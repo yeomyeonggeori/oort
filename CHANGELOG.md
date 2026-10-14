@@ -11,6 +11,21 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+## [0.1.24] - 2026-10-14
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.24>. Tag target: `main=c82cb823`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. Database migration 131: the schema moves from 130 to 131; `bootstrap_runtime_roles` is unchanged. The server gains the `image` 0.25 dependency (avatar re-encoding). No new environment variable.
+
+### Added
+- Server: agent action scope v3 (ADR-0186 addendum, #3772, #3777). The base for handing a secret to an agent exactly once (`deliverSecretToAgent`, `secretClaim`, #3795); `agent.profile.update` for name, bio, status and role label through an approval card (#3797); agent profile pictures, where only the server's re-encoded PNG/JPEG (at most 512x512 and 512 KiB) is stored in the new `agent_avatar_image` table (migration 131, #3799) and the approver previews it before deciding (`GET /approvals/{approvalId}/avatar-preview`, workspace-file and generated-bytes sources, #3800); `agent.invite`, which creates an agent in the approver's name with a one-time pairing secret (#3801); `oort_action_claim_secret`, a single-use claim that mints the secret on claim (#3802); agent instructions and tool descriptions for the v3 flow (#3803).
+- Web: a personal-assistant list and one-step Grokbot connection (#3778); Settings > Appearance > Font for body and code, defaulting to the system typeface (#3781).
+
+### Changed
+- Approvals: a decision that rewrites a card is announced as `message.edited` and a 409 now states the original decision (#3780); the approve button no longer reappears right after approving, and card copy is in the polite register (#3779).
+- Typography: body text moves to 15 with heading, label and code tokens and a literal guard (#3776, #3782), and the phone role table keeps font and line in one place with size and weight guards (#3783).
+
+### Not in this release
+- The backfill of past messages into the inbox.
+
 ## [0.1.23] - 2026-10-13
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.23>. Tag target: `main=d1cbe68b`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. Database migrations 128-130: the schema moves from 127 to 130, and `bootstrap_runtime_roles` now grants `momo_notifier` SELECT/INSERT on `agent_run_event` and USAGE on its sequence. No new required environment variable.

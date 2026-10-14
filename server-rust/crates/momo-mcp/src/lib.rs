@@ -190,6 +190,59 @@ pub fn dispatch(request: HttpRequest<'_>) -> HttpResponse {
     }
 }
 
+/// What a refused request looked like, as **names only**.
+///
+/// Built for the adapter's diagnostic log when a request is answered with a
+/// JSON-RPC error: it carries the method, the top-level `params` key names and
+/// the `params._meta` key names — never a value, never a nested name, never an
+/// argument key. Names come from the caller, so they are capped in count and
+/// length and the adapter logs them through `Debug` formatting.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RequestShape {
+    pub method: Option<String>,
+    pub params_keys: Vec<String>,
+    pub meta_keys: Vec<String>,
+}
+
+const SHAPE_MAX_KEYS: usize = 16;
+const SHAPE_MAX_NAME_CHARS: usize = 64;
+
+fn bounded_name(name: &str) -> String {
+    name.chars().take(SHAPE_MAX_NAME_CHARS).collect()
+}
+
+fn bounded_keys(object: &serde_json::Map<String, Value>) -> Vec<String> {
+    object
+        .keys()
+        .take(SHAPE_MAX_KEYS)
+        .map(|key| bounded_name(key))
+        .collect()
+}
+
+/// Extract the [`RequestShape`] of a raw body. Unparseable input yields the
+/// empty shape; this never fails and never echoes a value.
+pub fn request_shape(body: &[u8]) -> RequestShape {
+    let Ok(value) = serde_json::from_slice::<Value>(body) else {
+        return RequestShape::default();
+    };
+    let Some(object) = value.as_object() else {
+        return RequestShape::default();
+    };
+    let params = object.get("params").and_then(Value::as_object);
+    RequestShape {
+        method: object
+            .get("method")
+            .and_then(Value::as_str)
+            .map(bounded_name),
+        params_keys: params.map(bounded_keys).unwrap_or_default(),
+        meta_keys: params
+            .and_then(|params| params.get("_meta"))
+            .and_then(Value::as_object)
+            .map(bounded_keys)
+            .unwrap_or_default(),
+    }
+}
+
 fn dispatch_inner(
     request: HttpRequest<'_>,
     view: &ToolView,
@@ -351,22 +404,10 @@ fn dispatch_modern(
         Some(meta) => meta,
         None => return error(400, id, -32602, "modern params._meta is required", None),
     };
-    if !has_only_keys(
-        meta,
-        &[
-            META_PROTOCOL_VERSION,
-            META_CLIENT_CAPABILITIES,
-            META_CLIENT_INFO,
-        ],
-    ) {
-        return error(
-            400,
-            id,
-            -32602,
-            "modern _meta contains an unknown field",
-            None,
-        );
-    }
+    // Unknown `_meta` keys are tolerated and ignored: the MCP spec reserves
+    // `_meta` for client-defined extensions (`progressToken`, related-task
+    // markers, vendor keys) and nothing in it is ever read as a tool argument.
+    // Only the three keys this server defines are validated below.
     let meta_version = match meta.get(META_PROTOCOL_VERSION).and_then(Value::as_str) {
         Some(version) => version,
         None => {
@@ -401,7 +442,7 @@ fn dispatch_modern(
     }
 
     match method {
-        "server/discover" | "tools/list" if !has_only_keys(params, &["_meta"]) => {
+        "server/discover" if !has_only_keys(params, &["_meta"]) => {
             return error(
                 400,
                 id,
@@ -410,10 +451,16 @@ fn dispatch_modern(
                 None,
             );
         }
-        "tools/call"
-            if !has_only_keys(params, &["_meta", "name", "arguments"])
-                || matches!(params.get("arguments"), Some(value) if !value.is_object()) =>
-        {
+        "tools/list" if !valid_list_params(params) => {
+            return error(
+                400,
+                id,
+                -32602,
+                "method params contain an unknown field",
+                None,
+            );
+        }
+        "tools/call" if !valid_tool_call_params(params) => {
             return error(400, id, -32602, "invalid tools/call params", None);
         }
         _ => {}
@@ -478,10 +525,13 @@ fn admit_tool_call(
     let Some(tool) = body_name.and_then(|name| view.callable(name)) else {
         return error(400, id, -32602, "unknown tool", None);
     };
-    let arguments = params
-        .get("arguments")
-        .cloned()
-        .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+    // An absent or `null` `arguments` is an empty object, so exactly one shape
+    // reaches schema validation and every domain port. Nothing else in the
+    // params (`_meta`, `task`) is ever forwarded.
+    let arguments = match params.get("arguments") {
+        Some(Value::Object(arguments)) => Value::Object(arguments.clone()),
+        _ => Value::Object(serde_json::Map::new()),
+    };
     // The published schema is enforced HERE, before the call becomes an
     // invocation — so an unknown field or an out-of-bounds number never reaches
     // a domain port, and `additionalProperties: false` means what it says.
@@ -589,7 +639,11 @@ fn dispatch_legacy(
             || !params
                 .get("clientInfo")
                 .is_some_and(valid_implementation_info)
-            || !has_only_keys(params, &["protocolVersion", "capabilities", "clientInfo"])
+            || !has_only_keys(
+                params,
+                &["protocolVersion", "capabilities", "clientInfo", "_meta"],
+            )
+            || !meta_is_object_if_present(params)
         {
             return error(
                 400,
@@ -627,20 +681,18 @@ fn dispatch_legacy(
         }
     }
 
-    if matches!(method, "notifications/initialized" | "ping" | "tools/list")
-        && !params_are_empty(params)
+    if matches!(method, "notifications/initialized" | "ping") && !params_are_meta_only(params) {
+        return error(400, id, -32602, "method params must be empty", None);
+    }
+    if method == "tools/list"
+        && !params.is_none_or(|params| params.as_object().is_some_and(valid_list_params))
     {
         return error(400, id, -32602, "method params must be empty", None);
     }
 
     if method == "tools/call" {
         let params = match params.and_then(Value::as_object) {
-            Some(params)
-                if has_only_keys(params, &["name", "arguments"])
-                    && !matches!(params.get("arguments"), Some(value) if !value.is_object()) =>
-            {
-                params
-            }
+            Some(params) if valid_tool_call_params(params) => params,
             _ => return error(400, id, -32602, "invalid tools/call params", None),
         };
         let body_name = params.get("name").and_then(Value::as_str);
@@ -778,12 +830,44 @@ fn has_only_keys(object: &serde_json::Map<String, Value>, allowed: &[&str]) -> b
     object.keys().all(|key| allowed.contains(&key.as_str()))
 }
 
-fn params_are_empty(params: Option<&Value>) -> bool {
+/// `_meta` is the one MCP-reserved extension slot on every request; when it is
+/// present it must be an object, and its contents are not interpreted here.
+fn meta_is_object_if_present(params: &serde_json::Map<String, Value>) -> bool {
+    params.get("_meta").is_none_or(Value::is_object)
+}
+
+/// Params for methods that take nothing but the optional `_meta` slot.
+fn params_are_meta_only(params: Option<&Value>) -> bool {
     match params {
         None => true,
-        Some(Value::Object(params)) => params.is_empty(),
+        Some(Value::Object(params)) => {
+            has_only_keys(params, &["_meta"]) && meta_is_object_if_present(params)
+        }
         Some(_) => false,
     }
+}
+
+/// `tools/list` params per MCP: optional `cursor` (a string) and `_meta`.
+/// This server never issues a `nextCursor`, so a cursor is accepted and
+/// ignored rather than failing a client that echoes the field.
+fn valid_list_params(params: &serde_json::Map<String, Value>) -> bool {
+    has_only_keys(params, &["_meta", "cursor"])
+        && meta_is_object_if_present(params)
+        && params.get("cursor").is_none_or(Value::is_string)
+}
+
+/// `tools/call` params per MCP 2025-06-18 / 2025-11-25: `name`, `arguments`
+/// (object; `null` is read as absent), `_meta`, and the task-augmentation
+/// marker `task` (object). `task` and `_meta` are accepted and ignored: this
+/// server declares no tasks capability, so the call always runs synchronously.
+/// Any other key is still refused.
+fn valid_tool_call_params(params: &serde_json::Map<String, Value>) -> bool {
+    has_only_keys(params, &["_meta", "name", "arguments", "task"])
+        && meta_is_object_if_present(params)
+        && params
+            .get("arguments")
+            .is_none_or(|value| value.is_object() || value.is_null())
+        && params.get("task").is_none_or(Value::is_object)
 }
 
 fn is_json_content_type(content_type: Option<&str>) -> bool {
