@@ -1305,20 +1305,31 @@ credential로, 터널이 아니라 VM 루프백에 POST한다.
    (권한 600). hasMore 이면 같은 커서로 더 읽는다. 커서가 거부되면
    (Unavailable) 처음부터 다시 읽지 말고 합류를 다시 안내한다.
 2) 이벤트는 kind(message / agent_job / agent_run)와 channelId·messageId·
-   messageSeq 만 준다. 본문은 oort_conversation_read 로 그 채널에서 읽는다.
+   messageSeq 만 준다. agent_job 이벤트가 하나라도 있으면 다른 것을 읽기 전에
+   3)의 추적 경로(claim, 그다음 시작 보고)를 먼저 탄다. 일반 message 이벤트의
+   본문은 oort_conversation_read 로 그 채널에서 읽는다.
 3) 처리할 일이 있으면 처리하고, 응답은 oort_message_post 로 같은 채널에
    쓴다. clientMsgId 는 보낼 때마다 새 UUID. 같은 clientMsgId 재시도는
    한 메시지로 남는다.
    이벤트 kind 가 agent_job 이면 추적되는 작업(run)이다. oort_message_post
    만 쓰지 말고 아래처럼 한다.
+   순서가 중요하다(사람이 시계를 보고 있다). 깨어나면 곧바로 oort_inbox_read,
+   oort_jobs_claim, 시작 보고 oort_run_event 순서로 부르고(아래 a, b) 그
+   사이에 다른 호출을 끼우지 않는다. 시작 보고 전에 대화를 읽거나 요청을
+   계획·고민하지 않는다. claim 응답의 work.prompt 에 요청이 이미 있다. 시작
+   보고 전의 매 초는 사람 화면에서 「아무 일도 안 일어나는」 시간이다.
    a) oort_jobs_claim {} 을 부른다. 각 job 에는 leaseHandle, leaseExpiresAtMs,
       work(channelId, prompt, ...)가 있다. leaseHandle 은
       /workspace/oort-run.handle 에 저장하고(권한 600) 회신에 쓰지 않는다.
       jobs 가 비었는데 그 파일이 있으면 이미 내 job 이다. 저장한 handle 을 쓴다.
-   b) work.channelId 로 oort_conversation_read 해서 요청을 읽는다.
-   c) 사람이 진행을 볼 수 있게 보고한다. claim 한 뒤 60초 안에
-      oort_run_event {leaseHandle, status:"running", stage:"시작: 코드 읽기"
-      (이런 짧은 단계 이름. 요청 요약이 아니다), eventId:<새 UUID>} 를 부른다. 그 뒤로는 단계가 시작될 때마다, 그리고
+   b) claim 직후(b2 전에) oort_run_event {leaseHandle, status:"running",
+      stage:"시작: <짧은 단계 이름>", eventId:<새 UUID>} 를 부른다. 이것이
+      시작 보고이고, 사람 화면에서 run 을 「가져감」에서 「시작함」으로
+      옮기는 호출이다.
+   b2) 그다음에야, work.prompt 만으로 모자라면 work.channelId 로
+      oort_conversation_read 해서 요청을 읽는다.
+   c) 사람이 진행을 볼 수 있게 보고한다. 시작 보고(b)는 claim 한 뒤 10초
+      안에 나가야 한다(하드 한도는 60초). 그 뒤로는 단계가 시작될 때마다, 그리고
       일하는 동안 최소 5분마다 부른다(새 단계가 없으면 status:"running" 만
       보내도 살아 있다는 신호가 된다). stage 는 일반 텍스트 1~80자(앞뒤 공백
       제거, 40자 안팎으로), "/"·"\"·제어 문자 불가, 요청 문구를 그대로 옮기지

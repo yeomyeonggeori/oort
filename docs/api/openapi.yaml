@@ -3784,6 +3784,14 @@ paths:
           in: path
           required: true
           schema: {type: string, format: uuid}
+        - name: include
+          in: query
+          required: false
+          description: >
+            `doorbell` adds the `doorbell_rung` rows (ADR-0200 증보 2026-10-14). Without
+            it they are left out, so a client that predates that kind keeps parsing the
+            ledger. Any other value is a 400.
+          schema: {type: string, enum: [doorbell]}
       responses:
         "200":
           description: The ledger.
@@ -13752,14 +13760,17 @@ components:
             200-row cap can drop old stage rows, so never use it as a key.
         kind:
           type: string
-          enum: [queued, claimed, started, stage, paused, resumed, approval_requested, approval_decided, succeeded, failed, timed_out, cancelled]
+          enum: [queued, claimed, started, stage, paused, resumed, approval_requested, approval_decided, succeeded, failed, timed_out, cancelled, doorbell_rung]
         stage:
           type: string
           maxLength: 80
           description: Agent-reported marker, present only on `stage`. Untrusted plain text.
         code:
           type: string
-          description: Machine code written by the server (`approval_expired`, `approved`, …).
+          description: >
+            Machine code written by the server (`approval_expired`, `approved`, …). On
+            `doorbell_rung` it is `<edge>_<result>` (`leading|trailing|urgent` + `ok|failed`),
+            never an HTTP status or host.
         approvalId: {type: string, format: uuid}
         actorMemberId: {type: string, format: uuid}
         createdAtMs: {type: integer, format: int64}

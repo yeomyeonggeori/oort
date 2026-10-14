@@ -90,10 +90,10 @@ use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
 use crate::dto::{
-    AgentRunCancelResponse, AgentRunEventDto, AgentRunEventsResponse, AgentRunHistoryQuery,
-    AgentRunListQuery, AgentRunPageResponse, AgentRunProgressDto, AgentRunProgressPageResponse,
-    AgentRunProgressQuery, AgentRunResponse, AgentRunSummaryDto, AgentRunSummaryPageResponse,
-    AheadRunDto, CreateAgentRunRequest,
+    AgentRunCancelResponse, AgentRunEventDto, AgentRunEventsQuery, AgentRunEventsResponse,
+    AgentRunHistoryQuery, AgentRunListQuery, AgentRunPageResponse, AgentRunProgressDto,
+    AgentRunProgressPageResponse, AgentRunProgressQuery, AgentRunResponse, AgentRunSummaryDto,
+    AgentRunSummaryPageResponse, AheadRunDto, CreateAgentRunRequest,
 };
 use crate::error::ApiError;
 use crate::routes::shared::{
@@ -879,17 +879,25 @@ pub async fn events(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
     Path((workspace, run)): Path<(String, String)>,
+    Query(query): Query<AgentRunEventsQuery>,
 ) -> Result<Json<AgentRunEventsResponse>, ApiError> {
     require_human(&principal, "human member required")?;
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let run_id = path_uuid(&run, "invalid run id")?;
+    let include_doorbell = match query.include.as_deref().map(str::trim) {
+        None | Some("") => false,
+        Some("doorbell") => true,
+        Some(_) => return Err(ApiError::bad_request("include must be doorbell")),
+    };
     let member_id = principal.member_id;
 
     let events = settle_db(
         "agent_runs.events",
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
-                match list_run_events_in_tx(conn, workspace_id, run_id, member_id).await? {
+                match list_run_events_in_tx(conn, workspace_id, run_id, member_id, include_doorbell)
+                    .await?
+                {
                     Some(events) => Ok(Ok(events)),
                     None => Ok(Err(ApiError::not_found("agent run not found"))),
                 }

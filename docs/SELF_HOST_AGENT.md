@@ -1546,21 +1546,35 @@ tunnel, with the active credential from join.
    rejected (Unavailable), do not rewind from the start — tell the user to
    re-join.
 2) Events give kind (message / agent_job / agent_run) and channelId ·
-   messageId · messageSeq only. Read bodies with oort_conversation_read on
-   that channel.
+   messageId · messageSeq only. If any event is kind agent_job, go to step
+   3's tracked path FIRST (claim, then the start report) before reading
+   anything else. For a plain message event, read the body with
+   oort_conversation_read on that channel.
 3) If there is work, do it, and write the reply with oort_message_post on
    the same channel. clientMsgId is a new UUID every send. Retrying the
    same clientMsgId stays one message.
    If an event is kind agent_job, the work is a tracked run. Do it like this
    instead of a bare oort_message_post:
+   Order matters (people wait on the clock): the moment you wake, run
+   oort_inbox_read, then oort_jobs_claim, then oort_run_event with the start
+   stage (a, then b), with no other call in between. Do not read the
+   conversation, plan, or think about the request before the start report;
+   the claim answer already has work.prompt. Every second before the start
+   report is time the person sees as "nothing is happening".
    a) oort_jobs_claim {} . Each job has leaseHandle, leaseExpiresAtMs and
       work (channelId, prompt, ...). Keep leaseHandle in
       /workspace/oort-run.handle (mode 600); never write it in a reply. If
       jobs is empty and that file exists, the job is already yours: use the
       stored handle.
-   b) Read the request with oort_conversation_read on work.channelId.
-   c) Report progress so people can see it. Within 60 seconds of the claim,
-      call oort_run_event {leaseHandle, status:"running", stage:"시작: 코드
+   b) Immediately after the claim (before b2), call oort_run_event
+      {leaseHandle, status:"running", stage:"시작: <short step name>",
+      eventId:<new UUID>}. This is the start report; it is what moves the
+      run from "claimed" to "started" on the person's screen.
+   b2) Only now read the request with oort_conversation_read on
+      work.channelId, if work.prompt is not enough.
+   c) Report progress so people can see it. The start report in (b) must come
+      within 10 seconds of the claim (the hard limit is 60 seconds). After
+      it, call oort_run_event {leaseHandle, status:"running", stage:"시작: 코드
       읽기" (a short step name like that, not a summary of the request), eventId:<new UUID>}. After that call it
       each time a phase starts, and at least every 5 minutes while you work
       (with no new stage, send status:"running" alone: it still tells oort you

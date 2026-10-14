@@ -2074,6 +2074,13 @@ pub struct AgentRunProgressQuery {
     pub limit: Option<String>,
 }
 
+/// `?include=` on the run event ledger read (ADR-0200 증보 2026-10-14). Only `doorbell`.
+#[derive(Debug, Deserialize)]
+pub struct AgentRunEventsQuery {
+    #[serde(default)]
+    pub include: Option<String>,
+}
+
 /// A run ahead of this one that the viewer can see (a channel they are in).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

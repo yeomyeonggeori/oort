@@ -603,19 +603,22 @@ mod tests {
     /// 131 is ADR-0186 증보 2026-10-13 A0 (#3786): the RLS-FORCE `agent_avatar_image` table (server
     /// re-encoded avatar bytes, immutable but for `status`) and `member.avatar_image_id` with a
     /// self-only composite FK.
+    ///
+    /// 132 is #3822's `doorbell_rung` ledger kind (ADR-0200 증보 2026-10-14): only the
+    /// `agent_run_event_kind_ck` vocabulary grows.
     #[test]
-    fn discovers_contiguous_migrations_001_to_131() {
+    fn discovers_contiguous_migrations_001_to_132() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            131,
-            "expected 131 migrations under {}",
+            132,
+            "expected 132 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 131);
+        assert_eq!(migrations.last().unwrap().version, 132);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {
