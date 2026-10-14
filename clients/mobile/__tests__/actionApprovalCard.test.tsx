@@ -296,11 +296,8 @@ function renderedText(): string {
   return out.join('\n');
 }
 
-/** 테스트가 쥔 시계 — 더블탭 가드를 **우회하지 않고 지나간다**. */
+/** 테스트가 쥔 시계(기한 판정이 `Date.now` 를 읽는다). */
 let nowMs = BASE_MS;
-function elapse(ms: number): void {
-  nowMs += ms;
-}
 
 beforeEach(() => {
   nowMs = BASE_MS;
