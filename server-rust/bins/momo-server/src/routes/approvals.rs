@@ -2251,8 +2251,9 @@ async fn execute_agent_invite(
     .await?
     {
         Provisioned::Created(member, issuance) => (member, issuance),
-        // The handle was taken between the card and the decision (a deleted member
-        // still holds its handle): nothing was written, the card is stale.
+        // Defence in depth: the resolver already checked every member row, deleted
+        // ones included, so this is a race with a creator that takes no namespace
+        // lock (join, REST create). Nothing was written; the card is stale.
         Provisioned::DuplicateHandle => {
             return Ok(Execution::Refused(args_invalid_refusal(
                 approval, input, now,
