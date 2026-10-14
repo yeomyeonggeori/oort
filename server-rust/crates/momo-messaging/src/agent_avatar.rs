@@ -1,14 +1,21 @@
 //! Agent avatar images — the one place an image **an agent proposed** is turned
 //! into bytes this server will serve (ADR-0186 증보 2026-10-13 v3, V3-2a, #3786).
 //!
-//! The rule that makes the rest of the design safe: **nothing the proposer sent
-//! is ever stored or served.** The input is sniffed, size- and dimension-gated
-//! *before* any decoder runs, decoded under allocation limits, rotated by its
-//! EXIF orientation (the tag itself is then gone), shrunk to at most 512×512 and
-//! **re-encoded from the decoded pixels** as a fresh PNG (or, when that is too
-//! big, JPEG). EXIF/ICC/XMP/comments/trailing bytes cannot survive a re-encode
-//! because they are not pixels, and a polyglot (a PNG with a ZIP or a script
-//! appended, a JPEG whose comment is HTML) loses its other half the same way.
+//! The rule that makes the rest of the design safe: **only decoded pixels, freshly
+//! encoded, are ever stored or served.** The input is sniffed, size- and
+//! dimension-gated *before* any decoder runs, decoded under allocation limits,
+//! shrunk to at most 512×512, rotated by its EXIF orientation (the tag itself is
+//! then gone) and **re-encoded from the decoded pixels** as a fresh PNG (or, when
+//! that is too big, JPEG). EXIF/ICC/XMP/text chunks/comments/trailing bytes cannot
+//! survive a re-encode because they are not pixels, and a polyglot (a PNG with a
+//! ZIP or a script appended, a JPEG whose comment is HTML) loses its other half
+//! the same way.
+//!
+//! What it does **not** claim: the *pixel values* are the proposer's, and a
+//! deliberately crafted image can spell bytes in them (a stored deflate block in
+//! the PNG data can contain a literal `<script>`). That is neutralised by what is
+//! served, not by the encoder: the response carries the stored image mime only,
+//! `nosniff` and `Content-Security-Policy: default-src 'none'; sandbox`.
 //!
 //! Storage is Postgres (migration 131, `agent_avatar_image`): `momo-drive` has no
 //! way for the server to write bytes and external URLs are forbidden, so the
@@ -18,7 +25,9 @@
 //! pinned are the bytes that get served.
 //!
 //! The decode is CPU/memory work on attacker-chosen input: callers run
-//! [`process_avatar_image`] inside `spawn_blocking` under a timeout.
+//! [`process_avatar_image`] inside `spawn_blocking` under a timeout **and bound how
+//! many run at once** (a decode peaks at tens of MiB even for a tiny file; this
+//! crate has no runtime to hold a semaphore, so the caller owns that).
 
 use std::io::Cursor;
 
@@ -29,9 +38,7 @@ use sha2::{Digest, Sha256};
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::member_avatar::{
-    image_dimensions, sniff_image_mime, IMAGE_SNIFF_PREFIX_BYTES, MAX_MEMBER_AVATAR_DIMENSION,
-};
+use crate::member_avatar::{image_dimensions, sniff_image_mime, IMAGE_SNIFF_PREFIX_BYTES};
 
 /// The longest side of a stored avatar. The image is drawn in 24–64 px tiles.
 pub const AGENT_AVATAR_OUT_MAX_DIM: u32 = 512;
@@ -49,9 +56,15 @@ pub const AGENT_AVATAR_OUT_MAX_BYTES: usize = 512 * 1024;
 pub const AGENT_AVATAR_IN_MAX_BYTES_GENERATED: usize = 44_000;
 /// An image already uploaded to the workspace (V3-2a: ≤5 MiB, like member avatars).
 pub const AGENT_AVATAR_IN_MAX_BYTES_ATTACHMENT: usize = 5 * 1024 * 1024;
-/// The decoder's allocation ceiling: a 4096×4096 RGBA8 frame is 64 MiB, so this
-/// admits exactly one such frame plus working room and nothing larger.
-pub const AGENT_AVATAR_DECODE_ALLOC_LIMIT: u64 = 160 * 1024 * 1024;
+/// The longest side of an **input** image. The stored result is at most 512, so an
+/// input beyond 2048 buys nothing and costs memory: a 2048×2048 16-bit RGBA frame is
+/// 32 MiB. (Security review of #3799 measured 160–310 MB of RSS for 4096² inputs;
+/// 2048² is a quarter of that.)
+pub const AGENT_AVATAR_IN_MAX_DIM: u32 = 2048;
+/// The decoder's allocation ceiling — one 2048² 16-bit RGBA frame plus working room.
+/// Not every decoder honours it (zune-jpeg checks dimensions only), which is why the
+/// dimension gate above exists and why the **caller** bounds concurrency.
+pub const AGENT_AVATAR_DECODE_ALLOC_LIMIT: u64 = 96 * 1024 * 1024;
 /// A staged row older than this is swept by the next avatar proposal.
 pub const AGENT_AVATAR_STAGED_TTL_HOURS: i64 = 24;
 /// Where a stored avatar came from (`agent_avatar_source_ck`).
@@ -126,6 +139,21 @@ pub fn process_with_limits(
     max_input_bytes: usize,
     max_output_bytes: usize,
 ) -> Result<ProcessedAvatar, AvatarImageRejected> {
+    process_with_all_limits(
+        input,
+        max_input_bytes,
+        max_output_bytes,
+        AGENT_AVATAR_DECODE_ALLOC_LIMIT,
+    )
+}
+
+/// [`process_with_limits`] with the decoder's allocation ceiling explicit too.
+pub fn process_with_all_limits(
+    input: &[u8],
+    max_input_bytes: usize,
+    max_output_bytes: usize,
+    decode_alloc_limit: u64,
+) -> Result<ProcessedAvatar, AvatarImageRejected> {
     if input.is_empty() {
         return Err(AvatarImageRejected::Empty);
     }
@@ -159,8 +187,8 @@ pub fn process_with_limits(
         image_dimensions(mime, input).ok_or(AvatarImageRejected::DimensionsUnreadable)?;
     if width == 0
         || height == 0
-        || width > MAX_MEMBER_AVATAR_DIMENSION
-        || height > MAX_MEMBER_AVATAR_DIMENSION
+        || width > AGENT_AVATAR_IN_MAX_DIM
+        || height > AGENT_AVATAR_IN_MAX_DIM
     {
         return Err(AvatarImageRejected::DimensionsOutOfRange);
     }
@@ -169,27 +197,27 @@ pub fn process_with_limits(
     //    what the stream then does).
     let mut reader = ImageReader::with_format(Cursor::new(input), format);
     let mut limits = Limits::default();
-    limits.max_image_width = Some(MAX_MEMBER_AVATAR_DIMENSION);
-    limits.max_image_height = Some(MAX_MEMBER_AVATAR_DIMENSION);
-    limits.max_alloc = Some(AGENT_AVATAR_DECODE_ALLOC_LIMIT);
+    limits.max_image_width = Some(AGENT_AVATAR_IN_MAX_DIM);
+    limits.max_image_height = Some(AGENT_AVATAR_IN_MAX_DIM);
+    limits.max_alloc = Some(decode_alloc_limit);
     reader.limits(limits);
     let mut decoder = reader
         .into_decoder()
         .map_err(|_| AvatarImageRejected::DecodeFailed)?;
-    // The EXIF orientation is read here and applied to the pixels: the tag is not
-    // carried into the output, so a phone photo must be turned upright first.
+    // The EXIF orientation is **read** here, but applied only after the shrink: a
+    // rotation copies the whole frame, and doing it on the full-size decode doubled
+    // the peak (security review of #3799, measured 178 → 312 MB).
     let orientation = decoder.orientation().ok();
-    let mut decoded =
+    let decoded =
         DynamicImage::from_decoder(decoder).map_err(|_| AvatarImageRejected::DecodeFailed)?;
-    if let Some(orientation) = orientation {
-        decoded.apply_orientation(orientation);
-    }
     if decoded.width() == 0 || decoded.height() == 0 {
         return Err(AvatarImageRejected::DecodeFailed);
     }
 
-    // 4. Shrink to fit 512×512 (never enlarge), keeping the aspect ratio.
-    let shrunk = if decoded.width() > AGENT_AVATAR_OUT_MAX_DIM
+    // 4. Shrink to fit 512×512 (never enlarge), keeping the aspect ratio, **then**
+    //    turn it upright (the box is square, so rotating a shrunk image keeps it
+    //    inside it). The tag is not carried into the output.
+    let mut shrunk = if decoded.width() > AGENT_AVATAR_OUT_MAX_DIM
         || decoded.height() > AGENT_AVATAR_OUT_MAX_DIM
     {
         decoded.resize(
@@ -200,6 +228,9 @@ pub fn process_with_limits(
     } else {
         decoded
     };
+    if let Some(orientation) = orientation {
+        shrunk.apply_orientation(orientation);
+    }
 
     // 5. Encode from pixels. PNG keeps transparency; when it is too big the picture
     //    is flattened onto white and written as JPEG.
@@ -276,6 +307,9 @@ pub struct AgentAvatarImage {
     pub size_bytes: i32,
     pub sha256: Vec<u8>,
     pub status: String,
+    /// The approval this staged image was proposed under, once bound
+    /// ([`bind_staged_image_to_approval_in_tx`]); `None` before that.
+    pub approval_id: Option<Uuid>,
 }
 
 /// A stored avatar with the bytes to serve.
@@ -286,7 +320,7 @@ pub struct AgentAvatarBytes {
 }
 
 const META_COLS: &str = "id, member_id, proposed_by, source, mime, width, height, size_bytes, \
-                         sha256, status";
+                         sha256, status, approval_id";
 
 fn decode_meta(row: &sqlx::postgres::PgRow) -> Result<AgentAvatarImage, sqlx::Error> {
     Ok(AgentAvatarImage {
@@ -300,6 +334,7 @@ fn decode_meta(row: &sqlx::postgres::PgRow) -> Result<AgentAvatarImage, sqlx::Er
         size_bytes: row.try_get("size_bytes")?,
         sha256: row.try_get("sha256")?,
         status: row.try_get("status")?,
+        approval_id: row.try_get("approval_id")?,
     })
 }
 
@@ -397,7 +432,7 @@ pub async fn read_current_avatar_image_in_tx(
     read_bytes_where(
         conn,
         "SELECT i.id, i.member_id, i.proposed_by, i.source, i.mime, i.width, i.height, \
-                i.size_bytes, i.sha256, i.status, i.bytes \
+                i.size_bytes, i.sha256, i.status, i.approval_id, i.bytes \
            FROM agent_avatar_image i \
            JOIN member m ON m.avatar_image_id = i.id AND m.id = i.member_id \
                         AND m.workspace_id = i.workspace_id \
@@ -421,7 +456,7 @@ pub async fn staged_image_matches_pin_in_tx(
     expected_sha256: &[u8],
 ) -> Result<bool, DbError> {
     let ok: Option<bool> = sqlx::query_scalar(
-        "SELECT sha256 = $4 AND digest(bytes, 'sha256') = $4 \
+        "SELECT sha256 = $4 AND public.digest(bytes, 'sha256') = $4 \
            FROM agent_avatar_image \
           WHERE workspace_id = $1 AND id = $2 AND member_id = $3 AND status = 'staged'",
     )
@@ -432,6 +467,28 @@ pub async fn staged_image_matches_pin_in_tx(
     .fetch_optional(&mut *conn)
     .await?;
     Ok(ok.unwrap_or(false))
+}
+
+/// Bind a freshly staged image to the approval created for it (once: the column is
+/// `UNIQUE` and the immutability trigger lets it go from `NULL` to a value only). The
+/// decision then accepts the image only under **that** approval, so a pin that names
+/// another approval's staged row is refused by the database's own record.
+pub async fn bind_staged_image_to_approval_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    image_id: Uuid,
+    approval_id: Uuid,
+) -> Result<bool, DbError> {
+    let bound = sqlx::query(
+        "UPDATE agent_avatar_image SET approval_id = $3 \
+          WHERE workspace_id = $1 AND id = $2 AND status = 'staged' AND approval_id IS NULL",
+    )
+    .bind(workspace_id)
+    .bind(image_id)
+    .bind(approval_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(bound.rows_affected() == 1)
 }
 
 /// Make a `staged` image the member's current avatar. Returns the **previous**
@@ -496,6 +553,14 @@ pub async fn clear_avatar_image_in_tx(
     workspace_id: Uuid,
     member_id: Uuid,
 ) -> Result<bool, DbError> {
+    // The member row first, exactly like `apply_avatar_image_in_tx`: without it a
+    // concurrent apply could move the pointer between this read and the delete and
+    // leave the new image winning over a preset the caller believed it had set.
+    sqlx::query("SELECT id FROM member WHERE workspace_id = $1 AND id = $2 FOR UPDATE")
+        .bind(workspace_id)
+        .bind(member_id)
+        .fetch_optional(&mut *conn)
+        .await?;
     let deleted = sqlx::query(
         "DELETE FROM agent_avatar_image i USING member m \
           WHERE m.workspace_id = $1 AND m.id = $2 AND i.id = m.avatar_image_id \
@@ -807,14 +872,22 @@ mod tests {
     }
 
     #[test]
+    fn the_input_dimension_ceiling_is_the_one_documented() {
+        assert_eq!(AGENT_AVATAR_IN_MAX_DIM, 2048);
+    }
+
+    #[test]
     fn a_header_that_claims_a_huge_canvas_never_reaches_the_decoder() {
-        // A real PNG header (IHDR) claiming 4097 wide, then nothing.
-        let mut png = png_of(8, 8, [0, 0, 0, 255]);
-        png[16..20].copy_from_slice(&4097u32.to_be_bytes());
-        assert_eq!(
-            process_avatar_image(&png, 1 << 20).unwrap_err(),
-            AvatarImageRejected::DimensionsOutOfRange
-        );
+        // A real PNG header (IHDR) claiming 2049 and then 4097 wide, then nothing.
+        for claimed in [2049u32, 4097] {
+            let mut png = png_of(8, 8, [0, 0, 0, 255]);
+            png[16..20].copy_from_slice(&claimed.to_be_bytes());
+            assert_eq!(
+                process_avatar_image(&png, 1 << 20).unwrap_err(),
+                AvatarImageRejected::DimensionsOutOfRange,
+                "{claimed}"
+            );
+        }
         let mut zero = png_of(8, 8, [0, 0, 0, 255]);
         zero[16..20].copy_from_slice(&0u32.to_be_bytes());
         assert_eq!(
@@ -857,8 +930,8 @@ mod tests {
     }
 
     #[test]
-    fn a_four_thousand_pixel_square_is_shrunk_and_a_noisy_one_falls_back_to_jpeg() {
-        let big = process_avatar_image(&png_of(4096, 4096, [30, 60, 90, 255]), 5 << 20).unwrap();
+    fn a_large_square_is_shrunk_and_a_noisy_one_falls_back_to_jpeg() {
+        let big = process_avatar_image(&png_of(2048, 2048, [30, 60, 90, 255]), 5 << 20).unwrap();
         assert_eq!((big.width, big.height), (512, 512));
 
         // Deterministic noise: PNG cannot compress it under 512 KiB at 512x512.
@@ -890,6 +963,50 @@ mod tests {
             process_with_limits(&png, 1 << 20, 10).unwrap_err(),
             AvatarImageRejected::OutputTooLarge
         );
+    }
+
+    #[test]
+    fn the_decoders_own_allocation_limit_is_applied() {
+        // The header gate lets a 600×600 PNG through; only the decoder's `Limits`
+        // can refuse it here, so removing `reader.limits(..)` fails this test.
+        let png = png_of(600, 600, [10, 20, 30, 255]);
+        assert!(
+            process_with_all_limits(&png, 1 << 20, AGENT_AVATAR_OUT_MAX_BYTES, 1 << 28).is_ok()
+        );
+        assert_eq!(
+            process_with_all_limits(&png, 1 << 20, AGENT_AVATAR_OUT_MAX_BYTES, 1_000).unwrap_err(),
+            AvatarImageRejected::DecodeFailed
+        );
+    }
+
+    #[test]
+    fn a_transparent_picture_falls_back_to_white_not_black() {
+        // Fully transparent noise: the PNG is large (noise), the flattened JPEG is
+        // a white square. If the alpha blend were dropped the JPEG would be noise.
+        let mut state = 7u32;
+        let noise = ImageBuffer::from_fn(64, 64, |_, _| {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let [a, b, c, _] = state.to_be_bytes();
+            Rgba([a, b, c, 0])
+        });
+        let mut input = Cursor::new(Vec::new());
+        DynamicImage::ImageRgba8(noise)
+            .write_to(&mut input, ImageFormat::Png)
+            .unwrap();
+        let out = process_with_limits(&input.into_inner(), 1 << 20, 3_000).unwrap();
+        assert_eq!(out.mime, "image/jpeg", "the PNG did not fit 3000 bytes");
+        let pixels = image::load_from_memory(&out.bytes).unwrap().to_rgb8();
+        assert!(
+            pixels.pixels().all(|p| p.0.iter().all(|c| *c >= 245)),
+            "a transparent pixel must flatten to white"
+        );
+    }
+
+    #[test]
+    fn a_big_rotated_photo_is_shrunk_then_turned_upright() {
+        // 1000×600, orientation 6 (90° CW): upright it is 600×1000 → fits 512 as 307×512.
+        let out = process_avatar_image(&hostile_jpeg(1000, 600, 6), 5 << 20).unwrap();
+        assert_eq!((out.width, out.height), (307, 512));
     }
 
     #[test]

@@ -13717,19 +13717,192 @@ async fn an_agent_avatar_image_is_staged_pinned_applied_and_served() {
     assert_eq!(pins, (true, false, false));
 
     // ---- immutability: the trigger refuses every column but status ----------
+    //
+    // Each replacement is a **valid** value (same length, in range, a real member),
+    // so the CHECKs and foreign keys would let it through: only the trigger can say
+    // no, and the message must be the trigger's.
     for statement in [
-        "UPDATE agent_avatar_image SET bytes = '\\x00'::bytea WHERE id = $1",
-        "UPDATE agent_avatar_image SET sha256 = '\\x00'::bytea WHERE id = $1",
+        "UPDATE agent_avatar_image SET bytes = set_byte(bytes, 0, 255) WHERE id = $1",
+        "UPDATE agent_avatar_image SET sha256 = decode(repeat('00', 32), 'hex') WHERE id = $1",
         "UPDATE agent_avatar_image SET mime = 'image/jpeg' WHERE id = $1",
-        "UPDATE agent_avatar_image SET member_id = (SELECT member_id FROM agent LIMIT 1 OFFSET 1) \
-         WHERE id = $1",
-        "UPDATE agent_avatar_image SET width = 7 WHERE id = $1",
-        "UPDATE agent_avatar_image SET source = 'attachment' WHERE id = $1",
-        "UPDATE agent_avatar_image SET proposed_by = $1 WHERE id = $1",
+        "UPDATE agent_avatar_image SET member_id = $2 WHERE id = $1",
+        "UPDATE agent_avatar_image SET proposed_by = $2 WHERE id = $1",
+        "UPDATE agent_avatar_image SET width = width - 1 WHERE id = $1",
+        "UPDATE agent_avatar_image SET height = height - 1 WHERE id = $1",
+        "UPDATE agent_avatar_image SET size_bytes = size_bytes WHERE id = $1 AND false",
+        "UPDATE agent_avatar_image SET source = CASE source WHEN 'generated' THEN 'attachment' \
+                                                ELSE 'generated' END WHERE id = $1",
+        "UPDATE agent_avatar_image SET created_at = created_at - interval '1 day' WHERE id = $1",
     ] {
-        let result = sqlx::query(statement).bind(first).execute(&su).await;
-        assert!(result.is_err(), "{statement} must be refused");
+        let result = sqlx::query(statement)
+            .bind(first)
+            .bind(other_agent)
+            .execute(&su)
+            .await;
+        if statement.contains("AND false") {
+            assert!(result.is_ok(), "a no-op statement is not a change");
+            continue;
+        }
+        let error = result.expect_err(statement).to_string();
+        assert!(error.contains("immutable"), "{statement}: {error}");
     }
+    // A write-once binding: NULL → value is allowed, then never again.
+    let approval_row: Uuid =
+        sqlx::query_scalar("SELECT id FROM approval WHERE workspace_id = $1 LIMIT 1")
+            .bind(ws)
+            .fetch_optional(&su)
+            .await
+            .unwrap()
+            .unwrap_or_else(Uuid::new_v4);
+    sqlx::query("UPDATE agent_avatar_image SET approval_id = $2 WHERE id = $1")
+        .bind(first)
+        .bind(approval_row)
+        .execute(&su)
+        .await
+        .expect("an unbound row can be bound once");
+    let rebind = sqlx::query("UPDATE agent_avatar_image SET approval_id = $2 WHERE id = $1")
+        .bind(first)
+        .bind(Uuid::new_v4())
+        .execute(&su)
+        .await
+        .expect_err("a bound row cannot be re-bound")
+        .to_string();
+    assert!(rebind.contains("write-once"), "{rebind}");
+    let unbind = sqlx::query("UPDATE agent_avatar_image SET approval_id = NULL WHERE id = $1")
+        .bind(first)
+        .execute(&su)
+        .await
+        .expect_err("a bound row cannot be unbound")
+        .to_string();
+    assert!(unbind.contains("write-once"), "{unbind}");
+    // The status can only move forward.
+    sqlx::query("UPDATE agent_avatar_image SET status = 'applied' WHERE id = $1")
+        .bind(first)
+        .execute(&su)
+        .await
+        .unwrap();
+    let back = sqlx::query("UPDATE agent_avatar_image SET status = 'staged' WHERE id = $1")
+        .bind(first)
+        .execute(&su)
+        .await
+        .expect_err("applied cannot go back to staged")
+        .to_string();
+    assert!(back.contains("staged"), "{back}");
+    // An applied row is no longer a pin target.
+    let (s0, applied_pin) = (sha.clone(), {
+        let sha = sha.clone();
+        tenant_3786(&app, ws, move |conn| {
+            Box::pin(async move {
+                momo_messaging::staged_image_matches_pin_in_tx(conn, ws, first, agent, &sha).await
+            })
+        })
+        .await
+        .unwrap()
+    });
+    assert!(
+        !applied_pin,
+        "only a staged row can satisfy a pin ({} bytes of pin)",
+        s0.len()
+    );
+    // Rows are inserted staged and unbound, for an agent of the same workspace.
+    for (label, statement) in [
+        (
+            "applied on insert",
+            "INSERT INTO agent_avatar_image (workspace_id, member_id, proposed_by, source, mime, \
+                width, height, size_bytes, sha256, bytes, status) \
+             SELECT workspace_id, member_id, proposed_by, source, mime, width, height, size_bytes, \
+                    sha256, bytes, 'applied' FROM agent_avatar_image WHERE id = $1",
+        ),
+        (
+            "a human as the owner",
+            "INSERT INTO agent_avatar_image (workspace_id, member_id, proposed_by, source, mime, \
+                width, height, size_bytes, sha256, bytes) \
+             SELECT workspace_id, $2, proposed_by, source, mime, width, height, size_bytes, \
+                    sha256, bytes FROM agent_avatar_image WHERE id = $1",
+        ),
+        (
+            "an unknown source",
+            "INSERT INTO agent_avatar_image (workspace_id, member_id, proposed_by, source, mime, \
+                width, height, size_bytes, sha256, bytes) \
+             SELECT workspace_id, member_id, proposed_by, 'url', mime, width, height, size_bytes, \
+                    sha256, bytes FROM agent_avatar_image WHERE id = $1",
+        ),
+        (
+            "a size that is not the byte length",
+            "INSERT INTO agent_avatar_image (workspace_id, member_id, proposed_by, source, mime, \
+                width, height, size_bytes, sha256, bytes) \
+             SELECT workspace_id, member_id, proposed_by, source, mime, width, height, \
+                    size_bytes + 1, sha256, bytes FROM agent_avatar_image WHERE id = $1",
+        ),
+        (
+            "an out-of-range canvas",
+            "INSERT INTO agent_avatar_image (workspace_id, member_id, proposed_by, source, mime, \
+                width, height, size_bytes, sha256, bytes) \
+             SELECT workspace_id, member_id, proposed_by, source, mime, 513, height, size_bytes, \
+                    sha256, bytes FROM agent_avatar_image WHERE id = $1",
+        ),
+    ] {
+        let human = fixture.human;
+        let result = sqlx::query(statement)
+            .bind(first)
+            .bind(human)
+            .execute(&su)
+            .await;
+        assert!(result.is_err(), "{label} must be refused");
+    }
+    // The applied row is the member's pointer target in the next block; for now
+    // make it the member's current image, then delete it: the pointer goes NULL.
+    sqlx::query("UPDATE member SET avatar_image_id = $1 WHERE id = $2")
+        .bind(first)
+        .bind(agent)
+        .execute(&su)
+        .await
+        .unwrap();
+    // One avatar at a time: an uploaded avatar and an image avatar do not coexist.
+    let media: Uuid = sqlx::query_scalar(
+        "INSERT INTO member_avatar_media (workspace_id, member_id, drive_file_id, name, mime, \
+            size_bytes, status) VALUES ($1,$2,'drive-3786','a.png','image/png',10,'complete') \
+         RETURNING id",
+    )
+    .bind(ws)
+    .bind(agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let both = sqlx::query("UPDATE member SET avatar_media_id = $1 WHERE id = $2")
+        .bind(media)
+        .bind(agent)
+        .execute(&su)
+        .await
+        .expect_err("both pointers set must be refused")
+        .to_string();
+    assert!(both.contains("member_avatar_exclusive_ck"), "{both}");
+    sqlx::query("DELETE FROM member_avatar_media WHERE id = $1")
+        .bind(media)
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM agent_avatar_image WHERE id = $1")
+        .bind(first)
+        .execute(&su)
+        .await
+        .unwrap();
+    let pointer: Option<Uuid> =
+        sqlx::query_scalar("SELECT avatar_image_id FROM member WHERE id=$1")
+            .bind(agent)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(pointer, None, "deleting the image clears the pointer");
+    // Re-create a staged row for the tamper check below (the first one is gone).
+    let p2 = processed.clone();
+    let first = tenant_3786(&app, ws, move |conn| {
+        Box::pin(async move {
+            momo_messaging::stage_avatar_image_in_tx(conn, ws, agent, agent, "generated", &p2).await
+        })
+    })
+    .await
+    .expect("stage again");
     // …and if the trigger were somehow bypassed, the pin check still notices,
     // because the database recomputes the digest from the stored bytes.
     sqlx::query("ALTER TABLE agent_avatar_image DISABLE TRIGGER agent_avatar_image_immutable_trg")
@@ -13781,15 +13954,21 @@ async fn an_agent_avatar_image_is_staged_pinned_applied_and_served() {
         .execute(&su)
         .await;
     assert!(wrong.is_err(), "the pointer FK must be self-only");
-    // Another workspace's tenant transaction cannot see the row.
-    let foreign = tenant_3786(&app, Uuid::new_v4(), move |conn| {
-        Box::pin(async move {
-            momo_messaging::read_avatar_image_in_tx(conn, Uuid::new_v4(), image).await
-        })
+    // Row-level security, not the query's own WHERE: the right workspace id is
+    // asked for, but under another tenant's GUC — and the same call under the right
+    // GUC finds the row, so the only difference is RLS.
+    let found = tenant_3786(&app, ws, move |conn| {
+        Box::pin(async move { momo_messaging::read_avatar_image_in_tx(conn, ws, image).await })
     })
     .await
     .unwrap();
-    assert!(foreign.is_none());
+    assert!(found.is_some(), "control: visible under its own tenant");
+    let foreign = tenant_3786(&app, Uuid::new_v4(), move |conn| {
+        Box::pin(async move { momo_messaging::read_avatar_image_in_tx(conn, ws, image).await })
+    })
+    .await
+    .unwrap();
+    assert!(foreign.is_none(), "invisible under another tenant's GUC");
     // A staged image is not served: the pointer is unset.
     let url = format!("{base}/v1/workspaces/{ws}/members/{agent}/avatar/content");
     let before = client
