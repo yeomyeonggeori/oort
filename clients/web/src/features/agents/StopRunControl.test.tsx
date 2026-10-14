@@ -219,3 +219,67 @@ describe("거절은 문장으로", () => {
     expect(q("agent-work-panel-stop-outcome")?.textContent).toBe("김인턴의 실행을 중단했어요.");
   });
 });
+
+describe("답이 선 뒤 캐럿 (#3854 design-review H-1)", () => {
+  // 중단됨·이미 끝남이면 확정 버튼이 사라진다. 키보드로 누른 사람의 캐럿이 <body>로
+  // 떨어지지 않고 방금 선 문장에 놓여야 한다. jsdom의 `.click()`은 초점을 옮기지
+  // 않으므로 키보드처럼 먼저 초점을 놓고 누른다.
+  async function commitFromKeyboard() {
+    await click("agent-work-panel-stop-arm");
+    act(() => q("agent-work-panel-stop-commit")?.focus());
+    expect(document.activeElement).toBe(q("agent-work-panel-stop-commit"));
+    await click("agent-work-panel-stop-commit");
+    await settle();
+  }
+
+  it("중단됨: 캐럿이 영수증 문장으로 간다", async () => {
+    mount();
+    await commitFromKeyboard();
+    const outcome = q("agent-work-panel-stop-outcome");
+    expect(outcome?.getAttribute("data-kind")).toBe("cancelled");
+    expect(document.activeElement).toBe(outcome);
+    expect(outcome?.getAttribute("tabindex")).toBe("-1");
+  });
+
+  it("이미 끝남(409): 캐럿이 문장으로 가고, 원장을 다시 읽는다", async () => {
+    const invalidate = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+    fetchMock.mockImplementation(async () =>
+      answer(409, { error: { message: "agent run is already succeeded" } })
+    );
+    mount();
+    await commitFromKeyboard();
+    const outcome = q("agent-work-panel-stop-outcome");
+    expect(outcome?.getAttribute("data-kind")).toBe("alreadyOver");
+    expect(document.activeElement).toBe(outcome);
+    expect(
+      invalidate.mock.calls.some(
+        ([filters]) =>
+          JSON.stringify((filters as { queryKey?: unknown })?.queryKey) ===
+          JSON.stringify(["agent-run-events", WS, RUN.toLowerCase()])
+      )
+    ).toBe(true);
+    invalidate.mockRestore();
+  });
+
+  it("실패(403): 캐럿은 확정 버튼에 남는다", async () => {
+    fetchMock.mockImplementation(async () =>
+      answer(403, { error: { message: "active human channel member required" } })
+    );
+    mount();
+    await commitFromKeyboard();
+    expect(document.activeElement).toBe(q("agent-work-panel-stop-commit"));
+  });
+
+  it("캐럿이 패널 밖에 있었으면 옮기지 않는다", async () => {
+    const elsewhere = document.createElement("button");
+    document.body.appendChild(elsewhere);
+    mount();
+    await click("agent-work-panel-stop-arm");
+    act(() => elsewhere.focus());
+    await click("agent-work-panel-stop-commit");
+    await settle();
+    expect(q("agent-work-panel-stop-outcome")?.getAttribute("data-kind")).toBe("cancelled");
+    expect(document.activeElement).toBe(elsewhere);
+    elsewhere.remove();
+  });
+});

@@ -219,6 +219,12 @@ export function ApprovalDecision({
         // 실패로 그리면 더는 바뀔 수 없는 것에 재시도를 권하게 된다 —
         // `src/push/notifications.ts:142`가 같은 이유로 같은 선택을 한다.
         onSettled(outcome);
+        // 로터로 결정한 사람에게는 성공도 소리로 말한다(#3854 design-review H-2).
+        // 카드에 서는 영수증은 행의 낭독 라벨에 들어가지 않고, 로터의 「승인」·
+        // 「거부」는 말없이 사라진다. 낱말은 카드 영수증과 같은 함수가 짓는다.
+        if (spoken) {
+          AccessibilityInfo.announceForAccessibility(decisionReceiptCopy(outcome));
+        }
       } finally {
         sendingRef.current = false;
         setSending(null);

@@ -190,6 +190,45 @@ describe('#2595 — 로터에서 승인·거부에 닿는다', () => {
   });
 });
 
+describe('#3854 H-2 — 로터로 보낸 결정은 성공도 소리로 말한다', () => {
+  // 행은 요소 하나라 카드의 영수증 줄이 낭독 라벨에 들어가지 않는다. 로터의 동작은
+  // 결정 뒤 말없이 사라진다. 소리가 없으면 결정이 나갔는지 알 길이 없다.
+  it.each([
+    [{kind: 'committed', status: 'approved'}, 'momoApprove', '승인을 기록했어요.'],
+    [{kind: 'committed', status: 'rejected'}, 'momoReject', '거부를 기록했어요.'],
+    [
+      {kind: 'superseded', status: 'approved', note: '다른 곳에서 이미 결정됐어요.'},
+      'momoApprove',
+      '이미 승인으로 기록되어 있었어요.',
+    ],
+  ])('%j → 「%s」 뒤 영수증을 말한다', async (outcome, action, spoken) => {
+    const announce = jest
+      .spyOn(AccessibilityInfo, 'announceForAccessibility')
+      .mockImplementation(() => {});
+    // RN 의 jest 준비가 이 함수를 이미 mock 으로 두어 앞 시험의 호출이 남는다.
+    announce.mockClear();
+    mockDecide.mockResolvedValue(outcome);
+    renderRow({gates: GATES});
+    await invoke(action);
+    expect(announce).toHaveBeenCalledTimes(1);
+    expect(announce).toHaveBeenCalledWith(spoken);
+  });
+
+  it('버튼을 눌러 결정한 사람에게는 말하지 않는다 — 눈이 영수증을 읽는다', async () => {
+    const announce = jest
+      .spyOn(AccessibilityInfo, 'announceForAccessibility')
+      .mockImplementation(() => {});
+    // RN 의 jest 준비가 이 함수를 이미 mock 으로 두어 앞 시험의 호출이 남는다.
+    announce.mockClear();
+    renderRow({gates: GATES});
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('card-approval-ap-1-approve'));
+    });
+    expect(mockDecide).toHaveBeenCalledTimes(1);
+    expect(announce).not.toHaveBeenCalled();
+  });
+});
+
 describe('버튼이 서지 않는 자리에서는 로터에도 없다', () => {
   const names = () => rotor().map(action => action.name);
 

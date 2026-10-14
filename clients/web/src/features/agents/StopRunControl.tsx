@@ -67,6 +67,10 @@ export function StopRunControl({
   const keepRef = useRef<HTMLButtonElement>(null);
   /** 접은 뒤 캐럿을 돌려줄 곳이 무장 버튼인가. 처음 그릴 때는 옮기지 않는다. */
   const returnFocus = useRef(false);
+  const sectionRef = useRef<HTMLElement>(null);
+  const outcomeRef = useRef<HTMLParagraphElement>(null);
+  /** 답(중단됨·이미 끝남)이 선 뒤 캐럿을 그 문장으로 옮길 것인가. */
+  const focusOutcome = useRef(false);
 
   // 첫 클릭이 버튼을 확인 줄로 바꾼다. 누른 버튼이 사라지면 캐럿이 <body>로 떨어지므로
   // 안전한 쪽(그대로 두기)에 놓는다. 접히면 무장 버튼으로 돌려준다.
@@ -79,6 +83,15 @@ export function StopRunControl({
     }
   }, [armed]);
 
+  // 중단됨·이미 끝남이면 확정 버튼도 무장 버튼도 사라진다. 캐럿이 그 버튼에 있었다면
+  // <body>로 떨어지므로, 방금 선 문장으로 옮긴다(#3854 design-review H-1). 실패는
+  // 확정 버튼이 그대로 남아 캐럿도 그 자리에 있다.
+  useEffect(() => {
+    if (outcome === null || !focusOutcome.current) return;
+    focusOutcome.current = false;
+    outcomeRef.current?.focus();
+  }, [outcome]);
+
   const dismiss = useCallback(() => {
     returnFocus.current = true;
     setArmed(false);
@@ -89,18 +102,30 @@ export function StopRunControl({
     sending.current = true;
     setBusy(true);
     setOutcome(null);
-    try {
-      const result = await cancelAgentRun(workspaceId, runId);
-      setArmed(false);
-      setOutcome(cancelSucceeded(result, agentName));
-      // 원장의 「취소됐어요」 줄을 바로 읽는다. 진행 칩은 서버의 run 프레임이 따라온다.
+    // 원장을 다시 읽어 머리 칩이 방금 낸 문장과 같은 말을 하게 한다. 진행 칩은
+    // 서버의 run 프레임도 따라온다.
+    const rereadLedger = () =>
       void client.invalidateQueries({
         queryKey: ["agent-run-events", workspaceId, runId.toLowerCase()],
       });
+    const caretInside = () =>
+      sectionRef.current?.contains(document.activeElement) ?? false;
+    try {
+      const result = await cancelAgentRun(workspaceId, runId);
+      focusOutcome.current = caretInside();
+      setArmed(false);
+      setOutcome(cancelSucceeded(result, agentName));
+      // 원장의 「취소됐어요」 줄을 바로 읽는다.
+      rereadLedger();
     } catch (error) {
       const next = cancelFailureOutcome(error);
-      // 이미 끝난 실행에는 더 물을 것이 없다. 확인 줄을 접는다.
-      if (next.kind === "alreadyOver") setArmed(false);
+      if (next.kind === "alreadyOver") {
+        // 이미 끝난 실행에는 더 물을 것이 없다. 확인 줄을 접는다. 칩이 「작업 중」에
+        // 머문 채 「이미 끝났어요」와 나란히 서지 않게 원장도 다시 읽는다.
+        focusOutcome.current = caretInside();
+        setArmed(false);
+        rereadLedger();
+      }
       setOutcome(next);
     } finally {
       sending.current = false;
@@ -116,6 +141,7 @@ export function StopRunControl({
 
   return (
     <section
+      ref={sectionRef}
       aria-label="실행 중단"
       className="flex flex-col gap-2 border-b border-line px-4 py-2"
       data-testid="agent-work-panel-stop"
@@ -174,9 +200,12 @@ export function StopRunControl({
         ))}
       {outcome !== null && (
         <p
+          ref={outcomeRef}
+          // 캐럿이 머물 수 있는 문장이다(탭 순서에는 자리를 만들지 않는다).
+          tabIndex={-1}
           role={outcome.kind === "error" ? "alert" : "status"}
           className={cn(
-            "break-keep text-meta",
+            "break-keep text-meta focus-visible:focus-ring",
             outcome.kind === "error" ? "text-danger" : "text-ink-muted"
           )}
           data-testid="agent-work-panel-stop-outcome"
