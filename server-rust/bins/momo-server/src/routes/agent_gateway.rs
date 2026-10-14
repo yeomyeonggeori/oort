@@ -1534,6 +1534,9 @@ pub(crate) async fn report_standing_in_tx(
 /// so an operator can see an agent that retries the same mistake. Still no
 /// value. The server does not stop a retry by count — the lease and the rate
 /// limit bound it; the routine's "at most 2 corrections" rule is the agent's.
+// The tenant, the run, its agent, the token, the tool and the two halves of the
+// refusal are each one audit column/key; bundling them would only rename them.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn write_report_rejected_audit(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -2204,7 +2207,8 @@ mod tests {
     fn each_contract_violation_names_its_field_and_rule() {
         let pr = "https://github.com/a/b/pull/1";
         let kind = Some("artifacts.resultKind");
-        let cases: Vec<(Value, (&str, &str, Option<&str>))> = vec![
+        type Named = (&'static str, &'static str, Option<&'static str>);
+        let cases: Vec<(Value, Named)> = vec![
             (
                 json!({"tests": {"passed": 1, "failed": 0, "notRun": 0}}),
                 ("artifacts.tests", "requires", kind),
