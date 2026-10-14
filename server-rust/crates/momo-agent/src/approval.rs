@@ -339,6 +339,29 @@ pub async fn is_active_channel_member_in_tx(
     Ok(found.is_some())
 }
 
+/// An approval's kind, status and payload **without locking it** — for the read-only
+/// avatar-preview route. `None` when the id does not exist in the workspace.
+pub async fn read_approval_payload_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    approval_id: Uuid,
+) -> Result<Option<(String, String, Value)>, DbError> {
+    let row = sqlx::query(
+        "SELECT action_type, status::text AS status_label, payload FROM approval \
+          WHERE workspace_id = $1 AND id = $2",
+    )
+    .bind(workspace_id)
+    .bind(approval_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(row) = row else { return Ok(None) };
+    Ok(Some((
+        row.try_get("action_type").map_err(DbError::from)?,
+        row.try_get("status_label").map_err(DbError::from)?,
+        row.try_get("payload").map_err(DbError::from)?,
+    )))
+}
+
 /// Swift `lockApproval` (:441-485): `FOR UPDATE OF a`, joined to the run and
 /// the agent so one round trip carries everything the decision needs.
 ///
@@ -528,6 +551,46 @@ pub async fn mark_approval_decided_in_tx(
     .execute(&mut *conn)
     .await?;
     Ok(())
+}
+
+/// Record the claim grant on a just-decided approval (ADR-0186 증보 v3 V3-4). Called
+/// inside the decision transaction, under the approval row lock the decision already
+/// holds; the grant carries ids and a deadline, never a value.
+pub async fn grant_secret_claim_in_tx(
+    conn: &mut PgConnection,
+    approval_id: Uuid,
+    grant: &Value,
+) -> Result<(), DbError> {
+    sqlx::query(
+        "UPDATE approval \
+            SET payload = jsonb_set(payload, '{secretClaim}', $2::jsonb, true) \
+          WHERE id = $1",
+    )
+    .bind(approval_id)
+    .bind(grant)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
+/// Stamp the grant as spent. The caller holds the approval row `FOR UPDATE`
+/// ([`lock_approval_in_tx`]) and has just judged the grant `Open`; the `claimedAtMs`
+/// guard makes a second stamp affect no row even if that were ever wrong.
+pub async fn stamp_secret_claimed_in_tx(
+    conn: &mut PgConnection,
+    approval_id: Uuid,
+    claimed_at_ms: i64,
+) -> Result<bool, DbError> {
+    let stamped = sqlx::query(
+        "UPDATE approval \
+            SET payload = jsonb_set(payload, '{secretClaim,claimedAtMs}', to_jsonb($2::bigint), true) \
+          WHERE id = $1 AND payload #> '{secretClaim,claimedAtMs}' IS NULL",
+    )
+    .bind(approval_id)
+    .bind(claimed_at_ms)
+    .execute(&mut *conn)
+    .await?;
+    Ok(stamped.rows_affected() == 1)
 }
 
 /// Swift `recordExpiredClick`'s approval half (:920-929).

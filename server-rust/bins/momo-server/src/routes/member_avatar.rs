@@ -37,11 +37,11 @@ use axum::{Extension, Json};
 use momo_auth::Principal;
 use momo_messaging::{
     activate_member_avatar_upload_in_tx, active_workspace_role, clear_own_member_avatar_in_tx,
-    image_dimensions, load_own_member_avatar_media_in_tx, read_current_member_avatar_media_in_tx,
-    reserve_member_avatar_upload_in_tx, settle_member_avatar_upload_in_tx, sniff_image_mime,
-    validate_avatar_name, validate_member_avatar_mime, MemberAvatarMedia,
-    IMAGE_HEADER_PREFIX_BYTES, MAX_MEMBER_AVATAR_DIMENSION, MAX_MEMBER_AVATAR_UPLOADS_PER_HOUR,
-    MAX_WORKSPACE_AVATAR_BYTES,
+    image_dimensions, load_own_member_avatar_media_in_tx, read_current_avatar_image_in_tx,
+    read_current_member_avatar_media_in_tx, reserve_member_avatar_upload_in_tx,
+    settle_member_avatar_upload_in_tx, sniff_image_mime, validate_avatar_name,
+    validate_member_avatar_mime, MemberAvatarMedia, IMAGE_HEADER_PREFIX_BYTES,
+    MAX_MEMBER_AVATAR_DIMENSION, MAX_MEMBER_AVATAR_UPLOADS_PER_HOUR, MAX_WORKSPACE_AVATAR_BYTES,
 };
 use uuid::Uuid;
 
@@ -425,6 +425,40 @@ pub async fn remove(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// What a member's current avatar is: a Drive-held upload or a server-held,
+/// re-encoded agent image.
+enum CurrentAvatar {
+    Drive(MemberAvatarMedia),
+    Stored(momo_messaging::AgentAvatarBytes),
+}
+
+/// Serve an agent's stored avatar. Same discipline as the Drive path — the
+/// **stored** mime (only ever `image/png` or `image/jpeg`, a CHECK), `nosniff`,
+/// a `sandbox` CSP, and a `?v` that must be the current image id — but the bytes
+/// are the ones this server wrote, not bytes it relays.
+fn stored_image_response(
+    avatar: momo_messaging::AgentAvatarBytes,
+    version: Option<&str>,
+) -> Result<Response, ApiError> {
+    let cache_control = match version {
+        Some(v) if v == avatar.image.id.to_string() => "private, max-age=31536000, immutable",
+        Some(_) => return Err(ApiError::not_found("avatar version is not current")),
+        None => "private, no-cache",
+    };
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, avatar.image.mime)
+        .header(header::CONTENT_LENGTH, avatar.bytes.len().to_string())
+        .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
+        .header(
+            header::CONTENT_SECURITY_POLICY,
+            "default-src 'none'; sandbox",
+        )
+        .header(header::CACHE_CONTROL, cache_control)
+        .body(Body::from(avatar.bytes))
+        .map_err(|error| ApiError::internal("member_avatar.content.stored", error))
+}
+
 /// The `?v={media}` cache key (see [`member_avatar_url`]).
 #[derive(Debug, serde::Deserialize)]
 pub struct ContentQuery {
@@ -447,7 +481,11 @@ pub async fn content(
     let target_member = path_uuid(&member, "invalid member id")?;
     let viewer = principal.member_id;
 
-    let found: DbRejectable<MemberAvatarMedia> =
+    // An **agent's approved image avatar** (ADR-0186 증보 2026-10-13, V3-2a) is
+    // stored in Postgres, already re-encoded by this server; a member's own upload
+    // is in Drive. A member has at most one of the two (an agent cannot upload
+    // through `/members/me`, a person has no `avatar_image_id`).
+    let found: DbRejectable<CurrentAvatar> =
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
                 if active_workspace_role(conn, workspace_id, viewer)
@@ -456,16 +494,26 @@ pub async fn content(
                 {
                     return Ok(Err(ApiError::forbidden("not a workspace member")));
                 }
+                if let Some(image) =
+                    read_current_avatar_image_in_tx(conn, workspace_id, target_member).await?
+                {
+                    return Ok(Ok(CurrentAvatar::Stored(image)));
+                }
                 match read_current_member_avatar_media_in_tx(conn, workspace_id, target_member)
                     .await?
                 {
-                    Some(media) => Ok(Ok(media)),
+                    Some(media) => Ok(Ok(CurrentAvatar::Drive(media))),
                     None => Ok(Err(ApiError::not_found("member has no avatar"))),
                 }
             })
         })
         .await;
-    let media = settle_db("member_avatar.content", found)?;
+    let media = match settle_db("member_avatar.content", found)? {
+        CurrentAvatar::Drive(media) => media,
+        CurrentAvatar::Stored(image) => {
+            return stored_image_response(image, query.v.as_deref());
+        }
+    };
 
     // L-1: the `immutable` year-long cache is only safe when the URL names the
     // bytes. A `v` that is not the *current* media id (stale, forged or garbage)
