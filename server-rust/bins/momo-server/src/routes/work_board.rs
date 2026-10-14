@@ -87,7 +87,7 @@ pub fn parse_scope(include: Option<&str>, who: Option<&str>) -> Result<ListScope
     let mut board = BoardScope::default();
     if let Some(raw) = include {
         for token in raw.split(',') {
-            match token.trim() {
+            match token {
                 "runs" => board.include_runs = true,
                 "jobs" => board.include_jobs = true,
                 _ => return Err(ApiError::bad_request(INVALID_INCLUDE)),
@@ -427,7 +427,7 @@ mod tests {
         assert!(runs.board.include_runs && !runs.board.include_jobs);
         assert_eq!(runs.echo_who, None);
 
-        for raw in ["jobs", "runs,jobs", "jobs,runs", "runs, jobs"] {
+        for raw in ["jobs", "runs,jobs", "jobs,runs"] {
             let jobs = parse_scope(Some(raw), None).unwrap();
             assert!(jobs.board.include_runs && jobs.board.include_jobs, "{raw}");
             assert!(!jobs.board.who_mine, "{raw}: who defaults to team");
@@ -440,7 +440,16 @@ mod tests {
         assert!(!team.board.who_mine);
         assert_eq!(team.echo_who, Some("team"));
 
-        for bad in ["", "x", "runs,", ",runs", "RUNS", "runs,sessions", "tools"] {
+        for bad in [
+            "",
+            "x",
+            "runs,",
+            ",runs",
+            "RUNS",
+            "runs, jobs",
+            "runs,sessions",
+            "tools",
+        ] {
             let error = parse_scope(Some(bad), None).expect_err(bad);
             assert_eq!(error.message, INVALID_INCLUDE, "{bad}");
         }
