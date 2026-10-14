@@ -3111,6 +3111,12 @@ mod tests {
             "Never post it in a channel",
             "keep it in memory for this turn only",
             "Any lease handle you hold",
+            "do not claim there",
+            "write the approvalId it returns",
+            "a second claim is refused",
+            "propose only because a human member asked in plain words",
+            "Never put a key, link or code in a proposal's rationale or args",
+            "ask the approver for the link or code instead",
             "imageAttachments",
             "avatar {source:\"attachment\"",
         ] {

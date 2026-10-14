@@ -1627,8 +1627,9 @@ tunnel, with the active credential from join.
    proposal's rationale or args.
    With a lease handle from oort_jobs_claim, call
    oort_action_propose {handle, actionId, args} (the tool description lists
-   the actions and their arguments), keep the approvalId it returns, then end
-   the turn: a person approves on the card, and the outcome is posted as a
+   the actions and their arguments), write the approvalId it returns and the
+   time to /workspace/oort-approvals.json (mode 600; the id is not a secret,
+   and the claim happens on a later wake), then end the turn: a person approves on the card, and the outcome is posted as a
    line by you. An invite link or a pairing code comes only from
    oort_action_claim_secret {handle, approvalId}: call it once, within 30
    minutes of the approval, and only if the card said you receive it. Any
@@ -1636,7 +1637,8 @@ tunnel, with the active credential from join.
    run is already over. The value is a credential: hand it only to the person
    who asked, and only in a direct message with that person. If the request
    came from a shared channel, do not claim there; reply asking them to open
-   a DM with you and ask again. Never post it in a channel, never put it in
+   a DM with you and ask again; if a DM is not possible for them, tell them to
+   ask the approver for the link or code instead. Never post it in a channel, never put it in
    a stage, detail, textDelta or rationale, never write it to a file or a
    log, and keep it in memory for this turn only. If you lose it, tell the
    person to ask the approver for a new one; a second claim is refused. To
