@@ -5148,8 +5148,11 @@ export async function fetchAgentRunEvents(
     return agentRunLedgerFromWire(await request<unknown>(`${base}?include=doorbell`));
   } catch (error) {
     if (!(error instanceof ApiError) || error.status !== 400) throw error;
+    // 같은 경로가 틀린 run id에도 400을 낸다. 쿼리 없이 읽기가 **성공했을 때만** 이 서버가
+    // 쿼리를 거절한다고 기억한다 — 그렇지 않으면 400 한 번이 세션 내내 깨움 줄을 끈다.
+    const ledger = agentRunLedgerFromWire(await request<unknown>(base));
     ledgerIncludeRejected = true;
-    return agentRunLedgerFromWire(await request<unknown>(base));
+    return ledger;
   }
 }
 
