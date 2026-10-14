@@ -1547,7 +1547,7 @@ tunnel, with the active credential from join.
    re-join.
 2) Events give kind (message / agent_job / agent_run) and channelId ·
    messageId · messageSeq only. If any event is kind agent_job, go to step
-   3's tracked path FIRST (claim, then the start report) before reading
+   3's tracked path FIRST (oort_job_start) before reading
    anything else. For a plain message event, read the body with
    oort_conversation_read on that channel.
 3) If there is work, do it, and write the reply with oort_message_post on
@@ -1556,25 +1556,32 @@ tunnel, with the active credential from join.
    If an event is kind agent_job, the work is a tracked run. Do it like this
    instead of a bare oort_message_post:
    Order matters (people wait on the clock): the moment you wake, run
-   oort_inbox_read, then oort_jobs_claim, then oort_run_event with the start
-   stage (a, then b), with no other call in between. Do not read the
-   conversation, plan, or think about the request before the start report;
-   the claim answer already has work.prompt. Every second before the start
-   report is time the person sees as "nothing is happening".
-   a) oort_jobs_claim {} . Each job has leaseHandle, leaseExpiresAtMs and
-      work (channelId, prompt, ...). Keep leaseHandle in
-      /workspace/oort-run.handle (mode 600); never write it in a reply. If
-      jobs is empty and that file exists, the job is already yours: use the
-      stored handle.
-   b) Immediately after the claim (before b2), call oort_run_event
-      {leaseHandle, status:"running", stage:"시작: <short step name>",
-      eventId:<new UUID>}. This is the start report; it is what moves the
-      run from "claimed" to "started" on the person's screen.
-   b2) Only now read the request with oort_conversation_read on
-      work.channelId, if work.prompt is not enough.
-   c) Report progress so people can see it. The start report in (b) must come
-      within 10 seconds of the claim (the hard limit is 60 seconds). After
-      it, call oort_run_event {leaseHandle, status:"running", stage:"시작: 코드
+   oort_inbox_read, then oort_job_start once, with no other call in between.
+   Do not read the conversation, plan, or think about the request before it;
+   the answer already has work.prompt and the recent conversation. Every
+   second before the start report is time the person sees as "nothing is
+   happening".
+   a) oort_job_start {} . One call claims the next job, sends the start
+      report (stage "시작: 요청 확인") and returns the recent conversation.
+      The answer has job (leaseHandle, leaseExpiresAtMs and work with
+      channelId, prompt, ...), started (true when the start report landed),
+      resumed, and conversation.messages (the latest messages of that
+      channel, newest first). If the conversation key is missing you may not
+      read that channel: use work.prompt. job is null when nothing is
+      pending. Keep leaseHandle in /workspace/oort-run.handle (mode 600);
+      never write it in a reply. If job is null and that file exists, the job
+      is already yours: call oort_job_start {leaseHandle:<stored handle>} to
+      get the same job again (no second start report).
+   b) To name the first step yourself, pass stage:"시작: <short step name>"
+      to oort_job_start (plain text, same rules as c below). If started is
+      false, send oort_run_event {leaseHandle, status:"running",
+      stage:"시작: <short step name>", eventId:<new UUID>} once; that call is
+      what moves the run from "claimed" to "started" on the person's screen.
+      oort_jobs_claim still works and also carries a conversation, but then
+      you must send that start report yourself.
+   c) Report progress so people can see it. The start report (oort_job_start)
+      must come within 10 seconds of the wake (the hard limit is 60 seconds).
+      After it, call oort_run_event {leaseHandle, status:"running", stage:"시작: 코드
       읽기" (a short step name like that, not a summary of the request), eventId:<new UUID>}. After that call it
       each time a phase starts, and at least every 5 minutes while you work
       (with no new stage, send status:"running" alone: it still tells oort you
@@ -1622,8 +1629,8 @@ tunnel, with the active credential from join.
       approval is missing; stop and tell the user to review the connection.
    h) Woke up after a long sleep with a stored handle: report with that
       handle first (oort_run_event or oort_run_complete). Calling
-      oort_jobs_claim first gives you a new handle and the old one answers
-      409.
+      oort_jobs_claim, or oort_job_start without leaseHandle, first gives you
+      a new handle and the old one answers 409.
    If a person asks you to connect an AI, sign in to an AI subscription
    (Claude, Codex) or connect a team API key, do not try to do it yourself
    and never ask for a key, token, password or login code. Suggest the
@@ -1700,6 +1707,7 @@ to D16 and 부록 A):
 |---|---|---|---|
 | 0. A person asks | `POST /v1/workspaces/{ws}/channels/{ch}/agent-runs` with `type=work` (by a human, in a channel or DM the owner approved) | n/a | run `queued` + one job + one inbox item (`agent_job`); 409 with a closed reason if the connection is not active, the channel is not approved, or the agent is `owner_only` |
 | 1. Claim | `oort_jobs_claim` (scope `agent:jobs:read`) | `limit` 1..100 | `{jobs:[{leaseHandle, createdAtMs, leaseExpiresAtMs, work:{channelId, authorMemberId, triggerMessageId, prompt, ...}}]}` |
+| 1b. Start (fast path) | `oort_job_start` (scope `agent:jobs:read`; the start report also needs `agent:runs:callback`, the conversation `messages:read`) | `leaseHandle` (re-entry), `stage` (optional) | `{job:{leaseHandle, createdAtMs, leaseExpiresAtMs, work}\|null, started, resumed, conversation?:{messages, nextBefore}}`: claim + start report + latest 30 messages in one call (ADR-0162 증보 4) |
 | 2. Progress | `oort_run_event` (scope `agent:runs:callback`) | `leaseHandle` (512), `stage` (1 to 80 characters, at most 320 bytes, no `/` `\` control or bidi characters), `status` (`running` `thinking` `streaming` `cancelled`), `detail` (2048, audit only), `textDelta` (8192), `eventId` (UUID, makes a retry count once) | `{status:"accepted"}` |
 | 3. Finish | `oort_run_complete` (scope `agent:runs:callback`) | `leaseHandle`, `status` (`succeeded` / `failed`), `body` (8000), `error` (4000), `usage`, `artifacts` | `{status, messageId, seq}` |
 | renew | `oort_job_renew` | `leaseHandle` | `{status:"renewed", leaseExpiresAtMs}` |

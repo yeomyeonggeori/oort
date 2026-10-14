@@ -10786,9 +10786,11 @@ paths:
         server capability, so the advertised catalog is exactly the callable
         one. A credential carrying only `agent:port:connect` lists no tool and
         may call none; a tool outside the caller's view answers byte-identically
-        to a tool that does not exist. The ten tools are `oort_inbox_read`,
+        to a tool that does not exist. The tools are `oort_inbox_read`,
         `oort_conversation_read`, `oort_message_post`, `oort_jobs_claim`,
-        `oort_job_renew`, `oort_job_release`, `oort_run_event`,
+        `oort_job_start` (ADR-0162 증보 4: claim + start report + latest
+        conversation in one call, same scopes and gate as the tools it
+        combines), `oort_job_renew`, `oort_job_release`, `oort_run_event`,
         `oort_run_complete`, `oort_action_propose` (ADR-0186 D2) and
         `oort_card_suggest` (ADR-0186 증보 G1).
         ADR-0162 증보 3 adds two optional report fields to existing tools, no new
@@ -13886,7 +13888,9 @@ components:
         oort_conversation_read, `messages:write` -> oort_message_post and
         oort_card_suggest (ADR-0186 증보 G5: a suggestion card is a message in
         the handle's channel and grants nothing more),
-        `agent:jobs:read` -> oort_jobs_claim/oort_job_renew/oort_job_release,
+        `agent:jobs:read` -> oort_jobs_claim/oort_job_start/oort_job_renew/oort_job_release
+        (oort_job_start also re-proves agent:runs:callback for its start report and
+        messages:read for its conversation inside the call),
         `agent:runs:callback` -> oort_run_event/oort_run_complete,
         `workspace:propose` -> oort_action_propose (ADR-0186 D2: propose only —
         it opens no REST route at all, and the change it asks for is executed by

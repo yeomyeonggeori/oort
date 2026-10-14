@@ -644,6 +644,7 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
             "oort_conversation_read",
             "oort_message_post",
             "oort_jobs_claim",
+            "oort_job_start",
             "oort_job_renew",
             "oort_job_release",
             "oort_run_event",
@@ -2394,6 +2395,9 @@ async fn the_advertised_argument_schema_is_what_execution_accepts() {
             json!({"channelId": fixture.channel, "limit": 5000}),
         ),
         ("oort_jobs_claim", json!({"limit": -1})),
+        // #3831: the composite is as closed as the tools it is made of.
+        ("oort_job_start", json!({"limit": 5})),
+        ("oort_job_start", json!({"leaseHandle": 7})),
         (
             "oort_run_complete",
             json!({
@@ -16009,4 +16013,471 @@ async fn a_revoked_invite_cannot_be_claimed_and_a_flag_on_an_invite_is_refused()
     .unwrap();
     let (status, ok) = claim_3789(&client, &base, &fixture, second).await;
     assert_eq!(status, 200, "restored authority claims fine: {ok}");
+}
+
+// ---------------------------------------------------------------------------
+// (#3831, ADR-0162 증보 4) oort_job_start — claim + start report + conversation
+// ---------------------------------------------------------------------------
+
+/// A human mentions the hosted agent in the approved channel; returns the run id.
+async fn raise_mention_3831(
+    client: &reqwest::Client,
+    base: &str,
+    su: &PgPool,
+    fixture: &Fixture,
+    text: &str,
+) -> Uuid {
+    let handle_name = hosted_handle(su, fixture.hosted_agent).await;
+    let trigger: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "body": format!("@{handle_name} {text}")
+        }))
+        .send()
+        .await
+        .expect("mention send")
+        .json()
+        .await
+        .expect("mention body");
+    assert!(trigger["id"].is_string(), "{trigger}");
+    sqlx::query_scalar(
+        "SELECT id FROM agent_run WHERE workspace_id=$1 AND agent_member_id=$2 \
+          ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .fetch_one(su)
+    .await
+    .expect("the run the mention raised")
+}
+
+async fn set_approved_scopes_3831(su: &PgPool, fixture: &Fixture, scopes: &[&str]) {
+    let scopes: Vec<String> = scopes.iter().map(|scope| (*scope).to_string()).collect();
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET approved_scopes = $3 \
+         WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_connection)
+    .bind(scopes)
+    .execute(su)
+    .await
+    .unwrap();
+}
+
+async fn lease_owner_3831(su: &PgPool, run: Uuid) -> Option<Uuid> {
+    sqlx::query_scalar(
+        "SELECT lease_owner FROM outbox WHERE kind='agent_job' \
+           AND lower(payload->>'run_id') = lower($1::text)",
+    )
+    .bind(run.to_string())
+    .fetch_one(su)
+    .await
+    .expect("the run's job row")
+}
+
+const ALL_HOSTED_SCOPES_3831: [&str; 7] = [
+    "agent:port:connect",
+    "agent:inbox:read",
+    "messages:read",
+    "messages:write",
+    "agent:jobs:read",
+    "agent:runs:callback",
+    "workspace:propose",
+];
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn one_job_start_call_claims_reports_the_start_and_returns_the_conversation() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let run = raise_mention_3831(&client, &base, &su, &fixture, "작업해줘 3831").await;
+
+    let (status, started) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_job_start",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, 200, "{started}");
+    let answer = structured(&started);
+    assert_eq!(answer["started"], json!(true), "{answer}");
+    assert_eq!(answer["resumed"], json!(false));
+    let handle = answer["job"]["leaseHandle"].as_str().expect("lease handle");
+    assert!(answer["job"]["work"]["prompt"]
+        .as_str()
+        .unwrap()
+        .contains("작업해줘 3831"));
+    assert!(
+        answer["job"]["work"].get("run_id").is_none()
+            && answer["job"]["work"].get("runId").is_none(),
+        "the run identity stays inside the sealed handle: {answer}"
+    );
+    // The conversation is the live latest page of the job's channel, under
+    // `oort_conversation_read`'s own projection.
+    let messages = answer["conversation"]["messages"]
+        .as_array()
+        .expect("conversation");
+    assert!(
+        messages.iter().any(|message| message["body"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("작업해줘 3831")),
+        "{answer}"
+    );
+    assert!(answer["conversation"]["nextBefore"].is_i64());
+
+    // ONE call produced the claim fact, the start fact and the stage marker.
+    let ledger = ledger_3740(&su, fixture.workspace, run).await;
+    let kinds = kinds_3740(&ledger);
+    assert_eq!(
+        kinds.iter().filter(|k| **k == "claimed").count(),
+        1,
+        "{kinds:?}"
+    );
+    assert_eq!(
+        kinds.iter().filter(|k| **k == "started").count(),
+        1,
+        "{kinds:?}"
+    );
+    let stages: Vec<_> = ledger.iter().filter_map(|row| row.2.as_deref()).collect();
+    assert_eq!(stages, ["시작: 요청 확인"]);
+    let (steps, output) = run_record_3516(&su, run).await;
+    assert_eq!(steps, 1);
+    assert_eq!(output["stages"], json!(["시작: 요청 확인"]));
+    let run_status: String = sqlx::query_scalar("SELECT status::text FROM agent_run WHERE id=$1")
+        .bind(run)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(run_status, "running");
+
+    // The handle it returned is the real lease: it completes the run.
+    let (status, done) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_run_complete",
+        json!({"leaseHandle": handle, "status": "succeeded", "body": "끝"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{done}");
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn job_start_is_idempotent_for_the_same_job_and_the_same_agent() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let run = raise_mention_3831(&client, &base, &su, &fixture, "한 번만 시작").await;
+    let bearer = &fixture.hosted_bearer;
+
+    let (_, first) = call(&client, &base, bearer, "oort_job_start", json!({})).await;
+    let first = structured(&first).clone();
+    let handle = first["job"]["leaseHandle"]
+        .as_str()
+        .expect("handle")
+        .to_string();
+    let owner = lease_owner_3831(&su, run).await;
+    assert!(owner.is_some());
+    let before = ledger_3740(&su, fixture.workspace, run).await;
+
+    // A bare second call finds nothing more to claim and changes nothing.
+    let (status, again) = call(&client, &base, bearer, "oort_job_start", json!({})).await;
+    assert_eq!(status, 200, "{again}");
+    assert_eq!(structured(&again)["job"], Value::Null);
+    assert_eq!(structured(&again)["started"], json!(false));
+
+    // Re-entry with the handle it already holds: the same job again, the same
+    // conversation, and not one more ledger row, step, marker or lease.
+    for _ in 0..2 {
+        let (status, resumed) = call(
+            &client,
+            &base,
+            bearer,
+            "oort_job_start",
+            json!({"leaseHandle": handle}),
+        )
+        .await;
+        assert_eq!(status, 200, "{resumed}");
+        let resumed = structured(&resumed);
+        assert_eq!(resumed["resumed"], json!(true), "{resumed}");
+        assert_eq!(resumed["started"], json!(true));
+        assert_eq!(
+            resumed["job"]["work"]["triggerMessageId"],
+            first["job"]["work"]["triggerMessageId"]
+        );
+        assert_eq!(
+            resumed["job"]["work"]["prompt"],
+            first["job"]["work"]["prompt"]
+        );
+        assert_eq!(
+            resumed["conversation"]["messages"],
+            first["conversation"]["messages"]
+        );
+    }
+    assert_eq!(ledger_3740(&su, fixture.workspace, run).await, before);
+    assert_eq!(
+        run_record_3516(&su, run).await.0,
+        1,
+        "one start report, one step"
+    );
+    assert_eq!(lease_owner_3831(&su, run).await, owner, "no second lease");
+
+    // A handle that is not this agent's, and one whose job is settled, are refused.
+    let (status, refused) = call(
+        &client,
+        &base,
+        bearer,
+        "oort_job_start",
+        json!({"leaseHandle": "momo_lease_v1.AAAA"}),
+    )
+    .await;
+    assert_eq!(status, 403, "{refused}");
+    let (status, done) = call(
+        &client,
+        &base,
+        bearer,
+        "oort_run_complete",
+        json!({"leaseHandle": handle, "status": "succeeded", "body": "끝"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{done}");
+    let (status, settled) = call(
+        &client,
+        &base,
+        bearer,
+        "oort_job_start",
+        json!({"leaseHandle": handle}),
+    )
+    .await;
+    assert_eq!(status, 409, "{settled}");
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn job_start_and_claim_never_expose_a_conversation_the_agent_may_not_read() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let bearer = &fixture.hosted_bearer;
+    let secret_text = "상위비밀문장3831";
+
+    // (1) No `messages:read` on the human's approval: the job is delivered and
+    //     started, the conversation is simply absent, on BOTH composites.
+    let run = raise_mention_3831(&client, &base, &su, &fixture, secret_text).await;
+    let without_read: Vec<&str> = ALL_HOSTED_SCOPES_3831
+        .iter()
+        .copied()
+        .filter(|scope| *scope != "messages:read")
+        .collect();
+    set_approved_scopes_3831(&su, &fixture, &without_read).await;
+    let (status, started) = call(&client, &base, bearer, "oort_job_start", json!({})).await;
+    assert_eq!(status, 200, "{started}");
+    let answer = structured(&started);
+    assert_eq!(answer["started"], json!(true), "{answer}");
+    assert!(answer["job"]["leaseHandle"].is_string());
+    assert!(answer.get("conversation").is_none(), "{answer}");
+    let (status, refused) = call(
+        &client,
+        &base,
+        bearer,
+        "oort_conversation_read",
+        json!({"channelId": fixture.channel}),
+    )
+    .await;
+    assert_ne!(status, 200, "the read tool itself is closed too: {refused}");
+    // Release so the claim path below can lease it afresh.
+    let handle = answer["job"]["leaseHandle"].as_str().unwrap();
+    let (status, _) = call(
+        &client,
+        &base,
+        bearer,
+        "oort_job_release",
+        json!({"leaseHandle": handle}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let (status, claimed) = call(&client, &base, bearer, "oort_jobs_claim", json!({})).await;
+    assert_eq!(status, 200, "{claimed}");
+    let job = &structured(&claimed)["jobs"][0];
+    assert!(job["leaseHandle"].is_string(), "{claimed}");
+    assert!(job.get("conversation").is_none(), "{claimed}");
+    let (status, _) = call(
+        &client,
+        &base,
+        bearer,
+        "oort_run_complete",
+        json!({"leaseHandle": job["leaseHandle"], "status": "succeeded", "body": "끝"}),
+    )
+    .await;
+    assert_eq!(status, 200);
+
+    // (2) Scope restored but the agent has left the channel: the lease still
+    //     names the job, yet the channel's history is not this agent's to read.
+    set_approved_scopes_3831(&su, &fixture, &ALL_HOSTED_SCOPES_3831).await;
+    let _second = raise_mention_3831(&client, &base, &su, &fixture, secret_text).await;
+    let _third = raise_mention_3831(&client, &base, &su, &fixture, secret_text).await;
+    sqlx::query(
+        "UPDATE membership SET left_at=now() WHERE workspace_id=$1 AND channel_id=$2 \
+            AND member_id=$3",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.channel)
+    .bind(fixture.hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    for tool in ["oort_job_start", "oort_jobs_claim"] {
+        let (status, answer) = call(&client, &base, bearer, tool, json!({})).await;
+        assert_eq!(status, 200, "{tool}: {answer}");
+        let answer = structured(&answer);
+        let carried = answer.to_string();
+        // Whatever the composite delivers, no live conversation page rides along:
+        // `conversation` is absent (the job's own `work.prompt` is the queued
+        // snapshot both tools always had).
+        assert!(!carried.contains("\"conversation\""), "{tool}: {answer}");
+        let delivered = if tool == "oort_job_start" {
+            &answer["job"]
+        } else {
+            &answer["jobs"][0]
+        };
+        assert!(
+            delivered["leaseHandle"].is_string(),
+            "the job itself is delivered (so the absence is the gate, not an empty claim): {tool}: {answer}"
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn job_start_without_the_callback_scope_or_with_a_bad_stage_claims_nothing() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let bearer = &fixture.hosted_bearer;
+    let run = raise_mention_3831(&client, &base, &su, &fixture, "아무것도 잡지 마").await;
+
+    // No `agent:runs:callback`: the whole call is refused BEFORE the claim, so
+    // there is no half-started job.
+    let without_callback: Vec<&str> = ALL_HOSTED_SCOPES_3831
+        .iter()
+        .copied()
+        .filter(|scope| *scope != "agent:runs:callback")
+        .collect();
+    set_approved_scopes_3831(&su, &fixture, &without_callback).await;
+    let (status, refused) = call(&client, &base, bearer, "oort_job_start", json!({})).await;
+    assert_eq!((status, error_code(&refused)), (403, -32003), "{refused}");
+    assert_eq!(lease_owner_3831(&su, run).await, None, "nothing was leased");
+    let before = ledger_3740(&su, fixture.workspace, run).await;
+    assert!(!kinds_3740(&before).contains(&"claimed"));
+
+    // A stage the shared rule refuses is judged before the claim too.
+    set_approved_scopes_3831(&su, &fixture, &ALL_HOSTED_SCOPES_3831).await;
+    for bad in ["a/b", "   ", "bad\u{7}"] {
+        let (status, refused) = call(
+            &client,
+            &base,
+            bearer,
+            "oort_job_start",
+            json!({"stage": bad}),
+        )
+        .await;
+        assert_eq!(
+            (status, error_code(&refused)),
+            (400, -32602),
+            "{bad:?}: {refused}"
+        );
+    }
+    assert_eq!(
+        lease_owner_3831(&su, run).await,
+        None,
+        "still nothing leased"
+    );
+    assert_eq!(ledger_3740(&su, fixture.workspace, run).await, before);
+
+    // A named stage is the start report's marker.
+    let (status, started) = call(
+        &client,
+        &base,
+        bearer,
+        "oort_job_start",
+        json!({"stage": "시작: 코드 읽기"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{started}");
+    assert_eq!(
+        run_record_3516(&su, run).await.1["stages"],
+        json!(["시작: 코드 읽기"])
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn claim_carries_the_live_conversation_bounded_to_the_context_window() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    for index in 0..40 {
+        let sent: Value = client
+            .post(format!(
+                "{base}/v1/workspaces/{}/channels/{}/messages",
+                fixture.workspace, fixture.channel
+            ))
+            .bearer_auth(&fixture.human_jwt)
+            .json(&json!({"clientMsgId": Uuid::new_v4(), "body": format!("잡담 {index}")}))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(sent["id"].is_string(), "{sent}");
+    }
+    raise_mention_3831(&client, &base, &su, &fixture, "맨 끝 요청").await;
+    let (status, claimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    let job = &structured(&claimed)["jobs"][0];
+    let messages = job["conversation"]["messages"]
+        .as_array()
+        .expect("conversation");
+    assert_eq!(messages.len(), 30, "bounded to the agent context window");
+    assert!(
+        messages[0]["body"].as_str().unwrap().contains("맨 끝 요청"),
+        "newest first: {claimed}"
+    );
+    assert!(job["conversation"]["nextBefore"].is_i64());
+    // The queued snapshot is untouched and bounded by the same number.
+    assert!(job["work"]["recentMessages"].as_array().unwrap().len() <= 30);
 }

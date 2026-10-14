@@ -10,6 +10,7 @@
 //! | `oort_conversation_read` | `momo_messaging::list_channel_page` — the REST history's own read |
 //! | `oort_message_post` | `momo_messaging::send_message_with_mentions_in_tx` — the REST send's own transaction |
 //! | `oort_jobs_claim` | `momo_outbox::claim_hosted_gateway_jobs_in_tx` — the gateway claim, hosted branch |
+//! | `oort_job_start` | the claim above + `record_gateway_event_in_tx` (the start report) + the `oort_conversation_read` gate, in one transaction (#3831) |
 //! | `oort_job_renew` / `oort_job_release` | `momo_outbox`'s lease verbs; renew uses the hosted TTL and revives an unclaimed expired lease (#3530) |
 //! | `oort_run_event` | `routes::agent_gateway::record_gateway_event_in_tx` |
 //! | `oort_run_complete` | `routes::agent_gateway::complete_gateway_run_in_tx` |
@@ -235,6 +236,7 @@ pub(crate) async fn execute(
         momo_mcp::TOOL_CONVERSATION_READ => conversation_read(state, caller, &call.arguments).await,
         momo_mcp::TOOL_MESSAGE_POST => message_post(state, caller, &call.arguments).await,
         momo_mcp::TOOL_JOBS_CLAIM => jobs_claim(state, caller, &call.arguments).await,
+        momo_mcp::TOOL_JOB_START => job_start(state, caller, &call.arguments).await,
         momo_mcp::TOOL_JOB_RENEW => {
             job_lease(state, caller, &call.arguments, LeaseVerb::Renew).await
         }
@@ -303,6 +305,14 @@ async fn record_liveness(
                         ..Touch::default()
                     }
                 }
+                // #3831: a start that returned a job is a claim (when it took one
+                // rather than re-entered one) and a run event (when the start
+                // report landed); `job: null` proves only that the call worked.
+                momo_mcp::TOOL_JOB_START if structured["job"].is_object() => Touch {
+                    claim: structured["resumed"] == json!(false),
+                    run_event: structured["started"] == json!(true),
+                    ..Touch::default()
+                },
                 momo_mcp::TOOL_RUN_EVENT
                 | momo_mcp::TOOL_RUN_COMPLETE
                 | momo_mcp::TOOL_ACTION_PROPOSE => Touch {
@@ -612,35 +622,59 @@ async fn conversation_read(
                     Ok(identity) => identity,
                     Err(failure) => return Ok(Err(failure)),
                 };
-            // Two independent gates, one answer. A channel outside the human's
-            // approval and a channel the agent is not a member of are both
-            // `Unavailable`, and so is a channel that does not exist — the read
-            // must not become a workspace directory.
-            if !identity.approved_channel_ids.contains(&channel_id)
-                || !is_channel_member(conn, channel_id, caller.agent_member_id).await?
-            {
-                return Ok(Err(ToolFailure::Unavailable));
-            }
-            let page = list_channel_page(conn, channel_id, cursor, limit).await?;
-            // The **image** files attached to these messages (ADR-0186 증보 v3
-            // V3-2a): an agent can only propose a workspace file as its avatar if
-            // it can name one, and the attachment id is that name. Only complete
-            // PNG/JPEG/WebP rows of messages in a channel this read already
-            // authorised; the Drive file id is never projected.
-            let message_ids: Vec<Uuid> = page.iter().map(|paged| paged.message.id).collect();
-            let images = momo_messaging::image_attachments_for_messages_in_tx(
-                conn,
-                caller.workspace_id,
-                &message_ids,
+            // Two independent gates, one answer: see `gated_channel_page`.
+            Ok(
+                gated_channel_page(conn, caller, &identity, channel_id, cursor, limit)
+                    .await?
+                    .ok_or(ToolFailure::Unavailable),
             )
-            .await?;
-            Ok(Ok((page, images)))
         })
     })
     .await
     .map_err(|error| internal("agent_port.conversation_read", error))?;
 
-    let (page, images) = outcome?;
+    outcome
+}
+
+/// The ONE definition of "this hosted agent may read this channel's history"
+/// (ADR-0162 D3: `oort_conversation_read`'s gate), shared by every tool that
+/// returns conversation content — `oort_conversation_read` itself, the fresh
+/// window `oort_jobs_claim` carries and the one `oort_job_start` carries
+/// (#3831, ADR-0162 증보 4). A second copy of this check is how a convenience
+/// tool would quietly become a wider door, so there is none.
+///
+/// Two independent gates, one answer. A channel outside the human's approval and
+/// a channel the agent is not a member of are both `None`, and so is a channel
+/// that does not exist — the read must not become a workspace directory. The
+/// caller proves the `messages:read` scope on both halves of the intersection
+/// before it gets here (`authorize_in_tx` for the read tool,
+/// [`job_conversation`] for the composites).
+async fn gated_channel_page(
+    conn: &mut PgConnection,
+    caller: HostedCaller,
+    identity: &HostedToolIdentity,
+    channel_id: Uuid,
+    cursor: HistoryCursor,
+    limit: i64,
+) -> Result<Option<Value>, DbError> {
+    if !identity.approved_channel_ids.contains(&channel_id)
+        || !is_channel_member(conn, channel_id, caller.agent_member_id).await?
+    {
+        return Ok(None);
+    }
+    let page = list_channel_page(conn, channel_id, cursor, limit).await?;
+    // The **image** files attached to these messages (ADR-0186 증보 v3
+    // V3-2a): an agent can only propose a workspace file as its avatar if
+    // it can name one, and the attachment id is that name. Only complete
+    // PNG/JPEG/WebP rows of messages in a channel this read already
+    // authorised; the Drive file id is never projected.
+    let message_ids: Vec<Uuid> = page.iter().map(|paged| paged.message.id).collect();
+    let images = momo_messaging::image_attachments_for_messages_in_tx(
+        conn,
+        caller.workspace_id,
+        &message_ids,
+    )
+    .await?;
     let messages: Vec<Value> = page
         .iter()
         .map(|paged| {
@@ -673,7 +707,51 @@ async fn conversation_read(
         })
         .collect();
     let next_before = page.iter().map(|paged| paged.message.seq).min();
-    Ok(json!({"messages": messages, "nextBefore": next_before}))
+    Ok(Some(
+        json!({"messages": messages, "nextBefore": next_before}),
+    ))
+}
+
+/// The latest messages of a job's channel for a composite tool, or `None` when
+/// the caller may not read them (#3831). Exactly [`gated_channel_page`] plus the
+/// `messages:read` scope on both halves — the scope `oort_conversation_read`
+/// requires, nothing looser. Never an error: a composite whose conversation is
+/// withheld still delivers its job.
+async fn job_conversation(
+    conn: &mut PgConnection,
+    caller: HostedCaller,
+    identity: &HostedToolIdentity,
+    channel_id: Uuid,
+) -> Result<Option<Value>, DbError> {
+    if !has_scope(identity, momo_auth::SCOPE_MESSAGES_READ) {
+        return Ok(None);
+    }
+    gated_channel_page(
+        conn,
+        caller,
+        identity,
+        channel_id,
+        HistoryCursor::Newest,
+        JOB_CONVERSATION_ROWS,
+    )
+    .await
+}
+
+/// The rows of recent conversation a job carries — the agent context window's own
+/// default, so a composite never returns more than a mention turn is built from.
+const JOB_CONVERSATION_ROWS: i64 = momo_agent::mention::CONTEXT_WINDOW_DEFAULT;
+
+/// `oort_jobs_claim` attaches the live conversation to at most this many jobs of
+/// one call: the claim limit is up to 100, and 100 × 30 rows is not a response.
+const CLAIM_CONVERSATION_JOBS: usize = 5;
+
+/// The channel a job's payload names (the claim already required it to be in the
+/// live approved set).
+fn job_channel_id(payload: &Value) -> Option<Uuid> {
+    payload
+        .get("channel_id")
+        .and_then(Value::as_str)
+        .and_then(|raw| Uuid::parse_str(raw).ok())
 }
 
 // ---------------------------------------------------------------------------
@@ -883,14 +961,10 @@ async fn jobs_claim(
                 // id is: the claim already required this channel to be in the
                 // live approved set, and a handle without one could not carry
                 // the grant forward.
-                let Some(job_channel_id) = job
-                    .payload
-                    .get("channel_id")
-                    .and_then(Value::as_str)
-                    .and_then(|raw| Uuid::parse_str(raw).ok())
-                else {
+                let Some(job_channel_id) = job_channel_id(&job.payload) else {
                     continue;
                 };
+                let job_channel_id_value = job_channel_id;
                 let handle = encode_lease_handle(
                     LeaseHandle {
                         workspace_id: caller.workspace_id,
@@ -919,12 +993,25 @@ async fn jobs_claim(
                     caller.agent_member_id,
                 )
                 .await?;
-                jobs.push(json!({
+                let mut entry = json!({
                     "leaseHandle": handle,
                     "createdAtMs": crate::routes::shared::epoch_ms(job.created_at),
                     "leaseExpiresAtMs": crate::routes::shared::epoch_ms(job.lease_expires_at),
                     "work": projected_job_payload(&job.payload),
-                }));
+                });
+                // #3831 (ADR-0162 증보 4): the live latest-messages page of the
+                // job's channel, under exactly `oort_conversation_read`'s gate
+                // (`job_conversation`). Bounded: one page per job, for the first
+                // few jobs of the call. `work.recentMessages` stays what it was —
+                // the snapshot taken when the job was queued.
+                if jobs.len() < CLAIM_CONVERSATION_JOBS {
+                    if let Some(conversation) =
+                        job_conversation(conn, caller, &identity, job_channel_id_value).await?
+                    {
+                        entry["conversation"] = conversation;
+                    }
+                }
+                jobs.push(entry);
             }
             Ok(Ok(jobs))
         })
@@ -933,6 +1020,193 @@ async fn jobs_claim(
     .map_err(|error| internal("agent_port.jobs_claim", error))?;
 
     Ok(json!({"jobs": outcome?}))
+}
+
+// ---------------------------------------------------------------------------
+// oort_job_start (#3831, ADR-0162 증보 4)
+// ---------------------------------------------------------------------------
+
+/// The step name of the start report when the caller names none. Plain text under
+/// the same character rule as any `stage` (it is validated like one in tests).
+const DEFAULT_START_STAGE: &str = "시작: 요청 확인";
+
+/// Claim one job, send its start report and read the recent conversation, in ONE
+/// transaction — the round trips between "the inbox shows a job" and "the
+/// person's screen says it started" were the dominant cost of a hosted turn
+/// (#3830 measured 39.6 s + 86 s of model turns for what are three mechanical
+/// calls).
+///
+/// Nothing here is a new authority; every part is an existing tool's own check,
+/// re-proved inside this transaction:
+///
+/// * the claim is `oort_jobs_claim`'s (`agent:jobs:read`, the live approved
+///   channel set, hosted connection), with `limit` fixed at 1;
+/// * the start report is `oort_run_event`'s (`agent:runs:callback`, the lease
+///   check, the terminal and approval-hold refusals) — a token without that
+///   scope is refused BEFORE anything is claimed, so a half-started job never
+///   exists;
+/// * the conversation is `oort_conversation_read`'s gate verbatim
+///   ([`job_conversation`]: `messages:read`, approved channel, membership). When it
+///   does not hold the key is absent and the job is still delivered.
+///
+/// **Idempotent.** The start report's event id is derived from the lease, so a
+/// replay is one marker and one step (the existing `eventId` retry path). A caller
+/// that already holds the job passes its `leaseHandle`: the same handle check
+/// every lease verb makes, then the same job, report and conversation come back
+/// with no second `claimed` row.
+async fn job_start(
+    state: &AppState,
+    caller: HostedCaller,
+    arguments_value: &Value,
+) -> Result<Value, ToolFailure> {
+    let args = arguments(arguments_value)?;
+    let raw_handle = optional_str(args, "leaseHandle", 512)?
+        .filter(|raw| !raw.is_empty())
+        .map(str::to_string);
+    // Judged before anything is claimed: a bad step name must not leave a leased
+    // job behind with no start report.
+    let stage = match optional_str(args, "stage", momo_mcp::MAX_STAGE_BYTES as usize)? {
+        Some(raw) => validated_gateway_stage(raw).map_err(|_| ToolFailure::InvalidArguments)?,
+        None => DEFAULT_START_STAGE.to_string(),
+    };
+    let secret = state.agent_port.envelope_secret().to_string();
+    let lease_seconds = state.agent_port.config.hosted_lease_seconds;
+
+    let outcome = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
+        Box::pin(async move {
+            let identity =
+                match authorize_in_tx(conn, caller, momo_auth::SCOPE_AGENT_JOBS_READ).await? {
+                    Ok(identity) => identity,
+                    Err(failure) => return Ok(Err(failure)),
+                };
+            if !has_scope(&identity, momo_auth::SCOPE_AGENT_RUNS_CALLBACK) {
+                return Ok(Err(ToolFailure::NotAuthorized));
+            }
+            let resumed = raw_handle.is_some();
+            let job = match raw_handle.as_deref() {
+                Some(raw) => {
+                    let handle = match bound_handle(&identity, caller, raw, &secret) {
+                        Ok(handle) => handle,
+                        Err(failure) => return Ok(Err(failure)),
+                    };
+                    match momo_outbox::read_hosted_leased_job_in_tx(
+                        conn,
+                        caller.workspace_id,
+                        caller.agent_member_id,
+                        GatewayLeaseBinding {
+                            job_id: handle.job_id,
+                            lease_id: handle.lease_id,
+                        },
+                    )
+                    .await
+                    .map_err(DbError::from)?
+                    {
+                        Some(job) => job,
+                        // A lease someone else now holds, or a job already settled.
+                        None => return Ok(Err(ToolFailure::Conflict)),
+                    }
+                }
+                None => {
+                    let claimed = momo_outbox::claim_hosted_gateway_jobs_in_tx(
+                        conn,
+                        caller.workspace_id,
+                        caller.agent_member_id,
+                        identity.connection_id,
+                        1,
+                        lease_seconds,
+                    )
+                    .await
+                    .map_err(DbError::from)?;
+                    match claimed.into_iter().next() {
+                        Some(job) => job,
+                        None => {
+                            return Ok(Ok(json!({"job": null, "started": false, "resumed": false})))
+                        }
+                    }
+                }
+            };
+            // The same defence-in-depth the claim has: the hosted claim already
+            // required both ids to be well-formed, so this is unreachable.
+            let (Ok(run_id), Some(job_channel)) = (
+                Uuid::parse_str(job.run_id_field()),
+                job_channel_id(&job.payload),
+            ) else {
+                return Ok(Err(ToolFailure::Unavailable));
+            };
+            let lease = GatewayLeaseBinding {
+                job_id: job.id,
+                lease_id: job.lease_id,
+            };
+            let handle = encode_lease_handle(
+                LeaseHandle {
+                    workspace_id: caller.workspace_id,
+                    agent_member_id: caller.agent_member_id,
+                    connection_id: identity.connection_id,
+                    channel_id: job_channel,
+                    run_id,
+                    job_id: job.id,
+                    lease_id: job.lease_id,
+                },
+                &secret,
+            )
+            .map_err(|_| {
+                DbError::Sqlx(momo_db::sqlx::Error::Protocol(
+                    "lease handle issuance failed".into(),
+                ))
+            })?;
+            if !resumed {
+                momo_agent::append_run_event_in_tx(
+                    conn,
+                    caller.workspace_id,
+                    run_id,
+                    momo_agent::AppendedRunEvent::Claimed,
+                    caller.agent_member_id,
+                )
+                .await?;
+            }
+            // The start report: `oort_run_event`'s own transaction body. Keyed on
+            // the lease, so it is one report per lease however often this is
+            // called. A refusal (a parked or settled run) does not take the job
+            // back — the caller learns `started: false` and can act on the lease.
+            let started = record_gateway_event_in_tx(
+                conn,
+                caller.workspace_id,
+                GatewayEventInput {
+                    run_id,
+                    lease,
+                    status: "running",
+                    detail: None,
+                    text_delta: None,
+                    stage: Some(stage),
+                    event_id: Uuid::new_v5(&job.lease_id, b"oort_job_start"),
+                    actor_member_id: Some(caller.agent_member_id),
+                    via_token_id: Some(caller.token_id),
+                    hosted_lease: true,
+                },
+            )
+            .await?
+            .is_ok();
+            let conversation = job_conversation(conn, caller, &identity, job_channel).await?;
+            let mut answer = json!({
+                "job": {
+                    "leaseHandle": handle,
+                    "createdAtMs": crate::routes::shared::epoch_ms(job.created_at),
+                    "leaseExpiresAtMs": crate::routes::shared::epoch_ms(job.lease_expires_at),
+                    "work": projected_job_payload(&job.payload),
+                },
+                "started": started,
+                "resumed": resumed,
+            });
+            if let Some(conversation) = conversation {
+                answer["conversation"] = conversation;
+            }
+            Ok(Ok(answer))
+        })
+    })
+    .await
+    .map_err(|error| internal("agent_port.job_start", error))?;
+
+    outcome
 }
 
 // ---------------------------------------------------------------------------
