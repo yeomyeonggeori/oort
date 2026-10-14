@@ -1039,6 +1039,15 @@ async fn the_owner_switch_turns_the_wake_off() {
     assert_eq!(status, 200, "{body}");
     human_says(&client, &base, &f, f.channel, Some(root), "하나 더요").await;
     assert_eq!(wake_runs(&su, &f, f.managed).await, 1, "⑬ on again → wakes");
+
+    // The hosted (Grok-style) agent is the case the decision was about: its
+    // owner can switch it off through the same PUT (no hosted 409 on it).
+    let (status, body) = put_wake(&client, &base, &f, &f.human_jwt, f.hosted, false).await;
+    assert_eq!(status, 200, "{body}");
+    let hosted_root = hosted_posts(&client, &base, &f, None, "PR 올렸어요").await;
+    human_says(&client, &base, &f, f.channel, Some(hosted_root), "봤어요").await;
+    assert_eq!(wake_runs(&su, &f, f.hosted).await, 0, "⑬ hosted, off → 0");
+    assert_eq!(jobs_of(&su, &f, f.hosted).await, 0);
 }
 
 // ---------------------------------------------------------------------------
