@@ -75,6 +75,11 @@ pub const TOOL_INBOX_READ: &str = "oort_inbox_read";
 pub const TOOL_CONVERSATION_READ: &str = "oort_conversation_read";
 pub const TOOL_MESSAGE_POST: &str = "oort_message_post";
 pub const TOOL_JOBS_CLAIM: &str = "oort_jobs_claim";
+/// ADR-0162 증보 4 (#3831, 성재 결재 「둘 다 (추천)」 2026-10-14) — claim one job, send the
+/// start report and read the recent conversation in ONE call. Opened by `agent:jobs:read`
+/// like the claim; the start report additionally needs `agent:runs:callback` and the
+/// conversation additionally needs `messages:read` (both re-proved inside the call).
+pub const TOOL_JOB_START: &str = "oort_job_start";
 pub const TOOL_JOB_RENEW: &str = "oort_job_renew";
 pub const TOOL_JOB_RELEASE: &str = "oort_job_release";
 pub const TOOL_RUN_EVENT: &str = "oort_run_event";
@@ -220,6 +225,20 @@ fn jobs_claim_schema() -> Value {
         "additionalProperties": false,
         "properties": {
             "limit": nullable(integer(1, 100))
+        }
+    })
+}
+
+fn job_start_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            // Re-entry: the handle of a job this agent already holds. Without it the call
+            // claims the next pending job.
+            "leaseHandle": nullable(required_text(512)),
+            // The start report's step name; same character rule as oort_run_event.stage.
+            "stage": nullable(text(MAX_STAGE_BYTES))
         }
     })
 }
@@ -688,7 +707,7 @@ fn card_suggest_schema() -> Value {
 
 /// The complete catalog. Order is the `tools/list` order and is stable so a
 /// client diffing two listings sees only real capability changes.
-pub const TOOL_CATALOG: [ToolDescriptor; 12] = [
+pub const TOOL_CATALOG: [ToolDescriptor; 13] = [
     ToolDescriptor {
         name: TOOL_INBOX_READ,
         title: "Read the hosted inbox",
@@ -717,6 +736,22 @@ pub const TOOL_CATALOG: [ToolDescriptor; 12] = [
         description: "Claim pending work for this agent, each with an opaque lease handle.",
         required_scope: SCOPE_JOBS_READ,
         schema: jobs_claim_schema,
+    },
+    ToolDescriptor {
+        name: TOOL_JOB_START,
+        title: "Start the next job",
+        description: "Claim the next pending job, send its start report and read the recent \
+                      conversation in one call. This is the fast path: call it once right after \
+                      oort_inbox_read shows an agent_job, then work. The answer has job \
+                      (leaseHandle, work with the request in work.prompt), started, and \
+                      conversation (the latest messages of that channel; absent if you may not \
+                      read it). Calling it again with the leaseHandle you already hold returns \
+                      the same job without a second start report. job is null when nothing \
+                      is pending. Optional stage names the first step (plain text, like \
+                      oort_run_event.stage; default \"시작: 요청 확인\"). Needs agent:jobs:read and \
+                      agent:runs:callback; the conversation part needs messages:read.",
+        required_scope: SCOPE_JOBS_READ,
+        schema: job_start_schema,
     },
     ToolDescriptor {
         name: TOOL_JOB_RENEW,
@@ -824,6 +859,7 @@ impl ToolCapability {
             TOOL_CONVERSATION_READ,
             TOOL_MESSAGE_POST,
             TOOL_JOBS_CLAIM,
+            TOOL_JOB_START,
             TOOL_JOB_RENEW,
             TOOL_JOB_RELEASE,
             TOOL_RUN_EVENT,
@@ -1161,8 +1197,34 @@ mod tests {
         values.iter().map(|value| value.to_string()).collect()
     }
 
+    /// #3831 — `oort_job_start` is opened by the claim's own scope and adds no
+    /// scope of its own: the start report (`agent:runs:callback`) and the
+    /// conversation (`messages:read`) are re-proved inside the call, so no
+    /// descriptor names a scope the catalog did not already have.
     #[test]
-    fn the_catalog_is_exactly_the_twelve_named_tools() {
+    fn the_job_start_tool_is_opened_by_the_claim_scope_alone() {
+        let start = TOOL_CATALOG
+            .iter()
+            .find(|tool| tool.name == TOOL_JOB_START)
+            .expect("oort_job_start is in the catalog");
+        let claim = TOOL_CATALOG
+            .iter()
+            .find(|tool| tool.name == TOOL_JOBS_CLAIM)
+            .expect("oort_jobs_claim is in the catalog");
+        assert_eq!(start.required_scope, claim.required_scope);
+        let jobs_only = scopes(&[SCOPE_PORT_CONNECT, SCOPE_JOBS_READ]);
+        let view = ToolView::intersect(&jobs_only, &jobs_only, ToolCapability::FULL);
+        assert!(view.callable(TOOL_JOB_START).is_some());
+        assert!(validate_arguments(start, &json!({})).is_ok());
+        assert!(
+            validate_arguments(start, &json!({"stage": "시작: 읽기", "leaseHandle": null})).is_ok()
+        );
+        assert!(validate_arguments(start, &json!({"channelId": "x"})).is_err());
+        assert!(validate_arguments(start, &json!({"limit": 5})).is_err());
+    }
+
+    #[test]
+    fn the_catalog_is_exactly_the_thirteen_named_tools() {
         assert_eq!(
             TOOL_CATALOG.iter().map(|t| t.name).collect::<Vec<_>>(),
             vec![
@@ -1170,6 +1232,7 @@ mod tests {
                 "oort_conversation_read",
                 "oort_message_post",
                 "oort_jobs_claim",
+                "oort_job_start",
                 "oort_job_renew",
                 "oort_job_release",
                 "oort_run_event",
@@ -1207,12 +1270,13 @@ mod tests {
             SCOPE_WORKSPACE_PROPOSE,
         ]);
         let view = ToolView::intersect(&all, &all, ToolCapability::FULL);
-        assert_eq!(view.names().len(), 12);
+        assert_eq!(view.names().len(), 13);
         for (name, scope) in [
             (TOOL_INBOX_READ, SCOPE_INBOX_READ),
             (TOOL_CONVERSATION_READ, SCOPE_MESSAGES_READ),
             (TOOL_MESSAGE_POST, SCOPE_MESSAGES_WRITE),
             (TOOL_JOBS_CLAIM, SCOPE_JOBS_READ),
+            (TOOL_JOB_START, SCOPE_JOBS_READ),
             (TOOL_JOB_RENEW, SCOPE_JOBS_READ),
             (TOOL_JOB_RELEASE, SCOPE_JOBS_READ),
             (TOOL_RUN_EVENT, SCOPE_RUNS_CALLBACK),

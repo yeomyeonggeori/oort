@@ -5,6 +5,7 @@
 - 증보: **증보 2 — hosted 1:1 DM 승인 (2026-09-27, #2915) · Accepted (성재 결재 「권장대로」 2026-09-27).** 소유자↔자기 에이전트 1:1 DM은 자동 승인, 다른 멤버↔에이전트 1:1 DM은 에이전트 소유자가 DM 단위로 승인한다. 파일 끝 「증보 2」 절.
 - 증보: **증보 3 — 호스티드 에이전트 작업 추적 (2026-10-05, #3514 AT-1) · Accepted (성재 결재 「이대로 진행」 2026-10-05).** 외부 VM에서 일하는 호스팅 에이전트의 작업 요청·진행 표식·결과 산출물·팀 보드·끝남 푸시를 기존 `agent_run`/`agent_job`·Agent Port 도구의 확장으로 정한다. 새 저장소·터미널 보기 없음. 파일 끝 「증보 3」 절.
 - 증보: **증보 3 부록 A — 호스티드 lease 길이와 암묵 갱신 (2026-10-06, #3530 AT-8) · Accepted (성재 AT 계획 결재 「이대로 진행」 2026-10-05의 구현 세부).** 호스티드 claim·renew만 분 단위 lease를 쓰고, 만료됐어도 아무도 재클레임하지 않았다면 같은 핸들의 보고·완료를 받는다. 파일 끝 「증보 3 부록 A」 절.
+- 증보: **증보 4 — 호스팅 에이전트 왕복 줄이기: `oort_job_start` 합성 도구 (2026-10-14, #3831) · Accepted (성재 결재 「둘 다 (추천)」 2026-10-14, 선택지: 그록봇 도구를 합쳐 왕복을 줄여요(40~70초 단축, 기존 결정 문서 보강)).** `oort_job_start` 하나로 claim·시작 보고·최근 대화를 받고, `oort_jobs_claim`에 같은 게이트의 최근 대화를 싣는다. 새 scope·테이블·마이그레이션 없음. 파일 끝 「증보 4」 절.
 - 관련: ADR-0100(결정 거버넌스), ADR-0101(에이전트 신원·bearer), ADR-0102(worker/gateway 실행 경로), ADR-0130(외부 에이전트 fabric·ACP), ADR-0145(Rust/Axum), ADR-0150(대화 반출 경계)
 - 리서치: `docs/planning/research/2026-08-12-grok-bot-integration-feasibility.md`, `docs/planning/research/2026-08-12-grok-bot-reverse-teammate-direction.md`, `docs/planning/research/2026-08-12-external-agent-reception-audit.md`
 - 제품 문장: **Bring your hosted agent.** Grok Bot은 첫 setup preset이자 실증 클라이언트이며, 코어 계약은 벤더 중립이다.
@@ -532,3 +533,23 @@ D13·D14를 구현하면서 정한 세부다. 계약을 바꾸지 않고, 실측
 **열지 않는 것.** 새 컬럼·테이블·마이그레이션 없음(기존 lease 열만 쓴다). lease를 늘려도 연결 해제·채널 승인 축소·`agent_run` 취소는 즉시 유효하다(핸들 검증이 매번 연결·채널을 다시 읽는다). 관리형 에이전트와 BYOA gateway의 lease 의미는 바꾸지 않는다.
 
 **수용기준(시험, 되돌리면 실패).** ① 호스티드 claim의 lease가 약 30분이고 renew도 TTL까지 늘린다(30초로 되돌리면 실패), ② 만료됐지만 재클레임 없는 핸들로 run_event·run_complete가 200이고 job이 `done`(활성 요구로 되돌리면 실패), ③ 재클레임 뒤 옛 핸들의 renew·event·complete는 모두 409(소유자 비교를 빼면 실패), ④ 관리형 claim은 30초이고 만료된 관리형 lease의 renew·complete는 409, ⑤ TTL 안(예: 5분 지남)에는 두 번째 claim이 job을 못 가져간다, ⑥ 5~120분 경계 단위 시험.
+
+## 증보 4 — 호스팅 에이전트 왕복 줄이기: `oort_job_start` (Accepted · 성재 결재 「둘 다 (추천)」 2026-10-14 · #3831)
+
+> **결재 인용(원문).** 「둘 다 (추천)」 (2026-10-14, 선택지: 그록봇 도구를 합쳐 왕복을 줄여요(40~70초 단축, 기존 결정 문서 보강)). 이 증보는 그 선택지 중 **도구를 합치는 쪽(O2·O4·O3 점검)** 의 기록이다. 서버 팀 AI 즉시 처리(O1)는 별도 이슈·새 ADR이다.
+> 이 증보는 공개 도구 표면(도구 하나 추가, 응답 필드 하나 추가)을 바꾸므로 ADR-0100에 따라 이 Accepted 기록이 구현 PR의 머지 조건이다.
+
+**문제(#3830 계측).** 호스팅 에이전트의 한 턴 405.8초 중 `oort_inbox_read`→`oort_jobs_claim` 39.6초, claim→시작 보고 86초는 도구가 아니라 **모델 턴 사이의 간격**이다. 기계적으로 이어지는 호출(claim → 시작 보고 → 대화 읽기)마다 모델 턴이 한 번씩 끼는 것이 비용이다. 성재 기준은 「간단한 작업은 1분 안에」다.
+
+| # | 결정 | 근거 |
+|---|---|---|
+| J1 | **`oort_job_start`(신규 도구).** 한 트랜잭션에서 ① 다음 job 하나를 claim(`oort_jobs_claim`의 호스티드 claim, `limit`=1), ② 시작 보고(`oort_run_event` `status=running` + `stage`), ③ 그 채널의 최근 대화를 돌려준다. 입력은 `leaseHandle`(재진입)과 `stage`(시작 단계 이름, 기본 「시작: 요청 확인」) 둘뿐이고 둘 다 선택이다. 응답: `{job:{leaseHandle,createdAtMs,leaseExpiresAtMs,work}|null, started, resumed, conversation?}`. | 왕복 두 번(claim, 시작 보고)과 대화 읽기 한 번을 모델 턴 없이 한 호출로 줄인다. 각 부분은 기존 도구의 같은 함수를 부르므로 새 쓰기 경로가 없다. |
+| J2 | **새 권한 없음.** 도구는 `agent:jobs:read`(claim의 scope)로 열린다. 호출 안에서 두 번째로 `agent:runs:callback`을 양쪽(승인·토큰)에서 다시 증명하고, 없으면 **claim 전에** `NotAuthorized`로 거절한다(반쯤 시작된 job이 생기지 않는다). 잘못된 `stage`도 claim 전에 `InvalidArguments`다. | 시작 보고는 `oort_run_event`의 권한이므로 같은 권한이 있어야 한다. 권한 없는 합성 호출이 더 넓은 문이 되지 않는다. |
+| J3 | **대화 노출 = `oort_conversation_read`와 같은 게이트, 코드도 한 벌.** `messages:read`(양쪽 교집합) + 사람이 승인한 채널 + 에이전트의 채널 멤버십. 하나라도 어긋나면 `conversation` 키가 **없다**(job은 그대로 전달). 게이트는 `gated_channel_page` 한 함수이고 `oort_conversation_read`·`oort_job_start`·`oort_jobs_claim`이 모두 그것을 부른다. | 합성 도구가 대화를 더 넓게 열면 그것이 곧 권한 상승이다. 한 함수로 두어야 두 곳이 어긋나지 않는다. |
+| J4 | **멱등.** 시작 보고의 event id는 lease id에서 결정적으로 만든다(UUIDv5). 이미 가진 job은 `leaseHandle`을 주어 재진입한다: 기존 핸들 검증(`bound_handle`) → 같은 job·같은 대화 → 두 번째 `claimed` 행·단계·lease 없음, `resumed:true`. 핸들 없는 두 번째 호출은 새 job이 없으면 `job:null`이다. 다른 에이전트의 핸들·끝난 job의 핸들은 거절·409다. | 모델이 재시도해도 한 lease에 시작 보고가 한 번이다. |
+| J5 | **`oort_jobs_claim`에 최근 대화(O4).** 각 job에 J3과 같은 게이트의 `conversation`(`oort_conversation_read`와 같은 모양, 최신 `CONTEXT_WINDOW_DEFAULT`=30행)을 싣는다. 한 호출에서 앞의 5개 job에만 붙인다(claim 한도는 100이고 100×30행은 응답이 아니다). 합성 도구의 메시지 본문은 2 000자에서 잘라 `bodyTruncated:true`로 표시한다(`oort_conversation_read`는 그대로 전체를 준다) — 응답 상한이 30행×2 000자(×5 job)로 닫힌다. 기존 `work.recentMessages`는 job을 큐에 넣을 때 찍은 **스냅샷**이고 `messages:read`와 무관하게 전달되던 기존 동작이라 그대로 둔다. | 행 수는 기존 한도(30)를 재사용한다. |
+| J6 | **`oort_inbox_read`의 job 본문(O3) — 확인 결과: 넣지 않는다.** `oort_inbox_read`는 `agent:inbox:read`만 요구하는 순수 읽기이고 이벤트에는 id만 있다(ADR-0200). 본문을 넣으면 `messages:read` 없이 메시지 내용이 나가므로 「새 권한 없음」과 충돌한다. job 본문(`work.prompt`)은 `oort_job_start` 응답이 준다. | 왕복 비용은 inbox→start 한 번으로 이미 줄었고, inbox 본문은 그 위에 더하는 이득이 없다. 결재 문구의 「없으면 포함」 조건은 이 판단으로 닫는다. |
+
+**열지 않는 것.** 새 scope·컬럼·테이블·마이그레이션 없음. 시작 보고가 거절돼도(멈춘·끝난 run) claim은 되돌리지 않고 `started:false`로 알린다. 서버 측 즉시 처리(O1)·도어벨 계약은 바꾸지 않는다. 도구 수는 12 → 13.
+
+**수용기준(시험, 되돌리면 실패).** ① 한 호출로 `claimed`·`started`·`stage` 원장 행이 각 하나씩 생기고 대화가 돌아온다, ② 핸들 재진입·빈 재호출은 원장·단계·lease를 늘리지 않는다, ③ `messages:read` 없음·채널 이탈이면 `oort_job_start`와 `oort_jobs_claim` 모두 `conversation`이 없고 job은 전달된다(게이트의 멤버십·scope 검사를 빼면 실패), ④ `agent:runs:callback`이 없거나 `stage`가 잘못되면 아무것도 claim되지 않는다, ⑤ claim의 대화는 30행에서 멈추고 긴 본문은 2 000자에서 잘린다.
