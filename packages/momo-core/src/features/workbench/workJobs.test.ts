@@ -167,6 +167,7 @@ describe("줄 모델 (ADR-0202 D1)", () => {
     expect(job.finished).toBe(true);
     expect(job.duration?.kind).toBe("worked");
     expect(job.duration?.label).toBe("10분 동안 작업");
+    expect(job.durationText).toBe("10분 동안 작업");
     expect(job.pr?.number).toBe("PR #12");
     expect(reportedSummary(job.reported)).toBe("PR을 열었어요 · 테스트 통과 12 · 안 돌림 2 · 머지해도 된대요");
   });
@@ -176,7 +177,13 @@ describe("줄 모델 (ADR-0202 D1)", () => {
     expect(requesterToAgent(job)).toBe("김민지 → claude");
     expect(job.agentIsMember).toBe(false);
     expect(job.duration?.kind).toBe("clock");
+    expect(job.durationText).toBe("3분째");
     expect(job.reported).toBeNull();
+  });
+
+  it("막 시작한 일은 시계 눈금이 아니라 「방금 시작」", () => {
+    const job = workJobRow(row(wireSession({ startedAtMs: NOW - 20_000 })), NOW);
+    expect(job.durationText).toBe("방금 시작");
   });
 
   it("맡긴 사람 기록이 없는 옛 run은 에이전트 이름만", () => {
@@ -206,6 +213,12 @@ describe("줄 모델 (ADR-0202 D1)", () => {
   it("「지금 진행 n」은 다음 쪽이 남으면 n+", () => {
     expect(inProgressLabel(3, false)).toBe("지금 진행 3");
     expect(inProgressLabel(3, true)).toBe("지금 진행 3+");
+  });
+
+  it("테스트 수가 모두 0이면 줄 요약에서 테스트를 말하지 않는다", () => {
+    expect(
+      reportedSummary({ resultKind: "no_change", tests: { passed: 0, failed: 0, notRun: 0 }, nextAction: "none", commitSha: null, toolCounts: null })
+    ).toBe("바꾼 것이 없어요");
   });
 
   it("VM 안 개수는 닫힌 범주 순서로 말한다", () => {

@@ -316,7 +316,7 @@ describe('홈 「모두 보기」 (ADR-0202 D6)', () => {
     expect(open).toHaveBeenCalledTimes(1);
   });
 
-  it('작업 표면이 없으면(셸이 넘기지 않으면) 문이 서지 않는다', async () => {
+  it('셸 밖(하네스)에서 넘기지 않으면 문이 서지 않는다', async () => {
     installFetch();
     renderHome(undefined);
     await waitFor(() => expect(screen.getByText('agent-lab')).toBeTruthy());
@@ -330,6 +330,9 @@ describe('셸 배선 (소스)', () => {
     expect(shell.length).toBeGreaterThan(1000);
     expect(shell).toMatch(/<WorkJobsScreen\b/);
     expect(shell).not.toMatch(/<TeamBoardScreen\b/);
-    expect(shell).toMatch(/onOpenWorkList=\{workConsole \? onOpenWorkList : undefined\}/);
+    // 호스트 유무로 접지 않는다(ADR-0202 D3: 호스팅 에이전트의 일은 호스트 없이 생긴다).
+    expect(shell).toMatch(/onOpenWorkList=\{onOpenWorkList\}/);
+    expect(shell).not.toMatch(/onOpenWorkList=\{workConsole/);
+    expect(shell).not.toMatch(/has\('workList'\) && workConsole/);
   });
 });

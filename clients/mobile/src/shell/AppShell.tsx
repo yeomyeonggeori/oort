@@ -273,17 +273,19 @@ export function Shell({
         setAi(true);
       },
     });
-    if (workConsole) {
-      items.push({
-        key: 'work',
-        icon: 'work',
-        label: '작업',
-        hint: '에이전트에게 맡긴 일과 결과를 봐요.',
-        onPress: () => dispatch({type: 'openWorkList'}),
-      });
-    }
+    // ADR-0202 D3·D6 (#3842): 「작업」은 어느 에이전트에게든 맡긴 일의 결과 화면이다. 호스팅
+    // 에이전트(그록봇)·팀 AI의 일은 코드 실행 호스트 없이도 생기므로, 이 문은 더 이상 호스트
+    // 유무(`workConsoleAvailable`)로 접지 않는다(웹 사이드바 「작업」 줄과 같다). 호스트가
+    // 필요한 것은 세션 상세(`openWorkSession`)뿐이고 그 문은 아래에서 그대로 접힌다.
+    items.push({
+      key: 'work',
+      icon: 'work',
+      label: '작업',
+      hint: '에이전트에게 맡긴 일과 결과를 봐요.',
+      onPress: () => dispatch({type: 'openWorkList'}),
+    });
     return items;
-  }, [canCreateChannel, workConsole]);
+  }, [canCreateChannel]);
   // 셸 위에 층이 하나라도 서 있는가. 크롬은 그 밑에 그려지고(트리 순서), 보조기술
   // 에서도 숨는다(`ShellChrome` 의 `coveredProps`).
   const covered =
@@ -318,7 +320,7 @@ export function Shell({
               onOpenConversation={onOpenConversation}
               onOpenSearch={onOpenSearch}
               onOpenAgentList={onOpenAgentList}
-              onOpenWorkList={workConsole ? onOpenWorkList : undefined}
+              onOpenWorkList={onOpenWorkList}
               notificationNotice={tapRouting.notice}
               onDismissNotificationNotice={tapRouting.dismissNotice}
             />
@@ -368,7 +370,7 @@ export function Shell({
 
       {/* 탭이던 두 층 (ADR-0189 D1). + 메뉴가 열고, 한 번 열린 뒤로는 닫혀도
           마운트된 채 남는다 — 탭일 때와 같은 이유(스크롤 자리)로. */}
-      {visited.current.has('workList') && workConsole ? (
+      {visited.current.has('workList') ? (
         <EdgeSwipeBack
           accessibilityViewIsModal={nav.workList && nav.workSession === null}
           style={[styles.overlay, !nav.workList && styles.hidden]}
@@ -379,7 +381,7 @@ export function Shell({
           <WorkJobsScreen
             active={nav.workList && nav.workSession === null}
             onOpenConversation={onOpenConversation}
-            onOpenAgentSession={onOpenWorkSession}
+            onOpenAgentSession={workConsole ? onOpenWorkSession : undefined}
             onBack={onBack}
           />
         </EdgeSwipeBack>
@@ -490,7 +492,7 @@ export function Shell({
             onOpenAgent={onOpenAgent}
             onDelegateWork={onDelegateWork}
             onOpenWorkSession={workConsole ? onOpenWorkSession : undefined}
-            onOpenWorkList={workConsole ? onOpenWorkList : undefined}
+            onOpenWorkList={onOpenWorkList}
           />
         </EdgeSwipeBack>
       ) : null}
@@ -536,15 +538,13 @@ export function Shell({
           onOpenSession={sessionId => {
             if (workConsole) dispatch({type: 'openWorkSession', workSession: {sessionId}});
           }}
-          onOpenWorkList={() => {
-            if (workConsole) dispatch({type: 'openWorkList'});
-          }}
+          onOpenWorkList={() => dispatch({type: 'openWorkList'})}
         />
       ) : null}
       {delegate !== null ? (
         <DelegateWorkSheet
           prefill={delegate}
-          boardAvailable={workConsole}
+          boardAvailable
           onClose={closeDelegate}
           // 접수되면 작업 보드로 간다. 보드는 닫혀 있던 사람에게도 한 번에 보이도록 층을
           // 새로 연다(`openWorkList`는 열린 대화·에이전트 층을 걷는다).

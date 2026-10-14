@@ -462,9 +462,7 @@ function JobRow({
           <StateChip item={row.item} />
         </span>
         <span className="text-meta text-ink-muted" data-col="duration" data-testid="work-job-duration">
-          {row.duration === null ? "" : (
-            <span data-numeric={row.duration.numeric ? "" : undefined}>{row.duration.label}</span>
-          )}
+          {row.durationText ?? ""}
         </span>
         <span className="truncate text-meta text-ink-muted" data-col="channel">
           {row.channel}

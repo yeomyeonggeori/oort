@@ -353,7 +353,7 @@ function JobRow({
   const who = requesterToAgent(row);
   const result =
     reported ?? row.pr?.number ?? (row.finished ? null : WORK_JOBS_COPY.noResultYet);
-  const meta = [row.duration?.label ?? null, row.channel].filter(
+  const meta = [row.durationText, row.channel].filter(
     (part): part is string => part !== null && part !== '',
   );
   return (

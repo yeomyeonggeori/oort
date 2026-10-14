@@ -6,6 +6,7 @@ import type {
   SharedWorkSession,
   WorkJobsMode,
 } from "../../lib/api";
+import { elapsedSpan } from "../agents/runPhase";
 import {
   sessionElapsedReadout,
   type SessionElapsedReadout,
@@ -117,7 +118,14 @@ export interface WorkJobRow {
   /** 서버가 phase를 실은 run이 승인을 기다리는가(새 서버만, ADR-0202 D1). */
   awaitingApproval: boolean;
   statusLabel: string;
+  /** 공용 경과 판정(`sessionElapsedReadout`): 끝난 시각이 있으면 성과, 없으면 시계. */
   duration: SessionElapsedReadout | null;
+  /**
+   * 걸린 시간 칸의 말. 끝났으면 「25분 동안 작업」(공용 `sessionElapsedReadout`), 도는 중이면
+   * 「12분째」(공용 `elapsedSpan`, 1분 미만은 「방금 시작」). 시계 눈금(「4m 00s」)은 쓰지 않는다:
+   * 목록은 실시간 진행판이 아니다(ADR-0202 D1).
+   */
+  durationText: string | null;
   pr: { number: string; repo: string; href: string } | null;
   reported: AgentReportedResult | null;
   channel: string;
@@ -133,6 +141,10 @@ export function workJobRow(item: SharedWorkSession, nowMs: number): WorkJobRow {
     : { memberId: item.owner.memberId, displayName: item.owner.displayName };
   const finished = isFinishedState(item.state);
   const awaitingApproval = isAwaitingApproval(item);
+  const duration = sessionElapsedReadout(
+    { startedAtMs: item.startedAtMs > 0 ? item.startedAtMs : null, endedAtMs: item.endedAtMs },
+    nowMs
+  );
   return {
     id: item.sessionId,
     item,
@@ -143,15 +155,24 @@ export function workJobRow(item: SharedWorkSession, nowMs: number): WorkJobRow {
     finished,
     awaitingApproval,
     statusLabel: stateChipLabel(item),
-    duration: sessionElapsedReadout(
-      { startedAtMs: item.startedAtMs > 0 ? item.startedAtMs : null, endedAtMs: item.endedAtMs },
-      nowMs
-    ),
+    duration,
+    durationText: durationTextOf(duration, item.startedAtMs, nowMs),
     pr: prFacts(item.prUrl),
     reported: item.agentReported ?? null,
     channel: channelLabel(item),
     channelId: item.homeChannel.id,
   };
+}
+
+function durationTextOf(
+  duration: SessionElapsedReadout | null,
+  startedAtMs: number,
+  nowMs: number
+): string | null {
+  if (duration === null) return null;
+  if (duration.kind === "worked") return duration.label;
+  const span = elapsedSpan(startedAtMs, nowMs);
+  return span === undefined ? "방금 시작" : `${span}째`;
 }
 
 /** 「곽성재 → 그록봇」. 맡긴 사람 기록이 없으면 에이전트만. */
@@ -260,7 +281,10 @@ export function reportedSummary(reported: AgentReportedResult | null): string | 
   if (reported === null) return null;
   const parts: string[] = [];
   if (reported.resultKind !== null) parts.push(RESULT_KIND_TEXT[reported.resultKind]);
-  if (reported.tests !== null) parts.push(testsText(reported.tests));
+  // 세 수가 모두 0이면 「테스트 통과 0」은 아무것도 말하지 않는다: 줄에서는 뺀다(서랍은 그대로 말한다).
+  if (reported.tests !== null && reported.tests.passed + reported.tests.failed + reported.tests.notRun > 0) {
+    parts.push(testsText(reported.tests));
+  }
   if (reported.nextAction !== null) {
     const next = NEXT_ACTION_TEXT[reported.nextAction];
     if (next !== null) parts.push(next);
