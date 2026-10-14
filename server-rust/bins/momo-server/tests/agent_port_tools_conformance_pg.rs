@@ -739,7 +739,7 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
         list_tools(&client, &base, &fixture.hosted_bearer)
             .await
             .len(),
-        12,
+        13,
         "a foundation request proves the binding and re-activates it"
     );
     let reactivated: String = sqlx::query_scalar(
