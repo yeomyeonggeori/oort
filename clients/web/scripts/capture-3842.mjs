@@ -63,7 +63,13 @@ const teamRows = [
   { ...runBase, runId: ids(5), requestedBy: other, label: "릴리스 노트 초안 쓰기", status: "failed", state: "failed", phase: "failed", trigger: "work", startedAtMs: NOW - 95 * 60_000, endedAtMs: NOW - 80 * 60_000, branch: null, stepCount: 1, prUrl: null, lastActivityAt: sec - 4800, sessionId: undefined },
 ];
 // 옛 서버: include=runs면 호스팅 run 줄(새 필드 없음)까지, 아니면 세션 줄만.
-const legacyRows = teamRows.map(({ phase: _p, trigger: _t, agentReported: _a, ...rest }) => rest);
+const legacyRows = teamRows.map((row) => {
+  const rest = { ...row };
+  delete rest.phase;
+  delete rest.trigger;
+  delete rest.agentReported;
+  return rest;
+});
 
 const failures = [];
 function check(name, ok, detail) {
