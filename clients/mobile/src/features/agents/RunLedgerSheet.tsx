@@ -280,7 +280,7 @@ const buildStyles = (color: Palette) =>
     stateLine: {flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: space.sm},
     chip: {
       paddingHorizontal: space.sm,
-      paddingVertical: 2,
+      paddingVertical: space.xs,
       borderRadius: ds2Radius.badge,
       borderWidth: 1,
       borderColor: color.border,
@@ -310,7 +310,7 @@ const buildStyles = (color: Palette) =>
     rows: {paddingHorizontal: SAFE_GUTTER},
     row: {
       paddingVertical: space.sm,
-      gap: 2,
+      gap: space.xs,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: color.border,
     },

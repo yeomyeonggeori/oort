@@ -11,7 +11,7 @@ import {useQuery} from '@tanstack/react-query';
 import React, {useEffect, useMemo, useState} from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {useStyles} from '../../design/theme';
-import {font, line, radius, space, type Palette} from '../../design/tokens';
+import {font, line, radius, slopTo, space, type Palette} from '../../design/tokens';
 import {useSession} from '../../session/useSession';
 import {nudgeRunProgress} from './agentRunProgressStore';
 import {RunLedgerSheet} from './RunLedgerSheet';
@@ -30,6 +30,9 @@ import {useTickingNow} from './workingSignal';
 
 /** 내가 방금 보낸 메시지로 보는 시간. 이 안이면 진행을 한 번 당겨 읽는다. */
 const FRESH_SEND_MS = 15_000;
+
+/** 상태 줄 한 줄의 상자 높이: `line.meta` + 위아래 `space.xs`. */
+const ROW_HEIGHT = line.meta + space.xs * 2;
 
 export function MessageRunStatus({
   messageId,
@@ -107,7 +110,8 @@ function RunStatusRow({
       // 이름을 명시한다: 초마다 바뀌는 「n초째」를 보조기술이 다시 읽지 않게.
       accessibilityLabel={`${name}: ${chain}. 작업 기록 열기`}
       onPress={onOpen}
-      hitSlop={{top: 6, bottom: 6}}
+      // 한 줄(16) + 위아래 여백(4·4)이 상자다. 손가락 높이는 44까지 슬롭으로 채운다.
+      hitSlop={{top: slopTo(ROW_HEIGHT), bottom: slopTo(ROW_HEIGHT)}}
       style={({pressed}) => [styles.row, pressed && styles.pressed]}
       testID={`message-run-status-row-${progress.id}`}>
       <Text style={styles.text}>
@@ -141,7 +145,7 @@ const buildStyles = (color: Palette) =>
     row: {
       alignSelf: 'flex-start',
       marginTop: space.xs,
-      paddingVertical: 2,
+      paddingVertical: space.xs,
       borderRadius: radius.sm,
     },
     pressed: {backgroundColor: color.surfacePressed},
