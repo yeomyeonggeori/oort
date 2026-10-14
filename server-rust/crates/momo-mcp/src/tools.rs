@@ -1173,6 +1173,21 @@ pub enum ToolFailure {
 }
 
 impl ToolFailure {
+    /// The closed machine code a recorded tool call carries (ADR-0200 증보 2026-10-15
+    /// T1): one token per variant, 1:1, and the exact set migration 133's
+    /// `agent_run_event_tool_call_ck` admits besides `ok`.
+    pub fn code(self) -> &'static str {
+        match self {
+            ToolFailure::InvalidArguments => "invalid_arguments",
+            ToolFailure::NotAuthorized => "not_authorized",
+            ToolFailure::Unavailable => "unavailable",
+            ToolFailure::Conflict => "conflict",
+            ToolFailure::AlreadyClaimed => "already_claimed",
+            ToolFailure::ClaimExpired => "claim_expired",
+            ToolFailure::Internal => "internal",
+        }
+    }
+
     /// `(http status, json-rpc code, wire message)`.
     pub fn wire(self) -> (u16, i64, &'static str) {
         match self {
@@ -1938,5 +1953,52 @@ mod tests {
                 "{required}"
             );
         }
+    }
+
+    /// ADR-0200 증보 2026-10-15 T1 — what the dispatcher records must fit migration
+    /// 133's CHECKs, or the database (not this crate) would be the first to notice:
+    /// every catalog name matches `^oort_[a-z_]{1,40}$`, and the failure codes are
+    /// seven distinct tokens, none of them `ok`.
+    #[test]
+    fn recorded_tool_names_and_failure_codes_fit_the_ledger_vocabulary() {
+        for tool in TOOL_CATALOG.iter() {
+            let rest = tool
+                .name
+                .strip_prefix("oort_")
+                .unwrap_or_else(|| panic!("{} lacks the oort_ prefix", tool.name));
+            assert!(
+                (1..=40).contains(&rest.len())
+                    && rest.bytes().all(|b| b.is_ascii_lowercase() || b == b'_'),
+                "{} does not fit ^oort_[a-z_]{{1,40}}$",
+                tool.name
+            );
+        }
+        let codes: Vec<&str> = [
+            ToolFailure::InvalidArguments,
+            ToolFailure::NotAuthorized,
+            ToolFailure::Unavailable,
+            ToolFailure::Conflict,
+            ToolFailure::AlreadyClaimed,
+            ToolFailure::ClaimExpired,
+            ToolFailure::Internal,
+        ]
+        .into_iter()
+        .map(ToolFailure::code)
+        .collect();
+        let distinct: std::collections::HashSet<&str> = codes.iter().copied().collect();
+        assert_eq!(distinct.len(), 7);
+        assert!(!distinct.contains("ok"));
+        assert_eq!(
+            codes,
+            [
+                "invalid_arguments",
+                "not_authorized",
+                "unavailable",
+                "conflict",
+                "already_claimed",
+                "claim_expired",
+                "internal"
+            ]
+        );
     }
 }
