@@ -49,7 +49,7 @@ describe("보낸 메시지 아래 상태 줄 (#3824)", () => {
   it("받았어요 → 깨우는 신호 보냄 → 가져감 → 작업 중 → 결과 순으로 자란다", () => {
     const bell = doorbellFactOf([ev("queued", T), ev("doorbell_rung", T + 300, "leading_ok")]);
     const queued = runStatusLine(progress(), null, T + 400);
-    expect(runStatusText(queued)).toBe("받았어요 · 1초 미만째 기다려요");
+    expect(runStatusText(queued)).toBe("받았어요 · 방금 들어왔어요");
 
     const woken = runStatusLine(progress(), bell, T + 2 * SEC);
     expect(runStatusText(woken)).toBe("받았어요 → 깨우는 신호 보냄 · 2초째 기다려요");

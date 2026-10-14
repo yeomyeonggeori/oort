@@ -56,6 +56,16 @@ export function spanText(ms: number): string {
   return `${Math.floor(clamped / DAY)}일`;
 }
 
+/**
+ * 늘어나는 구간에 「째」·「전」을 붙일 수 있으면 그 낱말을, 1초가 안 되면 undefined를
+ * 준다. 「1초 미만」은 기간이 아니라 비교 표현이라 「째」도 「전」도 받지 못한다
+ * (「1초 미만째 기다려요」, 같은 결함의 앞선 수리 #1468). 부르는 쪽이 그 자리를
+ * 「방금」 같은 문장으로 바꾼다. 서버 시계가 조금 앞서 음수가 와도 여기로 온다.
+ */
+export function ongoingSpan(ms: number): string | undefined {
+  return ms < SECOND ? undefined : spanText(ms);
+}
+
 type DurationFacts = Pick<
   ServerRunFacts,
   "phase" | "queuedAtMs" | "claimedAtMs" | "startedAtMs" | "finishedAtMs"
@@ -134,7 +144,7 @@ export function runDurationSegments(
     d.waitMs === undefined
       ? DURATION_UNKNOWN
       : stillWaiting
-        ? `${spanText(d.waitMs)}째`
+        ? ongoingOrdinal(d.waitMs)
         : durationText(d.waitMs);
   segments.push({ key: "wait", label: "대기", text: waitText });
   if (stillWaiting) return segments;
@@ -148,7 +158,7 @@ export function runDurationSegments(
       d.workMs === undefined
         ? DURATION_UNKNOWN
         : d.open
-          ? `${spanText(d.workMs)}째`
+          ? ongoingOrdinal(d.workMs)
           : durationText(d.workMs);
     segments.push({ key: "work", label: "작업", text: workText });
   }
@@ -160,6 +170,12 @@ export function runDurationSegments(
     });
   }
   return segments;
+}
+
+/** 「12초째」, 1초가 안 되면 「중」(「대기 중」「작업 중」). */
+function ongoingOrdinal(ms: number): string {
+  const span = ongoingSpan(ms);
+  return span === undefined ? "중" : `${span}째`;
 }
 
 /** 조각들을 한 줄로: 「대기 12초 → 작업 3분 → 총 3분 12초」. */
@@ -186,13 +202,21 @@ export function runWorkingText(
   facts: Pick<ServerRunFacts, "startedAtMs" | "lastEventAtMs">,
   nowMs: number
 ): string {
+  const workingSpan =
+    facts.startedAtMs === undefined ? undefined : ongoingSpan(nowMs - facts.startedAtMs);
   const working =
     facts.startedAtMs === undefined
       ? `작업 시간 ${DURATION_UNKNOWN}`
-      : `${spanText(nowMs - facts.startedAtMs)}째`;
+      : workingSpan === undefined
+        ? "방금 시작"
+        : `${workingSpan}째`;
+  const reportSpan =
+    facts.lastEventAtMs === undefined ? undefined : ongoingSpan(nowMs - facts.lastEventAtMs);
   const report =
     facts.lastEventAtMs === undefined
       ? `마지막 보고 ${DURATION_UNKNOWN}`
-      : `마지막 보고 ${spanText(nowMs - facts.lastEventAtMs)} 전`;
+      : reportSpan === undefined
+        ? "마지막 보고 방금"
+        : `마지막 보고 ${reportSpan} 전`;
   return `${working} · ${report}`;
 }

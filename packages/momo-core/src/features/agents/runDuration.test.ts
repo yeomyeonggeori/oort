@@ -122,7 +122,36 @@ describe("runDurations: 대기 → 작업 → 총, 모르는 시각은 메우지
 
   it("서버 시계가 조금 앞서도 음수를 말하지 않는다", () => {
     const f = facts({});
-    expect(runDurationBreakdown(f, T - 3 * SEC)).toBe("대기 1초 미만째");
+    expect(runDurationBreakdown(f, T - 3 * SEC)).toBe("대기 중");
+  });
+
+  it("1초가 안 된 늘어나는 구간에 「1초 미만째」「1초 미만 전」을 만들지 않는다 (#3824 리뷰)", () => {
+    // 「1초 미만」은 비교 표현이라 「째」·「전」을 받지 못한다(같은 결함의 앞선 수리 #1468).
+    // 보낸 직후 첫 화면이 바로 이 자리다.
+    const queued = facts({});
+    expect(runDurationBreakdown(queued, T + 400)).toBe("대기 중");
+    expect(runPhaseDetail(queued, T + 400)).toBe("방금 들어왔어요");
+    expect(runPhaseDetail(queued, T + SEC)).toBe("1초째 기다려요");
+    const running = facts({
+      phase: "running",
+      status: "running",
+      leaseState: "live",
+      claimedAtMs: T,
+      startedAtMs: T + 10 * SEC,
+      lastEventAtMs: T + 10 * SEC,
+    });
+    expect(runWorkingText(running, T + 10 * SEC + 300)).toBe("방금 시작 · 마지막 보고 방금");
+    expect(runDurationBreakdown(running, T + 10 * SEC + 300)).toBe("대기 1초 미만 → 작업 중");
+    for (const at of [T - 3 * SEC, T + 400, T + 10 * SEC + 300]) {
+      for (const text of [
+        runDurationBreakdown(queued, at),
+        runPhaseDetail(queued, at) ?? "",
+        runWorkingText(running, at),
+        runDurationBreakdown(running, at),
+      ]) {
+        expect(text).not.toMatch(/미만(째| 전)/);
+      }
+    }
   });
 });
 

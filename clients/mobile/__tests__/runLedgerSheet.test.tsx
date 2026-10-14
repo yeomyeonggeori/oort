@@ -121,6 +121,13 @@ describe('폰 기록 시트 (#3824)', () => {
       '대기 12초 → 작업 2분 58초 → 총 3분 12초',
     );
     expect(screen.getByTestId('run-ledger-agent').props.children).toBe('그록봇');
+    // 「3분 / 12초」·「2분 / 58초」가 음절 사이에서 갈리지 않게 어절 단위로 접는다.
+    expect(screen.getByTestId('run-ledger-detail').props.lineBreakStrategyIOS).toBe(
+      'hangul-word',
+    );
+    expect(screen.getByTestId('run-ledger-durations').props.lineBreakStrategyIOS).toBe(
+      'hangul-word',
+    );
   });
 
   it('읽지 못하면 침묵하지 않고 다시 시도를 준다', async () => {
@@ -161,6 +168,10 @@ describe('폰 메시지 아래 상태 줄 (#3824)', () => {
       ),
     );
     expect(screen.getByTestId('message-run-status-step-received')).toBeTruthy();
+    // 「12분째」가 「12분 / 째」로 갈리지 않게(#3824 리뷰, RUN-STATUS 캡처).
+    expect(screen.getByTestId('message-run-status-text').props.lineBreakStrategyIOS).toBe(
+      'hangul-word',
+    );
     await waitFor(() => expect(mockFetchEvents).toHaveBeenCalledTimes(1));
     expect(screen.queryByTestId('message-run-status-step-woken')).toBeNull();
 

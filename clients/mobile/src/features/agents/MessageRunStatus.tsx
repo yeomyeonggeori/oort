@@ -114,7 +114,13 @@ function RunStatusRow({
       hitSlop={{top: slopTo(ROW_HEIGHT), bottom: slopTo(ROW_HEIGHT)}}
       style={({pressed}) => [styles.row, pressed && styles.pressed]}
       testID={`message-run-status-row-${progress.id}`}>
-      <Text style={styles.text}>
+      {/* 어절 단위로 접는다: iOS 기본 줄바꿈은 「12분째」를 「12분 / 째」로 가른다
+          (#3824 리뷰, 측정 표면 RUN-STATUS 캡처). 이 줄은 낱말 목록이 아니라
+          「… 작업 중 · 12분째 · 마지막 보고 1분 전」으로 읽는 한 문장이다. */}
+      <Text
+        style={styles.text}
+        lineBreakStrategyIOS="hangul-word"
+        testID="message-run-status-text">
         <Text style={styles.name}>{name}</Text>
         <Text>{' · '}</Text>
         {status.steps.map((step, index) => (

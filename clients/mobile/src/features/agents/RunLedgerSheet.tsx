@@ -167,12 +167,18 @@ export function SheetBody({
               </Text>
             </View>
             {detail !== undefined ? (
-              <Text style={styles.detail} testID="run-ledger-detail">
+              <Text
+                style={styles.detail}
+                lineBreakStrategyIOS="hangul-word"
+                testID="run-ledger-detail">
                 {detail}
               </Text>
             ) : null}
           </View>
-          <Text style={styles.durations} testID="run-ledger-durations">
+          <Text
+            style={styles.durations}
+            lineBreakStrategyIOS="hangul-word"
+            testID="run-ledger-durations">
             {runDurationBreakdown(facts, nowMs)}
           </Text>
         </View>

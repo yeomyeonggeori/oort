@@ -2,7 +2,7 @@ import type {
   AgentRunPhase,
   AgentRunProgress,
 } from "../../lib/api";
-import { runTookText, runWorkingText, spanText } from "./runDuration";
+import { ongoingSpan, runTookText, runWorkingText } from "./runDuration";
 import type {
   AgentTurnState,
   AgentWorkingSignal,
@@ -207,7 +207,9 @@ export function runPhaseDetail(
       const parts: string[] = [];
       // 초부터 말한다(#3824): 보낸 지 10초 된 요청에 아무 말도 없으면 사람은 요청이
       // 닿았는지부터 의심한다.
-      parts.push(`${spanText(nowMs - facts.queuedAtMs)}째 기다려요`);
+      // 1초가 안 됐으면 「1초 미만째」가 아니라 「방금 들어왔어요」다.
+      const waited = ongoingSpan(nowMs - facts.queuedAtMs);
+      parts.push(waited === undefined ? "방금 들어왔어요" : `${waited}째 기다려요`);
       if (
         options.omitAhead !== true &&
         facts.aheadTotal !== undefined &&
