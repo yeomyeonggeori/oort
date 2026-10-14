@@ -1657,7 +1657,9 @@ tunnel, with the active credential from join.
       oort_job_release after the lease expired.
    f) Inside a tracked run, oort_run_event {leaseHandle, status:"running"}
       (c above) is how you stay alive: send it at least every 5 minutes for
-      each job you hold, and touch that job's beat file each time; oort_ping does NOT keep a run alive
+      each job you hold, and touch that job's beat file each time. If that
+      job's folder is gone, another wake took it over: stop that job at once
+      and send nothing more with its handle. oort_ping does NOT keep a run alive
       (oort shows a runtime that only pings as "alive, takes no work", and a
       run with no event for 2 hours after its lease expired is ended by the
       server). If you are busy but have no leaseHandle (an untracked reply),
@@ -1959,7 +1961,7 @@ a change: every claim is atomic, and the hosted claim has no per-agent limit
 | One folder per job | `/workspace/oort-runs/<tag>/` (mode 700) with `handle` (mode 600), `beat` and `workdir`. `<tag>` is a new UUID, never the handle or the request text. |
 | Claim until none left, at most 4 | `oort_job_start {}` again and again with nothing in between, until `job` is null or 4 folders exist on the VM. A fifth job waits for a later wake. |
 | Same answer for one wake or four | Folders are per job, so it does not matter whether one wake claimed all four or four wakes claimed one each. |
-| Left-over jobs | A folder whose `beat` is older than 15 minutes is taken over by renaming it (only one wake can win the rename), then reported on with its stored handle before any new claim (§3.3.17.4 h). |
+| Left-over jobs | A folder whose `beat` is older than 15 minutes is taken over by renaming it (only one wake can win the rename), then reported on with its stored handle before any new claim (§3.3.17.4 h). The wake that lost it stops that job as soon as it sees the folder gone (§3.3.17.4 f). |
 | Own working copy | Each job works in `/workspace/work/<tag>` on its own branch, so two jobs never touch the same directory or branch. |
 | Alive and lease, per job | `oort_run_event {status:"running"}` at least every 5 minutes and `oort_job_renew` before `leaseExpiresAtMs`, for every job held, including the ones waiting their turn. |
 | Result order | Push the branch, run the tests, open the PR, then `oort_run_complete`. Each step is one stage. |

@@ -1403,7 +1403,9 @@ credential로, 터널이 아니라 VM 루프백에 POST한다.
       oort_job_release 를 부르지 않는다.
    f) 추적되는 run 안에서는 위 c)의 oort_run_event {leaseHandle,
       status:"running"} 가 살아 있음을 알리는 방법이다: 가진 job 마다 최소
-      5분마다 보내고, 그때마다 그 job 의 beat 파일을 touch 한다. oort_ping 은 run 을 살려 두지 못한다(ping 만 하는
+      5분마다 보내고, 그때마다 그 job 의 beat 파일을 touch 한다. 그 job 의
+      폴더가 없어졌으면 다른 wake 가 넘겨받은 것이니 그 job 을 바로 멈추고 그
+      handle 로 더 보내지 않는다. oort_ping 은 run 을 살려 두지 못한다(ping 만 하는
       런타임은 「살아 있지만 일은 안 가져감」으로 보이고, lease 가 만료된 뒤
       2시간 동안 이벤트가 없는 run 은 서버가 끝낸다). 바쁘지만 leaseHandle 이
       없는 경우(추적되지 않는 회신)에만 최소 5분마다 oort_ping {state:"working"}
@@ -1643,7 +1645,7 @@ claim은 하나하나 원자적이고, 호스팅 claim에는 에이전트별 한
 | job마다 폴더 하나 | `/workspace/oort-runs/<tag>/`(권한 700)에 `handle`(권한 600)·`beat`·`workdir`. `<tag>`는 새 UUID이고 handle이나 요청 문구가 아니다. |
 | 없을 때까지 claim, 최대 4 | 사이에 아무것도 끼우지 않고 `oort_job_start {}`를 거듭 불러 `job`이 null이 되거나 VM에 폴더가 4개가 될 때까지. 다섯 번째는 다음 wake에 남긴다. |
 | wake 하나든 넷이든 같다 | 폴더가 job마다 따로라서, wake 하나가 넷을 가져가든 wake 넷이 하나씩 가져가든 상관없다. |
-| 남겨진 job | `beat`가 15분보다 오래된 폴더는 이름 바꾸기로 가져오고(한 wake만 이긴다), 새 claim 전에 저장된 handle로 먼저 보고한다(§3.3.17.4 h). |
+| 남겨진 job | `beat`가 15분보다 오래된 폴더는 이름 바꾸기로 가져오고(한 wake만 이긴다), 새 claim 전에 저장된 handle로 먼저 보고한다(§3.3.17.4 h). 빼앗긴 wake는 폴더가 없어진 걸 보는 즉시 그 job을 멈춘다(§3.3.17.4 f). |
 | 자기 작업 사본 | job마다 `/workspace/work/<tag>`와 자기 브랜치에서 일해서 두 job이 같은 디렉터리·브랜치를 건드리지 않는다. |
 | 살아 있음·lease는 job마다 | 차례를 기다리는 job까지 가진 job마다 최소 5분마다 `oort_run_event {status:"running"}`, `leaseExpiresAtMs` 전에 `oort_job_renew`. |
 | 결과 순서 | 브랜치 올림 → 테스트 → PR → `oort_run_complete`. 단계마다 stage 하나. |
