@@ -1608,6 +1608,7 @@ async fn action_propose(
             if let Some(avatar) = resolved.validated.normalized.get("avatar") {
                 let source = avatar.get("source").and_then(Value::as_str);
                 if matches!(source, Some("generated") | Some("attachment")) {
+                    discard_staged(conn, caller.workspace_id, staged_image_id).await?;
                     return Ok(Err(ToolFailure::InvalidArguments));
                 }
             }
@@ -1622,6 +1623,8 @@ async fn action_propose(
             // are unconditional. The run row is already locked `FOR UPDATE` by
             // the snapshot above, so nothing can move it in between.
             if !momo_agent::park_run_for_approval_in_tx(conn, handle.run_id, expires_at).await? {
+                // `with_tenant_tx` commits on a handled refusal: drop the unbound row.
+                discard_staged(conn, caller.workspace_id, staged_image_id).await?;
                 return Ok(Err(ToolFailure::Conflict));
             }
 
@@ -1762,6 +1765,17 @@ const AVATAR_PROCESS_TIMEOUT: std::time::Duration = std::time::Duration::from_se
 /// that. Two at a time; a third caller waits (still inside the timeout) or is refused.
 static AVATAR_DECODE_PERMITS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
 
+async fn discard_staged(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    staged: Option<Uuid>,
+) -> Result<(), DbError> {
+    if let Some(image_id) = staged {
+        momo_messaging::delete_staged_avatar_image_in_tx(conn, workspace_id, image_id).await?;
+    }
+    Ok(())
+}
+
 fn hex_lower(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
@@ -1812,6 +1826,22 @@ async fn prepare_avatar(
     };
     match avatar {
         crate::routes::actions::AvatarIntent::Generated(encoded) => {
+            // Authorise before spending decode capacity (A1 review M1): a caller
+            // without the propose scope must not be able to occupy the shared permits.
+            let allowed = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
+                Box::pin(async move {
+                    Ok(
+                        authorize_in_tx(conn, caller, momo_auth::SCOPE_WORKSPACE_PROPOSE)
+                            .await?
+                            .is_ok(),
+                    )
+                })
+            })
+            .await
+            .map_err(|_| ToolFailure::Unavailable)?;
+            if !allowed {
+                return Err(ToolFailure::NotAuthorized);
+            }
             let bytes = base64::engine::general_purpose::STANDARD
                 .decode(encoded.as_bytes())
                 .map_err(|_| ToolFailure::InvalidArguments)?;
