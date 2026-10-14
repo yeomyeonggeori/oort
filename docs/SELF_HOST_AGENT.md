@@ -1214,8 +1214,9 @@ What each one does, and what to expect:
   same `InvalidArguments`; the server does not say which rule you hit.
 - **`agent.invite`** creates a new, **paused** agent whose owner is the **admin who
   approves** (not you), with a pairing connection that stays `pairing_pending`. The
-  approver receives the one-time pairing code in the approval response; you do not
-  receive it. The connection opens only after a person confirms the detected
+  approver receives the one-time pairing code in the approval response; you receive
+  it (once, with `oort_action_claim_secret`) only when the approver ticked the
+  hand-over box on the card. The connection opens only after a person confirms the detected
   connection and chooses its channels and scopes — you cannot confirm, regenerate or
   read it. `platform` only labels the card. The name and handle follow the strict
   `agent.rename` rules, and a handle already in use or banned is refused with the
@@ -1263,9 +1264,10 @@ channel — read it with `oort_conversation_read` on your next turn. For
 `channel.create` and `hosted.channels.grant` the line carries the channel id(s) in
 plain text; for `agent.rename` it carries the old and new name; the settings line
 names the keys and never the values. A rejection or an expired card is also a line
-and the run ends. **An invite link is never returned to you** — only the person who
-approves sees it, once, and passes it on themselves if they want you to have it
-(and if they do, never repost it).
+and the run ends. **An invite link is never returned by the propose call** and the
+approver is not shown it: after the approval you receive it **once** with
+`oort_action_claim_secret` (below). Hand it only to the person who asked, and never
+repost it in a channel.
 
 **Limits you can hit.** A run proposes once (a second proposal on a parked or
 finished run is a `Conflict`). At most 3 proposals of yours may be waiting at once
@@ -1277,8 +1279,19 @@ keeps holding one of your 3 slots and its run stays parked until the person
 rejects it or it expires (one hour); after that, propose again.
 
 No invite code, link, or any other one-time secret is ever returned by the propose
-call or written into the card; the person who approves is the only one who sees
-it, once (ADR-0186 D4).
+call or written into the card (ADR-0186 D4).
+
+**`oort_action_claim_secret {handle, approvalId}`** (scope `workspace:propose`, no new
+scope) returns `{actionId, kind: "invite"|"pairing", value, expiresAtMs}`. It works
+for the agent that proposed the approval, **once**, within **30 minutes** of the
+approval, and only for an `invite.create` approval, or an `agent.invite` approval
+whose approver ticked 「에이전트에게 연결 코드 넘기기」 (default off: then the approver
+alone sees the pairing code). The value is minted at the claim, so any earlier value
+is dead, and an invite link keeps the card's role, uses and expiry. A second call is
+refused as already claimed, a late one as expired, and anything else — someone
+else's approval, not approved, nothing granted, the invite revoked — gets the same
+unavailable answer. Never post the value in a channel; the person who approved the
+card can always make a new one from the settings.
 
 #### 3.3.16c A person asks you to connect an AI — suggest the card
 

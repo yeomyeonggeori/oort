@@ -81,6 +81,10 @@ pub const TOOL_RUN_EVENT: &str = "oort_run_event";
 pub const TOOL_RUN_COMPLETE: &str = "oort_run_complete";
 /// ADR-0186 D2 — propose a workspace change; never perform one.
 pub const TOOL_ACTION_PROPOSE: &str = "oort_action_propose";
+/// ADR-0186 증보 v3 V3-4 — receive, once, the one-time value an approval granted you
+/// (an invite link, or a pairing code the approver chose to hand over). Same scope as
+/// the proposal that produced it; no new scope.
+pub const TOOL_ACTION_CLAIM_SECRET: &str = "oort_action_claim_secret";
 /// ADR-0186 증보 2026-09-27 G1 — suggest a client-command card to the person
 /// who asked. Opened by `messages:write`: it writes one message in the run's
 /// own channel and grants nothing more (G5).
@@ -216,6 +220,18 @@ fn jobs_claim_schema() -> Value {
         "additionalProperties": false,
         "properties": {
             "limit": nullable(integer(1, 100))
+        }
+    })
+}
+
+fn action_claim_secret_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["handle", "approvalId"],
+        "properties": {
+            "handle": required_text(512),
+            "approvalId": required_text(64)
         }
     })
 }
@@ -672,7 +688,7 @@ fn card_suggest_schema() -> Value {
 
 /// The complete catalog. Order is the `tools/list` order and is stable so a
 /// client diffing two listings sees only real capability changes.
-pub const TOOL_CATALOG: [ToolDescriptor; 11] = [
+pub const TOOL_CATALOG: [ToolDescriptor; 12] = [
     ToolDescriptor {
         name: TOOL_INBOX_READ,
         title: "Read the hosted inbox",
@@ -751,6 +767,18 @@ pub const TOOL_CATALOG: [ToolDescriptor; 11] = [
         schema: action_propose_schema,
     },
     ToolDescriptor {
+        name: TOOL_ACTION_CLAIM_SECRET,
+        title: "Receive an approved one-time value",
+        description: "After a person approved your invite-link or agent-invite proposal and \
+                      allowed you to receive its value, call this once with the approval id \
+                      to get it (an invite link, or a pairing code). It works one time, \
+                      within 30 minutes of the approval, and only for the agent that \
+                      proposed it; a second call is refused. Hand the value only to the \
+                      person who asked, and never post it in a channel.",
+        required_scope: SCOPE_WORKSPACE_PROPOSE,
+        schema: action_claim_secret_schema,
+    },
+    ToolDescriptor {
         name: TOOL_CARD_SUGGEST,
         title: "Suggest a card",
         description: "Answer the person who asked with a card they can act on in place \
@@ -797,6 +825,7 @@ impl ToolCapability {
             TOOL_RUN_EVENT,
             TOOL_RUN_COMPLETE,
             TOOL_ACTION_PROPOSE,
+            TOOL_ACTION_CLAIM_SECRET,
             TOOL_CARD_SUGGEST,
             TOOL_PING,
         ],
@@ -1094,6 +1123,11 @@ pub enum ToolFailure {
     /// The target exists and refused the requested transition (a settled run, a
     /// lost lease, an already-terminal state).
     Conflict,
+    /// `oort_action_claim_secret` only, and only to the agent that proposed the
+    /// approval: the value was already received.
+    AlreadyClaimed,
+    /// Same, and same audience: the 30-minute window has passed.
+    ClaimExpired,
     /// The server failed. Never carries a cause.
     Internal,
 }
@@ -1108,6 +1142,8 @@ impl ToolFailure {
             }
             ToolFailure::Unavailable => (409, -32004, "tool target is unavailable"),
             ToolFailure::Conflict => (409, -32005, "tool target refused the transition"),
+            ToolFailure::AlreadyClaimed => (409, -32006, "secret was already claimed"),
+            ToolFailure::ClaimExpired => (409, -32007, "claim window has passed"),
             ToolFailure::Internal => (500, -32603, "internal error"),
         }
     }
@@ -1122,7 +1158,7 @@ mod tests {
     }
 
     #[test]
-    fn the_catalog_is_exactly_the_eleven_named_tools() {
+    fn the_catalog_is_exactly_the_twelve_named_tools() {
         assert_eq!(
             TOOL_CATALOG.iter().map(|t| t.name).collect::<Vec<_>>(),
             vec![
@@ -1135,6 +1171,7 @@ mod tests {
                 "oort_run_event",
                 "oort_run_complete",
                 "oort_action_propose",
+                "oort_action_claim_secret",
                 "oort_card_suggest",
                 "oort_ping",
             ]
@@ -1166,7 +1203,7 @@ mod tests {
             SCOPE_WORKSPACE_PROPOSE,
         ]);
         let view = ToolView::intersect(&all, &all, ToolCapability::FULL);
-        assert_eq!(view.names().len(), 11);
+        assert_eq!(view.names().len(), 12);
         for (name, scope) in [
             (TOOL_INBOX_READ, SCOPE_INBOX_READ),
             (TOOL_CONVERSATION_READ, SCOPE_MESSAGES_READ),
@@ -1177,6 +1214,7 @@ mod tests {
             (TOOL_RUN_EVENT, SCOPE_RUNS_CALLBACK),
             (TOOL_RUN_COMPLETE, SCOPE_RUNS_CALLBACK),
             (TOOL_ACTION_PROPOSE, SCOPE_WORKSPACE_PROPOSE),
+            (TOOL_ACTION_CLAIM_SECRET, SCOPE_WORKSPACE_PROPOSE),
             (TOOL_CARD_SUGGEST, SCOPE_MESSAGES_WRITE),
             (TOOL_PING, SCOPE_INBOX_READ),
         ] {

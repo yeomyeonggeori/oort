@@ -244,6 +244,9 @@ pub(crate) async fn execute(
         momo_mcp::TOOL_RUN_EVENT => run_event(state, caller, &call.arguments).await,
         momo_mcp::TOOL_RUN_COMPLETE => run_complete(state, caller, &call.arguments).await,
         momo_mcp::TOOL_ACTION_PROPOSE => action_propose(state, caller, &call.arguments).await,
+        momo_mcp::TOOL_ACTION_CLAIM_SECRET => {
+            action_claim_secret(state, caller, &call.arguments).await
+        }
         momo_mcp::TOOL_CARD_SUGGEST => card_suggest(state, caller, &call.arguments).await,
         momo_mcp::TOOL_PING => ping(state, caller, &call.arguments).await,
         _ => Err(ToolFailure::InvalidArguments),
@@ -1906,6 +1909,211 @@ async fn prepare_avatar(
         }
         _ => Ok(None),
     }
+}
+
+// ---------------------------------------------------------------------------
+// oort_action_claim_secret (ADR-0186 증보 v3 V3-4)
+// ---------------------------------------------------------------------------
+
+/// Receive, **once**, the value an approval granted to the agent that proposed it.
+///
+/// The server stores no plaintext: the value is minted **here**, at the claim, by the
+/// same domain function the human regenerate paths use — which also invalidates
+/// whatever value existed before. Everything else about the claim is judged under the
+/// approval row's `FOR UPDATE` lock, so two concurrent claims serialise and exactly one
+/// finds the grant `Open`.
+///
+/// Every refusal that is not about the value's own lifecycle (not the proposer, not
+/// approved, no grant, a target that is gone or in the wrong state) is the one
+/// `Unavailable`. `AlreadyClaimed` and `ClaimExpired` are only ever said to the
+/// proposer, who is the only caller that reaches them.
+async fn action_claim_secret(
+    state: &AppState,
+    caller: HostedCaller,
+    arguments_value: &Value,
+) -> Result<Value, ToolFailure> {
+    use momo_agent::actions::{
+        action_by_id, secret_claim_state, SecretClaimState, SecretDelivery,
+        ACTION_TYPE_WORKSPACE_ACTION, AUDIT_SECRET_CLAIMED, AUDIT_SECRET_CLAIMED_SCHEMA,
+        SECRET_CLAIM_KIND_INVITE, SECRET_CLAIM_KIND_PAIRING, SECRET_CLAIM_PAYLOAD_KEY,
+    };
+    let args = arguments(arguments_value)?;
+    let raw_handle = required_str(args, "handle", 512)?.to_string();
+    let approval_id = Uuid::parse_str(required_str(args, "approvalId", 64)?)
+        .map_err(|_| ToolFailure::InvalidArguments)?;
+    let secret = state.agent_port.envelope_secret().to_string();
+
+    let outcome = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
+        Box::pin(async move {
+            let identity =
+                match authorize_in_tx(conn, caller, momo_auth::SCOPE_WORKSPACE_PROPOSE).await? {
+                    Ok(identity) => identity,
+                    Err(failure) => return Ok(Err(failure)),
+                };
+            if let Err(failure) = bound_handle(&identity, caller, &raw_handle, &secret) {
+                return Ok(Err(failure));
+            }
+            let Some(approval) =
+                momo_agent::approval::lock_approval_in_tx(conn, caller.workspace_id, approval_id)
+                    .await?
+            else {
+                return Ok(Err(ToolFailure::Unavailable));
+            };
+            let action = approval
+                .payload
+                .get("action")
+                .and_then(|action| action.get("id"))
+                .and_then(Value::as_str)
+                .and_then(action_by_id);
+            let Some(action) = action else {
+                return Ok(Err(ToolFailure::Unavailable));
+            };
+            if approval.requested_by != caller.agent_member_id
+                || approval.action_type != ACTION_TYPE_WORKSPACE_ACTION
+                || approval.status != "approved"
+                || action.secret_delivery == SecretDelivery::None
+            {
+                return Ok(Err(ToolFailure::Unavailable));
+            }
+            let now_ms = chrono::Utc::now().timestamp_millis();
+            match secret_claim_state(&approval.payload, now_ms) {
+                SecretClaimState::NotGranted => return Ok(Err(ToolFailure::Unavailable)),
+                SecretClaimState::AlreadyClaimed => return Ok(Err(ToolFailure::AlreadyClaimed)),
+                SecretClaimState::Expired => return Ok(Err(ToolFailure::ClaimExpired)),
+                SecretClaimState::Open => {}
+            }
+            let grant = &approval.payload[SECRET_CLAIM_PAYLOAD_KEY];
+            let kind = grant.get("kind").and_then(Value::as_str).unwrap_or("");
+            let ref_id = grant
+                .get("refId")
+                .and_then(Value::as_str)
+                .and_then(|id| Uuid::parse_str(id).ok());
+            let decided_by = grant
+                .get("decidedBy")
+                .and_then(Value::as_str)
+                .and_then(|id| Uuid::parse_str(id).ok());
+            let (Some(ref_id), Some(decided_by)) = (ref_id, decided_by) else {
+                return Ok(Err(ToolFailure::Unavailable));
+            };
+
+            let (value, expires_at_ms) = match kind {
+                SECRET_CLAIM_KIND_PAIRING => {
+                    // The connection the approval created, while it is still waiting
+                    // for its first handshake. A detected, active or retired one is
+                    // not the thing this grant was about.
+                    let Some(connection) = momo_auth::latest_hosted_connection_for_agent_in_tx(
+                        conn,
+                        caller.workspace_id,
+                        ref_id,
+                    )
+                    .await
+                    .map_err(DbError::from)?
+                    else {
+                        return Ok(Err(ToolFailure::Unavailable));
+                    };
+                    if !matches!(connection.status.as_str(), "pairing_pending" | "expired") {
+                        return Ok(Err(ToolFailure::Unavailable));
+                    }
+                    match momo_auth::regenerate_pairing_in_tx(
+                        conn,
+                        caller.workspace_id,
+                        connection.id,
+                    )
+                    .await
+                    .map_err(DbError::from)?
+                    {
+                        momo_auth::HostedMutation::Applied(issuance) => {
+                            (issuance.pairing_credential, issuance.pairing_expires_at_ms)
+                        }
+                        _ => return Ok(Err(ToolFailure::Unavailable)),
+                    }
+                }
+                SECRET_CLAIM_KIND_INVITE => {
+                    let Some(origin) = grant.get("origin").and_then(Value::as_str) else {
+                        return Ok(Err(ToolFailure::Unavailable));
+                    };
+                    // The invite as the approval made it: still live, not spent, not
+                    // revoked by the approver. The replacement keeps its role, its
+                    // `max_uses` **and its expiry** (V3-4: no new ceiling is born here).
+                    let live: Option<(chrono::DateTime<chrono::Utc>,)> = momo_db::sqlx::query_as(
+                        "SELECT expires_at FROM invite_code \
+                          WHERE workspace_id = $1 AND id = $2 AND revoked_at IS NULL \
+                            AND expires_at > now() AND used_count < max_uses \
+                          FOR UPDATE",
+                    )
+                    .bind(caller.workspace_id)
+                    .bind(ref_id)
+                    .fetch_optional(&mut *conn)
+                    .await?;
+                    let Some((expires_at,)) = live else {
+                        return Ok(Err(ToolFailure::Unavailable));
+                    };
+                    let created =
+                        match momo_settings::regenerate_invite(conn, ref_id, decided_by).await? {
+                            Ok(created) => created,
+                            Err(_) => return Ok(Err(ToolFailure::Unavailable)),
+                        };
+                    momo_db::sqlx::query(
+                        "UPDATE invite_code SET expires_at = $3, updated_at = now() \
+                          WHERE workspace_id = $1 AND id = $2",
+                    )
+                    .bind(caller.workspace_id)
+                    .bind(created.invite.id)
+                    .bind(expires_at)
+                    .execute(&mut *conn)
+                    .await?;
+                    if !created
+                        .code
+                        .bytes()
+                        .all(crate::routes::approvals::is_url_safe_code_byte)
+                    {
+                        return Err(DbError::Sqlx(momo_db::sqlx::Error::Protocol(
+                            "minted invite code is not url-safe".into(),
+                        )));
+                    }
+                    (
+                        format!("{origin}/join?code={}", created.code),
+                        expires_at.timestamp_millis(),
+                    )
+                }
+                _ => return Ok(Err(ToolFailure::Unavailable)),
+            };
+
+            if !momo_agent::stamp_secret_claimed_in_tx(conn, approval.id, now_ms).await? {
+                // The lock says this cannot happen; if it did, the minted value must
+                // die with the transaction.
+                return Err(DbError::Sqlx(momo_db::sqlx::Error::Protocol(
+                    "secret claim stamped twice".into(),
+                )));
+            }
+            momo_db::audit::write_audit(
+                conn,
+                &momo_db::audit::AuditEntry::new(caller.workspace_id, AUDIT_SECRET_CLAIMED)
+                    .by(caller.agent_member_id)
+                    .target("approval", approval.id)
+                    .run(approval.run_id)
+                    .with_schema(
+                        AUDIT_SECRET_CLAIMED_SCHEMA,
+                        // Who, which approval, which kind. Never the value.
+                        json!({
+                            "approval_id": approval.id.to_string(),
+                            "action_id": action.id,
+                            "kind": kind,
+                        }),
+                    ),
+            )
+            .await?;
+            Ok(Ok(json!({
+                "actionId": action.id,
+                "kind": kind,
+                "value": value,
+                "expiresAtMs": expires_at_ms,
+            })))
+        })
+    })
+    .await
+    .map_err(|error| internal("agent_port.action_claim_secret", error))?;
+    outcome
 }
 
 // ---------------------------------------------------------------------------
