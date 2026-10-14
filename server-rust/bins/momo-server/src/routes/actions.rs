@@ -1282,6 +1282,11 @@ async fn resolve_agent_rename_target_in_tx(
     }))
 }
 
+/// The one message an unresolvable avatar carries: the decision route recognises it
+/// (the target did resolve, so the decider can be judged against it) and answers an
+/// eligible decider with `action_args_invalid` instead of the generic refusal.
+pub const AVATAR_UNRESOLVED: &str = "avatar did not resolve";
+
 /// `sha256` as the stored form spells it (64 lowercase hex characters) → 32 bytes.
 fn decode_sha256_hex(text: &str) -> Option<Vec<u8>> {
     if text.len() != 64 {
@@ -1514,6 +1519,7 @@ pub async fn resolve_action_in_tx(
         args,
         now_ms,
         ArgsOrigin::Proposal,
+        None,
     )
     .await
 }
@@ -1527,6 +1533,7 @@ pub async fn resolve_stored_action_in_tx(
     action: &WorkspaceAction,
     args: &Value,
     now_ms: i64,
+    approval_id: Uuid,
 ) -> DbRejectable<ResolvedAction> {
     resolve_action_with_origin_in_tx(
         conn,
@@ -1536,10 +1543,12 @@ pub async fn resolve_stored_action_in_tx(
         args,
         now_ms,
         ArgsOrigin::Stored,
+        Some(approval_id),
     )
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn resolve_action_with_origin_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -1548,6 +1557,7 @@ async fn resolve_action_with_origin_in_tx(
     args: &Value,
     now_ms: i64,
     origin: ArgsOrigin,
+    decision_approval_id: Option<Uuid>,
 ) -> DbRejectable<ResolvedAction> {
     let mut validated = match validated_action_args_from(action, args, now_ms, origin) {
         Ok(validated) => validated,
@@ -1857,6 +1867,10 @@ async fn resolve_action_with_origin_in_tx(
                     row.member_id == found.id
                         && row.proposed_by == proposer_member_id
                         && row.status == "staged"
+                        // Bound to the approval being decided, in the database's own
+                        // record — a pin naming another approval's image is refused.
+                        && decision_approval_id.is_some()
+                        && row.approval_id == decision_approval_id
                 });
                 let intact = match (&pin, bound) {
                     (Some(pin), true) => {
@@ -1872,7 +1886,7 @@ async fn resolve_action_with_origin_in_tx(
                     _ => false,
                 };
                 if !intact {
-                    return Ok(Err(ApiError::bad_request("avatar did not resolve")));
+                    return Ok(Err(ApiError::bad_request(AVATAR_UNRESOLVED)));
                 }
             }
             let changes = profile_changes(

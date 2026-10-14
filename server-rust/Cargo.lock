@@ -2051,6 +2051,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "ed25519-dalek",
+ "futures",
  "jsonwebtoken",
  "momo-agent",
  "momo-agent-worker",

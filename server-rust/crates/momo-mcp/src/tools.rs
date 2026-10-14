@@ -465,6 +465,10 @@ fn action_args_branches() -> Vec<Value> {
 /// way to name a file the agent cannot read.
 fn avatar_schema() -> Value {
     json!({
+        // `["object","null"]` + `oneOf`: the argument validator reads a `oneOf` only
+        // on an object-typed schema, and `null` (remove the avatar) is the nullable
+        // half of the type.
+        "type": ["object", "null"],
         "description": "Your avatar. Exactly one of: a server preset id; a workspace image file you can read (use the attachment id from oort_conversation_read); or an image you generated (PNG/JPEG/WebP, base64, at most about 44 KB decoded — downscale to 256x256 first). null removes the avatar. The server re-encodes every image; a person sees it on the approval card before anything changes.",
         "oneOf": [
             {
@@ -490,8 +494,7 @@ fn avatar_schema() -> Value {
                     "source": {"type": "string", "enum": ["generated"]},
                     "dataBase64": required_text(WORKSPACE_AVATAR_B64_MAX_CHARS)
                 }
-            },
-            {"type": "null"}
+            }
         ]
     })
 }

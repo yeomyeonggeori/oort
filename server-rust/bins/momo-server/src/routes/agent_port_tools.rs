@@ -1537,6 +1537,7 @@ async fn action_propose(
             // and the card preview all name that row and its sha256 — never the
             // agent's bytes, never an id it chose.
             let mut avatar_preview: Option<Value> = None;
+            let mut staged_image_id: Option<Uuid> = None;
             if let Some(prepared) = &prepared_avatar {
                 let crate::routes::actions::GateSubject::Agent(target) = resolved.subject else {
                     return Ok(Err(ToolFailure::InvalidArguments));
@@ -1552,6 +1553,7 @@ async fn action_propose(
                     &prepared.image,
                 )
                 .await?;
+                staged_image_id = Some(image_id);
                 let sha256 = hex_lower(&prepared.image.sha256);
                 let staged = json!({
                     "source": "staged",
@@ -1690,6 +1692,20 @@ async fn action_propose(
                 card.message.id,
             )
             .await?;
+            // The staged image belongs to **this** approval, in the database's own
+            // record (write-once): a decision accepts it under no other.
+            if let Some(image_id) = staged_image_id {
+                if !momo_messaging::bind_staged_image_to_approval_in_tx(
+                    conn,
+                    caller.workspace_id,
+                    image_id,
+                    approval_id,
+                )
+                .await?
+                {
+                    return Err(DbError::from(momo_db::sqlx::Error::RowNotFound));
+                }
+            }
             Ok(Ok(json!({
                 "approvalId": approval_id,
                 "status": "pending",
@@ -1718,6 +1734,13 @@ struct PreparedAvatar {
 /// The longest the decode-and-re-encode may run.
 const AVATAR_PROCESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// How many image decodes may run at once, process-wide. A decode of a tiny file can
+/// peak at tens of MiB (the security review of #3799 measured 160–310 MB before the
+/// input cap came down to 2048 px), and `spawn_blocking` is not cancelled by the
+/// timeout, so without this several agents — or one agent retrying — would multiply
+/// that. Two at a time; a third caller waits (still inside the timeout) or is refused.
+static AVATAR_DECODE_PERMITS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+
 fn hex_lower(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
@@ -1729,10 +1752,20 @@ async fn process_avatar_bytes(
     bytes: Vec<u8>,
     max_input: usize,
 ) -> Result<momo_messaging::ProcessedAvatar, ToolFailure> {
-    let task = tokio::task::spawn_blocking(move || {
-        momo_messaging::process_avatar_image(&bytes, max_input)
-    });
-    match tokio::time::timeout(AVATAR_PROCESS_TIMEOUT, task).await {
+    // The permit is taken **inside** the timeout and moved into the blocking task,
+    // so it is released when the decode actually ends — not when the caller gives up.
+    let work = async move {
+        let permit = AVATAR_DECODE_PERMITS
+            .acquire()
+            .await
+            .map_err(|_| ToolFailure::InvalidArguments)?;
+        let task = tokio::task::spawn_blocking(move || {
+            let _held = permit;
+            momo_messaging::process_avatar_image(&bytes, max_input)
+        });
+        task.await.map_err(|_| ToolFailure::InvalidArguments)
+    };
+    match tokio::time::timeout(AVATAR_PROCESS_TIMEOUT, work).await {
         Ok(Ok(Ok(image))) => Ok(image),
         _ => Err(ToolFailure::InvalidArguments),
     }

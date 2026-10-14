@@ -1379,10 +1379,34 @@ async fn execute_workspace_action(
         action,
         proposed_args(&approval.payload),
         now_ms,
+        approval.id,
     )
     .await?
     {
         Ok(resolved) => resolved,
+        Err(error) if error.message == crate::routes::actions::AVATAR_UNRESOLVED => {
+            // The avatar check runs **after** the target resolved, so the target is
+            // known — it is in the pins — and the decider can be judged against it:
+            // the owner or an admin is told the picture is no longer what the card
+            // showed (`action_args_invalid`); anyone else gets the generic
+            // `role_required`, which teaches them nothing.
+            let pinned_target = approval
+                .payload
+                .get("action")
+                .and_then(|action| action.get("pins"))
+                .and_then(|pins| pins.get("target"))
+                .and_then(Value::as_str)
+                .and_then(|id| Uuid::parse_str(id).ok());
+            if let Some(target) = pinned_target {
+                if require_profile_editor_in_tx(conn, input.workspace_id, target, input.member_id)
+                    .await?
+                    .is_ok()
+                {
+                    return Ok(Ok(args_invalid_refusal(approval, input, now)));
+                }
+            }
+            return role_required_refusal(conn, approval, input, now, required_role).await;
+        }
         Err(_) => {
             // An unresolvable *target* must not teach a non-eligible decider
             // anything about the workspace. For the subject-judged role the gate
