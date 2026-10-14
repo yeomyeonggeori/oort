@@ -304,6 +304,12 @@ pub use run_progress::{
     visible_channels_in_tx, AheadRun, JobFacts, LeaseState, QueueEntry, RunEventRow, RunPhase,
     RunProgressBase, RunProgressRow,
 };
+// ADR-0200 증보 2026-10-15 R1 — the workspace "running now" read (#3847).
+pub use run_progress::{
+    active_run_cursor_in_tx, list_active_run_progress_base_in_tx, validated_active_run_limit,
+    visible_active_run_counts_in_tx, workspace_active_run_totals_in_tx, ActiveRunScope,
+    VisibleAgentRunCounts, ACTIVE_RUN_PAGE_MAX,
+};
 pub use status::{
     agent_partial_payload, agent_partial_tool_call_payload, agent_status_channel,
     opening_agent_status_payload, progress_agent_status_payload, terminal_agent_status_payload,

@@ -3763,6 +3763,60 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {description: Active human channel membership required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
 
+  /v1/workspaces/{workspaceId}/agent-runs:
+    get:
+      tags: [agents]
+      operationId: listActiveAgentRuns
+      summary: What is running now in the channels the caller is a member of, with per-agent counts.
+      description: >
+        ADR-0200 증보 2026-10-15 R1 (ADR-0202 D2). Every non-terminal run
+        (`queued`, `running`, `awaiting_approval`, `paused`; `claimed` is the
+        derived phase of a leased `queued` run) in a channel the caller is an
+        active member of — unarchived, not left; a DM's runs are visible to its
+        two people only — newest first, in the same row shape as the channel
+        progress read. Every agent kind (hosted, managed, BYOA, team AI) and
+        every trigger (mention, work) is listed. `scope=mine` narrows to runs the
+        caller requested (the author of a mention run's trigger message, or the
+        person who queued a work run); channel membership still applies on top.
+        `agents[]` gives each agent with at least one listed run its per-phase
+        counts over the whole visible set in that scope (independent of `limit`
+        and `cursor`) and `activeTotal`, the agent's non-terminal runs in the
+        whole workspace as a bare number. No id, channel, requester or title of
+        a run in a channel the caller cannot see appears anywhere; an agent with
+        no visible run is not listed. Human members only. The channel progress
+        read and the channel run list are unchanged.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: state
+          in: query
+          description: Only `active` is supported; absent means `active`. Any other value is a 400.
+          schema: {type: string, enum: [active], default: active}
+        - name: scope
+          in: query
+          description: >
+            `team` (default) = every visible run; `mine` = runs the caller
+            requested. Any other value is a 400.
+          schema: {type: string, enum: [mine, team], default: team}
+        - name: cursor
+          in: query
+          description: >
+            `nextCursor` of the previous page (a run id). A run the caller cannot
+            see is a 400, not an empty page.
+          schema: {type: string, format: uuid}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+      responses:
+        "200":
+          description: One keyset page of running runs, newest first, and per-agent counts.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AgentRunActivePage"}
+        "400": {description: Malformed identifier, unknown state or scope, or a cursor the caller cannot see, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Human workspace member required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
   /v1/workspaces/{workspaceId}/agent-runs/{runId}/events:
     get:
       tags: [agents]
@@ -13748,6 +13802,53 @@ components:
         runs:
           type: array
           items: {$ref: "#/components/schemas/AgentRunProgress"}
+
+    AgentRunActivePage:
+      type: object
+      additionalProperties: false
+      required: [runs, agents]
+      properties:
+        runs:
+          type: array
+          maxItems: 100
+          items: {$ref: "#/components/schemas/AgentRunProgress"}
+        agents:
+          type: array
+          description: >
+            One entry per agent with at least one run in the visible set of this
+            scope, ordered by agent id. Counts cover the whole set, not the page.
+          items: {$ref: "#/components/schemas/AgentRunActiveCounts"}
+        nextCursor:
+          type: string
+          format: uuid
+          description: Present only when a further page exists.
+
+    AgentRunActiveCounts:
+      type: object
+      additionalProperties: false
+      required: [agentMemberId, visible, activeTotal]
+      properties:
+        agentMemberId: {type: string, format: uuid}
+        visible:
+          type: object
+          additionalProperties: false
+          description: Runs of this agent the caller can see in this scope, by derived phase.
+          required: [queued, claimed, running, awaitingApproval, paused]
+          properties:
+            queued: {type: integer, minimum: 0}
+            claimed: {type: integer, minimum: 0}
+            running: {type: integer, minimum: 0}
+            awaitingApproval: {type: integer, minimum: 0}
+            paused: {type: integer, minimum: 0}
+        activeTotal:
+          type: integer
+          minimum: 0
+          description: >
+            The agent's non-terminal runs in the whole workspace — every channel
+            and every requester — as one number (never less than the visible
+            sum). Runs in channels the caller cannot see are counted here and
+            named nowhere. Several at once may run in parallel for a hosted
+            agent; the number does not assert that they do.
 
     AgentRunEvent:
       type: object

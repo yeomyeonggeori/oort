@@ -4030,6 +4030,14 @@ sample agent-run-progress get \
   "/v1/workspaces/{workspaceId}/channels/{channelId}/agent-runs/progress" \
   "/v1/workspaces/$WS/channels/$GENERAL_CHANNEL_ID/agent-runs/progress" 200 "" "$ACCESS"
 guard_jq '(.runs | type) == "array"' "progress answers a list"
+# ADR-0200 증보 2026-10-15 R1 (#3847): "running now" across the caller's channels. The
+# gate's one run was cancelled above, so the honest answer here is the empty shape; the
+# populated rows and counts are proved in agent_runs_active_conformance_pg.
+sample agent-runs-active get \
+  "/v1/workspaces/{workspaceId}/agent-runs" \
+  "/v1/workspaces/$WS/agent-runs?state=active&scope=team" 200 "" "$ACCESS"
+guard_jq '(.runs | type) == "array" and (.agents | type) == "array"' \
+  "running-now answers rows and per-agent counts"
 
 # #3396 (ADR-0147 증보 2026-10-03) — 개인 API 키. 운영자가 동료 한 사람에게 발급하고, 그 사람의
 # 본인 전용 에이전트가 쓴다. 키는 쓰기 전용이라 응답 어디에도 나오면 안 된다(비밀 needle 로 등록).
