@@ -726,7 +726,7 @@ async fn job_conversation(
     if !has_scope(identity, momo_auth::SCOPE_MESSAGES_READ) {
         return Ok(None);
     }
-    gated_channel_page(
+    let mut page = gated_channel_page(
         conn,
         caller,
         identity,
@@ -734,7 +734,36 @@ async fn job_conversation(
         HistoryCursor::Newest,
         JOB_CONVERSATION_ROWS,
     )
-    .await
+    .await?;
+    if let Some(messages) = page
+        .as_mut()
+        .and_then(|page| page.get_mut("messages"))
+        .and_then(Value::as_array_mut)
+    {
+        for message in messages {
+            elide_long_body(message);
+        }
+    }
+    Ok(page)
+}
+
+/// The most characters of one message body a composite tool returns (the agent
+/// context window's own elision bound). A longer body is cut at a character
+/// boundary and flagged `bodyTruncated`; `oort_conversation_read` returns it whole.
+/// Together with [`JOB_CONVERSATION_ROWS`] this bounds a composite's conversation
+/// to 30 × 2 000 characters (#3831 security review M1).
+const JOB_CONVERSATION_BODY_CHARS: usize = 2_000;
+
+fn elide_long_body(message: &mut Value) {
+    let Some(body) = message.get("body").and_then(Value::as_str) else {
+        return;
+    };
+    if body.chars().count() <= JOB_CONVERSATION_BODY_CHARS {
+        return;
+    }
+    let cut: String = body.chars().take(JOB_CONVERSATION_BODY_CHARS).collect();
+    message["body"] = Value::String(cut);
+    message["bodyTruncated"] = Value::Bool(true);
 }
 
 /// The rows of recent conversation a job carries — the agent context window's own

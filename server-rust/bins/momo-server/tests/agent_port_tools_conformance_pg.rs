@@ -16458,6 +16458,21 @@ async fn claim_carries_the_live_conversation_bounded_to_the_context_window() {
             .unwrap();
         assert!(sent["id"].is_string(), "{sent}");
     }
+    let long_body = "길".repeat(5_000);
+    let sent: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({"clientMsgId": Uuid::new_v4(), "body": long_body}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(sent["id"].is_string(), "{sent}");
     raise_mention_3831(&client, &base, &su, &fixture, "맨 끝 요청").await;
     let (status, claimed) = call(
         &client,
@@ -16478,6 +16493,27 @@ async fn claim_carries_the_live_conversation_bounded_to_the_context_window() {
         "newest first: {claimed}"
     );
     assert!(job["conversation"]["nextBefore"].is_i64());
+    // One long message cannot make the composite's answer unbounded: it is cut
+    // (and flagged) here, while `oort_conversation_read` still returns it whole.
+    let long = messages
+        .iter()
+        .find(|message| message["bodyTruncated"] == json!(true))
+        .expect("the 5000-character message is elided in the composite");
+    assert_eq!(long["body"].as_str().unwrap().chars().count(), 2_000);
+    let (status, whole) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_conversation_read",
+        json!({"channelId": fixture.channel, "limit": 5}),
+    )
+    .await;
+    assert_eq!(status, 200, "{whole}");
+    assert!(structured(&whole)["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|message| message["body"].as_str().unwrap_or_default().chars().count() == 5_000));
     // The queued snapshot is untouched and bounded by the same number.
     assert!(job["work"]["recentMessages"].as_array().unwrap().len() <= 30);
 }
