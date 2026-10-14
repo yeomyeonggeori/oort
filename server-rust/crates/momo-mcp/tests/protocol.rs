@@ -1104,6 +1104,70 @@ fn a_schema_refusal_is_byte_identical_to_the_adapter_invalid_arguments() {
     assert_eq!(json_body(&schema_refusal), json_body(&adapter_shape));
 }
 
+/// ADR-0162 증보 5 C3 — an `artifacts` fault refused at the transport carries
+/// `error.data` naming the field and the closed rule, and is byte-identical to
+/// the adapter's own `InvalidArtifacts` answer for the same violation, so the
+/// two layers still cannot be told apart.
+#[test]
+fn an_artifacts_schema_refusal_names_the_field_and_matches_the_adapter() {
+    let view = full_view();
+    let arguments = json!({
+        "leaseHandle": "h", "status": "succeeded",
+        "artifacts": {"resultKind": "merged"}
+    });
+    let refusal = response_of(invoke_with(
+        &modern(
+            "tools/call",
+            json!(5),
+            json!({"name": "oort_run_complete", "arguments": arguments}),
+        ),
+        Some(MODERN_PROTOCOL_VERSION),
+        Some("tools/call"),
+        Some("oort_run_complete"),
+        &view,
+    ));
+    assert_eq!(refusal.status, 400);
+    let body = json_body(&refusal);
+    assert_eq!(body["error"]["code"], json!(-32602));
+    assert_eq!(
+        body["error"]["message"],
+        json!("artifacts.resultKind must be one of pr_opened, branch_only, vm_only, no_change")
+    );
+    assert_eq!(
+        body["error"]["data"],
+        json!({
+            "field": "artifacts.resultKind",
+            "rule": "enum",
+            "allowed": ["pr_opened", "branch_only", "vm_only", "no_change"]
+        })
+    );
+    assert!(
+        !body.to_string().contains("merged"),
+        "the value is never echoed"
+    );
+
+    let admitted = invoke_with(
+        &modern(
+            "tools/call",
+            json!(5),
+            json!({"name": "oort_run_complete", "arguments": {"leaseHandle": "h", "status": "succeeded"}}),
+        ),
+        Some(MODERN_PROTOCOL_VERSION),
+        Some("tools/call"),
+        Some("oort_run_complete"),
+        &view,
+    );
+    let Outcome::Tool(call) = admitted else {
+        panic!("admitted");
+    };
+    let violation =
+        momo_mcp::ArtifactViolation::on("artifacts.resultKind", momo_mcp::ArtifactRule::Enum)
+            .expect("a closed path");
+    let adapter_shape = tool_failure(&call, ToolFailure::InvalidArtifacts(violation));
+    assert_eq!(adapter_shape.status, refusal.status);
+    assert_eq!(json_body(&adapter_shape), body);
+}
+
 /// Every published constraint is enforced, and every violation is the same
 /// verdict. Table-driven so a new catalog keyword cannot be added without a
 /// case here.

@@ -509,6 +509,7 @@ pub(crate) fn run_response(run: &momo_agent::AgentRunRow) -> crate::dto::AgentRu
         input: run.input.clone(),
         output: run.output.clone(),
         error: run.error.clone(),
+        agent_reported: crate::routes::agent_gateway::agent_reported_of(run.output.as_ref()),
         started_at_ms: run.started_at.map(epoch_ms),
         finished_at_ms: run.finished_at.map(epoch_ms),
         created_at_ms: epoch_ms(run.created_at),

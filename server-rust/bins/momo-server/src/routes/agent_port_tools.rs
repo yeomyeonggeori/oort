@@ -1462,6 +1462,7 @@ async fn run_event(
                             Some(caller.token_id),
                             momo_mcp::TOOL_RUN_EVENT,
                             reason,
+                            None,
                         )
                         .await?;
                         return Ok(Err(ToolFailure::InvalidArguments));
@@ -1534,15 +1535,16 @@ async fn run_complete(
                 Ok(handle) => handle,
                 Err(failure) => return Ok(Err(failure)),
             };
-            // D12 — a malformed `artifacts` refuses the WHOLE completion before
+            // D12 — a malformed `artifacts` (or, ADR-0162 증보 5 C1, a broken
+            // result-contract cross rule) refuses the WHOLE completion before
             // anything is written; the audit row is the only trace, and the lease
-            // is untouched so the agent can complete again without it.
+            // is untouched so the agent can fix the named field and complete again.
             let artifacts = match validated_gateway_artifacts(
                 raw_artifacts.as_ref(),
                 momo_t3::work_share::allowed_pr_hosts(),
             ) {
                 Ok(artifacts) => artifacts,
-                Err(reason) => {
+                Err(refusal) => {
                     let lease = GatewayLeaseBinding {
                         job_id: handle.job_id,
                         lease_id: handle.lease_id,
@@ -1564,10 +1566,13 @@ async fn run_complete(
                             caller.agent_member_id,
                             Some(caller.token_id),
                             momo_mcp::TOOL_RUN_COMPLETE,
-                            reason,
+                            refusal.reason,
+                            Some(refusal.violation),
                         )
                         .await?;
-                        return Ok(Err(ToolFailure::InvalidArguments));
+                        // ADR-0162 증보 5 C3 — still -32602, now naming the field
+                        // and the closed rule so the agent can fix just that.
+                        return Ok(Err(ToolFailure::InvalidArtifacts(refusal.violation)));
                     }
                     // Not live: drop the artifacts and let the ordinary
                     // path answer (a finished run replays its first answer) (no audit row for a dead handle).
