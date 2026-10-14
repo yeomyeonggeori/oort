@@ -17,6 +17,12 @@ import type {Member} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {SafeAreaProvider, useSafeAreaInsets} from 'react-native-safe-area-context';
 import {SessionProvider} from '../src/session/useSession';
+import {
+  agentRunLedgerFromWire,
+  type AgentRunLedgerEvent,
+  type AgentRunProgress,
+} from '@momo/core/lib/api';
+import {RunLedgerSheet} from '../src/features/agents/RunLedgerSheet';
 import {ApiError} from '@momo/core/lib/api';
 import type {ProviderLink} from '@momo/core/features/settings/api';
 import {AiConnectCard, TEAM_QUERY_KEY} from '../src/features/aiConnect/AiConnectCard';
@@ -348,6 +354,8 @@ const OTHER = (
   ROSTER.find(m => m.kind === 'human' && m.id !== SELF) ?? ROSTER[1] ?? ROSTER[0]
 ).id;
 const NOW = 1_700_000_000_000;
+/** 하네스 세션의 워크스페이스. 원장 씨앗의 키가 같은 값을 읽는다(#3824). */
+const HARNESS_WS = 'measure-ws';
 
 const MESSAGE: Message = {
   id: '00000000-0000-7000-8000-0000000000a1',
@@ -2045,6 +2053,11 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   }
 
   switch (name) {
+    // #3824: 보낸 메시지 아래 상태 줄과 폰의 작업 기록 시트.
+    case 'run-status':
+      return <RunStatusSurface />;
+    case 'run-ledger':
+      return <RunLedgerSurface />;
     case 'quote-ready': {
       const draft = quoteDraftFor({
         ...MESSAGE,
@@ -4750,7 +4763,7 @@ function SearchResults(): React.JSX.Element {
 const HARNESS_SELF = ROSTER.find(member => member.id === SELF);
 const HARNESS_MEMBER = {
   id: SELF,
-  workspaceId: 'measure-ws',
+  workspaceId: HARNESS_WS,
   kind: 'human',
   displayName: HARNESS_SELF?.displayName ?? '곽성재',
   handle: HARNESS_SELF?.handle ?? 'seongjae',
@@ -4820,6 +4833,144 @@ function AiConnectCardWithComposer({
       />
     </>
   );
+}
+
+// ---- #3824: 메시지 아래 상태 줄 · 작업 기록 시트 -----------------------------------
+//
+//   RUN-STATUS  내가 보낸 메시지 세 줄: 깨우는 신호 보냄(대기) · 작업 중 · 완료(걸린 시간)
+//   RUN-LEDGER  폰 작업 기록 시트: 걸린 시간, 접힌 깨우는 신호(· 2번), 이 앱이 모르는
+//               원장 종류 한 줄
+//
+// 시각은 `Date.now()` 기준이다. 표면이 지금 시계로 「12분째」를 세므로 고정 `NOW` 를
+// 쓰면 사진이 수십 년째라고 말한다. 원장은 하네스 캐시에 씨앗으로 넣는다(같은 키).
+const RUN_IDS = {
+  woken: '0199aa11-2222-7000-8000-0000000003a1',
+  working: '0199aa11-2222-7000-8000-0000000003a2',
+  done: '0199aa11-2222-7000-8000-0000000003a3',
+} as const;
+
+function runFixture(
+  id: string,
+  triggerMessageId: string,
+  over: Partial<AgentRunProgress>,
+): AgentRunProgress {
+  const t = Date.now();
+  return {
+    id,
+    channelId: 'ch-measure',
+    agentMemberId: AGENT,
+    triggerMessageId,
+    triggerSummary: '채널 하나 만들어 줄래요? 이름은 grokbot-lab으로요.',
+    status: 'queued',
+    phase: 'queued',
+    leaseState: 'none',
+    stepCount: 0,
+    ahead: [],
+    createdAtMs: t - 4_000,
+    updatedAtMs: t - 4_000,
+    ...over,
+  };
+}
+
+function seedRunLedger(runId: string, events: AgentRunLedgerEvent[]): void {
+  harnessClient.setQueryData(['agent-run-events', HARNESS_WS, runId], {runId, events});
+}
+
+function RunStatusSurface(): React.JSX.Element {
+  const t = Date.now();
+  const sent = (id: string, body: string, at: number): Message => ({
+    ...MESSAGE,
+    id,
+    authorMemberId: SELF,
+    body,
+    createdAtMs: at,
+  });
+  const woken = runFixture(RUN_IDS.woken, 'm-run-1', {});
+  seedRunLedger(RUN_IDS.woken, [
+    {ordinal: 1, kind: 'queued', createdAtMs: t - 4_000},
+    {ordinal: 2, kind: 'doorbell_rung', code: 'leading_ok', createdAtMs: t - 3_500},
+  ]);
+  const working = runFixture(RUN_IDS.working, 'm-run-2', {
+    phase: 'running',
+    status: 'running',
+    leaseState: 'live',
+    createdAtMs: t - 12 * 60_000 - 20_000,
+    claimedAtMs: t - 12 * 60_000 - 8_000,
+    startedAtMs: t - 12 * 60_000,
+    lastEventAtMs: t - 65_000,
+  });
+  seedRunLedger(RUN_IDS.working, [
+    {ordinal: 1, kind: 'queued', createdAtMs: t - 12 * 60_000 - 20_000},
+    {ordinal: 2, kind: 'doorbell_rung', code: 'leading_ok', createdAtMs: t - 12 * 60_000 - 19_000},
+  ]);
+  const done = runFixture(RUN_IDS.done, 'm-run-3', {
+    phase: 'succeeded',
+    status: 'succeeded',
+    createdAtMs: t - 40 * 60_000,
+    claimedAtMs: t - 40 * 60_000 + 12_000,
+    startedAtMs: t - 40 * 60_000 + 14_000,
+    finishedAtMs: t - 40 * 60_000 + 192_000,
+  });
+  return (
+    <Frame label="보낸 메시지 아래 상태 줄 (#3824)">
+      <MessageRow
+        message={sent('m-run-3', '@grokbot 어제 회의 요약해 줄래요?', t - 40 * 60_000)}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={t}
+        runStatus={[done]}
+      />
+      <MessageRow
+        message={sent('m-run-2', '@grokbot 릴리스 노트 초안 써 줄래요?', t - 12 * 60_000 - 20_000)}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={t}
+        runStatus={[working]}
+      />
+      <MessageRow
+        message={sent('m-run-1', '@grokbot 채널 하나 만들어 줄래요? 이름은 grokbot-lab으로요.', t - 4_000)}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={t}
+        runStatus={[woken]}
+      />
+    </Frame>
+  );
+}
+
+function RunLedgerSurface(): React.JSX.Element {
+  const t = Date.now();
+  const at = t - 12 * 60_000 - 20_000;
+  const run = runFixture(RUN_IDS.working, 'm-run-2', {
+    phase: 'running',
+    status: 'running',
+    leaseState: 'live',
+    createdAtMs: at,
+    claimedAtMs: at + 12_000,
+    startedAtMs: at + 20_000,
+    lastEventAtMs: t - 65_000,
+    latestStage: 'grokbot-lab 이름 점검',
+    stepCount: 1,
+  });
+  seedRunLedger(
+    RUN_IDS.working,
+    agentRunLedgerFromWire({
+      runId: RUN_IDS.working,
+      events: [
+        {ordinal: 1, kind: 'queued', createdAtMs: at},
+        {ordinal: 2, kind: 'doorbell_rung', code: 'leading_ok', createdAtMs: at + 1_000},
+        {ordinal: 3, kind: 'doorbell_rung', code: 'trailing_ok', createdAtMs: at + 6_000},
+        {ordinal: 4, kind: 'tool_call', code: 'ok', createdAtMs: at + 7_000},
+        {ordinal: 5, kind: 'claimed', createdAtMs: at + 12_000},
+        {ordinal: 6, kind: 'started', createdAtMs: at + 20_000},
+        {ordinal: 7, kind: 'stage', stage: 'grokbot-lab 이름 점검', createdAtMs: t - 65_000},
+      ],
+    }).events,
+  );
+  return <RunLedgerSheet progress={run} directory={DIRECTORY} onClose={() => {}} />;
 }
 
 const harnessClient = new QueryClient({
