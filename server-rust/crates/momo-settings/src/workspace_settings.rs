@@ -19,6 +19,10 @@ pub const ALLOWED_SETTINGS_KEYS: &[&str] = &[
     "role_labels",
     "welcome_agent_member_id",
     "welcome_prompt",
+    // ADR-0201 D8: the team-AI fast-path switch. A bool; the route that stores it
+    // also provisions/pauses the member. The member id is server-written and is
+    // deliberately NOT here.
+    "team_ai_fast_path",
 ];
 
 /// Human membership roles that may carry a display override. Agent labels are
@@ -63,6 +67,8 @@ pub enum WorkspaceSettingsInvalid {
     RoleLabelsEntryLength,
     #[error("welcome_agent_member_id must be a uuid")]
     WelcomeAgentMemberIdShape,
+    #[error("team_ai_fast_path must be true or false")]
+    TeamAiFastPathShape,
     #[error("welcome_prompt must be a string")]
     WelcomePromptShape,
     #[error("welcome_prompt must be at most {MAX_WELCOME_PROMPT_CHARS} characters")]
@@ -112,6 +118,13 @@ fn validate_settings_value(key: &str, value: &Value) -> Result<(), WorkspaceSett
         "role_labels" => validate_role_labels(value),
         "welcome_agent_member_id" => validate_welcome_agent_member_id(value),
         "welcome_prompt" => validate_welcome_prompt(value),
+        "team_ai_fast_path" => {
+            if value.is_boolean() {
+                Ok(())
+            } else {
+                Err(WorkspaceSettingsInvalid::TeamAiFastPathShape)
+            }
+        }
         _ => Err(WorkspaceSettingsInvalid::UnknownKey(key.to_string())),
     }
 }

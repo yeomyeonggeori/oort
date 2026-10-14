@@ -16010,3 +16010,265 @@ async fn a_revoked_invite_cannot_be_claimed_and_a_flag_on_an_invite_is_refused()
     let (status, ok) = claim_3789(&client, &base, &fixture, second).await;
     assert_eq!(status, 200, "restored authority claims fine: {ok}");
 }
+
+/// ADR-0201 acceptance: a card the **team AI** raised is decided by the very same
+/// route and executes with the **approver's** authority.
+///
+/// The proposal goes through `momo_workspace_actions::team_ai::propose_in_tx` (the function the
+/// worker calls); the decision is the real HTTP route. What this proves that the
+/// worker suite cannot: the extra `via_ai` key in the payload does not trip the
+/// decision, the role gate still refuses a plain member (403 `role_required`, the
+/// approval intact), an agent still cannot decide, and an admin's approval
+/// creates the channel as *that admin* — the team AI never held the authority.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_team_ai_card_is_executed_by_the_approver_and_by_nobody_else() {
+    use momo_workspace_actions::team_ai::{self, ProposalContext, ViaAi};
+
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let plain_jwt = seed_plain_member(&su, &fixture).await;
+    let (workspace, human, channel) = (fixture.workspace, fixture.human, fixture.channel);
+
+    // The team AI, provisioned by the shipped function, seated in the channel.
+    let team_ai_id = momo_db::with_tenant_tx(&su, workspace, move |conn| {
+        Box::pin(async move { team_ai::enable_in_tx(conn, workspace, human).await })
+    })
+    .await
+    .expect("enable");
+    sqlx::query("INSERT INTO membership (workspace_id, channel_id, member_id) VALUES ($1,$2,$3)")
+        .bind(workspace)
+        .bind(channel)
+        .bind(team_ai_id)
+        .execute(&su)
+        .await
+        .unwrap();
+
+    // The admin asks; a run is raised for the team AI.
+    let name = format!("ta-{}", &Uuid::new_v4().simple().to_string()[..8]);
+    let run_id = momo_db::with_tenant_tx(&su, workspace, move |conn| {
+        Box::pin(async move {
+            let sent = momo_messaging::send_message_in_tx(
+                conn,
+                workspace,
+                momo_messaging::NewMessage::text(channel, human, "@oort-helper 채널 만들어줘".to_string()),
+            )
+            .await?;
+            let created = momo_agent::create_agent_run_in_tx(
+                conn,
+                workspace,
+                momo_agent::NewAgentRun {
+                    channel_id: channel,
+                    trigger: momo_agent::RunTrigger::Mention {
+                        message_id: sent.message.id,
+                        agent_member_id: team_ai_id,
+                    },
+                    parent_run_id: None,
+                    max_steps: 50,
+                    depth: 0,
+                    input: json!({"schema": "momo.agent_run.input.v0", "surface": "mention", "prompt": "x", "depth": 0}),
+                },
+            )
+            .await?;
+            Ok(created.id)
+        })
+    })
+    .await
+    .unwrap();
+    let args = json!({"name": name, "kind": "public"});
+    let proposed = {
+        let args = args.clone();
+        momo_db::with_tenant_tx(&su, workspace, move |conn| {
+            let args = args.clone();
+            Box::pin(async move {
+                let context = ProposalContext {
+                    workspace_id: workspace,
+                    run_id,
+                    channel_id: channel,
+                    agent_member_id: team_ai_id,
+                    trigger_message_id: None,
+                    now_ms: chrono::Utc::now().timestamp_millis(),
+                    expires_at: chrono::Utc::now() + chrono::Duration::minutes(30),
+                    via: ViaAi {
+                        model: "m".into(),
+                        latency_ms: 1,
+                        prompt_tokens: 1,
+                        completion_tokens: 1,
+                    },
+                };
+                team_ai::propose_in_tx(conn, &context, "channel.create", &args, None).await
+            })
+        })
+        .await
+        .expect("propose tx")
+        .expect("a card")
+    };
+    let approval_id = proposed.approval_id;
+    assert!(
+        channel_row_3706(&su, workspace, &name).await.is_none(),
+        "a proposal executes nothing"
+    );
+
+    // A plain member cannot decide it.
+    let (status, _h, refused) = decide_as(
+        &client,
+        &base,
+        workspace,
+        &plain_jwt,
+        approval_id,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["status"], "role_required");
+    assert!(channel_row_3706(&su, workspace, &name).await.is_none());
+
+    // The team AI cannot decide its own card (an agent bearer is not a human).
+    let agent_bearer = raw_credential(workspace);
+    let agent_try = client
+        .post(format!("{base}/v1/workspaces/{workspace}/approvals/{approval_id}/decision"))
+        .bearer_auth(&agent_bearer)
+        .json(&json!({"approvalId": approval_id, "approve": true, "clientDecisionId": Uuid::new_v4()}))
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        matches!(agent_try.status().as_u16(), 401 | 403),
+        "an agent cannot decide"
+    );
+    assert!(channel_row_3706(&su, workspace, &name).await.is_none());
+
+    // The admin approves: the channel exists, made by the admin.
+    let (status, _h, decided) = decide_as(
+        &client,
+        &base,
+        workspace,
+        &fixture.human_jwt,
+        approval_id,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{decided}");
+    let (_, kind, created_by) = channel_row_3706(&su, workspace, &name)
+        .await
+        .expect("the channel now exists");
+    assert_eq!(kind, "public");
+    assert_eq!(
+        created_by, human,
+        "executed with the APPROVER's authority, not the team AI's"
+    );
+    assert_ne!(created_by, team_ai_id);
+}
+
+/// ADR-0201 D8: the operator's switch provisions the team AI in the same
+/// transaction, a plain member cannot flip it, the member id is not writable, and
+/// "off" pauses the member instead of deleting it.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_team_ai_switch_provisions_pauses_and_cannot_be_forged() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let plain_jwt = seed_plain_member(&su, &fixture).await;
+    let url = format!("{base}/v1/workspaces/{}/settings", fixture.workspace);
+    let patch = |jwt: String, body: Value| {
+        let (client, url) = (client.clone(), url.clone());
+        async move {
+            let response = client
+                .patch(url)
+                .bearer_auth(jwt)
+                .json(&body)
+                .send()
+                .await
+                .unwrap();
+            (
+                response.status().as_u16(),
+                response.json::<Value>().await.unwrap_or(Value::Null),
+            )
+        }
+    };
+
+    let (status, _) = patch(plain_jwt.clone(), json!({"team_ai_fast_path": true})).await;
+    assert!(
+        matches!(status, 401 | 403),
+        "a plain member cannot flip it: {status}"
+    );
+    let none: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM member WHERE workspace_id=$1 AND handle='oort-helper'",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(none, 0);
+
+    // The member id cannot be written by hand, and the flag must be a bool.
+    let (status, _) = patch(
+        fixture.human_jwt.clone(),
+        json!({"team_ai_agent_member_id": Uuid::new_v4()}),
+    )
+    .await;
+    assert_eq!(status, 400, "the nominee is server-written only");
+    let (status, _) = patch(
+        fixture.human_jwt.clone(),
+        json!({"team_ai_fast_path": "yes"}),
+    )
+    .await;
+    assert_eq!(status, 400);
+
+    let (status, body) = patch(
+        fixture.human_jwt.clone(),
+        json!({"team_ai_fast_path": true}),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["team_ai_fast_path"], true);
+    let member =
+        Uuid::parse_str(body["team_ai_agent_member_id"].as_str().expect("member id")).unwrap();
+    let (kind, owner): (String, Uuid) = sqlx::query_as(
+        "SELECT m.kind::text, a.owner_human_id FROM member m JOIN agent a ON a.member_id=m.id WHERE m.id=$1",
+    ).bind(member).fetch_one(&su).await.unwrap();
+    assert_eq!(
+        (kind.as_str(), owner),
+        ("agent", fixture.human),
+        "a first-class agent member owned by the operator"
+    );
+    let (paused, tools): (bool, Value) =
+        sqlx::query_as("SELECT paused, enabled_tools FROM agent_profile WHERE agent_member_id=$1")
+            .bind(member)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert!(!paused);
+    assert_eq!(tools, json!(["workspace_action_propose"]));
+
+    // Off pauses; on again reuses the same member.
+    let (status, body) = patch(
+        fixture.human_jwt.clone(),
+        json!({"team_ai_fast_path": false}),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let paused: bool =
+        sqlx::query_scalar("SELECT paused FROM agent_profile WHERE agent_member_id=$1")
+            .bind(member)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert!(paused, "off pauses, it does not delete");
+    let (_, body) = patch(
+        fixture.human_jwt.clone(),
+        json!({"team_ai_fast_path": true}),
+    )
+    .await;
+    assert_eq!(body["team_ai_agent_member_id"], member.to_string());
+}

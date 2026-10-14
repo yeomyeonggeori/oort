@@ -1336,8 +1336,11 @@ paths:
         32 entries, each ≤ 64 bytes), `role_labels` (object whose keys
         are `owner`/`admin`/`member`/`guest`, values non-empty strings ≤ 48
         UTF-8 bytes), `welcome_agent_member_id` (uuid of an active workspace
-        agent, or null to delete), and `welcome_prompt` (string, ≤ 2000
-        characters). `role_labels` is replaced whole — omit a role key to
+        agent, or null to delete), `welcome_prompt` (string, ≤ 2000
+        characters), and `team_ai_fast_path` (boolean, ADR-0201: true
+        provisions the workspace's "oort 도우미" agent member and unpauses it,
+        false pauses it; the response also carries the server-written
+        `team_ai_agent_member_id`, which is not writable). `role_labels` is replaced whole — omit a role key to
         drop that override; `null` deletes the key (client default labels).
         Serialized body over 8192 bytes is 413. There is no PUT whole-replace.
       security:
