@@ -79,6 +79,7 @@ import {
   RunListView,
 } from "./AgentRunLedgerView";
 import { useRunLedger, type RunLedgerView } from "./useRunLedger";
+import { StopRunControl } from "./StopRunControl";
 import {
   closeWorkPanel,
   switchWorkPanelRun,
@@ -246,6 +247,15 @@ export function AgentWorkPanel() {
         server={server}
         listShown={runEntries.length > 1}
         onClose={close}
+      />
+      {/* 사람의 중단(#3852). 서버가 아는 열린 run에만 선다 — 서버가 모르는 run은
+          열렸는지 닫혔는지 이 화면이 단정할 수 없다. run을 바꾸면 새로 그린다. */}
+      <StopRunControl
+        key={target.runId.toLowerCase()}
+        runId={target.runId}
+        agentName={name}
+        open={server !== null && isOpenRunPhase(server.phase)}
+        live={railLive}
       />
       <PanelBody
         log={log}

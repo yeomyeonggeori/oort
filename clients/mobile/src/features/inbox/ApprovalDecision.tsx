@@ -9,7 +9,7 @@ import {
   preselectedHostId,
   spawnHostGate,
 } from '@momo/core/features/timeline/spawnHostChoice';
-import React, {useCallback, useRef, useState} from 'react';
+import React, {useCallback, useImperativeHandle, useRef, useState} from 'react';
 import {AccessibilityInfo, Pressable, StyleSheet, Text, View} from 'react-native';
 import {font, radius, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {Sentence} from '../../design/atoms';
@@ -46,6 +46,18 @@ import {SpawnHostChoice} from './SpawnHostChoice';
 type Direction = 'approve' | 'reject';
 
 /**
+ * 버튼 밖에서 같은 결정을 부르는 손잡이 (#2595).
+ *
+ * 타임라인 행은 접근성 요소 하나다(`MessageRow` 의 「행 하나 = 요소 하나」). 그 안의
+ * 버튼에는 VoiceOver 가 닿지 못하므로, 행이 로터 동작(「승인」·「거부」)을 내고 그
+ * 동작이 이 손잡이를 부른다. **두 번째 결정 경로가 아니다** — 버튼이 부르는 바로 그
+ * `commit` 이고, 멱등 키·보내는 중 잠금·호스트 판정·403 문장이 모두 같다.
+ */
+export interface ApprovalDecisionHandle {
+  decide: (direction: Direction) => void;
+}
+
+/**
  * 확정 버튼이 뜬 뒤 탭을 받기까지. **승인 결정은 이제 이 값을 쓰지 않는다**(#3819):
  * 아직 읽는 곳은 턴 중단 확인(`StopTurnControl`) 하나다.
  */
@@ -69,7 +81,7 @@ type NoticeTone = 'error' | 'quiet';
  * 승인에서 이 문장은 바로 위 「관리자만 승인할 수 있습니다」와 정면으로 부딪친다
  * (#2513 design-review H-1). 그래서 호출자가 바꾸거나 뺄 수 있다(`lead`).
  */
-export const DEFAULT_DECISION_LEAD = '실행 전에 회원님의 허가가 필요합니다.';
+export const DEFAULT_DECISION_LEAD = '실행하기 전에 허가가 필요해요.';
 
 export function ApprovalDecision({
   approvalId,
@@ -80,7 +92,10 @@ export function ApprovalDecision({
   forbiddenCopy = null,
   lead = DEFAULT_DECISION_LEAD,
   shape = 'box',
+  decisionRef,
 }: {
+  /** 로터 동작이 같은 결정을 부를 손잡이 (#2595). 인박스는 버튼에 직접 닿으므로 넘기지 않는다. */
+  decisionRef?: React.Ref<ApprovalDecisionHandle>;
   /**
    * 버튼 모양. `pill` 은 대화 안 에이전트 카드의 행동 줄(DS2-4, 시안 A `.a-pill`:
    * 주 = 잉크, 보조 = surface2, 반경 알약)이다. 인박스·잠금화면은 `box` 그대로다.
@@ -153,7 +168,7 @@ export function ApprovalDecision({
   const busy = sending !== null;
 
   const commit = useCallback(
-    async (direction: Direction) => {
+    async (direction: Direction, spoken = false) => {
       if (sendingRef.current) return;
       // 실행할 호스트가 하나도 없으면 승인은 나가지 않는다. 서버가 409로 답할 것을
       // 결정 전에 알고 있고(코어 `spawnHostGate`), 알면서 보내는 것은 헛걸음이다.
@@ -193,7 +208,11 @@ export function ApprovalDecision({
             return;
           }
           setNoticeTone('error');
-          setErrorCopy(outcome.errorCopy ?? '결정을 처리하지 못했어요.');
+          const copy = outcome.errorCopy ?? '결정을 처리하지 못했어요.';
+          setErrorCopy(copy);
+          // 로터로 결정한 사람의 초점은 행 위에 있고, 이 줄은 그 행의 낭독 라벨에
+          // 들어가지 않는다. 소리로 한 번 말하지 않으면 실패가 들리지 않는다.
+          if (spoken) AccessibilityInfo.announceForAccessibility(copy);
           return;
         }
         // `superseded`도 결정된 것이다(다른 기기에서 이미 결정됐거나 만료됨).
@@ -214,6 +233,12 @@ export function ApprovalDecision({
       onSettled,
       workspaceId,
     ],
+  );
+
+  useImperativeHandle(
+    decisionRef,
+    () => ({decide: (direction: Direction) => void commit(direction, true)}),
+    [commit],
   );
 
   // 기한이 지난 요청에 보내는 결정은 승인도 거부도 아니다 — 서버가 만료로 확정한다.
@@ -244,7 +269,9 @@ export function ApprovalDecision({
             styles.buttonQuiet,
             pill && styles.pillButton,
             pill && styles.pillQuiet,
-            busy && styles.buttonInert,
+            // 잠긴 모양은 **반대편**만 입는다. 자기 결정이 나가는 중인 버튼은 흐리지
+            // 않는다 — 「보내는 중」은 지금 읽혀야 하는 낱말이다(#3829 M4).
+            sending === 'approve' && styles.buttonInert,
             pressed && !busy && styles.pressed,
           ]}
           testID={`${testIDPrefix}-reject`}>
@@ -271,8 +298,15 @@ export function ApprovalDecision({
             hostGate.canApprove ? styles.buttonCommit : styles.buttonQuiet,
             pill && styles.pillButton,
             pill && (hostGate.canApprove ? styles.pillCommit : styles.pillQuiet),
-            (busy || !hostGate.canApprove) && styles.buttonInert,
-            pressed && !busy && hostGate.canApprove && styles.pressed,
+            (sending === 'reject' || !hostGate.canApprove) && styles.buttonInert,
+            // 눌림은 **채움의 눌린 값**이다. 옅은 눌림 회색(`surfacePressed`)으로
+            // 갈아 끼우면 채움의 흰 글자가 옅은 바탕에 앉는다(#3829 M4 — 라이트
+            // 1:1 근처). 상자는 `accentPressed`(atoms `PrimaryButton` 과 같은 값),
+            // 알약은 잉크 채움을 지키고 살짝 흐린다(웹 `hover:opacity-90` 의 짝).
+            pressed &&
+              !busy &&
+              hostGate.canApprove &&
+              (pill ? styles.pillCommitPressed : styles.buttonCommitPressed),
           ]}
           testID={`${testIDPrefix}-approve`}>
           <Text
@@ -316,6 +350,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   },
   buttonQuiet: {borderWidth: 1, borderColor: color.border},
   buttonCommit: {backgroundColor: color.accent},
+  buttonCommitPressed: {backgroundColor: color.accentPressed},
   buttonInert: {opacity: 0.6},
   /** 시안 `.a-pill{border-radius:19px}` — 높이는 엄지 바닥 44 를 지킨다. */
   pillButton: {borderRadius: radius.pill},
@@ -325,6 +360,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   pillQuiet: {borderWidth: 0, backgroundColor: color.surfaceMuted},
   /** `.a-pill.pri{background:var(--primary);color:var(--onPrimary)}`. */
   pillCommit: {backgroundColor: color.primary},
+  pillCommitPressed: {opacity: 0.85},
   pillCommitLabel: {color: color.onPrimary},
   buttonQuietLabel: {fontSize: font.label, fontWeight: '600', color: color.text},
   buttonCommitLabel: {fontSize: font.label, fontWeight: '600', color: color.onAccent},
@@ -354,22 +390,22 @@ const buildStyles = (color: Palette) => StyleSheet.create({
 export function decisionReceiptCopy(outcome: DecisionOutcome): string {
   if (outcome.kind === 'superseded') {
     if (outcome.status === 'approved') {
-      return '이미 승인으로 기록되어 있었습니다.';
+      return '이미 승인으로 기록되어 있었어요.';
     }
     if (outcome.status === 'rejected') {
-      return '이미 거부로 기록되어 있었습니다.';
+      return '이미 거부로 기록되어 있었어요.';
     }
     if (outcome.status === 'expired') {
-      return '결정 전에 만료되어 만료로 기록되었습니다.';
+      return '결정 전에 만료되어 만료로 기록되었어요.';
     }
     if (outcome.status === 'cancelled') {
-      return '이 요청은 취소되어 있었습니다.';
+      return '이 요청은 취소되어 있었어요.';
     }
-    return outcome.note ?? '이 요청은 이미 결정되어 있었습니다.';
+    return outcome.note ?? '이 요청은 이미 결정되어 있었어요.';
   }
-  if (outcome.status === 'approved') return '승인을 기록했습니다.';
-  if (outcome.status === 'rejected') return '거부를 기록했습니다.';
+  if (outcome.status === 'approved') return '승인을 기록했어요.';
+  if (outcome.status === 'rejected') return '거부를 기록했어요.';
   // 200을 받았지만 원장이 알아볼 수 없는 상태를 답했다. 무엇으로 기록됐는지 우리가
   // 모르므로, 안다고 말하지 않는다.
-  return '결정을 보냈습니다. 기록된 상태는 목록에서 확인하세요.';
+  return '결정을 보냈어요. 기록된 상태는 목록에서 확인해 주세요.';
 }

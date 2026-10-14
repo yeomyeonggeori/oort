@@ -388,7 +388,7 @@ describe('#1084 — 타임라인 승인 카드에서 바로 결정한다', () =>
     expect(within(card).getByTestId(`${PREFIX}-approve`)).toBeTruthy();
     expect(within(card).getByTestId(`${PREFIX}-reject`)).toBeTruthy();
     expect(
-      within(card).queryByText('이 결정은 인박스나 데스크톱 앱에서 처리할 수 있습니다.'),
+      within(card).queryByText('이 결정은 인박스나 데스크톱 앱에서 할 수 있어요.'),
     ).toBeNull();
   });
 
@@ -502,7 +502,7 @@ describe('#1084 — 403 은 「관리자가 승인해야 해요」라는 조용�
     await armAndCommit('approve');
     const error = await screen.findByTestId(`${PREFIX}-error`);
     expect(error.props.children).toBe(
-      '이 승인을 결정할 권한이 없습니다. 채널 멤버인지 확인하세요.',
+      '이 승인을 결정할 권한이 없어요. 채널 멤버인지 확인해 주세요.',
     );
     expect(flat(error.props.style).color).toBe(color.danger);
     // 버튼은 그대로 남는다(다른 멤버가 이어받을 수 있다).
@@ -512,9 +512,9 @@ describe('#1084 — 403 은 「관리자가 승인해야 해요」라는 조용�
 
 // =============================================================================
 describe('design-review H-1 — 카드가 누가 결정하는지를 한 가지로만 말한다', () => {
-  const DEFAULT_LEAD = '실행 전에 회원님의 허가가 필요합니다.';
+  const DEFAULT_LEAD = '실행하기 전에 허가가 필요해요.';
 
-  it('행동 승인 카드는 「회원님의 허가」 머리 문장을 세우지 않는다 — 결정 권한 행과 부딪친다', () => {
+  it('행동 승인 카드는 기본 머리 문장(「허가가 필요해요」)을 세우지 않는다 — 결정 권한 행과 부딪친다', () => {
     renderRow({});
     const card = screen.getByTestId('agent-card');
     expect(within(card).getByText('관리자만 승인할 수 있어요.')).toBeTruthy();
@@ -565,7 +565,7 @@ describe('design-review H-1 — 카드가 누가 결정하는지를 한 가지�
         [
           APPROVAL_ID,
           {
-            note: '승인을 기록했습니다.',
+            note: '승인을 기록했어요.',
             status: 'approved',
             secretOnce: {kind: 'invite_link', value: SECRET, expiresAtMs: null},
           },
@@ -654,7 +654,7 @@ describe('#2513 — 1회 링크는 영수증 자리에만 선다 (ADR-0182 ① �
       receipts: new Map([
         [
           APPROVAL_ID,
-          {note: '승인을 기록했습니다.', status: 'approved', secretOnce: SECRET_ONCE},
+          {note: '승인을 기록했어요.', status: 'approved', secretOnce: SECRET_ONCE},
         ],
       ]),
     });
@@ -681,7 +681,7 @@ describe('#2513 — 1회 링크는 영수증 자리에만 선다 (ADR-0182 ① �
       receipts: new Map([
         [
           APPROVAL_ID,
-          {note: '승인을 기록했습니다.', status: 'approved', secretOnce: SECRET_ONCE},
+          {note: '승인을 기록했어요.', status: 'approved', secretOnce: SECRET_ONCE},
         ],
       ]),
     });
@@ -712,7 +712,7 @@ describe('#2513 — 1회 링크는 영수증 자리에만 선다 (ADR-0182 ① �
       receipts: new Map([
         [
           APPROVAL_ID,
-          {note: '승인을 기록했습니다.', status: 'approved', secretOnce: SECRET_ONCE},
+          {note: '승인을 기록했어요.', status: 'approved', secretOnce: SECRET_ONCE},
         ],
       ]),
     });
@@ -741,7 +741,7 @@ describe('#2513 — 1회 링크는 영수증 자리에만 선다 (ADR-0182 ① �
   it('링크가 없는 카드에는 그 로터 항목도 없다', () => {
     renderRow({
       gates: new Map(),
-      receipts: new Map([[APPROVAL_ID, {note: '거부를 기록했습니다.', status: 'rejected'}]]),
+      receipts: new Map([[APPROVAL_ID, {note: '거부를 기록했어요.', status: 'rejected'}]]),
     });
     const rotor = (screen.getByTestId('message-row').props.accessibilityActions ??
       []) as {name: string}[];
@@ -751,7 +751,7 @@ describe('#2513 — 1회 링크는 영수증 자리에만 선다 (ADR-0182 ① �
   it('값이 없는 영수증(거부·다른 데서 결정)에는 링크가 서지 않는다', () => {
     renderRow({
       gates: new Map(),
-      receipts: new Map([[APPROVAL_ID, {note: '거부를 기록했습니다.', status: 'rejected'}]]),
+      receipts: new Map([[APPROVAL_ID, {note: '거부를 기록했어요.', status: 'rejected'}]]),
     });
     expect(screen.queryByTestId('card-approval-link-once')).toBeNull();
     expect(renderedText()).not.toContain(SECRET);
@@ -1123,9 +1123,9 @@ describe('D4 — 1회 링크는 폰 메모리에만 있고, 다시 열면 사라
     // 것부터 재야 한다.
     expect(renderedText()).toContain(SECRET);
     expect(screen.getByTestId('card-approval-receipt').props.children).toBe(
-      '승인을 기록했습니다.',
+      '승인을 기록했어요.',
     );
-    expect(announce).toHaveBeenCalledWith(`승인을 기록했습니다. ${LINK_ONCE_LEAD}`);
+    expect(announce).toHaveBeenCalledWith(`승인을 기록했어요. ${LINK_ONCE_LEAD}`);
     // 원장을 다시 읽어 컨트롤은 사라졌지만 영수증과 링크는 남는다.
     await waitFor(
       () => expect(screen.queryByTestId(`${PREFIX}-approve`)).toBeNull(),

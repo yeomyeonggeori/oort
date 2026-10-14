@@ -152,7 +152,7 @@ const CHANGED: Record<keyof MessageRowProps, Partial<MessageRowProps>> = {
   approvalGates: {approvalGates: new Map()},
   approvalReceipts: {
     approvalReceipts: new Map([
-      ['ap-1', {note: '승인을 기록했습니다.', status: 'approved'}],
+      ['ap-1', {note: '승인을 기록했어요.', status: 'approved'}],
     ]),
   },
   approvalOffline: {approvalOffline: true},

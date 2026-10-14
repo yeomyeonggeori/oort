@@ -29,7 +29,7 @@ import { NetworkError } from "../../lib/http";
  * the second is the reason this is not an approval-sized decision.
  */
 export const CANCEL_CONFIRM_SENTENCE =
-  "중단하면 이 실행이 여기서 끝납니다. 다시 시킬 수 있습니다.";
+  "중단하면 이 실행은 여기서 끝나요. 같은 일은 다시 시킬 수 있어요.";
 
 /**
  * The confirm sentence, plus what it does NOT reach when the agent has more than
@@ -48,7 +48,7 @@ export const CANCEL_CONFIRM_SENTENCE =
  */
 export function cancelConfirmSentence(runCount: number | undefined): string {
   if (runCount === undefined || runCount <= 1) return CANCEL_CONFIRM_SENTENCE;
-  return `${CANCEL_CONFIRM_SENTENCE} 이 에이전트는 이 대화에서 실행 ${runCount}개를 열어 두고 있고, 그중 가장 먼저 시작한 하나만 멈춥니다.`;
+  return `${CANCEL_CONFIRM_SENTENCE} 이 에이전트는 이 대화에서 실행 ${runCount}개를 하고 있고, 그중 가장 먼저 시작한 하나만 멈춰요.`;
 }
 
 /** The first tap, which asks rather than acts. */
@@ -98,10 +98,10 @@ export function cancelReceipt(
   const subject = `${agentName}의`;
   const linked = result.linkedWorkSessionIds.length;
   if (result.workSessionsTerminated) {
-    return `${subject} 실행을 중단했습니다. 연결된 작업 세션도 함께 끝났습니다.`;
+    return `${subject} 실행을 중단했어요. 연결된 작업 세션도 함께 끝났어요.`;
   }
-  if (linked === 0) return `${subject} 실행을 중단했습니다.`;
-  return `${subject} 실행을 중단했습니다. 이 실행에 연결된 작업 세션 ${linked}개는 계속 돕니다. 그것을 멈추는 것은 데스크톱에서 할 수 있습니다.`;
+  if (linked === 0) return `${subject} 실행을 중단했어요.`;
+  return `${subject} 실행을 중단했어요. 이 실행에 연결된 작업 세션 ${linked}개는 계속 돌아요. 세션은 데스크톱에서 멈출 수 있어요.`;
 }
 
 /** 200 → the receipt, as an outcome. */
@@ -131,17 +131,17 @@ export function cancelSucceeded(
  * the same one.
  */
 const TERMINAL_ENDINGS: ReadonlyArray<[string, string]> = [
-  ["succeeded", "에이전트가 먼저 마쳤습니다."],
-  ["timed_out", "시간이 초과돼 끝나 있었습니다."],
-  ["failed", "실패로 끝나 있었습니다."],
+  ["succeeded", "에이전트가 먼저 마쳤어요."],
+  ["timed_out", "시간이 초과돼 끝나 있었어요."],
+  ["failed", "실패로 끝나 있었어요."],
 ];
 
 export function alreadyOverSentence(message: string): string {
   const lowered = message.toLowerCase();
   for (const [label, ending] of TERMINAL_ENDINGS) {
-    if (lowered.includes(label)) return `이 실행은 이미 끝났습니다. ${ending}`;
+    if (lowered.includes(label)) return `이 실행은 이미 끝났어요. ${ending}`;
   }
-  return "이 실행은 이미 끝났습니다.";
+  return "이 실행은 이미 끝났어요.";
 }
 
 /**
@@ -174,26 +174,26 @@ export function cancelFailureOutcome(error: unknown): CancelOutcome {
       return {
         kind: "error",
         sentence:
-          "중단하지 못했습니다. 이 실행이 일어나는 채널의 멤버만 중단할 수 있습니다.",
+          "중단하지 못했어요. 이 실행이 있는 채널의 멤버만 중단할 수 있어요.",
       };
     }
     if (error.status === 404 || error.status === 405) {
       return {
         kind: "error",
         sentence:
-          "중단하지 못했습니다. 그 실행이 이미 사라졌거나, 이 서버가 실행 중단을 아직 받지 않습니다.",
+          "중단하지 못했어요. 그 실행이 이미 없어졌거나, 이 서버가 실행 중단을 아직 받지 않아요.",
       };
     }
     if (error.status === 429) {
       return {
         kind: "error",
-        sentence: "중단하지 못했습니다. 요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요.",
+        sentence: "중단하지 못했어요. 요청이 너무 잦아요. 잠시 뒤에 다시 해 주세요.",
       };
     }
     if (error.status >= 500) {
       return {
         kind: "error",
-        sentence: "중단하지 못했습니다. 서버가 오류로 답했습니다.",
+        sentence: "중단하지 못했어요. 서버가 오류로 답했어요.",
       };
     }
   }
@@ -202,11 +202,11 @@ export function cancelFailureOutcome(error: unknown): CancelOutcome {
     // so is what stops someone from assuming it stopped anyway.
     return {
       kind: "error",
-      sentence: `중단하지 못했습니다. ${error.message} 실행은 그대로입니다.`,
+      sentence: `중단하지 못했어요. ${error.message} 실행은 그대로예요.`,
     };
   }
   return {
     kind: "error",
-    sentence: "중단하지 못했습니다. 잠시 뒤에 다시 시도하세요.",
+    sentence: "중단하지 못했어요. 잠시 뒤에 다시 해 주세요.",
   };
 }
