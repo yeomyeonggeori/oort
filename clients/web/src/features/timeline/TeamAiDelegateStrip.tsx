@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { sendMessage } from "@momo/core/lib/api";
 import {
@@ -51,6 +51,18 @@ export function TeamAiDelegateStrip({
 }) {
   const offline = useOffline();
   const [state, setState] = useState<SendState>({ kind: "idle" });
+  // 보낸 뒤 버튼 묶음은 「맡겼어요」 한 줄로 바뀐다. 초점이 버튼에 있었다면 그대로 두면
+  // 지워진 버튼과 함께 문서 맨 앞(body)으로 떨어져 키보드 사용자가 타임라인에서 자리를
+  // 잃는다(#3844 design-review H-2). 그래서 초점을 그 한 줄로 옮긴다: 결과를 읽어 주고,
+  // 다음 Tab 은 같은 자리에서 이어진다.
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const sentRef = useRef<HTMLParagraphElement | null>(null);
+  const restoreFocus = useRef(false);
+  useEffect(() => {
+    if (state.kind !== "sent" || !restoreFocus.current) return;
+    restoreFocus.current = false;
+    sentRef.current?.focus();
+  }, [state.kind]);
   const showButtons = canDelegate(delegate, viewerMemberId);
   if (delegate.reasonLine === null && !showButtons) return null;
 
@@ -61,6 +73,8 @@ export function TeamAiDelegateStrip({
 
   function press(candidate: TeamAiDelegateCandidate) {
     if (offline || state.kind === "sending") return;
+    restoreFocus.current =
+      wrapRef.current?.contains(document.activeElement) ?? false;
     setState({ kind: "sending", memberId: candidate.memberId });
     const body = delegateMessageBody({
       targetHandle: candidate.handle,
@@ -81,7 +95,11 @@ export function TeamAiDelegateStrip({
   }
 
   return (
-    <div className="mt-1 flex flex-col gap-2" data-testid="team-ai-delegate">
+    <div
+      ref={wrapRef}
+      className="mt-1 flex flex-col gap-2"
+      data-testid="team-ai-delegate"
+    >
       {delegate.reasonLine !== null && (
         <p
           className="text-meta text-ink-muted"
@@ -92,8 +110,10 @@ export function TeamAiDelegateStrip({
       )}
       {showButtons && state.kind === "sent" && (
         <p
+          ref={sentRef}
           role="status"
-          className="text-meta text-ink-muted"
+          tabIndex={-1}
+          className="rounded-sm text-meta text-ink-muted focus-visible:focus-ring"
           data-testid="team-ai-delegate-sent"
         >
           {delegateSentLine(state.name)}

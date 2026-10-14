@@ -10,7 +10,7 @@ import {
   within,
 } from '@testing-library/react-native';
 import React from 'react';
-import {StyleSheet} from 'react-native';
+import {AccessibilityInfo, StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -229,6 +229,44 @@ describe('「그록봇에게 맡기기」 (폰)', () => {
       replyToId: SOURCE,
     });
     expect(screen.getByTestId('team-ai-delegate-sent')).toBeTruthy();
+  });
+
+  // #3844 design-review H-1: 행은 접근성 원소 하나라 띠의 버튼에 VoiceOver 가 닿지 못한다.
+  // 그래서 같은 행동을 로터에 등재하고, 띠의 글을 행 라벨로 읽고, 결과를 소리로 말한다.
+  it('VoiceOver 로터에서도 맡길 수 있고, 결과를 소리로 말한다', async () => {
+    mockSend.mockResolvedValue({});
+    const announce = jest
+      .spyOn(AccessibilityInfo, 'announceForAccessibility')
+      .mockImplementation(() => {});
+    renderRow(delegateMessage(), actionsFor(SELF_ID));
+    const row = screen.getByTestId('message-row');
+    expect(row.props.accessibilityLabel).toContain('넘긴 이유: 오늘 도우미 사용량을 다 씀');
+    const actions = (row.props.accessibilityActions ?? []) as {name: string; label: string}[];
+    const delegateAction = actions.find(action => action.label === '그록봇에게 맡기기');
+    expect(delegateAction).toBeDefined();
+    await act(async () => {
+      fireEvent(row, 'accessibilityAction', {
+        nativeEvent: {actionName: delegateAction?.name},
+      });
+    });
+    expect(mockSend).toHaveBeenCalledTimes(1);
+    expect(mockSend).toHaveBeenCalledWith(WS, CH, KEY, '@grokbot 프로필 소개를 바꿔 줘', {
+      replyToId: SOURCE,
+    });
+    expect(announce).toHaveBeenCalledWith('그록봇에게 맡겼어요. 답은 이 채널에 와요.');
+    const after = screen.getByTestId('message-row');
+    expect(after.props.accessibilityLabel).toContain('그록봇에게 맡겼어요.');
+    // 보낸 뒤에는 로터에서도 사라진다(띠의 버튼과 같은 조건).
+    const afterActions = (after.props.accessibilityActions ?? []) as {label: string}[];
+    expect(afterActions.some(action => action.label === '그록봇에게 맡기기')).toBe(false);
+    announce.mockRestore();
+  });
+
+  it('요청자가 아니면 로터에도 맡기기가 없다', () => {
+    renderRow(delegateMessage(), actionsFor(OTHER_ID));
+    const actions = (screen.getByTestId('message-row').props.accessibilityActions ??
+      []) as {label: string}[];
+    expect(actions.some(action => action.label.endsWith('맡기기'))).toBe(false);
   });
 
   it('요청자가 아니면 버튼이 없다', () => {

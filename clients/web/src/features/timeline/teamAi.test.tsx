@@ -291,6 +291,21 @@ describe("「그록봇에게 맡기기」 (ADR-0201 D5)", () => {
     expect(sendMessage.mock.calls[1]?.[2]).toBe(DELEGATE_KEY);
   });
 
+  // #3844 design-review H-2: 누른 버튼이 사라져도 키보드 초점이 body 로 떨어지지 않는다.
+  it("키보드로 맡기면 초점이 「맡겼어요」 줄로 옮겨 간다", async () => {
+    sendMessage.mockResolvedValue({});
+    const view = mountStrip(ME, "채널 만들어 줘");
+    const button = view.querySelector<HTMLButtonElement>('[data-testid="team-ai-delegate-button"]');
+    button?.focus();
+    expect(document.activeElement).toBe(button);
+    await act(async () => {
+      button?.click();
+    });
+    const sent = view.querySelector('[data-testid="team-ai-delegate-sent"]');
+    expect(sent).not.toBeNull();
+    expect(document.activeElement).toBe(sent);
+  });
+
   it("요청자가 아닌 사람에게는 버튼이 없다 (이유 줄만)", () => {
     const view = mountStrip(OTHER, "채널 만들어 줘");
     expect(view.querySelector('[data-testid="team-ai-delegate-button"]')).toBeNull();
