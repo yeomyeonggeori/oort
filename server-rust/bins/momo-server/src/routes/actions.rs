@@ -3078,6 +3078,61 @@ mod tests {
         );
     }
 
+    /// ADR-0186 v3 S1: what a hosted runtime is told is what the server does. The
+    /// production routine and the tool description must teach the propose-then-claim
+    /// flow, the "never post it" rule and the picture composition; a sentence removed
+    /// from either is a red test, not a runtime that silently stops being told.
+    #[test]
+    fn the_routine_and_the_tool_description_teach_the_v3_flow() {
+        let doc = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../docs/SELF_HOST_AGENT.md"
+        ))
+        .expect("docs/SELF_HOST_AGENT.md is readable from the server crate");
+        let start = doc
+            .find("##### 3.3.17.4 Production routine instructions")
+            .expect("the routine section exists");
+        let end = doc[start..]
+            .find("##### 3.3.17.4a")
+            .map(|offset| start + offset)
+            .expect("the routine section ends at 3.3.17.4a");
+        let routine = &doc[start..end];
+        for taught in [
+            "oort_action_propose {handle, actionId, args}",
+            "then end the turn",
+            "oort_action_claim_secret {handle, approvalId}",
+            "once, within 30 minutes",
+            "never post it in a",
+            "imageAttachments",
+            "avatar {source:\"attachment\"",
+        ] {
+            assert!(
+                routine.contains(taught),
+                "the routine no longer says: {taught}"
+            );
+        }
+        let propose = momo_mcp::TOOL_CATALOG
+            .iter()
+            .find(|tool| tool.name == momo_mcp::TOOL_ACTION_PROPOSE)
+            .expect("the propose tool");
+        for taught in [
+            "oort_action_claim_secret",
+            "never post it in a channel",
+            "profile card or picture",
+        ] {
+            assert!(
+                propose.description.contains(taught),
+                "propose lost: {taught}"
+            );
+        }
+        let claim = momo_mcp::TOOL_CATALOG
+            .iter()
+            .find(|tool| tool.name == momo_mcp::TOOL_ACTION_CLAIM_SECRET)
+            .expect("the claim tool");
+        assert!(claim.description.contains("never post it in a channel"));
+        assert!(claim.description.contains("second call is refused"));
+    }
+
     #[test]
     fn agent_invite_takes_exactly_three_keys_and_the_strict_name() {
         let ok =
