@@ -29,7 +29,7 @@ const TEXT_ROLES = ["timestamp", "meta", "code", "label", "body", "heading", "ti
  * not numbers: marker(2) · row(6) · control-sm/control/control-lg(28/32/40) ·
  * action-sm/action/action-band(96/144/240) · chat-min · rail 3종 · pane 5종 ·
  * diff-body · terminal-body · terminal-dock 3종 · terminal-floor · theme-tile-min ·
- * timeline-strip · preview-frame · unfurl-hero · tray-max · tray-thumb · onboarding-mark ·
+ * timeline-strip · preview-frame · unfurl-hero · tray-max · tray-thumb · inline-image-* · onboarding-mark ·
  * onboarding-copy · overflow-bowl · 새벽하늘 프리미티브(ADR-0189, DS2-1) pill ·
  * pill-inline · field · icon-button · card.
  * `--spacing-px`만 뺀다 — `w-px`류는
@@ -83,6 +83,10 @@ export const NAMED_MEASURES = [
   "unfurl-hero",
   "tray-max",
   "tray-thumb",
+  "inline-image-w",
+  "inline-image-h",
+  "inline-image-tile",
+  "inline-image-tile-sm",
   "onboarding-mark",
   "onboarding-copy",
   "onboarding-guide-head",

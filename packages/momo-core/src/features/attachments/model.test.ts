@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   admitDrafts,
+  attachmentDisplayName,
+  imageGridColumns,
+  looksLikeOpaqueFileName,
   ATTACH_COPY,
   draftAnnouncement,
   draftStatusLine,
@@ -483,5 +486,32 @@ describe("attachment preview (#2701)", () => {
     expect(ATTACH_COPY.pdfOpenFailed).toMatch(/내려받/);
     expect(ATTACH_COPY.pdfNotPdf).toMatch(/내려받/);
     expect(ATTACH_COPY.pdfPopupBlocked).toMatch(/팝업/);
+  });
+});
+
+describe("attachmentDisplayName (#3820)", () => {
+  const HASH = "geGngQxZ3pLmK9aVbT2wRq-pQ.webp";
+  it("hides a random-token file name behind a generic one", () => {
+    expect(looksLikeOpaqueFileName(HASH)).toBe(true);
+    expect(attachmentDisplayName({ name: HASH, mime: "image/webp" })).toBe("이미지");
+    expect(attachmentDisplayName({ name: "3f2b8c1e-9d4a-4e6b-8a1c-0f5d7e2b9a34.pdf", mime: "application/pdf" })).toBe("PDF 문서");
+    expect(attachmentDisplayName({ name: "9f86d081884c7d659a2feaa0c55ad015.zip", mime: "application/zip" })).toBe("파일");
+  });
+  it("keeps names a person wrote", () => {
+    for (const name of [
+      "분기 보고서.pdf",
+      "Screenshot_20261014_153012.png",
+      "QuarterlyRevenueReportFinal.pdf",
+      "drain-2026-08-09.log",
+      "a.png",
+    ]) {
+      expect(attachmentDisplayName({ name, mime: "image/png" })).toBe(name);
+    }
+  });
+  it("falls back on an empty name", () => {
+    expect(attachmentDisplayName({ name: "  ", mime: "video/mp4" })).toBe("동영상");
+  });
+  it("picks grid columns by count", () => {
+    expect([1, 2, 4, 5, 9].map(imageGridColumns)).toEqual([1, 2, 2, 3, 3]);
   });
 });
