@@ -1419,47 +1419,55 @@ async fn action_propose(
             if run.status.is_approval_held() || run.status.is_terminal() {
                 return Ok(Err(ToolFailure::Conflict));
             }
-            // **The two "already full" answers come first** (증보 v3, security review of
-            // #3797): `Conflict` must not depend on whether the proposal's *text* passes
-            // the roster-name rules, or an agent that already holds a pending proposal
+            // **The two "already full" answers come first — for the two actions whose
+            // text is judged against the roster** (증보 v3, security review of #3797):
+            // `Conflict` must not depend on whether the proposal's *text* passes the
+            // roster-name rules, or an agent that already holds a pending proposal
             // could tell 409 from 400 and so probe which names exist. Neither check
             // reads the text: the ceiling counts, and the same-target check resolves
-            // only **who the proposal is about**.
-            //
-            // The pending ceiling (증보 V1-e): the agent's `member` row is locked first so
-            // concurrent runs of one agent cannot each read "2 pending" and each add a
-            // third.
-            let pending = momo_agent::lock_agent_and_count_pending_workspace_actions_in_tx(
-                conn,
-                caller.workspace_id,
-                caller.agent_member_id,
-            )
-            .await?;
-            if pending >= momo_agent::MAX_PENDING_WORKSPACE_ACTIONS {
-                return Ok(Err(ToolFailure::Conflict));
-            }
-            // A second proposal about the same agent while one waits (증보 V4-M-9):
-            // the target's row is locked first so two simultaneous proposals cannot
-            // both see "none".
-            if let Some(target) = crate::routes::actions::early_target_agent_in_tx(
-                conn,
-                caller.workspace_id,
-                caller.agent_member_id,
-                action,
-                &raw_args,
-                proposed_at_ms,
-            )
-            .await?
-            {
-                if momo_agent::lock_target_and_find_pending_action_in_tx(
+            // only **who the proposal is about**. The other actions keep their order
+            // (resolution, then the ceiling), which the v2 suite pins.
+            let judges_text_against_roster = matches!(
+                action.id,
+                momo_agent::actions::ACTION_AGENT_RENAME
+                    | momo_agent::actions::ACTION_AGENT_PROFILE_UPDATE
+            );
+            if judges_text_against_roster {
+                // The pending ceiling (증보 V1-e): the agent's `member` row is locked
+                // first so concurrent runs of one agent cannot each read "2 pending"
+                // and each add a third.
+                let pending = momo_agent::lock_agent_and_count_pending_workspace_actions_in_tx(
                     conn,
                     caller.workspace_id,
-                    action.id,
-                    target,
+                    caller.agent_member_id,
+                )
+                .await?;
+                if pending >= momo_agent::MAX_PENDING_WORKSPACE_ACTIONS {
+                    return Ok(Err(ToolFailure::Conflict));
+                }
+                // A second proposal about the same agent while one waits (증보 V4-M-9):
+                // the target's row is locked first so two simultaneous proposals
+                // cannot both see "none".
+                if let Some(target) = crate::routes::actions::early_target_agent_in_tx(
+                    conn,
+                    caller.workspace_id,
+                    caller.agent_member_id,
+                    action,
+                    &raw_args,
+                    proposed_at_ms,
                 )
                 .await?
                 {
-                    return Ok(Err(ToolFailure::Conflict));
+                    if momo_agent::lock_target_and_find_pending_action_in_tx(
+                        conn,
+                        caller.workspace_id,
+                        action.id,
+                        target,
+                    )
+                    .await?
+                    {
+                        return Ok(Err(ToolFailure::Conflict));
+                    }
                 }
             }
             // **Resolved inside the transaction** (ADR-0186 증보 V1-a/b): names are
@@ -1483,6 +1491,19 @@ async fn action_propose(
                 // `failure_of` would let a 404 vs a 409 say which name failed.
                 Err(_) => return Ok(Err(ToolFailure::InvalidArguments)),
             };
+            // The pending ceiling for the actions whose answer does not depend on the
+            // roster (증보 V1-e): after resolution, as in v2.
+            if !judges_text_against_roster {
+                let pending = momo_agent::lock_agent_and_count_pending_workspace_actions_in_tx(
+                    conn,
+                    caller.workspace_id,
+                    caller.agent_member_id,
+                )
+                .await?;
+                if pending >= momo_agent::MAX_PENDING_WORKSPACE_ACTIONS {
+                    return Ok(Err(ToolFailure::Conflict));
+                }
+            }
             // A second rename of the same agent while one waits is refused
             // (증보 V4-M-9): the target's row is locked first so two simultaneous
             // proposals cannot both see "none".
