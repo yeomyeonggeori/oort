@@ -16283,7 +16283,7 @@ async fn job_start_and_claim_never_expose_a_conversation_the_agent_may_not_read(
 
     // (1) No `messages:read` on the human's approval: the job is delivered and
     //     started, the conversation is simply absent, on BOTH composites.
-    let run = raise_mention_3831(&client, &base, &su, &fixture, secret_text).await;
+    raise_mention_3831(&client, &base, &su, &fixture, secret_text).await;
     let without_read: Vec<&str> = ALL_HOSTED_SCOPES_3831
         .iter()
         .copied()
