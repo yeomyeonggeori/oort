@@ -16,7 +16,10 @@ import {
   updateAttachmentIdSet,
 } from "@/features/attachments/imageLightboxModel";
 import { EmptyInvite, InlineBanner } from "@/features/common/States";
-import type { MessageAttachment } from "@momo/core/features/attachments/model";
+import {
+  attachmentDisplayName,
+  type MessageAttachment,
+} from "@momo/core/features/attachments/model";
 
 function LightboxImage({
   workspaceId,
@@ -103,7 +106,7 @@ function LightboxImage({
       >
         <img
           src={preview.dataUrl}
-          alt={attachment.name}
+          alt={attachmentDisplayName(attachment)}
           draggable={false}
           className="max-h-full max-w-full object-contain"
         />
@@ -173,7 +176,7 @@ export function ImageLightbox({
         <div className="flex min-w-0 items-center gap-2 border-b border-line bg-surface-raised px-4 py-2">
           <div className="flex min-w-0 flex-1 flex-col">
             <DialogTitle className="truncate">
-              {selected?.name ?? "이미지 미리보기"}
+              {selected ? attachmentDisplayName(selected) : "이미지 미리보기"}
             </DialogTitle>
             <DialogDescription className="sr-only">
               {selected

@@ -11,6 +11,7 @@ import {
 import { pdfOpenLabel, pdfOpenMode } from "@/features/attachments/pdfOpenModel";
 import {
   ATTACH_COPY,
+  attachmentDisplayName,
   type MessageAttachment,
 } from "@momo/core/features/attachments/model";
 
@@ -63,7 +64,7 @@ export function AttachmentOpenPdfButton({
           .catch(fail)
           .finally(() => setBusy(false));
       }}
-      aria-label={`${attachment.name} ${label}`}
+      aria-label={`${attachmentDisplayName(attachment)} ${label}`}
       title={busy ? ATTACH_COPY.openingPdf : label}
       data-testid="attachment-open-pdf"
       data-busy={busy ? "" : undefined}
