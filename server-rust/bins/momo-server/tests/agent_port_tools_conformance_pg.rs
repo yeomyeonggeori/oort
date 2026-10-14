@@ -10187,10 +10187,14 @@ async fn a_platform_operator_who_is_not_an_admin_may_approve_a_settings_update()
 
 type LedgerRow = (i64, String, Option<String>, Option<String>, Option<Uuid>);
 
+/// The lifecycle/stage ledger of one run. `tool_call` rows (#3840, ADR-0200 증보
+/// 2026-10-15) are left out: every Agent Port call that points at the run adds one, and
+/// they have their own tests (`tool_calls_3840`) — the assertions written against this
+/// helper are about lifecycle and stage rows.
 async fn ledger_3740(pool: &PgPool, workspace: Uuid, run: Uuid) -> Vec<LedgerRow> {
     sqlx::query_as(
         "SELECT seq, kind, stage, code, actor_member_id FROM agent_run_event \
-          WHERE workspace_id=$1 AND run_id=$2 ORDER BY seq",
+          WHERE workspace_id=$1 AND run_id=$2 AND kind <> 'tool_call' ORDER BY seq",
     )
     .bind(workspace)
     .bind(run)

@@ -18,6 +18,9 @@
 --   * lifetime: rows and tally go with the run (delete trigger / FK CASCADE) and with the
 --     existing retention sweep — no cap deletion anywhere.
 --
+-- The stage fold in `agent_run_event_append` compares with the last NON-tool_call row, so
+-- a repeated stage still folds when tool calls sit in between.
+--
 -- Realtime: a `tool_call` row is written `framed = false`, so it puts no `agent.run.event`
 -- frame on the channel (a frame per tool call would flood the topic).
 --
@@ -217,6 +220,59 @@ $$;
 
 COMMENT ON FUNCTION agent_run_event_trim(uuid, uuid) IS
   'ADR-0200 D2: 200-row cap over non-tool_call rows — deletes the oldest stage rows (then oldest claimed rows). tool_call rows are neither counted nor deleted (증보 2026-10-15 T3). Called by the stage writer, never by a trigger.';
+
+-- -----------------------------------------------------------------------------
+-- The stage fold looks past `tool_call` rows. `agent_run_event_append` folds an immediate
+-- repeat of the same stage into the existing row by comparing with the run's LAST row;
+-- every `oort_run_event` now also leaves a `tool_call` row, so without this a repeated
+-- stage would never be "immediate" again and would add a row per report. Same function,
+-- same signature, still no lock (migration 128) — only the last-row lookup skips
+-- `tool_call`.
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION agent_run_event_append(
+  p_workspace_id uuid,
+  p_run_id       uuid,
+  p_kind         text,
+  p_stage        text DEFAULT NULL,
+  p_code         text DEFAULT NULL,
+  p_approval_id  uuid DEFAULT NULL,
+  p_actor        uuid DEFAULT NULL
+) RETURNS bigint
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_seq  bigint;
+  v_last record;
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM agent_run WHERE workspace_id = p_workspace_id AND id = p_run_id
+  ) THEN
+    RETURN NULL;
+  END IF;
+
+  IF p_kind = 'stage' THEN
+    SELECT seq, kind, stage INTO v_last
+      FROM agent_run_event
+     WHERE workspace_id = p_workspace_id AND run_id = p_run_id
+       AND kind <> 'tool_call'
+     ORDER BY seq DESC LIMIT 1;
+    IF v_last.kind = 'stage' AND v_last.stage IS NOT DISTINCT FROM p_stage THEN
+      RETURN v_last.seq;
+    END IF;
+  END IF;
+
+  INSERT INTO agent_run_event
+    (workspace_id, run_id, kind, stage, code, approval_id, actor_member_id)
+  VALUES
+    (p_workspace_id, p_run_id, p_kind, p_stage, p_code, p_approval_id, p_actor)
+  RETURNING seq INTO v_seq;
+  RETURN v_seq;
+END;
+$$;
+
+COMMENT ON FUNCTION agent_run_event_append(uuid, uuid, text, text, text, uuid, uuid) IS
+  'ADR-0200 D2: the INSERT into agent_run_event for every kind but tool_call. SECURITY INVOKER; takes no lock; folds an immediate stage repeat (tool_call rows in between do not count); NULL for a missing run.';
 
 -- -----------------------------------------------------------------------------
 -- No realtime frame for `tool_call` (T5). Same rule as migration 130 otherwise.
