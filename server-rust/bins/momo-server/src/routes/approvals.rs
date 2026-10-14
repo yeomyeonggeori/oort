@@ -1477,7 +1477,7 @@ async fn execute_workspace_action(
     }
 
     // ---- 3. the action's own executor --------------------------------------
-    let executed = match &resolved.validated.args {
+    let mut executed = match &resolved.validated.args {
         ActionArgs::WorkspaceSettingsUpdate {
             welcome_prompt,
             role_labels,
@@ -1638,6 +1638,59 @@ async fn execute_workspace_action(
             }
         }
     };
+
+    // ---- 3b. who receives the one-time value (ADR-0186 증보 v3 V3-3a/V3-5) -----
+    //
+    // `Always` (the invite link) and `OptIn` with the approver's box checked hand
+    // the value to the **proposing agent** through the one-time claim call instead
+    // of to the approver: the response carries no `secretOnce`, the executor's
+    // minted value is dropped unseen (the claim mints a fresh one — nothing about
+    // it is stored), and `payload.secretClaim` records only the permission, its
+    // deadline and the ids the claim will act on. The card row says which way it
+    // went, so what the approver read is what ran.
+    let deliver_to_agent = match action.secret_delivery {
+        SecretDelivery::Always => true,
+        SecretDelivery::OptIn => input.deliver_secret_to_agent,
+        SecretDelivery::None => false,
+    };
+    if deliver_to_agent && executed.secret_once.is_some() {
+        executed.secret_once = None;
+        let kind = if action.id == momo_agent::actions::ACTION_AGENT_INVITE {
+            momo_agent::actions::SECRET_CLAIM_KIND_PAIRING
+        } else {
+            momo_agent::actions::SECRET_CLAIM_KIND_INVITE
+        };
+        let mut grant = momo_agent::actions::secret_claim_grant(now.timestamp_millis());
+        if let Some(object) = grant.as_object_mut() {
+            object.insert("kind".into(), json!(kind));
+            object.insert("refId".into(), json!(executed.ref_id.to_string()));
+            object.insert("decidedBy".into(), json!(input.member_id.to_string()));
+            // An absolute origin is already required for the link to exist at all
+            // (`public_origin_unavailable`); the claim builds the same link from it.
+            if let Some(origin) = input.public_origin {
+                object.insert("origin".into(), json!(origin));
+            }
+        }
+        momo_agent::grant_secret_claim_in_tx(conn, approval.id, &grant).await?;
+    }
+    if action.id == momo_agent::actions::ACTION_AGENT_INVITE {
+        let chosen = if deliver_to_agent {
+            momo_agent::actions::PAIRING_DELIVERY_AGENT_TEXT
+        } else {
+            momo_agent::actions::PAIRING_DELIVERY_APPROVER_TEXT
+        };
+        for row in executed.result_rows.iter_mut() {
+            if row.get("label") == Some(&json!("연결 코드")) {
+                row["value"] = json!(chosen);
+            }
+        }
+    }
+    if action.id == momo_agent::actions::ACTION_INVITE_CREATE {
+        executed.result_rows.push(momo_agent::actions::action_row(
+            "초대 링크",
+            momo_agent::actions::INVITE_DELIVERY_TEXT,
+        ));
+    }
 
     // ---- 4. the shared tail ------------------------------------------------
     //
@@ -2728,7 +2781,7 @@ fn proposed_args(payload: &Value) -> &Value {
 }
 
 /// base64url, the alphabet `momo_generate_invite_code` produces.
-fn is_url_safe_code_byte(byte: u8) -> bool {
+pub(crate) fn is_url_safe_code_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'
 }
 

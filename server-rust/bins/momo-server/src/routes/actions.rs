@@ -2701,6 +2701,7 @@ mod tests {
                 json!({"label": "역할", "value": "admin"}),
                 json!({"label": "사용 횟수", "value": "5회"}),
                 json!({"label": "만료", "value": "14일"}),
+                json!({"label": "초대 링크", "value": "에이전트가 이 링크를 받아 전달해요"}),
             ]
         );
     }
@@ -3153,7 +3154,8 @@ mod tests {
             );
         }
         // The two rules a runtime must not have to guess.
-        assert!(section.contains("An invite link is never returned to you"));
+        assert!(section.contains("An invite link is never returned by the propose call"));
+        assert!(section.contains("oort_action_claim_secret"));
         assert!(
             section.contains("**The rule the runtime has to learn: propose, then end the turn.**")
         );
@@ -3278,7 +3280,12 @@ mod tests {
             .iter()
             .filter(|row| row["executable"] == json!(true))
         {
-            assert_eq!(row["agentDelivery"], json!("none"), "{row}");
+            let expected = match row["id"].as_str() {
+                Some("invite.create") => "always",
+                Some("agent.invite") => "opt_in",
+                _ => "none",
+            };
+            assert_eq!(row["agentDelivery"], json!(expected), "{row}");
         }
         // No executor, no secret, no credential ever rides in the catalog.
         let text = rendered.to_string();

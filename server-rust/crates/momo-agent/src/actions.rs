@@ -201,6 +201,14 @@ pub const SECRET_CLAIM_WINDOW_MS: i64 = 30 * 60 * 1000;
 /// The approval payload key that records a granted claim.
 pub const SECRET_CLAIM_PAYLOAD_KEY: &str = "secretClaim";
 
+/// `kind` of a claimed value (V3-4): what the value is, not how it looks.
+pub const SECRET_CLAIM_KIND_PAIRING: &str = "pairing";
+pub const SECRET_CLAIM_KIND_INVITE: &str = "invite";
+
+/// `audit_log.action` of a claim: who, which approval, which kind — never the value.
+pub const AUDIT_SECRET_CLAIMED: &str = "agent.secret.claimed";
+pub const AUDIT_SECRET_CLAIMED_SCHEMA: &str = "momo.agent.secret.claimed.v1";
+
 /// `payload.secretClaim` for a claim granted at `decided_at_ms`:
 /// `{allowed:true, deadlineMs}`. `claimedAtMs` is added by the claim itself,
 /// under the approval row lock, and is what makes the claim single-use.
@@ -547,7 +555,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         summary: "역할과 사용 횟수, 만료를 정해 초대 링크를 하나 만들어요.",
         risk: Risk::Approval,
         required_role: RequiredRole::Admin,
-        secret_delivery: SecretDelivery::None,
+        secret_delivery: SecretDelivery::Always,
         effect: "초대 링크를 만들어요",
         args_schema: invite_create_args_schema,
     },
@@ -617,10 +625,8 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         summary: "새 에이전트를 만들고 연결 코드를 발급해요. 승인한 관리자가 소유자가 되고, 연결은 사람이 확인하기 전까지 열리지 않아요.",
         risk: Risk::Approval,
         required_role: RequiredRole::Admin,
-        // `OptIn` arrives with the claim call (I2). Until then a checked
-        // `deliverSecretToAgent` is refused like on every action without a value
-        // for the agent — a pairing code nobody can claim must not be "handed over".
-        secret_delivery: SecretDelivery::None,
+        // The approver chooses at decision time (`deliverSecretToAgent`, default off).
+        secret_delivery: SecretDelivery::OptIn,
         effect: "표시된 이름의 새 에이전트를 만들고, 승인한 사람이 소유자가 돼요",
         args_schema: agent_invite_args_schema,
     },
@@ -771,6 +777,9 @@ pub fn invite_create_rows(role: &str, max_uses: i32, expires_in_days: Option<i64
                 expires_in_days.unwrap_or(DEFAULT_INVITE_EXPIRES_IN_DAYS)
             ),
         ),
+        // 성재 결재 3 (V3-5): the link goes to the proposing agent, not to the
+        // approver, and the card says so before anyone consents.
+        action_row("초대 링크", INVITE_DELIVERY_TEXT),
     ]
 }
 
@@ -992,9 +1001,19 @@ pub fn agent_rename_rows(
     ]
 }
 
+/// The `invite.create` card row that says who receives the link (V3-5).
+pub const INVITE_DELIVERY_TEXT: &str = "에이전트가 이 링크를 받아 전달해요";
+
+/// `agent.invite`'s delivery row: before the decision it names the choice, after it
+/// the choice that was made (the approver reads what is executed).
+pub const PAIRING_DELIVERY_PENDING_TEXT: &str = "승인할 때 고르세요 (기본: 승인한 분만 봐요)";
+pub const PAIRING_DELIVERY_AGENT_TEXT: &str = "에이전트가 받아요";
+pub const PAIRING_DELIVERY_APPROVER_TEXT: &str = "승인한 분만 봐요";
+
 /// The `agent.invite` card rows from the **server's** values. Plain text.
 pub fn agent_invite_rows(platform_label: &str, display_name: &str, handle: &str) -> Vec<Value> {
     vec![
+        action_row("연결 코드", PAIRING_DELIVERY_PENDING_TEXT),
         action_row("플랫폼", platform_label),
         action_row("새 에이전트", member_card_label(display_name, handle, true)),
         action_row("소유자", "승인한 사람"),
@@ -1550,6 +1569,7 @@ mod tests {
                 json!({"label": "역할", "value": "member"}),
                 json!({"label": "사용 횟수", "value": "1회"}),
                 json!({"label": "만료", "value": "7일"}),
+                json!({"label": "초대 링크", "value": "에이전트가 이 링크를 받아 전달해요"}),
             ]
         );
         assert_eq!(
@@ -1882,16 +1902,21 @@ mod tests {
     // ---- ADR-0186 증보 v3 P0: secret delivery foundation -----------------------
 
     #[test]
-    fn no_action_hands_its_secret_to_the_agent_before_its_own_slice_lands() {
-        // The slice that implements a claim flips its own action's value AND
-        // updates this list in the same commit; until then a decision request
-        // asking for delivery must be refused for every action.
-        let delivering: Vec<&str> = ACTIONS
+    fn exactly_two_actions_hand_a_secret_to_the_agent_and_each_says_how() {
+        // Adding a delivering action means a claim kind, a card row and a test in
+        // the same commit; this list is where that is noticed.
+        let delivering: Vec<(&str, SecretDelivery)> = ACTIONS
             .iter()
             .filter(|action| action.secret_delivery != SecretDelivery::None)
-            .map(|action| action.id)
+            .map(|action| (action.id, action.secret_delivery))
             .collect();
-        assert!(delivering.is_empty(), "{delivering:?}");
+        assert_eq!(
+            delivering,
+            vec![
+                (ACTION_INVITE_CREATE, SecretDelivery::Always),
+                (ACTION_AGENT_INVITE, SecretDelivery::OptIn)
+            ]
+        );
     }
 
     #[test]

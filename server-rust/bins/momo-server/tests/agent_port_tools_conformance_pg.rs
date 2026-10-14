@@ -649,6 +649,7 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
             "oort_run_event",
             "oort_run_complete",
             "oort_action_propose",
+            "oort_action_claim_secret",
             "oort_card_suggest",
             "oort_ping",
         ]
@@ -737,7 +738,7 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
         list_tools(&client, &base, &fixture.hosted_bearer)
             .await
             .len(),
-        11,
+        12,
         "a foundation request proves the binding and re-activates it"
     );
     let reactivated: String = sqlx::query_scalar(
@@ -818,7 +819,7 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
         list_tools(&client, &base, &fixture.hosted_bearer)
             .await
             .len(),
-        11,
+        12,
         "restoring the connection restores the catalog"
     );
 
@@ -2766,7 +2767,8 @@ async fn a_proposal_parks_the_run_and_opens_no_other_path() {
         json!([
             {"label": "역할", "value": "member"},
             {"label": "사용 횟수", "value": "2회"},
-            {"label": "만료", "value": "3일"}
+            {"label": "만료", "value": "3일"},
+            {"label": "초대 링크", "value": "에이전트가 이 링크를 받아 전달해요"}
         ])
     );
 
@@ -3469,6 +3471,7 @@ async fn propose_invite(
     )
     .await;
     assert_eq!(status, 200, "{proposed}");
+    remember_handle_3789(&proposed, &handle);
     let result = structured(&proposed);
     (
         Uuid::parse_str(result["approvalId"].as_str().expect("approvalId")).expect("uuid"),
@@ -3656,26 +3659,13 @@ async fn an_approved_workspace_action_mints_the_invite_and_shows_the_link_once()
             .expect("the ref names the invite"),
     )
     .expect("invite id is a uuid");
-    assert_eq!(
-        approved["result"]["secretOnce"]["kind"],
-        json!("invite_link")
+    // 성재 결재 3 (V3-5): the approver is NOT handed the link. It goes to the agent
+    // that asked, through the one-time claim below.
+    assert!(
+        approved["result"].get("secretOnce").is_none(),
+        "the approver's response carries no link: {approved}"
     );
-    let link = approved["result"]["secretOnce"]["value"]
-        .as_str()
-        .expect("the one-time link")
-        .to_string();
-    let code = link
-        .split("code=")
-        .nth(1)
-        .expect("the link carries the code")
-        .to_string();
-    assert!(!code.is_empty());
-    assert_eq!(
-        link,
-        format!("{base}/join?code={code}"),
-        "with no MOMO_PUBLIC_BASE_URL configured the link is built from this \
-         request's own origin (ADR-0167 derivation)"
-    );
+    assert!(!approved.to_string().contains("code="), "{approved}");
 
     // ---- the invite is real, and it is the approver's ----------------------
     let (invite_role, invite_max_uses, invite_created_by, invite_expires_ms): (
@@ -3699,37 +3689,13 @@ async fn an_approved_workspace_action_mints_the_invite_and_shows_the_link_once()
         invite_created_by, fixture.human,
         "executed with the APPROVER's authority — the agent is never admin"
     );
-    assert_eq!(
-        approved["result"]["secretOnce"]["expiresAtMs"]
-            .as_i64()
-            .expect("expiresAtMs"),
-        invite_expires_ms
-    );
-    // The code the body handed out is the one this row hashes, and the row
-    // keeps only the hash.
-    let code_matches: bool = sqlx::query_scalar(
-        "SELECT code_hash = momo_invite_code_hash($2) FROM invite_code \
-          WHERE workspace_id=$1 AND id=$3",
-    )
-    .bind(fixture.workspace)
-    .bind(&code)
-    .bind(invite_id)
-    .fetch_one(&su)
-    .await
-    .unwrap();
-    assert!(code_matches, "the answered code opens this invite");
 
-    // ---- red proof 1: the code lives in the response body and nowhere else --
+    // ---- red proof 1: no code, no link, in any durable store or log ---------
     let stored = durable_text(&su, fixture.workspace).await;
     assert!(
-        !stored.contains(&code),
-        "the minted code must not appear in approval.payload, message props or \
-         body, audit detail, the decision receipt, agent_run output or the \
-         outbox"
-    );
-    assert!(
         !stored.contains("/join?code="),
-        "nor may the assembled link: {stored}"
+        "no assembled link in approval.payload, message props or body, audit \
+         detail, the decision receipt, agent_run output or the outbox: {stored}"
     );
     assert!(
         captured.contains("ax3b-log-capture-canary"),
@@ -3738,16 +3704,11 @@ async fn an_approved_workspace_action_mints_the_invite_and_shows_the_link_once()
     );
     assert!(
         captured.contains("sqlx::query"),
-        "…and it must reach the layer where a credential would most plausibly \
-         leak by accident — the statement log — rather than only the events \
-         this test emits itself: {} bytes captured",
+        "…and it must reach the statement log rather than only the events this \
+         test emits itself: {} bytes captured",
         captured.len()
     );
-    assert!(
-        !captured.contains(&code),
-        "the minted code must not appear in any log line emitted while the \
-         decision was processed"
-    );
+    assert!(!captured.contains("/join?code="));
 
     // ---- red proof 5: 부록 B on the persistent card -------------------------
     let (result_author, result_props, result_body, result_key): (
@@ -3784,9 +3745,19 @@ async fn an_approved_workspace_action_mints_the_invite_and_shows_the_link_once()
         card["ref"],
         json!({"type": "invite", "id": invite_id.to_string()})
     );
-    assert_eq!(card["secret_shown_once"], json!(true));
+    assert_eq!(
+        card["secret_shown_once"],
+        json!(false),
+        "nobody saw a value at the decision: the agent claims it"
+    );
     assert_eq!(card["next"]["href"], json!("/settings?section=members"));
     assert_eq!(card["rows"][0], json!({"label": "역할", "value": "member"}));
+    assert!(
+        card["rows"].as_array().unwrap().contains(
+            &json!({"label": "초대 링크", "value": "에이전트가 이 링크를 받아 전달해요"})
+        ),
+        "the outcome line says who receives the link: {card}"
+    );
     let rendered_props = result_props.to_string();
     assert!(!rendered_props.contains("http"), "{rendered_props}");
     assert!(!rendered_props.contains("code="), "{rendered_props}");
@@ -3923,7 +3894,6 @@ async fn an_approved_workspace_action_mints_the_invite_and_shows_the_link_once()
         replayed["result"].get("secretOnce").is_none(),
         "a replay must not re-show the one-time value: {replayed}"
     );
-    assert!(!replayed.to_string().contains(&code));
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM invite_code WHERE workspace_id=$1")
             .bind(fixture.workspace)
@@ -3933,6 +3903,102 @@ async fn an_approved_workspace_action_mints_the_invite_and_shows_the_link_once()
         invites_before + 1,
         "and it mints nothing the second time"
     );
+
+    // ---- the claim: the proposing agent receives the link, once -------------
+    let handle = handle_of_3789(approval_id);
+    let claim_offset = capture_offset(&capture);
+    let (status, claimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_action_claim_secret",
+        json!({"handle": handle, "approvalId": approval_id}),
+    )
+    .await;
+    let claim_log = captured_since(&capture, claim_offset);
+    assert_eq!(status, 200, "{claimed}");
+    let received = structured(&claimed);
+    assert_eq!(received["actionId"], json!("invite.create"));
+    assert_eq!(received["kind"], json!("invite"));
+    let link = received["value"].as_str().expect("the link").to_string();
+    let code = link
+        .split("code=")
+        .nth(1)
+        .expect("the link carries the code")
+        .to_string();
+    assert_eq!(
+        link,
+        format!("{base}/join?code={code}"),
+        "built from the origin the approver\'s request carried"
+    );
+    assert_eq!(
+        received["expiresAtMs"].as_i64(),
+        Some(invite_expires_ms),
+        "the claim keeps the card\'s expiry"
+    );
+    // The link opens an invite with the card\'s role, uses and expiry, owned by the
+    // approver — and the one minted at the decision is dead.
+    let (live_role, live_uses, live_by, live_expiry, live_id): (String, i32, Uuid, i64, Uuid) =
+        sqlx::query_as(
+            "SELECT role::text, max_uses, created_by, \
+                    (extract(epoch FROM expires_at) * 1000)::bigint, id \
+               FROM invite_code \
+              WHERE workspace_id=$1 AND code_hash = momo_invite_code_hash($2) \
+                AND revoked_at IS NULL",
+        )
+        .bind(fixture.workspace)
+        .bind(&code)
+        .fetch_one(&su)
+        .await
+        .expect("the claimed code opens a live invite");
+    assert_eq!(live_role, "member");
+    assert_eq!(live_uses, 1);
+    assert_eq!(live_by, fixture.human);
+    assert_eq!(live_expiry, invite_expires_ms);
+    assert_ne!(
+        live_id, invite_id,
+        "minted at the claim, not at the decision"
+    );
+    let revoked_reason: Option<String> = sqlx::query_scalar(
+        "SELECT revocation_reason FROM invite_code WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(invite_id)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(revoked_reason.as_deref(), Some("regenerated"));
+    // Nowhere durable, nowhere in a log.
+    let stored = durable_text(&su, fixture.workspace).await;
+    assert!(!stored.contains(&code), "claimed code stored somewhere");
+    assert!(!claim_log.contains(&code), "claimed code logged");
+    // A second claim is refused, and so is a claim by nobody.
+    let (status, again) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_action_claim_secret",
+        json!({"handle": handle, "approvalId": approval_id}),
+    )
+    .await;
+    assert_eq!(status, 409, "{again}");
+    assert_eq!(error_code(&again), -32006, "already claimed: {again}");
+    let claim_audit: Vec<(Option<Uuid>, Value)> = sqlx::query_as(
+        "SELECT actor_member_id, detail FROM audit_log \
+          WHERE workspace_id=$1 AND action='agent.secret.claimed'",
+    )
+    .bind(fixture.workspace)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(claim_audit.len(), 1, "one claim, one audit row");
+    assert_eq!(claim_audit[0].0, Some(fixture.hosted_agent));
+    assert_eq!(
+        claim_audit[0].1["approval_id"],
+        json!(approval_id.to_string())
+    );
+    assert_eq!(claim_audit[0].1["kind"], json!("invite"));
+    assert!(!claim_audit[0].1.to_string().contains(&code));
 
     // ---- bodies for the spec's own validator -------------------------------
     //
@@ -7154,14 +7220,45 @@ async fn try_propose_action_3706(
         .as_str()
         .expect("a lease handle")
         .to_string();
-    call(
+    let (status, answer) = call(
         client,
         base,
         &fixture.hosted_bearer,
         "oort_action_propose",
         json!({"handle": handle, "actionId": action_id, "args": args}),
     )
-    .await
+    .await;
+    remember_handle_3789(&answer, &handle);
+    (status, answer)
+}
+
+/// The lease handle each proposal was made under, by approval id — the claim call
+/// takes one (`bound_handle`), and the tests have no other way to get it back.
+fn handles_3789() -> &'static std::sync::Mutex<std::collections::HashMap<Uuid, String>> {
+    static HANDLES: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<Uuid, String>>> =
+        std::sync::OnceLock::new();
+    HANDLES.get_or_init(Default::default)
+}
+
+fn remember_handle_3789(answer: &Value, handle: &str) {
+    if let Some(id) = structured(answer)["approvalId"]
+        .as_str()
+        .and_then(|id| Uuid::parse_str(id).ok())
+    {
+        handles_3789()
+            .lock()
+            .unwrap()
+            .insert(id, handle.to_string());
+    }
+}
+
+fn handle_of_3789(approval: Uuid) -> String {
+    handles_3789()
+        .lock()
+        .unwrap()
+        .get(&approval)
+        .cloned()
+        .expect("the proposal's handle was remembered")
 }
 
 fn proposed_approval_3706(answer: &Value) -> Uuid {
@@ -15261,8 +15358,8 @@ async fn member_count_3788(su: &PgPool, workspace: Uuid) -> i64 {
 /// exists; the admin's approval creates the member, agent, paused profile and a
 /// `pairing_pending` connection in one transaction, the approver is the owner, the
 /// pairing code is in the response alone (`no-store`) and in no durable store, and
-/// a replay does not show it again; `deliverSecretToAgent` is refused until the
-/// claim call exists.
+/// a replay does not show it again. (The approver\'s hand-over choice is the next
+/// test.)
 #[tokio::test]
 #[ignore = "needs verifier-owned isolated PostgreSQL 18"]
 async fn an_approved_agent_invite_creates_the_agent_for_the_approver_and_shows_the_code_once() {
@@ -15382,29 +15479,6 @@ async fn an_approved_agent_invite_creates_the_agent_for_the_approver_and_shows_t
         members_before,
         "proposing creates nobody"
     );
-
-    // ---- the flag is refused: there is no claim call yet --------------------
-    let (status, _h, flagged) = {
-        let response = client
-            .post(format!(
-                "{base}/v1/workspaces/{}/approvals/{approval}/decision",
-                fixture.workspace
-            ))
-            .bearer_auth(&fixture.human_jwt)
-            .json(&json!({
-                "approvalId": approval, "approve": true,
-                "clientDecisionId": Uuid::new_v4(), "deliverSecretToAgent": true
-            }))
-            .send()
-            .await
-            .unwrap();
-        let status = response.status().as_u16();
-        let headers = response.headers().clone();
-        (status, headers, response.json::<Value>().await.unwrap())
-    };
-    assert_eq!(status, 400, "{flagged}");
-    assert_eq!(flagged["status"], "deliver_secret_not_supported");
-    assert_eq!(approval_status_3708(&su, approval).await, "pending");
 
     // ---- a non-admin is refused; nothing exists -----------------------------
     let (status, _h, refused) = decide_as(
@@ -15560,4 +15634,379 @@ async fn an_agent_invite_whose_handle_was_taken_meanwhile_creates_nothing() {
         connections_after, connections_before,
         "no connection was made"
     );
+}
+
+async fn decide_with_flag_3789(
+    client: &reqwest::Client,
+    base: &str,
+    fixture: &Fixture,
+    approval: Uuid,
+    approve: bool,
+    deliver: bool,
+) -> (u16, Value) {
+    let response = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/approvals/{approval}/decision",
+            fixture.workspace
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({
+            "approvalId": approval, "approve": approve,
+            "clientDecisionId": Uuid::new_v4(), "deliverSecretToAgent": deliver
+        }))
+        .send()
+        .await
+        .unwrap();
+    (
+        response.status().as_u16(),
+        response.json::<Value>().await.unwrap_or(Value::Null),
+    )
+}
+
+async fn claim_3789(
+    client: &reqwest::Client,
+    base: &str,
+    fixture: &Fixture,
+    approval: Uuid,
+) -> (u16, Value) {
+    call(
+        client,
+        base,
+        &fixture.hosted_bearer,
+        "oort_action_claim_secret",
+        json!({"handle": handle_of_3789(approval), "approvalId": approval}),
+    )
+    .await
+}
+
+async fn pairing_hash_3789(su: &PgPool, workspace: Uuid, handle: &str) -> Vec<u8> {
+    sqlx::query_scalar(
+        "SELECT hc.pairing_challenge_hash FROM hosted_agent_connection hc \
+           JOIN member m ON m.id = hc.agent_member_id AND m.workspace_id = hc.workspace_id \
+          WHERE hc.workspace_id=$1 AND m.handle=$2",
+    )
+    .bind(workspace)
+    .bind(handle)
+    .fetch_one(su)
+    .await
+    .expect("the pairing hash")
+}
+
+async fn propose_invite_agent_3789(
+    client: &reqwest::Client,
+    base: &str,
+    su: &PgPool,
+    fixture: &Fixture,
+    name: &str,
+    handle: &str,
+) -> Uuid {
+    let (status, proposed) = try_propose_action_3706(
+        client,
+        base,
+        su,
+        fixture,
+        "agent.invite",
+        json!({"platform": "other", "displayName": name, "handle": handle}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    proposed_approval_3706(&proposed)
+}
+
+/// **The claim call for `agent.invite` (ADR-0186 증보 v3 V3-3a/V3-4, #3789).** The
+/// approver\'s checkbox decides who sees the pairing code: unchecked, the approver
+/// alone (`secretOnce`); checked, the proposing agent alone, once, within 30
+/// minutes, minted at the claim (the hash on the connection changes, so whatever
+/// existed before is dead). Every other caller or state is the one `unavailable`.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_agent_receives_a_pairing_code_only_when_the_approver_chose_to_hand_it_over() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    // ---- checked: no secretOnce, then one claim -----------------------------
+    let a = propose_invite_agent_3789(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "Alpha Scribe",
+        "alpha-scribe",
+    )
+    .await;
+    let (status, _) = claim_3789(&client, &base, &fixture, a).await;
+    assert_eq!(status, 409, "a pending approval grants nothing");
+    let (status, approved) = decide_with_flag_3789(&client, &base, &fixture, a, true, true).await;
+    assert_eq!(status, 200, "{approved}");
+    assert!(approved["result"].get("secretOnce").is_none(), "{approved}");
+    let before = pairing_hash_3789(&su, fixture.workspace, "alpha-scribe").await;
+    let grant: Value =
+        sqlx::query_scalar("SELECT payload->'secretClaim' FROM approval WHERE id=$1")
+            .bind(a)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(grant["allowed"], json!(true));
+    assert_eq!(grant["kind"], json!("pairing"));
+    assert!(grant.get("claimedAtMs").is_none());
+    let result_rows: Value = sqlx::query_scalar(
+        "SELECT props->'momo.action_result'->'rows' FROM message \
+          WHERE workspace_id=$1 AND type='tool_result' ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert!(
+        result_rows
+            .as_array()
+            .unwrap()
+            .contains(&json!({"label": "연결 코드", "value": "에이전트가 받아요"})),
+        "{result_rows}"
+    );
+    let (status, claimed) = claim_3789(&client, &base, &fixture, a).await;
+    assert_eq!(status, 200, "{claimed}");
+    let received = structured(&claimed);
+    assert_eq!(received["actionId"], json!("agent.invite"));
+    assert_eq!(received["kind"], json!("pairing"));
+    let pairing = received["value"].as_str().expect("the code").to_string();
+    assert!(received["expiresAtMs"].as_i64().unwrap() > 0);
+    let after = pairing_hash_3789(&su, fixture.workspace, "alpha-scribe").await;
+    assert_ne!(
+        before, after,
+        "minted at the claim: the earlier value is dead"
+    );
+    let matches: bool = sqlx::query_scalar("SELECT $1::bytea = digest($2::text, 'sha256')")
+        .bind(&after)
+        .bind(&pairing)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert!(
+        matches,
+        "the claimed code is the one the connection now holds"
+    );
+    assert!(!durable_text(&su, fixture.workspace)
+        .await
+        .contains(&pairing));
+    let (status, again) = claim_3789(&client, &base, &fixture, a).await;
+    assert_eq!((status, error_code(&again)), (409, -32006), "{again}");
+    let audit: Vec<Value> = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE workspace_id=$1 AND action='agent.secret.claimed'",
+    )
+    .bind(fixture.workspace)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(audit.len(), 1);
+    assert_eq!(audit[0]["kind"], json!("pairing"));
+    assert!(!audit[0].to_string().contains(&pairing));
+
+    // ---- unchecked: the approver sees it, the agent gets nothing -------------
+    let b = propose_invite_agent_3789(&client, &base, &su, &fixture, "Bravo Clerk", "bravo-clerk")
+        .await;
+    let (status, approved) = decide_with_flag_3789(&client, &base, &fixture, b, true, false).await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(
+        approved["result"]["secretOnce"]["kind"],
+        json!("pairing_credential")
+    );
+    let (status, refused) = claim_3789(&client, &base, &fixture, b).await;
+    let unknown = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_action_claim_secret",
+        json!({"handle": handle_of_3789(b), "approvalId": Uuid::new_v4()}),
+    )
+    .await;
+    assert_eq!((status, error_code(&refused)), (409, -32004), "{refused}");
+    assert_eq!(
+        (unknown.0, error_code(&unknown.1)),
+        (409, -32004),
+        "an approval that does not exist answers the same"
+    );
+
+    // ---- rejected: nothing to claim ------------------------------------------
+    let d = propose_invite_agent_3789(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "Delta Auditor",
+        "delta-auditor",
+    )
+    .await;
+    let (status, _) = decide_with_flag_3789(&client, &base, &fixture, d, false, false).await;
+    assert_eq!(status, 200);
+    let (status, refused) = claim_3789(&client, &base, &fixture, d).await;
+    assert_eq!((status, error_code(&refused)), (409, -32004), "{refused}");
+
+    // ---- past the 30 minutes: the value never leaves --------------------------
+    let e =
+        propose_invite_agent_3789(&client, &base, &su, &fixture, "Echo Pilot", "echo-pilot").await;
+    let (status, _) = decide_with_flag_3789(&client, &base, &fixture, e, true, true).await;
+    assert_eq!(status, 200);
+    sqlx::query(
+        "UPDATE approval SET payload = jsonb_set(payload, '{secretClaim,deadlineMs}', '1') WHERE id=$1",
+    )
+    .bind(e)
+    .execute(&su)
+    .await
+    .unwrap();
+    let before = pairing_hash_3789(&su, fixture.workspace, "echo-pilot").await;
+    let (status, late) = claim_3789(&client, &base, &fixture, e).await;
+    assert_eq!((status, error_code(&late)), (409, -32007), "{late}");
+    assert_eq!(
+        before,
+        pairing_hash_3789(&su, fixture.workspace, "echo-pilot").await,
+        "a refused claim mints nothing"
+    );
+
+    // ---- somebody else\'s approval is the same \'unavailable\' --------------------
+    let f = propose_invite_agent_3789(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "Foxtrot Mapper",
+        "foxtrot-mapper",
+    )
+    .await;
+    let (status, _) = decide_with_flag_3789(&client, &base, &fixture, f, true, true).await;
+    assert_eq!(status, 200);
+    sqlx::query("UPDATE approval SET requested_by=$2 WHERE id=$1")
+        .bind(f)
+        .bind(fixture.managed_agent)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, other) = claim_3789(&client, &base, &fixture, f).await;
+    assert_eq!((status, error_code(&other)), (409, -32004), "{other}");
+
+    // ---- two claims at once: exactly one wins --------------------------------
+    let g = propose_invite_agent_3789(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "Golf Courier",
+        "golf-courier",
+    )
+    .await;
+    let (status, _) = decide_with_flag_3789(&client, &base, &fixture, g, true, true).await;
+    assert_eq!(status, 200);
+    let (one, two) = tokio::join!(
+        claim_3789(&client, &base, &fixture, g),
+        claim_3789(&client, &base, &fixture, g)
+    );
+    let mut outcomes = vec![
+        (one.0, if one.0 == 200 { 0 } else { error_code(&one.1) }),
+        (two.0, if two.0 == 200 { 0 } else { error_code(&two.1) }),
+    ];
+    outcomes.sort();
+    assert_eq!(outcomes, vec![(200, 0), (409, -32006)], "{one:?} {two:?}");
+
+    // ---- malformed ids -------------------------------------------------------
+    let (status, bad) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_action_claim_secret",
+        json!({"handle": handle_of_3789(g), "approvalId": "nope"}),
+    )
+    .await;
+    assert_eq!(status, 400, "{bad}");
+    // A handle that is not a sealed lease handle of this connection is refused
+    // before the approval is even looked up.
+    let (status, forged) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_action_claim_secret",
+        json!({"handle": "forged", "approvalId": g}),
+    )
+    .await;
+    assert_eq!((status, error_code(&forged)), (403, -32003), "{forged}");
+}
+
+/// `invite.create` over the claim (V3-5): the approver is not shown a link; a
+/// revoked invite cannot be claimed; the replacement keeps the card\'s ceilings.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_revoked_invite_cannot_be_claimed_and_a_flag_on_an_invite_is_refused() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (approval, _card) = propose_invite(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        json!({"role": "admin", "maxUses": 3, "expiresInDays": 10}),
+    )
+    .await;
+    // The hand-over box is `agent.invite`\'s; asking on an invite is refused.
+    let (status, refused) =
+        decide_with_flag_3789(&client, &base, &fixture, approval, true, true).await;
+    assert_eq!(status, 400, "{refused}");
+    let (status, approved) =
+        decide_with_flag_3789(&client, &base, &fixture, approval, true, false).await;
+    assert_eq!(status, 200, "{approved}");
+    assert!(approved["result"].get("secretOnce").is_none());
+    // The approver changed their mind.
+    sqlx::query(
+        "UPDATE invite_code SET revoked_at = now(), revoked_by = created_by, \
+                revocation_reason = 'revoked' WHERE workspace_id=$1 AND id = $2",
+    )
+    .bind(fixture.workspace)
+    .bind(Uuid::parse_str(approved["result"]["ref"]["id"].as_str().unwrap()).unwrap())
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, refused) = claim_3789(&client, &base, &fixture, approval).await;
+    assert_eq!((status, error_code(&refused)), (409, -32004), "{refused}");
+    let live: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM invite_code WHERE workspace_id=$1 AND revoked_at IS NULL",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(live, 0, "nothing was minted for a revoked invite");
+
+    // An approver who is no longer an admin when the claim arrives has no link
+    // minted in their name (I2 review M2).
+    let (second, _card) =
+        propose_invite(&client, &base, &su, &fixture, json!({"role": "admin"})).await;
+    let (status, approved) =
+        decide_with_flag_3789(&client, &base, &fixture, second, true, false).await;
+    assert_eq!(status, 200, "{approved}");
+    sqlx::query(
+        "UPDATE workspace_membership SET role='member' WHERE workspace_id=$1 AND member_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.human)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, refused) = claim_3789(&client, &base, &fixture, second).await;
+    assert_eq!((status, error_code(&refused)), (409, -32004), "{refused}");
+    sqlx::query(
+        "UPDATE workspace_membership SET role='owner' WHERE workspace_id=$1 AND member_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.human)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, ok) = claim_3789(&client, &base, &fixture, second).await;
+    assert_eq!(status, 200, "restored authority claims fine: {ok}");
 }
