@@ -820,7 +820,7 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
         list_tools(&client, &base, &fixture.hosted_bearer)
             .await
             .len(),
-        12,
+        13,
         "restoring the connection restores the catalog"
     );
 
@@ -13247,7 +13247,9 @@ async fn an_agent_updates_its_profile_card_after_its_owner_approves() {
     .fetch_one(&su)
     .await
     .unwrap();
-    assert!((1.9..=2.0).contains(&hours_left), "{hours_left}");
+    // Upper bound has 36 s of slack: the app clock sets the expiry and the DB clock
+    // measures it, and a Docker VM clock runs tens of ms ahead of the host (2.000014 h).
+    assert!((1.9..=2.01).contains(&hours_left), "{hours_left}");
     // Nothing else moved.
     let prompt: Option<String> =
         sqlx::query_scalar("SELECT system_prompt FROM agent WHERE member_id=$1")
