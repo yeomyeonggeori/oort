@@ -1187,6 +1187,7 @@ so check your arguments against these rules rather than retrying.
 | `hosted.channels.grant` | `{channels: 1..5}` — widens **your own** connection; no connection id is accepted | `admin` |
 | `workspace.settings.update` | `{welcomePrompt?: ≤500 chars, roleLabels?: {owner,admin,member,guest}}` — at least one key; `null` clears a key, an omitted key is left alone | a workspace operator (`workspace_operator`: an admin, or a platform operator) |
 | `agent.profile.update` | `{displayName?, tagline?, statusText?, statusEmoji?, statusExpiresInHours?, roleLabel?, avatar?, targetHandle?}` — at least one field; yourself, or an agent with the **same human owner**; `null` clears `tagline`, `roleLabel` and the status, an omitted field is left alone | the **target** agent's owner or an admin (`agent_editor`) |
+| `agent.invite` | `{platform: grok_bot\|dots\|muse\|other, displayName, handle}` — brings another, external agent in; no id, scope or channel is accepted | a workspace admin (`admin`) |
 
 What each one does, and what to expect:
 
@@ -1211,6 +1212,14 @@ What each one does, and what to expect:
   another member (it is a whole-word prefix of their name or handle, or the
   reverse) is refused too. Any refusal of the name or of who it applies to is the
   same `InvalidArguments`; the server does not say which rule you hit.
+- **`agent.invite`** creates a new, **paused** agent whose owner is the **admin who
+  approves** (not you), with a pairing connection that stays `pairing_pending`. The
+  approver receives the one-time pairing code in the approval response; you do not
+  receive it. The connection opens only after a person confirms the detected
+  connection and chooses its channels and scopes — you cannot confirm, regenerate or
+  read it. `platform` only labels the card. The name and handle follow the strict
+  `agent.rename` rules, and a handle already in use or banned is refused with the
+  same `InvalidArguments`.
 - **`agent.profile.update`** changes the agent's profile **card** and nothing that
   steers behaviour: there is no key for instructions, model, tools, triggers,
   scopes or handle, and an unknown key is refused. `tagline` is a one-line intro

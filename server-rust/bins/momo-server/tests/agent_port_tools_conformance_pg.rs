@@ -15218,3 +15218,331 @@ async fn a_workspace_image_can_be_the_avatar_only_if_the_agent_could_read_it() {
         "an unapproved channel hides its files"
     );
 }
+
+async fn agent_invite_state_3788(
+    su: &PgPool,
+    workspace: Uuid,
+    handle: &str,
+) -> Option<(Uuid, Uuid, bool, String)> {
+    sqlx::query_as::<_, (Uuid, Uuid, bool, String)>(
+        "SELECT m.id, a.owner_human_id, ap.paused, hc.status::text \
+           FROM member m \
+           JOIN agent a ON a.member_id = m.id AND a.workspace_id = m.workspace_id \
+           JOIN agent_profile ap ON ap.agent_member_id = m.id AND ap.workspace_id = m.workspace_id \
+           JOIN hosted_agent_connection hc ON hc.agent_member_id = m.id \
+            AND hc.workspace_id = m.workspace_id \
+          WHERE m.workspace_id = $1 AND m.handle = $2 AND m.kind = 'agent'",
+    )
+    .bind(workspace)
+    .bind(handle)
+    .fetch_optional(su)
+    .await
+    .expect("read the invited agent")
+}
+
+async fn connection_count_3788(su: &PgPool, workspace: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM hosted_agent_connection WHERE workspace_id=$1")
+        .bind(workspace)
+        .fetch_one(su)
+        .await
+        .unwrap()
+}
+
+async fn member_count_3788(su: &PgPool, workspace: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM member WHERE workspace_id=$1")
+        .bind(workspace)
+        .fetch_one(su)
+        .await
+        .unwrap()
+}
+
+/// **agent.invite (증보 v3 V3-3, #3788), end to end.** Hostile spellings are one
+/// refusal and create nothing; a non-admin decider is `role_required` and nothing
+/// exists; the admin's approval creates the member, agent, paused profile and a
+/// `pairing_pending` connection in one transaction, the approver is the owner, the
+/// pairing code is in the response alone (`no-store`) and in no durable store, and
+/// a replay does not show it again; `deliverSecretToAgent` is refused until the
+/// claim call exists.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_approved_agent_invite_creates_the_agent_for_the_approver_and_shows_the_code_once() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (_plain, plain_jwt) = seed_human_3708(&su, &fixture, "plain", "member").await;
+    let members_before = member_count_3788(&su, fixture.workspace).await;
+
+    // ---- hostile spellings: one refusal, nothing written --------------------
+    let taken_handle = tidy_agent_3708(&su, fixture.managed_agent, "Taken Bot").await;
+    let mut answers = Vec::new();
+    for hostile in [
+        json!({"platform": "grok_bot", "displayName": "Muse Writer", "handle": "muse-writer", "ownerOnly": true}),
+        json!({"platform": "grok_bot", "displayName": "Muse Writer", "handle": "muse-writer", "channels": ["x"]}),
+        json!({"platform": "grok_bot", "displayName": "Muse Writer", "handle": "muse-writer", "scopes": ["workspace:propose"]}),
+        json!({"platform": "grok_bot", "displayName": "Muse Writer", "handle": "muse-writer", "ownerHumanId": Uuid::new_v4()}),
+        json!({"platform": "skynet", "displayName": "Muse Writer", "handle": "muse-writer"}),
+        json!({"displayName": "Muse Writer", "handle": "muse-writer"}),
+        json!({"platform": "muse", "handle": "muse-writer"}),
+        json!({"platform": "muse", "displayName": "Muse Writer"}),
+        json!({"platform": "muse", "displayName": "see https://evil.example", "handle": "muse-writer"}),
+        json!({"platform": "muse", "displayName": "[docs](http://evil.example)", "handle": "muse-writer"}),
+        json!({"platform": "muse", "displayName": "zero\u{200B}width", "handle": "muse-writer"}),
+        json!({"platform": "muse", "displayName": "Admin", "handle": "muse-writer"}),
+        json!({"platform": "muse", "displayName": "Muse Writer", "handle": "x"}),
+        json!({"platform": "muse", "displayName": "Muse Writer", "handle": "Bad Handle!"}),
+        json!({"platform": "muse", "displayName": "Muse Writer", "handle": taken_handle}),
+        json!({"platform": "muse", "displayName": "Person plain", "handle": "muse-writer"}),
+        json!({}),
+    ] {
+        let (status, refused) = try_propose_action_3706(
+            &client,
+            &base,
+            &su,
+            &fixture,
+            "agent.invite",
+            hostile.clone(),
+        )
+        .await;
+        answers.push((status, refused["error"].clone()));
+        assert_eq!(status, 400, "{hostile} must be refused: {refused}");
+    }
+    assert!(answers.iter().all(|a| a.1 == answers[0].1), "{answers:?}");
+    assert_eq!(
+        member_count_3788(&su, fixture.workspace).await,
+        members_before
+    );
+
+    // A banned handle is refused at the proposal too.
+    sqlx::query(
+        "INSERT INTO workspace_ban(workspace_id, handle_norm, created_by) VALUES($1,'banned-bot',$2)",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.human)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, refused) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.invite",
+        json!({"platform": "dots", "displayName": "Banned Bot", "handle": "banned-bot"}),
+    )
+    .await;
+    assert_eq!(status, 400, "{refused}");
+
+    // ---- a good proposal: the card says what approving does -----------------
+    let good = json!({"platform": "muse", "displayName": "Muse Writer", "handle": "muse-writer"});
+    let (status, proposed) =
+        try_propose_action_3706(&client, &base, &su, &fixture, "agent.invite", good.clone()).await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let card: Value = sqlx::query_scalar("SELECT props FROM message WHERE id=$1")
+        .bind(Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap())
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(card["action"]["id"], json!("agent.invite"));
+    assert_eq!(card["action"]["required_role"], json!("admin"));
+    let rows = card["action"]["rows"].as_array().unwrap().clone();
+    let row = |label: &str| {
+        rows.iter()
+            .find(|r| r["label"] == label)
+            .unwrap_or_else(|| panic!("{label} in {rows:?}"))["value"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert_eq!(row("플랫폼"), "Muse");
+    assert!(
+        row("새 에이전트").contains("Muse Writer") && row("새 에이전트").contains("muse-writer")
+    );
+    assert_eq!(row("소유자"), "승인한 사람");
+    assert_eq!(
+        member_count_3788(&su, fixture.workspace).await,
+        members_before,
+        "proposing creates nobody"
+    );
+
+    // ---- the flag is refused: there is no claim call yet --------------------
+    let (status, _h, flagged) = {
+        let response = client
+            .post(format!(
+                "{base}/v1/workspaces/{}/approvals/{approval}/decision",
+                fixture.workspace
+            ))
+            .bearer_auth(&fixture.human_jwt)
+            .json(&json!({
+                "approvalId": approval, "approve": true,
+                "clientDecisionId": Uuid::new_v4(), "deliverSecretToAgent": true
+            }))
+            .send()
+            .await
+            .unwrap();
+        let status = response.status().as_u16();
+        let headers = response.headers().clone();
+        (status, headers, response.json::<Value>().await.unwrap())
+    };
+    assert_eq!(status, 400, "{flagged}");
+    assert_eq!(flagged["status"], "deliver_secret_not_supported");
+    assert_eq!(approval_status_3708(&su, approval).await, "pending");
+
+    // ---- a non-admin is refused; nothing exists -----------------------------
+    let (status, _h, refused) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &plain_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["status"], "role_required");
+    assert_eq!(approval_status_3708(&su, approval).await, "pending");
+    assert!(
+        agent_invite_state_3788(&su, fixture.workspace, "muse-writer")
+            .await
+            .is_none()
+    );
+
+    // ---- the admin approves --------------------------------------------------
+    let decision_id = Uuid::new_v4();
+    let (status, headers, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval,
+        true,
+        decision_id,
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(approved["result"]["actionId"], json!("agent.invite"));
+    assert_eq!(
+        headers
+            .get("cache-control")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or(""),
+        "no-store"
+    );
+    let secret = &approved["result"]["secretOnce"];
+    assert_eq!(secret["kind"], json!("pairing_credential"), "{approved}");
+    let pairing = secret["value"].as_str().expect("the code").to_string();
+    assert!(pairing.len() >= 20, "a real credential");
+    let (new_agent, owner, paused, connection) =
+        agent_invite_state_3788(&su, fixture.workspace, "muse-writer")
+            .await
+            .expect("the agent exists");
+    assert_eq!(owner, fixture.human, "the approver owns it");
+    assert!(paused, "born paused");
+    assert_eq!(connection, "pairing_pending");
+    assert_eq!(
+        member_count_3788(&su, fixture.workspace).await,
+        members_before + 1
+    );
+    assert_eq!(
+        approved["result"]["ref"]["id"],
+        json!(new_agent.to_string())
+    );
+
+    // The code is in no durable store.
+    let durable = durable_text(&su, fixture.workspace).await;
+    assert!(!durable.contains(&pairing), "pairing code leaked");
+    let audit: Value = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE workspace_id=$1 AND action='agent.invited'",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .expect("the invite audit row");
+    assert_eq!(audit["via_agent"], json!(fixture.hosted_agent.to_string()));
+    assert_eq!(audit["approval_id"], json!(approval.to_string()));
+    assert_eq!(audit["platform"], json!("muse"));
+    assert!(!audit.to_string().contains(&pairing));
+
+    // A replay answers the same receipt without the code.
+    let (status, _h, replay) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval,
+        true,
+        decision_id,
+    )
+    .await;
+    assert_eq!(status, 200, "{replay}");
+    assert!(replay["result"].get("secretOnce").is_none(), "{replay}");
+    assert_eq!(
+        member_count_3788(&su, fixture.workspace).await,
+        members_before + 1
+    );
+}
+
+/// A handle that became unavailable between the card and the decision (here a
+/// *deleted* member still holds it, which the roster check does not see) refuses
+/// the decision as stale with **nothing written** — no member, no connection — and
+/// the approval stays pending.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_agent_invite_whose_handle_was_taken_meanwhile_creates_nothing() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.invite",
+        json!({"platform": "dots", "displayName": "Dots Helper", "handle": "dots-helper"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let members_before = member_count_3788(&su, fixture.workspace).await;
+    let connections_before = connection_count_3788(&su, fixture.workspace).await;
+    let ghost = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member(id, workspace_id, kind, display_name, handle, deleted_at) \
+         VALUES($1,$2,'human','Gone','dots-helper', now())",
+    )
+    .bind(ghost)
+    .bind(fixture.workspace)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, _h, refused) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{refused}");
+    assert_eq!(refused["status"], "action_args_invalid");
+    assert_eq!(approval_status_3708(&su, approval).await, "pending");
+    assert_eq!(
+        member_count_3788(&su, fixture.workspace).await,
+        members_before + 1,
+        "only the ghost row the test added"
+    );
+    let connections_after = connection_count_3788(&su, fixture.workspace).await;
+    assert_eq!(
+        connections_after, connections_before,
+        "no connection was made"
+    );
+}

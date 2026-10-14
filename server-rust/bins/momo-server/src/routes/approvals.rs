@@ -64,20 +64,21 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use chrono::Utc;
 use momo_agent::actions::{
-    action_by_id, action_ref, action_result_props, agent_profile_update_result_body,
-    agent_rename_result_body, channel_create_result_body, channel_create_result_rows,
-    channel_member_add_result_body, channel_member_add_rows, invite_result_body,
-    invite_result_rows, last_attempt_patch, result_client_msg_id, workspace_settings_result_body,
-    ActionResult, ActionResultNext, RequiredRole, SecretDelivery, ACTION_APPROVED_AUDIT_SCHEMA,
-    ACTION_RESULT_EXECUTED, ACTION_TYPE_WORKSPACE_ACTION, AUDIT_ACTION_APPROVED,
-    AUDIT_AGENT_AVATAR_UPDATED, AUDIT_AGENT_AVATAR_UPDATED_SCHEMA, AUDIT_AGENT_PROFILE_UPDATED,
+    action_by_id, action_ref, action_result_props, agent_invite_result_body,
+    agent_profile_update_result_body, agent_rename_result_body, channel_create_result_body,
+    channel_create_result_rows, channel_member_add_result_body, channel_member_add_rows,
+    invite_result_body, invite_result_rows, last_attempt_patch, result_client_msg_id,
+    workspace_settings_result_body, ActionResult, ActionResultNext, RequiredRole, SecretDelivery,
+    ACTION_APPROVED_AUDIT_SCHEMA, ACTION_RESULT_EXECUTED, ACTION_TYPE_WORKSPACE_ACTION,
+    AUDIT_ACTION_APPROVED, AUDIT_AGENT_AVATAR_UPDATED, AUDIT_AGENT_AVATAR_UPDATED_SCHEMA,
+    AUDIT_AGENT_INVITED, AUDIT_AGENT_INVITED_SCHEMA, AUDIT_AGENT_PROFILE_UPDATED,
     AUDIT_AGENT_PROFILE_UPDATED_SCHEMA, AUDIT_CHANNELS_GRANTED, AUDIT_CHANNELS_GRANTED_SCHEMA,
     AUDIT_CHANNEL_CREATED, AUDIT_CHANNEL_CREATED_SCHEMA, AUDIT_CHANNEL_MEMBER_ADDED,
     AUDIT_CHANNEL_MEMBER_ADDED_SCHEMA, AUDIT_MEMBER_RENAMED, AUDIT_MEMBER_RENAMED_SCHEMA,
     AUDIT_WORKSPACE_SETTING_UPDATED, AUDIT_WORKSPACE_SETTING_UPDATED_SCHEMA,
     DEFAULT_INVITE_EXPIRES_IN_DAYS, INVITE_RESULT_NEXT, LAST_ATTEMPT_PROPS_KEY, REF_TYPE_AGENT,
     REF_TYPE_CHANNEL, REF_TYPE_HOSTED_CONNECTION, REF_TYPE_INVITE, REF_TYPE_WORKSPACE_SETTINGS,
-    ROLE_REQUIRED, SECRET_ONCE_INVITE_LINK,
+    ROLE_REQUIRED, SECRET_ONCE_INVITE_LINK, SECRET_ONCE_PAIRING,
 };
 use momo_agent::approval::{
     decided_props_patch, decision_broadcast_payload, decision_event_payload, decision_receipt,
@@ -1561,6 +1562,16 @@ async fn execute_workspace_action(
                 "agent.profile.update resolved without a target",
             ));
         }
+        ActionArgs::AgentInvite {
+            platform,
+            display_name,
+            handle,
+        } => match execute_agent_invite(conn, approval, input, now, platform, display_name, handle)
+            .await?
+        {
+            Execution::Ran(executed) => executed,
+            Execution::Refused(decision) => return Ok(Ok(decision)),
+        },
         ActionArgs::ChannelMemberAdd {
             channel: Some(channel),
             members,
@@ -2198,6 +2209,92 @@ async fn execute_agent_rename(
             &applied.member.display_name,
         ),
         secret_once: None,
+        next: None,
+    }))
+}
+
+/// `agent.invite` (증보 v3 V3-3): the **approver** — an admin, judged by the gate
+/// before this runs — becomes the owner of a new hosted agent, born paused with a
+/// `pairing_pending` connection, in the decision's own transaction. Nothing the
+/// proposing agent said selects an id, a scope or a channel; access opens only when
+/// a person confirms the detected connection.
+///
+/// The pairing code is the one-time value of this decision (`secretOnce`, D4). It is
+/// in no audit row, no message and no payload.
+async fn execute_agent_invite(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
+    platform: &str,
+    display_name: &str,
+    handle: &str,
+) -> Result<Execution, momo_db::DbError> {
+    use crate::routes::hosted_agent_connections::{provision_hosted_agent_in_tx, Provisioned};
+    // The ban list is the REST route's check too; the resolver already asked, this
+    // is the same-transaction recheck for a ban that landed in between.
+    if momo_settings::is_handle_banned_in_tx(conn, handle).await? {
+        return Ok(Execution::Refused(args_invalid_refusal(
+            approval, input, now,
+        )));
+    }
+    let (member, issuance) = match provision_hosted_agent_in_tx(
+        conn,
+        input.workspace_id,
+        input.member_id,
+        input.via_token_id,
+        display_name.to_string(),
+        handle.to_string(),
+        None,
+        None,
+    )
+    .await?
+    {
+        Provisioned::Created(member, issuance) => (member, issuance),
+        // The handle was taken between the card and the decision (a deleted member
+        // still holds its handle): nothing was written, the card is stale.
+        Provisioned::DuplicateHandle => {
+            return Ok(Execution::Refused(args_invalid_refusal(
+                approval, input, now,
+            )));
+        }
+        Provisioned::Rejected(_) => {
+            return Err(protocol_error(
+                "agent.invite approver is not an active human",
+            ));
+        }
+    };
+    let audit = AuditEntry::new(input.workspace_id, AUDIT_AGENT_INVITED)
+        .by(input.member_id)
+        .about(member.id)
+        .target("member", member.id)
+        .via_token(input.via_token_id)
+        .run(approval.run_id)
+        .with_schema(
+            AUDIT_AGENT_INVITED_SCHEMA,
+            // Provenance only — never the pairing code.
+            json!({
+                "via_agent": approval.requested_by.to_string(),
+                "approval_id": approval.id.to_string(),
+                "platform": platform,
+                "connection_id": issuance.connection.id.to_string(),
+            }),
+        );
+    Ok(Execution::Ran(Executed {
+        audits: vec![audit],
+        ref_type: REF_TYPE_AGENT,
+        ref_id: member.id,
+        result_body: agent_invite_result_body(display_name),
+        result_rows: momo_agent::actions::agent_invite_rows(
+            momo_agent::actions::agent_invite_platform_label(platform).unwrap_or(""),
+            display_name,
+            handle,
+        ),
+        secret_once: Some(SecretOnceDto {
+            kind: SECRET_ONCE_PAIRING.to_string(),
+            value: issuance.pairing_credential,
+            expires_at_ms: issuance.pairing_expires_at_ms,
+        }),
         next: None,
     }))
 }

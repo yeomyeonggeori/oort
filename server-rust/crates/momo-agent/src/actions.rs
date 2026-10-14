@@ -85,6 +85,11 @@ pub const ACTION_WORKSPACE_SETTINGS_UPDATE: &str = "workspace.settings.update";
 /// that steers behaviour are not reachable from here.
 pub const ACTION_AGENT_PROFILE_UPDATE: &str = "agent.profile.update";
 
+/// `agent.invite` — bring another, external agent into the workspace: the approver
+/// (an admin) becomes its owner and gets a one-time pairing code; the connection
+/// stays `pairing_pending` and a human still confirms it (ADR-0186 증보 v3 V3-3).
+pub const ACTION_AGENT_INVITE: &str = "agent.invite";
+
 /// What a person is consenting to when they approve (ADR-0186 D3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Risk {
@@ -371,6 +376,39 @@ pub const AGENT_RENAME_NAME_MAX_BYTES: u64 = 256;
 
 /// `agent.rename` arguments (증보 V2): the new name, and optionally which of the
 /// proposer's managed agents (by handle) — absent means the proposer itself.
+/// `platform` of `agent.invite`: a display/preset key and **never** a ground for
+/// authority (ADR-0162 D6). The pair is (wire key, label the card shows).
+pub const AGENT_INVITE_PLATFORMS: [(&str, &str); 4] = [
+    ("grok_bot", "Grok Bot"),
+    ("dots", "dots"),
+    ("muse", "Muse"),
+    ("other", "다른 에이전트"),
+];
+
+/// The label the card shows for a platform key, `None` for an unknown key.
+pub fn agent_invite_platform_label(key: &str) -> Option<&'static str> {
+    AGENT_INVITE_PLATFORMS
+        .iter()
+        .find(|(wire, _)| *wire == key)
+        .map(|(_, label)| *label)
+}
+
+/// `agent.invite` arguments (V3-3): a name, a handle and the platform preset. No
+/// id, scope or channel — those are decided by a human at the confirm step.
+fn agent_invite_args_schema() -> Value {
+    let platforms: Vec<&str> = AGENT_INVITE_PLATFORMS.iter().map(|(key, _)| *key).collect();
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["platform", "displayName", "handle"],
+        "properties": {
+            "platform": {"type": "string", "enum": platforms},
+            "displayName": {"type": "string", "minLength": 1, "maxLength": AGENT_RENAME_NAME_MAX_BYTES},
+            "handle": {"type": "string", "minLength": 1, "maxLength": MEMBER_HANDLE_MAX_BYTES}
+        }
+    })
+}
+
 fn agent_rename_args_schema() -> Value {
     json!({
         "type": "object",
@@ -572,6 +610,19 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         secret_delivery: SecretDelivery::None,
         effect: "대상 에이전트의 프로필(표시된 항목)을 바꿔요",
         args_schema: agent_profile_update_args_schema,
+    },
+    WorkspaceAction {
+        id: ACTION_AGENT_INVITE,
+        title: "외부 에이전트 데려오기",
+        summary: "새 에이전트를 만들고 연결 코드를 발급해요. 승인한 관리자가 소유자가 되고, 연결은 사람이 확인하기 전까지 열리지 않아요.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::Admin,
+        // `OptIn` arrives with the claim call (I2). Until then a checked
+        // `deliverSecretToAgent` is refused like on every action without a value
+        // for the agent — a pairing code nobody can claim must not be "handed over".
+        secret_delivery: SecretDelivery::None,
+        effect: "표시된 이름의 새 에이전트를 만들고, 승인한 사람이 소유자가 돼요",
+        args_schema: agent_invite_args_schema,
     },
 ];
 
@@ -940,6 +991,34 @@ pub fn agent_rename_rows(
         ),
     ]
 }
+
+/// The `agent.invite` card rows from the **server's** values. Plain text.
+pub fn agent_invite_rows(platform_label: &str, display_name: &str, handle: &str) -> Vec<Value> {
+    vec![
+        action_row("플랫폼", platform_label),
+        action_row("새 에이전트", member_card_label(display_name, handle, true)),
+        action_row("소유자", "승인한 사람"),
+        action_row(
+            "연결",
+            "연결 코드가 발급되고, 연결은 사람이 확인하기 전까지 열리지 않아요",
+        ),
+    ]
+}
+
+/// The outcome line of `agent.invite`. No code, no link.
+pub fn agent_invite_result_body(display_name: &str) -> String {
+    format!(
+        "에이전트를 만들었어요: {display_name}. 연결 코드로 연결을 마친 뒤 사람이 확인해야 열려요"
+    )
+}
+
+/// `audit_log.action` / schema of an approved `agent.invite` (V3-3): who asked, which
+/// approval, which platform preset. Never the pairing code.
+pub const AUDIT_AGENT_INVITED: &str = "agent.invited";
+pub const AUDIT_AGENT_INVITED_SCHEMA: &str = "momo.agent.invited.v1";
+
+/// `result.secretOnce.kind` for a hosted-agent pairing code.
+pub const SECRET_ONCE_PAIRING: &str = "pairing_credential";
 
 /// The outcome line of `agent.rename`.
 pub fn agent_rename_result_body(old: &str, new: &str) -> String {
@@ -1327,7 +1406,8 @@ mod tests {
                 "agent.rename",
                 "hosted.channels.grant",
                 "workspace.settings.update",
-                "agent.profile.update"
+                "agent.profile.update",
+                "agent.invite"
             ]
         );
         assert_eq!(
