@@ -103,7 +103,7 @@ import {CONV} from './convDesign';
 import {AiConnectSuggestion} from './AiConnectSuggestion';
 import {TeamAiDelegateStrip} from './TeamAiDelegateStrip';
 import {
-  parseTeamAiDelegate,
+  teamAiDelegateFor,
   type TeamAiDelegate,
   TEAM_AI_PROPOSAL_AUTHORITY,
   TEAM_AI_PROPOSAL_LABEL,
@@ -1314,7 +1314,11 @@ function FactRow({
         <Sentence style={styles.factValue}>{value}</Sentence>
       ) : (
         <View style={styles.factValueStack}>
-          <Sentence style={styles.factValue}>{value}</Sentence>
+          {/* 세로 상자 안에서는 `flex: 1` 이 높이 0 으로 접힌다(가로 줄의 폭 규칙). 그래서
+              값은 자기 높이로 선다(#3836 시뮬레이터 캡처에서 값이 사라졌던 결함). */}
+          <Sentence style={[styles.factValue, styles.factValueInStack]} testID={`${testID}-value`}>
+            {value}
+          </Sentence>
           <Sentence style={styles.factNote} testID={`${testID}-note`}>
             {note}
           </Sentence>
@@ -2212,11 +2216,7 @@ function MessageRowInner({
     [message, directory],
   );
   // 도우미가 넘기는 줄(ADR-0201 D5). 이 키를 보내지 않는 서버에서는 늘 null 이다.
-  const teamAiDelegate = useMemo(
-    () =>
-      message.state === 'deleted' ? null : parseTeamAiDelegate(message.props),
-    [message],
-  );
+  const teamAiDelegate = useMemo(() => teamAiDelegateFor(message), [message]);
   // 1회 링크 (#2513). 행은 접근성 요소 **하나**라(아래 `accessible`) 카드 안의
   // 복사 버튼에 VoiceOver 가 닿지 못한다 — 코드 상자의 복사가 로터로 나온 것과
   // 같은 이유로 여기서 로터에 세운다. 값은 영수증 표(화면의 메모리)에서만 읽고,
@@ -3988,7 +3988,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     lineHeight: line.label,
     color: color.text,
   },
-  factValueStack: {flex: 1, gap: 2},
+  factValueStack: {flex: 1, gap: space.xs},
+  factValueInStack: {flex: 0},
   factNote: {fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},
   gateGroup: {marginTop: space.xs},
   gateSurface: {fontSize: font.label, fontWeight: '600', color: color.text},

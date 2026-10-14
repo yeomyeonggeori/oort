@@ -11,7 +11,7 @@ import { cn } from "@/design/lib/cn";
 import { InlineBanner } from "@/features/common/States";
 import { AgentCard } from "./AgentCard";
 import { TeamAiDelegateStrip } from "./TeamAiDelegateStrip";
-import { parseTeamAiDelegate } from "@momo/core/features/timeline/teamAi";
+import { teamAiDelegateFor } from "@momo/core/features/timeline/teamAi";
 import { ArtifactCard } from "./ArtifactCard";
 import { AttachmentList } from "./AttachmentList";
 import { MessageBody } from "./MessageBody";
@@ -500,10 +500,7 @@ export function MessageRow({
   );
   const idleNotice = useMemo(() => workSessionIdleNotice(message), [message]);
   // 도우미가 넘기는 줄(ADR-0201 D5). 이 키를 보내지 않는 서버에서는 늘 null 이다.
-  const teamAiDelegate = useMemo(
-    () => (deleted ? null : parseTeamAiDelegate(message.props)),
-    [message, deleted]
-  );
+  const teamAiDelegate = useMemo(() => teamAiDelegateFor(message), [message]);
   // 맡길 원래 요청의 본문: 화면에 든 행이 먼저, 없으면 페이지에 동봉된 인용.
   const delegateSourceId = teamAiDelegate?.sourceMessageId ?? null;
   const delegateSourceBody =

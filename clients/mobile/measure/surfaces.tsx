@@ -2951,6 +2951,90 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     // (링크가 이 화면에 한 번) → 다시 열었을 때(링크 없이 영속 카드만). 픽스처는
     // ADR-0186 부록 A·B 그대로이고, 값(부록 C `secretOnce`)은 **영수증 표**로만
     // 건넨다 — 대화 화면이 결정 응답에서 받아 드는 바로 그 자리다.
+    // ---- ADR-0201 (#3836): 도우미 승인 카드 + 넘기는 줄 ------------------------
+    case 'team-ai': {
+      const agents = ROSTER.filter(m => m.kind === 'agent');
+      const helper = agents[0] ?? ROSTER[0];
+      const grok = agents[1] ?? agents[0] ?? ROSTER[0];
+      const requester = ROSTER.find(m => m.id === OTHER) ?? ROSTER[0];
+      const card = {
+        ...MESSAGE,
+        id: '00000000-0000-7000-8000-0000000036b1',
+        type: 'approval_request',
+        body: '에이전트 프로필 바꾸기',
+        authorMemberId: helper.id,
+        thread: undefined,
+        props: {
+          approval_id: 'ap-team-ai',
+          action_type: 'workspace_action',
+          status: 'pending',
+          title: '에이전트 프로필 바꾸기',
+          action: {
+            id: 'agent.profile.update',
+            rows: [
+              {label: '에이전트', value: grok.displayName},
+              {label: '소개', value: '주간 리포트 담당'},
+            ],
+            rationale: `${requester.displayName} 님이 소개를 주간 리포트 담당으로 바꿔 달라고 했어요.`,
+            required_role: 'admin',
+          },
+          proposed_via: {
+            kind: 'team_ai',
+            requester_id: requester.id,
+            requester_name: requester.displayName,
+          },
+        },
+      } as unknown as Message;
+      const handOff = {
+        ...MESSAGE,
+        id: '00000000-0000-7000-8000-0000000036b2',
+        authorMemberId: helper.id,
+        thread: undefined,
+        body: '이건 제가 바로 처리하기엔 큰 일이에요. 다른 에이전트에게 맡길 수 있어요.',
+        props: {
+          source: 'team_ai_fallback',
+          kind: 'team_ai.delegate.v1',
+          reason: 'out_of_scope',
+          agent_member_id: helper.id,
+          notice_for_member_id: SELF,
+          delegate: {
+            source_message_id: null,
+            candidates: [
+              {
+                member_id: grok.id,
+                handle: grok.handle,
+                display_name: grok.displayName,
+                client_msg_id: '0e5fa1d0-c0de-5201-9d00-7e4a11a12023',
+              },
+            ],
+          },
+        },
+      } as unknown as Message;
+      return (
+        <Frame label="도우미 제안 카드 · 넘기는 줄 (ADR-0201 #3836)">
+          <MessageRow
+            message={card}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+            approvalGates={
+              new Map([
+                ['ap-team-ai', {approvalId: 'ap-team-ai', reversible: true, expiresAtMs: null}],
+              ])
+            }
+          />
+          <MessageRow
+            message={handOff}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+            actions={{...aiSuggestActions(SELF), workspaceId: 'ws-capture'}}
+          />
+        </Frame>
+      );
+    }
     case 'ai-suggest':
       harnessClient.setQueryData(['settings', 'provider-link'], AI_SUGGEST_LINK);
       return (

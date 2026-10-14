@@ -10,6 +10,7 @@ import {
   within,
 } from '@testing-library/react-native';
 import React from 'react';
+import {StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -178,6 +179,16 @@ describe('도우미 승인 카드 (폰)', () => {
     const rationale = screen.getByTestId('approval-action-rationale');
     expect(within(rationale).getByText('도우미가 쓴 사유')).toBeTruthy();
     expect(screen.getByTestId('approval-action-rationale-note')).toBeTruthy();
+  });
+
+  it('값과 아래 한 줄이 함께 설 때 값이 높이 0 으로 접히지 않는다', () => {
+    // 세로 상자 안의 `flex: 1` 은 flexBasis 0 이라 높이가 0 이 된다. 시뮬레이터 캡처에서
+    // 「도우미 제안 · 요청」과 사유 본문이 사라졌던 결함(#3836)의 회귀 시험이다.
+    renderRow(message({type: 'approval_request', props: approvalProps(true)}));
+    for (const id of ['approval-team-ai-value', 'approval-action-rationale-value']) {
+      const style = StyleSheet.flatten(screen.getByTestId(id).props.style) as {flex?: number};
+      expect(style.flex ?? 0).toBe(0);
+    }
   });
 
   it('도우미가 아닌 카드는 그대로다', () => {

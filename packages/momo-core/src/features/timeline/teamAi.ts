@@ -14,6 +14,9 @@
 // 순수 모듈이다: DOM·fetch·React 없음. 웹과 폰이 같은 함수를 부른다.
 // =============================================================================
 
+import type { Message } from "../../lib/api";
+import { attachRecipient } from "../../lib/koreanParticle";
+
 type Props = Record<string, unknown> | undefined;
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -188,7 +191,23 @@ export function canDelegate(
 }
 
 export function delegateButtonLabel(candidate: TeamAiDelegateCandidate): string {
-  return `${candidate.displayName}에게 맡기기`;
+  return `${attachRecipient(candidate.displayName, "person")} 맡기기`;
+}
+
+/** 누른 뒤 버튼 자리에 서는 한 줄. */
+export function delegateSentLine(displayName: string): string {
+  return `${attachRecipient(displayName, "person")} 맡겼어요. 답은 이 채널에 와요.`;
+}
+
+/**
+ * 행이 부르는 입구. 지워진 행에는 없다. 클라이언트는 `message.props` 를 스스로 읽지
+ * 않고 이 함수만 부른다(폰의 「모델 소비 단일점」 규칙).
+ */
+export function teamAiDelegateFor(
+  message: Pick<Message, "props" | "state">
+): TeamAiDelegate | null {
+  if (message.state === "deleted") return null;
+  return parseTeamAiDelegate(message.props);
 }
 
 /** 도우미의 기본 handle (서버 `TEAM_AI_HANDLE`). 디렉터리에서 못 찾을 때의 안전망이다. */

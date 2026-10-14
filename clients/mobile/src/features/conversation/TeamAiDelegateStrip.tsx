@@ -5,6 +5,7 @@ import {
   canDelegate,
   delegateButtonLabel,
   delegateMessageBody,
+  delegateSentLine,
   type TeamAiDelegate,
   type TeamAiDelegateCandidate,
 } from '@momo/core/features/timeline/teamAi';
@@ -83,7 +84,7 @@ export function TeamAiDelegateStrip({
           style={styles.meta}
           accessibilityLiveRegion="polite"
           testID="team-ai-delegate-sent">
-          {`${state.name}에게 맡겼어요. 답은 이 채널에 와요.`}
+          {delegateSentLine(state.name)}
         </Sentence>
       ) : null}
       {showButtons && state.kind !== 'sent' ? (
