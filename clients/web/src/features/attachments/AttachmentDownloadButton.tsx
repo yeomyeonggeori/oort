@@ -4,6 +4,7 @@ import { cn } from "@/design/lib/cn";
 import { downloadAttachment } from "@/features/attachments/content";
 import {
   ATTACH_COPY,
+  attachmentDisplayName,
   type MessageAttachment,
 } from "@momo/core/features/attachments/model";
 
@@ -56,7 +57,7 @@ export function AttachmentDownloadButton({
           .catch(() => onFailed?.())
           .finally(() => setBusy(false));
       }}
-      aria-label={`${attachment.name} ${ATTACH_COPY.download}`}
+      aria-label={`${attachmentDisplayName(attachment)} ${ATTACH_COPY.download}`}
       title={busy ? ATTACH_COPY.downloading : ATTACH_COPY.download}
       data-testid="attachment-download"
       data-busy={busy ? "" : undefined}

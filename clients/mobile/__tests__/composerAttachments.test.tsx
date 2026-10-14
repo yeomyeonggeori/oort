@@ -364,9 +364,13 @@ describe('Composer 첨부 렌더·발송', () => {
 
     openPicker('photo');
 
+    // 사진 칩은 썸네일뿐이라 상태 문장은 낭독 라벨에 산다 (#3820).
     await waitFor(() =>
-      expect(screen.getByText(new RegExp(ATTACH_COPY.uploading))).toBeTruthy(),
+      expect(
+        screen.getByTestId('attachment-draft').props.accessibilityLabel,
+      ).toMatch(new RegExp(ATTACH_COPY.uploading)),
     );
+    expect(screen.getByTestId('attachment-draft-thumb')).toBeTruthy();
     await act(async () => {
       resolveCreate?.({
         id: 'upload-attachment-photo',
@@ -375,7 +379,9 @@ describe('Composer 첨부 렌더·발송', () => {
       });
     });
     await waitFor(() =>
-      expect(screen.getByText(new RegExp(ATTACH_COPY.uploaded))).toBeTruthy(),
+      expect(
+        screen.getByTestId('attachment-draft').props.accessibilityLabel,
+      ).toMatch(new RegExp(ATTACH_COPY.uploaded)),
     );
     expect(
       screen.getByTestId('attachment-draft').props.accessibilityLabel,
