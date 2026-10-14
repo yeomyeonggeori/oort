@@ -39,7 +39,8 @@ export const TEAM_BOARD_COPY = {
   offlineEmpty: "오프라인이에요. 연결되면 팀 작업을 불러와요.",
   loadMore: "더 보기",
   loadingMore: "더 불러와요",
-  drawerLabel: "세션 상세",
+  // ADR-0202 D1: 서랍·시트는 「작업」 화면의 상세다(화면 이름과 같은 낱말).
+  drawerLabel: "작업 상세",
   drawerClose: "닫기",
   progressHeading: "진행",
   logHeading: "로그 요약",

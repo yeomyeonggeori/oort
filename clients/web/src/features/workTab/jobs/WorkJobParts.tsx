@@ -23,7 +23,7 @@ import { isDesktop, openExternalUrl } from "@/lib/tauri";
 export function ReportedTag() {
   return (
     <span
-      className={cn(CHIP_CLASS, "inline-flex shrink-0 items-center gap-1 bg-muted-soft text-ink-muted")}
+      className={cn(CHIP_CLASS, "inline-flex shrink-0 items-center gap-1 bg-muted-soft font-medium text-ink")}
       data-testid="work-job-reported-tag"
     >
       <Bot aria-hidden className="size-3 shrink-0" />
@@ -35,7 +35,7 @@ export function ReportedTag() {
 /** 서랍의 「에이전트 보고」 절: 닫힌 칸만 키-값으로. 값은 서버가 닫힌 목록으로 검증한 것뿐이다. */
 export function ReportedFacts({ reported }: { reported: AgentReportedResult }) {
   const rows: [string, string][] = [];
-  if (reported.resultKind !== null) rows.push(["결과", resultKindText(reported.resultKind)]);
+  if (reported.resultKind !== null) rows.push(["한 일", resultKindText(reported.resultKind)]);
   if (reported.tests !== null) rows.push(["테스트", testsText(reported.tests)]);
   if (reported.nextAction !== null) {
     const next = nextActionText(reported.nextAction);

@@ -23,7 +23,7 @@ import {
   type WorkFilter,
   type WorkJobRow,
 } from "@momo/core/features/workbench/workJobs";
-import { isRunItem } from "@momo/core/features/workbench/teamBoard";
+import { TEAM_BOARD_COPY, isRunItem } from "@momo/core/features/workbench/teamBoard";
 import { LOCAL_TERMINALS_PATH } from "@momo/core/features/workbench/workTab";
 import { SESSION_STATUS_LABEL } from "@momo/core/features/workbench/sessionList";
 import { useSession } from "@/app/session";
@@ -271,7 +271,7 @@ export function WorkJobsRoute() {
           ref={listRef}
           tabIndex={-1}
           data-team-board-list=""
-          className="flex min-h-0 min-w-0 flex-col overflow-y-auto focus-visible:focus-ring"
+          className="work-jobs-list flex min-h-0 min-w-0 flex-col overflow-y-auto focus-visible:focus-ring"
           aria-label={WORK_JOBS_COPY.listLabel}
           aria-busy={firstLoad}
           role="region"
@@ -388,7 +388,7 @@ export function WorkJobsRoute() {
               <aside
                 ref={drawerRef}
                 tabIndex={-1}
-                aria-label="작업 상세"
+                aria-label={TEAM_BOARD_COPY.drawerLabel}
                 className="flex min-h-0 flex-1 flex-col border-s border-line bg-surface focus-visible:focus-ring"
                 data-testid="work-jobs-drawer-loading"
               >
@@ -450,9 +450,9 @@ function JobRow({
           >
             {requesterToAgent(row)}
           </span>
-          <span data-narrow="" className="min-w-0 flex-wrap items-center gap-x-2 text-timestamp text-ink-muted">
+          <span data-narrow="" className="min-w-0 flex-col gap-1 text-timestamp text-ink-muted">
             {result}
-            <span className="shrink-0">{row.channel}</span>
+            <span className="truncate">{row.channel}</span>
           </span>
         </span>
         <span className="flex min-w-0 flex-col gap-1" data-col="result">
@@ -478,11 +478,14 @@ function JobRow({
   );
 }
 
-/** 결과 칸: 에이전트 보고(꼬리표와 함께) → 아니면 서버가 본 PR 번호 → 아니면 「아직 결과 없음」. */
+/**
+ * 결과 칸: 에이전트 보고(꼬리표와 한 덩어리) → 아니면 서버가 본 PR 번호 → 아니면 도는 중 「아직 결과
+ * 없음」, 끝났으면 「알린 결과 없음」. 잘려도 전체 문장은 `title`로 읽힌다.
+ */
 function ResultCell({ row, reported }: { row: WorkJobRow; reported: string | null }) {
   if (reported !== null) {
     return (
-      <span className="flex min-w-0 items-center gap-2" data-testid="work-job-result">
+      <span className="flex min-w-0 items-center gap-2" data-testid="work-job-result" title={`${WORK_JOBS_COPY.reportedTag}: ${reported}`}>
         <ReportedTag />
         <span className="min-w-0 truncate text-meta text-ink">{reported}</span>
       </span>
@@ -497,7 +500,7 @@ function ResultCell({ row, reported }: { row: WorkJobRow; reported: string | nul
   }
   return (
     <span className="min-w-0 truncate text-meta text-ink-muted" data-testid="work-job-result">
-      {row.finished ? "" : WORK_JOBS_COPY.noResultYet}
+      {row.finished ? WORK_JOBS_COPY.noResultReported : WORK_JOBS_COPY.noResultYet}
     </span>
   );
 }

@@ -33,7 +33,7 @@ export function ReportedFacts({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const rows: [string, string][] = [];
-  if (reported.resultKind !== null) rows.push(['결과', resultKindText(reported.resultKind)]);
+  if (reported.resultKind !== null) rows.push(['한 일', resultKindText(reported.resultKind)]);
   if (reported.tests !== null) rows.push(['테스트', testsText(reported.tests)]);
   if (reported.nextAction !== null) {
     const next = nextActionText(reported.nextAction);
@@ -68,7 +68,7 @@ const buildStyles = (color: Palette) =>
       borderColor: color.border,
       backgroundColor: color.surface,
     },
-    tagLabel: {fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},
+    tagLabel: {fontSize: font.meta, lineHeight: line.meta, color: color.text, fontWeight: '600'},
     block: {gap: space.xs},
     head: {flexDirection: 'row', alignItems: 'center', gap: space.sm, flexWrap: 'wrap'},
     hint: {fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},

@@ -352,7 +352,9 @@ function JobRow({
   const reported = reportedSummary(row.reported);
   const who = requesterToAgent(row);
   const result =
-    reported ?? row.pr?.number ?? (row.finished ? null : WORK_JOBS_COPY.noResultYet);
+    reported ??
+    row.pr?.number ??
+    (row.finished ? WORK_JOBS_COPY.noResultReported : WORK_JOBS_COPY.noResultYet);
   const meta = [row.durationText, row.channel].filter(
     (part): part is string => part !== null && part !== '',
   );
@@ -381,18 +383,20 @@ function JobRow({
           testID={`work-job-who-${row.id}`}>
           {who}
         </Text>
+        {/* 상태 칩 줄은 서버가 본 사실만. 에이전트가 스스로 알린 말은 꼬리표와 한 덩어리로
+            아래 줄에 선다(design-review H-1, 웹 결과 칸과 같은 묶음). */}
         <View style={styles.chipLine}>
           <StateChip item={row.item} testID={`work-job-state-${row.id}`} />
-          {reported !== null ? <ReportedTag testID={`work-job-reported-tag-${row.id}`} /> : null}
         </View>
-        {result !== null ? (
+        <View style={styles.resultLine}>
+          {reported !== null ? <ReportedTag testID={`work-job-reported-tag-${row.id}`} /> : null}
           <Text
             style={[styles.rowResult, reported === null && row.pr === null && styles.rowResultMuted]}
             numberOfLines={2}
             testID={`work-job-result-${row.id}`}>
             {result}
           </Text>
-        ) : null}
+        </View>
         {row.awaitingApproval ? (
           <Text style={styles.rowApproval} testID={`work-job-approval-${row.id}`}>
             {WORK_JOBS_COPY.approvalHint}
@@ -439,7 +443,8 @@ const buildStyles = (color: Palette) =>
     rowWho: {fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},
     rowWhoAgent: {color: color.agent},
     chipLine: {flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: space.sm},
-    rowResult: {fontSize: font.label, lineHeight: line.label, color: color.text},
+    resultLine: {flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: space.sm},
+    rowResult: {flexShrink: 1, fontSize: font.label, lineHeight: line.label, color: color.text},
     rowResultMuted: {color: color.textMuted},
     rowApproval: {fontSize: font.meta, lineHeight: line.meta, color: color.text, fontWeight: '600'},
     rowMeta: {fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},

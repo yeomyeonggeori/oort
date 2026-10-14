@@ -185,11 +185,6 @@ function SheetBody({
           ) : null}
         </View>
 
-        {item.agentReported != null ? (
-          <View style={styles.section}>
-            <ReportedFacts reported={item.agentReported} />
-          </View>
-        ) : null}
 
         {markers.length > 0 ? (
           <Section heading={TEAM_BOARD_COPY.progressHeading}>
@@ -221,6 +216,13 @@ function SheetBody({
               {logParts.join(' · ')}
             </Text>
           </Section>
+        ) : null}
+
+        {/* 웹 서랍과 같은 순서: 진행 → 로그 요약 → 에이전트 보고 → 결과(design-review M-6). */}
+        {item.agentReported != null ? (
+          <View style={styles.section}>
+            <ReportedFacts reported={item.agentReported} />
+          </View>
         ) : null}
 
         <Section heading={TEAM_BOARD_COPY.resultHeading}>

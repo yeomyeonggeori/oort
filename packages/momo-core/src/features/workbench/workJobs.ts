@@ -71,6 +71,8 @@ export const WORK_JOBS_COPY = {
   colDuration: "걸린 시간",
   colChannel: "채널",
   noResultYet: "아직 결과 없음",
+  /** 끝났는데 에이전트가 결과를 알리지 않았다(실패·멈춤 포함). 빈칸으로 두지 않는다. */
+  noResultReported: "알린 결과 없음",
 } as const;
 
 /** 기기별로 기억하는 마지막 필터(ADR-0202 D2). 기본은 언제나 「내 것」이다. */

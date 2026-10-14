@@ -187,6 +187,13 @@ async function scene(browser, origin, scheme, viewport, mode) {
     await page.waitForTimeout(200);
     const reported = await page.getByTestId("work-job-reported").innerText();
     check(`${tag} 서랍: 에이전트 보고 칸`, reported.includes("테스트 통과 128") && reported.includes("머지해도 된대요"), reported);
+    if (viewport.width >= 1400) {
+      // 1400 아래에서는 서랍이 목록 자리를 통째로 쓴다(team-board-layout). 그 위에서만 나란히 선다.
+      // design-review B-1: 서랍이 열리면 목록 상자 폭으로 접어 결과는 첫 열 셋째 줄로 내려간다.
+      const resultCol = await page.locator('[data-testid="work-job-row"] > [data-col="result"]').first().evaluate((el) => getComputedStyle(el).display);
+      const narrowLine = await page.locator('[data-testid="work-job-row"] [data-narrow]').first().evaluate((el) => getComputedStyle(el).display);
+      check(`${tag} 서랍 열림: 결과 열 접힘·셋째 줄로`, resultCol === "none" && narrowLine === "flex", { resultCol, narrowLine });
+    }
     check(`${tag} 가로 넘침 0(서랍)`, (await overflowX(page)) === 0);
     await save(`work-drawer-${tag}`);
     await page.keyboard.press("Escape");
@@ -220,7 +227,7 @@ async function main() {
   const browser = await chromium.launch();
   try {
     for (const scheme of ["light", "dark"]) {
-      for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+      for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 800 }, { width: 390, height: 844 }]) {
         await scene(browser, preview.origin, scheme, viewport, "jobs");
       }
     }
