@@ -937,8 +937,15 @@ async fn wake_thread_opener_in_tx(
     };
 
     // W2 합치기: a turn of this agent in this thread that nobody has picked up
-    // yet will read this reply with its recent conversation when it is claimed.
-    if let Some(pending_run) = find_unclaimed_thread_run_in_tx(
+    // yet takes this reply into the conversation it answers from.
+    //
+    // #3855 review: the job's `recent_messages` is a snapshot taken when it was
+    // queued, and the managed worker and the gateway claim answer from that
+    // snapshot alone — so folding the reply in without re-reading it would drop
+    // the reply from every turn. The job row is locked by the lookup (claimers
+    // skip it until this send commits), and the snapshot is re-read here,
+    // anchored on this reply, in the same transaction.
+    if let Some(pending) = find_unclaimed_thread_run_in_tx(
         &mut *conn,
         send.workspace_id,
         agent.member_id,
@@ -947,17 +954,35 @@ async fn wake_thread_opener_in_tx(
     )
     .await?
     {
-        wake_audit(
+        let window = agent_context_window_in_tx(
             &mut *conn,
-            send,
-            &trigger,
-            agent,
-            THREAD_WAKE_COALESCED_ACTION,
-            "coalesced_into_queued_run",
-            Some(pending_run),
+            send.channel_id,
+            send.message_id,
+            send.context_max_messages,
         )
         .await?;
-        return Ok(None);
+        let refreshed = momo_outbox::refresh_pending_agent_job_recent_messages_in_tx(
+            &mut *conn,
+            send.workspace_id,
+            pending.job_outbox_id,
+            &Value::Array(window),
+        )
+        .await?;
+        if refreshed {
+            wake_audit(
+                &mut *conn,
+                send,
+                &trigger,
+                agent,
+                THREAD_WAKE_COALESCED_ACTION,
+                "coalesced_into_queued_run",
+                Some(pending.run_id),
+            )
+            .await?;
+            return Ok(None);
+        }
+        // Unreachable while the row lock holds; if the job was taken after
+        // all, this reply gets a turn of its own rather than none.
     }
 
     // No request tier (see [`Turn::requested`]), so the agent's own preferences

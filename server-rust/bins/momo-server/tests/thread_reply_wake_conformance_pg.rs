@@ -11,7 +11,7 @@
 //! | `agent_replies_never_wake_anyone` (⑪) | an agent's reply (Agent Port, agent credential) in another agent's thread → 0 wake runs | BOTH halves of the loop guard are removed (the credential refusal in `wake_thread_opener_in_tx` and the roster `kind = 'human'` check) |
 //! | `a_reply_that_mentions_an_agent_takes_the_mention_path_only` (⑫) | mentioning another agent → that agent's mention run only; mentioning the opener → one mention run, no wake run | the wake is called on the addressed path too |
 //! | `the_owner_switch_turns_the_wake_off` (⑬) | `PUT …/profile {threadReplyWake:false}` → 0; non-editor 403 and unchanged; on again → 1 | the switch check is removed |
-//! | `a_second_reply_before_pickup_joins_the_waiting_turn` (⑭) | 2nd reply before claim → no run, one `agent.thread_wake.coalesced`; after claim → a new run | `find_unclaimed_thread_run_in_tx` is skipped, or stops looking at the lease |
+//! | `a_second_reply_before_pickup_joins_the_waiting_turn` (⑭) | 2nd reply before claim → no run, one `agent.thread_wake.coalesced`, and the reply is in the waiting job's `recent_messages` (hosted claim and managed snapshot alike, #3855 review); after claim → a new run | `find_unclaimed_thread_run_in_tx` is skipped, or stops looking at the lease; the coalesce stops refreshing the job snapshot |
 //! | `gate_refusals_are_silent` (⑮) | unapproved channel, paused, `owner_only` non-owner → 0 runs, 0 jobs, 0 agent-authored lines, 0 approvals; one `agent.thread_wake.skipped` with the gate's reason; the owner's reply (control) still wakes | the wake path posts the mention path's notices (e.g. the paused line), or skips the gate |
 //!
 //! Isolated database only:
@@ -1057,7 +1057,7 @@ async fn the_owner_switch_turns_the_wake_off() {
 #[tokio::test]
 #[ignore = "needs an isolated PostgreSQL 18 (#3851)"]
 async fn a_second_reply_before_pickup_joins_the_waiting_turn() {
-    let (su, _app, f, base, client) = setup().await;
+    let (su, app, f, base, client) = setup().await;
     let root = hosted_posts(&client, &base, &f, None, "리뷰 끝났어요").await;
     let first = human_says(&client, &base, &f, f.channel, Some(root), "고칠 게 있나요?").await;
     let (waiting, _) = wake_run_for(&su, &f, first, f.hosted)
@@ -1083,6 +1083,16 @@ async fn a_second_reply_before_pickup_joins_the_waiting_turn() {
         !coalesced[0].to_string().contains("그리고 문서도요"),
         "the reply's body is never copied into the audit"
     );
+    // #3855 review: the coalesced reply must reach the waiting turn. The job's
+    // snapshot is what the claim hands out, so it is re-read with the reply in it,
+    // while the turn stays bound to the reply that started it.
+    let (snapshot, trigger) = pending_job_snapshot(&su, &f, f.hosted).await;
+    assert!(
+        snapshot.contains(&upper(second)),
+        "⑭ the coalesced reply is in the waiting job's recent_messages: {snapshot:?}"
+    );
+    assert!(snapshot.contains(&upper(first)), "{snapshot:?}");
+    assert_eq!(trigger, upper(first), "the turn is still the first reply's");
 
     // Picked up: the next reply is a turn of its own.
     let claimed = port_call(
@@ -1098,12 +1108,88 @@ async fn a_second_reply_before_pickup_joins_the_waiting_turn() {
         Some(1),
         "{claimed}"
     );
+    let claimed_lines: Vec<String> = claimed["jobs"][0]["work"]["recentMessages"]
+        .as_array()
+        .map(|lines| {
+            lines
+                .iter()
+                .filter_map(|line| line["message_id"].as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(
+        claimed_lines.contains(&upper(second)),
+        "⑭ the claimed work carries the coalesced reply: {claimed}"
+    );
     let third = human_says(&client, &base, &f, f.channel, Some(root), "급해요").await;
     assert!(
         wake_run_for(&su, &f, third, f.hosted).await.is_some(),
         "⑭ after pickup a new reply is a new run"
     );
     assert_eq!(wake_runs(&su, &f, f.hosted).await, 2);
+
+    // A managed agent answers from the job snapshot alone (the worker's
+    // `assemble`, the gateway claim's raw payload) — the case where a coalesced
+    // reply that is not written into the snapshot reaches nobody.
+    let managed_root = agent_says(&app, &f, f.managed, f.channel, None, "배포 끝났어요").await;
+    let ask = human_says(
+        &client,
+        &base,
+        &f,
+        f.channel,
+        Some(managed_root),
+        "로그는요?",
+    )
+    .await;
+    assert!(wake_run_for(&su, &f, ask, f.managed).await.is_some());
+    let follow_up = human_says(
+        &client,
+        &base,
+        &f,
+        f.channel,
+        Some(managed_root),
+        "에러만요",
+    )
+    .await;
+    assert_eq!(wake_runs(&su, &f, f.managed).await, 1, "coalesced");
+    let (snapshot, trigger) = pending_job_snapshot(&su, &f, f.managed).await;
+    assert!(
+        snapshot.contains(&upper(follow_up)),
+        "⑭ managed: the coalesced reply is in the job the worker/gateway reads: {snapshot:?}"
+    );
+    assert_eq!(trigger, upper(ask));
+}
+
+fn upper(id: Uuid) -> String {
+    id.to_string().to_uppercase()
+}
+
+/// The one pending `agent_job` of `agent`: the message ids of its
+/// `recent_messages` snapshot and its `trigger_message_id`.
+async fn pending_job_snapshot(su: &PgPool, f: &Fixture, agent: Uuid) -> (Vec<String>, String) {
+    let payload: Value = sqlx::query_scalar(
+        "SELECT payload FROM outbox WHERE workspace_id=$1 AND kind='agent_job' \
+           AND partition_key=$2 AND status='pending' AND lease_owner IS NULL",
+    )
+    .bind(f.workspace)
+    .bind(agent)
+    .fetch_one(su)
+    .await
+    .expect("exactly one unclaimed job");
+    let lines = payload["recent_messages"]
+        .as_array()
+        .map(|lines| {
+            lines
+                .iter()
+                .filter_map(|line| line["message_id"].as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    let trigger = payload["trigger_message_id"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    (lines, trigger)
 }
 
 // ---------------------------------------------------------------------------

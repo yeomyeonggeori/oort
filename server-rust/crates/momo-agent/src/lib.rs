@@ -331,7 +331,8 @@ pub use subscription::{
     SUBSCRIPTION_NOTICE_THROTTLE_SECONDS,
 };
 pub use thread_wake::{
-    find_unclaimed_thread_run_in_tx, load_thread_wake_target_in_tx, THREAD_REPLY_WAKE_REASON,
+    find_unclaimed_thread_run_in_tx, load_thread_wake_target_in_tx, UnclaimedThreadTurn,
+    THREAD_REPLY_WAKE_REASON,
 };
 pub use usage::{
     budget_state, chain_usage_in_tx, record_run_usage_in_tx, usage_summary_in_tx, validated_window,

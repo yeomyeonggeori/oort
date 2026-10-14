@@ -92,6 +92,15 @@ pub async fn load_thread_wake_target_in_tx(
     Ok(root_agent.or(first_reply_agent))
 }
 
+/// The turn W2 coalesces into: a queued run of this agent in this thread and
+/// the one `agent_job` row that will deliver it, **row-locked** for the rest of
+/// the send transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnclaimedThreadTurn {
+    pub run_id: Uuid,
+    pub job_outbox_id: i64,
+}
+
 /// A queued run of `agent_member_id` whose trigger message is in the thread
 /// `root_id` (the root itself or any reply in it) **and whose job no consumer
 /// has picked up yet** — W2's 「수령 전」.
@@ -99,30 +108,42 @@ pub async fn load_thread_wake_target_in_tx(
 /// "Picked up" is read off the job row, not the run, because the two consumers
 /// record it differently: the managed worker moves the row to `processing`, a
 /// gateway / Agent Port claim leaves it `pending` and writes a lease. A job that
-/// is `pending` with no lease owner has been taken by nobody, so the reply will
-/// still be in the conversation the claim reads. Any other state means the turn
-/// is underway and the new reply needs a turn of its own.
+/// is `pending` with no lease owner has been taken by nobody. Any other state
+/// means the turn is underway and the new reply needs a turn of its own.
+///
+/// **`FOR UPDATE OF o`** (#3855 review): the job row stays locked until the send
+/// commits. Every claimer takes these rows `FOR UPDATE … SKIP LOCKED`, so
+/// * a claim already in flight holds the lock first: this read waits, re-checks
+///   `pending`/`lease_owner IS NULL` on the committed row, finds it taken and
+///   returns `None` — the reply gets a turn of its own;
+/// * otherwise claimers skip the row until this transaction commits, so the
+///   caller can refresh the job's conversation snapshot
+///   (`momo_outbox::refresh_pending_agent_job_recent_messages_in_tx`) before
+///   anyone can read it. Without the lock a claim could lease the job between
+///   this read and the send's commit, and the coalesced reply would be in
+///   nobody's turn.
 pub async fn find_unclaimed_thread_run_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     agent_member_id: Uuid,
     channel_id: Uuid,
     root_id: Uuid,
-) -> Result<Option<Uuid>, DbError> {
-    let found: Option<Uuid> = sqlx::query_scalar(
-        "SELECT r.id FROM agent_run r \
+) -> Result<Option<UnclaimedThreadTurn>, DbError> {
+    let found: Option<(Uuid, i64)> = sqlx::query_as(
+        "SELECT r.id, o.id FROM outbox o \
+           JOIN agent_run r ON r.workspace_id = o.workspace_id \
+                           AND upper(r.id::text) = upper(o.payload->>'run_id') \
            JOIN message tm ON tm.workspace_id = r.workspace_id AND tm.id = r.trigger_message_id \
-          WHERE r.workspace_id = $1 AND r.agent_member_id = $2 AND r.channel_id = $3 \
+          WHERE o.workspace_id = $1 \
+            AND o.kind = 'agent_job' \
+            AND o.partition_key = $2 \
+            AND o.status = 'pending' \
+            AND o.lease_owner IS NULL \
+            AND r.agent_member_id = $2 AND r.channel_id = $3 \
             AND r.status = 'queued' \
             AND COALESCE(tm.root_id, tm.id) = $4 \
-            AND EXISTS (SELECT 1 FROM outbox o \
-                         WHERE o.workspace_id = r.workspace_id \
-                           AND o.kind = 'agent_job' \
-                           AND o.partition_key = r.agent_member_id \
-                           AND o.status = 'pending' \
-                           AND o.lease_owner IS NULL \
-                           AND upper(o.payload->>'run_id') = upper(r.id::text)) \
-          ORDER BY r.created_at DESC LIMIT 1",
+          ORDER BY r.created_at DESC LIMIT 1 \
+          FOR UPDATE OF o",
     )
     .bind(workspace_id)
     .bind(agent_member_id)
@@ -130,5 +151,8 @@ pub async fn find_unclaimed_thread_run_in_tx(
     .bind(root_id)
     .fetch_optional(&mut *conn)
     .await?;
-    Ok(found)
+    Ok(found.map(|(run_id, job_outbox_id)| UnclaimedThreadTurn {
+        run_id,
+        job_outbox_id,
+    }))
 }
