@@ -665,7 +665,18 @@
    * 진행 막대 자리)이 서는 높이에 맞춘 정사각형이라, 썸네일이 있는 칩과 없는 칩의
    * 글줄이 같은 자리에서 시작한다. 로딩·디코드 실패에도 같은 상자가 서서 칩이
    * 도착 순간에 자라지 않는다. 캔버스는 이 값의 두 배로 그린다(draftThumbnail.ts). */
-  --spacing-tray-thumb: 48px;
+  --spacing-tray-thumb: 64px;
+
+  /* 타임라인 인라인 이미지의 상한 (#3820, Buzz 레퍼런스).
+   *
+   * 한 장은 폭 360 · 높이 320 안에서 비율을 지킨다. 서버가 이미지 치수를 주지
+   * 않으므로 도착 전 자리는 높이 상한(`--spacing-inline-image-h`)의 상자로 잡고,
+   * 도착 뒤 세로로 긴 그림은 같은 높이 안에, 가로로 긴 그림은 그보다 낮게 선다
+   * (그 차이만큼만 아래 줄이 움직인다). 격자 타일은 정사각형이다. */
+  --spacing-inline-image-w: 360px;
+  --spacing-inline-image-h: 320px;
+  --spacing-inline-image-tile: 176px;
+  --spacing-inline-image-tile-sm: 112px;
 
   /* S0 히어로 마크 (#1882). #1869의 96px(24px 제품 마크 ×4)를 1.5배한 바닥.
    * `.onboarding-mark`가 이 값과 12vw 사이에서 clamp하고, 상한은 같은 값의
@@ -1019,6 +1030,14 @@
  * ========================================================================== */
 @custom-variant focus-visible-within {
   :root[data-focus-modality="keyboard"] &:has(:focus-visible) {
+    @slot;
+  }
+}
+/* 호버가 되는 입력(마우스)에서만 겹친다 (#3820). 터치는 호버가 없으니 호버로
+ * 드러내는 컨트롤이 늘 보여야 한다. Tailwind 의 `hover:` 는 이미 (hover: hover)
+ * 안에서만 켜지지만, 「기본은 숨김」 쪽을 같은 조건에 묶으려면 이름이 필요하다. */
+@custom-variant pointer-hover {
+  @media (hover: hover) {
     @slot;
   }
 }

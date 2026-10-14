@@ -189,6 +189,12 @@ describe("timeline PDF card", () => {
     act(() => {
       root.render(<AttachmentList channelId="ch" attachments={attachments} />);
     });
+    // 행동 버튼은 호버에서 선다 (#3820): 카드마다 포인터를 올려 둔다.
+    act(() => {
+      for (const card of host.querySelectorAll('[data-testid="attachment-card"]')) {
+        card.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      }
+    });
   }
 
   it("offers an open action on a PDF card only", () => {
