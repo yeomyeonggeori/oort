@@ -327,13 +327,14 @@ fn artifacts_schema() -> Value {
 /// `docs/api/openapi.yaml`'s `WorkspaceActionId` against each other. Adding an
 /// action means editing three lines; forgetting one of them is a red test, not a
 /// production surprise.
-const WORKSPACE_ACTION_IDS: [&str; 6] = [
+const WORKSPACE_ACTION_IDS: [&str; 7] = [
     "invite.create",
     "channel.create",
     "channel.member.add",
     "agent.rename",
     "hosted.channels.grant",
     "workspace.settings.update",
+    "agent.profile.update",
 ];
 
 // The argument vocabulary the registry publishes, restated here for the same
@@ -362,6 +363,16 @@ const WORKSPACE_WELCOME_PROMPT_MAX_BYTES: u64 = 2_000;
 const WORKSPACE_ROLE_LABEL_KEYS: [&str; 4] = ["owner", "admin", "member", "guest"];
 const WORKSPACE_ROLE_LABEL_MAX_BYTES: u64 = 48;
 const WORKSPACE_MEMBER_HANDLES_MAX: u64 = 10;
+// `agent.profile.update`'s vocabulary (ADR-0186 증보 v3 V3-2), measured against
+// `momo_agent::actions`' `PROFILE_*` by the same drift test.
+const WORKSPACE_PROFILE_TAGLINE_MAX_BYTES: u64 = 560;
+const WORKSPACE_PROFILE_STATUS_TEXT_MAX_BYTES: u64 = 320;
+const WORKSPACE_PROFILE_STATUS_EMOJI_MAX_BYTES: u64 = 64;
+const WORKSPACE_PROFILE_ROLE_LABEL_MAX_BYTES: u64 = 96;
+const WORKSPACE_PROFILE_STATUS_HOURS_MAX: i64 = 168;
+const WORKSPACE_AVATAR_B64_MAX_CHARS: u64 = 58_700;
+const WORKSPACE_AVATAR_ID_MAX_CHARS: u64 = 36;
+const WORKSPACE_AVATAR_PRESET_MAX_CHARS: u64 = 24;
 const WORKSPACE_MEMBER_HANDLE_MAX_BYTES: u64 = 33;
 
 /// One `oneOf` branch of `oort_action_propose`'s `args`: the closed object
@@ -445,7 +456,80 @@ fn action_args_branches() -> Vec<Value> {
             }),
         ),
         workspace_settings_branch(),
+        agent_profile_update_branch(),
     ]
+}
+
+/// The `avatar` argument of `agent.profile.update` (증보 v3 V3-2a): exactly one of
+/// four closed shapes, or `null` to remove the avatar. There is no URL form and no
+/// way to name a file the agent cannot read.
+fn avatar_schema() -> Value {
+    json!({
+        // `["object","null"]` + `oneOf`: the argument validator reads a `oneOf` only
+        // on an object-typed schema, and `null` (remove the avatar) is the nullable
+        // half of the type.
+        "type": ["object", "null"],
+        "description": "Your avatar. Exactly one of: a server preset id; a workspace image file you can read (use the attachment id from oort_conversation_read); or an image you generated (PNG/JPEG/WebP, base64, at most about 44 KB decoded — downscale to 256x256 first). null removes the avatar. The server re-encodes every image; a person sees it on the approval card before anything changes.",
+        "oneOf": [
+            {
+                "title": "preset",
+                "type": "object", "additionalProperties": false,
+                "required": ["source", "presetId"],
+                "properties": {
+                    "source": {"type": "string", "enum": ["preset"]},
+                    "presetId": required_text(WORKSPACE_AVATAR_PRESET_MAX_CHARS)
+                }
+            },
+            {
+                "title": "attachment",
+                "type": "object", "additionalProperties": false,
+                "required": ["source", "attachmentId"],
+                "properties": {
+                    "source": {"type": "string", "enum": ["attachment"]},
+                    "attachmentId": required_text(WORKSPACE_AVATAR_ID_MAX_CHARS)
+                }
+            },
+            {
+                "title": "generated",
+                "type": "object", "additionalProperties": false,
+                "required": ["source", "dataBase64"],
+                "properties": {
+                    "source": {"type": "string", "enum": ["generated"]},
+                    "dataBase64": required_text(WORKSPACE_AVATAR_B64_MAX_CHARS)
+                }
+            }
+        ]
+    })
+}
+
+/// `agent.profile.update` (증보 v3 V3-2): at least one key. UNLIKE the other
+/// actions, `null` on `tagline`, `roleLabel`, `statusText` and `statusEmoji`
+/// CLEARS that field, so omit what you are not changing. `displayName`,
+/// `statusExpiresInHours` and `targetHandle` treat `null` as omitted.
+fn agent_profile_update_branch() -> Value {
+    let mut branch = action_args_branch(
+        "agent.profile.update",
+        &[],
+        json!({
+            "displayName": nullable(required_text(WORKSPACE_AGENT_NAME_MAX_BYTES)),
+            "tagline": nullable(text(WORKSPACE_PROFILE_TAGLINE_MAX_BYTES)),
+            "statusText": nullable(text(WORKSPACE_PROFILE_STATUS_TEXT_MAX_BYTES)),
+            "statusEmoji": nullable(text(WORKSPACE_PROFILE_STATUS_EMOJI_MAX_BYTES)),
+            "statusExpiresInHours": nullable(integer(1, WORKSPACE_PROFILE_STATUS_HOURS_MAX)),
+            "roleLabel": nullable(text(WORKSPACE_PROFILE_ROLE_LABEL_MAX_BYTES)),
+            "avatar": avatar_schema(),
+            "targetHandle": nullable(required_text(WORKSPACE_MEMBER_HANDLE_MAX_BYTES))
+        }),
+    );
+    branch["minProperties"] = json!(1);
+    branch["description"] = json!(
+        "At least one key. null on tagline, roleLabel, statusText or statusEmoji CLEARS it, \
+         so omit what you are not changing. A status ends on its own (statusExpiresInHours, \
+         default 24, max 168). Text must be plain: no links, @mentions, markdown, line breaks \
+         or hidden characters, and it must not repeat another member's name. targetHandle \
+         names another agent of your owner; omit it to change yourself."
+    );
+    branch
 }
 
 /// `workspace.settings.update`: exactly the two keys, and at least one
