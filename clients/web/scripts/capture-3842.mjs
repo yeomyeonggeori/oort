@@ -136,6 +136,20 @@ async function signIn(page, origin) {
   await page.getByTestId("nav-work").waitFor({ timeout: 20_000 });
 }
 const overflowX = (page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+// #3850 리뷰(ADR-0112 D6): 보이는 줄의 제목·결과 글이 한 글자라도 잘리면 그 글을 돌려준다.
+// 잘림 = 상자보다 글이 넓거나(한 줄 말줄임) 높다(줄 수 제한). 숨은 열(display:none)은 세지 않는다.
+const clippedText = (page) =>
+  page.evaluate(() => {
+    const nodes = document.querySelectorAll(
+      '[data-testid="work-job-row"] [data-col="task"] > span:first-child, [data-testid="work-job-result"], [data-testid="work-job-result"] > span'
+    );
+    const out = [];
+    for (const el of nodes) {
+      if (el.getClientRects().length === 0) continue;
+      if (el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1) out.push((el.textContent ?? "").trim());
+    }
+    return out;
+  });
 const shot = (page, name) => page.screenshot({ path: resolve(OUT_DIR, `${name}.png`) });
 const shots = [];
 
@@ -167,6 +181,7 @@ async function scene(browser, origin, scheme, viewport, mode) {
   const running = await page.getByTestId("work-jobs-running").innerText();
   check(`${tag} 지금 진행`, /지금 진행 2/.test(running), running);
   check(`${tag} 가로 넘침 0(내 것)`, (await overflowX(page)) === 0, await overflowX(page));
+  check(`${tag} 제목·결과 잘림 0(내 것)`, (await clippedText(page)).length === 0, await clippedText(page));
   if (mode === "jobs") {
     check(`${tag} 승인 대기 줄이 맨 위·카드 링크`, (await page.getByTestId("work-job-row").first().getAttribute("data-approval")) === "" && (await page.getByTestId("work-job-approval-link").count()) === 1);
     check(`${tag} 에이전트 보고 꼬리표`, (await page.getByTestId("work-job-reported-tag").count()) >= 1);
@@ -179,6 +194,7 @@ async function scene(browser, origin, scheme, viewport, mode) {
   await page.waitForFunction(() => document.querySelectorAll('[data-testid="work-job-row"]').length === 6);
   check(`${tag} 팀 전체 6줄`, (await page.getByTestId("work-job-row").count()) === 6);
   check(`${tag} 가로 넘침 0(팀 전체)`, (await overflowX(page)) === 0, await overflowX(page));
+  check(`${tag} 제목·결과 잘림 0(팀 전체)`, (await clippedText(page)).length === 0, await clippedText(page));
   await save(`work-team-${tag}`);
 
   if (mode === "jobs") {
@@ -195,6 +211,7 @@ async function scene(browser, origin, scheme, viewport, mode) {
       check(`${tag} 서랍 열림: 결과 열 접힘·셋째 줄로`, resultCol === "none" && narrowLine === "flex", { resultCol, narrowLine });
     }
     check(`${tag} 가로 넘침 0(서랍)`, (await overflowX(page)) === 0);
+    check(`${tag} 제목·결과 잘림 0(서랍)`, (await clippedText(page)).length === 0, await clippedText(page));
     await save(`work-drawer-${tag}`);
     await page.keyboard.press("Escape");
     await page.locator('[data-testid="work-job-row"]', { hasText: "v0.1.26 공지" }).click();

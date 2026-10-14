@@ -440,7 +440,11 @@ function JobRow({
         )}
       >
         <span className="flex min-w-0 flex-col" data-col="task">
-          <span className="truncate font-medium">{row.title}</span>
+          {/* 제목과 결과는 한 줄로 자르지 않는다(ADR-0112 D6, #3850 리뷰): 두 줄까지 어절에서 접고,
+              폰 줄(`numberOfLines={2}`)과 같은 길이를 보여 준다. 전체는 서랍이 말한다. */}
+          <span className="line-clamp-2 break-keep break-words font-medium" title={row.title}>
+            {row.title}
+          </span>
           <span
             className={cn(
               "truncate text-timestamp",
@@ -480,14 +484,19 @@ function JobRow({
 
 /**
  * 결과 칸: 에이전트 보고(꼬리표와 한 덩어리) → 아니면 서버가 본 PR 번호 → 아니면 도는 중 「아직 결과
- * 없음」, 끝났으면 「알린 결과 없음」. 잘려도 전체 문장은 `title`로 읽힌다.
+ * 없음」, 끝났으면 「알린 결과 없음」. 에이전트 보고는 닫힌 낱말 셋(한 일·테스트·다음 할 일)이라
+ * 길이가 정해져 있어, 자르지 않고 어절에서 접는다(좁으면 꼬리표 아래로 내려간다).
  */
 function ResultCell({ row, reported }: { row: WorkJobRow; reported: string | null }) {
   if (reported !== null) {
     return (
-      <span className="flex min-w-0 items-center gap-2" data-testid="work-job-result" title={`${WORK_JOBS_COPY.reportedTag}: ${reported}`}>
+      <span
+        className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1"
+        data-testid="work-job-result"
+        title={`${WORK_JOBS_COPY.reportedTag}: ${reported}`}
+      >
         <ReportedTag />
-        <span className="min-w-0 truncate text-meta text-ink">{reported}</span>
+        <span className="min-w-0 break-keep text-meta text-ink">{reported}</span>
       </span>
     );
   }
