@@ -599,19 +599,23 @@ mod tests {
     /// 130 is #3744's run-event realtime frame (ADR-0200 S5): the `agent_run_event` AFTER INSERT trigger
     /// that puts a thin `agent.run.event` frame on the channel topic through the outbox, and the
     /// `agent_run.finished_at` index the retention sweep scans.
+    ///
+    /// 131 is ADR-0186 증보 2026-10-13 A0 (#3786): the RLS-FORCE `agent_avatar_image` table (server
+    /// re-encoded avatar bytes, immutable but for `status`) and `member.avatar_image_id` with a
+    /// self-only composite FK.
     #[test]
-    fn discovers_contiguous_migrations_001_to_130() {
+    fn discovers_contiguous_migrations_001_to_131() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            130,
-            "expected 130 migrations under {}",
+            131,
+            "expected 131 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 130);
+        assert_eq!(migrations.last().unwrap().version, 131);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

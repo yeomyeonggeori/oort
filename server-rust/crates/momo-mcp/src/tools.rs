@@ -81,6 +81,10 @@ pub const TOOL_RUN_EVENT: &str = "oort_run_event";
 pub const TOOL_RUN_COMPLETE: &str = "oort_run_complete";
 /// ADR-0186 D2 — propose a workspace change; never perform one.
 pub const TOOL_ACTION_PROPOSE: &str = "oort_action_propose";
+/// ADR-0186 증보 v3 V3-4 — receive, once, the one-time value an approval granted you
+/// (an invite link, or a pairing code the approver chose to hand over). Same scope as
+/// the proposal that produced it; no new scope.
+pub const TOOL_ACTION_CLAIM_SECRET: &str = "oort_action_claim_secret";
 /// ADR-0186 증보 2026-09-27 G1 — suggest a client-command card to the person
 /// who asked. Opened by `messages:write`: it writes one message in the run's
 /// own channel and grants nothing more (G5).
@@ -220,6 +224,18 @@ fn jobs_claim_schema() -> Value {
     })
 }
 
+fn action_claim_secret_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["handle", "approvalId"],
+        "properties": {
+            "handle": required_text(512),
+            "approvalId": required_text(64)
+        }
+    })
+}
+
 fn ping_schema() -> Value {
     json!({
         "type": "object",
@@ -327,13 +343,15 @@ fn artifacts_schema() -> Value {
 /// `docs/api/openapi.yaml`'s `WorkspaceActionId` against each other. Adding an
 /// action means editing three lines; forgetting one of them is a red test, not a
 /// production surprise.
-const WORKSPACE_ACTION_IDS: [&str; 6] = [
+const WORKSPACE_ACTION_IDS: [&str; 8] = [
     "invite.create",
     "channel.create",
     "channel.member.add",
     "agent.rename",
     "hosted.channels.grant",
     "workspace.settings.update",
+    "agent.profile.update",
+    "agent.invite",
 ];
 
 // The argument vocabulary the registry publishes, restated here for the same
@@ -357,11 +375,22 @@ const WORKSPACE_CHANNEL_NAME_MAX_BYTES: u64 = 80;
 const WORKSPACE_CHANNEL_TOPIC_MAX_BYTES: u64 = 1_120;
 const WORKSPACE_CHANNEL_REF_MAX_BYTES: u64 = 81;
 const WORKSPACE_AGENT_NAME_MAX_BYTES: u64 = 256;
+const WORKSPACE_AGENT_INVITE_PLATFORMS: [&str; 4] = ["grok_bot", "dots", "muse", "other"];
 const WORKSPACE_GRANT_CHANNELS_MAX: u64 = 5;
 const WORKSPACE_WELCOME_PROMPT_MAX_BYTES: u64 = 2_000;
 const WORKSPACE_ROLE_LABEL_KEYS: [&str; 4] = ["owner", "admin", "member", "guest"];
 const WORKSPACE_ROLE_LABEL_MAX_BYTES: u64 = 48;
 const WORKSPACE_MEMBER_HANDLES_MAX: u64 = 10;
+// `agent.profile.update`'s vocabulary (ADR-0186 증보 v3 V3-2), measured against
+// `momo_agent::actions`' `PROFILE_*` by the same drift test.
+const WORKSPACE_PROFILE_TAGLINE_MAX_BYTES: u64 = 560;
+const WORKSPACE_PROFILE_STATUS_TEXT_MAX_BYTES: u64 = 320;
+const WORKSPACE_PROFILE_STATUS_EMOJI_MAX_BYTES: u64 = 64;
+const WORKSPACE_PROFILE_ROLE_LABEL_MAX_BYTES: u64 = 96;
+const WORKSPACE_PROFILE_STATUS_HOURS_MAX: i64 = 168;
+const WORKSPACE_AVATAR_B64_MAX_CHARS: u64 = 58_700;
+const WORKSPACE_AVATAR_ID_MAX_CHARS: u64 = 36;
+const WORKSPACE_AVATAR_PRESET_MAX_CHARS: u64 = 24;
 const WORKSPACE_MEMBER_HANDLE_MAX_BYTES: u64 = 33;
 
 /// One `oneOf` branch of `oort_action_propose`'s `args`: the closed object
@@ -445,7 +474,89 @@ fn action_args_branches() -> Vec<Value> {
             }),
         ),
         workspace_settings_branch(),
+        agent_profile_update_branch(),
+        action_args_branch(
+            "agent.invite",
+            &["platform", "displayName", "handle"],
+            json!({
+                "platform": {"type": "string", "enum": WORKSPACE_AGENT_INVITE_PLATFORMS},
+                "displayName": required_text(WORKSPACE_AGENT_NAME_MAX_BYTES),
+                "handle": required_text(WORKSPACE_MEMBER_HANDLE_MAX_BYTES)
+            }),
+        ),
     ]
+}
+
+/// The `avatar` argument of `agent.profile.update` (증보 v3 V3-2a): exactly one of
+/// four closed shapes, or `null` to remove the avatar. There is no URL form and no
+/// way to name a file the agent cannot read.
+fn avatar_schema() -> Value {
+    json!({
+        // `["object","null"]` + `oneOf`: the argument validator reads a `oneOf` only
+        // on an object-typed schema, and `null` (remove the avatar) is the nullable
+        // half of the type.
+        "type": ["object", "null"],
+        "description": "Your avatar. Exactly one of: a server preset id; a workspace image file you can read (use the attachment id from oort_conversation_read); or an image you generated (PNG/JPEG/WebP, base64, at most about 44 KB decoded — downscale to 256x256 first). null removes the avatar. The server re-encodes every image; a person sees it on the approval card before anything changes.",
+        "oneOf": [
+            {
+                "title": "preset",
+                "type": "object", "additionalProperties": false,
+                "required": ["source", "presetId"],
+                "properties": {
+                    "source": {"type": "string", "enum": ["preset"]},
+                    "presetId": required_text(WORKSPACE_AVATAR_PRESET_MAX_CHARS)
+                }
+            },
+            {
+                "title": "attachment",
+                "type": "object", "additionalProperties": false,
+                "required": ["source", "attachmentId"],
+                "properties": {
+                    "source": {"type": "string", "enum": ["attachment"]},
+                    "attachmentId": required_text(WORKSPACE_AVATAR_ID_MAX_CHARS)
+                }
+            },
+            {
+                "title": "generated",
+                "type": "object", "additionalProperties": false,
+                "required": ["source", "dataBase64"],
+                "properties": {
+                    "source": {"type": "string", "enum": ["generated"]},
+                    "dataBase64": required_text(WORKSPACE_AVATAR_B64_MAX_CHARS)
+                }
+            }
+        ]
+    })
+}
+
+/// `agent.profile.update` (증보 v3 V3-2): at least one key. UNLIKE the other
+/// actions, `null` on `tagline`, `roleLabel`, `statusText` and `statusEmoji`
+/// CLEARS that field, so omit what you are not changing. `displayName`,
+/// `statusExpiresInHours` and `targetHandle` treat `null` as omitted.
+fn agent_profile_update_branch() -> Value {
+    let mut branch = action_args_branch(
+        "agent.profile.update",
+        &[],
+        json!({
+            "displayName": nullable(required_text(WORKSPACE_AGENT_NAME_MAX_BYTES)),
+            "tagline": nullable(text(WORKSPACE_PROFILE_TAGLINE_MAX_BYTES)),
+            "statusText": nullable(text(WORKSPACE_PROFILE_STATUS_TEXT_MAX_BYTES)),
+            "statusEmoji": nullable(text(WORKSPACE_PROFILE_STATUS_EMOJI_MAX_BYTES)),
+            "statusExpiresInHours": nullable(integer(1, WORKSPACE_PROFILE_STATUS_HOURS_MAX)),
+            "roleLabel": nullable(text(WORKSPACE_PROFILE_ROLE_LABEL_MAX_BYTES)),
+            "avatar": avatar_schema(),
+            "targetHandle": nullable(required_text(WORKSPACE_MEMBER_HANDLE_MAX_BYTES))
+        }),
+    );
+    branch["minProperties"] = json!(1);
+    branch["description"] = json!(
+        "At least one key. null on tagline, roleLabel, statusText or statusEmoji CLEARS it, \
+         so omit what you are not changing. A status ends on its own (statusExpiresInHours, \
+         default 24, max 168). Text must be plain: no links, @mentions, markdown, line breaks \
+         or hidden characters, and it must not repeat another member's name. targetHandle \
+         names another agent of your owner; omit it to change yourself."
+    );
+    branch
 }
 
 /// `workspace.settings.update`: exactly the two keys, and at least one
@@ -577,7 +688,7 @@ fn card_suggest_schema() -> Value {
 
 /// The complete catalog. Order is the `tools/list` order and is stable so a
 /// client diffing two listings sees only real capability changes.
-pub const TOOL_CATALOG: [ToolDescriptor; 11] = [
+pub const TOOL_CATALOG: [ToolDescriptor; 12] = [
     ToolDescriptor {
         name: TOOL_INBOX_READ,
         title: "Read the hosted inbox",
@@ -646,14 +757,30 @@ pub const TOOL_CATALOG: [ToolDescriptor; 11] = [
         name: TOOL_ACTION_PROPOSE,
         title: "Propose a workspace action",
         description: "Ask a person to approve one workspace change (an invite link, a channel, \
-                      channel members, an agent's name, your own channel reach, or the \
-                      welcome/role-label settings). Name channels and people by name or \
-                      handle, never by id. The proposal parks this run until someone \
-                      decides; it never performs the change. End your turn after proposing: \
-                      the outcome is posted as a line in the channel, which you read on \
-                      your next turn.",
+                      channel members, an agent's name or profile card or picture, bringing \
+                      another agent in, your own channel reach, or the welcome/role-label \
+                      settings). Name channels and people by name or handle, never by id. \
+                      The proposal parks this run until someone decides; it never performs \
+                      the change. End your turn after proposing: the outcome is posted as a \
+                      line in the channel, which you read on your next turn. A link or \
+                      pairing code from an approved proposal comes only from \
+                      oort_action_claim_secret; give it only to the person who asked, in a \
+                      direct message, and never post it in a channel.",
         required_scope: SCOPE_WORKSPACE_PROPOSE,
         schema: action_propose_schema,
+    },
+    ToolDescriptor {
+        name: TOOL_ACTION_CLAIM_SECRET,
+        title: "Receive an approved one-time value",
+        description: "After a person approved your invite-link or agent-invite proposal and \
+                      allowed you to receive its value, call this once with the approval id \
+                      to get it (an invite link, or a pairing code). It works one time, \
+                      within 30 minutes of the approval, and only for the agent that \
+                      proposed it; a second call is refused. Hand the value only to the \
+                      person who asked, in a direct message, and never post it in a \
+                      channel; keep it in memory for this turn only.",
+        required_scope: SCOPE_WORKSPACE_PROPOSE,
+        schema: action_claim_secret_schema,
     },
     ToolDescriptor {
         name: TOOL_CARD_SUGGEST,
@@ -702,6 +829,7 @@ impl ToolCapability {
             TOOL_RUN_EVENT,
             TOOL_RUN_COMPLETE,
             TOOL_ACTION_PROPOSE,
+            TOOL_ACTION_CLAIM_SECRET,
             TOOL_CARD_SUGGEST,
             TOOL_PING,
         ],
@@ -999,6 +1127,11 @@ pub enum ToolFailure {
     /// The target exists and refused the requested transition (a settled run, a
     /// lost lease, an already-terminal state).
     Conflict,
+    /// `oort_action_claim_secret` only, and only to the agent that proposed the
+    /// approval: the value was already received.
+    AlreadyClaimed,
+    /// Same, and same audience: the 30-minute window has passed.
+    ClaimExpired,
     /// The server failed. Never carries a cause.
     Internal,
 }
@@ -1013,6 +1146,8 @@ impl ToolFailure {
             }
             ToolFailure::Unavailable => (409, -32004, "tool target is unavailable"),
             ToolFailure::Conflict => (409, -32005, "tool target refused the transition"),
+            ToolFailure::AlreadyClaimed => (409, -32006, "secret was already claimed"),
+            ToolFailure::ClaimExpired => (409, -32007, "claim window has passed"),
             ToolFailure::Internal => (500, -32603, "internal error"),
         }
     }
@@ -1027,7 +1162,7 @@ mod tests {
     }
 
     #[test]
-    fn the_catalog_is_exactly_the_eleven_named_tools() {
+    fn the_catalog_is_exactly_the_twelve_named_tools() {
         assert_eq!(
             TOOL_CATALOG.iter().map(|t| t.name).collect::<Vec<_>>(),
             vec![
@@ -1040,6 +1175,7 @@ mod tests {
                 "oort_run_event",
                 "oort_run_complete",
                 "oort_action_propose",
+                "oort_action_claim_secret",
                 "oort_card_suggest",
                 "oort_ping",
             ]
@@ -1071,7 +1207,7 @@ mod tests {
             SCOPE_WORKSPACE_PROPOSE,
         ]);
         let view = ToolView::intersect(&all, &all, ToolCapability::FULL);
-        assert_eq!(view.names().len(), 11);
+        assert_eq!(view.names().len(), 12);
         for (name, scope) in [
             (TOOL_INBOX_READ, SCOPE_INBOX_READ),
             (TOOL_CONVERSATION_READ, SCOPE_MESSAGES_READ),
@@ -1082,6 +1218,7 @@ mod tests {
             (TOOL_RUN_EVENT, SCOPE_RUNS_CALLBACK),
             (TOOL_RUN_COMPLETE, SCOPE_RUNS_CALLBACK),
             (TOOL_ACTION_PROPOSE, SCOPE_WORKSPACE_PROPOSE),
+            (TOOL_ACTION_CLAIM_SECRET, SCOPE_WORKSPACE_PROPOSE),
             (TOOL_CARD_SUGGEST, SCOPE_MESSAGES_WRITE),
             (TOOL_PING, SCOPE_INBOX_READ),
         ] {
