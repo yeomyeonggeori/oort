@@ -420,7 +420,6 @@ export function InboxDetail({
               <InboxApprovalActions
                 approvalId={control.approvalId}
                 onSettled={onDecided}
-                reversible={entry.task.reversible}
                 execution={entry.task.execution}
               />
             )}

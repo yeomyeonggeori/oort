@@ -286,7 +286,7 @@ export function loginHandoffWaitingCopy(
  * 조건부다.**
  *
  *   * `cancelled` — 승인 원장이 답한 사실이라 언제나 참이다. 「대기 중이던」이
- *     붙어 있는 이유는 `REJECT_CONFIRM` 에 붙어 있는 이유와 같다: 취소 UPDATE 가
+ *     붙어 있는 이유는 (예전 거부 확정 문장이 같은 한정어를 달던 이유와) 같다: 취소 UPDATE 가
  *     `WHERE status='awaiting_approval'` 로 가드돼 있어, hold 를 이미 떠난 run 은
  *     취소 대상이 아니다.
  *   * `neverStarted` — **창이 열린 적이 없을 때만** 참이다.
@@ -354,13 +354,8 @@ export function loginHandoffSeeksControl(
  * 이 카드의 두 결정이 부르는 이름.
  *
  * 낱말만 다르고 **기계는 승인 카드의 것 그대로**다: 같은 결정 REST, 같은 멱등
- * 키, 같은 2단 무장, 같은 409 문장. 그래서 여기 있는 것은 문장뿐이고 판정은
+ * 키, 같은 한 번 결정(#3819), 같은 409 문장. 그래서 여기 있는 것은 문장뿐이고 판정은
  * 하나도 없다.
- *
- * `stop` 의 확정 문장이 「대기 중인」을 달고 있는 이유는 거부 문장이 그것을 달고
- * 있는 이유와 같다: 취소 UPDATE 가 `WHERE status='awaiting_approval'` 로 가드돼
- * 있어, hold 를 이미 떠난 run 은 취소 대상이 아니다. 한정어 없는 문장은 그 경우에
- * 거짓이 된다.
  *
  * 코어에 두는 이유는 두 클라가 같은 낱말을 봐야 하기 때문만이 아니다. 폰은 이
  * 낱말을 **그리지 않는 것이 계약**이고(안내 동선), 그 부재는 낱말이 한 곳에
@@ -371,11 +366,6 @@ export const LOGIN_HANDOFF_DECISION = {
   resume: "재개",
   /** run 을 멈춘다. 거부와 같은 REST. */
   stop: "중단",
-  resumeCommit: "재개 확정",
-  stopCommit: "중단 확정",
-  resumeConfirm:
-    "개입이 끝난 것으로 기록하고 에이전트를 이어서 진행시킵니다.",
-  stopConfirm: "중단하면 대기 중인 실행이 취소됩니다.",
   lead: "에이전트가 사람의 개입을 기다립니다.",
 } as const;
 

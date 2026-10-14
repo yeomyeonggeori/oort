@@ -1,10 +1,6 @@
-import { useState } from "react";
 import type { DecisionOutcome } from "@momo/core/features/timeline/approvalDecision";
 import type { SpawnExecutionPlan } from "@momo/core/lib/executionPlan";
-import {
-  ApprovalActions,
-  type Armed,
-} from "@/features/timeline/ApprovalActions";
+import { ApprovalActions } from "@/features/timeline/ApprovalActions";
 import { rememberSettledApproval } from "@/features/timeline/settledApprovals";
 import { parseApprovalStatus } from "@momo/core/features/timeline/agentCardModel";
 
@@ -19,12 +15,10 @@ import { parseApprovalStatus } from "@momo/core/features/timeline/agentCardModel
 export function InboxApprovalActions({
   approvalId,
   onSettled,
-  reversible,
   execution,
 }: {
   approvalId: string;
   onSettled: (outcome: DecisionOutcome) => void;
-  reversible?: boolean;
   /**
    * 스폰 승인의 호스트 후보 (ADR-0125 D6-A, 이슈 1114).
    *
@@ -35,12 +29,9 @@ export function InboxApprovalActions({
    */
   execution?: SpawnExecutionPlan;
 }) {
-  const [armed, setArmed] = useState<Armed>(null);
   return (
     <ApprovalActions
       approvalId={approvalId}
-      armed={armed}
-      setArmed={setArmed}
       onSettled={(outcome) => {
         // 같은 승인을 그리는 타임라인 카드가 낡은 대기로 남지 않게 한다 (#3771).
         const status = parseApprovalStatus(outcome.status ?? null);
@@ -60,7 +51,6 @@ export function InboxApprovalActions({
       lead="실행 전에 내 허가가 필요해요."
       className="pb-2"
       testIdPrefix="inbox-approval"
-      reversible={reversible}
       execution={execution ?? null}
     />
   );

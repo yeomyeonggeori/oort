@@ -20,7 +20,6 @@ import '../src/boot/coreHost';
 
 import {LINK_ONCE_LEAD} from '@momo/core/features/approvals/secretOnce';
 import {
-  actionApproveConfirmCopy,
   roleRequiredCopy,
 } from '@momo/core/features/approvals/actionRole';
 import {
@@ -32,7 +31,6 @@ import {
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import type {RowPresentation} from '@momo/core/features/timeline/rowModel';
 import {color} from '../src/design/tokens';
-import {CONFIRM_GUARD_MS} from '../src/features/inbox/ApprovalDecision';
 import {
   linkOnceFrom,
   type ApprovalGate,
@@ -378,12 +376,10 @@ function renderRow(props: {
   );
 }
 
-/** 무장 → 확정 문장을 읽을 만큼 기다림 → 확정. 사람이 하는 순서 그대로. */
+/** 한 번 탭하면 결정이 나간다 (#3819). 확정 단계는 없다. */
 async function armAndCommit(direction: 'approve' | 'reject'): Promise<void> {
-  fireEvent.press(screen.getByTestId(`${PREFIX}-${direction}`));
-  elapse(CONFIRM_GUARD_MS + 100);
   await act(async () => {
-    fireEvent.press(screen.getByTestId(`${PREFIX}-commit`));
+    fireEvent.press(screen.getByTestId(`${PREFIX}-${direction}`));
   });
 }
 
@@ -399,41 +395,27 @@ describe('#1084 — 타임라인 승인 카드에서 바로 결정한다', () =>
     ).toBeNull();
   });
 
-  it('승인 확정 문장은 서버의 실행을 말하고 에이전트 재개를 약속하지 않는다 (웹 R1 M2)', () => {
+  it('승인 한 번에 결정이 나가고 확정 단계가 서지 않는다 (#3819)', async () => {
+    const log = installDecision(() => jsonResponse(200, APPENDIX_C));
     renderRow({});
-    fireEvent.press(screen.getByTestId(`${PREFIX}-approve`));
-    const confirm = screen.getByTestId(`${PREFIX}-confirm`);
-    expect(within(confirm).getByText(actionApproveConfirmCopy('admin'))).toBeTruthy();
-    expect(actionApproveConfirmCopy('admin')).toBe(
-      '승인하면 서버가 관리자 권한으로 이 행동을 실행해요.',
-    );
+    expect(screen.queryByTestId(`${PREFIX}-confirm`)).toBeNull();
+    await armAndCommit('approve');
+    await waitFor(() => expect(log.calls).toHaveLength(1));
+    expect(screen.queryByTestId(`${PREFIX}-confirm`)).toBeNull();
+    expect(screen.queryByTestId(`${PREFIX}-commit`)).toBeNull();
+    // 서버가 실행한다는 사실은 눌리기 전에 카드가 이미 말한다(결정 권한 행).
     expect(renderedText()).not.toContain('에이전트가 이어서');
   });
 
-  it('도구 호출 승인의 확정 문장은 그대로다 (회귀 0)', () => {
-    renderRow({
-      message: approvalMessage({
-        approval_id: APPROVAL_ID,
-        title: 'github.search_issues 실행 허가',
-        approval_status: 'pending',
-      }),
-    });
-    fireEvent.press(screen.getByTestId(`${PREFIX}-approve`));
-    expect(
-      within(screen.getByTestId(`${PREFIX}-confirm`)).getByText(
-        '승인하면 에이전트가 이어서 진행합니다. 되돌릴 수 없습니다.',
-      ),
-    ).toBeTruthy();
-  });
-
-  it('기한이 지난 행동 승인은 실행을 약속하지 않고 만료를 말한다', () => {
+  it('기한이 지난 행동 승인은 누르기 전에 만료를 말한다', () => {
     renderRow({
       gates: new Map([[APPROVAL_ID, {...GATE, expiresAtMs: BASE_MS - 1}]]),
     });
-    fireEvent.press(screen.getByTestId(`${PREFIX}-approve`));
-    const confirm = screen.getByTestId(`${PREFIX}-confirm`);
-    expect(within(confirm).getByText(/만료로 기록됩니다/)).toBeTruthy();
-    expect(within(confirm).queryByText(actionApproveConfirmCopy('admin'))).toBeNull();
+    expect(
+      within(screen.getByTestId(`${PREFIX}-actions`)).getByText(
+        /만료로 기록돼요/,
+      ),
+    ).toBeTruthy();
   });
 
   it('승인을 확정하면 결정이 한 번 나가고 원장의 답(부록 C)이 호출자에게 간다', async () => {
@@ -447,22 +429,13 @@ describe('#1084 — 타임라인 승인 카드에서 바로 결정한다', () =>
     expect(linkOnceFrom(settled[0])?.value).toBe(SECRET);
   });
 
-  it('거부는 대기 중인 실행의 취소를 말하고, 거부된 결정에는 링크가 없다', async () => {
+  it('거부도 한 번에 나가고, 거부된 결정에는 링크가 없다', async () => {
     const log = installDecision(() =>
       jsonResponse(200, {...APPENDIX_C, status: 'rejected', result: undefined}),
     );
     const settled: DecisionOutcome[] = [];
     renderRow({onSettled: (_id, outcome) => settled.push(outcome)});
-    fireEvent.press(screen.getByTestId(`${PREFIX}-reject`));
-    expect(
-      within(screen.getByTestId(`${PREFIX}-confirm`)).getByText(
-        '거부하면 대기 중인 실행이 취소됩니다.',
-      ),
-    ).toBeTruthy();
-    elapse(CONFIRM_GUARD_MS + 100);
-    await act(async () => {
-      fireEvent.press(screen.getByTestId(`${PREFIX}-commit`));
-    });
+    await armAndCommit('reject');
     await waitFor(() => expect(settled).toHaveLength(1));
     expect(log.calls).toEqual([{approve: false, key: expect.any(String)}]);
     expect(settled[0]).toMatchObject({kind: 'committed', status: 'rejected'});
@@ -471,10 +444,10 @@ describe('#1084 — 타임라인 승인 카드에서 바로 결정한다', () =>
 });
 
 // =============================================================================
-describe('#1084 — 403 은 「관리자가 승인해야 해요」와 무장 해제다 (ADR-0186 §5)', () => {
+describe('#1084 — 403 은 「관리자가 승인해야 해요」라는 조용한 안내다 (ADR-0186 §5)', () => {
   const ROLE_COPY = roleRequiredCopy('admin');
 
-  it('영수증이 role_required 라고 말하면 조용한 안내가 서고 무장이 풀린다', async () => {
+  it('영수증이 role_required 라고 말하면 조용한 안내가 서고 버튼은 그대로다', async () => {
     const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
     installDecision(() =>
       jsonResponse(403, {approval_id: APPROVAL_ID, status: 'role_required'}),
@@ -488,7 +461,7 @@ describe('#1084 — 403 은 「관리자가 승인해야 해요」와 무장 해
     // 사고가 아니다 — 붉지 않다. 웹의 `unavailable`(ink-muted)과 같은 자리.
     expect(flat(notice.props.style).color).toBe(color.textMuted);
     expect(flat(notice.props.style).color).not.toBe(color.danger);
-    // 성공할 수 없는 「승인 확정」이 남지 않는다 (웹 R1 M1).
+    // 확정 버튼은 애초에 없다(#3819) — 승인·거부가 그대로 서 있을 뿐이다.
     expect(screen.queryByTestId(`${PREFIX}-commit`)).toBeNull();
     // 요청은 여전히 대기다 — 다른 사람이 이어받을 수 있다.
     expect(screen.getByTestId(`${PREFIX}-approve`)).toBeTruthy();
@@ -507,16 +480,17 @@ describe('#1084 — 403 은 「관리자가 승인해야 해요」와 무장 해
     expect(screen.queryByTestId(`${PREFIX}-commit`)).toBeNull();
   });
 
-  it('다시 누르면 안내가 걷히고 다시 무장한다', async () => {
+  it('다시 누르면 안내가 걷히고 같은 결정을 다시 보낸다', async () => {
     installDecision(() =>
       jsonResponse(403, {approval_id: APPROVAL_ID, status: 'role_required'}),
     );
     renderRow({});
     await armAndCommit('approve');
     await screen.findByTestId(`${PREFIX}-error`);
-    fireEvent.press(screen.getByTestId(`${PREFIX}-approve`));
-    expect(screen.queryByTestId(`${PREFIX}-error`)).toBeNull();
-    expect(screen.getByTestId(`${PREFIX}-confirm`)).toBeTruthy();
+    // 다시 누르면 안내가 걷히고 요청이 다시 나간다(같은 403 이 안내를 다시 세운다).
+    await armAndCommit('approve');
+    await screen.findByTestId(`${PREFIX}-error`);
+    expect(screen.getByTestId(`${PREFIX}-approve`)).toBeTruthy();
   });
 
   it('행동 블록이 없는 승인의 403 은 지금까지의 붉은 문장이다 (회귀 0)', async () => {
@@ -534,8 +508,8 @@ describe('#1084 — 403 은 「관리자가 승인해야 해요」와 무장 해
       '이 승인을 결정할 권한이 없습니다. 채널 멤버인지 확인하세요.',
     );
     expect(flat(error.props.style).color).toBe(color.danger);
-    // 인박스와 같은 옛 동작: 무장이 유지된다.
-    expect(screen.getByTestId(`${PREFIX}-commit`)).toBeTruthy();
+    // 버튼은 그대로 남는다(다른 멤버가 이어받을 수 있다).
+    expect(screen.getByTestId(`${PREFIX}-approve`)).toBeTruthy();
   });
 });
 
@@ -1141,10 +1115,8 @@ describe('D4 — 1회 링크는 폰 메모리에만 있고, 다시 열면 사라
       SETTLE,
     );
     expect(screen.getAllByTestId('approval-action-row')).toHaveLength(3);
-    fireEvent.press(screen.getByTestId(`${PREFIX}-approve`));
-    elapse(CONFIRM_GUARD_MS + 100);
     await act(async () => {
-      fireEvent.press(screen.getByTestId(`${PREFIX}-commit`));
+      fireEvent.press(screen.getByTestId(`${PREFIX}-approve`));
     });
 
     // ② 영수증 자리에 링크가 **한 번** 선다.
@@ -1240,10 +1212,8 @@ describe('D4 — 1회 링크는 폰 메모리에만 있고, 다시 열면 사라
       () => expect(screen.getByTestId(`${PREFIX}-approve`)).toBeTruthy(),
       SETTLE,
     );
-    fireEvent.press(screen.getByTestId(`${PREFIX}-approve`));
-    elapse(CONFIRM_GUARD_MS + 100);
     await act(async () => {
-      fireEvent.press(screen.getByTestId(`${PREFIX}-commit`));
+      fireEvent.press(screen.getByTestId(`${PREFIX}-approve`));
     });
     await screen.findByTestId('card-approval-link-once-value', {}, SETTLE);
     expect(renderedText()).toContain(SECRET);

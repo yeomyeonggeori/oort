@@ -3986,15 +3986,8 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           <View style={styles.noticeStack}>
             <ApprovalDecision
               approvalId="ap-1"
-              initialArmed="approve"
               onSettled={() => {}}
               testIDPrefix="measure-approve"
-            />
-            <ApprovalDecision
-              approvalId="ap-2"
-              initialArmed="reject"
-              onSettled={() => {}}
-              testIDPrefix="measure-reject"
             />
             <StopTurnControl
               runId="run-1"
