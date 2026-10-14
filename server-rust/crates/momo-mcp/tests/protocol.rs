@@ -608,15 +608,6 @@ fn unknown_fields_and_method_specific_params_are_rejected() {
         .unwrap()
         .insert("extra".into(), json!(true));
 
-    let unknown_meta = json!({
-        "jsonrpc":"2.0","id":1,"method":"tools/list","params":{
-            "_meta":{
-                "io.modelcontextprotocol/protocolVersion":MODERN_PROTOCOL_VERSION,
-                "io.modelcontextprotocol/clientCapabilities":{},
-                "extra":true
-            }
-        }
-    });
     let unknown_params = modern("tools/list", json!(1), json!({"extra": true}));
     let invalid_arguments = modern(
         "tools/call",
@@ -624,7 +615,7 @@ fn unknown_fields_and_method_specific_params_are_rejected() {
         json!({"name":"never","arguments":[]}),
     );
 
-    for body in [unknown_top, unknown_meta, unknown_params, invalid_arguments] {
+    for body in [unknown_top, unknown_params, invalid_arguments] {
         let method = body["method"].as_str().unwrap();
         let name = (method == "tools/call").then_some("never");
         let response = invoke(&body, Some(MODERN_PROTOCOL_VERSION), Some(method), name);
@@ -1193,4 +1184,244 @@ fn the_published_schema_is_enforced_field_by_field() {
             "{tool_name}: {why}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Hotfix #3812 — standard MCP request fields must not refuse a tool call.
+// `_meta.progressToken`, the task-augmentation `task` marker and
+// `"arguments": null` are all spec-legal; refusing them returned -32602 for
+// every call from a client that sent them. They are accepted and ignored,
+// while genuinely unknown keys and non-object arguments stay refused.
+// ---------------------------------------------------------------------------
+
+fn legacy_call(params: Value) -> Value {
+    json!({"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": params})
+}
+
+fn admit_legacy(params: Value) -> Outcome {
+    invoke_with(
+        &legacy_call(params),
+        Some(LEGACY_PROTOCOL_VERSION),
+        Some("tools/call"),
+        Some("oort_inbox_read"),
+        &full_view(),
+    )
+}
+
+fn admit_modern(extra: Value, meta_extra: Value) -> Outcome {
+    let mut body = modern("tools/call", json!(9), extra);
+    for (key, value) in meta_extra.as_object().unwrap() {
+        body["params"]["_meta"][key] = value.clone();
+    }
+    invoke_with(
+        &body,
+        Some(MODERN_PROTOCOL_VERSION),
+        Some("tools/call"),
+        Some("oort_inbox_read"),
+        &full_view(),
+    )
+}
+
+fn expect_call(outcome: Outcome) -> momo_mcp::ToolCall {
+    match outcome {
+        Outcome::Tool(call) => call,
+        Outcome::Response(response) => panic!(
+            "expected an admitted call, got {}",
+            String::from_utf8_lossy(response.body.as_deref().unwrap_or_default())
+        ),
+    }
+}
+
+fn expect_invalid_params(outcome: Outcome) {
+    let response = response_of(outcome);
+    assert_eq!(response.status, 400);
+    assert_eq!(error_code(&response), -32602);
+}
+
+#[test]
+fn legacy_tools_call_ignores_meta_progress_token_and_never_forwards_it() {
+    let call = expect_call(admit_legacy(json!({
+        "name": "oort_inbox_read",
+        "arguments": {"limit": 5},
+        "_meta": {"progressToken": "tok-1", "vendor/x": {"nested": true}}
+    })));
+    assert_eq!(call.tool.name, "oort_inbox_read");
+    assert_eq!(call.era, ToolEra::Legacy);
+    assert_eq!(call.arguments, json!({"limit": 5}));
+}
+
+#[test]
+fn legacy_tools_call_ignores_the_task_marker() {
+    let call = expect_call(admit_legacy(json!({
+        "name": "oort_inbox_read",
+        "arguments": {},
+        "task": {"ttl": 60000}
+    })));
+    assert_eq!(call.arguments, json!({}));
+    assert_eq!(call.tool.name, "oort_inbox_read");
+}
+
+#[test]
+fn null_arguments_are_an_empty_object_in_both_eras() {
+    let legacy = expect_call(admit_legacy(
+        json!({"name": "oort_inbox_read", "arguments": null}),
+    ));
+    assert_eq!(legacy.arguments, json!({}));
+
+    let modern_call = expect_call(admit_modern(
+        json!({"name": "oort_inbox_read", "arguments": null}),
+        json!({}),
+    ));
+    assert_eq!(modern_call.arguments, json!({}));
+}
+
+#[test]
+fn modern_tools_call_ignores_extra_meta_keys_and_task() {
+    let call = expect_call(admit_modern(
+        json!({
+            "name": "oort_inbox_read",
+            "arguments": {"limit": 3},
+            "task": {"ttl": 1000}
+        }),
+        json!({"progressToken": 7, "io.modelcontextprotocol/related-task": {"taskId": "t"}}),
+    ));
+    assert_eq!(call.era, ToolEra::Modern);
+    assert_eq!(call.arguments, json!({"limit": 3}));
+}
+
+#[test]
+fn a_hidden_argument_in_meta_or_task_never_reaches_the_tool() {
+    let call = expect_call(admit_modern(
+        json!({
+            "name": "oort_inbox_read",
+            "arguments": {"limit": 2},
+            "task": {"limit": 99, "workspaceId": "other"}
+        }),
+        json!({"limit": 99, "arguments": {"limit": 99}}),
+    ));
+    assert_eq!(call.arguments, json!({"limit": 2}));
+}
+
+#[test]
+fn unknown_top_level_keys_and_non_object_arguments_are_still_refused() {
+    for params in [
+        json!({"name": "oort_inbox_read", "arguments": {}, "extra": true}),
+        json!({"name": "oort_inbox_read", "arguments": []}),
+        json!({"name": "oort_inbox_read", "arguments": "x"}),
+        json!({"name": "oort_inbox_read", "arguments": 1}),
+        json!({"name": "oort_inbox_read", "task": "yes"}),
+        json!({"name": "oort_inbox_read", "_meta": "x"}),
+        json!({"name": "oort_inbox_read", "_meta": null}),
+    ] {
+        expect_invalid_params(admit_legacy(params.clone()));
+    }
+    for extra in [
+        json!({"name": "oort_inbox_read", "extra": true}),
+        json!({"name": "oort_inbox_read", "arguments": []}),
+        json!({"name": "oort_inbox_read", "arguments": "x"}),
+        json!({"name": "oort_inbox_read", "task": [1]}),
+    ] {
+        expect_invalid_params(admit_modern(extra, json!({})));
+    }
+}
+
+#[test]
+fn legacy_meta_protocol_version_is_still_a_version_mismatch() {
+    let response = response_of(admit_legacy(json!({
+        "name": "oort_inbox_read",
+        "_meta": {"io.modelcontextprotocol/protocolVersion": MODERN_PROTOCOL_VERSION}
+    })));
+    assert_eq!(error_code(&response), ERR_VERSION_MISMATCH);
+}
+
+#[test]
+fn list_ping_and_initialize_accept_only_their_standard_extras() {
+    let view = full_view();
+    for params in [
+        json!({"_meta": {"progressToken": "p"}}),
+        json!({"cursor": "c"}),
+        json!({"cursor": "c", "_meta": {"progressToken": 1}}),
+    ] {
+        let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":params});
+        let response = response_of(invoke_with(
+            &body,
+            Some(LEGACY_PROTOCOL_VERSION),
+            None,
+            None,
+            &view,
+        ));
+        assert_eq!(response.status, 200, "legacy tools/list {params}");
+    }
+    let ping =
+        json!({"jsonrpc":"2.0","id":1,"method":"ping","params":{"_meta":{"progressToken":1}}});
+    assert_eq!(
+        invoke(&ping, Some(LEGACY_PROTOCOL_VERSION), None, None).status,
+        200
+    );
+
+    let mut modern_list = modern("tools/list", json!(1), json!({"cursor": "c"}));
+    modern_list["params"]["_meta"]["progressToken"] = json!("p");
+    assert_eq!(
+        invoke(
+            &modern_list,
+            Some(MODERN_PROTOCOL_VERSION),
+            Some("tools/list"),
+            None
+        )
+        .status,
+        200
+    );
+
+    for bad in [
+        json!({"cursor": 1}),
+        json!({"cursor": "c", "extra": 1}),
+        json!({"_meta": []}),
+    ] {
+        let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":bad});
+        assert_eq!(
+            error_code(&invoke(&body, Some(LEGACY_PROTOCOL_VERSION), None, None)),
+            -32602
+        );
+    }
+    let ping_extra = json!({"jsonrpc":"2.0","id":1,"method":"ping","params":{"extra":1}});
+    assert_eq!(
+        error_code(&invoke(
+            &ping_extra,
+            Some(LEGACY_PROTOCOL_VERSION),
+            None,
+            None
+        )),
+        -32602
+    );
+}
+
+#[test]
+fn request_shape_reports_key_names_only() {
+    let body = serde_json::to_vec(&legacy_call(json!({
+        "name": "secret-tool-name",
+        "arguments": {"token": "secret-argument-value"},
+        "_meta": {"progressToken": "secret-token-value"},
+        "extra": "secret-extra-value"
+    })))
+    .unwrap();
+    let shape = momo_mcp::request_shape(&body);
+    assert_eq!(shape.method.as_deref(), Some("tools/call"));
+    let mut params_keys = shape.params_keys.clone();
+    params_keys.sort();
+    assert_eq!(params_keys, ["_meta", "arguments", "extra", "name"]);
+    assert_eq!(shape.meta_keys, ["progressToken"]);
+    let rendered = format!("{shape:?}");
+    assert!(!rendered.contains("secret"), "{rendered}");
+
+    assert_eq!(momo_mcp::request_shape(b"{"), Default::default());
+    let many: serde_json::Map<String, Value> = (0..100)
+        .map(|index| (format!("{}{index}", "k".repeat(200)), json!(0)))
+        .collect();
+    let body = serde_json::to_vec(&json!({"method": "m", "params": many})).unwrap();
+    let shape = momo_mcp::request_shape(&body);
+    assert!(shape.params_keys.len() <= 16);
+    assert!(shape
+        .params_keys
+        .iter()
+        .all(|key| key.chars().count() <= 64));
 }

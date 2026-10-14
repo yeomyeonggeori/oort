@@ -215,7 +215,10 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
         body: &bytes,
     };
     match momo_mcp::dispatch_with_tools(request, &view) {
-        momo_mcp::Outcome::Response(response) => dispatched_response(response),
+        momo_mcp::Outcome::Response(response) => {
+            log_invalid_params(&response, &bytes);
+            dispatched_response(response)
+        }
         momo_mcp::Outcome::Tool(call) => match caller {
             Some(caller) => dispatched_response(
                 crate::routes::agent_port_tools::execute(&state, caller, call).await,
@@ -228,6 +231,41 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
             )),
         },
     }
+}
+
+/// Leave a diagnostic trail for a JSON-RPC `-32602` refusal.
+///
+/// Before this existed a client could be refused on every call with nothing in
+/// the logs to say why. Only **names** are recorded — the method, the top-level
+/// `params` keys and the `_meta` keys — never a value, an argument name or the
+/// caller's identity, so no tool input or credential can reach the log.
+fn log_invalid_params(response: &momo_mcp::HttpResponse, body: &[u8]) {
+    let Some((code, message)) = response
+        .body
+        .as_deref()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(bytes).ok())
+        .and_then(|value| {
+            let error = value.get("error")?;
+            Some((
+                error.get("code")?.as_i64()?,
+                error.get("message")?.as_str()?.to_owned(),
+            ))
+        })
+    else {
+        return;
+    };
+    if code != -32602 {
+        return;
+    }
+    let shape = momo_mcp::request_shape(body);
+    tracing::warn!(
+        method = ?shape.method,
+        code,
+        message = %message,
+        params_keys = ?shape.params_keys,
+        meta_keys = ?shape.meta_keys,
+        "Agent Port refused request params"
+    );
 }
 
 /// Whether this body's JSON-RPC method is one the tool view can change.
