@@ -32,7 +32,14 @@ CREATE TABLE agent_avatar_image (
   sha256        bytea NOT NULL,
   bytes         bytea NOT NULL,
   status        text NOT NULL DEFAULT 'staged',
+  -- The approval this image was staged for. NULL until the approval exists (the
+  -- image is staged first so the card can preview it); then set **once**: the
+  -- trigger below allows NULL → value and nothing else, and the UNIQUE makes one
+  -- image belong to at most one approval. The decision accepts an image only under
+  -- the approval it is bound to.
+  approval_id   uuid,
   created_at    timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT agent_avatar_approval_uniq UNIQUE (approval_id),
   CONSTRAINT agent_avatar_source_ck CHECK (source IN ('attachment', 'generated')),
   -- 출력은 PNG 또는 JPEG 뿐이다(서버가 새로 인코딩한다). 입력의 WebP/그 밖은 여기 오지 않는다.
   CONSTRAINT agent_avatar_mime_ck CHECK (mime IN ('image/png', 'image/jpeg')),
@@ -74,6 +81,10 @@ BEGIN
      OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
     RAISE EXCEPTION 'agent_avatar_image is immutable except for status' USING ERRCODE = '23000';
   END IF;
+  -- The approval binding is write-once.
+  IF OLD.approval_id IS NOT NULL AND NEW.approval_id IS DISTINCT FROM OLD.approval_id THEN
+    RAISE EXCEPTION 'agent_avatar_image.approval_id is write-once' USING ERRCODE = '23000';
+  END IF;
   IF OLD.status = 'applied' AND NEW.status = 'staged' THEN
     RAISE EXCEPTION 'agent_avatar_image cannot go back to staged' USING ERRCODE = '23000';
   END IF;
@@ -84,6 +95,33 @@ CREATE TRIGGER agent_avatar_image_immutable_trg
   BEFORE UPDATE ON agent_avatar_image
   FOR EACH ROW EXECUTE FUNCTION agent_avatar_image_immutable();
 
+-- 워크스페이스 일치: FK 검사는 RLS 를 우회하므로 `member_id`·`proposed_by` 가 **같은
+-- 워크스페이스의 멤버**라는 사실은 이 트리거가 INSERT 때 직접 확인한다(주인은 에이전트).
+CREATE FUNCTION agent_avatar_image_guard_insert() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM member m
+                  WHERE m.id = NEW.member_id AND m.workspace_id = NEW.workspace_id
+                    AND m.kind = 'agent') THEN
+    RAISE EXCEPTION 'agent_avatar_image.member_id must be an agent of the same workspace'
+      USING ERRCODE = '23000';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM member m
+                  WHERE m.id = NEW.proposed_by AND m.workspace_id = NEW.workspace_id) THEN
+    RAISE EXCEPTION 'agent_avatar_image.proposed_by must be a member of the same workspace'
+      USING ERRCODE = '23000';
+  END IF;
+  IF NEW.status <> 'staged' OR NEW.approval_id IS NOT NULL THEN
+    RAISE EXCEPTION 'agent_avatar_image rows are inserted staged and unbound'
+      USING ERRCODE = '23000';
+  END IF;
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER agent_avatar_image_guard_insert_trg
+  BEFORE INSERT ON agent_avatar_image
+  FOR EACH ROW EXECUTE FUNCTION agent_avatar_image_guard_insert();
+
 -- 에이전트가 가리키는 현재 이미지(`applied` 행) 또는 NULL. 복합 FK: 포인터는 **자기
 -- id 의 멤버 몫**의 이미지만 가리킬 수 있다(MATCH SIMPLE: NULL 이면 검사 없음).
 -- ON DELETE SET NULL (avatar_image_id): 컬럼 목록 형태(PG15+)라 id(PK)는 건드리지 않는다.
@@ -93,6 +131,15 @@ ALTER TABLE member
     FOREIGN KEY (avatar_image_id, id)
     REFERENCES agent_avatar_image (id, member_id)
     ON DELETE SET NULL (avatar_image_id);
+
+-- 한 멤버는 업로드 아바타(111)와 승인된 이미지 아바타를 동시에 갖지 않는다 — 로스터와
+-- 서빙 프록시가 어느 쪽이 이기는지에 대해 어긋날 수 없게 DB 가 말한다.
+ALTER TABLE member
+  ADD CONSTRAINT member_avatar_exclusive_ck
+    CHECK (avatar_media_id IS NULL OR avatar_image_id IS NULL);
+-- 이미지 행 삭제 때 포인터 FK 검사가 member 를 훑지 않게.
+CREATE INDEX member_avatar_image_idx ON member (avatar_image_id)
+  WHERE avatar_image_id IS NOT NULL;
 
 COMMENT ON TABLE agent_avatar_image IS
   'ADR-0186 증보 2026-10-13 V3-2a: 에이전트 프로필 이미지(서버가 재인코딩한 PNG/JPEG, ≤512x512, ≤512KiB). staged(제안·카드 미리보기·핀) → applied(승인). 불변(트리거).';
