@@ -53,10 +53,16 @@ pub const AGENT_AVATAR_IN_MAX_BYTES_ATTACHMENT: usize = 5 * 1024 * 1024;
 /// 32 MiB. (Security review of #3799 measured 160–310 MB of RSS for 4096² inputs;
 /// 2048² is a quarter of that.)
 pub const AGENT_AVATAR_IN_MAX_DIM: u32 = 2048;
-/// The decoder's allocation ceiling — one 2048² 16-bit RGBA frame plus working room.
-/// Not every decoder honours it (zune-jpeg checks dimensions only), which is why the
-/// dimension gate above exists and why the **caller** bounds concurrency.
-pub const AGENT_AVATAR_DECODE_ALLOC_LIMIT: u64 = 96 * 1024 * 1024;
+/// The decoder's allocation ceiling. What it actually bounds is the decoder's
+/// **scratch** — the PNG `iCCP`/`zTXt` inflation and similar — not the decoded frame
+/// (a 2048² 16-bit frame is 32 MiB and decodes fine with this set far lower; the
+/// frame is bounded by the dimension gate above). A security review measured the
+/// 4 MB `iCCP` bomb at 109 MB with a 96 MiB limit, 42 MB at 32 MiB and 25 MB at
+/// 16 MiB, with no valid input refused at 8 MiB. 24 MiB leaves room and keeps the
+/// worst case near 35 MB. Not every decoder honours it (zune-jpeg checks dimensions
+/// only), which is why the dimension gate exists and why the **caller** bounds
+/// concurrency.
+pub const AGENT_AVATAR_DECODE_ALLOC_LIMIT: u64 = 24 * 1024 * 1024;
 /// A staged row older than this is swept by the next avatar proposal.
 pub const AGENT_AVATAR_STAGED_TTL_HOURS: i64 = 24;
 /// Where a stored avatar came from (`agent_avatar_source_ck`).
@@ -436,7 +442,9 @@ pub async fn read_current_avatar_image_in_tx(
 }
 
 /// Whether the stored bytes of `image_id` are **still** the ones `expected_sha256`
-/// pinned: the row exists, is `staged`, belongs to `member_id`, and both its
+/// pinned: the row exists, is `staged`, belongs to `member_id`, **is bound to
+/// `approval_id`** (the approval being decided — an unbound row, or one bound to
+/// another approval, never satisfies a pin), and both its
 /// recorded hash **and a hash recomputed from the stored bytes by the database**
 /// equal the pin. The recomputation is the point — a column that was edited
 /// around the immutability trigger is caught here too.
@@ -445,16 +453,19 @@ pub async fn staged_image_matches_pin_in_tx(
     workspace_id: Uuid,
     image_id: Uuid,
     member_id: Uuid,
+    approval_id: Uuid,
     expected_sha256: &[u8],
 ) -> Result<bool, DbError> {
     let ok: Option<bool> = sqlx::query_scalar(
-        "SELECT sha256 = $4 AND public.digest(bytes, 'sha256') = $4 \
+        "SELECT sha256 = $5 AND public.digest(bytes, 'sha256') = $5 \
            FROM agent_avatar_image \
-          WHERE workspace_id = $1 AND id = $2 AND member_id = $3 AND status = 'staged'",
+          WHERE workspace_id = $1 AND id = $2 AND member_id = $3 AND status = 'staged' \
+            AND approval_id = $4",
     )
     .bind(workspace_id)
     .bind(image_id)
     .bind(member_id)
+    .bind(approval_id)
     .bind(expected_sha256)
     .fetch_optional(&mut *conn)
     .await?;
@@ -491,6 +502,7 @@ pub async fn apply_avatar_image_in_tx(
     workspace_id: Uuid,
     member_id: Uuid,
     image_id: Uuid,
+    approval_id: Uuid,
 ) -> Result<Option<Option<Uuid>>, DbError> {
     let member = sqlx::query(
         "SELECT avatar_image_id FROM member \
@@ -507,18 +519,22 @@ pub async fn apply_avatar_image_in_tx(
     let previous: Option<Uuid> = member.try_get("avatar_image_id")?;
     let applied = sqlx::query(
         "UPDATE agent_avatar_image SET status = 'applied' \
-          WHERE workspace_id = $1 AND id = $2 AND member_id = $3 AND status = 'staged'",
+          WHERE workspace_id = $1 AND id = $2 AND member_id = $3 AND status = 'staged' \
+            AND approval_id = $4",
     )
     .bind(workspace_id)
     .bind(image_id)
     .bind(member_id)
+    .bind(approval_id)
     .execute(&mut *conn)
     .await?;
     if applied.rows_affected() != 1 {
         return Ok(None);
     }
     sqlx::query(
-        "UPDATE member SET avatar_image_id = $3, updated_at = now() \
+        // An image avatar and an uploaded one never coexist
+        // (`member_avatar_exclusive_ck`): the uploaded pointer is cleared with it.
+        "UPDATE member SET avatar_image_id = $3, avatar_media_id = NULL, updated_at = now() \
           WHERE workspace_id = $1 AND id = $2",
     )
     .bind(workspace_id)

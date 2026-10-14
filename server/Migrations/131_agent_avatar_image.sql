@@ -21,9 +21,12 @@
 CREATE TABLE agent_avatar_image (
   id            uuid PRIMARY KEY DEFAULT uuidv7(),
   workspace_id  uuid NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
-  -- 이미지의 주인 = 아바타를 갖게 될 에이전트(제안자가 아니다).
-  member_id     uuid NOT NULL REFERENCES member(id) ON DELETE CASCADE,
-  proposed_by   uuid NOT NULL REFERENCES member(id) ON DELETE CASCADE,
+  -- 이미지의 주인 = 아바타를 갖게 될 에이전트(제안자가 아니다). 복합 FK 라 두 멤버
+  -- 모두 **이 행과 같은 워크스페이스**의 멤버다(FK 검사는 RLS 를 우회하므로 단일 컬럼
+  -- FK 로는 다른 워크스페이스 멤버를 가리킬 수 있다 — `member (workspace_id, id)` 는
+  -- 003 의 UNIQUE).
+  member_id     uuid NOT NULL,
+  proposed_by   uuid NOT NULL,
   source        text NOT NULL,
   mime          text NOT NULL,
   width         integer NOT NULL,
@@ -49,7 +52,11 @@ CREATE TABLE agent_avatar_image (
   CONSTRAINT agent_avatar_len_ck CHECK (octet_length(bytes) = size_bytes),
   CONSTRAINT agent_avatar_sha_ck CHECK (octet_length(sha256) = 32),
   CONSTRAINT agent_avatar_status_ck CHECK (status IN ('staged', 'applied')),
-  CONSTRAINT agent_avatar_id_member_uniq UNIQUE (id, member_id)
+  CONSTRAINT agent_avatar_id_member_uniq UNIQUE (id, member_id),
+  CONSTRAINT agent_avatar_member_ws_fk FOREIGN KEY (workspace_id, member_id)
+    REFERENCES member (workspace_id, id) ON DELETE CASCADE,
+  CONSTRAINT agent_avatar_proposer_ws_fk FOREIGN KEY (workspace_id, proposed_by)
+    REFERENCES member (workspace_id, id) ON DELETE CASCADE
 );
 
 CREATE INDEX agent_avatar_member_idx ON agent_avatar_image (workspace_id, member_id);
@@ -95,20 +102,15 @@ CREATE TRIGGER agent_avatar_image_immutable_trg
   BEFORE UPDATE ON agent_avatar_image
   FOR EACH ROW EXECUTE FUNCTION agent_avatar_image_immutable();
 
--- 워크스페이스 일치: FK 검사는 RLS 를 우회하므로 `member_id`·`proposed_by` 가 **같은
--- 워크스페이스의 멤버**라는 사실은 이 트리거가 INSERT 때 직접 확인한다(주인은 에이전트).
+-- INSERT 규칙: 주인은 에이전트이고, 행은 늘 `staged`·미결속으로 태어난다.
+-- (같은 워크스페이스라는 사실은 위의 복합 FK 가 말한다.)
 CREATE FUNCTION agent_avatar_image_guard_insert() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM member m
+  IF NOT EXISTS (SELECT 1 FROM public.member m
                   WHERE m.id = NEW.member_id AND m.workspace_id = NEW.workspace_id
                     AND m.kind = 'agent') THEN
-    RAISE EXCEPTION 'agent_avatar_image.member_id must be an agent of the same workspace'
-      USING ERRCODE = '23000';
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM member m
-                  WHERE m.id = NEW.proposed_by AND m.workspace_id = NEW.workspace_id) THEN
-    RAISE EXCEPTION 'agent_avatar_image.proposed_by must be a member of the same workspace'
+    RAISE EXCEPTION 'agent_avatar_image.member_id must be an agent'
       USING ERRCODE = '23000';
   END IF;
   IF NEW.status <> 'staged' OR NEW.approval_id IS NOT NULL THEN
