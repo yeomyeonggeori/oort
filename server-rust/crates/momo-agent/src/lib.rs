@@ -164,6 +164,7 @@ pub mod run_progress;
 pub mod status;
 pub mod subscription;
 pub mod subscription_transition;
+pub mod thread_wake;
 pub mod tools;
 pub mod usage;
 pub mod welcome;
@@ -272,9 +273,9 @@ pub use provisioning::{
     agent_owner_in_tx, create_agent_identity_in_tx, default_enabled_tools,
     load_agent_model_policy_in_tx, load_agent_profile_in_tx, normalized_model,
     normalized_system_prompt, reject_credential_shaped_fields, set_agent_model_source_in_tx,
-    set_agent_paused_in_tx, upsert_agent_profile_in_tx, validate_agent_profile, validated_config,
-    AgentCreation, AgentMember, AgentProfile, AgentProfileSpec, AgentSpecInvalid, ModelSource,
-    NewAgentMember, DEFAULT_ENABLED_TOOLS,
+    set_agent_paused_in_tx, set_agent_thread_reply_wake_in_tx, upsert_agent_profile_in_tx,
+    validate_agent_profile, validated_config, AgentCreation, AgentMember, AgentProfile,
+    AgentProfileSpec, AgentSpecInvalid, ModelSource, NewAgentMember, DEFAULT_ENABLED_TOOLS,
 };
 pub use routing::{
     validate_request_routing, RequestedRouting, RoutingInvalid, MAX_ROUTING_MODEL_LENGTH,
@@ -328,6 +329,9 @@ pub use subscription::{
     SUBSCRIPTION_NOTICE_AUDIT_SCHEMA, SUBSCRIPTION_NOTICE_POSTED_ACTION,
     SUBSCRIPTION_NOTICE_SOURCE, SUBSCRIPTION_NOTICE_THROTTLED_ACTION,
     SUBSCRIPTION_NOTICE_THROTTLE_SECONDS,
+};
+pub use thread_wake::{
+    find_unclaimed_thread_run_in_tx, load_thread_wake_target_in_tx, THREAD_REPLY_WAKE_REASON,
 };
 pub use usage::{
     budget_state, chain_usage_in_tx, record_run_usage_in_tx, usage_summary_in_tx, validated_window,
