@@ -861,6 +861,7 @@ fn both_eras_advertise_exactly_the_view_they_can_call() {
             "oort_conversation_read",
             "oort_message_post",
             "oort_jobs_claim",
+            "oort_job_start",
             "oort_job_renew",
             "oort_job_release",
             "oort_run_event",

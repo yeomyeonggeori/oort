@@ -1306,7 +1306,7 @@ credential로, 터널이 아니라 VM 루프백에 POST한다.
    (Unavailable) 처음부터 다시 읽지 말고 합류를 다시 안내한다.
 2) 이벤트는 kind(message / agent_job / agent_run)와 channelId·messageId·
    messageSeq 만 준다. agent_job 이벤트가 하나라도 있으면 다른 것을 읽기 전에
-   3)의 추적 경로(claim, 그다음 시작 보고)를 먼저 탄다. 일반 message 이벤트의
+   3)의 추적 경로(oort_job_start)를 먼저 탄다. 일반 message 이벤트의
    본문은 oort_conversation_read 로 그 채널에서 읽는다.
 3) 처리할 일이 있으면 처리하고, 응답은 oort_message_post 로 같은 채널에
    쓴다. clientMsgId 는 보낼 때마다 새 UUID. 같은 clientMsgId 재시도는
@@ -1314,21 +1314,28 @@ credential로, 터널이 아니라 VM 루프백에 POST한다.
    이벤트 kind 가 agent_job 이면 추적되는 작업(run)이다. oort_message_post
    만 쓰지 말고 아래처럼 한다.
    순서가 중요하다(사람이 시계를 보고 있다). 깨어나면 곧바로 oort_inbox_read,
-   oort_jobs_claim, 시작 보고 oort_run_event 순서로 부르고(아래 a, b) 그
-   사이에 다른 호출을 끼우지 않는다. 시작 보고 전에 대화를 읽거나 요청을
-   계획·고민하지 않는다. claim 응답의 work.prompt 에 요청이 이미 있다. 시작
-   보고 전의 매 초는 사람 화면에서 「아무 일도 안 일어나는」 시간이다.
-   a) oort_jobs_claim {} 을 부른다. 각 job 에는 leaseHandle, leaseExpiresAtMs,
-      work(channelId, prompt, ...)가 있다. leaseHandle 은
+   그다음 oort_job_start 를 한 번 부르고 그 사이에 다른 호출을 끼우지 않는다.
+   그 전에 대화를 읽거나 요청을 계획·고민하지 않는다. 응답의 work.prompt 와
+   최근 대화에 요청이 이미 있다. 시작 보고 전의 매 초는 사람 화면에서 「아무
+   일도 안 일어나는」 시간이다.
+   a) oort_job_start {} 를 부른다. 한 번의 호출이 다음 job 을 claim 하고,
+      시작 보고(stage "시작: 요청 확인")를 보내고, 최근 대화를 돌려준다.
+      응답에는 job(leaseHandle, leaseExpiresAtMs, work(channelId, prompt,
+      ...)), started(시작 보고가 들어갔으면 true), resumed,
+      conversation.messages(그 채널의 최근 메시지, 최신이 먼저)가 있다.
+      conversation 키가 없으면 그 채널을 읽을 권한이 없는 것이니 work.prompt 를
+      쓴다. 처리할 job 이 없으면 job 이 null 이다. leaseHandle 은
       /workspace/oort-run.handle 에 저장하고(권한 600) 회신에 쓰지 않는다.
-      jobs 가 비었는데 그 파일이 있으면 이미 내 job 이다. 저장한 handle 을 쓴다.
-   b) claim 직후(b2 전에) oort_run_event {leaseHandle, status:"running",
-      stage:"시작: <짧은 단계 이름>", eventId:<새 UUID>} 를 부른다. 이것이
-      시작 보고이고, 사람 화면에서 run 을 「가져감」에서 「시작함」으로
-      옮기는 호출이다.
-   b2) 그다음에야, work.prompt 만으로 모자라면 work.channelId 로
-      oort_conversation_read 해서 요청을 읽는다.
-   c) 사람이 진행을 볼 수 있게 보고한다. 시작 보고(b)는 claim 한 뒤 10초
+      job 이 null 인데 그 파일이 있으면 이미 내 job 이다.
+      oort_job_start {leaseHandle:<저장한 handle>} 로 같은 job 을 다시 받는다
+      (시작 보고는 두 번 나가지 않는다).
+   b) 첫 단계 이름을 직접 정하려면 oort_job_start 에 stage:"시작: <짧은 단계
+      이름>" 을 넘긴다(일반 텍스트, 규칙은 아래 c와 같다). started 가 false 면
+      oort_run_event {leaseHandle, status:"running", stage:"시작: <짧은 단계
+      이름>", eventId:<새 UUID>} 를 한 번 보낸다. 사람 화면에서 run 을
+      「가져감」에서 「시작함」으로 옮기는 호출이 이것이다. oort_jobs_claim 도
+      여전히 되고 대화도 싣지만, 그때는 시작 보고를 직접 보내야 한다.
+   c) 사람이 진행을 볼 수 있게 보고한다. 시작 보고(oort_job_start)는 깬 뒤 10초
       안에 나가야 한다(하드 한도는 60초). 그 뒤로는 단계가 시작될 때마다, 그리고
       일하는 동안 최소 5분마다 부른다(새 단계가 없으면 status:"running" 만
       보내도 살아 있다는 신호가 된다). stage 는 일반 텍스트 1~80자(앞뒤 공백
@@ -1369,8 +1376,8 @@ credential로, 터널이 아니라 VM 루프백에 POST한다.
       에이전트가 일시정지·연결 해제됐거나 대상이 보이지 않는다. 멈춘다.
       HTTP 403 / -32003: scope 나 채널 승인이 없다. 멈추고 연결 확인을 안내한다.
    h) 오래 잠들었다 깨어났고 저장한 handle 이 있으면 그 handle 로 먼저
-      보고한다(oort_run_event 또는 oort_run_complete). oort_jobs_claim 을 먼저
-      부르면 새 handle 을 받고 옛 handle 은 409 가 된다.
+      보고한다(oort_run_event 또는 oort_run_complete). oort_jobs_claim 이나 handle 없는
+      oort_job_start 를 먼저 부르면 새 handle 을 받고 옛 handle 은 409 가 된다.
    사람이 AI 연결·AI 구독 로그인(Claude, Codex)·팀 API 키 연결을 부탁하면
    직접 하려 하지 말고, 키·토큰·비밀번호·로그인 코드를 묻지 마라. 연결
    카드를 제안한다. oort_jobs_claim 리스 handle이 있으면
@@ -1416,6 +1423,7 @@ dots도 같은 패턴이고 곧 지원한다. 이 문서는 dots에 대한 개�
 |---|---|---|---|
 | 0. 사람이 요청 | `POST /v1/workspaces/{ws}/channels/{ch}/agent-runs` 의 `type=work` (소유자가 승인한 채널·DM에서 사람이) | 해당 없음 | run `queued` + job 1 + inbox 항목 1(`agent_job`). 연결이 active 가 아니거나 채널이 승인 밖이거나 `owner_only` 이면 닫힌 사유로 409 |
 | 1. claim | `oort_jobs_claim` (scope `agent:jobs:read`) | `limit` 1..100 | `{jobs:[{leaseHandle, createdAtMs, leaseExpiresAtMs, work:{channelId, authorMemberId, triggerMessageId, prompt, ...}}]}` |
+| 1b. 시작(빠른 길) | `oort_job_start` (scope `agent:jobs:read`; 시작 보고는 `agent:runs:callback`, 대화는 `messages:read`도 필요) | `leaseHandle`(재진입), `stage`(선택) | `{job:{leaseHandle, createdAtMs, leaseExpiresAtMs, work}\|null, started, resumed, conversation?:{messages, nextBefore}}`: claim + 시작 보고 + 최근 30개 메시지를 한 번에(ADR-0162 증보 4) |
 | 2. 진행 | `oort_run_event` (scope `agent:runs:callback`) | `leaseHandle`(512), `stage`(1~80자, 최대 320바이트, `/`·`\`·제어·bidi 문자 불가), `status`(`running` `thinking` `streaming` `cancelled`), `detail`(2048, 감사 전용), `textDelta`(8192), `eventId`(UUID, 재시도가 한 번만 세어짐) | `{status:"accepted"}` |
 | 3. 끝남 | `oort_run_complete` (scope `agent:runs:callback`) | `leaseHandle`, `status`(`succeeded` / `failed`), `body`(8000), `error`(4000), `usage`, `artifacts` | `{status, messageId, seq}` |
 | 갱신 | `oort_job_renew` | `leaseHandle` | `{status:"renewed", leaseExpiresAtMs}` |

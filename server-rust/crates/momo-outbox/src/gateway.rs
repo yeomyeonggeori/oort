@@ -650,6 +650,52 @@ pub async fn renew_hosted_gateway_lease_in_tx(
     .await
 }
 
+/// Read the job a hosted lease still names, without touching the lease
+/// (`oort_job_start` re-entry, #3831).
+///
+/// The same binding the hosted renew uses: the row must still be `pending`,
+/// belong to this agent, and still carry **this** lease id. An expired lease
+/// nobody re-claimed is still readable (the hosted rule of
+/// [`renew_hosted_gateway_lease_in_tx`]); a re-claimed row carries a fresh
+/// `lease_owner`, so a stale handle matches nothing. Read-only: it never
+/// extends, takes or releases anything.
+pub async fn read_hosted_leased_job_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+    lease: GatewayLeaseBinding,
+) -> Result<Option<ClaimedGatewayJob>, sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT id, payload, created_at, lease_owner, lease_expires_at \
+           FROM outbox \
+          WHERE id = $3 \
+            AND workspace_id = $1 \
+            AND kind = 'agent_job' \
+            AND method = 'gateway' \
+            AND status = 'pending' \
+            AND partition_key = $2 \
+            AND lower(payload->>'agent_member_id') = lower($2::text) \
+            AND lease_owner = $4 \
+            AND lease_expires_at IS NOT NULL",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .bind(lease.job_id)
+    .bind(lease.lease_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    row.map(|row| {
+        Ok(ClaimedGatewayJob {
+            id: row.try_get("id")?,
+            payload: row.try_get("payload")?,
+            created_at: row.try_get("created_at")?,
+            lease_id: row.try_get("lease_owner")?,
+            lease_expires_at: row.try_get("lease_expires_at")?,
+        })
+    })
+    .transpose()
+}
+
 /// Hand a claimed job back to the pool (Swift :205-221). Returns whether this
 /// call released it; the row stays `pending`, so another consumer picks it up
 /// immediately rather than after the lease expires.
