@@ -18,6 +18,7 @@ import {
   attachmentDisplayName,
   formatBytes,
   formatMimeLabel,
+  genericAttachmentName,
   imageGridColumns,
   isImageMime,
   showsInlinePreview,
@@ -79,17 +80,21 @@ function ImageTile({
   channelId,
   attachment,
   layout,
+  position,
   onOpen,
 }: {
   workspaceId: string;
   channelId: string;
   attachment: MessageAttachment;
   layout: "single" | "grid-2" | "grid-3";
+  /** 여러 장일 때의 「n/N」. 같은 이름(「이미지」)의 버튼들이 서로 구별되게 한다. */
+  position: string | null;
   onOpen: (opener: HTMLButtonElement) => void;
 }) {
   const [failed, setFailed] = useState(false);
   const { revealed, handlers } = useRevealOnHover();
   const label = attachmentDisplayName(attachment);
+  const actionName = `${label}${position === null ? "" : ` ${position}`} ${ATTACH_COPY.expandImage}`;
   const preview = useAttachmentPreview(
     workspaceId,
     channelId,
@@ -112,7 +117,7 @@ function ImageTile({
         type="button"
         data-row-action=""
         onClick={(event) => onOpen(event.currentTarget)}
-        aria-label={`${label} ${ATTACH_COPY.expandImage}`}
+        aria-label={actionName}
         title={label}
         className={
           preview.status === "ready"
@@ -156,7 +161,7 @@ function ImageTile({
             data-row-action=""
             data-testid="attachment-expand"
             onClick={(event) => onOpen(event.currentTarget)}
-            aria-label={`${label} ${ATTACH_COPY.expandImage}`}
+            aria-label={actionName}
             title={ATTACH_COPY.expandImage}
             className="touch-target flex size-control shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring"
           >
@@ -165,9 +170,10 @@ function ImageTile({
         </div>
       )}
       {failed && (
+        // 타일 위에 얹는다(자리를 예약할 필요가 없다): 아래로 흘리면 격자 줄이 밀린다.
         <span
           role="status"
-          className="mt-1 block text-meta text-danger"
+          className="absolute inset-x-1 bottom-1 rounded-sm bg-surface px-1 text-meta text-danger"
           data-testid="attachment-download-failed"
         >
           {ATTACH_COPY.downloadFailed}
@@ -189,22 +195,24 @@ function ImageGroup({
   onOpen: (attachmentId: string, opener: HTMLButtonElement) => void;
 }) {
   const columns = imageGridColumns(images.length);
-  const tiles = images.map((attachment) => (
+  const tiles = images.map((attachment, index) => (
     <ImageTile
       key={attachment.id}
       workspaceId={workspaceId}
       channelId={channelId}
       attachment={attachment}
       layout={columns === 1 ? "single" : columns === 2 ? "grid-2" : "grid-3"}
+      position={images.length > 1 ? `${index + 1}/${images.length}` : null}
       onOpen={(opener) => onOpen(attachment.id, opener)}
     />
   ));
   if (columns === 1) return <>{tiles}</>;
   return (
+    // 진짜 격자다: 열 수가 장수로 정해진다(폭이 넉넉하다고 한 줄로 늘어서지 않는다).
     <div
       data-testid="attachment-image-grid"
       data-columns={columns}
-      className="flex flex-wrap gap-1"
+      className={cn("grid w-fit gap-1", columns === 2 ? "grid-cols-2" : "grid-cols-3")}
     >
       {tiles}
     </div>
@@ -244,11 +252,18 @@ function FileCard({
     <div
       data-testid="attachment-card"
       data-revealed={revealed ? "" : undefined}
+      // 키보드 진입점: 카드가 포커스를 받으면(`:focus-visible`) 행동이 서고 Tab 이 그
+      // 안으로 이어진다. 카드에 포커스할 것이 없으면 호버 없는 사람은 미리보기·
+      // 내려받기에 닿지 못한다(design-review B1). 행 로빙 그룹에도 합류한다.
+      tabIndex={0}
+      role="group"
+      aria-label={label}
+      data-row-action=""
       // 폭은 고정이다(`w-pane`). 앞 판은 내용 폭(`w-fit`)이라 이름이 짧으면 카드가
       // 줄고, 행동 줄을 이름 위에 얹으면 이름 끝을 가리고 위 가장자리에 걸치면 앞
       // 줄 글자를 가렸다(캡처에서 둘 다 실측). 고정 폭 + 고정 크기의 행동 자리가
       // 호버가 아무것도 움직이지 않는 유일한 배치다.
-      className="flex w-pane max-w-full items-center gap-3 rounded-lg border border-line bg-surface-raised px-3 py-2"
+      className="flex w-pane max-w-full items-center gap-3 rounded-lg border border-line bg-surface-raised px-3 py-2 focus-visible:focus-ring"
       {...handlers}
     >
       <span className="flex size-control shrink-0 items-center justify-center rounded-md bg-surface-hover">
@@ -259,7 +274,9 @@ function FileCard({
           {label}
         </span>
         <span className="text-meta text-ink-muted" data-testid="attachment-meta">
-          {formatMimeLabel(attachment.mime)} · {formatBytes(attachment.sizeBytes)}
+          {label === genericAttachmentName(attachment.mime)
+            ? formatBytes(attachment.sizeBytes)
+            : `${formatMimeLabel(attachment.mime)} · ${formatBytes(attachment.sizeBytes)}`}
         </span>
         {failed && (
           <span className="text-meta text-danger" data-testid="attachment-download-failed">

@@ -92,7 +92,7 @@ function LightboxImage({
   if (preview.status !== "ready") return null;
 
   return (
-    <div className="flex min-h-0 w-full flex-1 flex-col">
+    <div className="flex min-h-0 w-full flex-1 flex-col self-stretch">
       {offline ? (
         <InlineBanner
           tone="neutral"

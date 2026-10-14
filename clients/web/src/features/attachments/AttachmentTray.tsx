@@ -204,7 +204,7 @@ function DraftChip({
       data-attachment-status={draft.status}
       data-thumb={thumbnail.status}
       className={cn(
-        "group relative flex h-tray-thumb min-w-0 max-w-pane items-center gap-2 overflow-hidden rounded-md bg-surface-hover pl-3 pr-8",
+        "group relative flex min-h-tray-thumb min-w-0 max-w-pane items-center gap-2 overflow-hidden rounded-md bg-surface-hover py-1 pl-3 pr-8",
         failed && "border border-danger"
       )}
     >

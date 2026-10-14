@@ -144,4 +144,22 @@ describe("timeline attachments, Buzz style", () => {
     expect(q('[data-testid="attachment-open-pdf"]', card!)).not.toBeNull();
     expect(q('[data-testid="attachment-download"]', card!)).not.toBeNull();
   });
+
+  it("reaches a file card's actions by keyboard alone", () => {
+    render([PDF]);
+    const card = q('[data-testid="attachment-card"]')!;
+    expect(card.tabIndex).toBe(0);
+    expect(q('[data-testid="attachment-open-pdf"]')).toBeNull();
+    act(() => card.focus());
+    expect(q('[data-testid="attachment-open-pdf"]', card)).not.toBeNull();
+    expect(q('[data-testid="attachment-download"]', card)).not.toBeNull();
+  });
+
+  it("reaches an image's actions by keyboard and tells repeated images apart", () => {
+    render([img("i1"), img("i2")]);
+    const figure = q('[data-testid="attachment-image"]')!;
+    act(() => q("button", figure)!.focus());
+    expect(q('[data-testid="attachment-download"]', figure)).not.toBeNull();
+    expect(q("button", figure)!.getAttribute("aria-label")).toBe("이미지 1/2 크게 보기");
+  });
 });
