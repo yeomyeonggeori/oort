@@ -34,7 +34,6 @@ import {
   type AgentActionResultCard,
 } from '@momo/core/features/timeline/actionResultCard';
 import {
-  actionApproveConfirmCopy,
   approvalRoleCopy,
   roleRequiredCopy,
 } from '@momo/core/features/approvals/actionRole';
@@ -1613,15 +1612,7 @@ function AgentCard({
         ) : approval !== null ? (
           <ApprovalDecision
             approvalId={approval.approvalId}
-            reversible={approval.reversible}
             deadlinePassed={deadlinePassed(approval, nowMs)}
-            // 행동 승인만 두 칸을 갈아 끼운다 (ADR-0186 §5 · 웹 `ApprovalBody`).
-            // 문장만 갈라지고 결정 경로는 인박스·잠금화면과 한 벌 그대로다.
-            approveConfirm={
-              card.action !== null
-                ? actionApproveConfirmCopy(card.action.requiredRole)
-                : null
-            }
             forbiddenCopy={
               card.action?.requiredRole
                 ? roleRequiredCopy(card.action.requiredRole)

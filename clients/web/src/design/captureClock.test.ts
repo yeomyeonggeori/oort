@@ -237,44 +237,6 @@ function fileUsesGuardMs(source: string, path: string): boolean {
   return nodeUsesGuardMs(file);
 }
 
-function jsxAttrStringLiterals(
-  source: string,
-  component: string,
-  attr: string
-): string[] {
-  const file = ts.createSourceFile(
-    "file.tsx",
-    source,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TSX
-  );
-  const values: string[] = [];
-  const visit = (node: ts.Node): void => {
-    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
-      if (node.tagName.getText() === component) {
-        for (const property of node.attributes.properties) {
-          if (!ts.isJsxAttribute(property)) continue;
-          if (property.name.getText() !== attr) continue;
-          const init = property.initializer;
-          if (init && ts.isStringLiteral(init)) values.push(init.text);
-          if (
-            init &&
-            ts.isJsxExpression(init) &&
-            init.expression &&
-            ts.isStringLiteral(init.expression)
-          ) {
-            values.push(init.expression.text);
-          }
-        }
-      }
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(file);
-  return values;
-}
-
 function makeLocator(selector: string) {
   const locator = {
     click: async () => {
@@ -323,51 +285,41 @@ function makeLocator(selector: string) {
 const clicks: string[] = [];
 
 const COMMIT_ABORT =
-  /CAPTURE ABORT: scene "approvals-confirm" is clock:fixed; time-gated control \[inbox-approval-commit\] cannot open CONFIRM_GUARD_MS/;
+  /CAPTURE ABORT: scene "approvals-confirm" is clock:fixed; time-gated control \[agent-permission-commit\] cannot open CONFIRM_GUARD_MS/;
 
 describe("capture clock scene registry", () => {
   it("welcome-backstop is flowing; every other scene is fixed", () => {
     expect(clockForScene("welcome-backstop")).toBe("flowing");
     expect(clockForScene("approvals-confirm")).toBe("fixed");
     expect(clockForScene("chat")).toBe("fixed");
-    expect(TIME_GATED_CONTROLS).toContain(timeGatedTestId("inbox-approval"));
+    expect(TIME_GATED_CONTROLS).toContain(timeGatedTestId("agent-permission"));
     expect(TIME_GATED_CONTROLS).toEqual([...PRODUCT_CONTROLS]);
   });
 
   it("every *_GUARD_MS usage site in clients/web/src registers its control", () => {
     const files = walkTsFiles(WEB_SRC);
     const usageIds = new Set<string>();
-    const prefixes = new Set<string>(["approval"]);
     for (const path of files) {
       const src = readFileSync(path, "utf8");
-      if (src.includes("ApprovalActions")) {
-        for (const prefix of jsxAttrStringLiterals(
-          src,
-          "ApprovalActions",
-          "testIdPrefix"
-        )) {
-          prefixes.add(prefix);
-        }
-      }
       if (!fileUsesGuardMs(src, path)) continue;
       for (const id of gatedInteractiveTestIds(src)) {
         usageIds.add(id);
       }
     }
-    for (const prefix of prefixes) {
-      usageIds.add(timeGatedTestId(prefix));
-    }
+    // #3819: ApprovalActions 호출자는 더는 시간 게이트가 걸린 컨트롤을 세우지 않으므로
+    // 호출자 접두사를 레지스트리에 요구하지 않는다. 남은 사용처(작업 세션 권한 카드)는
+    // `*_GUARD_MS` 를 읽는 파일에서 곧바로 찾는다.
     expect([...usageIds].sort()).toEqual([...PRODUCT_CONTROLS].sort());
   });
 
-  it("fixed-clock scene clicking inbox-approval-commit aborts naming CONFIRM_GUARD_MS", () => {
+  it("fixed-clock scene clicking agent-permission-commit aborts naming CONFIRM_GUARD_MS", () => {
     beginCaptureScene("approvals-confirm");
     expect(activeCaptureScene()).toBe("approvals-confirm");
     expect(clockForScene()).toBe("fixed");
     expect(() =>
       abortIfFixedClockClicksTimeGate(
         "approvals-confirm",
-        timeGatedTestId("inbox-approval")
+        timeGatedTestId("agent-permission")
       )
     ).toThrow(COMMIT_ABORT);
   });
@@ -376,15 +328,15 @@ describe("capture clock scene registry", () => {
     expect(() =>
       abortIfFixedClockClicksTimeGate(
         "welcome-backstop",
-        timeGatedTestId("inbox-approval")
+        timeGatedTestId("agent-permission")
       )
     ).not.toThrow();
   });
 
   it("page.locator data-testid click aborts in a fixed-clock scene", async () => {
     beginCaptureScene("approvals-confirm");
-    expect(testIdFromSelector("[data-testid=inbox-approval-commit]")).toBe(
-      "inbox-approval-commit"
+    expect(testIdFromSelector("[data-testid=agent-permission-commit]")).toBe(
+      "agent-permission-commit"
     );
     clicks.length = 0;
     const page = {
@@ -397,22 +349,22 @@ describe("capture clock scene registry", () => {
     await wrapPageTimeGateClicks(page);
     await expect(
       (
-        page.locator("[data-testid=inbox-approval-commit]") as {
+        page.locator("[data-testid=agent-permission-commit]") as {
           click: () => Promise<unknown>;
         }
       ).click()
     ).rejects.toThrow(COMMIT_ABORT);
     expect(clicks).toEqual([]);
     await expect(
-      sceneClick(page, page.locator("[data-testid=inbox-approval-commit]"))
+      sceneClick(page, page.locator("[data-testid=agent-permission-commit]"))
     ).rejects.toThrow(COMMIT_ABORT);
     beginCaptureScene("welcome-backstop");
     await (
-      page.locator("[data-testid=inbox-approval-commit]") as {
+      page.locator("[data-testid=agent-permission-commit]") as {
         click: () => Promise<unknown>;
       }
     ).click();
-    expect(clicks).toEqual(["[data-testid=inbox-approval-commit]"]);
+    expect(clicks).toEqual(["[data-testid=agent-permission-commit]"]);
   });
 
   it("capture-screens routes clicks through sceneClick and names welcome-backstop flowing", () => {

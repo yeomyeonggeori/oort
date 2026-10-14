@@ -6,9 +6,7 @@ import {
 import type {SpawnExecutionPlan} from '@momo/core/lib/executionPlan';
 import {
   decisionHostId,
-  findCandidate,
   preselectedHostId,
-  spawnApproveLead,
   spawnHostGate,
 } from '@momo/core/features/timeline/spawnHostChoice';
 import React, {useCallback, useRef, useState} from 'react';
@@ -31,39 +29,25 @@ import {SpawnHostChoice} from './SpawnHostChoice';
 // 두 경로는 서로 다른 멱등 정책과 서로 다른 409 해석을 갖게 되고, 갈라진 쪽은
 // 아무도 보고 있지 않은 쪽이다.
 //
-// ## 확인 단계가 있는 이유 (되돌릴 수 없음)
+// ## 한 번 탭하면 결정된다 (#3819)
 //
-// 잠금화면의 승인/거부 버튼은 Face ID나 암호를 요구한다
-// (`src/push/categories.ts:31` — `isAuthenticationRequired`). 그 마찰은 예의가
-// 아니라 통제다: 주운 폰이 배너에서 에이전트의 행동을 승인해 버리는 것을 막는다.
+// 성재(2026-10-14): 「승인을 누르면 그냥 승인이 되게 해줘 또 확정 같은 거 누르지
+// 않아도 되게.」 이 파일이 오래 지키던 제자리 2단(첫 탭은 묻고 둘째 탭이 결정)은
+// 걷혔다. 실수 방지는 탭 **전에** 카드가 보여 주는 사실 — 영향, 결정 권한, 고른
+// 호스트, 기한 — 이 지고, 탭한 뒤에는 멱등 키와 `sending` 이 같은 결정이 두 번
+// 나가는 것을 막는다. 잠금화면의 승인/거부는 Face ID 를 요구하는 별개의 통제이고
+// (`src/push/categories.ts:31`) 그대로다.
 //
-// 앱 안에서는 그 통제가 이미 값을 치렀다 — 여기까지 온 사람은 기기를 이미 열었다.
-// 남는 위험은 다른 것이다: 목록을 훑는 엄지 밑에서 되돌릴 수 없는 행동이 한 번의
-// 탭으로 실행되는 것. 그래서 같은 크기의 마찰을 다른 재료로 세운다. **첫 탭은
-// 결정하지 않는다.** 무엇이 일어나는지 한 문장으로 말하고, 그 다음 탭이 결정한다.
-//
-// 시스템 `Alert`가 아닌 제자리 확인인 이유: 확인은 판단의 근거 옆에 있어야 한다.
-// 모달은 누가 무엇을 언제까지 요청했는지를 화면 밖으로 밀어내고, 그러면 사람은
-// 자기가 무엇을 승인하는지 못 보는 채로 확정 버튼을 누른다.
-//
-// ## 그런데 제자리 확인에는 폰에만 있는 구멍이 하나 있다
-//
-// 확정 버튼이 방금 누른 버튼 **바로 그 자리**에 뜬다. 마우스라면 상관없지만
-// 엄지에게는 그 둘이 같은 지점이고, 빠른 두 번 탭은 확인 단계를 통째로 건너뛴다 —
-// 원클릭 즉발을 금지하고 얻은 것이 더블탭 즉발이면 아무것도 얻지 못한 것이다.
-// (이 결함은 「행 안의 모든 버튼을 눌러 본다」는 red proof가 실제로 잡아냈다.)
-//
-// 그래서 확정 버튼은 나타난 직후 `CONFIRM_GUARD_MS` 동안 탭을 받지 않는다.
-// 이 값은 사람이 한 문장을 읽는 시간보다 짧고, 의도 없이 이어지는 두 번째 탭보다
-// 길다. 자리를 옮기는 방식은 쓰지 않았다: 확인은 두 자리뿐인 줄에 있고, 두 자리
-// 모두 방금까지 버튼이었다.
+// 결정 중에는 두 버튼이 모두 잠기고, 누른 쪽이 「보내는 중」으로 말한다. 서버의
+// 결정은 되돌릴 수 없으므로 「되돌리기」는 두지 않는다 — 지연 전송으로 흉내 내면
+// 앱을 닫는 순간 결정이 조용히 사라진다.
 // =============================================================================
 
-export type Armed = 'approve' | 'reject' | null;
+type Direction = 'approve' | 'reject';
 
 /**
- * 확정 버튼이 뜬 뒤 탭을 받기까지. 되돌릴 수 없는 행동에 붙는 마찰이므로 짧게
- * 잡되 0은 아니다 — 0이면 확인 단계는 그림이고, 결정은 여전히 두 번의 빠른 탭이다.
+ * 확정 버튼이 뜬 뒤 탭을 받기까지. **승인 결정은 이제 이 값을 쓰지 않는다**(#3819):
+ * 아직 읽는 곳은 턴 중단 확인(`StopTurnControl`) 하나다.
  */
 export const CONFIRM_GUARD_MS = 400;
 
@@ -89,13 +73,10 @@ export const DEFAULT_DECISION_LEAD = '실행 전에 회원님의 허가가 필�
 
 export function ApprovalDecision({
   approvalId,
-  reversible = false,
   deadlinePassed = false,
   execution = null,
   onSettled,
   testIDPrefix = 'inbox-approval',
-  initialArmed = null,
-  approveConfirm = null,
   forbiddenCopy = null,
   lead = DEFAULT_DECISION_LEAD,
   shape = 'box',
@@ -103,24 +84,14 @@ export function ApprovalDecision({
   /**
    * 버튼 모양. `pill` 은 대화 안 에이전트 카드의 행동 줄(DS2-4, 시안 A `.a-pill`:
    * 주 = 잉크, 보조 = surface2, 반경 알약)이다. 인박스·잠금화면은 `box` 그대로다.
-   * 결정의 두 단(묻기 → 확정)과 문장·testID·낭독 라벨은 모양과 무관하게 같다.
    */
   shape?: 'box' | 'pill';
   approvalId: string;
   /**
-   * 서버가 **명시적으로** 되돌릴 수 있다고 말했는가 (2R B1).
-   *
-   * 기본값이 `false`인 것이 이 prop의 전부다: 아무도 말해 주지 않았으면 되돌릴 수
-   * 없는 것으로 다룬다. 예전 기본값은 `true`였고, 그래서 값을 넘기지 않는 호출자
-   * 하나가 생기는 순간 비가역 승인이 조용히 "되돌릴 수 있음"이 됐다. 모르는 것을
-   * 위험한 쪽으로 읽는 기본값은 되돌릴 수 없는 행동 앞에서 특히 나쁘다.
-   */
-  reversible?: boolean;
-  /**
    * 기한이 이미 지난 대기 행인가 (2R M4).
    *
    * 이때 결정을 보내면 서버는 승인/거부가 아니라 **만료로 확정**한다
-   * (`routes/approvals.rs:584`). 확정 문장이 그 사실을 말해야 한다.
+   * (`routes/approvals.rs:584`). 탭 전에 그 사실을 말한다(머리 문장을 대신한다).
    */
   deadlinePassed?: boolean;
   /**
@@ -138,82 +109,38 @@ export function ApprovalDecision({
    */
   testIDPrefix?: string;
   /**
-   * 확인 단계에서 시작한다. **`measure/` 하네스 전용이고 앱은 절대 넘기지 않는다.**
-   *
-   * 왜 필요한가 (#1210 D2): 확정 버튼은 사람이 한 번 탭해야 나타나고, 시뮬레이터는
-   * 스크립트로 누를 수 없다(스파이크 #837 — RN 요소가 접근성 트리에 없고 좌표 클릭도
-   * 닿지 않는다. `measure/surfaces.tsx` 머리말이 이 하네스가 존재하는 이유로 적어 둔
-   * 바로 그 사실이다). 그래서 이 제품에서 **되돌릴 수 없는 두 버튼이 나란히 서는
-   * 유일한 화면**은 한 번도 사진으로 리뷰된 적이 없고, 감사가 잰 「거부가 승인보다
-   * 5배 조용하다」는 그동안 아무 캡처에도 나타나지 않았다. 다른 상태는 전부 prop 으로
-   * 세울 수 있는데 이 하나만 그럴 수 없었던 것이 그 결함이 오래 산 이유다.
-   *
-   * 기본값이 `null` 이라 앱의 행동은 한 바이트도 바뀌지 않는다. 그리고 넘기면 안 되는
-   * 이유가 하나 더 있다: 여기서 시작하면 `armedAtMs` 가 0 이라 `CONFIRM_GUARD_MS`
-   * 더블탭 가드를 지나친 상태가 된다. 그래서 규칙을 기억에 맡기지 않고 기계가 진다 —
-   * `__tests__/fillTokens.test.ts` 가 `src/` 전수에서 이 prop 의 사용을 0 으로 단정한다.
-   */
-  initialArmed?: Armed;
-  /**
-   * 승인 확정 문장을 **이 문장으로** 갈아 끼운다 (ADR-0186 · 웹 R1 M2).
-   *
-   * 기본 문장(「승인하면 에이전트가 이어서 진행합니다」)은 도구 호출 승인의 것이고
-   * 거기서는 참이다. **워크스페이스 행동 승인에서는 거짓이다**: 제안한 turn 은 이미
-   * 끝났고(ADR-0186 D2 run park) 승인하면 서버가 결정자 권한으로 실행한다. 그래서
-   * 행동 승인 카드는 코어의 `actionApproveConfirmCopy` 를 넘긴다 — 웹이 같은 함수로
-   * 같은 칸(`verbs.approveConfirm`)을 갈아 끼운다.
-   *
-   * 갈아 끼우는 것은 **문장 하나**뿐이고 판정은 하나도 갈라지지 않는다: 멱등 키도,
-   * 더블탭 가드도, 409 해석도 그대로다. 기한이 지난 요청이면 여전히 만료 문장이
-   * 이긴다 — 그 요청은 승인도 거부도 아닌 만료로 기록되므로, 행동을 실행한다는
-   * 문장은 그때 거짓이 된다.
-   */
-  approveConfirm?: string | null;
-  /**
    * 403 일 때 이 컨트롤이 대신 할 말 (ADR-0186 §5 · 웹 `forbiddenCopy`).
    *
-   * `null`(기본)이면 지금까지와 한 글자도 다르지 않다: 코어의 문장이 붉게 서고
-   * 무장이 유지된다. 인박스는 이것을 넘기지 않는다.
-   *
-   * 넘기면 세 가지가 웹과 같은 뜻으로 바뀐다:
-   *   1. 문장이 호출자의 것이 된다 — 부록 A 의 `required_role` 을 아는 카드만
-   *      「관리자가 승인해야 합니다」라고 말할 수 있다(코어 `roleRequiredCopy`).
-   *   2. **무장이 풀린다.** 다시 눌러도 같은 403 을 받는 「승인 확정」을 위계의
-   *      꼭대기에 세워 두지 않는다(웹 design-review R1 M1). 요청은 여전히 대기라
-   *      승인·거부 버튼은 다시 선다 — 권한 있는 사람이 이 폰을 이어받을 수 있다.
-   *   3. 붉지 않다. 사고가 아니라 이 사람의 역할에 대한 사실이다(`NoticeTone`).
-   *
-   * 서버가 이름을 댄 `role_required` 와 이름 없는 `forbidden` 이 같은 갈래를 탄다.
-   * 웹의 판정 그대로다: 부록 A 가 `required_role` 을 실어 보낸 카드에서 403 이
-   * 뜻할 수 있는 것은 그것 하나다.
+   * `null`(기본)이면 코어의 문장이 붉게 선다. 넘기면 문장이 호출자의 것이 되고
+   * (부록 A 의 `required_role` 을 아는 카드만 「관리자가 승인해야 해요」라고 말할 수
+   * 있다), 붉지 않다 — 사고가 아니라 이 사람의 역할에 대한 사실이고 요청은 여전히
+   * 대기다(`NoticeTone`). 버튼은 그대로 남는다. 서버가 이름을 댄 `role_required` 와
+   * 이름 없는 `forbidden` 이 같은 갈래를 탄다.
    */
   forbiddenCopy?: string | null;
   /**
    * 버튼 위 머리 문장. `null` 이면 세우지 않는다 (#2513 design-review H-1).
    *
    * 행동 승인 카드는 누가 결정할 수 있는지를 이미 사실 행(「결정 권한」)으로
-   * 말한다. 그 아래에서 컨트롤이 읽는 사람의 권한을 다시 단정하면 — 기본 문장은
-   * 「회원님의 허가가 필요합니다」다 — 카드가 한 화면에서 두 가지를 말하고, 403
-   * 뒤에는 「관리자가 승인해야 합니다」까지 세 문장이 서로를 반박한다. 웹의
-   * `ApprovalActions` 가 같은 칸(`lead`)을 호출자에게 열어 둔 것과 같은 모양이다.
+   * 말한다. 그 아래에서 컨트롤이 읽는 사람의 권한을 다시 단정하면 카드가 한 화면에서
+   * 두 가지를 말한다. 웹의 `ApprovalActions` 가 같은 칸(`lead`)을 호출자에게 열어 둔
+   * 것과 같은 모양이다.
    */
   lead?: string | null;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const pill = shape === 'pill';
   const {workspaceId} = useSession();
-  const [armed, setArmed] = useState<Armed>(initialArmed);
-  const [busy, setBusy] = useState(false);
+  /** 지금 서버에 나가 있는 결정의 방향. 없으면 `null`. */
+  const [sending, setSending] = useState<Direction | null>(null);
+  /** 같은 틱의 두 번째 탭을 거르는 동기 문. state 는 다음 렌더에야 바뀐다. */
+  const sendingRef = useRef(false);
   const [errorCopy, setErrorCopy] = useState<string | null>(null);
   const [noticeTone, setNoticeTone] = useState<NoticeTone>('error');
-  /** 가드 창 안에서 확정 탭이 실제로 있었는가 (2R M1). 죽은 버튼처럼 보이지 않게. */
-  const [tooFast, setTooFast] = useState(false);
   // (행, 방향)당 하나. 같은 결정을 다시 누르면 서버가 원래 영수증을 그대로
   // 재생하고, 두 번째 결정이 기록되지 않는다. 멱등 충돌일 때만 버린다 — 그
   // 키는 이미 다른 결정에 묶여 있어서 재시도해도 같은 충돌만 반복한다.
   const keys = useRef<{approve?: string; reject?: string}>({});
-  /** 확정 버튼이 이 자리에 뜬 시각. 위의 더블탭 구멍을 막는 데만 쓴다. */
-  const armedAtMs = useRef(0);
   // ---- 호스트 선택 (이슈 1114) ---------------------------------------------
   //
   // `null`은 "아무것도 안 골랐다"가 아니라 **"사람이 손대지 않았다"**이다. 찍혀
@@ -223,207 +150,95 @@ export function ApprovalDecision({
   const [pickedHostId, setPickedHostId] = useState<string | null>(null);
   const chosenHostId = pickedHostId ?? preselectedHostId(execution);
   const hostGate = spawnHostGate(execution);
-  const chosenHostName =
-    findCandidate(execution, chosenHostId)?.displayName ?? null;
+  const busy = sending !== null;
 
-  const arm = useCallback(
-    (next: Exclude<Armed, null>) => {
-    // 실행할 호스트가 하나도 없으면 승인은 무장조차 하지 않는다. 서버가 409로
-    // 답할 것을 결정 전에 알고 있고(코어 `spawnHostGate`), 알면서 확정 화면을
-    // 세우는 것은 헛걸음을 시키는 것이다. **거부는 막지 않는다** — 서버도 거부에는
-    // 호스트를 묻지 않고, 실행할 수 없는 요청을 정리할 길까지 닫을 이유는 없다.
-    if (next === 'approve' && !hostGate.canApprove) return;
-    setArmed(next);
-    armedAtMs.current = Date.now();
-    setErrorCopy(null);
-    setTooFast(false);
-    // 엄지 밑의 버튼이 방금 의미를 바꿨다. 화면을 보지 않는 사람에게 그 변화는
-    // 소리로만 전달된다 — RN에는 포커스를 옮길 웹의 `focus()`가 없다.
-    AccessibilityInfo.announceForAccessibility(
-      next === 'approve'
-        ? '승인을 확정할지 묻습니다.'
-        : '거부를 확정할지 묻습니다.',
-    );
-    },
-    [hostGate.canApprove],
-  );
-
-  const commit = useCallback(async () => {
-    // 이 함수는 확인 단계 뒤에만 있다. `armed`가 null이면 확정 버튼이 그려지지도
-    // 않았다는 뜻이므로, 여기서 한 번 더 막는 것은 방어가 아니라 계약의 진술이다:
-    // 무장하지 않은 결정은 전송되지 않는다.
-    if (armed === null || busy) return;
-    // 방금 무장한 그 탭의 꼬리다. 확정 버튼이 앞선 버튼 자리에 떴으므로, 이 창
-    // 안의 탭은 확인이 아니라 같은 한 번의 동작으로 본다.
-    //
-    // 조용히 무시하지는 않는다(2R M1): 아무 일도 일어나지 않는 버튼은 고장난
-    // 버튼과 구별되지 않고, 그 자리에서 사람이 하는 다음 행동은 더 세게 두 번
-    // 누르는 것이다. 무엇이 일어났는지 한 줄로 말한다.
-    if (Date.now() - armedAtMs.current < CONFIRM_GUARD_MS) {
-      setTooFast(true);
-      return;
-    }
-    setTooFast(false);
-    const slot = armed;
-    const approve = slot === 'approve';
-    keys.current[slot] ??= newDecisionId();
-    setBusy(true);
-    setErrorCopy(null);
-    try {
-      const outcome = await decideApproval(
-        workspaceId,
-        approvalId,
-        approve,
-        keys.current[slot] as string,
-        // 픽커가 없으면 `undefined`이고, 그때 키는 본문에 실리지 않는다. 서버는
-        // 픽커 없는 승인에 실린 `hostId`를 400으로 거절한다 — 그 거절이 옳다.
-        decisionHostId(execution, chosenHostId),
-      );
-      if (outcome.kind === 'error') {
-        if (outcome.errorCode === 'idempotency_conflict') {
-          delete keys.current[slot];
-        }
-        if (
-          (outcome.errorCode === 'role_required' ||
-            outcome.errorCode === 'forbidden') &&
-          forbiddenCopy !== null
-        ) {
-          // 성공할 수 없는 확정 버튼을 남기지 않는다 — 무장만 푼다. 카드는 여전히
-          // 대기이므로 승인·거부는 그대로 다시 서고, 이 사람에게 참인 사실은 그
-          // 아래 한 줄이 진다. 웹은 여기서 초점을 카드로 옮기지만(R2 H-R2-1)
-          // RN 에는 옮길 `focus()` 가 없다. 엄지 밑의 버튼이 바뀐 것을 화면을 보지
-          // 않는 사람에게 알리는 길은 소리 하나다 — 무장이 이미 그렇게 한다.
-          setNoticeTone('quiet');
-          setErrorCopy(forbiddenCopy);
-          setArmed(null);
-          AccessibilityInfo.announceForAccessibility(forbiddenCopy);
+  const commit = useCallback(
+    async (direction: Direction) => {
+      if (sendingRef.current) return;
+      // 실행할 호스트가 하나도 없으면 승인은 나가지 않는다. 서버가 409로 답할 것을
+      // 결정 전에 알고 있고(코어 `spawnHostGate`), 알면서 보내는 것은 헛걸음이다.
+      // **거부는 막지 않는다** — 서버도 거부에는 호스트를 묻지 않고, 실행할 수 없는
+      // 요청을 정리할 길까지 닫을 이유는 없다.
+      if (direction === 'approve' && !hostGate.canApprove) return;
+      const approve = direction === 'approve';
+      keys.current[direction] ??= newDecisionId();
+      sendingRef.current = true;
+      setSending(direction);
+      setErrorCopy(null);
+      try {
+        const outcome = await decideApproval(
+          workspaceId,
+          approvalId,
+          approve,
+          keys.current[direction] as string,
+          // 픽커가 없으면 `undefined`이고, 그때 키는 본문에 실리지 않는다. 서버는
+          // 픽커 없는 승인에 실린 `hostId`를 400으로 거절한다 — 그 거절이 옳다.
+          decisionHostId(execution, chosenHostId),
+        );
+        if (outcome.kind === 'error') {
+          if (outcome.errorCode === 'idempotency_conflict') {
+            delete keys.current[direction];
+          }
+          if (
+            (outcome.errorCode === 'role_required' ||
+              outcome.errorCode === 'forbidden') &&
+            forbiddenCopy !== null
+          ) {
+            // 카드는 여전히 대기이므로 승인·거부는 그대로 남고, 이 사람에게 참인
+            // 사실은 그 아래 한 줄이 진다. RN 에는 옮길 `focus()` 가 없으므로 화면을
+            // 보지 않는 사람에게는 소리 하나로 알린다.
+            setNoticeTone('quiet');
+            setErrorCopy(forbiddenCopy);
+            AccessibilityInfo.announceForAccessibility(forbiddenCopy);
+            return;
+          }
+          setNoticeTone('error');
+          setErrorCopy(outcome.errorCopy ?? '결정을 처리하지 못했어요.');
           return;
         }
-        setNoticeTone('error');
-        setErrorCopy(outcome.errorCopy ?? '결정을 처리하지 못했습니다.');
-        return;
+        // `superseded`도 결정된 것이다(다른 기기에서 이미 결정됐거나 만료됨).
+        // 실패로 그리면 더는 바뀔 수 없는 것에 재시도를 권하게 된다 —
+        // `src/push/notifications.ts:142`가 같은 이유로 같은 선택을 한다.
+        onSettled(outcome);
+      } finally {
+        sendingRef.current = false;
+        setSending(null);
       }
-      // `superseded`도 결정된 것이다(다른 기기에서 이미 결정됐거나 만료됨).
-      // 실패로 그리면 더는 바뀔 수 없는 것에 재시도를 권하게 된다 —
-      // `src/push/notifications.ts:142`가 같은 이유로 같은 선택을 한다.
-      setArmed(null);
-      onSettled(outcome);
-    } finally {
-      setBusy(false);
-    }
-  }, [
-    approvalId,
-    armed,
-    busy,
-    chosenHostId,
-    execution,
-    forbiddenCopy,
-    onSettled,
-    workspaceId,
-  ]);
+    },
+    [
+      approvalId,
+      chosenHostId,
+      execution,
+      forbiddenCopy,
+      hostGate.canApprove,
+      onSettled,
+      workspaceId,
+    ],
+  );
 
-  if (armed === null) {
-    return (
-      <View style={[styles.bar, pill && styles.pillBar]} testID={`${testIDPrefix}-actions`}>
-        {lead !== null ? <Sentence style={styles.lead}>{lead}</Sentence> : null}
-        {execution !== null ? (
-          <SpawnHostChoice
-            plan={execution}
-            pickedHostId={chosenHostId}
-            onPick={setPickedHostId}
-            locked={false}
-            testIDPrefix={testIDPrefix}
-          />
-        ) : null}
-        <View style={styles.buttons}>
-          <Pressable
-            accessibilityRole="button"
-            // 이 탭은 거부하지 않는다 — 거부할지 묻는다. 라벨이 행동을 약속하면
-            // 화면을 보지 않는 사람은 이미 결정한 줄 알고 손을 뗀다 (2R M2).
-            accessibilityLabel="거부, 확인 필요"
-            accessibilityHint="누르면 거부 확정 여부를 묻습니다."
-            onPress={() => arm('reject')}
-            style={({pressed}) => [
-              styles.button,
-              styles.buttonQuiet,
-              pill && styles.pillButton,
-              pill && styles.pillQuiet,
-              pressed && styles.pressed,
-            ]}
-            testID={`${testIDPrefix}-reject`}>
-            <Text style={styles.buttonQuietLabel}>거부</Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="승인, 확인 필요"
-            accessibilityHint="누르면 승인 확정 여부를 묻습니다."
-            // 진짜로 할 수 없다: 자격 있는 호스트가 하나도 없으면 서버는 이 승인에
-            // 409로 답한다. 이유는 픽커 아래에 이미 서 있으므로, 꺼진 버튼이 설명
-            // 없이 서 있는 경우가 아니다.
-            accessibilityState={{disabled: !hostGate.canApprove}}
-            disabled={!hostGate.canApprove}
-            onPress={() => arm('approve')}
-            style={({pressed}) => [
-              styles.button,
-              styles.buttonQuiet,
-              pill && styles.pillButton,
-              pill && styles.pillQuiet,
-              !hostGate.canApprove && styles.buttonInert,
-              pressed && hostGate.canApprove && styles.pressed,
-            ]}
-            testID={`${testIDPrefix}-approve`}>
-            <Text style={styles.buttonQuietLabel}>승인</Text>
-          </Pressable>
-        </View>
-        {errorCopy !== null ? (
-          <Sentence
-            // 403 뒤의 안내는 무장이 풀린 **이 자리**에 선다. 격은 `noticeTone`
-            // 이 정한다 — 같은 testID 에 두 격이 서는 것은 웹과 같은 모양이다
-            // (`approval-error` + `data-tone`). 두 문장짜리 안내라 어절에서
-            // 접는다(「결 / 정할」이 캡처 실측).
-            style={noticeTone === 'quiet' ? styles.hint : styles.error}
-            testID={`${testIDPrefix}-error`}>
-            {errorCopy}
-          </Sentence>
-        ) : null}
-      </View>
-    );
-  }
-
-  const consequence =
-    // 기한이 지난 요청이면 만료 문장이 이긴다 — 그때는 아무것도 실행되지 않는다.
-    armed === 'approve' && approveConfirm !== null && !deadlinePassed
-      ? approveConfirm
-      : confirmCopy(
-          armed,
-          reversible,
-          deadlinePassed,
-          armed === 'approve' ? chosenHostName : null,
-        );
+  // 기한이 지난 요청에 보내는 결정은 승인도 거부도 아니다 — 서버가 만료로 확정한다.
+  // 탭 **전에** 그 사실을 말한다. 목적지도 붙이지 않는다: 아무 데서도 실행되지 않는다.
+  const headline = deadlinePassed ? DEADLINE_PASSED_LEAD : lead;
 
   return (
-    <View style={[styles.bar, pill && styles.pillBar]} testID={`${testIDPrefix}-confirm`}>
-      <Sentence style={styles.consequence}>{consequence}</Sentence>
-      {/* 픽커는 확정 화면에서도 자리를 지킨다. 사라지면 사람은 자기가 무엇을 고른
-          채 확정하는지 볼 수 없고, 확인이 판단의 근거 옆에 있어야 한다는 이 파일의
-          원칙이 무너진다. 대신 잠긴다 — 확정 문장이 이미 목적지를 말했고, 그 아래에서
-          목적지가 바뀌면 읽은 문장과 나가는 요청이 달라진다. */}
+    <View style={[styles.bar, pill && styles.pillBar]} testID={`${testIDPrefix}-actions`}>
+      {headline !== null ? <Sentence style={styles.lead}>{headline}</Sentence> : null}
       {execution !== null ? (
         <SpawnHostChoice
           plan={execution}
           pickedHostId={chosenHostId}
           onPick={setPickedHostId}
-          locked
+          locked={busy}
           testIDPrefix={testIDPrefix}
         />
       ) : null}
       <View style={styles.buttons}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="취소"
-          accessibilityState={{disabled: busy}}
+          accessibilityLabel="거부"
+          accessibilityState={{disabled: busy, busy: sending === 'reject'}}
           disabled={busy}
-          onPress={() => setArmed(null)}
+          onPress={() => void commit('reject')}
           style={({pressed}) => [
             styles.button,
             styles.buttonQuiet,
@@ -432,43 +247,50 @@ export function ApprovalDecision({
             busy && styles.buttonInert,
             pressed && !busy && styles.pressed,
           ]}
-          testID={`${testIDPrefix}-cancel`}>
-          <Text style={styles.buttonQuietLabel}>취소</Text>
+          testID={`${testIDPrefix}-reject`}>
+          <Text style={styles.buttonQuietLabel}>
+            {sending === 'reject' ? '보내는 중' : '거부'}
+          </Text>
         </Pressable>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={armed === 'approve' ? '승인 확정' : '거부 확정'}
-          accessibilityState={{disabled: busy, busy}}
-          disabled={busy}
-          onPress={() => void commit()}
+          accessibilityLabel="승인"
+          // 진짜로 할 수 없다: 자격 있는 호스트가 하나도 없으면 서버는 이 승인에
+          // 409로 답한다. 이유는 픽커 아래에 이미 서 있으므로, 꺼진 버튼이 설명
+          // 없이 서 있는 경우가 아니다.
+          accessibilityState={{
+            disabled: busy || !hostGate.canApprove,
+            busy: sending === 'approve',
+          }}
+          disabled={busy || !hostGate.canApprove}
+          onPress={() => void commit('approve')}
           style={({pressed}) => [
             styles.button,
-            armed === 'approve' ? styles.buttonCommit : styles.buttonReject,
+            // 이제 이 탭이 결정이다 — 주 액션은 채움으로 선다(웹 `variant="default"`).
+            // 막힌 승인은 조용한 형태로 강등한다: 지금은 이것이 기본 액션이 아니다.
+            hostGate.canApprove ? styles.buttonCommit : styles.buttonQuiet,
             pill && styles.pillButton,
-            pill && armed === 'approve' && styles.pillCommit,
-            busy && styles.buttonInert,
-            pressed && !busy && styles.pressed,
+            pill && (hostGate.canApprove ? styles.pillCommit : styles.pillQuiet),
+            (busy || !hostGate.canApprove) && styles.buttonInert,
+            pressed && !busy && hostGate.canApprove && styles.pressed,
           ]}
-          testID={`${testIDPrefix}-commit`}>
+          testID={`${testIDPrefix}-approve`}>
           <Text
             style={[
-              armed === 'approve'
-                ? styles.buttonCommitLabel
-                : styles.buttonRejectLabel,
-              pill && armed === 'approve' && styles.pillCommitLabel,
+              hostGate.canApprove ? styles.buttonCommitLabel : styles.buttonQuietLabel,
+              pill && hostGate.canApprove && styles.pillCommitLabel,
             ]}>
-            {busy ? '보내는 중' : armed === 'approve' ? '승인 확정' : '거부 확정'}
+            {sending === 'approve' ? '보내는 중' : '승인'}
           </Text>
         </Pressable>
       </View>
-      {tooFast ? (
-        <Sentence style={styles.hint} testID={`${testIDPrefix}-too-fast`}>
-          방금 누른 탭과 이어진 동작이라 보내지 않았습니다. 문장을 확인하고 다시
-          누르세요.
-        </Sentence>
-      ) : null}
       {errorCopy !== null ? (
-        <Sentence style={styles.error} testID={`${testIDPrefix}-error`}>
+        <Sentence
+          // 403 뒤의 안내는 **이 자리**에 선다. 격은 `noticeTone` 이 정한다 — 같은
+          // testID 에 두 격이 서는 것은 웹과 같은 모양이다(`approval-error` +
+          // `data-tone`). 두 문장짜리 안내라 어절에서 접는다.
+          style={noticeTone === 'quiet' ? styles.hint : styles.error}
+          testID={`${testIDPrefix}-error`}>
           {errorCopy}
         </Sentence>
       ) : null}
@@ -476,51 +298,13 @@ export function ApprovalDecision({
   );
 }
 
-/**
- * 확정 버튼 위에 놓일 한 문장 — **서버가 실제로 하는 일만** (2R H4/M4).
- *
- * 예전 문장은 "승인하면 에이전트가 바로 실행합니다"였다. 이 서버는 그것을 약속할
- * 수 없다: 승인은 run이 hold를 떠났으면 resume job 없이 200을 답하고
- * (`routes/approvals.rs`의 `approve_run` — `requeue_run_from_approval_in_tx`가
- * false면 아무 job도 넣지 않는다), 정상 경로에서도 실행은 outbox를 거치는 비동기다.
- * "바로"는 우리가 지킬 수 없는 말이고, 승인 화면은 지킬 수 없는 말을 하기에 가장
- * 나쁜 자리다.
- *
- * 거부는 반대로 **같은 트랜잭션**에서 일어난다(`reject_run` → `end_parked_run_in_tx`).
- * 다만 이미 hold를 떠난 run은 취소할 것이 없으므로 문장을 「대기 중인 실행」으로
- * 한정한다.
- */
-export function confirmCopy(
-  armed: Exclude<Armed, null>,
-  reversible: boolean,
-  deadlinePassed: boolean,
-  /**
-   * 스폰 승인에서 지금 찍혀 있는 호스트의 이름 (이슈 1114). 픽커가 없거나 고를 수
-   * 있는 것이 없으면 `null`이고, 그때 목적지 절은 통째로 빠진다 — 「어딘가에서
-   * 실행합니다」는 문장이 아니라 소음이다.
-   */
-  hostName: string | null = null,
-): string {
-  if (deadlinePassed) {
-    // 기한이 지난 요청에 보내는 결정은 승인도 거부도 아니다 — 서버가 만료로
-    // 확정한다. 승인 문장을 그대로 두면 일어나지 않을 일을 약속하게 된다.
-    // 목적지도 붙이지 않는다: 아무 데서도 실행되지 않는다.
-    return '기한이 지난 요청입니다. 지금 보내면 승인도 거부도 아닌 만료로 기록됩니다.';
-  }
-  if (armed === 'approve') {
-    // 목적지는 **조건절 안**에 있다. 별도 문장으로 앞세우면("…에서 실행합니다")
-    // 이 승인이 지킬 수 없는 약속을 현재 직설로 단언하게 되고, 바로 뒤에 오는
-    // 조건과 서로를 반박한다 — 근거는 코어 `spawnApproveLead`에 있다.
-    const base = spawnApproveLead(hostName);
-    return reversible ? base : `${base} 되돌릴 수 없습니다.`;
-  }
-  return '거부하면 대기 중인 실행이 취소됩니다.';
-}
+/** 기한이 지난 요청의 머리 문장. 결정하기 **전에** 말해야 하는 사실이다. */
+const DEADLINE_PASSED_LEAD =
+  '기한이 지난 요청이에요. 지금 보내면 승인도 거부도 아닌 만료로 기록돼요.';
 
 const buildStyles = (color: Palette) => StyleSheet.create({
   bar: {gap: space.sm, paddingBottom: space.md},
   lead: {fontSize: font.meta, color: color.textMuted},
-  consequence: {fontSize: font.meta, color: color.text, lineHeight: 18},
   buttons: {flexDirection: 'row', gap: space.sm},
   button: {
     flex: 1,
@@ -532,13 +316,6 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   },
   buttonQuiet: {borderWidth: 1, borderColor: color.border},
   buttonCommit: {backgroundColor: color.accent},
-  // 채움은 `dangerBorder` 였다 (#1210 D2). 폰에 파괴 **채움** 토큰이 없어서 테두리
-  // 토큰을 바탕으로 쓰고 있었고, 그래서 다크에서 되돌릴 수 없는 「거부 확정」이 이
-  // 카드(`surface`) 위 1.64:1 · 그 옆의 「승인 확정」이 8.12:1 이었다 — 파괴 쪽이
-  // 5배 조용했다. `dangerFill` 은 웹 `--danger-fill` 의 두 항이고, 같은 카드 위
-  // 다크 5.83:1 · 라이트 7.52:1 이면서 채도는 accent 아래다(다크 0.1130 대
-  // 0.1336): 보이되 주 액션을 이기지 않는다.
-  buttonReject: {backgroundColor: color.dangerFill},
   buttonInert: {opacity: 0.6},
   /** 시안 `.a-pill{border-radius:19px}` — 높이는 엄지 바닥 44 를 지킨다. */
   pillButton: {borderRadius: radius.pill},
@@ -551,10 +328,6 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   pillCommitLabel: {color: color.onPrimary},
   buttonQuietLabel: {fontSize: font.label, fontWeight: '600', color: color.text},
   buttonCommitLabel: {fontSize: font.label, fontWeight: '600', color: color.onAccent},
-  // 두 확정 버튼의 채움이 갈라졌으므로 그 위의 글자도 갈라진다. `onAccent` 하나가
-  // 두 채움을 다 덮던 동안 거부 라벨은 다크에서 어두운 잉크(#17161a)가 어두운
-  // 바탕(#623635) 위에 얹혀 1.80:1 이었다 — AA 는커녕 3:1 도 아니다.
-  buttonRejectLabel: {fontSize: font.label, fontWeight: '600', color: color.onDangerFill},
   error: {fontSize: font.meta, color: color.danger, lineHeight: 18},
   hint: {fontSize: font.meta, color: color.textMuted, lineHeight: 18},
   pressed: {backgroundColor: color.surfacePressed},

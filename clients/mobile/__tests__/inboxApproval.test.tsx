@@ -15,7 +15,6 @@ import {AccessibilityInfo} from 'react-native';
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
-import {CONFIRM_GUARD_MS} from '../src/features/inbox/ApprovalDecision';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
@@ -50,10 +49,7 @@ import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 // 통과하지만, 같은 파일의 스쳐가는 상태(「불러오는 동안에는 로딩을 말한다」)가
 // 빨강이 된다. 예산은 단정별로 나눈다 — 아래 TRANSIENT / SETTLE.
 //
-// 시계도 테스트가 쥔다. 확정 버튼은 뜬 직후 `CONFIRM_GUARD_MS` 동안 탭을 받지
-// 않는데(더블탭이 확인 단계를 건너뛰는 구멍 — 아래 red proof ①이 잡아낸 것),
-// 실제 시계로는 "빠른 두 번째 탭"과 "읽고 나서 누른 탭"을 테스트가 구분해서
-// 만들어낼 수 없다. `Date.now`를 손에 쥐면 둘 다 정확히 만들 수 있다.
+// 시계도 테스트가 쥔다(기한 판정이 `Date.now` 를 읽는다).
 // =============================================================================
 
 // jest는 `jest.mock` 팩토리를 파일 선언 위로 끌어올리므로 밖에서 읽는 이름은
@@ -349,11 +345,9 @@ function elapse(ms: number): void {
   nowMs += ms;
 }
 
-/** 무장하고, 확정 문장을 읽을 만큼 기다린 뒤 확정한다 — 사람이 하는 순서 그대로. */
+/** 한 번 탭하면 결정이 나간다 (#3819). 확정 단계는 없다. */
 function armAndCommit(approvalId: string, direction: 'approve' | 'reject'): void {
   fireEvent.press(screen.getByTestId(`inbox-approval-${approvalId}-${direction}`));
-  elapse(CONFIRM_GUARD_MS + 100);
-  fireEvent.press(screen.getByTestId(`inbox-approval-${approvalId}-commit`));
 }
 
 beforeEach(() => {
@@ -507,11 +501,11 @@ describe('결정의 세 갈래', () => {
       /서버가 오류로 답했습니다/,
     );
     expect(screen.queryByText(/503/)).toBeNull();
-    // 실패했으므로 결정된 척하지 않는다: 확정 버튼도 행도 그대로 있다.
+    // 실패했으므로 결정된 척하지 않는다: 버튼도 행도 그대로 있다.
     expect(screen.queryByTestId('inbox-decision-note')).toBeNull();
     expect(screen.getByTestId(`feed-row-approval:${PENDING}`)).toBeTruthy();
 
-    fireEvent.press(screen.getByTestId(`inbox-approval-${PENDING}-commit`));
+    fireEvent.press(screen.getByTestId(`inbox-approval-${PENDING}-reject`));
     // 행이 아직 목록에 있으므로 답은 그 행 자리에 남는다 (2R H3).
     await waitForSettled(() =>
       expect(
@@ -519,7 +513,7 @@ describe('결정의 세 갈래', () => {
       ).toHaveTextContent(/거부를 기록했습니다\./),
     );
     // 답이 있는 자리에는 컨트롤이 없다 — 끝난 결정을 다시 누를 자리를 남기지 않는다.
-    expect(screen.queryByTestId(`inbox-approval-${PENDING}-commit`)).toBeNull();
+    expect(screen.queryByTestId(`inbox-approval-${PENDING}-reject`)).toBeNull();
     // 재시도는 **같은 멱등키**로 나갔다. 새 키였다면 서버 쪽에서 두 번째 결정이
     // 되고, 첫 요청이 실은 도착해 있었을 때 같은 승인이 두 번 기록된다.
     const sent = fixture.decisions();
@@ -574,7 +568,7 @@ describe('결정의 세 갈래', () => {
       ),
     );
 
-    fireEvent.press(screen.getByTestId(`inbox-approval-${PENDING}-commit`));
+    fireEvent.press(screen.getByTestId(`inbox-approval-${PENDING}-approve`));
     await waitForSettled(() => expect(fixture.decisions()).toHaveLength(2));
     const sent = fixture.decisions();
     expect(sent[0].key).not.toBe(sent[1].key);
@@ -596,12 +590,9 @@ describe('RED PROOF ③: 서버가 가역이라고 말하지 않았으면 가역
     const row = await openPendingRow();
     expect(row).toHaveTextContent(/되돌릴 수 없음/);
 
-    fireEvent.press(within(row).getByTestId(`inbox-approval-${PENDING}-approve`));
-    // 확정 문장이 그 사실을 다시 말한다. 경고를 행에만 두면 확인 화면에서
-    // 사라지고, 사람이 마지막으로 읽는 문장이 가장 조용해진다.
-    expect(screen.getByTestId(`inbox-approval-${PENDING}-confirm`)).toHaveTextContent(
-      /되돌릴 수 없습니다\./,
-    );
+    // 한 번에 결정되므로(#3819) 이 경고는 **누르기 전에** 행에 있어야 한다 —
+    // 확정 문장이 다시 말해 주던 시절은 끝났다.
+    expect(screen.queryByTestId(`inbox-approval-${PENDING}-confirm`)).toBeNull();
   });
 
   it('서버가 명시적으로 true라고 말한 행에서만 그 경고가 없다', async () => {
@@ -616,11 +607,6 @@ describe('RED PROOF ③: 서버가 가역이라고 말하지 않았으면 가역
     });
     const row = await openPendingRow(REVERSIBLE);
     expect(row).not.toHaveTextContent(/되돌릴 수 없음/);
-
-    fireEvent.press(within(row).getByTestId(`inbox-approval-${REVERSIBLE}-approve`));
-    expect(
-      screen.getByTestId(`inbox-approval-${REVERSIBLE}-confirm`),
-    ).not.toHaveTextContent(/되돌릴 수 없습니다/);
   });
 });
 
@@ -690,100 +676,34 @@ describe('두 서버의 표기를 모두 읽는다', () => {
     const row = await openPendingRow();
     expect(row).toHaveTextContent(/작업 세션 종료 허가를 요청했어요/);
     expect(row).toHaveTextContent(/되돌릴 수 없음/);
-    expect(within(row).getByLabelText('승인, 확인 필요')).toBeTruthy();
+    expect(within(row).getByLabelText('승인')).toBeTruthy();
   });
 });
 
-// ---- red proof ①: 확인 없이 결정되는 경로가 없다 ---------------------------
+// ---- #3819: 한 번에 결정된다 ------------------------------------------------
 
-describe('RED PROOF ①: 확인 단계를 건너뛰는 경로가 없다', () => {
-  it('행 안의 어떤 것을 눌러도 확인 전에는 결정이 전송되지 않는다', async () => {
-    // 승인/거부를 한 번씩 누르는 것으로는 부족하다 — 다음 배치가 행에 새 컨트롤을
-    // 하나 더 붙이고 그것이 즉발이면, 좁은 단언은 그대로 초록으로 남는다. 그래서
-    // 행 안의 **모든** 누를 수 있는 것을, 시간을 흘리지 않고 잇달아 누른다.
-    // 이것이 사람의 손에서 일어나는 모습은 이렇다: 승인을 누르고, 그 자리에 뜬
-    // 확정 버튼을 같은 동작의 두 번째 탭이 그대로 때린다.
-    //
-    // **이 단언은 실제로 결함을 잡았다.** 처음 구현에서는 이 sweep이 결정 하나를
-    // 전송했다 — 확인 단계는 있었지만 확정 버튼이 방금 누른 버튼 자리에 떠서,
-    // 빠른 두 번 탭이 그것을 통째로 건너뛰었다. 그래서 `CONFIRM_GUARD_MS`가 있다.
-    const fixture = installFetch();
-    const row = await openPendingRow();
-
-    for (const button of within(row).getAllByRole('button')) {
-      fireEvent.press(button);
-    }
-    // 확인 컨트롤이 떠 있을 뿐, 원장에는 아무것도 가지 않았다.
-    expect(fixture.decisions()).toHaveLength(0);
-    expect(
-      fixture.fetch.mock.calls.some(([url]) => String(url).includes('/decision')),
-    ).toBe(false);
-
-    // 그리고 사람이 문장을 읽고 누르면 정확히 한 번 나간다.
-    elapse(CONFIRM_GUARD_MS + 100);
-    fireEvent.press(screen.getByTestId(`inbox-approval-${PENDING}-commit`));
-    await waitForSettled(() => expect(fixture.decisions()).toHaveLength(1));
-  });
-
-  it('확정 버튼이 뜬 직후의 탭은 확인이 아니다 (더블탭 구멍)', async () => {
-    // 위 sweep을 사람 손의 모양 그대로 좁혀 놓은 것. 같은 지점을 두 번 빠르게
-    // 때리는 것으로 되돌릴 수 없는 행동이 실행되면 안 된다.
+describe('한 번 탭하면 결정된다 (#3819)', () => {
+  it('승인 한 번으로 결정이 정확히 한 번 나간다 — 확정 단계가 없다', async () => {
     const fixture = installFetch();
     const row = await openPendingRow();
 
     fireEvent.press(within(row).getByTestId(`inbox-approval-${PENDING}-approve`));
-    elapse(CONFIRM_GUARD_MS - 100);
-    fireEvent.press(screen.getByTestId(`inbox-approval-${PENDING}-commit`));
-    expect(fixture.decisions()).toHaveLength(0);
-    // 컨트롤은 죽지 않았다 — 잠깐 뒤의 같은 탭은 결정한다.
-    expect(screen.getByTestId(`inbox-approval-${PENDING}-confirm`)).toBeTruthy();
-    // 그리고 조용히 삼키지 않는다 (2R M1): 아무 일도 없는 버튼은 고장난 버튼과
-    // 구별되지 않고, 그 다음에 사람이 하는 일은 더 세게 두 번 누르는 것이다.
-    expect(
-      screen.getByTestId(`inbox-approval-${PENDING}-too-fast`),
-    ).toHaveTextContent(/보내지 않았습니다/);
-
-    elapse(200);
-    fireEvent.press(screen.getByTestId(`inbox-approval-${PENDING}-commit`));
     await waitForSettled(() => expect(fixture.decisions()).toHaveLength(1));
-  });
-
-  it('취소하면 아무 일도 일어나지 않은 상태로 돌아간다', async () => {
-    const fixture = installFetch();
-    const row = await openPendingRow();
-
-    fireEvent.press(within(row).getByTestId(`inbox-approval-${PENDING}-approve`));
-    fireEvent.press(screen.getByTestId(`inbox-approval-${PENDING}-cancel`));
-
-    expect(screen.getByTestId(`inbox-approval-${PENDING}-actions`)).toBeTruthy();
+    expect(fixture.decisions()[0]).toMatchObject({approvalId: PENDING, approve: true});
     expect(screen.queryByTestId(`inbox-approval-${PENDING}-confirm`)).toBeNull();
-    expect(fixture.decisions()).toHaveLength(0);
+    expect(screen.queryByTestId(`inbox-approval-${PENDING}-commit`)).toBeNull();
   });
 
-  it('확인 문장은 무엇이 일어나는지 말한다 — 서버가 약속하지 못하는 것은 빼고', async () => {
-    // 「바로/이어서 실행합니다」는 계약상 못 지키는 약속이었다(2R H4): 승인은
-    // run이 hold를 떠났으면 resume job 없이 200을 답하고(approvals.rs
-    // `approve_run`의 `requeue…` 가드), 정상 경로도 outbox 비동기다. 그래서
-    // 문장은 조건 없이 참인 것만 말한다.
-    installFetch();
+  it('거부도 한 번으로 나간다', async () => {
+    const fixture = installFetch();
     const row = await openPendingRow();
 
-    fireEvent.press(within(row).getByTestId(`inbox-approval-${PENDING}-approve`));
-    const confirm = screen.getByTestId(`inbox-approval-${PENDING}-confirm`);
-    expect(confirm).toHaveTextContent(/승인하면 에이전트가 이어서 진행합니다\./);
-    expect(confirm).not.toHaveTextContent(/바로 실행/);
-
-    fireEvent.press(screen.getByTestId(`inbox-approval-${PENDING}-cancel`));
-    fireEvent.press(screen.getByTestId(`inbox-approval-${PENDING}-reject`));
-    // 거부→취소는 결정과 **같은 트랜잭션**이다(approvals.rs `reject_run` →
-    // `end_parked_run_in_tx`). 다만 이미 hold를 떠난 run은 취소할 것이 없으므로
-    // 문장은 「대기 중인 실행」으로 한정한다.
-    expect(screen.getByTestId(`inbox-approval-${PENDING}-confirm`)).toHaveTextContent(
-      /거부하면 대기 중인 실행이 취소됩니다\./,
-    );
+    fireEvent.press(within(row).getByTestId(`inbox-approval-${PENDING}-reject`));
+    await waitForSettled(() => expect(fixture.decisions()).toHaveLength(1));
+    expect(fixture.decisions()[0]).toMatchObject({approvalId: PENDING, approve: false});
   });
 
-  it('보내는 중에는 두 번째 요청이 나가지 않는다', async () => {
+  it('보내는 중에는 두 번째 요청이 나가지 않는다 — 두 버튼 모두', async () => {
     let release: (() => void) | null = null;
     const fixture = installFetch({
       decision: approvalId =>
@@ -793,14 +713,16 @@ describe('RED PROOF ①: 확인 단계를 건너뛰는 경로가 없다', () => 
     });
     await openPendingRow();
 
-    armAndCommit(PENDING, 'approve');
-    // 답이 아직 붙잡혀 있는 동안: 버튼은 "보내는 중"이고, 다시 눌러도 조용하다.
+    fireEvent.press(screen.getByTestId(`inbox-approval-${PENDING}-approve`));
+    // 답이 아직 붙잡혀 있는 동안: 누른 버튼은 "보내는 중"이고, 다시 눌러도, 반대편을
+    // 눌러도 조용하다.
     await waitForTransient(() =>
-      expect(screen.getByTestId(`inbox-approval-${PENDING}-commit`)).toHaveTextContent(
+      expect(screen.getByTestId(`inbox-approval-${PENDING}-approve`)).toHaveTextContent(
         '보내는 중',
       ),
     );
-    fireEvent.press(screen.getByTestId(`inbox-approval-${PENDING}-commit`));
+    fireEvent.press(screen.getByTestId(`inbox-approval-${PENDING}-approve`));
+    fireEvent.press(screen.getByTestId(`inbox-approval-${PENDING}-reject`));
     expect(fixture.decisions()).toHaveLength(1);
 
     release!();
@@ -811,24 +733,10 @@ describe('RED PROOF ①: 확인 단계를 건너뛰는 경로가 없다', () => 
     );
     expect(fixture.decisions()).toHaveLength(1);
   });
-
-  it('무장 사실을 화면을 보지 않는 사람에게도 알린다', async () => {
-    // RN에는 웹처럼 확정 버튼으로 포커스를 옮길 방법이 없다. 엄지 밑의 버튼이
-    // 의미를 바꿨다는 사실이 소리로 전달되지 않으면 VoiceOver 사용자는 승인
-    // 버튼이라고 믿고 같은 자리를 다시 누른다.
-    const announce = jest
-      .spyOn(AccessibilityInfo, 'announceForAccessibility')
-      .mockImplementation(() => {});
-    installFetch();
-    const row = await openPendingRow();
-
-    fireEvent.press(within(row).getByTestId(`inbox-approval-${PENDING}-approve`));
-    expect(announce).toHaveBeenCalledWith('승인을 확정할지 묻습니다.');
-  });
 });
 
 describe('기한이 지난 요청 (2R M4)', () => {
-  it('확정 문장이 승인도 거부도 아닌 만료를 말한다', async () => {
+  it('결정하기 전에 승인도 거부도 아닌 만료를 말한다', async () => {
     // 서버는 기한 뒤에 도착한 클릭을 **만료로 확정**한다(approvals.rs:584
     // `settle_expired` — 409 + status expired). "승인하면 …"은 일어나지 않을 일이다.
     installFetch({
@@ -843,12 +751,12 @@ describe('기한이 지난 요청 (2R M4)', () => {
     const row = await openPendingRow();
     expect(row).toHaveTextContent(/기한 지남/);
 
-    fireEvent.press(within(row).getByTestId(`inbox-approval-${PENDING}-approve`));
-    const confirm = screen.getByTestId(`inbox-approval-${PENDING}-confirm`);
-    expect(confirm).toHaveTextContent(
-      /기한이 지난 요청입니다\. 지금 보내면 승인도 거부도 아닌 만료로 기록됩니다\./,
+    // 한 번에 결정되므로(#3819) 이 사실은 탭 **전에** 컨트롤 머리에 서 있어야 한다.
+    const actions = screen.getByTestId(`inbox-approval-${PENDING}-actions`);
+    expect(actions).toHaveTextContent(
+      /기한이 지난 요청이에요\. 지금 보내면 승인도 거부도 아닌 만료로 기록돼요\./,
     );
-    expect(confirm).not.toHaveTextContent(/이어서 진행/);
+    expect(actions).not.toHaveTextContent(/실행 전에/);
   });
 
   it('만료로 확정된 영수증은 만료라고 말한다', async () => {
@@ -986,8 +894,8 @@ describe('RED PROOF ②: pending 아닌 항목에는 결정 컨트롤이 없다'
     expect(within(settled).queryAllByRole('button')).toHaveLength(1); // 행 본문뿐
     // 그리고 대기 행에는 여전히 있다 — 이 단언이 없으면 위의 부재는 "아무 컨트롤도
     // 안 그렸다"로도 참이 된다.
-    expect(within(pending).getByLabelText('승인, 확인 필요')).toBeTruthy();
-    expect(within(pending).getByLabelText('거부, 확인 필요')).toBeTruthy();
+    expect(within(pending).getByLabelText('승인')).toBeTruthy();
+    expect(within(pending).getByLabelText('거부')).toBeTruthy();
   });
 
   it('에이전트 탭에서는 결정하지 않고, 어디서 하는지만 말한다', async () => {
