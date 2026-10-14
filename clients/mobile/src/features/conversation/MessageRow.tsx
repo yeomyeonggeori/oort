@@ -101,6 +101,16 @@ import {appNote} from './appVoice';
 import {Avatar} from './Avatar';
 import {CONV} from './convDesign';
 import {AiConnectSuggestion} from './AiConnectSuggestion';
+import {TeamAiDelegateStrip} from './TeamAiDelegateStrip';
+import {
+  parseTeamAiDelegate,
+  type TeamAiDelegate,
+  TEAM_AI_PROPOSAL_AUTHORITY,
+  TEAM_AI_PROPOSAL_LABEL,
+  TEAM_AI_RATIONALE_LABEL,
+  TEAM_AI_RATIONALE_NOTE,
+  teamAiProposalLine,
+} from '@momo/core/features/timeline/teamAi';
 import {commandSuggestCard} from '@momo/core/features/timeline/commandSuggest';
 import {
   deadlinePassed,
@@ -1284,11 +1294,14 @@ export function actionResultElsewhereCopy(
 function FactRow({
   label,
   value,
+  note,
   styles,
   testID,
 }: {
   label: string;
   value: string;
+  /** 값 아래 작은 한 줄(도우미 카드의 「AI가 쓴 글」 등). 없으면 지금과 같다. */
+  note?: string;
   styles: ReturnType<typeof buildStyles>;
   testID: string;
 }): React.JSX.Element {
@@ -1297,7 +1310,16 @@ function FactRow({
       <Text style={styles.factLabel}>{label}</Text>
       {/* 값은 서버·에이전트가 쓴 한국어 문장일 수 있다(사유·결정 권한). 접히면
           어절에서 접는다 — `Sentence` 머리말의 규칙. */}
-      <Sentence style={styles.factValue}>{value}</Sentence>
+      {note === undefined ? (
+        <Sentence style={styles.factValue}>{value}</Sentence>
+      ) : (
+        <View style={styles.factValueStack}>
+          <Sentence style={styles.factValue}>{value}</Sentence>
+          <Sentence style={styles.factNote} testID={`${testID}-note`}>
+            {note}
+          </Sentence>
+        </View>
+      )}
     </View>
   );
 }
@@ -1426,9 +1448,12 @@ function ApprovalFooter({
  */
 function ApprovalActionRows({
   action,
+  teamAi,
   styles,
 }: {
   action: AgentApprovalAction;
+  /** 도우미가 올린 카드면 참(ADR-0201 D6-3). 사유가 AI가 쓴 글이라고 말한다. */
+  teamAi: boolean;
   styles: ReturnType<typeof buildStyles>;
 }): React.JSX.Element {
   return (
@@ -1452,8 +1477,9 @@ function ApprovalActionRows({
       ) : null}
       {action.rationale !== null ? (
         <FactRow
-          label="사유"
+          label={teamAi ? TEAM_AI_RATIONALE_LABEL : '사유'}
           value={action.rationale}
+          {...(teamAi ? {note: TEAM_AI_RATIONALE_NOTE} : {})}
           styles={styles}
           testID="approval-action-rationale"
         />
@@ -1561,6 +1587,22 @@ function AgentCard({
         </View>
         {/* 서버가 쓴 한국어 문장이다. 접히면 어절에서 접는다 — 기본 줄바꿈은
             「초 / 대 링크」처럼 낱말 가운데를 자른다(#2513 캡처 실측). */}
+        {/* 도우미가 올린 카드 (ADR-0201 D6-3). 누가 부탁했고 누구 권한으로 실행되는지를
+            결정 **전에** 말한다. 이름은 디렉터리가 먼저, 없으면 서버가 박은 이름. */}
+        {card.proposedVia !== undefined ? (
+          <View style={styles.factRows}>
+            <FactRow
+              label={TEAM_AI_PROPOSAL_LABEL}
+              value={teamAiProposalLine(
+                memberFor(directory, card.proposedVia.requesterId ?? undefined)
+                  ?.displayName ?? card.proposedVia.requesterName,
+              )}
+              note={TEAM_AI_PROPOSAL_AUTHORITY}
+              styles={styles}
+              testID="approval-team-ai"
+            />
+          </View>
+        ) : null}
         {card.summary ? (
           <Sentence style={styles.cardBody}>{card.summary}</Sentence>
         ) : null}
@@ -1568,7 +1610,11 @@ function AgentCard({
             `card.action` 만 그린다 — 블록이 없으면 아래는 전부 지금까지의 도구
             호출 승인 그대로다. */}
         {card.action !== null ? (
-          <ApprovalActionRows action={card.action} styles={styles} />
+          <ApprovalActionRows
+            action={card.action}
+            teamAi={card.proposedVia !== undefined}
+            styles={styles}
+          />
         ) : null}
         {/* =====================================================================
             여기 있던 문장은 이랬다 (감사 H-1):
@@ -2098,6 +2144,33 @@ function linkActionLabel(href: string, count: number): string {
   return count > 1 ? `첫 ${where} (총 ${count}개)` : where;
 }
 
+/**
+ * 맡길 원래 요청의 본문 (ADR-0201 D5). 페이지에 동봉된 인용이 먼저, 없으면 화면이 그린
+ * 인용 블록(잘리지 않은 것만). 둘 다 없으면 null 이고, 그때 본문은 지어내지 않는다.
+ */
+function delegateSourceBody(
+  delegate: TeamAiDelegate,
+  message: Message,
+  quote: QuoteBlockModel | null | undefined,
+): string | null {
+  const id = delegate.sourceMessageId;
+  if (id === null) return null;
+  if (
+    message.replyTo !== undefined &&
+    message.replyTo.id.toLowerCase() === id.toLowerCase()
+  ) {
+    return message.replyTo.body ?? null;
+  }
+  if (
+    quote?.kind === 'ready' &&
+    !quote.truncated &&
+    quote.targetId.toLowerCase() === id.toLowerCase()
+  ) {
+    return quote.lines.join('\n');
+  }
+  return null;
+}
+
 function MessageRowInner({
   message,
   startsGroup,
@@ -2137,6 +2210,12 @@ function MessageRowInner({
   const suggestion = useMemo(
     () => commandSuggestCard(message, directory),
     [message, directory],
+  );
+  // 도우미가 넘기는 줄(ADR-0201 D5). 이 키를 보내지 않는 서버에서는 늘 null 이다.
+  const teamAiDelegate = useMemo(
+    () =>
+      message.state === 'deleted' ? null : parseTeamAiDelegate(message.props),
+    [message],
   );
   // 1회 링크 (#2513). 행은 접근성 요소 **하나**라(아래 `accessible`) 카드 안의
   // 복사 버튼에 VoiceOver 가 닿지 못한다 — 코드 상자의 복사가 로터로 나온 것과
@@ -2718,6 +2797,23 @@ function MessageRowInner({
               <AiConnectSuggestion
                 card={suggestion}
                 viewerMemberId={actions?.myMemberId}
+                offline={approvalOffline === true}
+              />
+            ) : null}
+
+            {teamAiDelegate ? (
+              <TeamAiDelegateStrip
+                delegate={teamAiDelegate}
+                workspaceId={actions?.workspaceId}
+                channelId={message.channelId}
+                viewerMemberId={actions?.myMemberId}
+                sourceBody={delegateSourceBody(teamAiDelegate, message, quote)}
+                teamAiHandle={
+                  memberFor(
+                    directory,
+                    teamAiDelegate.teamAiMemberId ?? message.authorMemberId,
+                  )?.handle ?? null
+                }
                 offline={approvalOffline === true}
               />
             ) : null}
@@ -3892,6 +3988,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     lineHeight: line.label,
     color: color.text,
   },
+  factValueStack: {flex: 1, gap: 2},
+  factNote: {fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},
   gateGroup: {marginTop: space.xs},
   gateSurface: {fontSize: font.label, fontWeight: '600', color: color.text},
   fileRow: {flexDirection: 'row', alignItems: 'center', gap: space.sm},

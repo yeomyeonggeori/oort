@@ -12,6 +12,7 @@ import {
   actionResultCard,
   type AgentActionResultCard,
 } from "./actionResultCard";
+import { parseTeamAiProposal, type TeamAiProposal } from "./teamAi";
 
 // =============================================================================
 // Agent card model (R-1 §4). Pure: no DOM, no fetch, no React, so the status
@@ -260,6 +261,9 @@ const PARSED_KEYS: ReadonlySet<string> = new Set([
   // (`actionResultCard` 가 `payloadDetail` 을 쓴다) 진입 순서에 따라 TDZ 에
   // 걸린다. 같은 글자인지는 시험이 잰다(`agentCardModel.test.ts`).
   "momo.action_result",
+  // ADR-0201 D6-3. 도우미 카드의 「도우미 제안 · 요청: ○○」 줄이 **그리는** 블록이다
+  // (`teamAi.ts`). 위 `action` 과 같은 이유로 숨김이 아니다.
+  "proposed_via",
 ]);
 
 export interface PayloadRow {
@@ -559,6 +563,11 @@ export interface AgentApprovalCard {
   requestedByMemberId?: string;
   /** 이 카드가 선 채널. */
   channelId?: string;
+  /**
+   * 팀 AI(「oort 도우미」)가 올린 카드인가 (ADR-0201 D6-3, `props.proposed_via`).
+   * 없으면 지금까지의 카드 그대로다. 모르는 `kind` 도 없음으로 읽는다(`teamAi.ts`).
+   */
+  proposedVia?: TeamAiProposal;
   detail: PayloadDetail;
 }
 
@@ -717,6 +726,8 @@ function approvalCard(
     card.requestedByMemberId = message.authorMemberId;
   }
   if (message.channelId !== "") card.channelId = message.channelId;
+  const proposedVia = parseTeamAiProposal(props["proposed_via"]);
+  if (proposedVia !== null) card.proposedVia = proposedVia;
   return card;
 }
 
