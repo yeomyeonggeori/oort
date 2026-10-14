@@ -697,3 +697,48 @@ describe("승인 직후 재마운트해도 카드는 결정 상태다 (#3771)", 
     expect(byTestId(other, "approval-approve")).toHaveLength(1);
   });
 });
+
+// =============================================================================
+// #3818: 배포 전에 결정된 옛 카드에 거부/승인 버튼이 다시 보였다.
+//
+// #3779의 영수증 저장소는 **이번 세션에 결정한** 카드만 안다. 서버가 이미 결정을 적은
+// 카드(`message.props`의 status·decided_by)는 영수증이 없으므로, 카드는 서버가 말한
+// 사실만으로 버튼을 숨겨야 한다. 이 시험은 영수증을 일부러 비워 둔 채(저장소 reset)
+// 서버 props만으로 그린다 — 푸터가 `settled`를 보지 않던 옛 분기로 되돌리면 실패한다.
+// =============================================================================
+describe("서버가 이미 결정한 옛 카드는 버튼이 없다 (#3818)", () => {
+  for (const status of ["approved", "rejected", "cancelled", "expired"] as const) {
+    it(`props.status=${status} → 영수증 없이도 승인·거부 버튼과 y/n 단축키가 없다`, () => {
+      const host = mountCard({
+        ...approvalProps(),
+        status,
+        approval_status: status,
+        decided_by: ME,
+        decided_at_ms: 1_753_400_000_000,
+      });
+      expect(byTestId(host, "approval-approve")).toHaveLength(0);
+      expect(byTestId(host, "approval-reject")).toHaveLength(0);
+      expect(byTestId(host, "approval-commit")).toHaveLength(0);
+      const card = byTestId(host, "agent-card")[0];
+      expect(card?.dataset.status).toBe(status);
+      expect(card?.getAttribute("aria-keyshortcuts")).toBeNull();
+    });
+  }
+
+  it("결정자·원장 줄은 그대로 남는다", () => {
+    const host = mountCard({
+      ...approvalProps(),
+      status: "approved",
+      approval_status: "approved",
+      decided_by: ME,
+      decided_at_ms: 1_753_400_000_000,
+    });
+    expect(byTestId(host, "approval-ledger")[0]?.textContent).toContain("곽성재");
+  });
+
+  it("status 없는 대기 카드는 여전히 버튼을 그린다 (과잉 숨김 방지)", () => {
+    const host = mountCard(approvalProps());
+    expect(byTestId(host, "approval-approve")).toHaveLength(1);
+    expect(byTestId(host, "approval-reject")).toHaveLength(1);
+  });
+});

@@ -494,7 +494,7 @@ function ApprovalBody({
       kind="approval"
       // 오프라인에서는 y/n 단축키도 꺼진다. 켜 두면 키가 무장까지 하고 확정이
       // 나가지 않는, 화면이 설명하지 못하는 상태가 만들어진다.
-      keyboard={note === null && !expired}
+      keyboard={note === null && !expired && !settled}
       // 이슈 1114: `y`도 버튼과 같은 문을 지난다. 자격 있는 호스트가 없으면 승인은
       // 무장하지 않는다 — 단축키만 통과시키면 꺼진 버튼 옆에서 키보드로는 열리는,
       // 화면이 설명하지 못하는 두 번째 문이 생긴다. `n`은 그대로다.
@@ -522,6 +522,12 @@ function ApprovalBody({
           </>
         ) : expired ? (
           <ExpiredApprovalFooter card={card} directory={directory} />
+        ) : settled ? (
+          // #3818: 서버가 이미 결정을 적은 카드(`props.status`·`decided_by`)는 영수증
+          // 저장소가 몰라도 컨트롤이 서지 않는다. 결정 사실은 아래 원장 줄이 말한다.
+          // 이 분기가 없던 때는 영수증(이번 세션의 결정)이 없는 옛 카드가 `note === null`로
+          // 떨어져 거부/승인 버튼을 다시 그렸다.
+          null
         ) : card.approvalId !== null ? (
           <>
             {phase === "soon" && card.expiresAtMs !== undefined && (
