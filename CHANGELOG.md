@@ -11,6 +11,16 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+## [0.1.25] - 2026-10-14
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.25>. Tag target: `main=b51ce8eb`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. Hotfix release: no database migration (the schema stays at 131), `bootstrap_runtime_roles` is unchanged, and there is no new environment variable.
+
+### Fixed
+- Agent Port: every Grokbot `tools/call` was rejected with -32602 `invalid tools/call params` from 2026-10-14 01:45 KST, because `momo-mcp` refused every key other than `name` and `arguments` and `arguments: null`, which blocked any client that sends the standard MCP fields (`_meta.progressToken`, `task`) (#3812, #3813). `tools/call` now accepts and ignores an object `_meta` and an object `task` and treats `arguments: null` as an empty object; `tools/list` (`cursor`, `_meta`) and `ping`/`initialize` (`_meta`) follow the same rule. Array or string `arguments`, non-object `_meta`/`task` and any other top-level key are still rejected.
+
+### Added
+- Agent Port: a -32602 rejection now logs a `Agent Port refused request params` warning with the method, code, message, and only the key names of `params` and `_meta` (no values), after authentication.
+
 ## [0.1.24] - 2026-10-14
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.24>. Tag target: `main=c82cb823`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. Database migration 131: the schema moves from 130 to 131; `bootstrap_runtime_roles` is unchanged. The server gains the `image` 0.25 dependency (avatar re-encoding). No new environment variable.
