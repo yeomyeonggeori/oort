@@ -102,13 +102,13 @@ describe("사이드바 (시안 `.a-side`)", () => {
     expect(SIDEBAR).toMatch(/className="[^"]*\bglass\b[^"]*\bsidebar-search\b[^"]*"/);
   });
 
-  it("행은 34 · 반경 10 · 아이콘 18이고, 안 읽음은 굵기 700이다", () => {
+  it("행은 34 · 반경 10 · 아이콘 18이고, 안 읽음은 굵기 600이다(#3774, 800·700 위계 정리)", () => {
     const row = utility("sidebar-row");
     expect(row).toMatch(/min-block-size: 34px;/);
     expect(row).toMatch(/border-radius: var\(--radius-md\);/);
     expect(TOKENS).toMatch(/--radius-md: 10px;/);
     expect(row).toMatch(/\[data-row-icon\] svg \{\s*inline-size: 1\.125rem;\s*block-size: 1\.125rem;/);
-    expect(row).toMatch(/&\[data-unread\] \{\s*font-weight: 700;/);
+    expect(row).toMatch(/&\[data-unread\] \{\s*font-weight: 600;/);
   });
 
   it("선택 행은 흰 면 + rest로 뜨고 호박색을 쓰지 않는다 (owner 결정 2026-09-26)", () => {
@@ -181,13 +181,13 @@ describe("띠 위 규칙 (노을띠 `band`, themes-2.0 §3)", () => {
 });
 
 describe("본문 머리와 컴포저 (시안 `.a-mhd` · `.a-dcomp`)", () => {
-  it("머리는 넓은 창에서 60 · 좌 24 우 18이고 제목은 17/800이다", () => {
+  it("머리는 넓은 창에서 60 · 좌 24 우 18이고 제목은 heading 16/700이다", () => {
     const head = utility("channel-head");
     expect(head).toMatch(/min-block-size: 60px;/);
     expect(head).toMatch(/padding-inline: var\(--spacing-6\) 18px;/);
     const title = utility("channel-head-title");
-    expect(title).toMatch(/font-size: 1\.0625rem;/);
-    expect(title).toMatch(/font-weight: 800;/);
+    expect(title).toMatch(/font-size: var\(--text-heading\);/);
+    expect(title).toMatch(/font-weight: 700;/);
     expect(CHAT_SHELL).toMatch(/className="channel-head\b/);
   });
 

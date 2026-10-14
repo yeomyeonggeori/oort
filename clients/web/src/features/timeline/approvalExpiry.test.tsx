@@ -295,10 +295,10 @@ describe("새 행동 카드 다섯 (#3729)", () => {
   });
 
   it.each([
-    ["channel.member.add", "admin", "관리자만 승인할 수 있습니다."],
-    ["agent.rename", "agent_editor", "대상 에이전트의 소유자 또는 관리자만 승인할 수 있습니다."],
-    ["hosted.channels.grant", "admin", "관리자만 승인할 수 있습니다."],
-    ["workspace.settings.update", "workspace_operator", "워크스페이스 운영자(관리자)만 승인할 수 있습니다."],
+    ["channel.member.add", "admin", "관리자만 승인할 수 있어요."],
+    ["agent.rename", "agent_editor", "대상 에이전트의 소유자 또는 관리자만 승인할 수 있어요."],
+    ["hosted.channels.grant", "admin", "관리자만 승인할 수 있어요."],
+    ["workspace.settings.update", "workspace_operator", "워크스페이스 운영자(관리자)만 승인할 수 있어요."],
   ])("%s: 결정 권한 줄이 %s 의 문장으로 선다", (id, role, copy) => {
     const el = mount(
       actionProps(id, [{ label: "행", value: "값" }], role, FUTURE)
@@ -389,7 +389,7 @@ describe("결과 줄의 새 ref.type 넷 (#3729)", () => {
     expect(q(el, "agent-card")?.dataset.cardKind).toBe("action_result");
     expect(q(el, "action-result-row")?.textContent).toContain("#계획");
     expect(q(el, "action-result-next")).toBeNull();
-    // 1회 값이 없는 행동이라 「1회 표시됐습니다」도 서지 않는다.
+    // 1회 값이 없는 행동이라 「1회 표시됐어요」도 서지 않는다.
     expect(q(el, "action-result-secret-once")).toBeNull();
     // 내부 식별자(ref.id, ref.type 낱말)가 화면에 닿지 않는다.
     expect(el.textContent).not.toContain("0199aa11-2222-7000-8000-0000000000f1");

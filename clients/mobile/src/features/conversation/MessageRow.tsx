@@ -3588,7 +3588,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    * 건너뛰는 baseline 정렬이 없어서 그것이 한 줄로 읽히는 근거다(u44 M-2).
    */
   authorName: {
-    fontSize: CONV.whoSize,
+    fontSize: font.body,
     lineHeight: CONV.whoLine,
     letterSpacing: CONV.whoTracking,
     fontWeight: '700',
@@ -3610,7 +3610,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     borderRadius: radius.sm,
     backgroundColor: color.agentSurface,
   },
-  agentTagText: {fontSize: 10, color: color.agent, fontWeight: '600'},
+  agentTagText: {fontSize: font.caption, color: color.agent, fontWeight: '600'},
   // 그룹 머리의 시각. 연속 행의 것과 **같은 밝기**여야 한다 — 위 주석 참조.
   time: {fontSize: font.meta, color: color.textMuted},
   // 앱이 말하는 문장이다 — 구분축은 `appVoice.ts` 의 `※` 가 든다. 인용 안의
@@ -3799,7 +3799,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   chipMine: {borderColor: 'transparent', backgroundColor: color.accentSurface},
   chipPressed: {backgroundColor: color.surfacePressed},
   chipEmoji: {fontSize: font.label},
-  chipCount: {fontSize: CONV.reactText, color: color.textMuted, fontWeight: '600'},
+  chipCount: {fontSize: font.meta, color: color.textMuted, fontWeight: '600'},
   chipCountMine: {color: color.accentText},
 
   /**
@@ -3834,7 +3834,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   },
   /** `.a-step{display:flex;align-items:center;gap:9px;font-size:13.5px}`. */
   step: {flexDirection: 'row', alignItems: 'center', gap: CONV.stepsGap},
-  stepLabel: {flexShrink: 1, fontSize: CONV.stepText, color: color.text},
+  stepLabel: {flexShrink: 1, fontSize: font.label, color: color.text},
   /** `.a-step.run{font-weight:600;color:var(--agent)}`. */
   stepLabelRun: {fontWeight: '600', color: color.agent},
   /** `.a-step .mt{margin-left:auto;font-size:12px;color:var(--ink2)}`. */
@@ -3869,7 +3869,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   },
   cardTitle: {flex: 1, fontSize: font.label, fontWeight: '700', color: color.text},
   /** `.a-card .sum{font-size:15px;line-height:1.5}`. */
-  cardBody: {fontSize: CONV.cardSum, color: color.text, lineHeight: CONV.cardSumLine},
+  cardBody: {fontSize: font.body, color: color.text, lineHeight: CONV.cardSumLine},
   cardNote: {fontSize: font.meta, color: color.textMuted, lineHeight: line.meta},
   cardNoteDanger: {color: color.danger},
   cardMeta: {fontSize: font.meta, color: color.textFaint},
@@ -3917,7 +3917,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   statusChip_warn: {borderColor: color.warnBorder, backgroundColor: color.warnSurface},
   statusChip_danger: {borderColor: color.dangerBorder, backgroundColor: color.dangerSurface},
   statusChip_muted: {borderColor: color.border, backgroundColor: color.surfacePressed},
-  statusChipText: {fontSize: 11, fontWeight: '600'},
+  statusChipText: {fontSize: font.caption, fontWeight: '600'},
   statusChipText_ok: {color: color.ok},
   statusChipText_warn: {color: color.warn},
   statusChipText_danger: {color: color.danger},

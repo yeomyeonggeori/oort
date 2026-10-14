@@ -210,7 +210,6 @@ function SuggestedCard({
 const AI_SUGGEST = {
   /** 폰 `.ag{width:20px;height:20px;font-size:10px;border-radius:28%}`. */
   agentMark: 20,
-  agentMarkText: 10,
   agentMarkRadius: 5.6,
   /** `.chd{padding:10px 14px}`. */
   headPadY: 10,
@@ -256,7 +255,7 @@ function build(color: Palette) {
       justifyContent: 'center',
       backgroundColor: color.agentSurface,
     },
-    agentMarkText: {fontSize: AI_SUGGEST.agentMarkText, fontWeight: '700', color: color.agent},
+    agentMarkText: {fontSize: font.caption, fontWeight: '700', color: color.agent},
     /** 시안 `.chd .by{font-size:12.5px;color:var(--agent);font-weight:600}`. */
     headText: {flexShrink: 1, fontSize: font.meta, fontWeight: '600', color: color.agent},
     /** 시안 `.csec{padding:6px 14px 4px}`. */

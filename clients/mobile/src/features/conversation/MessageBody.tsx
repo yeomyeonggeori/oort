@@ -18,7 +18,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import {font, radius, space, type Palette} from '../../design/tokens';
+import {font, line, radius, space, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {COPY_RECEIPT_MS, copyText} from './copy';
 
@@ -555,7 +555,7 @@ export function MessageBody({
 
 const buildStyles = (color: Palette) => StyleSheet.create({
   markdown: {gap: space.sm},
-  paragraph: {fontSize: font.body, color: color.text, lineHeight: 22},
+  paragraph: {fontSize: font.body, color: color.text, lineHeight: line.body},
   muted: {color: color.textMuted},
   strong: {fontWeight: '700'},
   em: {fontStyle: 'italic'},
@@ -633,7 +633,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   // 문단·목록에서 이미 하는 것과 같은 배선). 기본은 본문과 **같은 잉크**다:
   // 사람이 꺼내러 온 것(명령어·해시·경로)이 산문보다 한 급 아래일 이유가 없다.
   // ===========================================================================
-  code: {fontFamily: 'Menlo', fontSize: font.meta, color: color.text, lineHeight: 17},
+  code: {fontFamily: 'Menlo', fontSize: font.meta, color: color.text, lineHeight: line.code},
   list: {gap: space.xs},
   listItem: {flexDirection: 'row', gap: space.xs},
   // ===========================================================================
@@ -652,7 +652,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   // ===========================================================================
   listMarker: {
     fontSize: font.body,
-    lineHeight: 22,
+    lineHeight: line.body,
     color: color.textMuted,
     // 두 자리 + 마침표만큼. **오른쪽 정렬**이라 마침표가 한 줄에 서고, 그래서
     // 9번과 10번의 본문 시작점도 한 줄에 선다.
@@ -663,5 +663,5 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   listBulletCell: {width: 10, height: 22, alignItems: 'center', justifyContent: 'center'},
   listBulletDot: {width: 4, height: 4, borderRadius: 2, backgroundColor: color.textMuted},
   listBulletDotMuted: {backgroundColor: color.textFaint},
-  listText: {flex: 1, fontSize: font.body, color: color.text, lineHeight: 22},
+  listText: {flex: 1, fontSize: font.body, color: color.text, lineHeight: line.body},
 });

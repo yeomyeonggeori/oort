@@ -25,9 +25,29 @@
   var PALETTE = "dawnsky";
   // 시스템을 따를 때 브라우저 크롬이 쓰던 색. 고정을 풀 때 되돌릴 자리다.
   var SYSTEM_COLOR_ATTR = "data-theme-color-system";
+  // 사용자 글꼴 (#3774). 이름 허용 목록·상한·변수 이름은 src/design/userFont.ts의 거울이다.
+  var FONT_NAME_PATTERN = "^[\\p{L}\\p{M}\\p{N} ._+&-]+$";
+  var FONT_NAME_MAX = 64;
+  var FONT_SANS_VAR = "--font-user-sans";
+  var FONT_MONO_VAR = "--font-user-mono";
+  var FONT_SANS_ATTR = "data-font-sans";
+  var FONT_MONO_ATTR = "data-font-mono";
+
+  function fontName(value) {
+    if (typeof value !== "string") return null;
+    var name = value.replace(/\s+/g, " ").trim();
+    if (name === "" || name.length > FONT_NAME_MAX) return null;
+    try {
+      return new RegExp(FONT_NAME_PATTERN, "u").test(name) ? name : null;
+    } catch (error) {
+      return null;
+    }
+  }
 
   var scheme = "system";
   var accent = "dawn";
+  var fontSans = null;
+  var fontMono = null;
   try {
     var raw = localStorage.getItem(KEY);
     if (raw) {
@@ -39,6 +59,8 @@
         if (typeof parsed.accent === "string" && /^[a-z]+$/.test(parsed.accent)) {
           accent = parsed.accent;
         }
+        fontSans = fontName(parsed.fontSans);
+        fontMono = fontName(parsed.fontMono);
       }
     } else {
       var legacy = localStorage.getItem(LEGACY_KEY);
@@ -51,6 +73,16 @@
 
   document.documentElement.setAttribute(PALETTE_ATTR, PALETTE);
   document.documentElement.setAttribute(ACCENT_ATTR, accent);
+
+  // 값은 허용 목록을 통과한 이름과 var() 폴백뿐이고, 인라인 style 속성이 아니라 CSSOM 변수다.
+  if (fontSans) {
+    document.documentElement.style.setProperty(FONT_SANS_VAR, '"' + fontSans + '", var(--font-sans)');
+    document.documentElement.setAttribute(FONT_SANS_ATTR, "");
+  }
+  if (fontMono) {
+    document.documentElement.style.setProperty(FONT_MONO_VAR, '"' + fontMono + '", var(--font-mono)');
+    document.documentElement.setAttribute(FONT_MONO_ATTR, "");
+  }
 
   // "system"과 미지의 값은 같은 답을 받는다: 스킴 스탬프를 붙이지 않는 것.
   // tokens.css의 `:root { color-scheme: light dark }`가 그때 OS를 따른다.

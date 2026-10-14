@@ -412,7 +412,7 @@ describe("확정 문장", () => {
   });
 
   it("비가역은 그 사실을 재진술한다", () => {
-    expect(approveConfirmCopy(false)).toMatch(/되돌릴 수 없습니다\.$/);
+    expect(approveConfirmCopy(false)).toMatch(/되돌릴 수 없어요\.$/);
   });
 
   it("모름은 경고 쪽에 붙는다: 안 물어본 것을 안전하다고 말하지 않는다", () => {

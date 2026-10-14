@@ -13,6 +13,10 @@ import {
   type AiConnectRowId,
   type HarnessPill,
 } from "@momo/core/features/onboarding/aiConnect";
+import {
+  PERSONAL_ASSISTANTS_COPY,
+  soonPersonalAssistants,
+} from "@momo/core/features/hostedAgents/personalAssistants";
 import { LOGIN_ROW_HINT, loginActionLabel } from "@momo/core/features/onboarding/harnessLogin";
 import { Button } from "@/design/ui/button";
 import { openExternalUrl } from "@/lib/tauri";
@@ -171,6 +175,7 @@ export function AiConnectList({
             {needsLogin && isSubscriptionRow(id) && (
               <LoginRow id={id} onLoginOpen={onLoginOpen} />
             )}
+            {id === "grok" && <SoonRows />}
           </div>
         );
       })}
@@ -267,5 +272,56 @@ function LoginRow({
         {loginActionLabel(id)}
       </Button>
     </div>
+  );
+}
+
+/**
+ * 「곧」 줄 (#3773). 설정의 「개인 비서」 목록과 같은 카탈로그(`PERSONAL_ASSISTANTS`)에서
+ * 온다: 이름·제공사·설명을 이 파일에서 다시 적지 않는다. 연동 경로가 없는 비서는 고를
+ * 수 없는 줄로 정직하게 서고, 눌러서 가는 가짜 길이 없다.
+ */
+function SoonRows() {
+  return (
+    <>
+      {soonPersonalAssistants().map((entry) => {
+        const detailId = `ai-connect-soon-${entry.id}-detail`;
+        return (
+          <div
+            key={entry.id}
+            className="ai-connect-opt"
+            data-selectable="false"
+            data-testid="ai-connect-soon-row"
+            data-row-id={entry.id}
+          >
+            <div className="ai-connect-opt-label">
+              {/* 라디오 자리: 다른 줄과 타일 줄이 맞게 비워 둔다. */}
+              <span aria-hidden="true" className="ai-connect-radio invisible" />
+              {/* 중립 타일: 그록봇 줄의 회색 타일 스타일을 빌린다. 브랜드 색·로고는 쓰지 않는다. */}
+              <span className="ai-connect-mark" data-mark="grok" aria-hidden="true">
+                {entry.mark}
+              </span>
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="ai-connect-title">
+                  {entry.name}
+                  {entry.provider ? ` · ${entry.provider}` : ""}
+                </span>
+                <span id={detailId} className="ai-connect-detail">
+                  {entry.note}
+                </span>
+              </span>
+            </div>
+            <span
+              className="ai-connect-pill"
+              data-tone="mute"
+              aria-describedby={detailId}
+              data-testid={`ai-connect-pill-${entry.id}`}
+              data-pill="soon"
+            >
+              {PERSONAL_ASSISTANTS_COPY.soonBadge}
+            </span>
+          </div>
+        );
+      })}
+    </>
   );
 }

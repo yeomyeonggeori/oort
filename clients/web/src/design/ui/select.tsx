@@ -41,7 +41,7 @@ export const Select = React.forwardRef<
       // 칸은 초점을 지키려고 native `disabled` 대신 `aria-disabled` + 가드로
       // 잠그는데(#1486 문법: 잠금 = aria-disabled + 흐림 + 사유 + 가드), 흐림이
       // `disabled:` 에만 걸려 있어 잠긴 칸이 고를 수 있는 칸처럼 보였다.
-      "tap-target h-field w-full min-w-0 truncate rounded-lg border border-line-strong bg-transparent pl-3 pr-9 text-body text-ink transition-colors focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50",
+      "tap-target h-field w-full min-w-0 truncate rounded-lg border border-line-strong bg-transparent pl-3 pr-9 text-label text-ink transition-colors focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50",
       className
     )}
     {...props}
