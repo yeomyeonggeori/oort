@@ -1942,6 +1942,11 @@ async fn action_claim_secret(
     let approval_id = Uuid::parse_str(required_str(args, "approvalId", 64)?)
         .map_err(|_| ToolFailure::InvalidArguments)?;
     let secret = state.agent_port.envelope_secret().to_string();
+    // The operator\'s configured public address, if any. It outranks the origin the
+    // approver\'s request carried (I2 review M1): the link now reaches a person through
+    // an agent, unseen, so a `Host` header must not be the thing that decides where
+    // it points when the operator has said what the address is.
+    let configured_origin = state.t3.ready_public_base_url();
 
     let outcome = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
         Box::pin(async move {
@@ -1996,6 +2001,7 @@ async fn action_claim_secret(
                 return Ok(Err(ToolFailure::Unavailable));
             };
 
+            let mut minted_invite: Option<Uuid> = None;
             let (value, expires_at_ms) = match kind {
                 SECRET_CLAIM_KIND_PAIRING => {
                     // The connection the approval created, while it is still waiting
@@ -2029,9 +2035,21 @@ async fn action_claim_secret(
                     }
                 }
                 SECRET_CLAIM_KIND_INVITE => {
-                    let Some(origin) = grant.get("origin").and_then(Value::as_str) else {
+                    let Some(origin) = configured_origin
+                        .as_deref()
+                        .or_else(|| grant.get("origin").and_then(Value::as_str))
+                    else {
                         return Ok(Err(ToolFailure::Unavailable));
                     };
+                    // The approver\'s authority is re-proved: an admin demoted or
+                    // removed since the approval does not get to have a link minted
+                    // in their name (I2 review M2).
+                    if crate::routes::invites::require_admin(conn, caller.workspace_id, decided_by)
+                        .await?
+                        .is_err()
+                    {
+                        return Ok(Err(ToolFailure::Unavailable));
+                    }
                     // The invite as the approval made it: still live, not spent, not
                     // revoked by the approver. The replacement keeps its role, its
                     // `max_uses` **and its expiry** (V3-4: no new ceiling is born here).
@@ -2062,6 +2080,7 @@ async fn action_claim_secret(
                     .bind(expires_at)
                     .execute(&mut *conn)
                     .await?;
+                    minted_invite = Some(created.invite.id);
                     if !created
                         .code
                         .bytes()
@@ -2099,6 +2118,9 @@ async fn action_claim_secret(
                             "approval_id": approval.id.to_string(),
                             "action_id": action.id,
                             "kind": kind,
+                            "invite_id": minted_invite.map(|id| id.to_string()),
+                            "replaced_invite_id": (kind == SECRET_CLAIM_KIND_INVITE)
+                                .then(|| ref_id.to_string()),
                         }),
                     ),
             )

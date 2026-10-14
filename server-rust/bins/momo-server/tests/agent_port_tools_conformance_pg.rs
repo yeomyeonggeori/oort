@@ -15981,4 +15981,32 @@ async fn a_revoked_invite_cannot_be_claimed_and_a_flag_on_an_invite_is_refused()
     .await
     .unwrap();
     assert_eq!(live, 0, "nothing was minted for a revoked invite");
+
+    // An approver who is no longer an admin when the claim arrives has no link
+    // minted in their name (I2 review M2).
+    let (second, _card) =
+        propose_invite(&client, &base, &su, &fixture, json!({"role": "admin"})).await;
+    let (status, approved) =
+        decide_with_flag_3789(&client, &base, &fixture, second, true, false).await;
+    assert_eq!(status, 200, "{approved}");
+    sqlx::query(
+        "UPDATE workspace_membership SET role='member' WHERE workspace_id=$1 AND member_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.human)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, refused) = claim_3789(&client, &base, &fixture, second).await;
+    assert_eq!((status, error_code(&refused)), (409, -32004), "{refused}");
+    sqlx::query(
+        "UPDATE workspace_membership SET role='owner' WHERE workspace_id=$1 AND member_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.human)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, ok) = claim_3789(&client, &base, &fixture, second).await;
+    assert_eq!(status, 200, "restored authority claims fine: {ok}");
 }

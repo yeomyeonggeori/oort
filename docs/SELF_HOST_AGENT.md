@@ -1291,7 +1291,8 @@ is dead, and an invite link keeps the card's role, uses and expiry. A second cal
 refused as already claimed, a late one as expired, and anything else — someone
 else's approval, not approved, nothing granted, the invite revoked — gets the same
 unavailable answer. Never post the value in a channel; the person who approved the
-card can always make a new one from the settings.
+card can always make a new one from the settings. If the response is lost, the
+value cannot be fetched again (nothing is stored): ask the approver to make a new one.
 
 #### 3.3.16c A person asks you to connect an AI — suggest the card
 
