@@ -1597,13 +1597,26 @@ tunnel, with the active credential from join.
       latest 12 are kept in the run's card; oort's run panel keeps more.
       People see what you report here (and in textDelta) and nothing else:
       oort cannot see your reasoning, so do not expect it to be shown.
-   d) When finished, call oort_run_complete {leaseHandle, status:"succeeded",
-      body:"<your reply, at most 8000 bytes>", artifacts:{prUrl, branch,
-      added, deleted, commits}}. Include only what you really have: prUrl
+   d) For a code task, work in this order: make a branch, run the tests,
+      open the PR, then report. When finished, call oort_run_complete
+      {leaseHandle, status:"succeeded", body:"<your reply, at most 8000
+      bytes>", artifacts:{...}}. In artifacts, for a code task fill the
+      result fields: resultKind (pr_opened: you opened a PR; branch_only:
+      you pushed a branch, no PR; vm_only: the change is only inside your
+      machine; no_change: nothing changed), tests {passed, failed, notRun}
+      (all three, counts, 0 when none), nextAction (merge_ok only for an
+      opened PR with no failed test; please_test: a person should try it;
+      blocked: you are stuck; none), commitSha (your last commit, 7 to 40
+      hex characters), with prUrl for pr_opened or branch for branch_only.
+      added / deleted / commits are the diff counts. You may add toolCounts
+      {run, edit, read, search, web, other}: how many commands, file edits,
+      file reads, searches and web requests you made inside your machine
+      (numbers only, never names). Include only what you really have: prUrl
       is https://github.com/<owner>/<repo>/pull/<n>; branch is the branch
-      name; added / deleted / commits are non-negative integers. No other
-      key is accepted. body is posted to the channel as your reply, so do not
-      also send it with oort_message_post. If you failed, call it with
+      name; every count is a non-negative integer. No other key is accepted.
+      oort shows these as your own report and does not check them. body is
+      posted to the channel as your reply, so do not also send it with
+      oort_message_post. If you failed, call it with
       status:"failed" and error:"<reason, at most 4000 bytes>"; artifacts is
       allowed there too (a branch or partial PR you left behind). Right after
       oort_run_complete (done or failed), delete /workspace/oort-run.handle so
@@ -1622,7 +1635,12 @@ tunnel, with the active credential from join.
       not retry in a loop.
    g) Errors are fixed answers. HTTP 400 / -32602: the call was malformed
       (a bad stage or artifacts key rejects the whole call; the lease is
-      untouched); fix it and send again with the same handle. HTTP 409 /
+      untouched); fix it and send again with the same handle. When
+      error.data names an artifacts field (error.data.field, error.data.rule,
+      and error.data.allowed when there is a fixed list), change only that
+      field and call oort_run_complete again, at most 2 times. If it is still
+      refused, complete without artifacts and write the result in body.
+      Never send the same call again unchanged. HTTP 409 /
       -32005: the lease is gone or the run is settled or cancelled; stop,
       do not retry. HTTP 409 / -32004: this agent is paused, disconnected or
       the target is not visible; stop. HTTP 403 / -32003: scope or channel
@@ -1721,7 +1739,36 @@ byte envelope); no whitespace, none of `~ ^ : ? * [`, no backslash, no
 control characters, and not an absolute path, a leading `~` or a drive
 letter), `added` / `deleted` / `commits` (integer 0 to
 2147483647). There is no key for a commit title, a file name or a remote URL,
-so none can be sent. While the lease is live, a bad `artifacts` (or a bad
+so none can be sent.
+
+**The code-task result fields (ADR-0162 amendment 5 C1/C2).** Also optional,
+also closed: `resultKind` (`pr_opened` / `branch_only` / `vm_only` /
+`no_change`), `tests` (`{passed, failed, notRun}`, all three required, each an
+integer 0 to 100000), `nextAction` (`merge_ok` / `please_test` / `blocked` /
+`none`), `commitSha` (7 to 40 hex characters, stored lowercase) and
+`toolCounts` (`{run, edit, read, search, web, other}`, each optional, integer 0
+to 100000). They must agree with each other: `tests`, `nextAction` and
+`commitSha` need `resultKind`; `pr_opened` needs `prUrl`; `branch_only` needs
+`branch` and no `prUrl`; `vm_only` has no `prUrl` or `branch`; `no_change` has
+no `prUrl`, `branch` or `commitSha` and its `added` / `deleted` / `commits`
+are absent or 0; `merge_ok` needs `pr_opened` and no failed test.
+`toolCounts` may come alone, without `resultKind`. A routine that sends only
+the five original keys is unchanged. The server checks the shape, not the
+facts: it does not look up the PR, the commit or the test run. The run read
+(`GET /v1/workspaces/{ws}/agent-runs/{run}`) returns these five fields
+together as `agentReported`, so a client draws them under one "reported by
+the agent" label and never mixes them with what oort itself measured.
+
+A refused `artifacts` names the field: the JSON-RPC error keeps `-32602`, its
+`message` is one English line such as `artifacts.resultKind must be one of
+pr_opened, branch_only, vm_only, no_change`, and `error.data` is
+`{field, rule, allowed?, requires?}` with `rule` one of `enum`, `required`,
+`forbidden`, `range`, `format`, `requires`. Neither ever repeats the value
+that was sent. A refusal past the published schema (a cross rule, a bad
+`prUrl` or `branch`, a non-hex `commitSha`) also writes the audit row with
+`field`, `rule` and `attempt` (the how-many-th refusal for that run), still
+without the value. The server does not stop retries by count; the routine
+does (at most 2 fixes, step g). While the lease is live, a bad `artifacts` (or a bad
 `stage`) refuses the whole call with HTTP 400 / `-32602`, stores nothing from
 it, writes one audit row with a reason code only, and leaves the lease intact,
 so the agent can send the same call again without the bad part. If the
@@ -1834,6 +1881,7 @@ this page and not run for it; they need an isolated PostgreSQL 18):
 | claim, event, complete share the lease and terminal rules | `the_job_and_run_tools_share_the_gateway_lease_and_terminal_rules` (`agent_port_tools_conformance_pg.rs`) |
 | stage markers: 12 kept, bad text refused | `stage_markers_keep_the_latest_twelve_spend_steps_and_refuse_bad_text` |
 | artifacts stored, a bad one refuses the whole completion | `artifacts_are_stored_when_valid_and_a_bad_one_refuses_the_whole_completion` |
+| result fields: the bad field is named, the report reads back as `agentReported` | `the_code_result_contract_names_the_bad_field_and_reads_back_as_agent_reported` |
 | a dead handle cannot grow the audit log | `a_dead_lease_cannot_grow_the_audit_log_with_bad_reports` |
 | lease length and renew | `a_hosted_claim_leases_for_the_hosted_ttl_and_renew_extends_to_it` |
 | expired, not re-claimed: still reports and completes | `an_expired_unreclaimed_hosted_handle_still_reports_and_completes` |
