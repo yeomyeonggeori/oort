@@ -247,6 +247,13 @@ pub enum ActionArgs {
         target_handle: Option<String>,
         target: Option<ResolvedAgentTarget>,
     },
+    /// `agent.invite` (증보 v3 V3-3). `platform` is the card's preset label key
+    /// only; the identity is born at decision time as the **approver's**.
+    AgentInvite {
+        platform: &'static str,
+        display_name: String,
+        handle: String,
+    },
     ChannelMemberAdd {
         channel_ref: String,
         handles: Vec<String>,
@@ -453,6 +460,7 @@ pub fn validated_action_args_from(
         actions::ACTION_HOSTED_CHANNELS_GRANT => hosted_channels_grant_args(args),
         actions::ACTION_WORKSPACE_SETTINGS_UPDATE => workspace_settings_update_args(args),
         actions::ACTION_AGENT_PROFILE_UPDATE => agent_profile_update_args(args, origin),
+        actions::ACTION_AGENT_INVITE => agent_invite_args(args),
         // Fail closed. A registry entry with no normaliser must be an error and
         // not an unvalidated passthrough — `every_action_has_a_normaliser` is
         // what makes this arm unreachable rather than merely unlikely.
@@ -867,6 +875,41 @@ fn agent_rename_args(args: &Value) -> Result<ValidatedActionArgs, ApiError> {
             display_name,
             target_handle,
             target: None,
+        },
+    })
+}
+
+fn agent_invite_args(args: &Value) -> Result<ValidatedActionArgs, ApiError> {
+    let object = args
+        .as_object()
+        .ok_or_else(|| ApiError::bad_request("action args must be an object"))?;
+    // Closed: no id, scope, channel or `ownerOnly`/subscription key can ride along.
+    closed_keys(object, &["platform", "displayName", "handle"])?;
+    let platform_key = optional_string(object, "platform")?
+        .ok_or_else(|| ApiError::bad_request("platform is required"))?;
+    let (platform, _) = actions::AGENT_INVITE_PLATFORMS
+        .iter()
+        .find(|(key, _)| *key == platform_key)
+        .ok_or_else(|| ApiError::bad_request("platform is not allowed"))?;
+    let raw_name = optional_string(object, "displayName")?
+        .ok_or_else(|| ApiError::bad_request("displayName is required"))?;
+    // The strict agent-proposal guard (a link, a mention or an invisible
+    // character cannot get through); which rule failed is not said.
+    let display_name = validated_agent_proposed_display_name(raw_name)
+        .map_err(|_| ApiError::bad_request("display name is not allowed"))?;
+    let raw_handle = optional_string(object, "handle")?
+        .ok_or_else(|| ApiError::bad_request("handle is required"))?;
+    let handle = normalized_member_handle(raw_handle)
+        .map_err(|_| ApiError::bad_request("handle is not allowed"))?;
+    Ok(ValidatedActionArgs {
+        summary: None,
+        normalized: json!({"platform": platform, "displayName": display_name, "handle": handle}),
+        // The label is the registry's; the rows need the roster check first.
+        rows: Vec::new(),
+        args: ActionArgs::AgentInvite {
+            platform,
+            display_name,
+            handle,
         },
     })
 }
@@ -1567,6 +1610,52 @@ async fn resolve_action_with_origin_in_tx(
     // resolves anything and whom its role gate is about.
     let subject = match &mut validated.args {
         ActionArgs::InviteCreate { .. } => GateSubject::Workspace,
+        ActionArgs::AgentInvite {
+            platform,
+            display_name,
+            handle,
+        } => {
+            if !proposer_is_live_agent_in_tx(conn, workspace_id, proposer_member_id).await? {
+                return Ok(Err(ApiError::bad_request(
+                    "proposer is not an active agent",
+                )));
+            }
+            // The collision check and the later INSERT must see the same roster.
+            lock_display_name_namespace_in_tx(conn, workspace_id).await?;
+            let roster = load_roster_names_in_tx(conn, workspace_id, Uuid::nil()).await?;
+            let names: Vec<RosterName<'_>> = roster
+                .iter()
+                .map(|(member_id, display_name, handle)| RosterName {
+                    member_id: *member_id,
+                    display_name,
+                    handle,
+                })
+                .collect();
+            // Nobody to exclude: the new agent is not in the roster yet.
+            if conflicts_with_roster(display_name, Uuid::nil(), &names)
+                || mention_overlaps_roster(display_name, Uuid::nil(), &names)
+                || conflicts_with_roster(handle, Uuid::nil(), &names)
+                // The handle is spoken as `@handle`: it gets the name rules too
+                // (reserved words) and the mention-overlap rule (I1 review M1/M2).
+                || validated_agent_proposed_display_name(handle).is_err()
+                || mention_overlaps_roster(handle, Uuid::nil(), &names)
+                // A deleted member still holds its handle (unique index), which
+                // the roster does not list (I1 review L1).
+                || momo_db::sqlx::query_scalar::<_, bool>(
+                    "SELECT EXISTS (SELECT 1 FROM member WHERE workspace_id = $1 AND handle = $2)",
+                )
+                .bind(workspace_id)
+                .bind(handle.as_str())
+                .fetch_one(&mut *conn)
+                .await?
+                || momo_settings::is_handle_banned_in_tx(conn, handle).await?
+            {
+                return Ok(Err(ApiError::bad_request("agent name is not allowed")));
+            }
+            let label = actions::agent_invite_platform_label(platform).unwrap_or("");
+            validated.rows = actions::agent_invite_rows(label, display_name, handle);
+            GateSubject::Workspace
+        }
         ActionArgs::ChannelCreate {
             name,
             kind,
@@ -2009,6 +2098,7 @@ async fn resolve_action_with_origin_in_tx(
             "avatar": avatar_pin(avatar),
         }),
         ActionArgs::InviteCreate { .. } => Value::Null,
+        ActionArgs::AgentInvite { handle, .. } => json!({"handle": handle}),
         ActionArgs::ChannelCreate { members, .. } => {
             json!({"members": members.iter().map(|m| m.id.to_string()).collect::<Vec<_>>()})
         }
@@ -2985,6 +3075,41 @@ mod tests {
             actions::WELCOME_PROMPT_PROPOSAL_MAX_BYTES as usize,
             actions::WELCOME_PROMPT_PROPOSAL_MAX_CHARS * 4
         );
+    }
+
+    #[test]
+    fn agent_invite_takes_exactly_three_keys_and_the_strict_name() {
+        let ok =
+            json!({"platform": "muse", "displayName": "Muse Writer", "handle": "@Muse-Writer"});
+        let validated = validated_action_args(
+            actions::action_by_id(actions::ACTION_AGENT_INVITE).expect("registered"),
+            &ok,
+            NOW_MS,
+        )
+        .expect("a good invite");
+        assert_eq!(
+            validated.normalized,
+            json!({"platform": "muse", "displayName": "Muse Writer", "handle": "muse-writer"})
+        );
+        for hostile in [
+            json!({"platform": "muse", "displayName": "Muse Writer", "handle": "muse-writer", "ownerOnly": true}),
+            json!({"platform": "muse", "displayName": "Muse Writer", "handle": "muse-writer", "scopes": []}),
+            json!({"platform": "skynet", "displayName": "Muse Writer", "handle": "muse-writer"}),
+            json!({"platform": "muse", "displayName": "see https://x.example", "handle": "muse-writer"}),
+            json!({"platform": "muse", "displayName": "Admin", "handle": "muse-writer"}),
+            json!({"platform": "muse", "displayName": "Muse Writer", "handle": "bad handle"}),
+            json!({"displayName": "Muse Writer", "handle": "muse-writer"}),
+        ] {
+            assert!(
+                validated_action_args(
+                    actions::action_by_id(actions::ACTION_AGENT_INVITE).expect("registered"),
+                    &hostile,
+                    NOW_MS
+                )
+                .is_err(),
+                "{hostile} must be refused"
+            );
+        }
     }
 
     /// **The runbook cannot drift from the registry (ADR-0186 증보 S6).**

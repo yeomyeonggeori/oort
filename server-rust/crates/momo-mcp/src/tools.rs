@@ -327,7 +327,7 @@ fn artifacts_schema() -> Value {
 /// `docs/api/openapi.yaml`'s `WorkspaceActionId` against each other. Adding an
 /// action means editing three lines; forgetting one of them is a red test, not a
 /// production surprise.
-const WORKSPACE_ACTION_IDS: [&str; 7] = [
+const WORKSPACE_ACTION_IDS: [&str; 8] = [
     "invite.create",
     "channel.create",
     "channel.member.add",
@@ -335,6 +335,7 @@ const WORKSPACE_ACTION_IDS: [&str; 7] = [
     "hosted.channels.grant",
     "workspace.settings.update",
     "agent.profile.update",
+    "agent.invite",
 ];
 
 // The argument vocabulary the registry publishes, restated here for the same
@@ -358,6 +359,7 @@ const WORKSPACE_CHANNEL_NAME_MAX_BYTES: u64 = 80;
 const WORKSPACE_CHANNEL_TOPIC_MAX_BYTES: u64 = 1_120;
 const WORKSPACE_CHANNEL_REF_MAX_BYTES: u64 = 81;
 const WORKSPACE_AGENT_NAME_MAX_BYTES: u64 = 256;
+const WORKSPACE_AGENT_INVITE_PLATFORMS: [&str; 4] = ["grok_bot", "dots", "muse", "other"];
 const WORKSPACE_GRANT_CHANNELS_MAX: u64 = 5;
 const WORKSPACE_WELCOME_PROMPT_MAX_BYTES: u64 = 2_000;
 const WORKSPACE_ROLE_LABEL_KEYS: [&str; 4] = ["owner", "admin", "member", "guest"];
@@ -457,6 +459,15 @@ fn action_args_branches() -> Vec<Value> {
         ),
         workspace_settings_branch(),
         agent_profile_update_branch(),
+        action_args_branch(
+            "agent.invite",
+            &["platform", "displayName", "handle"],
+            json!({
+                "platform": {"type": "string", "enum": WORKSPACE_AGENT_INVITE_PLATFORMS},
+                "displayName": required_text(WORKSPACE_AGENT_NAME_MAX_BYTES),
+                "handle": required_text(WORKSPACE_MEMBER_HANDLE_MAX_BYTES)
+            }),
+        ),
     ]
 }
 
