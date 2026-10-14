@@ -16271,4 +16271,20 @@ async fn the_team_ai_switch_provisions_pauses_and_cannot_be_forged() {
     )
     .await;
     assert_eq!(body["team_ai_agent_member_id"], member.to_string());
+
+    // `null` deletes the key, which means off: it must pause, not leave a live
+    // member behind a switch that reads as unset.
+    let (status, _) = patch(
+        fixture.human_jwt.clone(),
+        json!({"team_ai_fast_path": null}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let paused: bool =
+        sqlx::query_scalar("SELECT paused FROM agent_profile WHERE agent_member_id=$1")
+            .bind(member)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert!(paused, "null switches the team AI off");
 }

@@ -66,6 +66,8 @@ pub const DEFAULT_DAILY_TOKEN_CAP: i64 = 200_000;
 pub const MAX_PENDING_PER_REQUESTER: i64 = 3;
 /// ADR-0201 D6-5: pending team-AI cards a workspace may have open.
 pub const MAX_PENDING_PER_WORKSPACE: i64 = 30;
+/// ADR-0201 D6-5: model calls one requester may start per 10 minutes.
+pub const MAX_REQUESTS_PER_10_MIN: i64 = 20;
 /// The model may write at most this many tokens (D7: no long answers here).
 pub const MAX_OUTPUT_TOKENS: i32 = 600;
 /// A trigger message longer than this is cut before it reaches the model.
@@ -278,7 +280,8 @@ pub async fn tokens_used_today_in_tx(
 pub struct Roster {
     /// `(handle, display name, is_agent)`.
     pub members: Vec<(String, String, bool)>,
-    /// Channel names the requester can see.
+    /// Public channel names plus the channel the request was made in — the reply is
+    /// posted in that channel, so nothing the channel's readers could not see is sent.
     pub channels: Vec<String>,
     /// The channel the request was made in.
     pub this_channel: String,
@@ -290,31 +293,39 @@ pub async fn load_roster_in_tx(
     requester_member_id: Uuid,
     channel_id: Uuid,
 ) -> Result<Roster, DbError> {
-    let members = sqlx::query(
-        "SELECT m.handle, m.display_name, (m.kind = 'agent') AS is_agent \
-           FROM member m \
-          WHERE m.workspace_id = $1 AND m.status = 'active' AND m.deleted_at IS NULL \
-            AND m.handle IS NOT NULL \
-          ORDER BY m.kind, lower(m.display_name) \
-          LIMIT $2",
-    )
-    .bind(workspace_id)
-    .bind(ROSTER_MEMBERS_MAX)
-    .fetch_all(&mut *conn)
-    .await?;
+    // A guest sees a narrowed roster everywhere else (`GET …/roster`); the team AI
+    // would otherwise read it out. Guests get no member list at all.
+    let is_guest = matches!(
+        momo_auth::active_workspace_role(conn, workspace_id, requester_member_id)
+            .await
+            .map_err(DbError::from)?,
+        Some(momo_auth::WorkspaceRole::Guest) | None
+    );
+    let members = if is_guest {
+        Vec::new()
+    } else {
+        sqlx::query(
+            "SELECT m.handle, m.display_name, (m.kind = 'agent') AS is_agent \
+               FROM member m \
+              WHERE m.workspace_id = $1 AND m.status = 'active' AND m.deleted_at IS NULL \
+                AND m.handle IS NOT NULL \
+              ORDER BY m.kind, lower(m.display_name) \
+              LIMIT $2",
+        )
+        .bind(workspace_id)
+        .bind(ROSTER_MEMBERS_MAX)
+        .fetch_all(&mut *conn)
+        .await?
+    };
     let channels = sqlx::query(
         "SELECT c.name \
            FROM channel c \
-          WHERE c.workspace_id = $1 AND c.kind IN ('public', 'private') \
-            AND c.archived_at IS NULL \
-            AND (c.kind = 'public' OR EXISTS ( \
-                  SELECT 1 FROM membership p \
-                   WHERE p.workspace_id = c.workspace_id AND p.channel_id = c.id \
-                     AND p.member_id = $2 AND p.left_at IS NULL)) \
+          WHERE c.workspace_id = $1 AND c.archived_at IS NULL \
+            AND (c.kind = 'public' OR c.id = $2) \
           ORDER BY lower(c.name) LIMIT $3",
     )
     .bind(workspace_id)
-    .bind(requester_member_id)
+    .bind(channel_id)
     .bind(ROSTER_CHANNELS_MAX)
     .fetch_all(&mut *conn)
     .await?;
@@ -496,6 +507,27 @@ async fn count_pending_for_requester_in_tx(
         row.try_get::<i64, _>("mine").map_err(DbError::from)?,
         row.try_get::<i64, _>("everyone").map_err(DbError::from)?,
     ))
+}
+
+/// Team-AI runs this requester started in the last ten minutes (the rate limit
+/// is checked **before** any model call).
+pub async fn recent_requests_by_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+    requester: Uuid,
+) -> Result<i64, DbError> {
+    Ok(sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM agent_run r \
+           JOIN message t ON t.id = r.trigger_message_id AND t.workspace_id = r.workspace_id \
+          WHERE r.workspace_id = $1 AND r.agent_member_id = $2 \
+            AND t.author_member_id = $3 AND r.created_at > now() - interval '10 minutes'",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .bind(requester)
+    .fetch_one(&mut *conn)
+    .await?)
 }
 
 /// Could the requester approve this action themselves? A convenience check so a
@@ -814,6 +846,7 @@ pub async fn delegation_candidates_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     team_ai_member_id: Uuid,
+    channel_id: Uuid,
 ) -> Result<Vec<(Uuid, String, String)>, DbError> {
     let rows = sqlx::query(
         "SELECT m.id, m.handle, m.display_name \
@@ -823,6 +856,9 @@ pub async fn delegation_candidates_in_tx(
           WHERE m.workspace_id = $1 AND m.kind = 'agent' AND m.status = 'active' \
             AND m.deleted_at IS NULL AND m.id <> $2 AND m.handle IS NOT NULL \
             AND NOT ap.paused \
+            AND EXISTS (SELECT 1 FROM membership cm \
+                         WHERE cm.workspace_id = m.workspace_id AND cm.channel_id = $3 \
+                           AND cm.member_id = m.id AND cm.left_at IS NULL) \
             AND EXISTS (SELECT 1 FROM hosted_agent_connection h \
                          WHERE h.workspace_id = m.workspace_id AND h.agent_member_id = m.id \
                            AND h.status = 'active') \
@@ -830,6 +866,7 @@ pub async fn delegation_candidates_in_tx(
     )
     .bind(workspace_id)
     .bind(team_ai_member_id)
+    .bind(channel_id)
     .fetch_all(&mut *conn)
     .await?;
     Ok(rows
@@ -855,6 +892,8 @@ pub enum FallbackReason {
     OverBudget,
     /// The proposal was refused by the registry/resolver (the sentence says so).
     CouldNotPropose,
+    /// This requester asked too often in a short time.
+    RateLimited,
 }
 
 impl FallbackReason {
@@ -864,6 +903,7 @@ impl FallbackReason {
             FallbackReason::Slow => "slow",
             FallbackReason::OverBudget => "over_budget",
             FallbackReason::CouldNotPropose => "could_not_propose",
+            FallbackReason::RateLimited => "rate_limited",
         }
     }
 
@@ -878,6 +918,9 @@ impl FallbackReason {
             }
             FallbackReason::OverBudget => {
                 "오늘 팀 AI 사용량을 다 썼어요. 다른 에이전트에게 맡길 수 있어요."
+            }
+            FallbackReason::RateLimited => {
+                "요청이 너무 빨라요. 잠시 뒤에 다시 해 주세요."
             }
             FallbackReason::CouldNotPropose => {
                 "그 요청은 카드로 만들지 못했어요. 이름이나 채널을 다시 확인하거나, 다른 에이전트에게 맡길 수 있어요."

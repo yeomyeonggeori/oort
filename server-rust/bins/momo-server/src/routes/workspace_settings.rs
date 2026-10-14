@@ -112,8 +112,9 @@ pub async fn patch(
             // ADR-0201 D8: the switch also provisions (or pauses) the team AI member.
             // Same transaction: a switch that says "on" with no member behind it
             // cannot commit.
-            if let Some(Value::Bool(on)) = request.get("team_ai_fast_path") {
-                if *on {
+            if let Some(switch) = request.get("team_ai_fast_path") {
+                // `null` deletes the key, which means off; only `true` provisions.
+                if switch.as_bool() == Some(true) {
                     match momo_workspace_actions::team_ai::enable_in_tx(
                         conn,
                         workspace_id,

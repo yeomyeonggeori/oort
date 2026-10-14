@@ -696,6 +696,10 @@ async fn a_slow_model_hands_off_instead_of_retrying() {
         .await
         .unwrap();
     assert_eq!(pending, 0, "not requeued");
+    assert!(
+        ledger_tokens(&su, &t).await > 0,
+        "a timed-out call is still charged (estimate), so the ceiling moves"
+    );
 }
 
 #[tokio::test]
@@ -863,4 +867,108 @@ async fn the_fast_path_reaches_a_card_within_the_budget() {
     }
     let _ = usage(0, 0);
     let _ = ledger_tokens(&su, &t).await;
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn a_rapid_requester_is_refused_before_any_model_call() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool, true).await;
+    seed_link(&su, t.owner_id).await;
+    let provider = Arc::new(MockChatProvider::echo());
+    let w = worker_with(provider.clone(), |_| {}).await;
+    let mut last = Uuid::nil();
+    for n in 0..=momo_workspace_actions::team_ai::MAX_REQUESTS_PER_10_MIN {
+        last = enqueue(&pool, &t, t.owner_id, "human", &format!("질문 {n}"), None)
+            .await
+            .0;
+    }
+    // One agent's jobs are claimed one at a time (and a drain handles eight): keep
+    // draining until the last run has left the queue.
+    for _ in 0..10 {
+        drain(&w).await;
+        if run_status(&su, last).await.0 != "queued" {
+            break;
+        }
+    }
+    assert!(
+        provider.calls().is_empty(),
+        "over the rate, no model is called"
+    );
+    let (status, error) = run_status(&su, last).await;
+    assert_eq!(
+        (status.as_str(), error["code"].as_str()),
+        ("failed", Some("rate_limited"))
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn the_prompt_names_no_private_channel_and_a_guest_gets_no_member_list() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool, true).await;
+    seed_link(&su, t.owner_id).await;
+    // A private channel the requester belongs to, and a guest requester.
+    let secret = format!("secret-{}", &Uuid::new_v4().simple().to_string()[..8]);
+    let private_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO channel (id, workspace_id, kind, name) VALUES ($1, $2, 'private', $3)",
+    )
+    .bind(private_id)
+    .bind(t.workspace_id)
+    .bind(&secret)
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO channel_seq (channel_id, workspace_id, last_seq) VALUES ($1, $2, 0)")
+        .bind(private_id)
+        .bind(t.workspace_id)
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO membership (workspace_id, channel_id, member_id) VALUES ($1, $2, $3)")
+        .bind(t.workspace_id)
+        .bind(private_id)
+        .bind(t.owner_id)
+        .execute(&su)
+        .await
+        .unwrap();
+
+    let provider = Arc::new(MockChatProvider::echo());
+    let w = worker_with(provider.clone(), |_| {}).await;
+    enqueue(&pool, &t, t.owner_id, "human", "채널이 뭐 있어?", None).await;
+    drain(&w).await;
+    let system = provider.calls()[0].messages[0].content.clone();
+    assert!(
+        !system.contains(&secret),
+        "the reply goes to a public channel: no private names"
+    );
+    assert!(
+        system.contains("성재") || system.contains("민수"),
+        "anti-vacuity: a member requester sees the roster"
+    );
+
+    sqlx::query(
+        "UPDATE workspace_membership SET role = 'guest' WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(t.workspace_id)
+    .bind(t.member_id)
+    .execute(&su)
+    .await
+    .unwrap();
+    let provider2 = Arc::new(MockChatProvider::echo());
+    let w2 = worker_with(provider2.clone(), |_| {}).await;
+    enqueue(&pool, &t, t.member_id, "human", "누가 있어?", None).await;
+    drain(&w2).await;
+    let system = provider2.calls()[0].messages[0].content.clone();
+    assert!(
+        !system.contains("성재") && !system.contains("그록봇"),
+        "a guest is shown no member list: {system}"
+    );
 }

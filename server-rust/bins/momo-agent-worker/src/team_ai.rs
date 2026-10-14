@@ -38,6 +38,7 @@ struct Gathered {
     used_today: i64,
     roster: team_ai::Roster,
     candidates: Vec<(Uuid, String, String)>,
+    recent_requests: i64,
 }
 
 /// How a settled team-AI turn ends the run.
@@ -90,11 +91,25 @@ impl AgentWorker {
                             channel_id,
                         )
                         .await?,
-                        team_ai::delegation_candidates_in_tx(conn, workspace_id, agent).await?,
+                        team_ai::delegation_candidates_in_tx(conn, workspace_id, agent, channel_id)
+                            .await?,
                     ),
                     None => (team_ai::Roster::default(), Vec::new()),
                 };
+                let recent_requests = match &requester {
+                    Some(requester) => {
+                        team_ai::recent_requests_by_in_tx(
+                            conn,
+                            workspace_id,
+                            agent,
+                            requester.member_id,
+                        )
+                        .await?
+                    }
+                    None => 0,
+                };
                 Ok(Some(Gathered {
+                    recent_requests,
                     state,
                     requester,
                     trigger_text,
@@ -154,6 +169,24 @@ impl AgentWorker {
             );
         }
 
+        // D6-5: asking faster than a person plausibly does is refused before any
+        // model call (the count includes this run, hence `>`).
+        if gathered.recent_requests > team_ai::MAX_REQUESTS_PER_10_MIN {
+            return Some(
+                self.team_ai_fallback(
+                    job,
+                    payload,
+                    run_id,
+                    &requester,
+                    &gathered.candidates,
+                    FallbackReason::RateLimited,
+                    None,
+                    "",
+                )
+                .await,
+            );
+        }
+
         // D4 pre-flight for an OAuth link (internal dogfood only): refresh first.
         if transport.needs_refresh(crate::now_ms())
             && self.refresh_and_reseal(transport).await.is_err()
@@ -189,6 +222,11 @@ impl AgentWorker {
             ]),
         };
 
+        let prompt_chars: usize = request
+            .messages
+            .iter()
+            .map(|message| message.content.chars().count())
+            .sum();
         let started = Instant::now();
         let attempt = tokio::time::timeout(
             self.config.team_ai_model_timeout,
@@ -219,14 +257,17 @@ impl AgentWorker {
                         &requester,
                         &gathered.candidates,
                         FallbackReason::Slow,
-                        None,
+                        // The provider may well have spent tokens before it timed
+                        // out or failed: charge a conservative estimate so the
+                        // daily ceiling still moves.
+                        Some(Spend::of(None, prompt_chars)),
                         &model,
                     )
                     .await,
                 );
             }
         };
-        let usage = completion.usage;
+        let usage = Some(Spend::of(completion.usage, prompt_chars));
 
         let Some(call) = completion.tool_calls.first().cloned() else {
             // A plain answer (workspace facts). Bounded, posted as one message.
@@ -302,8 +343,8 @@ impl AgentWorker {
         let via = ViaAi {
             model: model.clone(),
             latency_ms,
-            prompt_tokens: usage.map(|u| u.prompt_tokens).unwrap_or(0),
-            completion_tokens: usage.map(|u| u.completion_tokens).unwrap_or(0),
+            prompt_tokens: usage.map(|u| u.usage.prompt_tokens).unwrap_or(0),
+            completion_tokens: usage.map(|u| u.usage.completion_tokens).unwrap_or(0),
         };
         let ledger = ledger_report(usage, &model, payload);
         let fallback_model = model.clone();
@@ -412,7 +453,7 @@ impl AgentWorker {
         requester: &momo_agent::card_suggest::SuggestionRequester,
         candidates: &[(Uuid, String, String)],
         reason: FallbackReason,
-        usage: Option<ChatUsage>,
+        usage: Option<Spend>,
         model: &str,
     ) -> Settlement {
         let props = team_ai::fallback_props(
@@ -446,7 +487,7 @@ impl AgentWorker {
         run_id: Uuid,
         body: Option<String>,
         props: Value,
-        usage: Option<ChatUsage>,
+        usage: Option<Spend>,
         model: &str,
         ending: Ending,
     ) -> Settlement {
@@ -556,20 +597,48 @@ impl AgentWorker {
     }
 }
 
-fn ledger_report(
-    usage: Option<ChatUsage>,
-    model: &str,
-    payload: &AgentJobPayload,
-) -> RunUsageReport {
+/// Tokens a team-AI turn is charged for the daily ceiling.
+#[derive(Debug, Clone, Copy)]
+struct Spend {
+    usage: ChatUsage,
+    /// `true` when the provider reported nothing and this is our estimate.
+    estimated: bool,
+}
+
+impl Spend {
+    /// What the provider reported, or — when it reported nothing (timeout, error,
+    /// no `usage` object) — a conservative estimate: ~3 characters per prompt
+    /// token plus the full output allowance. Never zero, so the ceiling cannot be
+    /// walked past by a provider that omits usage.
+    fn of(reported: Option<ChatUsage>, prompt_chars: usize) -> Spend {
+        match reported {
+            Some(usage) => Spend {
+                usage,
+                estimated: false,
+            },
+            None => Spend {
+                usage: ChatUsage {
+                    prompt_tokens: i32::try_from(prompt_chars / 3 + 1).unwrap_or(i32::MAX),
+                    completion_tokens: momo_workspace_actions::team_ai::MAX_OUTPUT_TOKENS,
+                    cached_tokens: 0,
+                    reasoning_tokens: 0,
+                },
+                estimated: true,
+            },
+        }
+    }
+}
+
+fn ledger_report(spend: Option<Spend>, model: &str, payload: &AgentJobPayload) -> RunUsageReport {
     RunUsageReport {
         model: Some(model.to_string()),
         effort: payload.effort.clone(),
-        prompt_tokens: usage.map(|u| u.prompt_tokens),
-        completion_tokens: usage.map(|u| u.completion_tokens),
-        cached_tokens: usage.map(|u| u.cached_tokens),
-        reasoning_tokens: usage.map(|u| u.reasoning_tokens),
+        prompt_tokens: spend.map(|s| s.usage.prompt_tokens),
+        completion_tokens: spend.map(|s| s.usage.completion_tokens),
+        cached_tokens: spend.map(|s| s.usage.cached_tokens),
+        reasoning_tokens: spend.map(|s| s.usage.reasoning_tokens),
         cost_micro_usd: None,
-        was_estimated: Some(usage.is_none()),
+        was_estimated: Some(spend.map(|s| s.estimated).unwrap_or(true)),
     }
 }
 
