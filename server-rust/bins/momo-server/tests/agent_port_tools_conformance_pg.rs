@@ -12666,3 +12666,2898 @@ async fn a_rejected_card_is_announced_as_rejected() {
     assert_eq!(frames.len(), 1, "the rejection announces the card once");
     assert_eq!(frames[0]["payload"]["props"]["status"], json!("rejected"));
 }
+
+/// **#3784 red proof** (hardened after the #3795 security review): a decision
+/// asking `deliverSecretToAgent: true` where it cannot be honoured is refused 400
+/// `deliver_secret_not_supported` **before any write**, on both decision routes,
+/// both spellings, approve and reject, and on a card whose deadline has passed
+/// (an expiry settlement must not outrank the refusal). The approval, the ledger
+/// (`approval_decision`), the audit log and the invite table are all unchanged.
+/// A decision that does not ask still executes, and a replay of an executed
+/// decision that now asks answers the original receipt (documented: the flag is
+/// not part of the idempotency key).
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn deliver_secret_to_agent_is_refused_where_the_action_does_not_offer_it() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app.clone(), true).await;
+    let client = reqwest::Client::new();
+
+    async fn counts(su: &PgPool, workspace: Uuid, approval_id: Uuid) -> (String, i64, i64, i64) {
+        let status: String =
+            sqlx::query_scalar("SELECT status::text FROM approval WHERE workspace_id=$1 AND id=$2")
+                .bind(workspace)
+                .bind(approval_id)
+                .fetch_one(su)
+                .await
+                .unwrap();
+        let ledger: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM approval_decision WHERE workspace_id=$1 AND approval_id=$2",
+        )
+        .bind(workspace)
+        .bind(approval_id)
+        .fetch_one(su)
+        .await
+        .unwrap();
+        let audits: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE workspace_id=$1")
+                .bind(workspace)
+                .fetch_one(su)
+                .await
+                .unwrap();
+        let invites: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM invite_code WHERE workspace_id=$1")
+                .bind(workspace)
+                .fetch_one(su)
+                .await
+                .unwrap();
+        (status, ledger, audits, invites)
+    }
+
+    async fn post_decision(
+        client: &reqwest::Client,
+        url: String,
+        bearer: &str,
+        body: Value,
+    ) -> (u16, Value) {
+        let response = client
+            .post(url)
+            .bearer_auth(bearer)
+            .json(&body)
+            .send()
+            .await
+            .expect("decision responds");
+        let status = response.status().as_u16();
+        (status, response.json().await.unwrap_or(Value::Null))
+    }
+
+    let (approval_id, _card) = propose_invite(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        json!({"role": "member", "maxUses": 1, "expiresInDays": 7}),
+    )
+    .await;
+    let run_id: Uuid =
+        sqlx::query_scalar("SELECT run_id FROM approval WHERE workspace_id=$1 AND id=$2")
+            .bind(fixture.workspace)
+            .bind(approval_id)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    let before = counts(&su, fixture.workspace, approval_id).await;
+    assert_eq!(before.0, "pending");
+
+    let workspace_route = format!(
+        "{base}/v1/workspaces/{}/approvals/{approval_id}/decision",
+        fixture.workspace
+    );
+    let run_route = format!("{base}/v1/agent-runs/{run_id}/approval-decisions");
+    for (route_label, url) in [("workspace", workspace_route.clone()), ("run", run_route)] {
+        for approve in [true, false] {
+            for spelling in ["deliverSecretToAgent", "deliver_secret_to_agent"] {
+                let (status, body) = post_decision(
+                    &client,
+                    url.clone(),
+                    &fixture.human_jwt,
+                    json!({
+                        "approvalId": approval_id,
+                        "approve": approve,
+                        "clientDecisionId": Uuid::new_v4(),
+                        spelling: true,
+                    }),
+                )
+                .await;
+                let label = format!("{route_label}/approve={approve}/{spelling}");
+                assert_eq!(status, 400, "{label}: {body}");
+                assert_eq!(
+                    body["status"], "deliver_secret_not_supported",
+                    "{label}: {body}"
+                );
+                assert!(
+                    body.get("result").is_none(),
+                    "{label}: executed nothing: {body}"
+                );
+                assert_eq!(
+                    counts(&su, fixture.workspace, approval_id).await,
+                    before,
+                    "{label}: nothing consumed, nothing written"
+                );
+            }
+        }
+    }
+
+    // A non-boolean flag is a malformed body, not a quiet `false`.
+    let (status, _body) = post_decision(
+        &client,
+        workspace_route.clone(),
+        &fixture.human_jwt,
+        json!({
+            "approvalId": approval_id, "approve": true,
+            "clientDecisionId": Uuid::new_v4(), "deliverSecretToAgent": "true"
+        }),
+    )
+    .await;
+    assert!((400..500).contains(&status), "{status}");
+    assert_eq!(counts(&su, fixture.workspace, approval_id).await, before);
+
+    // An approval that is not a workspace action at all (an ordinary tool-call
+    // card): a `true` is refused for it too, approve or reject, nothing written.
+    let plain_run: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status) \
+         VALUES ($1,$2,$3,'awaiting_approval') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let plain: Uuid = sqlx::query_scalar(
+        "INSERT INTO approval (workspace_id, run_id, channel_id, requested_by, action_type, payload) \
+         VALUES ($1,$2,$3,$4,'tool_call','{}'::jsonb) RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(plain_run)
+    .bind(fixture.channel)
+    .bind(fixture.hosted_agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let plain_before = counts(&su, fixture.workspace, plain).await;
+    for approve in [true, false] {
+        let (status, body) = post_decision(
+            &client,
+            format!(
+                "{base}/v1/workspaces/{}/approvals/{plain}/decision",
+                fixture.workspace
+            ),
+            &fixture.human_jwt,
+            json!({"approvalId": plain, "approve": approve,
+                   "clientDecisionId": Uuid::new_v4(), "deliverSecretToAgent": true}),
+        )
+        .await;
+        assert_eq!(status, 400, "tool_call approve={approve}: {body}");
+        assert_eq!(body["status"], "deliver_secret_not_supported", "{body}");
+        assert_eq!(
+            counts(&su, fixture.workspace, plain).await,
+            plain_before,
+            "tool_call approve={approve}: nothing consumed, nothing written"
+        );
+    }
+
+    // The deadline has passed: the refusal still wins over the expiry settlement.
+    sqlx::query(
+        "UPDATE approval SET expires_at = now() - interval '1 minute' \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(approval_id)
+    .execute(&su)
+    .await
+    .unwrap();
+    let expired_before = counts(&su, fixture.workspace, approval_id).await;
+    let (status, body) = post_decision(
+        &client,
+        workspace_route.clone(),
+        &fixture.human_jwt,
+        json!({
+            "approvalId": approval_id, "approve": true,
+            "clientDecisionId": Uuid::new_v4(), "deliverSecretToAgent": true
+        }),
+    )
+    .await;
+    assert_eq!(status, 400, "{body}");
+    assert_eq!(body["status"], "deliver_secret_not_supported", "{body}");
+    assert_eq!(
+        counts(&su, fixture.workspace, approval_id).await,
+        expired_before,
+        "an overdue card is not settled by a refused request"
+    );
+
+    // A decision that does not ask executes, and a replay that now asks answers
+    // the original receipt.
+    let (fresh, _card) = propose_invite(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        json!({"role": "member", "maxUses": 1, "expiresInDays": 7}),
+    )
+    .await;
+    let decision_id = Uuid::new_v4();
+    let url = format!(
+        "{base}/v1/workspaces/{}/approvals/{fresh}/decision",
+        fixture.workspace
+    );
+    let (status, body) = post_decision(
+        &client,
+        url.clone(),
+        &fixture.human_jwt,
+        json!({"approvalId": fresh, "approve": true, "clientDecisionId": decision_id,
+               "deliverSecretToAgent": false}),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["status"], "approved", "{body}");
+    let (status, replay) = post_decision(
+        &client,
+        url,
+        &fixture.human_jwt,
+        json!({"approvalId": fresh, "approve": true, "clientDecisionId": decision_id,
+               "deliverSecretToAgent": true}),
+    )
+    .await;
+    assert_eq!(status, 200, "{replay}");
+    assert_eq!(replay["status"], "approved", "{replay}");
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0186 증보 2026-10-13 v3 P1 (#3785) — agent.profile.update
+// ---------------------------------------------------------------------------
+
+async fn profile_row_3785(
+    pool: &PgPool,
+    agent: Uuid,
+) -> (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+) {
+    sqlx::query_as(
+        "SELECT a.config->>'tagline', a.config->>'roleLabel', m.status_emoji, m.status_text \
+           FROM member m JOIN agent a ON a.member_id = m.id WHERE m.id = $1",
+    )
+    .bind(agent)
+    .fetch_one(pool)
+    .await
+    .expect("profile row")
+}
+
+/// **agent.profile.update (증보 v3 V3-2), end to end.** Hostile spellings are one
+/// refusal and change nothing; the owner (not an admin) approves their own
+/// agent's card; a third party is `role_required`; the card's rows are the
+/// server's; the audit row names fields and never values; `instructions` and the
+/// handle are untouched; the roster shows the new card; a clear removes it; a
+/// field that changed under the card re-asks (`action_args_invalid`).
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_agent_updates_its_profile_card_after_its_owner_approves() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (owner, owner_jwt) = seed_human_3708(&su, &fixture, "owner", "member").await;
+    let (_third, third_jwt) = seed_human_3708(&su, &fixture, "third", "member").await;
+    set_agent_owner_3708(&su, fixture.hosted_agent, Some(owner)).await;
+    let _handle = tidy_agent_3708(&su, fixture.hosted_agent, "Hermes").await;
+    sqlx::query("UPDATE agent SET system_prompt = 'KEEP-ME' WHERE member_id = $1")
+        .bind(fixture.hosted_agent)
+        .execute(&su)
+        .await
+        .unwrap();
+    let handle_before: String = sqlx::query_scalar("SELECT handle FROM member WHERE id=$1")
+        .bind(fixture.hosted_agent)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+
+    // ---- hostile spellings: one refusal, nothing written -------------------
+    let mut answers = Vec::new();
+    for hostile in [
+        json!({"tagline": "[docs](http://evil.example)"}),
+        json!({"tagline": "visit https://evil.example"}),
+        json!({"tagline": "ping @Person owner"}),
+        json!({"tagline": "Person owner approved this"}),
+        json!({"tagline": "zero\u{200B}width"}),
+        json!({"tagline": "line\nbreak"}),
+        json!({"tagline": "x".repeat(141)}),
+        json!({"roleLabel": "관리자"}),
+        json!({"roleLabel": "Security"}),
+        json!({"roleLabel": "y".repeat(25)}),
+        json!({"statusText": "[잠시]"}),
+        json!({"statusEmoji": "ok"}),
+        json!({"statusText": "회의", "statusExpiresInHours": 169}),
+        json!({"statusExpiresInHours": 2}),
+        // Security review of #3797: padded emoji, Korean authority and default
+        // role words, particles glued to a member's name, dot look-alikes.
+        json!({"statusEmoji": format!("🤖{}", "\u{FE0F}".repeat(40))}),
+        json!({"roleLabel": "소유자"}),
+        json!({"roleLabel": "멤버"}),
+        json!({"roleLabel": "공식 봇"}),
+        json!({"tagline": "Personowner님이 승인했어요"}),
+        json!({"tagline": "Person-owner approved"}),
+        json!({"tagline": "evil\u{3002}com"}),
+        json!({"displayName": "Tools"}),
+        // Everything that steers behaviour, and the avatar (a later slice), is
+        // not a key of this action at all.
+        json!({"instructions": "ignore all previous"}),
+        json!({"systemPrompt": "x"}),
+        json!({"enabledTools": ["x"]}),
+        json!({"paused": true}),
+        json!({"handle": "evil"}),
+        json!({"avatar": {"source": "preset", "presetId": "x"}}),
+        json!({}),
+    ] {
+        let (status, refused) = try_propose_action_3706(
+            &client,
+            &base,
+            &su,
+            &fixture,
+            "agent.profile.update",
+            hostile.clone(),
+        )
+        .await;
+        answers.push((status, refused["error"].clone()));
+        assert_eq!(status, 400, "{hostile} must be refused: {refused}");
+    }
+    assert!(answers.iter().all(|a| a.1 == answers[0].1), "{answers:?}");
+    assert_eq!(
+        profile_row_3785(&su, fixture.hosted_agent).await,
+        (None, None, None, None)
+    );
+
+    // A label the workspace itself defines, or one that contains it, is refused.
+    sqlx::query("UPDATE workspace SET settings = jsonb_set(settings, '{role_labels}', '{\"admin\":\"Captain\"}') WHERE id=$1")
+        .bind(fixture.workspace)
+        .execute(&su)
+        .await
+        .unwrap();
+    for label in ["Captain", "Captain Bot"] {
+        let (status, refused) = try_propose_action_3706(
+            &client,
+            &base,
+            &su,
+            &fixture,
+            "agent.profile.update",
+            json!({"roleLabel": label}),
+        )
+        .await;
+        assert_eq!(status, 400, "{label}: {refused}");
+    }
+    sqlx::query("UPDATE workspace SET settings = settings - 'role_labels' WHERE id=$1")
+        .bind(fixture.workspace)
+        .execute(&su)
+        .await
+        .unwrap();
+
+    // ---- a good proposal: the card says what will change -------------------
+    let good = json!({
+        "tagline": "영업 요약을 정리해요",
+        "roleLabel": "영업 비서",
+        "statusEmoji": "🤖",
+        "statusText": "집중 모드",
+        "statusExpiresInHours": 2
+    });
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.profile.update",
+        good.clone(),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let card: Value = sqlx::query_scalar("SELECT props FROM message WHERE id=$1")
+        .bind(Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap())
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(card["action"]["required_role"], json!("agent_editor"));
+    let rows = card["action"]["rows"].as_array().unwrap().clone();
+    let row = |label: &str| {
+        rows.iter()
+            .find(|r| r["label"] == label)
+            .unwrap_or_else(|| panic!("{label} in {rows:?}"))["value"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert!(row("대상 에이전트").contains("Hermes"));
+    assert_eq!(row("소개"), "없음 → 영업 요약을 정리해요");
+    assert_eq!(row("역할 라벨"), "없음 → 영업 비서");
+    assert_eq!(row("상태"), "없음 → 🤖 집중 모드 (2시간 동안)");
+    assert!(!card["summary"].as_str().unwrap().contains("다른 에이전트"));
+
+    // ---- a third party is refused; the agent cannot approve ----------------
+    let (status, _h, refused) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &third_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["status"], "role_required");
+    assert_eq!(approval_status_3708(&su, approval).await, "pending");
+    assert_eq!(
+        profile_row_3785(&su, fixture.hosted_agent).await,
+        (None, None, None, None)
+    );
+
+    // ---- the owner approves ------------------------------------------------
+    let audits_before: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE workspace_id=$1")
+            .bind(fixture.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &owner_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(
+        approved["result"]["actionId"],
+        json!("agent.profile.update")
+    );
+    assert!(approved["result"].get("secretOnce").is_none());
+    assert_eq!(
+        profile_row_3785(&su, fixture.hosted_agent).await,
+        (
+            Some("영업 요약을 정리해요".into()),
+            Some("영업 비서".into()),
+            Some("🤖".into()),
+            Some("집중 모드".into())
+        )
+    );
+    let hours_left: f64 = sqlx::query_scalar(
+        "SELECT (extract(epoch FROM (status_expires_at - now())) / 3600.0)::float8 FROM member WHERE id=$1",
+    )
+    .bind(fixture.hosted_agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert!((1.9..=2.0).contains(&hours_left), "{hours_left}");
+    // Nothing else moved.
+    let prompt: Option<String> =
+        sqlx::query_scalar("SELECT system_prompt FROM agent WHERE member_id=$1")
+            .bind(fixture.hosted_agent)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(prompt.as_deref(), Some("KEEP-ME"));
+    let handle_after: String = sqlx::query_scalar("SELECT handle FROM member WHERE id=$1")
+        .bind(fixture.hosted_agent)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(handle_after, handle_before);
+    assert_eq!(display_name_3708(&su, fixture.hosted_agent).await, "Hermes");
+
+    // ---- audit: field names, never values ----------------------------------
+    let audit: Value = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE workspace_id=$1 AND action='agent.profile.updated' \
+          ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .expect("audit row");
+    assert_eq!(
+        audit["fields"],
+        json!(["tagline", "roleLabel", "status"]),
+        "{audit}"
+    );
+    let rendered = audit.to_string();
+    for value in ["영업 요약", "영업 비서", "집중 모드", "🤖"] {
+        assert!(
+            !rendered.contains(value),
+            "{value} leaked into the audit: {rendered}"
+        );
+    }
+    assert!(
+        audits_before
+            < sqlx::query_scalar::<_, i64>("SELECT count(*) FROM audit_log WHERE workspace_id=$1")
+                .bind(fixture.workspace)
+                .fetch_one(&su)
+                .await
+                .unwrap()
+    );
+
+    // ---- the roster shows the card -----------------------------------------
+    let roster: Value = client
+        .get(format!("{base}/v1/workspaces/{}/roster", fixture.workspace))
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let members = roster["members"]
+        .as_array()
+        .or(roster.as_array())
+        .expect("roster list");
+    let me = members
+        .iter()
+        .find(|m| m["id"] == json!(fixture.hosted_agent.to_string()))
+        .expect("the agent is on the roster");
+    assert_eq!(me["tagline"], json!("영업 요약을 정리해요"), "{me}");
+    assert_eq!(me["roleLabel"], json!("영업 비서"), "{me}");
+    assert_eq!(me["statusText"], json!("집중 모드"), "{me}");
+    assert_eq!(me["statusEmoji"], json!("🤖"), "{me}");
+    // A human still carries neither.
+    let human = members
+        .iter()
+        .find(|m| m["id"] == json!(fixture.human.to_string()))
+        .expect("the human is on the roster");
+    assert!(
+        human.get("tagline").is_none() && human.get("roleLabel").is_none(),
+        "{human}"
+    );
+
+    // `config` is also a free bag written at creation: a non-string or oversized
+    // value under a card key reads as unset, on the roster and in the card.
+    sqlx::query(
+        "UPDATE agent SET config = config || jsonb_build_object('roleLabel', 5, \
+            'tagline', repeat('x', 200)) WHERE member_id=$1",
+    )
+    .bind(fixture.hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    let roster: Value = client
+        .get(format!("{base}/v1/workspaces/{}/roster", fixture.workspace))
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let members = roster["members"]
+        .as_array()
+        .or(roster.as_array())
+        .expect("roster list");
+    let me = members
+        .iter()
+        .find(|m| m["id"] == json!(fixture.hosted_agent.to_string()))
+        .unwrap();
+    assert!(
+        me.get("roleLabel").is_none() && me.get("tagline").is_none(),
+        "{me}"
+    );
+    // Put the good card back for the steps below.
+    sqlx::query(
+        "UPDATE agent SET config = config || jsonb_build_object('roleLabel', '영업 비서'::text, \
+            'tagline', '영업 요약을 정리해요'::text) WHERE member_id=$1",
+    )
+    .bind(fixture.hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+
+    // ---- a field that changed under the card re-asks -----------------------
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.profile.update",
+        json!({"tagline": "새 소개예요"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let stale = proposed_approval_3706(&proposed);
+    sqlx::query("UPDATE agent SET config = jsonb_set(config, '{tagline}', '\"바뀐 소개\"') WHERE member_id=$1")
+        .bind(fixture.hosted_agent)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, _h, refused) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &owner_jwt,
+        stale,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{refused}");
+    assert_eq!(refused["status"], "action_args_invalid");
+    assert_eq!(approval_status_3708(&su, stale).await, "pending");
+    assert_eq!(
+        profile_row_3785(&su, fixture.hosted_agent)
+            .await
+            .0
+            .as_deref(),
+        Some("바뀐 소개")
+    );
+
+    // The stale card is rejected (a second pending proposal on the same target
+    // is a conflict, V4-M-9), then a clear is proposed.
+    let (status, _h, rejected) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &owner_jwt,
+        stale,
+        false,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{rejected}");
+
+    // ---- null clears --------------------------------------------------------
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.profile.update",
+        json!({"tagline": null, "roleLabel": null, "statusText": null, "statusEmoji": null}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let clear = proposed_approval_3706(&proposed);
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &owner_jwt,
+        clear,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(
+        profile_row_3785(&su, fixture.hosted_agent).await,
+        (None, None, None, None)
+    );
+    // Clearing what is already clear changes nothing, so it is not a proposal.
+    let (status, nothing) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.profile.update",
+        json!({"tagline": null}),
+    )
+    .await;
+    assert_eq!(status, 400, "{nothing}");
+}
+
+/// The name rides the same card (one approval, two audit rows), and another
+/// agent is a target only when it has the **same owner** (V4-M): a stranger's
+/// agent, an ownerless one and a human handle are one refusal.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_profile_update_may_rename_and_may_target_only_a_managed_agent() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (owner, owner_jwt) = seed_human_3708(&su, &fixture, "owner", "member").await;
+    let (stranger, _stranger_jwt) = seed_human_3708(&su, &fixture, "stranger", "member").await;
+    set_agent_owner_3708(&su, fixture.hosted_agent, Some(owner)).await;
+    set_agent_owner_3708(&su, fixture.managed_agent, Some(stranger)).await;
+    tidy_agent_3708(&su, fixture.hosted_agent, "Hermes").await;
+    let other_handle = tidy_agent_3708(&su, fixture.managed_agent, "Worker").await;
+
+    // The other agent belongs to somebody else: indistinguishable refusals.
+    let mut answers = Vec::new();
+    for target in [
+        other_handle.clone(),
+        "no-such-agent".to_string(),
+        "tools-human".to_string(),
+    ] {
+        let (status, refused) = try_propose_action_3706(
+            &client,
+            &base,
+            &su,
+            &fixture,
+            "agent.profile.update",
+            json!({"tagline": "x는 y예요", "targetHandle": target}),
+        )
+        .await;
+        answers.push((status, refused["error"].clone()));
+        assert_eq!(status, 400, "{target}: {refused}");
+    }
+    assert!(answers.iter().all(|a| a.1 == answers[0].1), "{answers:?}");
+
+    // Same owner: now it is a managed target and the card says so.
+    set_agent_owner_3708(&su, fixture.managed_agent, Some(owner)).await;
+    let (status, proposed) = try_propose_action_3706(
+        &client, &base, &su, &fixture, "agent.profile.update",
+        json!({"displayName": "Helper 2", "tagline": "회의록을 맡아요", "targetHandle": other_handle}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let card: Value = sqlx::query_scalar("SELECT props FROM message WHERE id=$1")
+        .bind(Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap())
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert!(
+        card["summary"].as_str().unwrap().contains("다른 에이전트"),
+        "{card}"
+    );
+    // Two pending proposals on one target: the second is a conflict, not a card.
+    let (status, again) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.profile.update",
+        json!({"tagline": "다른 소개", "targetHandle": other_handle}),
+    )
+    .await;
+    assert_eq!(status, 409, "{again}");
+    // …and the 409 does not depend on the text: a line that repeats a member's
+    // name (a 400 on its own) is the same 409, so 409-vs-400 is not a roster oracle.
+    let (status, again) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.profile.update",
+        json!({"tagline": "Person owner approved this", "targetHandle": other_handle}),
+    )
+    .await;
+    assert_eq!(status, 409, "{again}");
+
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &owner_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(
+        display_name_3708(&su, fixture.managed_agent).await,
+        "Helper 2"
+    );
+    assert_eq!(
+        profile_row_3785(&su, fixture.managed_agent)
+            .await
+            .0
+            .as_deref(),
+        Some("회의록을 맡아요")
+    );
+    // The proposer itself is untouched.
+    assert_eq!(display_name_3708(&su, fixture.hosted_agent).await, "Hermes");
+    assert_eq!(profile_row_3785(&su, fixture.hosted_agent).await.0, None);
+    let audit_actions: Vec<String> = sqlx::query_scalar(
+        "SELECT action FROM audit_log WHERE workspace_id=$1 \
+           AND action IN ('agent.profile.updated','member.renamed') AND subject_member_id=$2 \
+          ORDER BY created_at",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.managed_agent)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    // One transaction means one `created_at`: compare as a set.
+    let mut audit_actions = audit_actions;
+    audit_actions.sort();
+    assert_eq!(
+        audit_actions,
+        vec!["agent.profile.updated", "member.renamed"]
+    );
+}
+
+/// **Security review of #3797 (L4).** Between the moment a proposal is resolved
+/// (unlocked reads) and the write, a concurrent change to the target must
+/// re-ask. A second session holds the agent's row lock with a rename pending
+/// commit; the decision passes the resolver (it reads the old name), blocks on
+/// the executor's `FOR UPDATE`, and — once the rename commits — must refuse
+/// `action_args_invalid` having written nothing. The test waits until the
+/// decision is *actually* blocked on the lock, so it is the executor's re-read
+/// under the lock that is being measured and not the pins.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_change_that_lands_after_resolution_is_caught_under_the_lock() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (owner, owner_jwt) = seed_human_3708(&su, &fixture, "owner", "member").await;
+    set_agent_owner_3708(&su, fixture.hosted_agent, Some(owner)).await;
+    tidy_agent_3708(&su, fixture.hosted_agent, "Hermes").await;
+
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.profile.update",
+        json!({"tagline": "새 소개예요"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+
+    // Hold the row lock and stage a rename that has not committed yet.
+    let mut blocker = su.begin().await.unwrap();
+    sqlx::query("SELECT id FROM member WHERE id=$1 FOR UPDATE")
+        .bind(fixture.hosted_agent)
+        .execute(&mut *blocker)
+        .await
+        .unwrap();
+
+    let decision = {
+        let (client, base, jwt, ws) = (
+            client.clone(),
+            base.clone(),
+            owner_jwt.clone(),
+            fixture.workspace,
+        );
+        tokio::spawn(async move {
+            decide_as(&client, &base, ws, &jwt, approval, true, Uuid::new_v4()).await
+        })
+    };
+    // Wait until the decision transaction is parked on a row lock.
+    let mut waited = false;
+    for _ in 0..200 {
+        let blocked: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_stat_activity \
+              WHERE wait_event_type = 'Lock' AND state = 'active' AND query ILIKE '%FOR UPDATE%'",
+        )
+        .fetch_one(&su)
+        .await
+        .unwrap();
+        if blocked > 0 {
+            waited = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(waited, "the decision never reached the executor's row lock");
+    sqlx::query("UPDATE member SET display_name = 'Renamed Meanwhile' WHERE id=$1")
+        .bind(fixture.hosted_agent)
+        .execute(&mut *blocker)
+        .await
+        .unwrap();
+    blocker.commit().await.unwrap();
+
+    let (status, _h, refused) = decision.await.unwrap();
+    assert_eq!(status, 409, "{refused}");
+    assert_eq!(refused["status"], "action_args_invalid");
+    assert_eq!(approval_status_3708(&su, approval).await, "pending");
+    assert_eq!(
+        profile_row_3785(&su, fixture.hosted_agent).await.0,
+        None,
+        "nothing was written"
+    );
+    assert_eq!(
+        display_name_3708(&su, fixture.hosted_agent).await,
+        "Renamed Meanwhile"
+    );
+}
+
+/// **Security review of #3797 (F1) — lock order.** Proposing takes the
+/// display-name advisory lock *before* any member row, exactly as an approval and
+/// the human `PATCH …/agents/{agent}` do; the reverse order is a deadlock with a
+/// concurrent approval. A second session holds the advisory lock; the proposal
+/// parks on it; and while it is parked the agent's member row must still be free
+/// (`FOR UPDATE NOWAIT` succeeds) — a proposal that had already taken the row
+/// first would make that fail.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_proposal_takes_the_advisory_lock_before_any_member_row() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (owner, _jwt) = seed_human_3708(&su, &fixture, "owner", "member").await;
+    set_agent_owner_3708(&su, fixture.hosted_agent, Some(owner)).await;
+    tidy_agent_3708(&su, fixture.hosted_agent, "Hermes").await;
+
+    let mut blocker = su.begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended('display-name:' || $1::text, 0))")
+        .bind(fixture.workspace.to_string())
+        .execute(&mut *blocker)
+        .await
+        .unwrap();
+
+    let propose = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.profile.update",
+        json!({"tagline": "새 소개예요"}),
+    );
+    let agent = fixture.hosted_agent;
+    let control = async {
+        let mut parked = false;
+        for _ in 0..200 {
+            let waiting: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM pg_stat_activity \
+                  WHERE wait_event_type = 'Lock' AND wait_event = 'advisory'",
+            )
+            .fetch_one(&su)
+            .await
+            .unwrap();
+            if waiting > 0 {
+                parked = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(parked, "the proposal never parked on the advisory lock");
+        // While it is parked, the proposer's row is not held by it.
+        let free = sqlx::query("SELECT id FROM member WHERE id = $1 FOR UPDATE NOWAIT")
+            .bind(agent)
+            .fetch_all(&su)
+            .await;
+        assert!(
+            free.is_ok(),
+            "the proposal took the member row before the advisory lock: {free:?}"
+        );
+        blocker.commit().await.unwrap();
+    };
+    let ((status, proposed), ()) = tokio::join!(propose, control);
+    assert_eq!(status, 200, "{proposed}");
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0186 증보 2026-10-13 v3 A0 (#3786) — agent_avatar_image (migration 131)
+// ---------------------------------------------------------------------------
+
+/// The well-known 1×1 PNG.
+const TINY_PNG_B64_3786: &str =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+async fn tenant_3786<T: Send + 'static>(
+    pool: &PgPool,
+    workspace: Uuid,
+    body: impl for<'c> FnOnce(
+            &'c mut momo_db::PgConnection,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<T, momo_db::DbError>> + Send + 'c>,
+        > + Send,
+) -> Result<T, momo_db::DbError> {
+    momo_db::with_tenant_tx(pool, workspace, body).await
+}
+
+/// Stage `processed` for `agent` and bind it to a fresh approval id (the order the
+/// proposal path uses: stage, create the approval, bind). Returns `(image, approval)`.
+async fn stage_bound_3786(
+    app: &PgPool,
+    ws: Uuid,
+    agent: Uuid,
+    processed: &momo_messaging::ProcessedAvatar,
+) -> (Uuid, Uuid) {
+    let p = processed.clone();
+    let approval = Uuid::new_v4();
+    let image = tenant_3786(app, ws, move |conn| {
+        Box::pin(async move {
+            let image =
+                momo_messaging::stage_avatar_image_in_tx(conn, ws, agent, agent, "generated", &p)
+                    .await?;
+            assert!(
+                momo_messaging::bind_staged_image_to_approval_in_tx(conn, ws, image, approval)
+                    .await?
+            );
+            Ok(image)
+        })
+    })
+    .await
+    .expect("stage and bind");
+    (image, approval)
+}
+
+/// **The stored agent avatar, end to end at the database and the proxy.**
+/// staged rows are immutable (trigger) and pinned by a hash the database
+/// recomputes; the pointer can only name the member's own image (composite FK);
+/// RLS hides another workspace's rows; applying replaces and deletes the previous
+/// image; the content proxy serves exactly the re-encoded bytes with the
+/// sandbox headers and a version token that must be current; clearing removes it.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_agent_avatar_image_is_staged_pinned_applied_and_served() {
+    use base64::Engine as _;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app.clone(), true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+    let agent = fixture.hosted_agent;
+    let other_agent = fixture.managed_agent;
+
+    let input = base64::engine::general_purpose::STANDARD
+        .decode(TINY_PNG_B64_3786)
+        .unwrap();
+    let processed = momo_messaging::process_avatar_image(&input, 1 << 20).expect("a valid image");
+    assert_eq!(processed.mime, "image/png");
+
+    // ---- stage (bound to its approval, as the proposal path does) -------------
+    let (first, appr_first) = stage_bound_3786(&app, ws, agent, &processed).await;
+    let sha = processed.sha256.to_vec();
+
+    // ---- the pin: right hash, wrong hash, wrong member, wrong approval ----------
+    let (s1, s2) = (sha.clone(), vec![0u8; 32]);
+    // A staged row that was never bound to any approval.
+    let p = processed.clone();
+    let unbound = tenant_3786(&app, ws, move |conn| {
+        Box::pin(async move {
+            momo_messaging::stage_avatar_image_in_tx(conn, ws, agent, agent, "generated", &p).await
+        })
+    })
+    .await
+    .unwrap();
+    let s3 = sha.clone();
+    let pins = tenant_3786(&app, ws, move |conn| {
+        Box::pin(async move {
+            Ok((
+                momo_messaging::staged_image_matches_pin_in_tx(
+                    conn, ws, first, agent, appr_first, &s1,
+                )
+                .await?,
+                momo_messaging::staged_image_matches_pin_in_tx(
+                    conn, ws, first, agent, appr_first, &s2,
+                )
+                .await?,
+                momo_messaging::staged_image_matches_pin_in_tx(
+                    conn,
+                    ws,
+                    first,
+                    other_agent,
+                    appr_first,
+                    &s1,
+                )
+                .await?,
+                momo_messaging::staged_image_matches_pin_in_tx(
+                    conn,
+                    ws,
+                    first,
+                    agent,
+                    Uuid::new_v4(),
+                    &s1,
+                )
+                .await?,
+                momo_messaging::staged_image_matches_pin_in_tx(
+                    conn, ws, unbound, agent, appr_first, &s3,
+                )
+                .await?,
+            ))
+        })
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        pins,
+        (true, false, false, false, false),
+        "right hash/member/approval only; an unbound row or another approval never matches"
+    );
+    sqlx::query("DELETE FROM agent_avatar_image WHERE id=$1")
+        .bind(unbound)
+        .execute(&su)
+        .await
+        .unwrap();
+    // A second image cannot be bound to the same approval (UNIQUE), and a row cannot
+    // be bound twice (the function reports it).
+    let p = processed.clone();
+    let collision = tenant_3786(&app, ws, move |conn| {
+        Box::pin(async move {
+            let again =
+                momo_messaging::stage_avatar_image_in_tx(conn, ws, agent, agent, "generated", &p)
+                    .await?;
+            Ok((
+                again,
+                momo_messaging::bind_staged_image_to_approval_in_tx(
+                    conn,
+                    ws,
+                    first,
+                    Uuid::new_v4(),
+                )
+                .await?,
+            ))
+        })
+    })
+    .await
+    .unwrap();
+    assert!(!collision.1, "a bound row is not re-bound");
+    let duplicate = sqlx::query("UPDATE agent_avatar_image SET approval_id = $2 WHERE id = $1")
+        .bind(collision.0)
+        .bind(appr_first)
+        .execute(&su)
+        .await
+        .expect_err("one approval, one image")
+        .to_string();
+    assert!(
+        duplicate.contains("agent_avatar_approval_uniq"),
+        "{duplicate}"
+    );
+    sqlx::query("DELETE FROM agent_avatar_image WHERE id=$1")
+        .bind(collision.0)
+        .execute(&su)
+        .await
+        .unwrap();
+
+    // ---- immutability: the trigger refuses every column but status ----------
+    //
+    // Each replacement is a **valid** value (same length, in range, a real member),
+    // so the CHECKs and foreign keys would let it through: only the trigger can say
+    // no, and the message must be the trigger's.
+    for statement in [
+        "UPDATE agent_avatar_image SET bytes = set_byte(bytes, 0, 255) WHERE id = $1",
+        "UPDATE agent_avatar_image SET sha256 = decode(repeat('00', 32), 'hex') WHERE id = $1",
+        "UPDATE agent_avatar_image SET mime = 'image/jpeg' WHERE id = $1",
+        "UPDATE agent_avatar_image SET member_id = $2 WHERE id = $1",
+        "UPDATE agent_avatar_image SET proposed_by = $2 WHERE id = $1",
+        "UPDATE agent_avatar_image SET width = width - 1 WHERE id = $1",
+        "UPDATE agent_avatar_image SET height = height - 1 WHERE id = $1",
+        "UPDATE agent_avatar_image SET size_bytes = size_bytes WHERE id = $1 AND false",
+        "UPDATE agent_avatar_image SET source = CASE source WHEN 'generated' THEN 'attachment' \
+                                                ELSE 'generated' END WHERE id = $1",
+        "UPDATE agent_avatar_image SET created_at = created_at - interval '1 day' WHERE id = $1",
+    ] {
+        let result = sqlx::query(statement)
+            .bind(first)
+            .bind(other_agent)
+            .execute(&su)
+            .await;
+        if statement.contains("AND false") {
+            assert!(result.is_ok(), "a no-op statement is not a change");
+            continue;
+        }
+        let error = result.expect_err(statement).to_string();
+        assert!(error.contains("immutable"), "{statement}: {error}");
+    }
+    // A write-once binding: a bound row is never re-bound or unbound.
+    let rebind = sqlx::query("UPDATE agent_avatar_image SET approval_id = $2 WHERE id = $1")
+        .bind(first)
+        .bind(Uuid::new_v4())
+        .execute(&su)
+        .await
+        .expect_err("a bound row cannot be re-bound")
+        .to_string();
+    assert!(rebind.contains("write-once"), "{rebind}");
+    let unbind = sqlx::query("UPDATE agent_avatar_image SET approval_id = NULL WHERE id = $1")
+        .bind(first)
+        .execute(&su)
+        .await
+        .expect_err("a bound row cannot be unbound")
+        .to_string();
+    assert!(unbind.contains("write-once"), "{unbind}");
+    // The status can only move forward.
+    sqlx::query("UPDATE agent_avatar_image SET status = 'applied' WHERE id = $1")
+        .bind(first)
+        .execute(&su)
+        .await
+        .unwrap();
+    let back = sqlx::query("UPDATE agent_avatar_image SET status = 'staged' WHERE id = $1")
+        .bind(first)
+        .execute(&su)
+        .await
+        .expect_err("applied cannot go back to staged")
+        .to_string();
+    assert!(back.contains("staged"), "{back}");
+    // An applied row is no longer a pin target.
+    let (s0, applied_pin) = (sha.clone(), {
+        let sha = sha.clone();
+        tenant_3786(&app, ws, move |conn| {
+            Box::pin(async move {
+                momo_messaging::staged_image_matches_pin_in_tx(
+                    conn, ws, first, agent, appr_first, &sha,
+                )
+                .await
+            })
+        })
+        .await
+        .unwrap()
+    });
+    assert!(
+        !applied_pin,
+        "only a staged row can satisfy a pin ({} bytes of pin)",
+        s0.len()
+    );
+    // Rows are inserted staged and unbound, for an agent of the same workspace.
+    for (label, statement) in [
+        (
+            "applied on insert",
+            "INSERT INTO agent_avatar_image (workspace_id, member_id, proposed_by, source, mime, \
+                width, height, size_bytes, sha256, bytes, status) \
+             SELECT workspace_id, member_id, proposed_by, source, mime, width, height, size_bytes, \
+                    sha256, bytes, 'applied' FROM agent_avatar_image WHERE id = $1",
+        ),
+        (
+            "a human as the owner",
+            "INSERT INTO agent_avatar_image (workspace_id, member_id, proposed_by, source, mime, \
+                width, height, size_bytes, sha256, bytes) \
+             SELECT workspace_id, $2, proposed_by, source, mime, width, height, size_bytes, \
+                    sha256, bytes FROM agent_avatar_image WHERE id = $1",
+        ),
+        (
+            "an unknown source",
+            "INSERT INTO agent_avatar_image (workspace_id, member_id, proposed_by, source, mime, \
+                width, height, size_bytes, sha256, bytes) \
+             SELECT workspace_id, member_id, proposed_by, 'url', mime, width, height, size_bytes, \
+                    sha256, bytes FROM agent_avatar_image WHERE id = $1",
+        ),
+        (
+            "a size that is not the byte length",
+            "INSERT INTO agent_avatar_image (workspace_id, member_id, proposed_by, source, mime, \
+                width, height, size_bytes, sha256, bytes) \
+             SELECT workspace_id, member_id, proposed_by, source, mime, width, height, \
+                    size_bytes + 1, sha256, bytes FROM agent_avatar_image WHERE id = $1",
+        ),
+        (
+            "an out-of-range canvas",
+            "INSERT INTO agent_avatar_image (workspace_id, member_id, proposed_by, source, mime, \
+                width, height, size_bytes, sha256, bytes) \
+             SELECT workspace_id, member_id, proposed_by, source, mime, 513, height, size_bytes, \
+                    sha256, bytes FROM agent_avatar_image WHERE id = $1",
+        ),
+    ] {
+        let human = fixture.human;
+        let result = sqlx::query(statement)
+            .bind(first)
+            .bind(human)
+            .execute(&su)
+            .await;
+        assert!(result.is_err(), "{label} must be refused");
+    }
+    // A member of ANOTHER workspace can be neither the owner nor the proposer of a
+    // row here: the composite foreign keys say so, whatever RLS does or does not
+    // hide from a foreign-key check.
+    let elsewhere = seed(&su).await;
+    for column in ["member_id", "proposed_by"] {
+        let statement =
+            format!(
+            "INSERT INTO agent_avatar_image (workspace_id, member_id, proposed_by, source, mime, \
+                width, height, size_bytes, sha256, bytes) \
+             SELECT workspace_id, {member}, {proposer}, source, mime, width, height, size_bytes, \
+                    sha256, bytes FROM agent_avatar_image WHERE id = $1",
+            member = if column == "member_id" { "$2" } else { "member_id" },
+            proposer = if column == "proposed_by" { "$2" } else { "proposed_by" },
+        );
+        let error = sqlx::query(&statement)
+            .bind(first)
+            .bind(elsewhere.hosted_agent)
+            .execute(&su)
+            .await
+            .expect_err("a member of another workspace must be refused")
+            .to_string();
+        assert!(error.contains("agent_avatar_"), "{column}: {error}");
+    }
+    // The applied row is the member's pointer target in the next block; for now
+    // make it the member's current image, then delete it: the pointer goes NULL.
+    sqlx::query("UPDATE member SET avatar_image_id = $1 WHERE id = $2")
+        .bind(first)
+        .bind(agent)
+        .execute(&su)
+        .await
+        .unwrap();
+    // One avatar at a time: an uploaded avatar and an image avatar do not coexist.
+    let media: Uuid = sqlx::query_scalar(
+        "INSERT INTO member_avatar_media (workspace_id, member_id, drive_file_id, name, mime, \
+            size_bytes, status) VALUES ($1,$2,'drive-3786','a.png','image/png',10,'complete') \
+         RETURNING id",
+    )
+    .bind(ws)
+    .bind(agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let both = sqlx::query("UPDATE member SET avatar_media_id = $1 WHERE id = $2")
+        .bind(media)
+        .bind(agent)
+        .execute(&su)
+        .await
+        .expect_err("both pointers set must be refused")
+        .to_string();
+    assert!(both.contains("member_avatar_exclusive_ck"), "{both}");
+    sqlx::query("DELETE FROM member_avatar_media WHERE id = $1")
+        .bind(media)
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM agent_avatar_image WHERE id = $1")
+        .bind(first)
+        .execute(&su)
+        .await
+        .unwrap();
+    let pointer: Option<Uuid> =
+        sqlx::query_scalar("SELECT avatar_image_id FROM member WHERE id=$1")
+            .bind(agent)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(pointer, None, "deleting the image clears the pointer");
+    // Re-create a staged row for the tamper check below (the first one is gone).
+    let (first, appr_first) = stage_bound_3786(&app, ws, agent, &processed).await;
+    // …and if the trigger were somehow bypassed, the pin check still notices,
+    // because the database recomputes the digest from the stored bytes.
+    sqlx::query("ALTER TABLE agent_avatar_image DISABLE TRIGGER agent_avatar_image_immutable_trg")
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE agent_avatar_image SET bytes = '\\x89504e47'::bytea, size_bytes = 4 WHERE id=$1",
+    )
+    .bind(first)
+    .execute(&su)
+    .await
+    .unwrap();
+    let s1 = sha.clone();
+    let tampered = tenant_3786(&app, ws, move |conn| {
+        Box::pin(async move {
+            momo_messaging::staged_image_matches_pin_in_tx(conn, ws, first, agent, appr_first, &s1)
+                .await
+        })
+    })
+    .await
+    .unwrap();
+    assert!(
+        !tampered,
+        "a row whose bytes changed no longer matches its pin"
+    );
+    sqlx::query("DELETE FROM agent_avatar_image WHERE id=$1")
+        .bind(first)
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query("ALTER TABLE agent_avatar_image ENABLE TRIGGER agent_avatar_image_immutable_trg")
+        .execute(&su)
+        .await
+        .unwrap();
+
+    // ---- stage again, then the composite FK and RLS --------------------------
+    let p = processed.clone();
+    let appr_image = Uuid::new_v4();
+    let image = tenant_3786(&app, ws, move |conn| {
+        Box::pin(async move {
+            let image =
+                momo_messaging::stage_avatar_image_in_tx(conn, ws, agent, agent, "attachment", &p)
+                    .await?;
+            momo_messaging::bind_staged_image_to_approval_in_tx(conn, ws, image, appr_image)
+                .await?;
+            Ok(image)
+        })
+    })
+    .await
+    .unwrap();
+    // A pointer at another member's image is not representable.
+    let wrong = sqlx::query("UPDATE member SET avatar_image_id = $1 WHERE id = $2")
+        .bind(image)
+        .bind(other_agent)
+        .execute(&su)
+        .await;
+    assert!(wrong.is_err(), "the pointer FK must be self-only");
+    // Row-level security, not the query's own WHERE: the right workspace id is
+    // asked for, but under another tenant's GUC — and the same call under the right
+    // GUC finds the row, so the only difference is RLS.
+    let found = tenant_3786(&app, ws, move |conn| {
+        Box::pin(async move { momo_messaging::read_avatar_image_in_tx(conn, ws, image).await })
+    })
+    .await
+    .unwrap();
+    assert!(found.is_some(), "control: visible under its own tenant");
+    let foreign = tenant_3786(&app, Uuid::new_v4(), move |conn| {
+        Box::pin(async move { momo_messaging::read_avatar_image_in_tx(conn, ws, image).await })
+    })
+    .await
+    .unwrap();
+    assert!(foreign.is_none(), "invisible under another tenant's GUC");
+    // A staged image is not served: the pointer is unset.
+    let url = format!("{base}/v1/workspaces/{ws}/members/{agent}/avatar/content");
+    let before = client
+        .get(&url)
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        before.status().as_u16(),
+        404,
+        "a staged image is never served"
+    );
+    // Even a pointer forced at a staged row (a bug, a manual edit) serves nothing:
+    // the read itself requires `applied`.
+    sqlx::query("UPDATE member SET avatar_image_id = $1 WHERE id = $2")
+        .bind(image)
+        .bind(agent)
+        .execute(&su)
+        .await
+        .unwrap();
+    let forced = client
+        .get(&url)
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        forced.status().as_u16(),
+        404,
+        "a staged row behind the pointer is not served"
+    );
+    sqlx::query("UPDATE member SET avatar_image_id = NULL WHERE id = $1")
+        .bind(agent)
+        .execute(&su)
+        .await
+        .unwrap();
+
+    // ---- apply ---------------------------------------------------------------
+    let applied = tenant_3786(&app, ws, move |conn| {
+        Box::pin(async move {
+            // Under another approval's id the same staged row is not applicable.
+            let wrong =
+                momo_messaging::apply_avatar_image_in_tx(conn, ws, agent, image, Uuid::new_v4())
+                    .await?;
+            assert_eq!(wrong, None, "another approval cannot apply this image");
+            momo_messaging::apply_avatar_image_in_tx(conn, ws, agent, image, appr_image).await
+        })
+    })
+    .await
+    .unwrap();
+    assert_eq!(applied, Some(None), "applied, with no previous image");
+    // Applying something that is not staged (or twice) is refused.
+    let again = tenant_3786(&app, ws, move |conn| {
+        Box::pin(async move {
+            momo_messaging::apply_avatar_image_in_tx(conn, ws, agent, image, appr_image).await
+        })
+    })
+    .await
+    .unwrap();
+    assert_eq!(again, None);
+
+    // ---- the proxy -----------------------------------------------------------
+    let versioned = format!("{url}?v={image}");
+    let served = client
+        .get(&versioned)
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(served.status().as_u16(), 200);
+    let headers = served.headers().clone();
+    assert_eq!(headers["content-type"], "image/png");
+    assert_eq!(headers["x-content-type-options"], "nosniff");
+    assert_eq!(
+        headers["content-security-policy"],
+        "default-src 'none'; sandbox"
+    );
+    assert!(headers["cache-control"]
+        .to_str()
+        .unwrap()
+        .contains("immutable"));
+    assert_eq!(served.bytes().await.unwrap().to_vec(), processed.bytes);
+    let stale = client
+        .get(format!("{url}?v={}", Uuid::new_v4()))
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        stale.status().as_u16(),
+        404,
+        "a version that is not current is not served"
+    );
+    let bare = client
+        .get(&url)
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bare.status().as_u16(), 200);
+    assert_eq!(bare.headers()["cache-control"], "private, no-cache");
+
+    // ---- the roster hands out the versioned URL --------------------------------
+    let roster: Value = client
+        .get(format!("{base}/v1/workspaces/{ws}/roster"))
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let members = roster["members"]
+        .as_array()
+        .or(roster.as_array())
+        .expect("roster list");
+    let me = members
+        .iter()
+        .find(|m| m["id"] == json!(agent.to_string()))
+        .unwrap();
+    assert_eq!(
+        me["avatarUrl"],
+        json!(format!(
+            "/v1/workspaces/{ws}/members/{agent}/avatar/content?v={image}"
+        ))
+    );
+
+    // ---- replace: the previous image row is deleted ------------------------------
+    let (second, appr_second) = stage_bound_3786(&app, ws, agent, &processed).await;
+    let replaced = tenant_3786(&app, ws, move |conn| {
+        Box::pin(async move {
+            momo_messaging::apply_avatar_image_in_tx(conn, ws, agent, second, appr_second).await
+        })
+    })
+    .await
+    .unwrap();
+    assert_eq!(replaced, Some(Some(image)));
+    let rows: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM agent_avatar_image WHERE member_id=$1")
+            .bind(agent)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(rows, 1, "only the current image remains");
+
+    // ---- stale staged rows are swept; an applied one never is --------------------
+    let p = processed.clone();
+    let old_staged = tenant_3786(&app, ws, move |conn| {
+        Box::pin(async move {
+            momo_messaging::stage_avatar_image_in_tx(conn, ws, agent, agent, "generated", &p).await
+        })
+    })
+    .await
+    .unwrap();
+    sqlx::query("ALTER TABLE agent_avatar_image DISABLE TRIGGER agent_avatar_image_immutable_trg")
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE agent_avatar_image SET created_at = now() - interval '25 hours' WHERE id IN ($1,$2)")
+        .bind(old_staged)
+        .bind(second)
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query("ALTER TABLE agent_avatar_image ENABLE TRIGGER agent_avatar_image_immutable_trg")
+        .execute(&su)
+        .await
+        .unwrap();
+    let purged = tenant_3786(&app, ws, move |conn| {
+        Box::pin(
+            async move { momo_messaging::purge_stale_staged_avatar_images_in_tx(conn, ws).await },
+        )
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        purged, 1,
+        "the old staged row goes, the old APPLIED row stays"
+    );
+    let left: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM agent_avatar_image WHERE member_id=$1")
+            .bind(agent)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(left, 1);
+
+    // ---- clear ------------------------------------------------------------------
+    let cleared = tenant_3786(&app, ws, move |conn| {
+        Box::pin(async move { momo_messaging::clear_avatar_image_in_tx(conn, ws, agent).await })
+    })
+    .await
+    .unwrap();
+    assert!(cleared);
+    let gone = client
+        .get(&url)
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(gone.status().as_u16(), 404);
+    let pointer: Option<Uuid> =
+        sqlx::query_scalar("SELECT avatar_image_id FROM member WHERE id=$1")
+            .bind(agent)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(pointer, None);
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0186 증보 2026-10-13 v3 A1 (#3787) — avatar sources, staging, pins, preview
+// ---------------------------------------------------------------------------
+
+/// An in-memory Drive archive: `file_content` answers the bytes registered under a
+/// Drive file id. Everything else is refused (the avatar path only reads).
+#[derive(Debug, Default)]
+struct MemDrive3787 {
+    files: std::sync::Mutex<std::collections::HashMap<String, Vec<u8>>>,
+}
+
+#[async_trait::async_trait]
+impl momo_drive::DriveArchive for MemDrive3787 {
+    async fn create_resumable_upload(
+        &self,
+        _channel_id: Uuid,
+        _name: &str,
+        _mime: &str,
+        _size_bytes: i64,
+    ) -> Result<momo_drive::DriveUploadSession, momo_drive::DriveError> {
+        Err(momo_drive::DriveError::Unavailable)
+    }
+
+    async fn file_metadata(
+        &self,
+        file_id: &str,
+    ) -> Result<momo_drive::DriveFile, momo_drive::DriveError> {
+        let files = self.files.lock().unwrap();
+        let bytes = files
+            .get(file_id)
+            .ok_or(momo_drive::DriveError::FileNotFound)?;
+        Ok(momo_drive::DriveFile {
+            drive_file_id: file_id.to_string(),
+            name: "x".into(),
+            mime: "image/png".into(),
+            size_bytes: bytes.len() as i64,
+        })
+    }
+
+    async fn file_content(
+        &self,
+        file_id: &str,
+        _max_bytes: i64,
+    ) -> Result<momo_drive::DriveContent, momo_drive::DriveError> {
+        let bytes = self
+            .files
+            .lock()
+            .unwrap()
+            .get(file_id)
+            .cloned()
+            .ok_or(momo_drive::DriveError::FileNotFound)?;
+        let size = bytes.len() as i64;
+        Ok(momo_drive::DriveContent {
+            mime: "image/png".into(),
+            size_bytes: size,
+            body: Box::pin(futures::stream::iter(vec![Ok(axum::body::Bytes::from(
+                bytes,
+            ))])),
+        })
+    }
+}
+
+async fn start_server_with_drive_3787(
+    pool: PgPool,
+    drive: Arc<dyn momo_drive::DriveArchive>,
+) -> String {
+    let state = AppState::new(
+        pool,
+        TEST_JWT_SECRET.to_string(),
+        "ws://127.0.0.1:8000/connection/websocket".to_string(),
+    )
+    .with_drive(drive)
+    .with_agent_port(AgentPortConfig {
+        external_origin: None,
+        window_seconds: 60,
+        per_token_limit: 0,
+        per_agent_limit: 0,
+        per_ip_limit: 0,
+        hosted_delivery_enabled: true,
+        hosted_lease_seconds: momo_outbox::HOSTED_LEASE_SECONDS_DEFAULT,
+        subscription_agents_enabled: true,
+        claude_subscription_agents_enabled: true,
+        oauth: Default::default(),
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind avatar conformance server");
+    let address: SocketAddr = listener.local_addr().expect("server address");
+    tokio::spawn(async move {
+        let _ = axum::serve(
+            listener,
+            build_app(state).into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await;
+    });
+    format!("http://{address}")
+}
+
+fn b64_3787(bytes: &[u8]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+fn tiny_png_3787() -> Vec<u8> {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD
+        .decode(TINY_PNG_B64_3786)
+        .unwrap()
+}
+
+async fn staged_rows_3787(pool: &PgPool, ws: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM agent_avatar_image WHERE workspace_id=$1")
+        .bind(ws)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// **An agent proposes an avatar it generated — the whole loop.** Hostile inputs
+/// are one refusal and leave no staged row; a good image is re-encoded, staged,
+/// bound to its approval, previewed to the approver only (and by hash), pinned;
+/// a third party cannot approve; tampered bytes re-ask; a swapped pin re-asks;
+/// rejection and expiry delete the staged row; approval serves exactly the server's
+/// bytes and the roster says so; a preset replaces it; null removes it.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_agent_proposes_a_generated_avatar_and_only_the_approved_bytes_are_served() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server_with_drive_3787(app, Arc::new(MemDrive3787::default())).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+    let agent = fixture.hosted_agent;
+    let (owner, owner_jwt) = seed_human_3708(&su, &fixture, "owner", "member").await;
+    let (_third, third_jwt) = seed_human_3708(&su, &fixture, "third", "member").await;
+    set_agent_owner_3708(&su, agent, Some(owner)).await;
+    tidy_agent_3708(&su, agent, "Hermes").await;
+
+    let propose = |avatar: Value| {
+        let (client, base, su) = (client.clone(), base.clone(), su.clone());
+        let fixture = &fixture;
+        async move {
+            try_propose_action_3706(
+                &client,
+                &base,
+                &su,
+                fixture,
+                "agent.profile.update",
+                json!({ "avatar": avatar }),
+            )
+            .await
+        }
+    };
+
+    // ---- hostile inputs: one refusal, no staged row ---------------------------
+    let mut polyglot = tiny_png_3787();
+    polyglot.extend_from_slice(b"<script>alert(1)</script>PK\x03\x04");
+    let mut bomb_header = tiny_png_3787();
+    bomb_header[16..20].copy_from_slice(&60000u32.to_be_bytes());
+    let mut answers = Vec::new();
+    for hostile in [
+        json!({"source": "url", "url": "https://evil.example/a.png"}),
+        json!({"source": "generated", "dataBase64": b64_3787(b"GIF89a\x01\x00\x01\x00\x00\x00\x00;")}),
+        json!({"source": "generated", "dataBase64": b64_3787(b"<svg xmlns='http://www.w3.org/2000/svg'><script>1</script></svg>")}),
+        json!({"source": "generated", "dataBase64": b64_3787(&bomb_header)}),
+        json!({"source": "generated", "dataBase64": b64_3787(&[0u8; 44_001])}),
+        json!({"source": "generated", "dataBase64": "not base64 !!"}),
+        json!({"source": "generated", "dataBase64": format!("{}\n", b64_3787(&tiny_png_3787()))}),
+        json!({"source": "generated", "dataBase64": b64_3787(&tiny_png_3787()), "mime": "image/svg+xml"}),
+        json!({"source": "generated", "dataBase64": b64_3787(&tiny_png_3787()[..40])}),
+        json!({"source": "preset", "presetId": "no-such-preset"}),
+        json!({"source": "attachment", "attachmentId": Uuid::new_v4().to_string()}),
+        json!({"source": "staged", "imageId": Uuid::new_v4().to_string(),
+               "sha256": "0".repeat(64), "origin": "generated"}),
+    ] {
+        let (status, refused) = propose(hostile.clone()).await;
+        answers.push((status, refused["error"].clone()));
+        assert_eq!(status, 400, "{hostile} must be refused: {refused}");
+    }
+    assert!(answers.iter().all(|a| a.1 == answers[0].1), "{answers:?}");
+    assert_eq!(
+        staged_rows_3787(&su, ws).await,
+        0,
+        "a refusal stages nothing"
+    );
+
+    // ---- a good (and hostile-but-valid) image: re-encoded, staged, bound --------
+    let (status, proposed) =
+        propose(json!({"source": "generated", "dataBase64": b64_3787(&polyglot)})).await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let card: Value = sqlx::query_scalar("SELECT props FROM message WHERE id=$1")
+        .bind(Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap())
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    let preview = &card["action"]["preview"];
+    assert_eq!(preview["kind"], "avatar_image", "{card}");
+    assert_eq!(preview["origin"], "generated");
+    let image_id = Uuid::parse_str(preview["imageId"].as_str().unwrap()).unwrap();
+    let sha = preview["sha256"].as_str().unwrap().to_string();
+    assert_eq!(sha.len(), 64);
+    let rows = card["action"]["rows"].as_array().unwrap().clone();
+    let picture_row = rows.iter().find(|r| r["label"] == "프로필 사진").unwrap();
+    assert!(picture_row["value"]
+        .as_str()
+        .unwrap()
+        .contains("에이전트가 만든 이미지"));
+    // The stored row is the server's bytes, bound to this approval, staged.
+    let (stored, status_label, bound, source): (Vec<u8>, String, Option<Uuid>, String) =
+        sqlx::query_as(
+            "SELECT bytes, status, approval_id, source FROM agent_avatar_image WHERE id=$1",
+        )
+        .bind(image_id)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(status_label, "staged");
+    assert_eq!(bound, Some(approval));
+    assert_eq!(source, "generated");
+    assert!(
+        !stored.windows(8).any(|w| w == b"<script>")
+            && !stored.windows(4).any(|w| w == b"PK\x03\x04"),
+        "the appendix did not survive the re-encode"
+    );
+    assert_ne!(stored, polyglot);
+    // No bytes, no base64, no agent-chosen id in the approval payload.
+    let payload: Value = sqlx::query_scalar("SELECT payload FROM approval WHERE id=$1")
+        .bind(approval)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    let payload_text = payload.to_string();
+    assert!(
+        !payload_text.contains("dataBase64") && !payload_text.contains(&b64_3787(&polyglot)[..40])
+    );
+    assert_eq!(payload["action"]["args"]["avatar"]["source"], "staged");
+    assert_eq!(payload["action"]["pins"]["avatar"]["sha256"], json!(sha));
+
+    // ---- the preview: the decider only, by hash ---------------------------------
+    let preview_url = format!("{base}/v1/workspaces/{ws}/approvals/{approval}/avatar-preview");
+    let seen = client
+        .get(format!("{preview_url}?v={sha}"))
+        .bearer_auth(&owner_jwt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(seen.status().as_u16(), 200);
+    assert_eq!(seen.headers()["x-content-type-options"], "nosniff");
+    assert_eq!(
+        seen.headers()["content-security-policy"],
+        "default-src 'none'; sandbox"
+    );
+    assert_eq!(seen.bytes().await.unwrap().to_vec(), stored);
+    for (label, jwt, query) in [
+        ("a third party", third_jwt.as_str(), format!("?v={sha}")),
+        (
+            "a wrong hash",
+            owner_jwt.as_str(),
+            format!("?v={}", "0".repeat(64)),
+        ),
+    ] {
+        let denied = client
+            .get(format!("{preview_url}{query}"))
+            .bearer_auth(jwt)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(denied.status().as_u16(), 404, "{label}");
+    }
+    let admin = client
+        .get(format!("{preview_url}?v={sha}"))
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        admin.status().as_u16(),
+        200,
+        "an admin may decide, so may preview"
+    );
+    let agent_try = client
+        .get(format!("{preview_url}?v={sha}"))
+        .bearer_auth(&fixture.hosted_bearer)
+        .send()
+        .await
+        .unwrap();
+    assert!(matches!(agent_try.status().as_u16(), 401 | 403));
+    let unknown = client
+        .get(format!(
+            "{base}/v1/workspaces/{ws}/approvals/{}/avatar-preview?v={sha}",
+            Uuid::new_v4()
+        ))
+        .bearer_auth(&owner_jwt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unknown.status().as_u16(), 404);
+
+    // ---- a third party cannot approve; tampered bytes re-ask --------------------
+    let (status, _h, refused) = decide_as(
+        &client,
+        &base,
+        ws,
+        &third_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["status"], "role_required");
+    sqlx::query("ALTER TABLE agent_avatar_image DISABLE TRIGGER agent_avatar_image_immutable_trg")
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE agent_avatar_image SET bytes = set_byte(bytes, 0, 7) WHERE id=$1")
+        .bind(image_id)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, _h, refused) = decide_as(
+        &client,
+        &base,
+        ws,
+        &owner_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{refused}");
+    assert_eq!(refused["status"], "action_args_invalid");
+    assert_eq!(approval_status_3708(&su, approval).await, "pending");
+    let pointer: Option<Uuid> =
+        sqlx::query_scalar("SELECT avatar_image_id FROM member WHERE id=$1")
+            .bind(agent)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(pointer, None, "tampered bytes were not applied");
+    sqlx::query("UPDATE agent_avatar_image SET bytes = set_byte(bytes, 0, $2) WHERE id=$1")
+        .bind(image_id)
+        .bind(stored[0] as i32)
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query("ALTER TABLE agent_avatar_image ENABLE TRIGGER agent_avatar_image_immutable_trg")
+        .execute(&su)
+        .await
+        .unwrap();
+
+    // ---- a pin that names ANOTHER approval's image is refused -------------------
+    // Reject the first so the target is free for a second proposal, then stage a
+    // second image and rewrite its approval to point at the first's row.
+    let (status, _h, rejected) = decide_as(
+        &client,
+        &base,
+        ws,
+        &owner_jwt,
+        approval,
+        false,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{rejected}");
+    assert_eq!(
+        staged_rows_3787(&su, ws).await,
+        0,
+        "a rejected proposal's staged image is deleted"
+    );
+
+    let (status, one) =
+        propose(json!({"source": "generated", "dataBase64": b64_3787(&tiny_png_3787())})).await;
+    assert_eq!(status, 200, "{one}");
+    let approval_one = proposed_approval_3706(&one);
+    let image_one: Uuid =
+        sqlx::query_scalar("SELECT id FROM agent_avatar_image WHERE approval_id=$1")
+            .bind(approval_one)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    let sha_one: Vec<u8> = sqlx::query_scalar("SELECT sha256 FROM agent_avatar_image WHERE id=$1")
+        .bind(image_one)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    let sha_one_hex: String = sha_one.iter().map(|b| format!("{b:02x}")).collect();
+    // A second staged image of the same agent, bound to a *different* approval id.
+    sqlx::query(
+        "UPDATE approval SET payload = jsonb_set(jsonb_set(payload, \
+             '{action,args,avatar,imageId}', to_jsonb($2::text)), \
+             '{action,pins,avatar,imageId}', to_jsonb($2::text)) WHERE id = $1",
+    )
+    .bind(approval_one)
+    .bind(Uuid::new_v4().to_string())
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, _h, swapped) = decide_as(
+        &client,
+        &base,
+        ws,
+        &fixture.human_jwt,
+        approval_one,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{swapped}");
+    assert_eq!(swapped["status"], "action_args_invalid");
+    // Point it back at a REAL staged row that belongs to another approval: stage a
+    // second row bound to nothing and re-point args+pins at it.
+    let other_image: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_avatar_image (workspace_id, member_id, proposed_by, source, mime, \
+            width, height, size_bytes, sha256, bytes) \
+         SELECT workspace_id, member_id, proposed_by, source, mime, width, height, size_bytes, \
+                sha256, bytes FROM agent_avatar_image WHERE id = $1 RETURNING id",
+    )
+    .bind(image_one)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE approval SET payload = jsonb_set(jsonb_set(payload, \
+             '{action,args,avatar,imageId}', to_jsonb($2::text)), \
+             '{action,pins,avatar,imageId}', to_jsonb($2::text)) WHERE id = $1",
+    )
+    .bind(approval_one)
+    .bind(other_image.to_string())
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, _h, swapped) = decide_as(
+        &client,
+        &base,
+        ws,
+        &fixture.human_jwt,
+        approval_one,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(
+        status, 409,
+        "an unbound staged row is not this approval's: {swapped}"
+    );
+    assert_eq!(swapped["status"], "action_args_invalid");
+    // Restore and approve for real.
+    sqlx::query(
+        "UPDATE approval SET payload = jsonb_set(jsonb_set(payload, \
+             '{action,args,avatar,imageId}', to_jsonb($2::text)), \
+             '{action,pins,avatar,imageId}', to_jsonb($2::text)) WHERE id = $1",
+    )
+    .bind(approval_one)
+    .bind(image_one.to_string())
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query("DELETE FROM agent_avatar_image WHERE id=$1")
+        .bind(other_image)
+        .execute(&su)
+        .await
+        .unwrap();
+
+    // ---- approve: the server's bytes are what is served --------------------------
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        ws,
+        &owner_jwt,
+        approval_one,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(approved["result"]["actionId"], "agent.profile.update");
+    let url = format!("{base}/v1/workspaces/{ws}/members/{agent}/avatar/content?v={image_one}");
+    let served = client
+        .get(&url)
+        .bearer_auth(&owner_jwt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(served.status().as_u16(), 200);
+    let bytes_one: Vec<u8> = sqlx::query_scalar("SELECT bytes FROM agent_avatar_image WHERE id=$1")
+        .bind(image_one)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(served.bytes().await.unwrap().to_vec(), bytes_one);
+    let _ = sha_one_hex;
+    let audit: Value = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE workspace_id=$1 AND action='agent.avatar.updated' \
+          ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(ws)
+    .fetch_one(&su)
+    .await
+    .expect("an avatar audit row");
+    assert_eq!(audit["origin"], "generated");
+    assert!(audit["sha256_prefix"].as_str().unwrap().len() == 12);
+    assert!(!audit.to_string().contains("dataBase64"));
+    let roster: Value = client
+        .get(format!("{base}/v1/workspaces/{ws}/roster"))
+        .bearer_auth(&owner_jwt)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let members = roster["members"].as_array().or(roster.as_array()).unwrap();
+    let me = members
+        .iter()
+        .find(|m| m["id"] == json!(agent.to_string()))
+        .unwrap();
+    assert_eq!(
+        me["avatarUrl"],
+        json!(format!(
+            "/v1/workspaces/{ws}/members/{agent}/avatar/content?v={image_one}"
+        ))
+    );
+
+    // ---- a preset replaces the image; the image row is deleted -------------------
+    let (status, preset) = propose(json!({"source": "preset", "presetId": "comet"})).await;
+    assert_eq!(status, 200, "{preset}");
+    let approval_preset = proposed_approval_3706(&preset);
+    let (status, _h, done) = decide_as(
+        &client,
+        &base,
+        ws,
+        &owner_jwt,
+        approval_preset,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{done}");
+    assert_eq!(
+        staged_rows_3787(&su, ws).await,
+        0,
+        "the image row went with the switch"
+    );
+    let (preset_value, pointer): (Option<String>, Option<Uuid>) = sqlx::query_as(
+        "SELECT a.config->>'avatarPreset', m.avatar_image_id FROM member m \
+           JOIN agent a ON a.member_id = m.id WHERE m.id=$1",
+    )
+    .bind(agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!((preset_value.as_deref(), pointer), (Some("comet"), None));
+    // The same preset again is not a proposal.
+    let (status, again) = propose(json!({"source": "preset", "presetId": "comet"})).await;
+    assert_eq!(status, 400, "{again}");
+    // null removes it.
+    let (status, clear) = propose(Value::Null).await;
+    assert_eq!(status, 200, "{clear}");
+    let approval_clear = proposed_approval_3706(&clear);
+    let (status, _h, done) = decide_as(
+        &client,
+        &base,
+        ws,
+        &owner_jwt,
+        approval_clear,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{done}");
+    let preset_value: Option<String> =
+        sqlx::query_scalar("SELECT config->>'avatarPreset' FROM agent WHERE member_id=$1")
+            .bind(agent)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(preset_value, None);
+
+    // ---- an overdue proposal's staged image dies with it -------------------------
+    let (status, last) =
+        propose(json!({"source": "generated", "dataBase64": b64_3787(&tiny_png_3787())})).await;
+    assert_eq!(status, 200, "{last}");
+    let approval_last = proposed_approval_3706(&last);
+    assert_eq!(staged_rows_3787(&su, ws).await, 1);
+    sqlx::query("UPDATE approval SET expires_at = now() - interval '1 minute' WHERE id=$1")
+        .bind(approval_last)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, _h, expired) = decide_as(
+        &client,
+        &base,
+        ws,
+        &owner_jwt,
+        approval_last,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{expired}");
+    assert_eq!(expired["status"], "expired");
+    assert_eq!(
+        staged_rows_3787(&su, ws).await,
+        0,
+        "an expired proposal's image is deleted"
+    );
+}
+
+/// **A workspace file as the avatar (source (a)) and the read path that names it.**
+/// `oort_conversation_read` shows image attachments only (an id, never the Drive
+/// file id); a visible image becomes a staged, re-encoded avatar; everything the
+/// agent could not read — a private channel it is not in, a non-image, a pending
+/// upload, a deleted message — is the one refusal.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_workspace_image_can_be_the_avatar_only_if_the_agent_could_read_it() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let drive = Arc::new(MemDrive3787::default());
+    let base = start_server_with_drive_3787(app.clone(), drive.clone()).await;
+    let fixture_channel = fixture.channel;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+    let agent = fixture.hosted_agent;
+    let (owner, _owner_jwt) = seed_human_3708(&su, &fixture, "owner", "member").await;
+    set_agent_owner_3708(&su, agent, Some(owner)).await;
+    tidy_agent_3708(&su, agent, "Hermes").await;
+
+    let png = tiny_png_3787();
+    for id in ["drive-ok", "drive-pending", "drive-hidden", "drive-unbound"] {
+        drive.files.lock().unwrap().insert(id.into(), png.clone());
+    }
+    drive
+        .files
+        .lock()
+        .unwrap()
+        .insert("drive-text".into(), b"hello".to_vec());
+
+    // A human message with attachments in the approved channel, and one in the
+    // private channel the agent is not part of.
+    let message = |channel: Uuid, body: &str| {
+        let body = body.to_string();
+        let su = su.clone();
+        let human = fixture.human;
+        async move {
+            sqlx::query_scalar::<_, Uuid>(
+                "INSERT INTO message (workspace_id, channel_id, author_member_id, seq, body, \
+                    client_msg_id, hlc_ts, hlc_count) \
+                 SELECT $1, $2, $3, COALESCE(max(seq),0)+1, $4, gen_random_uuid(), 1, 0 \
+                   FROM message WHERE channel_id = $2 RETURNING id",
+            )
+            .bind(ws)
+            .bind(channel)
+            .bind(human)
+            .bind(body)
+            .fetch_one(&su)
+            .await
+            .expect("seed message")
+        }
+    };
+    let visible_msg = message(fixture.channel, "my logo").await;
+    let private_msg = message(fixture.private_channel, "secret logo").await;
+    // Rows seeded straight into `message` bypass the per-channel counter the REST
+    // send reads: bring it up to the highest seq used, or the next real send collides.
+    sqlx::query(
+        "UPDATE channel_seq SET last_seq = GREATEST(last_seq, \
+            (SELECT COALESCE(max(seq), 0) FROM message m WHERE m.channel_id = channel_seq.channel_id)) \
+          WHERE workspace_id = $1",
+    )
+    .bind(ws)
+    .execute(&su)
+    .await
+    .unwrap();
+    let attach = |channel: Uuid, msg: Option<Uuid>, drive_id: &str, mime: &str, status: &str| {
+        let (su, human, drive_id, mime, status) = (
+            su.clone(),
+            fixture.human,
+            drive_id.to_string(),
+            mime.to_string(),
+            status.to_string(),
+        );
+        async move {
+            sqlx::query_scalar::<_, Uuid>(
+                "INSERT INTO attachment (workspace_id, channel_id, uploader_member_id, message_id, \
+                    drive_file_id, name, mime, size_bytes, status) \
+                 VALUES ($1,$2,$3,$4,$5,'logo.png',$6,70,$7) RETURNING id",
+            )
+            .bind(ws)
+            .bind(channel)
+            .bind(human)
+            .bind(msg)
+            .bind(drive_id)
+            .bind(mime)
+            .bind(status)
+            .fetch_one(&su)
+            .await
+            .expect("seed attachment")
+        }
+    };
+    let good = attach(
+        fixture.channel,
+        Some(visible_msg),
+        "drive-ok",
+        "image/png",
+        "complete",
+    )
+    .await;
+    let text_file = attach(
+        fixture.channel,
+        Some(visible_msg),
+        "drive-text",
+        "text/plain",
+        "complete",
+    )
+    .await;
+    let pending = attach(
+        fixture.channel,
+        Some(visible_msg),
+        "drive-pending",
+        "image/png",
+        "pending",
+    )
+    .await;
+    let hidden = attach(
+        fixture.private_channel,
+        Some(private_msg),
+        "drive-hidden",
+        "image/png",
+        "complete",
+    )
+    .await;
+    let unbound = attach(
+        fixture.channel,
+        None,
+        "drive-unbound",
+        "image/png",
+        "complete",
+    )
+    .await;
+
+    // ---- the read path: images only, ids only ------------------------------------
+    let (status, read) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_conversation_read",
+        json!({"channelId": fixture.channel}),
+    )
+    .await;
+    assert_eq!(status, 200, "{read}");
+    let rendered = read.to_string();
+    assert!(
+        rendered.contains(&good.to_string()),
+        "the image attachment id is shown: {rendered}"
+    );
+    for absent in [text_file, pending, unbound, hidden] {
+        assert!(
+            !rendered.contains(&absent.to_string()),
+            "{absent} must not be shown"
+        );
+    }
+    assert!(
+        !rendered.contains("drive-ok") && !rendered.contains("drive-text"),
+        "no Drive id"
+    );
+    assert!(rendered.contains("imageAttachments"));
+
+    // ---- what the agent cannot read is one refusal --------------------------------
+    let mut answers = Vec::new();
+    for id in [text_file, pending, unbound, hidden, Uuid::new_v4()] {
+        let (status, refused) = try_propose_action_3706(
+            &client,
+            &base,
+            &su,
+            &fixture,
+            "agent.profile.update",
+            json!({"avatar": {"source": "attachment", "attachmentId": id.to_string()}}),
+        )
+        .await;
+        answers.push((status, refused["error"].clone()));
+        assert_eq!(status, 400, "{id}: {refused}");
+    }
+    assert!(answers.iter().all(|a| a.1 == answers[0].1), "{answers:?}");
+    assert_eq!(staged_rows_3787(&su, ws).await, 0);
+
+    // ---- a deleted message hides its file -----------------------------------------
+    sqlx::query("UPDATE message SET state = 'deleted' WHERE id = $1")
+        .bind(visible_msg)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, refused) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.profile.update",
+        json!({"avatar": {"source": "attachment", "attachmentId": good.to_string()}}),
+    )
+    .await;
+    assert_eq!(status, 400, "{refused}");
+    sqlx::query("UPDATE message SET state = 'sent' WHERE id = $1")
+        .bind(visible_msg)
+        .execute(&su)
+        .await
+        .unwrap();
+
+    // ---- the readable image becomes a staged, re-encoded avatar ---------------------
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.profile.update",
+        json!({"avatar": {"source": "attachment", "attachmentId": good.to_string()}}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let (origin, bound, source): (String, Option<Uuid>, String) = sqlx::query_as(
+        "SELECT source, approval_id, source FROM agent_avatar_image WHERE approval_id=$1",
+    )
+    .bind(approval)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        (origin.as_str(), bound, source.as_str()),
+        ("attachment", Some(approval), "attachment")
+    );
+    let payload: Value = sqlx::query_scalar("SELECT payload FROM approval WHERE id=$1")
+        .bind(approval)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert!(
+        !payload.to_string().contains(&good.to_string()),
+        "the attachment id is not stored"
+    );
+    assert!(!payload.to_string().contains("drive-ok"));
+
+    // ---- a channel the agent left hides the file even though the row is intact -----
+    // (Asked at the database function, not through a mention: an agent that has left
+    // the room cannot be mentioned into a run.)
+    let visible_before = tenant_3786(&app, ws, move |conn| {
+        Box::pin(async move {
+            momo_messaging::find_visible_image_attachment_in_tx(
+                conn,
+                ws,
+                agent,
+                &[fixture_channel],
+                good,
+                5 << 20,
+            )
+            .await
+        })
+    })
+    .await
+    .unwrap();
+    assert!(
+        visible_before.is_some(),
+        "control: visible while the agent is a member"
+    );
+    sqlx::query("UPDATE membership SET left_at = now() WHERE channel_id=$1 AND member_id=$2")
+        .bind(fixture.channel)
+        .bind(agent)
+        .execute(&su)
+        .await
+        .unwrap();
+    let visible_after = tenant_3786(&app, ws, move |conn| {
+        Box::pin(async move {
+            momo_messaging::find_visible_image_attachment_in_tx(
+                conn,
+                ws,
+                agent,
+                &[fixture_channel],
+                good,
+                5 << 20,
+            )
+            .await
+        })
+    })
+    .await
+    .unwrap();
+    assert!(
+        visible_after.is_none(),
+        "an agent that left the channel cannot use its files"
+    );
+    // …and a file outside the connection's approved channels is invisible too.
+    sqlx::query("UPDATE membership SET left_at = NULL WHERE channel_id=$1 AND member_id=$2")
+        .bind(fixture.channel)
+        .bind(agent)
+        .execute(&su)
+        .await
+        .unwrap();
+    let not_approved = tenant_3786(&app, ws, move |conn| {
+        Box::pin(async move {
+            momo_messaging::find_visible_image_attachment_in_tx(
+                conn,
+                ws,
+                agent,
+                &[Uuid::new_v4()],
+                good,
+                5 << 20,
+            )
+            .await
+        })
+    })
+    .await
+    .unwrap();
+    assert!(
+        not_approved.is_none(),
+        "an unapproved channel hides its files"
+    );
+}
+
+async fn agent_invite_state_3788(
+    su: &PgPool,
+    workspace: Uuid,
+    handle: &str,
+) -> Option<(Uuid, Uuid, bool, String)> {
+    sqlx::query_as::<_, (Uuid, Uuid, bool, String)>(
+        "SELECT m.id, a.owner_human_id, ap.paused, hc.status::text \
+           FROM member m \
+           JOIN agent a ON a.member_id = m.id AND a.workspace_id = m.workspace_id \
+           JOIN agent_profile ap ON ap.agent_member_id = m.id AND ap.workspace_id = m.workspace_id \
+           JOIN hosted_agent_connection hc ON hc.agent_member_id = m.id \
+            AND hc.workspace_id = m.workspace_id \
+          WHERE m.workspace_id = $1 AND m.handle = $2 AND m.kind = 'agent'",
+    )
+    .bind(workspace)
+    .bind(handle)
+    .fetch_optional(su)
+    .await
+    .expect("read the invited agent")
+}
+
+async fn connection_count_3788(su: &PgPool, workspace: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM hosted_agent_connection WHERE workspace_id=$1")
+        .bind(workspace)
+        .fetch_one(su)
+        .await
+        .unwrap()
+}
+
+async fn member_count_3788(su: &PgPool, workspace: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM member WHERE workspace_id=$1")
+        .bind(workspace)
+        .fetch_one(su)
+        .await
+        .unwrap()
+}
+
+/// **agent.invite (증보 v3 V3-3, #3788), end to end.** Hostile spellings are one
+/// refusal and create nothing; a non-admin decider is `role_required` and nothing
+/// exists; the admin's approval creates the member, agent, paused profile and a
+/// `pairing_pending` connection in one transaction, the approver is the owner, the
+/// pairing code is in the response alone (`no-store`) and in no durable store, and
+/// a replay does not show it again; `deliverSecretToAgent` is refused until the
+/// claim call exists.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_approved_agent_invite_creates_the_agent_for_the_approver_and_shows_the_code_once() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (_plain, plain_jwt) = seed_human_3708(&su, &fixture, "plain", "member").await;
+
+    // ---- hostile spellings: one refusal, nothing written --------------------
+    let taken_handle = tidy_agent_3708(&su, fixture.managed_agent, "Taken Bot").await;
+    sqlx::query(
+        "INSERT INTO member(id, workspace_id, kind, display_name, handle, deleted_at) \
+         VALUES($1,$2,'human','Gone Ghost','ghost-handle', now())",
+    )
+    .bind(Uuid::new_v4())
+    .bind(fixture.workspace)
+    .execute(&su)
+    .await
+    .unwrap();
+    let members_before = member_count_3788(&su, fixture.workspace).await;
+    let mut answers = Vec::new();
+    for hostile in [
+        json!({"platform": "grok_bot", "displayName": "Muse Writer", "handle": "muse-writer", "ownerOnly": true}),
+        json!({"platform": "grok_bot", "displayName": "Muse Writer", "handle": "muse-writer", "channels": ["x"]}),
+        json!({"platform": "grok_bot", "displayName": "Muse Writer", "handle": "muse-writer", "scopes": ["workspace:propose"]}),
+        json!({"platform": "grok_bot", "displayName": "Muse Writer", "handle": "muse-writer", "ownerHumanId": Uuid::new_v4()}),
+        json!({"platform": "skynet", "displayName": "Muse Writer", "handle": "muse-writer"}),
+        json!({"displayName": "Muse Writer", "handle": "muse-writer"}),
+        json!({"platform": "muse", "handle": "muse-writer"}),
+        json!({"platform": "muse", "displayName": "Muse Writer"}),
+        json!({"platform": "muse", "displayName": "see https://evil.example", "handle": "muse-writer"}),
+        json!({"platform": "muse", "displayName": "[docs](http://evil.example)", "handle": "muse-writer"}),
+        json!({"platform": "muse", "displayName": "zero\u{200B}width", "handle": "muse-writer"}),
+        json!({"platform": "muse", "displayName": "Admin", "handle": "muse-writer"}),
+        json!({"platform": "muse", "displayName": "Muse Writer", "handle": "x"}),
+        json!({"platform": "muse", "displayName": "Muse Writer", "handle": "Bad Handle!"}),
+        json!({"platform": "muse", "displayName": "Muse Writer", "handle": taken_handle}),
+        json!({"platform": "muse", "displayName": "Person plain", "handle": "muse-writer"}),
+        // Review of #3801: the handle is spoken as @handle, so it gets the reserved
+        // words, the mention-overlap rule and the deleted members' handles too.
+        json!({"platform": "muse", "displayName": "Muse Writer", "handle": "admin"}),
+        json!({"platform": "muse", "displayName": "Muse Writer", "handle": "everyone"}),
+        json!({"platform": "muse", "displayName": "Muse Writer", "handle": "ghost-handle"}),
+        json!({"platform": "muse", "displayName": "Muse Writer", "handle": "person"}),
+        json!({}),
+    ] {
+        let (status, refused) = try_propose_action_3706(
+            &client,
+            &base,
+            &su,
+            &fixture,
+            "agent.invite",
+            hostile.clone(),
+        )
+        .await;
+        answers.push((status, refused["error"].clone()));
+        assert_eq!(status, 400, "{hostile} must be refused: {refused}");
+    }
+    assert!(answers.iter().all(|a| a.1 == answers[0].1), "{answers:?}");
+    assert_eq!(
+        member_count_3788(&su, fixture.workspace).await,
+        members_before
+    );
+
+    // A banned handle is refused at the proposal too.
+    sqlx::query(
+        "INSERT INTO workspace_ban(workspace_id, handle_norm, created_by) VALUES($1,'banned-bot',$2)",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.human)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, refused) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.invite",
+        json!({"platform": "dots", "displayName": "Banned Bot", "handle": "banned-bot"}),
+    )
+    .await;
+    assert_eq!(status, 400, "{refused}");
+
+    // ---- a good proposal: the card says what approving does -----------------
+    let good = json!({"platform": "muse", "displayName": "Muse Writer", "handle": "muse-writer"});
+    let (status, proposed) =
+        try_propose_action_3706(&client, &base, &su, &fixture, "agent.invite", good.clone()).await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let card: Value = sqlx::query_scalar("SELECT props FROM message WHERE id=$1")
+        .bind(Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap())
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(card["action"]["id"], json!("agent.invite"));
+    assert_eq!(card["action"]["required_role"], json!("admin"));
+    let rows = card["action"]["rows"].as_array().unwrap().clone();
+    let row = |label: &str| {
+        rows.iter()
+            .find(|r| r["label"] == label)
+            .unwrap_or_else(|| panic!("{label} in {rows:?}"))["value"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert_eq!(row("플랫폼"), "Muse");
+    assert!(
+        row("새 에이전트").contains("Muse Writer") && row("새 에이전트").contains("muse-writer")
+    );
+    assert_eq!(row("소유자"), "승인한 사람");
+    assert_eq!(
+        member_count_3788(&su, fixture.workspace).await,
+        members_before,
+        "proposing creates nobody"
+    );
+
+    // ---- the flag is refused: there is no claim call yet --------------------
+    let (status, _h, flagged) = {
+        let response = client
+            .post(format!(
+                "{base}/v1/workspaces/{}/approvals/{approval}/decision",
+                fixture.workspace
+            ))
+            .bearer_auth(&fixture.human_jwt)
+            .json(&json!({
+                "approvalId": approval, "approve": true,
+                "clientDecisionId": Uuid::new_v4(), "deliverSecretToAgent": true
+            }))
+            .send()
+            .await
+            .unwrap();
+        let status = response.status().as_u16();
+        let headers = response.headers().clone();
+        (status, headers, response.json::<Value>().await.unwrap())
+    };
+    assert_eq!(status, 400, "{flagged}");
+    assert_eq!(flagged["status"], "deliver_secret_not_supported");
+    assert_eq!(approval_status_3708(&su, approval).await, "pending");
+
+    // ---- a non-admin is refused; nothing exists -----------------------------
+    let (status, _h, refused) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &plain_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["status"], "role_required");
+    assert_eq!(approval_status_3708(&su, approval).await, "pending");
+    assert!(
+        agent_invite_state_3788(&su, fixture.workspace, "muse-writer")
+            .await
+            .is_none()
+    );
+
+    // ---- the admin approves --------------------------------------------------
+    let decision_id = Uuid::new_v4();
+    let (status, headers, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval,
+        true,
+        decision_id,
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(approved["result"]["actionId"], json!("agent.invite"));
+    assert_eq!(
+        headers
+            .get("cache-control")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or(""),
+        "no-store"
+    );
+    let secret = &approved["result"]["secretOnce"];
+    assert_eq!(secret["kind"], json!("pairing_credential"), "{approved}");
+    let pairing = secret["value"].as_str().expect("the code").to_string();
+    assert!(pairing.len() >= 20, "a real credential");
+    let (new_agent, owner, paused, connection) =
+        agent_invite_state_3788(&su, fixture.workspace, "muse-writer")
+            .await
+            .expect("the agent exists");
+    assert_eq!(owner, fixture.human, "the approver owns it");
+    assert!(paused, "born paused");
+    assert_eq!(connection, "pairing_pending");
+    assert_eq!(
+        member_count_3788(&su, fixture.workspace).await,
+        members_before + 1
+    );
+    assert_eq!(
+        approved["result"]["ref"]["id"],
+        json!(new_agent.to_string())
+    );
+
+    // The code is in no durable store.
+    let durable = durable_text(&su, fixture.workspace).await;
+    assert!(!durable.contains(&pairing), "pairing code leaked");
+    let audit: Value = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE workspace_id=$1 AND action='agent.invited'",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .expect("the invite audit row");
+    assert_eq!(audit["via_agent"], json!(fixture.hosted_agent.to_string()));
+    assert_eq!(audit["approval_id"], json!(approval.to_string()));
+    assert_eq!(audit["platform"], json!("muse"));
+    assert!(!audit.to_string().contains(&pairing));
+
+    // A replay answers the same receipt without the code.
+    let (status, _h, replay) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval,
+        true,
+        decision_id,
+    )
+    .await;
+    assert_eq!(status, 200, "{replay}");
+    assert!(replay["result"].get("secretOnce").is_none(), "{replay}");
+    assert_eq!(
+        member_count_3788(&su, fixture.workspace).await,
+        members_before + 1
+    );
+}
+
+/// A handle that became unavailable between the card and the decision (here a
+/// *deleted* member still holds it, which the roster check does not see) refuses
+/// the decision as stale with **nothing written** — no member, no connection — and
+/// the approval stays pending.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_agent_invite_whose_handle_was_taken_meanwhile_creates_nothing() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.invite",
+        json!({"platform": "dots", "displayName": "Dots Helper", "handle": "dots-helper"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let members_before = member_count_3788(&su, fixture.workspace).await;
+    let connections_before = connection_count_3788(&su, fixture.workspace).await;
+    let ghost = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member(id, workspace_id, kind, display_name, handle, deleted_at) \
+         VALUES($1,$2,'human','Gone','dots-helper', now())",
+    )
+    .bind(ghost)
+    .bind(fixture.workspace)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, _h, refused) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{refused}");
+    assert_eq!(refused["status"], "action_args_invalid");
+    assert_eq!(approval_status_3708(&su, approval).await, "pending");
+    assert_eq!(
+        member_count_3788(&su, fixture.workspace).await,
+        members_before + 1,
+        "only the ghost row the test added"
+    );
+    let connections_after = connection_count_3788(&su, fixture.workspace).await;
+    assert_eq!(
+        connections_after, connections_before,
+        "no connection was made"
+    );
+}

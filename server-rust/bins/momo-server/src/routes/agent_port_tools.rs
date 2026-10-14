@@ -619,18 +619,30 @@ async fn conversation_read(
                 return Ok(Err(ToolFailure::Unavailable));
             }
             let page = list_channel_page(conn, channel_id, cursor, limit).await?;
-            Ok(Ok(page))
+            // The **image** files attached to these messages (ADR-0186 증보 v3
+            // V3-2a): an agent can only propose a workspace file as its avatar if
+            // it can name one, and the attachment id is that name. Only complete
+            // PNG/JPEG/WebP rows of messages in a channel this read already
+            // authorised; the Drive file id is never projected.
+            let message_ids: Vec<Uuid> = page.iter().map(|paged| paged.message.id).collect();
+            let images = momo_messaging::image_attachments_for_messages_in_tx(
+                conn,
+                caller.workspace_id,
+                &message_ids,
+            )
+            .await?;
+            Ok(Ok((page, images)))
         })
     })
     .await
     .map_err(|error| internal("agent_port.conversation_read", error))?;
 
-    let page = outcome?;
+    let (page, images) = outcome?;
     let messages: Vec<Value> = page
         .iter()
         .map(|paged| {
             let message = &paged.message;
-            json!({
+            let mut value = json!({
                 "id": message.id,
                 "seq": message.seq,
                 "channelId": message.channel_id,
@@ -641,7 +653,20 @@ async fn conversation_read(
                 "rootId": message.root_id,
                 "replyToId": message.reply_to_id,
                 "createdAtMs": crate::routes::shared::epoch_ms(message.created_at),
-            })
+            });
+            let attached: Vec<Value> = images
+                .iter()
+                .filter(|(message_id, ..)| *message_id == message.id)
+                .map(|(_, id, name, mime, size_bytes)| {
+                    json!({"id": id, "name": name, "mime": mime, "sizeBytes": size_bytes})
+                })
+                .collect();
+            if !attached.is_empty() && message.state != "deleted" {
+                if let Some(object) = value.as_object_mut() {
+                    object.insert("imageAttachments".into(), Value::Array(attached));
+                }
+            }
+            value
         })
         .collect();
     let next_before = page.iter().map(|paged| paged.message.seq).min();
@@ -1325,8 +1350,13 @@ async fn action_propose(
     // so a malformed proposal never costs one. Resolution against the workspace
     // (ADR-0186 증보 V1-a/b) needs the connection and happens inside, below.
     let proposed_at_ms = chrono::Utc::now().timestamp_millis();
-    crate::routes::actions::validated_action_args(action, &raw_args, proposed_at_ms)
+    let pure = crate::routes::actions::validated_action_args(action, &raw_args, proposed_at_ms)
         .map_err(|error| failure_of(&error))?;
+    // **An avatar image is turned into server-made bytes before anything else
+    // happens** (ADR-0186 증보 v3 V3-2a): decoded and re-encoded under a timeout, off
+    // the async threads, and — for a workspace file — fetched from Drive *outside*
+    // any database transaction. Nothing the agent sent survives this step.
+    let prepared_avatar = prepare_avatar(state, caller, &pure.args).await?;
 
     let secret = state.agent_port.envelope_secret().to_string();
     let now = chrono::Utc::now();
@@ -1334,6 +1364,22 @@ async fn action_propose(
 
     let outcome = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
         Box::pin(async move {
+            // **Lock order** (second security review of #3797): the display-name
+            // advisory lock is the **first** thing this transaction takes — before
+            // `authorize_in_tx`, whose hosted-identity read holds the proposer's member
+            // row `FOR SHARE`. An approval and the human `PATCH …/agents/{agent}` take
+            // the advisory lock and *then* the target's member row `FOR UPDATE`;
+            // proposing in the opposite order (row first, lock second) deadlocks with a
+            // concurrent approval of the same agent. The lock is re-entrant, so the
+            // resolver's own acquisition later in this transaction is a no-op.
+            if matches!(
+                action.id,
+                momo_agent::actions::ACTION_AGENT_RENAME
+                    | momo_agent::actions::ACTION_AGENT_PROFILE_UPDATE
+            ) {
+                momo_messaging::lock_display_name_namespace_in_tx(conn, caller.workspace_id)
+                    .await?;
+            }
             let identity =
                 match authorize_in_tx(conn, caller, momo_auth::SCOPE_WORKSPACE_PROPOSE).await? {
                     Ok(identity) => identity,
@@ -1403,12 +1449,63 @@ async fn action_propose(
             if run.status.is_approval_held() || run.status.is_terminal() {
                 return Ok(Err(ToolFailure::Conflict));
             }
+            // **The two "already full" answers come first — for the two actions whose
+            // text is judged against the roster** (증보 v3, security review of #3797):
+            // `Conflict` must not depend on whether the proposal's *text* passes the
+            // roster-name rules, or an agent that already holds a pending proposal
+            // could tell 409 from 400 and so probe which names exist. Neither check
+            // reads the text: the ceiling counts, and the same-target check resolves
+            // only **who the proposal is about**. The other actions keep their order
+            // (resolution, then the ceiling), which the v2 suite pins.
+            let judges_text_against_roster = matches!(
+                action.id,
+                momo_agent::actions::ACTION_AGENT_RENAME
+                    | momo_agent::actions::ACTION_AGENT_PROFILE_UPDATE
+            );
+            if judges_text_against_roster {
+                // The pending ceiling (증보 V1-e): the agent's `member` row is locked
+                // first so concurrent runs of one agent cannot each read "2 pending"
+                // and each add a third.
+                let pending = momo_agent::lock_agent_and_count_pending_workspace_actions_in_tx(
+                    conn,
+                    caller.workspace_id,
+                    caller.agent_member_id,
+                )
+                .await?;
+                if pending >= momo_agent::MAX_PENDING_WORKSPACE_ACTIONS {
+                    return Ok(Err(ToolFailure::Conflict));
+                }
+                // A second proposal about the same agent while one waits (증보 V4-M-9):
+                // the target's row is locked first so two simultaneous proposals
+                // cannot both see "none".
+                if let Some(target) = crate::routes::actions::early_target_agent_in_tx(
+                    conn,
+                    caller.workspace_id,
+                    caller.agent_member_id,
+                    action,
+                    &raw_args,
+                    proposed_at_ms,
+                )
+                .await?
+                {
+                    if momo_agent::lock_target_and_find_pending_action_in_tx(
+                        conn,
+                        caller.workspace_id,
+                        action.id,
+                        target,
+                    )
+                    .await?
+                    {
+                        return Ok(Err(ToolFailure::Conflict));
+                    }
+                }
+            }
             // **Resolved inside the transaction** (ADR-0186 증보 V1-a/b): names are
             // looked up against the workspace as it is now, and the card rows are
             // built from what was found, never from the agent's strings. A
             // resolution failure is the same `InvalidArguments` as a malformed
             // argument — it never says which name failed.
-            let resolved = match crate::routes::actions::resolve_action_in_tx(
+            let mut resolved = match crate::routes::actions::resolve_action_in_tx(
                 conn,
                 caller.workspace_id,
                 caller.agent_member_id,
@@ -1424,17 +1521,18 @@ async fn action_propose(
                 // `failure_of` would let a 404 vs a 409 say which name failed.
                 Err(_) => return Ok(Err(ToolFailure::InvalidArguments)),
             };
-            // **The pending ceiling** (증보 V1-e). The agent's `member` row is
-            // locked first so concurrent runs of one agent cannot each read
-            // "2 pending" and each add a third.
-            let pending = momo_agent::lock_agent_and_count_pending_workspace_actions_in_tx(
-                conn,
-                caller.workspace_id,
-                caller.agent_member_id,
-            )
-            .await?;
-            if pending >= momo_agent::MAX_PENDING_WORKSPACE_ACTIONS {
-                return Ok(Err(ToolFailure::Conflict));
+            // The pending ceiling for the actions whose answer does not depend on the
+            // roster (증보 V1-e): after resolution, as in v2.
+            if !judges_text_against_roster {
+                let pending = momo_agent::lock_agent_and_count_pending_workspace_actions_in_tx(
+                    conn,
+                    caller.workspace_id,
+                    caller.agent_member_id,
+                )
+                .await?;
+                if pending >= momo_agent::MAX_PENDING_WORKSPACE_ACTIONS {
+                    return Ok(Err(ToolFailure::Conflict));
+                }
             }
             // A second rename of the same agent while one waits is refused
             // (증보 V4-M-9): the target's row is locked first so two simultaneous
@@ -1455,6 +1553,65 @@ async fn action_propose(
             // still `queued` until its first progress event, and an adapter that
             // claims a job and proposes without reporting progress first is
             // normal — the park below requires `running`.
+            // **Stage the avatar image** (V3-2a): the server-re-encoded bytes become a
+            // `staged` row for the *target* agent, and the stored arguments, the pins
+            // and the card preview all name that row and its sha256 — never the
+            // agent's bytes, never an id it chose.
+            let mut avatar_preview: Option<Value> = None;
+            let mut staged_image_id: Option<Uuid> = None;
+            if let Some(prepared) = &prepared_avatar {
+                let crate::routes::actions::GateSubject::Agent(target) = resolved.subject else {
+                    return Ok(Err(ToolFailure::InvalidArguments));
+                };
+                momo_messaging::purge_stale_staged_avatar_images_in_tx(conn, caller.workspace_id)
+                    .await?;
+                let image_id = momo_messaging::stage_avatar_image_in_tx(
+                    conn,
+                    caller.workspace_id,
+                    target,
+                    caller.agent_member_id,
+                    prepared.origin,
+                    &prepared.image,
+                )
+                .await?;
+                staged_image_id = Some(image_id);
+                let sha256 = hex_lower(&prepared.image.sha256);
+                let staged = json!({
+                    "source": "staged",
+                    "imageId": image_id.to_string(),
+                    "sha256": sha256,
+                    "origin": prepared.origin,
+                });
+                if let Some(object) = resolved.validated.normalized.as_object_mut() {
+                    object.insert("avatar".into(), staged);
+                }
+                if let Some(object) = resolved.pins.as_object_mut() {
+                    object.insert(
+                        "avatar".into(),
+                        json!({"imageId": image_id.to_string(), "sha256": sha256}),
+                    );
+                }
+                // Everything here is the server's: ids, hash, measured size.
+                avatar_preview = Some(json!({
+                    "kind": "avatar_image",
+                    "imageId": image_id.to_string(),
+                    "sha256": sha256,
+                    "mime": prepared.image.mime,
+                    "width": prepared.image.width,
+                    "height": prepared.image.height,
+                    "sizeBytes": prepared.image.bytes.len(),
+                    "origin": prepared.origin,
+                }));
+            }
+            // Backstop for the invariant the handler promises: no raw avatar input
+            // (bytes, a file id the agent chose) reaches the stored arguments.
+            if let Some(avatar) = resolved.validated.normalized.get("avatar") {
+                let source = avatar.get("source").and_then(Value::as_str);
+                if matches!(source, Some("generated") | Some("attachment")) {
+                    discard_staged(conn, caller.workspace_id, staged_image_id).await?;
+                    return Ok(Err(ToolFailure::InvalidArguments));
+                }
+            }
             momo_agent::mark_run_started_in_tx(conn, handle.run_id).await?;
             // **The park happens before the approval, not after.**
             //
@@ -1466,6 +1623,8 @@ async fn action_propose(
             // are unconditional. The run row is already locked `FOR UPDATE` by
             // the snapshot above, so nothing can move it in between.
             if !momo_agent::park_run_for_approval_in_tx(conn, handle.run_id, expires_at).await? {
+                // `with_tenant_tx` commits on a handled refusal: drop the unbound row.
+                discard_staged(conn, caller.workspace_id, staged_image_id).await?;
                 return Ok(Err(ToolFailure::Conflict));
             }
 
@@ -1510,11 +1669,19 @@ async fn action_propose(
                             handle.run_id,
                             run.channel_id,
                             action,
-                            momo_agent::action_block(
-                                action,
-                                resolved.validated.rows.clone(),
-                                rationale.as_deref(),
-                            ),
+                            {
+                                let mut block = momo_agent::action_block(
+                                    action,
+                                    resolved.validated.rows.clone(),
+                                    rationale.as_deref(),
+                                );
+                                if let (Some(preview), Some(object)) =
+                                    (&avatar_preview, block.as_object_mut())
+                                {
+                                    object.insert("preview".into(), preview.clone());
+                                }
+                                block
+                            },
                             expires_at,
                         );
                         // A rename of ANOTHER agent says so in the sentence the
@@ -1549,6 +1716,20 @@ async fn action_propose(
                 card.message.id,
             )
             .await?;
+            // The staged image belongs to **this** approval, in the database's own
+            // record (write-once): a decision accepts it under no other.
+            if let Some(image_id) = staged_image_id {
+                if !momo_messaging::bind_staged_image_to_approval_in_tx(
+                    conn,
+                    caller.workspace_id,
+                    image_id,
+                    approval_id,
+                )
+                .await?
+                {
+                    return Err(DbError::from(momo_db::sqlx::Error::RowNotFound));
+                }
+            }
             Ok(Ok(json!({
                 "approvalId": approval_id,
                 "status": "pending",
@@ -1561,6 +1742,170 @@ async fn action_propose(
     .map_err(|error| internal("agent_port.action_propose", error))?;
 
     outcome
+}
+
+// ---------------------------------------------------------------------------
+// avatar images (ADR-0186 증보 2026-10-13 v3, V3-2a)
+// ---------------------------------------------------------------------------
+
+/// An avatar image the server has already re-encoded, ready to be staged.
+struct PreparedAvatar {
+    image: momo_messaging::ProcessedAvatar,
+    /// `attachment` or `generated` (`agent_avatar_source_ck`).
+    origin: &'static str,
+}
+
+/// The longest the decode-and-re-encode may run.
+const AVATAR_PROCESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// How many image decodes may run at once, process-wide. A decode of a tiny file can
+/// peak at tens of MiB (the security review of #3799 measured 160–310 MB before the
+/// input cap came down to 2048 px), and `spawn_blocking` is not cancelled by the
+/// timeout, so without this several agents — or one agent retrying — would multiply
+/// that. Two at a time; a third caller waits (still inside the timeout) or is refused.
+static AVATAR_DECODE_PERMITS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+
+async fn discard_staged(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    staged: Option<Uuid>,
+) -> Result<(), DbError> {
+    if let Some(image_id) = staged {
+        momo_messaging::delete_staged_avatar_image_in_tx(conn, workspace_id, image_id).await?;
+    }
+    Ok(())
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// Run the (CPU- and memory-bound) image pass off the async threads and under a
+/// timeout. Every failure — a refused image, a join error, the timeout — is the
+/// one `InvalidArguments`: which rule the picture broke is not the agent's to learn.
+async fn process_avatar_bytes(
+    bytes: Vec<u8>,
+    max_input: usize,
+) -> Result<momo_messaging::ProcessedAvatar, ToolFailure> {
+    // The permit is taken **inside** the timeout and moved into the blocking task,
+    // so it is released when the decode actually ends — not when the caller gives up.
+    let work = async move {
+        let permit = AVATAR_DECODE_PERMITS
+            .acquire()
+            .await
+            .map_err(|_| ToolFailure::InvalidArguments)?;
+        let task = tokio::task::spawn_blocking(move || {
+            let _held = permit;
+            momo_messaging::process_avatar_image(&bytes, max_input)
+        });
+        task.await.map_err(|_| ToolFailure::InvalidArguments)
+    };
+    match tokio::time::timeout(AVATAR_PROCESS_TIMEOUT, work).await {
+        Ok(Ok(Ok(image))) => Ok(image),
+        _ => Err(ToolFailure::InvalidArguments),
+    }
+}
+
+/// Turn the proposal's avatar input, if it has any, into server-made bytes.
+///
+/// * `generated` — strict standard base64, decoded size capped well inside the Agent
+///   Port's 64 KiB body, then the image pass;
+/// * `attachment` — the file must be one **this agent could read** (complete, bound
+///   to a live message, in an approved non-DM channel it belongs to; a PNG/JPEG/WebP
+///   within 5 MiB). Its bytes come from Drive here, outside any transaction.
+///
+/// Anything else (no avatar, a preset, a clear) returns `None`.
+async fn prepare_avatar(
+    state: &AppState,
+    caller: HostedCaller,
+    args: &crate::routes::actions::ActionArgs,
+) -> Result<Option<PreparedAvatar>, ToolFailure> {
+    use base64::Engine as _;
+    let crate::routes::actions::ActionArgs::AgentProfileUpdate { avatar, .. } = args else {
+        return Ok(None);
+    };
+    match avatar {
+        crate::routes::actions::AvatarIntent::Generated(encoded) => {
+            // Authorise before spending decode capacity (A1 review M1): a caller
+            // without the propose scope must not be able to occupy the shared permits.
+            let allowed = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
+                Box::pin(async move {
+                    Ok(
+                        authorize_in_tx(conn, caller, momo_auth::SCOPE_WORKSPACE_PROPOSE)
+                            .await?
+                            .is_ok(),
+                    )
+                })
+            })
+            .await
+            .map_err(|_| ToolFailure::Unavailable)?;
+            if !allowed {
+                return Err(ToolFailure::NotAuthorized);
+            }
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(encoded.as_bytes())
+                .map_err(|_| ToolFailure::InvalidArguments)?;
+            if bytes.len() > momo_messaging::AGENT_AVATAR_IN_MAX_BYTES_GENERATED {
+                return Err(ToolFailure::InvalidArguments);
+            }
+            let image =
+                process_avatar_bytes(bytes, momo_messaging::AGENT_AVATAR_IN_MAX_BYTES_GENERATED)
+                    .await?;
+            Ok(Some(PreparedAvatar {
+                image,
+                origin: "generated",
+            }))
+        }
+        crate::routes::actions::AvatarIntent::Attachment(attachment_id) => {
+            let attachment_id = *attachment_id;
+            let max = momo_messaging::AGENT_AVATAR_IN_MAX_BYTES_ATTACHMENT;
+            let found = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
+                Box::pin(async move {
+                    let identity =
+                        match authorize_in_tx(conn, caller, momo_auth::SCOPE_WORKSPACE_PROPOSE)
+                            .await?
+                        {
+                            Ok(identity) => identity,
+                            Err(_) => return Ok(None),
+                        };
+                    momo_messaging::find_visible_image_attachment_in_tx(
+                        conn,
+                        caller.workspace_id,
+                        caller.agent_member_id,
+                        &identity.approved_channel_ids,
+                        attachment_id,
+                        max as i64,
+                    )
+                    .await
+                })
+            })
+            .await
+            .map_err(|error| internal("agent_port.avatar_attachment", error))?;
+            let Some(source) = found else {
+                return Err(ToolFailure::InvalidArguments);
+            };
+            let content = state
+                .drive
+                .file_content(&source.drive_file_id, source.size_bytes)
+                .await
+                .map_err(|_| ToolFailure::InvalidArguments)?;
+            // One byte more than the ceiling: a longer stream than the row claimed
+            // is refused, not truncated into something that decodes.
+            let bytes = content
+                .read_prefix(max + 1)
+                .await
+                .map_err(|_| ToolFailure::InvalidArguments)?;
+            if bytes.len() > max {
+                return Err(ToolFailure::InvalidArguments);
+            }
+            let image = process_avatar_bytes(bytes, max).await?;
+            Ok(Some(PreparedAvatar {
+                image,
+                origin: "attachment",
+            }))
+        }
+        _ => Ok(None),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1777,6 +2122,30 @@ fn usage_from_arguments(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ADR-0186 v3 A1 (security review of #3799, hard acceptance item): at most two
+    /// image decodes run at once, process-wide, and the permit is released when the
+    /// decode ends — never leaked by a refused image.
+    #[tokio::test]
+    async fn at_most_two_avatar_decodes_run_at_once_and_a_refusal_releases_its_permit() {
+        assert_eq!(AVATAR_DECODE_PERMITS.available_permits(), 2);
+        let first = AVATAR_DECODE_PERMITS.try_acquire().expect("one permit");
+        let second = AVATAR_DECODE_PERMITS.try_acquire().expect("two permits");
+        assert!(
+            AVATAR_DECODE_PERMITS.try_acquire().is_err(),
+            "a third decode must wait"
+        );
+        drop((first, second));
+        // A refused image (not an image at all) takes a permit and gives it back.
+        let refused = process_avatar_bytes(b"not an image".to_vec(), 1024).await;
+        assert!(refused.is_err());
+        assert_eq!(AVATAR_DECODE_PERMITS.available_permits(), 2);
+    }
+
+    #[test]
+    fn a_digest_is_spelled_as_lowercase_hex() {
+        assert_eq!(hex_lower(&[0x00, 0x0f, 0xa5, 0xff]), "000fa5ff");
+    }
 
     #[test]
     fn the_job_projection_is_an_allow_list_that_hides_the_run() {

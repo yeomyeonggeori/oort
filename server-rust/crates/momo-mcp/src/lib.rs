@@ -39,6 +39,16 @@ pub const SUPPORTED_PROTOCOL_VERSIONS: [&str; 2] =
 pub const MAX_BODY_BYTES: usize = 64 * 1024;
 pub const MAX_JSON_DEPTH: usize = 32;
 pub const MAX_STRING_BYTES: usize = 8 * 1024;
+
+/// The one bulk string the Agent Port accepts: an `avatar.dataBase64` (ADR-0186
+/// 증보 v3 V3-2a) — the base64 of an image of at most 44 000 bytes, 58 668
+/// characters. It is allowed to exceed [`MAX_STRING_BYTES`] **only under this key
+/// name** and only up to this many bytes; the whole request is still bounded by
+/// [`MAX_BODY_BYTES`] before it is parsed, so this adds no allocation the body bound
+/// did not already allow.
+pub const MAX_BULK_BASE64_BYTES: usize = 58_700;
+/// The key [`MAX_BULK_BASE64_BYTES`] applies to.
+pub const BULK_BASE64_KEY: &str = "dataBase64";
 pub const MAX_COLLECTION_ITEMS: usize = 256;
 
 pub const JSON_CONTENT_TYPE: &str = "application/json";
@@ -1007,6 +1017,15 @@ fn validate_bounds(root: &Value) -> Result<(), &'static str> {
                     if key.len() > MAX_STRING_BYTES {
                         return Err("JSON string exceeds the limit");
                     }
+                    // The single bulk exception (see `MAX_BULK_BASE64_BYTES`).
+                    if key == BULK_BASE64_KEY {
+                        if let Value::String(text) = value {
+                            if text.len() > MAX_BULK_BASE64_BYTES {
+                                return Err("JSON string exceeds the limit");
+                            }
+                            continue;
+                        }
+                    }
                     stack.push((value, depth + 1));
                 }
             }
@@ -1116,5 +1135,28 @@ mod tests {
             )),
             None
         );
+    }
+
+    #[test]
+    fn bulk_base64_is_allowed_only_under_its_own_key_and_up_to_its_own_ceiling() {
+        let big = |len: usize| "A".repeat(len);
+        let ok =
+            serde_json::json!({"args": {"avatar": {"dataBase64": big(MAX_BULK_BASE64_BYTES)}}});
+        assert!(validate_bounds(&ok).is_ok());
+        let over = serde_json::json!({"dataBase64": big(MAX_BULK_BASE64_BYTES + 1)});
+        assert_eq!(validate_bounds(&over), Err("JSON string exceeds the limit"));
+        // Any other key keeps the 8 KiB rule — including a near miss in spelling.
+        for key in ["data", "database64", "dataBase64 ", "body"] {
+            let other = serde_json::json!({ key: big(MAX_STRING_BYTES + 1) });
+            assert_eq!(
+                validate_bounds(&other),
+                Err("JSON string exceeds the limit"),
+                "{key}"
+            );
+        }
+        // A string of the allowed size is fine; one byte over the ordinary limit under
+        // another key is not, and the exception does not extend to an array of strings.
+        let list = serde_json::json!({"dataBase64": [big(MAX_STRING_BYTES + 1)]});
+        assert_eq!(validate_bounds(&list), Err("JSON string exceeds the limit"));
     }
 }

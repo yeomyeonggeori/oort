@@ -64,18 +64,21 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use chrono::Utc;
 use momo_agent::actions::{
-    action_by_id, action_ref, action_result_props, agent_rename_result_body,
-    channel_create_result_body, channel_create_result_rows, channel_member_add_result_body,
-    channel_member_add_rows, invite_result_body, invite_result_rows, last_attempt_patch,
-    result_client_msg_id, workspace_settings_result_body, ActionResult, ActionResultNext,
-    RequiredRole, ACTION_APPROVED_AUDIT_SCHEMA, ACTION_RESULT_EXECUTED,
-    ACTION_TYPE_WORKSPACE_ACTION, AUDIT_ACTION_APPROVED, AUDIT_CHANNELS_GRANTED,
-    AUDIT_CHANNELS_GRANTED_SCHEMA, AUDIT_CHANNEL_CREATED, AUDIT_CHANNEL_CREATED_SCHEMA,
-    AUDIT_CHANNEL_MEMBER_ADDED, AUDIT_CHANNEL_MEMBER_ADDED_SCHEMA, AUDIT_MEMBER_RENAMED,
-    AUDIT_MEMBER_RENAMED_SCHEMA, AUDIT_WORKSPACE_SETTING_UPDATED,
-    AUDIT_WORKSPACE_SETTING_UPDATED_SCHEMA, DEFAULT_INVITE_EXPIRES_IN_DAYS, INVITE_RESULT_NEXT,
-    LAST_ATTEMPT_PROPS_KEY, REF_TYPE_AGENT, REF_TYPE_CHANNEL, REF_TYPE_HOSTED_CONNECTION,
-    REF_TYPE_INVITE, REF_TYPE_WORKSPACE_SETTINGS, ROLE_REQUIRED, SECRET_ONCE_INVITE_LINK,
+    action_by_id, action_ref, action_result_props, agent_invite_result_body,
+    agent_profile_update_result_body, agent_rename_result_body, channel_create_result_body,
+    channel_create_result_rows, channel_member_add_result_body, channel_member_add_rows,
+    invite_result_body, invite_result_rows, last_attempt_patch, result_client_msg_id,
+    workspace_settings_result_body, ActionResult, ActionResultNext, RequiredRole, SecretDelivery,
+    ACTION_APPROVED_AUDIT_SCHEMA, ACTION_RESULT_EXECUTED, ACTION_TYPE_WORKSPACE_ACTION,
+    AUDIT_ACTION_APPROVED, AUDIT_AGENT_AVATAR_UPDATED, AUDIT_AGENT_AVATAR_UPDATED_SCHEMA,
+    AUDIT_AGENT_INVITED, AUDIT_AGENT_INVITED_SCHEMA, AUDIT_AGENT_PROFILE_UPDATED,
+    AUDIT_AGENT_PROFILE_UPDATED_SCHEMA, AUDIT_CHANNELS_GRANTED, AUDIT_CHANNELS_GRANTED_SCHEMA,
+    AUDIT_CHANNEL_CREATED, AUDIT_CHANNEL_CREATED_SCHEMA, AUDIT_CHANNEL_MEMBER_ADDED,
+    AUDIT_CHANNEL_MEMBER_ADDED_SCHEMA, AUDIT_MEMBER_RENAMED, AUDIT_MEMBER_RENAMED_SCHEMA,
+    AUDIT_WORKSPACE_SETTING_UPDATED, AUDIT_WORKSPACE_SETTING_UPDATED_SCHEMA,
+    DEFAULT_INVITE_EXPIRES_IN_DAYS, INVITE_RESULT_NEXT, LAST_ATTEMPT_PROPS_KEY, REF_TYPE_AGENT,
+    REF_TYPE_CHANNEL, REF_TYPE_HOSTED_CONNECTION, REF_TYPE_INVITE, REF_TYPE_WORKSPACE_SETTINGS,
+    ROLE_REQUIRED, SECRET_ONCE_INVITE_LINK, SECRET_ONCE_PAIRING,
 };
 use momo_agent::approval::{
     decided_props_patch, decision_broadcast_payload, decision_event_payload, decision_receipt,
@@ -96,10 +99,13 @@ use momo_auth::{
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::PgConnection;
 use momo_messaging::{
-    add_channel_member_in_tx, cent_channel, create_channel_detailed_in_tx,
-    emit_message_edited_in_tx, normalize_channel_kind, patch_and_prune_message_props_in_tx,
-    patch_message_props_in_tx, rename_agent_display_name_in_tx, send_message_in_tx, MessageType,
-    NewChannel, NewMessage,
+    add_channel_member_in_tx, apply_agent_card_in_tx, apply_avatar_image_in_tx, cent_channel,
+    clear_avatar_image_in_tx, create_channel_detailed_in_tx, delete_staged_avatar_image_in_tx,
+    emit_message_edited_in_tx, lock_agent_card_in_tx, normalize_channel_kind,
+    patch_and_prune_message_props_in_tx, patch_message_props_in_tx, read_avatar_image_bytes_in_tx,
+    read_avatar_image_in_tx, rename_agent_display_name_in_tx, send_message_in_tx,
+    staged_image_matches_pin_in_tx, AgentCard, AgentCardPatch, CardStatusPatch, FieldPatch,
+    MessageType, NewChannel, NewMessage,
 };
 use momo_outbox::{emit_outbox, OutboxKind, RESUME_APPROVAL_JOB_METHOD};
 use momo_settings::{
@@ -118,17 +124,126 @@ use crate::dto::{
 use crate::error::ApiError;
 use crate::realtime_advert::derive_same_origin_http_base;
 use crate::routes::actions::{
-    resolve_action_in_tx, ActionArgs, GateSubject, ResolvedAgentTarget, ResolvedChannel,
-    ResolvedConnection, ResolvedMember, SettingPatch, SettingsBefore,
+    profile_changes, resolve_stored_action_in_tx, ActionArgs, AvatarIntent, GateSubject,
+    ResolvedAgentTarget, ResolvedChannel, ResolvedConnection, ResolvedMember, SettingPatch,
+    SettingsBefore, StatusIntent,
 };
 use crate::routes::agents::require_profile_editor_in_tx;
 use crate::routes::invites::require_admin;
 use crate::routes::shared::{
     agent_tenant_tx, audit_via_token_id, emit_terminal_agent_status, epoch_ms,
-    has_platform_read_scope, path_uuid, settle_db, workspace_scope, DbRejectable,
+    has_platform_read_scope, path_uuid, require_human, settle_db, workspace_scope, DbRejectable,
 };
 use crate::routes::webhooks::no_store;
 use crate::AppState;
+
+/// `?v=` of the avatar preview: the image's sha256 (64 hex characters).
+#[derive(Debug, serde::Deserialize)]
+pub struct AvatarPreviewQuery {
+    v: Option<String>,
+}
+
+/// `GET /v1/workspaces/{ws}/approvals/{approval}/avatar-preview?v={sha256}`
+/// (ADR-0186 증보 v3 V3-2a) — **the picture the approver is being asked about**.
+///
+/// The card's `preview` block names the staged image and its sha256; this route is
+/// the one place those bytes can be read before the decision. Who may read them:
+/// the people who may *decide* the card — a human who is the target agent's owner
+/// or a workspace admin (`require_profile_editor_in_tx`, the very judgment the
+/// decision applies). Everybody else — a channel member who is not the owner, a
+/// stranger, an agent, an unknown approval id, an approval with no staged avatar —
+/// gets the same 404, so the route is neither a preview for onlookers nor an oracle
+/// for which approvals carry an image.
+///
+/// The bytes are the server's re-encoded ones; `?v` must be their sha256 (a
+/// different value is a 404, so a cached URL can never show another image); the
+/// response carries the stored mime only, `nosniff` and the sandbox CSP like the
+/// avatar content proxy.
+pub async fn avatar_preview(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, approval)): Path<(String, String)>,
+    Query(query): Query<AvatarPreviewQuery>,
+) -> Result<Response, ApiError> {
+    require_human(&principal, "human approver required")?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let approval_id = path_uuid(&approval, "invalid approval id")?;
+    let viewer = principal.member_id;
+
+    let outcome: DbRejectable<Option<momo_messaging::AgentAvatarBytes>> =
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                let Some((action_type, _status, payload)) =
+                    momo_agent::approval::read_approval_payload_in_tx(
+                        conn,
+                        workspace_id,
+                        approval_id,
+                    )
+                    .await?
+                else {
+                    return Ok(Ok(None));
+                };
+                if action_type != ACTION_TYPE_WORKSPACE_ACTION {
+                    return Ok(Ok(None));
+                }
+                let args = payload.get("action").and_then(|action| action.get("args"));
+                let avatar = args.and_then(|args| args.get("avatar"));
+                let Some(image_id) = avatar
+                    .filter(|avatar| avatar.get("source").and_then(Value::as_str) == Some("staged"))
+                    .and_then(|avatar| avatar.get("imageId"))
+                    .and_then(Value::as_str)
+                    .and_then(|id| Uuid::parse_str(id).ok())
+                else {
+                    return Ok(Ok(None));
+                };
+                let Some(target) = payload
+                    .get("action")
+                    .and_then(|action| action.get("pins"))
+                    .and_then(|pins| pins.get("target"))
+                    .and_then(Value::as_str)
+                    .and_then(|id| Uuid::parse_str(id).ok())
+                else {
+                    return Ok(Ok(None));
+                };
+                // The decider's own judgment, answered as "not found" on any no.
+                if require_profile_editor_in_tx(conn, workspace_id, target, viewer)
+                    .await?
+                    .is_err()
+                {
+                    return Ok(Ok(None));
+                }
+                let image = read_avatar_image_bytes_in_tx(conn, workspace_id, image_id).await?;
+                Ok(Ok(image.filter(|image| image.image.member_id == target)))
+            })
+        })
+        .await;
+    let Some(image) = settle_db("approvals.avatar_preview", outcome)? else {
+        return Err(ApiError::not_found("avatar preview not found"));
+    };
+    let sha_hex: String = image
+        .image
+        .sha256
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    let cache_control = match query.v.as_deref() {
+        Some(v) if v == sha_hex => "private, max-age=31536000, immutable",
+        Some(_) => return Err(ApiError::not_found("avatar preview not found")),
+        None => "private, no-cache",
+    };
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, image.image.mime)
+        .header(header::CONTENT_LENGTH, image.bytes.len().to_string())
+        .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
+        .header(
+            header::CONTENT_SECURITY_POLICY,
+            "default-src 'none'; sandbox",
+        )
+        .header(header::CACHE_CONTROL, cache_control)
+        .body(axum::body::Body::from(image.bytes))
+        .map_err(|error| ApiError::internal("approvals.avatar_preview.response", error))
+}
 
 /// The body of the `tool_result` a rejection appends (Swift :847).
 const REJECTED_TOOL_RESULT_BODY: &str = "Tool call rejected by human approval.";
@@ -153,6 +268,9 @@ const HUMAN_PRINCIPAL_REQUIRED: &str = "human_principal_required";
 /// back exactly as it must, and [`decide`] recognises the sentinel and answers
 /// the receipt-shaped 409 the clients already decode.
 const RUN_NOT_PARKED: &str = "run_not_parked";
+/// `deliverSecretToAgent: true` on a decision that cannot honour it (ADR-0186
+/// 증보 v3 V3-3a). 400, and the approval is not consumed.
+const DELIVER_SECRET_NOT_SUPPORTED: &str = "deliver_secret_not_supported";
 
 /// The sentinel itself. Namespaced and versioned so it cannot collide with a
 /// genuine `sqlx::Error::Protocol` message from the driver.
@@ -366,6 +484,7 @@ async fn decide(
     let claude_subscription_agents_enabled =
         state.agent_port.config.claude_subscription_agents_enabled;
     let operator_scope = has_platform_read_scope(&principal);
+    let deliver_secret_to_agent = request.deliver_secret_to_agent == Some(true);
 
     let outcome: DbRejectable<Decision> = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
@@ -384,6 +503,7 @@ async fn decide(
                     public_origin: public_origin.as_deref(),
                     claude_subscription_agents_enabled,
                     operator_scope,
+                    deliver_secret_to_agent,
                 },
             )
             .await
@@ -460,6 +580,34 @@ struct DecisionInput<'a> {
     /// two ways to satisfy `RequiredRole::WorkspaceOperator`
     /// (`routes::shared::has_platform_read_scope`).
     operator_scope: bool,
+    /// `deliverSecretToAgent` as sent. Only `Some(true)` matters.
+    deliver_secret_to_agent: bool,
+}
+
+/// Whether the action a `workspace_action` payload names offers its one-time
+/// value to the proposing agent **at the approver's choice**
+/// (`SecretDelivery::OptIn`). An unknown or missing id is `false`, so the early
+/// guard refuses.
+fn payload_offers_opt_in_delivery(payload: &Value) -> bool {
+    payload
+        .get("action")
+        .and_then(|action| action.get("id"))
+        .and_then(Value::as_str)
+        .and_then(action_by_id)
+        .is_some_and(|action| action.secret_delivery == SecretDelivery::OptIn)
+}
+
+/// The early `deliverSecretToAgent` guard as a pure function (so its whole truth
+/// table is measurable, including the `OptIn` row no action occupies yet): a
+/// `true` is honoured only when **approving** a **workspace action** whose
+/// registry entry offers `OptIn` delivery (`offers_opt_in`).
+fn deliver_flag_refused(
+    deliver_requested: bool,
+    action_type: &str,
+    approve: bool,
+    offers_opt_in: bool,
+) -> bool {
+    deliver_requested && !(action_type == ACTION_TYPE_WORKSPACE_ACTION && approve && offers_opt_in)
 }
 
 async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRejectable<Decision> {
@@ -545,6 +693,28 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
             "forbidden",
             "not a member of this approval channel",
             StatusCode::FORBIDDEN,
+            now,
+        )));
+    }
+
+    // **`deliverSecretToAgent` is only meaningful on the approve half of a
+    // workspace action** (ADR-0186 증보 v3 V3-3a). Anywhere else it is a
+    // malformed request. Judged straight after the membership gate and *before*
+    // the status and expiry arms, so it can never be outranked by an expiry
+    // settlement (which writes) — a security review (#3795) caught the first
+    // draft placing it after that arm.
+    if deliver_flag_refused(
+        input.deliver_secret_to_agent,
+        &approval.action_type,
+        input.approve,
+        payload_offers_opt_in_delivery(&approval.payload),
+    ) {
+        return Ok(Ok(refusal(
+            approval.id,
+            input.member_id,
+            DELIVER_SECRET_NOT_SUPPORTED,
+            "deliverSecretToAgent applies only to approving a workspace action",
+            StatusCode::BAD_REQUEST,
             now,
         )));
     }
@@ -737,6 +907,8 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
 
     // ---- expiry: settle it rather than merely refusing (Swift :198-221) ----
     if approval.expires_at.is_some_and(|expires| expires <= now) {
+        // An expired proposal's staged avatar image dies with it.
+        discard_staged_avatar_in_tx(conn, &approval).await?;
         return Ok(Ok(settle_expired(
             conn,
             &approval,
@@ -769,6 +941,12 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
     // own deadline.
     if approval.action_type == ACTION_TYPE_WORKSPACE_ACTION && input.approve {
         return execute_workspace_action(conn, &approval, &input, now).await;
+    }
+    // A rejected proposal's staged avatar image dies with it (the 24-hour sweep on
+    // the next avatar proposal is the backstop for the arms that never get here,
+    // such as a run cancelled by a person).
+    if approval.action_type == ACTION_TYPE_WORKSPACE_ACTION && !input.approve {
+        discard_staged_avatar_in_tx(conn, &approval).await?;
     }
 
     // ---- writes ------------------------------------------------------------
@@ -1068,6 +1246,44 @@ async fn role_required_refusal(
 /// A proposal that no longer holds: the approval stays pending and nothing is
 /// spent (ADR-0186 증보 V1-d — one word for every way a card can go stale, so
 /// the client vocabulary does not grow).
+/// Delete the staged avatar image a workspace-action approval points at, if any
+/// (ADR-0186 증보 v3 V3-2a): the rejected and expired arms. Only a `staged` row can
+/// be deleted here — an `applied` image is never touched — and a payload without a
+/// staged avatar is a no-op.
+async fn discard_staged_avatar_in_tx(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+) -> Result<(), momo_db::DbError> {
+    if approval.action_type != ACTION_TYPE_WORKSPACE_ACTION {
+        return Ok(());
+    }
+    let avatar = approval
+        .payload
+        .get("action")
+        .and_then(|action| action.get("args"))
+        .and_then(|args| args.get("avatar"));
+    let staged = avatar
+        .filter(|avatar| avatar.get("source").and_then(Value::as_str) == Some("staged"))
+        .and_then(|avatar| avatar.get("imageId"))
+        .and_then(Value::as_str)
+        .and_then(|id| Uuid::parse_str(id).ok());
+    if let Some(image_id) = staged {
+        delete_staged_avatar_image_in_tx(conn, approval.workspace_id, image_id).await?;
+    }
+    Ok(())
+}
+
+/// 64 lowercase hex characters → the 32-byte digest, or `None`.
+fn decode_pin_hex(text: &str) -> Option<Vec<u8>> {
+    if text.len() != 64 {
+        return None;
+    }
+    (0..64)
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&text[i..i + 2], 16).ok())
+        .collect()
+}
+
 fn args_invalid_refusal(
     approval: &LockedApproval,
     input: &DecisionInput<'_>,
@@ -1143,25 +1359,55 @@ async fn execute_workspace_action(
         )));
     };
 
+    // `deliverSecretToAgent` was already judged against this very action by the
+    // early guard in `decide_in_tx` (`deliver_flag_refused`), which runs before the
+    // expiry arm; a second copy here could never disagree with it, so there is
+    // none. The slice that first gives an action `SecretDelivery::OptIn` adds the
+    // honoured path *here*, with its own test.
+
     // The stored `args` are re-run through the **same** resolver the proposal
-    // passed (`routes::actions::resolve_action_in_tx`), for the reason ADR-0186
+    // passed (`routes::actions::resolve_stored_action_in_tx`), for the reason ADR-0186
     // D2 gives: 「저장값을 신뢰하지 않는다」. The card may be an hour old, the
     // ceilings may have narrowed, a channel name may have been taken or an agent
     // may have left a room since, and the row is writable by anything that can
     // write `approval.payload`. Re-proving is the difference between "a person
     // approved these values" and "a person approved a row".
     let now_ms = now.timestamp_millis();
-    let resolved = match resolve_action_in_tx(
+    let resolved = match resolve_stored_action_in_tx(
         conn,
         input.workspace_id,
         approval.requested_by,
         action,
         proposed_args(&approval.payload),
         now_ms,
+        approval.id,
     )
     .await?
     {
         Ok(resolved) => resolved,
+        Err(error) if error.message == crate::routes::actions::AVATAR_UNRESOLVED => {
+            // The avatar check runs **after** the target resolved, so the target is
+            // known — it is in the pins — and the decider can be judged against it:
+            // the owner or an admin is told the picture is no longer what the card
+            // showed (`action_args_invalid`); anyone else gets the generic
+            // `role_required`, which teaches them nothing.
+            let pinned_target = approval
+                .payload
+                .get("action")
+                .and_then(|action| action.get("pins"))
+                .and_then(|pins| pins.get("target"))
+                .and_then(Value::as_str)
+                .and_then(|id| Uuid::parse_str(id).ok());
+            if let Some(target) = pinned_target {
+                if require_profile_editor_in_tx(conn, input.workspace_id, target, input.member_id)
+                    .await?
+                    .is_ok()
+                {
+                    return Ok(Ok(args_invalid_refusal(approval, input, now)));
+                }
+            }
+            return role_required_refusal(conn, approval, input, now, required_role).await;
+        }
         Err(_) => {
             // An unresolvable *target* must not teach a non-eligible decider
             // anything about the workspace. For the subject-judged role the gate
@@ -1282,6 +1528,50 @@ async fn execute_workspace_action(
         ActionArgs::AgentRename { target: None, .. } => {
             return Err(protocol_error("agent.rename resolved without a target"));
         }
+        ActionArgs::AgentProfileUpdate {
+            display_name,
+            tagline,
+            role_label,
+            status,
+            avatar,
+            target: Some(target),
+            before: Some(before),
+            ..
+        } => match execute_agent_profile_update(
+            conn,
+            approval,
+            input,
+            now,
+            AgentProfileChange {
+                display_name,
+                tagline,
+                role_label,
+                status,
+                avatar,
+            },
+            target,
+            before,
+        )
+        .await?
+        {
+            Execution::Ran(executed) => executed,
+            Execution::Refused(decision) => return Ok(Ok(decision)),
+        },
+        ActionArgs::AgentProfileUpdate { .. } => {
+            return Err(protocol_error(
+                "agent.profile.update resolved without a target",
+            ));
+        }
+        ActionArgs::AgentInvite {
+            platform,
+            display_name,
+            handle,
+        } => match execute_agent_invite(conn, approval, input, now, platform, display_name, handle)
+            .await?
+        {
+            Execution::Ran(executed) => executed,
+            Execution::Refused(decision) => return Ok(Ok(decision)),
+        },
         ActionArgs::ChannelMemberAdd {
             channel: Some(channel),
             members,
@@ -1865,7 +2155,7 @@ async fn execute_hosted_channels_grant(
 }
 
 /// `agent.rename` (증보 V4): set the target agent's display name as the approver.
-/// The collision check ran in `resolve_action_in_tx` under the workspace's
+/// The collision check ran in `resolve_stored_action_in_tx` under the workspace's
 /// display-name lock, which this transaction still holds, so the write sees the
 /// roster that was checked.
 async fn execute_agent_rename(
@@ -1917,6 +2207,329 @@ async fn execute_agent_rename(
             &applied.previous_display_name,
             &target.handle,
             &applied.member.display_name,
+        ),
+        secret_once: None,
+        next: None,
+    }))
+}
+
+/// `agent.invite` (증보 v3 V3-3): the **approver** — an admin, judged by the gate
+/// before this runs — becomes the owner of a new hosted agent, born paused with a
+/// `pairing_pending` connection, in the decision's own transaction. Nothing the
+/// proposing agent said selects an id, a scope or a channel; access opens only when
+/// a person confirms the detected connection.
+///
+/// The pairing code is the one-time value of this decision (`secretOnce`, D4). It is
+/// in no audit row, no message and no payload.
+async fn execute_agent_invite(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
+    platform: &str,
+    display_name: &str,
+    handle: &str,
+) -> Result<Execution, momo_db::DbError> {
+    use crate::routes::hosted_agent_connections::{provision_hosted_agent_in_tx, Provisioned};
+    // The ban list is the REST route's check too; the resolver already asked, this
+    // is the same-transaction recheck for a ban that landed in between.
+    if momo_settings::is_handle_banned_in_tx(conn, handle).await? {
+        return Ok(Execution::Refused(args_invalid_refusal(
+            approval, input, now,
+        )));
+    }
+    let (member, issuance) = match provision_hosted_agent_in_tx(
+        conn,
+        input.workspace_id,
+        input.member_id,
+        input.via_token_id,
+        display_name.to_string(),
+        handle.to_string(),
+        None,
+        None,
+    )
+    .await?
+    {
+        Provisioned::Created(member, issuance) => (member, issuance),
+        // Defence in depth: the resolver already checked every member row, deleted
+        // ones included, so this is a race with a creator that takes no namespace
+        // lock (join, REST create). Nothing was written; the card is stale.
+        Provisioned::DuplicateHandle => {
+            return Ok(Execution::Refused(args_invalid_refusal(
+                approval, input, now,
+            )));
+        }
+        Provisioned::Rejected(_) => {
+            return Err(protocol_error(
+                "agent.invite approver is not an active human",
+            ));
+        }
+    };
+    let audit = AuditEntry::new(input.workspace_id, AUDIT_AGENT_INVITED)
+        .by(input.member_id)
+        .about(member.id)
+        .target("member", member.id)
+        .via_token(input.via_token_id)
+        .run(approval.run_id)
+        .with_schema(
+            AUDIT_AGENT_INVITED_SCHEMA,
+            // Provenance only — never the pairing code.
+            json!({
+                "via_agent": approval.requested_by.to_string(),
+                "approval_id": approval.id.to_string(),
+                "platform": platform,
+                "connection_id": issuance.connection.id.to_string(),
+            }),
+        );
+    Ok(Execution::Ran(Executed {
+        audits: vec![audit],
+        ref_type: REF_TYPE_AGENT,
+        ref_id: member.id,
+        result_body: agent_invite_result_body(display_name),
+        result_rows: momo_agent::actions::agent_invite_rows(
+            momo_agent::actions::agent_invite_platform_label(platform).unwrap_or(""),
+            display_name,
+            handle,
+        ),
+        secret_once: Some(SecretOnceDto {
+            kind: SECRET_ONCE_PAIRING.to_string(),
+            value: issuance.pairing_credential,
+            expires_at_ms: issuance.pairing_expires_at_ms,
+        }),
+        next: None,
+    }))
+}
+
+/// The card fields one `agent.profile.update` carries, as the resolver typed them.
+struct AgentProfileChange<'a> {
+    display_name: &'a Option<String>,
+    tagline: &'a FieldPatch,
+    role_label: &'a FieldPatch,
+    status: &'a StatusIntent,
+    avatar: &'a AvatarIntent,
+}
+
+/// `agent.profile.update` (증보 v3 V3-2): the name through the one rename write,
+/// the rest through the card write, in one transaction and as the approver.
+async fn execute_agent_profile_update(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
+    change: AgentProfileChange<'_>,
+    target: &ResolvedAgentTarget,
+    before: &AgentCard,
+) -> Result<Execution, momo_db::DbError> {
+    // The very diff the card showed (the pins proved `before` is still current).
+    let changes = profile_changes(
+        &target.current_display_name,
+        before,
+        change.display_name,
+        change.tagline,
+        change.role_label,
+        change.status,
+        change.avatar,
+    );
+    if changes.is_empty() {
+        return Err(protocol_error("agent.profile.update changes nothing"));
+    }
+    // The row is locked **before the first write** and read again: the card was
+    // resolved earlier in this transaction without the lock, so anything that
+    // moved since (a concurrent rename or profile change) re-asks. A refusal here
+    // has written nothing.
+    let Some((locked_name, locked_card)) =
+        lock_agent_card_in_tx(conn, input.workspace_id, target.id).await?
+    else {
+        return Err(protocol_error(
+            "the profile target is no longer a live agent",
+        ));
+    };
+    if locked_name != target.current_display_name || &locked_card != before {
+        return Ok(Execution::Refused(args_invalid_refusal(
+            approval, input, now,
+        )));
+    }
+    let via_agent = approval.requested_by.to_string();
+    let mut audits = Vec::new();
+    let mut new_name = target.current_display_name.clone();
+
+    if let Some(name) = change.display_name {
+        if name != &target.current_display_name {
+            let applied =
+                rename_agent_display_name_in_tx(conn, input.workspace_id, target.id, name)
+                    .await?
+                    .ok_or_else(|| {
+                        protocol_error("the profile target is no longer a live agent")
+                    })?;
+            new_name = applied.member.display_name.clone();
+            let mut detail = json!({
+                "old": applied.previous_display_name,
+                "new": applied.member.display_name,
+                "kind": "agent",
+                "via_agent": via_agent,
+                "approval_id": approval.id.to_string(),
+                "managed": target.managed,
+            });
+            if target.managed {
+                if let Some(object) = detail.as_object_mut() {
+                    object.insert("target_agent".into(), json!(target.id.to_string()));
+                }
+            }
+            audits.push(
+                AuditEntry::new(input.workspace_id, AUDIT_MEMBER_RENAMED)
+                    .by(input.member_id)
+                    .about(target.id)
+                    .target("member", target.id)
+                    .via_token(input.via_token_id)
+                    .run(approval.run_id)
+                    .with_schema(AUDIT_MEMBER_RENAMED_SCHEMA, detail),
+            );
+        }
+    }
+
+    // The picture. An approved image wins over a preset, so each choice clears the
+    // other: a preset removes the image row, an image removes the preset key, a
+    // clear removes both. The staged image is verified against its pin **again**
+    // here, under the member lock taken above and in this transaction — the
+    // resolver proved it, this is the write's own guarantee.
+    let mut avatar_audit: Option<Value> = None;
+    let avatar_preset = match change.avatar {
+        AvatarIntent::Unchanged => FieldPatch::Unchanged,
+        AvatarIntent::Clear => {
+            clear_avatar_image_in_tx(conn, input.workspace_id, target.id).await?;
+            FieldPatch::Clear
+        }
+        AvatarIntent::Preset(id) => {
+            clear_avatar_image_in_tx(conn, input.workspace_id, target.id).await?;
+            FieldPatch::Set(id.clone())
+        }
+        AvatarIntent::Staged {
+            image_id,
+            sha256,
+            origin,
+        } => {
+            let pin = decode_pin_hex(sha256)
+                .ok_or_else(|| protocol_error("avatar pin is not a sha256"))?;
+            if !staged_image_matches_pin_in_tx(
+                conn,
+                input.workspace_id,
+                *image_id,
+                target.id,
+                approval.id,
+                &pin,
+            )
+            .await?
+            {
+                return Ok(Execution::Refused(args_invalid_refusal(
+                    approval, input, now,
+                )));
+            }
+            let meta = read_avatar_image_in_tx(conn, input.workspace_id, *image_id)
+                .await?
+                .ok_or_else(|| protocol_error("the staged avatar vanished"))?;
+            apply_avatar_image_in_tx(conn, input.workspace_id, target.id, *image_id, approval.id)
+                .await?
+                .ok_or_else(|| protocol_error("the staged avatar could not be applied"))?;
+            avatar_audit = Some(json!({
+                "image_id": image_id.to_string(),
+                "origin": origin,
+                "mime": meta.mime,
+                "width": meta.width,
+                "height": meta.height,
+                "size_bytes": meta.size_bytes,
+                // A prefix is enough to find the row; the bytes never go in a log.
+                "sha256_prefix": &sha256[..12],
+            }));
+            FieldPatch::Clear
+        }
+        // Raw proposal forms never reach the executor: the stored parser refuses
+        // them (`ArgsOrigin::Stored`), so the resolver already said no.
+        AvatarIntent::Attachment(_) | AvatarIntent::Generated(_) => {
+            return Err(protocol_error("an unstaged avatar reached the executor"));
+        }
+    };
+    let patch = AgentCardPatch {
+        avatar_preset,
+        tagline: change.tagline.clone(),
+        role_label: change.role_label.clone(),
+        status: match change.status {
+            StatusIntent::Unchanged => CardStatusPatch::Unchanged,
+            StatusIntent::Clear => CardStatusPatch::Clear,
+            StatusIntent::Set { emoji, text, hours } => CardStatusPatch::Set {
+                emoji: emoji.clone(),
+                text: text.clone(),
+                expires_at: now + chrono::Duration::hours(*hours),
+            },
+        },
+    };
+    apply_agent_card_in_tx(conn, input.workspace_id, target.id, &patch)
+        .await?
+        .ok_or_else(|| protocol_error("the profile target is no longer a live agent"))?;
+
+    // Field **names** only: tagline and status are user-facing prose and never
+    // belong in an audit row (the card keeps the old/new for the approver).
+    let labels: Vec<&str> = changes.iter().map(|(label, _, _)| *label).collect();
+    let keys: Vec<&str> = labels
+        .iter()
+        .map(|label| match *label {
+            "이름" => "displayName",
+            "소개" => "tagline",
+            "역할 라벨" => "roleLabel",
+            "프로필 사진" => "avatar",
+            _ => "status",
+        })
+        .collect();
+    let mut detail = json!({
+        "fields": keys,
+        "via_agent": via_agent,
+        "approval_id": approval.id.to_string(),
+        "managed": target.managed,
+    });
+    if target.managed {
+        if let Some(object) = detail.as_object_mut() {
+            object.insert("target_agent".into(), json!(target.id.to_string()));
+            object.insert(
+                "owner_member_id".into(),
+                json!(target.owner_member_id.map(|owner| owner.to_string())),
+            );
+        }
+    }
+    if let Some(avatar_detail) = avatar_audit {
+        let mut avatar_detail = avatar_detail;
+        if let Some(object) = avatar_detail.as_object_mut() {
+            object.insert("via_agent".into(), json!(via_agent));
+            object.insert("approval_id".into(), json!(approval.id.to_string()));
+            object.insert("managed".into(), json!(target.managed));
+        }
+        audits.push(
+            AuditEntry::new(input.workspace_id, AUDIT_AGENT_AVATAR_UPDATED)
+                .by(input.member_id)
+                .about(target.id)
+                .target("member", target.id)
+                .via_token(input.via_token_id)
+                .run(approval.run_id)
+                .with_schema(AUDIT_AGENT_AVATAR_UPDATED_SCHEMA, avatar_detail),
+        );
+    }
+    audits.push(
+        AuditEntry::new(input.workspace_id, AUDIT_AGENT_PROFILE_UPDATED)
+            .by(input.member_id)
+            .about(target.id)
+            .target("member", target.id)
+            .via_token(input.via_token_id)
+            .run(approval.run_id)
+            .with_schema(AUDIT_AGENT_PROFILE_UPDATED_SCHEMA, detail),
+    );
+
+    Ok(Execution::Ran(Executed {
+        audits,
+        ref_type: REF_TYPE_AGENT,
+        ref_id: target.id,
+        result_body: agent_profile_update_result_body(&labels),
+        result_rows: momo_agent::actions::agent_profile_update_rows(
+            &new_name,
+            &target.handle,
+            &changes,
         ),
         secret_once: None,
         next: None,
@@ -2589,6 +3202,41 @@ fn refusal(
 mod tests {
     use super::*;
 
+    /// `deliverSecretToAgent` truth table (ADR-0186 증보 v3, security review of
+    /// #3795): honoured only when approving a workspace action that offers
+    /// opt-in delivery — every other cell is a refusal. The `offers_opt_in` row
+    /// is exercised here because no registry action occupies it yet.
+    #[test]
+    fn the_deliver_flag_is_honoured_in_exactly_one_cell() {
+        for action_type in [ACTION_TYPE_WORKSPACE_ACTION, "tool_call"] {
+            for approve in [true, false] {
+                for offers in [true, false] {
+                    let honoured = !deliver_flag_refused(true, action_type, approve, offers);
+                    assert_eq!(
+                        honoured,
+                        action_type == ACTION_TYPE_WORKSPACE_ACTION && approve && offers,
+                        "{action_type} approve={approve} offers={offers}"
+                    );
+                    // Not asking is never a refusal.
+                    assert!(!deliver_flag_refused(false, action_type, approve, offers));
+                }
+            }
+        }
+    }
+
+    /// No registry action opts in during P0, so the payload reader says no for
+    /// every real, unknown and absent id.
+    #[test]
+    fn nothing_offers_opt_in_delivery_in_p0() {
+        for payload in [
+            json!({"action": {"id": "invite.create"}}),
+            json!({"action": {"id": "no.such.action"}}),
+            json!({}),
+        ] {
+            assert!(!payload_offers_opt_in_delivery(&payload), "{payload}");
+        }
+    }
+
     /// The refusal body must decode as the receipt the client expects, or a 409
     /// would reach the phone as an unparseable success shape.
     #[test]
@@ -2826,6 +3474,7 @@ mod tests {
             public_origin: None,
             claude_subscription_agents_enabled: false,
             operator_scope: false,
+            deliver_secret_to_agent: false,
         }
     }
 

@@ -10125,6 +10125,58 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/approvals/{approvalId}/avatar-preview:
+    get:
+      tags: [approvals]
+      operationId: getApprovalAvatarPreview
+      summary: The image a pending `agent.profile.update` card proposes as an avatar.
+      description: >
+        ADR-0186 addendum 2026-10-13 (v3) V3-2a. The approval card's `action.preview`
+        block (`kind: avatar_image`) names a staged image and its `sha256`; this is
+        where the approver reads those bytes **before** deciding. They are the
+        server's re-encoded PNG/JPEG (at most 512x512 and 512 KiB), never the
+        proposer's bytes. Readable only by a person who could decide the card — the
+        target agent's owner or a workspace admin; every other caller (another
+        channel member, an unknown approval, an approval with no staged avatar) gets
+        the same 404, so the route is neither a preview for onlookers nor an oracle.
+        `v` must be the image's sha256 (64 hex characters); another value is a 404.
+        The response is the stored mime only, `X-Content-Type-Options: nosniff` and
+        `Content-Security-Policy: default-src 'none'; sandbox`.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: approvalId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: v
+          in: query
+          required: false
+          schema: {type: string, pattern: "^[0-9a-f]{64}$"}
+      responses:
+        "200":
+          description: The staged image.
+          headers:
+            Cache-Control:
+              description: "`private, max-age=31536000, immutable` with a matching `v`; `private, no-cache` without."
+              schema: {type: string}
+          content:
+            image/png: {schema: {type: string, format: binary}}
+            image/jpeg: {schema: {type: string, format: binary}}
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The caller is not a person (an agent bearer).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found for this caller (see above).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /v1/workspaces/{workspaceId}/plugins:
     get:
       tags: [plugins]
@@ -12803,6 +12855,27 @@ components:
           type: string
         agentModel:
           type: string
+        tagline:
+          type: string
+          maxLength: 140
+          description: >
+            ADR-0186 addendum 2026-10-13 (v3) V3-2. An agent's one-line intro,
+            plain text: a client must not auto-link, mention-parse or render
+            markdown in it. Agents only; omitted when unset.
+        avatarPreset:
+          type: string
+          description: >
+            ADR-0186 addendum 2026-10-13 (v3) V3-2a. The id of a server avatar
+            preset the agent wears instead of an uploaded image (a colour tile
+            or mascot the client draws). Agents only; omitted when unset. An
+            approved image avatar is `avatarUrl` instead and wins over a preset.
+        roleLabel:
+          type: string
+          maxLength: 24
+          description: >
+            ADR-0186 addendum 2026-10-13 (v3) V3-2. The agent's own role label,
+            plain text, distinct from the workspace role labels. Agents only;
+            omitted when unset.
         ownerHumanId:
           type: string
           format: uuid
@@ -12915,14 +12988,16 @@ components:
         statusEmoji:
           type: string
           description: >
-            ADR-0176 custom status emoji, human only. Omitted when unset, empty,
-            expired (`statusExpiresAtMs` reached — lazy delete), or for an agent.
+            ADR-0176 custom status emoji. Humans, and agents since ADR-0186
+            addendum 2026-10-13 (v3). Omitted when unset, empty, or expired
+            (`statusExpiresAtMs` reached — lazy delete).
         statusText:
           type: string
           maxLength: 80
           description: >
-            ADR-0176 custom status text (trimmed, ≤80), human only. Omitted when
-            unset, empty, expired, or for an agent.
+            ADR-0176 custom status text (trimmed, ≤80). Humans, and agents since
+            ADR-0186 addendum 2026-10-13 (v3). Omitted when unset, empty, or
+            expired.
         statusExpiresAtMs:
           type: integer
           format: int64
@@ -13818,7 +13893,7 @@ components:
         `actionId` enum of the Agent Port tool `oort_action_propose`, and that
         registry are held equal by one test
         (`routes::actions::the_action_ids_are_one_list_in_three_places`).
-      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update"]
+      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite"]
 
     SuggestableCommandId:
       type: string
@@ -13855,6 +13930,7 @@ components:
             - $ref: "#/components/schemas/WorkspaceActionRequiredRole"
           description: Who must approve this action. Absent while executable is false.
         argsSchema: {type: object, description: JSON Schema for the action's args object. Absent while executable is false.}
+        agentDelivery: {type: string, enum: [none, opt_in, always], description: "ADR-0186 v3. Whether this action's one-time value may be handed to the proposing agent: `opt_in` shows the approver a 'give the code to the agent' checkbox (default off), `always` hands it over without showing it to the approver, `none` never. Absent while executable is false."}
         executable: {type: boolean}
         unavailableReason: {type: string, nullable: true, description: Null when executable; a sentence when not. Never absent.}
 
@@ -19843,6 +19919,22 @@ components:
             rejection it is ignored (ADR-0188 R0.1): nothing runs, and the
             decision is judged on the host the card points at. Not part of the
             idempotency key: a replayed decision answers the original receipt.
+        deliverSecretToAgent:
+          type: boolean
+          default: false
+          description: >
+            ADR-0186 addendum 2026-10-13 (v3) V3-3a. Approver's choice to hand
+            the action's one-time value to the proposing agent (claimable once,
+            for 30 minutes, with `oort_action_claim_secret`) instead of showing
+            it to the approver. Only honoured when the approved action's catalog
+            row says `agentDelivery: opt_in`; `true` on anything else (another
+            action, a rejection, a non-workspace approval) is a 400 receipt
+            `deliver_secret_not_supported` and the approval stays pending (judged
+            right after the channel-membership gate, before the status and
+            expiry arms, so an overdue card is not settled by it). Not part of
+            the idempotency key: a replay of an already-executed decision
+            answers the original receipt even if it now carries `true`, and that
+            200 does not imply anything was delivered.
 
     ApprovalDecisionReceipt:
       type: object

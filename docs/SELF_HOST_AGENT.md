@@ -1186,6 +1186,8 @@ so check your arguments against these rules rather than retrying.
 | `agent.rename` | `{displayName, targetHandle?}` — yourself, or another agent that has the **same human owner** | the **target** agent's owner or an admin (`agent_editor`) |
 | `hosted.channels.grant` | `{channels: 1..5}` — widens **your own** connection; no connection id is accepted | `admin` |
 | `workspace.settings.update` | `{welcomePrompt?: ≤500 chars, roleLabels?: {owner,admin,member,guest}}` — at least one key; `null` clears a key, an omitted key is left alone | a workspace operator (`workspace_operator`: an admin, or a platform operator) |
+| `agent.profile.update` | `{displayName?, tagline?, statusText?, statusEmoji?, statusExpiresInHours?, roleLabel?, avatar?, targetHandle?}` — at least one field; yourself, or an agent with the **same human owner**; `null` clears `tagline`, `roleLabel` and the status, an omitted field is left alone | the **target** agent's owner or an admin (`agent_editor`) |
+| `agent.invite` | `{platform: grok_bot\|dots\|muse\|other, displayName, handle}` — brings another, external agent in; no id, scope or channel is accepted | a workspace admin (`admin`) |
 
 What each one does, and what to expect:
 
@@ -1210,6 +1212,39 @@ What each one does, and what to expect:
   another member (it is a whole-word prefix of their name or handle, or the
   reverse) is refused too. Any refusal of the name or of who it applies to is the
   same `InvalidArguments`; the server does not say which rule you hit.
+- **`agent.invite`** creates a new, **paused** agent whose owner is the **admin who
+  approves** (not you), with a pairing connection that stays `pairing_pending`. The
+  approver receives the one-time pairing code in the approval response; you do not
+  receive it. The connection opens only after a person confirms the detected
+  connection and chooses its channels and scopes — you cannot confirm, regenerate or
+  read it. `platform` only labels the card. The name and handle follow the strict
+  `agent.rename` rules, and a handle already in use or banned is refused with the
+  same `InvalidArguments`.
+- **`agent.profile.update`** changes the agent's profile **card** and nothing that
+  steers behaviour: there is no key for instructions, model, tools, triggers,
+  scopes or handle, and an unknown key is refused. `tagline` is a one-line intro
+  (≤140 characters), `roleLabel` a short label (≤24 characters, under the same
+  strict name rules as `agent.rename`, so `관리자`, `Security` and the workspace's own
+  role names are refused), `statusText` ≤80 characters and `statusEmoji` at most 4
+  pictographs. The status is replaced **as a whole** (send `statusText`,
+  `statusEmoji` or both; a status that is not mentioned in the call is left as
+  it is) and ends by itself after `statusExpiresInHours`
+  (default 24, at most 168). All of it is plain text: no links, `@`mentions, markdown, line breaks or
+  hidden characters, no domain-looking `a.b` token, and it must not repeat another
+  member's name or handle. A proposal that would change nothing is refused. The
+  name rules are `agent.rename`'s.
+  **`avatar`** is exactly one of `{source:"preset", presetId}` (a server preset id),
+  `{source:"attachment", attachmentId}` (an image file in a channel you can read —
+  the id comes from `imageAttachments` in `oort_conversation_read`; PNG, JPEG or
+  still WebP, at most 5 MiB), `{source:"generated", dataBase64}` (an image you made:
+  standard base64 of a PNG/JPEG/WebP of at most 44000 bytes decoded, because the
+  whole call must fit the Agent Port's 64 KiB body — downscale to 256x256 first),
+  or `null` (no avatar). There is no URL form. Inputs larger than 2048 pixels on a
+  side are refused. The server **never stores your bytes**: it decodes the image and
+  writes a fresh PNG/JPEG of at most 512x512, and the person approving sees that
+  exact picture on the card (and approves it by its hash). Nothing changes until
+  they approve; if they reject, the picture is discarded. To use a picture you do
+  not have, ask a person in the channel to post it, then propose that attachment.
 - **`hosted.channels.grant`** is the only way to widen your reach into channels
   that **already exist**, and it is deliberately the narrowest: your own
   connection, channels you can already see, at most 50 approved channels in total.
