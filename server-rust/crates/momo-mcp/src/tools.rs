@@ -370,6 +370,9 @@ const WORKSPACE_PROFILE_STATUS_TEXT_MAX_BYTES: u64 = 320;
 const WORKSPACE_PROFILE_STATUS_EMOJI_MAX_BYTES: u64 = 64;
 const WORKSPACE_PROFILE_ROLE_LABEL_MAX_BYTES: u64 = 96;
 const WORKSPACE_PROFILE_STATUS_HOURS_MAX: i64 = 168;
+const WORKSPACE_AVATAR_B64_MAX_CHARS: u64 = 58_700;
+const WORKSPACE_AVATAR_ID_MAX_CHARS: u64 = 36;
+const WORKSPACE_AVATAR_PRESET_MAX_CHARS: u64 = 24;
 const WORKSPACE_MEMBER_HANDLE_MAX_BYTES: u64 = 33;
 
 /// One `oneOf` branch of `oort_action_propose`'s `args`: the closed object
@@ -457,6 +460,48 @@ fn action_args_branches() -> Vec<Value> {
     ]
 }
 
+/// The `avatar` argument of `agent.profile.update` (증보 v3 V3-2a): exactly one of
+/// four closed shapes, or `null` to remove the avatar. There is no URL form and no
+/// way to name a file the agent cannot read.
+fn avatar_schema() -> Value {
+    json!({
+        // `["object","null"]` + `oneOf`: the argument validator reads a `oneOf` only
+        // on an object-typed schema, and `null` (remove the avatar) is the nullable
+        // half of the type.
+        "type": ["object", "null"],
+        "description": "Your avatar. Exactly one of: a server preset id; a workspace image file you can read (use the attachment id from oort_conversation_read); or an image you generated (PNG/JPEG/WebP, base64, at most about 44 KB decoded — downscale to 256x256 first). null removes the avatar. The server re-encodes every image; a person sees it on the approval card before anything changes.",
+        "oneOf": [
+            {
+                "title": "preset",
+                "type": "object", "additionalProperties": false,
+                "required": ["source", "presetId"],
+                "properties": {
+                    "source": {"type": "string", "enum": ["preset"]},
+                    "presetId": required_text(WORKSPACE_AVATAR_PRESET_MAX_CHARS)
+                }
+            },
+            {
+                "title": "attachment",
+                "type": "object", "additionalProperties": false,
+                "required": ["source", "attachmentId"],
+                "properties": {
+                    "source": {"type": "string", "enum": ["attachment"]},
+                    "attachmentId": required_text(WORKSPACE_AVATAR_ID_MAX_CHARS)
+                }
+            },
+            {
+                "title": "generated",
+                "type": "object", "additionalProperties": false,
+                "required": ["source", "dataBase64"],
+                "properties": {
+                    "source": {"type": "string", "enum": ["generated"]},
+                    "dataBase64": required_text(WORKSPACE_AVATAR_B64_MAX_CHARS)
+                }
+            }
+        ]
+    })
+}
+
 /// `agent.profile.update` (증보 v3 V3-2): at least one key. UNLIKE the other
 /// actions, `null` on `tagline`, `roleLabel`, `statusText` and `statusEmoji`
 /// CLEARS that field, so omit what you are not changing. `displayName`,
@@ -472,6 +517,7 @@ fn agent_profile_update_branch() -> Value {
             "statusEmoji": nullable(text(WORKSPACE_PROFILE_STATUS_EMOJI_MAX_BYTES)),
             "statusExpiresInHours": nullable(integer(1, WORKSPACE_PROFILE_STATUS_HOURS_MAX)),
             "roleLabel": nullable(text(WORKSPACE_PROFILE_ROLE_LABEL_MAX_BYTES)),
+            "avatar": avatar_schema(),
             "targetHandle": nullable(required_text(WORKSPACE_MEMBER_HANDLE_MAX_BYTES))
         }),
     );

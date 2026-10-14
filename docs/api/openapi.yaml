@@ -10125,6 +10125,58 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/approvals/{approvalId}/avatar-preview:
+    get:
+      tags: [approvals]
+      operationId: getApprovalAvatarPreview
+      summary: The image a pending `agent.profile.update` card proposes as an avatar.
+      description: >
+        ADR-0186 addendum 2026-10-13 (v3) V3-2a. The approval card's `action.preview`
+        block (`kind: avatar_image`) names a staged image and its `sha256`; this is
+        where the approver reads those bytes **before** deciding. They are the
+        server's re-encoded PNG/JPEG (at most 512x512 and 512 KiB), never the
+        proposer's bytes. Readable only by a person who could decide the card — the
+        target agent's owner or a workspace admin; every other caller (another
+        channel member, an unknown approval, an approval with no staged avatar) gets
+        the same 404, so the route is neither a preview for onlookers nor an oracle.
+        `v` must be the image's sha256 (64 hex characters); another value is a 404.
+        The response is the stored mime only, `X-Content-Type-Options: nosniff` and
+        `Content-Security-Policy: default-src 'none'; sandbox`.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: approvalId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: v
+          in: query
+          required: false
+          schema: {type: string, pattern: "^[0-9a-f]{64}$"}
+      responses:
+        "200":
+          description: The staged image.
+          headers:
+            Cache-Control:
+              description: "`private, max-age=31536000, immutable` with a matching `v`; `private, no-cache` without."
+              schema: {type: string}
+          content:
+            image/png: {schema: {type: string, format: binary}}
+            image/jpeg: {schema: {type: string, format: binary}}
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The caller is not a person (an agent bearer).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found for this caller (see above).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /v1/workspaces/{workspaceId}/plugins:
     get:
       tags: [plugins]
@@ -12810,6 +12862,13 @@ components:
             ADR-0186 addendum 2026-10-13 (v3) V3-2. An agent's one-line intro,
             plain text: a client must not auto-link, mention-parse or render
             markdown in it. Agents only; omitted when unset.
+        avatarPreset:
+          type: string
+          description: >
+            ADR-0186 addendum 2026-10-13 (v3) V3-2a. The id of a server avatar
+            preset the agent wears instead of an uploaded image (a colour tile
+            or mascot the client draws). Agents only; omitted when unset. An
+            approved image avatar is `avatarUrl` instead and wins over a preset.
         roleLabel:
           type: string
           maxLength: 24

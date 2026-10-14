@@ -44,8 +44,16 @@ use crate::member_avatar::{image_dimensions, sniff_image_mime, IMAGE_SNIFF_PREFI
 pub const AGENT_AVATAR_OUT_MAX_DIM: u32 = 512;
 /// The largest stored avatar (matches `agent_avatar_size_ck`).
 pub const AGENT_AVATAR_OUT_MAX_BYTES: usize = 512 * 1024;
-/// An image an agent generated and sent in the tool call (V3-2a: ≤1 MiB).
-pub const AGENT_AVATAR_IN_MAX_BYTES_GENERATED: usize = 1024 * 1024;
+/// An image an agent generated and sent **inside the tool call** (V3-2a).
+///
+/// The ADR planned 1 MiB; the Agent Port reads at most
+/// `momo_mcp::MAX_BODY_BYTES` = 64 KiB of request
+/// body *before* it authenticates (a deliberate pre-auth buffer bound), and a
+/// base64 image has to fit in that body together with the call's own JSON. So the
+/// decoded image is capped at 44 000 bytes (≈ 58.7 k base64 characters): a 256×256
+/// PNG or a 512×512 JPEG fits; a 1 MiB render has to be downscaled by the agent
+/// first. A larger image can still arrive as a workspace file (source (a), ≤5 MiB).
+pub const AGENT_AVATAR_IN_MAX_BYTES_GENERATED: usize = 44_000;
 /// An image already uploaded to the workspace (V3-2a: ≤5 MiB, like member avatars).
 pub const AGENT_AVATAR_IN_MAX_BYTES_ATTACHMENT: usize = 5 * 1024 * 1024;
 /// The longest side of an **input** image. The stored result is at most 512, so an
@@ -615,6 +623,112 @@ pub async fn purge_stale_staged_avatar_images_in_tx(
     .execute(&mut *conn)
     .await?;
     Ok(deleted.rows_affected())
+}
+
+// ---------------------------------------------------------------------------
+// presets and attachment sources (ADR-0186 증보 v3 V3-2a, A1)
+// ---------------------------------------------------------------------------
+
+/// The server-side avatar presets (an id the clients draw: a colour tile with the
+/// agent's initial, or one of the mascots). A preset is only an id — no bytes, no
+/// URL, nothing to parse. The art and the picker belong to the UXUI.
+pub const AGENT_AVATAR_PRESETS: [&str; 8] = [
+    "sky", "mint", "sun", "rose", "violet", "slate", "comet", "omu",
+];
+
+/// Whether `id` is one of [`AGENT_AVATAR_PRESETS`].
+pub fn is_avatar_preset(id: &str) -> bool {
+    AGENT_AVATAR_PRESETS.contains(&id)
+}
+
+/// A workspace image file an agent may use as an avatar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AvatarAttachmentSource {
+    pub id: Uuid,
+    pub channel_id: Uuid,
+    pub drive_file_id: String,
+    pub size_bytes: i64,
+}
+
+/// The attachment, **if and only if the proposing agent could read it**: it is
+/// complete, bound to a message that still exists, a PNG/JPEG/WebP within
+/// `max_bytes`, in a live non-DM channel that is in the agent's approved set
+/// (`approved_channels`, from its hosted identity) and that the agent is a live
+/// member of. Everything else — somebody else's private channel, a DM, an archived
+/// channel, a deleted message, a pending or failed upload, a missing id — is the
+/// same `None`, so a refusal cannot be used to learn that a file exists.
+pub async fn find_visible_image_attachment_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    proposer_member_id: Uuid,
+    approved_channels: &[Uuid],
+    attachment_id: Uuid,
+    max_bytes: i64,
+) -> Result<Option<AvatarAttachmentSource>, DbError> {
+    let row = sqlx::query(
+        "SELECT a.id, a.channel_id, a.drive_file_id, a.size_bytes \
+           FROM attachment a \
+           JOIN channel c ON c.workspace_id = a.workspace_id AND c.id = a.channel_id \
+           JOIN message m ON m.workspace_id = a.workspace_id AND m.id = a.message_id \
+          WHERE a.workspace_id = $1 AND a.id = $2 AND a.status = 'complete' \
+            AND a.drive_file_id IS NOT NULL \
+            AND a.mime IN ('image/png', 'image/jpeg', 'image/webp') \
+            AND a.size_bytes BETWEEN 1 AND $5 \
+            AND m.state <> 'deleted' \
+            AND c.kind IN ('public', 'private') AND c.archived_at IS NULL \
+            AND a.channel_id = ANY($3) \
+            AND EXISTS (SELECT 1 FROM membership p \
+                         WHERE p.workspace_id = c.workspace_id AND p.channel_id = c.id \
+                           AND p.member_id = $4 AND p.left_at IS NULL)",
+    )
+    .bind(workspace_id)
+    .bind(attachment_id)
+    .bind(approved_channels)
+    .bind(proposer_member_id)
+    .bind(max_bytes)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(row) = row else { return Ok(None) };
+    Ok(Some(AvatarAttachmentSource {
+        id: row.try_get("id")?,
+        channel_id: row.try_get("channel_id")?,
+        drive_file_id: row.try_get("drive_file_id")?,
+        size_bytes: row.try_get("size_bytes")?,
+    }))
+}
+
+/// Image attachments of a page of messages, for the Agent Port's conversation read:
+/// `(message id, attachment id, name, mime, size)` for complete PNG/JPEG/WebP files
+/// only. The agent learns an attachment's **id** here because that id is the only
+/// way to name a file for [`find_visible_image_attachment_in_tx`]; the Drive file id
+/// is never projected.
+pub async fn image_attachments_for_messages_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    message_ids: &[Uuid],
+) -> Result<Vec<(Uuid, Uuid, String, String, i64)>, DbError> {
+    let rows = sqlx::query(
+        "SELECT a.message_id, a.id, a.name, a.mime, a.size_bytes FROM attachment a \
+          WHERE a.workspace_id = $1 AND a.message_id = ANY($2) AND a.status = 'complete' \
+            AND a.mime IN ('image/png', 'image/jpeg', 'image/webp') \
+          ORDER BY a.created_at ASC, a.id ASC",
+    )
+    .bind(workspace_id)
+    .bind(message_ids)
+    .fetch_all(&mut *conn)
+    .await?;
+    rows.iter()
+        .map(|row| {
+            Ok((
+                row.try_get("message_id")?,
+                row.try_get("id")?,
+                row.try_get("name")?,
+                row.try_get("mime")?,
+                row.try_get("size_bytes")?,
+            ))
+        })
+        .collect::<Result<Vec<_>, sqlx::Error>>()
+        .map_err(DbError::from)
 }
 
 #[cfg(test)]

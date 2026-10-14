@@ -66,6 +66,9 @@ pub struct AgentCardPatch {
     pub tagline: FieldPatch,
     pub role_label: FieldPatch,
     pub status: CardStatusPatch,
+    /// The avatar **preset** id (`config.avatarPreset`). An image avatar is a
+    /// separate row (`agent_avatar_image`) written by `crate::agent_avatar`.
+    pub avatar_preset: FieldPatch,
 }
 
 /// The card as it stands **now**: an expired status reads as absent, exactly as
@@ -76,6 +79,10 @@ pub struct AgentCard {
     pub role_label: Option<String>,
     pub status_emoji: Option<String>,
     pub status_text: Option<String>,
+    /// `config.avatarPreset`, when it is a short string.
+    pub avatar_preset: Option<String>,
+    /// `member.avatar_image_id` — the approved image avatar, if any.
+    pub avatar_image_id: Option<Uuid>,
 }
 
 // `config` is also written at agent creation as a free bag, so the two card keys
@@ -87,6 +94,10 @@ const CARD_SELECT: &str = "SELECT \
             CASE WHEN jsonb_typeof(a.config->'roleLabel') = 'string' \
                   AND char_length(a.config->>'roleLabel') <= 24 \
                  THEN a.config->>'roleLabel' END AS role_label, \
+            CASE WHEN jsonb_typeof(a.config->'avatarPreset') = 'string' \
+                  AND char_length(a.config->>'avatarPreset') <= 24 \
+                 THEN a.config->>'avatarPreset' END AS avatar_preset, \
+            m.avatar_image_id AS avatar_image_id, \
             CASE WHEN m.status_expires_at IS NULL OR m.status_expires_at > now() \
                  THEN m.status_emoji END AS status_emoji, \
             CASE WHEN m.status_expires_at IS NULL OR m.status_expires_at > now() \
@@ -102,6 +113,8 @@ fn decode(row: &sqlx::postgres::PgRow) -> Result<AgentCard, sqlx::Error> {
         role_label: row.try_get("role_label")?,
         status_emoji: row.try_get("status_emoji")?,
         status_text: row.try_get("status_text")?,
+        avatar_preset: row.try_get("avatar_preset")?,
+        avatar_image_id: row.try_get("avatar_image_id")?,
     })
 }
 
@@ -177,6 +190,7 @@ pub async fn apply_agent_card_in_tx(
     for (key, field) in [
         ("tagline", &patch.tagline),
         ("roleLabel", &patch.role_label),
+        ("avatarPreset", &patch.avatar_preset),
     ] {
         match field {
             FieldPatch::Unchanged => {}

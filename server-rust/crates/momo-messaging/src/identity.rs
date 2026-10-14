@@ -483,6 +483,8 @@ pub struct RosterMember {
     pub agent_tagline: Option<String>,
     /// `agent.config->>'roleLabel'`, agents only.
     pub agent_role_label: Option<String>,
+    /// `agent.config->>'avatarPreset'` (ADR-0186 증보 v3 V3-2a), agents only.
+    pub agent_avatar_preset: Option<String>,
     pub owner_human_id: Option<Uuid>,
     pub max_concurrent_runs: Option<i32>,
     pub max_run_steps: Option<i32>,
@@ -551,6 +553,7 @@ fn decode_roster_member(row: &sqlx::postgres::PgRow) -> Result<RosterMember, sql
         agent_model: row.try_get("agent_model")?,
         agent_tagline: row.try_get("agent_tagline")?,
         agent_role_label: row.try_get("agent_role_label")?,
+        agent_avatar_preset: row.try_get("agent_avatar_preset")?,
         owner_human_id: row.try_get("owner_human_id")?,
         max_concurrent_runs: row.try_get("max_concurrent_runs")?,
         max_run_steps: row.try_get("max_run_steps")?,
@@ -643,6 +646,9 @@ pub async fn list_workspace_roster(
                 CASE WHEN jsonb_typeof(a.config->'roleLabel') = 'string' \
                       AND char_length(a.config->>'roleLabel') <= 24 \
                      THEN a.config->>'roleLabel' END AS agent_role_label, \
+                CASE WHEN jsonb_typeof(a.config->'avatarPreset') = 'string' \
+                      AND char_length(a.config->>'avatarPreset') <= 24 \
+                     THEN a.config->>'avatarPreset' END AS agent_avatar_preset, \
                 a.owner_human_id, \
                 a.max_concurrent_runs, \
                 a.max_run_steps, \

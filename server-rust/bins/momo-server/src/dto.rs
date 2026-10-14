@@ -2753,6 +2753,10 @@ pub struct RosterMemberDto {
     /// from the workspace role labels. Agents only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role_label: Option<String>,
+    /// ADR-0186 증보 v3 V3-2a — the id of a server avatar preset (a tile the
+    /// client draws), when the agent wears one instead of an image. Agents only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_preset: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner_human_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

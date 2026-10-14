@@ -339,6 +339,29 @@ pub async fn is_active_channel_member_in_tx(
     Ok(found.is_some())
 }
 
+/// An approval's kind, status and payload **without locking it** — for the read-only
+/// avatar-preview route. `None` when the id does not exist in the workspace.
+pub async fn read_approval_payload_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    approval_id: Uuid,
+) -> Result<Option<(String, String, Value)>, DbError> {
+    let row = sqlx::query(
+        "SELECT action_type, status::text AS status_label, payload FROM approval \
+          WHERE workspace_id = $1 AND id = $2",
+    )
+    .bind(workspace_id)
+    .bind(approval_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(row) = row else { return Ok(None) };
+    Ok(Some((
+        row.try_get("action_type").map_err(DbError::from)?,
+        row.try_get("status_label").map_err(DbError::from)?,
+        row.try_get("payload").map_err(DbError::from)?,
+    )))
+}
+
 /// Swift `lockApproval` (:441-485): `FOR UPDATE OF a`, joined to the run and
 /// the agent so one round trip carries everything the decision needs.
 ///

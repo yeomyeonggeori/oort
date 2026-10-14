@@ -14296,3 +14296,925 @@ async fn an_agent_avatar_image_is_staged_pinned_applied_and_served() {
             .unwrap();
     assert_eq!(pointer, None);
 }
+
+// ---------------------------------------------------------------------------
+// ADR-0186 증보 2026-10-13 v3 A1 (#3787) — avatar sources, staging, pins, preview
+// ---------------------------------------------------------------------------
+
+/// An in-memory Drive archive: `file_content` answers the bytes registered under a
+/// Drive file id. Everything else is refused (the avatar path only reads).
+#[derive(Debug, Default)]
+struct MemDrive3787 {
+    files: std::sync::Mutex<std::collections::HashMap<String, Vec<u8>>>,
+}
+
+#[async_trait::async_trait]
+impl momo_drive::DriveArchive for MemDrive3787 {
+    async fn create_resumable_upload(
+        &self,
+        _channel_id: Uuid,
+        _name: &str,
+        _mime: &str,
+        _size_bytes: i64,
+    ) -> Result<momo_drive::DriveUploadSession, momo_drive::DriveError> {
+        Err(momo_drive::DriveError::Unavailable)
+    }
+
+    async fn file_metadata(
+        &self,
+        file_id: &str,
+    ) -> Result<momo_drive::DriveFile, momo_drive::DriveError> {
+        let files = self.files.lock().unwrap();
+        let bytes = files
+            .get(file_id)
+            .ok_or(momo_drive::DriveError::FileNotFound)?;
+        Ok(momo_drive::DriveFile {
+            drive_file_id: file_id.to_string(),
+            name: "x".into(),
+            mime: "image/png".into(),
+            size_bytes: bytes.len() as i64,
+        })
+    }
+
+    async fn file_content(
+        &self,
+        file_id: &str,
+        _max_bytes: i64,
+    ) -> Result<momo_drive::DriveContent, momo_drive::DriveError> {
+        let bytes = self
+            .files
+            .lock()
+            .unwrap()
+            .get(file_id)
+            .cloned()
+            .ok_or(momo_drive::DriveError::FileNotFound)?;
+        let size = bytes.len() as i64;
+        Ok(momo_drive::DriveContent {
+            mime: "image/png".into(),
+            size_bytes: size,
+            body: Box::pin(futures::stream::iter(vec![Ok(axum::body::Bytes::from(
+                bytes,
+            ))])),
+        })
+    }
+}
+
+async fn start_server_with_drive_3787(
+    pool: PgPool,
+    drive: Arc<dyn momo_drive::DriveArchive>,
+) -> String {
+    let state = AppState::new(
+        pool,
+        TEST_JWT_SECRET.to_string(),
+        "ws://127.0.0.1:8000/connection/websocket".to_string(),
+    )
+    .with_drive(drive)
+    .with_agent_port(AgentPortConfig {
+        external_origin: None,
+        window_seconds: 60,
+        per_token_limit: 0,
+        per_agent_limit: 0,
+        per_ip_limit: 0,
+        hosted_delivery_enabled: true,
+        hosted_lease_seconds: momo_outbox::HOSTED_LEASE_SECONDS_DEFAULT,
+        subscription_agents_enabled: true,
+        claude_subscription_agents_enabled: true,
+        oauth: Default::default(),
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind avatar conformance server");
+    let address: SocketAddr = listener.local_addr().expect("server address");
+    tokio::spawn(async move {
+        let _ = axum::serve(
+            listener,
+            build_app(state).into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await;
+    });
+    format!("http://{address}")
+}
+
+fn b64_3787(bytes: &[u8]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+fn tiny_png_3787() -> Vec<u8> {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD
+        .decode(TINY_PNG_B64_3786)
+        .unwrap()
+}
+
+async fn staged_rows_3787(pool: &PgPool, ws: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM agent_avatar_image WHERE workspace_id=$1")
+        .bind(ws)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// **An agent proposes an avatar it generated — the whole loop.** Hostile inputs
+/// are one refusal and leave no staged row; a good image is re-encoded, staged,
+/// bound to its approval, previewed to the approver only (and by hash), pinned;
+/// a third party cannot approve; tampered bytes re-ask; a swapped pin re-asks;
+/// rejection and expiry delete the staged row; approval serves exactly the server's
+/// bytes and the roster says so; a preset replaces it; null removes it.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_agent_proposes_a_generated_avatar_and_only_the_approved_bytes_are_served() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server_with_drive_3787(app, Arc::new(MemDrive3787::default())).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+    let agent = fixture.hosted_agent;
+    let (owner, owner_jwt) = seed_human_3708(&su, &fixture, "owner", "member").await;
+    let (_third, third_jwt) = seed_human_3708(&su, &fixture, "third", "member").await;
+    set_agent_owner_3708(&su, agent, Some(owner)).await;
+    tidy_agent_3708(&su, agent, "Hermes").await;
+
+    let propose = |avatar: Value| {
+        let (client, base, su) = (client.clone(), base.clone(), su.clone());
+        let fixture = &fixture;
+        async move {
+            try_propose_action_3706(
+                &client,
+                &base,
+                &su,
+                fixture,
+                "agent.profile.update",
+                json!({ "avatar": avatar }),
+            )
+            .await
+        }
+    };
+
+    // ---- hostile inputs: one refusal, no staged row ---------------------------
+    let mut polyglot = tiny_png_3787();
+    polyglot.extend_from_slice(b"<script>alert(1)</script>PK\x03\x04");
+    let mut bomb_header = tiny_png_3787();
+    bomb_header[16..20].copy_from_slice(&60000u32.to_be_bytes());
+    let mut answers = Vec::new();
+    for hostile in [
+        json!({"source": "url", "url": "https://evil.example/a.png"}),
+        json!({"source": "generated", "dataBase64": b64_3787(b"GIF89a\x01\x00\x01\x00\x00\x00\x00;")}),
+        json!({"source": "generated", "dataBase64": b64_3787(b"<svg xmlns='http://www.w3.org/2000/svg'><script>1</script></svg>")}),
+        json!({"source": "generated", "dataBase64": b64_3787(&bomb_header)}),
+        json!({"source": "generated", "dataBase64": b64_3787(&[0u8; 44_001])}),
+        json!({"source": "generated", "dataBase64": "not base64 !!"}),
+        json!({"source": "generated", "dataBase64": format!("{}\n", b64_3787(&tiny_png_3787()))}),
+        json!({"source": "generated", "dataBase64": b64_3787(&tiny_png_3787()), "mime": "image/svg+xml"}),
+        json!({"source": "generated", "dataBase64": b64_3787(&tiny_png_3787()[..40])}),
+        json!({"source": "preset", "presetId": "no-such-preset"}),
+        json!({"source": "attachment", "attachmentId": Uuid::new_v4().to_string()}),
+        json!({"source": "staged", "imageId": Uuid::new_v4().to_string(),
+               "sha256": "0".repeat(64), "origin": "generated"}),
+    ] {
+        let (status, refused) = propose(hostile.clone()).await;
+        answers.push((status, refused["error"].clone()));
+        assert_eq!(status, 400, "{hostile} must be refused: {refused}");
+    }
+    assert!(answers.iter().all(|a| a.1 == answers[0].1), "{answers:?}");
+    assert_eq!(
+        staged_rows_3787(&su, ws).await,
+        0,
+        "a refusal stages nothing"
+    );
+
+    // ---- a good (and hostile-but-valid) image: re-encoded, staged, bound --------
+    let (status, proposed) =
+        propose(json!({"source": "generated", "dataBase64": b64_3787(&polyglot)})).await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let card: Value = sqlx::query_scalar("SELECT props FROM message WHERE id=$1")
+        .bind(Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap())
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    let preview = &card["action"]["preview"];
+    assert_eq!(preview["kind"], "avatar_image", "{card}");
+    assert_eq!(preview["origin"], "generated");
+    let image_id = Uuid::parse_str(preview["imageId"].as_str().unwrap()).unwrap();
+    let sha = preview["sha256"].as_str().unwrap().to_string();
+    assert_eq!(sha.len(), 64);
+    let rows = card["action"]["rows"].as_array().unwrap().clone();
+    let picture_row = rows.iter().find(|r| r["label"] == "프로필 사진").unwrap();
+    assert!(picture_row["value"]
+        .as_str()
+        .unwrap()
+        .contains("에이전트가 만든 이미지"));
+    // The stored row is the server's bytes, bound to this approval, staged.
+    let (stored, status_label, bound, source): (Vec<u8>, String, Option<Uuid>, String) =
+        sqlx::query_as(
+            "SELECT bytes, status, approval_id, source FROM agent_avatar_image WHERE id=$1",
+        )
+        .bind(image_id)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(status_label, "staged");
+    assert_eq!(bound, Some(approval));
+    assert_eq!(source, "generated");
+    assert!(
+        !stored.windows(8).any(|w| w == b"<script>")
+            && !stored.windows(4).any(|w| w == b"PK\x03\x04"),
+        "the appendix did not survive the re-encode"
+    );
+    assert_ne!(stored, polyglot);
+    // No bytes, no base64, no agent-chosen id in the approval payload.
+    let payload: Value = sqlx::query_scalar("SELECT payload FROM approval WHERE id=$1")
+        .bind(approval)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    let payload_text = payload.to_string();
+    assert!(
+        !payload_text.contains("dataBase64") && !payload_text.contains(&b64_3787(&polyglot)[..40])
+    );
+    assert_eq!(payload["action"]["args"]["avatar"]["source"], "staged");
+    assert_eq!(payload["action"]["pins"]["avatar"]["sha256"], json!(sha));
+
+    // ---- the preview: the decider only, by hash ---------------------------------
+    let preview_url = format!("{base}/v1/workspaces/{ws}/approvals/{approval}/avatar-preview");
+    let seen = client
+        .get(format!("{preview_url}?v={sha}"))
+        .bearer_auth(&owner_jwt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(seen.status().as_u16(), 200);
+    assert_eq!(seen.headers()["x-content-type-options"], "nosniff");
+    assert_eq!(
+        seen.headers()["content-security-policy"],
+        "default-src 'none'; sandbox"
+    );
+    assert_eq!(seen.bytes().await.unwrap().to_vec(), stored);
+    for (label, jwt, query) in [
+        ("a third party", third_jwt.as_str(), format!("?v={sha}")),
+        (
+            "a wrong hash",
+            owner_jwt.as_str(),
+            format!("?v={}", "0".repeat(64)),
+        ),
+    ] {
+        let denied = client
+            .get(format!("{preview_url}{query}"))
+            .bearer_auth(jwt)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(denied.status().as_u16(), 404, "{label}");
+    }
+    let admin = client
+        .get(format!("{preview_url}?v={sha}"))
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        admin.status().as_u16(),
+        200,
+        "an admin may decide, so may preview"
+    );
+    let agent_try = client
+        .get(format!("{preview_url}?v={sha}"))
+        .bearer_auth(&fixture.hosted_bearer)
+        .send()
+        .await
+        .unwrap();
+    assert!(matches!(agent_try.status().as_u16(), 401 | 403));
+    let unknown = client
+        .get(format!(
+            "{base}/v1/workspaces/{ws}/approvals/{}/avatar-preview?v={sha}",
+            Uuid::new_v4()
+        ))
+        .bearer_auth(&owner_jwt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unknown.status().as_u16(), 404);
+
+    // ---- a third party cannot approve; tampered bytes re-ask --------------------
+    let (status, _h, refused) = decide_as(
+        &client,
+        &base,
+        ws,
+        &third_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["status"], "role_required");
+    sqlx::query("ALTER TABLE agent_avatar_image DISABLE TRIGGER agent_avatar_image_immutable_trg")
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE agent_avatar_image SET bytes = set_byte(bytes, 0, 7) WHERE id=$1")
+        .bind(image_id)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, _h, refused) = decide_as(
+        &client,
+        &base,
+        ws,
+        &owner_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{refused}");
+    assert_eq!(refused["status"], "action_args_invalid");
+    assert_eq!(approval_status_3708(&su, approval).await, "pending");
+    let pointer: Option<Uuid> =
+        sqlx::query_scalar("SELECT avatar_image_id FROM member WHERE id=$1")
+            .bind(agent)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(pointer, None, "tampered bytes were not applied");
+    sqlx::query("UPDATE agent_avatar_image SET bytes = set_byte(bytes, 0, $2) WHERE id=$1")
+        .bind(image_id)
+        .bind(stored[0] as i32)
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query("ALTER TABLE agent_avatar_image ENABLE TRIGGER agent_avatar_image_immutable_trg")
+        .execute(&su)
+        .await
+        .unwrap();
+
+    // ---- a pin that names ANOTHER approval's image is refused -------------------
+    // Reject the first so the target is free for a second proposal, then stage a
+    // second image and rewrite its approval to point at the first's row.
+    let (status, _h, rejected) = decide_as(
+        &client,
+        &base,
+        ws,
+        &owner_jwt,
+        approval,
+        false,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{rejected}");
+    assert_eq!(
+        staged_rows_3787(&su, ws).await,
+        0,
+        "a rejected proposal's staged image is deleted"
+    );
+
+    let (status, one) =
+        propose(json!({"source": "generated", "dataBase64": b64_3787(&tiny_png_3787())})).await;
+    assert_eq!(status, 200, "{one}");
+    let approval_one = proposed_approval_3706(&one);
+    let image_one: Uuid =
+        sqlx::query_scalar("SELECT id FROM agent_avatar_image WHERE approval_id=$1")
+            .bind(approval_one)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    let sha_one: Vec<u8> = sqlx::query_scalar("SELECT sha256 FROM agent_avatar_image WHERE id=$1")
+        .bind(image_one)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    let sha_one_hex: String = sha_one.iter().map(|b| format!("{b:02x}")).collect();
+    // A second staged image of the same agent, bound to a *different* approval id.
+    sqlx::query(
+        "UPDATE approval SET payload = jsonb_set(jsonb_set(payload, \
+             '{action,args,avatar,imageId}', to_jsonb($2::text)), \
+             '{action,pins,avatar,imageId}', to_jsonb($2::text)) WHERE id = $1",
+    )
+    .bind(approval_one)
+    .bind(Uuid::new_v4().to_string())
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, _h, swapped) = decide_as(
+        &client,
+        &base,
+        ws,
+        &fixture.human_jwt,
+        approval_one,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{swapped}");
+    assert_eq!(swapped["status"], "action_args_invalid");
+    // Point it back at a REAL staged row that belongs to another approval: stage a
+    // second row bound to nothing and re-point args+pins at it.
+    let other_image: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_avatar_image (workspace_id, member_id, proposed_by, source, mime, \
+            width, height, size_bytes, sha256, bytes) \
+         SELECT workspace_id, member_id, proposed_by, source, mime, width, height, size_bytes, \
+                sha256, bytes FROM agent_avatar_image WHERE id = $1 RETURNING id",
+    )
+    .bind(image_one)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE approval SET payload = jsonb_set(jsonb_set(payload, \
+             '{action,args,avatar,imageId}', to_jsonb($2::text)), \
+             '{action,pins,avatar,imageId}', to_jsonb($2::text)) WHERE id = $1",
+    )
+    .bind(approval_one)
+    .bind(other_image.to_string())
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, _h, swapped) = decide_as(
+        &client,
+        &base,
+        ws,
+        &fixture.human_jwt,
+        approval_one,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(
+        status, 409,
+        "an unbound staged row is not this approval's: {swapped}"
+    );
+    assert_eq!(swapped["status"], "action_args_invalid");
+    // Restore and approve for real.
+    sqlx::query(
+        "UPDATE approval SET payload = jsonb_set(jsonb_set(payload, \
+             '{action,args,avatar,imageId}', to_jsonb($2::text)), \
+             '{action,pins,avatar,imageId}', to_jsonb($2::text)) WHERE id = $1",
+    )
+    .bind(approval_one)
+    .bind(image_one.to_string())
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query("DELETE FROM agent_avatar_image WHERE id=$1")
+        .bind(other_image)
+        .execute(&su)
+        .await
+        .unwrap();
+
+    // ---- approve: the server's bytes are what is served --------------------------
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        ws,
+        &owner_jwt,
+        approval_one,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(approved["result"]["actionId"], "agent.profile.update");
+    let url = format!("{base}/v1/workspaces/{ws}/members/{agent}/avatar/content?v={image_one}");
+    let served = client
+        .get(&url)
+        .bearer_auth(&owner_jwt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(served.status().as_u16(), 200);
+    let bytes_one: Vec<u8> = sqlx::query_scalar("SELECT bytes FROM agent_avatar_image WHERE id=$1")
+        .bind(image_one)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(served.bytes().await.unwrap().to_vec(), bytes_one);
+    let _ = sha_one_hex;
+    let audit: Value = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE workspace_id=$1 AND action='agent.avatar.updated' \
+          ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(ws)
+    .fetch_one(&su)
+    .await
+    .expect("an avatar audit row");
+    assert_eq!(audit["origin"], "generated");
+    assert!(audit["sha256_prefix"].as_str().unwrap().len() == 12);
+    assert!(!audit.to_string().contains("dataBase64"));
+    let roster: Value = client
+        .get(format!("{base}/v1/workspaces/{ws}/roster"))
+        .bearer_auth(&owner_jwt)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let members = roster["members"].as_array().or(roster.as_array()).unwrap();
+    let me = members
+        .iter()
+        .find(|m| m["id"] == json!(agent.to_string()))
+        .unwrap();
+    assert_eq!(
+        me["avatarUrl"],
+        json!(format!(
+            "/v1/workspaces/{ws}/members/{agent}/avatar/content?v={image_one}"
+        ))
+    );
+
+    // ---- a preset replaces the image; the image row is deleted -------------------
+    let (status, preset) = propose(json!({"source": "preset", "presetId": "comet"})).await;
+    assert_eq!(status, 200, "{preset}");
+    let approval_preset = proposed_approval_3706(&preset);
+    let (status, _h, done) = decide_as(
+        &client,
+        &base,
+        ws,
+        &owner_jwt,
+        approval_preset,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{done}");
+    assert_eq!(
+        staged_rows_3787(&su, ws).await,
+        0,
+        "the image row went with the switch"
+    );
+    let (preset_value, pointer): (Option<String>, Option<Uuid>) = sqlx::query_as(
+        "SELECT a.config->>'avatarPreset', m.avatar_image_id FROM member m \
+           JOIN agent a ON a.member_id = m.id WHERE m.id=$1",
+    )
+    .bind(agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!((preset_value.as_deref(), pointer), (Some("comet"), None));
+    // The same preset again is not a proposal.
+    let (status, again) = propose(json!({"source": "preset", "presetId": "comet"})).await;
+    assert_eq!(status, 400, "{again}");
+    // null removes it.
+    let (status, clear) = propose(Value::Null).await;
+    assert_eq!(status, 200, "{clear}");
+    let approval_clear = proposed_approval_3706(&clear);
+    let (status, _h, done) = decide_as(
+        &client,
+        &base,
+        ws,
+        &owner_jwt,
+        approval_clear,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{done}");
+    let preset_value: Option<String> =
+        sqlx::query_scalar("SELECT config->>'avatarPreset' FROM agent WHERE member_id=$1")
+            .bind(agent)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(preset_value, None);
+
+    // ---- an overdue proposal's staged image dies with it -------------------------
+    let (status, last) =
+        propose(json!({"source": "generated", "dataBase64": b64_3787(&tiny_png_3787())})).await;
+    assert_eq!(status, 200, "{last}");
+    let approval_last = proposed_approval_3706(&last);
+    assert_eq!(staged_rows_3787(&su, ws).await, 1);
+    sqlx::query("UPDATE approval SET expires_at = now() - interval '1 minute' WHERE id=$1")
+        .bind(approval_last)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, _h, expired) = decide_as(
+        &client,
+        &base,
+        ws,
+        &owner_jwt,
+        approval_last,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{expired}");
+    assert_eq!(expired["status"], "expired");
+    assert_eq!(
+        staged_rows_3787(&su, ws).await,
+        0,
+        "an expired proposal's image is deleted"
+    );
+}
+
+/// **A workspace file as the avatar (source (a)) and the read path that names it.**
+/// `oort_conversation_read` shows image attachments only (an id, never the Drive
+/// file id); a visible image becomes a staged, re-encoded avatar; everything the
+/// agent could not read — a private channel it is not in, a non-image, a pending
+/// upload, a deleted message — is the one refusal.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_workspace_image_can_be_the_avatar_only_if_the_agent_could_read_it() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let drive = Arc::new(MemDrive3787::default());
+    let base = start_server_with_drive_3787(app.clone(), drive.clone()).await;
+    let fixture_channel = fixture.channel;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+    let agent = fixture.hosted_agent;
+    let (owner, _owner_jwt) = seed_human_3708(&su, &fixture, "owner", "member").await;
+    set_agent_owner_3708(&su, agent, Some(owner)).await;
+    tidy_agent_3708(&su, agent, "Hermes").await;
+
+    let png = tiny_png_3787();
+    for id in ["drive-ok", "drive-pending", "drive-hidden", "drive-unbound"] {
+        drive.files.lock().unwrap().insert(id.into(), png.clone());
+    }
+    drive
+        .files
+        .lock()
+        .unwrap()
+        .insert("drive-text".into(), b"hello".to_vec());
+
+    // A human message with attachments in the approved channel, and one in the
+    // private channel the agent is not part of.
+    let message = |channel: Uuid, body: &str| {
+        let body = body.to_string();
+        let su = su.clone();
+        let human = fixture.human;
+        async move {
+            sqlx::query_scalar::<_, Uuid>(
+                "INSERT INTO message (workspace_id, channel_id, author_member_id, seq, body, \
+                    client_msg_id, hlc_ts, hlc_count) \
+                 SELECT $1, $2, $3, COALESCE(max(seq),0)+1, $4, gen_random_uuid(), 1, 0 \
+                   FROM message WHERE channel_id = $2 RETURNING id",
+            )
+            .bind(ws)
+            .bind(channel)
+            .bind(human)
+            .bind(body)
+            .fetch_one(&su)
+            .await
+            .expect("seed message")
+        }
+    };
+    let visible_msg = message(fixture.channel, "my logo").await;
+    let private_msg = message(fixture.private_channel, "secret logo").await;
+    // Rows seeded straight into `message` bypass the per-channel counter the REST
+    // send reads: bring it up to the highest seq used, or the next real send collides.
+    sqlx::query(
+        "UPDATE channel_seq SET last_seq = GREATEST(last_seq, \
+            (SELECT COALESCE(max(seq), 0) FROM message m WHERE m.channel_id = channel_seq.channel_id)) \
+          WHERE workspace_id = $1",
+    )
+    .bind(ws)
+    .execute(&su)
+    .await
+    .unwrap();
+    let attach = |channel: Uuid, msg: Option<Uuid>, drive_id: &str, mime: &str, status: &str| {
+        let (su, human, drive_id, mime, status) = (
+            su.clone(),
+            fixture.human,
+            drive_id.to_string(),
+            mime.to_string(),
+            status.to_string(),
+        );
+        async move {
+            sqlx::query_scalar::<_, Uuid>(
+                "INSERT INTO attachment (workspace_id, channel_id, uploader_member_id, message_id, \
+                    drive_file_id, name, mime, size_bytes, status) \
+                 VALUES ($1,$2,$3,$4,$5,'logo.png',$6,70,$7) RETURNING id",
+            )
+            .bind(ws)
+            .bind(channel)
+            .bind(human)
+            .bind(msg)
+            .bind(drive_id)
+            .bind(mime)
+            .bind(status)
+            .fetch_one(&su)
+            .await
+            .expect("seed attachment")
+        }
+    };
+    let good = attach(
+        fixture.channel,
+        Some(visible_msg),
+        "drive-ok",
+        "image/png",
+        "complete",
+    )
+    .await;
+    let text_file = attach(
+        fixture.channel,
+        Some(visible_msg),
+        "drive-text",
+        "text/plain",
+        "complete",
+    )
+    .await;
+    let pending = attach(
+        fixture.channel,
+        Some(visible_msg),
+        "drive-pending",
+        "image/png",
+        "pending",
+    )
+    .await;
+    let hidden = attach(
+        fixture.private_channel,
+        Some(private_msg),
+        "drive-hidden",
+        "image/png",
+        "complete",
+    )
+    .await;
+    let unbound = attach(
+        fixture.channel,
+        None,
+        "drive-unbound",
+        "image/png",
+        "complete",
+    )
+    .await;
+
+    // ---- the read path: images only, ids only ------------------------------------
+    let (status, read) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_conversation_read",
+        json!({"channelId": fixture.channel}),
+    )
+    .await;
+    assert_eq!(status, 200, "{read}");
+    let rendered = read.to_string();
+    assert!(
+        rendered.contains(&good.to_string()),
+        "the image attachment id is shown: {rendered}"
+    );
+    for absent in [text_file, pending, unbound, hidden] {
+        assert!(
+            !rendered.contains(&absent.to_string()),
+            "{absent} must not be shown"
+        );
+    }
+    assert!(
+        !rendered.contains("drive-ok") && !rendered.contains("drive-text"),
+        "no Drive id"
+    );
+    assert!(rendered.contains("imageAttachments"));
+
+    // ---- what the agent cannot read is one refusal --------------------------------
+    let mut answers = Vec::new();
+    for id in [text_file, pending, unbound, hidden, Uuid::new_v4()] {
+        let (status, refused) = try_propose_action_3706(
+            &client,
+            &base,
+            &su,
+            &fixture,
+            "agent.profile.update",
+            json!({"avatar": {"source": "attachment", "attachmentId": id.to_string()}}),
+        )
+        .await;
+        answers.push((status, refused["error"].clone()));
+        assert_eq!(status, 400, "{id}: {refused}");
+    }
+    assert!(answers.iter().all(|a| a.1 == answers[0].1), "{answers:?}");
+    assert_eq!(staged_rows_3787(&su, ws).await, 0);
+
+    // ---- a deleted message hides its file -----------------------------------------
+    sqlx::query("UPDATE message SET state = 'deleted' WHERE id = $1")
+        .bind(visible_msg)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, refused) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.profile.update",
+        json!({"avatar": {"source": "attachment", "attachmentId": good.to_string()}}),
+    )
+    .await;
+    assert_eq!(status, 400, "{refused}");
+    sqlx::query("UPDATE message SET state = 'sent' WHERE id = $1")
+        .bind(visible_msg)
+        .execute(&su)
+        .await
+        .unwrap();
+
+    // ---- the readable image becomes a staged, re-encoded avatar ---------------------
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.profile.update",
+        json!({"avatar": {"source": "attachment", "attachmentId": good.to_string()}}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let (origin, bound, source): (String, Option<Uuid>, String) = sqlx::query_as(
+        "SELECT source, approval_id, source FROM agent_avatar_image WHERE approval_id=$1",
+    )
+    .bind(approval)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        (origin.as_str(), bound, source.as_str()),
+        ("attachment", Some(approval), "attachment")
+    );
+    let payload: Value = sqlx::query_scalar("SELECT payload FROM approval WHERE id=$1")
+        .bind(approval)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert!(
+        !payload.to_string().contains(&good.to_string()),
+        "the attachment id is not stored"
+    );
+    assert!(!payload.to_string().contains("drive-ok"));
+
+    // ---- a channel the agent left hides the file even though the row is intact -----
+    // (Asked at the database function, not through a mention: an agent that has left
+    // the room cannot be mentioned into a run.)
+    let visible_before = tenant_3786(&app, ws, move |conn| {
+        Box::pin(async move {
+            momo_messaging::find_visible_image_attachment_in_tx(
+                conn,
+                ws,
+                agent,
+                &[fixture_channel],
+                good,
+                5 << 20,
+            )
+            .await
+        })
+    })
+    .await
+    .unwrap();
+    assert!(
+        visible_before.is_some(),
+        "control: visible while the agent is a member"
+    );
+    sqlx::query("UPDATE membership SET left_at = now() WHERE channel_id=$1 AND member_id=$2")
+        .bind(fixture.channel)
+        .bind(agent)
+        .execute(&su)
+        .await
+        .unwrap();
+    let visible_after = tenant_3786(&app, ws, move |conn| {
+        Box::pin(async move {
+            momo_messaging::find_visible_image_attachment_in_tx(
+                conn,
+                ws,
+                agent,
+                &[fixture_channel],
+                good,
+                5 << 20,
+            )
+            .await
+        })
+    })
+    .await
+    .unwrap();
+    assert!(
+        visible_after.is_none(),
+        "an agent that left the channel cannot use its files"
+    );
+    // …and a file outside the connection's approved channels is invisible too.
+    sqlx::query("UPDATE membership SET left_at = NULL WHERE channel_id=$1 AND member_id=$2")
+        .bind(fixture.channel)
+        .bind(agent)
+        .execute(&su)
+        .await
+        .unwrap();
+    let not_approved = tenant_3786(&app, ws, move |conn| {
+        Box::pin(async move {
+            momo_messaging::find_visible_image_attachment_in_tx(
+                conn,
+                ws,
+                agent,
+                &[Uuid::new_v4()],
+                good,
+                5 << 20,
+            )
+            .await
+        })
+    })
+    .await
+    .unwrap();
+    assert!(
+        not_approved.is_none(),
+        "an unapproved channel hides its files"
+    );
+}
