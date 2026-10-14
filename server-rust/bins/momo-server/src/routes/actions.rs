@@ -3057,6 +3057,14 @@ mod tests {
                 "(≤{} characters, under",
                 momo_messaging::name_guard::AGENT_ROLE_LABEL_MAX_CHARS
             ),
+            format!(
+                "of at most {} bytes decoded",
+                momo_messaging::AGENT_AVATAR_IN_MAX_BYTES_GENERATED
+            ),
+            format!(
+                "Inputs larger than {} pixels",
+                momo_messaging::agent_avatar::AGENT_AVATAR_IN_MAX_DIM
+            ),
             format!("maxUses: 1..{}", actions::INVITE_MAX_USES_CEILING),
             format!(
                 "expiresInDays: 1..{}",
