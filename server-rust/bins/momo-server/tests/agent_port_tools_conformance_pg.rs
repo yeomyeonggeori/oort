@@ -15273,10 +15273,19 @@ async fn an_approved_agent_invite_creates_the_agent_for_the_approver_and_shows_t
     let base = start_server(app, true).await;
     let client = reqwest::Client::new();
     let (_plain, plain_jwt) = seed_human_3708(&su, &fixture, "plain", "member").await;
-    let members_before = member_count_3788(&su, fixture.workspace).await;
 
     // ---- hostile spellings: one refusal, nothing written --------------------
     let taken_handle = tidy_agent_3708(&su, fixture.managed_agent, "Taken Bot").await;
+    sqlx::query(
+        "INSERT INTO member(id, workspace_id, kind, display_name, handle, deleted_at) \
+         VALUES($1,$2,'human','Gone Ghost','ghost-handle', now())",
+    )
+    .bind(Uuid::new_v4())
+    .bind(fixture.workspace)
+    .execute(&su)
+    .await
+    .unwrap();
+    let members_before = member_count_3788(&su, fixture.workspace).await;
     let mut answers = Vec::new();
     for hostile in [
         json!({"platform": "grok_bot", "displayName": "Muse Writer", "handle": "muse-writer", "ownerOnly": true}),
@@ -15295,6 +15304,12 @@ async fn an_approved_agent_invite_creates_the_agent_for_the_approver_and_shows_t
         json!({"platform": "muse", "displayName": "Muse Writer", "handle": "Bad Handle!"}),
         json!({"platform": "muse", "displayName": "Muse Writer", "handle": taken_handle}),
         json!({"platform": "muse", "displayName": "Person plain", "handle": "muse-writer"}),
+        // Review of #3801: the handle is spoken as @handle, so it gets the reserved
+        // words, the mention-overlap rule and the deleted members' handles too.
+        json!({"platform": "muse", "displayName": "Muse Writer", "handle": "admin"}),
+        json!({"platform": "muse", "displayName": "Muse Writer", "handle": "everyone"}),
+        json!({"platform": "muse", "displayName": "Muse Writer", "handle": "ghost-handle"}),
+        json!({"platform": "muse", "displayName": "Muse Writer", "handle": "person"}),
         json!({}),
     ] {
         let (status, refused) = try_propose_action_3706(

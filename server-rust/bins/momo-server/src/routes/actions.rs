@@ -1635,6 +1635,19 @@ async fn resolve_action_with_origin_in_tx(
             if conflicts_with_roster(display_name, Uuid::nil(), &names)
                 || mention_overlaps_roster(display_name, Uuid::nil(), &names)
                 || conflicts_with_roster(handle, Uuid::nil(), &names)
+                // The handle is spoken as `@handle`: it gets the name rules too
+                // (reserved words) and the mention-overlap rule (I1 review M1/M2).
+                || validated_agent_proposed_display_name(handle).is_err()
+                || mention_overlaps_roster(handle, Uuid::nil(), &names)
+                // A deleted member still holds its handle (unique index), which
+                // the roster does not list (I1 review L1).
+                || momo_db::sqlx::query_scalar::<_, bool>(
+                    "SELECT EXISTS (SELECT 1 FROM member WHERE workspace_id = $1 AND handle = $2)",
+                )
+                .bind(workspace_id)
+                .bind(handle.as_str())
+                .fetch_one(&mut *conn)
+                .await?
                 || momo_settings::is_handle_banned_in_tx(conn, handle).await?
             {
                 return Ok(Err(ApiError::bad_request("agent name is not allowed")));
