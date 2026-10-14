@@ -1555,14 +1555,18 @@ pub(crate) async fn write_report_rejected_audit(
     if let Some(violation) = violation {
         // Counted per run and tool — a superset of "per lease", since a refused
         // completion leaves its lease intact and a run rarely changes lease.
+        // Keyed by the indexed target columns (`audit_target_idx`, the same
+        // predicate `momo_db::audit::run_event_recorded` uses), so a refusal
+        // reads this run's rows rather than scanning the workspace's audit log.
         let earlier: i64 = momo_db::sqlx::query_scalar(
             "SELECT count(*) FROM audit_log \
-              WHERE workspace_id = $1 AND action = $2 \
-                AND detail->>'run_id' = $3 AND detail->>'tool' = $4",
+              WHERE target_type = 'agent_run' AND target_id = $1 \
+                AND workspace_id = $2 AND run_id = $1 AND action = $3 \
+                AND detail->>'tool' = $4",
         )
+        .bind(run_id)
         .bind(workspace_id)
         .bind(REPORT_REJECTED_AUDIT_ACTION)
-        .bind(run_id.to_string())
         .bind(tool)
         .fetch_one(&mut *conn)
         .await?;
@@ -2384,6 +2388,43 @@ mod tests {
                 Some(field)
             );
         }
+    }
+
+    /// C3's message is the agent's one fix instruction, so it must state the
+    /// rule the validator actually applies: every character `validated_branch`
+    /// refuses is named in the branch clause, and the PR clause does not pin
+    /// one host when the operator may allow a GitHub Enterprise one.
+    #[test]
+    fn the_branch_and_pr_messages_state_the_rule_the_validator_applies() {
+        let branch = refusal_message(json!({"branch": "a:b"}));
+        for forbidden in ['~', '^', ':', '?', '*', '[', '\\'] {
+            let raw = format!("feat{forbidden}x");
+            assert!(
+                momo_t3::work_share::validated_branch(&raw).is_err(),
+                "{raw} is refused by the validator"
+            );
+            assert!(
+                branch.contains(forbidden),
+                "{forbidden} missing from: {branch}"
+            );
+        }
+        assert!(
+            branch.contains("whitespace") && branch.contains("path"),
+            "{branch}"
+        );
+        let pr = refusal_message(json!({"prUrl": "https://example.com/a/b/pull/1"}));
+        assert!(
+            pr.starts_with("artifacts.prUrl must be https://<allowed host>/"),
+            "{pr}"
+        );
+        assert!(!pr.contains("example.com"), "{pr}");
+    }
+
+    fn refusal_message(value: Value) -> String {
+        validated_gateway_artifacts(Some(&value), &hosts())
+            .expect_err("refused")
+            .violation
+            .message()
     }
 
     /// The published schema's ceiling is the share's.

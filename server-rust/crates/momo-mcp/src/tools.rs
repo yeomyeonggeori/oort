@@ -1347,12 +1347,18 @@ const ARTIFACT_FIELDS: &[ArtifactField] = &[
     },
     ArtifactField {
         path: "artifacts.prUrl",
-        hint: "must be https://github.com/<owner>/<repo>/pull/<n> (at most 300 bytes)",
+        // The host list is the operator's (github.com plus any GitHub
+        // Enterprise host), so the clause names the shape, not one host.
+        hint: "must be https://<allowed host>/<owner>/<repo>/pull/<n> \
+               (github.com or this server's GitHub Enterprise host, at most 300 bytes)",
         allowed: &[],
     },
     ArtifactField {
         path: "artifacts.branch",
-        hint: "must be a git branch name of at most 200 characters, with no spaces",
+        // Every rule `momo_t3::work_share::validated_branch` applies, so the
+        // agent's one fix is the right one.
+        hint: "must be a git branch name of at most 200 characters: no whitespace, \
+               none of ~ ^ : ? * [ \\, and not a path",
         allowed: &[],
     },
     ArtifactField {
