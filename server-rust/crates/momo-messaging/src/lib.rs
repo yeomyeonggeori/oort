@@ -47,6 +47,7 @@
 //! LiveKit receives only a short-lived room grant. The pgvector memory plane
 //! remains outside this crate.
 
+pub mod agent_card;
 pub mod attachment;
 pub mod avatar_reclaim;
 pub mod channel;
@@ -75,6 +76,10 @@ pub mod search;
 pub mod sidebar_prefs;
 pub mod workspace_avatar;
 
+pub use agent_card::{
+    apply_agent_card_in_tx, lock_agent_card_in_tx, read_agent_card_in_tx, AgentCard,
+    AgentCardPatch, CardStatusPatch, FieldPatch,
+};
 pub use attachment::{
     create_pending_upload_in_tx, is_attachment_channel_member, link_attachments_in_tx,
     load_attachment_in_tx, message_attachments_in_tx, settle_upload_in_tx,

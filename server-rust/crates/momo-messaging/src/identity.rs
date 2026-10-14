@@ -479,6 +479,10 @@ pub struct RosterMember {
     pub email: Option<String>,
     pub time_zone: Option<String>,
     pub agent_model: Option<String>,
+    /// `agent.config->>'tagline'` (ADR-0186 증보 v3 V3-2), agents only.
+    pub agent_tagline: Option<String>,
+    /// `agent.config->>'roleLabel'`, agents only.
+    pub agent_role_label: Option<String>,
     pub owner_human_id: Option<Uuid>,
     pub max_concurrent_runs: Option<i32>,
     pub max_run_steps: Option<i32>,
@@ -512,7 +516,8 @@ pub struct RosterMember {
     /// co-member's client can drop the dot at that moment without a re-fetch
     /// (no sweeper, no broadcast fires at expiry).
     pub dnd_until_ms: Option<i64>,
-    /// ADR-0176 custom status, human only, expire-filtered on read. `None` when
+    /// ADR-0176 custom status, expire-filtered on read. Humans, and — since
+    /// ADR-0186 증보 v3 — agents (declared presence stays human only). `None` when
     /// the member is an agent, the fields are unset, or `status_expires_at` has
     /// been reached (lazy delete — the columns may still be set).
     pub status_emoji: Option<String>,
@@ -544,6 +549,8 @@ fn decode_roster_member(row: &sqlx::postgres::PgRow) -> Result<RosterMember, sql
         email: row.try_get("email")?,
         time_zone: row.try_get("time_zone")?,
         agent_model: row.try_get("agent_model")?,
+        agent_tagline: row.try_get("agent_tagline")?,
+        agent_role_label: row.try_get("agent_role_label")?,
         owner_human_id: row.try_get("owner_human_id")?,
         max_concurrent_runs: row.try_get("max_concurrent_runs")?,
         max_run_steps: row.try_get("max_run_steps")?,
@@ -630,6 +637,12 @@ pub async fn list_workspace_roster(
                 h.email, \
                 h.tz AS time_zone, \
                 a.model AS agent_model, \
+                CASE WHEN jsonb_typeof(a.config->'tagline') = 'string' \
+                      AND char_length(a.config->>'tagline') <= 140 \
+                     THEN a.config->>'tagline' END AS agent_tagline, \
+                CASE WHEN jsonb_typeof(a.config->'roleLabel') = 'string' \
+                      AND char_length(a.config->>'roleLabel') <= 24 \
+                     THEN a.config->>'roleLabel' END AS agent_role_label, \
                 a.owner_human_id, \
                 a.max_concurrent_runs, \
                 a.max_run_steps, \
@@ -644,15 +657,15 @@ pub async fn list_workspace_roster(
                       AND m.presence_dnd_until > now() \
                      THEN floor(extract(epoch from m.presence_dnd_until) * 1000)::bigint \
                 END AS dnd_until_ms, \
-                CASE WHEN m.kind = 'human' \
+                CASE WHEN m.kind IN ('human', 'agent') \
                       AND (m.status_expires_at IS NULL OR m.status_expires_at > now()) \
                       AND (m.status_emoji IS NOT NULL OR m.status_text IS NOT NULL) \
                      THEN m.status_emoji END AS status_emoji, \
-                CASE WHEN m.kind = 'human' \
+                CASE WHEN m.kind IN ('human', 'agent') \
                       AND (m.status_expires_at IS NULL OR m.status_expires_at > now()) \
                       AND (m.status_emoji IS NOT NULL OR m.status_text IS NOT NULL) \
                      THEN m.status_text END AS status_text, \
-                CASE WHEN m.kind = 'human' \
+                CASE WHEN m.kind IN ('human', 'agent') \
                       AND (m.status_expires_at IS NULL OR m.status_expires_at > now()) \
                       AND (m.status_emoji IS NOT NULL OR m.status_text IS NOT NULL) \
                      THEN floor(extract(epoch from m.status_expires_at) * 1000)::bigint END AS status_expires_at_ms, \

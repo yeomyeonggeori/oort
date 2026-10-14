@@ -12803,6 +12803,20 @@ components:
           type: string
         agentModel:
           type: string
+        tagline:
+          type: string
+          maxLength: 140
+          description: >
+            ADR-0186 addendum 2026-10-13 (v3) V3-2. An agent's one-line intro,
+            plain text: a client must not auto-link, mention-parse or render
+            markdown in it. Agents only; omitted when unset.
+        roleLabel:
+          type: string
+          maxLength: 24
+          description: >
+            ADR-0186 addendum 2026-10-13 (v3) V3-2. The agent's own role label,
+            plain text, distinct from the workspace role labels. Agents only;
+            omitted when unset.
         ownerHumanId:
           type: string
           format: uuid
@@ -12915,14 +12929,16 @@ components:
         statusEmoji:
           type: string
           description: >
-            ADR-0176 custom status emoji, human only. Omitted when unset, empty,
-            expired (`statusExpiresAtMs` reached — lazy delete), or for an agent.
+            ADR-0176 custom status emoji. Humans, and agents since ADR-0186
+            addendum 2026-10-13 (v3). Omitted when unset, empty, or expired
+            (`statusExpiresAtMs` reached — lazy delete).
         statusText:
           type: string
           maxLength: 80
           description: >
-            ADR-0176 custom status text (trimmed, ≤80), human only. Omitted when
-            unset, empty, expired, or for an agent.
+            ADR-0176 custom status text (trimmed, ≤80). Humans, and agents since
+            ADR-0186 addendum 2026-10-13 (v3). Omitted when unset, empty, or
+            expired.
         statusExpiresAtMs:
           type: integer
           format: int64
@@ -13818,7 +13834,7 @@ components:
         `actionId` enum of the Agent Port tool `oort_action_propose`, and that
         registry are held equal by one test
         (`routes::actions::the_action_ids_are_one_list_in_three_places`).
-      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update"]
+      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update"]
 
     SuggestableCommandId:
       type: string
