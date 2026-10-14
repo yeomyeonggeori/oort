@@ -606,19 +606,25 @@ mod tests {
     ///
     /// 132 is #3822's `doorbell_rung` ledger kind (ADR-0200 증보 2026-10-14): only the
     /// `agent_run_event_kind_ck` vocabulary grows.
+    ///
+    /// 133 is #3840's `tool_call` ledger kind and 134 #3851's `agent.thread_reply_wake`
+    /// (both open when 135 was named; they merge first or 135 is renumbered).
+    ///
+    /// 135 is #3853 (ADR-0202 E1): `work.run.updated` fires for every agent kind's work
+    /// runs and for top-level mention runs' final transition. Function body only.
     #[test]
-    fn discovers_contiguous_migrations_001_to_132() {
+    fn discovers_contiguous_migrations_001_to_135() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            132,
-            "expected 132 migrations under {}",
+            135,
+            "expected 135 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 132);
+        assert_eq!(migrations.last().unwrap().version, 135);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

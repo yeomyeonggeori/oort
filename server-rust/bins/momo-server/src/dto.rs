@@ -1384,9 +1384,37 @@ pub struct SharedWorkSessionListQuery {
     pub cursor: Option<String>,
     /// `runs` adds hosted agents' work runs (ADR-0162 증보 3 D13). Opt-in so a
     /// shipped client that keys every row on `sessionId` is never handed a row
-    /// without one.
+    /// without one. ADR-0202 D4: a comma-separated closed set `runs` | `jobs`;
+    /// `jobs` widens the run source to every agent's delegated work and adds the
+    /// job fields. Any other token is a 400.
     #[serde(default)]
     pub include: Option<String>,
+    /// ADR-0202 D4: `mine` | `team` (default `team`, the set shipped clients get).
+    #[serde(default)]
+    pub who: Option<String>,
+}
+
+/// ADR-0162 증보 5 C1·C2: the code-task result the **agent reported** about its
+/// own run. Nothing here is checked against GitHub; a client labels it
+/// 「에이전트 보고」. Only the closed fields travel — never the rest of
+/// `output.artifacts`.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentReportedDto {
+    pub result_kind: Option<&'static str>,
+    pub tests: Option<AgentReportedTestsDto>,
+    pub next_action: Option<&'static str>,
+    pub commit_sha: Option<String>,
+    /// Only the reported categories, in the closed order. `null` = none.
+    pub tool_counts: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentReportedTestsDto {
+    pub passed: i64,
+    pub failed: i64,
+    pub not_run: i64,
 }
 
 /// The S1 diff numbers as the board returns them. `null` = unknown.
@@ -1466,6 +1494,24 @@ pub struct SharedWorkSessionDto {
     pub pr_url: Option<String>,
     /// Epoch seconds.
     pub last_activity_at: i64,
+    /// `include=jobs` run rows only (ADR-0202 D3): `work` | `mention` |
+    /// `thread_reply`. Absent everywhere else, so a shipped client that rejects
+    /// unknown values never sees it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger: Option<&'static str>,
+    /// `include=jobs` run rows only: the ADR-0200 phase word.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phase: Option<&'static str>,
+    /// `include=jobs` run rows only, once finished: `endedAtMs − startedAtMs`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<i64>,
+    /// `include=jobs` run rows only: the agent's newest live text message of
+    /// this run (its result). The id only — never the text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_message_id: Option<String>,
+    /// `include=jobs` run rows only, when the agent reported any closed field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_reported: Option<AgentReportedDto>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1474,6 +1520,11 @@ pub struct SharedWorkSessionListResponse {
     pub sessions: Vec<SharedWorkSessionDto>,
     /// Present only when more rows follow; opaque.
     pub next_cursor: Option<String>,
+    /// ADR-0202 D4: the `who` this page answered, echoed only when the caller
+    /// sent `who` or `include=jobs` — a new client tells a new server from an
+    /// old one by it. Absent on the shipped request shapes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub who: Option<&'static str>,
 }
 
 #[derive(Debug, Serialize)]
