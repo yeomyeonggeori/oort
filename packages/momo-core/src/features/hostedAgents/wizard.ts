@@ -91,6 +91,39 @@ export const HOSTED_WIZARD_STEPS: readonly HostedWizardStepSpec[] = [
   },
 ];
 
+/**
+ * 압축 진행 표시 (#3773). 그록봇처럼 **프롬프트 한 덩어리**로 전하는 프리셋의 진행
+ * 표시는 다섯이 아니라 셋이다. 서버 상태 기계(위 `hostedWizardStep`)는 그대로이고,
+ * 사람에게 보이는 번호만 묶는다.
+ *
+ *   1. 프롬프트 붙여 넣기  = 이름(자동) · 연결 값 발급 · 다이얼인 기다리기 · 만료 막힘
+ *   2. 채널과 권한 승인     = 사람 확인 (ADR-0162 D6-4, 줄이지 않는다)
+ *   3. 교체하고 확인        = 새 자격증명 교체 · 증명 대기 · 활성
+ *
+ * 묶는 것은 같은 사람의 같은 자리에서 이어지는 단계뿐이다. 사람이 결정하는 승인은
+ * 홀로 선다.
+ */
+export interface HostedCompactStepSpec {
+  number: number;
+  title: string;
+  covers: readonly HostedWizardStep[];
+}
+
+export const HOSTED_COMPACT_STEPS: readonly HostedCompactStepSpec[] = [
+  {
+    number: 1,
+    title: "프롬프트 붙여 넣기",
+    covers: ["identity", "pairing", "detecting", "expired"],
+  },
+  { number: 2, title: "채널과 권한 승인", covers: ["approval"] },
+  { number: 3, title: "값 교체하고 확인", covers: ["activation", "closed"] },
+];
+
+export function compactStepNumber(step: HostedWizardStep): number {
+  const found = HOSTED_COMPACT_STEPS.find((item) => item.covers.includes(step));
+  return (found ?? HOSTED_COMPACT_STEPS[HOSTED_COMPACT_STEPS.length - 1])!.number;
+}
+
 export function hostedStepSpec(step: HostedWizardStep): HostedWizardStepSpec {
   if (step === "expired") return HOSTED_WIZARD_STEPS[1] as HostedWizardStepSpec;
   const found = HOSTED_WIZARD_STEPS.find((item) => item.id === step);

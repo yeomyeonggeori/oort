@@ -52,7 +52,13 @@ import {
   type ViewStyle,
 } from 'react-native';
 
-import {BAR_CONTROL_MAX_SCALE, Sentence} from '../../design/atoms';
+import {
+  BAR_CONTROL_MAX_SCALE,
+  FOLDED_MAX_SCALE,
+  HEAD_MAX_SCALE,
+  Sentence,
+  STACK_PILL_SCALE,
+} from '../../design/atoms';
 import {useHostedConnections} from '../hostedAgents/queries';
 import {useDirectory} from '../workspace/queries';
 import {useKeyboardShown} from '../../lib/useKeyboardShown';
@@ -61,7 +67,6 @@ import {HOME_ICONS, SHELL_ICONS} from '../../design/icons';
 import {usePalette, useStyles} from '../../design/theme';
 import {
   ds2Radius,
-  ds2Type,
   font,
   line as lineHeight,
   radius,
@@ -840,23 +845,6 @@ const GLYPH_SCALE_CAP = 2;
  * 온전히 담을 폭을 남긴다.
  */
 const MARK_SCALE_CAP = 1.3;
-/** 이 배수부터 알약이 이름 아래로 내려간다 — 한 줄에 셋을 세우면 이름이 부서진다. */
-const STACK_PILL_SCALE = 1.5;
-/**
- * 머리·접힌 줄의 글자 배수 상한(R5-H1). 375 폭에서 「플러그 · AI 계정 · 나에게만 ·
- * 닫기」가 한 줄에 드는 값. 화면 막대의 `BAR_CONTROL_MAX_SCALE`(1.6)과 같은 규율이고,
- * 이 카드는 입력창 위에 자판과 함께 서므로 더 낮다.
- */
-const HEAD_MAX_SCALE = 1.3;
-/**
- * 접힌 줄(「자판을 내리고 카드 펼치기」)의 글자 배수 상한 (#2988, R6 M1 판단).
- * 머리의 1.3 은 **한 줄에 넷**(플러그·제목·표지·닫기)을 세우려는 값이다. 접힌 줄은
- * 제 줄에 혼자 서므로 그 이유가 없다: 375 폭에서 `ds2Type.caption × 1.6`이면 열세 자
- * 남짓(~270pt)이 가장자리 안(327pt)에 한 줄로 들고, 줄 높이(`line.meta × 1.6` +
- * 여백)는 엄지 바닥 44 와 거의 같아(+1pt) 자판 위 높이 예산(R5-H1)을 바꾸지 않는다.
- * 그래서 화면 막대의 조작 글자와 같은 1.6(`BAR_CONTROL_MAX_SCALE`)으로 올린다.
- */
-const FOLDED_MAX_SCALE = BAR_CONTROL_MAX_SCALE;
 /** 닫기 글리프 상자. */
 const CLOSE_BOX = 24;
 /** 알약 앞 점(시안 `.pill i{width:6px}`). */
@@ -898,7 +886,7 @@ function buildStyles(color: Palette) {
       alignItems: 'center',
       gap: space.sm,
     },
-    headTitle: {fontSize: ds2Type.subhead, fontWeight: '700', color: color.text},
+    headTitle: {fontSize: font.label, fontWeight: '700', color: color.text},
     onlyChip: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -909,7 +897,7 @@ function buildStyles(color: Palette) {
       backgroundColor: color.surfaceMuted,
     },
     onlyText: {
-      fontSize: ds2Type.caption,
+      fontSize: font.meta,
       lineHeight: lineHeight.head,
       fontWeight: '600',
       color: color.textMuted,
@@ -923,7 +911,7 @@ function buildStyles(color: Palette) {
     pressed: {opacity: 0.6},
     section: {paddingTop: space.xs, paddingBottom: space.xs, paddingHorizontal: space.md},
     sectionHead: {
-      fontSize: ds2Type.caption,
+      fontSize: font.meta,
       fontWeight: '700',
       color: color.textMuted,
       paddingTop: space.sm,
@@ -932,12 +920,12 @@ function buildStyles(color: Palette) {
     note: {flexDirection: 'row', alignItems: 'flex-start', gap: space.sm, paddingTop: space.xs, paddingBottom: space.xs},
     // 글리프를 첫 줄 상자 가운데에 세운다(줄이 둘이어도 첫 줄 옆에 남는다).
     noteIconBox: {height: lineHeight.meta, justifyContent: 'center'},
-    noteText: {flex: 1, fontSize: ds2Type.caption, lineHeight: lineHeight.meta, color: color.textMuted},
-    deniedText: {flex: 1, fontSize: ds2Type.subhead, lineHeight: lineHeight.label, color: color.text},
+    noteText: {flex: 1, fontSize: font.meta, lineHeight: lineHeight.meta, color: color.textMuted},
+    deniedText: {flex: 1, fontSize: font.label, lineHeight: lineHeight.label, color: color.text},
     inline: {flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: space.sm},
     errorBox: {gap: space.sm, paddingVertical: space.sm, alignItems: 'flex-start'},
-    errorText: {fontSize: ds2Type.caption, lineHeight: lineHeight.meta, color: color.dangerText},
-    offlineNote: {fontSize: ds2Type.caption, lineHeight: lineHeight.meta, color: color.textMuted, paddingBottom: space.sm},
+    errorText: {fontSize: font.meta, lineHeight: lineHeight.meta, color: color.dangerText},
+    offlineNote: {fontSize: font.meta, lineHeight: lineHeight.meta, color: color.textMuted, paddingBottom: space.sm},
     row: {paddingVertical: space.sm, gap: space.sm},
     rowMain: {flexDirection: 'row', alignItems: 'center', gap: space.sm},
     mark: {
@@ -948,12 +936,12 @@ function buildStyles(color: Palette) {
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: color.border,
     },
-    markText: {fontSize: ds2Type.caption, fontWeight: '800', color: color.text},
+    markText: {fontSize: font.meta, fontWeight: '700', color: color.text},
     rowText: {flex: 1, minWidth: 0},
     stackedPill: {flexDirection: 'row', paddingTop: space.xs},
     nameLine: {flexDirection: 'row', alignItems: 'center', gap: space.xs, flexWrap: 'wrap'},
     name: {
-      fontSize: ds2Type.subhead,
+      fontSize: font.label,
       lineHeight: lineHeight.label,
       fontWeight: '600',
       color: color.text,
@@ -965,16 +953,16 @@ function buildStyles(color: Palette) {
       backgroundColor: color.surfaceMuted,
     },
     sourceText: {
-      fontSize: ds2Type.badge,
+      fontSize: font.caption,
       lineHeight: lineHeight.head,
       fontWeight: '600',
       color: color.textMuted,
     },
-    sub: {fontSize: ds2Type.caption, lineHeight: lineHeight.meta, color: color.textMuted},
+    sub: {fontSize: font.meta, lineHeight: lineHeight.meta, color: color.textMuted},
     subMono: {fontFamily: 'Menlo', fontSize: font.meta},
     // 시안 `.pbody .row .btn{grid-column:2/-1}` — 버튼과 결과 줄은 이름 칸 아래에서 시작한다.
     rowAction: {flexDirection: 'row'},
-    result: {fontSize: ds2Type.caption, lineHeight: lineHeight.meta},
+    result: {fontSize: font.meta, lineHeight: lineHeight.meta},
     pill: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -1014,7 +1002,7 @@ function buildStyles(color: Palette) {
       borderTopColor: color.border,
       backgroundColor: color.sheet,
     },
-    footText: {flex: 1, fontSize: ds2Type.caption, lineHeight: lineHeight.meta, color: color.textMuted},
+    footText: {flex: 1, fontSize: font.meta, lineHeight: lineHeight.meta, color: color.textMuted},
     hidden: {display: 'none'},
     foldedRow: {
       minHeight: TOUCH_TARGET,
@@ -1024,7 +1012,7 @@ function buildStyles(color: Palette) {
     },
     folded: {
       fontWeight: '600',
-      fontSize: ds2Type.caption,
+      fontSize: font.meta,
       lineHeight: lineHeight.meta,
       color: color.text,
     },

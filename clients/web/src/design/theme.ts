@@ -7,6 +7,7 @@ import {
   normalizeAccentId,
   type AccentId,
 } from "./themes";
+import { applyUserFonts, normalizeFontName } from "./userFont";
 
 export type { AccentId } from "./themes";
 export {
@@ -51,6 +52,10 @@ export type ThemeChoice = "system" | "light" | "dark";
 export type AppearanceState = {
   scheme: ThemeChoice;
   accent: AccentId;
+  /** 본문 글꼴 이름(이 기기에 설치된 것). 없으면 시스템 서체. #3774 */
+  fontSans?: string;
+  /** 코드 글꼴 이름. 없으면 시스템 고정폭. #3774 */
+  fontMono?: string;
 };
 
 /** 정본 저장 위치 (ADR-0174 D3). 동결층이므로 접두는 `momo.`로 남는다. */
@@ -177,8 +182,13 @@ export function parseAppearance(raw: string | null | undefined): AppearanceState
   try {
     const parsed: unknown = JSON.parse(raw);
     if (parsed == null || typeof parsed !== "object") return null;
-    const record = parsed as { scheme?: unknown; accent?: unknown };
-    return {
+    const record = parsed as {
+      scheme?: unknown;
+      accent?: unknown;
+      fontSans?: unknown;
+      fontMono?: unknown;
+    };
+    const state: AppearanceState = {
       scheme: normalizeThemeChoice(
         typeof record.scheme === "string" ? record.scheme : null
       ),
@@ -186,13 +196,24 @@ export function parseAppearance(raw: string | null | undefined): AppearanceState
         typeof record.accent === "string" ? record.accent : null
       ),
     };
+    // 모르는 값·깨진 값은 키를 두지 않는다(시스템 서체).
+    const fontSans = normalizeFontName(record.fontSans);
+    const fontMono = normalizeFontName(record.fontMono);
+    if (fontSans !== undefined) state.fontSans = fontSans;
+    if (fontMono !== undefined) state.fontMono = fontMono;
+    return state;
   } catch {
     return null;
   }
 }
 
 export function serializeAppearance(state: AppearanceState): string {
-  return JSON.stringify({ scheme: state.scheme, accent: state.accent });
+  return JSON.stringify({
+    scheme: state.scheme,
+    accent: state.accent,
+    fontSans: normalizeFontName(state.fontSans),
+    fontMono: normalizeFontName(state.fontMono),
+  });
 }
 
 /**
@@ -244,6 +265,7 @@ function commit(next: AppearanceState): void {
   writeStorage(next);
   applyTheme(next.scheme);
   applyAccent(next.accent);
+  applyUserFonts(next);
   for (const listener of listeners) listener();
 }
 
@@ -266,17 +288,44 @@ export function getAppearance(): AppearanceState {
   return appearance;
 }
 
+export function getFontSans(): string | undefined {
+  return appearance.fontSans;
+}
+
+export function getFontMono(): string | undefined {
+  return appearance.fontMono;
+}
+
 /** 고른 스킴을 저장하고 화면에 바로 적용한다. 저장 버튼이 없는 설정이다. */
 export function setTheme(next: ThemeChoice): void {
   if (next === appearance.scheme) return;
-  commit({ scheme: next, accent: appearance.accent });
+  commit({ ...appearance, scheme: next });
 }
 
 /** 고른 액센트를 저장하고 화면에 바로 적용한다. 기본(새벽)으로 되돌리는 길도 여기. */
 export function setAccent(next: AccentId): void {
   const accent = normalizeAccentId(next);
   if (accent === appearance.accent) return;
-  commit({ scheme: appearance.scheme, accent });
+  commit({ ...appearance, accent });
+}
+
+/**
+ * 글꼴 이름을 저장하고 바로 적용한다. 빈 값·허용 밖 값은 「기본」으로 읽는다(호출자가
+ * 먼저 `parseFontName`으로 사람에게 거절 이유를 말한다). 한 칸만 바꿔도 다른 칸은 그대로다.
+ */
+export function setUserFonts(next: { fontSans?: string | null; fontMono?: string | null }): void {
+  const fontSans = "fontSans" in next ? normalizeFontName(next.fontSans) : appearance.fontSans;
+  const fontMono = "fontMono" in next ? normalizeFontName(next.fontMono) : appearance.fontMono;
+  if (fontSans === appearance.fontSans && fontMono === appearance.fontMono) return;
+  const state: AppearanceState = { scheme: appearance.scheme, accent: appearance.accent };
+  if (fontSans !== undefined) state.fontSans = fontSans;
+  if (fontMono !== undefined) state.fontMono = fontMono;
+  commit(state);
+}
+
+/** 두 칸 모두 시스템 서체로. */
+export function resetUserFonts(): void {
+  setUserFonts({ fontSans: null, fontMono: null });
 }
 
 /**
@@ -288,6 +337,7 @@ export function initTheme(): void {
   applyPalette(ACTIVE_PALETTE_ID);
   applyTheme(appearance.scheme);
   applyAccent(appearance.accent);
+  applyUserFonts(appearance);
 }
 
 export function useThemeChoice(): ThemeChoice {
@@ -298,11 +348,20 @@ export function useAccentId(): AccentId {
   return useSyncExternalStore(subscribeTheme, getAccent, getAccent);
 }
 
+export function useFontSans(): string | undefined {
+  return useSyncExternalStore(subscribeTheme, getFontSans, getFontSans);
+}
+
+export function useFontMono(): string | undefined {
+  return useSyncExternalStore(subscribeTheme, getFontMono, getFontMono);
+}
+
 /** 시험이 저장소와 모듈 상태를 같은 자리에서 다시 읽게 한다. */
 export function reloadAppearanceForTest(): void {
   appearance = readStorage();
   applyTheme(appearance.scheme);
   applyAccent(appearance.accent);
+  applyUserFonts(appearance);
   for (const listener of listeners) listener();
 }
 

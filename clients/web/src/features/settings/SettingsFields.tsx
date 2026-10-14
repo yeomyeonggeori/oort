@@ -640,6 +640,7 @@ export function CopyButton({
   testId,
   size = "sm",
   className,
+  variant = "outline",
 }: {
   value: string;
   label?: string;
@@ -667,6 +668,8 @@ export function CopyButton({
    * `tap-target` 은 600px 미만에서만 자란다(`tokens.css`).
    */
   className?: string;
+  /** 한 화면의 주 행동일 때만 `default`(잉크 채움)로 올린다. 나머지 복사는 outline이다. */
+  variant?: "outline" | "default";
 }) {
   const { copied, copy } = useClipboardCopy(value);
 
@@ -678,7 +681,7 @@ export function CopyButton({
   return (
     <Button
       type="button"
-      variant="outline"
+      variant={variant}
       size={size}
       onClick={() => void copy()}
       aria-label={subject ? `${subject} ${text}` : undefined}

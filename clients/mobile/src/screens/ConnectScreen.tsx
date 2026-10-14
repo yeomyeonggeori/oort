@@ -47,7 +47,7 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
-import {FailureBanner, NoticeBlock, Sentence} from '../design/atoms';
+import {FailureBanner, NoticeBlock, SAS_MAX_SCALE, Sentence} from '../design/atoms';
 import {font, space, TOUCH_TARGET, type Palette} from '../design/tokens';
 import {usePalette, useStyles, useTheme} from '../design/theme';
 import {
@@ -1178,18 +1178,14 @@ const JOIN_SUBMIT_LABEL = '팀에 들어가기';
 
 /** 다크 M0 히어로(시안 `.phone.T.dark .hero-k{width:176px;margin-bottom:10px}`). */
 const WELCOME_DARK_HERO = 176;
-/** SAS 숫자는 이미 크다(40). 큰 글씨에서 네 칸이 375 폭을 넘지 않게 멈춘다. */
-const SAS_MAX_SCALE = 1.35;
 
 /** 시안 M0·M2 값. */
 const WELCOME = {
-  /** `.wordmark{font-size:36px;font-weight:800;letter-spacing:-.045em;line-height:1}` */
+  /** `.wordmark{font-size:36px;font-weight:700;letter-spacing:-.045em;line-height:1}` */
   wordmark: 36,
   wordmarkTracking: -1.62,
   /** 다크 `margin-bottom:10px` (배지 아래) */
   badgeGap: 10,
-  /** `.tagline{font-size:15px}` */
-  tagline: 15,
   /** `.bubble{margin-top:10px}` (M0 인라인) */
   bubbleTop: 10,
 } as const;
@@ -1203,7 +1199,6 @@ const SAS = {
   /** `.chip{height:28px;padding:0 10px;font-size:13px;gap:6px}` */
   chip: 28,
   chipPadH: 10,
-  chipFont: 13,
 } as const;
 
 /** 주소의 호스트(칩). 읽을 수 없으면 null. */
@@ -1290,8 +1285,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   },
   // `.field{gap:6px}` · `label{13px/600 ink2}` · `.hint{12.5px ink2}` (D1′ 시안)
   field: {gap: PHONE_OB.fieldGap},
-  label: {fontSize: PHONE_OB.labelFont, fontWeight: '600', color: color.textMuted},
-  fieldHint: {fontSize: PHONE_OB.hintFont, color: color.textMuted},
+  label: {fontSize: font.label, fontWeight: '600', color: color.textMuted},
+  fieldHint: {fontSize: font.meta, color: color.textMuted},
   input: {
     minHeight: PHONE_OB.input,
     borderWidth: 1,
@@ -1317,7 +1312,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   },
   reentryPressed: {opacity: 0.6},
   // `.reentry{font-size:12.5px;color:ink2;text-align:center}` · `.link{signal-text 600 underline}`
-  reentryText: {fontSize: PHONE_OB.hintFont, color: color.textMuted, textAlign: 'center'},
+  reentryText: {fontSize: font.meta, color: color.textMuted, textAlign: 'center'},
   reentryLink: {
     color: color.accentText,
     fontWeight: '600',
@@ -1329,13 +1324,13 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   welcomeBubble: {marginTop: WELCOME.bubbleTop, alignSelf: 'center'},
   wordmark: {
     fontSize: WELCOME.wordmark,
-    fontWeight: '800',
+    fontWeight: '700',
     letterSpacing: WELCOME.wordmarkTracking,
     color: color.text,
     textAlign: 'center',
   },
   wordmarkAfterBadge: {marginTop: WELCOME.badgeGap},
-  tagline: {fontSize: WELCOME.tagline, color: color.textMuted, textAlign: 'center'},
+  tagline: {fontSize: font.body, color: color.textMuted, textAlign: 'center'},
   mainWide: {gap: PHONE_OB.mainGapWide},
   sasRow: {
     flexDirection: 'row',
@@ -1368,12 +1363,12 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     justifyContent: 'center',
     maxWidth: '100%',
   },
-  chipText: {fontSize: SAS.chipFont, color: color.text, fontWeight: '600'},
+  chipText: {fontSize: font.label, color: color.text, fontWeight: '600'},
   sys: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: space.sm,
   },
-  sysText: {fontSize: PHONE_OB.sysFont, color: color.textMuted, flexShrink: 1},
+  sysText: {fontSize: font.label, color: color.textMuted, flexShrink: 1},
 });

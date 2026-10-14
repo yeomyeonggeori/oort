@@ -4,7 +4,7 @@ import {Animated, Image, Pressable, StyleSheet, Text, View} from 'react-native';
 import {BAR_CONTROL_MAX_SCALE} from '../design/atoms';
 import {MENU_ICONS, MENU_ICON_SIZE, type MenuIconName} from '../design/icons';
 import {usePalette, useStyles} from '../design/theme';
-import {ds2Radius, ds2Type, type Palette} from '../design/tokens';
+import {ds2Radius, type Palette, font} from '../design/tokens';
 import {useReduceMotionRef} from '../lib/useReduceMotion';
 import {PLUS_LABEL, SHELL} from './ShellChrome';
 
@@ -178,7 +178,7 @@ const buildStyles = (color: Palette) =>
     rowPressed: {backgroundColor: `${color.onPrimary}29`},
     label: {
       flex: 1,
-      fontSize: ds2Type.headline,
+      fontSize: font.heading,
       fontWeight: '600',
       color: color.onPrimary,
     },
