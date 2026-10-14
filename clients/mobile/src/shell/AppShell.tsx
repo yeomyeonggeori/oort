@@ -41,7 +41,7 @@ import HostedConnectionsScreen from '../screens/HostedConnectionsScreen';
 import InboxScreen from '../screens/InboxScreen';
 import SearchScreen from '../screens/SearchScreen';
 import SidebarScreen from '../screens/SidebarScreen';
-import TeamBoardScreen from '../screens/TeamBoardScreen';
+import WorkJobsScreen from '../screens/WorkJobsScreen';
 import WorkSessionDetailScreen from '../screens/WorkSessionDetailScreen';
 import {SessionProvider, useSession} from '../session/useSession';
 import {AiSheet} from './AiSheet';
@@ -278,7 +278,7 @@ export function Shell({
         key: 'work',
         icon: 'work',
         label: '작업',
-        hint: '팀이 공유한 작업과 내가 시킨 작업을 봅니다.',
+        hint: '에이전트에게 맡긴 일과 결과를 봐요.',
         onPress: () => dispatch({type: 'openWorkList'}),
       });
     }
@@ -318,6 +318,7 @@ export function Shell({
               onOpenConversation={onOpenConversation}
               onOpenSearch={onOpenSearch}
               onOpenAgentList={onOpenAgentList}
+              onOpenWorkList={workConsole ? onOpenWorkList : undefined}
               notificationNotice={tapRouting.notice}
               onDismissNotificationNotice={tapRouting.dismissNotice}
             />
@@ -373,7 +374,9 @@ export function Shell({
           style={[styles.overlay, !nav.workList && styles.hidden]}
           onBack={onBack}
           testID="work-list-pane">
-          <TeamBoardScreen
+          {/* ADR-0202 D6: 결과 중심 「작업」 한 화면(내 것 / 팀 전체). 옛 팀 보드 판
+              (`TeamBoardScreen`)은 코드로 남는다. */}
+          <WorkJobsScreen
             active={nav.workList && nav.workSession === null}
             onOpenConversation={onOpenConversation}
             onOpenAgentSession={onOpenWorkSession}

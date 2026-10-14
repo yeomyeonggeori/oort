@@ -7,6 +7,7 @@ import {
   channelLabel,
   diffFacts,
   harnessLabel,
+  isAwaitingApproval,
   isRunItem,
   prFacts,
   sessionTitle,
@@ -14,9 +15,11 @@ import {
   stateSentence,
   whereLabel,
 } from "@momo/core/features/workbench/teamBoard";
+import { WORK_JOBS_COPY } from "@momo/core/features/workbench/workJobs";
 import { cn } from "@/design/lib/cn";
 import { isDesktop, openExternalUrl } from "@/lib/tauri";
 import { StateChip, LaneLabel } from "./TeamBoardParts";
+import { ApprovalCardLink, ReportedFacts } from "@/features/workTab/jobs/WorkJobParts";
 
 // =============================================================================
 // 세션 상세 드로어 (#2863, 제안서 §4.3, 시안 ④ `.drawer`).
@@ -45,6 +48,7 @@ export const TeamBoardDrawer = forwardRef<
   const markers = stageMarkers(item);
   const pr = prFacts(item.prUrl);
   const channel = channelLabel(item);
+  const awaitingApproval = isAwaitingApproval(item);
   return (
     <aside
       ref={ref}
@@ -90,9 +94,11 @@ export const TeamBoardDrawer = forwardRef<
         <p className="flex flex-wrap items-center gap-2">
           <StateChip item={item} />
           <span className="break-keep text-meta text-ink">
-            {stateSentence(item, nowMs)}
+            {awaitingApproval ? WORK_JOBS_COPY.approvalHint : stateSentence(item, nowMs)}
           </span>
         </p>
+        {/* 승인 대기(새 서버의 phase, ADR-0202 D1): 승인 단추는 여기 없다. 카드가 있는 자리로 간다. */}
+        {awaitingApproval && <ApprovalCardLink channelId={item.homeChannel.id} channel={channel} />}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto pb-3">
@@ -156,6 +162,8 @@ export const TeamBoardDrawer = forwardRef<
             </ul>
           </section>
         )}
+
+        {item.agentReported != null && <ReportedFacts reported={item.agentReported} />}
 
         <section aria-labelledby="team-board-result">
           <h3 id="team-board-result" className={SECTION_HEADING}>

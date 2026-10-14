@@ -1,16 +1,11 @@
-import { Activity, Bot, Inbox, Milestone, ServerCog, Sparkles, SquareKanban, SquareTerminal, Users } from "lucide-react";
+import { Bot, Inbox, ListChecks, Sparkles, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { NeedsMe } from "@momo/core/features/inbox/needsMe";
 import {
-  isSurfaceProvided,
-  serverSurface,
-} from "@momo/core/features/capabilities/serverSurfaces";
-import {
-  MY_WORK_PATH,
-  TEAM_WORK_PATH,
-  WORK_CONSOLE_VIEW_PATH,
+  LOCAL_TERMINALS_PATH,
   WORK_NAV,
+  WORK_PATH,
 } from "@momo/core/features/workbench/workTab";
 import { DraftsNavItem } from "@/features/drafts/DraftsNavItem";
 import { useLocalPaneAttention } from "@/features/workbench/local/paneAttention";
@@ -29,15 +24,15 @@ import {
 //
 //   구획 A  인박스 · 멤버(초안이 있으면 초안) — 「대화」 줄은 #3662로 없앴다: 채널·DM 목록이
 //           바로 아래에 서 있어 `/`로 가는 두 번째 문은 쓸모가 없었다(성재 2026-10-10)
-//   구획 B  「에이전트·작업」 — AI(허브, AIH-3) · 에이전트 · 내 작업 · 팀 작업 · 활동(+ 서버가 싣는 작업
-//           콘솔·작업 흐름) · 지금 도는 세션 줄
+//   구획 B  「에이전트·작업」 — AI(허브, AIH-3) · 에이전트 · 작업 · 지금 도는 세션 줄
+//           (ADR-0202 D6: 내 작업·팀 작업·활동·작업 콘솔·작업 흐름 다섯 줄이 「작업」 한 줄이 됐다.
+//           라우트와 화면 코드는 남는다: 옛 링크는 계속 열리고, 진입점만 숨겼다.)
 //
 // 이 머리는 **모든 탭에서 같은 노드·같은 자리**다. 탭이 바뀌어도 바뀌는 것은 이 아래의 본문
 // (채널·DM ↔ 내 작업 세션 목록 ↔ 팀 세션 목록)뿐이다: 「탭을 옮기면 왼쪽 크롬이 통째로
 // 바뀐다」(#3275/#3280)는 불만의 재발 방지다. 그래서 이 컴포넌트는 라우트를 읽어 줄을
-// 더하고 빼지 않는다 — 읽는 것은 선택 표시와 배지뿐이다. (`가용성`에 따라 서는 줄 —
-// 서버가 안 싣는 작업 콘솔·작업 흐름, 있을 때만 서는 초안 — 은 라우트가 아니라 서버·데이터의
-// 사실이다.)
+// 더하고 빼지 않는다 — 읽는 것은 선택 표시와 배지뿐이다. (있을 때만 서는 초안은 라우트가
+// 아니라 데이터의 사실이다.)
 //
 // 「메시지 검색」 줄은 없다: ⌘K 「검색과 이동」이 메시지 본문까지 덮는다(성재 2026-10-02).
 // 레일은 펼친 동안 워크스페이스 전용이고, ⌘B로 이 열이 접히면 레일이 같은 목적지 아이콘을
@@ -47,7 +42,6 @@ import {
 export function SidebarDestinations({
   active,
   needsMe,
-  workConsoleProvided,
   nowCard,
   unreadChannels = 0,
 }: {
@@ -58,7 +52,6 @@ export function SidebarDestinations({
    * 같은 입력이라 여기서도 같은 `destinationMarks`로 한 번에 푼다.
    */
   unreadChannels?: number;
-  workConsoleProvided: boolean;
   /** 지금 도는 에이전트 턴 카드(`SidebarNowCard`). 열린 턴이 없으면 아무것도 그리지 않는다. */
   nowCard?: ReactNode;
 }) {
@@ -103,12 +96,13 @@ export function SidebarDestinations({
       >
         <SidebarRow to={AI_HUB_NAV.to} icon={<Sparkles className="size-4" />} label={AI_HUB_NAV.label} testId="nav-ai" isActive={active.ai} />
         <SidebarRow to={AGENTS_NAV.to} icon={<Bot className="size-4" />} label={AGENTS_NAV.label} testId="nav-agents" isActive={active.agents} />
+        {/* 「작업」 한 줄(ADR-0202 D6). 배지·점은 옛 「내 작업」의 것 그대로다(응답 필요 칸·안 본 끝남). */}
         <SidebarRow
-          to={MY_WORK_PATH}
-          icon={<SquareTerminal className="size-4" />}
-          label={WORK_NAV.mine}
-          testId="nav-mine"
-          isActive={active.mine}
+          to={WORK_PATH}
+          icon={<ListChecks className="size-4" />}
+          label={WORK_NAV.work}
+          testId="nav-work"
+          isActive={active.work}
           mentionCount={marks.mine.pill?.count ?? 0}
           dot={marks.mine.dot}
           badgeLabel={
@@ -119,29 +113,10 @@ export function SidebarDestinations({
                 : undefined
           }
         />
-        <SidebarRow to={TEAM_WORK_PATH} icon={<SquareKanban className="size-4" />} label={WORK_NAV.team} testId="nav-team" isActive={active.team} />
-        <SidebarRow to="/activity" icon={<Activity className="size-4" />} label="활동" testId="nav-activity" isActive={active.activity} />
-        {/* TC-1 (#1758): 전역 작업 세션 목록. 표면 삭제 금지 — 셀프호스트 기본은 진입점만
-            접는다(#2166). #2780: 온라인 호스트 유무로 펼친다(useSurfaceProvided). 콘솔은
-            데스크탑·웹 모두 `?view=console`에 선다(#3334: 웹의 `/work`는 「내 작업」 설명 상태). */}
-        {workConsoleProvided && (
-          <SidebarRow
-            to={WORK_CONSOLE_VIEW_PATH}
-            icon={<ServerCog className="size-4" />}
-            label={serverSurface("workConsole").label}
-            testId="nav-work-console"
-            isActive={active.console}
-          />
-        )}
-        {/* 작업 흐름(MOMO-652, ADR-0143): 이 서버가 싣지 않으면 줄 자체를 세우지 않는다
-            (goal B12) — 없는 것은 권한이 아니라 기능이다. */}
-        {isSurfaceProvided("workstreams") && (
-          <SidebarRow to="/workstreams" icon={<Milestone className="size-4" />} label={serverSurface("workstreams").label} testId="nav-workstreams" isActive={active.workstreams} />
-        )}
         {liveRows.map((entry) => (
           <li key={entry.paneId}>
             <Link
-              to={MY_WORK_PATH}
+              to={LOCAL_TERMINALS_PATH}
               data-testid="sidebar-live-pane"
               data-status={entry.status}
               className="sidebar-row flex w-full items-center gap-2 text-left hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring"

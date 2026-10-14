@@ -25,10 +25,19 @@ vi.mock("@/features/workConsole/WorkConsoleRoute", () => ({
   WorkConsoleRoute: () => createElement("div", { "data-testid": "work-console-stub" }),
 }));
 vi.mock("@/app/SidebarDrawerToggle", () => ({ SidebarDrawerToggle: () => null }));
-// 보드의 몸(읽기·드로어·키보드)은 teamBoard/ 시험이 잰다. 여기서는 주소가 보드로 가는지만 잰다.
-vi.mock("@/features/workTab/teamBoard/TeamBoardRoute", () => ({
-  TeamBoardRoute: () => createElement("div", { "data-testid": "team-board-stub" }),
-}));
+// 「작업」 화면의 몸(읽기·필터·서랍·키보드)은 jobs/ 시험이 잰다. 여기서는 주소가 그 화면으로
+// 가는지와 어느 필터를 들고 가는지만 잰다.
+vi.mock("@/features/workTab/jobs/WorkJobsRoute", async () => {
+  const { useLocation } = await import("react-router-dom");
+  const { currentWorkFilter } = await import("@/features/workTab/jobs/useWorkJobs");
+  return {
+    WorkJobsRoute: () =>
+      createElement("div", {
+        "data-testid": "work-jobs-stub",
+        "data-filter": currentWorkFilter(useLocation().search),
+      }),
+  };
+});
 
 const { WorkRoute } = await import("./WorkRoute");
 
@@ -71,32 +80,61 @@ afterEach(() => {
   shell.desktop = false;
 });
 
-describe("/work 보기 (#2854)", () => {
-  it("데스크탑 /work는 「내 작업」 격자(도크를 탭으로 그린다)", async () => {
-    shell.desktop = true;
+describe("/work 보기 (#2854 → ADR-0202 D6)", () => {
+  it.each([false, true])("/work는 어디서나 결과 중심 「작업」 화면이고 기본 필터는 「내 것」 (desktop=%s)", async (desktop) => {
+    shell.desktop = desktop;
+    try {
+      window.localStorage.removeItem("oort.work.filter");
+    } catch {
+      // jsdom 저장소가 없으면 기억도 없다.
+    }
     const el = await mount("/work");
-    expect(el.querySelector('[data-testid="dock-stub"]')?.getAttribute("data-presentation")).toBe("tab");
-    expect(el.querySelector('[data-testid="work-console-stub"]')).toBeNull();
-  });
-
-  it.each(["/work/", "/Work"])("데스크탑 %s도 격자이고 셸 판정과 같다(검수 #2927 M2)", async (entry) => {
-    shell.desktop = true;
-    const el = await mount(entry);
-    expect(el.querySelector('[data-testid="dock-stub"]')?.getAttribute("data-presentation")).toBe("tab");
-    const { isMyWorkTab } = await import("@momo/core/features/workbench/workTab");
-    expect(isMyWorkTab(entry, "", true)).toBe(true);
-  });
-
-  it("웹 /work는 「내 작업」 설명 상태다: 이유 + 팀 작업 링크, 콘솔도 격자도 아니다 (#3334)", async () => {
-    const el = await mount("/work");
+    const jobs = el.querySelector('[data-testid="work-jobs-stub"]');
+    expect(jobs).not.toBeNull();
+    expect(jobs?.getAttribute("data-filter")).toBe("mine");
     expect(el.querySelector('[data-testid="dock-stub"]')).toBeNull();
     expect(el.querySelector('[data-testid="work-console-stub"]')).toBeNull();
+    const { isMyWorkTab } = await import("@momo/core/features/workbench/workTab");
+    expect(isMyWorkTab("/work", "", desktop)).toBe(false);
+  });
+
+  it.each([false, true])("옛 팀 링크 ?view=team은 「작업」 + 「팀 전체」로 연다 (desktop=%s)", async (desktop) => {
+    shell.desktop = desktop;
+    const el = await mount("/work?view=team");
+    expect(el.querySelector('[data-testid="work-jobs-stub"]')?.getAttribute("data-filter")).toBe("team");
+    expect(el.querySelector('[data-testid="dock-stub"]')).toBeNull();
+    expect(el.querySelector('[data-testid="work-console-stub"]')).toBeNull();
+  });
+
+  it("옛 ?view=team&card=…(보드 카드 링크)도 「팀 전체」 화면이고 card는 그대로다", async () => {
+    const el = await mount("/work?view=team&card=abc");
+    expect(el.querySelector('[data-testid="work-jobs-stub"]')?.getAttribute("data-filter")).toBe("team");
+    expect(new URLSearchParams(seen.search).get("card")).toBe("abc");
+  });
+
+  it("데스크탑 ?view=terminals는 이 기기의 터미널 격자(도크를 탭으로 그린다)", async () => {
+    shell.desktop = true;
+    const el = await mount("/work?view=terminals");
+    expect(el.querySelector('[data-testid="dock-stub"]')?.getAttribute("data-presentation")).toBe("tab");
+    expect(el.querySelector('[data-testid="work-jobs-stub"]')).toBeNull();
+  });
+
+  it.each(["/work/", "/Work"])("데스크탑 %s?view=terminals도 격자이고 셸 판정과 같다(검수 #2927 M2)", async (entry) => {
+    shell.desktop = true;
+    const el = await mount(`${entry}?view=terminals`);
+    expect(el.querySelector('[data-testid="dock-stub"]')?.getAttribute("data-presentation")).toBe("tab");
+    const { isMyWorkTab } = await import("@momo/core/features/workbench/workTab");
+    expect(isMyWorkTab(entry, "?view=terminals", true)).toBe(true);
+  });
+
+  it("웹 ?view=terminals는 설명 상태: 이유 + 「작업」 링크 (#3334)", async () => {
+    const el = await mount("/work?view=terminals");
+    expect(el.querySelector('[data-testid="dock-stub"]')).toBeNull();
     const notice = el.querySelector('[data-testid="my-work-web-notice"]');
     expect(notice?.textContent).toContain("이 기기에는 터미널 레인이 없어요");
-    expect(el.querySelector("h1")?.textContent).toBe("내 작업");
     expect(
       el.querySelector('[data-testid="my-work-web-notice-team-link"]')?.getAttribute("href")
-    ).toBe("/work?view=team");
+    ).toBe("/work");
   });
 
   it("웹 ?view=console은 호스트 판정 뒤의 작업 콘솔이다 (#3334: 콘솔의 새 주소)", async () => {
@@ -104,14 +142,6 @@ describe("/work 보기 (#2854)", () => {
     expect(el.querySelector('[data-testid="surface-route-stub"]')?.getAttribute("data-surface")).toBe("workConsole");
     expect(el.querySelector('[data-testid="work-console-stub"]')).not.toBeNull();
     expect(el.querySelector('[data-testid="my-work-web-notice"]')).toBeNull();
-  });
-
-  it.each([false, true])("?view=team은 어디서나 「팀 작업」 보드다 (desktop=%s)", async (desktop) => {
-    shell.desktop = desktop;
-    const el = await mount("/work?view=team");
-    expect(el.querySelector('[data-testid="team-board-stub"]')).not.toBeNull();
-    expect(el.querySelector('[data-testid="dock-stub"]')).toBeNull();
-    expect(el.querySelector('[data-testid="work-console-stub"]')).toBeNull();
   });
 
   it("데스크탑 세션 링크는 콘솔로 가고 주소에 view=console을 붙인다(목록으로 돌아가도 격자로 새지 않는다)", async () => {

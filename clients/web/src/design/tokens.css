@@ -3116,6 +3116,41 @@
   }
 }
 
+/* 「작업」 한 화면의 줄(ADR-0202 D1, U1 #3842). 맡긴 일 | 결과 | 상태 120 | 걸린 시간 128 | 채널 96.
+ * 1100보다 좁으면 결과·채널 열을 접고 그 내용은 첫 열 셋째 줄(`data-narrow`)로 옮긴다. 720보다
+ * 좁으면(폰 폭 셸) 걸린 시간 열도 접는다: 서랍이 말한다. */
+@utility work-jobs-row {
+  display: grid;
+  align-items: center;
+  column-gap: 12px;
+  grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.8fr) 120px 128px 96px;
+
+  [data-narrow] {
+    display: none;
+  }
+
+  @media (width < 1100px) {
+    grid-template-columns: minmax(0, 1fr) 120px 128px;
+
+    > [data-col="result"],
+    > [data-col="channel"] {
+      display: none;
+    }
+
+    [data-narrow] {
+      display: flex;
+    }
+  }
+
+  @media (width < 720px) {
+    grid-template-columns: minmax(0, 1fr) 120px;
+
+    > [data-col="duration"] {
+      display: none;
+    }
+  }
+}
+
 @utility work-console-layout {
   display: grid;
   grid-template-columns: var(--spacing-pane) minmax(0, 1fr);

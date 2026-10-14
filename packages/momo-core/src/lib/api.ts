@@ -3441,9 +3441,40 @@ export interface SharedWorkSession {
   prUrl: string | null;
   /** 에포크 **초**. 목록 순서의 기준이다. */
   lastActivityAt: number;
+  /**
+   * `include=jobs` 응답의 run 줄에만(ADR-0202 D3·D4). 무엇이 이 일을 만들었나:
+   * `work`(맡긴 일)·`mention`(멘션)·`thread_reply`(스레드 답글 깨우기). 모르는 값·옛 서버는 null.
+   */
+  trigger?: WorkJobTrigger | null;
+  /** `include=jobs` 응답의 run 줄에만: ADR-0200 phase 그대로. 옛 서버는 null(보드 어휘만 있다). */
+  phase?: string | null;
+  /**
+   * `include=jobs` 응답의 run 줄에만: 에이전트가 **스스로 보고한** 코드 결과(ADR-0162 증보 5 C1·C2).
+   * 서버는 사실인지 검증하지 않는다. 화면은 항상 「에이전트 보고」 꼬리표와 함께 그린다.
+   */
+  agentReported?: AgentReportedResult | null;
 }
 
 export type SharedBoardSource = "session" | "run";
+
+/** ADR-0202 D3: run 줄을 만든 것. */
+export type WorkJobTrigger = "work" | "mention" | "thread_reply";
+
+/** ADR-0162 증보 5 C1의 닫힌 칸. 모르는 값은 null로 비운다(예외 없음). */
+export type AgentResultKind = "pr_opened" | "branch_only" | "vm_only" | "no_change";
+export type AgentNextAction = "merge_ok" | "please_test" | "blocked" | "none";
+/** ADR-0162 증보 5 C2의 닫힌 범주. */
+export type AgentToolCountKey = "run" | "edit" | "read" | "search" | "web" | "other";
+
+export interface AgentReportedResult {
+  resultKind: AgentResultKind | null;
+  tests: { passed: number; failed: number; notRun: number } | null;
+  nextAction: AgentNextAction | null;
+  /** 소문자 7~40자 hex만. */
+  commitSha: string | null;
+  /** 있는 범주만. 비면 null. */
+  toolCounts: Partial<Record<AgentToolCountKey, number>> | null;
+}
 
 export interface SharedWorkSessionPage {
   sessions: SharedWorkSession[];
@@ -3549,7 +3580,106 @@ export function sharedWorkSessionFromWire(value: unknown): SharedWorkSession | n
     // 화면이 한 번 더 https·모양을 확인한다(`prFacts`).
     prUrl: sharedText(raw, "prUrl") ?? (pr === null ? null : sharedText(pr, "url")),
     lastActivityAt: sharedCount(raw, "lastActivityAt") ?? 0,
+    trigger: isRun ? workJobTriggerOf(raw.trigger) : null,
+    phase: isRun ? sharedText(raw, "phase") : null,
+    agentReported: isRun ? agentReportedFromWire(raw.agentReported) : null,
   };
+}
+
+const WORK_JOB_TRIGGERS: ReadonlySet<string> = new Set<WorkJobTrigger>([
+  "work",
+  "mention",
+  "thread_reply",
+]);
+const AGENT_RESULT_KINDS: ReadonlySet<string> = new Set<AgentResultKind>([
+  "pr_opened",
+  "branch_only",
+  "vm_only",
+  "no_change",
+]);
+const AGENT_NEXT_ACTIONS: ReadonlySet<string> = new Set<AgentNextAction>([
+  "merge_ok",
+  "please_test",
+  "blocked",
+  "none",
+]);
+const AGENT_TOOL_COUNT_KEYS: readonly AgentToolCountKey[] = [
+  "run",
+  "edit",
+  "read",
+  "search",
+  "web",
+  "other",
+];
+/** ADR-0162 증보 5 C1·C2의 정수 상한. 넘거나 음수·소수면 그 칸은 모름이다. */
+const AGENT_REPORT_COUNT_MAX = 100_000;
+
+function workJobTriggerOf(value: unknown): WorkJobTrigger | null {
+  return typeof value === "string" && WORK_JOB_TRIGGERS.has(value)
+    ? (value as WorkJobTrigger)
+    : null;
+}
+
+function reportCount(source: Record<string, unknown>, key: string): number | null {
+  const value = source[key];
+  return typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value <= AGENT_REPORT_COUNT_MAX
+    ? value
+    : null;
+}
+
+/**
+ * 에이전트 보고 칸을 **너그럽게** 읽는다. 서버가 이미 닫힌 형식으로 검증했지만, 이 클라보다
+ * 새 서버가 범주를 늘려도 화면이 깨지지 않게 모르는 값은 그 칸만 비운다. 칸이 하나도
+ * 없으면 null이다(「에이전트 보고」 꼬리표를 빈 채로 세우지 않는다).
+ */
+export function agentReportedFromWire(value: unknown): AgentReportedResult | null {
+  const raw = record(value);
+  if (raw === null) return null;
+  const resultKind =
+    typeof raw.resultKind === "string" && AGENT_RESULT_KINDS.has(raw.resultKind)
+      ? (raw.resultKind as AgentResultKind)
+      : null;
+  const nextAction =
+    typeof raw.nextAction === "string" && AGENT_NEXT_ACTIONS.has(raw.nextAction)
+      ? (raw.nextAction as AgentNextAction)
+      : null;
+  const testsRaw = record(raw.tests);
+  let tests: AgentReportedResult["tests"] = null;
+  if (testsRaw !== null) {
+    const passed = reportCount(testsRaw, "passed");
+    const failed = reportCount(testsRaw, "failed");
+    const notRun = reportCount(testsRaw, "notRun");
+    if (passed !== null && failed !== null && notRun !== null) {
+      tests = { passed, failed, notRun };
+    }
+  }
+  const sha =
+    typeof raw.commitSha === "string" && /^[0-9a-fA-F]{7,40}$/.test(raw.commitSha)
+      ? raw.commitSha.toLowerCase()
+      : null;
+  const countsRaw = record(raw.toolCounts);
+  let toolCounts: AgentReportedResult["toolCounts"] = null;
+  if (countsRaw !== null) {
+    const counts: Partial<Record<AgentToolCountKey, number>> = {};
+    for (const key of AGENT_TOOL_COUNT_KEYS) {
+      const n = reportCount(countsRaw, key);
+      if (n !== null) counts[key] = n;
+    }
+    toolCounts = Object.keys(counts).length > 0 ? counts : null;
+  }
+  if (
+    resultKind === null &&
+    tests === null &&
+    nextAction === null &&
+    sha === null &&
+    toolCounts === null
+  ) {
+    return null;
+  }
+  return { resultKind, tests, nextAction, commitSha: sha, toolCounts };
 }
 
 export function sharedWorkSessionPageFromWire(value: unknown): SharedWorkSessionPage {
@@ -3587,6 +3717,77 @@ export async function fetchSharedWorkSessions(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/work-sessions/shared${suffix}`
   );
   return sharedWorkSessionPageFromWire(res);
+}
+
+// ---- 「작업」 한 화면의 읽기 (ADR-0202 D4, U1 #3842) ------------------------------
+//
+// 새 서버는 같은 보드 경로에 `include=runs,jobs`·`who=mine|team`을 받는다(E1). 배포된 서버는
+// `include`를 **정확히 "runs"일 때만** 알아보고 그 밖의 값은 400 없이 조용히 무시한다
+// (`work_board.rs`의 `== Some("runs")`, `who`도 모르는 키라 무시). 그래서 400만 보고 물러서면
+// 옛 서버에서 호스팅 에이전트 줄이 소리 없이 사라진다. 판정은 **응답이 `who`를 되울리는가**다:
+// 새 서버는 페이지에 `who`를 싣고(E1이 지킬 계약), 옛 서버는 싣지 않는다. 되울리지 않거나 400이면
+// 이 워크스페이스는 이번 실행 동안 옛 방식(`include=runs`, 「내 것」은 화면이 고른다)으로 읽고
+// 다시 묻지 않는다.
+
+export type WorkJobsWho = "mine" | "team";
+/** `jobs` = 새 서버가 D3 줄과 `who`를 맞춰 준다. `legacy` = 옛 보드(호스팅 에이전트 work run만). */
+export type WorkJobsMode = "jobs" | "legacy";
+
+export interface WorkJobsPage extends SharedWorkSessionPage {
+  mode: WorkJobsMode;
+}
+
+const legacyWorkJobsWorkspaces = new Set<string>();
+
+/** 시험용: 기억한 판정을 지운다. */
+export function resetWorkJobsDetection(): void {
+  legacyWorkJobsWorkspaces.clear();
+}
+
+/** 이 워크스페이스를 이미 옛 서버로 판정했나(이번 실행 동안). */
+export function workJobsKnownLegacy(workspaceId: string): boolean {
+  return legacyWorkJobsWorkspaces.has(workspaceId.toLowerCase());
+}
+
+/** 새 서버의 표지: 페이지 머리에 보낸 `who`를 그대로 되울린다. */
+export function pageEchoesWho(value: unknown, who: WorkJobsWho): boolean {
+  const source = record(value);
+  return source !== null && source["who"] === who;
+}
+
+export async function fetchWorkJobs(
+  workspaceId: string,
+  opts: { who: WorkJobsWho; cursor?: string | null; limit?: number }
+): Promise<WorkJobsPage> {
+  const key = workspaceId.toLowerCase();
+  if (!legacyWorkJobsWorkspaces.has(key)) {
+    const query = new URLSearchParams();
+    if (opts.limit !== undefined) query.set("limit", String(opts.limit));
+    if (opts.cursor) query.set("cursor", opts.cursor);
+    query.set("include", "runs,jobs");
+    query.set("who", opts.who);
+    let res: unknown;
+    let answered = true;
+    try {
+      res = await request<unknown>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/work-sessions/shared?${query.toString()}`
+      );
+    } catch (error) {
+      // 400 = `include=jobs`나 `who`를 모르는 서버(ADR-0202 D4의 물러서기). 다른 실패는 그대로 올린다.
+      if (!(error instanceof ApiError && error.status === 400)) throw error;
+      answered = false;
+    }
+    if (answered && pageEchoesWho(res, opts.who)) {
+      return { ...sharedWorkSessionPageFromWire(res), mode: "jobs" };
+    }
+    legacyWorkJobsWorkspaces.add(key);
+  }
+  const page = await fetchSharedWorkSessions(workspaceId, {
+    cursor: opts.cursor,
+    limit: opts.limit,
+    include: "runs",
+  });
+  return { ...page, mode: "legacy" };
 }
 
 /** 단건. 보이지 않는 이유가 무엇이든 404 하나다(보드에서 지우라는 뜻). */

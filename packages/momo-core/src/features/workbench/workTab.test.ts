@@ -8,6 +8,7 @@ import {
   workTabFits,
   workTabPaneWidth,
   workViewOf,
+  LOCAL_TERMINALS_PATH,
 } from "./workTab";
 
 /** 목록 열까지 편 앱 사이드바(레일 56 + 목록 268). */
@@ -34,26 +35,31 @@ describe("작업 탭 폭 (#2854, 제안서 §3.3)", () => {
   });
 });
 
-describe("/work 보기 판정 (ADR-0194 D1·D2)", () => {
-  it("쿼리 없음은 내 작업, view=team은 팀 작업, 세션 링크와 view=console은 콘솔", () => {
-    expect(workViewOf("")).toBe("mine");
-    expect(workViewOf("?view=team")).toBe("team");
-    expect(workViewOf("?view=team&channel=c1")).toBe("team");
+describe("/work 보기 판정 (ADR-0202 D6, ADR-0194 D2)", () => {
+  it("쿼리 없음·옛 view=team·view=mine·모르는 값은 「작업」 화면, 세션 링크와 view=console은 콘솔", () => {
+    expect(workViewOf("")).toBe("jobs");
+    expect(workViewOf("?view=team")).toBe("jobs");
+    expect(workViewOf("?view=team&channel=c1")).toBe("jobs");
+    expect(workViewOf("?view=mine")).toBe("jobs");
+    expect(workViewOf("?who=team")).toBe("jobs");
     expect(workViewOf("?session=abc")).toBe("console");
     expect(workViewOf("?view=console")).toBe("console");
-    expect(workViewOf("?view=nope")).toBe("mine");
+    expect(workViewOf("?view=nope")).toBe("jobs");
+    expect(workViewOf("?view=terminals")).toBe("terminals");
   });
 
-  it("격자를 그리는 내 작업은 데스크탑의 /work 쿼리 없음 하나뿐이다", () => {
-    expect(isMyWorkTab("/work", "", true)).toBe(true);
-    expect(isMyWorkTab("/work", "", false)).toBe(false);
+  it("격자를 그리는 것은 데스크탑의 /work?view=terminals 하나뿐이다(옛 /work는 이제 「작업」 화면)", () => {
+    expect(isMyWorkTab("/work", "?view=terminals", true)).toBe(true);
+    expect(isMyWorkTab("/work", "?view=terminals", false)).toBe(false);
+    expect(isMyWorkTab("/work", "", true)).toBe(false);
     expect(isMyWorkTab("/work", "?view=team", true)).toBe(false);
     expect(isMyWorkTab("/work", "?session=abc", true)).toBe(false);
-    expect(isMyWorkTab("/inbox", "", true)).toBe(false);
+    expect(isMyWorkTab("/inbox", "?view=terminals", true)).toBe(false);
     // 라우터가 같은 라우트로 받는 표기(끝 빗금·대소문자)도 같은 답이다(검수 #2927 M2).
-    expect(isMyWorkTab("/work/", "", true)).toBe(true);
-    expect(isMyWorkTab("/Work", "", true)).toBe(true);
-    expect(isMyWorkTab("/workstreams", "", true)).toBe(false);
+    expect(isMyWorkTab("/work/", "?view=terminals", true)).toBe(true);
+    expect(isMyWorkTab("/Work", "?view=terminals", true)).toBe(true);
+    expect(isMyWorkTab("/workstreams", "?view=terminals", true)).toBe(false);
+    expect(LOCAL_TERMINALS_PATH).toBe("/work?view=terminals");
   });
 });
 

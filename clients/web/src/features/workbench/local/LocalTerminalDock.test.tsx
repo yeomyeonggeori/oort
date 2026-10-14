@@ -250,12 +250,12 @@ describe("터미널 입력이 먼저", () => {
 });
 
 describe("「내 작업」 탭 (#2854)", () => {
-  it("도크가 닫혀 있어도 격자를 그리고, 도크 여닫이 단추 없이 제목이 「내 작업」이다", async () => {
+  it("도크가 닫혀 있어도 격자를 그리고, 도크 여닫이 단추 없이 제목이 「이 기기 터미널」이다(ADR-0202 D6)", async () => {
     const { sessions } = fakeSessions();
     await mount(sessions, "tab");
     expect(dockSnapshot().open).toBe(false);
     await vi.waitFor(() => expect(q("fake-xterm-p1")).not.toBeNull());
-    expect(q("my-work-tab")?.querySelector("h1")?.textContent).toBe("내 작업");
+    expect(q("my-work-tab")?.querySelector("h1")?.textContent).toBe("이 기기 터미널");
     expect(q("local-terminal-dock")).toBeNull();
     expect(q("local-terminal-fullscreen")).toBeNull();
     expect(q("local-terminal-dock-close")).toBeNull();
