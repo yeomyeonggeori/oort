@@ -14922,7 +14922,8 @@ async fn a_workspace_image_can_be_the_avatar_only_if_the_agent_could_read_it() {
     let app = momo_app_pool().await;
     let fixture = seed(&su).await;
     let drive = Arc::new(MemDrive3787::default());
-    let base = start_server_with_drive_3787(app, drive.clone()).await;
+    let base = start_server_with_drive_3787(app.clone(), drive.clone()).await;
+    let fixture_channel = fixture.channel;
     let client = reqwest::Client::new();
     let ws = fixture.workspace;
     let agent = fixture.hosted_agent;
@@ -14964,6 +14965,17 @@ async fn a_workspace_image_can_be_the_avatar_only_if_the_agent_could_read_it() {
     };
     let visible_msg = message(fixture.channel, "my logo").await;
     let private_msg = message(fixture.private_channel, "secret logo").await;
+    // Rows seeded straight into `message` bypass the per-channel counter the REST
+    // send reads: bring it up to the highest seq used, or the next real send collides.
+    sqlx::query(
+        "UPDATE channel_seq SET last_seq = GREATEST(last_seq, \
+            (SELECT COALESCE(max(seq), 0) FROM message m WHERE m.channel_id = channel_seq.channel_id)) \
+          WHERE workspace_id = $1",
+    )
+    .bind(ws)
+    .execute(&su)
+    .await
+    .unwrap();
     let attach = |channel: Uuid, msg: Option<Uuid>, drive_id: &str, mime: &str, status: &str| {
         let (su, human, drive_id, mime, status) = (
             su.clone(),
@@ -15133,23 +15145,76 @@ async fn a_workspace_image_can_be_the_avatar_only_if_the_agent_could_read_it() {
     assert!(!payload.to_string().contains("drive-ok"));
 
     // ---- a channel the agent left hides the file even though the row is intact -----
+    // (Asked at the database function, not through a mention: an agent that has left
+    // the room cannot be mentioned into a run.)
+    let visible_before = tenant_3786(&app, ws, move |conn| {
+        Box::pin(async move {
+            momo_messaging::find_visible_image_attachment_in_tx(
+                conn,
+                ws,
+                agent,
+                &[fixture_channel],
+                good,
+                5 << 20,
+            )
+            .await
+        })
+    })
+    .await
+    .unwrap();
+    assert!(
+        visible_before.is_some(),
+        "control: visible while the agent is a member"
+    );
     sqlx::query("UPDATE membership SET left_at = now() WHERE channel_id=$1 AND member_id=$2")
         .bind(fixture.channel)
         .bind(agent)
         .execute(&su)
         .await
         .unwrap();
-    let (status, _refused) = try_propose_action_3706(
-        &client,
-        &base,
-        &su,
-        &fixture,
-        "agent.profile.update",
-        json!({"avatar": {"source": "attachment", "attachmentId": good.to_string()}}),
-    )
-    .await;
-    assert_ne!(
-        status, 200,
+    let visible_after = tenant_3786(&app, ws, move |conn| {
+        Box::pin(async move {
+            momo_messaging::find_visible_image_attachment_in_tx(
+                conn,
+                ws,
+                agent,
+                &[fixture_channel],
+                good,
+                5 << 20,
+            )
+            .await
+        })
+    })
+    .await
+    .unwrap();
+    assert!(
+        visible_after.is_none(),
         "an agent that left the channel cannot use its files"
+    );
+    // …and a file outside the connection's approved channels is invisible too.
+    sqlx::query("UPDATE membership SET left_at = NULL WHERE channel_id=$1 AND member_id=$2")
+        .bind(fixture.channel)
+        .bind(agent)
+        .execute(&su)
+        .await
+        .unwrap();
+    let not_approved = tenant_3786(&app, ws, move |conn| {
+        Box::pin(async move {
+            momo_messaging::find_visible_image_attachment_in_tx(
+                conn,
+                ws,
+                agent,
+                &[Uuid::new_v4()],
+                good,
+                5 << 20,
+            )
+            .await
+        })
+    })
+    .await
+    .unwrap();
+    assert!(
+        not_approved.is_none(),
+        "an unapproved channel hides its files"
     );
 }

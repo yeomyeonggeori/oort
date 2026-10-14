@@ -1872,13 +1872,14 @@ async fn resolve_action_with_origin_in_tx(
                         && decision_approval_id.is_some()
                         && row.approval_id == decision_approval_id
                 });
-                let intact = match (&pin, bound) {
-                    (Some(pin), true) => {
+                let intact = match (&pin, bound, decision_approval_id) {
+                    (Some(pin), true, Some(approval_id)) => {
                         momo_messaging::staged_image_matches_pin_in_tx(
                             conn,
                             workspace_id,
                             *image_id,
                             found.id,
+                            approval_id,
                             pin,
                         )
                         .await?

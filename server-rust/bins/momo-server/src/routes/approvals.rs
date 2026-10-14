@@ -2312,8 +2312,15 @@ async fn execute_agent_profile_update(
         } => {
             let pin = decode_pin_hex(sha256)
                 .ok_or_else(|| protocol_error("avatar pin is not a sha256"))?;
-            if !staged_image_matches_pin_in_tx(conn, input.workspace_id, *image_id, target.id, &pin)
-                .await?
+            if !staged_image_matches_pin_in_tx(
+                conn,
+                input.workspace_id,
+                *image_id,
+                target.id,
+                approval.id,
+                &pin,
+            )
+            .await?
             {
                 return Ok(Execution::Refused(args_invalid_refusal(
                     approval, input, now,
@@ -2322,7 +2329,7 @@ async fn execute_agent_profile_update(
             let meta = read_avatar_image_in_tx(conn, input.workspace_id, *image_id)
                 .await?
                 .ok_or_else(|| protocol_error("the staged avatar vanished"))?;
-            apply_avatar_image_in_tx(conn, input.workspace_id, target.id, *image_id)
+            apply_avatar_image_in_tx(conn, input.workspace_id, target.id, *image_id, approval.id)
                 .await?
                 .ok_or_else(|| protocol_error("the staged avatar could not be applied"))?;
             avatar_audit = Some(json!({

@@ -472,6 +472,7 @@ fn avatar_schema() -> Value {
         "description": "Your avatar. Exactly one of: a server preset id; a workspace image file you can read (use the attachment id from oort_conversation_read); or an image you generated (PNG/JPEG/WebP, base64, at most about 44 KB decoded — downscale to 256x256 first). null removes the avatar. The server re-encodes every image; a person sees it on the approval card before anything changes.",
         "oneOf": [
             {
+                "title": "preset",
                 "type": "object", "additionalProperties": false,
                 "required": ["source", "presetId"],
                 "properties": {
@@ -480,6 +481,7 @@ fn avatar_schema() -> Value {
                 }
             },
             {
+                "title": "attachment",
                 "type": "object", "additionalProperties": false,
                 "required": ["source", "attachmentId"],
                 "properties": {
@@ -488,6 +490,7 @@ fn avatar_schema() -> Value {
                 }
             },
             {
+                "title": "generated",
                 "type": "object", "additionalProperties": false,
                 "required": ["source", "dataBase64"],
                 "properties": {
