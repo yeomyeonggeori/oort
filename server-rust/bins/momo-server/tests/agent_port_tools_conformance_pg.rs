@@ -12666,3 +12666,252 @@ async fn a_rejected_card_is_announced_as_rejected() {
     assert_eq!(frames.len(), 1, "the rejection announces the card once");
     assert_eq!(frames[0]["payload"]["props"]["status"], json!("rejected"));
 }
+
+/// **#3784 red proof** (hardened after the #3795 security review): a decision
+/// asking `deliverSecretToAgent: true` where it cannot be honoured is refused 400
+/// `deliver_secret_not_supported` **before any write**, on both decision routes,
+/// both spellings, approve and reject, and on a card whose deadline has passed
+/// (an expiry settlement must not outrank the refusal). The approval, the ledger
+/// (`approval_decision`), the audit log and the invite table are all unchanged.
+/// A decision that does not ask still executes, and a replay of an executed
+/// decision that now asks answers the original receipt (documented: the flag is
+/// not part of the idempotency key).
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn deliver_secret_to_agent_is_refused_where_the_action_does_not_offer_it() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app.clone(), true).await;
+    let client = reqwest::Client::new();
+
+    async fn counts(su: &PgPool, workspace: Uuid, approval_id: Uuid) -> (String, i64, i64, i64) {
+        let status: String =
+            sqlx::query_scalar("SELECT status::text FROM approval WHERE workspace_id=$1 AND id=$2")
+                .bind(workspace)
+                .bind(approval_id)
+                .fetch_one(su)
+                .await
+                .unwrap();
+        let ledger: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM approval_decision WHERE workspace_id=$1 AND approval_id=$2",
+        )
+        .bind(workspace)
+        .bind(approval_id)
+        .fetch_one(su)
+        .await
+        .unwrap();
+        let audits: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE workspace_id=$1")
+                .bind(workspace)
+                .fetch_one(su)
+                .await
+                .unwrap();
+        let invites: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM invite_code WHERE workspace_id=$1")
+                .bind(workspace)
+                .fetch_one(su)
+                .await
+                .unwrap();
+        (status, ledger, audits, invites)
+    }
+
+    async fn post_decision(
+        client: &reqwest::Client,
+        url: String,
+        bearer: &str,
+        body: Value,
+    ) -> (u16, Value) {
+        let response = client
+            .post(url)
+            .bearer_auth(bearer)
+            .json(&body)
+            .send()
+            .await
+            .expect("decision responds");
+        let status = response.status().as_u16();
+        (status, response.json().await.unwrap_or(Value::Null))
+    }
+
+    let (approval_id, _card) = propose_invite(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        json!({"role": "member", "maxUses": 1, "expiresInDays": 7}),
+    )
+    .await;
+    let run_id: Uuid =
+        sqlx::query_scalar("SELECT run_id FROM approval WHERE workspace_id=$1 AND id=$2")
+            .bind(fixture.workspace)
+            .bind(approval_id)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    let before = counts(&su, fixture.workspace, approval_id).await;
+    assert_eq!(before.0, "pending");
+
+    let workspace_route = format!(
+        "{base}/v1/workspaces/{}/approvals/{approval_id}/decision",
+        fixture.workspace
+    );
+    let run_route = format!("{base}/v1/agent-runs/{run_id}/approval-decisions");
+    for (route_label, url) in [("workspace", workspace_route.clone()), ("run", run_route)] {
+        for approve in [true, false] {
+            for spelling in ["deliverSecretToAgent", "deliver_secret_to_agent"] {
+                let (status, body) = post_decision(
+                    &client,
+                    url.clone(),
+                    &fixture.human_jwt,
+                    json!({
+                        "approvalId": approval_id,
+                        "approve": approve,
+                        "clientDecisionId": Uuid::new_v4(),
+                        spelling: true,
+                    }),
+                )
+                .await;
+                let label = format!("{route_label}/approve={approve}/{spelling}");
+                assert_eq!(status, 400, "{label}: {body}");
+                assert_eq!(
+                    body["status"], "deliver_secret_not_supported",
+                    "{label}: {body}"
+                );
+                assert!(
+                    body.get("result").is_none(),
+                    "{label}: executed nothing: {body}"
+                );
+                assert_eq!(
+                    counts(&su, fixture.workspace, approval_id).await,
+                    before,
+                    "{label}: nothing consumed, nothing written"
+                );
+            }
+        }
+    }
+
+    // A non-boolean flag is a malformed body, not a quiet `false`.
+    let (status, _body) = post_decision(
+        &client,
+        workspace_route.clone(),
+        &fixture.human_jwt,
+        json!({
+            "approvalId": approval_id, "approve": true,
+            "clientDecisionId": Uuid::new_v4(), "deliverSecretToAgent": "true"
+        }),
+    )
+    .await;
+    assert!((400..500).contains(&status), "{status}");
+    assert_eq!(counts(&su, fixture.workspace, approval_id).await, before);
+
+    // An approval that is not a workspace action at all (an ordinary tool-call
+    // card): a `true` is refused for it too, approve or reject, nothing written.
+    let plain_run: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status) \
+         VALUES ($1,$2,$3,'awaiting_approval') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let plain: Uuid = sqlx::query_scalar(
+        "INSERT INTO approval (workspace_id, run_id, channel_id, requested_by, action_type, payload) \
+         VALUES ($1,$2,$3,$4,'tool_call','{}'::jsonb) RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(plain_run)
+    .bind(fixture.channel)
+    .bind(fixture.hosted_agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let plain_before = counts(&su, fixture.workspace, plain).await;
+    for approve in [true, false] {
+        let (status, body) = post_decision(
+            &client,
+            format!(
+                "{base}/v1/workspaces/{}/approvals/{plain}/decision",
+                fixture.workspace
+            ),
+            &fixture.human_jwt,
+            json!({"approvalId": plain, "approve": approve,
+                   "clientDecisionId": Uuid::new_v4(), "deliverSecretToAgent": true}),
+        )
+        .await;
+        assert_eq!(status, 400, "tool_call approve={approve}: {body}");
+        assert_eq!(body["status"], "deliver_secret_not_supported", "{body}");
+        assert_eq!(
+            counts(&su, fixture.workspace, plain).await,
+            plain_before,
+            "tool_call approve={approve}: nothing consumed, nothing written"
+        );
+    }
+
+    // The deadline has passed: the refusal still wins over the expiry settlement.
+    sqlx::query(
+        "UPDATE approval SET expires_at = now() - interval '1 minute' \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(approval_id)
+    .execute(&su)
+    .await
+    .unwrap();
+    let expired_before = counts(&su, fixture.workspace, approval_id).await;
+    let (status, body) = post_decision(
+        &client,
+        workspace_route.clone(),
+        &fixture.human_jwt,
+        json!({
+            "approvalId": approval_id, "approve": true,
+            "clientDecisionId": Uuid::new_v4(), "deliverSecretToAgent": true
+        }),
+    )
+    .await;
+    assert_eq!(status, 400, "{body}");
+    assert_eq!(body["status"], "deliver_secret_not_supported", "{body}");
+    assert_eq!(
+        counts(&su, fixture.workspace, approval_id).await,
+        expired_before,
+        "an overdue card is not settled by a refused request"
+    );
+
+    // A decision that does not ask executes, and a replay that now asks answers
+    // the original receipt.
+    let (fresh, _card) = propose_invite(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        json!({"role": "member", "maxUses": 1, "expiresInDays": 7}),
+    )
+    .await;
+    let decision_id = Uuid::new_v4();
+    let url = format!(
+        "{base}/v1/workspaces/{}/approvals/{fresh}/decision",
+        fixture.workspace
+    );
+    let (status, body) = post_decision(
+        &client,
+        url.clone(),
+        &fixture.human_jwt,
+        json!({"approvalId": fresh, "approve": true, "clientDecisionId": decision_id,
+               "deliverSecretToAgent": false}),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["status"], "approved", "{body}");
+    let (status, replay) = post_decision(
+        &client,
+        url,
+        &fixture.human_jwt,
+        json!({"approvalId": fresh, "approve": true, "clientDecisionId": decision_id,
+               "deliverSecretToAgent": true}),
+    )
+    .await;
+    assert_eq!(status, 200, "{replay}");
+    assert_eq!(replay["status"], "approved", "{replay}");
+}

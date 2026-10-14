@@ -81,6 +81,11 @@ pub struct WorkspaceActionDto {
     pub required_role: Option<&'static str>,
     #[serde(rename = "argsSchema", skip_serializing_if = "Option::is_none")]
     pub args_schema: Option<Value>,
+    /// ADR-0186 증보 v3: whether the one-time value may be handed to the
+    /// proposing agent (`none`|`opt_in`|`always`). A card shows the
+    /// 「에이전트에게 연결 코드 넘기기」 checkbox only for `opt_in`.
+    #[serde(rename = "agentDelivery", skip_serializing_if = "Option::is_none")]
+    pub secret_delivery: Option<&'static str>,
     pub executable: bool,
     /// `null` when executable, a sentence when not. Never absent — a client
     /// reading `executable: false` must always find the reason in the same key.
@@ -105,6 +110,7 @@ pub fn catalog() -> Vec<WorkspaceActionDto> {
             risk: action.risk.as_wire(),
             required_role: Some(action.required_role.as_wire()),
             args_schema: Some(action.args_schema()),
+            secret_delivery: Some(action.secret_delivery.as_wire()),
             executable: true,
             unavailable_reason: None,
         })
@@ -120,6 +126,7 @@ pub fn catalog() -> Vec<WorkspaceActionDto> {
             risk: actions::Risk::Approval.as_wire(),
             required_role: None,
             args_schema: None,
+            secret_delivery: None,
             executable: false,
             unavailable_reason: Some(declared.unavailable_reason),
         }
@@ -2394,6 +2401,18 @@ mod tests {
             .as_object()
             .expect("row")
             .contains_key("argsSchema"));
+        // ADR-0186 v3: every executable row says whether its one-time value may
+        // go to the proposing agent. The key is named `agentDelivery` and not
+        // after the value, because the scan below is exactly the guard that
+        // keeps a secret out of this catalog.
+        for row in rendered["actions"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .filter(|row| row["executable"] == json!(true))
+        {
+            assert_eq!(row["agentDelivery"], json!("none"), "{row}");
+        }
         // No executor, no secret, no credential ever rides in the catalog.
         let text = rendered.to_string();
         for absent in ["code", "secret", "token", "credential"] {

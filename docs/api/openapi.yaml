@@ -13855,6 +13855,7 @@ components:
             - $ref: "#/components/schemas/WorkspaceActionRequiredRole"
           description: Who must approve this action. Absent while executable is false.
         argsSchema: {type: object, description: JSON Schema for the action's args object. Absent while executable is false.}
+        agentDelivery: {type: string, enum: [none, opt_in, always], description: "ADR-0186 v3. Whether this action's one-time value may be handed to the proposing agent: `opt_in` shows the approver a 'give the code to the agent' checkbox (default off), `always` hands it over without showing it to the approver, `none` never. Absent while executable is false."}
         executable: {type: boolean}
         unavailableReason: {type: string, nullable: true, description: Null when executable; a sentence when not. Never absent.}
 
@@ -19843,6 +19844,22 @@ components:
             rejection it is ignored (ADR-0188 R0.1): nothing runs, and the
             decision is judged on the host the card points at. Not part of the
             idempotency key: a replayed decision answers the original receipt.
+        deliverSecretToAgent:
+          type: boolean
+          default: false
+          description: >
+            ADR-0186 addendum 2026-10-13 (v3) V3-3a. Approver's choice to hand
+            the action's one-time value to the proposing agent (claimable once,
+            for 30 minutes, with `oort_action_claim_secret`) instead of showing
+            it to the approver. Only honoured when the approved action's catalog
+            row says `agentDelivery: opt_in`; `true` on anything else (another
+            action, a rejection, a non-workspace approval) is a 400 receipt
+            `deliver_secret_not_supported` and the approval stays pending (judged
+            right after the channel-membership gate, before the status and
+            expiry arms, so an overdue card is not settled by it). Not part of
+            the idempotency key: a replay of an already-executed decision
+            answers the original receipt even if it now carries `true`, and that
+            200 does not imply anything was delivered.
 
     ApprovalDecisionReceipt:
       type: object

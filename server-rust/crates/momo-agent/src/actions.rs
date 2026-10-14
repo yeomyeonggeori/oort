@@ -153,6 +153,78 @@ impl RequiredRole {
 /// `oort_action_propose` from several runs.
 pub const MAX_PENDING_WORKSPACE_ACTIONS: i64 = 3;
 
+/// Whether an action's one-time secret may go to the **proposing agent** instead
+/// of (only) the approver (ADR-0186 증보 v3 V3-3a, V3-5).
+///
+/// This is a property of the action, never of the proposal: the agent cannot ask
+/// for it, and the decision request's `deliverSecretToAgent` is judged against
+/// this value (`OptIn` only) before anything executes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecretDelivery {
+    /// The action has no value the agent may receive.
+    None,
+    /// The approver chooses at decision time (`deliverSecretToAgent`, default
+    /// off). `agent.invite`'s pairing value.
+    OptIn,
+    /// Always claimable by the proposer; the approver is not shown the value.
+    /// `invite.create`'s link (성재 결재 3).
+    Always,
+}
+
+impl SecretDelivery {
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            SecretDelivery::None => "none",
+            SecretDelivery::OptIn => "opt_in",
+            SecretDelivery::Always => "always",
+        }
+    }
+}
+
+/// How long after the approval the proposer may claim the value (V3-4 (4)).
+/// After this the value never leaves the server; the approver can still mint a
+/// fresh one over the existing regenerate routes.
+pub const SECRET_CLAIM_WINDOW_MS: i64 = 30 * 60 * 1000;
+
+/// The approval payload key that records a granted claim.
+pub const SECRET_CLAIM_PAYLOAD_KEY: &str = "secretClaim";
+
+/// `payload.secretClaim` for a claim granted at `decided_at_ms`:
+/// `{allowed:true, deadlineMs}`. `claimedAtMs` is added by the claim itself,
+/// under the approval row lock, and is what makes the claim single-use.
+pub fn secret_claim_grant(decided_at_ms: i64) -> Value {
+    json!({"allowed": true, "deadlineMs": decided_at_ms.saturating_add(SECRET_CLAIM_WINDOW_MS)})
+}
+
+/// What a claim attempt finds in `payload.secretClaim`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecretClaimState {
+    /// No grant: the approval never allowed the proposer to claim.
+    NotGranted,
+    Open,
+    AlreadyClaimed,
+    Expired,
+}
+
+/// Judge a claim against the stored marker. Pure so the single-use and the
+/// deadline are measurable without a database; the claim route calls it under
+/// the approval's row lock.
+pub fn secret_claim_state(approval_payload: &Value, now_ms: i64) -> SecretClaimState {
+    let Some(claim) = approval_payload.get(SECRET_CLAIM_PAYLOAD_KEY) else {
+        return SecretClaimState::NotGranted;
+    };
+    if claim.get("allowed").and_then(Value::as_bool) != Some(true) {
+        return SecretClaimState::NotGranted;
+    }
+    if claim.get("claimedAtMs").is_some_and(|v| !v.is_null()) {
+        return SecretClaimState::AlreadyClaimed;
+    }
+    match claim.get("deadlineMs").and_then(Value::as_i64) {
+        Some(deadline) if now_ms <= deadline => SecretClaimState::Open,
+        _ => SecretClaimState::Expired,
+    }
+}
+
 /// One action this server can be asked to take.
 #[derive(Debug, Clone, Copy)]
 pub struct WorkspaceAction {
@@ -164,6 +236,10 @@ pub struct WorkspaceAction {
     pub summary: &'static str,
     pub risk: Risk,
     pub required_role: RequiredRole,
+    /// Whether the proposing agent may be handed this action's one-time value
+    /// (ADR-0186 증보 v3 V3-3a/V3-4). Everything is [`SecretDelivery::None`]
+    /// until the slice that implements the claim flips its own action.
+    pub secret_delivery: SecretDelivery,
     /// What approving this executes, as a verb phrase. Only used to build
     /// [`proposal_summary`]; it lives here so a new action cannot be added
     /// without writing the sentence a person reads before consenting.
@@ -368,6 +444,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         summary: "역할과 사용 횟수, 만료를 정해 초대 링크를 하나 만들어요.",
         risk: Risk::Approval,
         required_role: RequiredRole::Admin,
+        secret_delivery: SecretDelivery::None,
         effect: "초대 링크를 만들어요",
         args_schema: invite_create_args_schema,
     },
@@ -377,6 +454,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         summary: "이름과 공개 범위를 정해 채널을 하나 만들고, 이 에이전트와 정한 멤버를 넣어요.",
         risk: Risk::Approval,
         required_role: RequiredRole::Admin,
+        secret_delivery: SecretDelivery::None,
         effect: "채널을 만들고, 표시된 대로 이 에이전트와 멤버를 그 채널에 넣어요",
         args_schema: channel_create_args_schema,
     },
@@ -386,6 +464,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         summary: "이 에이전트가 볼 수 있는 채널에 멤버를 넣어요. 역할은 멤버로 고정돼요.",
         risk: Risk::Approval,
         required_role: RequiredRole::Admin,
+        secret_delivery: SecretDelivery::None,
         effect: "표시된 멤버를 그 채널에 넣어요",
         args_schema: channel_member_add_args_schema,
     },
@@ -395,6 +474,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         summary: "에이전트 한 명의 표시 이름을 바꿔요. 자기 자신이나 같은 소유자의 에이전트만 대상이 돼요.",
         risk: Risk::Approval,
         required_role: RequiredRole::AgentEditor,
+        secret_delivery: SecretDelivery::None,
         effect: "대상 에이전트의 표시 이름을 바꿔요",
         args_schema: agent_rename_args_schema,
     },
@@ -404,6 +484,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         summary: "이 에이전트의 연결이 읽고 쓸 수 있는 채널을 늘려요. 이 에이전트 자신의 연결만 대상이에요.",
         risk: Risk::Approval,
         required_role: RequiredRole::Admin,
+        secret_delivery: SecretDelivery::None,
         effect: "이 에이전트의 연결이 표시된 채널을 읽고 쓸 수 있게 해요",
         args_schema: hosted_channels_grant_args_schema,
     },
@@ -413,6 +494,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         summary: "환영 문구와 역할 이름, 이 두 가지만 바꿔요. 지우려면 null을 보내요.",
         risk: Risk::Approval,
         required_role: RequiredRole::WorkspaceOperator,
+        secret_delivery: SecretDelivery::None,
         effect: "표시된 설정(환영 문구·역할 이름)을 바꿔요",
         args_schema: workspace_settings_update_args_schema,
     },
@@ -1596,5 +1678,171 @@ mod tests {
             next: None,
         });
         assert!(props[ACTION_RESULT_PROPS_KEY].get("next").is_none());
+    }
+
+    // ---- ADR-0186 증보 v3 P0: secret delivery foundation -----------------------
+
+    #[test]
+    fn no_action_hands_its_secret_to_the_agent_before_its_own_slice_lands() {
+        // The slice that implements a claim flips its own action's value AND
+        // updates this list in the same commit; until then a decision request
+        // asking for delivery must be refused for every action.
+        let delivering: Vec<&str> = ACTIONS
+            .iter()
+            .filter(|action| action.secret_delivery != SecretDelivery::None)
+            .map(|action| action.id)
+            .collect();
+        assert!(delivering.is_empty(), "{delivering:?}");
+    }
+
+    #[test]
+    fn secret_delivery_wire_values_are_distinct() {
+        let mut wire = vec![
+            SecretDelivery::None.as_wire(),
+            SecretDelivery::OptIn.as_wire(),
+            SecretDelivery::Always.as_wire(),
+        ];
+        wire.sort_unstable();
+        wire.dedup();
+        assert_eq!(wire.len(), 3);
+    }
+
+    #[test]
+    fn a_claim_is_single_use_and_ends_at_the_deadline() {
+        let decided = 1_000_000;
+        let granted = serde_json::json!({ SECRET_CLAIM_PAYLOAD_KEY: secret_claim_grant(decided) });
+        assert_eq!(
+            secret_claim_state(&granted, decided),
+            SecretClaimState::Open
+        );
+        assert_eq!(
+            secret_claim_state(&granted, decided + SECRET_CLAIM_WINDOW_MS),
+            SecretClaimState::Open,
+            "the deadline itself is still inside the window"
+        );
+        assert_eq!(
+            secret_claim_state(&granted, decided + SECRET_CLAIM_WINDOW_MS + 1),
+            SecretClaimState::Expired
+        );
+        let mut claimed = granted.clone();
+        claimed[SECRET_CLAIM_PAYLOAD_KEY]["claimedAtMs"] = serde_json::json!(decided + 5);
+        assert_eq!(
+            secret_claim_state(&claimed, decided + 6),
+            SecretClaimState::AlreadyClaimed
+        );
+        // A consumed claim stays consumed after the deadline: the answer is not
+        // allowed to flip to `Expired`, which would let a client retry as if
+        // the value had never been given.
+        assert_eq!(
+            secret_claim_state(&claimed, decided + SECRET_CLAIM_WINDOW_MS + 99),
+            SecretClaimState::AlreadyClaimed
+        );
+    }
+
+    #[test]
+    fn an_approval_without_a_grant_cannot_be_claimed() {
+        assert_eq!(
+            secret_claim_state(&serde_json::json!({}), 0),
+            SecretClaimState::NotGranted
+        );
+        let denied = serde_json::json!({ SECRET_CLAIM_PAYLOAD_KEY: {"allowed": false, "deadlineMs": i64::MAX} });
+        assert_eq!(secret_claim_state(&denied, 0), SecretClaimState::NotGranted);
+        let no_deadline = serde_json::json!({ SECRET_CLAIM_PAYLOAD_KEY: {"allowed": true} });
+        assert_eq!(
+            secret_claim_state(&no_deadline, 0),
+            SecretClaimState::Expired
+        );
+    }
+
+    #[test]
+    fn the_pending_cap_is_the_only_flood_control_and_there_is_no_rate_limiter() {
+        // 성재 결재 4 (ADR-0186 증보 v3 V3-6): no hourly cap. The registry must
+        // not grow a rate-limit field and the v2 pending cap stays 3.
+        assert_eq!(MAX_PENDING_WORKSPACE_ACTIONS, 3);
+    }
+
+    #[test]
+    fn a_claim_judgement_fails_closed_on_every_malformed_marker() {
+        // Pinned so a later `unwrap_or`/`as_f64` refactor cannot loosen it
+        // (security review of #3795).
+        let key = SECRET_CLAIM_PAYLOAD_KEY;
+        let state = |claim: serde_json::Value, now: i64| {
+            secret_claim_state(&serde_json::json!({ key: claim }), now)
+        };
+        // Wrong shapes of the whole marker.
+        assert_eq!(
+            state(serde_json::json!("yes"), 0),
+            SecretClaimState::NotGranted
+        );
+        assert_eq!(
+            state(serde_json::json!([]), 0),
+            SecretClaimState::NotGranted
+        );
+        assert_eq!(
+            secret_claim_state(&serde_json::json!("not an object"), 0),
+            SecretClaimState::NotGranted
+        );
+        // `allowed` must be the boolean true.
+        for allowed in [
+            serde_json::json!("true"),
+            serde_json::json!(1),
+            serde_json::json!(null),
+        ] {
+            assert_eq!(
+                state(
+                    serde_json::json!({"allowed": allowed, "deadlineMs": i64::MAX}),
+                    0
+                ),
+                SecretClaimState::NotGranted
+            );
+        }
+        // Deadline must be an i64: a float, a string, a u64 above i64::MAX and a
+        // missing one are all Expired, never Open.
+        for deadline in [
+            serde_json::json!(1.0e15),
+            serde_json::json!("9999999999999"),
+            serde_json::json!(u64::MAX),
+            serde_json::json!(null),
+        ] {
+            assert_eq!(
+                state(
+                    serde_json::json!({"allowed": true, "deadlineMs": deadline}),
+                    0
+                ),
+                SecretClaimState::Expired,
+                "{deadline}"
+            );
+        }
+        // A null `claimedAtMs` is not a claim; any other present value is, even a
+        // falsy one.
+        assert_eq!(
+            state(
+                serde_json::json!({"allowed": true, "deadlineMs": 10, "claimedAtMs": null}),
+                5
+            ),
+            SecretClaimState::Open
+        );
+        for claimed in [
+            serde_json::json!(0),
+            serde_json::json!(false),
+            serde_json::json!(""),
+        ] {
+            assert_eq!(
+                state(
+                    serde_json::json!({"allowed": true, "deadlineMs": 10, "claimedAtMs": claimed}),
+                    5
+                ),
+                SecretClaimState::AlreadyClaimed,
+                "{claimed}"
+            );
+        }
+        // Negative `now` is simply earlier than the deadline.
+        assert_eq!(
+            state(serde_json::json!({"allowed": true, "deadlineMs": 10}), -5),
+            SecretClaimState::Open
+        );
+        // The grant saturates instead of wrapping into the past.
+        let near_max = secret_claim_grant(i64::MAX - 1);
+        assert_eq!(near_max["deadlineMs"], serde_json::json!(i64::MAX));
     }
 }

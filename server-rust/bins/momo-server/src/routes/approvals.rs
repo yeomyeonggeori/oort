@@ -68,7 +68,7 @@ use momo_agent::actions::{
     channel_create_result_body, channel_create_result_rows, channel_member_add_result_body,
     channel_member_add_rows, invite_result_body, invite_result_rows, last_attempt_patch,
     result_client_msg_id, workspace_settings_result_body, ActionResult, ActionResultNext,
-    RequiredRole, ACTION_APPROVED_AUDIT_SCHEMA, ACTION_RESULT_EXECUTED,
+    RequiredRole, SecretDelivery, ACTION_APPROVED_AUDIT_SCHEMA, ACTION_RESULT_EXECUTED,
     ACTION_TYPE_WORKSPACE_ACTION, AUDIT_ACTION_APPROVED, AUDIT_CHANNELS_GRANTED,
     AUDIT_CHANNELS_GRANTED_SCHEMA, AUDIT_CHANNEL_CREATED, AUDIT_CHANNEL_CREATED_SCHEMA,
     AUDIT_CHANNEL_MEMBER_ADDED, AUDIT_CHANNEL_MEMBER_ADDED_SCHEMA, AUDIT_MEMBER_RENAMED,
@@ -153,6 +153,9 @@ const HUMAN_PRINCIPAL_REQUIRED: &str = "human_principal_required";
 /// back exactly as it must, and [`decide`] recognises the sentinel and answers
 /// the receipt-shaped 409 the clients already decode.
 const RUN_NOT_PARKED: &str = "run_not_parked";
+/// `deliverSecretToAgent: true` on a decision that cannot honour it (ADR-0186
+/// 증보 v3 V3-3a). 400, and the approval is not consumed.
+const DELIVER_SECRET_NOT_SUPPORTED: &str = "deliver_secret_not_supported";
 
 /// The sentinel itself. Namespaced and versioned so it cannot collide with a
 /// genuine `sqlx::Error::Protocol` message from the driver.
@@ -366,6 +369,7 @@ async fn decide(
     let claude_subscription_agents_enabled =
         state.agent_port.config.claude_subscription_agents_enabled;
     let operator_scope = has_platform_read_scope(&principal);
+    let deliver_secret_to_agent = request.deliver_secret_to_agent == Some(true);
 
     let outcome: DbRejectable<Decision> = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
@@ -384,6 +388,7 @@ async fn decide(
                     public_origin: public_origin.as_deref(),
                     claude_subscription_agents_enabled,
                     operator_scope,
+                    deliver_secret_to_agent,
                 },
             )
             .await
@@ -460,6 +465,34 @@ struct DecisionInput<'a> {
     /// two ways to satisfy `RequiredRole::WorkspaceOperator`
     /// (`routes::shared::has_platform_read_scope`).
     operator_scope: bool,
+    /// `deliverSecretToAgent` as sent. Only `Some(true)` matters.
+    deliver_secret_to_agent: bool,
+}
+
+/// Whether the action a `workspace_action` payload names offers its one-time
+/// value to the proposing agent **at the approver's choice**
+/// (`SecretDelivery::OptIn`). An unknown or missing id is `false`, so the early
+/// guard refuses.
+fn payload_offers_opt_in_delivery(payload: &Value) -> bool {
+    payload
+        .get("action")
+        .and_then(|action| action.get("id"))
+        .and_then(Value::as_str)
+        .and_then(action_by_id)
+        .is_some_and(|action| action.secret_delivery == SecretDelivery::OptIn)
+}
+
+/// The early `deliverSecretToAgent` guard as a pure function (so its whole truth
+/// table is measurable, including the `OptIn` row no action occupies yet): a
+/// `true` is honoured only when **approving** a **workspace action** whose
+/// registry entry offers `OptIn` delivery (`offers_opt_in`).
+fn deliver_flag_refused(
+    deliver_requested: bool,
+    action_type: &str,
+    approve: bool,
+    offers_opt_in: bool,
+) -> bool {
+    deliver_requested && !(action_type == ACTION_TYPE_WORKSPACE_ACTION && approve && offers_opt_in)
 }
 
 async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRejectable<Decision> {
@@ -545,6 +578,28 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
             "forbidden",
             "not a member of this approval channel",
             StatusCode::FORBIDDEN,
+            now,
+        )));
+    }
+
+    // **`deliverSecretToAgent` is only meaningful on the approve half of a
+    // workspace action** (ADR-0186 증보 v3 V3-3a). Anywhere else it is a
+    // malformed request. Judged straight after the membership gate and *before*
+    // the status and expiry arms, so it can never be outranked by an expiry
+    // settlement (which writes) — a security review (#3795) caught the first
+    // draft placing it after that arm.
+    if deliver_flag_refused(
+        input.deliver_secret_to_agent,
+        &approval.action_type,
+        input.approve,
+        payload_offers_opt_in_delivery(&approval.payload),
+    ) {
+        return Ok(Ok(refusal(
+            approval.id,
+            input.member_id,
+            DELIVER_SECRET_NOT_SUPPORTED,
+            "deliverSecretToAgent applies only to approving a workspace action",
+            StatusCode::BAD_REQUEST,
             now,
         )));
     }
@@ -1142,6 +1197,12 @@ async fn execute_workspace_action(
             now,
         )));
     };
+
+    // `deliverSecretToAgent` was already judged against this very action by the
+    // early guard in `decide_in_tx` (`deliver_flag_refused`), which runs before the
+    // expiry arm; a second copy here could never disagree with it, so there is
+    // none. The slice that first gives an action `SecretDelivery::OptIn` adds the
+    // honoured path *here*, with its own test.
 
     // The stored `args` are re-run through the **same** resolver the proposal
     // passed (`routes::actions::resolve_action_in_tx`), for the reason ADR-0186
@@ -2589,6 +2650,41 @@ fn refusal(
 mod tests {
     use super::*;
 
+    /// `deliverSecretToAgent` truth table (ADR-0186 증보 v3, security review of
+    /// #3795): honoured only when approving a workspace action that offers
+    /// opt-in delivery — every other cell is a refusal. The `offers_opt_in` row
+    /// is exercised here because no registry action occupies it yet.
+    #[test]
+    fn the_deliver_flag_is_honoured_in_exactly_one_cell() {
+        for action_type in [ACTION_TYPE_WORKSPACE_ACTION, "tool_call"] {
+            for approve in [true, false] {
+                for offers in [true, false] {
+                    let honoured = !deliver_flag_refused(true, action_type, approve, offers);
+                    assert_eq!(
+                        honoured,
+                        action_type == ACTION_TYPE_WORKSPACE_ACTION && approve && offers,
+                        "{action_type} approve={approve} offers={offers}"
+                    );
+                    // Not asking is never a refusal.
+                    assert!(!deliver_flag_refused(false, action_type, approve, offers));
+                }
+            }
+        }
+    }
+
+    /// No registry action opts in during P0, so the payload reader says no for
+    /// every real, unknown and absent id.
+    #[test]
+    fn nothing_offers_opt_in_delivery_in_p0() {
+        for payload in [
+            json!({"action": {"id": "invite.create"}}),
+            json!({"action": {"id": "no.such.action"}}),
+            json!({}),
+        ] {
+            assert!(!payload_offers_opt_in_delivery(&payload), "{payload}");
+        }
+    }
+
     /// The refusal body must decode as the receipt the client expects, or a 409
     /// would reach the phone as an unparseable success shape.
     #[test]
@@ -2826,6 +2922,7 @@ mod tests {
             public_origin: None,
             claude_subscription_agents_enabled: false,
             operator_scope: false,
+            deliver_secret_to_agent: false,
         }
     }
 
