@@ -1058,7 +1058,7 @@ describe('오프라인', () => {
     await waitForSettled(() =>
       expect(
         screen.getByTestId(`decision-offline-approval:${PENDING}`),
-      ).toHaveTextContent(/연결이 끊겨 지금은 결정할 수 없어요/),
+      ).toHaveTextContent(/연결이 끊겨 지금은 결정할 수 없습니다/),
     );
     expect(screen.queryByTestId(`inbox-approval-${PENDING}-approve`)).toBeNull();
   });
