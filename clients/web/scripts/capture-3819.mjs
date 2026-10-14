@@ -109,33 +109,6 @@ const APPROVAL_PROPS = {
   },
 };
 
-/** ADR-0186 부록 B 그대로. `next.href` 는 이 클라이언트에 실물이 있는 섹션이다. */
-function actionResultProps(over = {}) {
-  return {
-    "momo.action_result": {
-      v: 1,
-      action_id: "invite.create",
-      status: "executed",
-      approval_id: APPROVAL_ID,
-      decided_by: ME,
-      ref: { type: "invite", id: INVITE_ID },
-      rows: [
-        { label: "역할", value: "member" },
-        { label: "만료", value: "2026-09-29" },
-      ],
-      secret_shown_once: true,
-      // **확정된 계약값** (AX-3b #2549): 서버는 `?section=members` 를 보낸다.
-      // 부록 B 샘플의 `?section=invites` 는 이 클라이언트에 없는 섹션이었고,
-      // 그 값이 오면 어떻게 되는지는 아래 세 번째 카드가 그대로 보여 준다.
-      next: {
-        label: "설정 › 멤버와 초대에서 보기",
-        href: "/settings?section=members",
-      },
-      ...over,
-    },
-  };
-}
-
 /** ADR-0186 부록 C 그대로. 승인 성공에만 실린다. */
 const SECRET_VALUE = "https://oort.example/join?code=Ab3-_xQ7mK";
 
@@ -153,14 +126,6 @@ const DECISION_OK = {
       expiresAtMs: BASE_MS + 604_800_000,
     },
   },
-};
-
-const DECIDED_PROPS = {
-  ...APPROVAL_PROPS,
-  status: "approved",
-  approval_status: "approved",
-  decided_by: ME,
-  decided_at_ms: BASE_MS + 180_000,
 };
 
 const MESSAGES = [
