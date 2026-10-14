@@ -35,8 +35,47 @@ pub enum CoalesceAction {
     MarkTrailing,
     /// Window expired with pending events: fire once.
     Trailing,
+    /// #3822: a tracked `agent_job` arrived inside an open window and the urgent
+    /// minimum gap has passed: fire now instead of waiting for the trailing edge.
+    Urgent,
+    /// #3822: an `agent_job` arrived inside the urgent minimum gap. Nothing is
+    /// consumed; the next poll re-decides (so the job fires as soon as the gap ends).
+    Defer,
     /// Nothing to do.
     Idle,
+}
+
+impl CoalesceAction {
+    /// The ledger edge token (`doorbell_rung.code` prefix), `None` for non-fires.
+    pub fn edge(self) -> Option<&'static str> {
+        match self {
+            CoalesceAction::Leading => Some("leading"),
+            CoalesceAction::Trailing => Some("trailing"),
+            CoalesceAction::Urgent => Some("urgent"),
+            _ => None,
+        }
+    }
+}
+
+/// #3822: tracked work (`agent_job`) must not wait out the message cooldown, but a flood
+/// of jobs must not become a flood of webhooks either: inside an open window a job fires
+/// at most once per `urgent_gap` (the caller passes whether that gap is still running).
+/// Plain message events keep ADR-0171 D4 coalescing unchanged.
+pub fn coalesce_action_with_jobs(
+    new_events: bool,
+    new_job_event: bool,
+    pending_trailing: bool,
+    window_open: bool,
+    urgent_gap_open: bool,
+) -> CoalesceAction {
+    if new_events && new_job_event && window_open {
+        return if urgent_gap_open {
+            CoalesceAction::Defer
+        } else {
+            CoalesceAction::Urgent
+        };
+    }
+    coalesce_action(new_events, pending_trailing, window_open)
 }
 
 /// Leading-edge + trailing coalescing (ADR-0171 D4).
@@ -80,6 +119,8 @@ pub struct DoorbellClaim {
     pub pending_trailing: bool,
     pub window_started_at: Option<DateTime<Utc>>,
     pub inbox_last_seq: i64,
+    /// An `agent_job` inbox event newer than `last_seen_inbox_seq` exists (#3822).
+    pub has_new_job: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -411,7 +452,12 @@ pub async fn claim_doorbell_batch(
          ) \
          SELECT d.workspace_id, d.connection_id, d.url, d.secret_sealed, \
                 d.last_seen_inbox_seq, d.pending_trailing, d.window_started_at, \
-                COALESCE(c.last_seq, 0) AS inbox_last_seq \
+                COALESCE(c.last_seq, 0) AS inbox_last_seq, \
+                EXISTS (SELECT 1 FROM hosted_agent_inbox_event e \
+                         WHERE e.workspace_id = d.workspace_id \
+                           AND e.connection_id = d.connection_id \
+                           AND e.inbox_seq > d.last_seen_inbox_seq \
+                           AND e.event_kind = 'agent_job') AS has_new_job \
            FROM hosted_agent_doorbell d \
            JOIN claimed x ON x.connection_id = d.connection_id \
            LEFT JOIN hosted_agent_inbox_counter c \
@@ -432,6 +478,7 @@ pub async fn claim_doorbell_batch(
             pending_trailing: row.try_get("pending_trailing")?,
             window_started_at: row.try_get("window_started_at")?,
             inbox_last_seq: row.try_get("inbox_last_seq")?,
+            has_new_job: row.try_get("has_new_job")?,
         });
     }
     Ok(out)
@@ -511,6 +558,59 @@ pub async fn record_doorbell_fire_in_tx(
     Ok(())
 }
 
+/// At most this many `doorbell_rung` rows per run (#3822): a run that waits for hours must
+/// not grow its ledger by one row per cooldown.
+pub const DOORBELL_RUNG_PER_RUN_CAP: i64 = 10;
+/// At most this many waiting runs get a row per ring.
+pub const DOORBELL_RUNG_RUNS_PER_RING: i64 = 20;
+
+/// Closed `doorbell_rung.code`: `<edge>_<ok|failed>`. No HTTP status, host or reason
+/// (those stay on `hosted_agent_doorbell.last_status` and the audit log).
+pub fn doorbell_rung_code(edge: &str, delivered: bool) -> String {
+    format!("{edge}_{}", if delivered { "ok" } else { "failed" })
+}
+
+/// Record a ring on every run of this connection's agent that is still waiting to be
+/// claimed (`queued`, no `claimed` row), through `agent_run_event_append` (SECURITY
+/// INVOKER, no lock). Bounded per run and per ring. Returns the rows written.
+pub async fn record_doorbell_rung_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    connection_id: Uuid,
+    edge: &str,
+    delivered: bool,
+) -> Result<u64, DbError> {
+    sqlx::query("SELECT set_config('app.workspace_id', $1::text, true)")
+        .bind(workspace_id.to_string())
+        .execute(&mut *conn)
+        .await?;
+    let code = doorbell_rung_code(edge, delivered);
+    let rows = sqlx::query(
+        "SELECT agent_run_event_append(r.workspace_id, r.id, 'doorbell_rung', NULL, $3, NULL, NULL) \
+           FROM agent_run r \
+           JOIN hosted_agent_connection hc \
+             ON hc.workspace_id = r.workspace_id AND hc.agent_member_id = r.agent_member_id \
+          WHERE r.workspace_id = $1 AND hc.id = $2 \
+            AND r.status = 'queued' \
+            AND NOT EXISTS (SELECT 1 FROM agent_run_event c \
+                             WHERE c.workspace_id = r.workspace_id AND c.run_id = r.id \
+                               AND c.kind = 'claimed') \
+            AND (SELECT count(*) FROM agent_run_event d \
+                  WHERE d.workspace_id = r.workspace_id AND d.run_id = r.id \
+                    AND d.kind = 'doorbell_rung') < $4 \
+          ORDER BY r.created_at DESC \
+          LIMIT $5",
+    )
+    .bind(workspace_id)
+    .bind(connection_id)
+    .bind(code)
+    .bind(DOORBELL_RUNG_PER_RUN_CAP)
+    .bind(DOORBELL_RUNG_RUNS_PER_RING)
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(rows.len() as u64)
+}
+
 /// The payload bytes that leave the process. Typed serialization is forbidden:
 /// a struct round-trip could add an identifier and break D2.
 pub fn doorbell_body() -> &'static [u8] {
@@ -561,6 +661,9 @@ mod tests {
                 }
                 CoalesceAction::MarkTrailing => pending = true,
                 CoalesceAction::Idle => {}
+                CoalesceAction::Urgent | CoalesceAction::Defer => {
+                    unreachable!("coalesce_action never returns the job-only actions")
+                }
             }
             if i == 0 {
                 window_open = true;
@@ -578,6 +681,72 @@ mod tests {
             guarded, 2,
             "removing coalesce_action would fail this assertion"
         );
+    }
+
+    #[test]
+    fn a_job_skips_the_cooldown_but_not_the_urgent_gap() {
+        // window open, a job arrives, the gap has passed -> fire now
+        assert_eq!(
+            coalesce_action_with_jobs(true, true, false, true, false),
+            CoalesceAction::Urgent
+        );
+        // inside the urgent gap -> defer (not consumed, so not lost)
+        assert_eq!(
+            coalesce_action_with_jobs(true, true, false, true, true),
+            CoalesceAction::Defer
+        );
+        // a message-only event keeps ADR-0171 D4: coalesced
+        assert_eq!(
+            coalesce_action_with_jobs(true, false, false, true, false),
+            CoalesceAction::MarkTrailing
+        );
+        // window closed: ordinary leading edge, job or not
+        assert_eq!(
+            coalesce_action_with_jobs(true, true, false, false, false),
+            CoalesceAction::Leading
+        );
+    }
+
+    /// RED of the flood bound: a burst of jobs inside one window must fire at most once
+    /// per urgent gap. The unbounded variant (`Urgent` whenever a job is new) fires per job.
+    #[test]
+    fn a_job_burst_is_bounded_by_the_urgent_gap_not_one_fire_per_job() {
+        let mut fires = 0;
+        let mut gap_open = false;
+        for tick in 0..20 {
+            // 20 ticks, a new job each tick, window open the whole time; the gap closes
+            // every 10th tick (fire resets it).
+            match coalesce_action_with_jobs(true, true, false, true, gap_open) {
+                CoalesceAction::Urgent => {
+                    fires += 1;
+                    gap_open = true;
+                }
+                CoalesceAction::Defer => {}
+                other => panic!("unexpected {other:?}"),
+            }
+            if tick % 10 == 9 {
+                gap_open = false;
+            }
+        }
+        assert_eq!(fires, 2, "unbounded would be 20");
+    }
+
+    #[test]
+    fn the_rung_code_is_a_closed_token_that_fits_the_ledger_check() {
+        for edge in ["leading", "trailing", "urgent"] {
+            for delivered in [true, false] {
+                let code = doorbell_rung_code(edge, delivered);
+                assert!(
+                    !code.is_empty()
+                        && code.len() <= 64
+                        && code
+                            .chars()
+                            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
+                    "{code}"
+                );
+            }
+        }
+        assert_eq!(doorbell_rung_code("urgent", false), "urgent_failed");
     }
 
     #[test]

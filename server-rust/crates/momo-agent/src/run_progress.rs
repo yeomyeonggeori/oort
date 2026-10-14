@@ -187,7 +187,8 @@ pub async fn list_channel_run_progress_base_in_tx(
                   WHERE e.workspace_id = r.workspace_id AND e.run_id = r.id \
                     AND e.kind = 'stage' ORDER BY e.seq DESC LIMIT 1) AS latest_stage, \
                 (SELECT max(e.created_at) FROM agent_run_event e \
-                  WHERE e.workspace_id = r.workspace_id AND e.run_id = r.id) AS last_event_at, \
+                  WHERE e.workspace_id = r.workspace_id AND e.run_id = r.id \
+                    AND e.kind <> 'doorbell_rung') AS last_event_at, \
                 ap.id AS approval_id, ap.expires_at AS approval_expires_at \
            FROM agent_run r \
            LEFT JOIN LATERAL ( \
@@ -360,11 +361,16 @@ pub struct RunEventRow {
 /// The whole ledger of one run (≤ 200 rows), oldest first — or `None` when the run
 /// is not in this workspace or the viewer is not an active member of its channel.
 /// Both are the same `None`, so the answer is no existence oracle (ADR-0200 D3).
+///
+/// `doorbell_rung` rows (ADR-0200 증보 2026-10-14) are returned only when the caller asks
+/// (`include_doorbell`): clients built before that kind reject a ledger with a kind they
+/// do not know, so the default read must stay what they can parse.
 pub async fn list_run_events_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     run_id: Uuid,
     viewer_member_id: Uuid,
+    include_doorbell: bool,
 ) -> Result<Option<Vec<RunEventRow>>, DbError> {
     // `expired`: the run finished past retention, so its ledger answers empty even before
     // the sweep has deleted it (ADR-0200 D2). `None` = not in this workspace / not a member.
@@ -393,11 +399,13 @@ pub async fn list_run_events_in_tx(
                 e.kind, e.stage, e.code, e.approval_id, e.actor_member_id, e.created_at \
            FROM agent_run_event e \
           WHERE e.workspace_id = $1 AND e.run_id = $2 \
+            AND ($3 OR e.kind <> 'doorbell_rung') \
           ORDER BY e.seq ASC \
           LIMIT 200",
     )
     .bind(workspace_id)
     .bind(run_id)
+    .bind(include_doorbell)
     .fetch_all(&mut *conn)
     .await?;
     let mut events = Vec::with_capacity(rows.len());
