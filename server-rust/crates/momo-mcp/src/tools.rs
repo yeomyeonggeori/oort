@@ -757,12 +757,15 @@ pub const TOOL_CATALOG: [ToolDescriptor; 12] = [
         name: TOOL_ACTION_PROPOSE,
         title: "Propose a workspace action",
         description: "Ask a person to approve one workspace change (an invite link, a channel, \
-                      channel members, an agent's name, your own channel reach, or the \
-                      welcome/role-label settings). Name channels and people by name or \
-                      handle, never by id. The proposal parks this run until someone \
-                      decides; it never performs the change. End your turn after proposing: \
-                      the outcome is posted as a line in the channel, which you read on \
-                      your next turn.",
+                      channel members, an agent's name or profile card or picture, bringing \
+                      another agent in, your own channel reach, or the welcome/role-label \
+                      settings). Name channels and people by name or handle, never by id. \
+                      The proposal parks this run until someone decides; it never performs \
+                      the change. End your turn after proposing: the outcome is posted as a \
+                      line in the channel, which you read on your next turn. A link or \
+                      pairing code from an approved proposal comes only from \
+                      oort_action_claim_secret; give it only to the person who asked, in a \
+                      direct message, and never post it in a channel.",
         required_scope: SCOPE_WORKSPACE_PROPOSE,
         schema: action_propose_schema,
     },
@@ -774,7 +777,8 @@ pub const TOOL_CATALOG: [ToolDescriptor; 12] = [
                       to get it (an invite link, or a pairing code). It works one time, \
                       within 30 minutes of the approval, and only for the agent that \
                       proposed it; a second call is refused. Hand the value only to the \
-                      person who asked, and never post it in a channel.",
+                      person who asked, in a direct message, and never post it in a \
+                      channel; keep it in memory for this turn only.",
         required_scope: SCOPE_WORKSPACE_PROPOSE,
         schema: action_claim_secret_schema,
     },
