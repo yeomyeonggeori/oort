@@ -19,6 +19,9 @@ const body = (id: string) => () => createElement("div", { "data-testid": `body-$
 vi.mock("@/features/plugins/PluginSection", () => ({ PluginSection: body("apps") }));
 vi.mock("@/features/settings/WebhookSection", () => ({ WebhookSection: body("incoming") }));
 vi.mock("@/features/settings/EventSubscriptionSection", () => ({ EventSubscriptionSection: body("outgoing") }));
+vi.mock("@/features/hostedAgents/PersonalAssistantsList", () => ({
+  PersonalAssistantsList: body("assistants"),
+}));
 vi.mock("@/features/settings/AgentCredentialsSection", () => ({ AgentCredentialsSection: body("agents") }));
 
 const reactActEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
@@ -64,6 +67,8 @@ describe("외부 연결 목차 (AIH-8)", () => {
   it("다섯 줄: 용어집 이름, 옛 이름 괄호(영어 약자 없음), 열기 링크", async () => {
     reads.input = { apps: OK(2), incoming: OK(1), outgoing: OK(2), externalAgents: OK(1) };
     const el = await mountAt("/");
+    // #3773: 목차 위에 「개인 비서」 목록이 선다(상세 본문이 아니라 목차 머리).
+    expect(el.querySelector('[data-testid="body-assistants"]')).not.toBeNull();
     const rows = [...el.querySelectorAll('[data-testid^="ai-external-row-"]')];
     expect(rows.map((r) => r.querySelector("h3")?.firstChild?.textContent)).toEqual([
       "앱",

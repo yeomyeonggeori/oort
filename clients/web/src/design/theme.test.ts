@@ -221,6 +221,32 @@ describe("appearance storage", () => {
   });
 });
 
+describe("user fonts in appearance storage (#3774)", () => {
+  it("round-trips both font names", () => {
+    const state = { scheme: "dark", accent: "dawn", fontSans: "Pretendard", fontMono: "D2Coding" } as const;
+    expect(parseAppearance(serializeAppearance(state))).toEqual(state);
+  });
+
+  it("omits the keys when no font is set, so old readers see the old shape", () => {
+    expect(serializeAppearance({ scheme: "system", accent: "dawn" })).toBe(
+      '{"scheme":"system","accent":"dawn"}'
+    );
+    expect(parseAppearance('{"scheme":"light","accent":"dawn"}')).toEqual({
+      scheme: "light",
+      accent: "dawn",
+    });
+  });
+
+  it("reads unknown or broken font values as undefined", () => {
+    const parsed = parseAppearance(
+      JSON.stringify({ scheme: "dark", accent: "dawn", fontSans: 'x"; y', fontMono: 7 })
+    );
+    expect(parsed).toEqual({ scheme: "dark", accent: "dawn" });
+    expect(parsed).not.toHaveProperty("fontSans");
+    expect(parsed).not.toHaveProperty("fontMono");
+  });
+});
+
 describe("applyAccent", () => {
   it("stamps data-accent including Dawn", () => {
     const doc = fakeDocument(false);
@@ -252,6 +278,32 @@ describe("the pre-paint boot script mirrors this module", () => {
     const early = BOOT.search(/scheme\s*!==\s*"light"/);
     expect(stamp).toBeGreaterThan(0);
     expect(stamp).toBeLessThan(early);
+  });
+
+  it("applies user fonts with the same names and runs before the scheme early-return (#3774)", () => {
+    for (const name of [
+      "--font-user-sans",
+      "--font-user-mono",
+      "data-font-sans",
+      "data-font-mono",
+      "var(--font-sans)",
+      "var(--font-mono)",
+    ]) {
+      expect(BOOT, name).toContain(name);
+    }
+    expect(BOOT).toContain("parsed.fontSans");
+    expect(BOOT).toContain("parsed.fontMono");
+    const stamp = BOOT.indexOf("FONT_SANS_VAR,");
+    const early = BOOT.search(/scheme\s*!==\s*"light"/);
+    expect(stamp).toBeGreaterThan(0);
+    expect(stamp).toBeLessThan(early);
+  });
+
+  it("is read by the two tokens.css rules and nothing else (#3774)", () => {
+    expect(TOKENS).toContain(":root[data-font-sans] body {");
+    expect(TOKENS).toContain("font-family: var(--font-user-sans);");
+    expect(TOKENS).toContain(":root[data-font-mono] :is(.font-mono, code, pre, kbd, samp) {");
+    expect(TOKENS).toContain("font-family: var(--font-user-mono);");
   });
 
   it("treats only light and dark as scheme pins", () => {

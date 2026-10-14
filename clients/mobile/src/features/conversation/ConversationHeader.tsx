@@ -19,7 +19,7 @@ import {
   type ConvIconName,
 } from '../../design/icons';
 import {usePalette, useStyles} from '../../design/theme';
-import {ds2Radius, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {ds2Radius, font, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {Avatar} from './Avatar';
 import {CONV} from './convDesign';
 
@@ -245,12 +245,12 @@ const buildStyles = (color: Palette) =>
     titleGlyph: {width: CONV.titleGlyph, height: CONV.titleGlyph},
     title: {
       flexShrink: 1,
-      fontSize: CONV.titleSize,
+      fontSize: font.heading,
       fontWeight: '700',
       letterSpacing: CONV.titleTracking,
       color: color.text,
     },
-    subtitle: {fontSize: CONV.subtitleSize, color: color.textMuted},
+    subtitle: {fontSize: font.meta, color: color.textMuted},
     banner: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -267,5 +267,5 @@ const buildStyles = (color: Palette) =>
     bannerDot: {width: space.sm, height: space.sm, borderRadius: space.xs},
     bannerDotWait: {backgroundColor: color.textMuted},
     bannerDotLost: {backgroundColor: color.warn},
-    bannerText: {fontSize: CONV.subtitleSize, color: color.text, fontWeight: '600'},
+    bannerText: {fontSize: font.meta, color: color.text, fontWeight: '600'},
   });

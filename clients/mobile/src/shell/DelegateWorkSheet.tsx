@@ -37,7 +37,6 @@ import {PageSheet, usePageSheetClose} from '../design/PageSheet';
 import {usePalette, useStyles} from '../design/theme';
 import {
   ds2Radius,
-  ds2Type,
   font,
   SAFE_GUTTER,
   space,
@@ -1062,7 +1061,7 @@ const buildStyles = (color: Palette) =>
       justifyContent: 'center',
     },
     trailingLabel: {
-      fontSize: ds2Type.callout,
+      fontSize: font.body,
       fontWeight: '700',
       color: color.text,
     },

@@ -60,8 +60,14 @@ import {
   type RevealedPairingChallenge,
 } from "@momo/core/features/hostedAgents/model";
 import {
+  buildConnectPrompt,
+  buildSwapPrompt,
+} from "@momo/core/features/hostedAgents/connectPrompt";
+import {
   awaitingProof,
+  compactStepNumber,
   confirmStateGate,
+  HOSTED_COMPACT_STEPS,
   hostedLiveMessage,
   hostedStepPurpose,
   hostedSwapRows,
@@ -109,6 +115,12 @@ import {
   hostedPreset,
   hostedRoutineLabel,
   GROK_PAIRING_PURPOSE,
+  GROK_PROMPT_DONE_LABEL,
+  GROK_PROMPT_HEADLINE,
+  GROK_SWAP_DONE_LABEL,
+  GROK_SWAP_HINT,
+  GROK_PROMPT_HINT,
+  GROK_PROMPT_PURPOSE,
   GROK_PAIRING_REVEAL_HEADLINE,
   HOSTED_AUTH_MODE_CHOICES,
   HOSTED_PRESETS,
@@ -541,7 +553,7 @@ function HostedWizardBody({
       : detailLoading
         ? "연결 상태를 불러오는 중이에요."
         : presetId === "grok" && step === "pairing"
-          ? "2단계. 연결 값이 발급됐어요. 그록봇에게 말로 전하세요."
+          ? "1단계. 연결 프롬프트가 만들어졌어요. 복사해 그록봇에게 붙여 넣으세요."
           : hostedLiveMessage(step, connection);
 
   return (
@@ -562,7 +574,10 @@ function HostedWizardBody({
           {HOSTED_WIZARD_LEAD}
         </DialogDescription>
         {screen !== "picker" && screen !== "closed" && (
-          <StepRail current={spec.number} />
+          <StepRail
+            current={preset.id === "grok" ? compactStepNumber(step) : spec.number}
+            compact={preset.id === "grok"}
+          />
         )}
         {/* 상태 전이는 소리로도 알린다. 비밀값은 절대 담기지 않는다. */}
         <p role="status" aria-live="polite" className="sr-only">
@@ -697,7 +712,24 @@ function HostedWizardBody({
             checking={detail.isFetching}
             channelName={approvedChannelName(connection, channelInputs)}
             onRecheck={() => void detail.refetch()}
+            swapPrompt={
+              preset.id === "grok" && endpoint !== null
+                ? {
+                    endpoint,
+                    routineLabel: hostedRoutineLabel(
+                      workspace.data?.name ?? "oort",
+                      agentLabel,
+                      connection.agentMemberId
+                    ),
+                  }
+                : null
+            }
             onDone={() => {
+              // 그록봇: 「붙여 넣었어요」는 값을 바꿨다는 사람의 말이다. 교체 표시를
+              // 따로 한 번 더 누르게 하지 않는다. 실행 표시는 사람의 몫으로 남는다.
+              if (preset.id === "grok") {
+                setSwapTicks((current) => ({ ...current, replace: true }));
+              }
               setIssued(null);
               purgeHostedCredentials(client);
             }}
@@ -809,11 +841,20 @@ function approvedChannelName(
  * 탭이 아니라 목록이다: 사람이 눌러서 이동할 수 있는 자리가 아니고, 다음 단계는
  * 이 화면이 아니라 서버가 연다. 순서가 있는 목록이므로 `ol` 이다.
  */
-function StepRail({ current }: { current: number }) {
+function StepRail({ current, compact = false }: { current: number; compact?: boolean }) {
+  // 그록봇은 프롬프트 한 덩어리로 전하므로 다섯이 아니라 셋이다(#3773, 번호만 묶고
+  // 서버 단계 기계는 그대로).
+  const steps: readonly { id: string; number: number; title: string }[] = compact
+    ? HOSTED_COMPACT_STEPS.map((item) => ({
+        id: `compact-${item.number}`,
+        number: item.number,
+        title: item.title,
+      }))
+    : HOSTED_WIZARD_STEPS;
   return (
-    <nav aria-label="연결 단계" className="pt-2">
+    <nav aria-label="연결 단계" className="pt-2" data-step-count={steps.length}>
       <ol className="flex flex-wrap gap-2">
-        {HOSTED_WIZARD_STEPS.map((step) => {
+        {steps.map((step) => {
           const state =
             step.number === current
               ? "current"
@@ -1159,12 +1200,28 @@ function PairingStep({
     rows.push({ key: "routine 이름", value: routineLabel, token: false });
     rows.push({ key: "routine 지시", value: HOSTED_ROUTINE_TEMPLATE, token: false });
   }
-  return (
-    <div className="flex min-w-0 flex-col gap-6">
-      <StepHeading
-        step="pairing"
-        purpose={grok ? GROK_PAIRING_PURPOSE : undefined}
-      />
+  // 그록봇: 주소·routine·연결 값을 한 덩어리로 복사한다(#3773). 주소를 못 만들면
+  // 덩어리도 없고, 아래 직접 붙여 넣는 길이 사유를 말한다.
+  const promptInput =
+    grok && endpoint !== null
+      ? {
+          endpoint,
+          pairingCredential: pairing.pairingCredential,
+          routineLabel,
+        }
+      : null;
+  const prompt = promptInput
+    ? {
+        value: buildConnectPrompt(promptInput),
+        preview: buildConnectPrompt(promptInput, { reveal: false }),
+        label: "연결 프롬프트 복사",
+        subject: "그록봇에게 전할 연결 프롬프트",
+        hint: GROK_PROMPT_HINT,
+        testId: "hosted-prompt-copy",
+      }
+    : undefined;
+  const manual = (
+    <div className="flex min-w-0 flex-col gap-4">
       <SetupSteps preset={preset} />
       {endpoint && (
         <div className="flex flex-wrap items-center gap-2">
@@ -1184,22 +1241,69 @@ function PairingStep({
           )}
         </div>
       )}
+    </div>
+  );
+  return (
+    <div className="flex min-w-0 flex-col gap-6">
+      <StepHeading
+        step="pairing"
+        purpose={grok ? (prompt ? GROK_PROMPT_PURPOSE : GROK_PAIRING_PURPOSE) : undefined}
+      />
+      {prompt ? (
+        <>
+          {!preset.verified && preset.unverifiedNote && (
+            <p className="break-keep text-meta text-warn" data-testid="hosted-preset-unverified">
+              {preset.unverifiedNote}
+            </p>
+          )}
+        </>
+      ) : (
+        manual
+      )}
       <OneTimeSecretCard
-        headline={grok ? GROK_PAIRING_REVEAL_HEADLINE : PAIRING_REVEAL_HEADLINE}
+        headline={
+          prompt
+            ? GROK_PROMPT_HEADLINE
+            : grok
+              ? GROK_PAIRING_REVEAL_HEADLINE
+              : PAIRING_REVEAL_HEADLINE
+        }
         warning={PAIRING_REVEAL_WARNING}
         notes={
-          grok
-            ? [PAIRING_NATURAL_LANGUAGE_HANDOFF, PAIRING_REVEAL_SCOPE_NOTE]
-            : [PAIRING_REVEAL_SCOPE_NOTE]
+          prompt
+            ? [PAIRING_REVEAL_SCOPE_NOTE]
+            : grok
+              ? [PAIRING_NATURAL_LANGUAGE_HANDOFF, PAIRING_REVEAL_SCOPE_NOTE]
+              : [PAIRING_REVEAL_SCOPE_NOTE]
         }
-        rows={rows}
+        rows={prompt ? undefined : rows}
         secretLabel="연결 값"
         secret={pairing.pairingCredential}
         copyLabel="연결 값 복사"
         expiryLabel={expiry.label}
         onDone={onDone}
+        doneLabel={prompt ? GROK_PROMPT_DONE_LABEL : undefined}
+        prompt={prompt}
         testId="hosted-pairing-card"
       />
+      {prompt && (
+        <details className="flex min-w-0 flex-col gap-3" data-testid="hosted-manual-steps">
+          <summary className="flex min-h-11 cursor-pointer items-center rounded-sm text-meta font-medium text-ink focus-visible:focus-ring active:bg-surface-pressed">
+            직접 붙여 넣는 순서 보기
+          </summary>
+          <div className="mt-2 flex min-w-0 flex-col gap-3">
+            {manual}
+            <KeyValueRows
+              rows={rows.map((row) => ({
+                key: row.key,
+                value: row.value,
+                numeric: row.token,
+                prose: !row.token,
+              }))}
+            />
+          </div>
+        </details>
+      )}
     </div>
   );
 }
@@ -1501,8 +1605,10 @@ function ActivationStep({
   checking,
   channelName,
   onRecheck,
+  swapPrompt,
   onDone,
 }: {
+  swapPrompt: { endpoint: string; routineLabel: string } | null;
   ticks: { replace: boolean; run: boolean };
   onTicks: (next: { replace: boolean; run: boolean }) => void;
   stall: { cause: string; action: string } | null;
@@ -1546,6 +1652,30 @@ function ActivationStep({
           secret={issued.credential}
           copyLabel="자격증명 복사"
           onDone={onDone}
+          doneLabel={swapPrompt ? GROK_SWAP_DONE_LABEL : undefined}
+          prompt={
+            swapPrompt
+              ? {
+                  value: buildSwapPrompt({
+                    endpoint: swapPrompt.endpoint,
+                    activeCredential: issued.credential,
+                    routineLabel: swapPrompt.routineLabel,
+                  }),
+                  preview: buildSwapPrompt(
+                    {
+                      endpoint: swapPrompt.endpoint,
+                      activeCredential: issued.credential,
+                      routineLabel: swapPrompt.routineLabel,
+                    },
+                    { reveal: false }
+                  ),
+                  label: "교체 프롬프트 복사",
+                  subject: "그록봇에게 전할 교체 프롬프트",
+                  hint: GROK_SWAP_HINT,
+                  testId: "hosted-swap-prompt-copy",
+                }
+              : undefined
+          }
           testId="hosted-active-card"
         />
         {!appManaged && (
@@ -1658,7 +1788,7 @@ function WizardActions({
   if (holdingSecret) {
     return (
       <p className="text-meta text-ink-muted" data-testid="hosted-hold-note">
-        값을 옮긴 뒤 저장했어요를 누르면 이어서 진행해요.
+        값을 옮긴 뒤 카드의 마지막 버튼을 눌러 이어가요.
       </p>
     );
   }

@@ -90,10 +90,10 @@ export const ACTION_RESULT_STATUS_LABEL: Readonly<
 export const ACTION_RESULT_STATUS_NOTE: Readonly<
   Record<ActionResultStatus, string>
 > = {
-  executed: "실행을 마쳤습니다.",
-  rejected: "승인하지 않아 실행하지 않았습니다.",
-  expired: "기한이 지나 실행하지 않았습니다.",
-  role_required: "관리자가 승인해야 합니다.",
+  executed: "실행을 마쳤어요.",
+  rejected: "승인하지 않아 실행하지 않았어요.",
+  expired: "기한이 지나 실행하지 않았어요.",
+  role_required: "관리자가 승인해야 해요.",
 };
 
 /**
@@ -103,7 +103,7 @@ export const ACTION_RESULT_STATUS_NOTE: Readonly<
  * 없는 것을 없다고만 하면 사람은 화면이 잃어버렸다고 읽는다.
  */
 export const ACTION_RESULT_SECRET_ONCE_NOTE =
-  "링크는 승인한 사람에게 1회 표시됐습니다. 다시 필요하면 새로 만드세요.";
+  "링크는 승인한 사람에게 1회 표시됐어요. 다시 필요하면 새로 만드세요.";
 
 /** 카드가 그리는 행의 상한. 넘은 것은 개수로 말한다(정직 카운트). */
 export const MAX_ACTION_RESULT_ROWS = 12;

@@ -25,7 +25,7 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import type {OnboardingDots as OnboardingDotsModel} from '@momo/core/features/onboarding/guide';
 
 import {usePalette, useStyles} from '../../design/theme';
-import {TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {font, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {useReduceMotion} from '../../lib/useReduceMotion';
 import {OnboardingCanvas, OnboardingDots} from './KomettoGuide';
 
@@ -47,32 +47,23 @@ export const PHONE_OB = {
   /** `.btn.lg{height:54px;border-radius:14px;font-size:16.5px}` */
   buttonLg: 54,
   buttonLgRadius: 14,
-  buttonLgFont: 16.5,
   /** `.btn{gap:8px;padding:0 18px;font-weight:600}` */
   buttonGap: 8,
   buttonPadH: 18,
-  /** `.btn.ghost{height:36px;font-weight:500}` + `.btn{font-size:15px}` */
-  ghostFont: 15,
   /** `.ic{width:18px;height:18px;stroke-width:1.8}` */
   icon: 18,
   iconStroke: 1.8,
   /** `.spin{width:14px;height:14px;border:2px solid}` */
   spin: 14,
   spinStroke: 2,
-  /** `.sys` 폰 M2 `font-size:14px` */
-  sysFont: 14,
   /** `.link` 줄 `gap:18px;font-size:14px` · `text-underline-offset:3px` */
   linkGap: 18,
-  linkFont: 14,
   /** `.field{gap:6px}` · `.field label{font-size:13px;font-weight:600}` */
   fieldGap: 6,
-  labelFont: 13,
   /** `.input{height:44px;border-radius:10px;padding:0 14px;font-size:15px}` */
   input: 44,
   inputRadius: 10,
   inputPadH: 14,
-  /** `.hint{font-size:12.5px}` */
-  hintFont: 12.5,
   /** `.col{gap:16px}` (D1′ 폼) */
   formGap: 16,
 } as const;
@@ -449,7 +440,7 @@ const buildStyles = (color: Palette) =>
     // 못 누르는 주 행동: 채움을 걷고 옅은 칸으로 둔다(잉크가 서 있으면 눌러도 되는 줄 안다).
     buttonInert: {backgroundColor: color.surfaceMuted, borderWidth: 0},
     buttonLabel: {
-      fontSize: PHONE_OB.buttonLgFont,
+      fontSize: font.body,
       fontWeight: '600',
       textAlign: 'center',
       flexShrink: 1,
@@ -465,7 +456,7 @@ const buildStyles = (color: Palette) =>
     },
     ghostLabel: {
       color: color.textMuted,
-      fontSize: PHONE_OB.ghostFont,
+      fontSize: font.body,
       fontWeight: '500',
     },
     pressedText: {opacity: 0.6},
@@ -478,7 +469,7 @@ const buildStyles = (color: Palette) =>
     link: {minHeight: TOUCH_TARGET, justifyContent: 'center'},
     linkLabel: {
       color: color.textMuted,
-      fontSize: PHONE_OB.linkFont,
+      fontSize: font.label,
       fontWeight: '600',
       textDecorationLine: 'underline',
     },

@@ -246,7 +246,12 @@ describe("AppearanceSection: S3b 컨트롤은 아직 열리지 않는다 (R4)", 
     const host = mount(createElement(AppearanceSection));
     const groups = [...host.querySelectorAll("fieldset")].map((f) => f.getAttribute("data-testid"));
     expect(groups).toEqual(["theme-choice", "accent-choice", "link-preview-choice"]);
-    expect(host.querySelector('[role="switch"], input[type="range"], input[type="text"], select')).toBeNull();
+    expect(host.querySelector('[role="switch"], input[type="range"], input[type="text"]:not([data-testid^="font-"]), select')).toBeNull();
+    // 글꼴(#3774)은 이름 입력 두 칸까지만 연다.
+    expect([...host.querySelectorAll('input[type="text"]')].map((i) => i.getAttribute("data-testid"))).toEqual([
+      "font-sans-input",
+      "font-mono-input",
+    ]);
     for (const closed of ["density", "font-size", "glass", "palette", "hex"]) {
       expect(host.querySelector(`[data-testid*="${closed}"]`), closed).toBeNull();
     }

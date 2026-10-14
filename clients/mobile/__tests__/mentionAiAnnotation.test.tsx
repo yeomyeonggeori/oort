@@ -14,6 +14,7 @@ import {
   mentionRowHeight,
   mentionSheetMaxHeight,
 } from '../src/features/conversation/Composer';
+import {line} from '../src/design/tokens';
 import {__setNonSecretStore} from '../src/storage/kv';
 
 // =============================================================================
@@ -230,8 +231,8 @@ describe('멘션 시트 높이 — 두 줄 행에 맞춘 산식', () => {
   });
 
   it('보조 줄 행은 이름 한 줄 + 보조 줄 + 여백이고 바닥은 엄지 44다', () => {
-    // (15 + 17 × 2) × 1 + 8 = 57
-    expect(mentionRowHeight(1, true)).toBe(57);
+    // (line.head 15 + line.meta 16 × 2) × 1 + 8 = 55
+    expect(mentionRowHeight(1, true)).toBe(line.head + line.meta * 2 + 8);
     expect(mentionRowHeight(1, true)).toBeGreaterThan(mentionRowHeight(1, false));
     // 줄 수가 1 로 줄면 행도 준다 — 글자가 커져도 행이 두 줄로 부풀지 않는다.
     expect(mentionAnnotationLines(1.3)).toBe(2);
@@ -263,7 +264,7 @@ describe('멘션 시트 높이 — 두 줄 행에 맞춘 산식', () => {
   });
 
   it('기준 창(874pt · 기본 크기)에서 두 줄 행 시트는 세 행이다', () => {
-    expect(mentionSheetMaxHeight(1, H, true)).toBe(3 * 57);
+    expect(mentionSheetMaxHeight(1, H, true)).toBe(3 * (line.head + line.meta * 2 + 8));
   });
 
   it('시트가 실제로 칠하는 maxHeight 가 이 산식이다 — 보조 줄이 있을 때만', () => {
@@ -347,7 +348,7 @@ describe('입력창 위 한 줄 — 답하지 않을 에이전트를 부르는 �
     for (const fs of [1, 2.143, 3.143, 3.571]) {
       for (const h of [812, 874, 956]) {
         const b = composerColumnBudget(fs, h);
-        const noticeMax = 2 * 17 * fs; // 두 줄 × line.meta × 글자 배수
+        const noticeMax = 2 * line.meta * fs; // 두 줄 × line.meta × 글자 배수
         expect(b.composer + b.dockChrome + noticeMax).toBeLessThanOrEqual(b.column);
       }
     }

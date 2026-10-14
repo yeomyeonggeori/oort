@@ -27,7 +27,7 @@ import {
 } from '@momo/core/features/onboarding/guide';
 
 import {useStyles} from '../../design/theme';
-import {ds2Type, type Palette} from '../../design/tokens';
+import {type Palette, font} from '../../design/tokens';
 import {useReduceMotion} from '../../lib/useReduceMotion';
 import {KOMETTO_EXPRESSION_ASSETS} from './komettoExpressions';
 
@@ -342,14 +342,14 @@ const buildStyles = (color: Palette) =>
     badge: {boxShadow: color.elevationFloat},
     line: {
       color: color.text,
-      fontSize: ds2Type.body,
+      fontSize: font.body,
       fontWeight: '600',
       letterSpacing: -0.16,
     },
     detail: {
       marginTop: ONBOARDING.detailGap,
       color: color.textMuted,
-      fontSize: ds2Type.subhead,
+      fontSize: font.label,
     },
     center: {textAlign: 'center'},
     dots: {

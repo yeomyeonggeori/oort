@@ -12,6 +12,7 @@ import {
   space,
   TOUCH_TARGET,
 } from '../src/design/tokens';
+import {CONV} from '../src/features/conversation/convDesign';
 import {PILL_HEIGHT} from '../src/features/conversation/JumpPill';
 
 // =============================================================================
@@ -227,9 +228,9 @@ describe('타이포 축', () => {
    * 역할 이름과 값이 **둘 다** 맞는 유일한 짝.
    *
    * 웹 `--text-title`(16px)과 폰 `font.body`(16)도 값이 같지만 그것은 우연이다 —
-   * 한쪽은 표면 제목이고 한쪽은 본문이라 뜻이 다르고, 폰의 16 은 iOS 입력창이 줌을
-   * 멈추는 크기에서 왔다(`tokens.ts` 의 `font` 주석). 우연을 짝으로 적으면 웹이 제목
-   * 크기를 바꾸는 날 폰 본문이 함께 끌려간다.
+   * 한쪽은 표면 제목이고 한쪽은 본문이라 뜻이 다르고, 폰의 16 은 iOS Body(17)보다 한 단
+   * 작은 메신저 밀도에서 왔다(`tokens.ts` 의 `font` 주석). 우연을 짝으로 적으면 웹이
+   * 제목 크기를 바꾸는 날 폰 본문이 함께 끌려간다.
    */
   const TYPE_PAIRS: ReadonlyArray<readonly [keyof typeof font, string]> = [
     ['meta', 'meta'],
@@ -248,24 +249,23 @@ describe('타이포 축', () => {
     const pairedPhone = new Set<string>(TYPE_PAIRS.map(([key]) => key));
     const pairedWeb = new Set<string>(TYPE_PAIRS.map(([, role]) => role));
     expect(Object.keys(font).filter(key => !pairedPhone.has(key)).sort()).toEqual(
-      ['body', 'display', 'heading', 'label', 'title'],
+      ['body', 'caption', 'display', 'heading', 'label', 'title'],
     );
     expect(
       Object.keys(WEB_TEXT)
         .filter(role => !pairedWeb.has(role))
         .sort(),
-    ).toEqual(['body', 'display', 'timestamp', 'title']);
+    ).toEqual(['body', 'code', 'display', 'heading', 'label', 'timestamp', 'title']);
   });
 
-  it('폰 본문이 iOS 입력창 줌 문턱 위에 있다', () => {
-    // `tokens.ts` 가 이 값의 이유를 적어 두었다: *"Body is 16 because that is the
-    // size iOS stops zooming text fields at, and a login form that zooms on focus
-    // is the first thing a person meets."* 산문으로만 있던 그 문턱을 여기서 잰다 —
-    // 웹의 본문(14px)에 「맞추는」 정렬이 이 값을 15 로 내리면 로그인 폼이 줌한다.
+  it('폰 본문이 16 아래로 내려가지 않는다', () => {
+    // 16 은 iOS Body(17)보다 한 단 작은 메신저 밀도다. 「입력창 줌 문턱」은 Safari/WebView
+    // 규칙이라 RN `TextInput` 에는 적용되지 않으므로 그것은 이유가 아니다. 웹 본문(14)에
+    // 「맞추는」 정렬이 이 값을 내리지 못하게 하한만 잡는다.
     expect(font.body).toBeGreaterThanOrEqual(16);
   });
 
-  it('크기 여섯 단이 겹치지 않고 내려간다', () => {
+  it('크기 일곱 단이 겹치지 않고 내려간다', () => {
     const ranks = [
       font.display,
       font.title,
@@ -273,6 +273,7 @@ describe('타이포 축', () => {
       font.body,
       font.label,
       font.meta,
+      font.caption,
     ];
     for (let index = 1; index < ranks.length; index += 1) {
       expect(ranks[index]).toBeLessThan(ranks[index - 1]);
@@ -293,6 +294,11 @@ describe('타이포 축', () => {
       ['meta', 'meta'],
       ['label', 'label'],
       ['body', 'body'],
+      ['caption', 'caption'],
+      ['heading', 'heading'],
+      ['title', 'title'],
+      ['display', 'display'],
+      ['code', 'meta'],
     ];
 
   it.each(LINE_FOR)('line.%s 가 font.%s 보다 크다', (lineKey, fontKey) => {
@@ -306,8 +312,35 @@ describe('타이포 축', () => {
     expect(line.head).toBeLessThan(line.label);
   });
 
-  it('줄 상자 네 단이 겹치지 않고 올라간다', () => {
-    const ranks = [line.head, line.meta, line.label, line.body];
+  it('역할 표(§3.3)의 줄 높이가 그대로다', () => {
+    // #3774 승인표: 본문 16/23 (22 → 23), meta 12/16, caption 11/14, 코드 12/17.
+    expect({
+      display: line.display,
+      title: line.title,
+      heading: line.heading,
+      body: line.body,
+      label: line.label,
+      meta: line.meta,
+      caption: line.caption,
+      code: line.code,
+    }).toEqual({display: 36, title: 28, heading: 22, body: 23, label: 18, meta: 16, caption: 14, code: 17});
+    expect({
+      display: font.display,
+      title: font.title,
+      heading: font.heading,
+      body: font.body,
+      label: font.label,
+      meta: font.meta,
+      caption: font.caption,
+    }).toEqual({display: 30, title: 22, heading: 17, body: 16, label: 13, meta: 12, caption: 11});
+  });
+
+  it('본문 줄 높이가 하나다 — CONV.bodyLine 이 line.body 와 갈라지지 않는다', () => {
+    expect(CONV.bodyLine).toBe(line.body);
+  });
+
+  it('줄 상자 단이 겹치지 않고 올라간다', () => {
+    const ranks = [line.caption, line.head, line.meta, line.code, line.label, line.heading, line.body, line.title, line.display];
     for (let index = 1; index < ranks.length; index += 1) {
       expect(ranks[index]).toBeGreaterThan(ranks[index - 1]);
     }
@@ -472,18 +505,24 @@ describe('간격 스윕 — 격자 밖 여백이 늘지 않는다', () => {
   });
 });
 
-describe('타이포 스윕 — 스케일 밖 글자와 줄 상자가 늘지 않는다', () => {
+describe('타이포 스윕 — 글자 크기·굵기는 역할 표에서만 나온다', () => {
   /**
-   * 오늘의 잔량 (`fontSize`).
+   * `fontSize:` 의 값은 `font.<역할>` 이어야 한다 (#3774). 숫자 리터럴도, `CONV.x` 같은
+   * 모듈별 크기 상수도 실패다 — 후자가 17·15·12.5 같은 반단 값을 몰래 들여온 경로였다.
+   * 허용 목록은 짧고, 각 줄이 근거를 든다. 줄어드는 것은 언제나 통과한다.
    *
-   *   `atoms.tsx` 30 · `MessageActionSheet.tsx` 24  빈 상태의 큰 글리프.
-   *   `MessageRow.tsx` 10·11  아바타 이니셜과 오버플로 표식 — 글자가 아니라 도형에
-   *                           가까운 자리다.
+   *   `atoms.tsx` 1          `backGlyph` 30 — 뒤로 가기 셰브런 **글리프**(글자가 아니라 도형).
+   *   `MessageActionSheet` 1 `reactionGlyph` 24 — 이모지 한 글자의 도형 크기.
+   *   `Avatar.tsx` 1         이니셜은 `font.label` 을 아바타 크기에 비례해 줄인다(계산식).
+   *   `ConnectScreen.tsx` 2  `WELCOME.wordmark` 36 (로고 글자 — 역할 표에 없는 마크 크기)와
+   *                          `SAS.digit` 40 (두 화면이 소리 내어 맞춰 보는 숫자 — `display`
+   *                          30 보다 한 단 위가 의도다, `font.display` 주석).
    */
   const FONT_REMAINING: Readonly<Record<string, number>> = {
     'design/atoms.tsx': 1,
     'features/conversation/MessageActionSheet.tsx': 1,
-    'features/conversation/MessageRow.tsx': 2,
+    'features/conversation/Avatar.tsx': 1,
+    'screens/ConnectScreen.tsx': 2,
   };
 
   /**
@@ -495,18 +534,46 @@ describe('타이포 스윕 — 스케일 밖 글자와 줄 상자가 늘지 않�
     'design/atoms.tsx': 3,
     'features/conversation/MessageActionSheet.tsx': 2,
     'features/conversation/MessageEditorSheet.tsx': 2,
-    'features/conversation/TypingBar.tsx': 1,
     'screens/AgentDetailScreen.tsx': 2,
     'screens/InboxScreen.tsx': 1,
     'screens/SearchScreen.tsx': 1,
   };
 
-  it('스케일 밖 fontSize 가 잔량 안에 있다', () => {
-    const scale = new Set<number>(Object.values(font));
+  it('fontSize 가 font.<역할> 이 아닌 자리가 허용 목록 안에 있다', () => {
     expectWithinRemaining(
-      sweep(/\bfontSize:\s*(\d+)/, found => !scale.has(Number(found[1]))),
+      sweep(/\bfontSize:\s*([^,}\n]+)/, found => !/^font\.[a-z]+$/.test(found[1].trim())),
       FONT_REMAINING,
     );
+  });
+
+  it("fontWeight '800' 은 어디에도 없다 (#3774: 굵기는 600/700)", () => {
+    expectWithinRemaining(sweep(/\bfontWeight:\s*['"]800['"]/, () => true), {});
+  });
+
+  it('maxFontSizeMultiplier 는 atoms.tsx 의 이름 상수만 쓴다', () => {
+    // 상한이 여기저기 숫자로 흩어지면 「크롬만 상한, 본문은 없음」 정책을 못 읽는다.
+    const atoms = fs.readFileSync(path.join(SRC_DIR, 'design/atoms.tsx'), 'utf8');
+    const exported = new Set(
+      [...atoms.matchAll(/export const ([A-Z_]+_SCALE)\b/g)].map(found => found[1]),
+    );
+    expect([...exported].sort()).toEqual([
+      'AVATAR_INITIAL_MAX_SCALE',
+      'BAR_CONTROL_MAX_SCALE',
+      'FOLDED_MAX_SCALE',
+      'HEAD_MAX_SCALE',
+      'SAS_MAX_SCALE',
+      'STACK_PILL_SCALE',
+    ]);
+    const stray = sweep(
+      /\bmaxFontSizeMultiplier=\{([^}]+)\}/,
+      // `cond ? BAR_CONTROL_MAX_SCALE : undefined` 도 허용 — 이름 상수만 든 식이면 된다.
+      found => {
+        const names = found[1].match(/[A-Z][A-Z_]*_SCALE/g) ?? [];
+        const bareNumber = /(?<![\w.])\d/.test(found[1]);
+        return bareNumber || names.length === 0 || names.some(name => !exported.has(name));
+      },
+    );
+    expect(stray.counts).toEqual({});
   });
 
   it('스케일 밖 lineHeight 가 잔량 안에 있다', () => {

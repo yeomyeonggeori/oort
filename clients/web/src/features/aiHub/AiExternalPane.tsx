@@ -15,11 +15,13 @@ import {
   type AiExternalRowId,
 } from "@momo/core/features/ai/aiHubModel";
 import { CHIP_CLASS } from "@/features/common/chip";
+import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
 import { PluginSection } from "@/features/plugins/PluginSection";
 import { AgentCredentialsSection } from "@/features/settings/AgentCredentialsSection";
 import { EventSubscriptionSection } from "@/features/settings/EventSubscriptionSection";
 import { SectionHeadingContext } from "@/features/settings/SettingsFields";
 import { WebhookSection } from "@/features/settings/WebhookSection";
+import { PersonalAssistantsList } from "@/features/hostedAgents/PersonalAssistantsList";
 import { HUB_CHIP_TONE } from "./AiHubOverview";
 import type { ChipTone, ExternalInput, Read } from "./aiHubOverviewModel";
 import { useExternalReads } from "./useAiHubOverview";
@@ -120,6 +122,7 @@ function Index() {
   return (
     <div className="flex min-w-0 flex-col">
       <PaneHead />
+      {isSurfaceProvided("hostedAgentPairing") && <PersonalAssistantsList className="mb-8" />}
       <ul className="flex min-w-0 flex-col" aria-label={glossaryEntry("externalConnection").term}>
         {AI_EXTERNAL_ROWS.map((row) => (
           <RowItem key={row.id} row={row} input={input} hostedBots={hostedBots} restoreFocus={from === row.id} />

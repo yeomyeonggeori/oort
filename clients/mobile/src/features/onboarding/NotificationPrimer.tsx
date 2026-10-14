@@ -18,7 +18,7 @@ import React, {useCallback, useState} from 'react';
 import {Image, StyleSheet, Text, View} from 'react-native';
 
 import {useStyles} from '../../design/theme';
-import type {Palette} from '../../design/tokens';
+import {font, type Palette} from '../../design/tokens';
 import {usePushPrompt} from '../../push/PushProvider';
 import {KomettoGuide, OnboardingCanvas} from './KomettoGuide';
 import {
@@ -50,9 +50,6 @@ const NOTIF = {
   /** `.notif img{width:38px;height:38px;border-radius:9px}` */
   icon: 38,
   iconRadius: 9,
-  /** `.notif .t{font-size:13.5px;line-height:1.4}` · `b span{font-size:12px}` */
-  font: 13.5,
-  time: 12,
 } as const;
 
 export function NotificationPrimer({
@@ -165,12 +162,12 @@ const buildStyles = (color: Palette) =>
       justifyContent: 'space-between',
       alignItems: 'baseline',
     },
-    notifTitle: {color: color.text, fontSize: NOTIF.font, fontWeight: '600'},
-    notifTime: {color: color.textMuted, fontSize: NOTIF.time},
-    notifBody: {color: color.text, fontSize: NOTIF.font},
+    notifTitle: {color: color.text, fontSize: font.label, fontWeight: '600'},
+    notifTime: {color: color.textMuted, fontSize: font.meta},
+    notifBody: {color: color.text, fontSize: font.label},
     hint: {
       color: color.textMuted,
-      fontSize: PHONE_OB.hintFont,
+      fontSize: font.meta,
       textAlign: 'center',
     },
   });

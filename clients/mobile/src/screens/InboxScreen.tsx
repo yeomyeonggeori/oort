@@ -41,7 +41,7 @@ import {
   ScreenHeader,
 } from '../design/atoms';
 import {useRefreshControl} from '../design/refresh';
-import {ds2Radius, ds2Type, font, line, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../design/tokens';
+import {ds2Radius, font, line, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../design/tokens';
 import {useStyles} from '../design/theme';
 import {
   ApprovalDecision,
@@ -869,7 +869,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: color.primary,
   },
-  tabCountLabel: {fontSize: ds2Type.badge, fontWeight: '800', color: color.onPrimary},
+  tabCountLabel: {fontSize: font.caption, fontWeight: '700', color: color.onPrimary},
   tabLabel: {fontSize: font.label, color: color.textMuted},
   tabLabelActive: {color: color.text, fontWeight: '600'},
   listContent: {paddingBottom: space.lg},

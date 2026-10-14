@@ -29,7 +29,7 @@ import { describe, expect, it } from "vitest";
  * 어디서 재나(두 축을 따로):
  *   - 좁은 창 375px, 마우스: `width < 600px` 갈래
  *   - 넓은 창 1024px, 손가락(`hasTouch`): `hover: none` 갈래(아이패드)
- *   - 넓은 창 1280px, 마우스: 대조군. 데스크탑 밀도(14px)는 그대로여야 한다. 이 칸이
+ *   - 넓은 창 1280px, 마우스: 대조군. 데스크탑 밀도(컨트롤 14px, 컴포저·본문 15px)는 그대로여야 한다. 이 칸이
  *     없으면 「어디서나 16px」도 초록이 된다.
  *
  * 엔진: WebKit(사파리의 엔진)과 Chromium 중 설치된 것 전부. 둘 다 없으면 경고를 남기고
@@ -127,23 +127,23 @@ function fields(): Field[] {
   const real: Field[] = [
     { label: "Input 프리미티브", tag: "input", classes: primitiveClasses("design/ui/input.tsx"), widePx: 14 },
     { label: "Select 프리미티브", tag: "select", classes: primitiveClasses("design/ui/select.tsx"), widePx: 14 },
-    { label: "채널 컴포저", tag: "textarea", classes: textareaClasses("features/chat/Composer.tsx"), widePx: 14 },
-    { label: "스레드 컴포저", tag: "textarea", classes: textareaClasses("features/timeline/ThreadComposer.tsx"), widePx: 14 },
-    { label: "메시지 편집기", tag: "textarea", classes: textareaClasses("features/timeline/MessageEditor.tsx"), widePx: 14 },
+    { label: "채널 컴포저", tag: "textarea", classes: textareaClasses("features/chat/Composer.tsx"), widePx: 15 },
+    { label: "스레드 컴포저", tag: "textarea", classes: textareaClasses("features/timeline/ThreadComposer.tsx"), widePx: 15 },
+    { label: "메시지 편집기", tag: "textarea", classes: textareaClasses("features/timeline/MessageEditor.tsx"), widePx: 15 },
   ];
   const bare: Field[] = (["input", "textarea", "select"] as const).map((tag) => ({
     label: `클래스 없는 ${tag}`,
     tag,
     classes: "",
     parent: "text-body",
-    widePx: 14,
+    widePx: 15,
   }));
   const adornment: Field = {
     label: "핸들 칸의 @ 표식",
     tag: "span",
     classes: adornmentClasses("features/profile/shared/HandleField.tsx"),
     parent: "text-body",
-    widePx: 14,
+    widePx: 15,
   };
   return [...roleFields, ...real, ...bare, adornment];
 }
