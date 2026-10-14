@@ -423,12 +423,16 @@ fn decode_projection(row: &sqlx::postgres::PgRow) -> Result<DoorbellProjection, 
 
 /// Claim doorbells that have new inbox events or an expired trailing window.
 ///
+/// `urgent_gap_ms` keeps a connection whose only news is a job inside the urgent gap out of the
+/// claim set altogether (the sender would `Defer` it without consuming anything, and a batch of
+/// such rows would be re-claimed in a hot loop, starving the connections behind them).
 /// `cooldown_ms` is the D4 window. The sender re-checks `window_open` in
 /// process because the SQL prefilter is a wake set, not the decision.
 pub async fn claim_doorbell_batch(
     conn: &mut PgConnection,
     batch_size: i64,
     cooldown_ms: i64,
+    urgent_gap_ms: i64,
 ) -> Result<Vec<DoorbellClaim>, sqlx::Error> {
     let rows = sqlx::query(
         "WITH claimed AS ( \
@@ -445,6 +449,14 @@ pub async fn claim_doorbell_batch(
                          d.window_started_at IS NULL \
                       OR d.window_started_at <= now() - ($2::bigint * interval '1 millisecond') \
                    )) \
+                ) \
+                AND NOT ( \
+                      COALESCE(d.window_started_at > now() - ($3::bigint * interval '1 millisecond'), false) \
+                  AND EXISTS (SELECT 1 FROM hosted_agent_inbox_event je \
+                               WHERE je.workspace_id = d.workspace_id \
+                                 AND je.connection_id = d.connection_id \
+                                 AND je.inbox_seq > d.last_seen_inbox_seq \
+                                 AND je.event_kind = 'agent_job') \
                 ) \
               ORDER BY d.connection_id \
               FOR UPDATE OF d SKIP LOCKED \
@@ -465,6 +477,7 @@ pub async fn claim_doorbell_batch(
     )
     .bind(batch_size)
     .bind(cooldown_ms)
+    .bind(urgent_gap_ms)
     .fetch_all(&mut *conn)
     .await?;
     let mut out = Vec::with_capacity(rows.len());

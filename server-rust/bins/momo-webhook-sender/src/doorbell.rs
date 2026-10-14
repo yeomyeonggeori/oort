@@ -52,9 +52,20 @@ impl<T: DoorbellTransport> DoorbellWorker<T> {
             return Ok(DoorbellDrainStats::default());
         }
         let cooldown_ms = self.config.doorbell_cooldown.as_millis() as i64;
+        // never longer than the cooldown: a gap past the window would hold back a plain leading edge
+        let urgent_gap = self
+            .config
+            .doorbell_urgent_gap
+            .min(self.config.doorbell_cooldown);
+        let urgent_gap_ms = urgent_gap.as_millis() as i64;
         let mut tx = self.pool.begin().await.map_err(DbError::from)?;
-        let claims =
-            claim_doorbell_batch(&mut tx, self.config.claim_batch_size, cooldown_ms).await?;
+        let claims = claim_doorbell_batch(
+            &mut tx,
+            self.config.claim_batch_size,
+            cooldown_ms,
+            urgent_gap_ms,
+        )
+        .await?;
         let mut stats = DoorbellDrainStats {
             claimed: claims.len(),
             ..DoorbellDrainStats::default()
@@ -128,7 +139,11 @@ impl<T: DoorbellTransport> DoorbellWorker<T> {
                     total.skipped += stats.skipped;
                     total.urgent += stats.urgent;
                     total.deferred += stats.deferred;
-                    if (stats.claimed as i64) < self.config.claim_batch_size {
+                    // a pass that consumed nothing would be identical to the next one: wait for the
+                    // next poll instead of spinning on rows that are being held back
+                    if (stats.claimed as i64) < self.config.claim_batch_size
+                        || stats.fired + stats.failed + stats.coalesced == 0
+                    {
                         return total;
                     }
                 }

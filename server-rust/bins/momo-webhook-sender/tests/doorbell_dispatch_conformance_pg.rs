@@ -695,9 +695,10 @@ async fn a_burst_of_jobs_rings_once_per_urgent_gap_and_loses_none() {
     for _ in 0..5 {
         append_job(&pool, &hosted).await;
     }
-    // window just opened (gap running): all five are deferred, none consumed
+    // window just opened (gap running): the five jobs are held back (not even claimed) and
+    // none is consumed
     let held = worker.drain_once().await.expect("held");
-    assert_eq!((held.fired, held.deferred), (0, 1), "{held:?}");
+    assert_eq!((held.claimed, held.fired), (0, 0), "{held:?}");
     let again = worker.drain_once().await.expect("held again");
     assert_eq!(again.fired, 0, "RED: one fire per job would be 5");
     assert_eq!(transport.rings.load(Ordering::SeqCst), 1);
@@ -881,4 +882,93 @@ async fn a_ring_never_marks_another_connections_or_workspaces_run() {
         rung_codes(&pool, other_run).await.is_empty(),
         "RED: dropping the connection/workspace join would mark it"
     );
+}
+
+/// Security review H-1: connections whose only news is a job inside the urgent gap are not
+/// claimed at all. Without that, a full batch of them is re-claimed on every pass (nothing is
+/// consumed), so the drain spins and the connections behind them starve.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn connections_held_back_by_the_urgent_gap_do_not_spin_the_drain_or_starve_others() {
+    ensure_schema();
+    let pool = superuser_pool().await;
+    sqlx::query("DELETE FROM hosted_agent_doorbell")
+        .execute(&pool)
+        .await
+        .expect("isolate doorbells");
+    let sealed = seal_doorbell_secret(DOORBELL_SECRET, TEST_MASTER_KEY).expect("seal");
+    let transport = RecordingTransport::new();
+    let worker = worker(pool.clone(), transport.clone(), true);
+
+    let batch = 16;
+    let mut held = Vec::new();
+    for _ in 0..batch + 2 {
+        let hosted = seed_hosted(&pool).await;
+        sqlx::query(
+            "INSERT INTO hosted_agent_doorbell \
+               (workspace_id, connection_id, url, secret_sealed, secret_masked, registered_by, \
+                window_started_at) \
+             VALUES ($1,$2,'https://example.com/hook',$3,'••••alue',$4, now())",
+        )
+        .bind(hosted.workspace)
+        .bind(hosted.connection)
+        .bind(&sealed)
+        .bind(hosted.human)
+        .execute(&pool)
+        .await
+        .expect("doorbell");
+        append_job(&pool, &hosted).await;
+        held.push(hosted);
+    }
+
+    let held_pass = worker.drain_once().await.expect("held pass");
+    assert_eq!(
+        (held_pass.claimed, held_pass.fired),
+        (0, 0),
+        "RED: claiming the held rows is what spins the drain: {held_pass:?}"
+    );
+    let total = worker.drain_to_empty().await;
+    assert_eq!(total.fired, 0, "{total:?}");
+    assert_eq!(transport.rings.load(Ordering::SeqCst), 0);
+
+    // the gap ends for all of them: each gets exactly one ring (the batch loops, no starvation)
+    sqlx::query(
+        "UPDATE hosted_agent_doorbell SET window_started_at = now() - interval '11 seconds'",
+    )
+    .execute(&pool)
+    .await
+    .expect("age");
+    let total = worker.drain_to_empty().await;
+    assert_eq!(
+        (total.fired, total.urgent),
+        (batch as usize + 2, batch as usize + 2),
+        "{total:?}"
+    );
+    assert_eq!(transport.rings.load(Ordering::SeqCst), batch as usize + 2);
+}
+
+/// Security review L-4: one ring marks at most DOORBELL_RUNG_RUNS_PER_RING waiting runs.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn one_ring_marks_at_most_twenty_waiting_runs() {
+    ensure_schema();
+    let pool = superuser_pool().await;
+    let hosted = seed_hosted(&pool).await;
+    register_doorbell(&pool, &hosted).await;
+    let transport = RecordingTransport::new();
+    let worker = worker(pool.clone(), transport.clone(), true);
+    let mut runs = Vec::new();
+    for _ in 0..25 {
+        runs.push(append_job(&pool, &hosted).await);
+    }
+    assert_eq!(worker.drain_once().await.expect("leading").fired, 1);
+    let marked: i64 = sqlx::query_scalar(
+        "SELECT count(DISTINCT run_id) FROM agent_run_event \
+          WHERE workspace_id=$1 AND kind='doorbell_rung'",
+    )
+    .bind(hosted.workspace)
+    .fetch_one(&pool)
+    .await
+    .expect("count");
+    assert_eq!(marked, momo_webhook::DOORBELL_RUNG_RUNS_PER_RING);
 }
