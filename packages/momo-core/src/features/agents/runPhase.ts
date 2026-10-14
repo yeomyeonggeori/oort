@@ -2,6 +2,7 @@ import type {
   AgentRunPhase,
   AgentRunProgress,
 } from "../../lib/api";
+import { runTookText, runWorkingText, spanText } from "./runDuration";
 import type {
   AgentTurnState,
   AgentWorkingSignal,
@@ -70,6 +71,10 @@ export function serverFactsOf(progress: AgentRunProgress): ServerRunFacts {
       ? { approvalExpiresAtMs: progress.approvalExpiresAtMs }
       : {}),
     ...(progress.endReason !== undefined ? { endReason: progress.endReason } : {}),
+    ...(progress.startedAtMs !== undefined ? { startedAtMs: progress.startedAtMs } : {}),
+    ...(progress.finishedAtMs !== undefined
+      ? { finishedAtMs: progress.finishedAtMs }
+      : {}),
   };
 }
 
@@ -184,10 +189,10 @@ export function runPhaseLabel(facts: ServerRunFacts): string {
 /**
  * 라벨 옆에 붙는 한 줄(근거). 서버가 알려 준 사실만 쓴다.
  *
- *   queued   「n분째 기다려요 · 에이전트 앞에 m건」
+ *   queued   「n초째 기다려요 · 에이전트 앞에 m건」(초부터 센다)
  *   claimed  「n분 전에 가져감」, lease가 만료됐으면 「가져간 뒤 n분째 소식이 없어요」
- *   running  「마지막 보고 n분 전」
- *   끝       종료 사유 문장
+ *   running  「12분째 · 마지막 보고 1분 전」(`runDuration.runWorkingText`)
+ *   끝       「3분 12초 걸림」 + 종료 사유 문장(`runDuration.runTookText`)
  *
  * lease 만료는 「끊김」이 아니다. 에이전트는 돌아올 수 있으므로 「소식이 없어요」
  * 까지만 말한다(ADR-0200 D1).
@@ -200,8 +205,9 @@ export function runPhaseDetail(
   switch (facts.phase) {
     case "queued": {
       const parts: string[] = [];
-      const waited = elapsedSpan(facts.queuedAtMs, nowMs);
-      if (waited !== undefined) parts.push(`${waited}째 기다려요`);
+      // 초부터 말한다(#3824): 보낸 지 10초 된 요청에 아무 말도 없으면 사람은 요청이
+      // 닿았는지부터 의심한다.
+      parts.push(`${spanText(nowMs - facts.queuedAtMs)}째 기다려요`);
       if (
         options.omitAhead !== true &&
         facts.aheadTotal !== undefined &&
@@ -225,17 +231,17 @@ export function runPhaseDetail(
           : elapsedSpan(facts.claimedAtMs, nowMs);
       return span === undefined ? undefined : `${span} 전에 가져감`;
     }
-    case "running": {
-      const span =
-        facts.lastEventAtMs === undefined
-          ? undefined
-          : elapsedSpan(facts.lastEventAtMs, nowMs);
-      return span === undefined ? undefined : `마지막 보고 ${span} 전`;
-    }
+    case "running":
+      // 「12분째 · 마지막 보고 1분 전」(#3824). 모르는 시각은 「모름」이다.
+      return runWorkingText(facts, nowMs);
     case "awaiting_approval":
     case "paused":
       return undefined;
-    default:
-      return endReasonText(facts.endReason);
+    default: {
+      // 「3분 12초 걸림 · 멤버가 취소했어요」. 사유는 닫힌 코드일 때만 붙는다.
+      const reason = endReasonText(facts.endReason);
+      const took = runTookText(facts);
+      return reason === undefined ? took : `${took} · ${reason}`;
+    }
   }
 }

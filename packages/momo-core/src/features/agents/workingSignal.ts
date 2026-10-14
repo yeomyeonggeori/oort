@@ -88,6 +88,14 @@ export interface ServerRunFacts {
   approvalExpiresAtMs?: number;
   /** Closed machine code the server wrote for a finished run. */
   endReason?: string;
+  /**
+   * When the work itself began (server clock). Absent until the run ran; never
+   * guessed from `claimedAtMs` — the gap between the two is the agent's, not the
+   * work's (#3824 durations).
+   */
+  startedAtMs?: number;
+  /** When the run ended (server clock). Absent on an open run. */
+  finishedAtMs?: number;
 }
 
 export interface AgentWorkingSignal {

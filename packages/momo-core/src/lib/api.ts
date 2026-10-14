@@ -4999,8 +4999,11 @@ export function agentRunProgressPageFromWire(value: unknown): AgentRunProgress[]
   return runs.map(agentRunProgressFromWire);
 }
 
-/** 원장 행의 닫힌 어휘(openapi `AgentRunEvent.kind`). */
-export type AgentRunLedgerKind =
+/**
+ * 원장 행의 닫힌 어휘(openapi `AgentRunEvent.kind`). `doorbell_rung`은
+ * `?include=doorbell`로 읽을 때만 온다(ADR-0200 증보 2026-10-14, #3824).
+ */
+export type AgentRunLedgerKnownKind =
   | "queued"
   | "claimed"
   | "started"
@@ -5012,9 +5015,17 @@ export type AgentRunLedgerKind =
   | "succeeded"
   | "failed"
   | "timed_out"
-  | "cancelled";
+  | "cancelled"
+  | "doorbell_rung";
 
-const AGENT_RUN_LEDGER_KINDS = new Set<AgentRunLedgerKind>([
+/**
+ * 이 클라이언트가 아는 종류, 그리고 모르는 종류 하나(`unknown`). 서버는 클라이언트보다
+ * 먼저 새 종류를 싣는다(#3830 `doorbell_rung`, ADR-0200 증보 2026-10-15 `tool_call`).
+ * 모르는 행 하나 때문에 원장 전체를 버리면 사람은 기록이 통째로 사라진 화면을 본다.
+ */
+export type AgentRunLedgerKind = AgentRunLedgerKnownKind | "unknown";
+
+const AGENT_RUN_LEDGER_KINDS = new Set<AgentRunLedgerKnownKind>([
   "queued",
   "claimed",
   "started",
@@ -5027,12 +5038,15 @@ const AGENT_RUN_LEDGER_KINDS = new Set<AgentRunLedgerKind>([
   "failed",
   "timed_out",
   "cancelled",
+  "doorbell_rung",
 ]);
 
 export interface AgentRunLedgerEvent {
   /** 읽는 순간의 1-기반 순번. 키로 쓰지 않는다(200행 상한이 오래된 stage를 지운다). */
   ordinal: number;
   kind: AgentRunLedgerKind;
+  /** `kind === "unknown"`일 때 서버가 보낸 낱말 그대로. 화면에 내지 않는다(진단용). */
+  rawKind?: string;
   /** 에이전트가 보고한 단계 표식(≤80자). 신뢰하지 않는 일반 텍스트. `stage`에만 있다. */
   stage?: string;
   /** 서버가 쓴 닫힌 코드(`approved`, `approval_expired` …). */
@@ -5060,21 +5074,20 @@ export function agentRunLedgerFromWire(value: unknown): AgentRunLedger {
       const ordinal = num(row, "ordinal");
       const kind = str(row, "kind");
       const createdAtMs = num(row, "createdAtMs");
-      if (
-        ordinal === undefined ||
-        kind === undefined ||
-        !AGENT_RUN_LEDGER_KINDS.has(kind as AgentRunLedgerKind) ||
-        createdAtMs === undefined
-      ) {
+      if (ordinal === undefined || kind === undefined || createdAtMs === undefined) {
         throw new WireShapeError();
       }
+      // 모르는 종류는 원장을 거부하지 않고 `unknown` 한 줄로 남긴다(#3824). 행의
+      // 모양(순번·시각) 자체가 틀린 것은 여전히 거부한다.
+      const known = AGENT_RUN_LEDGER_KINDS.has(kind as AgentRunLedgerKnownKind);
       const stage = optionalString(row, "stage");
       const code = optionalString(row, "code");
       const approvalId = optionalString(row, "approvalId");
       const actorMemberId = optionalString(row, "actorMemberId");
       return {
         ordinal,
-        kind: kind as AgentRunLedgerKind,
+        kind: known ? (kind as AgentRunLedgerKnownKind) : "unknown",
+        ...(known ? {} : { rawKind: kind }),
         createdAtMs,
         ...(stage === undefined ? {} : { stage }),
         ...(code === undefined ? {} : { code }),
@@ -5111,18 +5124,41 @@ export async function fetchAgentRunProgress(
   );
 }
 
-/** run 하나의 원장 전체(≤200행). 커서가 없으니 매번 통째로 다시 읽는다. */
+/**
+ * run 하나의 원장 전체(≤200행). 커서가 없으니 매번 통째로 다시 읽는다.
+ *
+ * `?include=doorbell`(#3824): 깨우는 신호 행(`doorbell_rung`)을 함께 달라는 요청이다.
+ * 그 행을 아는 서버(#3830)만 싣고, 모르는 서버(v0.1.24 이전)는 쿼리를 읽지 않으므로
+ * 그냥 예전 원장을 준다 — 그것이 옛 서버의 폴백이다. 다만 쿼리를 읽고 모르는 값이면
+ * 400을 내는 서버가 생길 수 있어, 400이면 쿼리 없이 한 번 더 읽는다(`absentInclude`).
+ * 이 클라이언트는 `doorbell` 외의 값을 보내지 않는다.
+ */
 export async function fetchAgentRunEvents(
   workspaceId: string,
-  runId: string
+  runId: string,
+  options: { includeDoorbell?: boolean } = {}
 ): Promise<AgentRunLedger> {
-  return agentRunLedgerFromWire(
-    await request<unknown>(
-      `/v1/workspaces/${encodeURIComponent(
-        workspaceId.toLowerCase()
-      )}/agent-runs/${encodeURIComponent(runId.toLowerCase())}/events`
-    )
-  );
+  const base = `/v1/workspaces/${encodeURIComponent(
+    workspaceId.toLowerCase()
+  )}/agent-runs/${encodeURIComponent(runId.toLowerCase())}/events`;
+  if (options.includeDoorbell !== true || ledgerIncludeRejected) {
+    return agentRunLedgerFromWire(await request<unknown>(base));
+  }
+  try {
+    return agentRunLedgerFromWire(await request<unknown>(`${base}?include=doorbell`));
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 400) throw error;
+    ledgerIncludeRejected = true;
+    return agentRunLedgerFromWire(await request<unknown>(base));
+  }
+}
+
+/** 이 서버가 `?include=doorbell`을 400으로 거절했는가. 거절했으면 다시 묻지 않는다. */
+let ledgerIncludeRejected = false;
+
+/** 세션·워크스페이스가 바뀌면 다시 물어본다(다른 서버일 수 있다). 시험 seam이기도 하다. */
+export function resetRunLedgerIncludeProbe(): void {
+  ledgerIncludeRejected = false;
 }
 
 // ---- Hosted agent liveness (ADR-0200 D4, #3742) -----------------------------

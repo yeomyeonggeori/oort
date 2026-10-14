@@ -34,6 +34,22 @@ export interface RunLedgerRow {
   tone: RunLedgerTone;
   /** 승인 요청 줄이 가리키는 승인. 카드로 가는 링크의 열쇠다. */
   approvalId?: string;
+  /**
+   * 연속한 같은 줄을 접은 수(2 이상일 때만). 깨우는 신호는 한 run에 여러 번(상한 10)
+   * 올 수 있고, 같은 줄 열 개는 기록이 아니라 소음이다(#3824).
+   */
+  count?: number;
+}
+
+/** 깨우는 신호 줄. 우리가 보낸 신호이므로 에이전트 활동(tone agent)이 아니다. */
+export const DOORBELL_SENT_TEXT = "깨우는 신호를 보냈어요";
+export const DOORBELL_FAILED_TEXT = "깨우는 신호가 닿지 않았어요";
+/** 이 앱이 아직 모르는 종류의 줄. 서버가 앞서 새 종류를 실었다. */
+export const LEDGER_UNKNOWN_TEXT = "이 앱이 아직 모르는 기록이에요";
+
+/** `doorbell_rung`의 `code`는 `<edge>_<result>`다. `_failed`로 끝나면 닿지 않았다. */
+export function doorbellFailed(code: string | undefined): boolean {
+  return code !== undefined && code.endsWith("_failed");
 }
 
 /** 에이전트가 보고한 단계의 상한(서버도 80자로 자른다). 화면에서도 한 번 더 자른다. */
@@ -57,6 +73,27 @@ const APPROVAL_DECISION_TEXT: Record<string, string> = {
  * 믿지 않고 시각으로 한 번 더 정렬한다(같은 시각은 받은 순서를 지킨다).
  */
 export function ledgerRows(
+  events: readonly AgentRunLedgerEvent[]
+): RunLedgerRow[] {
+  return foldRepeats(rawLedgerRows(events));
+}
+
+/** 바로 앞 줄과 같은 깨움·모르는 줄은 한 줄로 접고 횟수를 붙인다. 시각은 첫 줄의 것이다. */
+function foldRepeats(rows: RunLedgerRow[]): RunLedgerRow[] {
+  const out: RunLedgerRow[] = [];
+  for (const row of rows) {
+    const prev = out[out.length - 1];
+    const foldable = row.kind === "doorbell_rung" || row.kind === "unknown";
+    if (foldable && prev !== undefined && prev.kind === row.kind && prev.text === row.text) {
+      out[out.length - 1] = { ...prev, count: (prev.count ?? 1) + 1 };
+      continue;
+    }
+    out.push(row);
+  }
+  return out;
+}
+
+function rawLedgerRows(
   events: readonly AgentRunLedgerEvent[]
 ): RunLedgerRow[] {
   const seen = new Map<string, number>();
@@ -121,6 +158,14 @@ export function ledgerRows(
           const reason = endReasonText(event.code);
           return { ...common, text: "취소됐어요", tone: "end", ...(reason ? { reason } : {}) };
         }
+        case "doorbell_rung":
+          return {
+            ...common,
+            text: doorbellFailed(event.code) ? DOORBELL_FAILED_TEXT : DOORBELL_SENT_TEXT,
+            tone: "neutral",
+          };
+        case "unknown":
+          return { ...common, text: LEDGER_UNKNOWN_TEXT, tone: "neutral" };
       }
     });
 }

@@ -125,6 +125,8 @@ import { useTimelineLive } from "./timelineLiveContext";
 import { useConversationEntrance } from "./conversationEntrance";
 import { commandSuggestCard } from "@momo/core/features/timeline/commandSuggest";
 import { CommandSuggestSlot, ThreadSurfaceRoot } from "./commandSuggestSlot";
+import { MessageRunStatus } from "@/features/agents/MessageRunStatus";
+import type { AgentRunProgress } from "@momo/core/lib/api";
 
 // =============================================================================
 // One message row (R-1 §3). Humans and agents share the SAME grid and the same
@@ -303,6 +305,7 @@ export function MessageRow({
   showRollup = true,
   playEntrance = false,
   onEntranceConsumed,
+  runStatus,
 }: {
   message: Message;
   startsGroup: boolean;
@@ -389,6 +392,12 @@ export function MessageRow({
   playEntrance?: boolean;
   /** Parent consumes the grant on the first painted frame (flash-unmount keeps it). */
   onEntranceConsumed?: () => void;
+  /**
+   * #3824 — 내가 보낸 이 메시지가 일으킨 run들(서버 진행 읽기). 목록이 넣는다(`Timeline`):
+   * 행이 직접 스토어를 구독하면 아무 run이나 바뀔 때 모든 줄이 다시 그려진다. 넣지 않으면
+   * (남의 메시지·스레드 패널·작업 로그) 줄이 없다. 빈 배열은 「아직 없음」이다.
+   */
+  runStatus?: readonly AgentRunProgress[];
 }) {
   const entrance = useConversationEntrance(playEntrance, onEntranceConsumed);
   const [resending, setResending] = useState(false);
@@ -1093,6 +1102,19 @@ export function MessageRow({
               ) : (
                 <span data-testid="thread-anchor">{rollupLabel(rollup)}</span>
               ))}
+          </div>
+        )}
+        {/* 내가 보낸 메시지가 에이전트를 불렀으면 그 일의 상태 한 줄 (#3824). 칩보다
+            안쪽이다: 칩은 남들의 반응이고, 이 줄은 이 메시지가 일으킨 일이다. */}
+        {runStatus !== undefined && (
+          <div className="mt-1 flex min-w-0" data-testid="message-run-status-slot">
+            <MessageRunStatus
+              messageId={message.id}
+              channelId={message.channelId}
+              createdAtMs={message.createdAtMs}
+              runs={runStatus}
+              directory={directory}
+            />
           </div>
         )}
         {actions && (
