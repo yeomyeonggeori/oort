@@ -6,8 +6,10 @@ import type {
 } from "@momo/core/lib/realtimeEvents";
 import { WireShapeError } from "@momo/core/lib/wire";
 import {
+  nudgeRunProgress,
   resetRunProgress,
   runFactsFor,
+  subscribeRunLedgerFrames,
   runProgressSignals,
   runProgressSnapshot,
   runProgressUnsupported,
@@ -284,5 +286,53 @@ describe("서버가 답한 신호는 클라이언트 시계로 지워지지 않�
     sweepAgentWorking(Date.now() + ZOMBIE_CLEAR_MS * 10);
     expect(agentWorkingSnapshot().size).toBe(0);
     stop();
+  });
+});
+
+describe("깨우는 신호와 방금 보낸 메시지 (#3824)", () => {
+  it("doorbell_rung 프레임은 그 run의 원장 구독자를 깨운다(진행 지문이 바뀌지 않아도)", async () => {
+    const fetchProgress = vi.fn(async () => [row()]);
+    const { realtime, handlers } = fakeRealtime();
+    const stop = startRunProgress({ workspaceId: WS, channelIds: [CH_A], realtime, fetchProgress });
+    await settle();
+    const onLedger = vi.fn();
+    const onOther = vi.fn();
+    const unsubscribe = subscribeRunLedgerFrames(RUN_1.toUpperCase(), onLedger);
+    const unsubscribeOther = subscribeRunLedgerFrames("0199aa11-2222-7000-8000-0000000000ff", onOther);
+    handlers.get(CH_A)?.onRunEvent({
+      type: "agent.run.event",
+      v: 1,
+      ts: Date.now(),
+      payload: { run_id: RUN_1, channel_id: CH_A, kind: "doorbell_rung" },
+    });
+    expect(onLedger).toHaveBeenCalledTimes(1);
+    expect(onOther).not.toHaveBeenCalled();
+    unsubscribe();
+    handlers.get(CH_A)?.onRunEvent({
+      type: "agent.run.event",
+      v: 1,
+      ts: Date.now(),
+      payload: { run_id: RUN_1, channel_id: CH_A, kind: "doorbell_rung" },
+    });
+    expect(onLedger).toHaveBeenCalledTimes(1);
+    unsubscribeOther();
+    stop();
+  });
+
+  it("방금 보낸 메시지가 지켜보는 채널을 한 번 당겨 읽고, 지켜보지 않는 채널은 건드리지 않는다", async () => {
+    const fetchProgress = vi.fn(async (_ws: string, _ch: string) => [row()]);
+    const stop = startRunProgress({ workspaceId: WS, channelIds: [CH_A], realtime: null, fetchProgress });
+    await settle();
+    fetchProgress.mockClear();
+    nudgeRunProgress(CH_A.toUpperCase());
+    nudgeRunProgress(CH_B);
+    await settle();
+    expect(fetchProgress).toHaveBeenCalledTimes(1);
+    expect(fetchProgress.mock.calls[0]?.[1]).toBe(CH_A);
+    stop();
+    fetchProgress.mockClear();
+    nudgeRunProgress(CH_A);
+    await settle();
+    expect(fetchProgress).not.toHaveBeenCalled();
   });
 });

@@ -18,6 +18,7 @@ import {
   centrifugoTypingChannelName,
   createReplayGate,
   type AgentProgressEvent,
+  type AgentRunEventFrame,
   type MessageDeletedEvent,
   type MessageNewEvent,
   type PinEvent,
@@ -130,7 +131,11 @@ export type ChannelRail = Pick<
   subscribeRunEvents: (
     workspaceId: string,
     channelId: string,
-    handlers: {onRunEvent: () => void; onResync: () => void},
+    handlers: {
+      /** 프레임은 run id를 알려 준다(#3824: 그 run의 원장만 다시 읽게). */
+      onRunEvent: (frame?: AgentRunEventFrame) => void;
+      onResync: () => void;
+    },
   ) => () => void;
 };
 
@@ -309,7 +314,8 @@ export function createChannelRail(getClient: () => Centrifuge): ChannelRail {
           };
           const onPublication = (ctx: {data?: unknown}) => {
             if (gate.isReplaying()) return;
-            if (asAgentRunEventFrame(ctx.data)) handlers.onRunEvent();
+            const frame = asAgentRunEventFrame(ctx.data);
+            if (frame) handlers.onRunEvent(frame);
           };
           sub.on('subscribed', onSubscribed);
           sub.on('publication', onPublication);
