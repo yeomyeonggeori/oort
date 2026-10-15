@@ -201,6 +201,11 @@ export PGHOST=127.0.0.1 PGPORT="$PG_PORT" PGDATABASE=momo PGUSER=momo PGPASSWORD
   # refusals that write nothing, owner_only / Claude conservative mode unchanged.
   cargo test -p momo-server --test hosted_work_request_conformance_pg \
     -- --ignored --test-threads=1 --nocapture
+  # Layer 4 — ADR-0162 증보 5 G1~G6 (#3857): the in-place 「이 채널에서 쓰기」
+  # card — held run with no job, exactly one job on approval, expiry/reject/
+  # cancel write no job, who may decide.
+  cargo test -p momo-server --test hosted_inplace_grant_conformance_pg \
+    -- --ignored --test-threads=1 --nocapture
 )
 
 remove_owned

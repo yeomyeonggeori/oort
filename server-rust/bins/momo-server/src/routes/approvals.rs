@@ -485,6 +485,7 @@ async fn decide(
         state.agent_port.config.claude_subscription_agents_enabled;
     let operator_scope = has_platform_read_scope(&principal);
     let deliver_secret_to_agent = request.deliver_secret_to_agent == Some(true);
+    let context_max_messages = state.mentions.context_max_messages;
 
     let outcome: DbRejectable<Decision> = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
@@ -504,6 +505,7 @@ async fn decide(
                     claude_subscription_agents_enabled,
                     operator_scope,
                     deliver_secret_to_agent,
+                    context_max_messages,
                 },
             )
             .await
@@ -582,6 +584,9 @@ struct DecisionInput<'a> {
     operator_scope: bool,
     /// `deliverSecretToAgent` as sent. Only `Some(true)` matters.
     deliver_secret_to_agent: bool,
+    /// `MentionSettings::context_max_messages` — the recent-conversation window
+    /// of the job an approved in-place channel grant releases (ADR-0162 증보 5 G3).
+    context_max_messages: i64,
 }
 
 /// Whether the action a `workspace_action` payload names offers its one-time
@@ -687,6 +692,20 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
     }
 
     if !is_active_channel_member_in_tx(conn, approval.channel_id, input.member_id).await? {
+        // ADR-0162 증보 5 G2/G6 ⑤ — an in-place channel-grant card names a room
+        // (possibly private) and who called whom there. To somebody outside that
+        // room, an admin included, it answers exactly as a missing approval does,
+        // so the id teaches them nothing.
+        if momo_agent::in_place_grant::is_in_place_grant(&approval.payload) {
+            return Ok(Ok(refusal(
+                input.approval_id,
+                input.member_id,
+                "not_found",
+                "approval not found",
+                StatusCode::NOT_FOUND,
+                now,
+            )));
+        }
         return Ok(Ok(refusal(
             approval.id,
             input.member_id,
@@ -1791,6 +1810,63 @@ async fn execute_workspace_action(
     )
     .await?;
 
+    // ---- ADR-0162 증보 5 G3 — an in-place channel grant releases ONE job -----
+    //
+    // The card was raised when a person called the agent here; the run has been
+    // held on it with no job. Approving widens the grant (above) and then, in
+    // this same transaction, re-queues the held run and writes the one job.
+    // `requeue_run_from_approval_in_tx` is guarded on `awaiting_approval`, so a
+    // replayed or concurrent decision — or a run a person stopped meanwhile —
+    // gets `false`, and `false` rolls the whole decision back (grant included):
+    // never a widened channel with no work behind it, never a second job.
+    if momo_agent::in_place_grant::is_in_place_grant(&approval.payload) {
+        let Some(run) =
+            momo_agent::load_agent_run_in_tx(conn, input.workspace_id, approval.run_id).await?
+        else {
+            return Err(protocol_error(RUN_NOT_PARKED_SENTINEL));
+        };
+        if !requeue_run_from_approval_in_tx(conn, approval.run_id).await? {
+            return Err(protocol_error(RUN_NOT_PARKED_SENTINEL));
+        }
+        if crate::routes::agent_mentions::enqueue_granted_mention_job_in_tx(
+            conn,
+            input.workspace_id,
+            &run,
+            executed.ref_id,
+            input.context_max_messages,
+        )
+        .await?
+        .is_none()
+        {
+            return Err(protocol_error(
+                "in-place channel grant approved for an agent that can no longer take the job",
+            ));
+        }
+        emit_outbox(
+            &mut *conn,
+            input.workspace_id,
+            OutboxKind::Broadcast,
+            "publish",
+            &decision_broadcast_payload(
+                &cent_channel(input.workspace_id, approval.channel_id),
+                approval,
+                "approved",
+                &event,
+                now,
+            ),
+            Some(approval.channel_id),
+        )
+        .await
+        .map_err(momo_db::DbError::from)?;
+        // No outcome line and no terminal frame: the card patch above says
+        // 승인됨, and the turn that starts now is the agent's to speak in.
+        return Ok(Ok(Decision {
+            receipt,
+            status: StatusCode::OK,
+            secret_once: executed.secret_once,
+        }));
+    }
+
     // ---- the outcome line, authored by the agent ---------------------------
     //
     // Same authorship rule as the rejection's (`reject_run`): the proposal was
@@ -2176,15 +2252,19 @@ async fn execute_hosted_channels_grant(
         .target("hosted_connection", connection.id)
         .via_token(input.via_token_id)
         .run(approval.run_id)
-        .with_schema(
-            AUDIT_CHANNELS_GRANTED_SCHEMA,
-            json!({
+        .with_schema(AUDIT_CHANNELS_GRANTED_SCHEMA, {
+            let mut detail = json!({
                 "connection_id": connection.id.to_string(),
                 "channel_ids": ids.iter().map(Uuid::to_string).collect::<Vec<_>>(),
                 "via_agent": approval.requested_by.to_string(),
                 "approval_id": approval.id.to_string(),
-            }),
-        );
+            });
+            // ADR-0162 증보 5 G3-4: which door the grant came through.
+            if momo_agent::in_place_grant::is_in_place_grant(&approval.payload) {
+                detail["via"] = json!(momo_agent::in_place_grant::IN_PLACE_GRANT_AUDIT_VIA);
+            }
+            detail
+        });
     let named: Vec<(String, Uuid)> = channels
         .iter()
         .map(|channel| (channel.name.clone(), channel.id))
@@ -2838,12 +2918,24 @@ async fn reject_run(
     reason: Option<&str>,
     now: chrono::DateTime<Utc>,
 ) -> Result<(), momo_db::DbError> {
+    // ADR-0162 증보 5 G4 — a rejected in-place channel grant ends the held run
+    // with its own code and tells the person who called, in words, why nothing
+    // happened; a tool-call rejection keeps its sentence.
+    let in_place = momo_agent::in_place_grant::is_in_place_grant(&approval.payload);
+    let (code, body) = if in_place {
+        (
+            momo_agent::in_place_grant::IN_PLACE_GRANT_REJECTED_CODE,
+            momo_agent::in_place_grant::IN_PLACE_GRANT_REJECTED_BODY,
+        )
+    } else {
+        ("approval_rejected", REJECTED_TOOL_RESULT_BODY)
+    };
     let ended = end_parked_run_in_tx(
         conn,
         approval.run_id,
         RunStatus::Cancelled,
         &json!({
-            "code": "approval_rejected",
+            "code": code,
             "approval_id": approval.id.to_string(),
             "reason": reason,
         }),
@@ -2874,7 +2966,7 @@ async fn reject_run(
         .and_then(|call| call.get("call_id"))
         .and_then(Value::as_str)
         .unwrap_or_default();
-    let mut props = ToolResult::error(call_id, REJECTED_TOOL_RESULT_BODY).message_props();
+    let mut props = ToolResult::error(call_id, body).message_props();
     if let Some(object) = props.as_object_mut() {
         object.insert("approval_id".into(), json!(approval.id.to_string()));
         object.insert("run_id".into(), json!(approval.run_id.to_string()));
@@ -2891,7 +2983,7 @@ async fn reject_run(
             channel_id: approval.channel_id,
             author_member_id: approval.requested_by,
             message_type: MessageType::ToolResult,
-            body: Some(REJECTED_TOOL_RESULT_BODY.to_string()),
+            body: Some(body.to_string()),
             props,
             root_id: None,
             reply_to_id: None,
@@ -3528,6 +3620,7 @@ mod tests {
             claude_subscription_agents_enabled: false,
             operator_scope: false,
             deliver_secret_to_agent: false,
+            context_max_messages: 30,
         }
     }
 

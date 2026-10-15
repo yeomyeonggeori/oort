@@ -148,6 +148,7 @@ pub mod error;
 pub mod hosted_dm;
 pub mod hosted_liveness;
 pub mod hosted_notice;
+pub mod in_place_grant;
 pub mod korean;
 pub mod memory;
 pub mod memory_cons;
@@ -282,8 +283,8 @@ pub use routing::{
 };
 pub use run::{
     agent_run_cursor_is_visible_in_tx, authorize_run_binding_in_tx, cancel_run_in_tx,
-    completion_status, consume_run_step_in_tx, create_agent_run_in_tx, end_parked_run_in_tx,
-    end_stalled_run_in_tx, find_agent_run_by_trigger_in_tx, finish_run_in_tx,
+    completion_status, consume_run_step_in_tx, create_agent_run_in_tx, create_held_agent_run_in_tx,
+    end_parked_run_in_tx, end_stalled_run_in_tx, find_agent_run_by_trigger_in_tx, finish_run_in_tx,
     is_active_agent_in_tx, is_active_human_channel_member_in_tx, is_guest_in_channel_in_tx,
     linked_work_session_ids_in_tx, list_agent_run_summaries_in_tx, list_channel_work_runs_in_tx,
     live_run_count_in_tx, load_agent_run_in_tx, load_agent_run_with_visibility_in_tx,

@@ -159,6 +159,29 @@ async fn start_server_with_gateway(
     hosted_delivery_enabled: bool,
     gateway_mode: bool,
 ) -> String {
+    start_server_with_settings(
+        pool,
+        hosted_delivery_enabled,
+        gateway_mode,
+        momo_server::config::MentionSettings::default(),
+    )
+    .await
+}
+
+/// Hosted delivery open, worker mode, with these mention settings.
+async fn start_server_with_mentions(
+    pool: PgPool,
+    mentions: momo_server::config::MentionSettings,
+) -> String {
+    start_server_with_settings(pool, true, false, mentions).await
+}
+
+async fn start_server_with_settings(
+    pool: PgPool,
+    hosted_delivery_enabled: bool,
+    gateway_mode: bool,
+    mentions: momo_server::config::MentionSettings,
+) -> String {
     let mut state = AppState::new(
         pool,
         TEST_JWT_SECRET.to_string(),
@@ -186,6 +209,7 @@ async fn start_server_with_gateway(
         claude_subscription_agents_enabled: true,
         oauth: Default::default(),
     });
+    let state = state.with_mentions(mentions);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind tools conformance server");
@@ -2135,7 +2159,18 @@ async fn an_unapproved_channel_never_reaches_the_hosted_job_path() {
     let su = superuser_pool().await;
     let app = momo_app_pool().await;
     let fixture = seed(&su).await;
-    let base = start_server(app, true).await;
+    // ADR-0162 증보 5 G5 (#3857): with `MOMO_HOSTED_INPLACE_GRANT_ENABLED` off
+    // this room keeps the old notice line, which is what this test pins. With it
+    // on (the default) the same call raises an in-place approval card — still no
+    // job, still not claimable — pinned in `hosted_inplace_grant_conformance_pg`.
+    let base = start_server_with_mentions(
+        app,
+        momo_server::config::MentionSettings {
+            hosted_inplace_grant_enabled: false,
+            ..Default::default()
+        },
+    )
+    .await;
     let client = reqwest::Client::new();
     let handle = hosted_handle(&su, fixture.hosted_agent).await;
 
