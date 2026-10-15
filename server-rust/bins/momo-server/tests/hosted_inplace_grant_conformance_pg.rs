@@ -896,6 +896,16 @@ async fn approving_widens_the_grant_and_releases_exactly_one_job() {
         "the room is now granted"
     );
     assert_eq!(run_state(&su, run).await.0, "queued");
+    // Independent review of #3858: the hold marker leaves with the hold. A
+    // released run that later parks on an ordinary approval must count against
+    // the concurrency cap again (`live_run_count_in_tx`).
+    let hold: Option<String> =
+        sqlx::query_scalar("SELECT input->>'hold' FROM agent_run WHERE id=$1")
+            .bind(run)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(hold, None, "the released run no longer reads as held");
     assert_eq!(jobs_for_agent(&su, &f).await, 1, "exactly one job");
     assert_eq!(inbox_events(&su, &f).await, 1, "one inbox reference");
     let job_payload: Value = sqlx::query_scalar(
@@ -1249,6 +1259,31 @@ async fn only_an_admin_in_the_room_can_decide_and_outsiders_see_nothing() {
     .await;
     assert_eq!(status, 403, "{member}");
     assert_eq!(member["status"], json!("role_required"));
+    // …and the same member saying no is refused the same way (independent
+    // review of #3858): the decider is an admin in the room for both halves
+    // (G2), and the outcome line says 「관리자가 … 승인하지 않아서」.
+    let (status, member_no) = decide(
+        &client,
+        &base,
+        &f,
+        &f.member.jwt,
+        approval,
+        false,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 403, "{member_no}");
+    assert_eq!(member_no["status"], json!("role_required"));
+    let outcome_lines = count(
+        &su,
+        "SELECT count(*) FROM message WHERE workspace_id=$1 AND type='tool_result'",
+        f.workspace,
+    )
+    .await;
+    assert_eq!(
+        outcome_lines, 0,
+        "a refused rejection writes no outcome line"
+    );
     let still: String = sqlx::query_scalar("SELECT status::text FROM approval WHERE id=$1")
         .bind(approval)
         .fetch_one(&su)

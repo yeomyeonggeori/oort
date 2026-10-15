@@ -186,6 +186,29 @@ pub fn in_place_grant_payload(
     payload
 }
 
+/// Drop the hold marker from a run the decision route just released
+/// (`awaiting_approval` → `queued`). `live_run_count_in_tx` skips a run that is
+/// `awaiting_approval` **and** marked held; left in place, the marker would make
+/// the same run invisible to the concurrency cap if it later parked on an
+/// ordinary approval (an `oort_action_propose` card) during its own turn.
+pub async fn clear_channel_grant_hold_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+) -> Result<(), DbError> {
+    sqlx::query(
+        "UPDATE agent_run SET input = input - $3, updated_at = now() \
+          WHERE workspace_id = $1 AND id = $2 AND input->>$3 = $4",
+    )
+    .bind(workspace_id)
+    .bind(run_id)
+    .bind(RUN_HOLD_KEY)
+    .bind(RUN_HOLD_CHANNEL_GRANT)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
 /// Serialize every in-place card producer of one connection for the rest of the
 /// transaction (G2's per-connection ceiling). An advisory lock only this path
 /// takes, so it cannot close a cycle with the decision route's row locks; one

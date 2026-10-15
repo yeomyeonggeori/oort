@@ -961,6 +961,22 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
     if approval.action_type == ACTION_TYPE_WORKSPACE_ACTION && input.approve {
         return execute_workspace_action(conn, &approval, &input, now).await;
     }
+    // ADR-0162 증보 5 G2 — an in-place 「이 채널에서 쓰기」 card has ONE decider
+    // for both halves: a workspace admin who is in the room (the membership
+    // gate above). The approve half is gated inside `execute_workspace_action`;
+    // without this the reject half fell through to the generic arm, so any room
+    // member could cancel somebody else's request and the outcome line would
+    // claim 「관리자가 … 승인하지 않아서」 (independent review of #3858). Refused
+    // like the approve half — nothing spent, run still held, card still pending.
+    if !input.approve
+        && momo_agent::in_place_grant::is_in_place_grant(&approval.payload)
+        && require_admin(conn, input.workspace_id, input.member_id)
+            .await?
+            .is_err()
+    {
+        return role_required_refusal(conn, &approval, &input, now, Some(RequiredRole::Admin))
+            .await;
+    }
     // A rejected proposal's staged avatar image dies with it (the 24-hour sweep on
     // the next avatar proposal is the backstop for the arms that never get here,
     // such as a run cancelled by a person).
@@ -1828,6 +1844,14 @@ async fn execute_workspace_action(
         if !requeue_run_from_approval_in_tx(conn, approval.run_id).await? {
             return Err(protocol_error(RUN_NOT_PARKED_SENTINEL));
         }
+        // The hold marker leaves with the hold: a released run that later parks
+        // on an ordinary approval must count against the concurrency cap again.
+        momo_agent::in_place_grant::clear_channel_grant_hold_in_tx(
+            conn,
+            input.workspace_id,
+            approval.run_id,
+        )
+        .await?;
         if crate::routes::agent_mentions::enqueue_granted_mention_job_in_tx(
             conn,
             input.workspace_id,
