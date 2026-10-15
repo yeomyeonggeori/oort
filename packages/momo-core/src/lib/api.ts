@@ -183,6 +183,15 @@ export interface RosterMember {
   statusEmoji?: string;
   statusText?: string;
   statusExpiresAtMs?: number;
+  /**
+   * Agents only (ADR-0186 증보 v3 V3-2): the agent's one-line intro. Plain
+   * text: never auto-link, mention-parse or render markdown in it.
+   */
+  tagline?: string;
+  /** Agents only (V3-2): the agent's own role label, plain text. */
+  roleLabel?: string;
+  /** Agents only (V3-2a): a server avatar preset id. An uploaded image wins. */
+  avatarPreset?: string;
   createdAtMs: number;
   updatedAtMs: number;
 }
@@ -229,6 +238,13 @@ function sanitizeRosterMember(value: unknown): unknown {
   if ("statusText" in row && typeof row.statusText !== "string") {
     const { statusText: _bad, ...rest } = row;
     row = rest;
+  }
+  // v3 agent profile text: a non-string drops the column, never the member.
+  for (const key of ["tagline", "roleLabel", "avatarPreset"] as const) {
+    if (key in row && typeof row[key] !== "string") {
+      const { [key]: _bad, ...rest } = row;
+      row = rest;
+    }
   }
   if (
     "dndUntilMs" in row &&
@@ -2937,6 +2953,26 @@ export async function changeMyProfile(
     await request<unknown>(
       `/v1/workspaces/${encodeURIComponent(workspaceId)}/members/me`,
       { method: "PATCH", body: JSON.stringify(body) }
+    )
+  );
+  return memberFromWire(source.member);
+}
+
+/**
+ * PATCH /v1/workspaces/{ws}/agents/{agent} `{displayName}` (ADR-0186 증보 V4).
+ * Human bearer, and the caller must be the agent's owner or a workspace
+ * owner/admin. The handle never changes. 400 (empty / too long), 403, 404 and
+ * 409 (`display name is already in use`) arrive as `ApiError`.
+ */
+export async function renameAgent(
+  workspaceId: string,
+  agentId: string,
+  displayName: string
+): Promise<Member> {
+  const source = responseRecord(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(agentId)}`,
+      { method: "PATCH", body: JSON.stringify({ displayName }) }
     )
   );
   return memberFromWire(source.member);

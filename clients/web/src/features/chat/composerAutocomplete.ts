@@ -306,6 +306,11 @@ export interface ComposerCandidate {
    * 만들고 이 목록은 그리기만 한다. 서버가 쓰는 AI를 알려주지 않았으면 없다(줄을 그리지 않는다).
    */
   agent?: ComposerAgentAnnotation;
+  /**
+   * 멘션 후보만 (#3821): 아바타를 그릴 명부 행. 사람과 에이전트가 같은 컴포넌트로
+   * 그려진다. 다른 트리거에는 없다.
+   */
+  member?: RosterMember;
   /** 오른쪽 흐린 자리. 사람 이름 · 채널 주제 · 이모지 숏코드. */
   hint: string;
   /** 트리거 자리부터 캐럿까지를 대체할 문자열. 뒤 공백을 포함한다. */
@@ -389,6 +394,7 @@ export function memberCandidates(
       kind: "mention" as const,
       id: member.id,
       lead: `@${member.handle}`,
+      member,
       hint: member.displayName,
       // 코어 `mentionTokenAt` 이 읽는 그 문법이다. 삽입은 평문이고, 렌더가
       // 그 평문을 다시 토큰으로 읽는다 — 보이지 않는 신원을 본문에 심지 않는다.

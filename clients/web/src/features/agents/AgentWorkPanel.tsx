@@ -46,11 +46,12 @@ import {
   runEmptyState,
   runList,
 } from "@momo/core/features/agents/runLedger";
-import type { AgentRunProgress, Channel } from "@momo/core/lib/api";
+import type { AgentRunProgress, Channel, RosterMember } from "@momo/core/lib/api";
 import { isOpenRunPhase } from "@momo/core/features/agents/runPhase";
 import { useSession } from "@/app/session";
 import { useInertRefWhile } from "@/app/inert";
 import {
+  memberFor,
   memberNameParts,
   useChannels,
   useDirectory,
@@ -66,6 +67,7 @@ import {
 } from "@/design/ui/dialog";
 import { useEscapeLayer } from "@/design/ui/escapeLayer";
 import { cn } from "@/design/lib/cn";
+import { MemberAvatar } from "@/features/common/MemberAvatar";
 import { useTickingNow } from "./agentWorkingSignal";
 import {
   useChannelRuns,
@@ -237,6 +239,7 @@ export function AgentWorkPanel() {
     >
       <PanelHeader
         name={name}
+        member={memberFor(directory, target.memberId) ?? null}
         agentId={target.memberId}
         log={log}
         // 시계는 **연 쪽이 알고 있던 시작 시각**으로 그린다. 패널이 붙는 시점에
@@ -280,6 +283,7 @@ export function AgentWorkPanel() {
 
 function PanelHeader({
   name,
+  member,
   agentId,
   log,
   startedAtMs,
@@ -290,6 +294,8 @@ function PanelHeader({
   onClose,
 }: {
   name: string;
+  /** 머리의 아바타(#3821). 명부에 없으면 글자 없이 자리만 지킨다. */
+  member: RosterMember | null;
   agentId: string;
   log: WorkLog | null;
   startedAtMs?: number;
@@ -327,8 +333,11 @@ function PanelHeader({
         </button>
       </div>
       <div className="flex flex-wrap items-baseline gap-2 text-meta text-ink-muted">
-        <span className="min-w-0 truncate text-agent" data-testid="agent-work-panel-agent">
-          {name}
+        <span className="flex min-w-0 items-center gap-2">
+          <MemberAvatar member={member} size="sm" />
+          <span className="min-w-0 truncate text-agent" data-testid="agent-work-panel-agent">
+            {name}
+          </span>
         </span>
         {log !== null && liveness !== null && (
           // 읽어 줄 값은 **상태 칩 하나뿐**이다. live 영역을 이 줄 전체로 잡으면
