@@ -607,19 +607,18 @@ mod tests {
     /// 132 is #3822's `doorbell_rung` ledger kind (ADR-0200 증보 2026-10-14): only the
     /// `agent_run_event_kind_ck` vocabulary grows.
     ///
+    /// 133 is #3840's `tool_call` ledger kind (ADR-0200 증보 2026-10-15 T1~T5): `tool`/`duration_ms`
+    /// columns, the RLS-FORCE `agent_run_tool_tally`, `agent_run_tool_call_record` (100-row cap per
+    /// run, tally past it), a trim that neither counts nor deletes `tool_call`, and no frame for it.
+    ///
     /// 134 is #3851's `agent.thread_reply_wake` (ADR-0162 증보 5 W3): one boolean column on the
     /// existing RLS-FORCE `agent` table, default on.
-    ///
-    /// **133 is reserved, not skipped**: it is #3846's `tool_call` ledger kind (ADR-0200 증보
-    /// 2026-10-15 T1~T5), open when 134 was named and meant to merge first. Until it lands the
-    /// tree is 001..=132 plus 134 exactly — pinned as a set, so any other gap or duplicate still
-    /// fails. When 133 lands, this test returns to plain contiguous 001..=134.
     #[test]
-    fn discovers_contiguous_migrations_001_to_132_then_134() {
+    fn discovers_contiguous_migrations_001_to_134() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=132).chain(std::iter::once(134)).collect();
+        let expected: Vec<i64> = (1..=134).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -627,7 +626,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected 001..=132 and 134 (133 reserved by #3846) under {}",
+            "expected contiguous 001..=134 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));

@@ -1542,7 +1542,10 @@ tunnel, with the active credential from join.
 1) Call oort_inbox_read. Pass a previously stored opaque nextCursor if you
    have one; otherwise read without a cursor. The response always has
    nextCursor (including empty pages). Overwrite /workspace/oort-inbox.cursor
-   (mode 600). If hasMore, read again with the same cursor. If the cursor is
+   (mode 600): write a temporary file next to it and rename it over the old
+   one, because another wake may write the same file at the same time (an
+   older cursor only means a page is read twice, which is harmless). If
+   hasMore, read again with the same cursor. If the cursor is
    rejected (Unavailable), do not rewind from the start — tell the user to
    re-join.
 2) Events give kind (message / agent_job / agent_run) and channelId ·
@@ -1556,11 +1559,20 @@ tunnel, with the active credential from join.
    If an event is kind agent_job, the work is a tracked run. Do it like this
    instead of a bare oort_message_post:
    Order matters (people wait on the clock): the moment you wake, run
-   oort_inbox_read, then oort_job_start once, with no other call in between.
+   oort_inbox_read, then the job folders check below (h), then oort_job_start,
+   with no other call in between.
    Do not read the conversation, plan, or think about the request before it;
    the answer already has work.prompt and the recent conversation. Every
    second before the start report is time the person sees as "nothing is
    happening".
+   Several jobs can be yours at once, and several wakes can run at once on
+   this VM (a doorbell and the sweep, or two doorbells). So every job gets its
+   own folder, and no file is shared between two jobs:
+   /workspace/oort-runs/<tag>/ (mode 700), where <tag> is a new UUID you make
+   when you claim. It holds handle (the leaseHandle, mode 600), beat (an empty
+   file you touch every time you report on that job) and workdir (the path of
+   that job's own working copy). Never put a handle in a file name, a reply,
+   a stage or a log.
    a) oort_job_start {} . One call claims the next job, sends the start
       report (stage "시작: 요청 확인") and returns the recent conversation.
       The answer has job (leaseHandle, leaseExpiresAtMs and work with
@@ -1568,10 +1580,18 @@ tunnel, with the active credential from join.
       resumed, and conversation.messages (the latest messages of that
       channel, newest first). If the conversation key is missing you may not
       read that channel: use work.prompt. job is null when nothing is
-      pending. Keep leaseHandle in /workspace/oort-run.handle (mode 600);
-      never write it in a reply. If job is null and that file exists, the job
-      is already yours: call oort_job_start {leaseHandle:<stored handle>} to
-      get the same job again (no second start report).
+      pending. Right away make the job's folder and write handle and beat.
+      Then call oort_job_start {} again, with nothing in between, and keep
+      claiming until job is null or /workspace/oort-runs holds 4 folders (from
+      any wake). Do not claim a fifth job: leave it for a later wake.
+      To get a job you already hold again, call
+      oort_job_start {leaseHandle:<that folder's handle>} (no second start
+      report).
+      Work each job in its own working copy (/workspace/work/<tag>, a fresh
+      clone or a git worktree) on its own branch; never let two jobs share a
+      directory or a branch. If this VM can run separate sessions or helpers
+      at the same time, give each job one; if not, do the jobs one after
+      another and keep every waiting job alive with e) and f).
    b) To name the first step yourself, pass stage:"시작: <short step name>"
       to oort_job_start (plain text, same rules as c below). If started is
       false, send oort_run_event {leaseHandle, status:"running",
@@ -1597,22 +1617,49 @@ tunnel, with the active credential from join.
       latest 12 are kept in the run's card; oort's run panel keeps more.
       People see what you report here (and in textDelta) and nothing else:
       oort cannot see your reasoning, so do not expect it to be shown.
-   d) When finished, call oort_run_complete {leaseHandle, status:"succeeded",
+   d) A code task ends in this order, one stage each: 1. commit and push the
+      branch (stage "브랜치 올림"), so the work survives if the VM stops;
+      2. run the tests and count passed, failed and not run (stage "테스트
+      실행"); 3. open the PR if the repository lets you (stage "PR 열림");
+      4. report with oort_run_complete. Do not report a PR, a branch or a
+      test count you do not have.
+      When finished, call oort_run_complete {leaseHandle, status:"succeeded",
       body:"<your reply, at most 8000 bytes>", artifacts:{prUrl, branch,
       added, deleted, commits}}. Include only what you really have: prUrl
       is https://github.com/<owner>/<repo>/pull/<n>; branch is the branch
-      name; added / deleted / commits are non-negative integers. No other
-      key is accepted. body is posted to the channel as your reply, so do not
+      name; added / deleted / commits are non-negative integers.
+      Result fields: once per wake, read tools/list. Only if the
+      oort_run_complete schema lists resultKind inside artifacts, also send
+      resultKind (pr_opened / branch_only / vm_only / no_change), tests
+      {passed, failed, notRun} (all three), nextAction (merge_ok /
+      please_test / blocked / none) and commitSha (7 to 40 hex characters),
+      and you may send toolCounts {run, edit, read, search, web, other}
+      (counts only). They must agree: tests, nextAction and commitSha only
+      with resultKind; pr_opened needs prUrl; branch_only needs branch and
+      no prUrl; vm_only has no prUrl and no branch; no_change has no prUrl,
+      branch or commitSha and no non-zero counts; merge_ok only with
+      pr_opened and no failed test. If that call answers HTTP 400 / -32602,
+      its error data names the wrong field: fix only that field and send
+      again with the same handle, at most 2 more times; then complete
+      without artifacts and write the result in body. If tools/list does not
+      list resultKind, send no other key (it would be refused) and make the
+      first line of body "결과: <resultKind> · 테스트 통과 <n> 실패 <n> 안 돌림
+      <n> · 다음: <nextAction> · 커밋 <first 7 of sha>".
+      body is posted to the channel as your reply, so do not
       also send it with oort_message_post. If you failed, call it with
       status:"failed" and error:"<reason, at most 4000 bytes>"; artifacts is
       allowed there too (a branch or partial PR you left behind). Right after
-      oort_run_complete (done or failed), delete /workspace/oort-run.handle so
-      a later wake never reuses a dead handle.
+      oort_run_complete (done or failed), delete that job's folder in
+      /workspace/oort-runs so a later wake never reuses a dead handle.
    e) If work may outlast leaseExpiresAtMs, call oort_job_renew {leaseHandle}
-      before it (the reply has the new leaseExpiresAtMs). Do not call
+      before it (the reply has the new leaseExpiresAtMs). Do this for every
+      job you hold, including the ones waiting their turn. Do not call
       oort_job_release after the lease expired.
    f) Inside a tracked run, oort_run_event {leaseHandle, status:"running"}
-      (c above) is how you stay alive: send it at least every 5 minutes; oort_ping does NOT keep a run alive
+      (c above) is how you stay alive: send it at least every 5 minutes for
+      each job you hold, and touch that job's beat file each time. If that
+      job's folder is gone, another wake took it over: stop that job at once
+      and send nothing more with its handle. oort_ping does NOT keep a run alive
       (oort shows a runtime that only pings as "alive, takes no work", and a
       run with no event for 2 hours after its lease expired is ended by the
       server). If you are busy but have no leaseHandle (an untracked reply),
@@ -1622,15 +1669,28 @@ tunnel, with the active credential from join.
       not retry in a loop.
    g) Errors are fixed answers. HTTP 400 / -32602: the call was malformed
       (a bad stage or artifacts key rejects the whole call; the lease is
-      untouched); fix it and send again with the same handle. HTTP 409 /
-      -32005: the lease is gone or the run is settled or cancelled; stop,
-      do not retry. HTTP 409 / -32004: this agent is paused, disconnected or
+      untouched); fix it and send again with the same handle. When
+      error.data names an artifacts field (error.data.field, error.data.rule,
+      and error.data.allowed when there is a fixed list), change only that
+      field and call oort_run_complete again, at most 2 times. If it is still
+      refused, complete without artifacts and write the result in body.
+      Never send the same call again unchanged. HTTP 409 /
+      -32005: the lease is gone or the run is settled or cancelled; stop
+      that job, do not retry, and delete its folder (other jobs go on).
+      HTTP 409 / -32004: this agent is paused, disconnected or
       the target is not visible; stop. HTTP 403 / -32003: scope or channel
       approval is missing; stop and tell the user to review the connection.
-   h) Woke up after a long sleep with a stored handle: report with that
-      handle first (oort_run_event or oort_run_complete). Calling
-      oort_jobs_claim, or oort_job_start without leaseHandle, first gives you
-      a new handle and the old one answers 409.
+   h) Job folders check (right after oort_inbox_read, before claiming). A
+      folder whose beat was touched in the last 15 minutes belongs to a wake
+      that is still working: leave it alone. A folder whose beat is older is
+      left over from a wake that stopped: take it by renaming the folder to a
+      new tag (mv; if the rename fails, another wake took it first, so leave
+      it), touch beat, and report with its handle first (oort_run_event or
+      oort_run_complete), then carry on in its workdir. If
+      /workspace/oort-run.handle exists (left by the older single-job
+      routine), move it into a new folder as handle and treat it the same
+      way. Calling oort_jobs_claim, or oort_job_start without leaseHandle,
+      before that report gives you a new handle and the old one answers 409.
    If a person asks you to connect an AI, sign in to an AI subscription
    (Claude, Codex) or connect a team API key, do not try to do it yourself
    and never ask for a key, token, password or login code. Suggest the
@@ -1670,7 +1730,10 @@ tunnel, with the active credential from join.
 4) Speech: write only when you add information. If a human asked, you must
    answer. Otherwise silence is success. Bare acknowledgement ("got it",
    "understood") is forbidden.
-5) If events is empty, write nothing and exit. Do not ACK the doorbell
+5) If events is empty, still do h) and call oort_job_start {} once while
+   fewer than 4 folders exist (another wake may have read the same page
+   first); if it returns a job, go on as in 3 a). If job is null and no
+   folder was left for you in h), write nothing and exit. Do not ACK the doorbell
    with a message.
 
 Agent Port shape (loopback, same EP as join):
@@ -1733,7 +1796,36 @@ byte envelope); no whitespace, none of `~ ^ : ? * [`, no backslash, no
 control characters, and not an absolute path, a leading `~` or a drive
 letter), `added` / `deleted` / `commits` (integer 0 to
 2147483647). There is no key for a commit title, a file name or a remote URL,
-so none can be sent. While the lease is live, a bad `artifacts` (or a bad
+so none can be sent.
+
+**The code-task result fields (ADR-0162 amendment 5 C1/C2).** Also optional,
+also closed: `resultKind` (`pr_opened` / `branch_only` / `vm_only` /
+`no_change`), `tests` (`{passed, failed, notRun}`, all three required, each an
+integer 0 to 100000), `nextAction` (`merge_ok` / `please_test` / `blocked` /
+`none`), `commitSha` (7 to 40 hex characters, stored lowercase) and
+`toolCounts` (`{run, edit, read, search, web, other}`, each optional, integer 0
+to 100000). They must agree with each other: `tests`, `nextAction` and
+`commitSha` need `resultKind`; `pr_opened` needs `prUrl`; `branch_only` needs
+`branch` and no `prUrl`; `vm_only` has no `prUrl` or `branch`; `no_change` has
+no `prUrl`, `branch` or `commitSha` and its `added` / `deleted` / `commits`
+are absent or 0; `merge_ok` needs `pr_opened` and no failed test.
+`toolCounts` may come alone, without `resultKind`. A routine that sends only
+the five original keys is unchanged. The server checks the shape, not the
+facts: it does not look up the PR, the commit or the test run. The run read
+(`GET /v1/workspaces/{ws}/agent-runs/{run}`) returns these five fields
+together as `agentReported`, so a client draws them under one "reported by
+the agent" label and never mixes them with what oort itself measured.
+
+A refused `artifacts` names the field: the JSON-RPC error keeps `-32602`, its
+`message` is one English line such as `artifacts.resultKind must be one of
+pr_opened, branch_only, vm_only, no_change`, and `error.data` is
+`{field, rule, allowed?, requires?}` with `rule` one of `enum`, `required`,
+`forbidden`, `range`, `format`, `requires`. Neither ever repeats the value
+that was sent. A refusal past the published schema (a cross rule, a bad
+`prUrl` or `branch`, a non-hex `commitSha`) also writes the audit row with
+`field`, `rule` and `attempt` (the how-many-th refusal for that run), still
+without the value. The server does not stop retries by count; the routine
+does (at most 2 fixes, step g). While the lease is live, a bad `artifacts` (or a bad
 `stage`) refuses the whole call with HTTP 400 / `-32602`, stores nothing from
 it, writes one audit row with a reason code only, and leaves the lease intact,
 so the agent can send the same call again without the bad part. If the
@@ -1846,6 +1938,7 @@ this page and not run for it; they need an isolated PostgreSQL 18):
 | claim, event, complete share the lease and terminal rules | `the_job_and_run_tools_share_the_gateway_lease_and_terminal_rules` (`agent_port_tools_conformance_pg.rs`) |
 | stage markers: 12 kept, bad text refused | `stage_markers_keep_the_latest_twelve_spend_steps_and_refuse_bad_text` |
 | artifacts stored, a bad one refuses the whole completion | `artifacts_are_stored_when_valid_and_a_bad_one_refuses_the_whole_completion` |
+| result fields: the bad field is named, the report reads back as `agentReported` | `the_code_result_contract_names_the_bad_field_and_reads_back_as_agent_reported` |
 | a dead handle cannot grow the audit log | `a_dead_lease_cannot_grow_the_audit_log_with_bad_reports` |
 | lease length and renew | `a_hosted_claim_leases_for_the_hosted_ttl_and_renew_extends_to_it` |
 | expired, not re-claimed: still reports and completes | `an_expired_unreclaimed_hosted_handle_still_reports_and_completes` |
@@ -1892,6 +1985,39 @@ account and VM).** Do not paste handles, bearers or invite values anywhere.
    read). Then stop the VM for 25 minutes with a request waiting: expect
    `work_waiting` or `woken_not_collected`, not `responsive`. Ring again from the
    API and note the doorbell's `lastStatus`. Record the times in #3736 / #3737.
+
+##### 3.3.17.4b Several jobs at once and code results (#3582, draft)
+
+**Status: draft, not tried on a real VM (실기기 미검증).** This is the
+parallel-safe form of the §3.3.17.4 routine. The final wording is fixed after
+the Grok 4-parallel experiment in #3542 (owner decision 「실험용 저장소·Bot 하나
+(추천)」, 2026-10-15, ADR-0162 증보 5 X1), which compares this procedure with the
+older single-handle one. Until then, do not describe it as tested.
+
+Why it changed. The older routine kept one lease handle in
+`/workspace/oort-run.handle`. Four requests sent within half a minute can be
+claimed by one wake or by several wakes at once (job wakes skip the doorbell
+cooldown with a 10-second gap, #3822, and the 15-minute sweep can overlap a
+doorbell wake). With one file, the second claim overwrites the first handle,
+and the first job is left with no way to report. The server side never needed
+a change: every claim is atomic, and the hosted claim has no per-agent limit
+(ADR-0200 증보 2026-10-15 R1).
+
+| Rule | What the routine does |
+|---|---|
+| One folder per job | `/workspace/oort-runs/<tag>/` (mode 700) with `handle` (mode 600), `beat` and `workdir`. `<tag>` is a new UUID, never the handle or the request text. |
+| Claim until none left, at most 4 | `oort_job_start {}` again and again with nothing in between, until `job` is null or 4 folders exist on the VM. A fifth job waits for a later wake. |
+| Same answer for one wake or four | Folders are per job, so it does not matter whether one wake claimed all four or four wakes claimed one each. |
+| Left-over jobs | A folder whose `beat` is older than 15 minutes is taken over by renaming it (only one wake can win the rename), then reported on with its stored handle before any new claim (§3.3.17.4 h). The wake that lost it stops that job as soon as it sees the folder gone (§3.3.17.4 f). |
+| Own working copy | Each job works in `/workspace/work/<tag>` on its own branch, so two jobs never touch the same directory or branch. |
+| Alive and lease, per job | `oort_run_event {status:"running"}` at least every 5 minutes and `oort_job_renew` before `leaseExpiresAtMs`, for every job held, including the ones waiting their turn. |
+| Result order | Push the branch, run the tests, open the PR, then `oort_run_complete`. Each step is one stage. |
+| Result fields | Sent only when `tools/list` shows `resultKind` in the `oort_run_complete` schema (ADR-0162 증보 5 C1 and C2, engine slice C-S1). Until then the five keys of §3.3.17.4a stay the only ones accepted, and the result goes on the first line of `body`. |
+| Refused result | HTTP 400 / `-32602` names the wrong field in the error data (C3, ships with C-S1): fix that field only, at most 2 more sends, then complete without `artifacts`. |
+
+All result fields are what the agent **reported**. oort does not open the PR,
+read the commit or rerun the tests, and the screen labels them 「에이전트
+보고」.
 
 ##### 3.3.17.5 15-minute sweep fallback
 
