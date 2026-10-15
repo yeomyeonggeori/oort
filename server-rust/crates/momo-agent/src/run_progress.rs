@@ -589,7 +589,42 @@ pub struct RunEventRow {
     pub code: Option<String>,
     pub approval_id: Option<Uuid>,
     pub actor_member_id: Option<Uuid>,
+    /// `tool_call` rows only: the oort tool name (ADR-0200 증보 2026-10-15 T1).
+    pub tool: Option<String>,
+    /// `tool_call` rows only: the server-measured duration.
+    pub duration_ms: Option<i32>,
     pub created_at: DateTime<Utc>,
+}
+
+/// Which opt-in ledger kinds a read asks for. Clients built before a kind reject a
+/// ledger holding a kind they do not know, so every kind added after the first
+/// release is returned only on request (`?include=`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RunEventInclude {
+    /// `doorbell_rung` rows (ADR-0200 증보 2026-10-14).
+    pub doorbell: bool,
+    /// `tool_call` rows plus the tally (ADR-0200 증보 2026-10-15 T4).
+    pub tools: bool,
+}
+
+/// Per-tool totals of one run's oort calls (`agent_run_tool_tally`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolTallyRow {
+    pub tool: String,
+    pub ok: i64,
+    pub error: i64,
+    pub duration_ms_sum: i64,
+}
+
+/// One run's ledger as a viewer may read it.
+#[derive(Debug, Clone, Default)]
+pub struct RunLedger {
+    pub events: Vec<RunEventRow>,
+    /// `Some` only when [`RunEventInclude::tools`] was asked for.
+    pub tool_tally: Option<Vec<ToolTallyRow>>,
+    /// `Some` only with `tools`: whether calls were counted past the row cap (the tally
+    /// holds more calls than the ledger has `tool_call` rows).
+    pub tool_call_rows_capped: Option<bool>,
 }
 
 /// The whole ledger of one run (≤ 200 rows), oldest first — or `None` when the run
@@ -598,7 +633,8 @@ pub struct RunEventRow {
 ///
 /// `doorbell_rung` rows (ADR-0200 증보 2026-10-14) are returned only when the caller asks
 /// (`include_doorbell`): clients built before that kind reject a ledger with a kind they
-/// do not know, so the default read must stay what they can parse.
+/// do not know, so the default read must stay what they can parse. `tool_call` rows are
+/// never returned here — see [`list_run_ledger_in_tx`].
 pub async fn list_run_events_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -606,6 +642,30 @@ pub async fn list_run_events_in_tx(
     viewer_member_id: Uuid,
     include_doorbell: bool,
 ) -> Result<Option<Vec<RunEventRow>>, DbError> {
+    Ok(list_run_ledger_in_tx(
+        conn,
+        workspace_id,
+        run_id,
+        viewer_member_id,
+        RunEventInclude {
+            doorbell: include_doorbell,
+            tools: false,
+        },
+    )
+    .await?
+    .map(|ledger| ledger.events))
+}
+
+/// [`list_run_events_in_tx`] with every opt-in kind selectable. With `tools`, the
+/// `tool_call` rows (≤ 100 per run, ADR-0200 증보 T3) ride along — so the row bound is
+/// 300 — and the run's per-tool tally is returned beside them.
+pub async fn list_run_ledger_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    viewer_member_id: Uuid,
+    include: RunEventInclude,
+) -> Result<Option<RunLedger>, DbError> {
     // `expired`: the run finished past retention, so its ledger answers empty even before
     // the sweep has deleted it (ADR-0200 D2). `None` = not in this workspace / not a member.
     let visible: Option<bool> = sqlx::query_scalar(
@@ -623,23 +683,39 @@ pub async fn list_run_events_in_tx(
     .bind(crate::run_event::RUN_EVENT_RETENTION_DAYS)
     .fetch_optional(&mut *conn)
     .await?;
+    let empty_tools = || include.tools.then(Vec::new);
     match visible {
         None => return Ok(None),
-        Some(true) => return Ok(Some(Vec::new())),
+        Some(true) => {
+            return Ok(Some(RunLedger {
+                events: Vec::new(),
+                tool_tally: empty_tools(),
+                tool_call_rows_capped: include.tools.then_some(false),
+            }))
+        }
         Some(false) => {}
     }
+    let limit: i64 = if include.tools {
+        200 + crate::run_event::TOOL_CALL_ROWS_PER_RUN
+    } else {
+        200
+    };
     let rows = sqlx::query(
         "SELECT row_number() OVER (ORDER BY e.seq) AS ordinal, \
-                e.kind, e.stage, e.code, e.approval_id, e.actor_member_id, e.created_at \
+                e.kind, e.stage, e.code, e.approval_id, e.actor_member_id, \
+                e.tool, e.duration_ms, e.created_at \
            FROM agent_run_event e \
           WHERE e.workspace_id = $1 AND e.run_id = $2 \
             AND ($3 OR e.kind <> 'doorbell_rung') \
+            AND ($4 OR e.kind <> 'tool_call') \
           ORDER BY e.seq ASC \
-          LIMIT 200",
+          LIMIT $5",
     )
     .bind(workspace_id)
     .bind(run_id)
-    .bind(include_doorbell)
+    .bind(include.doorbell)
+    .bind(include.tools)
+    .bind(limit)
     .fetch_all(&mut *conn)
     .await?;
     let mut events = Vec::with_capacity(rows.len());
@@ -651,8 +727,42 @@ pub async fn list_run_events_in_tx(
             code: row.try_get("code")?,
             approval_id: row.try_get("approval_id")?,
             actor_member_id: row.try_get("actor_member_id")?,
+            tool: row.try_get("tool")?,
+            duration_ms: row.try_get("duration_ms")?,
             created_at: row.try_get("created_at")?,
         });
     }
-    Ok(Some(events))
+    if !include.tools {
+        return Ok(Some(RunLedger {
+            events,
+            tool_tally: None,
+            tool_call_rows_capped: None,
+        }));
+    }
+    let tally_rows = sqlx::query(
+        "SELECT tool, ok_count, error_count, duration_ms_sum \
+           FROM agent_run_tool_tally \
+          WHERE workspace_id = $1 AND run_id = $2 \
+          ORDER BY tool",
+    )
+    .bind(workspace_id)
+    .bind(run_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut tally = Vec::with_capacity(tally_rows.len());
+    for row in &tally_rows {
+        tally.push(ToolTallyRow {
+            tool: row.try_get("tool")?,
+            ok: row.try_get("ok_count")?,
+            error: row.try_get("error_count")?,
+            duration_ms_sum: row.try_get("duration_ms_sum")?,
+        });
+    }
+    let counted: i64 = tally.iter().map(|row| row.ok + row.error).sum();
+    let written = events.iter().filter(|e| e.kind == "tool_call").count() as i64;
+    Ok(Some(RunLedger {
+        events,
+        tool_tally: Some(tally),
+        tool_call_rows_capped: Some(counted > written),
+    }))
 }

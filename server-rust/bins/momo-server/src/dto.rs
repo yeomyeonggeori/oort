@@ -2000,6 +2000,15 @@ pub struct AgentRunResponse {
     pub output: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<Value>,
+    /// ADR-0162 증보 5 C1 — the agent's own code-task report
+    /// (`{resultKind, tests, nextAction, commitSha, toolCounts}`, only what was
+    /// reported), gathered in one object so a client draws it under one
+    /// 「에이전트 보고」 label and never mixes it with what oort measured. Absent
+    /// when the run reported none of it. Deployed clients build their run from
+    /// named fields (`packages/momo-core` `agentRunDetailFromWire`), so an extra
+    /// top-level key is ignored rather than refused.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_reported: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub started_at_ms: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2207,7 +2216,23 @@ pub struct AgentRunEventDto {
     pub approval_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub actor_member_id: Option<String>,
+    /// `tool_call` only (served behind `include=tools`): the oort tool name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool: Option<String>,
+    /// `tool_call` only: the server-measured duration of the call.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<i32>,
     pub created_at_ms: i64,
+}
+
+/// openapi `AgentRunToolTally` — one tool's totals on one run (ADR-0200 증보 T3).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunToolTallyDto {
+    pub tool: String,
+    pub ok: i64,
+    pub error: i64,
+    pub duration_ms_sum: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -2215,6 +2240,12 @@ pub struct AgentRunEventDto {
 pub struct AgentRunEventsResponse {
     pub run_id: String,
     pub events: Vec<AgentRunEventDto>,
+    /// Present only with `include=tools` (ADR-0200 증보 2026-10-15 T4).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_tally: Option<Vec<AgentRunToolTallyDto>>,
+    /// Present only with `include=tools`: calls were counted past the 100-row cap.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_rows_capped: Option<bool>,
 }
 
 /// openapi `AgentRunSummaryPage` (Swift `AgentRunSummaryPageDTO`).

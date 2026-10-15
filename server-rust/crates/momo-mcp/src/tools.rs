@@ -348,10 +348,72 @@ fn artifacts_schema() -> Value {
             "branch": nullable(text(800)),
             "added": nullable(integer(0, MAX_ARTIFACT_COUNT)),
             "deleted": nullable(integer(0, MAX_ARTIFACT_COUNT)),
-            "commits": nullable(integer(0, MAX_ARTIFACT_COUNT))
+            "commits": nullable(integer(0, MAX_ARTIFACT_COUNT)),
+            // ADR-0162 증보 5 C1 — the code-task result contract. Closed values
+            // only; the cross rules (which kind needs which key) are the
+            // adapter's, because this validator sees one property at a time.
+            "resultKind": nullable(json!({"type": "string", "enum": RESULT_KINDS})),
+            "tests": nullable(json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": TEST_COUNT_KEYS,
+                "properties": {
+                    "passed": integer(0, MAX_REPORTED_COUNT),
+                    "failed": integer(0, MAX_REPORTED_COUNT),
+                    "notRun": integer(0, MAX_REPORTED_COUNT)
+                }
+            })),
+            "nextAction": nullable(json!({"type": "string", "enum": NEXT_ACTIONS})),
+            // 7..=40 hexadecimal characters. The hex rule itself is checked by the
+            // adapter (`pattern` is not a keyword this validator enforces, and an
+            // advertised-but-unchecked keyword is what the validator exists to
+            // prevent), so the tool description says it in words.
+            "commitSha": nullable(json!({
+                "type": "string",
+                "minLength": 7,
+                "maxLength": 40,
+                "description": BYTE_BOUND_NOTE
+            })),
+            // ADR-0162 증보 5 C2 — work done inside your own VM, as counts only.
+            "toolCounts": nullable(json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "run": nullable(integer(0, MAX_REPORTED_COUNT)),
+                    "edit": nullable(integer(0, MAX_REPORTED_COUNT)),
+                    "read": nullable(integer(0, MAX_REPORTED_COUNT)),
+                    "search": nullable(integer(0, MAX_REPORTED_COUNT)),
+                    "web": nullable(integer(0, MAX_REPORTED_COUNT)),
+                    "other": nullable(integer(0, MAX_REPORTED_COUNT))
+                }
+            }))
         }
     })
 }
+
+/// ADR-0162 증보 5 C1 — `artifacts.resultKind`.
+pub const RESULT_KINDS: [&str; 4] = ["pr_opened", "branch_only", "vm_only", "no_change"];
+/// ADR-0162 증보 5 C1 — `artifacts.nextAction`.
+pub const NEXT_ACTIONS: [&str; 4] = ["merge_ok", "please_test", "blocked", "none"];
+/// ADR-0162 증보 5 C1/C2 — the ceiling of every `tests` and `toolCounts` count.
+pub const MAX_REPORTED_COUNT: i64 = 100_000;
+/// Every key `artifacts` accepts, in the order the schema declares them.
+pub const ARTIFACT_KEYS: [&str; 10] = [
+    "prUrl",
+    "branch",
+    "added",
+    "deleted",
+    "commits",
+    "resultKind",
+    "tests",
+    "nextAction",
+    "commitSha",
+    "toolCounts",
+];
+/// `artifacts.tests` — all three required.
+pub const TEST_COUNT_KEYS: [&str; 3] = ["passed", "failed", "notRun"];
+/// `artifacts.toolCounts` — the closed categories (ADR-0162 증보 5 C2), all optional.
+pub const TOOL_COUNT_KEYS: [&str; 6] = ["run", "edit", "read", "search", "web", "other"];
 
 /// The `actionId` enum of [`action_propose_schema`] — ADR-0186 D1.
 ///
@@ -784,7 +846,17 @@ pub const TOOL_CATALOG: [ToolDescriptor; 13] = [
     ToolDescriptor {
         name: TOOL_RUN_COMPLETE,
         title: "Complete a run",
-        description: "Deliver the final answer and settle the run this lease owns.",
+        description: "Deliver the final answer and settle the run this lease owns. For a code \
+                      task, report the result in artifacts: resultKind (pr_opened, \
+                      branch_only, vm_only or no_change), tests {passed, failed, notRun}, \
+                      nextAction (merge_ok, please_test, blocked or none) and commitSha (7 to \
+                      40 hex characters); \
+                      toolCounts {run, edit, read, search, web, other} counts work done \
+                      inside your own machine. People see these as your own report. If the \
+                      call is refused with -32602 and error.data names an artifacts field, \
+                      fix only that field and call again with the same leaseHandle, at most \
+                      2 times; if it is still refused, complete without artifacts and write \
+                      the result in body. Never resend an unchanged call.",
         required_scope: SCOPE_RUNS_CALLBACK,
         schema: run_complete_schema,
     },
@@ -959,8 +1031,23 @@ fn has_scope(scopes: &[String], required: &str) -> bool {
 /// Every violation is the one [`ToolFailure::InvalidArguments`], never a
 /// per-cause code: which rule a call broke is not something an unauthorized
 /// caller should be able to enumerate.
+///
+/// **One exception, by decision (ADR-0162 증보 5 C3, 결재 「정해진 칸으로 보고
+/// (추천)」 2026-10-15):** a fault inside `oort_run_complete.artifacts` answers
+/// [`ToolFailure::InvalidArtifacts`], which names the field and the closed rule
+/// (never the value) so the agent can fix exactly that field and send again.
+/// It reveals nothing the published `inputSchema` does not already state, and it
+/// is only reachable by a caller the view already lets call the tool.
 pub fn validate_arguments(tool: &ToolDescriptor, arguments: &Value) -> Result<(), ToolFailure> {
-    validate_against(&tool.input_schema(), arguments)
+    let mut path = String::new();
+    match check(&tool.input_schema(), arguments, &mut path) {
+        Ok(()) => Ok(()),
+        Err(fault) if tool.name == TOOL_RUN_COMPLETE => Err(ArtifactViolation::from_fault(&fault)
+            .map_or(ToolFailure::InvalidArguments, |v| {
+                ToolFailure::InvalidArtifacts(v)
+            })),
+        Err(_) => Err(ToolFailure::InvalidArguments),
+    }
 }
 
 /// The declared types of one property: `"string"` or `["string", "null"]`.
@@ -975,8 +1062,31 @@ fn declared_types(schema: &Value) -> Vec<&str> {
     }
 }
 
+/// Where a value broke its schema: the dotted property path (`artifacts.tests.failed`)
+/// and the closed rule. Internal — only [`ArtifactViolation::from_fault`] turns
+/// one into something that crosses the wire, and only for a closed list of paths.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Fault {
+    path: String,
+    rule: ArtifactRule,
+}
+
+/// The coarse verdict of [`check`] on one schema — what the unit tests below
+/// pin per keyword.
+#[cfg(test)]
 fn validate_against(schema: &Value, value: &Value) -> Result<(), ToolFailure> {
-    let invalid = ToolFailure::InvalidArguments;
+    let mut path = String::new();
+    check(schema, value, &mut path).map_err(|_| ToolFailure::InvalidArguments)
+}
+
+fn fault(path: &str, rule: ArtifactRule) -> Fault {
+    Fault {
+        path: path.to_owned(),
+        rule,
+    }
+}
+
+fn check(schema: &Value, value: &Value, path: &mut String) -> Result<(), Fault> {
     let types = declared_types(schema);
     // `null` is accepted only where the schema says so — which, by the
     // nullability contract above, is exactly the optional properties whose
@@ -985,7 +1095,7 @@ fn validate_against(schema: &Value, value: &Value) -> Result<(), ToolFailure> {
         return if types.contains(&"null") {
             Ok(())
         } else {
-            Err(invalid)
+            Err(fault(path, ArtifactRule::Format))
         };
     }
     // Exactly one non-null type per property in this catalog; pick it rather
@@ -997,7 +1107,9 @@ fn validate_against(schema: &Value, value: &Value) -> Result<(), ToolFailure> {
         .collect();
     match concrete.first().filter(|_| concrete.len() == 1).copied() {
         Some("object") => {
-            let object = value.as_object().ok_or(invalid)?;
+            let object = value
+                .as_object()
+                .ok_or_else(|| fault(path, ArtifactRule::Format))?;
             // `oneOf` of closed branches: the value must satisfy at least one.
             // (The branches are mutually exclusive by construction — closed,
             // with `required` keys that differ — so "at least one" and "exactly
@@ -1006,40 +1118,44 @@ fn validate_against(schema: &Value, value: &Value) -> Result<(), ToolFailure> {
             if let Some(branches) = schema.get("oneOf").and_then(Value::as_array) {
                 // `oneOf` beside sibling `properties` would silently skip them.
                 if schema.get("properties").is_some() {
-                    return Err(invalid);
+                    return Err(fault(path, ArtifactRule::Format));
                 }
-                return if branches
-                    .iter()
-                    .any(|branch| validate_against(branch, value).is_ok())
-                {
+                return if branches.iter().any(|branch| {
+                    let mut inner = path.clone();
+                    check(branch, value, &mut inner).is_ok()
+                }) {
                     Ok(())
                 } else {
-                    Err(invalid)
+                    Err(fault(path, ArtifactRule::Format))
                 };
             }
             if let Some(minimum) = schema.get("minProperties").and_then(Value::as_u64) {
                 if (object.len() as u64) < minimum {
-                    return Err(invalid);
+                    return Err(fault(path, ArtifactRule::Required));
                 }
             }
             let properties = schema
                 .get("properties")
                 .and_then(Value::as_object)
-                .ok_or(invalid)?;
+                .ok_or_else(|| fault(path, ArtifactRule::Format))?;
             if schema.get("additionalProperties") == Some(&Value::Bool(false)) {
                 for key in object.keys() {
                     if !properties.contains_key(key) {
-                        return Err(invalid);
+                        // The unknown key's own name is caller text: the fault
+                        // names the object that refused it, never the key.
+                        return Err(fault(path, ArtifactRule::Forbidden));
                     }
                 }
             }
             if let Some(required) = schema.get("required").and_then(Value::as_array) {
                 for name in required {
-                    let name = name.as_str().ok_or(invalid)?;
+                    let name = name
+                        .as_str()
+                        .ok_or_else(|| fault(path, ArtifactRule::Format))?;
                     // A required key present as `null` is absent: the catalog
                     // never declares a nullable required field.
                     if !matches!(object.get(name), Some(present) if !present.is_null()) {
-                        return Err(invalid);
+                        return Err(fault(&child(path, name), ArtifactRule::Required));
                     }
                 }
             }
@@ -1048,13 +1164,16 @@ fn validate_against(schema: &Value, value: &Value) -> Result<(), ToolFailure> {
                 // present `null` — is validated against its own schema, which
                 // is where the nullability contract is actually applied.
                 if let Some(present) = object.get(key) {
-                    validate_against(property, present)?;
+                    let mut inner = child(path, key);
+                    check(property, present, &mut inner)?;
                 }
             }
             Ok(())
         }
         Some("string") => {
-            let text = value.as_str().ok_or(invalid)?;
+            let text = value
+                .as_str()
+                .ok_or_else(|| fault(path, ArtifactRule::Format))?;
             // **Bytes, not characters** — the ceilings these mirror are byte
             // ceilings in the domain, so counting characters here would admit
             // a 3,000-emoji body that the adapter then refuses at 12,000 bytes.
@@ -1063,21 +1182,21 @@ fn validate_against(schema: &Value, value: &Value) -> Result<(), ToolFailure> {
             let length = text.len() as u64;
             if let Some(min) = schema.get("minLength").and_then(Value::as_u64) {
                 if length < min {
-                    return Err(invalid);
+                    return Err(fault(path, ArtifactRule::Range));
                 }
             }
             if let Some(max) = schema.get("maxLength").and_then(Value::as_u64) {
                 if length > max {
-                    return Err(invalid);
+                    return Err(fault(path, ArtifactRule::Range));
                 }
             }
             if schema.get("format").and_then(Value::as_str) == Some("uuid") && !is_uuid_shaped(text)
             {
-                return Err(invalid);
+                return Err(fault(path, ArtifactRule::Format));
             }
             if let Some(allowed) = schema.get("enum").and_then(Value::as_array) {
                 if !allowed.iter().any(|candidate| candidate == value) {
-                    return Err(invalid);
+                    return Err(fault(path, ArtifactRule::Enum));
                 }
             }
             Ok(())
@@ -1085,45 +1204,325 @@ fn validate_against(schema: &Value, value: &Value) -> Result<(), ToolFailure> {
         Some("integer") => {
             // `as_i64` also rejects a fractional or float-shaped number, which
             // `integer` forbids and a lenient reader would have truncated.
-            let number = value.as_i64().filter(|_| value.is_i64()).ok_or(invalid)?;
+            let Some(number) = value.as_i64().filter(|_| value.is_i64()) else {
+                // An integer beyond i64 is out of range; anything else
+                // (a fraction, a string) is the wrong shape.
+                return Err(fault(
+                    path,
+                    if value.is_u64() {
+                        ArtifactRule::Range
+                    } else {
+                        ArtifactRule::Format
+                    },
+                ));
+            };
             if let Some(min) = schema.get("minimum").and_then(Value::as_i64) {
                 if number < min {
-                    return Err(invalid);
+                    return Err(fault(path, ArtifactRule::Range));
                 }
             }
             if let Some(max) = schema.get("maximum").and_then(Value::as_i64) {
                 if number > max {
-                    return Err(invalid);
+                    return Err(fault(path, ArtifactRule::Range));
                 }
             }
             Ok(())
         }
-        Some("boolean") => value.is_boolean().then_some(()).ok_or(invalid),
+        Some("boolean") => value
+            .is_boolean()
+            .then_some(())
+            .ok_or_else(|| fault(path, ArtifactRule::Format)),
         Some("array") => {
-            let items = value.as_array().ok_or(invalid)?;
+            let items = value
+                .as_array()
+                .ok_or_else(|| fault(path, ArtifactRule::Format))?;
             let length = items.len() as u64;
             if let Some(min) = schema.get("minItems").and_then(Value::as_u64) {
                 if length < min {
-                    return Err(invalid);
+                    return Err(fault(path, ArtifactRule::Range));
                 }
             }
             // An unbounded array is unvalidatable: a missing `maxItems` refuses.
             let max = schema
                 .get("maxItems")
                 .and_then(Value::as_u64)
-                .ok_or(invalid)?;
+                .ok_or_else(|| fault(path, ArtifactRule::Format))?;
             if length > max {
-                return Err(invalid);
+                return Err(fault(path, ArtifactRule::Range));
             }
-            let element = schema.get("items").ok_or(invalid)?;
+            let element = schema
+                .get("items")
+                .ok_or_else(|| fault(path, ArtifactRule::Format))?;
             for item in items {
-                validate_against(element, item)?;
+                check(element, item, path)?;
             }
             Ok(())
         }
         // No catalog schema uses another type; refusing rather than passing
         // keeps an unvalidated shape from ever reaching a domain port.
-        _ => Err(invalid),
+        _ => Err(fault(path, ArtifactRule::Format)),
+    }
+}
+
+fn child(path: &str, key: &str) -> String {
+    if path.is_empty() {
+        key.to_owned()
+    } else {
+        format!("{path}.{key}")
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0162 증보 5 C3 — a refused `artifacts` names its field and rule
+// ---------------------------------------------------------------------------
+
+/// The closed rule an `artifacts` field broke (ADR-0162 증보 5 C3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArtifactRule {
+    /// The value is not one of the field's closed values.
+    Enum,
+    /// A key that must be present is missing.
+    Required,
+    /// A key that must be absent is present (an unknown key, or a key the
+    /// chosen `resultKind` rules out).
+    Forbidden,
+    /// A number or a length is outside its bounds.
+    Range,
+    /// The value has the wrong type or shape.
+    Format,
+    /// The field is valid only together with another one (`requires`).
+    Requires,
+}
+
+impl ArtifactRule {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Enum => "enum",
+            Self::Required => "required",
+            Self::Forbidden => "forbidden",
+            Self::Range => "range",
+            Self::Format => "format",
+            Self::Requires => "requires",
+        }
+    }
+}
+
+/// Which `artifacts` field a completion got wrong, and how — ADR-0162 증보 5 C3.
+///
+/// Every part is `'static`: the field is one of a closed list of paths and the
+/// hint is a fixed English clause, so **no caller text can reach the wire, a log
+/// or an audit row through it** — not the bad value, and not an unknown key's
+/// name (an unknown key is reported as a fault of the object that refused it,
+/// with `allowed` listing the keys it does accept).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArtifactViolation {
+    /// Dotted path from the tool's arguments, e.g. `artifacts.tests.failed`.
+    pub field: &'static str,
+    pub rule: ArtifactRule,
+    /// The closed values (`enum`) or the accepted keys (an unknown key). Empty
+    /// when neither applies.
+    pub allowed: &'static [&'static str],
+    /// The other field this one needs (`requires`, `required`).
+    pub requires: Option<&'static str>,
+    /// A fixed English clause completing `"<field> <hint>"` for the wire message.
+    pub hint: &'static str,
+}
+
+/// One `artifacts` path the wire may name, with the clause a format or range
+/// fault on it is explained by, and the closed list that goes with it.
+struct ArtifactField {
+    path: &'static str,
+    hint: &'static str,
+    allowed: &'static [&'static str],
+}
+
+const COUNT_HINT: &str = "must be an integer from 0 to 100000";
+const DIFF_HINT: &str = "must be an integer from 0 to 2147483647";
+
+const ARTIFACT_FIELDS: &[ArtifactField] = &[
+    ArtifactField {
+        path: "artifacts",
+        hint: "must be an object",
+        allowed: &ARTIFACT_KEYS,
+    },
+    ArtifactField {
+        path: "artifacts.prUrl",
+        // The host list is the operator's (github.com plus any GitHub
+        // Enterprise host), so the clause names the shape, not one host.
+        hint: "must be https://<allowed host>/<owner>/<repo>/pull/<n> \
+               (github.com or this server's GitHub Enterprise host, at most 300 bytes)",
+        allowed: &[],
+    },
+    ArtifactField {
+        path: "artifacts.branch",
+        // Every rule `momo_t3::work_share::validated_branch` applies, so the
+        // agent's one fix is the right one.
+        hint: "must be a git branch name of at most 200 characters: no whitespace, \
+               none of ~ ^ : ? * [ \\, and not a path",
+        allowed: &[],
+    },
+    ArtifactField {
+        path: "artifacts.added",
+        hint: DIFF_HINT,
+        allowed: &[],
+    },
+    ArtifactField {
+        path: "artifacts.deleted",
+        hint: DIFF_HINT,
+        allowed: &[],
+    },
+    ArtifactField {
+        path: "artifacts.commits",
+        hint: DIFF_HINT,
+        allowed: &[],
+    },
+    ArtifactField {
+        path: "artifacts.resultKind",
+        hint: "must be one of the allowed values",
+        allowed: &RESULT_KINDS,
+    },
+    ArtifactField {
+        path: "artifacts.tests",
+        hint: "must be an object {passed, failed, notRun}",
+        allowed: &TEST_COUNT_KEYS,
+    },
+    ArtifactField {
+        path: "artifacts.tests.passed",
+        hint: COUNT_HINT,
+        allowed: &[],
+    },
+    ArtifactField {
+        path: "artifacts.tests.failed",
+        hint: COUNT_HINT,
+        allowed: &[],
+    },
+    ArtifactField {
+        path: "artifacts.tests.notRun",
+        hint: COUNT_HINT,
+        allowed: &[],
+    },
+    ArtifactField {
+        path: "artifacts.nextAction",
+        hint: "must be one of the allowed values",
+        allowed: &NEXT_ACTIONS,
+    },
+    ArtifactField {
+        path: "artifacts.commitSha",
+        hint: "must be 7 to 40 hexadecimal characters",
+        allowed: &[],
+    },
+    ArtifactField {
+        path: "artifacts.toolCounts",
+        hint: "must be an object of counts",
+        allowed: &TOOL_COUNT_KEYS,
+    },
+    ArtifactField {
+        path: "artifacts.toolCounts.run",
+        hint: COUNT_HINT,
+        allowed: &[],
+    },
+    ArtifactField {
+        path: "artifacts.toolCounts.edit",
+        hint: COUNT_HINT,
+        allowed: &[],
+    },
+    ArtifactField {
+        path: "artifacts.toolCounts.read",
+        hint: COUNT_HINT,
+        allowed: &[],
+    },
+    ArtifactField {
+        path: "artifacts.toolCounts.search",
+        hint: COUNT_HINT,
+        allowed: &[],
+    },
+    ArtifactField {
+        path: "artifacts.toolCounts.web",
+        hint: COUNT_HINT,
+        allowed: &[],
+    },
+    ArtifactField {
+        path: "artifacts.toolCounts.other",
+        hint: COUNT_HINT,
+        allowed: &[],
+    },
+];
+
+impl ArtifactViolation {
+    /// A violation on one of the closed `artifacts` paths. `None` for a path
+    /// outside `artifacts` (those keep the coarse answer).
+    pub fn on(field: &str, rule: ArtifactRule) -> Option<Self> {
+        let spec = ARTIFACT_FIELDS.iter().find(|spec| spec.path == field)?;
+        Some(Self {
+            field: spec.path,
+            rule,
+            allowed: match rule {
+                ArtifactRule::Enum | ArtifactRule::Forbidden => spec.allowed,
+                _ => &[],
+            },
+            requires: None,
+            // A missing key reads "<field> is required"; every other rule is
+            // explained by the field's own clause.
+            hint: if rule == ArtifactRule::Required {
+                ""
+            } else {
+                spec.hint
+            },
+        })
+    }
+
+    /// A cross-rule violation the adapter found (ADR-0162 증보 5 C1): `field`
+    /// broke `rule`, explained by the fixed clause `hint`.
+    pub fn cross(
+        field: &'static str,
+        rule: ArtifactRule,
+        requires: Option<&'static str>,
+        hint: &'static str,
+    ) -> Self {
+        Self {
+            field,
+            rule,
+            allowed: &[],
+            requires,
+            hint,
+        }
+    }
+
+    fn from_fault(fault: &Fault) -> Option<Self> {
+        Self::on(&fault.path, fault.rule)
+    }
+
+    /// The one-line English message the agent reads (C3) — the same facts as
+    /// [`Self::data`], never the value that was sent.
+    pub fn message(&self) -> String {
+        match self.rule {
+            ArtifactRule::Enum => {
+                format!("{} must be one of {}", self.field, self.allowed.join(", "))
+            }
+            ArtifactRule::Forbidden if !self.allowed.is_empty() => format!(
+                "{} accepts only the keys {}",
+                self.field,
+                self.allowed.join(", ")
+            ),
+            ArtifactRule::Required if self.hint.is_empty() => {
+                format!("{} is required", self.field)
+            }
+            _ => format!("{} {}", self.field, self.hint),
+        }
+    }
+
+    /// JSON-RPC `error.data` (C3): `{field, rule, allowed?, requires?}`.
+    pub fn data(&self) -> Value {
+        let mut data = serde_json::Map::new();
+        data.insert("field".into(), json!(self.field));
+        data.insert("rule".into(), json!(self.rule.as_str()));
+        if !self.allowed.is_empty() {
+            data.insert("allowed".into(), json!(self.allowed));
+        }
+        if let Some(requires) = self.requires {
+            data.insert("requires".into(), json!(requires));
+        }
+        Value::Object(data)
     }
 }
 
@@ -1155,6 +1554,10 @@ fn is_uuid_shaped(value: &str) -> bool {
 pub enum ToolFailure {
     /// The arguments did not satisfy the tool's schema.
     InvalidArguments,
+    /// `oort_run_complete.artifacts` broke its contract (ADR-0162 증보 5 C3):
+    /// the same -32602 as [`Self::InvalidArguments`], plus `error.data` naming
+    /// the field and the closed rule so the agent can fix that field and retry.
+    InvalidArtifacts(ArtifactViolation),
     /// The connection, scope, membership or actor binding refused the call.
     NotAuthorized,
     /// The target is not reachable right now — paused, inactive, missing, or
@@ -1173,10 +1576,29 @@ pub enum ToolFailure {
 }
 
 impl ToolFailure {
+    /// The closed machine code a recorded tool call carries (ADR-0200 증보 2026-10-15
+    /// T1): one token per variant, 1:1, and the exact set migration 133's
+    /// `agent_run_event_tool_call_ck` admits besides `ok`.
+    pub fn code(self) -> &'static str {
+        match self {
+            // A rejected artifacts field is the same -32602 wire answer, so it records
+            // as `invalid_arguments` too; the closed code set stays migration 133's.
+            ToolFailure::InvalidArguments | ToolFailure::InvalidArtifacts(_) => "invalid_arguments",
+            ToolFailure::NotAuthorized => "not_authorized",
+            ToolFailure::Unavailable => "unavailable",
+            ToolFailure::Conflict => "conflict",
+            ToolFailure::AlreadyClaimed => "already_claimed",
+            ToolFailure::ClaimExpired => "claim_expired",
+            ToolFailure::Internal => "internal",
+        }
+    }
+
     /// `(http status, json-rpc code, wire message)`.
     pub fn wire(self) -> (u16, i64, &'static str) {
         match self {
-            ToolFailure::InvalidArguments => (400, -32602, "invalid tool arguments"),
+            ToolFailure::InvalidArguments | ToolFailure::InvalidArtifacts(_) => {
+                (400, -32602, "invalid tool arguments")
+            }
             ToolFailure::NotAuthorized => {
                 (403, -32003, "tool is not authorized for this connection")
             }
@@ -1185,6 +1607,24 @@ impl ToolFailure {
             ToolFailure::AlreadyClaimed => (409, -32006, "secret was already claimed"),
             ToolFailure::ClaimExpired => (409, -32007, "claim window has passed"),
             ToolFailure::Internal => (500, -32603, "internal error"),
+        }
+    }
+
+    /// The wire message: [`Self::wire`]'s fixed text for every failure but
+    /// [`Self::InvalidArtifacts`], whose message names the field and rule
+    /// (never the value) — ADR-0162 증보 5 C3.
+    pub fn message(self) -> std::borrow::Cow<'static, str> {
+        match self {
+            ToolFailure::InvalidArtifacts(violation) => violation.message().into(),
+            other => other.wire().2.into(),
+        }
+    }
+
+    /// JSON-RPC `error.data`: present only for [`Self::InvalidArtifacts`].
+    pub fn data(self) -> Option<Value> {
+        match self {
+            ToolFailure::InvalidArtifacts(violation) => Some(violation.data()),
+            _ => None,
         }
     }
 }
@@ -1814,9 +2254,12 @@ mod tests {
             json!({"prUrl": 5}),
             json!("https://github.com/a/b/pull/1"),
         ] {
-            assert_eq!(
-                validate_arguments(complete, &done(bad.clone())),
-                Err(ToolFailure::InvalidArguments),
+            // ADR-0162 증보 5 C3: still -32602, now naming the field.
+            assert!(
+                matches!(
+                    validate_arguments(complete, &done(bad.clone())),
+                    Err(ToolFailure::InvalidArtifacts(_))
+                ),
                 "{bad}"
             );
         }
@@ -1825,6 +2268,278 @@ mod tests {
             schema["properties"]["artifacts"]["additionalProperties"],
             json!(false)
         );
+    }
+
+    fn artifacts_refusal(artifacts: Value) -> Option<ArtifactViolation> {
+        let complete = TOOL_CATALOG
+            .iter()
+            .find(|tool| tool.name == TOOL_RUN_COMPLETE)
+            .expect("oort_run_complete");
+        match validate_arguments(
+            complete,
+            &json!({"leaseHandle": "x", "status": "succeeded", "artifacts": artifacts}),
+        ) {
+            Ok(()) => None,
+            Err(ToolFailure::InvalidArtifacts(violation)) => Some(violation),
+            Err(other) => panic!("artifacts refusal must name its field, got {other:?}"),
+        }
+    }
+
+    /// ADR-0162 증보 5 C1/C2 — the closed result fields are published, closed and
+    /// enforced; the old five keys still validate on their own.
+    #[test]
+    fn the_code_result_contract_fields_are_declared_closed_and_bounded() {
+        let complete = TOOL_CATALOG
+            .iter()
+            .find(|tool| tool.name == TOOL_RUN_COMPLETE)
+            .expect("oort_run_complete");
+        let schema = complete.input_schema();
+        let artifacts = &schema["properties"]["artifacts"];
+        let declared: Vec<&str> = artifacts["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        let mut expected: Vec<&str> = ARTIFACT_KEYS.to_vec();
+        expected.sort_unstable();
+        let mut declared_sorted = declared.clone();
+        declared_sorted.sort_unstable();
+        assert_eq!(declared_sorted, expected);
+        assert_eq!(
+            artifacts["properties"]["resultKind"]["enum"],
+            json!(RESULT_KINDS)
+        );
+        assert_eq!(
+            artifacts["properties"]["nextAction"]["enum"],
+            json!(NEXT_ACTIONS)
+        );
+        assert_eq!(
+            artifacts["properties"]["tests"]["additionalProperties"],
+            json!(false)
+        );
+        assert_eq!(
+            artifacts["properties"]["toolCounts"]["additionalProperties"],
+            json!(false)
+        );
+
+        // Old routines (five keys only) are untouched.
+        assert_eq!(
+            artifacts_refusal(
+                json!({"prUrl": "https://github.com/a/b/pull/1", "branch": "x", "added": 1, "deleted": 2, "commits": 3})
+            ),
+            None
+        );
+        // A full code-task report validates at the transport (cross rules are the adapter's).
+        assert_eq!(
+            artifacts_refusal(json!({
+                "resultKind": "pr_opened", "prUrl": "https://github.com/a/b/pull/1",
+                "tests": {"passed": 12, "failed": 0, "notRun": 1},
+                "nextAction": "merge_ok", "commitSha": "ABCDEF1",
+                "toolCounts": {"run": 12, "edit": 4, "read": 30}
+            })),
+            None
+        );
+        assert_eq!(
+            artifacts_refusal(json!({"toolCounts": {"web": MAX_REPORTED_COUNT}})),
+            None
+        );
+    }
+
+    /// ADR-0162 증보 5 C3 — each refusal names the exact field and the closed rule,
+    /// lists the closed values where there are some, and never echoes the value.
+    #[test]
+    fn an_artifacts_refusal_names_the_field_and_rule_never_the_value() {
+        let cases: Vec<(Value, &str, ArtifactRule, &[&str])> = vec![
+            (
+                json!({"resultKind": "merged"}),
+                "artifacts.resultKind",
+                ArtifactRule::Enum,
+                &RESULT_KINDS,
+            ),
+            (
+                json!({"nextAction": "ship_it"}),
+                "artifacts.nextAction",
+                ArtifactRule::Enum,
+                &NEXT_ACTIONS,
+            ),
+            (
+                json!({"tests": {"passed": 1, "failed": 0}}),
+                "artifacts.tests.notRun",
+                ArtifactRule::Required,
+                &[],
+            ),
+            (
+                json!({"tests": {"passed": -1, "failed": 0, "notRun": 0}}),
+                "artifacts.tests.passed",
+                ArtifactRule::Range,
+                &[],
+            ),
+            (
+                json!({"tests": {"passed": 1, "failed": MAX_REPORTED_COUNT + 1, "notRun": 0}}),
+                "artifacts.tests.failed",
+                ArtifactRule::Range,
+                &[],
+            ),
+            (
+                json!({"tests": {"passed": 1, "failed": 0, "notRun": 0, "skipped": 2}}),
+                "artifacts.tests",
+                ArtifactRule::Forbidden,
+                &TEST_COUNT_KEYS,
+            ),
+            (
+                json!({"tests": "12 passed"}),
+                "artifacts.tests",
+                ArtifactRule::Format,
+                &[],
+            ),
+            (
+                json!({"toolCounts": {"bash": 3}}),
+                "artifacts.toolCounts",
+                ArtifactRule::Forbidden,
+                &TOOL_COUNT_KEYS,
+            ),
+            (
+                json!({"toolCounts": {"run": 1.5}}),
+                "artifacts.toolCounts.run",
+                ArtifactRule::Format,
+                &[],
+            ),
+            (
+                json!({"toolCounts": {"edit": MAX_REPORTED_COUNT + 1}}),
+                "artifacts.toolCounts.edit",
+                ArtifactRule::Range,
+                &[],
+            ),
+            (
+                json!({"commitSha": "abc"}),
+                "artifacts.commitSha",
+                ArtifactRule::Range,
+                &[],
+            ),
+            (
+                json!({"commitSha": 1234567}),
+                "artifacts.commitSha",
+                ArtifactRule::Format,
+                &[],
+            ),
+            (
+                json!({"secretTitle": "fix: rotate KEY=hunter2"}),
+                "artifacts",
+                ArtifactRule::Forbidden,
+                &ARTIFACT_KEYS,
+            ),
+            (
+                json!({"added": -1}),
+                "artifacts.added",
+                ArtifactRule::Range,
+                &[],
+            ),
+            (
+                json!("https://github.com/a/b/pull/1"),
+                "artifacts",
+                ArtifactRule::Format,
+                &[],
+            ),
+        ];
+        for (artifacts, field, rule, allowed) in cases {
+            let violation = artifacts_refusal(artifacts.clone())
+                .unwrap_or_else(|| panic!("{artifacts} must be refused"));
+            assert_eq!(violation.field, field, "{artifacts}");
+            assert_eq!(violation.rule, rule, "{artifacts}");
+            assert_eq!(violation.allowed, allowed, "{artifacts}");
+            let failure = ToolFailure::InvalidArtifacts(violation);
+            assert_eq!(failure.wire().0, 400);
+            assert_eq!(failure.wire().1, -32602);
+            let data = failure.data().expect("error.data");
+            assert_eq!(data["field"], json!(field));
+            assert_eq!(data["rule"], json!(rule.as_str()));
+            let message = failure.message();
+            assert!(message.starts_with(field), "{message}");
+            assert!(message.is_ascii(), "{message}");
+            // Never the value, never an unknown key's name.
+            let wire = format!("{message} {data}");
+            for leaked in [
+                "merged",
+                "ship_it",
+                "hunter2",
+                "secretTitle",
+                "bash",
+                "skipped",
+                "12 passed",
+                "abc\"",
+            ] {
+                assert!(!wire.contains(leaked), "{leaked} leaked in {wire}");
+            }
+        }
+        // The message is the agent's one-line fix instruction.
+        assert_eq!(
+            artifacts_refusal(json!({"resultKind": "merged"}))
+                .unwrap()
+                .message(),
+            "artifacts.resultKind must be one of pr_opened, branch_only, vm_only, no_change"
+        );
+        assert_eq!(
+            artifacts_refusal(json!({"tests": {"passed": 1, "failed": 0}}))
+                .unwrap()
+                .message(),
+            "artifacts.tests.notRun is required"
+        );
+    }
+
+    /// A refusal outside `artifacts`, and every other tool's refusal, keep the
+    /// coarse answer with no `error.data`.
+    #[test]
+    fn only_artifacts_faults_carry_detail() {
+        let complete = TOOL_CATALOG
+            .iter()
+            .find(|tool| tool.name == TOOL_RUN_COMPLETE)
+            .expect("oort_run_complete");
+        assert_eq!(
+            validate_arguments(complete, &json!({"leaseHandle": "x", "status": "done"})),
+            Err(ToolFailure::InvalidArguments)
+        );
+        assert_eq!(
+            validate_arguments(
+                complete,
+                &json!({"leaseHandle": "x", "status": "succeeded", "bodyy": "x"})
+            ),
+            Err(ToolFailure::InvalidArguments)
+        );
+        let event = TOOL_CATALOG
+            .iter()
+            .find(|tool| tool.name == TOOL_RUN_EVENT)
+            .expect("oort_run_event");
+        assert_eq!(
+            validate_arguments(
+                event,
+                &json!({"leaseHandle": "x", "artifacts": {"resultKind": "x"}})
+            ),
+            Err(ToolFailure::InvalidArguments)
+        );
+        assert_eq!(ToolFailure::InvalidArguments.data(), None);
+        assert_eq!(
+            ToolFailure::InvalidArguments.message(),
+            "invalid tool arguments"
+        );
+    }
+
+    /// Every closed path the wire may name exists in the published schema, so a
+    /// violation can never name a field the agent cannot find.
+    #[test]
+    fn every_nameable_artifact_path_is_a_published_property() {
+        let complete = TOOL_CATALOG
+            .iter()
+            .find(|tool| tool.name == TOOL_RUN_COMPLETE)
+            .expect("oort_run_complete");
+        let schema = complete.input_schema();
+        for spec in ARTIFACT_FIELDS {
+            let mut node = &schema;
+            for segment in spec.path.split('.') {
+                node = &node["properties"][segment];
+                assert!(!node.is_null(), "{} is not published", spec.path);
+            }
+        }
     }
 
     #[test]
@@ -1938,5 +2653,52 @@ mod tests {
                 "{required}"
             );
         }
+    }
+
+    /// ADR-0200 증보 2026-10-15 T1 — what the dispatcher records must fit migration
+    /// 133's CHECKs, or the database (not this crate) would be the first to notice:
+    /// every catalog name matches `^oort_[a-z_]{1,40}$`, and the failure codes are
+    /// seven distinct tokens, none of them `ok`.
+    #[test]
+    fn recorded_tool_names_and_failure_codes_fit_the_ledger_vocabulary() {
+        for tool in TOOL_CATALOG.iter() {
+            let rest = tool
+                .name
+                .strip_prefix("oort_")
+                .unwrap_or_else(|| panic!("{} lacks the oort_ prefix", tool.name));
+            assert!(
+                (1..=40).contains(&rest.len())
+                    && rest.bytes().all(|b| b.is_ascii_lowercase() || b == b'_'),
+                "{} does not fit ^oort_[a-z_]{{1,40}}$",
+                tool.name
+            );
+        }
+        let codes: Vec<&str> = [
+            ToolFailure::InvalidArguments,
+            ToolFailure::NotAuthorized,
+            ToolFailure::Unavailable,
+            ToolFailure::Conflict,
+            ToolFailure::AlreadyClaimed,
+            ToolFailure::ClaimExpired,
+            ToolFailure::Internal,
+        ]
+        .into_iter()
+        .map(ToolFailure::code)
+        .collect();
+        let distinct: std::collections::HashSet<&str> = codes.iter().copied().collect();
+        assert_eq!(distinct.len(), 7);
+        assert!(!distinct.contains("ok"));
+        assert_eq!(
+            codes,
+            [
+                "invalid_arguments",
+                "not_authorized",
+                "unavailable",
+                "conflict",
+                "already_claimed",
+                "claim_expired",
+                "internal"
+            ]
+        );
     }
 }

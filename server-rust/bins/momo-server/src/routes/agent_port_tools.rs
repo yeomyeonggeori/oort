@@ -231,6 +231,9 @@ pub(crate) async fn execute(
     caller: HostedCaller,
     call: ToolCall,
 ) -> momo_mcp::HttpResponse {
+    // ADR-0200 증보 2026-10-15 T1: the server's own monotonic measure, from the
+    // moment the dispatcher takes the call to the moment its verdict is known.
+    let started = std::time::Instant::now();
     let result = match call.tool.name {
         momo_mcp::TOOL_INBOX_READ => inbox_read(state, caller, &call.arguments).await,
         momo_mcp::TOOL_CONVERSATION_READ => conversation_read(state, caller, &call.arguments).await,
@@ -253,7 +256,9 @@ pub(crate) async fn execute(
         momo_mcp::TOOL_PING => ping(state, caller, &call.arguments).await,
         _ => Err(ToolFailure::InvalidArguments),
     };
+    let elapsed = started.elapsed();
     record_liveness(state, caller, call.tool.name, &result).await;
+    record_tool_call(state, caller, &call, &result, elapsed).await;
     match result {
         Ok(structured) => momo_mcp::tool_success(&call, structured),
         Err(failure) => momo_mcp::tool_failure(&call, failure),
@@ -369,6 +374,146 @@ async fn record_liveness(
             tracing::warn!(error = %error, tool, "agent port liveness write failed");
         }
         Err(_) => tracing::warn!(tool, "agent port liveness write timed out"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// tool_call ledger (ADR-0200 증보 2026-10-15 T1~T3, #3840)
+// ---------------------------------------------------------------------------
+
+/// The argument a handle-taking tool carries its sealed lease handle in. `None` for
+/// a tool that takes none (its call points at no run unless it hands a job out).
+fn handle_argument(tool: &str) -> Option<&'static str> {
+    match tool {
+        momo_mcp::TOOL_JOB_START
+        | momo_mcp::TOOL_JOB_RENEW
+        | momo_mcp::TOOL_JOB_RELEASE
+        | momo_mcp::TOOL_RUN_EVENT
+        | momo_mcp::TOOL_RUN_COMPLETE => Some("leaseHandle"),
+        // ADR-0186 D2 names the field `handle`; the value is the same sealed handle.
+        momo_mcp::TOOL_ACTION_PROPOSE
+        | momo_mcp::TOOL_ACTION_CLAIM_SECRET
+        | momo_mcp::TOOL_CARD_SUGGEST => Some("handle"),
+        _ => None,
+    }
+}
+
+/// The runs ONE call points at, and nothing inferred (T2):
+///
+/// * the run inside the sealed handle the caller passed, when the handle opens under
+///   this server's secret and names this workspace and this agent — even if the tool
+///   then refused (a lost lease is still that agent's call on that run);
+/// * the run of every job the call handed out (`oort_jobs_claim`, `oort_job_start`),
+///   read back from the handles in the answer the agent is about to receive.
+///
+/// A call with neither (inbox/conversation read, message post, ping, an unopenable
+/// handle, a claim that took nothing) points at no run and is not recorded. No
+/// "it must be the one lease it holds" guess: this ledger exists to stop guessing.
+fn attributed_runs(
+    secret: &str,
+    caller: HostedCaller,
+    call: &ToolCall,
+    result: &Result<Value, ToolFailure>,
+) -> Vec<Uuid> {
+    let mut raw_handles: Vec<&str> = Vec::new();
+    if let Some(field) = handle_argument(call.tool.name) {
+        if let Some(raw) = call.arguments.get(field).and_then(Value::as_str) {
+            raw_handles.push(raw);
+        }
+    }
+    if let Ok(structured) = result {
+        match call.tool.name {
+            momo_mcp::TOOL_JOBS_CLAIM => {
+                if let Some(jobs) = structured["jobs"].as_array() {
+                    raw_handles.extend(jobs.iter().filter_map(|job| job["leaseHandle"].as_str()));
+                }
+            }
+            momo_mcp::TOOL_JOB_START => {
+                raw_handles.extend(structured["job"]["leaseHandle"].as_str());
+            }
+            _ => {}
+        }
+    }
+    let mut runs: Vec<Uuid> = Vec::new();
+    for raw in raw_handles {
+        if raw.len() > 512 {
+            continue;
+        }
+        let Ok(handle) = decode_lease_handle(raw, secret) else {
+            continue;
+        };
+        if handle.workspace_id != caller.workspace_id
+            || handle.agent_member_id != caller.agent_member_id
+        {
+            continue;
+        }
+        if !runs.contains(&handle.run_id) {
+            runs.push(handle.run_id);
+        }
+    }
+    runs
+}
+
+/// Record the call on the run(s) it points at: name, server-measured duration, `ok` or
+/// the closed failure code — never arguments, bodies or the handle (T1).
+///
+/// A SEPARATE short tenant transaction after the tool's own has settled, under the
+/// same 2 s ceiling as the liveness write: the record is an observation, not a state
+/// transition, so it must never decide, delay past that ceiling, or change the
+/// tool's answer. Any failure is logged and dropped.
+async fn record_tool_call(
+    state: &AppState,
+    caller: HostedCaller,
+    call: &ToolCall,
+    result: &Result<Value, ToolFailure>,
+    elapsed: std::time::Duration,
+) {
+    let tool = call.tool.name;
+    // The closed server-side list (T1): only a catalog name is ever written.
+    if !momo_mcp::TOOL_CATALOG
+        .iter()
+        .any(|known| known.name == tool)
+    {
+        return;
+    }
+    let runs = attributed_runs(state.agent_port.envelope_secret(), caller, call, result);
+    if runs.is_empty() {
+        return;
+    }
+    let code = match result {
+        Ok(_) => "ok",
+        Err(failure) => failure.code(),
+    };
+    let duration_ms = i32::try_from(elapsed.as_millis())
+        .unwrap_or(i32::MAX)
+        .min(momo_agent::TOOL_CALL_DURATION_MS_MAX);
+    let write = tokio::time::timeout(
+        LIVENESS_WRITE_TIMEOUT,
+        momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
+            Box::pin(async move {
+                for run_id in runs {
+                    momo_agent::record_tool_call_in_tx(
+                        conn,
+                        caller.workspace_id,
+                        run_id,
+                        caller.agent_member_id,
+                        tool,
+                        duration_ms,
+                        code,
+                    )
+                    .await?;
+                }
+                Ok(())
+            })
+        }),
+    )
+    .await;
+    match write {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            tracing::warn!(error = %error, tool, "agent port tool_call record failed");
+        }
+        Err(_) => tracing::warn!(tool, "agent port tool_call record timed out"),
     }
 }
 
@@ -1462,6 +1607,7 @@ async fn run_event(
                             Some(caller.token_id),
                             momo_mcp::TOOL_RUN_EVENT,
                             reason,
+                            None,
                         )
                         .await?;
                         return Ok(Err(ToolFailure::InvalidArguments));
@@ -1534,15 +1680,16 @@ async fn run_complete(
                 Ok(handle) => handle,
                 Err(failure) => return Ok(Err(failure)),
             };
-            // D12 — a malformed `artifacts` refuses the WHOLE completion before
+            // D12 — a malformed `artifacts` (or, ADR-0162 증보 5 C1, a broken
+            // result-contract cross rule) refuses the WHOLE completion before
             // anything is written; the audit row is the only trace, and the lease
-            // is untouched so the agent can complete again without it.
+            // is untouched so the agent can fix the named field and complete again.
             let artifacts = match validated_gateway_artifacts(
                 raw_artifacts.as_ref(),
                 momo_t3::work_share::allowed_pr_hosts(),
             ) {
                 Ok(artifacts) => artifacts,
-                Err(reason) => {
+                Err(refusal) => {
                     let lease = GatewayLeaseBinding {
                         job_id: handle.job_id,
                         lease_id: handle.lease_id,
@@ -1564,10 +1711,13 @@ async fn run_complete(
                             caller.agent_member_id,
                             Some(caller.token_id),
                             momo_mcp::TOOL_RUN_COMPLETE,
-                            reason,
+                            refusal.reason,
+                            Some(refusal.violation),
                         )
                         .await?;
-                        return Ok(Err(ToolFailure::InvalidArguments));
+                        // ADR-0162 증보 5 C3 — still -32602, now naming the field
+                        // and the closed rule so the agent can fix just that.
+                        return Ok(Err(ToolFailure::InvalidArtifacts(refusal.violation)));
                     }
                     // Not live: drop the artifacts and let the ordinary
                     // path answer (a finished run replays its first answer) (no audit row for a dead handle).

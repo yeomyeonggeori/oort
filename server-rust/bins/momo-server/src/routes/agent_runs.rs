@@ -76,12 +76,12 @@ use momo_agent::{
     cancel_pending_approvals_for_run_in_tx, cancel_run_in_tx, create_agent_run_in_tx,
     is_active_agent_in_tx, is_active_human_channel_member_in_tx, linked_work_session_ids_in_tx,
     list_active_run_progress_base_in_tx, list_agent_run_summaries_in_tx,
-    list_channel_run_progress_base_in_tx, list_channel_work_runs_in_tx, list_run_events_in_tx,
+    list_channel_run_progress_base_in_tx, list_channel_work_runs_in_tx, list_run_ledger_in_tx,
     load_agent_run_in_tx, load_agent_run_with_visibility_in_tx, load_eligible_agent_in_tx,
     lock_run_for_cancel_in_tx, validated_active_run_limit, validated_run_limit,
     visible_active_run_counts_in_tx, visible_channels_in_tx, workspace_active_run_totals_in_tx,
     ActiveRunScope, AgentRunSummaryRow, JobFacts, NewAgentRun, QueueEntry, RequestedRouting,
-    RunProgressBase, RunProgressRow, RunStatus, RunTrigger,
+    RunEventInclude, RunProgressBase, RunProgressRow, RunStatus, RunTrigger,
 };
 use momo_auth::{Principal, PrincipalKind};
 use momo_db::audit::{write_audit, AuditEntry};
@@ -97,7 +97,8 @@ use crate::dto::{
     AgentRunCancelResponse, AgentRunEventDto, AgentRunEventsQuery, AgentRunEventsResponse,
     AgentRunHistoryQuery, AgentRunListQuery, AgentRunPageResponse, AgentRunProgressDto,
     AgentRunProgressPageResponse, AgentRunProgressQuery, AgentRunResponse, AgentRunSummaryDto,
-    AgentRunSummaryPageResponse, AgentRunVisibleCountsDto, AheadRunDto, CreateAgentRunRequest,
+    AgentRunSummaryPageResponse, AgentRunToolTallyDto, AgentRunVisibleCountsDto, AheadRunDto,
+    CreateAgentRunRequest,
 };
 use crate::error::ApiError;
 use crate::routes::shared::{
@@ -1061,21 +1062,15 @@ pub async fn events(
     require_human(&principal, "human member required")?;
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let run_id = path_uuid(&run, "invalid run id")?;
-    let include_doorbell = match query.include.as_deref().map(str::trim) {
-        None | Some("") => false,
-        Some("doorbell") => true,
-        Some(_) => return Err(ApiError::bad_request("include must be doorbell")),
-    };
+    let include = parse_run_event_include(query.include.as_deref())?;
     let member_id = principal.member_id;
 
-    let events = settle_db(
+    let ledger = settle_db(
         "agent_runs.events",
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
-                match list_run_events_in_tx(conn, workspace_id, run_id, member_id, include_doorbell)
-                    .await?
-                {
-                    Some(events) => Ok(Ok(events)),
+                match list_run_ledger_in_tx(conn, workspace_id, run_id, member_id, include).await? {
+                    Some(ledger) => Ok(Ok(ledger)),
                     None => Ok(Err(ApiError::not_found("agent run not found"))),
                 }
             })
@@ -1085,7 +1080,8 @@ pub async fn events(
 
     Ok(Json(AgentRunEventsResponse {
         run_id: run_id.to_string(),
-        events: events
+        events: ledger
+            .events
             .iter()
             .map(|event| AgentRunEventDto {
                 ordinal: event.ordinal,
@@ -1094,10 +1090,45 @@ pub async fn events(
                 code: event.code.clone(),
                 approval_id: event.approval_id.map(|id| id.to_string()),
                 actor_member_id: event.actor_member_id.map(|id| id.to_string()),
+                tool: event.tool.clone(),
+                duration_ms: event.duration_ms,
                 created_at_ms: epoch_ms(event.created_at),
             })
             .collect(),
+        tool_tally: ledger.tool_tally.map(|tally| {
+            tally
+                .into_iter()
+                .map(|row| AgentRunToolTallyDto {
+                    tool: row.tool,
+                    ok: row.ok,
+                    error: row.error,
+                    duration_ms_sum: row.duration_ms_sum,
+                })
+                .collect()
+        }),
+        tool_call_rows_capped: ledger.tool_call_rows_capped,
     }))
+}
+
+/// `?include=` of the ledger read: a comma-separated subset of the closed set
+/// `{doorbell, tools}` (ADR-0200 증보 2026-10-14 / 2026-10-15 T4). Blank parts are
+/// ignored and a repeat is harmless; any other value is a 400, so a typo is never
+/// silently read as "nothing extra".
+fn parse_run_event_include(raw: Option<&str>) -> Result<RunEventInclude, ApiError> {
+    let mut include = RunEventInclude::default();
+    for part in raw.unwrap_or("").split(',').map(str::trim) {
+        match part {
+            "" => {}
+            "doorbell" => include.doorbell = true,
+            "tools" => include.tools = true,
+            _ => {
+                return Err(ApiError::bad_request(
+                    "include must be doorbell, tools or both",
+                ))
+            }
+        }
+    }
+    Ok(include)
 }
 
 fn summary_dto(row: &AgentRunSummaryRow) -> AgentRunSummaryDto {
@@ -1608,6 +1639,41 @@ fn agent_job_broadcast_payload(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ADR-0200 증보 2026-10-15 T4: `include` is a comma set over `{doorbell, tools}`;
+    /// nothing asked for means neither, and an unknown token is a 400 (not "nothing").
+    #[test]
+    fn the_ledger_include_is_a_closed_comma_set() {
+        let none = RunEventInclude::default();
+        let doorbell = RunEventInclude {
+            doorbell: true,
+            tools: false,
+        };
+        let tools = RunEventInclude {
+            doorbell: false,
+            tools: true,
+        };
+        let both = RunEventInclude {
+            doorbell: true,
+            tools: true,
+        };
+        for (raw, want) in [
+            (None, none),
+            (Some(""), none),
+            (Some(" "), none),
+            (Some("doorbell"), doorbell),
+            (Some("tools"), tools),
+            (Some("doorbell,tools"), both),
+            (Some("tools, doorbell"), both),
+            (Some("tools,tools"), tools),
+            (Some("tools,"), tools),
+        ] {
+            assert_eq!(parse_run_event_include(raw).unwrap(), want, "{raw:?}");
+        }
+        for raw in ["tool", "TOOLS", "doorbell,args", "tools;doorbell", "*"] {
+            assert!(parse_run_event_include(Some(raw)).is_err(), "{raw}");
+        }
+    }
 
     fn request(input: Value, routing: Option<Value>) -> CreateAgentRunRequest {
         CreateAgentRunRequest {

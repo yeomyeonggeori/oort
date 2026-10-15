@@ -606,19 +606,23 @@ mod tests {
     ///
     /// 132 is #3822's `doorbell_rung` ledger kind (ADR-0200 증보 2026-10-14): only the
     /// `agent_run_event_kind_ck` vocabulary grows.
+    ///
+    /// 133 is #3840's `tool_call` ledger kind (ADR-0200 증보 2026-10-15 T1~T5): `tool`/`duration_ms`
+    /// columns, the RLS-FORCE `agent_run_tool_tally`, `agent_run_tool_call_record` (100-row cap per
+    /// run, tally past it), a trim that neither counts nor deletes `tool_call`, and no frame for it.
     #[test]
-    fn discovers_contiguous_migrations_001_to_132() {
+    fn discovers_contiguous_migrations_001_to_133() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            132,
-            "expected 132 migrations under {}",
+            133,
+            "expected 133 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 132);
+        assert_eq!(migrations.last().unwrap().version, 133);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

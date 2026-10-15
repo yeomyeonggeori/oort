@@ -296,13 +296,15 @@ pub use run::{
     RunStatus, RunTrigger, WelcomeKind, TRIGGER_SUMMARY_LIMIT,
 };
 pub use run_event::{
-    append_run_event_in_tx, delete_expired_run_events_in_tx, workspaces_with_expired_run_events,
-    AppendedRunEvent, RUN_EVENT_RETENTION_DAYS,
+    append_run_event_in_tx, delete_expired_run_events_in_tx, record_tool_call_in_tx,
+    workspaces_with_expired_run_events, AppendedRunEvent, ToolCallRecord, RUN_EVENT_RETENTION_DAYS,
+    TOOL_CALL_DURATION_MS_MAX, TOOL_CALL_ROWS_PER_RUN,
 };
 pub use run_progress::{
     assemble_run_progress, list_channel_run_progress_base_in_tx, list_run_events_in_tx,
-    visible_channels_in_tx, AheadRun, JobFacts, LeaseState, QueueEntry, RunEventRow, RunPhase,
-    RunProgressBase, RunProgressRow,
+    list_run_ledger_in_tx, visible_channels_in_tx, AheadRun, JobFacts, LeaseState, QueueEntry,
+    RunEventInclude, RunEventRow, RunLedger, RunPhase, RunProgressBase, RunProgressRow,
+    ToolTallyRow,
 };
 // ADR-0200 증보 2026-10-15 R1 — the workspace "running now" read (#3847).
 pub use run_progress::{

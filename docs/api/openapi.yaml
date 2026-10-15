@@ -3842,10 +3842,15 @@ paths:
           in: query
           required: false
           description: >
-            `doorbell` adds the `doorbell_rung` rows (ADR-0200 증보 2026-10-14). Without
-            it they are left out, so a client that predates that kind keeps parsing the
-            ledger. Any other value is a 400.
-          schema: {type: string, enum: [doorbell]}
+            A comma-separated subset of `doorbell` and `tools` (`include=doorbell,tools`).
+            `doorbell` adds the `doorbell_rung` rows (ADR-0200 증보 2026-10-14). `tools` adds
+            the `tool_call` rows — the oort tools the agent called on this run, at most 100,
+            with `tool`, `durationMs` and a closed `code` — plus `toolTally` and
+            `toolCallRowsCapped` (ADR-0200 증보 2026-10-15 T4). Without them those rows and
+            fields are left out, so a client that predates the kinds keeps parsing the
+            ledger. Any other value is a 400; a server that predates `tools` answers 400 to
+            it, and a client then re-reads without it.
+          schema: {type: string, pattern: "^\\s*(doorbell|tools)?\\s*(,\\s*(doorbell|tools)?\\s*)*$"}
       responses:
         "200":
           description: The ledger.
@@ -10855,7 +10860,20 @@ paths:
         `branch`, `added`, `deleted`, `commits`, all optional; stored in
         `agent_run.output.artifacts`; a malformed one refuses the whole
         completion with nothing written). Both are self-reports the server does
-        not verify. Each tool binds an existing domain rather than a second one, and job authority travels only as an opaque `leaseHandle` that
+        not verify. ADR-0162 증보 5 C1-C3 (#3841) adds the code-task result
+        contract to the same closed `artifacts` object: `resultKind`
+        (`pr_opened`, `branch_only`, `vm_only`, `no_change`), `tests`
+        (`{passed, failed, notRun}`, 0..100000), `nextAction` (`merge_ok`,
+        `please_test`, `blocked`, `none`), `commitSha` (7..40 hex, stored
+        lowercase) and `toolCounts` (`{run, edit, read, search, web, other}`,
+        0..100000), all optional with cross rules (`tests`/`nextAction`/
+        `commitSha` need `resultKind`; `pr_opened` needs `prUrl`; `merge_ok`
+        needs `pr_opened` and no failed test). A refusal inside `artifacts`
+        keeps -32602 and adds `error.data` `{field, rule, allowed?,
+        requires?}` (`rule` one of `enum`, `required`, `forbidden`, `range`,
+        `format`, `requires`) and a one-line message naming the field; the
+        value sent is never echoed. The run read returns these fields as
+        `agentReported`. Each tool binds an existing domain rather than a second one, and job authority travels only as an opaque `leaseHandle` that
         carries the channel its work came from, so the confirming human's exact
         channel grant is re-checked on every later verb. Arguments are validated
         against the tool's published `inputSchema` before execution, so
@@ -13863,7 +13881,10 @@ components:
             200-row cap can drop old stage rows, so never use it as a key.
         kind:
           type: string
-          enum: [queued, claimed, started, stage, paused, resumed, approval_requested, approval_decided, succeeded, failed, timed_out, cancelled, doorbell_rung]
+          description: >
+            `doorbell_rung` only with `include=doorbell`; `tool_call` only with
+            `include=tools`. Clients reject a ledger holding a kind they do not know.
+          enum: [queued, claimed, started, stage, paused, resumed, approval_requested, approval_decided, succeeded, failed, timed_out, cancelled, doorbell_rung, tool_call]
         stage:
           type: string
           maxLength: 80
@@ -13873,10 +13894,36 @@ components:
           description: >
             Machine code written by the server (`approval_expired`, `approved`, …). On
             `doorbell_rung` it is `<edge>_<result>` (`leading|trailing|urgent` + `ok|failed`),
-            never an HTTP status or host.
+            never an HTTP status or host. On `tool_call` it is `ok` or one closed failure
+            code (`invalid_arguments`, `not_authorized`, `unavailable`, `conflict`,
+            `already_claimed`, `claim_expired`, `internal`) — never an error message.
         approvalId: {type: string, format: uuid}
         actorMemberId: {type: string, format: uuid}
+        tool:
+          type: string
+          pattern: "^oort_[a-z_]{1,40}$"
+          description: >
+            `tool_call` only: the oort tool the agent called, recorded by the server
+            (ADR-0200 증보 2026-10-15 T1). Never the arguments or the result.
+        durationMs:
+          type: integer
+          minimum: 0
+          maximum: 600000
+          description: "`tool_call` only: how long the server took, measured by the server."
         createdAtMs: {type: integer, format: int64}
+
+    AgentRunToolTally:
+      type: object
+      additionalProperties: false
+      required: [tool, ok, error, durationMsSum]
+      description: >
+        One tool's totals on one run (ADR-0200 증보 2026-10-15 T3). Counts every recorded
+        call, past the 100-row cap of `tool_call` rows too.
+      properties:
+        tool: {type: string, pattern: "^oort_[a-z_]{1,40}$"}
+        ok: {type: integer, format: int64, minimum: 0}
+        error: {type: integer, format: int64, minimum: 0}
+        durationMsSum: {type: integer, format: int64, minimum: 0}
 
     AgentRunEvents:
       type: object
@@ -13886,8 +13933,18 @@ components:
         runId: {type: string, format: uuid}
         events:
           type: array
-          maxItems: 200
+          maxItems: 300
+          description: At most 200 rows, plus at most 100 `tool_call` rows with `include=tools`.
           items: {$ref: "#/components/schemas/AgentRunEvent"}
+        toolTally:
+          type: array
+          description: Present only with `include=tools`.
+          items: {$ref: "#/components/schemas/AgentRunToolTally"}
+        toolCallRowsCapped:
+          type: boolean
+          description: >
+            Present only with `include=tools`. True when calls were counted past the
+            100-row cap (the tally holds more calls than there are `tool_call` rows).
 
     AgentRunCancelResponse:
       type: object
