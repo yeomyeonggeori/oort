@@ -290,6 +290,12 @@ export function LedgerView({
               )}
             >
               {row.text}
+              {row.count !== undefined && (
+                // 연속한 같은 줄을 접은 수(#3824). 시각은 첫 줄의 것이다.
+                <span className="text-ink-muted" data-numeric data-testid="agent-work-panel-ledger-count">
+                  {" "}· {row.count}번
+                </span>
+              )}
             </span>
           </div>
           {row.reason !== undefined && (

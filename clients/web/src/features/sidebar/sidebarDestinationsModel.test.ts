@@ -3,7 +3,7 @@ import { destinationActive } from "./sidebarDestinationsModel";
 import { filterTeamSessions } from "./teamSessionsModel";
 import type { SharedWorkSession } from "@momo/core/lib/api";
 
-describe("목적지 선택 판정 (#3334)", () => {
+describe("목적지 선택 판정 (#3334, ADR-0202 D6)", () => {
   const only = (a: ReturnType<typeof destinationActive>) =>
     Object.entries(a)
       .filter(([, v]) => v)
@@ -19,11 +19,13 @@ describe("목적지 선택 판정 (#3334)", () => {
     ["/ai/external", null, ["ai"]],
     ["/ai-connect", null, []],
     ["/directory", null, ["directory"]],
-    ["/activity", null, ["activity"]],
-    ["/workstreams", null, ["workstreams"]],
-    ["/work", "mine", ["mine"]],
-    ["/work", "team", ["team"]],
-    ["/work", "console", ["console"]],
+    // 숨긴 진입점의 옛 주소는 열리지만(라우트 유지) 어느 줄도 고르지 않는다.
+    ["/activity", null, []],
+    ["/workstreams", null, []],
+    // 「작업」 한 줄: 「작업」 화면·터미널 격자·콘솔 모두 이 줄이다.
+    ["/work", "jobs", ["work"]],
+    ["/work", "terminals", ["work"]],
+    ["/work", "console", ["work"]],
     ["/settings", null, []],
     ["/channels-archive", null, []],
   ] as const)("%s %s → %j", (path, view, expected) => {

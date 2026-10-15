@@ -465,7 +465,7 @@ describe('결정의 세 갈래', () => {
 
     await waitForSettled(() =>
       expect(screen.getByTestId('inbox-decision-note')).toHaveTextContent(
-        /승인을 기록했습니다\./,
+        /승인을 기록했어요\./,
       ),
     );
     expect(fixture.decisions()).toEqual([
@@ -498,7 +498,7 @@ describe('결정의 세 갈래', () => {
     // W-2R M5 이후 상태 코드는 문구에 없다. 사람에게 503은 할 말이 아니고,
     // 할 말은 "무엇이 일어났고 다음에 뭘 하면 되는가"다.
     expect(screen.getByTestId(`inbox-approval-${PENDING}-error`)).toHaveTextContent(
-      /서버가 오류로 답했습니다/,
+      /서버가 오류로 답했어요/,
     );
     expect(screen.queryByText(/503/)).toBeNull();
     // 실패했으므로 결정된 척하지 않는다: 버튼도 행도 그대로 있다.
@@ -510,7 +510,7 @@ describe('결정의 세 갈래', () => {
     await waitForSettled(() =>
       expect(
         screen.getByTestId(`decision-receipt-approval:${PENDING}`),
-      ).toHaveTextContent(/거부를 기록했습니다\./),
+      ).toHaveTextContent(/거부를 기록했어요\./),
     );
     // 답이 있는 자리에는 컨트롤이 없다 — 끝난 결정을 다시 누를 자리를 남기지 않는다.
     expect(screen.queryByTestId(`inbox-approval-${PENDING}-reject`)).toBeNull();
@@ -540,7 +540,7 @@ describe('결정의 세 갈래', () => {
     await waitForSettled(() =>
       expect(
         screen.getByTestId(`decision-receipt-approval:${PENDING}`),
-      ).toHaveTextContent(/이미 승인으로 기록되어 있었습니다\./),
+      ).toHaveTextContent(/이미 승인으로 기록되어 있었어요\./),
     );
     // 실패로 그리지 않는다 — 더는 바뀔 수 없는 것에 재시도를 권하지 않기 위해.
     expect(screen.queryByTestId(`inbox-approval-${PENDING}-error`)).toBeNull();
@@ -564,7 +564,7 @@ describe('결정의 세 갈래', () => {
     armAndCommit(PENDING, 'approve');
     await waitForSettled(() =>
       expect(screen.getByTestId(`inbox-approval-${PENDING}-error`)).toHaveTextContent(
-        /다른 결정으로 기록되어 있습니다/,
+        /다른 결정으로 기록돼 있어요/,
       ),
     );
 
@@ -775,7 +775,7 @@ describe('기한이 지난 요청 (2R M4)', () => {
     await waitForSettled(() =>
       expect(
         screen.getByTestId(`decision-receipt-approval:${PENDING}`),
-      ).toHaveTextContent(/결정 전에 만료되어 만료로 기록되었습니다\./),
+      ).toHaveTextContent(/결정 전에 만료되어 만료로 기록되었어요\./),
     );
   });
 });
@@ -800,18 +800,18 @@ describe('영수증 (2R H3/M6)', () => {
     await waitForSettled(() =>
       expect(
         screen.getByTestId(`decision-receipt-approval:${PENDING}`),
-      ).toHaveTextContent(/승인을 기록했습니다\./),
+      ).toHaveTextContent(/승인을 기록했어요\./),
     );
     armAndCommit(SECOND, 'reject');
     await waitForSettled(() =>
       expect(
         screen.getByTestId(`decision-receipt-approval:${SECOND}`),
-      ).toHaveTextContent(/거부를 기록했습니다\./),
+      ).toHaveTextContent(/거부를 기록했어요\./),
     );
     // 첫 번째 답은 그대로 있다. 1R은 한 칸을 덮어써서 하나를 잃었다.
     expect(
       screen.getByTestId(`decision-receipt-approval:${PENDING}`),
-    ).toHaveTextContent(/승인을 기록했습니다\./);
+    ).toHaveTextContent(/승인을 기록했어요\./);
   });
 
   it('행이 목록에서 빠지면 그 답을 위쪽 알림으로 올린다', async () => {
@@ -838,7 +838,7 @@ describe('영수증 (2R H3/M6)', () => {
     );
     // 사라진 것과 답을 못 본 것은 다르다.
     expect(screen.getByTestId('inbox-decision-note')).toHaveTextContent(
-      /승인을 기록했습니다\./,
+      /승인을 기록했어요\./,
     );
     fireEvent.press(screen.getByTestId('inbox-decision-note-dismiss'));
     expect(screen.queryByTestId('inbox-decision-note')).toBeNull();
@@ -853,7 +853,7 @@ describe('영수증 (2R H3/M6)', () => {
     await openPendingRow();
     armAndCommit(PENDING, 'approve');
     await waitForSettled(() =>
-      expect(announce).toHaveBeenCalledWith('승인을 기록했습니다.'),
+      expect(announce).toHaveBeenCalledWith('승인을 기록했어요.'),
     );
   });
 });

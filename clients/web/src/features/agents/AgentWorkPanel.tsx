@@ -32,6 +32,7 @@ import {
   isSignalLostByServer,
   runPhaseDetail,
 } from "@momo/core/features/agents/runPhase";
+import { runDurationBreakdown } from "@momo/core/features/agents/runDuration";
 import {
   agentLabel,
   TURN_STALE_SENTENCE,
@@ -81,6 +82,7 @@ import {
   RunListView,
 } from "./AgentRunLedgerView";
 import { useRunLedger, type RunLedgerView } from "./useRunLedger";
+import { StopRunControl } from "./StopRunControl";
 import {
   closeWorkPanel,
   switchWorkPanelRun,
@@ -250,6 +252,15 @@ export function AgentWorkPanel() {
         listShown={runEntries.length > 1}
         onClose={close}
       />
+      {/* 사람의 중단(#3852). 서버가 아는 열린 run에만 선다 — 서버가 모르는 run은
+          열렸는지 닫혔는지 이 화면이 단정할 수 없다. run을 바꾸면 새로 그린다. */}
+      <StopRunControl
+        key={target.runId.toLowerCase()}
+        runId={target.runId}
+        agentName={name}
+        open={server !== null && isOpenRunPhase(server.phase)}
+        live={railLive}
+      />
       <PanelBody
         log={log}
         nowMs={nowMs}
@@ -378,7 +389,10 @@ function PanelHeader({
             에이전트를 기다리라는 말로 읽는데, 실제로는 에이전트가 사람을
             기다리는 중이다. 컴포저 활동 줄이 같은 규칙을 쓰고, 두 표면이 같은
             턴에 대해 다른 말을 하지 않는 이유가 그것이다. */}
-        {startedAtMs !== undefined &&
+        {/* 서버가 아는 run은 근거 줄이 이미 「12분째」를 말한다(#3824). 같은 시간을
+            두 번, 두 말로(「12m 03s」) 하지 않는다. */}
+        {server === null &&
+          startedAtMs !== undefined &&
           liveness === "live" &&
           turnState === "working" &&
           railLive && (
@@ -485,6 +499,18 @@ function PanelBody({
           directory={directory}
           selfMemberId={selfMemberId}
         />
+      )}
+
+      {/* 걸린 시간(#3824): 대기 → 작업 → 총. 서버 시계의 사실만이고, 모르는 구간은
+          「모름」이다. 근거 줄(머리·목록)이 지금 단계를 말한다면 이 줄은 run 전체를 말한다. */}
+      {server !== null && (
+        <p
+          className="break-keep border-b border-line px-4 py-2 text-timestamp text-ink-muted"
+          data-numeric
+          data-testid="agent-work-panel-durations"
+        >
+          {runDurationBreakdown(server, nowMs)}
+        </p>
       )}
 
       {server !== null ? (

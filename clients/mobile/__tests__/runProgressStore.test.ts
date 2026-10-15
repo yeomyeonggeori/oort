@@ -5,8 +5,10 @@ import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {
+  nudgeRunProgress,
   resetRunProgress,
   runFactsFor,
+  subscribeRunLedgerFrames,
   runProgressSignals,
   runProgressUnsupported,
   RUN_PROGRESS_POLL_MS,
@@ -20,6 +22,7 @@ import {
   ZOMBIE_CLEAR_MS,
 } from '../src/features/agents/workingSignal';
 import type {ChannelRail} from '../src/realtime/channelRail';
+import type {AgentRunEventFrame} from '@momo/core/lib/realtimeEvents';
 
 // =============================================================================
 // 폰의 서버 진행 스토어 (ADR-0200, U4 #3750). 웹의 같은 이름 스토어와 같은 약속을
@@ -54,14 +57,14 @@ function row(extra: Partial<AgentRunProgress> = {}): AgentRunProgress {
 function fakeRail() {
   const handlers = new Map<
     string,
-    {onRunEvent: () => void; onResync: () => void}
+    {onRunEvent: (frame?: AgentRunEventFrame) => void; onResync: () => void}
   >();
   const stops: string[] = [];
   const rail = {
     subscribeRunEvents: (
       _ws: string,
       channelId: string,
-      h: {onRunEvent: () => void; onResync: () => void},
+      h: {onRunEvent: (frame?: AgentRunEventFrame) => void; onResync: () => void},
     ) => {
       handlers.set(channelId, h);
       return () => stops.push(channelId);
@@ -253,6 +256,42 @@ describe('서버가 답한 신호는 폰의 시계로 지워지지 않는다', (
     markAgentWorking(legacy);
     sweepAgentWorking(Date.now() + ZOMBIE_CLEAR_MS * 10);
     expect(agentWorkingSnapshot().size).toBe(0);
+    stop();
+  });
+});
+
+describe('깨우는 신호와 방금 보낸 메시지 (#3824)', () => {
+  it('doorbell_rung 프레임은 그 run의 원장 구독자를 깨운다', async () => {
+    const fetchProgress = jest.fn(async () => [row()]);
+    const {rail, handlers} = fakeRail();
+    const stop = startRunProgress({workspaceId: WS, channelIds: [CH_A], rail, fetchProgress});
+    await settle();
+    const onLedger = jest.fn();
+    const unsubscribe = subscribeRunLedgerFrames(RUN_1.toUpperCase(), onLedger);
+    handlers.get(CH_A)?.onRunEvent({
+      type: 'agent.run.event',
+      v: 1,
+      ts: Date.now(),
+      payload: {run_id: RUN_1, channel_id: CH_A, kind: 'doorbell_rung'},
+    });
+    expect(onLedger).toHaveBeenCalledTimes(1);
+    // 프레임 없이 부르는 옛 레일도 진행은 다시 읽고 원장 구독자는 건드리지 않는다.
+    handlers.get(CH_A)?.onRunEvent();
+    expect(onLedger).toHaveBeenCalledTimes(1);
+    unsubscribe();
+    stop();
+  });
+
+  it('방금 보낸 메시지가 지켜보는 채널만 한 번 당겨 읽는다', async () => {
+    const fetchProgress = jest.fn(async (_ws: string, _ch: string) => [row()]);
+    const stop = startRunProgress({workspaceId: WS, channelIds: [CH_A], rail: null, fetchProgress});
+    await settle();
+    fetchProgress.mockClear();
+    nudgeRunProgress(CH_A.toUpperCase());
+    nudgeRunProgress(CH_B);
+    await settle();
+    expect(fetchProgress).toHaveBeenCalledTimes(1);
+    expect(fetchProgress.mock.calls[0]?.[1]).toBe(CH_A);
     stop();
   });
 });

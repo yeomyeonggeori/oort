@@ -1,5 +1,10 @@
 import {missingMemberLabel} from '@momo/core/features/workspace/directory';
-import {threadRollup, type Message, type ThreadRollup} from '@momo/core/lib/api';
+import {
+  threadRollup,
+  type AgentRunProgress,
+  type Message,
+  type ThreadRollup,
+} from '@momo/core/lib/api';
 import {
   dayDividerLabel,
   dayDividerSegments,
@@ -101,6 +106,22 @@ import {appNote} from './appVoice';
 import {Avatar} from './Avatar';
 import {CONV} from './convDesign';
 import {AiConnectSuggestion} from './AiConnectSuggestion';
+import {
+  TEAM_AI_DELEGATE_ACTION_PREFIX,
+  TeamAiDelegateStrip,
+  teamAiDelegateSpoken,
+  useTeamAiDelegateSend,
+} from './TeamAiDelegateStrip';
+import {
+  delegateButtonLabel,
+  teamAiDelegateFor,
+  type TeamAiDelegate,
+  TEAM_AI_PROPOSAL_AUTHORITY,
+  TEAM_AI_PROPOSAL_LABEL,
+  TEAM_AI_RATIONALE_LABEL,
+  TEAM_AI_RATIONALE_NOTE,
+  teamAiProposalLine,
+} from '@momo/core/features/timeline/teamAi';
 import {commandSuggestCard} from '@momo/core/features/timeline/commandSuggest';
 import {
   deadlinePassed,
@@ -115,7 +136,9 @@ import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecisio
 import {
   ApprovalDecision,
   DEFAULT_DECISION_LEAD,
+  type ApprovalDecisionHandle,
 } from '../inbox/ApprovalDecision';
+import {spawnHostGate} from '@momo/core/features/timeline/spawnHostChoice';
 import {LinkOnce} from './LinkOnce';
 import {BAR_CONTROL_MAX_SCALE, Sentence} from '../../design/atoms';
 import {AttachmentList} from '../attachments/AttachmentList';
@@ -150,6 +173,7 @@ import {useLongPress} from './useLongPress';
 import {turnRecordRunId} from '@momo/core/features/timeline/cascadeModel';
 import {MemoryProposalCards} from '../memory/MemoryProposalCard';
 import {MemoryReceiptChip} from '../memory/MemoryReceiptChip';
+import {MessageRunStatus} from '../agents/MessageRunStatus';
 
 // =============================================================================
 // One row of the conversation.
@@ -1284,11 +1308,14 @@ export function actionResultElsewhereCopy(
 function FactRow({
   label,
   value,
+  note,
   styles,
   testID,
 }: {
   label: string;
   value: string;
+  /** 값 아래 작은 한 줄(도우미 카드의 「AI가 쓴 글」 등). 없으면 지금과 같다. */
+  note?: string;
   styles: ReturnType<typeof buildStyles>;
   testID: string;
 }): React.JSX.Element {
@@ -1297,7 +1324,20 @@ function FactRow({
       <Text style={styles.factLabel}>{label}</Text>
       {/* 값은 서버·에이전트가 쓴 한국어 문장일 수 있다(사유·결정 권한). 접히면
           어절에서 접는다 — `Sentence` 머리말의 규칙. */}
-      <Sentence style={styles.factValue}>{value}</Sentence>
+      {note === undefined ? (
+        <Sentence style={styles.factValue}>{value}</Sentence>
+      ) : (
+        <View style={styles.factValueStack}>
+          {/* 세로 상자 안에서는 `flex: 1` 이 높이 0 으로 접힌다(가로 줄의 폭 규칙). 그래서
+              값은 자기 높이로 선다(#3836 시뮬레이터 캡처에서 값이 사라졌던 결함). */}
+          <Sentence style={[styles.factValue, styles.factValueInStack]} testID={`${testID}-value`}>
+            {value}
+          </Sentence>
+          <Sentence style={styles.factNote} testID={`${testID}-note`}>
+            {note}
+          </Sentence>
+        </View>
+      )}
     </View>
   );
 }
@@ -1426,9 +1466,12 @@ function ApprovalFooter({
  */
 function ApprovalActionRows({
   action,
+  teamAi,
   styles,
 }: {
   action: AgentApprovalAction;
+  /** 도우미가 올린 카드면 참(ADR-0201 D6-3). 사유가 AI가 쓴 글이라고 말한다. */
+  teamAi: boolean;
   styles: ReturnType<typeof buildStyles>;
 }): React.JSX.Element {
   return (
@@ -1452,8 +1495,9 @@ function ApprovalActionRows({
       ) : null}
       {action.rationale !== null ? (
         <FactRow
-          label="사유"
+          label={teamAi ? TEAM_AI_RATIONALE_LABEL : '사유'}
           value={action.rationale}
+          {...(teamAi ? {note: TEAM_AI_RATIONALE_NOTE} : {})}
           styles={styles}
           testID="approval-action-rationale"
         />
@@ -1470,6 +1514,73 @@ function ApprovalActionRows({
   );
 }
 
+/**
+ * 승인 카드가 지금 무엇을 말하는가 — 카드 본체와 행의 로터(#2595)가 같이 읽는다.
+ *
+ * `note === null` 이면 결정 컨트롤이 선다(문장이 아니라 버튼). 로터의 「승인」·
+ * 「거부」는 정확히 그때만 선다.
+ */
+export function readApprovalCard(
+  card: Extract<AgentCardModel, {kind: 'approval'}>,
+  {
+    approvalGates,
+    approvalReceipts,
+    approvalOffline,
+    approvalsProvided,
+  }: {
+    approvalGates?: ReadonlyMap<string, ApprovalGate>;
+    approvalReceipts?: ReadonlyMap<string, ApprovalReceipt>;
+    approvalOffline?: boolean;
+    approvalsProvided?: boolean;
+  },
+) {
+  // 카드가 이미 파싱돼 있으므로 여기서 맞춰 본다 — 목록 쪽에서 하려면 이
+  // 파싱을 한 번 더 해야 하고, 그것은 코어 규칙의 두 번째 구현이 된다.
+  const approval = gateFor(card, approvalGates ?? EMPTY_GATES);
+  const receipt =
+    card.approvalId === null
+      ? undefined
+      : approvalReceipts?.get(card.approvalId);
+  const settledStatus = receipt?.status ?? card.status;
+  const note = approvalCardNote({
+    receiptNote: receipt?.note ?? null,
+    isResumeOffer: card.isResumeOffer,
+    // 폰에는 재개 제안에 할 말이 아직 없다. 웹의 문장은 **작업 세션 패널**로
+    // 가라는 안내인데(`AgentCard.tsx` — 「내 세션에서 온라인 호스트를
+    // 선택하세요」) 이 클라에는 그 화면이 없다. 없는 문을 가리키느니 아무
+    // 말도 하지 않는다. 그리고 이것이 옛 판을 고친다: 예전에는 재개 제안
+    // 카드가 `approval === null` 이라는 이유로 「이 결정은 인박스나 데스크톱
+    // 앱에서」를 입었다 — 승인이 아닌 것에 승인 문장을 붙인 것이다.
+    resumeOfferText: null,
+    // ## 세 값이 하나였을 때 이 자리가 무엇을 잃었나 (U4-6 리뷰 B-1)
+    //
+    // 앞 판은 `decidable: approval !== null` 하나를 넘겼다. 그 불리언이 세 가지
+    // **서로 다른 사실**을 접고 있었다 — 「끝났는가」·「결정할 대상이 있는가」·
+    // 「이 표면에서 지금 대기인가」. 코어가 그것을 가른 뒤(`approvalNote.ts`)
+    // 이 호출부만 옛 이름으로 남았고, 그 결과가 **오프라인인데 승인·거부 버튼이
+    // 되살아나는** 화면이었다: 넘기지 않은 `settled`·`hasTarget` 이 `undefined`
+    // 라 `settled || !hasTarget` 이 참이 되고, 영수증 말고는 전부 `null` —
+    // 그리고 이 파일에서 `null` 은 「할 말이 없다」가 아니라 **「컨트롤이
+    // 선다」**이다. 끊긴 채로 누르면 나가지 않는 버튼이 서 있었다.
+    //
+    // 세 값의 출처가 각각 다르다는 것이 이 자리의 요점이다:
+    //
+    //   settled     원장이 답했으면 그 상태, 아니면 카드 스냅샷 — 위에서 칩이
+    //               읽는 그 값(`settledStatus`)과 **같은 값**이다. 다른 값을
+    //               쓰면 한 카드가 한 줄에서 두 가지를 말한다.
+    //   hasTarget   카드에 결정할 대상이 있는가. 재개 제안에는 없다.
+    //   pendingHere 대기 승인 **목록**이 지금도 대기라고 말하는가. 폰만 아는
+    //               사실이고(웹의 타임라인 카드는 이 목록을 구독하지 않는다),
+    //               다른 기기에서 결정된 건이 여기서 사라지는 근거다.
+    settled: settledStatus !== 'pending',
+    hasTarget: card.approvalId !== null,
+    pendingHere: approval !== null,
+    offline: approvalOffline === true,
+    approvalsProvided,
+  });
+  return {approval, receipt, settledStatus, note};
+}
+
 function AgentCard({
   card,
   directory,
@@ -1479,8 +1590,11 @@ function AgentCard({
   approvalsProvided,
   nowMs,
   onApprovalSettled,
+  decisionRef,
 }: {
   card: AgentCardModel;
+  /** 행의 로터가 같은 결정을 부르는 손잡이 (#2595). */
+  decisionRef?: React.Ref<ApprovalDecisionHandle>;
   /** 결과 카드의 「결정」 줄이 사람 이름을 푸는 데 쓴다. */
   directory: Directory;
   approvalGates?: ReadonlyMap<string, ApprovalGate>;
@@ -1495,48 +1609,13 @@ function AgentCard({
   const approvalNoteStyle = useStyles(buildApprovalNoteStyle);
   const completionToneStyle = useStyles(buildCompletionToneStyle);
   if (card.kind === 'approval') {
-    // 카드가 이미 파싱돼 있으므로 여기서 맞춰 본다 — 목록 쪽에서 하려면 이
-    // 파싱을 한 번 더 해야 하고, 그것은 코어 규칙의 두 번째 구현이 된다.
-    const approval = gateFor(card, approvalGates ?? EMPTY_GATES);
-    const receipt =
-      card.approvalId === null
-        ? undefined
-        : approvalReceipts?.get(card.approvalId);
-    const settledStatus = receipt?.status ?? card.status;
-    const note = approvalCardNote({
-      receiptNote: receipt?.note ?? null,
-      isResumeOffer: card.isResumeOffer,
-      // 폰에는 재개 제안에 할 말이 아직 없다. 웹의 문장은 **작업 세션 패널**로
-      // 가라는 안내인데(`AgentCard.tsx` — 「내 세션에서 온라인 호스트를
-      // 선택하세요」) 이 클라에는 그 화면이 없다. 없는 문을 가리키느니 아무
-      // 말도 하지 않는다. 그리고 이것이 옛 판을 고친다: 예전에는 재개 제안
-      // 카드가 `approval === null` 이라는 이유로 「이 결정은 인박스나 데스크톱
-      // 앱에서」를 입었다 — 승인이 아닌 것에 승인 문장을 붙인 것이다.
-      resumeOfferText: null,
-      // ## 세 값이 하나였을 때 이 자리가 무엇을 잃었나 (U4-6 리뷰 B-1)
-      //
-      // 앞 판은 `decidable: approval !== null` 하나를 넘겼다. 그 불리언이 세 가지
-      // **서로 다른 사실**을 접고 있었다 — 「끝났는가」·「결정할 대상이 있는가」·
-      // 「이 표면에서 지금 대기인가」. 코어가 그것을 가른 뒤(`approvalNote.ts`)
-      // 이 호출부만 옛 이름으로 남았고, 그 결과가 **오프라인인데 승인·거부 버튼이
-      // 되살아나는** 화면이었다: 넘기지 않은 `settled`·`hasTarget` 이 `undefined`
-      // 라 `settled || !hasTarget` 이 참이 되고, 영수증 말고는 전부 `null` —
-      // 그리고 이 파일에서 `null` 은 「할 말이 없다」가 아니라 **「컨트롤이
-      // 선다」**이다. 끊긴 채로 누르면 나가지 않는 버튼이 서 있었다.
-      //
-      // 세 값의 출처가 각각 다르다는 것이 이 자리의 요점이다:
-      //
-      //   settled     원장이 답했으면 그 상태, 아니면 카드 스냅샷 — 위에서 칩이
-      //               읽는 그 값(`settledStatus`)과 **같은 값**이다. 다른 값을
-      //               쓰면 한 카드가 한 줄에서 두 가지를 말한다.
-      //   hasTarget   카드에 결정할 대상이 있는가. 재개 제안에는 없다.
-      //   pendingHere 대기 승인 **목록**이 지금도 대기라고 말하는가. 폰만 아는
-      //               사실이고(웹의 타임라인 카드는 이 목록을 구독하지 않는다),
-      //               다른 기기에서 결정된 건이 여기서 사라지는 근거다.
-      settled: settledStatus !== 'pending',
-      hasTarget: card.approvalId !== null,
-      pendingHere: approval !== null,
-      offline: approvalOffline === true,
+    // 카드가 무엇을 말하는지(문장 / 컨트롤 / 둘 다 아님)는 `readApprovalCard` 한
+    // 곳에서 읽는다. 행의 로터(#2595)도 같은 답을 보고 「승인」·「거부」를 세운다 —
+    // 두 자리가 따로 읽으면 버튼은 없는데 로터만 남는 날이 온다.
+    const {approval, receipt, settledStatus, note} = readApprovalCard(card, {
+      approvalGates,
+      approvalReceipts,
+      approvalOffline,
       approvalsProvided,
     });
     return (
@@ -1561,6 +1640,22 @@ function AgentCard({
         </View>
         {/* 서버가 쓴 한국어 문장이다. 접히면 어절에서 접는다 — 기본 줄바꿈은
             「초 / 대 링크」처럼 낱말 가운데를 자른다(#2513 캡처 실측). */}
+        {/* 도우미가 올린 카드 (ADR-0201 D6-3). 누가 부탁했고 누구 권한으로 실행되는지를
+            결정 **전에** 말한다. 이름은 디렉터리가 먼저, 없으면 서버가 박은 이름. */}
+        {card.proposedVia !== undefined ? (
+          <View style={styles.factRows}>
+            <FactRow
+              label={TEAM_AI_PROPOSAL_LABEL}
+              value={teamAiProposalLine(
+                memberFor(directory, card.proposedVia.requesterId ?? undefined)
+                  ?.displayName ?? card.proposedVia.requesterName,
+              )}
+              note={TEAM_AI_PROPOSAL_AUTHORITY}
+              styles={styles}
+              testID="approval-team-ai"
+            />
+          </View>
+        ) : null}
         {card.summary ? (
           <Sentence style={styles.cardBody}>{card.summary}</Sentence>
         ) : null}
@@ -1568,7 +1663,11 @@ function AgentCard({
             `card.action` 만 그린다 — 블록이 없으면 아래는 전부 지금까지의 도구
             호출 승인 그대로다. */}
         {card.action !== null ? (
-          <ApprovalActionRows action={card.action} styles={styles} />
+          <ApprovalActionRows
+            action={card.action}
+            teamAi={card.proposedVia !== undefined}
+            styles={styles}
+          />
         ) : null}
         {/* =====================================================================
             여기 있던 문장은 이랬다 (감사 H-1):
@@ -1636,6 +1735,7 @@ function AgentCard({
             testIDPrefix={`card-approval-${approval.approvalId}`}
             // 시안 `.a-acts` 알약 행동(주 = 잉크, 보조 = surface2).
             shape="pill"
+            decisionRef={decisionRef}
           />
         ) : null}
         </ApprovalFooter>
@@ -2065,6 +2165,12 @@ export interface MessageRowProps {
    */
   runEnded?: boolean;
   /**
+   * #3824 — 내가 보낸 이 메시지가 일으킨 run들(서버 진행 읽기). 목록이 넣는다: 행이
+   * 스토어를 구독하면 아무 run이나 바뀔 때 모든 행이 다시 그려진다. 넣지 않으면(남의
+   * 메시지) 줄이 없다. 빈 배열은 「아직 없음」이다.
+   */
+  runStatus?: readonly AgentRunProgress[];
+  /**
    * 이 행의 접근성 요소(아래 `accessible` 뿌리)를 목록에 알린다 (#1892 R1 M-3).
    *
    * 점프 필은 누르는 순간 사라지고, 목록은 착지한 행으로 VoiceOver 초점을 옮겨야
@@ -2098,6 +2204,33 @@ function linkActionLabel(href: string, count: number): string {
   return count > 1 ? `첫 ${where} (총 ${count}개)` : where;
 }
 
+/**
+ * 맡길 원래 요청의 본문 (ADR-0201 D5). 페이지에 동봉된 인용이 먼저, 없으면 화면이 그린
+ * 인용 블록(잘리지 않은 것만). 둘 다 없으면 null 이고, 그때 본문은 지어내지 않는다.
+ */
+function delegateSourceBody(
+  delegate: TeamAiDelegate,
+  message: Message,
+  quote: QuoteBlockModel | null | undefined,
+): string | null {
+  const id = delegate.sourceMessageId;
+  if (id === null) return null;
+  if (
+    message.replyTo !== undefined &&
+    message.replyTo.id.toLowerCase() === id.toLowerCase()
+  ) {
+    return message.replyTo.body ?? null;
+  }
+  if (
+    quote?.kind === 'ready' &&
+    !quote.truncated &&
+    quote.targetId.toLowerCase() === id.toLowerCase()
+  ) {
+    return quote.lines.join('\n');
+  }
+  return null;
+}
+
 function MessageRowInner({
   message,
   startsGroup,
@@ -2120,6 +2253,7 @@ function MessageRowInner({
   approvalsProvided,
   onApprovalSettled,
   runEnded,
+  runStatus,
   registerRowNode,
 }: MessageRowProps): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -2138,6 +2272,28 @@ function MessageRowInner({
     () => commandSuggestCard(message, directory),
     [message, directory],
   );
+  // 도우미가 넘기는 줄(ADR-0201 D5). 이 키를 보내지 않는 서버에서는 늘 null 이다.
+  const teamAiDelegate = useMemo(() => teamAiDelegateFor(message), [message]);
+  // 손가락(띠의 버튼)과 로터(아래 `accessibilityActions`)가 같은 보내기와 상태를 쓴다
+  // (#3844 design-review H-1). 행이 접근성 원소 하나라 띠의 버튼에 VoiceOver 가 닿지 않는다.
+  const teamAiSend = useTeamAiDelegateSend({
+    delegate: teamAiDelegate,
+    workspaceId: actions?.workspaceId,
+    channelId: message.channelId,
+    viewerMemberId: actions?.myMemberId,
+    sourceBody:
+      teamAiDelegate === null
+        ? null
+        : delegateSourceBody(teamAiDelegate, message, quote),
+    teamAiHandle:
+      teamAiDelegate === null
+        ? null
+        : memberFor(
+            directory,
+            teamAiDelegate.teamAiMemberId ?? message.authorMemberId,
+          )?.handle ?? null,
+    offline: approvalOffline === true,
+  });
   // 1회 링크 (#2513). 행은 접근성 요소 **하나**라(아래 `accessible`) 카드 안의
   // 복사 버튼에 VoiceOver 가 닿지 못한다 — 코드 상자의 복사가 로터로 나온 것과
   // 같은 이유로 여기서 로터에 세운다. 값은 영수증 표(화면의 메모리)에서만 읽고,
@@ -2147,6 +2303,30 @@ function MessageRowInner({
     presentation.card.approvalId !== null
       ? approvalReceipts?.get(presentation.card.approvalId)?.secretOnce
       : undefined;
+  // 승인 카드의 결정 버튼 (#2595). 같은 이유로 — 행이 요소 하나라 카드 안의 승인·
+  // 거부에 VoiceOver 가 닿지 못한다 — 로터에 「승인」·「거부」를 세운다. 서는 조건은
+  // 카드가 버튼을 세우는 조건과 **같은 함수**(`readApprovalCard`)의 답이고, 로터가
+  // 부르는 것은 버튼이 부르는 그 `commit` 이다(`ApprovalDecisionHandle`).
+  const decisionRef = useRef<ApprovalDecisionHandle | null>(null);
+  const decisionRotor = useMemo(() => {
+    const card = presentation.card;
+    if (card?.kind !== 'approval') return null;
+    const read = readApprovalCard(card, {
+      approvalGates,
+      approvalReceipts,
+      approvalOffline,
+      approvalsProvided,
+    });
+    if (read.note !== null || read.approval === null) return null;
+    // 실행할 호스트가 하나도 없는 스폰 승인은 버튼도 꺼져 있다. 로터에도 세우지 않는다.
+    return {canApprove: spawnHostGate(card.execution).canApprove};
+  }, [
+    presentation.card,
+    approvalGates,
+    approvalReceipts,
+    approvalOffline,
+    approvalsProvided,
+  ]);
   const deleted = message.state === 'deleted';
   const rollup =
     rollupOverride === undefined ? threadRollup(message) : rollupOverride;
@@ -2354,6 +2534,12 @@ function MessageRowInner({
         case 'momoCopyCode':
           if (affordances.firstCode) void copyText(affordances.firstCode);
           return;
+        case 'momoApprove':
+          decisionRef.current?.decide('approve');
+          return;
+        case 'momoReject':
+          decisionRef.current?.decide('reject');
+          return;
         case 'momoCopyLinkOnce':
           // 버튼의 라벨 교체(ADR-0182 ①)를 로터에서는 들을 수 없으므로, 같은
           // 낱말을 소리로 한 번 말한다. 값 자체는 읽지 않는다.
@@ -2373,6 +2559,13 @@ function MessageRowInner({
           actions?.onOpenProfile?.(message.authorMemberId);
           return;
         default:
+          if (event.nativeEvent.actionName.startsWith(TEAM_AI_DELEGATE_ACTION_PREFIX)) {
+            const index = Number(
+              event.nativeEvent.actionName.slice(TEAM_AI_DELEGATE_ACTION_PREFIX.length),
+            );
+            const candidate = teamAiSend.pressable[index];
+            if (candidate !== undefined) teamAiSend.press(candidate);
+          }
       }
     },
     [
@@ -2385,6 +2578,7 @@ function MessageRowInner({
       presentation.artifact,
       togglePin,
       linkOnce,
+      teamAiSend,
     ],
   );
 
@@ -2394,6 +2588,19 @@ function MessageRowInner({
     const list: {name: string; label: string}[] = [];
     // 맨 앞이다: 「지금 전달하세요」라고 말한 값이고, 이 화면을 떠나면 다시 없다.
     if (linkOnce) list.push({name: 'momoCopyLinkOnce', label: '링크 복사하기'});
+    // 그다음이 기다리는 결정이다. 낱말은 버튼과 같다(「승인」·「거부」).
+    if (decisionRotor !== null && !deleted) {
+      if (decisionRotor.canApprove) list.push({name: 'momoApprove', label: '승인'});
+      list.push({name: 'momoReject', label: '거부'});
+    }
+    // 도우미가 넘긴 줄의 「○○에게 맡기기」 (ADR-0201 D5). 요청자 본인에게만, 지금 누를 수
+    // 있을 때만 선다 — 띠의 버튼과 같은 조건이다(`useTeamAiDelegateSend`).
+    teamAiSend.pressable.forEach((candidate, index) => {
+      list.push({
+        name: `${TEAM_AI_DELEGATE_ACTION_PREFIX}${index}`,
+        label: delegateButtonLabel(candidate),
+      });
+    });
     if (actionable) list.push({name: 'momoActions', label: '메시지 액션'});
     if (actions?.onOpenProfile && memberFor(directory, message.authorMemberId)) {
       list.push({name: 'momoProfile', label: '작성자 프로필 보기'});
@@ -2444,6 +2651,8 @@ function MessageRowInner({
     directory,
     message.authorMemberId,
     linkOnce,
+    decisionRotor,
+    teamAiSend.pressable,
   ]);
 
   const authorLabel = memberNameParts(
@@ -2499,7 +2708,8 @@ function MessageRowInner({
       // the same count the web client cut from 6 to 1. Touch is unaffected:
       // grouping changes the accessibility tree, not the responder tree.
       accessible
-      accessibilityLabel={rowAccessibilityLabel({
+      accessibilityLabel={[
+        rowAccessibilityLabel({
         message,
         authorLabel,
         chips,
@@ -2522,7 +2732,14 @@ function MessageRowInner({
           quote && !deleted
             ? quoteAccessibilityPhrase(quote, directory, quoteAttachmentCount)
             : null,
-      })}
+        }),
+        // 도우미가 넘긴 줄의 띠(넘긴 이유·맡겼어요). 행이 원소 하나라 따로 읽히지 않는다.
+        ...teamAiDelegateSpoken(
+          teamAiDelegate,
+          teamAiSend,
+          approvalOffline === true,
+        ),
+      ].join(', ')}
       accessibilityActions={accessibilityActions}
       onAccessibilityAction={onAccessibilityAction}
       style={[
@@ -2710,6 +2927,7 @@ function MessageRowInner({
                 approvalsProvided={approvalsProvided}
                 nowMs={nowMs}
                 onApprovalSettled={onApprovalSettled}
+                decisionRef={decisionRef}
               />
             ) : null}
 
@@ -2718,6 +2936,14 @@ function MessageRowInner({
               <AiConnectSuggestion
                 card={suggestion}
                 viewerMemberId={actions?.myMemberId}
+                offline={approvalOffline === true}
+              />
+            ) : null}
+
+            {teamAiDelegate ? (
+              <TeamAiDelegateStrip
+                delegate={teamAiDelegate}
+                send={teamAiSend}
                 offline={approvalOffline === true}
               />
             ) : null}
@@ -2818,6 +3044,18 @@ function MessageRowInner({
               </Pressable>
             ) : null}
           </View>
+        ) : null}
+
+        {/* 내가 보낸 메시지가 에이전트를 불렀으면 그 일의 상태 한 줄 (#3824). 칩보다
+            안쪽이다: 칩은 남들의 반응이고, 이 줄은 이 메시지가 일으킨 일이다. */}
+        {runStatus !== undefined ? (
+          <MessageRunStatus
+            messageId={message.id}
+            channelId={message.channelId}
+            createdAtMs={message.createdAtMs}
+            runs={runStatus}
+            directory={directory}
+          />
         ) : null}
 
         <Chips chips={chips} onToggle={actions ? onChipPress : undefined} />
@@ -3081,6 +3319,7 @@ export const MESSAGE_ROW_COMPARED_PROPS: Record<keyof MessageRowProps, true> = {
   approvalsProvided: true,
   onApprovalSettled: true,
   runEnded: true,
+  runStatus: true,
   registerRowNode: true,
 };
 
@@ -3155,6 +3394,9 @@ export function sameMessageRowProps(
     // 다시 그려진다. 이것이 빠지면 취소 직후 붙어 있는 행은 옛 값을 든 채 서 있고
     // 「응답이 끊김」은 다음에 무언가가 그 행을 흔들 때까지 나타나지 않는다.
     a.runEnded === b.runEnded &&
+    // #3824. 목록이 채널 run이 바뀔 때만 새 배열을 만들고, run이 없는 행에는 같은
+    // 빈 배열을 넘기므로 동일성으로 충분하다.
+    a.runStatus === b.runStatus &&
     // #1892 R1 M-3. 목록이 한 함수를 모든 행에 나눠 주므로 동일성으로 충분하다.
     // 빠지면 필이 켜진 표면으로 옮겨 온 행이 노드를 알리지 않아 초점이 그 행에
     // 가지 못한다.
@@ -3892,6 +4134,9 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     lineHeight: line.label,
     color: color.text,
   },
+  factValueStack: {flex: 1, gap: space.xs},
+  factValueInStack: {flex: 0},
+  factNote: {fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},
   gateGroup: {marginTop: space.xs},
   gateSurface: {fontSize: font.label, fontWeight: '600', color: color.text},
   fileRow: {flexDirection: 'row', alignItems: 'center', gap: space.sm},
