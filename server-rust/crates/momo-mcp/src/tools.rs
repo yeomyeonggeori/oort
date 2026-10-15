@@ -1581,7 +1581,9 @@ impl ToolFailure {
     /// `agent_run_event_tool_call_ck` admits besides `ok`.
     pub fn code(self) -> &'static str {
         match self {
-            ToolFailure::InvalidArguments => "invalid_arguments",
+            // A rejected artifacts field is the same -32602 wire answer, so it records
+            // as `invalid_arguments` too; the closed code set stays migration 133's.
+            ToolFailure::InvalidArguments | ToolFailure::InvalidArtifacts(_) => "invalid_arguments",
             ToolFailure::NotAuthorized => "not_authorized",
             ToolFailure::Unavailable => "unavailable",
             ToolFailure::Conflict => "conflict",
