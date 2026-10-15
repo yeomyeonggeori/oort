@@ -12,8 +12,11 @@ import {
 } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { AI_HUB_NAV_COPY } from "@momo/core/features/ai/aiHubModel";
-import { Bot, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useSession } from "@/app/session";
+import { MemberAvatar } from "@/features/common/MemberAvatar";
+import { AgentIdentityCard } from "./AgentIdentityCard";
+import { canEditAgentIdentity } from "./identityCardModel";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
@@ -221,12 +224,7 @@ function AgentListRow({
         data-testid="agent-hub-agent-row"
         data-agent-id={normalizedId(agent.id)}
       >
-        <span
-          className="flex size-control shrink-0 items-center justify-center rounded-sm bg-agent-soft text-agent"
-          aria-hidden="true"
-        >
-          <Bot className="size-4" />
-        </span>
+        <MemberAvatar member={agent} size="md" />
         <span className="flex min-w-0 flex-1 flex-col gap-1">
           <span className="flex min-w-0 items-center gap-2">
             <span className="min-w-0 flex-1 truncate text-body font-medium text-ink">
@@ -640,7 +638,7 @@ function AgentProfileSection({
   signals: ReturnType<typeof signalsForAgent>;
   live: boolean;
 }) {
-  const { workspaceId } = useSession();
+  const { workspaceId, session } = useSession();
   const client = useQueryClient();
   const handle = useAgentProfile(agent.id);
   const catalogQuery = useAgentToolCatalog();
@@ -733,23 +731,45 @@ function AgentProfileSection({
     }
   }
 
+  // 프로필 카드는 지시문·모델 프로필과 다른 줄기(명부)에서 온다. 프로필을 불러오는
+  // 중이거나 못 불러와도 이름과 사진은 보이고 바꿀 수 있어야 한다(#3821).
+  const identityCard = (
+    <AgentIdentityCard
+      agent={agent}
+      canEdit={canEditAgentIdentity(
+        {
+          id: session.member.id,
+          kind: session.member.kind,
+          role: memberFor(directory, session.member.id)?.role,
+        },
+        agent
+      )}
+      offline={offline}
+    />
+  );
+
   if (handle.isPending) {
     return (
-      <AgentHubLoading
-        message="에이전트 프로필을 불러오는 중이에요."
-        rows={6}
-        className="p-4"
-      />
+      <div className="flex flex-col gap-6 p-4">
+        {identityCard}
+        <AgentHubLoading
+          message="에이전트 프로필을 불러오는 중이에요."
+          rows={6}
+        />
+      </div>
     );
   }
   if (handle.error || currentDraft === null || currentInstructions === null) {
     return (
-      <InlineBanner
-        message="에이전트 프로필을 불러오지 못했어요."
-        actionLabel="다시 시도"
-        onAction={handle.refetch}
-        testId="agent-hub-profile-error"
-      />
+      <div className="flex flex-col gap-6 p-4">
+        {identityCard}
+        <InlineBanner
+          message="에이전트 프로필을 불러오지 못했어요."
+          actionLabel="다시 시도"
+          onAction={handle.refetch}
+          testId="agent-hub-profile-error"
+        />
+      </div>
     );
   }
 
@@ -760,6 +780,7 @@ function AgentProfileSection({
 
   return (
     <div className="flex flex-col gap-6 p-4">
+      {identityCard}
       {handle.missing && (
         <InlineBanner
           tone="neutral"
