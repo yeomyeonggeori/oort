@@ -8199,6 +8199,32 @@ paths:
         step update) is broadcast as work.run.updated (run_id, channel_id, to) on
         the home channel; clients re-read as for sessions. The single read below
         is sessions only; a run card is read from the agent-runs detail.
+
+        Jobs delegated to any agent (#3853, ADR-0202 D3 and D4), opt-in with
+        include=jobs (include=runs,jobs is the same): the run rows widen to every
+        agent kind's work runs (hosted, managed, BYOA, team AI) plus each
+        top-level mention run that became a job, meaning it reported a stage,
+        raised an approval card, reported artifacts, or has run (or ran) for at
+        least 60 seconds. A mention run that is none of those is a short reply
+        and has no row; a sub-run (an agent's run started by another run) belongs
+        to its parent. Visibility, the session-link dedupe and the 30-day window
+        are unchanged, so a channel the caller is not an active member of
+        contributes no row and no count. A jobs run row also carries trigger
+        (work, mention or thread_reply), phase (the ADR-0200 word: queued,
+        claimed, running, awaiting_approval, paused, succeeded, failed,
+        timed_out, cancelled), durationMs once finished, resultMessageId (the
+        agent's newest text message of the run; the id only) and agentReported
+        (the closed code-task result the agent reported, ADR-0162 증보 5 C1 and
+        C2, never verified by the server). A mention run's requestedBy is the
+        person who wrote the mention. who=mine narrows the page to rows the
+        caller asked for (requestedBy) or owns (session owner), inside the same
+        visibility; who=team (the default) is the whole visible set. A page
+        answered to a request that sent who or include=jobs echoes who; with
+        neither parameter the response is byte-for-byte the earlier one (no new
+        key appears). work.run.updated now fires for every agent kind's work
+        runs on each board transition and for top-level mention runs on their
+        final transition (done, failed or stopped); nothing is emitted when a
+        mention run crosses 60 seconds, so a client also refetches on focus.
       security:
         - bearerAuth: []
       parameters:
@@ -8206,10 +8232,18 @@ paths:
         - name: include
           in: query
           required: false
-          description: "runs adds hosted agents' work runs (D13). Anything else, or omitted, lists sessions only so a client that keys rows on sessionId is never handed a run row."
+          description: "Comma-separated, closed: runs adds hosted agents' work runs (D13); jobs adds every agent's delegated work and the job fields (ADR-0202 D4) and implies runs. Omitted lists sessions only so a client that keys rows on sessionId is never handed a run row. Any other token is 400 (message \"invalid include\")."
           schema:
             type: string
-            enum: [runs]
+            pattern: "^(runs|jobs)(,(runs|jobs))*$"
+        - name: who
+          in: query
+          required: false
+          description: "ADR-0202 D2: mine = rows the caller asked for or owns; team (default) = every row the caller may see. Any other value is 400 (message \"invalid who\")."
+          schema:
+            type: string
+            enum: [mine, team]
+            default: team
         - name: limit
           in: query
           required: false
@@ -8234,7 +8268,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/SharedWorkSessionListResponse"
         "400":
-          description: Malformed cursor (message "invalid cursor").
+          description: Malformed cursor (message "invalid cursor"), an unknown include token ("invalid include") or an unknown who ("invalid who").
           content:
             application/json:
               schema:
@@ -16667,6 +16701,68 @@ components:
           type: integer
           format: int64
           description: Epoch seconds. Orders the list.
+        trigger:
+          type: string
+          enum: [work, mention, thread_reply]
+          description: "include=jobs run row only (ADR-0202 D3): what made this job."
+        phase:
+          type: string
+          enum: [queued, claimed, running, awaiting_approval, paused, succeeded, failed, timed_out, cancelled]
+          description: "include=jobs run row only: the ADR-0200 phase (claimed = queued with a leased delivery job)."
+        durationMs:
+          type: integer
+          format: int64
+          description: "include=jobs run row only, once finished: endedAtMs minus startedAtMs."
+        resultMessageId:
+          type: string
+          format: uuid
+          description: "include=jobs run row only: the agent's newest live text message of this run. The id only."
+        agentReported:
+          $ref: "#/components/schemas/AgentReportedResult"
+
+    AgentReportedResult:
+      type: object
+      required: [resultKind, tests, nextAction, commitSha, toolCounts]
+      additionalProperties: false
+      description: >
+        include=jobs run row only, when the agent reported at least one field:
+        the closed code-task result of ADR-0162 증보 5 C1 and C2, as the agent
+        reported it. The server re-checks the closed vocabulary on read but does
+        not verify any of it; clients label it 「에이전트 보고」.
+      properties:
+        resultKind:
+          type: string
+          nullable: true
+          enum: [pr_opened, branch_only, vm_only, no_change]
+        tests:
+          type: object
+          nullable: true
+          required: [passed, failed, notRun]
+          additionalProperties: false
+          properties:
+            passed: {type: integer, minimum: 0, maximum: 100000}
+            failed: {type: integer, minimum: 0, maximum: 100000}
+            notRun: {type: integer, minimum: 0, maximum: 100000}
+        nextAction:
+          type: string
+          nullable: true
+          enum: [merge_ok, please_test, blocked, none]
+        commitSha:
+          type: string
+          nullable: true
+          pattern: "^[0-9a-f]{7,40}$"
+        toolCounts:
+          type: object
+          nullable: true
+          additionalProperties: false
+          description: Only the reported categories.
+          properties:
+            run: {type: integer, minimum: 0, maximum: 100000}
+            edit: {type: integer, minimum: 0, maximum: 100000}
+            read: {type: integer, minimum: 0, maximum: 100000}
+            search: {type: integer, minimum: 0, maximum: 100000}
+            web: {type: integer, minimum: 0, maximum: 100000}
+            other: {type: integer, minimum: 0, maximum: 100000}
 
     SharedWorkSessionListResponse:
       type: object
@@ -16681,6 +16777,10 @@ components:
           type: string
           nullable: true
           description: Opaque; present only when more visible rows follow. There is no total.
+        who:
+          type: string
+          enum: [mine, team]
+          description: "ADR-0202 D4: the who this page answered, present only when the request sent who or include=jobs. A client tells a server that knows include=jobs from one that does not by this echo."
 
     SharedWorkSessionResponse:
       type: object

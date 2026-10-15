@@ -613,12 +613,15 @@ mod tests {
     ///
     /// 134 is #3851's `agent.thread_reply_wake` (ADR-0162 증보 5 W3): one boolean column on the
     /// existing RLS-FORCE `agent` table, default on.
+    ///
+    /// 135 is #3853 (ADR-0202 E1): `work.run.updated` fires for every agent kind's work
+    /// runs and for top-level mention runs' final transition. Function body only.
     #[test]
-    fn discovers_contiguous_migrations_001_to_134() {
+    fn discovers_contiguous_migrations_001_to_135() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=134).collect();
+        let expected: Vec<i64> = (1..=135).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -626,7 +629,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=134 under {}",
+            "expected contiguous 001..=135 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -634,7 +637,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("134_agent_thread_reply_wake"));
+            .starts_with("135_work_run_updated_all_agents"));
     }
 
     #[test]
