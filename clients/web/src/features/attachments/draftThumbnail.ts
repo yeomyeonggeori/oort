@@ -33,7 +33,7 @@ import { draftFile } from "./draftStore";
 // =============================================================================
 
 /** 트레이 칩의 썸네일 한 변(CSS px). tokens.css `--spacing-tray-thumb` 와 같은 값. */
-const THUMB_EDGE_PX = 48;
+const THUMB_EDGE_PX = 64;
 /** 레티나에서 흐리지 않게 두 배로 그린다. */
 const THUMB_RENDER_PX = THUMB_EDGE_PX * 2;
 

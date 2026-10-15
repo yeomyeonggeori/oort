@@ -496,7 +496,6 @@ describe('승인 결정 — 대화 카드에서만 알약, 인박스는 그대�
         <SessionProvider member={ME}>
           <ApprovalDecision
             approvalId="ap-1"
-            reversible
             onSettled={() => {}}
             testIDPrefix="x"
             shape={shape}
@@ -510,7 +509,8 @@ describe('승인 결정 — 대화 카드에서만 알약, 인박스는 그대�
     rerender(tree('pill'));
     const pill = flatten(screen.getByTestId('x-approve').props.style);
     expect(pill.borderRadius).toBe(999);
-    expect(pill.borderWidth).toBe(0);
+    // 보조(거부)는 테두리 없는 surface2 알약이고, 주(승인)는 채움 알약이다(#3819).
+    expect(flatten(screen.getByTestId('x-reject').props.style).borderWidth).toBe(0);
   });
 });
 

@@ -226,21 +226,15 @@ function byTestId(host: HTMLElement, id: string): HTMLElement[] {
   return [...host.querySelectorAll(`[data-testid="${id}"]`)] as HTMLElement[];
 }
 
-/** 무장 → 시간 게이트 통과 → 확정. 반환은 확정 뒤의 호스트. */
+/** 한 번 누르면 결정이 나간다 (#3819). 반환은 응답이 반영된 뒤의 호스트. */
 async function decide(host: HTMLElement, response: Response): Promise<void> {
-  let now = 1_000_000;
-  vi.spyOn(Date, "now").mockImplementation(() => now);
   vi.stubGlobal("fetch", vi.fn(async () => response));
   const approve = byTestId(host, "approval-approve")[0] as HTMLButtonElement;
-  act(() => {
-    approve.click();
-  });
-  // CONFIRM_GUARD_MS 를 넘긴다. 한 번의 누름이 무장과 확정을 관통하지 못하게
-  // 막는 그 가드이고, 시험이 그것을 우회하지 않고 **지나간다**.
-  now += 1_000;
-  const commit = byTestId(host, "approval-commit")[0] as HTMLButtonElement;
+  // 키보드로 오는 사람은 버튼에 초점을 둔 채 누른다. 눌린 버튼이 초점을 잃지 않는지가
+  // 아래 시험들의 관심이다(`aria-disabled` 이지 `disabled` 가 아니다).
+  approve.focus();
   await act(async () => {
-    commit.click();
+    approve.click();
     await Promise.resolve();
     await Promise.resolve();
   });
@@ -366,32 +360,93 @@ describe("1회 링크는 결정 응답에서만 그려지고 새로고침을 견
     expect(host.querySelectorAll('[role="status"]')).toHaveLength(1);
   });
 
-  it("R1 M2: 행동 승인의 확정 문장은 에이전트 재개를 약속하지 않는다", () => {
+  it("#3819: 승인 한 번이 곧 결정이다 — 확정 줄도 확정 버튼도 서지 않는다", async () => {
     const host = mountCard(approvalProps());
+    const fetchSpy = vi.fn(async () => jsonResponse(APPENDIX_C_BODY));
+    vi.stubGlobal("fetch", fetchSpy);
     const approve = byTestId(host, "approval-approve")[0] as HTMLButtonElement;
-    act(() => {
+    await act(async () => {
       approve.click();
+      await Promise.resolve();
+      await Promise.resolve();
     });
-    const confirm = byTestId(host, "approval-confirm")[0];
-    expect(confirm?.textContent).toContain("승인하면 서버가 관리자 권한으로");
-    expect(confirm?.textContent).not.toContain("에이전트가 이어서");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(byTestId(host, "approval-confirm")).toHaveLength(0);
+    expect(byTestId(host, "approval-commit")).toHaveLength(0);
   });
 
-  it("R1 M2: 행동 블록이 없으면 확정 문장도 그대로다 (회귀 0)", () => {
-    const host = mountCard({
-      approval_id: APPROVAL_ID,
-      action_type: "shell",
-      tool_name: "shell",
-      title: "빌드 캐시 정리",
-      status: "pending",
-    });
-    const approve = byTestId(host, "approval-approve")[0] as HTMLButtonElement;
-    act(() => {
-      approve.click();
-    });
-    expect(byTestId(host, "approval-confirm")[0]?.textContent).toContain(
-      "승인하면 에이전트가 이어서 진행합니다."
+  it("#3819: 거부도 한 번에 나간다", async () => {
+    const host = mountCard(approvalProps());
+    const fetchSpy = vi.fn(async () =>
+      jsonResponse({ ...APPENDIX_C_BODY, status: "rejected", result: undefined })
     );
+    vi.stubGlobal("fetch", fetchSpy);
+    const reject = byTestId(host, "approval-reject")[0] as HTMLButtonElement;
+    reject.focus();
+    await act(async () => {
+      reject.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const init = (fetchSpy.mock.calls[0] as unknown as [string, RequestInit])[1];
+    const body = JSON.parse(String(init.body));
+    expect(body.approve).toBe(false);
+    expect(byTestId(host, "agent-status-chip")[0]?.textContent).toBe("거부됨");
+    // 눌린 버튼은 영수증 줄로 바뀌며 사라진다 — 초점은 카드가 받는다(body 로 떨어지지 않는다).
+    expect(document.activeElement).toBe(byTestId(host, "agent-card")[0]);
+  });
+
+  it("#3819: 보내는 동안 같은 결정이 두 번 나가지 않는다 — 두 버튼 모두", async () => {
+    const host = mountCard(approvalProps());
+    let release: (response: Response) => void = () => undefined;
+    const fetchSpy = vi.fn(
+      () => new Promise<Response>((resolve) => (release = resolve))
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+    const approve = byTestId(host, "approval-approve")[0] as HTMLButtonElement;
+    const reject = byTestId(host, "approval-reject")[0] as HTMLButtonElement;
+    approve.focus();
+    await act(async () => {
+      approve.click();
+      approve.click();
+      reject.click();
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    // 보내는 중은 `disabled` 가 아니라 `aria-disabled` — 초점이 body 로 떨어지지 않는다.
+    expect(approve.textContent).toBe("보내는 중");
+    expect(approve.getAttribute("aria-disabled")).toBe("true");
+    expect(approve.hasAttribute("disabled")).toBe(false);
+    expect(document.activeElement).toBe(approve);
+    await act(async () => {
+      release(jsonResponse({ ...APPENDIX_C_BODY, result: undefined }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("#3819: y/n 단축키는 결정하지 않고 버튼에 초점을 놓는다", async () => {
+    const host = mountCard(approvalProps());
+    const fetchSpy = vi.fn(async () => jsonResponse(APPENDIX_C_BODY));
+    vi.stubGlobal("fetch", fetchSpy);
+    const card = byTestId(host, "agent-card")[0] as HTMLElement;
+    card.focus();
+    act(() => {
+      card.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "y", bubbles: true })
+      );
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(byTestId(host, "approval-approve")[0]);
+    card.focus();
+    act(() => {
+      card.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "n", bubbles: true })
+      );
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(byTestId(host, "approval-reject")[0]);
   });
 
   it("거부로 확정된 결정에는 링크가 서지 않는다", async () => {
@@ -426,9 +481,9 @@ describe("1회 링크는 결정 응답에서만 그려지고 새로고침을 견
     expect(error?.textContent).toContain("관리자가 승인해야 해요.");
     expect(error?.dataset.tone).toBe("unavailable");
     expect(error?.getAttribute("role")).toBe("status");
-    // 무장 해제·초점 착지도 같은 갈래를 탄다.
+    // 초점은 누른 버튼에 남는다 — 다시 누를 자리를 잃지 않는다(#3819).
     expect(byTestId(host, "approval-commit")).toHaveLength(0);
-    expect(document.activeElement).toBe(byTestId(host, "agent-card")[0]);
+    expect(document.activeElement).toBe(byTestId(host, "approval-approve")[0]);
   });
 
   it("AX-3b #2549: role_required 영수증도 승인 상태를 뒤집지 않는다", async () => {
@@ -442,7 +497,7 @@ describe("1회 링크는 결정 응답에서만 그려지고 새로고침을 견
     expect(byTestId(host, "approval-approve")).toHaveLength(1);
   });
 
-  it("R1 M1: 403 뒤 성공할 수 없는 「승인 확정」이 남지 않는다", async () => {
+  it("R1 M1: 403 뒤에도 확정 버튼은 없고 승인·거부가 그대로 선다", async () => {
     const host = mountCard(approvalProps());
     await decide(host, jsonResponse({ status: "pending" }, 403));
     expect(byTestId(host, "approval-commit")).toHaveLength(0);
@@ -451,35 +506,23 @@ describe("1회 링크는 결정 응답에서만 그려지고 새로고침을 견
     expect(byTestId(host, "approval-reject")).toHaveLength(1);
   });
 
-  it("R1 H2 · R2 H-R2-1: 403 뒤 초점이 이름과 링을 가진 카드에 앉는다", async () => {
+  it("R1 H2: 403 뒤 초점이 body 로 떨어지지 않고 누른 버튼에 남는다", async () => {
     const host = mountCard(approvalProps());
     await decide(host, jsonResponse({ status: "pending" }, 403));
     expect(host.contains(document.activeElement)).toBe(true);
     expect(document.activeElement).not.toBe(document.body);
-    // 이름 없는 `div` 가 아니라 카드다 — 그 노드는 `aria-label` 과
-    // `focus-visible:focus-ring` 을 이미 갖고 있고, UA 기본 링이 서지 않는다.
+    expect(document.activeElement).toBe(byTestId(host, "approval-approve")[0]);
+    // 카드는 여전히 이름과 링을 가진 정거장이다.
     const card = byTestId(host, "agent-card")[0];
-    expect(document.activeElement).toBe(card);
     expect(card?.getAttribute("aria-label")).toBe("팀원 초대 링크 만들기");
     expect(card?.className).toContain("focus-visible:focus-ring");
   });
 
-  it("R2 H-R2-1: 두 키보드 정거장이 같은 house 링을 든다", async () => {
-    // 하나는 성공 착지(LinkOnce 그룹), 하나는 403 착지(카드). 둘 중 하나라도
-    // 링 클래스가 없으면 크로미움이 자기 파란 링을 그린다 — 한 카드 안에서
-    // 두 정거장이 두 색이 되는 것이 R2 가 High 로 잡은 결함이다.
-    const forbidden = mountCard(approvalProps());
-    await decide(forbidden, jsonResponse({ status: "pending" }, 403));
-    const cardRing = (document.activeElement as HTMLElement).className;
-    unmount();
-
+  it("R2 H-R2-1: 성공 착지 정거장(1회 링크 그룹)이 house 링을 든다", async () => {
     const settled = mountCard(approvalProps());
     await decide(settled, jsonResponse(APPENDIX_C_BODY));
     const groupRing = (document.activeElement as HTMLElement).className;
-
-    for (const cls of [cardRing, groupRing]) {
-      expect(cls).toContain("focus-visible:focus-ring");
-    }
+    expect(groupRing).toContain("focus-visible:focus-ring");
   });
 
   it("R2 H-R2-1: 착지 대안인 컨트롤 컨테이너도 링을 든다", () => {
@@ -695,5 +738,50 @@ describe("승인 직후 재마운트해도 카드는 결정 상태다 (#3771)", 
       approval_id: "0199aa11-2222-7000-8000-0000000000a2",
     });
     expect(byTestId(other, "approval-approve")).toHaveLength(1);
+  });
+});
+
+// =============================================================================
+// #3818: 배포 전에 결정된 옛 카드에 거부/승인 버튼이 다시 보였다.
+//
+// #3779의 영수증 저장소는 **이번 세션에 결정한** 카드만 안다. 서버가 이미 결정을 적은
+// 카드(`message.props`의 status·decided_by)는 영수증이 없으므로, 카드는 서버가 말한
+// 사실만으로 버튼을 숨겨야 한다. 이 시험은 영수증을 일부러 비워 둔 채(저장소 reset)
+// 서버 props만으로 그린다 — 푸터가 `settled`를 보지 않던 옛 분기로 되돌리면 실패한다.
+// =============================================================================
+describe("서버가 이미 결정한 옛 카드는 버튼이 없다 (#3818)", () => {
+  for (const status of ["approved", "rejected", "cancelled", "expired"] as const) {
+    it(`props.status=${status} → 영수증 없이도 승인·거부 버튼과 y/n 단축키가 없다`, () => {
+      const host = mountCard({
+        ...approvalProps(),
+        status,
+        approval_status: status,
+        decided_by: ME,
+        decided_at_ms: 1_753_400_000_000,
+      });
+      expect(byTestId(host, "approval-approve")).toHaveLength(0);
+      expect(byTestId(host, "approval-reject")).toHaveLength(0);
+      expect(byTestId(host, "approval-commit")).toHaveLength(0);
+      const card = byTestId(host, "agent-card")[0];
+      expect(card?.dataset.status).toBe(status);
+      expect(card?.getAttribute("aria-keyshortcuts")).toBeNull();
+    });
+  }
+
+  it("결정자·원장 줄은 그대로 남는다", () => {
+    const host = mountCard({
+      ...approvalProps(),
+      status: "approved",
+      approval_status: "approved",
+      decided_by: ME,
+      decided_at_ms: 1_753_400_000_000,
+    });
+    expect(byTestId(host, "approval-ledger")[0]?.textContent).toContain("곽성재");
+  });
+
+  it("status 없는 대기 카드는 여전히 버튼을 그린다 (과잉 숨김 방지)", () => {
+    const host = mountCard(approvalProps());
+    expect(byTestId(host, "approval-approve")).toHaveLength(1);
+    expect(byTestId(host, "approval-reject")).toHaveLength(1);
   });
 });

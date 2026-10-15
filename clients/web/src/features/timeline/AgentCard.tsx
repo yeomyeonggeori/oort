@@ -84,14 +84,12 @@ import {
   TurnChip,
 } from "./StatusChip";
 import {
-  APPROVAL_VERBS,
   ApprovalActions,
   LinkOnce,
-  type Armed,
+  focusDecisionControl,
 } from "./ApprovalActions";
 import { ActionResultBody } from "./ActionResultCard";
 import {
-  actionApproveConfirmCopy,
   approvalRoleCopy,
   roleRequiredCopy,
 } from "@momo/core/features/approvals/actionRole";
@@ -424,9 +422,8 @@ function ApprovalBody({
   // 낡은 `pending` 스냅샷이 방금 한 결정을 덮는 일을 여기서 막는다.
   const remembered = useSettledApproval(card.approvalId);
   const receipt = local ?? remembered;
-  const [armed, setArmed] = useState<Armed>(null);
-  // 403 뒤 초점이 내려앉을 자리 (R2 H-R2-1). 카드 자신이다 — 이름과 링을
-  // 이미 가진 유일한 조상이고, 방금 생긴 안내 문장이 그 안에 있다.
+  // 카드 자신. y/n 단축키가 결정 버튼에 초점을 놓는 범위이고, 기한이 지날 때 초점을
+  // 받는 자리다.
   const cardRef = useRef<HTMLElement | null>(null);
   const approvalsProvided = isSurfaceProvided("approvals");
   // 결정은 REST POST로 나간다. 「레일이 붙어 있는가」와 「이 요청이 나갈 수 있는가」는
@@ -494,16 +491,19 @@ function ApprovalBody({
       kind="approval"
       // 오프라인에서는 y/n 단축키도 꺼진다. 켜 두면 키가 무장까지 하고 확정이
       // 나가지 않는, 화면이 설명하지 못하는 상태가 만들어진다.
-      keyboard={note === null && !expired}
-      // 이슈 1114: `y`도 버튼과 같은 문을 지난다. 자격 있는 호스트가 없으면 승인은
-      // 무장하지 않는다 — 단축키만 통과시키면 꺼진 버튼 옆에서 키보드로는 열리는,
-      // 화면이 설명하지 못하는 두 번째 문이 생긴다. `n`은 그대로다.
+      keyboard={note === null && !expired && !settled}
+      // y/n 은 한 번에 결정하지 않고 **버튼에 초점을 놓는다**(#3819): 키 하나로
+      // 되돌릴 수 없는 결정이 나가지 않게, Enter/Space 가 결정을 만든다.
+      // 이슈 1114: `y`도 버튼과 같은 문을 지난다. 자격 있는 호스트가 없으면 승인
+      // 버튼은 막혀 있고(`aria-disabled`), 단축키가 그 너머로 열리지 않는다.
       onApprove={() => {
         if (expired) return;
-        if (spawnHostGate(card.execution).canApprove) setArmed("approve");
+        if (spawnHostGate(card.execution).canApprove) {
+          focusDecisionControl(cardRef.current, "approve");
+        }
       }}
       onReject={() => {
-        if (!expired) setArmed("reject");
+        if (!expired) focusDecisionControl(cardRef.current, "reject");
       }}
       detail={card.detail}
       footer={
@@ -522,6 +522,12 @@ function ApprovalBody({
           </>
         ) : expired ? (
           <ExpiredApprovalFooter card={card} directory={directory} />
+        ) : settled ? (
+          // #3818: 서버가 이미 결정을 적은 카드(`props.status`·`decided_by`)는 영수증
+          // 저장소가 몰라도 컨트롤이 서지 않는다. 결정 사실은 아래 원장 줄이 말한다.
+          // 이 분기가 없던 때는 영수증(이번 세션의 결정)이 없는 옛 카드가 `note === null`로
+          // 떨어져 거부/승인 버튼을 다시 그렸다.
+          null
         ) : card.approvalId !== null ? (
           <>
             {phase === "soon" && card.expiresAtMs !== undefined && (
@@ -536,31 +542,16 @@ function ApprovalBody({
           <ApprovalActions
             approvalId={card.approvalId}
             className="border-t border-line"
-            armed={armed}
-            setArmed={setArmed}
             execution={card.execution}
             forbiddenCopy={
               card.action?.requiredRole
                 ? roleRequiredCopy(card.action.requiredRole)
                 : null
             }
-            onLandOnCard={() => cardRef.current?.focus()}
-            {...(card.action !== null
-              ? {
-                  // 확정 문장만 갈아 끼운다 (design-review R1 M2). 기본 문장
-                  // 「승인하면 에이전트가 이어서 진행합니다」는 도구 호출 승인의
-                  // 것이고 행동 승인에서는 거짓이다 — 제안한 turn 은 이미
-                  // 끝났고(ADR-0186 D2 run park) 승인하면 **서버가** 실행한다.
-                  // 낱말만 갈라지고 계약은 하나로 남는다(`DecisionVerbs`).
-                  verbs: {
-                    ...APPROVAL_VERBS,
-                    approveConfirm: actionApproveConfirmCopy(
-                      card.action.requiredRole
-                    ),
-                  },
-                }
-              : {})}
             onSettled={(outcome) => {
+              // 눌린 버튼은 이 렌더에서 영수증 줄로 바뀌며 사라진다. 초점이 body 로
+              // 떨어지지 않게 카드가 받는다(1회 링크가 서면 그 그룹이 다시 가져간다).
+              cardRef.current?.focus();
               const next: {
                 status: ApprovalStatus;
                 decidedAtMs?: number;
@@ -711,7 +702,7 @@ function LoginHandoffBody({
   } | null>(null);
   const remembered = useSettledApproval(card.approvalId);
   const receipt = local ?? remembered;
-  const [armed, setArmed] = useState<Armed>(null);
+  const cardRef = useRef<HTMLElement | null>(null);
   const approvalsProvided = isSurfaceProvided("approvals");
   const offline = useOffline();
 
@@ -745,14 +736,15 @@ function LoginHandoffBody({
 
   return (
     <CardFrame
+      sectionRef={cardRef}
       icon={<KeyRound className="size-4" aria-hidden="true" />}
       title={card.title}
       chip={<LoginHandoffChip card={card} />}
       status={card.outcome ?? card.phase}
       kind="login_handoff"
       keyboard={note === null && !settled}
-      onApprove={() => setArmed("approve")}
-      onReject={() => setArmed("reject")}
+      onApprove={() => focusDecisionControl(cardRef.current, "approve")}
+      onReject={() => focusDecisionControl(cardRef.current, "reject")}
       detail={card.detail}
       // 슬롯 **자체가** 조건을 진다 (design-review L1). 안의 두 조각이 모두
       // 조건부인데 래퍼만 무조건이면, 끝난 카드에 세션 딥링크까지 없을 때
@@ -810,19 +802,14 @@ function LoginHandoffBody({
           <ApprovalActions
             approvalId={card.approvalId}
             className="border-t border-line"
-            armed={armed}
-            setArmed={setArmed}
             testIdPrefix="handoff"
             lead={LOGIN_HANDOFF_DECISION.lead}
             verbs={{
               approve: LOGIN_HANDOFF_DECISION.resume,
               reject: LOGIN_HANDOFF_DECISION.stop,
-              approveCommit: LOGIN_HANDOFF_DECISION.resumeCommit,
-              rejectCommit: LOGIN_HANDOFF_DECISION.stopCommit,
-              approveConfirm: LOGIN_HANDOFF_DECISION.resumeConfirm,
-              rejectConfirm: LOGIN_HANDOFF_DECISION.stopConfirm,
             }}
             onSettled={(outcome) => {
+              cardRef.current?.focus();
               const next: {
                 status: ApprovalStatus;
                 decidedAtMs?: number;

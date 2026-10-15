@@ -299,3 +299,57 @@ describe('첨부 탭과 메시지 롱프레스는 서로의 행동을 훔치지 
     expect(Share.share).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('Buzz 식 첨부 (#3820)', () => {
+  const HASH = 'geGngQxZ3pLmK9aVbT2wRq-pQ';
+
+  it('무작위 토큰 같은 이름은 어디에도 찍히지 않고 일반 이름이 된다', async () => {
+    render(
+      <AttachmentList
+        channelId="ch"
+        attachments={[
+          attachment({ id: 'h1', name: `${HASH}.webp`, mime: 'image/webp', sizeBytes: 9400 }),
+          attachment({ id: 'h2', name: `${HASH}.pdf`, mime: 'application/pdf', sizeBytes: 9400 }),
+        ]}
+      />,
+    );
+    await waitFor(() => expect(screen.getAllByTestId('attachment-item')).toHaveLength(2));
+    // 화면에 보이는 글자와 낭독 라벨에 없어야 한다(앱 캐시 파일 경로는 화면이 아니다).
+    expect(screen.queryByText(/geGngQ/)).toBeNull();
+    for (const item of screen.getAllByTestId('attachment-item')) {
+      expect(String(item.props.accessibilityLabel)).not.toContain('geGngQ');
+    }
+    expect(screen.getByText('PDF 문서')).toBeTruthy();
+  });
+
+  it('이미지는 이름·크기 줄 없이 서고, 탭하면 전체 화면 보기가 열린다', async () => {
+    render(
+      <AttachmentList
+        channelId="ch"
+        attachments={[
+          attachment({ id: 'p1', name: '화면.png', mime: 'image/png', sizeBytes: 4096 }),
+        ]}
+      />,
+    );
+    expect(screen.queryByTestId('attachment-meta')).toBeNull();
+    expect(screen.queryByText(/4 KB|이미지 ·/)).toBeNull();
+    fireEvent.press(screen.getByTestId('attachment-item'));
+    expect(screen.getByTestId('attachment-viewer')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('attachment-viewer-close'));
+    expect(screen.queryByTestId('attachment-viewer')).toBeNull();
+  });
+
+  it('여러 장은 한 묶음 격자이고 누른 장에서 시작한다', async () => {
+    render(
+      <AttachmentList
+        channelId="ch"
+        attachments={['a', 'b', 'c'].map(id =>
+          attachment({ id, name: `${id}.png`, mime: 'image/png', sizeBytes: 4096 }),
+        )}
+      />,
+    );
+    expect(screen.getAllByTestId('attachment-image-group')).toHaveLength(1);
+    fireEvent.press(screen.getAllByTestId('attachment-item')[1] as never);
+    expect(screen.getByTestId('attachment-viewer-position').props.children).toBe('2 / 3');
+  });
+});

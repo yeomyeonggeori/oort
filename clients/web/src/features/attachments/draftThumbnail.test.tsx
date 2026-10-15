@@ -127,15 +127,41 @@ describe("composer tray thumbnail", () => {
     expect(createImageBitmap).not.toHaveBeenCalled();
   });
 
-  it("aligns an icon chip's name column to the thumbnail column in a mixed tray", async () => {
+  it("draws an image as a thumbnail-only chip and a file as icon + short name in a mixed tray", async () => {
     addFiles(KEY, TARGET, [file("curve.png", "image/png"), file("drain.log", "text/plain")]);
     renderTray();
     await flush();
     renderTray();
-    const [, logChip] = [...host.querySelectorAll('[data-testid="attachment-chip"]')];
-    expect(logChip?.querySelector(".w-tray-thumb")).not.toBeNull();
-    // 폭만 맞춘다: 아이콘 칩은 48px 로 자라지 않는다.
-    expect(logChip?.querySelector(".size-tray-thumb")).toBeNull();
+    const [imageChip, logChip] = [...host.querySelectorAll('[data-testid="attachment-chip"]')];
+    // 썸네일 칩: 정사각 상자뿐이고 눈에 보이는 이름 줄이 없다 (이름은 sr-only).
+    expect(imageChip?.className).toMatch(/size-tray-thumb/);
+    expect(imageChip?.querySelector('[data-testid="attachment-chip-name"]')?.className).toMatch(/sr-only/);
+    // 파일 칩: 이름이 보인다.
+    expect(logChip?.className).not.toMatch(/\bsize-tray-thumb\b/);
+    expect(logChip?.querySelector('[data-testid="attachment-chip-name"]')?.textContent).toBe("drain.log");
+  });
+
+  it("shows no list header, no done sentence, and never a random-token name", async () => {
+    addFiles(KEY, TARGET, [file("geGngQxZ3pLmK9aVbT2wRq-pQ.webp", "image/webp")]);
+    renderTray();
+    await flush();
+    renderTray();
+    expect(host.innerHTML).not.toContain("geGngQ");
+    expect(host.querySelector("h2")).toBeNull();
+    const chip = host.querySelector('[data-testid="attachment-chip"]');
+    expect(chip?.getAttribute("title")).toBe("이미지");
+    // 진행 표시는 칩 안에 있고, 제거 × 는 칩 안에서 탭으로 닿는다.
+    expect(chip?.querySelector('[data-testid="attachment-chip-progress"]')).not.toBeNull();
+    expect(chip?.querySelector('[data-testid="attachment-chip-remove"]')).not.toBeNull();
+  });
+
+  it("offers clear-all only when the chips are many", async () => {
+    addFiles(KEY, TARGET, [file("a.log", "text/plain"), file("b.log", "text/plain"), file("c.log", "text/plain")]);
+    renderTray();
+    expect(host.querySelector('[data-testid="attachment-clear"]')).toBeNull();
+    addFiles(KEY, TARGET, [file("d.log", "text/plain")]);
+    renderTray();
+    expect(host.querySelector('[data-testid="attachment-clear"]')).not.toBeNull();
   });
 
   it("falls back to the icon when the browser cannot decode the image", async () => {

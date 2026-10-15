@@ -11,7 +11,7 @@ import {join, relative} from 'node:path';
 // 으로 제외한 채 통과했다(`paletteContrast.test.ts` 의 옛 주석). 잴 것이 없으면
 // 아무 단정도 설 수 없고, 그 빈자리를 컴포넌트가 **가장 가까운 이름**으로 메웠다:
 //
-//   ApprovalDecision.tsx  buttonReject:  {backgroundColor: color.dangerBorder}
+//   ApprovalDecision.tsx  buttonReject:  {backgroundColor: color.dangerBorder}  (#3819 에서 삭제)
 //   StopTurnControl.tsx   buttonCommit:  {backgroundColor: color.dangerBorder}
 //
 // 결과가 감사(2026-08-09 §B-4 ②)의 실측이다 — 다크에서 되돌릴 수 없는 「거부 확정」
@@ -71,10 +71,8 @@ describe('#1210 D2 — 채움 토큰', () => {
     // 되돌릴 수 없는 행동 앞의 마찰을 지우는 일이다. 규칙을 주석에만 두면 다음
     // 사람이 그 주석을 읽지 않는다.
     // 선언하는 두 파일만 이 이름을 안다. 세는 것은 **넘기는** 자리다.
-    const OWNERS = [
-      'features/inbox/ApprovalDecision.tsx',
-      'features/agents/StopTurnControl.tsx',
-    ];
+    // (승인 결정은 #3819 에서 한 번에 결정되도록 바뀌어 더는 확정 단계가 없다.)
+    const OWNERS = ['features/agents/StopTurnControl.tsx'];
     const offenders: string[] = [];
     for (const file of sources(SRC)) {
       const rel = relative(SRC, file);
@@ -102,10 +100,9 @@ describe('#1210 D2 — 채움 토큰', () => {
   it('파괴 확정 버튼 둘이 실제로 dangerFill 을 든다', () => {
     // 위 단정은 「없음」을 잰다. 이것은 「있음」을 잰다 — 누가 채움을 통째로 지워서
     // 초록을 얻는 길을 닫는다. 두 자리는 감사가 이름을 댄 바로 그 둘이다.
-    const DESTRUCTIVE = [
-      'features/inbox/ApprovalDecision.tsx',
-      'features/agents/StopTurnControl.tsx',
-    ];
+    // 파괴 채움이 실제로 그려지는 곳은 턴 중단 확정 하나다(#3819: 거부는 한 번에
+    // 결정되므로 확정 채움이 없다).
+    const DESTRUCTIVE = ['features/agents/StopTurnControl.tsx'];
     for (const file of DESTRUCTIVE) {
       const source = readFileSync(join(SRC, file), 'utf8');
       expect([file, source.includes('backgroundColor: color.dangerFill')]).toEqual([

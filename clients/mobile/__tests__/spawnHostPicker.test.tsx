@@ -17,7 +17,6 @@ import '../src/boot/coreHost';
 
 import {
   ApprovalDecision,
-  CONFIRM_GUARD_MS,
 } from '../src/features/inbox/ApprovalDecision';
 import {SessionProvider} from '../src/session/useSession';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
@@ -44,9 +43,8 @@ import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 //   ② 픽커를 손대지 않으면 `hostId` 키가 아예 없다 = 서버가 카드의 기본값을
 //      적용한다. 코어의 기본값 비교를 지우면 붉어진다.
 //
-// 시계는 테스트가 쥔다. 확정 버튼은 뜬 직후 `CONFIRM_GUARD_MS` 동안 탭을 받지
-// 않으므로(더블탭이 확인 단계를 건너뛰는 구멍), 실제 시계로는 "읽고 나서 누른 탭"을
-// 만들어낼 수 없다.
+// 승인·거부는 한 번 탭에 결정된다(#3819). 결정이 나가 있는 동안의 모습은 응답을 붙잡아
+// 두는 `hold` 로 만든다.
 // =============================================================================
 
 const WS = '22222222-2222-4222-8222-222222222222';
@@ -140,7 +138,7 @@ interface Sent {
   carriedHostKey: boolean;
 }
 
-function installFetch(): {fetch: jest.Mock; sent: () => Sent[]} {
+function installFetch(hold = false): {fetch: jest.Mock; sent: () => Sent[]} {
   const sent: Sent[] = [];
   const mock = jest.fn(async (url: string, init?: RequestInit) => {
     const target = String(url);
@@ -151,6 +149,7 @@ function installFetch(): {fetch: jest.Mock; sent: () => Sent[]} {
         hostId: body.hostId,
         carriedHostKey: Object.prototype.hasOwnProperty.call(body, 'hostId'),
       });
+      if (hold) await new Promise<never>(() => {});
       return {
         status: 200,
         ok: true,
@@ -180,16 +179,11 @@ function mount(node: React.ReactNode) {
   );
 }
 
-/** 무장한 뒤 가드 창을 넘겨 확정한다. 두 탭 사이의 시간은 테스트가 만든다. */
+/** 한 번 탭하면 결정이 나간다 (#3819). */
 async function armAndCommit(prefix: string) {
-  fireEvent.press(screen.getByTestId(`${prefix}-approve`));
-  await screen.findByTestId(`${prefix}-confirm`);
-  const now = Date.now();
-  const spy = jest.spyOn(Date, 'now').mockReturnValue(now + CONFIRM_GUARD_MS + 1);
   await act(async () => {
-    fireEvent.press(screen.getByTestId(`${prefix}-commit`));
+    fireEvent.press(screen.getByTestId(`${prefix}-approve`));
   });
-  spy.mockRestore();
 }
 
 beforeEach(async () => {
@@ -307,12 +301,14 @@ describe('RED PROOF ① — 자격 없는 호스트는 선택되지도 전송되
     const approve = screen.getByTestId(`${PREFIX}-approve`);
     expect(approve.props.accessibilityState.disabled).toBe(true);
     fireEvent.press(approve);
-    // 무장조차 하지 않는다 — 확정 화면이 서면 사람에게 헛걸음을 시키는 것이다.
-    expect(screen.queryByTestId(`${PREFIX}-confirm`)).toBeNull();
+    // 요청조차 나가지 않는다 — 서버가 409로 답할 것을 알면서 보내는 것은 헛걸음이다.
     expect(fixture.sent()).toHaveLength(0);
     // 거부는 열려 있다: 서버도 거부에는 호스트를 묻지 않는다.
-    fireEvent.press(screen.getByTestId(`${PREFIX}-reject`));
-    await screen.findByTestId(`${PREFIX}-confirm`);
+    await act(async () => {
+      fireEvent.press(screen.getByTestId(`${PREFIX}-reject`));
+    });
+    await waitFor(() => expect(fixture.sent()).toHaveLength(1));
+    expect(fixture.sent()[0].approve).toBe(false);
   });
 });
 
@@ -360,25 +356,18 @@ describe('RED PROOF ② — 손대지 않으면 카드의 기본값이 적용된
       />,
     );
     fireEvent.press(screen.getByTestId(`${PREFIX}-host-option-${REMOTE}`));
-    fireEvent.press(screen.getByTestId(`${PREFIX}-reject`));
-    await screen.findByTestId(`${PREFIX}-confirm`);
-    const now = Date.now();
-    const spy = jest
-      .spyOn(Date, 'now')
-      .mockReturnValue(now + CONFIRM_GUARD_MS + 1);
     await act(async () => {
-      fireEvent.press(screen.getByTestId(`${PREFIX}-commit`));
+      fireEvent.press(screen.getByTestId(`${PREFIX}-reject`));
     });
-    spy.mockRestore();
     await waitFor(() => expect(fixture.sent()).toHaveLength(1));
     expect(fixture.sent()[0].approve).toBe(false);
     expect(fixture.sent()[0].carriedHostKey).toBe(false);
   });
 });
 
-describe('확정 문장', () => {
-  it('목적지를 말하고, 확정 화면에서 픽커는 잠긴다', async () => {
-    installFetch();
+describe('결정 중의 픽커', () => {
+  it('결정이 나가 있는 동안 픽커는 잠긴다 — 고른 것과 나간 요청이 달라지지 않게', async () => {
+    installFetch(true);
     mount(
       <ApprovalDecision
         approvalId={APPROVAL}
@@ -387,23 +376,18 @@ describe('확정 문장', () => {
       />,
     );
     fireEvent.press(screen.getByTestId(`${PREFIX}-host-option-${REMOTE}`));
-    fireEvent.press(screen.getByTestId(`${PREFIX}-approve`));
-    await screen.findByTestId(`${PREFIX}-confirm`);
-    // 목적지는 **조건절 안**에 있다: 이 승인은 실행을 보장하지 않으므로
-    // 「…에서 실행합니다」로 단언하면 바로 뒤 조건과 서로를 반박한다
-    // (design-review H3).
     expect(
-      screen.getByText(/승인하면 에이전트가 팀 VPS에서 이어서 진행합니다\./),
-    ).toBeTruthy();
-    // 문장이 목적지를 말한 뒤 그 아래에서 목적지가 바뀌면, 읽은 문장과 나가는
-    // 요청이 달라진다.
+      screen.getByTestId(`${PREFIX}-host-option-${LOCAL}`).props
+        .accessibilityState.disabled,
+    ).toBe(false);
+    await armAndCommit(PREFIX);
     expect(
       screen.getByTestId(`${PREFIX}-host-option-${LOCAL}`).props
         .accessibilityState.disabled,
     ).toBe(true);
   });
 
-  it("잠긴 픽커는 살아 있는 픽커와 **달라 보인다** (design-review B1)", () => {
+  it("잠긴 픽커는 살아 있는 픽커와 **달라 보인다** (design-review B1)", async () => {
     // 잠금은 탭을 막는 것으로 끝나지 않는다. 앞 판은 `locked`를 읽는 스타일 갈래가
     // 하나도 없어서, 잠긴 픽커가 살아 있는 픽커와 픽셀까지 같았다 — 탭은 아무 일도
     // 하지 않는데 화면은 그 사실을 말하지 않았다.
@@ -413,7 +397,7 @@ describe('확정 문장', () => {
         .getByTestId(`${PREFIX}-host-option-${hostId}`)
         .findAllByType(Text as never)[0];
 
-    installFetch();
+    installFetch(true);
     mount(
       <ApprovalDecision
         approvalId={APPROVAL}
@@ -422,7 +406,7 @@ describe('확정 문장', () => {
       />,
     );
     const liveColor = StyleSheet.flatten(nameOf(REMOTE).props.style).color;
-    fireEvent.press(screen.getByTestId(`${PREFIX}-approve`));
+    await armAndCommit(PREFIX);
     const lockedColor = StyleSheet.flatten(nameOf(REMOTE).props.style).color;
     expect(lockedColor).not.toBe(liveColor);
   });
