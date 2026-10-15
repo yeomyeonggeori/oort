@@ -96,6 +96,13 @@ import {
 import type { SecretOnce } from "@momo/core/features/approvals/secretOnce";
 import { APPROVAL_NOTE_TONE_CLASS } from "./approvalNoteTone";
 import {
+  TEAM_AI_PROPOSAL_AUTHORITY,
+  TEAM_AI_PROPOSAL_LABEL,
+  TEAM_AI_RATIONALE_LABEL,
+  TEAM_AI_RATIONALE_NOTE,
+  teamAiProposalLine,
+} from "@momo/core/features/timeline/teamAi";
+import {
   rememberSettledApproval,
   useSettledApproval,
 } from "./settledApprovals";
@@ -587,6 +594,19 @@ function ApprovalBody({
         ) : null
       }
     >
+      {/* 도우미가 올린 카드 (ADR-0201 D6-3). 누가 부탁했고 누가 제안했는지를 결정
+          **전에** 말한다. 이름은 디렉터리가 먼저고, 없으면 서버가 박은 이름이다. */}
+      {card.proposedVia && (
+        <LabeledRow label={TEAM_AI_PROPOSAL_LABEL} testId="approval-team-ai">
+          {teamAiProposalLine(
+            memberFor(directory, card.proposedVia.requesterId ?? undefined)
+              ?.displayName ?? card.proposedVia.requesterName
+          )}
+          <span className="mt-1 block text-meta text-ink-muted">
+            {TEAM_AI_PROPOSAL_AUTHORITY}
+          </span>
+        </LabeledRow>
+      )}
       {card.summary && <LabeledRow label="요청">{card.summary}</LabeledRow>}
       {/* 워크스페이스 행동의 행 (ADR-0186 부록 A).
           서버가 이름 붙여 보낸 것만, 보낸 순서대로. 이 카드가 두 얼굴을 갖되
@@ -623,8 +643,21 @@ function ApprovalBody({
         </LabeledRow>
       )}
       {card.action?.rationale && (
-        <LabeledRow label="사유" testId="approval-action-rationale">
+        // 도우미 카드의 사유는 모델이 쓴 글이다. 서버가 검증한 위 행과 다른 층이라는
+        // 것을 이름과 한 줄로 말한다(ADR-0201 D6-1 ③: 모델 출력을 믿지 않는다).
+        <LabeledRow
+          label={card.proposedVia ? TEAM_AI_RATIONALE_LABEL : "사유"}
+          testId="approval-action-rationale"
+        >
           {card.action.rationale}
+          {card.proposedVia && (
+            <span
+              className="mt-1 block text-meta text-ink-muted"
+              data-testid="approval-team-ai-rationale-note"
+            >
+              {TEAM_AI_RATIONALE_NOTE}
+            </span>
+          )}
         </LabeledRow>
       )}
       {card.action?.requiredRole !== undefined &&
