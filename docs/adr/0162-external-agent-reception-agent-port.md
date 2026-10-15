@@ -6,6 +6,7 @@
 - 증보: **증보 3 — 호스티드 에이전트 작업 추적 (2026-10-05, #3514 AT-1) · Accepted (성재 결재 「이대로 진행」 2026-10-05).** 외부 VM에서 일하는 호스팅 에이전트의 작업 요청·진행 표식·결과 산출물·팀 보드·끝남 푸시를 기존 `agent_run`/`agent_job`·Agent Port 도구의 확장으로 정한다. 새 저장소·터미널 보기 없음. 파일 끝 「증보 3」 절.
 - 증보: **증보 3 부록 A — 호스티드 lease 길이와 암묵 갱신 (2026-10-06, #3530 AT-8) · Accepted (성재 AT 계획 결재 「이대로 진행」 2026-10-05의 구현 세부).** 호스티드 claim·renew만 분 단위 lease를 쓰고, 만료됐어도 아무도 재클레임하지 않았다면 같은 핸들의 보고·완료를 받는다. 파일 끝 「증보 3 부록 A」 절.
 - 증보: **증보 4 — 호스팅 에이전트 왕복 줄이기: `oort_job_start` 합성 도구 (2026-10-14, #3831) · Accepted (성재 결재 「둘 다 (추천)」 2026-10-14, 선택지: 그록봇 도구를 합쳐 왕복을 줄여요(40~70초 단축, 기존 결정 문서 보강)).** `oort_job_start` 하나로 claim·시작 보고·최근 대화를 받고, `oort_jobs_claim`에 같은 게이트의 최근 대화를 싣는다. 새 scope·테이블·마이그레이션 없음. 파일 끝 「증보 4」 절.
+- 증보: **증보 5 — 코드 결과 계약·스레드 답글 깨우기·그 자리 채널 승인 카드 (2026-10-15, #3838) · Accepted (성재 결재 「정해진 칸으로 보고 (추천)」·「깨우기 (추천)」·「그 자리 승인 카드 (추천)」·「oort 호출 + VM 개수 보고 (추천)」 2026-10-15).** `oort_run_complete.artifacts`에 닫힌 결과 칸(C1)과 VM 안 개수 자기 보고(C2), 거절 오류·재시도 규칙(C3), 에이전트가 연 스레드의 사람 답글이 그 에이전트를 깨우는 규칙(W1~W4), 승인 안 된 채널에서 부르면 그 자리에 「이 채널에서 쓰기」 승인 카드가 뜨고 승인 시 대기 요청이 정확히 한 번 처리되는 규칙(G1~G6, HAP-E3 정확 채널 허가 경계). 파일 끝 「증보 5」 절.
 - 관련: ADR-0100(결정 거버넌스), ADR-0101(에이전트 신원·bearer), ADR-0102(worker/gateway 실행 경로), ADR-0130(외부 에이전트 fabric·ACP), ADR-0145(Rust/Axum), ADR-0150(대화 반출 경계)
 - 리서치: `docs/planning/research/2026-08-12-grok-bot-integration-feasibility.md`, `docs/planning/research/2026-08-12-grok-bot-reverse-teammate-direction.md`, `docs/planning/research/2026-08-12-external-agent-reception-audit.md`
 - 제품 문장: **Bring your hosted agent.** Grok Bot은 첫 setup preset이자 실증 클라이언트이며, 코어 계약은 벤더 중립이다.
@@ -421,7 +422,7 @@ agent_run.output = {
 
   테이블을 만들지 않는 이유: run당 한 번만 쓰는 닫힌 모양의 작은 값이고, 목록·해제·보존이 모두 `agent_run` 행의 수명을 따른다. `work_session_share`가 별 테이블이었던 이유(세션 원장과 분리된 공유 해제·보존 삭제)는 run에 없다. 따로 해제할 공유가 아니라 run의 결과이기 때문이다. 판독은 검증을 거쳐 쓴 값만 읽으므로 DB에는 모양 CHECK를 필수로 두지 않는다. 구현이 CHECK 함수를 추가하는 것은 허용하되 신규 migration이어야 하고 `schema_v0.sql`은 건드리지 않는다.
 - `succeeded`와 `failed` 모두 `artifacts`를 실을 수 있다(실패해도 만든 브랜치·부분 PR을 남길 수 있다).
-- **형식이 틀린 `artifacts`는 완료 전체를 거절한다**(400, 어떤 쓰기도 없음, 거절 사유 코드만 반환). 일부만 버리고 완료시키지 않는 이유는 보고가 조용히 틀린 채 남지 않게 하기 위해서다. 에이전트는 `artifacts` 없이 같은 lease로 다시 완료할 수 있다(lease는 거절로 풀리지 않는다).
+- **형식이 틀린 `artifacts`는 완료 전체를 거절한다**(400, 어떤 쓰기도 없음, 거절 사유 코드만 반환). 일부만 버리고 완료시키지 않는 이유는 보고가 조용히 틀린 채 남지 않게 하기 위해서다. 에이전트는 `artifacts` 없이 같은 lease로 다시 완료할 수 있다(lease는 거절로 풀리지 않는다). **→ 증보 5 C1~C3(2026-10-15)이 결과 계약 키·자기 보고 개수·거절 오류 문구와 재시도 규칙을 더한다.**
 - PR URL이 드러내는 `소유자/저장소`는 ADR-0194 D7의 Q2가 이미 받아들인 노출이다. 서버는 PR 제목·체크·리뷰를 가져오지 않는다.
 
 ### D13. 팀 보드의 두 번째 출처: 호스팅 에이전트 work run
@@ -440,8 +441,8 @@ agent_run.output = {
 
 - **가시성은 읽기 SQL 한 문장에서 결정한다.** 보는 사람이 `agent_run.channel_id`의 활성 멤버(채널 미보관·`left_at IS NULL`)여야 한다. 아니면 「멤버 아님」·「없는 run」·「다른 테넌트」가 모두 같은 빈 결과/404다. 워크스페이스 전체 보기는 없다(Q4 유지). DM 채널의 run은 그 DM의 두 사람에게만 보인다.
 - **중복 제거.** run에 이미 연결된 `work_session`이 있으면(`linked_work_session_ids_in_tx`) 세션 쪽 항목이 대표이고 run 항목은 내지 않는다. 같은 일이 두 줄로 나오지 않는다.
-- **mention run은 v1에 넣지 않는다.** 채팅 답을 만드는 mention run은 이미 스레드의 메시지로 보이고, 보드에 넣으면 잡음이 되며 「작업」 정의가 흐려진다. `type=work`만 보드 대상이다.
-- **managed·BYOA의 work run은 v1에 넣지 않는다.** 이 증보의 대상은 호스팅 에이전트다(해당 run은 이미 A 세션 경로로 보인다). 넓히는 것은 별도 결정이다.
+- **mention run은 v1에 넣지 않는다.** 채팅 답을 만드는 mention run은 이미 스레드의 메시지로 보이고, 보드에 넣으면 잡음이 되며 「작업」 정의가 흐려진다. `type=work`만 보드 대상이다. **→ ADR-0202 D3(2026-10-15)이 대체: 짧은 멘션 답만 뺀다.**
+- **managed·BYOA의 work run은 v1에 넣지 않는다.** 이 증보의 대상은 호스팅 에이전트다(해당 run은 이미 A 세션 경로로 보인다). 넓히는 것은 별도 결정이다. **→ ADR-0202 D3(2026-10-15)이 그 결정이다: 모든 에이전트의 work run을 넣는다.**
 - 보존: 끝난 뒤 `SHARE_RETENTION_DAYS`가 지나면 읽기가 스스로 거른다(세션 쪽과 같은 규칙, notifier 정리를 기다리지 않는다). `agent_run` 행 자체의 보존은 이 증보가 바꾸지 않는다.
 - 정렬·페이징: 두 출처를 `(last_activity µs, id)` 하나로 합쳐 같은 opaque cursor를 쓴다.
 - **실시간.** run의 **상태 전환**(queued→running, 종결: succeeded/failed/timed_out/cancelled)과 같은 tx 안의 outbox INSERT → relay → Centrifugo로 집 채널 토픽에 `work.run.updated`(`run_id`와 전환 종류만, 이름·제목·숫자 없음)를 보낸다. 클라는 이벤트에 보드/카드를 다시 조회하고 가시성은 조회가 다시 강제한다(ADR-0194 D8과 같은 구조). 단계 표식 갱신과 `step_count` 증가는 이벤트를 만들지 않는다. 이미 같은 의미의 agent_run 채널 이벤트가 있으면 새 이름을 만들지 않고 그것을 재사용한다(구현 티켓이 확인하고 PR에 기록).
@@ -553,3 +554,118 @@ D13·D14를 구현하면서 정한 세부다. 계약을 바꾸지 않고, 실측
 **열지 않는 것.** 새 scope·컬럼·테이블·마이그레이션 없음. 시작 보고가 거절돼도(멈춘·끝난 run) claim은 되돌리지 않고 `started:false`로 알린다. 서버 측 즉시 처리(O1)·도어벨 계약은 바꾸지 않는다. 도구 수는 12 → 13.
 
 **수용기준(시험, 되돌리면 실패).** ① 한 호출로 `claimed`·`started`·`stage` 원장 행이 각 하나씩 생기고 대화가 돌아온다, ② 핸들 재진입·빈 재호출은 원장·단계·lease를 늘리지 않는다, ③ `messages:read` 없음·채널 이탈이면 `oort_job_start`와 `oort_jobs_claim` 모두 `conversation`이 없고 job은 전달된다(게이트의 멤버십·scope 검사를 빼면 실패), ④ `agent:runs:callback`이 없거나 `stage`가 잘못되면 아무것도 claim되지 않는다, ⑤ claim의 대화는 30행에서 멈추고 긴 본문은 2 000자에서 잘린다.
+
+## 증보 5 — 코드 결과 계약·스레드 답글 깨우기·그 자리 채널 승인 카드 (Accepted · 성재 결재 2026-10-15 · #3838)
+
+> **결재 인용(원문, 2026-10-15 AskUserQuestion).** ① 「정해진 칸으로 보고 (추천)」 — 코드 작업 결과는 닫힌 칸으로 보고한다: 결과 종류(`pr_opened`/`branch_only`/`vm_only`/`no_change`), 테스트(통과/실패/안 돌림 개수), 다음 할 일(`merge_ok`/`please_test`/`blocked`/`none`), 커밋 sha, 「에이전트 보고」로 표시. ② 「oort 호출 + VM 개수 보고 (추천)」 — oort 도구 호출은 서버가 기록하고(ADR-0200 증보 2026-10-15 T1), VM 안의 일은 닫힌 범주의 개수로만 자기 보고하며 「에이전트 보고」로 표시한다. ③ 「깨우기 (추천)」 — 에이전트가 연 스레드에 사람이 멘션 없이 답하면 그 에이전트를 작업으로 깨운다. 사람이 쓴 답글만, 답글마다 한 번, 끌 수 있다. ④ 「그 자리 승인 카드 (추천)」 — 승인 안 된 채널에서 그록봇을 부르면 그 자리에 「이 채널에서 쓰기」 승인 카드를 띄우고, 승인되면 기다리던 일을 정확히 한 번 처리한다. ⑤ 「실험용 저장소·Bot 하나 (추천)」 — X1에 기록.
+> 공개 도구 표면·보안 경계(HAP-E3 채널 승인)·DB 계약(에이전트 설정 열)을 바꾸므로 ADR-0100에 따라 이 Accepted 기록이 구현 PR의 머지 조건이다.
+> 표기: [V] track/engine `6ee2386f8`에서 직접 확인 · **[추정]** 결재를 구체화하며 이 증보가 정한 값 · [확인 필요] 구현 전 확인.
+
+### 확인한 사실 [V]
+- `oort_run_complete.artifacts`는 `prUrl`·`branch`·`added`·`deleted`·`commits` 다섯 키뿐이고 `additionalProperties:false`다(`momo-mcp/src/tools.rs:340-355`). 결과 종류·테스트·다음 할 일·커밋 sha 칸은 없다.
+- 거절은 `ToolFailure::InvalidArguments` 하나이고 와이어 문장은 고정 「invalid tool arguments」다(`tools.rs:1155-1180`). 에이전트는 어느 칸이 틀렸는지 모른다.
+- 승인 안 된 채널의 멘션은 **job을 만들기 전에** 건너뛰고 시스템 안내 한 줄만 남긴다(`routes/agent_mentions.rs:446-483`, 사유 `hosted_channel_unapproved`, 문구 `hosted_notice.rs:167`). 「기다리는 job」은 **없다.** `gateway.rs:224-236`의 「승인 밖 job은 `pending`으로 남는다」는 claim 쪽 재검사이고, 승인 뒤에 채널 승인이 **좁혀진** job에만 해당한다. 그래서 G는 생산자 쪽을 바꿔야 한다.
+- 채널 승인을 넓히는 쓰기 경로는 confirm·consent·`grant_hosted_channels_in_tx`(`momo-auth/src/hosted_connection.rs:1073`, ADR-0186 V5) 셋이고 시험이 그 셋을 고정한다. confirm은 워크스페이스 admin만(`routes/hosted_agent_connections.rs:1079`).
+- 승인 기본 만료는 1시간(`momo-agent/src/approval.rs:76` `DEFAULT_TTL_SECONDS`)이고 만료 스위프가 run을 `timed_out{approval_expired}`로 끝낸다. `requeue_run_from_approval_in_tx`는 `status='awaiting_approval'`일 때만 run을 되살린다(`run.rs:1367-1377`) — 재생된 결정이 job을 두 번 만들지 못하는 근거다. 미수령 24시간 스위프는 run과 함께 job을 회수한다(`bins/momo-notifier/src/run_stall_sweep.rs`).
+
+### C1. 코드 결과 계약 — `artifacts`의 닫힌 칸
+D12의 `artifacts`에 키를 더한다. `additionalProperties:false`는 유지한다. 새 키는 모두 선택이지만 아래 교차 규칙을 지켜야 한다.
+
+| 키 | 형식 |
+|---|---|
+| `resultKind` | `pr_opened` · `branch_only` · `vm_only` · `no_change` |
+| `tests` | `{passed, failed, notRun}` — 세 키 모두 필수, 각 0~100 000 정수, `additionalProperties:false` |
+| `nextAction` | `merge_ok` · `please_test` · `blocked` · `none` |
+| `commitSha` | `^[0-9a-fA-F]{7,40}$`, 소문자로 정규화해 저장 |
+
+교차 규칙 **[추정 — 결재의 닫힌 칸을 서로 모순 없이 묶는 최소 규칙]**:
+- `tests`·`nextAction`·`commitSha`는 `resultKind`가 있을 때만 받는다(옛 다섯 키만 보내는 구버전 루틴은 그대로 통과).
+- `pr_opened` → `prUrl` 필수. `branch_only` → `branch` 필수, `prUrl` 금지. `vm_only` → `prUrl`·`branch` 금지(일이 VM 안에만 있다). `no_change` → `prUrl`·`branch`·`commitSha` 금지, `added`·`deleted`·`commits`는 없거나 0.
+- `nextAction=merge_ok` → `resultKind=pr_opened`이고 `tests.failed`가 없거나 0.
+- 서버는 PR·sha·테스트가 실제로 그런지 **검증하지 않는다**(D9 「자기 보고」 그대로, 서버는 GitHub 토큰이 없다). 저장은 `agent_run.output.artifacts` 그대로.
+- **읽기 표시.** 읽기 응답은 이 칸들을 `agentReported` 객체 안에 모아서 낸다(`{resultKind, tests, nextAction, commitSha, toolCounts}`). 구조가 곧 표시 규칙이다: 화면은 이 객체를 항상 「에이전트 보고」 꼬리표와 함께 그리고, ADR-0200 증보의 「oort 기록」과 같은 칸에 섞지 않는다. 배포된 클라이언트가 모르는 키를 거부하는지 [확인 필요] — 거부하면 `include=` 뒤로 숨긴다(ADR-0202 D4의 `include=jobs`가 그 자리다).
+
+### C2. VM 안의 일 — 닫힌 범주의 개수 자기 보고
+- `artifacts.toolCounts`: `{run, edit, read, search, web, other}` — 모두 선택, 각 0~100 000 정수, `additionalProperties:false`. 범주 뜻: `run` 명령 실행, `edit` 파일 수정, `read` 파일 읽기, `search` 코드·파일 검색, `web` 웹 요청, `other` 그 밖. **[추정 — 결재의 「run/edit/read…」를 닫은 목록]**
+- 이름·경로·명령 문자열은 키가 없으므로 보낼 수도 저장될 수도 없다. 개수만이다.
+- `resultKind` 없이도 보낼 수 있다(코드 작업이 아니어도 VM 안의 일은 있다).
+- 표시는 「에이전트 보고 · 명령 12 · 수정 4 · 읽기 30」식이고, 서버가 잰 oort 호출(ADR-0200 증보 T1)과 같은 줄에 합산하지 않는다.
+
+### C3. 거절 — 어느 칸이 틀렸는지 말하고, 재시도는 정해진 만큼만
+- 형식·교차 규칙 위반은 지금처럼 **완료 전체를 거절**한다(D12: 쓰기 0, lease 유지).
+- 오류는 `InvalidArguments`(-32602) 그대로이되 JSON-RPC `error.data`에 **닫힌 설명**을 싣는다: `{field: "artifacts.resultKind", rule: "enum"|"required"|"forbidden"|"range"|"format"|"requires", allowed?: [...], requires?: "artifacts.prUrl"}`. 보낸 **값은 되돌려 싣지 않는다**(로그·감사에도 값 없음). 사람이 읽는 `message`는 「artifacts.resultKind must be one of pr_opened, branch_only, vm_only, no_change」처럼 같은 사실을 영어 한 줄로 쓴다(에이전트용).
+- **재시도 규칙(도구 설명과 `docs/SELF_HOST_AGENT.md` 루틴에 적는다).** ① 같은 `leaseHandle`로 지적된 칸만 고쳐 다시 `oort_run_complete`를 보낸다. ② 고쳐 보내기는 **최대 2번**. ③ 그래도 거절되면 `artifacts` 없이 완료하고 결과는 `body` 문장으로 쓴다. 같은 내용을 그대로 다시 보내는 루프는 금지. 서버는 lease당 거절 수를 세어 감사 행(`agent.run.report_rejected`, 기존)에 `field`·`rule`과 몇 번째인지를 남긴다(값 없음). 서버가 횟수로 막지는 않는다(lease와 속도 제한이 상한).
+
+### W1. 스레드 답글 깨우기 — 무엇이 깨우나
+에이전트 A가 **연** 스레드 T에 사람이 멘션 없이 답하면 A에게 작업(run + `agent_job`)이 생긴다.
+- **「A가 연 스레드」** **[추정 — 운영 정의]**: T의 루트 메시지 작성자가 A이거나, T의 **첫 답글** 작성자가 A다(사람이 채널에서 A를 부르고 A가 그 메시지에 스레드로 답해 스레드가 시작된 경우).
+- **깨우는 답글**: ① 작성자가 `member.kind='human'`이고 사람 bearer로 보낸 일반 메시지(시스템 줄·웹훅·도어벨·에이전트 메시지 제외 — 에이전트끼리 서로 깨우는 고리를 막는다), ② **어떤 에이전트도 멘션하지 않음**(멘션이 있으면 기존 멘션 경로가 정하고 깨우기는 하지 않는다 — 이중 run 방지), ③ 새 메시지(수정은 깨우지 않음), ④ 작성자가 그 채널의 활성 멤버.
+- **같은 관문**: 깨우기는 「A를 그 사람이 멘션한 것」과 **같은 라우팅 관문**을 지난다 — 보수 모드(ADR-0193 D18), `owner_only`(구독 에이전트면 작성자가 소유자여야 함), `paused`, 호스팅이면 채널 승인(`hosted_connection_channel_ids`). 관문에서 막히면 **조용히** 깨우지 않는다(안내 줄·G의 승인 카드 없음 — 사람이 A를 부른 것이 아니므로).
+- 그 스레드의 다른 에이전트는 깨우지 않는다. A 하나다.
+
+### W2. 답글마다 한 번
+- `(트리거 메시지 id, A)`에 run은 **최대 하나**다(유일 제약 또는 같은 tx의 존재 검사; 메시지 전송과 같은 tx에서 run·job·outbox를 쓴다).
+- **합치기** **[추정]**: A에게 같은 스레드를 트리거로 하는 run이 아직 `phase=queued`(수령 전)이면 새 run을 만들지 않는다. 그 답글은 수령 때 최근 대화(증보 4 J5)로 함께 읽힌다. 감사 `agent.thread_wake.coalesced` 1행(메시지 id만). 이미 수령·진행 중이면 새 답글은 새 run이다.
+- run의 트리거 표시는 `thread_reply`이고, 인박스 이벤트는 기존 멘션 이벤트 모양에 선택 필드 `wakeReason:"thread_reply"`만 더한다(이벤트 종류를 새로 만들지 않는다 — 배포된 에이전트 루틴이 깨지지 않게).
+
+### W3. 끌 수 있다
+- 에이전트마다 `agent.thread_reply_wake boolean NOT NULL DEFAULT true`(신규 migration). 바꾸는 사람은 그 에이전트의 프로필 편집자(소유자 또는 워크스페이스 admin — `require_profile_editor_in_tx`와 같은 판정)이고, 기존 `PUT …/agents/{agent}/profile`의 선택 필드로 받는다. 꺼져 있으면 W1 전체가 조용히 건너뛴다.
+- 스레드별 끄기는 이번 범위가 아니다.
+
+### W4. 보이는 곳
+- 깨우기 run은 멘션 run과 같은 어휘로 원장·채널 작업 패널에 보이고, 「작업」 화면에는 ADR-0202 D3-3 규칙(단계·카드·산출물·60초)을 넘을 때만 줄이 된다.
+- 소유자의 벤더 사용량을 쓴다는 점은 멘션과 같다(D16). 그래서 기본값은 켜짐이되 끄는 스위치를 소유자에게 준다.
+
+### G1. 그 자리 채널 승인 카드 — 언제 뜨나
+- 사람이 사람 bearer로 보낸 메시지에서 호스팅 에이전트 A를 **명시적으로 멘션**했고, 오늘이라면 `hosted_channel_unapproved`로 건너뛸 자리(`agent_mentions.rs:446`)일 때 — 단 채널이 DM이 아니고(DM은 증보 2 규칙 그대로) 보관되지 않았으며, A의 connection이 `active`이고 증명됐고, 서버 전달이 켜져 있을 때.
+- 위 조건이 아니면(연결 끊김·전달 꺼짐·DM·스레드 깨우기·에이전트나 웹훅이 쓴 멘션) 지금의 안내 줄 그대로다.
+
+### G2. 무엇을 쓰나 — job은 승인 전에 만들지 않는다
+- 메시지 전송과 같은 tx에서: ① 멘션 run을 **`awaiting_approval`로** 만든다(`deadline_at` = 승인 만료), ② 승인 행 하나 — 행동 `hosted.channels.grant`(ADR-0186 V5와 같은 행동 id), 인자 `{channels:[그 채널 이름]}`(**정확히 그 채널 하나**), 제안자 = A, 출처 `origin:"server_in_place"`, 만료 = 기본 1시간, ③ 그 스레드에 시스템 명의 카드 메시지(`approval_request`, 단일 쓰기 경로 + outbox).
+- **`agent_job`은 쓰지 않는다.** 승인 전에는 요청 본문·최근 대화가 outbox에도, 에이전트에게도 가지 않는다(HAP-E3의 「승인 밖 채널의 프롬프트는 선을 넘지 않는다」 그대로).
+- 카드 행(서버가 해석한 값만, ADR-0186 V1-a): 에이전트 이름, 채널 이름·공개 범위·인원 수, 이 connection의 현재 승인 채널 수. 제목 「이 채널에서 쓰기」.
+- **누가 누르나**: 워크스페이스 admin **이면서 그 채널의 활성 멤버**인 사람(ADR-0162 「채널 승인 권한 주체 = 관리자」 그대로, 거기에 「그 채널을 볼 수 있는 사람」을 더해 비공개 채널 이름이 채널 밖 관리자에게 새지 않게 한다). 다른 사람에게는 보는 사람별 렌더(ADR-0186 G4)로 버튼 없이 「관리자가 승인하면 바로 처리돼요」. 인박스 「나에게 필요한 일」에는 그 조건을 만족하는 admin에게만 들어간다.
+- **상한**: (connection, 채널)마다 대기 중 카드 1장. 대기 중에 같은 채널에서 A를 다시 부르면 새 run·카드를 만들지 않고(감사 `agent.hosted_grant_card.coalesced`), 그 멘션은 승인 뒤 첫 job의 최근 대화(J5)로 읽힌다. connection마다 대기 카드 5장을 넘으면 지금의 안내 줄로 돌아간다 **[추정]**. 이 카드는 에이전트 제안이 아니므로 V1-e(에이전트당 대기 3개) 계산에 넣지 않는다.
+
+### G3. 승인되면 — 정확히 한 번
+결정 tx 하나에서:
+1. 재증명(ADR-0186 V1-d): 승인 행 `pending`·미만료, run `awaiting_approval`, connection `active`·증명됨, 채널 미보관·`kind<>'dm'`, 승인 채널 합계 ≤ 50, 결정자가 admin이고 그 채널 활성 멤버. 하나라도 어긋나면 기존 `action_args_invalid`(409, 승인 소모 없음).
+2. `grant_hosted_channels_in_tx`로 그 채널 하나를 승인 집합에 더한다(+ A의 membership). **새 쓰기 경로가 아니다** — 같은 함수다.
+3. `requeue_run_from_approval_in_tx`(가드 `status='awaiting_approval'`)로 run을 `queued`로 되돌리고, **그 함수가 참일 때만** 같은 tx에서 `agent_job` 하나를 넣는다. 거짓이면(그 사이 취소·만료) 결정 전체를 되돌린다 — 승인 채널만 넓어지고 일은 없는 반쪽 상태를 남기지 않는다.
+4. 감사: `action.approved` + `hosted_connection.channels_granted`(`via:"in_place_card"`). 도어벨은 기존 작업 이벤트 경로(즉시 발사, ADR-0200 2026-10-14 증보)로 울린다.
+
+정확히 한 번의 근거: 승인 행은 `pending`에서 한 번만 바뀌고(재생은 상태 가드로 무효), run 되살리기는 `awaiting_approval` 가드 하나로 한 번만 성공하며, job은 그 성공 갈래에서만 하나 생기고, 그 job은 claim의 `SKIP LOCKED` + lease로 한 에이전트에게 한 번 간다. 같은 채널의 두 번째 멘션은 G2 상한으로 run이 없다.
+
+### G4. 거절·만료
+- **거절**: run은 기존 행동 거절 경로대로 끝나고(원장 `approval_decided`, code `rejected`), job 0, 채널 승인 변화 없음. 카드에 「승인하지 않았어요」.
+- **만료(1시간)**: 기존 승인 만료 스위프가 run을 `timed_out{approval_expired}`로 끝낸다. job이 애초에 없으므로 회수할 것이 없고, 24시간 `unclaimed_expired`·`lease_abandoned` 경로에 들어갈 수 없다(run이 `queued`·`running`이 된 적이 없다). 카드에 「시간이 지나 처리하지 않았어요. 다시 불러 주세요」.
+- 만료·거절 뒤 같은 채널에서 다시 부르면 새 카드가 뜬다.
+
+### G5. HAP-E3 정확 채널 허가 경계 — 무엇이 바뀌고 무엇이 그대로인가
+- **그대로**: 승인 집합은 여전히 **사람(admin)이 정확한 채널 이름 하나를 명시적으로 승인해야만** 넓어진다. 와일드카드·자동 승인·소유자 단독 승인·「멤버니까 됨」은 없다. DM은 증보 2 규칙이 전부다. 쓰기 함수는 confirm·consent·grant 셋 그대로다(「셋」 시험 불변). claim이 승인 집합을 그 tx에서 다시 읽는 최종 권위(`gateway.rs:224-236`)도 그대로다.
+- **바뀌는 것**: 승인 밖 채널의 멘션이 이제 「안내 줄만」이 아니라 「멈춘 run + 승인 행 + 카드」를 쓴다. 즉 승인 밖 채널에 대해 **run 행과 승인 행이 생긴다**(본문은 run의 트리거 요약, 기존 상한). 이 행들은 그 채널 멤버에게만 보이고(run 가시성 = 채널 멤버십, ADR-0200 D3), 에이전트에게는 아무것도 가지 않는다.
+- 이 변경은 HAP-E3을 넓히는 것이 아니라 **같은 승인을 그 자리에서 청하는 새 문**이다. 문을 닫으려면 환경변수 `MOMO_HOSTED_INPLACE_GRANT_ENABLED`(기본 켜짐 **[추정]**)를 끄면 지금의 안내 줄로 돌아간다.
+
+### G6. 수용 기준(되돌리면 실패하는 시험)
+① 승인 밖 채널 멘션이 run(`awaiting_approval`)·승인·카드를 각 1개 만들고 `agent_job`은 0(생산자 가드를 지우면 job이 생겨 실패), ② 승인하면 job 정확히 1개, 같은 결정을 다시 보내도 1개(가드를 지우면 2개), ③ 승인 직전 run을 취소하면 결정이 409이고 승인 채널이 넓어지지 않음, ④ 만료 스위프 후 job 0·run `timed_out{approval_expired}`·채널 미승인, ⑤ 채널 비멤버 admin은 카드를 볼 수도 누를 수도 없음(404와 같은 답), 일반 멤버는 버튼 없음, ⑥ 대기 중 두 번째 멘션은 run·카드 0, ⑦ DM·스레드 깨우기·에이전트 멘션에서는 카드 0이고 기존 안내 줄, ⑧ 승인 집합 쓰기 경로 = confirm·consent·grant 셋(시험 그대로 통과), ⑨ 승인된 job을 두 connection이 동시에 claim해도 한 번만 수령.
+
+스레드 깨우기 시험: ⑩ 에이전트가 연 스레드에 사람의 멘션 없는 답글 → run 1(같은 메시지 재처리에도 1), ⑪ 에이전트·시스템·웹훅 답글 → 0, ⑫ 다른 에이전트를 멘션한 답글 → 깨우기 0(멘션 경로만), ⑬ 스위치 끔 → 0, ⑭ 수령 전 run이 있으면 두 번째 답글은 run 0(합치기), ⑮ 승인 안 된 채널·`owner_only` 위반 → 0이고 안내 줄도 0.
+
+결과 계약 시험: ⑯ 닫힌 값 밖·교차 규칙 위반은 완료 전체 거절·쓰기 0이고 `error.data.field`가 그 칸, 값은 응답·감사 어디에도 없음, ⑰ 옛 다섯 키만 보내면 그대로 통과, ⑱ `toolCounts`의 모르는 키 거절.
+
+### X1. 그록 4병렬 실험 — 결재만 기록 (코드 계약 아님)
+- 결재 원문: 「실험용 저장소·Bot 하나 (추천)」 (2026-10-15) — v0.1.26 배포 뒤, **전용 시험 저장소**와 **그 저장소에만 권한이 있는 토큰**, **그록봇 하나**로 4건을 동시에 맡겨, 지금 절차(기준)와 고친 절차를 비교한다.
+- 측정은 이 증보와 같은 날 증보의 사실로 한다: 에이전트별 동시 수(ADR-0200 R1), run별 oort 호출 기록(T1), 결과 칸(C1). 호스팅 claim은 에이전트별 직렬화가 없으므로(ADR-0200 R1의 [V]) 4건이 실제로 겹치는지 원장 시각으로 확인한다.
+- 실험은 owner 본인 계정·VM에서만(D16), 운영 저장소·운영 토큰은 쓰지 않는다. 실행·결과는 별도 이슈와 그 PR 본문이 기록한다.
+
+### 열지 않는 것 (증보 5)
+- 서버의 PR·sha·테스트 검증, GitHub API 호출(D9·D17 그대로).
+- 스레드별 깨우기 끄기, 에이전트끼리의 깨우기, 멘션 없는 채널 메시지 깨우기.
+- DM 승인 규칙 변경(증보 2), 채널 여러 개를 한 카드로 묶는 승인, 소유자 단독 채널 승인.
+- 새 scope·새 인증 경로. 새 MCP 도구 없음(기존 `oort_run_complete` 스키마 확장만).
+
+### 구현 단위 (Accepted 후)
+- **C-S1 (engine)**: C1~C3 스키마·교차 검증·`error.data`·감사, 읽기의 `agentReported`. `SELF_HOST_AGENT.md` 루틴 문구(재시도 규칙). 시험 ⑯~⑱.
+- **W-S1 (engine)**: W1~W3 판정(같은 라우팅 관문 재사용)·합치기·`agent.thread_reply_wake` migration·프로필 필드. 시험 ⑩~⑮.
+- **G-S1 (engine)**: G1~G5 생산자 변경·카드·결정 tx·환경변수. 시험 ①~⑨.
+- **G-U1·W-U1·C-U1 (UXUI)**: 카드 렌더(보는 사람별), 「에이전트 보고」 꼬리표, 깨우기 스위치. 캡처·design-review.
