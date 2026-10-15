@@ -836,6 +836,102 @@ async fn another_workspace_and_another_member_never_reach_my_policy() {
     assert_eq!(status, 403, "workspace scope mismatch (shared rule)");
 }
 
+/// Review of #3861: the policy join's lifecycle predicates (`pg.status =
+/// 'active' AND pg.revoked_at IS NULL`, `wpi.enabled`, `wpi.revoked_at IS
+/// NULL`) and the catalog's `installed` revocation check had no test — each
+/// could be deleted with the suite still green. A revoked grant, a disabled
+/// install and a revoked install must each keep the caller's policy empty for
+/// that plugin (ADR-0113 D5 fail-closed), while one live grant stays visible
+/// as the positive control.
+#[tokio::test]
+#[ignore]
+async fn a_revoked_grant_or_a_disabled_or_revoked_install_never_reaches_my_policy() {
+    let _guard = test_lock().await;
+    let env = env().await;
+    let workspace = seed_workspace(&env.su, "plugins-lifecycle").await;
+    let me = seed_human(&env.su, workspace, "owner").await;
+
+    // Positive control: installed, enabled, granted → in my policy.
+    seed_install(&env.su, workspace, me.id, GITHUB, true).await;
+    seed_grant(&env.su, workspace, me.id, GITHUB, "github:read").await;
+
+    // Revoked grant on an installed, enabled plugin.
+    seed_install(&env.su, workspace, me.id, NOTION, true).await;
+    seed_grant(&env.su, workspace, me.id, NOTION, "notion:read").await;
+    let grant_revoke_audit = seed_audit(&env.su, workspace, me.id, "plugin.grant.revoked").await;
+    sqlx::query(
+        "UPDATE plugin_grant \
+            SET status = 'revoked', revoked_at = now(), revoked_audit_id = $3 \
+          WHERE workspace_id = $1 AND plugin_id = $2",
+    )
+    .bind(workspace)
+    .bind(NOTION)
+    .bind(grant_revoke_audit)
+    .execute(&env.su)
+    .await
+    .expect("revoke notion grant");
+
+    // Active grant on an install that is present but disabled.
+    seed_install(&env.su, workspace, me.id, LINEAR, false).await;
+    seed_grant(&env.su, workspace, me.id, LINEAR, "linear:read").await;
+
+    // Active grant on an install that is revoked but still flagged enabled, so
+    // only `wpi.revoked_at IS NULL` stands between it and my policy.
+    seed_install(&env.su, workspace, me.id, DRIVE, true).await;
+    seed_grant(&env.su, workspace, me.id, DRIVE, "drive:read").await;
+    let install_revoke_audit = seed_audit(&env.su, workspace, me.id, "plugin.revoked").await;
+    sqlx::query(
+        "UPDATE workspace_plugin_install \
+            SET revoked_at = now(), revoked_by = $3, revoked_audit_id = $4 \
+          WHERE workspace_id = $1 AND plugin_id = $2",
+    )
+    .bind(workspace)
+    .bind(DRIVE)
+    .bind(me.id)
+    .bind(install_revoke_audit)
+    .execute(&env.su)
+    .await
+    .expect("revoke drive install");
+
+    let token = login(&env, workspace, &me.email).await;
+    let (status, catalog) = get(&env, &token, &catalog_path(workspace)).await;
+    assert_eq!(status, 200, "{catalog}");
+    let policy: Vec<&str> = catalog["toolPolicy"]["plugins"]
+        .as_array()
+        .expect("policy")
+        .iter()
+        .map(|plugin| plugin["pluginId"].as_str().expect("id"))
+        .collect();
+    assert_eq!(
+        policy,
+        [GITHUB],
+        "only the live grant on a live install is my policy: {catalog}"
+    );
+
+    let flag = |plugin: &str, key: &str| -> Value {
+        catalog["plugins"]
+            .as_array()
+            .expect("plugins")
+            .iter()
+            .find(|row| row["pluginId"] == plugin)
+            .unwrap_or_else(|| panic!("{plugin} listed"))[key]
+            .clone()
+    };
+    assert_eq!(
+        flag(DRIVE, "installed"),
+        false,
+        "a revoked install is not installed"
+    );
+    assert_eq!(flag(DRIVE, "enabled"), false);
+    assert_eq!(flag(LINEAR, "installed"), true);
+    assert_eq!(flag(LINEAR, "enabled"), false);
+    let (_, drive) = get(&env, &token, &detail_path(workspace, DRIVE)).await;
+    assert_eq!(
+        drive["plugin"]["installed"], false,
+        "detail agrees: {drive}"
+    );
+}
+
 // ---- ④ membership + P3 boundary ------------------------------------------------
 
 #[tokio::test]
