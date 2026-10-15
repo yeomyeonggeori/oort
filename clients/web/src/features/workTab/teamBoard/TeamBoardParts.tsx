@@ -13,6 +13,7 @@ import type { SharedSessionState, SharedWorkSession } from "@momo/core/lib/api";
 import {
   diffFacts,
   isAgentLane,
+  isAwaitingApproval,
   laneLabel,
   stateChipLabel,
 } from "@momo/core/features/workbench/teamBoard";
@@ -48,16 +49,19 @@ const STATE_TONE: Readonly<Record<SharedSessionState, string>> = {
 };
 
 export function StateChip({ item }: { item: SharedWorkSession }) {
-  const Icon = STATE_ICON[item.state];
+  // 승인 대기 run(ADR-0202 D1)은 응답이 필요한 세션과 같은 그릇·모양으로 말한다: 사람이 할 일이 있다.
+  const approval = isAwaitingApproval(item);
+  const Icon = approval ? CircleAlert : STATE_ICON[item.state];
   return (
     <span
       className={cn(
         CHIP_CLASS,
         "inline-flex items-center gap-1",
-        STATE_TONE[item.state]
+        approval ? STATE_TONE.waiting : STATE_TONE[item.state]
       )}
       data-testid="team-board-state"
       data-state={item.state}
+      data-approval={approval ? "" : undefined}
     >
       <Icon aria-hidden className="size-3 shrink-0" />
       {stateChipLabel(item)}

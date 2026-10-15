@@ -60,13 +60,13 @@ describe("읽을 수 없는 답", () => {
   it("본문이 있는데 못 읽은 것은 미제공이 아니다", () => {
     // 원장을 가진 서버가 깨진 JSON을 보낸 경우다. 그때는 다시 시도할 값이 있다.
     const outcome = unreadableAnswerOutcome(404, "<html>gateway</html>");
-    expect(outcome.errorCopy).toMatch(/다시 시도/);
+    expect(outcome.errorCopy).toMatch(/다시 눌러/);
     expect(outcome.errorCopy).not.toBe(serverSurface("approvals").absentReason);
   });
 
   it("미제공 코드가 아닌 상태는 기존 문구를 그대로 쓴다", () => {
     for (const status of [200, 403, 409, 500]) {
-      expect(unreadableAnswerOutcome(status, "").errorCopy).toMatch(/다시 시도/);
+      expect(unreadableAnswerOutcome(status, "").errorCopy).toMatch(/다시 눌러/);
     }
   });
 });
@@ -82,13 +82,13 @@ describe("영수증이 아닌 답 (2R, 리뷰 M5 이관)", () => {
 
   it("사람이 판단할 수 있는 세 갈래로 접는다", () => {
     expect(unsettledAnswerClause(429)).toMatch(/요청이 잦아/);
-    expect(unsettledAnswerClause(503)).toMatch(/서버가 오류로 답했습니다/);
-    expect(unsettledAnswerClause(418)).toMatch(/받지 않았습니다/);
+    expect(unsettledAnswerClause(503)).toMatch(/서버가 오류로 답했어요/);
+    expect(unsettledAnswerClause(418)).toMatch(/받지 않았어요/);
   });
 
   it("모든 갈래가 다음에 할 일을 말한다", () => {
     for (const status of [429, 500, 418]) {
-      expect(unsettledAnswerClause(status)).toMatch(/다시 시도|받지 않았습니다/);
+      expect(unsettledAnswerClause(status)).toMatch(/다시 눌러|받지 않았어요/);
     }
   });
 });
@@ -193,7 +193,7 @@ describe("영수증 해석은 그대로다", () => {
       status: "rejected",
     });
     expect(outcome.kind).toBe("superseded");
-    expect(outcome.note).toBe("다른 곳에서 이미 결정되었습니다.");
+    expect(outcome.note).toBe("다른 곳에서 이미 결정됐어요.");
   });
 
   it("만료는 만료라고 말한다: 실패로 승격하지 않는다 (ADR-0132)", () => {
@@ -202,7 +202,7 @@ describe("영수증 해석은 그대로다", () => {
       status: "expired",
     });
     expect(outcome.kind).toBe("superseded");
-    expect(outcome.note).toBe("결정 전에 만료되었습니다.");
+    expect(outcome.note).toBe("결정 전에 만료됐어요.");
   });
 
   it("영수증을 실은 404는 여전히 '찾을 수 없다'로 읽는다", () => {
@@ -212,6 +212,6 @@ describe("영수증 해석은 그대로다", () => {
       status: "unknown-to-this-client",
     });
     expect(outcome.kind).toBe("error");
-    expect(outcome.errorCopy).toMatch(/찾을 수 없습니다/);
+    expect(outcome.errorCopy).toMatch(/찾지 못했어요/);
   });
 });

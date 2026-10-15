@@ -54,6 +54,11 @@ import {
 import {resolveQuote} from '@momo/core/features/timeline/quote';
 import {isStreamRunEnded} from '@momo/core/features/timeline/streamStop';
 import {useEndedRuns} from '../agents/endedRuns';
+import {useChannelRuns} from '../agents/agentRunProgressStore';
+import {runsByTriggerMessage} from '@momo/core/features/agents/runStatusLine';
+import type {AgentRunProgress} from '@momo/core/lib/api';
+
+const NO_RUNS: readonly AgentRunProgress[] = [];
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import type {ApprovalGate, ApprovalReceipt} from './approvalGate';
 import {buildThreadContext, parentOf, rollupFor} from './threadContext';
@@ -2419,6 +2424,11 @@ function TimelineInner({
   // 내려 보낸다. 행마다 구독하면 아무 run 이나 끝날 때 붙어 있는 모든 줄이 다시
   // 그려진다.
   const endedRuns = useEndedRuns();
+  // #3824 — 내가 보낸 메시지 아래 상태 줄. 이 채널의 run을 여기서 한 번 구독하고 행에는
+  // 그 메시지가 일으킨 run만 내려 보낸다(같은 이유: 행마다 구독하면 모든 행이 다시 그려진다).
+  const timelineChannelId = channelId ?? messages[0]?.channelId ?? null;
+  const channelRuns = useChannelRuns(timelineChannelId);
+  const runsByMessage = useMemo(() => runsByTriggerMessage(channelRuns), [channelRuns]);
 
   const renderItem = useCallback(
     ({item}: {item: FoldedTimelineItem}) => {
@@ -2485,6 +2495,11 @@ function TimelineInner({
           approvalsProvided={approvalsProvided}
           onApprovalSettled={onApprovalSettled}
           runEnded={isStreamRunEnded(item.message, endedRuns)}
+          runStatus={
+            uuidEq(item.message.authorMemberId, myMemberId)
+              ? (runsByMessage.get(item.message.id.toLowerCase()) ?? NO_RUNS)
+              : undefined
+          }
           // 필이 착지한 행에 초점을 줄 때만 읽는다(R1 M-3). 필이 없는 표면에서는
           // 모을 이유가 없다.
           registerRowNode={jumpPills ? registerRowNode : undefined}
@@ -2542,6 +2557,8 @@ function TimelineInner({
       approvalsProvided,
       onApprovalSettled,
       endedRuns,
+      // #3824. 채널 run이 바뀔 때만 새 표다.
+      runsByMessage,
       // 둘 다 마운트 동안 바뀌지 않는다(`jumpPills` 는 규약, 등록 함수는 빈 의존성).
       jumpPills,
       registerRowNode,

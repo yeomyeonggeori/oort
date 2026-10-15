@@ -68,32 +68,15 @@ function flat(testID: string): Record<string, unknown> {
 afterEach(cleanup);
 
 describe.each(SCHEMES)('%s — 확정 버튼의 실제 스타일', (scheme, palette) => {
-  it('거부 확정은 파괴 채움으로 칠해진다 (테두리 토큰이 아니라)', () => {
+  // #3819: 승인·거부는 한 번 탭에 결정되므로 「확정 버튼」이 없다. 이 스위트가 지키는
+  // 파괴 채움(테두리 토큰이 아니라 dangerFill)은 이제 턴 중단 확정이 홀로 진다.
+  it('승인 결정에는 확정 버튼이 없고 승인은 주 액션 채움 그대로다', () => {
     draw(
       scheme,
-      <ApprovalDecision
-        approvalId="ap-1"
-        initialArmed="reject"
-        onSettled={() => {}}
-        testIDPrefix="row"
-      />,
+      <ApprovalDecision approvalId="ap-1" onSettled={() => {}} testIDPrefix="row" />,
     );
-    expect(flat('row-commit').backgroundColor).toBe(palette.dangerFill);
-    // 그리고 **그것이 테두리 토큰이 아니다.** 이 줄이 회귀의 이름이다.
-    expect(flat('row-commit').backgroundColor).not.toBe(palette.dangerBorder);
-  });
-
-  it('승인 확정은 주 액션 채움 그대로다 (이 수리가 건드리지 않은 쪽)', () => {
-    draw(
-      scheme,
-      <ApprovalDecision
-        approvalId="ap-1"
-        initialArmed="approve"
-        onSettled={() => {}}
-        testIDPrefix="row"
-      />,
-    );
-    expect(flat('row-commit').backgroundColor).toBe(palette.accent);
+    expect(screen.queryByTestId('row-commit')).toBeNull();
+    expect(flat('row-approve').backgroundColor).toBe(palette.accent);
   });
 
   it('턴 중단 확정도 같은 파괴 채움을 든다', () => {

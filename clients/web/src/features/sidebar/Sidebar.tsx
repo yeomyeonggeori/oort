@@ -59,7 +59,6 @@ import { SidebarDestinations } from "./SidebarDestinations";
 import { destinationMarks } from "./sidebarBadge";
 import { useLocalPaneAttention } from "@/features/workbench/local/paneAttention";
 import { destinationActive } from "./sidebarDestinationsModel";
-import { SidebarTeamSessions } from "./SidebarTeamSessions";
 import { setSidebarBodySlot } from "./sidebarBodySlot";
 import { workspaceRailTile } from "./workspaceRailModel";
 import { KomettoMark } from "@/design/brand/KomettoMark";
@@ -108,7 +107,6 @@ import { cn } from "@/design/lib/cn";
 import { DRAWER_SCRIM_MOTION } from "@/design/motion";
 import { MOVE_UNREAD_CHANNEL_SHORTCUT } from "@/app/keyboardShortcuts";
 import { ShortcutHelpDialog } from "@/app/ShortcutHelpDialog";
-import { useSurfaceProvided } from "@/features/capabilities/useSurfaceProvided";
 import { useOpenNewDm } from "@/features/directory/useNewDm";
 import {
   PEER_DOT_LABEL,
@@ -187,29 +185,24 @@ export function Sidebar({
   const { session, workspaceId, connStatus } = useSession();
   const navigate = useNavigate();
   const navRef = useRef<HTMLDivElement>(null);
-  const workConsoleProvided = useSurfaceProvided("workConsole");
-  // 「작업」 묶음 (#2854, ADR-0194 D1). 「내 작업」은 웹에서도 줄이 선다(#3334): 데스크탑에서는
-  // 이 기기의 격자, 웹에서는 「이 기기에는 터미널 레인이 없어요」 설명 상태가 열린다. 두 줄의
-  // 경로가 같아(`/work`) 선택은 쿼리까지 보고 가른다.
+  // 「작업」 한 줄(ADR-0202 D6). 선택은 `/work`의 어느 보기든 「작업」이다. 옛 팀 작업 탭은 목록
+  // 열을 팀 세션 목록으로 바꿨지만(#3334), 이제 팀은 「작업」 화면의 필터라 목록 열은 채널이다.
+  // (`SidebarTeamSessions`는 코드로 남는다: D6 「숨김 = 진입점만」.)
   const workLocation = useLocation();
   const currentWorkView: WorkView | null =
     isWorkPath(workLocation.pathname) ? workViewOf(workLocation.search) : null;
-  // 팀 작업 탭의 본문은 채널이 아니라 팀 세션 목록이다(#3334).
-  const teamBody = currentWorkView === "team";
   // 목적지 선택(#3334): 펼침의 목록 열 구획 A·B와 접힘의 레일 아이콘이 같은 판정을 읽는다.
   const { pathname } = workLocation;
   const destActive = destinationActive(pathname, currentWorkView);
   const railActive: RailDestination | null = destActive.inbox
     ? "inbox"
-    : destActive.mine
-      ? "mine"
-      : destActive.team
-        ? "team"
-        : destActive.agents
-          ? "agents"
-          : destActive.chat
-            ? "chat"
-            : null;
+    : destActive.work
+      ? "work"
+      : destActive.agents
+        ? "agents"
+        : destActive.chat
+          ? "chat"
+          : null;
   // 「나에게 필요한 일」 단일 출처(#3337): 승인+응답 필요 칸+안 읽은 멘션.
   const needsMeState = useNeedsMe();
 
@@ -780,7 +773,6 @@ export function Sidebar({
                 active={destActive}
                 needsMe={needsMeState}
                 unreadChannels={unreadChannels.length}
-                workConsoleProvided={workConsoleProvided}
                 nowCard={
                   /* 작업 중 카드 (DS2-6, 시안 A `.a-side .a-now`). 열린 턴이 없으면 아무것도
                      그리지 않는다 — 빈 카드는 「조용하다」를 말하는 대신 자리만 차지한다. 채널
@@ -797,8 +789,8 @@ export function Sidebar({
               />
             </div>
 
-            {/* 본문 자리 셋(#3334): 탭에 따라 하나만 보인다. 채널 목록은 언마운트하지 않고 숨긴다
-                (스크롤·펼친 섹션이 남는다). 「내 작업」의 세션 목록은 라우트가 이 자리에 포털로
+            {/* 본문 자리 둘(#3334, ADR-0202 D6): 하나만 보인다. 채널 목록은 언마운트하지 않고 숨긴다
+                (스크롤·펼친 섹션이 남는다). 터미널 격자의 세션 목록은 라우트가 이 자리에 포털로
                 그린다(`sidebarBodySlot`). */}
             <div
               ref={setSidebarBodySlot}
@@ -806,9 +798,8 @@ export function Sidebar({
               className="sidebar-list-body flex min-h-0 flex-1 flex-col"
               data-testid="sidebar-body-slot"
             />
-            {teamBody && !listInRoute && <SidebarTeamSessions />}
             <div
-              hidden={listInRoute || teamBody}
+              hidden={listInRoute}
               // `overscroll-contain` (goal B9): 채널 목록 끝에서 계속 미는 손가락이
               // 서랍 바깥으로 넘어가지 않는다 — 덮인 표면이 함께 움직이면 서랍이 종이
               // 한 장이 아니라 창처럼 느껴진다. 타임라인이 같은 이유로 같은 것을 쓴다.

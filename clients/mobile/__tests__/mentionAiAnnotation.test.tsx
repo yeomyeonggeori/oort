@@ -182,6 +182,14 @@ describe('멘션 시트 — 에이전트 행의 보조 줄·칩·잠금', () => 
     expect(dim(2, 'mention-badge')).toBeUndefined();
   });
 
+  it('모든 후보 행이 앞에 아바타를 든다 — 사람은 원, 에이전트는 표식 (#3821)', () => {
+    composer([human, teamKey]);
+    openSheet();
+    const rows = screen.getAllByTestId('mention-option');
+    expect(within(rows[0]).getByTestId('avatar-human', {includeHiddenElements: true})).toBeTruthy();
+    expect(within(rows[1]).getByTestId('avatar-agent', {includeHiddenElements: true})).toBeTruthy();
+  });
+
   it('잠긴 행도 고를 수 있다 — 막지 않고 위 한 줄이 말한다', () => {
     const onSend = jest.fn();
     composer([otherSub], {onSend});

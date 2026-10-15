@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import {
   fetchAgentRunProgress,
+  resetRunLedgerIncludeProbe,
   type AgentRunProgress,
 } from "@momo/core/lib/api";
 import { serverSaysAbsent } from "@momo/core/features/capabilities/serverSurfaces";
@@ -45,6 +46,48 @@ type FetchProgress = typeof fetchAgentRunProgress;
 let byChannel: ReadonlyMap<string, readonly AgentRunProgress[]> = new Map();
 let unsupported = false;
 const listeners = new Set<() => void>();
+
+// ---- run 하나의 원장 신호 (#3824) --------------------------------------------
+// 진행 읽기는 채널 단위지만 원장은 run 단위다. 그리고 깨우는 신호 행(`doorbell_rung`)은
+// 서버가 진행의 `lastEventAtMs`에서 뺀다 — 진행의 지문이 바뀌지 않으므로, 프레임을
+// 버리면 「깨우는 신호 보냄」은 다음 30초 타이머까지 서지 않는다. 그래서 프레임이 온
+// run을 따로 알려 준다. 원장을 들고 있는 훅이 듣고 다시 읽는다.
+const ledgerFrameListeners = new Map<string, Set<() => void>>();
+
+/** 이 run의 원장에 행이 생겼다는 프레임을 듣는다. 반환값은 멈추는 함수다. */
+export function subscribeRunLedgerFrames(runId: string, listener: () => void): () => void {
+  const key = runId.toLowerCase();
+  let set = ledgerFrameListeners.get(key);
+  if (set === undefined) {
+    set = new Set();
+    ledgerFrameListeners.set(key, set);
+  }
+  set.add(listener);
+  return () => {
+    const current = ledgerFrameListeners.get(key);
+    if (current === undefined) return;
+    current.delete(listener);
+    if (current.size === 0) ledgerFrameListeners.delete(key);
+  };
+}
+
+/** 시험 seam: 프레임 하나가 이 run의 원장 구독자에게 닿는다. */
+export function notifyRunLedgerFrame(runId: string): void {
+  const set = ledgerFrameListeners.get(runId.toLowerCase());
+  if (set === undefined) return;
+  for (const listener of [...set]) listener();
+}
+
+// ---- 채널 하나를 지금 다시 읽기 (#3824) -------------------------------------------
+// 보낸 메시지 아래 상태 줄은 1초 안에 「받았어요」를 말해야 한다. 서버는 run을 만들 때
+// 프레임을 내지만, 소켓이 막 다시 붙는 중이면 그 프레임이 늦거나 오지 않는다. 내가 보낸
+// 메시지가 화면에 서면 그 채널을 한 번 다시 읽는다(`nudgeRunProgress`). 지켜보지 않는
+// 채널(에이전트가 없는 채널)이면 아무 일도 하지 않는다.
+let nudgeChannel: ((channelId: string) => void) | null = null;
+
+export function nudgeRunProgress(channelId: string): void {
+  nudgeChannel?.(channelId.toLowerCase());
+}
 
 function emit(next: ReadonlyMap<string, readonly AgentRunProgress[]>): void {
   byChannel = next;
@@ -203,13 +246,20 @@ export function startRunProgress(options: RunProgressOptions): () => void {
       options.workspaceId,
       channelId,
       {
-        onRunEvent: () => void refresh(channelId),
+        onRunEvent: (frame) => {
+          void refresh(channelId);
+          notifyRunLedgerFrame(frame.payload.run_id);
+        },
         onResync: () => void refresh(channelId),
       }
     );
     if (stop !== undefined) unsubscribers.push(stop);
   }
   for (const channelId of channels) void refresh(channelId);
+  const nudge = (channelId: string) => {
+    if (channels.includes(channelId)) void refresh(channelId);
+  };
+  nudgeChannel = nudge;
 
   const timer = setInterval(() => {
     for (const channelId of channels) {
@@ -223,6 +273,7 @@ export function startRunProgress(options: RunProgressOptions): () => void {
   return () => {
     stopped = true;
     clearInterval(timer);
+    if (nudgeChannel === nudge) nudgeChannel = null;
     for (const stop of unsubscribers) stop();
   };
 }
@@ -230,5 +281,6 @@ export function startRunProgress(options: RunProgressOptions): () => void {
 /** 세션 종료·워크스페이스 전환: 이전 워크스페이스의 run을 물려주지 않는다. */
 export function resetRunProgress(): void {
   unsupported = false;
+  resetRunLedgerIncludeProbe();
   if (byChannel.size > 0) emit(new Map());
 }

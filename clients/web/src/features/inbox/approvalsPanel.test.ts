@@ -11,8 +11,6 @@ import {
   type DecisionOutcome,
 } from "@momo/core/features/timeline/approvalDecision";
 import {
-  approveConfirmCopy,
-  REJECT_CONFIRM,
 } from "@/features/timeline/ApprovalActions";
 import type {
   AgentRun,
@@ -406,45 +404,13 @@ describe("agentsFeedPartial", () => {
 
 // ---- ⑥ 2R 확정 문장 정본 ----------------------------------------------------
 
-describe("확정 문장", () => {
-  it("되돌릴 수 있다고 서버가 말한 것만 경고 없이 지나간다", () => {
-    expect(approveConfirmCopy(true)).toBe("승인하면 에이전트가 이어서 진행합니다.");
-  });
-
-  it("비가역은 그 사실을 재진술한다", () => {
-    expect(approveConfirmCopy(false)).toMatch(/되돌릴 수 없어요\.$/);
-  });
-
-  it("모름은 경고 쪽에 붙는다: 안 물어본 것을 안전하다고 말하지 않는다", () => {
-    // server-rust `ApprovalDto`는 `is_reversible`를 아예 싣지 않는다. 그 침묵을
-    // "되돌릴 수 있음"으로 읽는 것은 되돌릴 수 없는 액션 계열에서 가장 나쁜 기본값이다.
-    expect(approveConfirmCopy(undefined)).toBe(approveConfirmCopy(false));
-  });
-
-  it("확정 문장이 계약을 넘어서는 약속을 하지 않는다", () => {
-    for (const copy of [
-      approveConfirmCopy(true),
-      approveConfirmCopy(false),
-      REJECT_CONFIRM,
-    ]) {
-      expect(copy).not.toMatch(/바로 실행|즉시/);
-      expect(copy).not.toMatch(/[—–]/);
-    }
-  });
-
-  // 2R N1: 모바일과 같은 한 문장. 같은 제품이 같은 액션 앞에서 두 문장을 말하면
-  // 둘 중 하나는 반드시 낡는다.
-  it("거부 확정은 「대기 중인」으로 한정한다", () => {
-    expect(REJECT_CONFIRM).toBe("거부하면 대기 중인 실행이 취소됩니다.");
-    // 한정어 없는 "이 실행이 취소됩니다"는 hold를 떠난 run 앞에서 거짓이 된다
-    // (`end_parked_run_in_tx`의 `WHERE status='awaiting_approval'`).
-    expect(REJECT_CONFIRM).toMatch(/대기 중인/);
-  });
-
+// #3819: 승인/거부는 한 번에 결정되므로 「확정 문장」(approveConfirmCopy·REJECT_CONFIRM)이
+// 없다. 남은 것은 영수증 — 원장에 적힌 것까지만 말한다.
+describe("영수증 문장", () => {
   it("영수증은 원장에 적힌 것까지만 말한다 (2R M2)", () => {
     // 앞 판의 거부 영수증은 "…이 실행은 이어지지 않습니다."였다. 참이긴 하지만
     // **앞을 내다보는 절**이고, 영수증이 말할 수 있는 것은 원장에 적힌 것뿐이라는
-    // 이 한 벌의 규칙을 스스로 어기고 있었다. 그 사실은 확정 문장이 말한다.
+    // 이 한 벌의 규칙을 스스로 어기고 있었다. 
     expect(REJECTED_RECEIPT).toBe("거부를 기록했어요.");
     expect(APPROVED_RECEIPT).toBe("승인을 기록했어요.");
     for (const copy of [APPROVED_RECEIPT, REJECTED_RECEIPT]) {

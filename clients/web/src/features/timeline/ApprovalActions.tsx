@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
@@ -10,9 +10,7 @@ import {
 import type { SpawnExecutionPlan } from "@momo/core/lib/executionPlan";
 import {
   decisionHostId,
-  findCandidate,
   preselectedHostId,
-  spawnApproveLead,
   spawnHostGate,
 } from "@momo/core/features/timeline/spawnHostChoice";
 import { SpawnHostChoice } from "./SpawnHostChoice";
@@ -24,52 +22,48 @@ import type { SecretOnce } from "@momo/core/features/approvals/secretOnce";
 //
 // Lifted out of AgentCard because a SECOND surface now decides approvals: the
 // inbox 결정 대기 목록 (`GET …/approvals?status=pending`). Two implementations of
-// "approve or reject" would mean two idempotency policies, two confirm rules and
-// two ways to word a 409, and the one that is not being looked at is the one
-// that drifts. So the card and the list share this, and the only thing that
-// varies is the sentence in front of the buttons.
+// "approve or reject" would mean two idempotency policies, two ways to word a
+// 409, and the one that is not being looked at is the one that drifts. So the
+// card and the list share this, and the only thing that varies is the sentence
+// in front of the buttons.
 //
-// The rules it carries, unchanged from the card:
+// The rules it carries:
 //   - one idempotency key per (row, direction), reused across retries, dropped
 //     only on an idempotency conflict so the retry mints a fresh one;
-//   - no decision fires on a single unguarded click: 승인/거부 arms, the second
-//     press commits (design-taste-web §6, confirm in place rather than in a
-//     modal so the question stays next to the evidence);
+//   - **한 번 누르면 결정된다** (#3819, 성재 2026-10-14: 「승인을 누르면 그냥
+//     승인이 되게 해줘 또 확정 같은 거 누르지 않아도 되게」). 이 파일이 오래
+//     지키던 2단(승인/거부가 무장하고 두 번째 누름이 확정)은 걷혔다. 실수 방지는
+//     눌리기 **전에** 카드가 보여 주는 사실 — 영향(되돌릴 수 있는가), 결정 권한,
+//     접근을 넓히는 행의 경고, 고른 호스트 — 가 지고, 누르는 순간부터는 멱등
+//     키와 `busy` 가 같은 결정이 두 번 나가는 것을 막는다;
 //   - a rejection is stated inline, never as a toast.
 //
-// ## 2R: 2단 무장은 키보드에서 1단이었다
+// ## 눌린 뒤의 화면
 //
-// 무장하면 초점이 확정 버튼으로 옮겨 간다(H2 수정의 잔재). 그 자체는 옳지만, 그
-// 결과로 **Enter를 누르고 있으면** 키 반복이 무장 직후의 확정 버튼에 그대로
-// 떨어졌다: 한 번의 길게 누름이 승인/거부를 관통한다. 되돌릴 수 없는 액션에서
-// 그것은 2단 확인이 없는 것과 같다.
+// 누른 버튼은 `disabled` 가 아니라 `aria-disabled` + 「보내는 중」으로 선다.
+// 네이티브 `disabled` 는 초점을 body 로 떨어뜨려, 실패했을 때 다시 누를 자리를
+// 키보드 사용자가 잃는다. 대신 `commit` 이 `busy` 를 먼저 거른다.
 //
-// 두 겹으로 막는다:
-//   (a) `CONFIRM_GUARD_MS` — 무장 직후 그 시간 동안 확정을 받지 않는다. 사람이
-//       두 번째 의도를 갖기까지 걸리는 시간이고, 모바일이 같은 결함을 같은 값으로
-//       막는다.
-//   (b) `repeat` 거부 — 눌린 채로 반복 발생한 keydown은 두 번째 **의도**가 아니라
-//       하나의 누름이다. (a)만 두면 400ms를 넘긴 긴 누름이 여전히 관통한다.
+// ## 긴 누름
+//
+// 2R 의 `event.repeat` 거절은 확정 버튼에서 승인/거부 버튼으로 옮겨 왔다. 이제 한
+// 번의 누름이 곧 결정이므로, 눌린 채 반복된 Enter 가 결정의 **재시도**처럼 보이게
+// 두지 않는다(첫 keydown 이 이미 결정을 보냈고, 반복은 두 번째 의도가 아니다).
 // =============================================================================
 
-export type Armed = "approve" | "reject" | null;
-
 /**
- * 무장 직후 확정을 받지 않는 시간.
+ * 시간 게이트가 남아 있는 확정 컨트롤의 시간 (ms).
  *
- * 이 값에 근거가 있어야 한다: 너무 짧으면 키 반복(보통 첫 반복까지 ~500ms,
- * 이후 ~30ms 간격)을 못 막고, 너무 길면 진짜로 빠르게 결정하려는 사람에게
- * "버튼이 안 먹는다"가 된다. 400ms는 모바일 승인 경로가 같은 결함에 대해 쓰는
- * 값이고, 여기서 다른 값을 고르면 같은 제품의 같은 액션이 플랫폼마다 다른
- * 안전 간격을 갖게 된다.
+ * **승인 카드·인박스·로그인 핸드오프는 이제 이 값을 쓰지 않는다** (#3819, 한 번에
+ * 결정). 아직 읽는 곳은 작업 세션의 권한 카드(`AgentProgressView`, 「이번만 허용 /
+ * 세션 동안 허용」의 2단) 하나다. 그 표면은 이 이슈의 범위 밖이라 값과 이름을
+ * 그대로 둔다.
  */
 export const CONFIRM_GUARD_MS = 400;
 
 /**
- * Suffix of the control whose handler reads `CONFIRM_GUARD_MS`.
- * The armed row's `${testIdPrefix}-confirm` is a non-focusable container;
- * the guard lives on the commit button. Capture keys the time-gate on
- * that button, so a rename of this suffix moves the markup and the
+ * Suffix of the control whose handler reads `CONFIRM_GUARD_MS`. Capture keys the
+ * time-gate on that button, so a rename of this suffix moves the markup and the
  * registry together.
  */
 const TIME_GATED_CONTROL_SUFFIX = "commit";
@@ -81,103 +75,33 @@ export function timeGatedTestId(testIdPrefix: string): string {
 }
 
 /**
- * Click targets gated by `CONFIRM_GUARD_MS`. Capture consults this list
- * under `clock: "fixed"`. Derived from the same helper the commit button
- * uses for `data-testid`, so a rename cannot drift. Every ApprovalActions
- * caller prefix must appear here (the usage-site test walks callers).
+ * Click targets gated by `CONFIRM_GUARD_MS`. Capture consults this list under
+ * `clock: "fixed"`. Derived from the same helper the commit button uses for
+ * `data-testid`, so a rename cannot drift. 승인 결정 컨트롤은 한 번에 결정되므로
+ * 여기에 없다 — 남은 것은 작업 세션 권한 카드뿐이다.
  */
 // eslint-disable-next-line react-refresh/only-export-components -- allowConstantExport covers CONFIRM_GUARD_MS 리터럴만; as const 배열은 같은 자리의 레지스트리다.
 export const TIME_GATED_CONTROLS = [
-  timeGatedTestId("approval"),
-  timeGatedTestId("inbox-approval"),
-  timeGatedTestId("handoff"),
   // A 칸 권한 카드(#2779, workbench/agent/AgentProgressView). 같은 400ms 무장 간격.
   timeGatedTestId("agent-permission"),
 ] as const;
 
 /**
- * 확정 문장 정본 (2R 오케스트레이터 결정).
- *
- * **"바로 실행합니다"를 쓰지 않는다.** 계약이 지킬 수 없는 약속이었기 때문이다:
- * 승인은 `routes/approvals.rs`의 `approve_run`에서 재개 job을 outbox로 넣고, 그
- * 재개는 비동기다. 게다가 실행이 락과 그 사이에 hold를 떠났으면 job은 아예 들어가지
- * 않고 200만 돌아온다. 즉 "바로"도 "실행"도 보장되지 않는다. 승인이 보장하는 것은
- * **사람이 허가했고 그 허가가 기록됐다**는 것과, 그 뒤 에이전트가 이어서 간다는
- * 것뿐이다.
- */
-export function approveConfirmCopy(reversible: boolean | undefined): string {
-  return spawnApproveConfirmCopy(null, reversible);
-}
-
-/**
- * 확정 문장. 스폰 승인이면 **목적지가 조건절 안에 들어간다** (이슈 1114).
- *
- * 목적지를 별도 문장으로 앞세우지 않는 이유는 코어(`spawnApproveLead`)에 적혀
- * 있다: "「팀 VPS」에서 실행합니다."는 이 승인이 지킬 수 없는 약속을 현재 직설로
- * 단언하고, 바로 뒤 문장이 조심스럽게 단 조건과 서로를 반박한다
- * (design-review H3). 호스트 이름을 모를 때(자격 후보가 없어 아무것도 찍히지 않은
- * 경우) 그 자리는 통째로 빠진다 — 「어딘가에서」는 문장이 아니라 소음이다.
- */
-export function spawnApproveConfirmCopy(
-  hostName: string | null,
-  reversible: boolean | undefined
-): string {
-  const base = spawnApproveLead(hostName);
-  // `undefined`는 "모른다"이고, 되돌릴 수 없는 액션 계열에서 모름은 경고 쪽에
-  // 붙는다. 서버가 위험도를 싣지 않았다고 안전하다고 말할 수는 없다.
-  return reversible === true ? base : `${base} 되돌릴 수 없어요.`;
-}
-
-/**
- * 거부 확정 문장 — **모바일과 같은 한 문장** (2R 지적 N1).
- *
- * 앞 판의 웹 문장은 "거부하면 이 실행은 이어지지 않습니다."였다. 참이지만 모바일이
- * 실측해 landing한 문장과 달랐고, 같은 제품이 같은 액션 앞에서 두 문장을 말하면
- * 둘 중 하나는 반드시 낡는다.
- *
- * 모바일의 문장이 더 낫기도 하다. 「대기 중인」이라는 한정어가 이 계약을 정확히
- * 그린다: 거부는 결정과 **같은 트랜잭션**에서 실행을 취소하지만
- * (`reject_run` → `end_parked_run_in_tx`), 그 UPDATE는
- * `WHERE status='awaiting_approval'`로 가드돼 있어 hold를 떠난 run은 취소 대상이
- * 아니다. 한정어 없는 "이 실행이 취소됩니다"는 그 경우에 거짓이 되고, 한정어가
- * 붙으면 무조건 참이 되면서 무슨 일이 일어나는지까지 말한다.
- */
-export const REJECT_CONFIRM = "거부하면 대기 중인 실행이 취소됩니다.";
-
-/**
  * 결정이 스스로를 부르는 이름 (LIVE-4).
  *
- * 이 파일 머리말이 세운 규칙 — *"the only thing that varies is the sentence in
- * front of the buttons"* — 을 낱말까지 넓힌 것이다. 로그인 핸드오프 카드는 같은
- * 승인 원장에 같은 REST 로 결정하면서 「재개/중단」이라고 부른다. 그것을 위해
- * 두 번째 결정 컨트롤을 짓는 것이야말로 이 파일이 존재하는 이유에 반한다:
- * 멱등 정책이 둘, 확인 규칙이 둘, 409 문장이 둘이 되고, 보지 않는 쪽이 낡는다.
- *
- * 그래서 갈라지는 것은 여섯 낱말뿐이고, **판정은 하나도 갈라지지 않는다**.
+ * 로그인 핸드오프 카드는 같은 승인 원장에 같은 REST 로 결정하면서 「재개/중단」이라고
+ * 부른다. 그것을 위해 두 번째 결정 컨트롤을 짓지 않는다: 멱등 정책이 둘, 409 문장이
+ * 둘이 되고, 보지 않는 쪽이 낡는다. 갈라지는 것은 두 낱말뿐이다.
  */
 export interface DecisionVerbs {
   approve: string;
   reject: string;
-  approveCommit: string;
-  rejectCommit: string;
-  /** `null`이면 기존 승인 문장(가역성·호스트 조건절)을 그대로 쓴다. */
-  approveConfirm: string | null;
-  rejectConfirm: string;
 }
 
-/**
- * 승인/거부의 기본 낱말. 행동 승인 카드가 `approveConfirm` 한 칸만 갈아 끼우려고
- * 이것을 펴서 쓴다(R1 M2), 그래서 내보낸다 — 여섯 낱말을 그쪽에서 다시 적으면
- * 「거부 확정」이 두 파일에 살게 된다.
- */
 // eslint-disable-next-line react-refresh/only-export-components -- 이 파일의 다른 상수 내보내기와 같은 자리의 어휘표다.
 export const APPROVAL_VERBS: DecisionVerbs = {
   approve: "승인",
   reject: "거부",
-  approveCommit: "승인 확정",
-  rejectCommit: "거부 확정",
-  approveConfirm: null,
-  rejectConfirm: REJECT_CONFIRM,
 };
 
 /**
@@ -282,25 +206,21 @@ export function LinkOnce({
   );
 }
 
+type Direction = "approve" | "reject";
+
 export function ApprovalActions({
   approvalId,
-  armed,
-  setArmed,
   onSettled,
   lead = "이 작업은 승인이 필요해요.",
   className,
   testIdPrefix = "approval",
-  reversible = true,
   execution = null,
   verbs = APPROVAL_VERBS,
   forbiddenCopy = null,
-  onLandOnCard,
 }: {
   approvalId: string;
-  armed: Armed;
-  setArmed: (armed: Armed) => void;
   onSettled: (outcome: DecisionOutcome) => void;
-  /** The sentence in front of the buttons before either one is armed. */
+  /** The sentence in front of the buttons. */
   lead?: string;
   className?: string;
   /**
@@ -309,22 +229,10 @@ export function ApprovalActions({
    */
   testIdPrefix?: string;
   /**
-   * M2(design-review): 비가역 승인이면 확정 문장이 그 사실을 재진술한다.
-   *
-   * 2R: **`undefined`는 "모른다"이고, 모르면 경고한다.** 서버가 위험도를 싣지
-   * 않은 승인을 되돌릴 수 있다고 가정하는 것은, 되돌릴 수 없는 액션 계열에서
-   * 할 수 있는 가장 나쁜 기본값이다(server-rust `ApprovalDto` 주석도 같은 말을
-   * 한다: "absent `isReversible`를 reversible로 읽지 마라").
-   */
-  reversible?: boolean;
-  /**
    * 이 승인이 **어디서 실행할지**까지 묻는가 (ADR-0125 D6-A, 이슈 1114).
    *
    * `null`이 압도적 다수다. 픽커가 붙는 순간 이 컨트롤이 지는 것이 하나 늘어나는데,
-   * 그것은 라디오 하나가 아니라 **결정의 목적지**다 — 그래서 여기 있다. 픽커를
-   * 카드 본문에 두고 결정만 이 파일이 지면, 두 조각은 서로 다른 컴포넌트의 state에
-   * 살면서 「무장했으니 잠근다」와 「고른 것을 싣는다」를 각자 기억해야 한다.
-   * 세 번째 표면(폰)이 같은 계약을 다시 지어야 하는 것도 그때부터다.
+   * 그것은 라디오 하나가 아니라 **결정의 목적지**다 — 그래서 여기 있다.
    */
   execution?: SpawnExecutionPlan | null;
   /**
@@ -335,80 +243,62 @@ export function ApprovalActions({
   /**
    * 403 일 때 이 카드가 대신 할 말 (ADR-0186 §5).
    *
-   * 기본 문장("채널 멤버인지 확인하세요")은 도구 호출 승인의 것이고 지금도
+   * 기본 문장("채널 멤버인지 확인해 주세요")은 도구 호출 승인의 것이고 지금도
    * 옳다. 워크스페이스 행동 승인만 다른 사실을 안다 — 부록 A 가 `required_role`
    * 을 실어 보냈으므로, 이 403 에서 모자란 것은 멤버십이 아니라 **역할**이다.
-   * 그 판정을 이 파일이 지지 않고 호출자가 문장으로 건네는 이유는 낱말만
-   * 갈라지고 계약은 하나로 남기는 이 컴포넌트의 규칙 그대로다(`verbs`).
    */
   forbiddenCopy?: string | null;
-  /**
-   * 403 뒤 초점을 어디에 내려놓을지 **호출자가 안다** (R2 H-R2-1 · N-R2-2).
-   *
-   * 이 컨트롤의 컨테이너는 이름 없는 `div` 다. 카드는 이름(`aria-label`)과
-   * house 링을 이미 가진 `section` 을 갖고 있고, 그것이 옳은 착지점이다 —
-   * 그런데 그 노드는 이 컴포넌트가 만들지 않는다. 그래서 목적지를 아는 쪽이
-   * 함수로 건넨다. 없으면 `root` 로 떨어지고, 그 `root` 도 이제 링을 든다.
-   */
-  onLandOnCard?: () => void;
 }) {
   // workspaceId comes from session context rather than a prop chain: both
   // callers sit several components below the shell.
   const { workspaceId } = useSession();
-  const [busy, setBusy] = useState(false);
+  /** 지금 서버에 나가 있는 결정의 방향. 없으면 `null`. */
+  const [sending, setSending] = useState<Direction | null>(null);
+  /** 같은 틱의 두 번째 누름을 거르는 동기 문. state 는 다음 렌더에야 바뀐다. */
+  const sendingRef = useRef(false);
   const [errorCopy, setErrorCopy] = useState<string | null>(null);
   const [errorTone, setErrorTone] = useState<"error" | "unavailable">("error");
-  /** 가드에 걸린 누름을 말하는 줄 (2R N-C). 무장할 때마다 지워진다. */
-  const [tooFast, setTooFast] = useState(false);
   const keysRef = useRef<{ approve?: string; reject?: string }>({});
-  /** 무장한 시각. 확정이 그 뒤 `CONFIRM_GUARD_MS`를 기다렸는지 재는 기준. */
-  const armedAtRef = useRef<number>(0);
 
   // ---- 호스트 선택 (이슈 1114) --------------------------------------------------
   //
   // `null`은 "아직 아무것도 안 골랐다"가 아니라 **"사람이 손대지 않았다"**이다.
   // 그래서 찍혀 있는 것은 언제나 코어가 답하는 기본값이고, 사람이 라디오를 눌러야
-  // 이 state가 값을 갖는다. 그 구분이 결정 본문을 정한다: 손대지 않았으면 키를
-  // 안 싣고(서버가 카드의 기본값을 적용한다), 손댔으면 명시적으로 싣는다.
+  // 이 state가 값을 갖는다. 손대지 않았으면 키를 안 싣고(서버가 카드의 기본값을
+  // 적용한다), 손댔으면 명시적으로 싣는다.
   const [pickedHostId, setPickedHostId] = useState<string | null>(null);
   /** 「고를 것이 없다」 문장의 id. 승인 버튼이 `aria-describedby`로 되짚는다. */
   const blockedId = useId();
   const defaultHostId = preselectedHostId(execution);
   const chosenHostId = pickedHostId ?? defaultHostId;
   const hostGate = spawnHostGate(execution);
-  const chosenHostName =
-    findCandidate(execution, chosenHostId)?.displayName ?? null;
+  const busy = sending !== null;
 
-  async function commit(approve: boolean) {
-    if (busy) return;
-    // (a) 무장 직후의 확정은 두 번째 의도가 아니다.
-    //
-    // 조용히 삼키지 않는다(2R N-C). 아무 일도 일어나지 않는 버튼은 고장난 버튼과
-    // 구별되지 않고, 그 자리에서 사람이 하는 다음 행동은 더 세게 다시 누르는
-    // 것이다. 무엇이 일어났는지 한 줄로 말한다 — 모바일이 같은 가드에 대해 하는
-    // 것과 같은 말이다(`ApprovalDecision.tsx`의 `too-fast`).
-    if (Date.now() - armedAtRef.current < CONFIRM_GUARD_MS) {
-      setTooFast(true);
-      return;
-    }
-    setTooFast(false);
-    const slot = approve ? "approve" : "reject";
-    keysRef.current[slot] ??= newDecisionId();
-    setBusy(true);
+  async function commit(direction: Direction) {
+    if (sendingRef.current) return;
+    // 실행할 호스트가 하나도 없으면 승인은 나가지 않는다. 서버가 409로 답할 것을
+    // 결정 전에 알고 있고(코어 `spawnHostGate`), 그것을 알면서 요청을 보내는 것은
+    // 헛걸음이다. **거부는 막지 않는다** — 서버도 거부에는 호스트를 묻지 않고,
+    // 실행할 수 없는 요청을 정리할 길까지 닫을 이유는 없다.
+    if (direction === "approve" && !hostGate.canApprove) return;
+    const approve = direction === "approve";
+    keysRef.current[direction] ??= newDecisionId();
+    sendingRef.current = true;
+    setSending(direction);
     setErrorCopy(null);
     try {
       const outcome = await decideApproval(
         workspaceId,
         approvalId,
         approve,
-        keysRef.current[slot],
+        keysRef.current[direction],
         // 픽커가 없으면 `undefined`이고, 그때 키는 본문에 실리지 않는다. 서버는
         // 픽커 없는 승인에 실린 `hostId`를 400으로 거절한다 — 그 거절이 옳다.
         decisionHostId(execution, chosenHostId)
       );
       if (outcome.kind === "error") {
         if (outcome.errorCode === "idempotency_conflict") {
-          delete keysRef.current[slot];
+          delete keysRef.current[direction];
         }
         // 2R M1: 같은 404를 목록은 조용히 접는데 이 줄만 빨갛게 그리면, 한 화면이
         // 같은 사실을 두 색으로 말한다. tone은 core의 판정에서 받는다.
@@ -417,13 +307,8 @@ export function ApprovalActions({
         );
         // 역할이 모자란 403 은 사고가 아니다. 승인은 여전히 대기이고(§5), 사람이
         // 할 수 있는 다음 행동이 있다 — 그래서 붉은 alert 이 아니라 조용한
-        // 안내로 서고, 문장은 호출자가 아는 사실에서 온다.
-        //
-        // 두 갈래가 같은 자리에 선다 (AX-3b #2549). `role_required` 는 서버가
-        // 이름을 댄 것이고, `forbidden` 은 이름 없는 403 이다. 행동 승인 카드는
-        // 어느 쪽에서도 자기 문장을 안다 — 부록 A 가 `required_role` 을 실어
-        // 보냈으니까. 이름 없는 403 에도 이 문장을 쓰는 것은 R1 부터의 판정
-        // 그대로다: 이 카드에서 403 이 뜻할 수 있는 것은 그것 하나다.
+        // 안내로 서고, 문장은 호출자가 아는 사실에서 온다. `role_required` 는
+        // 서버가 이름을 댄 것이고 `forbidden` 은 이름 없는 403 이다(AX-3b #2549).
         if (
           (outcome.errorCode === "role_required" ||
             outcome.errorCode === "forbidden") &&
@@ -431,255 +316,102 @@ export function ApprovalActions({
         ) {
           setErrorTone("unavailable");
           setErrorCopy(forbiddenCopy);
-          // ## 성공할 수 없는 버튼을 세워 두지 않는다 (design-review R1 M1)
-          //
-          // 앞 판은 무장을 유지했다. 그 결과 화면에서 **가장 큰 컨트롤**(채움
-          // 「승인 확정」)이 「관리자가 승인해야 해요」 바로 위에 서서, 다시
-          // 눌러도 같은 403 을 받는 행동을 위계의 꼭대기에 두었다(§3).
-          //
-          // 무장만 푼다. 카드는 여전히 대기이므로 승인·거부 버튼은 그대로 있고
-          // (다른 사람이 이 화면을 이어받을 수 있다), 이 사람에게 참인 사실은
-          // 바로 아래 안내 문장이 진다.
-          //
-          // 초점도 함께 돌려놓는다 (R1 H2). `disabled={busy}` 가 눌린 버튼을
-          // 비활성화한 순간 초점은 이미 body 로 떨어졌고, 여기서 확정 버튼까지
-          // 언마운트된다 — 목적지를 적어 두지 않으면 키보드 사용자는 방금 읽을
-          // 문장이 생긴 자리를 잃는다.
-          //
-          // ## 목적지가 `root` 에서 **카드**로 옮겨 갔다 (R2 H-R2-1 · N-R2-2)
-          //
-          // R2 는 `root` 착지에서 두 가지를 실측했다. 이 `div` 에는 house 링이
-          // 없어 크로미움 UA 기본 링(이 팔레트 밖의 파랑)이 footer 를 둘렀고
-          // (같은 카드의 성공 착지는 2px accent 였다 — 한 카드에 두 링), 이름도
-          // role 도 없어 스크린리더가 footer 의 textContent 를 통째로 읽었다.
-          //
-          // 카드 `section` 은 그 둘을 이미 갖고 있다: `focus-visible:focus-ring`
-          // 과 `aria-label={title}`. R1 H2 가 적어 둔 방향이기도 하다. 그래서
-          // 착지는 카드이고, 착지한 사람이 듣는 것은 카드 제목이다 — 그 아래에
-          // 방금 생긴 안내 문장이 있다.
-          //
-          // 카드가 없는 표면(인박스 목록)에서는 이 갈래 자체에 들어오지 않지만
-          // (`forbiddenCopy === null`), 들어오더라도 `onLandOnCard` 가 없으면
-          // `root` 로 떨어진다. 그 `root` 도 이제 house 링을 든다(아래).
-          focusAfterArmChange.current = "card";
-          setArmed(null);
+          // 버튼은 그대로 남는다 — 카드는 여전히 대기이고 다른 사람이 이어받을 수
+          // 있다. 눌린 버튼은 `aria-disabled` 였을 뿐 초점을 잃지 않았으므로 초점도
+          // 그 자리에 있다.
           return;
         }
         setErrorCopy(outcome.errorCopy ?? "결정을 처리하지 못했어요.");
         return;
       }
-      // 2R M6: 확정에 성공하면 확정 버튼이 언마운트된다. 무장 때 고쳤던 것과
-      // **같은 결함**이 반대편에 남아 있었다: 초점이 body로 떨어져, 키보드
-      // 사용자는 방금 결정한 자리를 잃고 문서 맨 위에서 다시 Tab을 시작한다.
-      focusAfterArmChange.current = "root";
-      setArmed(null);
+      // 성공하면 호출자가 이 컨트롤을 영수증 줄로 바꾸면서 언마운트한다. 초점은
+      // 호출자가 받는다(카드의 영수증/1회 링크, 목록의 다음 행).
       onSettled(outcome);
     } finally {
-      setBusy(false);
+      sendingRef.current = false;
+      setSending(null);
     }
   }
 
-  // ---- 초점 (H2 · 2R H2/M6) ------------------------------------------------
-  //
-  // 이 표면은 무장할 때도 해제할 때도 확정할 때도 **버튼을 언마운트한다**. 그때마다
-  // 초점은 body로 떨어지고, 키보드 사용자는 매번 문서 맨 위로 돌아간다. 그래서
-  // 세 전이 모두에 목적지가 있어야 한다: 어디로 갈지는 전이를 일으킨 쪽이 적어
-  // 두고(`focusAfterArmChange`), 옮기는 것은 렌더 뒤 한 곳에서 한다.
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const commitRef = useRef<HTMLButtonElement | null>(null);
-  const approveRef = useRef<HTMLButtonElement | null>(null);
-  const rejectRef = useRef<HTMLButtonElement | null>(null);
-  const focusAfterArmChange = useRef<
-    "commit" | "approve" | "reject" | "root" | "card" | null
-  >(null);
-
-  useEffect(() => {
-    const target = focusAfterArmChange.current;
-    focusAfterArmChange.current = null;
-    if (target === null) return;
-    if (target === "commit") commitRef.current?.focus();
-    else if (target === "approve") approveRef.current?.focus();
-    else if (target === "reject") rejectRef.current?.focus();
-    else if (target === "card" && onLandOnCard !== undefined) onLandOnCard();
-    else rootRef.current?.focus();
-  }, [armed, onLandOnCard]);
-
-  function arm(next: Exclude<Armed, null>) {
-    // 실행할 호스트가 하나도 없으면 승인은 무장조차 하지 않는다. 서버가 409로
-    // 답할 것을 결정 전에 알고 있고(코어 `spawnHostGate`), 그것을 알면서 확정
-    // 화면을 세우는 것은 사람에게 헛걸음을 시키는 것이다. **거부는 막지 않는다** —
-    // 서버도 거부에는 호스트를 묻지 않고, 실행할 수 없는 요청을 정리할 길까지
-    // 닫을 이유는 없다.
-    if (next === "approve" && !hostGate.canApprove) return;
-    armedAtRef.current = Date.now();
-    focusAfterArmChange.current = "commit";
-    setTooFast(false);
-    setErrorCopy(null);
-    setArmed(next);
-  }
-
-  /** 무장 해제. 왔던 버튼으로 캐럿을 돌려준다 (다이얼로그와 같은 계약). */
-  function disarm() {
-    focusAfterArmChange.current = armed === "approve" ? "approve" : "reject";
-    setTooFast(false);
-    setArmed(null);
-  }
+  /** 눌린 채 반복된 keydown 은 두 번째 결정이 아니다. */
+  const swallowRepeat = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.repeat) event.preventDefault();
+  };
 
   return (
     <div
-      // `tabIndex={-1}` 로 초점을 받는 자리라 링이 있어야 한다 (R2 H-R2-1).
-      // 없으면 크로미움이 자기 기본 링을 그리고, 그것은 이 팔레트 밖 색이다
-      // (§2.2 한 액센트). 프리플라이트의 `naked_focus` 는 링을 **끈** 자리만
-      // 보므로 이렇게 링이 아예 없던 자리는 기계가 잡지 못한다 — 세 줄 아래
-      // `LinkOnce` 와 카드 `section` 이 이미 드는 그 클래스다.
+      // `tabIndex={-1}` 로 호출자가 초점을 내려놓을 수 있는 자리라 링이 있어야 한다.
       className={cn("px-3 py-2 focus-visible:focus-ring", className)}
-      ref={rootRef}
-      // 확정 뒤 캐럿이 착지할 자리. 목록에서는 이 행이 곧 사라지므로 호출자가
-      // 다시 옮기지만(InboxRoute), 카드에서는 여기가 종착지다.
       tabIndex={-1}
-      // H2: 되돌릴 수 없는 액션의 확인은 Esc로 취소할 수 있어야 한다. 이 표면은
-      // AlertDialog가 아니라 제자리 2단 행이라 그 동작을 공짜로 받지 못한다 —
-      // 그래서 직접 단다. 다이얼로그를 Esc로 닫는 손이 여기서만 통하지 않으면,
-      // 사람은 무장을 푸는 법을 모른 채 확정 버튼 앞에 남는다.
-      onKeyDown={(event) => {
-        if (event.key !== "Escape" || armed === null || busy) return;
-        event.stopPropagation();
-        disarm();
-      }}
     >
-      {/* 픽커가 붙으면 **묻는 말이 먼저 온다** (design-review M4).
-          픽커 없는 행에서 `lead`는 버튼과 한 줄에 앉는다(아래). 픽커가 붙으면 그
-          배치가 읽는 순서를 뒤집는다: 제목 → 실행할 호스트 → *허가가 필요합니다*
-          → 거부/승인. 두 번째 질문이 제기되고 답해진 뒤에야 첫 번째 질문이 나온다.
-          그래서 픽커가 있을 때만 `lead`를 자기 줄로 올린다. */}
+      {/* 픽커가 붙으면 **묻는 말이 먼저 온다** (design-review M4). */}
       {execution !== null && (
         <p className="pb-2 text-meta text-ink-muted">{lead}</p>
       )}
-      {/* 픽커는 무장 여부와 무관하게 자리를 지킨다. 확정 화면에서 사라지면
-          사람은 자기가 무엇을 고른 채 확정하는지 볼 수 없고, 확인은 판단의 근거
-          옆에 있어야 한다는 이 표면의 원칙이 무너진다. 대신 잠긴다. */}
+      {/* 픽커는 결정 중에 잠긴다 — 고른 것이 나가는 요청과 달라지지 않게. */}
       {execution !== null && (
         <SpawnHostChoice
           plan={execution}
           pickedHostId={chosenHostId}
           onPick={setPickedHostId}
-          locked={armed !== null || busy}
+          locked={busy}
           blockedId={blockedId}
           testIdPrefix={testIdPrefix}
         />
       )}
-      {armed === null ? (
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          {execution === null ? (
-            <span className="text-meta text-ink-muted">{lead}</span>
-          ) : (
-            // 픽커가 있으면 `lead`는 이미 위에 있다. 자리는 남겨 둬야 버튼이
-            // 오른쪽에 붙는다(`justify-between`).
-            <span />
-          )}
-          <span className="flex shrink-0 items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              ref={rejectRef}
-              data-testid={`${testIdPrefix}-reject`}
-              onClick={() => arm("reject")}
-            >
-              {verbs.reject}
-            </Button>
-            {/* ## 막힌 승인은 **모양을 바꾸지 투명해지지 않는다** (design-review H1)
-                
-                앞 판은 `disabled`였다. 두 가지가 따라왔다:
-                  - `disabled:opacity-50`이 채움 버튼에 걸리면 「승인」 글자가
-                    **2.23:1**이 된다. tokens.md §5b가 이 정확한 실패를 이름으로
-                    적어 둔 그 숫자다.
-                  - 네이티브 `disabled` 버튼은 **초점을 받지 못한다**. 키보드나
-                    보이스오버로 이 행을 지나는 사람은 막힌 컨트롤을 아예 만나지
-                    못하고, 그래서 왜 승인할 수 없는지도 듣지 못한다.
-                
-                그래서 실제로 할 수 없을 때는 **조용한 형태로 강등**하고(채움을
-                버리는 것이 곧 "지금은 이것이 기본 액션이 아니다"라는 말이다),
-                `aria-disabled`로 상태만 알린 뒤 초점은 남긴다. 이유는
-                `aria-describedby`가 픽커 아래 문장을 가리켜 초점이 닿는 순간 함께
-                읽힌다. 누름은 `arm()`이 거절한다 — 화면과 같은 판정으로. */}
-            <Button
-              size="sm"
-              ref={approveRef}
-              variant={hostGate.canApprove ? "default" : "outline"}
-              className={cn(!hostGate.canApprove && "text-ink-muted")}
-              aria-disabled={!hostGate.canApprove || undefined}
-              aria-describedby={
-                hostGate.canApprove ? undefined : blockedId
-              }
-              data-blocked={hostGate.canApprove ? undefined : ""}
-              data-testid={`${testIdPrefix}-approve`}
-              onClick={() => arm("approve")}
-            >
-              {verbs.approve}
-            </Button>
-          </span>
-        </div>
-      ) : (
-        <div
-          className="flex flex-wrap items-center justify-between gap-2"
-          data-testid={`${testIdPrefix}-confirm`}
-        >
-          <span className="text-meta text-ink">
-            {armed === "approve"
-              ? (verbs.approveConfirm ??
-                (execution === null
-                  ? approveConfirmCopy(reversible)
-                  : spawnApproveConfirmCopy(chosenHostName, reversible)))
-              : verbs.rejectConfirm}
-          </span>
-          <span className="flex shrink-0 items-center gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={busy}
-              data-testid={`${testIdPrefix}-cancel`}
-              onClick={disarm}
-            >
-              취소
-            </Button>
-            <Button
-              variant={armed === "approve" ? "default" : "destructive"}
-              size="sm"
-              disabled={busy}
-              ref={commitRef}
-              data-testid={timeGatedTestId(testIdPrefix)}
-              // (b) 눌린 채로 반복 발생한 keydown은 두 번째 의도가 아니라 하나의
-              // 누름이다. 브라우저는 <button> 위의 Enter keydown마다 click을
-              // 합성하므로, 여기서 막지 않으면 길게 누른 Enter가 무장과 확정을
-              // 한 번에 관통한다. `preventDefault`가 그 합성을 끊는다.
-              onKeyDown={(event) => {
-                if (event.repeat) event.preventDefault();
-              }}
-              onClick={() => void commit(armed === "approve")}
-            >
-              {busy
-                ? "보내는 중"
-                : armed === "approve"
-                  ? verbs.approveCommit
-                  : verbs.rejectCommit}
-            </Button>
-          </span>
-        </div>
-      )}
-      {/* 2R N-C: 모바일과 같은 문장. 「탭」만 바꿨다 — 이 표면에서 가드에 걸리는
-          것은 빠른 더블클릭이기도 하고 눌린 채 반복된 Enter이기도 해서, 한 입력
-          장치의 이름을 쓰면 나머지 경우에 틀린 말이 된다. role="status"인 것도
-          같은 이유다: 이것은 사고가 아니라 안내다. */}
-      {tooFast && (
-        <p
-          role="status"
-          data-testid={`${testIdPrefix}-too-fast`}
-          className="pt-2 text-meta text-ink-muted"
-        >
-          방금 누른 것과 이어진 동작이라 보내지 않았어요. 문장을 확인하고 다시
-          눌러 주세요.
-        </p>
-      )}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        {execution === null ? (
+          <span className="text-meta text-ink-muted">{lead}</span>
+        ) : (
+          // 픽커가 있으면 `lead`는 이미 위에 있다. 자리는 남겨 둬야 버튼이
+          // 오른쪽에 붙는다(`justify-between`).
+          <span />
+        )}
+        <span className="flex shrink-0 items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            aria-disabled={busy || undefined}
+            data-busy={sending === "reject" ? "" : undefined}
+            data-decision="reject"
+            data-testid={`${testIdPrefix}-reject`}
+            onKeyDown={swallowRepeat}
+            onClick={() => void commit("reject")}
+          >
+            {sending === "reject" ? "보내는 중" : verbs.reject}
+          </Button>
+          {/* ## 막힌 승인은 **모양을 바꾸지 투명해지지 않는다** (design-review H1)
+
+              호스트가 하나도 없어 승인할 수 없을 때 앞 판은 `disabled`였다.
+                - `disabled:opacity-50`이 채움 버튼에 걸리면 「승인」 글자가
+                  **2.23:1**이 된다. tokens.md §5b가 이 정확한 실패를 이름으로
+                  적어 둔 그 숫자다.
+                - 네이티브 `disabled` 버튼은 **초점을 받지 못한다**. 키보드나
+                  보이스오버로 이 행을 지나는 사람은 막힌 컨트롤을 아예 만나지
+                  못하고, 그래서 왜 승인할 수 없는지도 듣지 못한다.
+
+              그래서 실제로 할 수 없을 때는 **조용한 형태로 강등**하고(채움을
+              버리는 것이 곧 "지금은 이것이 기본 액션이 아니다"라는 말이다),
+              `aria-disabled`로 상태만 알린 뒤 초점은 남긴다. 이유는
+              `aria-describedby`가 픽커 아래 문장을 가리켜 초점이 닿는 순간 함께
+              읽힌다. 누름은 `commit()`이 거절한다 — 화면과 같은 판정으로. */}
+          <Button
+            size="sm"
+            variant={hostGate.canApprove ? "default" : "outline"}
+            className={cn(!hostGate.canApprove && "text-ink-muted")}
+            aria-disabled={busy || !hostGate.canApprove || undefined}
+            aria-describedby={hostGate.canApprove ? undefined : blockedId}
+            data-blocked={hostGate.canApprove ? undefined : ""}
+            data-busy={sending === "approve" ? "" : undefined}
+            data-decision="approve"
+            data-testid={`${testIdPrefix}-approve`}
+            onKeyDown={swallowRepeat}
+            onClick={() => void commit("approve")}
+          >
+            {sending === "approve" ? "보내는 중" : verbs.approve}
+          </Button>
+        </span>
+      </div>
       {errorCopy !== null && (
         <p
           // 미제공은 사고가 아니므로 alert으로 끼어들지도, 빨갛지도 않다.
@@ -696,4 +428,20 @@ export function ApprovalActions({
       )}
     </div>
   );
+}
+
+/**
+ * 카드의 y/n 단축키는 한 번에 결정하지 않고 **결정 버튼에 초점을 놓는다**. 키 하나로
+ * 되돌릴 수 없는 결정이 나가지 않게, Enter/Space 가 결정을 만든다. 마우스는 한 번의
+ * 누름이고, 키보드는 y/n 한 번과 Enter 한 번이다. 결정 컨트롤이 없으면(이미 결정됨)
+ * 아무 일도 없다.
+ */
+// eslint-disable-next-line react-refresh/only-export-components -- 컴포넌트와 한 쌍인 초점 헬퍼다.
+export function focusDecisionControl(
+  scope: HTMLElement | null,
+  which: Direction
+): void {
+  scope
+    ?.querySelector<HTMLButtonElement>(`[data-decision="${which}"]`)
+    ?.focus();
 }
