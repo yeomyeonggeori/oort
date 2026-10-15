@@ -291,6 +291,9 @@ services:
       # #3397 (ADR-0193 증보 2026-10-03): Claude subscription agents are OFF by default;
       # only an exact `true` opens registration. Codex is unaffected.
       MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED: ${MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED:-}
+      # #3857 (ADR-0162 증보 5 G5): the in-place 「이 채널에서 쓰기」 card. ON by default;
+      # unset / blank / `true` = on, any other value = off (the old notice line).
+      MOMO_HOSTED_INPLACE_GRANT_ENABLED: ${MOMO_HOSTED_INPLACE_GRANT_ENABLED:-}
       # #3500 (ADR-0197 M1): personal cloud box API. OFF unless an exact `true`; closed means
       # every /cloud-boxes route answers 404 before any database read. `:-` so existing
       # stacks keep it closed without a new required key.

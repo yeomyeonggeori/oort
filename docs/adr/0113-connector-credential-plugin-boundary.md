@@ -1,6 +1,7 @@
 # ADR-0113: 커넥터 자격증명·플러그인 경계 — 오피셜 플러그인 플랫폼의 신뢰 모델
 
 - Status: **Accepted** (2026-07-17, 성재 — 권고안 D1-A~D6 전체 승인 "ㄱㄱ". 첫 파생 SE-04A=MOMO-410부터 codex-fleet 발급)
+- 증보: **2026-10-15 (#3838) 플러그인 레지스트리 이월 해제, 공식 4개 읽기 Rust 라우트부터** (성재 결재 「이월 풀고 읽기부터 (추천)」) — 파일 끝.
 - 관련: `research/16-plugin-platform/00~04`(생태계·제안·실검증·Slack/MM 호환), `docs/planning/proposals/2026-07-14-superapp-engine-roadmap.md` §ADR-0113·SE-04A/B, ADR-0004(provider 자격증명 비유입), ADR-0102(BYOA), ADR-0111(Work), ADR-0115(signed webhook — 본 ADR의 D6이 입력 제공), `research/13-redesign/03`(Drive 동결 트랙)
 - 발단: 성재 발제 3회 누적 — ① "Codex 앱식 공식+커스텀 플러그인, 원클릭 설치, 1호 Drive"(2026-07-16) ② momo-main 구체화 지정(custody/Drive-vs-GitHub/delegation/egress) ③ "오피셜 플러그인 집중 + Slack/Mattermost에서 쓰던 것 계속 사용"(2026-07-16)
 
@@ -53,3 +54,36 @@
 ## 파생 (Accepted 후 — 기존 SE 큐와 정렬)
 
 SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook + **D4 Slack-호환 모드**) → 신규 SE(GitHub 등재+grant 왕복) → 신규 SE(Drive 경로 C MCP 포장) → Notion/Linear 등재 → 온보딩 추천 세트(ADR-0121 합류). ADR-0116(context/memory)은 병렬 draft 유지.
+
+## 증보 2026-10-15 (#3838) — 플러그인 레지스트리 이월 해제, Rust 읽기 경로부터
+
+- Status: **Accepted** (2026-10-15 성재 결재, 원문 인용 아래). 공개 API(새 Rust 라우트) 변경이라 ADR-0100에 따라 이 기록이 구현 머지 조건이다. D1~D6은 바뀌지 않는다.
+- 결재 원문(2026-10-15, AskUserQuestion): 「이월 풀고 읽기부터 (추천)」 — 플러그인 레지스트리 이월을 풀고, 공식 4개(GitHub·Notion·Linear·Drive)의 읽기(목록·상세)를 먼저 Rust로 옮긴다.
+- 무엇을 푸나: 2026-08-09 성재 판정 「이월 5 + 종속 1」 중 `plugins`(+`mcp` 종속)의 이월(`docs/planning/research/2026-08-09-swift-family-disposition-table.md` §3, ADR-0145 증보 1의 「판정 보류」 줄). 나머지 이월(`memories`·`huddles`·`workstreams`·`members 잔여`)은 그대로다.
+
+### 확인한 사실 [V] (track/engine `6ee2386f8`)
+- DB는 있다: `server/Migrations/013_plugin_registry.sql`(`plugin_registry` 전역 카탈로그 — 자격증명·토큰 없음, `workspace_plugin_install`·`plugin_grant`(D2의 4-튜플)·`plugin_capability_projection`은 테넌트 테이블), 공식 매니페스트 시드 `com.momo.plugins.github`·`.notion`·`.linear`(013), `.drive`(015), 도구 설명 보강(031·059). `momo_app`은 `plugin_registry`에 쓰기 권한이 없다(037).
+- 웹 「앱」 화면과 core 호출부가 있다: `packages/momo-core/src/lib/api.ts`의 6경로(`GET …/plugins`, `GET …/plugins/{plugin}`, `POST·DELETE …/install`, `POST …/grants`, `DELETE …/grants/{scope}`)와 응답 파서(`PluginCatalogItem`, 정책 서술자), 화면 `clients/web/src/features/plugins/PluginSection.tsx`.
+- Rust 라우트는 0이다(`/plugins` 없음). 그래서 `serverSurfaces.ts`의 `plugins`가 `provided:false`로 「앱」 진입점을 접어 둔다.
+
+### P1. 이월 해제
+- `plugins`는 「이월」에서 「이식 확정(단계적)」으로 바뀐다. `mcp`는 계속 `plugins`에 종속이다(매니페스트의 `mcp` 필드로만 쓰인다).
+
+### P2. 첫 단계 = 읽기 둘, 공식 4개
+- `GET /v1/workspaces/{ws}/plugins` — 카탈로그 + 호출한 사람의 실효 정책(설치 여부·내 grant), 자격증명 없음.
+- `GET /v1/workspaces/{ws}/plugins/{plugin}` — 매니페스트 상세. 자격증명 없음.
+- 대상은 `official = true AND revoked_at IS NULL`인 4개(`com.momo.plugins.github`·`.notion`·`.linear`·`.drive`)뿐이다. 다른 `plugin_id`는 없는 것과 같은 404.
+- **와이어는 새로 짓지 않는다.** 이미 배포된 core 파서(`api.ts`의 `listPlugins`·`getPlugin`과 그 파서)가 받는 모양이 계약이다. Rust 구현은 그 파서를 통과하는 응답을 내고, 시험이 파서 픽스처와 Rust 응답을 맞춘다(Swift 시절 계약을 이어받는 방식, ADR-0145).
+- 권한: 사람 JWT, 워크스페이스 활성 멤버. 테넌트 테이블 읽기는 `with_tenant_tx` + RLS FORCE, `plugin_registry`(전역·읽기 전용 카탈로그)는 같은 tx 안의 단순 SELECT. 쓰기 없음.
+
+### P3. 쓰기(설치·grant·회수)는 다음 단계
+- `install`·`grants` 4경로는 이번에 만들지 않는다(계속 404). 그래서 화면은 읽기 전용이어야 한다: `serverSurfaces`를 「앱 보기」(`plugins`, 이번에 켬)와 「앱 설치」(새 줄, 꺼짐)로 나누고, 설치·권한 버튼은 「앱 설치」가 켜질 때만 보인다(UXUI 슬라이스).
+- 쓰기 단계를 열 때는 D2(4-튜플·위임 사용자 grant)·D5(egress 표시·fail-closed)를 그대로 지키는 별도 이슈다. D1-B(서버측 토큰 보관)는 계속 기각이다.
+
+### P4. 바뀌지 않는 것
+- D1 커스터디 A(토큰은 에이전트 호스트에만, oort 서버는 카탈로그·정책·grant 기록·감사만), D2~D6 전부.
+- 커뮤니티·워크스페이스 커스텀 플러그인, 마켓플레이스, Slack-호환 웹훅(ADR-0115 쪽) 범위.
+
+### 구현 슬라이스 (Accepted 후)
+- **P-S1 (engine)**: 두 읽기 라우트, 공식 4개 술어, core 파서 픽스처와 맞추는 계약 시험. red proof: ① 비공식·회수된 플러그인은 404(술어를 지우면 실패), ② 응답 어디에도 토큰·시크릿 키가 없음(키 이름 허용목록 시험), ③ 다른 워크스페이스의 install·grant 행이 내 정책에 섞이지 않음(RLS), ④ 비멤버 404, ⑤ core `listPlugins` 파서가 Rust 응답을 받는다.
+- **P-U1 (UXUI)**: `serverSurfaces` 분리(보기 켬·설치 꺼짐), 「앱」 화면 읽기 전용 상태, 캡처·design-review.

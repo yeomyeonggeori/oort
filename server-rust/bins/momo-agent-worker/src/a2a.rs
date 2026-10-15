@@ -710,6 +710,7 @@ mod tests {
             owner_member_id: None,
             owner_display_name: None,
             hosted_confirmed_by_owner: false,
+            thread_reply_wake: true,
         };
         let block = A2aBlock::Depth {
             source_depth: 3,

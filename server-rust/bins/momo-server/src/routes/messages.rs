@@ -619,6 +619,7 @@ pub async fn send(
     // `new_message` consumes the original and the routing needs the same text.
     let mention_body = request.body.clone().unwrap_or_default();
     let author_is_agent = principal.kind == momo_auth::PrincipalKind::Agent;
+    let author_is_human = principal.kind == momo_auth::PrincipalKind::Human;
     let via_token_id = audit_via_token_id(&principal);
     let gateway_enabled = state.agent_gateway.enabled();
     // ADR-0162 HAP-E5: the per-agent hosted selector's production gate, read
@@ -629,6 +630,7 @@ pub async fn send(
     let claude_subscription_agents_enabled =
         state.agent_port.config.claude_subscription_agents_enabled;
     let context_max_messages = state.mentions.context_max_messages;
+    let inplace_grant_enabled = state.mentions.hosted_inplace_grant_enabled;
     // ADR-0158 D2 — the refinement block becomes props here, *before* the
     // transaction, because it is a pure rewrite of an already-validated value.
     // The key it writes into is server-owned (`SERVER_OWNED_PROPS_KEYS`), so
@@ -775,6 +777,7 @@ pub async fn send(
                         root_id: sent.message.root_id,
                         author_member_id: principal.member_id,
                         author_is_agent,
+                        author_is_human,
                         body: &mention_body,
                         hlc_ts: sent.message.hlc_ts,
                         via_token_id,
@@ -783,6 +786,7 @@ pub async fn send(
                         subscription_agents_enabled,
                         claude_subscription_agents_enabled,
                         context_max_messages,
+                        inplace_grant_enabled,
                         routing: requested_routing.as_ref(),
                     },
                 )

@@ -413,6 +413,46 @@ pub async fn retire_pending_agent_jobs_for_run_with_reason_in_tx(
     Ok(result.rows_affected())
 }
 
+/// Replace a still-unclaimed `agent_job`'s `recent_messages` snapshot
+/// (ADR-0162 증보 5 W2 합치기, #3855 review).
+///
+/// A job carries the conversation it was queued with, and both the managed
+/// worker (`assemble(&payload.recent_messages, …)`) and the gateway claim
+/// (`payload` as stored) answer from that snapshot alone. When a later thread
+/// reply is folded into this job instead of getting a run of its own, the
+/// snapshot must be re-read or that reply reaches no turn at all.
+///
+/// Only `recent_messages` moves: `run_id`, `trigger_message_id`, `prompt` and
+/// the routing keys stay what the run was created with, so the answer is still
+/// bound to the message that started the turn and the new reply is simply a
+/// later line of the conversation it reads.
+///
+/// Guarded by the same 「nobody has it」 predicate the caller locked the row
+/// under (`pending`, no lease owner), so a row a claimer took is never
+/// rewritten. Returns whether the row was updated.
+pub async fn refresh_pending_agent_job_recent_messages_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    job_outbox_id: i64,
+    recent_messages: &serde_json::Value,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE outbox \
+            SET payload = jsonb_set(payload, '{recent_messages}', $3, true) \
+          WHERE workspace_id = $1 \
+            AND id = $2 \
+            AND kind = 'agent_job' \
+            AND status = 'pending' \
+            AND lease_owner IS NULL",
+    )
+    .bind(workspace_id)
+    .bind(job_outbox_id)
+    .bind(recent_messages)
+    .execute(&mut *conn)
+    .await?;
+    Ok(result.rows_affected() == 1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

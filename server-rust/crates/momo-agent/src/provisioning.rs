@@ -482,6 +482,10 @@ pub struct AgentProfile {
     pub updated_at_ms: i64,
     /// `agent.model_source` (#3147) — not an `agent_profile` column, read with it.
     pub model_source: ModelSource,
+    /// `agent.thread_reply_wake` (ADR-0162 증보 5 W3, #3851) — whether a human's
+    /// plain reply in a thread this agent opened wakes it. Also an `agent`
+    /// column read with the profile, like `model_source`.
+    pub thread_reply_wake: bool,
 }
 
 fn decode_profile(
@@ -516,7 +520,33 @@ fn decode_profile(
             &row.try_get::<Option<String>, _>("model_source")?
                 .unwrap_or_default(),
         ),
+        // The column is NOT NULL DEFAULT true; a missing agent row (the
+        // subselect's NULL) reads as the default, never as "off".
+        thread_reply_wake: row
+            .try_get::<Option<bool>, _>("thread_reply_wake")?
+            .unwrap_or(true),
     })
+}
+
+/// Set `agent.thread_reply_wake` (ADR-0162 증보 5 W3, #3851). `false` when no
+/// such agent exists in the workspace (the caller's 404). Like
+/// [`set_agent_model_source_in_tx`], the profile PUT calls it before its upsert
+/// so the returned profile already shows the new value.
+pub async fn set_agent_thread_reply_wake_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+    enabled: bool,
+) -> Result<bool, DbError> {
+    let done = sqlx::query(
+        "UPDATE agent SET thread_reply_wake = $3 WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .bind(enabled)
+    .execute(&mut *conn)
+    .await?;
+    Ok(done.rows_affected() == 1)
 }
 
 /// Set `agent.model_source` (#3147). `false` when no such agent exists in the
@@ -543,7 +573,10 @@ const PROFILE_COLS: &str = "instructions, model_pref, effort_pref, enabled_tools
      paused, version, updated_by, updated_at, \
      (SELECT a.model_source FROM agent a \
        WHERE a.member_id = agent_profile.agent_member_id \
-         AND a.workspace_id = agent_profile.workspace_id) AS model_source";
+         AND a.workspace_id = agent_profile.workspace_id) AS model_source, \
+     (SELECT a.thread_reply_wake FROM agent a \
+       WHERE a.member_id = agent_profile.agent_member_id \
+         AND a.workspace_id = agent_profile.workspace_id) AS thread_reply_wake";
 
 /// The agent's own `agent.model` + its workspace's `settings` — the two inputs
 /// the ADR-0131 D2 allow-list needs, read inside the transaction that is about

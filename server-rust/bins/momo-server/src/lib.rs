@@ -1286,6 +1286,14 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/agents/{agent}/runs",
             get(routes::agent_runs::list_by_agent),
         )
+        // ADR-0200 증보 2026-10-15 R1 (#3847): "running now" across the
+        // channels the reader is a member of, with per-agent concurrency. The
+        // collection path, not a channel's — there is still no workspace-wide
+        // queue: rows are the reader's rooms, other rooms are a count only.
+        .route(
+            "/v1/workspaces/{ws}/agent-runs",
+            get(routes::agent_runs::active),
+        )
         .route(
             "/v1/workspaces/{ws}/agent-runs/{run}",
             get(routes::agent_runs::detail),
