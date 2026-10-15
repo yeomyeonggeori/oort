@@ -603,29 +603,41 @@ mod tests {
     /// 131 is ADR-0186 증보 2026-10-13 A0 (#3786): the RLS-FORCE `agent_avatar_image` table (server
     /// re-encoded avatar bytes, immutable but for `status`) and `member.avatar_image_id` with a
     /// self-only composite FK.
+    ///
+    /// 132 is #3822's `doorbell_rung` ledger kind (ADR-0200 증보 2026-10-14): only the
+    /// `agent_run_event_kind_ck` vocabulary grows.
+    ///
+    /// 133 is #3840's `tool_call` ledger kind (ADR-0200 증보 2026-10-15 T1~T5): `tool`/`duration_ms`
+    /// columns, the RLS-FORCE `agent_run_tool_tally`, `agent_run_tool_call_record` (100-row cap per
+    /// run, tally past it), a trim that neither counts nor deletes `tool_call`, and no frame for it.
+    ///
+    /// 134 is #3851's `agent.thread_reply_wake` (ADR-0162 증보 5 W3): one boolean column on the
+    /// existing RLS-FORCE `agent` table, default on.
+    ///
+    /// 135 is #3853 (ADR-0202 E1): `work.run.updated` fires for every agent kind's work
+    /// runs and for top-level mention runs' final transition. Function body only.
     #[test]
-    fn discovers_contiguous_migrations_001_to_131() {
+    fn discovers_contiguous_migrations_001_to_135() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
+        let expected: Vec<i64> = (1..=135).collect();
+        let found: Vec<i64> = migrations
+            .iter()
+            .map(|migration| migration.version)
+            .collect();
         assert_eq!(
-            migrations.len(),
-            131,
-            "expected 131 migrations under {}",
+            found,
+            expected,
+            "expected contiguous 001..=135 under {}",
             dir.display()
         );
-        assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 131);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
-
-        for (i, migration) in migrations.iter().enumerate() {
-            assert_eq!(
-                migration.version,
-                (i as i64) + 1,
-                "migrations must be contiguous and sorted; gap/dupe near {}",
-                migration.name
-            );
-        }
+        assert!(migrations
+            .last()
+            .unwrap()
+            .name
+            .starts_with("135_work_run_updated_all_agents"));
     }
 
     #[test]
