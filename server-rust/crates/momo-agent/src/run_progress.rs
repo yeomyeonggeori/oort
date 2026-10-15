@@ -163,18 +163,12 @@ impl QueueEntry {
     }
 }
 
-/// Hosted-agent runs of one channel (mention runs and work runs alike), newest
-/// first, WITHOUT their delivery-job facts. The caller has already proven the
-/// viewer is an active member of `channel_id`. Only runs whose agent has a hosted
-/// connection are listed (the ledger exists for no other kind, ADR-0200 D6).
-pub async fn list_channel_run_progress_base_in_tx(
-    conn: &mut PgConnection,
-    workspace_id: Uuid,
-    channel_id: Uuid,
-    active_only: bool,
-    limit: i64,
-) -> Result<Vec<RunProgressBase>, DbError> {
-    let sql = format!(
+/// The columns every progress read selects: the run summary, the agent, the
+/// counters and the ledger-derived facts. Shared by the channel read and the
+/// workspace "running now" read (R1) so the two cannot disagree about what a
+/// row means. Expects `agent_run r` and is followed by [`PROGRESS_APPROVAL_JOIN`].
+fn progress_select_sql() -> String {
+    format!(
         "SELECT {SUMMARY_COLS}, r.agent_member_id, r.step_count, \
                 CASE WHEN r.status IN ('succeeded','failed','timed_out','cancelled') \
                       AND jsonb_typeof(r.error -> 'code') = 'string' \
@@ -187,21 +181,56 @@ pub async fn list_channel_run_progress_base_in_tx(
                   WHERE e.workspace_id = r.workspace_id AND e.run_id = r.id \
                     AND e.kind = 'stage' ORDER BY e.seq DESC LIMIT 1) AS latest_stage, \
                 (SELECT max(e.created_at) FROM agent_run_event e \
-                  WHERE e.workspace_id = r.workspace_id AND e.run_id = r.id) AS last_event_at, \
-                ap.id AS approval_id, ap.expires_at AS approval_expires_at \
-           FROM agent_run r \
-           LEFT JOIN LATERAL ( \
+                  WHERE e.workspace_id = r.workspace_id AND e.run_id = r.id \
+                    AND e.kind <> 'doorbell_rung') AS last_event_at, \
+                ap.id AS approval_id, ap.expires_at AS approval_expires_at "
+    )
+}
+
+/// The pending approval of an `awaiting_approval` run (at most one row).
+const PROGRESS_APPROVAL_JOIN: &str = "LEFT JOIN LATERAL ( \
                 SELECT a.id, a.expires_at FROM approval a \
                  WHERE r.status = 'awaiting_approval' \
                    AND a.workspace_id = r.workspace_id AND a.run_id = r.id \
                    AND a.status = 'pending' \
                  ORDER BY a.created_at DESC LIMIT 1 \
-           ) ap ON true \
+           ) ap ON true ";
+
+fn decode_progress_base(row: &sqlx::postgres::PgRow) -> Result<RunProgressBase, DbError> {
+    Ok(RunProgressBase {
+        summary: decode_run_summary(row).map_err(DbError::from)?,
+        agent_member_id: row.try_get("agent_member_id")?,
+        step_count: row.try_get("step_count")?,
+        end_reason: row.try_get("end_reason")?,
+        claimed_at: row.try_get("claimed_at")?,
+        latest_stage: row.try_get("latest_stage")?,
+        last_event_at: row.try_get("last_event_at")?,
+        approval_id: row.try_get("approval_id")?,
+        approval_expires_at: row.try_get("approval_expires_at")?,
+    })
+}
+
+/// Hosted-agent runs of one channel (mention runs and work runs alike), newest
+/// first, WITHOUT their delivery-job facts. The caller has already proven the
+/// viewer is an active member of `channel_id`. Only runs whose agent has a hosted
+/// connection are listed (the ledger exists for no other kind, ADR-0200 D6).
+pub async fn list_channel_run_progress_base_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    active_only: bool,
+    limit: i64,
+) -> Result<Vec<RunProgressBase>, DbError> {
+    let sql = format!(
+        "{select} \
+           FROM agent_run r \
+           {PROGRESS_APPROVAL_JOIN} \
           WHERE r.workspace_id = $1 AND r.channel_id = $2 \
             AND agent_run_event_is_hosted(r.workspace_id, r.agent_member_id) \
             AND ($3::boolean = false OR r.status IN ('queued','running','awaiting_approval','paused')) \
           ORDER BY r.created_at DESC, r.id DESC \
-          LIMIT $4"
+          LIMIT $4",
+        select = progress_select_sql(),
     );
     let rows = sqlx::query(&sql)
         .bind(workspace_id)
@@ -212,19 +241,225 @@ pub async fn list_channel_run_progress_base_in_tx(
         .await?;
     let mut base = Vec::with_capacity(rows.len());
     for row in &rows {
-        base.push(RunProgressBase {
-            summary: decode_run_summary(row).map_err(DbError::from)?,
-            agent_member_id: row.try_get("agent_member_id")?,
-            step_count: row.try_get("step_count")?,
-            end_reason: row.try_get("end_reason")?,
-            claimed_at: row.try_get("claimed_at")?,
-            latest_stage: row.try_get("latest_stage")?,
-            last_event_at: row.try_get("last_event_at")?,
-            approval_id: row.try_get("approval_id")?,
-            approval_expires_at: row.try_get("approval_expires_at")?,
-        });
+        base.push(decode_progress_base(row)?);
     }
     Ok(base)
+}
+
+// ---------------------------------------------------------------------------
+// R1 — "running now" across the viewer's channels (ADR-0200 증보 2026-10-15)
+// ---------------------------------------------------------------------------
+
+/// The page cap of the "running now" read (R1: `limit ≤ 100`).
+pub const ACTIVE_RUN_PAGE_MAX: i64 = 100;
+
+/// `?limit=` for the "running now" read. Like [`crate::validated_run_limit`] an
+/// unparsable value falls back to the default rather than 400ing, but the cap is
+/// R1's 100, not the history reads' 200.
+pub fn validated_active_run_limit(raw: Option<&str>) -> i64 {
+    raw.and_then(|raw| raw.trim().parse::<i64>().ok())
+        .unwrap_or(50)
+        .clamp(1, ACTIVE_RUN_PAGE_MAX)
+}
+
+/// `scope=` of the "running now" read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActiveRunScope {
+    /// Every visible run (the default — channels the viewer is a member of).
+    Team,
+    /// Only runs the viewer requested: the author of a mention run's trigger
+    /// message, or the actor of a work run's `agent.work.queued` audit row (the
+    /// run has no requester column — the same source the team board reads).
+    Mine,
+}
+
+impl ActiveRunScope {
+    fn is_mine(self) -> bool {
+        matches!(self, ActiveRunScope::Mine)
+    }
+}
+
+/// The ONE predicate that decides which runs the "running now" read may show:
+/// a non-terminal run whose channel is unarchived and has the viewer as an
+/// active member (`left_at IS NULL` — a DM's runs are therefore its two
+/// people's), optionally narrowed to runs the viewer requested. Every agent
+/// kind (hosted, managed, BYOA, team AI) and every trigger (mention, work)
+/// counts. The page and the per-agent counts both read through it, so a row
+/// can never be counted that cannot be listed, or listed that is not counted.
+///
+/// Binds: `$1` workspace, `$2` viewer member, `$3` mine-only flag.
+const ACTIVE_VISIBLE_FROM: &str = "FROM agent_run r \
+     JOIN channel c \
+       ON c.workspace_id = r.workspace_id AND c.id = r.channel_id AND c.archived_at IS NULL \
+     JOIN membership vm \
+       ON vm.workspace_id = r.workspace_id AND vm.channel_id = r.channel_id \
+      AND vm.member_id = $2 AND vm.left_at IS NULL ";
+
+const ACTIVE_VISIBLE_WHERE: &str = "WHERE r.workspace_id = $1 \
+      AND r.status IN ('queued','running','awaiting_approval','paused') \
+      AND ($3::boolean = false \
+           OR EXISTS (SELECT 1 FROM message tm \
+                       WHERE tm.workspace_id = r.workspace_id AND tm.id = r.trigger_message_id \
+                         AND tm.author_member_id = $2) \
+           OR EXISTS (SELECT 1 FROM audit_log al \
+                       WHERE al.workspace_id = r.workspace_id AND al.run_id = r.id \
+                         AND al.action = 'agent.work.queued' AND al.actor_member_id = $2)) ";
+
+/// The `(created_at, id)` keyset position of `cursor`, or `None` when that run is
+/// not in a channel the viewer can see (the caller answers 400, not an empty
+/// page). The run need not still be active: a run that finished between two
+/// page reads is still a valid place to resume from.
+pub async fn active_run_cursor_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    viewer_member_id: Uuid,
+    cursor: Uuid,
+) -> Result<Option<(DateTime<Utc>, Uuid)>, DbError> {
+    let row = sqlx::query(
+        "SELECT r.created_at, r.id FROM agent_run r \
+           JOIN membership vm \
+             ON vm.workspace_id = r.workspace_id AND vm.channel_id = r.channel_id \
+            AND vm.member_id = $2 AND vm.left_at IS NULL \
+          WHERE r.workspace_id = $1 AND r.id = $3",
+    )
+    .bind(workspace_id)
+    .bind(viewer_member_id)
+    .bind(cursor)
+    .fetch_optional(&mut *conn)
+    .await?;
+    match row {
+        Some(row) => Ok(Some((row.try_get("created_at")?, row.try_get("id")?))),
+        None => Ok(None),
+    }
+}
+
+/// One keyset page of the "running now" read, newest first, without delivery-job
+/// facts. `next_cursor` is `Some` only when a further page exists (the query
+/// reads `limit + 1`).
+pub async fn list_active_run_progress_base_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    viewer_member_id: Uuid,
+    scope: ActiveRunScope,
+    after: Option<(DateTime<Utc>, Uuid)>,
+    limit: i64,
+) -> Result<(Vec<RunProgressBase>, Option<Uuid>), DbError> {
+    let sql = format!(
+        "{select} \
+           {ACTIVE_VISIBLE_FROM} \
+           {PROGRESS_APPROVAL_JOIN} \
+           {ACTIVE_VISIBLE_WHERE} \
+            AND ($4::timestamptz IS NULL OR (r.created_at, r.id) < ($4, $5)) \
+          ORDER BY r.created_at DESC, r.id DESC \
+          LIMIT $6",
+        select = progress_select_sql(),
+    );
+    let rows = sqlx::query(&sql)
+        .bind(workspace_id)
+        .bind(viewer_member_id)
+        .bind(scope.is_mine())
+        .bind(after.map(|(at, _)| at))
+        .bind(after.map(|(_, id)| id))
+        .bind(limit + 1)
+        .fetch_all(&mut *conn)
+        .await?;
+    let mut base = Vec::with_capacity(rows.len());
+    for row in &rows {
+        base.push(decode_progress_base(row)?);
+    }
+    let next_cursor = if base.len() as i64 > limit {
+        base.truncate(limit as usize);
+        base.last().map(|run| run.summary.id)
+    } else {
+        None
+    };
+    Ok((base, next_cursor))
+}
+
+/// Per-agent counts of the runs the "running now" read can show — over the
+/// WHOLE visible set, never the page, so `limit=1` does not shrink them.
+/// `queued` is the raw status: the route moves the leased ones to `claimed`
+/// with the outbox facts (this crate owns no outbox SQL), which is why the
+/// queued run ids come along.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VisibleAgentRunCounts {
+    pub agent_member_id: Uuid,
+    pub queued: i64,
+    pub running: i64,
+    pub awaiting_approval: i64,
+    pub paused: i64,
+    pub queued_run_ids: Vec<Uuid>,
+}
+
+/// [`VisibleAgentRunCounts`] for every agent with at least one visible run in
+/// `scope`, ordered by agent id. An agent with no visible run is not listed at
+/// all — naming it would tell the viewer it is busy in rooms they cannot see.
+pub async fn visible_active_run_counts_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    viewer_member_id: Uuid,
+    scope: ActiveRunScope,
+) -> Result<Vec<VisibleAgentRunCounts>, DbError> {
+    let sql = format!(
+        "SELECT r.agent_member_id, \
+                count(*) FILTER (WHERE r.status = 'queued') AS queued, \
+                count(*) FILTER (WHERE r.status = 'running') AS running, \
+                count(*) FILTER (WHERE r.status = 'awaiting_approval') AS awaiting_approval, \
+                count(*) FILTER (WHERE r.status = 'paused') AS paused, \
+                COALESCE(array_agg(r.id) FILTER (WHERE r.status = 'queued'), '{{}}'::uuid[]) \
+                  AS queued_run_ids \
+           {ACTIVE_VISIBLE_FROM} \
+           {ACTIVE_VISIBLE_WHERE} \
+          GROUP BY r.agent_member_id \
+          ORDER BY r.agent_member_id"
+    );
+    let rows = sqlx::query(&sql)
+        .bind(workspace_id)
+        .bind(viewer_member_id)
+        .bind(scope.is_mine())
+        .fetch_all(&mut *conn)
+        .await?;
+    let mut counts = Vec::with_capacity(rows.len());
+    for row in &rows {
+        counts.push(VisibleAgentRunCounts {
+            agent_member_id: row.try_get("agent_member_id")?,
+            queued: row.try_get("queued")?,
+            running: row.try_get("running")?,
+            awaiting_approval: row.try_get("awaiting_approval")?,
+            paused: row.try_get("paused")?,
+            queued_run_ids: row.try_get("queued_run_ids")?,
+        });
+    }
+    Ok(counts)
+}
+
+/// Each listed agent's non-terminal runs in the WHOLE workspace — every
+/// channel, every requester — as one number (R1 `activeTotal`). The same class
+/// of leak as D3's `ahead_total` ("this agent is busy"), and nothing else: no
+/// id, channel, requester or title of a run the viewer cannot see.
+pub async fn workspace_active_run_totals_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agents: &[Uuid],
+) -> Result<HashMap<Uuid, i64>, DbError> {
+    if agents.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let rows = sqlx::query(
+        "SELECT r.agent_member_id, count(*) AS total FROM agent_run r \
+          WHERE r.workspace_id = $1 AND r.agent_member_id = ANY($2) \
+            AND r.status IN ('queued','running','awaiting_approval','paused') \
+          GROUP BY r.agent_member_id",
+    )
+    .bind(workspace_id)
+    .bind(agents)
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut totals = HashMap::with_capacity(rows.len());
+    for row in &rows {
+        totals.insert(row.try_get("agent_member_id")?, row.try_get("total")?);
+    }
+    Ok(totals)
 }
 
 /// Which of `channels` the viewer is an active member of.
@@ -354,18 +589,83 @@ pub struct RunEventRow {
     pub code: Option<String>,
     pub approval_id: Option<Uuid>,
     pub actor_member_id: Option<Uuid>,
+    /// `tool_call` rows only: the oort tool name (ADR-0200 증보 2026-10-15 T1).
+    pub tool: Option<String>,
+    /// `tool_call` rows only: the server-measured duration.
+    pub duration_ms: Option<i32>,
     pub created_at: DateTime<Utc>,
+}
+
+/// Which opt-in ledger kinds a read asks for. Clients built before a kind reject a
+/// ledger holding a kind they do not know, so every kind added after the first
+/// release is returned only on request (`?include=`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RunEventInclude {
+    /// `doorbell_rung` rows (ADR-0200 증보 2026-10-14).
+    pub doorbell: bool,
+    /// `tool_call` rows plus the tally (ADR-0200 증보 2026-10-15 T4).
+    pub tools: bool,
+}
+
+/// Per-tool totals of one run's oort calls (`agent_run_tool_tally`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolTallyRow {
+    pub tool: String,
+    pub ok: i64,
+    pub error: i64,
+    pub duration_ms_sum: i64,
+}
+
+/// One run's ledger as a viewer may read it.
+#[derive(Debug, Clone, Default)]
+pub struct RunLedger {
+    pub events: Vec<RunEventRow>,
+    /// `Some` only when [`RunEventInclude::tools`] was asked for.
+    pub tool_tally: Option<Vec<ToolTallyRow>>,
+    /// `Some` only with `tools`: whether calls were counted past the row cap (the tally
+    /// holds more calls than the ledger has `tool_call` rows).
+    pub tool_call_rows_capped: Option<bool>,
 }
 
 /// The whole ledger of one run (≤ 200 rows), oldest first — or `None` when the run
 /// is not in this workspace or the viewer is not an active member of its channel.
 /// Both are the same `None`, so the answer is no existence oracle (ADR-0200 D3).
+///
+/// `doorbell_rung` rows (ADR-0200 증보 2026-10-14) are returned only when the caller asks
+/// (`include_doorbell`): clients built before that kind reject a ledger with a kind they
+/// do not know, so the default read must stay what they can parse. `tool_call` rows are
+/// never returned here — see [`list_run_ledger_in_tx`].
 pub async fn list_run_events_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     run_id: Uuid,
     viewer_member_id: Uuid,
+    include_doorbell: bool,
 ) -> Result<Option<Vec<RunEventRow>>, DbError> {
+    Ok(list_run_ledger_in_tx(
+        conn,
+        workspace_id,
+        run_id,
+        viewer_member_id,
+        RunEventInclude {
+            doorbell: include_doorbell,
+            tools: false,
+        },
+    )
+    .await?
+    .map(|ledger| ledger.events))
+}
+
+/// [`list_run_events_in_tx`] with every opt-in kind selectable. With `tools`, the
+/// `tool_call` rows (≤ 100 per run, ADR-0200 증보 T3) ride along — so the row bound is
+/// 300 — and the run's per-tool tally is returned beside them.
+pub async fn list_run_ledger_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    viewer_member_id: Uuid,
+    include: RunEventInclude,
+) -> Result<Option<RunLedger>, DbError> {
     // `expired`: the run finished past retention, so its ledger answers empty even before
     // the sweep has deleted it (ADR-0200 D2). `None` = not in this workspace / not a member.
     let visible: Option<bool> = sqlx::query_scalar(
@@ -383,21 +683,39 @@ pub async fn list_run_events_in_tx(
     .bind(crate::run_event::RUN_EVENT_RETENTION_DAYS)
     .fetch_optional(&mut *conn)
     .await?;
+    let empty_tools = || include.tools.then(Vec::new);
     match visible {
         None => return Ok(None),
-        Some(true) => return Ok(Some(Vec::new())),
+        Some(true) => {
+            return Ok(Some(RunLedger {
+                events: Vec::new(),
+                tool_tally: empty_tools(),
+                tool_call_rows_capped: include.tools.then_some(false),
+            }))
+        }
         Some(false) => {}
     }
+    let limit: i64 = if include.tools {
+        200 + crate::run_event::TOOL_CALL_ROWS_PER_RUN
+    } else {
+        200
+    };
     let rows = sqlx::query(
         "SELECT row_number() OVER (ORDER BY e.seq) AS ordinal, \
-                e.kind, e.stage, e.code, e.approval_id, e.actor_member_id, e.created_at \
+                e.kind, e.stage, e.code, e.approval_id, e.actor_member_id, \
+                e.tool, e.duration_ms, e.created_at \
            FROM agent_run_event e \
           WHERE e.workspace_id = $1 AND e.run_id = $2 \
+            AND ($3 OR e.kind <> 'doorbell_rung') \
+            AND ($4 OR e.kind <> 'tool_call') \
           ORDER BY e.seq ASC \
-          LIMIT 200",
+          LIMIT $5",
     )
     .bind(workspace_id)
     .bind(run_id)
+    .bind(include.doorbell)
+    .bind(include.tools)
+    .bind(limit)
     .fetch_all(&mut *conn)
     .await?;
     let mut events = Vec::with_capacity(rows.len());
@@ -409,8 +727,42 @@ pub async fn list_run_events_in_tx(
             code: row.try_get("code")?,
             approval_id: row.try_get("approval_id")?,
             actor_member_id: row.try_get("actor_member_id")?,
+            tool: row.try_get("tool")?,
+            duration_ms: row.try_get("duration_ms")?,
             created_at: row.try_get("created_at")?,
         });
     }
-    Ok(Some(events))
+    if !include.tools {
+        return Ok(Some(RunLedger {
+            events,
+            tool_tally: None,
+            tool_call_rows_capped: None,
+        }));
+    }
+    let tally_rows = sqlx::query(
+        "SELECT tool, ok_count, error_count, duration_ms_sum \
+           FROM agent_run_tool_tally \
+          WHERE workspace_id = $1 AND run_id = $2 \
+          ORDER BY tool",
+    )
+    .bind(workspace_id)
+    .bind(run_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut tally = Vec::with_capacity(tally_rows.len());
+    for row in &tally_rows {
+        tally.push(ToolTallyRow {
+            tool: row.try_get("tool")?,
+            ok: row.try_get("ok_count")?,
+            error: row.try_get("error_count")?,
+            duration_ms_sum: row.try_get("duration_ms_sum")?,
+        });
+    }
+    let counted: i64 = tally.iter().map(|row| row.ok + row.error).sum();
+    let written = events.iter().filter(|e| e.kind == "tool_call").count() as i64;
+    Ok(Some(RunLedger {
+        events,
+        tool_tally: Some(tally),
+        tool_call_rows_capped: Some(counted > written),
+    }))
 }

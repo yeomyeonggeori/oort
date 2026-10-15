@@ -56,8 +56,9 @@ use momo_agent::{
     agent_owner_in_tx, allowed_agent_models, create_agent_identity_in_tx, default_enabled_tools,
     load_agent_model_policy_in_tx, load_agent_profile_in_tx, normalized_model,
     normalized_system_prompt, set_agent_model_source_in_tx, set_agent_paused_in_tx,
-    upsert_agent_profile_in_tx, validate_agent_profile, validated_config, AgentCreation,
-    AgentProfile, AgentProfileSpec, AgentSpecInvalid, ModelSource, NewAgentMember,
+    set_agent_thread_reply_wake_in_tx, upsert_agent_profile_in_tx, validate_agent_profile,
+    validated_config, AgentCreation, AgentProfile, AgentProfileSpec, AgentSpecInvalid, ModelSource,
+    NewAgentMember,
 };
 use momo_auth::{is_hosted_agent_activated_in_tx, Principal, HOSTED_CONNECTION_MANAGED_CODE};
 use momo_db::audit::{write_audit, AuditEntry};
@@ -106,6 +107,7 @@ fn profile_dto(profile: &AgentProfile) -> AgentProfileDto {
         updated_by: profile.updated_by.to_string(),
         updated_at_ms: profile.updated_at_ms,
         model_source: profile.model_source.as_str(),
+        thread_reply_wake: profile.thread_reply_wake,
     }
 }
 
@@ -562,6 +564,7 @@ pub async fn put_profile(
         .as_deref()
         .map(parse_model_source)
         .transpose()?;
+    let thread_reply_wake = request.thread_reply_wake;
     let actor_member_id = principal.member_id;
     let via_token_id = audit_via_token_id(&principal);
 
@@ -595,6 +598,20 @@ pub async fn put_profile(
                 if let Some(source) = model_source {
                     if !set_agent_model_source_in_tx(conn, workspace_id, agent_member_id, source)
                         .await?
+                    {
+                        return Ok(Err(ApiError::not_found("agent profile target not found")));
+                    }
+                }
+                // ADR-0162 증보 5 W3 (#3851): the owner's 「끌 수 있다」 switch, by
+                // the same editor check as everything else on this route.
+                if let Some(enabled) = thread_reply_wake {
+                    if !set_agent_thread_reply_wake_in_tx(
+                        conn,
+                        workspace_id,
+                        agent_member_id,
+                        enabled,
+                    )
+                    .await?
                     {
                         return Ok(Err(ApiError::not_found("agent profile target not found")));
                     }
@@ -634,6 +651,7 @@ pub async fn put_profile(
                                 "has_effort_pref": stored.effort_pref.is_some(),
                                 "model_source": stored.model_source.as_str(),
                                 "mention_enabled": true,
+                                "thread_reply_wake": stored.thread_reply_wake,
                             }),
                         ),
                 )
@@ -928,6 +946,7 @@ mod tests {
             enabled_tools: Some(vec![]),
             triggers: None,
             model_source: None,
+            thread_reply_wake: None,
         };
         let error = validated_profile(&unusable, &[]).expect_err("hermes-fast cannot do max");
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
@@ -948,6 +967,7 @@ mod tests {
             enabled_tools: Some(vec![]),
             triggers: None,
             model_source: None,
+            thread_reply_wake: None,
         };
         let spec = validated_profile(&input, &[]).expect("valid");
         assert_eq!(spec.triggers, json!({"mention": true}));

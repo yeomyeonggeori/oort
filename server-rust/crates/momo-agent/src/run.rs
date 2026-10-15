@@ -166,6 +166,16 @@ pub enum RunTrigger {
         message_id: Uuid,
         agent_member_id: Uuid,
     },
+    /// ADR-0162 증보 5 W1~W2 (#3851): a human's plain reply in a thread the
+    /// agent opened. Like [`Self::Mention`] it *is* a message, so the reply's id
+    /// lands in `agent_run.trigger_message_id` too; its own key prefix is what
+    /// keeps "one run per reply" (W2) independent of the mention key — a reply
+    /// is either a mention or a wake, never both, but the two facts stay
+    /// distinguishable at the SoT.
+    ThreadReply {
+        message_id: Uuid,
+        agent_member_id: Uuid,
+    },
     /// An explicit work request from a human, keyed by the client's run id.
     Work {
         channel_id: Uuid,
@@ -193,6 +203,14 @@ impl RunTrigger {
                 agent_member_id,
             } => format!(
                 "mention:{}:{}",
+                message_id.to_string().to_uppercase(),
+                agent_member_id.to_string().to_uppercase()
+            ),
+            RunTrigger::ThreadReply {
+                message_id,
+                agent_member_id,
+            } => format!(
+                "thread_reply:{}:{}",
                 message_id.to_string().to_uppercase(),
                 agent_member_id.to_string().to_uppercase()
             ),
@@ -227,7 +245,9 @@ impl RunTrigger {
     /// the column NULL, `MessageRoutes.swift:2021` writes it).
     pub fn trigger_message_id(&self) -> Option<Uuid> {
         match self {
-            RunTrigger::Mention { message_id, .. } => Some(*message_id),
+            RunTrigger::Mention { message_id, .. } | RunTrigger::ThreadReply { message_id, .. } => {
+                Some(*message_id)
+            }
             RunTrigger::Work { .. } | RunTrigger::Welcome { .. } => None,
         }
     }
@@ -235,6 +255,9 @@ impl RunTrigger {
     pub fn agent_member_id(&self) -> Uuid {
         match self {
             RunTrigger::Mention {
+                agent_member_id, ..
+            }
+            | RunTrigger::ThreadReply {
                 agent_member_id, ..
             }
             | RunTrigger::Work {
@@ -370,6 +393,67 @@ pub async fn create_agent_run_in_tx(
     .await?;
     // No insert and no row means the conflict was on something else entirely —
     // surface it rather than inventing a run id.
+    let id = existing.ok_or_else(|| DbError::from(sqlx::Error::RowNotFound))?;
+    Ok(CreatedRun { id, created: false })
+}
+
+/// Create a mention run that is **born held on an approval** — ADR-0162 증보 5
+/// G2's in-place channel grant (#3857).
+///
+/// The same `ON CONFLICT (workspace_id, idempotency_key)` shape as
+/// [`create_agent_run_in_tx`], with two differences that are the point:
+///
+/// * the row is inserted as `awaiting_approval` with its `deadline_at`, never as
+///   `queued`. The run ledger's INSERT trigger (migration 128) maps
+///   `awaiting_approval` to no row, and the approval INSERT that follows writes
+///   `approval_requested` — so the ledger never claims a `queued`/`started` turn
+///   that nothing will start until a person says yes;
+/// * no job exists for it. [`requeue_run_from_approval_in_tx`] is the only way
+///   out to `queued`, and the decision route writes the job only when that
+///   guarded update succeeds.
+///
+/// `created == false` is the same idempotency hit as the queued sibling: the
+/// trigger already produced a run, and the caller writes nothing more.
+pub async fn create_held_agent_run_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    input: NewAgentRun,
+    deadline_at: DateTime<Utc>,
+) -> Result<CreatedRun, DbError> {
+    let idempotency_key = input.trigger.idempotency_key();
+    let inserted: Option<Uuid> = sqlx::query_scalar(
+        "INSERT INTO agent_run \
+           (workspace_id, agent_member_id, channel_id, trigger_message_id, parent_run_id, \
+            status, step_count, max_steps, depth, input, idempotency_key, deadline_at) \
+         VALUES ($1, $2, $3, $4, $5, 'awaiting_approval', 0, $6, $7, $8, $9, $10) \
+         ON CONFLICT (workspace_id, idempotency_key) DO NOTHING \
+         RETURNING id",
+    )
+    .bind(workspace_id)
+    .bind(input.trigger.agent_member_id())
+    .bind(input.channel_id)
+    .bind(input.trigger.trigger_message_id())
+    .bind(input.parent_run_id)
+    .bind(input.max_steps)
+    .bind(input.depth)
+    .bind(&input.input)
+    .bind(&idempotency_key)
+    .bind(deadline_at)
+    .fetch_optional(&mut *conn)
+    .await?;
+
+    if let Some(id) = inserted {
+        return Ok(CreatedRun { id, created: true });
+    }
+    let existing: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM agent_run \
+          WHERE workspace_id = $1 AND idempotency_key = $2 \
+          LIMIT 1",
+    )
+    .bind(workspace_id)
+    .bind(&idempotency_key)
+    .fetch_optional(&mut *conn)
+    .await?;
     let id = existing.ok_or_else(|| DbError::from(sqlx::Error::RowNotFound))?;
     Ok(CreatedRun { id, created: false })
 }
@@ -842,6 +926,12 @@ pub async fn find_agent_run_by_trigger_in_tx(
 
 /// How many live runs an agent has right now — the concurrency cap's input
 /// (Swift `AgentRunRoutes.swift:662-669`).
+///
+/// A run held for an in-place channel grant (ADR-0162 증보 5 G2,
+/// `input.hold = "channel_grant"`) is **not** counted: it has no job, nothing
+/// of it has reached the agent, and counting it against the default cap of 1
+/// would let one unanswered card in one room refuse every work request to that
+/// agent for up to an hour.
 pub async fn live_run_count_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -850,7 +940,9 @@ pub async fn live_run_count_in_tx(
     let count: i64 = sqlx::query_scalar(
         "SELECT count(*)::bigint FROM agent_run \
           WHERE workspace_id = $1 AND agent_member_id = $2 \
-            AND status IN ('queued','running','awaiting_approval','paused')",
+            AND status IN ('queued','running','awaiting_approval','paused') \
+            AND NOT (status = 'awaiting_approval' \
+                     AND input->>'hold' IS NOT DISTINCT FROM 'channel_grant')",
     )
     .bind(workspace_id)
     .bind(agent_member_id)
@@ -2174,6 +2266,31 @@ mod tests {
             agent_member_id: Uuid::from_u128(13),
         };
         assert_ne!(first.idempotency_key(), other_agent.idempotency_key());
+    }
+
+    /// ADR-0162 증보 5 W2: one wake per (reply, agent), binding the reply as the
+    /// trigger message, under a key that can never collide with a mention's.
+    #[test]
+    fn a_thread_reply_trigger_keys_on_the_reply_and_binds_it() {
+        let message = Uuid::from_u128(21);
+        let agent = Uuid::from_u128(22);
+        let wake = RunTrigger::ThreadReply {
+            message_id: message,
+            agent_member_id: agent,
+        };
+        let replay = RunTrigger::ThreadReply {
+            message_id: message,
+            agent_member_id: agent,
+        };
+        assert_eq!(wake.idempotency_key(), replay.idempotency_key());
+        assert!(wake.idempotency_key().starts_with("thread_reply:"));
+        assert_eq!(wake.trigger_message_id(), Some(message));
+        assert_eq!(wake.agent_member_id(), agent);
+        let mention = RunTrigger::Mention {
+            message_id: message,
+            agent_member_id: agent,
+        };
+        assert_ne!(wake.idempotency_key(), mention.idempotency_key());
     }
 
     #[test]

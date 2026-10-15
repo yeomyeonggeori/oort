@@ -159,6 +159,29 @@ async fn start_server_with_gateway(
     hosted_delivery_enabled: bool,
     gateway_mode: bool,
 ) -> String {
+    start_server_with_settings(
+        pool,
+        hosted_delivery_enabled,
+        gateway_mode,
+        momo_server::config::MentionSettings::default(),
+    )
+    .await
+}
+
+/// Hosted delivery open, worker mode, with these mention settings.
+async fn start_server_with_mentions(
+    pool: PgPool,
+    mentions: momo_server::config::MentionSettings,
+) -> String {
+    start_server_with_settings(pool, true, false, mentions).await
+}
+
+async fn start_server_with_settings(
+    pool: PgPool,
+    hosted_delivery_enabled: bool,
+    gateway_mode: bool,
+    mentions: momo_server::config::MentionSettings,
+) -> String {
     let mut state = AppState::new(
         pool,
         TEST_JWT_SECRET.to_string(),
@@ -186,6 +209,7 @@ async fn start_server_with_gateway(
         claude_subscription_agents_enabled: true,
         oauth: Default::default(),
     });
+    let state = state.with_mentions(mentions);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind tools conformance server");
@@ -644,6 +668,7 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
             "oort_conversation_read",
             "oort_message_post",
             "oort_jobs_claim",
+            "oort_job_start",
             "oort_job_renew",
             "oort_job_release",
             "oort_run_event",
@@ -738,7 +763,7 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
         list_tools(&client, &base, &fixture.hosted_bearer)
             .await
             .len(),
-        12,
+        13,
         "a foundation request proves the binding and re-activates it"
     );
     let reactivated: String = sqlx::query_scalar(
@@ -819,7 +844,7 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
         list_tools(&client, &base, &fixture.hosted_bearer)
             .await
             .len(),
-        12,
+        13,
         "restoring the connection restores the catalog"
     );
 
@@ -2134,7 +2159,18 @@ async fn an_unapproved_channel_never_reaches_the_hosted_job_path() {
     let su = superuser_pool().await;
     let app = momo_app_pool().await;
     let fixture = seed(&su).await;
-    let base = start_server(app, true).await;
+    // ADR-0162 증보 5 G5 (#3857): with `MOMO_HOSTED_INPLACE_GRANT_ENABLED` off
+    // this room keeps the old notice line, which is what this test pins. With it
+    // on (the default) the same call raises an in-place approval card — still no
+    // job, still not claimable — pinned in `hosted_inplace_grant_conformance_pg`.
+    let base = start_server_with_mentions(
+        app,
+        momo_server::config::MentionSettings {
+            hosted_inplace_grant_enabled: false,
+            ..Default::default()
+        },
+    )
+    .await;
     let client = reqwest::Client::new();
     let handle = hosted_handle(&su, fixture.hosted_agent).await;
 
@@ -2394,6 +2430,9 @@ async fn the_advertised_argument_schema_is_what_execution_accepts() {
             json!({"channelId": fixture.channel, "limit": 5000}),
         ),
         ("oort_jobs_claim", json!({"limit": -1})),
+        // #3831: the composite is as closed as the tools it is made of.
+        ("oort_job_start", json!({"limit": 5})),
+        ("oort_job_start", json!({"leaseHandle": 7})),
         (
             "oort_run_complete",
             json!({
@@ -6388,7 +6427,7 @@ async fn artifacts_are_stored_when_valid_and_a_bad_one_refuses_the_whole_complet
     for (_, reason) in refused.iter().filter(|(_, reason)| reason.is_some()) {
         assert!(codes.contains(&reason.unwrap()), "{reason:?} in {codes:?}");
     }
-    for audit in &audits {
+    for (index, audit) in audits.iter().enumerate() {
         assert_eq!(audit["tool"], json!("oort_run_complete"));
         let mut keys: Vec<&str> = audit
             .as_object()
@@ -6397,11 +6436,13 @@ async fn artifacts_are_stored_when_valid_and_a_bad_one_refuses_the_whole_complet
             .map(String::as_str)
             .collect();
         keys.sort_unstable();
+        // ADR-0162 증보 5 C3 adds the closed field, rule and attempt — still no value.
         assert_eq!(
             keys,
-            ["reason", "run_id", "schema", "tool"],
+            ["attempt", "field", "reason", "rule", "run_id", "schema", "tool"],
             "no free text: {audit}"
         );
+        assert_eq!(audit["attempt"], json!(index + 1));
     }
     let artifacts_audits: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM audit_log WHERE action='agent.run.artifacts_reported' \
@@ -6482,6 +6523,184 @@ async fn artifacts_are_stored_when_valid_and_a_bad_one_refuses_the_whole_complet
         assert_eq!(structured(&replay)["messageId"], answer);
     }
     assert_eq!(rejected_audits_3516(&su, run).await.len(), audits_before);
+}
+
+/// ADR-0162 증보 5 C1~C3 (#3841) — the code-task result contract, end to end:
+/// a broken cross rule refuses the whole completion with `error.data` naming the
+/// field and rule (never the value) and leaves the lease for a fixed retry; the
+/// audit row counts the attempt; a transport-level enum fault names its allowed
+/// values; the valid report is stored closed (sha lowercased) and read back as
+/// `agentReported` on the run detail; an old five-key routine still completes
+/// and carries no `agentReported`.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_code_result_contract_names_the_bad_field_and_reads_back_as_agent_reported() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (handle, run) = claimed_run_3516(&client, &base, &su, &fixture).await;
+    let complete = |args: Value| {
+        let (client, base, bearer) = (&client, &base, &fixture.hosted_bearer);
+        async move { call(client, base, bearer, "oort_run_complete", args).await }
+    };
+    let before = run_record_3516(&su, run).await;
+    let messages_before = channel_message_count(&su, fixture.workspace, fixture.channel).await;
+    let pr = "https://github.com/acme/app/pull/77";
+
+    // 1. A cross rule (pr_opened without prUrl): refused at the adapter.
+    let (status, answer) = complete(json!({
+        "leaseHandle": handle, "status": "succeeded", "body": "done",
+        "artifacts": {"resultKind": "pr_opened", "branch": "feat/secret-branch-name"}
+    }))
+    .await;
+    assert_eq!(status, 400, "{answer}");
+    assert_eq!(error_code(&answer), -32602);
+    assert_eq!(
+        answer["error"]["data"],
+        json!({"field": "artifacts.prUrl", "rule": "required"})
+    );
+    assert_eq!(
+        answer["error"]["message"],
+        json!("artifacts.prUrl is required when resultKind is pr_opened")
+    );
+
+    // 2. The agent fixes that field; the next rule (merge_ok with failed tests) answers.
+    let (status, answer) = complete(json!({
+        "leaseHandle": handle, "status": "succeeded", "body": "done",
+        "artifacts": {
+            "resultKind": "pr_opened", "prUrl": pr,
+            "tests": {"passed": 3, "failed": 2, "notRun": 0}, "nextAction": "merge_ok"
+        }
+    }))
+    .await;
+    assert_eq!(status, 400, "{answer}");
+    assert_eq!(
+        answer["error"]["data"],
+        json!({"field": "artifacts.nextAction", "rule": "forbidden"})
+    );
+
+    // 3. A closed-value fault is refused by the published schema, naming the
+    //    allowed values — before any transaction, so no audit row.
+    let (status, answer) = complete(json!({
+        "leaseHandle": handle, "status": "succeeded", "body": "done",
+        "artifacts": {"resultKind": "merged-by-bot"}
+    }))
+    .await;
+    assert_eq!(status, 400, "{answer}");
+    assert_eq!(
+        answer["error"]["data"],
+        json!({
+            "field": "artifacts.resultKind", "rule": "enum",
+            "allowed": ["pr_opened", "branch_only", "vm_only", "no_change"]
+        })
+    );
+    assert!(!answer.to_string().contains("merged-by-bot"));
+
+    // Nothing was written by any refusal; the lease is intact.
+    assert_eq!(run_record_3516(&su, run).await, before);
+    assert_eq!(
+        channel_message_count(&su, fixture.workspace, fixture.channel).await,
+        messages_before
+    );
+    let audits = rejected_audits_3516(&su, run).await;
+    assert_eq!(
+        audits.len(),
+        2,
+        "two adapter refusals, none for the schema one"
+    );
+    assert_eq!(audits[0]["field"], json!("artifacts.prUrl"));
+    assert_eq!(audits[0]["rule"], json!("required"));
+    assert_eq!(audits[0]["attempt"], json!(1));
+    assert_eq!(audits[0]["reason"], json!("artifacts_contract_invalid"));
+    assert_eq!(audits[1]["field"], json!("artifacts.nextAction"));
+    assert_eq!(audits[1]["rule"], json!("forbidden"));
+    assert_eq!(audits[1]["attempt"], json!(2));
+    for audit in &audits {
+        let rendered = audit.to_string();
+        for value in ["secret-branch-name", "github.com", "merge_ok", "pr_opened"] {
+            assert!(!rendered.contains(value), "{value} in {rendered}");
+        }
+    }
+
+    // 4. The fixed report completes and is stored in its closed shape.
+    let (status, done) = complete(json!({
+        "leaseHandle": handle, "status": "succeeded", "body": "PR을 열었어요",
+        "artifacts": {
+            "resultKind": "pr_opened", "prUrl": pr, "branch": "feat/3841-x",
+            "tests": {"passed": 12, "failed": 0, "notRun": 1},
+            "nextAction": "merge_ok", "commitSha": "ABCDEF0123",
+            "toolCounts": {"run": 12, "edit": 4, "read": 30}
+        }
+    }))
+    .await;
+    assert_eq!(status, 200, "{done}");
+    let expected_reported = json!({
+        "resultKind": "pr_opened",
+        "tests": {"passed": 12, "failed": 0, "notRun": 1},
+        "nextAction": "merge_ok",
+        "commitSha": "abcdef0123",
+        "toolCounts": {"run": 12, "edit": 4, "read": 30}
+    });
+    let (_, output) = run_record_3516(&su, run).await;
+    assert_eq!(output["artifacts"]["commitSha"], json!("abcdef0123"));
+    assert_eq!(output["artifacts"]["prUrl"], json!(pr));
+    assert_eq!(output["artifacts"]["tests"], expected_reported["tests"]);
+    let reported: Vec<Value> = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE action='agent.run.artifacts_reported' \
+           AND detail->>'run_id'=$1",
+    )
+    .bind(run.to_string())
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(reported.len(), 1);
+    assert_eq!(
+        reported[0]["keys"],
+        json!([
+            "prUrl",
+            "branch",
+            "resultKind",
+            "tests",
+            "nextAction",
+            "commitSha",
+            "toolCounts"
+        ])
+    );
+    assert!(!reported[0].to_string().contains("abcdef0123"));
+
+    // 5. The run detail reads it back under `agentReported`.
+    let detail = |run: Uuid| {
+        let (client, base, jwt, ws) = (&client, &base, &fixture.human_jwt, fixture.workspace);
+        async move {
+            let response = client
+                .get(format!("{base}/v1/workspaces/{ws}/agent-runs/{run}"))
+                .bearer_auth(jwt)
+                .send()
+                .await
+                .expect("run detail");
+            assert_eq!(response.status().as_u16(), 200);
+            response.json::<Value>().await.expect("run detail body")
+        }
+    };
+    let read = detail(run).await;
+    assert_eq!(read["agentReported"], expected_reported, "{read}");
+
+    // 6. An old routine (the five original keys only) still completes, and its
+    //    run carries no `agentReported`.
+    let (old_handle, old_run) = claimed_run_3516(&client, &base, &su, &fixture).await;
+    assert_ne!(old_run, run);
+    let (status, answer) = complete(json!({
+        "leaseHandle": old_handle, "status": "succeeded", "body": "done",
+        "artifacts": {"prUrl": pr, "branch": "feat/old", "added": 1, "deleted": 0, "commits": 1}
+    }))
+    .await;
+    assert_eq!(status, 200, "{answer}");
+    let read = detail(old_run).await;
+    assert!(read.get("agentReported").is_none(), "{read}");
+    assert_eq!(read["output"]["artifacts"]["branch"], json!("feat/old"));
 }
 
 #[tokio::test]
@@ -10183,10 +10402,14 @@ async fn a_platform_operator_who_is_not_an_admin_may_approve_a_settings_update()
 
 type LedgerRow = (i64, String, Option<String>, Option<String>, Option<Uuid>);
 
+/// The lifecycle/stage ledger of one run. `tool_call` rows (#3840, ADR-0200 증보
+/// 2026-10-15) are left out: every Agent Port call that points at the run adds one, and
+/// they have their own tests (`tool_calls_3840`) — the assertions written against this
+/// helper are about lifecycle and stage rows.
 async fn ledger_3740(pool: &PgPool, workspace: Uuid, run: Uuid) -> Vec<LedgerRow> {
     sqlx::query_as(
         "SELECT seq, kind, stage, code, actor_member_id FROM agent_run_event \
-          WHERE workspace_id=$1 AND run_id=$2 ORDER BY seq",
+          WHERE workspace_id=$1 AND run_id=$2 AND kind <> 'tool_call' ORDER BY seq",
     )
     .bind(workspace)
     .bind(run)
@@ -10814,6 +11037,812 @@ async fn the_ledger_append_takes_no_lock_and_history_is_immutable() {
     assert!(
         ledger_3740(&su, fixture.workspace, run2).await.is_empty(),
         "…as momo_app under RLS too"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// (#3840, ADR-0200 증보 2026-10-15 T1~T5) the `tool_call` ledger kind
+// ---------------------------------------------------------------------------
+
+/// `(tool, code, duration_ms, stage, approval_id, actor, framed, created_at)` of every
+/// `tool_call` row of one run, oldest first.
+type ToolCallRow3840 = (
+    String,
+    String,
+    i32,
+    Option<String>,
+    Option<Uuid>,
+    Option<Uuid>,
+    bool,
+    chrono::DateTime<chrono::Utc>,
+);
+
+async fn tool_calls_3840(su: &PgPool, workspace: Uuid, run: Uuid) -> Vec<ToolCallRow3840> {
+    sqlx::query_as(
+        "SELECT tool, code, duration_ms, stage, approval_id, actor_member_id, framed, created_at \
+           FROM agent_run_event \
+          WHERE workspace_id=$1 AND run_id=$2 AND kind='tool_call' ORDER BY seq",
+    )
+    .bind(workspace)
+    .bind(run)
+    .fetch_all(su)
+    .await
+    .expect("tool_call rows")
+}
+
+/// `(tool, ok, error, duration_ms_sum)` of one run's tally, by tool name.
+async fn tally_3840(su: &PgPool, workspace: Uuid, run: Uuid) -> Vec<(String, i64, i64, i64)> {
+    sqlx::query_as(
+        "SELECT tool, ok_count, error_count, duration_ms_sum FROM agent_run_tool_tally \
+          WHERE workspace_id=$1 AND run_id=$2 ORDER BY tool",
+    )
+    .bind(workspace)
+    .bind(run)
+    .fetch_all(su)
+    .await
+    .expect("tally rows")
+}
+
+async fn workspace_tool_call_count_3840(su: &PgPool, workspace: Uuid) -> i64 {
+    sqlx::query_scalar(
+        "SELECT (SELECT count(*) FROM agent_run_event WHERE workspace_id=$1 AND kind='tool_call') \
+              + (SELECT count(*) FROM agent_run_tool_tally WHERE workspace_id=$1)",
+    )
+    .bind(workspace)
+    .fetch_one(su)
+    .await
+    .unwrap()
+}
+
+async fn columns_3840(su: &PgPool, table: &str) -> Vec<String> {
+    sqlx::query_scalar(
+        "SELECT column_name::text FROM information_schema.columns \
+          WHERE table_schema='public' AND table_name=$1 ORDER BY column_name",
+    )
+    .bind(table)
+    .fetch_all(su)
+    .await
+    .unwrap()
+}
+
+async fn events_with_3840(
+    client: &reqwest::Client,
+    base: &str,
+    fixture: &Fixture,
+    run: Uuid,
+    query: &str,
+) -> (u16, Value) {
+    let response = client
+        .get(format!(
+            "{base}/v1/workspaces/{}/agent-runs/{run}/events{query}",
+            fixture.workspace
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .expect("events responds");
+    let status = response.status().as_u16();
+    (status, response.json().await.unwrap_or(Value::Null))
+}
+
+fn kinds_of_3840(body: &Value) -> Vec<String> {
+    body["events"]
+        .as_array()
+        .expect("events array")
+        .iter()
+        .map(|event| event["kind"].as_str().unwrap().to_string())
+        .collect()
+}
+
+/// RED PROOF (ADR-0200 증보 2026-10-15 T1/T2/T4/T5, T-S1 ①②③, T-S2 ①②③). One hosted
+/// run, driven through the real Agent Port: every call that points at the run —
+/// through the handle it handed out or one it was given, refused or not — is one
+/// `tool_call` row carrying the tool name, the server's duration and a closed code,
+/// and NOTHING else. Calls that point at no run write nothing. The rows put no
+/// realtime frame on the channel, do move the panel's 「마지막 보고」, and are served
+/// only behind `?include=tools`.
+///
+/// Tamper table (each edit turns this test red):
+///   * drop the handle-argument branch of `attributed_runs`     -> renew/release rows missing
+///   * drop the answer branch (`oort_job_start` job handle)     -> job_start row missing
+///   * attribute calls with no handle to "the one lease"         -> inbox_read/ping rows appear
+///   * drop `tool_call` from `agent_run_event_set_framed`        -> framed = true, a frame row
+///   * drop `AND ($4 OR e.kind <> 'tool_call')` in the read      -> default read holds tool_call
+///   * add any column to `agent_run_event`/the tally             -> the fixed column lists differ
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_oort_call_on_a_run_is_one_row_of_name_time_and_code_and_nothing_else() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    // ② the columns are fixed: there is nowhere for an argument or a body to go.
+    assert_eq!(
+        columns_3840(&su, "agent_run_event").await,
+        [
+            "actor_member_id",
+            "approval_id",
+            "code",
+            "created_at",
+            "duration_ms",
+            "framed",
+            "kind",
+            "run_id",
+            "seq",
+            "stage",
+            "tool",
+            "workspace_id"
+        ]
+    );
+    assert_eq!(
+        columns_3840(&su, "agent_run_tool_tally").await,
+        [
+            "duration_ms_sum",
+            "error_count",
+            "ok_count",
+            "run_id",
+            "tool",
+            "updated_at",
+            "workspace_id"
+        ]
+    );
+
+    // A start with nothing to claim points at no run: nothing is written.
+    let (status, nothing) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_job_start",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, 200, "{nothing}");
+    assert_eq!(structured(&nothing)["job"], Value::Null);
+    assert_eq!(
+        workspace_tool_call_count_3840(&su, fixture.workspace).await,
+        0
+    );
+
+    let run = raise_mention_3831(&client, &base, &su, &fixture, "작업해줘 3840").await;
+    let (status, started) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_job_start",
+        json!({"stage": "고유표지 확인 중"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{started}");
+    let handle = structured(&started)["job"]["leaseHandle"]
+        .as_str()
+        .expect("lease handle")
+        .to_string();
+
+    let renew = |handle: String| {
+        let client = client.clone();
+        let base = base.clone();
+        let bearer = fixture.hosted_bearer.clone();
+        async move {
+            call(
+                &client,
+                &base,
+                &bearer,
+                "oort_job_renew",
+                json!({"leaseHandle": handle}),
+            )
+            .await
+        }
+    };
+    let (status, renewed) = renew(handle.clone()).await;
+    assert_eq!(status, 200, "{renewed}");
+    let (status, released) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_job_release",
+        json!({"leaseHandle": handle}),
+    )
+    .await;
+    assert_eq!(status, 200, "{released}");
+    // The lease is gone: the tool refuses — and the call is still this agent's call on
+    // this run, so it is recorded with its closed code.
+    let (status, lost) = renew(handle.clone()).await;
+    assert_eq!(status, 409, "{lost}");
+    assert_eq!(error_code(&lost), -32005, "{lost}");
+
+    // Calls that point at no run: a handle that does not open, the inbox, a ping.
+    let (status, forged) = renew(format!("momo_lease_v1.{}", "A".repeat(120))).await;
+    assert_ne!(status, 200, "{forged}");
+    let (status, inbox) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_inbox_read",
+        json!({"limit": 5}),
+    )
+    .await;
+    assert_eq!(status, 200, "{inbox}");
+    let (status, pinged) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_ping",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, 200, "{pinged}");
+
+    // ① one row per attributed call, in call order, with nothing but name/time/code.
+    let rows = tool_calls_3840(&su, fixture.workspace, run).await;
+    let shape: Vec<(&str, &str)> = rows
+        .iter()
+        .map(|row| (row.0.as_str(), row.1.as_str()))
+        .collect();
+    assert_eq!(
+        shape,
+        [
+            ("oort_job_start", "ok"),
+            ("oort_job_renew", "ok"),
+            ("oort_job_release", "ok"),
+            ("oort_job_renew", "conflict"),
+        ],
+        "③ the forged handle, the inbox read and the ping wrote nothing"
+    );
+    for row in &rows {
+        assert!((0..=600_000).contains(&row.2), "duration {}", row.2);
+        assert_eq!(row.3, None, "no stage on a tool_call row");
+        assert_eq!(row.4, None, "no approval on a tool_call row");
+        assert_eq!(row.5, Some(fixture.hosted_agent), "the acting agent");
+        assert!(!row.6, "T5: a tool_call row is never framed");
+    }
+    assert_eq!(
+        workspace_tool_call_count_3840(&su, fixture.workspace).await,
+        4 + 3,
+        "four rows and three tally lines in the whole workspace — nothing elsewhere"
+    );
+    assert_eq!(
+        tally_3840(&su, fixture.workspace, run).await,
+        [
+            ("oort_job_release".to_string(), 1, 0, i64::from(rows[2].2)),
+            (
+                "oort_job_renew".to_string(),
+                1,
+                1,
+                i64::from(rows[1].2) + i64::from(rows[3].2)
+            ),
+            ("oort_job_start".to_string(), 1, 0, i64::from(rows[0].2)),
+        ]
+    );
+    // ② no handle, no argument and no channel/message id sits in any tool_call row.
+    let dumps: Vec<String> = sqlx::query_scalar(
+        "SELECT row_to_json(e)::text FROM agent_run_event e \
+          WHERE workspace_id=$1 AND run_id=$2 AND kind='tool_call'",
+    )
+    .bind(fixture.workspace)
+    .bind(run)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    for dump in &dumps {
+        for secret in [
+            handle.as_str(),
+            "고유표지",
+            "작업해줘",
+            &fixture.channel.to_string(),
+        ] {
+            assert!(!dump.contains(secret), "{secret} leaked into {dump}");
+        }
+    }
+    // T5: no realtime frame names `tool_call`.
+    let frames: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE workspace_id=$1 \
+            AND payload #>> '{data,type}' = 'agent.run.event' \
+            AND payload #>> '{data,payload,kind}' = 'tool_call'",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(frames, 0);
+    // T5: the panel's 「마지막 보고」 does include the call (the last row is a tool_call).
+    let (status, progress) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "",
+    )
+    .await;
+    assert_eq!(status, 200, "{progress}");
+    let last_call_ms = rows[3].7.timestamp_millis();
+    let line = progress["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|line| line["id"] == json!(run.to_string()))
+        .expect("the run's progress line");
+    assert_eq!(line["lastEventAtMs"], json!(last_call_ms), "{line}");
+
+    // T-S2 ①: a client that predates the kind reads a ledger it can parse.
+    let (status, plain) = events_with_3840(&client, &base, &fixture, run, "").await;
+    assert_eq!(status, 200, "{plain}");
+    assert!(
+        !kinds_of_3840(&plain).contains(&"tool_call".to_string()),
+        "{plain}"
+    );
+    let object = plain.as_object().unwrap();
+    assert!(!object.contains_key("toolTally") && !object.contains_key("toolCallRowsCapped"));
+    assert!(!plain.to_string().contains("durationMs"));
+
+    // `include=tools`: the rows, the tally, and whether the cap was reached.
+    let (status, with_tools) =
+        events_with_3840(&client, &base, &fixture, run, "?include=tools").await;
+    assert_eq!(status, 200, "{with_tools}");
+    let tool_events: Vec<&Value> = with_tools["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|event| event["kind"] == json!("tool_call"))
+        .collect();
+    assert_eq!(tool_events.len(), 4, "{with_tools}");
+    assert_eq!(tool_events[3]["tool"], json!("oort_job_renew"));
+    assert_eq!(tool_events[3]["code"], json!("conflict"));
+    assert_eq!(tool_events[3]["durationMs"], json!(rows[3].2));
+    assert!(tool_events[0].get("stage").is_none());
+    assert_eq!(
+        with_tools["toolTally"],
+        json!([
+            {"tool": "oort_job_release", "ok": 1, "error": 0, "durationMsSum": rows[2].2},
+            {"tool": "oort_job_renew", "ok": 1, "error": 1, "durationMsSum": rows[1].2 + rows[3].2},
+            {"tool": "oort_job_start", "ok": 1, "error": 0, "durationMsSum": rows[0].2},
+        ])
+    );
+    assert_eq!(with_tools["toolCallRowsCapped"], json!(false));
+    assert!(!kinds_of_3840(&with_tools).contains(&"doorbell_rung".to_string()));
+
+    // T-S2 ②: the two opt-ins combine.
+    sqlx::query("SELECT agent_run_event_append($1,$2,'doorbell_rung',NULL,'leading_ok',NULL,NULL)")
+        .bind(fixture.workspace)
+        .bind(run)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, both) =
+        events_with_3840(&client, &base, &fixture, run, "?include=doorbell,tools").await;
+    assert_eq!(status, 200, "{both}");
+    let kinds = kinds_of_3840(&both);
+    assert!(
+        kinds.contains(&"tool_call".to_string()) && kinds.contains(&"doorbell_rung".to_string())
+    );
+    let (_, doorbell_only) =
+        events_with_3840(&client, &base, &fixture, run, "?include=doorbell").await;
+    let kinds = kinds_of_3840(&doorbell_only);
+    assert!(
+        !kinds.contains(&"tool_call".to_string()) && kinds.contains(&"doorbell_rung".to_string())
+    );
+    assert!(doorbell_only.get("toolTally").is_none());
+
+    // T-S2 ③: an unknown value is a 400, alone or beside a known one.
+    for query in ["?include=bogus", "?include=tools,bogus", "?include=tool"] {
+        let (status, refused) = events_with_3840(&client, &base, &fixture, run, query).await;
+        assert_eq!(status, 400, "{query}: {refused}");
+    }
+}
+
+/// RED PROOF (ADR-0200 증보 2026-10-15 T3, T-S1 ④⑤). Past 100 `tool_call` rows on a run
+/// the ledger stops growing and only the tally moves — and nothing is deleted to make
+/// room: the 200-row trim neither counts nor deletes `tool_call` rows.
+///
+/// Tamper table:
+///   * drop `IF v_rows >= 100` in `agent_run_tool_call_record`  -> 102 rows, not 100
+///   * move the tally UPSERT below the cap's RETURN              -> tally sum 100, not 102
+///   * drop `AND kind <> 'tool_call'` from the trim's count     -> only 100 stage/lifecycle rows survive
+///   * add `tool_call` to the trim's DELETE                      -> tool_call rows vanish
+///   * drop the tally DELETE from `delete_expired_run_events_in_tx` -> a swept run keeps its tally
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_hundred_and_first_call_moves_only_the_tally_and_nothing_is_deleted() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (handle, run) = claimed_run_3516(&client, &base, &su, &fixture).await;
+
+    for n in 0..101 {
+        let (status, renewed) = call(
+            &client,
+            &base,
+            &fixture.hosted_bearer,
+            "oort_job_renew",
+            json!({"leaseHandle": handle}),
+        )
+        .await;
+        assert_eq!(status, 200, "renew {n}: {renewed}");
+    }
+    // 1 claim + 101 renews = 102 calls; the ledger keeps the first 100.
+    let rows = tool_calls_3840(&su, fixture.workspace, run).await;
+    assert_eq!(rows.len() as i64, momo_agent::TOOL_CALL_ROWS_PER_RUN);
+    assert_eq!(
+        rows[0].0, "oort_jobs_claim",
+        "jobs_claim attributes through its answer"
+    );
+    let tally = tally_3840(&su, fixture.workspace, run).await;
+    assert_eq!(
+        tally
+            .iter()
+            .map(|row| (row.0.as_str(), row.1, row.2))
+            .collect::<Vec<_>>(),
+        [("oort_job_renew", 101, 0), ("oort_jobs_claim", 1, 0)],
+        "every call is counted, past the row cap too"
+    );
+    let (status, ledger) = events_with_3840(&client, &base, &fixture, run, "?include=tools").await;
+    assert_eq!(status, 200, "{ledger}");
+    assert_eq!(ledger["toolCallRowsCapped"], json!(true));
+    assert_eq!(
+        kinds_of_3840(&ledger)
+            .iter()
+            .filter(|kind| *kind == "tool_call")
+            .count(),
+        100
+    );
+
+    // ⑤ 250 stage markers: the trim keeps 200 non-tool rows and never touches the
+    // 100 tool_call rows — not counting them, not deleting them.
+    for n in 0..250 {
+        sqlx::query("SELECT agent_run_event_append($1,$2,'stage',$3,NULL,NULL,$4)")
+            .bind(fixture.workspace)
+            .bind(run)
+            .bind(format!("단계 {n}"))
+            .bind(fixture.hosted_agent)
+            .execute(&su)
+            .await
+            .unwrap();
+        sqlx::query("SELECT agent_run_event_trim($1,$2)")
+            .bind(fixture.workspace)
+            .bind(run)
+            .execute(&su)
+            .await
+            .unwrap();
+    }
+    let (others, calls): (i64, i64) = sqlx::query_as(
+        "SELECT count(*) FILTER (WHERE kind <> 'tool_call'), count(*) FILTER (WHERE kind = 'tool_call') \
+           FROM agent_run_event WHERE workspace_id=$1 AND run_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(run)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!((others, calls), (200, 100));
+    // The read still serves all of it (200 + 100) with `include=tools`, and the default
+    // read stays the 200 rows an older client expects.
+    let (_, ledger) = events_with_3840(&client, &base, &fixture, run, "?include=tools").await;
+    assert_eq!(ledger["events"].as_array().unwrap().len(), 300);
+    let (_, plain) = events_with_3840(&client, &base, &fixture, run, "").await;
+    assert_eq!(plain["events"].as_array().unwrap().len(), 200);
+
+    // Lifetime, not cap: a run that goes takes its rows and its tally with it — as the
+    // production role under RLS (the ledger's delete trigger, the tally's FK CASCADE).
+    let gone: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status) \
+         VALUES ($1,$2,$3,'queued') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let app = momo_app_pool().await;
+    let mut tx = app.begin().await.unwrap();
+    sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+        .bind(fixture.workspace.to_string())
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let recorded: String =
+        sqlx::query_scalar("SELECT agent_run_tool_call_record($1,$2,$3,'oort_job_renew',7,'ok')")
+            .bind(fixture.workspace)
+            .bind(gone)
+            .bind(fixture.hosted_agent)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+    assert_eq!(recorded, "row");
+    sqlx::query("DELETE FROM agent_run WHERE id=$1")
+        .bind(gone)
+        .execute(&mut *tx)
+        .await
+        .expect("momo_app may delete a run with tool calls");
+    tx.commit().await.unwrap();
+    assert!(tool_calls_3840(&su, fixture.workspace, gone)
+        .await
+        .is_empty());
+    assert!(tally_3840(&su, fixture.workspace, gone).await.is_empty());
+
+    // …and the retention sweep (ADR-0200 D2) takes a long-finished run's tally along
+    // with its ledger: the cross-tenant read finds the workspace by the tally alone, and
+    // the RLS-bound delete clears it.
+    let old: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status) \
+         VALUES ($1,$2,$3,'queued') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let mut tx = app.begin().await.unwrap();
+    sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+        .bind(fixture.workspace.to_string())
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query("SELECT agent_run_tool_call_record($1,$2,$3,'oort_job_renew',7,'ok')")
+        .bind(fixture.workspace)
+        .bind(old)
+        .bind(fixture.hosted_agent)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    // Only the tally is left (a ledger already swept), and the run finished long ago.
+    sqlx::query("DELETE FROM agent_run_event WHERE run_id=$1")
+        .bind(old)
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE agent_run SET status='succeeded', finished_at = now() - interval '31 days' \
+          WHERE id=$1",
+    )
+    .bind(old)
+    .execute(&su)
+    .await
+    .unwrap();
+    let notifier = momo_notifier_pool().await;
+    let mut read = notifier.acquire().await.unwrap();
+    let due = momo_agent::workspaces_with_expired_run_events(&mut read, 1000)
+        .await
+        .unwrap();
+    drop(read);
+    assert!(
+        due.contains(&fixture.workspace),
+        "the tally alone makes the workspace due"
+    );
+    let workspace = fixture.workspace;
+    momo_db::with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(
+            async move { momo_agent::delete_expired_run_events_in_tx(conn, workspace, 1000).await },
+        )
+    })
+    .await
+    .unwrap();
+    assert!(tally_3840(&su, fixture.workspace, old).await.is_empty());
+}
+
+/// RED PROOF (ADR-0200 증보 2026-10-15 T1/T2, T-S1 ⑥). The tally and the rows are
+/// tenant data under RLS FORCE: another workspace's `momo_app` session sees none of
+/// it and cannot write into it, a foreign handle records nothing, and the recorder
+/// refuses a run that is not the acting agent's. The CHECKs refuse any row that is
+/// not name/time/closed code.
+///
+/// Tamper table:
+///   * `ALTER TABLE agent_run_tool_tally DISABLE ROW LEVEL SECURITY` -> the other tenant reads/writes it
+///   * drop the `agent_member_id = p_actor` test in the recorder     -> the other agent's record lands
+///   * drop the workspace/agent test in `attributed_runs` AND the SQL actor test -> the foreign handle records
+///   * relax `agent_run_event_tool_call_ck`                          -> the bad rows insert
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn another_tenant_neither_reads_nor_writes_the_tool_call_record() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let other = seed(&su).await;
+    let base = start_server(app.clone(), true).await;
+    let client = reqwest::Client::new();
+    let (handle, run) = claimed_run_3516(&client, &base, &su, &fixture).await;
+    assert_eq!(tool_calls_3840(&su, fixture.workspace, run).await.len(), 1);
+
+    // The other tenant's agent presents this tenant's handle: refused, nothing recorded.
+    let (status, refused) = call(
+        &client,
+        &base,
+        &other.hosted_bearer,
+        "oort_job_renew",
+        json!({"leaseHandle": handle}),
+    )
+    .await;
+    assert_ne!(status, 200, "{refused}");
+    assert_eq!(tool_calls_3840(&su, fixture.workspace, run).await.len(), 1);
+    assert_eq!(
+        workspace_tool_call_count_3840(&su, other.workspace).await,
+        0
+    );
+
+    // Under the other tenant's GUC, as the production role: nothing to read, nothing to write.
+    let mut tx = app.begin().await.unwrap();
+    sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+        .bind(other.workspace.to_string())
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let seen: i64 = sqlx::query_scalar(
+        "SELECT (SELECT count(*) FROM agent_run_tool_tally WHERE run_id=$1) \
+              + (SELECT count(*) FROM agent_run_event WHERE run_id=$1 AND kind='tool_call')",
+    )
+    .bind(run)
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    assert_eq!(seen, 0, "RLS hides another tenant's tool calls");
+    let recorded: String =
+        sqlx::query_scalar("SELECT agent_run_tool_call_record($1,$2,$3,'oort_job_renew',5,'ok')")
+            .bind(fixture.workspace)
+            .bind(run)
+            .bind(fixture.hosted_agent)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+    assert_eq!(
+        recorded, "skipped",
+        "the run is invisible from another tenant"
+    );
+    let forged = sqlx::query(
+        "INSERT INTO agent_run_tool_tally (workspace_id, run_id, tool, ok_count) \
+         VALUES ($1,$2,'oort_job_renew',1)",
+    )
+    .bind(fixture.workspace)
+    .bind(run)
+    .execute(&mut *tx)
+    .await;
+    assert!(forged.is_err(), "WITH CHECK refuses a foreign workspace id");
+    drop(tx);
+
+    // Same tenant, another agent: the recorder refuses a run that is not the actor's.
+    let mut tx = app.begin().await.unwrap();
+    sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+        .bind(fixture.workspace.to_string())
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let recorded: String =
+        sqlx::query_scalar("SELECT agent_run_tool_call_record($1,$2,$3,'oort_job_renew',5,'ok')")
+            .bind(fixture.workspace)
+            .bind(run)
+            .bind(fixture.managed_agent)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+    assert_eq!(recorded, "skipped");
+    tx.commit().await.unwrap();
+    let tally = tally_3840(&su, fixture.workspace, run).await;
+    assert_eq!(
+        tally
+            .iter()
+            .map(|row| (row.0.as_str(), row.1, row.2))
+            .collect::<Vec<_>>(),
+        [("oort_jobs_claim", 1, 0)],
+        "neither the foreign handle nor the refused records moved the tally"
+    );
+
+    // The CHECKs: a tool_call row is name + time + closed code, and only that.
+    for (tool, duration, code, stage) in [
+        (Some("evil_tool"), Some(1), Some("ok"), None),
+        (Some("oort_job_renew"), Some(-1), Some("ok"), None),
+        (Some("oort_job_renew"), Some(600_001), Some("ok"), None),
+        (Some("oort_job_renew"), Some(1), Some("timeout"), None),
+        (Some("oort_job_renew"), Some(1), None, None),
+        (Some("oort_job_renew"), Some(1), Some("ok"), Some("단계")),
+        (None, Some(1), Some("ok"), None),
+        (Some("oort_job_renew"), None, Some("ok"), None),
+    ] {
+        let inserted = sqlx::query(
+            "INSERT INTO agent_run_event (workspace_id, run_id, kind, tool, duration_ms, code, stage) \
+             VALUES ($1,$2,'tool_call',$3,$4,$5,$6)",
+        )
+        .bind(fixture.workspace)
+        .bind(run)
+        .bind(tool)
+        .bind(duration)
+        .bind(code)
+        .bind(stage)
+        .execute(&su)
+        .await;
+        assert!(
+            inserted.is_err(),
+            "{tool:?} {duration:?} {code:?} {stage:?}"
+        );
+    }
+    let inserted = sqlx::query(
+        "INSERT INTO agent_run_event (workspace_id, run_id, kind, tool, duration_ms) \
+         VALUES ($1,$2,'claimed','oort_job_renew',1)",
+    )
+    .bind(fixture.workspace)
+    .bind(run)
+    .execute(&su)
+    .await;
+    assert!(
+        inserted.is_err(),
+        "tool/duration exist only on tool_call rows"
+    );
+}
+
+/// RED PROOF (ADR-0200 증보 2026-10-15 T1, T-S1 ⑦). The record is an observation in
+/// its own transaction: when it fails, the tool's answer is exactly what it would have
+/// been, the failure is logged, and nothing half-written is left behind.
+///
+/// Tamper table:
+///   * panic / map the record failure into the tool result      -> the renew is not a 200 `renewed`
+///   * write the record inside the tool's own transaction        -> the renew rolls back (409/500)
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_failed_tool_call_record_does_not_change_the_tool_answer() {
+    ensure_schema_and_roles();
+    let capture = log_capture();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (handle, run) = claimed_run_3516(&client, &base, &su, &fixture).await;
+    let before = tool_calls_3840(&su, fixture.workspace, run).await.len();
+
+    // Break the recorder for the production role only.
+    sqlx::query("REVOKE INSERT, UPDATE ON agent_run_tool_tally FROM momo_app")
+        .execute(&su)
+        .await
+        .unwrap();
+    let offset = capture_offset(&capture);
+    let (status, renewed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_job_renew",
+        json!({"leaseHandle": handle}),
+    )
+    .await;
+    sqlx::query("GRANT INSERT, UPDATE ON agent_run_tool_tally TO momo_app")
+        .execute(&su)
+        .await
+        .unwrap();
+    assert_eq!(status, 200, "{renewed}");
+    assert_eq!(
+        structured(&renewed)["status"],
+        json!("renewed"),
+        "{renewed}"
+    );
+    assert!(
+        captured_since(&capture, offset).contains("agent port tool_call record failed"),
+        "the failure is logged"
+    );
+    assert_eq!(
+        tool_calls_3840(&su, fixture.workspace, run).await.len(),
+        before,
+        "the failed record left no half-written row"
+    );
+
+    // The grant restored, the next call records again.
+    let (status, _) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_job_renew",
+        json!({"leaseHandle": handle}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        tool_calls_3840(&su, fixture.workspace, run).await.len(),
+        before + 1
     );
 }
 
@@ -13243,7 +14272,9 @@ async fn an_agent_updates_its_profile_card_after_its_owner_approves() {
     .fetch_one(&su)
     .await
     .unwrap();
-    assert!((1.9..=2.0).contains(&hours_left), "{hours_left}");
+    // Upper bound has 36 s of slack: the app clock sets the expiry and the DB clock
+    // measures it, and a Docker VM clock runs tens of ms ahead of the host (2.000014 h).
+    assert!((1.9..=2.01).contains(&hours_left), "{hours_left}");
     // Nothing else moved.
     let prompt: Option<String> =
         sqlx::query_scalar("SELECT system_prompt FROM agent WHERE member_id=$1")
@@ -16009,4 +17040,507 @@ async fn a_revoked_invite_cannot_be_claimed_and_a_flag_on_an_invite_is_refused()
     .unwrap();
     let (status, ok) = claim_3789(&client, &base, &fixture, second).await;
     assert_eq!(status, 200, "restored authority claims fine: {ok}");
+}
+
+// ---------------------------------------------------------------------------
+// (#3831, ADR-0162 증보 4) oort_job_start — claim + start report + conversation
+// ---------------------------------------------------------------------------
+
+/// A human mentions the hosted agent in the approved channel; returns the run id.
+async fn raise_mention_3831(
+    client: &reqwest::Client,
+    base: &str,
+    su: &PgPool,
+    fixture: &Fixture,
+    text: &str,
+) -> Uuid {
+    let handle_name = hosted_handle(su, fixture.hosted_agent).await;
+    let trigger: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "body": format!("@{handle_name} {text}")
+        }))
+        .send()
+        .await
+        .expect("mention send")
+        .json()
+        .await
+        .expect("mention body");
+    assert!(trigger["id"].is_string(), "{trigger}");
+    sqlx::query_scalar(
+        "SELECT id FROM agent_run WHERE workspace_id=$1 AND agent_member_id=$2 \
+          ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .fetch_one(su)
+    .await
+    .expect("the run the mention raised")
+}
+
+async fn set_approved_scopes_3831(su: &PgPool, fixture: &Fixture, scopes: &[&str]) {
+    let scopes: Vec<String> = scopes.iter().map(|scope| (*scope).to_string()).collect();
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET approved_scopes = $3 \
+         WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_connection)
+    .bind(scopes)
+    .execute(su)
+    .await
+    .unwrap();
+}
+
+async fn lease_owner_3831(su: &PgPool, run: Uuid) -> Option<Uuid> {
+    sqlx::query_scalar(
+        "SELECT lease_owner FROM outbox WHERE kind='agent_job' \
+           AND lower(payload->>'run_id') = lower($1::text)",
+    )
+    .bind(run.to_string())
+    .fetch_one(su)
+    .await
+    .expect("the run's job row")
+}
+
+const ALL_HOSTED_SCOPES_3831: [&str; 7] = [
+    "agent:port:connect",
+    "agent:inbox:read",
+    "messages:read",
+    "messages:write",
+    "agent:jobs:read",
+    "agent:runs:callback",
+    "workspace:propose",
+];
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn one_job_start_call_claims_reports_the_start_and_returns_the_conversation() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let run = raise_mention_3831(&client, &base, &su, &fixture, "작업해줘 3831").await;
+
+    let (status, started) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_job_start",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, 200, "{started}");
+    let answer = structured(&started);
+    assert_eq!(answer["started"], json!(true), "{answer}");
+    assert_eq!(answer["resumed"], json!(false));
+    let handle = answer["job"]["leaseHandle"].as_str().expect("lease handle");
+    assert!(answer["job"]["work"]["prompt"]
+        .as_str()
+        .unwrap()
+        .contains("작업해줘 3831"));
+    assert!(
+        answer["job"]["work"].get("run_id").is_none()
+            && answer["job"]["work"].get("runId").is_none(),
+        "the run identity stays inside the sealed handle: {answer}"
+    );
+    // The conversation is the live latest page of the job's channel, under
+    // `oort_conversation_read`'s own projection.
+    let messages = answer["conversation"]["messages"]
+        .as_array()
+        .expect("conversation");
+    assert!(
+        messages.iter().any(|message| message["body"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("작업해줘 3831")),
+        "{answer}"
+    );
+    assert!(answer["conversation"]["nextBefore"].is_i64());
+
+    // ONE call produced the claim fact, the start fact and the stage marker.
+    let ledger = ledger_3740(&su, fixture.workspace, run).await;
+    let kinds = kinds_3740(&ledger);
+    assert_eq!(
+        kinds.iter().filter(|k| **k == "claimed").count(),
+        1,
+        "{kinds:?}"
+    );
+    assert_eq!(
+        kinds.iter().filter(|k| **k == "started").count(),
+        1,
+        "{kinds:?}"
+    );
+    let stages: Vec<_> = ledger.iter().filter_map(|row| row.2.as_deref()).collect();
+    assert_eq!(stages, ["시작: 요청 확인"]);
+    let (steps, output) = run_record_3516(&su, run).await;
+    assert_eq!(steps, 1);
+    assert_eq!(output["stages"], json!(["시작: 요청 확인"]));
+    let run_status: String = sqlx::query_scalar("SELECT status::text FROM agent_run WHERE id=$1")
+        .bind(run)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(run_status, "running");
+
+    // The handle it returned is the real lease: it completes the run.
+    let (status, done) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_run_complete",
+        json!({"leaseHandle": handle, "status": "succeeded", "body": "끝"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{done}");
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn job_start_is_idempotent_for_the_same_job_and_the_same_agent() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let run = raise_mention_3831(&client, &base, &su, &fixture, "한 번만 시작").await;
+    let bearer = &fixture.hosted_bearer;
+
+    let (_, first) = call(&client, &base, bearer, "oort_job_start", json!({})).await;
+    let first = structured(&first).clone();
+    let handle = first["job"]["leaseHandle"]
+        .as_str()
+        .expect("handle")
+        .to_string();
+    let owner = lease_owner_3831(&su, run).await;
+    assert!(owner.is_some());
+    let before = ledger_3740(&su, fixture.workspace, run).await;
+
+    // A bare second call finds nothing more to claim and changes nothing.
+    let (status, again) = call(&client, &base, bearer, "oort_job_start", json!({})).await;
+    assert_eq!(status, 200, "{again}");
+    assert_eq!(structured(&again)["job"], Value::Null);
+    assert_eq!(structured(&again)["started"], json!(false));
+
+    // Re-entry with the handle it already holds: the same job again, the same
+    // conversation, and not one more ledger row, step, marker or lease.
+    for _ in 0..2 {
+        let (status, resumed) = call(
+            &client,
+            &base,
+            bearer,
+            "oort_job_start",
+            json!({"leaseHandle": handle}),
+        )
+        .await;
+        assert_eq!(status, 200, "{resumed}");
+        let resumed = structured(&resumed);
+        assert_eq!(resumed["resumed"], json!(true), "{resumed}");
+        assert_eq!(resumed["started"], json!(true));
+        assert_eq!(
+            resumed["job"]["work"]["triggerMessageId"],
+            first["job"]["work"]["triggerMessageId"]
+        );
+        assert_eq!(
+            resumed["job"]["work"]["prompt"],
+            first["job"]["work"]["prompt"]
+        );
+        assert_eq!(
+            resumed["conversation"]["messages"],
+            first["conversation"]["messages"]
+        );
+    }
+    assert_eq!(ledger_3740(&su, fixture.workspace, run).await, before);
+    assert_eq!(
+        run_record_3516(&su, run).await.0,
+        1,
+        "one start report, one step"
+    );
+    assert_eq!(lease_owner_3831(&su, run).await, owner, "no second lease");
+
+    // A handle that is not this agent's, and one whose job is settled, are refused.
+    let (status, refused) = call(
+        &client,
+        &base,
+        bearer,
+        "oort_job_start",
+        json!({"leaseHandle": "momo_lease_v1.AAAA"}),
+    )
+    .await;
+    assert_eq!(status, 403, "{refused}");
+    let (status, done) = call(
+        &client,
+        &base,
+        bearer,
+        "oort_run_complete",
+        json!({"leaseHandle": handle, "status": "succeeded", "body": "끝"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{done}");
+    let (status, settled) = call(
+        &client,
+        &base,
+        bearer,
+        "oort_job_start",
+        json!({"leaseHandle": handle}),
+    )
+    .await;
+    assert_eq!(status, 409, "{settled}");
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn job_start_and_claim_never_expose_a_conversation_the_agent_may_not_read() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let bearer = &fixture.hosted_bearer;
+    let secret_text = "상위비밀문장3831";
+
+    // (1) No `messages:read` on the human's approval: the job is delivered and
+    //     started, the conversation is simply absent, on BOTH composites.
+    raise_mention_3831(&client, &base, &su, &fixture, secret_text).await;
+    let without_read: Vec<&str> = ALL_HOSTED_SCOPES_3831
+        .iter()
+        .copied()
+        .filter(|scope| *scope != "messages:read")
+        .collect();
+    set_approved_scopes_3831(&su, &fixture, &without_read).await;
+    let (status, started) = call(&client, &base, bearer, "oort_job_start", json!({})).await;
+    assert_eq!(status, 200, "{started}");
+    let answer = structured(&started);
+    assert_eq!(answer["started"], json!(true), "{answer}");
+    assert!(answer["job"]["leaseHandle"].is_string());
+    assert!(answer.get("conversation").is_none(), "{answer}");
+    let (status, refused) = call(
+        &client,
+        &base,
+        bearer,
+        "oort_conversation_read",
+        json!({"channelId": fixture.channel}),
+    )
+    .await;
+    assert_ne!(status, 200, "the read tool itself is closed too: {refused}");
+    // Release so the claim path below can lease it afresh.
+    let handle = answer["job"]["leaseHandle"].as_str().unwrap();
+    let (status, _) = call(
+        &client,
+        &base,
+        bearer,
+        "oort_job_release",
+        json!({"leaseHandle": handle}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let (status, claimed) = call(&client, &base, bearer, "oort_jobs_claim", json!({})).await;
+    assert_eq!(status, 200, "{claimed}");
+    let job = &structured(&claimed)["jobs"][0];
+    assert!(job["leaseHandle"].is_string(), "{claimed}");
+    assert!(job.get("conversation").is_none(), "{claimed}");
+    let (status, _) = call(
+        &client,
+        &base,
+        bearer,
+        "oort_run_complete",
+        json!({"leaseHandle": job["leaseHandle"], "status": "succeeded", "body": "끝"}),
+    )
+    .await;
+    assert_eq!(status, 200);
+
+    // (2) Scope restored but the agent has left the channel: the lease still
+    //     names the job, yet the channel's history is not this agent's to read.
+    set_approved_scopes_3831(&su, &fixture, &ALL_HOSTED_SCOPES_3831).await;
+    let _second = raise_mention_3831(&client, &base, &su, &fixture, secret_text).await;
+    let _third = raise_mention_3831(&client, &base, &su, &fixture, secret_text).await;
+    sqlx::query(
+        "UPDATE membership SET left_at=now() WHERE workspace_id=$1 AND channel_id=$2 \
+            AND member_id=$3",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.channel)
+    .bind(fixture.hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    for tool in ["oort_job_start", "oort_jobs_claim"] {
+        let (status, answer) = call(&client, &base, bearer, tool, json!({})).await;
+        assert_eq!(status, 200, "{tool}: {answer}");
+        let answer = structured(&answer);
+        let carried = answer.to_string();
+        // Whatever the composite delivers, no live conversation page rides along:
+        // `conversation` is absent (the job's own `work.prompt` is the queued
+        // snapshot both tools always had).
+        assert!(!carried.contains("\"conversation\""), "{tool}: {answer}");
+        let delivered = if tool == "oort_job_start" {
+            &answer["job"]
+        } else {
+            &answer["jobs"][0]
+        };
+        assert!(
+            delivered["leaseHandle"].is_string(),
+            "the job itself is delivered (so the absence is the gate, not an empty claim): {tool}: {answer}"
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn job_start_without_the_callback_scope_or_with_a_bad_stage_claims_nothing() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let bearer = &fixture.hosted_bearer;
+    let run = raise_mention_3831(&client, &base, &su, &fixture, "아무것도 잡지 마").await;
+
+    // No `agent:runs:callback`: the whole call is refused BEFORE the claim, so
+    // there is no half-started job.
+    let without_callback: Vec<&str> = ALL_HOSTED_SCOPES_3831
+        .iter()
+        .copied()
+        .filter(|scope| *scope != "agent:runs:callback")
+        .collect();
+    set_approved_scopes_3831(&su, &fixture, &without_callback).await;
+    let (status, refused) = call(&client, &base, bearer, "oort_job_start", json!({})).await;
+    assert_eq!((status, error_code(&refused)), (403, -32003), "{refused}");
+    assert_eq!(lease_owner_3831(&su, run).await, None, "nothing was leased");
+    let before = ledger_3740(&su, fixture.workspace, run).await;
+    assert!(!kinds_3740(&before).contains(&"claimed"));
+
+    // A stage the shared rule refuses is judged before the claim too.
+    set_approved_scopes_3831(&su, &fixture, &ALL_HOSTED_SCOPES_3831).await;
+    for bad in ["a/b", "   ", "bad\u{7}"] {
+        let (status, refused) = call(
+            &client,
+            &base,
+            bearer,
+            "oort_job_start",
+            json!({"stage": bad}),
+        )
+        .await;
+        assert_eq!(
+            (status, error_code(&refused)),
+            (400, -32602),
+            "{bad:?}: {refused}"
+        );
+    }
+    assert_eq!(
+        lease_owner_3831(&su, run).await,
+        None,
+        "still nothing leased"
+    );
+    assert_eq!(ledger_3740(&su, fixture.workspace, run).await, before);
+
+    // A named stage is the start report's marker.
+    let (status, started) = call(
+        &client,
+        &base,
+        bearer,
+        "oort_job_start",
+        json!({"stage": "시작: 코드 읽기"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{started}");
+    assert_eq!(
+        run_record_3516(&su, run).await.1["stages"],
+        json!(["시작: 코드 읽기"])
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn claim_carries_the_live_conversation_bounded_to_the_context_window() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    for index in 0..40 {
+        let sent: Value = client
+            .post(format!(
+                "{base}/v1/workspaces/{}/channels/{}/messages",
+                fixture.workspace, fixture.channel
+            ))
+            .bearer_auth(&fixture.human_jwt)
+            .json(&json!({"clientMsgId": Uuid::new_v4(), "body": format!("잡담 {index}")}))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(sent["id"].is_string(), "{sent}");
+    }
+    let long_body = "길".repeat(5_000);
+    let sent: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({"clientMsgId": Uuid::new_v4(), "body": long_body}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(sent["id"].is_string(), "{sent}");
+    raise_mention_3831(&client, &base, &su, &fixture, "맨 끝 요청").await;
+    let (status, claimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    let job = &structured(&claimed)["jobs"][0];
+    let messages = job["conversation"]["messages"]
+        .as_array()
+        .expect("conversation");
+    assert_eq!(messages.len(), 30, "bounded to the agent context window");
+    assert!(
+        messages[0]["body"].as_str().unwrap().contains("맨 끝 요청"),
+        "newest first: {claimed}"
+    );
+    assert!(job["conversation"]["nextBefore"].is_i64());
+    // One long message cannot make the composite's answer unbounded: it is cut
+    // (and flagged) here, while `oort_conversation_read` still returns it whole.
+    let long = messages
+        .iter()
+        .find(|message| message["bodyTruncated"] == json!(true))
+        .expect("the 5000-character message is elided in the composite");
+    assert_eq!(long["body"].as_str().unwrap().chars().count(), 2_000);
+    let (status, whole) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_conversation_read",
+        json!({"channelId": fixture.channel, "limit": 5}),
+    )
+    .await;
+    assert_eq!(status, 200, "{whole}");
+    assert!(structured(&whole)["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|message| message["body"].as_str().unwrap_or_default().chars().count() == 5_000));
+    // The queued snapshot is untouched and bounded by the same number.
+    assert!(job["work"]["recentMessages"].as_array().unwrap().len() <= 30);
 }

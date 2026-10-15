@@ -217,6 +217,11 @@ pub async fn create_pending_approval_in_tx(
 ///
 /// An expired-but-unswept card is not counted: the sweep may lag, and a card
 /// nobody can still decide must not lock an agent out of proposing.
+///
+/// Neither is an in-place 「이 채널에서 쓰기」 card (ADR-0162 증보 5 G2,
+/// `payload.origin = "server_in_place"`): the server raised it when a person
+/// called the agent, it is not the agent's proposal, and it has its own
+/// per-connection ceiling (`in_place_grant`).
 pub async fn lock_agent_and_count_pending_workspace_actions_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -233,7 +238,8 @@ pub async fn lock_agent_and_count_pending_workspace_actions_in_tx(
         "SELECT count(*) FROM approval \
           WHERE workspace_id = $1 AND requested_by = $2 \
             AND action_type = 'workspace_action' AND status = 'pending' \
-            AND (expires_at IS NULL OR expires_at > now())",
+            AND (expires_at IS NULL OR expires_at > now()) \
+            AND payload->>'origin' IS DISTINCT FROM 'server_in_place'",
     )
     .bind(workspace_id)
     .bind(agent_member_id)
@@ -445,6 +451,11 @@ pub async fn decision_stamp_in_tx(
 /// The `JOIN membership` is the authorization, not a filter applied afterwards:
 /// a person sees exactly the approvals raised in rooms they are still in. A
 /// `WHERE` on the workspace alone would have shown every approval in the tenant.
+///
+/// An in-place channel-grant card (ADR-0162 증보 5 G2) is listed only to a
+/// workspace owner/admin — the people who can decide it. Everyone else in the
+/// room still sees the card in the timeline, without buttons; it is not put in
+/// their 「나에게 필요한 일」.
 pub async fn list_approvals_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -463,6 +474,11 @@ pub async fn list_approvals_in_tx(
             AND ms.left_at IS NULL \
           WHERE a.workspace_id = $1 \
             AND a.status = $3::approval_status \
+            AND (a.payload->>'origin' IS DISTINCT FROM 'server_in_place' \
+                 OR EXISTS (SELECT 1 FROM workspace_membership wm \
+                             WHERE wm.workspace_id = a.workspace_id \
+                               AND wm.member_id = $2 \
+                               AND wm.role IN ('owner', 'admin'))) \
           ORDER BY a.expires_at NULLS LAST, a.created_at DESC \
           LIMIT $4",
     )

@@ -3,6 +3,7 @@
 - Status: **Accepted** (2026-10-13 성재 결재 — 아래 「결재 기록」. 공개 API·DB 계약 변경이라 ADR-0100에 따라 이 Accepted가 구현 머지 조건이다.) 초안은 같은 날 Proposed였고 결재로 D4-5(`oort_ping`)가 추천안과 달라졌다.
 - Date: 2026-10-13
 - Deciders: 성재
+- 증보: 2026-10-14 (#3822) 도어벨 깨움 `doorbell_rung` · **2026-10-15 (#3838) oort 호출 기록 `tool_call`(T1~T5)·「지금 실행 중」 읽기(R1)** — 파일 끝.
 - 기안: Opus 5.5 (#3736 + #3737 묶음)
 - 관계: ADR-0162 증보 3(D9 「새 저장소 없음」, D11 「단계 표식은 realtime 없음」, D13 보드 가시성, D17 비목표, 부록 A lease·암묵 갱신) **일부를 이 ADR이 바꾼다**(아래 「바뀌는 기존 결정」), ADR-0171(도어벨), ADR-0186(승인 액션 — run을 park), ADR-0199(인박스 투영 — 같은 방식의 쓰기 시 투영), ADR-0198, ADR-0100
 - 표기: [V] 코드·문서 직접 확인 · **[추정]** 해석 · [확인 필요] 구현 전 사실 확인 · `runtime-unverified` 실행 안 함
@@ -105,7 +106,7 @@ actor_member_id uuid                  -- 에이전트 또는 사람(승인자·�
 created_at    timestamptz NOT NULL DEFAULT now()
 ```
 
-- `kind` 어휘(S1 구현 확정): `queued` · `claimed` · `started`(첫 `running`) · `stage` · `paused` · `resumed` · `approval_requested` · `approval_decided`(code=approved/rejected/expired/cancelled) · `succeeded` · `failed` · `timed_out` · `cancelled`. 도어벨은 run이 아니라 connection 단위 사실이라 원장 kind가 아니다(`hosted_agent_doorbell.last_fired_at/last_status`를 읽기에서 합친다). 하위 봇 위임은 별도 kind 없이 `stage`(「위임: …」)로 보고한다. `lease_renewed`는 잡음이라 넣지 않는다. 수명주기 행은 `agent_run`/`approval` 트리거가, `claimed`·`stage`는 서버 코드가 같은 SQL 함수(`agent_run_event_append`)로 쓴다. 200행 상한은 `agent_run_event_trim`(DELETE는 이 함수에만, 트리거 경로의 notifier 역할에는 DELETE 없음).
+- `kind` 어휘(S1 구현 확정): `queued` · `claimed` · `started`(첫 `running`) · `stage` · `paused` · `resumed` · `approval_requested` · `approval_decided`(code=approved/rejected/expired/cancelled) · `succeeded` · `failed` · `timed_out` · `cancelled`. 도어벨은 run이 아니라 connection 단위 사실이라 원장 kind가 아니다(`hosted_agent_doorbell.last_fired_at/last_status`를 읽기에서 합친다). **→ 2026-10-14 증보가 `doorbell_rung`을 더해 이 문장을 바꾼다.** **→ 2026-10-15 증보(T1)가 `tool_call`을 더한다(14개, `?include=tools` 뒤에서만 읽힘).** 하위 봇 위임은 별도 kind 없이 `stage`(「위임: …」)로 보고한다. `lease_renewed`는 잡음이라 넣지 않는다. 수명주기 행은 `agent_run`/`approval` 트리거가, `claimed`·`stage`는 서버 코드가 같은 SQL 함수(`agent_run_event_append`)로 쓴다. 200행 상한은 `agent_run_event_trim`(DELETE는 이 함수에만, 트리거 경로의 notifier 역할에는 DELETE 없음).
 - 쓰기는 **이미 있는 전이 지점의 같은 tx**에서 한다: run 생성(`agent_runs::create`), 도어벨 결과(송신기 — `momo_relay` 역할이 이미 `hosted_agent_doorbell`을 쓴다), `jobs_claim`, `record_gateway_event_in_tx`, `action_propose`/`card_suggest`의 park, 승인 결정·만료 스위프, `complete_gateway_run_in_tx`, 취소. 생산자별 호출에 의존하지 않도록 **상태 전이 헬퍼 한 곳**(`append_run_event_in_tx`)을 거치게 하고, 우회 INSERT는 시험으로 막는다.
 - **자유 텍스트를 새로 저장하지 않는다.** `stage`(≤80자, 기존 검증)와 닫힌 `code`뿐이다. `detail`은 여전히 감사 전용, `textDelta`는 저장하지 않는다(D5의 한계 참조). 표시는 일반 텍스트 이스케이프(증보 3 D15 그대로).
 - **크기 상한.** run당 최대 200행. 초과하면 가장 오래된 **`stage`** 행부터 지운다(수명주기 행 `queued/claimed/started/approval_*/종결`은 지우지 않는다). `output.stages`(12개)와 `step_count`는 호환을 위해 그대로 쓴다.
@@ -121,7 +122,7 @@ created_at    timestamptz NOT NULL DEFAULT now()
 
 - 순번은 claim의 실제 순서(`outbox.id ASC`, 에이전트별)를 그대로 쓴다. 「대기 n번째」는 같은 에이전트의 `phase='queued'`인 run 중 내 run보다 `outbox.id`가 앞선 개수 + 1이다. **수령 가능한 job만** 센다(그 connection이 승인받은 채널의 job — claim 후보와 같은 술어).
 - **누가 보나.** run 가시성은 D13과 같다: 읽는 사람이 `agent_run.channel_id`의 활성 멤버(채널 미보관·`left_at IS NULL`). 아니면 「멤버 아님」·「없는 run」·「다른 테넌트」가 모두 같은 404/빈 결과다. DM의 run은 그 DM의 두 사람에게만 보인다.
-- **정보 누출 경계.** 내 run 앞에 **내가 볼 수 없는 다른 채널의 run**이 있어도 순번은 센다. 응답은 `queue_position`(정수)과 `ahead_total`만 주고, 앞선 run의 id·채널·요청자·제목은 **내가 멤버인 채널의 것만** `ahead[]`에 낸다. 남은 누출은 「이 에이전트가 지금 바쁘다」는 집계뿐이다. **[추정]** 이는 에이전트를 멘션할 수 있는 사람이 응답 지연으로 이미 체감하는 사실과 같은 수준이라 받아들인다(owner 결정 ④가 이 상한 대신 「순번 숨김」을 고르게 한다). 워크스페이스 전체 큐 조회 API는 만들지 않는다.
+- **정보 누출 경계.** 내 run 앞에 **내가 볼 수 없는 다른 채널의 run**이 있어도 순번은 센다. 응답은 `queue_position`(정수)과 `ahead_total`만 주고, 앞선 run의 id·채널·요청자·제목은 **내가 멤버인 채널의 것만** `ahead[]`에 낸다. 남은 누출은 「이 에이전트가 지금 바쁘다」는 집계뿐이다. **[추정]** 이는 에이전트를 멘션할 수 있는 사람이 응답 지연으로 이미 체감하는 사실과 같은 수준이라 받아들인다(owner 결정 ④가 이 상한 대신 「순번 숨김」을 고르게 한다). 워크스페이스 전체 큐 조회 API는 만들지 않는다. **→ 2026-10-15 증보(R1)가 「내가 멤버인 채널의」 지금 실행 중 목록과 에이전트별 동시 수를 연다. 워크스페이스 전체 큐는 여전히 없다.**
 - `claimed` 이후에는 순번이 없다(`queue_position=null`).
 
 ### D4. 연결 생존 신호
@@ -183,7 +184,7 @@ last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
 - 사고 과정 전문 저장·터미널 바이트·원격 입력(증보 3 D15/D17 유지).
 - 서버 쪽 재배정(다른 에이전트로 job 이전)·자동 재시도. 스위프는 종결만 한다.
 - 관리형(momo-agent worker)·BYOA gateway run의 클라이언트 휴리스틱 폐기. 이번 범위는 **hosted 에이전트**이고, 다른 종류는 기존 90초 규칙을 두되 문구만 「신호 소실」 대신 「조용함」으로 낮추는 것은 UXUI 슬라이스가 같이 한다(서버 사실이 없는 곳에서 단정하지 않는다).
-- 워크스페이스 전체 큐/대시보드, 푸시 알림 신규 reason(「응답 없음」 푸시는 후속).
+- 워크스페이스 전체 큐/대시보드, 푸시 알림 신규 reason(「응답 없음」 푸시는 후속). **→ 2026-10-15 증보(R1)가 멤버 채널 범위의 「지금 실행 중」 읽기만 연다.**
 - 새 scope·새 인증 경로. 새 MCP 도구는 `oort_ping` 하나뿐이다.
 
 ## 대안과 기각
@@ -242,3 +243,91 @@ last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
 - **U2 작업 패널.** 패널을 열면 서버 기록을 읽고, 닫아도 기록이 남으므로 「패널을 닫으면 이 기록은 사라집니다」 고지를 지운다(`WORK_LOG_CLOSE_NOTICE`). 여러 run을 대기 → 진행 → 종결 순서로, 동시 진행은 나란히. 승인 대기는 카드로 링크. 「아직 도착한 진행이 없습니다」는 수령 전/후 문구로 분기. 「실행 중인 작업」 띠와 채널 「작업 중」 배지는 `phase=running`만 「작업 중」, `queued`는 「대기 중」, `awaiting_approval`은 「승인 대기」.
 - **U3 생존 표시.** 멤버 목록·에이전트 헤더·작업 패널 머리의 liveness 라벨(D4 문구), 「연결됨」 vs 「응답함」 분리, 「다시 깨우기」 버튼(소유자/admin에게만, 쿨다운 표시).
 - **U4 폰.** 같은 읽기 계약을 폰 시트에 적용(`momo-core` 순수 함수 공유). UI 변경이므로 각 슬라이스는 해당 표면 preflight와 design-review Blocker 0·High 0, 캡처 전달.
+
+## 증보 2026-10-14 (#3822) — 도어벨 깨움을 대기 중 run 원장에 기록
+
+- Status: Accepted 범위의 **관측 추가**다(기존 원장 의미·권한·읽기 계약을 좁히거나 넓히지 않는다). 새 결정이 owner 몫인 곳은 없다(아래 「왜 owner 결정이 필요 없는가」).
+- 배경: 성재(2026-10-14) 「프로필 변경 작업 자체가 너무 오래걸려… 웹훅으로 작업을 요청하는게 아니야?」 운영 실측에서 도어벨 발사 이력은 `hosted_agent_doorbell.last_fired_at` **마지막 1건**만 남아 「이벤트→발사→그록 기동→claim」 구간을 나눌 수 없었다. D2는 도어벨을 connection 단위 사실이라 원장 밖에 두었는데, 그 결과 run 하나의 대기 시간을 원장만으로 설명할 수 없다.
+
+**바뀌는 것 (D2의 한 문장).** `agent_run_event.kind`에 **`doorbell_rung`** 하나를 더한다(마이그레이션 132는 `agent_run_event_kind_ck`만 바꾼다). 어휘는 12개에서 13개가 된다.
+
+| 항목 | 값 |
+|---|---|
+| 쓰는 곳 | 도어벨 송신기(`momo-webhook-sender`)가 발사를 끝낸 직후(성공·실패 모두), 기존 `agent_run_event_append`로 |
+| 쓰는 대상 | 그 connection의 에이전트가 맡은 run 중 **`queued`이고 `claimed` 행이 아직 없는 것**(대기 중). 한 번에 최대 20개 |
+| `code` | 닫힌 토큰 **`<edge>_<result>`**: edge = `leading`(창이 닫혀 있던 첫 이벤트) · `trailing`(합쳐 둔 이벤트·수동 「다시 깨우기」) · `urgent`(추적 작업 `agent_job`이 쿨다운을 건너뛴 발사), result = `ok` · `failed`. 예: `leading_ok`, `urgent_failed` |
+| `created_at` | 발사가 끝난 시각(HTTP 응답 뒤). 재시도가 있으면 그 끝 |
+| 싣지 않는 것 | HTTP 상태·호스트·사유·`stage`·행위자·승인 id. 그건 `hosted_agent_doorbell.last_status`(소유자·admin 전용)와 감사 로그에 그대로 남는다 |
+| 상한 | run당 `doorbell_rung` **10행**(그 뒤는 쓰지 않는다). 몇 시간 기다리는 run의 원장이 쿨다운마다 자라지 않는다 |
+| 활동으로 세지 않음 | `last_event_at`(작업 패널의 「마지막 신호」)에서 제외한다. 우리가 보낸 신호는 에이전트의 활동이 아니다 |
+| 실시간 | 130의 AFTER INSERT 트리거가 그대로 얇은 `agent.run.event` 프레임(`kind`만)을 낸다. 프레임 스키마 불변 |
+
+- **읽기 계약.** `GET …/agent-runs/{run}/events`의 `kind` enum에 `doorbell_rung`이 늘고 `code`는 위 토큰이다. **기존 클라이언트는 알 수 없는 kind를 만나면 원장 전체를 `WireShapeError`로 거부한다**(`parseAgentRunEvents`, 실측 확인). 그래서 읽기는 **기본으로 `doorbell_rung`을 빼고**, 새 선택 쿼리 `?include=doorbell`을 줄 때만 싣는다(그 외 값은 400). 이미 배포된 맥·웹·폰 클라이언트는 응답이 그대로라 깨지지 않고, 표시를 만드는 UXUI 이슈가 이 쿼리를 켠다. 실시간 프레임은 `kind`를 문자열로만 읽어 재조회 신호로 쓰므로 영향이 없다. 클라이언트 표시 문구 **「깨움 보냄」**(보조 줄: 시각, `…_failed`면 「깨움이 닿지 않았어요」)은 UXUI 이슈로만 연다. 서버는 문구를 내려주지 않는다.
+- **쿨다운 규칙 (ADR-0171 D4 보강, 관측이 아니라 동작 변경이라 별도 기록).** 메시지 이벤트는 D4 그대로 합친다. **추적되는 작업(`agent_job` 인박스 이벤트)은 쿨다운 창이 열려 있어도 기다리지 않고 즉시 발사**하되, 도어벨 폭주를 막는 상한으로 **같은 connection에서 `MOMO_DOORBELL_URGENT_GAP_SECONDS`(기본 10, 최소 1)초에 한 번**만 쏜다. 간격 안에 들어온 작업은 소비하지 않고 보류해 두었다가 간격이 끝나는 첫 폴링에서 한 번에 깨운다(유실 없음). 페이로드·인증·SSRF 방어·재시도는 불변이다. connection당 **발사는 최대 분당 6회**(작업 기준)이고, HTTP 시도는 발사마다 최대 3번(재시도 2회)이라 **최악 분당 약 18회**다(이전 최악 3회). 메시지는 이전처럼 분당 1회 안팎이다. 간격 안의 작업만 있는 connection은 claim 집합에서 아예 빼서(`claim_doorbell_batch`) 보류 중에 폴링을 헛돌리지 않는다. 전역 상한은 없고 connection 수에 선형이며, 느린 대상이 발사 루프를 붙잡는 기존 구조(순차 발사)는 그대로다. 이전에는 쿨다운이 끝날 때까지(최대 60초) 두 번째 요청이 깨움 없이 기다렸다.
+- **왜 owner 결정이 필요 없는가.** ① 새 저장소·새 테이블·새 권한이 없다: 같은 테이블의 CHECK 어휘 한 줄, 같은 SQL 함수. ② 새로 보이는 정보가 없다: 이미 run을 볼 수 있는 사람이 보는 원장에 「깨웠다/못 깨웠다」 두 값과 시각이 추가될 뿐이고, 호스트·상태 코드는 일부러 뺐다. ③ 외부로 나가는 것이 없다: 웹훅 페이로드·대상·인증은 불변이고 발사 빈도만 작업 이벤트에 한해 최대 6배(분당 1→6) 상한으로 는다. ④ D2가 도어벨을 원장 밖에 둔 이유(connection 단위 사실)는 그대로이고, 이 증보는 그 사실을 **대기 중인 run들에 복사**한 관측 행을 더할 뿐 `hosted_agent_doorbell`의 의미를 바꾸지 않는다. owner가 반대하면 마이그레이션 132와 송신기 호출 한 곳을 되돌리면 된다(읽기 쪽은 알 수 없는 kind를 무시).
+- **쓰기 경로 경계.** 송신기는 `momo_relay`(BYPASSRLS, 전 테넌트 폴링 예외)로 쓰되, 기존에 이미 `hosted_agent_doorbell`을 쓰던 그 예외 범위 안이다. `relay`는 이미 모든 테넌트 테이블 DML 권한과 원장 시퀀스 USAGE를 가졌고(128) 이 변경은 권한을 늘리지 않는다. BYPASSRLS라 RLS가 안전망이 아니므로 **방어선은 SQL의 `workspace_id`·`connection_id` 조건뿐**이고(모든 서브쿼리에 걸었고 교차 테넌트 시험이 있다), `set_config('app.workspace_id')`는 RLS 역할로 바뀌어도 같은 쿼리가 맞게 도는 습관일 뿐 보호 수단이 아니다. 원장 쓰기가 실패해도 이미 나간 발사 결과는 바뀌지 않는다(로그만).
+- **보이는 정보 (보안 검수 M-2 반영).** `include=doorbell`로 읽으면 run을 볼 수 있는 채널 멤버 누구나 「깨움이 닿았나(`ok`/`failed`)」와 시각을 본다. `hosted_agent_doorbell.last_status`는 소유자·admin 전용이지만 이 한 비트는 일반 멤버에게도 「왜 안 가져가나」를 설명하는 데 필요해서 의도적으로 연다. 에이전트의 대기 run 전부에 같은 행이 찍히므로 다른 채널의 이벤트 때문에 난 발사 시각이 보일 수 있고(`urgent`는 그 이벤트가 작업이었음까지), 내용·채널·사람은 드러나지 않는다. 이 노출이 과하다고 보면 `ok`/`failed`를 합쳐 `rung` 한 값으로 줄이면 된다(마이그레이션 변경 없음, 송신기 한 줄).
+- **롤아웃·롤백 (보안 검수 M-1 반영).** 새 필터는 새 서버에만 있다. 한 이미지로 api·송신기가 함께 오르는 배포에서는 같은 순간에 바뀌지만, **구 서버 이미지로 롤백하면** 이미 쌓인 `doorbell_rung` 행이 필터 없이 내려간다. 롤백 절차: 구 이미지로 돌리기 **전에** `DELETE FROM agent_run_event WHERE kind = 'doorbell_rung';` (CHECK를 옛 정의로 되돌릴 때도 이 행이 있으면 실패한다).
+- **측정 용도.** 같은 run의 `queued` → `doorbell_rung` → `claimed` → `started` 시각 차이가 「oort→웹훅」·「웹훅→그록 기동」·「claim→시작」 구간이다(2026-10-14 실측 표는 #3822 PR 본문).
+
+
+## 증보 2026-10-15 (#3838) — oort 호출 기록(`tool_call`)과 「지금 실행 중」 읽기
+
+- Status: **Accepted** (2026-10-15 성재 결재 — 아래 인용. 공개 API·DB 계약 변경이라 ADR-0100에 따라 이 기록이 구현 머지 조건이다.)
+- 결재 원문(2026-10-15, AskUserQuestion): 「oort 호출 + VM 개수 보고 (추천)」 — oort 도구 호출은 서버가 자동으로 기록한다(이름·걸린 시간·성공/오류, 인자·본문 없음). VM 안의 일은 에이전트가 닫힌 범주의 개수로만 스스로 보고하고 「에이전트 보고」로 표시한다. 이 증보는 앞쪽(서버 기록)과 「지금 실행 중」 읽기를 적고, 자기 보고 개수는 ADR-0162 증보 5 C1이 적는다.
+- 함께 결재: 「한 화면, 필터로 나눔 (추천)」의 「팀 = 내가 멤버인 채널」 범위가 R1의 가시성이다(ADR-0202 D2).
+- 사실 [V] (track/engine `6ee2386f8`): 도구 호출 기록은 어디에도 없다 — 원장 어휘(migration 128·132)에 호출 종류가 없고, Agent Port 디스패처의 `record_liveness`(`routes/agent_port_tools.rs:284-372`)는 `hosted_agent_liveness`의 시각 열만 고친다. run별 시간은 이미 있다(`agent_runs.rs:842-845`의 `claimed_at`·`last_event_at`, `runPhase.ts:195-241`). 동시성은 채널별 run 목록으로만 보인다(D3 「워크스페이스 전체 큐 조회 API는 만들지 않는다」, D6).
+
+### T1. `tool_call` 원장 종류 — Agent Port에서 서버가 기록한다
+| 항목 | 값 |
+|---|---|
+| 어휘 | `agent_run_event.kind`에 **`tool_call`** 하나를 더한다(13 → 14). 마이그레이션은 구현 시점의 다음 번호(알려진 최신 132 — 이름 붙이기 직전에 `origin/track/engine`과 열린 PR(#3837 등)의 `server/Migrations/` 최고 번호를 확인) |
+| 새 열 | `tool text`(닫힌 도구 이름 — `momo_mcp::TOOL_CATALOG`의 이름만, 정규식 `^oort_[a-z_]{1,40}$` CHECK + 서버 쪽 닫힌 목록), `duration_ms integer`(0 ≤ x ≤ 600 000). 둘 다 NULL 허용이고 CHECK가 「`kind='tool_call'`이면 둘 다 있음, 아니면 둘 다 없음」을 강제 |
+| 결과 | 기존 `code` 열: `ok` 또는 닫힌 실패 코드 `invalid_arguments` · `not_authorized` · `unavailable` · `conflict` · `already_claimed` · `claim_expired` · `internal`(`ToolFailure` 7종과 1:1, `momo-mcp/src/tools.rs:1155`) |
+| 싣지 않는 것 | 인자·결과 본문·`leaseHandle`·채널/메시지 id·오류 문장·`stage`·`actor_member_id` 외의 신원. `stage` 열은 NULL |
+| 기록하는 곳 | Agent Port 디스패처가 도구가 끝난 직후(`record_liveness`와 같은 자리), **별도의 짧은 테넌트 tx**(`with_tenant_tx`, `momo_app`, BYPASSRLS 없음, 2초 시간 제한). 기록 실패는 도구 응답을 바꾸지 않는다(로그만). 상태 전이가 아니라 관측이라서 D2의 「전이와 같은 tx」 규칙의 예외로 둔다 — 도구가 쓴 상태 전이 행(`claimed`·`stage` 등)은 여전히 그 도구의 tx 안에서 쓰인다 |
+| `duration_ms` | 디스패처가 `tools/call` 처리를 시작한 순간부터 결과가 정해진 순간까지 서버 단조 시계로 잰다(네트워크 왕복 제외). 에이전트가 보낸 값이 아니다 |
+
+### T2. 어느 run에 붙나 — 핸들이 말해 주는 run에만
+- 원장은 run 단위다. 호출이 **run 하나를 가리킬 때만** 행을 쓴다:
+  - 핸들을 받는 도구: `oort_job_renew` · `oort_job_release` · `oort_run_event` · `oort_run_complete` · `oort_action_propose` · `oort_card_suggest` · `oort_action_claim_secret` — 서버가 봉인한 핸들을 열어 **호출한 에이전트의 run**으로 확인된 경우(lease를 잃어 `conflict`로 거절돼도 핸들이 진짜면 기록한다).
+  - job을 돌려준 도구: `oort_job_start`(돌려준 job의 run), `oort_jobs_claim`(가져간 job마다 그 run에 한 행).
+- run을 가리키지 않는 호출(`oort_inbox_read` · `oort_conversation_read` · `oort_message_post` · `oort_ping`, 열리지 않는 핸들, job 없이 끝난 claim)은 **원장 행도 집계도 없다.** 기존처럼 `hosted_agent_liveness`의 `last_tool_call_at`·`last_tool_error_*`(D4)만 움직인다. 「하나뿐인 lease라서 그 run이겠지」 식의 추정 귀속은 하지 않는다 — 이 ADR은 추정을 화면에서 빼려고 만들었다.
+- 대상은 Agent Port(호스팅 에이전트)다. 관리형 워커의 도구(`momo-agent/src/tools.rs`)는 이 증보 범위가 아니다(후속 결정).
+
+### T3. 지우지 않는다 — 기록을 멈추고 세기만 한다
+- 성재 결재의 「행을 지우지 않는다」를 따른다. **`tool_call` 행은 `agent_run_event_trim`이 세지도 지우지도 않는다**(trim의 200행 계산에서 빼고, DELETE 술어에 넣지 않는다). trim이 지금 `stage`·`claimed`를 지우는 동작은 그대로다.
+- 상한은 **run당 `tool_call` 100행**이다 **[추정 — 기본값]**. 100행을 넘는 호출은 행을 쓰지 않고 집계만 올린다.
+- **집계 테이블** `agent_run_tool_tally`(새 테이블, `(workspace_id, run_id, tool)` PK, `ok_count`·`error_count bigint`, `duration_ms_sum bigint`, FK `(workspace_id, run_id) → agent_run` CASCADE, RLS `ENABLE`+`FORCE`, `ws_isolation`, `momo_app` GRANT). **모든** run 귀속 호출(처음 100개 포함)이 UPSERT로 올린다 — 그래서 합계는 행 상한과 무관하게 정확하고, 행은 「앞부분 100개의 순서」를 보여 준다. 크기는 run당 도구 수(카탈로그 14개 이하)로 닫힌다.
+- 수명: 행·집계 모두 `agent_run`과 함께 CASCADE, 종결 후 `SHARE_RETENTION_DAYS` 지나 기존 보존 정리가 지우는 것은 그대로다(「수명 삭제」만 있고 「상한 삭제」는 없다).
+
+### T4. 읽기 — `?include=tools` 뒤에서만
+- 배포된 클라이언트는 모르는 kind를 만나면 원장 전체를 `WireShapeError`로 버린다(위 2026-10-14 증보의 실측, #3830 선례). 그래서 `GET …/agent-runs/{run}/events`는 **기본으로 `tool_call`을 빼고**, `include`에 `tools`가 있을 때만 싣는다.
+- `include`는 쉼표로 나눈 닫힌 집합 `{doorbell, tools}`가 된다(`include=doorbell,tools` 가능). 모르는 값은 지금처럼 400. 지금 코드는 `doorbell` 하나만 받는다(`agent_runs.rs:887-890`) — 구 서버가 `include=tools`에 400을 내면 새 클라이언트는 `tools` 없이 한 번 다시 읽고 「oort 호출 기록은 서버 업데이트 뒤에 보여요」라고 적는다.
+- `include=tools` 응답에는 원장 행 외에 `toolTally: [{tool, ok, error, durationMsSum}]`(T3 집계)와 `toolCallRowsCapped: bool`이 실린다.
+- 가시성은 원장 그대로(run의 채널 활성 멤버, D3·D13). 도구 이름·시간·성공 여부는 그 run을 볼 수 있는 사람에게 열린다. 새로 보이는 것은 「에이전트가 oort의 어떤 문을 언제 몇 번 두드렸나」뿐이고 내용은 없다.
+- **표시 규칙.** 이 행들은 서버가 직접 잰 사실이므로 「oort 기록」으로 표시하고, ADR-0162 증보 5 C2의 VM 안 개수(「에이전트 보고」)와 **같은 칸에 섞지 않는다.**
+
+### T5. 실시간·활동 판정
+- `tool_call` INSERT는 `agent.run.event` 프레임을 **내지 않는다**(migration 130 트리거의 술어에서 뺀다). 호출마다 프레임이면 채널 토픽이 시끄럽다. 클라이언트는 다른 원장 프레임(`stage`·수명주기)이나 패널을 열 때 재조회에서 본다.
+- `last_event_at`(작업 패널의 「마지막 보고」)에는 **넣는다** — 핸들로 run에 묶인 호출은 그 에이전트가 그 run에서 한 일이다(도어벨 행을 뺀 이유와 반대). 단 run 상태, 스톨 스위프 입력(`agent_run.updated_at`), `hosted_agent_liveness` 판정은 바꾸지 않는다.
+
+### R1. 「지금 실행 중」 읽기 — 내가 멤버인 채널 범위, 에이전트별 동시 수
+- **새 경로** `GET /v1/workspaces/{ws}/agent-runs?state=active`(사람 JWT). 지금 있는 채널·에이전트별 목록(D2)과 같은 항목 모양(`phase`·`lease_state`·`queue_position`·`latest_stage`·`last_event_at`)에 `channel_id`를 더한 목록이다.
+- **행의 범위**: 읽는 사람이 **활성 멤버인 채널**(미보관·`left_at IS NULL`; DM은 그 두 사람)의 run 중 종결이 아닌 것(`queued`·`claimed`·`running`·`awaiting_approval`·`paused`). 멘션 run 포함(위 「바뀌는 기존 결정」 D13 항목과 같은 이유). 에이전트 종류(호스팅·관리형·BYOA·팀 AI)로 거르지 않는다. D3의 한 SQL 가시성을 재사용한다(복사 금지).
+- **에이전트별 동시 수** `agents: [{agentMemberId, visible:{running, queued, awaitingApproval}, activeTotal}]`:
+  - `visible.*`는 위 행 범위 안의 개수다.
+  - `activeTotal`은 그 에이전트의 **워크스페이스 전체** 미종결 run 수(숫자 하나)다. D3의 `ahead_total`과 같은 등급의 누출(「이 에이전트가 지금 바쁘다」는 집계)이고, 2026-10-13 결재 4 「내 채널만 자세히 (Recommended)」 — 다른 채널은 숫자만 — 를 그대로 따른다. 다른 채널 run의 id·채널·요청자·제목은 어디에도 실리지 않는다.
+  - 호스팅 claim은 에이전트별 직렬화가 없고(`momo-outbox/src/gateway.rs:76-77`의 claim 한도, `:266-283`의 hosted claim), 관리형은 직렬화된다(`momo-outbox/src/agent_job.rs:80-100`) [V]. 그래서 `activeTotal`이 2 이상인 호스팅 에이전트는 실제로 병렬로 일하고 있을 수 있다 — 화면은 「동시 n건」으로 쓰되 「병렬 실행」을 단정하지 않는다.
+- 워크스페이스 **전체 큐**(남의 채널 run 목록)는 여전히 없다. D3·D6의 해당 문장은 이 범위로만 좁혀진다.
+- 페이징: `(created_at, id)` 키셋, `limit ≤ 100`. 실시간은 새 프레임 없이 기존 `agent.run.event`·`work.run.updated` 재조회.
+
+### 불변식 대조 (이 증보)
+- 새 테이블 `agent_run_tool_tally`와 원장 열 추가는 신규 migration으로, RLS FORCE, `schema_v0.sql` 불변, sqlx 런타임 쿼리.
+- 쓰기 경로 BYPASSRLS 없음(Agent Port는 `momo_app` 테넌트 tx). 클라이언트 직접 publish 없음.
+- 원장은 여전히 상태의 원본이 아니라 관측 기록이다. `tool_call`은 run 상태를 바꾸지 않는다.
+
+### 구현 슬라이스 (Accepted 후)
+- **T-S1 (engine) 기록.** migration(kind CHECK·`tool`/`duration_ms` 열·trim 술어·130 트리거 술어·`agent_run_tool_tally`), 디스패처 기록, 귀속 규칙. red proof: ① 핸들 도구 한 번이 `tool_call` 행 1개·집계 1을 만든다, ② 인자·본문이 행 어디에도 없다(열 목록 고정 시험), ③ `oort_inbox_read`·`oort_message_post`는 행 0개, ④ 101번째 호출은 행이 늘지 않고 집계만 오른다(상한을 지우면 실패), ⑤ trim이 `tool_call`을 지우지 않고 200행 계산에 넣지 않는다(술어를 되돌리면 실패), ⑥ 다른 테넌트가 집계를 못 읽는다(RLS), ⑦ 기록 tx 실패가 도구 응답을 바꾸지 않는다.
+- **T-S2 (engine) 읽기.** `include=tools`(쉼표 집합), `toolTally`, R1 경로. red proof: ① `include` 없으면 `tool_call`이 없다(필터를 지우면 실패), ② `include=doorbell,tools`가 둘 다 싣는다, ③ 모르는 값 400, ④ R1에서 비멤버 채널 run은 행에 없고 `activeTotal`에만 반영, ⑤ 멘션 run 포함, ⑥ DM run은 그 두 사람에게만.
+- **T-U1 (UXUI).** run 상세에 「oort 기록」 칸(호출 이름·시간·성공/오류, 「에이전트 보고」 칸과 분리), 구 서버 400 물러서기, 「작업」 화면 머리의 에이전트별 「동시 n건」(ADR-0202).

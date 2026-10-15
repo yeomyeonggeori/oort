@@ -1384,9 +1384,37 @@ pub struct SharedWorkSessionListQuery {
     pub cursor: Option<String>,
     /// `runs` adds hosted agents' work runs (ADR-0162 증보 3 D13). Opt-in so a
     /// shipped client that keys every row on `sessionId` is never handed a row
-    /// without one.
+    /// without one. ADR-0202 D4: a comma-separated closed set `runs` | `jobs`;
+    /// `jobs` widens the run source to every agent's delegated work and adds the
+    /// job fields. Any other token is a 400.
     #[serde(default)]
     pub include: Option<String>,
+    /// ADR-0202 D4: `mine` | `team` (default `team`, the set shipped clients get).
+    #[serde(default)]
+    pub who: Option<String>,
+}
+
+/// ADR-0162 증보 5 C1·C2: the code-task result the **agent reported** about its
+/// own run. Nothing here is checked against GitHub; a client labels it
+/// 「에이전트 보고」. Only the closed fields travel — never the rest of
+/// `output.artifacts`.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentReportedDto {
+    pub result_kind: Option<&'static str>,
+    pub tests: Option<AgentReportedTestsDto>,
+    pub next_action: Option<&'static str>,
+    pub commit_sha: Option<String>,
+    /// Only the reported categories, in the closed order. `null` = none.
+    pub tool_counts: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentReportedTestsDto {
+    pub passed: i64,
+    pub failed: i64,
+    pub not_run: i64,
 }
 
 /// The S1 diff numbers as the board returns them. `null` = unknown.
@@ -1466,6 +1494,24 @@ pub struct SharedWorkSessionDto {
     pub pr_url: Option<String>,
     /// Epoch seconds.
     pub last_activity_at: i64,
+    /// `include=jobs` run rows only (ADR-0202 D3): `work` | `mention` |
+    /// `thread_reply`. Absent everywhere else, so a shipped client that rejects
+    /// unknown values never sees it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger: Option<&'static str>,
+    /// `include=jobs` run rows only: the ADR-0200 phase word.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phase: Option<&'static str>,
+    /// `include=jobs` run rows only, once finished: `endedAtMs − startedAtMs`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<i64>,
+    /// `include=jobs` run rows only: the agent's newest live text message of
+    /// this run (its result). The id only — never the text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_message_id: Option<String>,
+    /// `include=jobs` run rows only, when the agent reported any closed field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_reported: Option<AgentReportedDto>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1474,6 +1520,11 @@ pub struct SharedWorkSessionListResponse {
     pub sessions: Vec<SharedWorkSessionDto>,
     /// Present only when more rows follow; opaque.
     pub next_cursor: Option<String>,
+    /// ADR-0202 D4: the `who` this page answered, echoed only when the caller
+    /// sent `who` or `include=jobs` — a new client tells a new server from an
+    /// old one by it. Absent on the shipped request shapes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub who: Option<&'static str>,
 }
 
 #[derive(Debug, Serialize)]
@@ -2000,6 +2051,15 @@ pub struct AgentRunResponse {
     pub output: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<Value>,
+    /// ADR-0162 증보 5 C1 — the agent's own code-task report
+    /// (`{resultKind, tests, nextAction, commitSha, toolCounts}`, only what was
+    /// reported), gathered in one object so a client draws it under one
+    /// 「에이전트 보고」 label and never mixes it with what oort measured. Absent
+    /// when the run reported none of it. Deployed clients build their run from
+    /// named fields (`packages/momo-core` `agentRunDetailFromWire`), so an extra
+    /// top-level key is ignored rather than refused.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_reported: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub started_at_ms: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2074,6 +2134,13 @@ pub struct AgentRunProgressQuery {
     pub limit: Option<String>,
 }
 
+/// `?include=` on the run event ledger read (ADR-0200 증보 2026-10-14). Only `doorbell`.
+#[derive(Debug, Deserialize)]
+pub struct AgentRunEventsQuery {
+    #[serde(default)]
+    pub include: Option<String>,
+}
+
 /// A run ahead of this one that the viewer can see (a channel they are in).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -2137,6 +2204,54 @@ pub struct AgentRunProgressPageResponse {
     pub runs: Vec<AgentRunProgressDto>,
 }
 
+/// `?state=&scope=&cursor=&limit=` on the workspace "running now" read
+/// (ADR-0200 증보 2026-10-15 R1). `state` is `active` or absent; `scope` is
+/// `team` (default) or `mine`. Anything else is a 400.
+#[derive(Debug, Deserialize)]
+pub struct AgentRunActiveQuery {
+    #[serde(default)]
+    pub state: Option<String>,
+    #[serde(default)]
+    pub scope: Option<String>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+    #[serde(default)]
+    pub limit: Option<String>,
+}
+
+/// openapi `AgentRunActiveCounts.visible` — counts by derived phase over the
+/// whole visible set (not the page).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunVisibleCountsDto {
+    pub queued: i64,
+    pub claimed: i64,
+    pub running: i64,
+    pub awaiting_approval: i64,
+    pub paused: i64,
+}
+
+/// openapi `AgentRunActiveCounts` — one agent's concurrency as the viewer may
+/// see it: per-phase counts of visible runs, plus `activeTotal`, the agent's
+/// non-terminal runs in the whole workspace as a bare number.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunActiveCountsDto {
+    pub agent_member_id: String,
+    pub visible: AgentRunVisibleCountsDto,
+    pub active_total: i64,
+}
+
+/// openapi `AgentRunActivePage`.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunActivePageResponse {
+    pub runs: Vec<AgentRunProgressDto>,
+    pub agents: Vec<AgentRunActiveCountsDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
 /// openapi `AgentRunEvent` — one ledger row. No raw sequence, no free text beyond
 /// the agent-reported `stage` marker.
 #[derive(Debug, Serialize)]
@@ -2152,7 +2267,23 @@ pub struct AgentRunEventDto {
     pub approval_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub actor_member_id: Option<String>,
+    /// `tool_call` only (served behind `include=tools`): the oort tool name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool: Option<String>,
+    /// `tool_call` only: the server-measured duration of the call.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<i32>,
     pub created_at_ms: i64,
+}
+
+/// openapi `AgentRunToolTally` — one tool's totals on one run (ADR-0200 증보 T3).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunToolTallyDto {
+    pub tool: String,
+    pub ok: i64,
+    pub error: i64,
+    pub duration_ms_sum: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -2160,6 +2291,12 @@ pub struct AgentRunEventDto {
 pub struct AgentRunEventsResponse {
     pub run_id: String,
     pub events: Vec<AgentRunEventDto>,
+    /// Present only with `include=tools` (ADR-0200 증보 2026-10-15 T4).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_tally: Option<Vec<AgentRunToolTallyDto>>,
+    /// Present only with `include=tools`: calls were counted past the 100-row cap.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_rows_capped: Option<bool>,
 }
 
 /// openapi `AgentRunSummaryPage` (Swift `AgentRunSummaryPageDTO`).
@@ -4199,6 +4336,11 @@ pub struct AgentProfileInput {
     /// (the create body's own `modelSource` decides).
     #[serde(default, alias = "model_source")]
     pub model_source: Option<String>,
+    /// ADR-0162 증보 5 W3 (#3851): on a profile PUT, sets
+    /// `agent.thread_reply_wake`; absent leaves it unchanged. Ignored on create
+    /// (a new agent starts with the column's default, on).
+    #[serde(default, alias = "thread_reply_wake")]
+    pub thread_reply_wake: Option<bool>,
 }
 
 /// `POST /v1/workspaces/{ws}/subscription-agents/register` (#3392 AIH-2,
@@ -4878,6 +5020,8 @@ pub struct AgentProfileDto {
     pub updated_at_ms: i64,
     /// #3147: `"agent"` or `"instance_default"`.
     pub model_source: &'static str,
+    /// ADR-0162 증보 5 W3 (#3851): `agent.thread_reply_wake`.
+    pub thread_reply_wake: bool,
 }
 
 /// Swift `AgentProfileResponse` (:577-579).

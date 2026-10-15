@@ -9,9 +9,9 @@ use chrono::{TimeDelta, Utc};
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{DbError, PgPool};
 use momo_webhook::{
-    claim_doorbell_batch, coalesce_action, consume_for_fire_in_tx, doorbell_body,
+    claim_doorbell_batch, coalesce_action_with_jobs, consume_for_fire_in_tx, doorbell_body,
     mark_trailing_in_tx, open_claimed_secret, parse_outbound_url, record_doorbell_fire_in_tx,
-    CoalesceAction, DoorbellClaim,
+    record_doorbell_rung_in_tx, CoalesceAction, DoorbellClaim,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -26,6 +26,10 @@ pub struct DoorbellDrainStats {
     pub coalesced: usize,
     pub failed: usize,
     pub skipped: usize,
+    /// #3822: job wakes that skipped the message cooldown.
+    pub urgent: usize,
+    /// #3822: job wakes held back by the urgent minimum gap (re-decided next poll).
+    pub deferred: usize,
 }
 
 pub struct DoorbellWorker<T: DoorbellTransport> {
@@ -48,9 +52,20 @@ impl<T: DoorbellTransport> DoorbellWorker<T> {
             return Ok(DoorbellDrainStats::default());
         }
         let cooldown_ms = self.config.doorbell_cooldown.as_millis() as i64;
+        // never longer than the cooldown: a gap past the window would hold back a plain leading edge
+        let urgent_gap = self
+            .config
+            .doorbell_urgent_gap
+            .min(self.config.doorbell_cooldown);
+        let urgent_gap_ms = urgent_gap.as_millis() as i64;
         let mut tx = self.pool.begin().await.map_err(DbError::from)?;
-        let claims =
-            claim_doorbell_batch(&mut tx, self.config.claim_batch_size, cooldown_ms).await?;
+        let claims = claim_doorbell_batch(
+            &mut tx,
+            self.config.claim_batch_size,
+            cooldown_ms,
+            urgent_gap_ms,
+        )
+        .await?;
         let mut stats = DoorbellDrainStats {
             claimed: claims.len(),
             ..DoorbellDrainStats::default()
@@ -61,7 +76,19 @@ impl<T: DoorbellTransport> DoorbellWorker<T> {
             let new_events = claim.inbox_last_seq > claim.last_seen_inbox_seq;
             let window_open =
                 window_still_open(claim.window_started_at, self.config.doorbell_cooldown, now);
-            match coalesce_action(new_events, claim.pending_trailing, window_open) {
+            let urgent_gap_open = window_still_open(
+                claim.window_started_at,
+                self.config.doorbell_urgent_gap,
+                now,
+            );
+            let action = coalesce_action_with_jobs(
+                new_events,
+                claim.has_new_job,
+                claim.pending_trailing,
+                window_open,
+                urgent_gap_open,
+            );
+            match action {
                 CoalesceAction::MarkTrailing => {
                     mark_trailing_in_tx(
                         &mut tx,
@@ -72,7 +99,7 @@ impl<T: DoorbellTransport> DoorbellWorker<T> {
                     .await?;
                     stats.coalesced += 1;
                 }
-                CoalesceAction::Leading | CoalesceAction::Trailing => {
+                CoalesceAction::Leading | CoalesceAction::Trailing | CoalesceAction::Urgent => {
                     consume_for_fire_in_tx(
                         &mut tx,
                         claim.workspace_id,
@@ -80,15 +107,19 @@ impl<T: DoorbellTransport> DoorbellWorker<T> {
                         claim.inbox_last_seq,
                     )
                     .await?;
-                    to_fire.push(claim);
+                    if action == CoalesceAction::Urgent {
+                        stats.urgent += 1;
+                    }
+                    to_fire.push((claim, action));
                 }
+                CoalesceAction::Defer => stats.deferred += 1,
                 CoalesceAction::Idle => stats.skipped += 1,
             }
         }
         tx.commit().await.map_err(DbError::from)?;
 
-        for claim in to_fire {
-            match self.ring(&claim).await {
+        for (claim, action) in to_fire {
+            match self.ring(&claim, action.edge().unwrap_or("leading")).await {
                 Ok(()) => stats.fired += 1,
                 Err(()) => stats.failed += 1,
             }
@@ -106,7 +137,13 @@ impl<T: DoorbellTransport> DoorbellWorker<T> {
                     total.coalesced += stats.coalesced;
                     total.failed += stats.failed;
                     total.skipped += stats.skipped;
-                    if (stats.claimed as i64) < self.config.claim_batch_size {
+                    total.urgent += stats.urgent;
+                    total.deferred += stats.deferred;
+                    // a pass that consumed nothing would be identical to the next one: wait for the
+                    // next poll instead of spinning on rows that are being held back
+                    if (stats.claimed as i64) < self.config.claim_batch_size
+                        || stats.fired + stats.failed + stats.coalesced == 0
+                    {
                         return total;
                     }
                 }
@@ -142,7 +179,7 @@ impl<T: DoorbellTransport> DoorbellWorker<T> {
         tracing::info!("doorbell drain stopped");
     }
 
-    async fn ring(&self, claim: &DoorbellClaim) -> Result<(), ()> {
+    async fn ring(&self, claim: &DoorbellClaim, edge: &str) -> Result<(), ()> {
         let secret = match open_claimed_secret(claim, &self.config.signing_master_key) {
             Ok(secret) => secret,
             Err(error) => {
@@ -151,12 +188,12 @@ impl<T: DoorbellTransport> DoorbellWorker<T> {
                     error = %error,
                     "doorbell sealed box would not open"
                 );
-                self.finish(claim, "sealed_box_invalid", false).await;
+                self.finish(claim, edge, "sealed_box_invalid", false).await;
                 return Err(());
             }
         };
         let Ok(url) = parse_outbound_url(&claim.url, self.config.allow_development_http) else {
-            self.finish(claim, "invalid_url", false).await;
+            self.finish(claim, edge, "invalid_url", false).await;
             return Err(());
         };
 
@@ -190,7 +227,7 @@ impl<T: DoorbellTransport> DoorbellWorker<T> {
             self.audit(claim, &url.host, &last_status, retries, false)
                 .await;
         }
-        self.finish(claim, &last_status, delivered).await;
+        self.finish(claim, edge, &last_status, delivered).await;
         if delivered {
             Ok(())
         } else {
@@ -198,7 +235,7 @@ impl<T: DoorbellTransport> DoorbellWorker<T> {
         }
     }
 
-    async fn finish(&self, claim: &DoorbellClaim, status: &str, _delivered: bool) {
+    async fn finish(&self, claim: &DoorbellClaim, edge: &str, status: &str, delivered: bool) {
         let write = async {
             let mut conn = self.pool.acquire().await.map_err(DbError::from)?;
             record_doorbell_fire_in_tx(&mut conn, claim.workspace_id, claim.connection_id, status)
@@ -209,6 +246,27 @@ impl<T: DoorbellTransport> DoorbellWorker<T> {
                 connection_id = %claim.connection_id,
                 error = %error,
                 "doorbell fire projection write failed"
+            );
+        }
+        // #3822: the run ledger learns the ring (best effort; a ledger failure must not
+        // change what the ring already did).
+        let ledger = async {
+            let mut tx = self.pool.begin().await.map_err(DbError::from)?;
+            record_doorbell_rung_in_tx(
+                &mut tx,
+                claim.workspace_id,
+                claim.connection_id,
+                edge,
+                delivered,
+            )
+            .await?;
+            tx.commit().await.map_err(DbError::from)
+        };
+        if let Err(error) = ledger.await {
+            tracing::error!(
+                connection_id = %claim.connection_id,
+                error = %error,
+                "doorbell_rung ledger write failed"
             );
         }
     }

@@ -51,6 +51,10 @@ use momo_agent::{
 use momo_auth::Principal;
 use momo_db::audit::{run_event_recorded, write_audit, AuditEntry};
 use momo_db::PgConnection;
+use momo_mcp::{
+    ArtifactRule, ArtifactViolation, ARTIFACT_KEYS, MAX_REPORTED_COUNT, NEXT_ACTIONS, RESULT_KINDS,
+    TEST_COUNT_KEYS, TOOL_COUNT_KEYS,
+};
 use momo_messaging::{find_client_message_in_tx, send_message_in_tx, MessageType, NewMessage};
 use momo_outbox::{
     claim_gateway_jobs_in_tx, clamp_claim_limit, gateway_lease_authorized,
@@ -894,6 +898,8 @@ pub(crate) enum ReportRejection {
     ArtifactsPrUrl,
     ArtifactsBranch,
     ArtifactsCount,
+    /// ADR-0162 증보 5 C1/C2 — a result-contract field or cross rule.
+    ArtifactsContract,
 }
 
 impl ReportRejection {
@@ -904,6 +910,7 @@ impl ReportRejection {
             Self::ArtifactsPrUrl => "artifacts_pr_url_invalid",
             Self::ArtifactsBranch => "artifacts_branch_invalid",
             Self::ArtifactsCount => "artifacts_count_invalid",
+            Self::ArtifactsContract => "artifacts_contract_invalid",
         }
     }
 }
@@ -919,6 +926,11 @@ pub(crate) fn validated_gateway_stage(raw: &str) -> Result<String, ReportRejecti
 }
 
 /// The finished work's outputs (D12), after validation. Every field is optional.
+///
+/// ADR-0162 증보 5 C1/C2 adds the code-task result contract (`result_kind` …
+/// `commit_sha`) and the in-VM counts (`tool_counts`). All of it is the agent's
+/// own report: nothing here is checked against GitHub (D9, the server holds no
+/// GitHub token), and the read side labels it so (`agentReported`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct GatewayArtifacts {
     pub pr_url: Option<String>,
@@ -926,6 +938,17 @@ pub(crate) struct GatewayArtifacts {
     pub added: Option<i64>,
     pub deleted: Option<i64>,
     pub commits: Option<i64>,
+    /// One of [`momo_mcp::RESULT_KINDS`].
+    pub result_kind: Option<&'static str>,
+    /// `(passed, failed, notRun)`.
+    pub tests: Option<(i64, i64, i64)>,
+    /// One of [`momo_mcp::NEXT_ACTIONS`].
+    pub next_action: Option<&'static str>,
+    /// 7..=40 hex characters, lowercased.
+    pub commit_sha: Option<String>,
+    /// The reported categories of [`momo_mcp::TOOL_COUNT_KEYS`], in that order;
+    /// `None` when no category was reported.
+    pub tool_counts: Option<Vec<(&'static str, i64)>>,
 }
 
 impl GatewayArtifacts {
@@ -935,6 +958,11 @@ impl GatewayArtifacts {
             && self.added.is_none()
             && self.deleted.is_none()
             && self.commits.is_none()
+            && self.result_kind.is_none()
+            && self.tests.is_none()
+            && self.next_action.is_none()
+            && self.commit_sha.is_none()
+            && self.tool_counts.is_none()
     }
 
     /// The stored shape — only the keys that were reported.
@@ -955,6 +983,28 @@ impl GatewayArtifacts {
                 object.insert(key.into(), json!(value));
             }
         }
+        if let Some(value) = self.result_kind {
+            object.insert("resultKind".into(), json!(value));
+        }
+        if let Some((passed, failed, not_run)) = self.tests {
+            object.insert(
+                "tests".into(),
+                json!({"passed": passed, "failed": failed, "notRun": not_run}),
+            );
+        }
+        if let Some(value) = self.next_action {
+            object.insert("nextAction".into(), json!(value));
+        }
+        if let Some(value) = &self.commit_sha {
+            object.insert("commitSha".into(), json!(value));
+        }
+        if let Some(counts) = &self.tool_counts {
+            let counts: Map<String, Value> = counts
+                .iter()
+                .map(|(key, value)| ((*key).to_owned(), json!(value)))
+                .collect();
+            object.insert("toolCounts".into(), Value::Object(counts));
+        }
         Value::Object(object)
     }
 
@@ -967,6 +1017,11 @@ impl GatewayArtifacts {
             ("added", self.added.is_some()),
             ("deleted", self.deleted.is_some()),
             ("commits", self.commits.is_some()),
+            ("resultKind", self.result_kind.is_some()),
+            ("tests", self.tests.is_some()),
+            ("nextAction", self.next_action.is_some()),
+            ("commitSha", self.commit_sha.is_some()),
+            ("toolCounts", self.tool_counts.is_some()),
         ] {
             if present {
                 keys.push(key);
@@ -976,8 +1031,336 @@ impl GatewayArtifacts {
     }
 }
 
-/// `artifacts` (D12) against the share's rules. `Ok(None)` for an absent, `null`
-/// or empty object; any malformed field is an `Err` — the caller rejects the
+/// A refused `artifacts`: the closed audit reason (D15) and the field-level
+/// violation the agent is told about (ADR-0162 증보 5 C3). Neither carries a
+/// value the agent sent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ArtifactsRefusal {
+    pub reason: ReportRejection,
+    pub violation: ArtifactViolation,
+}
+
+fn refused(reason: ReportRejection, field: &str, rule: ArtifactRule) -> ArtifactsRefusal {
+    ArtifactsRefusal {
+        reason,
+        // Every path named here is in momo-mcp's closed list (pinned by
+        // `every_refusal_path_is_a_closed_artifact_path`); the fallback is the
+        // object itself rather than a panic on a request path.
+        violation: ArtifactViolation::on(field, rule)
+            .or_else(|| ArtifactViolation::on("artifacts", rule))
+            .expect("`artifacts` is a closed artifact path"),
+    }
+}
+
+fn cross(
+    field: &'static str,
+    rule: ArtifactRule,
+    requires: Option<&'static str>,
+    hint: &'static str,
+) -> ArtifactsRefusal {
+    ArtifactsRefusal {
+        reason: ReportRejection::ArtifactsContract,
+        violation: ArtifactViolation::cross(field, rule, requires, hint),
+    }
+}
+
+/// One closed-vocabulary string (`resultKind`, `nextAction`), as the `'static`
+/// member of `allowed` it equals.
+fn closed_value(
+    object: &Map<String, Value>,
+    key: &str,
+    field: &str,
+    allowed: &'static [&'static str],
+) -> Result<Option<&'static str>, ArtifactsRefusal> {
+    match object.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) => allowed
+            .iter()
+            .copied()
+            .find(|candidate| *candidate == value)
+            .map(Some)
+            .ok_or_else(|| {
+                refused(
+                    ReportRejection::ArtifactsContract,
+                    field,
+                    ArtifactRule::Enum,
+                )
+            }),
+        Some(_) => Err(refused(
+            ReportRejection::ArtifactsContract,
+            field,
+            ArtifactRule::Format,
+        )),
+    }
+}
+
+/// One `tests` / `toolCounts` count: an integer in `0..=MAX_REPORTED_COUNT`.
+fn reported_count(raw: &Value, field: &str) -> Result<i64, ArtifactsRefusal> {
+    let Value::Number(number) = raw else {
+        return Err(refused(
+            ReportRejection::ArtifactsContract,
+            field,
+            ArtifactRule::Format,
+        ));
+    };
+    match number.as_i64() {
+        Some(value) if (0..=MAX_REPORTED_COUNT).contains(&value) => Ok(value),
+        Some(_) => Err(refused(
+            ReportRejection::ArtifactsContract,
+            field,
+            ArtifactRule::Range,
+        )),
+        // A fraction is the wrong shape; an integer beyond i64 is out of range.
+        None if number.is_u64() => Err(refused(
+            ReportRejection::ArtifactsContract,
+            field,
+            ArtifactRule::Range,
+        )),
+        None => Err(refused(
+            ReportRejection::ArtifactsContract,
+            field,
+            ArtifactRule::Format,
+        )),
+    }
+}
+
+fn validated_tests(raw: Option<&Value>) -> Result<Option<(i64, i64, i64)>, ArtifactsRefusal> {
+    let object = match raw {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::Object(object)) => object,
+        Some(_) => {
+            return Err(refused(
+                ReportRejection::ArtifactsContract,
+                "artifacts.tests",
+                ArtifactRule::Format,
+            ))
+        }
+    };
+    if object
+        .keys()
+        .any(|key| !TEST_COUNT_KEYS.contains(&key.as_str()))
+    {
+        return Err(refused(
+            ReportRejection::ArtifactsContract,
+            "artifacts.tests",
+            ArtifactRule::Forbidden,
+        ));
+    }
+    let mut counts = [0_i64; 3];
+    for (slot, key) in counts.iter_mut().zip(TEST_COUNT_KEYS) {
+        let field = match key {
+            "passed" => "artifacts.tests.passed",
+            "failed" => "artifacts.tests.failed",
+            _ => "artifacts.tests.notRun",
+        };
+        match object.get(key) {
+            None | Some(Value::Null) => {
+                return Err(refused(
+                    ReportRejection::ArtifactsContract,
+                    field,
+                    ArtifactRule::Required,
+                ))
+            }
+            Some(raw) => *slot = reported_count(raw, field)?,
+        }
+    }
+    Ok(Some((counts[0], counts[1], counts[2])))
+}
+
+fn validated_tool_counts(
+    raw: Option<&Value>,
+) -> Result<Option<Vec<(&'static str, i64)>>, ArtifactsRefusal> {
+    let object = match raw {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::Object(object)) => object,
+        Some(_) => {
+            return Err(refused(
+                ReportRejection::ArtifactsContract,
+                "artifacts.toolCounts",
+                ArtifactRule::Format,
+            ))
+        }
+    };
+    if object
+        .keys()
+        .any(|key| !TOOL_COUNT_KEYS.contains(&key.as_str()))
+    {
+        return Err(refused(
+            ReportRejection::ArtifactsContract,
+            "artifacts.toolCounts",
+            ArtifactRule::Forbidden,
+        ));
+    }
+    let mut counts = Vec::new();
+    for key in TOOL_COUNT_KEYS {
+        let field = match key {
+            "run" => "artifacts.toolCounts.run",
+            "edit" => "artifacts.toolCounts.edit",
+            "read" => "artifacts.toolCounts.read",
+            "search" => "artifacts.toolCounts.search",
+            "web" => "artifacts.toolCounts.web",
+            _ => "artifacts.toolCounts.other",
+        };
+        match object.get(key) {
+            None | Some(Value::Null) => {}
+            Some(raw) => counts.push((key, reported_count(raw, field)?)),
+        }
+    }
+    Ok((!counts.is_empty()).then_some(counts))
+}
+
+fn validated_commit_sha(raw: Option<&Value>) -> Result<Option<String>, ArtifactsRefusal> {
+    let field = "artifacts.commitSha";
+    match raw {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) => {
+            if !(7..=40).contains(&value.len()) {
+                return Err(refused(
+                    ReportRejection::ArtifactsContract,
+                    field,
+                    ArtifactRule::Range,
+                ));
+            }
+            if !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                return Err(refused(
+                    ReportRejection::ArtifactsContract,
+                    field,
+                    ArtifactRule::Format,
+                ));
+            }
+            Ok(Some(value.to_ascii_lowercase()))
+        }
+        Some(_) => Err(refused(
+            ReportRejection::ArtifactsContract,
+            field,
+            ArtifactRule::Format,
+        )),
+    }
+}
+
+/// ADR-0162 증보 5 C1's cross rules — the minimum that keeps the closed fields
+/// from contradicting each other. The first broken rule is the answer, in a
+/// fixed order, so a retry that fixes it meets the next one deterministically.
+fn contract_violation(artifacts: &GatewayArtifacts) -> Option<ArtifactsRefusal> {
+    const NEEDS_KIND: &str = "needs artifacts.resultKind";
+    let Some(kind) = artifacts.result_kind else {
+        // An old five-key routine (or counts alone) needs no kind; the three
+        // code-task fields do.
+        for (field, present) in [
+            ("artifacts.tests", artifacts.tests.is_some()),
+            ("artifacts.nextAction", artifacts.next_action.is_some()),
+            ("artifacts.commitSha", artifacts.commit_sha.is_some()),
+        ] {
+            if present {
+                return Some(cross(
+                    field,
+                    ArtifactRule::Requires,
+                    Some("artifacts.resultKind"),
+                    NEEDS_KIND,
+                ));
+            }
+        }
+        return None;
+    };
+    let has_pr = artifacts.pr_url.is_some();
+    let has_branch = artifacts.branch.is_some();
+    match kind {
+        "pr_opened" if !has_pr => {
+            return Some(cross(
+                "artifacts.prUrl",
+                ArtifactRule::Required,
+                None,
+                "is required when resultKind is pr_opened",
+            ))
+        }
+        "branch_only" if !has_branch => {
+            return Some(cross(
+                "artifacts.branch",
+                ArtifactRule::Required,
+                None,
+                "is required when resultKind is branch_only",
+            ))
+        }
+        "branch_only" if has_pr => {
+            return Some(cross(
+                "artifacts.prUrl",
+                ArtifactRule::Forbidden,
+                None,
+                "must be absent when resultKind is branch_only",
+            ))
+        }
+        "vm_only" if has_pr => {
+            return Some(cross(
+                "artifacts.prUrl",
+                ArtifactRule::Forbidden,
+                None,
+                "must be absent when resultKind is vm_only",
+            ))
+        }
+        "vm_only" if has_branch => {
+            return Some(cross(
+                "artifacts.branch",
+                ArtifactRule::Forbidden,
+                None,
+                "must be absent when resultKind is vm_only",
+            ))
+        }
+        "no_change" => {
+            for (field, present) in [
+                ("artifacts.prUrl", has_pr),
+                ("artifacts.branch", has_branch),
+                ("artifacts.commitSha", artifacts.commit_sha.is_some()),
+            ] {
+                if present {
+                    return Some(cross(
+                        field,
+                        ArtifactRule::Forbidden,
+                        None,
+                        "must be absent when resultKind is no_change",
+                    ));
+                }
+            }
+            for (field, value) in [
+                ("artifacts.added", artifacts.added),
+                ("artifacts.deleted", artifacts.deleted),
+                ("artifacts.commits", artifacts.commits),
+            ] {
+                if value.is_some_and(|count| count != 0) {
+                    return Some(cross(
+                        field,
+                        ArtifactRule::Forbidden,
+                        None,
+                        "must be absent or 0 when resultKind is no_change",
+                    ));
+                }
+            }
+        }
+        _ => {}
+    }
+    if artifacts.next_action == Some("merge_ok") {
+        if kind != "pr_opened" {
+            return Some(cross(
+                "artifacts.nextAction",
+                ArtifactRule::Requires,
+                Some("artifacts.resultKind"),
+                "can be merge_ok only when resultKind is pr_opened",
+            ));
+        }
+        if artifacts.tests.is_some_and(|(_, failed, _)| failed > 0) {
+            return Some(cross(
+                "artifacts.nextAction",
+                ArtifactRule::Forbidden,
+                None,
+                "cannot be merge_ok while artifacts.tests.failed is above 0",
+            ));
+        }
+    }
+    None
+}
+
+/// `artifacts` (D12, ADR-0162 증보 5 C1/C2) against the share's rules and the
+/// result contract. `Ok(None)` for an absent, `null` or empty object; any
+/// malformed field or broken cross rule is an `Err` — the caller rejects the
 /// **whole** completion, nothing is dropped and nothing is stored.
 ///
 /// `additionalProperties:false` is enforced here as well as by the published
@@ -985,53 +1368,125 @@ impl GatewayArtifacts {
 pub(crate) fn validated_gateway_artifacts(
     raw: Option<&Value>,
     allowed_hosts: &[String],
-) -> Result<Option<GatewayArtifacts>, ReportRejection> {
+) -> Result<Option<GatewayArtifacts>, ArtifactsRefusal> {
     let object = match raw {
         None | Some(Value::Null) => return Ok(None),
         Some(Value::Object(object)) => object,
-        Some(_) => return Err(ReportRejection::ArtifactsShape),
+        Some(_) => {
+            return Err(refused(
+                ReportRejection::ArtifactsShape,
+                "artifacts",
+                ArtifactRule::Format,
+            ))
+        }
     };
-    if object.keys().any(|key| {
-        !matches!(
-            key.as_str(),
-            "prUrl" | "branch" | "added" | "deleted" | "commits"
-        )
-    }) {
-        return Err(ReportRejection::ArtifactsShape);
+    if object
+        .keys()
+        .any(|key| !ARTIFACT_KEYS.contains(&key.as_str()))
+    {
+        return Err(refused(
+            ReportRejection::ArtifactsShape,
+            "artifacts",
+            ArtifactRule::Forbidden,
+        ));
     }
-    let text = |key: &str| -> Result<Option<&str>, ReportRejection> {
+    let text = |key: &str, field: &str| -> Result<Option<&str>, ArtifactsRefusal> {
         match object.get(key) {
             None | Some(Value::Null) => Ok(None),
             Some(Value::String(value)) => Ok(Some(value.as_str())),
-            Some(_) => Err(ReportRejection::ArtifactsShape),
+            Some(_) => Err(refused(
+                ReportRejection::ArtifactsShape,
+                field,
+                ArtifactRule::Format,
+            )),
         }
     };
-    let count = |key: &str| -> Result<Option<i64>, ReportRejection> {
+    let count = |key: &str, field: &str| -> Result<Option<i64>, ArtifactsRefusal> {
         let raw = match object.get(key) {
             None | Some(Value::Null) => return Ok(None),
             Some(Value::Number(number)) => number.as_i64(),
-            Some(_) => return Err(ReportRejection::ArtifactsShape),
+            Some(_) => {
+                return Err(refused(
+                    ReportRejection::ArtifactsShape,
+                    field,
+                    ArtifactRule::Format,
+                ))
+            }
         };
         // A fractional or beyond-i64 number is not a count either.
         if raw.is_none() {
-            return Err(ReportRejection::ArtifactsCount);
+            return Err(refused(
+                ReportRejection::ArtifactsCount,
+                field,
+                ArtifactRule::Format,
+            ));
         }
-        validated_count(raw, key, MAX_COUNT).map_err(|_| ReportRejection::ArtifactsCount)
+        validated_count(raw, key, MAX_COUNT)
+            .map_err(|_| refused(ReportRejection::ArtifactsCount, field, ArtifactRule::Range))
     };
     let artifacts = GatewayArtifacts {
-        pr_url: text("prUrl")?
+        pr_url: text("prUrl", "artifacts.prUrl")?
             .map(|value| validated_pr_url(value, allowed_hosts))
             .transpose()
-            .map_err(|_| ReportRejection::ArtifactsPrUrl)?,
-        branch: text("branch")?
+            .map_err(|_| {
+                refused(
+                    ReportRejection::ArtifactsPrUrl,
+                    "artifacts.prUrl",
+                    ArtifactRule::Format,
+                )
+            })?,
+        branch: text("branch", "artifacts.branch")?
             .map(validated_branch)
             .transpose()
-            .map_err(|_| ReportRejection::ArtifactsBranch)?,
-        added: count("added")?,
-        deleted: count("deleted")?,
-        commits: count("commits")?,
+            .map_err(|_| {
+                refused(
+                    ReportRejection::ArtifactsBranch,
+                    "artifacts.branch",
+                    ArtifactRule::Format,
+                )
+            })?,
+        added: count("added", "artifacts.added")?,
+        deleted: count("deleted", "artifacts.deleted")?,
+        commits: count("commits", "artifacts.commits")?,
+        result_kind: closed_value(object, "resultKind", "artifacts.resultKind", &RESULT_KINDS)?,
+        tests: validated_tests(object.get("tests"))?,
+        next_action: closed_value(object, "nextAction", "artifacts.nextAction", &NEXT_ACTIONS)?,
+        commit_sha: validated_commit_sha(object.get("commitSha"))?,
+        tool_counts: validated_tool_counts(object.get("toolCounts"))?,
     };
+    if let Some(refusal) = contract_violation(&artifacts) {
+        return Err(refusal);
+    }
     Ok((!artifacts.is_empty()).then_some(artifacts))
+}
+
+/// The agent-reported part of a stored `output.artifacts` — the read-side
+/// projection ADR-0162 증보 5 C1 calls `agentReported`:
+/// `{resultKind, tests, nextAction, commitSha, toolCounts}`, only the keys that
+/// were stored. `None` when the run reported none of them (an old routine, or
+/// no artifacts at all), so the field is simply absent on the wire.
+///
+/// Only values of the stored shape are carried: this reads what
+/// [`validated_gateway_artifacts`] wrote, but a row is still data, not proof.
+pub(crate) fn agent_reported_of(output: Option<&Value>) -> Option<Value> {
+    let artifacts = output?.get("artifacts")?.as_object()?;
+    let mut reported = Map::new();
+    for key in ["resultKind", "nextAction", "commitSha"] {
+        if let Some(value @ Value::String(_)) = artifacts.get(key) {
+            reported.insert(key.into(), value.clone());
+        }
+    }
+    for key in ["tests", "toolCounts"] {
+        if let Some(Value::Object(counts)) = artifacts.get(key) {
+            let counts: Map<String, Value> = counts
+                .iter()
+                .filter(|(_, value)| value.is_i64())
+                .map(|(name, value)| (name.clone(), value.clone()))
+                .collect();
+            reported.insert(key.into(), Value::Object(counts));
+        }
+    }
+    (!reported.is_empty()).then_some(Value::Object(reported))
 }
 
 /// Where a report stands before its refusal may be recorded.
@@ -1073,6 +1528,15 @@ pub(crate) async fn report_standing_in_tx(
 
 /// The audit row a refused report leaves (D15): the run, the tool and a reason
 /// code — no text from the report.
+///
+/// ADR-0162 증보 5 C3: a refused `artifacts` also records the closed `field` and
+/// `rule` it broke and which refusal this is for the run (`attempt`, 1-based),
+/// so an operator can see an agent that retries the same mistake. Still no
+/// value. The server does not stop a retry by count — the lease and the rate
+/// limit bound it; the routine's "at most 2 corrections" rule is the agent's.
+// The tenant, the run, its agent, the token, the tool and the two halves of the
+// refusal are each one audit column/key; bundling them would only rename them.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn write_report_rejected_audit(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -1081,7 +1545,37 @@ pub(crate) async fn write_report_rejected_audit(
     via_token_id: Option<Uuid>,
     tool: &'static str,
     reason: ReportRejection,
+    violation: Option<ArtifactViolation>,
 ) -> Result<(), momo_db::DbError> {
+    let mut detail = json!({
+        "run_id": run_id.to_string(),
+        "tool": tool,
+        "reason": reason.code(),
+    });
+    if let Some(violation) = violation {
+        // Counted per run and tool — a superset of "per lease", since a refused
+        // completion leaves its lease intact and a run rarely changes lease.
+        // Keyed by the indexed target columns (`audit_target_idx`, the same
+        // predicate `momo_db::audit::run_event_recorded` uses), so a refusal
+        // reads this run's rows rather than scanning the workspace's audit log.
+        let earlier: i64 = momo_db::sqlx::query_scalar(
+            "SELECT count(*) FROM audit_log \
+              WHERE target_type = 'agent_run' AND target_id = $1 \
+                AND workspace_id = $2 AND run_id = $1 AND action = $3 \
+                AND detail->>'tool' = $4",
+        )
+        .bind(run_id)
+        .bind(workspace_id)
+        .bind(REPORT_REJECTED_AUDIT_ACTION)
+        .bind(tool)
+        .fetch_one(&mut *conn)
+        .await?;
+        if let Some(object) = detail.as_object_mut() {
+            object.insert("field".into(), json!(violation.field));
+            object.insert("rule".into(), json!(violation.rule.as_str()));
+            object.insert("attempt".into(), json!(earlier + 1));
+        }
+    }
     write_audit(
         conn,
         &AuditEntry::new(workspace_id, REPORT_REJECTED_AUDIT_ACTION)
@@ -1089,14 +1583,7 @@ pub(crate) async fn write_report_rejected_audit(
             .target("agent_run", run_id)
             .via_token(via_token_id)
             .run(run_id)
-            .with_schema(
-                "momo.agent_run.report_rejected.v0",
-                json!({
-                    "run_id": run_id.to_string(),
-                    "tool": tool,
-                    "reason": reason.code(),
-                }),
-            ),
+            .with_schema("momo.agent_run.report_rejected.v0", detail),
     )
     .await?;
     Ok(())
@@ -1613,7 +2100,7 @@ mod tests {
         ];
         for (value, expected) in cases {
             assert_eq!(
-                validated_gateway_artifacts(Some(&value), &hosts()),
+                validated_gateway_artifacts(Some(&value), &hosts()).map_err(|r| r.reason),
                 Err(expected),
                 "{value}"
             );
@@ -1621,6 +2108,323 @@ mod tests {
         assert!(
             validated_gateway_artifacts(Some(&json!({"commits": MAX_COUNT})), &hosts()).is_ok()
         );
+    }
+
+    fn refusal_of(value: Value) -> (&'static str, &'static str, Option<&'static str>) {
+        let refusal = validated_gateway_artifacts(Some(&value), &hosts())
+            .expect_err(&format!("{value} must be refused"));
+        (
+            refusal.violation.field,
+            refusal.violation.rule.as_str(),
+            refusal.violation.requires,
+        )
+    }
+
+    /// ADR-0162 증보 5 C1 — a full code-task report is stored in its closed shape
+    /// (sha lowercased, counts as sent) and the old five keys still pass alone.
+    #[test]
+    fn a_code_task_report_is_stored_closed_and_normalised() {
+        let artifacts = validated_gateway_artifacts(
+            Some(&json!({
+                "resultKind": "pr_opened",
+                "prUrl": "https://github.com/acme/app/pull/42",
+                "branch": "feat/x",
+                "tests": {"passed": 12, "failed": 0, "notRun": 1},
+                "nextAction": "merge_ok",
+                "commitSha": "ABCDEF0123",
+                "toolCounts": {"run": 12, "edit": 4, "read": 30, "web": null}
+            })),
+            &hosts(),
+        )
+        .expect("valid")
+        .expect("present");
+        assert_eq!(
+            artifacts.to_json(),
+            json!({
+                "prUrl": "https://github.com/acme/app/pull/42",
+                "branch": "feat/x",
+                "resultKind": "pr_opened",
+                "tests": {"passed": 12, "failed": 0, "notRun": 1},
+                "nextAction": "merge_ok",
+                "commitSha": "abcdef0123",
+                "toolCounts": {"run": 12, "edit": 4, "read": 30}
+            })
+        );
+        assert_eq!(
+            artifacts.keys(),
+            [
+                "prUrl",
+                "branch",
+                "resultKind",
+                "tests",
+                "nextAction",
+                "commitSha",
+                "toolCounts"
+            ]
+        );
+        assert_eq!(
+            agent_reported_of(Some(&json!({"artifacts": artifacts.to_json()}))),
+            Some(json!({
+                "resultKind": "pr_opened",
+                "tests": {"passed": 12, "failed": 0, "notRun": 1},
+                "nextAction": "merge_ok",
+                "commitSha": "abcdef0123",
+                "toolCounts": {"run": 12, "edit": 4, "read": 30}
+            }))
+        );
+        // Counts alone need no kind (C2); an empty toolCounts is nothing.
+        assert!(
+            validated_gateway_artifacts(Some(&json!({"toolCounts": {"read": 3}})), &hosts())
+                .expect("valid")
+                .is_some()
+        );
+        assert_eq!(
+            validated_gateway_artifacts(Some(&json!({"toolCounts": {}})), &hosts()),
+            Ok(None)
+        );
+        // An old routine's report has no agent-reported part.
+        assert_eq!(
+            agent_reported_of(Some(
+                &json!({"artifacts": {"prUrl": "https://github.com/a/b/pull/1"}})
+            )),
+            None
+        );
+        assert_eq!(agent_reported_of(None), None);
+        // Each kind's minimal valid report.
+        for ok in [
+            json!({"resultKind": "pr_opened", "prUrl": "https://github.com/a/b/pull/1", "branch": "x"}),
+            json!({"resultKind": "branch_only", "branch": "x", "commitSha": "abcdef1"}),
+            json!({"resultKind": "vm_only", "tests": {"passed": 0, "failed": 2, "notRun": 0}, "nextAction": "blocked"}),
+            json!({"resultKind": "no_change", "added": 0, "deleted": 0, "commits": 0, "nextAction": "none"}),
+            json!({"resultKind": "pr_opened", "prUrl": "https://github.com/a/b/pull/1", "tests": {"passed": 3, "failed": 1, "notRun": 0}, "nextAction": "please_test"}),
+        ] {
+            assert!(
+                validated_gateway_artifacts(Some(&ok), &hosts()).is_ok(),
+                "{ok}"
+            );
+        }
+    }
+
+    /// ADR-0162 증보 5 C1/C3 — every cross rule and closed-field fault refuses the
+    /// whole report and names exactly which field and rule (never the value).
+    #[test]
+    fn each_contract_violation_names_its_field_and_rule() {
+        let pr = "https://github.com/a/b/pull/1";
+        let kind = Some("artifacts.resultKind");
+        type Named = (&'static str, &'static str, Option<&'static str>);
+        let cases: Vec<(Value, Named)> = vec![
+            (
+                json!({"tests": {"passed": 1, "failed": 0, "notRun": 0}}),
+                ("artifacts.tests", "requires", kind),
+            ),
+            (
+                json!({"nextAction": "none"}),
+                ("artifacts.nextAction", "requires", kind),
+            ),
+            (
+                json!({"commitSha": "abcdef1"}),
+                ("artifacts.commitSha", "requires", kind),
+            ),
+            (
+                json!({"resultKind": "pr_opened"}),
+                ("artifacts.prUrl", "required", None),
+            ),
+            (
+                json!({"resultKind": "branch_only"}),
+                ("artifacts.branch", "required", None),
+            ),
+            (
+                json!({"resultKind": "branch_only", "branch": "x", "prUrl": pr}),
+                ("artifacts.prUrl", "forbidden", None),
+            ),
+            (
+                json!({"resultKind": "vm_only", "prUrl": pr}),
+                ("artifacts.prUrl", "forbidden", None),
+            ),
+            (
+                json!({"resultKind": "vm_only", "branch": "x"}),
+                ("artifacts.branch", "forbidden", None),
+            ),
+            (
+                json!({"resultKind": "no_change", "commitSha": "abcdef1"}),
+                ("artifacts.commitSha", "forbidden", None),
+            ),
+            (
+                json!({"resultKind": "no_change", "added": 3}),
+                ("artifacts.added", "forbidden", None),
+            ),
+            (
+                json!({"resultKind": "no_change", "commits": 1}),
+                ("artifacts.commits", "forbidden", None),
+            ),
+            (
+                json!({"resultKind": "branch_only", "branch": "x", "nextAction": "merge_ok"}),
+                ("artifacts.nextAction", "requires", kind),
+            ),
+            (
+                json!({"resultKind": "pr_opened", "prUrl": pr, "nextAction": "merge_ok", "tests": {"passed": 3, "failed": 1, "notRun": 0}}),
+                ("artifacts.nextAction", "forbidden", None),
+            ),
+            (
+                json!({"resultKind": "merged"}),
+                ("artifacts.resultKind", "enum", None),
+            ),
+            (
+                json!({"resultKind": 3}),
+                ("artifacts.resultKind", "format", None),
+            ),
+            (
+                json!({"resultKind": "vm_only", "nextAction": "ship"}),
+                ("artifacts.nextAction", "enum", None),
+            ),
+            (
+                json!({"resultKind": "vm_only", "tests": {"passed": 1}}),
+                ("artifacts.tests.failed", "required", None),
+            ),
+            (
+                json!({"resultKind": "vm_only", "tests": {"passed": 1, "failed": 0, "notRun": 0, "x": 1}}),
+                ("artifacts.tests", "forbidden", None),
+            ),
+            (
+                json!({"resultKind": "vm_only", "tests": {"passed": 100_001, "failed": 0, "notRun": 0}}),
+                ("artifacts.tests.passed", "range", None),
+            ),
+            (
+                json!({"resultKind": "vm_only", "tests": {"passed": 1, "failed": 0, "notRun": -1}}),
+                ("artifacts.tests.notRun", "range", None),
+            ),
+            (
+                json!({"resultKind": "vm_only", "commitSha": "xyz1234"}),
+                ("artifacts.commitSha", "format", None),
+            ),
+            (
+                json!({"resultKind": "vm_only", "commitSha": "abc"}),
+                ("artifacts.commitSha", "range", None),
+            ),
+            (
+                json!({"resultKind": "vm_only", "commitSha": "a".repeat(41)}),
+                ("artifacts.commitSha", "range", None),
+            ),
+            (
+                json!({"toolCounts": {"bash": 1}}),
+                ("artifacts.toolCounts", "forbidden", None),
+            ),
+            (
+                json!({"toolCounts": {"run": 1.5}}),
+                ("artifacts.toolCounts.run", "format", None),
+            ),
+            (
+                json!({"toolCounts": {"web": 100_001}}),
+                ("artifacts.toolCounts.web", "range", None),
+            ),
+            (
+                json!({"toolCounts": "lots"}),
+                ("artifacts.toolCounts", "format", None),
+            ),
+            (json!({"title": "fix"}), ("artifacts", "forbidden", None)),
+            (
+                json!({"branch": "fix: rotate"}),
+                ("artifacts.branch", "format", None),
+            ),
+            (
+                json!({"prUrl": "http://github.com/a/b/pull/1"}),
+                ("artifacts.prUrl", "format", None),
+            ),
+            (json!({"added": -1}), ("artifacts.added", "range", None)),
+        ];
+        for (value, expected) in cases {
+            assert_eq!(refusal_of(value.clone()), expected, "{value}");
+            let refusal = validated_gateway_artifacts(Some(&value), &hosts()).unwrap_err();
+            let message = refusal.violation.message();
+            assert!(message.starts_with(expected.0), "{message}");
+            let data = refusal.violation.data().to_string();
+            for leaked in [
+                "merged", "ship", "bash", "lots", "xyz1234", "rotate", "http://",
+            ] {
+                assert!(
+                    !message.contains(leaked) && !data.contains(leaked),
+                    "{leaked}: {message} {data}"
+                );
+            }
+        }
+        // Old keys keep their old audit codes; new ones get the contract code.
+        assert_eq!(
+            validated_gateway_artifacts(Some(&json!({"resultKind": "pr_opened"})), &hosts())
+                .unwrap_err()
+                .reason
+                .code(),
+            "artifacts_contract_invalid"
+        );
+    }
+
+    /// Every path the server names is one momo-mcp's closed list knows, so no
+    /// refusal falls back to the generic object path by accident.
+    #[test]
+    fn every_refusal_path_is_a_closed_artifact_path() {
+        for field in [
+            "artifacts",
+            "artifacts.prUrl",
+            "artifacts.branch",
+            "artifacts.added",
+            "artifacts.deleted",
+            "artifacts.commits",
+            "artifacts.resultKind",
+            "artifacts.tests",
+            "artifacts.tests.passed",
+            "artifacts.tests.failed",
+            "artifacts.tests.notRun",
+            "artifacts.nextAction",
+            "artifacts.commitSha",
+            "artifacts.toolCounts",
+            "artifacts.toolCounts.run",
+            "artifacts.toolCounts.edit",
+            "artifacts.toolCounts.read",
+            "artifacts.toolCounts.search",
+            "artifacts.toolCounts.web",
+            "artifacts.toolCounts.other",
+        ] {
+            assert_eq!(
+                ArtifactViolation::on(field, ArtifactRule::Format).map(|v| v.field),
+                Some(field)
+            );
+        }
+    }
+
+    /// C3's message is the agent's one fix instruction, so it must state the
+    /// rule the validator actually applies: every character `validated_branch`
+    /// refuses is named in the branch clause, and the PR clause does not pin
+    /// one host when the operator may allow a GitHub Enterprise one.
+    #[test]
+    fn the_branch_and_pr_messages_state_the_rule_the_validator_applies() {
+        let branch = refusal_message(json!({"branch": "a:b"}));
+        for forbidden in ['~', '^', ':', '?', '*', '[', '\\'] {
+            let raw = format!("feat{forbidden}x");
+            assert!(
+                momo_t3::work_share::validated_branch(&raw).is_err(),
+                "{raw} is refused by the validator"
+            );
+            assert!(
+                branch.contains(forbidden),
+                "{forbidden} missing from: {branch}"
+            );
+        }
+        assert!(
+            branch.contains("whitespace") && branch.contains("path"),
+            "{branch}"
+        );
+        let pr = refusal_message(json!({"prUrl": "https://example.com/a/b/pull/1"}));
+        assert!(
+            pr.starts_with("artifacts.prUrl must be https://<allowed host>/"),
+            "{pr}"
+        );
+        assert!(!pr.contains("example.com"), "{pr}");
+    }
+
+    fn refusal_message(value: Value) -> String {
+        validated_gateway_artifacts(Some(&value), &hosts())
+            .expect_err("refused")
+            .violation
+            .message()
     }
 
     /// The published schema's ceiling is the share's.

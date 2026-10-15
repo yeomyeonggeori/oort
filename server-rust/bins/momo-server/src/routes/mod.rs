@@ -55,6 +55,8 @@ pub mod notification_rules;
 pub mod password;
 pub mod personal_agents;
 pub mod personal_links;
+/// ADR-0113 증보 2026-10-15 P-S1 (#3859) — official plugin catalog + manifest reads.
+pub mod plugins;
 /// ADR-0160 — declared presence status ③ (durable). The availability ② half is
 /// in [`ephemeral`]; the connection ① half never reaches the server.
 pub mod presence;
