@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import githubManifest from "../../../../server/Fixtures/plugin-manifests/github.json";
+// ADR-0113 증보 P-S1 (#3859): bytes the Rust server answered, pinned by
+// server-rust/bins/momo-server/tests/plugin_registry_read_conformance_pg.rs.
+import rustCatalog from "../../../../server/Fixtures/plugin-wire/catalog.json";
+import rustGithubDetail from "../../../../server/Fixtures/plugin-wire/detail-github.json";
 import { pluginCatalogFromWire, pluginDetailFromWire } from "@momo/core/lib/api";
 import { WireShapeError } from "@momo/core/lib/wire";
 
@@ -100,4 +104,37 @@ describe("plugin API wire boundary", () => {
     "rejects malformed detail response %j into an inline error state",
     (body) => expect(() => pluginDetailFromWire(body)).toThrow(WireShapeError)
   );
+
+  // ⑤ of ADR-0113 증보 P-S1: the Rust read routes answer what this parser
+  // already accepts. Not a lookalike — the fixture is the server's response.
+  it("accepts the Rust server's catalog response", () => {
+    const catalog = pluginCatalogFromWire(rustCatalog);
+    expect(catalog.plugins.map((plugin) => plugin.pluginId)).toEqual([
+      "com.momo.plugins.drive",
+      "com.momo.plugins.github",
+      "com.momo.plugins.linear",
+      "com.momo.plugins.notion",
+    ]);
+    const github = catalog.plugins.find((plugin) => plugin.pluginId === "com.momo.plugins.github");
+    expect(github).toMatchObject({ installed: true, enabled: true, official: true, recommended: true });
+    expect(catalog.toolsByPlugin.get("com.momo.plugins.github")).toEqual([
+      { name: "github.list_repositories", risk: "read", approvalTier: "read_only" },
+      { name: "github.search_issues", risk: "read", approvalTier: "read_only" },
+    ]);
+  });
+
+  it("accepts the Rust server's manifest detail response", () => {
+    const detail = pluginDetailFromWire(rustGithubDetail);
+    expect(detail).toMatchObject({
+      pluginId: "com.momo.plugins.github",
+      publisherName: "GitHub",
+      publisherVerified: true,
+      license: "MIT",
+      provenanceURL: "https://github.com/github/github-mcp-server",
+    });
+    expect(detail.tools.map((tool) => [tool.name, tool.scopes, tool.approvalTier])).toEqual([
+      ["github.list_repositories", ["github:read"], "read_only"],
+      ["github.search_issues", ["github:read"], "read_only"],
+    ]);
+  });
 });
