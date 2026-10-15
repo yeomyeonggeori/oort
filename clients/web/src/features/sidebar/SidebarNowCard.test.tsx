@@ -99,6 +99,15 @@ describe("SidebarNowCard", () => {
     expect(card.querySelector("progress, [role='progressbar']")).toBeNull();
   });
 
+  it("앞 칸은 로봇 아이콘이 아니라 그 에이전트의 아바타다 (#3821)", () => {
+    mount([signal({})]);
+    const card = screen.getByTestId("sidebar-now-card");
+    const avatar = card.querySelector("[data-testid='member-avatar']");
+    expect(avatar?.getAttribute("data-avatar-kind")).toBe("agent");
+    expect(avatar?.textContent).toBe("H");
+    expect(card.querySelector("svg.lucide-bot")).toBeNull();
+  });
+
   it("가장 오래된 턴을 싣고 나머지는 수로 센다", () => {
     mount([
       signal({ memberId: AGENT2, channelId: CH2, startedAtMs: NOW - 5_000 }),

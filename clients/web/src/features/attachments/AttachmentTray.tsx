@@ -4,6 +4,8 @@ import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import {
   ATTACH_COPY,
+  attachmentDisplayName,
+  CLEAR_ALL_MIN_DRAFTS,
   draftAnnouncement,
   draftStatusLine,
   splitFileName,
@@ -14,186 +16,213 @@ import {
   showsDraftThumbnail,
   type AttachmentDraft,
 } from "@momo/core/features/attachments/model";
-import { useDraftThumbnail, type DraftThumbnailState } from "./draftThumbnail";
+import { useDraftThumbnail } from "./draftThumbnail";
 
-// =============================================================================
-// 컴포저의 첨부 자리 (ADR-0151 D2 / #1202 첨부 축).
+// =====================================================================
+// 컴포저의 첨부 자리 (ADR-0151 D2 / #1202 · #3820 Buzz 식 칩).
 //
-// **칩이지 카드가 아니다.** 첨부 하나마다 둥근 상자를 씌우면 입력창 위에 작은
-// 카드들이 쌓이고, 그것이 이 앱이 금지한 「모든 행을 감싼 과대한 웹 카드」다
-// (design-taste-web §8).
+// **칩이지 목록이 아니다.** 입력창 안 위쪽에 둥근 칩이 줄바꿈되며 선다. 이미지는
+// 썸네일만, 파일은 아이콘과 짧은 이름이다. 파일명 · 크기 · 「업로드 완료」 행을 쌓던
+// 앞 판(#1202)은 정상 상태에서도 줄마다 문장을 찍어 목록처럼 읽혔다.
 //
-// ## 두 줄인 이유 (design-review B-1)
+// ## 상태가 칩에서 보이는 방식
 //
-// R1 은 이름·상태·퍼센트를 **한 줄**에 놓고 이름에만 `truncate`, 상태에는
-// `shrink-0` 을 걸었다. 그래서 줄어들 수 있는 유일한 것이 「무엇이」이고 줄어들지
-// 않는 것이 「무엇이 잘못됐는지」였다: 320px 스레드 패널과 390px 폰에서 파일명이
-// **0px 로 사라지고** 오류 문장이 「다시 시도」·✕ 위에 겹쳐 인쇄됐다. 긴 이름
-// 탓이 아니라 6종 실패 문구 중 3종이 항상 그 폭을 넘었다.
+//   대기 · 확인 중 · 완료   조용하다. 문장은 sr-only (낭독은 live region 이 한다).
+//   업로드 중              칩 아래 가장자리에 진행 막대. 아직 못 잰 동안은 흐르는
+//                          줄(indeterminate), 첫 측정부터 값 있는 막대 + 퍼센트.
+//   실패                   파일 칩 모양 + 빨간 이유 문장 + (되돌릴 값이 있으면)
+//                          다시 시도. 제거 ×는 늘 보인다.
 //
-// 이제 이름과 상태는 각자 줄을 갖는다. 이름은 `truncate`(한 줄이 맞다 — 파일명은
-// 접히면 오히려 못 읽는다), 상태는 `break-words` 로 접힌다. 컨트롤은 바깥 행에
-// 남아 어느 폭에서도 자기 자리를 잃지 않는다.
+// 지켜진 앞 판의 규율: 「확인 중」에서 막대를 100% 로 세우지 않고 첫 측정 전에 0 짜리
+// 막대를 그리지 않는다(B-3), 이름은 가운데에서 생략한다(N-A), 20개를 채워도 창을
+// 먹지 않는다(B-2), 발치 안내 줄은 비어도 자리를 지킨다(M-3).
 //
-// ## 네 칸이 화면에서 다르게 보이는 방식
+// ## 제거 ×
 //
-//   대기 중   회색 두 줄. 막대 자리는 비어 있다 — 아무 바이트도 안 움직인다.
-//   업로드 중 회색 두 줄 + 막대. **아직 못 잰 동안은 흐르는 줄**(indeterminate),
-//             첫 측정이 오면 그때부터 값이 있는 막대 + 퍼센트.
-//   확인 중   회색 두 줄. 막대가 사라진다 — 셈이 끝났으므로 셈을 그리지 않는다.
-//   업로드 완료 회색 두 줄. 조용하다.
-//   실패     빨간 상태 줄 + (되돌릴 값이 있으면) 다시 시도 버튼.
-//
-// 「확인 중」에서 막대를 100%로 세워 두지 않는 것과, 첫 측정 전에 0짜리 막대를
-// 그리지 않는 것이 같은 규율의 앞뒤다: 화면은 재지 않은 것을 잰 척하지 않는다.
-// 막대 자리(2px)는 모든 칸에서 예약돼 있어서, 그 등장과 퇴장이 아래 줄을 밀지
-// 않는다.
-// =============================================================================
-
-/** 막대 자리. 모든 칸에서 같은 높이를 차지해 칩이 상태에 따라 자라지 않는다. */
-const PROGRESS_ROW_CLASS = "block h-marker w-full";
+// 호버 · 키보드 포커스에서 드러난다(`pointer-hover`: 호버가 있는 입력에서만 숨김,
+// 터치는 늘 보임). 숨겨진 상태에서도 탭 순서에는 있어서 키보드 사용자는 Tab 으로
+// 닿고, 포커스가 오면 보인다.
+// =====================================================================
 
 /** 줄 상자를 만드는 공백 한 칸. 빈 <p> 는 높이가 0 이라 예약이 되지 않는다. */
 const NBSP = "\u00a0";
 
-/**
- * 칩 왼쪽의 그림 자리 (#2701). 안전한 래스터 이미지면 48px 정사각형이 서고,
- * 바이트를 디코드하는 동안과 디코드하지 못한 뒤에도 **같은 상자**가 선다 —
- * 썸네일이 도착하는 순간 칩이 자라면 트레이 아래 입력창이 밀린다. 그 밖의 파일은
- * 지금까지의 16px 아이콘 그대로다.
- *
- * 썸네일의 `alt` 는 비어 있다: 바로 옆에 파일명이 있고, 보조기술이 같은 이름을
- * 두 번 읽을 이유가 없다(장식 이미지).
- */
-function DraftVisual({
-  thumbnail,
-  danger,
-  Icon,
-  alignToThumb,
+/** 칩 위의 제거 ×. 호버·키보드 포커스에서 드러나고 터치에서는 늘 보인다. */
+const REMOVE_BUTTON_CLASS =
+  "touch-target absolute right-1 top-1 flex size-control-sm items-center justify-center rounded-full bg-surface text-ink-muted shadow-sm press hover:text-ink focus-visible:focus-ring pointer-hover:opacity-0 pointer-hover:group-hover:opacity-100 pointer-hover:focus-visible:opacity-100";
+
+function RemoveButton({
+  draft,
+  alwaysVisible,
+  onRemove,
 }: {
-  thumbnail: DraftThumbnailState;
-  danger: boolean;
-  Icon: typeof ImageIcon;
-  /** 트레이에 썸네일 칩이 하나라도 있으면 아이콘 칩도 같은 **폭**을 잡는다. */
-  alignToThumb: boolean;
+  draft: AttachmentDraft;
+  alwaysVisible: boolean;
+  onRemove: (localId: string) => void;
 }) {
-  const iconClass = cn("size-4 shrink-0", danger ? "text-danger" : "text-ink-muted");
-  if (thumbnail.status === "none") {
-    // 섞인 트레이에서 파일명 열이 칩마다 다른 x 에서 시작하지 않게, 폭만 맞춘다.
-    // 높이는 그대로라 아이콘 칩은 자라지 않는다(20개 상한의 밀도를 지킨다).
-    return alignToThumb ? (
-      <span aria-hidden="true" className="flex w-tray-thumb shrink-0 justify-center">
-        <Icon className={iconClass} />
-      </span>
-    ) : (
-      <Icon aria-hidden="true" className={iconClass} />
-    );
-  }
-  if (thumbnail.status === "ready") {
-    return (
-      <img
-        src={thumbnail.dataUrl}
-        alt=""
-        draggable={false}
-        data-testid="attachment-chip-thumb"
-        className="size-tray-thumb shrink-0 rounded-sm border border-line object-cover"
-      />
-    );
-  }
-  // 로딩과 실패: 같은 중립 상자, 그 안에 아이콘. 셔머 없음(SKILL §4).
   return (
-    <span
-      aria-hidden="true"
-      className="flex size-tray-thumb shrink-0 items-center justify-center rounded-sm border border-line bg-surface-hover"
+    <button
+      type="button"
+      onClick={() => onRemove(draft.localId)}
+      aria-label={`${attachmentDisplayName(draft)} ${ATTACH_COPY.remove}`}
+      title={ATTACH_COPY.remove}
+      data-testid="attachment-chip-remove"
+      className={cn(
+        REMOVE_BUTTON_CLASS,
+        alwaysVisible && "pointer-hover:opacity-100"
+      )}
     >
-      <Icon className={iconClass} />
-    </span>
+      <X aria-hidden="true" className="size-4" />
+    </button>
   );
 }
 
+/**
+ * 업로드 진행 표시. 막대는 칩 **아래 가장자리**에 붙는다(칩 위에 얹힌 진행).
+ * 첫 측정 전에는 값 없는 막대(indeterminate), 측정이 오면 값 있는 막대 (B-3:
+ * 0 은 「아직 안 쟀다」이지 「하나도 안 갔다」가 아니다).
+ */
+function ChipProgress({
+  draft,
+  measured,
+}: {
+  draft: AttachmentDraft;
+  measured: boolean;
+}) {
+  return (
+    <progress
+      data-upload-progress
+      data-testid="attachment-chip-progress"
+      className="absolute inset-x-0 bottom-0 block h-marker w-full"
+      // `value` 를 **아예 달지 않는다**: 그것이 indeterminate 다.
+      {...(measured ? { value: draft.progress, max: 1 } : {})}
+      aria-label={`${attachmentDisplayName(draft)} ${ATTACH_COPY.uploading}`}
+    />
+  );
+}
+
+/**
+ * 칩 (#3820, Buzz 레퍼런스).
+ *
+ * 앞 판은 칩마다 「이름 · 상태 문장 · 진행 막대」 세 줄 행이었고, 정상일 때도
+ * 「업로드 완료」 같은 문장이 줄마다 찍혀 입력창 위가 목록처럼 읽혔다. 이제:
+ *
+ *   이미지(정상·진행 중)  썸네일만 있는 둥근 정사각형. 이름은 `title` 과 낭독에만.
+ *   파일(정상·진행 중)    아이콘 + 짧은 이름 한 줄. 상태 문장은 진행 중에만.
+ *   실패한 것(종류 무관)   이유를 읽어야 하므로 파일 칩 모양. 다시 시도 + 제거.
+ *
+ * 정상 상태의 문장(「업로드 완료」)은 시각에서 빠지고 sr-only 로 남는다. 상태 전이는
+ * 트레이의 live region(`useAttachmentAnnouncement`)이 낭독하므로 정보는 줄지 않는다.
+ * 화면은 **예외**(진행·실패)만 말한다.
+ */
 function DraftChip({
   draft,
-  alignToThumb,
   onRemove,
   onRetry,
 }: {
   draft: AttachmentDraft;
-  alignToThumb: boolean;
   onRemove: (localId: string) => void;
   onRetry: (localId: string) => void;
 }) {
   const line = draftStatusLine(draft);
-  const name = splitFileName(draft.name);
   const uploading = draft.status === "uploading";
-  // 0 은 「아직 안 쟀다」이지 「하나도 안 갔다」가 아니다 (design-review B-3).
-  // 잰 값이 없는 동안은 값 없는 막대(indeterminate)를 그리고 퍼센트를 찍지 않는다.
   const measured = uploading && line.percent !== null;
-  const Icon = isImageMime(draft.mime) ? ImageIcon : FileText;
+  const failed = draft.status === "failed";
   const thumbnail = useDraftThumbnail(draft);
+  const label = attachmentDisplayName(draft);
   const retryable =
-    draft.status === "failed" &&
-    draft.issue !== undefined &&
-    isRetryableIssue(draft.issue);
+    failed && draft.issue !== undefined && isRetryableIssue(draft.issue);
+  const Icon = isImageMime(draft.mime) ? ImageIcon : FileText;
+  const asThumb = showsDraftThumbnail(draft) && !failed;
+  const showStatus = failed || uploading || draft.status === "ready" || draft.status === "verifying";
+  const name = splitFileName(label);
+
+  const statusText = (
+    <span
+      className={cn(
+        "min-w-0 break-words text-meta",
+        line.danger ? "text-danger" : "text-ink-muted",
+        !showStatus && "sr-only"
+      )}
+      data-testid="attachment-chip-status"
+    >
+      {line.text}
+      {line.percent !== null && (
+        <>
+          {" "}
+          <span data-numeric data-testid="attachment-chip-percent">
+            {line.percent}%
+          </span>
+        </>
+      )}
+    </span>
+  );
+
+  if (asThumb) {
+    return (
+      <li
+        data-testid="attachment-chip"
+        data-attachment-status={draft.status}
+        data-thumb={thumbnail.status}
+        title={label}
+        className="group relative size-tray-thumb shrink-0 overflow-hidden rounded-md bg-surface-hover"
+      >
+        {thumbnail.status === "ready" ? (
+          <img
+            src={thumbnail.dataUrl}
+            alt=""
+            draggable={false}
+            data-testid="attachment-chip-thumb"
+            className={cn(
+              "size-full object-cover",
+              (uploading || draft.status === "verifying") && "opacity-70"
+            )}
+          />
+        ) : (
+          // 로딩·디코드 실패: 같은 중립 상자 + 아이콘. 칩이 도착 순간에 자라지 않는다.
+          <span
+            aria-hidden="true"
+            className="flex size-full items-center justify-center"
+          >
+            <Icon className="size-4 text-ink-muted" />
+          </span>
+        )}
+        <span className="sr-only" data-testid="attachment-chip-name">
+          {label}
+        </span>
+        <span className="sr-only">{statusText}</span>
+
+        {uploading && <ChipProgress draft={draft} measured={measured} />}
+        <RemoveButton draft={draft} alwaysVisible={false} onRemove={onRemove} />
+      </li>
+    );
+  }
 
   return (
     <li
       data-testid="attachment-chip"
       data-attachment-status={draft.status}
       data-thumb={thumbnail.status}
-      className="flex items-center gap-2 rounded-sm px-2 py-1 hover:bg-surface-hover"
+      className={cn(
+        "group relative flex min-h-tray-thumb min-w-0 max-w-pane items-center gap-2 overflow-hidden rounded-md bg-surface-hover py-1 pl-3 pr-8",
+        failed && "border border-danger"
+      )}
     >
-      <DraftVisual
-        thumbnail={thumbnail}
-        danger={line.danger}
-        Icon={Icon}
-        alignToThumb={alignToThumb}
+      <Icon
+        aria-hidden="true"
+        className={cn("size-4 shrink-0", line.danger ? "text-danger" : "text-ink-muted")}
       />
-      <span className="flex min-w-0 flex-1 flex-col gap-px">
-        {/* 가운데에서 생략한다 (리뷰 N-A). 끝에서 자르면 확장자가 가장 먼저
-            죽고, 확장자는 파일을 서로 구별해 주는 조각이다. 이름 열에는 이제
-            **이름만** 있다 — 퍼센트는 아래 줄로 내려갔다(N-B), 그래서 첫 측정에
-            나타나고 「확인 중」에 사라지는 그 칩이 이름 폭을 흔들지 않는다. */}
+      <span className="flex min-w-0 flex-col">
+        {/* 가운데에서 생략한다 (리뷰 N-A): 끝에서 자르면 확장자가 가장 먼저 죽는다. */}
         <span
-          className="flex min-w-0 items-baseline text-body text-ink"
+          className="flex min-w-0 items-baseline text-label text-ink"
           data-testid="attachment-chip-name"
-          title={draft.name}
+          title={label}
         >
           <span className="min-w-0 truncate">{name.head}</span>
           {name.tail !== "" && <span className="shrink-0">{name.tail}</span>}
         </span>
-        {/* `shrink-0` 이 없다. 좁은 폭에서 줄어들어야 하는 것은 이 줄이 아니라
-            이 줄의 **줄 수**이고, 그래서 접힌다(B-1). */}
-        <span
-          className={cn(
-            "min-w-0 break-words text-meta",
-            line.danger ? "text-danger" : "text-ink-muted"
-          )}
-          data-testid="attachment-chip-status"
-        >
-          {line.text}
-          {line.percent !== null && (
-            <>
-              {" "}
-              <span data-numeric data-testid="attachment-chip-percent">
-                {line.percent}%
-              </span>
-            </>
-          )}
-        </span>
-        {uploading ? (
-          <progress
-            data-upload-progress
-            data-testid="attachment-chip-progress"
-            className={PROGRESS_ROW_CLASS}
-            // `value` 를 **아예 달지 않는다**: 그것이 indeterminate 다. `undefined`
-            // 를 넘기면 React 가 속성을 렌더하지 않으므로 이 한 줄이 두 주장을
-            // 가른다 — "얼마인지 모른다" vs "0 이다".
-            {...(measured ? { value: draft.progress, max: 1 } : {})}
-            aria-label={`${draft.name} ${ATTACH_COPY.uploading}`}
-          />
-        ) : (
-          <span aria-hidden="true" className={PROGRESS_ROW_CLASS} />
-        )}
+        {statusText}
       </span>
       {retryable && (
         <Button
@@ -202,27 +231,14 @@ function DraftChip({
           size="sm"
           onClick={() => onRetry(draft.localId)}
           data-testid="attachment-chip-retry"
-          // 위험 톤이 아니다 (design-review H-4). 빨강은 「이것이 잘못됐다」의
-          // 언어고 이 컨트롤은 「여기로 나가라」다. 앞 판은 이 표면에서 유일하게
-          // 누를 수 있는 것에 위험색을 입히고 hover 에서 중성색으로 물러났다.
-          className={cn("shrink-0", "focus-visible:focus-ring")}
+          // 위험 톤이 아니다 (design-review H-4): 이 컨트롤은 「여기로 나가라」다.
+          className="shrink-0 focus-visible:focus-ring"
         >
           {ATTACH_COPY.retry}
         </Button>
       )}
-      <button
-        type="button"
-        onClick={() => onRemove(draft.localId)}
-        aria-label={`${draft.name} ${ATTACH_COPY.remove}`}
-        title={ATTACH_COPY.remove}
-        data-testid="attachment-chip-remove"
-        className={cn(
-          "touch-target flex size-control-sm shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover hover:text-ink",
-          "focus-visible:focus-ring"
-        )}
-      >
-        <X aria-hidden="true" className="size-4" />
-      </button>
+      {uploading && <ChipProgress draft={draft} measured={measured} />}
+      <RemoveButton draft={draft} alwaysVisible={failed} onRemove={onRemove} />
     </li>
   );
 }
@@ -330,7 +346,6 @@ export function AttachmentTray({
   // 버튼 옆이 아니라 트레이 발치이고, 그 규율은 오프라인 줄이 이미 세워 뒀다.
   const blocked = sendBlockReason(drafts);
   const blockedCopy = sendBlockCopy(drafts);
-  const alignToThumb = drafts.some(showsDraftThumbnail);
 
   if (drafts.length === 0 && rejected === 0 && folders === 0) return null;
 
@@ -346,14 +361,29 @@ export function AttachmentTray({
       <p className="sr-only" role="status" data-testid="attachment-announce">
         {announcement}
       </p>
+      {/* 제목은 시각에서 빠지고 목록의 이름으로만 남는다 (#3820): 입력창 안의 칩은
+          「첨부 파일 N」 머리 없이도 첨부로 읽힌다. */}
       {drafts.length > 0 && (
-        <div className="flex items-baseline justify-between gap-2 px-2">
-          <h2 className="text-meta font-semibold text-ink-muted">
-            {ATTACH_COPY.tray}{" "}
-            <span data-numeric className="font-mono">
-              {drafts.length}
-            </span>
-          </h2>
+        // 상한만큼 채워도 창을 먹지 않는다 (design-review B-2): 칩이 줄바꿈되고
+        // 최대 높이에서 스크롤한다.
+        <ul
+          className="flex max-h-tray-max flex-wrap gap-2 overflow-y-auto py-1"
+          aria-label={`${ATTACH_COPY.tray} ${drafts.length}`}
+          data-testid="attachment-list-scroll"
+        >
+          {drafts.map((draft) => (
+            <DraftChip
+              key={draft.localId}
+              draft={draft}
+              onRemove={onRemove}
+              onRetry={onRetry}
+            />
+          ))}
+        </ul>
+      )}
+      {/* 칩이 많을 때만 (CLEAR_ALL_MIN_DRAFTS): 셋 이하는 하나씩 지우는 쪽이 빠르다. */}
+      {drafts.length >= CLEAR_ALL_MIN_DRAFTS && (
+        <div className="flex justify-end px-2">
           <button
             type="button"
             onClick={onClear}
@@ -366,26 +396,6 @@ export function AttachmentTray({
             {ATTACH_COPY.clearAll}
           </button>
         </div>
-      )}
-      {drafts.length > 0 && (
-        // 상한만큼 채워도 창을 먹지 않는다 (design-review B-2). 20개면 칩이
-        // 720px 이라 타임라인이 통째로 밀려났고, 컴포저 하단은 `app-shell` 의
-        // clip 밖으로 나가 스크롤로도 못 되찾았다.
-        <ul
-          className="flex max-h-tray-max flex-col overflow-y-auto"
-          aria-label={ATTACH_COPY.tray}
-          data-testid="attachment-list-scroll"
-        >
-          {drafts.map((draft) => (
-            <DraftChip
-              key={draft.localId}
-              draft={draft}
-              alignToThumb={alignToThumb}
-              onRemove={onRemove}
-              onRetry={onRetry}
-            />
-          ))}
-        </ul>
       )}
       {/* 받지 못한 것은 **말하고 나서** 사라진다. mac 은 여기서 말없이 떨궜고,
           말없이 사라진 파일은 사용자가 보낸 줄 아는 파일이다. */}

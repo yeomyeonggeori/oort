@@ -1,6 +1,7 @@
 import React, {useEffect, useRef} from 'react';
 import {
   AccessibilityInfo,
+  Image,
   Linking,
   Pressable,
   ScrollView,
@@ -11,12 +12,15 @@ import {
 
 import {
   ATTACH_COPY,
+  attachmentDisplayName,
+  CLEAR_ALL_MIN_DRAFTS,
   draftAnnouncement,
   draftStatusLine,
   isImageMime,
   isRetryableIssue,
   sendBlockCopy,
   sendBlockReason,
+  showsDraftThumbnail,
   splitFileName,
   uploadIssueCopy,
   uploadIssueNext,
@@ -24,7 +28,9 @@ import {
   type UploadIssue,
 } from '@momo/core/features/attachments/model';
 
+import {draftPickedUri} from './draftStore';
 import {
+  ATTACHMENT_CHIP_THUMB,
   ATTACHMENT_TRAY_MAX_HEIGHT,
   font,
   line,
@@ -91,20 +97,21 @@ export function AttachmentTray({
     <View style={styles.root} testID="attachment-tray">
       {drafts.length > 0 ? (
         <>
-          <View style={styles.heading}>
-            <Text
-              style={styles.title}
-            >{`${ATTACH_COPY.tray} ${drafts.length}`}</Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={ATTACH_COPY.clearAll}
-              onPress={onClear}
-              style={({pressed}) => [styles.clear, pressed && styles.pressed]}
-              testID="attachment-clear"
-            >
-              <Text style={styles.clearLabel}>{ATTACH_COPY.clearAll}</Text>
-            </Pressable>
-          </View>
+          {/* 머리글은 없다 (#3820): 입력창 안의 칩은 목록 이름 없이도 첨부로 읽힌다.
+              「모두 지우기」는 칩이 많을 때만 선다. */}
+          {drafts.length >= CLEAR_ALL_MIN_DRAFTS ? (
+            <View style={styles.heading}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={ATTACH_COPY.clearAll}
+                onPress={onClear}
+                style={({pressed}) => [styles.clear, pressed && styles.pressed]}
+                testID="attachment-clear"
+              >
+                <Text style={styles.clearLabel}>{ATTACH_COPY.clearAll}</Text>
+              </Pressable>
+            </View>
+          ) : null}
           <ScrollView
             style={styles.listViewport}
             showsVerticalScrollIndicator
@@ -166,6 +173,12 @@ export function AttachmentTray({
   );
 }
 
+/**
+ * 칩 (#3820, Buzz 레퍼런스). 웹 트레이와 같은 규칙이다.
+ *   이미지(정상·진행 중)  썸네일만 있는 둥근 정사각형. 이름·상태는 낭독 라벨에만.
+ *   그 밖(파일·실패)      아이콘 + 짧은 이름 + 상태 한 줄. 실패면 다시 시도.
+ * 진행 막대는 칩 아래 가장자리에 붙고, 자리(progress slot)는 늘 예약돼 있다.
+ */
 function DraftRow({
   draft,
   onRemove,
@@ -177,18 +190,90 @@ function DraftRow({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const status = draftStatusLine(draft);
-  const name = splitFileName(draft.name);
+  const label = attachmentDisplayName(draft);
+  const name = splitFileName(label);
   const retryable =
     draft.status === 'failed' &&
     draft.issue !== undefined &&
     isRetryableIssue(draft.issue);
   const uploading = draft.status === 'uploading';
+  const statusText = `${status.text}${
+    status.percent === null ? '' : ` ${status.percent}%`
+  }`;
+  const thumbUri =
+    draft.status !== 'failed' && showsDraftThumbnail(draft)
+      ? draftPickedUri(draft.localId)
+      : undefined;
+
+  const progress = (
+    <View style={styles.progressSlot} testID="attachment-draft-progress-slot">
+      {uploading ? (
+        <View
+          accessibilityRole="progressbar"
+          accessibilityValue={
+            status.percent === null
+              ? {text: ATTACH_COPY.uploading}
+              : {min: 0, max: 100, now: status.percent}
+          }
+          style={styles.progressTrack}
+          testID="attachment-draft-progress"
+        >
+          {status.percent === null ? (
+            // 가운데 조각은 왼쪽에서 잰 비율이 아니다. 첫 native 측정 전의
+            // 값 없음(indeterminate)을 빈 트랙이나 0%로 오독하지 않게 한다.
+            <View
+              style={styles.progressIndeterminate}
+              testID="attachment-draft-progress-indeterminate"
+            />
+          ) : (
+            <View
+              style={[styles.progressFill, {width: `${status.percent}%`}]}
+              testID="attachment-draft-progress-fill"
+            />
+          )}
+        </View>
+      ) : null}
+    </View>
+  );
+  const remove = (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${label} ${ATTACH_COPY.remove}`}
+      hitSlop={space.md}
+      onPress={() => onRemove(draft.localId)}
+      style={({pressed}) => [
+        thumbUri !== undefined ? styles.removeOnThumb : styles.remove,
+        pressed && styles.pressed,
+      ]}
+      testID="attachment-draft-remove"
+    >
+      <Text style={styles.removeLabel}>×</Text>
+    </Pressable>
+  );
+
+  if (thumbUri !== undefined) {
+    return (
+      <View
+        accessibilityLabel={`${label}. ${statusText}`}
+        style={styles.thumbChip}
+        testID="attachment-draft"
+      >
+        <Image
+          source={{uri: thumbUri}}
+          resizeMode="cover"
+          style={[styles.thumbImage, uploading && styles.thumbBusy]}
+          testID="attachment-draft-thumb"
+        />
+        {progress}
+        {remove}
+      </View>
+    );
+  }
+
   return (
     <View
-      accessibilityLabel={`${draft.name}. ${status.text}${
-        status.percent === null ? '' : ` ${status.percent}%`
-      }`}
-      style={styles.draft}
+      accessibilityLabel={`${label}. ${statusText}`}
+      style={[styles.fileChip, draft.status === 'failed' && styles.fileChipFailed]}
       testID="attachment-draft"
     >
       <View style={styles.icon}>
@@ -207,48 +292,13 @@ function DraftRow({
           style={[styles.status, status.danger && styles.statusDanger]}
           testID="attachment-draft-status"
         >
-          {`${status.text}${
-            status.percent === null ? '' : ` ${status.percent}%`
-          }`}
+          {statusText}
         </Text>
-        {/* 웹 쌍둥이와 같은 자리 예약. 상태가 바뀌어도 이 4pt가 나타났다 사라지며
-            행 높이를 흔들지 않는다. 실제 트랙은 uploading에서만 보인다. */}
-        <View
-          style={styles.progressSlot}
-          testID="attachment-draft-progress-slot"
-        >
-          {uploading ? (
-            <View
-              accessibilityRole="progressbar"
-              accessibilityValue={
-                status.percent === null
-                  ? {text: ATTACH_COPY.uploading}
-                  : {min: 0, max: 100, now: status.percent}
-              }
-              style={styles.progressTrack}
-              testID="attachment-draft-progress"
-            >
-              {status.percent === null ? (
-                // 가운데 조각은 왼쪽에서 잰 비율이 아니다. 첫 native 측정 전의
-                // 값 없음(indeterminate)을 빈 트랙이나 0%로 오독하지 않게 한다.
-                <View
-                  style={styles.progressIndeterminate}
-                  testID="attachment-draft-progress-indeterminate"
-                />
-              ) : (
-                <View
-                  style={[styles.progressFill, {width: `${status.percent}%`}]}
-                  testID="attachment-draft-progress-fill"
-                />
-              )}
-            </View>
-          ) : null}
-        </View>
       </View>
       {retryable ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`${draft.name} ${ATTACH_COPY.retry}`}
+          accessibilityLabel={`${label} ${ATTACH_COPY.retry}`}
           onPress={() => onRetry(draft.localId)}
           style={({pressed}) => [styles.retry, pressed && styles.pressed]}
           testID="attachment-draft-retry"
@@ -256,15 +306,8 @@ function DraftRow({
           <Text style={styles.retryLabel}>{ATTACH_COPY.retry}</Text>
         </Pressable>
       ) : null}
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`${draft.name} ${ATTACH_COPY.remove}`}
-        onPress={() => onRemove(draft.localId)}
-        style={({pressed}) => [styles.remove, pressed && styles.pressed]}
-        testID="attachment-draft-remove"
-      >
-        <Text style={styles.removeLabel}>×</Text>
-      </Pressable>
+      {remove}
+      {progress}
     </View>
   );
 }
@@ -302,15 +345,29 @@ const buildStyles = (color: Palette) =>
       color: color.textMuted,
       textDecorationLine: 'underline',
     },
-    list: {gap: space.xs},
+    list: {flexDirection: 'row', flexWrap: 'wrap', gap: space.sm},
     listViewport: {maxHeight: ATTACHMENT_TRAY_MAX_HEIGHT},
-    draft: {
-      minHeight: TOUCH_TARGET,
+    thumbChip: {
+      width: ATTACHMENT_CHIP_THUMB,
+      height: ATTACHMENT_CHIP_THUMB,
+      overflow: 'hidden',
+      borderRadius: radius.md,
+      backgroundColor: color.surface,
+    },
+    thumbImage: {width: '100%', height: '100%'},
+    thumbBusy: {opacity: 0.7},
+    fileChip: {
+      minHeight: ATTACHMENT_CHIP_THUMB,
+      maxWidth: '100%',
       flexDirection: 'row',
       alignItems: 'center',
       gap: space.sm,
-      paddingVertical: space.xs,
+      overflow: 'hidden',
+      paddingLeft: space.sm,
+      borderRadius: radius.md,
+      backgroundColor: color.surface,
     },
+    fileChipFailed: {borderWidth: 1, borderColor: color.dangerText},
     icon: {
       width: TOUCH_TARGET,
       height: TOUCH_TARGET,
@@ -341,7 +398,13 @@ const buildStyles = (color: Palette) =>
       color: color.textMuted,
     },
     statusDanger: {color: color.dangerText},
-    progressSlot: {height: space.xs},
+    progressSlot: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 0,
+      height: space.xs,
+    },
     progressTrack: {
       height: '100%',
       width: '100%',
@@ -382,6 +445,18 @@ const buildStyles = (color: Palette) =>
       borderRadius: radius.sm,
     },
     removeLabel: {fontSize: font.title, color: color.textMuted},
+    // 썸네일 위의 ×: 28pt 면 + hitSlop 으로 44pt 를 채운다. 터치에는 호버가 없어 늘 보인다.
+    removeOnThumb: {
+      position: 'absolute',
+      top: space.xs,
+      right: space.xs,
+      width: space.xl + space.xs,
+      height: space.xl + space.xs,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: radius.pill,
+      backgroundColor: color.bg,
+    },
     blocked: {
       minHeight: line.meta,
       fontSize: font.meta,

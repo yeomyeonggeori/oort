@@ -2,6 +2,7 @@ import type {SharedSessionState, SharedWorkSession} from '@momo/core/lib/api';
 import {
   diffFacts,
   isAgentLane,
+  isAwaitingApproval,
   laneLabel,
   stateChipLabel,
 } from '@momo/core/features/workbench/teamBoard';
@@ -38,8 +39,10 @@ export function StateChip({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const label = stateChipLabel(item);
+  // 승인 대기 run(ADR-0202 D1)은 응답이 필요한 세션과 같은 그릇·모양이다: 사람이 할 일이 있다.
+  const warn = item.state === 'waiting' || isAwaitingApproval(item);
   const tone =
-    item.state === 'waiting'
+    warn
       ? styles.chipWarn
       : item.state === 'done'
         ? styles.chipOk
@@ -47,7 +50,7 @@ export function StateChip({
           ? styles.chipDanger
           : styles.chipNeutral;
   const textTone =
-    item.state === 'waiting'
+    warn
       ? styles.textWarn
       : item.state === 'done'
         ? styles.textOk
@@ -67,7 +70,7 @@ export function StateChip({
         accessibilityElementsHidden
         importantForAccessibility="no"
         style={[styles.chipMark, textTone]}>
-        {STATE_MARK[item.state]}
+        {warn ? STATE_MARK.waiting : STATE_MARK[item.state]}
       </Text>
       <Text style={[styles.chipLabel, textTone]}>{label}</Text>
     </View>

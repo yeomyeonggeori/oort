@@ -138,7 +138,7 @@ function renderCard(props: {
   );
 }
 
-const DEAD_END = '이 결정은 인박스나 데스크톱 앱에서 처리할 수 있습니다.';
+const DEAD_END = '이 결정은 인박스나 데스크톱 앱에서 할 수 있어요.';
 
 /** 잉크의 밝기. 「격상이 실제로 격상인가」를 값으로 묻는 데만 쓴다. */
 function brightness(hex: string): number {
@@ -269,7 +269,7 @@ describe('영수증과 컨트롤은 같은 순간에 서로 반대로 움직인�
     const view = renderCard({
       gates: new Map(),
       receipts: new Map([
-        ['ap-1', {note: '승인을 기록했습니다.', status: 'approved'}],
+        ['ap-1', {note: '승인을 기록했어요.', status: 'approved'}],
       ]),
     });
     const agentCard = view.getByTestId('agent-card');
@@ -280,7 +280,7 @@ describe('영수증과 컨트롤은 같은 순간에 서로 반대로 움직인�
     const view = renderCard({
       gates: new Map(),
       receipts: new Map([
-        ['ap-1', {note: '결정을 보냈습니다. 기록된 상태는 목록에서 확인하세요.'}],
+        ['ap-1', {note: '결정을 보냈어요. 기록된 상태는 목록에서 확인해 주세요.'}],
       ]),
     });
     expect(
@@ -292,13 +292,13 @@ describe('영수증과 컨트롤은 같은 순간에 서로 반대로 움직인�
     const view = renderCard({
       gates: new Map([['ap-1', GATE]]),
       receipts: new Map([
-        ['ap-1', {note: '승인을 기록했습니다.', status: 'approved'}],
+        ['ap-1', {note: '승인을 기록했어요.', status: 'approved'}],
       ]),
     });
     const agentCard = view.getByTestId('agent-card');
     expect(
       within(agentCard).getByTestId('card-approval-receipt').props.children,
-    ).toBe('승인을 기록했습니다.');
+    ).toBe('승인을 기록했어요.');
     expect(
       within(agentCard).queryByTestId('card-approval-ap-1-actions'),
     ).toBeNull();
@@ -370,7 +370,7 @@ describe('오프라인 — 같은 컨트롤은 화면마다 같은 결을 갖는
       gates: new Map([['ap-1', GATE]]),
       offline: true,
       receipts: new Map([
-        ['ap-1', {note: '승인을 기록했습니다.', status: 'approved'}],
+        ['ap-1', {note: '승인을 기록했어요.', status: 'approved'}],
       ]),
     });
     expect(
@@ -458,9 +458,9 @@ describe('두 번째 구현이 아니라 세 번째 호출자다', () => {
   it('영수증 문구가 한 벌이다 — 화면마다 다시 적지 않는다', () => {
     const screenSrc = codeOnly(SRC('screens/ConversationScreen.tsx'));
     expect(screenSrc).toContain('decisionReceiptCopy');
-    expect(screenSrc).not.toContain('승인을 기록했습니다');
+    expect(screenSrc).not.toContain('승인을 기록했어요');
     expect(codeOnly(SRC('screens/InboxScreen.tsx'))).not.toContain(
-      '승인을 기록했습니다',
+      '승인을 기록했어요',
     );
   });
 
@@ -507,7 +507,7 @@ describe('M-3 — 승인 카드 세 문장의 격', () => {
   }
 
   const RECEIPT = new Map([
-    ['ap-1', {note: '승인을 기록했습니다.', status: 'approved' as const}],
+    ['ap-1', {note: '승인을 기록했어요.', status: 'approved' as const}],
   ]);
 
   it('세 갈래가 코어가 말한 kind 로 선다', () => {
@@ -759,7 +759,7 @@ describe('B-1 — 판정 입력 셋이 각자 다른 사실을 나른다', () =>
     const view = renderCard({
       gates: new Map([['ap-1', GATE]]),
       receipts: new Map([
-        ['ap-1', {note: '승인을 기록했습니다.', status: 'approved'}],
+        ['ap-1', {note: '승인을 기록했어요.', status: 'approved'}],
       ]),
     });
     const agentCard = view.getByTestId('agent-card');

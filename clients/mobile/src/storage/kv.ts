@@ -104,6 +104,11 @@ export const NON_SECRET_KEYS = {
    * 없을 뿐이다(ADR-0198 N5 3·집 채널 규칙: 서버는 대응을 저장하지 않고 기기에만 기억한다).
    */
   askMacLast: 'momo.mobile.ask-mac.last.v1',
+  /**
+   * 「작업」 화면에서 마지막으로 고른 필터(ADR-0202 D2): `mine` 또는 `team` 한 낱말. 기기별
+   * 편의일 뿐이고, 잃으면 기본값 「내 것」으로 열린다.
+   */
+  workFilter: 'momo.mobile.work.filter.v1',
 } as const;
 
 export type NonSecretKey = (typeof NON_SECRET_KEYS)[keyof typeof NON_SECRET_KEYS];

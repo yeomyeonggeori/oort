@@ -253,7 +253,14 @@ describe("한 목록 기계가 세 트리거를 그린다 (#1930)", () => {
     typeAll(input(), "@her");
     expect(list()?.getAttribute("role")).toBe("listbox");
     expect(list()?.getAttribute("aria-label")).toBe("멘션 선택");
-    expect(options().map((node) => node.textContent)).toEqual(["@hermes헤르메스"]);
+    // 아바타는 장식(aria-hidden)이라 접근 이름에 들어가지 않는다 (#3821).
+    expect(
+      options().map((node) => {
+        const clone = node.cloneNode(true) as HTMLElement;
+        clone.querySelectorAll("[aria-hidden='true']").forEach((n) => n.remove());
+        return clone.textContent;
+      })
+    ).toEqual(["@hermes헤르메스"]);
     press(input(), "Enter");
     flushFrames();
     expect(input().value).toBe("@hermes ");

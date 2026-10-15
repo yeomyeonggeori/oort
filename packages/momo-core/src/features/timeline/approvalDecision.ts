@@ -182,9 +182,9 @@ export function newDecisionId(): string {
  */
 export function sendFailureCopy(cause: unknown): string {
   if (cause instanceof NetworkError && cause.failure === "timeout") {
-    return "서버가 제때 응답하지 않아 결정을 보내지 못했습니다. 다시 시도하세요.";
+    return "서버가 제때 응답하지 않아 결정을 보내지 못했어요. 다시 눌러 주세요.";
   }
-  return "결정이 서버에 닿지 못했습니다. 연결을 확인하고 다시 시도하세요.";
+  return "결정이 서버에 닿지 못했어요. 연결을 확인하고 다시 눌러 주세요.";
 }
 
 /**
@@ -201,9 +201,9 @@ export function sendFailureCopy(cause: unknown): string {
  * 규칙이 두 벌로 갈라지면 한쪽만 고쳐지는 날이 온다.
  */
 export function unsettledAnswerClause(status: number): string {
-  if (status === 429) return "요청이 잦아 서버가 이번 결정을 받지 않았습니다.";
-  if (status >= 500) return "서버가 오류로 답했습니다. 잠시 후 다시 시도하세요.";
-  return "서버가 이 결정을 받지 않았습니다. 다시 시도하세요.";
+  if (status === 429) return "요청이 잦아 서버가 이번 결정을 받지 않았어요.";
+  if (status >= 500) return "서버가 오류로 답했어요. 잠시 뒤에 다시 눌러 주세요.";
+  return "서버가 이 결정을 받지 않았어요. 다시 눌러 주세요.";
 }
 
 /**
@@ -320,7 +320,7 @@ export function unreadableAnswerOutcome(
   }
   return {
     kind: "error",
-    errorCopy: "서버 응답을 읽지 못했습니다. 다시 시도하세요.",
+    errorCopy: "서버 응답을 읽지 못했어요. 다시 눌러 주세요.",
   };
 }
 
@@ -355,8 +355,8 @@ export function interpretReceipt(
         status,
         note:
           status === "expired"
-            ? "결정 전에 만료되었습니다."
-            : "다른 곳에서 이미 결정되었습니다.",
+            ? "결정 전에 만료됐어요."
+            : "다른 곳에서 이미 결정됐어요.",
       };
       if (decidedAtMs !== undefined) outcome.decidedAtMs = decidedAtMs;
       if (decidedBy !== undefined) outcome.decidedByMemberId = decidedBy;
@@ -365,13 +365,13 @@ export function interpretReceipt(
     return {
       kind: "error",
       errorCode: "idempotency_conflict",
-      errorCopy: "같은 요청이 다른 결정으로 기록되어 있습니다. 다시 시도하세요.",
+      errorCopy: "같은 요청이 다른 결정으로 기록돼 있어요. 다시 눌러 주세요.",
     };
   }
   if (httpStatus === 404) {
     return {
       kind: "error",
-      errorCopy: "이 승인 요청을 찾을 수 없습니다. 이미 정리되었을 수 있습니다.",
+      errorCopy: "이 승인 요청을 찾지 못했어요. 이미 정리됐을 수 있어요.",
     };
   }
   // AX-3b #2549: 역할 부족만 영수증이 이름을 댄다. 그 밖의 403 은 지금까지처럼
@@ -383,12 +383,12 @@ export function interpretReceipt(
       // 역할 이름 없이도 참인 문장. 어느 역할인지 아는 카드는 이것을 자기
       // 문장으로 덮는다(`ApprovalActions.forbiddenCopy`).
       errorCopy:
-        "이 결정을 내릴 수 있는 역할이 아닙니다. 이 요청은 아직 대기 중입니다.",
+        "이 결정을 내릴 수 있는 역할이 아니에요. 이 요청은 아직 기다리고 있어요.",
     };
   }
   return {
     kind: "error",
     errorCode: "forbidden",
-    errorCopy: "이 승인을 결정할 권한이 없습니다. 채널 멤버인지 확인하세요.",
+    errorCopy: "이 승인을 결정할 권한이 없어요. 채널 멤버인지 확인해 주세요.",
   };
 }

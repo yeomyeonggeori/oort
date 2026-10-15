@@ -4,22 +4,22 @@ import { isMyWorkTab, workViewOf } from "@momo/core/features/workbench/workTab";
 import { SurfaceRoute } from "@/features/capabilities/SurfaceGate";
 import { WorkConsoleRoute } from "@/features/workConsole/WorkConsoleRoute";
 import { ConnectedTerminalDock } from "@/features/workbench/agent/ConnectedTerminalDock";
-import { TeamBoardRoute } from "@/features/workTab/teamBoard/TeamBoardRoute";
+import { WorkJobsRoute } from "@/features/workTab/jobs/WorkJobsRoute";
 import { MyWorkWebNotice } from "@/features/workTab/MyWorkWebNotice";
 import { isDesktop } from "@/lib/tauri";
 
 // Reading this as: 작업 탭 라우트(`/work`) for internal team users on web+Tauri,
 // density 7/10, motion 0/10.
 //
-// 사이드바 「작업」 두 줄이 이 라우트 하나를 채운다(#2854, ADR-0194 D1, 코어
-// `workTab.ts` 머리말).
+// ADR-0202 D6 (U1 #3842): 사이드바 「작업」 한 줄이 이 라우트를 채운다.
 //
-// - `?view=team` → 「팀 작업」 보드(T11 #2863, `teamBoard/`). 공유된 세션만, 서버가 거른 대로.
-// - 데스크탑 `/work` → 「내 작업」 격자. 도크와 같은 세션·같은 배치를 그린다.
-//   셸이 이 동안 도크를 내리고 앱 사이드바를 레일로 접는다(AppShell).
-// - 웹 `/work` → 「내 작업」 설명 상태(#3334, 이 기기에는 터미널 레인이 없어요 + 팀 작업 링크).
-// - 그 밖(세션 링크 `?session=`, `?view=console`) → 작업 콘솔.
+// - `/work`(옛 `?view=team`·`?view=mine` 포함) → 결과 중심 「작업」 화면. 「내 것 / 팀 전체」는
+//   화면의 필터다(`?who=`, 옛 `?view=team`은 「팀 전체」).
+// - 데스크탑 `?view=terminals` → 이 기기의 터미널 격자(옛 「내 작업」 본문). 셸이 이 동안 도크를
+//   내리고 앱 사이드바를 레일로 접는다(AppShell). 웹은 터미널 레인이 없다는 설명 상태.
+// - 세션 링크 `?session=`, `?view=console` → 작업 콘솔(진입점은 숨겼고 주소는 그대로 열린다).
 //   콘솔은 여전히 내가 쓸 수 있는 온라인 호스트가 있을 때만 선다(#2780, #2893).
+// - 옛 팀 보드 화면(`TeamBoardRoute`)은 코드로 남는다(D6 「숨김 = 진입점만」). 서랍은 새 화면이 쓴다.
 
 export function WorkRoute() {
   const location = useLocation();
@@ -39,14 +39,13 @@ export function WorkRoute() {
     navigate({ pathname: location.pathname, search: `?${params.toString()}` }, { replace: true });
   }, [needsConsoleView, location.pathname, location.search, navigate]);
 
-  if (view === "team") return <TeamBoardRoute />;
+  if (view === "jobs") return <WorkJobsRoute />;
   // 셸과 **같은 함수**로 판정한다: 셸이 도크를 내리는 바로 그때만 격자를 그린다.
   if (isMyWorkTab(location.pathname, location.search, desktop)) {
     return <ConnectedTerminalDock presentation="tab" />;
   }
-  // 웹의 「내 작업」(`/work`, #3334): 로컬 터미널 레인이 없다는 이유와 팀 작업으로 가는 길.
-  // 작업 콘솔은 `?view=console`(사이드바 「작업 콘솔」 줄)과 세션 링크(`?session=`)가 연다.
-  if (view === "mine") return <MyWorkWebNotice />;
+  // 웹의 터미널 격자 주소(#3334): 로컬 터미널 레인이 없다는 이유와 「작업」으로 가는 길.
+  if (view === "terminals") return <MyWorkWebNotice />;
   return (
     <SurfaceRoute surface="workConsole">
       <WorkConsoleRoute />

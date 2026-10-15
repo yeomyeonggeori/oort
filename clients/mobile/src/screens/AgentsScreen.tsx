@@ -18,7 +18,11 @@ import {
   TURN_STALE_SENTENCE,
   UNKNOWN_AGENT_NAME,
 } from '@momo/core/features/agents/turnCopy';
-import {memberNameParts} from '@momo/core/features/workspace/directory';
+import {
+  memberNameParts,
+  type Directory,
+} from '@momo/core/features/workspace/directory';
+import {Avatar} from '../features/conversation/Avatar';
 import {
   agentRowMeta,
   buildAgentRows,
@@ -242,6 +246,7 @@ export default function AgentsScreen({
           renderItem={({item}) => (
             <Row
               row={item}
+              directory={directoryQuery.directory}
               turn={agentTurnBadgeCopy(
                 agentTurnsForMember(signals, item.memberId, nowMs),
                 memberId =>
@@ -266,11 +271,13 @@ export default function AgentsScreen({
 
 function Row({
   row,
+  directory,
   turn,
   railLive,
   onPress,
 }: {
   row: AgentRow;
+  directory: Directory;
   /** The one open turn this agent has, in words, or null when it has none. */
   turn: ReturnType<typeof agentTurnBadgeCopy>;
   railLive: boolean;
@@ -305,7 +312,11 @@ function Row({
       {/* The same mark the sidebar uses for an agent: the agent colour, on a
           dot rather than on an icon nobody has a name for. A row that looked
           like a person's would undo the one distinction this screen is for. */}
-      <View style={[styles.dot, row.paused === true && styles.dotPaused]} />
+      {/* #3821: 점 대신 에이전트 아바타(사진, 없으면 이니셜). 모양이 에이전트(둥근 사각)를
+          말하므로 사람 행으로 오해되지 않는다. 재워진 에이전트는 흐려진다. */}
+      <View style={row.paused === true ? styles.avatarPaused : undefined}>
+        <Avatar directory={directory} memberId={row.memberId} />
+      </View>
       <View style={styles.rowText}>
         <View style={styles.rowTitleLine}>
           <Text style={styles.rowTitle} numberOfLines={1} ellipsizeMode="tail">
@@ -353,16 +364,9 @@ function Row({
 
 const buildStyles = (color: Palette) => StyleSheet.create({
   listContent: {paddingBottom: space.lg},
-  dot: {
-    width: 10,
-    height: 10,
-    marginHorizontal: 4,
-    borderRadius: radius.pill,
-    backgroundColor: color.agent,
-  },
-  // 재워진 에이전트는 색이 빠진다. 상태 문구가 이미 말하고 있으므로 이것은
+  // 재워진 에이전트는 흐려진다. 상태 문구가 이미 말하고 있으므로 이것은
   // 두 번째 신호이지 유일한 신호가 아니다 — 색만으로 말하지 않는다.
-  dotPaused: {backgroundColor: color.textFaint},
+  avatarPaused: {opacity: 0.5},
   rowText: {flex: 1, gap: 2},
   rowTitleLine: {flexDirection: 'row', alignItems: 'center', gap: space.xs},
   rowTitle: {fontSize: font.body, color: color.agent, flexShrink: 1},

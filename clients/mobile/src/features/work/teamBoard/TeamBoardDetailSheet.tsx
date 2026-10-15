@@ -4,6 +4,7 @@ import {
   channelLabel,
   diffFacts,
   harnessLabel,
+  isAwaitingApproval,
   isRunItem,
   prFacts,
   sessionTitle,
@@ -35,6 +36,8 @@ import {
   type Palette,
 } from '../../../design/tokens';
 import {LaneLabel, StateChip} from './TeamBoardParts';
+import {WORK_JOBS_COPY} from '@momo/core/features/workbench/workJobs';
+import {ReportedFacts} from '../jobs/WorkJobParts';
 
 // =============================================================================
 // 세션 상세 시트 (#2864, 제안서 §4.3·T12, 웹 `TeamBoardDrawer`의 폰 짝).
@@ -106,6 +109,7 @@ function SheetBody({
   const markers = stageMarkers(item);
   const pr = prFacts(item.prUrl);
   const channel = channelLabel(item);
+  const approval = isAwaitingApproval(item);
   const logParts =
     facts === null
       ? []
@@ -164,10 +168,23 @@ function SheetBody({
           <View style={styles.stateLine}>
             <StateChip item={item} testID="team-detail-state" />
             <Text style={styles.stateSentence} testID="team-detail-sentence">
-              {stateSentence(item, nowMs)}
+              {approval ? WORK_JOBS_COPY.approvalHint : stateSentence(item, nowMs)}
             </Text>
           </View>
+          {/* 승인 대기(ADR-0202 D1): 결정 단추는 여기 없다. 카드가 있는 채널로 간다(D5). */}
+          {approval ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`${WORK_JOBS_COPY.approvalAction}, ${channel}`}
+              onPress={() => onOpenChannel(item.homeChannel.id)}
+              style={({pressed}) => [styles.card, pressed && styles.pressed]}
+              testID="team-detail-approval-link">
+              <Text style={styles.cardTitle}>{WORK_JOBS_COPY.approvalAction}</Text>
+              <Text style={styles.cardSub}>{channel}</Text>
+            </Pressable>
+          ) : null}
         </View>
+
 
         {markers.length > 0 ? (
           <Section heading={TEAM_BOARD_COPY.progressHeading}>
@@ -199,6 +216,13 @@ function SheetBody({
               {logParts.join(' · ')}
             </Text>
           </Section>
+        ) : null}
+
+        {/* 웹 서랍과 같은 순서: 진행 → 로그 요약 → 에이전트 보고 → 결과(design-review M-6). */}
+        {item.agentReported != null ? (
+          <View style={styles.section}>
+            <ReportedFacts reported={item.agentReported} />
+          </View>
         ) : null}
 
         <Section heading={TEAM_BOARD_COPY.resultHeading}>

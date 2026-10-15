@@ -153,6 +153,16 @@ export const ATTACH_COPY = {
   remove: "첨부 제거",
   /** 전부 제거 (macOS `clearAll`). */
   clearAll: "모두 지우기",
+  /** 타임라인 이미지를 크게 본다 (#3820). */
+  expandImage: "크게 보기",
+  /** 이름을 보여 줄 수 없는 이미지의 일반 이름 (#3820). */
+  genericImage: "이미지",
+  /** 이름을 보여 줄 수 없는 PDF 의 일반 이름. */
+  genericPdf: "PDF 문서",
+  /** 그 밖의 종류별 일반 이름. */
+  genericVideo: "동영상",
+  genericAudio: "오디오",
+  genericFile: "파일",
   /** 실패한 건 다시 (macOS `retryUpload`). */
   retry: "다시 시도",
   /** 타임라인 카드의 내려받기 (macOS `downloadAttachment`). */
@@ -346,7 +356,7 @@ export function draftAnnouncement(
   if (changed.length === 0) return null;
   if (changed.length === 1) {
     const draft = changed[0];
-    return `${draft.name} ${draftStatusLine(draft).text}`;
+    return `${attachmentDisplayName(draft)} ${draftStatusLine(draft).text}`;
   }
   // 낱말별로 묶어 개수로 말한다. 「N개 상태가 바뀌었습니다」 같은 요약은 짧지만
   // 아무것도 말하지 않는다 — 무엇이 몇 개인지가 이 줄의 전부다.
@@ -769,4 +779,77 @@ export function hasPdfSignature(bytes: Uint8Array): boolean {
     if (match) return true;
   }
   return false;
+}
+
+// ---- 보여 줄 이름 (#3820) ----------------------------------------------------
+//
+// 타임라인은 파일명을 기본으로 보여 주지 않는다. 이름이 필요한 자리(호버 제목,
+// 대체 텍스트, 보조기술 이름, 파일 카드)는 아래 함수만 거친다.
+//
+// 서버는 올린 사람이 보낸 `name` 을 그대로 보관하고 그대로 돌려준다
+// (`attachment.rs` INSERT 가 요청의 name 을 바인딩한다). 그러니 `geGngQ…pQ.webp`
+// 같은 이름은 서버가 만든 해시가 아니라 **파일 자체의 이름**이다(웹에서 끌어온
+// 이미지, 앱이 저장한 임시 파일 등). 서버에서 원래 이름을 더 얻을 길이 없으므로
+// 클라이언트가 그런 이름을 알아보고 일반 이름으로 갈음한다.
+
+/** 칩이 이 개수 이상일 때만 「모두 지우기」를 보인다. 한 줄에 3개면 하나씩 지워도 된다. */
+export const CLEAR_ALL_MIN_DRAFTS = 4;
+
+/**
+ * 사람이 지은 이름이 아니라 무작위 토큰처럼 보이는 이름인가.
+ *
+ * 휴리스틱이고 보수적이다: 길이 16 이상에 구분자(공백·점·따옴표)가 없고
+ * `[A-Za-z0-9_-]` 만 쓰면서, (a) UUID 이거나 (b) 24자 이상 16진 덩어리이거나
+ * (c) 소문자 뒤에 대문자가 오는 전환이 3번 이상이고 글자 수의 15% 이상인
+ * 경우다. `Screenshot_20261014_153012` 는 전환이 1번이라 사람의 이름으로 남고,
+ * `QuarterlyRevenueReportFinal` 은 비율이 낮아 사람의 이름으로 남는다.
+ */
+export function looksLikeOpaqueFileName(name: string): boolean {
+  const trimmed = name.trim();
+  const dot = trimmed.lastIndexOf(".");
+  const stem =
+    dot > 0 && trimmed.length - dot <= 6 ? trimmed.slice(0, dot) : trimmed;
+  if (stem.length < 16 || !/^[A-Za-z0-9_-]+$/.test(stem)) return false;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(stem)) {
+    return true;
+  }
+  if (stem.length >= 24 && /^[0-9a-f]+$/i.test(stem)) return true;
+  const flips = (stem.match(/[a-z][A-Z]/g) ?? []).length;
+  return flips >= 3 && flips / stem.length >= 0.15;
+}
+
+/** 종류별 일반 이름. 이름을 보일 수 없을 때 이것이 갈음한다. */
+export function genericAttachmentName(mime: string): string {
+  if (isPdfAttachment({ mime })) return ATTACH_COPY.genericPdf;
+  const top = mime.trim().toLowerCase().split("/")[0];
+  switch (top) {
+    case "image":
+      return ATTACH_COPY.genericImage;
+    case "video":
+      return ATTACH_COPY.genericVideo;
+    case "audio":
+      return ATTACH_COPY.genericAudio;
+    default:
+      return ATTACH_COPY.genericFile;
+  }
+}
+
+/** 화면과 보조기술이 쓰는 이름. 무작위 토큰 같은 이름은 일반 이름이 된다. */
+export function attachmentDisplayName(
+  attachment: Pick<MessageAttachment, "name" | "mime">
+): string {
+  const name = attachment.name.trim();
+  if (name === "" || looksLikeOpaqueFileName(name)) {
+    return genericAttachmentName(attachment.mime);
+  }
+  return name;
+}
+
+/**
+ * 한 메시지의 이미지 격자 열 수 (#3820). 한 장은 격자가 아니라 1열이고,
+ * 2~4장은 2열, 5장 이상은 3열이다.
+ */
+export function imageGridColumns(count: number): 1 | 2 | 3 {
+  if (count <= 1) return 1;
+  return count <= 4 ? 2 : 3;
 }

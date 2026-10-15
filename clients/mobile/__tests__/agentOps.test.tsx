@@ -421,6 +421,15 @@ describe('the 에이전트 tab exists at all', () => {
     expect(screen.queryByText('곽성재')).toBeNull();
     expect(screen.getAllByText('김인턴')).toHaveLength(1);
   });
+
+  it('draws the agent avatar (not a dot) at the head of each row (#3821)', async () => {
+    installFetch();
+    await openAgentsTab();
+    for (const id of [KIM_AGENT, HERMES]) {
+      const row = screen.getByTestId(`agent-row-${id}`);
+      expect(within(row).getByTestId('avatar-agent', {includeHiddenElements: true})).toBeTruthy();
+    }
+  });
 });
 
 describe('a row says what state the agent is in', () => {

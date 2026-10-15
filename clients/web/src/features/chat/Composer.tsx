@@ -314,7 +314,11 @@ function AgentActivityBar({
                 {activityDetail(line, nowMs)}
               </span>
             )}
-            {live && line.state === "working" && line.startedAtMs !== undefined && (
+            {/* 서버가 아는 run은 근거 줄이 「12분째」를 이미 말한다(#3824). */}
+            {live &&
+              line.server === undefined &&
+              line.state === "working" &&
+              line.startedAtMs !== undefined && (
               <span className="shrink-0 text-timestamp" data-numeric>
                 {elapsedLabel(line.startedAtMs, nowMs)}
               </span>

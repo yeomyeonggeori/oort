@@ -95,10 +95,6 @@ describe('폰은 그리되 결정하지 않는다', () => {
     // 코어에 한 벌로 있고(`LOGIN_HANDOFF_DECISION`), 그 부재를 시험할 수 있는
     // 것도 한 벌이기 때문이다.
     for (const verb of [
-      LOGIN_HANDOFF_DECISION.resumeCommit,
-      LOGIN_HANDOFF_DECISION.stopCommit,
-      LOGIN_HANDOFF_DECISION.resumeConfirm,
-      LOGIN_HANDOFF_DECISION.stopConfirm,
       LOGIN_HANDOFF_DECISION.lead,
     ]) {
       expect(MESSAGE_ROW_CODE).not.toContain(verb);

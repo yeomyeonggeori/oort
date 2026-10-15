@@ -10,6 +10,8 @@ import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { cn } from "@/design/lib/cn";
 import { InlineBanner } from "@/features/common/States";
 import { AgentCard } from "./AgentCard";
+import { TeamAiDelegateStrip } from "./TeamAiDelegateStrip";
+import { teamAiDelegateFor } from "@momo/core/features/timeline/teamAi";
 import { ArtifactCard } from "./ArtifactCard";
 import { AttachmentList } from "./AttachmentList";
 import { MessageBody } from "./MessageBody";
@@ -125,6 +127,8 @@ import { useTimelineLive } from "./timelineLiveContext";
 import { useConversationEntrance } from "./conversationEntrance";
 import { commandSuggestCard } from "@momo/core/features/timeline/commandSuggest";
 import { CommandSuggestSlot, ThreadSurfaceRoot } from "./commandSuggestSlot";
+import { MessageRunStatus } from "@/features/agents/MessageRunStatus";
+import type { AgentRunProgress } from "@momo/core/lib/api";
 
 // =============================================================================
 // One message row (R-1 §3). Humans and agents share the SAME grid and the same
@@ -303,6 +307,7 @@ export function MessageRow({
   showRollup = true,
   playEntrance = false,
   onEntranceConsumed,
+  runStatus,
 }: {
   message: Message;
   startsGroup: boolean;
@@ -389,6 +394,12 @@ export function MessageRow({
   playEntrance?: boolean;
   /** Parent consumes the grant on the first painted frame (flash-unmount keeps it). */
   onEntranceConsumed?: () => void;
+  /**
+   * #3824 — 내가 보낸 이 메시지가 일으킨 run들(서버 진행 읽기). 목록이 넣는다(`Timeline`):
+   * 행이 직접 스토어를 구독하면 아무 run이나 바뀔 때 모든 줄이 다시 그려진다. 넣지 않으면
+   * (남의 메시지·스레드 패널·작업 로그) 줄이 없다. 빈 배열은 「아직 없음」이다.
+   */
+  runStatus?: readonly AgentRunProgress[];
 }) {
   const entrance = useConversationEntrance(playEntrance, onEntranceConsumed);
   const [resending, setResending] = useState(false);
@@ -497,6 +508,18 @@ export function MessageRow({
     [message]
   );
   const idleNotice = useMemo(() => workSessionIdleNotice(message), [message]);
+  // 도우미가 넘기는 줄(ADR-0201 D5). 이 키를 보내지 않는 서버에서는 늘 null 이다.
+  const teamAiDelegate = useMemo(() => teamAiDelegateFor(message), [message]);
+  // 맡길 원래 요청의 본문: 화면에 든 행이 먼저, 없으면 페이지에 동봉된 인용.
+  const delegateSourceId = teamAiDelegate?.sourceMessageId ?? null;
+  const delegateSourceBody =
+    delegateSourceId === null
+      ? null
+      : (quoteLookup?.(delegateSourceId)?.body ??
+        (message.replyTo !== undefined &&
+        message.replyTo.id.toLowerCase() === delegateSourceId.toLowerCase()
+          ? (message.replyTo.body ?? null)
+          : null));
   // 에이전트가 제안한 연결 카드(#2948 GC-7, ADR-0186 G4). 본문은 그대로 두고 그
   // 아래에 선다. 모르는 모양은 null(본문만)이다.
   const SuggestionCard = useContext(CommandSuggestSlot);
@@ -947,6 +970,17 @@ export function MessageRow({
           ))}
         {/* 서버 안내 줄의 문 (#2871): 본문 문장이 말한 곳으로 바로 간다. */}
         {!deleted && <NoticeActionLink message={message} />}
+        {teamAiDelegate && (
+          <TeamAiDelegateStrip
+            delegate={teamAiDelegate}
+            workspaceId={workspaceId}
+            channelId={message.channelId}
+            authorMemberId={message.authorMemberId}
+            viewerMemberId={actions?.myMemberId}
+            sourceBody={delegateSourceBody}
+            directory={directory}
+          />
+        )}
         {/* 첨부는 본문 **바로 아래**다 (ADR-0151 D2). 카드·아티팩트보다 앞인
             이유는 순서가 안쪽에서 바깥쪽이기 때문이다: 파일은 작성자가 이 메시지에
             직접 붙인 것이고, 그 아래 카드들은 그 메시지에 **대해** 서버가 말하는
@@ -1093,6 +1127,19 @@ export function MessageRow({
               ) : (
                 <span data-testid="thread-anchor">{rollupLabel(rollup)}</span>
               ))}
+          </div>
+        )}
+        {/* 내가 보낸 메시지가 에이전트를 불렀으면 그 일의 상태 한 줄 (#3824). 칩보다
+            안쪽이다: 칩은 남들의 반응이고, 이 줄은 이 메시지가 일으킨 일이다. */}
+        {runStatus !== undefined && (
+          <div className="mt-1 flex min-w-0" data-testid="message-run-status-slot">
+            <MessageRunStatus
+              messageId={message.id}
+              channelId={message.channelId}
+              createdAtMs={message.createdAtMs}
+              runs={runStatus}
+              directory={directory}
+            />
           </div>
         )}
         {actions && (

@@ -155,17 +155,22 @@ describe("상태 어휘: 대기 n번째 / 가져감 / 진행 / 승인 대기 / �
     // 패널이 앞의 일을 따로 자세히 보일 때는 같은 건수를 두 번 말하지 않는다.
     expect(runPhaseDetail(queued, NOW, { omitAhead: true })).toBe("11분째 기다려요");
     const fresh = serverFactsOf(progress({ createdAtMs: NOW - 10_000, queuePosition: 1 }));
-    expect(runPhaseDetail(fresh, NOW)).toBeUndefined();
+    // 1분 전에도 말한다(#3824): 「0분」을 지어내지 않고 초로 센다.
+    expect(runPhaseDetail(fresh, NOW)).toBe("10초째 기다려요");
     const running = serverFactsOf(
       progress({ phase: "running", status: "running", leaseState: "live", lastEventAtMs: NOW - 4 * MIN })
     );
-    expect(runPhaseDetail(running, NOW)).toBe("마지막 보고 4분 전");
+    // 시작 시각을 모르는 run의 작업 시간은 「모름」이다(가져간 때로 메우지 않는다).
+    expect(runPhaseDetail(running, NOW)).toBe("작업 시간 모름 · 마지막 보고 4분 전");
   });
 
   it("종료 사유: 닫힌 코드만 문장이 되고 모르는 코드는 만들어 내지 않는다", () => {
     expect(endReasonText("approval_expired")).toBe("승인이 만료됐어요");
     expect(endReasonText("unclaimed_expired")).toBe("아무도 가져가지 않아 끝냈어요");
     expect(endReasonText("cancelled_by_member")).toBe("멤버가 취소했어요");
+    // 서버의 사람 중단(`POST …/agent-runs/{run}/cancel`)이 원장에 남기는 코드다.
+    // 이 줄이 없으면 「취소됐어요」 아래 사유가 비어, 누가 멈췄는지 기록이 말하지 않는다.
+    expect(endReasonText("human_cancelled")).toBe("사람이 중단했어요");
     expect(endReasonText("brand_new_code")).toBeUndefined();
     expect(endReasonText(undefined)).toBeUndefined();
   });
