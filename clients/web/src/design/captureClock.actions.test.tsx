@@ -2,14 +2,11 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { act, createElement, useState, type ReactElement } from "react";
+import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
-import {
-  ApprovalActions,
-  type Armed,
-} from "@/features/timeline/ApprovalActions";
+import { ApprovalActions } from "@/features/timeline/ApprovalActions";
 
 const CLOCK_SRC = readFileSync(
   join(process.cwd(), "scripts/capture-clock.mjs"),
@@ -61,7 +58,7 @@ const {
 } = loadClock();
 
 const COMMIT_ABORT =
-  /CAPTURE ABORT: scene "approvals-confirm" is clock:fixed; time-gated control \[inbox-approval-commit\] cannot open CONFIRM_GUARD_MS/;
+  /CAPTURE ABORT: scene "approvals-confirm" is clock:fixed; time-gated control \[agent-permission-commit\] cannot open CONFIRM_GUARD_MS/;
 
 const reactActEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
@@ -106,14 +103,11 @@ function sessionValue(): SessionContextValue {
 }
 
 function ApprovalHarness(): ReactElement {
-  const [armed, setArmed] = useState<Armed>(null);
   return createElement(
     SessionProvider,
     { value: sessionValue() },
     createElement(ApprovalActions, {
       approvalId: "approval-1",
-      armed,
-      setArmed,
       onSettled: () => undefined,
       testIdPrefix: "inbox-approval",
     })
@@ -131,21 +125,19 @@ function mountApproval(): HTMLElement {
 }
 
 describe("capture clock resolver against rendered ApprovalActions", () => {
-  it("raw keyboard Enter on a focused armed commit aborts in a fixed scene", async () => {
+  // #3819: 승인 결정은 한 번에 결정되므로 시간 게이트가 걸린 컨트롤이 없다. 이
+  // 시험은 두 가지를 잰다 — 렌더된 승인 컨트롤에 게이트 대상이 하나도 없다는 것,
+  // 그리고 그 위에서도 고정 시계 장면의 Enter 가 **아무것도 중단시키지 않는다**는 것.
+  it("rendered approval controls expose no time-gated control, so Enter is not aborted", async () => {
     beginCaptureScene("approvals-confirm");
     const host = mountApproval();
     const approve = host.querySelector(
       '[data-testid="inbox-approval-approve"]'
     ) as HTMLButtonElement | null;
     expect(approve).not.toBeNull();
-    act(() => {
-      approve?.click();
-    });
-    const commit = host.querySelector(
-      '[data-testid="inbox-approval-commit"]'
-    ) as HTMLButtonElement | null;
-    expect(commit).not.toBeNull();
-    expect(document.activeElement).toBe(commit);
+    expect(host.querySelector('[data-testid$="-commit"]')).toBeNull();
+    approve?.focus();
+    expect(document.activeElement).toBe(approve);
 
     const presses: string[] = [];
     const page = {
@@ -162,16 +154,14 @@ describe("capture clock resolver against rendered ApprovalActions", () => {
       getByLabel: () => ({ click: async () => undefined }),
     };
     await wrapPageTimeGateClicks(page);
-    await expect(
-      (page.keyboard.press as (key: string) => Promise<unknown>)("Enter")
-    ).rejects.toThrow(COMMIT_ABORT);
-    expect(presses).toEqual([]);
+    await (page.keyboard.press as (key: string) => Promise<unknown>)("Enter");
+    expect(presses).toEqual(["Enter"]);
   });
 
   it("sceneDispatchMouseEvent reads the target's test id from the element", async () => {
     beginCaptureScene("approvals-confirm");
     const target = document.createElement("button");
-    target.setAttribute("data-testid", "inbox-approval-commit");
+    target.setAttribute("data-testid", "agent-permission-commit");
     const locator = {
       evaluate: async (
         fn: (el: Element, arg?: unknown) => unknown,

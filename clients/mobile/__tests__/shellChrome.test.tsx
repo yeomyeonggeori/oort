@@ -345,15 +345,17 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     });
   });
 
-  it('작업 콘솔의 행은 서버가 그 표면을 내줄 때만 선다', async () => {
+  it('「작업」 행은 코드 실행 호스트가 없어도 선다 (ADR-0202 D3·D6, #3842)', async () => {
     installFetch();
     await renderReady();
     openMenu();
-    // jest 기본 서버 표면에는 작업 콘솔이 없다(`navState` 의 옛 단정과 같은 전제).
-    expect(screen.queryByTestId('plus-menu-work')).toBeNull();
+    // jest 기본 서버 표면에는 작업 콘솔(호스트)이 없다. 그래도 「작업」은 어느 에이전트에게든 맡긴
+    // 일의 결과 화면이라(호스팅 에이전트의 일은 호스트 없이 생긴다) 선다.
+    await waitFor(() => expect(screen.getByTestId('plus-menu-work')).toBeTruthy());
+    expect(screen.getByTestId('plus-menu-work')).toHaveProp('accessibilityLabel', '작업');
   });
 
-  it('메뉴의 행은 새 DM · 새 채널 · AI 순서이고, 모두 메뉴 항목이다 — 옛 AI 행들은 없다', async () => {
+  it('메뉴의 행은 새 DM · 새 채널 · AI · 작업 순서이고, 모두 메뉴 항목이다 — 옛 AI 행들은 없다', async () => {
     installFetch();
     await renderReady();
     openMenu();
@@ -372,6 +374,7 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
       'plus-menu-dm',
       'plus-menu-channel',
       'plus-menu-ai',
+      'plus-menu-work',
     ]);
     // 옛 세 행은 AI 시트 안으로 들어갔다. 메뉴에 남아 있으면 같은 문이 두 곳에 서는 것이다.
     for (const gone of ['agents', 'delegate', 'ask-mac']) {

@@ -71,7 +71,7 @@ describe("접힌 레일 = 펼친 줄", () => {
   const needs = { total: 6, panes: 1 };
   const marks = destinationMarks({ needsMe: needs, unreadChannels: 2, doneUnseen: false });
 
-  it("같은 입력에서 인박스·내 작업 알약의 색과 수가 줄과 레일이 같다", () => {
+  it("같은 입력에서 인박스·작업 알약의 색과 수가 줄과 레일이 같다(ADR-0202 D6: 「작업」이 옛 「내 작업」 배지를 진다)", () => {
     const rail = render(
       <MemoryRouter>
         <WorkspaceRail
@@ -91,7 +91,7 @@ describe("접힌 레일 = 펼친 줄", () => {
     expect(railInbox.textContent).toBe(String(needs.total));
     expect(railInbox.className).toContain(INK);
     expect(railInbox.className).not.toContain(AMBER);
-    const railMine = rail.getByTestId("rail-mine-badge");
+    const railMine = rail.getByTestId("rail-work-badge");
     expect(railMine.textContent).toBe("1");
     expect(railMine.className).toContain(INK);
     // 안 읽은 채널은 수 없이 호박 점으로만 선다(펼침에서는 채널 줄이 수를 말한다).

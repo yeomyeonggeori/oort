@@ -35,7 +35,7 @@
 
 import { serverSurface, type SurfaceId } from "../capabilities/serverSurfaces";
 import { attachDirection } from "../../lib/koreanParticle";
-import { WORK_CONSOLE_VIEW_PATH } from "../workbench/workTab";
+import { WORK_CONSOLE_VIEW_PATH, WORK_NAV, WORK_PATH } from "../workbench/workTab";
 import { AI_HUB_PATH, AI_HUB_SECTIONS, glossaryEntry } from "../ai/aiHubModel";
 
 /**
@@ -92,6 +92,7 @@ export type CommandIcon =
   | "members"
   | "settings"
   | "credentials"
+  | "work"
   | "work-console"
   | "workstreams"
   | "create-channel"
@@ -347,6 +348,19 @@ const STATIC_COMMANDS: readonly StaticCommand[] = [
     testId: "switcher-drafts",
     available: (env) => env.showDrafts,
     run: navigateTo("/drafts", "초안"),
+  },
+  {
+    // ADR-0202 D6: 사이드바 「작업」 한 줄과 같은 이름·같은 주소. 활동·작업 콘솔·작업 흐름 명령은
+    // 사이드바 줄이 아니라 이름으로 찾는 길이라 남는다(옛 주소는 계속 열린다).
+    id: "nav.work",
+    title: WORK_NAV.work,
+    group: "navigate",
+    kind: "navigate",
+    keywords: ["work", "jobs", "내 작업", "팀 작업", "맡긴 일"],
+    icon: "work",
+    testId: "switcher-work",
+    available: always,
+    run: navigateTo(WORK_PATH, WORK_NAV.work),
   },
   {
     id: "nav.activity",

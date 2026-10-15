@@ -48,6 +48,11 @@ const listeners = new Set<() => void>();
 // reset 때마다 증가하고, 비동기 경계마다 시작 세대와 대조한다.
 let sessionGeneration = 0;
 
+/** 고른 로컬 이미지의 주소. 칩 썸네일이 쓴다(없으면 아이콘). */
+export function draftPickedUri(localId: string): string | undefined {
+  return files.get(localId)?.uri;
+}
+
 export function attachmentSurfaceKey(target: AttachmentTarget): string {
   return `${target.workspaceId}|${target.channelId}|${target.rootId ?? ''}`;
 }

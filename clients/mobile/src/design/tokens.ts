@@ -54,6 +54,20 @@ export const ATTACHMENT_SHEET_GRABBER_WIDTH = 44;
 export const ATTACHMENT_TRAY_MAX_HEIGHT = 240;
 
 /**
+ * 첨부의 Buzz 식 이미지 측정 (#3820). 웹 `--spacing-inline-image-*` 와 같은 뜻의 짝이되
+ * 폰 폭에 맞춰 줄였다: 한 장은 폭 280 · 높이 320 안에서 비율을 지키고, 격자 타일은
+ * 정사각(둘 이상 136, 5장부터 88)이다. 칩 썸네일은 웹 `--spacing-tray-thumb`(64)와
+ * 같은 값이다.
+ */
+export const ATTACHMENT_INLINE_IMAGE = {
+  maxWidth: 280,
+  maxHeight: 320,
+  tile: 136,
+  tileSmall: 88,
+} as const;
+export const ATTACHMENT_CHIP_THUMB = 64;
+
+/**
  * 콘텐츠 상자 한 변을 `TOUCH_TARGET` 으로 채우는 `hitSlop` 값 (감사 M-14).
  *
  * ## 왜 함수인가 — 6·6·4·4 가 어떻게 29pt 가 되었나

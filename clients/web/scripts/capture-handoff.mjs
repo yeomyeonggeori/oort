@@ -38,7 +38,7 @@
 // =============================================================================
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -374,30 +374,14 @@ async function goToBottom(page, cards) {
 }
 
 /**
- * 확정 문장이 **코어의 것 그대로**인지.
- *
- * 문장을 이 파일에 적어 두면, 문장이 고쳐지는 날 증거 스크립트가 그 수리를
- * 막는다(`composerCopy.test.ts` 가 게이트에 대해 같은 말을 한다). 그래서 화면에서
- * 읽은 문장이 코어 소스 안에 있는지만 본다.
+ * #3819: 재개/중단도 한 번에 결정되므로 확정 문장이 없다. 클릭하면 결정이 나가므로
+ * 이 프레임은 **버튼에 초점을 놓은 모습**을 찍는다.
  */
-const CORE_HANDOFF_SRC = readFileSync(
-  resolve(WEB_ROOT, "../../packages/momo-core/src/features/timeline/loginHandoffCard.ts"),
-  "utf8"
-);
-
 async function armAndShoot(page, card, testId, path) {
   await card.evaluate((el) =>
     el.scrollIntoView({ block: "start", behavior: "auto" })
   );
-  await page.getByTestId(testId).first().click();
-  const confirm = page.getByTestId("handoff-confirm").first();
-  await confirm.waitFor({ state: "visible" });
-  const sentence = (await confirm.locator("span").first().innerText()).trim();
-  if (!CORE_HANDOFF_SRC.includes(sentence)) {
-    throw new Error(
-      `${path}: 확정 문장이 코어의 것이 아니다 — 화면: ${JSON.stringify(sentence)}`
-    );
-  }
+  await page.getByTestId(testId).first().focus();
   return shootCard(page, card, path);
 }
 

@@ -362,8 +362,8 @@ describe('세 가지 답', () => {
     const receipt = screen.getByTestId('turn-stop-outcome-cancelled');
     // 이름을 부른다 (2R M2). 이 문장은 여러 에이전트의 줄 아래 서므로, 이름이
     // 없으면 바로 위 줄에 대한 말로 읽힌다 — 아직 일하는 쪽이 멈췄다고.
-    expect(receipt).toHaveTextContent(/김인턴의 실행을 중단했습니다/);
-    expect(receipt).toHaveTextContent(/작업 세션 2개는 계속 돕니다/);
+    expect(receipt).toHaveTextContent(/김인턴의 실행을 중단했어요/);
+    expect(receipt).toHaveTextContent(/작업 세션 2개는 계속 돌아요/);
   });
 
   it('이미 터미널 — 409는 오류가 아니고, 어떤 끝이었는지까지 말한다', async () => {
@@ -387,8 +387,8 @@ describe('세 가지 답', () => {
       expect(screen.getByTestId('turn-stop-outcome-alreadyOver')).toBeTruthy(),
     );
     const settled = screen.getByTestId('turn-stop-outcome-alreadyOver');
-    expect(settled).toHaveTextContent(/이 실행은 이미 끝났습니다\./);
-    expect(settled).toHaveTextContent(/에이전트가 먼저 마쳤습니다\./);
+    expect(settled).toHaveTextContent(/이 실행은 이미 끝났어요\./);
+    expect(settled).toHaveTextContent(/에이전트가 먼저 마쳤어요\./);
     // 실패로 그리지 않는다 — 사람이 원한 것(이 실행이 돌지 않는 것)은 참이 됐다.
     expect(screen.queryByTestId('turn-stop-outcome-error')).toBeNull();
     // 확인 단계도 접힌다. 남겨 두면 존재하지 않는 실행을 다시 멈추라고 권하는
@@ -408,10 +408,10 @@ describe('세 가지 답', () => {
       expect(screen.getByTestId('turn-stop-outcome-error')).toBeTruthy(),
     );
     const banner = screen.getByTestId('turn-stop-outcome-error');
-    expect(banner).toHaveTextContent(/중단하지 못했습니다/);
+    expect(banner).toHaveTextContent(/중단하지 못했어요/);
     // 아무것도 나가지 않았으므로 반쯤 일어난 일도 없다. 그 사실을 말하는 것이
     // 사람이 "그래도 멈췄겠지"라고 넘겨짚는 것을 막는다.
-    expect(banner).toHaveTextContent(/실행은 그대로입니다/);
+    expect(banner).toHaveTextContent(/실행은 그대로예요/);
     // 다시 시도할 수 있게 확인 단계는 그대로 서 있다.
     expect(screen.getByTestId(COMMIT)).toBeTruthy();
   });
@@ -436,8 +436,8 @@ describe('한 줄이 여러 실행을 접고 있을 때 (2R M3)', () => {
     const confirm = screen.getByTestId(`turn-stop-${KIM_AGENT}-confirm`);
     // 아무 말도 없으면, 눌러도 배지가 남는 것이 고장난 버튼으로 읽힌다. 그때
     // 사람이 하는 다음 행동은 이미 취소된 실행에 대고 다시 누르는 것이다.
-    expect(confirm).toHaveTextContent(/실행 2개를 열어 두고 있고/);
-    expect(confirm).toHaveTextContent(/가장 먼저 시작한 하나만 멈춥니다/);
+    expect(confirm).toHaveTextContent(/실행 2개를 하고 있고/);
+    expect(confirm).toHaveTextContent(/가장 먼저 시작한 하나만 멈춰요/);
   });
 
   it('하나뿐이면 그 문장은 붙지 않는다', async () => {

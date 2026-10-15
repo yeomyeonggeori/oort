@@ -236,7 +236,7 @@ export const APPROVAL_OFFLINE_COPY =
 
 /** 이 표면에서는 결정할 수 없고 다른 자리가 있는 경우. 폰의 문장 그대로. */
 export const APPROVAL_ELSEWHERE_COPY =
-  "이 결정은 인박스나 데스크톱 앱에서 처리할 수 있습니다.";
+  "이 결정은 인박스나 데스크톱 앱에서 할 수 있어요.";
 
 /**
  * 카드가 컨트롤 대신 말할 줄. `null`이면 **컨트롤을 세우거나, 할 말이 없다**.

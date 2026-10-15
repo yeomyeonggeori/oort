@@ -30,22 +30,36 @@ export const WORK_TAB_SESSION_LIST_PX = 268;
 /** 격자의 좌우 여백(시안 ① `.grid` padding 0 12). */
 export const WORK_TAB_GRID_PAD_PX = 12;
 
+// ADR-0202 D6 (U1 #3842): 사이드바의 「내 작업」·「팀 작업」·「활동」·「작업 콘솔」·「작업 흐름」
+// 다섯 줄이 「작업」 한 줄이 됐다. `/work`는 이제 결과 중심 「작업」 화면이고, 「내 것 / 팀 전체」는
+// 그 화면의 필터다(`workJobs.ts`). 옛 주소는 지우지 않는다:
+//   - `/work?view=team`(ADR-0194 D2 보드 링크) → 「작업」 + 「팀 전체」
+//   - `/work?view=console`·`?session=` → 작업 콘솔(그대로, 진입점만 숨김)
+//   - 데스크탑 터미널 격자(옛 「내 작업」 본문)는 `?view=terminals`로 옮겼다. 「작업」 화면의
+//     「내 것」 머리의 「이 기기」 줄이 그리로 간다. 사이드바 줄은 따로 없다.
+
+/** 「작업」 화면. 옛 이름을 지키는 것은 이 상수를 쓰는 진입점(인박스·도크)이 여럿이라서다. */
 export const MY_WORK_PATH = "/work";
+export const WORK_PATH = MY_WORK_PATH;
+/** 옛 「팀 작업」 링크. 지금은 「작업」 + 「팀 전체」로 열린다. */
 export const TEAM_WORK_PATH = "/work?view=team";
 export const WORK_CONSOLE_VIEW_PATH = "/work?view=console";
+/** 데스크탑 이 기기의 터미널 격자(옛 「내 작업」 본문). */
+export const LOCAL_TERMINALS_PATH = "/work?view=terminals";
 
-export type WorkView = "mine" | "team" | "console";
+export type WorkView = "jobs" | "terminals" | "console";
 
 /**
  * `/work`의 쿼리로 어느 보기인지 정한다. 세션 링크(`?session=`)는 콘솔이다.
- * 모르는 `view` 값은 「내 작업」으로 읽는다: 링크가 낡았다고 빈 화면을 주지 않는다.
+ * 모르는 `view` 값(옛 `team`·`mine` 포함)은 「작업」 화면으로 읽는다: 링크가 낡았다고 빈 화면을
+ * 주지 않는다. 필터(`who`·옛 `view=team`)는 화면이 `workFilterFromSearch`로 읽는다.
  */
 export function workViewOf(search: string): WorkView {
   const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
   const view = params.get("view");
-  if (view === "team") return "team";
+  if (view === "terminals") return "terminals";
   if (view === "console" || params.has("session")) return "console";
-  return "mine";
+  return "jobs";
 }
 
 /**
@@ -53,7 +67,7 @@ export function workViewOf(search: string): WorkView {
  * 앱 셸이 이 답으로 목록 열을 라우트(세션 목록)에 넘기고 도크를 내린다. 레일은 그대로다.
  */
 export function isMyWorkTab(pathname: string, search: string, desktop: boolean): boolean {
-  return desktop && isWorkPath(pathname) && workViewOf(search) === "mine";
+  return desktop && isWorkPath(pathname) && workViewOf(search) === "terminals";
 }
 
 /**
@@ -103,8 +117,13 @@ export function sessionListFits(windowWidth: number, minGridWidth: number): bool
   return grid >= minGridWidth;
 }
 
-/** 사이드바 두 줄과 화면 제목. 줄 이름과 도착한 화면의 제목이 같은 말이다(#1146 N4). */
+/**
+ * 사이드바 줄과 화면 제목. 줄 이름과 도착한 화면의 제목이 같은 말이다(#1146 N4).
+ * `work`가 사이드바의 한 줄이다(ADR-0202 D6). `mine`은 터미널 격자 머리의 제목으로만 남고,
+ * `team`은 옛 화면(팀 보드 코드, 라우트에서 내려옴)의 제목으로만 남는다.
+ */
 export const WORK_NAV = {
-  mine: "내 작업",
+  work: "작업",
+  mine: "이 기기 터미널",
   team: "팀 작업",
 } as const;
