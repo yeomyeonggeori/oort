@@ -134,6 +134,8 @@ const END_REASON_TEXT: Record<string, string> = {
   lease_abandoned: "가져간 에이전트가 오래 응답하지 않아 서버가 끝냈어요",
   agent_error: "에이전트가 오류로 끝냈어요",
   cancelled_by_member: "멤버가 취소했어요",
+  // 서버의 사람 중단 경로가 쓰는 코드(`routes/agent_runs.rs` CANCEL_ERROR_CODE).
+  human_cancelled: "사람이 중단했어요",
 };
 
 /** 종료 사유 문장. 모르는 코드(서버가 클라보다 앞서감)는 undefined다. */

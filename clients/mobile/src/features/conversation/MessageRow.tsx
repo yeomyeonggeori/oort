@@ -136,7 +136,9 @@ import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecisio
 import {
   ApprovalDecision,
   DEFAULT_DECISION_LEAD,
+  type ApprovalDecisionHandle,
 } from '../inbox/ApprovalDecision';
+import {spawnHostGate} from '@momo/core/features/timeline/spawnHostChoice';
 import {LinkOnce} from './LinkOnce';
 import {BAR_CONTROL_MAX_SCALE, Sentence} from '../../design/atoms';
 import {AttachmentList} from '../attachments/AttachmentList';
@@ -1512,6 +1514,73 @@ function ApprovalActionRows({
   );
 }
 
+/**
+ * 승인 카드가 지금 무엇을 말하는가 — 카드 본체와 행의 로터(#2595)가 같이 읽는다.
+ *
+ * `note === null` 이면 결정 컨트롤이 선다(문장이 아니라 버튼). 로터의 「승인」·
+ * 「거부」는 정확히 그때만 선다.
+ */
+export function readApprovalCard(
+  card: Extract<AgentCardModel, {kind: 'approval'}>,
+  {
+    approvalGates,
+    approvalReceipts,
+    approvalOffline,
+    approvalsProvided,
+  }: {
+    approvalGates?: ReadonlyMap<string, ApprovalGate>;
+    approvalReceipts?: ReadonlyMap<string, ApprovalReceipt>;
+    approvalOffline?: boolean;
+    approvalsProvided?: boolean;
+  },
+) {
+  // 카드가 이미 파싱돼 있으므로 여기서 맞춰 본다 — 목록 쪽에서 하려면 이
+  // 파싱을 한 번 더 해야 하고, 그것은 코어 규칙의 두 번째 구현이 된다.
+  const approval = gateFor(card, approvalGates ?? EMPTY_GATES);
+  const receipt =
+    card.approvalId === null
+      ? undefined
+      : approvalReceipts?.get(card.approvalId);
+  const settledStatus = receipt?.status ?? card.status;
+  const note = approvalCardNote({
+    receiptNote: receipt?.note ?? null,
+    isResumeOffer: card.isResumeOffer,
+    // 폰에는 재개 제안에 할 말이 아직 없다. 웹의 문장은 **작업 세션 패널**로
+    // 가라는 안내인데(`AgentCard.tsx` — 「내 세션에서 온라인 호스트를
+    // 선택하세요」) 이 클라에는 그 화면이 없다. 없는 문을 가리키느니 아무
+    // 말도 하지 않는다. 그리고 이것이 옛 판을 고친다: 예전에는 재개 제안
+    // 카드가 `approval === null` 이라는 이유로 「이 결정은 인박스나 데스크톱
+    // 앱에서」를 입었다 — 승인이 아닌 것에 승인 문장을 붙인 것이다.
+    resumeOfferText: null,
+    // ## 세 값이 하나였을 때 이 자리가 무엇을 잃었나 (U4-6 리뷰 B-1)
+    //
+    // 앞 판은 `decidable: approval !== null` 하나를 넘겼다. 그 불리언이 세 가지
+    // **서로 다른 사실**을 접고 있었다 — 「끝났는가」·「결정할 대상이 있는가」·
+    // 「이 표면에서 지금 대기인가」. 코어가 그것을 가른 뒤(`approvalNote.ts`)
+    // 이 호출부만 옛 이름으로 남았고, 그 결과가 **오프라인인데 승인·거부 버튼이
+    // 되살아나는** 화면이었다: 넘기지 않은 `settled`·`hasTarget` 이 `undefined`
+    // 라 `settled || !hasTarget` 이 참이 되고, 영수증 말고는 전부 `null` —
+    // 그리고 이 파일에서 `null` 은 「할 말이 없다」가 아니라 **「컨트롤이
+    // 선다」**이다. 끊긴 채로 누르면 나가지 않는 버튼이 서 있었다.
+    //
+    // 세 값의 출처가 각각 다르다는 것이 이 자리의 요점이다:
+    //
+    //   settled     원장이 답했으면 그 상태, 아니면 카드 스냅샷 — 위에서 칩이
+    //               읽는 그 값(`settledStatus`)과 **같은 값**이다. 다른 값을
+    //               쓰면 한 카드가 한 줄에서 두 가지를 말한다.
+    //   hasTarget   카드에 결정할 대상이 있는가. 재개 제안에는 없다.
+    //   pendingHere 대기 승인 **목록**이 지금도 대기라고 말하는가. 폰만 아는
+    //               사실이고(웹의 타임라인 카드는 이 목록을 구독하지 않는다),
+    //               다른 기기에서 결정된 건이 여기서 사라지는 근거다.
+    settled: settledStatus !== 'pending',
+    hasTarget: card.approvalId !== null,
+    pendingHere: approval !== null,
+    offline: approvalOffline === true,
+    approvalsProvided,
+  });
+  return {approval, receipt, settledStatus, note};
+}
+
 function AgentCard({
   card,
   directory,
@@ -1521,8 +1590,11 @@ function AgentCard({
   approvalsProvided,
   nowMs,
   onApprovalSettled,
+  decisionRef,
 }: {
   card: AgentCardModel;
+  /** 행의 로터가 같은 결정을 부르는 손잡이 (#2595). */
+  decisionRef?: React.Ref<ApprovalDecisionHandle>;
   /** 결과 카드의 「결정」 줄이 사람 이름을 푸는 데 쓴다. */
   directory: Directory;
   approvalGates?: ReadonlyMap<string, ApprovalGate>;
@@ -1537,48 +1609,13 @@ function AgentCard({
   const approvalNoteStyle = useStyles(buildApprovalNoteStyle);
   const completionToneStyle = useStyles(buildCompletionToneStyle);
   if (card.kind === 'approval') {
-    // 카드가 이미 파싱돼 있으므로 여기서 맞춰 본다 — 목록 쪽에서 하려면 이
-    // 파싱을 한 번 더 해야 하고, 그것은 코어 규칙의 두 번째 구현이 된다.
-    const approval = gateFor(card, approvalGates ?? EMPTY_GATES);
-    const receipt =
-      card.approvalId === null
-        ? undefined
-        : approvalReceipts?.get(card.approvalId);
-    const settledStatus = receipt?.status ?? card.status;
-    const note = approvalCardNote({
-      receiptNote: receipt?.note ?? null,
-      isResumeOffer: card.isResumeOffer,
-      // 폰에는 재개 제안에 할 말이 아직 없다. 웹의 문장은 **작업 세션 패널**로
-      // 가라는 안내인데(`AgentCard.tsx` — 「내 세션에서 온라인 호스트를
-      // 선택하세요」) 이 클라에는 그 화면이 없다. 없는 문을 가리키느니 아무
-      // 말도 하지 않는다. 그리고 이것이 옛 판을 고친다: 예전에는 재개 제안
-      // 카드가 `approval === null` 이라는 이유로 「이 결정은 인박스나 데스크톱
-      // 앱에서」를 입었다 — 승인이 아닌 것에 승인 문장을 붙인 것이다.
-      resumeOfferText: null,
-      // ## 세 값이 하나였을 때 이 자리가 무엇을 잃었나 (U4-6 리뷰 B-1)
-      //
-      // 앞 판은 `decidable: approval !== null` 하나를 넘겼다. 그 불리언이 세 가지
-      // **서로 다른 사실**을 접고 있었다 — 「끝났는가」·「결정할 대상이 있는가」·
-      // 「이 표면에서 지금 대기인가」. 코어가 그것을 가른 뒤(`approvalNote.ts`)
-      // 이 호출부만 옛 이름으로 남았고, 그 결과가 **오프라인인데 승인·거부 버튼이
-      // 되살아나는** 화면이었다: 넘기지 않은 `settled`·`hasTarget` 이 `undefined`
-      // 라 `settled || !hasTarget` 이 참이 되고, 영수증 말고는 전부 `null` —
-      // 그리고 이 파일에서 `null` 은 「할 말이 없다」가 아니라 **「컨트롤이
-      // 선다」**이다. 끊긴 채로 누르면 나가지 않는 버튼이 서 있었다.
-      //
-      // 세 값의 출처가 각각 다르다는 것이 이 자리의 요점이다:
-      //
-      //   settled     원장이 답했으면 그 상태, 아니면 카드 스냅샷 — 위에서 칩이
-      //               읽는 그 값(`settledStatus`)과 **같은 값**이다. 다른 값을
-      //               쓰면 한 카드가 한 줄에서 두 가지를 말한다.
-      //   hasTarget   카드에 결정할 대상이 있는가. 재개 제안에는 없다.
-      //   pendingHere 대기 승인 **목록**이 지금도 대기라고 말하는가. 폰만 아는
-      //               사실이고(웹의 타임라인 카드는 이 목록을 구독하지 않는다),
-      //               다른 기기에서 결정된 건이 여기서 사라지는 근거다.
-      settled: settledStatus !== 'pending',
-      hasTarget: card.approvalId !== null,
-      pendingHere: approval !== null,
-      offline: approvalOffline === true,
+    // 카드가 무엇을 말하는지(문장 / 컨트롤 / 둘 다 아님)는 `readApprovalCard` 한
+    // 곳에서 읽는다. 행의 로터(#2595)도 같은 답을 보고 「승인」·「거부」를 세운다 —
+    // 두 자리가 따로 읽으면 버튼은 없는데 로터만 남는 날이 온다.
+    const {approval, receipt, settledStatus, note} = readApprovalCard(card, {
+      approvalGates,
+      approvalReceipts,
+      approvalOffline,
       approvalsProvided,
     });
     return (
@@ -1698,6 +1735,7 @@ function AgentCard({
             testIDPrefix={`card-approval-${approval.approvalId}`}
             // 시안 `.a-acts` 알약 행동(주 = 잉크, 보조 = surface2).
             shape="pill"
+            decisionRef={decisionRef}
           />
         ) : null}
         </ApprovalFooter>
@@ -2265,6 +2303,30 @@ function MessageRowInner({
     presentation.card.approvalId !== null
       ? approvalReceipts?.get(presentation.card.approvalId)?.secretOnce
       : undefined;
+  // 승인 카드의 결정 버튼 (#2595). 같은 이유로 — 행이 요소 하나라 카드 안의 승인·
+  // 거부에 VoiceOver 가 닿지 못한다 — 로터에 「승인」·「거부」를 세운다. 서는 조건은
+  // 카드가 버튼을 세우는 조건과 **같은 함수**(`readApprovalCard`)의 답이고, 로터가
+  // 부르는 것은 버튼이 부르는 그 `commit` 이다(`ApprovalDecisionHandle`).
+  const decisionRef = useRef<ApprovalDecisionHandle | null>(null);
+  const decisionRotor = useMemo(() => {
+    const card = presentation.card;
+    if (card?.kind !== 'approval') return null;
+    const read = readApprovalCard(card, {
+      approvalGates,
+      approvalReceipts,
+      approvalOffline,
+      approvalsProvided,
+    });
+    if (read.note !== null || read.approval === null) return null;
+    // 실행할 호스트가 하나도 없는 스폰 승인은 버튼도 꺼져 있다. 로터에도 세우지 않는다.
+    return {canApprove: spawnHostGate(card.execution).canApprove};
+  }, [
+    presentation.card,
+    approvalGates,
+    approvalReceipts,
+    approvalOffline,
+    approvalsProvided,
+  ]);
   const deleted = message.state === 'deleted';
   const rollup =
     rollupOverride === undefined ? threadRollup(message) : rollupOverride;
@@ -2472,6 +2534,12 @@ function MessageRowInner({
         case 'momoCopyCode':
           if (affordances.firstCode) void copyText(affordances.firstCode);
           return;
+        case 'momoApprove':
+          decisionRef.current?.decide('approve');
+          return;
+        case 'momoReject':
+          decisionRef.current?.decide('reject');
+          return;
         case 'momoCopyLinkOnce':
           // 버튼의 라벨 교체(ADR-0182 ①)를 로터에서는 들을 수 없으므로, 같은
           // 낱말을 소리로 한 번 말한다. 값 자체는 읽지 않는다.
@@ -2520,6 +2588,11 @@ function MessageRowInner({
     const list: {name: string; label: string}[] = [];
     // 맨 앞이다: 「지금 전달하세요」라고 말한 값이고, 이 화면을 떠나면 다시 없다.
     if (linkOnce) list.push({name: 'momoCopyLinkOnce', label: '링크 복사하기'});
+    // 그다음이 기다리는 결정이다. 낱말은 버튼과 같다(「승인」·「거부」).
+    if (decisionRotor !== null && !deleted) {
+      if (decisionRotor.canApprove) list.push({name: 'momoApprove', label: '승인'});
+      list.push({name: 'momoReject', label: '거부'});
+    }
     // 도우미가 넘긴 줄의 「○○에게 맡기기」 (ADR-0201 D5). 요청자 본인에게만, 지금 누를 수
     // 있을 때만 선다 — 띠의 버튼과 같은 조건이다(`useTeamAiDelegateSend`).
     teamAiSend.pressable.forEach((candidate, index) => {
@@ -2578,6 +2651,7 @@ function MessageRowInner({
     directory,
     message.authorMemberId,
     linkOnce,
+    decisionRotor,
     teamAiSend.pressable,
   ]);
 
@@ -2853,6 +2927,7 @@ function MessageRowInner({
                 approvalsProvided={approvalsProvided}
                 nowMs={nowMs}
                 onApprovalSettled={onApprovalSettled}
+                decisionRef={decisionRef}
               />
             ) : null}
 

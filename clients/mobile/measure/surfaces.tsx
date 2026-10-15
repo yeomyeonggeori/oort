@@ -2396,7 +2396,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             chips={[]}
             nowMs={NOW}
             approvalReceipts={
-              new Map([['ap-1', {note: '승인을 기록했습니다.', status: 'approved'}]])
+              new Map([['ap-1', {note: '승인을 기록했어요.', status: 'approved'}]])
             }
           />
         </Frame>
@@ -2934,7 +2934,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             nowMs={NOW}
             approvalGates={gates}
             approvalReceipts={
-              new Map([['ap-1', {note: '승인을 기록했습니다.', status: 'approved'}]])
+              new Map([['ap-1', {note: '승인을 기록했어요.', status: 'approved'}]])
             }
           />
           {/* 오프라인은 U4-4 리뷰가 **미캡처**로 남긴 자리다 — 「증거가 상수
@@ -3134,7 +3134,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
                 [
                   'ap-1',
                   {
-                    note: '승인을 기록했습니다.',
+                    note: '승인을 기록했어요.',
                     status: 'approved',
                     secretOnce: {
                       kind: 'invite_link',

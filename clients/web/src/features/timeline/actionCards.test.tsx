@@ -545,7 +545,7 @@ describe("1회 링크는 결정 응답에서만 그려지고 새로고침을 견
     });
     await decide(host, jsonResponse({ status: "pending" }, 403));
     expect(byTestId(host, "approval-error")[0]?.textContent).toContain(
-      "채널 멤버인지 확인하세요"
+      "채널 멤버인지 확인해 주세요"
     );
   });
 });

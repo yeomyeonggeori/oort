@@ -168,6 +168,9 @@ describe("상태 어휘: 대기 n번째 / 가져감 / 진행 / 승인 대기 / �
     expect(endReasonText("approval_expired")).toBe("승인이 만료됐어요");
     expect(endReasonText("unclaimed_expired")).toBe("아무도 가져가지 않아 끝냈어요");
     expect(endReasonText("cancelled_by_member")).toBe("멤버가 취소했어요");
+    // 서버의 사람 중단(`POST …/agent-runs/{run}/cancel`)이 원장에 남기는 코드다.
+    // 이 줄이 없으면 「취소됐어요」 아래 사유가 비어, 누가 멈췄는지 기록이 말하지 않는다.
+    expect(endReasonText("human_cancelled")).toBe("사람이 중단했어요");
     expect(endReasonText("brand_new_code")).toBeUndefined();
     expect(endReasonText(undefined)).toBeUndefined();
   });

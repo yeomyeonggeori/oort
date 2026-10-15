@@ -9,6 +9,8 @@
 //   SLICE=u2  서버 원장 기록(닫아도 남는다) · 여러 run(진행 중 병렬·대기열 순서·끝난 일) ·
 //             대기열 앞(내 채널은 자세히, 아니면 「앞에 N건」) · 승인 카드 링크 ·
 //             보이는 것의 한계 한 줄 · 서버가 모르는 run(이 화면에만 있는 기록).
+//   SLICE=stop 사람의 중단 (#3852): 열린 run에만 서는 「중단」 → 확인 문장 → 확정 →
+//             영수증·원장 「취소됐어요 · 사람이 중단했어요」, 이미 끝난 run(409)·권한 없음(403).
 //   SLICE=u1  대기 2번째 → 가져감(소식 없음 포함) → 진행 단계 → 승인 대기 → 끝(사유),
 //             여러 run 병렬. 사이드바 알약·컴포저 활동 줄·작업 패널 머리.
 //   SLICE=d1  #3824: 보낸 메시지 아래 상태 줄(받았어요 → 깨우는 신호 보냄 → 가져감 →
@@ -90,7 +92,7 @@ function progress(now, extra) {
 
 /** 장면 상태. 페이지가 읽을 때마다 현재 값을 돌려준다. */
 function newScene() {
-  return { runs: [], progressCalls: 0, ledgers: {}, ledgerCalls: 0, ledgerIncludes: [], approvals: [], liveness: {}, ringCalls: 0, ringMode: "ok", role: "owner", dmChannels: [] };
+  return { runs: [], progressCalls: 0, ledgers: {}, ledgerCalls: 0, ledgerIncludes: [], approvals: [], liveness: {}, ringCalls: 0, ringMode: "ok", role: "owner", dmChannels: [], cancelCalls: [], cancelMode: "ok" };
 }
 
 async function installRoutes(context, scene) {
@@ -141,6 +143,17 @@ async function installRoutes(context, scene) {
       return json(route, { profile: { agentMemberId: id, workspaceId, instructions: "채널 정리와 일정 요약을 맡아요.", enabledTools: [], triggers: { mention: true }, paused: false, version: 1, updatedBy: memberId, updatedAtMs: Date.now() - 86_400_000 } });
     }
     if (path.endsWith("/allowed-models")) return json(route, { allowedAgentModels: [] });
+    const cancelMatch = path.match(/\/agent-runs\/([^/]+)\/cancel$/);
+    if (cancelMatch && method === "POST") {
+      const runId = cancelMatch[1].toLowerCase();
+      scene.cancelCalls.push(path);
+      if (scene.cancelMode === "forbidden") return json(route, { error: { code: "forbidden", message: "active human channel member required" } }, 403);
+      if (scene.cancelMode === "over") return json(route, { error: { code: "conflict", message: "agent run is already succeeded" } }, 409);
+      // 서버처럼: run을 cancelled로, 원장에 human_cancelled 줄을 더한다(migration 128 트리거).
+      scene.runs = scene.runs.map((r) => (r.id === runId ? { ...r, phase: "cancelled", status: "cancelled", finishedAtMs: Date.now(), endReason: "human_cancelled" } : r));
+      scene.ledgers[runId] = [...(scene.ledgers[runId] ?? []), { ordinal: (scene.ledgers[runId]?.length ?? 0) + 1, kind: "cancelled", code: "human_cancelled", createdAtMs: Date.now() }];
+      return json(route, { runId, status: "cancelled", linkedWorkSessionIds: [], workSessionsTerminated: false });
+    }
     const ledgerMatch = path.match(/\/agent-runs\/([^/]+)\/events$/);
     if (ledgerMatch) {
       scene.ledgerCalls += 1;
@@ -231,6 +244,8 @@ async function open(browser, origin, scheme, scene, hash) {
 async function serverMoves(page, scene, runs, kind) {
   scene.runs = runs;
   const before = scene.progressCalls;
+  // 로그인 직후에는 가짜 소켓이 아직 없을 수 있다(구독 전). 있을 때 민다.
+  await page.waitForFunction(() => window.__socket !== undefined, null, { timeout: 15_000 });
   await page.evaluate(
     ([channel, runId, k]) =>
       window.__push(channel, {
@@ -367,6 +382,81 @@ async function open2(browser, origin, scheme, scene) {
 async function openPanelFor(page, who) {
   await page.getByTestId("composer-working-open").filter({ hasText: who }).first().click();
   await page.getByTestId("agent-work-panel").waitFor();
+}
+
+async function stop(browser, origin, scheme) {
+  const tag = `1440-${scheme}`;
+  const shot = (name) => resolve(OUT_DIR, `${name}-${tag}.png`);
+  const now = Date.now();
+  const running = () =>
+    progress(now, { id: RUN_A, phase: "running", status: "running", leaseState: "live", claimedAtMs: now - 4 * MIN, startedAtMs: now - 3 * MIN, lastEventAtMs: now - 10_000, latestStage: "grokbot-lab 이름 점검", triggerSummary: "채널 하나 만들어 줄래요?", createdAtMs: now - 5 * MIN });
+  const ledgerA = () => ledger(now, [["queued", 5], ["claimed", 4], ["started", 3], ["stage", 2, { stage: "시작: 채널 이름 확인" }], ["stage", 1, { stage: "grokbot-lab 이름 점검" }]]);
+
+  // ①~③ 중단 → 확인 → 확정 → 영수증과 원장
+  const scene = newScene();
+  scene.runs = [running()];
+  scene.ledgers[RUN_A] = ledgerA();
+  const { context, page } = await open(browser, origin, scheme, scene, `/c/${CH}`);
+  await serverMoves(page, scene, scene.runs, "stage");
+  await page.getByTestId("composer-working-open").first().waitFor({ timeout: 15_000 });
+  await openPanelFor(page, "그록봇");
+  await page.getByTestId("agent-work-panel-stop-arm").waitFor({ timeout: 10_000 });
+  check(`${tag} 열린 run에 「중단」이 선다`, ((await page.getByTestId("agent-work-panel-stop-arm").textContent()) ?? "").trim() === "중단");
+  check(`${tag} 이름이 「확인 필요」를 말한다`, (await page.getByTestId("agent-work-panel-stop-arm").getAttribute("aria-label")) === "실행 중단, 확인 필요");
+  await page.screenshot({ path: shot("1-stop-offer") });
+
+  await page.getByTestId("agent-work-panel-stop-arm").click();
+  await page.getByTestId("agent-work-panel-stop-confirm").waitFor();
+  check(`${tag} 첫 클릭은 아무것도 보내지 않는다`, scene.cancelCalls.length === 0, String(scene.cancelCalls.length));
+  await page.screenshot({ path: shot("2-stop-confirm") });
+
+  await page.getByTestId("agent-work-panel-stop-commit").click();
+  await page.getByTestId("agent-work-panel-stop-outcome").waitFor();
+  check(`${tag} run 취소 경로로 한 번`, scene.cancelCalls.length === 1 && scene.cancelCalls[0].endsWith(`/agent-runs/${RUN_A}/cancel`), scene.cancelCalls.join(","));
+  // 서버가 run 프레임을 낸 것처럼.
+  await serverMoves(page, scene, scene.runs, "cancelled");
+  await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="agent-work-panel-ledger-row"]')].some((n) => n.getAttribute("data-kind") === "cancelled"), null, { timeout: 8_000 });
+  const outcomeText = ((await page.getByTestId("agent-work-panel-stop-outcome").textContent()) ?? "").trim();
+  check(`${tag} 영수증`, outcomeText === "그록봇의 실행을 중단했어요.", outcomeText);
+  const reasons = await page.getByTestId("agent-work-panel-ledger-reason").allTextContents();
+  check(`${tag} 원장 사유 「사람이 중단했어요」`, reasons.some((r) => r.includes("사람이 중단했어요")), reasons.join("|"));
+  check(`${tag} 끝난 run에는 버튼이 없다`, (await page.getByTestId("agent-work-panel-stop-arm").count()) === 0);
+  await page.screenshot({ path: shot("3-stop-done-ledger") });
+  await context.close();
+
+  // ④ 이미 끝난 run(409)
+  const over = newScene();
+  over.runs = [running()];
+  over.ledgers[RUN_A] = ledgerA();
+  over.cancelMode = "over";
+  const second = await open(browser, origin, scheme, over, `/c/${CH}`);
+  await serverMoves(second.page, over, over.runs, "stage");
+  await second.page.getByTestId("composer-working-open").first().waitFor({ timeout: 15_000 });
+  await openPanelFor(second.page, "그록봇");
+  await second.page.getByTestId("agent-work-panel-stop-arm").click();
+  await second.page.getByTestId("agent-work-panel-stop-commit").click();
+  await second.page.getByTestId("agent-work-panel-stop-outcome").waitFor();
+  const overText = ((await second.page.getByTestId("agent-work-panel-stop-outcome").textContent()) ?? "").trim();
+  check(`${tag} 409는 「이미 끝났어요」`, overText === "이 실행은 이미 끝났어요. 에이전트가 먼저 마쳤어요.", overText);
+  await second.page.screenshot({ path: shot("4-stop-already-over") });
+  await second.context.close();
+
+  // ⑤ 권한 없음(403)
+  const denied = newScene();
+  denied.runs = [running()];
+  denied.ledgers[RUN_A] = ledgerA();
+  denied.cancelMode = "forbidden";
+  const third = await open(browser, origin, scheme, denied, `/c/${CH}`);
+  await serverMoves(third.page, denied, denied.runs, "stage");
+  await third.page.getByTestId("composer-working-open").first().waitFor({ timeout: 15_000 });
+  await openPanelFor(third.page, "그록봇");
+  await third.page.getByTestId("agent-work-panel-stop-arm").click();
+  await third.page.getByTestId("agent-work-panel-stop-commit").click();
+  await third.page.getByTestId("agent-work-panel-stop-outcome").waitFor();
+  const deniedText = ((await third.page.getByTestId("agent-work-panel-stop-outcome").textContent()) ?? "").trim();
+  check(`${tag} 403은 누가 멈출 수 있는지 말한다`, deniedText === "중단하지 못했어요. 이 실행이 있는 채널의 멤버만 중단할 수 있어요.", deniedText);
+  await third.page.screenshot({ path: shot("5-stop-forbidden") });
+  await third.context.close();
 }
 
 async function u2(browser, origin, scheme) {
@@ -732,6 +822,7 @@ async function main() {
       if (SLICE === "u1") await u1(browser, preview.origin, scheme);
       if (SLICE === "u2") await u2(browser, preview.origin, scheme);
       if (SLICE === "u3") await u3(browser, preview.origin, scheme);
+      if (SLICE === "stop") await stop(browser, preview.origin, scheme);
       if (SLICE === "d1") await d1(browser, preview.origin, scheme);
     }
   } finally {

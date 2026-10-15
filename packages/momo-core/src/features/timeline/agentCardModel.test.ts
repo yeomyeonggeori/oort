@@ -585,12 +585,12 @@ describe("decision receipt semantics", () => {
     const outcome = interpretReceipt(409, receipt("rejected"));
     expect(outcome.kind).toBe("superseded");
     expect(outcome.status).toBe("rejected");
-    expect(outcome.note).toBe("다른 곳에서 이미 결정되었습니다.");
+    expect(outcome.note).toBe("다른 곳에서 이미 결정됐어요.");
   });
 
   it("names expiry for what it is", () => {
     expect(interpretReceipt(409, receipt("expired")).note).toBe(
-      "결정 전에 만료되었습니다."
+      "결정 전에 만료됐어요."
     );
   });
 
@@ -604,19 +604,19 @@ describe("decision receipt semantics", () => {
     // MOMO-609: the request either reached the server or it did not, and the
     // two absences point at different next moves. Neither is "it was recorded".
     expect(sendFailureCopy(new NetworkError("timeout", 15_000))).toContain(
-      "보내지 못했습니다"
+      "보내지 못했어요"
     );
     expect(sendFailureCopy(new NetworkError("unreachable", 15_000))).toContain(
-      "닿지 못했습니다"
+      "닿지 못했어요"
     );
   });
 
   it("says what a 403 and a 404 mean without apologising", () => {
     expect(interpretReceipt(403, receipt("forbidden")).errorCopy).toContain(
-      "권한이 없습니다"
+      "권한이 없어요"
     );
     expect(interpretReceipt(404, receipt("not_found")).errorCopy).toContain(
-      "찾을 수 없습니다"
+      "찾지 못했어요"
     );
   });
 });

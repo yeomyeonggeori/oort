@@ -142,7 +142,7 @@ name: 30-approval
     visible:
       id: "inbox-decision-note"
     timeout: 60000
-- assertVisible: ".*승인을 기록했습니다.*"
+- assertVisible: ".*승인을 기록했어요.*"
 
 # An approved call that never executes is not an approval. `work.session.end` is
 # the catalog's one executable entry precisely so this last step is real: the run
