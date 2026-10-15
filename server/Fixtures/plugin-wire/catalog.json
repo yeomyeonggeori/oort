@@ -1,0 +1,99 @@
+{
+  "plugins": [
+    {
+      "description": "Official momo-hosted read-only MCP for an operator-configured shared drive",
+      "egressDomains": [
+        "www.googleapis.com",
+        "oauth2.googleapis.com"
+      ],
+      "enabled": false,
+      "installed": false,
+      "name": "Google Drive",
+      "official": true,
+      "pluginId": "com.momo.plugins.drive",
+      "recommended": true,
+      "recommendedFor": [
+        "knowledge-management",
+        "shared-drive-search"
+      ],
+      "version": "1.0.0"
+    },
+    {
+      "description": "Official GitHub hosted MCP integration",
+      "egressDomains": [
+        "api.githubcopilot.com"
+      ],
+      "enabled": true,
+      "installed": true,
+      "name": "GitHub",
+      "official": true,
+      "pluginId": "com.momo.plugins.github",
+      "recommended": true,
+      "recommendedFor": [
+        "software-development",
+        "work-tracking"
+      ],
+      "version": "1.0.0"
+    },
+    {
+      "description": "Official Linear hosted MCP integration",
+      "egressDomains": [
+        "mcp.linear.app"
+      ],
+      "enabled": false,
+      "installed": true,
+      "name": "Linear",
+      "official": true,
+      "pluginId": "com.momo.plugins.linear",
+      "recommended": false,
+      "recommendedFor": [
+        "work-tracking",
+        "product-development"
+      ],
+      "version": "1.0.0"
+    },
+    {
+      "description": "Official Notion hosted MCP integration",
+      "egressDomains": [
+        "mcp.notion.com"
+      ],
+      "enabled": false,
+      "installed": false,
+      "name": "Notion",
+      "official": true,
+      "pluginId": "com.momo.plugins.notion",
+      "recommended": false,
+      "recommendedFor": [
+        "knowledge-management",
+        "documentation"
+      ],
+      "version": "1.0.0"
+    }
+  ],
+  "toolPolicy": {
+    "plugins": [
+      {
+        "egressDomains": [
+          "api.githubcopilot.com"
+        ],
+        "mcp": {
+          "transport": "streamable_http",
+          "url": "https://api.githubcopilot.com/mcp/"
+        },
+        "pluginId": "com.momo.plugins.github",
+        "tools": [
+          {
+            "approvalTier": "read_only",
+            "name": "github.list_repositories",
+            "risk": "read"
+          },
+          {
+            "approvalTier": "read_only",
+            "name": "github.search_issues",
+            "risk": "read"
+          }
+        ]
+      }
+    ]
+  }
+}
