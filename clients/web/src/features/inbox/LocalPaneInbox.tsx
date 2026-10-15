@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { relativeLabel } from "@momo/core/features/inbox/model";
 import { waitingLine } from "@momo/core/features/workbench/paneStatus";
-import { MY_WORK_PATH } from "@momo/core/features/workbench/workTab";
+import { LOCAL_TERMINALS_PATH } from "@momo/core/features/workbench/workTab";
 import { StatusMark } from "@/features/workbench/local/SessionList";
 import {
   focusStoredPane,
@@ -40,7 +40,7 @@ export function LocalPaneInbox({ store = paneAttention() }: { store?: PaneAttent
               data-status={e.status}
               onClick={() => {
                 focusStoredPane(e.paneId);
-                navigate(MY_WORK_PATH);
+                navigate(LOCAL_TERMINALS_PATH);
               }}
               className="flex h-control w-full min-w-0 items-center gap-2 rounded-lg px-2 text-left text-body hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring"
             >

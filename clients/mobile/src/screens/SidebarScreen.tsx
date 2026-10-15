@@ -246,6 +246,7 @@ export default function SidebarScreen({
   onOpenConversation,
   onOpenSearch,
   onOpenAgentList,
+  onOpenWorkList,
   notificationNotice = null,
   onDismissNotificationNotice,
 }: {
@@ -268,6 +269,12 @@ export default function SidebarScreen({
    * 에서는 없을 수 있고, 그때 그 문들은 서지 않는다.
    */
   onOpenAgentList?: () => void;
+  /**
+   * 「작업」 층을 연다(ADR-0202 D6, U1 #3842): 「작업 중」 카드 머리의 「모두 보기」. + 메뉴의
+   * 「작업」과 같은 화면·같은 줄이다. 작업 표면이 없는 서버·셸 밖(하네스)에서는 없고, 그때 이
+   * 문은 서지 않는다.
+   */
+  onOpenWorkList?: () => void;
   /**
    * 알림을 눌렀는데 그 대화로 갈 수 없었던 이유, 한 문장 (#2569).
    *
@@ -559,6 +566,9 @@ export default function SidebarScreen({
           keyExtractor={row => row.key}
           ListHeaderComponent={
             <>
+              {onOpenWorkList && !searching ? (
+                <WorkSeeAllRow onPress={onOpenWorkList} />
+              ) : null}
               {card ? (
                 <WorkingCard
                   card={card}
@@ -997,6 +1007,31 @@ export function WorkingCard({
  * 한 화면 아래로 밀어 매일 여는 채널이 첫 화면에서 빠진다. 그래서 행 한 줄 — 시안의
  * `.a-row` 문법 그대로, 에이전트 사각과 함께.
  */
+/**
+ * 「작업 중」 카드 머리의 「모두 보기」 (ADR-0202 D6, U1 #3842). 카드는 지금 도는 턴 하나만
+ * 말하고, 맡긴 일 전부(결과 포함)는 「작업」 화면이 말한다. 카드 자체가 누르는 면이라 이 문은
+ * 카드 안이 아니라 그 위의 머리 줄에 선다(누르는 면 안에 누르는 면을 겹치지 않는다).
+ */
+function WorkSeeAllRow({onPress}: {onPress: () => void}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  return (
+    <View style={styles.workHead}>
+      <Text accessibilityRole="header" style={styles.workHeadLabel}>
+        작업
+      </Text>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="작업 모두 보기"
+        onPress={onPress}
+        hitSlop={space.sm}
+        style={({pressed}) => [styles.workSeeAll, pressed && styles.rowPressed]}
+        testID="home-work-see-all">
+        <Text style={styles.workSeeAllLabel}>모두 보기 ›</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 function IdleAgentsRow({
   count,
   onPress,
@@ -1365,6 +1400,20 @@ const buildStyles = (color: Palette) => StyleSheet.create({
 
   // ---- 빈 카드 자리 · 이름 찾기 --------------------------------------------
   idleRow: {marginBottom: HOME.secBelow},
+  workHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: space.xs,
+  },
+  workHeadLabel: {fontSize: font.label, color: color.textMuted, fontWeight: '600'},
+  workSeeAll: {
+    minHeight: TOUCH_TARGET,
+    justifyContent: 'center',
+    paddingHorizontal: space.sm,
+    borderRadius: radius.md,
+  },
+  workSeeAllLabel: {fontSize: font.label, color: color.accentText, fontWeight: '600'},
   idleText: {flex: 1},
   idleMeta: {fontSize: font.label, color: color.textMuted},
   fallthrough: {

@@ -164,6 +164,7 @@ import {
 } from '@momo/core/features/chat/composerCopy';
 import {FixedScheme, useStyles, type ColorScheme} from '../src/design/theme';
 import TeamBoardScreen from '../src/screens/TeamBoardScreen';
+import WorkJobsScreen from '../src/screens/WorkJobsScreen';
 import {TeamBoardDetailSheet} from '../src/features/work/teamBoard/TeamBoardDetailSheet';
 import WorkSessionDetailScreen from '../src/screens/WorkSessionDetailScreen';
 import {buildConversation} from '../src/features/work/conversation';
@@ -3932,6 +3933,37 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           onBack={() => {}}
         />
       );
+    // ---- #3842 (ADR-0202 U1): 결과 중심 「작업」 한 화면 + 시트 -------------------
+    //   work-jobs · work-jobs-team · work-jobs-detail · work-jobs-approval · work-jobs-empty
+    case 'work-jobs':
+    case 'work-jobs-team':
+    case 'work-jobs-empty':
+      return (
+        <WorkJobsScreen
+          active
+          initialFilter={name === 'work-jobs-team' ? 'team' : 'mine'}
+          onOpenConversation={() => {}}
+          onBack={() => {}}
+        />
+      );
+    case 'work-jobs-detail':
+    case 'work-jobs-approval':
+      return (
+        <>
+          <WorkJobsScreen
+            active
+            initialFilter="mine"
+            onOpenConversation={() => {}}
+            onBack={() => {}}
+          />
+          <TeamBoardDetailSheet
+            item={name === 'work-jobs-approval' ? WORK_JOBS_ROWS[0] : WORK_JOBS_ROWS[2]}
+            nowMs={Date.now()}
+            onClose={() => {}}
+            onOpenChannel={() => {}}
+          />
+        </>
+      );
     case 'team-board-detail':
     case 'team-board-detail-agent':
     case 'team-board-detail-nopr': {
@@ -5774,6 +5806,95 @@ function seedTeamBoard(surface: string): void {
   });
 }
 
+// #3842: 「작업」 한 화면의 줄. 새 서버(`include=jobs`) 모양이다: run 줄에 trigger·phase·에이전트 보고.
+const WORK_JOBS_ROWS: SharedWorkSession[] = [
+  tbRow({
+    sessionId: '00000000-0000-7000-8000-0000000000c1',
+    source: 'run',
+    runId: '00000000-0000-7000-8000-0000000000c1',
+    requestedBy: {memberId: SELF, displayName: '곽성재'},
+    origin: 'agent_run',
+    label: '#launch 채널에 v0.1.26 공지 올리기',
+    folderLabel: null,
+    repo: null,
+    branch: null,
+    harness: 'hosted',
+    owner: {memberId: 'measure-agent-grok', displayName: '그록봇'},
+    homeChannel: {id: 'ch-build', name: 'agent-lab'},
+    state: 'running',
+    phase: 'awaiting_approval',
+    trigger: 'mention',
+    startedAtMs: Date.now() - 4 * 60_000,
+    lastActivityAt: TB_MIN(1),
+  }),
+  tbRow({
+    sessionId: '00000000-0000-7000-8000-0000000000c2',
+    source: 'run',
+    runId: '00000000-0000-7000-8000-0000000000c2',
+    requestedBy: {memberId: SELF, displayName: '곽성재'},
+    origin: 'agent_run',
+    label: '온보딩 문구 해요체로 다듬기',
+    folderLabel: null,
+    repo: null,
+    branch: 'feat/onboarding-copy',
+    harness: 'hosted',
+    owner: {memberId: 'measure-agent-grok', displayName: '그록봇'},
+    homeChannel: {id: 'ch-build', name: 'agent-lab'},
+    state: 'running',
+    phase: 'running',
+    trigger: 'work',
+    stages: ['코드 읽기', '문구 고치기'],
+    startedAtMs: Date.now() - 12 * 60_000,
+    lastActivityAt: TB_MIN(2),
+  }),
+  tbRow({
+    sessionId: '00000000-0000-7000-8000-0000000000c3',
+    source: 'run',
+    runId: '00000000-0000-7000-8000-0000000000c3',
+    requestedBy: {memberId: SELF, displayName: '곽성재'},
+    origin: 'agent_run',
+    label: '푸시 알림이 두 번 오는 문제 고치기',
+    folderLabel: null,
+    repo: null,
+    branch: 'fix/push-dup',
+    harness: 'hosted',
+    owner: {memberId: 'measure-agent-grok', displayName: '그록봇'},
+    homeChannel: {id: 'ch-build', name: 'agent-lab'},
+    state: 'done',
+    status: 'done',
+    phase: 'succeeded',
+    trigger: 'work',
+    stages: ['원인 찾기', '고치기', 'PR 열기'],
+    diff: {added: 42, deleted: 18, files: null, ahead: 2, behind: null, uncommitted: null},
+    prUrl: 'https://github.com/yeomyeonggeori/oort/pull/3521',
+    startedAtMs: Date.now() - 31 * 60_000,
+    endedAtMs: Date.now() - 6 * 60_000,
+    lastActivityAt: TB_MIN(6),
+    agentReported: {
+      resultKind: 'pr_opened',
+      tests: {passed: 128, failed: 0, notRun: 3},
+      nextAction: 'merge_ok',
+      commitSha: '9f3c2a1b7e',
+      toolCounts: {run: 14, edit: 6, read: 41},
+    },
+  }),
+];
+const WORK_JOBS_TEAM_ROWS: SharedWorkSession[] = [...WORK_JOBS_ROWS, TEAM_BOARD_ROWS[1], TEAM_BOARD_ROWS[3]];
+
+function seedWorkJobs(surface: string): void {
+  harnessClient.setQueryData(['roster', ADE_WS], ADE_ROSTER);
+  harnessClient.setQueryData(['channels', ADE_WS], ADE_CHANNELS);
+  const empty = surface === 'work-jobs-empty';
+  harnessClient.setQueryData(['team-board', ADE_WS, 'jobs', 'mine'], {
+    pages: [{sessions: empty ? [] : WORK_JOBS_ROWS, nextCursor: null, mode: 'jobs'}],
+    pageParams: [null],
+  });
+  harnessClient.setQueryData(['team-board', ADE_WS, 'jobs', 'team'], {
+    pages: [{sessions: empty ? [] : WORK_JOBS_TEAM_ROWS, nextCursor: null, mode: 'jobs'}],
+    pageParams: [null],
+  });
+}
+
 function seedWorkConsole(): void {
   const shift = Date.now() - NOW;
   harnessClient.setQueryData(['roster', ADE_WS], ADE_ROSTER);
@@ -6108,6 +6229,13 @@ if (
   LAUNCHED.name.startsWith('team-board')
 ) {
   seedTeamBoard(LAUNCHED.name);
+}
+if (
+  LAUNCHED !== null &&
+  LAUNCHED.kind === 'surface' &&
+  LAUNCHED.name.startsWith('work-jobs')
+) {
+  seedWorkJobs(LAUNCHED.name);
 }
 if (
   LAUNCHED !== null &&

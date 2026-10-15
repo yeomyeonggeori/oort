@@ -3116,6 +3116,48 @@
   }
 }
 
+/* 「작업」 한 화면의 목록 상자(ADR-0202 D1, U1 #3842). 줄의 열 접기는 **창이 아니라 이 상자의
+ * 폭**을 본다: 서랍이 열리면 창은 그대로인데 목록만 좁아지므로, 창 폭으로 접으면 결과 칸이
+ * 한 글자로 잘린다(design-review B-1). */
+@utility work-jobs-list {
+  container-type: inline-size;
+}
+
+/* 「작업」 한 화면의 줄. 맡긴 일 | 결과 | 상태 120 | 걸린 시간 104 | 채널 96. 목록 상자가 900보다
+ * 좁으면(서랍이 열린 1440 창 포함) 결과·채널 열을 접고 그 내용은 첫 열 셋째 줄(`data-narrow`)로
+ * 옮긴다. 560보다 좁으면(폰 폭 셸) 걸린 시간 열도 접는다: 서랍이 말한다. */
+@utility work-jobs-row {
+  display: grid;
+  align-items: center;
+  column-gap: 12px;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 2fr) 120px 104px 96px;
+
+  [data-narrow] {
+    display: none;
+  }
+
+  @container (width < 900px) {
+    grid-template-columns: minmax(0, 1fr) 120px 104px;
+
+    > [data-col="result"],
+    > [data-col="channel"] {
+      display: none;
+    }
+
+    [data-narrow] {
+      display: flex;
+    }
+  }
+
+  @container (width < 560px) {
+    grid-template-columns: minmax(0, 1fr) 120px;
+
+    > [data-col="duration"] {
+      display: none;
+    }
+  }
+}
+
 @utility work-console-layout {
   display: grid;
   grid-template-columns: var(--spacing-pane) minmax(0, 1fr);
