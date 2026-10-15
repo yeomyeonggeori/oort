@@ -13,6 +13,9 @@
 //             영수증·원장 「취소됐어요 · 사람이 중단했어요」, 이미 끝난 run(409)·권한 없음(403).
 //   SLICE=u1  대기 2번째 → 가져감(소식 없음 포함) → 진행 단계 → 승인 대기 → 끝(사유),
 //             여러 run 병렬. 사이드바 알약·컴포저 활동 줄·작업 패널 머리.
+//   SLICE=d1  #3824: 보낸 메시지 아래 상태 줄(받았어요 → 깨우는 신호 보냄 → 가져감 →
+//             작업 중 → 결과)과 일마다 걸린 시간(대기 → 작업 → 총), 원장의 깨우는 신호 줄
+//             (접어 횟수), 이 앱이 모르는 원장 종류가 와도 깨지지 않는 기록.
 //
 // 라이트·다크 × 1440×900. 백엔드는 없다: `/v1/**`는 ADR-0200 응답 모양의 고정
 // 응답이고, 서버 프레임(`agent.run.event`)은 가짜 소켓으로 밀어 넣는다. 화면이
@@ -89,7 +92,7 @@ function progress(now, extra) {
 
 /** 장면 상태. 페이지가 읽을 때마다 현재 값을 돌려준다. */
 function newScene() {
-  return { runs: [], progressCalls: 0, ledgers: {}, ledgerCalls: 0, approvals: [], liveness: {}, ringCalls: 0, ringMode: "ok", role: "owner", dmChannels: [], cancelCalls: [], cancelMode: "ok" };
+  return { runs: [], progressCalls: 0, ledgers: {}, ledgerCalls: 0, ledgerIncludes: [], approvals: [], liveness: {}, ringCalls: 0, ringMode: "ok", role: "owner", dmChannels: [], cancelCalls: [], cancelMode: "ok" };
 }
 
 async function installRoutes(context, scene) {
@@ -154,6 +157,7 @@ async function installRoutes(context, scene) {
     const ledgerMatch = path.match(/\/agent-runs\/([^/]+)\/events$/);
     if (ledgerMatch) {
       scene.ledgerCalls += 1;
+      scene.ledgerIncludes.push(url.searchParams.get("include"));
       const runId = ledgerMatch[1].toLowerCase();
       return json(route, { runId, events: scene.ledgers[runId] ?? [] });
     }
@@ -174,7 +178,7 @@ async function installRoutes(context, scene) {
     if (path.endsWith("/work-sessions")) return json(route, { workSessions: [] });
     if (path.endsWith("/reminders")) return json(route, { reminders: [] });
     if (path.endsWith(`/workspaces/${workspaceId}`)) return json(route, { workspace: { id: workspaceId, name: "여명거리" } });
-    if (path.includes(`/channels/${CH}/messages`)) return json(route, { messages: messageRows });
+    if (path.includes(`/channels/${CH}/messages`)) return json(route, { messages: scene.messageRows ?? messageRows });
     if (path.includes("/messages")) return json(route, { messages: [] });
     return json(route, {});
   });
@@ -328,7 +332,8 @@ async function u1(browser, origin, scheme) {
   const ended = await soft("agent-work-panel-state");
   const endedDetail = await soft("agent-work-panel-detail");
   if (!endedDetail) console.log("panel header:", (await page.locator("[data-testid=agent-work-panel] header").textContent().catch(() => "(none)")));
-  check(`${tag} ended: 「시간 초과 · 승인이 만료됐어요」`, ended === "시간 초과" && endedDetail === "승인이 만료됐어요", `${ended} / ${endedDetail}`);
+  // #3824: 근거 줄은 걸린 시간을 먼저 말한다(「10분 걸림 · 승인이 만료됐어요」).
+  check(`${tag} ended: 「시간 초과 · … 걸림 · 승인이 만료됐어요」`, ended === "시간 초과" && /걸림 · 승인이 만료됐어요$/.test(endedDetail), `${ended} / ${endedDetail}`);
   check(`${tag} ended: 알약이 사라진다`, (await pill(page).count()) === 0);
   await page.screenshot({ path: shot("6-ended-approval-expired") });
 
@@ -704,6 +709,109 @@ async function u3(browser, origin, scheme) {
   await third.context.close();
 }
 
+// ---- d1 (#3824): 보낸 메시지 아래 상태 줄 · 걸린 시간 · 깨우는 신호 -------------------
+
+const MSG_SENT = "00000000-0000-7000-8000-0000000a0009";
+
+async function d1(browser, origin, scheme) {
+  const tag = `1440-${scheme}`;
+  const shot = (name) => resolve(OUT_DIR, `d1-${name}-${tag}.png`);
+  const scene = newScene();
+  const now = Date.now();
+  // 방금 보낸 메시지 하나(내가 썼다). 상태 줄은 내 메시지 아래에만 선다.
+  scene.messageRows = [
+    {
+      id: MSG_SENT, channelId: CH, seq: 12, hlcTs: now - 4_000, hlcCount: 0,
+      authorMemberId: memberId, type: "text",
+      body: "@grokbot 채널 하나 만들어 줄래요? 이름은 grokbot-lab으로요.", state: "sent", createdAtMs: now - 4_000,
+    },
+  ];
+  const base = { id: RUN_A, triggerMessageId: MSG_SENT, triggerSummary: "채널 하나 만들어 줄래요?", createdAtMs: now - 3_000, updatedAtMs: now - 3_000 };
+  scene.ledgers[RUN_A] = [{ ordinal: 1, kind: "queued", createdAtMs: now - 3_000 }];
+  scene.runs = [progress(now, { ...base, queuePosition: 1, aheadTotal: 0 })];
+  const { context, page } = await open(browser, origin, scheme, scene, `/c/${CH}`);
+  const status = () => page.getByTestId("message-run-status-row").first();
+  const statusText = async () => ((await status().textContent()) ?? "").replace(/\s+/g, " ").trim();
+
+  // ① 받았어요: 진행 읽기에 run이 서면 곧바로.
+  await status().waitFor({ timeout: 15_000 });
+  let text = await statusText();
+  check(`${tag} received: 「받았어요」와 기다린 초`, text.includes("받았어요") && /\d+초째 기다려요/.test(text), text);
+  check(`${tag} received: 깨우는 신호 행이 없으면 그 단계를 지어내지 않는다`, !text.includes("깨우는 신호"), text);
+  await page.screenshot({ path: shot("1-received") });
+
+  // ② 깨우는 신호 보냄: 원장에 doorbell_rung 행, 프레임 하나. 진행 지문은 그대로다.
+  scene.ledgers[RUN_A] = [
+    { ordinal: 1, kind: "queued", createdAtMs: now - 3_000 },
+    { ordinal: 2, kind: "doorbell_rung", code: "leading_ok", createdAtMs: now - 2_500 },
+  ];
+  const ledgerBefore = scene.ledgerCalls;
+  await serverMoves(page, scene, scene.runs, "doorbell_rung");
+  await page.waitForFunction(() => /깨우는 신호 보냄/.test(document.querySelector('[data-testid="message-run-status-row"]')?.textContent ?? ""), null, { timeout: 3_000 }).catch(() => {});
+  text = await statusText();
+  check(`${tag} woken: 프레임 하나로 「받았어요 → 깨우는 신호 보냄」`, text.includes("받았어요 → 깨우는 신호 보냄"), text);
+  check(`${tag} woken: 원장을 다시 읽었고 ?include=doorbell로 물었다`, scene.ledgerCalls > ledgerBefore && scene.ledgerIncludes.every((v) => v === "doorbell"), JSON.stringify(scene.ledgerIncludes));
+  await page.screenshot({ path: shot("2-woken") });
+
+  // ③ 가져감 → 작업 중: 12분째 · 마지막 보고 1분 전.
+  scene.ledgers[RUN_A] = [
+    { ordinal: 1, kind: "queued", createdAtMs: now - 12 * MIN - 20_000 },
+    { ordinal: 2, kind: "doorbell_rung", code: "leading_ok", createdAtMs: now - 12 * MIN - 19_000 },
+    { ordinal: 3, kind: "doorbell_rung", code: "trailing_ok", createdAtMs: now - 12 * MIN - 14_000 },
+    { ordinal: 4, kind: "tool_call", code: "ok", createdAtMs: now - 12 * MIN - 13_000 },
+    { ordinal: 5, kind: "claimed", createdAtMs: now - 12 * MIN - 8_000 },
+    { ordinal: 6, kind: "started", createdAtMs: now - 12 * MIN },
+    { ordinal: 7, kind: "stage", stage: "grokbot-lab 이름 점검", createdAtMs: now - MIN },
+  ];
+  await serverMoves(page, scene, [
+    progress(now, { ...base, createdAtMs: now - 12 * MIN - 20_000, phase: "running", status: "running", leaseState: "live", claimedAtMs: now - 12 * MIN - 8_000, startedAtMs: now - 12 * MIN, lastEventAtMs: now - MIN - 5_000, latestStage: "grokbot-lab 이름 점검", stepCount: 1 }),
+  ], "stage");
+  await page.waitForFunction(() => /작업 중/.test(document.querySelector('[data-testid="message-run-status-row"]')?.textContent ?? ""), null, { timeout: 3_000 }).catch(() => {});
+  text = await statusText();
+  check(`${tag} working: 「… 가져감 → 작업 중 · 12분째 · 마지막 보고 1분 전」`, text.includes("받았어요 → 깨우는 신호 보냄 → 가져감 → 작업 중") && text.includes("12분째 · 마지막 보고 1분 전"), text);
+  const activity = ((await page.getByTestId("composer-working").textContent().catch(() => "")) ?? "");
+  check(`${tag} working: 활동 줄에 영어 시계(12m)가 없다`, !/\d+m \d+s/.test(activity), activity);
+  await page.screenshot({ path: shot("3-working") });
+
+  // ④ 상태 줄을 누르면 작업 패널: 걸린 시간 줄 · 접힌 깨우는 신호 · 모르는 종류.
+  await status().click();
+  await page.getByTestId("agent-work-panel").waitFor();
+  await page.getByTestId("agent-work-panel-ledger").waitFor({ timeout: 5_000 });
+  const durations = ((await page.getByTestId("agent-work-panel-durations").textContent()) ?? "").trim();
+  check(`${tag} panel: 걸린 시간 「대기 12초 → 작업 12분째」`, durations === "대기 12초 → 작업 12분째", durations);
+  const ledgerText = ((await page.getByTestId("agent-work-panel-ledger").textContent()) ?? "");
+  check(`${tag} panel: 깨우는 신호가 접혀 「· 2번」`, ledgerText.includes("깨우는 신호를 보냈어요 · 2번"), ledgerText);
+  check(`${tag} panel: 모르는 종류가 와도 기록이 선다`, ledgerText.includes("이 앱이 아직 모르는 기록이에요") && ledgerText.includes("grokbot-lab 이름 점검"), ledgerText);
+  await page.screenshot({ path: shot("4-panel-ledger") });
+
+  // ⑤ 결과: 완료 · 3분 12초 걸림.
+  scene.ledgers[RUN_A] = [
+    ...scene.ledgers[RUN_A],
+    { ordinal: 8, kind: "succeeded", createdAtMs: now - 12 * MIN - 20_000 + 192_000 },
+  ];
+  await serverMoves(page, scene, [
+    progress(now, { ...base, createdAtMs: now - 12 * MIN - 20_000, phase: "succeeded", status: "succeeded", leaseState: "none", claimedAtMs: now - 12 * MIN - 8_000, startedAtMs: now - 12 * MIN, finishedAtMs: now - 12 * MIN - 20_000 + 192_000 }),
+  ], "succeeded");
+  await page.waitForFunction(() => /걸림/.test(document.querySelector('[data-testid="message-run-status-row"]')?.textContent ?? ""), null, { timeout: 3_000 }).catch(() => {});
+  text = await statusText();
+  check(`${tag} done: 「… → 완료 · 3분 12초 걸림」`, text.includes("가져감 → 완료") && text.includes("3분 12초 걸림"), text);
+  const doneDurations = ((await page.getByTestId("agent-work-panel-durations").textContent()) ?? "").trim();
+  check(`${tag} done: 「대기 12초 → 작업 2분 52초 → 총 3분 12초」`, doneDurations === "대기 12초 → 작업 2분 52초 → 총 3분 12초", doneDurations);
+  await page.screenshot({ path: shot("5-done") });
+  await context.close();
+
+  // ⑥ 옛 서버(진행 읽기 없음): 상태 줄이 없고 예전 화면 그대로.
+  const legacy = newScene();
+  legacy.legacyServer = true;
+  legacy.messageRows = scene.messageRows;
+  const old = await open(browser, origin, scheme, legacy, `/c/${CH}`);
+  await old.page.getByText("grokbot-lab으로요").first().waitFor({ timeout: 15_000 });
+  await old.page.waitForTimeout(800);
+  check(`${tag} legacy: 진행 읽기가 없는 서버에서는 상태 줄이 없다`, (await old.page.getByTestId("message-run-status-row").count()) === 0);
+  await old.page.screenshot({ path: shot("6-legacy-server") });
+  await old.context.close();
+}
+
 async function main() {
   if (!existsSync(resolve(WEB_ROOT, "dist/index.html"))) throw new Error("dist/ is missing. Run npm run build first.");
   mkdirSync(OUT_DIR, { recursive: true });
@@ -715,6 +823,7 @@ async function main() {
       if (SLICE === "u2") await u2(browser, preview.origin, scheme);
       if (SLICE === "u3") await u3(browser, preview.origin, scheme);
       if (SLICE === "stop") await stop(browser, preview.origin, scheme);
+      if (SLICE === "d1") await d1(browser, preview.origin, scheme);
     }
   } finally {
     await browser.close();
