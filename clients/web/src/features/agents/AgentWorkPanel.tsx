@@ -322,9 +322,11 @@ function PanelHeader({
         </button>
       </div>
       <div className="flex flex-wrap items-baseline gap-2 text-meta text-ink-muted">
-        <MemberAvatar member={member} size="sm" className="self-center" />
-        <span className="min-w-0 truncate text-agent" data-testid="agent-work-panel-agent">
-          {name}
+        <span className="flex min-w-0 items-center gap-2">
+          <MemberAvatar member={member} size="sm" />
+          <span className="min-w-0 truncate text-agent" data-testid="agent-work-panel-agent">
+            {name}
+          </span>
         </span>
         {log !== null && liveness !== null && (
           // 읽어 줄 값은 **상태 칩 하나뿐**이다. live 영역을 이 줄 전체로 잡으면

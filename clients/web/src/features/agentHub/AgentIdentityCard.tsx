@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { renameAgent, type RosterMember } from "@momo/core/lib/api";
 import { visibleCustomStatus } from "@momo/core/features/presence/customStatus";
@@ -37,6 +37,12 @@ export function AgentIdentityCard({
   const { workspaceId } = useSession();
   const client = useQueryClient();
   const [editing, setEditing] = useState(false);
+  // 편집이 끝나면 입력이 사라지므로 포커스를 열었던 버튼으로 돌려 준다(키보드 길).
+  const editButton = useRef<HTMLButtonElement>(null);
+  const closeEditor = () => {
+    setEditing(false);
+    requestAnimationFrame(() => editButton.current?.focus());
+  };
   const [draft, setDraft] = useState(agent.displayName);
   const rename = useMutation({
     mutationFn: (name: string) => renameAgent(workspaceId, agent.id, name),
@@ -48,7 +54,7 @@ export function AgentIdentityCard({
             : row
         )
       );
-      setEditing(false);
+      closeEditor();
     },
   });
   const state = renameDraftState(draft, agent.displayName);
@@ -88,6 +94,11 @@ export function AgentIdentityCard({
               <p className="text-meta text-ink-muted">
                 멘션 이름(@{agent.handle})은 그대로예요.
               </p>
+              {offline && (
+                <p className="text-meta text-ink-muted">
+                  연결이 끊긴 동안에는 저장할 수 없어요.
+                </p>
+              )}
               {rename.isError && (
                 <InlineBanner
                   separator={false}
@@ -114,7 +125,7 @@ export function AgentIdentityCard({
                   onClick={() => {
                     rename.reset();
                     setDraft(agent.displayName);
-                    setEditing(false);
+                    closeEditor();
                   }}
                 >
                   취소
@@ -137,6 +148,7 @@ export function AgentIdentityCard({
                   type="button"
                   size="sm"
                   variant="outline"
+                  ref={editButton}
                   className="self-start"
                   disabled={offline}
                   onClick={() => {
