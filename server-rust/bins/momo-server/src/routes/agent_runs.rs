@@ -6,6 +6,7 @@
 //! POST /v1/workspaces/{ws}/channels/{ch}/agent-runs
 //! GET  /v1/workspaces/{ws}/channels/{ch}/agent-runs?type=work&limit=
 //! GET  /v1/workspaces/{ws}/agents/{agent}/runs?cursor=&limit=
+//! GET  /v1/workspaces/{ws}/agent-runs?state=active&scope=&cursor=&limit=
 //! GET  /v1/workspaces/{ws}/agent-runs/{run}
 //! POST /v1/workspaces/{ws}/agent-runs/{run}/cancel
 //! ```
@@ -71,14 +72,16 @@ use axum::http::StatusCode;
 use axum::{Extension, Json};
 use momo_agent::approval::is_active_channel_member_in_tx;
 use momo_agent::{
-    agent_run_cursor_is_visible_in_tx, assemble_run_progress,
+    active_run_cursor_in_tx, agent_run_cursor_is_visible_in_tx, assemble_run_progress,
     cancel_pending_approvals_for_run_in_tx, cancel_run_in_tx, create_agent_run_in_tx,
     is_active_agent_in_tx, is_active_human_channel_member_in_tx, linked_work_session_ids_in_tx,
-    list_agent_run_summaries_in_tx, list_channel_run_progress_base_in_tx,
-    list_channel_work_runs_in_tx, list_run_ledger_in_tx, load_agent_run_in_tx,
-    load_agent_run_with_visibility_in_tx, load_eligible_agent_in_tx, lock_run_for_cancel_in_tx,
-    validated_run_limit, visible_channels_in_tx, AgentRunSummaryRow, JobFacts, NewAgentRun,
-    QueueEntry, RequestedRouting, RunEventInclude, RunStatus, RunTrigger,
+    list_active_run_progress_base_in_tx, list_agent_run_summaries_in_tx,
+    list_channel_run_progress_base_in_tx, list_channel_work_runs_in_tx, list_run_ledger_in_tx,
+    load_agent_run_in_tx, load_agent_run_with_visibility_in_tx, load_eligible_agent_in_tx,
+    lock_run_for_cancel_in_tx, validated_active_run_limit, validated_run_limit,
+    visible_active_run_counts_in_tx, visible_channels_in_tx, workspace_active_run_totals_in_tx,
+    ActiveRunScope, AgentRunSummaryRow, JobFacts, NewAgentRun, QueueEntry, RequestedRouting,
+    RunEventInclude, RunProgressBase, RunProgressRow, RunStatus, RunTrigger,
 };
 use momo_auth::{Principal, PrincipalKind};
 use momo_db::audit::{write_audit, AuditEntry};
@@ -90,10 +93,12 @@ use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
 use crate::dto::{
+    AgentRunActiveCountsDto, AgentRunActivePageResponse, AgentRunActiveQuery,
     AgentRunCancelResponse, AgentRunEventDto, AgentRunEventsQuery, AgentRunEventsResponse,
     AgentRunHistoryQuery, AgentRunListQuery, AgentRunPageResponse, AgentRunProgressDto,
     AgentRunProgressPageResponse, AgentRunProgressQuery, AgentRunResponse, AgentRunSummaryDto,
-    AgentRunSummaryPageResponse, AgentRunToolTallyDto, AheadRunDto, CreateAgentRunRequest,
+    AgentRunSummaryPageResponse, AgentRunToolTallyDto, AgentRunVisibleCountsDto, AheadRunDto,
+    CreateAgentRunRequest,
 };
 use crate::error::ApiError;
 use crate::routes::shared::{
@@ -765,108 +770,281 @@ pub async fn progress(
                     limit,
                 )
                 .await?;
-
-                // The delivery job's lease and the agent's claimable queue come from
-                // momo-outbox — the claim's own predicate — and are handed to the pure
-                // assembly as plain facts (momo-agent owns no outbox SQL).
-                let wanting_job: Vec<(Uuid, Uuid)> = base
-                    .iter()
-                    .filter(|run| {
-                        matches!(run.summary.status, RunStatus::Queued | RunStatus::Running)
-                    })
-                    .map(|run| (run.summary.id, run.agent_member_id))
-                    .collect();
-                let jobs: std::collections::HashMap<Uuid, JobFacts> =
-                    momo_outbox::pending_job_facts_for_runs_in_tx(conn, workspace_id, &wanting_job)
-                        .await
-                        .map_err(momo_db::DbError::from)?
-                        .into_iter()
-                        .map(|fact| {
-                            (
-                                fact.run_id,
-                                JobFacts {
-                                    job_id: fact.job_id,
-                                    leased: fact.leased,
-                                    lease_live: fact.lease_live,
-                                },
-                            )
-                        })
-                        .collect();
-
-                let waiting_agents: std::collections::HashSet<Uuid> = base
-                    .iter()
-                    .filter(|run| {
-                        run.summary.status == RunStatus::Queued
-                            && jobs.get(&run.summary.id).is_some_and(|job| !job.leased)
-                    })
-                    .map(|run| run.agent_member_id)
-                    .collect();
-                let mut queue: Vec<QueueEntry> = Vec::new();
-                for agent in waiting_agents {
-                    let claimable = momo_outbox::list_claimable_hosted_jobs_in_tx(
-                        conn,
-                        workspace_id,
-                        agent,
-                        PROGRESS_QUEUE_LIMIT,
-                    )
-                    .await
-                    .map_err(momo_db::DbError::from)?;
-                    queue.extend(
-                        claimable.iter().filter_map(|job| {
-                            QueueEntry::from_payload(job.id, agent, &job.payload)
-                        }),
-                    );
-                }
-                let queue_channels: Vec<Uuid> = queue
-                    .iter()
-                    .map(|entry| entry.channel_id)
-                    .collect::<std::collections::HashSet<_>>()
-                    .into_iter()
-                    .collect();
-                let visible =
-                    visible_channels_in_tx(conn, workspace_id, member_id, &queue_channels).await?;
-
-                Ok(Ok(assemble_run_progress(base, &jobs, &queue, &visible)))
+                Ok(Ok(assemble_progress_in_tx(
+                    conn,
+                    workspace_id,
+                    member_id,
+                    base,
+                )
+                .await?))
             })
         })
         .await,
     )?;
 
-    let runs = rows
+    Ok(Json(AgentRunProgressPageResponse {
+        runs: rows.iter().map(progress_dto).collect(),
+    }))
+}
+
+/// Join run-side progress facts with the delivery job's lease and the agent's
+/// claimable queue — the half that lives in `momo-outbox`, read with the claim's
+/// own predicate and handed to the pure assembly as plain facts (momo-agent owns
+/// no outbox SQL). Shared by the channel read and the workspace "running now"
+/// read so a row's `phase`, `leaseState` and `queuePosition` mean one thing.
+async fn assemble_progress_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    base: Vec<RunProgressBase>,
+) -> Result<Vec<RunProgressRow>, momo_db::DbError> {
+    let wanting_job: Vec<(Uuid, Uuid)> = base
         .iter()
-        .map(|row| AgentRunProgressDto {
-            id: row.summary.id.to_string(),
-            channel_id: row.summary.channel_id.to_string(),
-            agent_member_id: row.agent_member_id.to_string(),
-            trigger_message_id: row.summary.trigger_message_id.map(|id| id.to_string()),
-            trigger_summary: row.summary.trigger_summary.clone(),
-            status: row.summary.status.as_db_label().to_string(),
-            phase: row.phase.as_wire().to_string(),
-            lease_state: row.lease_state.as_wire().to_string(),
-            step_count: row.step_count,
-            claimed_at_ms: row.claimed_at.map(epoch_ms),
-            latest_stage: row.latest_stage.clone(),
-            last_event_at_ms: row.last_event_at.map(epoch_ms),
-            approval_id: row.approval_id.map(|id| id.to_string()),
-            approval_expires_at_ms: row.approval_expires_at.map(epoch_ms),
-            end_reason: row.end_reason.clone(),
-            queue_position: row.queue_position,
-            ahead_total: row.queue_position.map(|_| row.ahead_total),
-            ahead: row
-                .ahead
+        .filter(|run| matches!(run.summary.status, RunStatus::Queued | RunStatus::Running))
+        .map(|run| (run.summary.id, run.agent_member_id))
+        .collect();
+    let jobs = job_facts_in_tx(conn, workspace_id, &wanting_job).await?;
+
+    let waiting_agents: std::collections::HashSet<Uuid> = base
+        .iter()
+        .filter(|run| {
+            run.summary.status == RunStatus::Queued
+                && jobs.get(&run.summary.id).is_some_and(|job| !job.leased)
+        })
+        .map(|run| run.agent_member_id)
+        .collect();
+    let mut queue: Vec<QueueEntry> = Vec::new();
+    for agent in waiting_agents {
+        let claimable = momo_outbox::list_claimable_hosted_jobs_in_tx(
+            conn,
+            workspace_id,
+            agent,
+            PROGRESS_QUEUE_LIMIT,
+        )
+        .await
+        .map_err(momo_db::DbError::from)?;
+        queue.extend(
+            claimable
                 .iter()
-                .map(|ahead| AheadRunDto {
-                    run_id: ahead.run_id.to_string(),
-                    channel_id: ahead.channel_id.to_string(),
-                })
-                .collect(),
-            started_at_ms: row.summary.started_at.map(epoch_ms),
-            finished_at_ms: row.summary.finished_at.map(epoch_ms),
-            created_at_ms: epoch_ms(row.summary.created_at),
-            updated_at_ms: epoch_ms(row.summary.updated_at),
+                .filter_map(|job| QueueEntry::from_payload(job.id, agent, &job.payload)),
+        );
+    }
+    let queue_channels: Vec<Uuid> = queue
+        .iter()
+        .map(|entry| entry.channel_id)
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    let visible = visible_channels_in_tx(conn, workspace_id, member_id, &queue_channels).await?;
+
+    Ok(assemble_run_progress(base, &jobs, &queue, &visible))
+}
+
+/// The pending delivery job behind each `(run, agent)`, keyed by run id.
+async fn job_facts_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    runs: &[(Uuid, Uuid)],
+) -> Result<std::collections::HashMap<Uuid, JobFacts>, momo_db::DbError> {
+    Ok(
+        momo_outbox::pending_job_facts_for_runs_in_tx(conn, workspace_id, runs)
+            .await
+            .map_err(momo_db::DbError::from)?
+            .into_iter()
+            .map(|fact| {
+                (
+                    fact.run_id,
+                    JobFacts {
+                        job_id: fact.job_id,
+                        leased: fact.leased,
+                        lease_live: fact.lease_live,
+                    },
+                )
+            })
+            .collect(),
+    )
+}
+
+fn progress_dto(row: &RunProgressRow) -> AgentRunProgressDto {
+    AgentRunProgressDto {
+        id: row.summary.id.to_string(),
+        channel_id: row.summary.channel_id.to_string(),
+        agent_member_id: row.agent_member_id.to_string(),
+        trigger_message_id: row.summary.trigger_message_id.map(|id| id.to_string()),
+        trigger_summary: row.summary.trigger_summary.clone(),
+        status: row.summary.status.as_db_label().to_string(),
+        phase: row.phase.as_wire().to_string(),
+        lease_state: row.lease_state.as_wire().to_string(),
+        step_count: row.step_count,
+        claimed_at_ms: row.claimed_at.map(epoch_ms),
+        latest_stage: row.latest_stage.clone(),
+        last_event_at_ms: row.last_event_at.map(epoch_ms),
+        approval_id: row.approval_id.map(|id| id.to_string()),
+        approval_expires_at_ms: row.approval_expires_at.map(epoch_ms),
+        end_reason: row.end_reason.clone(),
+        queue_position: row.queue_position,
+        ahead_total: row.queue_position.map(|_| row.ahead_total),
+        ahead: row
+            .ahead
+            .iter()
+            .map(|ahead| AheadRunDto {
+                run_id: ahead.run_id.to_string(),
+                channel_id: ahead.channel_id.to_string(),
+            })
+            .collect(),
+        started_at_ms: row.summary.started_at.map(epoch_ms),
+        finished_at_ms: row.summary.finished_at.map(epoch_ms),
+        created_at_ms: epoch_ms(row.summary.created_at),
+        updated_at_ms: epoch_ms(row.summary.updated_at),
+    }
+}
+
+/// `GET /v1/workspaces/{ws}/agent-runs?state=active` — "running now"
+/// (ADR-0200 증보 2026-10-15 R1, #3847; ADR-0202 D2).
+///
+/// Every non-terminal run (`queued` · `running` · `awaiting_approval` ·
+/// `paused`; `claimed` is the derived phase of a leased `queued` run) in a
+/// channel the caller is an **active member** of — unarchived, not left; a DM's
+/// runs are its two people's — newest first, in the same row shape as the
+/// channel progress read. Every agent kind and every trigger is listed: the
+/// channel read narrows to hosted agents because the ledger is theirs, this one
+/// answers "what is running" and must not hide a managed agent's work.
+///
+/// `scope=mine` narrows to runs the caller requested (a mention run's trigger
+/// author, a work run's `agent.work.queued` actor); membership still applies on
+/// top. `scope=team` (default) is everything visible.
+///
+/// `agents[]` is the per-agent concurrency: `visible.*` counts the WHOLE visible
+/// set in that scope (never just this page), `activeTotal` is the agent's
+/// non-terminal runs in the whole workspace as one number — the same class of
+/// leak as `aheadTotal` and nothing more. An agent with no visible run is not
+/// listed. There is still no workspace-wide queue: no run of a channel the
+/// caller cannot see is named anywhere.
+///
+/// | condition | status |
+/// |---|---|
+/// | not a human principal | 403 |
+/// | `state` other than `active`, `scope` other than `mine`/`team` | 400 |
+/// | a cursor that is not a run in a channel the caller can see | 400 |
+pub async fn active(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(workspace): Path<String>,
+    Query(query): Query<AgentRunActiveQuery>,
+) -> Result<Json<AgentRunActivePageResponse>, ApiError> {
+    require_human(&principal, "human member required")?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    match query.state.as_deref().map(str::trim) {
+        None | Some("") | Some("active") => {}
+        Some(_) => return Err(ApiError::bad_request("only state=active is supported")),
+    }
+    let scope = match query.scope.as_deref().map(str::trim) {
+        None | Some("") | Some("team") => ActiveRunScope::Team,
+        Some("mine") => ActiveRunScope::Mine,
+        Some(_) => return Err(ApiError::bad_request("scope must be mine or team")),
+    };
+    let cursor = match query
+        .cursor
+        .as_deref()
+        .map(str::trim)
+        .filter(|raw| !raw.is_empty())
+    {
+        Some(raw) => Some(path_uuid(raw, "invalid agent run cursor")?),
+        None => None,
+    };
+    let limit = validated_active_run_limit(query.limit.as_deref());
+    let member_id = principal.member_id;
+
+    let (rows, next_cursor, counts, totals, claimed) = settle_db(
+        "agent_runs.active",
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                let after = match cursor {
+                    Some(cursor) => {
+                        match active_run_cursor_in_tx(conn, workspace_id, member_id, cursor).await?
+                        {
+                            Some(position) => Some(position),
+                            None => {
+                                return Ok(Err(ApiError::bad_request(
+                                    "agent run cursor was not found",
+                                )))
+                            }
+                        }
+                    }
+                    None => None,
+                };
+                let (base, next_cursor) = list_active_run_progress_base_in_tx(
+                    conn,
+                    workspace_id,
+                    member_id,
+                    scope,
+                    after,
+                    limit,
+                )
+                .await?;
+                let rows = assemble_progress_in_tx(conn, workspace_id, member_id, base).await?;
+
+                let counts =
+                    visible_active_run_counts_in_tx(conn, workspace_id, member_id, scope).await?;
+                let agents: Vec<Uuid> = counts.iter().map(|count| count.agent_member_id).collect();
+                let totals = workspace_active_run_totals_in_tx(conn, workspace_id, &agents).await?;
+                // `claimed` is not a status: it is a `queued` run whose delivery
+                // job is leased — the same derivation `assemble_run_progress`
+                // makes per row, applied to every visible queued run (not just
+                // this page's) so the count does not depend on `limit`.
+                let queued: Vec<(Uuid, Uuid)> = counts
+                    .iter()
+                    .flat_map(|count| {
+                        count
+                            .queued_run_ids
+                            .iter()
+                            .map(move |run| (*run, count.agent_member_id))
+                    })
+                    .collect();
+                let jobs = job_facts_in_tx(conn, workspace_id, &queued).await?;
+                let mut claimed: std::collections::HashMap<Uuid, i64> =
+                    std::collections::HashMap::new();
+                for (run, agent) in &queued {
+                    if jobs.get(run).is_some_and(|job| job.leased) {
+                        *claimed.entry(*agent).or_default() += 1;
+                    }
+                }
+                Ok(Ok((rows, next_cursor, counts, totals, claimed)))
+            })
+        })
+        .await,
+    )?;
+
+    let agents = counts
+        .iter()
+        .map(|count| {
+            let claimed = claimed.get(&count.agent_member_id).copied().unwrap_or(0);
+            AgentRunActiveCountsDto {
+                agent_member_id: count.agent_member_id.to_string(),
+                visible: AgentRunVisibleCountsDto {
+                    queued: count.queued - claimed,
+                    claimed,
+                    running: count.running,
+                    awaiting_approval: count.awaiting_approval,
+                    paused: count.paused,
+                },
+                // At least the visible runs: they are part of the workspace total,
+                // and a run that settled between the two statements must not make
+                // the total read smaller than what is on screen.
+                active_total: totals
+                    .get(&count.agent_member_id)
+                    .copied()
+                    .unwrap_or(0)
+                    .max(count.queued + count.running + count.awaiting_approval + count.paused),
+            }
         })
         .collect();
-    Ok(Json(AgentRunProgressPageResponse { runs }))
+
+    Ok(Json(AgentRunActivePageResponse {
+        runs: rows.iter().map(progress_dto).collect(),
+        agents,
+        next_cursor: next_cursor.map(|id| id.to_string()),
+    }))
 }
 
 /// `GET /v1/workspaces/{ws}/agent-runs/{run}/events` (ADR-0200 D2, #3741).

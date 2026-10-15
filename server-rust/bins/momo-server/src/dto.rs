@@ -2153,6 +2153,54 @@ pub struct AgentRunProgressPageResponse {
     pub runs: Vec<AgentRunProgressDto>,
 }
 
+/// `?state=&scope=&cursor=&limit=` on the workspace "running now" read
+/// (ADR-0200 증보 2026-10-15 R1). `state` is `active` or absent; `scope` is
+/// `team` (default) or `mine`. Anything else is a 400.
+#[derive(Debug, Deserialize)]
+pub struct AgentRunActiveQuery {
+    #[serde(default)]
+    pub state: Option<String>,
+    #[serde(default)]
+    pub scope: Option<String>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+    #[serde(default)]
+    pub limit: Option<String>,
+}
+
+/// openapi `AgentRunActiveCounts.visible` — counts by derived phase over the
+/// whole visible set (not the page).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunVisibleCountsDto {
+    pub queued: i64,
+    pub claimed: i64,
+    pub running: i64,
+    pub awaiting_approval: i64,
+    pub paused: i64,
+}
+
+/// openapi `AgentRunActiveCounts` — one agent's concurrency as the viewer may
+/// see it: per-phase counts of visible runs, plus `activeTotal`, the agent's
+/// non-terminal runs in the whole workspace as a bare number.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunActiveCountsDto {
+    pub agent_member_id: String,
+    pub visible: AgentRunVisibleCountsDto,
+    pub active_total: i64,
+}
+
+/// openapi `AgentRunActivePage`.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunActivePageResponse {
+    pub runs: Vec<AgentRunProgressDto>,
+    pub agents: Vec<AgentRunActiveCountsDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
 /// openapi `AgentRunEvent` — one ledger row. No raw sequence, no free text beyond
 /// the agent-reported `stage` marker.
 #[derive(Debug, Serialize)]
