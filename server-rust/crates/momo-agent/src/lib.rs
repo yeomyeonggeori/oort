@@ -165,6 +165,7 @@ pub mod run_progress;
 pub mod status;
 pub mod subscription;
 pub mod subscription_transition;
+pub mod thread_wake;
 pub mod tools;
 pub mod usage;
 pub mod welcome;
@@ -273,9 +274,9 @@ pub use provisioning::{
     agent_owner_in_tx, create_agent_identity_in_tx, default_enabled_tools,
     load_agent_model_policy_in_tx, load_agent_profile_in_tx, normalized_model,
     normalized_system_prompt, reject_credential_shaped_fields, set_agent_model_source_in_tx,
-    set_agent_paused_in_tx, upsert_agent_profile_in_tx, validate_agent_profile, validated_config,
-    AgentCreation, AgentMember, AgentProfile, AgentProfileSpec, AgentSpecInvalid, ModelSource,
-    NewAgentMember, DEFAULT_ENABLED_TOOLS,
+    set_agent_paused_in_tx, set_agent_thread_reply_wake_in_tx, upsert_agent_profile_in_tx,
+    validate_agent_profile, validated_config, AgentCreation, AgentMember, AgentProfile,
+    AgentProfileSpec, AgentSpecInvalid, ModelSource, NewAgentMember, DEFAULT_ENABLED_TOOLS,
 };
 pub use routing::{
     validate_request_routing, RequestedRouting, RoutingInvalid, MAX_ROUTING_MODEL_LENGTH,
@@ -297,13 +298,21 @@ pub use run::{
     RunStatus, RunTrigger, WelcomeKind, TRIGGER_SUMMARY_LIMIT,
 };
 pub use run_event::{
-    append_run_event_in_tx, delete_expired_run_events_in_tx, workspaces_with_expired_run_events,
-    AppendedRunEvent, RUN_EVENT_RETENTION_DAYS,
+    append_run_event_in_tx, delete_expired_run_events_in_tx, record_tool_call_in_tx,
+    workspaces_with_expired_run_events, AppendedRunEvent, ToolCallRecord, RUN_EVENT_RETENTION_DAYS,
+    TOOL_CALL_DURATION_MS_MAX, TOOL_CALL_ROWS_PER_RUN,
 };
 pub use run_progress::{
     assemble_run_progress, list_channel_run_progress_base_in_tx, list_run_events_in_tx,
-    visible_channels_in_tx, AheadRun, JobFacts, LeaseState, QueueEntry, RunEventRow, RunPhase,
-    RunProgressBase, RunProgressRow,
+    list_run_ledger_in_tx, visible_channels_in_tx, AheadRun, JobFacts, LeaseState, QueueEntry,
+    RunEventInclude, RunEventRow, RunLedger, RunPhase, RunProgressBase, RunProgressRow,
+    ToolTallyRow,
+};
+// ADR-0200 증보 2026-10-15 R1 — the workspace "running now" read (#3847).
+pub use run_progress::{
+    active_run_cursor_in_tx, list_active_run_progress_base_in_tx, validated_active_run_limit,
+    visible_active_run_counts_in_tx, workspace_active_run_totals_in_tx, ActiveRunScope,
+    VisibleAgentRunCounts, ACTIVE_RUN_PAGE_MAX,
 };
 pub use status::{
     agent_partial_payload, agent_partial_tool_call_payload, agent_status_channel,
@@ -329,6 +338,10 @@ pub use subscription::{
     SUBSCRIPTION_NOTICE_AUDIT_SCHEMA, SUBSCRIPTION_NOTICE_POSTED_ACTION,
     SUBSCRIPTION_NOTICE_SOURCE, SUBSCRIPTION_NOTICE_THROTTLED_ACTION,
     SUBSCRIPTION_NOTICE_THROTTLE_SECONDS,
+};
+pub use thread_wake::{
+    find_unclaimed_thread_run_in_tx, load_thread_wake_target_in_tx, UnclaimedThreadTurn,
+    THREAD_REPLY_WAKE_REASON,
 };
 pub use usage::{
     budget_state, chain_usage_in_tx, record_run_usage_in_tx, usage_summary_in_tx, validated_window,

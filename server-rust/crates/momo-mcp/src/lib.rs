@@ -25,11 +25,12 @@ pub use oauth::{
     MAX_STATE_BYTES, PROTECTED_RESOURCE_WELL_KNOWN_PREFIX, RESPONSE_TYPE_CODE, TOKEN_TYPE_BEARER,
 };
 pub use tools::{
-    validate_arguments, ToolCapability, ToolDescriptor, ToolFailure, ToolView, MAX_ARTIFACT_COUNT,
-    MAX_STAGE_BYTES, TOOL_ACTION_CLAIM_SECRET, TOOL_ACTION_PROPOSE, TOOL_CARD_SUGGEST,
-    TOOL_CATALOG, TOOL_CONVERSATION_READ, TOOL_INBOX_READ, TOOL_JOBS_CLAIM, TOOL_JOB_RELEASE,
-    TOOL_JOB_RENEW, TOOL_JOB_START, TOOL_MESSAGE_POST, TOOL_PING, TOOL_RUN_COMPLETE,
-    TOOL_RUN_EVENT,
+    validate_arguments, ArtifactRule, ArtifactViolation, ToolCapability, ToolDescriptor,
+    ToolFailure, ToolView, ARTIFACT_KEYS, MAX_ARTIFACT_COUNT, MAX_REPORTED_COUNT, MAX_STAGE_BYTES,
+    NEXT_ACTIONS, RESULT_KINDS, TEST_COUNT_KEYS, TOOL_ACTION_CLAIM_SECRET, TOOL_ACTION_PROPOSE,
+    TOOL_CARD_SUGGEST, TOOL_CATALOG, TOOL_CONVERSATION_READ, TOOL_COUNT_KEYS, TOOL_INBOX_READ,
+    TOOL_JOBS_CLAIM, TOOL_JOB_RELEASE, TOOL_JOB_RENEW, TOOL_JOB_START, TOOL_MESSAGE_POST,
+    TOOL_PING, TOOL_RUN_COMPLETE, TOOL_RUN_EVENT,
 };
 
 pub const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
@@ -539,8 +540,8 @@ fn admit_tool_call(
     // The answer is byte-identical to the adapter's own invalid-arguments
     // failure (pinned by a test), so a caller cannot tell which layer refused.
     if let Err(failure) = tools::validate_arguments(tool, &arguments) {
-        let (status, code, message) = failure.wire();
-        return error(status, id, code, message, None);
+        let (status, code, _) = failure.wire();
+        return error(status, id, code, &failure.message(), failure.data());
     }
     *call = Some(ToolCall {
         id: id.clone(),
@@ -577,12 +578,21 @@ pub fn tool_success(call: &ToolCall, structured: Value) -> HttpResponse {
 
 /// The JSON-RPC error envelope for a tool that refused.
 ///
-/// Every failure is one of [`ToolFailure`]'s five, and each carries a fixed
+/// Every failure is one of [`ToolFailure`]'s closed set, and each carries a fixed
 /// message: a domain string here would leak the very existence facts the
-/// fail-closed reads refuse to confirm.
+/// fail-closed reads refuse to confirm. The one exception is
+/// [`ToolFailure::InvalidArtifacts`] (ADR-0162 증보 5 C3), whose message and
+/// `error.data` name an `artifacts` field and a closed rule from a static list —
+/// still never a value the caller sent.
 pub fn tool_failure(call: &ToolCall, failure: ToolFailure) -> HttpResponse {
-    let (status, code, message) = failure.wire();
-    error(status, call.id.clone(), code, message, None)
+    let (status, code, _) = failure.wire();
+    error(
+        status,
+        call.id.clone(),
+        code,
+        &failure.message(),
+        failure.data(),
+    )
 }
 
 fn dispatch_legacy(
