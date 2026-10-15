@@ -397,6 +397,67 @@ pub async fn create_agent_run_in_tx(
     Ok(CreatedRun { id, created: false })
 }
 
+/// Create a mention run that is **born held on an approval** — ADR-0162 증보 5
+/// G2's in-place channel grant (#3857).
+///
+/// The same `ON CONFLICT (workspace_id, idempotency_key)` shape as
+/// [`create_agent_run_in_tx`], with two differences that are the point:
+///
+/// * the row is inserted as `awaiting_approval` with its `deadline_at`, never as
+///   `queued`. The run ledger's INSERT trigger (migration 128) maps
+///   `awaiting_approval` to no row, and the approval INSERT that follows writes
+///   `approval_requested` — so the ledger never claims a `queued`/`started` turn
+///   that nothing will start until a person says yes;
+/// * no job exists for it. [`requeue_run_from_approval_in_tx`] is the only way
+///   out to `queued`, and the decision route writes the job only when that
+///   guarded update succeeds.
+///
+/// `created == false` is the same idempotency hit as the queued sibling: the
+/// trigger already produced a run, and the caller writes nothing more.
+pub async fn create_held_agent_run_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    input: NewAgentRun,
+    deadline_at: DateTime<Utc>,
+) -> Result<CreatedRun, DbError> {
+    let idempotency_key = input.trigger.idempotency_key();
+    let inserted: Option<Uuid> = sqlx::query_scalar(
+        "INSERT INTO agent_run \
+           (workspace_id, agent_member_id, channel_id, trigger_message_id, parent_run_id, \
+            status, step_count, max_steps, depth, input, idempotency_key, deadline_at) \
+         VALUES ($1, $2, $3, $4, $5, 'awaiting_approval', 0, $6, $7, $8, $9, $10) \
+         ON CONFLICT (workspace_id, idempotency_key) DO NOTHING \
+         RETURNING id",
+    )
+    .bind(workspace_id)
+    .bind(input.trigger.agent_member_id())
+    .bind(input.channel_id)
+    .bind(input.trigger.trigger_message_id())
+    .bind(input.parent_run_id)
+    .bind(input.max_steps)
+    .bind(input.depth)
+    .bind(&input.input)
+    .bind(&idempotency_key)
+    .bind(deadline_at)
+    .fetch_optional(&mut *conn)
+    .await?;
+
+    if let Some(id) = inserted {
+        return Ok(CreatedRun { id, created: true });
+    }
+    let existing: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM agent_run \
+          WHERE workspace_id = $1 AND idempotency_key = $2 \
+          LIMIT 1",
+    )
+    .bind(workspace_id)
+    .bind(&idempotency_key)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let id = existing.ok_or_else(|| DbError::from(sqlx::Error::RowNotFound))?;
+    Ok(CreatedRun { id, created: false })
+}
+
 /// Load a run by id (tenant-scoped by the caller's GUC).
 pub async fn load_agent_run_in_tx(
     conn: &mut PgConnection,
@@ -865,6 +926,12 @@ pub async fn find_agent_run_by_trigger_in_tx(
 
 /// How many live runs an agent has right now — the concurrency cap's input
 /// (Swift `AgentRunRoutes.swift:662-669`).
+///
+/// A run held for an in-place channel grant (ADR-0162 증보 5 G2,
+/// `input.hold = "channel_grant"`) is **not** counted: it has no job, nothing
+/// of it has reached the agent, and counting it against the default cap of 1
+/// would let one unanswered card in one room refuse every work request to that
+/// agent for up to an hour.
 pub async fn live_run_count_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -873,7 +940,9 @@ pub async fn live_run_count_in_tx(
     let count: i64 = sqlx::query_scalar(
         "SELECT count(*)::bigint FROM agent_run \
           WHERE workspace_id = $1 AND agent_member_id = $2 \
-            AND status IN ('queued','running','awaiting_approval','paused')",
+            AND status IN ('queued','running','awaiting_approval','paused') \
+            AND NOT (status = 'awaiting_approval' \
+                     AND input->>'hold' IS NOT DISTINCT FROM 'channel_grant')",
     )
     .bind(workspace_id)
     .bind(agent_member_id)

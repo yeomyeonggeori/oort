@@ -1031,6 +1031,7 @@ async fn message_post(
                         root_id: sent.message.root_id,
                         author_member_id: caller.agent_member_id,
                         author_is_agent: true,
+                        author_is_human: false,
                         body: &mention_body,
                         hlc_ts: sent.message.hlc_ts,
                         via_token_id: Some(caller.token_id),
@@ -1039,6 +1040,8 @@ async fn message_post(
                         subscription_agents_enabled,
                         claude_subscription_agents_enabled,
                         context_max_messages,
+                        // An agent's send never raises the in-place card (G1).
+                        inplace_grant_enabled: false,
                         routing: None,
                     },
                 )

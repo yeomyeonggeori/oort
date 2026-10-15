@@ -159,6 +159,10 @@ pub(crate) struct MentionSend<'a> {
     pub author_member_id: Uuid,
     /// `true` when the send came in on an agent bearer — the A2A branch.
     pub author_is_agent: bool,
+    /// `true` only when the send came in on a **person's** bearer. Not merely
+    /// `!author_is_agent`: the in-place channel-grant card (ADR-0162 증보 5 G1)
+    /// is raised for a person's explicit call and for nothing else.
+    pub author_is_human: bool,
     pub body: &'a str,
     pub hlc_ts: i64,
     pub via_token_id: Option<Uuid>,
@@ -179,6 +183,8 @@ pub(crate) struct MentionSend<'a> {
     /// to, whenever it was registered.
     pub claude_subscription_agents_enabled: bool,
     pub context_max_messages: i64,
+    /// ADR-0162 증보 5 G5 — `MentionSettings::hosted_inplace_grant_enabled`.
+    pub inplace_grant_enabled: bool,
     /// ADR-0134 D1's per-request tier, already shape-validated by the route
     /// before the transaction opened. `None` = the caller chose nothing and the
     /// agent's own preferences decide.
@@ -403,6 +409,32 @@ pub(crate) async fn route_agent_mentions_in_tx(
                 continue;
             }
             DeliveryGate::HostedChannelUnapproved => {
+                // ADR-0162 증보 5 G1 (#3857) — a person explicitly called the
+                // agent in a live non-DM room its connection is not approved
+                // for: raise the in-place 「이 채널에서 쓰기」 card with a held
+                // run and NO job. Every other shape (the DM rule, a DM, an
+                // agent's or a non-person's send, a paused agent, the door
+                // switched off, the per-connection ceiling) keeps the line below.
+                if let Some(connection_id) = agent.hosted_active_connection_id {
+                    if send.inplace_grant_enabled
+                        && send.author_is_human
+                        && !send.author_is_agent
+                        && !in_dm
+                        && *addressing == Addressing::Mention
+                        && !agent.paused
+                    {
+                        // The sender's own routing block is judged now, exactly as
+                        // on the queued path: an impossible model is their 400.
+                        if let Err(invalid) = resolve_mention_routing(agent, send.routing) {
+                            return Ok(Err(ApiError::bad_request(invalid.to_string())));
+                        }
+                        if in_place_grant_card(&mut *conn, &send, &trigger, agent, connection_id)
+                            .await?
+                        {
+                            continue;
+                        }
+                    }
+                }
                 skip(
                     &mut *conn,
                     &send,
@@ -1110,6 +1142,378 @@ fn addressed_agents(
     addressed
 }
 
+// ---------------------------------------------------------------------------
+// ADR-0162 증보 5 G1~G5 (#3857) — the in-place 「이 채널에서 쓰기」 card
+// ---------------------------------------------------------------------------
+
+/// Raise the in-place channel-grant card for one agent, inside the send
+/// transaction. `Ok(true)` = handled (a card was raised, or an existing pending
+/// card absorbed this call); `Ok(false)` = declined, and the caller writes the
+/// old notice line instead.
+///
+/// What is written, in order (G2):
+/// 1. the mention run, **born** `awaiting_approval` with `deadline_at` = the
+///    approval's expiry and `input.hold = "channel_grant"`;
+/// 2. one `workspace_action` approval of `hosted.channels.grant` naming exactly
+///    this channel, proposer = the agent, `origin = "server_in_place"`;
+/// 3. the `approval_request` card, in the thread the person spoke in.
+///
+/// **What is not:** an `agent_job`, a hosted inbox reference, a wake-up. The
+/// prompt and the room's recent messages stay on this side of HAP-E3 until a
+/// workspace admin approves this channel; the decision route writes the one
+/// job ([`enqueue_granted_mention_job_in_tx`]).
+///
+/// One card per (connection, channel) while pending: a second call in the same
+/// room is coalesced (audited, nothing else), and the person's message is still
+/// there for the first job's recent-conversation window to read.
+async fn in_place_grant_card(
+    conn: &mut PgConnection,
+    send: &MentionSend<'_>,
+    trigger: &MentionTrigger<'_>,
+    agent: &MentionCandidate,
+    connection_id: Uuid,
+) -> Result<bool, DbError> {
+    use momo_agent::in_place_grant as grant;
+
+    // Every producer of this connection serializes here for the rest of the
+    // transaction (the per-connection ceiling below). One room's producers are
+    // already serialized by its `channel_seq` row, which the send holds.
+    grant::lock_in_place_grant_slot_in_tx(&mut *conn, connection_id).await?;
+
+    if let Some(existing) = grant::pending_in_place_grant_in_tx(
+        &mut *conn,
+        send.workspace_id,
+        agent.member_id,
+        connection_id,
+        send.channel_id,
+    )
+    .await?
+    {
+        write_audit(
+            &mut *conn,
+            &AuditEntry::new(send.workspace_id, grant::AUDIT_IN_PLACE_CARD_COALESCED)
+                .by(send.author_member_id)
+                .about(agent.member_id)
+                .target("message", send.message_id)
+                .via_token(send.via_token_id)
+                .with_schema(
+                    grant::AUDIT_IN_PLACE_CARD_SCHEMA,
+                    serde_json::json!({
+                        "approval_id": existing,
+                        "channel_id": send.channel_id,
+                        "trigger_message_id": send.message_id,
+                    }),
+                ),
+        )
+        .await?;
+        return Ok(true);
+    }
+    if grant::count_pending_in_place_grants_in_tx(&mut *conn, send.workspace_id, connection_id)
+        .await?
+        >= grant::MAX_PENDING_IN_PLACE_GRANTS_PER_CONNECTION
+    {
+        return Ok(false);
+    }
+    // A DM, an archived room or a connection that stopped being active and
+    // proved since the candidate read: the card would promise a grant the
+    // decision could never make.
+    let Some(facts) = grant::in_place_channel_facts_in_tx(
+        &mut *conn,
+        send.workspace_id,
+        send.channel_id,
+        connection_id,
+    )
+    .await?
+    else {
+        return Ok(false);
+    };
+    if facts.approved_before >= momo_auth::MAX_HOSTED_APPROVED_CHANNELS {
+        return Ok(false);
+    }
+    let Some(action) =
+        momo_agent::actions::action_by_id(momo_agent::actions::ACTION_HOSTED_CHANNELS_GRANT)
+    else {
+        return Ok(false);
+    };
+
+    let now = chrono::Utc::now();
+    let expires_at = momo_agent::default_expires_at(now, momo_agent::DEFAULT_TTL_SECONDS);
+
+    let run_trigger = RunTrigger::Mention {
+        message_id: send.message_id,
+        agent_member_id: agent.member_id,
+    };
+    let idempotency_key = run_trigger.idempotency_key();
+    let mut input = mention_run_input(
+        trigger,
+        agent.member_id,
+        &idempotency_key,
+        None,
+        0,
+        send.routing,
+    );
+    stamp_addressing(&mut input, Addressing::Mention);
+    grant::mark_held_for_channel_grant(&mut input);
+    let created = momo_agent::create_held_agent_run_in_tx(
+        &mut *conn,
+        send.workspace_id,
+        NewAgentRun {
+            channel_id: send.channel_id,
+            trigger: run_trigger,
+            parent_run_id: None,
+            max_steps: agent.max_run_steps,
+            depth: 0,
+            input,
+        },
+        expires_at,
+    )
+    .await?;
+    if !created.created {
+        // This trigger already produced its run (a replay the send's own
+        // dedupe did not catch): nothing more to write, and no notice either.
+        return Ok(true);
+    }
+
+    let approval_id = momo_agent::create_pending_approval_in_tx(
+        &mut *conn,
+        send.workspace_id,
+        momo_agent::NewApproval {
+            run_id: created.id,
+            channel_id: send.channel_id,
+            // The agent is the proposer of record: the grant widens ITS
+            // connection, the resolver re-finds it from this id, and a decision
+            // requires a human — so self-approval stays structurally impossible.
+            requested_by: agent.member_id,
+            action_type: momo_agent::ACTION_TYPE_WORKSPACE_ACTION.to_string(),
+            payload: grant::in_place_grant_payload(
+                agent.member_id,
+                send.author_member_id,
+                connection_id,
+                send.channel_id,
+                &facts.name,
+                send.message_id,
+            ),
+            expires_at,
+        },
+    )
+    .await?;
+
+    let mut props = momo_agent::workspace_action_request_props(
+        approval_id,
+        created.id,
+        send.channel_id,
+        action,
+        momo_agent::action_block(
+            action,
+            grant::in_place_grant_rows(&agent.display_name, &agent.handle, &facts),
+            None,
+        ),
+        expires_at,
+    );
+    if let Some(object) = props.as_object_mut() {
+        object.insert(
+            "title".into(),
+            Value::String(grant::IN_PLACE_GRANT_TITLE.into()),
+        );
+        object.insert(
+            "summary".into(),
+            Value::String(grant::IN_PLACE_GRANT_SUMMARY.into()),
+        );
+        object.insert(
+            "origin".into(),
+            Value::String(grant::APPROVAL_ORIGIN_SERVER_IN_PLACE.into()),
+        );
+        object.insert(
+            "waiting_text".into(),
+            Value::String(grant::IN_PLACE_GRANT_WAITING_TEXT.into()),
+        );
+        object.insert(
+            "requested_for".into(),
+            Value::String(send.author_member_id.to_string()),
+        );
+    }
+    let card = send_thread_notice_in_tx(
+        &mut *conn,
+        send.workspace_id,
+        NewMessage {
+            channel_id: send.channel_id,
+            author_member_id: agent.member_id,
+            message_type: MessageType::ApprovalRequest,
+            body: Some(grant::in_place_grant_body(&agent.display_name)),
+            props,
+            // Where the person spoke: their thread, or the main timeline.
+            root_id: send.root_id,
+            reply_to_id: None,
+            // The same derived key an agent's proposal card uses, so the card
+            // can never collide with this approval's own rejection or expiry
+            // line (both keyed on `approval.id`, same author, same channel).
+            client_msg_id: Some(momo_agent::card_client_msg_id(approval_id)),
+            run_id: Some(created.id),
+            hlc_ts: None,
+            hlc_count: None,
+        },
+    )
+    .await?;
+    momo_agent::attach_request_message_in_tx(
+        &mut *conn,
+        send.workspace_id,
+        approval_id,
+        card.message.id,
+    )
+    .await?;
+
+    write_audit(
+        &mut *conn,
+        &AuditEntry::new(send.workspace_id, grant::AUDIT_IN_PLACE_CARD_POSTED)
+            .by(send.author_member_id)
+            .about(agent.member_id)
+            .target("approval", approval_id)
+            .via_token(send.via_token_id)
+            .run(created.id)
+            .with_schema(
+                grant::AUDIT_IN_PLACE_CARD_SCHEMA,
+                serde_json::json!({
+                    "approval_id": approval_id,
+                    "run_id": created.id,
+                    "channel_id": send.channel_id,
+                    "connection_id": connection_id,
+                    "trigger_message_id": send.message_id,
+                    "card_message_id": card.message.id,
+                }),
+            ),
+    )
+    .await?;
+    Ok(true)
+}
+
+/// The one `agent_job` an approved in-place card releases (ADR-0162 증보 5 G3-3).
+///
+/// Called by the decision route **only** after `requeue_run_from_approval_in_tx`
+/// returned `true` in the same transaction — that guarded update is the single
+/// gate, so a replayed or concurrent decision cannot reach here twice for one
+/// run. Built exactly as the mention path builds a hosted job, from what the run
+/// recorded at mention time and from the room **as it is now**: the recent
+/// conversation is read at approval, so a call coalesced into the pending card
+/// is in front of the agent on its first turn (증보 4 J5).
+///
+/// `Ok(None)` = the agent is no longer a deliverable candidate here; the caller
+/// rolls the whole decision back rather than widen a grant with no job behind it.
+pub(crate) async fn enqueue_granted_mention_job_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run: &momo_agent::AgentRunRow,
+    connection_id: Uuid,
+    context_max_messages: i64,
+) -> Result<Option<i64>, DbError> {
+    let candidates =
+        load_mention_candidates_in_tx(&mut *conn, workspace_id, run.channel_id).await?;
+    let Some(agent) = candidates
+        .iter()
+        .find(|candidate| candidate.member_id == run.agent_member_id)
+    else {
+        return Ok(None);
+    };
+    let Some(trigger_message_id) = run.trigger_message_id else {
+        return Ok(None);
+    };
+    let text = |key: &str| run.input.get(key).and_then(Value::as_str);
+    let body = text("prompt").unwrap_or_default().to_string();
+    let Some(author_member_id) = text("author_member_id").and_then(|id| Uuid::parse_str(id).ok())
+    else {
+        return Ok(None);
+    };
+    let message_seq = run
+        .input
+        .get("source")
+        .and_then(|source| source.get("message_seq"))
+        .and_then(Value::as_i64)
+        .unwrap_or_default();
+    let requested = run.input.get("routing").map(|routing| RequestedRouting {
+        model: routing
+            .get("model")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        effort: routing
+            .get("effort")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+    });
+    // The request tier was judged when the person sent it (a bad one was their
+    // 400 then). If the workspace allow-list narrowed while the card waited, the
+    // hosted runtime picks its own model anyway; the agent tier decides.
+    let routing = match resolve_mention_routing(agent, requested.as_ref()) {
+        Ok(routing) => routing,
+        Err(_) => match resolve_mention_routing(agent, None) {
+            Ok(routing) => routing,
+            Err(_) => return Ok(None),
+        },
+    };
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let trigger = MentionTrigger {
+        workspace_id,
+        channel_id: run.channel_id,
+        message_id: trigger_message_id,
+        message_seq,
+        author_member_id,
+        body: &body,
+        hlc_ts: now_ms,
+    };
+    let window = agent_context_window_in_tx(
+        &mut *conn,
+        run.channel_id,
+        trigger_message_id,
+        context_max_messages,
+    )
+    .await?;
+    let payload = mention_job_payload(
+        &trigger,
+        agent,
+        &routing,
+        run.id,
+        &window,
+        0,
+        MENTION_JOB_METHOD_GATEWAY,
+    );
+    let job_outbox_id = momo_outbox::emit_outbox(
+        &mut *conn,
+        workspace_id,
+        momo_outbox::OutboxKind::AgentJob,
+        MENTION_JOB_METHOD_GATEWAY,
+        &payload,
+        Some(agent.member_id),
+    )
+    .await?;
+    // The hosted inbox reference (and with it the doorbell), in this
+    // transaction — the same pair the mention path writes for a hosted job.
+    momo_messaging::append_job_reference_in_tx(
+        &mut *conn,
+        workspace_id,
+        agent.member_id,
+        connection_id,
+        run.channel_id,
+        job_outbox_id,
+        run.id,
+    )
+    .await?;
+    // The opening frame: the turn begins now, not when the card was raised.
+    crate::routes::shared::emit_rail_frame(
+        &mut *conn,
+        workspace_id,
+        run.channel_id,
+        &momo_agent::opening_agent_status_payload(
+            momo_agent::AgentRunAddress {
+                workspace_id,
+                channel_id: run.channel_id,
+                agent_member_id: agent.member_id,
+                run_id: run.id,
+            },
+            now_ms,
+        ),
+    )
+    .await?;
+    Ok(Some(job_outbox_id))
+}
+
 /// An audited no-op — Swift `insertMentionDiagnostic` (:2195-2228).
 ///
 /// The audit row is the whole point: "the agent ignored me" and "the agent is
@@ -1564,6 +1968,7 @@ mod tests {
             root_id: Some(Uuid::from_u128(103)),
             author_member_id: author,
             author_is_agent: false,
+            author_is_human: true,
             body: "고마워요",
             hlc_ts: 0,
             via_token_id: None,
@@ -1573,6 +1978,9 @@ mod tests {
             claude_subscription_agents_enabled: true,
             context_max_messages: 30,
             routing: None,
+            // The in-place grant door (#3857) is off here: these units pin the
+            // shared gate, not the card.
+            inplace_grant_enabled: false,
         }
     }
 
