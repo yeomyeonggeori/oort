@@ -1,0 +1,115 @@
+{
+  "plugin": {
+    "description": "Official GitHub hosted MCP integration",
+    "egressDomains": [
+      "api.githubcopilot.com"
+    ],
+    "enabled": true,
+    "installed": true,
+    "manifest": {
+      "mcp": {
+        "protocolVersion": "2025-06-18",
+        "server": {
+          "name": "github/github-mcp-server",
+          "version": "hosted"
+        },
+        "tools": [
+          {
+            "approvalPolicy": "none",
+            "description": "권한을 위임한 사용자가 접근할 수 있는 저장소 목록을 조회합니다.",
+            "inputSchema": {
+              "additionalProperties": false,
+              "properties": {},
+              "type": "object"
+            },
+            "name": "github.list_repositories",
+            "risk": "read",
+            "schemaDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            "scopes": [
+              "github:read"
+            ]
+          },
+          {
+            "approvalPolicy": "none",
+            "description": "권한을 위임한 사용자가 접근할 수 있는 저장소에서 이슈를 검색합니다.",
+            "inputSchema": {
+              "additionalProperties": false,
+              "properties": {
+                "limit": {
+                  "type": "integer"
+                },
+                "query": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "name": "github.search_issues",
+            "risk": "read",
+            "schemaDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+            "scopes": [
+              "github:read"
+            ]
+          }
+        ],
+        "transport": "streamable_http",
+        "url": "https://api.githubcopilot.com/mcp/"
+      },
+      "momo": {
+        "approvalTier": {
+          "github.list_repositories": "read_only",
+          "github.search_issues": "read_only"
+        },
+        "egressDomains": [
+          "api.githubcopilot.com"
+        ],
+        "recommendedFor": [
+          "software-development",
+          "work-tracking"
+        ],
+        "risk": "low",
+        "serverPolicy": {
+          "allowedRoles": [
+            "owner",
+            "admin"
+          ],
+          "enabledByDefault": false,
+          "installAllowed": true
+        }
+      },
+      "plugin": {
+        "description": "Official GitHub hosted MCP integration",
+        "id": "com.momo.plugins.github",
+        "license": {
+          "kind": "open_source",
+          "spdx": "MIT"
+        },
+        "name": "GitHub",
+        "provenance": {
+          "releaseRef": "hosted",
+          "sourceURL": "https://github.com/github/github-mcp-server",
+          "verified": true
+        },
+        "publisher": {
+          "id": "github",
+          "name": "GitHub",
+          "verified": true
+        },
+        "version": "1.0.0"
+      },
+      "schemaVersion": "momo.plugin.v1",
+      "skill": {
+        "optional": true,
+        "reference": null
+      }
+    },
+    "name": "GitHub",
+    "official": true,
+    "pluginId": "com.momo.plugins.github",
+    "recommendedFor": [
+      "software-development",
+      "work-tracking"
+    ],
+    "version": "1.0.0"
+  }
+}

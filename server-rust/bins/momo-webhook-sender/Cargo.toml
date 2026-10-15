@@ -52,3 +52,4 @@ axum.workspace = true
 momo-server = { path = "../momo-server" }
 momo-auth = { path = "../../crates/momo-auth" }
 momo-messaging = { path = "../../crates/momo-messaging" }
+momo-agent = { path = "../../crates/momo-agent" }

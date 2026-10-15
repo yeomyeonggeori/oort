@@ -99,11 +99,14 @@ struct RecordingTransport {
     rings: Arc<AtomicUsize>,
     bodies: Arc<Mutex<Vec<Vec<u8>>>>,
     auths: Arc<Mutex<Vec<String>>>,
+    /// #3822: when set, the vendor answers 404 (a permanent give-up, no retry sleep).
+    fail: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl RecordingTransport {
     fn new() -> Self {
         RecordingTransport {
+            fail: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             rings: Arc::new(AtomicUsize::new(0)),
             bodies: Arc::new(Mutex::new(Vec::new())),
             auths: Arc::new(Mutex::new(Vec::new())),
@@ -116,6 +119,12 @@ impl DoorbellTransport for RecordingTransport {
         self.rings.fetch_add(1, Ordering::SeqCst);
         self.bodies.lock().unwrap().push(body.to_vec());
         self.auths.lock().unwrap().push(format!("Bearer {secret}"));
+        if self.fail.load(Ordering::SeqCst) {
+            return DeliveryResult::Permanent {
+                reason: "not found".to_string(),
+                status: Some(404),
+            };
+        }
         DeliveryResult::Ok(200)
     }
 }
@@ -570,4 +579,396 @@ async fn a_manual_ring_fires_the_same_content_free_signal_once_without_an_inbox_
         "{status:?}"
     );
     assert!(fired_at.is_some());
+}
+
+// ---------------------------------------------------------------------------
+// #3822 — tracked work wakes without waiting out the message cooldown; the ring is
+// recorded on the waiting runs' ledger.
+// ---------------------------------------------------------------------------
+
+/// A queued hosted run with its gateway job and the inbox `agent_job` reference, exactly
+/// the three rows the real producer writes in one transaction.
+async fn append_job(pool: &PgPool, hosted: &Hosted) -> Uuid {
+    let run = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO agent_run(id,workspace_id,agent_member_id,channel_id,idempotency_key) \
+         VALUES($1,$2,$3,$4,$5)",
+    )
+    .bind(run)
+    .bind(hosted.workspace)
+    .bind(hosted.agent)
+    .bind(hosted.channel)
+    .bind(run.to_string())
+    .execute(pool)
+    .await
+    .expect("run");
+    let job: i64 = sqlx::query_scalar(
+        "INSERT INTO outbox(workspace_id,kind,status,method,payload,partition_key) \
+         VALUES($1,'agent_job','pending','gateway', \
+           jsonb_build_object('run_id',upper($2::text),'agent_member_id',upper($3::text)),$3) \
+         RETURNING id",
+    )
+    .bind(hosted.workspace)
+    .bind(run.to_string())
+    .bind(hosted.agent)
+    .fetch_one(pool)
+    .await
+    .expect("job");
+    let (workspace, agent, connection, channel) = (
+        hosted.workspace,
+        hosted.agent,
+        hosted.connection,
+        hosted.channel,
+    );
+    with_tenant_tx(pool, workspace, move |conn| {
+        Box::pin(async move {
+            momo_messaging::append_job_reference_in_tx(
+                conn, workspace, agent, connection, channel, job, run,
+            )
+            .await?;
+            Ok(())
+        })
+    })
+    .await
+    .expect("job reference");
+    run
+}
+
+async fn expire_window(pool: &PgPool, hosted: &Hosted, seconds: i32) {
+    sqlx::query(
+        "UPDATE hosted_agent_doorbell \
+            SET window_started_at = now() - make_interval(secs => $2) WHERE connection_id = $1",
+    )
+    .bind(hosted.connection)
+    .bind(f64::from(seconds))
+    .execute(pool)
+    .await
+    .expect("age window");
+}
+
+/// RED: without `coalesce_action_with_jobs` the job would be `MarkTrailing` and wait out
+/// the 60 s window (the 4-minute-old complaint's first suspect). Message-only stays coalesced.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn a_tracked_job_wakes_inside_the_cooldown_but_a_message_does_not() {
+    ensure_schema();
+    let pool = superuser_pool().await;
+    let hosted = seed_hosted(&pool).await;
+    register_doorbell(&pool, &hosted).await;
+    let transport = RecordingTransport::new();
+    let worker = worker(pool.clone(), transport.clone(), true);
+
+    append_human_message(&pool, &hosted).await;
+    assert_eq!(worker.drain_once().await.expect("leading").fired, 1);
+
+    // a message inside the open window: coalesced, nothing fires
+    append_human_message(&pool, &hosted).await;
+    let msg = worker.drain_once().await.expect("message");
+    assert_eq!((msg.fired, msg.urgent), (0, 0), "{msg:?}");
+    assert_eq!(transport.rings.load(Ordering::SeqCst), 1);
+
+    // age the window past the 10 s urgent gap but not past the 60 s cooldown
+    expire_window(&pool, &hosted, 15).await;
+    append_job(&pool, &hosted).await;
+    let job = worker.drain_once().await.expect("job");
+    assert_eq!((job.fired, job.urgent), (1, 1), "{job:?}");
+    assert_eq!(
+        transport.rings.load(Ordering::SeqCst),
+        2,
+        "the job rang inside the 60 s window"
+    );
+}
+
+/// The flood bound: a burst of jobs rings once per urgent gap, not once per job.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn a_burst_of_jobs_rings_once_per_urgent_gap_and_loses_none() {
+    ensure_schema();
+    let pool = superuser_pool().await;
+    let hosted = seed_hosted(&pool).await;
+    register_doorbell(&pool, &hosted).await;
+    let transport = RecordingTransport::new();
+    let worker = worker(pool.clone(), transport.clone(), true);
+
+    append_job(&pool, &hosted).await;
+    assert_eq!(worker.drain_once().await.expect("first").fired, 1); // leading
+    for _ in 0..5 {
+        append_job(&pool, &hosted).await;
+    }
+    // window just opened (gap running): the five jobs are held back (not even claimed) and
+    // none is consumed
+    let held = worker.drain_once().await.expect("held");
+    assert_eq!((held.claimed, held.fired), (0, 0), "{held:?}");
+    let again = worker.drain_once().await.expect("held again");
+    assert_eq!(again.fired, 0, "RED: one fire per job would be 5");
+    assert_eq!(transport.rings.load(Ordering::SeqCst), 1);
+
+    // the gap ends: ONE urgent ring covers the five jobs
+    expire_window(&pool, &hosted, 11).await;
+    let covered = worker.drain_once().await.expect("covered");
+    assert_eq!((covered.fired, covered.urgent), (1, 1), "{covered:?}");
+    assert_eq!(transport.rings.load(Ordering::SeqCst), 2);
+    let quiet = worker.drain_once().await.expect("quiet");
+    assert_eq!(quiet.fired, 0, "consumed: nothing left to ring for");
+}
+
+async fn rung_codes(pool: &PgPool, run: Uuid) -> Vec<String> {
+    sqlx::query_scalar(
+        "SELECT code FROM agent_run_event WHERE run_id=$1 AND kind='doorbell_rung' ORDER BY seq",
+    )
+    .bind(run)
+    .fetch_all(pool)
+    .await
+    .expect("rung codes")
+}
+
+/// The ring lands on the waiting run's ledger as one closed token; a claimed run, a
+/// run that finished and a failed ring are told apart; the per-run cap holds; and the
+/// rung never counts as run activity.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn a_ring_is_recorded_on_the_waiting_runs_ledger_and_only_there() {
+    ensure_schema();
+    let pool = superuser_pool().await;
+    let hosted = seed_hosted(&pool).await;
+    register_doorbell(&pool, &hosted).await;
+    let transport = RecordingTransport::new();
+    let worker = worker(pool.clone(), transport.clone(), true);
+
+    let waiting = append_job(&pool, &hosted).await;
+    let claimed = append_job(&pool, &hosted).await;
+    let done = append_job(&pool, &hosted).await;
+    sqlx::query("SELECT agent_run_event_append($1,$2,'claimed')")
+        .bind(hosted.workspace)
+        .bind(claimed)
+        .execute(&pool)
+        .await
+        .expect("claimed row");
+    sqlx::query("UPDATE agent_run SET status='cancelled' WHERE id=$1")
+        .bind(done)
+        .execute(&pool)
+        .await
+        .expect("cancel");
+    let queued_at: chrono::DateTime<chrono::Utc> = sqlx::query_scalar(
+        "SELECT max(created_at) FROM agent_run_event WHERE run_id=$1 AND kind='queued'",
+    )
+    .bind(waiting)
+    .fetch_one(&pool)
+    .await
+    .expect("queued_at");
+
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert_eq!(worker.drain_once().await.expect("leading").fired, 1);
+    assert_eq!(rung_codes(&pool, waiting).await, ["leading_ok"]);
+    assert!(
+        rung_codes(&pool, claimed).await.is_empty(),
+        "already claimed"
+    );
+    assert!(
+        rung_codes(&pool, done).await.is_empty(),
+        "no longer waiting"
+    );
+
+    // a rung is not run activity: last_event_at is still the `queued` row's time
+    let (workspace, channel) = (hosted.workspace, hosted.channel);
+    let app = superuser_pool().await;
+    let base = with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            momo_agent::list_channel_run_progress_base_in_tx(conn, workspace, channel, true, 10)
+                .await
+        })
+    })
+    .await
+    .expect("progress base");
+    let row = base.iter().find(|r| r.summary.id == waiting).expect("row");
+    assert_eq!(
+        row.last_event_at,
+        Some(queued_at),
+        "RED: counting doorbell_rung would move last_event_at past the ring"
+    );
+
+    // the default read leaves the rung out (a client built before the kind rejects a
+    // ledger with a kind it does not know); `include=doorbell` asks for it
+    let (human, run_id) = (hosted.human, waiting);
+    let (plain, with_rung) = with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            let plain = momo_agent::list_run_events_in_tx(conn, workspace, run_id, human, false)
+                .await?
+                .expect("visible");
+            let with_rung = momo_agent::list_run_events_in_tx(conn, workspace, run_id, human, true)
+                .await?
+                .expect("visible");
+            Ok((plain, with_rung))
+        })
+    })
+    .await
+    .expect("events");
+    assert!(
+        plain.iter().all(|e| e.kind != "doorbell_rung"),
+        "RED: an old client would reject this ledger"
+    );
+    let rungs: Vec<_> = with_rung
+        .iter()
+        .filter(|e| e.kind == "doorbell_rung")
+        .collect();
+    assert_eq!(rungs.len(), 1);
+    assert_eq!(rungs[0].code.as_deref(), Some("leading_ok"));
+
+    // a manual ring is recorded as the trailing edge; a dead vendor as `failed`
+    transport.fail.store(true, Ordering::SeqCst);
+    sqlx::query(
+        "UPDATE hosted_agent_doorbell SET pending_trailing = true, window_started_at = NULL \
+          WHERE connection_id = $1",
+    )
+    .bind(hosted.connection)
+    .execute(&pool)
+    .await
+    .expect("rearm");
+    assert_eq!(worker.drain_once().await.expect("trailing").failed, 1);
+    assert_eq!(
+        rung_codes(&pool, waiting).await,
+        ["leading_ok", "trailing_failed"]
+    );
+    let leaked: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM agent_run_event WHERE kind='doorbell_rung' \
+            AND (stage IS NOT NULL OR code ~ '[0-9]' OR approval_id IS NOT NULL \
+                 OR actor_member_id IS NOT NULL)",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("leak scan");
+    assert_eq!(
+        leaked, 0,
+        "no HTTP status, host, stage or actor in the ledger"
+    );
+
+    // the per-run cap: a run that waits for hours does not grow its ledger without bound
+    for _ in 0..30 {
+        let (workspace, connection) = (hosted.workspace, hosted.connection);
+        with_tenant_tx(&pool, workspace, move |conn| {
+            Box::pin(async move {
+                momo_webhook::record_doorbell_rung_in_tx(
+                    conn, workspace, connection, "trailing", true,
+                )
+                .await
+            })
+        })
+        .await
+        .expect("record");
+    }
+    assert_eq!(
+        rung_codes(&pool, waiting).await.len() as i64,
+        momo_webhook::DOORBELL_RUNG_PER_RUN_CAP
+    );
+}
+
+/// A foreign workspace's waiting run never gets this connection's ring.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn a_ring_never_marks_another_connections_or_workspaces_run() {
+    ensure_schema();
+    let pool = superuser_pool().await;
+    let mine = seed_hosted(&pool).await;
+    let other = seed_hosted(&pool).await;
+    register_doorbell(&pool, &mine).await;
+    let transport = RecordingTransport::new();
+    let worker = worker(pool.clone(), transport.clone(), true);
+
+    let mine_run = append_job(&pool, &mine).await;
+    let other_run = append_job(&pool, &other).await;
+    assert_eq!(worker.drain_once().await.expect("drain").fired, 1);
+    assert_eq!(rung_codes(&pool, mine_run).await, ["leading_ok"]);
+    assert!(
+        rung_codes(&pool, other_run).await.is_empty(),
+        "RED: dropping the connection/workspace join would mark it"
+    );
+}
+
+/// Security review H-1: connections whose only news is a job inside the urgent gap are not
+/// claimed at all. Without that, a full batch of them is re-claimed on every pass (nothing is
+/// consumed), so the drain spins and the connections behind them starve.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn connections_held_back_by_the_urgent_gap_do_not_spin_the_drain_or_starve_others() {
+    ensure_schema();
+    let pool = superuser_pool().await;
+    sqlx::query("DELETE FROM hosted_agent_doorbell")
+        .execute(&pool)
+        .await
+        .expect("isolate doorbells");
+    let sealed = seal_doorbell_secret(DOORBELL_SECRET, TEST_MASTER_KEY).expect("seal");
+    let transport = RecordingTransport::new();
+    let worker = worker(pool.clone(), transport.clone(), true);
+
+    let batch = 16;
+    let mut held = Vec::new();
+    for _ in 0..batch + 2 {
+        let hosted = seed_hosted(&pool).await;
+        sqlx::query(
+            "INSERT INTO hosted_agent_doorbell \
+               (workspace_id, connection_id, url, secret_sealed, secret_masked, registered_by, \
+                window_started_at) \
+             VALUES ($1,$2,'https://example.com/hook',$3,'••••alue',$4, now())",
+        )
+        .bind(hosted.workspace)
+        .bind(hosted.connection)
+        .bind(&sealed)
+        .bind(hosted.human)
+        .execute(&pool)
+        .await
+        .expect("doorbell");
+        append_job(&pool, &hosted).await;
+        held.push(hosted);
+    }
+
+    let held_pass = worker.drain_once().await.expect("held pass");
+    assert_eq!(
+        (held_pass.claimed, held_pass.fired),
+        (0, 0),
+        "RED: claiming the held rows is what spins the drain: {held_pass:?}"
+    );
+    let total = worker.drain_to_empty().await;
+    assert_eq!(total.fired, 0, "{total:?}");
+    assert_eq!(transport.rings.load(Ordering::SeqCst), 0);
+
+    // the gap ends for all of them: each gets exactly one ring (the batch loops, no starvation)
+    sqlx::query(
+        "UPDATE hosted_agent_doorbell SET window_started_at = now() - interval '11 seconds'",
+    )
+    .execute(&pool)
+    .await
+    .expect("age");
+    let total = worker.drain_to_empty().await;
+    assert_eq!(
+        (total.fired, total.urgent),
+        (batch as usize + 2, batch as usize + 2),
+        "{total:?}"
+    );
+    assert_eq!(transport.rings.load(Ordering::SeqCst), batch as usize + 2);
+}
+
+/// Security review L-4: one ring marks at most DOORBELL_RUNG_RUNS_PER_RING waiting runs.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn one_ring_marks_at_most_twenty_waiting_runs() {
+    ensure_schema();
+    let pool = superuser_pool().await;
+    let hosted = seed_hosted(&pool).await;
+    register_doorbell(&pool, &hosted).await;
+    let transport = RecordingTransport::new();
+    let worker = worker(pool.clone(), transport.clone(), true);
+    let mut runs = Vec::new();
+    for _ in 0..25 {
+        runs.push(append_job(&pool, &hosted).await);
+    }
+    assert_eq!(worker.drain_once().await.expect("leading").fired, 1);
+    let marked: i64 = sqlx::query_scalar(
+        "SELECT count(DISTINCT run_id) FROM agent_run_event \
+          WHERE workspace_id=$1 AND kind='doorbell_rung'",
+    )
+    .bind(hosted.workspace)
+    .fetch_one(&pool)
+    .await
+    .expect("count");
+    assert_eq!(marked, momo_webhook::DOORBELL_RUNG_RUNS_PER_RING);
 }

@@ -4,8 +4,8 @@
 //! documents (event -> refetch) must name the event the server really emits.
 
 use momo_server::dto::{
-    SharedDiffDto, SharedPrDto, SharedSessionChannelDto, SharedSessionOwnerDto,
-    SharedWorkSessionDto, SharedWorkSessionListResponse,
+    AgentReportedDto, AgentReportedTestsDto, SharedDiffDto, SharedPrDto, SharedSessionChannelDto,
+    SharedSessionOwnerDto, SharedWorkSessionDto, SharedWorkSessionListResponse,
 };
 use serde_json::{json, Value};
 
@@ -103,6 +103,11 @@ fn sample() -> SharedWorkSessionDto {
         },
         pr_url: None,
         last_activity_at: 1,
+        trigger: None,
+        phase: None,
+        duration_ms: None,
+        result_message_id: None,
+        agent_reported: None,
     }
 }
 
@@ -122,6 +127,22 @@ fn sample_run() -> SharedWorkSessionDto {
         pr: Some(SharedPrDto {
             url: "https://github.com/a/b/pull/1".into(),
             number: Some(1),
+        }),
+        // ADR-0202 D3·D4: the `include=jobs` fields.
+        trigger: Some("mention"),
+        phase: Some("succeeded"),
+        duration_ms: Some(61_000),
+        result_message_id: Some("m".into()),
+        agent_reported: Some(AgentReportedDto {
+            result_kind: Some("pr_opened"),
+            tests: Some(AgentReportedTestsDto {
+                passed: 1,
+                failed: 0,
+                not_run: 0,
+            }),
+            next_action: Some("merge_ok"),
+            commit_sha: Some("abcdef1".into()),
+            tool_counts: Some(serde_json::Map::from_iter([("run".to_string(), json!(1))])),
         }),
         ..sample()
     }
@@ -198,6 +219,7 @@ fn the_spec_and_the_board_dto_name_the_same_fields() {
     let list = serde_json::to_value(SharedWorkSessionListResponse {
         sessions: vec![],
         next_cursor: None,
+        who: Some("team"),
     })
     .unwrap();
     assert_eq!(
@@ -205,6 +227,53 @@ fn the_spec_and_the_board_dto_name_the_same_fields() {
         sorted_keys(&list),
         "list envelope"
     );
+    assert_eq!(
+        sorted(property_names(&spec, "AgentReportedResult", None)),
+        sorted_keys(&run_wire["agentReported"]),
+        "agentReported fields"
+    );
+    // A session row never carries a job key (they are run-only).
+    for key in [
+        "trigger",
+        "phase",
+        "durationMs",
+        "resultMessageId",
+        "agentReported",
+    ] {
+        assert!(wire.get(key).is_none(), "{key} is absent on a session row");
+    }
+}
+
+/// ADR-0202 D4 ①: with no job field set, a row and a page serialize to exactly
+/// the bytes the shipped DTOs produce (the literals were taken by running this
+/// test against track/engine b33e2298f's `dto.rs`, before #3853). A new key
+/// leaking onto the default shape fails here.
+#[test]
+fn the_default_shape_is_byte_identical_to_the_shipped_one() {
+    let row = serde_json::to_string(&sample()).unwrap();
+    assert_eq!(
+        row,
+        r#"{"source":"session","sessionId":"s","origin":"host","label":"l","folderLabel":null,"status":"running","owner":{"memberId":"m","displayName":"n"},"homeChannel":{"id":"c","name":null},"startedAtMs":1,"endedAtMs":null,"sharedAtMs":null,"repo":null,"branch":null,"harness":"codex","state":"running","stages":[],"diff":{"added":null,"deleted":null,"files":null,"ahead":null,"behind":null,"uncommitted":null},"prUrl":null,"lastActivityAt":1}"#
+    );
+    let run = SharedWorkSessionDto {
+        trigger: None,
+        phase: None,
+        duration_ms: None,
+        result_message_id: None,
+        agent_reported: None,
+        ..sample_run()
+    };
+    assert_eq!(
+        serde_json::to_string(&run).unwrap(),
+        r#"{"source":"run","runId":"r","requestedBy":{"memberId":"m","displayName":"n"},"stepCount":1,"commits":1,"pr":{"url":"https://github.com/a/b/pull/1","number":1},"origin":"host","label":"l","folderLabel":null,"status":"running","owner":{"memberId":"m","displayName":"n"},"homeChannel":{"id":"c","name":null},"startedAtMs":1,"endedAtMs":null,"sharedAtMs":null,"repo":null,"branch":null,"harness":"codex","state":"running","stages":[],"diff":{"added":null,"deleted":null,"files":null,"ahead":null,"behind":null,"uncommitted":null},"prUrl":null,"lastActivityAt":1}"#
+    );
+    let page = serde_json::to_string(&SharedWorkSessionListResponse {
+        sessions: vec![],
+        next_cursor: None,
+        who: None,
+    })
+    .unwrap();
+    assert_eq!(page, r#"{"sessions":[],"nextCursor":null}"#);
 }
 
 #[test]

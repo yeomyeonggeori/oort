@@ -1180,12 +1180,24 @@ pub struct MentionSettings {
     /// window projected into the `agent_job` payload (Swift
     /// `MessageRoutes.agentContextMaxMessages`, :1742-1751).
     pub context_max_messages: i64,
+    /// ADR-0162 증보 5 G5 (#3857) — `MOMO_HOSTED_INPLACE_GRANT_ENABLED`.
+    ///
+    /// On (the default): a person's mention of a hosted agent in a channel its
+    /// connection is not approved for raises an in-place 「이 채널에서 쓰기」
+    /// approval card with a held run. Off: the old notice line, nothing else.
+    /// It is the door's off switch, not a widening of HAP-E3 — the grant still
+    /// needs a workspace admin's explicit approval of that one channel.
+    ///
+    /// Parsed like the subscription switch: unset, blank or an exact `true` is
+    /// on; any other value is off, so a misspelled "off" closes the door.
+    pub hosted_inplace_grant_enabled: bool,
 }
 
 impl Default for MentionSettings {
     fn default() -> Self {
         MentionSettings {
             context_max_messages: momo_agent::mention::CONTEXT_WINDOW_DEFAULT,
+            hosted_inplace_grant_enabled: true,
         }
     }
 }
@@ -1196,7 +1208,18 @@ impl MentionSettings {
             context_max_messages: momo_agent::context_window_size(
                 env("AGENT_CONTEXT_MAX_MESSAGES").as_deref(),
             ),
+            hosted_inplace_grant_enabled: hosted_inplace_grant_switch_on(
+                env("MOMO_HOSTED_INPLACE_GRANT_ENABLED").as_deref(),
+            ),
         }
+    }
+}
+
+/// Unset / blank / exact `true` = on; anything else = off (G5).
+fn hosted_inplace_grant_switch_on(value: Option<&str>) -> bool {
+    match value.map(str::trim) {
+        None | Some("") => true,
+        Some(value) => value == "true",
     }
 }
 
@@ -2306,6 +2329,25 @@ fn choose_log_filter(rust_log: Option<&str>, log_level: Option<&str>) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ADR-0162 증보 5 G5 (#3857): the in-place grant door is on by default and
+    /// only an exact `true` (or nothing) keeps it on.
+    #[test]
+    fn the_in_place_grant_switch_is_on_by_default_and_any_other_value_closes_it() {
+        assert!(MentionSettings::default().hosted_inplace_grant_enabled);
+        for on in [None, Some(""), Some("  "), Some("true"), Some(" true\n")] {
+            assert!(hosted_inplace_grant_switch_on(on), "{on:?}");
+        }
+        for off in [
+            Some("false"),
+            Some("0"),
+            Some("off"),
+            Some("True"),
+            Some("yes"),
+        ] {
+            assert!(!hosted_inplace_grant_switch_on(off), "{off:?}");
+        }
+    }
 
     /// #3022: the requirement is off by default, and turning it on without the
     /// instance id every signed statement carries is refused at boot.

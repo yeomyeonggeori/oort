@@ -35,6 +35,8 @@ pub mod dto;
 pub mod error;
 pub mod human_control;
 mod livekit;
+/// ADR-0113 D6 manifest admission (port of the retired Swift validator, #3859).
+pub mod plugin_manifest;
 pub mod rate_limit;
 pub mod realtime_advert;
 pub mod routes;
@@ -714,6 +716,14 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/settings",
             get(routes::workspace_settings::get).patch(routes::workspace_settings::patch),
         )
+        // ADR-0113 증보 2026-10-15 P-S1 (#3859) — the plugin registry's two
+        // reads, official four only. install / grants (P3) are not mounted and
+        // stay 404, so the web 「앱」 screen must render read-only (P-U1).
+        .route("/v1/workspaces/{ws}/plugins", get(routes::plugins::list))
+        .route(
+            "/v1/workspaces/{ws}/plugins/{plugin}",
+            get(routes::plugins::detail),
+        )
         // ADR-0161 D4 — self-leave. The higher-scoped sibling of channel leave:
         // ends the caller's whole workspace membership. The last owner is refused
         // (409) so a workspace is never orphaned.
@@ -1285,6 +1295,14 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/agents/{agent}/runs",
             get(routes::agent_runs::list_by_agent),
+        )
+        // ADR-0200 증보 2026-10-15 R1 (#3847): "running now" across the
+        // channels the reader is a member of, with per-agent concurrency. The
+        // collection path, not a channel's — there is still no workspace-wide
+        // queue: rows are the reader's rooms, other rooms are a count only.
+        .route(
+            "/v1/workspaces/{ws}/agent-runs",
+            get(routes::agent_runs::active),
         )
         .route(
             "/v1/workspaces/{ws}/agent-runs/{run}",

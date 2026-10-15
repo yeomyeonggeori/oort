@@ -340,6 +340,12 @@ BEGIN
   IF to_regclass('public.agent_run_event_seq') IS NOT NULL THEN
     GRANT USAGE, SELECT ON SEQUENCE agent_run_event_seq TO momo_notifier;
   END IF;
+  -- ADR-0200 증보 2026-10-15 / #3840: the run-event retention sweep's cross-tenant
+  -- read (`workspaces_with_expired_run_events`) also finds a finished run by its oort
+  -- tool-call tally. SELECT only — the tally DELETE runs on the RLS-bound momo_app pool.
+  IF to_regclass('public.agent_run_tool_tally') IS NOT NULL THEN
+    GRANT SELECT ON TABLE agent_run_tool_tally TO momo_notifier;
+  END IF;
   IF to_regclass('public.agent') IS NOT NULL THEN
     GRANT SELECT ON TABLE agent TO momo_notifier;
   END IF;

@@ -25,7 +25,7 @@
 //! | `b10_run_items_follow_channel_membership_and_tenant` | 비멤버·떠난 멤버·보관 채널·타 테넌트는 run을 못 봄 | the `membership ms` join in `runs` |
 //! | `b11_mention_managed_linked_and_stale_runs_are_not_listed` | mention·managed work run 제외, 세션에 연결된 run은 세션 한 줄만, 종료 30일 뒤 제외 | the `input.type` / hosted `EXISTS` / `NOT EXISTS` link / retention predicates |
 //! | `b12_a_cursor_is_stable_across_mixed_sources` | 세션+run 혼합 목록의 커서 완전·무중복·동률 안정 | the `(activity_us, id) <` keyset over `board` |
-//! | `b13_work_run_updated_fires_on_board_transitions_only` | 보드 어휘 전환·생성에서만 `work.run.updated`, 단계/step 갱신·승인 보류·mention/managed에서는 없음 | the trigger's state comparison and its type/hosted guards |
+//! | `b13_work_run_updated_fires_on_board_transitions_only` | 보드 어휘 전환·생성에서만 `work.run.updated`, 단계/step 갱신·승인 보류에서는 없음, managed work run도 냄·최상위 mention은 마지막 전환만·하위 run은 없음(#3853 migration 135) | the trigger's state comparison and its type/top-level/final-transition guards |
 //!
 //! Every refusal test also takes the legitimate path beside it, so none of them
 //! can pass by a route that refuses everything, and each asserts the status and
@@ -1612,9 +1612,11 @@ struct RunSpec {
     input: Value,
     output: Option<Value>,
     requester: Option<Uuid>,
-    /// Seconds ago for created/updated/finished (all the same instant).
+    /// Seconds ago for created/updated (and started).
     age_secs: i64,
     step_count: i32,
+    /// A finished run ended this many seconds after it was created (#3853).
+    ran_secs: i64,
 }
 
 impl RunSpec {
@@ -1628,6 +1630,7 @@ impl RunSpec {
             requester: Some(tenant.owner),
             age_secs: 60,
             step_count: 0,
+            ran_secs: 0,
         }
     }
 }
@@ -1645,7 +1648,8 @@ async fn seed_work_run(su: &PgPool, tenant: &Tenant, spec: RunSpec) -> Uuid {
             idempotency_key, step_count, started_at, finished_at, created_at, updated_at) \
          VALUES ($1, $2, $3, $4, $5::run_status, $6, $7, $8, $9, $10, \
                  now() - make_interval(secs => $11::double precision), \
-                 CASE WHEN $12 THEN now() - make_interval(secs => $11::double precision) END, \
+                 CASE WHEN $12 THEN now() - make_interval(secs => $11::double precision) \
+                                    + make_interval(secs => $13::double precision) END, \
                  now() - make_interval(secs => $11::double precision), \
                  now() - make_interval(secs => $11::double precision))",
     )
@@ -1661,6 +1665,7 @@ async fn seed_work_run(su: &PgPool, tenant: &Tenant, spec: RunSpec) -> Uuid {
     .bind(spec.step_count)
     .bind(spec.age_secs as f64)
     .bind(terminal)
+    .bind(spec.ran_secs as f64)
     .execute(su)
     .await
     .expect("seed work run");
@@ -2292,16 +2297,8 @@ async fn b13_work_run_updated_fires_on_board_transitions_only() {
     assert_eq!(events.len(), 3, "running -> done");
     assert_eq!(events[2]["data"]["payload"]["to"], "done");
 
-    // mention runs and managed agents' work runs never emit.
-    let _ = seed_work_run(
-        &su,
-        &tenant,
-        RunSpec {
-            input: json!({"surface": "mention", "prompt": "x"}),
-            ..RunSpec::work(&tenant, "queued")
-        },
-    )
-    .await;
+    // ADR-0202 D3·D4 (#3853, migration 135): a managed agent's work run is a board
+    // row now, so it emits like a hosted one (creation + each board transition).
     let managed_run = seed_work_run(
         &su,
         &tenant,
@@ -2316,7 +2313,60 @@ async fn b13_work_run_updated_fires_on_board_transitions_only() {
         .execute(&su)
         .await
         .unwrap();
-    assert_eq!(count().await, 3, "mention and managed runs emit nothing");
+    let events = run_events(&su, tenant.workspace).await;
+    assert_eq!(events.len(), 5, "managed: create + running");
+    assert_eq!(
+        events[3]["data"]["payload"]["run_id"],
+        managed_run.to_string()
+    );
+    assert_eq!(events[4]["data"]["payload"]["to"], "running");
+
+    // A top-level mention run emits on its final transition only; a sub-run never.
+    let mention = seed_work_run(
+        &su,
+        &tenant,
+        RunSpec {
+            input: json!({"surface": "mention", "prompt": "x"}),
+            ..RunSpec::work(&tenant, "queued")
+        },
+    )
+    .await;
+    sqlx::query("UPDATE agent_run SET status = 'running'::run_status WHERE id = $1")
+        .bind(mention)
+        .execute(&su)
+        .await
+        .unwrap();
+    assert_eq!(
+        count().await,
+        5,
+        "a mention run's create and start are silent"
+    );
+    let sub = seed_work_run(
+        &su,
+        &tenant,
+        RunSpec {
+            input: json!({"surface": "mention", "prompt": "y"}),
+            ..RunSpec::work(&tenant, "queued")
+        },
+    )
+    .await;
+    sqlx::query("UPDATE agent_run SET parent_run_id = $2 WHERE id = $1")
+        .bind(sub)
+        .bind(mention)
+        .execute(&su)
+        .await
+        .unwrap();
+    for id in [mention, sub] {
+        sqlx::query("UPDATE agent_run SET status = 'succeeded'::run_status WHERE id = $1")
+            .bind(id)
+            .execute(&su)
+            .await
+            .unwrap();
+    }
+    let events = run_events(&su, tenant.workspace).await;
+    assert_eq!(events.len(), 6, "the mention's end only, not the sub-run's");
+    assert_eq!(events[5]["data"]["payload"]["run_id"], mention.to_string());
+    assert_eq!(events[5]["data"]["payload"]["to"], "done");
 
     // Cancelling a queued run is a transition to `stopped`.
     let queued = seed_work_run(&su, &tenant, RunSpec::work(&tenant, "queued")).await;
@@ -2326,6 +2376,650 @@ async fn b13_work_run_updated_fires_on_board_transitions_only() {
         .await
         .unwrap();
     let events = run_events(&su, tenant.workspace).await;
-    assert_eq!(events.len(), 5, "create + cancel of the second run");
-    assert_eq!(events[4]["data"]["payload"]["to"], "stopped");
+    assert_eq!(events.len(), 8, "create + cancel of the second run");
+    assert_eq!(events[7]["data"]["payload"]["to"], "stopped");
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0202 E1 (#3853) — `include=jobs` · `who=mine|team`
+// ---------------------------------------------------------------------------
+
+const JOB_KEYS: [&str; 5] = [
+    "trigger",
+    "phase",
+    "durationMs",
+    "resultMessageId",
+    "agentReported",
+];
+
+/// A mention run the way `mention_run_input` writes it: `surface`, `prompt` and
+/// the author. No `agent.work.queued` row (mentions have none).
+fn mention(tenant: &Tenant, author: Uuid, status: &'static str, prompt: &str) -> RunSpec {
+    RunSpec {
+        input: json!({
+            "schema": "momo.mention_run_input.v1",
+            "surface": "mention",
+            "prompt": prompt,
+            "author_member_id": author.to_string().to_uppercase(),
+            "addressing": "mention",
+        }),
+        requester: None,
+        ..RunSpec::work(tenant, status)
+    }
+}
+
+async fn jobs(b: &Board, token: &str, query: &str) -> Value {
+    b.list(token, &format!("?include=runs,jobs&limit=100{query}"))
+        .await
+}
+
+fn row(list: &Value, id: Uuid) -> Option<&Value> {
+    list["sessions"]
+        .as_array()
+        .expect("sessions")
+        .iter()
+        .find(|item| item["runId"] == id.to_string() || item["sessionId"] == id.to_string())
+}
+
+/// The agent's text message of `run` (its result), straight into the channel.
+async fn seed_result_message(su: &PgPool, tenant: &Tenant, agent: Uuid, run: Uuid) -> Uuid {
+    sqlx::query_scalar(
+        "INSERT INTO message (workspace_id, channel_id, seq, hlc_ts, author_member_id, type, body, run_id) \
+         VALUES ($1, $2, \
+                 (SELECT COALESCE(max(seq), 0) + 1 FROM message WHERE channel_id = $2), \
+                 (extract(epoch FROM now()) * 1000)::bigint, $3, 'text', 'SECRET-REPLY', $4) \
+         RETURNING id",
+    )
+    .bind(tenant.workspace)
+    .bind(tenant.channel)
+    .bind(agent)
+    .bind(run)
+    .fetch_one(su)
+    .await
+    .expect("seed result message")
+}
+
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL)"]
+async fn b14_jobs_list_every_agent_kinds_work_runs_with_the_job_fields() {
+    let b = board().await;
+    make_hosted(&b.su, &b.tenant, b.tenant.agent).await;
+    let managed = extra_agent(&b.su, &b.tenant, b.tenant.channel, false).await;
+
+    let hosted_run = seed_work_run(&b.su, &b.tenant, RunSpec::work(&b.tenant, "running")).await;
+    let mut done = RunSpec {
+        agent: managed,
+        ran_secs: 25 * 60,
+        age_secs: 3600,
+        ..RunSpec::work(&b.tenant, "succeeded")
+    };
+    done.output = Some(json!({
+        "artifacts": {
+            "prUrl": "https://github.com/yeomyeonggeori/oort/pull/3853",
+            "branch": "feat/3853",
+            "resultKind": "pr_opened",
+            "tests": {"passed": 12, "failed": 0, "notRun": 3},
+            "nextAction": "merge_ok",
+            "commitSha": "ABCDEF0123",
+            "toolCounts": {"run": 4, "edit": 2},
+            "note": "SECRET-NOTE"
+        },
+        "body": "SECRET-BODY"
+    }));
+    let managed_run = seed_work_run(&b.su, &b.tenant, done).await;
+    let reply = seed_result_message(&b.su, &b.tenant, managed, managed_run).await;
+
+    // ③ Before: the shipped `include=runs` never lists the managed run.
+    let runs = b.list(&b.alice_token, "?include=runs&limit=100").await;
+    assert!(
+        row(&runs, managed_run).is_none(),
+        "include=runs is unchanged"
+    );
+    assert!(row(&runs, hosted_run).is_some());
+
+    // ③ include=jobs lists both agent kinds.
+    let list = jobs(&b, &b.alice_token, "").await;
+    assert_eq!(list["who"], "team", "a jobs page echoes who (default team)");
+    let hosted = row(&list, hosted_run).expect("hosted work run");
+    let item = row(&list, managed_run).expect("managed work run is a job row");
+    assert_eq!(item["source"], "run");
+    assert_eq!(item["trigger"], "work");
+    assert_eq!(item["phase"], "succeeded");
+    assert_eq!(item["status"], "done");
+    assert_eq!(item["owner"]["memberId"], managed.to_string());
+    assert_eq!(item["requestedBy"]["memberId"], b.tenant.owner.to_string());
+    assert_eq!(item["label"], "로그인 버그 수정");
+    assert_eq!(item["durationMs"], 25 * 60 * 1000);
+    assert_eq!(item["resultMessageId"], reply.to_string());
+    assert_eq!(
+        item["agentReported"],
+        json!({
+            "resultKind": "pr_opened",
+            "tests": {"passed": 12, "failed": 0, "notRun": 3},
+            "nextAction": "merge_ok",
+            "commitSha": "abcdef0123",
+            "toolCounts": {"run": 4, "edit": 2}
+        })
+    );
+    assert_eq!(hosted["trigger"], "work");
+    assert_eq!(hosted["phase"], "running");
+    assert!(hosted.get("durationMs").is_none(), "not finished yet");
+    assert!(hosted.get("agentReported").is_none(), "nothing reported");
+
+    let wire = serde_json::to_string(&list).unwrap();
+    for secret in ["SECRET-BRIEF", "SECRET-BODY", "SECRET-NOTE", "SECRET-REPLY"] {
+        assert!(!wire.contains(secret), "{secret} leaked");
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL)"]
+async fn b15_a_short_mention_reply_has_no_row_and_a_job_does() {
+    let b = board().await;
+    let managed = extra_agent(&b.su, &b.tenant, b.tenant.channel, false).await;
+    let ask = |status: &'static str, prompt: &str| RunSpec {
+        agent: managed,
+        ..mention(&b.tenant, b.alice, status, prompt)
+    };
+
+    // ② the 60-second line, both sides, running and finished.
+    let young = seed_work_run(
+        &b.su,
+        &b.tenant,
+        RunSpec {
+            age_secs: 59,
+            ..ask("running", "59초")
+        },
+    )
+    .await;
+    let old = seed_work_run(
+        &b.su,
+        &b.tenant,
+        RunSpec {
+            age_secs: 61,
+            ..ask("running", "61초")
+        },
+    )
+    .await;
+    let quick = seed_work_run(
+        &b.su,
+        &b.tenant,
+        RunSpec {
+            age_secs: 600,
+            ran_secs: 59,
+            ..ask("succeeded", "짧은 답")
+        },
+    )
+    .await;
+    let long = seed_work_run(
+        &b.su,
+        &b.tenant,
+        RunSpec {
+            age_secs: 600,
+            ran_secs: 60,
+            ..ask("succeeded", "@그록봇 로그인 고쳐 줘")
+        },
+    )
+    .await;
+    // Short but a job by what it did: stages, an approval card, artifacts.
+    let mut staged = RunSpec {
+        age_secs: 10,
+        ..ask("running", "단계")
+    };
+    staged.output = Some(json!({"stages": ["원인 찾음"]}));
+    let staged = seed_work_run(&b.su, &b.tenant, staged).await;
+    let carded = seed_work_run(
+        &b.su,
+        &b.tenant,
+        RunSpec {
+            age_secs: 10,
+            ..ask("running", "카드")
+        },
+    )
+    .await;
+    sqlx::query(
+        "INSERT INTO approval (workspace_id, run_id, channel_id, requested_by, action_type) \
+         VALUES ($1, $2, $3, $4, 'tool_call')",
+    )
+    .bind(b.tenant.workspace)
+    .bind(carded)
+    .bind(b.tenant.channel)
+    .bind(managed)
+    .execute(&b.su)
+    .await
+    .expect("seed approval card");
+    let mut reported = RunSpec {
+        age_secs: 30,
+        ran_secs: 5,
+        ..ask("succeeded", "결과")
+    };
+    reported.output = Some(json!({"artifacts": {"resultKind": "no_change"}}));
+    let reported = seed_work_run(&b.su, &b.tenant, reported).await;
+    let waiting = seed_work_run(
+        &b.su,
+        &b.tenant,
+        RunSpec {
+            age_secs: 5,
+            ..ask("awaiting_approval", "승인 대기")
+        },
+    )
+    .await;
+    // An empty artifacts object and an empty stage list are not reports.
+    let mut empty = RunSpec {
+        age_secs: 10,
+        ..ask("running", "빈 보고")
+    };
+    empty.output = Some(json!({"stages": [], "artifacts": {}}));
+    let empty = seed_work_run(&b.su, &b.tenant, empty).await;
+    // A sub-run is part of its parent's job, however long.
+    let sub = seed_work_run(
+        &b.su,
+        &b.tenant,
+        RunSpec {
+            age_secs: 3600,
+            ..ask("running", "하위")
+        },
+    )
+    .await;
+    sqlx::query("UPDATE agent_run SET parent_run_id = $2 WHERE id = $1")
+        .bind(sub)
+        .bind(old)
+        .execute(&b.su)
+        .await
+        .unwrap();
+    // A thread-reply wake (ADR-0162 증보 5 W1) and a DM run keep their trigger.
+    let mut wake = RunSpec {
+        age_secs: 120,
+        ..ask("running", "스레드 답글")
+    };
+    wake.input["addressing"] = json!("thread_reply");
+    let wake = seed_work_run(&b.su, &b.tenant, wake).await;
+    let mut dm = RunSpec {
+        age_secs: 120,
+        ..ask("running", "디엠")
+    };
+    dm.input["addressing"] = json!("dm_implicit");
+    let dm = seed_work_run(&b.su, &b.tenant, dm).await;
+
+    let list = jobs(&b, &b.owner_token, "").await;
+    for (id, name) in [
+        (young, "59s"),
+        (quick, "finished in 59s"),
+        (empty, "empty report"),
+        (sub, "sub-run"),
+    ] {
+        assert!(row(&list, id).is_none(), "{name}: a short reply has no row");
+    }
+    for (id, name) in [
+        (old, "61s"),
+        (long, "took 60s"),
+        (staged, "stage"),
+        (carded, "approval card"),
+        (reported, "artifacts"),
+        (waiting, "awaiting approval"),
+        (wake, "thread wake"),
+        (dm, "dm"),
+    ] {
+        assert!(row(&list, id).is_some(), "{name}: a job row");
+    }
+    let item = row(&list, long).unwrap();
+    assert_eq!(item["trigger"], "mention");
+    assert_eq!(
+        item["label"], "@그록봇 로그인 고쳐 줘",
+        "the mention is the title"
+    );
+    assert_eq!(
+        item["requestedBy"]["memberId"],
+        b.alice.to_string(),
+        "the author asked"
+    );
+    assert_eq!(item["requestedBy"]["displayName"], "앨리스");
+    assert_eq!(item["durationMs"], 60_000);
+    assert_eq!(row(&list, wake).unwrap()["trigger"], "thread_reply");
+    assert_eq!(row(&list, dm).unwrap()["trigger"], "mention");
+    assert_eq!(row(&list, waiting).unwrap()["phase"], "awaiting_approval");
+    assert_eq!(
+        row(&list, reported).unwrap()["agentReported"]["resultKind"],
+        "no_change"
+    );
+
+    // The shipped shapes never list a mention run.
+    for query in ["", "?include=runs&limit=100"] {
+        let shipped = b.list(&b.owner_token, query).await;
+        assert!(run_items(&shipped).is_empty(), "{query}: no mention rows");
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL)"]
+async fn b16_jobs_follow_channel_membership_and_tenant() {
+    let b = board().await;
+    let managed = extra_agent(&b.su, &b.tenant, b.tenant.channel, false).await;
+    let work = seed_work_run(
+        &b.su,
+        &b.tenant,
+        RunSpec {
+            agent: managed,
+            ..RunSpec::work(&b.tenant, "running")
+        },
+    )
+    .await;
+    let asked = seed_work_run(
+        &b.su,
+        &b.tenant,
+        RunSpec {
+            agent: managed,
+            age_secs: 120,
+            ..mention(&b.tenant, b.alice, "running", "멘션")
+        },
+    )
+    .await;
+
+    // ④ bob is only in channel 2: no row and no count, for either source.
+    for query in ["", "&who=mine", "&who=team"] {
+        let bob = jobs(&b, &b.bob_token, query).await;
+        assert!(run_items(&bob).is_empty(), "bob{query}: {bob}");
+        assert!(bob["nextCursor"].is_null());
+    }
+    // …and alice sees both while she is a member.
+    let alice = jobs(&b, &b.alice_token, "").await;
+    assert!(row(&alice, work).is_some() && row(&alice, asked).is_some());
+    // Leaving the channel removes even the job she asked for herself.
+    sqlx::query(
+        "UPDATE membership SET left_at = now() WHERE workspace_id = $1 AND channel_id = $2 AND member_id = $3",
+    )
+    .bind(b.tenant.workspace)
+    .bind(b.tenant.channel)
+    .bind(b.alice)
+    .execute(&b.su)
+    .await
+    .unwrap();
+    for query in ["", "&who=mine"] {
+        let gone = jobs(&b, &b.alice_token, query).await;
+        assert!(run_items(&gone).is_empty(), "left{query}: {gone}");
+    }
+
+    // Another tenant: its owner sees none of these, and the path is the caller's own.
+    let other = seed_tenant(&b.su, &b.app).await;
+    let other_token = token_for(&b, &other).await;
+    let theirs = b
+        .get(
+            &other_token,
+            board_list_url(&b.base, &other, "?include=runs,jobs&limit=100"),
+        )
+        .await;
+    assert_eq!(theirs.status(), 200);
+    let theirs: Value = theirs.json().await.unwrap();
+    assert!(run_items(&theirs).is_empty(), "{theirs}");
+    let cross = b
+        .get(
+            &other_token,
+            board_list_url(&b.base, &b.tenant, "?include=runs,jobs"),
+        )
+        .await;
+    assert_eq!(cross.status(), 403, "another tenant's path is refused");
+    // RLS alone: naming A's workspace and A's member-viewer inside B's tenant
+    // transaction returns no job; the same call in A's transaction does.
+    let (workspace_a, viewer_a) = (b.tenant.workspace, b.tenant.owner);
+    let scope = momo_t3::work_board::BoardScope {
+        include_runs: true,
+        include_jobs: true,
+        who_mine: false,
+    };
+    let count_in = |guc: Uuid| {
+        let app = b.app.clone();
+        async move {
+            momo_db::with_tenant_tx(&app, guc, move |conn| {
+                Box::pin(async move {
+                    let page = momo_t3::work_board::list_board_scoped_in_tx(
+                        conn,
+                        workspace_a,
+                        viewer_a,
+                        scope,
+                        None,
+                        100,
+                    )
+                    .await
+                    .expect("query");
+                    Ok::<_, momo_db::DbError>(
+                        page.items.iter().filter(|item| item.run.is_some()).count(),
+                    )
+                })
+            })
+            .await
+            .expect("tenant tx")
+        }
+    };
+    assert_eq!(
+        count_in(other.workspace).await,
+        0,
+        "RLS hides A's jobs from B"
+    );
+    assert_eq!(
+        count_in(workspace_a).await,
+        2,
+        "control: A sees its two jobs"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL)"]
+async fn b17_who_mine_is_what_i_asked_for_or_own() {
+    let b = board().await;
+    let managed = extra_agent(&b.su, &b.tenant, b.tenant.channel, false).await;
+    let now = now_ms() / 1000;
+    let my_session = b
+        .local(
+            b.tenant.channel,
+            "내 세션",
+            Some(payload_with(now - 50, "running")),
+        )
+        .await;
+    let owner_work = seed_work_run(
+        &b.su,
+        &b.tenant,
+        RunSpec {
+            agent: managed,
+            ..RunSpec::work(&b.tenant, "running")
+        },
+    )
+    .await;
+    let alice_work = seed_work_run(
+        &b.su,
+        &b.tenant,
+        RunSpec {
+            agent: managed,
+            requester: Some(b.alice),
+            ..RunSpec::work(&b.tenant, "running")
+        },
+    )
+    .await;
+    let alice_mention = seed_work_run(
+        &b.su,
+        &b.tenant,
+        RunSpec {
+            agent: managed,
+            age_secs: 120,
+            ..mention(&b.tenant, b.alice, "running", "앨리스 멘션")
+        },
+    )
+    .await;
+    let mut nobody = RunSpec {
+        agent: managed,
+        ..RunSpec::work(&b.tenant, "running")
+    };
+    nobody.requester = None;
+    let nobody = seed_work_run(&b.su, &b.tenant, nobody).await;
+
+    // ⑤ alice, mine: only what she asked for — not the owner's run or session.
+    let alice = jobs(&b, &b.alice_token, "&who=mine").await;
+    assert_eq!(alice["who"], "mine");
+    let mut got = item_ids(&alice);
+    got.sort();
+    let mut want = vec![alice_work.to_string(), alice_mention.to_string()];
+    want.sort();
+    assert_eq!(got, want, "alice's own jobs only");
+
+    // The owner, mine: his run and his own shared session.
+    let owner = jobs(&b, &b.owner_token, "&who=mine").await;
+    let mut got = item_ids(&owner);
+    got.sort();
+    let mut want = vec![owner_work.to_string(), my_session.to_string()];
+    want.sort();
+    assert_eq!(got, want, "the owner's run + session");
+
+    // team (and the default): everything visible, including a run with no requester.
+    for query in ["&who=team", ""] {
+        let team = jobs(&b, &b.alice_token, query).await;
+        for id in [my_session, owner_work, alice_work, alice_mention, nobody] {
+            assert!(row(&team, id).is_some(), "team{query} lists {id}");
+        }
+    }
+    // who=mine without include=jobs narrows the shipped board too, and echoes.
+    let sessions_only = b.list(&b.alice_token, "?who=mine").await;
+    assert_eq!(sessions_only["who"], "mine");
+    assert!(item_ids(&sessions_only).is_empty(), "alice owns no session");
+}
+
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL)"]
+async fn b18_a_run_linked_to_a_session_is_one_row_in_jobs() {
+    let b = board().await;
+    let managed = extra_agent(&b.su, &b.tenant, b.tenant.channel, false).await;
+    let session = open_host_session(&b.http, &b.base, &b.owner_token, &b.tenant, b.desktop).await;
+    let linked = seed_work_run(
+        &b.su,
+        &b.tenant,
+        RunSpec {
+            agent: managed,
+            ..RunSpec::work(&b.tenant, "running")
+        },
+    )
+    .await;
+    let control: Uuid = sqlx::query_scalar(
+        "INSERT INTO work_control (workspace_id, channel_id, requester_member_id, target_host_id, \
+                                   session_id, kind, status) \
+         VALUES ($1, $2, $3, $4, $5, 'read', 'acked') RETURNING id",
+    )
+    .bind(b.tenant.workspace)
+    .bind(b.tenant.channel)
+    .bind(managed)
+    .bind(b.desktop)
+    .bind(session)
+    .fetch_one(&b.su)
+    .await
+    .expect("seed a control against the session");
+    sqlx::query(
+        "INSERT INTO audit_log (workspace_id, actor_member_id, action, target_type, target_id, run_id) \
+         VALUES ($1, $2, 'work.control.requested', 'work_control', $3, $4)",
+    )
+    .bind(b.tenant.workspace)
+    .bind(managed)
+    .bind(control)
+    .bind(linked)
+    .execute(&b.su)
+    .await
+    .expect("link the run to the session");
+
+    // ⑥ the session represents the work; the run is not a second row.
+    let list = jobs(&b, &b.owner_token, "").await;
+    let got = item_ids(&list);
+    assert!(!got.contains(&linked.to_string()), "{got:?}");
+    assert_eq!(
+        got.iter().filter(|id| **id == session.to_string()).count(),
+        1
+    );
+    let item = row(&list, session).unwrap();
+    for key in JOB_KEYS {
+        assert!(item.get(key).is_none(), "a session row has no {key}");
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL)"]
+async fn b19_the_shipped_shapes_are_unchanged_and_unknown_values_are_400() {
+    let b = board().await;
+    make_hosted(&b.su, &b.tenant, b.tenant.agent).await;
+    let managed = extra_agent(&b.su, &b.tenant, b.tenant.channel, false).await;
+    let now = now_ms() / 1000;
+    let session = b
+        .local(
+            b.tenant.channel,
+            "공유",
+            Some(payload_with(now - 50, "running")),
+        )
+        .await;
+    let hosted = seed_work_run(&b.su, &b.tenant, RunSpec::work(&b.tenant, "succeeded")).await;
+    let _managed = seed_work_run(
+        &b.su,
+        &b.tenant,
+        RunSpec {
+            agent: managed,
+            ..RunSpec::work(&b.tenant, "running")
+        },
+    )
+    .await;
+    let _asked = seed_work_run(
+        &b.su,
+        &b.tenant,
+        RunSpec {
+            agent: managed,
+            age_secs: 120,
+            ..mention(&b.tenant, b.alice, "running", "멘션")
+        },
+    )
+    .await;
+
+    // ① no include: sessions only, the shipped envelope (no `who`), no job key.
+    let plain = b.list(&b.alice_token, "").await;
+    assert_eq!(item_ids(&plain), vec![session.to_string()]);
+    assert_eq!(
+        sorted_object_keys(&plain),
+        vec!["nextCursor".to_string(), "sessions".to_string()]
+    );
+    // ① include=runs: the shipped run row — hosted only, no job key, no `who`.
+    let runs = b.list(&b.alice_token, "?include=runs&limit=100").await;
+    let mut got = item_ids(&runs);
+    got.sort();
+    let mut want = vec![hosted.to_string(), session.to_string()];
+    want.sort();
+    assert_eq!(got, want, "hosted run + session; no managed or mention row");
+    assert!(runs.get("who").is_none());
+    for item in runs["sessions"].as_array().unwrap() {
+        for key in JOB_KEYS {
+            assert!(
+                item.get(key).is_none(),
+                "include=runs carries no {key}: {item}"
+            );
+        }
+    }
+
+    // ⑦ unknown include / who: 400 with the fixed message; a valid one beside it.
+    for (query, message) in [
+        ("?include=tools", "invalid include"),
+        ("?include=runs,sessions", "invalid include"),
+        ("?include=", "invalid include"),
+        ("?include=JOBS", "invalid include"),
+        ("?who=all", "invalid who"),
+        ("?include=jobs&who=me", "invalid who"),
+    ] {
+        let response = b
+            .get(&b.alice_token, board_list_url(&b.base, &b.tenant, query))
+            .await;
+        let (status, _, got) = error_of(response).await;
+        assert_eq!((status, got.as_str()), (400, message), "{query}");
+    }
+    let ok = b
+        .get(
+            &b.alice_token,
+            board_list_url(&b.base, &b.tenant, "?include=jobs"),
+        )
+        .await;
+    assert_eq!(ok.status(), 200, "include=jobs alone is valid");
+}
+
+fn sorted_object_keys(value: &Value) -> Vec<String> {
+    let mut keys: Vec<String> = value.as_object().unwrap().keys().cloned().collect();
+    keys.sort();
+    keys
 }
