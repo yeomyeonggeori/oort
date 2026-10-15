@@ -1084,6 +1084,10 @@ fn projected_job_payload(payload: &Value) -> Value {
         ("enabled_tools", "enabledTools"),
         ("max_output_tokens", "maxOutputTokens"),
         ("created_at_ms", "createdAtMs"),
+        // ADR-0162 증보 5 W2 (#3851): present only on a thread-reply wake
+        // (`"thread_reply"`); a mention's job has no such key, so its projection
+        // is byte-for-byte what it was.
+        ("wake_reason", "wakeReason"),
     ] {
         if let Some(value) = payload.get(source) {
             projected.insert(target.to_string(), value.clone());

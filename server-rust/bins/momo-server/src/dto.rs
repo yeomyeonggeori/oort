@@ -4285,6 +4285,11 @@ pub struct AgentProfileInput {
     /// (the create body's own `modelSource` decides).
     #[serde(default, alias = "model_source")]
     pub model_source: Option<String>,
+    /// ADR-0162 증보 5 W3 (#3851): on a profile PUT, sets
+    /// `agent.thread_reply_wake`; absent leaves it unchanged. Ignored on create
+    /// (a new agent starts with the column's default, on).
+    #[serde(default, alias = "thread_reply_wake")]
+    pub thread_reply_wake: Option<bool>,
 }
 
 /// `POST /v1/workspaces/{ws}/subscription-agents/register` (#3392 AIH-2,
@@ -4964,6 +4969,8 @@ pub struct AgentProfileDto {
     pub updated_at_ms: i64,
     /// #3147: `"agent"` or `"instance_default"`.
     pub model_source: &'static str,
+    /// ADR-0162 증보 5 W3 (#3851): `agent.thread_reply_wake`.
+    pub thread_reply_wake: bool,
 }
 
 /// Swift `AgentProfileResponse` (:577-579).

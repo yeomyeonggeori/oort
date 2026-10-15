@@ -166,6 +166,16 @@ pub enum RunTrigger {
         message_id: Uuid,
         agent_member_id: Uuid,
     },
+    /// ADR-0162 증보 5 W1~W2 (#3851): a human's plain reply in a thread the
+    /// agent opened. Like [`Self::Mention`] it *is* a message, so the reply's id
+    /// lands in `agent_run.trigger_message_id` too; its own key prefix is what
+    /// keeps "one run per reply" (W2) independent of the mention key — a reply
+    /// is either a mention or a wake, never both, but the two facts stay
+    /// distinguishable at the SoT.
+    ThreadReply {
+        message_id: Uuid,
+        agent_member_id: Uuid,
+    },
     /// An explicit work request from a human, keyed by the client's run id.
     Work {
         channel_id: Uuid,
@@ -193,6 +203,14 @@ impl RunTrigger {
                 agent_member_id,
             } => format!(
                 "mention:{}:{}",
+                message_id.to_string().to_uppercase(),
+                agent_member_id.to_string().to_uppercase()
+            ),
+            RunTrigger::ThreadReply {
+                message_id,
+                agent_member_id,
+            } => format!(
+                "thread_reply:{}:{}",
                 message_id.to_string().to_uppercase(),
                 agent_member_id.to_string().to_uppercase()
             ),
@@ -227,7 +245,9 @@ impl RunTrigger {
     /// the column NULL, `MessageRoutes.swift:2021` writes it).
     pub fn trigger_message_id(&self) -> Option<Uuid> {
         match self {
-            RunTrigger::Mention { message_id, .. } => Some(*message_id),
+            RunTrigger::Mention { message_id, .. } | RunTrigger::ThreadReply { message_id, .. } => {
+                Some(*message_id)
+            }
             RunTrigger::Work { .. } | RunTrigger::Welcome { .. } => None,
         }
     }
@@ -235,6 +255,9 @@ impl RunTrigger {
     pub fn agent_member_id(&self) -> Uuid {
         match self {
             RunTrigger::Mention {
+                agent_member_id, ..
+            }
+            | RunTrigger::ThreadReply {
                 agent_member_id, ..
             }
             | RunTrigger::Work {
@@ -2174,6 +2197,31 @@ mod tests {
             agent_member_id: Uuid::from_u128(13),
         };
         assert_ne!(first.idempotency_key(), other_agent.idempotency_key());
+    }
+
+    /// ADR-0162 증보 5 W2: one wake per (reply, agent), binding the reply as the
+    /// trigger message, under a key that can never collide with a mention's.
+    #[test]
+    fn a_thread_reply_trigger_keys_on_the_reply_and_binds_it() {
+        let message = Uuid::from_u128(21);
+        let agent = Uuid::from_u128(22);
+        let wake = RunTrigger::ThreadReply {
+            message_id: message,
+            agent_member_id: agent,
+        };
+        let replay = RunTrigger::ThreadReply {
+            message_id: message,
+            agent_member_id: agent,
+        };
+        assert_eq!(wake.idempotency_key(), replay.idempotency_key());
+        assert!(wake.idempotency_key().starts_with("thread_reply:"));
+        assert_eq!(wake.trigger_message_id(), Some(message));
+        assert_eq!(wake.agent_member_id(), agent);
+        let mention = RunTrigger::Mention {
+            message_id: message,
+            agent_member_id: agent,
+        };
+        assert_ne!(wake.idempotency_key(), mention.idempotency_key());
     }
 
     #[test]

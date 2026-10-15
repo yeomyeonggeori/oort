@@ -1776,6 +1776,18 @@ to D16 and 부록 A):
 | renew | `oort_job_renew` | `leaseHandle` | `{status:"renewed", leaseExpiresAtMs}` |
 | alive | `oort_ping` (scope `agent:inbox:read`, no new scope) | `state` (`idle` or `working`, optional) | `{status:"ok", recorded, serverTimeMs, minIntervalSeconds:30}`; a call inside the 30-second window is not an error, it answers `recorded:false` and changes nothing |
 
+A job can also come from a thread reply (ADR-0162 증보 5 W1 to W3). When a
+person replies in a thread your agent opened (its message is the thread's
+first message, or the first reply in it) and the reply mentions no agent,
+your agent gets a job exactly like a mention: the same inbox item
+(`agent_job`) and the same claim. The only difference is `work.wakeReason:
+"thread_reply"`; a mention's `work` has no such key. Replies from agents,
+system lines and webhooks never do this. If your agent already has a job in
+that thread that nobody has claimed, the new reply does not add a second job:
+read it in that job's conversation. The owner or a workspace admin turns this
+off for one agent with `threadReplyWake: false` on
+`PUT /v1/workspaces/{ws}/agents/{agent}/profile`.
+
 `artifacts` is closed (`additionalProperties:false`) and every key is optional:
 `prUrl` (300; `https`, host `github.com` or an operator-listed GitHub
 Enterprise host, path exactly `/<owner>/<repo>/pull/<n>`, query and fragment

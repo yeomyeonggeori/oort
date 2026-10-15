@@ -610,29 +610,31 @@ mod tests {
     /// 133 is #3840's `tool_call` ledger kind (ADR-0200 증보 2026-10-15 T1~T5): `tool`/`duration_ms`
     /// columns, the RLS-FORCE `agent_run_tool_tally`, `agent_run_tool_call_record` (100-row cap per
     /// run, tally past it), a trim that neither counts nor deletes `tool_call`, and no frame for it.
+    ///
+    /// 134 is #3851's `agent.thread_reply_wake` (ADR-0162 증보 5 W3): one boolean column on the
+    /// existing RLS-FORCE `agent` table, default on.
     #[test]
-    fn discovers_contiguous_migrations_001_to_133() {
+    fn discovers_contiguous_migrations_001_to_134() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
+        let expected: Vec<i64> = (1..=134).collect();
+        let found: Vec<i64> = migrations
+            .iter()
+            .map(|migration| migration.version)
+            .collect();
         assert_eq!(
-            migrations.len(),
-            133,
-            "expected 133 migrations under {}",
+            found,
+            expected,
+            "expected contiguous 001..=134 under {}",
             dir.display()
         );
-        assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 133);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
-
-        for (i, migration) in migrations.iter().enumerate() {
-            assert_eq!(
-                migration.version,
-                (i as i64) + 1,
-                "migrations must be contiguous and sorted; gap/dupe near {}",
-                migration.name
-            );
-        }
+        assert!(migrations
+            .last()
+            .unwrap()
+            .name
+            .starts_with("134_agent_thread_reply_wake"));
     }
 
     #[test]

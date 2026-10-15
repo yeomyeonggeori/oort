@@ -66,6 +66,20 @@
 //! the same danger that makes this module refuse agent-authored mentions with
 //! `a2a_source_run_unavailable` below.
 //!
+//! ## ADR-0162 증보 5 W1~W3 — the thread-reply wake (#3851)
+//!
+//! A person's reply that addresses **no** agent, in a thread an agent opened,
+//! wakes that agent ([`wake_thread_opener_in_tx`]). It is not a second router:
+//! it is the "nobody was addressed" exit of this one, it passes the same
+//! [`delivery_gate`] a mention passes, and it writes its turn through the same
+//! [`enqueue_turn_in_tx`]. Three things differ, each on purpose:
+//!
+//! | | mention | wake |
+//! |---|---|---|
+//! | refusal | audit + a sentence in the timeline | audit only — nobody called the agent |
+//! | run key / label | `mention:` / `mention`·`dm_implicit` | `thread_reply:` / `thread_reply` |
+//! | a second reply before pickup | its own run | joins the waiting run (W2 합치기) |
+//!
 //! ## What is deliberately not ported (see the PR body)
 //!
 //! * **The Context Packet** (`context_packet_id` / `memory_refs` / `tool_grants`)
@@ -86,12 +100,13 @@
 //!   `runId` made the follow-up possible; it did not make it correct by default.
 
 use momo_agent::{
-    create_agent_run_in_tx, load_dm_audience_in_tx, load_mention_candidates_in_tx,
-    mention_diagnostic_detail, mention_job_broadcast_payload, mention_job_payload,
-    mention_run_input, paused_mention_body, paused_mention_props, resolve_dm_addressing,
-    resolve_mention_routing, stamp_addressing, Addressing, DmAddressing, MentionCandidate,
-    MentionTrigger, NewAgentRun, RequestedRouting, RunTrigger, MENTION_JOB_METHOD_GATEWAY,
-    MENTION_JOB_METHOD_WORKER,
+    create_agent_run_in_tx, find_unclaimed_thread_run_in_tx, load_dm_audience_in_tx,
+    load_mention_candidates_in_tx, load_thread_wake_target_in_tx, mention_diagnostic_detail,
+    mention_job_broadcast_payload, mention_job_payload, mention_run_input, paused_mention_body,
+    paused_mention_props, resolve_dm_addressing, resolve_mention_routing, stamp_addressing,
+    Addressing, DmAddressing, MentionCandidate, MentionRouting, MentionTrigger, NewAgentRun,
+    RequestedRouting, RunTrigger, MENTION_JOB_METHOD_GATEWAY, MENTION_JOB_METHOD_WORKER,
+    THREAD_REPLY_WAKE_REASON,
 };
 use momo_agent::{
     hosted_skip_notice_body_with_owner, hosted_skip_notice_key, hosted_skip_notice_props,
@@ -125,6 +140,11 @@ const MENTION_QUEUED_ACTION: &str = "agent.mention.queued";
 const MENTION_SKIPPED_ACTION: &str = "agent.mention.skipped";
 const MENTION_PAUSED_ACTION: &str = "agent.mention.paused";
 const MODEL_PREF_IGNORED_ACTION: &str = "agent.profile.model_pref.ignored";
+/// ADR-0162 증보 5 W1~W2 (#3851) — the thread-reply wake's three outcomes, on
+/// the mention outcomes' diagnostic schema.
+const THREAD_WAKE_QUEUED_ACTION: &str = "agent.thread_wake.queued";
+const THREAD_WAKE_SKIPPED_ACTION: &str = "agent.thread_wake.skipped";
+const THREAD_WAKE_COALESCED_ACTION: &str = "agent.thread_wake.coalesced";
 
 /// Everything the routing needs about the message that triggered it.
 #[derive(Debug, Clone, Copy)]
@@ -224,7 +244,11 @@ pub(crate) async fn route_agent_mentions_in_tx(
 
     let addressed = addressed_agents(&candidates, send.body, dm_target);
     if addressed.is_empty() {
-        return Ok(Ok(Vec::new()));
+        // ADR-0162 증보 5 W1 (#3851): nobody was addressed — neither named nor by
+        // the DM rule — so this is the only exit where a plain thread reply may
+        // wake the agent that opened the thread.
+        let woken = wake_thread_opener_in_tx(&mut *conn, &send, &candidates).await?;
+        return Ok(Ok(woken.into_iter().collect()));
     }
 
     let trigger = MentionTrigger {
@@ -260,128 +284,69 @@ pub(crate) async fn route_agent_mentions_in_tx(
             .await?;
             continue;
         }
-        // ---------------------------------------------------------------
-        // ADR-0198 증보 1 D7 (#3592) — a personal agent is the owner's own
-        // harness on the owner's own Mac. The server never starts it from a
-        // message: the owner's client sends this message and then a signed
-        // spawn (`POST /work-spawns`, T5), so there is no run, no job and no
-        // outbox row here, whoever called.
-        //
-        // This arm sits BEFORE the channel-membership check on purpose. The
-        // owner calls the alias from any room they are in without inviting it
-        // (결재 2026-10-08, 「소유자면 어디서나」), so the alias is usually not a
-        // member — and a teammate's `@alias` in such a room must still be told
-        // whose agent this is, instead of dying as `agent_not_channel_member`.
-        //
-        //   * a teammate → the existing `NonOwner` sentence, nothing started;
-        //   * the owner  → an audited no-op (`personal_agent_client_signs`);
-        //     `owner_only_gate` returns `None` for the owner of a personal
-        //     agent, so neither instance switch (#3626 L2) can refuse it here.
-        // ---------------------------------------------------------------
-        if agent
-            .owner_only
-            .as_ref()
-            .is_some_and(|scope| scope.personal_agent)
-        {
-            match owner_only_gate(
-                agent.owner_only.as_ref(),
-                send.author_member_id,
-                send.subscription_agents_enabled,
-                send.claude_subscription_agents_enabled,
-            ) {
-                Some(kind) => {
-                    skip(
-                        &mut *conn,
-                        &send,
-                        &trigger,
-                        agent,
-                        *addressing,
-                        SKIP_OWNER_ONLY_NON_OWNER,
-                    )
-                    .await?;
-                    subscription_notice(&mut *conn, &send, agent, kind).await?;
-                }
-                None => {
-                    skip(
-                        &mut *conn,
-                        &send,
-                        &trigger,
-                        agent,
-                        *addressing,
-                        SKIP_PERSONAL_AGENT_CLIENT_SIGNS,
-                    )
-                    .await?;
-                }
-            }
-            continue;
-        }
-        if !agent.is_channel_member {
-            skip(
-                &mut *conn,
-                &send,
-                &trigger,
-                agent,
-                *addressing,
-                "agent_not_channel_member",
-            )
-            .await?;
-            continue;
-        }
-        // ---------------------------------------------------------------
-        // ADR-0193 D4·D6 (#2815) — a subscription agent is its owner's alone.
-        //
-        // Before every hosted-delivery question, on purpose: whether this
-        // instance delivers to hosted runtimes at all, and whether this
-        // agent's connection is live, are facts about delivery — and a
-        // non-owner's call is refused whatever they are. The D4 sentence is
-        // not a delivery either (no job, no inbox row, no model call), so it
-        // is posted even while `MOMO_HOSTED_DELIVERY_ENABLED` is closed.
-        //
-        // A mention, the 1:1 DM rule and a mention inside a thread all reach
-        // this one branch; a plain thread reply reaches the hosted runtime only
-        // through the inbox fan-out, which applies the same rule
-        // (`momo_messaging::hosted_inbox_recipients_in_tx`).
-        // ---------------------------------------------------------------
-        if let Some(kind) = owner_only_gate(
-            agent.owner_only.as_ref(),
-            send.author_member_id,
-            send.subscription_agents_enabled,
-            send.claude_subscription_agents_enabled,
-        ) {
-            let reason = match kind {
-                SubscriptionNoticeKind::NonOwner => SKIP_OWNER_ONLY_NON_OWNER,
-                SubscriptionNoticeKind::ClaudePaused => CLAUDE_SUBSCRIPTION_AGENT_PAUSED,
-                _ => SKIP_SUBSCRIPTION_AGENTS_DISABLED,
-            };
-            skip(&mut *conn, &send, &trigger, agent, *addressing, reason).await?;
-            subscription_notice(&mut *conn, &send, agent, kind).await?;
-            continue;
-        }
-        // ---------------------------------------------------------------
-        // ADR-0162 HAP-E5 — the per-agent delivery selector.
-        //
-        // Delivery is a property of the AGENT, not of the instance: one
-        // workspace may hold managed, BYOA and hosted agents at once, and each
-        // must reach its own runtime. So this branch is taken on the agent's
-        // own hosted state and never consults `gateway_enabled`.
-        //
-        // The three outcomes, and why the middle one is not a fallback:
-        //   * feature gate closed   → skipped, exactly as HAP-E3 skipped it;
-        //   * no ACTIVE connection  → skipped as unavailable. Falling back to a
-        //     managed provider here would run the turn on a runtime the human
-        //     never approved, and would run it a *second* time when the hosted
-        //     connection came back and claimed the same work;
-        //   * active connection     → the hosted gateway, below.
-        // ---------------------------------------------------------------
-        let hosted_connection_id = if agent.hosted_delivery_disabled {
-            if !send.hosted_delivery_enabled {
+        // The gate chain itself lives in [`delivery_gate`] so the thread-reply
+        // wake (ADR-0162 증보 5 W1) passes **the same** gates in the same order.
+        // What differs is only what a refusal says: a mention is a human calling
+        // this agent, so each refusal below tells them why in the timeline; a
+        // wake is not, so it refuses silently ([`wake_thread_opener_in_tx`]).
+        let gate = delivery_gate(agent, &send);
+        let hosted_connection_id = match gate {
+            DeliveryGate::Open {
+                hosted_connection_id,
+            } => hosted_connection_id,
+            // ADR-0198 증보 1 D7 (#3592) — see [`DeliveryGate::PersonalAgent`].
+            //   * a teammate → the existing `NonOwner` sentence, nothing started;
+            //   * the owner  → an audited no-op (`personal_agent_client_signs`).
+            DeliveryGate::PersonalAgent(Some(kind)) => {
                 skip(
                     &mut *conn,
                     &send,
                     &trigger,
                     agent,
                     *addressing,
-                    HostedSkipReason::DeliveryNotEnabled.as_str(),
+                    gate.skip_reason(),
+                )
+                .await?;
+                subscription_notice(&mut *conn, &send, agent, kind).await?;
+                continue;
+            }
+            DeliveryGate::PersonalAgent(None) | DeliveryGate::NotChannelMember => {
+                skip(
+                    &mut *conn,
+                    &send,
+                    &trigger,
+                    agent,
+                    *addressing,
+                    gate.skip_reason(),
+                )
+                .await?;
+                continue;
+            }
+            // ADR-0193 D4·D6 (#2815) — a non-owner's call of a subscription
+            // agent. The D4 sentence is not a delivery either (no job, no inbox
+            // row, no model call), so it is posted even while
+            // `MOMO_HOSTED_DELIVERY_ENABLED` is closed.
+            DeliveryGate::OwnerOnly(kind) => {
+                skip(
+                    &mut *conn,
+                    &send,
+                    &trigger,
+                    agent,
+                    *addressing,
+                    gate.skip_reason(),
+                )
+                .await?;
+                subscription_notice(&mut *conn, &send, agent, kind).await?;
+                continue;
+            }
+            DeliveryGate::HostedDeliveryNotEnabled => {
+                skip(
+                    &mut *conn,
+                    &send,
+                    &trigger,
+                    agent,
+                    *addressing,
+                    gate.skip_reason(),
                 )
                 .await?;
                 // #2871 — the audit row alone is invisible from the timeline.
@@ -394,14 +359,14 @@ pub(crate) async fn route_agent_mentions_in_tx(
                 .await?;
                 continue;
             }
-            let Some(connection_id) = agent.hosted_active_connection_id else {
+            DeliveryGate::HostedConnectionUnavailable => {
                 skip(
                     &mut *conn,
                     &send,
                     &trigger,
                     agent,
                     *addressing,
-                    HostedSkipReason::ConnectionUnavailable.as_str(),
+                    gate.skip_reason(),
                 )
                 .await?;
                 // ADR-0193 D5 — the owner called and there is no live
@@ -436,22 +401,15 @@ pub(crate) async fn route_agent_mentions_in_tx(
                     .await?;
                 }
                 continue;
-            };
-            // The human confirmed this connection for a NAMED set of channels
-            // (HAP-E3). Channel membership is not that grant: an agent can be a
-            // member of a room the operator never approved for hosted delivery,
-            // and creating a job there would put that room's prompt and recent
-            // messages in front of a runtime nobody authorized for it. The
-            // claim re-checks this live and is the authority; skipping here
-            // means the job is never written at all.
-            if !agent.hosted_channel_approved {
+            }
+            DeliveryGate::HostedChannelUnapproved => {
                 skip(
                     &mut *conn,
                     &send,
                     &trigger,
                     agent,
                     *addressing,
-                    HostedSkipReason::ChannelUnapproved.as_str(),
+                    gate.skip_reason(),
                 )
                 .await?;
                 // A DM is not a channel an admin approves at confirm
@@ -482,14 +440,11 @@ pub(crate) async fn route_agent_mentions_in_tx(
                 .await?;
                 continue;
             }
-            Some(connection_id)
-        } else {
-            None
+            DeliveryGate::Paused => {
+                paused(&mut *conn, &send, &trigger, agent, *addressing).await?;
+                continue;
+            }
         };
-        if agent.paused {
-            paused(&mut *conn, &send, &trigger, agent, *addressing).await?;
-            continue;
-        }
 
         // Eligibility first, routing second (Swift :1976-1986). Reversing the two
         // would answer "your model is not allowed" for a mention of an agent that
@@ -498,226 +453,605 @@ pub(crate) async fn route_agent_mentions_in_tx(
             Ok(routing) => routing,
             Err(invalid) => return Ok(Err(ApiError::bad_request(invalid.to_string()))),
         };
-        let run_trigger = RunTrigger::Mention {
-            message_id: send.message_id,
-            agent_member_id: agent.member_id,
-        };
-        let idempotency_key = run_trigger.idempotency_key();
-        // The run key is the same on both paths — `mention:<message>:<agent>` —
-        // so an @mention and the DM rule pointing at the same agent collapse
-        // into one run at the SoT even if the union above ever let both through.
-        let mut input = mention_run_input(
-            &trigger,
-            agent.member_id,
-            &idempotency_key,
-            None,
-            0,
-            send.routing,
-        );
-        stamp_addressing(&mut input, *addressing);
-        let created = create_agent_run_in_tx(
+        // The run key is the same on both addressing paths —
+        // `mention:<message>:<agent>` — so an @mention and the DM rule pointing
+        // at the same agent collapse into one run at the SoT even if the union
+        // above ever let both through.
+        if let Some(turn) = enqueue_turn_in_tx(
             &mut *conn,
-            send.workspace_id,
-            NewAgentRun {
-                channel_id: send.channel_id,
-                trigger: run_trigger,
-                parent_run_id: None,
-                max_steps: agent.max_run_steps,
-                depth: 0,
-                input,
-            },
-        )
-        .await?;
-        if !created.created {
-            // The unique index says this trigger already produced a run. Swift
-            // returns early on exactly this (`guard let first = rows.first`), so
-            // no second job and no second audit row — otherwise a replay would
-            // queue a second turn for an answer that already exists.
-            continue;
-        }
-
-        if context_window.is_none() {
-            context_window = Some(
-                agent_context_window_in_tx(
-                    &mut *conn,
-                    send.channel_id,
-                    send.message_id,
-                    send.context_max_messages,
-                )
-                .await?,
-            );
-        }
-        let window = context_window.as_deref().unwrap_or_default();
-
-        // A hosted turn is a `gateway` job whatever the instance mode is: the
-        // Agent Port's claim is the gateway claim's hosted branch, and using a
-        // second method would need a second consumer.
-        let hosted = hosted_connection_id.is_some();
-        let delivery = if hosted || send.gateway_enabled {
-            MENTION_JOB_METHOD_GATEWAY
-        } else {
-            "worker"
-        };
-        let payload =
-            mention_job_payload(&trigger, agent, &routing, created.id, window, 0, delivery);
-        let method = if hosted || send.gateway_enabled {
-            MENTION_JOB_METHOD_GATEWAY
-        } else {
-            MENTION_JOB_METHOD_WORKER
-        };
-        let job_outbox_id = momo_outbox::emit_outbox(
-            &mut *conn,
-            send.workspace_id,
-            momo_outbox::OutboxKind::AgentJob,
-            method,
-            &payload,
-            // L4 §3.5: partition_key = agent_member_id is what serializes one
-            // agent's turns; the worker's claim depends on it.
-            Some(agent.member_id),
-        )
-        .await?;
-
-        // The hosted inbox reference for this job — **in this transaction**, so
-        // a rolled-back mention takes the notification with it and a committed
-        // job can never be invisible to the runtime that must claim it.
-        //
-        // Migration 071 is what makes the pair below safe to write: the FK now
-        // binds `outbox.kind`, so the wake broadcast emitted a few lines down
-        // for the managed path can never be mistaken for this job row, and the
-        // job/run trigger requires `payload.run_id` to equal `created.id`.
-        if let Some(connection_id) = hosted_connection_id {
-            momo_messaging::append_job_reference_in_tx(
-                &mut *conn,
-                send.workspace_id,
-                agent.member_id,
-                connection_id,
-                send.channel_id,
-                job_outbox_id,
-                created.id,
-            )
-            .await?;
-        }
-
-        // The realtime wake-up is the managed gateway's doorbell. A hosted
-        // runtime is woken by its own inbox instead, and emitting a broadcast
-        // row on the agent's partition key for it would put exactly the
-        // kind-confusable row 071 now refuses next to every hosted job.
-        if !hosted && send.gateway_enabled {
-            let wake = mention_job_broadcast_payload(
-                send.workspace_id,
-                agent.member_id,
-                job_outbox_id,
-                created.id,
-                &payload,
-                send.hlc_ts,
-            );
-            momo_outbox::emit_outbox(
-                &mut *conn,
-                send.workspace_id,
-                momo_outbox::OutboxKind::Broadcast,
-                "publish",
-                &wake,
-                Some(agent.member_id),
-            )
-            .await?;
-        }
-
-        // The opening frame (goal SRV-B3d). The run row exists and is queued;
-        // this is what tells the rail WHEN the turn began, and it is the only
-        // frame that can — `isRunOpening` reads nothing else, so a rail that
-        // never sees one renders the badge with no elapsed clock.
-        //
-        // Emitted after the job so the FIFO on this channel reads the way the
-        // turn happened, and inside the send transaction so a rolled-back
-        // mention cannot leave a turn that never started showing as queued.
-        crate::routes::shared::emit_rail_frame(
-            &mut *conn,
-            send.workspace_id,
-            send.channel_id,
-            &momo_agent::opening_agent_status_payload(
-                momo_agent::AgentRunAddress {
-                    workspace_id: send.workspace_id,
-                    channel_id: send.channel_id,
-                    agent_member_id: agent.member_id,
-                    run_id: created.id,
-                },
-                send.hlc_ts,
-            ),
-        )
-        .await?;
-
-        // ADR-0193 D5 — the owner's call is queued on a live connection whose
-        // CLI has not reached the Agent Port lately. The job above stays
-        // pending (gateway jobs do not expire) and the next `oort_jobs_claim`
-        // takes it, so 「이어서 답할게요」 is the true sentence.
-        if hosted
-            && agent
-                .owner_only
-                .as_ref()
-                .is_some_and(|scope| !scope.recently_seen)
-        {
-            subscription_notice(
-                &mut *conn,
-                &send,
-                agent,
-                SubscriptionNoticeKind::OfflineQueued,
-            )
-            .await?;
-        }
-
-        if let Some(ignored) = routing.ignored_model_pref.as_deref() {
-            // ADR-0131 D2: an ignored inherited preference is only ever visible
-            // as audit — never as a client error, and never silently.
-            write_audit(
-                &mut *conn,
-                &AuditEntry::new(send.workspace_id, MODEL_PREF_IGNORED_ACTION)
-                    .by(send.author_member_id)
-                    .about(agent.member_id)
-                    .target("agent_profile", agent.member_id)
-                    .via_token(send.via_token_id)
-                    .run(created.id)
-                    .with_schema(
-                        "momo.agent_profile.model_pref.ignored.v1",
-                        serde_json::json!({
-                            "requested_model": ignored,
-                            "selected_model": routing.model,
-                            "reason": "not_in_workspace_allowed_models",
-                        }),
-                    ),
-            )
-            .await?;
-        }
-
-        let mut queued_detail = mention_diagnostic_detail(
+            &send,
             &trigger,
             agent,
-            "queued",
-            Some(created.id),
-            Some(&idempotency_key),
-            Some(&routing),
-            send.routing,
-        );
-        stamp_addressing(&mut queued_detail, *addressing);
-        write_audit(
-            &mut *conn,
-            &AuditEntry::new(send.workspace_id, MENTION_QUEUED_ACTION)
-                .by(send.author_member_id)
-                .about(agent.member_id)
-                .target("message", send.message_id)
-                .via_token(send.via_token_id)
-                .run(created.id)
-                .with_schema(MENTION_DIAGNOSTIC_SCHEMA, queued_detail),
+            Turn {
+                trigger: RunTrigger::Mention {
+                    message_id: send.message_id,
+                    agent_member_id: agent.member_id,
+                },
+                addressing: *addressing,
+                requested: send.routing,
+                wake_reason: None,
+                queued_action: MENTION_QUEUED_ACTION,
+                announce_offline_queue: true,
+            },
+            hosted_connection_id,
+            &routing,
+            &mut context_window,
         )
-        .await?;
-
-        queued.push(QueuedMention {
-            agent_member_id: agent.member_id,
-            run_id: created.id,
-            job_outbox_id,
-        });
+        .await?
+        {
+            queued.push(turn);
+        }
     }
 
     Ok(Ok(queued))
+}
+
+/// What the per-agent gate chain decided — the one place a mention and a
+/// thread-reply wake (ADR-0162 증보 5 W1 「같은 관문」) both ask.
+///
+/// The variants are the refusals in the order [`delivery_gate`] checks them,
+/// plus `Open`. Pure data: the side effects of a refusal (audit row, timeline
+/// sentence) are the caller's, because they are exactly what differs between
+/// the two callers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeliveryGate {
+    /// ADR-0198 증보 1 D7 (#3592) — a personal agent is the owner's own harness
+    /// on the owner's own Mac. The server never starts it from a message: the
+    /// owner's client sends the message and then a signed spawn, so there is no
+    /// run, no job and no outbox row here, whoever called. Checked BEFORE
+    /// channel membership on purpose: the owner calls the alias from any room
+    /// (결재 2026-10-08, 「소유자면 어디서나」), and a teammate's call must still
+    /// be told whose agent this is. `Some` = a teammate's call (the `NonOwner`
+    /// sentence); `None` = the owner's (an audited no-op).
+    PersonalAgent(Option<SubscriptionNoticeKind>),
+    /// Not an active member of the channel: a no-op, not an error.
+    NotChannelMember,
+    /// ADR-0193 D4·D6 (#2815) — a subscription agent is its owner's alone.
+    /// Before every hosted-delivery question, on purpose: a non-owner's call is
+    /// refused whatever the delivery state is.
+    OwnerOnly(SubscriptionNoticeKind),
+    /// ADR-0162 HAP-E5's production feature gate is closed.
+    HostedDeliveryNotEnabled,
+    /// A hosted agent with no ACTIVE, proved connection. Never a fallback to a
+    /// managed provider: that would run the turn on a runtime nobody approved,
+    /// and a *second* time when the connection came back.
+    HostedConnectionUnavailable,
+    /// The human confirmed the connection for a NAMED set of channels (HAP-E3)
+    /// and this is not one of them. The claim re-checks this live and is the
+    /// authority; refusing here means the job is never written at all.
+    HostedChannelUnapproved,
+    /// `agent_profile.paused`.
+    Paused,
+    /// Deliver. `Some` = the hosted connection to deliver to (a `gateway` job
+    /// plus an inbox reference); `None` = the instance's managed/BYOA path.
+    Open { hosted_connection_id: Option<Uuid> },
+}
+
+impl DeliveryGate {
+    /// The `agent.mention.skipped` / `agent.thread_wake.skipped` audit reason.
+    /// `Open` has none; `Paused` keeps the paused line's own reason.
+    fn skip_reason(self) -> &'static str {
+        match self {
+            DeliveryGate::PersonalAgent(Some(_)) => SKIP_OWNER_ONLY_NON_OWNER,
+            DeliveryGate::PersonalAgent(None) => SKIP_PERSONAL_AGENT_CLIENT_SIGNS,
+            DeliveryGate::NotChannelMember => "agent_not_channel_member",
+            DeliveryGate::OwnerOnly(SubscriptionNoticeKind::NonOwner) => SKIP_OWNER_ONLY_NON_OWNER,
+            DeliveryGate::OwnerOnly(SubscriptionNoticeKind::ClaudePaused) => {
+                CLAUDE_SUBSCRIPTION_AGENT_PAUSED
+            }
+            DeliveryGate::OwnerOnly(_) => SKIP_SUBSCRIPTION_AGENTS_DISABLED,
+            DeliveryGate::HostedDeliveryNotEnabled => HostedSkipReason::DeliveryNotEnabled.as_str(),
+            DeliveryGate::HostedConnectionUnavailable => {
+                HostedSkipReason::ConnectionUnavailable.as_str()
+            }
+            DeliveryGate::HostedChannelUnapproved => HostedSkipReason::ChannelUnapproved.as_str(),
+            DeliveryGate::Paused => "agent_paused",
+            DeliveryGate::Open { .. } => "open",
+        }
+    }
+}
+
+/// The per-agent gate chain, in the order the mention path has always applied
+/// it: personal agent → channel membership → `owner_only` (ADR-0193 D4·D6·D18)
+/// → the hosted per-agent delivery selector (ADR-0162 HAP-E5: feature gate,
+/// active connection, exact-channel grant) → paused.
+///
+/// Delivery is a property of the AGENT, not of the instance: the hosted branch
+/// is taken on the agent's own hosted state and never consults
+/// `gateway_enabled`.
+fn delivery_gate(agent: &MentionCandidate, send: &MentionSend<'_>) -> DeliveryGate {
+    let owner_gate = || {
+        owner_only_gate(
+            agent.owner_only.as_ref(),
+            send.author_member_id,
+            send.subscription_agents_enabled,
+            send.claude_subscription_agents_enabled,
+        )
+    };
+    if agent
+        .owner_only
+        .as_ref()
+        .is_some_and(|scope| scope.personal_agent)
+    {
+        // `owner_only_gate` returns `None` for the owner of a personal agent, so
+        // neither instance switch (#3626 L2) can refuse it here.
+        return DeliveryGate::PersonalAgent(owner_gate());
+    }
+    if !agent.is_channel_member {
+        return DeliveryGate::NotChannelMember;
+    }
+    if let Some(kind) = owner_gate() {
+        return DeliveryGate::OwnerOnly(kind);
+    }
+    let hosted_connection_id = if agent.hosted_delivery_disabled {
+        if !send.hosted_delivery_enabled {
+            return DeliveryGate::HostedDeliveryNotEnabled;
+        }
+        let Some(connection_id) = agent.hosted_active_connection_id else {
+            return DeliveryGate::HostedConnectionUnavailable;
+        };
+        if !agent.hosted_channel_approved {
+            return DeliveryGate::HostedChannelUnapproved;
+        }
+        Some(connection_id)
+    } else {
+        None
+    };
+    if agent.paused {
+        return DeliveryGate::Paused;
+    }
+    DeliveryGate::Open {
+        hosted_connection_id,
+    }
+}
+
+/// What kind of turn [`enqueue_turn_in_tx`] is writing. Everything else about
+/// the turn — run, job, inbox reference, wake broadcast, rail frame, audit — is
+/// the same for a mention and a thread-reply wake (W4 「같은 어휘」).
+struct Turn<'a> {
+    trigger: RunTrigger,
+    addressing: Addressing,
+    /// The sender's own `routing` block — the mention's. A wake carries none:
+    /// the sender did not address this agent, so nothing they sent is a choice
+    /// about how it runs.
+    requested: Option<&'a RequestedRouting>,
+    /// `payload.wake_reason` (`work.wakeReason` on the Agent Port). `None` for a
+    /// mention, whose payload shape is unchanged.
+    wake_reason: Option<&'static str>,
+    queued_action: &'static str,
+    /// ADR-0193 D5's 「이어서 답할게요」 line for an offline subscription agent.
+    /// Only a call earns that sentence; a wake (nobody called) stays silent.
+    announce_offline_queue: bool,
+}
+
+/// Write one agent turn inside the send transaction: run → job → hosted inbox
+/// reference | managed wake broadcast → rail opening frame → audit.
+///
+/// `Ok(None)` is an idempotency hit: the unique `(workspace_id,
+/// idempotency_key)` index says this trigger already produced a run. Swift
+/// returns early on exactly this (`guard let first = rows.first`), so no second
+/// job and no second audit row — otherwise a replay would queue a second turn
+/// for an answer that already exists.
+#[allow(clippy::too_many_arguments)]
+async fn enqueue_turn_in_tx(
+    conn: &mut PgConnection,
+    send: &MentionSend<'_>,
+    trigger: &MentionTrigger<'_>,
+    agent: &MentionCandidate,
+    turn: Turn<'_>,
+    hosted_connection_id: Option<Uuid>,
+    routing: &MentionRouting,
+    context_window: &mut Option<Vec<Value>>,
+) -> Result<Option<QueuedMention>, DbError> {
+    let idempotency_key = turn.trigger.idempotency_key();
+    let mut input = mention_run_input(
+        trigger,
+        agent.member_id,
+        &idempotency_key,
+        None,
+        0,
+        turn.requested,
+    );
+    stamp_addressing(&mut input, turn.addressing);
+    let created = create_agent_run_in_tx(
+        &mut *conn,
+        send.workspace_id,
+        NewAgentRun {
+            channel_id: send.channel_id,
+            trigger: turn.trigger,
+            parent_run_id: None,
+            max_steps: agent.max_run_steps,
+            depth: 0,
+            input,
+        },
+    )
+    .await?;
+    if !created.created {
+        return Ok(None);
+    }
+
+    if context_window.is_none() {
+        *context_window = Some(
+            agent_context_window_in_tx(
+                &mut *conn,
+                send.channel_id,
+                send.message_id,
+                send.context_max_messages,
+            )
+            .await?,
+        );
+    }
+    let window = context_window.as_deref().unwrap_or_default();
+
+    // A hosted turn is a `gateway` job whatever the instance mode is: the
+    // Agent Port's claim is the gateway claim's hosted branch, and using a
+    // second method would need a second consumer.
+    let hosted = hosted_connection_id.is_some();
+    let delivery = if hosted || send.gateway_enabled {
+        MENTION_JOB_METHOD_GATEWAY
+    } else {
+        "worker"
+    };
+    let mut payload = mention_job_payload(trigger, agent, routing, created.id, window, 0, delivery);
+    if let (Some(reason), Some(object)) = (turn.wake_reason, payload.as_object_mut()) {
+        object.insert("wake_reason".into(), Value::String(reason.to_string()));
+    }
+    let method = if hosted || send.gateway_enabled {
+        MENTION_JOB_METHOD_GATEWAY
+    } else {
+        MENTION_JOB_METHOD_WORKER
+    };
+    let job_outbox_id = momo_outbox::emit_outbox(
+        &mut *conn,
+        send.workspace_id,
+        momo_outbox::OutboxKind::AgentJob,
+        method,
+        &payload,
+        // L4 §3.5: partition_key = agent_member_id is what serializes one
+        // agent's turns; the worker's claim depends on it.
+        Some(agent.member_id),
+    )
+    .await?;
+
+    // The hosted inbox reference for this job — **in this transaction**, so
+    // a rolled-back mention takes the notification with it and a committed
+    // job can never be invisible to the runtime that must claim it.
+    //
+    // Migration 071 is what makes the pair below safe to write: the FK now
+    // binds `outbox.kind`, so the wake broadcast emitted a few lines down
+    // for the managed path can never be mistaken for this job row, and the
+    // job/run trigger requires `payload.run_id` to equal `created.id`.
+    if let Some(connection_id) = hosted_connection_id {
+        momo_messaging::append_job_reference_in_tx(
+            &mut *conn,
+            send.workspace_id,
+            agent.member_id,
+            connection_id,
+            send.channel_id,
+            job_outbox_id,
+            created.id,
+        )
+        .await?;
+    }
+
+    // The realtime wake-up is the managed gateway's doorbell. A hosted
+    // runtime is woken by its own inbox instead, and emitting a broadcast
+    // row on the agent's partition key for it would put exactly the
+    // kind-confusable row 071 now refuses next to every hosted job.
+    if !hosted && send.gateway_enabled {
+        let wake = mention_job_broadcast_payload(
+            send.workspace_id,
+            agent.member_id,
+            job_outbox_id,
+            created.id,
+            &payload,
+            send.hlc_ts,
+        );
+        momo_outbox::emit_outbox(
+            &mut *conn,
+            send.workspace_id,
+            momo_outbox::OutboxKind::Broadcast,
+            "publish",
+            &wake,
+            Some(agent.member_id),
+        )
+        .await?;
+    }
+
+    // The opening frame (goal SRV-B3d). The run row exists and is queued;
+    // this is what tells the rail WHEN the turn began, and it is the only
+    // frame that can — `isRunOpening` reads nothing else, so a rail that
+    // never sees one renders the badge with no elapsed clock.
+    //
+    // Emitted after the job so the FIFO on this channel reads the way the
+    // turn happened, and inside the send transaction so a rolled-back
+    // mention cannot leave a turn that never started showing as queued.
+    crate::routes::shared::emit_rail_frame(
+        &mut *conn,
+        send.workspace_id,
+        send.channel_id,
+        &momo_agent::opening_agent_status_payload(
+            momo_agent::AgentRunAddress {
+                workspace_id: send.workspace_id,
+                channel_id: send.channel_id,
+                agent_member_id: agent.member_id,
+                run_id: created.id,
+            },
+            send.hlc_ts,
+        ),
+    )
+    .await?;
+
+    // ADR-0193 D5 — the owner's call is queued on a live connection whose
+    // CLI has not reached the Agent Port lately. The job above stays
+    // pending (gateway jobs do not expire) and the next `oort_jobs_claim`
+    // takes it, so 「이어서 답할게요」 is the true sentence.
+    if turn.announce_offline_queue
+        && hosted
+        && agent
+            .owner_only
+            .as_ref()
+            .is_some_and(|scope| !scope.recently_seen)
+    {
+        subscription_notice(
+            &mut *conn,
+            send,
+            agent,
+            SubscriptionNoticeKind::OfflineQueued,
+        )
+        .await?;
+    }
+
+    if let Some(ignored) = routing.ignored_model_pref.as_deref() {
+        // ADR-0131 D2: an ignored inherited preference is only ever visible
+        // as audit — never as a client error, and never silently.
+        write_audit(
+            &mut *conn,
+            &AuditEntry::new(send.workspace_id, MODEL_PREF_IGNORED_ACTION)
+                .by(send.author_member_id)
+                .about(agent.member_id)
+                .target("agent_profile", agent.member_id)
+                .via_token(send.via_token_id)
+                .run(created.id)
+                .with_schema(
+                    "momo.agent_profile.model_pref.ignored.v1",
+                    serde_json::json!({
+                        "requested_model": ignored,
+                        "selected_model": routing.model,
+                        "reason": "not_in_workspace_allowed_models",
+                    }),
+                ),
+        )
+        .await?;
+    }
+
+    let mut queued_detail = mention_diagnostic_detail(
+        trigger,
+        agent,
+        "queued",
+        Some(created.id),
+        Some(&idempotency_key),
+        Some(routing),
+        turn.requested,
+    );
+    stamp_addressing(&mut queued_detail, turn.addressing);
+    write_audit(
+        &mut *conn,
+        &AuditEntry::new(send.workspace_id, turn.queued_action)
+            .by(send.author_member_id)
+            .about(agent.member_id)
+            .target("message", send.message_id)
+            .via_token(send.via_token_id)
+            .run(created.id)
+            .with_schema(MENTION_DIAGNOSTIC_SCHEMA, queued_detail),
+    )
+    .await?;
+
+    Ok(Some(QueuedMention {
+        agent_member_id: agent.member_id,
+        run_id: created.id,
+        job_outbox_id,
+    }))
+}
+
+/// ADR-0162 증보 5 W1~W3 (#3851, 결재 「깨우기 (추천)」 2026-10-15) — a human's
+/// reply that addressed **no** agent, in a thread an agent opened, wakes that
+/// agent as a job.
+///
+/// Called only from [`route_agent_mentions_in_tx`]'s "nobody was addressed"
+/// exit, so the mention path keeps precedence by construction (W1 ②: a reply
+/// that mentions any agent — the opener included — is the mention path's, and a
+/// 1:1 DM's bare utterance is the DM rule's). Its callers' own guards hold too:
+/// a real insert (`!deduped`), a `text` message, a non-empty body.
+///
+/// Every refusal is **silent** — an audit row at most, never a timeline line,
+/// never the in-place approval card (W1 「같은 관문… 조용히」, G6 ⑦·⑮): the
+/// person replied in a thread, they did not call the agent.
+///
+/// The loop guard is doubled like the DM rule's: the agent **credential** is
+/// refused here, and the **roster** (`member.kind = 'human'`) is required by
+/// [`load_thread_wake_target_in_tx`]. Two agents answering each other in a
+/// thread would otherwise wake each other forever.
+async fn wake_thread_opener_in_tx(
+    conn: &mut PgConnection,
+    send: &MentionSend<'_>,
+    candidates: &[MentionCandidate],
+) -> Result<Option<QueuedMention>, DbError> {
+    let Some(root_id) = send.root_id else {
+        return Ok(None);
+    };
+    if send.author_is_agent {
+        return Ok(None);
+    }
+    let Some(opener) = load_thread_wake_target_in_tx(
+        &mut *conn,
+        send.workspace_id,
+        send.channel_id,
+        root_id,
+        send.message_id,
+        send.message_seq,
+        send.author_member_id,
+    )
+    .await?
+    else {
+        return Ok(None);
+    };
+    // A suspended or deleted opener is not a candidate: nobody to wake.
+    let Some(agent) = candidates
+        .iter()
+        .find(|candidate| candidate.member_id == opener)
+    else {
+        return Ok(None);
+    };
+    // W3: the owner's switch. Off is silent and writes nothing at all — not
+    // even an audit row per reply in a busy thread.
+    if !agent.thread_reply_wake {
+        return Ok(None);
+    }
+
+    let trigger = MentionTrigger {
+        workspace_id: send.workspace_id,
+        channel_id: send.channel_id,
+        message_id: send.message_id,
+        message_seq: send.message_seq,
+        author_member_id: send.author_member_id,
+        body: send.body,
+        hlc_ts: send.hlc_ts,
+    };
+    let gate = delivery_gate(agent, send);
+    let DeliveryGate::Open {
+        hosted_connection_id,
+    } = gate
+    else {
+        wake_audit(
+            &mut *conn,
+            send,
+            &trigger,
+            agent,
+            THREAD_WAKE_SKIPPED_ACTION,
+            gate.skip_reason(),
+            None,
+        )
+        .await?;
+        return Ok(None);
+    };
+
+    // W2 합치기: a turn of this agent in this thread that nobody has picked up
+    // yet takes this reply into the conversation it answers from.
+    //
+    // #3855 review: the job's `recent_messages` is a snapshot taken when it was
+    // queued, and the managed worker and the gateway claim answer from that
+    // snapshot alone — so folding the reply in without re-reading it would drop
+    // the reply from every turn. The job row is locked by the lookup (claimers
+    // skip it until this send commits), and the snapshot is re-read here,
+    // anchored on this reply, in the same transaction.
+    if let Some(pending) = find_unclaimed_thread_run_in_tx(
+        &mut *conn,
+        send.workspace_id,
+        agent.member_id,
+        send.channel_id,
+        root_id,
+    )
+    .await?
+    {
+        let window = agent_context_window_in_tx(
+            &mut *conn,
+            send.channel_id,
+            send.message_id,
+            send.context_max_messages,
+        )
+        .await?;
+        let refreshed = momo_outbox::refresh_pending_agent_job_recent_messages_in_tx(
+            &mut *conn,
+            send.workspace_id,
+            pending.job_outbox_id,
+            &Value::Array(window),
+        )
+        .await?;
+        if refreshed {
+            wake_audit(
+                &mut *conn,
+                send,
+                &trigger,
+                agent,
+                THREAD_WAKE_COALESCED_ACTION,
+                "coalesced_into_queued_run",
+                Some(pending.run_id),
+            )
+            .await?;
+            return Ok(None);
+        }
+        // Unreachable while the row lock holds; if the job was taken after
+        // all, this reply gets a turn of its own rather than none.
+    }
+
+    // No request tier (see [`Turn::requested`]), so the agent's own preferences
+    // decide; an unusable one is ignored-with-audit, exactly as for a mention.
+    let routing = match resolve_mention_routing(agent, None) {
+        Ok(routing) => routing,
+        Err(_) => {
+            wake_audit(
+                &mut *conn,
+                send,
+                &trigger,
+                agent,
+                THREAD_WAKE_SKIPPED_ACTION,
+                "routing_unavailable",
+                None,
+            )
+            .await?;
+            return Ok(None);
+        }
+    };
+    let mut context_window = None;
+    enqueue_turn_in_tx(
+        &mut *conn,
+        send,
+        &trigger,
+        agent,
+        Turn {
+            trigger: RunTrigger::ThreadReply {
+                message_id: send.message_id,
+                agent_member_id: agent.member_id,
+            },
+            addressing: Addressing::ThreadReply,
+            requested: None,
+            wake_reason: Some(THREAD_REPLY_WAKE_REASON),
+            queued_action: THREAD_WAKE_QUEUED_ACTION,
+            announce_offline_queue: false,
+        },
+        hosted_connection_id,
+        &routing,
+        &mut context_window,
+    )
+    .await
+}
+
+/// The audit row of a wake that did not start a turn. Same diagnostic schema
+/// as the mention outcomes, so one query answers "what happened to this reply";
+/// ids only — the reply's body is never copied into the audit detail.
+async fn wake_audit(
+    conn: &mut PgConnection,
+    send: &MentionSend<'_>,
+    trigger: &MentionTrigger<'_>,
+    agent: &MentionCandidate,
+    action: &'static str,
+    reason: &str,
+    run_id: Option<Uuid>,
+) -> Result<(), DbError> {
+    let mut detail = mention_diagnostic_detail(trigger, agent, reason, run_id, None, None, None);
+    stamp_addressing(&mut detail, Addressing::ThreadReply);
+    let mut entry = AuditEntry::new(send.workspace_id, action)
+        .by(send.author_member_id)
+        .about(agent.member_id)
+        .target("message", send.message_id)
+        .via_token(send.via_token_id)
+        .with_schema(MENTION_DIAGNOSTIC_SCHEMA, detail);
+    if let Some(run_id) = run_id {
+        entry = entry.run(run_id);
+    }
+    write_audit(conn, &entry).await?;
+    Ok(())
 }
 
 /// **Where the two ways of addressing an agent meet — and the only place they
@@ -1102,6 +1436,7 @@ mod tests {
             owner_member_id: None,
             owner_display_name: None,
             hosted_confirmed_by_owner: false,
+            thread_reply_wake: true,
         }
     }
 
@@ -1218,5 +1553,110 @@ mod tests {
             "each outcome is its own action"
         );
         assert!(MENTION_DIAGNOSTIC_SCHEMA.ends_with(".v0"));
+    }
+
+    fn send_for(author: Uuid) -> MentionSend<'static> {
+        MentionSend {
+            workspace_id: Uuid::from_u128(100),
+            channel_id: Uuid::from_u128(101),
+            message_id: Uuid::from_u128(102),
+            message_seq: 7,
+            root_id: Some(Uuid::from_u128(103)),
+            author_member_id: author,
+            author_is_agent: false,
+            body: "고마워요",
+            hlc_ts: 0,
+            via_token_id: None,
+            gateway_enabled: true,
+            hosted_delivery_enabled: true,
+            subscription_agents_enabled: true,
+            claude_subscription_agents_enabled: true,
+            context_max_messages: 30,
+            routing: None,
+        }
+    }
+
+    fn send_for_closed(author: Uuid) -> MentionSend<'static> {
+        MentionSend {
+            hosted_delivery_enabled: false,
+            ..send_for(author)
+        }
+    }
+
+    /// ADR-0162 증보 5 W1 「같은 관문」: the wake and the mention ask ONE gate
+    /// function, so its order is the mention path's order. Pinned here so a
+    /// reorder shows up as a unit failure, not only in the docker suite.
+    #[test]
+    fn the_delivery_gate_keeps_the_mention_order() {
+        let human = Uuid::from_u128(1);
+        let send = send_for(human);
+        let base = candidate(Uuid::from_u128(2), "opener");
+
+        assert_eq!(
+            delivery_gate(&base, &send),
+            DeliveryGate::Open {
+                hosted_connection_id: None
+            }
+        );
+
+        // Not in the channel is answered before paused.
+        let mut absent = base.clone();
+        absent.is_channel_member = false;
+        absent.paused = true;
+        assert_eq!(
+            delivery_gate(&absent, &send),
+            DeliveryGate::NotChannelMember
+        );
+
+        // Every hosted refusal is answered before paused.
+        let mut hosted = base.clone();
+        hosted.hosted_delivery_disabled = true;
+        hosted.paused = true;
+        assert_eq!(
+            delivery_gate(&hosted, &send_for_closed(human)),
+            DeliveryGate::HostedDeliveryNotEnabled
+        );
+        assert_eq!(
+            delivery_gate(&hosted, &send),
+            DeliveryGate::HostedConnectionUnavailable
+        );
+        hosted.hosted_active_connection_id = Some(Uuid::from_u128(9));
+        assert_eq!(
+            delivery_gate(&hosted, &send),
+            DeliveryGate::HostedChannelUnapproved
+        );
+        hosted.hosted_channel_approved = true;
+        assert_eq!(delivery_gate(&hosted, &send), DeliveryGate::Paused);
+        hosted.paused = false;
+        assert_eq!(
+            delivery_gate(&hosted, &send),
+            DeliveryGate::Open {
+                hosted_connection_id: Some(Uuid::from_u128(9))
+            }
+        );
+        assert_eq!(
+            DeliveryGate::HostedChannelUnapproved.skip_reason(),
+            "hosted_channel_unapproved"
+        );
+        assert_eq!(DeliveryGate::Paused.skip_reason(), "agent_paused");
+    }
+
+    /// The wake's three outcomes are their own actions, distinct from the
+    /// mention's, on the same diagnostic schema.
+    #[test]
+    fn thread_wake_outcomes_are_their_own_actions() {
+        let actions = [
+            MENTION_QUEUED_ACTION,
+            MENTION_SKIPPED_ACTION,
+            MENTION_PAUSED_ACTION,
+            THREAD_WAKE_QUEUED_ACTION,
+            THREAD_WAKE_SKIPPED_ACTION,
+            THREAD_WAKE_COALESCED_ACTION,
+        ];
+        let mut unique = actions.to_vec();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), actions.len());
+        assert_eq!(THREAD_REPLY_WAKE_REASON, Addressing::ThreadReply.as_label());
     }
 }
