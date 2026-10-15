@@ -105,9 +105,49 @@ pub async fn patch(
                     )));
                 }
             }
-            let Some(stored) = write_workspace_settings(conn, workspace_id, &merged).await? else {
+            let Some(mut stored) = write_workspace_settings(conn, workspace_id, &merged).await?
+            else {
                 return Ok(Err(ApiError::not_found("workspace not found")));
             };
+            // ADR-0201 D8: the switch also provisions (or pauses) the team AI member.
+            // Same transaction: a switch that says "on" with no member behind it
+            // cannot commit.
+            if let Some(switch) = request.get("team_ai_fast_path") {
+                // `null` deletes the key, which means off; only `true` provisions.
+                if switch.as_bool() == Some(true) {
+                    match momo_workspace_actions::team_ai::enable_in_tx(
+                        conn,
+                        workspace_id,
+                        member_id,
+                    )
+                    .await
+                    {
+                        Ok(_) => {}
+                        Err(error) => {
+                            tracing::warn!(error = %error, "team ai could not be enabled");
+                            // A handled refusal COMMITS; take the switch back out so
+                            // "on" never stands without a member behind it.
+                            momo_workspace_actions::team_ai::disable_in_tx(
+                                conn,
+                                workspace_id,
+                                member_id,
+                            )
+                            .await?;
+                            return Ok(Err(ApiError::coded(
+                                axum::http::StatusCode::CONFLICT,
+                                "team_ai_unavailable",
+                                "the 'oort-helper' handle is taken; rename that agent first",
+                            )));
+                        }
+                    }
+                } else {
+                    momo_workspace_actions::team_ai::disable_in_tx(conn, workspace_id, member_id)
+                        .await?;
+                }
+                stored = read_workspace_settings(conn, workspace_id)
+                    .await?
+                    .unwrap_or(stored);
+            }
             write_audit(
                 conn,
                 &AuditEntry::new(workspace_id, "workspace_setting.updated")
