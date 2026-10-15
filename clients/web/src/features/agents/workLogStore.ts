@@ -157,7 +157,7 @@ export interface WorkPanelTarget extends WorkLogTarget {
    * 것은 **새로 연 것**이고, 키가 같으면 패널은 캐럿을 이미 사라진 컴포저
    * 버튼으로 돌려주려 한다.
    */
-  origin: "activity" | "hub" | "ade";
+  origin: "activity" | "hub" | "ade" | "message";
   /**
    * 턴이 시작된 서버 시각, **연 쪽이 알고 있을 때만**.
    *

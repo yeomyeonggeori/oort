@@ -1,5 +1,10 @@
 import {missingMemberLabel} from '@momo/core/features/workspace/directory';
-import {threadRollup, type Message, type ThreadRollup} from '@momo/core/lib/api';
+import {
+  threadRollup,
+  type AgentRunProgress,
+  type Message,
+  type ThreadRollup,
+} from '@momo/core/lib/api';
 import {
   dayDividerLabel,
   dayDividerSegments,
@@ -150,6 +155,7 @@ import {useLongPress} from './useLongPress';
 import {turnRecordRunId} from '@momo/core/features/timeline/cascadeModel';
 import {MemoryProposalCards} from '../memory/MemoryProposalCard';
 import {MemoryReceiptChip} from '../memory/MemoryReceiptChip';
+import {MessageRunStatus} from '../agents/MessageRunStatus';
 
 // =============================================================================
 // One row of the conversation.
@@ -2065,6 +2071,12 @@ export interface MessageRowProps {
    */
   runEnded?: boolean;
   /**
+   * #3824 — 내가 보낸 이 메시지가 일으킨 run들(서버 진행 읽기). 목록이 넣는다: 행이
+   * 스토어를 구독하면 아무 run이나 바뀔 때 모든 행이 다시 그려진다. 넣지 않으면(남의
+   * 메시지) 줄이 없다. 빈 배열은 「아직 없음」이다.
+   */
+  runStatus?: readonly AgentRunProgress[];
+  /**
    * 이 행의 접근성 요소(아래 `accessible` 뿌리)를 목록에 알린다 (#1892 R1 M-3).
    *
    * 점프 필은 누르는 순간 사라지고, 목록은 착지한 행으로 VoiceOver 초점을 옮겨야
@@ -2120,6 +2132,7 @@ function MessageRowInner({
   approvalsProvided,
   onApprovalSettled,
   runEnded,
+  runStatus,
   registerRowNode,
 }: MessageRowProps): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -2820,6 +2833,18 @@ function MessageRowInner({
           </View>
         ) : null}
 
+        {/* 내가 보낸 메시지가 에이전트를 불렀으면 그 일의 상태 한 줄 (#3824). 칩보다
+            안쪽이다: 칩은 남들의 반응이고, 이 줄은 이 메시지가 일으킨 일이다. */}
+        {runStatus !== undefined ? (
+          <MessageRunStatus
+            messageId={message.id}
+            channelId={message.channelId}
+            createdAtMs={message.createdAtMs}
+            runs={runStatus}
+            directory={directory}
+          />
+        ) : null}
+
         <Chips chips={chips} onToggle={actions ? onChipPress : undefined} />
 
         {/* 이 답이 참고한 기억 (#3166). 정착한 에이전트 턴 기록에만 서고, 참고한 것이
@@ -3081,6 +3106,7 @@ export const MESSAGE_ROW_COMPARED_PROPS: Record<keyof MessageRowProps, true> = {
   approvalsProvided: true,
   onApprovalSettled: true,
   runEnded: true,
+  runStatus: true,
   registerRowNode: true,
 };
 
@@ -3155,6 +3181,9 @@ export function sameMessageRowProps(
     // 다시 그려진다. 이것이 빠지면 취소 직후 붙어 있는 행은 옛 값을 든 채 서 있고
     // 「응답이 끊김」은 다음에 무언가가 그 행을 흔들 때까지 나타나지 않는다.
     a.runEnded === b.runEnded &&
+    // #3824. 목록이 채널 run이 바뀔 때만 새 배열을 만들고, run이 없는 행에는 같은
+    // 빈 배열을 넘기므로 동일성으로 충분하다.
+    a.runStatus === b.runStatus &&
     // #1892 R1 M-3. 목록이 한 함수를 모든 행에 나눠 주므로 동일성으로 충분하다.
     // 빠지면 필이 켜진 표면으로 옮겨 온 행이 노드를 알리지 않아 초점이 그 행에
     // 가지 못한다.

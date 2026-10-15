@@ -165,6 +165,9 @@ const CHANGED: Record<keyof MessageRowProps, Partial<MessageRowProps>> = {
   // run 이 끝난 뒤에도 붙어 있는 행은 옛 `false` 를 든 채 그대로 서 있고
   // 「응답이 끊김」은 다음 무언가가 그 행을 흔들 때까지 나타나지 않는다.
   runEnded: {runEnded: true},
+  // #3824. 내 메시지가 일으킨 run이 생기거나 바뀌면 상태 줄이 바뀐다. 목록이 채널 run이
+  // 바뀔 때만 새 배열을 만들므로 동일성이 곧 값이다.
+  runStatus: {runStatus: []},
   // #1892 R1 M-3. 목록이 한 함수를 모든 행에 나눠 주므로 동일성이 곧 값이다.
   // 비교자가 이것을 안 보면, 필이 켜진 표면에서 붙은 행이 노드를 알리지 않은 채
   // 남아 점프가 그 행에 초점을 주지 못한다.
