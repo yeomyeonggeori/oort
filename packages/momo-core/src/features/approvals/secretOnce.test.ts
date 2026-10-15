@@ -80,7 +80,7 @@ describe("403 영수증의 role_required (AX-3b #2549 계약)", () => {
     } as never);
     expect(outcome.kind).toBe("error");
     expect(outcome.errorCode).toBe("role_required");
-    expect(outcome.errorCopy).toContain("아직 대기 중");
+    expect(outcome.errorCopy).toContain("아직 기다리고 있어요");
     // 승인의 **상태**는 뒤집지 않는다 — 여전히 pending 이다(§5). 그 값은
     // `approval_status` enum 밖이라 상태로 읽히지 않아야 한다.
     expect(outcome.status).toBeUndefined();
@@ -89,7 +89,7 @@ describe("403 영수증의 role_required (AX-3b #2549 계약)", () => {
   it("그 밖의 403 은 기존 forbidden 그대로다 (도구 호출 승인 회귀 0)", () => {
     const outcome = interpretReceipt(403, { status: "pending" } as never);
     expect(outcome.errorCode).toBe("forbidden");
-    expect(outcome.errorCopy).toContain("채널 멤버인지 확인하세요");
+    expect(outcome.errorCopy).toContain("채널 멤버인지 확인해 주세요");
   });
 
   it("role_required 는 200·409 에서 읽지 않는다", () => {

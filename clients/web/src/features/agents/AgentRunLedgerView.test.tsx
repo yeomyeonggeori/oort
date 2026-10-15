@@ -4,7 +4,11 @@ import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import type { AgentRunProgress, Channel } from "@momo/core/lib/api";
+import {
+  agentRunLedgerFromWire,
+  type AgentRunProgress,
+  type Channel,
+} from "@momo/core/lib/api";
 import { ledgerRows, runList } from "@momo/core/features/agents/runLedger";
 import type { Directory } from "@/features/workspace/useWorkspace";
 import {
@@ -177,6 +181,26 @@ describe("기록 줄과 승인 링크", () => {
     );
     expect(el.querySelector("img")).toBeNull();
     expect(el.textContent).toContain("<img src=x onerror=alert(1)>");
+  });
+
+  it("모르는 원장 종류가 와도 기록이 그대로 서고, 깨우는 신호는 접혀 횟수가 붙는다 (#3824)", () => {
+    const ledger = agentRunLedgerFromWire({
+      runId: "0199aa11-2222-7000-8000-0000000000b1",
+      events: [
+        { ordinal: 1, kind: "queued", createdAtMs: T - 12 * MIN },
+        { ordinal: 2, kind: "doorbell_rung", code: "leading_ok", createdAtMs: T - 12 * MIN + 1_000 },
+        { ordinal: 3, kind: "doorbell_rung", code: "trailing_ok", createdAtMs: T - 11 * MIN },
+        { ordinal: 4, kind: "tool_call", code: "ok", createdAtMs: T - 10 * MIN },
+        { ordinal: 5, kind: "claimed", createdAtMs: T - MIN },
+      ],
+    });
+    const el = render(createElement(LedgerView, { rows: ledgerRows(ledger.events), nowMs: T }));
+    const kinds = [...el.querySelectorAll('[data-testid="agent-work-panel-ledger-row"]')].map((row) =>
+      row.getAttribute("data-kind")
+    );
+    expect(kinds).toEqual(["queued", "doorbell_rung", "unknown", "claimed"]);
+    expect(el.textContent).toContain("깨우는 신호를 보냈어요 · 2번");
+    expect(el.textContent).toContain("이 앱이 아직 모르는 기록이에요");
   });
 
   it("승인 대기 안내는 카드로 가는 링크를 둔다", () => {

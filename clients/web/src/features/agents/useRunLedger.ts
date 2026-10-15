@@ -8,7 +8,12 @@ import {
   type RunLedgerRow,
 } from "@momo/core/features/agents/runLedger";
 import type { ServerRunFacts } from "@momo/core/features/agents/workingSignal";
+import {
+  doorbellFactOf,
+  type DoorbellFact,
+} from "@momo/core/features/agents/runStatusLine";
 import { useSession } from "@/app/session";
+import { subscribeRunLedgerFrames } from "./agentRunProgressStore";
 
 // =============================================================================
 // 서버 원장 읽기 (ADR-0200 D2, #3748). 원장은 서버가 기억하므로 패널을 닫아도
@@ -24,6 +29,8 @@ export const RUN_LEDGER_POLL_MS = 30_000;
 
 export interface RunLedgerView {
   rows: RunLedgerRow[];
+  /** 원장의 깨우는 신호(행이 없거나 아직 못 읽었으면 null). */
+  doorbell: DoorbellFact | null;
   isLoading: boolean;
   /** 읽지 못했다(네트워크·5xx). 직전에 읽은 줄이 있으면 그대로 남는다. */
   isError: boolean;
@@ -42,6 +49,39 @@ function fingerprintOf(facts: ServerRunFacts | null): string {
   ].join("|");
 }
 
+/**
+ * 원장 읽기의 키와 함수. 작업 패널과 메시지 아래 상태 줄이 **같은 캐시**를 쓴다: 한 run의
+ * 원장을 두 표면이 따로 읽으면 같은 순간에 서로 다른 단계를 말할 수 있다.
+ *
+ * 깨우는 신호 행을 함께 달라고 묻는다(`?include=doorbell`, #3824). 그 행을 모르는 옛
+ * 서버는 쿼리를 읽지 않고 예전 원장을 준다.
+ */
+export function runLedgerQueryOptions(workspaceId: string, runKey: string | null) {
+  return {
+    queryKey: ["agent-run-events", workspaceId, runKey] as const,
+    queryFn: () =>
+      fetchAgentRunEvents(workspaceId, runKey as string, { includeDoorbell: true }),
+    staleTime: 0,
+    retry: (count: number, error: unknown) => !serverSaysAbsent(error) && count < 1,
+  };
+}
+
+/**
+ * 이 run의 원장에 행이 생겼다는 프레임이 오면 다시 읽는다. 깨우는 신호 행은 진행의
+ * 지문을 바꾸지 않으므로(서버가 `lastEventAtMs`에서 뺀다) 이 길이 아니면 30초를 기다린다.
+ */
+export function useRunLedgerFrames(
+  runKey: string | null,
+  refetch: () => unknown
+): void {
+  const latest = useRef(refetch);
+  latest.current = refetch;
+  useEffect(() => {
+    if (runKey === null) return;
+    return subscribeRunLedgerFrames(runKey, () => void latest.current());
+  }, [runKey]);
+}
+
 export function useRunLedger(
   runId: string | null,
   facts: ServerRunFacts | null
@@ -52,13 +92,11 @@ export function useRunLedger(
   const open = facts !== null && isOpenRunPhase(facts.phase);
   const key = runId?.toLowerCase() ?? null;
   const query = useQuery({
-    queryKey: ["agent-run-events", workspaceId, key],
-    queryFn: () => fetchAgentRunEvents(workspaceId, key as string),
+    ...runLedgerQueryOptions(workspaceId, key),
     enabled,
-    staleTime: 0,
-    retry: (count, error) => !serverSaysAbsent(error) && count < 1,
     refetchInterval: open ? RUN_LEDGER_POLL_MS : false,
   });
+  useRunLedgerFrames(enabled ? key : null, query.refetch);
 
   const fingerprint = fingerprintOf(facts);
   const seen = useRef<string>(fingerprint);
@@ -74,5 +112,6 @@ export function useRunLedger(
     () => (query.data === undefined ? [] : ledgerRows(query.data.events)),
     [query.data]
   );
-  return { rows, isLoading: enabled && query.isLoading, isError: query.isError };
+  const doorbell = useMemo(() => doorbellFactOf(query.data?.events), [query.data]);
+  return { rows, doorbell, isLoading: enabled && query.isLoading, isError: query.isError };
 }
