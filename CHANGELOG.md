@@ -11,6 +11,23 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+## [0.1.26] - 2026-10-15
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.26>. Tag target: `main=4084b77b`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. Four database migrations since 0.1.25 (132-135): the schema moves from 131 to 135. 132 and 133 widen the `agent_run_event` kind check (`doorbell_rung`, `tool_call`) and 133 adds the RLS FORCE table `agent_run_tool_tally`; 134 adds an `agent` column (default true); 135 replaces a function body only. `bootstrap_runtime_roles` grants `momo_notifier` SELECT on `agent_run_tool_tally`. Two new optional environment variables, both with defaults: `MOMO_DOORBELL_URGENT_GAP_SECONDS` (default 10) and `MOMO_HOSTED_INPLACE_GRANT_ENABLED` (unset means on).
+
+### Added
+- Server: the doorbell now records every wake signal on the run ledger as `doorbell_rung`, and a tracked job request wakes the agent at once instead of waiting out the cooldown, capped at one wake per connection every `MOMO_DOORBELL_URGENT_GAP_SECONDS` (#3822, #3830).
+- Agent Port: the `oort_job_start` synthetic tool, with the recent conversation on claim (#3831, #3834); a tool-call ledger that keeps the tool name, duration and outcome of each oort call, at most 100 rows per run plus an exact per-tool tally, shown only with `include=tools` (ADR-0200 addendum, #3840, #3846); the closed result fields of `oort_run_complete` and `error.data` (ADR-0162 addendum 5 C1-C3, #3845).
+- Agent Port: a human reply in a thread an agent opened wakes that agent (an `agent` column, default on; ADR-0162 addendum 5 W1-W3, #3851, #3855); calling a hosted agent in a channel it is not approved for raises an in-place "write in this channel" approval card, and approving it runs the waiting job exactly once (#3857, #3858). `MOMO_HOSTED_INPLACE_GRANT_ENABLED=false` turns the card off.
+- Server reads: "running now" (`GET /agent-runs?state=active`, scoped to member channels, `scope=mine|team`, #3847, #3849); the board accepts `include=jobs` and `who=mine|team` (ADR-0202 E1, #3853, #3856); the official four-plugin list and detail read path in Rust (ADR-0113 addendum P-S1, #3859, #3861).
+- Web, desktop and phone: attachment previews like Buzz with thumbnail chips, inline images and hover download (#3820, #3828); per-task duration, a status line under a sent message including the wake signal, and the phone task history (#3824, #3848); the Tasks screen shows results first with "mine / whole team" (ADR-0202 U1, #3842, #3850); agent profile card with inline name editing and consistent avatars in mentions and lists (#3821, #3862); the oort helper switch and "hand it to ..." wording (ADR-0201, #3836, #3844), which stays hidden against a server that does not know the switch; run cancel in the task panel and the phone approval follow-ups (#3852, #3854).
+
+### Changed
+- Web and phone: approving or rejecting is decided by a single tap, with no confirmation step (#3819, #3829); cards the server already decided hide their buttons (#3818, #3825).
+
+### Not in this release
+- The server side of the team AI fast path (ADR-0201, #3835, #3837) is not merged yet, so the helper switch does not appear. The backfill of past messages into the inbox.
+
 ## [0.1.25] - 2026-10-14
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.25>. Tag target: `main=b51ce8eb`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. Hotfix release: no database migration (the schema stays at 131), `bootstrap_runtime_roles` is unchanged, and there is no new environment variable.
