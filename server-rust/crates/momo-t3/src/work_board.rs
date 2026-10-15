@@ -26,6 +26,23 @@
 //! actor of the run's `agent.work.queued` audit row (the run has no requester
 //! column); a run without one still lists, with no requester.
 //!
+//! ## The third source: jobs delegated to any agent (ADR-0202 D3·D4, #3853)
+//!
+//! When the caller asks for `include_jobs`, the run source widens past the hosted
+//! filter: every agent kind's `type=work` run (hosted, managed, BYOA, team AI),
+//! plus each **top-level mention run that became a job** — it reported a stage,
+//! raised an approval card, reported artifacts, or has lasted
+//! [`MENTION_JOB_MIN_SECS`] (still running) / took that long (finished). A mention
+//! run that is none of those is a short reply: it is already a message in the
+//! thread and has no row. Sub-runs (`parent_run_id`) belong to their parent's row.
+//! The membership predicate, the session-link dedupe and the retention window are
+//! the same ones the other sources use, so a non-member still gets nothing.
+//!
+//! A mention run's requester is the human who wrote the mention (`input`'s
+//! `author_member_id`, which `mention_run_input` writes) — the message itself is
+//! not read. `who_mine` narrows the page to rows the viewer asked for (runs) or
+//! owns (sessions), inside the same visibility.
+//!
 //! There is no workspace-wide view (Q4): a member of a different channel gets
 //! nothing, not a 403. The list and the single read share this one query, so
 //! "not a member", "not shared", "no such session" and "another tenant's id" are
@@ -55,6 +72,10 @@ use crate::work_share::SHARE_RETENTION_DAYS;
 
 /// Shown when a work run was queued without a title.
 pub const RUN_FALLBACK_LABEL: &str = "작업";
+
+/// ADR-0202 D3: a mention run this long (running) or that took this long
+/// (finished) is a job, not a short reply — ADR-0162 증보 3 D14's push threshold.
+pub const MENTION_JOB_MIN_SECS: f64 = 60.0;
 
 pub const DEFAULT_PAGE: i64 = 50;
 pub const MAX_PAGE: i64 = 100;
@@ -93,16 +114,37 @@ impl BoardSource {
 }
 
 /// What only a run item has (D13). The numbers are the agent's own report.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BoardRun {
     pub run_id: Uuid,
     pub requested_by: Option<(Uuid, String)>,
     pub step_count: i32,
     pub commits: Option<i32>,
     pub pr_number: Option<i64>,
+    /// The raw `run_status` (the board word is in [`BoardItem::status`]).
+    pub run_status: String,
+    /// `include_jobs` only: `work` | `mention` | `thread_reply` (ADR-0202 D3).
+    pub trigger: Option<String>,
+    /// `include_jobs` only: `output.artifacts` as stored. The route reduces it to
+    /// the closed result fields; nothing else of it leaves the server.
+    pub agent_report: Option<serde_json::Value>,
+    /// `include_jobs` only: the agent's newest live message of this run.
+    pub result_message_id: Option<Uuid>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Which rows a list read returns (ADR-0202 D4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct BoardScope {
+    /// `include=runs`: hosted agents' work runs (ADR-0162 증보 3 D13).
+    pub include_runs: bool,
+    /// `include=jobs`: every agent's work runs + mention runs that became jobs.
+    /// A superset of `include_runs`.
+    pub include_jobs: bool,
+    /// `who=mine`: only what the viewer asked for or owns.
+    pub who_mine: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct BoardItem {
     /// The row's own id: the session id for a session item, the run id for a run
     /// item. It is also the cursor's tie-breaker, so the two never collide.
@@ -134,7 +176,7 @@ pub struct BoardItem {
 }
 
 /// A page and, when more rows follow, where to resume.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BoardPage {
     pub items: Vec<BoardItem>,
     pub next: Option<BoardCursor>,
@@ -153,7 +195,8 @@ WITH sess AS ( \
              ELSE GREATEST(ws.started_at, ws.ended_at, t.last_at) END) * 1000000)::bigint \
            AS activity_us, \
          'session'::text AS source, NULL::text AS run_status, NULL::uuid AS requester_id, \
-         NULL::text AS requester_name, NULL::int AS step_count, NULL::int AS run_commits \
+         NULL::text AS requester_name, NULL::int AS step_count, NULL::int AS run_commits, \
+         NULL::text AS job_trigger, NULL::jsonb AS agent_report, NULL::uuid AS result_message_id \
     FROM work_session ws \
     JOIN channel c \
       ON c.workspace_id = ws.workspace_id AND c.id = ws.channel_id AND c.archived_at IS NULL \
@@ -180,7 +223,9 @@ WITH sess AS ( \
 ), \
 runs AS ( \
   SELECT r.id, r.channel_id, r.agent_member_id AS member_id, 'agent_run'::text AS origin, \
-         COALESCE(left(btrim(r.input->>'title'), 200), '') AS label, NULL::text AS folder_label, \
+         COALESCE(left(btrim(CASE WHEN r.input->>'type' = 'work' THEN r.input->>'title' \
+                                  WHEN r.input->>'surface' = 'mention' THEN r.input->>'prompt' END), 200), '') \
+           AS label, NULL::text AS folder_label, \
          'hosted'::text AS tool, r.status::text AS status, NULL::int AS exit_code, \
          COALESCE(r.started_at, r.created_at) AS started_at, r.finished_at AS ended_at, \
          c.name AS channel_name, ag.display_name AS owner_name, \
@@ -205,7 +250,14 @@ runs AS ( \
          'run'::text AS source, r.status::text AS run_status, rq.id AS requester_id, \
          rq.display_name AS requester_name, r.step_count, \
          CASE WHEN jsonb_typeof(r.output->'artifacts'->'commits') = 'number' \
-              THEN (r.output->'artifacts'->>'commits')::numeric::int END AS run_commits \
+              THEN (r.output->'artifacts'->>'commits')::numeric::int END AS run_commits, \
+         CASE WHEN NOT $9::boolean THEN NULL \
+              WHEN r.input->>'type' = 'work' THEN 'work' \
+              WHEN r.input->>'addressing' = 'thread_reply' THEN 'thread_reply' \
+              ELSE 'mention' END AS job_trigger, \
+         CASE WHEN $9::boolean AND jsonb_typeof(r.output->'artifacts') = 'object' \
+              THEN r.output->'artifacts' END AS agent_report, \
+         rm.id AS result_message_id \
     FROM agent_run r \
     JOIN channel c \
       ON c.workspace_id = r.workspace_id AND c.id = r.channel_id AND c.archived_at IS NULL \
@@ -223,13 +275,42 @@ runs AS ( \
           ORDER BY a.created_at, a.id LIMIT 1 \
         ) q ON true \
     LEFT JOIN member rq \
-      ON rq.workspace_id = r.workspace_id AND rq.id = q.actor_member_id \
+      ON rq.workspace_id = r.workspace_id \
+     AND rq.id = COALESCE(q.actor_member_id, \
+           CASE WHEN $9::boolean AND r.input->>'surface' = 'mention' \
+                 AND r.input->>'author_member_id' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' \
+                THEN (r.input->>'author_member_id')::uuid END) \
      AND rq.kind = 'human' \
-   WHERE $8::boolean AND $3::uuid IS NULL \
+    LEFT JOIN LATERAL ( \
+         SELECT m.id FROM message m \
+          WHERE $9::boolean AND m.workspace_id = r.workspace_id AND m.run_id = r.id \
+            AND m.channel_id = r.channel_id AND m.author_member_id = r.agent_member_id \
+            AND m.type = 'text' \
+            AND m.deleted_at IS NULL \
+          ORDER BY m.seq DESC LIMIT 1 \
+        ) rm ON true \
+   WHERE $3::uuid IS NULL \
      AND r.workspace_id = $1 \
-     AND r.input->>'type' = 'work' \
-     AND EXISTS (SELECT 1 FROM hosted_agent_connection hc \
-                  WHERE hc.workspace_id = r.workspace_id AND hc.agent_member_id = r.agent_member_id) \
+     AND ( ($8::boolean AND NOT $9::boolean \
+            AND r.input->>'type' = 'work' \
+            AND EXISTS (SELECT 1 FROM hosted_agent_connection hc \
+                         WHERE hc.workspace_id = r.workspace_id \
+                           AND hc.agent_member_id = r.agent_member_id)) \
+        OR ($9::boolean \
+            AND (r.input->>'type' = 'work' \
+                 OR (r.input->>'surface' = 'mention' AND r.parent_run_id IS NULL \
+                     AND (r.status = 'awaiting_approval' \
+                          OR (jsonb_typeof(r.output->'stages') = 'array' \
+                              AND jsonb_array_length(r.output->'stages') > 0) \
+                          OR EXISTS (SELECT 1 FROM agent_run_event e \
+                                      WHERE e.workspace_id = r.workspace_id AND e.run_id = r.id \
+                                        AND e.kind IN ('stage', 'approval_requested')) \
+                          OR EXISTS (SELECT 1 FROM approval ap \
+                                      WHERE ap.workspace_id = r.workspace_id AND ap.run_id = r.id) \
+                          OR (jsonb_typeof(r.output->'artifacts') = 'object' \
+                              AND r.output->'artifacts' <> '{}'::jsonb) \
+                          OR COALESCE(r.finished_at, clock_timestamp()) - r.created_at \
+                             >= make_interval(secs => $11::double precision)))))) \
      AND NOT EXISTS (SELECT 1 FROM audit_log al \
                        JOIN work_control wc \
                          ON wc.workspace_id = al.workspace_id AND wc.id = al.target_id \
@@ -243,6 +324,9 @@ board AS ( \
 ) \
 SELECT * FROM board \
  WHERE ($5::bigint IS NULL OR (activity_us, id) < ($5, $6::uuid)) \
+   AND (NOT $10::boolean \
+        OR (source = 'session' AND member_id = $2) \
+        OR (source = 'run' AND requester_id = $2)) \
  ORDER BY activity_us DESC, id DESC \
  LIMIT $7";
 
@@ -321,6 +405,10 @@ fn decode(row: &sqlx::postgres::PgRow) -> Result<BoardItem, T3Error> {
             step_count: row.try_get("step_count")?,
             commits: row.try_get("run_commits")?,
             pr_number: pr_url.as_deref().and_then(pr_number_of),
+            run_status: status.clone(),
+            trigger: row.try_get("job_trigger")?,
+            agent_report: row.try_get("agent_report")?,
+            result_message_id: row.try_get("result_message_id")?,
         })
     } else {
         None
@@ -383,7 +471,7 @@ async fn query(
     workspace_id: Uuid,
     viewer_member_id: Uuid,
     only_session: Option<Uuid>,
-    include_runs: bool,
+    scope: BoardScope,
     after: Option<BoardCursor>,
     limit: i64,
 ) -> Result<Vec<BoardItem>, T3Error> {
@@ -395,7 +483,10 @@ async fn query(
         .bind(after.map(|cursor| cursor.activity_us))
         .bind(after.map(|cursor| cursor.session_id))
         .bind(limit)
-        .bind(include_runs)
+        .bind(scope.include_runs)
+        .bind(scope.include_jobs)
+        .bind(scope.who_mine)
+        .bind(MENTION_JOB_MIN_SECS)
         .fetch_all(&mut *conn)
         .await?;
     rows.iter().map(decode).collect()
@@ -411,13 +502,36 @@ pub async fn list_board_in_tx(
     after: Option<BoardCursor>,
     limit: i64,
 ) -> Result<BoardPage, T3Error> {
+    list_board_scoped_in_tx(
+        conn,
+        workspace_id,
+        viewer_member_id,
+        BoardScope {
+            include_runs,
+            ..BoardScope::default()
+        },
+        after,
+        limit,
+    )
+    .await
+}
+
+/// [`list_board_in_tx`] with the ADR-0202 D4 scope (`include=jobs`, `who=mine`).
+pub async fn list_board_scoped_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    viewer_member_id: Uuid,
+    scope: BoardScope,
+    after: Option<BoardCursor>,
+    limit: i64,
+) -> Result<BoardPage, T3Error> {
     let limit = limit.clamp(1, MAX_PAGE);
     let mut items = query(
         conn,
         workspace_id,
         viewer_member_id,
         None,
-        include_runs,
+        scope,
         after,
         limit + 1,
     )
@@ -446,7 +560,7 @@ pub async fn get_board_item_in_tx(
         workspace_id,
         viewer_member_id,
         Some(session_id),
-        false,
+        BoardScope::default(),
         None,
         1,
     )

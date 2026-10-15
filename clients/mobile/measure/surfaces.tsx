@@ -17,6 +17,12 @@ import type {Member} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {SafeAreaProvider, useSafeAreaInsets} from 'react-native-safe-area-context';
 import {SessionProvider} from '../src/session/useSession';
+import {
+  agentRunLedgerFromWire,
+  type AgentRunLedgerEvent,
+  type AgentRunProgress,
+} from '@momo/core/lib/api';
+import {RunLedgerSheet} from '../src/features/agents/RunLedgerSheet';
 import {ApiError} from '@momo/core/lib/api';
 import type {ProviderLink} from '@momo/core/features/settings/api';
 import {AiConnectCard, TEAM_QUERY_KEY} from '../src/features/aiConnect/AiConnectCard';
@@ -158,6 +164,7 @@ import {
 } from '@momo/core/features/chat/composerCopy';
 import {FixedScheme, useStyles, type ColorScheme} from '../src/design/theme';
 import TeamBoardScreen from '../src/screens/TeamBoardScreen';
+import WorkJobsScreen from '../src/screens/WorkJobsScreen';
 import {TeamBoardDetailSheet} from '../src/features/work/teamBoard/TeamBoardDetailSheet';
 import WorkSessionDetailScreen from '../src/screens/WorkSessionDetailScreen';
 import {buildConversation} from '../src/features/work/conversation';
@@ -348,6 +355,8 @@ const OTHER = (
   ROSTER.find(m => m.kind === 'human' && m.id !== SELF) ?? ROSTER[1] ?? ROSTER[0]
 ).id;
 const NOW = 1_700_000_000_000;
+/** 하네스 세션의 워크스페이스. 원장 씨앗의 키가 같은 값을 읽는다(#3824). */
+const HARNESS_WS = 'measure-ws';
 
 const MESSAGE: Message = {
   id: '00000000-0000-7000-8000-0000000000a1',
@@ -2045,6 +2054,11 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   }
 
   switch (name) {
+    // #3824: 보낸 메시지 아래 상태 줄과 폰의 작업 기록 시트.
+    case 'run-status':
+      return <RunStatusSurface />;
+    case 'run-ledger':
+      return <RunLedgerSurface />;
     case 'quote-ready': {
       const draft = quoteDraftFor({
         ...MESSAGE,
@@ -2383,7 +2397,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             chips={[]}
             nowMs={NOW}
             approvalReceipts={
-              new Map([['ap-1', {note: '승인을 기록했습니다.', status: 'approved'}]])
+              new Map([['ap-1', {note: '승인을 기록했어요.', status: 'approved'}]])
             }
           />
         </Frame>
@@ -2921,7 +2935,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             nowMs={NOW}
             approvalGates={gates}
             approvalReceipts={
-              new Map([['ap-1', {note: '승인을 기록했습니다.', status: 'approved'}]])
+              new Map([['ap-1', {note: '승인을 기록했어요.', status: 'approved'}]])
             }
           />
           {/* 오프라인은 U4-4 리뷰가 **미캡처**로 남긴 자리다 — 「증거가 상수
@@ -2951,6 +2965,90 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     // (링크가 이 화면에 한 번) → 다시 열었을 때(링크 없이 영속 카드만). 픽스처는
     // ADR-0186 부록 A·B 그대로이고, 값(부록 C `secretOnce`)은 **영수증 표**로만
     // 건넨다 — 대화 화면이 결정 응답에서 받아 드는 바로 그 자리다.
+    // ---- ADR-0201 (#3836): 도우미 승인 카드 + 넘기는 줄 ------------------------
+    case 'team-ai': {
+      const agents = ROSTER.filter(m => m.kind === 'agent');
+      const helper = agents[0] ?? ROSTER[0];
+      const grok = agents[1] ?? agents[0] ?? ROSTER[0];
+      const requester = ROSTER.find(m => m.id === OTHER) ?? ROSTER[0];
+      const card = {
+        ...MESSAGE,
+        id: '00000000-0000-7000-8000-0000000036b1',
+        type: 'approval_request',
+        body: '에이전트 프로필 바꾸기',
+        authorMemberId: helper.id,
+        thread: undefined,
+        props: {
+          approval_id: 'ap-team-ai',
+          action_type: 'workspace_action',
+          status: 'pending',
+          title: '에이전트 프로필 바꾸기',
+          action: {
+            id: 'agent.profile.update',
+            rows: [
+              {label: '에이전트', value: grok.displayName},
+              {label: '소개', value: '주간 리포트 담당'},
+            ],
+            rationale: `${requester.displayName} 님이 소개를 주간 리포트 담당으로 바꿔 달라고 했어요.`,
+            required_role: 'admin',
+          },
+          proposed_via: {
+            kind: 'team_ai',
+            requester_id: requester.id,
+            requester_name: requester.displayName,
+          },
+        },
+      } as unknown as Message;
+      const handOff = {
+        ...MESSAGE,
+        id: '00000000-0000-7000-8000-0000000036b2',
+        authorMemberId: helper.id,
+        thread: undefined,
+        body: '이건 제가 바로 처리하기엔 큰 일이에요. 다른 에이전트에게 맡길 수 있어요.',
+        props: {
+          source: 'team_ai_fallback',
+          kind: 'team_ai.delegate.v1',
+          reason: 'out_of_scope',
+          agent_member_id: helper.id,
+          notice_for_member_id: SELF,
+          delegate: {
+            source_message_id: null,
+            candidates: [
+              {
+                member_id: grok.id,
+                handle: grok.handle,
+                display_name: grok.displayName,
+                client_msg_id: '0e5fa1d0-c0de-5201-9d00-7e4a11a12023',
+              },
+            ],
+          },
+        },
+      } as unknown as Message;
+      return (
+        <Frame label="도우미 제안 카드 · 넘기는 줄 (ADR-0201 #3836)">
+          <MessageRow
+            message={card}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+            approvalGates={
+              new Map([
+                ['ap-team-ai', {approvalId: 'ap-team-ai', reversible: true, expiresAtMs: null}],
+              ])
+            }
+          />
+          <MessageRow
+            message={handOff}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+            actions={{...aiSuggestActions(SELF), workspaceId: 'ws-capture'}}
+          />
+        </Frame>
+      );
+    }
     case 'ai-suggest':
       harnessClient.setQueryData(['settings', 'provider-link'], AI_SUGGEST_LINK);
       return (
@@ -3037,7 +3135,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
                 [
                   'ap-1',
                   {
-                    note: '승인을 기록했습니다.',
+                    note: '승인을 기록했어요.',
                     status: 'approved',
                     secretOnce: {
                       kind: 'invite_link',
@@ -3835,6 +3933,37 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           onBack={() => {}}
         />
       );
+    // ---- #3842 (ADR-0202 U1): 결과 중심 「작업」 한 화면 + 시트 -------------------
+    //   work-jobs · work-jobs-team · work-jobs-detail · work-jobs-approval · work-jobs-empty
+    case 'work-jobs':
+    case 'work-jobs-team':
+    case 'work-jobs-empty':
+      return (
+        <WorkJobsScreen
+          active
+          initialFilter={name === 'work-jobs-team' ? 'team' : 'mine'}
+          onOpenConversation={() => {}}
+          onBack={() => {}}
+        />
+      );
+    case 'work-jobs-detail':
+    case 'work-jobs-approval':
+      return (
+        <>
+          <WorkJobsScreen
+            active
+            initialFilter="mine"
+            onOpenConversation={() => {}}
+            onBack={() => {}}
+          />
+          <TeamBoardDetailSheet
+            item={name === 'work-jobs-approval' ? WORK_JOBS_ROWS[0] : WORK_JOBS_ROWS[2]}
+            nowMs={Date.now()}
+            onClose={() => {}}
+            onOpenChannel={() => {}}
+          />
+        </>
+      );
     case 'team-board-detail':
     case 'team-board-detail-agent':
     case 'team-board-detail-nopr': {
@@ -3986,15 +4115,8 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           <View style={styles.noticeStack}>
             <ApprovalDecision
               approvalId="ap-1"
-              initialArmed="approve"
               onSettled={() => {}}
               testIDPrefix="measure-approve"
-            />
-            <ApprovalDecision
-              approvalId="ap-2"
-              initialArmed="reject"
-              onSettled={() => {}}
-              testIDPrefix="measure-reject"
             />
             <StopTurnControl
               runId="run-1"
@@ -4757,7 +4879,7 @@ function SearchResults(): React.JSX.Element {
 const HARNESS_SELF = ROSTER.find(member => member.id === SELF);
 const HARNESS_MEMBER = {
   id: SELF,
-  workspaceId: 'measure-ws',
+  workspaceId: HARNESS_WS,
   kind: 'human',
   displayName: HARNESS_SELF?.displayName ?? '곽성재',
   handle: HARNESS_SELF?.handle ?? 'seongjae',
@@ -4827,6 +4949,144 @@ function AiConnectCardWithComposer({
       />
     </>
   );
+}
+
+// ---- #3824: 메시지 아래 상태 줄 · 작업 기록 시트 -----------------------------------
+//
+//   RUN-STATUS  내가 보낸 메시지 세 줄: 깨우는 신호 보냄(대기) · 작업 중 · 완료(걸린 시간)
+//   RUN-LEDGER  폰 작업 기록 시트: 걸린 시간, 접힌 깨우는 신호(· 2번), 이 앱이 모르는
+//               원장 종류 한 줄
+//
+// 시각은 `Date.now()` 기준이다. 표면이 지금 시계로 「12분째」를 세므로 고정 `NOW` 를
+// 쓰면 사진이 수십 년째라고 말한다. 원장은 하네스 캐시에 씨앗으로 넣는다(같은 키).
+const RUN_IDS = {
+  woken: '0199aa11-2222-7000-8000-0000000003a1',
+  working: '0199aa11-2222-7000-8000-0000000003a2',
+  done: '0199aa11-2222-7000-8000-0000000003a3',
+} as const;
+
+function runFixture(
+  id: string,
+  triggerMessageId: string,
+  over: Partial<AgentRunProgress>,
+): AgentRunProgress {
+  const t = Date.now();
+  return {
+    id,
+    channelId: 'ch-measure',
+    agentMemberId: AGENT,
+    triggerMessageId,
+    triggerSummary: '채널 하나 만들어 줄래요? 이름은 grokbot-lab으로요.',
+    status: 'queued',
+    phase: 'queued',
+    leaseState: 'none',
+    stepCount: 0,
+    ahead: [],
+    createdAtMs: t - 4_000,
+    updatedAtMs: t - 4_000,
+    ...over,
+  };
+}
+
+function seedRunLedger(runId: string, events: AgentRunLedgerEvent[]): void {
+  harnessClient.setQueryData(['agent-run-events', HARNESS_WS, runId], {runId, events});
+}
+
+function RunStatusSurface(): React.JSX.Element {
+  const t = Date.now();
+  const sent = (id: string, body: string, at: number): Message => ({
+    ...MESSAGE,
+    id,
+    authorMemberId: SELF,
+    body,
+    createdAtMs: at,
+  });
+  const woken = runFixture(RUN_IDS.woken, 'm-run-1', {});
+  seedRunLedger(RUN_IDS.woken, [
+    {ordinal: 1, kind: 'queued', createdAtMs: t - 4_000},
+    {ordinal: 2, kind: 'doorbell_rung', code: 'leading_ok', createdAtMs: t - 3_500},
+  ]);
+  const working = runFixture(RUN_IDS.working, 'm-run-2', {
+    phase: 'running',
+    status: 'running',
+    leaseState: 'live',
+    createdAtMs: t - 12 * 60_000 - 20_000,
+    claimedAtMs: t - 12 * 60_000 - 8_000,
+    startedAtMs: t - 12 * 60_000,
+    lastEventAtMs: t - 65_000,
+  });
+  seedRunLedger(RUN_IDS.working, [
+    {ordinal: 1, kind: 'queued', createdAtMs: t - 12 * 60_000 - 20_000},
+    {ordinal: 2, kind: 'doorbell_rung', code: 'leading_ok', createdAtMs: t - 12 * 60_000 - 19_000},
+  ]);
+  const done = runFixture(RUN_IDS.done, 'm-run-3', {
+    phase: 'succeeded',
+    status: 'succeeded',
+    createdAtMs: t - 40 * 60_000,
+    claimedAtMs: t - 40 * 60_000 + 12_000,
+    startedAtMs: t - 40 * 60_000 + 14_000,
+    finishedAtMs: t - 40 * 60_000 + 192_000,
+  });
+  return (
+    <Frame label="보낸 메시지 아래 상태 줄 (#3824)">
+      <MessageRow
+        message={sent('m-run-3', '@grokbot 어제 회의 요약해 줄래요?', t - 40 * 60_000)}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={t}
+        runStatus={[done]}
+      />
+      <MessageRow
+        message={sent('m-run-2', '@grokbot 릴리스 노트 초안 써 줄래요?', t - 12 * 60_000 - 20_000)}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={t}
+        runStatus={[working]}
+      />
+      <MessageRow
+        message={sent('m-run-1', '@grokbot 채널 하나 만들어 줄래요? 이름은 grokbot-lab으로요.', t - 4_000)}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={t}
+        runStatus={[woken]}
+      />
+    </Frame>
+  );
+}
+
+function RunLedgerSurface(): React.JSX.Element {
+  const t = Date.now();
+  const at = t - 12 * 60_000 - 20_000;
+  const run = runFixture(RUN_IDS.working, 'm-run-2', {
+    phase: 'running',
+    status: 'running',
+    leaseState: 'live',
+    createdAtMs: at,
+    claimedAtMs: at + 12_000,
+    startedAtMs: at + 20_000,
+    lastEventAtMs: t - 65_000,
+    latestStage: 'grokbot-lab 이름 점검',
+    stepCount: 1,
+  });
+  seedRunLedger(
+    RUN_IDS.working,
+    agentRunLedgerFromWire({
+      runId: RUN_IDS.working,
+      events: [
+        {ordinal: 1, kind: 'queued', createdAtMs: at},
+        {ordinal: 2, kind: 'doorbell_rung', code: 'leading_ok', createdAtMs: at + 1_000},
+        {ordinal: 3, kind: 'doorbell_rung', code: 'trailing_ok', createdAtMs: at + 6_000},
+        {ordinal: 4, kind: 'tool_call', code: 'ok', createdAtMs: at + 7_000},
+        {ordinal: 5, kind: 'claimed', createdAtMs: at + 12_000},
+        {ordinal: 6, kind: 'started', createdAtMs: at + 20_000},
+        {ordinal: 7, kind: 'stage', stage: 'grokbot-lab 이름 점검', createdAtMs: t - 65_000},
+      ],
+    }).events,
+  );
+  return <RunLedgerSheet progress={run} directory={DIRECTORY} onClose={() => {}} />;
 }
 
 const harnessClient = new QueryClient({
@@ -5546,6 +5806,95 @@ function seedTeamBoard(surface: string): void {
   });
 }
 
+// #3842: 「작업」 한 화면의 줄. 새 서버(`include=jobs`) 모양이다: run 줄에 trigger·phase·에이전트 보고.
+const WORK_JOBS_ROWS: SharedWorkSession[] = [
+  tbRow({
+    sessionId: '00000000-0000-7000-8000-0000000000c1',
+    source: 'run',
+    runId: '00000000-0000-7000-8000-0000000000c1',
+    requestedBy: {memberId: SELF, displayName: '곽성재'},
+    origin: 'agent_run',
+    label: '#launch 채널에 v0.1.26 공지 올리기',
+    folderLabel: null,
+    repo: null,
+    branch: null,
+    harness: 'hosted',
+    owner: {memberId: 'measure-agent-grok', displayName: '그록봇'},
+    homeChannel: {id: 'ch-build', name: 'agent-lab'},
+    state: 'running',
+    phase: 'awaiting_approval',
+    trigger: 'mention',
+    startedAtMs: Date.now() - 4 * 60_000,
+    lastActivityAt: TB_MIN(1),
+  }),
+  tbRow({
+    sessionId: '00000000-0000-7000-8000-0000000000c2',
+    source: 'run',
+    runId: '00000000-0000-7000-8000-0000000000c2',
+    requestedBy: {memberId: SELF, displayName: '곽성재'},
+    origin: 'agent_run',
+    label: '온보딩 문구 해요체로 다듬기',
+    folderLabel: null,
+    repo: null,
+    branch: 'feat/onboarding-copy',
+    harness: 'hosted',
+    owner: {memberId: 'measure-agent-grok', displayName: '그록봇'},
+    homeChannel: {id: 'ch-build', name: 'agent-lab'},
+    state: 'running',
+    phase: 'running',
+    trigger: 'work',
+    stages: ['코드 읽기', '문구 고치기'],
+    startedAtMs: Date.now() - 12 * 60_000,
+    lastActivityAt: TB_MIN(2),
+  }),
+  tbRow({
+    sessionId: '00000000-0000-7000-8000-0000000000c3',
+    source: 'run',
+    runId: '00000000-0000-7000-8000-0000000000c3',
+    requestedBy: {memberId: SELF, displayName: '곽성재'},
+    origin: 'agent_run',
+    label: '푸시 알림이 두 번 오는 문제 고치기',
+    folderLabel: null,
+    repo: null,
+    branch: 'fix/push-dup',
+    harness: 'hosted',
+    owner: {memberId: 'measure-agent-grok', displayName: '그록봇'},
+    homeChannel: {id: 'ch-build', name: 'agent-lab'},
+    state: 'done',
+    status: 'done',
+    phase: 'succeeded',
+    trigger: 'work',
+    stages: ['원인 찾기', '고치기', 'PR 열기'],
+    diff: {added: 42, deleted: 18, files: null, ahead: 2, behind: null, uncommitted: null},
+    prUrl: 'https://github.com/yeomyeonggeori/oort/pull/3521',
+    startedAtMs: Date.now() - 31 * 60_000,
+    endedAtMs: Date.now() - 6 * 60_000,
+    lastActivityAt: TB_MIN(6),
+    agentReported: {
+      resultKind: 'pr_opened',
+      tests: {passed: 128, failed: 0, notRun: 3},
+      nextAction: 'merge_ok',
+      commitSha: '9f3c2a1b7e',
+      toolCounts: {run: 14, edit: 6, read: 41},
+    },
+  }),
+];
+const WORK_JOBS_TEAM_ROWS: SharedWorkSession[] = [...WORK_JOBS_ROWS, TEAM_BOARD_ROWS[1], TEAM_BOARD_ROWS[3]];
+
+function seedWorkJobs(surface: string): void {
+  harnessClient.setQueryData(['roster', ADE_WS], ADE_ROSTER);
+  harnessClient.setQueryData(['channels', ADE_WS], ADE_CHANNELS);
+  const empty = surface === 'work-jobs-empty';
+  harnessClient.setQueryData(['team-board', ADE_WS, 'jobs', 'mine'], {
+    pages: [{sessions: empty ? [] : WORK_JOBS_ROWS, nextCursor: null, mode: 'jobs'}],
+    pageParams: [null],
+  });
+  harnessClient.setQueryData(['team-board', ADE_WS, 'jobs', 'team'], {
+    pages: [{sessions: empty ? [] : WORK_JOBS_TEAM_ROWS, nextCursor: null, mode: 'jobs'}],
+    pageParams: [null],
+  });
+}
+
 function seedWorkConsole(): void {
   const shift = Date.now() - NOW;
   harnessClient.setQueryData(['roster', ADE_WS], ADE_ROSTER);
@@ -5880,6 +6229,13 @@ if (
   LAUNCHED.name.startsWith('team-board')
 ) {
   seedTeamBoard(LAUNCHED.name);
+}
+if (
+  LAUNCHED !== null &&
+  LAUNCHED.kind === 'surface' &&
+  LAUNCHED.name.startsWith('work-jobs')
+) {
+  seedWorkJobs(LAUNCHED.name);
 }
 if (
   LAUNCHED !== null &&

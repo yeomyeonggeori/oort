@@ -14,6 +14,16 @@
 //!   produced by the same code path (no 403 that says "it exists").
 //! * **No totals.** A page reports `nextCursor` only when more rows follow; the
 //!   count of rows the viewer cannot see is never observable.
+//! * **ADR-0202 D4 (#3853): `include=jobs` and `who=mine|team`.** `include` is a
+//!   comma-separated closed set (`runs`, `jobs`); any other token is a 400.
+//!   `jobs` widens the run rows to every agent's delegated work (`momo_t3::
+//!   work_board` decides which mention runs count) and adds the job fields
+//!   (`trigger`, `phase`, `durationMs`, `resultMessageId`, `agentReported`).
+//!   `who` defaults to `team`, the set shipped clients already get; `mine`
+//!   narrows to what the viewer asked for or owns. With neither parameter the
+//!   response is byte-for-byte the shipped one: every new key is optional and
+//!   absent, and the page echoes `who` only to a caller that used the new
+//!   parameters.
 //! * **Realtime is event → refetch.** `work.session.share_changed` carries only
 //!   the session id and the kind; a client that receives one re-reads this
 //!   endpoint. Nothing in the event is trusted as board content.
@@ -22,15 +32,16 @@ use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use momo_auth::Principal;
 use momo_t3::work_board::{
-    get_board_item_in_tx, list_board_in_tx, BoardCursor, BoardItem, BoardSource, DEFAULT_PAGE,
-    MAX_PAGE,
+    get_board_item_in_tx, list_board_scoped_in_tx, BoardCursor, BoardItem, BoardScope, BoardSource,
+    DEFAULT_PAGE, MAX_PAGE,
 };
+use serde_json::Value;
 use uuid::Uuid;
 
 use crate::dto::{
-    SharedDiffDto, SharedPrDto, SharedSessionChannelDto, SharedSessionOwnerDto,
-    SharedWorkSessionDto, SharedWorkSessionListQuery, SharedWorkSessionListResponse,
-    SharedWorkSessionResponse,
+    AgentReportedDto, AgentReportedTestsDto, SharedDiffDto, SharedPrDto, SharedSessionChannelDto,
+    SharedSessionOwnerDto, SharedWorkSessionDto, SharedWorkSessionListQuery,
+    SharedWorkSessionListResponse, SharedWorkSessionResponse,
 };
 use crate::error::ApiError;
 use crate::routes::shared::{path_uuid, require_human, settle, tenant_tx, workspace_scope};
@@ -61,6 +72,141 @@ pub fn decode_cursor(raw: &str) -> Result<BoardCursor, ApiError> {
     })
 }
 
+pub const INVALID_INCLUDE: &str = "invalid include";
+pub const INVALID_WHO: &str = "invalid who";
+
+/// What the list query asked for (ADR-0202 D4). Strict: unknown is a 400.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ListScope {
+    pub board: BoardScope,
+    /// The `who` to echo on the page, when the caller used the new parameters.
+    pub echo_who: Option<&'static str>,
+}
+
+pub fn parse_scope(include: Option<&str>, who: Option<&str>) -> Result<ListScope, ApiError> {
+    let mut board = BoardScope::default();
+    if let Some(raw) = include {
+        for token in raw.split(',') {
+            match token {
+                "runs" => board.include_runs = true,
+                "jobs" => board.include_jobs = true,
+                _ => return Err(ApiError::bad_request(INVALID_INCLUDE)),
+            }
+        }
+    }
+    // `jobs` is a superset of `runs` (every hosted work run is a job).
+    if board.include_jobs {
+        board.include_runs = true;
+    }
+    let who_word = match who {
+        None => None,
+        Some("team") => Some("team"),
+        Some("mine") => Some("mine"),
+        Some(_) => return Err(ApiError::bad_request(INVALID_WHO)),
+    };
+    board.who_mine = who_word == Some("mine");
+    let echo_who = if who_word.is_some() || board.include_jobs {
+        Some(who_word.unwrap_or("team"))
+    } else {
+        None
+    };
+    Ok(ListScope { board, echo_who })
+}
+
+/// ADR-0162 증보 5 C1·C2's closed vocabularies. The write side (the gateway)
+/// validates before storing; this read re-checks so that a row written before
+/// the contract, or by hand, can only ever surface a closed value.
+const RESULT_KINDS: [&str; 4] = ["pr_opened", "branch_only", "vm_only", "no_change"];
+const NEXT_ACTIONS: [&str; 4] = ["merge_ok", "please_test", "blocked", "none"];
+const TOOL_COUNT_KEYS: [&str; 6] = ["run", "edit", "read", "search", "web", "other"];
+const MAX_REPORTED_COUNT: i64 = 100_000;
+
+fn closed(value: Option<&Value>, set: &[&'static str]) -> Option<&'static str> {
+    let text = value?.as_str()?;
+    set.iter().copied().find(|word| *word == text)
+}
+
+fn count(value: Option<&Value>) -> Option<i64> {
+    value?
+        .as_i64()
+        .filter(|number| (0..=MAX_REPORTED_COUNT).contains(number))
+}
+
+/// `output.artifacts` → only the closed result fields. `None` when the agent
+/// reported none of them (a PR link or diff alone is the server-side `pr`/`diff`).
+pub fn agent_reported(artifacts: Option<&Value>) -> Option<AgentReportedDto> {
+    let artifacts = artifacts?.as_object()?;
+    let result_kind = closed(artifacts.get("resultKind"), &RESULT_KINDS);
+    let next_action = closed(artifacts.get("nextAction"), &NEXT_ACTIONS);
+    let tests = artifacts
+        .get("tests")
+        .and_then(Value::as_object)
+        .and_then(|tests| {
+            Some(AgentReportedTestsDto {
+                passed: count(tests.get("passed"))?,
+                failed: count(tests.get("failed"))?,
+                not_run: count(tests.get("notRun"))?,
+            })
+        });
+    let commit_sha = artifacts
+        .get("commitSha")
+        .and_then(Value::as_str)
+        .filter(|sha| (7..=40).contains(&sha.len()) && sha.bytes().all(|b| b.is_ascii_hexdigit()))
+        .map(str::to_ascii_lowercase);
+    let tool_counts = artifacts
+        .get("toolCounts")
+        .and_then(Value::as_object)
+        .map(|counts| {
+            TOOL_COUNT_KEYS
+                .iter()
+                .filter_map(|key| {
+                    count(counts.get(*key)).map(|n| ((*key).to_string(), Value::from(n)))
+                })
+                .collect::<serde_json::Map<String, Value>>()
+        })
+        .filter(|counts| !counts.is_empty());
+    if result_kind.is_none()
+        && tests.is_none()
+        && next_action.is_none()
+        && commit_sha.is_none()
+        && tool_counts.is_none()
+    {
+        return None;
+    }
+    Some(AgentReportedDto {
+        result_kind,
+        tests,
+        next_action,
+        commit_sha,
+        tool_counts,
+    })
+}
+
+/// The ADR-0200 phase word of a run row (`claimed` = queued with a leased job).
+fn phase_of(run_status: &str, leased: bool) -> Option<&'static str> {
+    Some(match run_status {
+        "queued" if leased => "claimed",
+        "queued" => "queued",
+        "running" => "running",
+        "awaiting_approval" => "awaiting_approval",
+        "paused" => "paused",
+        "succeeded" => "succeeded",
+        "failed" => "failed",
+        "timed_out" => "timed_out",
+        "cancelled" => "cancelled",
+        _ => return None,
+    })
+}
+
+fn trigger_word(trigger: Option<&str>) -> Option<&'static str> {
+    match trigger? {
+        "work" => Some("work"),
+        "mention" => Some("mention"),
+        "thread_reply" => Some("thread_reply"),
+        _ => None,
+    }
+}
+
 /// Lenient like the message-history page size: a bad size has a safe default.
 fn page_limit(raw: Option<&str>) -> i64 {
     raw.and_then(|text| text.parse::<i64>().ok())
@@ -68,9 +214,25 @@ fn page_limit(raw: Option<&str>) -> i64 {
         .unwrap_or(DEFAULT_PAGE)
 }
 
-fn dto(item: BoardItem) -> SharedWorkSessionDto {
+/// `jobs`: add the ADR-0202 job fields to run rows; `leased` = run ids whose
+/// pending delivery job is leased (only consulted for `queued`).
+fn dto(
+    item: BoardItem,
+    jobs: bool,
+    leased: &std::collections::HashSet<Uuid>,
+) -> SharedWorkSessionDto {
     let is_run = item.source == BoardSource::Run;
     let run = item.run;
+    let job = run.as_ref().filter(|_| jobs);
+    let trigger = job.and_then(|run| trigger_word(run.trigger.as_deref()));
+    let phase = job.and_then(|run| phase_of(&run.run_status, leased.contains(&run.run_id)));
+    let duration_ms = job
+        .and(item.ended_at_ms)
+        .map(|ended| (ended - item.started_at_ms).max(0));
+    let result_message_id = job
+        .and_then(|run| run.result_message_id)
+        .map(|id| id.to_string());
+    let agent_reported = job.and_then(|run| agent_reported(run.agent_report.as_ref()));
     let pr = match (is_run, item.pr_url.as_ref()) {
         (true, Some(url)) => Some(SharedPrDto {
             url: url.clone(),
@@ -123,10 +285,15 @@ fn dto(item: BoardItem) -> SharedWorkSessionDto {
         },
         pr_url: item.pr_url,
         last_activity_at: item.last_activity_at,
+        trigger,
+        phase,
+        duration_ms,
+        result_message_id,
+        agent_reported,
     }
 }
 
-/// `GET /v1/workspaces/{ws}/work-sessions/shared?limit=&cursor=`
+/// `GET /v1/workspaces/{ws}/work-sessions/shared?limit=&cursor=&include=&who=`
 pub async fn list(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
@@ -137,29 +304,53 @@ pub async fn list(
     require_human(&principal, "the team board requires a signed-in member")?;
     let after = query.cursor.as_deref().map(decode_cursor).transpose()?;
     let limit = page_limit(query.limit.as_deref());
-    let include_runs = query.include.as_deref() == Some("runs");
+    let scope = parse_scope(query.include.as_deref(), query.who.as_deref())?;
     let viewer = principal.member_id;
+    let jobs = scope.board.include_jobs;
 
-    let page = settle(
+    let (page, leased) = settle(
         "work_board.list",
         tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
-                Ok(Ok(list_board_in_tx(
-                    conn,
-                    workspace_id,
-                    viewer,
-                    include_runs,
-                    after,
-                    limit,
-                )
-                .await?))
+                let page =
+                    list_board_scoped_in_tx(conn, workspace_id, viewer, scope.board, after, limit)
+                        .await?;
+                // ADR-0200 `claimed`: a queued run whose delivery job is leased.
+                // The claim's own predicate (momo-outbox), as the run reads use.
+                let mut leased = std::collections::HashSet::new();
+                if jobs {
+                    let queued: Vec<(Uuid, Uuid)> = page
+                        .items
+                        .iter()
+                        .filter_map(|item| {
+                            item.run
+                                .as_ref()
+                                .filter(|run| run.run_status == "queued")
+                                .map(|run| (run.run_id, item.owner_member_id))
+                        })
+                        .collect();
+                    for fact in
+                        momo_outbox::pending_job_facts_for_runs_in_tx(conn, workspace_id, &queued)
+                            .await?
+                    {
+                        if fact.leased {
+                            leased.insert(fact.run_id);
+                        }
+                    }
+                }
+                Ok(Ok((page, leased)))
             })
         })
         .await,
     )?;
     Ok(Json(SharedWorkSessionListResponse {
         next_cursor: page.next.map(encode_cursor),
-        sessions: page.items.into_iter().map(dto).collect(),
+        sessions: page
+            .items
+            .into_iter()
+            .map(|item| dto(item, jobs, &leased))
+            .collect(),
+        who: scope.echo_who,
     }))
 }
 
@@ -190,7 +381,9 @@ pub async fn get_one(
         .await,
     )?;
     match item {
-        Some(item) => Ok(Json(SharedWorkSessionResponse { session: dto(item) })),
+        Some(item) => Ok(Json(SharedWorkSessionResponse {
+            session: dto(item, false, &std::collections::HashSet::new()),
+        })),
         None => Err(ApiError::not_found(NOT_FOUND)),
     }
 }
@@ -219,6 +412,113 @@ mod tests {
             let error = decode_cursor(bad).expect_err(bad);
             assert_eq!(error.message, "invalid cursor", "{bad}");
         }
+    }
+
+    #[test]
+    fn include_and_who_are_closed_sets_and_jobs_implies_runs() {
+        let scope = parse_scope(None, None).unwrap();
+        assert_eq!(scope.board, BoardScope::default());
+        assert_eq!(
+            scope.echo_who, None,
+            "the shipped request shape echoes nothing"
+        );
+
+        let runs = parse_scope(Some("runs"), None).unwrap();
+        assert!(runs.board.include_runs && !runs.board.include_jobs);
+        assert_eq!(runs.echo_who, None);
+
+        for raw in ["jobs", "runs,jobs", "jobs,runs"] {
+            let jobs = parse_scope(Some(raw), None).unwrap();
+            assert!(jobs.board.include_runs && jobs.board.include_jobs, "{raw}");
+            assert!(!jobs.board.who_mine, "{raw}: who defaults to team");
+            assert_eq!(jobs.echo_who, Some("team"), "{raw}");
+        }
+        let mine = parse_scope(Some("runs,jobs"), Some("mine")).unwrap();
+        assert!(mine.board.who_mine);
+        assert_eq!(mine.echo_who, Some("mine"));
+        let team = parse_scope(None, Some("team")).unwrap();
+        assert!(!team.board.who_mine);
+        assert_eq!(team.echo_who, Some("team"));
+
+        for bad in [
+            "",
+            "x",
+            "runs,",
+            ",runs",
+            "RUNS",
+            "runs, jobs",
+            "runs,sessions",
+            "tools",
+        ] {
+            let error = parse_scope(Some(bad), None).expect_err(bad);
+            assert_eq!(error.message, INVALID_INCLUDE, "{bad}");
+        }
+        for bad in ["", "all", "MINE", "me"] {
+            let error = parse_scope(None, Some(bad)).expect_err(bad);
+            assert_eq!(error.message, INVALID_WHO, "{bad}");
+        }
+    }
+
+    #[test]
+    fn agent_reported_keeps_only_closed_fields() {
+        use serde_json::json;
+        assert!(agent_reported(None).is_none());
+        assert!(agent_reported(Some(&json!("x"))).is_none());
+        // PR link / diff / branch alone are not an agent report.
+        assert!(agent_reported(Some(&json!({
+            "prUrl": "https://github.com/a/b/pull/1", "branch": "b", "added": 3
+        })))
+        .is_none());
+        let report = agent_reported(Some(&json!({
+            "resultKind": "pr_opened",
+            "tests": {"passed": 12, "failed": 1, "notRun": 3},
+            "nextAction": "please_test",
+            "commitSha": "ABCDEF1234",
+            "toolCounts": {"run": 4, "edit": 2, "bogus": 9, "web": -1},
+            "prUrl": "https://github.com/a/b/pull/1",
+            "secret": "SECRET"
+        })))
+        .unwrap();
+        let wire = serde_json::to_value(&report).unwrap();
+        assert_eq!(
+            wire,
+            json!({
+                "resultKind": "pr_opened",
+                "tests": {"passed": 12, "failed": 1, "notRun": 3},
+                "nextAction": "please_test",
+                "commitSha": "abcdef1234",
+                "toolCounts": {"run": 4, "edit": 2}
+            })
+        );
+        // Unknown words and out-of-range numbers are dropped field by field.
+        let partial = agent_reported(Some(&json!({
+            "resultKind": "merged",
+            "tests": {"passed": 1, "failed": 100001, "notRun": 0},
+            "nextAction": "ship_it",
+            "commitSha": "xyz1234",
+            "toolCounts": {"read": 7}
+        })))
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(&partial).unwrap(),
+            json!({"resultKind": null, "tests": null, "nextAction": null,
+                   "commitSha": null, "toolCounts": {"read": 7}})
+        );
+    }
+
+    #[test]
+    fn phase_is_the_adr_0200_word() {
+        assert_eq!(phase_of("queued", false), Some("queued"));
+        assert_eq!(phase_of("queued", true), Some("claimed"));
+        assert_eq!(phase_of("running", true), Some("running"));
+        assert_eq!(
+            phase_of("awaiting_approval", false),
+            Some("awaiting_approval")
+        );
+        assert_eq!(phase_of("timed_out", false), Some("timed_out"));
+        assert_eq!(phase_of("weird", false), None);
+        assert_eq!(trigger_word(Some("thread_reply")), Some("thread_reply"));
+        assert_eq!(trigger_word(Some("dm_implicit")), None);
     }
 
     #[test]

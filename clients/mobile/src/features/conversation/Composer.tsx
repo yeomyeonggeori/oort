@@ -54,6 +54,7 @@ import {CARD_ICONS} from '../../design/icons/cardIcons';
 import {isPhoneSlashRow} from '../aiConnect/AiConnectCard';
 import {CONV} from './convDesign';
 import {clearDraft, readDraft, saveDraft} from './drafts';
+import {Avatar} from './Avatar';
 import {
   applyMention,
   caretAfterChange,
@@ -1620,6 +1621,9 @@ export function Composer({
                   testID="mention-option">
                   {({pressed}) => (
                     <>
+                  {/* 사람과 에이전트 모두 같은 아바타(사진, 없으면 이니셜)가 앞에 선다 (#3821).
+                      행의 접근성 라벨이 이름을 말하므로 아바타는 보조기술에서 숨는다. */}
+                  <Avatar directory={directory} memberId={member.id} />
                   {/* 왼쪽 칸 = 첫 줄(이름+핸들) + 보조 줄. 오른쪽 칩은 첫 줄에 맞춰 선다. */}
                   <View
                     style={[

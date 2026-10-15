@@ -367,15 +367,16 @@ async function openBoard(): Promise<void> {
   // 탭이던 것이 + 메뉴의 행이 되었다 (ADR-0189 D1, #2714 → #2750).
   fireEvent.press(screen.getByTestId('shell-plus'));
   fireEvent.press(screen.getByTestId('plus-menu-work'));
+  // ADR-0202 D6 (#3842): + 메뉴 「작업」은 결과 중심 「작업」 화면이다(옛 팀 보드 판의 자리).
   await waitFor(() =>
-    expect(screen.getByTestId('team-board-list')).toBeTruthy(),
+    expect(screen.getByTestId('work-jobs-list')).toBeTruthy(),
   );
 }
 
 /** 보드 → 줄 → 읽기 전용 시트 → 「내 에이전트 세션 화면」 → 에이전트 세션 화면. */
 async function openWorkDetail(sessionId: string): Promise<void> {
   await openBoard();
-  fireEvent.press(screen.getByTestId(`team-board-row-${sessionId}`));
+  fireEvent.press(screen.getByTestId(`work-job-row-${sessionId}`));
   await waitFor(() =>
     expect(screen.getByTestId('team-detail-open-agent-session')).toBeTruthy(),
   );
@@ -447,7 +448,7 @@ describe('read-only phone-native work detail', () => {
     const detailBacks = screen.getAllByTestId('header-back');
     fireEvent.press(detailBacks[detailBacks.length - 1]);
     await waitFor(() =>
-      expect(screen.getByTestId('team-board-list')).toBeTruthy(),
+      expect(screen.getByTestId('work-jobs-list')).toBeTruthy(),
     );
     await waitFor(() =>
       expect(focusSpy.mock.calls.length).toBeGreaterThan(detailReturnFocusCalls),

@@ -212,7 +212,14 @@ async fn settle_expired_in_tx(
         .and_then(|call| call.get("call_id"))
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
-    let mut props = ToolResult::error(call_id, EXPIRED_TOOL_RESULT_BODY).message_props();
+    // ADR-0162 증보 5 G4 — an expired in-place channel-grant card tells the
+    // person who called, in words, that nothing ran and how to try again.
+    let body = if momo_agent::in_place_grant::is_in_place_grant(&approval.payload) {
+        momo_agent::in_place_grant::IN_PLACE_GRANT_EXPIRED_BODY
+    } else {
+        EXPIRED_TOOL_RESULT_BODY
+    };
+    let mut props = ToolResult::error(call_id, body).message_props();
     if let Some(object) = props.as_object_mut() {
         object.insert("approval_id".into(), json!(approval.id.to_string()));
         object.insert("run_id".into(), json!(approval.run_id.to_string()));
@@ -226,7 +233,7 @@ async fn settle_expired_in_tx(
             channel_id: approval.channel_id,
             author_member_id: approval.requested_by,
             message_type: MessageType::ToolResult,
-            body: Some(EXPIRED_TOOL_RESULT_BODY.to_string()),
+            body: Some(body.to_string()),
             props,
             root_id: None,
             reply_to_id: None,

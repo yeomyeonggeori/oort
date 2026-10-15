@@ -377,8 +377,9 @@ describe("「명령」 그룹은 레지스트리를 그린다", () => {
     expect(rendered).not.toContain("nav.workConsole");
     expect(rendered).not.toContain("nav.workstreams");
     // 두 환경의 숫자가 실제로 다르다 — 그래야 이 시험이 무언가를 잰다.
-    // (허브 이동 명령 다섯은 환경과 무관하게 서므로 바닥이 그만큼 올랐다, AIH-3.)
-    expect(rendered.length).toBeLessThan(12);
+    // (허브 이동 명령 다섯은 환경과 무관하게 서므로 바닥이 그만큼 올랐다, AIH-3. 「작업」 이동 명령
+    // 하나도 언제나 선다, ADR-0202 D6.)
+    expect(rendered.length).toBeLessThan(13);
   });
 
   it("옛 머리글 셋 대신 「명령」 하나다", async () => {

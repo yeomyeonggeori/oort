@@ -2,6 +2,7 @@ import { KeyRound, Lock, Plug, type LucideIcon } from "lucide-react";
 import type { CommandIcon } from "@momo/core/features/commands/registry";
 import { Keycaps } from "@/app/ShortcutHelpDialog";
 import { cn } from "@/design/lib/cn";
+import { MemberAvatar } from "@/features/common/MemberAvatar";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import {
   composerTriggerSpec,
@@ -165,6 +166,10 @@ export function ComposerAutocompleteList({
                 locked && index !== highlight ? "text-ink-muted" : "text-ink"
               )}
             >
+              {candidate.member ? (
+                // 사진이 곧 신원이다 (#3821). 줄이 두 줄로 감겨도 아바타는 첫 줄에 붙는다.
+                <MemberAvatar member={candidate.member} size="sm" />
+              ) : null}
               {agent ? (
                 // 에이전트 줄은 두 칸이다: 왼쪽(이름 줄 + 보조 줄, 이름은 이 칸 안에서 감싼다)과
                 // 오른쪽 칩(첫 줄에 붙은 고정 칸). 한 줄 flex-wrap 으로 두면 긴 표시 이름이 칩을

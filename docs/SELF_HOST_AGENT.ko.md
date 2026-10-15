@@ -1302,11 +1302,13 @@ credential로, 터널이 아니라 VM 루프백에 POST한다.
 1) oort_inbox_read 를 호출한다. 이전에 저장한 opaque nextCursor가 있으면
    그대로 넘긴다. 없으면 cursor 없이 읽는다. 응답의 nextCursor는 항상
    있다(빈 페이지 포함). /workspace/oort-inbox.cursor 에 덮어 쓴다
-   (권한 600). hasMore 이면 같은 커서로 더 읽는다. 커서가 거부되면
+   (권한 600). 다른 wake 가 같은 파일을 동시에 쓸 수 있으니 옆에 임시 파일을
+   쓰고 이름 바꾸기로 덮어 쓴다(옛 커서가 남아도 한 페이지를 두 번 읽을 뿐이라
+   해가 없다). hasMore 이면 같은 커서로 더 읽는다. 커서가 거부되면
    (Unavailable) 처음부터 다시 읽지 말고 합류를 다시 안내한다.
 2) 이벤트는 kind(message / agent_job / agent_run)와 channelId·messageId·
    messageSeq 만 준다. agent_job 이벤트가 하나라도 있으면 다른 것을 읽기 전에
-   3)의 추적 경로(claim, 그다음 시작 보고)를 먼저 탄다. 일반 message 이벤트의
+   3)의 추적 경로(oort_job_start)를 먼저 탄다. 일반 message 이벤트의
    본문은 oort_conversation_read 로 그 채널에서 읽는다.
 3) 처리할 일이 있으면 처리하고, 응답은 oort_message_post 로 같은 채널에
    쓴다. clientMsgId 는 보낼 때마다 새 UUID. 같은 clientMsgId 재시도는
@@ -1314,21 +1316,44 @@ credential로, 터널이 아니라 VM 루프백에 POST한다.
    이벤트 kind 가 agent_job 이면 추적되는 작업(run)이다. oort_message_post
    만 쓰지 말고 아래처럼 한다.
    순서가 중요하다(사람이 시계를 보고 있다). 깨어나면 곧바로 oort_inbox_read,
-   oort_jobs_claim, 시작 보고 oort_run_event 순서로 부르고(아래 a, b) 그
-   사이에 다른 호출을 끼우지 않는다. 시작 보고 전에 대화를 읽거나 요청을
-   계획·고민하지 않는다. claim 응답의 work.prompt 에 요청이 이미 있다. 시작
-   보고 전의 매 초는 사람 화면에서 「아무 일도 안 일어나는」 시간이다.
-   a) oort_jobs_claim {} 을 부른다. 각 job 에는 leaseHandle, leaseExpiresAtMs,
-      work(channelId, prompt, ...)가 있다. leaseHandle 은
-      /workspace/oort-run.handle 에 저장하고(권한 600) 회신에 쓰지 않는다.
-      jobs 가 비었는데 그 파일이 있으면 이미 내 job 이다. 저장한 handle 을 쓴다.
-   b) claim 직후(b2 전에) oort_run_event {leaseHandle, status:"running",
-      stage:"시작: <짧은 단계 이름>", eventId:<새 UUID>} 를 부른다. 이것이
-      시작 보고이고, 사람 화면에서 run 을 「가져감」에서 「시작함」으로
-      옮기는 호출이다.
-   b2) 그다음에야, work.prompt 만으로 모자라면 work.channelId 로
-      oort_conversation_read 해서 요청을 읽는다.
-   c) 사람이 진행을 볼 수 있게 보고한다. 시작 보고(b)는 claim 한 뒤 10초
+   그다음 아래 h)의 job 폴더 확인, 그다음 oort_job_start 를 부르고 그 사이에
+   다른 호출을 끼우지 않는다.
+   그 전에 대화를 읽거나 요청을 계획·고민하지 않는다. 응답의 work.prompt 와
+   최근 대화에 요청이 이미 있다. 시작 보고 전의 매 초는 사람 화면에서 「아무
+   일도 안 일어나는」 시간이다.
+   여러 job 이 동시에 내 것일 수 있고, 이 VM 에서 wake 여러 개가 동시에 돌 수
+   있다(도어벨과 스윕, 또는 도어벨 둘). 그래서 job 마다 폴더를 따로 두고 두
+   job 이 파일을 함께 쓰지 않는다:
+   /workspace/oort-runs/<tag>/ (권한 700). <tag> 는 claim 할 때 새로 만든
+   UUID 다. 안에 handle(leaseHandle, 권한 600), beat(그 job 을 보고할 때마다
+   touch 하는 빈 파일), workdir(그 job 전용 작업 사본 경로)를 둔다. handle 을
+   파일 이름·회신·stage·로그에 넣지 않는다.
+   a) oort_job_start {} 를 부른다. 한 번의 호출이 다음 job 을 claim 하고,
+      시작 보고(stage "시작: 요청 확인")를 보내고, 최근 대화를 돌려준다.
+      응답에는 job(leaseHandle, leaseExpiresAtMs, work(channelId, prompt,
+      ...)), started(시작 보고가 들어갔으면 true), resumed,
+      conversation.messages(그 채널의 최근 메시지, 최신이 먼저)가 있다.
+      conversation 키가 없으면 그 채널을 읽을 권한이 없는 것이니 work.prompt 를
+      쓴다. 처리할 job 이 없으면 job 이 null 이다. 받자마자 그 job 의 폴더를
+      만들고 handle 과 beat 를 쓴다. 그리고 사이에 아무것도 끼우지 않고
+      oort_job_start {} 를 다시 부르며, job 이 null 이 되거나
+      /workspace/oort-runs 에 폴더가 4개(어느 wake 것이든)가 될 때까지 계속
+      claim 한다. 다섯 번째 job 은 가져오지 않고 다음 wake 에 남긴다.
+      이미 가진 job 을 다시 받으려면
+      oort_job_start {leaseHandle:<그 폴더의 handle>} 를 부른다(시작 보고는 두
+      번 나가지 않는다).
+      job 마다 자기 작업 사본(/workspace/work/<tag>, 새 clone 이나 git
+      worktree)과 자기 브랜치에서 일한다. 두 job 이 디렉터리나 브랜치를 함께
+      쓰지 않는다. 이 VM 이 별도 세션이나 도우미를 동시에 돌릴 수 있으면 job
+      마다 하나씩 맡기고, 안 되면 하나씩 차례로 하되 기다리는 job 도 e)·f)로
+      살려 둔다.
+   b) 첫 단계 이름을 직접 정하려면 oort_job_start 에 stage:"시작: <짧은 단계
+      이름>" 을 넘긴다(일반 텍스트, 규칙은 아래 c와 같다). started 가 false 면
+      oort_run_event {leaseHandle, status:"running", stage:"시작: <짧은 단계
+      이름>", eventId:<새 UUID>} 를 한 번 보낸다. 사람 화면에서 run 을
+      「가져감」에서 「시작함」으로 옮기는 호출이 이것이다. oort_jobs_claim 도
+      여전히 되고 대화도 싣지만, 그때는 시작 보고를 직접 보내야 한다.
+   c) 사람이 진행을 볼 수 있게 보고한다. 시작 보고(oort_job_start)는 깬 뒤 10초
       안에 나가야 한다(하드 한도는 60초). 그 뒤로는 단계가 시작될 때마다, 그리고
       일하는 동안 최소 5분마다 부른다(새 단계가 없으면 status:"running" 만
       보내도 살아 있다는 신호가 된다). stage 는 일반 텍스트 1~80자(앞뒤 공백
@@ -1341,21 +1366,46 @@ credential로, 터널이 아니라 VM 루프백에 POST한다.
       stage 에 넣지 마라. run 카드에는 최근 12개만 남고, oort 작업 패널은 더
       오래 보관한다. 사람이 보는 것은 여기서(그리고 textDelta 로) 보고한 것뿐이다.
       oort 는 너의 추론을 볼 수 없으니 보일 거라고 기대하지 마라.
-   d) 끝나면 oort_run_complete {leaseHandle, status:"succeeded",
+   d) 코드 작업은 이 순서로 끝내고 단계마다 stage 를 하나씩 보낸다: 1. 브랜치를
+      커밋하고 올린다(stage "브랜치 올림"). VM 이 멈춰도 작업이 남는다.
+      2. 테스트를 돌리고 통과·실패·안 돌림 개수를 센다(stage "테스트 실행").
+      3. 저장소가 허락하면 PR 을 연다(stage "PR 열림"). 4. oort_run_complete 로
+      보고한다. 갖지 않은 PR·브랜치·테스트 개수를 보고하지 않는다.
+      끝나면 oort_run_complete {leaseHandle, status:"succeeded",
       body:"<회신, 8000바이트 이하>", artifacts:{prUrl, branch, added,
       deleted, commits}} 를 부른다. 실제로 가진 값만 넣는다. prUrl 은
       https://github.com/<owner>/<repo>/pull/<n>, branch 는 브랜치 이름,
-      added / deleted / commits 는 0 이상 정수. 다른 키는 받지 않는다. body 는
+      added / deleted / commits 는 0 이상 정수.
+      결과 칸: wake 마다 한 번 tools/list 를 읽는다. oort_run_complete 스키마의
+      artifacts 안에 resultKind 가 있을 때만 resultKind(pr_opened /
+      branch_only / vm_only / no_change), tests {passed, failed, notRun}(셋
+      다), nextAction(merge_ok / please_test / blocked / none), commitSha(16진수
+      7~40자)를 함께 보내고, toolCounts {run, edit, read, search, web, other}
+      (개수만)를 보낼 수 있다. 서로 맞아야 한다: tests·nextAction·commitSha 는
+      resultKind 가 있을 때만, pr_opened 는 prUrl 필수, branch_only 는 branch
+      필수·prUrl 금지, vm_only 는 prUrl·branch 금지, no_change 는 prUrl·
+      branch·commitSha 금지·개수는 0 이거나 없음, merge_ok 는 pr_opened 이고
+      실패한 테스트가 없을 때만. 그 호출이 HTTP 400 / -32602 로 답하면 오류
+      data 가 틀린 칸을 알려 준다. 그 칸만 고쳐 같은 handle 로 최대 2번 더
+      보낸다. 그래도 거절되면 artifacts 없이 완료하고 결과는 body 에 쓴다.
+      tools/list 에 resultKind 가 없으면 다른 키를 보내지 말고(거절된다) body
+      첫 줄을 "결과: <resultKind> · 테스트 통과 <n> 실패 <n> 안 돌림 <n> · 다음:
+      <nextAction> · 커밋 <sha 앞 7자>" 로 쓴다.
+      body 는
       채널에 에이전트 회신으로 게시되므로 oort_message_post 로 또 보내지
       마라. 실패하면 status:"failed" 와 error:"<사유, 4000바이트 이하>" 로
       부른다. 이 경우에도 artifacts(남긴 브랜치·부분 PR)를 실을 수 있다. oort_run_complete(성공·실패 모두) 직후
-      /workspace/oort-run.handle 을 지워서 다음 wake 가 죽은 handle 을 쓰지
-      않게 한다.
+      /workspace/oort-runs 의 그 job 폴더를 지워서 다음 wake 가 죽은 handle 을
+      쓰지 않게 한다.
    e) 작업이 leaseExpiresAtMs 를 넘길 수 있으면 그 전에 oort_job_renew
-      {leaseHandle} 을 부른다(응답에 새 leaseExpiresAtMs). lease 가 만료된 뒤에는
+      {leaseHandle} 을 부른다(응답에 새 leaseExpiresAtMs). 차례를 기다리는 job
+      을 포함해 가진 job 마다 한다. lease 가 만료된 뒤에는
       oort_job_release 를 부르지 않는다.
    f) 추적되는 run 안에서는 위 c)의 oort_run_event {leaseHandle,
-      status:"running"} 가 살아 있음을 알리는 방법이다: 최소 5분마다 보낸다. oort_ping 은 run 을 살려 두지 못한다(ping 만 하는
+      status:"running"} 가 살아 있음을 알리는 방법이다: 가진 job 마다 최소
+      5분마다 보내고, 그때마다 그 job 의 beat 파일을 touch 한다. 그 job 의
+      폴더가 없어졌으면 다른 wake 가 넘겨받은 것이니 그 job 을 바로 멈추고 그
+      handle 로 더 보내지 않는다. oort_ping 은 run 을 살려 두지 못한다(ping 만 하는
       런타임은 「살아 있지만 일은 안 가져감」으로 보이고, lease 가 만료된 뒤
       2시간 동안 이벤트가 없는 run 은 서버가 끝낸다). 바쁘지만 leaseHandle 이
       없는 경우(추적되지 않는 회신)에만 최소 5분마다 oort_ping {state:"working"}
@@ -1364,13 +1414,24 @@ credential로, 터널이 아니라 VM 루프백에 POST한다.
       재시도하지 않는다.
    g) 오류는 고정된 답이다. HTTP 400 / -32602: 호출이 잘못됐다(잘못된 stage 나
       artifacts 키는 호출 전체를 거절하고 lease 는 그대로다). 고쳐서
-      같은 handle 로 다시 보낸다. HTTP 409 / -32005: lease 를 잃었거나 run 이
-      이미 끝났거나 취소됐다. 멈추고 재시도하지 않는다. HTTP 409 / -32004:
+      같은 handle 로 다시 보낸다. error.data 가 artifacts 칸을 짚으면
+      (error.data.field, error.data.rule, 정해진 값이 있으면 error.data.allowed)
+      그 칸만 고쳐서 oort_run_complete 를 다시 부른다. 고쳐 보내기는 최대 2번.
+      그래도 거절되면 artifacts 없이 완료하고 결과는 body 에 쓴다. 같은 호출을
+      그대로 다시 보내지 않는다. HTTP 409 / -32005: lease 를 잃었거나 run 이
+      이미 끝났거나 취소됐다. 그 job 을 멈추고 재시도하지 않으며 그 폴더를
+      지운다(다른 job 은 계속한다). HTTP 409 / -32004:
       에이전트가 일시정지·연결 해제됐거나 대상이 보이지 않는다. 멈춘다.
       HTTP 403 / -32003: scope 나 채널 승인이 없다. 멈추고 연결 확인을 안내한다.
-   h) 오래 잠들었다 깨어났고 저장한 handle 이 있으면 그 handle 로 먼저
-      보고한다(oort_run_event 또는 oort_run_complete). oort_jobs_claim 을 먼저
-      부르면 새 handle 을 받고 옛 handle 은 409 가 된다.
+   h) job 폴더 확인(oort_inbox_read 바로 뒤, claim 전). beat 가 최근 15분 안에
+      touch 된 폴더는 아직 일하는 wake 의 것이니 건드리지 않는다. beat 가 더
+      오래된 폴더는 멈춘 wake 가 남긴 것이다. 폴더 이름을 새 tag 로 바꿔(mv,
+      이름 바꾸기가 실패하면 다른 wake 가 먼저 가져간 것이니 둔다) 가져오고,
+      beat 를 touch 한 뒤 저장된 handle 로 먼저 보고하고(oort_run_event 또는
+      oort_run_complete) 그 workdir 에서 이어 한다. /workspace/oort-run.handle
+      (예전 한 job 루틴이 남긴 파일)이 있으면 새 폴더의 handle 로 옮기고 같은
+      식으로 다룬다. 그 보고 전에 oort_jobs_claim 이나 handle 없는
+      oort_job_start 를 먼저 부르면 새 handle 을 받고 옛 handle 은 409 가 된다.
    사람이 AI 연결·AI 구독 로그인(Claude, Codex)·팀 API 키 연결을 부탁하면
    직접 하려 하지 말고, 키·토큰·비밀번호·로그인 코드를 묻지 마라. 연결
    카드를 제안한다. oort_jobs_claim 리스 handle이 있으면
@@ -1381,8 +1442,10 @@ credential로, 터널이 아니라 VM 루프백에 POST한다.
 4) 발화 규약: 새 정보를 더할 때만 쓴다. 사람이 물었으면 반드시 응답한다.
    그 외에는 침묵이 성공이다. 「확인했습니다」「알겠습니다」 단독
    (bare acknowledgement)은 금지.
-5) events 가 비었으면 아무 것도 쓰지 말고 종료한다. 도어벨에 ACK 메시지를
-   보내지 마라.
+5) events 가 비었어도 h)를 하고, 폴더가 4개보다 적으면 oort_job_start {} 를
+   한 번 부른다(다른 wake 가 같은 페이지를 먼저 읽었을 수 있다). job 이 오면
+   3 a)처럼 이어 간다. job 이 null 이고 h)에서 넘겨받은 폴더도 없으면 아무
+   것도 쓰지 말고 종료한다. 도어벨에 ACK 메시지를 보내지 마라.
 
 Agent Port 호출 형태(루프백, 합류 때와 같은 EP):
 
@@ -1416,6 +1479,7 @@ dots도 같은 패턴이고 곧 지원한다. 이 문서는 dots에 대한 개�
 |---|---|---|---|
 | 0. 사람이 요청 | `POST /v1/workspaces/{ws}/channels/{ch}/agent-runs` 의 `type=work` (소유자가 승인한 채널·DM에서 사람이) | 해당 없음 | run `queued` + job 1 + inbox 항목 1(`agent_job`). 연결이 active 가 아니거나 채널이 승인 밖이거나 `owner_only` 이면 닫힌 사유로 409 |
 | 1. claim | `oort_jobs_claim` (scope `agent:jobs:read`) | `limit` 1..100 | `{jobs:[{leaseHandle, createdAtMs, leaseExpiresAtMs, work:{channelId, authorMemberId, triggerMessageId, prompt, ...}}]}` |
+| 1b. 시작(빠른 길) | `oort_job_start` (scope `agent:jobs:read`; 시작 보고는 `agent:runs:callback`, 대화는 `messages:read`도 필요) | `leaseHandle`(재진입), `stage`(선택) | `{job:{leaseHandle, createdAtMs, leaseExpiresAtMs, work}\|null, started, resumed, conversation?:{messages, nextBefore}}`: claim + 시작 보고 + 최근 30개 메시지를 한 번에(ADR-0162 증보 4) |
 | 2. 진행 | `oort_run_event` (scope `agent:runs:callback`) | `leaseHandle`(512), `stage`(1~80자, 최대 320바이트, `/`·`\`·제어·bidi 문자 불가), `status`(`running` `thinking` `streaming` `cancelled`), `detail`(2048, 감사 전용), `textDelta`(8192), `eventId`(UUID, 재시도가 한 번만 세어짐) | `{status:"accepted"}` |
 | 3. 끝남 | `oort_run_complete` (scope `agent:runs:callback`) | `leaseHandle`, `status`(`succeeded` / `failed`), `body`(8000), `error`(4000), `usage`, `artifacts` | `{status, messageId, seq}` |
 | 갱신 | `oort_job_renew` | `leaseHandle` | `{status:"renewed", leaseExpiresAtMs}` |
@@ -1425,7 +1489,33 @@ dots도 같은 패턴이고 곧 지원한다. 이 문서는 dots에 대한 개�
 Enterprise 호스트, 경로는 정확히 `/<owner>/<repo>/pull/<n>`, 쿼리·조각은
 버림), `branch`(git 브랜치 이름 꼴, 최대 200자(800은 바이트 여유일 뿐); 공백·`~ ^ : ? * [`·역슬래시·제어 문자 불가, 절대 경로·맨 앞 `~`·드라이브 문자 불가),
 `added` / `deleted` / `commits`(0~2147483647 정수). 커밋 제목·파일 이름·원격
-URL의 키는 없어서 보낼 수 없다. lease가 살아 있는 동안 잘못된 `artifacts`(또는
+URL의 키는 없어서 보낼 수 없다.
+
+**코드 작업 결과 칸(ADR-0162 증보 5 C1/C2).** 이것도 모두 선택이고 닫혀 있다.
+`resultKind`(`pr_opened` / `branch_only` / `vm_only` / `no_change`), `tests`
+(`{passed, failed, notRun}`, 셋 다 필수, 각 0~100000 정수), `nextAction`
+(`merge_ok` / `please_test` / `blocked` / `none`), `commitSha`(16진수 7~40자,
+소문자로 저장), `toolCounts`(`{run, edit, read, search, web, other}`, 각각 선택,
+0~100000 정수). 서로 맞아야 한다: `tests`·`nextAction`·`commitSha`는
+`resultKind`가 있어야 받는다. `pr_opened`는 `prUrl`이 필요하다. `branch_only`는
+`branch`가 필요하고 `prUrl`은 안 된다. `vm_only`는 `prUrl`·`branch`가 없다.
+`no_change`는 `prUrl`·`branch`·`commitSha`가 없고 `added` / `deleted` /
+`commits`는 없거나 0이다. `merge_ok`는 `pr_opened`이고 실패한 테스트가 없어야
+한다. `toolCounts`는 `resultKind` 없이 혼자 와도 된다. 원래 다섯 키만 보내는
+루틴은 그대로 통과한다. 서버는 모양만 보고 사실은 확인하지 않는다(PR·커밋·
+테스트 실행을 찾아보지 않는다). run 읽기(`GET /v1/workspaces/{ws}/agent-runs/{run}`)는
+이 다섯 칸을 `agentReported` 하나로 모아 돌려준다. 클라이언트는 이것을
+「에이전트 보고」 꼬리표 아래 그리고, oort 가 직접 잰 값과 섞지 않는다.
+
+거절된 `artifacts`는 어느 칸인지 알려 준다. JSON-RPC 오류는 그대로 `-32602`이고,
+`message`는 `artifacts.resultKind must be one of pr_opened, branch_only,
+vm_only, no_change` 같은 영어 한 줄, `error.data`는 `{field, rule, allowed?,
+requires?}`이며 `rule`은 `enum`·`required`·`forbidden`·`range`·`format`·
+`requires` 중 하나다. 어느 쪽에도 보낸 값은 다시 싣지 않는다. 공개 스키마 뒤에서
+걸린 거절(교차 규칙, 잘못된 `prUrl`·`branch`, 16진수가 아닌 `commitSha`)은 감사
+행에 `field`·`rule`·`attempt`(그 run 의 몇 번째 거절인지)도 남기고, 이때도 값은
+없다. 서버는 횟수로 재시도를 막지 않는다. 막는 것은 루틴이다(고쳐 보내기 최대
+2번, g 단계). lease가 살아 있는 동안 잘못된 `artifacts`(또는
 잘못된 `stage`)는 호출 전체를 HTTP 400 / `-32602`로 거절하고, 그 값은 저장하지
 않으며, 사유 코드만 담은 감사 1행을 남기고, lease는 그대로라서 같은 호출을
 잘못된 부분만 빼고 다시 보낼 수 있다. handle이 죽었거나 run이 이미 끝났다면
@@ -1523,6 +1613,7 @@ oort가 보여 줄 수 있는 것은 에이전트가 **보낸** 것뿐이다: �
 | claim·event·complete 가 lease·종결 규칙을 공유 | `the_job_and_run_tools_share_the_gateway_lease_and_terminal_rules` (`agent_port_tools_conformance_pg.rs`) |
 | 단계: 12개 유지, 나쁜 문자 거절 | `stage_markers_keep_the_latest_twelve_spend_steps_and_refuse_bad_text` |
 | artifacts 저장, 나쁜 것은 완료 전체 거절 | `artifacts_are_stored_when_valid_and_a_bad_one_refuses_the_whole_completion` |
+| 결과 칸: 틀린 칸을 짚고, 보고는 `agentReported` 로 읽힘 | `the_code_result_contract_names_the_bad_field_and_reads_back_as_agent_reported` |
 | 죽은 handle 은 감사 로그를 키우지 못함 | `a_dead_lease_cannot_grow_the_audit_log_with_bad_reports` |
 | lease 길이와 renew | `a_hosted_claim_leases_for_the_hosted_ttl_and_renew_extends_to_it` |
 | 만료됐지만 재claim 없음: 보고·완료 가능 | `an_expired_unreclaimed_hosted_handle_still_reports_and_completes` |
@@ -1564,6 +1655,36 @@ bearer·초대 값을 어디에도 붙여 넣지 않는다.
    `responsive`(읽을 게 없었다면 `alive_idle`). 그다음 요청 하나를 대기시킨 채 VM을
    25분 멈춘다. 기대: `responsive`가 아니라 `work_waiting` 또는 `woken_not_collected`.
    API로 다시 울리고 도어벨의 `lastStatus`를 적는다. 시각을 #3736 / #3737 에 기록한다.
+
+##### 3.3.17.4b 여러 job 동시 처리와 코드 결과 (#3582, 초안)
+
+**상태: 초안, 실기기 미검증.** §3.3.17.4 루틴을 병렬에 안전하게 고친 형태다.
+최종 문구는 #3542의 그록 4병렬 실험(성재 결재 「실험용 저장소·Bot 하나 (추천)」,
+2026-10-15, ADR-0162 증보 5 X1)에서 예전 handle 하나 방식과 비교한 뒤 정한다.
+그 전에는 시험을 거쳤다고 말하지 않는다.
+
+왜 바꿨나. 예전 루틴은 lease handle 하나를 `/workspace/oort-run.handle`에
+뒀다. 30초 안에 들어온 요청 네 건은 wake 하나가 모두 가져갈 수도, 여러 wake가
+동시에 나눠 가져갈 수도 있다(job wake는 10초 간격으로 도어벨 쿨다운을 건너뛰고,
+#3822, 15분 스윕이 도어벨 wake와 겹칠 수 있다). 파일이 하나면 두 번째 claim이
+첫 handle을 덮어 써서 첫 job은 보고할 길을 잃는다. 서버는 바꿀 필요가 없었다.
+claim은 하나하나 원자적이고, 호스팅 claim에는 에이전트별 한도가 없다(ADR-0200
+증보 2026-10-15 R1).
+
+| 규칙 | 루틴이 하는 일 |
+|---|---|
+| job마다 폴더 하나 | `/workspace/oort-runs/<tag>/`(권한 700)에 `handle`(권한 600)·`beat`·`workdir`. `<tag>`는 새 UUID이고 handle이나 요청 문구가 아니다. |
+| 없을 때까지 claim, 최대 4 | 사이에 아무것도 끼우지 않고 `oort_job_start {}`를 거듭 불러 `job`이 null이 되거나 VM에 폴더가 4개가 될 때까지. 다섯 번째는 다음 wake에 남긴다. |
+| wake 하나든 넷이든 같다 | 폴더가 job마다 따로라서, wake 하나가 넷을 가져가든 wake 넷이 하나씩 가져가든 상관없다. |
+| 남겨진 job | `beat`가 15분보다 오래된 폴더는 이름 바꾸기로 가져오고(한 wake만 이긴다), 새 claim 전에 저장된 handle로 먼저 보고한다(§3.3.17.4 h). 빼앗긴 wake는 폴더가 없어진 걸 보는 즉시 그 job을 멈춘다(§3.3.17.4 f). |
+| 자기 작업 사본 | job마다 `/workspace/work/<tag>`와 자기 브랜치에서 일해서 두 job이 같은 디렉터리·브랜치를 건드리지 않는다. |
+| 살아 있음·lease는 job마다 | 차례를 기다리는 job까지 가진 job마다 최소 5분마다 `oort_run_event {status:"running"}`, `leaseExpiresAtMs` 전에 `oort_job_renew`. |
+| 결과 순서 | 브랜치 올림 → 테스트 → PR → `oort_run_complete`. 단계마다 stage 하나. |
+| 결과 칸 | `tools/list`의 `oort_run_complete` 스키마에 `resultKind`가 보일 때만 보낸다(ADR-0162 증보 5 C1·C2, engine 슬라이스 C-S1). 그 전에는 §3.3.17.4a의 다섯 키만 받으므로 결과는 `body` 첫 줄에 쓴다. |
+| 결과 거절 | HTTP 400 / `-32602`의 오류 data가 틀린 칸을 알려 준다(C3, C-S1과 함께 나온다). 그 칸만 고쳐 최대 2번 더, 그래도 안 되면 `artifacts` 없이 완료. |
+
+결과 칸은 모두 에이전트가 **보고한** 것이다. oort는 PR을 열어 보거나 커밋을 읽거나
+테스트를 다시 돌리지 않고, 화면은 「에이전트 보고」로 표시한다.
 
 ##### 3.3.17.5 15분 스윕 폴백
 

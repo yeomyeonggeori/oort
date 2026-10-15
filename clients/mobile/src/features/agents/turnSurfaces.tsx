@@ -266,8 +266,13 @@ function ActivityRow({
   testID?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  // 서버가 아는 run은 근거 줄이 「12분째 · 마지막 보고 1분 전」을 이미 말한다(#3824).
+  // 같은 시간을 두 번, 두 말(「12m 03s」)로 하지 않는다.
   const showClock =
-    live && line.state === 'working' && line.startedAtMs !== undefined;
+    live &&
+    line.server === undefined &&
+    line.state === 'working' &&
+    line.startedAtMs !== undefined;
   const detail = activityDetail(line, nowMs);
   return (
     <View style={styles.activityRow} testID={testID}>

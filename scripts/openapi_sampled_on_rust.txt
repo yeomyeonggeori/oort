@@ -251,6 +251,7 @@ POST /v1/workspaces/{workspaceId}/agent-runs/{runId}/cancel
 GET /v1/workspaces/{workspaceId}/agent-runs/{runId}/events
 GET /v1/workspaces/{workspaceId}/agents/{agentId}/liveness
 GET /v1/workspaces/{workspaceId}/channels/{channelId}/agent-runs/progress
+GET /v1/workspaces/{workspaceId}/agent-runs
 POST /v1/workspaces/{workspaceId}/hosted-agent-connections
 POST /v1/workspaces/{workspaceId}/subscription-agents/register
 GET /v1/workspaces/{workspaceId}/hosted-agent-connections

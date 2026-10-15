@@ -1,12 +1,8 @@
 import { useRef, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Bot, Inbox, MessageSquare, Plus, SquareKanban, SquareTerminal } from "lucide-react";
+import { Bot, Inbox, ListChecks, MessageSquare, Plus } from "lucide-react";
 import { cn } from "@/design/lib/cn";
-import {
-  MY_WORK_PATH,
-  TEAM_WORK_PATH,
-  WORK_NAV,
-} from "@momo/core/features/workbench/workTab";
+import { WORK_NAV, WORK_PATH } from "@momo/core/features/workbench/workTab";
 import { AGENTS_NAV } from "./workspaceNav";
 import { AttentionDot, AttentionPill } from "./AttentionBadge";
 import type { DestinationMark, DestinationMarks } from "./sidebarBadge";
@@ -189,17 +185,17 @@ export function WorkspaceRail({
                 pillLabel="나에게 필요한 일"
               />
               <RailLink to={AGENTS_NAV.to} icon={<Bot />} label={AGENTS_NAV.label} testId="rail-agents" current={active === "agents"} />
+              {/* ADR-0202 D6: 「내 작업」·「팀 작업」 두 아이콘이 「작업」 하나가 됐다. 배지·점은 옛 「내 작업」의 것. */}
               <RailLink
-                to={MY_WORK_PATH}
-                icon={<SquareTerminal />}
-                label={WORK_NAV.mine}
-                testId="rail-mine"
-                current={active === "mine"}
+                to={WORK_PATH}
+                icon={<ListChecks />}
+                label={WORK_NAV.work}
+                testId="rail-work"
+                current={active === "work"}
                 mark={marks?.mine}
                 pillLabel="응답이 필요한 세션"
                 dotLabel="아직 안 본 끝난 세션이 있어요"
               />
-              <RailLink to={TEAM_WORK_PATH} icon={<SquareKanban />} label={WORK_NAV.team} testId="rail-team" current={active === "team"} />
             </ul>
           </nav>
         </>
@@ -210,7 +206,7 @@ export function WorkspaceRail({
   );
 }
 
-export type RailDestination = "chat" | "inbox" | "agents" | "mine" | "team";
+export type RailDestination = "chat" | "inbox" | "agents" | "work";
 
 function RailLink({
   to,

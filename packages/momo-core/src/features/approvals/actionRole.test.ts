@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ROLE_KEYS } from "../directory/model";
 import {
-  actionApproveConfirmCopy,
   approvalRoleCopy,
   roleDisplayName,
   roleRequiredCopy,
@@ -48,22 +47,6 @@ describe("행동의 결정 권한 낱말 (ADR-0186 부록 A · §5)", () => {
     }
   });
 
-  it("R1 M2: 행동 승인의 확정 문장은 에이전트 재개를 약속하지 않는다", () => {
-    const copy = actionApproveConfirmCopy("admin");
-    expect(copy).toBe("승인하면 서버가 관리자 권한으로 이 행동을 실행해요.");
-    expect(copy).not.toContain("에이전트");
-    expect(copy).not.toContain("이어서");
-  });
-
-  it("역할을 모르면 권한 절을 빼고 말한다 — 없는 사실을 짓지 않는다", () => {
-    expect(actionApproveConfirmCopy(null)).toBe(
-      "승인하면 서버가 이 행동을 실행해요."
-    );
-    expect(actionApproveConfirmCopy("operator")).toBe(
-      "승인하면 서버가 이 행동을 실행해요."
-    );
-  });
-
   it("프로토타입 키가 역할 이름으로 새지 않는다", () => {
     expect(roleDisplayName("constructor")).toBe("constructor");
     expect(roleDisplayName("__proto__")).toBe("__proto__");
@@ -84,10 +67,7 @@ describe("행동의 결정 권한 낱말 (ADR-0186 부록 A · §5)", () => {
     );
   });
 
-  it("#3729: 합성 역할도 확정 문장에 권한 절이 선다 (원문 토큰으로 새지 않는다)", () => {
-    expect(actionApproveConfirmCopy("agent_editor")).toBe(
-      "승인하면 서버가 대상 에이전트의 소유자 또는 관리자 권한으로 이 행동을 실행해요."
-    );
+  it("#3729: 합성 역할 403 문장에 원문 토큰이 새지 않는다", () => {
     expect(roleRequiredCopy("workspace_operator")).not.toContain("workspace_operator");
   });
 

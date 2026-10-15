@@ -8199,32 +8199,23 @@ async function captureScheme(browser, scheme) {
   await approvals.screenshot({ path: approvalsShot });
   shots.push(approvalsShot);
 
+  // #3819: 승인/거부는 한 번에 결정되므로 「확정 화면」이 없다. 장면 이름과 파일 이름은
+  // 캡처 시계 레지스트리가 알고 있어 그대로 두고, 이 프레임은 **승인 버튼에 초점이
+  // 놓인 모습**(키보드 y/n 이 가는 자리)을 찍는다. 클릭하지 않는다 — 클릭은 곧 결정이다.
   beginScene("approvals-confirm");
-  await sceneClick(approvals, approvals.getByTestId("inbox-approval-approve").first());
-  await approvals
-    .getByTestId("inbox-approval-confirm")
-    .first()
-    .waitFor({ state: "visible" });
+  await approvals.getByTestId("inbox-approval-approve").first().focus();
   const approvalsConfirmShot = beginSceneFromShotPath(`${OUT_DIR}/approvals-confirm-${scheme}.png`);
   await approvals.screenshot({ path: approvalsConfirmShot });
   shots.push(approvalsConfirmShot);
 
   //     ③ 호스트 선택기 (이슈 1114). 위 두 프레임이 이미 그것을 담고 있지만, 이
-  //        한 장은 **확정 문장이 목적지를 말하는 순간**을 다른 호스트에서 잡는다:
-  //        사람이 팀 VPS로 바꾼 뒤 무장하면 잠긴 라디오 옆에서 문장이
-  //        「팀 VPS」를 말해야 한다. 두 조각(고른 것 / 말한 것)이 어긋나면 사진
-  //        한 장에서 바로 보인다.
-  await approvals.keyboard.press("Escape");
+  //        한 장은 **다른 호스트를 고른 모습**을 잡는다(#3819: 확정 문장이 없어졌으므로
+  //        고른 라디오가 곧 목적지의 유일한 진술이다).
   await approvals
     .getByTestId(
       "inbox-approval-host-radio-019f9b10-0000-7000-8000-00000000c002"
     )
     .check();
-  await sceneClick(approvals, approvals.getByTestId("inbox-approval-approve").first());
-  await approvals
-    .getByTestId("inbox-approval-confirm")
-    .first()
-    .waitFor({ state: "visible" });
   const spawnPickerShot = beginSceneFromShotPath(`${OUT_DIR}/approvals-host-picker-${scheme}.png`);
   await approvals.screenshot({ path: spawnPickerShot });
   shots.push(spawnPickerShot);

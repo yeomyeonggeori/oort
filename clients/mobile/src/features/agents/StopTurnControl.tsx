@@ -93,7 +93,7 @@ export function StopTurnControl({
     // 엄지 밑의 버튼이 방금 의미를 바꿨다. 화면을 보지 않는 사람에게 그 변화는
     // 소리로만 전달된다 — RN에는 포커스를 옮길 웹의 `focus()`가 없다.
     AccessibilityInfo.announceForAccessibility(
-      `${consequence} 중단할지 묻습니다.`,
+      `${consequence} 중단할지 물어요.`,
     );
   }, [consequence]);
 
@@ -132,7 +132,7 @@ export function StopTurnControl({
         // 이 탭은 중단하지 않는다 — 중단할지 묻는다. 라벨이 행동을 약속하면
         // 화면을 보지 않는 사람은 이미 멈춘 줄 알고 손을 뗀다.
         accessibilityLabel="실행 중단, 확인 필요"
-        accessibilityHint="누르면 중단 확정 여부를 묻습니다."
+        accessibilityHint="누르면 중단할지 물어요."
         onPress={arm}
         hitSlop={8}
         style={({pressed}) => [styles.quiet, pressed && styles.pressed]}
@@ -181,8 +181,8 @@ export function StopTurnControl({
       </View>
       {tooFast ? (
         <Text style={styles.hint} testID={`${testIDPrefix}-too-fast`}>
-          방금 누른 탭과 이어진 동작이라 보내지 않았습니다. 문장을 확인하고 다시
-          누르세요.
+          방금 누른 탭과 이어진 동작이라 보내지 않았어요. 문장을 확인하고 다시
+          눌러 주세요.
         </Text>
       ) : null}
     </View>

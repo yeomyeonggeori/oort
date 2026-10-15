@@ -152,6 +152,10 @@ pub struct MentionCandidate {
     /// owner. ADR-0162 증보 2 B6: only then does it carry any DM, so only then
     /// is "ask the owner to approve this DM" a true sentence.
     pub hosted_confirmed_by_owner: bool,
+    /// `agent.thread_reply_wake` (ADR-0162 증보 5 W3, #3851): off means a plain
+    /// human reply in a thread this agent opened never wakes it. Mentions are
+    /// not affected.
+    pub thread_reply_wake: bool,
 }
 
 /// Read every active agent of the workspace, with its channel membership and
@@ -217,7 +221,7 @@ pub async fn load_mention_candidates_in_tx(
                      AND acr.status = 'confirmed' \
                 ) AS is_external_runtime, \
                 a.invocation_scope, a.subscription_harness, a.owner_human_id, a.uses_owner_key, \
-                a.personal_agent, \
+                a.personal_agent, a.thread_reply_wake, \
                 (SELECT o.display_name FROM member o \
                   WHERE o.workspace_id = m.workspace_id AND o.id = a.owner_human_id) \
                   AS owner_display_name, \
@@ -324,6 +328,7 @@ pub async fn load_mention_candidates_in_tx(
             hosted_confirmed_by_owner: row
                 .try_get("hosted_confirmed_by_owner")
                 .map_err(DbError::from)?,
+            thread_reply_wake: row.try_get("thread_reply_wake").map_err(DbError::from)?,
         });
     }
     Ok(candidates)
@@ -954,6 +959,7 @@ mod tests {
             owner_member_id: None,
             owner_display_name: None,
             hosted_confirmed_by_owner: false,
+            thread_reply_wake: true,
         }
     }
 

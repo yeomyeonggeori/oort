@@ -1,4 +1,3 @@
-import { Bot } from "lucide-react";
 import { Link } from "react-router-dom";
 import { uuidEq, type Channel } from "@momo/core/lib/api";
 import {
@@ -14,10 +13,12 @@ import {
 } from "@/features/agents/turnCopy";
 import {
   channelLabelParts,
+  memberFor,
   memberNameParts,
   type Directory,
 } from "@/features/workspace/useWorkspace";
 import { cn } from "@/design/lib/cn";
+import { MemberAvatar } from "@/features/common/MemberAvatar";
 
 // =============================================================================
 // 작업 중 카드 (DS2-6 #2718, 시안 A `.a-side .a-now`).
@@ -108,9 +109,7 @@ export function SidebarNowCard({
       aria-label={accessible}
     >
       <span className="flex min-w-0 items-center gap-2" aria-hidden="true">
-        <span className="sidebar-now-agent">
-          <Bot />
-        </span>
+        <MemberAvatar member={memberFor(directory, lead.memberId) ?? null} size="sm" />
         <span className="sidebar-now-name min-w-0 truncate text-ink">
           {name.name}
         </span>

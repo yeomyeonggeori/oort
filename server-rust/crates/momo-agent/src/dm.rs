@@ -60,6 +60,10 @@ pub enum Addressing {
     Mention,
     /// A 1:1 DM with exactly one agent counterpart — this module's rule.
     DirectMessage,
+    /// ADR-0162 증보 5 W1 (#3851): a human's plain reply in a thread this agent
+    /// opened ([`crate::thread_wake`]). Nobody typed a mention here either; the
+    /// label is the run's 「트리거 표시」 (W2).
+    ThreadReply,
 }
 
 impl Addressing {
@@ -69,6 +73,7 @@ impl Addressing {
         match self {
             Addressing::Mention => "mention",
             Addressing::DirectMessage => "dm_implicit",
+            Addressing::ThreadReply => "thread_reply",
         }
     }
 }
@@ -349,6 +354,7 @@ mod tests {
     fn the_addressing_labels_are_stable() {
         assert_eq!(Addressing::Mention.as_label(), "mention");
         assert_eq!(Addressing::DirectMessage.as_label(), "dm_implicit");
+        assert_eq!(Addressing::ThreadReply.as_label(), "thread_reply");
 
         let mut detail = serde_json::json!({"reason": "queued"});
         stamp_addressing(&mut detail, Addressing::DirectMessage);

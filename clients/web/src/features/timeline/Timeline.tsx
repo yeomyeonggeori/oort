@@ -31,6 +31,8 @@ function TimelineTail() {
 const TIMELINE_COMPONENTS = { Footer: TimelineTail };
 import {
   threadRollup,
+  uuidEq,
+  type AgentRunProgress,
   type Channel,
   type Message,
   type RosterMember,
@@ -59,6 +61,10 @@ import {
 } from "@momo/core/features/timeline/deletedFold";
 import { isStreamRunEnded } from "@momo/core/features/timeline/streamStop";
 import { useEndedRuns } from "@/features/agents/endedRuns";
+import { useChannelRuns } from "@/features/agents/agentRunProgressStore";
+import { runsByTriggerMessage } from "@momo/core/features/agents/runStatusLine";
+
+const NO_RUNS: readonly AgentRunProgress[] = [];
 import {
   DayDivider,
   MessageRow,
@@ -448,6 +454,17 @@ export function Timeline({
   // 내려 보낸다. 행마다 구독하면 아무 run 이나 끝날 때 화면의 모든 줄이 다시 그려지고,
   // 이 목록은 가상화되어 있어서 그 비용이 바로 스크롤로 나온다.
   const endedRuns = useEndedRuns();
+  // #3824 — 내가 보낸 메시지 아래 상태 줄. 이 채널의 run을 여기서 한 번 구독하고, 행에는
+  // 그 메시지가 일으킨 run만 내려 보낸다(같은 이유: 가상 리스트 전체 재렌더 방지).
+  const timelineChannelId = messages[0]?.channelId ?? null;
+  const channelRuns = useChannelRuns(timelineChannelId);
+  const runsByMessage = useMemo(() => runsByTriggerMessage(channelRuns), [channelRuns]);
+  const runStatusFor = (message: Message): readonly AgentRunProgress[] | undefined => {
+    // 대화 표면(행 동작이 있는 곳)에서 내가 보낸 메시지에만 선다.
+    if (myMemberIdForFold === undefined) return undefined;
+    if (!uuidEq(message.authorMemberId, myMemberIdForFold)) return undefined;
+    return runsByMessage.get(message.id.toLowerCase()) ?? NO_RUNS;
+  };
 
   // Derived during render, not in an effect: virtuoso has to receive the new
   // `data` and the lowered `firstItemIndex` together or the correction lands a
@@ -877,6 +894,7 @@ export function Timeline({
               onOpenWorkSession={onOpenWorkSession}
               onResend={onResend}
               runEnded={isStreamRunEnded(item.message, endedRuns)}
+              runStatus={runStatusFor(item.message)}
             />
           );
         }}

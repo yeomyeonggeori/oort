@@ -3766,6 +3766,60 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {description: Active human channel membership required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
 
+  /v1/workspaces/{workspaceId}/agent-runs:
+    get:
+      tags: [agents]
+      operationId: listActiveAgentRuns
+      summary: What is running now in the channels the caller is a member of, with per-agent counts.
+      description: >
+        ADR-0200 증보 2026-10-15 R1 (ADR-0202 D2). Every non-terminal run
+        (`queued`, `running`, `awaiting_approval`, `paused`; `claimed` is the
+        derived phase of a leased `queued` run) in a channel the caller is an
+        active member of — unarchived, not left; a DM's runs are visible to its
+        two people only — newest first, in the same row shape as the channel
+        progress read. Every agent kind (hosted, managed, BYOA, team AI) and
+        every trigger (mention, work) is listed. `scope=mine` narrows to runs the
+        caller requested (the author of a mention run's trigger message, or the
+        person who queued a work run); channel membership still applies on top.
+        `agents[]` gives each agent with at least one listed run its per-phase
+        counts over the whole visible set in that scope (independent of `limit`
+        and `cursor`) and `activeTotal`, the agent's non-terminal runs in the
+        whole workspace as a bare number. No id, channel, requester or title of
+        a run in a channel the caller cannot see appears anywhere; an agent with
+        no visible run is not listed. Human members only. The channel progress
+        read and the channel run list are unchanged.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: state
+          in: query
+          description: Only `active` is supported; absent means `active`. Any other value is a 400.
+          schema: {type: string, enum: [active], default: active}
+        - name: scope
+          in: query
+          description: >
+            `team` (default) = every visible run; `mine` = runs the caller
+            requested. Any other value is a 400.
+          schema: {type: string, enum: [mine, team], default: team}
+        - name: cursor
+          in: query
+          description: >
+            `nextCursor` of the previous page (a run id). A run the caller cannot
+            see is a 400, not an empty page.
+          schema: {type: string, format: uuid}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+      responses:
+        "200":
+          description: One keyset page of running runs, newest first, and per-agent counts.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AgentRunActivePage"}
+        "400": {description: Malformed identifier, unknown state or scope, or a cursor the caller cannot see, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Human workspace member required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
   /v1/workspaces/{workspaceId}/agent-runs/{runId}/events:
     get:
       tags: [agents]
@@ -3791,10 +3845,15 @@ paths:
           in: query
           required: false
           description: >
-            `doorbell` adds the `doorbell_rung` rows (ADR-0200 증보 2026-10-14). Without
-            it they are left out, so a client that predates that kind keeps parsing the
-            ledger. Any other value is a 400.
-          schema: {type: string, enum: [doorbell]}
+            A comma-separated subset of `doorbell` and `tools` (`include=doorbell,tools`).
+            `doorbell` adds the `doorbell_rung` rows (ADR-0200 증보 2026-10-14). `tools` adds
+            the `tool_call` rows — the oort tools the agent called on this run, at most 100,
+            with `tool`, `durationMs` and a closed `code` — plus `toolTally` and
+            `toolCallRowsCapped` (ADR-0200 증보 2026-10-15 T4). Without them those rows and
+            fields are left out, so a client that predates the kinds keeps parsing the
+            ledger. Any other value is a 400; a server that predates `tools` answers 400 to
+            it, and a client then re-reads without it.
+          schema: {type: string, pattern: "^\\s*(doorbell|tools)?\\s*(,\\s*(doorbell|tools)?\\s*)*$"}
       responses:
         "200":
           description: The ledger.
@@ -8143,6 +8202,32 @@ paths:
         step update) is broadcast as work.run.updated (run_id, channel_id, to) on
         the home channel; clients re-read as for sessions. The single read below
         is sessions only; a run card is read from the agent-runs detail.
+
+        Jobs delegated to any agent (#3853, ADR-0202 D3 and D4), opt-in with
+        include=jobs (include=runs,jobs is the same): the run rows widen to every
+        agent kind's work runs (hosted, managed, BYOA, team AI) plus each
+        top-level mention run that became a job, meaning it reported a stage,
+        raised an approval card, reported artifacts, or has run (or ran) for at
+        least 60 seconds. A mention run that is none of those is a short reply
+        and has no row; a sub-run (an agent's run started by another run) belongs
+        to its parent. Visibility, the session-link dedupe and the 30-day window
+        are unchanged, so a channel the caller is not an active member of
+        contributes no row and no count. A jobs run row also carries trigger
+        (work, mention or thread_reply), phase (the ADR-0200 word: queued,
+        claimed, running, awaiting_approval, paused, succeeded, failed,
+        timed_out, cancelled), durationMs once finished, resultMessageId (the
+        agent's newest text message of the run; the id only) and agentReported
+        (the closed code-task result the agent reported, ADR-0162 증보 5 C1 and
+        C2, never verified by the server). A mention run's requestedBy is the
+        person who wrote the mention. who=mine narrows the page to rows the
+        caller asked for (requestedBy) or owns (session owner), inside the same
+        visibility; who=team (the default) is the whole visible set. A page
+        answered to a request that sent who or include=jobs echoes who; with
+        neither parameter the response is byte-for-byte the earlier one (no new
+        key appears). work.run.updated now fires for every agent kind's work
+        runs on each board transition and for top-level mention runs on their
+        final transition (done, failed or stopped); nothing is emitted when a
+        mention run crosses 60 seconds, so a client also refetches on focus.
       security:
         - bearerAuth: []
       parameters:
@@ -8150,10 +8235,18 @@ paths:
         - name: include
           in: query
           required: false
-          description: "runs adds hosted agents' work runs (D13). Anything else, or omitted, lists sessions only so a client that keys rows on sessionId is never handed a run row."
+          description: "Comma-separated, closed: runs adds hosted agents' work runs (D13); jobs adds every agent's delegated work and the job fields (ADR-0202 D4) and implies runs. Omitted lists sessions only so a client that keys rows on sessionId is never handed a run row. Any other token is 400 (message \"invalid include\")."
           schema:
             type: string
-            enum: [runs]
+            pattern: "^(runs|jobs)(,(runs|jobs))*$"
+        - name: who
+          in: query
+          required: false
+          description: "ADR-0202 D2: mine = rows the caller asked for or owns; team (default) = every row the caller may see. Any other value is 400 (message \"invalid who\")."
+          schema:
+            type: string
+            enum: [mine, team]
+            default: team
         - name: limit
           in: query
           required: false
@@ -8178,7 +8271,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/SharedWorkSessionListResponse"
         "400":
-          description: Malformed cursor (message "invalid cursor").
+          description: Malformed cursor (message "invalid cursor"), an unknown include token ("invalid include") or an unknown who ("invalid who").
           content:
             application/json:
               schema:
@@ -10789,9 +10882,11 @@ paths:
         server capability, so the advertised catalog is exactly the callable
         one. A credential carrying only `agent:port:connect` lists no tool and
         may call none; a tool outside the caller's view answers byte-identically
-        to a tool that does not exist. The ten tools are `oort_inbox_read`,
+        to a tool that does not exist. The tools are `oort_inbox_read`,
         `oort_conversation_read`, `oort_message_post`, `oort_jobs_claim`,
-        `oort_job_renew`, `oort_job_release`, `oort_run_event`,
+        `oort_job_start` (ADR-0162 증보 4: claim + start report + latest
+        conversation in one call, same scopes and gate as the tools it
+        combines), `oort_job_renew`, `oort_job_release`, `oort_run_event`,
         `oort_run_complete`, `oort_action_propose` (ADR-0186 D2) and
         `oort_card_suggest` (ADR-0186 증보 G1).
         ADR-0162 증보 3 adds two optional report fields to existing tools, no new
@@ -10802,7 +10897,20 @@ paths:
         `branch`, `added`, `deleted`, `commits`, all optional; stored in
         `agent_run.output.artifacts`; a malformed one refuses the whole
         completion with nothing written). Both are self-reports the server does
-        not verify. Each tool binds an existing domain rather than a second one, and job authority travels only as an opaque `leaseHandle` that
+        not verify. ADR-0162 증보 5 C1-C3 (#3841) adds the code-task result
+        contract to the same closed `artifacts` object: `resultKind`
+        (`pr_opened`, `branch_only`, `vm_only`, `no_change`), `tests`
+        (`{passed, failed, notRun}`, 0..100000), `nextAction` (`merge_ok`,
+        `please_test`, `blocked`, `none`), `commitSha` (7..40 hex, stored
+        lowercase) and `toolCounts` (`{run, edit, read, search, web, other}`,
+        0..100000), all optional with cross rules (`tests`/`nextAction`/
+        `commitSha` need `resultKind`; `pr_opened` needs `prUrl`; `merge_ok`
+        needs `pr_opened` and no failed test). A refusal inside `artifacts`
+        keeps -32602 and adds `error.data` `{field, rule, allowed?,
+        requires?}` (`rule` one of `enum`, `required`, `forbidden`, `range`,
+        `format`, `requires`) and a one-line message naming the field; the
+        value sent is never echoed. The run read returns these fields as
+        `agentReported`. Each tool binds an existing domain rather than a second one, and job authority travels only as an opaque `leaseHandle` that
         carries the channel its work came from, so the confirming human's exact
         channel grant is re-checked on every later verb. Arguments are validated
         against the tool's published `inputSchema` before execution, so
@@ -13566,6 +13674,14 @@ components:
             On a profile PUT: sets `agent.model_source`; omitted leaves it
             unchanged. Ignored on the create body's `profile` (the create body's
             own `modelSource` decides).
+        threadReplyWake:
+          type: boolean
+          description: >-
+            On a profile PUT: sets `agent.thread_reply_wake` (ADR-0162 증보 5
+            W3, #3851); omitted leaves it unchanged. Ignored on create (a new
+            agent starts with it on). Off means a person's reply without a
+            mention in a thread this agent opened does not wake it; mentions
+            are unaffected.
         instructions:
           type: string
           description: UTF-8 content is limited to 8192 bytes by the server.
@@ -13611,9 +13727,15 @@ components:
       type: object
       required:
         [agentMemberId, workspaceId, instructions, enabledTools, triggers, paused,
-         version, updatedBy, updatedAtMs, modelSource]
+         version, updatedBy, updatedAtMs, modelSource, threadReplyWake]
       properties:
         modelSource: {$ref: "#/components/schemas/AgentModelSource"}
+        threadReplyWake:
+          type: boolean
+          description: >-
+            ADR-0162 증보 5 W3 (#3851) — whether a person's reply without a
+            mention, in a thread this agent opened, wakes it as a job. Default
+            true.
         agentMemberId: {type: string, format: uuid}
         workspaceId: {type: string, format: uuid}
         instructions: {type: string}
@@ -13750,6 +13872,53 @@ components:
           type: array
           items: {$ref: "#/components/schemas/AgentRunProgress"}
 
+    AgentRunActivePage:
+      type: object
+      additionalProperties: false
+      required: [runs, agents]
+      properties:
+        runs:
+          type: array
+          maxItems: 100
+          items: {$ref: "#/components/schemas/AgentRunProgress"}
+        agents:
+          type: array
+          description: >
+            One entry per agent with at least one run in the visible set of this
+            scope, ordered by agent id. Counts cover the whole set, not the page.
+          items: {$ref: "#/components/schemas/AgentRunActiveCounts"}
+        nextCursor:
+          type: string
+          format: uuid
+          description: Present only when a further page exists.
+
+    AgentRunActiveCounts:
+      type: object
+      additionalProperties: false
+      required: [agentMemberId, visible, activeTotal]
+      properties:
+        agentMemberId: {type: string, format: uuid}
+        visible:
+          type: object
+          additionalProperties: false
+          description: Runs of this agent the caller can see in this scope, by derived phase.
+          required: [queued, claimed, running, awaitingApproval, paused]
+          properties:
+            queued: {type: integer, minimum: 0}
+            claimed: {type: integer, minimum: 0}
+            running: {type: integer, minimum: 0}
+            awaitingApproval: {type: integer, minimum: 0}
+            paused: {type: integer, minimum: 0}
+        activeTotal:
+          type: integer
+          minimum: 0
+          description: >
+            The agent's non-terminal runs in the whole workspace — every channel
+            and every requester — as one number (never less than the visible
+            sum). Runs in channels the caller cannot see are counted here and
+            named nowhere. Several at once may run in parallel for a hosted
+            agent; the number does not assert that they do.
+
     AgentRunEvent:
       type: object
       additionalProperties: false
@@ -13763,7 +13932,10 @@ components:
             200-row cap can drop old stage rows, so never use it as a key.
         kind:
           type: string
-          enum: [queued, claimed, started, stage, paused, resumed, approval_requested, approval_decided, succeeded, failed, timed_out, cancelled, doorbell_rung]
+          description: >
+            `doorbell_rung` only with `include=doorbell`; `tool_call` only with
+            `include=tools`. Clients reject a ledger holding a kind they do not know.
+          enum: [queued, claimed, started, stage, paused, resumed, approval_requested, approval_decided, succeeded, failed, timed_out, cancelled, doorbell_rung, tool_call]
         stage:
           type: string
           maxLength: 80
@@ -13773,10 +13945,36 @@ components:
           description: >
             Machine code written by the server (`approval_expired`, `approved`, …). On
             `doorbell_rung` it is `<edge>_<result>` (`leading|trailing|urgent` + `ok|failed`),
-            never an HTTP status or host.
+            never an HTTP status or host. On `tool_call` it is `ok` or one closed failure
+            code (`invalid_arguments`, `not_authorized`, `unavailable`, `conflict`,
+            `already_claimed`, `claim_expired`, `internal`) — never an error message.
         approvalId: {type: string, format: uuid}
         actorMemberId: {type: string, format: uuid}
+        tool:
+          type: string
+          pattern: "^oort_[a-z_]{1,40}$"
+          description: >
+            `tool_call` only: the oort tool the agent called, recorded by the server
+            (ADR-0200 증보 2026-10-15 T1). Never the arguments or the result.
+        durationMs:
+          type: integer
+          minimum: 0
+          maximum: 600000
+          description: "`tool_call` only: how long the server took, measured by the server."
         createdAtMs: {type: integer, format: int64}
+
+    AgentRunToolTally:
+      type: object
+      additionalProperties: false
+      required: [tool, ok, error, durationMsSum]
+      description: >
+        One tool's totals on one run (ADR-0200 증보 2026-10-15 T3). Counts every recorded
+        call, past the 100-row cap of `tool_call` rows too.
+      properties:
+        tool: {type: string, pattern: "^oort_[a-z_]{1,40}$"}
+        ok: {type: integer, format: int64, minimum: 0}
+        error: {type: integer, format: int64, minimum: 0}
+        durationMsSum: {type: integer, format: int64, minimum: 0}
 
     AgentRunEvents:
       type: object
@@ -13786,8 +13984,18 @@ components:
         runId: {type: string, format: uuid}
         events:
           type: array
-          maxItems: 200
+          maxItems: 300
+          description: At most 200 rows, plus at most 100 `tool_call` rows with `include=tools`.
           items: {$ref: "#/components/schemas/AgentRunEvent"}
+        toolTally:
+          type: array
+          description: Present only with `include=tools`.
+          items: {$ref: "#/components/schemas/AgentRunToolTally"}
+        toolCallRowsCapped:
+          type: boolean
+          description: >
+            Present only with `include=tools`. True when calls were counted past the
+            100-row cap (the tally holds more calls than there are `tool_call` rows).
 
     AgentRunCancelResponse:
       type: object
@@ -13889,7 +14097,9 @@ components:
         oort_conversation_read, `messages:write` -> oort_message_post and
         oort_card_suggest (ADR-0186 증보 G5: a suggestion card is a message in
         the handle's channel and grants nothing more),
-        `agent:jobs:read` -> oort_jobs_claim/oort_job_renew/oort_job_release,
+        `agent:jobs:read` -> oort_jobs_claim/oort_job_start/oort_job_renew/oort_job_release
+        (oort_job_start also re-proves agent:runs:callback for its start report and
+        messages:read for its conversation inside the call),
         `agent:runs:callback` -> oort_run_event/oort_run_complete,
         `workspace:propose` -> oort_action_propose (ADR-0186 D2: propose only —
         it opens no REST route at all, and the change it asks for is executed by
@@ -16494,6 +16704,68 @@ components:
           type: integer
           format: int64
           description: Epoch seconds. Orders the list.
+        trigger:
+          type: string
+          enum: [work, mention, thread_reply]
+          description: "include=jobs run row only (ADR-0202 D3): what made this job."
+        phase:
+          type: string
+          enum: [queued, claimed, running, awaiting_approval, paused, succeeded, failed, timed_out, cancelled]
+          description: "include=jobs run row only: the ADR-0200 phase (claimed = queued with a leased delivery job)."
+        durationMs:
+          type: integer
+          format: int64
+          description: "include=jobs run row only, once finished: endedAtMs minus startedAtMs."
+        resultMessageId:
+          type: string
+          format: uuid
+          description: "include=jobs run row only: the agent's newest live text message of this run. The id only."
+        agentReported:
+          $ref: "#/components/schemas/AgentReportedResult"
+
+    AgentReportedResult:
+      type: object
+      required: [resultKind, tests, nextAction, commitSha, toolCounts]
+      additionalProperties: false
+      description: >
+        include=jobs run row only, when the agent reported at least one field:
+        the closed code-task result of ADR-0162 증보 5 C1 and C2, as the agent
+        reported it. The server re-checks the closed vocabulary on read but does
+        not verify any of it; clients label it 「에이전트 보고」.
+      properties:
+        resultKind:
+          type: string
+          nullable: true
+          enum: [pr_opened, branch_only, vm_only, no_change]
+        tests:
+          type: object
+          nullable: true
+          required: [passed, failed, notRun]
+          additionalProperties: false
+          properties:
+            passed: {type: integer, minimum: 0, maximum: 100000}
+            failed: {type: integer, minimum: 0, maximum: 100000}
+            notRun: {type: integer, minimum: 0, maximum: 100000}
+        nextAction:
+          type: string
+          nullable: true
+          enum: [merge_ok, please_test, blocked, none]
+        commitSha:
+          type: string
+          nullable: true
+          pattern: "^[0-9a-f]{7,40}$"
+        toolCounts:
+          type: object
+          nullable: true
+          additionalProperties: false
+          description: Only the reported categories.
+          properties:
+            run: {type: integer, minimum: 0, maximum: 100000}
+            edit: {type: integer, minimum: 0, maximum: 100000}
+            read: {type: integer, minimum: 0, maximum: 100000}
+            search: {type: integer, minimum: 0, maximum: 100000}
+            web: {type: integer, minimum: 0, maximum: 100000}
+            other: {type: integer, minimum: 0, maximum: 100000}
 
     SharedWorkSessionListResponse:
       type: object
@@ -16508,6 +16780,10 @@ components:
           type: string
           nullable: true
           description: Opaque; present only when more visible rows follow. There is no total.
+        who:
+          type: string
+          enum: [mine, team]
+          description: "ADR-0202 D4: the who this page answered, present only when the request sent who or include=jobs. A client tells a server that knows include=jobs from one that does not by this echo."
 
     SharedWorkSessionResponse:
       type: object

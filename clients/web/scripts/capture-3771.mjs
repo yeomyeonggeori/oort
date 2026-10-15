@@ -308,20 +308,9 @@ async function openChannel(context) {
   return page;
 }
 
-/**
- * 무장 → 시간 게이트(400ms) → 확정. 이 레인은 시계를 얼리지 않으므로 열린다.
- *
- * **키보드로 민다** (design-review R2 H-R2-1). 포인터로 확정하면 착지한 요소가
- * `:focus-visible` 에 걸리지 않아 링이 그려지지 않고, 그러면 이 배치가 새로 연
- * 두 키보드 정거장(성공 착지·403 착지)의 링을 사진으로도 실측으로도 잴 수 없다.
- * 가드는 우회하지 않는다: 무장 뒤 600ms 를 기다리고, Enter 는 한 번씩만 누른다
- * (반복 keydown 은 `ApprovalActions` 가 거절한다).
- */
+/** 승인 한 번 (#3819 — 확정 단계가 없다). 키보드로 민다. */
 async function decide(page) {
   await page.getByTestId("approval-approve").first().focus();
-  await page.keyboard.press("Enter");
-  await page.getByTestId("approval-commit").first().waitFor({ state: "visible" });
-  await page.waitForTimeout(600);
   await page.keyboard.press("Enter");
 }
 
