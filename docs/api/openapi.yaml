@@ -10806,7 +10806,20 @@ paths:
         `branch`, `added`, `deleted`, `commits`, all optional; stored in
         `agent_run.output.artifacts`; a malformed one refuses the whole
         completion with nothing written). Both are self-reports the server does
-        not verify. Each tool binds an existing domain rather than a second one, and job authority travels only as an opaque `leaseHandle` that
+        not verify. ADR-0162 증보 5 C1-C3 (#3841) adds the code-task result
+        contract to the same closed `artifacts` object: `resultKind`
+        (`pr_opened`, `branch_only`, `vm_only`, `no_change`), `tests`
+        (`{passed, failed, notRun}`, 0..100000), `nextAction` (`merge_ok`,
+        `please_test`, `blocked`, `none`), `commitSha` (7..40 hex, stored
+        lowercase) and `toolCounts` (`{run, edit, read, search, web, other}`,
+        0..100000), all optional with cross rules (`tests`/`nextAction`/
+        `commitSha` need `resultKind`; `pr_opened` needs `prUrl`; `merge_ok`
+        needs `pr_opened` and no failed test). A refusal inside `artifacts`
+        keeps -32602 and adds `error.data` `{field, rule, allowed?,
+        requires?}` (`rule` one of `enum`, `required`, `forbidden`, `range`,
+        `format`, `requires`) and a one-line message naming the field; the
+        value sent is never echoed. The run read returns these fields as
+        `agentReported`. Each tool binds an existing domain rather than a second one, and job authority travels only as an opaque `leaseHandle` that
         carries the channel its work came from, so the confirming human's exact
         channel grant is re-checked on every later verb. Arguments are validated
         against the tool's published `inputSchema` before execution, so

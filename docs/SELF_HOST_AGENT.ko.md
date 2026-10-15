@@ -1414,7 +1414,11 @@ credential로, 터널이 아니라 VM 루프백에 POST한다.
       재시도하지 않는다.
    g) 오류는 고정된 답이다. HTTP 400 / -32602: 호출이 잘못됐다(잘못된 stage 나
       artifacts 키는 호출 전체를 거절하고 lease 는 그대로다). 고쳐서
-      같은 handle 로 다시 보낸다. HTTP 409 / -32005: lease 를 잃었거나 run 이
+      같은 handle 로 다시 보낸다. error.data 가 artifacts 칸을 짚으면
+      (error.data.field, error.data.rule, 정해진 값이 있으면 error.data.allowed)
+      그 칸만 고쳐서 oort_run_complete 를 다시 부른다. 고쳐 보내기는 최대 2번.
+      그래도 거절되면 artifacts 없이 완료하고 결과는 body 에 쓴다. 같은 호출을
+      그대로 다시 보내지 않는다. HTTP 409 / -32005: lease 를 잃었거나 run 이
       이미 끝났거나 취소됐다. 그 job 을 멈추고 재시도하지 않으며 그 폴더를
       지운다(다른 job 은 계속한다). HTTP 409 / -32004:
       에이전트가 일시정지·연결 해제됐거나 대상이 보이지 않는다. 멈춘다.
@@ -1485,7 +1489,33 @@ dots도 같은 패턴이고 곧 지원한다. 이 문서는 dots에 대한 개�
 Enterprise 호스트, 경로는 정확히 `/<owner>/<repo>/pull/<n>`, 쿼리·조각은
 버림), `branch`(git 브랜치 이름 꼴, 최대 200자(800은 바이트 여유일 뿐); 공백·`~ ^ : ? * [`·역슬래시·제어 문자 불가, 절대 경로·맨 앞 `~`·드라이브 문자 불가),
 `added` / `deleted` / `commits`(0~2147483647 정수). 커밋 제목·파일 이름·원격
-URL의 키는 없어서 보낼 수 없다. lease가 살아 있는 동안 잘못된 `artifacts`(또는
+URL의 키는 없어서 보낼 수 없다.
+
+**코드 작업 결과 칸(ADR-0162 증보 5 C1/C2).** 이것도 모두 선택이고 닫혀 있다.
+`resultKind`(`pr_opened` / `branch_only` / `vm_only` / `no_change`), `tests`
+(`{passed, failed, notRun}`, 셋 다 필수, 각 0~100000 정수), `nextAction`
+(`merge_ok` / `please_test` / `blocked` / `none`), `commitSha`(16진수 7~40자,
+소문자로 저장), `toolCounts`(`{run, edit, read, search, web, other}`, 각각 선택,
+0~100000 정수). 서로 맞아야 한다: `tests`·`nextAction`·`commitSha`는
+`resultKind`가 있어야 받는다. `pr_opened`는 `prUrl`이 필요하다. `branch_only`는
+`branch`가 필요하고 `prUrl`은 안 된다. `vm_only`는 `prUrl`·`branch`가 없다.
+`no_change`는 `prUrl`·`branch`·`commitSha`가 없고 `added` / `deleted` /
+`commits`는 없거나 0이다. `merge_ok`는 `pr_opened`이고 실패한 테스트가 없어야
+한다. `toolCounts`는 `resultKind` 없이 혼자 와도 된다. 원래 다섯 키만 보내는
+루틴은 그대로 통과한다. 서버는 모양만 보고 사실은 확인하지 않는다(PR·커밋·
+테스트 실행을 찾아보지 않는다). run 읽기(`GET /v1/workspaces/{ws}/agent-runs/{run}`)는
+이 다섯 칸을 `agentReported` 하나로 모아 돌려준다. 클라이언트는 이것을
+「에이전트 보고」 꼬리표 아래 그리고, oort 가 직접 잰 값과 섞지 않는다.
+
+거절된 `artifacts`는 어느 칸인지 알려 준다. JSON-RPC 오류는 그대로 `-32602`이고,
+`message`는 `artifacts.resultKind must be one of pr_opened, branch_only,
+vm_only, no_change` 같은 영어 한 줄, `error.data`는 `{field, rule, allowed?,
+requires?}`이며 `rule`은 `enum`·`required`·`forbidden`·`range`·`format`·
+`requires` 중 하나다. 어느 쪽에도 보낸 값은 다시 싣지 않는다. 공개 스키마 뒤에서
+걸린 거절(교차 규칙, 잘못된 `prUrl`·`branch`, 16진수가 아닌 `commitSha`)은 감사
+행에 `field`·`rule`·`attempt`(그 run 의 몇 번째 거절인지)도 남기고, 이때도 값은
+없다. 서버는 횟수로 재시도를 막지 않는다. 막는 것은 루틴이다(고쳐 보내기 최대
+2번, g 단계). lease가 살아 있는 동안 잘못된 `artifacts`(또는
 잘못된 `stage`)는 호출 전체를 HTTP 400 / `-32602`로 거절하고, 그 값은 저장하지
 않으며, 사유 코드만 담은 감사 1행을 남기고, lease는 그대로라서 같은 호출을
 잘못된 부분만 빼고 다시 보낼 수 있다. handle이 죽었거나 run이 이미 끝났다면
@@ -1583,6 +1613,7 @@ oort가 보여 줄 수 있는 것은 에이전트가 **보낸** 것뿐이다: �
 | claim·event·complete 가 lease·종결 규칙을 공유 | `the_job_and_run_tools_share_the_gateway_lease_and_terminal_rules` (`agent_port_tools_conformance_pg.rs`) |
 | 단계: 12개 유지, 나쁜 문자 거절 | `stage_markers_keep_the_latest_twelve_spend_steps_and_refuse_bad_text` |
 | artifacts 저장, 나쁜 것은 완료 전체 거절 | `artifacts_are_stored_when_valid_and_a_bad_one_refuses_the_whole_completion` |
+| 결과 칸: 틀린 칸을 짚고, 보고는 `agentReported` 로 읽힘 | `the_code_result_contract_names_the_bad_field_and_reads_back_as_agent_reported` |
 | 죽은 handle 은 감사 로그를 키우지 못함 | `a_dead_lease_cannot_grow_the_audit_log_with_bad_reports` |
 | lease 길이와 renew | `a_hosted_claim_leases_for_the_hosted_ttl_and_renew_extends_to_it` |
 | 만료됐지만 재claim 없음: 보고·완료 가능 | `an_expired_unreclaimed_hosted_handle_still_reports_and_completes` |

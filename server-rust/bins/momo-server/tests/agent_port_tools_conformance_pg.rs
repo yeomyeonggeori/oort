@@ -6392,7 +6392,7 @@ async fn artifacts_are_stored_when_valid_and_a_bad_one_refuses_the_whole_complet
     for (_, reason) in refused.iter().filter(|(_, reason)| reason.is_some()) {
         assert!(codes.contains(&reason.unwrap()), "{reason:?} in {codes:?}");
     }
-    for audit in &audits {
+    for (index, audit) in audits.iter().enumerate() {
         assert_eq!(audit["tool"], json!("oort_run_complete"));
         let mut keys: Vec<&str> = audit
             .as_object()
@@ -6401,11 +6401,13 @@ async fn artifacts_are_stored_when_valid_and_a_bad_one_refuses_the_whole_complet
             .map(String::as_str)
             .collect();
         keys.sort_unstable();
+        // ADR-0162 증보 5 C3 adds the closed field, rule and attempt — still no value.
         assert_eq!(
             keys,
-            ["reason", "run_id", "schema", "tool"],
+            ["attempt", "field", "reason", "rule", "run_id", "schema", "tool"],
             "no free text: {audit}"
         );
+        assert_eq!(audit["attempt"], json!(index + 1));
     }
     let artifacts_audits: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM audit_log WHERE action='agent.run.artifacts_reported' \
@@ -6486,6 +6488,184 @@ async fn artifacts_are_stored_when_valid_and_a_bad_one_refuses_the_whole_complet
         assert_eq!(structured(&replay)["messageId"], answer);
     }
     assert_eq!(rejected_audits_3516(&su, run).await.len(), audits_before);
+}
+
+/// ADR-0162 증보 5 C1~C3 (#3841) — the code-task result contract, end to end:
+/// a broken cross rule refuses the whole completion with `error.data` naming the
+/// field and rule (never the value) and leaves the lease for a fixed retry; the
+/// audit row counts the attempt; a transport-level enum fault names its allowed
+/// values; the valid report is stored closed (sha lowercased) and read back as
+/// `agentReported` on the run detail; an old five-key routine still completes
+/// and carries no `agentReported`.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_code_result_contract_names_the_bad_field_and_reads_back_as_agent_reported() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (handle, run) = claimed_run_3516(&client, &base, &su, &fixture).await;
+    let complete = |args: Value| {
+        let (client, base, bearer) = (&client, &base, &fixture.hosted_bearer);
+        async move { call(client, base, bearer, "oort_run_complete", args).await }
+    };
+    let before = run_record_3516(&su, run).await;
+    let messages_before = channel_message_count(&su, fixture.workspace, fixture.channel).await;
+    let pr = "https://github.com/acme/app/pull/77";
+
+    // 1. A cross rule (pr_opened without prUrl): refused at the adapter.
+    let (status, answer) = complete(json!({
+        "leaseHandle": handle, "status": "succeeded", "body": "done",
+        "artifacts": {"resultKind": "pr_opened", "branch": "feat/secret-branch-name"}
+    }))
+    .await;
+    assert_eq!(status, 400, "{answer}");
+    assert_eq!(error_code(&answer), -32602);
+    assert_eq!(
+        answer["error"]["data"],
+        json!({"field": "artifacts.prUrl", "rule": "required"})
+    );
+    assert_eq!(
+        answer["error"]["message"],
+        json!("artifacts.prUrl is required when resultKind is pr_opened")
+    );
+
+    // 2. The agent fixes that field; the next rule (merge_ok with failed tests) answers.
+    let (status, answer) = complete(json!({
+        "leaseHandle": handle, "status": "succeeded", "body": "done",
+        "artifacts": {
+            "resultKind": "pr_opened", "prUrl": pr,
+            "tests": {"passed": 3, "failed": 2, "notRun": 0}, "nextAction": "merge_ok"
+        }
+    }))
+    .await;
+    assert_eq!(status, 400, "{answer}");
+    assert_eq!(
+        answer["error"]["data"],
+        json!({"field": "artifacts.nextAction", "rule": "forbidden"})
+    );
+
+    // 3. A closed-value fault is refused by the published schema, naming the
+    //    allowed values — before any transaction, so no audit row.
+    let (status, answer) = complete(json!({
+        "leaseHandle": handle, "status": "succeeded", "body": "done",
+        "artifacts": {"resultKind": "merged-by-bot"}
+    }))
+    .await;
+    assert_eq!(status, 400, "{answer}");
+    assert_eq!(
+        answer["error"]["data"],
+        json!({
+            "field": "artifacts.resultKind", "rule": "enum",
+            "allowed": ["pr_opened", "branch_only", "vm_only", "no_change"]
+        })
+    );
+    assert!(!answer.to_string().contains("merged-by-bot"));
+
+    // Nothing was written by any refusal; the lease is intact.
+    assert_eq!(run_record_3516(&su, run).await, before);
+    assert_eq!(
+        channel_message_count(&su, fixture.workspace, fixture.channel).await,
+        messages_before
+    );
+    let audits = rejected_audits_3516(&su, run).await;
+    assert_eq!(
+        audits.len(),
+        2,
+        "two adapter refusals, none for the schema one"
+    );
+    assert_eq!(audits[0]["field"], json!("artifacts.prUrl"));
+    assert_eq!(audits[0]["rule"], json!("required"));
+    assert_eq!(audits[0]["attempt"], json!(1));
+    assert_eq!(audits[0]["reason"], json!("artifacts_contract_invalid"));
+    assert_eq!(audits[1]["field"], json!("artifacts.nextAction"));
+    assert_eq!(audits[1]["rule"], json!("forbidden"));
+    assert_eq!(audits[1]["attempt"], json!(2));
+    for audit in &audits {
+        let rendered = audit.to_string();
+        for value in ["secret-branch-name", "github.com", "merge_ok", "pr_opened"] {
+            assert!(!rendered.contains(value), "{value} in {rendered}");
+        }
+    }
+
+    // 4. The fixed report completes and is stored in its closed shape.
+    let (status, done) = complete(json!({
+        "leaseHandle": handle, "status": "succeeded", "body": "PR을 열었어요",
+        "artifacts": {
+            "resultKind": "pr_opened", "prUrl": pr, "branch": "feat/3841-x",
+            "tests": {"passed": 12, "failed": 0, "notRun": 1},
+            "nextAction": "merge_ok", "commitSha": "ABCDEF0123",
+            "toolCounts": {"run": 12, "edit": 4, "read": 30}
+        }
+    }))
+    .await;
+    assert_eq!(status, 200, "{done}");
+    let expected_reported = json!({
+        "resultKind": "pr_opened",
+        "tests": {"passed": 12, "failed": 0, "notRun": 1},
+        "nextAction": "merge_ok",
+        "commitSha": "abcdef0123",
+        "toolCounts": {"run": 12, "edit": 4, "read": 30}
+    });
+    let (_, output) = run_record_3516(&su, run).await;
+    assert_eq!(output["artifacts"]["commitSha"], json!("abcdef0123"));
+    assert_eq!(output["artifacts"]["prUrl"], json!(pr));
+    assert_eq!(output["artifacts"]["tests"], expected_reported["tests"]);
+    let reported: Vec<Value> = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE action='agent.run.artifacts_reported' \
+           AND detail->>'run_id'=$1",
+    )
+    .bind(run.to_string())
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(reported.len(), 1);
+    assert_eq!(
+        reported[0]["keys"],
+        json!([
+            "prUrl",
+            "branch",
+            "resultKind",
+            "tests",
+            "nextAction",
+            "commitSha",
+            "toolCounts"
+        ])
+    );
+    assert!(!reported[0].to_string().contains("abcdef0123"));
+
+    // 5. The run detail reads it back under `agentReported`.
+    let detail = |run: Uuid| {
+        let (client, base, jwt, ws) = (&client, &base, &fixture.human_jwt, fixture.workspace);
+        async move {
+            let response = client
+                .get(format!("{base}/v1/workspaces/{ws}/agent-runs/{run}"))
+                .bearer_auth(jwt)
+                .send()
+                .await
+                .expect("run detail");
+            assert_eq!(response.status().as_u16(), 200);
+            response.json::<Value>().await.expect("run detail body")
+        }
+    };
+    let read = detail(run).await;
+    assert_eq!(read["agentReported"], expected_reported, "{read}");
+
+    // 6. An old routine (the five original keys only) still completes, and its
+    //    run carries no `agentReported`.
+    let (old_handle, old_run) = claimed_run_3516(&client, &base, &su, &fixture).await;
+    assert_ne!(old_run, run);
+    let (status, answer) = complete(json!({
+        "leaseHandle": old_handle, "status": "succeeded", "body": "done",
+        "artifacts": {"prUrl": pr, "branch": "feat/old", "added": 1, "deleted": 0, "commits": 1}
+    }))
+    .await;
+    assert_eq!(status, 200, "{answer}");
+    let read = detail(old_run).await;
+    assert!(read.get("agentReported").is_none(), "{read}");
+    assert_eq!(read["output"]["artifacts"]["branch"], json!("feat/old"));
 }
 
 #[tokio::test]
