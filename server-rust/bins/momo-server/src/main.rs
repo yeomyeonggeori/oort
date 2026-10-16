@@ -226,6 +226,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             momo_server::routes::provider_link::PROBE_TIMEOUT,
         ),
     ))
+    // ADR-0203: the co-hosted agent probe dials only the host the operator wrote
+    // in HERMES_BASE_URL, under the same egress policy as a real turn.
+    .with_cohosted(
+        config.cohosted,
+        std::sync::Arc::new(momo_provider_probe::GuardedProviderProbe::new(
+            momo_server::config::provider_probe_policy_from_env(&config.settings),
+            momo_server::routes::provider_link::PROBE_TIMEOUT,
+        )),
+    )
     // B4.3: the per-IP limiter in front of `POST /v1/join`. On by default —
     // `RATE_LIMIT_PER_IP=0` is the only way to turn it off, and the boot warns
     // when someone does.

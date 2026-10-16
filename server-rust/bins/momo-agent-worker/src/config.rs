@@ -131,6 +131,11 @@ pub struct WorkerConfig {
     /// ADR-0201 D7 hard cut for the team AI's model call (default 20 s). A field
     /// so a conformance test can prove the cut without waiting twenty seconds.
     pub team_ai_model_timeout: Duration,
+    /// ADR-0201 증보 v2 H10: the whole tool path's wall clock (default 45 s).
+    pub team_ai_request_deadline: Duration,
+    /// `TEAM_AI_DAILY_SEARCH_CAP` (ADR-0201 증보 v2 H5): provider-side web searches
+    /// the team AI may make per UTC day. `0` turns search off.
+    pub team_ai_daily_search_cap: i64,
 }
 
 /// The team-memory summary loop's knobs (#3162, ADR-0196 D10, plan §6.1/§6.6). Every default
@@ -680,6 +685,14 @@ impl WorkerConfig {
             team_ai_model_timeout: Duration::from_secs(
                 momo_workspace_actions::team_ai::MODEL_TIMEOUT_SECS,
             ),
+            team_ai_request_deadline: Duration::from_secs(
+                momo_workspace_actions::team_ai::TOOL_PATH_DEADLINE_SECS,
+            ),
+            team_ai_daily_search_cap: env_number(
+                "TEAM_AI_DAILY_SEARCH_CAP",
+                momo_workspace_actions::team_ai::DEFAULT_DAILY_SEARCH_CAP,
+            )?
+            .max(0),
         })
     }
 
@@ -711,6 +724,10 @@ impl WorkerConfig {
             team_ai_model_timeout: Duration::from_secs(
                 momo_workspace_actions::team_ai::MODEL_TIMEOUT_SECS,
             ),
+            team_ai_request_deadline: Duration::from_secs(
+                momo_workspace_actions::team_ai::TOOL_PATH_DEADLINE_SECS,
+            ),
+            team_ai_daily_search_cap: momo_workspace_actions::team_ai::DEFAULT_DAILY_SEARCH_CAP,
         }
     }
 

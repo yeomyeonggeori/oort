@@ -599,8 +599,20 @@ pub async fn record_mentions_in_tx(
         return Ok(Vec::new());
     }
 
+    // `aliases` (ADR-0201 증보 v2 H2-6): the member's live aliases, minus any a
+    // real member's handle has since taken (the real member wins at read time
+    // too, H2-4).
     let rows = sqlx::query(
-        "SELECT m.id, m.handle, m.display_name \
+        "SELECT m.id, m.handle, m.display_name, \
+                COALESCE((SELECT array_agg(a.alias_norm ORDER BY a.alias_norm) \
+                            FROM member_handle_alias a \
+                           WHERE a.workspace_id = m.workspace_id AND a.member_id = m.id \
+                             AND NOT EXISTS (SELECT 1 FROM member o \
+                                              WHERE o.workspace_id = a.workspace_id \
+                                                AND o.id <> a.member_id \
+                                                AND o.deleted_at IS NULL \
+                                                AND lower(o.handle) = a.alias_norm)), \
+                         '{}'::text[]) AS aliases \
            FROM membership ms \
            JOIN member m \
              ON m.id = ms.member_id \
@@ -623,8 +635,10 @@ pub async fn record_mentions_in_tx(
         let id: Uuid = row.try_get("id").map_err(DbError::from)?;
         let handle: String = row.try_get("handle").map_err(DbError::from)?;
         let display_name: String = row.try_get("display_name").map_err(DbError::from)?;
-        let named_in_body =
-            body.is_some_and(|body| contains_mention(body, &handle, &display_name, id));
+        let aliases: Vec<String> = row.try_get("aliases").map_err(DbError::from)?;
+        let named_in_body = body.is_some_and(|body| {
+            contains_mention_with_aliases(body, &handle, &display_name, id, &aliases)
+        });
         // `||` rather than a second pass: a message that both quotes someone and
         // `@`s them names them once. The list feeds a jsonb array the recount
         // asks membership questions of, and a duplicate id there would let one
@@ -685,6 +699,34 @@ pub async fn record_mentions_in_tx(
 /// trailing side is checked — matching Swift — which is what lets `hey@bob` and
 /// `(@bob)` both count.
 pub fn contains_mention(text: &str, handle: &str, display_name: &str, member_id: Uuid) -> bool {
+    contains_mention_with_aliases(text, handle, display_name, member_id, &[])
+}
+
+/// [`contains_mention`] plus the member's **aliases** (ADR-0201 증보 v2 H2-6,
+/// `member_handle_alias`): `@alias` / `<@alias>` under the handle's own rules —
+/// case-insensitive, same trailing boundary. This is the one parser; the alias
+/// list is just more spellings of the same member, and what is stored as the
+/// mention is still the member id.
+///
+/// The boundary rule is what keeps an alias from firing inside a longer name:
+/// `@oort-helper` does not mention `oort` (`-` is not a boundary), and
+/// `@오르트야` does not mention `오르트` (a hangul syllable is alphanumeric).
+pub fn contains_mention_with_aliases(
+    text: &str,
+    handle: &str,
+    display_name: &str,
+    member_id: Uuid,
+    aliases: &[String],
+) -> bool {
+    for alias in aliases {
+        let alias = alias.trim();
+        if !alias.is_empty()
+            && (contains_mention_token(text, &format!("@{alias}"), true)
+                || contains_mention_token(text, &format!("<@{alias}>"), true))
+        {
+            return true;
+        }
+    }
     let trimmed_handle = handle.trim();
     let trimmed_name = display_name.trim();
     let id = member_id.to_string().to_lowercase();
@@ -741,6 +783,54 @@ fn is_mention_boundary(character: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ADR-0201 증보 v2 H2-6: an alias is one more spelling under the handle's
+    /// rules — and the boundary keeps it out of longer names.
+    #[test]
+    fn an_alias_mentions_its_member_only_on_a_boundary() {
+        let id = Uuid::from_u128(42);
+        let aliases = vec![
+            "oort".to_string(),
+            "오르트".to_string(),
+            "claude".to_string(),
+        ];
+        for text in [
+            "@oort 안녕",
+            "@OORT 안녕",
+            "<@oort> 안녕",
+            "@오르트 이거 봐줘",
+            "끝에 @오르트",
+            "@claude 요약해 줘",
+            "(@oort)",
+        ] {
+            assert!(
+                contains_mention_with_aliases(text, "oort-helper", "oort 도우미", id, &aliases),
+                "{text}"
+            );
+        }
+        for text in [
+            "@oort-helper 안녕",
+            "@oortly",
+            "@오르트야 안녕",
+            "@claudebot",
+            "oort 혼자",
+            "@grokbot 해 줘",
+        ] {
+            assert!(
+                !contains_mention_with_aliases(text, "zz-handle", "zz", id, &aliases),
+                "{text}"
+            );
+        }
+        // No aliases: exactly `contains_mention`.
+        assert!(!contains_mention_with_aliases(
+            "@oort",
+            "zz-handle",
+            "zz",
+            id,
+            &[]
+        ));
+        assert!(contains_mention("@oort-helper", "oort-helper", "x", id));
+    }
 
     #[test]
     fn the_cursor_never_rewinds_and_never_overruns_the_head() {
