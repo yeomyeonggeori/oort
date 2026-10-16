@@ -84,6 +84,9 @@ export const PHONE_OB = {
  * 밖 바닥에 붙든다: 내용만 스크롤하고, 가장 짧은 폰(375x667)이나 큰 글씨에서도 주 행동이
  * 첫 화면에 온전히 보인다. 바닥에는 행동만 서서(내용에 속한 안내 줄은 스크롤한다) 큰 글씨에서도
  * 바닥이 화면을 먹지 않는다. 내용은 행동 위에서 녹아 사라진다(`pinFade`).
+ *
+ * **입력칸이 있는 장은 이 옵션을 켜지 않는다.** 붙든 바닥은 키보드를 피하지 않아서 키보드가
+ * 행동을 가린다.
  */
 export function OnboardingPhoneScreen({
   top,
@@ -137,7 +140,8 @@ export function OnboardingPhoneScreen({
       {pinned ? (
         <View style={styles.flex}>
           {scroller}
-          {/* 내용이 붙은 행동 밑으로 잘리는 선을 지운다(글자가 반쯤 걸리지 않게). 누름은 가로채지 않는다. */}
+          {/* 내용이 붙은 행동 밑으로 잘리는 선을 지운다. 24는 기본~큰 글씨의 한 줄을 덮는다(가장 큰
+              글씨의 한 줄은 더 높아 반쯤 걸릴 수 있다). 누름은 가로채지 않는다. */}
           <View
             pointerEvents="none"
             style={styles.pinFade}
