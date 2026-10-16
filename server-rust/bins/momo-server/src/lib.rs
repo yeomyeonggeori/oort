@@ -821,6 +821,13 @@ pub fn build_app(state: AppState) -> Router {
                 .delete(routes::provider_link::delete),
         )
         .route("/v1/provider/link/test", post(routes::provider_link::test))
+        // #3886 — 「한도·남은 크레딧」: operator-typed monthly budget + oort's
+        // month-to-date spend ESTIMATE per company. Same operator gate.
+        .route("/v1/provider/limits", get(routes::provider_limits::get))
+        .route(
+            "/v1/provider/limits/budget",
+            put(routes::provider_limits::put_budget),
+        )
         // #3009 — 「기본 AI」 team rows. Instance-global like `provider/link`,
         // so the same MOMO-583 operator gate on both verbs.
         .route(

@@ -621,12 +621,16 @@ mod tests {
     /// `agent_provider_pin` (a link reference per agent, no credential material; reads are
     /// workspace-scoped, writes need the `app.provider_link_admin` operator GUC) and its guard
     /// trigger (own workspace, never an `owner_only` agent).
+    ///
+    /// 137 is #3886's 「월 크레딧」 (ADR-0147 증보 2026-10-16): the RLS-FORCE
+    /// `provider_key_budget` (one operator-typed number per AI company, read and written only under
+    /// `app.provider_link_admin`) and the global Anthropic `model_pricing` rows.
     #[test]
-    fn discovers_contiguous_migrations_001_to_136() {
+    fn discovers_contiguous_migrations_001_to_137() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=136).collect();
+        let expected: Vec<i64> = (1..=137).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -634,7 +638,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=136 under {}",
+            "expected contiguous 001..=137 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -642,7 +646,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("136_agent_provider_pin"));
+            .starts_with("137_provider_key_budget"));
     }
 
     #[test]
