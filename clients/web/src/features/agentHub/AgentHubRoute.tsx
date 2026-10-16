@@ -87,6 +87,7 @@ import {
   type AgentHubSection,
 } from "@momo/core/features/agents/hubModel";
 import { AgentChannelsSection } from "./AgentChannelsSection";
+import { AgentProviderPinSection } from "./AgentProviderPinSection";
 import { EnabledToolsSection } from "./EnabledToolsSection";
 import { RunReportSection } from "./RunReportSection";
 import { StatusChip } from "./StatusChip";
@@ -1071,6 +1072,9 @@ function AgentProfileSection({
           };
         }}
       />
+
+      {/* #3875: 운영자에게만. 서버가 403/404 를 답하면 아무것도 그리지 않는다. */}
+      <AgentProviderPinSection agent={agent} offline={offline} />
 
       <PermissionsSection agent={agent} />
 
