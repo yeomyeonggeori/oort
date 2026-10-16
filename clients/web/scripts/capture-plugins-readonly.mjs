@@ -14,7 +14,9 @@
 //   PROBE=present  경로가 있다 → 405. 설치·권한 버튼이 돌아오는 경계를 한 장 찍는다.
 // 두 값은 서버의 응답일 뿐이고, 화면은 어느 쪽이든 같은 번들이다.
 //
-// 라이트·다크 × 1280 · 900. 목록(첫 화면), 상세(GitHub·Notion·Linear), 전체(키 큰 창).
+// 라이트·다크 × 1280 · 900. 목록(첫 화면), 상세(GitHub·Notion·Linear·Drive), 전체(키 큰 창).
+// 거기에 네 가지 필수 상태(빈 · 로딩 · 오류 · 서버가 앱 목록을 싣지 않아 접힘)와 키보드로 지나가는
+// 포커스 링 장면을 1280에서 더 찍는다.
 // 단언이 하나라도 실패하면 종료 코드 1이다. CAPTURE_ASSERT=0이면 사진만 찍는다.
 // =============================================================================
 
@@ -62,6 +64,9 @@ const auth = {
 const base = { workspaceId, status: "active", channelCount: 1, channelIds: channels.map((c) => c.id), capabilities: [], createdAtMs: 0, updatedAtMs: 0 };
 const roster = [{ ...base, id: memberId, kind: "human", displayName: "곽성재", handle: "seongjae", role: "owner" }];
 
+/** 앱 목록 경로가 어떤 서버처럼 답하는가: ok · empty · error(503) · absent(404) · slow(2.5초 늦게). */
+const scenario = { catalog: "ok" };
+
 function json(route, body, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
@@ -98,7 +103,13 @@ async function installRoutes(context) {
     if (path.endsWith("/hosted-agent-connections")) return json(route, { connections: [] });
     if (path.endsWith("/webhooks")) return json(route, { installations: [] });
     if (path.endsWith("/event-subscriptions")) return json(route, { eventSubscriptions: [] });
-    if (path.endsWith("/plugins")) return json(route, CATALOG);
+    if (path.endsWith("/plugins")) {
+      if (scenario.catalog === "empty") return json(route, { plugins: [], toolPolicy: { plugins: [] } });
+      if (scenario.catalog === "error") return json(route, { error: { code: "unavailable", message: "unavailable" } }, 503);
+      if (scenario.catalog === "absent") return json(route, { error: { code: "not_found", message: "not found" } }, 404);
+      if (scenario.catalog === "slow") await new Promise((done) => setTimeout(done, 2500));
+      return json(route, CATALOG);
+    }
     const detail = path.match(/\/plugins\/([^/]+)$/);
     if (detail) {
       const body = detailFor(decodeURIComponent(detail[1]));
@@ -186,6 +197,15 @@ async function scenes(browser, origin, scheme, viewport) {
   const { context, page } = await open(browser, origin, scheme, { width: viewport.width, height: viewport.height });
   const shot = (name, options = {}) => page.screenshot({ path: resolve(OUT_DIR, `${name}-${tag}.png`), ...options });
   try {
+    // 0) 들어가는 문: AI 허브 › 외부 연결 목차의 「앱」 줄(문구와 설치 개수 칩).
+    await page.goto(`${origin}/#/ai/external`);
+    await page.getByTestId("ai-external-row-apps").waitFor({ timeout: 20_000 });
+    await page.waitForTimeout(700);
+    await shot("index");
+    const appsRow = (await page.getByTestId("ai-external-row-apps").textContent()) ?? "";
+    check(`${tag} 목차: 「앱」 줄은 읽기만 되는 서버에서도 참이다(관리한다고 말하지 않는다)`, appsRow.includes("확인해요") && !appsRow.includes("관리"), appsRow);
+    check(`${tag} 목차: 설치 개수 칩 (서버가 준 설치 2)`, ((await page.getByTestId("ai-external-chip-apps").textContent()) ?? "").trim() === "설치 2");
+
     await page.goto(`${origin}/#/ai/external/apps`);
     await page.getByTestId("plugin-list").waitFor({ timeout: 20_000 });
     await page.getByTestId("plugin-detail").waitFor();
@@ -221,9 +241,113 @@ async function scenes(browser, origin, scheme, viewport) {
 
     // 3) 전체: 키 큰 창에서 처음부터 끝까지(스크롤 없이 한 장).
     await selectPlugin(page, ID.github);
-    await page.setViewportSize({ width: viewport.width, height: viewport.width >= 1200 ? 1300 : 2300 });
+    await page.setViewportSize({ width: viewport.width, height: viewport.width >= 1200 ? 1300 : 1700 });
     await page.waitForTimeout(400);
     await shot("full");
+  } finally {
+    await context.close();
+  }
+}
+
+/** Tab을 눌러 조건을 만족하는 요소에 닿을 때까지. 닿지 못하면 null. */
+async function tabTo(page, predicateSource, max = 80) {
+  for (let step = 1; step <= max; step += 1) {
+    await page.keyboard.press("Tab");
+    const hit = await page.evaluate(`(() => { const el = document.activeElement; return Boolean(el) && (${predicateSource})(el); })()`);
+    if (hit) return step;
+  }
+  return null;
+}
+
+/**
+ * 한 상태 장면. 상태마다 **새 컨텍스트**로 연다: 같은 페이지에서 서버의 답만 바꾸면 react-query가
+ * 앞 장면의 캐시를 먼저 보여 줘서 다른 상태를 찍게 된다.
+ */
+async function stateScene(browser, origin, scheme, state, run) {
+  const viewport = { width: 1280, height: 800 };
+  const tag = `${viewport.width}-${scheme}`;
+  scenario.catalog = state;
+  const { context, page } = await open(browser, origin, scheme, viewport);
+  const shot = (name) => page.screenshot({ path: resolve(OUT_DIR, `${name}-${tag}.png`) });
+  try {
+    await run({ page, tag, shot });
+  } finally {
+    scenario.catalog = "ok";
+    await context.close();
+  }
+}
+
+/** 네 가지 필수 상태. 모두 1280, 한 서버가 앱 목록에 어떻게 답하느냐만 다르다. */
+async function stateScenes(browser, origin, scheme) {
+  // 빈 상태: 서버가 앱을 하나도 등록하지 않았다.
+  await stateScene(browser, origin, scheme, "empty", async ({ page, tag, shot }) => {
+    await page.goto(`${origin}/#/ai/external/apps`);
+    await page.getByTestId("plugins-empty").waitFor({ timeout: 20_000 });
+    await page.waitForTimeout(400);
+    await shot("state-empty");
+    check(`${tag} 빈 상태: 사실대로 말한다`, ((await page.getByTestId("plugins-empty").textContent()) ?? "").includes("보여 줄 앱이 아직 없어요."));
+    check(`${tag} 빈 상태: 안내 줄·검색 컨트롤이 없다`, (await count(page, "plugin-install-closed")) === 0 && (await page.locator("#plugin-search").count()) === 0);
+  });
+
+  // 오류: 서버가 아프다(503). 접지 않고 다시 시도를 준다.
+  await stateScene(browser, origin, scheme, "error", async ({ page, tag, shot }) => {
+    await page.goto(`${origin}/#/ai/external/apps`);
+    await page.getByTestId("plugins-error").waitFor({ timeout: 20_000 });
+    await page.waitForTimeout(400);
+    await shot("state-error");
+    check(`${tag} 오류: 다시 시도가 있고 접힌 안내가 아니다`, (await count(page, "plugins-unavailable")) === 0 && ((await page.getByTestId("plugins-error").textContent()) ?? "").includes("다시 시도"));
+  });
+
+  // 로딩: 높이를 보존하는 중성 막대(목록·상세 두 칸). 응답이 늦다.
+  await stateScene(browser, origin, scheme, "slow", async ({ page, tag, shot }) => {
+    await page.goto(`${origin}/#/ai/external/apps`);
+    await page.getByTestId("plugin-marketplace-skeleton").waitFor({ timeout: 20_000 });
+    await page.waitForTimeout(300);
+    await shot("state-loading");
+    check(`${tag} 로딩: 막대가 서고 목록·설치 컨트롤은 아직 없다`, (await count(page, "plugin-list")) === 0 && (await count(page, "plugin-install-closed")) === 0);
+  });
+
+  // 접힘: 이 서버는 앱 목록 경로가 없다(404). 목차의 「앱」 줄이 접히고, 직접 열어도 오류가 아니다.
+  await stateScene(browser, origin, scheme, "absent", async ({ page, tag, shot }) => {
+    await page.goto(`${origin}/#/ai/external`);
+    await page.getByTestId("ai-external-row-incoming").waitFor({ timeout: 20_000 });
+    await page.waitForTimeout(900);
+    await shot("state-absent-index");
+    check(`${tag} 접힘: 목차에 「앱」 줄도 칩도 없다`, (await count(page, "ai-external-row-apps")) === 0 && (await count(page, "ai-external-chip-apps")) === 0);
+    const indexText = (await page.getByTestId("ai-external-row-incoming").locator("xpath=ancestor::ul").textContent()) ?? "";
+    check(`${tag} 접힘: 목차가 「읽지 못했어요」를 말하지 않는다`, !indexText.includes("읽지 못했어요"));
+    await page.goto(`${origin}/#/ai/external/apps`);
+    await page.getByTestId("plugins-unavailable").waitFor({ timeout: 20_000 });
+    await page.waitForTimeout(400);
+    await shot("state-absent-detail");
+    check(`${tag} 접힘: 직접 열면 미제공 안내이고 오류 배너가 아니다`, (await count(page, "plugins-error")) === 0);
+  });
+}
+
+/** 키보드만으로: 목록 행과 상세의 링크에 포커스 링이 보이는가. */
+async function keyboardScenes(browser, origin, scheme) {
+  const viewport = { width: 1280, height: 800 };
+  const tag = `${viewport.width}-${scheme}`;
+  const { context, page } = await open(browser, origin, scheme, viewport);
+  const shot = (name) => page.screenshot({ path: resolve(OUT_DIR, `${name}-${tag}.png`) });
+  try {
+    scenario.catalog = "ok";
+    await page.goto(`${origin}/#/ai/external/apps`);
+    await page.getByTestId("plugin-list").waitFor({ timeout: 20_000 });
+    await page.getByTestId("plugin-detail").waitFor();
+    await page.waitForTimeout(700);
+    await page.locator("body").click({ position: { x: 5, y: 5 } });
+    const toRow = await tabTo(page, `(el) => (el.getAttribute("data-testid") || "").startsWith("plugin-catalog-")`);
+    check(`${tag} 키보드: Tab으로 앱 목록 행에 닿는다`, toRow !== null, String(toRow));
+    await page.waitForTimeout(150);
+    await shot("focus-row");
+    const toLink = await tabTo(page, `(el) => el.tagName === "A" && el.closest('[data-testid="plugin-detail"]') !== null`, 40);
+    check(`${tag} 키보드: Tab으로 상세의 링크에 닿는다`, toLink !== null, String(toLink));
+    await page.waitForTimeout(150);
+    await shot("focus-link");
+    // 포커스 링이 실제로 그려진다(outline이 있다).
+    const ring = await page.evaluate(() => { const style = getComputedStyle(document.activeElement); return { width: style.outlineWidth, style: style.outlineStyle }; });
+    check(`${tag} 키보드: 링크의 포커스 링이 보인다`, ring.style !== "none" && ring.width !== "0px", JSON.stringify(ring));
   } finally {
     await context.close();
   }
@@ -238,6 +362,11 @@ async function main() {
     for (const scheme of ["light", "dark"]) {
       for (const viewport of [{ width: 1280, height: 800 }, { width: 900, height: 800 }]) {
         await scenes(browser, preview.origin, scheme, viewport);
+      }
+      // 필수 상태와 키보드 장면은 설치 경로가 없는 서버(오늘의 서버)에서만 의미가 있다.
+      if (PROBE === "absent") {
+        await stateScenes(browser, preview.origin, scheme);
+        await keyboardScenes(browser, preview.origin, scheme);
       }
     }
   } finally {

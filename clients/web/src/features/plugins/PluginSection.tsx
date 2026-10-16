@@ -611,7 +611,8 @@ function PluginDetailPanel({
           <PluginIcon plugin={detail} />
           <div className="flex min-w-0 flex-col gap-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-body font-semibold text-ink">{detail.name}</h3>
+              {/* 앱 이름은 아래 섹션 제목(body 굵게)보다 한 단 위다: 이 패널의 주인이 누구인지가 먼저 읽힌다. */}
+              <h3 className="text-title font-semibold text-ink">{detail.name}</h3>
               {detail.official && <StatusChip tone="accent">공식</StatusChip>}
             </div>
             <p className="text-meta text-ink-muted">{pluginSubtitle(detail)} · 버전 {detail.version}</p>
