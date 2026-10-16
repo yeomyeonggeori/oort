@@ -6,6 +6,7 @@ import {
   closedAtSeqOf,
   closedDmsFor,
   dmHiddenByClosure,
+  indexFallbackChannelId,
   parseClosedDmLedger,
   readProjectionPhase,
   reloadClosedDmsForTest,
@@ -236,5 +237,73 @@ describe("외부 저장소: 영속과 새로고침", () => {
     const before = closedDmsFor(WS);
     closeDmOnDevice(OTHER_WS, dm(2), 1, storage);
     expect(closedDmsFor(WS)).toBe(before);
+  });
+});
+
+describe("indexFallbackChannelId: `/` 가 여는 대화 (design-review R1 H1)", () => {
+  const dms = [{ id: dm(1) }, { id: dm(2) }, { id: dm(3) }];
+  const none = () => undefined;
+
+  it("채널이 있으면 첫 채널이다 — 닫은 DM 은 상관이 없다", () => {
+    expect(
+      indexFallbackChannelId({
+        channels: [{ id: "ch-1" }],
+        dms,
+        closed: { [dm(1)]: 5 },
+        latestSeqOf: () => 5,
+        phase: "ready",
+      })
+    ).toBe("ch-1");
+  });
+
+  it("채널이 없으면 첫 DM 이다", () => {
+    expect(
+      indexFallbackChannelId({ channels: [], dms, closed: {}, latestSeqOf: none, phase: "ready" })
+    ).toBe(dm(1));
+  });
+
+  it("닫은 DM 은 후보에서 빠진다 — 닫은 첫 DM 을 `/` 가 도로 열지 않는다", () => {
+    expect(
+      indexFallbackChannelId({
+        channels: [],
+        dms,
+        closed: { [dm(1)]: 5 },
+        latestSeqOf: (id) => (id === dm(1) ? 5 : undefined),
+        phase: "ready",
+      })
+    ).toBe(dm(2));
+  });
+
+  it("새 메시지로 돌아온 DM 은 다시 후보다", () => {
+    expect(
+      indexFallbackChannelId({
+        channels: [],
+        dms,
+        closed: { [dm(1)]: 5 },
+        latestSeqOf: (id) => (id === dm(1) ? 6 : undefined),
+        phase: "ready",
+      })
+    ).toBe(dm(1));
+  });
+
+  it("남은 것이 없으면 null — 본문은 빈 상태를 그린다", () => {
+    expect(
+      indexFallbackChannelId({
+        channels: [],
+        dms: [{ id: dm(1) }],
+        closed: { [dm(1)]: 0 },
+        latestSeqOf: none,
+        phase: "ready",
+      })
+    ).toBeNull();
+    expect(
+      indexFallbackChannelId({ channels: [], dms: [], closed: {}, latestSeqOf: none, phase: "ready" })
+    ).toBeNull();
+  });
+
+  it("투영이 오는 중이면 닫은 DM 은 후보가 아니고, 못 읽었으면 후보다(사이드바와 같은 판정)", () => {
+    const base = { channels: [], dms, closed: { [dm(1)]: 5 }, latestSeqOf: none };
+    expect(indexFallbackChannelId({ ...base, phase: "loading" })).toBe(dm(2));
+    expect(indexFallbackChannelId({ ...base, phase: "error" })).toBe(dm(1));
   });
 });

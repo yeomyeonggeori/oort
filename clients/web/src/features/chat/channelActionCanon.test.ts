@@ -204,6 +204,21 @@ describe("#3963: 새 낱말과 새 쓰기 길도 한 곳이다", () => {
   });
 });
 
+describe("#3963 H1: `/` 가 여는 대화는 한 함수가 고른다", () => {
+  it("사이드바와 ChatShell 이 같은 함수를 부르고, 각자 `dms[0]` 폴백을 쓰지 않는다", () => {
+    // 둘이 따로 고르면 채널이 없는 멤버의 첫 DM 을 닫았을 때 `/` 가 그 DM 을 도로 열어 닫기가 무반응이
+    // 된다(design-review R1 H1). 함수 하나가 닫은 DM 을 후보에서 빼는 일을 지므로 둘은 어긋날 수 없다.
+    const sidebar = "features/sidebar/Sidebar.tsx";
+    const shell = "features/chat/ChatShell.tsx";
+    expect(callers("indexFallbackChannelId").sort()).toEqual(
+      ["features/sidebar/sidebarDmClosure.ts", shell, sidebar].sort()
+    );
+    for (const path of [sidebar, shell]) {
+      expect(fileCode(path)).not.toMatch(/dms\[0\]/);
+    }
+  });
+});
+
 describe("게이트가 실제로 파일을 읽고 있다", () => {
   it("훑은 목록에 두 표면과 정본이 전부 들어 있다", () => {
     const paths = FILES.map((file) => file.path);

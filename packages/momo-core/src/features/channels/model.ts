@@ -204,7 +204,7 @@ export function channelCopyIdLabel(copied: boolean): string {
  * (ADR-0178 D5). 안 읽음이 이미 있는 채널에는 「읽음 처리하기」가 서므로 둘은 한 자리의
  * 두 방향이고, 한 메뉴에 함께 서지 않는다.
  */
-export const CHANNEL_MARK_UNREAD_LABEL = "읽지 않음으로 표시";
+export const CHANNEL_MARK_UNREAD_LABEL = "읽지 않음으로 표시하기";
 
 /** 왕복이 도는 동안. 「명사 + 중」 꼴이다(진행 낱말 게이트). */
 export const CHANNEL_MARK_UNREAD_BUSY_LABEL = "읽지 않음으로 표시 중";

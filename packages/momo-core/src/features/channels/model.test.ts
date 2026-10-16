@@ -349,8 +349,8 @@ describe("channelCopyIdLabel", () => {
 });
 
 describe("읽지 않음으로 표시 · DM 닫기 낱말", () => {
-  it("읽음 처리와 서로 다른 낱말이고, 같은 메뉴의 형제 항목처럼 읽힌다", () => {
-    expect(CHANNEL_MARK_UNREAD_LABEL).toBe("읽지 않음으로 표시");
+  it("읽음 처리와 서로 다른 낱말이고, 같은 메뉴의 형제 항목처럼 -기 동사구다", () => {
+    expect(CHANNEL_MARK_UNREAD_LABEL).toBe("읽지 않음으로 표시하기");
     expect(CHANNEL_MARK_UNREAD_LABEL).not.toBe(CHANNEL_MARK_READ_LABEL);
     expect(CHANNEL_MARK_UNREAD_BUSY_LABEL).not.toBe(CHANNEL_MARK_UNREAD_LABEL);
   });

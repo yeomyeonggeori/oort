@@ -102,6 +102,7 @@ import {
   closeDmOnDevice,
   closedAtSeqOf,
   dmHiddenByClosure,
+  indexFallbackChannelId,
   readProjectionPhase,
   reopenDmOnDevice,
   useClosedDms,
@@ -328,13 +329,10 @@ export function Sidebar({
   // "새 메시지 1"을 붙인다. 읽고 있는 것은 읽은 것이다. 나머지 행은 그대로
   // 서버가 세고(P7), 이 규칙은 오직 열려 있는 한 행에만 적용된다.
   //
-  // (#3963: 아래 「닫은 DM」 판정이 이 값을 먼저 읽어서 위로 올렸다. 계산은 그대로다.)
-  const routePath = useLocation().pathname;
-  const openId = openChannelId(
-    routePath,
-    channels[0]?.id ?? dms[0]?.id ?? null
-  );
-
+  // (#3963: 아래 「닫은 DM」 판정이 이 값을 먼저 읽어서 위로 올렸다.) 인덱스 라우트가 여는 대화는
+  // `ChatShell` 과 **같은 함수**가 고른다: 채널이 없는 멤버의 첫 DM 을 닫았을 때 `/` 가 그 DM 을
+  // 도로 열면 닫기가 무반응이 된다(design-review R1 H1).
+  //
   // 이 기기의 사이드바에서 닫은 DM (#3963, `sidebarDmClosure.ts`). 규칙과 근거는 그 파일 머리말에
   // 있다: 새 메시지가 오면 다시 나타나고, 열려 있는 DM 은 닫은 것이 아니며, 투영이 오는 중이면
   // 숨김을 유지하고 못 읽었으면 보인다. 걸러내는 자리는 파생 **앞**이라 ⌥↑↓ 순회와 접힌 머리의
@@ -342,6 +340,21 @@ export function Sidebar({
   // 닫는 것은 목록의 진열이지 대화의 존재가 아니다.
   const closedDms = useClosedDms(workspaceId);
   const readPhase = readProjectionPhase(readStates);
+  const routePath = useLocation().pathname;
+  const openId = openChannelId(
+    routePath,
+    indexFallbackChannelId({
+      channels,
+      dms,
+      closed: closedDms,
+      latestSeqOf: (id) => unreadFor(readStates.byChannel, id)?.latestSeq,
+      phase: readPhase,
+    })
+  );
+  // 닫기는 **읽음 투영이 준비된 뒤에만** 내민다(design-review R1 M1): 닫을 때 워터마크로 서버의
+  // 최신 seq 를 적는데, 투영이 오기 전(또는 못 읽은 동안)에는 그 기준이 없다. 0 으로 적으면 투영이
+  // 도착하는 순간 「최신 > 0」이 되어 방금 닫은 대화가 되살아난다. 없는 기준으로 닫는 문은 열지 않는다.
+  const canCloseDm = readPhase === "ready";
   const visibleDms = useMemo(
     () =>
       dms.filter(
@@ -652,7 +665,9 @@ export function Sidebar({
         // 호버 X 는 포인터 표면의 문이다: 터치에는 호버가 없고, 그 표면의 길은 (아직) 없다 -
         // 폰 길게 누르기 메뉴는 BT-1 이 서랍 스크롤과의 충돌로 닫아 둔 자리다.
         onClose={
-          channel.kind === "dm" && !touchSurface ? () => closeDmRow(channel) : undefined
+          channel.kind === "dm" && !touchSurface && canCloseDm
+            ? () => closeDmRow(channel)
+            : undefined
         }
         closeLabel={channel.kind === "dm" ? dmCloseButtonLabel(label.text) : undefined}
         unreadCount={counts.unreadCount}
@@ -698,7 +713,9 @@ export function Sidebar({
                 ? () => sidebarPrefs.toggleStar(channel.id)
                 : undefined
             }
-            onCloseDm={channel.kind === "dm" ? () => closeDmRow(channel) : undefined}
+            onCloseDm={
+              channel.kind === "dm" && canCloseDm ? () => closeDmRow(channel) : undefined
+            }
           >
             {link}
           </SidebarRowContextMenu>

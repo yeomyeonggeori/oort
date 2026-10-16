@@ -59,7 +59,13 @@ function topLevelBlocks(css: string): Block[] {
 
 const squash = (text: string) => text.replace(/\s+/g, " ").trim();
 
-describe("우클릭 테두리: 키보드로 연 메뉴가 아니면 열림 윤곽이 없다", () => {
+function utilityBody(name: string): string {
+  const block = topLevelBlocks(TOKENS_CSS).find((candidate) => candidate.head === `@utility ${name}`);
+  if (!block) throw new Error(`@utility ${name} 을 tokens.css 에서 못 찾았다`);
+  return block.body;
+}
+
+describe("우클릭 테두리: 포인터로 연 행 메뉴는 열림 윤곽이 없다", () => {
   const blocks = topLevelBlocks(TOKENS_CSS);
   const rule = blocks.find((block) => /data-row-menu-trigger/.test(block.head));
 
@@ -71,29 +77,66 @@ describe("우클릭 테두리: 키보드로 연 메뉴가 아니면 열림 윤�
     expect(blocks.filter((block) => /data-row-menu-trigger/.test(block.head))).toHaveLength(1);
   });
 
-  it("키보드 모달리티가 아닐 때만, 열린 트리거에만, 윤곽을 없앤다", () => {
-    // 「="pointer"」로 적지 않는 이유는 tokens.css 의 규칙 주석에 있다: `focusRing.test.ts` 가 그 표기를
-    // 가진 규칙 전부에 「늘 보이는 링」 예외를 요구하는데, 이 규칙은 링이 아니라 메뉴의 열림 윤곽이다.
+  it("열린 트리거 가운데 **포인터로 연** 것에만 윤곽을 없앤다", () => {
     expect(squash(rule!.head)).toBe(
-      ':root:not([data-focus-modality="keyboard"]) [data-row-menu-trigger][data-state="open"]'
+      '[data-row-menu-trigger][data-state="open"][data-open-via="pointer"]'
     );
     expect(squash(rule!.body)).toBe("outline: none;");
   });
 
-  it("키보드로 연 메뉴의 표식은 건드리지 않는다 — 규칙은 keyboard 를 부정할 뿐이다", () => {
-    const code = stripCssComments(TOKENS_CSS);
-    // keyboard 모달리티를 **긍정**해 이 트리거를 겨누는 규칙(= 키보드의 표식을 바꾸는 규칙)은 없다.
-    expect(code).not.toMatch(
-      /:root\[data-focus-modality="keyboard"\][^{]*data-row-menu-trigger/
+  it("전역 모달리티 스탬프를 읽지 않는다 — 열린 길은 트리거가 적는다", () => {
+    // 스탬프를 읽던 첫 판은 두 곳에서 틀렸다(design-review R1 N1): 포인터로 연 메뉴 안의 첫 방향키가
+    // 윤곽을 되살리고, 마우스로 행을 누른 뒤 Shift+F10 으로 연 메뉴는 표식을 잃었다.
+    expect(squash(rule!.head)).not.toContain("data-focus-modality");
+    expect(MENU_SOURCE).toMatch(/data-open-via=\{open \? openVia : undefined\}/);
+    // 열린 길은 키보드 소환 경로(`onKeyDown`)만 `keyboard` 로 적는다.
+    expect(MENU_SOURCE).toMatch(/summoning\.current = true/);
+    expect(MENU_SOURCE).toMatch(/setOpenVia\(summoning\.current \? "keyboard" : "pointer"\)/);
+  });
+
+  it("키보드로 연 메뉴의 표식은 건드리지 않는다 — keyboard 값을 겨누는 규칙이 없다", () => {
+    expect(stripCssComments(TOKENS_CSS)).not.toMatch(
+      /data-open-via="keyboard"[^{]*\{[^}]*outline/
     );
-    // 그리고 이 규칙은 `focusRing.test.ts` 의 「pointer 규칙 집합」에 속하지 않는다.
-    expect(squash(rule!.head)).not.toContain('data-focus-modality="pointer"');
   });
 
   it("컴포넌트는 열림 윤곽의 클래스를 그대로 들고 있다 — 대비 시험이 이 문자열을 읽는다", () => {
     expect(MENU_SOURCE).toMatch(/data-\[state=open\]:outline\b/);
     expect(MENU_SOURCE).toMatch(/data-\[state=open\]:-outline-offset-1/);
     expect(MENU_SOURCE).toMatch(/data-row-menu-trigger/);
+  });
+
+  it("열린 행의 틴트는 호버 채움과 같은 반경이다 (design-review R1 M3)", () => {
+    // 링크는 `sidebar-row` 의 `--radius-md`. 트리거가 `rounded-sm`(6) 이면 윤곽이 걷힌 자리에서 열린 행의
+    // 모서리가 호버보다 4px 좁게 보인다.
+    const trigger = MENU_SOURCE.slice(MENU_SOURCE.indexOf("data-row-menu-trigger"));
+    expect(trigger).toMatch(/className="block rounded-md data-\[state=open\]:bg-surface-hover/);
+    expect(squash(utilityBody("sidebar-row"))).toContain("border-radius: var(--radius-md)");
+  });
+});
+
+describe("행 메뉴는 창보다 길어지면 판 안에서 스크롤한다 (design-review R1 B1)", () => {
+  const CONTEXT_MENU_SOURCE = read("../../design/ui/context-menu.tsx");
+  const utility = topLevelBlocks(TOKENS_CSS).find(
+    (block) => block.head === "@utility max-h-menu-available"
+  );
+
+  it("유틸리티가 Radix 가 실어 주는 가용 높이로 상한을 둔다", () => {
+    expect(utility).toBeDefined();
+    const body = squash(utility!.body);
+    // 변수는 프리미티브마다 이름이 달라 한 패널에는 하나만 서므로 둘을 이어 쓴다.
+    expect(body).toContain("--radix-context-menu-content-available-height");
+    expect(body).toContain("--radix-dropdown-menu-content-available-height");
+    expect(body).toMatch(/max-block-size: var\(/);
+    expect(body).toContain("overflow-y: auto");
+  });
+
+  it("컨텍스트 메뉴 판이 그 유틸리티를 쓴다", () => {
+    const panel = CONTEXT_MENU_SOURCE.slice(
+      CONTEXT_MENU_SOURCE.indexOf("export const ContextMenuContent"),
+      CONTEXT_MENU_SOURCE.indexOf("export const ContextMenuItem")
+    );
+    expect(panel).toMatch(/"layer-overlay-surface[^"]*\bmax-h-menu-available\b/);
   });
 });
 

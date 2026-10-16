@@ -607,6 +607,8 @@ describe("DM 닫기: 사라지고, 돌아온다 (#3963)", () => {
     expect(empty).not.toBeNull();
     expect(empty!.textContent).toContain("닫은 대화는 새 메시지가 오면 다시 나타납니다");
     expect(empty!.textContent).not.toContain("아직 대화가 없습니다");
+    // 빈 상태는 한 줄 카피와 액션 하나다: 옛 문장의 행동(⌘⇧K로 시작하세요)이 남아 있다.
+    expect(empty!.textContent).toContain("⌘⇧K로 시작하세요");
   });
 
   it("DM 이 원래 하나도 없으면 예전 문장 그대로다", async () => {
@@ -624,5 +626,76 @@ describe("DM 닫기: 사라지고, 돌아온다 (#3963)", () => {
     act(() => closeButton(host)!.click());
     // 에이전트 구독·⌘K 목록이 읽는 원본(`channelsQuery.groups.dms`)은 건드리지 않는다.
     expect(channelsQuery.groups.dms.map((c) => c.id)).toContain(DM_ID(2));
+  });
+});
+
+describe("닫기는 준비된 기준 위에서만 내민다 (design-review R1 M1)", () => {
+  it("읽음 투영이 오는 중이면 호버해도 X 가 없고, 준비되면 선다", async () => {
+    // 닫을 때 서버의 최신 seq 를 워터마크로 적는다. 투영이 오기 전에 0 으로 적으면 도착하는 순간
+    // 「최신 > 0」이 되어 방금 닫은 대화가 되살아났다(실측 4.37초). 기준이 없으면 문을 열지 않는다.
+    readStatesQuery.isPending = true;
+    readStatesQuery.data = undefined;
+    const host = await mount();
+    enterRow(host, DM_ID(1));
+    expect(closeButton(host)).toBeNull();
+    leaveRow(host, DM_ID(1));
+    readStatesQuery.isPending = false;
+    setReadStates([readState(DM_ID(1), 5)]);
+    await rerender();
+    enterRow(host, DM_ID(1));
+    expect(closeButton(host)).not.toBeNull();
+  });
+
+  it("읽음 투영을 한 번도 못 읽었으면 X 가 없다 — 닫기가 영영 붙지 않는 문을 내밀지 않는다", async () => {
+    readStatesQuery.isError = true;
+    readStatesQuery.data = undefined;
+    const host = await mount();
+    enterRow(host, DM_ID(1));
+    expect(closeButton(host)).toBeNull();
+  });
+});
+
+describe("채널이 없는 멤버의 첫 DM (design-review R1 H1)", () => {
+  beforeEach(() => {
+    channelsQuery.groups = { channels: [], dms };
+    channelsQuery.data = [...dms];
+  });
+
+  it("`/` 가 첫 DM 을 열어 주는 상태에서 그 DM 을 X 로 닫으면 정말 사라진다", async () => {
+    // 첫 판은 `channels[0] ?? dms[0]` 폴백 때문에 닫은 DM 이 「열려 있음」으로 남아, 누른 결과가 화면에
+    // 보이지 않았다(보이는 컨트롤의 무반응).
+    setReadStates([readState(DM_ID(1), 12)]);
+    const host = await mount("/");
+    expect(rowIds(host)).toContain(DM_ID(1));
+    enterRow(host, DM_ID(1));
+    act(() => closeButton(host)!.click());
+    expect(rowIds(host)).not.toContain(DM_ID(1));
+    expect(rowIds(host)).toContain(DM_ID(2));
+    expect(closedAtSeqOf(closedDmsFor(WS), DM_ID(1))).toBe(12);
+  });
+
+  it("새 메시지가 오면 그 DM 은 다시 나타난다", async () => {
+    setReadStates([readState(DM_ID(1), 12)]);
+    const host = await mount("/");
+    enterRow(host, DM_ID(1));
+    act(() => closeButton(host)!.click());
+    expect(rowIds(host)).not.toContain(DM_ID(1));
+    setReadStates([readState(DM_ID(1), 13, 12)]);
+    await rerender();
+    expect(rowIds(host)).toContain(DM_ID(1));
+  });
+
+  it("DM 이 하나뿐이어도 닫으면 사라지고, 구획은 닫은 대화를 말한다", async () => {
+    channelsQuery.groups = { channels: [], dms: [dms[0]] };
+    channelsQuery.data = [dms[0]];
+    setReadStates([readState(DM_ID(1), 3)]);
+    const host = await mount("/");
+    expect(rowIds(host)).toEqual([DM_ID(1)]);
+    enterRow(host, DM_ID(1));
+    act(() => closeButton(host)!.click());
+    expect(rowIds(host)).toEqual([]);
+    expect(host.querySelector('[data-testid="dm-section-empty"]')?.textContent).toContain(
+      "닫은 대화는 새 메시지가 오면 다시 나타납니다"
+    );
   });
 });

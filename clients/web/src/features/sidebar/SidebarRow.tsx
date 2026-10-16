@@ -101,10 +101,12 @@ export interface SidebarRowProps {
    * 거기에 절대 위치한다. 우클릭 메뉴의 트리거 상자 안에 같이 들어가므로 X 위에서의 우클릭도 같은
    * 행 메뉴를 연다.
    *
-   * 마운트 규율은 메시지 행 툴바와 같다(SKILL §6): 호버하지 않은 행에는 DOM 이 없다. `opacity`·
-   * `visibility` 로 숨기지 않는다. 탭 정거장도 아니다(`tabIndex={-1}`) - 키보드의 길은 행 메뉴의
-   * 같은 이름 항목이다. **터치(`hover: none`)에는 호출부가 이 프롭을 주지 않는다**: 그 표면 판정은
-   * 이미 사이드바가 하고(`touchSurface`), 행마다 미디어 쿼리 구독을 하나씩 더 들이지 않는다.
+   * 마운트 규율은 메시지 행 툴바의 **호버 쪽**과 같다(SKILL §6): 호버하지 않은 행에는 DOM 이 없다.
+   * `opacity`·`visibility` 로 숨기지 않는다. 키보드 포커스로는 세우지 않는다(design-review R1 N2):
+   * X 는 탭 정거장이 아니라서(`tabIndex={-1}`) 포커스로 세우면 닿을 수 없는 컨트롤이 보이게 된다.
+   * 키보드의 길은 행 메뉴의 같은 이름 항목이고 그 경로는 끝까지 실측했다(`capture-3963.mjs` H).
+   * **터치(`hover: none`)에는 호출부가 이 프롭을 주지 않는다**: 그 표면 판정은 이미 사이드바가
+   * 하고(`touchSurface`), 행마다 미디어 쿼리 구독을 하나씩 더 들이지 않는다.
    */
   onClose?: () => void;
   /** X 의 접근 가능한 이름(어느 대화인지 말한다). 없으면 낱말만 쓴다. */
@@ -252,6 +254,8 @@ export function SidebarRow({
       aria-label={closeLabel ?? DM_CLOSE_LABEL}
       title={DM_CLOSE_LABEL}
       data-testid="dm-close"
+      // 자리: 오른쪽 8px(`right-2`) × 24px(`size-6`). `tokens.css` 의 `sidebar-row` 가 같은 숫자에서 이름의
+      // 오른쪽 끝(36px = 24 + 8 + 간격 4)을 도출하므로 둘은 함께 움직인다(소스 시험이 36 을 잰다).
       className="press absolute right-2 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-pressed hover:text-ink focus-visible:focus-ring"
     >
       <X className="size-4" aria-hidden="true" />

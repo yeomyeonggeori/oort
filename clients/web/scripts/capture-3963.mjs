@@ -20,6 +20,11 @@
 //   E. 메뉴 항목 목록(채널/DM)과 순서.
 //   F. 닫기: X → 행이 사라지고, 새로고침해도 숨은 채이며, 새 메시지가 오면 다시 나타난다.
 //   G. 읽지 않음으로 표시: PUT 몸통이 mark_unread_before_seq만 싣고 read_intent는 싣지 않는다.
+//   (design-review R1 수리분)
+//   S. 메뉴 넘침: 창보다 긴 메뉴는 판 안에서 스크롤하고 마지막 항목에 키보드로 닿는다(B1).
+//   Z. 채널이 없는 멤버의 첫 DM: X 가 정말 닫는다 — 본문도 다음 대화로 간다(H1).
+//   P. 읽음 투영이 느리거나 실패하면 닫기를 내밀지 않는다(M1).
+//   O. 열린 길: 포인터로 연 메뉴 안의 방향키, 마우스 뒤의 Shift+F10(N1).
 // =============================================================================
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -72,9 +77,6 @@ function check(engine, scheme, name, ok, detail) {
   results.push({ engine, scheme, name, ok: Boolean(ok), detail });
   console.log(JSON.stringify({ engine, scheme, check: name, ok: Boolean(ok), detail }));
 }
-function info(engine, scheme, name, detail) {
-  console.log(JSON.stringify({ engine, scheme, info: name, detail }));
-}
 async function attempt(engine, scheme, name, fn) {
   try {
     await fn();
@@ -83,8 +85,9 @@ async function attempt(engine, scheme, name, fn) {
   }
 }
 
-function newState() {
-  return { read: structuredClone(READ), puts: [], writes: [], livenessState: "inactive" };
+const DEFAULT_PREFS = { version: 1, sections: [{ id: "sec-1", name: "출시 준비", order: 0, channelIds: [chId(5)] }], starredChannelIds: [chId(3)] };
+function newState(cfg = {}) {
+  return { read: structuredClone(READ), puts: [], writes: [], livenessState: "inactive", channels, dms, prefs: DEFAULT_PREFS, readMode: "ok", readDelayMs: 0, ...cfg };
 }
 const wireRead = (state, id) => ({
   channel_id: id, last_read_seq: state.read[id][0], latest_seq: state.read[id][1],
@@ -117,12 +120,14 @@ async function installMocks(context, state) {
       }
       return json(route, wireRead(state, id));
     }
-    if (path.endsWith("/read-state")) return json(route, { read_states: Object.keys(state.read).map((id) => wireRead(state, id)) });
-    if (path.endsWith("/members/me/sidebar-prefs")) {
-      return json(route, { prefs: { version: 1, sections: [{ id: "sec-1", name: "출시 준비", order: 0, channelIds: [chId(5)] }], starredChannelIds: [chId(3)] } });
+    if (path.endsWith("/read-state")) {
+      if (state.readDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, state.readDelayMs));
+      if (state.readMode === "error") return json(route, { error: "capture-forced-failure" }, 500);
+      return json(route, { read_states: Object.keys(state.read).map((id) => wireRead(state, id)) });
     }
+    if (path.endsWith("/members/me/sidebar-prefs")) return json(route, { prefs: state.prefs });
     if (/\/agents\/[^/]+\/liveness$/.test(path)) return json(route, { agentMemberId: P("14"), state: state.livenessState });
-    if (path.endsWith("/channels")) return json(route, { channels: [...channels, ...dms] });
+    if (path.endsWith("/channels")) return json(route, { channels: [...state.channels, ...state.dms] });
     if (path.endsWith("/roster")) return json(route, { members: roster });
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
     if (path.endsWith(`/workspaces/${workspaceId}`)) return json(route, { workspace: { id: workspaceId, name: "여명거리" } });
@@ -157,7 +162,7 @@ async function login(page) {
   await page.getByTestId("dm-avatar").first().waitFor({ timeout: 20_000 });
 }
 
-async function open(browserType, origin, scheme, state, viewport = { width: 1440, height: 900 }) {
+async function open(browserType, origin, scheme, state, viewport = { width: 1440, height: 900 }, ready = "sidebar-section-sec-1") {
   const browser = await browserType.launch();
   const context = await browser.newContext({ viewport, colorScheme: scheme, serviceWorkers: "block", reducedMotion: "reduce" });
   await installMocks(context, state);
@@ -166,7 +171,7 @@ async function open(browserType, origin, scheme, state, viewport = { width: 1440
   await page.goto(origin, { waitUntil: "domcontentloaded" });
   await login(page);
   // 사이드바 배치(섹션·별표)가 도착해야 메뉴에 「섹션으로 이동」이 선다.
-  await page.getByTestId("sidebar-section-sec-1").waitFor({ timeout: 20_000 });
+  if (ready) await page.getByTestId(ready).waitFor({ timeout: 20_000 });
   return { browser, context, page };
 }
 
@@ -197,8 +202,11 @@ const OUTLINE = () => {
   };
   const trigger = document.querySelector('[data-row-menu-trigger][data-state="open"]');
   const active = document.activeElement;
+  const link = trigger?.querySelector('[data-testid="channel-item"]');
   return {
     modality: document.documentElement.getAttribute("data-focus-modality"),
+    openVia: trigger?.getAttribute("data-open-via") ?? null,
+    radius: trigger && link ? { trigger: getComputedStyle(trigger).borderTopLeftRadius, link: getComputedStyle(link).borderTopLeftRadius } : null,
     trigger: out(trigger),
     triggerFound: Boolean(trigger),
     activeTag: active ? `${active.tagName.toLowerCase()}${active.getAttribute("data-testid") ? `[${active.getAttribute("data-testid")}]` : ""}` : null,
@@ -335,12 +343,14 @@ async function runEngine(browserType, engine, origin) {
           check(engine, scheme, `C1 ${what}: 우클릭 모달리티는 pointer`, o.modality === "pointer", o.modality);
           check(engine, scheme, `C2 ${what}: 열린 행(trigger)에 테두리가 없다`, o.triggerFound && o.trigger && !o.trigger.drawn, o.trigger);
           check(engine, scheme, `C3 ${what}: 캐럿 요소에도 포커스 링이 없다`, !o.active || !o.active.drawn, { tag: o.activeTag, ring: o.active });
+          check(engine, scheme, `C1b ${what}: 트리거가 「포인터로 열림」을 적는다(data-open-via=pointer)`, o.openVia === "pointer", o.openVia);
+          check(engine, scheme, `C6 ${what}: 열린 행 틴트의 모서리 반경이 호버 채움(링크)과 같다`, o.radius !== null && o.radius.trigger === o.radius.link, o.radius);
           if (id === chId(4)) await shot("menu-channel", { x: 0, y: 0, width: 760, height: 900 });
           if (id === chId(2)) await shot("menu-channel-selected", { x: 0, y: 0, width: 760, height: 900 });
           if (id === dmId(1)) await shot("menu-dm", { x: 0, y: 0, width: 760, height: 900 });
           if (full && id === chId(4)) {
             const texts = await menuTexts(page);
-            check(engine, scheme, "E1 채널 메뉴 항목과 순서", JSON.stringify(texts) === JSON.stringify(["복사", "이름 복사하기", "링크 복사하기", "ID 복사하기", "---", "섹션으로 이동", "채널 섹션으로", "출시 준비", "---", "읽지 않음으로 표시", "알림 끄기", "별표 붙이기", "---", "채널 나가기"]), texts);
+            check(engine, scheme, "E1 채널 메뉴 항목과 순서", JSON.stringify(texts) === JSON.stringify(["복사", "이름 복사하기", "링크 복사하기", "ID 복사하기", "---", "섹션으로 이동", "채널 섹션으로", "출시 준비", "---", "읽지 않음으로 표시하기", "알림 끄기", "별표 붙이기", "---", "채널 나가기"]), texts);
           }
           if (full && id === dmId(1)) {
             const texts = await menuTexts(page);
@@ -353,6 +363,19 @@ async function runEngine(browserType, engine, origin) {
           check(engine, scheme, `C4 ${what}: 메뉴를 닫은 뒤에도 링이 없다`, after.modality === "pointer" && (!after.active || !after.active.drawn), { tag: after.activeTag, ring: after.active, modality: after.modality });
         });
       }
+
+      // ── O. 열린 길(design-review R1 N1): 포인터로 연 메뉴 안의 방향키는 윤곽을 되살리지 않는다 ──
+      await attempt(engine, scheme, "O.pointer-open-then-arrow", async () => {
+        await rowOf(page, chId(4)).click({ button: "right" });
+        await page.getByTestId("channel-row-menu").waitFor({ timeout: 5_000 });
+        await page.waitForFunction(() => getComputedStyle(document.querySelector('[data-testid="channel-row-menu"]')).opacity === "1", null, { timeout: 5_000 });
+        await page.keyboard.press("ArrowDown");
+        await page.waitForTimeout(200);
+        const o = await page.evaluate(OUTLINE);
+        check(engine, scheme, "O1 포인터로 연 메뉴 안에서 방향키를 눌러도 열림 윤곽이 되살아나지 않는다(전역 모달리티는 keyboard 로 바뀐다)", o.modality === "keyboard" && o.openVia === "pointer" && o.trigger && !o.trigger.drawn, o);
+        await closeMenu(page);
+        await page.mouse.move(900, 450);
+      });
 
       // ── D. 키보드: 링은 남고, 키보드로 연 메뉴는 열림 표식이 남는다 ──────────────
       await attempt(engine, scheme, "D.keyboard", async () => {
@@ -371,6 +394,22 @@ async function runEngine(browserType, engine, origin) {
         check(engine, scheme, "D2 키보드로 연 메뉴: 모달리티는 keyboard로 남는다", open.modality === "keyboard", open.modality);
         check(engine, scheme, "D3 키보드로 연 메뉴: 열린 행 표식(outline)이 남는다", open.trigger?.drawn === true, open.trigger);
         await closeMenu(page);
+      });
+
+      // ── D4. 마우스로 행을 누른 뒤 Shift+F10(모달리티 스탬프는 pointer 로 남는다) ─────────
+      await attempt(engine, scheme, "D4.mouse-then-shift-f10", async () => {
+        await rowOf(page, chId(5)).click();
+        await page.waitForURL(new RegExp(`/c/${chId(5)}$`), { timeout: 5_000 });
+        await rowOf(page, chId(5)).evaluate((el) => el.focus()); // WebKit 은 눌린 링크에 포커스를 주지 않는다
+        await page.keyboard.press("Shift+F10");
+        await page.getByTestId("channel-row-menu").waitFor({ timeout: 5_000 });
+        await page.waitForTimeout(250);
+        const o = await page.evaluate(OUTLINE);
+        check(engine, scheme, "D4 마우스를 쓰던 사람이 Shift+F10 으로 열어도 열림 표식이 선다(스탬프 pointer, 열린 길 keyboard)", o.modality === "pointer" && o.openVia === "keyboard" && o.trigger?.drawn === true, o);
+        await closeMenu(page);
+        await rowOf(page, chId(2)).click();
+        await page.waitForURL(new RegExp(`/c/${chId(2)}$`), { timeout: 5_000 });
+        await page.mouse.move(900, 450);
       });
 
       // ── G. 읽지 않음으로 표시(Chromium만) ──────────────────────────────────────
@@ -483,6 +522,107 @@ async function runEngine(browserType, engine, origin) {
           await shot("after-reappear");
         });
       }
+    } finally {
+      await context.close();
+      await browser.close();
+    }
+  }
+  await scenarioOverflow(browserType, engine, origin);
+  if (full) {
+    await scenarioZeroChannels(browserType, engine, origin);
+    await scenarioProjection(browserType, engine, origin);
+  }
+}
+
+// ── S. 메뉴 넘침(design-review R1 B1) ───────────────────────────────────────────
+async function scenarioOverflow(browserType, engine, origin) {
+  const scheme = "light";
+  const sections = Array.from({ length: 6 }, (_, i) => ({ id: `sec-${i + 1}`, name: `섹션 ${i + 1} 팀 운영`, order: i, channelIds: i === 0 ? [chId(5)] : [] }));
+  const state = newState({ prefs: { version: 1, sections, starredChannelIds: [chId(3)] } });
+  const { browser, context, page } = await open(browserType, origin, scheme, state, { width: 1100, height: 480 });
+  try {
+    await attempt(engine, scheme, "S.menu-overflow", async () => {
+      await rowOf(page, chId(4)).click({ button: "right" });
+      await page.getByTestId("channel-row-menu").waitFor({ timeout: 5_000 });
+      await page.waitForFunction(() => getComputedStyle(document.querySelector('[data-testid="channel-row-menu"]')).opacity === "1", null, { timeout: 5_000 });
+      await page.waitForTimeout(250);
+      const m = await page.evaluate(() => {
+        const el = document.querySelector('[data-testid="channel-row-menu"]');
+        const r = el.getBoundingClientRect();
+        const st = getComputedStyle(el);
+        return { top: Math.round(r.top * 10) / 10, bottom: Math.round(r.bottom * 10) / 10, vh: window.innerHeight, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight, overflowY: st.overflowY };
+      });
+      check(engine, scheme, "S1 1100x480 에서 섹션 6개: 메뉴 판이 창 안에 있다", m.top >= -0.5 && m.bottom <= m.vh + 0.5, m);
+      check(engine, scheme, "S2 넘치는 메뉴는 판 안에서 스크롤한다(overflow-y: auto, 내용 > 판)", m.overflowY === "auto" && m.scrollHeight > m.clientHeight, m);
+      if (engine === "chromium" && SHOTS) await page.screenshot({ path: resolve(OUT_DIR, `${PREFIX}-menu-overflow-${scheme}.png`) });
+      await page.keyboard.press("End");
+      await page.waitForTimeout(250);
+      const last = await page.evaluate(() => {
+        const a = document.activeElement;
+        const menu = document.querySelector('[data-testid="channel-row-menu"]');
+        const ar = a.getBoundingClientRect();
+        const mr = menu.getBoundingClientRect();
+        return { id: a.getAttribute("data-testid"), inPanel: ar.top >= mr.top - 0.5 && ar.bottom <= mr.bottom + 0.5, inViewport: ar.top >= -0.5 && ar.bottom <= window.innerHeight + 0.5 };
+      });
+      check(engine, scheme, "S3 키보드 End 로 마지막 항목(채널 나가기)에 닿고, 그 항목이 판 안·창 안에 보인다", last.id === "channel-row-leave" && last.inPanel && last.inViewport, last);
+      if (engine === "chromium" && SHOTS) await page.screenshot({ path: resolve(OUT_DIR, `${PREFIX}-menu-overflow-end-${scheme}.png`) });
+      await closeMenu(page);
+    });
+  } finally {
+    await context.close();
+    await browser.close();
+  }
+}
+
+// ── Z. 채널이 없는 멤버의 첫 DM(design-review R1 H1) ─────────────────────────────
+async function scenarioZeroChannels(browserType, engine, origin) {
+  const scheme = "light";
+  const state = newState({ channels: [], prefs: { version: 1, sections: [], starredChannelIds: [] } });
+  const { browser, context, page } = await open(browserType, origin, scheme, state, undefined, null);
+  try {
+    await attempt(engine, scheme, "Z.zero-channels", async () => {
+      await page.getByTestId("channel-header").waitFor({ timeout: 10_000 });
+      const head = async () => ((await page.getByTestId("channel-header").count()) > 0 ? await page.getByTestId("channel-header").innerText() : "");
+      check(engine, scheme, "Z1 채널이 없는 멤버는 `/` 에서 첫 DM(이도현)이 열려 있다", (await head()).includes("이도현"), await head());
+      await rowOf(page, dmId(1)).hover();
+      await page.getByTestId("dm-close").click();
+      await page.waitForFunction((id) => document.querySelector(`[data-channel-id="${id}"]`) === null, dmId(1), { timeout: 5_000 });
+      check(engine, scheme, "Z2 첫 DM 을 X 로 닫으면 사이드바에서 사라진다", (await rowOf(page, dmId(1)).count()) === 0, null);
+      const moved = await page.waitForFunction(() => !document.querySelector('[data-testid="channel-header"]')?.textContent?.includes("이도현"), null, { timeout: 5_000 }).then(() => true, () => false);
+      check(engine, scheme, "Z3 본문도 닫은 DM 에 머물지 않는다(다음 대화로 간다)", moved, await head());
+      check(engine, scheme, "Z4 사이드바와 본문이 같은 대화를 가리킨다: 본문은 닫지 않은 첫 DM(박서연)", (await head()).includes("박서연"), await head());
+      if (engine === "chromium" && SHOTS) await page.screenshot({ path: resolve(OUT_DIR, `${PREFIX}-zero-channels-after-close-${scheme}.png`) });
+    });
+  } finally {
+    await context.close();
+    await browser.close();
+  }
+}
+
+// ── P. 읽음 투영이 느리거나 실패하면 닫기를 내밀지 않는다(design-review R1 M1) ──────────
+async function scenarioProjection(browserType, engine, origin) {
+  const scheme = "light";
+  for (const [mode, cfg] of [["느림(4초)", { readDelayMs: 4000 }], ["실패(500)", { readMode: "error" }]]) {
+    const state = newState(cfg);
+    const { browser, context, page } = await open(browserType, origin, scheme, state, undefined, null);
+    try {
+      await attempt(engine, scheme, `P.projection-${mode}`, async () => {
+        await rowOf(page, dmId(5)).hover();
+        await page.waitForTimeout(400);
+        check(engine, scheme, `P1 읽음 투영 ${mode}: 호버해도 X 가 없다(기준이 없는 닫기는 내밀지 않는다)`, (await page.getByTestId("dm-close").count()) === 0, null);
+        await rowOf(page, dmId(5)).click({ button: "right" });
+        await page.getByTestId("channel-row-menu").waitFor({ timeout: 5_000 });
+        const texts = await menuTexts(page);
+        check(engine, scheme, `P2 읽음 투영 ${mode}: 메뉴에도 「사이드바에서 닫기」가 없다`, !texts.includes("사이드바에서 닫기"), texts);
+        await closeMenu(page);
+        if (mode.startsWith("느림")) {
+          await page.mouse.move(900, 450);
+          await page.waitForTimeout(4600);
+          await rowOf(page, dmId(5)).hover();
+          const x = await page.getByTestId("dm-close").waitFor({ timeout: 2_000 }).then(() => true, () => false);
+          check(engine, scheme, "P3 투영이 도착하면 X 가 선다", x, null);
+        }
+      });
     } finally {
       await context.close();
       await browser.close();

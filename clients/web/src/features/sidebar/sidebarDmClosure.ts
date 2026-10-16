@@ -195,6 +195,38 @@ export function dmHiddenByClosure(input: {
   return (input.latestSeq ?? 0) <= input.closedAtSeq;
 }
 
+/**
+ * 인덱스 라우트(`/`)가 열어 주는 대화: 첫 채널, 채널이 없으면 **닫지 않은** 첫 DM, 그것도 없으면
+ * `null`(빈 상태).
+ *
+ * 사이드바(`openId`)와 `ChatShell`(본문)이 **같은 함수**를 읽는다. 둘이 따로 `dms[0]` 을 고르면
+ * 채널이 없는 멤버가 첫 DM 을 X 로 닫아도 `/` 가 그 DM 을 도로 열어 「열려 있음」으로 되살아났다
+ * (design-review R1 H1: 보이는 컨트롤이 무반응). 닫은 DM 은 후보에서 빠지므로 본문은 다음 DM 을
+ * 열거나, 남은 것이 없으면 빈 상태를 그린다. 새 메시지가 와서 돌아온 DM(`dmHiddenByClosure` 가
+ * 거짓)은 다시 후보다.
+ */
+export function indexFallbackChannelId(input: {
+  channels: readonly { id: string }[];
+  dms: readonly { id: string }[];
+  closed: ClosedDms;
+  latestSeqOf: (channelId: string) => number | undefined;
+  phase: ReadProjectionPhase;
+}): string | null {
+  const channel = input.channels[0];
+  if (channel !== undefined) return channel.id;
+  for (const dm of input.dms) {
+    const hidden = dmHiddenByClosure({
+      closedAtSeq: closedAtSeqOf(input.closed, dm.id),
+      latestSeq: input.latestSeqOf(dm.id),
+      // 후보를 고르는 중이다: 열려 있다는 사실은 이 판정의 입력이 아니라 결과다.
+      isOpen: false,
+      phase: input.phase,
+    });
+    if (!hidden) return dm.id;
+  }
+  return null;
+}
+
 // ---- 외부 저장소 (useSyncExternalStore) ------------------------------------------
 
 function readLedger(storage: LedgerStorage | null = browserStorage()): ClosedDmLedger {

@@ -1326,3 +1326,66 @@ describe("DM 닫기 (#3963)", () => {
     expect(closed).toHaveBeenCalledTimes(1);
   });
 });
+
+// =============================================================================
+// 열린 길 표식 (data-open-via, #3963 design-review R1 N1)
+// =============================================================================
+
+describe("열린 길 표식: 열림 윤곽이 누가 열었는가를 읽는다 (#3963)", () => {
+  it("우클릭으로 열면 pointer, 닫히면 속성이 없다", async () => {
+    mountRow();
+    expect(trigger().hasAttribute("data-open-via")).toBe(false);
+    rightClick();
+    expect(trigger().getAttribute("data-open-via")).toBe("pointer");
+    pressKey(document.activeElement, "Escape");
+    await flush();
+    expect(trigger().hasAttribute("data-open-via")).toBe(false);
+  });
+
+  it("Shift+F10 과 메뉴 키로 열면 keyboard", async () => {
+    mountRow();
+    const link = row();
+    act(() => link.focus());
+    pressKey(link, "F10", { shiftKey: true });
+    expect(trigger().getAttribute("data-open-via")).toBe("keyboard");
+    pressKey(document.activeElement, "Escape");
+    await flush();
+    pressKey(link, "ContextMenu");
+    expect(trigger().getAttribute("data-open-via")).toBe("keyboard");
+  });
+
+  it("포인터로 연 메뉴 안에서 방향키를 눌러도 pointer 로 남는다", async () => {
+    // 전역 모달리티 스탬프를 읽던 첫 판은 이 순간 윤곽이 되살아났다(첫 방향키가 스탬프를 keyboard 로 올린다).
+    mountRow();
+    rightClick();
+    await flush();
+    document.documentElement.setAttribute("data-focus-modality", "keyboard");
+    pressKey(document.activeElement, "ArrowDown");
+    await flush();
+    expect(trigger().getAttribute("data-open-via")).toBe("pointer");
+    document.documentElement.removeAttribute("data-focus-modality");
+  });
+
+  it("마우스를 쓰던 사람(스탬프 pointer)이 Shift+F10 으로 열어도 keyboard 다", () => {
+    // F10 은 스탬프를 올리는 키가 아니다. 스탬프를 읽던 첫 판은 이 경우 키보드로 연 메뉴의 표식을 잃었다.
+    mountRow();
+    document.documentElement.setAttribute("data-focus-modality", "pointer");
+    const link = row();
+    act(() => link.focus());
+    pressKey(link, "F10", { shiftKey: true });
+    expect(trigger().getAttribute("data-open-via")).toBe("keyboard");
+    document.documentElement.removeAttribute("data-focus-modality");
+  });
+
+  it("열 때마다 새로 적는다: 키보드로 열었다 닫은 뒤 우클릭하면 pointer", async () => {
+    mountRow();
+    const link = row();
+    act(() => link.focus());
+    pressKey(link, "F10", { shiftKey: true });
+    expect(trigger().getAttribute("data-open-via")).toBe("keyboard");
+    pressKey(document.activeElement, "Escape");
+    await flush();
+    rightClick();
+    expect(trigger().getAttribute("data-open-via")).toBe("pointer");
+  });
+});

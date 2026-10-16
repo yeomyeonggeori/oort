@@ -1098,21 +1098,22 @@
  * 방금 그 행을 눌렀고, 배경 한 겹이 이미 말한다). 실측(Chromium·WebKit): 우클릭 직후 트리거가
  * `solid 1px` 이고 캐럿 요소에는 링이 없었다 - 보더의 정체는 포커스 링이 아니라 이 윤곽이었다.
  *
- * 위 포커스 링 규칙과 같은 모달리티 스탬프(`focusModality.ts`)를 읽는다. 키보드(Tab·화살표 →
- * Shift+F10 / 메뉴 키)로 연 메뉴는 스탬프가 `keyboard` 라 윤곽이 그대로 서고, 키보드 포커스 링은
- * 건드리지 않는다. **「keyboard 가 아닐 때」로 적은 이유**: 위 두 규칙은 「포인터 모달리티의
- * `:focus-visible` 링을 걷는다」는 한 집합이고 `focusRing.test.ts` 가 그 집합 전부에 「늘 보이는 링」
- * 예외가 있는지 잰다. 이 규칙은 링이 아니라 메뉴의 열림 윤곽이라 그 집합에 속하지 않는다 -
- * `="pointer"` 로 적으면 속하지도 않는 예외를 요구받는다. 스탬프는 `initFocusModality` 가 처음부터
- * `pointer` 로 두므로 실제 값은 둘뿐이고 두 표현은 같은 뜻이다.
+ * **누가 열었는가는 트리거가 열린 순간에 적는다**(`data-open-via`, `SidebarRowContextMenu`). 위의
+ * 포커스 링 규칙처럼 전역 모달리티 스탬프(`focusModality.ts`)를 읽는 첫 판은 두 곳에서 틀렸다
+ * (design-review R1 N1): ①포인터로 연 메뉴 안에서 첫 방향키를 누르는 순간 스탬프가 `keyboard` 로
+ * 바뀌어 윤곽이 되살아났다 ②마우스로 행을 누른 뒤 Shift+F10 으로 연 메뉴는 스탬프가 `pointer` 라
+ * 키보드로 열었는데도 표식이 사라졌다(F10 은 스탬프를 올리는 키가 아니다). 열린 방법은 키보드
+ * 소환 경로(`onKeyDown`)가 정확히 안다.
  *
+ * 이 규칙은 모달리티 속성을 읽지 않으므로 `focusRing.test.ts` 가 재는 「포인터 링 규칙 집합」에도
+ * 속하지 않는다(그 집합은 `:focus-visible` 링을 걷는 규칙이고, 이 규칙은 메뉴의 열림 윤곽이다).
  * **레이어 밖**이어야 한다: 윤곽을 그리는 것은 utilities 레이어의 클래스라 레이어 안의 규칙은
- * 특정도·순서와 무관하게 그것을 이기지 못한다(위 규칙과 같은 이유).
+ * 특정도·순서와 무관하게 그것을 이기지 못한다(위 규칙과 같은 이유). 키보드 포커스 링
+ * (`focus-visible:focus-ring`)은 건드리지 않는다.
  *
  * 클래스 문자열은 컴포넌트에 그대로 남는다 - `tokens.contrast.test.ts` 의 「행 메뉴 열림 표식」이
  * 그 문자열에서 토큰을 읽어 대비를 잰다. */
-:root:not([data-focus-modality="keyboard"])
-  [data-row-menu-trigger][data-state="open"] {
+[data-row-menu-trigger][data-state="open"][data-open-via="pointer"] {
   outline: none;
 }
 
@@ -2259,6 +2260,19 @@
  * that box instead of growing the menu past the viewport (#1886 M-1). */
 @utility max-w-menu-available {
   max-inline-size: var(--radix-dropdown-menu-content-available-width);
+}
+
+/* 같은 일의 높이 쪽 (#3963 design-review B1). Radix 메뉴(컨텍스트·드롭다운)는 패널에 가용 높이를
+ * 실어 준다(충돌 여백 8px 을 뺀 값). 창보다 긴 메뉴는 창 밖으로 자라는 대신 **판 안에서 스크롤**한다:
+ * 사용자 섹션이 늘면 행 메뉴가 길어지고(상한 50), 맨 아래 항목이 「채널 나가기」라 가장 잃기 쉬운 것이
+ * 가장 위험한 것이다. 변수는 프리미티브마다 이름이 달라 한 패널에는 하나만 서므로 둘을 이어 쓴다.
+ * 어느 쪽도 없으면(가용 높이를 모르는 자리) 선언이 무효가 되어 상한이 없는 예전 그대로다. */
+@utility max-h-menu-available {
+  max-block-size: var(
+    --radix-context-menu-content-available-height,
+    var(--radix-dropdown-menu-content-available-height)
+  );
+  overflow-y: auto;
 }
 
 /* Four tabular figures ("100%"). ch follows the face; a pixel box does not
