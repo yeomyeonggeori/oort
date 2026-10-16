@@ -6,6 +6,7 @@ import {
   delegateButtonLabel,
   delegateMessageBody,
   delegateSentLine,
+  teamAiCallNames,
   type TeamAiDelegate,
   type TeamAiDelegateCandidate,
 } from "@momo/core/features/timeline/teamAi";
@@ -79,7 +80,7 @@ export function TeamAiDelegateStrip({
     const body = delegateMessageBody({
       targetHandle: candidate.handle,
       sourceBody,
-      teamAiHandles: teamAi?.handle ? [teamAi.handle] : [],
+      teamAiHandles: teamAiCallNames(teamAi),
     });
     sendMessage(
       workspaceId,

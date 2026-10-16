@@ -52,7 +52,7 @@ import {
 import {PageSheet, usePageSheetClose} from '../../design/PageSheet';
 import {ThemeControl} from '../../design/ThemeControl';
 import {
-  themeChoiceLabel,
+  themeSummary,
   usePalette,
   useStyles,
   useTheme,
@@ -76,6 +76,11 @@ import {Avatar} from '../conversation/Avatar';
 import {formatRealtimeDiagnostics} from '../../realtime/diagnostics';
 import {COPY_RECEIPT_MS, copyText} from '../conversation/copy';
 import {currentAppVersionLabel} from './appVersion';
+import {
+  AppUpdateBanner,
+  AppUpdateSheet,
+} from '../appUpdate/AppUpdateBanner';
+import {useAppUpdateOffer} from '../appUpdate/useAppUpdateOffer';
 import {
   usePauseNotifications,
   usePushKinds,
@@ -364,7 +369,7 @@ export function ProfilePage({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
-  const {choice} = useTheme();
+  const {choice, themeId} = useTheme();
   const push = usePushPermission();
   const setPresence = useSetPresence(workspaceId, member.id);
   const pause = usePauseNotifications(workspaceId);
@@ -373,6 +378,9 @@ export function ProfilePage({
   const now = useNow();
   const [confirming, setConfirming] = useState(false);
   const [diagCopied, setDiagCopied] = useState(false);
+  // 새 버전 배너(#3905): 「내 상태」 위에 새 판이 있는 동안 상시 선다.
+  const updateOffer = useAppUpdateOffer();
+  const [updateSheetOpen, setUpdateSheetOpen] = useState(false);
 
   // 버전 줄을 길게 누르면 실시간 연결 기록을 복사한다(#2751). 폰 소켓이 왜
   // 끊겼는지는 서버 로그로 판정되지 않았고, 이유 코드는 클라이언트에만 있다.
@@ -489,6 +497,20 @@ export function ProfilePage({
         ) : null}
       </View>
 
+      {updateOffer ? (
+        <AppUpdateBanner
+          offer={updateOffer}
+          onPress={() => setUpdateSheetOpen(true)}
+          testID="profile-update-banner"
+        />
+      ) : null}
+      {updateSheetOpen && updateOffer ? (
+        <AppUpdateSheet
+          offer={updateOffer}
+          onClose={() => setUpdateSheetOpen(false)}
+        />
+      ) : null}
+
       {declared ? (
         <GroupSection label={PRESENCE_MENU_LABEL}>
           <View accessibilityRole="radiogroup" accessibilityLabel={PRESENCE_MENU_LABEL}>
@@ -557,11 +579,11 @@ export function ProfilePage({
       <GroupSection label="보기">
         <GroupRow
           title="테마"
-          value={themeChoiceLabel(choice)}
+          value={themeSummary(themeId, choice)}
           chevron
           onPress={onOpenTheme}
-          accessibilityLabel={`테마, ${themeChoiceLabel(choice)}`}
-          accessibilityHint="시스템·라이트·다크 중에서 고릅니다."
+          accessibilityLabel={`테마, ${themeSummary(themeId, choice)}`}
+          accessibilityHint="화면 모드, 테마, 강조색을 고릅니다."
           testID="profile-theme-row"
         />
       </GroupSection>

@@ -11,6 +11,10 @@ import {
 import {
   ACCESS_WIDENING_NOTE,
   isAccessWideningRow,
+  isWorkspaceWideAction,
+  WORKSPACE_WIDE_LABEL,
+  WORKSPACE_WIDE_NOTE,
+  WORKSPACE_WIDE_VALUE,
 } from "@momo/core/features/approvals/actionRows";
 import { attachParticle } from "@momo/core/lib/koreanParticle";
 import { useExpiryNow } from "./useExpiryNow";
@@ -635,6 +639,15 @@ function ApprovalBody({
           )}
         </LabeledRow>
       ))}
+      {card.action !== null && isWorkspaceWideAction(card.action.id) && (
+        // 서버 행이 「무엇이 바뀌는가」라면 이 줄은 「누구에게 닿는가」다(ADR-0201 v2 H6-1).
+        <LabeledRow label={WORKSPACE_WIDE_LABEL} testId="approval-workspace-wide">
+          {WORKSPACE_WIDE_VALUE}
+          <span className="mt-1 block text-meta text-ink-muted">
+            {WORKSPACE_WIDE_NOTE}
+          </span>
+        </LabeledRow>
+      )}
       {card.action !== null && card.action.omittedRows > 0 && (
         <LabeledRow label="그 밖에" testId="approval-action-omitted">
           <span data-numeric>

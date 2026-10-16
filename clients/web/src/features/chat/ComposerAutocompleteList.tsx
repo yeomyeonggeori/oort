@@ -131,13 +131,18 @@ export function ComposerAutocompleteList({
   // 보조 줄이 있는 목록(AI 주석, AIH-9)은 `쓰는 AI · 부를 수 있는 사람 · 맥 꺼짐` 이 들어갈
   // 폭이 필요하다. 192 에서는 줄이 두세 줄로 접혀 후보 하나가 목록의 반을 먹는다.
   const annotated = candidates.some((candidate) => candidate.agent !== undefined);
+  // 별칭을 든 후보(ADR-0201 v2 H2-8, 「oort 도우미 · @오르트」)도 넓은 폭을 쓴다. 192 에서는
+  // 친 글자가 맞춘 별칭이 말줄임에 먹혀 왜 그 줄이 떴는지 말하지 못한다.
+  const wide =
+    annotated ||
+    candidates.some((candidate) => (candidate.member?.aliases?.length ?? 0) > 0);
   return (
     <ul
       id={id}
       role="listbox"
       aria-label={spec.listLabel}
       data-testid={testId}
-      className={cn(PANEL_CLASS, annotated ? "w-pane max-w-full" : "w-pane-sm", className)}
+      className={cn(PANEL_CLASS, wide ? "w-pane max-w-full" : "w-pane-sm", className)}
     >
       {candidates.map((candidate, index) => {
         const agent = candidate.agent;
