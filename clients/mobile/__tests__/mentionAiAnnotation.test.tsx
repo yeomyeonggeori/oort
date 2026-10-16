@@ -500,3 +500,32 @@ describe('후속 (#3459) — 큰 글자에서도 지켜지는 말', () => {
     expect(screen.getByTestId('composer-input').props.value).toBe('@sj ');
   });
 });
+
+// ADR-0201 증보 v2 H2-8 (#3893): 도우미 별칭이 시트에 뜨고, 넣는 글자는 @oort 다.
+describe('멘션 시트 — 도우미 별칭', () => {
+  const helper = member({
+    handle: 'oort-helper',
+    displayName: 'oort 도우미',
+    aliases: ['oort', '오르트', 'claude'],
+  });
+
+  it('@오르 에 도우미가 「@oort · @오르트」로 뜨고, 고르면 @oort 를 넣는다', () => {
+    composer([human, helper]);
+    openSheet('@오르');
+    const rows = screen.getAllByTestId('mention-option');
+    expect(rows).toHaveLength(1);
+    expect(within(rows[0]).getByText('@oort · @오르트')).toBeTruthy();
+    expect(rows[0].props.accessibilityLabel).toContain('oort 도우미 @oort · @오르트');
+    fireEvent.press(rows[0]);
+    expect(screen.getByTestId('composer-input').props.value).toBe('@oort ');
+  });
+
+  it('별칭이 없는 서버에서는 예전처럼 @핸들이다', () => {
+    composer([human, {...helper, aliases: undefined}]);
+    openSheet('@oo');
+    const rows = screen.getAllByTestId('mention-option');
+    expect(within(rows[0]).getByText('@oort-helper')).toBeTruthy();
+    fireEvent.press(rows[0]);
+    expect(screen.getByTestId('composer-input').props.value).toBe('@oort-helper ');
+  });
+});

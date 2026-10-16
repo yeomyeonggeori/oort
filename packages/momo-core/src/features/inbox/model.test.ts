@@ -446,6 +446,11 @@ describe("워크스페이스 행동 승인 행 (#3729 · #3738)", () => {
       ["agent.rename", "에이전트 이름 바꾸기"],
       ["hosted.channels.grant", "승인 채널 늘리기"],
       ["workspace.settings.update", "워크스페이스 설정 바꾸기"],
+      // ADR-0201 v2 H6-1·H7 (#3893)
+      ["workspace.unfurl.update", "링크 미리보기 설정 바꾸기"],
+      ["workspace.memory.update", "팀 기억 끄기·멈추기"],
+      ["workspace.work_tier.update", "워크스페이스 기본 재개 정책 바꾸기"],
+      ["plugin.install", "앱 설치"],
     ] as const) {
       const item = approvalItem(
         approval({ actionType: "workspace_action", workspaceActionId: id }),

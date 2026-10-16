@@ -113,6 +113,13 @@ import {
   useTeamAiDelegateSend,
 } from './TeamAiDelegateStrip';
 import {
+  TEAM_AI_CITATION_ACTION_PREFIX,
+  TeamAiReplyMeta,
+  teamAiCitationActions,
+  teamAiReplySpoken,
+} from './TeamAiReplyMeta';
+import {teamAiReplyMetaFor} from '@momo/core/features/timeline/teamAiReply';
+import {
   delegateButtonLabel,
   teamAiDelegateFor,
   type TeamAiDelegate,
@@ -120,8 +127,18 @@ import {
   TEAM_AI_PROPOSAL_LABEL,
   TEAM_AI_RATIONALE_LABEL,
   TEAM_AI_RATIONALE_NOTE,
+  teamAiCallNames,
   teamAiProposalLine,
 } from '@momo/core/features/timeline/teamAi';
+import {
+  isWorkspaceWideAction,
+  WORKSPACE_WIDE_LABEL,
+  WORKSPACE_WIDE_NOTE,
+  WORKSPACE_WIDE_VALUE,
+} from '@momo/core/features/approvals/actionRows';
+
+/** 도우미 줄이 아닐 때 넘기는 빈 이름 목록. 렌더마다 새 배열을 만들지 않는다. */
+const NO_NAMES: readonly string[] = [];
 import {commandSuggestCard} from '@momo/core/features/timeline/commandSuggest';
 import {
   deadlinePassed,
@@ -1485,6 +1502,16 @@ function ApprovalActionRows({
           testID="approval-action-row"
         />
       ))}
+      {isWorkspaceWideAction(action.id) ? (
+        // 「누구에게 닿는가」(ADR-0201 v2 H6-1). 웹 `approval-workspace-wide` 와 같은 줄.
+        <FactRow
+          label={WORKSPACE_WIDE_LABEL}
+          value={WORKSPACE_WIDE_VALUE}
+          note={WORKSPACE_WIDE_NOTE}
+          styles={styles}
+          testID="approval-workspace-wide"
+        />
+      ) : null}
       {action.omittedRows > 0 ? (
         <FactRow
           label="그 밖에"
@@ -2274,6 +2301,8 @@ function MessageRowInner({
   );
   // 도우미가 넘기는 줄(ADR-0201 D5). 이 키를 보내지 않는 서버에서는 늘 null 이다.
   const teamAiDelegate = useMemo(() => teamAiDelegateFor(message), [message]);
+  // 도우미 답의 꼬리(ADR-0201 v2): 찾아본 것 · 출처 · 모델 라벨. 칸이 없으면 null.
+  const teamAiReply = useMemo(() => teamAiReplyMetaFor(message), [message]);
   // 손가락(띠의 버튼)과 로터(아래 `accessibilityActions`)가 같은 보내기와 상태를 쓴다
   // (#3844 design-review H-1). 행이 접근성 원소 하나라 띠의 버튼에 VoiceOver 가 닿지 않는다.
   const teamAiSend = useTeamAiDelegateSend({
@@ -2285,13 +2314,15 @@ function MessageRowInner({
       teamAiDelegate === null
         ? null
         : delegateSourceBody(teamAiDelegate, message, quote),
-    teamAiHandle:
+    teamAiNames:
       teamAiDelegate === null
-        ? null
-        : memberFor(
-            directory,
-            teamAiDelegate.teamAiMemberId ?? message.authorMemberId,
-          )?.handle ?? null,
+        ? NO_NAMES
+        : teamAiCallNames(
+            memberFor(
+              directory,
+              teamAiDelegate.teamAiMemberId ?? message.authorMemberId,
+            ),
+          ),
     offline: approvalOffline === true,
   });
   // 1회 링크 (#2513). 행은 접근성 요소 **하나**라(아래 `accessible`) 카드 안의
@@ -2559,6 +2590,14 @@ function MessageRowInner({
           actions?.onOpenProfile?.(message.authorMemberId);
           return;
         default:
+          if (event.nativeEvent.actionName.startsWith(TEAM_AI_CITATION_ACTION_PREFIX)) {
+            const index = Number(
+              event.nativeEvent.actionName.slice(TEAM_AI_CITATION_ACTION_PREFIX.length),
+            );
+            const item = teamAiReply?.citations[index];
+            if (item !== undefined) openLink(item.url);
+            return;
+          }
           if (event.nativeEvent.actionName.startsWith(TEAM_AI_DELEGATE_ACTION_PREFIX)) {
             const index = Number(
               event.nativeEvent.actionName.slice(TEAM_AI_DELEGATE_ACTION_PREFIX.length),
@@ -2579,6 +2618,7 @@ function MessageRowInner({
       togglePin,
       linkOnce,
       teamAiSend,
+      teamAiReply,
     ],
   );
 
@@ -2601,6 +2641,8 @@ function MessageRowInner({
         label: delegateButtonLabel(candidate),
       });
     });
+    // 도우미 답의 웹 출처(ADR-0201 v2 H5). 꼬리의 링크와 같은 `openLink` 로 연다.
+    if (!deleted) list.push(...teamAiCitationActions(teamAiReply));
     if (actionable) list.push({name: 'momoActions', label: '메시지 액션'});
     if (actions?.onOpenProfile && memberFor(directory, message.authorMemberId)) {
       list.push({name: 'momoProfile', label: '작성자 프로필 보기'});
@@ -2653,6 +2695,7 @@ function MessageRowInner({
     linkOnce,
     decisionRotor,
     teamAiSend.pressable,
+    teamAiReply,
   ]);
 
   const authorLabel = memberNameParts(
@@ -2739,6 +2782,8 @@ function MessageRowInner({
           teamAiSend,
           approvalOffline === true,
         ),
+        // 도우미 답의 꼬리(찾아본 것 · 모델 라벨 · 출처 수).
+        ...teamAiReplySpoken(teamAiReply),
       ].join(', ')}
       accessibilityActions={accessibilityActions}
       onAccessibilityAction={onAccessibilityAction}
@@ -2939,6 +2984,8 @@ function MessageRowInner({
                 offline={approvalOffline === true}
               />
             ) : null}
+
+            {teamAiReply ? <TeamAiReplyMeta meta={teamAiReply} /> : null}
 
             {teamAiDelegate ? (
               <TeamAiDelegateStrip

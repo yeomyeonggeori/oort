@@ -9,6 +9,7 @@ import {
   memberFor,
   type Directory,
 } from '@momo/core/features/workspace/directory';
+import {mentionableNames} from '@momo/core/features/routing/helperAliases';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   Linking,
@@ -516,11 +517,8 @@ export function MessageBody({
     // Keep the pre-markdown path cheap: ordinary prose neither walks the
     // directory nor changes its rendered shape just because this prop exists.
     if (blocks === null || directory === undefined) return NO_MENTIONS;
-    const activeHandles = new Set(
-      directory.members
-        .filter(member => member.status === 'active')
-        .map(member => member.handle.toLowerCase()),
-    );
+    // 핸들 + 서버가 등록한 ASCII 별칭(ADR-0201 v2 H2). 웹과 같은 코어 함수다.
+    const activeHandles = mentionableNames(directory.members);
     const self = memberFor(directory, selfMemberId);
     return {
       activeHandles,

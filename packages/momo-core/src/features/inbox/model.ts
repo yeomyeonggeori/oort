@@ -522,6 +522,12 @@ const WORKSPACE_ACTION_LABELS: Record<string, string> = {
   "agent.rename": "에이전트 이름 바꾸기",
   "hosted.channels.grant": "승인 채널 늘리기",
   "workspace.settings.update": "워크스페이스 설정 바꾸기",
+  // ADR-0201 증보 v2 H6-1: 도우미만 제안하는 설정 액션 셋.
+  "workspace.unfurl.update": "링크 미리보기 설정 바꾸기",
+  "workspace.memory.update": "팀 기억 끄기·멈추기",
+  "workspace.work_tier.update": "워크스페이스 기본 재개 정책 바꾸기",
+  // H7: 계약만 있다. 설치 경로가 생기기 전까지 서버가 카드를 만들지 않는다(#3889).
+  "plugin.install": "앱 설치",
 };
 
 export function workspaceActionLabel(actionId?: string): string {
