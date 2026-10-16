@@ -169,6 +169,41 @@ describe("두 표면이 같은 모델을 소비한다", () => {
   });
 });
 
+describe("#3963: 새 낱말과 새 쓰기 길도 한 곳이다", () => {
+  it("두 표면은 새 낱말을 직접 적지 않는다 — 모델과 코어만 안다", () => {
+    for (const path of [HEADER, ROW]) {
+      const code = fileCode(path);
+      expect(code).not.toMatch(/CHANNEL_MARK_UNREAD_LABEL/);
+      expect(code).not.toMatch(/CHANNEL_COPY_ID_LABEL/);
+      expect(code).not.toMatch(/CHANNEL_COPY_GROUP_LABEL/);
+      expect(code).not.toMatch(/DM_CLOSE_LABEL/);
+      expect(code).not.toMatch(/channelCopyIdLabel/);
+    }
+  });
+
+  it("읽지 않음으로 표시도 읽음 광고 헬퍼 한 곳을 지난다(mark_unread 사유)", () => {
+    const canon = fileCode(CANON);
+    expect(canon).toMatch(/advertiseReadState\(\s*workspaceId,\s*channel\.id,\s*readState\.lastReadSeq,\s*"mark_unread"/);
+    // 표면은 어느 쪽도 직접 부르지 않는다.
+    for (const path of [HEADER, ROW]) {
+      expect(fileCode(path)).not.toMatch(/advertiseReadState/);
+      expect(fileCode(path)).not.toMatch(/markUnreadBeforeSeq/);
+    }
+  });
+
+  it("DM 닫기 원장에 쓰는 자리는 사이드바 한 곳이다(모듈 정의는 제외)", () => {
+    // 행 메뉴·호버 X 가 각자 원장을 만지면 닫는 순서(이웃 → 원장 → 착지 → 캐럿)가 갈라진다.
+    // 두 입구는 사이드바의 `closeDmRow` 하나를 지난다.
+    const sidebar = "features/sidebar/Sidebar.tsx";
+    const module = "features/sidebar/sidebarDmClosure.ts";
+    expect(callers("closeDmOnDevice").sort()).toEqual([module, sidebar].sort());
+    expect(callers("reopenDmOnDevice").sort()).toEqual([module, sidebar].sort());
+    for (const path of [HEADER, ROW, "features/sidebar/SidebarRow.tsx"]) {
+      expect(fileCode(path)).not.toMatch(/closeDmOnDevice|reopenDmOnDevice|localStorage/);
+    }
+  });
+});
+
 describe("게이트가 실제로 파일을 읽고 있다", () => {
   it("훑은 목록에 두 표면과 정본이 전부 들어 있다", () => {
     const paths = FILES.map((file) => file.path);

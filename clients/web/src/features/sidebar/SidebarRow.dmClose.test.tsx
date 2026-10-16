@@ -1,0 +1,185 @@
+// @vitest-environment jsdom
+
+import { act, createElement, type ReactElement } from "react";
+import { createPortal } from "react-dom";
+import { createRoot, type Root } from "react-dom/client";
+import { MemoryRouter } from "react-router-dom";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { SidebarRow } from "./SidebarRow";
+
+// =============================================================================
+// DM 행의 호버 X (#3963). SidebarRow 가 지는 것만 잰다: 언제 서고 언제 내려가는가, 무엇을
+// 알리는가. 닫는 일의 실행은 사이드바의 몫이라 `Sidebar.dm.test.tsx` 가 잰다.
+// =============================================================================
+
+const reactActEnvironment = globalThis as typeof globalThis & {
+  IS_REACT_ACT_ENVIRONMENT?: boolean;
+};
+let root: Root | null = null;
+let host: HTMLElement | null = null;
+
+beforeAll(() => {
+  reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+});
+
+function stubPointer(hoverNone = false) {
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: hoverNone && query.includes("hover: none"),
+    media: query,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    addListener: () => undefined,
+    removeListener: () => undefined,
+    dispatchEvent: () => false,
+  }));
+}
+
+afterEach(() => {
+  if (root) act(() => root?.unmount());
+  root = null;
+  host?.remove();
+  host = null;
+  vi.unstubAllGlobals();
+});
+
+function mount(
+  props: Partial<Parameters<typeof SidebarRow>[0]> = {},
+  wrapLink?: (link: ReactElement) => ReactElement
+): void {
+  stubPointer(false);
+  host = document.createElement("div");
+  document.body.append(host);
+  root = createRoot(host);
+  act(() => {
+    root?.render(
+      createElement(
+        MemoryRouter,
+        { initialEntries: ["/"] },
+        createElement(
+          "ul",
+          null,
+          createElement(SidebarRow, {
+            to: "/c/00000000-0000-7000-8000-000000000301",
+            icon: createElement("span", null, "이"),
+            label: "이도현",
+            testId: "channel-item",
+            wrapLink,
+            ...props,
+          })
+        )
+      )
+    );
+  });
+}
+
+const li = () => document.querySelector("li") as HTMLElement;
+const link = () => document.querySelector('[data-testid="channel-item"]') as HTMLElement;
+const x = () => document.querySelector<HTMLButtonElement>('[data-testid="dm-close"]');
+const enter = () => act(() => void li().dispatchEvent(new MouseEvent("mouseenter")));
+const leave = () => act(() => void li().dispatchEvent(new MouseEvent("mouseleave")));
+
+describe("호버 X 가 서는 조건", () => {
+  it("닫는 손이 없는 행에는 X 도 위치 기준(relative)도 없다", () => {
+    mount();
+    enter();
+    expect(x()).toBeNull();
+    expect(li().className).not.toContain("relative");
+    expect(link().hasAttribute("data-row-close")).toBe(false);
+  });
+
+  it("호버하지 않은 행에는 DOM 이 없다 — opacity·visibility 로 숨기지 않는다", () => {
+    mount({ onClose: () => undefined });
+    expect(x()).toBeNull();
+    expect(li().className).toContain("relative");
+    enter();
+    expect(x()).not.toBeNull();
+    leave();
+    expect(x()).toBeNull();
+  });
+
+  it("누르면 닫는 손을 한 번 부른다. 행은 이동하지 않는다", () => {
+    const onClose = vi.fn();
+    mount({ onClose });
+    enter();
+    act(() => x()!.click());
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("호버 X 가 말하는 것", () => {
+  it("이름은 어느 대화인지 말하고, 탭 정거장이 아니며, 링크 안이 아니다", () => {
+    mount({ onClose: () => undefined, closeLabel: "이도현, 사이드바에서 닫기" });
+    enter();
+    expect(x()?.getAttribute("aria-label")).toBe("이도현, 사이드바에서 닫기");
+    expect(x()?.getAttribute("title")).toBe("사이드바에서 닫기");
+    expect(x()?.tabIndex).toBe(-1);
+    expect(link().contains(x())).toBe(false);
+  });
+
+  it("이름이 없으면 낱말만 쓴다", () => {
+    mount({ onClose: () => undefined });
+    enter();
+    expect(x()?.getAttribute("aria-label")).toBe("사이드바에서 닫기");
+  });
+
+  it("닫을 수 없는 행의 DOM 은 예전 그대로다: 오른쪽 끝의 것들을 묶는 상자가 없다", () => {
+    mount({ unreadCount: 3 });
+    expect(link().querySelector("[data-row-trailing]")).toBeNull();
+    expect(link().querySelector('[data-testid="unread-count"]')).not.toBeNull();
+  });
+
+  it("서 있는 동안 링크가 알린다: 오른쪽 끝의 것들이 한 덩어리로 내려갈 수 있다", () => {
+    mount({ onClose: () => undefined, unreadCount: 3 });
+    const trailing = link().querySelector("[data-row-trailing]");
+    expect(trailing?.querySelector('[data-testid="unread-count"]')).not.toBeNull();
+    expect(link().hasAttribute("data-row-close")).toBe(false);
+    enter();
+    expect(link().hasAttribute("data-row-close")).toBe(true);
+    leave();
+    expect(link().hasAttribute("data-row-close")).toBe(false);
+  });
+
+  it("아이콘 자리의 종류를 말한다: 아바타만 표시가 선다", () => {
+    mount({ iconKind: "avatar" });
+    expect(link().querySelector("[data-row-icon]")?.getAttribute("data-icon-kind")).toBe(
+      "avatar"
+    );
+    act(() => root?.unmount());
+    root = null;
+    host?.remove();
+    mount();
+    expect(link().querySelector("[data-row-icon]")?.hasAttribute("data-icon-kind")).toBe(false);
+  });
+});
+
+describe("포털 메뉴로 포인터가 건너가면 X 가 내려간다", () => {
+  it("브라우저의 실제 이벤트 순서(mouseover→mouseenter, mouseout→mouseleave)에서 남지 않는다", () => {
+    // 우클릭 메뉴는 `document.body` 로 포털되지만 React 트리로는 이 행의 자손이다. React 의
+    // `onMouseLeave` 는 포털 자손으로의 이동을 행 안의 이동으로 치므로, 그것으로 호버를 들으면
+    // 포인터가 메뉴로 건너가도 leave 가 오지 않고 메뉴가 닫힌 뒤에도 X 가 남는다. DOM 으로는
+    // 행 밖이라 네이티브 mouseenter/leave 가 맞다 - 이 순서를 브라우저가 쏘는 대로 재현한다.
+    mount({ onClose: () => undefined }, (child) =>
+      createElement(
+        "span",
+        null,
+        child,
+        createPortal(createElement("div", { "data-testid": "portal-menu" }, "메뉴"), document.body)
+      )
+    );
+    const menu = document.querySelector('[data-testid="portal-menu"]') as HTMLElement;
+    expect(menu).not.toBeNull();
+    // 포인터가 바깥에서 행으로 들어온다.
+    act(() => {
+      link().dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: document.body }));
+      li().dispatchEvent(new MouseEvent("mouseenter"));
+    });
+    expect(x()).not.toBeNull();
+    // 포인터가 행에서 포털 메뉴로 건너간다.
+    act(() => {
+      link().dispatchEvent(new MouseEvent("mouseout", { bubbles: true, relatedTarget: menu }));
+      menu.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: link() }));
+      li().dispatchEvent(new MouseEvent("mouseleave"));
+    });
+    expect(x()).toBeNull();
+  });
+});

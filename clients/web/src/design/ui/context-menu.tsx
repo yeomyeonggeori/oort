@@ -15,6 +15,12 @@ import { menuRowClass } from "@/design/ui/dropdown-menu";
 
 export const ContextMenu = ContextMenuPrimitive.Root;
 export const ContextMenuTrigger = ContextMenuPrimitive.Trigger;
+/**
+ * A plain (non-radio) group: `role="group"`, named by a `ContextMenuLabel` through
+ * `aria-labelledby`. The `DropdownMenuGroup` twin; the row menu's 「복사」 cluster
+ * uses it (#3963), a title over three rows that stay on screen.
+ */
+export const ContextMenuGroup = ContextMenuPrimitive.Group;
 
 export const ContextMenuContent = React.forwardRef<
   React.ElementRef<typeof ContextMenuPrimitive.Content>,

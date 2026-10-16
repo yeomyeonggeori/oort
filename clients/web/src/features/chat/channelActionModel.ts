@@ -1,9 +1,14 @@
 import {
   canLeaveChannel,
+  CHANNEL_COPY_GROUP_LABEL,
   CHANNEL_LEAVE_LABEL,
   CHANNEL_MARK_READ_BUSY_LABEL,
   CHANNEL_MARK_READ_LABEL,
+  CHANNEL_MARK_UNREAD_BUSY_LABEL,
+  CHANNEL_MARK_UNREAD_LABEL,
   CHANNEL_TOPIC_VIEW_LABEL,
+  DM_CLOSE_LABEL,
+  channelCopyIdLabel,
   channelCopyNameLabel,
   channelMenuAccessibleLabel,
   channelMuteToggleBusyLabel,
@@ -70,18 +75,79 @@ import type { Channel, MembershipRole } from "@momo/core/lib/api";
 // 라디오인 이유는 `PresenceControl` 과 같다: 섹션 배치는 **여럿 중 하나**라
 // 지금 속한 섹션이 `aria-checked` 로 들려야 한다. 평범한 항목 N 개는 스크린리더에
 // 동등한 명령 N 개로 읽히고, 그 중 어디에 이미 있는지는 말해 주지 않는다.
+//
+// ## 무리(cluster)가 구분선을 정한다 (#3963)
+//
+// 앞 판은 구분선을 항목마다 「앞 항목이 누구인가」로 따로 정했고, 그 판정이 **표면 필터
+// 앞**에서 돌았다. 항목이 늘 때마다 분기가 하나씩 늘었고, 거른 뒤에는 첫 항목만 보정됐다.
+// 이제 모든 항목이 자기 무리를 들고(`CLUSTER_OF`), 구분선은 **거른 뒤의 이웃이 다른 무리일
+// 때** 선다(`withClusterSeparators`). 정본 차례는 Buzz 의 우클릭 메뉴를 따른다:
+//
+//   복사(이름 · 링크 · ID) │ 섹션 이동 │ 읽음/읽지 않음 · 알림 · 별표 │ 닫기(DM) │ 나가기
+//
+// 헤더 ⋮ 는 같은 표를 다른 열쇠로 거른다 - `주제 │ 알림 · 기억 │ 나가기` 로 예전 그대로다.
+// 복사 무리는 서브메뉴(Buzz 의 「복사 ▸」)가 아니라 **제목 + 화면에 남는 세 행**이다. 이유는
+// 위 「왜 서브메뉴가 아닌가」와 같다.
 // =============================================================================
 
 export type ChannelActionKey =
   | "topic"
   | "mark-read"
+  | "mark-unread"
   | "mute"
   | "memory"
   | "star"
   | "move-to-section"
   | "copy-link"
   | "copy-name"
+  | "copy-id"
+  | "close-dm"
   | "leave";
+
+/**
+ * 구분선의 단위. 정본 차례도 이 이름들의 차례다.
+ *
+ *   info   주제 보기 (헤더 전용)
+ *   copy   이름 · 링크 · ID (행 전용, 제목 「복사」)
+ *   place  섹션으로 이동 (행 전용, 채널만)
+ *   state  읽음 · 읽지 않음 · 알림 · 기억 · 별표
+ *   close  사이드바에서 닫기 (행 전용, DM 만)
+ *   danger 채널 나가기
+ */
+export type ChannelActionCluster =
+  | "info"
+  | "copy"
+  | "place"
+  | "state"
+  | "close"
+  | "danger";
+
+/** 열쇠 → 무리. 새 항목은 여기 한 줄을 적어야 구분선이 제자리에 선다. */
+const CLUSTER_OF: Record<ChannelActionKey, ChannelActionCluster> = {
+  topic: "info",
+  "copy-name": "copy",
+  "copy-link": "copy",
+  "copy-id": "copy",
+  "move-to-section": "place",
+  "mark-read": "state",
+  "mark-unread": "state",
+  mute: "state",
+  memory: "state",
+  star: "state",
+  "close-dm": "close",
+  leave: "danger",
+};
+
+/** 제목을 이고 서는 무리. 나머지는 제목 없이 행만 선다(`place` 는 항목이 자기 제목을 든다). */
+const CLUSTER_TITLE: Partial<Record<ChannelActionCluster, string>> = {
+  copy: CHANNEL_COPY_GROUP_LABEL,
+};
+
+export function channelActionClusterTitle(
+  cluster: ChannelActionCluster
+): string | undefined {
+  return CLUSTER_TITLE[cluster];
+}
 
 /**
  * 「섹션으로 이동」의 한 목적지 (ADR-0177 D4).
@@ -97,6 +163,8 @@ export interface ChannelSectionChoice {
 
 export interface ChannelActionItem {
   key: ChannelActionKey;
+  /** 이 항목이 속한 무리. 구분선과 복사 무리의 제목이 이것으로 선다. */
+  cluster: ChannelActionCluster;
   /** `data-testid` 접미사. 표면이 접두사를 붙인다(`channel-` / `channel-row-`). */
   testKey: string;
   label: string;
@@ -108,7 +176,7 @@ export interface ChannelActionItem {
   busyLabel?: string;
   /** 파괴적 액션. 메뉴 행이 --danger 를 입는다. */
   tone?: "danger";
-  /** 이 항목 위에 구분선을 세운다. 무리가 바뀌는 자리에서만. */
+  /** 이 항목 위에 구분선을 세운다. 거른 뒤의 이웃이 다른 무리일 때만(`withClusterSeparators`). */
   separatorBefore?: boolean;
   /**
    * 이 항목이 **행 하나가 아니라 무리**라는 표식. `move-to-section` 만 갖는다.
@@ -133,6 +201,11 @@ export type ChannelActionSurface = (typeof CHANNEL_ACTION_SURFACES)[number];
 export interface ChannelActionAvailability {
   topic: boolean;
   markRead: boolean;
+  /**
+   * 다 읽은 채널의 「읽지 않음으로 표시」 (#3963). `markRead` 와 같은 자리의 반대 방향이라
+   * 둘이 함께 참일 수 없다.
+   */
+  markUnread: boolean;
   mute: boolean;
   /**
    * 「기억 설정」(ADR-0196 D9, #3165). 선택 칸이다: 이 서버가 팀 기억을 싣지
@@ -143,6 +216,10 @@ export interface ChannelActionAvailability {
   moveToSection: boolean;
   copyLink: boolean;
   copyName: boolean;
+  /** 채널·DM 의 ID 복사 (#3963). 어느 채널에든 있다. */
+  copyId: boolean;
+  /** DM 을 이 기기의 사이드바에서 닫는다 (#3963). DM 이고 닫을 손이 있을 때만. */
+  closeDm: boolean;
   leave: boolean;
 }
 
@@ -151,6 +228,8 @@ export interface ChannelActionState {
   muted: boolean;
   copiedLink: boolean;
   copiedName: boolean;
+  /** ID 가 방금 클립보드에 올라갔는가 (#3963). 없으면 아직이다. */
+  copiedId?: boolean;
   /** 이 채널에 별표가 붙어 있는가 (ADR-0177 / BT-5). 낱말이 이 값으로 뒤집힌다. */
   starred?: boolean;
   /**
@@ -170,8 +249,12 @@ export interface ChannelActionState {
  * 서버의 `remove_member`(`routes/channels.rs`)에는 DM 분기가 없어서 호출하면
  * 그냥 멤버십이 지워지는데, DM 은 그것으로 「대화를 닫는」 것이 아니라 상대가
  * 빈 방에 남는 것이고, 되돌아올 길도 없다(`add_member` 도 관리자 전용). 버즈의
- * 「대화 닫기」에 해당하는 라우트는 이 서버에 없다. 없는 문을 그리는 것은 없는
- * 것보다 나쁘므로, DM 은 나가기 자리를 비우고 아무것도 대신 넣지 않는다.
+ * 「대화 닫기」에 해당하는 **서버** 라우트는 지금도 없다.
+ *
+ * 그 자리를 #3963 이 **기기 로컬 닫기**(`close-dm`)로 채웠다: 이 기기의 사이드바에서만
+ * 숨기고(`sidebarDmClosure.ts`), 멤버십도 서버도 건드리지 않으며, 새 메시지가 오면 다시
+ * 나타난다. 그래서 나가기와 달리 확인 단계가 없고, 닫을 **손**(`canCloseDm`)을 넘긴 표면에만
+ * 선다. 기기 사이 동기화는 서버 계약이 필요한 일이라 이 항목의 범위 밖이다.
  *
  * 「주제 보기」도 같은 갈래로 DM 에는 없다: DM 에는 토픽이 없다.
  */
@@ -187,12 +270,22 @@ export function channelActionAvailability(input: {
   canStar?: boolean;
   /** 이 서버가 팀 기억을 싣는가. DM 은 요약 제외가 기본이라 여기서도 뺀다. */
   hasMemorySettings?: boolean;
+  /**
+   * 「읽지 않음으로 표시」를 받을 수 있는 채널인가 (#3963): 서버 투영이 있고 다 읽었고
+   * 메시지가 하나라도 있다. 판정은 투영을 든 호출부가 한다(`composedUnreadCount`). 여기서는
+   * `unreadCount` 와 겹치지 않는지만 한 번 더 막는다.
+   */
+  canMarkUnread?: boolean;
+  /** DM 을 닫을 손이 있는가 (#3963). 없으면 눌러도 아무 일이 없는 항목이 된다. */
+  canCloseDm?: boolean;
 }): ChannelActionAvailability {
   const isDm = input.channel.kind === "dm";
   return {
     topic: !isDm && normalizeChannelTopic(input.channel.topic ?? "") !== "",
     // 이미 다 읽은 채널에 「읽음 처리」는 아무 일도 하지 않는 항목이다.
     markRead: input.unreadCount > 0,
+    // 반대 방향: 안 읽음이 이미 있는 채널에는 「읽음 처리」가 서므로 둘이 겹치지 않는다.
+    markUnread: input.unreadCount === 0 && (input.canMarkUnread ?? false),
     // **DM 은 별표를 받지 않는다.** 별표 섹션은 파생이고, 그 파생이 세는 것은
     // 비-DM 채널뿐이다(`deriveSidebarSections` — `byId` 에 DM 이 없다). 문을 열면
     // payload 에는 적히는데 화면에는 아무 일도 일어나지 않는다.
@@ -206,99 +299,128 @@ export function channelActionAvailability(input: {
     moveToSection: !isDm && (input.sectionCount ?? 0) > 0,
     copyLink: true,
     copyName: true,
+    copyId: true,
+    closeDm: isDm && (input.canCloseDm ?? false),
     leave: !isDm && canLeaveChannel(input.selfRole),
   };
+}
+
+/**
+ * 거른 뒤의 이웃이 **다른 무리일 때** 그 위에 구분선을 단다. 첫 항목은 구분선을 이지 않는다 -
+ * 메뉴 맨 위의 구분선은 무리를 나누지 않고 그냥 선이다.
+ *
+ * 표면 필터 **뒤에** 다시 돌려야 한다. 필터 앞에서 정한 구분선은 사라진 항목을 기준으로
+ * 서 있어서, 예를 들어 「주제」가 빠진 헤더에서 첫 항목이 선을 이고 서거나, 사이에 낀 무리가
+ * 통째로 빠지고도 두 선이 겹쳐 서는 일이 생긴다.
+ */
+function withClusterSeparators(items: ChannelActionItem[]): ChannelActionItem[] {
+  return items.map((item, index) => ({
+    ...item,
+    separatorBefore: index > 0 && items[index - 1].cluster !== item.cluster,
+  }));
 }
 
 /**
  * 인벤토리 전량, 정본 순서로. 표면은 이 배열을 **거르기만** 한다 — 순서를
  * 표면이 다시 정하면 같은 두 메뉴가 다른 차례로 읽힌다.
  *
- * 무리: ①상태를 바꾸는 것(읽음·알림) ②밖으로 꺼내는 것(링크·이름) ③파괴적인 것
- * (나가기). 구분선은 무리가 바뀌는 자리에만 선다.
+ * 차례는 무리의 차례다(위 머리말): 주제 │ 복사 │ 섹션 이동 │ 상태(읽음·읽지 않음·알림·
+ * 기억·별표) │ 닫기 │ 나가기. 구분선은 `withClusterSeparators` 가 무리가 바뀌는 자리에 세운다.
  */
 export function channelActionItems(
   available: ChannelActionAvailability,
   state: ChannelActionState
 ): ChannelActionItem[] {
   const items: ChannelActionItem[] = [];
+  const push = (item: Omit<ChannelActionItem, "cluster" | "separatorBefore">) => {
+    items.push({ ...item, cluster: CLUSTER_OF[item.key] });
+  };
   if (available.topic) {
-    items.push({ key: "topic", testKey: "topic", label: CHANNEL_TOPIC_VIEW_LABEL });
+    push({ key: "topic", testKey: "topic", label: CHANNEL_TOPIC_VIEW_LABEL });
   }
-  if (available.markRead) {
-    items.push({
-      key: "mark-read",
-      testKey: "mark-read",
-      label: CHANNEL_MARK_READ_LABEL,
-      busyLabel: CHANNEL_MARK_READ_BUSY_LABEL,
-      separatorBefore: items.length > 0,
+  // 복사 무리: 이름 → 링크 → ID. Buzz 의 「복사 ▸」가 든 것과 같은 세 가지다.
+  if (available.copyName) {
+    push({
+      key: "copy-name",
+      testKey: "copy-name",
+      label: channelCopyNameLabel(state.copiedName),
     });
   }
-  if (available.mute) {
-    items.push({
-      key: "mute",
-      testKey: "mute-toggle",
-      label: channelMuteToggleLabel(state.muted),
-      busyLabel: channelMuteToggleBusyLabel(state.muted),
-      separatorBefore: items.length > 0 && items[items.length - 1].key === "topic",
+  if (available.copyLink) {
+    push({
+      key: "copy-link",
+      testKey: "copy-link",
+      label: copyLinkActionLabel(state.copiedLink),
     });
   }
-  if (available.memory === true) {
-    items.push({
-      key: "memory",
-      testKey: "memory-settings",
-      label: CHANNEL_MEMORY_SETTINGS_LABEL,
+  if (available.copyId) {
+    push({
+      key: "copy-id",
+      testKey: "copy-id",
+      label: channelCopyIdLabel(state.copiedId ?? false),
     });
   }
-  // 무리 셋째: **사이드바를 정리하는 것**(별표 · 배치). 앞의 둘(읽음 · 알림)이
-  // 「이 채널의 상태」라면 이 둘은 「내 목록에서의 자리」다 — 그래서 구분선은 별표
-  // 앞에 한 번만 서고, 배치는 별표와 같은 무리에 붙는다.
-  if (available.star) {
-    items.push({
-      key: "star",
-      testKey: "star",
-      label: channelStarToggleLabel(state.starred ?? false),
-      separatorBefore: items.length > 0,
-    });
-  }
+  // 섹션 이동: 무리 하나(제목 + 라디오 행들).
   if (available.moveToSection) {
-    // 무리 하나(제목 + 라디오 행들).
-    items.push({
+    push({
       key: "move-to-section",
       testKey: "move-to-section",
       label: SECTION_MOVE_GROUP_LABEL,
       sections: state.sections ?? [],
       currentSectionId: state.currentSectionId ?? null,
-      separatorBefore:
-        items.length > 0 && items[items.length - 1].key !== "star",
     });
   }
-  if (available.copyLink) {
-    items.push({
-      key: "copy-link",
-      testKey: "copy-link",
-      label: copyLinkActionLabel(state.copiedLink),
-      separatorBefore: items.length > 0,
+  // 상태 무리: 이 채널의 읽음 · 알림 · 기억 · 내 목록에서의 자리(별표).
+  if (available.markRead) {
+    push({
+      key: "mark-read",
+      testKey: "mark-read",
+      label: CHANNEL_MARK_READ_LABEL,
+      busyLabel: CHANNEL_MARK_READ_BUSY_LABEL,
     });
   }
-  if (available.copyName) {
-    items.push({
-      key: "copy-name",
-      testKey: "copy-name",
-      label: channelCopyNameLabel(state.copiedName),
-      separatorBefore: items.length > 0 && items[items.length - 1].key !== "copy-link",
+  if (available.markUnread) {
+    push({
+      key: "mark-unread",
+      testKey: "mark-unread",
+      label: CHANNEL_MARK_UNREAD_LABEL,
+      busyLabel: CHANNEL_MARK_UNREAD_BUSY_LABEL,
     });
+  }
+  if (available.mute) {
+    push({
+      key: "mute",
+      testKey: "mute-toggle",
+      label: channelMuteToggleLabel(state.muted),
+      busyLabel: channelMuteToggleBusyLabel(state.muted),
+    });
+  }
+  if (available.memory === true) {
+    push({
+      key: "memory",
+      testKey: "memory-settings",
+      label: CHANNEL_MEMORY_SETTINGS_LABEL,
+    });
+  }
+  if (available.star) {
+    push({
+      key: "star",
+      testKey: "star",
+      label: channelStarToggleLabel(state.starred ?? false),
+    });
+  }
+  if (available.closeDm) {
+    push({ key: "close-dm", testKey: "close-dm", label: DM_CLOSE_LABEL });
   }
   if (available.leave) {
-    items.push({
+    push({
       key: "leave",
       testKey: "leave",
       label: CHANNEL_LEAVE_LABEL,
       tone: "danger",
-      separatorBefore: items.length > 0,
     });
   }
-  return items;
+  return withClusterSeparators(items);
 }
 
 /**
@@ -309,17 +431,20 @@ const SURFACE_KEYS: Record<ChannelActionSurface, ReadonlySet<ChannelActionKey>> 
   // 헤더 ⋮ 는 BZ-2 가 세운 그대로다. 이 티켓은 헤더의 항목을 늘리지 않는다:
   // 채널을 열어 둔 사람에게 「읽음 처리」와 「이름 복사」는 다른 물음이다.
   header: new Set<ChannelActionKey>(["topic", "mute", "memory", "leave"]),
-  // 행 우클릭은 「열지 않고 조작한다」가 전부다.
   // 행 우클릭은 「열지 않고 조작한다」가 전부다. BT-4 의 섹션 배치가 여기 사는
   // 이유도 그것이다 - 채널을 어디에 둘지는 그 채널을 **보지 않고** 정하는 일이고,
-  // 헤더 ⋮ 는 정의상 이미 그 안에 들어와 있는 사람의 것이다.
+  // 헤더 ⋮ 는 정의상 이미 그 안에 들어와 있는 사람의 것이다. 복사 셋과 DM 닫기(#3963)도
+  // 같은 갈래다. 「읽지 않음으로 표시」는 읽음 처리의 반대 방향이라 같은 이유로 여기에만 선다.
   row: new Set<ChannelActionKey>([
+    "copy-name",
+    "copy-link",
+    "copy-id",
+    "move-to-section",
     "mark-read",
+    "mark-unread",
     "mute",
     "star",
-    "move-to-section",
-    "copy-link",
-    "copy-name",
+    "close-dm",
     "leave",
   ]),
 };
@@ -330,15 +455,9 @@ export function channelActionItemsForSurface(
   state: ChannelActionState
 ): ChannelActionItem[] {
   const keys = SURFACE_KEYS[surface];
-  const kept = channelActionItems(available, state).filter((item) =>
-    keys.has(item.key)
-  );
-  // 거르고 나면 첫 항목이 구분선을 이고 있을 수 있다. 메뉴 맨 위의 구분선은
-  // 무리를 나누지 않고 그냥 선이다.
-  return kept.map((item, index) =>
-    index === 0 && item.separatorBefore
-      ? { ...item, separatorBefore: false }
-      : item
+  // 구분선은 거른 **뒤에** 다시 센다 (`withClusterSeparators`).
+  return withClusterSeparators(
+    channelActionItems(available, state).filter((item) => keys.has(item.key))
   );
 }
 
@@ -360,12 +479,17 @@ export function channelActionKeepsMenuOpen(key: ChannelActionKey): boolean {
   // 섹션으로 옮겨 간다**(파생 「별표」가 맨 위에서 가져간다). 이 메뉴를 이고 있는
   // 트리거는 옮겨 가면서 언마운트되므로, 남기려 해도 남지 않는다 - 닫히는 것이
   // 실제로 일어나는 일이고, 화면이 그렇게 말하는 편이 정직하다.
+  //
+  // `close-dm` (#3963) 도 닫는 쪽이다: 닫는 순간 이 행이 사라지고, 메뉴를 이고 있던 트리거가
+  // 함께 언마운트되므로 열린 채로 둘 수 없다(`star` 와 같은 이유). `mark-unread` 는 읽음
+  // 처리와 같은 왕복이라 실패 배너를 읽도록 열어 둔다.
   return (
     key !== "leave" &&
     key !== "topic" &&
     key !== "memory" &&
     key !== "star" &&
-    key !== "move-to-section"
+    key !== "move-to-section" &&
+    key !== "close-dm"
   );
 }
 

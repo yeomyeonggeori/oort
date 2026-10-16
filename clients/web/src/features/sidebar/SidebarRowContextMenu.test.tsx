@@ -7,11 +7,17 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Channel, MembershipRole, ReadState } from "@momo/core/lib/api";
 import {
+  CHANNEL_COPY_ID_DONE_LABEL,
+  CHANNEL_COPY_ID_LABEL,
   CHANNEL_LEAVE_LABEL,
   CHANNEL_MARK_READ_LABEL,
+  CHANNEL_MARK_UNREAD_BUSY_LABEL,
+  CHANNEL_MARK_UNREAD_FAILURE,
+  CHANNEL_MARK_UNREAD_LABEL,
   CHANNEL_MUTE_FAILURE,
   CHANNEL_MUTE_LABEL,
   CHANNEL_UNMUTE_LABEL,
+  DM_CLOSE_LABEL,
 } from "@momo/core/features/channels/model";
 import {
   COPY_LINK_ACTION_LABEL,
@@ -147,6 +153,7 @@ function mountRow({
   onMoveToSection,
   starred = false,
   onToggleStar,
+  onCloseDm,
 }: {
   channel?: Channel;
   readState?: ReadState | null;
@@ -159,6 +166,8 @@ function mountRow({
   /** ADR-0177 / BT-5 #1933 — 별표. 손이 없으면 항목이 서지 않는다. */
   starred?: boolean;
   onToggleStar?: () => void;
+  /** #3963 — DM 닫기. 손이 없으면 항목이 서지 않는다. */
+  onCloseDm?: () => void;
 } = {}): HTMLElement {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
@@ -211,6 +220,7 @@ function mountRow({
                   onMoveToSection,
                   starred,
                   onToggleStar,
+                  onCloseDm,
                   children: link,
                 }),
             }),
@@ -344,11 +354,14 @@ describe("사이드바 행 우클릭 (BT-1 / #1929)", () => {
     expect(menu()).toBeNull();
     rightClick();
     expect(menu()).not.toBeNull();
+    // Buzz 의 차례다(#3963): 복사(제목 + 이름·링크·ID) │ 읽음 · 알림 │ 나가기.
     expect(labels()).toEqual([
+      "복사",
+      "이름 복사하기",
+      COPY_LINK_ACTION_LABEL,
+      CHANNEL_COPY_ID_LABEL,
       CHANNEL_MARK_READ_LABEL,
       CHANNEL_MUTE_LABEL,
-      COPY_LINK_ACTION_LABEL,
-      "이름 복사하기",
       CHANNEL_LEAVE_LABEL,
     ]);
     // 메뉴가 열려 있는 동안 행 자리가 그것을 말한다: 포털로 떠 있는 패널이
@@ -446,7 +459,8 @@ describe("읽음 처리", () => {
     });
     rightClick();
     expect(item("mark-read")).toBeNull();
-    expect(labels()[0]).toBe(CHANNEL_MUTE_LABEL);
+    // 읽음 처리의 자리에는 그 반대 방향이 선다(#3963). 다 읽었고 메시지가 있다.
+    expect(item("mark-unread")?.textContent?.trim()).toBe(CHANNEL_MARK_UNREAD_LABEL);
   });
 
   it("서버 unread_count 가 0 이어도 마크가 있으면 「읽음 처리」가 선다", () => {
@@ -534,10 +548,12 @@ describe("나가기", () => {
     rightClick();
     expect(item("leave")).toBeNull();
     expect(labels()).toEqual([
+      "복사",
+      "이름 복사하기",
+      COPY_LINK_ACTION_LABEL,
+      CHANNEL_COPY_ID_LABEL,
       CHANNEL_MARK_READ_LABEL,
       CHANNEL_MUTE_LABEL,
-      COPY_LINK_ACTION_LABEL,
-      "이름 복사하기",
     ]);
   });
 
@@ -617,7 +633,7 @@ describe("메뉴 안의 화살표 순회 (design-review #1937 B-1)", () => {
     await flush();
   }
 
-  it("↓ 두 번이면 두 번째 항목에 서고, Enter 가 그것을 실행한다", async () => {
+  it("↓ 로 알림 항목에 서고, Enter 가 그것을 실행한다", async () => {
     // 결함: 포털된 메뉴의 키가 React 트리로 사이드바 로빙 핸들러까지 올라와,
     // ↓ 한 번에 메뉴가 닫히고 캐럿이 「활동」으로 튀었다. 다섯 항목 중 어느
     // 것도 키보드로 실행할 수 없었다. 형상은 헤더 게이트가 이미 쓰는 것과
@@ -628,10 +644,11 @@ describe("메뉴 안의 화살표 순회 (design-review #1937 B-1)", () => {
     pressKey(link, "F10", { shiftKey: true });
     expect(menu()).not.toBeNull();
     await flush();
-    // Radix 는 열면서 첫 항목에 캐럿을 둔다.
-    expect(document.activeElement).toBe(item("mark-read"));
+    // Radix 는 열면서 첫 항목에 캐럿을 둔다. 첫 항목은 복사 무리의 첫 행이다(#3963).
+    expect(document.activeElement).toBe(item("copy-name"));
 
-    await arrow("ArrowDown");
+    // 복사 셋과 읽음 처리를 지나 알림에 선다. 제목(「복사」)은 항목이 아니라서 걸리지 않는다.
+    for (let step = 0; step < 4; step += 1) await arrow("ArrowDown");
     expect(menu()).not.toBeNull();
     expect(document.activeElement).toBe(item("mute-toggle"));
 
@@ -641,7 +658,7 @@ describe("메뉴 안의 화살표 순회 (design-review #1937 B-1)", () => {
     expect(setChannelNotificationPref).toHaveBeenCalledWith(WS, CHANNEL_ID, true);
   });
 
-  it("↓ 로 다섯 항목을 끝까지 걸어도 메뉴가 살아 있다", async () => {
+  it("↓ 로 여섯 항목을 끝까지 걸어도 메뉴가 살아 있다", async () => {
     mountRow();
     const link = row();
     act(() => link.focus());
@@ -650,15 +667,16 @@ describe("메뉴 안의 화살표 순회 (design-review #1937 B-1)", () => {
     const walked = [
       document.activeElement?.getAttribute("data-testid"),
     ];
-    for (let step = 0; step < 4; step += 1) {
+    for (let step = 0; step < 5; step += 1) {
       await arrow("ArrowDown");
       walked.push(document.activeElement?.getAttribute("data-testid") ?? null);
     }
     expect(walked).toEqual([
+      "channel-row-copy-name",
+      "channel-row-copy-link",
+      "channel-row-copy-id",
       "channel-row-mark-read",
       "channel-row-mute-toggle",
-      "channel-row-copy-link",
-      "channel-row-copy-name",
       "channel-row-leave",
     ]);
     expect(menu()).not.toBeNull();
@@ -996,12 +1014,19 @@ describe("섹션으로 이동", () => {
     // 스크린리더에는 이름 없는 라디오 무리가 선다.
     mountRow({ sections: SECTIONS, onMoveToSection: () => undefined });
     rightClick();
-    const group = menu()?.querySelector('[role="group"][aria-labelledby]');
-    expect(group).not.toBeNull();
-    const labelledBy = group?.getAttribute("aria-labelledby") ?? "";
-    expect(document.getElementById(labelledBy)?.textContent).toBe(
-      "섹션으로 이동"
+    // 이 메뉴에는 이름을 가진 무리가 둘이다: 「복사」(#3963)와 「섹션으로 이동」. 무리마다
+    // 이름이 풀리는지 전부 본다 - 하나만 보면 다른 하나가 이름 없이 서도 초록이다.
+    const groups = Array.from(
+      menu()?.querySelectorAll('[role="group"][aria-labelledby]') ?? []
     );
+    const named = groups.map((group) =>
+      document.getElementById(group.getAttribute("aria-labelledby") ?? "")?.textContent
+    );
+    expect(named).toEqual(["복사", "섹션으로 이동"]);
+    // 라디오 행은 「섹션으로 이동」 무리 안에 선다.
+    const move = groups[1];
+    expect(move.querySelectorAll('[role="menuitemradio"]').length).toBe(3);
+    expect(groups[0].querySelectorAll('[role="menuitemradio"]').length).toBe(0);
   });
 });
 
@@ -1059,7 +1084,7 @@ describe("별표", () => {
     expect(menu()).toBeNull();
   });
 
-  it("사이드바 정리 무리로 배치와 나란히 선다", () => {
+  it("섹션 이동은 상태 무리 앞에, 별표는 읽음·알림 뒤에 선다 (Buzz 의 차례, #3963)", () => {
     mountRow({
       onToggleStar: () => undefined,
       sections: [{ id: "sec-1", label: "출시 준비" }],
@@ -1072,9 +1097,232 @@ describe("별표", () => {
       ) ?? []
     ).map((el) => el.dataset.testid);
     expect(order).toEqual([
+      "channel-row-move-to-section",
       "channel-row-mute-toggle",
       "channel-row-star",
-      "channel-row-move-to-section",
     ]);
+  });
+});
+
+// =============================================================================
+// 복사 무리 · ID 복사 (#3963)
+// =============================================================================
+
+describe("복사 무리 (#3963)", () => {
+  it("제목 하나와 세 행이 서브메뉴가 아니라 화면에 남는다", () => {
+    mountRow();
+    rightClick();
+    const title = item("copy-group");
+    expect(title?.textContent).toBe("복사");
+    const group = menu()?.querySelector('[role="group"][aria-labelledby]');
+    expect(group).not.toBeNull();
+    expect(document.getElementById(group?.getAttribute("aria-labelledby") ?? "")).toBe(
+      title
+    );
+    // 이름 · 링크 · ID, 이 차례. 접히지 않고 전부 보인다.
+    expect(
+      Array.from(group?.querySelectorAll('[role="menuitem"]') ?? []).map((el) =>
+        el.getAttribute("data-testid")
+      )
+    ).toEqual([
+      "channel-row-copy-name",
+      "channel-row-copy-link",
+      "channel-row-copy-id",
+    ]);
+    // 이 레포는 서브메뉴를 금지한다(dropdown-menu.tsx 머리말, 이슈 #1383).
+    expect(menu()?.querySelector('[aria-haspopup="menu"]')).toBeNull();
+  });
+
+  it("구분선이 복사 무리와 다음 무리 사이에만 선다", () => {
+    mountRow();
+    rightClick();
+    const children = Array.from(menu()?.children ?? []);
+    const roles = children.map((el) => el.getAttribute("role") ?? el.tagName);
+    // [복사 제목][복사 그룹][선][읽음·알림 행들 ...][선][나가기]
+    expect(roles.filter((role) => role === "separator").length).toBe(2);
+    expect(children[0]).toBe(item("copy-group"));
+  });
+});
+
+describe("ID 복사 (#3963)", () => {
+  it("채널 id 를 그대로 올리고, 영수증 동안 메뉴가 열려 있다", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    mountRow();
+    rightClick();
+    expect(item("copy-id")?.textContent?.trim()).toBe(CHANNEL_COPY_ID_LABEL);
+    clickItem("copy-id");
+    await flush();
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(writeText).toHaveBeenCalledWith(CHANNEL_ID);
+    expect(menu()).not.toBeNull();
+    expect(item("copy-id")?.textContent?.trim()).toBe(CHANNEL_COPY_ID_DONE_LABEL);
+  });
+
+  it("DM 행도 같은 열쇠로 자기 id 를 올린다", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    mountRow({ channel: channelFixture({ kind: "dm", name: undefined }), title: "이도현" });
+    rightClick();
+    clickItem("copy-id");
+    await flush();
+    expect(writeText).toHaveBeenCalledWith(CHANNEL_ID);
+  });
+});
+
+// =============================================================================
+// 읽지 않음으로 표시 (#3963, ADR-0178 D5)
+// =============================================================================
+
+describe("읽지 않음으로 표시 (#3963)", () => {
+  const READ_ALL = () =>
+    readStateFixture({ lastReadSeq: 47, latestSeq: 47, unreadCount: 0 });
+
+  it("안 읽음이 있으면 서지 않는다 — 읽음 처리와 한 자리의 두 방향이다", () => {
+    mountRow({ readState: readStateFixture() });
+    rightClick();
+    expect(item("mark-unread")).toBeNull();
+    expect(item("mark-read")).not.toBeNull();
+  });
+
+  it("메시지가 하나도 없는 채널에는 서지 않는다", () => {
+    mountRow({
+      readState: readStateFixture({ lastReadSeq: 0, latestSeq: 0, unreadCount: 0 }),
+    });
+    rightClick();
+    expect(item("mark-unread")).toBeNull();
+    expect(item("mark-read")).toBeNull();
+  });
+
+  it("투영이 이 채널을 싣지 않았으면 서지 않는다", () => {
+    mountRow({ readState: null });
+    rightClick();
+    expect(item("mark-unread")).toBeNull();
+  });
+
+  it("최신 메시지를 첫 안 읽음으로 광고한다: 커서는 그대로, read_intent 는 싣지 않는다", async () => {
+    mountRow({ readState: READ_ALL() });
+    rightClick();
+    clickItem("mark-unread");
+    await flush();
+    expect(updateReadState).toHaveBeenCalledTimes(1);
+    const [ws, ch, cursor, options] = updateReadState.mock.calls[0] as [
+      string,
+      string,
+      number,
+      { readIntent?: string; markUnreadBeforeSeq?: number },
+    ];
+    expect([ws, ch, cursor]).toEqual([WS, CHANNEL_ID, 47]);
+    expect(options.markUnreadBeforeSeq).toBe(47);
+    // `explicit_open` 을 실으면 표시를 세운 같은 트랜잭션이 그 표시를 지운다
+    // (advertiseReadState.ts 머리말 5번). 이 단정이 그 회귀를 잡는다.
+    expect(options.readIntent).toBeUndefined();
+    // 성공하면 메뉴가 닫힌다.
+    expect(menu()).toBeNull();
+  });
+
+  it("커서가 최신보다 뒤처져 있으면 안 읽음이 있는 것이라 이 항목이 서지 않는다", () => {
+    mountRow({ readState: readStateFixture({ lastReadSeq: 40, latestSeq: 47, unreadCount: 7 }) });
+    rightClick();
+    expect(item("mark-unread")).toBeNull();
+  });
+
+  it("왕복 중에는 낱말과 aria-busy 가 말하고, 잠그지 않는다", async () => {
+    updateReadState.mockReturnValue(new Promise(() => undefined));
+    mountRow({ readState: READ_ALL() });
+    rightClick();
+    clickItem("mark-unread");
+    await flush();
+    const busy = item("mark-unread");
+    expect(busy?.getAttribute("aria-busy")).toBe("true");
+    expect(busy?.textContent?.trim()).toBe(CHANNEL_MARK_UNREAD_BUSY_LABEL);
+    expect(busy?.hasAttribute("data-disabled")).toBe(false);
+    // 같은 항목을 다시 눌러도 두 번째 PUT 은 나가지 않는다.
+    clickItem("mark-unread");
+    await flush();
+    expect(updateReadState).toHaveBeenCalledTimes(1);
+  });
+
+  it("실패는 메뉴를 열어 둔 채 그 자리에서 말한다", async () => {
+    updateReadState.mockRejectedValue(new Error("nope"));
+    mountRow({ readState: READ_ALL() });
+    rightClick();
+    clickItem("mark-unread");
+    await flush();
+    expect(menu()).not.toBeNull();
+    const banner = document.querySelector('[data-testid="channel-row-action-error"]');
+    expect(banner?.textContent).toContain(CHANNEL_MARK_UNREAD_FAILURE);
+  });
+});
+
+// =============================================================================
+// DM 닫기 (#3963)
+// =============================================================================
+
+describe("DM 닫기 (#3963)", () => {
+  const dmChannel = () => channelFixture({ kind: "dm", name: undefined });
+
+  it("DM 이고 닫을 손이 있을 때만 선다", () => {
+    mountRow({ channel: dmChannel(), title: "이도현", onCloseDm: () => undefined });
+    rightClick();
+    expect(item("close-dm")?.textContent?.trim()).toBe(DM_CLOSE_LABEL);
+  });
+
+  it("손이 없으면 서지 않는다", () => {
+    mountRow({ channel: dmChannel(), title: "이도현" });
+    rightClick();
+    expect(item("close-dm")).toBeNull();
+  });
+
+  it("채널 행에는 손을 줘도 서지 않는다 — 채널을 치우는 문은 나가기다", () => {
+    mountRow({ onCloseDm: () => undefined });
+    rightClick();
+    expect(item("close-dm")).toBeNull();
+  });
+
+  it("고르면 닫는 손이 한 번 불리고 메뉴가 닫힌다. 서버는 부르지 않는다", async () => {
+    const closed = vi.fn();
+    mountRow({ channel: dmChannel(), title: "이도현", onCloseDm: closed });
+    rightClick();
+    clickItem("close-dm");
+    await flush();
+    expect(closed).toHaveBeenCalledTimes(1);
+    expect(menu()).toBeNull();
+    // 대화 삭제도 나가기도 아니다: 어느 서버 표면도 부르지 않는다.
+    expect(removeChannelMember).not.toHaveBeenCalled();
+    expect(setChannelNotificationPref).not.toHaveBeenCalled();
+    expect(updateReadState).not.toHaveBeenCalled();
+  });
+
+  it("확인 단계가 없고 빨강이 아니다 — 되돌릴 것이 없다", async () => {
+    mountRow({ channel: dmChannel(), title: "이도현", onCloseDm: () => undefined });
+    rightClick();
+    expect(item("close-dm")?.className).not.toContain("text-danger");
+    clickItem("close-dm");
+    await flush();
+    expect(document.querySelector('[data-testid="channel-row-leave-confirm"]')).toBeNull();
+  });
+
+  it("키보드: 항목까지 걸어 Enter 로 닫는다", async () => {
+    const closed = vi.fn();
+    mountRow({
+      channel: dmChannel(),
+      title: "이도현",
+      readState: readStateFixture(),
+      onCloseDm: closed,
+    });
+    const link = row();
+    act(() => link.focus());
+    pressKey(link, "F10", { shiftKey: true });
+    await flush();
+    // 복사 셋 · 읽음 처리 · 알림 · 닫기: 여섯 번째 항목이다.
+    for (let step = 0; step < 5; step += 1) {
+      pressKey(document.activeElement, "ArrowDown");
+      await flush();
+    }
+    expect(document.activeElement).toBe(item("close-dm"));
+    pressKey(document.activeElement, "Enter");
+    await flush();
+    expect(closed).toHaveBeenCalledTimes(1);
   });
 });

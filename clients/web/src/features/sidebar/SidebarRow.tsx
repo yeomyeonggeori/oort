@@ -1,12 +1,14 @@
 import {
   useEffect,
+  useRef,
   useState,
   type FocusEvent,
   type ReactElement,
   type ReactNode,
 } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, X } from "lucide-react";
 import { Link, NavLink } from "react-router-dom";
+import { DM_CLOSE_LABEL } from "@momo/core/features/channels/model";
 import { cn } from "@/design/lib/cn";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
 import { AttentionDot, AttentionPill } from "./AttentionBadge";
@@ -91,6 +93,27 @@ export interface SidebarRowProps {
    * 둘이 서면 알약이 이긴다(`sidebarBadge`).
    */
   dot?: DotTone | null;
+  /**
+   * 호버하면 오른쪽에 서는 X (DM 행의 「사이드바에서 닫기」, #3963). 없으면 X 가 서지 않는다.
+   *
+   * X 는 **링크 안이 아니라 링크의 형제**다: 앵커 안의 `<button>` 은 상호작용 콘텐츠의 중첩이라
+   * 클릭이 어느 쪽인지 브라우저마다 다르다. 그래서 `<li>` 가 위치의 기준(`relative`)이 되고 X 는
+   * 거기에 절대 위치한다. 우클릭 메뉴의 트리거 상자 안에 같이 들어가므로 X 위에서의 우클릭도 같은
+   * 행 메뉴를 연다.
+   *
+   * 마운트 규율은 메시지 행 툴바와 같다(SKILL §6): 호버하지 않은 행에는 DOM 이 없다. `opacity`·
+   * `visibility` 로 숨기지 않는다. 탭 정거장도 아니다(`tabIndex={-1}`) - 키보드의 길은 행 메뉴의
+   * 같은 이름 항목이다. **터치(`hover: none`)에는 호출부가 이 프롭을 주지 않는다**: 그 표면 판정은
+   * 이미 사이드바가 하고(`touchSurface`), 행마다 미디어 쿼리 구독을 하나씩 더 들이지 않는다.
+   */
+  onClose?: () => void;
+  /** X 의 접근 가능한 이름(어느 대화인지 말한다). 없으면 낱말만 쓴다. */
+  closeLabel?: string;
+  /**
+   * 아이콘 자리에 서는 것의 종류. `avatar` 는 24px 아바타(DM)다 - 18px 글리프 행과 **이름이
+   * 같은 자리에서 시작하도록** 아바타가 글리프의 축 위에 앉는다(`sidebar-row`, tokens.css).
+   */
+  iconKind?: "glyph" | "avatar";
 }
 
 export function SidebarRow({
@@ -109,10 +132,34 @@ export function SidebarRow({
   isActive: activeOverride,
   badgeLabel,
   dot = null,
+  onClose,
+  closeLabel,
+  iconKind = "glyph",
 }: SidebarRowProps) {
   // 알약은 한 줄에 하나다(필요 > 일반). 규칙은 `badgeFor`가 진다.
   const pill = badgeFor({ needsMe: mentionCount, unread: unreadCount });
   const hasUnread = unreadCount > 0;
+  const closable = onClose !== undefined;
+  const rowRef = useRef<HTMLLIElement>(null);
+  const [hovered, setHovered] = useState(false);
+  // 호버는 **네이티브** mouseenter/leave 로 듣는다. React 의 `onMouseLeave` 는 포털 자손을 행
+  // 안으로 친다: 우클릭 메뉴(포털)로 포인터가 건너가도 leave 가 오지 않고, 메뉴가 닫힌 뒤에는
+  // 그 leave 가 영영 오지 않아 X 가 남는다. 포털은 DOM 으로는 행 밖이므로 네이티브 이벤트가 맞다.
+  // 닫을 수 없는 행(채널·전역 행)은 구독도 하지 않는다.
+  useEffect(() => {
+    const row = rowRef.current;
+    if (!closable || row === null) return;
+    const enter = () => setHovered(true);
+    const leave = () => setHovered(false);
+    row.addEventListener("mouseenter", enter);
+    row.addEventListener("mouseleave", leave);
+    return () => {
+      row.removeEventListener("mouseenter", enter);
+      row.removeEventListener("mouseleave", leave);
+      setHovered(false);
+    };
+  }, [closable]);
+  const showClose = closable && hovered;
   const linkProps = {
     to,
     "data-sidebar-row": "",
@@ -120,11 +167,33 @@ export function SidebarRow({
     ...dataAttrs,
     ...dragProps,
     "data-unread": hasUnread ? "" : undefined,
+    // X 가 서 있는 동안 오른쪽 안쪽 여백을 비우고 알약·점을 내린다(`sidebar-row`, tokens.css).
+    "data-row-close": showClose ? "" : undefined,
     "aria-label": badgeLabel ? `${label}, ${badgeLabel}` : undefined,
   };
+  // 오른쪽 끝의 것들(뒤따르는 슬롯 · 알약 · 점). 닫을 수 있는 행에서만 한 덩어리로 묶는다: `contents`
+  // 라 레이아웃은 예전 그대로이고, X 가 서는 동안 이 덩어리 하나만 내리면 된다(tokens.css
+  // `sidebar-row`). 닫을 수 없는 행의 DOM 은 예전 그대로다.
+  const trailingCells = (
+    <>
+      {trailing}
+      {pill ? (
+        <AttentionPill
+          spec={pill}
+          testId={pill.tone === "ink" ? "mention-badge" : "unread-count"}
+        />
+      ) : dot ? (
+        <AttentionDot tone={dot} testId="row-dot" />
+      ) : null}
+    </>
+  );
   const content = (
     <>
-      <span data-row-icon="" aria-hidden="true">
+      <span
+        data-row-icon=""
+        data-icon-kind={iconKind === "avatar" ? "avatar" : undefined}
+        aria-hidden="true"
+      >
         {icon}
       </span>
       <span className="flex min-w-0 flex-1 items-baseline gap-1">
@@ -145,15 +214,13 @@ export function SidebarRow({
           </span>
         )}
       </span>
-      {trailing}
-      {pill ? (
-        <AttentionPill
-          spec={pill}
-          testId={pill.tone === "ink" ? "mention-badge" : "unread-count"}
-        />
-      ) : dot ? (
-        <AttentionDot tone={dot} testId="row-dot" />
-      ) : null}
+      {closable ? (
+        <span data-row-trailing="" className="contents">
+          {trailingCells}
+        </span>
+      ) : (
+        trailingCells
+      )}
     </>
   );
   // 선택을 셸이 정하는 줄(`isActive` 지정)은 `Link`로 그린다. `NavLink`는 `aria-current`를 자기
@@ -177,7 +244,34 @@ export function SidebarRow({
       </Link>
     );
 
-  return <li>{wrapLink ? wrapLink(link) : link}</li>;
+  const closeButton = showClose ? (
+    <button
+      type="button"
+      tabIndex={-1}
+      onClick={onClose}
+      aria-label={closeLabel ?? DM_CLOSE_LABEL}
+      title={DM_CLOSE_LABEL}
+      data-testid="dm-close"
+      className="press absolute right-2 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-pressed hover:text-ink focus-visible:focus-ring"
+    >
+      <X className="size-4" aria-hidden="true" />
+    </button>
+  ) : null;
+  // 링크와 X 는 **같은 트리거 상자 안**에 선다: X 위의 우클릭도 행 메뉴를 연다.
+  const body = closeButton ? (
+    <>
+      {link}
+      {closeButton}
+    </>
+  ) : (
+    link
+  );
+
+  return (
+    <li ref={rowRef} className={closable ? "relative" : undefined}>
+      {wrapLink ? wrapLink(body) : body}
+    </li>
+  );
 }
 
 /**

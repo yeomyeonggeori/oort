@@ -179,6 +179,51 @@ export function channelCopyNameLabel(copied: boolean): string {
   return copied ? CHANNEL_COPY_NAME_DONE_LABEL : CHANNEL_COPY_NAME_LABEL;
 }
 
+// ---- 복사 · 읽지 않음으로 표시 · DM 닫기 (#3963) ----------------------------
+//
+// 성재(2026-10-16)가 Buzz 캡처와 맞대어 준 메뉴 구성이다. 「복사 ▸」는 이 레포의 서브메뉴
+// 금지(이슈 #1383, `dropdown-menu.tsx` 머리말)에 따라 **서브메뉴가 아니라 화면에 남는 행들
+// 위의 제목**으로 옮겼다: 이름·링크·ID 세 행이 접히지 않고 서 있다.
+
+/** 복사 무리의 제목. 항목이 아니라 그 아래 세 행의 이름이다. */
+export const CHANNEL_COPY_GROUP_LABEL = "복사";
+
+/** 채널(또는 DM)의 ID를 클립보드에 올린다. */
+export const CHANNEL_COPY_ID_LABEL = "ID 복사하기";
+
+/** ID가 클립보드에 올라간 뒤의 영수증. */
+export const CHANNEL_COPY_ID_DONE_LABEL = "ID 복사됨";
+
+/** 복사 항목의 낱말도 상태다 - `channelCopyNameLabel` 과 같은 결. */
+export function channelCopyIdLabel(copied: boolean): string {
+  return copied ? CHANNEL_COPY_ID_DONE_LABEL : CHANNEL_COPY_ID_LABEL;
+}
+
+/**
+ * 읽음 처리의 반대 방향. 다 읽은 채널의 **가장 최근 메시지**를 첫 안 읽음으로 남긴다
+ * (ADR-0178 D5). 안 읽음이 이미 있는 채널에는 「읽음 처리하기」가 서므로 둘은 한 자리의
+ * 두 방향이고, 한 메뉴에 함께 서지 않는다.
+ */
+export const CHANNEL_MARK_UNREAD_LABEL = "읽지 않음으로 표시";
+
+/** 왕복이 도는 동안. 「명사 + 중」 꼴이다(진행 낱말 게이트). */
+export const CHANNEL_MARK_UNREAD_BUSY_LABEL = "읽지 않음으로 표시 중";
+
+/** 표시가 거절됐을 때, 그 항목 자리에서 하는 말(토스트가 아니다). */
+export const CHANNEL_MARK_UNREAD_FAILURE =
+  "읽지 않음으로 표시하지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+
+/**
+ * DM 행의 「닫기」. 호버 X 와 우클릭 항목이 같은 낱말을 쓴다. **대화를 지우는 것이 아니다**:
+ * 이 기기의 사이드바에서만 숨기고, 새 메시지가 오면 다시 나타난다. 그래서 확인 단계가 없다.
+ */
+export const DM_CLOSE_LABEL = "사이드바에서 닫기";
+
+/** 호버 X 의 접근 가능한 이름. 행의 링크 이름 꼴(`이름, 뜻`)을 따른다. */
+export function dmCloseButtonLabel(name: string): string {
+  return `${name}, ${DM_CLOSE_LABEL}`;
+}
+
 /**
  * 메뉴 안에서 실패 문장을 인 상자의 이름 (design-review #1937 N-5).
  *

@@ -3,6 +3,9 @@ import { ApiError } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
 import {
   CHANNEL_COPY_FAILURE,
+  CHANNEL_COPY_GROUP_LABEL,
+  CHANNEL_COPY_ID_DONE_LABEL,
+  CHANNEL_COPY_ID_LABEL,
   CHANNEL_COPY_NAME_DONE_LABEL,
   CHANNEL_COPY_NAME_LABEL,
   CHANNEL_COPY_UNAVAILABLE,
@@ -10,14 +13,19 @@ import {
   CHANNEL_MARK_READ_BUSY_LABEL,
   CHANNEL_MARK_READ_FAILURE,
   CHANNEL_MARK_READ_LABEL,
+  CHANNEL_MARK_UNREAD_BUSY_LABEL,
+  CHANNEL_MARK_UNREAD_FAILURE,
+  CHANNEL_MARK_UNREAD_LABEL,
   CHANNEL_MUTE_LABEL,
   CHANNEL_NAME_MAX,
   CHANNEL_TOPIC_MAX,
   CHANNEL_TOPIC_VIEW_LABEL,
   CHANNEL_UNMUTE_LABEL,
+  DM_CLOSE_LABEL,
   canCreateChannel,
   canCreateChannelNow,
   canLeaveChannel,
+  channelCopyIdLabel,
   channelCopyNameLabel,
   channelLeaveConfirmBody,
   channelLeaveFailureMessage,
@@ -28,6 +36,7 @@ import {
   channelNameIssueMessage,
   channelTopicIssue,
   createChannelFailure,
+  dmCloseButtonLabel,
   normalizeChannelName,
   normalizeChannelTopic,
 } from "./model";
@@ -320,5 +329,49 @@ describe("channelMenuAccessibleLabel", () => {
 
   it("채널은 채널이라 부른다", () => {
     expect(channelMenuAccessibleLabel("general", false)).toBe("general 채널 메뉴");
+  });
+});
+
+// ---- #3963: 복사 무리 · 읽지 않음으로 표시 · DM 닫기 --------------------------
+
+describe("channelCopyIdLabel", () => {
+  it("낱말이 상태다: 복사 전과 후가 다른 문장이다", () => {
+    expect(channelCopyIdLabel(false)).toBe(CHANNEL_COPY_ID_LABEL);
+    expect(channelCopyIdLabel(true)).toBe(CHANNEL_COPY_ID_DONE_LABEL);
+    expect(CHANNEL_COPY_ID_LABEL).not.toBe(CHANNEL_COPY_ID_DONE_LABEL);
+  });
+
+  it("이름 복사와 같은 결의 동사구다", () => {
+    expect(CHANNEL_COPY_ID_LABEL.endsWith("복사하기")).toBe(true);
+    expect(CHANNEL_COPY_NAME_LABEL.endsWith("복사하기")).toBe(true);
+    expect(CHANNEL_COPY_GROUP_LABEL).toBe("복사");
+  });
+});
+
+describe("읽지 않음으로 표시 · DM 닫기 낱말", () => {
+  it("읽음 처리와 서로 다른 낱말이고, 같은 메뉴의 형제 항목처럼 읽힌다", () => {
+    expect(CHANNEL_MARK_UNREAD_LABEL).toBe("읽지 않음으로 표시");
+    expect(CHANNEL_MARK_UNREAD_LABEL).not.toBe(CHANNEL_MARK_READ_LABEL);
+    expect(CHANNEL_MARK_UNREAD_BUSY_LABEL).not.toBe(CHANNEL_MARK_UNREAD_LABEL);
+  });
+
+  it("진행 낱말은 「명사 + 중」이다(프리플라이트 분류 11 이 재는 축)", () => {
+    expect(CHANNEL_MARK_UNREAD_BUSY_LABEL).not.toMatch(/하는 중$/);
+    expect(CHANNEL_MARK_UNREAD_BUSY_LABEL.endsWith("중")).toBe(true);
+  });
+
+  it("실패 문장은 그 자리에서 다음 행동을 준다", () => {
+    expect(CHANNEL_MARK_UNREAD_FAILURE).toContain("다시 시도");
+  });
+
+  it("DM 닫기는 삭제가 아니라 사이드바에서 닫는 것이라고 말한다", () => {
+    expect(DM_CLOSE_LABEL).toBe("사이드바에서 닫기");
+    expect(DM_CLOSE_LABEL).not.toContain("삭제");
+    expect(DM_CLOSE_LABEL).not.toContain("나가기");
+  });
+
+  it("호버 X 의 이름은 어느 대화인지 말한다(행의 링크 이름 꼴: 이름, 뜻)", () => {
+    expect(dmCloseButtonLabel("이도현")).toBe("이도현, 사이드바에서 닫기");
+    expect(dmCloseButtonLabel("kwak의 Claude")).toBe("kwak의 Claude, 사이드바에서 닫기");
   });
 });

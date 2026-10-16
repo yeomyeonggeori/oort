@@ -42,7 +42,10 @@ import {
   useReadStates,
   type Directory,
 } from "@/features/workspace/useWorkspace";
-import { canCreateChannelNow } from "@momo/core/features/channels/model";
+import {
+  canCreateChannelNow,
+  dmCloseButtonLabel,
+} from "@momo/core/features/channels/model";
 import {
   useCreateChannelOpen,
   useOpenCreateChannel,
@@ -86,11 +89,23 @@ import {
   SECTION_CREATE_TITLE,
   sidebarEmptySectionHint,
   sidebarSectionCapMessage,
+  SIDEBAR_DMS_ALL_CLOSED_HINT,
   SIDEBAR_PREFS_LOAD_RETRY_LABEL,
   SIDEBAR_STARRED_TOUCH_HINT,
 } from "@momo/core/features/sidebar/sidebarSections";
 import { useSidebarDrag, type SidebarDropAction } from "./sidebarDnd";
-import { scheduleSidebarChannelRowFocus } from "./sidebarRowFocus";
+import {
+  neighborSidebarChannelRowId,
+  scheduleSidebarChannelRowFocus,
+} from "./sidebarRowFocus";
+import {
+  closeDmOnDevice,
+  closedAtSeqOf,
+  dmHiddenByClosure,
+  readProjectionPhase,
+  reopenDmOnDevice,
+  useClosedDms,
+} from "./sidebarDmClosure";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
 import {
   setSidebarSectionCollapsed,
@@ -308,6 +323,47 @@ export function Sidebar({
   const rosterSettled = !directoryQuery.isPending;
   const canCreate = canCreateChannelNow(rosterSettled, selfMember?.role);
 
+  // 지금 읽고 있는 채널 (goal B8 H10). ChatShell이 커서를 올리는 PUT은 왕복이
+  // 걸리고 실패할 수도 있으므로, 그 사이 사이드바는 화면에 떠 있는 그 채널에
+  // "새 메시지 1"을 붙인다. 읽고 있는 것은 읽은 것이다. 나머지 행은 그대로
+  // 서버가 세고(P7), 이 규칙은 오직 열려 있는 한 행에만 적용된다.
+  //
+  // (#3963: 아래 「닫은 DM」 판정이 이 값을 먼저 읽어서 위로 올렸다. 계산은 그대로다.)
+  const routePath = useLocation().pathname;
+  const openId = openChannelId(
+    routePath,
+    channels[0]?.id ?? dms[0]?.id ?? null
+  );
+
+  // 이 기기의 사이드바에서 닫은 DM (#3963, `sidebarDmClosure.ts`). 규칙과 근거는 그 파일 머리말에
+  // 있다: 새 메시지가 오면 다시 나타나고, 열려 있는 DM 은 닫은 것이 아니며, 투영이 오는 중이면
+  // 숨김을 유지하고 못 읽었으면 보인다. 걸러내는 자리는 파생 **앞**이라 ⌥↑↓ 순회와 접힌 머리의
+  // 합산이 보이는 행만 센다. 에이전트 구독(`agentCoverage`)과 ⌘K 목록은 닫은 DM 도 그대로 든다 -
+  // 닫는 것은 목록의 진열이지 대화의 존재가 아니다.
+  const closedDms = useClosedDms(workspaceId);
+  const readPhase = readProjectionPhase(readStates);
+  const visibleDms = useMemo(
+    () =>
+      dms.filter(
+        (channel) =>
+          !dmHiddenByClosure({
+            closedAtSeq: closedAtSeqOf(closedDms, channel.id),
+            latestSeq: unreadFor(readStates.byChannel, channel.id)?.latestSeq,
+            isOpen: openId !== null && uuidEq(channel.id, openId),
+            phase: readPhase,
+          })
+      ),
+    [dms, closedDms, readStates.byChannel, openId, readPhase]
+  );
+  const closedDmCount = dms.length - visibleDms.length;
+  // 닫아 둔 DM 이 **열리는** 순간(주소 · ⌘K · 새 DM)이 곧 다시 연다는 뜻이다. 원장에서 지우지
+  // 않으면 사람이 일부러 연 대화가 다른 곳으로 옮겨 가는 순간 도로 사라진다. 효과는 `openId` 가
+  // **바뀔 때만** 돈다(deps): 열린 DM 을 X 로 닫으면 `closeDmRow` 가 원장을 쓴 뒤 `/` 로 착지시키고,
+  // 그 DM 은 이미 열린 것이 아니므로 이 효과가 닫기를 되돌릴 틈이 없다.
+  useEffect(() => {
+    if (openId !== null) reopenDmOnDevice(workspaceId, openId);
+  }, [openId, workspaceId]);
+
   // 사이드바 조직화 (ADR-0177 / BT-4 #1932). 부트스트랩 GET 이 도착하기 전에는
   // 배치가 비어 있고, 그때 파생은 오늘까지의 두 섹션과 정확히 같은 것을 돌려준다
   // - 그래서 로딩 중에도 목록이 흔들리지 않는다.
@@ -317,9 +373,9 @@ export function Sidebar({
       deriveSidebarSections({
         prefs: sidebarPrefs.prefs,
         channels,
-        dms,
+        dms: visibleDms,
       }),
-    [sidebarPrefs.prefs, channels, dms]
+    [sidebarPrefs.prefs, channels, visibleDms]
   );
   // 캐스트 없음 (design-review #1932 N-2): 기본 두 섹션이 언제나 있다는 것은
   // 코어의 계약이고, 이제 **타입이** 그렇게 말한다.
@@ -400,15 +456,6 @@ export function Sidebar({
     [renderedSections]
   );
 
-  // 지금 읽고 있는 채널 (goal B8 H10). ChatShell이 커서를 올리는 PUT은 왕복이
-  // 걸리고 실패할 수도 있으므로, 그 사이 사이드바는 화면에 떠 있는 그 채널에
-  // "새 메시지 1"을 붙인다. 읽고 있는 것은 읽은 것이다. 나머지 행은 그대로
-  // 서버가 세고(P7), 이 규칙은 오직 열려 있는 한 행에만 적용된다.
-  const routePath = useLocation().pathname;
-  const openId = openChannelId(
-    routePath,
-    channels[0]?.id ?? dms[0]?.id ?? null
-  );
   const unreadCountFor = useCallback(
     (channel: Channel) =>
       sidebarUnreadCounts(
@@ -510,6 +557,30 @@ export function Sidebar({
   }, []);
 
   /**
+   * DM 을 이 기기의 사이드바에서 닫는다 (#3963). 호버 X 와 행 메뉴의 「사이드바에서 닫기」가 이
+   * 한 길을 지난다.
+   *
+   * 순서가 일이다. ①이웃 행은 **지우기 전에** 잡는다(지운 뒤에는 DOM 에서 자리를 못 찾는다)
+   * ②원장에 닫을 때의 최신 seq 를 적는다 ③지금 보고 있는 DM 이면 `/` 로 착지한다(채널 나가기와
+   * 같은 착지: 보고 있던 대화가 사라진 자리에 머물지 않는다) ④다음 프레임에 캐럿을 이웃 행으로
+   * 넘긴다 - 이 행의 트리거가 함께 언마운트되므로 Radix 의 닫힘 복귀가 돌려줄 곳이 없고, 그대로
+   * 두면 캐럿은 `<body>` 에 떨어진다(`sidebarRowFocus.ts`, design-review #1933 H-1 과 같은 구멍).
+   */
+  const closeDmRow = (channel: Channel) => {
+    const neighborId =
+      navRef.current === null
+        ? null
+        : neighborSidebarChannelRowId(navRef.current, channel.id);
+    closeDmOnDevice(
+      workspaceId,
+      channel.id,
+      unreadFor(readStates.byChannel, channel.id)?.latestSeq ?? 0
+    );
+    if (openId !== null && uuidEq(openId, channel.id)) navigate("/");
+    if (neighborId !== null) scheduleSidebarChannelRowFocus(neighborId);
+  };
+
+  /**
    * 한 채널 행. `options.inStarredSection` 은 이 행이 **파생 「별표」 섹션에**
    * 그려지고 있다는 뜻이고, 그때는 끌 수 없다 (BT-5 #1933).
    *
@@ -577,6 +648,13 @@ export function Sidebar({
         label={label.text}
         handle={label.handle}
         agent={label.isAgent}
+        iconKind={channel.kind === "dm" ? "avatar" : "glyph"}
+        // 호버 X 는 포인터 표면의 문이다: 터치에는 호버가 없고, 그 표면의 길은 (아직) 없다 -
+        // 폰 길게 누르기 메뉴는 BT-1 이 서랍 스크롤과의 충돌로 닫아 둔 자리다.
+        onClose={
+          channel.kind === "dm" && !touchSurface ? () => closeDmRow(channel) : undefined
+        }
+        closeLabel={channel.kind === "dm" ? dmCloseButtonLabel(label.text) : undefined}
         unreadCount={counts.unreadCount}
         mentionCount={counts.mentionCount}
         trailing={
@@ -620,6 +698,7 @@ export function Sidebar({
                 ? () => sidebarPrefs.toggleStar(channel.id)
                 : undefined
             }
+            onCloseDm={channel.kind === "dm" ? () => closeDmRow(channel) : undefined}
           >
             {link}
           </SidebarRowContextMenu>
@@ -1169,7 +1248,10 @@ export function Sidebar({
                       className="px-2 py-1 text-meta text-ink-muted"
                       data-testid="dm-section-empty"
                     >
-                      아직 대화가 없습니다. ⌘⇧K로 시작하세요.
+                      {/* 닫은 DM 이 있으면 「아직 대화가 없습니다」는 거짓이다(#3963). */}
+                      {closedDmCount > 0
+                        ? SIDEBAR_DMS_ALL_CLOSED_HINT
+                        : "아직 대화가 없습니다. ⌘⇧K로 시작하세요."}
                     </li>
                   )}
               </SidebarSection>

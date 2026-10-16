@@ -113,6 +113,7 @@ export function SidebarRowContextMenu({
   onMoveToSection,
   starred = false,
   onToggleStar,
+  onCloseDm,
 }: {
   /** 이 행의 링크. 트리거 상자가 이것을 감싼다. */
   children: ReactElement;
@@ -138,6 +139,11 @@ export function SidebarRowContextMenu({
    */
   starred?: boolean;
   onToggleStar?: () => void;
+  /**
+   * DM 행의 「사이드바에서 닫기」 (#3963). 손이 없으면(채널 행·터치) 항목이 서지 않는다.
+   * 닫는 일의 실행(원장 · 착지 · 이웃 행 캐럿)은 사이드바가 지고, 이 파일은 그릇과 입력만 정한다.
+   */
+  onCloseDm?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const touchSurface = useHoverNone();
@@ -171,6 +177,9 @@ export function SidebarRowContextMenu({
           handOffFocus();
         }
       : undefined,
+    // 닫으면 이 행이 사라지므로 캐럿은 **이웃 행**으로 가야 한다. 이웃은 지우기 전에 잡아야 해서
+    // `handOffFocus`(옮겨간 그 행으로)와 다른 규칙이고, 그 계산은 사이드바의 `closeDmRow` 가 한다.
+    onCloseDm,
   });
   // 층을 세우지만, **이 층의 handle 은 결코 불리지 않는다** (design-review
   // #1937 N-2). 아래 층(폰 서랍·작업 패널)을 실제로 지키는 것은 이 줄이 아니라
@@ -235,6 +244,19 @@ export function SidebarRowContextMenu({
           // 「이 행의 메뉴가 열려 있다」가 섞이지 않는다. 이 선택은 주석이 아니라
           // `tokens.contrast.test.ts` 의 `describe("행 메뉴 열림 표식")` 이 이
           // 파일의 클래스에서 토큰을 읽어 잰다.
+          //
+          // ## 이 윤곽은 키보드로 연 메뉴만의 것이다 (#3963, 성재 2026-10-16)
+          //
+          // 「우클릭하면 보더가 표시된다」- 이 윤곽이 그 보더였다. 실측(Chromium·WebKit,
+          // `scripts/capture-3963.mjs`): 우클릭 직후 열린 트리거의 outline 이 `solid 1px`,
+          // 캐럿 요소(메뉴)에는 링이 없다. 위 N-4 가 이 윤곽을 세운 이유는 「포인터는 hover 가
+          // 대신 말해 준다」의 반대편 - **키보드로 연 메뉴가 어느 행의 것인지 말하는 유일한 표식**
+          // 이었다. 포인터로 연 메뉴에는 그 이유가 없다(사람이 방금 그 행을 눌렀다).
+          //
+          // 그래서 클래스는 그대로 두고(위 대비 시험이 이 문자열에서 토큰을 읽는다) 키보드
+          // 모달리티가 아닐 때만 윤곽을 걷는다: `tokens.css` 의 「포인터로 연 행 메뉴」. 포커스 링을
+          // 걷는 규칙과 같은 스탬프·같은 레이어 밖 규칙이다. 키보드 포커스 링
+          // (`focus-visible:focus-ring`)과 키보드로 연 메뉴의 윤곽은 그대로다.
           className="block rounded-sm data-[state=open]:bg-surface-hover data-[state=open]:outline data-[state=open]:outline-1 data-[state=open]:-outline-offset-1 data-[state=open]:outline-ink-muted"
           onKeyDown={(event) => {
             if (!enabled || !isContextMenuSummonKey(event)) return;

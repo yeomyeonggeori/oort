@@ -248,6 +248,15 @@ export function sidebarEmptySectionHint(pointerCanHover: boolean): string {
     ? "채널 행을 끌어다 놓거나 우클릭해 옮깁니다."
     : "이 섹션은 비어 있습니다. 채널은 넓은 화면에서 옮길 수 있습니다.";
 }
+
+/**
+ * DM 구획이 비어 보이는데 **닫은 DM이 있을 때** 하는 말 (#3963). 「아직 대화가 없습니다」는
+ * 이때 거짓이다: 대화는 있고 이 기기의 사이드바에서 닫혀 있을 뿐이다. 닫은 DM이 돌아오는
+ * 조건(새 메시지)을 함께 적어, 사라진 대화를 잃었다고 읽지 않게 한다.
+ */
+export const SIDEBAR_DMS_ALL_CLOSED_HINT =
+  "열어 둔 대화가 없습니다. 닫은 대화는 새 메시지가 오면 다시 나타납니다.";
+
 /** 배치를 풀고 기본 섹션으로 되돌리는 항목. */
 export const SECTION_MOVE_TO_BASE_LABEL = "채널 섹션으로";
 
