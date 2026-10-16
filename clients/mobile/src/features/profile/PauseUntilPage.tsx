@@ -15,7 +15,7 @@ import {
 import {NOTIFICATION_PAUSE_SAVE_FAILED} from '@momo/core/features/settings/notificationRules';
 import type {RosterMember} from '@momo/core/lib/api';
 import React, {useRef, useState} from 'react';
-import {ActivityIndicator, StyleSheet, Text, View} from 'react-native';
+import {ActivityIndicator, StyleSheet, View} from 'react-native';
 
 import {GroupRow, GroupSection, Sentence} from '../../design/atoms';
 import {usePalette, useStyles} from '../../design/theme';
@@ -118,9 +118,11 @@ export function PauseUntilPage({
   return (
     <View style={styles.page} testID="pause-until-page">
       <View style={styles.intro}>
-        <Text accessibilityRole="header" style={styles.heading} testID="pause-until-title">
+        {/* 완성된 한국어 문장이라 `Sentence` 다 — 큰 글씨에서 「언제까/지」처럼 어절 한가운데서 끊기지
+            않게 한다(`lineBreakStrategyIOS="hangul-word"`, 같은 규칙이 한 자리에 있다). */}
+        <Sentence accessibilityRole="header" style={styles.heading} testID="pause-until-title">
           {pauseUntilTitle(kind)}
-        </Text>
+        </Sentence>
         <Sentence style={styles.caption} testID="pause-until-description">
           {pauseUntilDescription(kind)}
         </Sentence>

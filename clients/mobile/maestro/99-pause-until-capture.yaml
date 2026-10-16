@@ -16,6 +16,13 @@ name: 99-pause-until-capture
     timeout: 60000
 # dismiss-dev-logbox 를 부르지 않는다: 시트 안에서 그 좌표(92%,94%)는 누르는 줄 위일 수 있다.
 - takeScreenshot: ${SHOT}-list
+# 큰 글씨(Dynamic Type AX5)에서는 「직접 고르기」 줄이 첫 화면 밖이다. 보이게 내린 뒤 누른다 —
+# 기본 크기에서는 이미 보여서 바로 지나간다.
+- scrollUntilVisible:
+    element:
+      id: "pause-until-option-custom"
+    direction: DOWN
+    timeout: 60000
 - tapOn:
     id: "pause-until-option-custom"
 - extendedWaitUntil:
@@ -29,5 +36,5 @@ name: 99-pause-until-capture
     element:
       id: "pause-until-confirm"
     direction: DOWN
-    timeout: 10000
+    timeout: 60000
 - takeScreenshot: ${SHOT}-custom-time

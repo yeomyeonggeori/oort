@@ -17,9 +17,10 @@ name: 99-pause-profile-capture
     timeout: 60000
 # dismiss-dev-logbox 를 부르지 않는다: 프로필 시트에서 그 좌표(92%,94%)는 「알림 켜기」 줄의 끝이다.
 - takeScreenshot: ${SHOT}-top
+# 큰 글씨(AX5)에서는 시트가 훨씬 길다 — 내리는 시간을 넉넉히 준다.
 - scrollUntilVisible:
     element:
       id: "profile-pause-row"
     direction: DOWN
-    timeout: 20000
+    timeout: 60000
 - takeScreenshot: ${SHOT}-notify

@@ -669,6 +669,20 @@ describe('직접 고르기 — 달력 한 달과 시각 칩', () => {
   });
 });
 
+describe('기한 장 — 머리 문장의 줄바꿈', () => {
+  it('머리 문장은 한글 어절 단위로 줄바꿈한다(큰 글씨에서 어절 한가운데서 끊기지 않는다)', async () => {
+    freezeClock(FRI_2107);
+    const sheet = await openSheet();
+    fireEvent.press(within(sheet).getByTestId('profile-pause-row'));
+    const title = within(sheet).getByTestId('pause-until-title');
+    expect(title.props.lineBreakStrategyIOS).toBe('hangul-word');
+    // 본문 문장과 같은 규칙이다 — 머리만 글자 단위로 끊기면 같은 장에서 둘이 다르게 접힌다.
+    expect(
+      within(sheet).getByTestId('pause-until-description').props.lineBreakStrategyIOS,
+    ).toBe('hangul-word');
+  });
+});
+
 describe('기한 장 — 읽어 주는 힌트', () => {
   it('짧은 선택 줄은 누르면 곧바로 켜진다고 읽어 주고, 「직접 고르기」 줄에는 힌트가 없다', async () => {
     freezeClock(FRI_2107);
