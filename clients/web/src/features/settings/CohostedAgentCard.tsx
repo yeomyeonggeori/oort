@@ -147,7 +147,11 @@ function CardBody({
       ) : !status.toolsLockAttested ? (
         <AiLineRow last testId="ai-cohosted-checklist-row">
           <span>{COPY.checklistLead}</span>
-          <span className="text-meta text-ink-muted">{COPY.checklistAfter}</span>
+          <span className="text-meta text-ink-muted">
+            {COPY.checklistAfterHead}
+            <code className="rounded-sm bg-muted-soft px-1 font-mono text-ink [overflow-wrap:anywhere]">{COPY.checklistEnv}</code>
+            {COPY.checklistAfterTail}
+          </span>
           <span>
             <ChecklistLink />
           </span>

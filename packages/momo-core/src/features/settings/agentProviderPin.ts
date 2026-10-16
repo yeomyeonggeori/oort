@@ -119,10 +119,10 @@ export async function putAgentProviderPin(
 
 export const PIN_COPY = {
   title: "이 에이전트가 쓸 AI",
-  lead: "고르지 않으면 기본 AI를 따라요. 고르면 이 에이전트는 그 연결로만 대답하고, 연결이 사라져도 다른 연결로 몰래 넘어가지 않아요.",
+  lead: "고르지 않으면 기본 AI를 따라요. 고르면 이 에이전트는 그 연결로만 대답하고, 연결이 사라져도 다른 연결로 몰래 넘어가지 않아요. 이 절은 위 프로필 저장과 따로 저장돼요.",
   followDefault: "기본 AI 따르기",
   sameServer: "같은 서버의 Hermes",
-  sameServerHint: "이 서버 운영자가 환경값으로 정한 연결이에요. 팀 AI 키와 따로 써요.",
+  sameServerHint: "이 서버 운영자가 환경값으로 정한 연결이에요. 팀 AI 키와 따로 써요. 도구 잠금은 운영자가 선언한 값이에요.",
   loading: "이 에이전트의 AI를 확인하는 중이에요.",
   readError: "이 에이전트의 AI를 불러오지 못했어요.",
   retry: "다시 시도",

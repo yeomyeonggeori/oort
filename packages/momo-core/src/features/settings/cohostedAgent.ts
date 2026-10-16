@@ -189,7 +189,9 @@ export const COHOSTED_COPY = {
   checklistLead:
     "같은 서버에 Hermes를 올렸다면, 먼저 도구 잠금 체크리스트를 따라 주세요. 터미널·코드 실행·브라우저 도구를 끄고, oort 비밀값을 주지 않고, 공개 주소를 열지 않는 것이 조건이에요.",
   checklistLink: "체크리스트 보기",
-  checklistAfter: "체크리스트를 따랐다면 서버에 OORT_COHOSTED_AGENT_TOOLS_LOCKED=1을 넣어 선언해 주세요.",
+  checklistAfterHead: "체크리스트를 따랐다면 서버에 ",
+  checklistEnv: "OORT_COHOSTED_AGENT_TOOLS_LOCKED=1",
+  checklistAfterTail: "을 넣어 선언해 주세요.",
   found: "같은 서버의 Hermes를 찾았어요, 연결할까요?",
   foundDetail: "연결하면 Hermes 에이전트가 생겨요. 채널에는 넣지 않고 도구 권한도 주지 않아요. 평소처럼 채널에 초대해 쓰세요.",
   connect: "Hermes 연결하기",
