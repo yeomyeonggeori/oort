@@ -48,7 +48,7 @@ import type {
   LocalCardArgs,
 } from '@momo/core/features/commands/registry';
 import {AiConnectCard} from '../features/aiConnect/AiConnectCard';
-import {font, lightPalette, SAFE_GUTTER, space, type Palette} from '../design/tokens';
+import {font, SAFE_GUTTER, space, type Palette} from '../design/tokens';
 import {useStyles} from '../design/theme';
 import {AdeControlPanel} from '../features/ade/AdeControlPanel';
 import {AdeSummaryLine} from '../features/ade/AdeSummaryLine';
@@ -1976,7 +1976,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   screen: {
     paddingTop: 0,
     experimental_backgroundImage: `linear-gradient(180deg, ${color.canvasTop} 0%, ${
-      color === lightPalette ? color.surface : color.bg
+      color.mode === 'light' ? color.surface : color.bg
     } 25%)`,
   },
   /**

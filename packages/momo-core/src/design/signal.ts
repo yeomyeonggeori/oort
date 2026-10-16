@@ -161,6 +161,11 @@ export function resolveSignal(
   const text = textOk(signal) ? signal : nearestFeasible(signal, textOk);
   if (!text) return reject("unreachable");
 
+  // `signal-text`도 같은 구분 제한을 받는다(DS2-7 planner 결정, #2735 M2). 글자로 서는 신호가
+  // 에이전트·오류 표시 색과 가까우면 `signal`이 멀어도 화면에서 두 뜻이 섞인다.
+  if (oklabDistance(text, c.danger) < SIGNAL_MIN_DISTANCE) return reject("near-danger");
+  if (oklabDistance(text, c.agent) < SIGNAL_MIN_DISTANCE) return reject("near-agent");
+
   return {
     ok: true,
     adjusted: !asGiven,
