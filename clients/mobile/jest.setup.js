@@ -683,3 +683,11 @@ jest.mock('expo-glass-effect', () => {
   const GlassView = props => React.createElement(View, props);
   return {GlassView};
 });
+
+// ---- 새 버전 배너 (#3905) ----------------------------------------------------
+// 홈·프로필을 마운트하는 모든 시험이 GitHub Pages 로 요청을 보내지 않게, 훅의 기본값은
+// 「제안 없음」이다. 배너 자체를 보는 시험은 `jest.mock` 으로 이 값을 바꾸고, 피드를 읽는
+// 시험(`appUpdateFeed.test.ts`)은 훅이 아니라 `feed.ts` 를 직접 쓴다.
+jest.mock('./src/features/appUpdate/useAppUpdateOffer', () => ({
+  useAppUpdateOffer: () => null,
+}));
