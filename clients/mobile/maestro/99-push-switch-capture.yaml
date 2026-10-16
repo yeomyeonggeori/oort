@@ -28,8 +28,9 @@ name: 99-push-switch-capture
 #    접근성 글자 크기 판은 `shell-profile-push-failed-ax` + `-e TAP=row`.)
 #
 # 스위치는 접근성 계층에서 숨겨져 있어(`accessibilityElementsHidden` — 줄이 하나의 `switch` 로 읽힌다)
-# id 가 없다. 그래서 스위치 자체는 좌표로 누른다: `maestro hierarchy` 실측(2026-10-17, iPhone 17,
-# 402x874pt) `profile-push-row` bounds [16,83][385,149], 스위치는 그 줄 오른쪽 끝(x 307~370, y 96~123).
+# id 가 없다. 그래서 스위치 자체는 좌표로 누른다. `maestro hierarchy` 실측(2026-10-17, iPhone 17,
+# 402x874pt)에는 줄 `profile-push-row` 의 bounds [16,83][385,149] 만 있고, 스위치 상자(x 307~370,
+# y 96~123)는 같은 표면의 캡처 픽셀에서 환산한 값이다(계층에 없다). 탭 지점 84%,13% 는 그 안이다.
 - extendedWaitUntil:
     visible:
       id: "profile-push-row"
