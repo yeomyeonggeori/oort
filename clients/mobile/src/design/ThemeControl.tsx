@@ -1,5 +1,5 @@
 import React, {useState} from 'react';
-import {StyleSheet, Text, TextInput, View} from 'react-native';
+import {AccessibilityInfo, StyleSheet, Text, TextInput, View} from 'react-native';
 import {
   resolvePreset,
   resolveSignal,
@@ -10,7 +10,7 @@ import {
   type SignalPresetId,
 } from '@momo/core/design/signal';
 import {GroupRow, OutlineButton, Sentence} from './atoms';
-import {THEMES, THEME_IDS, type Mode, type ThemeId} from './ds2Tokens';
+import {THEMES, THEME_IDS, type ThemeId} from './ds2Tokens';
 import {
   normalizeCustomHex,
   THEME_CHOICES,
@@ -104,7 +104,7 @@ function SchemeGroup(): React.JSX.Element {
   // 문장을 만들면 다크를 **고른** 동안에는 시스템이 라이트여도 「시스템은
   // 다크입니다」라고 말한다 — 이 문장이 있는 이유가 「고르지 않으면 무엇이
   // 되는가」인데, 고른 사람에게 그 답을 자기 선택으로 되돌려 주는 거짓말이 된다.
-  const systemNow = `지금 이 기기의 시스템은 ${systemScheme === 'dark' ? '다크' : '라이트'}입니다.`;
+  const systemNow = `지금 이 기기의 시스템은 ${systemScheme === 'dark' ? '다크' : '라이트'}예요.`;
   return (
     <GroupSection label="화면 모드">
       <View
@@ -171,31 +171,50 @@ function Check({selected, testID}: {selected: boolean; testID: string}): React.J
 
 // ---- 테마 --------------------------------------------------------------------
 
-/** 한 테마의 한 모드를 작은 타일로: 바닥 세 정지점, 표면 조각, 신호 점. */
-function ThemeSwatch({id, mode}: {id: ThemeId; mode: Mode}): React.JSX.Element {
+/**
+ * 한 테마를 **라이트·다크 두 반쪽**으로 보이는 작은 타일: 반쪽마다 바닥 세 정지점, 표면
+ * 조각, 신호 점. 현재 모드만 그리면 다크에서 새벽하늘과 노을띠가 거의 같아 보인다(리뷰
+ * M-1) — 두 반쪽이 있으면 모드를 바꾸지 않고도 테마의 차이가 보인다(웹 증보 1 D3 의 쌍
+ * 미리보기와 같은 뜻).
+ */
+function ThemeSwatch({id}: {id: ThemeId}): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const t = THEMES[id][mode];
-  const [top, mid, bottom] = t.canvas;
   return (
     <View
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
-      style={[
-        styles.swatch,
-        {
-          experimental_backgroundImage: `linear-gradient(180deg, ${top} 0%, ${mid} 50%, ${bottom} 100%)`,
-        },
-      ]}
+      style={styles.swatch}
       testID={`appearance-swatch-${id}`}>
-      <View style={[styles.swatchSurface, {backgroundColor: t.color.surface}]} />
-      <View style={[styles.swatchDot, {backgroundColor: t.color.signal}]} />
+      {(['light', 'dark'] as const).map(mode => {
+        const t = THEMES[id][mode];
+        const [top, mid, bottom] = t.canvas;
+        return (
+          <View
+            key={mode}
+            style={[
+              styles.swatchHalf,
+              {
+                experimental_backgroundImage: `linear-gradient(180deg, ${top} 0%, ${mid} 50%, ${bottom} 100%)`,
+              },
+            ]}
+            testID={`appearance-swatch-${id}-${mode}`}>
+            <View style={[styles.swatchSurface, {backgroundColor: t.color.surface}]} />
+            <View style={[styles.swatchDot, {backgroundColor: t.color.signal}]} />
+          </View>
+        );
+      })}
     </View>
   );
 }
 
+/** 노을띠의 남색 띠는 폰에서 그리지 않는다(ADR-0189 증보 1 「폰 구현」). 고르는 사람이 알도록 말한다. */
+const THEME_DETAIL: Partial<Record<ThemeId, string>> = {
+  noeul: '폰에서는 남색 띠 없이 평평한 바닥으로 보여요.',
+};
+
 function ThemeGroup(): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const {themeId, setTheme, scheme} = useTheme();
+  const {themeId, setTheme} = useTheme();
   return (
     <GroupSection label="테마">
       <View
@@ -209,13 +228,14 @@ function ThemeGroup(): React.JSX.Element {
             <GroupRow
               key={id}
               title={themeIdLabel(id)}
+              detail={THEME_DETAIL[id]}
               tone={selected ? 'accent' : 'default'}
               separated={index > 0}
               onPress={() => setTheme(id)}
               accessibilityRole="radio"
               accessibilityState={{selected}}
               accessibilityLabel={themeIdLabel(id)}
-              leading={<ThemeSwatch id={id} mode={scheme} />}
+              leading={<ThemeSwatch id={id} />}
               trailing={<Check selected={selected} testID={`appearance-theme-${id}-check`} />}
               testID={`appearance-theme-${id}`}
             />
@@ -245,7 +265,8 @@ function SignalGroup(): React.JSX.Element {
   const palette = usePalette();
   const {themeId, scheme, signal, signalState, setSignal} = useTheme();
   const [draft, setDraft] = useState(signal && 'custom' in signal ? signal.custom : '');
-  const [notice, setNotice] = useState<string | null>(null);
+  // 직접 입력이 **거절된** 이유(저장하지 않았다). 보정 안내는 저장된 상태에서 읽는다.
+  const [error, setError] = useState<string | null>(null);
 
   const usingDefault = signal == null;
   const presetId = signal && 'preset' in signal ? signal.preset : null;
@@ -254,21 +275,27 @@ function SignalGroup(): React.JSX.Element {
   const apply = () => {
     const hex = normalizeCustomHex(draft);
     if (hex == null) {
-      setNotice(SIGNAL_REJECTION_COPY['invalid-hex']);
+      reject(SIGNAL_REJECTION_COPY['invalid-hex']);
       return;
     }
     const result = resolveSignal(hex, themeId, scheme);
     if (!result.ok) {
-      setNotice(result.message);
+      reject(result.message);
       return;
     }
     setDraft(hex);
-    setNotice(result.adjusted ? SIGNAL_ADJUSTED_COPY : null);
+    setError(null);
     setSignal({custom: hex});
   };
 
+  /** 눈으로도 귀로도 알린다 — VoiceOver 는 화면에 새로 생긴 글을 스스로 읽지 않는다. */
+  const reject = (message: string) => {
+    setError(message);
+    AccessibilityInfo.announceForAccessibility?.(message);
+  };
+
   const pick = (next: SignalPresetId | null) => {
-    setNotice(null);
+    setError(null);
     setSignal(next == null ? null : {preset: next});
   };
 
@@ -277,9 +304,10 @@ function SignalGroup(): React.JSX.Element {
   const standing =
     signalState.kind === 'rejected'
       ? `이 테마에서는 고른 강조색을 쓸 수 없어 기본 색으로 보여요. ${signalState.message}`
-      : (signalState.kind === 'preset' || signalState.kind === 'custom') && signalState.adjusted
-        ? SIGNAL_ADJUSTED_COPY
-        : null;
+      : null;
+  // 보정 안내는 입력 바로 아래 **한 곳**에 둔다. 저장된 상태에서 읽으므로 다시 열어도 남는다.
+  const adjusted = signalState.kind === 'custom' && signalState.adjusted ? SIGNAL_ADJUSTED_COPY : null;
+  const notice = error ?? adjusted;
 
   return (
     <GroupSection label="강조색">
@@ -294,7 +322,7 @@ function SignalGroup(): React.JSX.Element {
           onPress={() => pick(null)}
           accessibilityRole="radio"
           accessibilityState={{selected: usingDefault}}
-          accessibilityLabel="기본 강조색"
+          accessibilityLabel="기본, 강조색"
           leading={<Dot color={THEMES[themeId][scheme].color.signal} testID="appearance-dot-default" />}
           trailing={<Check selected={usingDefault} testID="appearance-signal-default-check" />}
           testID="appearance-signal-default"
@@ -311,7 +339,7 @@ function SignalGroup(): React.JSX.Element {
               onPress={() => pick(id)}
               accessibilityRole="radio"
               accessibilityState={{selected}}
-              accessibilityLabel={`강조색 ${SIGNAL_PRESETS[id].label}`}
+              accessibilityLabel={`${SIGNAL_PRESETS[id].label}, 강조색`}
               leading={
                 <Dot
                   color={solved.ok ? solved.values.signal : SIGNAL_PRESETS[id][scheme]}
@@ -327,7 +355,7 @@ function SignalGroup(): React.JSX.Element {
 
       <View style={[styles.card, styles.customCard]} testID="appearance-signal-custom">
         <View style={styles.customHead}>
-          <Text style={styles.customLabel}>직접 입력</Text>
+          <Text style={[styles.customLabel, custom && styles.customLabelSelected]}>직접 입력</Text>
           <Check selected={!!custom} testID="appearance-signal-custom-check" />
         </View>
         <View style={styles.customRow}>
@@ -335,7 +363,7 @@ function SignalGroup(): React.JSX.Element {
             value={draft}
             onChangeText={text => {
               setDraft(text);
-              setNotice(null);
+              setError(null);
             }}
             onSubmitEditing={apply}
             placeholder="#RRGGBB"
@@ -345,13 +373,16 @@ function SignalGroup(): React.JSX.Element {
             maxLength={7}
             returnKeyType="done"
             accessibilityLabel={custom ? '강조색 직접 입력, 사용 중, 여섯 자리 색 코드' : '강조색 직접 입력, 여섯 자리 색 코드'}
-            style={[styles.input, custom && styles.inputSelected]}
+            style={[styles.input, custom && styles.inputSelected, error != null && styles.inputError]}
             testID="appearance-signal-input"
           />
           <OutlineButton label="적용" onPress={apply} testID="appearance-signal-apply" />
         </View>
         {notice ? (
-          <Sentence style={styles.notice} testID="appearance-signal-notice">
+          <Sentence
+            style={[styles.notice, error != null && styles.noticeError]}
+            accessibilityLiveRegion="polite"
+            testID="appearance-signal-notice">
             {notice}
           </Sentence>
         ) : null}
@@ -408,27 +439,29 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   // 자리는 지킨다 — 고른 줄이 바뀔 때 글자가 옆으로 움찔하지 않게.
   checkHidden: {opacity: 0},
   swatch: {
-    width: 36,
+    width: 44,
     height: 36,
+    flexDirection: 'row',
     borderRadius: ds2Radius.badge,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: color.border,
     overflow: 'hidden',
   },
+  swatchHalf: {flex: 1},
   swatchSurface: {
     position: 'absolute',
-    left: 5,
-    right: 5,
-    bottom: 5,
-    height: 12,
+    left: 3,
+    right: 3,
+    bottom: 4,
+    height: 11,
     borderRadius: radius.sm,
   },
   swatchDot: {
     position: 'absolute',
-    top: 6,
-    right: 6,
-    width: 8,
-    height: 8,
+    top: 5,
+    right: 4,
+    width: 7,
+    height: 7,
     borderRadius: radius.pill,
   },
   dot: {
@@ -449,6 +482,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     fontWeight: '600',
     color: color.textMuted,
   },
+  customLabelSelected: {color: color.accentText, fontWeight: '700'},
   customRow: {flexDirection: 'row', alignItems: 'center', gap: space.sm},
   input: {
     flex: 1,
@@ -463,7 +497,9 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     fontFamily: 'Menlo',
   },
   inputSelected: {borderColor: color.accent},
+  inputError: {borderColor: color.danger},
   notice: {fontSize: font.meta, color: color.textMuted},
+  noticeError: {color: color.dangerText, fontWeight: '600'},
   caption: {
     marginTop: space.sm,
     fontSize: font.meta,
