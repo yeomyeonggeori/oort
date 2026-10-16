@@ -55,6 +55,8 @@ npm --prefix clients/web run gate:csp-deploy
 docker/caddy 가 PATH 에 없으면 눈에 보이는 skip 줄(silent skip 금지,
 RED 아님), 있으면 실행하고 실패는 RED. 릴리스 체크리스트는 skip 이 없다.
 
+새 크레이트·빈이 들어간 릴리스면 `scripts/check_dockerfile_crates.sh` 도 통과시킨다 — `server-rust/Dockerfile` 의존성 캐시 COPY 목록이 워크스페이스 멤버와 어긋나면 이미지 빌드만 깨진다(v0.1.27 publish 실패, #3876). PR CI `alignment` 잡이 `scripts/check_ghcr_notice_bundle.sh` 경유로 같은 검사를 매 PR 돈다.
+
 ---
 
 ## 2. 발행 (dispatch · owner 승인)
