@@ -17,8 +17,10 @@ import type {Palette} from '../../design/tokens';
 //
 // 행은 **서 있는 동안**(`landed`) 틴트를 자기 그릇의 배경으로 입는다(`styles.rowLanded`).
 // 이 파일은 그 `landed` 가 참에서 거짓으로 바뀐 **그 순간**에만 일을 한다 — 그릇이
-// 배경을 벗는 같은 커밋에 같은 색의 덮개를 얹고, 그 덮개를 투명으로 녹인다. 덮개가
-// 불투명도 1 에서 시작하므로 벗는 순간 화면은 한 픽셀도 바뀌지 않는다.
+// 배경을 벗는 같은 커밋에 같은 색의 덮개를 얹고, 그 덮개를 투명으로 녹인다. 덮개는 같은
+// 면을 같은 색·불투명도 1 로 덮고 시작하므로 벗는 순간 같은 색이 이어서 선다. (그 커밋의
+// 색·면·불투명도는 `landedHighlight3921.test.tsx` 가 단정한다. 화면 픽셀로는 재지 않았다 —
+// 시험은 React 트리까지만 본다.)
 //
 // ## 왜 그릇의 배경을 움직이지 않는가
 //
@@ -80,8 +82,9 @@ function Leaving({onDone}: {onDone: () => void}): React.JSX.Element | null {
   const doneRef = useRef(onDone);
   doneRef.current = onDone;
 
-  // 레이아웃 효과: 즉시 거두는 길이 **그리기 전에** 끝나야 한다. 일반 효과면 덮개가 한
-  // 프레임 더 남아 「즉시」가 거짓이 된다.
+  // 레이아웃 효과로 두어 `leaving` 되돌림과 애니메이션 시작을 그리기 전에 건다. 즉시 거두는
+  // 길(`instant`)은 아래에서 덮개를 아예 그리지 않으므로(`return null`) 효과의 종류가 화면에
+  // 주는 차이는 없다 — 첫 프레임이 불투명도 1 인 것도 어느 효과든 같다.
   useLayoutEffect(() => {
     if (instant) {
       doneRef.current();

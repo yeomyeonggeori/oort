@@ -627,7 +627,7 @@ describe('(5) 「동작 줄이기」', () => {
     const timing = jest.spyOn(Animated, 'timing');
     await landThenExpire(false);
 
-    // 그릇은 배경을 벗었고, 덮개가 같은 색으로 이어받았다 — 화면은 한 픽셀도 바뀌지 않는다.
+    // 그릇은 배경을 벗었고, 덮개가 같은 색으로 이어받았다(첫 커밋의 색·면·불투명도는 아래 행 단위 시험이 단정한다).
     expect(tintedRows()).toBe(0);
     const overlay = fadeOverlay();
     expect(overlay).not.toBeNull();
@@ -704,6 +704,36 @@ describe('LandedTintFade — 행 하나의 전환', () => {
 
     await advance(LANDED_TINT_FADE_MS + 100);
     expect(fadeOverlay()).toBeNull();
+  });
+
+  // 갈아입는 **그 커밋**의 모양. 그릇이 배경을 벗은 같은 커밋에 덮개가 같은 면을 같은 색·불투명도 1 로
+  // 덮고 있어야 벗는 순간 같은 색이 이어서 선다 — 하나라도 어긋나면 한 프레임의 깜빡임이다
+  // (design-review M-1). 시험은 React 트리까지만 본다: 화면 픽셀로는 재지 않았다.
+  it('갈아입는 첫 커밋에서 덮개는 그릇이 벗은 면을 같은 색·불투명도 1 로 덮는다', () => {
+    const view = render(row(true, false));
+    const standing = StyleSheet.flatten(
+      screen.getByTestId('message-row').props.style,
+    );
+    expect(standing.backgroundColor).toBe(color.warnSurface);
+
+    view.rerender(row(false, false));
+
+    // 같은 커밋 — 그릇은 배경을 벗었고,
+    expect(
+      StyleSheet.flatten(screen.getByTestId('message-row').props.style)
+        .backgroundColor,
+    ).toBeUndefined();
+    // 덮개가 벗은 색 그대로(서 있던 값과 대조), 그릇 전체(네 변 0), 불투명도 1 로 서 있다.
+    const overlay = StyleSheet.flatten(fadeOverlay()!.props.style);
+    expect(overlay.backgroundColor).toBe(standing.backgroundColor);
+    expect(overlay.opacity).toBe(1);
+    expect(overlay).toMatchObject({
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+    });
   });
 
   it('녹는 도중 같은 행이 다시 서면 덮개를 거둔다 — 틴트가 두 겹이 되지 않는다', () => {
