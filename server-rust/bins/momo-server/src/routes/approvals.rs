@@ -68,7 +68,8 @@ use momo_agent::actions::{
     agent_profile_update_result_body, agent_rename_result_body, channel_create_result_body,
     channel_create_result_rows, channel_member_add_result_body, channel_member_add_rows,
     invite_result_body, invite_result_rows, last_attempt_patch, memory_update_result_body,
-    memory_update_result_rows, result_client_msg_id, unfurl_update_result_body, unfurl_update_rows,
+    memory_update_result_rows, plugin_install_result_body, plugin_install_result_rows,
+    result_client_msg_id, unfurl_update_result_body, unfurl_update_rows,
     work_tier_update_result_body, work_tier_update_rows, workspace_settings_result_body,
     ActionResult, ActionResultNext, RequiredRole, SecretDelivery, ACTION_APPROVED_AUDIT_SCHEMA,
     ACTION_RESULT_EXECUTED, ACTION_TYPE_WORKSPACE_ACTION, AUDIT_ACTION_APPROVED,
@@ -127,11 +128,12 @@ use crate::dto::{
     ApprovalListResponse, SecretOnceDto,
 };
 use crate::error::ApiError;
+use crate::plugin_writes::{self, Actor, Provenance};
 use crate::realtime_advert::derive_same_origin_http_base;
 use crate::routes::actions::{
     profile_changes, resolve_stored_action_in_tx, ActionArgs, AvatarIntent, GateSubject,
-    ResolvedAgentTarget, ResolvedChannel, ResolvedConnection, ResolvedMember, SettingPatch,
-    SettingsBefore, StatusIntent,
+    ResolvedAgentTarget, ResolvedChannel, ResolvedConnection, ResolvedMember, ResolvedPlugin,
+    SettingPatch, SettingsBefore, StatusIntent,
 };
 use crate::routes::agents::require_profile_editor_in_tx;
 use crate::routes::invites::require_admin;
@@ -1700,6 +1702,19 @@ async fn execute_workspace_action(
                 Execution::Refused(decision) => return Ok(Ok(decision)),
             }
         }
+        ActionArgs::PluginInstall {
+            plugin_id,
+            plugin: Some(plugin),
+        } => match execute_plugin_install(conn, approval, input, now, plugin_id, plugin).await? {
+            Execution::Ran(executed) => executed,
+            Execution::Refused(decision) => return Ok(Ok(decision)),
+        },
+        // The resolver always fills `plugin`; an install that reached the executor
+        // without one has no manifest the approver was shown, and rolling back is
+        // the safe answer.
+        ActionArgs::PluginInstall { plugin: None, .. } => {
+            return Err(protocol_error("plugin.install resolved without a plugin"));
+        }
     };
 
     // ---- 3b. who receives the one-time value (ADR-0186 증보 v3 V3-3a/V3-5) -----
@@ -2313,6 +2328,74 @@ async fn execute_workspace_unfurl_update(
         secret_once: None,
         next: None,
     })
+}
+
+/// `plugin.install` (ADR-0201 증보 v2 H7, #3889): the write `POST
+/// …/plugins/{plugin}/install` makes — [`plugin_writes::install`], the very
+/// function that route calls, with the **approver** as the actor (their role is
+/// judged a second time inside it, with the manifest's own `serverPolicy`) and
+/// the install **enabled**, which is what the card said. Its audit row
+/// (`plugin.installed`) is written by that function and carries `via_agent` and
+/// `approval_id`, so the install is recorded as what it did, once, naming the
+/// helper that asked.
+///
+/// A refusal inside it happens before its first write, so it is a refusal here
+/// too and the approval stays pending: a role the manifest's policy does not
+/// admit is a 403 `role_required`; anything else (the app was revoked in the
+/// registry, its manifest stopped passing admission) is the stale card.
+async fn execute_plugin_install(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
+    plugin_id: &str,
+    plugin: &ResolvedPlugin,
+) -> Result<Execution, momo_db::DbError> {
+    let provenance = Provenance {
+        subject_member_id: Some(approval.requested_by),
+        run_id: Some(approval.run_id),
+        via_agent: Some(approval.requested_by),
+        approval_id: Some(approval.id),
+    };
+    let actor = Actor {
+        member_id: input.member_id,
+        via_token_id: input.via_token_id,
+    };
+    match plugin_writes::install(
+        conn,
+        input.workspace_id,
+        plugin_id,
+        Some(true),
+        actor,
+        &provenance,
+    )
+    .await?
+    {
+        Ok(_installed) => Ok(Execution::Ran(Executed {
+            audits: Vec::new(),
+            ref_type: REF_TYPE_WORKSPACE_SETTINGS,
+            ref_id: input.workspace_id,
+            result_body: plugin_install_result_body(plugin.label),
+            result_rows: plugin_install_result_rows(
+                plugin.label,
+                &plugin.version,
+                &plugin.egress_domains,
+            ),
+            secret_once: None,
+            next: None,
+        })),
+        Err(error) if error.status == StatusCode::FORBIDDEN => Ok(Execution::Refused(refusal(
+            approval.id,
+            input.member_id,
+            ROLE_REQUIRED,
+            "this app's install policy does not allow your role",
+            StatusCode::FORBIDDEN,
+            now,
+        ))),
+        Err(_) => Ok(Execution::Refused(args_invalid_refusal(
+            approval, input, now,
+        ))),
+    }
 }
 
 /// `workspace.memory.update` (H6-1): the write `PATCH …/memory/settings` makes,
