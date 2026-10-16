@@ -771,10 +771,11 @@ describe('LandedTintFade — 행 하나의 전환', () => {
 
     const container = screen.getByTestId('message-row');
     // 덮개에서 가장 가까운 호스트 부모가 그릇 자신이다 — 안쪽 `Pressable`·래퍼 `View` 안에 들어가면
-    // 「그릇 전체」가 아니라 그 안쪽 상자만 덮는다.
+    // 「그릇 전체」가 아니라 그 안쪽 상자만 덮는다. 인스턴스끼리 `toBe` 로 비교하지 않는 이유: 실패하면
+    // jest 가 시험 렌더러 트리 전체를 찍느라 멈춘다(S23 사보타주가 타임아웃으로만 잡혔다).
     let parent = fadeOverlay()!.parent;
     while (parent !== null && typeof parent.type !== 'string') parent = parent.parent;
-    expect(parent).toBe(container);
+    expect(parent?.props?.testID).toBe('message-row');
     // 그릇의 자식 순서에서 덮개가 내용(`message-press`)보다 앞이다 — 뒤에 서면 불투명도 1 의 앰버가
     // 글자를 덮는다.
     const childIndex = (testID: string) =>
