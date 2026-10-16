@@ -2,6 +2,7 @@
 
 - Status: **Accepted** (2026-07-17, 성재 — 권고안 D1-A~D6 전체 승인 "ㄱㄱ". 첫 파생 SE-04A=MOMO-410부터 codex-fleet 발급)
 - 증보: **2026-10-15 (#3838) 플러그인 레지스트리 이월 해제, 공식 4개 읽기 Rust 라우트부터** (성재 결재 「이월 풀고 읽기부터 (추천)」) — 파일 끝.
+- 증보: **2026-10-16 (#3914) P3 착수 — 설치·grant·회수 쓰기 4경로** (성재 「미뤄둔 후속도 같이 작업해줘.」) — 파일 끝.
 - 관련: `research/16-plugin-platform/00~04`(생태계·제안·실검증·Slack/MM 호환), `docs/planning/proposals/2026-07-14-superapp-engine-roadmap.md` §ADR-0113·SE-04A/B, ADR-0004(provider 자격증명 비유입), ADR-0102(BYOA), ADR-0111(Work), ADR-0115(signed webhook — 본 ADR의 D6이 입력 제공), `research/13-redesign/03`(Drive 동결 트랙)
 - 발단: 성재 발제 3회 누적 — ① "Codex 앱식 공식+커스텀 플러그인, 원클릭 설치, 1호 Drive"(2026-07-16) ② momo-main 구체화 지정(custody/Drive-vs-GitHub/delegation/egress) ③ "오피셜 플러그인 집중 + Slack/Mattermost에서 쓰던 것 계속 사용"(2026-07-16)
 
@@ -87,3 +88,39 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
 ### 구현 슬라이스 (Accepted 후)
 - **P-S1 (engine)**: 두 읽기 라우트, 공식 4개 술어, core 파서 픽스처와 맞추는 계약 시험. red proof: ① 비공식·회수된 플러그인은 404(술어를 지우면 실패), ② 응답 어디에도 토큰·시크릿 키가 없음(키 이름 허용목록 시험), ③ 다른 워크스페이스의 install·grant 행이 내 정책에 섞이지 않음(RLS), ④ 비멤버 404, ⑤ core `listPlugins` 파서가 Rust 응답을 받는다.
 - **P-U1 (UXUI)**: `serverSurfaces` 분리(보기 켬·설치 꺼짐), 「앱」 화면 읽기 전용 상태, 캡처·design-review.
+
+## 증보 2026-10-16 (#3914) — P3 착수: 설치·grant·회수 쓰기 4경로
+
+- Status: **Accepted** (2026-10-16 성재 결재, 원문 인용 아래). 공개 API(새 Rust 라우트) 변경이라 ADR-0100에 따라 이 기록이 구현 머지 조건이다. 새 방향이 아니라 **P3가 「다음 단계」로 미뤄 둔 쓰기를 구현 계약으로 구체화**하는 증보다. D1~D6·P1~P4는 바뀌지 않는다.
+- 결재 원문:
+  - 2026-10-15 「이월 풀고 읽기부터 (추천)」 — 읽기를 먼저 옮기고 쓰기(설치·grant·회수)는 P3의 다음 단계로 미뤘다.
+  - 2026-10-16 「미뤄둔 후속도 같이 작업해줘. 플러그인 관련 UI와 채팅에서의 플러그인 호출과 연동 관련 경험도 설계 및 작업계획화해줘.」 — 미뤄 둔 P3를 연다. UI·채팅 연동 설계는 별도 레인이고, 이 증보는 어떤 설계에도 필요한 엔진 쪽 쓰기 경로만 정한다.
+- 참조 구현은 삭제된 Swift `PluginRoutes.swift`(`8f4a23cac^`)이고 와이어는 이미 배포된 core 파서(`packages/momo-core/src/lib/api.ts`의 `installPlugin`·`revokePluginInstall`·`grantPluginScope`·`revokePluginScope`)가 받는 모양이다. 아래는 Swift보다 **엄격해지는 곳만** 새로 정한 것이다.
+
+### W1. 경로와 권한 (D2)
+- `POST …/plugins/{plugin}/install` `{enabled?}` — 201 새 설치 / 200 기존 행 갱신·복구. 워크스페이스 owner/admin이고 매니페스트 `serverPolicy`(`installAllowed`·`allowedRoles`)가 그 역할을 허용할 때만. 아니면 403.
+- `DELETE …/plugins/{plugin}/install` — owner/admin. 그 앱의 모든 멤버 grant를 한 감사 행으로 회수하고 능력 투영을 모두 지운다. 멱등.
+- `POST …/plugins/{plugin}/grants` `{scope}` · `DELETE …/plugins/{plugin}/grants/{scope}` — 활성 멤버 **본인 명의로만**. 요청에 멤버 필드가 없고(`plugin_grant_self_ck`), 관리자도 남 명의로 grant하지 못한다. 에이전트는 grant를 갖지도 만들지도 않는다(에이전트 bearer는 이 경로의 허용목록에 없다). grant는 설치·활성 상태(409)와 매니페스트가 선언한 scope(400)를 요구한다.
+- 사람 bearer만. 모든 쓰기는 `with_tenant_tx` + RLS FORCE이고, 같은 tx에서 `audit_log` 행을 먼저 쓴다.
+
+### W2. 대상 (P2의 연장)
+- 만들기(설치·grant)는 공식 4개 중 `official`이고 미회수이며 매니페스트가 검증을 통과한 행에만 한다. 그 밖의 id는 없는 것과 같은 404다(설치 상태가 새지 않도록 404가 409보다 먼저).
+- **거두기(설치 해제·grant 회수)는 항상 가능하다.** 레지스트리가 그 앱을 회수했거나 비공식으로 돌려도 설치와 grant는 치울 수 있다. 단 공식 4개 밖(`external_webhook`의 설치 행은 ADR-0115의 수명주기)은 이 경로로 닿지 않는다.
+
+### W3. 의미
+- 설치 해제 뒤 다시 설치해도 grant는 되살아나지 않는다(동의는 새로). 설치를 끄는 것(`enabled=false`)은 일시 정지다: 정책 조회가 설치 활성 상태에 조인하므로 도구가 즉시 빠지고(D5 fail-closed) 멤버의 동의는 남는다.
+- 투영은 grant마다 「그 scope를 선언한 도구 수」만큼 쓴다(`github:read`는 migration 031 뒤 2행).
+- 설치 해제와 동시에 들어온 grant는 설치 행을 `FOR SHARE`로 읽어 직렬화한다 — 해제된 설치 밑에 활성 grant가 남는 경우가 없다.
+
+### W4. D5 영수증과 D1-A 강화
+- 설치·grant 응답에 가산 필드 `egressDomains`(매니페스트가 선언한 도메인)를 싣는다 — 사람이 동의한 것의 영수증이다. 감사 `detail`에도 도메인·매니페스트 버전·digest를 남긴다. 거두는 응답에는 싣지 않는다. core 파서는 모르는 키를 무시하므로 가산 변경이다.
+- 요청 본문은 문서화된 키만 받는다: install은 `enabled`뿐(본문 생략 가능), grant는 `scope`뿐. 그 밖의 키는 자격증명 모양이든 아니든 400이고 읽지도 저장하지도 에코하지도 않는다(Swift는 조용히 무시했다). 응답·감사 어디에도 토큰·시크릿 키가 없고, 키 이름 허용목록 시험이 이를 고정한다.
+
+### W5. 승인 카드와의 관계
+- ADR-0201 증보 v2 H7의 `plugin.install`은 이 쓰기의 같은 도메인 함수를 결정자 권한으로 부른다(#3889). 승인 전 설치 0·결정자 role 미달 403·승인 결과가 REST 설치와 같다는 계약은 ADR-0186/0201 그대로다.
+
+### 구현 슬라이스
+- **P-S2 (engine, #3914)**: 쓰기 4경로, 도메인 함수 `plugin_writes`, 계약 시험(red proof: 일반 멤버 install 403 · 설치 없이 grant 409 · 다른 워크스페이스 행 불가시(RLS) · 회수가 투영을 지움 · 응답·감사에 시크릿 키 없음 · 동시 해제 직렬화), 와이어 고정 `server/Fixtures/plugin-wire/mutation-*.json`.
+- **P-U2 (UXUI)**: P-U1이 꺼 둔 「앱 설치」 표면을 이 경로가 배포된 뒤 켠다(`serverSurfaces`). #3860 짝.
+- **#3889 (engine)**: `plugin.install` 승인 카드를 실행 가능으로.
+- 범위 밖: 에이전트가 위임 사용자의 policy를 읽는 경로, 커뮤니티·워크스페이스 커스텀 플러그인, D1-B(서버측 토큰 보관은 계속 기각).

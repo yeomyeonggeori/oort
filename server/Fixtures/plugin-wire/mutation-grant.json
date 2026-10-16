@@ -1,0 +1,15 @@
+{
+  "auditRef": "00000000-0000-0000-0000-000000000000",
+  "capabilities": [
+    "github.list_repositories",
+    "github.search_issues"
+  ],
+  "egressDomains": [
+    "api.githubcopilot.com"
+  ],
+  "enabled": true,
+  "memberId": "00000000-0000-0000-0000-000000000000",
+  "pluginId": "com.momo.plugins.github",
+  "scope": "github:read",
+  "status": "active"
+}
