@@ -2,6 +2,7 @@ import type {Member} from '@momo/core/lib/api';
 import {resetWorkJobsDetection} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -16,6 +17,7 @@ import {TextInput} from 'react-native';
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
+import {markAgentWorking, resetAgentWorking} from '../src/features/agents/workingSignal';
 import {RealtimeContext} from '../src/realtime/RealtimeProvider';
 import SidebarScreen from '../src/screens/SidebarScreen';
 import WorkJobsScreen from '../src/screens/WorkJobsScreen';
@@ -306,11 +308,35 @@ describe('홈 「모두 보기」 (ADR-0202 D6)', () => {
     );
   }
 
-  it('셸이 「작업」 층을 넘기면 홈 머리에 「모두 보기」가 서고 누르면 그 층을 연다', async () => {
+  afterEach(() => resetAgentWorking());
+
+  it('도는 턴이 없으면 「에이전트 작업」 머리도 「모두 보기」도 서지 않는다 (성재 2026-10-16: 상시 떠 있는 줄이 아니다)', async () => {
+    installFetch();
+    renderHome(() => {});
+    await waitFor(() => expect(screen.getByText('agent-lab')).toBeTruthy());
+    expect(screen.queryByTestId('home-work-see-all')).toBeNull();
+    expect(screen.queryByTestId('home-working-card')).toBeNull();
+    expect(screen.queryByTestId('home-work-head')).toBeNull();
+  });
+
+  it('셸이 「작업」 층을 넘기고 도는 턴이 있으면 「에이전트 작업」 머리에 「모두 보기」가 서고 누르면 그 층을 연다', async () => {
     installFetch();
     const open = jest.fn();
     renderHome(open);
+    await waitFor(() => expect(screen.getByText('agent-lab')).toBeTruthy());
+    act(() =>
+      markAgentWorking({
+        memberId: AGENT_ID,
+        channelId: CH_A,
+        state: 'working',
+        source: 'run',
+        startedAtMs: Date.now() - 30_000,
+        headlines: ['PR 초안 작성 중'],
+        lastActivityAtMs: Date.now(),
+      }),
+    );
     const button = await waitFor(() => screen.getByTestId('home-work-see-all'));
+    expect(screen.getByTestId('home-work-head')).toHaveTextContent('에이전트 작업');
     expect(button.props.accessibilityLabel).toBe('작업 모두 보기');
     fireEvent.press(button);
     expect(open).toHaveBeenCalledTimes(1);
@@ -320,6 +346,18 @@ describe('홈 「모두 보기」 (ADR-0202 D6)', () => {
     installFetch();
     renderHome(undefined);
     await waitFor(() => expect(screen.getByText('agent-lab')).toBeTruthy());
+    act(() =>
+      markAgentWorking({
+        memberId: AGENT_ID,
+        channelId: CH_A,
+        state: 'working',
+        source: 'run',
+        startedAtMs: Date.now() - 30_000,
+        headlines: [],
+        lastActivityAtMs: Date.now(),
+      }),
+    );
+    await waitFor(() => expect(screen.getByTestId('home-working-card')).toBeTruthy());
     expect(screen.queryByTestId('home-work-see-all')).toBeNull();
   });
 });

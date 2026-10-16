@@ -112,6 +112,7 @@ export function ScreenHeader({
   onBack,
   backLabel = '뒤로',
   right,
+  leading,
   titleTestID = 'header-title',
 }: {
   title: string;
@@ -124,6 +125,8 @@ export function ScreenHeader({
    */
   backLabel?: string;
   right?: React.ReactNode;
+  /** 뒤로 가기와 제목 사이의 얼굴(에이전트 상세의 아바타). 보조기술에서는 제목이 이미 이름을 말한다. */
+  leading?: React.ReactNode;
   /**
    * Overridable because more than one header is mounted at a time: the tab
    * screens stay alive under an open conversation, so a single shared id would
@@ -145,6 +148,7 @@ export function ScreenHeader({
           <Text style={styles.backGlyph}>‹</Text>
         </Pressable>
       ) : null}
+      {leading ?? null}
       <View style={styles.headerText}>
         <Text
           accessibilityRole="header"
@@ -212,8 +216,11 @@ export function PrimaryButton({
   disabled,
   busy,
   testID,
+  accessibilityLabel,
 }: {
   label: string;
+  /** 눈에 보이는 낱말보다 긴 낭독 문장이 필요할 때(「김인턴과의 대화 열기」). 없으면 낱말 그대로. */
+  accessibilityLabel?: string;
   /**
    * 진행 중에 라벨을 대체하는 낱말. **이 컴포넌트의 지역 관례는 맨몸이다**
    * (「저장 중」): 이 버튼은 낱말 옆에서 `ActivityIndicator` 를 함께 돌리므로,
@@ -246,6 +253,7 @@ export function PrimaryButton({
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
       accessibilityState={{disabled: inert, busy}}
       disabled={inert}
       onPress={onPress}

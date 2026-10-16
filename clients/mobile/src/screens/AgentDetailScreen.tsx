@@ -6,10 +6,6 @@ import {
 import {
   allowedModelsSummary,
   noSessionsDetail,
-  pauseActionLabel,
-  pauseEffectNotice,
-  pauseFailureCopy,
-  pauseReceipt,
   sessionsForAgent,
   sessionSurvival,
   TERMINAL_ON_DESKTOP,
@@ -29,25 +25,27 @@ import {workExecutionLocation} from '@momo/core/features/work/workLocation';
 import {attachParticle, attachRecipient} from '@momo/core/lib/koreanParticle';
 import {channelLabel} from '@momo/core/features/workspace/directory';
 import {useMutation} from '@tanstack/react-query';
-import React, {useMemo, useState} from 'react';
-import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
+import React, {useMemo} from 'react';
+import {ScrollView, StyleSheet, Text, View} from 'react-native';
 import {
   EmptyState,
   ErrorState,
   FailureBanner,
   LoadingState,
-  NoticeBlock,
+  OutlineButton,
+  PrimaryButton,
   Screen,
   ScreenHeader,
   SectionLabel,
 } from '../design/atoms';
-import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../design/tokens';
+import {font, radius, SAFE_GUTTER, space, type Palette} from '../design/tokens';
 import {useStyles} from '../design/theme';
 import {AgentLivenessLabel} from '../features/agents/AgentLivenessLabel';
+import {ChannelTags} from '../features/agents/channelTags';
+import {Avatar} from '../features/conversation/Avatar';
 import {
   useAgentProfile,
   useAllowedAgentModels,
-  usePauseAgent,
   useWorkHosts,
   useWorkSessions,
 } from '../features/agents/queries';
@@ -58,23 +56,14 @@ import {openDmFailureCopy} from './SidebarScreen';
 import type {OpenAgent} from '../nav/state';
 
 // =============================================================================
-// 한 에이전트 — 재우기·깨우기, 그리고 지금 무슨 일을 하는가.
+// 한 에이전트 — 누구인지, 어느 채널에 있는지, 지금 무슨 일을 하는가.
 //
-// ## 재우기가 이 배치의 심장이고, 문구는 서버를 읽고 썼다
+// ## 재우기·깨우기는 폰에 없다 (성재 2026-10-16)
 //
-// The sentence under the switch is not a paraphrase of the button. It is the
-// measured behaviour of `PUT …/agents/{agent}/pause` on `server-rust`, and it
-// lives in `@momo/core/features/agents/agentOps` beside the line numbers that
-// prove it. The short version: pause writes ONE column, and only the three
-// paths that CREATE a run consult it. A job the gateway has already claimed
-// runs to completion.
-//
-// That sentence used to end "…그대로 끝까지 갑니다", and it was true twice over:
-// pause did not reach a running job, AND nothing else could. goal SRV-C2 landed
-// `POST …/agent-runs/{run}/cancel`, so only the second half is still true. The
-// notice now says what pause does not do and where the person can actually stop
-// the run — repackaging pause as a cancel would be the same lie facing the other
-// way. 중단 자체는 이 화면이 아니라 **대화**에 있다: 취소되는 것은 실행(run)이고,
+// 에이전트는 사람처럼 쉬어야 하는 존재가 아니라서 폰에서 재울 이유가 없다는 결정이다.
+// 서버의 `PUT …/agents/{agent}/pause` 와 데스크톱·웹의 스위치는 그대로다 — 이 화면만
+// 그 문을 두지 않는다. 재워진 에이전트는 목록 줄에서 흐려지고 「일시정지」로 읽힌다
+// (`AgentsScreen`). 중단은 이 화면이 아니라 **대화**에 있다: 취소되는 것은 실행(run)이고,
 // 이 화면이 나열하는 것은 작업 세션이며, 서버는 그 둘이 함께 끝나지 **않는다**고
 // 응답으로 명시한다(`workSessionsTerminated: false`).
 //
@@ -93,6 +82,9 @@ import type {OpenAgent} from '../nav/state';
 // D5 demoted the raw PTY on the phone: reading 80 columns on a 390pt screen is
 // the problem, not the transport. There is no attach button here.
 // =============================================================================
+
+/** 상세 머리의 얼굴. 기본 아바타(32)보다 한 단 크게 — 이 화면의 주인공이다. */
+const AGENT_HEADER_FACE = 40;
 
 export default function AgentDetailScreen({
   agent,
@@ -114,9 +106,6 @@ export default function AgentDetailScreen({
   const allowedModelsQuery = useAllowedAgentModels(workspaceId, agent.memberId);
   const sessionsQuery = useWorkSessions(workspaceId);
   const hostsQuery = useWorkHosts(workspaceId);
-  const pause = usePauseAgent(workspaceId, agent.memberId);
-
-  const [receipt, setReceipt] = useState<string | null>(null);
 
   const rosterAgent = useMemo(
     () =>
@@ -167,6 +156,17 @@ export default function AgentDetailScreen({
         title={agent.displayName}
         subtitle={`@${agent.handle}`}
         onBack={onBack}
+        // 에이전트 목록·DM 목록과 같은 아바타(사진, 없으면 이니셜). 제목이 이름을 말하므로
+        // 얼굴은 보조기술에서 숨는다(`Avatar` 가 스스로 숨는다).
+        leading={
+          <View testID="agent-detail-face">
+            <Avatar
+              directory={directoryQuery.directory}
+              memberId={agent.memberId}
+              size={AGENT_HEADER_FACE}
+            />
+          </View>
+        }
         backLabel="에이전트 목록으로"
         titleTestID="agent-detail-title"
       />
@@ -182,70 +182,6 @@ export default function AgentDetailScreen({
           agentId={agent.memberId}
           testID="agent-detail-liveness"
         />
-        {/* ---- 재우기 / 깨우기 ------------------------------------------ */}
-        <SectionLabel label="상태" />
-        {read.kind === 'pending' ? (
-          <LoadingState label="상태를 확인하는 중입니다." testID="agent-state-loading" />
-        ) : read.kind === 'forbidden' ? (
-          // 권한은 장애가 아니다. 다시 시도 버튼도, 붉은 색도 없다.
-          <NoticeBlock
-            headline="이 에이전트의 상태는 볼 수 없습니다."
-            detail="재우고 깨우는 것은 워크스페이스 관리자나 이 에이전트를 맡은 사람만 할 수 있습니다."
-            testID="agent-state-forbidden"
-          />
-        ) : read.kind === 'failed' ? (
-          <ErrorState
-            headline="상태를 확인하지 못했습니다."
-            detail="지금 자고 있는지 깨어 있는지 알 수 없습니다."
-            onRetry={() => {
-              void profileQuery.refetch();
-            }}
-            testID="agent-state-error"
-          />
-        ) : (
-          <PauseControl
-            paused={profile?.paused === true}
-            busy={pause.isPending}
-            onToggle={next => {
-              setReceipt(null);
-              pause.mutate(next, {
-                onSuccess: saved => {
-                  setReceipt(pauseReceipt(agent.displayName, saved.paused));
-                },
-              });
-            }}
-          />
-        )}
-
-        {pause.isError ? (
-          <View style={styles.bannerWrap}>
-            <FailureBanner
-              // `pause.variables` is the state that was being moved TO, so the
-              // sentence names the act that failed and not its opposite.
-              message={pauseFailureCopy(pause.variables === true, pause.error)}
-              // 「다시 시도」가 실제로 다시 시도한다. 이전 판은 `reset()`이라
-              // 배너만 사라지고 아무 일도 일어나지 않았다 — 라벨이 하지 않는
-              // 일을 약속하고 있었다 (R1 High-3). 재우기는 재시도가 말이 되는
-              // 자리다: 실패 원인이 네트워크면 다음 번에 성공하고, 권한이면
-              // 같은 문장이 다시 뜬다(그건 정직한 답이다).
-              onRetry={
-                pause.variables === undefined
-                  ? undefined
-                  : () => pause.mutate(pause.variables as boolean)
-              }
-              testID="agent-pause-error"
-            />
-          </View>
-        ) : null}
-
-        {receipt !== null && !pause.isError ? (
-          <View style={styles.bannerWrap}>
-            <Text style={styles.receipt} testID="agent-pause-receipt">
-              {receipt}
-            </Text>
-          </View>
-        ) : null}
-
         {/* ---- 프로필 ---------------------------------------------------- */}
         <SectionLabel label="프로필" />
         <View style={styles.card} testID="agent-profile-card">
@@ -289,29 +225,32 @@ export default function AgentDetailScreen({
           ) : null}
         </View>
 
-        <Pressable
-          accessibilityRole="button"
-          // 「과/와」를 손으로 적으면 "Hermes과의 대화"가 된다. 조사는 항상
-          // 유틸이 고른다 (R1 Medium-2 — 이 배치에서 코어에 쌍을 추가했다).
-          accessibilityLabel={`${attachParticle(agent.displayName, 'with')}의 대화 열기`}
-          onPress={() => openDm.mutate()}
-          disabled={openDm.isPending}
-          style={({pressed}) => [styles.secondary, pressed && styles.pressed]}
-          testID="agent-open-dm">
-          <Text style={styles.secondaryLabel}>
-            {openDm.isPending ? '대화 여는 중…' : '대화 열기'}
-          </Text>
-        </Pressable>
-        {onDelegateWork ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`${attachRecipient(agent.displayName, 'person')} 작업 맡기기`}
-            onPress={() => onDelegateWork({agentMemberId: agent.memberId})}
-            style={({pressed}) => [styles.secondary, pressed && styles.pressed]}
-            testID="agent-delegate-work">
-            <Text style={styles.secondaryLabel}>작업 맡기기</Text>
-          </Pressable>
-        ) : null}
+        {/* 주 행동 하나, 보조 하나. 한 줄에 나란히 서고, 큰 글씨에서는 줄이 접혀 각각 한 줄을
+            전부 쓴다(`flexBasis` + `flexWrap`). 높이는 둘 다 44pt 이상이다. */}
+        <View style={styles.actions} testID="agent-actions">
+          <View style={styles.action}>
+            <PrimaryButton
+              label="대화 열기"
+              busyLabel="여는 중"
+              busy={openDm.isPending}
+              // 「과/와」를 손으로 적으면 "Hermes과의 대화"가 된다. 조사는 항상
+              // 유틸이 고른다 (R1 Medium-2 — 이 배치에서 코어에 쌍을 추가했다).
+              accessibilityLabel={`${attachParticle(agent.displayName, 'with')}의 대화 열기`}
+              onPress={() => openDm.mutate()}
+              testID="agent-open-dm"
+            />
+          </View>
+          {onDelegateWork ? (
+            <View style={styles.action}>
+              <OutlineButton
+                label="작업 맡기기"
+                accessibilityLabel={`${attachRecipient(agent.displayName, 'person')} 작업 맡기기`}
+                onPress={() => onDelegateWork({agentMemberId: agent.memberId})}
+                testID="agent-delegate-work"
+              />
+            </View>
+          ) : null}
+        </View>
         {openDm.isError ? (
           <View style={styles.bannerWrap}>
             <FailureBanner
@@ -323,7 +262,7 @@ export default function AgentDetailScreen({
         ) : null}
 
         {/* ---- 채널 배치 -------------------------------------------------- */}
-        <SectionLabel label="있는 채널" />
+        <SectionLabel label="에이전트가 포함된 채널" />
         {placement === null ? (
           <EmptyState
             headline="채널을 확인하지 못했습니다."
@@ -337,9 +276,14 @@ export default function AgentDetailScreen({
           />
         ) : (
           <View style={styles.card} testID="agent-channels">
-            <Text style={styles.channelList}>
-              {placement.present.map(channel => `#${channel.name}`).join('  ')}
-            </Text>
+            {placement.present.length > 0 ? (
+              <ChannelTags
+                names={placement.present
+                  .map(channel => channel.name)
+                  .filter((name): name is string => name !== undefined)}
+                testID="agent-channel-tags"
+              />
+            ) : null}
             {placement.unresolved > 0 ? (
               <Text style={styles.meta}>
                 {`그 밖에 ${placement.unresolved}곳에 더 있습니다. 여기서는 이름을 확인할 수 없는 곳입니다.`}
@@ -387,54 +331,6 @@ export default function AgentDetailScreen({
         <Text style={styles.footnote}>{TERMINAL_ON_DESKTOP}</Text>
       </ScrollView>
     </Screen>
-  );
-}
-
-/**
- * The switch, and the sentence that keeps it honest.
- *
- * The sentence is ABOVE the button and always visible, not behind a confirm
- * step. What it describes is reversible in one tap, so a modal would be
- * ceremony; what it must not do is let someone press 재우기 believing the
- * running job dies.
- */
-function PauseControl({
-  paused,
-  busy,
-  onToggle,
-}: {
-  paused: boolean;
-  busy: boolean;
-  onToggle: (next: boolean) => void;
-}): React.JSX.Element {
-  const styles = useStyles(buildStyles);
-  return (
-    <View style={styles.card}>
-      <Text style={styles.stateHeadline} testID="agent-state">
-        {paused ? '자고 있습니다' : '깨어 있습니다'}
-      </Text>
-      <Text style={styles.meta} testID="agent-pause-effect">
-        {pauseEffectNotice(paused)}
-      </Text>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{busy, disabled: busy}}
-        accessibilityLabel={
-          paused ? '이 에이전트를 깨우기' : '이 에이전트를 재우기'
-        }
-        disabled={busy}
-        onPress={() => onToggle(!paused)}
-        style={({pressed}) => [
-          styles.toggle,
-          paused && styles.toggleWake,
-          pressed && !busy && styles.pressed,
-        ]}
-        testID="agent-pause-toggle">
-        <Text style={[styles.toggleLabel, paused && styles.toggleWakeLabel]}>
-          {pauseActionLabel(paused, busy)}
-        </Text>
-      </Pressable>
-    </View>
   );
 }
 
@@ -561,38 +457,18 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     backgroundColor: color.surface,
     gap: space.sm,
   },
-  stateHeadline: {fontSize: font.body, color: color.text, fontWeight: '600'},
   meta: {fontSize: font.meta, color: color.textMuted, lineHeight: 18},
-  receipt: {fontSize: font.meta, color: color.ok, lineHeight: 18},
-  toggle: {
-    minHeight: TOUCH_TARGET,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: color.border,
-    alignSelf: 'flex-start',
-    paddingHorizontal: space.lg,
-  },
-  toggleWake: {backgroundColor: color.accent, borderColor: color.accent},
-  toggleLabel: {fontSize: font.label, color: color.text, fontWeight: '600'},
-  toggleWakeLabel: {color: color.onAccent},
   field: {gap: 2},
   fieldLabel: {fontSize: font.meta, color: color.textFaint},
   fieldValue: {fontSize: font.label, color: color.text, lineHeight: 19},
-  channelList: {fontSize: font.label, color: color.text, lineHeight: 20},
-  secondary: {
-    minHeight: TOUCH_TARGET,
-    justifyContent: 'center',
+  actions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: space.sm,
     marginHorizontal: SAFE_GUTTER,
-    marginTop: space.sm,
-    paddingHorizontal: space.md,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: color.border,
-    alignSelf: 'flex-start',
+    marginTop: space.md,
   },
-  secondaryLabel: {fontSize: font.label, color: color.accentText, fontWeight: '600'},
+  action: {flexGrow: 1, flexBasis: 140},
   sessionRow: {
     marginHorizontal: SAFE_GUTTER,
     marginBottom: space.sm,
@@ -619,5 +495,4 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     fontSize: font.meta,
     color: color.textFaint,
   },
-  pressed: {backgroundColor: color.surfacePressed},
 });
