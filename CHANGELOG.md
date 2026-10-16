@@ -11,6 +11,16 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+## [0.1.27] - 2026-10-16
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.27>. Tag target: `main=80924663`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. No database migration (the schema stays at 135), `bootstrap_runtime_roles` is unchanged. One new optional environment variable with a default: `TEAM_AI_DAILY_TOKEN_CAP` (default 200000).
+
+### Added
+- Server: the server side of the team AI fast path (ADR-0201, #3835, #3837), which the 0.1.26 notes listed as not merged. The workspace gets an "oort helper" agent member and proposes four kinds of approval cards; it works only in workspaces that turn on the `team_ai_fast_path` workspace switch, which is off by default, and it stops at a daily token cap (`TEAM_AI_DAILY_TOKEN_CAP`, default 200000). New crate `momo-workspace-actions`.
+
+### Fixed
+- Release build: the container dependency-cache stage now copies the new crate's `Cargo.toml`, so the image builds again (#3876, #3877).
+
 ## [0.1.26] - 2026-10-15
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.26>. Tag target: `main=4084b77b`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. Four database migrations since 0.1.25 (132-135): the schema moves from 131 to 135. 132 and 133 widen the `agent_run_event` kind check (`doorbell_rung`, `tool_call`) and 133 adds the RLS FORCE table `agent_run_tool_tally`; 134 adds an `agent` column (default true); 135 replaces a function body only. `bootstrap_runtime_roles` grants `momo_notifier` SELECT on `agent_run_tool_tally`. Two new optional environment variables, both with defaults: `MOMO_DOORBELL_URGENT_GAP_SECONDS` (default 10) and `MOMO_HOSTED_INPLACE_GRANT_ENABLED` (unset means on).
