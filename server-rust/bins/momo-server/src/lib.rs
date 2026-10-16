@@ -1024,6 +1024,12 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/auth/push-fetch-token",
             post(routes::push_fetch::issue),
         )
+        // #3927 (ADR-0204 D6) — the lock screen's one-request token. Minted by
+        // the app from its ordinary session; neither narrow token can reach it.
+        .route(
+            "/v1/auth/push-action-token",
+            post(routes::push_action::issue),
+        )
         // ADR-0180 — human issuer only. The phone redeem half is public (below).
         .route(
             "/v1/auth/device-link",

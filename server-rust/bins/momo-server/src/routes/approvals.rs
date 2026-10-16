@@ -99,7 +99,8 @@ use momo_agent::{
 };
 use momo_auth::{
     append_approved_channels_in_tx, grant_hosted_channels_in_tx,
-    lock_active_hosted_connection_in_tx, Principal, PrincipalKind, MAX_HOSTED_APPROVED_CHANNELS,
+    lock_active_hosted_connection_in_tx, Principal, PrincipalKind, AUDIT_VIA_PUSH_ACTION,
+    MAX_HOSTED_APPROVED_CHANNELS,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::PgConnection;
@@ -121,6 +122,7 @@ use momo_t3::work_control::{spawn_host_ineligible_reason_in_tx, work_control_id}
 use serde_json::{json, Value};
 use uuid::Uuid;
 
+use crate::auth::PushActionCredential;
 use crate::config::T3Settings;
 use crate::dto::{
     ApprovalDecisionReceipt, ApprovalDecisionRequest, ApprovalDto, ApprovalListQuery,
@@ -365,6 +367,11 @@ pub async fn decide_by_approval(
     Extension(principal): Extension<Principal>,
     Path((workspace, approval)): Path<(String, String)>,
     headers: HeaderMap,
+    // Present only when the middleware verified a `typ = push_action` token — the
+    // lock screen's credential (#3927, ADR-0204 D6). It names the door in the
+    // audit log and does nothing else: this handler must not branch on it for
+    // permission, because the token adds no authority.
+    credential: Option<Extension<PushActionCredential>>,
     Json(request): Json<ApprovalDecisionRequest>,
 ) -> Result<Response, ApiError> {
     let workspace_id = workspace_scope(&workspace, &principal)?;
@@ -383,6 +390,7 @@ pub async fn decide_by_approval(
         None,
         &headers,
         request,
+        credential.map(|_| AUDIT_VIA_PUSH_ACTION),
     )
     .await
 }
@@ -403,6 +411,8 @@ pub async fn decide_by_run(
     let run_id = path_uuid(&run, "invalid run id")?;
     let workspace_id = principal.workspace_id;
     let approval_id = request.approval_id;
+    // Not a door the lock-screen token can use (the middleware's route list has
+    // exactly one entry), so there is never a credential to name here.
     decide(
         state,
         principal,
@@ -411,6 +421,7 @@ pub async fn decide_by_run(
         Some(run_id),
         &headers,
         request,
+        None,
     )
     .await
 }
@@ -441,6 +452,7 @@ impl Decision {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn decide(
     state: AppState,
     principal: Principal,
@@ -449,6 +461,7 @@ async fn decide(
     route_run_id: Option<Uuid>,
     headers: &HeaderMap,
     request: ApprovalDecisionRequest,
+    credential_via: Option<&'static str>,
 ) -> Result<Response, ApiError> {
     // **ADR-0188 D3 (R0) — the decision route takes a person, and only a
     // person.**
@@ -502,6 +515,7 @@ async fn decide(
                     route_run_id,
                     member_id,
                     via_token_id,
+                    credential_via,
                     approve,
                     reason: reason.as_deref(),
                     client_decision_id,
@@ -573,6 +587,11 @@ struct DecisionInput<'a> {
     route_run_id: Option<Uuid>,
     member_id: Uuid,
     via_token_id: Option<Uuid>,
+    /// The door the decider came through when it was not an ordinary access
+    /// token (`Some("push_action")` for the lock screen's token, #3927) —
+    /// stamped into `detail.via` of the decision's own audit rows by
+    /// [`stamp_via`] and used for nothing else. Never a permission input.
+    credential_via: Option<&'static str>,
     approve: bool,
     reason: Option<&'a str>,
     client_decision_id: Uuid,
@@ -592,6 +611,22 @@ struct DecisionInput<'a> {
     /// `MentionSettings::context_max_messages` — the recent-conversation window
     /// of the job an approved in-place channel grant releases (ADR-0162 증보 5 G3).
     context_max_messages: i64,
+}
+
+/// Name the door a decision came through in one of its OWN audit rows
+/// (`detail.via`), when it was not an ordinary access token (#3927).
+///
+/// `via_token_id` already points every row at the exact `token` row, whose label
+/// says the same thing; this is the human-readable half, on the rows a reader
+/// asks "how was this decided?" of. A `via` the row already carries is left
+/// alone — the in-place grant's `channels.granted` row uses that key for which
+/// door the *grant* came through, and a credential must not overwrite it. A
+/// non-object detail is returned unchanged.
+fn stamp_via(via: Option<&'static str>, mut detail: Value) -> Value {
+    if let (Some(via), Some(object)) = (via, detail.as_object_mut()) {
+        object.entry("via").or_insert_with(|| json!(via));
+    }
+    detail
 }
 
 /// Whether the action a `workspace_action` payload names offers its one-time
@@ -938,6 +973,7 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
             &approval,
             input.member_id,
             input.via_token_id,
+            input.credential_via,
             input.approve,
             input.client_decision_id,
             control_id,
@@ -1053,7 +1089,12 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
             .target("approval", approval.id)
             .via_token(input.via_token_id)
             .run(approval.run_id)
-            .with_schema(TOOL_AUDIT_SCHEMA, event.clone()),
+            .with_schema(
+                TOOL_AUDIT_SCHEMA,
+                // A copy: `event` is also the resume job's input and the
+                // broadcast, and neither is told which credential decided.
+                stamp_via(input.credential_via, event.clone()),
+            ),
     )
     .await?;
 
@@ -1778,13 +1819,16 @@ async fn execute_workspace_action(
             .run(approval.run_id)
             .with_schema(
                 ACTION_APPROVED_AUDIT_SCHEMA,
-                json!({
-                    "action_id": action.id,
-                    "approval_id": approval.id.to_string(),
-                    "proposed_by": approval.requested_by.to_string(),
-                    "decided_by": input.member_id.to_string(),
-                    "ref": action_ref_value,
-                }),
+                stamp_via(
+                    input.credential_via,
+                    json!({
+                        "action_id": action.id,
+                        "approval_id": approval.id.to_string(),
+                        "proposed_by": approval.requested_by.to_string(),
+                        "decided_by": input.member_id.to_string(),
+                        "ref": action_ref_value,
+                    }),
+                ),
             ),
     )
     .await?;
@@ -3262,6 +3306,7 @@ async fn settle_expired(
     approval: &LockedApproval,
     member_id: Uuid,
     via_token_id: Option<Uuid>,
+    credential_via: Option<&'static str>,
     approve: bool,
     client_decision_id: Uuid,
     control_id: Option<Uuid>,
@@ -3309,7 +3354,7 @@ async fn settle_expired(
             .target("approval", approval.id)
             .via_token(via_token_id)
             .run(approval.run_id)
-            .with_schema(TOOL_AUDIT_SCHEMA, event.clone()),
+            .with_schema(TOOL_AUDIT_SCHEMA, stamp_via(credential_via, event.clone())),
     )
     .await?;
 
@@ -3862,6 +3907,7 @@ mod tests {
             route_run_id: None,
             member_id: Uuid::from_u128(7),
             via_token_id: None,
+            credential_via: None,
             approve,
             reason: None,
             client_decision_id: Uuid::from_u128(8),
@@ -3986,5 +4032,36 @@ mod tests {
                 "{unsafe_code} would truncate or re-target the link"
             );
         }
+    }
+
+    /// #3927 — the door a decision came through is named in the decision's own
+    /// audit row, and only when there is a door to name.
+    #[test]
+    fn a_credential_is_named_in_the_audit_detail_only_when_there_is_one() {
+        let event = json!({"action": "decided", "status": "approved"});
+        assert_eq!(stamp_via(None, event.clone()), event);
+        assert_eq!(
+            stamp_via(Some(AUDIT_VIA_PUSH_ACTION), event.clone()),
+            json!({"action": "decided", "status": "approved", "via": "push_action"})
+        );
+        // The caller's copy is untouched: the broadcast and the resume job are
+        // built from the unstamped event.
+        assert!(event.get("via").is_none());
+    }
+
+    /// A row that already says which door ITS action came through keeps saying it
+    /// (`channels.granted`'s `via: in_place_grant`); the credential does not
+    /// overwrite it, and a non-object detail is passed through, not wrapped.
+    #[test]
+    fn stamping_never_overwrites_an_existing_via_or_wraps_a_scalar() {
+        let granted = json!({"channel_ids": [], "via": "in_place_grant"});
+        assert_eq!(
+            stamp_via(Some(AUDIT_VIA_PUSH_ACTION), granted.clone()),
+            granted
+        );
+        assert_eq!(
+            stamp_via(Some(AUDIT_VIA_PUSH_ACTION), json!("scalar")),
+            json!("scalar")
+        );
     }
 }
