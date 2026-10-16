@@ -175,6 +175,22 @@ pub const CARD_SUGGEST: &str = "card_suggest";
 /// `card_suggest` — it runs only if the agent's profile turned it on ([`exempt_tool_not_enabled`]).
 pub const MEMORY_SUGGEST: &str = "memory_suggest";
 
+/// `workspace_action_propose` — the team AI's one tool (ADR-0201 D2/D3).
+///
+/// Arguments: `{"actionId": "<one of TEAM_AI_ACTION_IDS>", "args": {…}, "rationale"?: "…"}`.
+/// It raises the ADR-0186 approval card and **parks the run**; it executes nothing.
+///
+/// ## Why it runs without the generic approval card (same exception as [`CARD_SUGGEST`])
+///
+/// It *is* the approval producer: its one write is a pending `workspace_action`
+/// approval with its card. Stacking the generic tool-approval card in front would
+/// ask a person twice about one thing. [`approval_reason`] exempts it by name, and
+/// — as for the other name exemptions — it runs only if the agent's profile turned
+/// it on ([`exempt_tool_not_enabled`]) **and** the worker finds the agent is the
+/// workspace's team AI (`crate::team_ai`); any other agent that somehow lists it
+/// is refused there.
+pub const WORKSPACE_ACTION_PROPOSE: &str = "workspace_action_propose";
+
 /// `approval.action_type` for a tool call, matching Swift
 /// `ApprovalRuntime.pausePlan` (`ApprovalRuntime.swift:36-45`).
 ///
@@ -207,6 +223,7 @@ pub const CATALOG: &[&str] = &[
     WORK_SESSION_LOGIN_HANDOFF,
     CARD_SUGGEST,
     MEMORY_SUGGEST,
+    WORKSPACE_ACTION_PROPOSE,
 ];
 
 /// Capabilities the product already has that a **future** batch may expose as
@@ -361,7 +378,41 @@ pub fn catalog_definitions() -> Vec<ToolDefinition> {
              connected tool (PRs, deploys, metrics).",
             parameters: crate::memory_suggest::parameters(),
         },
+        ToolDefinition {
+            name: WORKSPACE_ACTION_PROPOSE,
+            description: "Propose ONE simple workspace change that the person who asked wants \
+             (change an agent's name or profile, create a channel, add people to a channel). \
+             This only makes an approval card: nothing changes until a person approves it, so \
+             say you proposed it, never that it is done. Use only the listed actionIds. Do not \
+             use it for anything else, and never put a key, token or password in `args`.",
+            parameters: workspace_action_propose_parameters(),
+        },
     ]
+}
+
+/// `workspace_action_propose`'s published schema — the enum is the team AI's
+/// allow-list itself, so the model is never told an id the server refuses.
+fn workspace_action_propose_parameters() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "actionId": {
+                "type": "string",
+                "enum": crate::actions::TEAM_AI_ACTION_IDS,
+                "description": "Which change."
+            },
+            "args": {
+                "type": "object",
+                "description": "The change's arguments (the action's own schema). Handles without @."
+            },
+            "rationale": {
+                "type": "string",
+                "description": "One short sentence for the approver, at most 280 characters."
+            }
+        },
+        "required": ["actionId", "args"],
+        "additionalProperties": false
+    })
 }
 
 /// `card_suggest`'s published schema, built from the allow-list so the enum
@@ -743,6 +794,7 @@ pub fn approval_reason(tool_name: &str, grants: Option<&[ToolGrant]>) -> Approva
     // nor be the thing that extends it to anything else.
     if normalize(tool_name) == normalize(CARD_SUGGEST)
         || normalize(tool_name) == normalize(MEMORY_SUGGEST)
+        || normalize(tool_name) == normalize(WORKSPACE_ACTION_PROPOSE)
     {
         return ApprovalReason::SuggestionOnly;
     }
@@ -1268,6 +1320,20 @@ mod tests {
             approval_reason(MEMORY_SUGGEST, Some(&demanding_memory)),
             ApprovalReason::SuggestionOnly
         );
+        // The third (`workspace_action_propose`, ADR-0201): it IS the approval producer, so
+        // it skips the generic card — and only by its exact name, never by a neighbour.
+        assert_eq!(
+            approval_reason(WORKSPACE_ACTION_PROPOSE, None),
+            ApprovalReason::SuggestionOnly
+        );
+        for near in [
+            "workspace.action.propose",
+            "workspace_action_proposal",
+            "workspace_action",
+            "action_propose",
+        ] {
+            assert!(requires_approval(near, None), "{near}");
+        }
         for near in [
             "memory.suggest",
             "memory_suggestion",
@@ -1276,10 +1342,9 @@ mod tests {
         ] {
             assert!(requires_approval(near, None), "{near}");
         }
-        for other in CATALOG
-            .iter()
-            .filter(|name| **name != CARD_SUGGEST && **name != MEMORY_SUGGEST)
-        {
+        for other in CATALOG.iter().filter(|name| {
+            **name != CARD_SUGGEST && **name != MEMORY_SUGGEST && **name != WORKSPACE_ACTION_PROPOSE
+        }) {
             assert!(requires_approval(other, None), "{other} lost its gate");
             // A grant *named* card_suggest does not reach another tool.
             let borrowed = [ToolGrant {

@@ -165,6 +165,17 @@ impl RequiredRole {
 /// `oort_action_propose` from several runs.
 pub const MAX_PENDING_WORKSPACE_ACTIONS: i64 = 3;
 
+/// ADR-0201 D3 v1: the four actions the workspace's team AI may propose. Lives here
+/// (not in the proposal crate) because the team AI's tool schema, built in
+/// `tools.rs`, publishes it as the `actionId` enum — the model is never told an id
+/// the server refuses. A new id here is an ADR amendment, not a code change.
+pub const TEAM_AI_ACTION_IDS: [&str; 4] = [
+    ACTION_AGENT_PROFILE_UPDATE,
+    ACTION_AGENT_RENAME,
+    ACTION_CHANNEL_CREATE,
+    ACTION_CHANNEL_MEMBER_ADD,
+];
+
 /// Whether an action's one-time secret may go to the **proposing agent** instead
 /// of (only) the approver (ADR-0186 증보 v3 V3-3a, V3-5).
 ///

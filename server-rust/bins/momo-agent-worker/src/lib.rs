@@ -91,6 +91,7 @@ pub mod serving;
 pub mod sse;
 pub mod stream;
 pub mod summary;
+mod team_ai;
 pub mod tool_exec;
 pub mod topics;
 
@@ -804,6 +805,17 @@ impl AgentWorker {
                     .await;
             }
         };
+
+        // ADR-0201 — the workspace's team AI takes its own short, bounded turn
+        // (no history window, one tool, a 20-second cut). `None` = an ordinary agent.
+        if !owner_key_turn && !payload.is_resume() {
+            if let Some(settlement) = self
+                .run_team_ai_turn(&job, &payload, run_id, &mut transport)
+                .await
+            {
+                return settlement;
+            }
+        }
 
         // goal B8 L7: the model is told what day it is, every turn, from this
         // process's clock plus the workspace offset. Computed here rather than

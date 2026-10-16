@@ -1,0 +1,5 @@
+//! The workspace-action proposal core, shared by the hosted (Agent Port) lane and
+//! the team AI's worker lane. See the module docs of each file.
+
+pub mod action_resolve;
+pub mod team_ai;

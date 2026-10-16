@@ -1,0 +1,24 @@
+[package]
+name = "momo-workspace-actions"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# ADR-0186 / ADR-0201: the proposal core (argument normalisation, name
+# resolution against the workspace, the team AI's proposal transaction). It lives
+# in its own crate, not in `momo-agent`, on purpose: `momo-agent` is the crate the
+# suggestion tools are built on and a guard (`a_suggestion_calls_no_pty_…`) keeps
+# it free of `momo-settings`/`momo-outbox`. This crate may read settings and the
+# roster; it is depended on by the server (hosted lane) and the worker (team AI).
+[dependencies]
+momo-agent = { path = "../momo-agent" }
+momo-auth = { path = "../momo-auth" }
+momo-db = { path = "../momo-db" }
+momo-messaging = { path = "../momo-messaging" }
+momo-settings = { path = "../momo-settings" }
+
+sqlx.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+serde_json.workspace = true

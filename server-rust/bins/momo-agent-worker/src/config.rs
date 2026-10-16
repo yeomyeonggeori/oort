@@ -124,6 +124,13 @@ pub struct WorkerConfig {
     /// `AgentPortConfig`: only an exact `true` opens it. Off keeps the
     /// `work.session.spawn` tool from starting Claude Code on a shared host.
     pub claude_subscription_agents_enabled: bool,
+    /// `TEAM_AI_DAILY_TOKEN_CAP` (ADR-0201 D4): prompt + completion tokens the
+    /// team AI may spend per UTC day on the team key. `0` turns it off (every
+    /// request falls back at once).
+    pub team_ai_daily_token_cap: i64,
+    /// ADR-0201 D7 hard cut for the team AI's model call (default 20 s). A field
+    /// so a conformance test can prove the cut without waiting twenty seconds.
+    pub team_ai_model_timeout: Duration,
 }
 
 /// The team-memory summary loop's knobs (#3162, ADR-0196 D10, plan §6.1/§6.6). Every default
@@ -665,6 +672,14 @@ impl WorkerConfig {
             claude_subscription_agents_enabled: claude_subscription_agents_switch_on(
                 env("MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED").as_deref(),
             ),
+            team_ai_daily_token_cap: env_number(
+                "TEAM_AI_DAILY_TOKEN_CAP",
+                momo_workspace_actions::team_ai::DEFAULT_DAILY_TOKEN_CAP,
+            )?
+            .max(0),
+            team_ai_model_timeout: Duration::from_secs(
+                momo_workspace_actions::team_ai::MODEL_TIMEOUT_SECS,
+            ),
         })
     }
 
@@ -692,6 +707,10 @@ impl WorkerConfig {
             report_protocol_enabled: true,
             memory: MemoryConfig::default(),
             claude_subscription_agents_enabled: false,
+            team_ai_daily_token_cap: momo_workspace_actions::team_ai::DEFAULT_DAILY_TOKEN_CAP,
+            team_ai_model_timeout: Duration::from_secs(
+                momo_workspace_actions::team_ai::MODEL_TIMEOUT_SECS,
+            ),
         }
     }
 
