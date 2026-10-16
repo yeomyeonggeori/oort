@@ -228,7 +228,7 @@ describe("한도·남은 크레딧 블록", () => {
     expect(q("ai-link-limits-checked")?.textContent).toBe("확인 전");
     expect(q("ai-link-limits-provider-note")?.textContent).toContain("아직 확인하지 않았어요");
     const estimate = q("ai-link-limits-estimate-lines")?.textContent ?? "";
-    expect(estimate).toContain("이번 달 oort가 집계한 사용액약 $32.50");
+    expect(estimate).toContain("이번 달 oort가 집계한 사용액약 $32.50 이상");
     expect(estimate).toContain("적어 둔 월 크레딧$100.00");
     expect(estimate).toContain("남은 양(추정)약 $67.50");
     expect(q("ai-link-limits-ratio")?.textContent).toContain("약 33% 사용");
@@ -318,7 +318,7 @@ describe("한도·남은 크레딧 블록", () => {
     await rtlWaitFor(() => expect(q("ai-link-limits-estimate")).not.toBeNull());
     expect(q("ai-team-hop-limits-estimate")).toBeNull();
     expect(q("ai-team-hop-limits-budget")).toBeNull();
-    expect(q("ai-team-hop-limits-estimate-elsewhere")?.textContent).toContain("맨 위 Anthropic 키 아래에 있어요");
+    expect(q("ai-team-hop-limits-estimate-elsewhere")?.textContent).toContain("위쪽 Anthropic 키 아래에 있어요");
   });
 
   it("추정을 받는 동안은 불러오는 중이라고, 못 받았을 때만 못 불러왔다고 말한다", async () => {

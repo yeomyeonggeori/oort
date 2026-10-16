@@ -201,7 +201,12 @@ export function limitsBlock(input: {
     const est: LimitsLine[] = [];
     est.push({
       label: "이번 달 oort가 집계한 사용액",
-      value: row.spendEstimate.runs === 0 ? "기록 없음" : `약 ${usdFromMicro(spent)}`,
+      value:
+        row.spendEstimate.runs === 0
+          ? "기록 없음"
+          : row.spendEstimate.unpricedRuns > 0
+            ? `약 ${usdFromMicro(spent)} 이상`
+            : `약 ${usdFromMicro(spent)}`,
     });
     let usedRatio: number | null = null;
     let over = false;

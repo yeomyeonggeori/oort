@@ -145,7 +145,7 @@ export function KeyLimitsBlock({
 
       {block.estimate && !estimateHere ? (
         <p className="break-keep border-t border-line pt-3 text-meta text-ink-muted" data-testid={`${testId}-estimate-elsewhere`}>
-          {COMPANY_LABEL[block.company ?? "anthropic"]} 전체의 oort 추정은 맨 위 {COMPANY_LABEL[block.company ?? "anthropic"]} 키 아래에 있어요.
+          {COMPANY_LABEL[block.company ?? "anthropic"]} 전체의 oort 추정은 위쪽 {COMPANY_LABEL[block.company ?? "anthropic"]} 키 아래에 있어요.
         </p>
       ) : block.estimate ? (
         <div className="flex min-w-0 flex-col gap-2 border-t border-line pt-3" data-testid={`${testId}-estimate`}>
