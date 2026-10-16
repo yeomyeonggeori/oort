@@ -110,7 +110,9 @@ export function ConnectionBanner() {
       // sat directly above the channel header at the same value, with nothing to
       // catch an eye that was looking somewhere else when the socket died. The
       // oort loader (#3961) replaced the warn-toned plug: one signal, not two.
-      icon={<OortLoader still={!reconnecting} />}
+      // 24px 무대가 22px 문장 줄 옆에 서면 줄이 3px 자라고 마크가 글자 중심보다 2px
+      // 아래로 내려앉는다. 위아래 2px(`marker`)를 물려 줄 높이는 그대로, 마크 중심은 첫 줄 중심에 둔다.
+      icon={<OortLoader still={!reconnecting} className="-my-marker" />}
       message={message}
       testId="connection-banner"
       {...(canRetry
