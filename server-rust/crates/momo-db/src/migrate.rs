@@ -625,12 +625,18 @@ mod tests {
     /// 137 is #3886's 「월 크레딧」 (ADR-0147 증보 2026-10-16): the RLS-FORCE
     /// `provider_key_budget` (one operator-typed number per AI company, read and written only under
     /// `app.provider_link_admin`) and the global Anthropic `model_pricing` rows.
+    ///
+    /// 138 is #3894's team-AI helper v2 (ADR-0201 증보 2026-10-16 H2·H4·H5): the RLS-FORCE
+    /// `member_handle_alias` (the helper's `oort`·`오르트`·`claude` aliases, released by a `member`
+    /// trigger when a real member takes that handle), the NOBYPASSRLS SELECT-only
+    /// `momo_helper_read` role the read tools `SET LOCAL ROLE` into, and
+    /// `usage_ledger.web_search_requests`.
     #[test]
-    fn discovers_contiguous_migrations_001_to_137() {
+    fn discovers_contiguous_migrations_001_to_138() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=137).collect();
+        let expected: Vec<i64> = (1..=138).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -638,7 +644,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=137 under {}",
+            "expected contiguous 001..=138 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -646,7 +652,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("137_provider_key_budget"));
+            .starts_with("138_team_ai_helper_v2"));
     }
 
     #[test]

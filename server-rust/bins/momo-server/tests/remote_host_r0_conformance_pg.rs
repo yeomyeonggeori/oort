@@ -2920,6 +2920,7 @@ impl ChatProvider for RuleFollowingHermes {
                 json!({})
             };
             return Ok(ChatCompletion {
+                web_search_requests: 0,
                 text: String::new(),
                 usage: None,
                 tool_calls: vec![ProviderToolCall {
@@ -2942,6 +2943,7 @@ impl ChatProvider for RuleFollowingHermes {
             "카드를 띄웠어요.".to_string()
         };
         Ok(ChatCompletion {
+            web_search_requests: 0,
             text,
             usage: None,
             tool_calls: Vec::new(),
