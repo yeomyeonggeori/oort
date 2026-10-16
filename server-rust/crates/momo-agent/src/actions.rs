@@ -272,6 +272,50 @@ impl SecretDelivery {
     }
 }
 
+/// The actions whose approval **mints a value that is shown once** — the invite
+/// link (`result.secretOnce.kind` = [`SECRET_ONCE_INVITE_LINK`]) and the pairing
+/// code ([`SECRET_ONCE_PAIRING`]).
+///
+/// ADR-0204 D7 keeps these off the lock screen: the one place the value would be
+/// shown is the approval card, and a banner button has nowhere to show it. The
+/// approver would approve and the value would be gone. The list is written out
+/// instead of derived from [`SecretDelivery`] because delivery to the *proposing
+/// agent* and minting a secret for the *approver* are different facts that happen
+/// to coincide today; a test pins that every action that delivers a secret is
+/// here, so adding one without opening it fails instead of shipping.
+pub const ONE_TIME_SECRET_ACTION_IDS: [&str; 2] = [ACTION_INVITE_CREATE, ACTION_AGENT_INVITE];
+
+/// Must this approval be opened in the app to be decided — i.e. may its push
+/// **not** carry the lock-screen 승인·거절 buttons? (ADR-0204 D7: the category
+/// `momo.approval.open` instead of `momo.approval`.)
+///
+/// The one list, in the one place; `momo_push::category_for` reads it and nothing
+/// else decides. Three kinds of approval belong on it:
+///
+/// 1. an action that mints a value shown once ([`ONE_TIME_SECRET_ACTION_IDS`]);
+/// 2. an approval whose card asks the approver to **choose a host**
+///    ([`crate::approval::offers_host_choice`] — every `work.spawn` card does).
+///    A banner 승인 would take the card's default machine without the person
+///    having looked at the picker;
+/// 3. ADR-0188 D5's work-host permission requests. They are `work_permission_request`
+///    rows with no `approval` row and no `approval_request` message today, so
+///    there is nothing here to classify; the producer that gives them one adds its
+///    arm in this function.
+///
+/// Everything else (a tool call, an ordinary workspace action) is decidable from
+/// the lock screen behind Face ID, as before.
+pub fn opens_in_app(action_type: &str, payload: &Value) -> bool {
+    if crate::approval::offers_host_choice(payload) {
+        return true;
+    }
+    action_type == ACTION_TYPE_WORKSPACE_ACTION
+        && payload
+            .get("action")
+            .and_then(|action| action.get("id"))
+            .and_then(Value::as_str)
+            .is_some_and(|id| ONE_TIME_SECRET_ACTION_IDS.contains(&id))
+}
+
 /// How long after the approval the proposer may claim the value (V3-4 (4)).
 /// After this the value never leaves the server; the approver can still mint a
 /// fresh one over the existing regenerate routes.
@@ -2650,5 +2694,73 @@ mod tests {
         // The grant saturates instead of wrapping into the past.
         let near_max = secret_claim_grant(i64::MAX - 1);
         assert_eq!(near_max["deadlineMs"], serde_json::json!(i64::MAX));
+    }
+
+    /// ADR-0204 D7: the open list is the actions that mint a value shown once.
+    /// Every id on it is a registered action (a typo would open nothing, silently),
+    /// and every action that hands a secret to the proposing agent is on it — so a
+    /// new secret-minting action cannot ship deciding from the lock screen.
+    #[test]
+    fn the_open_list_names_registered_actions_and_covers_every_secret_delivery() {
+        for id in ONE_TIME_SECRET_ACTION_IDS {
+            assert!(
+                action_by_id(id).is_some(),
+                "{id} is not a registered action"
+            );
+        }
+        for action in ACTIONS {
+            if action.secret_delivery != SecretDelivery::None {
+                assert!(
+                    ONE_TIME_SECRET_ACTION_IDS.contains(&action.id),
+                    "{} delivers a one-time secret but is not on the open list",
+                    action.id
+                );
+            }
+        }
+        assert_eq!(
+            ONE_TIME_SECRET_ACTION_IDS,
+            [ACTION_INVITE_CREATE, ACTION_AGENT_INVITE]
+        );
+    }
+
+    #[test]
+    fn a_secret_minting_action_opens_in_the_app_and_an_ordinary_one_does_not() {
+        let card = |id: &str| serde_json::json!({"action": {"id": id, "args": {}}});
+        for id in ONE_TIME_SECRET_ACTION_IDS {
+            assert!(
+                opens_in_app(ACTION_TYPE_WORKSPACE_ACTION, &card(id)),
+                "{id}"
+            );
+        }
+        for action in ACTIONS {
+            if !ONE_TIME_SECRET_ACTION_IDS.contains(&action.id) {
+                assert!(
+                    !opens_in_app(ACTION_TYPE_WORKSPACE_ACTION, &card(action.id)),
+                    "{} mints nothing shown once and picks no host",
+                    action.id
+                );
+            }
+        }
+        // Only a *workspace action* reads the id: a tool call whose payload merely
+        // contains an action block is still a tool call.
+        assert!(!opens_in_app("tool_call", &card(ACTION_INVITE_CREATE)));
+        assert!(!opens_in_app(
+            ACTION_TYPE_WORKSPACE_ACTION,
+            &serde_json::json!({})
+        ));
+    }
+
+    #[test]
+    fn a_card_that_asks_for_a_host_opens_in_the_app_whatever_its_type() {
+        let spawn = serde_json::json!({
+            "execution": {"tool": "codex", "host_candidates": [], "default_host_id": null}
+        });
+        assert!(opens_in_app("work.spawn", &spawn));
+        assert!(opens_in_app("tool_call", &spawn));
+        // A tool call with no picker is decided where it is shown.
+        assert!(!opens_in_app(
+            "tool_call",
+            &serde_json::json!({"tool_call": {"name": "x"}})
+        ));
     }
 }

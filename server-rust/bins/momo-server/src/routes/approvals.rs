@@ -279,6 +279,11 @@ const RUN_NOT_PARKED: &str = "run_not_parked";
 /// 증보 v3 V3-3a). 400, and the approval is not consumed.
 const DELIVER_SECRET_NOT_SUPPORTED: &str = "deliver_secret_not_supported";
 
+/// The receipt `status` of a lock-screen decision refused because the approval must
+/// be opened in the app (ADR-0204 D7): the native handler turns any 403 into 「눌러서
+/// 앱에서 마무리」 (D6).
+const OPENS_IN_APP: &str = "opens_in_app";
+
 /// The sentinel itself. Namespaced and versioned so it cannot collide with a
 /// genuine `sqlx::Error::Protocol` message from the driver.
 const RUN_NOT_PARKED_SENTINEL: &str = "momo.approvals.run_not_parked.v1";
@@ -368,9 +373,10 @@ pub async fn decide_by_approval(
     Path((workspace, approval)): Path<(String, String)>,
     headers: HeaderMap,
     // Present only when the middleware verified a `typ = push_action` token — the
-    // lock screen's credential (#3927, ADR-0204 D6). It names the door in the
-    // audit log and does nothing else: this handler must not branch on it for
-    // permission, because the token adds no authority.
+    // lock screen's credential (#3927, ADR-0204 D6). It names the door in the audit
+    // log and may only NARROW the route (`opens_in_app` is refused for it): it is
+    // never a reason to allow anything an access token could not, because the token
+    // adds no authority.
     credential: Option<Extension<PushActionCredential>>,
     Json(request): Json<ApprovalDecisionRequest>,
 ) -> Result<Response, ApiError> {
@@ -589,8 +595,9 @@ struct DecisionInput<'a> {
     via_token_id: Option<Uuid>,
     /// The door the decider came through when it was not an ordinary access
     /// token (`Some("push_action")` for the lock screen's token, #3927) —
-    /// stamped into `detail.via` of the decision's own audit rows by
-    /// [`stamp_via`] and used for nothing else. Never a permission input.
+    /// stamped into `detail.via` of the decision's own audit rows by [`stamp_via`]
+    /// and read by the `opens_in_app` refusal. It can only narrow what the decider
+    /// may do; it is never an input to a grant.
     credential_via: Option<&'static str>,
     approve: bool,
     reason: Option<&'a str>,
@@ -751,6 +758,30 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
             input.member_id,
             "forbidden",
             "not a member of this approval channel",
+            StatusCode::FORBIDDEN,
+            now,
+        )));
+    }
+
+    // **The lock screen's credential never decides an approval that must be
+    // opened in the app** (ADR-0204 D6/D7, security review of #3927): one that mints
+    // a value shown once (an invite link, a pairing code — `agent.invite` would put
+    // the code in THIS response's body) or whose card asks the approver to pick a
+    // host. The push is categorised the same way (`momo.approval.open`, no buttons),
+    // but that is the client's half; this is the server's, so a mis-categorised card,
+    // a stale notification or a leaked token cannot turn a banner tap into those
+    // effects. Approve and reject alike (the open category has neither button).
+    // Judged straight after the membership gate — a non-member keeps its 403/404 —
+    // and before anything is read or written for the decision. The credential only
+    // ever NARROWS the route here; it never grants (the token adds no authority).
+    if input.credential_via.is_some()
+        && momo_agent::actions::opens_in_app(&approval.action_type, &approval.payload)
+    {
+        return Ok(Ok(refusal(
+            approval.id,
+            input.member_id,
+            OPENS_IN_APP,
+            "this approval must be decided in the app",
             StatusCode::FORBIDDEN,
             now,
         )));
@@ -4047,6 +4078,44 @@ mod tests {
         // The caller's copy is untouched: the broadcast and the resume job are
         // built from the unstamped event.
         assert!(event.get("via").is_none());
+    }
+
+    /// The lock screen's token is NARROWER than the access token it was minted
+    /// beside, never wider: its only scope is the documentary `push:action`, so it
+    /// carries no `platform:read` and a platform operator who is not an admin gets
+    /// `role_required` for the operator-gated settings actions with it, where their
+    /// access token would pass. Pinned so nobody "fixes" it by copying the caller's
+    /// scopes into the token.
+    #[test]
+    fn the_token_carries_no_operator_standing() {
+        let issued = momo_auth::sign_push_action(Uuid::from_u128(1), Uuid::from_u128(2), "s3cret")
+            .expect("sign");
+        let principal = momo_auth::verify_app_push_action(&issued.token, "s3cret").expect("verify");
+        assert_eq!(
+            principal.scopes,
+            vec![momo_auth::SCOPE_PUSH_ACTION.to_string()]
+        );
+        assert!(!has_platform_read_scope(&principal));
+    }
+
+    /// The `opens_in_app` refusal is a receipt like every other expected failure,
+    /// and it executes nothing.
+    #[test]
+    fn opens_in_app_is_a_receipt_like_every_other_expected_failure() {
+        let decision = refusal(
+            Uuid::from_u128(1),
+            Uuid::from_u128(2),
+            OPENS_IN_APP,
+            "this approval must be decided in the app",
+            StatusCode::FORBIDDEN,
+            Utc::now(),
+        );
+        assert_eq!(decision.status, StatusCode::FORBIDDEN);
+        assert!(decision.secret_once.is_none());
+        let receipt: ApprovalDecisionReceipt =
+            serde_json::from_value(decision.receipt).expect("receipt decodes");
+        assert_eq!(receipt.status, "opens_in_app");
+        assert!(receipt.result.is_none());
     }
 
     /// A row that already says which door ITS action came through keeps saying it

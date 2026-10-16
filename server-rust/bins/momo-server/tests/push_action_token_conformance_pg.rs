@@ -13,8 +13,8 @@
 //! | test | revert that makes it red |
 //! |---|---|
 //! | `the_token_approves_and_rejects_through_the_one_route` | drop the `token` row insert in the mint route, or the `NotAccessToken` -> `verify_app_push_action` arm in `require_principal` |
-//! | `every_other_route_is_403_and_never_a_query` | add any second entry to `push_action_route_allowed`, or delete the route check in `require_principal` |
-//! | `method_case_and_shape_tricks_stay_refused` | loosen `push_action_route_allowed` (method, slashes, extra segments, the UUID spelling) |
+//! | `every_other_route_is_403_and_never_a_query` | add any second entry to `push_action_route_allowed`, or delete the route check in `require_principal` (the "before any query" half is pinned by `an_unrecorded_or_foreign_signed_token_is_401`: an unrecorded token is 403 off the list and 401 on it) |
+//! | `method_case_and_shape_tricks_stay_refused` | loosen `push_action_route_allowed` (verb, empty approval segment, `%2F`, the UUID spellings). Routed shapes must be exactly 403; shapes no route matches are exactly 404 (nothing reachable) |
 //! | `the_two_narrow_tokens_cannot_stand_in_for_each_other` | let `verify_app_push_fetch`/`verify_app_push_action` accept the other `typ`, or merge the two route lists |
 //! | `neither_narrow_token_can_mint_a_successor` | put a mint route on a route list |
 //! | `a_session_cannot_pile_up_live_tokens_and_the_two_budgets_are_separate` | drop the live-row cap in the mint route, or count the other label |
@@ -23,12 +23,13 @@
 //! | `an_unrecorded_or_foreign_signed_token_is_401` | skip `token_state` for the push-action arm |
 //! | `logging_out_ends_the_token` | record the row outside the caller's lineage |
 //! | `a_rotation_keeps_it_alive_and_a_spent_session_does_not` | make the token outlive the refresh row (drop `push_action_session_live`) |
-//! | `a_password_change_ends_the_token` | the same, through the real password route |
-//! | `a_refresh_reuse_sweep_ends_the_token` | the same, through the real reuse sweep |
+//! | `a_password_change_ends_the_token` | stop the real password route from revoking the member's session rows (those sweeps revoke the push_action row itself, so the derived `push_action_session_live` rule is only a second line here — it is pinned by the logout, rotation, access-only-logout and dead-lineage tests) |
+//! | `a_refresh_reuse_sweep_ends_the_token` | stop the real reuse sweep from revoking the lineage's session rows (same remark as the password change) |
 //! | `a_token_minted_from_a_dead_lineage_is_dead_on_arrival` | make the token outlive the refresh row (drop `push_action_session_live`) — the #2696 gap: an older access token mints into a dead lineage |
 //! | `an_access_only_logout_leaves_the_session_and_so_the_token` | (documents the derived-life rule) |
 //! | `the_row_is_a_session_row_of_the_callers_lineage` | change the label, kind or lineage the mint route records |
 //! | `the_token_adds_no_authority` | skip the channel-membership or role check for a push-action principal |
+//! | `a_lock_screen_tap_cannot_decide_what_must_be_opened_in_the_app` | drop the `opens_in_app` refusal in `decide_in_tx`, apply it to approve only, or move it before the membership gate |
 //! | `a_decision_replays_idempotently` | key the replay on the credential instead of the decision id |
 //! | `the_audit_rows_say_which_door_the_decision_came_through` | drop `stamp_via` at the generic, executor or expiry audit row, or stamp the shared `event` |
 //!
@@ -474,6 +475,48 @@ impl World {
         self.seed_approval_expiring("1 hour").await
     }
 
+    /// A pending approval of `action_type` with the caller's `payload`, on a run
+    /// parked for it. For the kinds the decision route reads from the payload alone
+    /// (`opens_in_app`), not for ones that must also execute.
+    async fn seed_parked_approval(&self, action_type: &str, payload: Value) -> (Uuid, Uuid) {
+        let run: Uuid = sqlx::query_scalar(
+            "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status) \
+             VALUES ($1, $2, $3, 'awaiting_approval') RETURNING id",
+        )
+        .bind(self.workspace)
+        .bind(self.agent)
+        .bind(self.channel)
+        .fetch_one(&self.su)
+        .await
+        .expect("seed parked run");
+        let approval: Uuid = sqlx::query_scalar(&format!(
+            "INSERT INTO approval \
+               (workspace_id, run_id, channel_id, requested_by, action_type, payload, \
+                status, expires_at) \
+             VALUES ($1, $2, $3, $4, '{action_type}', $5, 'pending', now() + interval '1 hour') \
+             RETURNING id"
+        ))
+        .bind(self.workspace)
+        .bind(run)
+        .bind(self.channel)
+        .bind(self.agent)
+        .bind(payload)
+        .fetch_one(&self.su)
+        .await
+        .expect("seed pending approval");
+        (run, approval)
+    }
+
+    async fn count(&self, table: &str) -> i64 {
+        sqlx::query_scalar(&format!(
+            "SELECT count(*) FROM {table} WHERE workspace_id = $1"
+        ))
+        .bind(self.workspace)
+        .fetch_one(&self.su)
+        .await
+        .expect("count rows")
+    }
+
     /// A pending `channel.create` workspace action — executed, not resumed, and
     /// gated on the workspace-admin role.
     async fn seed_channel_create_approval(&self, name: &str) -> (Uuid, Uuid) {
@@ -813,12 +856,22 @@ async fn method_case_and_shape_tricks_stay_refused() {
         }
         .bearer_auth(&action);
         let response = request.send().await.expect("request");
-        assert!(
-            matches!(response.status().as_u16(), 403..=405),
-            "{method} {path} must never be served to the lock-screen token, got {}",
-            response.status()
+        // Exact, not a range. A shape the router has a route for reaches the
+        // middleware, which answers 403 (every verb: the layer wraps the whole
+        // method router). A shape NO route matches (a trailing slash, an extra
+        // segment, `decisions`, an empty workspace segment) is a 404 before any
+        // middleware runs: nothing is reachable there, so nothing is asserted but
+        // that it stays so.
+        let unrouted = path.ends_with("/decision/")
+            || path.ends_with("/decision/extra")
+            || path.ends_with("/decisions")
+            || path.contains("//approvals/");
+        let expected = if unrouted { 404 } else { 403 };
+        assert_eq!(
+            response.status().as_u16(),
+            expected,
+            "{method} {path} must never be served to the lock-screen token"
         );
-        assert_ne!(response.status().as_u16(), 200, "{method} {path}");
     }
     assert_eq!(
         w.approval_state(approval).await.0,
@@ -1300,7 +1353,8 @@ async fn the_row_is_a_session_row_of_the_callers_lineage() {
     let _action = w.mint_action(&session).await;
     let rows: Vec<RecordedRow> = sqlx::query_as(
         "SELECT kind::text, label, session_id, \
-                expires_at < now() + interval '6 hours 1 minute' AS bounded, scopes \
+                (expires_at < now() + interval '6 hours 1 minute' \
+                 AND expires_at > now() + interval '5 hours 59 minutes') AS bounded, scopes \
            FROM token WHERE workspace_id = $1 AND label = 'push_action'",
     )
     .bind(w.workspace)
@@ -1311,7 +1365,7 @@ async fn the_row_is_a_session_row_of_the_callers_lineage() {
     let (kind, label, session_id, bounded, scopes) = &rows[0];
     assert_eq!(kind, "session");
     assert_eq!(label, "push_action");
-    assert!(bounded, "the row's expiry is the six-hour bound");
+    assert!(bounded, "the row's expiry is six hours out, to the minute");
     assert_eq!(scopes, &vec!["push:action".to_string()]);
     let lineage: Option<Uuid> = sqlx::query_scalar(
         "SELECT session_id FROM token WHERE workspace_id = $1 AND label = 'access' LIMIT 1",
@@ -1398,6 +1452,124 @@ async fn the_token_adds_no_authority() {
         made, 1,
         "the owner's token ran the action with the owner's authority"
     );
+}
+
+#[tokio::test]
+#[ignore = "needs Postgres + runtime roles (DATABASE_URL)"]
+async fn a_lock_screen_tap_cannot_decide_what_must_be_opened_in_the_app() {
+    // ADR-0204 D7 on the SERVER side: approvals that mint a value shown once and
+    // approvals whose card asks the approver to pick a host are never decided with
+    // the lock screen's credential, approve or reject, whatever the body says. The
+    // push category (`momo.approval.open`) is the client's half of the same rule.
+    let _guard = test_lock().await;
+    let w = world().await;
+    let session = w.login().await;
+    let action = w.mint_action(&session).await;
+
+    let agent_invite = momo_agent::actions::workspace_action_payload(
+        momo_agent::actions::ACTION_AGENT_INVITE,
+        &json!({}),
+        None,
+        w.agent,
+    );
+    let invite_create = momo_agent::actions::workspace_action_payload(
+        momo_agent::actions::ACTION_INVITE_CREATE,
+        &json!({}),
+        None,
+        w.agent,
+    );
+    // A spawn card: it carries the picker's candidate list (empty is still a picker).
+    let spawn = json!({
+        "tool_call": {"call_id": "pat-spawn", "name": "work.session.spawn", "arguments": {}},
+        "execution": {"tool": "codex", "host_candidates": [], "default_host_id": null},
+    });
+    let members_before = w.count("member").await;
+    let agents_before = w.count("agent").await;
+    let invites_before = w.count("invite_code").await;
+
+    let mut seeded = Vec::new();
+    for (label, action_type, payload) in [
+        ("agent.invite", "workspace_action", agent_invite),
+        ("invite.create", "workspace_action", invite_create),
+        ("a spawn card that offers a host", "tool_call", spawn),
+    ] {
+        let (_, approval) = w.seed_parked_approval(action_type, payload).await;
+        seeded.push((label, approval));
+        for approve in [true, false] {
+            let (status, receipt) = w.decide(&action, approval, approve, Uuid::new_v4()).await;
+            assert_eq!(status, 403, "{label} approve={approve}: {receipt}");
+            assert_eq!(receipt["status"], "opens_in_app", "{label}: {receipt}");
+            assert!(
+                receipt["result"].is_null() && receipt.get("secretOnce").is_none(),
+                "{label}: a refusal executes and reveals nothing: {receipt}"
+            );
+            assert_eq!(
+                w.approval_state(approval).await,
+                ("pending".to_string(), None),
+                "{label} approve={approve}: nothing was decided"
+            );
+        }
+        // The body cannot talk its way past it: a host pick and the secret-delivery
+        // flag, the two fields this kind of card reads.
+        let (status, receipt) = w
+            .send(
+                "POST",
+                &w.decision_path(approval),
+                &action,
+                Some(json!({
+                    "approval_id": approval,
+                    "approve": true,
+                    "client_decision_id": Uuid::new_v4(),
+                    "host_id": Uuid::new_v4(),
+                    "deliver_secret_to_agent": true,
+                })),
+            )
+            .await;
+        assert_eq!(status, 403, "{label}: {receipt}");
+        assert_eq!(receipt["status"], "opens_in_app", "{label}: {receipt}");
+    }
+    assert_eq!(
+        w.count("member").await,
+        members_before,
+        "no member was created"
+    );
+    assert_eq!(
+        w.count("agent").await,
+        agents_before,
+        "no agent was created"
+    );
+    assert_eq!(
+        w.count("invite_code").await,
+        invites_before,
+        "no invite was minted"
+    );
+
+    // The refusal sits behind the membership gate: someone outside the approval's
+    // channel is told `forbidden`, exactly as with an ordinary token, and learns
+    // nothing about what kind of card it is.
+    let (_outsider, outsider_email) = w.add_human("admin", false).await;
+    let outsider_session = w.login_as(&outsider_email, TEST_PASSWORD).await;
+    let outsider_token = w.mint_action(&outsider_session).await;
+    let (status, receipt) = w
+        .decide(&outsider_token, seeded[0].1, true, Uuid::new_v4())
+        .await;
+    assert_eq!(
+        (status, receipt["status"].as_str()),
+        (403, Some("forbidden"))
+    );
+
+    // The control: the in-app door is NOT refused by this guard. Rejecting is used
+    // so the control executes nothing.
+    for (label, approval) in &seeded {
+        let (status, receipt) = w
+            .decide(&session.access, *approval, false, Uuid::new_v4())
+            .await;
+        assert_eq!(
+            status, 200,
+            "{label}: the access token may reject it: {receipt}"
+        );
+        assert_eq!(receipt["status"], "rejected", "{label}");
+    }
 }
 
 #[tokio::test]
