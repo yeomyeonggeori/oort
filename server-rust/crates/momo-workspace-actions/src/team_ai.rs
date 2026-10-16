@@ -390,7 +390,7 @@ pub fn system_prompt(roster: &Roster) -> String {
          제안은 승인 카드가 되고, 사람이 승인해야만 실행돼. 너는 아무것도 직접 바꾸지 못해. \
          가능한 actionId는 `{ids}`뿐이야. 이 밖의 일(초대 링크, 권한, 웹훅, 이미지 아바타, \
          코드·파일 작업, 여러 단계 작업, 조사, 긴 글)은 제안하지 말고 \"이건 다른 에이전트가 더 \
-         잘해요\"라고 한 줄로 말해.\n\
+         잘해요\"라고 한 줄로 말해. {plugin_line}\n\
          2) 아래 [데이터]에 있는 사실만으로 답할 수 있는 짧은 질문에 한두 문장으로 답하는 것. \
          데이터에 없는 건 모른다고 말해. 일반 지식 질문에는 답하지 마.\n\
          \n\
@@ -407,6 +407,7 @@ pub fn system_prompt(roster: &Roster) -> String {
          멤버:\n{members}\n채널:\n{channels}```\n",
         tool = momo_agent::tools::WORKSPACE_ACTION_PROPOSE,
         ids = TEAM_AI_ACTION_IDS.join("`, `"),
+        plugin_line = actions::plugin_install_prompt_line(),
         this = data_line(&roster.this_channel),
         members = members,
         channels = channels,
@@ -1064,6 +1065,28 @@ mod tests {
         assert!(!prompt.contains("](http://"), "links in names are inert");
         // Exactly one opening and one closing fence: the data block is the only one.
         assert_eq!(prompt.matches("```").count(), 2);
+    }
+
+    /// H7 / H13-A16 (model half): `plugin.install` is not in the tool's `actionId`
+    /// enum, so a model that keeps to its schema can only give H7's sentence if
+    /// the prompt tells it to. The prompt carries the declared row's own reason and
+    /// every official app's name — the same source as the server's fallback line.
+    #[test]
+    fn the_prompt_tells_the_model_how_to_answer_an_install_request() {
+        let prompt = system_prompt(&Roster::default());
+        let reason = actions::declared_action(actions::ACTION_PLUGIN_INSTALL)
+            .expect("declared")
+            .unavailable_reason;
+        assert!(prompt.contains(reason), "{prompt}");
+        assert!(
+            prompt.contains("준비되면 설치 카드를 띄울게요."),
+            "{prompt}"
+        );
+        for (_, label) in actions::PLUGIN_INSTALL_PLUGINS {
+            assert!(prompt.contains(label), "{label} missing: {prompt}");
+        }
+        // The id itself is not offered: the tool enum stays H6-1's eight.
+        assert!(!prompt.contains(actions::ACTION_PLUGIN_INSTALL), "{prompt}");
     }
 
     #[test]

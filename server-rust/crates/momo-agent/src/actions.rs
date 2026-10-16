@@ -738,6 +738,29 @@ pub fn plugin_install_unavailable_line(args: &Value) -> String {
     format!("{subject} {reason} 준비되면 설치 카드를 띄울게요.")
 }
 
+/// The team AI's system-prompt instruction for an app-install request (H7).
+///
+/// `workspace_action_propose`'s `actionId` enum is [`TEAM_AI_ACTION_IDS`], which
+/// does not hold `plugin.install`, so a model that keeps to its tool schema never
+/// reaches the server's `NotYetAvailable` answer; without this line it answers an
+/// install request with the generic hand-off instead of H7's sentence. Built from
+/// the same declared row and labels as [`plugin_install_unavailable_line`], so the
+/// prompt, the server fallback and the catalog cannot name different reasons.
+pub fn plugin_install_prompt_line() -> String {
+    let reason = declared_action(ACTION_PLUGIN_INSTALL)
+        .map(|declared| declared.unavailable_reason)
+        .unwrap_or("아직 설치 경로가 없어요.");
+    let labels: Vec<&str> = PLUGIN_INSTALL_PLUGINS
+        .iter()
+        .map(|(_, label)| *label)
+        .collect();
+    format!(
+        "앱({}) 설치·연결을 부탁받으면 도구를 부르지 말고 \
+         「○○ 앱은 {reason} 준비되면 설치 카드를 띄울게요.」라고 한 줄로 말해(○○은 그 앱 이름).",
+        labels.join("·")
+    )
+}
+
 /// The complete registry. Order is the catalog's order.
 pub const ACTIONS: &[WorkspaceAction] = &[
     WorkspaceAction {
