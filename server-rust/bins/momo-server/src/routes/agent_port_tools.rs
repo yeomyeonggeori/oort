@@ -1814,7 +1814,7 @@ async fn action_propose(
     // (ADR-0186 증보 V1-a/b) needs the connection and happens inside, below.
     let proposed_at_ms = chrono::Utc::now().timestamp_millis();
     let pure = crate::routes::actions::validated_action_args(action, &raw_args, proposed_at_ms)
-        .map_err(|error| failure_of(&error))?;
+        .map_err(|error| failure_of(&crate::error::ApiError::from(error)))?;
     // **An avatar image is turned into server-made bytes before anything else
     // happens** (ADR-0186 증보 v3 V3-2a): decoded and re-encoded under a timeout, off
     // the async threads, and — for a workspace file — fetched from Drive *outside*

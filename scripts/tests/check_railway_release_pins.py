@@ -41,7 +41,7 @@ WEB_DEST = "/srv/web"
 # Mutations must use this exact previous digest so the proof is a real drift,
 # not a no-op rewrite of the current pin. Move it forward with every release bump.
 PREVIOUS_APP_DIGEST = (
-    "sha256:7ebb377d939e7985aa1aa9ce84e83e2387f1a74cc972a375acd6a01b6276dddd"
+    "sha256:762248ca73eaf1e67f410655209319c82fbd4d0065107e04d03d8dd5b80c15a6"
 )
 
 
