@@ -19,10 +19,10 @@
 # exit status is the notice check's when it fails, else the crate guard's.
 #
 # The guard judges THIS repository's tree. When the notice check is aimed at a
-# fixture tree (`--repo-root` / `--app-dockerfile`, as test fixtures do), that
-# tree has no server-rust workspace to compare, so the guard is skipped and
-# says so; scripts/tests/test_dockerfile_crates_gate.sh proves that skip and
-# the wiring.
+# fixture tree (`--repo-root` / `--app-dockerfile`, the options
+# scripts/tests/test_ghcr_notice_bundle.sh hands the generator), that tree has
+# no server-rust workspace to compare, so the guard is skipped and says so;
+# scripts/tests/test_dockerfile_crates_gate.sh proves that skip and the wiring.
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"

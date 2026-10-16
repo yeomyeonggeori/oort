@@ -17,7 +17,7 @@
 #   The mirror image — a COPY line whose crate was deleted — breaks the same
 #   build with "not found".
 #
-# What is checked (static: bash + grep/sed only, no cargo, no docker)
+# What is checked (static: bash + grep, plus sort/tr — no cargo, no docker)
 #   1. server-rust/Cargo.toml `[workspace] members` only names `crates/*` and
 #      `bins/*`, and has no `exclude`. Any other shape is a member root this
 #      guard (and the Dockerfile's stub loop, which also walks exactly those
