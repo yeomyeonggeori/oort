@@ -75,6 +75,11 @@ pub const INVALID_RESPONSE_REASON: &str = "provider_invalid_response";
 /// 2026-09-27 D1 — the same value the Messages wire sends).
 pub const ANTHROPIC_VERSION: &str = "2023-06-01";
 
+/// 402, or a 400/403/429 whose body names a billing problem (#3886): the key is
+/// real but the account behind it cannot pay. The body is only *classified*; no
+/// text from it is kept.
+pub const NO_CREDIT_REASON: &str = "provider_no_credit";
+
 /// A models page is small; this bounds what a hostile endpoint can make the api
 /// buffer.
 const MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
@@ -146,6 +151,9 @@ pub enum ProbeOutcome {
     Unreachable,
     /// 429.
     RateLimited,
+    /// 402, or a billing error body (#3886): the key is accepted but the
+    /// account has no credit / a billing problem. Not a verdict on the key.
+    NoCredit,
     /// Anything else: another status, or a 2xx we cannot read as the endpoint.
     Unknown,
 }
@@ -157,6 +165,7 @@ impl ProbeOutcome {
             ProbeOutcome::Rejected => "rejected",
             ProbeOutcome::Unreachable => "unreachable",
             ProbeOutcome::RateLimited => "rate_limited",
+            ProbeOutcome::NoCredit => "no_credit",
             ProbeOutcome::Unknown => "unknown",
         }
     }
@@ -198,6 +207,18 @@ pub struct KeyCredit {
     pub limit: Option<f64>,
     pub limit_remaining: Option<f64>,
     pub usage: Option<f64>,
+    /// `data.usage_monthly` — this key's spend in the current UTC month.
+    pub usage_monthly: Option<f64>,
+    /// `data.is_free_tier` — the account has never bought credits.
+    pub is_free_tier: Option<bool>,
+}
+
+/// OpenRouter `GET /credits` → `data.total_credits` / `data.total_usage`
+/// (USD). Account-wide, and readable only with a **management** key (#3886).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AccountCredit {
+    pub total_credits: f64,
+    pub total_usage: f64,
 }
 
 /// The whole result of one probe. Carries no text from the provider.
@@ -220,6 +241,11 @@ pub struct ProbeReport {
     pub rate_limit: Option<RateLimitNumbers>,
     pub retry_after_seconds: Option<u64>,
     pub credit: Option<KeyCredit>,
+    /// OpenRouter `/credits` when the key may read it (management key).
+    pub account_credit: Option<AccountCredit>,
+    /// OpenRouter answered `/credits` with 401/403: an ordinary key. The panel
+    /// says so instead of showing a balance it does not have.
+    pub account_credit_needs_management_key: bool,
 }
 
 impl ProbeReport {
@@ -236,6 +262,8 @@ impl ProbeReport {
             rate_limit: None,
             retry_after_seconds: None,
             credit: None,
+            account_credit: None,
+            account_credit_needs_management_key: false,
         }
     }
 }
@@ -374,6 +402,8 @@ impl ProviderProbe for GuardedProviderProbe {
             rate_limit,
             retry_after_seconds,
             credit: None,
+            account_credit: None,
+            account_credit_needs_management_key: false,
         };
 
         match status {
@@ -397,6 +427,26 @@ impl ProviderProbe for GuardedProviderProbe {
                         report.outcome = ProbeOutcome::Ok;
                         report.model_count = model_count;
                         report.credit = credit;
+                        if method == ProbeMethod::Key {
+                            // One bounded extra hop: the whole probe may not run past
+                            // twice the single-request budget (security review M2).
+                            let extra = self.timeout.min(Duration::from_secs(5));
+                            let read = tokio::time::timeout(
+                                extra,
+                                fetch_account_credit(client, &target.base_url, &target.credential),
+                            )
+                            .await
+                            .unwrap_or(AccountCreditRead::Unavailable);
+                            match read {
+                                AccountCreditRead::Read(account) => {
+                                    report.account_credit = Some(account)
+                                }
+                                AccountCreditRead::NeedsManagementKey => {
+                                    report.account_credit_needs_management_key = true
+                                }
+                                AccountCreditRead::Unavailable => {}
+                            }
+                        }
                         if method == ProbeMethod::Models {
                             if let Some(value) = parsed.as_ref() {
                                 let (ids, truncated) = model_ids(value, target.credential.secret());
@@ -411,13 +461,32 @@ impl ProviderProbe for GuardedProviderProbe {
                     }
                 }
             }
-            401 | 403 => {
-                report.outcome = ProbeOutcome::Rejected;
-                report.reason = Some(AUTH_FAILED_REASON.to_string());
+            402 => {
+                report.outcome = ProbeOutcome::NoCredit;
+                report.reason = Some(NO_CREDIT_REASON.to_string());
             }
-            429 => {
-                report.outcome = ProbeOutcome::RateLimited;
-                report.reason = Some(RATE_LIMITED_REASON.to_string());
+            400 | 401 | 403 | 429 => {
+                // A billing problem can arrive under any of these (Anthropic 400
+                // `credit balance is too low`, OpenAI 429 `insufficient_quota`,
+                // OpenRouter org budgets 403). The body is read only to pick the
+                // class; nothing from it is kept (#3886).
+                let billing = match read_capped(&mut response).await {
+                    BodyRead::Complete(bytes) => is_billing_body(&bytes, status),
+                    BodyRead::TooLarge | BodyRead::Failed => false,
+                };
+                if billing {
+                    report.outcome = ProbeOutcome::NoCredit;
+                    report.reason = Some(NO_CREDIT_REASON.to_string());
+                } else if status == 401 || status == 403 {
+                    report.outcome = ProbeOutcome::Rejected;
+                    report.reason = Some(AUTH_FAILED_REASON.to_string());
+                } else if status == 429 {
+                    report.outcome = ProbeOutcome::RateLimited;
+                    report.reason = Some(RATE_LIMITED_REASON.to_string());
+                } else {
+                    report.outcome = ProbeOutcome::Unknown;
+                    report.reason = Some(format!("provider_status_{status}"));
+                }
             }
             other => {
                 report.outcome = ProbeOutcome::Unknown;
@@ -437,6 +506,83 @@ pub(crate) fn denied_report(method: ProbeMethod, denied: EgressDenied) -> ProbeR
         EgressDenied::NonPublicAddress => {
             ProbeReport::failed(method, ProbeOutcome::Unreachable, EGRESS_DENIED_REASON)
         }
+    }
+}
+
+/// Does a 4xx body name a billing problem? Closed-set classification only:
+/// `error.type` / `error.code` from the providers' documented vocabularies, or
+/// Anthropic's documented sentence. Nothing here is returned or logged.
+fn is_billing_body(bytes: &[u8], status: u16) -> bool {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+        return false;
+    };
+    let error = value.get("error").unwrap_or(&value);
+    let text = |key: &str| {
+        error
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_ascii_lowercase)
+            .unwrap_or_default()
+    };
+    let (kind, code, message) = (text("type"), text("code"), text("message"));
+    matches!(kind.as_str(), "billing_error" | "insufficient_quota")
+        || matches!(
+            code.as_str(),
+            "credit_balance_exhausted" | "insufficient_quota" | "billing_hard_limit_reached"
+        )
+        // Anthropic's documented sentence, accepted only where it is documented
+        // (400/429): a 401/403 must match a structured field, so a proxy echoing
+        // the sentence cannot hide an invalid key (security review L3).
+        || (matches!(status, 400 | 429) && message.contains("credit balance is too low"))
+}
+
+enum AccountCreditRead {
+    Read(AccountCredit),
+    NeedsManagementKey,
+    Unavailable,
+}
+
+/// OpenRouter `GET {base}/credits`. Same guarded client, same credential, same
+/// host the `/key` call just reached. Any failure other than a 401/403 simply
+/// leaves the balance unknown — it never changes the key's verdict.
+async fn fetch_account_credit(
+    client: &reqwest::Client,
+    base_url: &str,
+    credential: &ProbeCredential,
+) -> AccountCreditRead {
+    let url = format!("{}/credits", base_url.trim().trim_end_matches('/'));
+    let request = client.get(&url).header("accept", "application/json");
+    let request = match credential {
+        ProbeCredential::Bearer(secret) => request.bearer_auth(secret),
+        ProbeCredential::AnthropicKey(secret) => request.header("x-api-key", secret),
+    };
+    let Ok(mut response) = request.send().await else {
+        return AccountCreditRead::Unavailable;
+    };
+    match response.status().as_u16() {
+        401 | 403 => AccountCreditRead::NeedsManagementKey,
+        200..=299 => {
+            let BodyRead::Complete(bytes) = read_capped(&mut response).await else {
+                return AccountCreditRead::Unavailable;
+            };
+            let parsed = serde_json::from_slice::<serde_json::Value>(&bytes).ok();
+            let data = parsed.as_ref().and_then(|value| value.get("data"));
+            let number = |key: &str| {
+                data.and_then(|data| data.get(key))
+                    .and_then(serde_json::Value::as_f64)
+                    .filter(|value| value.is_finite())
+            };
+            match (number("total_credits"), number("total_usage")) {
+                (Some(total_credits), Some(total_usage)) => {
+                    AccountCreditRead::Read(AccountCredit {
+                        total_credits,
+                        total_usage,
+                    })
+                }
+                _ => AccountCreditRead::Unavailable,
+            }
+        }
+        _ => AccountCreditRead::Unavailable,
     }
 }
 
@@ -489,6 +635,10 @@ fn read_body(
                     limit: number("limit"),
                     limit_remaining: number("limit_remaining"),
                     usage: number("usage"),
+                    usage_monthly: number("usage_monthly"),
+                    is_free_tier: data
+                        .get("is_free_tier")
+                        .and_then(serde_json::Value::as_bool),
                 }),
             ))
         }

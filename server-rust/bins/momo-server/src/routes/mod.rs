@@ -63,6 +63,7 @@ pub mod plugins;
 /// in [`ephemeral`]; the connection ① half never reaches the server.
 pub mod presence;
 pub mod provider_default_ai;
+pub mod provider_limits;
 pub mod provider_link;
 pub mod provider_settings;
 pub mod push_fetch;
