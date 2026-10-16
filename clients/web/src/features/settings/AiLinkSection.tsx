@@ -73,6 +73,7 @@ import {
 import { TeamKeyForm } from "./TeamKeyForm";
 import { TeamUnlinkDialog } from "./TeamUnlinkDialog";
 import { AiMyAccountsSection } from "./AiMyAccountsSection";
+import { CohostedAgentCard } from "./CohostedAgentCard";
 
 // =============================================================================
 // AI (#2877, 시안 claudedocs/ai-accounts/mockups.html §1·§6).
@@ -191,6 +192,8 @@ export function AiLinkSection({
       )}
       {offline && <AiOfflineBanner />}
       <TeamBoard offline={offline} workspaceId={workspaceId} />
+      {/* ADR-0203: 서버가 선언을 알고 이 사람이 운영자일 때만 그린다(아니면 null). */}
+      <CohostedAgentCard offline={offline} workspaceId={workspaceId} />
     </div>
   );
 }
