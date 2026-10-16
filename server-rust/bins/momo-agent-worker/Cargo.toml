@@ -26,6 +26,7 @@ path = "src/main.rs"
 #   momo-t3        the work-session lifecycle the one executable tool drives
 # This crate owns no SQL of its own; see the module docs in `src/lib.rs`.
 momo-agent = { path = "../../crates/momo-agent" }
+momo-workspace-actions = { path = "../../crates/momo-workspace-actions" }
 momo-db = { path = "../../crates/momo-db" }
 momo-messaging = { path = "../../crates/momo-messaging" }
 momo-outbox = { path = "../../crates/momo-outbox" }
