@@ -156,6 +156,11 @@ pub struct MentionCandidate {
     /// human reply in a thread this agent opened never wakes it. Mentions are
     /// not affected.
     pub thread_reply_wake: bool,
+    /// ADR-0201 증보 v2 H2-6: the names that also call this agent
+    /// (`member_handle_alias` — only the team AI has any). Already filtered so
+    /// a real member's handle wins (H2-4). Matched by
+    /// `momo_messaging::contains_mention_with_aliases`, the one parser.
+    pub aliases: Vec<String>,
 }
 
 /// Read every active agent of the workspace, with its channel membership and
@@ -245,7 +250,16 @@ pub async fn load_mention_candidates_in_tx(
                 EXISTS (SELECT 1 FROM hosted_agent_connection hc \
                   WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id \
                     AND hc.status = 'active' \
-                    AND hc.confirmed_by = a.owner_human_id) AS hosted_confirmed_by_owner \
+                    AND hc.confirmed_by = a.owner_human_id) AS hosted_confirmed_by_owner, \
+                COALESCE((SELECT array_agg(al.alias_norm ORDER BY al.alias_norm) \
+                            FROM member_handle_alias al \
+                           WHERE al.workspace_id = m.workspace_id AND al.member_id = m.id \
+                             AND NOT EXISTS (SELECT 1 FROM member o \
+                                              WHERE o.workspace_id = al.workspace_id \
+                                                AND o.id <> al.member_id \
+                                                AND o.deleted_at IS NULL \
+                                                AND lower(o.handle) = al.alias_norm)), \
+                         '{}'::text[]) AS aliases \
            FROM member m \
            JOIN agent a ON a.member_id = m.id AND a.workspace_id = m.workspace_id \
            JOIN workspace w ON w.id = m.workspace_id \
@@ -329,6 +343,7 @@ pub async fn load_mention_candidates_in_tx(
                 .try_get("hosted_confirmed_by_owner")
                 .map_err(DbError::from)?,
             thread_reply_wake: row.try_get("thread_reply_wake").map_err(DbError::from)?,
+            aliases: row.try_get("aliases").map_err(DbError::from)?,
         });
     }
     Ok(candidates)
@@ -960,6 +975,7 @@ mod tests {
             owner_display_name: None,
             hosted_confirmed_by_owner: false,
             thread_reply_wake: true,
+            aliases: Vec::new(),
         }
     }
 

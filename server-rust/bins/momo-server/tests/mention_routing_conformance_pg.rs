@@ -524,6 +524,7 @@ impl ChatProvider for StreamingMockProvider {
         let mut text = self.burst.concat();
         text.push_str(&self.tail);
         Ok(momo_agent_worker::provider::ChatCompletion {
+            web_search_requests: 0,
             text,
             usage: None,
             tool_calls: Vec::new(),
@@ -723,6 +724,7 @@ impl ChatProvider for ToolCallingMockProvider {
         momo_agent_worker::provider::ProviderError,
     > {
         Ok(momo_agent_worker::provider::ChatCompletion {
+            web_search_requests: 0,
             text: String::new(),
             usage: None,
             tool_calls: vec![momo_agent_worker::provider::ProviderToolCall {

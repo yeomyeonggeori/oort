@@ -67,18 +67,23 @@ use momo_agent::actions::{
     action_by_id, action_ref, action_result_props, agent_invite_result_body,
     agent_profile_update_result_body, agent_rename_result_body, channel_create_result_body,
     channel_create_result_rows, channel_member_add_result_body, channel_member_add_rows,
-    invite_result_body, invite_result_rows, last_attempt_patch, result_client_msg_id,
-    workspace_settings_result_body, ActionResult, ActionResultNext, RequiredRole, SecretDelivery,
-    ACTION_APPROVED_AUDIT_SCHEMA, ACTION_RESULT_EXECUTED, ACTION_TYPE_WORKSPACE_ACTION,
-    AUDIT_ACTION_APPROVED, AUDIT_AGENT_AVATAR_UPDATED, AUDIT_AGENT_AVATAR_UPDATED_SCHEMA,
-    AUDIT_AGENT_INVITED, AUDIT_AGENT_INVITED_SCHEMA, AUDIT_AGENT_PROFILE_UPDATED,
-    AUDIT_AGENT_PROFILE_UPDATED_SCHEMA, AUDIT_CHANNELS_GRANTED, AUDIT_CHANNELS_GRANTED_SCHEMA,
-    AUDIT_CHANNEL_CREATED, AUDIT_CHANNEL_CREATED_SCHEMA, AUDIT_CHANNEL_MEMBER_ADDED,
-    AUDIT_CHANNEL_MEMBER_ADDED_SCHEMA, AUDIT_MEMBER_RENAMED, AUDIT_MEMBER_RENAMED_SCHEMA,
-    AUDIT_WORKSPACE_SETTING_UPDATED, AUDIT_WORKSPACE_SETTING_UPDATED_SCHEMA,
-    DEFAULT_INVITE_EXPIRES_IN_DAYS, INVITE_RESULT_NEXT, LAST_ATTEMPT_PROPS_KEY, REF_TYPE_AGENT,
-    REF_TYPE_CHANNEL, REF_TYPE_HOSTED_CONNECTION, REF_TYPE_INVITE, REF_TYPE_WORKSPACE_SETTINGS,
-    ROLE_REQUIRED, SECRET_ONCE_INVITE_LINK, SECRET_ONCE_PAIRING,
+    invite_result_body, invite_result_rows, last_attempt_patch, memory_update_result_body,
+    memory_update_result_rows, result_client_msg_id, unfurl_update_result_body, unfurl_update_rows,
+    work_tier_update_result_body, work_tier_update_rows, workspace_settings_result_body,
+    ActionResult, ActionResultNext, RequiredRole, SecretDelivery, ACTION_APPROVED_AUDIT_SCHEMA,
+    ACTION_RESULT_EXECUTED, ACTION_TYPE_WORKSPACE_ACTION, AUDIT_ACTION_APPROVED,
+    AUDIT_AGENT_AVATAR_UPDATED, AUDIT_AGENT_AVATAR_UPDATED_SCHEMA, AUDIT_AGENT_INVITED,
+    AUDIT_AGENT_INVITED_SCHEMA, AUDIT_AGENT_PROFILE_UPDATED, AUDIT_AGENT_PROFILE_UPDATED_SCHEMA,
+    AUDIT_CHANNELS_GRANTED, AUDIT_CHANNELS_GRANTED_SCHEMA, AUDIT_CHANNEL_CREATED,
+    AUDIT_CHANNEL_CREATED_SCHEMA, AUDIT_CHANNEL_MEMBER_ADDED, AUDIT_CHANNEL_MEMBER_ADDED_SCHEMA,
+    AUDIT_MEMBER_RENAMED, AUDIT_MEMBER_RENAMED_SCHEMA, AUDIT_MEMORY_SETTINGS_UPDATED,
+    AUDIT_MEMORY_SETTINGS_UPDATED_SCHEMA, AUDIT_UNFURL_SETTING_UPDATED,
+    AUDIT_UNFURL_SETTING_UPDATED_SCHEMA, AUDIT_WORKSPACE_SETTING_UPDATED,
+    AUDIT_WORKSPACE_SETTING_UPDATED_SCHEMA, AUDIT_WORK_TIER_POLICY_CHANGED,
+    AUDIT_WORK_TIER_POLICY_CHANGED_SCHEMA, DEFAULT_INVITE_EXPIRES_IN_DAYS, INVITE_RESULT_NEXT,
+    LAST_ATTEMPT_PROPS_KEY, REF_TYPE_AGENT, REF_TYPE_CHANNEL, REF_TYPE_HOSTED_CONNECTION,
+    REF_TYPE_INVITE, REF_TYPE_WORKSPACE_SETTINGS, ROLE_REQUIRED, SECRET_ONCE_INVITE_LINK,
+    SECRET_ONCE_PAIRING,
 };
 use momo_agent::approval::{
     decided_props_patch, decision_broadcast_payload, decision_event_payload, decision_receipt,
@@ -1533,6 +1538,29 @@ async fn execute_workspace_action(
                 Execution::Refused(decision) => return Ok(Ok(decision)),
             }
         }
+        ActionArgs::WorkspaceUnfurlUpdate { enabled, before } => {
+            execute_workspace_unfurl_update(conn, approval, input, *enabled, *before).await?
+        }
+        ActionArgs::WorkspaceMemoryUpdate { enabled, paused } => {
+            execute_workspace_memory_update(conn, approval, input, *enabled, *paused).await?
+        }
+        ActionArgs::WorkspaceWorkTierUpdate {
+            mode, auto_target, ..
+        } => {
+            match execute_workspace_work_tier_update(
+                conn,
+                approval,
+                input,
+                now,
+                mode,
+                auto_target.as_deref(),
+            )
+            .await?
+            {
+                Execution::Ran(executed) => executed,
+                Execution::Refused(decision) => return Ok(Ok(decision)),
+            }
+        }
         ActionArgs::HostedChannelsGrant {
             connection: Some(connection),
             channels,
@@ -2236,6 +2264,204 @@ async fn execute_workspace_settings_update(
         ref_id: input.workspace_id,
         result_body: workspace_settings_result_body(&labels),
         result_rows: rows,
+        secret_once: None,
+        next: None,
+    }))
+}
+
+/// The detail every v2 settings executor adds to its REST route's own audit row
+/// (ADR-0201 증보 v2 H6-1): which agent proposed and which approval ran it.
+fn via_agent_detail(approval: &LockedApproval, mut detail: Value) -> Value {
+    if let Some(object) = detail.as_object_mut() {
+        object.insert("via_agent".into(), json!(approval.requested_by.to_string()));
+        object.insert("approval_id".into(), json!(approval.id.to_string()));
+    }
+    detail
+}
+
+/// `workspace.unfurl.update` (ADR-0201 증보 v2 H6-1): the write `PUT
+/// …/unfurl-settings` makes — `momo_unfurl::upsert_setting_in_tx`, with the
+/// **approver** as `updated_by` — and its audit row, plus `via_agent`. The gate
+/// (`WorkspaceOperator`, the route's `require_workspace_operator`) and the pin on
+/// the switch the card showed ran before this.
+async fn execute_workspace_unfurl_update(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    enabled: bool,
+    before: Option<bool>,
+) -> Result<Executed, momo_db::DbError> {
+    let saved =
+        momo_unfurl::upsert_setting_in_tx(conn, input.workspace_id, enabled, input.member_id)
+            .await?;
+    let audit = AuditEntry::new(input.workspace_id, AUDIT_UNFURL_SETTING_UPDATED)
+        .by(input.member_id)
+        .about(approval.requested_by)
+        .target("workspace", input.workspace_id)
+        .via_token(input.via_token_id)
+        .run(approval.run_id)
+        .with_schema(
+            AUDIT_UNFURL_SETTING_UPDATED_SCHEMA,
+            via_agent_detail(approval, json!({ "enabled": saved.enabled })),
+        );
+    Ok(Executed {
+        audits: vec![audit],
+        ref_type: REF_TYPE_WORKSPACE_SETTINGS,
+        ref_id: input.workspace_id,
+        result_body: unfurl_update_result_body(saved.enabled),
+        result_rows: unfurl_update_rows(before.unwrap_or(!saved.enabled), saved.enabled),
+        secret_once: None,
+        next: None,
+    })
+}
+
+/// `workspace.memory.update` (H6-1): the write `PATCH …/memory/settings` makes,
+/// in that route's posture — `app.member_id` bound to the **approver**
+/// (`bind_mem_reader_guc`, as `memory_tenant_tx` does), so the `mem_settings`
+/// write policy (`mem_is_workspace_admin()`) judges the person who said yes a
+/// second time, in the database. The binding is restored before returning, so the
+/// rest of the decision transaction runs as it did before.
+async fn execute_workspace_memory_update(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    enabled: Option<bool>,
+    paused: Option<bool>,
+) -> Result<Executed, momo_db::DbError> {
+    let previous: Option<String> =
+        momo_db::sqlx::query_scalar("SELECT current_setting('app.member_id', true)")
+            .fetch_one(&mut *conn)
+            .await?;
+    momo_messaging::bind_mem_reader_guc(conn, input.member_id).await?;
+    // ADR-0196 D9: no workspace row = on, not paused.
+    let before = momo_messaging::list_settings_in_tx(conn)
+        .await?
+        .into_iter()
+        .find(|row| row.scope == "workspace")
+        .map(|row| (row.enabled, row.paused))
+        .unwrap_or((true, false));
+    let saved =
+        momo_messaging::upsert_workspace_settings_in_tx(conn, input.workspace_id, enabled, paused)
+            .await?;
+    momo_db::sqlx::query("SELECT set_config('app.member_id', $1, true)")
+        .bind(previous.unwrap_or_default())
+        .execute(&mut *conn)
+        .await?;
+    let audit = AuditEntry::new(input.workspace_id, AUDIT_MEMORY_SETTINGS_UPDATED)
+        .by(input.member_id)
+        .about(approval.requested_by)
+        .target("workspace", input.workspace_id)
+        .via_token(input.via_token_id)
+        .run(approval.run_id)
+        .with_schema(
+            AUDIT_MEMORY_SETTINGS_UPDATED_SCHEMA,
+            via_agent_detail(
+                approval,
+                json!({
+                    "scope": "workspace",
+                    "enabled": saved.enabled,
+                    "paused": saved.paused,
+                }),
+            ),
+        );
+    Ok(Executed {
+        audits: vec![audit],
+        ref_type: REF_TYPE_WORKSPACE_SETTINGS,
+        ref_id: input.workspace_id,
+        result_body: memory_update_result_body(enabled, paused),
+        result_rows: memory_update_result_rows(
+            before,
+            (saved.enabled, saved.paused),
+            enabled.is_some(),
+            paused.is_some(),
+        ),
+        secret_once: None,
+        next: None,
+    })
+}
+
+/// `workspace.work_tier.update` (H6-1): the write `PUT …/work-tier-policy` makes
+/// for the workspace default — its registry check (`tier_target_allowed`, `FOR
+/// SHARE` on the host, so a host revoked since the card was drawn refuses here
+/// with nothing written) and `upsert_tier_policy` — and its audit row, plus
+/// `via_agent`.
+async fn execute_workspace_work_tier_update(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
+    mode: &str,
+    auto_target: Option<&str>,
+) -> Result<Execution, momo_db::DbError> {
+    let before = momo_settings::load_tier_policy(
+        conn,
+        input.workspace_id,
+        momo_settings::TierScope::Workspace,
+    )
+    .await?;
+    if momo_settings::tier_target_allowed(
+        conn,
+        input.workspace_id,
+        momo_settings::TierScope::Workspace,
+        auto_target,
+    )
+    .await?
+    .is_err()
+    {
+        return Ok(Execution::Refused(args_invalid_refusal(
+            approval, input, now,
+        )));
+    }
+    let saved = momo_settings::upsert_tier_policy(
+        conn,
+        input.workspace_id,
+        momo_settings::TierScope::Workspace,
+        mode,
+        auto_target,
+    )
+    .await?;
+    let audit = AuditEntry::new(input.workspace_id, AUDIT_WORK_TIER_POLICY_CHANGED)
+        .by(input.member_id)
+        .about(approval.requested_by)
+        .target("workspace", input.workspace_id)
+        .via_token(input.via_token_id)
+        .run(approval.run_id)
+        .with_schema(
+            AUDIT_WORK_TIER_POLICY_CHANGED_SCHEMA,
+            via_agent_detail(
+                approval,
+                json!({
+                    "scope": "workspace",
+                    "mode": saved.mode,
+                    "auto_target": saved.auto_target,
+                }),
+            ),
+        );
+    let before_label = match &before.auto_target {
+        Some(target) => Some(
+            crate::routes::actions::work_tier_target_label_in_tx(conn, input.workspace_id, target)
+                .await?,
+        ),
+        None => None,
+    };
+    let after_label = match &saved.auto_target {
+        Some(target) => Some(
+            crate::routes::actions::work_tier_target_label_in_tx(conn, input.workspace_id, target)
+                .await?,
+        ),
+        None => None,
+    };
+    Ok(Execution::Ran(Executed {
+        audits: vec![audit],
+        ref_type: REF_TYPE_WORKSPACE_SETTINGS,
+        ref_id: input.workspace_id,
+        result_body: work_tier_update_result_body(&saved.mode),
+        result_rows: work_tier_update_rows(
+            &before.mode,
+            before_label.as_deref(),
+            &saved.mode,
+            after_label.as_deref(),
+        ),
         secret_once: None,
         next: None,
     }))
