@@ -496,7 +496,7 @@ END
 $$;
 
 -- BEGIN helper-read (#3894; ADR-0201 증보 v2 H4-2). Identical in bootstrap_roles.sql and
--- bootstrap_runtime_roles.sql; a no-op before migration 137. The team AI's read tools run as the
+-- bootstrap_runtime_roles.sql; a no-op before migration 138. The team AI's read tools run as the
 -- worker with `SET LOCAL ROLE momo_helper_read` (NOBYPASSRLS, SELECT only), so momo_worker may SET
 -- that role but never inherits it, and no other runtime role is a member.
 DO $$

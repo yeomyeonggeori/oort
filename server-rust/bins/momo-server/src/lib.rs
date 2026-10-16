@@ -276,6 +276,10 @@ pub struct AppState {
     /// **default** egress policy (public addresses only); `main.rs` replaces
     /// it with the operator's policy, tests with a loopback-permitting one.
     pub provider_probe: Arc<routes::provider_link::ProviderProbeState>,
+    /// ADR-0203 (#3883) — the operator's declaration about a co-hosted agent
+    /// (`HERMES_BASE_URL` set, tool-lock attested). Default: nothing declared,
+    /// which keeps the whole feature silent and offline.
+    pub cohosted: Arc<routes::cohosted_agent::CohostedAgentState>,
 }
 
 impl AppState {
@@ -315,7 +319,28 @@ impl AppState {
                     routes::provider_link::PROBE_TIMEOUT,
                 ),
             ))),
+            cohosted: Arc::new(routes::cohosted_agent::CohostedAgentState::new(
+                config::CohostedAgentConfig::default(),
+                Arc::new(momo_provider_probe::GuardedProviderProbe::new(
+                    momo_settings::EgressPolicy::default(),
+                    routes::provider_link::PROBE_TIMEOUT,
+                )),
+            )),
         }
+    }
+
+    /// ADR-0203 — attach the operator's declaration and the probe that dials the
+    /// declared host (`main.rs` with the operator's egress policy, tests with a
+    /// loopback-permitting one). A fresh throttle comes with it.
+    pub fn with_cohosted(
+        mut self,
+        config: config::CohostedAgentConfig,
+        probe: Arc<dyn momo_provider_probe::CohostedAgentProbe>,
+    ) -> Self {
+        self.cohosted = Arc::new(routes::cohosted_agent::CohostedAgentState::new(
+            config, probe,
+        ));
+        self
     }
 
     /// Replace the 「연결 확인」 probe (#2960) — `main.rs` with the operator's
@@ -821,6 +846,13 @@ pub fn build_app(state: AppState) -> Router {
                 .delete(routes::provider_link::delete),
         )
         .route("/v1/provider/link/test", post(routes::provider_link::test))
+        // #3886 — 「한도·남은 크레딧」: operator-typed monthly budget + oort's
+        // month-to-date spend ESTIMATE per company. Same operator gate.
+        .route("/v1/provider/limits", get(routes::provider_limits::get))
+        .route(
+            "/v1/provider/limits/budget",
+            put(routes::provider_limits::put_budget),
+        )
         // #3009 — 「기본 AI」 team rows. Instance-global like `provider/link`,
         // so the same MOMO-583 operator gate on both verbs.
         .route(
@@ -1486,6 +1518,21 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/agents/{agent}/pause",
             put(routes::agents::put_pause),
+        )
+        // #3883 (ADR-0203) — the co-hosted Hermes: status (no network), probe
+        // (two fixed GETs at the operator-declared host) and the one-click connect.
+        // Instance operator only; absent from the agent-route allow-list.
+        .route(
+            "/v1/workspaces/{ws}/cohosted-agent",
+            get(routes::cohosted_agent::status),
+        )
+        .route(
+            "/v1/workspaces/{ws}/cohosted-agent/probe",
+            post(routes::cohosted_agent::probe),
+        )
+        .route(
+            "/v1/workspaces/{ws}/cohosted-agent/connect",
+            post(routes::cohosted_agent::connect),
         )
         // #3873 (ADR-0147 증보 2026-10-16) — which AI link an agent is pinned to.
         // Instance operator only (both verbs); absent from the agent-route

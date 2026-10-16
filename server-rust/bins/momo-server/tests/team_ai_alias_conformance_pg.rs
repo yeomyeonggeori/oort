@@ -586,7 +586,7 @@ async fn the_alias_status_is_server_written() {
 
 /// H8 calls the switch again on an already-on helper (the next-step card). That
 /// must stay a 200 with the same three aliases — and it must not need UPDATE on
-/// `member_handle_alias`, which migration 137 does not grant `momo_app` (a 42501
+/// `member_handle_alias`, which migration 138 does not grant `momo_app` (a 42501
 /// there would read as `team_ai_unavailable` and switch the helper OFF).
 #[tokio::test]
 #[ignore = "requires DATABASE_URL (pgvector pg18 superuser)"]

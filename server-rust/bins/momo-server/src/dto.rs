@@ -3909,7 +3909,7 @@ pub struct ProviderDefaultAiGuardrailInput {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderProbeDetailDto {
-    /// `ok` | `rejected` | `unreachable` | `rate_limited` | `unknown`.
+    /// `ok` | `rejected` | `unreachable` | `rate_limited` | `no_credit` | `unknown`.
     pub outcome: &'static str,
     /// `models` (`GET {base}/models`) | `key` (OpenRouter `GET {base}/key`).
     pub method: &'static str,
@@ -3936,6 +3936,14 @@ pub struct ProviderProbeDetailDto {
     pub retry_after_seconds: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub credit: Option<ProviderKeyCreditDto>,
+    /// #3886 — OpenRouter `GET /credits` (account-wide), present only when the
+    /// key is a management key.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_credit: Option<ProviderAccountCreditDto>,
+    /// #3886 — true when `/credits` refused the key (an ordinary key): the
+    /// account balance is not readable with it, and none is shown.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub account_credit_needs_management_key: bool,
     pub probed_at_ms: i64,
     /// True when this is the link's last report reused inside the throttle
     /// window rather than a new call.
@@ -3965,6 +3973,19 @@ pub struct ProviderKeyCreditDto {
     pub limit: Option<f64>,
     pub limit_remaining: Option<f64>,
     pub usage: Option<f64>,
+    /// #3886 — `data.usage_monthly`: this key's spend this UTC month.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage_monthly: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_free_tier: Option<bool>,
+}
+
+/// OpenRouter `GET /credits` → `data.total_credits` / `data.total_usage` (USD).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderAccountCreditDto {
+    pub total_credits: f64,
+    pub total_usage: f64,
 }
 
 /// `POST /v1/provider/link/test` response (Swift `ProviderLinkTestResponse`

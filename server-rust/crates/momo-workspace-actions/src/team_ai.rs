@@ -298,7 +298,7 @@ pub async fn register_aliases_in_tx(
         } else {
             // `DO NOTHING`, then read the owner: re-enabling an already-on helper
             // must not need UPDATE on the table (momo_app holds SELECT/INSERT/
-            // DELETE only, migration 137).
+            // DELETE only, migration 138).
             sqlx::query(
                 "INSERT INTO member_handle_alias (workspace_id, member_id, alias, alias_norm) \
                  VALUES ($1, $2, $3, $3) \
@@ -444,7 +444,7 @@ pub async fn tokens_used_today_in_tx(
 }
 
 /// H5: provider-side web searches the team AI made since 00:00 UTC, from the
-/// ledger's `web_search_requests` (migration 137) — no second counter.
+/// ledger's `web_search_requests` (migration 138) — no second counter.
 pub async fn searches_used_today_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,

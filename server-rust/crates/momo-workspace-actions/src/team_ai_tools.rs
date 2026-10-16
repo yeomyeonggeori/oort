@@ -75,7 +75,7 @@ pub const READ_TOOL_NAMES: [&str; 8] = [
     TOOL_READ_WORKSPACE_SETTINGS,
 ];
 
-/// The NOBYPASSRLS, SELECT-only role every read transaction enters (migration 137).
+/// The NOBYPASSRLS, SELECT-only role every read transaction enters (migration 138).
 pub const HELPER_READ_ROLE: &str = "momo_helper_read";
 
 /// ADR-0113 증보 P2: the only plugin ids the registry reads ever show. The REST
