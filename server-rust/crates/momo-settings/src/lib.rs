@@ -36,6 +36,7 @@
 //! |---|---|---|
 //! | [`provider`] | provider mode/URL vocabulary, endpoint redaction, base-URL validation | `Config.swift:502-700`, `AgentRoutes.validatedBaseURL` |
 //! | [`crypto`] | AES-GCM sealed bearer + masked tail | `Provider/ProviderLinkCrypto.swift` |
+//! | [`agent_pin`] | per-agent AI link pin (#3873) | no Swift ancestor |
 //! | [`default_ai`] | 「기본 AI」 operator rows (#3009) + the shared model-id sanitizer | no Swift ancestor |
 //! | [`link`] | `provider_link` singleton store + DB-over-env resolution | `Provider/ProviderLinkStore.swift`, `ProviderLinkResolver.swift` |
 //! | [`oauth`] | the `oauth-openai` sealed-payload kind (ADR-0147) | no Swift source — Rust-only |
@@ -54,6 +55,7 @@
 //! definer function that maps a code to its workspace and nothing else. See
 //! [`join`]'s module docs for why that placement is the invariant-preserving one.
 
+pub mod agent_pin;
 pub mod chain;
 pub mod cloud_box;
 pub mod cloud_box_runner;
@@ -73,6 +75,9 @@ pub mod tier;
 pub mod workspace;
 pub mod workspace_settings;
 
+pub use agent_pin::{
+    delete_agent_pin, read_agent_pin, upsert_agent_pin, PinKind, PinReadError, StoredAgentPin,
+};
 pub use chain::{
     attemptable_hops, cascade_plan, classify_probe_reason, decrypt_chain_entry,
     delete_all_chain_entries, read_chain, replace_chain, CascadeDecision, CascadeHop,

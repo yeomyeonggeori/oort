@@ -3696,6 +3696,73 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {description: Active agent not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
 
+  /v1/workspaces/{workspaceId}/agents/{agentId}/provider-pin:
+    get:
+      tags: [agents]
+      operationId: getAgentProviderPin
+      summary: Read which AI link an agent is pinned to.
+      description: >
+        ADR-0147 증보 2026-10-16 (#3873). Instance operator only (a listed
+        `PLATFORM_ADMIN_EMAILS` owner/admin or a `platform:read` token). `pin` is
+        `null` when the agent follows the team default AI. `linkResolved: false`
+        means the pinned link is gone or changed; the agent's turns are refused
+        (nothing falls back) until an operator picks again. No URL or key is ever
+        returned: only the redacted endpoint label.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: agentId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The agent's pin, or null.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AgentProviderPinResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {description: Agent not found in this workspace, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+    put:
+      tags: [agents]
+      operationId: putAgentProviderPin
+      summary: Pin an agent to the operator env link or a stored team link, or clear the pin.
+      description: >
+        ADR-0147 증보 2026-10-16 (#3873). Strict instance operator gate
+        (`platform:read` is not enough). `kind` is `operator_env` (the
+        `HERMES_BASE_URL` link), `team_link` (a cascade position: 0 is the stored
+        `provider_link` itself, never its env fallback; 1+ a chain hop) or
+        `default` (clear). The body is closed: no URL, key or path. A pin names a
+        link that already passed the base-URL validator, so the egress rules are
+        unchanged. 409 `owner_only_agent_cannot_be_pinned` for subscription /
+        personal-key agents; 409 `agent_own_model_required` for `team_link` on an
+        agent that follows the instance default model; 400 when the position is
+        not configured or the server has no env link.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: agentId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PutAgentProviderPinRequest"}
+      responses:
+        "200":
+          description: The agent's pin after the change.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AgentProviderPinResponse"}
+        "400": {description: Invalid body, unconfigured position or no env link, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {description: Agent not found in this workspace, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409": {description: "owner_only_agent_cannot_be_pinned or agent_own_model_required", content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
   /v1/workspaces/{workspaceId}/agent-runs/{runId}/cancel:
     post:
       tags: [agents]
@@ -14970,6 +15037,42 @@ components:
         muted:
           type: boolean
 
+    PutAgentProviderPinRequest:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind: {type: string, enum: [default, operator_env, team_link]}
+        linkPosition:
+          type: integer
+          minimum: 0
+          description: Required for `team_link`, refused for the other kinds.
+    AgentProviderPinResponse:
+      type: object
+      additionalProperties: false
+      required: [schema, agentId, pin]
+      properties:
+        schema: {type: string, enum: [momo.agent.provider_pin.v0]}
+        agentId: {type: string, format: uuid}
+        pin:
+          nullable: true
+          allOf:
+            - {$ref: "#/components/schemas/AgentProviderPin"}
+    AgentProviderPin:
+      type: object
+      additionalProperties: false
+      required: [kind, linkResolved, updatedAtMs]
+      properties:
+        kind: {type: string, enum: [operator_env, team_link]}
+        linkPosition: {type: integer, minimum: 0}
+        endpointLabel:
+          type: string
+          description: Redacted label (never a URL). For `team_link`, the one the position had when pinned; for `operator_env`, the env link's.
+        linkResolved:
+          type: boolean
+          description: False when the pinned link is gone or changed. The agent's turns are refused until re-picked.
+        pinnedBy: {type: string, format: uuid}
+        updatedAtMs: {type: integer, format: int64}
     ProviderDefaultAiResponse:
       type: object
       additionalProperties: false

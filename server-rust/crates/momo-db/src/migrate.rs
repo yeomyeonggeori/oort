@@ -616,12 +616,17 @@ mod tests {
     ///
     /// 135 is #3853 (ADR-0202 E1): `work.run.updated` fires for every agent kind's work
     /// runs and for top-level mention runs' final transition. Function body only.
+    ///
+    /// 136 is #3873's per-agent AI link pin (ADR-0147 증보 2026-10-16): the RLS-FORCE table
+    /// `agent_provider_pin` (a link reference per agent, no credential material; reads are
+    /// workspace-scoped, writes need the `app.provider_link_admin` operator GUC) and its guard
+    /// trigger (own workspace, never an `owner_only` agent).
     #[test]
-    fn discovers_contiguous_migrations_001_to_135() {
+    fn discovers_contiguous_migrations_001_to_136() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=135).collect();
+        let expected: Vec<i64> = (1..=136).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -629,7 +634,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=135 under {}",
+            "expected contiguous 001..=136 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -637,7 +642,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("135_work_run_updated_all_agents"));
+            .starts_with("136_agent_provider_pin"));
     }
 
     #[test]

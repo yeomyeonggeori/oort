@@ -9,6 +9,7 @@ pub mod agent_mentions;
 pub mod agent_port;
 pub mod agent_port_oauth;
 pub mod agent_port_tools;
+pub mod agent_provider_pin;
 pub mod agent_runs;
 pub mod agents;
 pub mod approvals;
