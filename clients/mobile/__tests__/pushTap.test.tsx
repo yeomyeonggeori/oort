@@ -1164,6 +1164,92 @@ describe('한 번의 탭은 한 번 착지한다', () => {
     expect(decisions).toHaveLength(0);
   });
 
+  // ADR-0204 D7 (#3928) — 「열어서 결정」은 승인·거절과 정반대로 취급한다. 그 버튼은 일을
+  // 하지 않고 앱을 앞으로 불러 카드를 보여 주는 것이 전부라서 본문 탭과 같은 탭이다.
+  // 그러니 마지막 응답으로도 받는다 — 되풀이해도 카드가 열릴 뿐이다.
+  //
+  // 이 시험들이 재는 것은 **착지**다. 「결정을 보내지 않는다」는 단정은 방어선이 아니라
+  // 확인이다: 콜드 런치 경로(`deliverTap`)는 응답을 행동으로 옮기는 `handlePushResponse`를
+  // 부르지 않으므로 거기서는 구조상 결정이 없고, 리스너 경로에서 승인·거절을 막는 것은
+  // `pushApprovalOpen.test.ts`가 잰다.
+  const OPEN_APPROVAL_AIM: Aim = {
+    ...TARGETS['승인 카드'].aim,
+    category: 'momo.approval.open',
+  };
+
+  function approvalDecisions(fetchMock: jest.Mock) {
+    return fetchMock.mock.calls.filter(
+      ([url, init]) =>
+        String(url).includes('/approvals') &&
+        (init as {method?: string} | undefined)?.method === 'POST',
+    );
+  }
+
+  it('「열어서 결정」은 콜드 런치의 마지막 응답이어도 카드에 착지한다', async () => {
+    const fetchMock = installFetch();
+    notificationsMock.getLastNotificationResponse.mockReturnValue(
+      tapResponse(apnsPayload(OPEN_APPROVAL_AIM), PUSH_ACTION.openApproval),
+    );
+    renderShell();
+
+    await expectLanded('general', APPROVAL_MSG, false);
+    expect(approvalDecisions(fetchMock)).toHaveLength(0);
+  });
+
+  it('「열어서 결정」은 앱이 떠 있을 때(리스너)도 카드에 착지한다', async () => {
+    const fetchMock = installFetch();
+    renderShell();
+    await waitForSidebar();
+
+    expect(deliver).not.toBeNull();
+    await act(async () => {
+      deliver?.(
+        tapResponse(apnsPayload(OPEN_APPROVAL_AIM), PUSH_ACTION.openApproval),
+      );
+    });
+
+    await expectLanded('general', APPROVAL_MSG, false);
+    expect(approvalDecisions(fetchMock)).toHaveLength(0);
+  });
+
+  it('「열어서 결정」이 두 길(마지막 응답과 리스너)로 와도 한 번만 착지한다', async () => {
+    installFetch();
+    const launched = tapResponse(
+      apnsPayload(OPEN_APPROVAL_AIM),
+      PUSH_ACTION.openApproval,
+    );
+    notificationsMock.getLastNotificationResponse.mockReturnValue(launched);
+    renderShell();
+    await expectLanded('general', APPROVAL_MSG, false);
+
+    // 같은 응답이 리스너로도 온다.
+    await act(async () => {
+      deliver?.(launched);
+    });
+
+    // 두 번째 착지가 있었다면 점프 토큰이 2 로 올랐다.
+    const tokens = jumpTargets()
+      .filter(target => target.messageId === APPROVAL_MSG)
+      .map(target => target.token);
+    expect(tokens.length).toBeGreaterThan(0);
+    expect(new Set(tokens)).toEqual(new Set([1]));
+  });
+
+  it('open 승인에 온 승인 버튼은 마지막 응답이어도 착지하지 않는다 (탭이 아니다)', async () => {
+    const fetchMock = installFetch();
+    notificationsMock.getLastNotificationResponse.mockReturnValue(
+      tapResponse(apnsPayload(OPEN_APPROVAL_AIM), PUSH_ACTION.approve),
+    );
+    renderShell();
+    await waitForSidebar();
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    });
+
+    expect(screen.queryByTestId('conversation-title')).toBeNull();
+    expect(approvalDecisions(fetchMock)).toHaveLength(0);
+  });
+
   it('같은 메시지를 가리키는 두 번째 탭도 다시 착지한다', async () => {
     installFetch();
     renderShell();

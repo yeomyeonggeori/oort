@@ -275,6 +275,69 @@ impl SecretDelivery {
     }
 }
 
+/// The actions whose approval **mints a value that is shown once** — the invite
+/// link (`result.secretOnce.kind` = [`SECRET_ONCE_INVITE_LINK`]) and the pairing
+/// code ([`SECRET_ONCE_PAIRING`]).
+///
+/// ADR-0204 D7 keeps these off the lock screen: approving one mints a value that is
+/// handed back exactly once — in the decision response to the approver's client, or
+/// to the proposer's claim — and a banner button has nowhere to receive it. The
+/// person would approve from a banner and the value would be gone. The list is written out
+/// instead of derived from [`SecretDelivery`] because delivery to the *proposing
+/// agent* and minting a secret for the *approver* are different facts that happen
+/// to coincide today. Two tests hold it: every action that delivers a secret is
+/// here, and every registered action has its lock-screen decision **written down**
+/// (`every_registered_action_has_a_recorded_lock_screen_decision`) — an action
+/// that mints a value for the approver without delivering it to the agent has no
+/// `SecretDelivery` to trip the first, and trips the second.
+pub const ONE_TIME_SECRET_ACTION_IDS: [&str; 2] = [ACTION_INVITE_CREATE, ACTION_AGENT_INVITE];
+
+/// Must this approval be opened in the app to be decided — i.e. may its push
+/// **not** carry the lock-screen 승인·거절 buttons? (ADR-0204 D7: the category
+/// `momo.approval.open` instead of `momo.approval`.)
+///
+/// The one list, in the one place; `momo_push::category_for` reads it and nothing
+/// else decides. Three kinds of approval belong on it:
+///
+/// 1. an action that mints a value shown once ([`ONE_TIME_SECRET_ACTION_IDS`]);
+/// 2. an approval whose card asks the approver to **choose a host**
+///    ([`crate::approval::offers_host_choice`] — every `work.spawn` card does).
+///    A banner 승인 would take the card's default machine without the person
+///    having looked at the picker;
+/// 3. ADR-0188 D5's work-host permission requests. They are `work_permission_request`
+///    rows with no `approval` row and no `approval_request` message today, so
+///    there is nothing here to classify; the producer that gives them one adds its
+///    arm in this function.
+///
+/// Everything else this build **knows** — a tool call, a workspace action it carries
+/// that mints nothing shown once — is decidable from the lock screen behind Face ID,
+/// as before.
+///
+/// **What it does not know it opens.** ADR-0204 「보안·경계 요약」: 「무엇인지 모르는
+/// 알림에는 버튼이 없다」. A workspace action this build's registry does not carry (the
+/// notifier is older than the server that wrote the card — a rolling deploy — or the
+/// action was retired), a workspace action whose payload names none, and an
+/// `action_type` that is not one of the three producers write today all answer
+/// `true`: the cost of a wrong guess is a card opened in the app, the cost of the
+/// other wrong guess is an approval whose one-time value had nowhere to be shown.
+pub fn opens_in_app(action_type: &str, payload: &Value) -> bool {
+    if crate::approval::offers_host_choice(payload) {
+        return true;
+    }
+    match action_type {
+        // Decided where it is shown, behind Face ID.
+        crate::tools::ACTION_TYPE_TOOL_CALL => false,
+        ACTION_TYPE_WORKSPACE_ACTION => payload
+            .get("action")
+            .and_then(|action| action.get("id"))
+            .and_then(Value::as_str)
+            .is_none_or(|id| {
+                action_by_id(id).is_none() || ONE_TIME_SECRET_ACTION_IDS.contains(&id)
+            }),
+        _ => true,
+    }
+}
+
 /// How long after the approval the proposer may claim the value (V3-4 (4)).
 /// After this the value never leaves the server; the approver can still mint a
 /// fresh one over the existing regenerate routes.
@@ -2790,5 +2853,144 @@ mod tests {
         // The grant saturates instead of wrapping into the past.
         let near_max = secret_claim_grant(i64::MAX - 1);
         assert_eq!(near_max["deadlineMs"], serde_json::json!(i64::MAX));
+    }
+
+    /// ADR-0204 D7: the open list is the actions that mint a value shown once.
+    /// Every id on it is a registered action (a typo would open nothing, silently),
+    /// and every action that hands a secret to the proposing agent is on it — so a
+    /// new secret-minting action cannot ship deciding from the lock screen.
+    #[test]
+    fn the_open_list_names_registered_actions_and_covers_every_secret_delivery() {
+        for id in ONE_TIME_SECRET_ACTION_IDS {
+            assert!(
+                action_by_id(id).is_some(),
+                "{id} is not a registered action"
+            );
+        }
+        for action in ACTIONS {
+            if action.secret_delivery != SecretDelivery::None {
+                assert!(
+                    ONE_TIME_SECRET_ACTION_IDS.contains(&action.id),
+                    "{} delivers a one-time secret but is not on the open list",
+                    action.id
+                );
+            }
+        }
+        assert_eq!(
+            ONE_TIME_SECRET_ACTION_IDS,
+            [ACTION_INVITE_CREATE, ACTION_AGENT_INVITE]
+        );
+    }
+
+    #[test]
+    fn a_secret_minting_action_opens_in_the_app_and_an_ordinary_one_does_not() {
+        let card = |id: &str| serde_json::json!({"action": {"id": id, "args": {}}});
+        for id in ONE_TIME_SECRET_ACTION_IDS {
+            assert!(
+                opens_in_app(ACTION_TYPE_WORKSPACE_ACTION, &card(id)),
+                "{id}"
+            );
+        }
+        for action in ACTIONS {
+            if !ONE_TIME_SECRET_ACTION_IDS.contains(&action.id) {
+                assert!(
+                    !opens_in_app(ACTION_TYPE_WORKSPACE_ACTION, &card(action.id)),
+                    "{} mints nothing shown once and picks no host",
+                    action.id
+                );
+            }
+        }
+        // Only a *workspace action* reads the id: a tool call whose payload merely
+        // contains an action block is still a tool call.
+        assert!(!opens_in_app("tool_call", &card(ACTION_INVITE_CREATE)));
+    }
+
+    /// ADR-0204 「무엇인지 모르는 알림에는 버튼이 없다」: a shape this build does not
+    /// know is opened, not decided from a banner.
+    #[test]
+    fn a_shape_this_build_does_not_know_is_never_decided_from_a_banner() {
+        let card = |id: &str| serde_json::json!({"action": {"id": id, "args": {}}});
+        // A workspace action the registry does not carry — e.g. one a newer server
+        // wrote — and one whose payload names no action at all.
+        assert!(opens_in_app(
+            ACTION_TYPE_WORKSPACE_ACTION,
+            &card("no.such.action")
+        ));
+        assert!(opens_in_app(
+            ACTION_TYPE_WORKSPACE_ACTION,
+            &serde_json::json!({})
+        ));
+        // An action type none of today's producers writes.
+        assert!(opens_in_app("deploy", &serde_json::json!({})));
+        assert!(opens_in_app("", &serde_json::json!({})));
+        // The shapes it does know stay decidable from the lock screen.
+        assert!(!opens_in_app(
+            crate::tools::ACTION_TYPE_TOOL_CALL,
+            &serde_json::json!({"tool_call": {"name": "x"}})
+        ));
+        assert!(!opens_in_app(
+            ACTION_TYPE_WORKSPACE_ACTION,
+            &card(ACTION_CHANNEL_CREATE)
+        ));
+    }
+
+    /// The lock-screen decision for every registered action, written out. The question
+    /// each row answers: **does approving it show the approver a value once?** (an
+    /// invite link, a pairing code — a banner button has nowhere to show it). The table
+    /// is exhaustive on purpose: an action added to the registry fails here until
+    /// someone says which side it is on, instead of defaulting to a lock-screen 승인
+    /// that mints something nobody sees. (`SecretDelivery` cannot do this job — it says
+    /// whether the *proposing agent* may receive a value, which is a different fact.)
+    #[test]
+    fn every_registered_action_has_a_recorded_lock_screen_decision() {
+        let recorded: &[(&str, bool)] = &[
+            (ACTION_INVITE_CREATE, true), // the invite link is shown once
+            (ACTION_AGENT_INVITE, true),  // the pairing code is shown once
+            (ACTION_CHANNEL_CREATE, false),
+            (ACTION_CHANNEL_MEMBER_ADD, false),
+            (ACTION_AGENT_RENAME, false),
+            (ACTION_HOSTED_CHANNELS_GRANT, false),
+            (ACTION_WORKSPACE_SETTINGS_UPDATE, false),
+            (ACTION_AGENT_PROFILE_UPDATE, false),
+            (ACTION_WORKSPACE_UNFURL_UPDATE, false),
+            (ACTION_WORKSPACE_MEMORY_UPDATE, false),
+            (ACTION_WORKSPACE_WORK_TIER_UPDATE, false),
+            // Installs one official app; "the token is not stored in oort", so there is
+            // no value to show the approver once (ADR-0113 P3, ADR-0201 증보 v2 H7).
+            (ACTION_PLUGIN_INSTALL, false),
+        ];
+        let registered: std::collections::BTreeSet<&str> =
+            ACTIONS.iter().map(|action| action.id).collect();
+        let written: std::collections::BTreeSet<&str> =
+            recorded.iter().map(|(id, _)| *id).collect();
+        assert_eq!(
+            registered, written,
+            "a registered action has no lock-screen decision recorded here (or a row \
+             names an action that is gone): decide whether approving it shows the \
+             approver a value once, add it to ONE_TIME_SECRET_ACTION_IDS if so, and \
+             record the row"
+        );
+        let card = |id: &str| serde_json::json!({"action": {"id": id, "args": {}}});
+        for (id, opens) in recorded {
+            assert_eq!(
+                opens_in_app(ACTION_TYPE_WORKSPACE_ACTION, &card(id)),
+                *opens,
+                "{id}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_card_that_asks_for_a_host_opens_in_the_app_whatever_its_type() {
+        let spawn = serde_json::json!({
+            "execution": {"tool": "codex", "host_candidates": [], "default_host_id": null}
+        });
+        assert!(opens_in_app("work.spawn", &spawn));
+        assert!(opens_in_app("tool_call", &spawn));
+        // A tool call with no picker is decided where it is shown.
+        assert!(!opens_in_app(
+            "tool_call",
+            &serde_json::json!({"tool_call": {"name": "x"}})
+        ));
     }
 }

@@ -15,7 +15,13 @@
 //!   projection persisted at insert time. Judgment **never re-parses the body**;
 //!   it never even reads it.
 //! * **Approval request** — an `approval_request` message notifies the humans
-//!   who can decide it, excluding the requesting agent.
+//!   who **may approve it**, excluding the requesting agent: active human members
+//!   of its channel that the decision route would let through (ADR-0204 D7; the
+//!   rule is read through [`crate::approvers::may_approve_in_tx`], which asks the
+//!   same functions the route asks). Everyone else in the channel sees the card
+//!   and hears nothing. A card with no `approval` row (a message that merely has
+//!   the type) has nobody to ask and pushes nobody — the relay would refuse the
+//!   dispatch anyway, since an approval category must name its approval.
 //! * **Resume offer** — the owning member of the orphaned session.
 //! * **Work complete (`work_session_idle`, ADR-0120 부록 A, #3341)** — only the
 //!   member who started the session, only when the turn ran at least
@@ -62,12 +68,24 @@
 //! ## What is *not* read
 //!
 //! `message.body` appears nowhere in these statements. A target carries ids,
-//! enum labels and a count — there is no column here that could carry prose.
+//! enum labels and a count — nothing this module returns can carry prose.
+//!
+//! The one table read here that does hold prose is `approval`, and it is read
+//! through a **projection** of its payload: only the keys the shared audience
+//! functions read (`action.id`, `action.pins`, `execution`, `origin` — see
+//! `momo_agent::decider`), never the card's `args`, `arguments` or rationale. That
+//! is a boundary (the card's text does not enter this process) and a bound (a
+//! model-sized tool input is not copied once per recipient and device).
 
+use std::collections::HashMap;
+
+use momo_agent::actions::opens_in_app;
 use momo_db::DbError;
+use serde_json::Value;
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
+use crate::approvers::{ApprovalCard, CardAudience};
 use crate::dispatch::{category_for, PushCategory, PushReason};
 
 /// A work turn must have run at least this long (ms) to earn a 「작업 끝남」 push
@@ -242,7 +260,14 @@ pub async fn judge_targets(
                 COALESCE((SELECT root_id FROM msg), (SELECT channel_id FROM msg)) AS thread_id, \
                 (SELECT message_type FROM msg) AS message_type, \
                 (SELECT props_kind FROM msg) AS props_kind, \
-                a.id AS approval_id \
+                a.id AS approval_id, \
+                a.action_type AS approval_action_type, \
+                jsonb_build_object( \
+                  'action', jsonb_build_object( \
+                              'id', a.payload#>'{action,id}', \
+                              'pins', a.payload#>'{action,pins}'), \
+                  'execution', a.payload->'execution', \
+                  'origin', a.payload->'origin') AS approval_payload \
            FROM recipients r \
            JOIN push_token t \
              ON t.member_id = r.member_id \
@@ -261,6 +286,7 @@ pub async fn judge_targets(
            LEFT JOIN approval a \
              ON a.workspace_id = $1 \
             AND a.request_message_id = $2 \
+            AND a.channel_id = (SELECT channel_id FROM msg) \
           WHERE r.reason IS NOT NULL \
             AND NOT ( \
               COALESCE(nr.dnd, false) \
@@ -283,6 +309,14 @@ pub async fn judge_targets(
     .await?;
 
     let mut targets = Vec::with_capacity(rows.len());
+    // One answer per person per card: a member with three devices is asked once. And
+    // one resolution per card: the gate it puts on its decider and the owner of the
+    // machine it is about do not depend on who is being asked. (Keyed by approval, not
+    // just by person: `approval.request_message_id` is not unique in the schema, and a
+    // message that two approval rows claim must not let the second reuse the first's
+    // answers.)
+    let mut may_approve: HashMap<(Uuid, Uuid), bool> = HashMap::new();
+    let mut audiences: HashMap<Uuid, CardAudience> = HashMap::new();
     for row in rows {
         let reason_label: String = row.get("reason");
         let Some(reason) = PushReason::from_db(&reason_label) else {
@@ -295,10 +329,63 @@ pub async fn judge_targets(
         };
         let message_type: String = row.get("message_type");
         let props_kind: Option<String> = row.get("props_kind");
-        let category = category_for(&message_type, props_kind.as_deref(), reason);
+        let member_id: Uuid = row.get("member_id");
+
+        // The approval this message is the card of, when it is one.
+        let card = row
+            .get::<Option<Uuid>, _>("approval_id")
+            .map(|approval_id| ApprovalCard {
+                approval_id,
+                action_type: row.get("approval_action_type"),
+                payload: row.get::<Value, _>("approval_payload"),
+            });
+
+        // ADR-0204 D7 — an approval request goes to the people who may approve it.
+        // The SQL above chose every active human in the room; the decision route's
+        // role/owner conditions narrow that here, through the functions the route
+        // calls (`crate::approvers`). Only the `approval_request` reason is
+        // narrowed: a resume offer, a work card or a mention on the same message
+        // were chosen by their own rules.
+        if reason == PushReason::ApprovalRequest {
+            let Some(card) = card.as_ref() else {
+                // A card with no `approval` row has nobody to ask. Silent in the
+                // result, loud in the log: this used to surface as the relay's 400.
+                tracing::warn!(
+                    workspace_id = %workspace_id,
+                    message_id = %message_id,
+                    "approval_request message has no approval row; nobody is pushed"
+                );
+                continue;
+            };
+            let key = (card.approval_id, member_id);
+            let allowed = match may_approve.get(&key) {
+                Some(answer) => *answer,
+                None => {
+                    let audience = match audiences.get(&card.approval_id) {
+                        Some(audience) => audience.clone(),
+                        None => {
+                            let resolved = CardAudience::resolve(conn, workspace_id, card).await?;
+                            audiences.insert(card.approval_id, resolved.clone());
+                            resolved
+                        }
+                    };
+                    let answer = audience.allows(conn, workspace_id, member_id).await?;
+                    may_approve.insert(key, answer);
+                    answer
+                }
+            };
+            if !allowed {
+                continue;
+            }
+        }
+
+        let opens = card
+            .as_ref()
+            .is_some_and(|card| opens_in_app(&card.action_type, &card.payload));
+        let category = category_for(&message_type, props_kind.as_deref(), reason, opens);
 
         targets.push(JudgedTarget {
-            member_id: row.get("member_id"),
+            member_id,
             token_id: row.get("token_id"),
             device_id: row.get("device_id"),
             device_platform: row.get("platform"),
@@ -308,10 +395,10 @@ pub async fn judge_targets(
             reason,
             thread_id: row.get("thread_id"),
             category,
-            // An approval id is meaningful only for the approval category —
+            // An approval id is meaningful only for the two approval categories —
             // the relay and the NSE both reject the pair otherwise.
-            approval_id: if category == PushCategory::Approval {
-                row.get("approval_id")
+            approval_id: if category.carries_approval_id() {
+                card.as_ref().map(|card| card.approval_id)
             } else {
                 None
             },

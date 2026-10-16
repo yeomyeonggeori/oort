@@ -164,6 +164,46 @@ SCAN_SCOPE = [
         "why": "push.rs:139 judge_targets / :212 unread_badge",
     },
     {
+        # ADR-0204 D7 (#3928): judge_targets narrows an approval's audience to the
+        # people the decision route would let through, by calling the same reads the
+        # route calls. approvers.rs holds no SQL of its own; the three scopes below
+        # are the functions it calls.
+        "path": "server-rust/crates/momo-push/src/approvers.rs",
+        "mode": "all",
+        "why": "judgment.rs judge_targets → may_approve_in_tx (no SQL; calls the three reads below)",
+    },
+    {
+        "path": "server-rust/crates/momo-messaging/src/identity.rs",
+        "mode": "symbols",
+        "symbols": ["active_workspace_role"],
+        # `SELECT wm.role … FROM workspace_membership wm JOIN member m ON
+        # (workspace_id, id) WHERE wm.workspace_id AND wm.member_id` — and nothing else
+        # of the table (joined_at / updated_at are never read), hence column grants.
+        "column_reads": {"workspace_membership": ["workspace_id", "member_id", "role"]},
+        "why": "approvers.rs CardAudience::allows: the agent-editor gate (require_profile_editor_in_tx calls this twin)",
+    },
+    {
+        "path": "server-rust/crates/momo-auth/src/workspace_authorization.rs",
+        "mode": "symbols",
+        "symbols": ["active_workspace_role"],
+        # The same statement as the messaging twin above: `require_admin` calls THIS
+        # one, so the admin / operator arm of the audience does too.
+        "column_reads": {"workspace_membership": ["workspace_id", "member_id", "role"]},
+        "why": "approvers.rs CardAudience::allows: the admin gate (require_admin calls this twin)",
+    },
+    {
+        "path": "server-rust/crates/momo-agent/src/provisioning.rs",
+        "mode": "symbols",
+        "symbols": ["agent_owner_in_tx"],
+        "why": "approvers.rs may_approve_in_tx: the owner arm of require_profile_editor_in_tx (agent ⋈ member, both already granted)",
+    },
+    {
+        "path": "server-rust/crates/momo-t3/src/work_control.rs",
+        "mode": "symbols",
+        "symbols": ["remote_host_owner_in_tx"],
+        "why": "approvers.rs may_approve_in_tx: ADR-0188 D3 host owner (work_host, already granted)",
+    },
+    {
         "path": "server-rust/crates/momo-push/src/dispatch_log.rs",
         "mode": "all",
         "why": "push.rs:200 claim_dispatch / :304 settle_dispatch",
@@ -333,7 +373,7 @@ LADDER_SITES = (
 )
 
 NOT_SCANNED = [
-    "momo-t3/reattach.rs, terminal_attach.rs, work_control.rs, provision.rs, cloud_host.rs — R2: not on the notifier call graph",
+    "momo-t3/reattach.rs, terminal_attach.rs, work_control.rs (except remote_host_owner_in_tx, scanned since #3928), provision.rs, cloud_host.rs — R2: not on the notifier call graph",
     "billing.rs topup/admission/start_usage — REST / agent-worker",
     "approval.rs create_pending / approval_decision — REST human decision",
     "message.rs thread/attachment/list — REST send extras; notifier uses ThreadPolicy::Skip",
