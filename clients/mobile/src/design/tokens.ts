@@ -524,6 +524,61 @@ export const lightPalette: Palette = paletteFrom(DEFAULT_THEME_ID, 'light');
  */
 export const color: Palette = darkPalette;
 
+// =============================================================================
+// 사용자 배경의 기본 제공 그림 (ADR-0189 증보 2, #3907).
+//
+// 색 리터럴은 이 파일에만 둔다(`conversationHygiene` 의 M-13). 단색과 그라데이션은 취향이고
+// 안전장치가 아니다 — 글자 대비는 그 위에 얹는 scrim 이 최악 입력으로 지킨다
+// (`design/background/scrim.ts`). 이 저장소가 CSS 그라데이션 문자열로 만든 것이라 바이너리
+// 자산도 외부 이미지도 없다.
+// =============================================================================
+
+/** 단색 8종. */
+export const BACKDROP_SOLIDS = {
+  slate: {label: '석판', hex: '#5B6B8C'},
+  rose: {label: '장미', hex: '#C2557A'},
+  amber: {label: '호박', hex: '#D9902F'},
+  sage: {label: '세이지', hex: '#5E8C6A'},
+  sky: {label: '하늘', hex: '#4F8FD6'},
+  plum: {label: '자두', hex: '#7A4FA0'},
+  clay: {label: '점토', hex: '#B4684A'},
+  ink: {label: '먹', hex: '#23272F'},
+} as const;
+
+/** 기본 제공 그라데이션 6종 — `fallback` 은 그라데이션을 못 그리는 경로의 단색이다. */
+export const BACKDROP_PRESETS = {
+  saebyeok: {
+    label: '새벽',
+    gradient: 'linear-gradient(160deg, #F7C7A3 0%, #C9A7E8 55%, #6C7BD9 100%)',
+    fallback: '#C9A7E8',
+  },
+  noeul: {
+    label: '노을',
+    gradient: 'linear-gradient(180deg, #3B2A63 0%, #C2557A 62%, #F2A33A 100%)',
+    fallback: '#C2557A',
+  },
+  angae: {
+    label: '안개',
+    gradient: 'radial-gradient(circle at 30% 20%, #DDE7F2 0%, #8FA3BF 72%, #5F7391 100%)',
+    fallback: '#8FA3BF',
+  },
+  sup: {
+    label: '숲',
+    gradient: 'linear-gradient(150deg, #1F4D3A 0%, #4F8F6B 55%, #D4E7A8 100%)',
+    fallback: '#4F8F6B',
+  },
+  bam: {
+    label: '밤',
+    gradient: 'radial-gradient(circle at 70% 15%, #3A4A8C 0%, #131A3A 60%, #070A18 100%)',
+    fallback: '#131A3A',
+  },
+  jinju: {
+    label: '진주',
+    gradient: 'linear-gradient(135deg, #FFF1E6 0%, #E8EAF6 50%, #D5ECE9 100%)',
+    fallback: '#E8EAF6',
+  },
+} as const;
+
 export const space = {
   xs: 4,
   sm: 8,

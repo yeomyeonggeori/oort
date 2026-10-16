@@ -16,6 +16,8 @@
 // 경로를 읽지 않는다).
 // =============================================================================
 
+import {BACKDROP_PRESETS, BACKDROP_SOLIDS} from '../tokens';
+
 export const BACKGROUND_ENTRY = 'momo.mobile.background.v1';
 
 export const SOLID_IDS = [
@@ -30,54 +32,12 @@ export const SOLID_IDS = [
 ] as const;
 export type SolidId = (typeof SOLID_IDS)[number];
 
-export const SOLIDS: Readonly<Record<SolidId, {label: string; hex: string}>> = {
-  slate: {label: '석판', hex: '#5B6B8C'},
-  rose: {label: '장미', hex: '#C2557A'},
-  amber: {label: '호박', hex: '#D9902F'},
-  sage: {label: '세이지', hex: '#5E8C6A'},
-  sky: {label: '하늘', hex: '#4F8FD6'},
-  plum: {label: '자두', hex: '#7A4FA0'},
-  clay: {label: '점토', hex: '#B4684A'},
-  ink: {label: '먹', hex: '#23272F'},
-};
+export const SOLIDS = BACKDROP_SOLIDS;
 
 export const PRESET_IDS = ['saebyeok', 'noeul', 'angae', 'sup', 'bam', 'jinju'] as const;
 export type PresetId = (typeof PRESET_IDS)[number];
 
-export const PRESETS: Readonly<
-  Record<PresetId, {label: string; gradient: string; fallback: string}>
-> = {
-  saebyeok: {
-    label: '새벽',
-    gradient: 'linear-gradient(160deg, #F7C7A3 0%, #C9A7E8 55%, #6C7BD9 100%)',
-    fallback: '#C9A7E8',
-  },
-  noeul: {
-    label: '노을',
-    gradient: 'linear-gradient(180deg, #3B2A63 0%, #C2557A 62%, #F2A33A 100%)',
-    fallback: '#C2557A',
-  },
-  angae: {
-    label: '안개',
-    gradient: 'radial-gradient(circle at 30% 20%, #DDE7F2 0%, #8FA3BF 72%, #5F7391 100%)',
-    fallback: '#8FA3BF',
-  },
-  sup: {
-    label: '숲',
-    gradient: 'linear-gradient(150deg, #1F4D3A 0%, #4F8F6B 55%, #D4E7A8 100%)',
-    fallback: '#4F8F6B',
-  },
-  bam: {
-    label: '밤',
-    gradient: 'radial-gradient(circle at 70% 15%, #3A4A8C 0%, #131A3A 60%, #070A18 100%)',
-    fallback: '#131A3A',
-  },
-  jinju: {
-    label: '진주',
-    gradient: 'linear-gradient(135deg, #FFF1E6 0%, #E8EAF6 50%, #D5ECE9 100%)',
-    fallback: '#E8EAF6',
-  },
-};
+export const PRESETS = BACKDROP_PRESETS;
 
 /** 내 사진의 처리 상한 — 긴 변 1600px, JPEG, 약 1MB 이하(ADR-0189 증보 2). */
 export const PHOTO_MAX_LONG_SIDE = 1600;

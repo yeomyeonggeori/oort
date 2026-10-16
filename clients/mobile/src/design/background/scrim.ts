@@ -60,9 +60,18 @@ export function blend(overlay: string, base: string, alpha: number): string {
   return `#${out.join('')}`;
 }
 
-/** 최악 입력 둘 — 순흑 사진 위 합성과 순백 사진 위 합성. */
+function blendRgb(overlay: string, base: readonly [number, number, number], alpha: number): string {
+  const out = base.map((value, i) =>
+    Math.round(alpha * channel(overlay, i) + (1 - alpha) * value)
+      .toString(16)
+      .padStart(2, '0'),
+  );
+  return `#${out.join('')}`;
+}
+
+/** 최악 입력 둘 — 순흑 사진 위 합성과 순백 사진 위 합성. 순흑·순백은 채널값으로 적는다(색 리터럴은 토큰 표에만 둔다). */
 export function worstCaseBackdrops(canvas: string, alpha: number): readonly [string, string] {
-  return [blend(canvas, '#000000', alpha), blend(canvas, '#ffffff', alpha)];
+  return [blendRgb(canvas, [0, 0, 0], alpha), blendRgb(canvas, [255, 255, 255], alpha)];
 }
 
 /** `#rrggbbaa` — scrim 면의 색. 바닥색에 알파를 단다. */
