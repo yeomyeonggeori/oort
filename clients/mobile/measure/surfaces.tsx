@@ -124,6 +124,8 @@ import {bootSpawnPort} from '../src/boot/spawnPort';
 import {workRunFailure} from '@momo/core/features/agents/workRunRequest';
 import {INITIAL_NAV, navReducer} from '../src/nav/state';
 import {ProfilePage, ProfileSheet} from '../src/features/profile/ProfileSheet';
+import {AppUpdateSheet} from '../src/features/appUpdate/AppUpdateBanner';
+import {seedIosFeedCacheForCapture} from '../src/features/appUpdate/feed';
 import {PageSheet} from '../src/design/PageSheet';
 import {LinkSheetBody} from '../src/features/deviceKey/DeviceKeyLinkSheet';
 import {
@@ -4313,6 +4315,45 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           <Shell />
         </RealtimeContext.Provider>
       );
+    // #3905: 새 버전 배너가 선 진짜 홈(피드는 하네스가 캐시에 꽂는다. 시뮬레이터 빌드 번호 1 < 3036).
+    case 'shell-update-home':
+      return (
+        <View style={styles.fill}>
+          <Shell />
+        </View>
+      );
+    // #3905: 프로필 시트의 「내 상태」 위 배너.
+    case 'shell-update-profile':
+      return (
+        <View style={styles.fill}>
+          <Shell />
+          <ProfileSheet
+            workspaceId={HARNESS_MEMBER.workspaceId}
+            member={HARNESS_MEMBER}
+            directory={makeDirectory(SHELL_ROSTER)}
+            connected
+            onSignOut={() => {}}
+            onClose={() => {}}
+          />
+        </View>
+      );
+    // #3905: 배너를 누르면 열리는 시트. TestFlight 판과 스토어 판.
+    case 'shell-update-sheet':
+    case 'shell-update-sheet-store':
+      return (
+        <View style={styles.fill}>
+          <Shell />
+          <AppUpdateSheet
+            offer={{
+              version: '0.1.29',
+              latestBuild: 3036,
+              currentBuild: 3035,
+              testflight: name === 'shell-update-sheet',
+            }}
+            onClose={() => {}}
+          />
+        </View>
+      );
     case 'shell-profile-sheet':
       return (
         <View style={styles.fill}>
@@ -6254,5 +6295,8 @@ if (
   if (LAUNCHED.name.startsWith('shell-ask-')) seedAsk(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-ai-')) seedAi(LAUNCHED.name);
   if (LAUNCHED.name === 'shell-ai-wired') bootSpawnPort();
+  if (LAUNCHED.name.startsWith('shell-update-')) {
+    seedIosFeedCacheForCapture({latestBuild: 3036, version: '0.1.29', testflight: true});
+  }
   if (LAUNCHED.name.startsWith('shell-call-')) seedCall(LAUNCHED.name);
 }

@@ -64,6 +64,11 @@ import {
 } from '../features/workspace/queries';
 import {Avatar} from '../features/conversation/Avatar';
 import {ProfileSheet} from '../features/profile/ProfileSheet';
+import {
+  AppUpdateBanner,
+  AppUpdateSheet,
+} from '../features/appUpdate/AppUpdateBanner';
+import {useAppUpdateOffer} from '../features/appUpdate/useAppUpdateOffer';
 import {haptics} from '../lib/haptics';
 import {useReduceMotion} from '../lib/useReduceMotion';
 import {useTabBarClearance} from '../shell/ShellChrome';
@@ -289,6 +294,9 @@ export default function SidebarScreen({
   const {member, workspaceId, signOut} = useSession();
   const realtime = useRealtime();
   const [profileOpen, setProfileOpen] = useState(false);
+  // 새 버전 배너(#3905): 피드를 못 읽었거나 이미 최신이면 `null` 이라 아무것도 서지 않는다.
+  const updateOffer = useAppUpdateOffer();
+  const [updateSheetOpen, setUpdateSheetOpen] = useState(false);
   // 셸 안의 탭이면 바닥 위에 투명하게 서고, 목록 끝을 탭바만큼 비운다(ADR-0189 D1).
   const clearance = useTabBarClearance();
   const channelsQuery = useChannels(workspaceId);
@@ -566,6 +574,16 @@ export default function SidebarScreen({
           keyExtractor={row => row.key}
           ListHeaderComponent={
             <>
+              {/* 성재 결재 2026-10-16: 홈 맨 위의 새 버전 배너. 검색 중에는 목록이
+                  검색 결과이므로 서지 않는다. 닫기·나중에는 없다. */}
+              {updateOffer && !searching ? (
+                <AppUpdateBanner
+                  offer={updateOffer}
+                  onPress={() => setUpdateSheetOpen(true)}
+                  testID="home-update-banner"
+                  flush
+                />
+              ) : null}
               {/* 「작업 중」은 **지금 도는 턴이 있을 때만** 선다 (성재 2026-10-16: 「저 작업이
                   모호해요, 상시 떠 있는 건가요?」). 머리 줄(에이전트 작업 · 모두 보기)과 카드가 한
                   묶음이고, 턴이 없으면 둘 다 없다 — 비어 있는 「작업」 머리 아래에 다른 문(에이전트
@@ -636,6 +654,13 @@ export default function SidebarScreen({
           testID="sidebar-list"
         />
       )}
+
+      {updateSheetOpen && updateOffer ? (
+        <AppUpdateSheet
+          offer={updateOffer}
+          onClose={() => setUpdateSheetOpen(false)}
+        />
+      ) : null}
 
       {profileOpen ? (
         <ProfileSheet

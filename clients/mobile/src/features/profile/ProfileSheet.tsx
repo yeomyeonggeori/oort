@@ -77,6 +77,11 @@ import {formatRealtimeDiagnostics} from '../../realtime/diagnostics';
 import {COPY_RECEIPT_MS, copyText} from '../conversation/copy';
 import {currentAppVersionLabel} from './appVersion';
 import {
+  AppUpdateBanner,
+  AppUpdateSheet,
+} from '../appUpdate/AppUpdateBanner';
+import {useAppUpdateOffer} from '../appUpdate/useAppUpdateOffer';
+import {
   usePauseNotifications,
   usePushKinds,
   useSetPresence,
@@ -373,6 +378,9 @@ export function ProfilePage({
   const now = useNow();
   const [confirming, setConfirming] = useState(false);
   const [diagCopied, setDiagCopied] = useState(false);
+  // 새 버전 배너(#3905): 「내 상태」 위에 새 판이 있는 동안 상시 선다.
+  const updateOffer = useAppUpdateOffer();
+  const [updateSheetOpen, setUpdateSheetOpen] = useState(false);
 
   // 버전 줄을 길게 누르면 실시간 연결 기록을 복사한다(#2751). 폰 소켓이 왜
   // 끊겼는지는 서버 로그로 판정되지 않았고, 이유 코드는 클라이언트에만 있다.
@@ -488,6 +496,20 @@ export function ProfilePage({
           </View>
         ) : null}
       </View>
+
+      {updateOffer ? (
+        <AppUpdateBanner
+          offer={updateOffer}
+          onPress={() => setUpdateSheetOpen(true)}
+          testID="profile-update-banner"
+        />
+      ) : null}
+      {updateSheetOpen && updateOffer ? (
+        <AppUpdateSheet
+          offer={updateOffer}
+          onClose={() => setUpdateSheetOpen(false)}
+        />
+      ) : null}
 
       {declared ? (
         <GroupSection label={PRESENCE_MENU_LABEL}>
