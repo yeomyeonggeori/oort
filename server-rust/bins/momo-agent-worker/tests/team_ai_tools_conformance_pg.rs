@@ -592,8 +592,9 @@ async fn a5_no_key_says_so_and_calls_no_model() {
 }
 
 /// **H13-A6** — a private channel the requester is not in yields nothing to any
-/// read, even though the helper is a member of it. The public channel the
-/// requester is in is found (anti-vacuity).
+/// read, even though the helper is a member of it — asked from the requester's
+/// DM with the helper, where the room would allow everything. The public
+/// channel the requester is in is found (anti-vacuity).
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
 async fn a6_a_requester_without_access_gets_nothing() {
@@ -642,14 +643,12 @@ async fn a6_a_requester_without_access_gets_nothing() {
         text("찾지 못했어요."),
     ]);
     let w = worker_with(script.clone(), |_| {}).await;
-    enqueue_in(
-        &pool,
-        &t,
-        t.channel_id,
-        t.member_id,
-        "@oort PHOENIX 찾아 줘",
-    )
-    .await;
+    // Asked in the member's own DM with the helper: that room's audience is the
+    // requester's whole view (H4-3), so the ONLY thing between the member and X
+    // is the requester predicate. (From a public room the audience rule would
+    // also stop it and mask a missing predicate.)
+    let (dm, _) = channel(&su, t.workspace_id, "dm", &[t.member_id, t.agent_id]).await;
+    enqueue_in(&pool, &t, dm, t.member_id, "PHOENIX 찾아 줘").await;
     drain(&w).await;
 
     let seen = script.seen();
@@ -659,7 +658,11 @@ async fn a6_a_requester_without_access_gets_nothing() {
         !data.contains(PRIVATE_MARKER),
         "a channel the requester is not in leaked: {data}"
     );
-    assert!(data.contains("not_found"), "{data}");
+    assert_eq!(
+        data.matches("not_found").count(),
+        3,
+        "search in X, read X, X's run: each is not_found: {data}"
+    );
     assert!(
         data.contains(PUBLIC_MARKER),
         "anti-vacuity: the requester's own public channel is searchable: {data}"
