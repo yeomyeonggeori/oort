@@ -40,6 +40,10 @@ import AppShell from '../src/shell/AppShell';
 import {SessionProvider} from '../src/session/useSession';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+import {
+  installAppClock,
+  SHELL_WAIT_TEST_TIMEOUT_MS,
+} from './fixtures/fakeClock';
 
 // =============================================================================
 // 폰이 「여기부터 안 읽음」을 소비한다 (ADR-0178 D3·D6, #1964)
@@ -285,7 +289,7 @@ function newClient(): QueryClient {
 
 async function settle(ms = 25) {
   await act(async () => {
-    await new Promise(resolve => setTimeout(resolve, ms));
+    await jest.advanceTimersByTimeAsync(ms);
   });
 }
 
@@ -337,7 +341,14 @@ function dividerInList(): {count: number; beforeSeq: number | null} | null {
   return {count: items[at].count ?? -1, beforeSeq: next?.message?.seq ?? null};
 }
 
+jest.setTimeout(SHELL_WAIT_TEST_TIMEOUT_MS);
+
 beforeEach(() => {
+  // 커서 flush 의 디바운스·재시도는 앱의 타이머다. `settle(700)` 이 실제 시계의 700ms 를 자면
+  // 「읽음 투영보다 먼저 나간 광고…」처럼 응답→렌더→flush 사슬이 그 창 안에 끝났다는 것에 시험이
+  // 걸린다(#3686: 부하에서 사슬이 창을 넘어 `read_intent` 가 빠진 채 단정이 돌았다). 가짜 시계에서
+  // `settle(700)` 은 정확히 700ms 의 앱 시간이고 사슬은 그 안에서 결정적으로 끝난다.
+  installAppClock();
   mmkvStore.clear();
   __resetSessionStore();
   __resetServerBaseCache();
@@ -364,6 +375,7 @@ afterEach(() => {
   cleanup();
   queryClient?.clear();
   queryClient = null;
+  jest.useRealTimers();
 });
 
 // ---- 1. the row, as a pure function -----------------------------------------
