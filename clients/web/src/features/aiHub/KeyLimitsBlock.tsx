@@ -241,7 +241,7 @@ export function KeyLimitsBlock({
             href={block.console.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="tap-target inline-flex w-max items-center gap-1 rounded-md text-meta font-semibold text-ink underline decoration-line-strong underline-offset-2 hover:text-ink-muted focus-visible:focus-ring"
+            className="tap-target press inline-flex w-max items-center gap-1 rounded-md text-meta font-semibold text-ink underline decoration-line-strong underline-offset-2 hover:text-ink-muted focus-visible:focus-ring"
             data-testid={`${testId}-console`}
           >
             {block.console.label}

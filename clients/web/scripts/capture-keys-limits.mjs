@@ -338,7 +338,7 @@ async function scenes(browser, origin, scheme, viewport) {
     await page.getByTestId("ai-link-preset-custom").locator("..").click();
     check(`${tag} 추가 폼: 모르는 주소에는 월 크레딧 칸이 없다`, (await page.getByTestId("ai-link-budget-input").count()) === 0);
   });
-  await run("non-operator", { operator: false }, async (page, shot) => {
+  await run("non-operator", { operator: false }, async (page) => {
     await page.getByTestId("operator-notice").waitFor();
     check(`${tag} 비운영자: 한도 블록 없음`, (await page.getByTestId("ai-link-limits").count()) === 0);
   });
