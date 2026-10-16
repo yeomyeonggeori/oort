@@ -93,10 +93,10 @@ const ranges = (knots: readonly Knot[], scale = 1) => ({
 
 type LoaderMode = 'still' | 'scrub' | 'breathe' | 'spin';
 
-export function OortLoader(props: OortLoaderProps): React.JSX.Element {
+export function OortLoader(loader: OortLoaderProps): React.JSX.Element {
   const reduceMotion = useReduceMotion();
-  const scrubbing = props.progress !== undefined && !(props.spinning ?? false);
-  const mode: LoaderMode = props.still
+  const scrubbing = loader.progress !== undefined && !(loader.spinning ?? false);
+  const mode: LoaderMode = loader.still
     ? 'still'
     : scrubbing
       ? 'scrub'
@@ -104,7 +104,7 @@ export function OortLoader(props: OortLoaderProps): React.JSX.Element {
         ? 'breathe'
         : 'spin';
   // `key` 가 모드라서 모드가 바뀌면 바디가 새로 선다(헤더 「모드가 바뀌면 바디를 새로 세운다」).
-  return <LoaderBody key={mode} mode={mode} {...props} />;
+  return <LoaderBody key={mode} mode={mode} {...loader} />;
 }
 
 function LoaderBody({
