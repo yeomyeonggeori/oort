@@ -1,12 +1,15 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  putProviderBudget,
   putProviderLink,
+  type LimitsCompany,
   type ProviderFormat,
   type ProviderLink,
 } from "@momo/core/features/settings/api";
 import { errorMessage, maskedBearer } from "@momo/core/features/settings/model";
 import { initialPresetId, teamKeyPresets } from "@momo/core/features/settings/teamKeyForm";
+import { BUDGET_INPUT_ERROR, budgetHint, limitsCompanyOf, parseBudgetUsd } from "@momo/core/features/settings/keyLimits";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import { SecretInput } from "@/features/settings/SecretInput";
@@ -74,7 +77,7 @@ export function TeamKeyForm({
   /** 지금 키가 방금 확인에 실패했는가(대체 경고의 문장이 달라진다). */
   currentFailed: boolean;
   onCancel: () => void;
-  onSaved: () => void;
+  onSaved: (info?: { budgetFailed?: boolean }) => void;
   /**
    * 어느 표면의 폼인가. 동작(칩·password 칸·잠금·대체 확인·저장)은 한 벌이고, 겉만
    * 각 시안을 따른다.
@@ -105,6 +108,11 @@ export function TeamKeyForm({
   const inputRef = useRef<HTMLInputElement>(null);
   const urlRef = useRef<HTMLInputElement>(null);
   const secretRef = useRef("");
+  // #3887: 월 크레딧(선택, 설정 표면만). 키와 달리 비밀이 아니라 상태로 둔다.
+  const [budgetText, setBudgetText] = useState("");
+  const [budgetError, setBudgetError] = useState<string | null>(null);
+  const budgetId = useId();
+  const budgetHintId = useId();
   const inputId = useId();
   const urlId = useId();
   const urlHintId = useId();
@@ -143,12 +151,30 @@ export function TeamKeyForm({
     mutationKey,
     // 누른 순간 한 번만 시도한다: 끊긴 동안 멈춰 두었다가 나중에 보내지 않는다.
     networkMode: "always",
-    mutationFn: (input: { baseUrl: string; format: ProviderFormat }) => {
+    mutationFn: async (input: {
+      baseUrl: string;
+      format: ProviderFormat;
+      budgetUsd: number | null;
+      company: LimitsCompany | null;
+    }): Promise<{ budgetFailed: boolean }> => {
       const bearer = secretRef.current;
       secretRef.current = "";
-      return putProviderLink({ baseUrl: input.baseUrl, bearer, mode: "external-hermes", format: input.format });
+      await putProviderLink({ baseUrl: input.baseUrl, bearer, mode: "external-hermes", format: input.format });
+      // 월 크레딧은 키가 저장된 뒤에 따로 적는다. 실패해도 키 저장은 되돌리지 않는다: 블록이
+      // 「월 크레딧을 적어 두면…」으로 비어 있음을 그대로 보여 주고 거기서 다시 적을 수 있다.
+      let budgetFailed = false;
+      if (input.budgetUsd !== null && input.company !== null) {
+        try {
+          const limits = await putProviderBudget(input.company, input.budgetUsd);
+          client.setQueryData(["settings", "provider-limits"], limits);
+        } catch {
+          budgetFailed = true;
+          void client.invalidateQueries({ queryKey: ["settings", "provider-limits"] });
+        }
+      }
+      return { budgetFailed };
     },
-    onSuccess: onSaved,
+    onSuccess: (result) => onSaved(result),
   });
 
   // 폼이 사라지면(취소·Esc·카드 닫기·채널 이동) 붙잡은 값과 멈춘 저장을 버린다.
@@ -164,6 +190,7 @@ export function TeamKeyForm({
   );
 
   const locked = offline || target === null || save.isPending;
+  const company = target ? limitsCompanyOf(target.baseUrl) : null;
 
   function pick(id: string | null) {
     setPresetId(id);
@@ -191,6 +218,13 @@ export function TeamKeyForm({
       return;
     }
     setFieldError(null);
+    const budgetUsd = allowCustomAddress && company !== null ? parseBudgetUsd(budgetText) : null;
+    if (budgetUsd === undefined) {
+      setBudgetError(BUDGET_INPUT_ERROR);
+      document.getElementById(budgetId)?.focus();
+      return;
+    }
+    setBudgetError(null);
     if (replacing && !confirmReplace) {
       setConfirmReplace(true);
       return;
@@ -198,7 +232,7 @@ export function TeamKeyForm({
     setConfirmReplace(false);
     secretRef.current = value;
     if (field) field.value = "";
-    save.mutate(target);
+    save.mutate({ ...target, budgetUsd, company });
   }
 
   const chipClass = cn(
@@ -347,6 +381,36 @@ export function TeamKeyForm({
       <p id={hintId} className="break-keep text-meta text-ink-muted">
         {KEY_HINT}
       </p>
+      {allowCustomAddress && company !== null && (
+        <div className="flex min-w-0 flex-col gap-1">
+          <label htmlFor={budgetId} className="text-meta font-semibold text-ink">
+            월 크레딧(달러, 선택)
+          </label>
+          <Input
+            id={budgetId}
+            value={budgetText}
+            inputMode="decimal"
+            autoComplete="off"
+            placeholder="예: 100"
+            className="w-32 self-start tabular-nums"
+            aria-describedby={budgetHintId}
+            aria-invalid={budgetError ? true : undefined}
+            onChange={(event) => {
+              setBudgetText(event.target.value);
+              setBudgetError(null);
+            }}
+            data-testid={tid("budget-input")}
+          />
+          {budgetError && (
+            <p className="break-keep text-meta text-danger" role="alert">
+              {budgetError}
+            </p>
+          )}
+          <p id={budgetHintId} className="break-keep text-meta text-ink-muted">
+            {budgetHint(company)} 적어 두면 oort가 집계한 사용량과 견줘 남은 양을 추정해 보여 줘요. 공급사 잔액은 아니에요.
+          </p>
+        </div>
+      )}
       {save.isError && (
         <p className="break-keep text-meta text-danger" role="alert" data-testid={tid("save-error")}>
           {errorMessage(save.error)} 키는 칸에서 지웠으니 다시 붙여 넣어 주세요.

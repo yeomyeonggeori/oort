@@ -18,6 +18,7 @@ import {
   fetchProviderLink,
   testProviderLink,
   type ProviderChainEntry,
+  type ProviderLink,
   type ProviderLinkTest,
 } from "@momo/core/features/settings/api";
 import { parseProviderChain } from "@momo/core/features/settings/chainModel";
@@ -32,7 +33,9 @@ import {
   type TeamDefaultRowId,
 } from "@momo/core/features/settings/defaultAi";
 import type { AiDefaultsTeamKey } from "@momo/core/features/settings/aiDefaults";
-import { teamProbeDetail } from "@momo/core/features/settings/teamKeyForm";
+import { teamProbeDetail, teamProbeDetailAt, teamProbeDialled } from "@momo/core/features/settings/teamKeyForm";
+import { fetchProviderLimits } from "@momo/core/features/settings/api";
+import { limitsCompanyOf } from "@momo/core/features/settings/keyLimits";
 import { errorMessage, isOperatorDenied, maskedBearer, providerSourceLabel } from "@momo/core/features/settings/model";
 import {
   isLoopbackProviderRefusal,
@@ -53,6 +56,7 @@ import { formatMoment } from "@/features/settings/oauthGrant";
 import { TeamKeyForm } from "@/features/settings/TeamKeyForm";
 import { TeamUnlinkDialog } from "@/features/settings/TeamUnlinkDialog";
 import { PersonalKeysOperatorSection } from "./PersonalKeysOperatorSection";
+import { KeyLimitsBlock, LIMITS_QUERY_KEY } from "./KeyLimitsBlock";
 
 // =============================================================================
 // 「팀 AI 키」 구획 (AIH-6, #3400, 플랜 §8-6, 시안 panel-team-keys).
@@ -90,6 +94,10 @@ interface PaneProps {
   memberId: string;
 }
 
+function hasRowForLimits(link: ProviderLink | undefined): boolean {
+  return link ? link.configured === true || (link.keyConfigured && link.availability !== "mock") : false;
+}
+
 function PaneHead() {
   const entry = glossaryEntry(aiHubSection("teamKeys").glossaryId);
   return (
@@ -117,6 +125,18 @@ export function AiTeamKeysPane({ offline, workspaceId, memberId }: PaneProps) {
   });
   const chain = chainQuery.isSuccess ? parseProviderChain(chainQuery.data) : null;
   const hops: ProviderChainEntry[] = chain ? chain.entries.filter((entry) => entry.position >= 1) : [];
+  // 회사 단위 추정은 그 회사의 첫 키 아래에서만 그린다(맨 위 키가 있으면 그것이 첫째).
+  const headCompany = hasRowForLimits(linkQuery.data) ? limitsCompanyOf(linkQuery.data?.baseUrl ?? "") : null;
+  const firstOfCompany = (baseUrl: string, position: number) => {
+    const company = limitsCompanyOf(baseUrl);
+    if (company === null) return true;
+    if (headCompany === company) return false;
+    return !hops.some((other) => other.position < position && limitsCompanyOf(other.baseUrl) === company);
+  };
+
+  // #3887: 월 크레딧·이번 달 oort 지출 추정(운영자 전용; 못 받으면 추정 칸 없이 읽은 숫자만).
+  const limitsQuery = useQuery({ queryKey: LIMITS_QUERY_KEY, queryFn: fetchProviderLimits, retry: false, enabled: operator });
+  const limits = limitsQuery.isSuccess ? limitsQuery.data : null;
 
   const defaultAiKey = ["settings", "provider-default-ai"];
   const defaultAi = useQuery({ queryKey: defaultAiKey, queryFn: fetchProviderDefaultAi, retry: false, enabled: operator });
@@ -128,6 +148,8 @@ export function AiTeamKeysPane({ offline, workspaceId, memberId }: PaneProps) {
   const [editing, setEditing] = useState(false);
   const [probe, setProbe] = useState<ProviderLinkTest | null>(null);
   const [justSaved, setJustSaved] = useState(false);
+  // 키는 저장됐는데 같이 적은 월 크레딧은 저장하지 못했다(#3887).
+  const [budgetNotice, setBudgetNotice] = useState(false);
   const [unlinkOpen, setUnlinkOpen] = useState(false);
   const [chainOpen, setChainOpen] = useState(false);
   const [chainPending, setChainPending] = useState(false);
@@ -142,7 +164,14 @@ export function AiTeamKeysPane({ offline, workspaceId, memberId }: PaneProps) {
   }, [editing]);
 
   const invalidate = () => client.invalidateQueries({ queryKey: ["settings", "provider-link"] });
-  const check = useMutation({ mutationFn: testProviderLink, onSuccess: setProbe });
+  const check = useMutation({
+    mutationFn: testProviderLink,
+    onSuccess: (result) => {
+      setProbe(result);
+      // 새로고침은 공급사 숫자와 oort 추정을 함께 다시 읽는다.
+      void client.invalidateQueries({ queryKey: LIMITS_QUERY_KEY });
+    },
+  });
   const unlink = useMutation({
     mutationFn: deleteProviderLink,
     onSuccess: () => {
@@ -233,7 +262,8 @@ export function AiTeamKeysPane({ offline, workspaceId, memberId }: PaneProps) {
     channels: (channels.data ?? []).map((channel) => ({ id: channel.id, name: channel.name ?? "" })),
   });
 
-  function onSaved() {
+  function onSaved(info?: { budgetFailed?: boolean }) {
+    setBudgetNotice(info?.budgetFailed === true);
     setEditing(false);
     setProbe(null);
     setJustSaved(true);
@@ -303,6 +333,27 @@ export function AiTeamKeysPane({ offline, workspaceId, memberId }: PaneProps) {
                   savedText={configured && link.updatedAtMs ? `${shortDate(link.updatedAtMs)} 저장` : null}
                   badge={AI_TEAM_KEYS_COPY.firstKeyBadge}
                   uses={usesFor(0, positions, defaultsKnown, agents, directory.isPending || hosted.isPending)}
+                  limits={
+                    legacy ? null : (
+                      <KeyLimitsBlock
+                        testId="ai-link-limits"
+                        baseUrl={link.baseUrl}
+                        detail={teamProbeDetailAt(probe, 0)}
+                        checked={teamProbeDialled(probe, 0)}
+                        limits={limits}
+                        limitsState={limitsQuery.isSuccess ? "ready" : limitsQuery.isError ? "error" : "loading"}
+                        checkedAtMs={probe && probe.reason !== PROBE_NOT_RUN ? probe.checkedAtMs : null}
+                        checking={check.isPending}
+                        offline={offline}
+                        offlineNoteId={OFFLINE_NOTE_ID}
+                        estimateHere
+                        onRefresh={() => {
+                          setJustSaved(false);
+                          check.mutate();
+                        }}
+                      />
+                    )
+                  }
                   status={
                     <>
                       {pill && <AiPill tone={pill.tone}>{pill.text}</AiPill>}
@@ -394,6 +445,24 @@ export function AiTeamKeysPane({ offline, workspaceId, memberId }: PaneProps) {
                   badge={AI_TEAM_KEYS_COPY.fallbackBadge}
                   uses={usesFor(hop.position, positions, defaultsKnown, agents, directory.isPending || hosted.isPending)}
                   status={<AiPill tone={hop.enabled ? "ok" : "mute"}>{hop.enabled ? "켜짐" : "꺼짐"}</AiPill>}
+                  limits={
+                    hop.bearerConfigured ? (
+                      <KeyLimitsBlock
+                        testId="ai-team-hop-limits"
+                        baseUrl={hop.baseUrl}
+                        detail={teamProbeDetailAt(probe, hop.position)}
+                        checked={teamProbeDialled(probe, hop.position)}
+                        limits={limits}
+                        limitsState={limitsQuery.isSuccess ? "ready" : limitsQuery.isError ? "error" : "loading"}
+                        checkedAtMs={probe && probe.reason !== PROBE_NOT_RUN ? probe.checkedAtMs : null}
+                        checking={check.isPending}
+                        offline={offline}
+                        offlineNoteId={OFFLINE_NOTE_ID}
+                        estimateHere={firstOfCompany(hop.baseUrl, hop.position)}
+                        onRefresh={() => check.mutate()}
+                      />
+                    ) : null
+                  }
                   actions={null}
                 />
               ))}
@@ -435,9 +504,14 @@ export function AiTeamKeysPane({ offline, workspaceId, memberId }: PaneProps) {
                   {errorMessage(check.error)}
                 </p>
               ))}
+            {budgetNotice && !editing && (
+              <p className="break-keep pt-2 text-meta text-warn" role="status" data-testid="ai-team-keys-budget-notice">
+                키는 저장했어요. 월 크레딧은 저장하지 못했어요. 한도·남은 크레딧 칸에서 다시 적어 주세요.
+              </p>
+            )}
             {!editing && !offline && probe && !check.isPending && (
               <div className="mt-3 flex min-w-0 flex-col gap-2">
-                <ProbeAnswer probe={probe} link={link} chainPending={chainPending} justSaved={justSaved} />
+                <ProbeAnswer probe={probe} link={link} chainPending={chainPending} justSaved={justSaved} numbersElsewhere />
               </div>
             )}
 
@@ -547,6 +621,7 @@ function KeyRow({
   uses,
   status,
   actions,
+  limits = null,
 }: {
   testId: string;
   company: { name: string; models: string | null };
@@ -557,6 +632,8 @@ function KeyRow({
   uses: { features: string[] | null; agents: string | null };
   status: React.ReactNode;
   actions: React.ReactNode;
+  /** 「한도·남은 크레딧」 블록(#3887). */
+  limits?: React.ReactNode;
 }) {
   return (
     <li className="flex min-w-0 flex-col gap-2 border-b border-line px-2 py-3" data-testid={testId}>
@@ -587,6 +664,7 @@ function KeyRow({
         <div className="flex min-w-0 flex-col items-start gap-1">{status}</div>
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+      {limits}
     </li>
   );
 }
