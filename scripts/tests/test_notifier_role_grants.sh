@@ -554,6 +554,14 @@ def parse_column_grants(text):
     return grants
 
 
+# Tables the notifier may UPDATE only through a column-scoped GRANT. A table-level
+# `GRANT … UPDATE ON TABLE <t>` on one of these is a problem even though every scanned
+# statement would be covered by it — the point of the column list is the writes the
+# notifier must NOT be able to make (#3930: it must not rewrite where a push goes).
+COLUMN_SCOPED_UPDATE_ONLY = {
+    "push_token": "#3930: the notifier retires a dead token; it must not rewrite apns_token, member_id or device_id",
+}
+
 COLUMN_UPDATE_GRANT_RE = re.compile(
     r'GRANT\s+UPDATE\s*\(([^)]*)\)\s+ON\s+([a-z][a-z0-9_]*)\s+TO\s+momo_notifier',
     re.I | re.S,
@@ -826,8 +834,11 @@ def compare(used, grants, real, col_grants=None, col_reads=None,
     # #3930: a table written through a column-scoped GRANT UPDATE (…). The columns
     # the scanned statements SET must equal the granted ones — a column more is a
     # write the production role does not have, a column less is an over-grant.
-    for table, cols in sorted(col_update_grants.items()):
+    for table, why in sorted(COLUMN_SCOPED_UPDATE_ONLY.items()):
         if "UPDATE" in grants.get(table, set()):
+            problems.append(f"table-level UPDATE {table} (must stay column-scoped; {why})")
+    for table, cols in sorted(col_update_grants.items()):
+        if "UPDATE" in grants.get(table, set()) and table not in COLUMN_SCOPED_UPDATE_ONLY:
             problems.append(
                 f"table-level UPDATE {table} next to a column-scoped GRANT UPDATE (…)"
             )
