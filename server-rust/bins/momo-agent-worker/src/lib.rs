@@ -136,9 +136,10 @@ use momo_outbox::{
     NOTIFY_CHANNEL,
 };
 use momo_settings::{
-    decrypt_chain_entry, decrypt_link, is_unsafe_secret, read_chain, read_default_ai, read_link,
-    redacted_endpoint_label, reseal_link_credential, resolve_link, seal_bearer, DefaultAiRole,
-    LinkCredential, OpenAiOAuthCredential, ProviderSource,
+    decrypt_chain_entry, decrypt_link, is_unsafe_secret, read_agent_pin, read_chain,
+    read_default_ai, read_link, redacted_endpoint_label, reseal_link_credential, resolve_link,
+    seal_bearer, DefaultAiRole, LinkCredential, OpenAiOAuthCredential, PinKind, PinReadError,
+    ProviderSource, StoredAgentPin,
 };
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
@@ -626,6 +627,31 @@ impl AgentWorker {
             return Settlement::Skipped;
         }
 
+        // #3873 (ADR-0147 증보 2026-10-16) — an agent pinned to one AI link runs
+        // on that link and on nothing else. Read per turn from the agent's own
+        // row (not the payload), so a pin set after a job was queued still binds
+        // it, and an owner-key turn never reads it (that door is its own road).
+        let pin = if owner_key_turn {
+            PinOutcome::NotPinned
+        } else {
+            self.resolve_agent_pin(job.workspace_id, payload.agent_member_id)
+                .await
+        };
+        if let PinOutcome::ReadFailed(reason) = &pin {
+            let endpoint = self.resolve_transport().await.endpoint;
+            return self
+                .settle_retryable(&job, &format!("agent pin read failed: {reason}"), &endpoint)
+                .await;
+        }
+        let pinned = !matches!(pin, PinOutcome::NotPinned);
+        if pinned && payload.is_welcome() {
+            // A welcome is the team's opener (the 「기본 AI」 summary row on the
+            // team link). A pinned agent has its own link and no team voice, so
+            // it does not welcome, and the team's link is never spent for it.
+            self.settle_done(job.id, Some(PINNED_NO_WELCOME)).await;
+            return Settlement::Skipped;
+        }
+
         if payload.is_welcome() {
             match self.prepare_welcome(&job, &mut payload).await {
                 WelcomePrep::Ready => {}
@@ -649,7 +675,13 @@ impl AgentWorker {
         // meet: an owner-key turn resolves its owner's key here and does not
         // compute the team transport, the 「기본 AI」 row or any chain hop at
         // all; a team turn never reaches `resolve_owner_key_transport`.
-        let mut transport = if owner_key_turn {
+        let mut transport = if let PinOutcome::Applied(pinned_transport) = pin {
+            *pinned_transport
+        } else if let PinOutcome::Unresolved(detail) = pin {
+            return self
+                .settle_pinned_link_unresolved(&job, &payload, run_id, detail)
+                .await;
+        } else if owner_key_turn {
             match self
                 .resolve_owner_key_transport(job.workspace_id, payload.agent_member_id)
                 .await
@@ -697,7 +729,7 @@ impl AgentWorker {
         // answer must not act either, and the placeholder env bearer must never
         // be presented to an endpoint. The caller is told why in the #2871
         // shape instead.
-        if !owner_key_turn && !self.provider_is_configured(&transport) {
+        if !owner_key_turn && !pinned && !self.provider_is_configured(&transport) {
             return self.settle_provider_required(&job, &payload, run_id).await;
         }
 
@@ -705,9 +737,12 @@ impl AgentWorker {
         // model of its own. Resolved once, here, before anything runs: a row
         // that no longer points at the link it was chosen on refuses the turn
         // (the #2871 line) instead of answering on some other provider.
-        let default_ai = if owner_key_turn {
+        let default_ai = if owner_key_turn || pinned {
             // The team's row (and the chain hop it may point at) is the team's
-            // key: it must not reroute a personal agent (billing confusion).
+            // key: it must not reroute a personal agent (billing confusion), and
+            // it must not reroute a pinned one either (#3873): the row names a
+            // team link and a model id for THAT link, and a pinned agent's link
+            // and model are its own. Its model stays `agent.model`.
             DefaultAiOutcome::NotApplicable
         } else {
             self.resolve_default_ai(&payload, run_id, &transport).await
@@ -3214,8 +3249,234 @@ impl AgentWorker {
     }
 
     // -----------------------------------------------------------------------
+    // per-agent AI link pin (#3873, ADR-0147 증보 2026-10-16)
+    // -----------------------------------------------------------------------
+
+    /// Which link, if any, this agent is pinned to — and whether that link can
+    /// be called right now.
+    ///
+    /// A pin **replaces** the team resolution for this agent; it never layers on
+    /// top of it. So there is no fallback of any kind: a pin whose link is gone,
+    /// changed or unconfigured is [`PinOutcome::Unresolved`] and the caller
+    /// refuses the turn. Not the head link, not another hop, not the env link,
+    /// not the 「기본 AI」 row (ADR-0135 D1, the rule #3041 and #3396 already
+    /// follow).
+    ///
+    /// * `operator_env` — the operator's env link, only when it is configured
+    ///   (a base URL and a real key). The DB link, even if one is stored, is not
+    ///   consulted: that is the whole point of the pin.
+    /// * `team_link` position 0 — the `provider_link` singleton itself. When the
+    ///   head resolved to the env fallback (no DB link, or its key will not
+    ///   open) the pin is unresolved; it is never satisfied by env.
+    /// * `team_link` position >= 1 — that `provider_link_chain` hop, only while
+    ///   it still shows the endpoint label it was pinned on and is enabled.
+    async fn resolve_agent_pin(&self, workspace_id: Uuid, agent_member_id: Uuid) -> PinOutcome {
+        let read = with_tenant_tx(&self.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                Ok(read_agent_pin(conn, workspace_id, agent_member_id)
+                    .await
+                    .map_err(|error| match error {
+                        PinReadError::Db(db) => PinReadFailure::Db(db),
+                        PinReadError::UnknownKind => PinReadFailure::UnknownKind,
+                    }))
+            })
+        })
+        .await;
+        let pin = match read {
+            Err(error) => return PinOutcome::ReadFailed(error.to_string()),
+            Ok(Err(PinReadFailure::Db(error))) => return PinOutcome::ReadFailed(error.to_string()),
+            Ok(Err(PinReadFailure::UnknownKind)) => {
+                // A pin this build cannot read is still a pin: refuse, do not
+                // quietly send the agent to the team's key.
+                return PinOutcome::Unresolved(PinUnresolved {
+                    kind: None,
+                    position: None,
+                    stored_label: None,
+                    current_label: None,
+                    reason: "unknown_pin_kind",
+                });
+            }
+            Ok(Ok(None)) => return PinOutcome::NotPinned,
+            Ok(Ok(Some(pin))) => pin,
+        };
+        self.resolve_stored_pin(&pin).await
+    }
+
+    async fn resolve_stored_pin(&self, pin: &StoredAgentPin) -> PinOutcome {
+        let unresolved = |reason: &'static str, current_label: Option<String>| {
+            PinOutcome::Unresolved(PinUnresolved {
+                kind: Some(pin.kind),
+                position: pin.link_position,
+                stored_label: pin.link_endpoint_label.clone(),
+                current_label,
+                reason,
+            })
+        };
+        match pin.kind {
+            PinKind::OperatorEnv => {
+                let env = self.env_transport();
+                if env.endpoint.base_url.trim().is_empty() || !self.config.provider.key_configured()
+                {
+                    return unresolved("operator_env_not_configured", None);
+                }
+                PinOutcome::Applied(Box::new(env))
+            }
+            PinKind::TeamLink => {
+                let (Some(position), Some(stored_label)) =
+                    (pin.link_position, pin.link_endpoint_label.as_deref())
+                else {
+                    return unresolved("pin_malformed", None);
+                };
+                if position == 0 {
+                    let head = self.resolve_transport().await;
+                    if head.endpoint.source != ProviderSource::Database.as_str() {
+                        // The stored link is gone or unreadable and the head fell
+                        // back to env: the pin must not follow it there.
+                        return unresolved("team_link_missing", None);
+                    }
+                    let now = redacted_endpoint_label(&head.endpoint.base_url);
+                    if now != stored_label {
+                        return unresolved("team_link_changed", Some(now));
+                    }
+                    if !self.provider_is_configured(&head) {
+                        return unresolved("team_link_unusable", Some(now));
+                    }
+                    return PinOutcome::Applied(Box::new(head));
+                }
+                let chain = {
+                    let mut conn = match self.pool.acquire().await {
+                        Ok(conn) => conn,
+                        Err(error) => return PinOutcome::ReadFailed(error.to_string()),
+                    };
+                    match read_chain(&mut conn).await {
+                        Ok(chain) => chain,
+                        Err(error) => return PinOutcome::ReadFailed(error.to_string()),
+                    }
+                };
+                let Some(entry) = chain.iter().find(|entry| entry.position == position) else {
+                    return unresolved("team_link_missing", None);
+                };
+                let now = redacted_endpoint_label(&entry.base_url);
+                if now != stored_label {
+                    return unresolved("team_link_changed", Some(now));
+                }
+                if !entry.enabled {
+                    return unresolved("team_link_disabled", Some(now));
+                }
+                let hop = self
+                    .config
+                    .provider_link_master_key
+                    .as_deref()
+                    .and_then(|key| decrypt_chain_entry(entry, key))
+                    .filter(|hop| {
+                        !hop.base_url.trim().is_empty()
+                            && !hop.bearer.trim().is_empty()
+                            && !is_unsafe_secret(&hop.bearer)
+                    });
+                let Some(hop) = hop else {
+                    // A hop whose key will not open (or is a dev placeholder) is a link
+                    // that is not there.
+                    return unresolved("team_link_unusable", Some(now));
+                };
+                tracing::debug!(position, "agent pin: chain hop");
+                PinOutcome::Applied(Box::new(ResolvedTransport {
+                    endpoint: ProviderEndpoint {
+                        base_url: hop.base_url,
+                        bearer: hop.bearer.clone(),
+                        source: ProviderSource::Database.as_str(),
+                        // Chain hops are bearer keys; the wire is the legacy one.
+                        wire: ProviderWire::ChatCompletions,
+                        account_id: None,
+                    },
+                    credential: LinkCredential::Bearer(hop.bearer),
+                    // A hop is never re-sealed by a turn.
+                    link_updated_at_ms: None,
+                }))
+            }
+        }
+    }
+
+    /// The pin does not resolve: no model is called. The operator gets an audit
+    /// row (kind, position, the two redacted labels, a fixed reason; no URL, no
+    /// key), the caller gets the #2871 line, the run closes `failed`.
+    async fn settle_pinned_link_unresolved(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &AgentJobPayload,
+        run_id: Uuid,
+        detail: PinUnresolved,
+    ) -> Settlement {
+        tracing::warn!(
+            run_id = %run_id,
+            reason = detail.reason,
+            "pinned agent link does not resolve; refusing the turn"
+        );
+        let workspace_id = job.workspace_id;
+        let agent_member_id = payload.agent_member_id;
+        let audit = json!({
+            "kind": detail.kind.map(PinKind::as_str),
+            "link_position": detail.position,
+            "stored_label": detail.stored_label,
+            "current_label": detail.current_label,
+            "reason": detail.reason,
+            "run_id": run_id,
+        });
+        let written = with_tenant_tx(&self.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                write_audit(
+                    conn,
+                    &AuditEntry::new(workspace_id, PIN_UNRESOLVED_AUDIT)
+                        .run(run_id)
+                        .about(agent_member_id)
+                        .with_schema(PIN_UNRESOLVED_AUDIT_SCHEMA, audit),
+                )
+                .await?;
+                Ok(())
+            })
+        })
+        .await;
+        if let Err(error) = written {
+            let endpoint = self.resolve_transport().await.endpoint;
+            return self
+                .settle_retryable(job, &format!("agent pin audit failed: {error}"), &endpoint)
+                .await;
+        }
+        self.settle_refused_turn(
+            job,
+            payload,
+            run_id,
+            HostedSkipReason::PinnedLinkUnresolved,
+            json!({"code": PINNED_LINK_UNRESOLVED, "reason": "pinned link unavailable"}),
+        )
+        .await
+    }
+
+    // -----------------------------------------------------------------------
     // provider resolution (ADR-0004 증보 1 P-1b)
     // -----------------------------------------------------------------------
+
+    /// The operator's env link as a transport (`HERMES_BASE_URL` +
+    /// `HERMES_API_KEY`). Shared by the head resolution's fallback and by an
+    /// agent pinned to `operator_env` (#3873), so the two can never be two
+    /// spellings of "the env link".
+    fn env_transport(&self) -> ResolvedTransport {
+        ResolvedTransport {
+            endpoint: ProviderEndpoint {
+                base_url: self.config.provider.base_url.clone(),
+                bearer: self.config.provider.bearer.clone(),
+                source: ProviderSource::Environment.as_str(),
+                // The env transport is `HERMES_API_KEY` against a gateway; it has
+                // no envelope, so it keeps the wire it has always spoken.
+                wire: ProviderWire::ChatCompletions,
+                account_id: None,
+            },
+            credential: LinkCredential::Bearer(self.config.provider.bearer.clone()),
+            // Env credentials are never written back: there is nothing to write
+            // them to, and the absent guard makes that structural rather than a
+            // rule someone has to remember.
+            link_updated_at_ms: None,
+        }
+    }
 
     /// The transport for this turn: the operator's `provider_link` when it is
     /// present, decryptable and usable; else the env transport.
@@ -3232,22 +3493,7 @@ impl AgentWorker {
     /// [`resolve_endpoint`](AgentWorker::resolve_endpoint) plus the credential
     /// behind it, which is what an OAuth turn needs in order to refresh itself.
     pub async fn resolve_transport(&self) -> ResolvedTransport {
-        let env_transport = || ResolvedTransport {
-            endpoint: ProviderEndpoint {
-                base_url: self.config.provider.base_url.clone(),
-                bearer: self.config.provider.bearer.clone(),
-                source: ProviderSource::Environment.as_str(),
-                // The env transport is `HERMES_API_KEY` against a gateway; it has
-                // no envelope, so it keeps the wire it has always spoken.
-                wire: ProviderWire::ChatCompletions,
-                account_id: None,
-            },
-            credential: LinkCredential::Bearer(self.config.provider.bearer.clone()),
-            // Env credentials are never written back: there is nothing to write
-            // them to, and the absent guard makes that structural rather than a
-            // rule someone has to remember.
-            link_updated_at_ms: None,
-        };
+        let env_transport = || self.env_transport();
 
         let Some(master_key) = self.config.provider_link_master_key.as_deref() else {
             // No master key ⇒ nothing to open. Backward compatible with
@@ -3630,6 +3876,13 @@ const PROVIDER_REQUIRED: &str = "provider_required";
 const OWNER_ONLY_NOT_WORKER: &str = "owner_only_not_worker";
 /// #3396 — the settle code of a welcome job for an owner-key agent (skipped).
 const OWNER_KEY_NO_WELCOME: &str = "owner_key_no_welcome";
+/// #3873 — a welcome job for a pinned agent: the welcome is the team's opener on
+/// the team link, which a pinned agent does not use.
+const PINNED_NO_WELCOME: &str = "pinned_no_welcome";
+/// #3873 — the run error code of a turn refused because the pin does not resolve.
+const PINNED_LINK_UNRESOLVED: &str = "pinned_link_unresolved";
+const PIN_UNRESOLVED_AUDIT: &str = "agent.provider_pin.unresolved";
+const PIN_UNRESOLVED_AUDIT_SCHEMA: &str = "momo.agent_provider_pin.unresolved.v0";
 /// #3396 — an owner-key agent's turn found no usable personal key.
 const PERSONAL_KEY_UNAVAILABLE: &str = "personal_key_unavailable";
 const PERSONAL_KEY_UNAVAILABLE_AUDIT: &str = "agent.personal_key.unavailable";
@@ -3640,6 +3893,35 @@ const DEFAULT_AI_UNRESOLVED: &str = "default_ai_unresolved";
 /// #3041 — the operator-facing audit row of that refusal.
 const DEFAULT_AI_UNRESOLVED_AUDIT: &str = "provider_default_ai.unresolved";
 const DEFAULT_AI_UNRESOLVED_AUDIT_SCHEMA: &str = "momo.provider_default_ai.unresolved.v0";
+
+/// What the agent's AI link pin means for one turn (#3873).
+enum PinOutcome {
+    /// No pin: the team resolution (head link, then the 「기본 AI」 row) applies.
+    NotPinned,
+    /// Run on this transport. The team's row is not applied.
+    Applied(Box<ResolvedTransport>),
+    /// The pin names a link that cannot be called. The turn is refused.
+    Unresolved(PinUnresolved),
+    /// The pin could not be read (DB trouble): retry, do not guess.
+    ReadFailed(String),
+}
+
+/// Non-secret facts of an unresolved pin: kind, position, redacted labels and a
+/// fixed reason label.
+struct PinUnresolved {
+    kind: Option<PinKind>,
+    position: Option<i32>,
+    stored_label: Option<String>,
+    current_label: Option<String>,
+    reason: &'static str,
+}
+
+/// A pin read that went wrong, kept apart from the `DbError` the transaction
+/// helper carries so an unknown stored kind is refused instead of retried.
+enum PinReadFailure {
+    Db(DbError),
+    UnknownKind,
+}
 
 /// What the 「기본 AI」 row means for one turn (#3041).
 enum DefaultAiOutcome {

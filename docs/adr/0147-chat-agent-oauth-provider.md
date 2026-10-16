@@ -10,6 +10,7 @@
 - 증보: 2026-09-28 키는 origin에 묶인다(#3040) — `PUT /v1/provider/link/chain`이 키 없이 hop의 origin을 바꾸면 409 `key_required_for_new_origin`. 파일 끝 「증보 2026-09-28 — 체인 키는 origin에 묶인다」 절
 - 증보: 2026-09-29 에이전트 모델 출처(#3147) — `agent.model_source`(migration 098)와 payload `model_source`가 #3146의 「모델 이름 비교」 휴리스틱을 대체한다. 파일 끝 「증보 2026-09-29 — 에이전트 모델 출처」 절
 - 증보: 2026-10-03 개인 API 키(#3396) — 조직이 한 사람에게 발급하는 소유자 있는 BYOK. 새 테이블 `personal_provider_link`와 `agent.uses_owner_key`(migration 117), 그 사람의 본인 전용 에이전트만 해석한다. 파일 끝 「증보 2026-10-03 — 개인 API 키」 절
+- 증보: 2026-10-16 에이전트별 키 고정(#3873) — 에이전트 한 명을 체인 위치 또는 운영자 env 링크(Hermes)에 고정한다. 새 테이블 `agent_provider_pin`(migration 136). 팀 기본 AI와 같은 서버 Hermes가 한 인스턴스에서 함께 산다. 파일 끝 「증보 2026-10-16 — 에이전트별 키 고정」 절
 - 발단: 티키타카 smoke의 provider 선택에서 성재가 API 키 대신 ChatGPT 구독 OAuth(Codex CLI 방식)를 지정.
 
 ## 결정
@@ -192,3 +193,44 @@
   - 환영·hosted 인박스 같은 일부 입구는 `owner_only`를 구독으로 읽는다. 개인 키 에이전트는 그 입구에서 호출되지 않거나(환영) 워커 큐로만 간다. 이 증보가 보장하는 호출 입구는 멘션·1:1 DM·스레드 답글(멘션)·작업 요청이다.
   - UI(발급·회수·내 키 화면)는 AIH-6이다. 멤버 직접 추가 정책 스위치는 열지 않았다.
 - **검증.** 격리 PG: `momo-agent-worker/tests/personal_key_conformance_pg.rs`(개인 턴은 소유자 키만, 팀 턴은 개인 키를 못 봄, 다른 사람의 에이전트, 회수는 다음 턴, 읽을 수 없는 키와 OAuth 봉투, 위임·환영 없음, 어떤 행에도 키 없음)와 `momo-server/tests/personal_key_conformance_pg.rs`(발급·목록·회수·인가, 한 키 한 사람, 입력 거부, 개인 에이전트 전달, RLS). 사보타주 기록은 PR 본문.
+
+---
+
+## 증보 2026-10-16 — 에이전트별 키 고정
+
+- Status: **Accepted**. 결재 인용: 성재 2026-10-16 AskUserQuestion — 「Max (크레딧 쓰기)」, 「키+팀 AI 먼저 (추천)」(선택지 문구: 크레딧 API 키를 넣고 팀 AI(oort 도우미)를 켜서 「간단한 요청 1분 안」을 바로 재요. Hermes는 에이전트별 키 고정 기능을 만든 뒤 나란히 붙여요), 「같은 프로젝트·도구 끔 (추천)」(선택지 문구: Hermes를 같은 Railway 프로젝트에 두되 터미널·브라우저 도구를 끄고, oort 비밀값은 주지 않고, 공개 주소도 열지 않아요. 도구 끄기를 확인하기 전에는 올리지 않아요). 관련: ADR-0201(팀 AI는 기본 AI `teamAgent` 행을 따른다), ADR-0004 증보 1(provider_link 봉인)·증보 5(egress 가드), ADR-0135 D1(폴백 없음).
+- 기안·구현: Opus 5.5 worker(#3873, 엔진). 짝 UI 이슈: #3875(UXUI).
+- **문제.** 에이전트 모델 링크 해석에는 「머리 자리」가 하나다. 저장된 `provider_link`가 env `HERMES_BASE_URL`을 이긴다(`resolve_link`, ADR-0004 증보 1). 그래서 팀 Anthropic 키(팀 AI가 쓴다)와 같은 서버의 Hermes가 한 인스턴스에 함께 살 수 없었다. 체인 hop(위치 1 이상)은 DB 행뿐이라 env 링크를 이름할 수 없다. 팀 기본을 바꾸지 않고 에이전트 하나만 다른 링크로 보내는 방법이 없었다.
+- **D1. 그릇: `agent_provider_pin`(migration 136).** 에이전트당 최대 한 행(`agent_member_id` PK, 에이전트 삭제 시 cascade). 행이 없으면 지금과 같다(팀 기본을 따른다). 한 행은 **링크 참조뿐**이다: 키·봉투·URL·경로·토큰 칸이 없다. 종류는 둘이다.
+  - `operator_env`: 운영자 env 링크(`HERMES_BASE_URL`·`HERMES_API_KEY`). 위치·라벨이 없다. 「운영자가 정한 그 링크」가 뜻이다.
+  - `team_link`: 캐스케이드 위치 + 고를 때의 가린 endpoint label. **위치 0은 저장된 `provider_link` 자체**이고 env 폴백이 아니다. 기본 AI 행의 위치 0은 「머리」(DB가 없으면 env)지만, 핀은 그 모호함을 물려받지 않는다. 저장된 링크가 사라지면 머리가 env로 떨어지고, 위치 0 핀은 거기로 따라가지 않고 거절된다. env는 `operator_env`로만 이름한다. 위치 1 이상은 `provider_link_chain` hop이다. `PUT …/chain`이 hop을 지우고 다시 넣으므로 위치는 안정된 id가 아니다. 라벨 스냅샷이 「그 위치가 다른 provider를 가리킨다」를 알아채게 한다(ADR-0147 증보 2026-09-28과 같은 이유).
+  - RLS ENABLE+FORCE. 읽기는 워크스페이스 정책(프로필 화면이 핀을 보인다), **INSERT·UPDATE·DELETE는 워크스페이스 일치 AND `app.provider_link_admin = 'on'`**이다. 그 GUC는 라우트가 인스턴스 운영자 게이트를 통과한 뒤에만 `with_provider_link_admin_tx`로 켠다. 그래서 라우트 게이트가 빠져도 일반 테넌트 트랜잭션은 이 표에 쓰지 못한다. 전 테넌트 worker(BYPASSRLS)가 읽는 것은 `provider_link`·`personal_provider_link`와 같은 기존 예외이고, 새 BYPASSRLS 경로는 없다. schema_v0.sql은 건드리지 않는다.
+  - 트리거: 핀은 에이전트와 같은 워크스페이스여야 하고, `owner_only` 에이전트(구독 또는 소유자의 개인 키; ADR-0193 D4, 위 증보 2026-10-03)에는 걸 수 없다. 에이전트 `config`·payload에 핀을 두지 않은 이유는 쓰기 권한을 DB가 지키게 하기 위해서다(`agent`의 일반 UPDATE 경로는 운영자 GUC 정책 밖이다).
+- **D2. 쓰기: 인스턴스 운영자 전용.** `PUT /v1/workspaces/{ws}/agents/{agent}/provider-pin`은 `require_instance_operator_write`(워크스페이스 owner/admin이면서 검증된 이메일이 `PLATFORM_ADMIN_EMAILS`에 있는 사람; `platform:read` 스코프는 읽기 스코프라 부족하다), `GET`은 `require_instance_operator`다. 핀은 **인스턴스 전역 자격** 중 하나를 고르는 일이라 워크스페이스 관리자나 에이전트 소유자의 권한이 아니다. 위치 목록은 운영자만 본다(`GET /v1/provider/default-ai`와 같다). 본문은 닫혀 있다(`deny_unknown_fields`): `{ "kind": "default" | "operator_env" | "team_link", "linkPosition"? }`. `default`는 핀을 지운다(`owner_only` 에이전트에서도 허용: 돌아오는 길). 게이트가 본문 검증보다 먼저다. 에이전트 bearer는 이 경로에 닿지 못한다(에이전트 라우트 허용 목록 밖).
+  - 400: 설정되지 않은 위치(위치 0은 저장된 링크가 없으면 400), 서버에 env 링크가 없는데 `operator_env`, 모양이 틀린 본문.
+  - 409 `owner_only_agent_cannot_be_pinned`: `owner_only` 에이전트. 409 `agent_own_model_required`: `team_link`는 에이전트가 자기 모델을 가질 때(`modelSource = agent`)만. D4에서 핀이 걸린 에이전트에는 팀의 「기본 AI」 행을 적용하지 않으므로, `instance_default` 에이전트가 자리표시자 모델 이름(`hermes-agent`)으로 팀 provider를 부르는 일을 막는다. `operator_env`에는 이 조건이 없다(Hermes의 모델 이름이 그 자리표시자다).
+  - 감사 `agent.provider_pin.updated`: 종류·위치·가린 label·이전 값만. 키·URL은 없다.
+  - `GET` 응답은 `pin: null | { kind, linkPosition?, endpointLabel, linkResolved, pinnedBy, updatedAtMs }`. `linkResolved: false`는 「고른 링크가 사라졌거나 바뀌었다」이고 worker가 그 에이전트의 턴을 거절한다. 기본 AI 응답의 `linkResolved`와 같은 말이다.
+- **D3. 에이전트 하나만 바뀐다.** 팀 기본 AI(ADR-0201의 `teamAgent` 행, 요약 행, 팀 AI 에이전트)는 건드리지 않는다. 팀 AI 에이전트 멤버를 핀으로 옮기지 않는 한 팀 키를 계속 쓴다.
+- **D4. worker는 매 턴 핀을 에이전트 행에서 읽는다.** payload가 아니다. 그래서 큐에 들어간 뒤에 건 핀도 그 턴에 적용되고, payload 위조·구버전 잡의 영향을 받지 않는다. 순서: 개인 키 문(owner-key)이 먼저이고 그 턴은 핀을 읽지 않는다. 다음 **핀**, 그다음 `provider_is_configured`(핀이 없을 때만), 그다음 「기본 AI」 행(핀이 없을 때만).
+  - 핀이 있으면 **팀 해석을 대체**한다. 겹쳐 쓰지 않는다. 머리 링크도, 다른 hop도, env도(`operator_env` 외에는), 「기본 AI」 행도 이 턴에 쓰이지 않는다. 모델은 `agent.model` 그대로다(「기본 AI」 행의 모델 id는 팀 링크의 것이다).
+  - `operator_env`: env 링크에 base URL이 있고 키가 진짜일 때(`key_configured`: 비어 있지 않고 개발용 자리표시자가 아님)만. 저장된 DB 링크가 있어도 보지 않는다. 그게 핀의 목적이다.
+  - `team_link` 0: `provider_link` 자체. 머리가 env로 떨어졌으면 거절. 라벨이 다르면 거절. 키가 쓸 수 없으면 거절.
+  - `team_link` 1 이상: 그 hop. 위치가 없거나, 라벨이 다르거나, 꺼졌거나, 키가 열리지 않으면 거절.
+  - 읽을 수 없는 종류의 행(미래 버전의 값)은 「핀 없음」이 아니라 거절이다.
+  - DB 오류로 핀을 읽지 못하면 추측하지 않고 재시도한다.
+  - **웰컴.** 첫 인사는 팀의 목소리(요약 행, 팀 링크)다. 핀이 걸린 에이전트는 환영하지 않고(`pinned_no_welcome`) 팀 링크를 쓰지 않는다. 개인 키 에이전트의 규칙과 같다.
+- **D5. egress 규칙은 그대로다.** 관리자는 URL을 쓰지 않는다. 핀은 이미 `validated_base_url`을 지난 hop을 이름하거나 운영자 자신의 env 호스트를 이름할 뿐이다. 운영자 env 호스트가 연결 가드의 주소 검사에서 면제되는 유일한 사설 호스트(`EgressPolicy::host_exempt`)라는 사실, 개인 키가 그 호스트를 겨냥할 수 없다는 규칙(위 증보 2026-10-03 D7)은 바뀌지 않는다. 핀은 면제를 넓히지 않고, 면제된 호스트로 가는 길을 「운영자가 인정한 인스턴스 운영자 한 명이 고른 에이전트」로 좁혀 둔다. 호출 경로는 기존 worker의 가드된 클라이언트다.
+- **D6. 정직한 실패.** 핀이 풀리지 않으면 모델을 부르지 않는다: 다른 링크·다른 모델·환경 폴백 없음(ADR-0135 D1, #3041·#3396과 같은 규칙). 실행은 `failed`(`error.code: pinned_link_unresolved`), 채널에는 #2871 시스템 줄(`props.reason: pinned_link_unresolved`, 문 「AI 연결 열기」, 문장은 「…에 고정해 둔 AI 연결을 쓸 수 없어서 답하지 못했어요. 다른 연결로 대신 답하지 않았어요. 운영자가 AI 화면에서 이 에이전트의 연결을 다시 고를 수 있어요.」), 운영자 audit `agent.provider_pin.unresolved`(종류·위치·저장 label·현재 label·고정 사유 라벨만; URL·키 없음). 사유 라벨: `operator_env_not_configured`·`team_link_missing`·`team_link_changed`·`team_link_disabled`·`team_link_unusable`·`pin_malformed`·`unknown_pin_kind`.
+- **배포 메모.** `HERMES_BASE_URL`·`HERMES_API_KEY`는 API와 worker가 같은 값을 가져야 한다. API는 「env 링크가 있는가」와 라벨을, worker는 호출을 맡는다. 같은 서버 Hermes의 감지·연결 흐름은 별도 ADR(초안 #3874)이다. Hermes 도구 끄기를 확인하기 전에는 올리지 않는다는 결재는 이 증보가 바꾸지 않는다.
+- **정직한 한계.**
+  - 위치는 안정된 id가 아니다. `PUT …/chain`으로 hop이 바뀌면 핀은 거절 상태가 되고 운영자가 다시 골라야 한다(조용히 따라가는 것보다 낫다고 결정했다).
+  - 핀이 걸린 에이전트는 팀의 「기본 AI」 모델 선택을 따르지 못한다. 자기 모델을 가져야 한다.
+  - `team_link`는 라벨(스킴·호스트·포트·경로)로만 같은 링크인지 판단한다. 같은 라벨 아래 키만 교체되거나, 같은 호스트의 두 hop 순서를 바꾸면 핀이 조용히 다른 키로 따라간다. 라벨은 키 지문이 아니다. 키 지문을 함께 두는 것은 후속으로 남긴다(독립 검수 M1, 위험 = 비용·키 귀속뿐, 권한 확대는 아니다).
+  - `GET`의 `linkResolved`는 라벨 일치와 hop의 켜짐까지만 본다. 키가 열리는지·자리표시자인지는 worker만 안다(그 경우 worker는 `team_link_unusable`로 거절한다).
+  - 채널 요약·기억 통합 루프는 핀과 무관하게 팀 머리 링크와 요약 행을 쓴다. Hermes에 고정한 에이전트의 채널 내용도 요약 단계에서는 팀 키로 간다(독립 검수 L4). Hermes 대화를 팀 키 밖에 두려면 요약 제외가 따로 필요하다.
+  - 풀리지 않는 핀에 계속 메시지를 보내면 거절된 턴마다 audit 행이 하나씩 쌓인다(채널 줄은 throttle이 있다). 기본 AI 행의 `provider_default_ai.unresolved`와 같은 기존 패턴이다.
+  - 웰컴은 핀이 걸린 에이전트에게 생략된다. 첫 인사가 필요한 에이전트를 핀으로 옮기려면 별도 결정이 필요하다.
+  - 사용량 원장은 에이전트 기준이다. 핀이 가리킨 링크의 비용 귀속(Hermes vs 팀 키)은 원장에 컬럼으로 남지 않는다.
+- **범위 밖.** 에이전트 설정의 연결 선택기 UI와 거절 줄의 클라이언트 처리(#3875, UXUI). 같은 서버 Hermes 감지(#3874). Hermes 컨테이너 배포와 도구 끄기 확인.
+- **검증.** 격리 PG(`pgvector/pgvector:pg18`): `momo-agent-worker/tests/agent_pin_conformance_pg.rs`(팀 키가 저장된 채 핀 에이전트는 Hermes·팀원은 팀 키, 위치 0·1 핀, 풀리지 않는 여섯 경우 모두 호출 0과 폴백 없음, 웰컴 생략, 해석기가 개인 자격을 이름하지 않음)와 `momo-server/tests/agent_provider_pin_conformance_pg.rs`(양 동사 운영자 전용, 쓰기·해제·감사, 닫힌 본문, `owner_only` 거절, 테이블 쓰기는 운영자 트랜잭션에서만, 테넌트 격리). 사보타주 기록은 PR 본문.

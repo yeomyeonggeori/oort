@@ -1487,6 +1487,13 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/agents/{agent}/pause",
             put(routes::agents::put_pause),
         )
+        // #3873 (ADR-0147 증보 2026-10-16) — which AI link an agent is pinned to.
+        // Instance operator only (both verbs); absent from the agent-route
+        // allow-list, so an agent bearer cannot reach it.
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/provider-pin",
+            get(routes::agent_provider_pin::get).put(routes::agent_provider_pin::put),
+        )
         .route(
             "/v1/workspaces/{ws}/agents/{agent}/allowed-models",
             get(routes::agents::allowed_models),
