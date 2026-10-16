@@ -1675,18 +1675,39 @@ tunnel, with the active credential from join.
       field and call oort_run_complete again, at most 2 times. If it is still
       refused, complete without artifacts and write the result in body.
       Never send the same call again unchanged. HTTP 409 /
-      -32005: the lease is gone or the run is settled or cancelled; stop
-      that job, do not retry, and delete its folder (other jobs go on).
+      -32005 on a call that carries a handle: the lease is gone or the run is
+      settled, cancelled or parked; stop that job, do not retry, and delete its
+      folder (other jobs go on). HTTP 403 / -32003 on a call that carries a
+      handle is the same: that handle is dead (an older connection's, a channel
+      no longer approved, a run that is not yours); delete that job's folder
+      and go on with the next one. Never send a second call with a handle that
+      just answered 409 or 403, and never loop on it.
+      oort_job_start {leaseHandle} can also answer 200 with job null and a
+      closed key: "run_settled" (the run is over) or "run_awaiting_approval"
+      (the run is parked for a person). Both mean: send no running event,
+      delete that job's folder, go on.
       HTTP 409 / -32004: this agent is paused, disconnected or
-      the target is not visible; stop. HTTP 403 / -32003: scope or channel
-      approval is missing; stop and tell the user to review the connection.
+      the target is not visible; stop. HTTP 403 / -32003 on a call with no
+      handle (oort_inbox_read, oort_jobs_claim, oort_job_start {}, oort_ping):
+      scope or channel approval is missing; stop and tell the user to review the
+      connection.
+   g2) A parked job is finished for this wake. The moment oort_action_propose
+      answers ok, the run waits for a person: delete that job's folder in
+      /workspace/oort-runs (keep the approvalId in /workspace/oort-approvals.json),
+      send no oort_run_event for it, do not call oort_job_start {leaseHandle}
+      for it, and do not call oort_run_complete or oort_job_release for it
+      (both answer 409). The outcome comes back as a line posted by oort; a
+      new request is a new job.
    h) Job folders check (right after oort_inbox_read, before claiming). A
       folder whose beat was touched in the last 15 minutes belongs to a wake
       that is still working: leave it alone. A folder whose beat is older is
       left over from a wake that stopped: take it by renaming the folder to a
       new tag (mv; if the rename fails, another wake took it first, so leave
-      it), touch beat, and report with its handle first (oort_run_event or
-      oort_run_complete), then carry on in its workdir. If
+      it), touch beat, and re-enter it first with oort_job_start
+      {leaseHandle:<that handle>}: if that answers 409 or 403, or job null with
+      closed, delete the folder and carry on with the next one; if it returns
+      the job with started true, report with its handle (oort_run_event or
+      oort_run_complete) and carry on in its workdir. If
       /workspace/oort-run.handle exists (left by the older single-job
       routine), move it into a new folder as handle and treat it the same
       way. Calling oort_jobs_claim, or oort_job_start without leaseHandle,
@@ -1710,8 +1731,9 @@ tunnel, with the active credential from join.
    oort_action_propose {handle, actionId, args} (the tool description lists
    the actions and their arguments), write the approvalId it returns and the
    time to /workspace/oort-approvals.json (mode 600; the id is not a secret,
-   and the claim happens on a later wake), then end the turn: a person approves on the card, and the outcome is posted as a
-   line by you. An invite link or a pairing code comes only from
+   and the claim happens on a later wake), delete that job's folder in
+   /workspace/oort-runs (see g2), then end the turn: a person approves on the
+   card, and the outcome is posted as a line by you. An invite link or a pairing code comes only from
    oort_action_claim_secret {handle, approvalId}: call it once, within 30
    minutes of the approval, and only if the card said you receive it. Any
    lease handle you hold from oort_jobs_claim works for it; the proposal's
@@ -1770,7 +1792,7 @@ to D16 and 부록 A):
 |---|---|---|---|
 | 0. A person asks | `POST /v1/workspaces/{ws}/channels/{ch}/agent-runs` with `type=work` (by a human, in a channel or DM the owner approved) | n/a | run `queued` + one job + one inbox item (`agent_job`); 409 with a closed reason if the connection is not active, the channel is not approved, or the agent is `owner_only` |
 | 1. Claim | `oort_jobs_claim` (scope `agent:jobs:read`) | `limit` 1..100 | `{jobs:[{leaseHandle, createdAtMs, leaseExpiresAtMs, work:{channelId, authorMemberId, triggerMessageId, prompt, ...}}]}` |
-| 1b. Start (fast path) | `oort_job_start` (scope `agent:jobs:read`; the start report also needs `agent:runs:callback`, the conversation `messages:read`) | `leaseHandle` (re-entry), `stage` (optional) | `{job:{leaseHandle, createdAtMs, leaseExpiresAtMs, work}\|null, started, resumed, conversation?:{messages, nextBefore}}`: claim + start report + latest 30 messages in one call (ADR-0162 증보 4) |
+| 1b. Start (fast path) | `oort_job_start` (scope `agent:jobs:read`; the start report also needs `agent:runs:callback`, the conversation `messages:read`) | `leaseHandle` (re-entry), `stage` (optional) | `{job:{leaseHandle, createdAtMs, leaseExpiresAtMs, work}\|null, started, resumed, closed?:"run_settled"\|"run_awaiting_approval", conversation?:{messages, nextBefore}}`: claim + start report + latest 30 messages in one call (ADR-0162 증보 4). Re-entry with a handle whose run is parked or over answers `job:null` + `closed` and reports nothing (증보 6) |
 | 2. Progress | `oort_run_event` (scope `agent:runs:callback`) | `leaseHandle` (512), `stage` (1 to 80 characters, at most 320 bytes, no `/` `\` control or bidi characters), `status` (`running` `thinking` `streaming` `cancelled`), `detail` (2048, audit only), `textDelta` (8192), `eventId` (UUID, makes a retry count once) | `{status:"accepted"}` |
 | 3. Finish | `oort_run_complete` (scope `agent:runs:callback`) | `leaseHandle`, `status` (`succeeded` / `failed`), `body` (8000), `error` (4000), `usage`, `artifacts` | `{status, messageId, seq}` |
 | renew | `oort_job_renew` | `leaseHandle` | `{status:"renewed", leaseExpiresAtMs}` |
@@ -1897,7 +1919,7 @@ comes from facts the server keeps, not from guesses in the app:
 | `woken_not_collected` | the doorbell answered 2xx, 5 minutes passed, claimable work is waiting and nothing was inbox-read or claimed since the ring |
 | `work_waiting` | claimable work has waited past 20 minutes and nothing was claimed since it was queued, even if the agent keeps polling or pinging |
 | `quiet` / `unresponsive` | some signal within 60 minutes / none (or never) |
-| `error` | the newest fact is a refused call (`unavailable`, `not_authorized`); the next accepted call of any kind ends it |
+| `error` | the newest fact is a refused call about the connection (`unavailable`, `not_authorized` from the token, the connection or a missing scope); the next accepted call of any kind ends it. A refused or dead lease handle (409, or 403 on a handle) is the agent's own flow and never sets it (#3903) |
 | `inactive` | the connection is not `active` |
 
 A person who sees `woken_not_collected` can ring again: `POST

@@ -634,6 +634,17 @@ fn failure_of(error: &ApiError) -> ToolFailure {
     }
 }
 
+/// [`failure_of`] for a refusal raised while judging a LEASE-bound call (a run event or
+/// completion): a 401/403 there is the run or lease not being this caller's — the
+/// agent's own flow, answered on the wire exactly as before — while the connection
+/// itself was already proved by `authorize_in_tx` (#3903).
+fn lease_failure_of(error: &ApiError) -> ToolFailure {
+    match failure_of(error) {
+        ToolFailure::NotAuthorized => ToolFailure::HandleRefused,
+        other => other,
+    }
+}
+
 /// A transaction failure → `Internal`, with the cause logged and nothing about
 /// it on the wire.
 fn internal(context: &str, error: DbError) -> ToolFailure {
@@ -1116,6 +1127,13 @@ async fn jobs_claim(
                     Ok(identity) => identity,
                     Err(failure) => return Ok(Err(failure)),
                 };
+            momo_outbox::retire_settled_run_hosted_jobs_in_tx(
+                conn,
+                caller.workspace_id,
+                caller.agent_member_id,
+            )
+            .await
+            .map_err(DbError::from)?;
             let claimed = momo_outbox::claim_hosted_gateway_jobs_in_tx(
                 conn,
                 caller.workspace_id,
@@ -1211,6 +1229,20 @@ async fn jobs_claim(
 /// the same character rule as any `stage` (it is validated like one in tests).
 const DEFAULT_START_STAGE: &str = "시작: 요청 확인";
 
+/// `oort_job_start` `closed` values (#3903, ADR-0162 증보 6): why a resume gets no job.
+const CLOSED_RUN_SETTLED: &str = "run_settled";
+const CLOSED_RUN_AWAITING_APPROVAL: &str = "run_awaiting_approval";
+
+fn closed_reason(status: momo_agent::RunStatus) -> Option<&'static str> {
+    if status.is_terminal() {
+        Some(CLOSED_RUN_SETTLED)
+    } else if status == momo_agent::RunStatus::AwaitingApproval {
+        Some(CLOSED_RUN_AWAITING_APPROVAL)
+    } else {
+        None
+    }
+}
+
 /// Claim one job, send its start report and read the recent conversation, in ONE
 /// transaction — the round trips between "the inbox shows a job" and "the
 /// person's screen says it started" were the dominant cost of a hosted turn
@@ -1270,6 +1302,33 @@ async fn job_start(
                         Ok(handle) => handle,
                         Err(failure) => return Ok(Err(failure)),
                     };
+                    // #3903 — a handle whose run is no longer the agent's to work gets
+                    // a CLOSED answer instead of a generic refusal: a parked run
+                    // (`awaiting_approval`) is waiting for a person, a settled run is
+                    // over. Both say "stop, do not re-enter", nothing is claimed or
+                    // reported, and the answer reveals only the state of the run the
+                    // caller's own sealed handle names.
+                    if let Some(closed) =
+                        momo_agent::lock_gateway_run_in_tx(conn, caller.workspace_id, handle.run_id)
+                            .await?
+                            .and_then(|run| closed_reason(run.status))
+                    {
+                        if closed == CLOSED_RUN_SETTLED {
+                            momo_outbox::retire_settled_run_hosted_jobs_in_tx(
+                                conn,
+                                caller.workspace_id,
+                                caller.agent_member_id,
+                            )
+                            .await
+                            .map_err(DbError::from)?;
+                        }
+                        return Ok(Ok(json!({
+                            "job": null,
+                            "started": false,
+                            "resumed": true,
+                            "closed": closed,
+                        })));
+                    }
                     match momo_outbox::read_hosted_leased_job_in_tx(
                         conn,
                         caller.workspace_id,
@@ -1288,6 +1347,13 @@ async fn job_start(
                     }
                 }
                 None => {
+                    momo_outbox::retire_settled_run_hosted_jobs_in_tx(
+                        conn,
+                        caller.workspace_id,
+                        caller.agent_member_id,
+                    )
+                    .await
+                    .map_err(DbError::from)?;
                     let claimed = momo_outbox::claim_hosted_gateway_jobs_in_tx(
                         conn,
                         caller.workspace_id,
@@ -1411,7 +1477,7 @@ fn bound_handle(
     raw: &str,
     secret: &str,
 ) -> Result<LeaseHandle, ToolFailure> {
-    let handle = decode_lease_handle(raw, secret).map_err(|_| ToolFailure::NotAuthorized)?;
+    let handle = decode_lease_handle(raw, secret).map_err(|_| ToolFailure::HandleRefused)?;
     if handle.workspace_id != caller.workspace_id
         || handle.agent_member_id != caller.agent_member_id
         || handle.connection_id != identity.connection_id
@@ -1421,7 +1487,7 @@ fn bound_handle(
         // reaches work already in flight and not merely the next claim.
         || !identity.approved_channel_ids.contains(&handle.channel_id)
     {
-        return Err(ToolFailure::NotAuthorized);
+        return Err(ToolFailure::HandleRefused);
     }
     Ok(handle)
 }
@@ -1644,7 +1710,7 @@ async fn run_event(
                 },
             )
             .await?;
-            Ok(recorded.map_err(|error| failure_of(&error)))
+            Ok(recorded.map_err(|error| lease_failure_of(&error)))
         })
     })
     .await
@@ -1756,7 +1822,7 @@ async fn run_complete(
                 },
             )
             .await?;
-            Ok(completed.map_err(|error| failure_of(&error)))
+            Ok(completed.map_err(|error| lease_failure_of(&error)))
         })
     })
     .await
@@ -1903,7 +1969,7 @@ async fn action_propose(
                 // the same work, and guessing which to believe is not an option.
                 || run.channel_id != handle.channel_id
             {
-                return Ok(Err(ToolFailure::NotAuthorized));
+                return Ok(Err(ToolFailure::HandleRefused));
             }
             // A run already parked, already settled, or paused cannot raise a
             // second card. `park_run_for_approval_in_tx` would refuse anyway;
@@ -2689,7 +2755,7 @@ async fn card_suggest(
             }
             if run.agent_member_id != caller.agent_member_id || run.channel_id != handle.channel_id
             {
-                return Ok(Err(ToolFailure::NotAuthorized));
+                return Ok(Err(ToolFailure::HandleRefused));
             }
             // A parked or settled run speaks no more. A suggestion is not a
             // transition, but a card appearing under a pending approval — or
@@ -2963,7 +3029,7 @@ mod tests {
         };
         assert_eq!(
             bound_handle(&narrowed, caller, &handle, "secret"),
-            Err(ToolFailure::NotAuthorized),
+            Err(ToolFailure::HandleRefused),
             "a revoked channel approval must stop work already leased"
         );
 
@@ -2973,7 +3039,7 @@ mod tests {
         };
         assert_eq!(
             bound_handle(&other_connection, caller, &handle, "secret"),
-            Err(ToolFailure::NotAuthorized)
+            Err(ToolFailure::HandleRefused)
         );
         let other_agent = HostedCaller {
             agent_member_id: Uuid::from_u128(98),
@@ -2981,7 +3047,7 @@ mod tests {
         };
         assert_eq!(
             bound_handle(&identity, other_agent, &handle, "secret"),
-            Err(ToolFailure::NotAuthorized)
+            Err(ToolFailure::HandleRefused)
         );
         let other_workspace = HostedCaller {
             workspace_id: Uuid::from_u128(97),
@@ -2989,15 +3055,15 @@ mod tests {
         };
         assert_eq!(
             bound_handle(&identity, other_workspace, &handle, "secret"),
-            Err(ToolFailure::NotAuthorized)
+            Err(ToolFailure::HandleRefused)
         );
         assert_eq!(
             bound_handle(&identity, caller, "momo_lease_v1.zzzz", "secret"),
-            Err(ToolFailure::NotAuthorized)
+            Err(ToolFailure::HandleRefused)
         );
         assert_eq!(
             bound_handle(&identity, caller, &handle, "another-secret"),
-            Err(ToolFailure::NotAuthorized)
+            Err(ToolFailure::HandleRefused)
         );
     }
 

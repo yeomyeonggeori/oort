@@ -7,6 +7,7 @@
 - 증보: **증보 3 부록 A — 호스티드 lease 길이와 암묵 갱신 (2026-10-06, #3530 AT-8) · Accepted (성재 AT 계획 결재 「이대로 진행」 2026-10-05의 구현 세부).** 호스티드 claim·renew만 분 단위 lease를 쓰고, 만료됐어도 아무도 재클레임하지 않았다면 같은 핸들의 보고·완료를 받는다. 파일 끝 「증보 3 부록 A」 절.
 - 증보: **증보 4 — 호스팅 에이전트 왕복 줄이기: `oort_job_start` 합성 도구 (2026-10-14, #3831) · Accepted (성재 결재 「둘 다 (추천)」 2026-10-14, 선택지: 그록봇 도구를 합쳐 왕복을 줄여요(40~70초 단축, 기존 결정 문서 보강)).** `oort_job_start` 하나로 claim·시작 보고·최근 대화를 받고, `oort_jobs_claim`에 같은 게이트의 최근 대화를 싣는다. 새 scope·테이블·마이그레이션 없음. 파일 끝 「증보 4」 절.
 - 증보: **증보 5 — 코드 결과 계약·스레드 답글 깨우기·그 자리 채널 승인 카드 (2026-10-15, #3838) · Accepted (성재 결재 「정해진 칸으로 보고 (추천)」·「깨우기 (추천)」·「그 자리 승인 카드 (추천)」·「oort 호출 + VM 개수 보고 (추천)」 2026-10-15).** `oort_run_complete.artifacts`에 닫힌 결과 칸(C1)과 VM 안 개수 자기 보고(C2), 거절 오류·재시도 규칙(C3), 에이전트가 연 스레드의 사람 답글이 그 에이전트를 깨우는 규칙(W1~W4), 승인 안 된 채널에서 부르면 그 자리에 「이 채널에서 쓰기」 승인 카드가 뜨고 승인 시 대기 요청이 정확히 한 번 처리되는 규칙(G1~G6, HAP-E3 정확 채널 허가 경계). 파일 끝 「증보 5」 절.
+- 증보: **증보 6 — 끝난 run의 죽은 job 재배달 차단·`oort_job_start` 닫힘 답·낡은 handle의 상태 배지 (2026-10-16, #3903) · Proposed (근거: 성재 제보 「그록 기준으로 지금 호출이 거절됨이라고 뜨는데 이유 분석해주고」; Accepted 승격은 오케스트레이터).** 새 도구·scope·오류 코드·마이그레이션 없음. 파일 끝 「증보 6」 절.
 - 관련: ADR-0100(결정 거버넌스), ADR-0101(에이전트 신원·bearer), ADR-0102(worker/gateway 실행 경로), ADR-0130(외부 에이전트 fabric·ACP), ADR-0145(Rust/Axum), ADR-0150(대화 반출 경계)
 - 리서치: `docs/planning/research/2026-08-12-grok-bot-integration-feasibility.md`, `docs/planning/research/2026-08-12-grok-bot-reverse-teammate-direction.md`, `docs/planning/research/2026-08-12-external-agent-reception-audit.md`
 - 제품 문장: **Bring your hosted agent.** Grok Bot은 첫 setup preset이자 실증 클라이언트이며, 코어 계약은 벤더 중립이다.
@@ -669,3 +670,21 @@ D12의 `artifacts`에 키를 더한다. `additionalProperties:false`는 유지�
 - **W-S1 (engine)**: W1~W3 판정(같은 라우팅 관문 재사용)·합치기·`agent.thread_reply_wake` migration·프로필 필드. 시험 ⑩~⑮.
 - **G-S1 (engine)**: G1~G5 생산자 변경·카드·결정 tx·환경변수. 시험 ①~⑨.
 - **G-U1·W-U1·C-U1 (UXUI)**: 카드 렌더(보는 사람별), 「에이전트 보고」 꼬리표, 깨우기 스위치. 캡처·design-review.
+
+## 증보 6 — 끝난 run의 죽은 job 재배달 차단·`oort_job_start` 닫힘 답·낡은 handle의 상태 배지 (Proposed · 근거 성재 제보 2026-10-16 · #3903)
+
+> **근거(원문).** 성재 제보: 「그록 기준으로 지금 호출이 거절됨이라고 뜨는데 이유 분석해주고」 (2026-10-16, 폰·데스크탑의 그록 상태 「호출이 거절됨」). 이 증보는 응답 필드 하나(`closed`)를 더하고 claim 조건·상태 배지 판정을 바로잡는 **좁은** 변경이다. 공개 도구 표면의 필드를 바꾸므로 ADR-0100에 따라 Accepted 기록이 구현 PR의 머지 조건이다.
+
+**측정(prod, oort-team v0.1.27, 읽기 전용).** 그록 `hosted_agent_liveness`: `last_tool_error_at`(06:30:08, `not_authorized`)이 마지막 정상 신호(06:29:37)보다 새로워 `error`로 고정. 원인 두 겹: ① 10-15 18:06 요청의 run은 승인 대기 중 만료돼 19:07 `timed_out`이 됐는데 그 job(outbox)은 `pending`으로 남아 lease가 만료될 때마다 다시 claim돼 `claimed`가 40분 간격으로 23번 쌓였고(같은 모양의 죽은 job이 5개: 끝난 run 3·`timed_out` 2), 에이전트는 매 wake마다 죽은 일에 `running` 이벤트를 보내 409를 99번 받았다. ② 그 뒤 에이전트가 낡은 handle을 보내 받은 403이 연결 오류로 기록됐다.
+
+| # | 결정 | 근거 |
+|---|---|---|
+| S1 | **끝난 run의 job은 다시 나눠주지 않는다.** 호스티드 claim 조건(`CLAIMABLE_JOB_PREDICATE`, claim·`oort_job_start`·대기열 위치 읽기가 공유)에 「그 run이 `succeeded`·`failed`·`cancelled`·`timed_out`·`awaiting_approval`이면 제외」를 더한다. | 승인 결정·만료는 run만 끝내고 job을 닫지 않는다. 멈춘(`awaiting_approval`) run의 job도 승인이 끝나면 run이 끝나므로 다시 줄 이유가 없다. |
+| S2 | **발견하면 닫는다.** `oort_jobs_claim`·`oort_job_start`(핸들 없음)가 claim 직전, 같은 tx에서 이 에이전트의 `pending` 호스티드 job 중 run이 끝난(`succeeded`·`failed`·`cancelled`·`timed_out`) 것을 `done`(`last_error`=「run already settled; job closed」, lease 비움)으로 바꾼다. 멈춘 run의 job은 건드리지 않는다. | 영원히 `pending`으로 남는 행을 만들지 않는다. 다른 에이전트의 행은 건드리지 않는다. |
+| S3 | **`oort_job_start {leaseHandle}`의 닫힘 답.** 핸들을 검증한 뒤 그 run이 끝났으면 `{job:null, started:false, resumed:true, closed:"run_settled"}`, 멈췄으면 `closed:"run_awaiting_approval"`(HTTP 200). 시작 보고·claim·lease 변경 없음. 끝난 run이면 S2도 부른다. 그 밖의 경우(lease를 남이 가졌다 등)는 기존대로 409. | 모호한 거절 대신 「들어가지 마라」를 닫힌 값 둘로 말한다. 응답에 나오는 것은 호출자 자신의 봉인된 핸들이 가리키는 run의 상태뿐이라 권한이 넓어지지 않는다. |
+| S4 | **낡은 handle은 연결 오류가 아니다.** 서버 내부 구분 `ToolFailure::HandleRefused`를 더한다: 선 위 답(403 / -32003 / `not_authorized`)과 원장 코드는 `NotAuthorized`와 **같다**. 연결·토큰·scope 증명(`authorize_in_tx`)을 이미 통과한 호출에서 handle만 거절된 경우(열리지 않음·다른 연결·승인 취소된 채널·run 불일치)에 쓰며, 이때 `hosted_agent_liveness`에 `last_tool_error_*`를 쓰지 않는다. scope 부족·연결 비활성 같은 연결 거절은 그대로 `error`로 기록한다. 상태값 wire(`error` 등 8개)는 그대로다. | 지금도 `error`는 「다음에 받아들여진 호출이 있으면」 풀리지만, 에이전트가 wake마다 낡은 handle을 다시 보내면 영원히 고정된다. 「핑 뒤 풀림」(감쇠)은 이를 고치지 못한다. |
+
+**열지 않는 것.** 새 도구·scope·오류 코드·컬럼·마이그레이션 없음. 선 위 오류 8종·`oort_run_event`/`oort_run_complete`의 409 답은 그대로다. 에이전트 쪽 절차(제안 뒤 job 폴더 삭제·409/403 handle은 폴더 삭제 후 계속·되풀이 금지)는 `SELF_HOST_AGENT.md` §3.3.17.4.
+
+**수용기준(시험, 되돌리면 실패).** ① 끝난·멈춘 run의 만료된 job은 `oort_jobs_claim`/`oort_job_start`가 주지 않고 끝난 것은 `done`이 되며 멈춘 것은 `pending`으로 남는다(조건 또는 닫기 호출을 빼면 실패), ② 멈춘·끝난 run의 핸들 재진입은 200 `job:null` + `closed`이고 원장·단계가 늘지 않는다, ③ 낡은 핸들 거절은 403이지만 `last_tool_error_at`이 비고, 빠진 scope 거절은 `not_authorized`로 기록된다.
+

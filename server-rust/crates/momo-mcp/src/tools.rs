@@ -808,8 +808,10 @@ pub const TOOL_CATALOG: [ToolDescriptor; 13] = [
                       (leaseHandle, work with the request in work.prompt), started, and \
                       conversation (the latest messages of that channel; absent if you may not \
                       read it). Calling it again with the leaseHandle you already hold returns \
-                      the same job without a second start report. job is null when nothing \
-                      is pending. Optional stage names the first step (plain text, like \
+                      the same job without a second start report, unless its run is already over \
+                      or waiting for a person: then job is null and closed is run_settled or \
+                      run_awaiting_approval (send no running event for it and drop it). job is \
+                      null when nothing is pending. Optional stage names the first step (plain text, like \
                       oort_run_event.stage; default \"시작: 요청 확인\"). Needs agent:jobs:read and \
                       agent:runs:callback; the conversation part needs messages:read.",
         required_scope: SCOPE_JOBS_READ,
@@ -1560,6 +1562,14 @@ pub enum ToolFailure {
     InvalidArtifacts(ArtifactViolation),
     /// The connection, scope, membership or actor binding refused the call.
     NotAuthorized,
+    /// #3903 — the same wire answer as [`Self::NotAuthorized`] (`not_authorized`,
+    /// 403, -32003, recorded as `not_authorized`), but raised when the CONNECTION
+    /// proved healthy and only the sealed lease handle the caller passed was refused
+    /// (unopenable, another connection's, a channel no longer approved, a run the
+    /// handle does not match). It is the agent's own stale flow, so it must not
+    /// flip the connection's liveness to `error`; only the server-side
+    /// distinction exists, nothing on the wire changes.
+    HandleRefused,
     /// The target is not reachable right now — paused, inactive, missing, or
     /// invisible. One answer for all four, on purpose.
     Unavailable,
@@ -1584,7 +1594,7 @@ impl ToolFailure {
             // A rejected artifacts field is the same -32602 wire answer, so it records
             // as `invalid_arguments` too; the closed code set stays migration 133's.
             ToolFailure::InvalidArguments | ToolFailure::InvalidArtifacts(_) => "invalid_arguments",
-            ToolFailure::NotAuthorized => "not_authorized",
+            ToolFailure::NotAuthorized | ToolFailure::HandleRefused => "not_authorized",
             ToolFailure::Unavailable => "unavailable",
             ToolFailure::Conflict => "conflict",
             ToolFailure::AlreadyClaimed => "already_claimed",
@@ -1599,7 +1609,7 @@ impl ToolFailure {
             ToolFailure::InvalidArguments | ToolFailure::InvalidArtifacts(_) => {
                 (400, -32602, "invalid tool arguments")
             }
-            ToolFailure::NotAuthorized => {
+            ToolFailure::NotAuthorized | ToolFailure::HandleRefused => {
                 (403, -32003, "tool is not authorized for this connection")
             }
             ToolFailure::Unavailable => (409, -32004, "tool target is unavailable"),
@@ -2542,11 +2552,31 @@ mod tests {
         }
     }
 
+    /// #3903: a refused HANDLE and a refused CONNECTION are one answer on the wire and
+    /// one recorded code — only the server's liveness bookkeeping tells them apart.
+    #[test]
+    fn a_refused_handle_is_wire_identical_to_a_refused_connection() {
+        assert_eq!(
+            ToolFailure::HandleRefused.wire(),
+            ToolFailure::NotAuthorized.wire()
+        );
+        assert_eq!(
+            ToolFailure::HandleRefused.code(),
+            ToolFailure::NotAuthorized.code()
+        );
+        assert_eq!(
+            ToolFailure::HandleRefused.message(),
+            ToolFailure::NotAuthorized.message()
+        );
+        assert!(ToolFailure::HandleRefused.data().is_none());
+    }
+
     #[test]
     fn no_failure_message_carries_a_cause() {
         for failure in [
             ToolFailure::InvalidArguments,
             ToolFailure::NotAuthorized,
+            ToolFailure::HandleRefused,
             ToolFailure::Unavailable,
             ToolFailure::Conflict,
             ToolFailure::Internal,
