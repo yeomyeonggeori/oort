@@ -17574,7 +17574,11 @@ async fn job_start_is_idempotent_for_the_same_job_and_the_same_agent() {
         json!({"leaseHandle": handle}),
     )
     .await;
-    assert_eq!(status, 409, "{settled}");
+    // #3903: a handle whose run is over is a CLOSED answer, not a generic refusal.
+    assert_eq!(status, 200, "{settled}");
+    assert_eq!(structured(&settled)["job"], Value::Null, "{settled}");
+    assert_eq!(structured(&settled)["closed"], json!("run_settled"));
+    assert_eq!(structured(&settled)["started"], json!(false));
 }
 
 #[tokio::test]
@@ -17824,6 +17828,249 @@ async fn claim_carries_the_live_conversation_bounded_to_the_context_window() {
         .any(|message| message["body"].as_str().unwrap_or_default().chars().count() == 5_000));
     // The queued snapshot is untouched and bounded by the same number.
     assert!(job["work"]["recentMessages"].as_array().unwrap().len() <= 30);
+}
+
+// ---------------------------------------------------------------------------
+// (#3903, ADR-0162 증보 6) a settled run's job is never re-delivered; a parked or
+// settled run answers `closed`; a stale handle is not a connection fault
+// ---------------------------------------------------------------------------
+
+async fn set_run_status_3903(su: &PgPool, run: Uuid, status: &str) {
+    sqlx::query("UPDATE agent_run SET status = $2::run_status WHERE id = $1")
+        .bind(run)
+        .bind(status)
+        .execute(su)
+        .await
+        .expect("move the run to the state under test");
+}
+
+async fn lapse_job_lease_3903(su: &PgPool, run: Uuid) {
+    lapse_lease_3530(su, run).await;
+}
+
+async fn job_row_3903(su: &PgPool, run: Uuid) -> (String, Option<String>, bool) {
+    sqlx::query_as(
+        "SELECT status::text, last_error, lease_owner IS NOT NULL FROM outbox \
+          WHERE kind='agent_job' AND lower(payload->>'run_id') = lower($1::text)",
+    )
+    .bind(run.to_string())
+    .fetch_one(su)
+    .await
+    .expect("the run's job row")
+}
+
+/// RED PROOF (#3903, prod 2026-10-16: a `timed_out` run's job was re-claimed every
+/// lease expiry for 12 hours, so the agent re-entered dead work on every wake).
+/// Approval expiry/decision ends the RUN but leaves its job `pending`; once its lease
+/// lapses the claim must not hand it out again, and the leftover is closed (`done`).
+///
+/// Tamper table:
+///   * drop the `NOT EXISTS (agent_run ...)` clause in `CLAIMABLE_JOB_PREDICATE`
+///       -> the settled run's job is delivered again by `oort_jobs_claim` / `oort_job_start`
+///   * drop `retire_settled_run_hosted_jobs_in_tx` from the claim path -> the row stays `pending`
+///   * retire a parked (`awaiting_approval`) run's job as well          -> the parked row turns `done`
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_settled_runs_leftover_job_is_closed_and_never_delivered_again_3903() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let bearer = &fixture.hosted_bearer;
+
+    for (label, status) in [("timed_out", "timed_out"), ("succeeded", "succeeded")] {
+        let run =
+            raise_mention_3831(&client, &base, &su, &fixture, &format!("끝난 일 {label}")).await;
+        let (_, first) = call(&client, &base, bearer, "oort_job_start", json!({})).await;
+        assert!(structured(&first)["job"].is_object(), "{label}: {first}");
+        // The run settles without the job (approval expiry / decision), the lease lapses.
+        set_run_status_3903(&su, run, status).await;
+        lapse_job_lease_3903(&su, run).await;
+
+        let (code, claimed) = call(&client, &base, bearer, "oort_jobs_claim", json!({})).await;
+        assert_eq!(code, 200, "{label}: {claimed}");
+        assert_eq!(
+            structured(&claimed)["jobs"],
+            json!([]),
+            "{label}: a settled run's job is not delivered again"
+        );
+        let (code, started) = call(&client, &base, bearer, "oort_job_start", json!({})).await;
+        assert_eq!(code, 200, "{label}: {started}");
+        assert_eq!(structured(&started)["job"], Value::Null, "{label}");
+        let (job_status, last_error, leased) = job_row_3903(&su, run).await;
+        assert_eq!(job_status, "done", "{label}: the leftover is closed");
+        assert_eq!(
+            last_error.as_deref(),
+            Some("run already settled; job closed")
+        );
+        assert!(!leased, "{label}: its lease is gone");
+    }
+
+    // A PARKED run is not over: its job is not delivered again, but it is not closed.
+    let parked = raise_mention_3831(&client, &base, &su, &fixture, "승인 기다리는 일").await;
+    let (_, first) = call(&client, &base, bearer, "oort_job_start", json!({})).await;
+    assert!(structured(&first)["job"].is_object(), "{first}");
+    set_run_status_3903(&su, parked, "awaiting_approval").await;
+    lapse_job_lease_3903(&su, parked).await;
+    let (_, claimed) = call(&client, &base, bearer, "oort_jobs_claim", json!({})).await;
+    assert_eq!(structured(&claimed)["jobs"], json!([]), "{claimed}");
+    assert_eq!(job_row_3903(&su, parked).await.0, "pending");
+}
+
+/// RED PROOF (#3903): re-entering a job with the handle you hold, after the run was
+/// parked for a person or settled, answers a closed `closed` value on a 200 instead of
+/// re-sending the job (`started:false` with a live-looking job) or a bare 409.
+/// Nothing is reported and nothing is claimed.
+///
+/// Tamper table:
+///   * drop the `closed_reason` branch in `job_start`     -> a parked run gets its job back (`job` is an object)
+///   * map the settled run to `awaiting_approval` (or the reverse) -> the two `closed` values swap
+///   * let the closed branch send the start report        -> the ledger or the step count moves
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn re_entering_a_parked_or_settled_run_answers_closed_and_reports_nothing_3903() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let bearer = &fixture.hosted_bearer;
+    let run = raise_mention_3831(&client, &base, &su, &fixture, "보류 뒤 재진입").await;
+    let (_, first) = call(&client, &base, bearer, "oort_job_start", json!({})).await;
+    let handle = structured(&first)["job"]["leaseHandle"]
+        .as_str()
+        .expect("handle")
+        .to_string();
+    let steps = run_record_3516(&su, run).await.0;
+    let ledger = ledger_3740(&su, fixture.workspace, run).await;
+
+    set_run_status_3903(&su, run, "awaiting_approval").await;
+    let (code, parked) = call(
+        &client,
+        &base,
+        bearer,
+        "oort_job_start",
+        json!({"leaseHandle": handle}),
+    )
+    .await;
+    assert_eq!(code, 200, "{parked}");
+    let parked = structured(&parked);
+    assert_eq!(parked["job"], Value::Null, "{parked}");
+    assert_eq!(parked["closed"], json!("run_awaiting_approval"));
+    assert_eq!(
+        (parked["started"].clone(), parked["resumed"].clone()),
+        (json!(false), json!(true))
+    );
+    assert_eq!(
+        run_record_3516(&su, run).await.0,
+        steps,
+        "no running report"
+    );
+    assert_eq!(
+        ledger_3740(&su, fixture.workspace, run).await,
+        ledger,
+        "the closed answer writes no run event"
+    );
+    assert_eq!(
+        job_row_3903(&su, run).await.0,
+        "pending",
+        "a parked job is not closed"
+    );
+
+    set_run_status_3903(&su, run, "timed_out").await;
+    let (code, settled) = call(
+        &client,
+        &base,
+        bearer,
+        "oort_job_start",
+        json!({"leaseHandle": handle}),
+    )
+    .await;
+    assert_eq!(code, 200, "{settled}");
+    assert_eq!(structured(&settled)["job"], Value::Null);
+    assert_eq!(structured(&settled)["closed"], json!("run_settled"));
+    assert_eq!(job_row_3903(&su, run).await.0, "done");
+
+    // The agent's own event on the over run is still the plain refusal it always was.
+    let (code, event) = call(
+        &client,
+        &base,
+        bearer,
+        "oort_run_event",
+        json!({"leaseHandle": handle, "status": "running"}),
+    )
+    .await;
+    assert_eq!((code, error_code(&event)), (409, -32005), "{event}");
+}
+
+/// RED PROOF (#3903, prod: the badge stuck on 「호출이 거절됨」 because the agent's own
+/// stale handle was recorded as a connection error). A refused or unopenable HANDLE
+/// leaves `last_tool_error_at` empty and the wire answer unchanged (403 / -32003); a
+/// refusal about the CONNECTION (a missing scope) still records `not_authorized`.
+///
+/// Tamper table:
+///   * make `bound_handle` return `NotAuthorized` again -> the garbage handle sets `last_tool_error_at`
+///   * stop recording the scope refusal                -> the connection fault leaves no error
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_stale_handle_is_not_a_connection_fault_but_a_missing_scope_is_3903() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let bearer = &fixture.hosted_bearer;
+    let _ = raise_mention_3831(&client, &base, &su, &fixture, "낡은 handle").await;
+    let (_, first) = call(&client, &base, bearer, "oort_job_start", json!({})).await;
+    assert!(structured(&first)["job"].is_object(), "{first}");
+
+    for (tool, args) in [
+        (
+            "oort_run_event",
+            json!({"leaseHandle": "momo_lease_v1.AAAA", "status": "running"}),
+        ),
+        (
+            "oort_job_start",
+            json!({"leaseHandle": "momo_lease_v1.AAAA"}),
+        ),
+        (
+            "oort_job_renew",
+            json!({"leaseHandle": "momo_lease_v1.AAAA"}),
+        ),
+    ] {
+        let (code, refused) = call(&client, &base, bearer, tool, args).await;
+        assert_eq!(
+            (code, error_code(&refused)),
+            (403, -32003),
+            "{tool}: {refused}"
+        );
+    }
+    let row = liveness_row_3742(&su, &fixture).await.expect("row");
+    assert!(
+        row.3.is_none(),
+        "a stale handle is the agent's own flow: {row:?}"
+    );
+    let liveness = connection_liveness_3742(&client, &base, &fixture).await;
+    assert_ne!(liveness["state"], json!("error"), "{liveness}");
+
+    let without_callback: Vec<&str> = ALL_HOSTED_SCOPES_3831
+        .iter()
+        .copied()
+        .filter(|scope| *scope != "agent:runs:callback")
+        .collect();
+    set_approved_scopes_3831(&su, &fixture, &without_callback).await;
+    let (code, refused) = call(&client, &base, bearer, "oort_job_start", json!({})).await;
+    assert_eq!((code, error_code(&refused)), (403, -32003), "{refused}");
+    let row = liveness_row_3742(&su, &fixture).await.expect("row");
+    assert!(
+        row.3.is_some(),
+        "a connection fault is still recorded: {row:?}"
+    );
+    assert_eq!(row.4.as_deref(), Some("not_authorized"));
 }
 
 // ---------------------------------------------------------------------------

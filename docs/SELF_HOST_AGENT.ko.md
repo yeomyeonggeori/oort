@@ -1418,16 +1418,37 @@ credential로, 터널이 아니라 VM 루프백에 POST한다.
       (error.data.field, error.data.rule, 정해진 값이 있으면 error.data.allowed)
       그 칸만 고쳐서 oort_run_complete 를 다시 부른다. 고쳐 보내기는 최대 2번.
       그래도 거절되면 artifacts 없이 완료하고 결과는 body 에 쓴다. 같은 호출을
-      그대로 다시 보내지 않는다. HTTP 409 / -32005: lease 를 잃었거나 run 이
-      이미 끝났거나 취소됐다. 그 job 을 멈추고 재시도하지 않으며 그 폴더를
-      지운다(다른 job 은 계속한다). HTTP 409 / -32004:
+      그대로 다시 보내지 않는다. handle 을 실은 호출의 HTTP 409 / -32005:
+      lease 를 잃었거나 run 이 이미 끝났거나 취소됐거나 승인 대기로 멈췄다.
+      그 job 을 멈추고 재시도하지 않으며 그 폴더를 지운다(다른 job 은
+      계속한다). handle 을 실은 호출의 HTTP 403 / -32003 도 같다: 그 handle 은
+      죽은 것이다(옛 연결의 것, 더는 승인되지 않은 채널, 내 것이 아닌 run).
+      그 job 의 폴더를 지우고 다음 job 으로 간다. 방금 409 나 403 을 받은
+      handle 로 두 번째 호출을 보내지 않고, 같은 handle 로 되풀이하지 않는다.
+      oort_job_start {leaseHandle} 은 200 에 job 이 null 이고 closed 키가 있는
+      답도 줄 수 있다: "run_settled"(run 이 끝남) 또는 "run_awaiting_approval"
+      (run 이 사람 결정을 기다리며 멈춤). 둘 다 running 이벤트를 보내지 말고 그
+      job 의 폴더를 지우고 계속하라는 뜻이다.
+      HTTP 409 / -32004:
       에이전트가 일시정지·연결 해제됐거나 대상이 보이지 않는다. 멈춘다.
-      HTTP 403 / -32003: scope 나 채널 승인이 없다. 멈추고 연결 확인을 안내한다.
+      handle 없는 호출(oort_inbox_read, oort_jobs_claim, oort_job_start {},
+      oort_ping)의 HTTP 403 / -32003: scope 나 채널 승인이 없다. 멈추고 연결
+      확인을 안내한다.
+   g2) 멈춘 job 은 이번 wake 에서 끝난 것이다. oort_action_propose 가 ok 로
+      답한 순간 그 run 은 사람을 기다린다. 그 job 의 폴더를
+      /workspace/oort-runs 에서 지우고(approvalId 는
+      /workspace/oort-approvals.json 에 남긴다), 그 job 으로 oort_run_event 를
+      보내지 않고, oort_job_start {leaseHandle} 로 다시 들어가지 않고,
+      oort_run_complete 나 oort_job_release 도 부르지 않는다(둘 다 409).
+      결과는 oort 가 올리는 한 줄로 돌아오고, 새 부탁은 새 job 이다.
    h) job 폴더 확인(oort_inbox_read 바로 뒤, claim 전). beat 가 최근 15분 안에
       touch 된 폴더는 아직 일하는 wake 의 것이니 건드리지 않는다. beat 가 더
       오래된 폴더는 멈춘 wake 가 남긴 것이다. 폴더 이름을 새 tag 로 바꿔(mv,
       이름 바꾸기가 실패하면 다른 wake 가 먼저 가져간 것이니 둔다) 가져오고,
-      beat 를 touch 한 뒤 저장된 handle 로 먼저 보고하고(oort_run_event 또는
+      beat 를 touch 한 뒤 저장된 handle 로 먼저
+      oort_job_start {leaseHandle:<그 handle>} 로 다시 들어간다. 409 나 403 이
+      오거나 job 이 null 이고 closed 가 있으면 폴더를 지우고 다음으로 간다.
+      job 이 오고 started 가 true 면 그 handle 로 보고하고(oort_run_event 또는
       oort_run_complete) 그 workdir 에서 이어 한다. /workspace/oort-run.handle
       (예전 한 job 루틴이 남긴 파일)이 있으면 새 폴더의 handle 로 옮기고 같은
       식으로 다룬다. 그 보고 전에 oort_jobs_claim 이나 handle 없는
@@ -1479,7 +1500,7 @@ dots도 같은 패턴이고 곧 지원한다. 이 문서는 dots에 대한 개�
 |---|---|---|---|
 | 0. 사람이 요청 | `POST /v1/workspaces/{ws}/channels/{ch}/agent-runs` 의 `type=work` (소유자가 승인한 채널·DM에서 사람이) | 해당 없음 | run `queued` + job 1 + inbox 항목 1(`agent_job`). 연결이 active 가 아니거나 채널이 승인 밖이거나 `owner_only` 이면 닫힌 사유로 409 |
 | 1. claim | `oort_jobs_claim` (scope `agent:jobs:read`) | `limit` 1..100 | `{jobs:[{leaseHandle, createdAtMs, leaseExpiresAtMs, work:{channelId, authorMemberId, triggerMessageId, prompt, ...}}]}` |
-| 1b. 시작(빠른 길) | `oort_job_start` (scope `agent:jobs:read`; 시작 보고는 `agent:runs:callback`, 대화는 `messages:read`도 필요) | `leaseHandle`(재진입), `stage`(선택) | `{job:{leaseHandle, createdAtMs, leaseExpiresAtMs, work}\|null, started, resumed, conversation?:{messages, nextBefore}}`: claim + 시작 보고 + 최근 30개 메시지를 한 번에(ADR-0162 증보 4) |
+| 1b. 시작(빠른 길) | `oort_job_start` (scope `agent:jobs:read`; 시작 보고는 `agent:runs:callback`, 대화는 `messages:read`도 필요) | `leaseHandle`(재진입), `stage`(선택) | `{job:{leaseHandle, createdAtMs, leaseExpiresAtMs, work}\|null, started, resumed, closed?:"run_settled"\|"run_awaiting_approval", conversation?:{messages, nextBefore}}`: claim + 시작 보고 + 최근 30개 메시지를 한 번에(ADR-0162 증보 4). 멈췄거나 끝난 run 의 handle 로 다시 들어가면 `job:null` + `closed` 이고 아무것도 보고하지 않는다(증보 6) |
 | 2. 진행 | `oort_run_event` (scope `agent:runs:callback`) | `leaseHandle`(512), `stage`(1~80자, 최대 320바이트, `/`·`\`·제어·bidi 문자 불가), `status`(`running` `thinking` `streaming` `cancelled`), `detail`(2048, 감사 전용), `textDelta`(8192), `eventId`(UUID, 재시도가 한 번만 세어짐) | `{status:"accepted"}` |
 | 3. 끝남 | `oort_run_complete` (scope `agent:runs:callback`) | `leaseHandle`, `status`(`succeeded` / `failed`), `body`(8000), `error`(4000), `usage`, `artifacts` | `{status, messageId, seq}` |
 | 갱신 | `oort_job_renew` | `leaseHandle` | `{status:"renewed", leaseExpiresAtMs}` |
@@ -1578,7 +1599,7 @@ credential이 한 번 증명됐다는 뜻일 뿐이다. 사람에게 보이는 �
 | `woken_not_collected` | 도어벨이 2xx로 울렸고 5분이 지났고, 수령 가능한 일이 기다리는데 울린 뒤로 inbox 읽기·claim이 없음 |
 | `work_waiting` | 수령 가능한 일이 20분 넘게 기다렸고 큐에 들어간 뒤 claim이 없음(폴링·ping을 해도 마찬가지) |
 | `quiet` / `unresponsive` | 60분 안에 어떤 신호가 있음 / 없음(또는 한 번도 없음) |
-| `error` | 가장 최근 사실이 거절된 호출(`unavailable`, `not_authorized`). 다음에 받아들여진 호출이 있으면 풀림 |
+| `error` | 가장 최근 사실이 연결에 대한 거절(`unavailable`, 토큰·연결·빠진 scope 의 `not_authorized`). 다음에 받아들여진 호출이 있으면 풀림. 거절됐거나 죽은 lease handle(409, 또는 handle 에 대한 403)은 에이전트 자신의 흐름이라 `error` 를 켜지 않는다(#3903) |
 | `inactive` | 연결이 `active`가 아님 |
 
 `woken_not_collected`를 본 사람은 다시 울릴 수 있다: `POST
