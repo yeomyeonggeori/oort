@@ -951,7 +951,15 @@ describe('#1076 — 인용 점프가 도착했다고 말한다', () => {
     expect(code).toMatch(/onScrollBeginDrag[\s\S]{0,400}setLanded\(null\)/);
     // ② 점프가 틴트를 세울 때는 시계(`holdMs`)가 `null` 이다 — 시한은 이동의 끝에서만 선다.
     expect(code).toMatch(/\{id: landingId, holdMs: null\}/);
-    expect(code.match(/LANDED_HOLD_MS/g)).toHaveLength(2); // import 와 `onLanded` 안의 사용 하나
+    // ③ 시계를 켜는 자리는 둘뿐이다: 이동이 끝난 순간(`onLanded`)과, 이동이 판정 없이 거둬진
+    // 착지를 위한 백스톱(`JUMP_TRAVEL_MAX_MS` 뒤에도 `holdMs` 가 비어 있을 때). 둘 다 이동이
+    // 끝났거나 끝났어야 하는 시점이다. 사용처는 import 하나와 이 둘 — 넷째가 생기면 점프
+    // 시각에 시계를 켜는 길이 열린 것이다.
+    expect(code).toMatch(/holdMs: LANDED_HOLD_MS \+ delayMs/);
+    expect(code).toMatch(
+      /current\.holdMs === null\s*\?\s*\{id: current\.id, holdMs: LANDED_HOLD_MS\}/,
+    );
+    expect(code.match(/LANDED_HOLD_MS/g)).toHaveLength(3);
   });
 });
 
