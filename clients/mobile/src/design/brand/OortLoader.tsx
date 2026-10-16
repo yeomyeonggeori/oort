@@ -51,6 +51,16 @@ import {
 // 선다(시간표의 처음 14% 를 손가락으로 되감는다). `spinning` 이 켜지면 그 자세에서 이어
 // 돈다: 시작 위상이 14% 이고 시간표가 주기 함수라 이음새가 없다.
 //
+// ## 모드가 바뀌면 바디를 새로 세운다 (`key`)
+//
+// 네이티브 드라이버로 돌기 시작한 뒤 **같은** `Animated.View` 의 스타일 그래프를 바꾸면
+// (동작 줄이기 첫 답이 늦게 도착해 투명도 시계에서 회전 시계로 갈아타는 경우) 네이티브 쪽
+// 노드 연결이 갱신되지 않는 일이 있다. 시뮬레이터에서 위성이 홈에 선 채 투명도만 숨 쉬는 모습으로
+// 굳었고, 부모가 우연히 다시 그려지는 화면에서만 풀렸다(2026-10-17 캡처에서 발견, jest 는 JS
+// 드라이버라 못 본다). 그래서 모드(정지·당김·숨·돎)마다 새 바디, 곧 새 `Animated` 노드를 세운다:
+// 한 바디의 그래프는 수명 동안 바뀌지 않는다. 대가는 첫 답이 오는 한 틱에 바디가 한 번 갈리는 것뿐이고,
+// 두 바디 모두 홈에서 시작하므로 눈에는 보이지 않는다.
+//
 // 항상 장식이다(접근성 트리에서 숨김). 로더가 서는 자리의 문장(「연결 중…」)이 이름을 진다.
 // =============================================================================
 
@@ -81,28 +91,41 @@ const ranges = (knots: readonly Knot[], scale = 1) => ({
   outputRange: knots.map(k => k[1] * scale),
 });
 
-export function OortLoader({
+type LoaderMode = 'still' | 'scrub' | 'breathe' | 'spin';
+
+export function OortLoader(props: OortLoaderProps): React.JSX.Element {
+  const reduceMotion = useReduceMotion();
+  const scrubbing = props.progress !== undefined && !(props.spinning ?? false);
+  const mode: LoaderMode = props.still
+    ? 'still'
+    : scrubbing
+      ? 'scrub'
+      : reduceMotion
+        ? 'breathe'
+        : 'spin';
+  // `key` 가 모드라서 모드가 바뀌면 바디가 새로 선다(헤더 「모드가 바뀌면 바디를 새로 세운다」).
+  return <LoaderBody key={mode} mode={mode} {...props} />;
+}
+
+function LoaderBody({
+  mode,
   size = 24,
-  still = false,
   progress,
-  spinning = false,
   color,
   testID = 'oort-loader',
-}: OortLoaderProps): React.JSX.Element {
+}: OortLoaderProps & {mode: LoaderMode}): React.JSX.Element {
   const palette = usePalette();
-  const reduceMotion = useReduceMotion();
   const optical = opticalFor(size);
   const geometry = OPTICAL[optical];
   const tables = useMemo(() => tablesFor(optical), [optical]);
 
-  const pulling = progress !== undefined;
-  const scrubbing = pulling && !spinning;
-  /** 시계가 도는 자리: 정지도 당김도 아니다. */
-  const running = !still && !scrubbing;
-  const full = running && !reduceMotion;
-  const breathing = running && reduceMotion;
+  /** 시계가 도는 모드: 움직임과 동작 줄이기(투명도 숨). 정지와 당김은 시계가 서 있다. */
+  const running = mode === 'spin' || mode === 'breathe';
+  const full = mode === 'spin';
+  const breathing = mode === 'breathe';
+  const scrubbing = mode === 'scrub';
   /** 당김에서 이어 도는 로더는 위성이 다 나온 14% 에서 시작한다. */
-  const startPhase = pulling ? PHASE.popEnd : 0;
+  const startPhase = progress !== undefined ? PHASE.popEnd : 0;
 
   const clock = useRef(new Animated.Value(0)).current;
   const zero = useRef(new Animated.Value(0)).current;

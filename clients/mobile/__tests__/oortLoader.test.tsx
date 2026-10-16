@@ -316,6 +316,10 @@ function spyOnLoop() {
   return {handles, timings};
 }
 
+/** 시작됐고 아직 멈추지 않은 반복. */
+const live = (handles: LoopHandle[]) =>
+  handles.filter(h => h.start.mock.calls.length > 0 && h.stop.mock.calls.length === 0);
+
 function reduceMotion(value: boolean) {
   jest.spyOn(AccessibilityInfo, 'isReduceMotionEnabled').mockResolvedValue(value);
 }
@@ -434,40 +438,59 @@ describe('컴포넌트 — 모양', () => {
 });
 
 describe('컴포넌트 — 세 갈래와 반복', () => {
-  it('움직임: 반복이 한 번 시작되고, 한 주기 1.8초 선형 시계를 네이티브 드라이버로 돈다', async () => {
+  it('움직임: 살아 있는 반복이 하나이고, 한 주기 1.8초 선형 시계를 네이티브 드라이버로 돈다', async () => {
     reduceMotion(false);
     const {handles, timings} = spyOnLoop();
     render(<OortLoader />);
     await settle();
-    expect(handles).toHaveLength(1);
-    expect(handles[0]!.start).toHaveBeenCalledTimes(1);
-    expect(timings).toHaveLength(1);
-    expect(timings[0]!.config).toMatchObject({
+    expect(live(handles)).toHaveLength(1);
+    expect(live(handles)[0]!.start).toHaveBeenCalledTimes(1);
+    expect(timings.at(-1)!.config).toMatchObject({
       toValue: 1,
       duration: LOADER_PERIOD_MS,
       useNativeDriver: true,
     });
   });
 
-  it('언마운트하면 반복이 멈춘다 (한 번, 시작한 그 반복을)', async () => {
+  it('동작 줄이기 첫 답이 늦게 와 모드가 숨에서 돎으로 바뀌면 바디가 갈린다: 앞 반복이 멈추고 새 반복이 선다', async () => {
+    reduceMotion(false);
+    const {handles} = spyOnLoop();
+    render(<OortLoader />);
+    // 첫 답 전: 켜진 것으로 보고 투명도 숨의 반복이 선다.
+    expect(handles).toHaveLength(1);
+    expect(handles[0]!.start).toHaveBeenCalledTimes(1);
+    await settle();
+    // 답(꺼짐) 뒤: 앞 반복은 멈추고 새 바디의 반복이 하나 선다. 같은 그래프를 갈아타지 않는다.
+    expect(handles).toHaveLength(2);
+    expect(handles[0]!.stop).toHaveBeenCalledTimes(1);
+    expect(handles[1]!.start).toHaveBeenCalledTimes(1);
+    expect(handles[1]!.stop).not.toHaveBeenCalled();
+  });
+
+  it('언마운트하면 살아 있던 반복이 멈춘다 (시작한 그 반복을 한 번)', async () => {
     reduceMotion(false);
     const {handles} = spyOnLoop();
     const view = render(<OortLoader />);
     await settle();
-    expect(handles[0]!.stop).not.toHaveBeenCalled();
+    const running = live(handles)[0]!;
+    expect(running.stop).not.toHaveBeenCalled();
     view.unmount();
-    expect(handles[0]!.stop).toHaveBeenCalledTimes(1);
+    expect(running.stop).toHaveBeenCalledTimes(1);
+    expect(live(handles)).toHaveLength(0);
   });
 
-  it('여러 번 다시 그려도 반복은 하나다(동작 줄이기 첫 답이 늦게 와도 다시 시작하지 않는다)', async () => {
+  it('여러 번 다시 그려도 반복은 하나다: 같은 모드에서는 다시 시작하지 않는다', async () => {
     reduceMotion(false);
     const {handles} = spyOnLoop();
     const view = render(<OortLoader size={24} />);
     await settle();
+    const before = handles.length;
     view.rerender(<OortLoader size={24} />);
     await settle();
-    expect(handles).toHaveLength(1);
-    expect(handles[0]!.stop).not.toHaveBeenCalled();
+    view.rerender(<OortLoader size={24} testID="oort-loader" />);
+    await settle();
+    expect(handles).toHaveLength(before);
+    expect(live(handles)).toHaveLength(1);
   });
 
   it('정지(still): 반복이 시작되지 않고 위성은 홈에 선다', async () => {
@@ -491,10 +514,10 @@ describe('컴포넌트 — 세 갈래와 반복', () => {
     render(<OortLoader size={56} />);
     await settle();
     expect(handles).toHaveLength(1);
-    expect(timings).toHaveLength(1);
+    expect(live(handles)).toHaveLength(1);
     expect(screen.queryByTestId('oort-loader-trail-0', HIDDEN)).toBeNull();
     // 시계를 중간으로 옮겨도 위성의 자세는 홈이다(투명도만 시계를 읽는다).
-    act(() => timings[0]!.value.setValue(0.5));
+    act(() => timings.at(-1)!.value.setValue(0.5));
     const satellite = flatten(screen.getByTestId('oort-loader-satellite', HIDDEN).props.style);
     expect((satellite.transform as Array<Record<string, unknown>>)[0]).toEqual({rotate: '-45deg'});
     expect(flatten(screen.getByTestId('oort-loader', HIDDEN).props.style).opacity).toBeCloseTo(0.5, 6);
@@ -505,7 +528,7 @@ describe('컴포넌트 — 세 갈래와 반복', () => {
     const {timings} = spyOnLoop();
     render(<OortLoader size={24} />);
     await settle();
-    const clock = timings[0]!.value;
+    const clock = timings.at(-1)!.value;
     act(() => clock.setValue(PHASE.popEnd));
     const popped = flatten(screen.getByTestId('oort-loader-satellite', HIDDEN).props.style);
     const out = (OPTICAL.small.out / OPTICAL.small.units) * 24;
@@ -556,10 +579,11 @@ describe('컴포넌트 — 당김(progress) · #3962 가 쓴다', () => {
     expect(handles).toHaveLength(0);
     view.rerender(<OortLoader size={40} progress={progress} spinning />);
     await settle();
-    expect(handles).toHaveLength(1);
-    expect(handles[0]!.start).toHaveBeenCalledTimes(1);
-    expect(timings[0]!.config.toValue).toBeCloseTo(PHASE.popEnd + 1, 6);
-    expect((timings[0]!.value as unknown as {_value: number})._value).toBeCloseTo(PHASE.popEnd, 6);
+    expect(live(handles)).toHaveLength(1);
+    expect(live(handles)[0]!.start).toHaveBeenCalledTimes(1);
+    const resumed = timings.at(-1)!;
+    expect(resumed.config.toValue).toBeCloseTo(PHASE.popEnd + 1, 6);
+    expect((resumed.value as unknown as {_value: number})._value).toBeCloseTo(PHASE.popEnd, 6);
   });
 
   it('당김에서 돌던 로더를 놓으면(spinning 해제) 반복이 멈춘다', async () => {
@@ -568,10 +592,10 @@ describe('컴포넌트 — 당김(progress) · #3962 가 쓴다', () => {
     const progress = new Animated.Value(1);
     const view = render(<OortLoader size={40} progress={progress} spinning />);
     await settle();
-    expect(handles).toHaveLength(1);
+    expect(live(handles)).toHaveLength(1);
     view.rerender(<OortLoader size={40} progress={progress} />);
     await settle();
-    expect(handles[0]!.stop).toHaveBeenCalledTimes(1);
+    expect(live(handles)).toHaveLength(0);
   });
 });
 
@@ -603,8 +627,7 @@ describe('배선 — 연결 띠(대화 머리)와 첫 로딩(Booting)', () => {
       expect(loader).toBeTruthy();
       // 띠 안에 있고, 20pt 정사각이다.
       expect(flatten(loader.props.style)).toMatchObject({width: 20, height: 20});
-      expect(handles).toHaveLength(1);
-      expect(handles[0]!.start).toHaveBeenCalledTimes(1);
+      expect(live(handles)).toHaveLength(1);
     },
   );
 
@@ -623,7 +646,7 @@ describe('배선 — 연결 띠(대화 머리)와 첫 로딩(Booting)', () => {
     const {handles} = spyOnLoop();
     const view = header('connecting');
     await settle();
-    expect(handles).toHaveLength(1);
+    expect(live(handles)).toHaveLength(1);
     view.rerender(
       <ConversationHeader
         title="agent-lab"
@@ -635,7 +658,7 @@ describe('배선 — 연결 띠(대화 머리)와 첫 로딩(Booting)', () => {
       />,
     );
     await settle();
-    expect(handles[0]!.stop).toHaveBeenCalledTimes(1);
+    expect(live(handles)).toHaveLength(0);
   });
 
   it('첫 로딩(Booting): 로더가 서고(56pt, 꼬리 점 포함), 문장·testID 는 그대로다', async () => {
