@@ -14,6 +14,7 @@ const reads = vi.hoisted(() => ({
 }));
 vi.mock("./useAiHubOverview", () => ({
   useExternalReads: () => ({ input: reads.input, hosted: {}, hostedBots: reads.bots }),
+  useAppsRead: () => reads.input.apps,
 }));
 const body = (id: string) => () => createElement("div", { "data-testid": `body-${id}` });
 vi.mock("@/features/plugins/PluginSection", () => ({ PluginSection: body("apps") }));
@@ -128,6 +129,21 @@ describe("외부 연결 목차 (AIH-8)", () => {
     expect(el.querySelector('[data-testid="ai-external-chip-apps"]')).toBeNull();
     expect(el.querySelector('[data-testid="ai-external-open-apps"]')).toBeNull();
     expect(el.textContent).not.toContain("읽지 못했어요");
+  });
+
+  it("앱 목록이 없는 서버에서 직접 연 상세는 제목과 돌아가기만 남기고 머리말 설명을 접는다 (#3860 M2)", async () => {
+    reads.input = { apps: { state: "absent" }, incoming: OK(0), outgoing: OK(0), externalAgents: OK(0) };
+    const el = await mountAt("/apps");
+    expect(el.querySelector('[data-testid="ai-external-detail-apps"] h2')?.firstChild?.textContent).toBe("앱");
+    expect(el.querySelector('[data-testid="ai-external-back"]')).not.toBeNull();
+    // 본문이 「보여주지 못해요」라고 말할 자리 위에서 머리말이 「확인해요」라고 약속하지 않는다.
+    expect(el.querySelector('[data-testid="ai-external-detail-apps"]')?.textContent).not.toContain("확인해요");
+    // 서 있는 서버에서는 그대로 선다.
+    act(() => root?.unmount());
+    host?.remove();
+    reads.input = { apps: OK(2), incoming: OK(0), outgoing: OK(0), externalAgents: OK(0) };
+    const normal = await mountAt("/apps");
+    expect(normal.querySelector('[data-testid="ai-external-detail-apps"]')?.textContent).toContain("확인해요");
   });
 
   it("앱 줄의 문구는 읽기만 되는 서버에서도 참이다: 관리한다고 말하지 않는다 (#3860)", () => {

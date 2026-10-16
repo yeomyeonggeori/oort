@@ -37,7 +37,7 @@ export function PluginIcon({
   return (
     <span
       className={cn(
-        "flex size-control shrink-0 items-center justify-center rounded-sm border border-line bg-surface-raised text-body font-semibold text-ink",
+        "flex size-control shrink-0 items-center justify-center rounded-sm border border-line bg-surface text-body font-semibold text-ink",
         className
       )}
       aria-hidden="true"
@@ -79,7 +79,7 @@ export function PluginStatusRows({
       />
       <StatusRow
         label={COPY.status.mine}
-        value={myGrantSentence(activeScopes, toolCount)}
+        value={myGrantSentence(activeScopes, toolCount, plugin)}
         testId="plugin-status-mine"
       />
     </dl>
@@ -167,8 +167,24 @@ export function scopeRiskAndApprovalBadges(tools: readonly PluginManifestTool[])
   return [...new Map(badges.map((badge) => [badge.label, badge])).values()];
 }
 
+/**
+ * 이 줄에서 말할 만한 칩만 남긴다. 읽기 도구와 읽기 전용 승인은 위의 한 줄 요약(「모두 읽기
+ * 도구예요」)이 이미 말하고, 일곱 도구가 똑같은 칩 둘을 달면 높이만 늘고 알려 주는 것이 없다(독립
+ * design-review #3860 M7). 쓰기·관리자 도구나 쓰기 승인 단계는 그대로 칩이 된다. 결정 표면(권한
+ * 동의 다이얼로그)은 이 규칙을 쓰지 않고 모든 칩을 보인다.
+ */
+function notableBadges(tool: PluginManifestTool): ScopeBadge[] {
+  return scopeRiskAndApprovalBadges([
+    {
+      ...tool,
+      risk: tool.risk === "read" ? undefined : tool.risk,
+      approvalTier: tool.approvalTier === "read_only" ? undefined : tool.approvalTier,
+    },
+  ]);
+}
+
 function ToolRow({ tool, allowed }: { tool: PluginManifestTool; allowed: boolean }) {
-  const badges = scopeRiskAndApprovalBadges([tool]);
+  const badges = notableBadges(tool);
   return (
     <li className="flex flex-col gap-1 py-3">
       {/* 사람이 읽는 문장이 먼저다. 도구 이름(`github.list_repositories`)은 정책과 감사가 부르는

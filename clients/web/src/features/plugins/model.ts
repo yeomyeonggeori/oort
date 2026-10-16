@@ -489,20 +489,32 @@ export function workspaceInstallSentence({
   enabled: boolean;
 }): string {
   if (!installed) return "설치하지 않았어요";
-  return enabled ? "설치돼 있어요" : "설치했지만 꺼져 있어요";
+  // 목록 칩(「워크스페이스 비활성」)과 같은 말이고, 설치가 열리면 돌아오는 「다시 활성화」 단추와도 짝이다.
+  return enabled ? "설치돼 있어요" : "설치했지만 비활성이에요";
 }
 
 /**
- * 내가 허용한 권한. 서버의 실효 정책(`toolPolicy`)이 말하는 것만 옮긴다: 정책이 싣는
- * 도구가 없으면 허용한 것이 없다. 설치가 아니라 정책에서 읽으므로 설치돼 있어도 비어 있을 수 있다.
+ * 내가 허용한 권한. 서버의 실효 정책(`toolPolicy`)이 말하는 것만 옮긴다. 설치가 아니라 정책에서
+ * 읽으므로 설치돼 있어도 비어 있을 수 있다.
+ *
+ * **비활성인 설치는 따로 말한다.** 서버의 정책 질의는 grant를 설치가 켜져 있을 때만 센다
+ * (`POLICY_SQL`: `wpi.enabled AND wpi.revoked_at IS NULL`). 그래서 꺼진 앱에서 비어 있는 정책은
+ * 「허용한 적 없다」가 아니라 「지금 적용되는 것이 없다」다. 앞의 말은 이 화면이 모르는 사실이다.
+ * 괄호 안은 「허용한 도구」로 쓴다: 「할 수 있는 일」 위의 「이 앱의 도구는 N개」(선언된 수)와
+ * 같은 낱말이 다른 수를 가리키면 둘이 어긋나는 날 한쪽이 거짓으로 읽힌다.
  */
 export function myGrantSentence(
   activeScopes: readonly string[],
-  toolCount: number
+  toolCount: number,
+  plugin: { installed: boolean; enabled: boolean } = { installed: true, enabled: true }
 ): string {
-  if (activeScopes.length === 0 && toolCount === 0) return "허용한 권한이 없어요";
-  if (activeScopes.length === 0) return `도구 ${toolCount}개`;
-  return `${activeScopes.map(identifiableScopeSentence).join(", ")} (도구 ${toolCount}개)`;
+  if (activeScopes.length === 0 && toolCount === 0) {
+    return plugin.installed && !plugin.enabled
+      ? "비활성인 동안은 적용되는 권한이 없어요"
+      : "허용한 권한이 없어요";
+  }
+  if (activeScopes.length === 0) return `허용한 도구 ${toolCount}개`;
+  return `${activeScopes.map(identifiableScopeSentence).join(", ")} (허용한 도구 ${toolCount}개)`;
 }
 
 /** 매니페스트의 도구를 한 줄로: 몇 개이고 어떤 종류인가. 도구가 없으면 줄 자체가 없다. */
@@ -514,25 +526,30 @@ export function pluginToolsSummary(tools: readonly { risk?: string }[]): string 
     counts.set(label, (counts.get(label) ?? 0) + 1);
   }
   if (counts.size === 1 && counts.has(riskLabel("read"))) {
-    return `도구 ${tools.length}개, 모두 읽기 도구예요.`;
+    return `이 앱의 도구는 ${tools.length}개이고, 모두 읽기 도구예요.`;
   }
   const parts = [...counts].map(([label, count]) => `${label} ${count}개`);
-  return `도구 ${tools.length}개: ${parts.join(", ")}.`;
+  return `이 앱의 도구는 ${tools.length}개예요: ${parts.join(", ")}.`;
 }
 
 export const PLUGIN_READONLY_COPY = {
   tools: {
     heading: "할 수 있는 일",
     none: "서버가 표시할 도구 정보를 보내지 않았어요.",
-    allowed: "내게 허용됨",
+    // 허용의 방향은 사람이 앱에 맡기는 쪽이다(설치가 열리면 돌아오는 「내 사용 허용」·「내 권한 회수」 단추와 같다).
+    // 「내게 허용됨」은 거꾸로 읽혀서 쓰지 않는다.
+    allowed: "내가 허용함",
   },
   egress: {
     heading: "연결하는 곳",
-    lead: "이 앱을 쓰면 아래 주소로 요청이 나가요. 에이전트가 도구에 넘긴 내용(검색어 등)이 그 요청에 담기고, 돌아온 내용은 에이전트가 읽어요.",
+    // 괄호 바로 뒤에 조사를 두지 않는다: `)` 뒤는 keep-all에서도 줄바꿈이 허용돼 900px에서 「이」가
+    // 줄 머리에 홀로 남았다(독립 design-review #3860 M1). 조사 고아는 `latin_particle`이 못 잡는다.
+    lead: "이 앱을 쓰면 아래 주소로 요청이 나가요. 에이전트가 도구에 넘긴 검색어 같은 내용은 그 요청에 담기고, 돌아온 내용은 에이전트가 읽어요.",
     none: "이 앱이 연결하는 주소를 서버가 알려 주지 않았어요.",
   },
   publisher: {
-    heading: "배포자와 약관",
+    // 이용약관·개인정보 링크는 매니페스트가 줄 때만 선다. 네 앱 모두 주지 않는 오늘 「약관」을 제목에 두면 거짓이다.
+    heading: "배포자 정보",
   },
   status: {
     workspace: "이 워크스페이스",

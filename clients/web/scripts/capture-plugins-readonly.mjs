@@ -12,7 +12,10 @@
 // 쓰기 경로 탐지(PROBE): 화면은 설치 경로에 GET을 보내 서버가 그 경로를 싣는지 본다.
 //   PROBE=absent   (기본) 설치·권한 경로가 라우터에 없다 → 404. 읽기 전용이다.
 //   PROBE=present  경로가 있다 → 405. 설치·권한 버튼이 돌아오는 경계를 한 장 찍는다.
-// 두 값은 서버의 응답일 뿐이고, 화면은 어느 쪽이든 같은 번들이다.
+//   PROBE=unknown  서버가 아파서 모른다 → 503. 화면은 닫힌 채 같은 안내 한 줄을 말한다(모르면 닫는다).
+// 세 값은 서버의 응답일 뿐이고, 화면은 어느 쪽이든 같은 번들이다.
+//   MANY=1         공식 네 앱 뒤에 합성 앱 셋을 더해 일곱으로 만든다. 검색·보기가 돌아오는 분기와
+//                  필터가 다 걸러 낸 빈 상태(「필터 지우기」)를 찍는다. 합성 앱은 길이만 재는 항목이다.
 //
 // 라이트·다크 × 1280 · 900. 목록(첫 화면), 상세(GitHub·Notion·Linear·Drive), 전체(키 큰 창).
 // 거기에 네 가지 필수 상태(빈 · 로딩 · 오류 · 서버가 앱 목록을 싣지 않아 접힘)와 키보드로 지나가는
@@ -31,7 +34,8 @@ const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO_ROOT = resolve(WEB_ROOT, "../..");
 const OUT_DIR = process.env.OUT_DIR ? resolve(process.env.OUT_DIR) : resolve(WEB_ROOT, "artifacts/plugins-readonly");
 const PORT = Number(process.env.CAPTURE_PORT || 5241);
-const PROBE = process.env.PROBE === "present" ? "present" : "absent";
+const PROBE = process.env.PROBE === "present" ? "present" : process.env.PROBE === "unknown" ? "unknown" : "absent";
+const MANY = process.env.MANY === "1";
 const ASSERT = process.env.CAPTURE_ASSERT !== "0";
 
 const wire = (name) => JSON.parse(readFileSync(resolve(REPO_ROOT, "server/Fixtures/plugin-wire", name), "utf8"));
@@ -49,6 +53,21 @@ const ID = {
   linear: "com.momo.plugins.linear",
   notion: "com.momo.plugins.notion",
 };
+
+if (MANY) {
+  // 길이만 재는 합성 항목: 상세가 없는 앱이라 고르지 않는다(첫 줄은 진짜 Drive가 선택된다).
+  for (const [name, from] of [["Atlas", 0], ["Beacon", 1], ["Cobalt", 3]]) {
+    CATALOG.plugins.push({
+      ...CATALOG.plugins[from],
+      pluginId: `com.example.${name.toLowerCase()}`,
+      name,
+      official: false,
+      recommended: false,
+      installed: false,
+      enabled: false,
+    });
+  }
+}
 
 const workspaceId = "00000000-0000-7000-8000-000000000001";
 const memberId = "00000000-0000-7000-8000-000000000101";
@@ -93,9 +112,9 @@ async function installRoutes(context) {
     }
     // 쓰기 경로 탐지: 설치·권한 경로에 GET. 있으면 405(다른 동사만 등록), 없으면 404.
     if (request.method() === "GET" && /\/plugins\/[^/]+\/(install|grants)$/.test(path)) {
-      return PROBE === "present"
-        ? json(route, { error: { code: "method_not_allowed", message: "method not allowed" } }, 405)
-        : json(route, { error: { code: "not_found", message: "not found" } }, 404);
+      if (PROBE === "present") return json(route, { error: { code: "method_not_allowed", message: "method not allowed" } }, 405);
+      if (PROBE === "unknown") return json(route, { error: { code: "unavailable", message: "unavailable" } }, 503);
+      return json(route, { error: { code: "not_found", message: "not found" } }, 404);
     }
     if (path.endsWith("/channels")) return json(route, { channels });
     if (path.endsWith("/roster")) return json(route, { members: roster });
@@ -232,7 +251,7 @@ async function scenes(browser, origin, scheme, viewport) {
         (await page.getByRole("button", { name: "워크스페이스에 설치", exact: true }).count()) +
         (await page.getByRole("button", { name: "다시 활성화", exact: true }).count());
       const uninstallButton = await page.getByRole("button", { name: "설치 해제", exact: true }).count();
-      if (PROBE === "absent") {
+      if (PROBE !== "present") {
         check(`${tag} ${name} 읽기 전용: 설치·권한 버튼 없음`, grantButtons + revokeButtons + installButton + uninstallButton === 0, `grant=${grantButtons} revoke=${revokeButtons} install=${installButton} uninstall=${uninstallButton}`);
         check(`${tag} ${name} 읽기 전용: 차분한 안내 한 줄`, closed === 1, `count=${closed}`);
       } else {
@@ -247,6 +266,90 @@ async function scenes(browser, origin, scheme, viewport) {
     await page.setViewportSize({ width: viewport.width, height: viewport.width >= 1200 ? 1300 : 1700 });
     await page.waitForTimeout(400);
     await shot("full");
+  } finally {
+    await context.close();
+  }
+}
+
+/** 한 문단이 실제로 어떻게 줄바꿈되는지: 글자마다 Range의 top으로 줄을 나눈다. */
+async function paragraphLines(page, selector) {
+  return page.evaluate((sel) => {
+    const paragraph = document.querySelector(sel);
+    if (!paragraph) return null;
+    const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT);
+    const lines = [];
+    let current = "";
+    let lastTop = null;
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      for (let index = 0; index < node.length; index += 1) {
+        const range = document.createRange();
+        range.setStart(node, index);
+        range.setEnd(node, index + 1);
+        const rect = range.getClientRects()[0];
+        if (!rect) continue;
+        const top = Math.round(rect.top);
+        if (lastTop !== null && Math.abs(top - lastTop) > 4) {
+          lines.push(current);
+          current = "";
+        }
+        lastTop = top;
+        current += node.data[index];
+      }
+    }
+    if (current) lines.push(current);
+    return lines;
+  }, selector);
+}
+
+/**
+ * D5 공개 문장(연결하는 곳)의 줄바꿈이 조사를 줄 머리에 홀로 남기지 않는가. 폭마다 다시 잰다:
+ * 900에서만 깨지던 결함(괄호 뒤 「이」)은 1240에서 다른 자리가 깨지는 식으로 폭에 따라 달랐다.
+ * 이어지는 줄이 한 글자 조사 + 공백으로 시작하면 고아다(첫 줄의 「이 앱을」은 지시어라 센 줄에서 뺀다).
+ */
+async function widthSweepScene(browser, origin, scheme) {
+  const { context, page } = await open(browser, origin, scheme, { width: 1280, height: 800 });
+  try {
+    await page.goto(`${origin}/#/ai/external/apps`);
+    await page.getByTestId("plugin-list").waitFor({ timeout: 20_000 });
+    for (const width of [900, 960, 1024, 1100, 1200, 1240, 1280, 1366, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      for (const [name, pluginId] of [["github", ID.github], ["notion", ID.notion], ["drive", ID.drive]]) {
+        await page.getByTestId(`plugin-catalog-${pluginId}`).click();
+        await page.getByTestId("plugin-detail").waitFor();
+        await page.waitForTimeout(250);
+        const lines = await paragraphLines(page, '[data-testid="plugin-egress"] p');
+        const orphans = (lines ?? []).slice(1).filter((line) => /^[이가은는을를도만의에로와과]\s/.test(line.trimStart()));
+        check(`${width}-${scheme} ${name} D5 문장: 줄 머리에 홀로 남은 조사가 없다`, lines !== null && orphans.length === 0, JSON.stringify(lines));
+      }
+    }
+  } finally {
+    await context.close();
+  }
+}
+
+/** 목록이 일곱이 되면 검색·보기가 돌아오고, 다 걸러 내면 사실대로 말하고 「필터 지우기」를 준다. */
+async function manyScenes(browser, origin, scheme) {
+  const viewport = { width: 1280, height: 800 };
+  const tag = `${viewport.width}-${scheme}`;
+  const { context, page } = await open(browser, origin, scheme, viewport);
+  const shot = (name) => page.screenshot({ path: resolve(OUT_DIR, `${name}-${tag}.png`) });
+  try {
+    await page.goto(`${origin}/#/ai/external/apps`);
+    await page.getByTestId("plugin-list").waitFor({ timeout: 20_000 });
+    await page.getByTestId("plugin-detail").waitFor();
+    await page.waitForTimeout(700);
+    await shot("many");
+    check(`${tag} 일곱 앱: 목록이 일곱 줄이다`, (await page.locator('[data-testid^="plugin-catalog-"]').count()) === 7);
+    check(`${tag} 일곱 앱: 검색·보기가 돌아온다`, (await page.locator("#plugin-search").count()) === 1 && (await page.locator("#plugin-filter").count()) === 1);
+    await page.locator("#plugin-search").fill("zzzz");
+    await page.getByTestId("plugins-empty").waitFor({ timeout: 10_000 });
+    await page.waitForTimeout(300);
+    await shot("many-filtered-empty");
+    const empty = (await page.getByTestId("plugins-empty").textContent()) ?? "";
+    check(`${tag} 걸러 낸 빈 상태: 사실대로 말하고 필터 지우기를 준다`, empty.includes("보여 줄 앱이 아직 없어요.") && empty.includes("검색어나 보기를 바꿔") && empty.includes("필터 지우기"), empty);
+    await page.getByRole("button", { name: "필터 지우기", exact: true }).click();
+    await page.getByTestId("plugin-list").waitFor({ timeout: 10_000 });
+    check(`${tag} 필터 지우기: 일곱 줄이 돌아온다`, (await page.locator('[data-testid^="plugin-catalog-"]').count()) === 7);
   } finally {
     await context.close();
   }
@@ -363,9 +466,14 @@ async function main() {
   const browser = await chromium.launch();
   try {
     for (const scheme of ["light", "dark"]) {
+      if (MANY) {
+        await manyScenes(browser, preview.origin, scheme);
+        continue;
+      }
       for (const viewport of [{ width: 1280, height: 800 }, { width: 900, height: 800 }]) {
         await scenes(browser, preview.origin, scheme, viewport);
       }
+      if (PROBE === "absent") await widthSweepScene(browser, preview.origin, scheme);
       // 필수 상태와 키보드 장면은 설치 경로가 없는 서버(오늘의 서버)에서만 의미가 있다.
       if (PROBE === "absent") {
         await stateScenes(browser, preview.origin, scheme);

@@ -62,6 +62,24 @@ function toAppsRead(
 }
 
 /**
+ * 「앱」 줄 하나만 읽는다. 외부 연결의 앱 상세 머리가 서버 사정(앱 목록이 없다)을 알아야 해서
+ * 따로 뗐다: 머리말이 「확인해요」라고 하는 바로 아래에서 본문이 「보여주지 못해요」라고 하면 화면이
+ * 스스로를 반박한다. 같은 쿼리 키라 `useExternalReads`와 앱 구획 본문이 한 번만 요청한다.
+ */
+export function useAppsRead(): AppsRead {
+  const { workspaceId } = useSession();
+  const appsProvided = isSurfaceProvided("plugins");
+  const plugins = useQuery({
+    queryKey: ["plugins", workspaceId.toLowerCase()],
+    queryFn: () => listPlugins(workspaceId),
+    retry: false,
+    // 정적 판정이 거짓이면 요청을 한 번도 보내지 않는다(`serverSurfaces.ts` 두 겹의 (a)).
+    enabled: appsProvided,
+  });
+  return toAppsRead(appsProvided, plugins);
+}
+
+/**
  * 외부 연결 네 줄의 개수 읽기. 개요 카드와 외부 연결 구획이 같은 값을 보도록 한 곳에서 센다.
  * `hosted`는 에이전트 카드도 쓰므로 함께 돌려준다.
  */
@@ -74,16 +92,9 @@ export function useExternalReads() {
     queryFn: () => listEventSubscriptions(workspaceId),
     retry: false,
   });
-  const appsProvided = isSurfaceProvided("plugins");
-  const plugins = useQuery({
-    queryKey: ["plugins", workspaceId.toLowerCase()],
-    queryFn: () => listPlugins(workspaceId),
-    retry: false,
-    // 정적 판정이 거짓이면 요청을 한 번도 보내지 않는다(`serverSurfaces.ts` 두 겹의 (a)).
-    enabled: appsProvided,
-  });
+  const apps = useAppsRead();
   const input: ExternalInput = {
-    apps: toAppsRead(appsProvided, plugins),
+    apps,
     incoming: toRead(webhooks, (rows) => rows.filter((row) => row.status === "active").length),
     outgoing: toRead(events, (rows) => rows.filter((row) => row.enabled).length),
     externalAgents: toRead(hosted, externalAgentCount),

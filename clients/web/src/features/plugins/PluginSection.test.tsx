@@ -225,26 +225,33 @@ describe("읽기 전용: 설치·권한 경로가 없는 서버 (오늘의 Rust 
 
     // 설치 상태와 내 권한: 정책이 싣는 것만 말한다.
     expect(text(el, "plugin-status-workspace")).toContain("설치돼 있어요");
-    expect(text(el, "plugin-status-mine")).toContain("github 읽기 권한 (도구 2개)");
+    expect(text(el, "plugin-status-mine")).toContain("github 읽기 권한 (허용한 도구 2개)");
 
     // 할 수 있는 일: 매니페스트의 한국어 설명이 제목이고, 도구 이름은 식별자로 아래에 선다.
     const tools = [...(q(el, "plugin-tools")?.querySelectorAll("li") ?? [])];
     expect(tools).toHaveLength(2);
     expect(tools[0].textContent).toContain("권한을 위임한 사용자가 접근할 수 있는 저장소 목록을 조회합니다.");
     expect(tools[0].textContent).toContain("github.list_repositories");
-    expect(text(el, "plugin-tools")).toContain("도구 2개, 모두 읽기 도구예요.");
-    // 내게 허용된 도구에만 「내게 허용됨」이 붙는다.
-    expect((text(el, "plugin-tools").match(/내게 허용됨/g) ?? []).length).toBe(2);
+    expect(text(el, "plugin-tools")).toContain("이 앱의 도구는 2개이고, 모두 읽기 도구예요.");
+    // 내가 허용한 도구에만 「내가 허용함」이 붙는다.
+    expect((text(el, "plugin-tools").match(/내가 허용함/g) ?? []).length).toBe(2);
+    expect(text(el, "plugin-tools")).not.toContain("내게 허용됨");
+    // 읽기 도구와 읽기 전용 승인은 위 요약이 이미 말한다: 도구마다 같은 칩 둘을 달지 않는다.
+    expect(text(el, "plugin-tools")).not.toMatch(/위험도: 읽기|승인: 읽기 전용/);
 
     // 연결하는 곳(D5): 주소와, 그 주소로 무엇이 오가는지 쉬운 말로.
     const egress = text(el, "plugin-egress");
     expect(egress).toContain("api.githubcopilot.com");
     expect(egress).toContain("요청이 나가요");
-    expect(egress).toContain("도구에 넘긴 내용");
+    expect(egress).toContain("도구에 넘긴 검색어 같은 내용");
+    // `)` 바로 뒤의 조사는 keep-all에서도 줄바꿈 자리라 900px에서 조사가 줄 머리에 홀로 남았다(M1).
+    expect(egress).not.toMatch(/\)[가-힣]/);
     // 로그인 정보를 어디에 둔다는 보증은 하지 않는다(앱마다 다르고 이 화면이 아는 사실이 아니다).
     expect(egress).not.toMatch(/토큰|비밀번호|저장하지 않/);
 
-    // 배포자와 약관.
+    // 배포자 정보. 이용약관·개인정보 링크가 없는 오늘 제목이 「약관」을 약속하지 않는다(M6).
+    expect(q(el, "plugin-detail")?.textContent).toContain("배포자 정보");
+    expect(q(el, "plugin-detail")?.textContent).not.toContain("배포자와 약관");
     expect(detail).toContain("GitHub, oort 레지스트리가 확인했어요");
     expect(detail).toContain("MIT");
     expect(q(el, "plugin-detail")?.querySelector('a[href="https://github.com/github/github-mcp-server"]')).not.toBeNull();
@@ -261,7 +268,7 @@ describe("읽기 전용: 설치·권한 경로가 없는 서버 (오늘의 Rust 
     const notice = q(el, "plugin-install-closed");
     expect(notice).not.toBeNull();
     expect(notice?.textContent).toBe(serverSurface("pluginInstall").fallback);
-    expect(notice?.textContent).toContain("설치는 곧 열려요");
+    expect(notice?.textContent).toContain("보기만 할 수 있어요");
     // 아직 만들지 않은 기능은 잘못된 것이 아니다: alert 역할도 오류 배너도 아니다.
     expect(el.querySelector('[role="alert"]')).toBeNull();
     expect(notice?.closest('[role="alert"]')).toBeNull();
@@ -271,10 +278,73 @@ describe("읽기 전용: 설치·권한 경로가 없는 서버 (오늘의 Rust 
     expect(text(el, "plugin-status-mine")).toContain("허용한 권한이 없어요");
   });
 
+  it("안내 줄은 이미 설치된 앱 곁에서도 참이다: 곧 열린다고 예측하지 않고 해제·권한 변경도 막혀 있다고 말한다 (H1)", async () => {
+    const el = await mount();
+    await openDetail(el, GITHUB);
+    // 실제 서버 바이트에서 GitHub은 설치되어 켜져 있다: 「설치돼 있어요」 곁에서 「설치는 곧」이면 모순이다.
+    expect(text(el, "plugin-status-workspace")).toContain("설치돼 있어요");
+    const notice = text(el, "plugin-install-closed");
+    expect(notice).toContain("보기만 할 수 있어요");
+    expect(notice).toContain("설치와 해제, 권한 변경");
+    expect(notice).not.toMatch(/곧|나중|예정/);
+    // 같은 줄이 서버를 모를 때(403)도 서고, 그때도 참이다(예측도 단정도 없다).
+    act(() => root?.unmount());
+    host?.remove();
+    root = null;
+    host = null;
+    h.probe.mockResolvedValue([405, 403]);
+    const unknown = await mount();
+    await openDetail(unknown, GITHUB);
+    await until(() => q(unknown, "plugin-install-closed"));
+    expect(text(unknown, "plugin-install-closed")).toBe(notice);
+  });
+
+  it("공식 네 앱은 모두 공식이라 「공식」 칩은 신호색이 아니라 중립 톤이다 (M5)", async () => {
+    const el = await mount();
+    await openDetail(el, GITHUB);
+    const chips = [...el.querySelectorAll("span")].filter((span) => span.textContent === "공식");
+    // 목록 네 줄 + 상세 머리 하나.
+    expect(chips.length).toBe(5);
+    for (const chip of chips) expect(chip.className, chip.className).not.toMatch(/accent|signal/);
+  });
+
+  it("도구 칩은 평범하지 않은 것만 단다: 읽기 도구는 칩이 없고 쓰기 도구와 쓰기 승인은 칩이 된다 (M7)", async () => {
+    const writeTool = {
+      name: "notion.update_page",
+      description: "페이지의 내용을 고칩니다.",
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      risk: "write",
+      approvalPolicy: "require_approval",
+      schemaDigest: `sha256:${"c".repeat(64)}`,
+      scopes: ["notion:write"],
+    };
+    const manifest = {
+      ...notionManifest,
+      mcp: { ...notionManifest.mcp, tools: [...notionManifest.mcp.tools, writeTool] },
+      momo: {
+        ...notionManifest.momo,
+        approvalTier: { ...notionManifest.momo.approvalTier, "notion.update_page": "workspace_write" },
+      },
+    };
+    h.details.set(NOTION, detailWire(manifest));
+    const el = await mount();
+    await openDetail(el, NOTION);
+    const rows = [...(q(el, "plugin-tools")?.querySelectorAll("li") ?? [])];
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toContain("notion.search");
+    expect(rows[0].textContent).not.toMatch(/위험도|승인/);
+    expect(rows[1].textContent).toContain("위험도: 쓰기");
+    expect(rows[1].textContent).toContain("승인: 워크스페이스 쓰기");
+    expect(text(el, "plugin-tools")).toContain("이 앱의 도구는 2개예요: 읽기 1개, 쓰기 1개.");
+  });
+
   it("설치했지만 꺼진 앱(Linear)은 그렇게 말하고, 라이선스는 읽을 수 있는 이름이다", async () => {
     const el = await mount();
     await openDetail(el, LINEAR);
-    expect(text(el, "plugin-status-workspace")).toContain("설치했지만 꺼져 있어요");
+    expect(text(el, "plugin-status-workspace")).toContain("설치했지만 비활성이에요");
+    // 서버는 grant를 설치가 켜져 있을 때만 센다: 빈 정책은 「허용한 적 없다」가 아니라 「지금 적용되는 것이 없다」다.
+    expect(text(el, "plugin-status-mine")).toContain("비활성인 동안은 적용되는 권한이 없어요");
+    expect(text(el, "plugin-status-mine")).not.toContain("허용한 권한이 없어요");
     expect(text(el, "plugin-detail")).toContain("Linear 호스팅 서비스 약관");
     expect(text(el, "plugin-detail")).not.toContain("LicenseRef-");
   });
@@ -284,7 +354,7 @@ describe("읽기 전용: 설치·권한 경로가 없는 서버 (오늘의 Rust 
     await openDetail(el, DRIVE);
     expect(text(el, "plugin-egress")).toContain("www.googleapis.com");
     expect(text(el, "plugin-egress")).toContain("oauth2.googleapis.com");
-    expect(text(el, "plugin-tools")).toContain("도구 3개, 모두 읽기 도구예요.");
+    expect(text(el, "plugin-tools")).toContain("이 앱의 도구는 3개이고, 모두 읽기 도구예요.");
   });
 
   it("공식 네 앱은 한눈에 읽히므로 검색·보기 컨트롤이 서지 않는다", async () => {
@@ -332,7 +402,7 @@ describe("열림: 설치·권한 경로가 서 있는 서버 (405, 405)", () => 
     await openDetail(el, GITHUB);
     await until(() => writeControls(el).length > 0);
     expect(writeControls(el).sort()).toEqual(["내 권한 회수", "설치 해제"].sort());
-    expect(text(el, "plugin-status-mine")).toContain("github 읽기 권한 (도구 2개)");
+    expect(text(el, "plugin-status-mine")).toContain("github 읽기 권한 (허용한 도구 2개)");
   });
 
   it("관리자가 아닌 멤버는 설치 대신 누구에게 부탁할지 안내를 받는다", async () => {

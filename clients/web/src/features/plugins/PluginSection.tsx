@@ -392,7 +392,9 @@ export function PluginSection({ offline }: { offline: boolean }) {
                     <span className="flex min-w-0 flex-wrap items-center gap-2">
                       <PluginIcon plugin={plugin} />
                       <span className="text-body font-semibold text-ink">{plugin.name}</span>
-                      {plugin.official && <StatusChip tone="accent">공식</StatusChip>}
+                      {/* 공식 네 앱에서 이 칩은 상수다. 신호색(선택 채움)을 상수에 쓰지 않고, 선택된 줄에서 칩이
+                          채움에 묻히지도 않게 옆의 설치 상태 칩과 같은 중립 톤으로 둔다(독립 design-review M5). */}
+                      {plugin.official && <StatusChip tone="muted">공식</StatusChip>}
                       {/* 다이얼로그와 같은 중립 톤이다(MOMO-676 M-1). MOMO-642 7이
                           동의 다이얼로그의 같은 문자열을 ok 초록에서 내린 근거는
                           "위험 칩과 경쟁하지 않는 다른 표면"이었는데, 마켓플레이스는
@@ -613,7 +615,7 @@ function PluginDetailPanel({
             <div className="flex flex-wrap items-center gap-2">
               {/* 앱 이름은 아래 섹션 제목(body 굵게)보다 한 단 위다: 이 패널의 주인이 누구인지가 먼저 읽힌다. */}
               <h3 className="text-title font-semibold text-ink">{detail.name}</h3>
-              {detail.official && <StatusChip tone="accent">공식</StatusChip>}
+              {detail.official && <StatusChip tone="muted">공식</StatusChip>}
             </div>
             <p className="text-meta text-ink-muted">{pluginSubtitle(detail)} · 버전 {detail.version}</p>
           </div>
@@ -934,7 +936,9 @@ function PluginActionButton({
 }
 
 function DetailRow({ label, value }: { label: string; value: string }) {
-  return <div className="flex min-w-0 flex-col gap-px"><dt className="text-meta text-ink-muted">{label}</dt><dd className="break-all text-body text-ink">{value}</dd></div>;
+  // break-words: 한국어 문장(「…oort 레지스트리가 확인했어요」)은 어절에서 끊고, 줄보다 긴 토큰(도메인)만 그 안에서 끊는다.
+  // break-all은 「레지스트리/가」처럼 어절 중간을 잘랐다(독립 design-review N4).
+  return <div className="flex min-w-0 flex-col gap-px"><dt className="text-meta text-ink-muted">{label}</dt><dd className="break-words text-body text-ink">{value}</dd></div>;
 }
 
 function DetailLink({ label, href }: { label: string; href: string }) {

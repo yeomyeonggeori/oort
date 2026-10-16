@@ -213,7 +213,12 @@ describe("앱 설치 탐지 (#3860, ADR-0113 증보 P3)", () => {
     expect(surface.provided).toBe(false);
     expect(surface.label).toBe("앱 설치");
     // 화면의 차분한 안내 줄이 이 문장을 그대로 쓴다.
-    expect(surface.fallback).toContain("설치는 곧 열려요");
+    expect(surface.fallback).toContain("보기만 할 수 있어요");
+    // 설치뿐 아니라 해제와 내 권한 변경도 막혀 있다고 말해야 설치된 앱 곁에서 거짓이 되지 않는다.
+    expect(surface.fallback).toContain("설치와 해제, 권한 변경");
+    // 이 줄은 서버에 경로가 없을 때도, 서버가 아파서 모를 때도 선다. 언제 열린다는 예측은
+    // 클라이언트가 지킬 수 없는 약속이다(독립 design-review H1).
+    expect(surface.fallback).not.toMatch(/곧|나중|예정|준비/);
   });
 
   it("앱 보기 줄의 라벨은 사용자가 부르는 이름 「앱」이다", () => {

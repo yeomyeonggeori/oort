@@ -359,23 +359,34 @@ describe("읽기 전용 카탈로그의 문장", () => {
   it("설치 상태는 설치·활성 두 사실을 세 문장으로 가른다", () => {
     expect(workspaceInstallSentence({ installed: false, enabled: false })).toBe("설치하지 않았어요");
     expect(workspaceInstallSentence({ installed: true, enabled: true })).toBe("설치돼 있어요");
-    expect(workspaceInstallSentence({ installed: true, enabled: false })).toBe("설치했지만 꺼져 있어요");
+    // 목록 칩(「워크스페이스 비활성」)과 같은 말이다: 같은 상태가 화면 둘에서 다른 낱말이 되지 않는다.
+    expect(workspaceInstallSentence({ installed: true, enabled: false })).toBe("설치했지만 비활성이에요");
+    expect(workspaceInstallationLabel({ installed: true, enabled: false })).toContain("비활성");
   });
 
   it("내 권한은 정책이 싣는 것만 말한다: 설치와 무관하게 비어 있을 수 있다", () => {
     expect(myGrantSentence([], 0)).toBe("허용한 권한이 없어요");
-    expect(myGrantSentence(["github:read"], 2)).toBe("github 읽기 권한 (도구 2개)");
+    expect(myGrantSentence(["github:read"], 2)).toBe("github 읽기 권한 (허용한 도구 2개)");
     // 정책에는 도구가 있는데 매니페스트와 이어 보지 못한 경우: 권한 이름을 지어내지 않는다.
-    expect(myGrantSentence([], 2)).toBe("도구 2개");
+    expect(myGrantSentence([], 2)).toBe("허용한 도구 2개");
+  });
+
+  it("꺼진 설치에서 비어 있는 정책은 「허용한 적 없다」가 아니라 「지금 적용되는 것이 없다」다", () => {
+    // 서버의 정책 질의는 grant를 설치가 켜져 있을 때만 센다. 꺼진 앱의 빈 정책에 「허용한 권한이 없어요」라고
+    // 하면 이 화면이 모르는 사실(허용한 적이 없다)을 말하게 된다(독립 design-review #3860 M3).
+    expect(myGrantSentence([], 0, { installed: true, enabled: false })).toBe("비활성인 동안은 적용되는 권한이 없어요");
+    expect(myGrantSentence([], 0, { installed: false, enabled: false })).toBe("허용한 권한이 없어요");
+    expect(myGrantSentence([], 0, { installed: true, enabled: true })).toBe("허용한 권한이 없어요");
   });
 
   it("도구 한 줄 요약: 공식 네 앱은 모두 읽기 도구라고 말하고, 섞이면 종류별로 센다", () => {
-    expect(pluginToolsSummary(githubManifest.mcp.tools)).toBe("도구 2개, 모두 읽기 도구예요.");
-    expect(pluginToolsSummary(driveManifest.mcp.tools)).toBe("도구 3개, 모두 읽기 도구예요.");
+    // 「이 앱의 도구」(선언된 수)는 내 권한 줄의 「허용한 도구」(허용된 수)와 다른 수다. 낱말로 갈라 둔다.
+    expect(pluginToolsSummary(githubManifest.mcp.tools)).toBe("이 앱의 도구는 2개이고, 모두 읽기 도구예요.");
+    expect(pluginToolsSummary(driveManifest.mcp.tools)).toBe("이 앱의 도구는 3개이고, 모두 읽기 도구예요.");
     expect(pluginToolsSummary([{ risk: "read" }, { risk: "write" }, { risk: "write" }]))
-      .toBe("도구 3개: 읽기 1개, 쓰기 2개.");
+      .toBe("이 앱의 도구는 3개예요: 읽기 1개, 쓰기 2개.");
     expect(pluginToolsSummary([{ risk: "read" }, { risk: "admin" }]))
-      .toBe("도구 2개: 읽기 1개, 관리자 1개.");
+      .toBe("이 앱의 도구는 2개예요: 읽기 1개, 관리자 1개.");
     expect(pluginToolsSummary([])).toBeNull();
   });
 
