@@ -17825,3 +17825,534 @@ async fn claim_carries_the_live_conversation_bounded_to_the_context_window() {
     // The queued snapshot is untouched and bounded by the same number.
     assert!(job["work"]["recentMessages"].as_array().unwrap().len() <= 30);
 }
+
+// ---------------------------------------------------------------------------
+// ADR-0201 증보 v2 H12-S5 (#3900) — the helper's new settings cards
+// ---------------------------------------------------------------------------
+
+/// The `momo_worker` pool — the role the team AI's proposal transaction really
+/// runs in (BYPASSRLS, and barred from every `mem_*` table by migration 101).
+async fn momo_worker_pool_3900() -> PgPool {
+    let options: PgConnectOptions = database_url()
+        .parse()
+        .expect("DATABASE_URL parses as a postgres connect string");
+    PgPoolOptions::new()
+        .max_connections(4)
+        .connect_with(
+            options.username("momo_worker").password(
+                &std::env::var("MOMO_WORKER_PASSWORD")
+                    .unwrap_or_else(|_| "momo_worker_dev_pw".to_string()),
+            ),
+        )
+        .await
+        .expect("connect as momo_worker after bootstrap_roles.sql")
+}
+
+/// One place builds the provenance record, so a field added to it is one edit.
+fn via_ai_3900() -> momo_workspace_actions::team_ai::ViaAi {
+    momo_workspace_actions::team_ai::ViaAi {
+        model: "m".into(),
+        latency_ms: 1,
+        prompt_tokens: 1,
+        completion_tokens: 1,
+        tools: Vec::new(),
+        model_calls: 1,
+        web_searches: 0,
+    }
+}
+
+/// Provision the team AI with the shipped function and seat it in the channel.
+async fn enable_helper_3900(su: &PgPool, fixture: &Fixture) -> Uuid {
+    let (workspace, human, channel) = (fixture.workspace, fixture.human, fixture.channel);
+    let helper = momo_db::with_tenant_tx(su, workspace, move |conn| {
+        Box::pin(async move {
+            momo_workspace_actions::team_ai::enable_in_tx(conn, workspace, human).await
+        })
+    })
+    .await
+    .expect("enable the team AI");
+    sqlx::query("INSERT INTO membership (workspace_id, channel_id, member_id) VALUES ($1,$2,$3)")
+        .bind(workspace)
+        .bind(channel)
+        .bind(helper)
+        .execute(su)
+        .await
+        .unwrap();
+    helper
+}
+
+/// The admin asks the helper; the proposal runs through
+/// `momo_workspace_actions::team_ai::propose_in_tx` (the worker's function) **on the
+/// `momo_worker` role**. Returns the verdict.
+async fn helper_propose_3900(
+    su: &PgPool,
+    worker: &PgPool,
+    fixture: &Fixture,
+    helper: Uuid,
+    action_id: &'static str,
+    args: Value,
+) -> Result<
+    momo_workspace_actions::team_ai::ProposalOk,
+    momo_workspace_actions::team_ai::ProposalRefusal,
+> {
+    let (workspace, human, channel) = (fixture.workspace, fixture.human, fixture.channel);
+    let run_id = momo_db::with_tenant_tx(su, workspace, move |conn| {
+        Box::pin(async move {
+            let sent = momo_messaging::send_message_in_tx(
+                conn,
+                workspace,
+                momo_messaging::NewMessage::text(channel, human, "@oort 설정 바꿔줘".to_string()),
+            )
+            .await?;
+            let created = momo_agent::create_agent_run_in_tx(
+                conn,
+                workspace,
+                momo_agent::NewAgentRun {
+                    channel_id: channel,
+                    trigger: momo_agent::RunTrigger::Mention {
+                        message_id: sent.message.id,
+                        agent_member_id: helper,
+                    },
+                    parent_run_id: None,
+                    max_steps: 50,
+                    depth: 0,
+                    input: json!({"schema": "momo.agent_run.input.v0", "surface": "mention", "prompt": "x", "depth": 0}),
+                },
+            )
+            .await?;
+            Ok(created.id)
+        })
+    })
+    .await
+    .expect("raise a run for the helper");
+    momo_db::with_tenant_tx(worker, workspace, move |conn| {
+        let args = args.clone();
+        Box::pin(async move {
+            let context = momo_workspace_actions::team_ai::ProposalContext {
+                workspace_id: workspace,
+                run_id,
+                channel_id: channel,
+                agent_member_id: helper,
+                trigger_message_id: None,
+                now_ms: chrono::Utc::now().timestamp_millis(),
+                expires_at: chrono::Utc::now() + chrono::Duration::minutes(30),
+                via: via_ai_3900(),
+            };
+            momo_workspace_actions::team_ai::propose_in_tx(conn, &context, action_id, &args, None)
+                .await
+        })
+    })
+    .await
+    .expect("the proposal transaction")
+}
+
+async fn approval_count_3900(su: &PgPool, workspace: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM approval WHERE workspace_id=$1")
+        .bind(workspace)
+        .fetch_one(su)
+        .await
+        .unwrap()
+}
+
+async fn approval_args_3900(su: &PgPool, approval: Uuid) -> Value {
+    let payload: Value = sqlx::query_scalar("SELECT payload FROM approval WHERE id=$1")
+        .bind(approval)
+        .fetch_one(su)
+        .await
+        .unwrap();
+    payload["action"]["args"].clone()
+}
+
+async fn card_rows_3900(su: &PgPool, card: Uuid) -> (Value, Value) {
+    let props: Value = sqlx::query_scalar("SELECT props FROM message WHERE id=$1")
+        .bind(card)
+        .fetch_one(su)
+        .await
+        .unwrap();
+    (
+        props["action"]["rows"].clone(),
+        props["action"]["required_role"].clone(),
+    )
+}
+
+/// The three switches as stored: (unfurl enabled row, memory workspace row, tier row).
+async fn helper_settings_state_3900(
+    su: &PgPool,
+    workspace: Uuid,
+) -> (
+    Option<bool>,
+    Option<(bool, bool)>,
+    Option<(String, Option<String>)>,
+) {
+    let unfurl: Option<bool> =
+        sqlx::query_scalar("SELECT enabled FROM workspace_unfurl_setting WHERE workspace_id=$1")
+            .bind(workspace)
+            .fetch_optional(su)
+            .await
+            .unwrap();
+    let memory: Option<(bool, bool)> = sqlx::query_as(
+        "SELECT enabled, paused FROM mem_settings WHERE workspace_id=$1 AND scope='workspace'",
+    )
+    .bind(workspace)
+    .fetch_optional(su)
+    .await
+    .unwrap();
+    let tier: Option<(String, Option<String>)> = sqlx::query_as(
+        "SELECT mode, auto_target FROM work_tier_policy WHERE workspace_id=$1 AND member_id IS NULL",
+    )
+    .bind(workspace)
+    .fetch_optional(su)
+    .await
+    .unwrap();
+    (unfurl, memory, tier)
+}
+
+/// ADR-0201 증보 v2 H13-A15 — for each of the three helper-only settings actions:
+/// the card changes nothing before a decision; a plain member's approval is 403
+/// `role_required` and changes nothing; an agent bearer cannot decide; the admin's
+/// approval executes **exactly the card's args** (stored row == payload args, and
+/// the REST route's own GET reads the same values), as the approver, with the REST
+/// route's audit row carrying `via_agent`.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_helper_settings_cards_execute_as_the_approver_and_nobody_else() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let worker = momo_worker_pool_3900().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let plain_jwt = seed_plain_member(&su, &fixture).await;
+    let workspace = fixture.workspace;
+    let helper = enable_helper_3900(&su, &fixture).await;
+
+    let start = helper_settings_state_3900(&su, workspace).await;
+    assert_eq!(start, (None, None, None), "a fresh workspace has no rows");
+
+    for (action_id, args, required_role, audit_action, row_label) in [
+        (
+            "workspace.unfurl.update",
+            json!({"enabled": false}),
+            "workspace_operator",
+            "unfurl_setting.updated",
+            ("링크 미리보기", "켜짐 → 꺼짐"),
+        ),
+        (
+            "workspace.memory.update",
+            json!({"enabled": false, "paused": true}),
+            "admin",
+            "memory.settings.updated",
+            ("팀 기억", "끄기 — 새 요약을 만들지 않아요"),
+        ),
+        (
+            "workspace.work_tier.update",
+            json!({"mode": "auto", "autoTarget": "cloud"}),
+            "admin",
+            "work.tier_policy.changed",
+            (
+                "작업 이어가기",
+                "연결 끊김 시 묻기 → 자동 재개 · oort Cloud",
+            ),
+        ),
+    ] {
+        let state_before = helper_settings_state_3900(&su, workspace).await;
+        let proposed = helper_propose_3900(&su, &worker, &fixture, helper, action_id, args.clone())
+            .await
+            .unwrap_or_else(|refusal| panic!("{action_id}: {refusal:?}"));
+        let approval = proposed.approval_id;
+        let (rows, role) = card_rows_3900(&su, proposed.card_message_id).await;
+        assert_eq!(role, json!(required_role), "{action_id}");
+        assert!(
+            rows.as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row["label"] == row_label.0 && row["value"] == row_label.1),
+            "{action_id}: {rows}"
+        );
+        assert_eq!(approval_args_3900(&su, approval).await, args, "{action_id}");
+        assert_eq!(
+            helper_settings_state_3900(&su, workspace).await,
+            state_before,
+            "{action_id}: a proposal executes nothing"
+        );
+
+        // A plain member cannot approve: 403 role_required, nothing changes.
+        let (status, _h, refused) = decide_as(
+            &client,
+            &base,
+            workspace,
+            &plain_jwt,
+            approval,
+            true,
+            Uuid::new_v4(),
+        )
+        .await;
+        assert_eq!(status, 403, "{action_id}: {refused}");
+        assert_eq!(refused["status"], "role_required", "{action_id}");
+        assert_eq!(
+            helper_settings_state_3900(&su, workspace).await,
+            state_before
+        );
+
+        // An agent cannot decide at all.
+        let agent_try = client
+            .post(format!(
+                "{base}/v1/workspaces/{workspace}/approvals/{approval}/decision"
+            ))
+            .bearer_auth(&fixture.hosted_bearer)
+            .json(&json!({"approvalId": approval, "approve": true,
+                          "clientDecisionId": Uuid::new_v4()}))
+            .send()
+            .await
+            .unwrap();
+        assert!(
+            matches!(agent_try.status().as_u16(), 401 | 403),
+            "{action_id}: an agent decided"
+        );
+        assert_eq!(
+            helper_settings_state_3900(&su, workspace).await,
+            state_before
+        );
+
+        // The owner approves: the change is the card's args, made as the owner.
+        let (status, _h, approved) = decide_as(
+            &client,
+            &base,
+            workspace,
+            &fixture.human_jwt,
+            approval,
+            true,
+            Uuid::new_v4(),
+        )
+        .await;
+        assert_eq!(status, 200, "{action_id}: {approved}");
+        assert_eq!(approved["result"]["actionId"], json!(action_id));
+        assert_eq!(
+            approved["result"]["ref"],
+            json!({"type": "workspace_settings", "id": workspace.to_string()})
+        );
+        let (unfurl, memory, tier) = helper_settings_state_3900(&su, workspace).await;
+        match action_id {
+            "workspace.unfurl.update" => {
+                assert_eq!(unfurl, Some(args["enabled"].as_bool().unwrap()));
+                let updated_by: Option<Uuid> = sqlx::query_scalar(
+                    "SELECT updated_by FROM workspace_unfurl_setting WHERE workspace_id=$1",
+                )
+                .bind(workspace)
+                .fetch_one(&su)
+                .await
+                .unwrap();
+                assert_eq!(updated_by, Some(fixture.human), "written as the approver");
+                let rest: Value = client
+                    .get(format!("{base}/v1/workspaces/{workspace}/unfurl-settings"))
+                    .bearer_auth(&fixture.human_jwt)
+                    .send()
+                    .await
+                    .unwrap()
+                    .json()
+                    .await
+                    .unwrap();
+                assert_eq!(rest["enabled"], args["enabled"], "{rest}");
+            }
+            "workspace.memory.update" => {
+                assert_eq!(
+                    memory,
+                    Some((
+                        args["enabled"].as_bool().unwrap(),
+                        args["paused"].as_bool().unwrap()
+                    ))
+                );
+                let rest: Value = client
+                    .get(format!("{base}/v1/workspaces/{workspace}/memory/settings"))
+                    .bearer_auth(&fixture.human_jwt)
+                    .send()
+                    .await
+                    .unwrap()
+                    .json()
+                    .await
+                    .unwrap();
+                assert_eq!(rest["workspace"]["enabled"], args["enabled"], "{rest}");
+                assert_eq!(rest["workspace"]["paused"], args["paused"], "{rest}");
+            }
+            _ => {
+                assert_eq!(
+                    tier,
+                    Some((
+                        args["mode"].as_str().unwrap().to_string(),
+                        args["autoTarget"].as_str().map(str::to_string)
+                    ))
+                );
+                let rest: Value = client
+                    .get(format!("{base}/v1/workspaces/{workspace}/work-tier-policy"))
+                    .bearer_auth(&fixture.human_jwt)
+                    .send()
+                    .await
+                    .unwrap()
+                    .json()
+                    .await
+                    .unwrap();
+                assert_eq!(rest["workTierPolicy"]["mode"], args["mode"], "{rest}");
+                assert_eq!(
+                    rest["workTierPolicy"]["autoTarget"], args["autoTarget"],
+                    "{rest}"
+                );
+            }
+        }
+        // The REST route's own audit row, by the approver, naming the helper.
+        let (actor, detail): (Option<Uuid>, Value) = sqlx::query_as(
+            "SELECT actor_member_id, detail FROM audit_log \
+              WHERE workspace_id=$1 AND action=$2 ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(workspace)
+        .bind(audit_action)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+        assert_eq!(actor, Some(fixture.human), "{action_id}");
+        assert_eq!(
+            detail["via_agent"],
+            json!(helper.to_string()),
+            "{action_id}"
+        );
+        assert_eq!(detail["approval_id"], json!(approval.to_string()));
+    }
+}
+
+/// ADR-0201 증보 v2 H13-A13·A14·A16 — what never becomes a card:
+/// * the three helper-only ids through the Agent Port (`oort_action_propose`) —
+///   refused like an unknown id, zero approvals;
+/// * an unknown or V9-closed settings key, and `memory {enabled:true}`, from the
+///   helper — `InvalidArguments`, zero approvals;
+/// * `plugin.install` from the helper — the honest line, zero approvals.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_helper_only_and_declared_actions_make_no_card_where_they_must_not() {
+    use momo_workspace_actions::team_ai::ProposalRefusal;
+
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let worker = momo_worker_pool_3900().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let workspace = fixture.workspace;
+    let helper = enable_helper_3900(&su, &fixture).await;
+
+    // ---- the Agent Port refuses the helper-only ids -------------------------
+    for (action_id, args) in [
+        ("workspace.unfurl.update", json!({"enabled": false})),
+        ("workspace.memory.update", json!({"enabled": false})),
+        (
+            "workspace.work_tier.update",
+            json!({"mode": "auto", "autoTarget": "cloud"}),
+        ),
+    ] {
+        let before = approval_count_3900(&su, workspace).await;
+        let (status, refused) =
+            try_propose_action_3706(&client, &base, &su, &fixture, action_id, args).await;
+        assert_ne!(status, 200, "{action_id}: {refused}");
+        assert!(
+            structured(&refused).get("approvalId").is_none(),
+            "{action_id}: {refused}"
+        );
+        assert_eq!(
+            approval_count_3900(&su, workspace).await,
+            before,
+            "{action_id}"
+        );
+    }
+    // The same refusal an unknown id gets — no oracle for what exists.
+    let (unknown_status, unknown) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "workspace.nonexistent.update",
+        json!({"enabled": false}),
+    )
+    .await;
+    let (helper_only_status, helper_only) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "workspace.unfurl.update",
+        json!({"enabled": false}),
+    )
+    .await;
+    assert_eq!(helper_only_status, unknown_status);
+    assert_eq!(error_code(&helper_only), error_code(&unknown));
+
+    // ---- the helper: closed and unknown keys, memory on ---------------------
+    let before = approval_count_3900(&su, workspace).await;
+    for (action_id, args) in [
+        (
+            "workspace.settings.update",
+            json!({"allowedAgentModels": ["x"]}),
+        ),
+        (
+            "workspace.settings.update",
+            json!({"welcomeAgentMemberId": helper.to_string()}),
+        ),
+        (
+            "workspace.settings.update",
+            json!({"welcomePrompt": "hi", "team_ai_fast_path": false}),
+        ),
+        (
+            "workspace.unfurl.update",
+            json!({"enabled": false, "bogus": 1}),
+        ),
+        ("workspace.memory.update", json!({"enabled": true})),
+        (
+            "workspace.work_tier.update",
+            json!({"mode": "ask", "autoTarget": "cloud"}),
+        ),
+        (
+            "workspace.work_tier.update",
+            json!({"mode": "auto", "autoTarget": Uuid::new_v4().to_string()}),
+        ),
+    ] {
+        let refused = helper_propose_3900(&su, &worker, &fixture, helper, action_id, args.clone())
+            .await
+            .expect_err("no card");
+        assert_eq!(
+            refused,
+            ProposalRefusal::InvalidArguments,
+            "{action_id} {args}"
+        );
+    }
+    // A change to what is already so is not a proposal (unfurl starts on).
+    let refused = helper_propose_3900(
+        &su,
+        &worker,
+        &fixture,
+        helper,
+        "workspace.unfurl.update",
+        json!({"enabled": true}),
+    )
+    .await
+    .expect_err("nothing to change");
+    assert_eq!(refused, ProposalRefusal::InvalidArguments);
+    assert_eq!(approval_count_3900(&su, workspace).await, before);
+
+    // ---- plugin.install: the honest line, no card ---------------------------
+    let refused = helper_propose_3900(
+        &su,
+        &worker,
+        &fixture,
+        helper,
+        "plugin.install",
+        json!({"pluginId": "com.momo.plugins.linear"}),
+    )
+    .await
+    .expect_err("no card for an install");
+    assert_eq!(
+        refused,
+        ProposalRefusal::NotYetAvailable(
+            "Linear 앱은 아직 설치 경로가 없어요. 준비되면 설치 카드를 띄울게요.".into()
+        )
+    );
+    assert_eq!(approval_count_3900(&su, workspace).await, before);
+}

@@ -180,9 +180,15 @@ mod tests {
     /// OpenAPI `WorkspaceActionId` is the published one. Adding an action means
     /// editing three lines, and this is the test that fails when only two of
     /// them were edited.
+    ///
+    /// ADR-0201 증보 v2 H6: the Agent Port enum is the registry **minus** the
+    /// team-AI-only rows (`Proposers::TeamAiOnly`), and no such id may appear in it
+    /// (H13-A14, schema half); `WorkspaceActionId` stays the whole registry
+    /// because a team-AI-only action still produces a `WorkspaceActionResult`.
     #[test]
     fn the_action_ids_are_one_list_in_three_places() {
         let registry = actions::action_ids();
+        let agent_port = actions::proposable_action_ids(actions::ProposalDoor::AgentPort);
 
         let propose = momo_mcp::TOOL_CATALOG
             .iter()
@@ -199,10 +205,85 @@ mod tests {
                     .to_string()
             })
             .collect();
-        assert_eq!(schema_enum, registry, "oort_action_propose enum vs ACTIONS");
+        assert_eq!(
+            schema_enum, agent_port,
+            "oort_action_propose enum vs ACTIONS proposable through the Agent Port"
+        );
+        for action in actions::ACTIONS {
+            if action.proposers == actions::Proposers::TeamAiOnly {
+                assert!(
+                    !schema_enum.iter().any(|id| id == action.id),
+                    "{} is team-AI-only and must not be offered to external agents",
+                    action.id
+                );
+            }
+        }
 
         let spec_enum = openapi_enum("WorkspaceActionId");
         assert_eq!(spec_enum, registry, "openapi WorkspaceActionId vs ACTIONS");
+    }
+
+    /// **ADR-0201 증보 v2 H6-3 — the helper's ids are one list in three places.**
+    ///
+    /// `TEAM_AI_ACTION_IDS` is the definition; the worker tool
+    /// `workspace_action_propose` publishes it as its `actionId` enum (read back
+    /// here as its own list, so a hand edit to the tool cannot pass); and every id
+    /// is in the published `WorkspaceActionId` and proposable through the team-AI
+    /// door.
+    #[test]
+    fn the_team_ai_ids_are_one_list_in_three_places() {
+        let worker = momo_agent::tools::catalog_definitions()
+            .into_iter()
+            .find(|definition| definition.name == momo_agent::tools::WORKSPACE_ACTION_PROPOSE)
+            .expect("workspace_action_propose is in the worker catalog");
+        let tool_enum: Vec<String> = worker.parameters["properties"]["actionId"]["enum"]
+            .as_array()
+            .expect("the helper's tool publishes an actionId enum")
+            .iter()
+            .map(|value| value.as_str().expect("a string").to_string())
+            .collect();
+        assert_eq!(tool_enum, actions::TEAM_AI_ACTION_IDS);
+        let spec = openapi_enum("WorkspaceActionId");
+        for id in actions::TEAM_AI_ACTION_IDS {
+            assert!(
+                spec.iter().any(|known| known == id),
+                "{id} is not published"
+            );
+            assert!(
+                actions::proposable_action_by_id(id, actions::ProposalDoor::TeamAi).is_some(),
+                "{id}"
+            );
+        }
+        // The args hint names every helper action's keys, from the registry.
+        let hint = worker.parameters["properties"]["args"]["description"]
+            .as_str()
+            .expect("an args description");
+        for id in actions::TEAM_AI_ACTION_IDS {
+            assert!(hint.contains(id), "the args hint does not name {id}");
+        }
+        assert!(
+            hint.contains("workspace.work_tier.update {autoTarget?, mode}"),
+            "{hint}"
+        );
+    }
+
+    /// ADR-0201 증보 v2 H7: `plugin.install`'s declared contract names exactly the
+    /// official plugins the registry reads show, so the slice that opens it cannot
+    /// inherit a stale list.
+    #[test]
+    fn plugin_install_names_exactly_the_official_plugins() {
+        let declared: Vec<&str> = actions::PLUGIN_INSTALL_PLUGINS
+            .iter()
+            .map(|(id, _)| *id)
+            .collect();
+        assert_eq!(declared, crate::routes::plugins::OFFICIAL_PLUGIN_IDS);
+        let row = catalog()
+            .into_iter()
+            .find(|row| row.id == actions::ACTION_PLUGIN_INSTALL)
+            .expect("plugin.install is in the catalog");
+        assert!(!row.executable);
+        assert_eq!(row.unavailable_reason, Some("아직 설치 경로가 없어요."));
+        assert!(row.required_role.is_none() && row.args_schema.is_none());
     }
 
     /// **ADR-0186 증보 — the approver roles are one list in two places.**
@@ -354,11 +435,14 @@ mod tests {
             .collect();
         assert_eq!(
             titles,
-            actions::action_ids(),
-            "one branch per registry action, in registry order"
+            actions::proposable_action_ids(actions::ProposalDoor::AgentPort),
+            "one branch per Agent-Port-proposable registry action, in registry order"
         );
 
-        for action in actions::ACTIONS {
+        for action in actions::ACTIONS
+            .iter()
+            .filter(|action| action.proposable_through(actions::ProposalDoor::AgentPort))
+        {
             let branch = branches
                 .iter()
                 .find(|branch| branch["title"] == json!(action.id))
@@ -1225,7 +1309,17 @@ mod tests {
             .map(|offset| start + offset)
             .expect("3.3.16b ends at 3.3.16c");
         let section = &doc[start..end];
+        // The runbook is for agents behind the Agent Port: a team-AI-only action
+        // (ADR-0201 증보 v2 H6) is not served to them and must not be taught.
         for action in actions::ACTIONS {
+            if !action.proposable_through(actions::ProposalDoor::AgentPort) {
+                assert!(
+                    !section.contains(&format!("| `{}`", action.id)),
+                    "{} is team-AI-only and must not have a runbook row",
+                    action.id
+                );
+                continue;
+            }
             let row = section
                 .lines()
                 .find(|line| line.starts_with(&format!("| `{}`", action.id)))
