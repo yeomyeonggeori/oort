@@ -1333,6 +1333,35 @@ function Frame({label, children}: {label: string; children: React.ReactNode}) {
   );
 }
 
+/**
+ * `Frame` 인데 바닥이 **실제 대화 화면의 바닥**이다 (#3921, design-review M1).
+ *
+ * `Frame` 은 `color.bg` 를 깐다. 대화 목록의 바닥은 다크에서 그 값이 맞지만 라이트에서는
+ * `surface` 다(`ConversationScreen` 의 `screen`: 위 25% 에서 `canvasTop` 이 `surface` 로
+ * 건너가는 그라디언트, 그 아래는 평평한 `surface`). 같은 틴트를 다른 바닥 위에서 찍으면
+ * 사진도, 사진에서 잰 대비 숫자도 거짓이 된다 — 라이트 `warnSurface`(#FFF0DB)의 세기는
+ * `bg` 위에서 1.04:1, 실제 지면 `surface` 위에서 1.11:1 이고 **방향도 다르다**.
+ *
+ * 배경식은 `ConversationScreen` 의 `screen` 과 **같은 식**을 옮겼다 — 한쪽을 고치면 이
+ * 틀도 따라가야 사진이 거짓이 되지 않는다. 가운데 정렬은 점프가 행을 놓는 자리다
+ * (`travelToIndex(index, 0.5, …)`: 목록 화면 가운데 → 그라디언트 아래, 평평한 바닥 위).
+ */
+function ConversationFloor({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  const styles = useStyles(buildStyles);
+  return (
+    <View style={styles.conversationFloor}>
+      <Text style={styles.label}>{label}</Text>
+      <View style={styles.conversationFloorMid}>{children}</View>
+    </View>
+  );
+}
+
 
 // ---- GC-7 (#2948): 에이전트가 제안한 AI 연결 카드 --------------------------------
 //
@@ -2875,6 +2904,9 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     // 사라졌는지가 논점이라 두 장을 같은 배치로 찍는다. 물러나는 **시간**(이동이 끝난 뒤
     // 2초, 불투명도 240ms)은 사진에 나오지 않는다 — `__tests__/landedHighlight3921.test.tsx`
     // 가 가짜 시계로 잰다. 여기 `landed` 는 목록이 건네는 값을 그대로 건넨 것이다.
+    //
+    // 바닥은 `ConversationFloor` — 실제 대화 화면의 바닥이다. 틴트는 바닥 위의 **상대적인**
+    // 세기라(라이트 `warnSurface` 대 `surface` 1.11:1) 바닥이 다르면 사진이 다른 말을 한다.
     case 'landed3921-arrival':
     case 'landed3921-decided': {
       const decided = name === 'landed3921-decided';
@@ -2911,7 +2943,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         ['ap-3921', {note: '승인을 기록했어요.', status: 'approved' as const}],
       ]);
       return (
-        <Frame
+        <ConversationFloor
           label={
             decided
               ? '결정 뒤 — 「승인됨」 · 틴트 없음 (#3921)'
@@ -2941,7 +2973,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             chips={[]}
             nowMs={NOW}
           />
-        </Frame>
+        </ConversationFloor>
       );
     }
     // ---- U4-6M (#1103): 아바타 · 문장의 격 · 컴포저 -------------------------
@@ -6223,6 +6255,24 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     // 판에서 어두운 회색 글자가 종이 위에 그대로 서야 캡션이 읽힌다.
     lockedLabel: {fontSize: 12, color: color.textMuted, paddingBottom: 4},
     root: {flex: 1, backgroundColor: color.bg, paddingTop: 56},
+    /**
+     * `ConversationFloor` — `ConversationScreen` 의 `screen` 과 같은 배경식 (#3921).
+     * 이미지 바닥이면 `bg` 한 장, 아니면 위 25% 에서 `canvasTop` 이 (라이트 `surface` ·
+     * 다크 `bg`) 로 건너가고 그 아래는 평평하다.
+     */
+    conversationFloor: {
+      flex: 1,
+      paddingTop: 56,
+      ...(color.backdrop === 'image'
+        ? {backgroundColor: color.bg}
+        : {
+            experimental_backgroundImage: `linear-gradient(180deg, ${color.canvasTop} 0%, ${
+              color.mode === 'light' ? color.surface : color.bg
+            } 25%)`,
+          }),
+    },
+    /** 틀 안에서 행들을 화면 가운데에 놓는다 — 점프가 행을 놓는 자리. */
+    conversationFloorMid: {flex: 1, justifyContent: 'center'},
     /** 제 `Screen` 을 든 화면을 통째로 세울 때 (#1964). */
     fill: {flex: 1, backgroundColor: color.bg},
     /** 그런 화면 아래의 캡션 — 홈 인디케이터를 비켜 선다. */
