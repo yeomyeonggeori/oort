@@ -31,6 +31,7 @@ import {DEFAULT_THEME_ID, ds2Roles, type Mode, type ThemeId} from './ds2Tokens';
 import type {SignalValues} from '@momo/core/design/signal';
 import {
   BACKDROP_SCRIM_ALPHA,
+  FIT_MARGIN,
   NON_TEXT_MIN_ON_BACKDROP,
   TEXT_MIN_ON_BACKDROP,
   fitForeground,
@@ -457,10 +458,10 @@ export function paletteFrom(
     const hosts = worstCaseBackdrops(mapped.bg, backdropAlpha);
     const fit = (hex: string, min: number) => fitForeground(hex, hosts, min, mode);
     for (const name of ['textMuted', 'accentText', 'agent', 'warn', 'danger', 'ok'] as const) {
-      mapped[name] = fit(mapped[name], TEXT_MIN_ON_BACKDROP);
+      mapped[name] = fit(mapped[name], TEXT_MIN_ON_BACKDROP + FIT_MARGIN);
     }
     for (const name of ['textFaint', 'icon', 'accent'] as const) {
-      mapped[name] = fit(mapped[name], NON_TEXT_MIN_ON_BACKDROP);
+      mapped[name] = fit(mapped[name], NON_TEXT_MIN_ON_BACKDROP + FIT_MARGIN);
     }
     mapped.onAccent = bestInk(mapped.accent);
   }

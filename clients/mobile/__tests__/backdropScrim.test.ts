@@ -5,6 +5,7 @@ import type {SignalChoice} from '@momo/core/design/appearance';
 import {resolveAppearance} from '../src/design/appearanceState';
 import {
   BACKDROP_SCRIM_ALPHA,
+  FIT_MARGIN,
   INK_MIN_ON_BACKDROP,
   NON_TEXT_MIN_ON_BACKDROP,
   TEXT_MIN_ON_BACKDROP,
@@ -139,6 +140,19 @@ describe.each(DS2_COMBOS)('%s/%s — 어떤 사진 위에서도', (theme, mode) 
         }
       }
       expect(failures).toEqual([]);
+    });
+
+    it('하한에서 멈추지 않는다 — 보정은 여유(FIT_MARGIN)를 얹어 하한보다 높게 선다', () => {
+      const thin: string[] = [];
+      for (const pixel of ['#000000', '#ffffff']) {
+        const host = blend(palette.bg, pixel, alpha);
+        for (const role of ROLES_TEXT) {
+          if (contrast(palette[role], host) < TEXT_MIN_ON_BACKDROP + FIT_MARGIN - 0.05) {
+            thin.push(`${role}@${pixel}`);
+          }
+        }
+      }
+      expect(thin).toEqual([]);
     });
 
     it('아이콘·옅은 선·강조 채움이 3:1 이상이다', () => {

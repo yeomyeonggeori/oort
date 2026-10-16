@@ -1,6 +1,6 @@
 import {act, cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react-native';
 import React from 'react';
-import {AccessibilityInfo} from 'react-native';
+import {AccessibilityInfo, StyleSheet} from 'react-native';
 
 import {ThemeControl} from '../src/design/ThemeControl';
 import {BACKGROUND_FALLBACK_COPY} from '../src/design/background/model';
@@ -14,6 +14,7 @@ import {
   setBackground,
 } from '../src/design/background/store';
 import {ThemeProvider} from '../src/design/theme';
+import {paletteFrom} from '../src/design/tokens';
 import {NON_SECRET_KEYS} from '../src/storage/kv';
 
 // =============================================================================
@@ -143,9 +144,37 @@ describe('고르기', () => {
     expect(selected('appearance-background-preset-sup')).toBe(true);
   });
 
-  it('화면이 사진이 어떻게 보이는지 미리 말한다 — 흐려진다는 사실', () => {
+  it('사진이 어떻게 보이는지 미리 말한다 — 흐려진다는 사실. 고르기 전에는 「고르면」이다', () => {
     mount();
-    expect(screen.getByText(/사진이 조금 흐리게 보여요/)).toBeTruthy();
+    expect(screen.getByTestId('appearance-background-scrim-note')).toHaveTextContent(
+      /고르면.*사진이 조금 흐리게 보여요/,
+    );
+    fireEvent.press(screen.getByTestId('appearance-background-solid-sage'));
+    expect(screen.getByTestId('appearance-background-scrim-note')).toHaveTextContent(
+      /깔려요. 그래서 사진이 조금 흐리게 보여요/,
+    );
+  });
+
+  it('기본 제공을 고르면 그 타일에 ✓ 가 선다 — 단색과 같은 색 외 표지', () => {
+    mount();
+    expect(screen.queryByTestId('appearance-background-preset-bam-check')).toBeNull();
+    fireEvent.press(screen.getByTestId('appearance-background-preset-bam'));
+    expect(screen.getByTestId('appearance-background-preset-bam-check')).toBeTruthy();
+  });
+
+  it('프라이버시 문구는 서버를 주어로 좁힌다 — 「이 기기에만」이라고 말하지 않는다 (iCloud 백업 가능)', () => {
+    mount();
+    const row = screen.getByTestId('appearance-background-photo');
+    expect(row).toHaveTextContent(/oort 서버로는 올라가지 않아요/);
+    expect(row).not.toHaveTextContent(/이 기기에만/);
+  });
+
+  it('단색의 경계는 3:1 컨트롤 선이다 — 어두운 단색이 카드에서 사라지지 않는다', () => {
+    mount();
+    const border = StyleSheet.flatten(
+      screen.getByTestId('appearance-background-solid-ink').props.style,
+    ).borderColor;
+    expect(border).toBe(paletteFrom('dawnsky', 'dark').textFaint);
   });
 });
 
@@ -173,6 +202,21 @@ describe('내 사진', () => {
     await act(async () => {});
     expect(getBackground()).toEqual({kind: 'none'});
     expect(screen.queryByTestId('appearance-background-notice')).toBeNull();
+  });
+
+  it('실패 문구는 오류 톤이고 보조기술에 읽어 준다', async () => {
+    const announce = jest
+      .spyOn(AccessibilityInfo, 'announceForAccessibility')
+      .mockImplementation(() => {});
+    mount(photoPorts({pick: {kind: 'denied'}}));
+    fireEvent.press(screen.getByTestId('appearance-background-photo'));
+    await waitFor(() => expect(screen.getByTestId('appearance-background-notice')).toBeTruthy());
+    const notice = screen.getByTestId('appearance-background-notice');
+    expect(StyleSheet.flatten(notice.props.style).color).toBe(
+      paletteFrom('dawnsky', 'dark').dangerText,
+    );
+    expect(notice.props.accessibilityLiveRegion).toBe('polite');
+    expect(announce).toHaveBeenCalledWith(IMPORT_FAILURE_COPY.denied);
   });
 
   it.each([
@@ -280,6 +324,8 @@ describe('접근성 설정이 켜져 있을 때', () => {
     );
     // 선택은 지우지 않는다 — 설정이 꺼지면 돌아온다.
     expect(getBackground()).toEqual({kind: 'solid', id: 'rose'});
+    // 꺼져 있는 동안 「사진이 흐리게 보여요」는 거짓이라 말하지 않는다(리뷰 M3).
+    expect(screen.queryByTestId('appearance-background-scrim-note')).toBeNull();
   });
 
   it('대비 높이기의 이유는 다른 문장이다', async () => {

@@ -469,9 +469,12 @@ const buildStyles = (color: Palette) =>
       height: SHELL.fadeHeight,
       // `transparent`는 검정 투명이라 중간에 회색 띠가 선다. 같은 색의 알파 0에서
       // 시작한다 — 시안의 `transparent`가 브라우저에서 그리는 것과 같은 그림이다.
-      // 배경이 깔린 동안은 바닥색으로 녹이면 사진 위에 띠가 선다 — 페이드를 걷는다.
+      // 배경이 깔린 동안은 바닥색(불투명)으로 녹이면 사진 위에 띠가 선다 — scrim 색으로
+      // 녹인다. 목록 글자가 탭바 밑으로 지나갈 때 가려 주는 일은 그대로 한다(리뷰 M5).
       ...(color.backdrop === 'image'
-        ? {}
+        ? {
+            experimental_backgroundImage: `linear-gradient(180deg, ${color.bg}00 0%, ${color.backdropScrim} 62%)`,
+          }
         : {
             experimental_backgroundImage: `linear-gradient(180deg, ${color.canvasBottom}00 0%, ${color.canvasBottom} 62%)`,
           }),

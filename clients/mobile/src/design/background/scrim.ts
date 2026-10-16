@@ -39,6 +39,11 @@ export const INK_MIN_ON_BACKDROP = 7;
 export const TEXT_MIN_ON_BACKDROP = 4.5;
 /** 글자 없는 표식(아이콘·채움)의 하한. */
 export const NON_TEXT_MIN_ON_BACKDROP = 3;
+/**
+ * 보정이 하한에서 멈추지 않게 얹는 여유. 보장은 평면 순흑·순백 기준이고 실제 사진은 글자 가장자리
+ * 주변 대비가 흔들린다(리뷰 M6) — 하한을 정확히 넘는 색은 여유가 없다.
+ */
+export const FIT_MARGIN = 0.3;
 
 const channel = (hex: string, i: number): number => parseInt(hex.slice(1 + 2 * i, 3 + 2 * i), 16);
 

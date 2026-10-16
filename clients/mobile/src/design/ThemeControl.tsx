@@ -439,6 +439,7 @@ function BackgroundGroup({photoPorts}: {photoPorts?: PhotoPorts}): React.JSX.Ele
   const palette = usePalette();
   const {background, backgroundFallback, setBackground} = useTheme();
   const [busy, setBusy] = useState(false);
+  // 사진 가져오기가 **실패한** 이유. 보조 문장과 눈으로도 귀로도 구분돼야 한다(리뷰 M2).
   const [notice, setNotice] = useState<string | null>(null);
 
   const none = background.kind === 'none';
@@ -456,7 +457,11 @@ function BackgroundGroup({photoPorts}: {photoPorts?: PhotoPorts}): React.JSX.Ele
     setNotice(null);
     try {
       const outcome = await chooseBackgroundPhoto(photoPorts);
-      if (!outcome.ok) setNotice(IMPORT_FAILURE_COPY[outcome.reason]);
+      if (!outcome.ok) {
+        const message = IMPORT_FAILURE_COPY[outcome.reason];
+        setNotice(message);
+        if (message) AccessibilityInfo.announceForAccessibility?.(message);
+      }
     } finally {
       setBusy(false);
     }
@@ -533,8 +538,13 @@ function BackgroundGroup({photoPorts}: {photoPorts?: PhotoPorts}): React.JSX.Ele
                         experimental_backgroundImage: PRESETS[id].gradient,
                       },
                       selected && styles.solidSelected,
-                    ]}
-                  />
+                    ]}>
+                    {selected ? (
+                      <View style={styles.tileCheck} testID={`appearance-background-preset-${id}-check`}>
+                        <Text style={styles.tileCheckGlyph}>✓</Text>
+                      </View>
+                    ) : null}
+                  </View>
                   <Text style={[styles.presetLabel, selected && styles.presetLabelSelected]}>
                     {PRESETS[id].label}
                   </Text>
@@ -545,7 +555,13 @@ function BackgroundGroup({photoPorts}: {photoPorts?: PhotoPorts}): React.JSX.Ele
         </View>
         <GroupRow
           title="내 사진"
-          detail={busy ? '사진을 줄이는 중이에요…' : '이 기기에만 저장되고 서버로 올라가지 않아요.'}
+          detail={
+            busy
+              ? '사진을 줄이는 중이에요…'
+              : background.kind === 'photo'
+                ? '탭해서 다른 사진으로 바꿔요. oort 서버로는 올라가지 않아요.'
+                : '이 기기 안에 저장되고, oort 서버로는 올라가지 않아요.'
+          }
           tone={background.kind === 'photo' ? 'accent' : 'default'}
           separated
           disabled={busy}
@@ -581,13 +597,20 @@ function BackgroundGroup({photoPorts}: {photoPorts?: PhotoPorts}): React.JSX.Ele
         </Sentence>
       ) : null}
       {notice ? (
-        <Sentence style={styles.caption} testID="appearance-background-notice">
+        <Sentence
+          style={[styles.caption, styles.noticeError]}
+          accessibilityLiveRegion="polite"
+          testID="appearance-background-notice">
           {notice}
         </Sentence>
       ) : null}
-      <Sentence style={styles.caption}>
-        글자가 읽히도록 배경 위에 반투명 면이 깔려요. 그래서 사진이 조금 흐리게 보여요.
-      </Sentence>
+      {backgroundFallback ? null : (
+        <Sentence style={styles.caption} testID="appearance-background-scrim-note">
+          {none
+            ? '배경을 고르면 글자가 읽히도록 반투명 면이 깔려서, 사진이 조금 흐리게 보여요.'
+            : '글자가 읽히도록 배경 위에 반투명 면이 깔려요. 그래서 사진이 조금 흐리게 보여요.'}
+        </Sentence>
+      )}
       {!none ? (
         <View style={styles.reset}>
           <OutlineButton
@@ -735,8 +758,10 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     borderRadius: radius.pill,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: color.border,
+    // 컨트롤 경계는 3:1 이다(`textFaint` = 웹 `--line-strong`). 어두운 단색(먹)이 다크 카드에서
+    // 사라지지 않게 한다(리뷰 M4).
+    borderWidth: 1,
+    borderColor: color.textFaint,
   },
   solidSelected: {borderWidth: 3, borderColor: color.accent},
   solidCheck: {fontSize: font.body, fontWeight: '700'},
@@ -746,9 +771,21 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     width: 96,
     height: 64,
     borderRadius: ds2Radius.row,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: color.border,
+    borderWidth: 1,
+    borderColor: color.textFaint,
   },
+  tileCheck: {
+    position: 'absolute',
+    top: space.xs,
+    right: space.xs,
+    width: 22,
+    height: 22,
+    borderRadius: radius.pill,
+    backgroundColor: color.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tileCheckGlyph: {fontSize: font.label, fontWeight: '700', color: color.onAccent},
   presetLabel: {fontSize: font.meta, color: color.textMuted, textAlign: 'center'},
   presetLabelSelected: {color: color.accentText, fontWeight: '600'},
   photoThumb: {width: 36, height: 36, borderRadius: ds2Radius.badge},

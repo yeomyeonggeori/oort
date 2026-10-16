@@ -171,6 +171,15 @@ describe('홈 바닥', () => {
     expect(flat('shell-canvas').experimental_backgroundImage).toBeUndefined();
   });
 
+  it('탭바 밑 페이드는 사라지지 않고 scrim 색으로 녹는다 — 사진 위에 불투명 띠가 서지 않는다', async () => {
+    const dark = paletteFrom('dawnsky', 'dark', null, true);
+    setBackground({kind: 'solid', id: 'sage'});
+    await openHome();
+    const image = String(flat('shell-fade').experimental_backgroundImage);
+    expect(image).toContain(dark.backdropScrim);
+    expect(image).not.toContain(`${dark.canvasBottom} 62%`);
+  });
+
   it('사진이 사라졌으면 저장소가 없음으로 되돌려 이미지 없는 바닥을 그리지 않는다', async () => {
     __setDiskPort({
       uri: name => name,
