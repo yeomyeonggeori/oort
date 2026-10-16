@@ -150,6 +150,8 @@ async function mountApp(): Promise<HTMLElement> {
 }
 
 describe("App post-login first-agent (#2216) · 폰은 채널 카드 (#2818)", () => {
+  // 파일의 첫 마운트는 App 모듈 그래프 전체를 처음 읽어 와서 기본 5초 한도에 아슬아슬하다
+  // (#3893 전 base 에서도 4.8~5.0초). 기능 회귀가 아니라 콜드 임포트 비용이라 한도만 넉넉히 둔다.
   it("둘 다 pending 이면 첫 에이전트가 선다", async () => {
     applyLogin(session);
     markFirstAgentPending(session.member.workspaceId);
@@ -161,5 +163,5 @@ describe("App post-login first-agent (#2216) · 폰은 채널 카드 (#2818)", (
     expect(appSrc).not.toMatch(/connStatus:\s*"connected"/);
     expect(host.querySelector('[data-testid="first-agent-stage"]')).not.toBeNull();
     expect(host.querySelector('[data-testid="channel-list"]')).toBeNull();
-  });
+  }, 30_000);
 });

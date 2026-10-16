@@ -254,8 +254,17 @@ describe('저장 — 다음 실행이 고른 것으로 시작한다', () => {
       </ThemeProvider>,
     );
     fireEvent.press(screen.getByTestId('theme-light'));
-    expect(NON_SECRET_KEYS.themeChoice.startsWith('momo.')).toBe(true);
-    expect(store.map.get(NON_SECRET_KEYS.themeChoice)).toBe('light');
+    expect(NON_SECRET_KEYS.appearance.startsWith('momo.')).toBe(true);
+    // 외양 레코드(core `AppearanceV2`) — 스킴만 바뀌고 테마·신호는 기본 그대로다.
+    expect(JSON.parse(store.map.get(NON_SECRET_KEYS.appearance) ?? '{}')).toEqual({
+      v: 2,
+      scheme: 'light',
+      theme: 'dawnsky',
+      signal: null,
+      density: 'comfortable',
+    });
+    // 옛 키는 읽기 전용이다 — 새로 쓰지 않는다.
+    expect(store.map.has(NON_SECRET_KEYS.themeChoice)).toBe(false);
   });
 
   it('새로 마운트하면 저장된 것으로 첫 렌더가 나온다 — 다크 한 프레임이 없다', () => {
@@ -266,6 +275,30 @@ describe('저장 — 다음 실행이 고른 것으로 시작한다', () => {
       </ThemeProvider>,
     );
     expect(renderedBodyInk()).toBe(lightPalette.text);
+  });
+
+  it('옛 스킴 키(momo.mobile.theme.v1)만 있어도 그 스킴으로 시작한다 — 이행', () => {
+    store.map.set(NON_SECRET_KEYS.themeChoice, 'light');
+    render(
+      <ThemeProvider>
+        <Row />
+      </ThemeProvider>,
+    );
+    expect(renderedBodyInk()).toBe(lightPalette.text);
+  });
+
+  it('새 키가 있으면 옛 키보다 먼저 읽는다', () => {
+    store.map.set(NON_SECRET_KEYS.themeChoice, 'light');
+    store.map.set(
+      NON_SECRET_KEYS.appearance,
+      JSON.stringify({v: 2, scheme: 'dark', theme: 'dawnsky', signal: null, density: 'comfortable'}),
+    );
+    render(
+      <ThemeProvider>
+        <Row />
+      </ThemeProvider>,
+    );
+    expect(renderedBodyInk()).toBe(darkPalette.text);
   });
 
   it('저장이 없거나 모르는 값이면 시스템을 따른다', () => {

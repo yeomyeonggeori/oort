@@ -14,7 +14,8 @@
 // 순수 모듈이다: DOM·fetch·React 없음. 웹과 폰이 같은 함수를 부른다.
 // =============================================================================
 
-import type { Message } from "../../lib/api";
+import type { Message, RosterMember } from "../../lib/api";
+import { memberAliases } from "../routing/helperAliases";
 import { attachRecipient } from "../../lib/koreanParticle";
 
 type Props = Record<string, unknown> | undefined;
@@ -213,6 +214,19 @@ export function teamAiDelegateFor(
 /** 도우미의 기본 handle (서버 `TEAM_AI_HANDLE`). 디렉터리에서 못 찾을 때의 안전망이다. */
 export const TEAM_AI_DEFAULT_HANDLE = "oort-helper";
 
+const HANGUL = /[\uAC00-\uD7A3]/u;
+
+/**
+ * 도우미를 부르는 모든 이름: 핸들 + 서버가 등록한 별칭 (ADR-0201 v2 H2). 맡기는 메시지에서
+ * 지울 이름들이다. 멤버를 모르면 빈 목록(기본 핸들은 `delegateMessageBody`가 늘 더한다).
+ */
+export function teamAiCallNames(
+  member: Pick<RosterMember, "kind" | "status" | "aliases" | "handle"> | undefined | null
+): string[] {
+  if (!member) return [];
+  return [member.handle, ...memberAliases(member)];
+}
+
 function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -242,10 +256,15 @@ export function delegateMessageBody({
   );
   // handle 은 `[a-z0-9_-]` 이다(서버 `is_valid_handle`). 그 밖의 글자(마침표·쉼표·한글)가
   // 경계라서 「@oort-helper.」도 지워지고 「@oort-helper2」는 남는다.
+  // 한글 별칭(`오르트`, ADR-0201 v2 H2)은 한글 음절도 이름의 글자다: 서버 경계 규칙
+  // (`is_mention_boundary` = 영숫자가 아님)대로 「@오르트에게」는 부른 것이 아니라서 남긴다.
   for (const handle of handles) {
+    const word = HANGUL.test(handle)
+      ? "A-Za-z0-9_\\-\\uAC00-\\uD7A3"
+      : "A-Za-z0-9_-";
     const pattern = new RegExp(
-      `(^|[^A-Za-z0-9_-])@${escapeRegExp(handle)}(?![A-Za-z0-9_-])`,
-      "gi"
+      `(^|[^${word}])@${escapeRegExp(handle)}(?![${word}])`,
+      "giu"
     );
     text = text.replace(pattern, "$1");
   }

@@ -28,7 +28,7 @@ export function UpdateNotice() {
     state.kind === "available"
       ? { label: "지금 업데이트", run: () => void installUpdate() }
       : state.kind === "installed"
-        ? { label: "지금 재시작", run: () => void relaunchIntoUpdate() }
+        ? { label: "지금 다시 실행", run: () => void relaunchIntoUpdate() }
         : null;
 
   return (

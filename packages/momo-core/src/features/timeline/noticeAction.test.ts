@@ -46,6 +46,16 @@ describe("noticeAction", () => {
     }
   });
 
+  it("draws a reason it has never heard of (pinned_link_unresolved, #3875) exactly like default_ai_unresolved", () => {
+    const door = { label: "AI 연결 열기", href: "/settings?section=ai" };
+    const ai = (section: string) => section === "ai";
+    for (const reason of ["default_ai_unresolved", "pinned_link_unresolved", "a_reason_from_a_newer_server"]) {
+      expect(noticeAction(row({ reason, notice_action: door }), ai)).toEqual(door);
+    }
+    // 문이 없는 줄은 문 없이 문장만 남는다(알 수 없는 reason 이 화면을 깨지 않는다).
+    expect(noticeAction(row({ reason: "pinned_link_unresolved", notice_action: undefined }), ai)).toBeNull();
+  });
+
   it("only reads the hosted notice source on a system row", () => {
     expect(noticeAction(row({ source: "someone.else" }), reachable)).toBeNull();
     expect(noticeAction(row({}, "text"), reachable)).toBeNull();

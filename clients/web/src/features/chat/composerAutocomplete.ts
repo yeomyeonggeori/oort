@@ -9,6 +9,11 @@ import type {
   LocalCardArgs,
 } from "@momo/core/features/commands/registry";
 import { mentionAnnotation } from "@momo/core/features/ai/aiMention";
+import {
+  aliasHint,
+  matchedAlias,
+  preferredMentionName,
+} from "@momo/core/features/routing/helperAliases";
 import { slashCandidates } from "@momo/core/features/commands/slash";
 
 // =============================================================================
@@ -339,7 +344,13 @@ export interface ComposerCommandPayload {
   matched: number;
 }
 
-/** 활성 멤버를 핸들·표시 이름 부분일치로 좁힌다. #1930 이전 규칙 그대로. */
+/**
+ * 활성 멤버를 핸들·표시 이름 부분일치로 좁힌다. #1930 이전 규칙 그대로이고, 서버가 별칭을
+ * 보내면(ADR-0201 v2 H2) 별칭도 맞춘다: `@오르`·`@oo`·`@cla`가 도우미를 찾는다.
+ *
+ * 별칭이 맞춘 멤버는 **앞으로** 온다. 별칭은 그 이름으로 부르라고 서버가 등록한 것이라
+ * `@oort`를 치는 사람이 찾는 것은 핸들에 우연히 `oo`가 든 사람이 아니라 도우미다.
+ */
 export function matchMembers(
   members: RosterMember[],
   query: string,
@@ -347,14 +358,16 @@ export function matchMembers(
 ): RosterMember[] {
   const needle = query.trim().toLowerCase();
   const active = members.filter((member) => member.status === "active");
-  const matched = needle
-    ? active.filter(
-        (member) =>
-          member.handle.toLowerCase().includes(needle) ||
-          member.displayName.toLowerCase().includes(needle)
-      )
-    : active;
-  return matched.slice(0, limit);
+  if (!needle) return active.slice(0, limit);
+  const byAlias = active.filter((member) => matchedAlias(member, needle) !== null);
+  const aliased = new Set(byAlias.map((member) => member.id));
+  const byName = active.filter(
+    (member) =>
+      !aliased.has(member.id) &&
+      (member.handle.toLowerCase().includes(needle) ||
+        member.displayName.toLowerCase().includes(needle))
+  );
+  return [...byAlias, ...byName].slice(0, limit);
 }
 
 /**
@@ -390,15 +403,19 @@ export function memberCandidates(
 ): ComposerCandidate[] {
   return matchMembers(members, query, limit).map((member) => {
     const note = mentionAnnotation(member, viewerHumanId);
+    // 별칭이 있는 멤버(도우미)는 별칭으로 넣는다. 넣는 이름은 멘션 문법이 다시 읽을 수
+    // 있는 ASCII 별칭뿐이고(`@오르`를 쳐도 `@oort`), 없으면 핸들이다. 별칭이 없는 서버에서는
+    // 아래 세 칸이 #1930 이전과 한 글자도 다르지 않다.
+    const name = preferredMentionName(member);
     return {
       kind: "mention" as const,
       id: member.id,
-      lead: `@${member.handle}`,
+      lead: `@${name}`,
       member,
-      hint: member.displayName,
+      hint: aliasHint(member, query),
       // 코어 `mentionTokenAt` 이 읽는 그 문법이다. 삽입은 평문이고, 렌더가
       // 그 평문을 다시 토큰으로 읽는다 — 보이지 않는 신원을 본문에 심지 않는다.
-      insert: `@${member.handle} `,
+      insert: `@${name} `,
       ...(note !== null && note.line !== null
         ? { agent: { line: note.line, badge: note.badge, locked: note.locked } }
         : {}),
