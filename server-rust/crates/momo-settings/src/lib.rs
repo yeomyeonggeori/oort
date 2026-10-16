@@ -64,6 +64,7 @@ pub mod default_ai;
 pub mod egress;
 pub mod invite;
 pub mod join;
+pub mod key_budget;
 pub mod link;
 pub mod membership_lifecycle;
 pub mod oauth;
@@ -103,6 +104,10 @@ pub use join::{
     normalized_join_password, normalized_join_time_zone, normalized_requested_handle,
     redeem_invite_in_tx, resolve_invite_workspace, role_rank, JoinError, JoinOutcome,
     JoinRejection, JoinRequestValues, JoinSpecInvalid, JoinedMember, JoinedMembership,
+};
+pub use key_budget::{
+    delete_key_budget, is_budget_company, list_key_budgets, upsert_key_budget, KeyBudget,
+    BUDGET_COMPANIES, MAX_BUDGET_MICRO_USD,
 };
 pub use link::{
     decrypt_link, delete_link, read_link, reseal_link_credential, resolve_link, upsert_link,

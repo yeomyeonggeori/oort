@@ -176,6 +176,93 @@ async fn mock() -> (u16, Arc<AtomicUsize>) {
                 )
             }),
         )
+        // #3886: billing problems arrive under several statuses; every body
+        // echoes the presented key to prove none of it is kept.
+        .route(
+            "/pay402/v1/models",
+            get(move |headers: HeaderMap| async move {
+                let key = bearer(&headers);
+                (
+                    StatusCode::PAYMENT_REQUIRED,
+                    [("x-echo-key", key.clone())],
+                    format!(r#"{{"error":{{"code":402,"message":"insufficient credits for {key}"}}}}"#),
+                )
+            }),
+        )
+        .route(
+            "/anthropic-low/v1/models",
+            get(move |headers: HeaderMap| async move {
+                let key = headers
+                    .get("x-api-key")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("")
+                    .to_string();
+                (
+                    StatusCode::BAD_REQUEST,
+                    format!(
+                        r#"{{"type":"error","error":{{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API. key={key}"}}}}"#
+                    ),
+                )
+            }),
+        )
+        .route(
+            "/openai-quota/v1/models",
+            get(move |headers: HeaderMap| async move {
+                let key = bearer(&headers);
+                (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    format!(
+                        r#"{{"error":{{"type":"insufficient_quota","code":"credit_balance_exhausted","message":"no credits for {key}"}}}}"#
+                    ),
+                )
+            }),
+        )
+        // An ordinary 400 that is not about money stays an unknown status.
+        .route(
+            "/bad-request/v1/models",
+            get(move || async move {
+                (
+                    StatusCode::BAD_REQUEST,
+                    r#"{"error":{"type":"invalid_request_error","message":"bad field"}}"#,
+                )
+            }),
+        )
+        // OpenRouter /credits: an ordinary key is refused, a management key reads it.
+        .route(
+            "/api/v1/credits",
+            get(move |headers: HeaderMap| async move {
+                if bearer(&headers) == GOOD {
+                    return (StatusCode::FORBIDDEN, "Only management keys can perform this operation")
+                        .into_response();
+                }
+                echo_refusal(&bearer(&headers))
+            }),
+        )
+        .route(
+            "/mgmt/api/v1/key",
+            get(move |headers: HeaderMap| async move {
+                if bearer(&headers) != GOOD {
+                    return echo_refusal(&bearer(&headers));
+                }
+                axum::Json(serde_json::json!({
+                    "data": {"limit": null, "limit_remaining": null, "usage": 3.0,
+                             "usage_monthly": 2.25, "is_free_tier": false}
+                }))
+                .into_response()
+            }),
+        )
+        .route(
+            "/mgmt/api/v1/credits",
+            get(move |headers: HeaderMap| async move {
+                if bearer(&headers) != GOOD {
+                    return echo_refusal(&bearer(&headers));
+                }
+                axum::Json(serde_json::json!({
+                    "data": {"total_credits": 100.0, "total_usage": 42.5}
+                }))
+                .into_response()
+            }),
+        )
         .route(
             "/broken/v1/models",
             get(move || async move {
@@ -367,10 +454,76 @@ async fn openrouter_is_checked_on_key_because_its_model_list_is_public() {
             limit: Some(20.0),
             limit_remaining: Some(12.5),
             usage: Some(7.5),
+            usage_monthly: None,
+            is_free_tier: None,
         })
     );
     assert_eq!(good.model_count, None);
+    // An ordinary key is refused by /credits: said so, no balance invented.
+    assert_eq!(good.account_credit, None);
+    assert!(good.account_credit_needs_management_key, "{good:?}");
+    assert_no_key(&good);
     assert_eq!(hits.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn a_management_key_also_reads_the_account_balance() {
+    let (port, _) = mock().await;
+    let report = opted_in(&["openrouter.ai"])
+        .probe(&target(
+            format!("http://openrouter.ai:{port}/mgmt/api/v1"),
+            ProbeCredential::Bearer(GOOD.into()),
+        ))
+        .await;
+    assert_eq!(report.outcome, ProbeOutcome::Ok, "{report:?}");
+    assert_eq!(
+        report.account_credit,
+        Some(AccountCredit {
+            total_credits: 100.0,
+            total_usage: 42.5
+        })
+    );
+    assert!(!report.account_credit_needs_management_key);
+    let credit = report.credit.clone().expect("key credit");
+    assert_eq!(credit.limit, None);
+    assert_eq!(credit.usage_monthly, Some(2.25));
+    assert_eq!(credit.is_free_tier, Some(false));
+    assert_no_key(&report);
+}
+
+#[tokio::test]
+async fn billing_problems_are_one_closed_result_and_the_echoed_key_goes_nowhere() {
+    let (port, _) = mock().await;
+    let probe = opted_in(&[]);
+    for (path, credential) in [
+        ("pay402", ProbeCredential::Bearer(GOOD.into())),
+        ("anthropic-low", ProbeCredential::AnthropicKey(GOOD.into())),
+        ("openai-quota", ProbeCredential::Bearer(GOOD.into())),
+    ] {
+        let report = probe
+            .probe(&target(
+                format!("http://127.0.0.1:{port}/{path}/v1"),
+                credential,
+            ))
+            .await;
+        assert_eq!(report.outcome, ProbeOutcome::NoCredit, "{path}: {report:?}");
+        assert_eq!(report.reason.as_deref(), Some(NO_CREDIT_REASON), "{path}");
+        assert_no_key(&report);
+        let all = format!("{report:?}");
+        assert!(
+            !all.contains("insufficient") && !all.contains("credit balance"),
+            "no provider text is kept: {all}"
+        );
+    }
+    // Not about money: stays an ordinary status, never mislabelled.
+    let plain = probe
+        .probe(&target(
+            format!("http://127.0.0.1:{port}/bad-request/v1"),
+            ProbeCredential::Bearer(GOOD.into()),
+        ))
+        .await;
+    assert_eq!(plain.outcome, ProbeOutcome::Unknown);
+    assert_eq!(plain.reason.as_deref(), Some("provider_status_400"));
 }
 
 #[tokio::test]
