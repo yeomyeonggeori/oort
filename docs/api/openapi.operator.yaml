@@ -108,6 +108,67 @@ paths:
           description: >-
             Non-human principal, or a human lacking both the platform:read
             operator scope and a workspace owner/admin role (ADR-0004 증보1 D3).
+  /v1/provider/limits:
+    get:
+      operationId: getProviderLimits
+      summary: Per-company monthly budget and month-to-date spend ESTIMATE
+      description: >-
+        #3886 (ADR-0147 증보 2026-10-16 「키 확인·한도·남은 크레딧」). Instance
+        operator only (same gate as /v1/provider/link). For each of anthropic,
+        openai, xai, openrouter: the monthly budget the operator typed (if any)
+        and oort's own estimate of this UTC month's spend in the caller's
+        workspace — usage_ledger tokens × model_pricing, computed at read time.
+        It is NOT a provider balance: Anthropic and OpenAI expose no credit
+        endpoint to an ordinary API key. Runs on a model with no price are
+        counted in unpricedRuns and named in unpricedModels, never given a dollar
+        figure. No key material is read or returned.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Limits.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderLimitsResponse"
+        "403":
+          description: Not an instance operator.
+  /v1/provider/limits/budget:
+    put:
+      operationId: putProviderLimitsBudget
+      summary: Set or clear one company's monthly budget
+      description: >-
+        #3886. `monthlyBudgetUsd: null` clears it. 0..=1,000,000 USD; any other
+        company or amount is a 400. Operator only; audited as
+        provider_key_budget.updated (company and amount only).
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [company, monthlyBudgetUsd]
+              properties:
+                company:
+                  type: string
+                  enum: [anthropic, openai, xai, openrouter]
+                monthlyBudgetUsd:
+                  type: number
+                  nullable: true
+      responses:
+        "200":
+          description: The refreshed limits.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderLimitsResponse"
+        "400":
+          description: Unknown company or amount out of range.
+        "403":
+          description: Not an instance operator.
   /v1/provider/link/test:
     post:
       operationId: testProviderLink
@@ -322,7 +383,8 @@ components:
           description: >-
             Position 0's machine reason when ok is false — provider_auth_failed
             (401/403), provider_unreachable, provider_rate_limited (429),
-            provider_status_NNN, provider_egress_denied,
+            provider_no_credit (402, or a 400/403/429 whose body names a billing
+            problem — #3886), provider_status_NNN, provider_egress_denied,
             provider_invalid_response, not_external_provider,
             provider_not_configured, hop_disabled, or probe_not_run (legacy
             oauth-openai link, not dialled). Never contains credentials.
@@ -371,6 +433,63 @@ components:
           enum: [ok, fall_over, propagate, skipped]
         probe:
           $ref: "#/components/schemas/ProviderProbeDetail"
+    ProviderLimitsResponse:
+      type: object
+      additionalProperties: false
+      required: [schema, monthStartMs, computedAtMs, companies]
+      properties:
+        schema:
+          type: string
+          enum: [momo.provider_limits.v0]
+        monthStartMs:
+          type: integer
+          format: int64
+        computedAtMs:
+          type: integer
+          format: int64
+        companies:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [company, spendEstimate]
+            properties:
+              company:
+                type: string
+                enum: [anthropic, openai, xai, openrouter]
+              monthlyBudgetMicroUsd:
+                type: integer
+                format: int64
+                description: Operator-typed; absent when none.
+              budgetUpdatedAtMs:
+                type: integer
+                format: int64
+              spendEstimate:
+                type: object
+                additionalProperties: false
+                required: [microUsd, runs, promptTokens, completionTokens, unpricedRuns, unpricedModels]
+                properties:
+                  microUsd:
+                    type: integer
+                    format: int64
+                    description: oort's estimate over priced runs only.
+                  runs:
+                    type: integer
+                    format: int64
+                  promptTokens:
+                    type: integer
+                    format: int64
+                  completionTokens:
+                    type: integer
+                    format: int64
+                  unpricedRuns:
+                    type: integer
+                    format: int64
+                  unpricedModels:
+                    type: array
+                    maxItems: 8
+                    items:
+                      type: string
     ProviderProbeDetail:
       type: object
       additionalProperties: false
@@ -381,7 +500,7 @@ components:
       properties:
         outcome:
           type: string
-          enum: [ok, rejected, unreachable, rate_limited, unknown]
+          enum: [ok, rejected, unreachable, rate_limited, no_credit, unknown]
         method:
           type: string
           enum: [models, key]
@@ -424,6 +543,23 @@ components:
           format: int64
         credit:
           $ref: "#/components/schemas/ProviderKeyCredit"
+        accountCredit:
+          type: object
+          additionalProperties: false
+          required: [totalCredits, totalUsage]
+          description: >-
+            #3886. OpenRouter GET /credits (account-wide USD), present only when
+            the key is a management key.
+          properties:
+            totalCredits:
+              type: number
+            totalUsage:
+              type: number
+        accountCreditNeedsManagementKey:
+          type: boolean
+          description: >-
+            Present (true) when /credits refused the key (an ordinary key): the
+            account balance is not readable with it and none is shown.
         probedAtMs:
           type: integer
           format: int64
@@ -465,6 +601,11 @@ components:
         usage:
           type: number
           nullable: true
+        usageMonthly:
+          type: number
+          description: "#3886. data.usage_monthly — this key's spend this UTC month."
+        isFreeTier:
+          type: boolean
     PutProviderLinkRequest:
       type: object
       additionalProperties: false

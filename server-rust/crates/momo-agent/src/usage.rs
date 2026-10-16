@@ -606,6 +606,105 @@ pub async fn chain_usage_in_tx(
     })
 }
 
+// ---------------------------------------------------------------------------
+// per-company month-to-date spend ESTIMATE (#3886, ADR-0147 증보 2026-10-16)
+// ---------------------------------------------------------------------------
+
+/// One `(company, model)` bucket of this workspace's month-to-date usage.
+///
+/// `cost_micro_usd` is **oort's estimate**, never a provider balance: the team
+/// AI worker writes `cost_micro_usd = 0` (`was_estimated = true`), so the
+/// dollars are computed here, at read time, from the ledger's token columns and
+/// the newest `model_pricing` row at or before each request. A ledger row that
+/// does carry a measured cost wins over the computation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderModelSpend {
+    /// `anthropic` | `openai` | `xai` | `openrouter` | `other` — derived from the
+    /// model id shape (the ledger has no provider column): a `vendor/model` id is
+    /// OpenRouter's, `claude-*` Anthropic's, `gpt-*`/`o<digit>*` OpenAI's,
+    /// `grok*` xAI's.
+    pub company: String,
+    pub model: String,
+    pub runs: i64,
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+    pub cost_micro_usd: i64,
+    /// False when no `model_pricing` row matched and no measured cost exists.
+    pub priced: bool,
+}
+
+/// Month-to-date spend per `(company, model, priced)` since `since` (UTC month start).
+///
+/// Price match: the ledger model is lower-cased, a leading `vendor/` dropped and
+/// dots turned into dashes (`anthropic/claude-sonnet-4.5` → `claude-sonnet-4-5`),
+/// then the longest `model_pricing.model` that is a prefix of it wins (a dated
+/// snapshot id matches its family row); a workspace row beats a global one.
+/// Uncached prompt tokens are billed at the input rate, cache reads at the
+/// cache-read rate (`prompt_tokens` already includes them), completion tokens at
+/// the output rate. Cache *writes* are not separated in the ledger, so they are
+/// billed as plain input — a slight under-estimate, labelled as an estimate.
+pub async fn provider_spend_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    since: DateTime<Utc>,
+) -> Result<Vec<ProviderModelSpend>, DbError> {
+    let rows = sqlx::query(
+        "WITH l AS ( \
+           SELECT u.model, u.prompt_tokens, u.completion_tokens, u.cached_tokens, \
+                  u.cost_micro_usd, u.created_at, \
+                  CASE WHEN position('/' in u.model) > 0 THEN 'openrouter' \
+                       WHEN lower(u.model) ~ '^claude' THEN 'anthropic' \
+                       WHEN lower(u.model) ~ '^(gpt|o[0-9]|chatgpt|codex)' THEN 'openai' \
+                       WHEN lower(u.model) ~ '^grok' THEN 'xai' \
+                       ELSE 'other' END AS company, \
+                  replace(regexp_replace(lower(u.model), '^[^/]+/', ''), '.', '-') AS pm \
+             FROM usage_ledger u \
+            WHERE u.workspace_id = $1 AND u.created_at >= $2), \
+         priced AS ( \
+           SELECT l.company, l.model, l.prompt_tokens, l.completion_tokens, \
+                  CASE WHEN l.cost_micro_usd > 0 THEN l.cost_micro_usd::numeric \
+                       WHEN p.id IS NOT NULL THEN \
+                         GREATEST(l.prompt_tokens - l.cached_tokens, 0) * p.input_micro_usd_per_token \
+                         + l.cached_tokens * p.cache_read_micro_usd_per_token \
+                         + l.completion_tokens * p.output_micro_usd_per_token \
+                       ELSE 0 END AS cost, \
+                  (l.cost_micro_usd > 0 OR p.id IS NOT NULL) AS priced \
+             FROM l LEFT JOIN LATERAL ( \
+               SELECT mp.* FROM model_pricing mp \
+                WHERE (mp.workspace_id IS NULL OR mp.workspace_id = $1) \
+                  AND mp.currency = 'USD' AND mp.effective_from <= l.created_at \
+                  AND starts_with(l.pm, mp.model) \
+                ORDER BY (mp.workspace_id IS NULL) ASC, length(mp.model) DESC, \
+                         mp.effective_from DESC \
+                LIMIT 1) p ON true) \
+         SELECT company, model, count(*)::bigint AS runs, \
+                COALESCE(sum(prompt_tokens), 0)::bigint AS prompt_tokens, \
+                COALESCE(sum(completion_tokens), 0)::bigint AS completion_tokens, \
+                round(COALESCE(sum(cost), 0))::bigint AS cost_micro_usd, \
+                priced \
+           FROM priced GROUP BY company, model, priced \
+          ORDER BY company ASC, cost_micro_usd DESC, model ASC",
+    )
+    .bind(workspace_id)
+    .bind(since)
+    .fetch_all(&mut *conn)
+    .await?;
+    rows.iter()
+        .map(|row| {
+            Ok(ProviderModelSpend {
+                company: row.try_get("company")?,
+                model: row.try_get("model")?,
+                runs: row.try_get("runs")?,
+                prompt_tokens: row.try_get("prompt_tokens")?,
+                completion_tokens: row.try_get("completion_tokens")?,
+                cost_micro_usd: row.try_get("cost_micro_usd")?,
+                priced: row.try_get("priced")?,
+            })
+        })
+        .collect::<Result<Vec<_>, sqlx::Error>>()
+        .map_err(DbError::from)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

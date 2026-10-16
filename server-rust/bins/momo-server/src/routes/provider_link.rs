@@ -73,9 +73,10 @@ use momo_settings::{
 };
 
 use crate::dto::{
-    ProviderChainEntryDto, ProviderChainProbeDto, ProviderChainResponse, ProviderKeyCreditDto,
-    ProviderLinkCredentialMeta, ProviderLinkResponse, ProviderLinkTestResponse,
-    ProviderProbeDetailDto, ProviderRateLimitDto, PutProviderChainRequest, PutProviderLinkRequest,
+    ProviderAccountCreditDto, ProviderChainEntryDto, ProviderChainProbeDto, ProviderChainResponse,
+    ProviderKeyCreditDto, ProviderLinkCredentialMeta, ProviderLinkResponse,
+    ProviderLinkTestResponse, ProviderProbeDetailDto, ProviderRateLimitDto,
+    PutProviderChainRequest, PutProviderLinkRequest,
 };
 use crate::error::ApiError;
 use crate::rate_limit::{too_many_requests, SlidingWindowRateLimiter};
@@ -736,7 +737,16 @@ fn probed_entry(
                 limit: credit.limit,
                 limit_remaining: credit.limit_remaining,
                 usage: credit.usage,
+                usage_monthly: credit.usage_monthly,
+                is_free_tier: credit.is_free_tier,
             }),
+            account_credit: report.account_credit.as_ref().map(|account| {
+                ProviderAccountCreditDto {
+                    total_credits: account.total_credits,
+                    total_usage: account.total_usage,
+                }
+            }),
+            account_credit_needs_management_key: report.account_credit_needs_management_key,
             probed_at_ms,
             cached,
         }),

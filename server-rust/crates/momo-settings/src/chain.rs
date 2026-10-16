@@ -372,6 +372,9 @@ mod tests {
         assert!(classify_probe_reason(Some("provider_status_502")).is_fall_over());
         assert!(!classify_probe_reason(Some("provider_status_401")).is_fall_over());
         assert!(!classify_probe_reason(Some("provider_auth_failed")).is_fall_over());
+        // #3886: an account with no credit is not evidence the next provider is
+        // the one to spend on — it is shown to the operator, not routed around.
+        assert!(!classify_probe_reason(Some("provider_no_credit")).is_fall_over());
         assert!(
             !classify_probe_reason(Some("something_new")).is_fall_over(),
             "an unknown reason is not evidence the next provider would do better"
