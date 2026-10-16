@@ -227,7 +227,10 @@ async function scenes(browser, origin, scheme, viewport) {
       const closed = await count(page, "plugin-install-closed");
       const grantButtons = await count(page, "plugin-scope-grant");
       const revokeButtons = await count(page, "plugin-scope-revoke");
-      const installButton = await page.getByRole("button", { name: "워크스페이스에 설치", exact: true }).count();
+      // 설치·권한을 바꾸는 단추 전부: 설치, 다시 활성화(설치했지만 꺼진 앱), 설치 해제.
+      const installButton =
+        (await page.getByRole("button", { name: "워크스페이스에 설치", exact: true }).count()) +
+        (await page.getByRole("button", { name: "다시 활성화", exact: true }).count());
       const uninstallButton = await page.getByRole("button", { name: "설치 해제", exact: true }).count();
       if (PROBE === "absent") {
         check(`${tag} ${name} 읽기 전용: 설치·권한 버튼 없음`, grantButtons + revokeButtons + installButton + uninstallButton === 0, `grant=${grantButtons} revoke=${revokeButtons} install=${installButton} uninstall=${uninstallButton}`);

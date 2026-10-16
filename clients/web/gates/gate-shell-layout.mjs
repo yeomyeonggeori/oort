@@ -1142,7 +1142,7 @@ async function assertPluginScopeConsent(page, size) {
     error: document.querySelector('[data-testid="plugin-scope-consent-error"]')?.textContent,
     policyCauseCount: (
       document.querySelector('[data-testid="plugin-scope-consent-error"]')?.textContent
-        ?.match(/이 앱은 워크스페이스 정책이나 내 역할상 변경할 수 없습니다\\./g) ?? []
+        ?.match(/이 앱은 워크스페이스 정책이나 내 역할상 변경할 수 없어요\\./g) ?? []
     ).length,
   }))()`);
   check(
@@ -1198,7 +1198,7 @@ async function assertPluginScopeConsent(page, size) {
   await retainedAttempt.waitFor({ state: "visible" });
   check(
     `${size.name} 전량 실패 뒤 취소해도 패널에 시도 기록이 남는다`,
-    (await retainedAttempt.textContent())?.includes("허용하지 못했습니다") === true
+    (await retainedAttempt.textContent())?.includes("허용하지 못했어요") === true
   );
 
   await grant.click();
