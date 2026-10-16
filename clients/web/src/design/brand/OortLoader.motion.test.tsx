@@ -6,7 +6,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { compile } from "tailwindcss";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { OortLoader } from "./OortLoader";
-import { GEOMETRY } from "./OortMark";
 
 /**
  * 오르트 로더 (#3961): 움직임 자체를 잰다.
@@ -31,6 +30,21 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const DESIGN = `${HERE}/..`;
 const require_ = createRequire(import.meta.url);
 const TOKENS_CSS = readFileSync(`${DESIGN}/tokens.css`, "utf8");
+
+/** 마크 정본 기하를 소스에서 읽는다(`brandMark.test.ts` 와 같은 방식: 이 파일의 path 가 정본이다). */
+const MARK_SOURCE = readFileSync(
+  fileURLToPath(new URL("./OortMark.tsx", import.meta.url)),
+  "utf8"
+);
+function markGeometry(optical: "small" | "display") {
+  const block = MARK_SOURCE.match(new RegExp(`${optical}: \\{([\\s\\S]*?)\\n  \\}`))![1]!;
+  return {
+    viewBox: block.match(/viewBox: "([^"]+)"/)![1]!,
+    ring: block.match(/ring: "([^"]+)"/)![1]!,
+    satellite: block.match(/satellite: "([^"]+)"/)![1]!,
+  };
+}
+const GEOMETRY = { small: markGeometry("small"), display: markGeometry("display") };
 
 // ---------------------------------------------------------------------------
 // 소스 읽기 (브라우저 없이)

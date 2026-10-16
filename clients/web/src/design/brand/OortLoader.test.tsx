@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OortLoader } from "./OortLoader";
-import { GEOMETRY } from "./OortMark";
 
 /**
  * 오르트 로더 (#3961): React 쪽 계약. 마크업, 움직임 선택(full · reduced · still),
@@ -17,6 +19,23 @@ import { GEOMETRY } from "./OortMark";
  *   - 링을 hero 에도 그리면 → 「hero 는 링 대신 코메토」 단정이 붉다
  *   - 궤도 층을 링 뒤로 옮기면 → 「궤도가 링보다 먼저」 단정이 붉다
  */
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+
+/** 마크 정본 기하를 소스에서 읽는다(`brandMark.test.ts` 와 같은 방식: 이 파일의 path 가 정본이다). */
+const MARK_SOURCE = readFileSync(
+  join(HERE, "OortMark.tsx"),
+  "utf8"
+);
+function markGeometry(optical: "small" | "display") {
+  const block = MARK_SOURCE.match(new RegExp(`${optical}: \\{([\\s\\S]*?)\\n  \\}`))![1]!;
+  return {
+    viewBox: block.match(/viewBox: "([^"]+)"/)![1]!,
+    ring: block.match(/ring: "([^"]+)"/)![1]!,
+    satellite: block.match(/satellite: "([^"]+)"/)![1]!,
+  };
+}
+const GEOMETRY = { small: markGeometry("small"), display: markGeometry("display") };
 
 const reactActEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
