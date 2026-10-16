@@ -248,4 +248,14 @@ describe("팀 AI 다음 단계 카드", () => {
     await click(enable);
     expect(setSwitch).not.toHaveBeenCalled();
   });
+
+  it("잠김과 오프라인이 겹쳐도 켜기 버튼의 설명은 화면에 있는 문장만 가리킨다", async () => {
+    fetchDefaultAi.mockResolvedValue({ teamAgent: null, summary: null });
+    const view = await mount(true);
+    const ids = (q(view, "team-ai-next-step-enable")?.getAttribute("aria-describedby") ?? "")
+      .split(" ")
+      .filter(Boolean);
+    expect(ids.length).toBeGreaterThan(0);
+    for (const id of ids) expect(document.getElementById(id)).not.toBeNull();
+  });
 });

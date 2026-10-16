@@ -243,7 +243,8 @@ export function TeamAiNextStepCard({
 
   const blocked = !view.defaultReady;
   const locked = blocked || offline || enable.isPending;
-  const describedBy = [blocked ? blockedId : null, offline ? offlineId : null]
+  // 상세 칸은 둘 중 하나만 그린다(잠김이 먼저). 그리지 않은 id 를 가리키지 않는다.
+  const describedBy = [blocked ? blockedId : null, !blocked && offline ? offlineId : null]
     .filter(Boolean)
     .join(" ");
 

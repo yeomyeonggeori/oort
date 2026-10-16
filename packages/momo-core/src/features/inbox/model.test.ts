@@ -448,7 +448,7 @@ describe("워크스페이스 행동 승인 행 (#3729 · #3738)", () => {
       ["workspace.settings.update", "워크스페이스 설정 바꾸기"],
       // ADR-0201 v2 H6-1·H7 (#3893)
       ["workspace.unfurl.update", "링크 미리보기 설정 바꾸기"],
-      ["workspace.memory.update", "팀 기억 끄기·멈추기"],
+      ["workspace.memory.update", "팀 기억 설정 바꾸기"],
       ["workspace.work_tier.update", "워크스페이스 기본 재개 정책 바꾸기"],
       ["plugin.install", "앱 설치"],
     ] as const) {
@@ -460,6 +460,18 @@ describe("워크스페이스 행동 승인 행 (#3729 · #3738)", () => {
       );
       expect(item.predicate).toBe(`${label} 허가를 요청했어요`);
       expect(item.predicate).not.toContain("workspace_action");
+    }
+  });
+
+  it("팀 기억 행동은 방향을 말하지 않는다 — 같은 id 가 멈춤과 재개를 둘 다 싣는다(ADR-0201 v2 H6-1)", () => {
+    const item = approvalItem(
+      approval({ actionType: "workspace_action", workspaceActionId: "workspace.memory.update" }),
+      agent,
+      "엔진",
+      NOW
+    );
+    for (const direction of ["끄기", "멈추기", "멈춤", "켜기", "재개"]) {
+      expect(item.predicate).not.toContain(direction);
     }
   });
 
