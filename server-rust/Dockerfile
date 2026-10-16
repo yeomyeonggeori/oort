@@ -183,6 +183,7 @@ COPY server-rust/crates/momo-t3/Cargo.toml crates/momo-t3/
 COPY server-rust/crates/momo-unfurl/Cargo.toml crates/momo-unfurl/
 COPY server-rust/crates/momo-webhook/Cargo.toml crates/momo-webhook/
 COPY server-rust/crates/momo-wire/Cargo.toml crates/momo-wire/
+COPY server-rust/crates/momo-workspace-actions/Cargo.toml crates/momo-workspace-actions/
 COPY server-rust/bins/momo-agent-worker/Cargo.toml bins/momo-agent-worker/
 COPY server-rust/bins/momo-box-agent/Cargo.toml bins/momo-box-agent/
 COPY server-rust/bins/momo-box-runner/Cargo.toml bins/momo-box-runner/
