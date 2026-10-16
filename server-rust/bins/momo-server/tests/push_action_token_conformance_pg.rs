@@ -25,6 +25,7 @@
 //! | `a_rotation_keeps_it_alive_and_a_spent_session_does_not` | make the token outlive the refresh row (drop `push_action_session_live`) |
 //! | `a_password_change_ends_the_token` | the same, through the real password route |
 //! | `a_refresh_reuse_sweep_ends_the_token` | the same, through the real reuse sweep |
+//! | `a_token_minted_from_a_dead_lineage_is_dead_on_arrival` | make the token outlive the refresh row (drop `push_action_session_live`) — the #2696 gap: an older access token mints into a dead lineage |
 //! | `an_access_only_logout_leaves_the_session_and_so_the_token` | (documents the derived-life rule) |
 //! | `the_row_is_a_session_row_of_the_callers_lineage` | change the label, kind or lineage the mint route records |
 //! | `the_token_adds_no_authority` | skip the channel-membership or role check for a push-action principal |
@@ -673,8 +674,17 @@ async fn every_other_route_is_403_and_never_a_query() {
             format!("/v1/workspaces/{foreign}/approvals/{approval}/decision"),
             Some(decision_body.clone()),
         ),
-        // Every neighbour on the approvals surface.
+        // Every neighbour on the approvals surface. (`POST …/approvals` is a path
+        // the router knows for GET only: without the route list it would answer
+        // 405, so only the middleware can make it 403. A path with NO route at all
+        // answers 404 before any middleware runs — nothing to reach, nothing to
+        // assert here.)
         ("GET", format!("/v1/workspaces/{ws}/approvals"), None),
+        (
+            "POST",
+            format!("/v1/workspaces/{ws}/approvals"),
+            Some(decision_body.clone()),
+        ),
         (
             "GET",
             format!("/v1/workspaces/{ws}/approvals/{approval}/avatar-preview?v=x"),
@@ -1214,6 +1224,68 @@ async fn a_refresh_reuse_sweep_ends_the_token() {
         "the reuse sweep ended the lock-screen token too"
     );
     assert_eq!(w.approval_state(approval2).await.0, "pending");
+}
+
+#[tokio::test]
+#[ignore = "needs Postgres + runtime roles (DATABASE_URL)"]
+async fn a_token_minted_from_a_dead_lineage_is_dead_on_arrival() {
+    // #2696 (known): a plain rotation does not revoke the access half it replaces,
+    // so an OLDER access token of the same lineage still authenticates for the rest
+    // of its 15 minutes after a logout ended the lineage, and
+    // `lock_session_for_registration` finds ITS row live. A push registration made
+    // that way binds to a dead lineage. This token must not inherit the gap: it
+    // lives only while its lineage holds a live refresh row, so whatever the mint
+    // route answers, no usable token comes out of a dead lineage.
+    let _guard = test_lock().await;
+    let w = world().await;
+    let first = w.login().await;
+    let (status, rotated) = w.rotate(&first.refresh).await;
+    assert_eq!(status, 200);
+    let second = Session {
+        access: rotated["accessToken"].as_str().expect("access").to_string(),
+        refresh: rotated["refreshToken"]
+            .as_str()
+            .expect("refresh")
+            .to_string(),
+    };
+    assert_eq!(w.logout(&second, true).await, 200, "the lineage ends");
+
+    // Is the premise real today? (If #2696 is ever closed this reads 401 and the
+    // mint below must be refused too.)
+    let roster = format!("/v1/workspaces/{}/roster", w.workspace);
+    let older_still_authenticates = w.status("GET", &roster, &first.access, None).await == 200;
+
+    let response = w
+        .http
+        .post(format!("{}/v1/auth/push-action-token", w.base))
+        .bearer_auth(&first.access)
+        .send()
+        .await
+        .expect("mint from the older access token");
+    let minted = response.status().as_u16();
+    let body: Value = response.json().await.unwrap_or(Value::Null);
+    eprintln!(
+        "[dead-lineage] older access token still authenticates: {older_still_authenticates}; \
+         the mint answered {minted}"
+    );
+    if !older_still_authenticates {
+        assert_eq!(minted, 401, "a dead access token mints nothing: {body}");
+        return;
+    }
+    assert!(
+        matches!(minted, 200 | 401),
+        "the mint answers 200 (the #2696 gap) or 401 (closed), got {minted}: {body}"
+    );
+    if minted == 200 {
+        let token = body["token"].as_str().expect("a minted token").to_string();
+        let (_, approval) = w.seed_approval().await;
+        let (decided, receipt) = w.decide(&token, approval, true, Uuid::new_v4()).await;
+        assert_eq!(
+            decided, 401,
+            "a token bound to a dead lineage is refused on arrival: {receipt}"
+        );
+        assert_eq!(w.approval_state(approval).await.0, "pending");
+    }
 }
 
 #[tokio::test]
