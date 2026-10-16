@@ -52,7 +52,7 @@ import {
 import {PageSheet, usePageSheetClose} from '../../design/PageSheet';
 import {ThemeControl} from '../../design/ThemeControl';
 import {
-  themeChoiceLabel,
+  themeSummary,
   usePalette,
   useStyles,
   useTheme,
@@ -369,7 +369,7 @@ export function ProfilePage({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
-  const {choice} = useTheme();
+  const {choice, themeId} = useTheme();
   const push = usePushPermission();
   const setPresence = useSetPresence(workspaceId, member.id);
   const pause = usePauseNotifications(workspaceId);
@@ -579,11 +579,11 @@ export function ProfilePage({
       <GroupSection label="보기">
         <GroupRow
           title="테마"
-          value={themeChoiceLabel(choice)}
+          value={themeSummary(themeId, choice)}
           chevron
           onPress={onOpenTheme}
-          accessibilityLabel={`테마, ${themeChoiceLabel(choice)}`}
-          accessibilityHint="시스템·라이트·다크 중에서 고릅니다."
+          accessibilityLabel={`테마, ${themeSummary(themeId, choice)}`}
+          accessibilityHint="화면 모드, 테마, 강조색을 고릅니다."
           testID="profile-theme-row"
         />
       </GroupSection>
