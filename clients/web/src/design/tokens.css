@@ -417,6 +417,13 @@
   --spacing-kometto-band: 52px;
   --spacing-band-action: 34px;
 
+  /* 오르트 로더 히어로의 한 변 (#3961). 첫 로딩에서 코메토 배지(한 변의 62/128)가
+   * 가운데 서고 위성이 그 둘레를 돈다. 시안 A 「공전」의 큰 자리 그대로 128이다:
+   * 리듬 스케일의 어느 단계도 아니고(최대 32), 안쪽 기하(배지 62·궤도 44·위성 7)가
+   * 전부 이 한 변의 비율이라 한 변이 하나의 이름이어야 한다. 코메토 32px 미만
+   * 금지(docs/brand/mark/README.md)와도 무관하게 넉넉히 위다. */
+  --spacing-loader-hero: 128px;
+
   /* 인박스 리마인더 행의 ⋯ 그릇 (#1888 B-2).
    *
    * 그릇은 tap-target(44, 600px 미만) + p-px×2 + border 1px×2 = 48. 행은
@@ -3844,6 +3851,235 @@
   }
   50.01%,
   100% {
+    opacity: 0;
+  }
+}
+
+/* =============================================================================
+ * 오르트 로더 (#3961), 시안 A 「공전」.
+ * owner 2026-10-17: 「A가 심플하고 좋아보이네. A 방향으로 가자.」
+ *
+ * 링(사람·팀)은 가만히 있고, 위성(에이전트)이 홈에서 나와 한 바퀴 돌고 다시 꽂힌다.
+ * 한 주기 1.8초: 홈에서 나오기 14% · 도는 동안 72% · 꽂히기 14%. 큰 자리(`-hero`)는
+ * 꽂힐 홈이 없어서 코메토 K6 배지 둘레를 멈춤 없이 등속으로 돈다.
+ *
+ * 움직이는 것은 transform(회전·이동·크기)과 opacity뿐이다. 레이아웃을 건드리는
+ * 속성은 키프레임에 들어오지 않는다(OortLoader.test 가 키프레임을 읽어 잠근다).
+ *
+ * 기하는 전부 무대(정사각 한 변)의 비율이다. 인라인 style 이 금지라 크기는 호출자가
+ * `size-6`(24) 또는 `size-loader-hero`(128)로 정하고 안쪽이 비율로 따라간다.
+ * 퍼센트 translate 는 **자기 상자** 기준이라 방사 층이 0×0 이면 한 칸도 못 움직인다:
+ * 궤도·팔·방사 층은 모두 무대와 같은 크기(`inset: 0`)다.
+ *
+ * 값은 마크 정본(OortMark GEOMETRY.small 의 30 격자 무대, 링 중심이 무대 중심)에서
+ * 나온다: 위성 중심까지 홈 9.9/30 · 궤도 12.2/30 · 위성 반지름 3/30(지름 20%).
+ * OortLoader.test 가 이 숫자와 GEOMETRY 가 어긋나는 날을 잡는다.
+ *
+ * 움직임의 선택은 컴포넌트가 `data-motion` 으로 한다.
+ *   full     위 동작.
+ *   reduced  OS 「동작 줄이기」. 회전 대신 정지한 마크 + 투명도 1↔0.5(같은 주기).
+ *   still    진행 중이 아닌 자리(오프라인 등). 정지한 마크, 투명도도 그대로.
+ * `spinner-busy` 는 reduced-motion 에서도 느리게 돈다(회전 자체가 정보라서). 이 로더는
+ * 곁의 문장이 상태를 말하므로, 정지 마크 + 은은한 투명도 변화라는 지시대로 간다.
+ * ========================================================================== */
+
+.oort-loader {
+  position: relative;
+  display: block;
+  flex: none;
+  --oort-loader-period: 1.8s;
+  /* 작은 자리(마크 small, 30 격자 무대): 위성 중심이 링 중심에서 놓이는 거리. */
+  --oort-loader-home: 33%;
+  --oort-loader-out: 40.667%;
+  --oort-loader-dip: 3%;
+  --oort-loader-dot: 20%;
+}
+
+/* 큰 자리(무대 128 = 배지 62 + 궤도 44 + 위성 7): 홈이 없어 home = out. */
+.oort-loader-hero {
+  --oort-loader-home: 34.375%;
+  --oort-loader-out: 34.375%;
+  --oort-loader-dip: 0%;
+  --oort-loader-dot: 10.9375%;
+}
+
+/* 깜빡임 방지: 사다리 한 칸(standard)보다 짧게 끝나는 로딩에는 나타나지 않는다.
+ * 상태 타이머가 아니라 CSS 지연이라 언마운트가 곧 정리다. reduced-motion 에서는 사다리가
+ * 0이라 지연도 0이다: 움직임이 없는 자리에서는 곧바로 서도 해가 작다. */
+.oort-loader-hero,
+.oort-loader-caption {
+  animation: oort-loader-appear var(--motion-fast) var(--motion-ease-standard)
+    var(--motion-standard) backwards;
+}
+
+.oort-loader-body,
+.oort-loader-orbit,
+.oort-loader-arm,
+.oort-loader-radial {
+  position: absolute;
+  inset: 0;
+}
+
+/* 24 격자 마크를 30 격자 무대에 앉힌다: 격자 (4, 2)에서 시작해 한 변 24. 링 구멍의
+ * 중심 (11, 13)이 무대 정중앙 (15, 15)에 온다. 링이 숨 쉬는 중심도 그 구멍이다. */
+.oort-loader-ring {
+  position: absolute;
+  inset-block-start: 6.66667%;
+  inset-inline-start: 13.33333%;
+  inline-size: 80%;
+  block-size: 80%;
+  overflow: visible;
+  transform-origin: 45.83333% 54.16667%;
+}
+
+.oort-loader-badge {
+  position: absolute;
+  inset-block-start: 25.78125%;
+  inset-inline-start: 25.78125%;
+  inline-size: 48.4375%;
+  block-size: 48.4375%;
+}
+
+/* 위성이 놓이는 각도는 링의 홈 쪽(오른쪽 위, -45도)이고, 방사 층이 그 축 위로 민다. */
+.oort-loader-arm {
+  transform: rotate(-45deg);
+}
+
+.oort-loader-radial {
+  transform: translateX(var(--oort-loader-home));
+}
+
+.oort-loader-dot {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: 50%;
+  inline-size: var(--oort-loader-dot);
+  aspect-ratio: 1;
+  border-radius: 9999px;
+  background-color: var(--signal);
+  translate: -50% -50%;
+}
+
+/* 꼬리 점 둘(큰 자리만): 머리 뒤 15도·30도, 작고 옅다. */
+.oort-loader-trail-near {
+  transform: rotate(-60deg);
+}
+
+.oort-loader-trail-far {
+  transform: rotate(-75deg);
+}
+
+.oort-loader-trail-near .oort-loader-dot {
+  inline-size: 8.59375%;
+  opacity: 0.5;
+}
+
+.oort-loader-trail-far .oort-loader-dot {
+  inline-size: 6.25%;
+  opacity: 0.26;
+}
+
+.oort-loader:not([data-motion="full"]) .oort-loader-trail-near,
+.oort-loader:not([data-motion="full"]) .oort-loader-trail-far {
+  display: none;
+}
+
+.oort-loader[data-motion="full"] .oort-loader-orbit {
+  animation: oort-loader-orbit var(--oort-loader-period) infinite;
+}
+
+.oort-loader[data-motion="full"] .oort-loader-radial {
+  animation: oort-loader-radial var(--oort-loader-period) infinite;
+}
+
+.oort-loader[data-motion="full"] .oort-loader-ring {
+  animation: oort-loader-ring var(--oort-loader-period) infinite;
+}
+
+.oort-loader-hero[data-motion="full"] .oort-loader-orbit {
+  animation: oort-loader-orbit-hero var(--oort-loader-period) linear infinite;
+}
+
+.oort-loader-hero[data-motion="full"] .oort-loader-radial {
+  animation: none;
+}
+
+.oort-loader[data-motion="reduced"] .oort-loader-body {
+  animation: oort-loader-breathe var(--oort-loader-period) ease-in-out infinite;
+}
+
+/* 코메토는 투명도도 건드리지 않는다. 숨 쉬는 것은 위성 층뿐이다. */
+.oort-loader-hero[data-motion="reduced"] .oort-loader-body {
+  animation: none;
+}
+
+.oort-loader-hero[data-motion="reduced"] .oort-loader-orbit {
+  animation: oort-loader-breathe var(--oort-loader-period) ease-in-out infinite;
+}
+
+@keyframes oort-loader-orbit {
+  0%,
+  14% {
+    transform: rotate(0deg);
+    animation-timing-function: cubic-bezier(0.45, 0.05, 0.25, 1);
+  }
+  86%,
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes oort-loader-orbit-hero {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes oort-loader-radial {
+  0% {
+    transform: translateX(var(--oort-loader-home));
+    animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  14% {
+    transform: translateX(var(--oort-loader-out));
+  }
+  86% {
+    transform: translateX(var(--oort-loader-out));
+    animation-timing-function: cubic-bezier(0.5, 0, 0.2, 1);
+  }
+  94% {
+    transform: translateX(calc(var(--oort-loader-home) - var(--oort-loader-dip)));
+    animation-timing-function: ease-out;
+  }
+  100% {
+    transform: translateX(var(--oort-loader-home));
+  }
+}
+
+/* 위성이 홈에 꽂히는 순간 링이 한 번 숨을 쉰다. */
+@keyframes oort-loader-ring {
+  0%,
+  90%,
+  100% {
+    transform: scale(1);
+  }
+  95% {
+    transform: scale(1.05);
+  }
+}
+
+@keyframes oort-loader-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes oort-loader-appear {
+  from {
     opacity: 0;
   }
 }

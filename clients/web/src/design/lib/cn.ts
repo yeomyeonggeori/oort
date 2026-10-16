@@ -31,7 +31,7 @@ const TEXT_ROLES = ["timestamp", "meta", "code", "label", "body", "heading", "ti
  * diff-body · terminal-body · terminal-dock 3종 · terminal-floor · theme-tile-min ·
  * timeline-strip · preview-frame · unfurl-hero · tray-max · tray-thumb · inline-image-* · onboarding-mark ·
  * onboarding-copy · overflow-bowl · 새벽하늘 프리미티브(ADR-0189, DS2-1) pill ·
- * pill-inline · field · icon-button · card.
+ * pill-inline · field · icon-button · card · loader-hero.
  * `--spacing-px`만 뺀다 — `w-px`류는
  * stock Tailwind라 tailwind-merge가 이미 안다. 이 목록과 tokens.css의 일치는
  * cn.test.ts가 정본을 읽어 단정한다.
@@ -107,6 +107,7 @@ export const NAMED_MEASURES = [
   "card",
   "kometto-band",
   "band-action",
+  "loader-hero",
 ] as const;
 
 /** Overlay stacking names (#2044). One spelling only: the `layer-*` class.

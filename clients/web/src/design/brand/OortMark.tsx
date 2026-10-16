@@ -32,7 +32,8 @@
 // 부모의 accent 한 색을 물려받아야 하기 때문이다.
 // =============================================================================
 
-const GEOMETRY = {
+// 로더 비율 시험(OortLoader.motion.test)이 같은 기하를 읽으려고 내보낸다. 그 밖의 호출자는 없다.
+export const GEOMETRY = {
   small: {
     viewBox: "0 0 24 24",
     ring: "M18.59 10.46A8 8 0 0 1 7.32 20.1A0.5 0.5 0 0 0 6.91 20.08L3.6 21.38A0.75 0.75 0 0 1 2.62 20.4L3.92 17.09A0.5 0.5 0 0 0 3.9 16.68A8 8 0 0 1 13.54 5.41A4.5 4.5 0 0 0 18.59 10.46ZM15 13A4 4 0 1 0 7 13A4 4 0 1 0 15 13Z",
@@ -58,12 +59,18 @@ export function OortMark({
   className,
   title,
   optical = "small",
+  ringOnly = false,
 }: {
   className?: string;
   /** 넘기면 접근 가능한 이름이 되고, 넘기지 않으면 장식으로 감춰진다. */
   title?: string;
   /** 그려질 크기. 32px 이하는 small(기본), 그보다 큰 자리는 display. */
   optical?: keyof typeof GEOMETRY;
+  /**
+   * 링만 그린다. 오르트 로더(#3961)가 위성을 따로 움직이므로, 같은 path를 쓰되
+   * 위성은 로더 쪽 원이 맡는다. 마크 자리에서는 쓰지 않는다.
+   */
+  ringOnly?: boolean;
 }) {
   const geometry = GEOMETRY[optical];
   return (
@@ -77,7 +84,7 @@ export function OortMark({
       aria-hidden={title ? undefined : "true"}
     >
       <path d={geometry.ring} />
-      <path d={geometry.satellite} />
+      {!ringOnly && <path d={geometry.satellite} />}
     </svg>
   );
 }

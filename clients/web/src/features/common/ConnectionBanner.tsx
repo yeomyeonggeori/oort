@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { PlugZap } from "lucide-react";
 import { useSession } from "@/app/session";
+import { OortLoader } from "@/design/brand/OortLoader";
 import { InlineBanner } from "@/features/common/States";
 import { useBrowserOffline } from "@/features/common/useOffline";
 import {
@@ -94,15 +94,23 @@ export function ConnectionBanner() {
     retry === "failed" && canRetry
       ? "다시 연결하지 못했습니다. 네트워크와 서버 상태를 확인한 뒤 다시 시도하세요."
       : alert.message;
+  // The loader moves only while something is actually dialling. `never-connected`
+  // and `dropped` both sit in centrifuge's reconnect loop, so the mark turns for
+  // them (and keeps turning under a hand-pressed retry). A browser that says it
+  // has no network is not dialling anything, and neither is a retry that has
+  // already reported failure: those two get the same mark standing still, so the
+  // motion never claims progress the sentence next to it denies (#3961).
+  const reconnecting = alert.kind !== "browser-offline" && retry !== "failed";
 
   return (
     <InlineBanner
       tone="neutral"
-      // Neutral keeps the banner from reading as an alarm, and the warn-toned
-      // icon keeps it from reading as chrome. Without it this line sat directly
-      // above the channel header at the same value, with nothing to catch an
-      // eye that was looking somewhere else when the socket died.
-      icon={<PlugZap className="size-4 text-warn" />}
+      // Neutral keeps the banner from reading as an alarm, and the turning mark
+      // keeps it from reading as chrome. Without a leading indicator this line
+      // sat directly above the channel header at the same value, with nothing to
+      // catch an eye that was looking somewhere else when the socket died. The
+      // oort loader (#3961) replaced the warn-toned plug: one signal, not two.
+      icon={<OortLoader still={!reconnecting} />}
       message={message}
       testId="connection-banner"
       {...(canRetry
