@@ -2351,13 +2351,11 @@ async fn execute_plugin_install(
     plugin_id: &str,
     plugin: &ResolvedPlugin,
 ) -> Result<Execution, momo_db::DbError> {
-    let mut extra_detail = serde_json::Map::new();
-    extra_detail.insert("via_agent".into(), json!(approval.requested_by.to_string()));
-    extra_detail.insert("approval_id".into(), json!(approval.id.to_string()));
     let provenance = Provenance {
         subject_member_id: Some(approval.requested_by),
         run_id: Some(approval.run_id),
-        extra_detail,
+        via_agent: Some(approval.requested_by),
+        approval_id: Some(approval.id),
     };
     let actor = Actor {
         member_id: input.member_id,
