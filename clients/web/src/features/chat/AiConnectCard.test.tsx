@@ -449,7 +449,7 @@ describe("같은 폼 · 같은 결과 문장: 설정 × 카드 (#2880)", () => {
     return Array.from(form.querySelectorAll<HTMLElement>("[data-testid]"))
       .map((el) => el.getAttribute("data-testid") ?? "")
       .map((id) => id.slice(prefix.length + 1))
-      .filter((tail) => tail !== "preset-custom" && tail !== "custom-url")
+      .filter((tail) => tail !== "preset-custom" && tail !== "custom-url" && tail !== "budget-input")
       .sort();
   }
 
@@ -459,7 +459,7 @@ describe("같은 폼 · 같은 결과 문장: 설정 × 카드 (#2880)", () => {
     );
   }
 
-  it("키 폼은 한 컴포넌트다: 칩·password 칸 속성·버튼이 같다(설정만 「직접 주소」를 더 세운다)", async () => {
+  it("키 폼은 한 컴포넌트다: 칩·password 칸 속성·버튼이 같다(설정만 「직접 주소」와 「월 크레딧」 칸을 더 세운다, #3887)", async () => {
     vi.mocked(fetchProviderLink).mockResolvedValue(EMPTY_LINK);
     const settings = mountEl(createElement(AiLinkSection, { offline: false, workspaceId: WS }));
     const card = mountCard({ line: "team" });
@@ -646,6 +646,29 @@ describe("흐름 ① 구독 로그인 (#2816 모달)", () => {
 
 describe("흐름 ② 팀 키 (운영자) · 비밀값", () => {
   const SECRET = ["sk", "-test-", "Q7mZ2xL9vB4nR8tK1wE6yU3i"].join("");
+
+  it("눈 버튼(#3885): 기본 가림 → 보기 → 저장하면 칸은 비고 다시 가림, 저장 뒤 키는 어디에도 되보이지 않는다", async () => {
+    vi.mocked(fetchProviderLink).mockResolvedValue(EMPTY_LINK);
+    const host = mountCard();
+    await until(host, "ai-connect-card-team");
+    act(() => q(host, "ai-connect-card-team-key")?.click());
+    const input = (await until(host, "ai-connect-card-key-input")) as HTMLInputElement;
+    const eye = q(host, "ai-connect-card-key-reveal") as HTMLButtonElement;
+    expect(input.type).toBe("password");
+    expect(eye.getAttribute("aria-pressed")).toBe("false");
+    input.value = SECRET;
+    act(() => eye.click());
+    expect(input.type).toBe("text");
+    expect(input.value).toBe(SECRET);
+    expect(input.getAttribute("autocomplete")).toBe("new-password");
+    vi.mocked(putProviderLink).mockImplementation(() => new Promise<ProviderLink>(() => undefined));
+    await act(async () => (q(host, "ai-connect-card-preset-anthropic") as HTMLInputElement).click());
+    await act(async () => (q(host, "ai-connect-card-key-save") as HTMLButtonElement).click());
+    expect(input.value).toBe("");
+    expect(input.type).toBe("password");
+    expect(eye.getAttribute("aria-pressed")).toBe("false");
+    expect(host.textContent).not.toContain(SECRET);
+  });
 
   it("키 넣기 → 저장하고 확인: 기존 PUT → test, 줄이 제자리에서 바뀌고 키는 어디에도 남지 않는다", async () => {
     vi.mocked(fetchProviderLink).mockResolvedValue(EMPTY_LINK);

@@ -4,6 +4,7 @@ import { Plus } from "lucide-react";
 import { ApiError } from "@momo/core/lib/api";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
+import { SecretInput } from "@/features/settings/SecretInput";
 import { Select } from "@/design/ui/select";
 import { cn } from "@/design/lib/cn";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/design/ui/dialog";
@@ -414,10 +415,9 @@ function IssueForm({ onOpenChange, workspaceId, offline, holders, presets }: Iss
           <label htmlFor="ai-personal-issue-key" className="text-meta font-semibold text-ink">
             {COPY.form.key}
           </label>
-          <Input
+          <SecretInput
             id="ai-personal-issue-key"
             ref={keyRef}
-            type="password"
             name="personal-api-key"
             autoComplete="new-password"
             autoCorrect="off"
@@ -432,6 +432,7 @@ function IssueForm({ onOpenChange, workspaceId, offline, holders, presets }: Iss
             aria-describedby={HINT_ID}
             aria-invalid={fieldError ? true : undefined}
             data-testid="ai-personal-issue-key"
+            revealTestId="ai-personal-issue-key-reveal"
           />
           {fieldError && (
             <p className="break-keep text-meta text-danger" role="alert">

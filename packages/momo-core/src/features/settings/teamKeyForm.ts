@@ -96,6 +96,12 @@ export function teamCheckReasonCopy(
             ? `${retryWhen(hints.retryAfterSeconds)}에 다시 확인해 주세요.`
             : "잠시 뒤에 다시 확인해 주세요.",
       };
+    case "provider_no_credit":
+      // #3886: 키는 받아들여졌지만 계정에 크레딧이 없거나 결제가 막혔다. 키 탓이 아니다.
+      return {
+        fact: "키는 맞지만 크레딧이나 결제에 문제가 있어요.",
+        action: "공급사 콘솔의 결제(Billing)에서 크레딧을 확인해 주세요.",
+      };
     case "provider_egress_denied":
       // #2960: 서버의 egress 가드가 부르기 전에 막았다. 키는 판정되지 않았다.
       return {
@@ -173,6 +179,13 @@ export interface TeamProbeDetail {
   readonly creditLimit?: number | null;
   readonly creditRemaining?: number;
   readonly creditUsage?: number;
+  /** #3886: 이 키가 이번 달(UTC) 쓴 크레딧(OpenRouter `/key`). */
+  readonly creditUsageMonthly?: number;
+  /** #3886: 계정 전체 크레딧(OpenRouter `/credits`, 관리 키일 때만). */
+  readonly accountTotalCredits?: number;
+  readonly accountTotalUsage?: number;
+  /** #3886: `/credits`가 이 키를 거절했다(일반 키). */
+  readonly accountNeedsManagementKey?: boolean;
   /** 서버가 20초 안의 직전 결과를 다시 준 것. */
   readonly cached?: boolean;
 }
@@ -189,10 +202,27 @@ function objectOf(value: unknown): Record<string, unknown> | null {
 
 /** 첫 칸(팀 AI 키)의 확인 세부. 모르는 모양이면 null(한 줄 문장으로 물러선다). */
 export function teamProbeDetail(probe: ProviderLinkTest | null | undefined): TeamProbeDetail | null {
+  return teamProbeDetailAt(probe, 0);
+}
+
+/** 이 자리가 방금 확인에서 실제로 불렸는가(숫자가 하나도 없어도 `true`). */
+export function teamProbeDialled(probe: ProviderLinkTest | null | undefined, position: number): boolean {
+  if (!probe) return false;
+  const entries = (probe as unknown as Record<string, unknown>).entries;
+  if (!Array.isArray(entries)) return false;
+  const row = entries.find((entry) => objectOf(entry)?.position === position);
+  return objectOf(objectOf(row)?.probe) !== null;
+}
+
+/** 연결 순서 `position` 자리의 확인 세부(#3886: 키마다 한도 블록을 그린다). */
+export function teamProbeDetailAt(
+  probe: ProviderLinkTest | null | undefined,
+  position: number
+): TeamProbeDetail | null {
   if (!probe) return null;
   const entries = (probe as unknown as Record<string, unknown>).entries;
   if (!Array.isArray(entries)) return null;
-  const head = entries.find((row) => objectOf(row)?.position === 0) as Record<string, unknown> | undefined;
+  const head = entries.find((row) => objectOf(row)?.position === position) as Record<string, unknown> | undefined;
   const detail = objectOf(head?.probe);
   if (detail === null) return null;
   const rate = objectOf(detail.rateLimit);
@@ -217,7 +247,14 @@ export function teamProbeDetail(probe: ProviderLinkTest | null | undefined): Tea
     else put("creditLimit", finiteNumber(credit.limit));
     put("creditRemaining", finiteNumber(credit.limitRemaining));
     put("creditUsage", finiteNumber(credit.usage));
+    put("creditUsageMonthly", finiteNumber(credit.usageMonthly));
   }
+  const account = objectOf(detail.accountCredit);
+  if (account) {
+    put("accountTotalCredits", finiteNumber(account.totalCredits));
+    put("accountTotalUsage", finiteNumber(account.totalUsage));
+  }
+  if (detail.accountCreditNeedsManagementKey === true) out.accountNeedsManagementKey = true;
   if (detail.cached === true) out.cached = true;
   return Object.keys(out).length > 0 ? out : null;
 }
