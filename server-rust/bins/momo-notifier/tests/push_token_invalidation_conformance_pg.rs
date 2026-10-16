@@ -30,6 +30,7 @@
 //! | `a_transient_failure_does_not_invalidate_and_the_candidate_is_retried` | settle or invalidate on `TransientFailure` |
 //! | `a_relay_400_is_audited_once_an_hour_and_never_invalidates` | invalidate on the relay's own 400, drop the audit row, or drop its one-per-hour dedupe |
 //! | `a_failing_invalidation_never_loses_the_receipt` | run the UPDATE outside a SAVEPOINT |
+//! | `a_failing_audit_never_loses_the_refusal_receipt` | write the `push.relay.refused` row outside its SAVEPOINT |
 //! | `settle_dispatch_and_invalidate_names_what_it_did` | drop the `workspace_id` predicate or the `invalidated_at IS NULL` guard of the UPDATE |
 //! | `the_real_transport_keeps_the_two_400s_apart` | read the relay's HTTP 400 as an APNs answer, or drop the body excerpt |
 
@@ -820,6 +821,82 @@ async fn a_failing_invalidation_never_loses_the_receipt() {
     assert!(
         is_invalidated(&su, fixture.token_id).await,
         "self-healing: the next 410 gets through"
+    );
+}
+
+/// Make the relay-refusal audit row of one token fail to insert (a role without
+/// INSERT on `audit_log`, a constraint). Scoped to the token so nothing else in the
+/// shared database notices.
+async fn make_refusal_audit_of_this_token_fail(su: &PgPool, token_id: Uuid) {
+    stop_refusing_audit(su).await;
+    sqlx::query(
+        "CREATE OR REPLACE FUNCTION audit_refuse_insert_3930() RETURNS trigger \
+         LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'audit refused by the 3930 test'; END $$",
+    )
+    .execute(su)
+    .await
+    .expect("create the refusing audit function");
+    sqlx::query(&format!(
+        "CREATE TRIGGER audit_refuse_insert_3930 BEFORE INSERT ON audit_log \
+         FOR EACH ROW WHEN (NEW.action = 'push.relay.refused' AND NEW.target_id = '{token_id}') \
+         EXECUTE FUNCTION audit_refuse_insert_3930()"
+    ))
+    .execute(su)
+    .await
+    .expect("create the refusing audit trigger");
+}
+
+async fn stop_refusing_audit(su: &PgPool) {
+    sqlx::query("DROP TRIGGER IF EXISTS audit_refuse_insert_3930 ON audit_log")
+        .execute(su)
+        .await
+        .expect("drop the refusing audit trigger");
+    sqlx::query("DROP FUNCTION IF EXISTS audit_refuse_insert_3930()")
+        .execute(su)
+        .await
+        .expect("drop the refusing audit function");
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn a_failing_audit_never_loses_the_refusal_receipt() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let notifier = momo_notifier_pool().await;
+
+    // The audit row is worth less than the settle: if it cannot be written the
+    // refusal is still recorded, and the candidate is done rather than re-sent.
+    let fixture = seed_dm_fixture(&su).await;
+    make_refusal_audit_of_this_token_fail(&su, fixture.token_id).await;
+    let reason = "HTTP 400: dispatch APNs environment does not match relay";
+    let relay = ScriptedRelay::answering(DispatchOutcome::PermanentFailure {
+        relay_http_status: 400,
+        reason: reason.to_string(),
+    });
+    let stats = drain_one_message(&su, &notifier, &relay, &fixture, 1).await;
+    let logs = log_rows(&su, fixture.workspace_id).await;
+    let audits = refusal_audit_count(&su, fixture.workspace_id, fixture.token_id).await;
+    let invalidated = is_invalidated(&su, fixture.token_id).await;
+    let candidates = candidate_status(&su, fixture.workspace_id).await;
+    stop_refusing_audit(&su).await;
+
+    assert_eq!(stats.dispatched, 1);
+    assert_eq!(
+        logs,
+        vec![(
+            Some(fixture.token_id),
+            Some(400),
+            Some(format!("relay_http: {reason}"))
+        )],
+        "the refusal is settled although its audit row failed"
+    );
+    assert_eq!(audits, 0, "and the failed audit row left nothing behind");
+    assert!(!invalidated, "a relay 400 never touches the token");
+    assert_eq!(
+        candidates,
+        vec![("done".to_string(), 1)],
+        "claimed once, completed once: a failed audit is not a retry"
     );
 }
 
