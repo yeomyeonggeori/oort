@@ -78,7 +78,7 @@ export function TeamAiReplyMeta({ meta }: { meta: Meta }) {
                     event.preventDefault();
                     void openExternalUrl(item.url);
                   }}
-                  className="inline-flex min-w-0 max-w-full items-baseline gap-1 rounded-sm text-signal-text underline decoration-line-strong underline-offset-2 hover:text-ink focus-visible:focus-ring"
+                  className="inline-flex min-w-0 max-w-full items-baseline gap-1 rounded-sm text-signal-text underline decoration-line-strong underline-offset-2 hover:text-ink active:bg-surface-pressed focus-visible:focus-ring"
                 >
                   <span data-numeric className="text-ink-muted">
                     {index + 1}
