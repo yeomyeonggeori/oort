@@ -27,6 +27,8 @@ import {
 } from 'react-native';
 import {useReduceMotionRef} from '../../lib/useReduceMotion';
 import {JumpPill, JumpPillDock} from './JumpPill';
+import {LANDED_HOLD_MS, landedApprovalOf} from './landedHighlight';
+import {ReduceMotionRefContext} from './LandedTintFade';
 import {
   countNewerThan,
   countUnreadJump,
@@ -1022,13 +1024,25 @@ function TimelineInner({
    */
   const [chasingTail, setChasingTail] = useState(false);
   /**
-   * 방금 점프해서 도착한 행의 id (#1076). 없으면 `null`.
+   * 방금 점프해서 도착한 행 (#1076 · #3921). 없으면 `null`.
    *
    * 상태인 이유: 이 값은 **화면에 닿아야** 한다. 한 번에 한 행만 참이어야 하므로
-   * 목록이 들고(행은 자기가 목적지였는지 모른다), 점프 한 번에 정확히 두 번
-   * 바뀐다 — 세울 때와 사람이 화면을 다시 가져갈 때.
+   * 목록이 들고(행은 자기가 목적지였는지 모른다), 점프 한 번에 두 번 바뀐다 — 세울 때와
+   * 거둘 때. 거두는 길이 셋이다(`landedHighlight.ts` 머리말): 승인이 결정됐을 때,
+   * 이동이 끝난 뒤 시한이 지났을 때, 사람이 화면을 다시 가져갈 때.
+   *
+   * `holdMs` 는 **시계가 켜졌다**는 뜻이다. `null` 이면 이동이 아직 안 끝났다 — 시계는
+   * 없다. 이동이 끝나면(`endJumpTravel` → `onLanded`) 값이 서고, 그 순간부터 아래 효과가
+   * 그만큼 뒤에 거둔다. 둘을 한 상태로 묶는 이유는 「이 시계가 어느 점프의 것인가」가
+   * 어긋날 틈을 없애려는 것이다 — 새 점프는 객체째 갈아 끼우므로 앞 점프의 시계가 새
+   * 행을 거둘 수 없다.
    */
-  const [landedId, setLandedId] = useState<string | null>(null);
+  const [landed, setLanded] = useState<{
+    id: string;
+    holdMs: number | null;
+  } | null>(null);
+  const landedId = landed === null ? null : landed.id;
+  const landedHoldMs = landed === null ? null : landed.holdMs;
   const geometryRef = useRef<TimelineGeometry>({
     offsetY: 0,
     contentHeight: 0,
@@ -1225,7 +1239,7 @@ function TimelineInner({
     setBaselineSeq(null);
     setRelationState(null);
     setUnreadLatched(false);
-    setLandedId(null);
+    setLanded(null);
     followingRef.current = true;
     atBottomRef.current = true;
     pendingVerdictRef.current = null;
@@ -2159,11 +2173,11 @@ function TimelineInner({
     // The reader has the list now. Whatever it shows from here on, they are
     // looking at (#1892 latch).
     settleEntry();
-    // 착지 표시도 여기서 물러난다 (#1076). 그것을 세운 것이 사람의 동작(점프)이
-    // 었으므로 거두는 것도 사람의 동작이다 — 타이머가 아니라. 이유는
-    // `MessageRow` 의 `rowLanded` 주석에 있다: 폰의 점프는 애니메이션이고,
-    // 목표 행이 아직 안 측정됐으면 한 번 더 도므로, 시한은 이동과 경주한다.
-    setLandedId(null);
+    // 착지 표시도 여기서 물러난다 (#1076). 사람이 화면을 다시 가져갔으니 「방금 여기로
+    // 왔다」는 더는 사실이 아니다. 시한(#3921)이 있어도 이 길은 남는다 — 시계가 돌고
+    // 있든(이동이 끝난 뒤) 아직 안 켜졌든(이동 중) 손가락이 먼저다. 시계는 `landed` 가
+    // 비면 아래 효과의 정리 함수가 거둔다.
+    setLanded(null);
     // And the prepend correction comes straight back: the reader taking the list
     // is the likeliest prelude to them scrolling UP into history, which is the
     // one thing that must never move under them.
@@ -2639,8 +2653,8 @@ function TimelineInner({
     onJumpLanded?.();
     // 「방금 여기로 왔다」 (#1076). 가운데로 옮겨 놓는 것만으로는 **어느 줄이
     // 원본인지**를 사람이 다시 찾아야 한다 — 밀집한 타임라인에서 가운데는
-    // 좌표이지 표시가 아니다. 색과 사라짐 규칙의 근거는 `MessageRow` 의
-    // `rowLanded` 주석에 있다.
+    // 좌표이지 표시가 아니다. 색의 근거와 물러나는 규칙은 `MessageRow` 의 `rowLanded`
+    // 주석과 `landedHighlight.ts` 머리말에 있다.
     //
     // 표시를 **먼저** 세우고 스크롤한다. 반대로 두면 이동이 실패해
     // (`onScrollToIndexFailed` 회복 경로) 두 프레임 뒤에 앉는 동안 표시가 없는
@@ -2650,14 +2664,116 @@ function TimelineInner({
     // (H-1) 화면에 없는 id 에 틴트를 걸게 되고, 사람은 움직이기만 하고 아무것도
     // 켜지지 않는 화면을 본다.
     const landing = items[index];
-    setLandedId(
-      landing?.kind === 'message' ? landing.message.id : jumpTarget.messageId,
-    );
+    const landingMessage = landing?.kind === 'message' ? landing.message : null;
+    const landingId =
+      landingMessage !== null ? landingMessage.id : jumpTarget.messageId;
+    // 도착했을 때 **이미 결정된** 승인 카드는 틴트를 입지 않는다 (#3921). 틴트는 앰버,
+    // 이 폰에서 「사람이 할 일이 남아 있다」를 맡는 색이다 — 「승인됨」 칩 옆에서 그 색이
+    // 서면 끝난 일이 안 끝난 것처럼 읽힌다(성재가 본 그 모순). 세웠다가 곧바로 거두는 길
+    // (아래 결정 효과)도 있지만 그러면 한 커밋 동안 틴트가 켜졌다 녹는다. 처음부터 세우지
+    // 않는다. 카드가 어디서 결정됐는지는 묻지 않는다 — 이 기기든 다른 기기든 같은 말이다.
+    const alreadyDecided =
+      landingMessage !== null &&
+      landedApprovalOf(landingMessage, {
+        gates: approvalGates,
+        receipts: approvalReceipts,
+      })?.decided === true;
+    setLanded(alreadyDecided ? null : {id: landingId, holdMs: null});
     // 화면 가운데에 놓는다: 인용의 원본은 그 앞뒤가 함께 읽혀야 뜻이 산다.
     // 「동작 줄이기」면 즉시다 — 두 필과 같은 규율이다(R1 N-4). 이 클라에서 점프가
     // 움직임을 거르는 자리가 둘이면 같은 설정이 버튼마다 다르게 듣는다.
-    travelToIndex(index, 0.5, !reduceMotionRef.current);
+    //
+    // 세 번째 인자 뒤의 콜백이 **「보였다」의 확인**이다 (#3921). 이동이 끝났다는 말은
+    // 애니메이션이 멎었고(`JUMP_SETTLE_MS` 동안 움직임 없음), `onScrollToIndexFailed` 의
+    // 회복이 끝났고(`recovering` 동안은 안 끝난다), 메우는 활강이 있었다면 그것까지
+    // 지났다는 뜻이다(`delayMs`). 시계를 그보다 일찍 켜면 틴트가 이동과 경주한다 —
+    // `rowLanded` 옛 주석이 시한을 버린 이유 그대로다. 이 확인은 `jumpPills` 와 무관하게
+    // 모든 표면에 있다(스레드 패널은 보이는 행 보고를 달지 않는다).
+    travelToIndex(index, 0.5, !reduceMotionRef.current, delayMs => {
+      setLanded(current =>
+        current !== null && uuidEq(current.id, landingId)
+          ? {id: current.id, holdMs: LANDED_HOLD_MS + delayMs}
+          : current,
+      );
+    });
   }, [jumpToken]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- 착지 틴트가 물러나는 두 길 (#3921) ---------------------------------------
+  //
+  // 손가락으로 거두는 셋째 길은 `onScrollBeginDrag` 에 있다. 이 둘은 효과인 이유가 다르다:
+  // 시계는 **정리 함수가 거두는** 것이 본질이고(점프가 갈아 끼워지든 방이 바뀌든 손가락이
+  // 거두든 `landed` 가 바뀌면 앞 시계는 저절로 사라진다), 결정은 이 목록이 소유하지 않는
+  // 입력(영수증·원장·카드 상태)이 바뀔 때 도착한다.
+
+  // 시계. `holdMs` 가 서야 켜지고(이동이 끝났다), 같은 점프의 것일 때만 거둔다.
+  useEffect(() => {
+    if (landedId === null || landedHoldMs === null) return undefined;
+    const timer = setTimeout(() => {
+      setLanded(current =>
+        current !== null && current.id === landedId ? null : current,
+      );
+    }, landedHoldMs);
+    return () => clearTimeout(timer);
+  }, [landedId, landedHoldMs]);
+
+  // 결정. 착지한 행이 승인 요청이고 그 승인이 결정되면 곧바로 거둔다 — 이 기기의 결정
+  // (영수증)도, 다시 읽기로 들어온 다른 기기의 결정·만료(카드 상태)도, 대기 원장에서
+  // 사라진 것도.
+  //
+  // **「원장에 없다」만으로는 결정이 아니다.** 원장은 첫 읽기가 오기 전에는 비어 있고,
+  // 알림 탭은 캐시를 무효화만 하므로(`useNotificationTapRouting`) 착지하는 순간 원장에
+  // 그 승인이 없는 것이 정상이다. 그것을 결정으로 읽으면 알림으로 도착하자마자 틴트가
+  // 꺼진다 — 옛 주석이 시한을 버린 이유(약속하고 안 주는 표시)를 다른 길로 되풀이하는
+  // 셈이다. 읽을 수 있는 것은 **같은 착지 동안 있었다가 사라지는** 전이뿐이다.
+  const landedMessage = useMemo(() => {
+    if (landedId === null) return null;
+    for (const item of items) {
+      if (item.kind === 'message' && uuidEq(item.message.id, landedId)) {
+        return item.message;
+      }
+    }
+    return null;
+  }, [landedId, items]);
+  const landedApproval = useMemo(
+    () =>
+      landedMessage === null
+        ? null
+        : landedApprovalOf(landedMessage, {
+            gates: approvalGates,
+            receipts: approvalReceipts,
+          }),
+    [landedMessage, approvalGates, approvalReceipts],
+  );
+  /** 이 착지 동안 원장이 그 승인을 대기로 든 적이 있는가. 착지가 바뀌면 낡은 값이 된다. */
+  const ledgerHeldRef = useRef<{landedId: string; approvalId: string} | null>(
+    null,
+  );
+  useEffect(() => {
+    if (landedId === null || landedApproval === null) {
+      ledgerHeldRef.current = null;
+      return;
+    }
+    const release = () =>
+      setLanded(current =>
+        current !== null && current.id === landedId ? null : current,
+      );
+    if (landedApproval.decided) {
+      release();
+      return;
+    }
+    if (landedApproval.pendingInLedger) {
+      ledgerHeldRef.current = {landedId, approvalId: landedApproval.approvalId};
+      return;
+    }
+    const held = ledgerHeldRef.current;
+    if (
+      held !== null &&
+      held.landedId === landedId &&
+      held.approvalId === landedApproval.approvalId
+    ) {
+      release();
+    }
+  }, [landedId, landedApproval]);
 
   const onScrollToIndexFailed = useCallback(
     (info: {index: number; averageItemLength: number}) => {
@@ -2870,16 +2986,25 @@ function TimelineInner({
     />
   );
 
+  // 「동작 줄이기」는 목록이 한 번 들고 행들이 읽는다 — 물러나는 틴트의 전환이 즉시여야
+  // 하는지 (`LandedTintFade`). 컨텍스트는 호스트 뷰를 만들지 않으므로 아래 약속(목록이
+  // 부모의 직접 자식)은 그대로다.
+  const motionScope = (
+    <ReduceMotionRefContext.Provider value={reduceMotionRef}>
+      {list}
+    </ReduceMotionRefContext.Provider>
+  );
+
   // Surfaces without the pills keep the list as the direct child they always had
   // — the harness and the thread panel render exactly what they rendered before.
-  if (!jumpPills) return list;
+  if (!jumpPills) return motionScope;
 
   return (
     // 필은 목록 **안에** 산다(웹 `relative h-full` 과 같은 자리). 그 줄이 가리키는
     // 곳도, 눌렀을 때 움직이는 것도 이 스크롤러다. 떠 있으므로 목록의 배치는 한
     // 픽셀도 바뀌지 않는다 — `measure/` 의 앵커 이동 두 줄이 그것을 잰다.
     <View style={styles.pillFrame}>
-      {list}
+      {motionScope}
       {/* 떠 있는 날짜 알약(DS2-4). 위 필(「안 읽은 곳으로」)과 같은 자리라, 그 필이
           서 있는 동안은 물러난다 — 할 일이 있는 필이 날짜보다 앞선다. */}
       {dayPillLive && floatingDay !== null && !showJumpUnread ? (
