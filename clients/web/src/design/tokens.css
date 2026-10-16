@@ -3665,6 +3665,13 @@
  * elements that paint it cannot be reached from a utility class. Tokens only,
  * so it follows the scheme like everything else, and no animation: it moves
  * exactly as fast as the bytes arrive. */
+/* 프로필 줄 위에 서는 업데이트 카드(#3904). 폭은 사이드바 목록 열에서 양쪽 여백을
+ * 뺀 값이다: 카드가 그 열보다 넓으면 본문 위로 넘어가 「줄에 붙은 카드」가 아니라
+ * 「떠다니는 창」으로 읽힌다. 창이 더 좁아지면(드로어 폭) 화면 안에 머문다. */
+@utility update-card {
+  inline-size: min(calc(var(--w-sidebar-list) - 16px), calc(100vw - 16px));
+}
+
 @utility progress-bar {
   appearance: none;
   inline-size: 100%;

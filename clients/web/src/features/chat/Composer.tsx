@@ -77,6 +77,7 @@ import {
   readDraft,
   writeDraft,
 } from "@/features/chat/draftStore";
+import { BEFORE_RELAUNCH_EVENT } from "@/features/updates/relaunchFlush";
 import { rememberSendLearned, useSendHintNeeded } from "@/features/chat/sendHint";
 import { useAutoGrow } from "@/features/timeline/useAutoGrow";
 import { useDmDeliveryHint } from "@/features/chat/useDmDeliveryHint";
@@ -708,6 +709,8 @@ export function Composer({
     setSecretBlocks(0);
     const save = () => writeDraft(workspaceId, channelId, textRef.current);
     window.addEventListener("pagehide", save);
+    // 업데이트로 앱이 스스로 다시 실행하기 직전(#3904)에도 같은 마지막 저장을 한다.
+    window.addEventListener(BEFORE_RELAUNCH_EVENT, save);
     const onSeed = (event: Event) => {
       const detail = (event as CustomEvent<{
         workspaceId: string;
@@ -726,6 +729,7 @@ export function Composer({
     window.addEventListener(COMPOSER_SEED_EVENT, onSeed);
     return () => {
       window.removeEventListener("pagehide", save);
+      window.removeEventListener(BEFORE_RELAUNCH_EVENT, save);
       window.removeEventListener(COMPOSER_SEED_EVENT, onSeed);
       save();
     };

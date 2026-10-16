@@ -48,7 +48,7 @@ import {
   useOpenCreateChannel,
 } from "@/features/channels/useCreateChannel";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
-import { UpdateBadge } from "@/features/updates/UpdateBadge";
+import { UpdateButton } from "@/features/updates/UpdateButton";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
 import { SidebarRowContextMenu } from "./SidebarRowContextMenu";
 import { openChannelId } from "./openChannel";
@@ -1196,11 +1196,6 @@ export function Sidebar({
             </div>
           </div>
 
-          {/* Above the identity row, not below it: a new build is news, and news
-              belongs where the eye already lands when it leaves the channel list.
-              Renders nothing at all unless there is something to act on. */}
-          <UpdateBadge />
-
           {/* The identity row ("who I am"). Two DIFFERENT facts appear around it and
               ADR-0160 keeps them apart (guard 6, 6b design-review H1):
               • the presence badge (③) on the avatar: the declared status
@@ -1218,6 +1213,9 @@ export function Sidebar({
             data-testid="sidebar-profile-foot"
           >
             {!railCollapsed && profileCard(false)}
+            {/* 「업데이트」 알약(성재 결재 2026-10-16, Cursor 방식): 새 버전이 있는 동안만,
+                펼친 프로필 줄 오른쪽 도움말 아이콘 앞에. 접힘에서는 마운트하지 않는다. */}
+            {!railCollapsed && <UpdateButton />}
             <ShortcutHelpDialog />
           </div>
         </div>
