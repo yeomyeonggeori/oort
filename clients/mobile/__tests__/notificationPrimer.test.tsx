@@ -30,10 +30,12 @@ import {
 } from '@testing-library/react-native';
 import * as Notifications from 'expo-notifications';
 import React from 'react';
+import {StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
+import {slopTo, TOUCH_TARGET} from '../src/design/tokens';
 import {KOMETTO_EXPRESSION_ASSETS} from '../src/features/onboarding/komettoExpressions';
 import {NotificationPrimerGate} from '../src/features/onboarding/NotificationPrimer';
 import {
@@ -313,6 +315,24 @@ describe('M3 어떤 알림을 받을까요? (#3925, ADR-0204 D4)', () => {
     expect(work.props.accessibilityRole).toBe('switch');
     expect(work.props.accessibilityState).toMatchObject({checked: true, disabled: false});
     expect(PUSH_WORK_COMPLETE_LABEL).toBe('작업 끝남');
+  });
+
+  it('reaches 44pt on the 작업 끝남 row: its box plus a derived hitSlop, never a typed 44', async () => {
+    await mountPrimer();
+    const row = screen.getByTestId('notify-work-row');
+    const box = StyleSheet.flatten(row.props.style).minHeight as number;
+    const {top, bottom} = row.props.hitSlop as {top: number; bottom: number};
+    expect(top).toBe(slopTo(box));
+    expect(bottom).toBe(slopTo(box));
+    expect(box + top + bottom).toBeGreaterThanOrEqual(TOUCH_TARGET);
+    // 세 종류 이름 줄이 같은 높이여야 이름과 알림 사이가 같은 리듬으로 선다.
+    const heights = ['approval', 'mention'].map(
+      kind =>
+        StyleSheet.flatten(
+          screen.getByTestId(`notify-kind-${kind}-head`).props.style,
+        ).minHeight,
+    );
+    expect(heights).toEqual([box, box]);
   });
 
   it('pictures the real approval buttons: the preview names the same two actions the notification carries', () => {
