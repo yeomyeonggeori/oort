@@ -126,6 +126,7 @@ import {INITIAL_NAV, navReducer} from '../src/nav/state';
 import {ProfilePage, ProfileSheet} from '../src/features/profile/ProfileSheet';
 import {__setPermissionReader} from '../src/push/permissionStatus';
 import {clearPushOptOut, setPushOptedOut} from '../src/push/pushOptOut';
+import {pushDeviceId} from '../src/push/registration';
 import {AppUpdateSheet} from '../src/features/appUpdate/AppUpdateBanner';
 import {seedIosFeedCacheForCapture} from '../src/features/appUpdate/feed';
 import {PageSheet} from '../src/design/PageSheet';
@@ -4391,16 +4392,24 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           </View>
         </Screen>
       );
-    // #3924: 프로필 「알림」 묶음의 첫 줄 — 이 폰의 푸시 스위치 세 상태(켬 · 끔 · OS 거부).
+    // #3924: 프로필 「알림」 묶음의 첫 줄 — 이 폰의 푸시 스위치. 기본 세 상태(켬 · 끔 · OS 거부)에 아래 몇 가지를 더한다.
     // 시트를 알림 묶음이 머리에 오도록 끌어올려 찍는다. iOS 의 답과 「껐다」는 기억은
     // `seedPush` 가 정한다 — 스위치·설명·잠김은 배송되는 `usePushSwitch` 가 그 값에서 그린다.
     // `-ax` 두 판은 접근성 글자 크기(`simctl ui content_size accessibility-extra-extra-large`)용이다:
     // 위쪽 줄들이 함께 커져 알림 묶음이 더 아래로 밀리므로 끌어올림이 다르다.
+    // `-undetermined` 는 iOS 가 아직 묻지 않은 폰, `-checking` 은 iOS 의 답이 아직 오지 않은 「읽는
+    // 중」이다. `-busy`·`-failed` 는 **눌러야만** 서는 상태라 정지 사진이 아니라
+    // `maestro/99-push-switch-capture.yaml` 이 진짜로 눌러 찍는다(서버 자리만 `seedPush` 의 가짜가 진다).
     case 'shell-profile-push-on':
     case 'shell-profile-push-off':
     case 'shell-profile-push-denied':
     case 'shell-profile-push-off-ax':
     case 'shell-profile-push-denied-ax':
+    case 'shell-profile-push-undetermined':
+    case 'shell-profile-push-checking':
+    case 'shell-profile-push-busy':
+    case 'shell-profile-push-failed':
+    case 'shell-profile-push-failed-ax':
       return (
         <Screen>
           <View style={{flex: 1, overflow: 'hidden'}}>
@@ -5555,7 +5564,7 @@ function seedAi(surface: string): void {
   ]);
 }
 
-// #3924: 푸시 스위치 세 판. 시뮬레이터에는 알림 권한을 허용·거부로 고정하는 길이 없어
+// #3924: 푸시 스위치 판들. 시뮬레이터에는 알림 권한을 허용·거부로 고정하는 길이 없어
 // (`simctl privacy` 에 notifications 가 없다) iOS 의 답을 하네스가 정한다. 「껐다」는 기억은
 // 진짜 저장소에 적는다 — 하네스의 멤버 id 로 적히므로 이 기기에 로그인한 진짜 멤버의 스위치에는
 // 닿지 않는다(`pushOptOut.ts`). 켬·거부 판은 그 기억을 지워 두고 시작한다.
@@ -5565,11 +5574,49 @@ const PUSH_CAPTURE_SCROLL_AX = 1160;
 
 function seedPush(surface: string): void {
   const denied = surface.startsWith('shell-profile-push-denied');
-  __setPermissionReader(async () => ({granted: !denied, canAskAgain: !denied}));
+  // iOS 가 아직 묻지 않은 폰: 허용도 거부도 아니고 다시 물을 수 있다.
+  const undetermined = surface === 'shell-profile-push-undetermined';
+  // 「읽는 중」: iOS 의 답이 영영 오지 않는다 — 스위치 자리의 스피너가 그대로 선다.
+  const reading = surface === 'shell-profile-push-checking';
+  __setPermissionReader(
+    reading
+      ? () => new Promise<{granted: boolean; canAskAgain: boolean}>(() => {})
+      : async () => ({
+          granted: !denied && !undetermined,
+          canAskAgain: !denied,
+        }),
+  );
   if (surface.startsWith('shell-profile-push-off')) {
     setPushOptedOut(HARNESS_MEMBER.id, true);
   } else {
     clearPushOptOut();
+  }
+  // 눌러야만 서는 두 상태: 켜진 스위치를 사람이 끄면 이 기기를 지우는 DELETE 가 나간다. 그 요청이
+  // 나가려면 이 폰이 서버에 등록된 적이 있어야 하므로 기기 id 를 하나 세운다(`pushDeviceId` 는 없으면
+  // 만든다). 서버 자리만 이 가짜다: `busy` 는 답이 영영 오지 않고(요청 중 잠김), `failed` 는 500 으로
+  // 거절한다(꺼졌다고 말하지 못하고 되돌려져 실패 문장이 선다). 그 밖의 요청은 `seedShell` 처럼 끝나지
+  // 않는다. DELETE 가 몇 번 나갔는지는 로그로 남긴다 — 한 번의 탭이 한 번의 요청이어야 한다.
+  if (
+    surface === 'shell-profile-push-busy' ||
+    surface.startsWith('shell-profile-push-failed')
+  ) {
+    pushDeviceId();
+    const refuse = surface.startsWith('shell-profile-push-failed');
+    let deletes = 0;
+    globalThis.fetch = (async (input: unknown, init?: {method?: string}) => {
+      const url = String(input);
+      if (init?.method === 'DELETE' && url.includes('/devices/')) {
+        deletes += 1;
+        console.log(`[measure-push] DELETE /devices/{id} #${deletes}`);
+        if (!refuse) return new Promise<Response>(() => {});
+        return {
+          status: 500,
+          ok: false,
+          text: async () => JSON.stringify({error: {code: 'internal'}}),
+        } as unknown as Response;
+      }
+      return new Promise<Response>(() => {});
+    }) as typeof fetch;
   }
 }
 

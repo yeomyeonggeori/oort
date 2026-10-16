@@ -1,0 +1,69 @@
+appId: app.momo.ios
+name: 99-push-switch-capture
+---
+# 99-push-switch-capture — 프로필 「푸시 알림」 스위치를 **누른 뒤** 두 상태 (#3924, ADR-0204 D1).
+#
+# `measure/` 의 표면들은 저 혼자 서서 찍히는데, 이 두 상태는 그럴 수 없다. 둘 다 켜진 스위치를
+# 사람이 **꺼야** 선다: 이 기기를 서버에서 지우는 DELETE 가 나가고, 그 답이 오기 전(요청 중 잠김)과
+# 서버가 거절한 뒤(꺼졌다고 말하지 못하고 켜진 채로 되돌려져 줄 아래에 문장이 선다)다.
+# `usePushSwitch` 의 상태는 prop 으로 세울 수 없고, 세울 수 있게 하는 것은 배송 컴포넌트에 하네스 전용 문을
+# 내는 일이다(92번 `ACTION-ROLE-REQUIRED` 와 같은 사정). 그래서 이 레인은 **정말로 누르고**, 서버 자리만
+# `measure/surfaces.tsx` 의 `seedPush` 가 세운 가짜가 진다(`busy` 는 답이 오지 않고, `failed` 는 500).
+# 진짜 스위치·진짜 훅·진짜 `revokeOwnDevice`·코어 `authedRequest` 가 그대로 돈다.
+#
+# 로그인도 서버도 필요 없고 `launchApp` 도 없다 — 앱을 다시 띄우면 계측 인자가 아니라 보통의 앱이 뜬다.
+#
+# 쓰는 법(사람이 부른다). 한 번에 한 표면, 환경 둘:
+#   TAP     switch = 오른쪽 끝의 스위치 자체를 누른다 · row = 줄(설명 글 쪽)을 누른다
+#   EXPECT  failure = 실패 문장이 설 때까지 기다린다 · busy = 문장이 서지 않은 채 잠긴 모습
+#
+#   xcrun simctl launch <udid> app.momo.ios --args \
+#     -momoMeasure shell-profile-push-failed -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro --device <udid> test -e TAP=switch -e EXPECT=failure \
+#     clients/mobile/maestro/99-push-switch-capture.yaml
+#   xcrun simctl io <udid> screenshot --type=png 3924-push-failed-dark.png
+#
+#   (`-momoMeasure shell-profile-push-busy` + `-e TAP=row -e EXPECT=busy`, 라이트는 `light-` 접두,
+#    접근성 글자 크기 판은 `shell-profile-push-failed-ax` + `-e TAP=row`.)
+#
+# 스위치는 접근성 계층에서 숨겨져 있어(`accessibilityElementsHidden` — 줄이 하나의 `switch` 로 읽힌다)
+# id 가 없다. 그래서 스위치 자체는 좌표로 누른다: `maestro hierarchy` 실측(2026-10-17, iPhone 17,
+# 402x874pt) `profile-push-row` bounds [16,83][385,149], 스위치는 그 줄 오른쪽 끝(x 307~370, y 96~123).
+- extendedWaitUntil:
+    visible:
+      id: "profile-push-row"
+    timeout: 60000
+- runFlow:
+    when:
+      true: ${TAP == 'switch'}
+    commands:
+      - tapOn:
+          point: "84%,13%"
+- runFlow:
+    when:
+      true: ${TAP == 'row'}
+    commands:
+      - tapOn:
+          id: "profile-push-row"
+- runFlow:
+    when:
+      true: ${EXPECT == 'failure'}
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "push-failure"
+          timeout: 15000
+      # 여기서 `dismiss-dev-logbox` 를 부르지 않는다: 하네스(`measure/surfaces.tsx`)는 LogBox 를 이미 꺼
+      # 두었고, 그 맹탄(92%,94%)은 접근성 글자 크기에서 **다음 줄(알림 일시 중지)** 을 눌러 사진을 더럽힌다.
+      - waitForAnimationToEnd:
+          timeout: 3000
+- runFlow:
+    when:
+      true: ${EXPECT == 'busy'}
+    commands:
+      # 요청의 기한은 15초(`REQUEST_TIMEOUT_MS`)다. 그 안에 사진이 찍히도록 오래 기다리지 않는다 —
+      # 기한이 지나면 `unreachable` 로 끝나 이 상태가 실패 문장으로 바뀐다.
+      - waitForAnimationToEnd:
+          timeout: 1000
+      - assertNotVisible:
+          id: "push-failure"
