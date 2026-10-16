@@ -302,6 +302,8 @@ describe('두 팔레트가 같은 역할표를 든다', () => {
     // 것만 남긴다:
     //
     //   shadow    그림자는 색이 아니라 **아래 방향**이라 스킴을 따라가지 않는다.
+    //   backdrop  바닥이 무엇 위에 서는가(`canvas`·`image`)는 색이 아니라 **분기용 사실**이라
+    //             두 스킴이 같은 값을 든다(ADR-0189 증보 2). 값은 색 문자열이 아니다.
     //
     // `onAccent` 가 여기 있었다 (#1155 이전). 그때는 두 스킴의 accent 채움이 **둘 다
     // 어두웠고**(다크 파랑 #3b6fd4 · 라이트 #a54c08) 그래서 그 위의 글자가 어느
@@ -314,7 +316,7 @@ describe('두 팔레트가 같은 역할표를 든다', () => {
       role =>
         darkPalette[role as keyof Palette] === lightPalette[role as keyof Palette],
     );
-    expect(shared.sort()).toEqual(['shadow']);
+    expect(shared.sort()).toEqual(['backdrop', 'shadow']);
   });
 });
 

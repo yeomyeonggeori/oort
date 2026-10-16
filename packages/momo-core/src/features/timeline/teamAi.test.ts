@@ -164,3 +164,31 @@ describe("넘기는 줄과 맡기기 버튼 (ADR-0201 D5)", () => {
     ).toBe("@grokbot 인용한 요청을 맡아 주세요.");
   });
 });
+
+describe("맡기는 메시지와 별칭 (ADR-0201 v2 H2, #3893)", () => {
+  it("@oort·@오르트 로 부른 요청을 맡기면 도우미 이름을 모두 지운다", () => {
+    expect(
+      delegateMessageBody({
+        targetHandle: "grokbot",
+        sourceBody: "@oort @오르트 PR 리뷰해 줘",
+        teamAiHandles: ["oort-helper", "oort", "오르트", "claude"],
+      })
+    ).toBe("@grokbot PR 리뷰해 줘");
+  });
+
+  it("「@오르트에게」는 서버 경계 규칙상 부른 것이 아니라서 남긴다", () => {
+    expect(
+      delegateMessageBody({
+        targetHandle: "grokbot",
+        sourceBody: "@오르트에게 물어봤는데",
+        teamAiHandles: ["오르트"],
+      })
+    ).toBe("@grokbot @오르트에게 물어봤는데");
+  });
+
+  it("별칭을 넘기지 않으면(옛 서버) @oort 는 남는다 — 다른 멤버일 수 있다", () => {
+    expect(
+      delegateMessageBody({ targetHandle: "grokbot", sourceBody: "@oort 해 줘", teamAiHandles: [] })
+    ).toBe("@grokbot @oort 해 줘");
+  });
+});

@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 
+import {AppBackground} from '../design/background/AppBackground';
 import {GlassSurface, useGlassMaterial} from '../design/glass';
 import {haptics} from '../lib/haptics';
 import {useReduceMotionRef} from '../lib/useReduceMotion';
@@ -180,6 +181,8 @@ export function Canvas({children}: {children: React.ReactNode}): React.JSX.Eleme
   const styles = useStyles(buildStyles);
   return (
     <View style={styles.canvas} testID="shell-canvas">
+      {/* 사용자 배경(ADR-0189 증보 2). 꺼져 있으면 아무것도 그리지 않는다. */}
+      <AppBackground />
       {children}
     </View>
   );
@@ -451,7 +454,12 @@ const buildStyles = (color: Palette) =>
       flex: 1,
       // 그라데이션을 못 그리는 경로(구 아키텍처·스냅숏)에서는 가운데 정지점 평면이다.
       backgroundColor: color.bg,
-      experimental_backgroundImage: `linear-gradient(180deg, ${color.canvasTop} 0%, ${color.bg} 46%, ${color.canvasBottom} 100%)`,
+      // 사용자 배경이 깔린 동안은 그 층(`AppBackground`)이 바닥을 그린다.
+      ...(color.backdrop === 'image'
+        ? {}
+        : {
+            experimental_backgroundImage: `linear-gradient(180deg, ${color.canvasTop} 0%, ${color.bg} 46%, ${color.canvasBottom} 100%)`,
+          }),
     },
     fade: {
       position: 'absolute',
@@ -461,7 +469,15 @@ const buildStyles = (color: Palette) =>
       height: SHELL.fadeHeight,
       // `transparent`는 검정 투명이라 중간에 회색 띠가 선다. 같은 색의 알파 0에서
       // 시작한다 — 시안의 `transparent`가 브라우저에서 그리는 것과 같은 그림이다.
-      experimental_backgroundImage: `linear-gradient(180deg, ${color.canvasBottom}00 0%, ${color.canvasBottom} 62%)`,
+      // 배경이 깔린 동안은 바닥색(불투명)으로 녹이면 사진 위에 띠가 선다 — scrim 색으로
+      // 녹인다. 목록 글자가 탭바 밑으로 지나갈 때 가려 주는 일은 그대로 한다(리뷰 M5).
+      ...(color.backdrop === 'image'
+        ? {
+            experimental_backgroundImage: `linear-gradient(180deg, ${color.bg}00 0%, ${color.backdropScrim} 62%)`,
+          }
+        : {
+            experimental_backgroundImage: `linear-gradient(180deg, ${color.canvasBottom}00 0%, ${color.canvasBottom} 62%)`,
+          }),
     },
     band: {
       position: 'absolute',

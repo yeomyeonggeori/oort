@@ -64,6 +64,7 @@ import {
   type AgentToolCatalogEntry,
 } from "../features/agents/toolCatalog";
 import { normalizeWorkRunInput, type WorkRunDraft } from "../features/agents/workRunRequest";
+import { parseAliases } from "../features/routing/helperAliases";
 
 export type { AgentToolCatalogEntry };
 
@@ -192,6 +193,14 @@ export interface RosterMember {
   roleLabel?: string;
   /** Agents only (V3-2a): a server avatar preset id. An uploaded image wins. */
   avatarPreset?: string;
+  /**
+   * Agents only (ADR-0201 증보 v2 H2): the other names this member answers to,
+   * e.g. the team AI's `oort`·`오르트`·`claude`. Only aliases the server actually
+   * registered (a real member's handle always wins). Normalised (NFC, lower case)
+   * by `parseAliases`; absent on servers that predate the alias table, and every
+   * consumer goes through `features/routing/helperAliases`.
+   */
+  aliases?: string[];
   createdAtMs: number;
   updatedAtMs: number;
 }
@@ -245,6 +254,13 @@ function sanitizeRosterMember(value: unknown): unknown {
       const { [key]: _bad, ...rest } = row;
       row = rest;
     }
+  }
+  // Aliases (ADR-0201 v2 H2): keep only the grammar the server writes; an
+  // unreadable list drops the column, never the member.
+  if ("aliases" in row) {
+    const aliases = parseAliases(row.aliases);
+    const { aliases: _raw, ...rest } = row;
+    row = aliases === null ? rest : { ...rest, aliases };
   }
   if (
     "dndUntilMs" in row &&
