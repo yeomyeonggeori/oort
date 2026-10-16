@@ -11,23 +11,46 @@
 //! completion-report protocol, no A2A routing of what it says. Its text is
 //! posted by [`AgentWorker::team_ai_finish`], which writes one message and the
 //! ledger row and routes nothing.
+//!
+//! ## ADR-0201 증보 v2 (#3894): a bounded read loop
+//!
+//! The helper may now read before it answers (H4) and, on a wire that has one,
+//! let the provider search the web (H5). The loop is bounded on every axis
+//! (H9-I11, H10): at most [`team_ai::MAX_MODEL_CALLS`] model calls, at most
+//! [`team_ai::MAX_TOOL_CALLS`] read calls, each call under the 20-second cut and
+//! the whole request under [`crate::WorkerConfig::team_ai_request_deadline`].
+//!
+//! * Each read runs in its own transaction **as the requester**:
+//!   `SET LOCAL ROLE momo_helper_read` first (NOBYPASSRLS, SELECT only), then the
+//!   same domain function the REST read uses, with the requester id the server
+//!   decided. Nothing is written in that transaction.
+//! * A result goes back to the model as a fenced data block in a user turn — the
+//!   one shape all three wires carry without adapter changes. The fence says it
+//!   is data; [`team_ai_tools::data_text`] makes it impossible to close.
+//! * Once any workspace read has happened in a request, no later call in that
+//!   request is offered web search (H5: workspace text never rides a search
+//!   query out).
+//! * Tool names, counts and token sums are recorded (audit `team_ai.turn`,
+//!   `via_ai` on a card); prompts, results and answers are not (H9-I10).
 
 use std::time::Instant;
 
 use momo_agent::{
     finish_run_in_tx, lock_gateway_run_in_tx, record_run_usage_in_tx, RunStatus, RunUsageReport,
 };
+use momo_db::audit::{self, AuditEntry};
 use momo_db::{with_tenant_tx, DbError};
 use momo_messaging::{send_message_in_tx, MessageType, NewMessage};
 use momo_outbox::ClaimedAgentJob;
 use momo_workspace_actions::team_ai::{
-    self, FallbackReason, ProposalContext, ProposalRefusal, TeamAiWorkspace, ViaAi,
+    self, FallbackReason, ProposalContext, ProposalRefusal, TeamAiWorkspace, ViaAi, WebSearch,
 };
+use momo_workspace_actions::team_ai_tools::{self, ToolOutcome};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::payload::AgentJobPayload;
-use crate::provider::{ChatMessage, ChatRequest, ChatUsage};
+use crate::provider::{ChatMessage, ChatRequest, ChatUsage, ProviderWire};
 use crate::{emit_terminal_agent_status, AgentWorker, ResolvedTransport, Settlement};
 
 /// What the first read of a team-AI turn found.
@@ -39,6 +62,45 @@ struct Gathered {
     roster: team_ai::Roster,
     candidates: Vec<(Uuid, String, String)>,
     recent_requests: i64,
+    searches_today: i64,
+}
+
+/// What one request did, for the audit row and `via_ai` (H9-I10). Names and
+/// numbers only — never a prompt, a result or an answer.
+#[derive(Debug, Clone, Default)]
+struct TurnTrace {
+    model: String,
+    wire: &'static str,
+    tools: Vec<String>,
+    tool_codes: Vec<&'static str>,
+    model_calls: i32,
+    web_searches: i32,
+    latency_ms: i64,
+}
+
+impl TurnTrace {
+    fn audit_detail(&self, spend: Option<Spend>, outcome: &str) -> Value {
+        json!({
+            "schema": "momo.team_ai_turn.v1",
+            "outcome": outcome,
+            "model": self.model,
+            "wire": self.wire,
+            "tools": self.tools,
+            "tool_results": self.tool_codes,
+            "model_calls": self.model_calls,
+            "web_searches": self.web_searches,
+            "latency_ms": self.latency_ms,
+            "prompt_tokens": spend.map(|s| s.usage.prompt_tokens),
+            "completion_tokens": spend.map(|s| s.usage.completion_tokens),
+        })
+    }
+}
+
+/// H5: can this wire search on the provider's side? Decided by the wire, never
+/// by a provider's name. `Responses` stays "no" until its tool type is verified
+/// against the live API (runtime-unverified follow-up).
+fn wire_searches(wire: ProviderWire) -> bool {
+    matches!(wire, ProviderWire::AnthropicMessages)
 }
 
 /// How a settled team-AI turn ends the run.
@@ -96,6 +158,8 @@ impl AgentWorker {
                     ),
                     None => (team_ai::Roster::default(), Vec::new()),
                 };
+                let searches_today =
+                    team_ai::searches_used_today_in_tx(conn, workspace_id, agent).await?;
                 let recent_requests = match &requester {
                     Some(requester) => {
                         team_ai::recent_requests_by_in_tx(
@@ -109,6 +173,7 @@ impl AgentWorker {
                     None => 0,
                 };
                 Ok(Some(Gathered {
+                    searches_today,
                     recent_requests,
                     state,
                     requester,
@@ -207,71 +272,225 @@ impl AgentWorker {
         }
 
         let model = payload.model_or(&self.config.default_model).to_string();
-        let request = ChatRequest {
-            model: model.clone(),
-            messages: vec![
-                ChatMessage::system(team_ai::system_prompt(&gathered.roster)),
-                ChatMessage::user(team_ai::user_turn(&gathered.trigger_text)),
-            ],
-            max_tokens: Some(team_ai::MAX_OUTPUT_TOKENS),
-            // The profile's own `tool_schema` is operator JSON; the team AI is
-            // offered exactly one tool and nothing an operator can add.
-            tools: Vec::new(),
-            momo_tools: momo_agent::tools::enabled_tool_definitions(&[
-                momo_agent::tools::WORKSPACE_ACTION_PROPOSE.to_string(),
-            ]),
+        let wire = transport.endpoint.wire;
+        let web = if !gathered.state.web_search {
+            WebSearch::Off
+        } else if !wire_searches(wire) {
+            WebSearch::NotSupported
+        } else if gathered.searches_today >= self.config.team_ai_daily_search_cap {
+            WebSearch::DailyCapReached
+        } else {
+            WebSearch::Available
         };
-
-        let prompt_chars: usize = request
-            .messages
-            .iter()
-            .map(|message| message.content.chars().count())
-            .sum();
+        let mut trace = TurnTrace {
+            model: model.clone(),
+            wire: wire.as_str(),
+            ..TurnTrace::default()
+        };
+        let mut messages = vec![
+            ChatMessage::system(team_ai::system_prompt(&gathered.roster, web)),
+            ChatMessage::user(team_ai::user_turn(&gathered.trigger_text)),
+        ];
+        let mut spend: Option<Spend> = None;
+        let mut read_used = false;
         let started = Instant::now();
-        let attempt = tokio::time::timeout(
-            self.config.team_ai_model_timeout,
-            self.provider.complete(&transport.endpoint, &request),
-        )
-        .await;
-        let latency_ms = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
-        let completion = match attempt {
-            Ok(Ok(completion))
-                if !(completion.text.trim().is_empty() && completion.tool_calls.is_empty()) =>
-            {
-                completion
-            }
-            // Timed out, errored, or said nothing: hand off, do not retry (a retry
-            // would spend the 20 seconds again and still miss the budget).
-            other => {
-                tracing::warn!(
-                    run_id = %run_id,
-                    timed_out = other.is_err(),
-                    latency_ms,
-                    "team ai model call produced no usable answer"
-                );
+        let deadline = self.config.team_ai_request_deadline;
+
+        let (completion, call) = loop {
+            let elapsed = started.elapsed();
+            if trace.model_calls as usize >= team_ai::MAX_MODEL_CALLS || elapsed >= deadline {
+                trace.latency_ms = millis(started);
                 return Some(
-                    self.team_ai_fallback(
+                    self.team_ai_fallback_traced(
                         job,
                         payload,
                         run_id,
                         &requester,
                         &gathered.candidates,
-                        FallbackReason::Slow,
-                        // The provider may well have spent tokens before it timed
-                        // out or failed: charge a conservative estimate so the
-                        // daily ceiling still moves.
-                        Some(Spend::of(None, prompt_chars)),
-                        &model,
+                        FallbackReason::TooLong,
+                        spend,
+                        &trace,
                     )
                     .await,
                 );
             }
-        };
-        let usage = Some(Spend::of(completion.usage, prompt_chars));
+            // The tools this call may use. Reads stop being offered once the read
+            // budget is spent; web search is never offered after a read (H5).
+            let mut momo_tools = momo_agent::tools::enabled_tool_definitions(&[
+                momo_agent::tools::WORKSPACE_ACTION_PROPOSE.to_string(),
+            ]);
+            if trace.tools.len() < team_ai::MAX_TOOL_CALLS {
+                momo_tools.extend(team_ai_tools::read_tool_definitions());
+            }
+            let mut tools: Vec<Value> = Vec::new();
+            if web == WebSearch::Available && !read_used {
+                tools.push(crate::anthropic::web_search_tool(
+                    &model,
+                    &transport.endpoint.base_url,
+                    team_ai::WEB_SEARCH_MAX_USES,
+                ));
+            }
+            let request = ChatRequest {
+                model: model.clone(),
+                messages: messages.clone(),
+                max_tokens: Some(team_ai::MAX_OUTPUT_TOKENS),
+                // The profile's own `tool_schema` is operator JSON; the team AI is
+                // offered exactly these tools and nothing an operator can add.
+                tools,
+                momo_tools,
+            };
+            let prompt_chars: usize = request
+                .messages
+                .iter()
+                .map(|message| message.content.chars().count())
+                .sum();
+            let cut = self
+                .config
+                .team_ai_model_timeout
+                .min(deadline.saturating_sub(elapsed));
+            let call_started = Instant::now();
+            let attempt =
+                tokio::time::timeout(cut, self.provider.complete(&transport.endpoint, &request))
+                    .await;
+            trace.model_calls += 1;
+            let call_ms = millis(call_started);
+            let completion = match attempt {
+                Ok(Ok(completion))
+                    if !(completion.text.trim().is_empty() && completion.tool_calls.is_empty()) =>
+                {
+                    completion
+                }
+                // Timed out, errored, or said nothing: hand off, do not retry (a
+                // retry would spend the budget again and still miss it).
+                other => {
+                    tracing::warn!(
+                        run_id = %run_id,
+                        timed_out = other.is_err(),
+                        latency_ms = call_ms,
+                        model_calls = trace.model_calls,
+                        "team ai model call produced no usable answer"
+                    );
+                    // The provider may well have spent tokens before it timed out
+                    // or failed: charge a conservative estimate so the daily
+                    // ceiling still moves.
+                    spend = Spend::add(spend, Spend::of(None, prompt_chars));
+                    trace.latency_ms = millis(started);
+                    let reason = if started.elapsed() >= deadline && trace.model_calls > 1 {
+                        FallbackReason::TooLong
+                    } else {
+                        FallbackReason::Slow
+                    };
+                    return Some(
+                        self.team_ai_fallback_traced(
+                            job,
+                            payload,
+                            run_id,
+                            &requester,
+                            &gathered.candidates,
+                            reason,
+                            spend,
+                            &trace,
+                        )
+                        .await,
+                    );
+                }
+            };
+            spend = Spend::add(spend, Spend::of(completion.usage, prompt_chars));
+            trace.web_searches += completion.web_search_requests.max(0);
 
-        let Some(call) = completion.tool_calls.first().cloned() else {
-            // A plain answer (workspace facts). Bounded, posted as one message.
-            let text: String = completion.text.trim().chars().take(1_500).collect();
+            if completion.tool_calls.is_empty() {
+                break (completion, None);
+            }
+            // A proposal ends the request, whatever else the call asked for.
+            if let Some(propose) = completion.tool_calls.iter().find(|call| {
+                momo_agent::tools::normalize(&call.name)
+                    == momo_agent::tools::normalize(momo_agent::tools::WORKSPACE_ACTION_PROPOSE)
+            }) {
+                let propose = propose.clone();
+                break (completion, Some(propose));
+            }
+            // Anything that is neither a read nor the proposal is the model going
+            // off script.
+            if completion
+                .tool_calls
+                .iter()
+                .any(|call| !team_ai_tools::is_read_tool(&call.name))
+            {
+                trace.latency_ms = millis(started);
+                return Some(
+                    self.team_ai_fallback_traced(
+                        job,
+                        payload,
+                        run_id,
+                        &requester,
+                        &gathered.candidates,
+                        FallbackReason::OutOfScope,
+                        spend,
+                        &trace,
+                    )
+                    .await,
+                );
+            }
+
+            // The reads, as the requester. One transaction each, nothing written.
+            let mut results = Vec::with_capacity(completion.tool_calls.len());
+            let mut called = Vec::with_capacity(completion.tool_calls.len());
+            for tool_call in &completion.tool_calls {
+                let name = momo_agent::tools::normalize(&tool_call.name);
+                if trace.tools.len() >= team_ai::MAX_TOOL_CALLS {
+                    results.push(
+                        ToolOutcome::Invalid("read budget for this request is spent").render(&name),
+                    );
+                    continue;
+                }
+                let outcome = match self
+                    .team_ai_read(
+                        workspace_id,
+                        agent,
+                        requester.member_id,
+                        channel_id,
+                        &name,
+                        &tool_call.arguments_json(),
+                    )
+                    .await
+                {
+                    Ok(outcome) => outcome,
+                    Err(error) => {
+                        return Some(
+                            self.settle_retryable(
+                                job,
+                                &format!("team ai read tool failed: {error}"),
+                                &transport.endpoint,
+                            )
+                            .await,
+                        )
+                    }
+                };
+                trace.tools.push(name.clone());
+                trace.tool_codes.push(outcome.code());
+                results.push(outcome.render(&name));
+                called.push(name);
+            }
+            read_used = true;
+            // The model's own call, in words (no structured tool turn exists on
+            // every wire), then the data — as a user turn the fence calls data.
+            messages.push(ChatMessage {
+                role: "assistant".to_string(),
+                content: format!("(읽기 도구 호출: {})", called.join(", ")),
+            });
+            messages.push(ChatMessage::user(results.join("\n\n")));
+        };
+        trace.latency_ms = millis(started);
+        let latency_ms = trace.latency_ms;
+
+        let Some(call) = call else {
+            // A plain answer. Bounded, posted as one message.
+            let text: String = completion
+                .text
+                .trim()
+                .chars()
+                .take(team_ai::ANSWER_CHARS_MAX)
+                .collect();
             return Some(
                 self.team_ai_finish(
                     job,
@@ -279,32 +498,16 @@ impl AgentWorker {
                     run_id,
                     Some(text),
                     json!({}),
-                    usage,
+                    spend,
                     &model,
                     Ending::Answered,
+                    Some(trace),
                 )
                 .await,
             );
         };
+        let usage = spend;
 
-        // Exactly one tool exists; anything else is the model going off script.
-        if momo_agent::tools::normalize(&call.name)
-            != momo_agent::tools::normalize(momo_agent::tools::WORKSPACE_ACTION_PROPOSE)
-        {
-            return Some(
-                self.team_ai_fallback(
-                    job,
-                    payload,
-                    run_id,
-                    &requester,
-                    &gathered.candidates,
-                    FallbackReason::OutOfScope,
-                    usage,
-                    &model,
-                )
-                .await,
-            );
-        }
         let arguments = call.arguments_json();
         let action_id = arguments
             .get("actionId")
@@ -324,7 +527,7 @@ impl AgentWorker {
                 _ => FallbackReason::CouldNotPropose,
             };
             return Some(
-                self.team_ai_fallback(
+                self.team_ai_fallback_traced(
                     job,
                     payload,
                     run_id,
@@ -332,7 +535,7 @@ impl AgentWorker {
                     &gathered.candidates,
                     reason,
                     usage,
-                    &model,
+                    &trace,
                 )
                 .await,
             );
@@ -345,9 +548,13 @@ impl AgentWorker {
             latency_ms,
             prompt_tokens: usage.map(|u| u.usage.prompt_tokens).unwrap_or(0),
             completion_tokens: usage.map(|u| u.usage.completion_tokens).unwrap_or(0),
+            tools: trace.tools.clone(),
+            model_calls: trace.model_calls,
+            web_searches: trace.web_searches,
         };
         let ledger = ledger_report(usage, &model, payload);
         let fallback_model = model.clone();
+        let searches = trace.web_searches;
         let proposed = with_tenant_tx(&self.pool, workspace_id, move |conn| {
             let via = via.clone();
             let action_id = action_id.clone();
@@ -374,6 +581,7 @@ impl AgentWorker {
                 let resolved = RunUsageReport::resolve(Some(&ledger), &fallback_model, None, None);
                 record_run_usage_in_tx(conn, workspace_id, run_id, agent, channel_id, &resolved)
                     .await?;
+                team_ai::record_web_searches_in_tx(conn, workspace_id, run_id, searches).await?;
                 Ok(outcome)
             })
         })
@@ -385,32 +593,35 @@ impl AgentWorker {
                     approval_id = %ok.approval_id,
                     run_to_card_ms = ?ok.run_to_card_ms,
                     model_ms = latency_ms,
+                    model_calls = trace.model_calls,
                     "team ai proposal card raised"
                 );
                 self.settle_done(job.id, Some("awaiting approval")).await;
                 Some(Settlement::Skipped)
             }
+            // The tokens are already on the ledger (the proposal transaction wrote
+            // the row), so the hand-off below charges nothing twice.
             Ok(Err(refusal)) => Some(match refusal {
                 ProposalRefusal::NotAllowed => {
-                    self.team_ai_fallback(job, payload, run_id, &requester, &gathered.candidates, FallbackReason::OutOfScope, None, &model).await
+                    self.team_ai_fallback_traced(job, payload, run_id, &requester, &gathered.candidates, FallbackReason::OutOfScope, None, &trace).await
                 }
                 ProposalRefusal::InvalidArguments | ProposalRefusal::AvatarNotAllowed => {
-                    self.team_ai_fallback(job, payload, run_id, &requester, &gathered.candidates, FallbackReason::CouldNotPropose, None, &model).await
+                    self.team_ai_fallback_traced(job, payload, run_id, &requester, &gathered.candidates, FallbackReason::CouldNotPropose, None, &trace).await
                 }
                 ProposalRefusal::RequesterLacksRole => {
                     self.team_ai_finish(job, payload, run_id,
                         Some("이 일은 관리자만 승인할 수 있어요. 관리자에게 부탁해 볼까요?".to_string()),
-                        json!({}), None, &model, Ending::Answered).await
+                        json!({}), None, &model, Ending::Answered, Some(trace.clone())).await
                 }
                 ProposalRefusal::TooManyPending => {
                     self.team_ai_finish(job, payload, run_id,
                         Some("승인을 기다리는 카드가 이미 많아요. 먼저 처리해 주세요.".to_string()),
-                        json!({}), None, &model, Ending::Answered).await
+                        json!({}), None, &model, Ending::Answered, Some(trace.clone())).await
                 }
                 ProposalRefusal::TargetBusy => {
                     self.team_ai_finish(job, payload, run_id,
                         Some("같은 대상에 승인을 기다리는 카드가 있어요. 그 카드를 먼저 처리해 주세요.".to_string()),
-                        json!({}), None, &model, Ending::Answered).await
+                        json!({}), None, &model, Ending::Answered, Some(trace.clone())).await
                 }
                 ProposalRefusal::NoHumanRequester | ProposalRefusal::RunNotParkable => {
                     self.team_ai_close(job, payload, run_id, "team_ai_not_proposable").await
@@ -420,6 +631,37 @@ impl AgentWorker {
                 self.settle_retryable(job, &format!("team ai proposal failed: {error}"), &transport.endpoint).await,
             ),
         }
+    }
+
+    /// One read tool, as the requester (H4-2): `SET LOCAL ROLE momo_helper_read`
+    /// first, the audience computed from the reply channel, then the domain
+    /// function. Read-only; nothing else happens in this transaction.
+    async fn team_ai_read(
+        &self,
+        workspace_id: Uuid,
+        helper: Uuid,
+        requester: Uuid,
+        reply_channel: Uuid,
+        tool: &str,
+        args: &Value,
+    ) -> Result<ToolOutcome, DbError> {
+        let tool = tool.to_string();
+        let args = args.clone();
+        with_tenant_tx(&self.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                team_ai_tools::enter_helper_read_role(conn).await?;
+                let scope = team_ai_tools::load_scope_in_tx(
+                    conn,
+                    workspace_id,
+                    helper,
+                    requester,
+                    reply_channel,
+                )
+                .await?;
+                team_ai_tools::execute_read_tool_in_tx(conn, &scope, &tool, &args).await
+            })
+        })
+        .await
     }
 
     /// End the run without posting anything (switch off, no human asked).
@@ -439,6 +681,7 @@ impl AgentWorker {
             None,
             "",
             Ending::Closed(code),
+            None,
         )
         .await
     }
@@ -472,6 +715,42 @@ impl AgentWorker {
             usage,
             model,
             Ending::Closed(reason.as_str()),
+            None,
+        )
+        .await
+    }
+
+    /// [`Self::team_ai_fallback`] after one or more model calls: the trace (tool
+    /// names, counts) goes to the audit row and the model label to the line.
+    #[allow(clippy::too_many_arguments)]
+    async fn team_ai_fallback_traced(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &AgentJobPayload,
+        run_id: Uuid,
+        requester: &momo_agent::card_suggest::SuggestionRequester,
+        candidates: &[(Uuid, String, String)],
+        reason: FallbackReason,
+        usage: Option<Spend>,
+        trace: &TurnTrace,
+    ) -> Settlement {
+        let props = team_ai::fallback_props(
+            reason,
+            payload.agent_member_id,
+            requester.member_id,
+            payload.trigger_message_id,
+            candidates,
+        );
+        self.team_ai_finish(
+            job,
+            payload,
+            run_id,
+            Some(reason.sentence().to_string()),
+            props,
+            usage,
+            &trace.model.clone(),
+            Ending::Closed(reason.as_str()),
+            Some(trace.clone()),
         )
         .await
     }
@@ -490,6 +769,7 @@ impl AgentWorker {
         usage: Option<Spend>,
         model: &str,
         ending: Ending,
+        trace: Option<TurnTrace>,
     ) -> Settlement {
         let workspace_id = job.workspace_id;
         let agent = payload.agent_member_id;
@@ -500,7 +780,19 @@ impl AgentWorker {
             Ending::Answered => (true, None),
             Ending::Closed(code) => (false, Some(code)),
         };
+        // H2-8 / H9-I9: whoever answers to `@claude`, the line says which model on
+        // which wire actually spoke (a plain id — no key, no URL).
+        let label = trace
+            .as_ref()
+            .filter(|trace| !trace.model.is_empty())
+            .map(|trace| json!({"model": trace.model, "wire": trace.wire}));
+        let audit_detail = trace
+            .as_ref()
+            .map(|trace| trace.audit_detail(usage, error_code.unwrap_or("answered")));
+        let searches = trace.as_ref().map(|trace| trace.web_searches).unwrap_or(0);
         let result = with_tenant_tx(&self.pool, workspace_id, move |conn| {
+            let label = label.clone();
+            let audit_detail = audit_detail.clone();
             let body = body.clone();
             let props = props.clone();
             let ledger = ledger.clone();
@@ -519,6 +811,9 @@ impl AgentWorker {
                     if let Some(object) = props.as_object_mut() {
                         object.insert("run_id".into(), json!(run_id));
                         object.entry("source").or_insert_with(|| json!("team_ai"));
+                        if let Some(label) = label {
+                            object.insert("team_ai_model".into(), label);
+                        }
                     }
                     let sent = send_message_in_tx(
                         conn,
@@ -572,6 +867,20 @@ impl AgentWorker {
                         &resolved,
                     )
                     .await?;
+                    team_ai::record_web_searches_in_tx(conn, workspace_id, run_id, searches)
+                        .await?;
+                }
+                // H9-I10: which tools, how many calls and searches, tokens, ms.
+                // Never the prompt, a tool result or the answer.
+                if let Some(detail) = audit_detail {
+                    audit::write_audit(
+                        conn,
+                        &AuditEntry::new(workspace_id, "team_ai.turn")
+                            .by(agent)
+                            .run(run_id)
+                            .with_schema("momo.team_ai_turn.v1", detail),
+                    )
+                    .await?;
                 }
                 Ok(true)
             })
@@ -606,6 +915,35 @@ struct Spend {
 }
 
 impl Spend {
+    /// The request's running total across its model calls (one ledger row per
+    /// run). An estimate anywhere makes the sum an estimate.
+    fn add(total: Option<Spend>, next: Spend) -> Option<Spend> {
+        Some(match total {
+            None => next,
+            Some(total) => Spend {
+                usage: ChatUsage {
+                    prompt_tokens: total
+                        .usage
+                        .prompt_tokens
+                        .saturating_add(next.usage.prompt_tokens),
+                    completion_tokens: total
+                        .usage
+                        .completion_tokens
+                        .saturating_add(next.usage.completion_tokens),
+                    cached_tokens: total
+                        .usage
+                        .cached_tokens
+                        .saturating_add(next.usage.cached_tokens),
+                    reasoning_tokens: total
+                        .usage
+                        .reasoning_tokens
+                        .saturating_add(next.usage.reasoning_tokens),
+                },
+                estimated: total.estimated || next.estimated,
+            },
+        })
+    }
+
     /// What the provider reported, or — when it reported nothing (timeout, error,
     /// no `usage` object) — a conservative estimate: ~3 characters per prompt
     /// token plus the full output allowance. Never zero, so the ceiling cannot be
@@ -658,4 +996,8 @@ async fn sqlx_body(
     .await?
     .flatten();
     Ok(body.unwrap_or_default())
+}
+
+fn millis(since: Instant) -> i64 {
+    i64::try_from(since.elapsed().as_millis()).unwrap_or(i64::MAX)
 }

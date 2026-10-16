@@ -56,7 +56,7 @@ use momo_agent::{
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{DbError, PgConnection};
 use momo_messaging::{
-    agent_auto_reply_streak_in_tx, agent_context_window_in_tx, contains_mention,
+    agent_auto_reply_streak_in_tx, agent_context_window_in_tx, contains_mention_with_aliases,
     send_message_in_tx, MessageType, NewMessage,
 };
 use serde_json::Value;
@@ -136,11 +136,12 @@ pub async fn route_a2a_mentions_in_tx(
     let mentioned: Vec<MentionCandidate> = candidates
         .into_iter()
         .filter(|candidate| {
-            contains_mention(
+            contains_mention_with_aliases(
                 send.body,
                 &candidate.handle,
                 &candidate.display_name,
                 candidate.member_id,
+                &candidate.aliases,
             )
         })
         .collect();
@@ -711,6 +712,7 @@ mod tests {
             owner_display_name: None,
             hosted_confirmed_by_owner: false,
             thread_reply_wake: true,
+            aliases: Vec::new(),
         };
         let block = A2aBlock::Depth {
             source_depth: 3,

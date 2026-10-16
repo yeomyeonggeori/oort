@@ -3,3 +3,4 @@
 
 pub mod action_resolve;
 pub mod team_ai;
+pub mod team_ai_tools;

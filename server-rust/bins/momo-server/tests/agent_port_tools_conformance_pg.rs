@@ -17129,6 +17129,9 @@ async fn a_team_ai_card_is_executed_by_the_approver_and_by_nobody_else() {
                         latency_ms: 1,
                         prompt_tokens: 1,
                         completion_tokens: 1,
+                        tools: Vec::new(),
+                        model_calls: 1,
+                        web_searches: 0,
                     },
                 };
                 team_ai::propose_in_tx(conn, &context, "channel.create", &args, None).await

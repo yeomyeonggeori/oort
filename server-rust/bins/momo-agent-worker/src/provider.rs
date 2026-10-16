@@ -218,6 +218,10 @@ pub struct ChatCompletion {
     /// tool_calls.is_empty()` is the only shape the worker still treats as a
     /// failed turn.
     pub tool_calls: Vec<ProviderToolCall>,
+    /// Provider-side web searches this call made (ADR-0201 증보 v2 H5) — Anthropic
+    /// reports `usage.server_tool_use.web_search_requests`. `0` on every wire
+    /// that has no server-side search, and whenever nothing was reported.
+    pub web_search_requests: i32,
 }
 
 /// Which request/response format an endpoint speaks (B5.4b).
@@ -801,6 +805,7 @@ pub fn parse_completion(body: &str) -> Result<ChatCompletion, ProviderError> {
         .unwrap_or_default();
 
     Ok(ChatCompletion {
+        web_search_requests: 0,
         text,
         tool_calls,
         usage: completion.usage.map(|usage| ChatUsage {
@@ -951,6 +956,9 @@ pub struct ObservedCall {
     /// own body tests, and what a wiring test needs to know is whether the
     /// profile's switch reached the request at all.
     pub momo_tools: Vec<String>,
+    /// The passthrough `tools` exactly as the request carried them — where a
+    /// provider-side tool (ADR-0201 증보 v2 H5 `web_search`) rides.
+    pub tools: Vec<Value>,
 }
 
 impl MockChatProvider {
@@ -1119,6 +1127,7 @@ impl ChatProvider for MockChatProvider {
                     .iter()
                     .map(|definition| definition.name.to_string())
                     .collect(),
+                tools: request.tools.clone(),
             });
         if let MockOutcome::Fail(error) = &self.outcome {
             return Err(error.clone());
@@ -1133,6 +1142,7 @@ impl ChatProvider for MockChatProvider {
             .and_then(|mut script| script.pop_front())
             .unwrap_or_default();
         Ok(ChatCompletion {
+            web_search_requests: 0,
             text,
             tool_calls,
             usage: Some(ChatUsage {
@@ -1257,6 +1267,7 @@ mod tests {
         assert_eq!(
             parse_completion(body),
             Ok(ChatCompletion {
+                web_search_requests: 0,
                 tool_calls: Vec::new(),
                 text: "hi".to_string(),
                 usage: None
@@ -1277,6 +1288,7 @@ mod tests {
         assert_eq!(
             parse_completion(body),
             Ok(ChatCompletion {
+                web_search_requests: 0,
                 tool_calls: Vec::new(),
                 text: "안녕하세요".to_string(),
                 usage: Some(ChatUsage {

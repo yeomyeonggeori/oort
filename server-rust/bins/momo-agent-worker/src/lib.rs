@@ -2986,6 +2986,21 @@ impl AgentWorker {
                     let name = agent_display_name_in_tx(conn, workspace_id, agent_member_id)
                         .await?
                         .unwrap_or_else(|| "에이전트".to_string());
+                    // ADR-0201 증보 v2 H3: the team AI says the team-AI sentence
+                    // when there is no key to answer on — still no model call.
+                    let no_key = matches!(
+                        reason,
+                        HostedSkipReason::ProviderRequired | HostedSkipReason::DefaultAiUnresolved
+                    );
+                    let body = if no_key
+                        && momo_workspace_actions::team_ai::read_state_in_tx(conn, workspace_id)
+                            .await?
+                            .is_team_ai(agent_member_id)
+                    {
+                        momo_workspace_actions::team_ai::NO_KEY_SENTENCE.to_string()
+                    } else {
+                        hosted_skip_notice_body(reason, &name)
+                    };
                     let sent = send_thread_notice_in_tx(
                         conn,
                         workspace_id,
@@ -2993,7 +3008,7 @@ impl AgentWorker {
                             channel_id,
                             author_member_id: agent_member_id,
                             message_type: MessageType::System,
-                            body: Some(hosted_skip_notice_body(reason, &name)),
+                            body: Some(body),
                             props: hosted_skip_notice_props(
                                 reason,
                                 agent_member_id,
