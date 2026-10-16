@@ -14,6 +14,7 @@ import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {ThemeProvider} from '../src/design/theme';
+import {PauseUntilPage} from '../src/features/profile/PauseUntilPage';
 import AppShell from '../src/shell/AppShell';
 import {
   __resetSessionStore,
@@ -665,5 +666,95 @@ describe('직접 고르기 — 달력 한 달과 시각 칩', () => {
     expect(
       within(sheet).getByTestId('pause-until-day-2026-10-17').props.accessibilityLabel,
     ).toBe('10월 17일 토요일');
+  });
+});
+
+describe('기한 장 — 읽어 주는 힌트', () => {
+  it('짧은 선택 줄은 누르면 곧바로 켜진다고 읽어 주고, 「직접 고르기」 줄에는 힌트가 없다', async () => {
+    freezeClock(FRI_2107);
+    const sheet = await openSheet();
+    fireEvent.press(within(sheet).getByTestId('profile-pause-row'));
+    for (const id of ['30m', '1h', '2h', 'tomorrow', 'nextMonday']) {
+      expect(within(sheet).getByTestId(`pause-until-option-${id}`).props.accessibilityHint).toBe(
+        '누르면 이 시각까지 알림을 멈춰요.',
+      );
+    }
+    expect(
+      within(sheet).getByTestId('pause-until-option-custom').props.accessibilityHint,
+    ).toBeUndefined();
+  });
+
+  it('방해 금지 장의 힌트는 방해 금지를 켠다고 말한다', async () => {
+    freezeClock(FRI_2107);
+    const sheet = await openSheet();
+    fireEvent.press(within(sheet).getByTestId('presence-option-dnd'));
+    expect(within(sheet).getByTestId('pause-until-option-30m').props.accessibilityHint).toBe(
+      '누르면 이 시각까지 방해 금지를 켜요.',
+    );
+    expect(
+      within(sheet).getByTestId('pause-until-option-custom').props.accessibilityHint,
+    ).toBeUndefined();
+  });
+});
+
+describe('직접 고르기 블록 — 열릴 때 한 번만 시트를 내린다', () => {
+  // 시트(`ProfileSheet`)는 `onReveal` 로 스크롤한다. 블록의 높이가 바뀔 때마다(지난 시각 오류문이
+  // 뜨거나 달을 넘길 때) `onLayout` 이 다시 오는데 그때마다 내리면 고르던 자리에서 시트가 튄다.
+  const layout = (y: number, height: number) => ({
+    nativeEvent: {layout: {x: 0, y, width: 390, height}},
+  });
+
+  function renderPage(onReveal: jest.Mock) {
+    queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {retry: false, staleTime: 30_000},
+        mutations: {retry: false},
+      },
+    });
+    return render(
+      <ThemeProvider>
+        <QueryClientProvider client={queryClient}>
+          {/* 방해 금지 장은 규칙을 읽기 전에도 눌린다 — 이 시험은 쓰기가 아니라 레이아웃을 잰다. */}
+          <PauseUntilPage
+            kind="dnd"
+            workspaceId={WS}
+            selfId={SELF_ID}
+            self={undefined}
+            onDone={jest.fn()}
+            onReveal={onReveal}
+          />
+        </QueryClientProvider>
+      </ThemeProvider>,
+    );
+  }
+
+  it('레이아웃이 몇 번 바뀌어도 시트는 한 번만 내려간다', () => {
+    const onReveal = jest.fn();
+    renderPage(onReveal);
+    fireEvent.press(screen.getByTestId('pause-until-option-custom'));
+    const block = screen.getByTestId('pause-until-custom-block');
+
+    fireEvent(block, 'layout', layout(120, 600));
+    fireEvent(block, 'layout', layout(120, 640)); // 오류문이 떠서 블록이 길어졌다
+    fireEvent(block, 'layout', layout(120, 600));
+
+    expect(onReveal).toHaveBeenCalledTimes(1);
+    expect(onReveal).toHaveBeenCalledWith(120);
+  });
+
+  it('닫았다가 다시 열면 다시 한 번 내려간다', () => {
+    const onReveal = jest.fn();
+    renderPage(onReveal);
+    fireEvent.press(screen.getByTestId('pause-until-option-custom'));
+    fireEvent(screen.getByTestId('pause-until-custom-block'), 'layout', layout(120, 600));
+    expect(onReveal).toHaveBeenCalledTimes(1);
+
+    fireEvent.press(screen.getByTestId('pause-until-option-custom'));
+    expect(screen.queryByTestId('pause-until-custom-block')).toBeNull();
+
+    fireEvent.press(screen.getByTestId('pause-until-option-custom'));
+    fireEvent(screen.getByTestId('pause-until-custom-block'), 'layout', layout(132, 600));
+    expect(onReveal).toHaveBeenCalledTimes(2);
+    expect(onReveal).toHaveBeenLastCalledWith(132);
   });
 });

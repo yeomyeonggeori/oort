@@ -9,6 +9,7 @@ import {
   pauseUntilHint,
   pauseUntilLabel,
   pauseUntilOptions,
+  pauseUntilPresetHint,
   pauseUntilStateLabel,
   pauseUntilTitle,
 } from "./pauseUntil";
@@ -205,5 +206,11 @@ describe("titles and descriptions", () => {
     expect(pauseUntilTitle("dnd")).toBe("방해 금지를 언제까지 켤까요?");
     expect(pauseUntilDescription("dnd")).toContain("알림도 함께 멈춰요");
     expect(pauseUntilDescription("pause")).not.toContain("방해 금지");
+  });
+
+  it("hints that a preset row turns the switch on at once, per switch", () => {
+    // 누르면 곧바로 켜진다 — 확인 단계가 없다는 것을 읽어 줘야 하는 줄이다.
+    expect(pauseUntilPresetHint("pause")).toBe("누르면 이 시각까지 알림을 멈춰요.");
+    expect(pauseUntilPresetHint("dnd")).toBe("누르면 이 시각까지 방해 금지를 켜요.");
   });
 });

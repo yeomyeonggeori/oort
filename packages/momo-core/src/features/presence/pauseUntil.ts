@@ -240,6 +240,13 @@ export const PAUSE_UNTIL_DND_DESCRIPTION = `${PRESENCE_DND_HINT} 시각이 지�
 export const PAUSE_UNTIL_PAUSE_CONFIRM_LABEL = "알림 멈추기";
 export const PAUSE_UNTIL_DND_CONFIRM_LABEL = "방해 금지 켜기";
 
+/**
+ * 짧은 선택 줄을 읽어 주는 힌트 — 이 줄은 **누르면 곧바로 켜진다**(확인 단계가 없다).
+ * 시각을 직접 정하는 「직접 고르기」 줄은 펼치기만 하므로 이 힌트를 달지 않는다.
+ */
+export const PAUSE_UNTIL_PAUSE_PRESET_HINT = "누르면 이 시각까지 알림을 멈춰요.";
+export const PAUSE_UNTIL_DND_PRESET_HINT = "누르면 이 시각까지 방해 금지를 켜요.";
+
 export function pauseUntilTitle(kind: PauseUntilKind): string {
   return kind === "dnd" ? PAUSE_UNTIL_DND_TITLE : PAUSE_UNTIL_PAUSE_TITLE;
 }
@@ -254,4 +261,10 @@ export function pauseUntilConfirmLabel(kind: PauseUntilKind): string {
   return kind === "dnd"
     ? PAUSE_UNTIL_DND_CONFIRM_LABEL
     : PAUSE_UNTIL_PAUSE_CONFIRM_LABEL;
+}
+
+export function pauseUntilPresetHint(kind: PauseUntilKind): string {
+  return kind === "dnd"
+    ? PAUSE_UNTIL_DND_PRESET_HINT
+    : PAUSE_UNTIL_PAUSE_PRESET_HINT;
 }

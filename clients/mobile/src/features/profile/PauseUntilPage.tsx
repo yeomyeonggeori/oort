@@ -7,13 +7,14 @@ import {
   pauseUntilHint,
   pauseUntilLabel,
   pauseUntilOptions,
+  pauseUntilPresetHint,
   pauseUntilTitle,
   type PauseUntilKind,
   type PauseUntilPreset,
 } from '@momo/core/features/presence/pauseUntil';
 import {NOTIFICATION_PAUSE_SAVE_FAILED} from '@momo/core/features/settings/notificationRules';
 import type {RosterMember} from '@momo/core/lib/api';
-import React, {useState} from 'react';
+import React, {useRef, useState} from 'react';
 import {ActivityIndicator, StyleSheet, Text, View} from 'react-native';
 
 import {GroupRow, GroupSection, Sentence} from '../../design/atoms';
@@ -77,6 +78,14 @@ export function PauseUntilPage({
   const [customOpen, setCustomOpen] = useState(false);
   const [pendingId, setPendingId] = useState<PauseUntilPreset | 'custom' | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
+  // 「직접 고르기」 블록이 **열릴 때 한 번만** 시트를 내린다. `onLayout` 은 블록의 높이가 바뀔
+  // 때마다(지난 시각 오류문이 뜨거나 달이 넘어갈 때) 다시 오는데, 그때마다 내리면 고르던 자리에서
+  // 시트가 튄다. 열고 닫을 때마다 깃발을 내려 다음에 열 때 다시 한 번 내린다.
+  const revealedRef = useRef(false);
+  const toggleCustom = () => {
+    revealedRef.current = false;
+    setCustomOpen(open => !open);
+  };
 
   const busy = kind === 'pause' ? pause.pending : setPresence.isPending;
   // 규칙을 한 번도 못 읽은 채로는 일시 중지 쓰기를 세우지 않는다(`usePauseNotifications`).
@@ -139,11 +148,13 @@ export function PauseUntilPage({
               separated={index > 0}
               disabled={locked}
               onPress={() => {
-                if (option.id === 'custom') setCustomOpen(open => !open);
+                if (option.id === 'custom') toggleCustom();
                 // 줄에 적힌 끝 시각(`hint`)과 저장되는 시각이 같도록 같은 시계로 센다.
                 else void commit(pauseUntilAtMs(option.id, nowMs), option.id);
               }}
               accessibilityLabel={hint ? `${option.label}, ${hint}` : option.label}
+              // 짧은 선택은 누르면 곧바로 켜진다 — 확인 단계가 없다는 것을 읽어 준다.
+              accessibilityHint={custom ? undefined : pauseUntilPresetHint(kind)}
               accessibilityState={custom ? {expanded: customOpen} : undefined}
               trailing={
                 pendingId === option.id ? (
@@ -161,7 +172,13 @@ export function PauseUntilPage({
       </GroupSection>
 
       {customOpen ? (
-        <View onLayout={event => onReveal(event.nativeEvent.layout.y)}>
+        <View
+          testID="pause-until-custom-block"
+          onLayout={event => {
+            if (revealedRef.current) return;
+            revealedRef.current = true;
+            onReveal(event.nativeEvent.layout.y);
+          }}>
           <PauseUntilCustom
             kind={kind}
             nowMs={nowMs}
