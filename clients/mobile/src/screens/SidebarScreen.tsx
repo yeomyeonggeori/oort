@@ -581,6 +581,7 @@ export default function SidebarScreen({
                   offer={updateOffer}
                   onPress={() => setUpdateSheetOpen(true)}
                   testID="home-update-banner"
+                  flush
                 />
               ) : null}
               {onOpenWorkList && !searching ? (

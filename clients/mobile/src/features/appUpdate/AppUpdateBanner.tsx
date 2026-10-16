@@ -3,6 +3,7 @@ import {
   Linking,
   Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -68,18 +69,24 @@ export function AppUpdateBanner({
   offer,
   onPress,
   testID,
+  flush = false,
 }: {
   offer: AppUpdateOffer;
   onPress: () => void;
   testID: string;
+  /** 호스트(홈 목록)가 이미 가로 여백을 줄 때: 배너가 한 번 더 들이지 않는다. */
+  flush?: boolean;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   return (
-    <View style={styles.banner} testID={testID}>
+    <View
+      accessible={false}
+      style={[styles.banner, flush && styles.bannerFlush]}
+      testID={testID}>
       <View style={styles.text}>
         <Text
           style={styles.title}
-          numberOfLines={1}
+          numberOfLines={2}
           maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
           {`새 버전 ${offer.version}`}
         </Text>
@@ -147,6 +154,7 @@ export function AppUpdateSheet({
             },
           ]}>
           <View style={styles.grabber} />
+          <ScrollView bounces={false} contentContainerStyle={styles.sheetScroll}>
           <Text accessibilityRole="header" style={styles.sheetTitle}>
             {`새 버전 ${offer.version} (${offer.latestBuild})`}
           </Text>
@@ -159,6 +167,7 @@ export function AppUpdateSheet({
               {destination.failure}
             </Sentence>
           ) : null}
+          </ScrollView>
           <View style={styles.sheetActions}>
             <PrimaryButton
               label={destination.actionLabel}
@@ -193,6 +202,7 @@ const buildStyles = (color: Palette) =>
       borderColor: color.border,
       backgroundColor: color.surface,
     },
+    bannerFlush: {marginHorizontal: 0},
     text: {flex: 1, gap: space.xs},
     title: {fontSize: font.heading, fontWeight: '600', color: color.text},
     meta: {fontSize: font.meta, color: color.textMuted},
@@ -201,9 +211,10 @@ const buildStyles = (color: Palette) =>
       justifyContent: 'center',
       paddingHorizontal: SAFE_GUTTER,
       borderRadius: radius.pill,
-      backgroundColor: color.accent,
+      borderWidth: 1,
+      borderColor: color.accentText,
     },
-    actionLabel: {fontSize: font.label, fontWeight: '700', color: color.onAccent},
+    actionLabel: {fontSize: font.label, fontWeight: '700', color: color.accentText},
     pressed: {opacity: 0.85},
     root: {flex: 1, justifyContent: 'flex-end'},
     backdrop: {
@@ -233,5 +244,6 @@ const buildStyles = (color: Palette) =>
     sheetTitle: {fontSize: font.title, fontWeight: '700', color: color.text},
     sheetBody: {fontSize: font.body, color: color.textMuted, lineHeight: 22},
     failure: {fontSize: font.meta, color: color.danger},
+    sheetScroll: {gap: space.md},
     sheetActions: {gap: space.sm, marginTop: space.sm},
   });
