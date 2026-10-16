@@ -1,0 +1,147 @@
+// =============================================================================
+// 상태 점 (#3964, 성재 2026-10-16 「꺼짐은 뭐야? … buzz UI 참고해」).
+//
+// DM 행·프로필·멤버 목록이 **같은 색 체계**로 사람과 에이전트의 상태를 말하게 하는 순수 판정이다. 점의
+// 톤(`ok`/`warn`/`danger`/`muted`)과 낱말만 여기 있고, 어느 클래스·어느 팔레트 값이 되는가는 각
+// 클라가 자기 표면에 매긴다(`presence/model.ts` 머리말과 같은 분업: 웹은 Tailwind, 폰은 토큰 객체).
+//
+// ## 무엇이 점이 되는가
+//
+//   사람     스스로 정한 **자리 비움**(warn)·**방해 금지**(danger)만. 웹 명부에는 다른 사람의 접속 여부가
+//            없어서 「온라인」 초록 점은 근거가 없다(design-review #1889 H-3). 회색 오프라인 점도 없다:
+//            로스터가 그것을 모른다.
+//   에이전트 서버가 파생한 **생존 판정**(`livenessView`)을 점으로 옮긴다. 낱말이 곁에 없는 자리라 **모양이 말한다**:
+//
+//              채운 초록  ok     응답함(최근에 일을 했다)
+//              채운 회색  idle   살아 있음 · 대기 중(신호는 오는데 일은 안 가져간다: 맡길 일이 없을 수 있다)
+//              속 빈 고리 muted  조용함·꺼짐(신호가 없다) - 그리고 일반 멤버에게는 아래 경고 넷도 이쪽
+//              채운 주황  warn   일이 안 가져가짐·응답 없음·거절됨(다시 깨울 수 있는 owner/admin 에게만)
+//
+//            채운 점 = 「신호가 오고 있다」, 속 빈 고리 = 「지금 응답을 기대하기 어렵다」. 살아 있지만 일이 없는 에이전트와
+//            꺼진 에이전트가 한 점이 되면 이 점이 답해야 할 질문(「꺼져 있다는 거야?」)에 답하지 못한다(design-review
+//            #3964 H1). 생존 **칩**은 neutral 셋을 한 색(채운 회색)으로 그려도 곁의 낱말이 가르므로 그 표
+//            (`STATUS_DOT_TONE_OF_LIVENESS`)는 그대로다.
+//            warn 은 **다시 깨울 수 있는 사람(owner/admin)에게만** 경고다(`livenessToneFor`). 그 밖의 멤버는 같은
+//            사실이 중립이라 속 빈 고리로 내려간다(그에게 「일을 안 가져간다」는 「지금 맡겨도 응답이 없다」다).
+//            생존 라벨이 없는 에이전트(호스티드가 아님: 서버가 404)는 명부의 호스트 연결(`hostOnline`)만으로
+//            닿아 있을 때 ok 점이 된다. 닿아 있지 않거나 모르면 점이 없다.
+//   모를 때   생존 판정을 **아직 못 받았으면**(undefined) 점이 없다. 호스트 연결 폴백을 먼저 그리면 곧
+//            이어 도착하는 판정이 다른 색일 때 거짓을 한 번 그렸다 지우게 된다.
+//
+// 색만으로 말하지 않는다: 낱말은 `label`/`meaning` 이 들고, 행에서는 글자를 빼는 대신 접근 가능한 이름과
+// 툴팁이 말한다(웹 `DmAvatar`, 폰 `Row`). muted 는 웹에서 속이 빈 고리로 그려 모양으로도 갈린다.
+// =============================================================================
+
+import type { AgentLiveness, RosterMember } from "../../lib/api";
+import {
+  livenessToneFor,
+  livenessView,
+  type LivenessTone,
+  type LivenessView,
+} from "../agents/liveness";
+import { declaredStatusLabel } from "./model";
+
+export type StatusDotTone = "ok" | "warn" | "danger" | "idle" | "muted";
+
+export interface StatusDot {
+  tone: StatusDotTone;
+  /** 상태 낱말. 행의 접근 가능한 이름과 툴팁의 첫 줄이다. */
+  label: string;
+  /** 낱말의 뜻 한 문장(에이전트 생존 판정만). 툴팁의 둘째 줄이다. */
+  meaning?: string;
+}
+
+/**
+ * 생존 톤 → 점 톤: 에이전트 생존 **칩**(`AgentLivenessLabel`)이 읽는 표. 칩은 낱말이 곁에 있어 neutral 셋을 한 색
+ * (`muted`: 채운 회색)으로 그린다. 낱말이 없는 아바타 점은 이 표를 한 칸 더 갈라 쓴다(`agentDotTone`).
+ */
+export const STATUS_DOT_TONE_OF_LIVENESS: Readonly<
+  Record<LivenessTone, StatusDotTone>
+> = {
+  ok: "ok",
+  warn: "warn",
+  neutral: "muted",
+};
+
+/** 생존 판정이 없는 에이전트가 호스트에 닿아 있을 때의 낱말. 새 DM 모달의 점과 같은 낱말이다. */
+export const AGENT_HOST_ONLINE_LABEL = "연결됨";
+
+/**
+ * 낱말이 없는 자리(아바타 모서리)의 톤. 칩은 neutral 셋을 한 색으로 그려도 곁의 낱말이 가르지만 점은 **모양이 말해야 한다**:
+ * 보는 사람에게 맞춘 톤(`livenessToneFor`)이 neutral 이면 **살아 있는가**로 가른다 - 신호가 오는 `alive_idle` 은 채운
+ * 회색(`idle`), 나머지(조용함·꺼짐, 그리고 일반 멤버에게 강등된 경고)는 속 빈 고리(`muted`).
+ */
+export function agentDotTone(
+  view: Pick<LivenessView, "state" | "tone">,
+  mayAct: boolean
+): StatusDotTone {
+  const tone = livenessToneFor(view, mayAct);
+  if (tone !== "neutral") return STATUS_DOT_TONE_OF_LIVENESS[tone];
+  return view.state === "alive_idle" ? "idle" : "muted";
+}
+
+/** 에이전트의 생존 판정 → 점. `mayAct` 는 보는 사람이 경고에 할 수 있는 일이 있는가. */
+export function agentLivenessDot(
+  liveness: Pick<AgentLiveness, "state" | "lastSignalAtMs">,
+  nowMs: number,
+  mayAct: boolean
+): StatusDot {
+  const view = livenessView(liveness, nowMs);
+  return {
+    tone: agentDotTone(view, mayAct),
+    label: view.text,
+    meaning: view.meaning,
+  };
+}
+
+/** 생존 판정이 없는 에이전트: 호스트에 닿아 있을 때만 점이다. */
+export function agentHostDot(hostOnline: boolean | undefined): StatusDot | null {
+  return hostOnline === true
+    ? { tone: "ok", label: AGENT_HOST_ONLINE_LABEL }
+    : null;
+}
+
+/**
+ * 사람: 스스로 정한 자리 비움·방해 금지만. 방해 금지는 만료 시각이 지나면 자동(auto)으로 본다 - 서버는
+ * 만료 때 이벤트를 보내지 않는다.
+ */
+export function humanPresenceDot(
+  member: Pick<RosterMember, "presenceStatus" | "dndUntilMs">,
+  nowMs: number
+): StatusDot | null {
+  if (member.presenceStatus === "away") {
+    return { tone: "warn", label: declaredStatusLabel("away") };
+  }
+  if (member.presenceStatus === "dnd") {
+    if (member.dndUntilMs !== undefined && member.dndUntilMs <= nowMs) return null;
+    return { tone: "danger", label: declaredStatusLabel("dnd") };
+  }
+  return null;
+}
+
+/**
+ * DM 상대 한 명의 점. 웹 `DmAvatar` 와 폰 `Row` 가 이 한 함수를 부른다.
+ *
+ * `liveness`: 값 있음 / `null`(라벨 없음: 호스티드가 아님) / `undefined`(아직 모름). 사람에게는 쓰지 않는다.
+ */
+export function dmPeerStatusDot(input: {
+  member: Pick<
+    RosterMember,
+    "kind" | "hostOnline" | "presenceStatus" | "dndUntilMs"
+  > | null;
+  liveness: Pick<AgentLiveness, "state" | "lastSignalAtMs"> | null | undefined;
+  mayAct: boolean;
+  nowMs: number;
+}): StatusDot | null {
+  const { member, liveness, mayAct, nowMs } = input;
+  if (member === null) return null;
+  if (member.kind !== "agent") return humanPresenceDot(member, nowMs);
+  if (liveness === undefined) return null;
+  if (liveness === null) return agentHostDot(member.hostOnline);
+  return agentLivenessDot(liveness, nowMs, mayAct);
+}
+
+/** 툴팁 문장: 낱말, 있으면 뜻까지. */
+export function statusDotTooltip(dot: StatusDot): string {
+  return dot.meaning === undefined ? dot.label : `${dot.label}. ${dot.meaning}`;
+}

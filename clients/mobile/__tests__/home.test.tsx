@@ -130,10 +130,22 @@ interface Routes {
   roster?: unknown[];
   channels?: unknown[];
   workspace?: () => Response | Promise<Response>;
+  /**
+   * 에이전트 생존 판정(#3964): id → 상태. 적지 않은 에이전트는 404 다(= 「라벨 없음」, 호스티드가 아님).
+   * `'pending'` 은 응답이 오지 않는다(아직 모름).
+   */
+  liveness?: Record<string, string>;
 }
 
 function installFetch(routes: Routes = {}): jest.Mock {
   const mock = jest.fn(async (url: string) => {
+    const liveness = /\/agents\/([^/]+)\/liveness$/.exec(url);
+    if (liveness) {
+      const state = routes.liveness?.[liveness[1].toLowerCase()];
+      if (state === 'pending') return new Promise<Response>(() => {});
+      if (state === undefined) return jsonResponse(404, {error: {message: 'not found'}});
+      return jsonResponse(200, {agentMemberId: liveness[1], state});
+    }
     if (url.includes('/reactions')) return jsonResponse(200, {});
     if (url.includes('/channels') && !url.includes('/messages')) {
       return jsonResponse(200, {channels: routes.channels ?? CHANNELS});
@@ -554,6 +566,160 @@ describe('홈 — 섹션과 행', () => {
     expect(style.minHeight).toBe(46);
     expect(style.height).toBeUndefined();
     expect(style.borderRadius).toBe(14);
+  });
+});
+
+describe('홈 — DM 줄의 상태 점 (#3964)', () => {
+  const dotOf = (rowKey: string) =>
+    within(screen.getByTestId(`sidebar-row-${rowKey}`)).queryByTestId('home-row-status-dot', {
+      includeHiddenElements: true,
+    });
+  const bg = (node: {props: {style?: unknown}}) => flat(node.props.style).backgroundColor;
+  const border = (node: {props: {style?: unknown}}) => flat(node.props.style).borderColor;
+  const asRoster = (over: Record<string, Record<string, unknown>>) =>
+    ROSTER.map(m => ({...m, ...(over[String((m as Record<string, unknown>).id)] ?? {})}));
+
+  it('채널 줄에는 점이 없다', async () => {
+    await mountHome();
+    expect(dotOf('channel:ch-general')).toBeNull();
+    expect(dotOf('channel:ch-agent-lab')).toBeNull();
+  });
+
+  it('사람: 자리 비움은 주황 점', async () => {
+    await mountHome({roster: asRoster({[HUMAN_ID]: {presenceStatus: 'away'}})});
+    const away = await waitFor(() => {
+      const node = dotOf('dm:ch-dm-human');
+      expect(node).toBeTruthy();
+      return node!;
+    });
+    expect([lightPalette.warn, darkPalette.warn]).toContain(bg(away));
+  });
+
+  it('사람: 방해 금지는 빨강 점', async () => {
+    await mountHome({roster: asRoster({[HUMAN_ID]: {presenceStatus: 'dnd'}})});
+    const dnd = await waitFor(() => {
+      const node = dotOf('dm:ch-dm-human');
+      expect(node).toBeTruthy();
+      return node!;
+    });
+    expect([lightPalette.danger, darkPalette.danger]).toContain(bg(dnd));
+  });
+
+  it('사람: 평소(auto)에는 점이 없다 — 근거 없는 온라인·회색 오프라인 점 금지', async () => {
+    await mountHome({roster: asRoster({[HUMAN_ID]: {presenceStatus: 'auto'}})});
+    await waitFor(() => expect(screen.getByTestId('sidebar-row-dm:ch-dm-human')).toBeTruthy());
+    expect(dotOf('dm:ch-dm-human')).toBeNull();
+  });
+
+  it('에이전트: 생존 판정이 점이 된다 — 응답함은 초록, 살아 있음은 채운 회색, 꺼짐은 속이 빈 고리', async () => {
+    const THIRD = 'eeeeeeee-1111-4111-8111-eeeeeeeeeeee';
+    await mountHome({
+      roster: [
+        ...ROSTER,
+        {...rosterMember({id: THIRD, kind: 'agent', displayName: '코비', handle: 'coby'})},
+      ],
+      channels: [
+        ...CHANNELS,
+        {id: 'ch-dm-coby', workspaceId: WS, kind: 'dm', muted: false, memberIds: [SELF_ID, THIRD]},
+      ],
+      liveness: {[AGENT_ID]: 'responsive', [HERMES_ID]: 'alive_idle', [THIRD]: 'inactive'},
+    });
+    const live = await waitFor(() => {
+      const node = dotOf('dm:ch-dm-agent');
+      expect(node).toBeTruthy();
+      return node!;
+    });
+    expect([lightPalette.ok, darkPalette.ok]).toContain(bg(live));
+    // 살아 있음(신호는 오는데 일이 없다): 채운 회색. 꺼짐과 한 점이 아니다(#3964 H1).
+    const idle = await waitFor(() => {
+      const node = dotOf(`agent:${HERMES_ID}`);
+      expect(node).toBeTruthy();
+      return node!;
+    });
+    expect([lightPalette.textFaint, darkPalette.textFaint]).toContain(bg(idle));
+    // 꺼짐: 속이 빈 고리. 면 채움 + 선 색(textFaint) 둘레. 채운 점과도, 아무것도 없는 것과도 다르다.
+    const off = await waitFor(() => {
+      const node = dotOf('dm:ch-dm-coby');
+      expect(node).toBeTruthy();
+      return node!;
+    });
+    expect([lightPalette.surface, darkPalette.surface]).toContain(bg(off));
+    expect([lightPalette.textFaint, darkPalette.textFaint]).toContain(border(off));
+    expect(bg(idle)).not.toBe(bg(off));
+  });
+
+  it('글자 라벨(「꺼짐」)은 줄에 없고 낭독 라벨에 있다', async () => {
+    await mountHome({liveness: {[AGENT_ID]: 'inactive'}});
+    const agentRow = await waitFor(() => {
+      const node = screen.getByTestId('sidebar-row-dm:ch-dm-agent');
+      expect(dotOf('dm:ch-dm-agent')).toBeTruthy();
+      return node;
+    });
+    expect(within(agentRow).queryByText(/꺼짐|연결이 꺼져 있어요/)).toBeNull();
+    expect(agentRow.props.accessibilityLabel).toContain('김인턴');
+    expect(agentRow.props.accessibilityLabel).toMatch(/, 연결이 꺼져 있어요$/);
+  });
+
+  it('사람 줄의 낭독 라벨도 상태를 잇는다', async () => {
+    await mountHome({roster: asRoster({[HUMAN_ID]: {presenceStatus: 'away'}})});
+    await waitFor(() => expect(dotOf('dm:ch-dm-human')).toBeTruthy());
+    expect(screen.getByTestId('sidebar-row-dm:ch-dm-human').props.accessibilityLabel).toMatch(
+      /, 자리 비움$/,
+    );
+  });
+
+  it('판정을 아직 모르는 동안은 점이 없다 — 호스트 연결 폴백을 먼저 그려 거짓을 한 번 그리지 않는다', async () => {
+    await mountHome({
+      roster: asRoster({[AGENT_ID]: {hostOnline: true}}),
+      liveness: {[AGENT_ID]: 'pending'},
+    });
+    await waitFor(() => expect(screen.getByTestId('sidebar-row-dm:ch-dm-agent')).toBeTruthy());
+    expect(dotOf('dm:ch-dm-agent')).toBeNull();
+  });
+
+  it('판정이 없다고 확정되면(404) 호스트 연결만으로: 닿아 있을 때만 초록 점', async () => {
+    await mountHome({roster: asRoster({[AGENT_ID]: {hostOnline: true}})});
+    const node = await waitFor(() => {
+      const found = dotOf('dm:ch-dm-agent');
+      expect(found).toBeTruthy();
+      return found!;
+    });
+    expect([lightPalette.ok, darkPalette.ok]).toContain(bg(node));
+    // 닿아 있지 않은 에이전트(헤르메스)에는 점이 없다.
+    expect(dotOf(`agent:${HERMES_ID}`)).toBeNull();
+  });
+
+  it('경고색: 역할이 없는 보는 사람에게는 같은 사실이 회색 고리다', async () => {
+    await mountHome({liveness: {[AGENT_ID]: 'woken_not_collected'}});
+    const asMember = await waitFor(() => {
+      const found = dotOf('dm:ch-dm-agent');
+      expect(found).toBeTruthy();
+      return found!;
+    });
+    expect([lightPalette.surface, darkPalette.surface]).toContain(bg(asMember));
+  });
+
+  it('경고색: 다시 깨울 수 있는 사람(owner)에게는 경고(주황)다', async () => {
+    await mountHome({
+      roster: asRoster({[SELF_ID]: {role: 'owner'}}),
+      liveness: {[AGENT_ID]: 'woken_not_collected'},
+    });
+    const asOwner = await waitFor(() => {
+      const found = dotOf('dm:ch-dm-agent');
+      expect(found).toBeTruthy();
+      return found!;
+    });
+    expect([lightPalette.warn, darkPalette.warn]).toContain(bg(asOwner));
+  });
+
+  it('점이 있는 줄도 얼굴의 자리는 같다 — 얼굴 크기의 상자 안에서 모서리에 앉는다', async () => {
+    await mountHome({liveness: {[AGENT_ID]: 'responsive'}});
+    const face = await waitFor(() =>
+      within(screen.getByTestId('sidebar-row-dm:ch-dm-agent')).getByTestId('home-row-face', {
+        includeHiddenElements: true,
+      }),
+    );
+    expect(flat(face.props.style)).toMatchObject({width: HOME.rowFace, height: HOME.rowFace});
   });
 });
 

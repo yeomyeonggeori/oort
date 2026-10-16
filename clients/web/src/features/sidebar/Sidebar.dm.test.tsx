@@ -154,6 +154,24 @@ function setReadStates(states: ReadState[]) {
   readStatesQuery.data = states;
 }
 
+/**
+ * 에이전트 생존 판정의 대역(#3964): id → 상태. 적지 않은 에이전트는 404(= 「라벨 없음」, 호스티드가 아님)다.
+ * `"pending"` 은 응답이 오지 않는다(아직 모름).
+ */
+const liveness = vi.hoisted(() => ({ byAgent: new Map<string, string>() }));
+vi.mock("@momo/core/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
+  return {
+    ...actual,
+    fetchAgentLiveness: async (_ws: string, agentId: string) => {
+      const state = liveness.byAgent.get(agentId.toLowerCase());
+      if (state === undefined) throw new actual.ApiError(404, "not found");
+      if (state === "pending") return new Promise(() => undefined);
+      return { agentMemberId: agentId, state };
+    },
+  };
+});
+
 vi.mock("@/features/workspace/useWorkspace", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@/features/workspace/useWorkspace")>();
@@ -287,6 +305,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  liveness.byAgent.clear();
   touch.hoverNone = false;
   localStorage.clear();
   reloadClosedDmsForTest(null);
@@ -401,11 +420,13 @@ describe("사이드바 DM 구획 (#3662)", () => {
   });
 
   it("상태 점은 아는 것만: 자리 비움·연결된 에이전트는 점이 있고, 평범한 사람은 점이 없다", async () => {
+    // 생존 판정이 없다(404)고 확정된 에이전트는 호스트 연결(`hostOnline`)만으로 점이 된다 (#3964).
     const host = await mount();
-    const dot = (id: string) => dmRow(host, id).querySelector('[data-testid="dm-avatar"]')!.getAttribute("data-peer-dot");
-    expect(dot(DM_ID(1))).toBeNull();
-    expect(dot(DM_ID(3))).toBe("away");
-    expect(dot(DM_ID(4))).toBe("online");
+    await settle();
+    const tone = (id: string) => dmRow(host, id).querySelector('[data-testid="dm-avatar"]')!.getAttribute("data-status-tone");
+    expect(tone(DM_ID(1))).toBeNull();
+    expect(tone(DM_ID(3))).toBe("warn");
+    expect(tone(DM_ID(4))).toBe("ok");
     expect(dmRow(host, DM_ID(3)).textContent).toContain("자리 비움");
     expect(dmRow(host, DM_ID(3)).querySelector('[data-testid="dm-peer-dot"]')).not.toBeNull();
     expect(dmRow(host, DM_ID(4)).querySelector('[data-testid="dm-peer-dot"]')).not.toBeNull();
@@ -446,6 +467,11 @@ const rowIds = (host: HTMLElement) =>
   [...host.querySelectorAll<HTMLElement>('[data-testid="channel-item"][data-channel-id]')].map(
     (el) => el.dataset.channelId
   );
+/** 쿼리 응답(에이전트 생존 판정)이 도착해 다시 그려지도록 한 박자 기다린다. */
+const settle = () =>
+  act(async () => {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  });
 /** requestAnimationFrame 한 번(캐럿 인계가 다음 프레임에 도착한다). */
 const nextFrame = () =>
   act(async () => {
@@ -697,5 +723,129 @@ describe("채널이 없는 멤버의 첫 DM (design-review R1 H1)", () => {
     expect(host.querySelector('[data-testid="dm-section-empty"]')?.textContent).toContain(
       "닫은 대화는 새 메시지가 오면 다시 나타납니다"
     );
+  });
+});
+
+// =============================================================================
+// DM 행의 상태 점 (#3964): 글자 라벨 대신 아바타 모서리의 점
+// =============================================================================
+
+describe("DM 행의 상태 점 (#3964)", () => {
+  const dotOf = (host: HTMLElement, id: string) =>
+    dmRow(host, id).querySelector<HTMLElement>('[data-testid="dm-peer-dot"]');
+  const AGENT_DM = DM_ID(4);
+
+  it("사이드바 행에는 생존 글자 라벨이 없다 — 「꺼짐」은 점이 대신 말한다", async () => {
+    liveness.byAgent.set(PEER_AGENT, "inactive");
+    const host = await mount();
+    await settle();
+    expect(host.querySelector('[data-testid="agent-liveness"]')).toBeNull();
+    // 눈에 보이는 글자에 「꺼짐」이 없다(숨은 글 `sr-only` 는 접근 가능한 이름의 몫이다).
+    const visible = [...dmRow(host, AGENT_DM).querySelectorAll("*")]
+      .filter((el) => !el.closest(".sr-only"))
+      .map((el) => [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join(""))
+      .join("");
+    expect(visible).not.toContain("꺼짐");
+    expect(visible).not.toContain("연결이 꺼져");
+  });
+
+  it("에이전트: 생존 판정이 점이 된다 — 응답함은 채운 초록, 살아 있음은 채운 회색, 꺼짐은 속이 빈 고리", async () => {
+    // 모양이 말한다(낱말이 없는 자리): 채운 점 = 신호가 오고 있다, 속 빈 고리 = 응답을 기대하기 어렵다.
+    // 「살아 있지만 일이 없는」 에이전트와 「꺼진」 에이전트가 한 점이면 점이 질문에 답하지 못한다 (#3964 H1).
+    const cases: Array<[string, string, string[], string[]]> = [
+      ["responsive", "ok", ["bg-ok", "border-surface"], ["bg-surface", "bg-ink-muted"]],
+      ["alive_idle", "idle", ["bg-ink-muted", "border-surface"], ["bg-surface", "bg-ok"]],
+      ["inactive", "muted", ["bg-surface", "border-line-strong"], ["bg-ok", "bg-ink-muted"]],
+    ];
+    for (const [state, tone, has, lacks] of cases) {
+      liveness.byAgent.set(PEER_AGENT, state);
+      const host = await mount();
+      await settle();
+      const dot = dotOf(host, AGENT_DM)!;
+      expect(dot.getAttribute("data-tone"), state).toBe(tone);
+      for (const cls of has) expect(dot.className, `${state}: ${cls}`).toContain(cls);
+      for (const cls of lacks) expect(dot.className, `${state}: !${cls}`).not.toContain(cls);
+      act(() => mountedRoot?.unmount());
+      mountedHost?.remove();
+    }
+  });
+
+  it("툴팁(title)과 행의 숨은 글에 낱말이 있다: 「이름, 연결이 꺼져 있어요」", async () => {
+    liveness.byAgent.set(PEER_AGENT, "inactive");
+    const host = await mount();
+    await settle();
+    const avatar = dmRow(host, AGENT_DM).querySelector('[data-testid="dm-avatar"]')!;
+    expect(avatar.getAttribute("title")).toContain("연결이 꺼져 있어요");
+    // 뜻까지: 이 에이전트의 연결이 꺼져 있다는 서버의 한 문장.
+    expect(avatar.getAttribute("title")).toContain("이 에이전트의 연결이 꺼져 있어요");
+    const hidden = dmRow(host, AGENT_DM).querySelector(".sr-only");
+    expect(hidden?.textContent).toBe(", 연결이 꺼져 있어요");
+    expect(dmRow(host, AGENT_DM).textContent).toMatch(/김인턴, 연결이 꺼져 있어요/);
+  });
+
+  it("사람: 자리 비움은 주황 채움 점이고, 낱말은 숨은 글에 있다", async () => {
+    const host = await mount();
+    await settle();
+    const dot = dotOf(host, DM_ID(3))!;
+    expect(dot.getAttribute("data-tone")).toBe("warn");
+    expect(dot.className).toContain("bg-warn");
+    expect(dmRow(host, DM_ID(3)).querySelector(".sr-only")?.textContent).toBe(", 자리 비움");
+  });
+
+  it("**회색 점은 에이전트에만 선다** — 평범한 사람·나간 멤버에는 점이 없다", async () => {
+    liveness.byAgent.set(PEER_AGENT, "inactive");
+    const host = await mount();
+    await settle();
+    for (const id of [DM_ID(1), DM_ID(2), DM_ID(6)]) {
+      expect(dotOf(host, id)).toBeNull();
+    }
+    // 그리고 회색(idle·muted)이 어디 있든 그것은 에이전트 행이다.
+    const gray = [...host.querySelectorAll('[data-testid="dm-peer-dot"][data-tone="muted"], [data-testid="dm-peer-dot"][data-tone="idle"]')];
+    expect(gray).toHaveLength(1);
+    expect(gray[0].closest('[data-testid="channel-item"]')?.getAttribute("data-channel-id")).toBe(AGENT_DM);
+  });
+
+  it("판정을 아직 모르는 동안은 점이 없다 — 호스트 폴백을 먼저 그려 거짓을 한 번 그리지 않는다", async () => {
+    liveness.byAgent.set(PEER_AGENT, "pending");
+    const host = await mount();
+    await settle();
+    expect(dotOf(host, AGENT_DM)).toBeNull();
+  });
+
+  it("경고색은 다시 깨울 수 있는 사람(owner/admin)에게만 경고다", async () => {
+    liveness.byAgent.set(PEER_AGENT, "woken_not_collected");
+    const host = await mount();
+    await settle();
+    expect(dotOf(host, AGENT_DM)!.getAttribute("data-tone")).toBe("warn");
+    act(() => mountedRoot?.unmount());
+    mountedHost?.remove();
+    const owner = roster[0];
+    roster[0] = { ...owner, role: "member" };
+    try {
+      const again = await mount();
+      await settle();
+      // 같은 사실이 보는 사람에게는 중립(회색 고리)이다.
+      expect(dotOf(again, AGENT_DM)!.getAttribute("data-tone")).toBe("muted");
+    } finally {
+      roster[0] = owner;
+    }
+  });
+
+  it("아바타를 알아볼 수 없는 행(나간 멤버)은 점 하나가 아니라 기본 아바타다", async () => {
+    const host = await mount();
+    await settle();
+    const ghost = dmRow(host, DM_ID(6));
+    expect(ghost.querySelector('[data-testid="dm-avatar"]')?.getAttribute("data-avatar-kind")).toBe("unknown");
+    expect(ghost.querySelector('[data-testid="dm-avatar-default"]')).not.toBeNull();
+    // 모를 때 이니셜을 지어내지 않는다(코어 `avatar.ts`).
+    expect(ghost.querySelector('[data-testid="dm-avatar"]')?.textContent).toBe("");
+  });
+
+  it("채널 행에는 점도 숨은 상태 글도 없다", async () => {
+    const host = await mount();
+    await settle();
+    const row = dmRow(host, CH_GENERAL);
+    expect(row.querySelector('[data-testid="dm-peer-dot"]')).toBeNull();
+    expect(row.querySelector(".sr-only")).toBeNull();
   });
 });

@@ -1,5 +1,7 @@
 import {
+  livenessToneFor,
   livenessView,
+  mayActOnLiveness,
   type LivenessTone,
 } from '@momo/core/features/agents/liveness';
 import {memberFor} from '@momo/core/features/workspace/directory';
@@ -37,10 +39,9 @@ export function AgentLivenessLabel({
     return null;
   }
   const view = livenessView(liveness, nowMs);
-  const role = memberFor(directory, member.id)?.role;
-  const mayAct = role === 'owner' || role === 'admin';
-  const tone: LivenessTone =
-    view.tone === 'warn' && !mayAct ? 'neutral' : view.tone;
+  // 경고색은 할 수 있는 일이 있는 사람(owner/admin)에게만 경고다. 규칙은 core 한 곳이다 (#3964).
+  const mayAct = mayActOnLiveness(memberFor(directory, member.id)?.role);
+  const tone: LivenessTone = livenessToneFor(view, mayAct);
   return (
     <View
       accessible
