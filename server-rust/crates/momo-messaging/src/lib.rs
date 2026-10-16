@@ -209,8 +209,8 @@ pub use presence::{
     STATUS_TEXT_MAX_CHARS,
 };
 pub use read_state::{
-    build_read_state_payload, contains_mention, effective_cursor, list_read_state,
-    mention_id_token, read_state_channel, record_mentions_in_tx, unread_count,
+    build_read_state_payload, contains_mention, contains_mention_with_aliases, effective_cursor,
+    list_read_state, mention_id_token, read_state_channel, record_mentions_in_tx, unread_count,
     update_read_cursor_in_tx, update_read_cursor_with_intent_in_tx, MarkUnreadWrite,
     ReadCursorOutcome, ReadCursorUpdate, ReadIntent, ReadState, MENTION_PROPS_KEY,
 };

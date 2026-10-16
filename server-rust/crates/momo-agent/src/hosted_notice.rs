@@ -89,6 +89,11 @@ pub enum HostedSkipReason {
     /// or unreadable). The worker does not answer on the team key instead —
     /// that would bill the team for a personal agent (ADR-0147 증보 2026-10-03).
     PersonalKeyUnavailable,
+    /// #3873 — the AI link this agent is pinned to (ADR-0147 증보 2026-10-16) is
+    /// gone, changed, disabled or not configured. The worker does not answer on
+    /// the team's link instead; the line says so and opens the same door (AI)
+    /// where the operator re-picks the agent's link.
+    PinnedLinkUnresolved,
 }
 
 impl HostedSkipReason {
@@ -106,6 +111,7 @@ impl HostedSkipReason {
             Self::ProviderRequired => "provider_required",
             Self::DefaultAiUnresolved => "default_ai_unresolved",
             Self::PersonalKeyUnavailable => "personal_key_unavailable",
+            Self::PinnedLinkUnresolved => "pinned_link_unresolved",
         }
     }
 
@@ -120,10 +126,12 @@ impl HostedSkipReason {
             Self::ConnectionUnavailable | Self::ChannelUnapproved => {
                 Some((HOSTED_SKIP_ACTION_LABEL, HOSTED_SKIP_ACTION_HREF))
             }
-            Self::ProviderRequired | Self::DefaultAiUnresolved => Some((
-                PROVIDER_REQUIRED_ACTION_LABEL,
-                PROVIDER_REQUIRED_ACTION_HREF,
-            )),
+            Self::ProviderRequired | Self::DefaultAiUnresolved | Self::PinnedLinkUnresolved => {
+                Some((
+                    PROVIDER_REQUIRED_ACTION_LABEL,
+                    PROVIDER_REQUIRED_ACTION_HREF,
+                ))
+            }
         }
     }
 }
@@ -182,6 +190,10 @@ pub fn hosted_skip_notice_body_with_owner(
         HostedSkipReason::DefaultAiUnresolved => format!(
             "{agent_display_name}에 정해 둔 기본 AI를 쓸 수 없어서 답하지 못했어요. \
              다른 모델로 대신 답하지 않았어요. 운영자가 AI 화면에서 기본 AI를 다시 고를 수 있어요."
+        ),
+        HostedSkipReason::PinnedLinkUnresolved => format!(
+            "{agent_display_name}에 고정해 둔 AI 연결을 쓸 수 없어서 답하지 못했어요. \
+             다른 연결로 대신 답하지 않았어요. 운영자가 AI 화면에서 이 에이전트의 연결을 다시 고를 수 있어요."
         ),
         HostedSkipReason::PersonalKeyUnavailable => format!(
             "{agent_display_name}에게 연결된 개인 API 키가 없어서 답하지 못했어요. \
@@ -252,7 +264,7 @@ pub fn hosted_skip_notice_key(
 mod tests {
     use super::*;
 
-    const ALL_REASONS: [HostedSkipReason; 8] = [
+    const ALL_REASONS: [HostedSkipReason; 9] = [
         HostedSkipReason::DeliveryNotEnabled,
         HostedSkipReason::ConnectionUnavailable,
         HostedSkipReason::ChannelUnapproved,
@@ -261,6 +273,7 @@ mod tests {
         HostedSkipReason::ProviderRequired,
         HostedSkipReason::DefaultAiUnresolved,
         HostedSkipReason::PersonalKeyUnavailable,
+        HostedSkipReason::PinnedLinkUnresolved,
     ];
 
     #[test]

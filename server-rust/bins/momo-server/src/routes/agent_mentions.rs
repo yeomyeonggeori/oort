@@ -125,8 +125,8 @@ use momo_agent::{
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{DbError, PgConnection};
 use momo_messaging::{
-    agent_context_window_in_tx, contains_mention, send_message_in_tx, send_thread_notice_in_tx,
-    MessageType, NewMessage,
+    agent_context_window_in_tx, contains_mention_with_aliases, send_message_in_tx,
+    send_thread_notice_in_tx, MessageType, NewMessage,
 };
 use serde_json::Value;
 use uuid::Uuid;
@@ -1115,11 +1115,12 @@ fn addressed_agents(
     let mut addressed: Vec<(MentionCandidate, Addressing)> = candidates
         .iter()
         .filter(|candidate| {
-            contains_mention(
+            contains_mention_with_aliases(
                 body,
                 &candidate.handle,
                 &candidate.display_name,
                 candidate.member_id,
+                &candidate.aliases,
             )
         })
         .cloned()
@@ -1841,6 +1842,7 @@ mod tests {
             owner_display_name: None,
             hosted_confirmed_by_owner: false,
             thread_reply_wake: true,
+            aliases: Vec::new(),
         }
     }
 

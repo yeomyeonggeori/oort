@@ -50,13 +50,9 @@ use crate::routes::shared::{
 };
 use crate::AppState;
 
-/// ADR-0113 증보 P2: the only plugin ids these reads ever show.
-pub const OFFICIAL_PLUGIN_IDS: [&str; 4] = [
-    "com.momo.plugins.github",
-    "com.momo.plugins.notion",
-    "com.momo.plugins.linear",
-    "com.momo.plugins.drive",
-];
+/// ADR-0113 증보 P2: the only plugin ids these reads ever show. One definition,
+/// shared with the team AI's `list_plugins` read (ADR-0201 증보 v2 H4-1).
+pub use momo_workspace_actions::team_ai_tools::OFFICIAL_PLUGIN_IDS;
 
 /// ADR-0113 D6's onboarding example set (Swift `onboardingRecommendedPluginIDs`).
 /// Product recommendation, distinct from each manifest's `recommendedFor`.
