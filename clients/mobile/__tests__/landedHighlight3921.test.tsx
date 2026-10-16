@@ -8,7 +8,7 @@ import {
   render,
   screen,
 } from '@testing-library/react-native';
-import React from 'react';
+import React, {Profiler} from 'react';
 import {AccessibilityInfo, Animated, FlatList, StyleSheet} from 'react-native';
 
 import {color} from '../src/design/tokens';
@@ -20,7 +20,10 @@ import {
   LANDED_HOLD_MS,
   landedApprovalOf,
 } from '../src/features/conversation/landedHighlight';
-import {ReduceMotionRefContext} from '../src/features/conversation/LandedTintFade';
+import {
+  LandedTintFade,
+  ReduceMotionRefContext,
+} from '../src/features/conversation/LandedTintFade';
 import {MessageRow} from '../src/features/conversation/MessageRow';
 import {Timeline} from '../src/features/conversation/Timeline';
 import {LANDED_TINT_FADE_MS} from '../src/design/motion';
@@ -174,6 +177,8 @@ function list() {
 }
 
 type Node = {props?: Record<string, unknown>};
+/** 시험 렌더러 인스턴스 중 이 파일이 쓰는 모양만 — 타입 정의가 없어 손으로 적는다. */
+type TestNode = {findAll: (predicate: (node: Node) => boolean) => unknown[]};
 
 /** 목록이 **물들인** 행들(`landed` 참) — 판정 쪽 증거. */
 function landedIds(): string[] {
@@ -706,10 +711,34 @@ describe('LandedTintFade — 행 하나의 전환', () => {
     expect(fadeOverlay()).toBeNull();
   });
 
-  // 갈아입는 **그 커밋**의 모양. 그릇이 배경을 벗은 같은 커밋에 덮개가 같은 면을 같은 색·불투명도 1 로
-  // 덮고 있어야 벗는 순간 같은 색이 이어서 선다 — 하나라도 어긋나면 한 프레임의 깜빡임이다
-  // (design-review M-1). 시험은 React 트리까지만 본다: 화면 픽셀로는 재지 않았다.
-  it('갈아입는 첫 커밋에서 덮개는 그릇이 벗은 면을 같은 색·불투명도 1 로 덮는다', () => {
+  // 갈아입는 순간의 모양 셋. 각각 **관측할 수 있는 것만** 말한다 — RNTL 의 `rerender` 는 `act` 로
+  // 감싸 효과를 다 비운 뒤에 돌아오므로, 아래 둘째·셋째 시험이 보는 것은 갈아입은 **직후의 정상
+  // 상태**이지 커밋 한 번의 중간이 아니다. 「한 커밋」은 첫째 시험이 `Profiler` 로 센다.
+  // 시험은 React 트리까지만 본다: 화면 픽셀로는 재지 않았다(design-review M-1·N-8).
+
+  it('덮개는 그릇이 배경을 벗는 같은 커밋에 선다 — 효과로 미루면 한 프레임이 깜빡인다', () => {
+    const phases: string[] = [];
+    const tree = (landed: boolean) => (
+      <Profiler
+        id="fade"
+        onRender={(_id, phase) => {
+          phases.push(phase);
+        }}>
+        <LandedTintFade landed={landed} />
+      </Profiler>
+    );
+    const view = render(tree(true));
+    phases.length = 0; // 마운트 커밋은 세지 않는다.
+
+    view.rerender(tree(false));
+
+    // 커밋 한 번이 덮개까지 그렸다. `wasLanded` 비교를 렌더 중 파생 상태에서 효과로 미루면 배경만
+    // 벗은 커밋이 먼저 그려지고(덮개 없음) 효과가 덮개를 세우는 둘째 커밋이 따른다.
+    expect(phases).toEqual(['update']);
+    expect(fadeOverlay()).not.toBeNull();
+  });
+
+  it('갈아입은 직후 덮개는 그릇이 벗은 면을 같은 색·불투명도 1 로, 그 밖의 것 없이 덮는다', () => {
     const view = render(row(true, false));
     const standing = StyleSheet.flatten(
       screen.getByTestId('message-row').props.style,
@@ -718,22 +747,46 @@ describe('LandedTintFade — 행 하나의 전환', () => {
 
     view.rerender(row(false, false));
 
-    // 같은 커밋 — 그릇은 배경을 벗었고,
+    // 그릇은 배경을 벗었고,
     expect(
       StyleSheet.flatten(screen.getByTestId('message-row').props.style)
         .backgroundColor,
     ).toBeUndefined();
-    // 덮개가 벗은 색 그대로(서 있던 값과 대조), 그릇 전체(네 변 0), 불투명도 1 로 서 있다.
-    const overlay = StyleSheet.flatten(fadeOverlay()!.props.style);
-    expect(overlay.backgroundColor).toBe(standing.backgroundColor);
-    expect(overlay.opacity).toBe(1);
-    expect(overlay).toMatchObject({
+    // 덮개는 벗은 색 그대로(서 있던 값과 대조), 그릇 전체(네 변 0), 불투명도 1 — 그리고 `margin`·
+    // `borderRadius` 같은 다른 키가 없다(`toEqual`: 있으면 면이 그릇과 달라진다).
+    expect(StyleSheet.flatten(fadeOverlay()!.props.style)).toEqual({
       position: 'absolute',
       top: 0,
       right: 0,
       bottom: 0,
       left: 0,
+      backgroundColor: standing.backgroundColor,
+      opacity: 1,
     });
+  });
+
+  it('덮개는 그릇의 직계 자식이고 내용보다 먼저 그려진다 — 내용 뒤에 깔리고 그릇 전체를 덮는다', () => {
+    const view = render(row(true, false));
+    view.rerender(row(false, false));
+
+    const container = screen.getByTestId('message-row');
+    // 덮개에서 가장 가까운 호스트 부모가 그릇 자신이다 — 안쪽 `Pressable`·래퍼 `View` 안에 들어가면
+    // 「그릇 전체」가 아니라 그 안쪽 상자만 덮는다.
+    let parent = fadeOverlay()!.parent;
+    while (parent !== null && typeof parent.type !== 'string') parent = parent.parent;
+    expect(parent).toBe(container);
+    // 그릇의 자식 순서에서 덮개가 내용(`message-press`)보다 앞이다 — 뒤에 서면 불투명도 1 의 앰버가
+    // 글자를 덮는다.
+    const childIndex = (testID: string) =>
+      container.children.findIndex(
+        (child: TestNode | string) =>
+          typeof child !== 'string' &&
+          child.findAll((node: Node) => node.props?.testID === testID).length > 0,
+      );
+    expect(childIndex('message-row-landed-fade')).toBeGreaterThanOrEqual(0);
+    expect(childIndex('message-press')).toBeGreaterThan(
+      childIndex('message-row-landed-fade'),
+    );
   });
 
   it('녹는 도중 같은 행이 다시 서면 덮개를 거둔다 — 틴트가 두 겹이 되지 않는다', () => {
