@@ -78,14 +78,17 @@ export function TeamAiReplyMeta({ meta }: { meta: Meta }) {
                     event.preventDefault();
                     void openExternalUrl(item.url);
                   }}
-                  className="inline-flex min-w-0 max-w-full items-baseline gap-1 rounded-sm text-signal-text underline decoration-line-strong underline-offset-2 hover:text-ink active:bg-surface-pressed focus-visible:focus-ring"
+                  className="inline-flex min-w-0 max-w-full items-baseline gap-1 rounded-sm py-1 text-signal-text hover:text-ink active:bg-surface-pressed focus-visible:focus-ring"
                 >
                   <span data-numeric className="text-ink-muted">
                     {index + 1}
                   </span>
-                  <span className="min-w-0 truncate">{item.title}</span>
+                  {/* 밑줄은 제목에만: 번호·호스트까지 그으면 제목과 출처의 위계가 흐려진다. */}
+                  <span className="min-w-0 truncate underline decoration-line-strong underline-offset-2">
+                    {item.title}
+                  </span>
                   {item.title !== item.host && (
-                    <span className="shrink-0 text-ink-muted no-underline">
+                    <span className="shrink-0 text-ink-muted">
                       {item.host}
                     </span>
                   )}

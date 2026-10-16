@@ -19,6 +19,7 @@
 
 import type { RosterMember } from "../../lib/api";
 import { attachParticle } from "../../lib/koreanParticle";
+import { aiDefaultFeatureRow } from "../ai/aiHubModel";
 import { normalizeAlias, preferredMentionName } from "../routing/helperAliases";
 import { TEAM_AI_DEFAULT_HANDLE } from "../timeline/teamAi";
 import type { ProviderDefaultAi } from "./defaultAi";
@@ -138,13 +139,16 @@ export function teamAiNextStepView(input: TeamAiNextStepInput): TeamAiNextStepVi
 
 // ---- 문구 (해요체) ---------------------------------------------------------------
 
+/** 기본 AI 표에 실제로 보이는 줄 이름. 같은 화면에서 한 줄을 두 이름으로 부르지 않게 표에서 읽는다. */
+const TEAM_AGENT_ROW = aiDefaultFeatureRow("teamAgent").feature;
+
 export const TEAM_AI_NEXT_STEP_COPY = {
   title: "다음 단계: 팀 AI(oort 도우미) 켜기",
   lead: "켜면 채팅에서 oort 도우미를 불러 이 키로 물어보고, 바꿀 일은 승인 카드로 받을 수 있어요.",
   step1Title: "이 키를 팀 AI 기본으로 쓰기",
-  step1Done: "기본 AI의 「팀 에이전트의 답」 줄이 이 키를 써요.",
-  step1Todo: "아래 기본 AI 표의 「팀 에이전트의 답」 줄에서 이 키를 골라 주세요.",
-  step1Stale: "「팀 에이전트의 답」 줄이 예전 연결을 가리켜요. 아래 표에서 이 키로 다시 골라 주세요.",
+  step1Done: `기본 AI의 「${TEAM_AGENT_ROW}」 줄이 이 키를 써요.`,
+  step1Todo: `아래 기본 AI 표의 「${TEAM_AGENT_ROW}」 줄에서 이 키를 골라 주세요. 고를 모델이 안 보이면 위 키 줄에서 「연결 확인」을 먼저 눌러 주세요.`,
+  step1Stale: `「${TEAM_AGENT_ROW}」 줄이 예전 연결을 가리켜요. 아래 표에서 이 키로 다시 골라 주세요.`,
   step1Action: "기본 AI 표로 가기",
   step2Title: "팀 AI(oort 도우미) 켜기",
   step2Action: "oort 도우미 켜기",

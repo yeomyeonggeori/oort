@@ -103,7 +103,10 @@ function build(color: Palette) {
       gap: space.sm,
     },
     meta: {fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},
+    // 큰 글자에서 칩이 행 밖으로 넘치지 않게: 줄어들 수 있고 행 폭을 넘지 않는다.
     chip: {
+      flexShrink: 1,
+      maxWidth: '100%',
       paddingHorizontal: space.sm,
       borderRadius: radius.sm,
       backgroundColor: color.surfaceMuted,
