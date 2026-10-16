@@ -146,7 +146,7 @@ function PinPicker({ agent, offline }: { agent: RosterMember; offline: boolean }
             <label
               key={option.key}
               className={cn(
-                "flex min-w-0 items-start gap-3 border-b border-line py-3",
+                "press flex min-w-0 items-start gap-3 border-b border-line py-3",
                 option.disabled ? "cursor-default" : "cursor-pointer hover:bg-surface-hover"
               )}
               data-testid={`agent-pin-option-${option.key}`}
