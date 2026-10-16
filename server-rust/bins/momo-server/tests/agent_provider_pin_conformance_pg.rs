@@ -527,6 +527,25 @@ async fn an_operator_pins_env_or_a_team_link_and_clears_it() {
         "the label it was pinned on"
     );
 
+    // A disabled hop is not a link the worker calls, so it cannot be pinned, and a
+    // pin on a hop that got disabled reads as unresolved.
+    sqlx::query("UPDATE provider_link_chain SET enabled = false WHERE position = 1")
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, _) = api
+        .put(
+            &op,
+            own_model,
+            json!({"kind": "team_link", "linkPosition": 1}),
+        )
+        .await;
+    assert_eq!(status, 400, "a disabled hop must not be pinnable");
+    sqlx::query("UPDATE provider_link_chain SET enabled = true WHERE position = 1")
+        .execute(&su)
+        .await
+        .unwrap();
+
     // Refusals: an unconfigured position, a closed body, the wrong shapes.
     let (status, _) = api
         .put(
@@ -690,6 +709,48 @@ async fn an_owner_only_agent_cannot_be_pinned_by_the_route_or_the_table() {
         cross.is_err(),
         "the trigger let a pin name a foreign workspace"
     );
+    // A pin made while the agent was an ordinary one stays valid data when the agent
+    // later becomes owner_only: the FK's `ON DELETE SET NULL` on `pinned_by` (the
+    // pinning operator left) is an UPDATE and must not be blocked by the guard.
+    let flipped = seed_agent(&su, &f, "agent", false).await;
+    sqlx::query(
+        "INSERT INTO agent_provider_pin (agent_member_id, workspace_id, kind, pinned_by) \
+         VALUES ($1, $2, 'operator_env', $3)",
+    )
+    .bind(flipped)
+    .bind(f.workspace)
+    .bind(f.owner)
+    .execute(&su)
+    .await
+    .expect("pin on an ordinary agent");
+    sqlx::query(
+        "UPDATE agent SET invocation_scope = 'owner_only', subscription_harness = 'claude_code' \
+          WHERE member_id = $1",
+    )
+    .bind(flipped)
+    .execute(&su)
+    .await
+    .expect("agent becomes owner_only");
+    let nulled =
+        sqlx::query("UPDATE agent_provider_pin SET pinned_by = NULL WHERE agent_member_id = $1")
+            .bind(flipped)
+            .execute(&su)
+            .await;
+    assert!(
+        nulled.is_ok(),
+        "the guard blocked the SET NULL update of pinned_by: {nulled:?}"
+    );
+    // ...but its meaning columns are still guarded.
+    let changed = sqlx::query(
+        "UPDATE agent_provider_pin SET kind = 'operator_env' WHERE agent_member_id = $1",
+    )
+    .bind(flipped)
+    .execute(&su)
+    .await;
+    assert!(
+        changed.is_err(),
+        "an owner_only agent's pin was rewritten through UPDATE"
+    );
     // The CHECK refuses a pin that smuggles a label onto the env kind.
     let shaped = sqlx::query(
         "INSERT INTO agent_provider_pin (agent_member_id, workspace_id, kind, link_endpoint_label) \
@@ -764,7 +825,7 @@ async fn the_table_writes_only_inside_the_operator_transaction_and_isolates_tena
     // A tenant tx can neither delete nor rewrite it (the policy hides the row from
     // the write, so it is a no-op rather than an error).
     let removed = with_tenant_tx(&app, ws_a, move |conn| {
-        Box::pin(async move { Ok(delete_agent_pin(conn, ws_a, agent_a).await?) })
+        Box::pin(async move { delete_agent_pin(conn, ws_a, agent_a).await })
     })
     .await
     .unwrap();
@@ -787,7 +848,7 @@ async fn the_table_writes_only_inside_the_operator_transaction_and_isolates_tena
 
     // The operator transaction of ANOTHER workspace cannot delete this tenant's pin.
     let cross = with_provider_link_admin_tx(&app, ws_b, move |conn| {
-        Box::pin(async move { Ok(delete_agent_pin(conn, ws_a, agent_a).await?) })
+        Box::pin(async move { delete_agent_pin(conn, ws_a, agent_a).await })
     })
     .await
     .unwrap();

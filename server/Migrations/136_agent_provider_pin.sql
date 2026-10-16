@@ -88,9 +88,13 @@ BEGIN
   RETURN NEW;
 END $$;
 
+-- UPDATE OF the identifying and meaning columns only: the FK's `ON DELETE SET NULL` on
+-- `pinned_by` (the pinning operator left) is also an UPDATE, and it must never be blocked
+-- by an agent that became owner_only after the pin was made (independent security review).
 DROP TRIGGER IF EXISTS agent_provider_pin_guard ON agent_provider_pin;
 CREATE TRIGGER agent_provider_pin_guard
-  BEFORE INSERT OR UPDATE ON agent_provider_pin
+  BEFORE INSERT OR UPDATE OF agent_member_id, workspace_id, kind, link_position, link_endpoint_label
+  ON agent_provider_pin
   FOR EACH ROW EXECUTE FUNCTION agent_provider_pin_guard();
 
 ALTER TABLE agent_provider_pin ENABLE ROW LEVEL SECURITY;
@@ -120,3 +124,16 @@ CREATE POLICY agent_provider_pin_delete ON agent_provider_pin
   FOR DELETE
   USING (workspace_id = current_setting('app.workspace_id', true)::uuid
          AND current_setting('app.provider_link_admin', true) = 'on');
+
+-- Granted here so an install that does not re-run bootstrap_roles.sql after this migration
+-- keeps working: the worker reads this table on EVERY non-owner-key agent turn, and a
+-- missing privilege would stall all of them (the same reason 128/131/133 grant).
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_app') THEN
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE agent_provider_pin TO momo_app;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_worker') THEN
+    GRANT SELECT ON TABLE agent_provider_pin TO momo_worker;
+  END IF;
+END $$;

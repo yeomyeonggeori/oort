@@ -129,7 +129,7 @@ pub struct AgentProviderPinDto {
 }
 
 /// The redacted label the stored `provider_link` row has now, for position 0, or
-/// the chain hop's, for 1 and up. Position 0 never means the env fallback.
+/// the (enabled) chain hop's, for 1 and up. Position 0 never means the env fallback.
 fn current_team_label(
     position: i32,
     link: Option<&StoredProviderLink>,
@@ -140,9 +140,11 @@ fn current_team_label(
             .filter(|row| !row.base_url.trim().is_empty())
             .map(|row| redacted_endpoint_label(&row.base_url));
     }
+    // A disabled hop is not a link the worker will call (`team_link_disabled`), so it is
+    // neither pinnable nor "resolved".
     chain
         .iter()
-        .find(|entry| entry.position == position)
+        .find(|entry| entry.position == position && entry.enabled)
         .map(|entry| redacted_endpoint_label(&entry.base_url))
 }
 
@@ -308,10 +310,8 @@ pub async fn put(
                         .await
                         .map_err(pin_read_error)?;
                     // Clearing a pin must work on any agent: it is the way back.
-                    if change != PinChange::Clear {
-                        if facts.invocation_scope == "owner_only" {
-                            return Ok(Err(Refusal::OwnerOnly));
-                        }
+                    if change != PinChange::Clear && facts.invocation_scope == "owner_only" {
+                        return Ok(Err(Refusal::OwnerOnly));
                     }
                     let (kind, position, label) = match change {
                         PinChange::Clear => {

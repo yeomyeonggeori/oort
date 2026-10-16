@@ -3368,9 +3368,14 @@ impl AgentWorker {
                     .provider_link_master_key
                     .as_deref()
                     .and_then(|key| decrypt_chain_entry(entry, key))
-                    .filter(|hop| !hop.base_url.trim().is_empty() && !hop.bearer.trim().is_empty());
+                    .filter(|hop| {
+                        !hop.base_url.trim().is_empty()
+                            && !hop.bearer.trim().is_empty()
+                            && !is_unsafe_secret(&hop.bearer)
+                    });
                 let Some(hop) = hop else {
-                    // A hop whose key will not open is a link that is not there.
+                    // A hop whose key will not open (or is a dev placeholder) is a link
+                    // that is not there.
                     return unresolved("team_link_unusable", Some(now));
                 };
                 tracing::debug!(position, "agent pin: chain hop");
