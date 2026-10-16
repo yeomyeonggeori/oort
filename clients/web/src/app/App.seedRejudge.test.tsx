@@ -100,9 +100,15 @@ let mountedRoot: Root | null = null;
 let mountedHost: HTMLElement | null = null;
 let queryClient: QueryClient | null = null;
 
-beforeAll(() => {
+beforeAll(async () => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
-});
+  // 이 파일의 첫 마운트는 `./App` 모듈 그래프 전체를 처음 읽어 온다(콜드 임포트). 그 값은 기능이
+  // 아니라 그래프의 크기이고 부하에 비례한다 — 실측: 첫 시험 1.5~1.7s(유휴), 54개 CPU 소비자
+  // 아래 2.5~3.2s, 병합 트리 게이트에서는 4.8~5.0s(#3893). 시험 안에서 읽으면 시험의 5s 가
+  // 그 값을 지는데, 여기서 읽으면 시험은 마운트 이후의 동작만 잰다. 훅 한도 60s 는 성능 예산이
+  // 아니라 멈춤 감지용(유휴 실측의 ~35배)이다.
+  await import("./App");
+}, 60_000);
 
 beforeEach(() => {
   sessionStorage.clear();
@@ -164,8 +170,6 @@ async function mountApp(): Promise<HTMLElement> {
 }
 
 describe("App: 시드 이름 그대로인 소유자는 저장소가 비어도 S1을 다시 받는다 (#3696)", () => {
-  // 파일의 첫 마운트는 App 모듈 그래프 전체를 처음 읽어 와서 기본 5초 한도에 아슬아슬하다
-  // (#3893 전 base 에서도 4.8~5.0초). 기능 회귀가 아니라 콜드 임포트 비용이라 한도만 넉넉히 둔다.
   it("서버 이름이 시드이고 내가 @demo 소유자면 S1이 선다", async () => {
     applyLogin(session);
     fetchWorkspace.mockResolvedValue({ name: "momo Demo Workspace" });
@@ -173,7 +177,8 @@ describe("App: 시드 이름 그대로인 소유자는 저장소가 비어도 S1
     const host = await mountApp();
     await vi.waitFor(() => {
       expect(host.querySelector('[data-testid="owner-onboarding"]')).not.toBeNull();
-    });  }, 30_000);
+    });
+  });
 
   it("이미 이름을 정했으면 S1이 서지 않는다", async () => {
     applyLogin(session);
