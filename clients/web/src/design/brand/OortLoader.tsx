@@ -35,12 +35,21 @@ export type OortLoaderVariant = "mark" | "hero";
 export function OortLoader({
   variant = "mark",
   still = false,
+  inline = false,
   className,
 }: {
-  /** `mark`: 링 + 위성(기본, `size-6` 24px). `hero`: 코메토 + 위성(128px, 첫 로딩). */
+  /**
+   * `mark`: 링 + 위성(기본, `size-6` 24px; **32px 이하 전용** small 광학판이라 그보다 크게 키우지 않는다).
+   * `hero`: 코메토 + 위성(128px, 첫 로딩).
+   */
   variant?: OortLoaderVariant;
   /** 진행 중이 아닌 자리. 위성을 홈에 꽂은 정지 마크로 둔다. */
   still?: boolean;
+  /**
+   * 문장 한 줄 옆에 서는 자리(배너 아이콘). 24 무대가 22 줄보다 커서 줄을 키우고 마크 중심이 글자
+   * 중심보다 내려앉으므로, 위아래로 `loader-bleed`(2px)를 물려 줄 높이는 그대로 두고 중심을 맞춘다.
+   */
+  inline?: boolean;
   /** 호출자가 크기·정렬 여백을 얹는다. 크기 기본은 mark `size-6`, hero `size-loader-hero`. */
   className?: string;
 }) {
@@ -56,6 +65,7 @@ export function OortLoader({
       className={cn(
         "oort-loader",
         hero ? "oort-loader-hero size-loader-hero" : "size-6",
+        inline && "-my-loader-bleed",
         className
       )}
     >

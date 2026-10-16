@@ -3,6 +3,7 @@ import {createHash} from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
+import NetInfo from '@react-native-community/netinfo';
 import {AccessibilityInfo, Animated, StyleSheet} from 'react-native';
 
 import {OortLoader} from '../src/design/brand/OortLoader';
@@ -630,6 +631,35 @@ describe('배선 — 연결 띠(대화 머리)와 첫 로딩(Booting)', () => {
       expect(live(handles)).toHaveLength(1);
     },
   );
+
+  it('기기가 오프라인이면(NetInfo) 같은 마크가 멈춘다 — 웹 browser-offline 과 같은 규칙, 문장은 그대로', async () => {
+    reduceMotion(false);
+    const {handles} = spyOnLoop();
+    header('disconnected');
+    await settle();
+    expect(live(handles)).toHaveLength(1);
+    act(() => {
+      (NetInfo as unknown as {__emit: (state: unknown) => void}).__emit({
+        isConnected: false,
+        isInternetReachable: false,
+      });
+    });
+    await settle();
+    // 도는 반복은 멈췄고(정지), 띠의 문장은 그대로다.
+    expect(live(handles)).toHaveLength(0);
+    expect(screen.getByTestId('connection-banner')).toHaveTextContent('연결이 끊겼습니다');
+    const satellite = flatten(screen.getByTestId('connection-loader-satellite', HIDDEN).props.style);
+    expect((satellite.transform as Array<Record<string, unknown>>)[0]).toEqual({rotate: '-45deg'});
+    // 다시 온라인이면 다시 돈다.
+    act(() => {
+      (NetInfo as unknown as {__emit: (state: unknown) => void}).__emit({
+        isConnected: true,
+        isInternetReachable: true,
+      });
+    });
+    await settle();
+    expect(live(handles)).toHaveLength(1);
+  });
 
   it('연결됐으면 띠도 로더도 없다', async () => {
     reduceMotion(false);

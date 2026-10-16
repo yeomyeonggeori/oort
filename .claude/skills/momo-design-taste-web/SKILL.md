@@ -73,7 +73,7 @@ The scales are closed sets in `tokens.css`: the dynamic spacing multiplier, the 
 
 ## 4. Motion
 
-- Every animation is feedback for a state change (short spring/ease, <200ms typical). No perpetual or decorative loops. Streaming text gets a caret, not a shimmer skeleton. Loading uses height-preserving neutral bars, not shimmer.
+- Every animation is feedback for a state change (short spring/ease, <200ms typical). No perpetual or decorative loops. The one brand exception is the oort loader (#3961): its motion IS the information (still connecting / loading), it animates transform and opacity only, it holds a static mark under reduced motion, and it stands still wherever nothing is actually in flight. Streaming text gets a caret, not a shimmer skeleton. Loading uses height-preserving neutral bars, not shimmer.
 - **Always guard non-trivial motion** with `@media (prefers-reduced-motion: reduce)` and/or the `useReducedMotion` hook. Floating/parallax motion is banned in the product surface (it belongs only on the landing site, one place, per alpha-site-direction).
 
 ## 5. States (mandatory, per surface)

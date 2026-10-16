@@ -424,6 +424,12 @@
    * 금지(docs/brand/mark/README.md)와도 무관하게 넉넉히 위다. */
   --spacing-loader-hero: 128px;
 
+  /* 줄 옆에 서는 오르트 로더가 문장 줄 위아래로 걸치는 양 (#3961, design-review M-4). 마크 무대
+   * 24가 문장 한 줄(`text-body` 22)보다 2 크다. 위아래로 2씩 물리면 줄 높이는 그대로이고
+   * (래퍼의 `mt-px` 1을 더해 21 ≤ 22) 마크 중심이 첫 줄 중심에 온다. 선택 마커 두께
+   * (`--spacing-marker`)와 값만 같은 **다른 축**이라 이름을 따로 준다. */
+  --spacing-loader-bleed: 2px;
+
   /* 인박스 리마인더 행의 ⋯ 그릇 (#1888 B-2).
    *
    * 그릇은 tap-target(44, 600px 미만) + p-px×2 + border 1px×2 = 48. 행은
@@ -4008,7 +4014,9 @@
   animation: oort-loader-breathe var(--oort-loader-period) ease-in-out infinite;
 }
 
-/* 코메토는 투명도도 건드리지 않는다. 숨 쉬는 것은 위성 층뿐이다. */
+/* 감소된 동작에서 코메토는 투명도도 건드리지 않는다. 숨 쉬는 것은 위성 층뿐이다.
+ * (처음 나타날 때의 페이드인(`oort-loader-appear`, 지연 뒤 한 번)은 이 규칙 밖이다:
+ * 사다리가 0이 되는 감소된 동작에서는 그것도 즉시다.) */
 .oort-loader-hero[data-motion="reduced"] .oort-loader-body {
   animation: none;
 }

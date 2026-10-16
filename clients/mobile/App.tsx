@@ -144,7 +144,10 @@ export function Booting({
   );
 }
 
-/** 첫 로딩 로더의 한 변(pt). 꼬리 점이 서는 display 마크의 첫 크기(40)보다 한 단 크게. */
+/**
+ * 첫 로딩 로더의 한 변(pt). 꼬리 점이 서는 display 마크의 첫 크기(40)보다 한 단 크게. 웹의 첫 로딩 큰 자리
+ * (128px, 코메토 둘레)는 폰에 짝이 없다: 폰에는 코메토 큰 자리가 없고 마크 로더만 쓴다.
+ */
 const BOOT_LOADER_SIZE = 56;
 
 const buildStyles = (color: Palette) => StyleSheet.create({

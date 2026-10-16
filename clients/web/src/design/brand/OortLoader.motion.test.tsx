@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 import { compile } from "tailwindcss";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { InlineBanner } from "@/features/common/States";
 import { OortLoader } from "./OortLoader";
 
 /**
@@ -237,13 +238,21 @@ async function loadStylesheet(id: string, base: string) {
   return { path, base: dirname(path), content: readFileSync(path, "utf8") };
 }
 
-let cssPromise: Promise<string> | null = null;
-function builtCss(): Promise<string> {
-  cssPromise ??= (async () => {
-    const compiler = await compile(TOKENS_CSS, { base: DESIGN, loadStylesheet });
-    return compiler.build(["size-6", "size-loader-hero", "block", "grid", "gap-6", "p-6"]);
-  })();
-  return cssPromise;
+const cssByCandidates = new Map<string, Promise<string>>();
+/** 마크업이 쓰는 클래스를 후보로 컴파일한다(기본 후보 + 마크업 안의 class). */
+function builtCss(markup = ""): Promise<string> {
+  const used = [...markup.matchAll(/class="([^"]*)"/g)].flatMap((m) => m[1]!.split(/\s+/)).filter(Boolean);
+  const candidates = [...new Set(["size-6", "size-loader-hero", "block", "grid", "gap-6", "p-6", ...used])];
+  const key = candidates.join(" ");
+  let hit = cssByCandidates.get(key);
+  if (!hit) {
+    hit = (async () => {
+      const compiler = await compile(TOKENS_CSS, { base: DESIGN, loadStylesheet });
+      return compiler.build(candidates);
+    })();
+    cssByCandidates.set(key, hit);
+  }
+  return hit;
 }
 
 let sharedBrowser: Promise<import("playwright").Browser> | null = null;
@@ -276,7 +285,7 @@ async function open(
     reducedMotion: opts.reducedMotion ?? "no-preference",
   });
   const page = await context.newPage();
-  const css = await builtCss();
+  const css = await builtCss(markup);
   await page.setContent(
     `<!doctype html><html><head><meta charset="utf-8"><style>${css}</style></head>` +
       `<body><div class="p-6">${markup}</div></body></html>`
@@ -643,6 +652,78 @@ maybe("동작 줄이기·still (Chromium)", () => {
     const h = await open(HERO_STILL);
     try {
       expect(await animationsOf(h)).toEqual({ body: [], orbit: [], arm: [], radial: [], ring: [], badge: [] });
+    } finally {
+      await h.close();
+    }
+  });
+});
+
+maybe("배너 안의 줄 정렬 (Chromium)", () => {
+  const message = "실시간 연결을 아직 맺지 못했습니다. 새 메시지는 채널을 다시 열어야 도착합니다.";
+  const banner = (icon: boolean, still = true) =>
+    renderToStaticMarkup(
+      <div className="w-pane-lg">
+        <InlineBanner
+          tone="neutral"
+          message={message}
+          testId="banner"
+          {...(icon ? { icon: <OortLoader inline still={still} /> } : {})}
+        />
+      </div>
+    );
+
+  it("로더가 문장 줄을 키우지 않는다: 단일 줄 배너 높이가 아이콘이 없을 때와 같다", async () => {
+    const withIcon = await open(banner(true));
+    const without = await open(banner(false));
+    try {
+      const height = (h: Awaited<ReturnType<typeof open>>) =>
+        h.page.evaluate(() => document.querySelector<HTMLElement>("[data-testid=banner]")!.getBoundingClientRect().height);
+      const [a, b] = [await height(withIcon), await height(without)];
+      expect(a).toBe(b);
+      expect(a).toBe(22 + 16 + 1); // text-body 줄 22 + py-2 위아래 16 + 아래 선 1
+    } finally {
+      await withIcon.close();
+      await without.close();
+    }
+  });
+
+  it("마크 중심이 첫 줄 중심에 온다(1px 이내)", async () => {
+    const h = await open(banner(true));
+    try {
+      const gap = await h.page.evaluate(() => {
+        const root = document.querySelector<HTMLElement>("[data-testid=banner]")!;
+        const loader = root.querySelector("[data-oort-loader]")!.getBoundingClientRect();
+        const text = root.querySelector("span:not([aria-hidden])")!;
+        const range = document.createRange();
+        range.selectNodeContents(text);
+        const first = range.getClientRects()[0]!;
+        return Math.abs(loader.y + loader.height / 2 - (first.y + first.height / 2));
+      });
+      expect(gap).toBeLessThanOrEqual(1);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it("두 줄 이상으로 접혀도 로더는 첫 줄에 남는다(줄 맞춤이 위쪽)", async () => {
+    const narrow = renderToStaticMarkup(
+      <div className="w-pane-sm">
+        <InlineBanner tone="neutral" message={message} testId="banner" icon={<OortLoader inline still />} />
+      </div>
+    );
+    const h = await open(narrow);
+    try {
+      const m = await h.page.evaluate(() => {
+        const root = document.querySelector<HTMLElement>("[data-testid=banner]")!;
+        const loader = root.querySelector("[data-oort-loader]")!.getBoundingClientRect();
+        const text = root.querySelector("span:not([aria-hidden])")!;
+        const range = document.createRange();
+        range.selectNodeContents(text);
+        const rects = [...range.getClientRects()];
+        return { lines: new Set(rects.map((r) => Math.round(r.y))).size, loaderCenter: loader.y + loader.height / 2, firstLineCenter: rects[0]!.y + rects[0]!.height / 2 };
+      });
+      expect(m.lines).toBeGreaterThan(1);
+      expect(Math.abs(m.loaderCenter - m.firstLineCenter)).toBeLessThanOrEqual(1);
     } finally {
       await h.close();
     }

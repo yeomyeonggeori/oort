@@ -21,6 +21,7 @@ import {
 } from '../../design/icons';
 import {usePalette, useStyles} from '../../design/theme';
 import {ds2Radius, font, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {useOnline} from '../inbox/useOnline';
 import {Avatar} from './Avatar';
 import {CONV} from './convDesign';
 
@@ -98,6 +99,9 @@ export function ConversationHeader({
   const palette = usePalette();
   const insets = useSafeAreaInsets();
   const banner = connectionBannerText(railStatus);
+  // 기기가 오프라인이면(NetInfo) 레일 재시도가 닿을 수 없다. 웹 배너의 browser-offline 과 같은 규칙으로
+  // 같은 마크가 멈춘다(#3961 design-review M-2). 문장은 그대로다.
+  const online = useOnline();
 
   const openMenu = useCallback(() => {
     ActionSheetIOS.showActionSheetWithOptions(
@@ -196,8 +200,8 @@ export function ConversationHeader({
           style={styles.banner}
           testID="connection-banner">
           {/* 두 문장(「연결 중…」·「연결이 끊겼습니다」) 모두 레일이 다시 연결을 시도하는 동안이라
-              같은 로더가 돈다(#3961). 문장은 그대로고 로더는 곁들일 뿐이다. */}
-          <OortLoader size={BANNER_LOADER_SIZE} testID="connection-loader" />
+              같은 로더가 돈다(#3961). 문장은 그대로고 로더는 곁들일 뿐이다. 기기가 오프라인이면 멈춘다. */}
+          <OortLoader size={BANNER_LOADER_SIZE} still={!online} testID="connection-loader" />
           <Text style={styles.bannerText} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
             {banner}
           </Text>
@@ -210,7 +214,10 @@ export function ConversationHeader({
 /** 42 원을 44 로 만드는 여유 — 한 변에 1. */
 const CIRCLE_SLOP = (TOUCH_TARGET - CONV.circle) / 2;
 
-/** 연결 띠의 로더 한 변(pt). 12pt 문장 한 줄 옆에 서는 자리라 small 마크가 읽히는 20. */
+/**
+ * 연결 띠의 로더 한 변(pt). 12pt 문장 한 줄 옆에 서는 자리라 small 마크가 읽히는 20: 글자 대비 1.67배로
+ * 웹 배너의 24px 대 15px(1.6배)와 같은 크기감이다(웹에는 같은 숫자의 짝이 없다).
+ */
 const BANNER_LOADER_SIZE = 20;
 
 const buildStyles = (color: Palette) =>

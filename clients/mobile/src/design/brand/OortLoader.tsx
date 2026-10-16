@@ -30,7 +30,7 @@ import {
 // 떠낸 PNG 에 `tintColor` 를 입히고, 위성은 원(`View`)이다 — 원이라 기하가 같다.
 // 래스터는 `oort-loader-ring-{small,display}[@2x|@3x].png`: 마크 정본 링 path 만(위성 없음)
 // 무대(정사각, 링 중심 = 무대 중심) 크기로 뜬 것이고, 코메토 배지처럼
-// `render-brand-icons.mjs` 의 검사 밖이다. 다시 만드는 법은 `oortLoaderRasters.test.ts` 머리말.
+// `render-brand-icons.mjs` 의 검사 밖이다. 다시 만드는 법과 해시 트립와이어는 `__tests__/oortLoader.test.tsx` 머리말.
 //
 // ## 움직이는 것은 transform 과 opacity 뿐
 //
