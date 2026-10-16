@@ -16,6 +16,7 @@ import '../src/boot/coreHost';
 
 import {FixedScheme, type ColorScheme} from '../src/design/theme';
 import {lightPalette} from '../src/design/tokens';
+import {channelListText, spokenChannels} from '../src/features/agents/channelTags';
 import AppShell from '../src/shell/AppShell';
 import {
   __resetSessionStore,
@@ -258,6 +259,8 @@ interface RouteOverrides {
   allowedModels?: () => Response | Promise<Response>;
   workSessions?: () => Response | Promise<Response>;
   workHosts?: () => Response | Promise<Response>;
+  /** 이 서버의 채널 목록(사이드바가 그리는 것). 기본은 #general 하나. */
+  channels?: () => unknown[];
 }
 
 /**
@@ -308,7 +311,7 @@ function installFetch(overrides: RouteOverrides = {}): jest.Mock {
         : jsonResponse(200, {workHosts: WORK_HOSTS});
     }
     if (url.includes('/channels') && !url.includes('/messages')) {
-      return jsonResponse(200, {channels: CHANNELS});
+      return jsonResponse(200, {channels: overrides.channels ? overrides.channels() : CHANNELS});
     }
     if (url.includes('/roster')) {
       return overrides.roster
@@ -560,137 +563,156 @@ describe('a row says what state the agent is in', () => {
   });
 });
 
-describe('재우기 / 깨우기', () => {
-  async function openKim() {
+describe('폰 에이전트 상세 (성재 2026-10-16)', () => {
+  const THREE_CHANNELS = () => [
+    {id: 'ch-agent-lab', workspaceId: WS, kind: 'public', name: 'agent-lab', muted: false},
+    {id: 'ch-general', workspaceId: WS, kind: 'public', name: 'general', muted: false},
+    {id: 'ch-grokbot', workspaceId: WS, kind: 'public', name: 'grokbot-lab', muted: false},
+  ];
+  const ROSTER_THREE = () =>
+    jsonResponse(200, {
+      members: ROSTER.map(m =>
+        m.id === KIM_AGENT
+          ? {
+              ...m,
+              channelIds: ['ch-agent-lab', 'ch-general', 'ch-grokbot'],
+              avatarUrl: 'data:image/png;base64,iVBORw0KGgo=',
+            }
+          : m,
+      ),
+    });
+
+  async function openKim(over: RouteOverrides = {}) {
+    installFetch(over);
     await openAgentsTab();
     fireEvent.press(screen.getByTestId(`agent-row-${KIM_AGENT}`));
-    await waitFor(() => expect(screen.getByTestId('agent-pause-toggle')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('agent-open-dm')).toBeTruthy());
   }
 
-  it('says what pause actually reaches BEFORE the press', async () => {
-    installFetch();
-    await openKim();
-    const effect = screen.getByTestId('agent-pause-effect');
-    // Measured on server-rust: pause blocks the three run-CREATION paths and
-    // nothing else. A job the gateway already claimed runs to completion —
-    // pausing does not reach it, and the way to stop it is the separate cancel
-    // route (goal SRV-C2), which is a different act on a different object.
-    expect(effect).toHaveTextContent(/새 실행이 시작되지 않습니다/);
-    // goal RN-C1에서 고쳐진 단정. 예전 문장은 "이미 실행 중인 작업은 그대로
-    // 끝까지 갑니다"였고 두 가지를 뜻했다 — 재우기가 도는 실행에 손대지 않는다는
-    // 것과, 멈출 방법이 아예 없다는 것. cancel 라우트가 이식되며 후자만 거짓이
-    // 됐으므로 전자를 잠근다.
-    expect(effect).toHaveTextContent(/재우기로 멈추지 않습니다/);
-    expect(effect).toHaveTextContent(/중단할 수 있습니다/);
-    expect(screen.getByTestId('agent-state')).toHaveTextContent('깨어 있습니다');
+  it('재우기·깨우기 카드와 스위치가 폰에 없다 (서버 PUT 도 부르지 않는다)', async () => {
+    const fetchMock = installFetch();
+    await openAgentsTab();
+    fireEvent.press(screen.getByTestId(`agent-row-${KIM_AGENT}`));
+    await waitFor(() => expect(screen.getByTestId('agent-model')).toBeTruthy());
+    for (const id of [
+      'agent-pause-toggle',
+      'agent-pause-effect',
+      'agent-state',
+      'agent-state-forbidden',
+      'agent-pause-receipt',
+    ]) {
+      expect(screen.queryByTestId(id)).toBeNull();
+    }
+    expect(screen.queryByText('재우기')).toBeNull();
+    expect(screen.queryByText('깨우기')).toBeNull();
+    expect(screen.queryByLabelText('이 에이전트를 재우기')).toBeNull();
+    expect(
+      fetchMock.mock.calls.filter(([url]) => String(url).includes('/pause')),
+    ).toHaveLength(0);
   });
 
-  it('moves under the thumb, then keeps what the server confirmed', async () => {
-    // The request is held open, so what follows can only pass if the switch
-    // moved BEFORE the server answered. A `waitFor` against a mock that has
-    // already resolved would prove nothing about optimism.
-    let answer: (() => void) | null = null;
-    const fetchMock = installFetch({
-      pause: body =>
-        new Promise<Response>(resolve => {
-          answer = () => {
-            const next = (body as {paused: boolean}).paused;
-            setStoredPaused(next);
-            resolve(jsonResponse(200, {profile: {...PROFILE, paused: next, version: 4}}));
-          };
-        }),
-    });
-    await openKim();
-
-    fireEvent.press(screen.getByTestId('agent-pause-toggle'));
-    await waitFor(() =>
-      expect(screen.getByTestId('agent-state')).toHaveTextContent('자고 있습니다'),
-    );
-    expect(answer).not.toBeNull();
-
-    answer!();
-    await waitFor(() =>
-      expect(screen.getByTestId('agent-pause-receipt')).toBeTruthy(),
-    );
-    const call = fetchMock.mock.calls.find(([url]) => String(url).includes('/pause'));
-    expect(call![1].method).toBe('PUT');
-    expect(JSON.parse(call![1].body)).toEqual({paused: true});
-    // The receipt names the agent with the right particle and repeats what
-    // changed, rather than saying "저장됨".
-    expect(screen.getByTestId('agent-pause-receipt')).toHaveTextContent(
-      /김인턴을 재웠습니다\./,
-    );
-    expect(screen.getByTestId('agent-pause-toggle')).toHaveTextContent('깨우기');
-  });
-
-  it('puts the switch BACK when the server refuses, and says why in Korean', async () => {
-    installFetch({
-      pause: () =>
-        jsonResponse(403, {
-          error: {message: 'agent owner or workspace admin required'},
-        }),
-    });
-    await openKim();
-
-    fireEvent.press(screen.getByTestId('agent-pause-toggle'));
-    await waitFor(() => expect(screen.getByTestId('agent-pause-error')).toBeTruthy());
-    // Rolled back: the agent is awake again, because it never went to sleep.
-    expect(screen.getByTestId('agent-state')).toHaveTextContent('깨어 있습니다');
-    expect(screen.getByTestId('agent-pause-error')).toHaveTextContent(
-      /재우지 못했습니다\./,
-    );
-    expect(screen.getByTestId('agent-pause-error')).toHaveTextContent(
-      /워크스페이스 관리자나 그 에이전트를 맡은 사람만/,
-    );
-    // No status code, no server English.
-    expect(screen.queryByText(/403/)).toBeNull();
-    expect(screen.queryByText(/admin required/)).toBeNull();
-  });
-
-  it('「다시 시도」 actually retries, rather than dismissing the banner (R1 High-3)', async () => {
-    // The label used to call `reset()`: the sentence vanished and nothing was
-    // sent. On the one control in this batch that changes workspace state.
-    let attempts = 0;
-    const fetchMock = installFetch({
-      pause: () => {
-        attempts += 1;
-        return attempts === 1
-          ? jsonResponse(503, {error: {message: 'upstream down'}})
-          : jsonResponse(200, {profile: {...PROFILE, paused: true, version: 4}});
-      },
-    });
-    await openKim();
-
-    fireEvent.press(screen.getByTestId('agent-pause-toggle'));
-    await waitFor(() => expect(screen.getByTestId('agent-pause-error')).toBeTruthy());
-    const before = fetchMock.mock.calls.filter(([url]) =>
-      String(url).includes('/pause'),
-    ).length;
-
-    fireEvent.press(screen.getByTestId('agent-pause-error-retry'));
-    await waitFor(() =>
-      expect(
-        fetchMock.mock.calls.filter(([url]) => String(url).includes('/pause')).length,
-      ).toBe(before + 1),
-    );
-    // …and the second attempt is the same act, not its opposite.
-    const last = fetchMock.mock.calls
-      .filter(([url]) => String(url).includes('/pause'))
-      .pop();
-    expect(JSON.parse(last![1].body)).toEqual({paused: true});
-    await waitFor(() => expect(screen.queryByTestId('agent-pause-error')).toBeNull());
-  });
-
-  it('offers no switch at all when the state cannot even be read', async () => {
+  it('권한이 없는 에이전트(프로필 403)도 상태 칸 없이 열린다', async () => {
     installFetch();
     await openAgentsTab();
     fireEvent.press(screen.getByTestId(`agent-row-${HERMES}`));
-    await waitFor(() =>
-      expect(screen.getByTestId('agent-state-forbidden')).toBeTruthy(),
+    await waitFor(() => expect(screen.getByTestId('agent-open-dm')).toBeTruthy());
+    expect(screen.queryByTestId('agent-state-forbidden')).toBeNull();
+    expect(screen.queryByText(/재우고 깨우는 것은/)).toBeNull();
+  });
+
+  it('머리에 에이전트 목록과 같은 출처의 아바타가 선다 (사진이 있으면 사진)', async () => {
+    await openKim({roster: ROSTER_THREE, channels: THREE_CHANNELS});
+    const header = screen.getByTestId('agent-detail-face');
+    const image = await waitFor(() =>
+      within(header).getByTestId('avatar-image', {includeHiddenElements: true}),
     );
-    expect(screen.queryByTestId('agent-pause-toggle')).toBeNull();
-    // Not drawn as a failure, and with nothing to retry.
-    expect(screen.queryByTestId('agent-state-forbidden-retry')).toBeNull();
+    expect(image.props.source).toEqual({uri: 'data:image/png;base64,iVBORw0KGgo='});
+  });
+
+  it('사진이 없으면 머리에 에이전트 모양(둥근 사각)의 이니셜이 선다', async () => {
+    await openKim();
+    const header = screen.getByTestId('agent-detail-face');
+    expect(
+      within(header).getByTestId('avatar-agent', {includeHiddenElements: true}),
+    ).toBeTruthy();
+    expect(
+      within(header).getByTestId('avatar-initial', {includeHiddenElements: true}),
+    ).toBeTruthy();
+  });
+
+  it('「대화 열기」가 주 버튼, 「작업 맡기기」가 보조 버튼이고 둘 다 44pt 이상이다', async () => {
+    installFetch();
+    await openAgentsTab();
+    fireEvent.press(screen.getByTestId(`agent-row-${KIM_AGENT}`));
+    await waitFor(() => expect(screen.getByTestId('agent-open-dm')).toBeTruthy());
+    const flat = (n: {props: {style?: unknown}}) =>
+      StyleSheet.flatten(n.props.style) as Record<string, unknown>;
+    const primary = flat(screen.getByTestId('agent-open-dm'));
+    expect(primary.backgroundColor).toBeDefined();
+    expect(primary.minHeight).toBeGreaterThanOrEqual(44);
+    expect(screen.getByTestId('agent-open-dm')).toHaveTextContent('대화 열기');
+    expect(screen.getByTestId('agent-open-dm').props.accessibilityLabel).toBe(
+      '김인턴과의 대화 열기',
+    );
+    const secondary = screen.getByTestId('agent-delegate-work');
+    const sec = flat(secondary);
+    expect(secondary).toHaveTextContent('작업 맡기기');
+    // 보조는 채움이 아니라 테두리 — 주 행동과 같은 위계가 아니다.
+    expect(sec.backgroundColor).toBeUndefined();
+    expect(sec.borderWidth).toBe(1);
+    expect(sec.minHeight).toBeGreaterThanOrEqual(44);
+    // 같은 묶음 안에서 주가 먼저다.
+    const group = screen.getByTestId('agent-actions');
+    const ids = within(group)
+      .getAllByRole('button')
+      .map(n => n.props.testID);
+    expect(ids).toEqual(['agent-open-dm', 'agent-delegate-work']);
+  });
+});
+
+describe('「에이전트가 포함된 채널」 칩', () => {
+  const THREE_CHANNELS = () => [
+    {id: 'ch-agent-lab', workspaceId: WS, kind: 'public', name: 'agent-lab', muted: false},
+    {id: 'ch-general', workspaceId: WS, kind: 'public', name: 'general', muted: false},
+    {id: 'ch-grokbot', workspaceId: WS, kind: 'public', name: 'grokbot-lab', muted: false},
+    {id: 'ch-extra', workspaceId: WS, kind: 'public', name: 'extra', muted: false},
+  ];
+  const ROSTER_CH = () =>
+    jsonResponse(200, {
+      members: ROSTER.map(m =>
+        m.id === KIM_AGENT
+          ? {...m, channelIds: ['ch-agent-lab', 'ch-general', 'ch-grokbot', 'ch-extra']}
+          : m,
+      ),
+    });
+
+  it('머리글이 바뀌고, 채널마다 칩 하나, 스크린리더는 쉼표로 이은 이름을 읽는다', async () => {
+    installFetch({roster: ROSTER_CH, channels: THREE_CHANNELS});
+    await openAgentsTab();
+    fireEvent.press(screen.getByTestId(`agent-row-${KIM_AGENT}`));
+    const tags = await waitFor(() => screen.getByTestId('agent-channel-tags'));
+    expect(screen.getByText('에이전트가 포함된 채널')).toBeTruthy();
+    expect(screen.queryByText('있는 채널')).toBeNull();
+    expect(within(tags).getAllByTestId('channel-tag')).toHaveLength(4);
+    expect(within(tags).getByText('#agent-lab')).toBeTruthy();
+    expect(tags.props.accessibilityLabel).toBe('agent-lab, general, grokbot-lab, extra');
+    expect(tags.props.accessible).toBe(true);
+  });
+
+  it('목록 줄은 세 곳까지 쉼표로 쓰고 나머지는 +N 으로 접는다, 낭독에는 전부 읽는다', async () => {
+    installFetch({roster: ROSTER_CH, channels: THREE_CHANNELS});
+    await openAgentsTab();
+    const row = screen.getByTestId(`agent-row-${KIM_AGENT}`);
+    expect(row).toHaveTextContent('#agent-lab, #general, #grokbot-lab +1', {exact: false});
+    expect(row.props.accessibilityLabel).toContain('채널 agent-lab, general, grokbot-lab, extra');
+    expect(row.props.accessibilityLabel).not.toContain('#');
+  });
+
+  it('순수 함수: 접기·낭독', () => {
+    expect(channelListText(['a', 'b'])).toBe('#a, #b');
+    expect(channelListText(['a', 'b', 'c', 'd', 'e'])).toBe('#a, #b, #c +2');
+    expect(channelListText([])).toBe('');
+    expect(spokenChannels(['a', 'b'])).toBe('a, b');
   });
 });
 
