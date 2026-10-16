@@ -483,12 +483,24 @@ impl World {
         .fetch_one(&self.su)
         .await
         .expect("seed parked run");
-        let payload = momo_agent::actions::workspace_action_payload(
+        // The stored form a real proposal leaves behind: the NORMALISED arguments
+        // (`channel_create_args`) plus the pins the decision compares with what
+        // the names resolve to now (`ChannelCreate` pins its member ids; there
+        // are none here). Anything less and the decision route answers
+        // `action_args_invalid` before it ever reaches the gate under test.
+        let mut payload = momo_agent::actions::workspace_action_payload(
             momo_agent::actions::ACTION_CHANNEL_CREATE,
-            &json!({"name": name, "kind": "public"}),
+            &json!({
+                "name": name,
+                "kind": "public",
+                "topic": null,
+                "addProposer": true,
+                "memberHandles": [],
+            }),
             None,
             self.agent,
         );
+        payload["action"]["pins"] = json!({"members": []});
         let approval: Uuid = sqlx::query_scalar(
             "INSERT INTO approval \
                (workspace_id, run_id, channel_id, requested_by, action_type, payload, \
