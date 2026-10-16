@@ -2,7 +2,7 @@
 
 - Status: **Accepted** (2026-07-17, 성재 — 권고안 D1-A~D6 전체 승인 "ㄱㄱ". 첫 파생 SE-04A=MOMO-410부터 codex-fleet 발급)
 - 증보: **2026-10-15 (#3838) 플러그인 레지스트리 이월 해제, 공식 4개 읽기 Rust 라우트부터** (성재 결재 「이월 풀고 읽기부터 (추천)」) — 파일 끝.
-- 증보 2: **2026-10-16 채팅에서 앱 실행 경로·주요 커넥터·쓰기 도구** (성재 결재 「각자 + 1인 워크스페이스에서 Hermes 시험 (추천)」, 「코덱스 앱이나 다른 그록봇류 앱처럼 …」, 같은 날 저녁 「개인 Gmail 외부 앱」·「초안·라벨까지 (Recommended)」) — 파일 끝. D1-A·D2·D5-①③·D6과 P1~P4는 바뀌지 않는다. D3 라인업과 Consequences의 「호스트 = 사용자 소유 머신」 문장을 조건부로 넓히고, D3 경로 A의 「GCP internal 앱」 전제를 이 배포에 한해 External로 바꾼다. Google 세 앱은 Developer Preview 신청 자격을 확인하기 전까지 시드·설치를 열지 않는다(E2).
+- 증보 2: **2026-10-16 채팅에서 앱 실행 경로·주요 커넥터·쓰기 도구** (성재 결재 「각자 + 1인 워크스페이스에서 Hermes 시험 (추천)」, 「코덱스 앱이나 다른 그록봇류 앱처럼 …」, 같은 날 저녁 「개인 Gmail 외부 앱」·「초안·라벨까지 (Recommended)」, 2026-10-17 「뭐 계정만 필요한거면 dawn.kim으로 우선하자. 나중에 바꿀 수도 있는거지 ?」 — 이 마지막 결재가 「개인 Gmail 외부 앱」을 대체한다) — 파일 끝. D1-A·D2·D5-①③·D6과 P1~P4는 바뀌지 않는다. D3 라인업과 Consequences의 「호스트 = 사용자 소유 머신」 문장을 조건부로 넓힌다. D3 경로 A의 「GCP internal 앱」 전제는 dawn.kim 조직 프로젝트에서 그대로 쓴다(E2). Google 세 앱의 시드·설치는 dawn.kim의 Developer Preview 가입과 OAuth client 준비(G-S0), 벤더 실측 뒤에 연다.
 - 관련: `research/16-plugin-platform/00~04`(생태계·제안·실검증·Slack/MM 호환), `docs/planning/proposals/2026-07-14-superapp-engine-roadmap.md` §ADR-0113·SE-04A/B, ADR-0004(provider 자격증명 비유입), ADR-0102(BYOA), ADR-0111(Work), ADR-0115(signed webhook — 본 ADR의 D6이 입력 제공), `research/13-redesign/03`(Drive 동결 트랙)
 - 발단: 성재 발제 3회 누적 — ① "Codex 앱식 공식+커스텀 플러그인, 원클릭 설치, 1호 Drive"(2026-07-16) ② momo-main 구체화 지정(custody/Drive-vs-GitHub/delegation/egress) ③ "오피셜 플러그인 집중 + Slack/Mattermost에서 쓰던 것 계속 사용"(2026-07-16)
 
@@ -91,13 +91,14 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
 
 ## 증보 2 (2026-10-16) — 채팅에서 앱 실행 경로·주요 커넥터·쓰기 도구
 
-- Status: **Accepted** (2026-10-16, 성재 결재 원문 아래). 보안 경계(어디서 누구 토큰으로 실행하나)·DB 계약(새 매니페스트 시드·새 approval 종류)·공개 API(매니페스트 와이어의 쓰기 도구) 변경이라 ADR-0100에 따라 이 기록이 구현 머지 조건이다. **두 가지는 아직 열지 않는다.** ① Google 세 앱(Calendar·Gmail·내 드라이브)은 E2의 Preview 자격 확인과 owner 재확인 전까지 시드·설치를 열지 않는다. ② E4의 Hermes 2단계 승인 얼굴(`connector_tool`)은 ADR-0203 증보 2단계(Proposed)와 같이 움직인다 — 그 확인 전에는 C-S4(#3956)를 시작하지 않는다.
+- Status: **Accepted** (2026-10-16, 성재 결재 원문 아래. Google 계정 부분은 2026-10-17 재결재가 바꿨다). 보안 경계(어디서 누구 토큰으로 실행하나)·DB 계약(새 매니페스트 시드·새 approval 종류)·공개 API(매니페스트 와이어의 쓰기 도구) 변경이라 ADR-0100에 따라 이 기록이 구현 머지 조건이다. **두 가지는 아직 열지 않는다.** ① Google 세 앱(Calendar·Gmail·내 드라이브)의 시드·설치는 G-S0(dawn.kim의 Developer Preview 가입·OAuth client 준비)과 벤더 실측 뒤에 연다 — owner 재확인은 끝났다(결재 원문 6). ② E4의 Hermes 2단계 승인 얼굴(`connector_tool`)은 ADR-0203 증보 2단계(Proposed)와 같이 움직인다 — 그 확인 전에는 C-S4(#3956)를 시작하지 않는다.
 - 결재 원문(2026-10-16, AskUserQuestion):
   1. 실행 장소: 「각자 + 1인 워크스페이스에서 Hermes 시험 (추천)」
   2. 입구·범위와 쓰기(두 질문에 같은 답): 「코덱스 앱이나 다른 그록봇류 앱처럼 구글쪽이랑 깃헙, 지라, 슬랙 등 메이저쪽 플러그인 지원 작업까지. 구글 캘린더나 구글 메일 드라이브등은 무조건 되어야함」
   3. GitHub 저장소 → 채널 알림: 「GitHub App으로 자동」 — 이 증보 밖이다. [ADR-0205](0205-github-app-integration.md)가 정한다(권한 묶음 결재 「GitHub App의 첫 권한을 어디까지 받을까요?」 → 「이슈·PR·체크+코드 읽기 (Recommended)」도 거기 인용한다).
-  4. Google 연결 계정과 OAuth 앱 (2026-10-16 저녁): 질문 「Google 앱(캘린더·메일·드라이브) 연결을 어느 Google 계정과 OAuth 앱으로 만들까요?」 → 답 「개인 Gmail 외부 앱」. 아래 E2가 반영하고, 새로 드러난 Preview 신청 자격 문제를 함께 적는다.
+  4. Google 연결 계정과 OAuth 앱 (2026-10-16 저녁, **6번이 대체함**): 질문 「Google 앱(캘린더·메일·드라이브) 연결을 어느 Google 계정과 OAuth 앱으로 만들까요?」 → 답 「개인 Gmail 외부 앱」. 이 답 뒤에 Preview 신청이 Workspace 계정을 요구한다는 사실(E2 [V])이 드러나 owner 재확인을 구했고, 그 답이 6번이다. 원문은 이력으로 남긴다.
   5. Gmail 쓰기 범위 (2026-10-16 저녁): 질문 「Gmail은 v1에서 「초안 만들기·라벨」까지만 해도 될까요?」 → 답 「초안·라벨까지 (Recommended)」. 보내기는 v1 밖으로 확정(E4).
+  6. Google 계정 재결재 (2026-10-17, 성재 원문): 「뭐 계정만 필요한거면 dawn.kim으로 우선하자. 나중에 바꿀 수도 있는거지 ?」 — **4번의 「개인 Gmail 외부 앱」을 대체한다.** 읽는 법(planner): Google 세 앱의 Developer Preview 가입과 OAuth 앱 구성은 dawn.kim Workspace 계정으로 먼저 하고, 「나중에 바꿀 수도 있는거지」에는 「예, 계정·OAuth 앱은 설정값이다」로 답한다(E2·E6). 신청에는 계정뿐 아니라 Cloud 프로젝트 번호도 든다(E2 [V]) — 그 프로젝트도 dawn.kim 조직 것으로 한다. 이 결재가 owner 질문 1과 owner 재확인을 닫는다.
 - 관계: ADR-0186(승인 카드 — 새 `action_type` 하나, 역방향 줄), ADR-0188 §8.9(workd MCP 예외, 같은 날 증보), ADR-0192 D3(설정 묶음)·D4(원장 비대칭 표기 선례)·D7 Q9(A5), ADR-0203 증보 2026-10-16(Hermes 커넥터 호스트), ADR-0162 D16(그록봇), ADR-0193 D4(`owner_only`), ADR-0201 H4·H7·H9, ADR-0205.
 - 표기: [V] 직접 확인(track/engine `cfe8ec888` 코드·문서, 또는 2026-10-16 받은 벤더 공식 문서) · [추정] · [확인 필요](닫는 슬라이스를 함께 적는다) · `runtime-unverified`.
 
@@ -121,7 +122,7 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
   - Atlassian Rovo `mcp.atlassian.com/v1/mcp`(권장 `/v2/mcp`) — OAuth 2.1 + DCR, `delete_jira`·`manage_jira` 묶음 기본 꺼짐(support.atlassian.com supported-tools).
   - Slack `mcp.slack.com/mcp` — DCR 없음, 「디렉터리 공개 앱이나 내부 앱만」(docs.slack.dev/ai/slack-mcp-server). GA 2026-02-17은 [2차 출처].
   - Notion `mcp.notion.com/mcp`, Linear `mcp.linear.app/mcp` — DCR.
-- **Google Developer Preview 신청 자격**(2026-10-16 열람): 공식 Google Workspace MCP 서버는 Developer Preview 프로그램 가입이 전제다(developers.google.com/workspace/guides/configure-mcp-servers: 「Membership in the Google Workspace Developer Preview Program」). 신청 안내는 Workspace 계정과 Cloud 프로젝트 정보를 요구한다(developers.google.com/workspace/preview: 「You need to provide us with your Google Workspace account and Google Cloud project information」). 약관 문장은 「도메인·회사 밖」 최종 사용자에게 GA 전 접근을 주는 것만 막는다(「… I may not grant end users access, outside my domain or company, to developer applications that have been built using APIs prior to their GA announcement …」).
+- **Google Developer Preview 신청 자격**(2026-10-16 열람): 공식 Google Workspace MCP 서버는 Developer Preview 프로그램 가입이 전제다(developers.google.com/workspace/guides/configure-mcp-servers: 「Membership in the Google Workspace Developer Preview Program」). 신청 안내는 Workspace 계정과 Cloud 프로젝트 정보를 요구한다(developers.google.com/workspace/preview: 「You need to provide us with your Google Workspace account and Google Cloud project information」). 약관 문장은 「도메인·회사 밖」 최종 사용자에게 GA 전 접근을 주는 것만 막는다(「… I may not grant end users access, outside my domain or company, to developer applications that have been built using APIs prior to their GA announcement …」). 가입 절차(2026-10-17 같은 페이지를 다시 열람): 「When we verify your Google Workspace account information, we will add you to a Google Group for the program and you should receive a notification.」 「The whole process should be done within a couple of days.」 프로젝트 번호를 받는 이유는 「We provide you access to the program API features through your Google Cloud project(s).」다. 가입 뒤 이메일이나 프로젝트를 더하고 빼는 길은 폼 둘이다 — 「Request to add or remove email addresses」·「Request to add or remove your Google Cloud project」. 즉 Preview 가입은 계정(이메일)과 Cloud 프로젝트 번호 둘 다에 묶이고, 둘 다 나중에 바꿀 수 있다.
 - **업계 쓰기 승인 기본값**: ChatGPT 앱(help.openai.com 11487775 — 기본 「Important actions」, 쓰기 확인), Claude 커넥터(support.claude.com 10166901 — 「동작마다 승인」이 기본, Team 소유자가 항상 허용 지정), Codex 플러그인(learn.chatgpt.com/docs/plugins — 한 번 허용 / 항상 허용). 공통: **읽기 자동, 쓰기는 호출마다 확인, 「항상 허용」은 기본 꺼짐.** ADR-0186 승인 카드 모양과 같아서 다른 패턴으로 바꿀 이유가 없다.
 
 ### E1. 실행 장소 — 요청한 사람 본인의 에이전트가 기본, 경로마다 강제 수준이 다르다
@@ -145,9 +146,9 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
 
 | 앱 (화면 이름) | plugin id | 원격 MCP (매니페스트 `mcp.url`) | 연결 방식 | 상태 |
 |---|---|---|---|---|
-| Google Calendar | `com.momo.plugins.google-calendar` (신규) | `https://calendarmcp.googleapis.com/mcp/v1` | 배포자 GCP OAuth client(DCR 없음, 결재: 개인 Gmail 외부 앱) | **미리보기**(Google Preview) · Preview 자격 확인 전 보류(아래) |
-| Gmail | `com.momo.plugins.gmail` (신규) | `https://gmailmcp.googleapis.com/mcp/v1` | 같음 | **미리보기** · 보류(아래). 쓰기는 초안·라벨까지(보내기 없음, 결재) |
-| Google Drive · 내 드라이브 | `com.momo.plugins.google-drive` (신규, D3 경로 A) | `https://drivemcp.googleapis.com/mcp/v1` | 같음 | **미리보기** · 보류(아래) |
+| Google Calendar | `com.momo.plugins.google-calendar` (신규) | `https://calendarmcp.googleapis.com/mcp/v1` | 배포자 GCP OAuth client(DCR 없음, 결재 2026-10-17: dawn.kim 조직 프로젝트·Internal) | **미리보기**(Google Preview) · dawn.kim의 Preview 가입·client 준비(G-S0)와 실측 뒤 시드 |
+| Gmail | `com.momo.plugins.gmail` (신규) | `https://gmailmcp.googleapis.com/mcp/v1` | 같음 | **미리보기** · 같음(G-S0 뒤). 쓰기는 초안·라벨까지(보내기 없음, 결재) |
+| Google Drive · 내 드라이브 | `com.momo.plugins.google-drive` (신규, D3 경로 A) | `https://drivemcp.googleapis.com/mcp/v1` | 같음 | **미리보기** · 같음(G-S0 뒤) |
 | Google Drive · 팀 공유 드라이브 | `com.momo.plugins.drive` (기존, D3 경로 C) | oort 자체(`/v1/mcp/drive`) | SA, oort 서버가 읽음 | `runtime-unverified` — `/v1/mcp/drive`가 Rust에 아직 없다(`momo-auth/src/agent_scope.rs:17`) |
 | GitHub | `com.momo.plugins.github` (기존) | `https://api.githubcopilot.com/mcp/` | OAuth(DCR 없음) 또는 PAT | 쓰기 도구 추가 |
 | Jira · Confluence | `com.momo.plugins.atlassian` (신규, 한 서버라 매니페스트 하나) | `https://mcp.atlassian.com/v1/mcp` [확인 필요: `/v2/mcp`로 시드할지 — C-S1b 실측] | OAuth 2.1 + DCR | 신규 |
@@ -156,21 +157,25 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
 | Linear | `com.momo.plugins.linear` (기존) | `https://mcp.linear.app/mcp` | DCR, API 키 가능 | 쓰기 도구 추가 |
 
 - **두 Drive를 함께 둔다.** 경로 C(팀 공유 드라이브, oort 서버가 SA로 읽음)와 경로 A(내 드라이브, 사람별 OAuth, 실행 장소가 읽음)는 서로를 대신하지 못한다. 화면 칩도 다르다(「팀 전체 · oort가 읽어요」 / 「내 드라이브 · 내 에이전트가 읽어요」). D3이 「Preview 졸업 시 재평가」로 예약한 경로 A를 **Preview 상태로 지금 연다** — 단 아래 「미리보기」 규칙 안에서.
-- **Google 「미리보기」 규칙.** Google 세 앱은 매니페스트에 `momo.preview: true`(새 가산 필드)를 달고 「미리보기」 칩을 보인다. Preview 약관(「GA 전 최종 사용자에게 접근 허용 금지」)에 맞추어, GA 전에는 **배포자 본인(GCP 프로젝트 주인)이 자기 계정으로 쓰는 경우**에만 설치를 연다 — 성재의 1인 Hermes 시험과 성재 본인 맥이 여기에 든다. 팀원에게 여는 것은 GA 공지 뒤의 별도 판단이다(약관 원문은 「도메인·회사 밖」 최종 사용자만 막지만 이 증보는 그보다 좁게, 배포자 본인으로 시작한다 — 위 [V]). Cursor 등 다른 제품이 이미 Google 플러그인을 냈지만 어떤 예외인지 확인할 수 없었다 [확인 필요: GA 공지 시 재확인 — 담당 G-S0].
-- **Google OAuth client — 결재 2026-10-16 저녁: 「개인 Gmail 외부 앱」.** 성재 개인 Gmail 계정의 GCP 프로젝트에 External(외부) 동의 화면과 OAuth client를 둔다. D3 경로 A가 가정한 「셀프호스터별 GCP internal 앱」(restricted 스코프 검증 면제)은 이 배포에서 쓰지 않는다. 결재가 알고 감수한 것:
-  - 게시 상태가 Testing이면 갱신 토큰이 **7일마다** 죽는다. 7일마다 다시 로그인한다(developers.google.com/identity/protocols/oauth2).
-  - 신규 사용자 **100명 상한**.
-  - restricted 스코프(`gmail.readonly`·`drive.readonly`)를 공개 배포할 때는 **CASA 보안 평가**가 필요하다(support.google.com/cloud/answer/13464323·15549945).
-  - 다른 Google 계정의 팀원에게 여는 일은 이 선택 위에서는 별도 판단이다.
+- **Google 「미리보기」 규칙.** Google 세 앱은 매니페스트에 `momo.preview: true`(새 가산 필드)를 달고 「미리보기」 칩을 보인다. Preview 약관(「GA 전 최종 사용자에게 접근 허용 금지」)에 맞추어, GA 전에는 **배포자 본인(GCP 프로젝트 주인)이 자기 계정으로 쓰는 경우**에만 설치를 연다 — 성재의 1인 Hermes 시험과 성재 본인 맥이 여기에 든다. 기술적 상한도 같은 쪽이다: 아래 Internal 동의 화면이면 dawn.kim 조직 계정만 연결할 수 있어서 약관의 「도메인·회사 밖」 금지에 걸리지 않는다. 팀원에게 여는 것은 GA 공지 뒤의 별도 판단이다(약관 원문은 「도메인·회사 밖」 최종 사용자만 막지만 이 증보는 그보다 좁게, 배포자 본인으로 시작한다 — 위 [V]). Cursor 등 다른 제품이 이미 Google 플러그인을 냈지만 어떤 예외인지 확인할 수 없었다 [확인 필요: GA 공지 시 재확인 — 담당 G-S0].
+- **Google 계정과 OAuth 앱 — 결재 2026-10-17: dawn.kim 우선.** 결재 원문 6 「뭐 계정만 필요한거면 dawn.kim으로 우선하자. 나중에 바꿀 수도 있는거지 ?」가 결재 원문 4 「개인 Gmail 외부 앱」을 대체한다. 새 이탈이 아니라 D3 경로 A의 원래 전제(조직이 소유한 GCP 프로젝트 + Internal 동의 화면)로 돌아가는 것이다.
+  - **Preview 신청자는 dawn.kim Workspace 계정이다.** 신청에는 계정뿐 아니라 Cloud 프로젝트 번호도 든다(위 [V]).
+  - **OAuth 앱은 dawn.kim 조직이 소유한 GCP 프로젝트의 Internal 동의 화면이다.** 프로젝트는 planner 기본값으로 이미 있는 `momo-dawn`(`docs/GWS_INTERNAL_CONSENT_RUNBOOK.md` §6.1)을 쓰고, 새로 만들어도 된다(owner는 계정만 정했다). Internal은 프로젝트가 조직 소유이고 동의 화면이 내부용으로 설정돼야 한다(support.google.com/cloud/answer/13464323 「The project must be owned by the organization, and its OAuth Consent Screen must be configured for internal use」 [V, 2026-10-17]). `momo-dawn`의 동의 화면 User type이 실제로 Internal인지는 콘솔에서 본다 [확인 필요: G-S0 ②].
+  - **그 결과, dawn.kim 조직 계정만 이 client로 연결할 수 있다.** 「only users in the Workspace or Cloud Identity organization will be able to use your app」(같은 문서 [V]). 조직 밖 계정이 승인하면 `org_internal` 오류가 난다(support.google.com/cloud/answer/15549945 [V, 2026-10-17]). 성재의 개인 Gmail 계정과 dawn.kim 밖의 팀원은 연결할 수 없다. 그 계정들의 메일·일정·드라이브를 읽히려면 External 앱이 따로 필요하고, 그것은 별도 결재다.
+  - **Internal이 면하는 것**: 같은 문서의 「When is verification not needed」 목록에 「Internal Use apps」가 있고(「it is not mandatory for your app to complete an OAuth verification」), 「Your app will not be subject to the unverified app screen or the 100-user cap if it's designated as internal-only」다([V]). 검증·CASA 면제는 런북 서두의 핵심 전제와 같다. 갱신 토큰의 **7일 만료**는 문서상 「an OAuth consent screen configured for an external user type and a publishing status of "Testing"」인 프로젝트에 걸린다(developers.google.com/identity/protocols/oauth2 [V, 2026-10-17]). Internal은 이 조건에 들지 않는다 — 문서가 Internal을 이름으로 말하지는 않으므로 실제 갱신 토큰 수명은 K-S1b가 잰다 [확인 필요].
+  - **관리자 설정이 필요할 수 있다.** 15549945는 Internal 앱에도 「User authorization of scopes associated with restricted Google Workspace services, including high-risk Gmail and Drive scopes, might require additional configuration by your organization's administrators」라고 적는다. dawn.kim Workspace 관리자 콘솔에서 Internal 앱의 restricted API 접근을 따로 허용해야 하는지는 G-S0 ②에서 본다 [확인 필요].
+  - **앞선 결재(4)가 감수했던 비용은 External을 고를 때만 돌아온다.** Testing 갱신 토큰 **7일 만료**, 사용자 **100명 상한**(15549945: Testing은 「up to 100 test users」, 미검증 앱은 「100 new users in total」), restricted 스코프(`gmail.readonly`·`drive.readonly`)를 공개 배포할 때의 **CASA 보안 평가**(support.google.com/cloud/answer/13464323·15549945). 이력으로 적어 둔다.
+  - 팀원(dawn.kim 조직 계정)에게 여는 것은 위 「미리보기」 규칙대로 GA 공지 뒤의 별도 판단이다.
+  - **나중에 바꿀 수 있다 — 계정·OAuth 앱은 설정값이다.** 순서와 근거는 E6 「교체」.
   이 결재가 owner 질문 1과 「어느 계정·프로젝트로 할지」 [확인 필요]를 닫는다.
-- **[V, 2026-10-16] 새로 드러난 전제 — Preview 신청 자격이 걸린다.** 위 [V]대로 공식 Google MCP 세 줄은 Developer Preview 가입이 전제이고, 신청 안내가 **Workspace 계정**을 요구한다. 그래서 「개인 Gmail 외부 앱」만으로는 신청 자격이 없을 수 있다.
-  - 이 증보는 결재를 그대로 적되, **Preview 자격이 확인되기 전까지 Google 세 앱의 시드와 설치를 열지 않는다.** 이 부분은 계약을 바꾸는 이탈이라 owner 재확인이 필요하다.
-  - 열 수 있는 길(owner가 고른다): (a) Workspace 계정(예: dawn.kim)이 신청자로 Preview에 가입하고 OAuth 앱은 External로 둔다 — 신청이 개인 Gmail 계정 소유 프로젝트를 받아 주는지는 [확인 필요: G-S0]. (b) 공식 Preview 대신 stdio 커뮤니티 서버(`workspace-mcp`)를 별도 증분으로 연다 — 검증기 transport 변경과 Hermes 런타임이 필요하다(ADR-0203 증보 K7). (c) Google 세 앱을 v1에서 보류하고 나머지 앱부터 연다.
+- **[V, 2026-10-16·17] Preview 신청 자격 — 결재 원문 6으로 해소.** 공식 Google MCP 세 줄은 Developer Preview 가입이 전제이고, 신청 안내가 **Workspace 계정**과 Cloud 프로젝트 정보를 요구한다(위 [V]). 「개인 Gmail 외부 앱」(결재 원문 4)으로는 신청이 안 될 수 있다는 이탈이 이래서 드러났고, owner가 2026-10-17에 Workspace 계정(dawn.kim)이 신청자인 길을 골랐다. dawn.kim은 신청 안내가 요구하는 바로 그 종류의 계정이다.
+  - 남은 불확실성은 하나다 — 신청의 승인 결과 [확인 필요: G-S0 ①]. 안내문은 며칠 안에 통지가 온다고 하고, 「If you don't hear from us within a week and there's no messages in your spam box, reach out to the program team by email」라고 적는다 [V]. 거절되거나 답이 없으면 owner가 다시 고른다: (b) 공식 Preview 대신 stdio 커뮤니티 서버(`workspace-mcp`)를 별도 증분으로 연다 — 검증기 transport 변경과 Hermes 런타임이 필요하다(ADR-0203 증보 K7). (c) Google 세 앱을 v1에서 보류하고 나머지 앱부터 연다.
+  - 이 불확실성은 Google 세 앱의 시드와 K-S1b에만 걸린다. 다른 슬라이스는 G-S0를 기다리지 않는다.
 - **도구 이름은 실측으로 정한다.** 매니페스트 도구 이름·`inputSchema`·`schemaDigest`는 각 벤더 서버의 실제 `tools/list` 응답에서 뽑아 migration에 싣는다(C-S1b). 이 증보는 이름을 계약하지 않고, 아래 E5의 **등급**과 **v1 제외 목록**을 계약한다. 2차 출처뿐인 이름(Slack·Linear 일부)은 실측 전 시드하지 않는다.
 - **이름 규칙**: oort 도구 이름은 `<앱 짧은 이름>.<벤더 도구 이름 그대로>`(예 `gmail.create_draft`, `notion.notion-search`) [확인 필요: 기존 시드 이름(`notion.search`)을 바꿀지 별칭으로 둘지 — C-S1b, 기존 grant 행의 scope는 도구 이름이 아니라 `<앱>:<등급>`이라 영향 없음].
 - **scope 단위**는 「앱:등급」이다: `gmail:read`·`gmail:draft`, `google-calendar:read`·`google-calendar:write`, `github:read`·`github:write` 등. D2 grant 4-튜플의 scope 칸에 그대로 들어가고, 쓰기 scope는 읽기 scope와 따로 동의받는다.
 - **v1 밖**: Microsoft 365(Outlook·Teams·SharePoint·OneDrive), Dropbox, Figma, 커뮤니티·워크스페이스 커스텀 앱. 다음 증보 후보로 남긴다.
-- **순서(C-S 슬라이스 편성 기준)**: 1파 = Notion·Linear·Atlassian(DCR이라 서버 밖 설정이 없다) + GitHub(PAT 또는 호스트 연결). 2파 = Google 세 앱(GCP client가 먼저 — 성재 Hermes 시험이 첫 사용처. 단 Preview 자격 확인 전에는 열지 않는다). 3파 = Slack(내부 앱이 먼저). 결재 2의 「구글 무조건」은 **v1 포함**이라는 뜻이지 1파라는 뜻이 아니다 — 다만 성재 1인 Hermes 시험은 Google 읽기부터 시작한다(ADR-0203 증보. 시험의 첫 실측 단계 K-S1a는 Google 없이 모의 서버로 먼저 한다).
+- **순서(C-S 슬라이스 편성 기준)**: 1파 = Notion·Linear·Atlassian(DCR이라 서버 밖 설정이 없다) + GitHub(PAT 또는 호스트 연결). 2파 = Google 세 앱(GCP client가 먼저 — 성재 Hermes 시험이 첫 사용처. dawn.kim의 Preview 가입·client 준비(G-S0)가 먼저다). 3파 = Slack(내부 앱이 먼저). 결재 2의 「구글 무조건」은 **v1 포함**이라는 뜻이지 1파라는 뜻이 아니다 — 다만 성재 1인 Hermes 시험은 Google 읽기부터 시작한다(ADR-0203 증보. 시험의 첫 실측 단계 K-S1a는 Google 없이 모의 서버로 먼저 한다).
 
 ### E3. 경로별 배달 규칙 — 앱을 붙인 에이전트는 소유자 본인만 부른다
 
@@ -224,6 +229,12 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
 - DCR 없는 벤더(Google·GitHub·Slack)는 **실행 장소마다 미리 등록한 클라이언트**를 쓴다. v1에서 그 값은 운영자·사용자가 실행 장소에 직접 넣는다(Hermes `oauth.client_id/client_secret`, 내 맥 host의 MCP 설정 또는 하네스 자체 연결). **서버가 클라이언트 값을 나눠 주는 API는 만들지 않는다**(`FORBIDDEN_KEY_FRAGMENTS`·D1-A 유지).
   - Google 설치형(Desktop) client의 secret은 Google 문서상 비밀이 아니지만(「the client secret is obviously not treated as a secret」, developers.google.com/identity/protocols/oauth2), 서버 배포 경로를 만들면 「클라이언트 자격증명 배포」라는 새 계약이 된다. 필요해지면 별도 증보로 연다.
   - Slack은 공개 앱을 oort가 내면 `client_secret`을 oort가 쥐어야 한다 — D1-A와 충돌하므로 v1은 **배포 조직의 Slack 내부 앱**이다.
+- **교체 — 계정·OAuth 앱은 설정값이다**(결재 원문 6 「나중에 바꿀 수도 있는거지 ?」에 대한 답: 예). 클라이언트 값은 실행 장소 설정에만 있고 매니페스트·서버·DB에는 없다(위). 그래서 Google 계정이나 OAuth 앱을 바꾸는 일에 oort 코드·migration·매니페스트 변경은 없다. 순서:
+  1. 새 OAuth client를 만든다(같은 조직의 다른 프로젝트, 또는 별도 결재를 받은 External 앱).
+  2. 계정이나 프로젝트가 Preview에 없으면 더한다 — 프로그램 페이지의 폼 「Request to add or remove email addresses」·「Request to add or remove your Google Cloud project」(E2 [V], 폼의 처리 시간은 문서에 없다). 같은 프로젝트에서 client만 바꾸면 이 단계는 없다.
+  3. 실행 장소 설정의 client 값을 바꾸고, 사용자가 앱마다 한 번 다시 로그인한다. 토큰은 발급받은 client에 묶여 있어서 옛 토큰은 새 client에서 쓸 수 없다.
+  4. 옛 연결을 회수한다(ADR-0203 증보 K5 회수 순서: Google 「타사 앱 액세스」 해제, Hermes `mcp-tokens/` 삭제).
+  바뀌지 않는 것은 매니페스트(`mcp.url`은 벤더 고정)·grant 행·승인 카드다. 바뀌는 것은 읽히는 데이터다 — 계정을 바꾸면 읽는 메일함·캘린더·드라이브 자체가 달라진다(dawn.kim에서 개인 Gmail로 바꾸려면 External 앱이 필요하다, E2).
 - 호스트에 이미 있는 하네스 자체 커넥터(예: claude.ai 계정의 Gmail·Calendar·Drive)를 넘겨받는 길은 v1 계약이 아니다. workd가 `claude` 하위 프로세스에 그 커넥터를 싣는지부터 [확인 필요: M-S0 실측]. 실리면 다음 증보에서 「매니페스트 도구 ↔ 하네스 커넥터 이름 대응」 규칙과 함께 연다.
 
 ### E7. 도우미(oort 팀 AI) 경계는 그대로
@@ -256,14 +267,14 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
 ### 구현 슬라이스 (Accepted 후, 한 슬라이스 = 한 이슈)
 
 - **C-S1a (engine, #3937)** 매니페스트 검증기 준비: `momo` 허용 키에 `preview`, `ALLOWED_SPDX`에 호스팅 서비스 LicenseRef(Google·Atlassian·Slack·Notion), `SUPPORTED_PROTOCOL_VERSIONS` 다중화, 「공식 전부 read」 시험을 「C 등급 도구 0」 시험으로 교체. 시드는 없다.
-- **C-S1b (engine, #3944)** 카탈로그 확장 migration: 새 앱 시드(Google 세 앱·Atlassian — Slack은 C-S1c) + 기존 3개에 쓰기 도구, 실측 `tools/list`에서 뽑은 이름·스키마·digest, E4 등급, `momo.preview`, `pluginId` enum을 활성 id 집합으로(E7), `github.list_repositories` 정정. **Google 세 앱은 위 Preview 자격 확인과 owner 재확인 전까지 시드하지 않는다.** Gmail은 초안·라벨까지.
+- **C-S1b (engine, #3944)** 카탈로그 확장 migration: 새 앱 시드(Google 세 앱·Atlassian — Slack은 C-S1c) + 기존 3개에 쓰기 도구, 실측 `tools/list`에서 뽑은 이름·스키마·digest, E4 등급, `momo.preview`, `pluginId` enum을 활성 id 집합으로(E7), `github.list_repositories` 정정. **Google 세 앱은 G-S0(dawn.kim의 Preview 가입·OAuth client 준비)과 벤더 실측 `tools/list` 뒤에 시드한다.** owner 재확인은 끝났다(2026-10-17). Gmail은 초안·라벨까지.
 - **C-S1c (engine, #3960)** Slack 시드(3파, Slack 내부 앱이 먼저).
 - **C-S2 (engine, #3938)** `connector_owner_human_id` migration + `owner_only_gate` 갈래 + 사람 아닌 작성자 0 + 안내 문장.
 - **C-S3 (engine, #3945)** `tool_grants` 생산자(근거만) + 옛 host 0 도구 계약 시험.
 - **C-S4 (engine, #3956)** `connector_tool` approval 종류(실행 없음, 결정 전달) — ADR-0203 증보 2단계(Proposed)와 묶음. 그 확인 전에는 시작하지 않는다.
 - **C-S5 (engine, #3946)** `connector.tool_used` 감사 수신.
 - **U-2 (uxui, #3943)** 「앱 설치」 켜기(동의 창·네 칸 상태 1·2칸·관리자 없음). **U-S1 (#3949)** 앱 화면 v2(신규 앱·「미리보기」 칩·두 Drive 칩·실행 장소 줄·등급 표시). **U-S2 (#3950)** 「쓴 앱」 꼬리·막힘 문장·채널 노출 줄(E10)·`/앱`. **U-4 (#3951)** 폰 읽기 화면·폰 허용 경로. 캡처·design-review Blocker 0·High 0.
-- **G-S0 (planner + owner)** ① Google Workspace Preview 신청 자격 확인(위 [V]) — 결과에 따라 owner 재확인, ② 자격이 열리면 개인 Gmail 계정의 GCP 프로젝트에 External 동의 화면(Testing, 테스트 사용자에 본인 계정)·OAuth client 준비, ③ GA 공지 때 Preview 약관 재확인.
+- **G-S0 (planner + owner)** ① dawn.kim Workspace 계정으로 Developer Preview 신청 — Cloud 프로젝트 번호(제안 `momo-dawn`)를 넣고 승인 통지를 확인해 결과를 기록한다. ② 같은 프로젝트에서 Gmail·Calendar·Drive MCP API를 켜고, 동의 화면 User type이 Internal인지 본 뒤(E2), dawn.kim Workspace 관리자 설정이 필요한지 확인하고 OAuth client를 만든다. ③ GA 공지 때 Preview 약관 재확인. 콘솔 단계는 planner가 링크로 드리고 손은 owner가 쓴다.
 - workd 쪽은 ADR-0188 §8.9, Hermes 쪽은 ADR-0203 증보의 슬라이스를 따른다.
 
 ### 수용 기준 (red proof — 해당 분기를 지우면 실패해야 한다)
@@ -278,14 +289,14 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
 8. 「미리보기」 앱은 설치 화면에 칩이 보이고, `momo.preview` 필드를 지우면 UI 시험이 실패한다.
 9. 채널에 보이는 앱 결과의 꼬리에 「이 채널 n명에게 보여요」가 붙고, 개인 앱의 「요약만, 본문 인용 금지」 지시가 실행 장소의 자기 보고라는 안내가 화면에 있다(문구를 지우면 UI 시험이 실패한다).
 
-### owner 결정 (닫힘, 2026-10-16 저녁)
+### owner 결정 (닫힘, 2026-10-16 저녁·2026-10-17)
 
-1. Google 연결 계정과 OAuth 앱: 「개인 Gmail 외부 앱」 — 7일 만료·100명 상한·공개 배포 시 CASA를 감수한 선택으로 적었다(E2). **단 Preview 신청 자격 확인과 owner 재확인이 남았다(E2 [V]).**
+1. Google 연결 계정과 OAuth 앱: ~~「개인 Gmail 외부 앱」(2026-10-16 저녁)~~ → **2026-10-17 「뭐 계정만 필요한거면 dawn.kim으로 우선하자. 나중에 바꿀 수도 있는거지 ?」가 대체했다.** dawn.kim Workspace 계정이 Preview 신청자이고, OAuth 앱은 dawn.kim 조직 프로젝트의 Internal(기본)이며, 계정·OAuth 앱은 나중에 바꿀 수 있다(E2·E6). 대체된 결재가 감수했던 7일 만료·100명 상한·공개 배포 시 CASA는 External을 고를 때만 돌아온다. **결과: dawn.kim 조직 계정만 연결할 수 있다.**
 2. Gmail v1 범위: 「초안·라벨까지 (Recommended)」 — 보내기는 v1 밖으로 확정했다(E4).
 
 ### 아직 열려 있는 것
 
-- Google Developer Preview 신청 자격(개인 Gmail 소유 프로젝트로 신청이 되는지) — 닫는 슬라이스 G-S0, 안 되면 owner가 E2의 (a)(b)(c) 중 고른다.
+- dawn.kim Workspace 계정의 Google Developer Preview 신청 승인, `momo-dawn` 동의 화면의 실제 User type, 관리자 설정 필요 여부 — 닫는 슬라이스 G-S0. 신청이 안 되면 owner가 E2의 (b)(c) 중 다시 고른다.
 - ADR-0188 §8.9 R(내 맥 읽기 자동 허락)과 ADR-0203 증보 2단계(Hermes 쓰기 중계)는 각 문서에서 Proposed다.
 
 ### 역방향 줄 (같은 문서 PR, D-0 #3935에서 달았다)

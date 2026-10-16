@@ -5,7 +5,7 @@
 - Deciders: 성재
 - 기안: Opus 5.5 worker (#3874)
 - 관계: ADR-0004(+증보 5: egress 가드 — Hermes provider 경계), ADR-0147(+증보 2026-10-16 「에이전트별 키 고정」 = #3873, **아직 머지 전**), ADR-0101(에이전트 = 1급 멤버), ADR-0162(Agent Port), ADR-0198(구독 정책), ADR-0201(팀 AI 빠른 길), ADR-0100
-- 증보: **2026-10-16 1인 워크스페이스의 커넥터 호스트로서의 Hermes** (성재 결재 「각자 + 1인 워크스페이스에서 Hermes 시험 (추천)」) — 파일 끝. D6 도구 잠금 목록을 커넥터 시험에 한해 넓히고, D7 볼륨 목록에 `mcp-tokens/`를 더하고, 「단일 워크스페이스」를 안내에서 서버 강제로 올린다. D1~D5·D8·D9는 바뀌지 않는다. 구현은 본문과 같이 #3873 뒤다(로컬 실측 K-S1a 제외). 같은 날 저녁 결재 「개인 Gmail 외부 앱」을 K3에 반영했고, Google 시험은 Developer Preview 신청 자격 확인 전까지 시작하지 않는다. 2단계(쓰기 중계)는 Proposed다.
+- 증보: **2026-10-16 1인 워크스페이스의 커넥터 호스트로서의 Hermes** (성재 결재 「각자 + 1인 워크스페이스에서 Hermes 시험 (추천)」) — 파일 끝. D6 도구 잠금 목록을 커넥터 시험에 한해 넓히고, D7 볼륨 목록에 `mcp-tokens/`를 더하고, 「단일 워크스페이스」를 안내에서 서버 강제로 올린다. D1~D5·D8·D9는 바뀌지 않는다. 구현은 본문과 같이 #3873 뒤다(로컬 실측 K-S1a 제외). 같은 날 저녁 결재 「개인 Gmail 외부 앱」은 2026-10-17 결재 「뭐 계정만 필요한거면 dawn.kim으로 우선하자. 나중에 바꿀 수도 있는거지 ?」가 대체했고, K3·K5·K7에 반영했다. Google 시험은 dawn.kim의 Developer Preview 가입·OAuth client 준비(ADR-0113 증보 2 G-S0) 뒤에 시작한다. 2단계(쓰기 중계)는 Proposed다.
 - 표기: [V] 직접 확인(저장소 코드·문서 또는 이 세션에서 받은 공식 문서 원문) · **[추정]** 해석·계산 · [확인 필요] 구현 전 확인 · `runtime-unverified` 실행 안 함. 이 문서는 설계이고 코드·인프라를 바꾸지 않았다.
 
 ## 맥락
@@ -151,7 +151,8 @@ AskUserQuestion 결재(방향):
 
 - Status: **1단계(읽기 시험) Accepted · 2단계(쓰기 승인 중계) Proposed.**
   - 결재 원문(2026-10-16, AskUserQuestion): 실행 장소 「각자 + 1인 워크스페이스에서 Hermes 시험 (추천)」 — 결재 맥락(planner 요약, 원문 아님): 각자 자기 에이전트가 앱을 실행하고(D1-A), 성재의 1인 워크스페이스에서는 같은 Railway 프로젝트의 Hermes가 성재 본인 토큰으로 속도 시험을 한다. 입구·범위와 쓰기: 「코덱스 앱이나 다른 그록봇류 앱처럼 구글쪽이랑 깃헙, 지라, 슬랙 등 메이저쪽 플러그인 지원 작업까지. 구글 캘린더나 구글 메일 드라이브등은 무조건 되어야함」.
-  - 결재 원문 추가(2026-10-16 저녁, AskUserQuestion): 질문 「Google 앱(캘린더·메일·드라이브) 연결을 어느 Google 계정과 OAuth 앱으로 만들까요?」 → 답 「개인 Gmail 외부 앱」. 반영은 K3·K5·K7과 구현 슬라이스에 있다. 이 결재가 owner 질문 1을 닫는다. **단 Preview 신청 자격 확인과 owner 재확인 전에는 Google 시험(K-S1b)을 시작하지 않는다**(ADR-0113 증보 2 E2).
+  - 결재 원문 추가(2026-10-16 저녁, AskUserQuestion, **다음 줄이 대체함**): 질문 「Google 앱(캘린더·메일·드라이브) 연결을 어느 Google 계정과 OAuth 앱으로 만들까요?」 → 답 「개인 Gmail 외부 앱」. 이 답 뒤에 Preview 신청이 Workspace 계정을 요구한다는 사실이 드러나 owner 재확인을 구했다(ADR-0113 증보 2 E2 [V]).
+  - 결재 원문 추가(2026-10-17, 성재): 「뭐 계정만 필요한거면 dawn.kim으로 우선하자. 나중에 바꿀 수도 있는거지 ?」 — 앞선 「개인 Gmail 외부 앱」을 대체한다. Google 세 앱의 Preview 가입과 OAuth 앱은 dawn.kim Workspace 계정으로 먼저 하고, 계정·OAuth 앱은 설정값이라 나중에 바꿀 수 있다(ADR-0113 증보 2 E2·E6). 반영은 K3·K5·K7과 구현 슬라이스에 있다. 이 결재가 owner 질문 1과 owner 재확인을 닫는다. Google 시험(K-S1b)은 G-S0(dawn.kim의 Preview 가입·OAuth client 준비, owner 행동) 뒤에 시작한다.
   - 1단계는 결재가 직접 다룬다. 2단계는 결재의 「쓰기 포함」을 이 경로에서 이루는 **방법**이 D5(chat/completions SSE 경로)와 ADR-0004 계약을 바꾸므로, planner가 방향을 적고 구현 전 확인을 받는다(이 ADR 「위임 결재」와 같은 방식 — 추천안 채택·보고·이의 시 증보).
 - 관계: ADR-0113 증보 2(E1 실행 장소 표·E3 배달 규칙·E4 등급·E5 `tool_grants`), ADR-0186(새 `connector_tool` 종류), ADR-0004(worker ↔ Hermes 계약), ADR-0193 D4(`owner_only_gate`).
 - 출처: hermes-agent.nousresearch.com `/docs/user-guide/features/mcp`, `/docs/reference/mcp-config-reference`, `/docs/reference/toolsets-reference`, `/docs/user-guide/features/api-server`, `/docs/user-guide/security`(모두 2026-10-16 받음).
@@ -182,8 +183,9 @@ D7은 「v1은 단일 워크스페이스만 안내」였다. 커넥터 시험은
 
 - D7 내용 목록에 **`mcp-tokens/`(벤더 OAuth 갱신 토큰, 고가치)** 를 더한다. oort DB의 RLS·백업 밖이고, 대화 기록(`sessions/`, 메일 본문이 들어갈 수 있다)과 같은 볼륨이다. 개인정보 안내문에 「Hermes 볼륨에 앱 로그인 토큰과 앱에서 읽은 내용이 남아요」를 더한다.
 - DCR 없는 서버(Google·GitHub·Slack)의 미리 등록한 client secret은 Hermes `config.yaml`(볼륨) 또는 Hermes 서비스 env에만 둔다. **oort 서버·DB에는 두지 않는다**(ADR-0113 증보 2 E6). D6-2 「oort 비밀값을 Hermes에 주지 않는다」의 반대 방향도 같다 — Hermes의 벤더 secret을 oort에 주지 않는다.
-- **Google 계정·앱 — 결재 2026-10-16 저녁: 「개인 Gmail 외부 앱」.** External 앱이고 게시 상태가 Testing이면 갱신 토큰이 **7일마다** 죽는다(developers.google.com/identity/protocols/oauth2). 결재가 알고 감수한 비용이라, 이 시험은 상시 무인 운영이 아니라 **7일마다 `hermes mcp login`을 다시 하는 시험**이다. 운영자 체크리스트(K5)에 「7일마다 재로그인」을 넣고, 갱신 실패는 `gateway.log`에만 남으므로(사실 2) 감지 신호는 K-S1a가 잰다.
-- **[V, 2026-10-16] Preview 자격이 먼저다.** 공식 Google MCP 세 줄은 Developer Preview 가입이 전제이고, 신청 안내가 Workspace 계정과 Cloud 프로젝트 정보를 요구한다(developers.google.com/workspace/preview, ADR-0113 증보 2 E2). 「개인 Gmail 외부 앱」으로 신청 자격이 되는지 확인되고 owner가 다시 확인하기 전에는 **K-S1b(Google 읽기 시험)를 시작하지 않는다.** K-S1a(모의 서버 실측)는 영향이 없다.
+- **Google 계정·앱 — 결재 2026-10-17: dawn.kim 우선**(앞선 「개인 Gmail 외부 앱」을 대체, ADR-0113 증보 2 E2). OAuth 앱은 dawn.kim 조직 프로젝트의 Internal 동의 화면이 기본이다. **그 결과 dawn.kim 조직 계정만 연결할 수 있다** — 소유자의 개인 Gmail은 이 client로 연결할 수 없고(`org_internal` 오류), 시험은 소유자의 dawn.kim 계정의 메일·일정·드라이브를 읽는다. 갱신 토큰 7일 만료는 문서상 「external user type + Testing」인 프로젝트에 걸리는 조건이라(developers.google.com/identity/protocols/oauth2) Internal은 그 밖이다 — 문서가 Internal을 이름으로 말하지는 않으므로 K-S1b가 실제 수명을 잰다 [확인 필요]. 조직 밖 계정이 필요해 External(Testing)로 바꾸면 갱신 토큰이 **7일마다** 죽고, 그때 이 시험은 7일마다 `hermes mcp login`을 다시 하는 시험이 된다. 갱신 실패는 `gateway.log`에만 남으므로(사실 2) 감지 신호는 K-S1a가 잰다.
+- **계정·OAuth 앱은 바꿀 수 있다**(결재 2026-10-17 「나중에 바꿀 수도 있는거지 ?」). client 값은 Hermes `config.yaml`(또는 서비스 env)에만 있고 oort 서버·DB·매니페스트에는 없다(ADR-0113 증보 2 E6). 바꿀 때는 새 client 값을 넣고 소유자가 `hermes mcp login`을 한 번 다시 하며, 옛 연결은 K5 회수 순서로 지운다. oort 쪽 변경은 없다. 순서 전체는 ADR-0113 증보 2 E6 「교체」.
+- **[V, 2026-10-16·17] Preview 가입이 먼저다.** 공식 Google MCP 세 줄은 Developer Preview 가입이 전제이고, 신청 안내가 Workspace 계정과 Cloud 프로젝트 정보를 요구한다(developers.google.com/workspace/preview, ADR-0113 증보 2 E2). 신청자는 dawn.kim Workspace 계정으로 정해졌고(결재 2026-10-17), 가입 확인(G-S0)이 되기 전에는 **K-S1b(Google 읽기 시험)를 시작하지 않는다.** K-S1a(모의 서버 실측)는 영향이 없다.
 
 ### K4. 도구 잠금 — D6을 커넥터 시험에 한해 넓힌다
 
@@ -198,7 +200,7 @@ D6의 다섯 조건은 그대로이고, 커넥터 시험이면 아래를 **모�
 ### K5. 운영자 체크리스트(SELF_HOST·Railway 절에 추가)와 회수
 
 - 순서: GCP·벤더 쪽 client 준비 → `config.yaml`에 `mcp_servers`(K4-2·3) → `disabled_toolsets`(K4-1) → `hermes mcp login <server>`(Railway shell에서 붙여 넣기 방식) 또는 `oauth.flow: device` → oort env attest 두 개 → 「커넥터 시험」 켜기.
-- 개인 Gmail 외부 앱(Testing)이면 7일마다 `hermes mcp login <server>`를 다시 한다(K3).
+- OAuth 앱이 External(Testing)이면 7일마다 `hermes mcp login <server>`를 다시 한다(K3). dawn.kim Internal 기본값에서는 이 조건에 들지 않는다 [확인 필요: K-S1b가 실제 갱신 토큰 수명을 잰다].
 - 첫 OAuth는 컨테이너에 브라우저가 없다. 붙여 넣기·기기 코드 중 벤더가 받는 쪽을 쓴다 [확인 필요: Google·GitHub·Slack 각각 — Hermes 쪽 형식은 K-S1a, Google 쪽 허용은 K-S1b]. 로컬에서 만든 토큰 파일을 볼륨에 복사하는 방법은 쓰지 않는다(토큰이 운영자 맥에 사본으로 남는다).
 - **회수 순서**: (1) oort에서 「커넥터 시험」 끄기(배달 즉시 0), (2) 벤더 쪽 연결 해제 — Google은 계정 「타사 앱 액세스」, GitHub은 Authorized OAuth Apps, Slack은 앱 설치 해제, (3) Hermes 볼륨의 `mcp-tokens/<server>.json` 삭제와 `config.yaml`의 서버 항목 삭제, (4) 필요하면 `sessions/`도 삭제(부분 삭제 절차는 Hermes 문서에 없다 — D7). oort는 (2)·(3)을 대신하지 못한다.
 
@@ -212,13 +214,13 @@ D6의 다섯 조건은 그대로이고, 커넥터 시험이면 아래를 **모�
 
 ### K7. Google을 먼저 한다
 
-- 1단계 첫 앱은 결재 「구글 … 무조건」에 맞춰 Google Calendar·Gmail·Drive(내 드라이브) 읽기다. 공식 Google MCP(Developer Preview)를 쓴다. 성재는 GCP 프로젝트 주인이자 유일한 사용자라 Preview 약관 안이다(ADR-0113 증보 2 E2 「미리보기」 규칙). 단 Preview 가입 자격이 먼저다(K3). 첫 실측 단계(K-S1a)는 Google 없이 모의 서버로 한다.
+- 1단계 첫 앱은 결재 「구글 … 무조건」에 맞춰 Google Calendar·Gmail·Drive(내 드라이브) 읽기다. 공식 Google MCP(Developer Preview)를 쓴다. 성재는 dawn.kim 조직 프로젝트의 주인이자 유일한 사용자이고, Internal 동의 화면이면 연결할 수 있는 계정도 dawn.kim 조직으로 한정돼서 Preview 약관의 「도메인·회사 밖 최종 사용자」 금지 안이다(ADR-0113 증보 2 E2 「미리보기」 규칙). 단 dawn.kim의 Preview 가입이 먼저다(K3, G-S0). 첫 실측 단계(K-S1a)는 Google 없이 모의 서버로 한다.
 - 비교군으로 `workspace-mcp`(taylorwilsdon/google_workspace_mcp, MIT, v2.1.0 2026-10-09)를 같은 시험에서 돌려 볼 수 있다. 단 stdio이고 Python(uv) 런타임이 Hermes 이미지에 있어야 한다 [확인 필요]. 비교 결과는 기록만 하고, oort 공식 매니페스트(원격 HTTP만)는 바꾸지 않는다. Railway에 `workspace-mcp`를 멀티유저 HTTP 서버로 따로 띄우는 것은 금지다 — 모든 멤버 토큰이 서버 하나에 모이는 D1-B 모양이다.
 
 ### 구현 슬라이스 (K-S1a는 #3873을 기다리지 않는다. K-S1b·K-S2·K-S3는 #3873과 이 ADR 본 슬라이스 1~3 뒤)
 
 - **K-S1a (engine 스파이크, 로컬 Docker, #3942)**: 전용 포트·볼륨의 Hermes 공식 이미지 + 대본 LLM 스텁 + 모의 MCP(OAuth·DCR)로 토큰 경로·`mcp-*` 기본 포함 여부·toolset 이름·붙여 넣기 redirect 형식·device 흐름·`trust: untrusted`의 승인 이벤트 모양과 대기 상한(H-S2)·갱신 실패 감지 신호를 실측해 기록한다. Google 없이 한다.
-- **K-S1b (runtime/manual, #3952)**: Railway에서 K4 설정으로 Hermes 기동, 성재 1인 Hermes로 Google Calendar·Gmail·내 드라이브 읽기 시험, 헤드리스 로그인(K5), 회수 순서 실연. 체크리스트(K5) 문서화. **Preview 자격 확인과 owner 재확인 뒤에 시작한다(K3).** 원래 하나였던 K-S1을 둘로 나눈 것이다 — 순서를 바꾼 게 아니라 owner 입력 없이 할 수 있는 부분을 먼저 떼어 낸 것이다.
+- **K-S1b (runtime/manual, #3952)**: Railway에서 K4 설정으로 Hermes 기동, 성재 1인 Hermes로 Google Calendar·Gmail·내 드라이브 읽기 시험, 헤드리스 로그인(K5), 회수 순서 실연. 체크리스트(K5) 문서화. **owner 재확인은 끝났다(2026-10-17). dawn.kim의 Preview 가입·OAuth client 준비(ADR-0113 증보 2 G-S0, owner 행동 2) 뒤에 시작한다(K3).** 원래 하나였던 K-S1을 둘로 나눈 것이다 — 순서를 바꾼 게 아니라 owner 입력 없이 할 수 있는 부분을 먼저 떼어 낸 것이다.
 - **K-S2 (engine, #3948)**: 「커넥터 시험」 켜기 라우트(운영자 전용, 사람 1명·attest 판정), `connector_owner_human_id` 기록(ADR-0113 증보 2 C-S2 위), 배달 직전 사람 수·grant 대조.
 - **K-S3 (uxui, #3953)**: 설정 › AI 연결의 Hermes 카드에 「앱 시험」 줄(켬·끔, 자기 선언 표기, 멈춤 안내). 캡처·design-review.
 - **H-S2 → C-S4 (engine, #3956)**: 2단계 쓰기 중계. H-S2의 실측(승인 이벤트 모양·응답 가능 클라이언트 판정·대기 상한)은 K-S1a가 하고, 그 결과로 K6을 Accepted로 올리거나 다시 쓴 뒤에 시작한다.

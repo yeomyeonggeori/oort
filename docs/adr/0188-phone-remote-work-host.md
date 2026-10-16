@@ -531,7 +531,7 @@ R1 진입 조건 「알림 확장(NSE) 토큰은 알림 읽기 전용으로 좁�
 - Codex: `config.toml` `mcp_servers` 항목만(D3 그대로). `plugins`·`apps`·`remote_plugin` feature 끄기(§8.1 조건 2)는 그대로다 — 앱 연결은 Codex 자체 앱 마켓이 아니라 이 항목으로만 한다.
 - 원격 HTTP 항목만 받는다(`transport = streamable_http`, 매니페스트 검증기와 같다). 앱 항목으로 stdio 서버를 띄우지 않는다 — D3 잔여 위험(stdio 기동은 권한 다리 밖)을 앱 경로에서 늘리지 않는다.
 - 항목의 `env`·`headers`에 리터럴 값이 있으면 거부(D3 그대로). OAuth는 하네스가 그 host 안에서 한다(ADR-0125 D9 연결 카드). 토큰은 host 전용 프로필 폴더(ADR-0191 D1)에 남는다 [확인 필요: Claude Code·Codex가 원격 MCP OAuth 토큰을 어디에 두는지, 프로필 폴더 밖(키체인 등)으로 새는지 — M-S0 실측. 밖이면 이 절을 다시 연다].
-- DCR 없는 서버(Google·GitHub·Slack)의 미리 등록한 client 값은 묶음에 넣지 않는다(시크릿 금지). 하네스가 client id 설정을 받는 방법 [확인 필요: M-S0] — 받지 못하면 그 앱은 이 경로에서 v1 「미지원」으로 표시하고, Google은 Hermes 시험과 하네스 자체 커넥터(ADR-0113 증보 2 E6) 실측을 먼저 한다. Google 세 앱은 ADR-0113 증보 2 E2의 Developer Preview 신청 자격 확인 전까지 어느 경로에서도 열지 않는다.
+- DCR 없는 서버(Google·GitHub·Slack)의 미리 등록한 client 값은 묶음에 넣지 않는다(시크릿 금지). 하네스가 client id 설정을 받는 방법 [확인 필요: M-S0] — 받지 못하면 그 앱은 이 경로에서 v1 「미지원」으로 표시하고, Google은 Hermes 시험과 하네스 자체 커넥터(ADR-0113 증보 2 E6) 실측을 먼저 한다. Google 세 앱은 ADR-0113 증보 2 G-S0(dawn.kim의 Developer Preview 가입·OAuth client 준비) 전까지 어느 경로에서도 열지 않는다.
 
 **도구 호출과 등급(ADR-0113 증보 2 E4).**
 - 모든 앱 도구 호출은 권한 다리(D5·§8.6)로 온다. 결정자는 host 소유자 본인뿐이다(D3).
