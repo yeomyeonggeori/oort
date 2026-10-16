@@ -1912,7 +1912,9 @@ agent:
    oort의 `DATABASE_URL`·`WORKER_DATABASE_URL`·`PROVIDER_LINK_MASTER_KEY`·JWT 키나
    oort 서비스의 shared variable은 **걸지 마세요**.
 4. Hermes 서비스에 **공개 도메인을 붙이지 않아요.** `<서비스이름>.railway.internal`
-   로만 닿아요.
+   로만 닿아요. `HERMES_BASE_URL`에는 DNS를 운영자가 직접 통제하는 호스트만
+   적으세요. 거기 적은 호스트는 설계상 oort의 주소 검사에서 면제되므로, 남이
+   바꿀 수 있는 이름은 선언하면 안전하지 않아요.
 5. **바인드 주소(D9):** 2025-10-16 이후 만든 environment는 내부 이름이 IPv4·IPv6
    둘 다 풀려서 `API_SERVER_HOST=0.0.0.0`이면 충분해요. 레거시 environment는
    IPv6만 풀려서 `::`가 필요한데, Hermes가 `::`를 받는지는 **확인하지 못했어요**

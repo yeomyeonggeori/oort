@@ -2256,7 +2256,10 @@ agent:
    `DATABASE_URL`, `WORKER_DATABASE_URL`, `PROVIDER_LINK_MASTER_KEY`, JWT keys
    or any shared variable of the oort services.
 4. **No public domain** on the Hermes service. It is reached only as
-   `<service-name>.railway.internal`.
+   `<service-name>.railway.internal`. Declare only a host whose DNS you
+   control: the host written in `HERMES_BASE_URL` is exempt from oort's
+   address checks by design, so a name someone else can re-point is not
+   safe to declare.
 5. **Bind address (D9):** an environment created on or after 2025-10-16
    resolves internal names to IPv4 and IPv6, so `API_SERVER_HOST=0.0.0.0` is
    enough. A legacy environment resolves IPv6 only and needs `::`; whether

@@ -341,3 +341,39 @@ async fn toolsets_is_a_third_request_only_when_asked_and_only_a_caution() {
     assert_eq!(report.toolsets, ToolsetsSignal::NotChecked);
     assert!(!seen.paths().contains(&"/v1/toolsets".to_string()));
 }
+
+#[test]
+fn the_declared_url_is_read_the_same_way_by_the_gate_and_the_socket() {
+    use super::cohosted::origin_of;
+    // Plain, with a port, trailing slash, IPv6 literal and a trailing dot all
+    // name one host and keep the scheme/port.
+    assert_eq!(
+        origin_of("http://hermes.railway.internal:8642/v1").unwrap(),
+        (
+            "http://hermes.railway.internal:8642".to_string(),
+            "hermes.railway.internal".to_string()
+        )
+    );
+    assert_eq!(
+        origin_of("https://Hermes.Example.com/v1/").unwrap().0,
+        "https://hermes.example.com"
+    );
+    assert_eq!(
+        origin_of("http://[::1]:8642/v1").unwrap().0,
+        "http://[::1]:8642"
+    );
+    // Userinfo, query, fragment and a foreign path are refused, not stripped.
+    for bad in [
+        "http://user:pw@hermes.internal:8642/v1",
+        "http://user@hermes.internal:8642/v1",
+        "http://hermes.internal:8642/v1?x=1",
+        "http://hermes.internal:8642/v1#frag",
+        "http://hermes.internal:8642/other",
+        "ftp://hermes.internal/v1",
+        "http://hermes.internal:8642\\@evil.example/v1",
+        "http://evil.example#@hermes.internal:8642/v1",
+        "",
+    ] {
+        assert_eq!(origin_of(bad), None, "{bad}");
+    }
+}

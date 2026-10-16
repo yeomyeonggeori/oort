@@ -962,3 +962,68 @@ async fn connect_creates_the_member_and_the_pin_and_grants_nothing_and_leaks_no_
         "positive control: the probe log line must exist for the log check to mean anything"
     );
 }
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn connect_keeps_the_name_hygiene_of_the_agent_create_and_rename_routes() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let f = seed(&su, "cohost-names").await;
+    // A person already named "Hermes": an agent with the same skeleton would be
+    // indistinguishable from them on cards and in mentions.
+    sqlx::query(
+        "INSERT INTO member (workspace_id, kind, display_name, handle) \
+         VALUES ($1, 'human', 'Hermes', 'hermes-person')",
+    )
+    .bind(f.workspace)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (port, _hits) = mock_agent(true, None).await;
+    let base = start_server(
+        momo_app_pool().await,
+        Declared {
+            operator_email: &f.email,
+            env_url: format!("http://127.0.0.1:{port}/v1"),
+            bearer: ENV_KEY,
+            declared: true,
+            tools_locked: true,
+        },
+    )
+    .await;
+    let http = reqwest::Client::new();
+    let api = Api {
+        http: &http,
+        base: &base,
+        workspace: f.workspace,
+    };
+    let op = login(&http, &base, f.workspace, &f.email).await;
+
+    // Default name collides with the person.
+    let (code, body, _) = api.post(&op, "/connect", None).await;
+    assert_eq!(
+        (code, body["error"]["code"].as_str()),
+        (409, Some("cohosted_agent_name_taken")),
+        "{body}"
+    );
+    // A zero-width character in the name is refused outright (the rename route's rule).
+    let (code, body, _) = api
+        .post(
+            &op,
+            "/connect",
+            Some(json!({"displayName": "Her\u{200b}mes", "handle": "hermes2"})),
+        )
+        .await;
+    assert_eq!(code, 400, "{body}");
+    assert_eq!(agent_count(&su, f.workspace).await, 0);
+    // A name of its own goes through (positive control).
+    let (code, body, _) = api
+        .post(
+            &op,
+            "/connect",
+            Some(json!({"displayName": "Hermes Bot", "handle": "hermesbot"})),
+        )
+        .await;
+    assert_eq!(code, 201, "{body}");
+    assert_eq!(agent_count(&su, f.workspace).await, 1);
+}

@@ -124,7 +124,7 @@ pub trait CohostedAgentProbe: Send + Sync {
 /// `(origin, host)` for the declared URL, or `None` when the base path is not
 /// empty / `/v1` or the URL has parts that could redirect a request (userinfo,
 /// query, fragment).
-fn origin_of(base_url: &str) -> Option<(String, String)> {
+pub(crate) fn origin_of(base_url: &str) -> Option<(String, String)> {
     let parsed = reqwest::Url::parse(base_url.trim()).ok()?;
     if !matches!(parsed.scheme(), "http" | "https")
         || !parsed.username().is_empty()
@@ -138,16 +138,20 @@ fn origin_of(base_url: &str) -> Option<(String, String)> {
         return None;
     }
     let host = parsed.host_str()?.to_ascii_lowercase();
+    // The write gate (`validated_base_url`) reads the URL with momo-settings' own
+    // splitter, and the socket is opened for the host reqwest reads. They must
+    // name the same host, or a spelling one of them reads differently could let a
+    // URL the gate approved dial somewhere else. A disagreement dials nothing.
+    let gate_host = momo_settings::url_host(base_url)?;
+    if host.trim_matches(['[', ']']) != gate_host {
+        return None;
+    }
+    // `host_str` returns an IPv6 literal already bracketed.
     let origin = match parsed.port() {
-        Some(port) => format!("{}://{}:{}", parsed.scheme(), host_for_url(&host), port),
-        None => format!("{}://{}", parsed.scheme(), host_for_url(&host)),
+        Some(port) => format!("{}://{host}:{port}", parsed.scheme()),
+        None => format!("{}://{host}", parsed.scheme()),
     };
     Some((origin, host))
-}
-
-/// `Url::host_str` returns IPv6 literals already bracketed.
-fn host_for_url(host: &str) -> &str {
-    host
 }
 
 enum Step {

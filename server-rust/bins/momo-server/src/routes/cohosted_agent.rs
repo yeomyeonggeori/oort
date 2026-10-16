@@ -47,12 +47,16 @@ use momo_agent::{
 use momo_auth::Principal;
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::with_provider_link_admin_tx;
+use momo_messaging::name_guard::{
+    conflicts_with_roster, has_invisible_or_control_characters, RosterName,
+};
+use momo_messaging::{load_roster_names_in_tx, lock_display_name_namespace_in_tx};
 use momo_provider_probe::{
     CohostedAgentProbe, CohostedReport, CohostedTarget, ProbeOutcome, ToolsetsSignal,
 };
 use momo_settings::{
-    normalized_join_display_name, normalized_requested_handle, redacted_endpoint_label,
-    upsert_agent_pin, validated_base_url, PinKind,
+    is_handle_banned_in_tx, normalized_join_display_name, normalized_requested_handle,
+    redacted_endpoint_label, upsert_agent_pin, validated_base_url, PinKind,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -63,7 +67,10 @@ use uuid::Uuid;
 use crate::config::CohostedAgentConfig;
 use crate::error::ApiError;
 use crate::rate_limit::{too_many_requests, SlidingWindowRateLimiter};
-use crate::routes::shared::{audit_via_token_id, require_instance_operator_write, workspace_scope};
+use crate::routes::shared::{
+    agent_tenant_tx, audit_via_token_id, require_instance_operator_write, settle_db,
+    workspace_scope,
+};
 use crate::AppState;
 
 const STATUS_SCHEMA: &str = "momo.cohosted_agent.status.v0";
@@ -146,31 +153,51 @@ fn declaration(state: &AppState) -> (Declaration, Option<String>) {
     }
 }
 
+/// The probe dials the gate's normalised spelling of the declared URL (what
+/// `validated_base_url` approved), never the raw env string.
 fn target(state: &AppState) -> CohostedTarget {
     let env = &state.settings.env_provider;
+    let approved = validated_base_url(
+        &env.base_url,
+        &state.settings.environment,
+        env.allow_local_loopback,
+    )
+    // `declaration()` already refused anything the gate refuses; an empty string
+    // dials nothing if that ever stops being true.
+    .unwrap_or_default();
     CohostedTarget {
-        base_url: env.base_url.clone(),
+        base_url: approved,
         bearer: env.bearer.clone(),
     }
 }
 
-/// The agent already connected in this workspace (an `operator_env` pin).
+/// The active agent already connected in this workspace (an `operator_env` pin on
+/// a member that is not deleted). A plain tenant read: the pin table's read policy
+/// needs only `app.workspace_id`.
 async fn connected_agent(state: &AppState, workspace_id: Uuid) -> Result<Option<Uuid>, ApiError> {
-    with_provider_link_admin_tx(&state.pool, workspace_id, move |conn| {
-        Box::pin(async move {
-            let row: Option<(Uuid,)> = momo_db::sqlx::query_as(
-                "SELECT agent_member_id FROM agent_provider_pin \
-                  WHERE workspace_id = $1 AND kind = 'operator_env' \
-                  ORDER BY updated_at LIMIT 1",
-            )
-            .bind(workspace_id)
-            .fetch_optional(&mut *conn)
-            .await?;
-            Ok(row.map(|(id,)| id))
+    settle_db(
+        "cohosted_agent.connected",
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move { Ok(Ok(connected_agent_in_tx(conn, workspace_id).await?)) })
         })
-    })
-    .await
-    .map_err(|error| ApiError::internal("cohosted_agent.connected", error))
+        .await,
+    )
+}
+
+async fn connected_agent_in_tx(
+    conn: &mut momo_db::PgConnection,
+    workspace_id: Uuid,
+) -> Result<Option<Uuid>, momo_db::DbError> {
+    let row: Option<(Uuid,)> = momo_db::sqlx::query_as(
+        "SELECT p.agent_member_id FROM agent_provider_pin p \
+           JOIN member m ON m.id = p.agent_member_id AND m.workspace_id = p.workspace_id \
+          WHERE p.workspace_id = $1 AND p.kind = 'operator_env' AND m.deleted_at IS NULL \
+          ORDER BY p.updated_at LIMIT 1",
+    )
+    .bind(workspace_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(row.map(|(id,)| id))
 }
 
 // ---------------------------------------------------------------------------
@@ -396,6 +423,13 @@ pub async fn connect(
             .unwrap_or(DEFAULT_DISPLAY_NAME),
     )
     .map_err(|invalid| ApiError::bad_request(invalid.to_string()))?;
+    // A name other people read on cards and in voice lines: the hidden-character
+    // rule `PATCH …/agents/{agent}` applies (`routes/agents.rs`).
+    if has_invisible_or_control_characters(&display_name) {
+        return Err(ApiError::bad_request(
+            "displayName must not contain invisible or control characters",
+        ));
+    }
     let handle =
         normalized_requested_handle(Some(request.handle.as_deref().unwrap_or(DEFAULT_HANDLE)))
             .map_err(|invalid| ApiError::bad_request(invalid.to_string()))?
@@ -483,18 +517,38 @@ pub async fn connect(
                         .bind(format!("cohosted_connect:{workspace_id}"))
                         .execute(&mut *conn)
                         .await?;
-                    let existing: Option<(Uuid,)> = momo_db::sqlx::query_as(
-                        "SELECT agent_member_id FROM agent_provider_pin \
-                          WHERE workspace_id = $1 AND kind = 'operator_env' LIMIT 1",
-                    )
-                    .bind(workspace_id)
-                    .fetch_optional(&mut *conn)
-                    .await?;
-                    if existing.is_some() {
+                    if connected_agent_in_tx(conn, workspace_id).await?.is_some() {
                         return Ok(Err(refusal(
                             StatusCode::CONFLICT,
                             "cohosted_agent_already_connected",
                             "이 워크스페이스에는 이미 같은 서버의 에이전트가 연결돼 있어요.",
+                        )));
+                    }
+                    // The create/rename siblings' hygiene, inside the same transaction:
+                    // a banned handle does not come back as an agent, and the name's
+                    // skeleton may not equal another member's name or handle.
+                    if is_handle_banned_in_tx(conn, &input.handle).await? {
+                        return Ok(Err(refusal(
+                            StatusCode::FORBIDDEN,
+                            "cohosted_agent_handle_banned",
+                            "그 핸들은 이 워크스페이스에서 쓸 수 없어요.",
+                        )));
+                    }
+                    lock_display_name_namespace_in_tx(conn, workspace_id).await?;
+                    let roster = load_roster_names_in_tx(conn, workspace_id, Uuid::nil()).await?;
+                    let names: Vec<RosterName<'_>> = roster
+                        .iter()
+                        .map(|(member_id, display_name, handle)| RosterName {
+                            member_id: *member_id,
+                            display_name,
+                            handle,
+                        })
+                        .collect();
+                    if conflicts_with_roster(&input.display_name, Uuid::nil(), &names) {
+                        return Ok(Err(refusal(
+                            StatusCode::CONFLICT,
+                            "cohosted_agent_name_taken",
+                            "그 이름을 쓰는 멤버가 이미 있어요. 다른 이름을 골라 주세요.",
                         )));
                     }
                     let created = create_agent_identity_in_tx(conn, workspace_id, &input).await?;
