@@ -12,19 +12,26 @@ import {
   focusPluginActionAfterErrorDismissal,
   focusPluginScopeChangeFallback,
   identifiableScopeSentence,
+  myGrantSentence,
   pluginActionButtonState,
   pluginActionConfirmation,
   pluginActionErrorMessage,
   pluginConsentScopeAction,
+  pluginControlsVisible,
   pluginDetailErrorMessage,
+  pluginIconText,
+  pluginLicenseLabel,
   pluginMarketplaceNeedsDetailFocus,
   type PluginActionFocusTarget,
   pluginRoleState,
   pluginScopeChangeFallbackKind,
   pluginScopeConsentCompletion,
   pluginScopeChangeMessage,
+  pluginSubtitle,
+  pluginToolsSummary,
   scopeSentence,
   settlePluginScopeChanges,
+  workspaceInstallSentence,
   workspaceInstallationLabel,
 } from "./model";
 
@@ -32,9 +39,11 @@ describe("plugin marketplace copy", () => {
   it("names workspace installation separately from my permission", () => {
     expect(workspaceInstallationLabel({ installed: true, enabled: true }))
       .toBe("워크스페이스 설치됨");
-    expect(callerPolicySummary(undefined)).toBe("내 권한 도구: 없음");
-    expect(callerPolicySummary([{ risk: "read" }]))
-      .toBe("내 권한 도구 위험도: 읽기");
+    expect(callerPolicySummary(undefined)).toBe("허용한 도구 없음");
+    expect(callerPolicySummary([])).toBe("허용한 도구 없음");
+    // 목록 줄은 개수만 말한다. 위험도는 상세의 도구 줄이 칩으로 말해서 같은 사실이 두 모양이 되지 않는다.
+    expect(callerPolicySummary([{ risk: "read" }, { risk: "write" }]))
+      .toBe("허용한 도구 2개");
   });
 
   it("keeps operator English out of action errors", () => {
@@ -285,5 +294,95 @@ describe("plugin marketplace copy", () => {
     ]);
     // Four failures, one headline and one item per cause.
     expect(completion.causes).toHaveLength(2);
+  });
+});
+
+// ---- 읽기 전용 카탈로그 (#3860) ----------------------------------------------------------------
+// 입력은 서버가 시드하는 매니페스트에서 가져온다. 지어낸 앱으로 문장을 재면 실제 네 앱에서
+// 깨지는 문장을 놓친다.
+
+const OFFICIAL_IDS = [
+  driveManifest.plugin.id,
+  githubManifest.plugin.id,
+  linearManifest.plugin.id,
+  notionManifest.plugin.id,
+];
+
+describe("읽기 전용 카탈로그의 문장", () => {
+  it("공식 네 앱은 영어 매니페스트 문구 대신 한국어 한 줄 소개로 선다", () => {
+    for (const manifest of [driveManifest, githubManifest, linearManifest, notionManifest]) {
+      const line = pluginSubtitle({
+        pluginId: manifest.plugin.id,
+        description: manifest.plugin.description,
+      });
+      expect(line, manifest.plugin.id).not.toBe(manifest.plugin.description);
+      // 한국어 목록에 영어 문장과 내부 약어를 먼저 보이지 않는다.
+      expect(line).toMatch(/[가-힣]/);
+      expect(line).not.toMatch(/MCP|Official|hosted/i);
+    }
+  });
+
+  it("표에 없는 앱은 서버 문구로 돌아가고, 대소문자는 가리지 않는다", () => {
+    expect(pluginSubtitle({ pluginId: "com.example.unknown", description: "Unknown app" }))
+      .toBe("Unknown app");
+    expect(pluginSubtitle({ pluginId: githubManifest.plugin.id.toUpperCase(), description: "x" }))
+      .not.toBe("x");
+  });
+
+  it("앱 타일 글자는 서버가 준 것을 먼저 쓰고, 없으면 이름의 머리글자(최대 둘)다", () => {
+    expect(pluginIconText({ name: "GitHub", iconText: " GH " })).toBe("GH");
+    expect(pluginIconText({ name: "GitHub" })).toBe("G");
+    // 「Google Drive」와 「GitHub」가 같은 「G」 타일이면 목록에서 서로 구별되지 않는다.
+    expect(pluginIconText({ name: "Google Drive" })).toBe("GD");
+    expect(pluginIconText({ name: "Google Drive" })).not.toBe(pluginIconText({ name: "GitHub" }));
+    expect(pluginIconText({ name: "노션 앱 서비스" })).toBe("노앱");
+    expect(pluginIconText({ name: "  " })).toBe("?");
+  });
+
+  it("공식 네 앱의 타일 글자는 서로 다르다", () => {
+    const tiles = [driveManifest, githubManifest, linearManifest, notionManifest]
+      .map((manifest) => pluginIconText({ name: manifest.plugin.name }));
+    expect(new Set(tiles).size).toBe(tiles.length);
+  });
+
+  it("서버가 허용한 SPDX가 아닌 하나(Linear)는 읽을 수 있는 이름으로 보이고 나머지는 그대로다", () => {
+    expect(pluginLicenseLabel(linearManifest.plugin.license.spdx)).toBe("Linear 호스팅 서비스 약관");
+    expect(pluginLicenseLabel(githubManifest.plugin.license.spdx)).toBe("MIT");
+    expect(pluginLicenseLabel(driveManifest.plugin.license.spdx)).toBe("Apache-2.0");
+  });
+
+  it("검색·보기 컨트롤은 목록이 한눈에 읽히는 길이(여섯 줄)를 넘을 때만 선다", () => {
+    expect([0, 1, 4, 6].map(pluginControlsVisible)).toEqual([false, false, false, false]);
+    expect([7, 12, 40].map(pluginControlsVisible)).toEqual([true, true, true]);
+  });
+
+  it("설치 상태는 설치·활성 두 사실을 세 문장으로 가른다", () => {
+    expect(workspaceInstallSentence({ installed: false, enabled: false })).toBe("설치하지 않았어요");
+    expect(workspaceInstallSentence({ installed: true, enabled: true })).toBe("설치돼 있어요");
+    expect(workspaceInstallSentence({ installed: true, enabled: false })).toBe("설치했지만 꺼져 있어요");
+  });
+
+  it("내 권한은 정책이 싣는 것만 말한다: 설치와 무관하게 비어 있을 수 있다", () => {
+    expect(myGrantSentence([], 0)).toBe("허용한 권한이 없어요");
+    expect(myGrantSentence(["github:read"], 2)).toBe("github 읽기 권한 (도구 2개)");
+    // 정책에는 도구가 있는데 매니페스트와 이어 보지 못한 경우: 권한 이름을 지어내지 않는다.
+    expect(myGrantSentence([], 2)).toBe("도구 2개");
+  });
+
+  it("도구 한 줄 요약: 공식 네 앱은 모두 읽기 도구라고 말하고, 섞이면 종류별로 센다", () => {
+    expect(pluginToolsSummary(githubManifest.mcp.tools)).toBe("도구 2개, 모두 읽기 도구예요.");
+    expect(pluginToolsSummary(driveManifest.mcp.tools)).toBe("도구 3개, 모두 읽기 도구예요.");
+    expect(pluginToolsSummary([{ risk: "read" }, { risk: "write" }, { risk: "write" }]))
+      .toBe("도구 3개: 읽기 1개, 쓰기 2개.");
+    expect(pluginToolsSummary([{ risk: "read" }, { risk: "admin" }]))
+      .toBe("도구 2개: 읽기 1개, 관리자 1개.");
+    expect(pluginToolsSummary([])).toBeNull();
+  });
+
+  it("네 앱의 도구 설명은 이미 한국어 문장이다(화면이 영어를 번역하지 않는다)", () => {
+    for (const manifest of [driveManifest, githubManifest, linearManifest, notionManifest]) {
+      for (const tool of manifest.mcp.tools) expect(tool.description, tool.name).toMatch(/[가-힣]/);
+    }
+    expect(OFFICIAL_IDS).toHaveLength(4);
   });
 });

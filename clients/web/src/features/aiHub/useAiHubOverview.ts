@@ -3,6 +3,10 @@ import { agentMembers } from "@momo/core/features/agents/hubModel";
 import { fetchProviderLink } from "@momo/core/features/settings/api";
 import { listEventSubscriptions } from "@momo/core/features/settings/eventSubscriptions";
 import { isOperatorDenied } from "@momo/core/features/settings/model";
+import {
+  isSurfaceProvided,
+  serverSaysAbsent,
+} from "@momo/core/features/capabilities/serverSurfaces";
 import { listPlugins } from "@momo/core/lib/api";
 import { useSession } from "@/app/session";
 import { hostedListQuery } from "@/features/hostedAgents/hostedCredentialScope";
@@ -12,6 +16,7 @@ import { useLocalHarnessWatch } from "@/features/welcome/useLocalHarnessWatch";
 import { useDirectory } from "@/features/workspace/useWorkspace";
 import { IS_TAURI } from "@/lib/env";
 import {
+  READ_ABSENT,
   READ_LOADING,
   accountsCard,
   agentsCard,
@@ -20,21 +25,40 @@ import {
   loginNudge,
   teamKeysCard,
   type AccountsInput,
+  type AppsRead,
   type ExternalInput,
   type HubCardView,
   type Read,
 } from "./aiHubOverviewModel";
 
+/** react-query 결과에서 이 파일이 읽는 칸. */
+interface ReadableQuery<T> {
+  isPending: boolean;
+  isError: boolean;
+  error: unknown;
+  data: T | undefined;
+}
+
 /** react-query 결과를 「읽었다 / 못 읽었다 / 권한이 없다」로 접는다. */
-function toRead<T, U>(
-  query: { isPending: boolean; isError: boolean; error: unknown; data: T | undefined },
-  pick: (data: T) => U
-): Read<U> {
+function toRead<T, U>(query: ReadableQuery<T>, pick: (data: T) => U): Read<U> {
   if (query.isPending) return READ_LOADING;
   if (query.isError || query.data === undefined) {
     return isOperatorDenied(query.error) ? { state: "denied" } : { state: "error" };
   }
   return { state: "ok", value: pick(query.data) };
+}
+
+/**
+ * 「앱」 줄의 개수. 이 서버가 앱 목록을 싣지 않으면(정적 판정이 거짓이거나 서버가 404·405·501로
+ * 답하면) 읽기 자체가 없다: 못 읽은 것이 아니라 줄이 서지 않는 서버다(`READ_ABSENT`).
+ * 정적 판정과 런타임 폴딩, 두 겹 모두 같은 결론이다(`serverSurfaces.ts` 상단).
+ */
+function toAppsRead(
+  provided: boolean,
+  query: ReadableQuery<Awaited<ReturnType<typeof listPlugins>>>
+): AppsRead {
+  if (!provided || serverSaysAbsent(query.error)) return READ_ABSENT;
+  return toRead(query, (catalog) => catalog.plugins.filter((p) => p.installed).length);
 }
 
 /**
@@ -50,13 +74,16 @@ export function useExternalReads() {
     queryFn: () => listEventSubscriptions(workspaceId),
     retry: false,
   });
+  const appsProvided = isSurfaceProvided("plugins");
   const plugins = useQuery({
     queryKey: ["plugins", workspaceId.toLowerCase()],
     queryFn: () => listPlugins(workspaceId),
     retry: false,
+    // 정적 판정이 거짓이면 요청을 한 번도 보내지 않는다(`serverSurfaces.ts` 두 겹의 (a)).
+    enabled: appsProvided,
   });
   const input: ExternalInput = {
-    apps: toRead(plugins, (catalog) => catalog.plugins.filter((p) => p.installed).length),
+    apps: toAppsRead(appsProvided, plugins),
     incoming: toRead(webhooks, (rows) => rows.filter((row) => row.status === "active").length),
     outgoing: toRead(events, (rows) => rows.filter((row) => row.enabled).length),
     externalAgents: toRead(hosted, externalAgentCount),

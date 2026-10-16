@@ -113,6 +113,29 @@ describe("외부 연결 목차 (AIH-8)", () => {
     reads.bots = { state: "ok", value: 1 };
   });
 
+  it("서버가 앱 목록을 싣지 않으면 「앱」 줄이 접힌다: 네 줄만 서고 칩도 없다 (#3860)", async () => {
+    reads.input = { apps: { state: "absent" }, incoming: OK(1), outgoing: OK(2), externalAgents: OK(1) };
+    const el = await mountAt("/");
+    const rows = [...el.querySelectorAll('[data-testid^="ai-external-row-"]')];
+    expect(rows.map((r) => r.querySelector("h3")?.firstChild?.textContent)).toEqual([
+      "채널로 들어오는 주소",
+      "밖으로 보내는 알림",
+      "외부 에이전트 연결",
+      "호스티드 봇 초대",
+    ]);
+    // 접힌 줄은 칩도 열기 링크도 남기지 않는다. 「읽지 못했어요」는 다시 시도하라는 말이다.
+    expect(el.querySelector('[data-testid="ai-external-row-apps"]')).toBeNull();
+    expect(el.querySelector('[data-testid="ai-external-chip-apps"]')).toBeNull();
+    expect(el.querySelector('[data-testid="ai-external-open-apps"]')).toBeNull();
+    expect(el.textContent).not.toContain("읽지 못했어요");
+  });
+
+  it("앱 줄의 문구는 읽기만 되는 서버에서도 참이다: 관리한다고 말하지 않는다 (#3860)", () => {
+    const apps = AI_EXTERNAL_ROWS.find((row) => row.id === "apps");
+    expect(apps?.summary).not.toMatch(/관리/);
+    expect(apps?.detail.join(" ")).not.toMatch(/관리/);
+  });
+
   it("새 문구가 옛 말(합류 등)을 되살리지 않는다", () => {
     for (const row of AI_EXTERNAL_ROWS) {
       for (const text of [row.title, row.summary, ...row.detail]) expect(findLegacyTerms(text), text).toEqual([]);

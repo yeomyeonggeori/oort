@@ -23,7 +23,7 @@ import { SectionHeadingContext } from "@/features/settings/SettingsFields";
 import { WebhookSection } from "@/features/settings/WebhookSection";
 import { PersonalAssistantsList } from "@/features/hostedAgents/PersonalAssistantsList";
 import { HUB_CHIP_TONE } from "./AiHubOverview";
-import type { ChipTone, ExternalInput, Read } from "./aiHubOverviewModel";
+import type { AppsRead, ChipTone, ExternalInput, Read } from "./aiHubOverviewModel";
 import { useExternalReads } from "./useAiHubOverview";
 
 // =============================================================================
@@ -56,15 +56,15 @@ function PaneHead() {
   );
 }
 
-function countChip(row: AiExternalRow, read: Read<number> | null): { text: string; tone: ChipTone } | null {
-  if (read === null || row.countNoun === null) return null;
+function countChip(row: AiExternalRow, read: AppsRead | null): { text: string; tone: ChipTone } | null {
+  if (read === null || read.state === "absent" || row.countNoun === null) return null;
   if (read.state === "ok") return { text: `${row.countNoun} ${read.value}`, tone: "neutral" };
   if (read.state === "denied") return { text: AI_HUB_OVERVIEW_COPY.chip.operatorOnly, tone: "neutral" };
   if (read.state === "error") return { text: AI_HUB_OVERVIEW_COPY.chip.readFailed, tone: "warn" };
   return null;
 }
 
-function readFor(id: AiExternalRowId, input: ExternalInput, hostedBots: Read<number>): Read<number> {
+function readFor(id: AiExternalRowId, input: ExternalInput, hostedBots: Read<number>): AppsRead {
   return id === "hostedBotInvite" ? hostedBots : input[id];
 }
 
@@ -124,7 +124,9 @@ function Index() {
       <PaneHead />
       {isSurfaceProvided("hostedAgentPairing") && <PersonalAssistantsList className="mb-8" />}
       <ul className="flex min-w-0 flex-col" aria-label={glossaryEntry("externalConnection").term}>
-        {AI_EXTERNAL_ROWS.map((row) => (
+        {/* 서버가 앱 목록을 싣지 않으면 「앱」 줄은 접힌다(#3860). 열면 접힌 화면만 만나는 진입점은
+            세우지 않는다. 같은 서버가 「읽지 못했어요」를 말하는 것도 거짓이라 칩도 함께 빠진다. */}
+        {AI_EXTERNAL_ROWS.filter((row) => row.id !== "apps" || input.apps.state !== "absent").map((row) => (
           <RowItem key={row.id} row={row} input={input} hostedBots={hostedBots} restoreFocus={from === row.id} />
         ))}
       </ul>
