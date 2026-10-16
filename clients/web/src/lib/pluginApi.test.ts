@@ -1,10 +1,25 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import githubManifest from "../../../../server/Fixtures/plugin-manifests/github.json";
 // ADR-0113 증보 P-S1 (#3859): bytes the Rust server answered, pinned by
 // server-rust/bins/momo-server/tests/plugin_registry_read_conformance_pg.rs.
 import rustCatalog from "../../../../server/Fixtures/plugin-wire/catalog.json";
 import rustGithubDetail from "../../../../server/Fixtures/plugin-wire/detail-github.json";
-import { pluginCatalogFromWire, pluginDetailFromWire } from "@momo/core/lib/api";
+// ADR-0113 P3 (#3914): the four writes' answers, pinned by
+// server-rust/bins/momo-server/tests/plugin_registry_write_conformance_pg.rs
+// (per-run uuids are the all-zero placeholder).
+import rustGrant from "../../../../server/Fixtures/plugin-wire/mutation-grant.json";
+import rustInstall from "../../../../server/Fixtures/plugin-wire/mutation-install.json";
+import rustRevokeGrant from "../../../../server/Fixtures/plugin-wire/mutation-revoke-grant.json";
+import rustUninstall from "../../../../server/Fixtures/plugin-wire/mutation-uninstall.json";
+import {
+  grantPluginScope,
+  installPlugin,
+  pluginCatalogFromWire,
+  pluginDetailFromWire,
+  revokePluginInstall,
+  revokePluginScope,
+} from "@momo/core/lib/api";
+import { installCoreHost, resetCoreHost, type SessionPort } from "@momo/core/runtime/host";
 import { WireShapeError } from "@momo/core/lib/wire";
 
 // These responses are assembled from the registry manifest the server seeds,
@@ -136,5 +151,132 @@ describe("plugin API wire boundary", () => {
       ["github.list_repositories", ["github:read"], "read_only"],
       ["github.search_issues", ["github:read"], "read_only"],
     ]);
+  });
+});
+
+// ADR-0113 P3 (#3914): the deployed core calls, fed the Rust server's answers.
+// Not a lookalike — each response body is the file the PG conformance suite
+// pins byte for byte; each request is what the Rust handlers accept (the body
+// is exactly the documented object, because the server refuses any other key).
+describe("plugin write calls against the Rust server's answers (ADR-0113 P3)", () => {
+  const GITHUB = "com.momo.plugins.github";
+  const ZERO = "00000000-0000-0000-0000-000000000000";
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    resetCoreHost();
+  });
+
+  function answering(fixture: unknown, status: number) {
+    const session: SessionPort = {
+      getAccessToken: () => "access-token",
+      getRefreshToken: () => null,
+      getPersistedSession: () => null,
+      applyLogin: () => {},
+      applyRotation: () => {},
+      markAuthExpired: () => {},
+      clearSession: () => {},
+    };
+    installCoreHost({
+      apiBase: () => "https://oort.test",
+      absoluteApiBase: () => "https://oort.test",
+      buildMode: () => "test",
+      session,
+    });
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify(fixture), {
+        status,
+        headers: { "content-type": "application/json" },
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("installs with exactly the body the server accepts and parses the answer", async () => {
+    const fetchMock = answering(rustInstall, 201);
+    await expect(installPlugin("ws-1", GITHUB)).resolves.toEqual({
+      pluginId: GITHUB,
+      status: "enabled",
+      enabled: true,
+      capabilities: [],
+      memberId: undefined,
+      scope: undefined,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://oort.test/v1/workspaces/ws-1/plugins/${GITHUB}/install`,
+      expect.objectContaining({ method: "POST", body: '{"enabled":true}' })
+    );
+  });
+
+  it("grants one scope for the caller and parses the capabilities it projected", async () => {
+    const fetchMock = answering(rustGrant, 201);
+    await expect(grantPluginScope("ws-1", GITHUB, "github:read")).resolves.toEqual({
+      pluginId: GITHUB,
+      memberId: ZERO,
+      scope: "github:read",
+      status: "active",
+      enabled: true,
+      capabilities: ["github.list_repositories", "github.search_issues"],
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://oort.test/v1/workspaces/ws-1/plugins/${GITHUB}/grants`,
+      expect.objectContaining({ method: "POST", body: '{"scope":"github:read"}' })
+    );
+  });
+
+  it("revokes a scope by its encoded path and an install without a body", async () => {
+    const revoke = answering(rustRevokeGrant, 200);
+    await expect(revokePluginScope("ws-1", GITHUB, "github:read")).resolves.toMatchObject({
+      status: "revoked",
+      scope: "github:read",
+      capabilities: [],
+    });
+    expect(revoke).toHaveBeenCalledWith(
+      `https://oort.test/v1/workspaces/ws-1/plugins/${GITHUB}/grants/github%3Aread`,
+      expect.objectContaining({ method: "DELETE" })
+    );
+    vi.unstubAllGlobals();
+    resetCoreHost();
+
+    const uninstall = answering(rustUninstall, 200);
+    await expect(revokePluginInstall("ws-1", GITHUB)).resolves.toMatchObject({
+      pluginId: GITHUB,
+      status: "revoked",
+      enabled: false,
+    });
+    const [, init] = uninstall.mock.calls[0] as [unknown, RequestInit];
+    expect(init.method).toBe("DELETE");
+    expect(init.body).toBeUndefined();
+  });
+
+  it("carries the D5 egress receipt only where access is extended, and no credential key", () => {
+    expect(rustInstall.egressDomains).toEqual(["api.githubcopilot.com"]);
+    expect(rustGrant.egressDomains).toEqual(["api.githubcopilot.com"]);
+    expect("egressDomains" in rustRevokeGrant).toBe(false);
+    expect("egressDomains" in rustUninstall).toBe(false);
+    const keys = new Set<string>();
+    const walk = (value: unknown) => {
+      if (Array.isArray(value)) value.forEach(walk);
+      else if (value && typeof value === "object") {
+        for (const [key, child] of Object.entries(value)) {
+          keys.add(key);
+          walk(child);
+        }
+      }
+    };
+    [rustInstall, rustGrant, rustRevokeGrant, rustUninstall].forEach(walk);
+    expect([...keys].sort()).toEqual([
+      "auditRef",
+      "capabilities",
+      "egressDomains",
+      "enabled",
+      "memberId",
+      "pluginId",
+      "scope",
+      "status",
+    ]);
+    expect([...keys].some((key) => /token|secret|credential|password|authorization|api_?key/i.test(key)))
+      .toBe(false);
   });
 });

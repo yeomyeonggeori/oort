@@ -10434,15 +10434,28 @@ paths:
     post:
       tags: [plugins]
       operationId: installPlugin
-      summary: Install or re-enable a plugin for the workspace.
-      description: Human bearer only; manifest serverPolicy and workspace role are enforced.
+      summary: Install, enable or disable an official plugin for the workspace.
+      description: >
+        Human bearer, workspace owner/admin only, and only when the manifest's
+        serverPolicy (installAllowed, allowedRoles) admits the caller's role.
+        Addressable plugins are the official four (ADR-0113 P2); any other id,
+        and a registry row that is revoked, is a 404. An existing installation,
+        even a revoked one, is updated and answers 200; a re-install after an
+        uninstall starts with no grants (consent is not resurrected). Repeating a
+        call that is already in force in the state asked for is a no-op: 200
+        with the audit id of the install in force, nothing written. The body
+        is exactly the documented object (an absent body is `{}`): any other
+        key, a credential-shaped one included, is a 400 and is neither stored
+        nor echoed. The answer carries the manifest's egressDomains (ADR-0113 D5)
+        as the receipt of what the app reaches. No provider credential is
+        accepted, stored or returned (ADR-0113 D1-A).
       security:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/PluginId"
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
@@ -10461,7 +10474,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/PluginMutationResponse"
         "400":
-          description: Invalid request body.
+          description: Invalid plugin id, or a request body that is not exactly the documented object.
           content:
             application/json:
               schema:
@@ -10469,15 +10482,21 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          description: >
+            The caller is not an active workspace owner/admin, or the manifest's
+            serverPolicy rejects installation for the caller's role.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "404":
-          description: Plugin is not registered.
+          description: Plugin is not one of the official four, or is revoked in the registry.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: Registered manifest fails validation or is revoked.
+          description: Registered manifest fails validation (digest, vocabulary, identity).
           content:
             application/json:
               schema:
@@ -10488,7 +10507,13 @@ paths:
       tags: [plugins]
       operationId: revokePluginInstall
       summary: Revoke a workspace plugin installation and all its grants.
-      description: Human workspace owner/admin only. Repeating a revoke is idempotent.
+      description: >
+        Human workspace owner/admin only. Every member's grant of the plugin is
+        revoked under the same audit row and every capability projection of it is
+        deleted. Repeating a revoke is idempotent (200, the first audit id).
+        Removal is always possible for the official four, including a plugin the
+        registry has since revoked; any other id (the incoming-webhook plugin's
+        install row has its own lifecycle, ADR-0115) is a 404.
       security:
         - bearerAuth: []
       parameters:
@@ -10501,12 +10526,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PluginMutationResponse"
+        "400":
+          description: Invalid plugin id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
-          description: Plugin installation does not exist.
+          description: Plugin is not one of the official four, or this workspace has no installation of it.
           content:
             application/json:
               schema:
@@ -10519,7 +10550,23 @@ paths:
       tags: [plugins]
       operationId: grantPluginScope
       summary: Grant one declared plugin scope to the calling human.
-      description: The plugin must be actively installed; no provider credential is accepted or returned.
+      description: >
+        The delegating user's own consent (ADR-0113 D2): the grant is the
+        four-tuple (workspace, caller, plugin, scope) and there is no member
+        field, so nobody grants for somebody else and an agent holds none. Any
+        active human workspace member except a guest may grant themselves (a
+        guest is refused with 403: a hosted app reads workspace data with the
+        server's own credential, so the grant is its only per-member gate). A
+        repeat of a grant whose projection is exactly what the manifest declares
+        is a no-op (200 with that grant's audit id, nothing written); one whose
+        projection has drifted from the manifest is rebuilt with a new audit
+        row. The plugin must be one of
+        the official four, installed and enabled; the scope must be declared by
+        the manifest, and one capability projection is written per tool that
+        declares it. The body is exactly `{scope}`: any other key, a
+        credential-shaped one included, is a 400 and is neither stored nor
+        echoed. The answer carries the manifest's egressDomains (D5). No provider
+        credential is accepted, stored or returned (D1-A).
       security:
         - bearerAuth: []
       parameters:
@@ -10545,7 +10592,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/PluginMutationResponse"
         "400":
-          description: Scope is invalid or not declared by the plugin.
+          description: >
+            Scope is invalid or not declared by the plugin, the plugin id is
+            invalid, or the body is not exactly `{scope}`.
           content:
             application/json:
               schema:
@@ -10553,9 +10602,23 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          description: >
+            The caller is not an active human member of the workspace, or is a
+            guest.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Plugin is not one of the official four, or is revoked in the registry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: Plugin is not installed and enabled.
+          description: >
+            Plugin is not installed and enabled, or its registered manifest fails
+            validation.
           content:
             application/json:
               schema:
@@ -10568,6 +10631,11 @@ paths:
       tags: [plugins]
       operationId: revokePluginScope
       summary: Revoke one plugin scope belonging to the calling human.
+      description: >
+        Only the caller's own grant is addressable. The grant is marked revoked
+        under a new audit row and its capability projection is deleted; repeating
+        it is idempotent (200, the first audit id). A grant can always be revoked,
+        including for a plugin the registry has since revoked.
       security:
         - bearerAuth: []
       parameters:
@@ -10598,7 +10666,7 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
-          description: Plugin grant does not exist.
+          description: Plugin is not one of the official four, or the caller holds no grant of this scope.
           content:
             application/json:
               schema:
@@ -19591,16 +19659,20 @@ components:
     # ---- Plugin registry and delegated tool policy --------------------------
     InstallPluginRequest:
       type: object
+      additionalProperties: false
       properties:
         enabled:
           type: boolean
+          description: Omitted means the manifest's serverPolicy.enabledByDefault.
 
     GrantPluginRequest:
       type: object
+      additionalProperties: false
       required: [scope]
       properties:
         scope:
           type: string
+          description: Trimmed and lowercased by the server; `^[a-z0-9][a-z0-9:._/-]{0,127}$`.
 
     PluginCatalogItem:
       type: object
@@ -19754,15 +19826,34 @@ components:
         memberId:
           type: string
           format: uuid
-        scope: {type: string}
-        status: {type: string}
-        enabled: {type: boolean}
+          description: The calling member, on the two grant operations.
+        scope:
+          type: string
+          description: The normalised scope, on the two grant operations.
+        status:
+          type: string
+          enum: [enabled, disabled, active, revoked]
+        enabled:
+          type: boolean
+          description: >
+            Install and grant: the resulting state. Uninstall: false. Grant
+            revoke: whether the installation is enabled now.
         auditRef:
           type: string
           format: uuid
+          description: The audit_log row this write wrote (the first revoke's, when a revoke repeats).
         capabilities:
           type: array
           items: {type: string}
+          description: Tool names a grant projected; empty for every other operation.
+        egressDomains:
+          type: array
+          items: {type: string}
+          description: >
+            ADR-0113 D5 receipt. The domains the plugin reaches, as its manifest
+            declares them, on the two operations that extend access (install and
+            grant); omitted when access is taken away. Also recorded in the audit
+            row as what was consented to.
 
     # ---- Incoming webhooks --------------------------------------------------
     CreateWebhookRequest:
