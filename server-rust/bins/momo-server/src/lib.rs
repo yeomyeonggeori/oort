@@ -37,6 +37,9 @@ pub mod human_control;
 mod livekit;
 /// ADR-0113 D6 manifest admission (port of the retired Swift validator, #3859).
 pub mod plugin_manifest;
+/// ADR-0113 P3 (#3914): the registry's four writes. Crate-private — the REST
+/// handlers and the approval executor are its only callers.
+mod plugin_writes;
 pub mod rate_limit;
 pub mod realtime_advert;
 pub mod routes;
@@ -742,12 +745,26 @@ pub fn build_app(state: AppState) -> Router {
             get(routes::workspace_settings::get).patch(routes::workspace_settings::patch),
         )
         // ADR-0113 증보 2026-10-15 P-S1 (#3859) — the plugin registry's two
-        // reads, official four only. install / grants (P3) are not mounted and
-        // stay 404, so the web 「앱」 screen must render read-only (P-U1).
+        // reads, official four only — and P3 (#3914), its four writes: install
+        // and uninstall (workspace owner/admin), and the caller's own grant and
+        // revoke of one scope (D2). The web 「앱 설치」 surface can switch on
+        // once these are deployed (P-U1, #3860).
         .route("/v1/workspaces/{ws}/plugins", get(routes::plugins::list))
         .route(
             "/v1/workspaces/{ws}/plugins/{plugin}",
             get(routes::plugins::detail),
+        )
+        .route(
+            "/v1/workspaces/{ws}/plugins/{plugin}/install",
+            post(routes::plugins::install).delete(routes::plugins::uninstall),
+        )
+        .route(
+            "/v1/workspaces/{ws}/plugins/{plugin}/grants",
+            post(routes::plugins::grant),
+        )
+        .route(
+            "/v1/workspaces/{ws}/plugins/{plugin}/grants/{scope}",
+            delete(routes::plugins::revoke_grant),
         )
         // ADR-0161 D4 — self-leave. The higher-scoped sibling of channel leave:
         // ends the caller's whole workspace membership. The last owner is refused

@@ -1,0 +1,7 @@
+{
+  "auditRef": "00000000-0000-0000-0000-000000000000",
+  "capabilities": [],
+  "enabled": false,
+  "pluginId": "com.momo.plugins.github",
+  "status": "revoked"
+}
