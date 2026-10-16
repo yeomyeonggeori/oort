@@ -1,4 +1,12 @@
-import React, {createContext, useCallback, useContext, useMemo, useRef, useState} from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import {Appearance, useColorScheme} from 'react-native';
 import {
   DEFAULT_APPEARANCE,
@@ -9,6 +17,14 @@ import {
 } from '@momo/core/design/appearance';
 import {normalizeHex, parseHex} from '@momo/core/design/color';
 import {resolveAppearance, signalKey, type SignalState} from './appearanceState';
+import {useBackgroundA11yFlags} from './background/accessibility';
+import {
+  effectiveBackground,
+  NO_BACKGROUND,
+  type BackgroundChoice,
+  type BackgroundFallback,
+} from './background/model';
+import {getBackground, setBackground, subscribeBackground} from './background/store';
 import {DEFAULT_THEME_ID, THEME_IDS, THEME_LABELS, type ThemeId} from './ds2Tokens';
 import {lightPalette, darkPalette, type Palette} from './tokens';
 import {NON_SECRET_KEYS, nonSecretStore} from '../storage/kv';
@@ -174,6 +190,13 @@ interface ThemeValue {
   /** 지금 테마 × 모드에서 신호가 어떻게 풀렸는가 — 보정됐는지, 거절됐는지. */
   signalState: SignalState;
   setSignal: (signal: SignalChoice) => void;
+  /** 사람이 고른 배경(저장된 그대로). 실제로 깔리는지는 `backgroundActive`. */
+  background: BackgroundChoice;
+  setBackground: (choice: BackgroundChoice) => void;
+  /** 지금 배경이 실제로 깔려 있는가. 접근성 설정이 켜져 있으면 고른 것이 있어도 `false`. */
+  backgroundActive: boolean;
+  /** 고른 배경을 시스템 설정이 끄고 있다면 그 이유. */
+  backgroundFallback: BackgroundFallback | null;
 }
 
 /** 시스템이 지금 말하는 것. 모름(`null`)이면 이 앱이 처음부터 입고 있던 다크다. */
@@ -211,6 +234,10 @@ const DETACHED: ThemeValue = {
   signal: null,
   signalState: {kind: 'default'},
   setSignal: () => {},
+  background: NO_BACKGROUND,
+  setBackground: () => {},
+  backgroundActive: false,
+  backgroundFallback: null,
 };
 
 const ThemeContext = createContext<ThemeValue>(DETACHED);
@@ -276,6 +303,9 @@ export function ThemeProvider({
   const [appearance, setAppearance] = useState<AppearanceV2>(readStoredAppearance);
   // 앱 전체에서 시스템을 구독하는 **유일한** 자리다 (파일 머리 주석).
   const system = useColorScheme();
+  // 배경은 React 밖의 저장소가 들고(로그아웃이 그곳을 부른다) 프로바이더는 구독만 한다.
+  const background = useSyncExternalStore(subscribeBackground, getBackground, getBackground);
+  const {reduceTransparency, increaseContrast} = useBackgroundA11yFlags();
 
   // 최신 값은 ref 에도 둔다: 한 틱에 두 번 고르면(테마, 이어서 신호) 두 번째가 첫째를
   // 덮어쓰지 않아야 하고, 저장은 상태 갱신 함수 안이 아니라 밖에서 한다.
@@ -290,6 +320,7 @@ export function ThemeProvider({
   const setTheme = useCallback((id: ThemeId) => update({theme: id}), [update]);
   const setSignal = useCallback((next: SignalChoice) => update({signal: next}), [update]);
 
+  const signalId = signalKey(appearance.signal);
   const value = useMemo<ThemeValue>(() => {
     // 시스템의 답을 **먼저** 이름 붙인다. 이 값은 고른 것과 무관하게 참이고,
     // `scheme` 은 그것을 고른 것으로 덮은 결과다 — 두 문장이 한 줄에 접혀 있었을 때
@@ -297,7 +328,8 @@ export function ThemeProvider({
     const fromSystem: ColorScheme = system === 'light' ? 'light' : 'dark';
     const choice = appearance.scheme;
     const scheme: ColorScheme = choice === 'system' ? fromSystem : choice;
-    const resolved = resolveAppearance(appearance.theme, scheme, appearance.signal);
+    const shown = effectiveBackground(background, reduceTransparency, increaseContrast);
+    const resolved = resolveAppearance(appearance.theme, scheme, appearance.signal, shown.active);
     return {
       choice,
       scheme,
@@ -309,11 +341,26 @@ export function ThemeProvider({
       signal: appearance.signal,
       signalState: resolved.signal,
       setSignal,
+      background,
+      setBackground,
+      backgroundActive: shown.active,
+      backgroundFallback: shown.fallback,
     };
-    // `signalKey` 를 의존으로 쓰는 것은 객체 동일성이 아니라 값이 바뀔 때만 다시
-    // 풀기 위해서다.
+    // `signalId` 를 의존으로 쓰는 것은 객체 동일성이 아니라 값이 바뀔 때만 다시 풀기
+    // 위해서다. `appearance.signal` 의 내용은 그 키가 대신한다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appearance.scheme, appearance.theme, signalKey(appearance.signal), system, setChoice, setTheme, setSignal]);
+  }, [
+    appearance.scheme,
+    appearance.theme,
+    signalId,
+    system,
+    background,
+    reduceTransparency,
+    increaseContrast,
+    setChoice,
+    setTheme,
+    setSignal,
+  ]);
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
@@ -331,11 +378,14 @@ export function FixedScheme({
   scheme,
   theme = DEFAULT_THEME_ID,
   signal = null,
+  background = NO_BACKGROUND,
   children,
 }: {
   scheme: ColorScheme;
   theme?: ThemeId;
   signal?: SignalChoice;
+  /** 하네스가 배경이 깔린 모습을 찍는다. 접근성 설정은 여기서 꺼진 것으로 본다. */
+  background?: BackgroundChoice;
   children: React.ReactNode;
 }): React.JSX.Element {
   // 시스템도 인자를 따른다. 하네스가 스킴을 못 박는 이유가 「같은 명령이 기기 상태에
@@ -344,7 +394,8 @@ export function FixedScheme({
   // 시뮬레이터 설정에 따라 다른 힌트를 담게 된다.
   const key = signalKey(signal);
   const value = useMemo<ThemeValue>(() => {
-    const resolved = resolveAppearance(theme, scheme, signal);
+    const active = background.kind !== 'none';
+    const resolved = resolveAppearance(theme, scheme, signal, active);
     return {
       choice: scheme,
       scheme,
@@ -356,9 +407,13 @@ export function FixedScheme({
       signal,
       signalState: resolved.signal,
       setSignal: () => {},
+      background,
+      setBackground: () => {},
+      backgroundActive: active,
+      backgroundFallback: null,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scheme, theme, key]);
+  }, [scheme, theme, key, background]);
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 
@@ -382,6 +437,9 @@ export function BrandAppearance({children}: {children: React.ReactNode}): React.
       themeId: DEFAULT_THEME_ID,
       signal: null,
       signalState: resolved.signal,
+      // 온보딩은 배경도 영향 밖이다 — 사용자의 사진이 로그인 화면 뒤에 깔리지 않는다.
+      backgroundActive: false,
+      backgroundFallback: null,
     };
   }, [parent, scheme]);
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

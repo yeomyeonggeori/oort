@@ -94,6 +94,12 @@ export const NON_SECRET_KEYS = {
    */
   appearance: 'momo.mobile.appearance.v1',
   /**
+   * 커스텀 배경의 선택 (ADR-0189 증보 2, #3907) — 없음·단색·기본 제공 id, 또는 내 사진의
+   * **파일 이름**(경로 아님). 사진 본체는 앱 샌드박스 파일이고 여기에는 이름만 있다.
+   * 로그아웃 때 사진 선택은 지워진다(`design/background/store.ts`).
+   */
+  background: 'momo.mobile.background.v1',
+  /**
    * 홈에서 접어 둔 섹션 (DS2-3 #2715). 워크스페이스 id → 접힌 섹션 키 목록의 JSON.
    * 화면 배치에 대한 사람의 선택일 뿐이고, 잃으면 섹션이 다시 펼쳐져 있을 뿐이다.
    */

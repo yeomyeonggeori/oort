@@ -362,7 +362,10 @@ describe('DOM is in `lib`, so the discipline is enforced by a gate', () => {
           // Module specifiers and UI copy are values, not global reads. Without
           // stripping strings, `expo-document-picker` is mistaken for the DOM
           // `document` global even though the source never evaluates it.
-          .replace(/(['"])(?:\\.|(?!\1).)*\1/g, '');
+          .replace(/(['"])(?:\\.|(?!\1).)*\1/g, '')
+          // `Paths.document` 는 expo-file-system 의 앱 샌드박스 Documents 디렉터리다(DOM
+          // `document` 전역이 아니다). 내 사진 배경이 OS 가 비우는 캐시 대신 여기에 둔다.
+          .replace(/\bPaths\.document\b/g, '');
         return banned.test(source);
       });
     expect(offenders).toEqual([]);

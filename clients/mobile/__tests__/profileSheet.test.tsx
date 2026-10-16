@@ -16,6 +16,12 @@ import {Linking, StyleSheet} from 'react-native';
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
+import {
+  __resetBackgroundStoreForTests,
+  __setDiskPort,
+  getBackground,
+  setBackground,
+} from '../src/design/background/store';
 import {ThemeProvider} from '../src/design/theme';
 import {darkPalette, lightPalette} from '../src/design/tokens';
 import {appVersionLabel} from '../src/features/profile/appVersion';
@@ -133,6 +139,7 @@ const permissions = getPermissionsAsync as jest.Mock;
 
 beforeEach(() => {
   mmkvStore.clear();
+  __resetBackgroundStoreForTests();
   __resetSessionStore();
   __resetServerBaseCache();
   setServerBase(BASE);
@@ -254,6 +261,42 @@ describe('프로필 시트', () => {
     fireEvent.press(screen.getByTestId('sign-out'));
     fireEvent.press(screen.getByTestId('sign-out-confirm'));
     expect(getPersistedSession()).toBeNull();
+  });
+
+  it('로그아웃은 내 사진 배경 파일을 지우고 선택을 없음으로 되돌린다 (ADR-0189 증보 2)', async () => {
+    let cleared = 0;
+    __setDiskPort({
+      uri: name => `file:///document/oort-background/${name}`,
+      exists: () => true,
+      remove: () => {},
+      clearAll: () => {
+        cleared += 1;
+      },
+    });
+    setBackground({kind: 'photo', file: 'bg-1760600000000.jpg', width: 1600, height: 1200});
+    expect(mmkvStore.get(NON_SECRET_KEYS.background)).toContain('bg-1760600000000.jpg');
+
+    await openSheet();
+    fireEvent.press(screen.getByTestId('sign-out'));
+    fireEvent.press(screen.getByTestId('sign-out-confirm'));
+
+    expect(cleared).toBeGreaterThan(0);
+    expect(getBackground()).toEqual({kind: 'none'});
+    expect(mmkvStore.has(NON_SECRET_KEYS.background)).toBe(false);
+  });
+
+  it('로그아웃해도 단색·기본 제공 선택은 남는다 — 취향이지 사람 데이터가 아니다', async () => {
+    __setDiskPort({
+      uri: name => name,
+      exists: () => true,
+      remove: () => {},
+      clearAll: () => {},
+    });
+    setBackground({kind: 'solid', id: 'sage'});
+    await openSheet();
+    fireEvent.press(screen.getByTestId('sign-out'));
+    fireEvent.press(screen.getByTestId('sign-out-confirm'));
+    expect(getBackground()).toEqual({kind: 'solid', id: 'sage'});
   });
 
   it('확인의 「취소」는 3:1 위 컨트롤 테두리를, 「로그아웃」은 파괴 채움을 입는다', async () => {

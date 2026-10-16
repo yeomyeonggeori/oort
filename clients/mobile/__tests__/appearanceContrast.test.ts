@@ -13,7 +13,7 @@ import {DS2_COMBOS} from '../src/design/ds2Tokens';
 import type {Palette} from '../src/design/tokens';
 
 // =============================================================================
-// #2719 — 테마 3 × 모드 2 × 강조색 8종(기본 · 프리셋 4 · 커스텀 3) = 48 팔레트를 같은 자로 잰다.
+// #2719·#3907 — 테마 3 × 모드 2 × 강조색 8종(기본 · 프리셋 4 · 커스텀 3) × 바닥 2(캔버스·배경 위) = 96 팔레트를 같은 자로 잰다.
 //
 // `paletteContrast.test.ts` 는 새벽하늘 두 벌을 잰다. 테마 선택과 강조색이 열리면서
 // 화면이 입을 수 있는 팔레트가 스물네 벌(기본 신호) → 마흔여덟 벌이 됐고, 그 어느 것도
@@ -63,17 +63,33 @@ const TEXT_PAIRS: ReadonlyArray<readonly [keyof Palette, keyof Palette]> = [
   ['warn', 'warnSurface'],
 ];
 
+// 바닥: 기본 그라데이션과, 사용자 배경이 깔린 동안(ADR-0189 증보 2)의 팔레트. 후자는 글자·
+// 표식 색이 scrim 최악 합성 위 대비로 보정된 판이고, 보정이 카드·칩 위 대비를 **깎지
+// 않는다**는 것도 같은 쌍 목록으로 잰다.
+const BACKDROPS = [
+  ['캔버스', false],
+  ['배경 위', true],
+] as const;
+
 const combos = DS2_COMBOS.flatMap(([theme, mode]) =>
-  SIGNALS.map(([label, signal]) => ({theme, mode, label, signal})),
+  SIGNALS.flatMap(([signalLabel, signal]) =>
+    BACKDROPS.map(([backdropLabel, onImage]) => ({
+      theme,
+      mode,
+      label: `${signalLabel} · ${backdropLabel}`,
+      signal,
+      onImage,
+    })),
+  ),
 );
 
-describe('팔레트 48벌 — 사람이 고를 수 있는 조합 전수', () => {
-  it('조합이 정말 마흔여덟이다', () => {
-    expect(combos).toHaveLength(48);
+describe('팔레트 96벌 — 사람이 고를 수 있는 조합 전수', () => {
+  it('조합이 정말 아흔여섯이다 (48 × 바닥 둘)', () => {
+    expect(combos).toHaveLength(96);
   });
 
-  describe.each(combos)('$theme/$mode · $label', ({theme, mode, signal}) => {
-    const {palette, signal: state} = resolveAppearance(theme, mode, signal);
+  describe.each(combos)('$theme/$mode · $label', ({theme, mode, signal, onImage}) => {
+    const {palette, signal: state} = resolveAppearance(theme, mode, signal, onImage);
 
     it('글자 쌍이 전부 AA(4.5:1) 를 넘는다', () => {
       const low = TEXT_PAIRS.map(([fg, bg]) => ({
@@ -101,13 +117,13 @@ describe('팔레트 48벌 — 사람이 고를 수 있는 조합 전수', () => 
 
     it('거절됐다면 테마 기본 신호로 그려진다 — 화면을 잠그지 않는다', () => {
       if (state.kind === 'rejected') {
-        expect(palette).toBe(resolveAppearance(theme, mode, null).palette);
+        expect(palette).toBe(resolveAppearance(theme, mode, null, onImage).palette);
         expect(state.message.length).toBeGreaterThan(0);
       }
     });
 
     it('주 행동은 신호가 아니라 잉크다 — 강조색이 primary 를 바꾸지 않는다', () => {
-      const base = resolveAppearance(theme, mode, null).palette;
+      const base = resolveAppearance(theme, mode, null, onImage).palette;
       expect(palette.primary).toBe(base.primary);
       expect(palette.onPrimary).toBe(base.onPrimary);
       expect(palette.mode).toBe(mode);

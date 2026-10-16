@@ -50,7 +50,9 @@ function solve(theme: ThemeId, mode: Mode, choice: SignalChoice) {
 }
 
 /**
- * 한 조합의 팔레트와 신호 상태. **같은 조합이면 같은 객체**를 돌려준다 — `useStyles`
+ * 한 조합의 팔레트와 신호 상태. `onImage` 는 사용자 배경이 깔린 동안의 팔레트다(글자·표식
+ * 색이 scrim 최악 합성 위 대비로 보정된다, ADR-0189 증보 2).
+ * **같은 조합이면 같은 객체**를 돌려준다 — `useStyles`
  * 가 팔레트 객체의 동일성으로 스타일시트를 캐시하고, 동일하지 않은 팔레트는 매 렌더
  * `StyleSheet.create` 를 부르게 만든다.
  */
@@ -58,8 +60,9 @@ export function resolveAppearance(
   theme: ThemeId,
   mode: Mode,
   choice: SignalChoice,
+  onImage = false,
 ): ResolvedAppearance {
-  const key = `${theme}/${mode}/${signalKey(choice)}`;
+  const key = `${theme}/${mode}/${signalKey(choice)}${onImage ? '/image' : ''}`;
   const cachedPalette = palettes.get(key);
   const cachedState = states.get(key);
   if (cachedPalette && cachedState) return {palette: cachedPalette, signal: cachedState};
@@ -83,7 +86,7 @@ export function resolveAppearance(
       };
     }
   }
-  const palette = paletteFrom(theme, mode, values);
+  const palette = paletteFrom(theme, mode, values, onImage);
   palettes.set(key, palette);
   states.set(key, state);
   return {palette, signal: state};
