@@ -8,6 +8,7 @@ import {
 } from '@momo/core/features/agents/agentOps';
 import {agentMembers} from '@momo/core/features/agents/hubModel';
 import {channelPlacement} from '@momo/core/features/agents/channelPlacement';
+import {channelListText, spokenChannels} from './channelTags';
 
 // =============================================================================
 // 「에이전트」 목록의 한 줄.
@@ -70,11 +71,19 @@ export interface AgentRow {
  * reads "작업 0개 · 채널 0개" for an agent whose profile has not loaded yet is
  * three lies in one line. What survives is only what a request already proved.
  */
-function metaParts(row: Omit<AgentRow, 'accessibilityLabel' | 'key'>): string[] {
+function metaParts(
+  row: Omit<AgentRow, 'accessibilityLabel' | 'key'>,
+  spoken = false,
+): string[] {
   const parts = [row.stateLabel];
   if (row.runningCount > 0) parts.push(runningSessionMeta(row.runningCount));
   if (row.channelNames.length > 0) {
-    parts.push(row.channelNames.map(name => `#${name}`).join(' '));
+    // 눈으로는 `#a, #b +2`, 귀로는 기호 없이 전부 「채널 a, b, c」 — 접은 +N 도 낭독에서는 펼친다.
+    parts.push(
+      spoken
+        ? `채널 ${spokenChannels(row.channelNames)}`
+        : channelListText(row.channelNames),
+    );
   }
   if (row.unresolvedChannels > 0) {
     parts.push(`그 밖에 ${row.unresolvedChannels}곳`);
@@ -133,7 +142,7 @@ export function buildAgentRows({
       accessibilityLabel: [
         `에이전트 ${partial.displayName}`,
         `@${partial.handle}`,
-        ...metaParts(partial),
+        ...metaParts(partial, true),
       ].join(', '),
     };
   });

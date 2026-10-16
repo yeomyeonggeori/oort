@@ -164,6 +164,8 @@ async function mountApp(): Promise<HTMLElement> {
 }
 
 describe("App: 시드 이름 그대로인 소유자는 저장소가 비어도 S1을 다시 받는다 (#3696)", () => {
+  // 파일의 첫 마운트는 App 모듈 그래프 전체를 처음 읽어 와서 기본 5초 한도에 아슬아슬하다
+  // (#3893 전 base 에서도 4.8~5.0초). 기능 회귀가 아니라 콜드 임포트 비용이라 한도만 넉넉히 둔다.
   it("서버 이름이 시드이고 내가 @demo 소유자면 S1이 선다", async () => {
     applyLogin(session);
     fetchWorkspace.mockResolvedValue({ name: "momo Demo Workspace" });
@@ -171,8 +173,7 @@ describe("App: 시드 이름 그대로인 소유자는 저장소가 비어도 S1
     const host = await mountApp();
     await vi.waitFor(() => {
       expect(host.querySelector('[data-testid="owner-onboarding"]')).not.toBeNull();
-    });
-  });
+    });  }, 30_000);
 
   it("이미 이름을 정했으면 S1이 서지 않는다", async () => {
     applyLogin(session);

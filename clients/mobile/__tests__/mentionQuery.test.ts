@@ -151,3 +151,26 @@ describe('caretAfterChange', () => {
     expect(caretAfterChange('안녕하세요', '')).toBe(0);
   });
 });
+
+// ADR-0201 증보 v2 H2 (#3893): 도우미 별칭. 웹 `composerAutocomplete.test.ts` 와 같은 규칙.
+describe('도우미 별칭', () => {
+  const helper = member({
+    id: 'm-helper',
+    kind: 'agent',
+    handle: 'oort-helper',
+    displayName: 'oort 도우미',
+    aliases: ['oort', '오르트', 'claude'],
+  });
+  const kimOo = member({id: 'm-1', handle: 'kim-oo', displayName: '김우영'});
+
+  it('@오르 가 도우미를 찾고, 별칭이 맞춘 멤버가 앞에 온다', () => {
+    expect(matchMembers([kimOo, helper], '오르').map(m => m.id)).toEqual(['m-helper']);
+    expect(matchMembers([kimOo, helper], 'oo').map(m => m.id)).toEqual(['m-helper', 'm-1']);
+  });
+
+  it('별칭이 없는 서버에서는 예전 결과와 같다', () => {
+    const plain = {...helper, aliases: undefined};
+    expect(matchMembers([kimOo, plain], 'oo').map(m => m.id)).toEqual(['m-1', 'm-helper']);
+    expect(matchMembers([kimOo, plain], '오르')).toEqual([]);
+  });
+});

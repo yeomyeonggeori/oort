@@ -59,7 +59,7 @@ export function useTeamAiDelegateSend({
   channelId,
   viewerMemberId,
   sourceBody,
-  teamAiHandle,
+  teamAiNames,
   offline,
 }: {
   delegate: TeamAiDelegate | null;
@@ -67,7 +67,8 @@ export function useTeamAiDelegateSend({
   channelId: string;
   viewerMemberId: string | undefined;
   sourceBody: string | null;
-  teamAiHandle: string | null;
+  /** 도우미를 부르는 이름들(핸들 + 별칭). 맡기는 메시지에서 지운다. */
+  teamAiNames: readonly string[];
   offline: boolean;
 }): TeamAiDelegateSend {
   const [state, setState] = useState<TeamAiDelegateSendState>({kind: 'idle'});
@@ -91,7 +92,7 @@ export function useTeamAiDelegateSend({
       const body = delegateMessageBody({
         targetHandle: candidate.handle,
         sourceBody,
-        teamAiHandles: teamAiHandle !== null ? [teamAiHandle] : [],
+        teamAiHandles: teamAiNames,
       });
       sendMessage(
         workspaceId,
@@ -113,7 +114,7 @@ export function useTeamAiDelegateSend({
           AccessibilityInfo.announceForAccessibility(SEND_ERROR_LINE);
         });
     },
-    [delegate, workspaceId, channelId, offline, state.kind, sourceBody, teamAiHandle],
+    [delegate, workspaceId, channelId, offline, state.kind, sourceBody, teamAiNames],
   );
 
   const pressable =

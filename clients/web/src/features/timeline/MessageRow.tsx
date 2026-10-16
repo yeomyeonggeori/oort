@@ -12,6 +12,8 @@ import { InlineBanner } from "@/features/common/States";
 import { AgentCard } from "./AgentCard";
 import { TeamAiDelegateStrip } from "./TeamAiDelegateStrip";
 import { teamAiDelegateFor } from "@momo/core/features/timeline/teamAi";
+import { teamAiReplyMetaFor } from "@momo/core/features/timeline/teamAiReply";
+import { TeamAiReplyMeta } from "./TeamAiReplyMeta";
 import { ArtifactCard } from "./ArtifactCard";
 import { AttachmentList } from "./AttachmentList";
 import { MessageBody } from "./MessageBody";
@@ -510,6 +512,8 @@ export function MessageRow({
   const idleNotice = useMemo(() => workSessionIdleNotice(message), [message]);
   // 도우미가 넘기는 줄(ADR-0201 D5). 이 키를 보내지 않는 서버에서는 늘 null 이다.
   const teamAiDelegate = useMemo(() => teamAiDelegateFor(message), [message]);
+  // 도우미 답의 꼬리(ADR-0201 v2): 찾아본 것 · 출처 · 모델 라벨. 칸이 없으면 null.
+  const teamAiReply = useMemo(() => teamAiReplyMetaFor(message), [message]);
   // 맡길 원래 요청의 본문: 화면에 든 행이 먼저, 없으면 페이지에 동봉된 인용.
   const delegateSourceId = teamAiDelegate?.sourceMessageId ?? null;
   const delegateSourceBody =
@@ -970,6 +974,7 @@ export function MessageRow({
           ))}
         {/* 서버 안내 줄의 문 (#2871): 본문 문장이 말한 곳으로 바로 간다. */}
         {!deleted && <NoticeActionLink message={message} />}
+        {teamAiReply && <TeamAiReplyMeta meta={teamAiReply} />}
         {teamAiDelegate && (
           <TeamAiDelegateStrip
             delegate={teamAiDelegate}
