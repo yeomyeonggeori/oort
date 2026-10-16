@@ -2491,3 +2491,84 @@ pub fn bounded_integer(
         Some(_) => Err(ActionRejection::new("argument must be an integer")),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `plugin.install` (H7, #3889): the pure stage takes exactly the official four
+    /// by id and keeps the static table's own string; everything else is refused
+    /// and the refusal names nothing the caller typed.
+    #[test]
+    fn plugin_install_takes_exactly_one_official_id() {
+        for (id, _) in actions::PLUGIN_INSTALL_PLUGINS {
+            let validated = plugin_install_args(&json!({ "pluginId": id })).expect(id);
+            assert_eq!(validated.normalized, json!({ "pluginId": id }));
+            assert!(
+                validated.rows.is_empty(),
+                "the rows come from the resolver, which reads the manifest"
+            );
+            assert!(matches!(
+                validated.args,
+                ActionArgs::PluginInstall { plugin: None, .. }
+            ));
+        }
+        let marker = "sk-live-must-not-echo";
+        for bad in [
+            json!({}),
+            json!({ "pluginId": 7 }),
+            json!({ "pluginId": null }),
+            json!({ "pluginId": "external_webhook" }),
+            json!({ "pluginId": marker }),
+            json!({ "pluginId": "com.momo.plugins.github", "enabled": true }),
+            json!({ "pluginId": "com.momo.plugins.github", "accessToken": marker }),
+            json!("com.momo.plugins.github"),
+            json!(["com.momo.plugins.github"]),
+        ] {
+            let error = plugin_install_args(&bad).expect_err("refused");
+            assert_eq!(error.status, 400, "{bad}");
+            assert!(!error.message.contains(marker), "{error:?}");
+        }
+    }
+
+    /// A card is where registry text becomes a consent: it prints a version only if
+    /// it looks like one and a domain only if it looks like one. Anything else makes
+    /// the proposal not resolve (the install itself re-runs the full manifest
+    /// admission).
+    #[test]
+    fn a_card_prints_only_a_plausible_version_and_plausible_domains() {
+        let long_version = "a".repeat(33);
+        for ok in ["1.0.0", "2026.10.16", "1.0.0-rc.1+build_5"] {
+            assert!(plausible_version(ok), "{ok}");
+        }
+        for bad in ["", " 1.0", "1.0 <b>", "한글", "1\n0", long_version.as_str()] {
+            assert!(!plausible_version(bad), "{bad:?}");
+        }
+        let long_domain = format!("{}.com", "a".repeat(250));
+        for ok in [
+            "api.githubcopilot.com",
+            "mcp.notion.com",
+            "www.googleapis.com",
+            "xn--abc.example.com",
+        ] {
+            assert!(plausible_egress_domain(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "localhost",
+            "-a.com",
+            "a.com-",
+            ".a.com",
+            "a.com.",
+            "API.github.com",
+            "evil.com/path",
+            "a b.com",
+            "a.com\n",
+            "https://a.com",
+            "a.com@b.com",
+            long_domain.as_str(),
+        ] {
+            assert!(!plausible_egress_domain(bad), "{bad:?}");
+        }
+    }
+}
