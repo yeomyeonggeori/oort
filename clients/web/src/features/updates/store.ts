@@ -1,7 +1,8 @@
 import { useSyncExternalStore } from "react";
 import { appVersion, desktopUpdater, isDesktop } from "@/lib/tauri";
 import type { AvailableUpdate } from "@/lib/tauri";
-import type { UpdateState } from "./model";
+import { RELAUNCH_COUNTDOWN_SECONDS, type UpdateState } from "./model";
+import { flushBeforeRelaunch } from "./relaunchFlush";
 
 // =============================================================================
 // The one update channel this app run has (ADR-0133 P2, MOMO-606).
@@ -28,6 +29,9 @@ let state: UpdateState = { kind: "idle" };
 let currentVersion: string | null = null;
 let watching = false;
 let inFlight = false;
+/** Seconds left before the automatic restart, or null when none is scheduled. */
+let relaunchIn: number | null = null;
+let relaunchTimer: number | null = null;
 
 const listeners = new Set<() => void>();
 
@@ -47,6 +51,10 @@ function snapshot(): UpdateState {
   return state;
 }
 
+function countdownSnapshot(): number | null {
+  return relaunchIn;
+}
+
 function versionSnapshot(): string | null {
   return currentVersion;
 }
@@ -61,6 +69,15 @@ function messageOf(error: unknown): string | null {
 /** The running build, once `startUpdateWatch()` has resolved it. */
 export function useAppVersion(): string | null {
   return useSyncExternalStore(subscribe, versionSnapshot, versionSnapshot);
+}
+
+/**
+ * Seconds until the automatic restart (3, 2, 1), or null when none is pending.
+ * It lives here and not in the card: the card can be closed or the sidebar
+ * folded (⌘B) and the owner's decision is still "restart on its own".
+ */
+export function useRelaunchCountdown(): number | null {
+  return useSyncExternalStore(subscribe, countdownSnapshot, countdownSnapshot);
 }
 
 /** The shared update state. */
@@ -97,6 +114,7 @@ export async function checkForUpdate(): Promise<void> {
   } catch (error) {
     set({
       kind: "failed",
+      phase: "check",
       message: "업데이트 서버에 닿지 못했어요. 네트워크를 확인하고 다시 시도하세요.",
       detail: messageOf(error),
       update: null,
@@ -131,9 +149,11 @@ export async function installUpdate(): Promise<void> {
   try {
     await desktopUpdater.install();
     set({ kind: "installed", update: pending });
+    scheduleRelaunch();
   } catch (error) {
     set({
       kind: "failed",
+      phase: "install",
       message: "업데이트를 설치하지 못했어요. 지금 쓰던 버전은 그대로예요.",
       detail: messageOf(error),
       // Deliberately dropped: the shell consumed its pending update, so a retry
@@ -145,9 +165,49 @@ export async function installUpdate(): Promise<void> {
   }
 }
 
-/** Restart into the installed build. Never returns on success. */
+function clearRelaunchTimer(): void {
+  if (relaunchTimer !== null) {
+    window.clearTimeout(relaunchTimer);
+    relaunchTimer = null;
+  }
+}
+
+/** Start the 3-second countdown after a finished install. One at a time. */
+function scheduleRelaunch(): void {
+  clearRelaunchTimer();
+  relaunchIn = RELAUNCH_COUNTDOWN_SECONDS;
+  for (const listener of listeners) listener();
+  const tick = () => {
+    relaunchTimer = null;
+    if (relaunchIn === null) return;
+    if (relaunchIn <= 1) {
+      void relaunchIntoUpdate();
+      return;
+    }
+    relaunchIn -= 1;
+    for (const listener of listeners) listener();
+    relaunchTimer = window.setTimeout(tick, 1000);
+  };
+  relaunchTimer = window.setTimeout(tick, 1000);
+}
+
+/**
+ * Restart into the installed build. Never returns on success.
+ *
+ * Every restart path (the automatic countdown, 「지금」, Settings, the connect
+ * screen) goes through here, so this is the one place that makes sure unsent
+ * text is on disk first. A failed restart keeps the installed state and puts
+ * the countdown away; the 「지금」 button stays, so nothing is lost.
+ */
 export async function relaunchIntoUpdate(): Promise<void> {
-  await desktopUpdater.relaunch();
+  clearRelaunchTimer();
+  flushBeforeRelaunch();
+  try {
+    await desktopUpdater.relaunch();
+  } catch {
+    relaunchIn = null;
+    for (const listener of listeners) listener();
+  }
 }
 
 /**
@@ -176,11 +236,20 @@ export function startUpdateWatch(): () => void {
   };
 }
 
+/** Test and capture seam: put the store into a given state without a manifest. */
+export function seedUpdateStateForTest(next: UpdateState, countdown: number | null = null): void {
+  state = next;
+  relaunchIn = countdown;
+  for (const listener of listeners) listener();
+}
+
 /** Test seam: reset the singleton between cases. */
 export function resetUpdateStoreForTest(): void {
   state = { kind: "idle" };
   currentVersion = null;
   watching = false;
   inFlight = false;
+  clearRelaunchTimer();
+  relaunchIn = null;
   listeners.clear();
 }

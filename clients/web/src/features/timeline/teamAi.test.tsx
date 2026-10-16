@@ -341,3 +341,89 @@ describe("「그록봇에게 맡기기」 (ADR-0201 D5)", () => {
     expect(view.querySelector('[data-testid="team-ai-delegate"]')).toBeNull();
   });
 });
+
+// ADR-0201 증보 v2 (#3893): 도우미 답의 꼬리와 새 설정 카드.
+describe("도우미 답의 꼬리 (v2 H4·H5·H9-I9)", () => {
+  const V2_REPLY = {
+    source: "team_ai",
+    run_id: "00000000-0000-7000-8000-0000000006b1",
+    model_label: "Claude Sonnet 4.5",
+    tools_used: [{ name: "search_messages" }, { name: "read_channel", channel: "마케팅" }, { name: "web_search" }],
+    web_citations: [
+      { url: "https://www.example.com/rust-2026", title: "Rust 2026 로드맵" },
+      { url: "javascript:alert(1)", title: "나쁜 주소" },
+    ],
+  };
+
+  it("찾아본 것 · 모델 칩 · 출처 링크를 본문 아래에 세운다", () => {
+    const view = mount(
+      createElement(MessageRow, {
+        message: message({ body: "지난주 마케팅 채널에서 정한 건 세 가지예요.", props: V2_REPLY }),
+        startsGroup: true,
+        directory: DIRECTORY,
+      })
+    );
+    expect(view.querySelector('[data-testid="team-ai-tools-line"]')?.textContent).toContain(
+      "찾아본 것: 메시지 검색 · #마케팅 읽기 · 웹 검색"
+    );
+    expect(view.querySelector('[data-testid="team-ai-model-chip"]')?.textContent).toBe(
+      "팀 AI · Claude Sonnet 4.5"
+    );
+    const links = view.querySelectorAll<HTMLAnchorElement>('[data-testid="team-ai-citation"]');
+    expect(links).toHaveLength(1);
+    expect(links[0].getAttribute("href")).toBe("https://www.example.com/rust-2026");
+    expect(links[0].getAttribute("rel")).toBe("noreferrer noopener");
+    expect(links[0].getAttribute("target")).toBe("_blank");
+    expect(links[0].getAttribute("aria-label")).toBe("Rust 2026 로드맵, example.com, 새 창에서 열기");
+  });
+
+  it("칸이 없는 도우미 답(옛 서버)에는 꼬리가 없다", () => {
+    const view = mount(
+      createElement(MessageRow, {
+        message: message({ body: "안녕하세요", props: { source: "team_ai", run_id: "r" } }),
+        startsGroup: true,
+        directory: DIRECTORY,
+      })
+    );
+    expect(view.querySelector('[data-testid="team-ai-reply-meta"]')).toBeNull();
+  });
+});
+
+describe("도우미의 워크스페이스 설정 카드 (v2 H6-1)", () => {
+  function mountAction(id: string): HTMLElement {
+    const card = agentCardModel(
+      message({
+        type: "approval_request",
+        props: {
+          approval_id: "00000000-0000-7000-8000-0000000005b1",
+          action_type: "workspace_action",
+          status: "pending",
+          title: "링크 미리보기 끄기",
+          action: {
+            id,
+            rows: [{ label: "링크 미리보기", value: "켜짐 → 꺼짐" }],
+            rationale: "링크 카드가 너무 커서 꺼 달라고 했어요",
+            required_role: "workspace_operator",
+          },
+          proposed_via: { kind: "team_ai", requester_id: OTHER, requester_name: "김하늘" },
+        },
+      })
+    );
+    if (card === null) throw new Error("no card");
+    return mount(createElement(AgentCard, { card, directory: DIRECTORY }));
+  }
+
+  it("설정 액션 카드는 서버 행 아래에 「적용 범위: 워크스페이스 전체」를 말한다", () => {
+    const view = mountAction("workspace.unfurl.update");
+    const row = view.querySelector('[data-testid="approval-workspace-wide"]');
+    expect(row?.querySelector("dt")?.textContent).toBe("적용 범위");
+    expect(row?.textContent).toContain("워크스페이스 전체");
+    expect(row?.textContent).toContain("승인하면 모든 멤버에게 바로 적용돼요.");
+    expect(view.querySelector('[data-testid="approval-action-row"]')?.textContent).toContain("켜짐 → 꺼짐");
+  });
+
+  it("채널 하나에 닿는 행동에는 그 줄이 없다", () => {
+    const view = mountAction("channel.create");
+    expect(view.querySelector('[data-testid="approval-workspace-wide"]')).toBeNull();
+  });
+});

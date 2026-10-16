@@ -73,6 +73,7 @@ import {
 import { TeamKeyForm } from "./TeamKeyForm";
 import { TeamUnlinkDialog } from "./TeamUnlinkDialog";
 import { AiMyAccountsSection } from "./AiMyAccountsSection";
+import { CohostedAgentCard } from "./CohostedAgentCard";
 
 // =============================================================================
 // AI (#2877, 시안 claudedocs/ai-accounts/mockups.html §1·§6).
@@ -191,6 +192,8 @@ export function AiLinkSection({
       )}
       {offline && <AiOfflineBanner />}
       <TeamBoard offline={offline} workspaceId={workspaceId} />
+      {/* ADR-0203: 서버가 선언을 알고 이 사람이 운영자일 때만 그린다(아니면 null). */}
+      <CohostedAgentCard offline={offline} workspaceId={workspaceId} />
     </div>
   );
 }
@@ -927,11 +930,14 @@ export function ProbeAnswer({
   link,
   chainPending,
   justSaved,
+  numbersElsewhere = false,
 }: {
   probe: ProviderLinkTest;
   link: ProviderLink;
   chainPending: boolean;
   justSaved: boolean;
+  /** 숫자(모델 수·한도·크레딧)를 다른 칸(한도·남은 크레딧 블록)이 보이는 표면: 결과 상자는 판정만 둔다(#3887). */
+  numbersElsewhere?: boolean;
 }) {
   // Parsed rather than trusted: `entries` is an ADR-0135 D1 addition, so an
   // unreadable answer degrades to the single-hop sentence (see chainModel).
@@ -963,7 +969,7 @@ export function ProbeAnswer({
         <span className="break-keep text-meta text-ink-muted" data-testid="ai-link-probe-text">
           <CheckSentence text={line.text} />
         </span>
-        {line.detailParts.length > 0 && (
+        {!numbersElsewhere && line.detailParts.length > 0 && (
           <span className="break-keep text-meta tabular-nums text-ink" data-testid="ai-link-probe-detail">
             <CheckNumbers parts={line.detailParts} />
           </span>

@@ -445,3 +445,49 @@ function channel(id: string, name: string | undefined): Channel {
     muted: false,
   };
 }
+
+// ADR-0201 증보 v2 H2-8 (#3893): 도우미 별칭이 자동완성에 「oort 도우미 · @오르트」로 뜬다.
+describe("도우미 별칭 후보", () => {
+  const helper: RosterMember = {
+    ...member("m-helper", "oort-helper", "oort 도우미"),
+    kind: "agent",
+    aliases: ["oort", "오르트", "claude"],
+  };
+  const others = [
+    member("m-1", "kim-oo", "김우영"),
+    member("m-2", "haneul", "김하늘"),
+  ];
+
+  it("별칭이 없는 서버에서는 #1930 이전과 한 글자도 다르지 않다", () => {
+    const plain = { ...helper, aliases: undefined };
+    const rows = memberCandidates([...others, plain], "oo");
+    expect(rows.map((row) => [row.lead, row.hint, row.insert])).toEqual([
+      ["@kim-oo", "김우영", "@kim-oo "],
+      ["@oort-helper", "oort 도우미", "@oort-helper "],
+    ]);
+    expect(memberCandidates([...others, plain], "오르")).toEqual([]);
+  });
+
+  it("@오르 를 치면 도우미가 뜨고, 넣는 글자는 멘션 문법이 읽는 @oort 다", () => {
+    const rows = memberCandidates([...others, helper], "오르");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      id: "m-helper",
+      lead: "@oort",
+      hint: "oort 도우미 · @오르트",
+      insert: "@oort ",
+    });
+    // 아바타를 그릴 명부 행이 그대로 실린다.
+    expect(rows[0].member?.id).toBe("m-helper");
+  });
+
+  it("별칭이 맞춘 멤버가 앞에 온다", () => {
+    const rows = memberCandidates([...others, helper], "oo");
+    expect(rows.map((row) => row.lead)).toEqual(["@oort", "@kim-oo"]);
+  });
+
+  it("@cla 는 등록된 claude 별칭으로 도우미를 찾는다", () => {
+    const rows = matchMembers([...others, helper], "cla");
+    expect(rows.map((row) => row.id)).toEqual(["m-helper"]);
+  });
+});

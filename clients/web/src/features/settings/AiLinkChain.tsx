@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
+import { SecretInput } from "@/features/settings/SecretInput";
 import { cn } from "@/design/lib/cn";
 import { InlineBanner, Skeleton } from "@/features/common/States";
 import {
@@ -303,9 +304,8 @@ function HopRow({
             hint={bearerHint(row)}
             error={error?.field === "bearer" ? error.message : null}
           >
-            <Input
+            <SecretInput
               id={bearerId}
-              type="password"
               value={row.bearer}
               autoComplete="off"
               disabled={locked}

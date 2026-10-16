@@ -134,11 +134,20 @@ export interface ProviderKeyCredit {
   limit: number | null;
   limitRemaining: number | null;
   usage: number | null;
+  /** #3886: 이 키가 이번 달(UTC) 쓴 크레딧. */
+  usageMonthly?: number;
+  isFreeTier?: boolean;
+}
+
+/** #3886: OpenRouter `GET /credits`. 관리 키로 확인했을 때만 온다(계정 전체 숫자). */
+export interface ProviderAccountCredit {
+  totalCredits: number;
+  totalUsage: number;
 }
 
 /** `ProviderProbeDetail` (#2960). */
 export interface ProviderProbeDetail {
-  outcome: "ok" | "rejected" | "unreachable" | "rate_limited" | "unknown";
+  outcome: "ok" | "rejected" | "unreachable" | "rate_limited" | "no_credit" | "unknown";
   method: "models" | "key";
   httpStatus?: number;
   latencyMs: number;
@@ -146,6 +155,9 @@ export interface ProviderProbeDetail {
   rateLimit?: ProviderRateLimit;
   retryAfterSeconds?: number;
   credit?: ProviderKeyCredit;
+  accountCredit?: ProviderAccountCredit;
+  /** `/credits`가 이 키를 거절했다: 일반 키라서 계정 전체 잔액은 읽을 수 없다. */
+  accountCreditNeedsManagementKey?: boolean;
   probedAtMs: number;
   /** The link's last report reused inside the server's 20 s window. */
   cached: boolean;
@@ -252,6 +264,51 @@ export function deleteProviderLink(): Promise<ProviderLink> {
 export function testProviderLink(): Promise<ProviderLinkTest> {
   return settingsRequest<ProviderLinkTest>("/v1/provider/link/test", {
     method: "POST",
+  });
+}
+
+// --- 한도·남은 크레딧: GET /v1/provider/limits, PUT …/limits/budget (#3886) ---
+//
+// 운영자 전용. 이 응답의 달러는 **oort 추정**이다(usage_ledger 토큰 × model_pricing):
+// 공급사가 밝힌 잔액이 아니다. Anthropic·OpenAI는 일반 API 키로 읽는 잔액 API가 없다.
+
+export type LimitsCompany = "anthropic" | "openai" | "xai" | "openrouter";
+
+export interface ProviderSpendEstimate {
+  /** 단가가 있는 실행만의 추정 합계(micro-USD). */
+  microUsd: number;
+  runs: number;
+  promptTokens: number;
+  completionTokens: number;
+  /** 단가가 없는 모델의 실행: 횟수에만 들고 달러에는 없다. */
+  unpricedRuns: number;
+  unpricedModels: string[];
+}
+
+export interface ProviderCompanyLimits {
+  company: LimitsCompany;
+  /** 운영자가 적은 월 크레딧(micro-USD). 없으면 생략. */
+  monthlyBudgetMicroUsd?: number;
+  budgetUpdatedAtMs?: number;
+  spendEstimate: ProviderSpendEstimate;
+}
+
+export interface ProviderLimits {
+  schema: string;
+  monthStartMs: number;
+  computedAtMs: number;
+  companies: ProviderCompanyLimits[];
+}
+
+export function fetchProviderLimits(): Promise<ProviderLimits> {
+  return settingsRequest<ProviderLimits>("/v1/provider/limits");
+}
+
+/** `monthlyBudgetUsd: null`은 지운다. */
+export function putProviderBudget(company: LimitsCompany, monthlyBudgetUsd: number | null): Promise<ProviderLimits> {
+  return settingsRequest<ProviderLimits>("/v1/provider/limits/budget", {
+    method: "PUT",
+    body: JSON.stringify({ company, monthlyBudgetUsd }),
   });
 }
 
