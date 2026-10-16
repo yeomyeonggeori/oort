@@ -279,6 +279,7 @@ T1 워커 레인 제안 도구(레지스트리 재사용·드리프트 시험) �
 - **`plugin.install`** 계약(지금 정한다): 인자 `{pluginId: "com.momo.plugins.github"|"com.momo.plugins.notion"|"com.momo.plugins.linear"|"com.momo.plugins.drive"}`, required_role **Admin**, effect 「워크스페이스에 ○○ 앱을 설치해요. 토큰은 oort에 저장하지 않아요」, secret_delivery None.
 - **배치: 설치 경로(ADR-0113 P3)가 생기기 전까지 `DECLARED_NOT_EXECUTABLE`**에 두고 `unavailable_reason = "아직 설치 경로가 없어요."`로 쓴다. 그래서 제안해도 **카드가 생기지 않고**, 도우미는 그 자리에서 「○○ 앱은 아직 oort에서 설치하는 경로가 없어요. 준비되면 설치 카드를 띄울게요.」라고 한다. 항상 실패하는 실행기를 단 카드(관리자 승인을 받아 놓고 실패)는 기각한다 — 관리자의 승인을 헛되게 하고, 성공할 수 없는 일을 할 수 있는 것처럼 보인다.
 - 설치 라우트가 생기면 한 슬라이스로 `ACTIONS`·`TEAM_AI_ACTION_IDS`로 옮기고, 실행기는 그 라우트와 같은 도메인 함수를 부른다(후속 이슈, H12).
+- **갱신 2026-10-16 (#3889): 열었다.** 설치 경로(ADR-0113 증보 2026-10-16, #3914)가 생겨 `plugin.install`을 `DECLARED_NOT_EXECUTABLE`에서 `ACTIONS`·`TEAM_AI_ACTION_IDS`(9개)로 옮겼다. 위 계약 그대로(인자 `{pluginId}` 공식 4개, Admin, 비밀 없음)이고, 정한 것은 셋이다. ① 제안자는 도우미 전용(`TeamAiOnly`) — H6의 설정 액션 셋과 같은 이유로, 외부 에이전트에게는 요청받지 않았다. ② 카드는 앱 이름·버전·**연결 대상(egress, 0113 D5)**·상태(before → after)를 보이고 그 매니페스트의 digest를 pin한다 — 카드를 그린 뒤 매니페스트가 바뀌면 승인은 409(`action_args_invalid`)로 되묻는다. 이미 설치되고 켜진 앱은 제안이 아니다(`nothing to change`). ③ 승인하면 설치 라우트와 같은 도메인 함수가 결정자 권한으로 **켠 채** 설치한다(grant는 없다 — 연결은 각자의 동의). 감사 `plugin.installed`에 `via_agent`·`approval_id`·run이 실리고, 결정자가 매니페스트 `serverPolicy`의 역할이 아니면 403(`role_required`, 승인은 소비되지 않는다). 프롬프트의 정직한 거절 문장과 `NotYetAvailable` 갈래는 없앴다.
 - **연결(grant)은 승인 카드가 아니다**: grant는 요청한 사람 본인 명의(0113 D2)이고 토큰은 에이전트 호스트에 있다(D1-A). 도우미는 `settings.open`(앱 섹션) 카드로 본인 화면을 열어 줄 뿐이고, 설치 경로가 없는 동안은 같은 정직한 문장을 쓴다. 도우미는 OAuth 토큰·키를 묻거나 받지 않는다.
 - 읽기는 지금 된다: `list_plugins`(H4-1).
 
@@ -348,7 +349,7 @@ T1 워커 레인 제안 도구(레지스트리 재사용·드리프트 시험) �
 - **H13-A13** `TEAM_AI_ACTION_IDS` = H6-1의 8개(기존 `…_is_the_four_…` 시험은 8개 시험으로 바뀐다). `invite.create`·`agent.invite`·`hosted.channels.grant`는 여전히 거절, `workspace.settings.update`에 `allowedAgentModels`·`welcomeAgentMemberId`를 넣으면 `InvalidArguments`.
 - **H13-A14** `workspace.memory.update {enabled:true}`는 스키마가 거절한다. 새 설정 액션 3개를 Agent Port `oort_action_propose`로 내면 `InvalidArguments`·카드 0이고, `oort_action_propose` 스키마 enum에 그 id가 없다(`proposers` 판정을 지우면 실패).
 - **H13-A15** 새 액션 3개는 승인 전 설정이 바뀌지 않고, 결정자가 role을 못 갖추면 403·설정 불변, 승인하면 REST 라우트와 같은 결과(저장 전후 비교)와 `via_agent` 감사.
-- **H13-A16** `plugin.install` 제안 → approval 행 0, 카드 0, 답에 「아직 설치 경로가 없어요」.
+- **H13-A16** `plugin.install` 제안 → approval 행 0, 카드 0, 답에 「아직 설치 경로가 없어요」. **→ 2026-10-16(#3889)에 대체**: 제안 → 카드 1(앱·버전·연결 대상), 승인 전 설치 0, 일반 멤버 결정은 403·설치 0·카드 유지, 승인하면 REST 설치와 같은 행 상태·같은 감사 detail(+`via_agent`), 바뀐 매니페스트·그 사이 설치는 409로 되묻고 설치 0, 에이전트 포트로는 알 수 없는 id처럼 거절.
 - **H13-A17** 도구 결과 직렬화에 시크릿 키 이름이 없다(키 이름 허용목록). `read_workspace_settings`는 비 operator 요청자에게 `not_allowed`.
 - **H13-A18** 감사·로그에 트리거 본문·도구 결과 본문이 없다(본문 문자열 검색으로 0건).
 - **H13-A19** 일일 검색 상한을 넘으면 검색 도구가 요청에 없다. 원장 `web_search_requests` 합이 상한을 집행한다.
