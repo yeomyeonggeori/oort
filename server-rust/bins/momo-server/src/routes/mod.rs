@@ -23,6 +23,7 @@ pub mod claim;
 pub mod cloud_box_runner;
 pub mod cloud_boxes;
 pub mod cloud_hosts;
+pub mod cohosted_agent;
 pub mod credits;
 pub mod device_keys;
 pub mod device_link;

@@ -497,7 +497,7 @@ impl ProviderProbe for GuardedProviderProbe {
     }
 }
 
-fn denied_report(method: ProbeMethod, denied: EgressDenied) -> ProbeReport {
+pub(crate) fn denied_report(method: ProbeMethod, denied: EgressDenied) -> ProbeReport {
     match denied {
         // An unresolvable name is availability, not policy.
         EgressDenied::NoAddress => {
@@ -586,13 +586,13 @@ async fn fetch_account_credit(
     }
 }
 
-enum BodyRead {
+pub(crate) enum BodyRead {
     Complete(Vec<u8>),
     TooLarge,
     Failed,
 }
 
-async fn read_capped(response: &mut reqwest::Response) -> BodyRead {
+pub(crate) async fn read_capped(response: &mut reqwest::Response) -> BodyRead {
     let mut body = Vec::new();
     loop {
         match response.chunk().await {
@@ -785,5 +785,13 @@ impl ProbeCache {
     }
 }
 
+mod cohosted;
+pub use cohosted::{
+    CohostedAgentProbe, CohostedReport, CohostedTarget, ToolsetsSignal,
+    COHOSTED_BASE_PATH_UNSUPPORTED,
+};
+
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_cohosted;

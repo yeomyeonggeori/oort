@@ -2226,6 +2226,72 @@ scripts/oort doctor --json
 **Gate after the platform URL exists:** `scripts/oort doctor --json` with
 `public.healthz` pass.
 
+### 3.4.1 Railway: Hermes in the same project (ADR-0203)
+
+Optional. Read this only when the operator wants a Hermes agent next to oort
+in the **same Railway project** and a one-click connect in 설정 › AI 연결.
+oort never lists Railway services, never stores a Railway token and never
+guesses a host: it dials only the host the operator wrote in `HERMES_BASE_URL`.
+Do these in order — **Hermes is not started until step 2 is confirmed**.
+
+1. **Write Hermes' own config first** (`config.yaml` on its volume, before the
+   service starts). Turn the dangerous toolsets off:
+
+```yaml
+agent:
+  disabled_toolsets: [terminal, code_execution, browser]
+```
+
+   The API server toolset keeps terminal, code execution and browser by
+   default, and the API server has no switch of its own. Whether to also turn
+   off `file`, `delegation`, `cronjob`, `process_manage`, `computer_use` is the
+   operator's call (names: Hermes toolsets reference). Do not set
+   `approvals.mode: off` and do not set `HERMES_YOLO_MODE`.
+2. **Confirm the lock**, then start the service. oort cannot see Hermes'
+   tools; this confirmation is yours.
+3. **Give Hermes only its own variables:** `API_SERVER_ENABLED=true`,
+   `API_SERVER_KEY` (long random, e.g. `openssl rand -hex 32`),
+   `API_SERVER_HOST`, `API_SERVER_PORT=8642` and its model provider key.
+   Leave `API_SERVER_CORS_ORIGINS` empty. Do **not** reference oort's
+   `DATABASE_URL`, `WORKER_DATABASE_URL`, `PROVIDER_LINK_MASTER_KEY`, JWT keys
+   or any shared variable of the oort services.
+4. **No public domain** on the Hermes service. It is reached only as
+   `<service-name>.railway.internal`. Declare only a host whose DNS you
+   control: the host written in `HERMES_BASE_URL` is exempt from oort's
+   address checks by design, so a name someone else can re-point is not
+   safe to declare.
+5. **Bind address (D9):** an environment created on or after 2025-10-16
+   resolves internal names to IPv4 and IPv6, so `API_SERVER_HOST=0.0.0.0` is
+   enough. A legacy environment resolves IPv6 only and needs `::`; whether
+   Hermes accepts `::` is **not verified** (runtime-unverified), so legacy
+   environments are not promised. Check the environment's creation date first.
+6. **On oort's `api` and `agent-worker` services** set:
+   `HERMES_BASE_URL=http://<service-name>.railway.internal:8642/v1`,
+   `HERMES_API_KEY=<the same value as API_SERVER_KEY>`,
+   `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`,
+   `AGENT_PROVIDER_LOCAL_HOSTS=<service-name>.railway.internal` (exact host, no
+   wildcard). A plain `http://` internal host is refused without this opt-in.
+7. **Attest the lock** on the `api` service:
+   `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`. This is the operator's own
+   declaration that steps 1-4 were followed. oort shows it that way and does
+   not verify it; a false declaration leaves a terminal on the agent host.
+8. In the web or desktop app, as the instance operator
+   (`PLATFORM_ADMIN_EMAILS`), open 설정 › AI 연결. The card 「같은 서버의
+   Hermes를 찾았어요, 연결할까요?」 appears only after step 7. One click creates
+   the agent member and pins it to this env link. It adds the agent to no
+   channel and grants no tool; invite it to channels as usual.
+
+Data and removal: everything Hermes keeps (`/opt/data`: sessions, memories,
+skills, `state.db`, `.env`) lives on **its own volume, outside oort's database
+and outside oort's backups** — back it up yourself. Conversations sent to
+Hermes stay there. Removing the agent in oort does not delete the volume; to
+erase it, delete the Hermes service and its volume in Railway. Connect only
+one workspace to one Hermes (conversations of several workspaces would share
+one volume).
+
+The compose `agents` profile is not shipped yet (it follows a verified Railway
+path). Measured `0.0.0.0` vs `::` on a real Railway environment is still open.
+
 ### 3.5 Fly
 
 T1. The compose procedure is §3.2 on one Fly VM with a volume. Catalog:
