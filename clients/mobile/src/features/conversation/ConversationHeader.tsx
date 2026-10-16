@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {BAR_CONTROL_MAX_SCALE} from '../../design/atoms';
+import {OortLoader} from '../../design/brand/OortLoader';
 import {GlassSurface} from '../../design/glass';
 import {
   CONV_ICONS,
@@ -194,12 +195,9 @@ export function ConversationHeader({
           accessibilityLiveRegion="polite"
           style={styles.banner}
           testID="connection-banner">
-          <View
-            style={[
-              styles.bannerDot,
-              railStatus === 'connecting' ? styles.bannerDotWait : styles.bannerDotLost,
-            ]}
-          />
+          {/* 두 문장(「연결 중…」·「연결이 끊겼습니다」) 모두 레일이 다시 연결을 시도하는 동안이라
+              같은 로더가 돈다(#3961). 문장은 그대로고 로더는 곁들일 뿐이다. */}
+          <OortLoader size={BANNER_LOADER_SIZE} testID="connection-loader" />
           <Text style={styles.bannerText} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
             {banner}
           </Text>
@@ -211,6 +209,9 @@ export function ConversationHeader({
 
 /** 42 원을 44 로 만드는 여유 — 한 변에 1. */
 const CIRCLE_SLOP = (TOUCH_TARGET - CONV.circle) / 2;
+
+/** 연결 띠의 로더 한 변(pt). 12pt 문장 한 줄 옆에 서는 자리라 small 마크가 읽히는 20. */
+const BANNER_LOADER_SIZE = 20;
 
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
@@ -264,8 +265,5 @@ const buildStyles = (color: Palette) =>
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: color.border,
     },
-    bannerDot: {width: space.sm, height: space.sm, borderRadius: space.xs},
-    bannerDotWait: {backgroundColor: color.textMuted},
-    bannerDotLost: {backgroundColor: color.warn},
     bannerText: {fontSize: font.meta, color: color.text, fontWeight: '600'},
   });

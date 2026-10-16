@@ -1,9 +1,10 @@
 import {QueryClientProvider} from '@tanstack/react-query';
 import React, {useEffect, useMemo, useState} from 'react';
-import {ActivityIndicator, StatusBar, StyleSheet, Text, View} from 'react-native';
+import {StatusBar, StyleSheet, Text, View} from 'react-native';
 import {SafeAreaProvider} from 'react-native-safe-area-context';
 import {bootSpawnPort} from './src/boot/spawnPort';
 import {PrimaryButton} from './src/design/atoms';
+import {OortLoader} from './src/design/brand/OortLoader';
 import {font, SAFE_GUTTER, space, type Palette} from './src/design/tokens';
 import {BrandAppearance, ThemeProvider, usePalette, useStyles, useTheme} from './src/design/theme';
 import {createQueryClient, installReactQueryBridges} from './src/query/queryClient';
@@ -117,7 +118,8 @@ function Gate(): React.JSX.Element {
   return <AppShell member={gate.member} />;
 }
 
-function Booting({
+/** 첫 로딩 화면. 오르트 로더 시험과 캡처 하네스가 직접 그린다(#3961). */
+export function Booting({
   label,
   onRetry,
   testID,
@@ -127,10 +129,11 @@ function Booting({
   testID?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const palette = usePalette();
   return (
     <View style={styles.booting} testID={testID}>
-      {onRetry ? null : <ActivityIndicator color={palette.accentText} />}
+      {/* 첫 로딩(앱을 열 때, 로그인 상태를 되살릴 때)은 오르트 로더가 돈다(#3961).
+          다시 시도 버튼이 서는 자리(서버에 닿지 못함)는 돌 것이 없다. */}
+      {onRetry ? null : <OortLoader size={BOOT_LOADER_SIZE} testID="boot-loader" />}
       {label ? <Text style={styles.bootingLabel}>{label}</Text> : null}
       {onRetry ? (
         <View style={styles.bootingAction}>
@@ -140,6 +143,9 @@ function Booting({
     </View>
   );
 }
+
+/** 첫 로딩 로더의 한 변(pt). 꼬리 점이 서는 display 마크의 첫 크기(40)보다 한 단 크게. */
+const BOOT_LOADER_SIZE = 56;
 
 const buildStyles = (color: Palette) => StyleSheet.create({
   booting: {
