@@ -280,3 +280,77 @@ describe('「그록봇에게 맡기기」 (폰)', () => {
     expect(screen.queryByTestId('team-ai-delegate')).toBeNull();
   });
 });
+
+// ADR-0201 증보 v2 (#3893): 도우미 답의 꼬리와 새 설정 카드 — 웹 `teamAi.test.tsx` 와 같은 픽스처.
+const V2_REPLY = {
+  source: 'team_ai',
+  run_id: '0199aa11-2222-7000-8000-0000000006b1',
+  model_label: 'Claude Sonnet 4.5',
+  tools_used: [
+    {name: 'search_messages'},
+    {name: 'read_channel', channel: '마케팅'},
+    {name: 'web_search'},
+  ],
+  web_citations: [
+    {url: 'https://www.example.com/rust-2026', title: 'Rust 2026 로드맵'},
+    {url: 'javascript:alert(1)', title: '나쁜 주소'},
+  ],
+};
+
+describe('도우미 답의 꼬리 (폰, v2)', () => {
+  it('찾아본 것 · 모델 칩 · 출처를 그리고, 행 낭독과 로터에도 싣는다', () => {
+    const {Linking} = require('react-native');
+    const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+    renderRow(
+      message({body: '지난주 마케팅 채널에서 정한 건 세 가지예요.', props: V2_REPLY}),
+      actionsFor(SELF_ID),
+    );
+    expect(screen.getByTestId('team-ai-tools-line')).toHaveTextContent(
+      '찾아본 것: 메시지 검색 · #마케팅 읽기 · 웹 검색',
+    );
+    expect(screen.getByTestId('team-ai-model-chip')).toHaveTextContent('팀 AI · Claude Sonnet 4.5');
+    expect(screen.getAllByTestId('team-ai-citation')).toHaveLength(1);
+
+    const row = screen.getByTestId('message-row');
+    expect(row.props.accessibilityLabel).toContain('찾아본 것: 메시지 검색, #마케팅 읽기, 웹 검색');
+    expect(row.props.accessibilityLabel).toContain('출처 1개');
+    const actions = (row.props.accessibilityActions ?? []) as {name: string; label: string}[];
+    const source = actions.find(action => action.label.startsWith('출처 1 열기'));
+    expect(source?.label).toBe('출처 1 열기, Rust 2026 로드맵');
+    act(() => {
+      fireEvent(row, 'accessibilityAction', {nativeEvent: {actionName: source?.name}});
+    });
+    expect(open).toHaveBeenCalledWith('https://www.example.com/rust-2026');
+    open.mockRestore();
+  });
+
+  it('칸이 없는 도우미 답(옛 서버)에는 꼬리도 로터 행동도 없다', () => {
+    renderRow(message({body: '안녕하세요', props: {source: 'team_ai', run_id: 'r'}}), actionsFor(SELF_ID));
+    expect(screen.queryByTestId('team-ai-reply-meta')).toBeNull();
+    const actions = (screen.getByTestId('message-row').props.accessibilityActions ??
+      []) as {label: string}[];
+    expect(actions.some(action => action.label.startsWith('출처'))).toBe(false);
+  });
+
+  it('설정 액션 카드는 「적용 범위: 워크스페이스 전체」를 말한다', () => {
+    renderRow(
+      message({
+        type: 'approval_request',
+        props: {
+          ...approvalProps(true),
+          title: '링크 미리보기 끄기',
+          action: {
+            id: 'workspace.unfurl.update',
+            rows: [{label: '링크 미리보기', value: '켜짐 → 꺼짐'}],
+            rationale: '링크 카드가 너무 커서 꺼 달라고 했어요',
+            required_role: 'workspace_operator',
+          },
+        },
+      }),
+    );
+    const wide = screen.getByTestId('approval-workspace-wide');
+    expect(within(wide).getByText('적용 범위')).toBeTruthy();
+    expect(within(wide).getByText('워크스페이스 전체')).toBeTruthy();
+    expect(within(wide).getByText('승인하면 모든 멤버에게 바로 적용돼요.')).toBeTruthy();
+  });
+});

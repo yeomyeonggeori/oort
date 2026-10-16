@@ -1,4 +1,5 @@
 import { Fragment, useMemo, useState } from "react";
+import { mentionableNames } from "@momo/core/features/routing/helperAliases";
 import { cn } from "@/design/lib/cn";
 import { isDesktop, openExternalUrl } from "@/lib/tauri";
 import {
@@ -288,11 +289,9 @@ export function MessageBody({
     // Keep the pre-markdown path cheap: ordinary prose neither walks the
     // directory nor changes its rendered shape just because this prop exists.
     if (blocks === null || directory === undefined) return NO_MENTIONS;
-    const activeHandles = new Set(
-      directory.members
-        .filter((member) => member.status === "active")
-        .map((member) => member.handle.toLowerCase())
-    );
+    // 핸들 + 서버가 등록한 ASCII 별칭(ADR-0201 v2 H2, `@oort`). 별칭이 없는 서버에서는
+    // 핸들 집합 그대로다.
+    const activeHandles = mentionableNames(directory.members);
     const self = memberFor(directory, selfMemberId);
     return {
       activeHandles,

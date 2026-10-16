@@ -163,6 +163,20 @@ function draftKeys(): string[] {
   }
 }
 
+function threadDraftKeys(): string[] {
+  try {
+    if (typeof localStorage === "undefined") return [];
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key !== null && key.startsWith(THREAD_PREFIX)) keys.push(key);
+    }
+    return keys;
+  } catch {
+    return [];
+  }
+}
+
 function parse(raw: string | null): StoredDraft | null {
   if (raw === null) return null;
   try {
@@ -298,9 +312,55 @@ export function seedThreadComposerText(
   return detail.result;
 }
 
+// 스레드 답글 초안 (#3904). 스레드 컴포저는 입력마다 저장하지 않는다. 앱이 업데이트로
+// **스스로 다시 실행**하기 직전(`features/updates/relaunchFlush.ts`)에만 이 자리에 내리고,
+// 스레드를 다시 열 때 비어 있으면 복원한다. 채널 초안과 열쇠 머리를 달리 둬서
+// 초안 목록(`listDrafts`)·사이드바가 이 항목을 채널 초안으로 읽지 않는다.
+// 같은 수명 규칙을 따른다: 비밀 키 모양은 두지 않고, 30일이 지나면 읽을 때 버리고,
+// 보내거나 로그아웃하면 지운다.
+const THREAD_PREFIX = "momo.thread-draft.v1:";
+
+function threadDraftKey(workspaceId: string, rootId: string): string {
+  return `${THREAD_PREFIX}${workspaceId.toLowerCase()}:${rootId.toLowerCase()}`;
+}
+
+export function writeThreadDraft(
+  workspaceId: string,
+  rootId: string,
+  text: string,
+  nowMs: number = Date.now()
+): void {
+  const key = threadDraftKey(workspaceId, rootId);
+  if (text.trim() === "" || containsSecretKey(text)) {
+    writeRaw(key, null);
+    return;
+  }
+  writeRaw(key, JSON.stringify({ text, atMs: nowMs } satisfies StoredDraft));
+}
+
+export function readThreadDraft(
+  workspaceId: string,
+  rootId: string,
+  nowMs: number = Date.now()
+): string {
+  const key = threadDraftKey(workspaceId, rootId);
+  const draft = parse(readRaw(key));
+  if (draft === null) return "";
+  if (nowMs - draft.atMs > DRAFT_TTL_MS) {
+    writeRaw(key, null);
+    return "";
+  }
+  return draft.text;
+}
+
+export function clearThreadDraft(workspaceId: string, rootId: string): void {
+  writeRaw(threadDraftKey(workspaceId, rootId), null);
+}
+
 /** 로그아웃. 이 기기에 남은 초안을 전부 지운다. */
 export function clearAllDrafts(): void {
   for (const key of draftKeys()) writeRaw(key, null);
+  for (const key of threadDraftKeys()) writeRaw(key, null);
   emitDraftsChanged();
 }
 
