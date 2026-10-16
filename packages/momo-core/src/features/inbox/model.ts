@@ -522,6 +522,15 @@ const WORKSPACE_ACTION_LABELS: Record<string, string> = {
   "agent.rename": "에이전트 이름 바꾸기",
   "hosted.channels.grant": "승인 채널 늘리기",
   "workspace.settings.update": "워크스페이스 설정 바꾸기",
+  // ADR-0201 증보 v2 H6-1: 도우미만 제안하는 설정 액션 셋.
+  "workspace.unfurl.update": "링크 미리보기 설정 바꾸기",
+  // 인자가 `{enabled?: false, paused?: boolean}` 이라 같은 id 가 멈춤과 **재개**를 둘 다
+  // 싣는다. 인박스 줄은 인자를 모르므로 방향을 말하지 않는다(재개 카드에 「멈추기」라고
+  // 쓰면 승인하기 전에 보는 한마디가 실제 행동과 반대가 된다).
+  "workspace.memory.update": "팀 기억 설정 바꾸기",
+  "workspace.work_tier.update": "워크스페이스 기본 재개 정책 바꾸기",
+  // H7: 계약만 있다. 설치 경로가 생기기 전까지 서버가 카드를 만들지 않는다(#3889).
+  "plugin.install": "앱 설치",
 };
 
 export function workspaceActionLabel(actionId?: string): string {

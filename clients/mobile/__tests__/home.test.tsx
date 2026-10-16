@@ -493,25 +493,49 @@ describe('홈 — 섹션과 행', () => {
     );
   });
 
-  it('DM 섹션의 에이전트는 둥근 사각이고 사람보다 앞이다', async () => {
+  it('사진이 있는 에이전트의 DM 줄은 그 사진을 싣는다 (로봇 아님)', async () => {
+    const photo = 'data:image/png;base64,iVBORw0KGgo=';
+    await mountHome({
+      roster: ROSTER.map(m => ((m as {id?: string}).id === AGENT_ID ? {...m, avatarUrl: photo} : m)),
+    });
+    const agentRow = screen.getByTestId('sidebar-row-dm:ch-dm-agent');
+    const image = await waitFor(() =>
+      within(agentRow).getByTestId('avatar-image', {includeHiddenElements: true}),
+    );
+    expect(image.props.source).toEqual({uri: photo});
+    expect(
+      within(agentRow).queryByTestId('home-agent-square', {includeHiddenElements: true}),
+    ).toBeNull();
+  });
+
+  it('DM 섹션의 에이전트는 로봇이 아니라 에이전트 목록과 같은 아바타(둥근 사각)이고 사람보다 앞이다', async () => {
     await mountHome();
     const dm = screen.getByTestId('home-section-dms');
     expect(dm).toBeTruthy();
     const agentRow = screen.getByTestId('sidebar-row-dm:ch-dm-agent');
-    const square = within(agentRow).getByTestId('home-agent-square', {
-      includeHiddenElements: true,
-    });
-    expect(flat(square.props.style)).toMatchObject({
+    // 예전에는 `isAgent` 가 먼저 걸려 사진이 있는 에이전트도 로봇 사각이었다.
+    expect(
+      within(agentRow).queryByTestId('home-agent-square', {includeHiddenElements: true}),
+    ).toBeNull();
+    const face = within(agentRow).getByTestId('avatar-agent', {includeHiddenElements: true});
+    expect(flat(face.props.style)).toMatchObject({
       width: HOME.rowFace,
       height: HOME.rowFace,
-      borderRadius: HOME.rowAgentCorner,
     });
+    // 사진이 없으면 이니셜이 선다(에이전트 목록 줄과 같은 규칙).
+    expect(within(agentRow).getByTestId('avatar-initial', {includeHiddenElements: true})).toBeTruthy();
     // DM 없는 에이전트도 같은 섹션의 행이다.
     expect(screen.getByTestId(`sidebar-row-agent:${HERMES_ID}`)).toBeTruthy();
     const humanRow = screen.getByTestId('sidebar-row-dm:ch-dm-human');
     expect(
       within(humanRow).queryByTestId('home-agent-square', {includeHiddenElements: true}),
     ).toBeNull();
+    // DM 없는 에이전트 줄도 같은 아바타다.
+    expect(
+      within(screen.getByTestId(`sidebar-row-agent:${HERMES_ID}`)).getByTestId('avatar-agent', {
+        includeHiddenElements: true,
+      }),
+    ).toBeTruthy();
     const order = screen
       .getAllByTestId(/^sidebar-row-(dm|agent):/)
       .map(node => node.props.testID);
@@ -583,22 +607,16 @@ describe('홈 — 섹션 메뉴(⋯)는 문이다', () => {
 });
 
 describe('홈 — 「작업 중」 카드', () => {
-  it('작업 중인 에이전트가 없으면 「에이전트 부르기」 한 줄이 서고, 에이전트 목록을 연다', async () => {
+  it('작업 중인 에이전트가 없으면 「작업」 머리도 「에이전트 부르기」 줄도 없다 (성재 2026-10-16)', async () => {
     await mountHome();
     expect(screen.queryByTestId('home-working-card')).toBeNull();
-    const idle = screen.getByTestId('home-agents-idle');
-    expect(idle).toHaveTextContent(/에이전트 부르기/);
-    expect(idle).toHaveTextContent(/2명/);
-    // 큰 글씨에서 두 줄로 감길 때 「에이전트 부 / 르기」가 되지 않게(R1 재캡처).
-    expect(screen.getByText('에이전트 부르기').props.lineBreakStrategyIOS).toBe('hangul-word');
-    fireEvent.press(idle);
-    await waitFor(() => expect(screen.getByTestId('agent-list-pane')).toBeTruthy());
-  });
-
-  it('에이전트가 하나도 없으면 그 한 줄도 없다', async () => {
-    await mountHome({roster: [ROSTER[0], ROSTER[1]]});
     expect(screen.queryByTestId('home-agents-idle')).toBeNull();
-    expect(screen.queryByTestId('home-working-card')).toBeNull();
+    expect(screen.queryByText('에이전트 부르기')).toBeNull();
+    expect(screen.queryByText('지금 작업 중인 에이전트 없음', {exact: false})).toBeNull();
+    // 에이전트 목록으로 가는 문은 DM 섹션 메뉴에 그대로 있다.
+    const offered = chooseFromMenu('dms', AGENT_LIST_ACTION);
+    expect(offered).toContain(AGENT_LIST_ACTION);
+    await waitFor(() => expect(screen.getByTestId('agent-list-pane')).toBeTruthy());
   });
 
   it('턴이 열리면 카드가 첫 화면 맨 위에 서고, 누르면 그 대화가 열린다', async () => {
