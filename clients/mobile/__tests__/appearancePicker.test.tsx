@@ -1,8 +1,13 @@
 import React from 'react';
-import {Text} from 'react-native';
+import {AccessibilityInfo, StyleSheet, Text} from 'react-native';
 import {act, cleanup, fireEvent, render, screen} from '@testing-library/react-native';
 
-import {SIGNAL_ADJUSTED_COPY, SIGNAL_REJECTION_COPY, resolvePreset} from '@momo/core/design/signal';
+import {
+  SIGNAL_ADJUSTED_COPY,
+  SIGNAL_REJECTION_COPY,
+  resolvePreset,
+  resolveSignal,
+} from '@momo/core/design/signal';
 import {THEMES} from '@momo/core/design/themes';
 
 import {ThemeControl} from '../src/design/ThemeControl';
@@ -220,6 +225,81 @@ describe('강조색 — 직접 입력은 core 규칙을 그대로 따른다', ()
     expect(screen.getByTestId('appearance-signal-state')).toHaveTextContent(/기본 색으로 보여요/);
     // 사람의 선택은 지우지 않는다 — 다른 테마로 돌아가면 다시 쓰인다.
     expect(saved()?.signal ?? {custom: agent}).toEqual({custom: agent});
+  });
+});
+
+describe('직접 입력의 상태 표현 (design-review M-2·M-3·M-4)', () => {
+  const type = (text: string) => {
+    fireEvent.changeText(screen.getByTestId('appearance-signal-input'), text);
+    fireEvent.press(screen.getByTestId('appearance-signal-apply'));
+  };
+  const style = (id: string) => StyleSheet.flatten(screen.getByTestId(id).props.style) ?? {};
+
+  it('거절은 오류 톤이고 입력 테두리도 바뀌며, 보조기술에 읽어 준다', () => {
+    const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility').mockImplementation(() => {});
+    mount();
+    const plain = style('appearance-signal-input').borderColor;
+    type('파랑');
+    const palette = paletteFrom('dawnsky', 'dark');
+    expect(style('appearance-signal-notice').color).toBe(palette.dangerText);
+    expect(style('appearance-signal-input').borderColor).toBe(palette.danger);
+    expect(style('appearance-signal-input').borderColor).not.toBe(plain);
+    expect(screen.getByTestId('appearance-signal-notice').props.accessibilityLiveRegion).toBe('polite');
+    expect(announce).toHaveBeenCalledWith(SIGNAL_REJECTION_COPY['invalid-hex']);
+    // 고치면 오류가 걷힌다.
+    fireEvent.changeText(screen.getByTestId('appearance-signal-input'), '#3A6BD8');
+    expect(screen.queryByTestId('appearance-signal-notice')).toBeNull();
+  });
+
+  it('보정 안내는 정보 톤이고, 다시 열어도 입력 아래 한 곳에만 남는다', () => {
+    store.map.set(
+      NON_SECRET_KEYS.appearance,
+      JSON.stringify({v: 2, scheme: 'dark', theme: 'dawnsky', signal: {custom: '#FFFFFF'}, density: 'comfortable'}),
+    );
+    mount();
+    expect(screen.getAllByText(SIGNAL_ADJUSTED_COPY)).toHaveLength(1);
+    expect(screen.getByTestId('appearance-signal-notice')).toHaveTextContent(SIGNAL_ADJUSTED_COPY);
+    expect(style('appearance-signal-notice').color).not.toBe(paletteFrom('dawnsky', 'dark').dangerText);
+  });
+
+  it('보정되는 색을 적용해도 같은 문장이 두 번 나오지 않는다', () => {
+    mount();
+    type('#FFFFFF');
+    expect(screen.getAllByText(SIGNAL_ADJUSTED_COPY)).toHaveLength(1);
+  });
+
+  it('직접 입력을 쓰는 중이면 제목이 accent 톤·굵기로 바뀐다 — 체크 하나에 기대지 않는다', () => {
+    mount();
+    const before = style('appearance-signal-custom').borderColor;
+    expect(before).toBeDefined();
+    const label = () => StyleSheet.flatten(screen.getByText('직접 입력').props.style) ?? {};
+    const plain = label();
+    type('#3A6BD8');
+    const used = label();
+    const solved = resolveSignal('#3A6BD8', 'dawnsky', 'dark');
+    expect(solved.ok).toBe(true);
+    if (solved.ok) expect(used.color).toBe(solved.values['signal-text'].toLowerCase());
+    expect(used.color).not.toBe(plain.color);
+    expect(used.fontWeight).toBe('700');
+  });
+});
+
+describe('테마 타일 (design-review M-1)', () => {
+  it('라이트·다크 두 반쪽을 모두 보인다 — 다크에서도 테마 차이가 보인다', () => {
+    mount();
+    for (const id of ['dawnsky', 'graphite', 'noeul'] as const) {
+      for (const mode of ['light', 'dark'] as const) {
+        const half = screen.getByTestId(`appearance-swatch-${id}-${mode}`, {includeHiddenElements: true});
+        const image = (StyleSheet.flatten(half.props.style) ?? {}).experimental_backgroundImage;
+        expect(String(image)).toContain(THEMES[id][mode].canvas[1]);
+      }
+    }
+  });
+
+  it('노을띠 행은 폰에서 띠가 없다는 사실을 말한다', () => {
+    mount();
+    expect(screen.getByText(/폰에서는 남색 띠 없이/)).toBeTruthy();
+    expect(screen.getAllByText(/남색 띠/)).toHaveLength(1);
   });
 });
 
