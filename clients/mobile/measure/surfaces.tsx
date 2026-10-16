@@ -6226,15 +6226,6 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     },
   });
 
-// 위 독스트링의 이유로 렌더 밖에서 한 번. **파일 맨 아래**인 것은 `harnessClient`
-// 가 `const` 라 그 선언보다 먼저 부르면 TDZ 로 터지기 때문이고(실측: 첫 시도가
-// "Cannot read property 'setQueryData' of undefined" 로 찍혔다), 다른 표면들은 이
-// 스토어도 이 키들도 읽지 않으므로 값이 앉아 있어도 자기 사진에 나타나지 않는다.
-//
-// `ade-summary-empty` 만 빼는 이유는 그 장이 보여야 하는 것이 **아무것도 없을 때**
-// 이기 때문이다. 스토어도 캐시도 모듈 상태라 표면마다 다른 값을 줄 방법은 「어느
-// 표면으로 띄웠는가」를 렌더보다 먼저 읽는 것 하나뿐이고, 그 답은 루트가 이미
-// 파싱하는 그 실행 인자에 있다.
 // ---- #3925 첫 실행 알림 단계 (ADR-0204 D4) --------------------------------------
 //
 // 배송되는 `NotificationPrimer`에 상태를 건넨다. 게이트가 아니라 화면이다: 게이트는 푸시
@@ -6277,6 +6268,15 @@ function NotifyPrimerSurface({which}: {which: string}): React.JSX.Element {
   );
 }
 
+// 위 독스트링의 이유로 렌더 밖에서 한 번. **파일 맨 아래**인 것은 `harnessClient`
+// 가 `const` 라 그 선언보다 먼저 부르면 TDZ 로 터지기 때문이고(실측: 첫 시도가
+// "Cannot read property 'setQueryData' of undefined" 로 찍혔다), 다른 표면들은 이
+// 스토어도 이 키들도 읽지 않으므로 값이 앉아 있어도 자기 사진에 나타나지 않는다.
+//
+// `ade-summary-empty` 만 빼는 이유는 그 장이 보여야 하는 것이 **아무것도 없을 때**
+// 이기 때문이다. 스토어도 캐시도 모듈 상태라 표면마다 다른 값을 줄 방법은 「어느
+// 표면으로 띄웠는가」를 렌더보다 먼저 읽는 것 하나뿐이고, 그 답은 루트가 이미
+// 파싱하는 그 실행 인자에 있다.
 const LAUNCHED = measureMode();
 if (
   !(

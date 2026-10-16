@@ -143,6 +143,8 @@ export function NotificationPrimer(
       testID={ask ? 'notify-primer' : 'notify-declined'}
       top={<OnboardingTopBar dots={dots} />}
       mainStyle={styles.main}
+      // [계속]은 내용과 함께 스크롤하지 않는다: 가장 짧은 폰과 큰 글씨에서도 첫 화면에 온전히 보인다.
+      pinBottom
       bottom={
         view.mode === 'ask' ? (
           <OnboardingButton
@@ -463,12 +465,16 @@ const buildStyles = (color: Palette) =>
     kind: {gap: NOTIF.kindGap},
     // 큰 글씨에서 이름과 「항상 와요」가 한 줄에 못 들어가면 뒤의 것이 아래 줄로 내려간다.
     // 이름을 줄여 한 글자씩 접는 것(「멘션·답」 / 「·DM」)보다 낫다.
+    // 줄바꿈 상자는 글자 줄을 기본으로 상자 맨 위에 세운다(`alignContent` 기본 flex-start).
+    // 한 줄일 때 스위치 줄(31)과 글자뿐인 줄이 같은 가운데에 서도록 가운데로 둔다. 그렇지
+    // 않으면 「항상 와요」 줄의 이름만 위로 붙어 세 종류의 이름과 카드 사이가 어긋난다.
     kindHead: {
       minHeight: NOTIF.headHeight,
       flexDirection: 'row',
       flexWrap: 'wrap',
       justifyContent: 'space-between',
       alignItems: 'center',
+      alignContent: 'center',
       gap: space.sm,
     },
     kindName: {

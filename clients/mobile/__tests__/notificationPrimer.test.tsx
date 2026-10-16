@@ -30,7 +30,7 @@ import {
 } from '@testing-library/react-native';
 import * as Notifications from 'expo-notifications';
 import React from 'react';
-import {StyleSheet} from 'react-native';
+import {ScrollView, StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -335,6 +335,32 @@ describe('M3 어떤 알림을 받을까요? (#3925, ADR-0204 D4)', () => {
     expect(heights).toEqual([box, box]);
   });
 
+  it('centres every kind head in its box: a wrapping row sticks the text to the top, and the gap under the name then differs by kind', async () => {
+    await mountPrimer();
+    const heads = [
+      screen.getByTestId('notify-kind-approval-head'),
+      screen.getByTestId('notify-work-row'),
+      screen.getByTestId('notify-kind-mention-head'),
+    ].map(node => StyleSheet.flatten(node.props.style));
+    expect(heads.map(style => style.alignContent)).toEqual([
+      'center',
+      'center',
+      'center',
+    ]);
+  });
+
+  it('keeps 「계속」 out of the scrolling content, so it is in view on the smallest phone and at the largest type', async () => {
+    await mountPrimer();
+    const scroll = screen.UNSAFE_getByType(ScrollView);
+    // 내용(종류 셋과 안내 두 줄)은 스크롤 안에 있고 함께 스크롤한다.
+    expect(within(scroll).getByTestId('notify-kind-approval')).toBeTruthy();
+    expect(within(scroll).getByTestId('notify-kind-mention')).toBeTruthy();
+    expect(within(scroll).getByTestId('notify-primer-detail')).toBeTruthy();
+    // [계속]은 스크롤 밖 바닥에 붙는다: 내용이 길어도 첫 화면에서 눌러 볼 수 있다.
+    expect(within(scroll).queryByTestId('notify-primer-continue')).toBeNull();
+    expect(screen.getByTestId('notify-primer-continue')).toBeTruthy();
+  });
+
   it('pictures the real approval buttons: the preview names the same two actions the notification carries', () => {
     const approval = PUSH_CATEGORY_ACTIONS.find(
       ([identifier]) => identifier === PUSH_CATEGORY.approval,
@@ -566,6 +592,13 @@ describe('거부 뒤 안내 (ADR-0204 D4)', () => {
     expect(screen.queryByTestId('notify-primer-continue')).toBeNull();
     // 창은 한 번만 떴다.
     expect(requestPermissions).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps 「시작하기」 in the same pinned place as 「계속」 was', async () => {
+    await declineInThePrompt();
+    const scroll = screen.UNSAFE_getByType(ScrollView);
+    expect(within(scroll).queryByTestId('notify-declined-continue')).toBeNull();
+    expect(screen.getByTestId('notify-declined-continue')).toBeTruthy();
   });
 
   it('the face turns sleepy (the 「skipped」 row of the D11 table)', async () => {
