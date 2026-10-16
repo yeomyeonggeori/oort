@@ -97,7 +97,7 @@ describe("설정 > 업데이트 (#3578 S5a)", () => {
     expect(q(el, "update-install")).not.toBeNull();
   });
 
-  it("설치가 끝나면 재시작 단추와 해요체 안내를 보인다", async () => {
+  it("설치가 끝나면 다시 실행 단추와 해요체 안내를 보인다", async () => {
     tauri.check.mockResolvedValue(UPDATE);
     tauri.install.mockResolvedValue(undefined);
     await act(async () => {
@@ -105,7 +105,7 @@ describe("설정 > 업데이트 (#3578 S5a)", () => {
       await installUpdate();
     });
     const el = await mount();
-    expect(q(el, "update-installed")?.textContent).toContain("재시작하면 0.1.20(으)로 열려요");
+    expect(q(el, "update-installed")?.textContent).toContain("곧 다시 실행되고 0.1.20(으)로 열려요");
     expect(q(el, "update-relaunch")).not.toBeNull();
   });
 

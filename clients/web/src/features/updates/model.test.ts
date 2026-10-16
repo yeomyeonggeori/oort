@@ -7,6 +7,8 @@ import {
   formatPublishedAt,
   offeredVersion,
   progressLabel,
+  pillTooltip,
+  pillWorthShowing,
   progressPercent,
   type UpdateState,
 } from "./model";
@@ -28,7 +30,7 @@ describe("badge visibility", () => {
       { kind: "idle" },
       { kind: "checking" },
       { kind: "current" },
-      { kind: "failed", message: "…", detail: null, update: null },
+      { kind: "failed", phase: "check", message: "…", detail: null, update: null },
     ];
     for (const state of quiet) expect(badgeWorthShowing(state)).toBe(false);
   });
@@ -49,7 +51,7 @@ describe("badge visibility", () => {
     expect(
       badgeLabel({ kind: "installing", update: UPDATE, downloaded: 25, total: 100 })
     ).toBe("업데이트 받는 중 25%");
-    expect(badgeLabel({ kind: "installed", update: UPDATE })).toBe("재시작하면 적용");
+    expect(badgeLabel({ kind: "installed", update: UPDATE })).toBe("곧 다시 실행");
     expect(badgeLabel({ kind: "current" })).toBeNull();
   });
 
@@ -105,5 +107,48 @@ describe("publish date", () => {
   it("drops an absent or unparseable timestamp instead of showing Invalid Date", () => {
     expect(formatPublishedAt(null)).toBeNull();
     expect(formatPublishedAt("어제")).toBeNull();
+  });
+});
+
+describe("업데이트 알약 (성재 결재 2026-10-16)", () => {
+  const installFailed: UpdateState = {
+    kind: "failed",
+    phase: "install",
+    message: "…",
+    detail: null,
+    update: null,
+  };
+  const checkFailed: UpdateState = { ...installFailed, phase: "check" };
+
+  it("새 버전·받는 중·설치 후·설치 실패에서만 서고, 그 밖에는 없다", () => {
+    expect(pillWorthShowing({ kind: "available", update: UPDATE })).toBe(true);
+    expect(
+      pillWorthShowing({ kind: "installing", update: UPDATE, downloaded: 1, total: 2 })
+    ).toBe(true);
+    expect(pillWorthShowing({ kind: "installed", update: UPDATE })).toBe(true);
+    expect(pillWorthShowing(installFailed)).toBe(true);
+    for (const quiet of [{ kind: "idle" }, { kind: "checking" }, { kind: "current" }, checkFailed] as UpdateState[]) {
+      expect(pillWorthShowing(quiet)).toBe(false);
+    }
+  });
+
+  it("툴팁 문장은 상태마다 정해져 있고 줄표가 없다", () => {
+    const texts = [
+      pillTooltip({ kind: "available", update: UPDATE }),
+      pillTooltip({ kind: "installing", update: UPDATE, downloaded: 26, total: 100 }),
+      pillTooltip({ kind: "installing", update: UPDATE, downloaded: 26, total: null }),
+      pillTooltip({ kind: "installed", update: UPDATE }),
+      pillTooltip(installFailed),
+    ];
+    expect(texts).toEqual([
+      "0.1.0-next.2로 업데이트할 수 있어요. 누르면 받고 다시 실행해요.",
+      "받는 중 26%",
+      "받는 중이에요.",
+      "곧 다시 실행돼요.",
+      "업데이트하지 못했어요. 눌러서 다시 확인해요.",
+    ]);
+    for (const text of texts) expect(text).not.toMatch(/[—–]/);
+    expect(pillTooltip(checkFailed)).toBeNull();
+    expect(pillTooltip({ kind: "current" })).toBeNull();
   });
 });

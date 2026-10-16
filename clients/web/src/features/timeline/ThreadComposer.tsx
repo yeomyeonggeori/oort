@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { THREAD_COMPOSER_SEED_EVENT, type ThreadComposerSeed } from "@/features/chat/draftStore";
+import {
+  clearThreadDraft,
+  readThreadDraft,
+  THREAD_COMPOSER_SEED_EVENT,
+  writeThreadDraft,
+  type ThreadComposerSeed,
+} from "@/features/chat/draftStore";
+import { BEFORE_RELAUNCH_EVENT } from "@/features/updates/relaunchFlush";
 import { AtSign, SendHorizontal, Smile } from "lucide-react";
 import { sendThreadReply, type Channel } from "@momo/core/lib/api";
 import {
@@ -99,7 +106,7 @@ export function ThreadComposer({
   /** Refetch the thread; the reply also arrives on the realtime rail. */
   onSent: () => void;
 }) {
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useState(() => readThreadDraft(workspaceId, rootId));
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // 키 모양을 보고 전송을 막은 횟수 (#2942 GC-1). 채널 컴포저와 같은 문이다.
@@ -151,6 +158,19 @@ export function ThreadComposer({
   useEffect(() => {
     draftRef.current = draft;
   }, [draft]);
+  // 앱이 업데이트로 스스로 다시 실행하기 직전, 쓰던 답글을 저장소로 내린다(#3904).
+  // 스레드 입력창은 입력마다 저장하지 않으므로 이 한 번이 유일한 보호다.
+  useEffect(() => {
+    const flush = () => {
+      try {
+        writeThreadDraft(workspaceId, rootId, draftRef.current);
+      } catch {
+        /* 저장소가 막힌 환경에서도 다시 실행은 막지 않는다. */
+      }
+    };
+    window.addEventListener(BEFORE_RELAUNCH_EVENT, flush);
+    return () => window.removeEventListener(BEFORE_RELAUNCH_EVENT, flush);
+  }, [workspaceId, rootId]);
   useEffect(() => {
     const onSeed = (event: Event) => {
       const detail = (event as CustomEvent<ThreadComposerSeed>).detail;
@@ -208,6 +228,7 @@ export function ThreadComposer({
       attachmentIds: sent.attachmentIds,
     })
       .then(() => {
+        clearThreadDraft(workspaceId, rootId);
         setDraft("");
         autocomplete.close();
         format.dismiss();

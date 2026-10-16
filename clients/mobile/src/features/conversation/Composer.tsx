@@ -27,6 +27,10 @@ import {
 import type {Directory} from '@momo/core/features/workspace/directory';
 import {composerAgentNotice, mentionAnnotation} from '@momo/core/features/ai/aiMention';
 import {calledAgents, mentionRoutingTarget} from '@momo/core/features/routing/mentionTargets';
+import {
+  mentionHandleLabel,
+  preferredMentionName,
+} from '@momo/core/features/routing/helperAliases';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   AccessibilityInfo,
@@ -1294,7 +1298,13 @@ export function Composer({
   const accept = useCallback(
     (member: RosterMember) => {
       if (!query) return;
-      const next = applyMention(text, query, caret, member.handle);
+      // 별칭이 있으면 ASCII 별칭으로 넣는다(ADR-0201 v2 H2, 코어 `preferredMentionName`).
+      const next = applyMention(
+        text,
+        query,
+        caret,
+        preferredMentionName(member),
+      );
       // Same synchronous write as a keystroke, and note what is NOT done here:
       // the `selection` prop is never set. Controlling selection on iOS resets
       // the input's composition state, which is the very failure this file is
@@ -1602,7 +1612,7 @@ export function Composer({
                   // 보조 줄은 칩의 말을 이미 포함하므로(코어 `mentionLine`) 칩은 따로 안 읽는다.
                   accessibilityLabel={[
                     member.displayName,
-                    `@${member.handle}`,
+                    mentionHandleLabel(member, query?.text ?? ''),
                     member.kind === 'agent' ? MENTION_AGENT_KIND : null,
                     annotationLine,
                   ]
@@ -1650,7 +1660,7 @@ export function Composer({
                         {member.displayName}
                       </Text>
                       <Text style={styles.mentionHandle} numberOfLines={1}>
-                        {`@${member.handle}`}
+                        {mentionHandleLabel(member, query?.text ?? '')}
                       </Text>
                       {locked ? (
                         <Image

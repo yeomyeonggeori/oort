@@ -57,6 +57,7 @@ import { TeamKeyForm } from "@/features/settings/TeamKeyForm";
 import { TeamUnlinkDialog } from "@/features/settings/TeamUnlinkDialog";
 import { PersonalKeysOperatorSection } from "./PersonalKeysOperatorSection";
 import { KeyLimitsBlock, LIMITS_QUERY_KEY } from "./KeyLimitsBlock";
+import { TeamAiNextStepCard } from "./TeamAiNextStepCard";
 
 // =============================================================================
 // 「팀 AI 키」 구획 (AIH-6, #3400, 플랜 §8-6, 시안 panel-team-keys).
@@ -565,6 +566,7 @@ export function AiTeamKeysPane({ offline, workspaceId, memberId }: PaneProps) {
         ) : null}
       </div>
 
+      <TeamAiNextStepCard workspaceId={workspaceId} offline={offline} />
       <section aria-labelledby="ai-team-defaults-title" className="flex min-w-0 flex-col" data-testid="ai-defaults">
         <div className="flex min-w-0 flex-wrap items-baseline gap-3 border-b border-line pb-2">
           <h3 id="ai-team-defaults-title" className="text-body font-bold text-ink">
