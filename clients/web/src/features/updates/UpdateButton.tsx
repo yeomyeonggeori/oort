@@ -85,6 +85,11 @@ export function UpdateButton() {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const tooltipId = useId();
+  // 카드는 알약이 아니라 프로필 **줄 전체**에 붙는다: 알약 오른쪽 끝에 맞추면 줄보다 넓은
+  // 카드가 왼쪽으로 삐져 워크스페이스 레일 위에 걸친다(design-review M2).
+  const rowRef = useRef<Element | null>(null);
+  rowRef.current =
+    buttonRef.current?.closest('[data-testid="sidebar-profile-foot"]') ?? buttonRef.current;
 
   // 설치가 끝나 카운트다운이 돌기 시작하면 카드를 연다: 곧 앱이 사라질 것이므로
   // 어디서 시작했든(설정 화면 포함) 이 줄이 마지막 안내다. 이 줄이 안 보이는
@@ -109,8 +114,8 @@ export function UpdateButton() {
 
   return (
     <Popover open={open} onOpenChange={setOpen} modal={false}>
-      <PopoverAnchor asChild>
-        <div className="group relative shrink-0" data-testid="update-pill-wrap">
+      <PopoverAnchor virtualRef={rowRef} />
+      <div className="group relative shrink-0" data-testid="update-pill-wrap">
           <Button
             ref={buttonRef}
             type="button"
@@ -137,11 +142,10 @@ export function UpdateButton() {
               {tooltip}
             </span>
           )}
-        </div>
-      </PopoverAnchor>
+      </div>
       <PopoverContent
         side="top"
-        align="end"
+        align="start"
         sideOffset={8}
         opener={buttonRef.current}
         aria-label="앱 업데이트"
@@ -195,6 +199,7 @@ export function UpdateButton() {
             <Button
               size="sm"
               onClick={() => void relaunchIntoUpdate()}
+              aria-label="지금 다시 실행"
               data-testid="update-card-now"
             >
               <RefreshCw aria-hidden="true" />

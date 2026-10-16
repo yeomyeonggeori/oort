@@ -176,6 +176,7 @@ async function scene(browser, origin, scheme) {
     check(`${scheme} 호버 툴팁이 보인다`, await tip.isVisible());
     check(`${scheme} 툴팁 문구`, (await tip.textContent()) === "0.1.28로 업데이트할 수 있어요. 누르면 받고 다시 실행해요.");
     const box = await tip.boundingBox();
+    check(`${scheme} 툴팁 문장은 어절에서 끊는다(keep-all)`, (await tip.evaluate((el) => getComputedStyle(el).wordBreak)) === "keep-all");
     check(`${scheme} 툴팁이 창 안에 있다`, !!box && box.x >= 0 && box.y >= 0 && box.x + box.width <= 1280);
     await shot(page, "2-tooltip-hover");
     await page.mouse.move(700, 300);
@@ -195,6 +196,10 @@ async function scene(browser, origin, scheme) {
     await page.waitForTimeout(250);
     check(`${scheme} 받는 중 카드 제목`, (await page.getByTestId("update-card-title").textContent()) === "새 버전을 받는 중");
     check(`${scheme} 게이지 값`, (await page.locator("[data-testid=update-card] progress").getAttribute("value")) === "11100000");
+    const cardBox = await page.getByTestId("update-card").boundingBox();
+    const footBox = await page.getByTestId("sidebar-profile-foot").boundingBox();
+    check(`${scheme} 카드가 프로필 줄(목록 열) 안에 선다`, !!cardBox && !!footBox && cardBox.x >= footBox.x - 1 && cardBox.x + cardBox.width <= footBox.x + footBox.width + 1, JSON.stringify([cardBox, footBox]));
+    check(`${scheme} 카드 문장은 어절에서 끊는다(keep-all)`, (await page.getByTestId("update-card-subline").evaluate((el) => getComputedStyle(el).wordBreak)) === "keep-all");
     await shot(page, "3-downloading");
     await page.screenshot({ path: resolve(OUT_DIR, `3-full-${scheme}.png`) });
     // 길이 모름: 불확정 막대
