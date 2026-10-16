@@ -239,9 +239,12 @@ async function loadStylesheet(id: string, base: string) {
 }
 
 const cssByCandidates = new Map<string, Promise<string>>();
+// 한 줄에 `class=` 와 `[숫자` 를 같이 두지 않는다: 사전 점검의 arbitrary_tw 가 시험 파일도 훑어서
+// 배열 첨자(`m[1]`)를 임의값 클래스로 읽는다. 구조 분해로 쓰면 첨자가 없다.
+const CLASS_ATTR = /class="([^"]*)"/g;
 /** 마크업이 쓰는 클래스를 후보로 컴파일한다(기본 후보 + 마크업 안의 class). */
 function builtCss(markup = ""): Promise<string> {
-  const used = [...markup.matchAll(/class="([^"]*)"/g)].flatMap((m) => m[1]!.split(/\s+/)).filter(Boolean);
+  const used = [...markup.matchAll(CLASS_ATTR)].flatMap(([, value]) => (value ?? "").split(/\s+/)).filter(Boolean);
   const candidates = [...new Set(["size-6", "size-loader-hero", "block", "grid", "gap-6", "p-6", ...used])];
   const key = candidates.join(" ");
   let hit = cssByCandidates.get(key);
@@ -666,6 +669,7 @@ maybe("배너 안의 줄 정렬 (Chromium)", () => {
         <InlineBanner
           tone="neutral"
           message={message}
+          messageId="banner-sentence"
           testId="banner"
           {...(icon ? { icon: <OortLoader inline still={still} /> } : {})}
         />
@@ -687,19 +691,27 @@ maybe("배너 안의 줄 정렬 (Chromium)", () => {
     }
   });
 
-  it("마크 중심이 첫 줄 중심에 온다(1px 이내)", async () => {
+  it("마크 중심이 첫 줄 중심에 정확히 온다(오차 0.5px 미만)", async () => {
     const h = await open(banner(true));
     try {
-      const gap = await h.page.evaluate(() => {
+      const m = await h.page.evaluate(() => {
         const root = document.querySelector<HTMLElement>("[data-testid=banner]")!;
-        const loader = root.querySelector("[data-oort-loader]")!.getBoundingClientRect();
-        const text = root.querySelector("span:not([aria-hidden])")!;
+        const loaderEl = root.querySelector("[data-oort-loader]")!;
+        const loader = loaderEl.getBoundingClientRect();
+        // 문장 자신을 id 로 집는다: 구조 선택자로 집으면 로더 안쪽 요소를 집어 자기 자신과 비교하게 된다.
+        const text = document.getElementById("banner-sentence")!;
         const range = document.createRange();
         range.selectNodeContents(text);
         const first = range.getClientRects()[0]!;
-        return Math.abs(loader.y + loader.height / 2 - (first.y + first.height / 2));
+        return {
+          pickedInsideLoader: loaderEl.contains(text),
+          pickedText: text.textContent,
+          gap: Math.abs(loader.y + loader.height / 2 - (first.y + first.height / 2)),
+        };
       });
-      expect(gap).toBeLessThanOrEqual(1);
+      expect(m.pickedInsideLoader).toBe(false);
+      expect(m.pickedText).toBe(message);
+      expect(m.gap).toBeLessThan(0.5);
     } finally {
       await h.close();
     }
@@ -708,22 +720,35 @@ maybe("배너 안의 줄 정렬 (Chromium)", () => {
   it("두 줄 이상으로 접혀도 로더는 첫 줄에 남는다(줄 맞춤이 위쪽)", async () => {
     const narrow = renderToStaticMarkup(
       <div className="w-pane-sm">
-        <InlineBanner tone="neutral" message={message} testId="banner" icon={<OortLoader inline still />} />
+        <InlineBanner
+          tone="neutral"
+          message={message}
+          messageId="banner-sentence"
+          testId="banner"
+          icon={<OortLoader inline still />}
+        />
       </div>
     );
     const h = await open(narrow);
     try {
       const m = await h.page.evaluate(() => {
         const root = document.querySelector<HTMLElement>("[data-testid=banner]")!;
-        const loader = root.querySelector("[data-oort-loader]")!.getBoundingClientRect();
-        const text = root.querySelector("span:not([aria-hidden])")!;
+        const loaderEl = root.querySelector("[data-oort-loader]")!;
+        const loader = loaderEl.getBoundingClientRect();
+        const text = document.getElementById("banner-sentence")!;
         const range = document.createRange();
         range.selectNodeContents(text);
         const rects = [...range.getClientRects()];
-        return { lines: new Set(rects.map((r) => Math.round(r.y))).size, loaderCenter: loader.y + loader.height / 2, firstLineCenter: rects[0]!.y + rects[0]!.height / 2 };
+        return {
+          pickedInsideLoader: loaderEl.contains(text),
+          lines: new Set(rects.map((r) => Math.round(r.y))).size,
+          loaderCenter: loader.y + loader.height / 2,
+          firstLineCenter: rects[0]!.y + rects[0]!.height / 2,
+        };
       });
+      expect(m.pickedInsideLoader).toBe(false);
       expect(m.lines).toBeGreaterThan(1);
-      expect(Math.abs(m.loaderCenter - m.firstLineCenter)).toBeLessThanOrEqual(1);
+      expect(Math.abs(m.loaderCenter - m.firstLineCenter)).toBeLessThan(0.5);
     } finally {
       await h.close();
     }
