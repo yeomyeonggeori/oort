@@ -58,6 +58,9 @@ use momo_server::{build_app, AppState, RealtimeAdvert};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
+/// `(kind, label, session_id, expiry is bounded, scopes)` of a recorded token row.
+type RecordedRow = (String, String, Option<Uuid>, bool, Vec<String>);
+
 const TEST_JWT_SECRET: &str = "push-action-token-conformance-signing-secret";
 const TEST_PASSWORD: &str = "push-action-token-password";
 const AGENT_MODEL: &str = "hermes-agent";
@@ -1295,7 +1298,7 @@ async fn the_row_is_a_session_row_of_the_callers_lineage() {
     let w = world().await;
     let session = w.login().await;
     let _action = w.mint_action(&session).await;
-    let rows: Vec<(String, String, Option<Uuid>, bool, Vec<String>)> = sqlx::query_as(
+    let rows: Vec<RecordedRow> = sqlx::query_as(
         "SELECT kind::text, label, session_id, \
                 expires_at < now() + interval '6 hours 1 minute' AS bounded, scopes \
            FROM token WHERE workspace_id = $1 AND label = 'push_action'",
