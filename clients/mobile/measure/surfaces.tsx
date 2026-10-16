@@ -5603,12 +5603,28 @@ function seedPush(surface: string): void {
     pushDeviceId();
     const refuse = surface.startsWith('shell-profile-push-failed');
     let deletes = 0;
-    globalThis.fetch = (async (input: unknown, init?: {method?: string}) => {
+    globalThis.fetch = (async (
+      input: unknown,
+      init?: {method?: string; signal?: AbortSignal},
+    ) => {
       const url = String(input);
       if (init?.method === 'DELETE' && url.includes('/devices/')) {
         deletes += 1;
         console.log(`[measure-push] DELETE /devices/{id} #${deletes}`);
-        if (!refuse) return new Promise<Response>(() => {});
+        if (!refuse) {
+          // 답이 오지 않는 서버. 진짜 `fetch` 처럼 중단 신호가 오면 거절로 끝난다 — 코어의 15초 기한
+          // (`fetchWithDeadline`)이 그 신호로 걸리므로, 기한이 지나면 `unreachable` 로 끝나 이 상태가
+          // 실패 문장으로 바뀐다(`maestro/99-push-switch-capture.yaml` 의 `EXPECT=timeout` 이 그것을 본다).
+          const startedAt = Date.now();
+          return new Promise<Response>((_, reject) => {
+            init?.signal?.addEventListener('abort', () => {
+              console.log(
+                `[measure-push] DELETE aborted by the client deadline after ${Date.now() - startedAt} ms`,
+              );
+              reject(new Error('aborted'));
+            });
+          });
+        }
         return {
           status: 500,
           ok: false,

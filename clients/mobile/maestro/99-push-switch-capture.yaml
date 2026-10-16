@@ -15,7 +15,8 @@ name: 99-push-switch-capture
 #
 # 쓰는 법(사람이 부른다). 한 번에 한 표면, 환경 둘:
 #   TAP     switch = 오른쪽 끝의 스위치 자체를 누른다 · row = 줄(설명 글 쪽)을 누른다
-#   EXPECT  failure = 실패 문장이 설 때까지 기다린다 · busy = 문장이 서지 않은 채 잠긴 모습
+#   EXPECT  failure = 실패 문장이 설 때까지 기다린다 · busy = 문장이 서지 않은 채 잠긴 모습 ·
+#           timeout = busy 표면에서 코어의 15초 기한이 지나 실패 문장으로 바뀌는 것을 기다린다
 #
 #   xcrun simctl launch <udid> app.momo.ios --args \
 #     -momoMeasure shell-profile-push-failed -RCT_jsLocation 127.0.0.1:$PORT
@@ -62,8 +63,20 @@ name: 99-push-switch-capture
       true: ${EXPECT == 'busy'}
     commands:
       # 요청의 기한은 15초(`REQUEST_TIMEOUT_MS`)다. 그 안에 사진이 찍히도록 오래 기다리지 않는다 —
-      # 기한이 지나면 `unreachable` 로 끝나 이 상태가 실패 문장으로 바뀐다.
+      # 기한이 지나면 이 상태가 실패 문장으로 바뀐다(아래 `timeout` 이 그것을 본다).
       - waitForAnimationToEnd:
           timeout: 1000
       - assertNotVisible:
           id: "push-failure"
+- runFlow:
+    when:
+      true: ${EXPECT == 'timeout'}
+    commands:
+      # 하네스의 가짜 `fetch` 는 진짜처럼 중단 신호에 거절로 끝나므로(`seedPush`), 답이 오지 않는 서버
+      # 앞에서 `fetchWithDeadline` 의 15초가 지나 `unreachable` → 기억 되돌림 → 실패 문장으로 이어진다.
+      - extendedWaitUntil:
+          visible:
+            id: "push-failure"
+          timeout: 40000
+      - waitForAnimationToEnd:
+          timeout: 3000
