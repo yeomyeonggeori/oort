@@ -347,7 +347,7 @@ export function PluginSection({ offline }: { offline: boolean }) {
       )}
       {catalogQuery.data && visible.length === 0 && (
         <EmptyInvite
-          headline={COPY.empty.headline}
+          headline={catalogQuery.data.plugins.length === 0 ? COPY.empty.headline : COPY.empty.filteredHeadline}
           detail={catalogQuery.data.plugins.length === 0
             ? COPY.empty.noneRegistered
             : COPY.empty.filtered}

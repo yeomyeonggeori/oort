@@ -556,8 +556,11 @@ export const PLUGIN_READONLY_COPY = {
     mine: "내 권한",
   },
   empty: {
+    // 서버에 앱이 하나도 없을 때. 「아직」은 시간의 말이라 걸러서 빈 경우에는 쓰지 않는다.
     headline: "보여 줄 앱이 아직 없어요.",
     noneRegistered: "서버에 등록된 공식 앱이 생기면 여기에 나타나요.",
+    // 앱은 있는데 검색·보기가 다 걸러 낸 경우(목록이 일곱을 넘어 컨트롤이 설 때만 생긴다).
+    filteredHeadline: "맞는 앱이 없어요.",
     filtered: "검색어나 보기를 바꿔 다른 앱을 확인하세요.",
   },
 } as const;

@@ -365,6 +365,35 @@ describe("읽기 전용: 설치·권한 경로가 없는 서버 (오늘의 Rust 
     expect(el.querySelector("#plugin-filter")).toBeNull();
   });
 
+  it("검색이 다 걸러 낸 빈 상태는 「아직」 없이 맞는 앱이 없다고 말하고 필터 지우기가 목록을 되돌린다", async () => {
+    const real = (catalogWire.plugins as Array<Record<string, unknown>>);
+    const extra = ["alpha", "beta", "gamma"].map((name) => ({
+      ...real[0],
+      pluginId: `com.example.${name}`,
+      name: `예시 ${name}`,
+      official: false,
+    }));
+    h.catalog = { ...catalogWire, plugins: [...real, ...extra] };
+    const el = await mount();
+    await until(() => q(el, "plugin-list"));
+    const search = el.querySelector("#plugin-search") as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(search, "zzzz");
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await until(() => q(el, "plugins-empty"));
+    const empty = text(el, "plugins-empty");
+    // 서버에 앱이 없는 경우(「…아직 없어요」)와 다르다: 걸러서 빈 것은 시간 문제가 아니다.
+    expect(empty).toContain("맞는 앱이 없어요.");
+    expect(empty).not.toContain("아직");
+    expect(empty).toContain("검색어나 보기를 바꿔 다른 앱을 확인하세요.");
+    await act(async () => {
+      [...el.querySelectorAll("button")].find((button) => button.textContent === "필터 지우기")?.click();
+    });
+    await until(() => q(el, "plugin-list"));
+    expect(el.querySelectorAll('[data-testid^="plugin-catalog-"]')).toHaveLength(7);
+  });
+
   it("목록이 한눈에 읽히는 길이를 넘으면 컨트롤이 돌아온다", async () => {
     // 길이만 재는 합성 항목이다: 공식 네 앱 뒤에 가짜 셋을 더해 일곱으로 만든다.
     const real = (catalogWire.plugins as Array<Record<string, unknown>>);

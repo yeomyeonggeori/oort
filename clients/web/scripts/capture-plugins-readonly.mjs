@@ -346,7 +346,7 @@ async function manyScenes(browser, origin, scheme) {
     await page.waitForTimeout(300);
     await shot("many-filtered-empty");
     const empty = (await page.getByTestId("plugins-empty").textContent()) ?? "";
-    check(`${tag} 걸러 낸 빈 상태: 사실대로 말하고 필터 지우기를 준다`, empty.includes("보여 줄 앱이 아직 없어요.") && empty.includes("검색어나 보기를 바꿔") && empty.includes("필터 지우기"), empty);
+    check(`${tag} 걸러 낸 빈 상태: 사실대로 말하고(시간의 말 「아직」 없이) 필터 지우기를 준다`, empty.includes("맞는 앱이 없어요.") && !empty.includes("아직") && empty.includes("검색어나 보기를 바꿔") && empty.includes("필터 지우기"), empty);
     await page.getByRole("button", { name: "필터 지우기", exact: true }).click();
     await page.getByTestId("plugin-list").waitFor({ timeout: 10_000 });
     check(`${tag} 필터 지우기: 일곱 줄이 돌아온다`, (await page.locator('[data-testid^="plugin-catalog-"]').count()) === 7);
