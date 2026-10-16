@@ -638,6 +638,13 @@ fn stamp_via(via: Option<&'static str>, mut detail: Value) -> Value {
     detail
 }
 
+/// Would this decision hand a value-shown-once to the lock screen's credential?
+/// A pure function so the rule is testable: no seeded approval reaches the call
+/// site while the `opens_in_app` refusal in front of it holds (that is the point).
+fn shows_a_value_to_the_lock_screen(credential_via: Option<&str>, secret_present: bool) -> bool {
+    credential_via.is_some() && secret_present
+}
+
 /// Whether the action a `workspace_action` payload names offers its one-time
 /// value to the proposing agent **at the approver's choice**
 /// (`SecretDelivery::OptIn`). An unknown or missing id is `false`, so the early
@@ -1822,6 +1829,17 @@ async fn execute_workspace_action(
             }
         }
         momo_agent::grant_secret_claim_in_tx(conn, approval.id, &grant).await?;
+    }
+    // **Backstop where the value is born** (security review of #3927). A lock-screen
+    // decision is refused up front for every action on the open list, so no value to
+    // show once should exist here for it. This catches the class that list cannot:
+    // a future action that mints a value for the APPROVER (`SecretDelivery::None`)
+    // and was never put on it. The transaction rolls back — nothing is committed and
+    // nothing is shown.
+    if shows_a_value_to_the_lock_screen(input.credential_via, executed.secret_once.is_some()) {
+        return Err(protocol_error(
+            "a lock-screen decision must not produce a value shown once",
+        ));
     }
     if action.id == momo_agent::actions::ACTION_AGENT_INVITE {
         let chosen = if deliver_to_agent {
@@ -4179,6 +4197,23 @@ mod tests {
             vec![momo_auth::SCOPE_PUSH_ACTION.to_string()]
         );
         assert!(!has_platform_read_scope(&principal));
+    }
+
+    /// The backstop's truth table: only the lock screen's credential WITH a value to
+    /// show once is stopped; an access token (no `credential_via`) gets its value, and
+    /// a credentialed decision that produced nothing proceeds.
+    #[test]
+    fn a_value_shown_once_never_reaches_the_lock_screen_credential() {
+        assert!(shows_a_value_to_the_lock_screen(
+            Some(AUDIT_VIA_PUSH_ACTION),
+            true
+        ));
+        assert!(!shows_a_value_to_the_lock_screen(
+            Some(AUDIT_VIA_PUSH_ACTION),
+            false
+        ));
+        assert!(!shows_a_value_to_the_lock_screen(None, true));
+        assert!(!shows_a_value_to_the_lock_screen(None, false));
     }
 
     /// The `opens_in_app` refusal is a receipt like every other expected failure,
