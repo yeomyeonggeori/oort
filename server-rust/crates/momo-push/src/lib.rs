@@ -47,7 +47,11 @@ pub use dispatch::{
     category_for, collapse_id, DispatchOutcome, DispatchTarget, PushCategory, PushDispatch,
     PushDispatcher, PushReason, DISPATCH_SCHEMA,
 };
-pub use dispatch_log::{claim_dispatch, settle_dispatch, DispatchClaim};
+pub use dispatch_log::{
+    claim_dispatch, dead_token_reason, settle_dispatch, settle_dispatch_and_invalidate,
+    settle_relay_refusal, DeadTokenReason, DispatchClaim, RefusalOutcome, RelayRefusal,
+    SettleOutcome, AUDIT_RELAY_REFUSED, AUDIT_RELAY_REFUSED_SCHEMA,
+};
 pub use error::{DeviceInputError, DeviceRejection, PushError};
 pub use judgment::{
     judge_targets, unread_badge, JudgedTarget, WORK_COMPLETE_FOREGROUND_WINDOW_SECS,
