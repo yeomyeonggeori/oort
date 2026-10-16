@@ -44,7 +44,7 @@ function StateChip({ state }: { state: UpdateState }) {
     case "installing":
       return <StatusChip tone="accent">받는 중</StatusChip>;
     case "installed":
-      return <StatusChip tone="ok">재시작 대기</StatusChip>;
+      return <StatusChip tone="ok">곧 다시 실행</StatusChip>;
     case "failed":
       return <StatusChip tone="danger">확인 실패</StatusChip>;
     default:
@@ -64,7 +64,7 @@ function stateSentence(state: UpdateState): string {
     case "installing":
       return "새 버전을 받고 있어요. 앱은 그대로 쓸 수 있어요.";
     case "installed":
-      return "설치를 마쳤어요. 재시작하면 새 버전으로 열려요.";
+      return "설치를 마쳤어요. 곧 새 버전으로 다시 실행돼요.";
     case "failed":
       return "확인하지 못했어요. 아래 안내를 따라 다시 시도하세요.";
     default:
@@ -85,7 +85,7 @@ export function UpdateSection() {
     <div className="flex min-w-0 flex-col gap-8" data-testid="updates-page">
       <SettingsSection
         title="앱 업데이트"
-        description="앱이 스스로 새 버전으로 바꿔요. 내려받은 파일은 서명을 검증한 뒤에만 설치해요. 설치는 지금 하고 재시작은 나중에 해도 돼요. 쓰던 화면은 그대로 있어요."
+        description="앱이 스스로 새 버전으로 바꿔요. 내려받은 파일은 서명을 검증한 뒤에만 설치해요. 설치가 끝나면 3초 뒤에 앱이 스스로 다시 실행돼요. 쓰던 글은 그대로 남아요."
       >
         <SettingsRow label="지금 버전">
           <span className="font-mono text-body text-ink" data-numeric>
@@ -143,18 +143,18 @@ export function UpdateSection() {
         {state.kind === "installed" && (
           <CardBody>
             <p className="text-body text-ink" data-testid="update-installed">
-              새 버전이 설치됐어요. 재시작하면 {state.update.version}(으)로 열려요.
+              새 버전이 설치됐어요. 곧 다시 실행되고 {state.update.version}(으)로 열려요.
             </p>
           </CardBody>
         )}
 
         {(state.kind === "available" || state.kind === "installed") && (
           <SettingsRow
-            label={state.kind === "available" ? "새 버전 설치" : "재시작"}
+            label={state.kind === "available" ? "새 버전 설치" : "다시 실행"}
             description={
               state.kind === "available"
-                ? "설치는 지금 하고 재시작은 나중에 해도 돼요."
-                : "지금 재시작하거나, 쓰던 일을 마친 뒤에 열어도 돼요."
+                ? "설치가 끝나면 3초 뒤에 앱이 스스로 다시 실행돼요."
+                : "기다리지 않고 지금 다시 실행해도 돼요."
             }
           >
             {state.kind === "available" ? (
@@ -163,7 +163,7 @@ export function UpdateSection() {
               </Button>
             ) : (
               <Button size="sm" onClick={() => void relaunchIntoUpdate()} data-testid="update-relaunch">
-                지금 재시작
+                지금 다시 실행
               </Button>
             )}
           </SettingsRow>

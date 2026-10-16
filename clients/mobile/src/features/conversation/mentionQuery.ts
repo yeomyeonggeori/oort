@@ -1,4 +1,5 @@
 import type {RosterMember} from '@momo/core/lib/api';
+import {matchedAlias} from '@momo/core/features/routing/helperAliases';
 
 // =============================================================================
 // The @mention token under the caret, and the members that match it.
@@ -88,14 +89,18 @@ export function matchMembers(
 ): RosterMember[] {
   const needle = query.trim().toLowerCase();
   const active = members.filter(m => m.status === 'active');
-  const matched = needle
-    ? active.filter(
-        m =>
-          m.handle.toLowerCase().includes(needle) ||
-          m.displayName.toLowerCase().includes(needle),
-      )
-    : active;
-  return matched.slice(0, limit);
+  if (!needle) return active.slice(0, limit);
+  // 별칭(ADR-0201 v2 H2)이 맞춘 멤버가 앞에 선다. 웹 `matchMembers` 와 같은 규칙이다.
+  // 별칭을 보내지 않는 서버에서는 `byAlias` 가 비어 예전 결과와 같다.
+  const byAlias = active.filter(m => matchedAlias(m, needle) !== null);
+  const aliased = new Set(byAlias.map(m => m.id));
+  const byName = active.filter(
+    m =>
+      !aliased.has(m.id) &&
+      (m.handle.toLowerCase().includes(needle) ||
+        m.displayName.toLowerCase().includes(needle)),
+  );
+  return [...byAlias, ...byName].slice(0, limit);
 }
 
 /**

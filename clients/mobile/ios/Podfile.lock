@@ -55,6 +55,9 @@ PODS:
     - ExpoModulesCore
   - ExpoHaptics (57.0.3):
     - ExpoModulesCore
+  - ExpoImageManipulator (57.0.21):
+    - ExpoModulesCore
+    - SDWebImageWebPCoder
   - ExpoImagePicker (57.0.12):
     - ExpoModulesCore
   - ExpoKeepAwake (57.0.1):
@@ -97,6 +100,18 @@ PODS:
   - hermes-engine (250829098.0.16):
     - hermes-engine/Pre-built (= 250829098.0.16)
   - hermes-engine/Pre-built (250829098.0.16)
+  - libwebp (1.6.0):
+    - libwebp/demux (= 1.6.0)
+    - libwebp/mux (= 1.6.0)
+    - libwebp/sharpyuv (= 1.6.0)
+    - libwebp/webp (= 1.6.0)
+  - libwebp/demux (1.6.0):
+    - libwebp/webp
+  - libwebp/mux (1.6.0):
+    - libwebp/demux
+  - libwebp/sharpyuv (1.6.0)
+  - libwebp/webp (1.6.0):
+    - libwebp/sharpyuv
   - MMKVCore (2.4.0)
   - MomoBackgroundTaskNative (1.0.0):
     - ExpoModulesCore
@@ -2109,6 +2124,10 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
+  - SDWebImage/Core (5.21.7)
+  - SDWebImageWebPCoder (0.15.0):
+    - libwebp (~> 1.0)
+    - SDWebImage/Core (~> 5.17)
   - Yoga (0.0.0)
   - ZXingObjC/Core (3.6.9)
   - ZXingObjC/OneD (3.6.9):
@@ -2132,6 +2151,7 @@ DEPENDENCIES:
   - ExpoFont (from `../node_modules/expo/node_modules/expo-font/ios`)
   - ExpoGlassEffect (from `../node_modules/expo-glass-effect/ios`)
   - ExpoHaptics (from `../node_modules/expo-haptics/ios`)
+  - ExpoImageManipulator (from `../node_modules/expo-image-manipulator/ios`)
   - ExpoImagePicker (from `../node_modules/expo-image-picker/ios`)
   - ExpoKeepAwake (from `../node_modules/expo/node_modules/expo-keep-awake/ios`)
   - "ExpoLogBox (from `../node_modules/expo/node_modules/@expo/log-box`)"
@@ -2228,7 +2248,10 @@ DEPENDENCIES:
 
 SPEC REPOS:
   trunk:
+    - libwebp
     - MMKVCore
+    - SDWebImage
+    - SDWebImageWebPCoder
     - ZXingObjC
 
 EXTERNAL SOURCES:
@@ -2262,6 +2285,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/expo-glass-effect/ios"
   ExpoHaptics:
     :path: "../node_modules/expo-haptics/ios"
+  ExpoImageManipulator:
+    :path: "../node_modules/expo-image-manipulator/ios"
   ExpoImagePicker:
     :path: "../node_modules/expo-image-picker/ios"
   ExpoKeepAwake:
@@ -2464,6 +2489,7 @@ SPEC CHECKSUMS:
   ExpoFont: 59e1faf66ba9bcd232ae1e2ce58d202a48b6f65e
   ExpoGlassEffect: 310dc75c8d862de1c4b3ff15a90439ba51a39798
   ExpoHaptics: 32efd02d88953d30a5c2ff796c0fce692e7bcd2e
+  ExpoImageManipulator: 9dc637d77a29941bbbff5ec9cfc6ef3d6772d875
   ExpoImagePicker: 09fafe2ab0257a41a0e6625ebbe56d73cb6611fa
   ExpoKeepAwake: c26f14275017370cc8a4b7b43a0e23361f2053a5
   ExpoLogBox: 6bb73c341aca22e699bd4da6cc61afc844e1a648
@@ -2473,6 +2499,7 @@ SPEC CHECKSUMS:
   ExpoNotifications: 0f253ad90f108c1c4045b541294164865c6aadc8
   FBLazyVector: 3c3be9a019176b5699455f7f66c5444b78a411c6
   hermes-engine: 017aba474510092d38cc82328f1102186301db3e
+  libwebp: af5937a13536ef73f3784d69cc342b98961acf33
   MMKVCore: 3d16ce9f7d411e135020915fde98a056859a1efa
   MomoBackgroundTaskNative: 75a5fd03f072d40976a6be7f2e8a7d40c49cc736
   MomoDeviceKeyNative: 2aa502b968215f65772fbec852ce09be8d3b0b51
@@ -2556,6 +2583,8 @@ SPEC CHECKSUMS:
   ReactCommon: 9002f006f571256348994183f7d4387aa7cf84e8
   ReactNativeDependencies: 2bd6854ade79bf1b60586d1ab7813a389df1b6bf
   RNKeychain: 6778b35b5bd067c322f8479526ac09b1d61f31d0
+  SDWebImage: e9fc87c1aab89a8ab1bbd74eba378c6f53be8abf
+  SDWebImageWebPCoder: 0e06e365080397465cc73a7a9b472d8a3bd0f377
   Yoga: 9891cfb1c680f64de9c41b09e7453dea33454d2b
   ZXingObjC: 8898711ab495761b2dbbdec76d90164a6d7e14c5
 

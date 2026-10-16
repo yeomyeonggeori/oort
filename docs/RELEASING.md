@@ -314,6 +314,36 @@ curl -sI https://github.com/yeomyeonggeori/oort/releases/latest/download/oort-ma
 
 ---
 
+## iOS 새 버전 피드 (폰 앱의 새 버전 배너)
+
+폰 앱의 「새 버전 x.y.z [업데이트]」 배너(홈 맨 위, 프로필 시트의 「내 상태」 위, #3905)는
+정적 JSON 한 장을 읽어 **자기 빌드 번호와 견준다.** 서버 필드도 네이티브 코드도 없다.
+
+| | |
+|---|---|
+| 주소 | `https://yeomyeonggeori.github.io/momo-alpha/ios-latest.json` (데스크탑 `update-next.json` 과 같은 Pages 저장소 `momo-alpha`) |
+| 읽는 곳 | `clients/mobile/src/features/appUpdate/feed.ts`(주소·검증·캐시 6시간, 실패 5분, 시간 제한 5초) |
+| 모양 | `{"ios": {"latest_build": 3036, "version": "0.1.29", "testflight": true}}` |
+| `latest_build` | 올린 빌드의 `CFBundleVersion`(정수). 앱의 `nativeBuildVersion` 과 숫자로 견주고, **더 클 때만** 배너가 선다 |
+| `version` | 사람이 읽는 `x.y.z`(영숫자와 `.` `+` `-`, 32자 이하) |
+| `testflight` | `true` 면 시트가 「TestFlight 앱에서 업데이트를 눌러 주세요」와 [TestFlight 열기](`itms-beta://`), `false` 면 App Store 링크(`feed.ts` 의 `APP_STORE_URL`, **스토어 등록 전 자리표시**) |
+
+**이 JSON은 증거 빌드 미션이 갱신한다.** TestFlight 업로드가 처리 완료(「Ready to Test」)로 바뀐
+**뒤에**, 그리고 그 빌드의 owner 승인(M7-I)이 기록된 **뒤에만** 올린 빌드 번호와 버전을 적어
+`momo-alpha` 에 커밋한다. 먼저 올리면 TestFlight 에 아직 없는 판을 배너가 약속한다.
+`latest_build` 는 **올라간 빌드의 번호**(App Store Connect·TestFlight 에 보이는 빌드 번호)다.
+저장소의 `project.pbxproj` 값(`1`)은 소스 기본값이라 쓰지 않는다. 번호를 부여·덮어쓰는 방식은
+이 문서를 쓴 PR 이 확인하지 못했다(runtime-unverified). 미션은 올린 뒤 기기에 깔린 앱의
+설정 시트 버전 줄 `oort x.y.z (빌드)` 의 숫자와 같은 값인지 한 번 대조한다.
+
+- 올리지 않으면 아무 일도 없다: 앱은 JSON 을 못 읽거나 같은 빌드면 배너를 그리지 않는다.
+- 되돌릴 때는 `latest_build` 를 앱들이 이미 가진 값 이하로 내리거나 파일을 지운다. 배너가 사라진다.
+- 시크릿·개인 정보는 이 파일에 쓰지 않는다. 앱은 쿠키·토큰 없이 `GET` 한 번만 한다.
+- 외부 TestFlight·App Store 로 넘어갈 때(M7-S)는 `testflight: false` 로 바꾸고 `APP_STORE_URL`
+  을 실제 앱 주소로 고쳐 같은 PR 에 싣는다. 그 PR 은 owner 승인 범위다.
+
+---
+
 ## 이 문서가 하지 않는 것
 
 - 태그/Release 의 원격 쓰기 — 오케스트레이터. 워커는 초안과 문면만.

@@ -21,6 +21,7 @@ import {authGate, type AuthGate} from './authGate';
 import {forgetDeviceKeyOnSignOut} from '../deviceKey/enrollment';
 import {clearAllDrafts} from '../features/conversation/drafts';
 import {clearAllAttachmentDrafts} from '../features/attachments/draftStore';
+import {forgetBackgroundOnSignOut} from '../design/background/store';
 import {clearMemberAvatarCache} from '../features/conversation/memberAvatarImage';
 import {revokeDevice} from '../push/devices';
 import {registeredPushDeviceId} from '../push/registration';
@@ -226,6 +227,11 @@ export function SessionProvider({
     };
   }, [attachmentSessionKey]);
 
+  // 세션 provider 가 내려갈 때(로그아웃·토큰 만료) 내 사진 배경을 지운다 (ADR-0189 증보 2).
+  // 위 효과처럼 workspace/member 키에 묶지 않는다 — 그러면 같은 사람이 워크스페이스를
+  // 바꿀 때마다 사진이 사라진다. 사진은 계정이 아니라 **세션의 끝**에서 지운다.
+  useEffect(() => forgetBackgroundOnSignOut, []);
+
   const workspaceId = member.workspaceId;
   const signOut = useCallback(() => {
     // Fire and forget, exactly as the web client does and for the reason the
@@ -270,6 +276,9 @@ export function SessionProvider({
     clearAllAttachmentDrafts();
     // 멤버 아바타 파일 캐시도 지운다(메모리 색인 + 디스크).
     clearMemberAvatarCache();
+    // 내 사진 배경은 이 기기의 사람 데이터다 — 다음 사람의 기기에 남기지 않는다
+    // (ADR-0189 증보 2). 단색·기본 제공 선택은 취향이라 남는다.
+    forgetBackgroundOnSignOut();
   }, [queryClient, workspaceId]);
 
   const value = useMemo<SignedInSession>(

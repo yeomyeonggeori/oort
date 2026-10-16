@@ -10,6 +10,7 @@ import { emptySidebarPrefs } from "@momo/core/features/sidebar/sidebarSections";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { ShellNavProvider } from "@/app/shellNav";
+import { resetUpdateStoreForTest, seedUpdateStateForTest } from "@/features/updates/store";
 import { Sidebar } from "./Sidebar";
 
 const WS = "00000000-0000-7000-8000-000000000001";
@@ -292,6 +293,37 @@ describe("사이드바 하단 프로필 (#3574)", () => {
     expect(
       foot.querySelector('[data-testid="profile-card"]')?.getAttribute("data-compact")
     ).toBe("false");
+  });
+  it("업데이트 알약: 펼침의 프로필 줄에는 서고, 접힘(⌘B)에서는 마운트되지 않는다 (#3904)", async () => {
+    const update = {
+      version: "0.1.28",
+      currentVersion: "0.1.27",
+      notes: null,
+      publishedAt: null,
+    };
+    resetUpdateStoreForTest();
+    seedUpdateStateForTest({ kind: "available", update });
+    const expanded = await mount();
+    const foot = await vi.waitFor(() => {
+      const node = expanded.querySelector('[data-testid="sidebar-profile-foot"]');
+      expect(node).not.toBeNull();
+      return node as HTMLElement;
+    });
+    expect(foot.querySelector('[data-testid="update-pill"]')).not.toBeNull();
+    // 알약은 프로필 카드와 도움말 사이, 같은 줄이다.
+    const order = Array.from(foot.querySelectorAll("[data-testid]")).map((n) =>
+      n.getAttribute("data-testid")
+    );
+    expect(order.indexOf("update-pill")).toBeGreaterThan(order.indexOf("profile-card"));
+    expect(order.indexOf("update-pill")).toBeLessThan(order.indexOf("shortcut-help-trigger"));
+    act(() => mountedRoot?.unmount());
+    mountedRoot = null;
+    mountedHost?.remove();
+    mountedHost = null;
+
+    const collapsed = await mount({ collapsed: true });
+    expect(collapsed.querySelector('[data-testid="update-pill"]')).toBeNull();
+    resetUpdateStoreForTest();
   });
 });
 

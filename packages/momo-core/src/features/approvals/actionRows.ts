@@ -27,3 +27,27 @@ export function isAccessWideningRow(
     row.value.startsWith("예")
   );
 }
+
+// -----------------------------------------------------------------------------
+// 워크스페이스 전체에 걸리는 행동 (ADR-0201 증보 v2 H6-1, #3893)
+//
+// 도우미가 이제 워크스페이스 설정(문구·링크 미리보기·팀 기억 끄기/멈춤·재개 정책)도 카드로
+// 올린다. 서버 행은 「무엇이 → 무엇으로」를 말하고, 이 한 줄은 **누구에게 닿는가**를 말한다:
+// 채널 하나, 에이전트 하나가 아니라 모든 멤버의 화면이 바뀐다. 판정은 액션 id 하나로 서고,
+// 모르는 id는 줄을 세우지 않는다(fail-closed).
+// -----------------------------------------------------------------------------
+
+const WORKSPACE_WIDE_ACTIONS: ReadonlySet<string> = new Set([
+  "workspace.settings.update",
+  "workspace.unfurl.update",
+  "workspace.memory.update",
+  "workspace.work_tier.update",
+]);
+
+export const WORKSPACE_WIDE_LABEL = "적용 범위";
+export const WORKSPACE_WIDE_VALUE = "워크스페이스 전체";
+export const WORKSPACE_WIDE_NOTE = "승인하면 모든 멤버에게 바로 적용돼요.";
+
+export function isWorkspaceWideAction(actionId: string): boolean {
+  return WORKSPACE_WIDE_ACTIONS.has(actionId);
+}

@@ -64,6 +64,11 @@ import {
 } from '../features/workspace/queries';
 import {Avatar} from '../features/conversation/Avatar';
 import {ProfileSheet} from '../features/profile/ProfileSheet';
+import {
+  AppUpdateBanner,
+  AppUpdateSheet,
+} from '../features/appUpdate/AppUpdateBanner';
+import {useAppUpdateOffer} from '../features/appUpdate/useAppUpdateOffer';
 import {haptics} from '../lib/haptics';
 import {useReduceMotion} from '../lib/useReduceMotion';
 import {useTabBarClearance} from '../shell/ShellChrome';
@@ -265,7 +270,7 @@ export default function SidebarScreen({
   onOpenSearch: (initialQuery?: string) => void;
   /**
    * 에이전트 목록 층을 연다 (ADR-0189 D1 — 에이전트 탭이 홈으로 흡수된 뒤의 문).
-   * 작업 중인 에이전트가 없을 때의 한 줄과 DM 섹션 메뉴가 부른다. 셸 밖(하네스)
+   * DM 섹션 메뉴가 부른다(홈 맨 위의 「에이전트 부르기」 한 줄은 2026-10-16에 없앴다). 셸 밖(하네스)
    * 에서는 없을 수 있고, 그때 그 문들은 서지 않는다.
    */
   onOpenAgentList?: () => void;
@@ -289,6 +294,9 @@ export default function SidebarScreen({
   const {member, workspaceId, signOut} = useSession();
   const realtime = useRealtime();
   const [profileOpen, setProfileOpen] = useState(false);
+  // 새 버전 배너(#3905): 피드를 못 읽었거나 이미 최신이면 `null` 이라 아무것도 서지 않는다.
+  const updateOffer = useAppUpdateOffer();
+  const [updateSheetOpen, setUpdateSheetOpen] = useState(false);
   // 셸 안의 탭이면 바닥 위에 투명하게 서고, 목록 끝을 탭바만큼 비운다(ADR-0189 D1).
   const clearance = useTabBarClearance();
   const channelsQuery = useChannels(workspaceId);
@@ -566,18 +574,34 @@ export default function SidebarScreen({
           keyExtractor={row => row.key}
           ListHeaderComponent={
             <>
-              {onOpenWorkList && !searching ? (
-                <WorkSeeAllRow onPress={onOpenWorkList} />
-              ) : null}
-              {card ? (
-                <WorkingCard
-                  card={card}
-                  onPress={() =>
-                    onOpenConversation(card.channelId, card.conversationTitle)
-                  }
+              {/* 성재 결재 2026-10-16: 홈 맨 위의 새 버전 배너. 검색 중에는 목록이
+                  검색 결과이므로 서지 않는다. 닫기·나중에는 없다. */}
+              {updateOffer && !searching ? (
+                <AppUpdateBanner
+                  offer={updateOffer}
+                  onPress={() => setUpdateSheetOpen(true)}
+                  testID="home-update-banner"
+                  flush
                 />
-              ) : agents.length > 0 && onOpenAgentList && !searching ? (
-                <IdleAgentsRow count={agents.length} onPress={onOpenAgentList} />
+              ) : null}
+              {/* 「작업 중」은 **지금 도는 턴이 있을 때만** 선다 (성재 2026-10-16: 「저 작업이
+                  모호해요, 상시 떠 있는 건가요?」). 머리 줄(에이전트 작업 · 모두 보기)과 카드가 한
+                  묶음이고, 턴이 없으면 둘 다 없다 — 비어 있는 「작업」 머리 아래에 다른 문(에이전트
+                  부르기)이 서 있던 것이 모호함의 원인이었다. 에이전트 목록·작업 목록으로 가는 문은
+                  + 메뉴(「AI」·「작업」)와 DM 섹션 메뉴에 그대로 있다. */}
+              {card ? (
+                <>
+                  {onOpenWorkList && !searching ? (
+                    <WorkSeeAllRow onPress={onOpenWorkList} />
+                  ) : null}
+                  <WorkingCard
+                    card={card}
+                    directory={directoryQuery.directory}
+                    onPress={() =>
+                      onOpenConversation(card.channelId, card.conversationTitle)
+                    }
+                  />
+                </>
               ) : null}
               {filterField}
             </>
@@ -630,6 +654,13 @@ export default function SidebarScreen({
           testID="sidebar-list"
         />
       )}
+
+      {updateSheetOpen && updateOffer ? (
+        <AppUpdateSheet
+          offer={updateOffer}
+          onClose={() => setUpdateSheetOpen(false)}
+        />
+      ) : null}
 
       {profileOpen ? (
         <ProfileSheet
@@ -809,12 +840,16 @@ function Row({
         testID={row.isPrivate ? 'home-row-lock' : 'home-row-hash'}
       />
     );
+  } else if (row.avatarMemberId !== null) {
+    // 에이전트도 같은 `Avatar` 다 (성재 2026-10-16: 에이전트 목록에는 사진이 보이는데 DM 줄은
+    // 로봇이었다). 예전에는 `isAgent` 가 먼저 걸려 `avatarMemberId` 가 있어도 로봇 사각을
+    // 그렸다. 사진이 없으면 `Avatar` 가 에이전트 모양(둥근 사각)에 이니셜을 세운다.
+    lead = <Avatar directory={directory} memberId={row.avatarMemberId} size={HOME.rowFace} />;
   } else if (row.isAgent) {
+    // 명부에서 상대를 못 찾은 에이전트 줄만 로봇 사각으로 남는다.
     lead = (
       <AgentSquare size={HOME.rowFace} corner={HOME.rowAgentCorner} glyph={HOME.rowAgentGlyph} />
     );
-  } else if (row.avatarMemberId !== null) {
-    lead = <Avatar directory={directory} memberId={row.avatarMemberId} size={HOME.rowFace} />;
   } else {
     lead = <View style={styles.faceBlank} />;
   }
@@ -910,9 +945,12 @@ function LiveDot({pulse, color}: {pulse: boolean; color: string}): React.JSX.Ele
 
 export function WorkingCard({
   card,
+  directory,
   onPress,
 }: {
   card: WorkingCardModel;
+  /** 있으면 에이전트의 프로필 사진이 서고, 없거나 사진이 없으면 로봇 사각이 선다. */
+  directory?: Directory;
   onPress: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -938,7 +976,11 @@ export function WorkingCard({
       testID="home-working-card">
       <GlassSurface radius={HOME.cardRadius} style={styles.card}>
         <View style={styles.cardTop}>
-          <AgentSquare size={HOME.cardFace} corner={HOME.cardAgentCorner} glyph={HOME_ICON_SIZE.bot} />
+          {directory ? (
+            <Avatar directory={directory} memberId={card.memberId} size={HOME.cardFace} />
+          ) : (
+            <AgentSquare size={HOME.cardFace} corner={HOME.cardAgentCorner} glyph={HOME_ICON_SIZE.bot} />
+          )}
           <Text
             style={styles.cardName}
             numberOfLines={1}
@@ -999,15 +1041,6 @@ export function WorkingCard({
 }
 
 /**
- * 작업 중인 에이전트가 없을 때 카드 자리에 서는 한 줄 (PR 「빈 상태」 결정).
- *
- * 카드를 통째로 비우지 않는 이유: 이 자리는 에이전트 탭이 흡수된 곳이라(ADR-0189
- * D1) 비우면 에이전트 목록·호스티드 연결로 가는 문이 FAB 시트 한 곳에만 남는다.
- * 빈 유리 카드를 두지 않는 이유: 「아무도 일하지 않음」을 카드 크기로 말하면 목록을
- * 한 화면 아래로 밀어 매일 여는 채널이 첫 화면에서 빠진다. 그래서 행 한 줄 — 시안의
- * `.a-row` 문법 그대로, 에이전트 사각과 함께.
- */
-/**
  * 「작업 중」 카드 머리의 「모두 보기」 (ADR-0202 D6, U1 #3842). 카드는 지금 도는 턴 하나만
  * 말하고, 맡긴 일 전부(결과 포함)는 「작업」 화면이 말한다. 카드 자체가 누르는 면이라 이 문은
  * 카드 안이 아니라 그 위의 머리 줄에 선다(누르는 면 안에 누르는 면을 겹치지 않는다).
@@ -1016,12 +1049,12 @@ function WorkSeeAllRow({onPress}: {onPress: () => void}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   return (
     <View style={styles.workHead}>
-      <Text accessibilityRole="header" style={styles.workHeadLabel}>
-        작업
+      <Text accessibilityRole="header" style={styles.workHeadLabel} testID="home-work-head">
+        에이전트 작업
       </Text>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="작업 모두 보기"
+        accessibilityLabel="에이전트 작업 모두 보기"
         onPress={onPress}
         hitSlop={space.sm}
         style={({pressed}) => [styles.workSeeAll, pressed && styles.rowPressed]}
@@ -1029,40 +1062,6 @@ function WorkSeeAllRow({onPress}: {onPress: () => void}): React.JSX.Element {
         <Text style={styles.workSeeAllLabel}>모두 보기 ›</Text>
       </Pressable>
     </View>
-  );
-}
-
-function IdleAgentsRow({
-  count,
-  onPress,
-}: {
-  count: number;
-  onPress: () => void;
-}): React.JSX.Element {
-  const styles = useStyles(buildStyles);
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`에이전트 부르기, 지금 작업 중인 에이전트 없음, 에이전트 ${count}명`}
-      onPress={onPress}
-      style={({pressed}) => [styles.row, styles.idleRow, pressed && styles.rowPressed]}
-      testID="home-agents-idle">
-      <AgentSquare size={HOME.rowFace} corner={HOME.rowAgentCorner} glyph={HOME.rowAgentGlyph} />
-      <View style={styles.idleText}>
-        {/* 동사가 잘리면 문이 무엇인지 사라진다(AX, 리뷰 M4) — 두 줄까지 감는다. */}
-        <Text style={styles.rowTitle} numberOfLines={2} lineBreakStrategyIOS="hangul-word">
-          에이전트 부르기
-        </Text>
-        {/* 보조 줄은 이름 **아래**에 선다. 오른쪽 끝에 두면 큰 글씨에서 이름이
-            「에…」로 먹힌다(AX 캡처). */}
-        <Text
-          style={styles.idleMeta}
-          numberOfLines={1}
-          maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
-          {`지금 작업 중인 에이전트 없음 · ${count}명`}
-        </Text>
-      </View>
-    </Pressable>
   );
 }
 
@@ -1399,7 +1398,6 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   progStepOnStale: {backgroundColor: color.textFaint},
 
   // ---- 빈 카드 자리 · 이름 찾기 --------------------------------------------
-  idleRow: {marginBottom: HOME.secBelow},
   workHead: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1414,8 +1412,6 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     borderRadius: radius.md,
   },
   workSeeAllLabel: {fontSize: font.label, color: color.accentText, fontWeight: '600'},
-  idleText: {flex: 1},
-  idleMeta: {fontSize: font.label, color: color.textMuted},
   fallthrough: {
     minHeight: TOUCH_TARGET,
     justifyContent: 'center',

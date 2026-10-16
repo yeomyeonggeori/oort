@@ -3,6 +3,7 @@
 - Status: **Accepted** (2026-07-18, 성재 — D1~D3 권고안 승인 "ㄱㄱ". MOMO-477 발급, track/engine)
 - 증보 2: 2026-09-27 **Accepted** — 알림 일시 중지 만료와 방해 금지 묶음(#2850). 파일 끝 「증보 2」 절
 - 증보 3: 2026-09-28 **Accepted**(증보 2 결재 범위의 쓰기 모양 보강, planner 편성 #3012) — 필드 단위 `PATCH …/notification-rules`. 파일 끝 「증보 3」 절
+- 증보: 2026-10-16 **ADR-0204 D2·D3** — 화면은 기한을 반드시 고른다(「직접 끌 때까지」 없음, 서버 `null` 계약은 그대로), 방해 금지 문구 「알림도 함께 멈춰요」(증보 2 요구 이행), 멈춤 표시(폰 인박스·데스크탑 사이드바). 증보 1 머리 표기 정정.
 - 관련: ADR-0120(푸시 — 판정은 notifier 한 곳), ux-bible P8(알림 예산)·P9(판정 로직 서버 단일화), ENGINE_HANDOFF B-4, ADR-0109(unread — 배지는 별개 데이터)
 - 발단: 설정 UI·서버 계약 양측 부재(2026-07-18 갭 감사 B-4). dogfood에서 채널이 늘며 알림 통제 수요.
 
@@ -36,7 +37,7 @@ MOMO-477 단일 goal: `018_notification_pref` migration((workspace, member, chan
 
 ---
 
-## 증보 1 (2026-08-10, **Proposed** — 머지 시 성재 최종 승인) — 사용자 편집 알림 규칙 v0 (DND + 멘션 예외)
+## 증보 1 (2026-08-10, **Accepted — 표기 정정 2026-10-16**: 머지돼 시행 중이고, 증보 2(2026-09-27 성재 결재 「묶어」)가 이 증보의 `dnd`를 전제로 승인됐다. 증보 1 자체의 별도 결재 원문은 없다 — ADR-0204 D2) — 사용자 편집 알림 규칙 v0 (DND + 멘션 예외)
 
 - 관련: 검수 배치 2 W-B2-3(`feat/notif-rules`), 편성 정본 `docs/planning/2026-08-10-desktop-qa-feedback-batch2.md`, ux-bible P9(판정 서버 단일).
 - 발단: 성재 결정 "알림 규칙 실기능 채우기". 조사 실측 — 설정의 알림 규칙 패널(`SettingsRoute.tsx` NotificationRulesSection)은 "규칙을 이 화면에서 바꾸는 기능은 아직 없습니다"라는 빈 안내 패널이고, 서버에 사용자 편집용 operator REST가 없다. 인박스 "알림 규칙 설정" 링크는 `/settings`(첫 섹션=계정)로 착지해 규칙 패널에 닿지 못한다.

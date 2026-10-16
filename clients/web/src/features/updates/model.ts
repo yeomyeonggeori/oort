@@ -36,6 +36,13 @@ export type UpdateState =
   | { kind: "installed"; update: AvailableUpdate }
   | {
       kind: "failed";
+      /**
+       * Which act failed. `check` (the manifest was unreachable, e.g. offline)
+       * says nothing about whether an update exists, so the sidebar pill stays
+       * hidden for it; `install` means an update DID exist and the swap broke,
+       * which is exactly when the pill must keep offering a retry.
+       */
+      phase: "check" | "install";
       /** A sentence for the person: what happened and what to do next. */
       message: string;
       /** The underlying error, for a bug report. Never the whole story alone. */
@@ -148,7 +155,51 @@ export function badgeLabel(state: UpdateState): string | null {
       return percent === null ? "업데이트 받는 중" : `업데이트 받는 중 ${percent}%`;
     }
     case "installed":
-      return "재시작하면 적용";
+      return "곧 다시 실행";
+    default:
+      return null;
+  }
+}
+
+/** Seconds the 「곧 다시 실행돼요」 card counts down before restarting on its own. */
+export const RELAUNCH_COUNTDOWN_SECONDS = 3;
+
+/**
+ * True when the profile row should carry the 「업데이트」 pill (owner 결정 2026-10-16).
+ *
+ * The pill stays for as long as an update exists: no dismiss, no snooze. That is
+ * the three live states, plus an INSTALL failure (an update existed and the swap
+ * broke). A failed CHECK is not on the list: an offline laptop does not know
+ * there is an update, and a standing 「업데이트」 button it cannot honour would be
+ * a regression from showing nothing.
+ */
+export function pillWorthShowing(state: UpdateState): boolean {
+  return (
+    state.kind === "available" ||
+    state.kind === "installing" ||
+    state.kind === "installed" ||
+    (state.kind === "failed" && state.phase === "install")
+  );
+}
+
+/**
+ * The hover/focus tooltip for the pill. Plain sentences, no em-dash (house copy
+ * rule), and one per state so the tooltip is the same fact the card will show.
+ */
+export function pillTooltip(state: UpdateState): string | null {
+  switch (state.kind) {
+    case "available":
+      return `${state.update.version}로 업데이트할 수 있어요. 누르면 받고 다시 실행해요.`;
+    case "installing": {
+      const percent = progressPercent(state.downloaded, state.total);
+      return percent === null ? "받는 중이에요." : `받는 중 ${percent}%`;
+    }
+    case "installed":
+      return "곧 다시 실행돼요.";
+    case "failed":
+      return state.phase === "install"
+        ? "업데이트하지 못했어요. 눌러서 다시 확인해요."
+        : null;
     default:
       return null;
   }
