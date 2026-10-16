@@ -124,6 +124,8 @@ import {bootSpawnPort} from '../src/boot/spawnPort';
 import {workRunFailure} from '@momo/core/features/agents/workRunRequest';
 import {INITIAL_NAV, navReducer} from '../src/nav/state';
 import {ProfilePage, ProfileSheet} from '../src/features/profile/ProfileSheet';
+import {__setPermissionReader} from '../src/push/permissionStatus';
+import {clearPushOptOut, setPushOptedOut} from '../src/push/pushOptOut';
 import {AppUpdateSheet} from '../src/features/appUpdate/AppUpdateBanner';
 import {seedIosFeedCacheForCapture} from '../src/features/appUpdate/feed';
 import {PageSheet} from '../src/design/PageSheet';
@@ -4389,6 +4391,31 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           </View>
         </Screen>
       );
+    // #3924: 프로필 「알림」 묶음의 첫 줄 — 이 폰의 푸시 스위치 세 상태(켬 · 끔 · OS 거부).
+    // 시트를 알림 묶음이 머리에 오도록 끌어올려 찍는다. iOS 의 답과 「껐다」는 기억은
+    // `seedPush` 가 정한다 — 스위치·설명·잠김은 배송되는 `usePushSwitch` 가 그 값에서 그린다.
+    case 'shell-profile-push-on':
+    case 'shell-profile-push-off':
+    case 'shell-profile-push-denied':
+      return (
+        <Screen>
+          <View style={{flex: 1, overflow: 'hidden'}}>
+            <View style={{marginTop: -PUSH_CAPTURE_SCROLL, height: 3000}}>
+              <ProfilePage
+                workspaceId={HARNESS_MEMBER.workspaceId}
+                member={HARNESS_MEMBER}
+                directory={makeDirectory(SHELL_ROSTER)}
+                connected
+                onOpenTheme={() => {}}
+                onOpenStatus={() => {}}
+                onOpenDeviceKey={() => {}}
+                onSignOut={() => {}}
+                onRevealEnd={() => {}}
+              />
+            </View>
+          </View>
+        </Screen>
+      );
     case 'mark-unread-sidebar':
       // 캡션은 **아래**에 단다. 이 화면은 자기 `Screen` 이 안전 영역 위쪽을
       // 이미 먹으므로, 위에 달면 상태 막대 밑으로 들어가거나 인셋이 두 번 쌓인다.
@@ -5518,6 +5545,23 @@ function seedAi(surface: string): void {
   ]);
 }
 
+// #3924: 푸시 스위치 세 판. 시뮬레이터에는 알림 권한을 허용·거부로 고정하는 길이 없어
+// (`simctl privacy` 에 notifications 가 없다) iOS 의 답을 하네스가 정한다. 「껐다」는 기억은
+// 진짜 저장소에 적는다 — 하네스의 멤버 id 로 적히므로 이 기기에 로그인한 진짜 멤버의 스위치에는
+// 닿지 않는다(`pushOptOut.ts`). 켬·거부 판은 그 기억을 지워 두고 시작한다.
+/** `shell-profile-notify` 와 같은 끌어올림: 알림 묶음 머리가 화면 위쪽에 오게. */
+const PUSH_CAPTURE_SCROLL = 560;
+
+function seedPush(surface: string): void {
+  const denied = surface === 'shell-profile-push-denied';
+  __setPermissionReader(async () => ({granted: !denied, canAskAgain: !denied}));
+  if (surface === 'shell-profile-push-off') {
+    setPushOptedOut(HARNESS_MEMBER.id, true);
+  } else {
+    clearPushOptOut();
+  }
+}
+
 // #3638: 컴포저 호출 판의 서버. 호출 흐름(대상 판정 → 맥 읽기 → 서명 키 확인 → 메시지 전송)은
 // 진짜이고, 서버만 이 가짜다. 시뮬레이터에는 Secure Enclave가 없어 키 저장소가 `unsupported`
 // 로 답하므로 「서명 키가 필요해요」가 **실제로** 뜬다. `flag-off` 판은 서버가 서명 요구를 꺼
@@ -6299,4 +6343,5 @@ if (
     seedIosFeedCacheForCapture({latestBuild: 3036, version: '0.1.29', testflight: true});
   }
   if (LAUNCHED.name.startsWith('shell-call-')) seedCall(LAUNCHED.name);
+  if (LAUNCHED.name.startsWith('shell-profile-push-')) seedPush(LAUNCHED.name);
 }
