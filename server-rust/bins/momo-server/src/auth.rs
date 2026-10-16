@@ -99,13 +99,23 @@ pub struct LegacyGatewaySecret;
 ///
 /// The `Principal` it travels beside is deliberately indistinguishable from an
 /// access token's: a person, in a workspace, with a `token_id`. The marker adds
-/// no authority and no handler is allowed to branch on it for permission. It
-/// exists so the one route that token may reach can say, in the audit log, which
-/// door the decision came through (`detail.via = "push_action"`). Only this
-/// middleware inserts it, on the one arm that verified that `typ`, so a request
-/// cannot carry it in.
+/// no authority, and no handler may read it as a reason to ALLOW anything — it may
+/// only narrow. It exists so the one route that token may reach can say, in the
+/// audit log, which door the decision came through (`detail.via = "push_action"`)
+/// and can refuse the approvals that must be opened in the app (`opens_in_app`),
+/// and so the two token-minting routes can refuse a narrow bearer a second time
+/// (the route list already does, before the database). Only this middleware
+/// inserts it, on the one arm that verified that `typ`, so a request cannot carry
+/// it in.
 #[derive(Debug, Clone, Copy)]
 pub struct PushActionCredential;
+
+/// Marker inserted when a request authenticated with a `push_fetch` token — the
+/// notification extension's narrow credential (#3121). Its only reader is the pair
+/// of token-minting routes, which refuse a narrow bearer (no self-renewal, and no
+/// narrow token mints the other kind) as a second line behind the route list.
+#[derive(Debug, Clone, Copy)]
+pub struct PushFetchCredential;
 
 /// The narrow, lineage-bound tokens `require_principal` is taught to accept
 /// besides an access token. Each has its own `typ`, its own closed route list
@@ -796,8 +806,14 @@ pub async fn require_principal(
             .map_err(|rejection| ApiError::unauthorized(rejection.message()))?,
     );
 
-    if narrow == Some(NarrowToken::PushAction) {
-        request.extensions_mut().insert(PushActionCredential);
+    match narrow {
+        Some(NarrowToken::PushAction) => {
+            request.extensions_mut().insert(PushActionCredential);
+        }
+        Some(NarrowToken::PushFetch) => {
+            request.extensions_mut().insert(PushFetchCredential);
+        }
+        None => {}
     }
     request.extensions_mut().insert(principal);
     Ok(next.run(request).await)

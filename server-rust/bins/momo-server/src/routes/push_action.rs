@@ -35,6 +35,7 @@ use momo_auth::{
 };
 use momo_db::{with_tenant_tx, DbError};
 
+use crate::auth::{PushActionCredential, PushFetchCredential};
 use crate::dto::PushActionTokenResponse;
 use crate::error::ApiError;
 use crate::routes::webhooks::no_store;
@@ -51,7 +52,18 @@ enum Minted {
 pub async fn issue(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
+    action_credential: Option<Extension<PushActionCredential>>,
+    fetch_credential: Option<Extension<PushFetchCredential>>,
 ) -> Result<Response, ApiError> {
+    // No narrow token mints a token — its own kind (no self-renewal: the app is the
+    // only party that extends the handler's access) or the other kind. The route
+    // lists already answer 403 before the database; this is the second line, so
+    // the guarantee does not rest on one list staying right.
+    if action_credential.is_some() || fetch_credential.is_some() {
+        return Err(ApiError::forbidden(
+            "a narrow token cannot mint another token",
+        ));
+    }
     if principal.kind != PrincipalKind::Human {
         return Err(ApiError::forbidden(
             "only a signed-in person can mint a push-action token",
@@ -136,5 +148,83 @@ pub async fn issue(
             axum::http::StatusCode::CONFLICT,
             "session has no lineage yet; refresh and ask again",
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use axum::http::StatusCode;
+    use momo_auth::{Principal, PrincipalKind};
+    use uuid::Uuid;
+
+    use super::*;
+
+    /// A pool handle that never reaches a database: the refusals below are decided
+    /// before the first query, and the control proves it by failing on the query.
+    fn state_without_a_database() -> AppState {
+        let pool = momo_db::sqlx::postgres::PgPoolOptions::new()
+            .acquire_timeout(Duration::from_millis(300))
+            .connect_lazy("postgres://unused:unused@127.0.0.1:1/unused")
+            .expect("a lazy pool never dials");
+        AppState::new(
+            pool,
+            "unit-test-secret".to_string(),
+            "ws://127.0.0.1:8000/connection/websocket".to_string(),
+        )
+    }
+
+    fn a_signed_in_person() -> Principal {
+        Principal {
+            member_id: Uuid::from_u128(1),
+            workspace_id: Uuid::from_u128(2),
+            token_id: Some(Uuid::from_u128(3)),
+            scopes: vec![],
+            kind: PrincipalKind::Human,
+        }
+    }
+
+    /// #3927 (second line): no narrow token mints a token — the push-action route is
+    /// refused for BOTH narrow markers, whatever the route list in front of it says.
+    #[tokio::test]
+    async fn a_narrow_bearer_cannot_mint_here_whichever_narrow_token_it_is() {
+        for (action, fetch) in [(true, false), (false, true), (true, true)] {
+            let outcome = issue(
+                State(state_without_a_database()),
+                Extension(a_signed_in_person()),
+                action.then_some(Extension(PushActionCredential)),
+                fetch.then_some(Extension(PushFetchCredential)),
+            )
+            .await;
+            let error = match outcome {
+                Ok(_) => panic!("a narrow bearer must not mint (action={action} fetch={fetch})"),
+                Err(error) => error,
+            };
+            assert_eq!(
+                error.status,
+                StatusCode::FORBIDDEN,
+                "action={action} fetch={fetch}"
+            );
+        }
+    }
+
+    /// The control: an ordinary bearer is NOT refused by the marker check — it goes
+    /// on to the database (which this test does not have), so the refusal above was
+    /// the marker's doing and not a side effect of the harness.
+    #[tokio::test]
+    async fn an_ordinary_bearer_is_not_stopped_by_the_marker_check() {
+        let outcome = issue(
+            State(state_without_a_database()),
+            Extension(a_signed_in_person()),
+            None,
+            None,
+        )
+        .await;
+        let error = match outcome {
+            Ok(_) => panic!("there is no database, so this cannot succeed"),
+            Err(error) => error,
+        };
+        assert_ne!(error.status, StatusCode::FORBIDDEN, "{}", error.message);
     }
 }
