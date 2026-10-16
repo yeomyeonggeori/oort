@@ -36,7 +36,11 @@ const OUT_DIR = process.env.OUT_DIR
 const DIST_DIR = process.env.DIST_DIR ? resolve(process.env.DIST_DIR) : resolve(WEB_ROOT, "dist");
 const PORT = Number(process.env.CAPTURE_PORT || 5183);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
-const VIEWPORT = { width: 1440, height: 900 };
+const WIDTH = Number(process.env.CAPTURE_WIDTH || 1440);
+const VIEWPORT = { width: WIDTH, height: 900 };
+/** 1440 이 아닌 폭은 배너가 접히는 모습만 본다(연결 중 한 장, 파일 이름에 폭이 붙는다). */
+const NARROW = WIDTH !== 1440;
+const SUFFIX = NARROW ? `-w${WIDTH}` : "";
 /** 한 주기(ms). tokens.css `--oort-loader-period`. */
 const PERIOD_MS = 1800;
 const SCHEMES = ["light", "dark"];
@@ -181,9 +185,13 @@ async function captureScheme(browser, scheme, shots, gifs) {
     // 15초 안 올라오면 배너가 선다.
     await page.getByTestId("connection-banner").waitFor({ state: "visible", timeout: 40_000 });
     await freezeAt(page, 0.45 * PERIOD_MS); // 위성이 궤도에 나가 있는 순간
-    const loading = join(OUT_DIR, `oort-loader-web-banner-connecting-${scheme}.png`);
+    const loading = join(OUT_DIR, `oort-loader-web-banner-connecting${SUFFIX}-${scheme}.png`);
     await page.screenshot({ path: loading });
     shots.push(loading);
+    if (NARROW) {
+      await context.close();
+      return;
+    }
 
     // GIF: 배너 왼쪽(아이콘 + 문장 앞부분). 시계를 세워 한 주기를 찍는다.
     const banner = await page.getByTestId("connection-banner").boundingBox();
