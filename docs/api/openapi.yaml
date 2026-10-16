@@ -10441,7 +10441,9 @@ paths:
         Addressable plugins are the official four (ADR-0113 P2); any other id,
         and a registry row that is revoked, is a 404. An existing installation,
         even a revoked one, is updated and answers 200; a re-install after an
-        uninstall starts with no grants (consent is not resurrected). The body
+        uninstall starts with no grants (consent is not resurrected). Repeating a
+        call that is already in force in the state asked for is a no-op: 200
+        with the audit id of the install in force, nothing written. The body
         is exactly the documented object (an absent body is `{}`): any other
         key, a credential-shaped one included, is a 400 and is neither stored
         nor echoed. The answer carries the manifest's egressDomains (ADR-0113 D5)
@@ -10552,7 +10554,13 @@ paths:
         The delegating user's own consent (ADR-0113 D2): the grant is the
         four-tuple (workspace, caller, plugin, scope) and there is no member
         field, so nobody grants for somebody else and an agent holds none. Any
-        active workspace member may grant themselves. The plugin must be one of
+        active human workspace member except a guest may grant themselves (a
+        guest is refused with 403: a hosted app reads workspace data with the
+        server's own credential, so the grant is its only per-member gate). A
+        repeat of a grant whose projection is exactly what the manifest declares
+        is a no-op (200 with that grant's audit id, nothing written); one whose
+        projection has drifted from the manifest is rebuilt with a new audit
+        row. The plugin must be one of
         the official four, installed and enabled; the scope must be declared by
         the manifest, and one capability projection is written per tool that
         declares it. The body is exactly `{scope}`: any other key, a
@@ -10594,7 +10602,13 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          description: >
+            The caller is not an active human member of the workspace, or is a
+            guest.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Plugin is not one of the official four, or is revoked in the registry.
           content:

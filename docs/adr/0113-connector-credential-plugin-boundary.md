@@ -100,7 +100,7 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
 ### W1. 경로와 권한 (D2)
 - `POST …/plugins/{plugin}/install` `{enabled?}` — 201 새 설치 / 200 기존 행 갱신·복구. 워크스페이스 owner/admin이고 매니페스트 `serverPolicy`(`installAllowed`·`allowedRoles`)가 그 역할을 허용할 때만. 아니면 403.
 - `DELETE …/plugins/{plugin}/install` — owner/admin. 그 앱의 모든 멤버 grant를 한 감사 행으로 회수하고 능력 투영을 모두 지운다. 멱등.
-- `POST …/plugins/{plugin}/grants` `{scope}` · `DELETE …/plugins/{plugin}/grants/{scope}` — 활성 멤버 **본인 명의로만**. 요청에 멤버 필드가 없고(`plugin_grant_self_ck`), 관리자도 남 명의로 grant하지 못한다. 에이전트는 grant를 갖지도 만들지도 않는다(에이전트 bearer는 이 경로의 허용목록에 없다). grant는 설치·활성 상태(409)와 매니페스트가 선언한 scope(400)를 요구한다.
+- `POST …/plugins/{plugin}/grants` `{scope}` · `DELETE …/plugins/{plugin}/grants/{scope}` — 활성 멤버 **본인 명의로만**. 요청에 멤버 필드가 없고(`plugin_grant_self_ck`), 관리자도 남 명의로 grant하지 못한다. 에이전트는 grant를 갖지도 만들지도 않는다 — 에이전트 bearer는 이 경로의 허용목록에 없고, 도메인 함수도 `member.kind = 'human'`이 아니면 거절한다(경로 앞단에만 기대지 않는다). **손님(guest)은 grant하지 못한다(403)**: 호스티드 앱(Drive)은 서버 자체 자격으로 워크스페이스 데이터를 읽어 grant가 멤버별 유일한 문인데, 손님은 워크스페이스 전체를 보지 않는다. 반대로 **회수는 역할과 무관하게 항상 된다**(grant 뒤에 손님이 된 멤버도 자기 동의를 거둔다). grant는 설치·활성 상태(409)와 매니페스트가 선언한 scope(400)를 요구한다.
 - 사람 bearer만. 모든 쓰기는 `with_tenant_tx` + RLS FORCE이고, 같은 tx에서 `audit_log` 행을 먼저 쓴다.
 
 ### W2. 대상 (P2의 연장)
@@ -110,7 +110,8 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
 ### W3. 의미
 - 설치 해제 뒤 다시 설치해도 grant는 되살아나지 않는다(동의는 새로). 설치를 끄는 것(`enabled=false`)은 일시 정지다: 정책 조회가 설치 활성 상태에 조인하므로 도구가 즉시 빠지고(D5 fail-closed) 멤버의 동의는 남는다.
 - 투영은 grant마다 「그 scope를 선언한 도구 수」만큼 쓴다(`github:read`는 migration 031 뒤 2행).
-- 설치 해제와 동시에 들어온 grant는 설치 행을 `FOR SHARE`로 읽어 직렬화한다 — 해제된 설치 밑에 활성 grant가 남는 경우가 없다.
+- 같은 호출의 반복은 기록을 늘리지 않는다: 이미 그 상태로 효력 중인 설치, 매니페스트가 지금 선언한 투영과 같은 투영으로 이미 활성인 grant는 200과 효력 중인 감사 id를 돌려주고 아무것도 쓰지 않는다(`installed_by`도 안 바뀐다). 매니페스트와 어긋난(도구가 바뀐) grant의 반복은 투영을 다시 짓고 새 감사 행을 쓴다. 설치 해제의 반복은 감사를 더하지 않지만 남은 투영·grant 찌꺼기는 다시 쓸어 낸다.
+- 설치 해제와 동시에 들어온 grant는 설치 키(advisory lock)로 직렬화한다 — 설치·해제는 배타, grant는 공유로 잡는다. 해제된 설치 밑에 활성 grant가 남는 경우가 없고, 대기 중인 해제 뒤에 도착한 grant는 줄을 선다(grant를 반복해 관리자의 해제를 굶기지 못한다).
 
 ### W4. D5 영수증과 D1-A 강화
 - 설치·grant 응답에 가산 필드 `egressDomains`(매니페스트가 선언한 도메인)를 싣는다 — 사람이 동의한 것의 영수증이다. 감사 `detail`에도 도메인·매니페스트 버전·digest를 남긴다. 거두는 응답에는 싣지 않는다. core 파서는 모르는 키를 무시하므로 가산 변경이다.
@@ -120,7 +121,8 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
 - ADR-0201 증보 v2 H7의 `plugin.install`은 이 쓰기의 같은 도메인 함수를 결정자 권한으로 부른다(#3889). 승인 전 설치 0·결정자 role 미달 403·승인 결과가 REST 설치와 같다는 계약은 ADR-0186/0201 그대로다.
 
 ### 구현 슬라이스
-- **P-S2 (engine, #3914)**: 쓰기 4경로, 도메인 함수 `plugin_writes`, 계약 시험(red proof: 일반 멤버 install 403 · 설치 없이 grant 409 · 다른 워크스페이스 행 불가시(RLS) · 회수가 투영을 지움 · 응답·감사에 시크릿 키 없음 · 동시 해제 직렬화), 와이어 고정 `server/Fixtures/plugin-wire/mutation-*.json`.
+- **P-S2 (engine, #3914)**: 쓰기 4경로, 도메인 함수 `plugin_writes`, 계약 시험(red proof: 일반 멤버 install 403 · 설치 없이 grant 409 · 다른 워크스페이스 행 불가시(RLS) · 회수가 투영을 지움 · 응답·감사에 시크릿 키 없음 · 설치 키에서 줄 선 grant/해제의 결정적 직렬화), 와이어 고정 `server/Fixtures/plugin-wire/mutation-*.json`.
+- **이월(P3 밖, 새 이슈)**: 멤버 탈퇴·정지 때 그 멤버의 grant 정리(재가입이 옛 동의를 되살리지 않게), 매니페스트가 바뀐 앱의 기존 투영 재동의(조회 시 현재 매니페스트와 교차). 에이전트가 위임 사용자의 정책을 읽는 경로가 열리기 전에 닫는다.
 - **P-U2 (UXUI)**: P-U1이 꺼 둔 「앱 설치」 표면을 이 경로가 배포된 뒤 켠다(`serverSurfaces`). #3860 짝.
 - **#3889 (engine)**: `plugin.install` 승인 카드를 실행 가능으로.
 - 범위 밖: 에이전트가 위임 사용자의 policy를 읽는 경로, 커뮤니티·워크스페이스 커스텀 플러그인, D1-B(서버측 토큰 보관은 계속 기각).

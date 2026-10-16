@@ -22,7 +22,10 @@
 //! * **D2 (4-tuple, delegated user).** A grant row is `(workspace, member,
 //!   plugin, scope)` and its `granted_by` is always the member itself
 //!   (`plugin_grant_self_ck`). There is no signature that names another member,
-//!   so an admin cannot grant for someone else and an agent cannot hold a grant.
+//!   so an admin cannot grant for someone else; and [`grant`] itself — not only
+//!   the HTTP shell in front of it — refuses a member that is not a human, or is a
+//!   guest (a hosted app such as Drive reads workspace data with the server's own
+//!   credential, so for it the grant is the only per-member gate).
 //! * **D5 (egress, fail-closed).** An install or grant answers with the
 //!   manifest's `egressDomains` (the receipt of what was consented to) and
 //!   records them, with the manifest version and digest, in the audit row. A
@@ -53,18 +56,16 @@ use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
 use crate::error::ApiError;
-use crate::plugin_manifest::{
-    is_scope, is_secret_like_key, ValidatedPluginManifest, ValidatedPluginTool,
-};
+use crate::plugin_manifest::{is_scope, ValidatedPluginManifest, ValidatedPluginTool};
 use crate::routes::invites::require_admin;
 use crate::routes::plugins::{registry_rows, NOT_FOUND, OFFICIAL_PLUGIN_IDS};
 use crate::routes::shared::DbRejectable;
 
 /// `audit_log.detail.schema` values (Swift's, unchanged).
-pub(crate) const SCHEMA_INSTALLED: &str = "momo.plugin.installed.v1";
-pub(crate) const SCHEMA_REVOKED: &str = "momo.plugin.revoked.v1";
-pub(crate) const SCHEMA_GRANT: &str = "momo.plugin.grant.v1";
-pub(crate) const SCHEMA_GRANT_REVOKED: &str = "momo.plugin.grant.revoked.v1";
+pub const SCHEMA_INSTALLED: &str = "momo.plugin.installed.v1";
+pub const SCHEMA_REVOKED: &str = "momo.plugin.revoked.v1";
+pub const SCHEMA_GRANT: &str = "momo.plugin.grant.v1";
+pub const SCHEMA_GRANT_REVOKED: &str = "momo.plugin.grant.revoked.v1";
 
 /// One audit row's identity: the `audit_log.action`, the `detail.schema` that
 /// versions its payload, and the kind of row it points at (Swift's, unchanged).
@@ -97,15 +98,15 @@ const AUDIT_GRANT_REVOKED: AuditKind = AuditKind {
 };
 
 /// 404 body for an install row that is not there (the plugin itself is known).
-pub(crate) const INSTALL_NOT_FOUND: &str = "plugin install not found";
+pub const INSTALL_NOT_FOUND: &str = "plugin install not found";
 /// 404 body for a grant the caller does not hold.
-pub(crate) const GRANT_NOT_FOUND: &str = "plugin grant not found";
+pub const GRANT_NOT_FOUND: &str = "plugin grant not found";
 /// 409 body for a grant against an app that is not installed and enabled.
-pub(crate) const NOT_INSTALLED: &str = "plugin is not installed and enabled";
+pub const NOT_INSTALLED: &str = "plugin is not installed and enabled";
 
 /// Who acts, as the audit row records it.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Actor {
+pub struct Actor {
     pub member_id: Uuid,
     /// `audit_log.via_token_id` — a bearer's `token` row (`audit_via_token_id`).
     pub via_token_id: Option<Uuid>,
@@ -113,22 +114,25 @@ pub(crate) struct Actor {
 
 /// What the approval-card path adds to the same audit row (#3889). The REST
 /// routes pass `Provenance::default()`.
+///
+/// Typed fields, not a free-form map: the only text a caller can add to an audit
+/// `detail` is two ids, so there is no key name for a secret to hide behind.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct Provenance {
+pub struct Provenance {
     /// `audit_log.subject_member_id` when the action is done *for* someone else
     /// (the proposing agent). `None` keeps the actor as its own subject.
     pub subject_member_id: Option<Uuid>,
     pub run_id: Option<Uuid>,
-    /// Keys merged into `detail` (`via_agent`, `approval_id`). They never
-    /// replace a key the write set itself, and a credential-shaped key is
-    /// dropped — see [`merge_extra_detail`].
-    pub extra_detail: Map<String, Value>,
+    /// `detail.via_agent` — the agent whose proposal an approver carries out.
+    pub via_agent: Option<Uuid>,
+    /// `detail.approval_id` — the approval that authorised it.
+    pub approval_id: Option<Uuid>,
 }
 
 /// The result of one write, projected onto `PluginMutationResponse` by the
 /// route layer.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Mutation {
+pub struct Mutation {
     pub plugin_id: String,
     pub member_id: Option<Uuid>,
     pub scope: Option<String>,
@@ -149,18 +153,18 @@ pub(crate) struct Mutation {
 
 /// Swift `normalizedScope`: trim, lowercase, then the `plugin_grant.scope`
 /// grammar. `None` is a 400 at the route.
-pub(crate) fn normalize_scope(raw: &str) -> Option<String> {
-    let scope = raw.trim().to_lowercase();
+pub fn normalize_scope(raw: &str) -> Option<String> {
+    let scope = raw.trim().to_ascii_lowercase();
     is_scope(&scope).then_some(scope)
 }
 
 /// Whether `plugin_id` is one of the four addressable apps (ADR-0113 P2).
-pub(crate) fn is_official_four(plugin_id: &str) -> bool {
+pub fn is_official_four(plugin_id: &str) -> bool {
     OFFICIAL_PLUGIN_IDS.contains(&plugin_id)
 }
 
 /// The tools a scope projects: every tool whose manifest `scopes` names it.
-pub(crate) fn tools_for_scope<'a>(
+pub fn tools_for_scope<'a>(
     manifest: &'a ValidatedPluginManifest,
     scope: &str,
 ) -> Vec<&'a ValidatedPluginTool> {
@@ -172,7 +176,7 @@ pub(crate) fn tools_for_scope<'a>(
 }
 
 /// The audit `detail` an install writes. Key set pinned by a test.
-pub(crate) fn installed_detail(
+pub fn installed_detail(
     manifest: &ValidatedPluginManifest,
     manifest_digest: &str,
     enabled: bool,
@@ -188,7 +192,7 @@ pub(crate) fn installed_detail(
 }
 
 /// The audit `detail` an uninstall writes.
-pub(crate) fn revoked_detail(plugin_id: &str) -> Map<String, Value> {
+pub fn revoked_detail(plugin_id: &str) -> Map<String, Value> {
     object(json!({
         "schema": SCHEMA_REVOKED,
         "plugin_id": plugin_id,
@@ -197,7 +201,7 @@ pub(crate) fn revoked_detail(plugin_id: &str) -> Map<String, Value> {
 
 /// The audit `detail` a grant writes: what the member consented to, including
 /// where the app reaches out to (D5).
-pub(crate) fn grant_detail(
+pub fn grant_detail(
     manifest: &ValidatedPluginManifest,
     manifest_digest: &str,
     scope: &str,
@@ -216,7 +220,7 @@ pub(crate) fn grant_detail(
 }
 
 /// The audit `detail` a grant revoke writes.
-pub(crate) fn grant_revoked_detail(plugin_id: &str, scope: &str) -> Map<String, Value> {
+pub fn grant_revoked_detail(plugin_id: &str, scope: &str) -> Map<String, Value> {
     object(json!({
         "schema": SCHEMA_GRANT_REVOKED,
         "plugin_id": plugin_id,
@@ -231,18 +235,18 @@ fn object(value: Value) -> Map<String, Value> {
     }
 }
 
-/// `detail` plus the provenance keys the caller supplied. The write set's own
-/// keys always win, and a credential-shaped key is never carried, so a future
-/// caller cannot turn the audit row into a place a secret lands.
-pub(crate) fn merge_extra_detail(
-    mut detail: Map<String, Value>,
-    extra: &Map<String, Value>,
-) -> Value {
-    for (key, value) in extra {
-        if is_secret_like_key(key) || detail.contains_key(key) {
-            continue;
+/// `detail` plus the two provenance ids, when the card path supplied them. The
+/// write set's own keys are never replaced.
+pub fn with_provenance(mut detail: Map<String, Value>, provenance: &Provenance) -> Value {
+    for (key, id) in [
+        ("via_agent", provenance.via_agent),
+        ("approval_id", provenance.approval_id),
+    ] {
+        if let Some(id) = id {
+            detail
+                .entry(key.to_string())
+                .or_insert_with(|| Value::String(id.to_string()));
         }
-        detail.insert(key.clone(), value.clone());
     }
     Value::Object(detail)
 }
@@ -265,10 +269,7 @@ fn audit_entry(
     if let Some(run_id) = provenance.run_id {
         entry = entry.run(run_id);
     }
-    entry.with_schema(
-        kind.schema,
-        merge_extra_detail(detail, &provenance.extra_detail),
-    )
+    entry.with_schema(kind.schema, with_provenance(detail, provenance))
 }
 
 fn conflict(message: impl Into<String>) -> ApiError {
@@ -277,10 +278,12 @@ fn conflict(message: impl Into<String>) -> ApiError {
 
 // ---- gates -------------------------------------------------------------------
 
-/// Install and uninstall are workspace authority: the single `require_admin`
-/// (ADR-0186 D2 judges a card's approver with the very same function), then the
-/// role itself, because the manifest's `serverPolicy.allowedRoles` is judged
-/// against it.
+/// Install and uninstall are workspace authority, judged by the single
+/// `require_admin` (ADR-0186 D2 judges a card's approver with the very same
+/// function). The role it returns is read only for the manifest's
+/// `serverPolicy.allowedRoles`; it is not a second gate, so taking `require_admin`
+/// out changes the outcome (the manifest then refuses a plain member with its own
+/// message) and a test sees it.
 async fn install_role(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -289,17 +292,13 @@ async fn install_role(
     if let Err(rejection) = require_admin(conn, workspace_id, member_id).await? {
         return Ok(Err(rejection));
     }
-    Ok(
-        match active_workspace_role(conn, workspace_id, member_id).await? {
-            Some(role) if role.is_admin() => Ok(role),
-            Some(_) => Err(ApiError::forbidden("workspace admin required")),
-            None => Err(ApiError::forbidden("not a workspace member")),
-        },
-    )
+    Ok(active_workspace_role(conn, workspace_id, member_id)
+        .await?
+        .ok_or_else(|| ApiError::forbidden("not a workspace member")))
 }
 
-/// Grants are personal: any active member, for themselves (Swift
-/// `requireWorkspaceRole`).
+/// Taking a grant back is for any active member of any role: consent can always be
+/// withdrawn (a member who became a guest after granting still can).
 async fn require_active_member(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -311,6 +310,37 @@ async fn require_active_member(
             None => Err(ApiError::forbidden("not a workspace member")),
         },
     )
+}
+
+/// Giving a grant is for an active **human** member who is not a guest (ADR-0113
+/// D2: the delegating user's own consent; no agent-owned grants in v1). The kind
+/// is checked here, in the domain function, so the rule does not depend on which
+/// credentials the HTTP shell happens to admit. A guest is refused because a hosted
+/// app (Drive) reads workspace data with the server's own credential: for it, the
+/// grant is the only per-member gate, and a guest does not see the whole workspace.
+async fn require_grantor(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+) -> DbRejectable<()> {
+    let Some(role) = active_workspace_role(conn, workspace_id, member_id).await? else {
+        return Ok(Err(ApiError::forbidden("not a workspace member")));
+    };
+    let kind: Option<String> =
+        sqlx::query_scalar("SELECT kind::text FROM member WHERE workspace_id = $1 AND id = $2")
+            .bind(workspace_id)
+            .bind(member_id)
+            .fetch_optional(&mut *conn)
+            .await?;
+    if kind.as_deref() != Some("human") {
+        return Ok(Err(ApiError::forbidden(
+            "only a human member can grant an app",
+        )));
+    }
+    if role == WorkspaceRole::Guest {
+        return Ok(Err(ApiError::forbidden("guests cannot connect apps")));
+    }
+    Ok(Ok(()))
 }
 
 /// The registry row a *creating* write may act on: one of the official four,
@@ -340,6 +370,24 @@ async fn advisory_lock(conn: &mut PgConnection, key: &str) -> Result<(), DbError
     Ok(())
 }
 
+/// The shared side of [`advisory_lock`]: many holders at once, but it queues
+/// **behind** a waiting exclusive request, which a row-level `FOR SHARE` does not —
+/// a member looping on grants could otherwise keep an admin's disable or uninstall
+/// waiting indefinitely.
+async fn advisory_lock_shared(conn: &mut PgConnection, key: &str) -> Result<(), DbError> {
+    sqlx::query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))")
+        .bind(key)
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
+}
+
+/// The key `install`/`uninstall` hold exclusively and `grant` holds shared: the
+/// one place an uninstall and a grant of the same app meet.
+fn install_lock_key(workspace_id: Uuid, plugin_id: &str) -> String {
+    format!("install:{workspace_id}:{plugin_id}")
+}
+
 // ---- install -----------------------------------------------------------------
 
 /// Install (or re-enable, or disable) an official app for the workspace.
@@ -349,7 +397,7 @@ async fn advisory_lock(conn: &mut PgConnection, key: &str) -> Result<(), DbError
 /// (`UNIQUE (workspace_id, plugin_id)`), and answers 200. A re-install after an
 /// uninstall starts with no grants: uninstall revoked them, and consent is not
 /// resurrected.
-pub(crate) async fn install(
+pub async fn install(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     plugin_id: &str,
@@ -378,17 +426,36 @@ pub(crate) async fn install(
     }
     let enabled = enabled.unwrap_or(manifest.enabled_by_default);
 
-    advisory_lock(conn, &format!("install:{workspace_id}:{plugin_id}")).await?;
-    let existing: Option<(Uuid,)> = sqlx::query_as(
-        "SELECT id FROM workspace_plugin_install \
+    advisory_lock(conn, &install_lock_key(workspace_id, plugin_id)).await?;
+    let existing: Option<(Uuid, bool, bool, Uuid)> = sqlx::query_as(
+        "SELECT id, enabled, revoked_at IS NULL, installed_audit_id \
+           FROM workspace_plugin_install \
           WHERE workspace_id = $1 AND plugin_id = $2 FOR UPDATE",
     )
     .bind(workspace_id)
     .bind(plugin_id)
     .fetch_optional(&mut *conn)
     .await?;
+    // The same call again is a no-op, not a second record: an install that is
+    // already in force in the state asked for keeps its row, its `installed_by`
+    // and its audit row, and answers with that audit id.
+    if let Some((_, current_enabled, true, installed_audit_id)) = existing {
+        if current_enabled == enabled {
+            return Ok(Ok(Mutation {
+                plugin_id: plugin_id.to_string(),
+                member_id: None,
+                scope: None,
+                status: if enabled { "enabled" } else { "disabled" },
+                enabled,
+                audit_ref: Some(installed_audit_id),
+                capabilities: Vec::new(),
+                egress_domains: Some(manifest.egress_domains.clone()),
+                created: false,
+            }));
+        }
+    }
     let created = existing.is_none();
-    let install_id = existing.map(|(id,)| id).unwrap_or_else(Uuid::new_v4);
+    let install_id = existing.map(|(id, ..)| id).unwrap_or_else(Uuid::new_v4);
 
     let audit_id = write_audit(
         conn,
@@ -451,7 +518,7 @@ pub(crate) async fn install(
 /// Revoke the workspace's install and, with it, every member's grant and every
 /// capability projection of that app. Idempotent: a repeat answers 200 with the
 /// first revoke's audit id, and still clears any projection row that lingers.
-pub(crate) async fn uninstall(
+pub async fn uninstall(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     plugin_id: &str,
@@ -467,7 +534,7 @@ pub(crate) async fn uninstall(
         return Ok(Err(ApiError::not_found(NOT_FOUND)));
     }
 
-    advisory_lock(conn, &format!("install:{workspace_id}:{plugin_id}")).await?;
+    advisory_lock(conn, &install_lock_key(workspace_id, plugin_id)).await?;
     let row: Option<(Uuid, bool, Option<Uuid>)> = sqlx::query_as(
         "SELECT id, revoked_at IS NULL, revoked_audit_id \
            FROM workspace_plugin_install \
@@ -506,6 +573,13 @@ pub(crate) async fn uninstall(
         .bind(audit_id)
         .execute(&mut *conn)
         .await?;
+        audit_ref = Some(audit_id);
+    }
+    // Every grant of the app goes under the audit row that ended the install, and
+    // it is swept on a repeat too: a straggler left by an older writer (the Swift
+    // server read the install without a lock) is healed rather than kept alive
+    // under a revoked install.
+    if let Some(revoking_audit) = audit_ref {
         sqlx::query(
             "UPDATE plugin_grant \
                 SET status = 'revoked', revoked_at = now(), revoked_audit_id = $3, \
@@ -514,10 +588,9 @@ pub(crate) async fn uninstall(
         )
         .bind(workspace_id)
         .bind(plugin_id)
-        .bind(audit_id)
+        .bind(revoking_audit)
         .execute(&mut *conn)
         .await?;
-        audit_ref = Some(audit_id);
     }
     sqlx::query(
         "DELETE FROM plugin_capability_projection \
@@ -546,17 +619,25 @@ pub(crate) async fn uninstall(
 /// The calling member grants themselves one scope the app declares, and the
 /// scope is projected into one capability row per tool that names it.
 ///
-/// Order of refusals (each before the first write): not a member (403), unknown
-/// or non-official app (404, so install state never leaks for an id outside the
-/// four), manifest rejected (409), not installed and enabled (409), scope not
-/// declared by this app (400).
+/// Order of refusals (each before the first write): not a human member of the
+/// workspace, or a guest (403), unknown or non-official app (404, so install state
+/// never leaks for an id outside the four), manifest rejected (409), not installed
+/// and enabled (409), scope not declared by this app (400).
 ///
-/// The install row is read `FOR SHARE`: an uninstall holds it `FOR UPDATE`, so a
-/// grant that races one either finishes first (and the uninstall then revokes
-/// it) or waits and sees the revoked install (409). Without the lock a grant
-/// could land after the uninstall's sweep and leave an active grant under a
-/// revoked install — alive again, with no new consent, at the next install.
-pub(crate) async fn grant(
+/// The install key is held **shared** from before the install check to the commit,
+/// and `install`/`uninstall` hold it exclusively: a grant that races an uninstall
+/// either finishes first (and the uninstall then revokes it) or waits and sees the
+/// revoked install (409). Without it a grant could land after the uninstall's sweep
+/// and leave an active grant under a revoked install — alive again, with no new
+/// consent, at the next install. (Advisory rather than a row-level `FOR SHARE`
+/// because a shared advisory request queues behind a waiting exclusive one: a
+/// member looping on this call cannot starve an admin's disable or uninstall.)
+///
+/// An unchanged grant is a no-op: the call that finds the member's grant active
+/// with exactly the projection the manifest declares now answers 200 with that
+/// grant's audit id and writes nothing, so a retry does not grow `audit_log`. One
+/// whose projection has drifted from the manifest is rebuilt, with a new audit row.
+pub async fn grant(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     plugin_id: &str,
@@ -564,7 +645,7 @@ pub(crate) async fn grant(
     actor: Actor,
     provenance: &Provenance,
 ) -> DbRejectable<Mutation> {
-    if let Err(rejection) = require_active_member(conn, workspace_id, actor.member_id).await? {
+    if let Err(rejection) = require_grantor(conn, workspace_id, actor.member_id).await? {
         return Ok(Err(rejection));
     }
     let (manifest_digest, manifest) = match admitted_official(conn, workspace_id, plugin_id).await?
@@ -572,11 +653,11 @@ pub(crate) async fn grant(
         Ok(found) => found,
         Err(rejection) => return Ok(Err(rejection)),
     };
+    advisory_lock_shared(conn, &install_lock_key(workspace_id, plugin_id)).await?;
     let installed: Option<(i32,)> = sqlx::query_as(
         "SELECT 1 FROM workspace_plugin_install \
           WHERE workspace_id = $1 AND plugin_id = $2 \
-            AND enabled AND revoked_at IS NULL \
-            FOR SHARE",
+            AND enabled AND revoked_at IS NULL",
     )
     .bind(workspace_id)
     .bind(plugin_id)
@@ -598,8 +679,8 @@ pub(crate) async fn grant(
         &format!("grant:{workspace_id}:{member_id}:{plugin_id}:{scope}"),
     )
     .await?;
-    let existing: Option<(Uuid,)> = sqlx::query_as(
-        "SELECT id FROM plugin_grant \
+    let existing: Option<(Uuid, String, Uuid)> = sqlx::query_as(
+        "SELECT id, status, granted_audit_id FROM plugin_grant \
           WHERE workspace_id = $1 AND member_id = $2 AND plugin_id = $3 AND scope = $4 \
             FOR UPDATE",
     )
@@ -609,8 +690,34 @@ pub(crate) async fn grant(
     .bind(scope)
     .fetch_optional(&mut *conn)
     .await?;
+    if let Some((_, status, granted_audit_id)) = &existing {
+        if status == "active"
+            && projection_matches(
+                conn,
+                workspace_id,
+                member_id,
+                plugin_id,
+                scope,
+                &manifest,
+                &tools,
+            )
+            .await?
+        {
+            return Ok(Ok(Mutation {
+                plugin_id: plugin_id.to_string(),
+                member_id: Some(member_id),
+                scope: Some(scope.to_string()),
+                status: "active",
+                enabled: true,
+                audit_ref: Some(*granted_audit_id),
+                capabilities: tools.iter().map(|tool| tool.name.clone()).collect(),
+                egress_domains: Some(manifest.egress_domains.clone()),
+                created: false,
+            }));
+        }
+    }
     let created = existing.is_none();
-    let grant_id = existing.map(|(id,)| id).unwrap_or_else(Uuid::new_v4);
+    let grant_id = existing.map(|(id, ..)| id).unwrap_or_else(Uuid::new_v4);
 
     let audit_id = write_audit(
         conn,
@@ -697,7 +804,7 @@ pub(crate) async fn grant(
 /// Idempotent: a grant that is already revoked answers 200 with the audit id of
 /// the revoke that did it. A grant the caller never held is a 404 — whoever else
 /// holds the same `(plugin, scope)` is invisible here.
-pub(crate) async fn revoke_grant(
+pub async fn revoke_grant(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     plugin_id: &str,
@@ -785,6 +892,47 @@ pub(crate) async fn revoke_grant(
     }))
 }
 
+/// Whether the member's stored projection for `(plugin, scope)` is exactly what
+/// the manifest declares now: the same tools at the same version, schema digest,
+/// risk and approval tier. Anything else — a tool added, dropped or re-tiered since
+/// the grant — is drift, and a repeated grant refreshes it.
+async fn projection_matches(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    plugin_id: &str,
+    scope: &str,
+    manifest: &ValidatedPluginManifest,
+    tools: &[&ValidatedPluginTool],
+) -> Result<bool, DbError> {
+    let stored: Vec<(String, String, String, String, String)> = sqlx::query_as(
+        "SELECT tool_name, capability_version, schema_digest, risk, approval_tier \
+           FROM plugin_capability_projection \
+          WHERE workspace_id = $1 AND member_id = $2 AND plugin_id = $3 AND scope = $4 \
+          ORDER BY tool_name",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .bind(plugin_id)
+    .bind(scope)
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut wanted: Vec<(String, String, String, String, String)> = tools
+        .iter()
+        .map(|tool| {
+            (
+                tool.name.clone(),
+                manifest.version.clone(),
+                tool.schema_digest.clone(),
+                tool.risk.clone(),
+                tool.approval_tier.clone(),
+            )
+        })
+        .collect();
+    wanted.sort();
+    Ok(stored == wanted)
+}
+
 async fn delete_projection(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -808,7 +956,7 @@ async fn delete_projection(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugin_manifest::validate_manifest;
+    use crate::plugin_manifest::{is_secret_like_key, validate_manifest};
 
     const GITHUB: &str = include_str!("../../../../server/Fixtures/plugin-manifests/github.json");
     const DRIVE: &str = include_str!("../../../../server/Fixtures/plugin-manifests/drive.json");
@@ -866,8 +1014,8 @@ mod tests {
     }
 
     /// The audit detail is an allowlist, not a pass-through: these are the only
-    /// keys any of the four writes can put in `audit_log.detail` (before a
-    /// caller's `extra_detail`), none is credential-shaped, and the egress list
+    /// keys any of the four writes can put in `audit_log.detail` (before the card
+    /// path's two provenance ids), none is credential-shaped, and the egress list
     /// the member consented to is in it.
     #[test]
     fn audit_details_carry_an_allowlist_of_keys_and_no_credential() {
@@ -926,23 +1074,38 @@ mod tests {
         assert_eq!(installed["version"], json!("1.0.0"));
     }
 
+    /// The card path can add exactly two ids — which agent's proposal, which
+    /// approval — and nothing else: there is no field to carry any other key, and
+    /// the write set's own keys are never replaced.
     #[test]
-    fn extra_detail_adds_provenance_but_never_overrides_or_carries_a_credential() {
+    fn provenance_adds_two_typed_ids_and_nothing_else() {
+        let (agent, approval) = (Uuid::from_u128(7), Uuid::from_u128(9));
         let base = revoked_detail("com.momo.plugins.github");
-        let mut extra = Map::new();
-        extra.insert("via_agent".into(), json!("agent-1"));
-        extra.insert("approval_id".into(), json!("approval-1"));
-        // A caller cannot replace what the write set, nor smuggle a secret.
-        extra.insert("plugin_id".into(), json!("com.momo.plugins.evil"));
-        extra.insert("schema".into(), json!("x"));
-        extra.insert("access_token".into(), json!("sk-should-not-land"));
-        extra.insert("Authorization".into(), json!("Bearer nope"));
-        let merged = merge_extra_detail(base, &extra);
-        assert_eq!(merged["via_agent"], json!("agent-1"));
-        assert_eq!(merged["approval_id"], json!("approval-1"));
-        assert_eq!(merged["plugin_id"], json!("com.momo.plugins.github"));
-        assert_eq!(merged["schema"], json!(SCHEMA_REVOKED));
-        let text = merged.to_string();
-        assert!(!text.contains("sk-should-not-land") && !text.contains("Bearer nope"));
+        assert_eq!(
+            with_provenance(base.clone(), &Provenance::default()),
+            Value::Object(base.clone()),
+            "the REST routes add nothing"
+        );
+        let carried = with_provenance(
+            base.clone(),
+            &Provenance {
+                subject_member_id: Some(Uuid::from_u128(1)),
+                run_id: Some(Uuid::from_u128(2)),
+                via_agent: Some(agent),
+                approval_id: Some(approval),
+            },
+        );
+        let mut keys: Vec<&str> = carried
+            .as_object()
+            .expect("object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["approval_id", "plugin_id", "schema", "via_agent"]);
+        assert_eq!(carried["via_agent"], json!(agent.to_string()));
+        assert_eq!(carried["approval_id"], json!(approval.to_string()));
+        assert_eq!(carried["plugin_id"], json!("com.momo.plugins.github"));
+        assert_eq!(carried["schema"], json!(SCHEMA_REVOKED));
     }
 }

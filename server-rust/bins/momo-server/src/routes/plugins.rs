@@ -337,7 +337,7 @@ pub async fn detail(
 ) -> Result<Json<PluginDetailResponse>, ApiError> {
     require_human(&principal, "human delegated user required")?;
     let workspace_id = workspace_scope(&workspace, &principal)?;
-    let plugin_id = plugin.to_lowercase();
+    let plugin_id = plugin.to_ascii_lowercase();
     if !is_plugin_id(&plugin_id) {
         return Err(ApiError::bad_request("invalid plugin id"));
     }
@@ -483,7 +483,7 @@ fn actor_of(principal: &Principal) -> Actor {
 
 /// Swift `pluginID`: lowercased, held to the registry id grammar.
 fn plugin_path_id(raw: &str) -> Result<String, ApiError> {
-    let id = raw.to_lowercase();
+    let id = raw.to_ascii_lowercase();
     if is_plugin_id(&id) {
         Ok(id)
     } else {
@@ -911,6 +911,69 @@ mod tests {
             plugin_path_id("Bad Id!").expect_err("grammar").status,
             StatusCode::BAD_REQUEST
         );
+    }
+
+    /// `require_human` is each handler's own gate. The middleware keeps agent
+    /// bearers off these paths today, but a principal that reached a handler anyway
+    /// is refused with 403 before any path, body or database work. The pool below
+    /// never dials and each request is otherwise well-formed, so without the guard
+    /// it would reach `agent_tenant_tx` and come back a 500.
+    #[tokio::test]
+    async fn an_agent_principal_is_refused_by_all_four_handlers_before_any_database_work() {
+        use momo_auth::PrincipalKind;
+
+        let pool = momo_db::sqlx::postgres::PgPoolOptions::new()
+            .acquire_timeout(std::time::Duration::from_millis(300))
+            .connect_lazy("postgres://unused:unused@127.0.0.1:1/unused")
+            .expect("a lazy pool never dials");
+        let state = AppState::new(
+            pool,
+            "test-secret".to_string(),
+            "ws://127.0.0.1:8000/connection/websocket".to_string(),
+        );
+        let workspace = Uuid::from_u128(1);
+        let agent = Principal {
+            member_id: Uuid::from_u128(2),
+            workspace_id: workspace,
+            token_id: None,
+            scopes: Vec::new(),
+            kind: PrincipalKind::Agent,
+        };
+        let ws = workspace.to_string();
+        let plugin = "com.momo.plugins.github".to_string();
+        let refusals = [
+            install(
+                State(state.clone()),
+                Extension(agent.clone()),
+                Path((ws.clone(), plugin.clone())),
+                Bytes::from_static(br#"{"enabled":true}"#),
+            )
+            .await,
+            uninstall(
+                State(state.clone()),
+                Extension(agent.clone()),
+                Path((ws.clone(), plugin.clone())),
+            )
+            .await,
+            grant(
+                State(state.clone()),
+                Extension(agent.clone()),
+                Path((ws.clone(), plugin.clone())),
+                Bytes::from_static(br#"{"scope":"github:read"}"#),
+            )
+            .await,
+            revoke_grant(
+                State(state.clone()),
+                Extension(agent.clone()),
+                Path((ws.clone(), plugin.clone(), "github:read".to_string())),
+            )
+            .await,
+        ];
+        for refusal in refusals {
+            let error = refusal.expect_err("an agent principal is refused");
+            assert_eq!(error.status, StatusCode::FORBIDDEN, "{}", error.message);
+            assert_eq!(error.message, "human delegated user required");
+        }
     }
 
     #[test]

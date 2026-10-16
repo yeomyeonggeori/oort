@@ -12,17 +12,19 @@
 //!
 //! | test | what removing it breaks |
 //! |---|---|
-//! | `install_and_uninstall_are_for_admins_and_the_manifest_policy` | the `require_admin` gate; the `serverPolicy` role check; the official-four guard (`external_webhook` / non-allowlisted → 404) |
-//! | `a_grant_is_personal_and_needs_an_enabled_install` | the install-enabled check (409), the 404-before-409 order, the declared-scope check (400), `deny_unknown_fields` (a body naming another member) |
-//! | `revoking_a_grant_removes_its_projection_and_only_mine` | the `DELETE FROM plugin_capability_projection` in `revoke_grant`; the member predicate on the grant lookup |
-//! | `uninstall_cascades_to_every_grant_and_projection` | the grant sweep and projection delete in `uninstall`; re-install must not resurrect consent |
+//! | `install_and_uninstall_are_for_admins_and_the_manifest_policy` | the `require_admin` gate; the `serverPolicy` role check; the official-four guard (`external_webhook` / non-allowlisted → 404); the no-op of a repeated install; the suspended-member refusal |
+//! | `a_grant_is_personal_and_needs_an_enabled_install` | the install-enabled check (409), the 404-before-409 order, the declared-scope check (400), `deny_unknown_fields` (a body naming another member), the guest refusal, the no-op of a repeated grant and the refresh of a drifted one |
+//! | `revoking_a_grant_removes_its_projection_and_only_mine` | the `DELETE FROM plugin_capability_projection` in `revoke_grant`; the member predicate on the grant lookup; the official-four guard on a revoke (a seeded `external_webhook` grant must survive) |
+//! | `uninstall_cascades_to_every_grant_and_projection` | the grant sweep and projection delete in `uninstall`; re-install must not resurrect consent; a straggler grant under a revoked install is healed by a repeat |
 //! | `a_disabled_install_hides_the_tools_but_keeps_the_consent` | the policy join on `wpi.enabled` (D5 fail-closed) end to end through the writes |
-//! | `another_workspace_never_sees_or_changes_my_rows` | RLS FORCE on the three tenant tables (checked as `momo_app`, non-vacuously) |
+//! | `another_workspace_never_sees_or_changes_my_rows` | RLS FORCE on the three tenant tables (checked as `momo_app`, non-vacuously, and `relforcerowsecurity` itself) |
 //! | `no_credential_survives_any_request_or_response` | `deny_unknown_fields`; the audit detail allowlist; the response key allowlist |
 //! | `the_wire_equals_the_mutation_fixtures_the_core_parser_reads` | any drift of a response from `server/Fixtures/plugin-wire/mutation-*.json` |
-//! | `a_grant_racing_an_uninstall_cannot_outlive_it` | the `FOR SHARE` on the install row in `grant` |
+//! | `a_grant_waits_for_an_uninstall_in_flight_and_then_refuses` | the shared install key in `grant` (a grant can no longer outlive an uninstall) |
+//! | `an_uninstall_waits_for_a_grant_in_flight_and_then_sweeps_it` | the exclusive install key in `uninstall`; the queue discipline that keeps a stream of grants from starving it |
 //! | `every_write_leaves_exactly_one_audit_row` | the audit row per write, its actor / target / schema, and the FK it satisfies |
 //! | `agent_bearers_cannot_reach_the_writes` | the agent-scope allowlist staying closed for these paths |
+//! | `the_domain_function_refuses_a_member_that_is_not_a_human` | the `member.kind = 'human'` predicate in `plugin_writes::grant` itself |
 //!
 //! `plugin_registry` is a **global** table. Tests that tamper with an official
 //! row restore it before asserting, and the whole binary holds one lock, so run
@@ -51,6 +53,7 @@ use momo_db::sqlx;
 use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use momo_db::PgPool;
 use momo_server::plugin_manifest::is_secret_like_key;
+use momo_server::plugin_writes::{self, Actor, Provenance};
 use momo_server::{build_app, AppState};
 use reqwest::Method;
 use serde_json::{json, Value};
@@ -700,11 +703,37 @@ async fn install_and_uninstall_are_for_admins_and_the_manifest_policy() {
     assert_eq!(installed_by, t.admin.0.id);
     assert_eq!(body["auditRef"], audit_ref.to_string());
 
-    // The same call again is an update (200), not a second row.
-    let (status, body) = install(&env, &t.owner.1, ws, GITHUB, true).await;
-    assert_eq!(status, 200, "re-install: {body}");
+    // The same call again is a no-op, not a second record: 200, the first call's
+    // audit row, the first installer still on the row, and nothing written.
+    let (status, again) = install(&env, &t.owner.1, ws, GITHUB, true).await;
+    assert_eq!(status, 200, "re-install: {again}");
+    assert_eq!(again["auditRef"], body["auditRef"], "the install in force");
     assert_eq!(install_rows(&env.su, ws, GITHUB).await, 1);
-    assert_eq!(audit_count(&env.su, ws, "plugin.installed").await, 2);
+    assert_eq!(
+        audit_count(&env.su, ws, "plugin.installed").await,
+        1,
+        "a repeat writes no audit row"
+    );
+    let still_by: Uuid = sqlx::query_scalar(
+        "SELECT installed_by FROM workspace_plugin_install \
+          WHERE workspace_id = $1 AND plugin_id = $2",
+    )
+    .bind(ws)
+    .bind(GITHUB)
+    .fetch_one(&env.su)
+    .await
+    .expect("installed_by");
+    assert_eq!(
+        still_by, t.admin.0.id,
+        "a repeat does not rewrite who installed it"
+    );
+    // A change of state is a record: off, then on, writes two more.
+    let (status, off) = install(&env, &t.owner.1, ws, GITHUB, false).await;
+    assert_eq!(status, 200, "{off}");
+    assert_ne!(off["auditRef"], body["auditRef"]);
+    let (status, _) = install(&env, &t.owner.1, ws, GITHUB, true).await;
+    assert_eq!(status, 200);
+    assert_eq!(audit_count(&env.su, ws, "plugin.installed").await, 3);
 
     // Without a body the manifest's enabledByDefault (false) decides.
     let (status, body) = call(
@@ -802,6 +831,25 @@ async fn install_and_uninstall_are_for_admins_and_the_manifest_policy() {
     assert_eq!(status, 404, "never installed: {body}");
     assert_eq!(body["error"]["message"], "plugin install not found");
 
+    // A suspended member keeps a membership row and a valid token, and is refused:
+    // `active_workspace_role` joins `member.status`.
+    sqlx::query("UPDATE member SET status = 'suspended' WHERE workspace_id = $1 AND id = $2")
+        .bind(ws)
+        .bind(t.admin.0.id)
+        .execute(&env.su)
+        .await
+        .expect("suspend the admin");
+    let (status, body) = install(&env, &t.admin.1, ws, NOTION, true).await;
+    assert_eq!(status, 403, "suspended admin: {body}");
+    let (status, _) = uninstall(&env, &t.admin.1, ws, GITHUB).await;
+    assert_eq!(status, 403, "suspended admin uninstall");
+    sqlx::query("UPDATE member SET status = 'active' WHERE workspace_id = $1 AND id = $2")
+        .bind(ws)
+        .bind(t.admin.0.id)
+        .execute(&env.su)
+        .await
+        .expect("reinstate the admin");
+
     // A member whose membership ended gets 403 on the writes (reads give 404).
     sqlx::query("DELETE FROM workspace_membership WHERE workspace_id = $1 AND member_id = $2")
         .bind(ws)
@@ -814,6 +862,13 @@ async fn install_and_uninstall_are_for_admins_and_the_manifest_policy() {
     assert_eq!(body["error"]["message"], "not a workspace member");
     let (status, _) = uninstall(&env, &t.admin.1, ws, GITHUB).await;
     assert_eq!(status, 403, "former admin uninstall");
+
+    // The registry row this test added outside the four does not outlive it.
+    sqlx::query("DELETE FROM plugin_registry WHERE plugin_id = $1")
+        .bind(EXTRA)
+        .execute(&env.su)
+        .await
+        .expect("remove the extra registry row");
 }
 
 // ---- 2. grants: personal, declared, behind an enabled install --------------------
@@ -878,6 +933,7 @@ async fn a_grant_is_personal_and_needs_an_enabled_install() {
     assert_eq!(granted_by, alice, "D2: a grant is the member's own consent");
     assert_eq!(body["auditRef"], audit_id.to_string());
     assert_eq!(member_projection_rows(&env.su, ws, alice, GITHUB).await, 2);
+    let first_audit = body["auditRef"].clone();
 
     // Her policy now lists the tools; bob's does not (a grant is not shared).
     let mine = catalog(&env, &t.alice.1, ws).await;
@@ -888,10 +944,53 @@ async fn a_grant_is_personal_and_needs_an_enabled_install() {
     let bobs = catalog(&env, &t.bob.1, ws).await;
     assert!(policy_tools(&bobs, GITHUB).is_empty());
 
-    // The same grant again refreshes (200) and does not double the projection.
-    let (status, _) = grant(&env, &t.alice.1, ws, GITHUB, "github:read").await;
-    assert_eq!(status, 200, "refresh");
+    // The same grant again is a no-op: 200, the first call's audit row, nothing
+    // written, the projection not doubled.
+    let granted_audits = audit_count(&env.su, ws, "plugin.grant.created").await;
+    let (status, again) = grant(&env, &t.alice.1, ws, GITHUB, "github:read").await;
+    assert_eq!(status, 200, "repeat: {again}");
+    assert_eq!(again["auditRef"], first_audit);
+    assert_eq!(
+        audit_count(&env.su, ws, "plugin.grant.created").await,
+        granted_audits,
+        "a repeat writes no audit row"
+    );
     assert_eq!(member_projection_rows(&env.su, ws, alice, GITHUB).await, 2);
+    // A projection that has drifted from the manifest (a tool re-tiered since the
+    // grant) is rebuilt by the same call — with a record of the refresh.
+    sqlx::query(
+        "UPDATE plugin_capability_projection SET approval_tier = 'network_write' \
+          WHERE workspace_id = $1 AND member_id = $2 AND plugin_id = $3 \
+            AND tool_name = 'github.search_issues'",
+    )
+    .bind(ws)
+    .bind(alice)
+    .bind(GITHUB)
+    .execute(&env.su)
+    .await
+    .expect("drift the projection");
+    let (status, refreshed) = grant(&env, &t.alice.1, ws, GITHUB, "github:read").await;
+    assert_eq!(status, 200, "refresh: {refreshed}");
+    assert_ne!(refreshed["auditRef"], first_audit, "a refresh is a record");
+    assert_eq!(
+        audit_count(&env.su, ws, "plugin.grant.created").await,
+        granted_audits + 1
+    );
+    let tiers: Vec<String> = sqlx::query_scalar(
+        "SELECT approval_tier FROM plugin_capability_projection \
+          WHERE workspace_id = $1 AND member_id = $2 AND plugin_id = $3 ORDER BY tool_name",
+    )
+    .bind(ws)
+    .bind(alice)
+    .bind(GITHUB)
+    .fetch_all(&env.su)
+    .await
+    .expect("tiers");
+    assert_eq!(
+        tiers,
+        ["read_only", "read_only"],
+        "the manifest's tiers again"
+    );
 
     // Nobody can grant for somebody else: there is no member field to send, and
     // a body that names one is refused whole.
@@ -923,6 +1022,19 @@ async fn a_grant_is_personal_and_needs_an_enabled_install() {
     let (status, _) = grant(&env, &t.alice.1, ws, NOTION, "notion:read").await;
     assert_eq!(status, 409);
 
+    // A guest cannot connect an app: a hosted app (Drive) reads workspace data with
+    // the server's own credential, so the grant is the only per-member gate and a
+    // guest does not see the whole workspace.
+    let carol = seed_human(&env.su, ws, "guest").await;
+    let carol_token = login(&env, ws, &carol.email).await;
+    let (status, body) = grant(&env, &carol_token, ws, GITHUB, "github:read").await;
+    assert_eq!(status, 403, "guest: {body}");
+    assert_eq!(body["error"]["message"], "guests cannot connect apps");
+    assert_eq!(
+        grant_status(&env.su, ws, carol.id, GITHUB, "github:read").await,
+        None
+    );
+
     // A former member cannot grant (403 on writes).
     sqlx::query("DELETE FROM workspace_membership WHERE workspace_id = $1 AND member_id = $2")
         .bind(ws)
@@ -933,6 +1045,22 @@ async fn a_grant_is_personal_and_needs_an_enabled_install() {
     let (status, body) = grant(&env, &t.bob.1, ws, GITHUB, "github:read").await;
     assert_eq!(status, 403, "former member: {body}");
     assert_eq!(body["error"]["message"], "not a workspace member");
+
+    // …but consent can always be withdrawn: alice, demoted to guest after granting,
+    // can still take her grant back, and cannot make a new one.
+    sqlx::query(
+        "UPDATE workspace_membership SET role = 'guest' WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(ws)
+    .bind(alice)
+    .execute(&env.su)
+    .await
+    .expect("demote alice to guest");
+    let (status, _) = grant(&env, &t.alice.1, ws, GITHUB, "github:write").await;
+    assert_eq!(status, 403, "a guest cannot grant");
+    let (status, body) = revoke(&env, &t.alice.1, ws, GITHUB, "github:read").await;
+    assert_eq!(status, 200, "a guest can revoke: {body}");
+    assert_eq!(member_projection_rows(&env.su, ws, alice, GITHUB).await, 0);
 }
 
 // ---- 3. revoking a grant -----------------------------------------------------------
@@ -1017,8 +1145,39 @@ async fn revoking_a_grant_removes_its_projection_and_only_mine() {
     assert_eq!(member_projection_rows(&env.su, ws, bob, GITHUB).await, 2);
     let (status, _) = revoke(&env, &t.alice.1, ws, GITHUB, "bad scope").await;
     assert_eq!(status, 400);
+    // The incoming-webhook plugin has a grant row of its own lifecycle; a revoke
+    // through this route must neither find nor touch it (a bare 404 would also be
+    // "no such grant", so the row is seeded and must stay active).
+    let audit: Uuid = sqlx::query_scalar(
+        "INSERT INTO audit_log (workspace_id, actor_member_id, subject_member_id, action) \
+         VALUES ($1, $2, $2, 'plugin.grant.created') RETURNING id",
+    )
+    .bind(ws)
+    .bind(alice)
+    .fetch_one(&env.su)
+    .await
+    .expect("seed audit");
+    sqlx::query(
+        "INSERT INTO plugin_grant \
+           (workspace_id, member_id, plugin_id, scope, status, granted_by, granted_audit_id) \
+         VALUES ($1, $2, $3, 'webhook:receive', 'active', $2, $4)",
+    )
+    .bind(ws)
+    .bind(alice)
+    .bind(EXTERNAL_WEBHOOK)
+    .bind(audit)
+    .execute(&env.su)
+    .await
+    .expect("seed a webhook-plugin grant");
     let (status, _) = revoke(&env, &t.alice.1, ws, EXTERNAL_WEBHOOK, "webhook:receive").await;
     assert_eq!(status, 404, "outside the four");
+    assert_eq!(
+        grant_status(&env.su, ws, alice, EXTERNAL_WEBHOOK, "webhook:receive")
+            .await
+            .as_deref(),
+        Some("active"),
+        "the webhook plugin's grant is not reachable from here"
+    );
 
     // A grant stays revocable after the registry has moved on: consent can
     // always be withdrawn.
@@ -1154,6 +1313,49 @@ async fn uninstall_cascades_to_every_grant_and_projection() {
     assert_eq!(again["auditRef"], body["auditRef"]);
     assert_eq!(audit_count(&env.su, ws, "plugin.revoked").await, 1);
 
+    // …and a repeat heals a straggler: an active grant (with its projection) under
+    // the revoked install, the kind an unlocked reader of the old server could leave
+    // behind, goes under the revoke that ended the install.
+    sqlx::query(
+        "UPDATE plugin_grant SET status = 'active', revoked_at = NULL, revoked_audit_id = NULL \
+          WHERE workspace_id = $1 AND member_id = $2 AND plugin_id = $3",
+    )
+    .bind(ws)
+    .bind(alice)
+    .bind(GITHUB)
+    .execute(&env.su)
+    .await
+    .expect("resurrect a grant under the revoked install");
+    sqlx::query(
+        "INSERT INTO plugin_capability_projection \
+           (workspace_id, member_id, plugin_id, scope, tool_name, capability_version, \
+            schema_digest, risk, approval_tier, grant_id) \
+         SELECT workspace_id, member_id, plugin_id, scope, 'github.list_repositories', '1.0.0', \
+                'sha256:' || repeat('1', 64), 'read', 'read_only', id \
+           FROM plugin_grant WHERE workspace_id = $1 AND member_id = $2 AND plugin_id = $3",
+    )
+    .bind(ws)
+    .bind(alice)
+    .bind(GITHUB)
+    .execute(&env.su)
+    .await
+    .expect("and its projection");
+    assert_eq!(
+        active_grants(&env.su, ws, GITHUB).await,
+        1,
+        "the straggler is there"
+    );
+    let (status, healed) = uninstall(&env, &t.admin.1, ws, GITHUB).await;
+    assert_eq!(status, 200, "{healed}");
+    assert_eq!(healed["auditRef"], body["auditRef"]);
+    assert_eq!(active_grants(&env.su, ws, GITHUB).await, 0, "healed");
+    assert_eq!(projection_rows(&env.su, ws, GITHUB).await, 0);
+    assert_eq!(
+        audit_count(&env.su, ws, "plugin.revoked").await,
+        1,
+        "no new record"
+    );
+
     // A grant against the uninstalled app is a 409 again, and an install that
     // is back (200: the row existed) does NOT bring consent back with it.
     let (status, _) = grant(&env, &t.alice.1, ws, GITHUB, "github:read").await;
@@ -1281,6 +1483,19 @@ async fn another_workspace_never_sees_or_changes_my_rows() {
         Some((true, false))
     );
     assert_eq!(active_grants(&env.su, a.workspace, GITHUB).await, 1);
+
+    // FORCE is on for all three tables: the policy binds the table's owner too, not
+    // only the runtime role below.
+    let forced: Vec<(String, bool)> = sqlx::query_as(
+        "SELECT relname::text, relforcerowsecurity FROM pg_class \
+          WHERE relname IN ('workspace_plugin_install', 'plugin_grant', 'plugin_capability_projection') \
+          ORDER BY relname",
+    )
+    .fetch_all(&env.su)
+    .await
+    .expect("relforcerowsecurity");
+    assert_eq!(forced.len(), 3, "{forced:?}");
+    assert!(forced.iter().all(|(_, forced)| *forced), "{forced:?}");
 
     // The database says the same, as the runtime role: with B's GUC, A's rows in
     // all three tenant tables do not exist, and A's GUC shows them (so the zero is
@@ -1518,22 +1733,96 @@ async fn the_wire_equals_the_mutation_fixtures_the_core_parser_reads() {
 
 // ---- 9. the race -----------------------------------------------------------------------
 
-/// An uninstall that is mid-flight holds the install row. A grant that arrives
-/// then must wait for it and see the revoked install (409) — not read the old
-/// state, finish after the sweep, and leave an active grant under a revoked
-/// install that the next install would bring back without anyone's consent.
+/// How many requests are waiting on the install key right now: ungranted advisory
+/// locks whose 64-bit key is `hashtextextended(key, 0)` (`classid` is its high word,
+/// `objid` its low word). Polling this replaces a sleep: the test proceeds only once
+/// the request under test is *provably queued on the lock*, so the assertions after
+/// it cannot pass merely because the request had not started yet.
+async fn waiters_on(su: &PgPool, key: &str) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM pg_locks \
+          WHERE locktype = 'advisory' AND NOT granted \
+            AND ((classid::bigint << 32) | objid::bigint) = hashtextextended($1, 0)",
+    )
+    .bind(key)
+    .fetch_one(su)
+    .await
+    .expect("waiters")
+}
+
+async fn wait_for_waiters(su: &PgPool, key: &str, at_least: i64) {
+    for _ in 0..200 {
+        if waiters_on(su, key).await >= at_least {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("never saw {at_least} request(s) queued on {key}");
+}
+
+fn spawn_grant(env: &Env, token: &str, workspace: Uuid) -> tokio::task::JoinHandle<(u16, String)> {
+    let http = env.http.clone();
+    let base = env.base.clone();
+    let token = token.to_string();
+    let path = format!("{}/grants", plugin_path(workspace, GITHUB));
+    tokio::spawn(async move {
+        let response = http
+            .post(format!("{base}{path}"))
+            .bearer_auth(token)
+            .header("content-type", "application/json")
+            .body(r#"{"scope":"github:read"}"#)
+            .send()
+            .await
+            .expect("grant request");
+        let status = response.status().as_u16();
+        (status, response.text().await.unwrap_or_default())
+    })
+}
+
+fn spawn_uninstall(
+    env: &Env,
+    token: &str,
+    workspace: Uuid,
+) -> tokio::task::JoinHandle<(u16, String)> {
+    let http = env.http.clone();
+    let base = env.base.clone();
+    let token = token.to_string();
+    let path = format!("{}/install", plugin_path(workspace, GITHUB));
+    tokio::spawn(async move {
+        let response = http
+            .delete(format!("{base}{path}"))
+            .bearer_auth(token)
+            .send()
+            .await
+            .expect("uninstall request");
+        let status = response.status().as_u16();
+        (status, response.text().await.unwrap_or_default())
+    })
+}
+
+/// An uninstall that is mid-flight holds the install key. A grant that arrives then
+/// must queue behind it and see the revoked install (409) — not read the old state,
+/// finish after the sweep, and leave an active grant under a revoked install that
+/// the next install would bring back without anyone's consent.
 #[tokio::test]
 #[ignore]
-async fn a_grant_racing_an_uninstall_cannot_outlive_it() {
+async fn a_grant_waits_for_an_uninstall_in_flight_and_then_refuses() {
     let _guard = test_lock().await;
     let env = env().await;
-    let t = team(&env, "plugins-race").await;
+    let t = team(&env, "plugins-race-grant").await;
     let ws = t.workspace;
+    let key = format!("install:{ws}:{GITHUB}");
     install(&env, &t.admin.1, ws, GITHUB, true).await;
     grant(&env, &t.bob.1, ws, GITHUB, "github:read").await;
 
-    // The uninstall, by hand: hold the install row FOR UPDATE, as `uninstall` does.
+    // The uninstall, by hand: the exclusive install key, then the install row, as
+    // `uninstall` takes them.
     let mut tx = env.su.begin().await.expect("begin the uninstall");
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(&key)
+        .execute(&mut *tx)
+        .await
+        .expect("hold the install key");
     sqlx::query(
         "SELECT id FROM workspace_plugin_install \
           WHERE workspace_id = $1 AND plugin_id = $2 FOR UPDATE",
@@ -1544,33 +1833,13 @@ async fn a_grant_racing_an_uninstall_cannot_outlive_it() {
     .await
     .expect("lock the install row");
 
-    // Alice's grant arrives while the uninstall is open.
-    let racing = {
-        let http = env.http.clone();
-        let base = env.base.clone();
-        let token = t.alice.1.clone();
-        let path = format!("{}/grants", plugin_path(ws, GITHUB));
-        tokio::spawn(async move {
-            let response = http
-                .post(format!("{base}{path}"))
-                .bearer_auth(token)
-                .header("content-type", "application/json")
-                .body(r#"{"scope":"github:read"}"#)
-                .send()
-                .await
-                .expect("racing grant");
-            let status = response.status().as_u16();
-            (status, response.text().await.unwrap_or_default())
-        })
-    };
-    tokio::time::sleep(Duration::from_millis(600)).await;
-    assert!(
-        !racing.is_finished(),
-        "the grant waits for the uninstall's lock"
-    );
+    // Alice's grant arrives while the uninstall is open — and queues on the key.
+    let racing = spawn_grant(&env, &t.alice.1, ws);
+    wait_for_waiters(&env.su, &key, 1).await;
+    assert!(!racing.is_finished(), "the grant waits for the uninstall");
 
     // The uninstall finishes: revoke the install, sweep the grants and the
-    // projection (Swift's order), commit.
+    // projection, commit.
     let audit: Uuid = sqlx::query_scalar(
         "INSERT INTO audit_log (workspace_id, actor_member_id, subject_member_id, action) \
          VALUES ($1, $2, $2, 'plugin.revoked') RETURNING id",
@@ -1624,6 +1893,110 @@ async fn a_grant_racing_an_uninstall_cannot_outlive_it() {
         grant_status(&env.su, ws, t.alice.0.id, GITHUB, "github:read").await,
         None,
         "alice's grant row was never created"
+    );
+}
+
+/// The other order: a grant that has passed its install check but not committed
+/// holds the key shared. The real `uninstall` must wait for it (so its sweep sees
+/// the grant), and a grant that arrives *after* the uninstall started waiting must
+/// queue behind the uninstall rather than slip past it — otherwise a member looping
+/// on grants could keep an admin's uninstall waiting forever.
+#[tokio::test]
+#[ignore]
+async fn an_uninstall_waits_for_a_grant_in_flight_and_then_sweeps_it() {
+    let _guard = test_lock().await;
+    let env = env().await;
+    let t = team(&env, "plugins-race-uninstall").await;
+    let ws = t.workspace;
+    let alice = t.alice.0.id;
+    let key = format!("install:{ws}:{GITHUB}");
+    install(&env, &t.admin.1, ws, GITHUB, true).await;
+
+    // A grant in flight, by hand: the shared install key, then its rows (not yet
+    // committed).
+    let mut tx = env.su.begin().await.expect("begin the grant");
+    sqlx::query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))")
+        .bind(&key)
+        .execute(&mut *tx)
+        .await
+        .expect("hold the install key shared");
+
+    // The real uninstall arrives and queues for the exclusive key.
+    let uninstalling = spawn_uninstall(&env, &t.admin.1, ws);
+    wait_for_waiters(&env.su, &key, 1).await;
+    assert!(
+        !uninstalling.is_finished(),
+        "the uninstall waits for the grant"
+    );
+
+    // A second grant arrives behind the waiting uninstall: it queues too, instead
+    // of overtaking it.
+    let overtaker = spawn_grant(&env, &t.bob.1, ws);
+    wait_for_waiters(&env.su, &key, 2).await;
+    assert!(
+        !overtaker.is_finished(),
+        "a grant that arrives after a waiting uninstall queues behind it"
+    );
+
+    // The grant in flight commits its rows.
+    let audit: Uuid = sqlx::query_scalar(
+        "INSERT INTO audit_log (workspace_id, actor_member_id, subject_member_id, action) \
+         VALUES ($1, $2, $2, 'plugin.grant.created') RETURNING id",
+    )
+    .bind(ws)
+    .bind(alice)
+    .fetch_one(&mut *tx)
+    .await
+    .expect("grant audit");
+    let grant_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO plugin_grant \
+           (workspace_id, member_id, plugin_id, scope, status, granted_by, granted_audit_id) \
+         VALUES ($1, $2, $3, 'github:read', 'active', $2, $4) RETURNING id",
+    )
+    .bind(ws)
+    .bind(alice)
+    .bind(GITHUB)
+    .bind(audit)
+    .fetch_one(&mut *tx)
+    .await
+    .expect("grant row");
+    sqlx::query(
+        "INSERT INTO plugin_capability_projection \
+           (workspace_id, member_id, plugin_id, scope, tool_name, capability_version, \
+            schema_digest, risk, approval_tier, grant_id) \
+         VALUES ($1, $2, $3, 'github:read', 'github.list_repositories', '1.0.0', \
+                 'sha256:' || repeat('1', 64), 'read', 'read_only', $4)",
+    )
+    .bind(ws)
+    .bind(alice)
+    .bind(GITHUB)
+    .bind(grant_id)
+    .execute(&mut *tx)
+    .await
+    .expect("projection row");
+    tx.commit().await.expect("commit the grant");
+
+    // The uninstall runs next and sweeps what it was waiting for; the overtaker,
+    // queued behind it, finds the install revoked.
+    let (status, removed) = uninstalling.await.expect("uninstall task");
+    assert_eq!(status, 200, "{removed}");
+    let (status, refused) = overtaker.await.expect("overtaker task");
+    assert_eq!(
+        status, 409,
+        "the queued grant saw the revoked install: {refused}"
+    );
+    assert_eq!(
+        grant_status(&env.su, ws, alice, GITHUB, "github:read")
+            .await
+            .as_deref(),
+        Some("revoked"),
+        "the in-flight grant was swept, not left active under a revoked install"
+    );
+    assert_eq!(active_grants(&env.su, ws, GITHUB).await, 0);
+    assert_eq!(projection_rows(&env.su, ws, GITHUB).await, 0);
+    assert_eq!(
+        grant_status(&env.su, ws, t.bob.0.id, GITHUB, "github:read").await,
+        None
     );
 }
 
@@ -1795,4 +2168,76 @@ async fn agent_bearers_cannot_reach_the_writes() {
         install_state(&env.su, ws, GITHUB).await,
         Some((true, false))
     );
+}
+
+/// D2 is a rule of the domain function, not only of the HTTP shell in front of it:
+/// `plugin_writes::grant` itself refuses a member that is not a human. Every agent
+/// has an ordinary `workspace_membership` row, so without the kind predicate it
+/// would pass the membership gate and `plugin_grant_self_ck` (which only compares
+/// `granted_by` to `member_id`) would accept the row. The same call by a human is
+/// the control: it is the kind, and only the kind, that decides.
+#[tokio::test]
+#[ignore]
+async fn the_domain_function_refuses_a_member_that_is_not_a_human() {
+    let _guard = test_lock().await;
+    let env = env().await;
+    let t = team(&env, "plugins-agent-grantor").await;
+    let ws = t.workspace;
+    install(&env, &t.admin.1, ws, GITHUB, true).await;
+
+    let agent = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member (id, workspace_id, kind, display_name, handle) \
+         VALUES ($1, $2, 'agent', 'Plugin Probe', $3)",
+    )
+    .bind(agent)
+    .bind(ws)
+    .bind(format!("probe-{}", &agent.simple().to_string()[..8]))
+    .execute(&env.su)
+    .await
+    .expect("seed an agent member");
+    sqlx::query(
+        "INSERT INTO workspace_membership (workspace_id, member_id, role) VALUES ($1, $2, 'member')",
+    )
+    .bind(ws)
+    .bind(agent)
+    .execute(&env.su)
+    .await
+    .expect("agents get an ordinary membership row");
+
+    let try_grant = |member: Uuid| {
+        let app = env.app.clone();
+        async move {
+            momo_db::with_tenant_tx(&app, ws, move |conn| {
+                Box::pin(async move {
+                    plugin_writes::grant(
+                        conn,
+                        ws,
+                        GITHUB,
+                        "github:read",
+                        Actor {
+                            member_id: member,
+                            via_token_id: None,
+                        },
+                        &Provenance::default(),
+                    )
+                    .await
+                })
+            })
+            .await
+            .expect("the transaction")
+        }
+    };
+    let refused = try_grant(agent).await.expect_err("an agent cannot grant");
+    assert_eq!(refused.status, 403);
+    assert_eq!(refused.message, "only a human member can grant an app");
+    assert_eq!(
+        grant_status(&env.su, ws, agent, GITHUB, "github:read").await,
+        None
+    );
+    assert_eq!(projection_rows(&env.su, ws, GITHUB).await, 0);
+
+    let granted = try_grant(t.alice.0.id).await.expect("a human member can");
+    assert_eq!(granted.status, "active");
+    assert_eq!(granted.capabilities.len(), 2);
 }

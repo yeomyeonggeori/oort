@@ -37,9 +37,10 @@ pub mod human_control;
 mod livekit;
 /// ADR-0113 D6 manifest admission (port of the retired Swift validator, #3859).
 pub mod plugin_manifest;
-/// ADR-0113 P3 (#3914): the registry's four writes. Crate-private — the REST
-/// handlers and the approval executor are its only callers.
-mod plugin_writes;
+/// ADR-0113 P3 (#3914): the registry's four writes as domain functions. The REST
+/// handlers and the approval executor are the callers; the module is public only so
+/// the conformance suite can drive a function without the HTTP shell in front of it.
+pub mod plugin_writes;
 pub mod rate_limit;
 pub mod realtime_advert;
 pub mod routes;
