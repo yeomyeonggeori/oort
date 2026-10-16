@@ -133,35 +133,35 @@ export type NotificationPrimerProps =
  * 바뀌면 VoiceOver에 한 번 알려지고, 얼굴은 크로스페이드한다) 종류 목록은 걷힌다.
  */
 export function NotificationPrimer(
-  props: NotificationPrimerProps,
+  view: NotificationPrimerProps,
 ): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const dots = phoneOnboardingDots(lastConnectRoute(), 'notify');
-  const ask = props.mode === 'ask';
+  const ask = view.mode === 'ask';
   return (
     <OnboardingPhoneScreen
       testID={ask ? 'notify-primer' : 'notify-declined'}
       top={<OnboardingTopBar dots={dots} />}
       mainStyle={styles.main}
       bottom={
-        props.mode === 'ask' ? (
+        view.mode === 'ask' ? (
           <OnboardingButton
             label={NOTIFY_CONTINUE_LABEL}
-            busy={props.busy}
-            onPress={props.onContinue}
+            busy={view.busy}
+            onPress={view.onContinue}
             accessibilityHint="iOS 알림 허용 창이 뜹니다."
             testID="notify-primer-continue"
           />
         ) : (
           <OnboardingButton
             label={NOTIFY_DECLINED_LABEL}
-            onPress={props.onDone}
+            onPress={view.onDone}
             testID="notify-declined-continue"
           />
         )
       }
     >
-      {props.mode === 'ask' ? (
+      {view.mode === 'ask' ? (
         <KomettoGuide expression="happy" line={NOTIFY_LINE} header />
       ) : (
         <KomettoGuide
@@ -171,7 +171,7 @@ export function NotificationPrimer(
           header
         />
       )}
-      {props.mode === 'ask' ? (
+      {view.mode === 'ask' ? (
         <>
           <View style={styles.kinds}>
             <AlwaysKind
@@ -180,7 +180,7 @@ export function NotificationPrimer(
               note={NOTIFY_APPROVAL_NOTE}
               withActions
             />
-            {props.kinds.absent ? null : <WorkKind kinds={props.kinds} />}
+            {view.kinds.absent ? null : <WorkKind kinds={view.kinds} />}
             <AlwaysKind kind="mention" label={NOTIFY_MENTION_LABEL} />
           </View>
           <Text
@@ -219,7 +219,9 @@ function AlwaysKind({
         accessibilityLabel={`${label}, ${NOTIFY_ALWAYS_LABEL}`}
         testID={`notify-kind-${kind}-head`}
       >
-        <Text style={styles.kindName}>{label}</Text>
+        <Text style={styles.kindName} lineBreakStrategyIOS="hangul-word">
+          {label}
+        </Text>
         <Text style={styles.kindState}>{NOTIFY_ALWAYS_LABEL}</Text>
       </View>
       <NoticeSample
@@ -260,7 +262,9 @@ function WorkKind({kinds}: {kinds: PrimerKinds}): React.JSX.Element {
         style={styles.kindHead}
         testID="notify-work-row"
       >
-        <Text style={styles.kindName}>{PUSH_WORK_COMPLETE_LABEL}</Text>
+        <Text style={styles.kindName} lineBreakStrategyIOS="hangul-word">
+          {PUSH_WORK_COMPLETE_LABEL}
+        </Text>
         {kinds.ready ? (
           <Switch
             value={kinds.workComplete}
@@ -457,9 +461,12 @@ const buildStyles = (color: Palette) =>
     main: {gap: PHONE_OB.mainGapWide},
     kinds: {gap: space.lg},
     kind: {gap: NOTIF.kindGap},
+    // 큰 글씨에서 이름과 「항상 와요」가 한 줄에 못 들어가면 뒤의 것이 아래 줄로 내려간다.
+    // 이름을 줄여 한 글자씩 접는 것(「멘션·답」 / 「·DM」)보다 낫다.
     kindHead: {
       minHeight: NOTIF.headHeight,
       flexDirection: 'row',
+      flexWrap: 'wrap',
       justifyContent: 'space-between',
       alignItems: 'center',
       gap: space.sm,
