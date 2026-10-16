@@ -1,5 +1,5 @@
 import React, {useState} from 'react';
-import {StyleSheet, Text, TextInput, View} from 'react-native';
+import {Image, Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
 import {
   resolvePreset,
   resolveSignal,
@@ -9,7 +9,20 @@ import {
   SIGNAL_REJECTION_COPY,
   type SignalPresetId,
 } from '@momo/core/design/signal';
+import {contrast} from '@momo/core/design/color';
 import {GroupRow, OutlineButton, Sentence} from './atoms';
+import {
+  BACKGROUND_FALLBACK_COPY,
+  NO_BACKGROUND,
+  PRESET_IDS,
+  PRESETS,
+  SOLID_IDS,
+  SOLIDS,
+  type PresetId,
+  type SolidId,
+} from './background/model';
+import {IMPORT_FAILURE_COPY, type PhotoPorts} from './background/photo';
+import {backgroundPhotoUri, chooseBackgroundPhoto} from './background/store';
 import {THEMES, THEME_IDS, type Mode, type ThemeId} from './ds2Tokens';
 import {
   normalizeCustomHex,
@@ -66,12 +79,18 @@ import {ds2Radius, font, radius, space, type Palette} from './tokens';
 // =============================================================================
 
 
-export function ThemeControl(): React.JSX.Element {
+export function ThemeControl({
+  photoPorts,
+}: {
+  /** 시험이 사진 고르기·줄이기를 바꿔 끼우는 자리. 앱은 넘기지 않는다. */
+  photoPorts?: PhotoPorts;
+}): React.JSX.Element {
   return (
     <View style={buildLayout.root} testID="appearance-control">
       <SchemeGroup />
       <ThemeGroup />
       <SignalGroup />
+      <BackgroundGroup photoPorts={photoPorts} />
     </View>
   );
 }
@@ -367,6 +386,185 @@ function SignalGroup(): React.JSX.Element {
   );
 }
 
+// ---- 배경 (ADR-0189 증보 2 · 성재 2026-10-16 「내 사진까지」) -------------------------
+
+/** 단색 위의 ✓ — 팔레트의 두 잉크 가운데 그 색 위 대비가 큰 쪽. 하드코딩한 흰색이 아니다. */
+function checkInkOn(hex: string, palette: Palette): string {
+  return contrast(palette.onPrimary, hex) >= contrast(palette.text, hex)
+    ? palette.onPrimary
+    : palette.text;
+}
+
+function BackgroundGroup({photoPorts}: {photoPorts?: PhotoPorts}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const palette = usePalette();
+  const {background, backgroundFallback, setBackground} = useTheme();
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const none = background.kind === 'none';
+  const pickSolid = (id: SolidId) => {
+    setNotice(null);
+    setBackground({kind: 'solid', id});
+  };
+  const pickPreset = (id: PresetId) => {
+    setNotice(null);
+    setBackground({kind: 'preset', id});
+  };
+  const pickPhoto = async () => {
+    if (busy) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const outcome = await chooseBackgroundPhoto(photoPorts);
+      if (!outcome.ok) setNotice(IMPORT_FAILURE_COPY[outcome.reason]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <GroupSection label="배경">
+      <View
+        accessibilityRole="radiogroup"
+        accessibilityLabel="배경"
+        style={styles.card}
+        testID="appearance-background-group">
+        <GroupRow
+          title="기본"
+          detail="테마의 바닥 그대로예요."
+          tone={none ? 'accent' : 'default'}
+          onPress={() => {
+            setNotice(null);
+            setBackground(NO_BACKGROUND);
+          }}
+          accessibilityRole="radio"
+          accessibilityState={{selected: none}}
+          accessibilityLabel="배경 기본"
+          trailing={<Check selected={none} testID="appearance-background-none-check" />}
+          testID="appearance-background-none"
+        />
+        <View style={styles.bgBlock}>
+          <Text style={styles.customLabel}>단색</Text>
+          <View style={styles.bgSolids}>
+            {SOLID_IDS.map(id => {
+              const selected = background.kind === 'solid' && background.id === id;
+              return (
+                <Pressable
+                  key={id}
+                  accessibilityRole="radio"
+                  accessibilityState={{selected}}
+                  accessibilityLabel={`배경 단색 ${SOLIDS[id].label}`}
+                  onPress={() => pickSolid(id)}
+                  style={[
+                    styles.solid,
+                    {backgroundColor: SOLIDS[id].hex},
+                    selected && styles.solidSelected,
+                  ]}
+                  testID={`appearance-background-solid-${id}`}>
+                  {selected ? (
+                    <Text style={[styles.solidCheck, {color: checkInkOn(SOLIDS[id].hex, palette)}]}>
+                      ✓
+                    </Text>
+                  ) : null}
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+        <View style={styles.bgBlock}>
+          <Text style={styles.customLabel}>기본 제공</Text>
+          <View style={styles.bgPresets}>
+            {PRESET_IDS.map(id => {
+              const selected = background.kind === 'preset' && background.id === id;
+              return (
+                <Pressable
+                  key={id}
+                  accessibilityRole="radio"
+                  accessibilityState={{selected}}
+                  accessibilityLabel={`배경 ${PRESETS[id].label}`}
+                  onPress={() => pickPreset(id)}
+                  style={styles.presetCell}
+                  testID={`appearance-background-preset-${id}`}>
+                  <View
+                    style={[
+                      styles.presetTile,
+                      {
+                        backgroundColor: PRESETS[id].fallback,
+                        experimental_backgroundImage: PRESETS[id].gradient,
+                      },
+                      selected && styles.solidSelected,
+                    ]}
+                  />
+                  <Text style={[styles.presetLabel, selected && styles.presetLabelSelected]}>
+                    {PRESETS[id].label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+        <GroupRow
+          title="내 사진"
+          detail={busy ? '사진을 줄이는 중이에요…' : '이 기기에만 저장되고 서버로 올라가지 않아요.'}
+          tone={background.kind === 'photo' ? 'accent' : 'default'}
+          separated
+          disabled={busy}
+          onPress={pickPhoto}
+          accessibilityRole="radio"
+          accessibilityState={{selected: background.kind === 'photo', disabled: busy}}
+          accessibilityLabel={
+            background.kind === 'photo' ? '배경 내 사진, 다시 고르기' : '배경 내 사진 고르기'
+          }
+          leading={
+            background.kind === 'photo' ? (
+              <Image
+                source={{uri: backgroundPhotoUri(background.file)}}
+                style={styles.photoThumb}
+                accessible={false}
+                testID="appearance-background-photo-thumb"
+              />
+            ) : undefined
+          }
+          trailing={
+            <Check
+              selected={background.kind === 'photo'}
+              testID="appearance-background-photo-check"
+            />
+          }
+          testID="appearance-background-photo"
+        />
+      </View>
+
+      {backgroundFallback ? (
+        <Sentence style={styles.caption} testID="appearance-background-fallback">
+          {BACKGROUND_FALLBACK_COPY[backgroundFallback]}
+        </Sentence>
+      ) : null}
+      {notice ? (
+        <Sentence style={styles.caption} testID="appearance-background-notice">
+          {notice}
+        </Sentence>
+      ) : null}
+      <Sentence style={styles.caption}>
+        글자가 읽히도록 배경 위에 반투명 면이 깔려요. 그래서 사진이 조금 흐리게 보여요.
+      </Sentence>
+      {!none ? (
+        <View style={styles.reset}>
+          <OutlineButton
+            label="기본으로"
+            onPress={() => {
+              setNotice(null);
+              setBackground(NO_BACKGROUND);
+            }}
+            testID="appearance-background-reset"
+          />
+        </View>
+      ) : null}
+    </GroupSection>
+  );
+}
+
 /** 고른 강조색이 쓰이는 세 자리를 한 줄로. 앱 전체가 곧 미리보기이므로 이것은 요약이다. */
 function Preview(): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -480,6 +678,37 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: color.border,
   },
+  bgBlock: {
+    padding: space.md,
+    gap: space.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: color.border,
+  },
+  bgSolids: {flexDirection: 'row', flexWrap: 'wrap', gap: space.md},
+  solid: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: color.border,
+  },
+  solidSelected: {borderWidth: 3, borderColor: color.accent},
+  solidCheck: {fontSize: font.body, fontWeight: '700'},
+  bgPresets: {flexDirection: 'row', flexWrap: 'wrap', gap: space.md},
+  presetCell: {width: 96, gap: space.xs},
+  presetTile: {
+    width: 96,
+    height: 64,
+    borderRadius: ds2Radius.row,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: color.border,
+  },
+  presetLabel: {fontSize: font.meta, color: color.textMuted, textAlign: 'center'},
+  presetLabelSelected: {color: color.accentText, fontWeight: '600'},
+  photoThumb: {width: 36, height: 36, borderRadius: ds2Radius.badge},
+  reset: {marginTop: space.sm, alignItems: 'flex-start'},
   previewFill: {
     paddingHorizontal: space.md,
     paddingVertical: space.xs,

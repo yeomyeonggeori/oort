@@ -29,6 +29,14 @@ import {
 import {ELEVATION, GLASS_FALLBACK_OPACITY} from '@momo/core/design/themes';
 import {DEFAULT_THEME_ID, ds2Roles, type Mode, type ThemeId} from './ds2Tokens';
 import type {SignalValues} from '@momo/core/design/signal';
+import {
+  BACKDROP_SCRIM_ALPHA,
+  NON_TEXT_MIN_ON_BACKDROP,
+  TEXT_MIN_ON_BACKDROP,
+  fitForeground,
+  scrimColor,
+  worstCaseBackdrops,
+} from './background/scrim';
 
 /** iOS HIG minimum tappable edge, in points. Not negotiable per-screen. */
 export const TOUCH_TARGET = 44;
@@ -157,6 +165,19 @@ export interface Palette {
    * 아니다.
    */
   mode: Mode;
+  /**
+   * 바닥이 **무엇 위에** 서는가 — `canvas`(기본, 테마의 그라데이션 바닥)와 `image`(사용자
+   * 배경 뒤에 깔린 scrim, ADR-0189 증보 2). `image` 일 때 홈·대화의 바닥 스타일은 자기
+   * 그라데이션과 불투명 채움을 걷고 `AppBackground` 가 바닥을 그린다. 글자 역할 색은
+   * 이미 scrim 최악 합성 위 대비로 보정돼 있다(`paletteFrom` 의 `onImage`).
+   */
+  backdrop: 'canvas' | 'image';
+  /**
+   * scrim 면의 색 — 바닥색(`bg`)에 모드별 불투명도(`BACKDROP_SCRIM_ALPHA`)를 단 `#rrggbbaa`.
+   * 사진·단색·그라데이션 **위에** 얹는다. 불투명도는 눈대중이 아니라 최악 입력(순흑·순백
+   * 사진)에서 잉크 7:1 이 되는 최소값이다(`design/background/scrim.ts`).
+   */
+  backdropScrim: string;
   /** App background. */
   bg: string;
   /** Raised surface: cards, rows, the tab bar. 언제나 `bg` 보다 한 단 위다. */
@@ -402,7 +423,12 @@ function lower(hex: string): string {
  * 뿐이고 `primary`(잉크)는 그대로다. 파생 역할(`accentPressed`·`accentSurfaceStrong`)은
  * 덮은 뒤의 값에서 계산되므로 따로 손대지 않는다.
  */
-export function paletteFrom(theme: ThemeId, mode: Mode, signal?: SignalValues | null): Palette {
+export function paletteFrom(
+  theme: ThemeId,
+  mode: Mode,
+  signal?: SignalValues | null,
+  onImage = false,
+): Palette {
   const roles = ds2Roles(theme, mode);
   const role = (name: string): string => {
     const value = roles[name];
@@ -419,16 +445,33 @@ export function paletteFrom(theme: ThemeId, mode: Mode, signal?: SignalValues | 
     mapped.accentSurface = lower(signal['signal-soft']);
     mapped.onAccent = lower(signal['on-signal']);
   }
-  const signalFill = mapped.accent;
   const onPrimary = mapped.onPrimary;
   const ink = mapped.text;
   const bestInk = (fill: string) =>
     contrast(onPrimary, fill) >= contrast(ink, fill) ? onPrimary : ink;
+  const backdropAlpha = BACKDROP_SCRIM_ALPHA[mode];
+  if (onImage) {
+    // 사용자 배경이 깔린 동안(ADR-0189 증보 2): 바닥 위에 **직접** 서는 글자·표식 색을
+    // scrim 최악 합성(순흑·순백 사진) 위 대비로 맞춘다. 명도만 움직이고 색상각은 지킨다.
+    // 잉크(`text`)는 scrim 불투명도 자체가 7:1 을 지키므로 손대지 않는다.
+    const hosts = worstCaseBackdrops(mapped.bg, backdropAlpha);
+    const fit = (hex: string, min: number) => fitForeground(hex, hosts, min, mode);
+    for (const name of ['textMuted', 'accentText', 'agent', 'warn', 'danger', 'ok'] as const) {
+      mapped[name] = fit(mapped[name], TEXT_MIN_ON_BACKDROP);
+    }
+    for (const name of ['textFaint', 'icon', 'accent'] as const) {
+      mapped[name] = fit(mapped[name], NON_TEXT_MIN_ON_BACKDROP);
+    }
+    mapped.onAccent = bestInk(mapped.accent);
+  }
+  const signalFill = mapped.accent;
   const pressedFrom = toOklch(signalFill);
 
   return {
     ...mapped,
     mode,
+    backdrop: onImage ? 'image' : 'canvas',
+    backdropScrim: scrimColor(mapped.bg, backdropAlpha),
     accentPressed: fromOklch({...pressedFrom, L: pressedFrom.L - 0.0887}),
     accentSurfaceStrong: mixOklab(mapped.accentSurface, signalFill, 0.25),
     warnBorder: mixOklab(mapped.warnSurface, mapped.warn, 0.35),

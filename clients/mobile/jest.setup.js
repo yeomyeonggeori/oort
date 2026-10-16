@@ -182,6 +182,12 @@ jest.mock('expo-file-system', () => {
     create() {
       directories.add(this.uri);
     }
+    delete() {
+      directories.delete(this.uri);
+      for (const uri of [...files]) {
+        if (uri.startsWith(`${this.uri}/`)) files.delete(uri);
+      }
+    }
     list() {
       return [...files]
         .filter(uri => uri.startsWith(`${this.uri}/`))
@@ -201,6 +207,12 @@ jest.mock('expo-file-system', () => {
     }
     delete() {
       files.delete(this.uri);
+    }
+    move(destination) {
+      files.delete(this.uri);
+      files.add(destination.uri);
+      state.sizes.set(destination.uri, state.sizes.get(this.uri) ?? 0);
+      this.uri = destination.uri;
     }
     static async downloadFileAsync(url, destination, options = {}) {
       state.downloads.push({url, destination, options});
@@ -232,17 +244,20 @@ jest.mock('expo-file-system', () => {
   }
 
   const cache = new Directory('file:///cache');
+  const documentDirectory = new Directory('file:///document');
+  directories.add('file:///document');
   return {
     Directory,
     File,
     UploadType: {BINARY_CONTENT: 0, MULTIPART: 1},
-    Paths: {cache},
+    Paths: {cache, document: documentDirectory},
     __files: files,
     __state: state,
     __reset: () => {
       files.clear();
       directories.clear();
       directories.add('file:///cache');
+      directories.add('file:///document');
       state.downloads.length = 0;
       state.uploads.length = 0;
       state.failure = null;
@@ -287,6 +302,25 @@ jest.mock('expo-image-picker', () => {
     getMediaLibraryPermissionsAsync: jest.fn(async () => state.permission),
   };
 });
+
+// 내 사진 배경(ADR-0189 증보 2)의 줄이기. 시험은 `PhotoPorts` 를 바꿔 끼우므로 이 목은
+// 모듈이 import 만 되게 하는 용도다.
+jest.mock('expo-image-manipulator', () => ({
+  SaveFormat: {JPEG: 'jpeg', PNG: 'png'},
+  ImageManipulator: {
+    manipulate: jest.fn(() => {
+      const context = {
+        resize: () => context,
+        renderAsync: async () => ({
+          width: 1,
+          height: 1,
+          saveAsync: async () => ({uri: 'file:///cache/shrunk.jpg', width: 1, height: 1}),
+        }),
+      };
+      return context;
+    }),
+  },
+}));
 
 jest.mock('expo-document-picker', () => {
   const state = {result: {canceled: true, assets: null}, failure: null};

@@ -41,6 +41,7 @@ import {
   type TextInput,
 } from 'react-native';
 import {NoticeBlock, Screen} from '../design/atoms';
+import {AppBackground} from '../design/background/AppBackground';
 import type {
   AiConnectLine,
   Command,
@@ -1640,6 +1641,8 @@ export default function ConversationScreen({
 
   return (
     <Screen style={styles.screen}>
+      {/* 사용자 배경(ADR-0189 증보 2) — 꺼져 있으면 아무것도 그리지 않는다. */}
+      <AppBackground />
       {/* 시안 A `.a-hd` + owner 표(DS2-4 #2716). 고정 목록의 문(이슈 #1112)은 머리
           오른쪽 글자 링크에서 ⋮ 메뉴로 옮겼다 — 고정이 하나도 없어도 메뉴 항목은
           남는다(처음 고정하는 사람이 목록이 어디 있는지 배울 자리, 그때 열리는
@@ -1975,9 +1978,13 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    */
   screen: {
     paddingTop: 0,
-    experimental_backgroundImage: `linear-gradient(180deg, ${color.canvasTop} 0%, ${
-      color.mode === 'light' ? color.surface : color.bg
-    } 25%)`,
+    ...(color.backdrop === 'image'
+      ? {backgroundColor: color.bg}
+      : {
+          experimental_backgroundImage: `linear-gradient(180deg, ${color.canvasTop} 0%, ${
+            color.mode === 'light' ? color.surface : color.bg
+          } 25%)`,
+        }),
   },
   /**
    * 중단의 결과 한 줄. 활동 줄과 입력창 사이, 방금 누른 버튼 바로 아래다 —
