@@ -28,6 +28,7 @@ import {
 } from '@momo/core/design/color';
 import {ELEVATION, GLASS_FALLBACK_OPACITY} from '@momo/core/design/themes';
 import {DEFAULT_THEME_ID, ds2Roles, type Mode, type ThemeId} from './ds2Tokens';
+import type {SignalValues} from '@momo/core/design/signal';
 
 /** iOS HIG minimum tappable edge, in points. Not negotiable per-screen. */
 export const TOUCH_TARGET = 44;
@@ -149,6 +150,13 @@ export function slopTo(size: number): number {
  * 타입이 진다 — 한쪽에만 있는 색은 컴파일되지 않는다.
  */
 export interface Palette {
+  /**
+   * 이 팔레트가 서 있는 모드(라이트·다크). 색이 아니라 **분기용 사실**이다 — 모드마다
+   * 갈라지는 몇 안 되는 자리(대화 바닥의 두 번째 정지점)가 팔레트 객체의 동일성을
+   * 비교하던 것을 이 값으로 바꾼다. 테마가 셋이 되면서 「라이트 팔레트」는 하나가
+   * 아니다.
+   */
+  mode: Mode;
   /** App background. */
   bg: string;
   /** Raised surface: cards, rows, the tab bar. 언제나 `bg` 보다 한 단 위다. */
@@ -386,8 +394,15 @@ function lower(hex: string): string {
   return normalizeHex(hex);
 }
 
-/** 한 테마 × 모드의 core 표에서 폰 팔레트를 만든다. */
-export function paletteFrom(theme: ThemeId, mode: Mode): Palette {
+/**
+ * 한 테마 × 모드의 core 표에서 폰 팔레트를 만든다.
+ *
+ * `signal` 을 주면 core `resolveSignal` 이 보정한 신호 네 값이 표의 신호를 **덮는다**
+ * (ADR-0189 D3: 커스텀은 `signal` 네 값만 바꾼다). 덮는 자리는 `accent` 계열 네 역할
+ * 뿐이고 `primary`(잉크)는 그대로다. 파생 역할(`accentPressed`·`accentSurfaceStrong`)은
+ * 덮은 뒤의 값에서 계산되므로 따로 손대지 않는다.
+ */
+export function paletteFrom(theme: ThemeId, mode: Mode, signal?: SignalValues | null): Palette {
   const roles = ds2Roles(theme, mode);
   const role = (name: string): string => {
     const value = roles[name];
@@ -398,17 +413,24 @@ export function paletteFrom(theme: ThemeId, mode: Mode): Palette {
   for (const [key, coreRole] of Object.entries(DS2_ROLE_MAP)) {
     mapped[key as keyof typeof DS2_ROLE_MAP] = lower(role(coreRole));
   }
-  const signal = mapped.accent;
+  if (signal) {
+    mapped.accent = lower(signal.signal);
+    mapped.accentText = lower(signal['signal-text']);
+    mapped.accentSurface = lower(signal['signal-soft']);
+    mapped.onAccent = lower(signal['on-signal']);
+  }
+  const signalFill = mapped.accent;
   const onPrimary = mapped.onPrimary;
   const ink = mapped.text;
   const bestInk = (fill: string) =>
     contrast(onPrimary, fill) >= contrast(ink, fill) ? onPrimary : ink;
-  const pressedFrom = toOklch(signal);
+  const pressedFrom = toOklch(signalFill);
 
   return {
     ...mapped,
+    mode,
     accentPressed: fromOklch({...pressedFrom, L: pressedFrom.L - 0.0887}),
-    accentSurfaceStrong: mixOklab(mapped.accentSurface, signal, 0.25),
+    accentSurfaceStrong: mixOklab(mapped.accentSurface, signalFill, 0.25),
     warnBorder: mixOklab(mapped.warnSurface, mapped.warn, 0.35),
     onWarn: bestInk(mapped.warn),
     dangerBorder: mixOklab(mapped.dangerSurface, mapped.danger, 0.35),

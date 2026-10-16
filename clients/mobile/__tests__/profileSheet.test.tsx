@@ -225,7 +225,7 @@ describe('프로필 시트', () => {
 
   it('테마 줄이 선택지를 열고, 고른 것이 저장되며 줄의 값이 바뀐다', async () => {
     await openSheet();
-    expect(screen.getByTestId('profile-theme-row')).toHaveTextContent(/시스템/);
+    expect(screen.getByTestId('profile-theme-row')).toHaveTextContent(/새벽하늘 · 시스템/);
     // 선택지는 줄을 누르기 전에는 없다.
     expect(screen.queryByTestId('theme-control')).toBeNull();
 
@@ -233,7 +233,7 @@ describe('프로필 시트', () => {
     expect(screen.getByTestId('theme-control')).toBeTruthy();
     fireEvent.press(screen.getByTestId('theme-dark'));
 
-    expect(mmkvStore.get(NON_SECRET_KEYS.themeChoice)).toBe('dark');
+    expect(JSON.parse(mmkvStore.get(NON_SECRET_KEYS.appearance) ?? '{}').scheme).toBe('dark');
     expect(screen.getByTestId('theme-dark').props.accessibilityState?.selected).toBe(
       true,
     );

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contrast, hueGap, oklabDistance, toOklch } from "./color";
+import { contrast, fromOklch, hueGap, oklabDistance, toOklch } from "./color";
 import {
   SIGNAL_PRESETS,
   SIGNAL_PRESET_IDS,
@@ -36,6 +36,8 @@ function violations(result: SignalResult, t: ThemeModeTokens): string[] {
   }
   if (oklabDistance(v.signal, c.agent) < 0.07) out.push("near-agent");
   if (oklabDistance(v.signal, c.danger) < 0.07) out.push("near-danger");
+  if (oklabDistance(v["signal-text"], c.agent) < 0.07) out.push("text-near-agent");
+  if (oklabDistance(v["signal-text"], c.danger) < 0.07) out.push("text-near-danger");
   for (const hex of Object.values(v)) {
     if (["#ffffff", "#000000"].includes(hex.toLowerCase())) out.push(`pure:${hex}`);
   }
@@ -199,5 +201,33 @@ describe("경계 입력", () => {
       expect(message).not.toMatch(/\n/);
       expect(message).not.toMatch(/—/);
     }
+  });
+});
+
+// DS2-7 planner 결정(#2735 M2): OKLab 0.07 구분 제한이 `signal-text`에도 걸린다.
+describe("signal-text 구분 제한 (#2735 M2)", () => {
+  it("보고된 사례 — 새벽하늘 라이트 #007799는 signal-text가 agent에 0.064라 거절된다", () => {
+    const result = resolveSignal("#007799", "dawnsky", "light");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("near-agent");
+  });
+
+  it("색상환을 훑어 수락된 모든 출력이 signal-text에서도 agent·danger와 0.07 이상이다", () => {
+    let accepted = 0;
+    for (const [theme, mode] of COMBOS) {
+      const t = THEMES[theme][mode];
+      for (let hue = 0; hue < 360; hue += 6) {
+        for (const chroma of [0.08, 0.16]) {
+          for (const lightness of [0.45, 0.7]) {
+            const hex = fromOklch({ L: lightness, C: chroma, h: hue });
+            const result = resolveSignal(hex, theme, mode);
+            if (!result.ok) continue;
+            accepted += 1;
+            expect(violations(result, t)).toEqual([]);
+          }
+        }
+      }
+    }
+    expect(accepted).toBeGreaterThan(500);
   });
 });

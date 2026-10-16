@@ -5,7 +5,7 @@ import {SafeAreaProvider} from 'react-native-safe-area-context';
 import {bootSpawnPort} from './src/boot/spawnPort';
 import {PrimaryButton} from './src/design/atoms';
 import {font, SAFE_GUTTER, space, type Palette} from './src/design/tokens';
-import {ThemeProvider, usePalette, useStyles, useTheme} from './src/design/theme';
+import {BrandAppearance, ThemeProvider, usePalette, useStyles, useTheme} from './src/design/theme';
 import {createQueryClient, installReactQueryBridges} from './src/query/queryClient';
 import ConnectScreen from './src/screens/ConnectScreen';
 import {RESTORE_UNREACHABLE_NOTICE} from './src/session/authGate';
@@ -106,7 +106,13 @@ function Gate(): React.JSX.Element {
     );
   }
   if (gate.kind === 'signedOut') {
-    return <ConnectScreen sessionExpired={gate.expired} />;
+    // 로그인 전 첫 화면은 테마 영향 밖이다(ADR-0174 D4 · #2719): 저장된 흑연·노을띠를
+    // 입지 않는다. 스킴(라이트·다크)만 사람의 선택을 따른다.
+    return (
+      <BrandAppearance>
+        <ConnectScreen sessionExpired={gate.expired} />
+      </BrandAppearance>
+    );
   }
   return <AppShell member={gate.member} />;
 }
