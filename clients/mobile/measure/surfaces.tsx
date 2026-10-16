@@ -4394,13 +4394,23 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     // #3924: 프로필 「알림」 묶음의 첫 줄 — 이 폰의 푸시 스위치 세 상태(켬 · 끔 · OS 거부).
     // 시트를 알림 묶음이 머리에 오도록 끌어올려 찍는다. iOS 의 답과 「껐다」는 기억은
     // `seedPush` 가 정한다 — 스위치·설명·잠김은 배송되는 `usePushSwitch` 가 그 값에서 그린다.
+    // `-ax` 두 판은 접근성 글자 크기(`simctl ui content_size accessibility-extra-extra-large`)용이다:
+    // 위쪽 줄들이 함께 커져 알림 묶음이 더 아래로 밀리므로 끌어올림이 다르다.
     case 'shell-profile-push-on':
     case 'shell-profile-push-off':
     case 'shell-profile-push-denied':
+    case 'shell-profile-push-off-ax':
+    case 'shell-profile-push-denied-ax':
       return (
         <Screen>
           <View style={{flex: 1, overflow: 'hidden'}}>
-            <View style={{marginTop: -PUSH_CAPTURE_SCROLL, height: 3000}}>
+            <View
+              style={{
+                marginTop: -(name.endsWith('-ax')
+                  ? PUSH_CAPTURE_SCROLL_AX
+                  : PUSH_CAPTURE_SCROLL),
+                height: 6000,
+              }}>
               <ProfilePage
                 workspaceId={HARNESS_MEMBER.workspaceId}
                 member={HARNESS_MEMBER}
@@ -5550,12 +5560,13 @@ function seedAi(surface: string): void {
 // 진짜 저장소에 적는다 — 하네스의 멤버 id 로 적히므로 이 기기에 로그인한 진짜 멤버의 스위치에는
 // 닿지 않는다(`pushOptOut.ts`). 켬·거부 판은 그 기억을 지워 두고 시작한다.
 /** `shell-profile-notify` 와 같은 끌어올림: 알림 묶음 머리가 화면 위쪽에 오게. */
-const PUSH_CAPTURE_SCROLL = 560;
+const PUSH_CAPTURE_SCROLL = 475;
+const PUSH_CAPTURE_SCROLL_AX = 1160;
 
 function seedPush(surface: string): void {
-  const denied = surface === 'shell-profile-push-denied';
+  const denied = surface.startsWith('shell-profile-push-denied');
   __setPermissionReader(async () => ({granted: !denied, canAskAgain: !denied}));
-  if (surface === 'shell-profile-push-off') {
+  if (surface.startsWith('shell-profile-push-off')) {
     setPushOptedOut(HARNESS_MEMBER.id, true);
   } else {
     clearPushOptOut();
