@@ -90,6 +90,27 @@ pub const ACTION_AGENT_PROFILE_UPDATE: &str = "agent.profile.update";
 /// stays `pairing_pending` and a human still confirms it (ADR-0186 증보 v3 V3-3).
 pub const ACTION_AGENT_INVITE: &str = "agent.invite";
 
+/// `workspace.unfurl.update` — turn the workspace's link previews on or off, as
+/// `PUT …/unfurl-settings` does (ADR-0201 증보 v2 H6-1). Team AI only.
+pub const ACTION_WORKSPACE_UNFURL_UPDATE: &str = "workspace.unfurl.update";
+
+/// `workspace.memory.update` — turn team memory **off** or pause/unpause it, as
+/// `PATCH …/memory/settings` does (ADR-0201 증보 v2 H6-1). Turning it **on** is not
+/// reachable from a card: switching it on sends channel text to a provider, so an
+/// admin reads the team notice (ADR-0196) in settings first. Team AI only.
+pub const ACTION_WORKSPACE_MEMORY_UPDATE: &str = "workspace.memory.update";
+
+/// `workspace.work_tier.update` — set the workspace's default work tier policy, as
+/// `PUT …/work-tier-policy` does (ADR-0201 증보 v2 H6-1). Team AI only.
+pub const ACTION_WORKSPACE_WORK_TIER_UPDATE: &str = "workspace.work_tier.update";
+
+/// `plugin.install` — install one official app into the workspace (ADR-0201 증보
+/// v2 H7). **Declared, not executable**: the install route (ADR-0113 P3) does not
+/// exist yet, so it sits in [`DECLARED_NOT_EXECUTABLE`] and a proposal makes no
+/// card. Its contract is fixed here so the slice that opens it (#3889) only moves
+/// it into [`ACTIONS`].
+pub const ACTION_PLUGIN_INSTALL: &str = "plugin.install";
+
 /// What a person is consenting to when they approve (ADR-0186 D3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Risk {
@@ -159,21 +180,68 @@ impl RequiredRole {
     ];
 }
 
+/// Who may **propose** an action (ADR-0201 증보 v2 H6).
+///
+/// Approval is unchanged by this: every action is decided by a person with the
+/// action's [`RequiredRole`]. What this narrows is which proposer may raise the
+/// card at all. The three settings actions the team AI gained in v2 were asked for
+/// the workspace's own helper, not for every external agent — 0186 V9 결재 3
+/// (「에이전트에게는 문구 2개만」) still holds for the Agent Port.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Proposers {
+    /// Any agent that may propose: the Agent Port's `oort_action_propose` and the
+    /// team AI (when the id is also on [`TEAM_AI_ACTION_IDS`]).
+    Any,
+    /// Only the workspace's team AI (`workspace_action_propose` in the worker).
+    /// The Agent Port refuses the id exactly as it refuses an unknown one.
+    TeamAiOnly,
+}
+
+/// Which door a proposal came through, judged against [`WorkspaceAction::proposers`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProposalDoor {
+    /// `oort_action_propose` — a hosted (external) agent.
+    AgentPort,
+    /// `workspace_action_propose` — the workspace's team AI ("oort 도우미").
+    TeamAi,
+}
+
+impl WorkspaceAction {
+    /// May a proposal through `door` name this action?
+    pub fn proposable_through(&self, door: ProposalDoor) -> bool {
+        match (self.proposers, door) {
+            (Proposers::Any, _) => true,
+            (Proposers::TeamAiOnly, ProposalDoor::TeamAi) => true,
+            (Proposers::TeamAiOnly, ProposalDoor::AgentPort) => false,
+        }
+    }
+}
+
 /// How many `workspace_action` approvals one agent may have `pending` at once
 /// (ADR-0186 증보 V1-e). A run parks on each proposal, so ordinary use never
 /// reaches it; it exists so a misbehaving agent cannot stack cards by re-calling
 /// `oort_action_propose` from several runs.
 pub const MAX_PENDING_WORKSPACE_ACTIONS: i64 = 3;
 
-/// ADR-0201 D3 v1: the four actions the workspace's team AI may propose. Lives here
-/// (not in the proposal crate) because the team AI's tool schema, built in
-/// `tools.rs`, publishes it as the `actionId` enum — the model is never told an id
-/// the server refuses. A new id here is an ADR amendment, not a code change.
-pub const TEAM_AI_ACTION_IDS: [&str; 4] = [
+/// The actions the workspace's team AI may propose: ADR-0201 D3 v1's four, plus
+/// ADR-0201 증보 v2 H6-1's four (`workspace.settings.update` opened to the helper,
+/// and the three helper-only settings actions). Lives here (not in the proposal
+/// crate) because the team AI's tool schema, built in `tools.rs`, publishes it as
+/// the `actionId` enum — the model is never told an id the server refuses. A new
+/// id here is an ADR amendment, not a code change.
+///
+/// Still outside (H6-2): `invite.create` and `agent.invite` (one-time secrets),
+/// `hosted.channels.grant` (widens access), and everything declared but not
+/// executable (`plugin.install` until its route exists).
+pub const TEAM_AI_ACTION_IDS: [&str; 8] = [
     ACTION_AGENT_PROFILE_UPDATE,
     ACTION_AGENT_RENAME,
     ACTION_CHANNEL_CREATE,
     ACTION_CHANNEL_MEMBER_ADD,
+    ACTION_WORKSPACE_SETTINGS_UPDATE,
+    ACTION_WORKSPACE_UNFURL_UPDATE,
+    ACTION_WORKSPACE_MEMORY_UPDATE,
+    ACTION_WORKSPACE_WORK_TIER_UPDATE,
 ];
 
 /// Whether an action's one-time secret may go to the **proposing agent** instead
@@ -271,6 +339,8 @@ pub struct WorkspaceAction {
     /// (ADR-0186 증보 v3 V3-3a/V3-4). Everything is [`SecretDelivery::None`]
     /// until the slice that implements the claim flips its own action.
     pub secret_delivery: SecretDelivery,
+    /// Which proposers may raise this card (ADR-0201 증보 v2 H6).
+    pub proposers: Proposers,
     /// What approving this executes, as a verb phrase. Only used to build
     /// [`proposal_summary`]; it lives here so a new action cannot be added
     /// without writing the sentence a person reads before consenting.
@@ -558,6 +628,116 @@ fn hosted_channels_grant_args_schema() -> Value {
 /// A channel reference: `#` + the 80-character name.
 pub const CHANNEL_REF_MAX_BYTES: u64 = 81;
 
+/// `workspace.unfurl.update` arguments (ADR-0201 증보 v2 H6-1): the one switch
+/// `PUT …/unfurl-settings` takes.
+fn workspace_unfurl_update_args_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["enabled"],
+        "properties": {
+            "enabled": {"type": "boolean"}
+        }
+    })
+}
+
+/// `workspace.memory.update` arguments (ADR-0201 증보 v2 H6-1): `enabled` may only
+/// be **false** (a card can turn team memory off, never on) and `paused` either
+/// way; at least one of the two.
+fn workspace_memory_update_args_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+            "enabled": {"type": "boolean", "const": false},
+            "paused": {"type": "boolean"}
+        }
+    })
+}
+
+/// The modes `PUT …/work-tier-policy` accepts (`momo_settings::validated_tier_mode`).
+pub const WORK_TIER_MODES: [&str; 3] = ["t1_only", "ask", "auto"];
+/// `autoTarget` in bytes: `cloud` or a work host id (a UUID is 36), with room.
+pub const WORK_TIER_AUTO_TARGET_MAX_BYTES: u64 = 64;
+
+/// `workspace.work_tier.update` arguments (ADR-0201 증보 v2 H6-1): the workspace
+/// default's `mode`, and `autoTarget` (`cloud` or a workspace-scoped work host id)
+/// exactly when `mode` is `auto` — the REST validator's cross-field rule.
+fn workspace_work_tier_update_args_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["mode"],
+        "properties": {
+            "mode": {"type": "string", "enum": WORK_TIER_MODES},
+            "autoTarget": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": WORK_TIER_AUTO_TARGET_MAX_BYTES
+            }
+        }
+    })
+}
+
+/// The official apps `plugin.install` may name, with the name a sentence uses
+/// (ADR-0201 증보 v2 H7; the ids are ADR-0113 증보 P2's official four, held equal to
+/// the server's `routes::plugins::OFFICIAL_PLUGIN_IDS` by a drift test).
+pub const PLUGIN_INSTALL_PLUGINS: [(&str, &str); 4] = [
+    ("com.momo.plugins.github", "GitHub"),
+    ("com.momo.plugins.notion", "Notion"),
+    ("com.momo.plugins.linear", "Linear"),
+    ("com.momo.plugins.drive", "Google Drive"),
+];
+
+/// `plugin.install`'s decided contract (H7), published now so the slice that opens
+/// it (#3889) moves the id and nothing else: Admin decides, no one-time value.
+pub const PLUGIN_INSTALL_REQUIRED_ROLE: RequiredRole = RequiredRole::Admin;
+pub const PLUGIN_INSTALL_SECRET_DELIVERY: SecretDelivery = SecretDelivery::None;
+/// What approving it will do. Tokens stay on the agent host (ADR-0113 D1-A).
+pub const PLUGIN_INSTALL_EFFECT: &str =
+    "워크스페이스에 표시된 앱을 설치해요. 토큰은 oort에 저장하지 않아요";
+
+/// `plugin.install` arguments (H7): one official plugin id.
+pub fn plugin_install_args_schema() -> Value {
+    let ids: Vec<&str> = PLUGIN_INSTALL_PLUGINS.iter().map(|(id, _)| *id).collect();
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["pluginId"],
+        "properties": {
+            "pluginId": {"type": "string", "enum": ids}
+        }
+    })
+}
+
+/// The name a sentence uses for an official plugin id, `None` for any other id.
+pub fn plugin_install_label(plugin_id: &str) -> Option<&'static str> {
+    PLUGIN_INSTALL_PLUGINS
+        .iter()
+        .find(|(id, _)| *id == plugin_id)
+        .map(|(_, label)| *label)
+}
+
+/// What the team AI says when asked to install an app while no install route
+/// exists (H7): no card, the honest line. It is built from the declared row's own
+/// `unavailable_reason`, so the catalog (`GET …/actions`) and the helper cannot
+/// give two different reasons. An id outside the official four (or no id) gets
+/// the same answer without a name — the line never repeats a string the model or
+/// a person typed.
+pub fn plugin_install_unavailable_line(args: &Value) -> String {
+    let reason = declared_action(ACTION_PLUGIN_INSTALL)
+        .map(|declared| declared.unavailable_reason)
+        .unwrap_or("아직 설치 경로가 없어요.");
+    let subject = args
+        .get("pluginId")
+        .and_then(Value::as_str)
+        .and_then(plugin_install_label)
+        .map(|label| format!("{label} 앱은"))
+        .unwrap_or_else(|| "앱은".to_string());
+    format!("{subject} {reason} 준비되면 설치 카드를 띄울게요.")
+}
+
 /// The complete registry. Order is the catalog's order.
 pub const ACTIONS: &[WorkspaceAction] = &[
     WorkspaceAction {
@@ -567,6 +747,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         risk: Risk::Approval,
         required_role: RequiredRole::Admin,
         secret_delivery: SecretDelivery::Always,
+        proposers: Proposers::Any,
         effect: "초대 링크를 만들어요",
         args_schema: invite_create_args_schema,
     },
@@ -577,6 +758,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         risk: Risk::Approval,
         required_role: RequiredRole::Admin,
         secret_delivery: SecretDelivery::None,
+        proposers: Proposers::Any,
         effect: "채널을 만들고, 표시된 대로 이 에이전트와 멤버를 그 채널에 넣어요",
         args_schema: channel_create_args_schema,
     },
@@ -587,6 +769,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         risk: Risk::Approval,
         required_role: RequiredRole::Admin,
         secret_delivery: SecretDelivery::None,
+        proposers: Proposers::Any,
         effect: "표시된 멤버를 그 채널에 넣어요",
         args_schema: channel_member_add_args_schema,
     },
@@ -597,6 +780,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         risk: Risk::Approval,
         required_role: RequiredRole::AgentEditor,
         secret_delivery: SecretDelivery::None,
+        proposers: Proposers::Any,
         effect: "대상 에이전트의 표시 이름을 바꿔요",
         args_schema: agent_rename_args_schema,
     },
@@ -607,6 +791,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         risk: Risk::Approval,
         required_role: RequiredRole::Admin,
         secret_delivery: SecretDelivery::None,
+        proposers: Proposers::Any,
         effect: "이 에이전트의 연결이 표시된 채널을 읽고 쓸 수 있게 해요",
         args_schema: hosted_channels_grant_args_schema,
     },
@@ -617,6 +802,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         risk: Risk::Approval,
         required_role: RequiredRole::WorkspaceOperator,
         secret_delivery: SecretDelivery::None,
+        proposers: Proposers::Any,
         effect: "표시된 설정(환영 문구·역할 이름)을 바꿔요",
         args_schema: workspace_settings_update_args_schema,
     },
@@ -627,6 +813,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         risk: Risk::Approval,
         required_role: RequiredRole::AgentEditor,
         secret_delivery: SecretDelivery::None,
+        proposers: Proposers::Any,
         effect: "대상 에이전트의 프로필(표시된 항목)을 바꿔요",
         args_schema: agent_profile_update_args_schema,
     },
@@ -638,8 +825,42 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         required_role: RequiredRole::Admin,
         // The approver chooses at decision time (`deliverSecretToAgent`, default off).
         secret_delivery: SecretDelivery::OptIn,
+        proposers: Proposers::Any,
         effect: "표시된 이름의 새 에이전트를 만들고, 승인한 사람이 소유자가 돼요",
         args_schema: agent_invite_args_schema,
+    },
+    WorkspaceAction {
+        id: ACTION_WORKSPACE_UNFURL_UPDATE,
+        title: "링크 미리보기 켜고 끄기",
+        summary: "워크스페이스 메시지의 링크 미리보기를 켜거나 꺼요.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::WorkspaceOperator,
+        secret_delivery: SecretDelivery::None,
+        proposers: Proposers::TeamAiOnly,
+        effect: "워크스페이스의 링크 미리보기를 표시된 대로 바꿔요",
+        args_schema: workspace_unfurl_update_args_schema,
+    },
+    WorkspaceAction {
+        id: ACTION_WORKSPACE_MEMORY_UPDATE,
+        title: "팀 기억 끄기·멈추기",
+        summary: "워크스페이스의 팀 기억을 끄거나 잠시 멈춰요. 켜는 일은 설정 화면에서 해요.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::Admin,
+        secret_delivery: SecretDelivery::None,
+        proposers: Proposers::TeamAiOnly,
+        effect: "워크스페이스의 팀 기억을 표시된 대로 끄거나 멈춰요",
+        args_schema: workspace_memory_update_args_schema,
+    },
+    WorkspaceAction {
+        id: ACTION_WORKSPACE_WORK_TIER_UPDATE,
+        title: "작업 이어가기 방식 바꾸기",
+        summary: "호스트 연결이 끊겼을 때 작업을 어떻게 이어갈지, 워크스페이스 기본값을 바꿔요.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::Admin,
+        secret_delivery: SecretDelivery::None,
+        proposers: Proposers::TeamAiOnly,
+        effect: "워크스페이스 기본 작업 이어가기 방식을 표시된 대로 바꿔요",
+        args_schema: workspace_work_tier_update_args_schema,
     },
 ];
 
@@ -675,12 +896,45 @@ pub const DECLARED_NOT_EXECUTABLE: &[DeclaredAction] = &[
         summary: "한 멤버의 워크스페이스 역할을 바꿉니다.",
         unavailable_reason: "다음 배치에서 열립니다.",
     },
+    // ADR-0201 증보 v2 H7: the contract is fixed (`plugin_install_args_schema`,
+    // `PLUGIN_INSTALL_REQUIRED_ROLE`), the route is not (ADR-0113 P3, #3889). Until
+    // it lands a proposal makes no card — never a card whose executor always fails.
+    DeclaredAction {
+        id: ACTION_PLUGIN_INSTALL,
+        title: "앱 설치",
+        summary: "공식 앱 하나를 워크스페이스에 설치해요. 토큰은 oort에 저장하지 않아요.",
+        unavailable_reason: "아직 설치 경로가 없어요.",
+    },
 ];
+
+/// The declared row for `id`, if it is declared but not executable.
+pub fn declared_action(id: &str) -> Option<&'static DeclaredAction> {
+    DECLARED_NOT_EXECUTABLE
+        .iter()
+        .find(|declared| declared.id == id)
+}
 
 /// The registry's ids, in catalog order. The propose schema's enum and the
 /// OpenAPI enum are measured against exactly this.
 pub fn action_ids() -> Vec<&'static str> {
     ACTIONS.iter().map(|action| action.id).collect()
+}
+
+/// The ids a proposal through `door` may name, in catalog order. The Agent Port's
+/// `oort_action_propose` enum is measured against the [`ProposalDoor::AgentPort`]
+/// list; [`TEAM_AI_ACTION_IDS`] is a subset of the [`ProposalDoor::TeamAi`] one.
+pub fn proposable_action_ids(door: ProposalDoor) -> Vec<&'static str> {
+    ACTIONS
+        .iter()
+        .filter(|action| action.proposable_through(door))
+        .map(|action| action.id)
+        .collect()
+}
+
+/// The action `id` names **if a proposal through `door` may raise it**, or `None`.
+/// A team-AI-only id through the Agent Port answers exactly like an unknown id.
+pub fn proposable_action_by_id(id: &str, door: ProposalDoor) -> Option<&'static WorkspaceAction> {
+    action_by_id(id).filter(|action| action.proposable_through(door))
 }
 
 /// The action `id` names, or `None`.
@@ -933,6 +1187,146 @@ pub fn workspace_settings_result_body(labels: &[&str]) -> String {
 /// `audit_log.action` of a settings write — the REST route's own name.
 pub const AUDIT_WORKSPACE_SETTING_UPDATED: &str = "workspace_setting.updated";
 pub const AUDIT_WORKSPACE_SETTING_UPDATED_SCHEMA: &str = "momo.workspace_setting.updated.v1";
+
+// ---------------------------------------------------------------------------
+// ADR-0201 증보 v2 H6-1 — the three helper-only settings actions
+// ---------------------------------------------------------------------------
+
+/// `audit_log.action` / schema each new executor writes: the REST route's own
+/// (`PUT …/unfurl-settings`, `PATCH …/memory/settings`, `PUT …/work-tier-policy`),
+/// with `via_agent` and `approval_id` added to the detail.
+pub const AUDIT_UNFURL_SETTING_UPDATED: &str = "unfurl_setting.updated";
+pub const AUDIT_UNFURL_SETTING_UPDATED_SCHEMA: &str = "momo.unfurl_setting.updated.v1";
+pub const AUDIT_MEMORY_SETTINGS_UPDATED: &str = "memory.settings.updated";
+pub const AUDIT_MEMORY_SETTINGS_UPDATED_SCHEMA: &str = "momo.memory.settings.updated.v1";
+pub const AUDIT_WORK_TIER_POLICY_CHANGED: &str = "work.tier_policy.changed";
+pub const AUDIT_WORK_TIER_POLICY_CHANGED_SCHEMA: &str = "momo.work_tier_policy.changed.v1";
+
+fn on_off(enabled: bool) -> &'static str {
+    if enabled {
+        "켜짐"
+    } else {
+        "꺼짐"
+    }
+}
+
+/// The `workspace.unfurl.update` card row: 「링크 미리보기: 켜짐 → 꺼짐」.
+pub fn unfurl_update_rows(before: bool, after: bool) -> Vec<Value> {
+    vec![action_row(
+        "링크 미리보기",
+        format!("{} → {}", on_off(before), on_off(after)),
+    )]
+}
+
+/// The outcome line of `workspace.unfurl.update`.
+pub fn unfurl_update_result_body(after: bool) -> String {
+    format!("링크 미리보기를 {}어요", if after { "켰" } else { "껐" })
+}
+
+/// How a team-memory pause reads.
+fn paused_word(paused: bool) -> &'static str {
+    if paused {
+        "멈춤"
+    } else {
+        "다시 시작"
+    }
+}
+
+/// The `workspace.memory.update` card rows, from the arguments alone.
+///
+/// No 「현재 → 」 half, on purpose: the team AI proposes from the agent worker,
+/// whose database role is barred from every `mem_*` table (migration 101, ADR-0196
+/// D6-6), so the proposal cannot read the current switch — and the card and the
+/// decision must be drawn from the same reads. The outcome card, written by the
+/// approver's own transaction, shows before → after.
+pub fn memory_update_rows(enabled: Option<bool>, paused: Option<bool>) -> Vec<Value> {
+    let mut rows = Vec::new();
+    if enabled == Some(false) {
+        rows.push(action_row("팀 기억", "끄기 — 새 요약을 만들지 않아요"));
+    }
+    if let Some(paused) = paused {
+        rows.push(action_row("팀 기억 멈춤", paused_word(paused)));
+    }
+    rows
+}
+
+/// The `workspace.memory.update` result rows: what the switch was and is now.
+pub fn memory_update_result_rows(
+    before: (bool, bool),
+    after: (bool, bool),
+    enabled_touched: bool,
+    paused_touched: bool,
+) -> Vec<Value> {
+    let mut rows = Vec::new();
+    if enabled_touched {
+        rows.push(action_row(
+            "팀 기억",
+            format!("{} → {}", on_off(before.0), on_off(after.0)),
+        ));
+    }
+    if paused_touched {
+        rows.push(action_row(
+            "팀 기억 멈춤",
+            format!(
+                "{} → {}",
+                if before.1 { "멈춤" } else { "진행" },
+                if after.1 { "멈춤" } else { "진행" }
+            ),
+        ));
+    }
+    rows
+}
+
+/// The outcome line of `workspace.memory.update`.
+pub fn memory_update_result_body(enabled: Option<bool>, paused: Option<bool>) -> String {
+    match (enabled, paused) {
+        (Some(false), _) => "팀 기억을 껐어요".to_string(),
+        (_, Some(true)) => "팀 기억을 멈췄어요".to_string(),
+        _ => "팀 기억을 다시 시작했어요".to_string(),
+    }
+}
+
+/// How a work tier mode reads — the web client's labels
+/// (`packages/momo-core/src/features/settings/model.ts` `WORK_TIER_MODES`).
+pub fn work_tier_mode_label(mode: &str) -> &'static str {
+    match mode {
+        "t1_only" => "처음 시작한 호스트에서만",
+        "ask" => "연결 끊김 시 묻기",
+        "auto" => "자동 재개",
+        _ => "알 수 없음",
+    }
+}
+
+/// The `workspace.work_tier.update` card row: mode (and target) before → after.
+/// `before_target`/`after_target` arrive already rendered by the server (a host's
+/// display name, quoted, or 「oort Cloud」).
+pub fn work_tier_update_rows(
+    before_mode: &str,
+    before_target: Option<&str>,
+    after_mode: &str,
+    after_target: Option<&str>,
+) -> Vec<Value> {
+    let side = |mode: &str, target: Option<&str>| match target {
+        Some(target) => format!("{} · {target}", work_tier_mode_label(mode)),
+        None => work_tier_mode_label(mode).to_string(),
+    };
+    vec![action_row(
+        "작업 이어가기",
+        format!(
+            "{} → {}",
+            side(before_mode, before_target),
+            side(after_mode, after_target)
+        ),
+    )]
+}
+
+/// The outcome line of `workspace.work_tier.update`.
+pub fn work_tier_update_result_body(after_mode: &str) -> String {
+    format!(
+        "작업 이어가기 방식을 바꿨어요: {}",
+        work_tier_mode_label(after_mode)
+    )
+}
 
 /// `ref.type` for a widened hosted connection (the connection's id).
 pub const REF_TYPE_HOSTED_CONNECTION: &str = "hosted_connection";
@@ -1437,7 +1831,10 @@ mod tests {
                 "hosted.channels.grant",
                 "workspace.settings.update",
                 "agent.profile.update",
-                "agent.invite"
+                "agent.invite",
+                "workspace.unfurl.update",
+                "workspace.memory.update",
+                "workspace.work_tier.update"
             ]
         );
         assert_eq!(
@@ -1445,7 +1842,158 @@ mod tests {
                 .iter()
                 .map(|declared| declared.id)
                 .collect::<Vec<_>>(),
-            vec!["webhook.create", "member.role.set"]
+            vec!["webhook.create", "member.role.set", "plugin.install"]
+        );
+    }
+
+    /// ADR-0201 증보 v2 H6 / H13-A13·A14: the helper's list is exactly H6-1's eight,
+    /// every one executable; the three new settings actions are the only
+    /// team-AI-only rows, so the Agent Port's list is the eight v1 actions.
+    #[test]
+    fn the_team_ai_list_is_h6_and_only_the_new_settings_actions_are_helper_only() {
+        assert_eq!(
+            TEAM_AI_ACTION_IDS,
+            [
+                "agent.profile.update",
+                "agent.rename",
+                "channel.create",
+                "channel.member.add",
+                "workspace.settings.update",
+                "workspace.unfurl.update",
+                "workspace.memory.update",
+                "workspace.work_tier.update",
+            ]
+        );
+        for id in TEAM_AI_ACTION_IDS {
+            assert!(
+                proposable_action_by_id(id, ProposalDoor::TeamAi).is_some(),
+                "{id} must be proposable by the team AI"
+            );
+        }
+        // Secrets and access stay out (H6-2).
+        for banned in [
+            ACTION_INVITE_CREATE,
+            ACTION_AGENT_INVITE,
+            ACTION_HOSTED_CHANNELS_GRANT,
+            ACTION_PLUGIN_INSTALL,
+        ] {
+            assert!(!TEAM_AI_ACTION_IDS.contains(&banned), "{banned}");
+        }
+        let helper_only: Vec<&str> = ACTIONS
+            .iter()
+            .filter(|action| action.proposers == Proposers::TeamAiOnly)
+            .map(|action| action.id)
+            .collect();
+        assert_eq!(
+            helper_only,
+            [
+                ACTION_WORKSPACE_UNFURL_UPDATE,
+                ACTION_WORKSPACE_MEMORY_UPDATE,
+                ACTION_WORKSPACE_WORK_TIER_UPDATE
+            ]
+        );
+        assert_eq!(
+            proposable_action_ids(ProposalDoor::AgentPort),
+            vec![
+                "invite.create",
+                "channel.create",
+                "channel.member.add",
+                "agent.rename",
+                "hosted.channels.grant",
+                "workspace.settings.update",
+                "agent.profile.update",
+                "agent.invite"
+            ]
+        );
+        for id in helper_only {
+            assert!(
+                proposable_action_by_id(id, ProposalDoor::AgentPort).is_none(),
+                "{id} through the Agent Port must answer like an unknown id"
+            );
+            assert!(action_by_id(id).is_some(), "{id} is still in the catalog");
+        }
+        assert_eq!(proposable_action_ids(ProposalDoor::TeamAi), action_ids());
+    }
+
+    /// H6-1: the memory card can only turn memory OFF — `enabled` is `const:false`
+    /// in the published schema (the normaliser enforces it too).
+    #[test]
+    fn the_memory_schema_cannot_turn_memory_on() {
+        let schema = action_by_id(ACTION_WORKSPACE_MEMORY_UPDATE)
+            .expect("registered")
+            .args_schema();
+        assert_eq!(schema["properties"]["enabled"]["const"], json!(false));
+        assert_eq!(schema["minProperties"], json!(1));
+        let tier = action_by_id(ACTION_WORKSPACE_WORK_TIER_UPDATE)
+            .expect("registered")
+            .args_schema();
+        assert_eq!(tier["properties"]["mode"]["enum"], json!(WORK_TIER_MODES));
+        assert_eq!(tier["required"], json!(["mode"]));
+        let unfurl = action_by_id(ACTION_WORKSPACE_UNFURL_UPDATE)
+            .expect("registered")
+            .args_schema();
+        assert_eq!(unfurl["required"], json!(["enabled"]));
+    }
+
+    /// H7 / H13-A16 (text half): `plugin.install` is declared, not executable; its
+    /// contract is the official four with an Admin decider; and the helper's honest
+    /// line carries the catalog's own reason and never echoes an unknown id.
+    #[test]
+    fn plugin_install_is_a_declared_contract_with_an_honest_line() {
+        assert!(action_by_id(ACTION_PLUGIN_INSTALL).is_none());
+        let declared = declared_action(ACTION_PLUGIN_INSTALL).expect("declared");
+        assert_eq!(declared.unavailable_reason, "아직 설치 경로가 없어요.");
+        assert_eq!(PLUGIN_INSTALL_REQUIRED_ROLE, RequiredRole::Admin);
+        assert_eq!(PLUGIN_INSTALL_SECRET_DELIVERY, SecretDelivery::None);
+        let schema = plugin_install_args_schema();
+        assert_eq!(schema["additionalProperties"], json!(false));
+        assert_eq!(
+            schema["properties"]["pluginId"]["enum"],
+            json!([
+                "com.momo.plugins.github",
+                "com.momo.plugins.notion",
+                "com.momo.plugins.linear",
+                "com.momo.plugins.drive"
+            ])
+        );
+        let line = plugin_install_unavailable_line(&json!({"pluginId": "com.momo.plugins.github"}));
+        assert_eq!(
+            line,
+            "GitHub 앱은 아직 설치 경로가 없어요. 준비되면 설치 카드를 띄울게요."
+        );
+        let unknown =
+            plugin_install_unavailable_line(&json!({"pluginId": "evil.plugin <@everyone>"}));
+        assert!(unknown.contains("아직 설치 경로가 없어요"), "{unknown}");
+        assert!(!unknown.contains("evil"), "{unknown}");
+    }
+
+    /// The new cards say before → after in plain words, and the memory card names
+    /// only what the proposal changes.
+    #[test]
+    fn the_new_settings_cards_read_in_plain_words() {
+        assert_eq!(
+            unfurl_update_rows(true, false),
+            vec![action_row("링크 미리보기", "켜짐 → 꺼짐")]
+        );
+        assert_eq!(
+            memory_update_rows(Some(false), None),
+            vec![action_row("팀 기억", "끄기 — 새 요약을 만들지 않아요")]
+        );
+        assert_eq!(
+            memory_update_rows(None, Some(true)),
+            vec![action_row("팀 기억 멈춤", "멈춤")]
+        );
+        assert_eq!(
+            work_tier_update_rows("ask", None, "auto", Some("oort Cloud")),
+            vec![action_row(
+                "작업 이어가기",
+                "연결 끊김 시 묻기 → 자동 재개 · oort Cloud"
+            )]
+        );
+        assert_eq!(unfurl_update_result_body(false), "링크 미리보기를 껐어요");
+        assert_eq!(
+            memory_update_result_body(Some(false), Some(true)),
+            "팀 기억을 껐어요"
         );
     }
 

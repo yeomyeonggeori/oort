@@ -319,6 +319,22 @@ impl AgentWorker {
         if let Err(refusal) =
             team_ai::validate_pure(&action_id, &args, chrono::Utc::now().timestamp_millis())
         {
+            // ADR-0201 증보 v2 H7: an app install has no route yet — say so, no card.
+            if let ProposalRefusal::NotYetAvailable(line) = refusal {
+                return Some(
+                    self.team_ai_finish(
+                        job,
+                        payload,
+                        run_id,
+                        Some(line),
+                        json!({}),
+                        usage,
+                        &model,
+                        Ending::Answered,
+                    )
+                    .await,
+                );
+            }
             let reason = match refusal {
                 ProposalRefusal::NotAllowed => FallbackReason::OutOfScope,
                 _ => FallbackReason::CouldNotPropose,
@@ -414,6 +430,9 @@ impl AgentWorker {
                 }
                 ProposalRefusal::NoHumanRequester | ProposalRefusal::RunNotParkable => {
                     self.team_ai_close(job, payload, run_id, "team_ai_not_proposable").await
+                }
+                ProposalRefusal::NotYetAvailable(line) => {
+                    self.team_ai_finish(job, payload, run_id, Some(line), json!({}), None, &model, Ending::Answered).await
                 }
             }),
             Err(error) => Some(

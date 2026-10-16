@@ -1805,8 +1805,14 @@ async fn action_propose(
     // the same sealed `oort_jobs_claim` handle the lease verbs take.
     let raw_handle = required_str(args, "handle", 512)?.to_string();
     let action_id = required_str(args, "actionId", 128)?;
-    let action =
-        momo_agent::actions::action_by_id(action_id).ok_or(ToolFailure::InvalidArguments)?;
+    // ADR-0201 증보 v2 H6: a team-AI-only id through this door answers exactly as
+    // an unknown id does — before any argument is read — so an external agent can
+    // neither raise the helper's settings cards nor learn that they exist.
+    let action = momo_agent::actions::proposable_action_by_id(
+        action_id,
+        momo_agent::actions::ProposalDoor::AgentPort,
+    )
+    .ok_or(ToolFailure::InvalidArguments)?;
     let rationale = optional_str(args, "rationale", 280)?.map(str::to_string);
     let raw_args = args.get("args").cloned().unwrap_or_else(|| json!({}));
     // The pure half of the normaliser runs here, **before** a transaction opens,

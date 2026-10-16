@@ -388,7 +388,7 @@ pub fn system_prompt(roster: &Roster) -> String {
          할 수 있는 일은 두 가지뿐이야.\n\
          1) 사람이 직접 부탁한 간단한 워크스페이스 변경을 `{tool}` 도구로 제안하는 것. \
          제안은 승인 카드가 되고, 사람이 승인해야만 실행돼. 너는 아무것도 직접 바꾸지 못해. \
-         가능한 actionId는 `{ids}` 네 개뿐이야. 이 밖의 일(초대 링크, 권한, 웹훅, 이미지 아바타, \
+         가능한 actionId는 `{ids}`뿐이야. 이 밖의 일(초대 링크, 권한, 웹훅, 이미지 아바타, \
          코드·파일 작업, 여러 단계 작업, 조사, 긴 글)은 제안하지 말고 \"이건 다른 에이전트가 더 \
          잘해요\"라고 한 줄로 말해.\n\
          2) 아래 [데이터]에 있는 사실만으로 답할 수 있는 짧은 질문에 한두 문장으로 답하는 것. \
@@ -443,6 +443,17 @@ pub enum ProposalRefusal {
     TargetBusy,
     /// The run is no longer in a state that can be parked.
     RunNotParkable,
+    /// The action is declared but has no route yet (ADR-0201 증보 v2 H7:
+    /// `plugin.install`). No card is made; the person is told this sentence,
+    /// built by the registry from the declared row's own reason.
+    NotYetAvailable(String),
+}
+
+/// The honest answer for a declared-but-not-executable action the team AI is
+/// asked for, or `None` for any other id (H7: only `plugin.install` today).
+pub fn not_yet_available(action_id: &str, raw_args: &Value) -> Option<String> {
+    (action_id == actions::ACTION_PLUGIN_INSTALL && actions::declared_action(action_id).is_some())
+        .then(|| actions::plugin_install_unavailable_line(raw_args))
 }
 
 /// The provenance recorded on the approval and the audit row. **Ids, a model
@@ -580,10 +591,14 @@ pub async fn propose_in_tx(
     rationale: Option<&str>,
 ) -> Result<Result<ProposalOk, ProposalRefusal>, DbError> {
     let workspace_id = context.workspace_id;
+    if let Some(line) = not_yet_available(action_id, raw_args) {
+        return Ok(Err(ProposalRefusal::NotYetAvailable(line)));
+    }
     if !is_team_ai_action(action_id) {
         return Ok(Err(ProposalRefusal::NotAllowed));
     }
-    let Some(action) = actions::action_by_id(action_id) else {
+    let Some(action) = actions::proposable_action_by_id(action_id, actions::ProposalDoor::TeamAi)
+    else {
         return Ok(Err(ProposalRefusal::NotAllowed));
     };
     let judges_text_against_roster =
@@ -826,10 +841,14 @@ pub fn validate_pure(
     raw_args: &Value,
     now_ms: i64,
 ) -> Result<(), ProposalRefusal> {
+    if let Some(line) = not_yet_available(action_id, raw_args) {
+        return Err(ProposalRefusal::NotYetAvailable(line));
+    }
     if !is_team_ai_action(action_id) {
         return Err(ProposalRefusal::NotAllowed);
     }
-    let Some(action) = actions::action_by_id(action_id) else {
+    let Some(action) = actions::proposable_action_by_id(action_id, actions::ProposalDoor::TeamAi)
+    else {
         return Err(ProposalRefusal::NotAllowed);
     };
     action_resolve::validated_action_args(action, raw_args, now_ms)
@@ -972,22 +991,24 @@ pub fn delegate_client_msg_id(source_message_id: Option<Uuid>, agent: Uuid) -> U
 mod tests {
     use super::*;
 
-    /// Acceptance 1 (ADR-0201): the allow-list is exactly the four, each in the
-    /// registry, and nothing that returns a secret or widens access is in it.
+    /// ADR-0201 증보 v2 H13-A13 (was v1 acceptance 1): the allow-list is exactly
+    /// H6-1's eight, each in the registry, and nothing that returns a secret or
+    /// widens access is in it.
     #[test]
-    fn the_allow_list_is_the_four_and_excludes_secret_and_access_actions() {
+    fn the_allow_list_is_the_eight_and_excludes_secret_and_access_actions() {
         for id in TEAM_AI_ACTION_IDS {
             assert!(
                 actions::action_by_id(id).is_some(),
                 "{id} is not in the registry"
             );
         }
-        assert_eq!(TEAM_AI_ACTION_IDS.len(), 4);
+        assert_eq!(TEAM_AI_ACTION_IDS.len(), 8);
+        assert!(is_team_ai_action(actions::ACTION_WORKSPACE_SETTINGS_UPDATE));
         for banned in [
             actions::ACTION_INVITE_CREATE,
             actions::ACTION_AGENT_INVITE,
             actions::ACTION_HOSTED_CHANNELS_GRANT,
-            actions::ACTION_WORKSPACE_SETTINGS_UPDATE,
+            actions::ACTION_PLUGIN_INSTALL,
         ] {
             assert!(!is_team_ai_action(banned), "{banned} must not be allowed");
         }
@@ -1080,5 +1101,90 @@ mod tests {
             Err(ProposalRefusal::InvalidArguments)
         );
         assert!(validate_pure("channel.create", &json!({"name": "ideas"}), 0).is_ok());
+    }
+
+    /// H13-A13: the settings card keeps its two keys — the two keys 0186 V9 closed,
+    /// and any unknown key, are refused for the helper as for everyone; the new
+    /// actions refuse unknown keys too, and memory cannot be turned on (A14).
+    #[test]
+    fn the_pure_gate_refuses_unknown_and_closed_setting_keys() {
+        for args in [
+            json!({"allowedAgentModels": ["x"]}),
+            json!({"welcomeAgentMemberId": "00000000-0000-0000-0000-000000000001"}),
+            json!({"welcomePrompt": "hi", "teamAiFastPath": true}),
+            json!({"team_ai_fast_path": false}),
+        ] {
+            assert_eq!(
+                validate_pure("workspace.settings.update", &args, 0),
+                Err(ProposalRefusal::InvalidArguments),
+                "{args}"
+            );
+        }
+        assert!(validate_pure(
+            "workspace.settings.update",
+            &json!({"welcomePrompt": "안녕하세요"}),
+            0
+        )
+        .is_ok());
+        for (id, args) in [
+            (
+                "workspace.unfurl.update",
+                json!({"enabled": false, "bogus": 1}),
+            ),
+            ("workspace.unfurl.update", json!({})),
+            ("workspace.unfurl.update", json!({"enabled": "no"})),
+            ("workspace.memory.update", json!({"enabled": true})),
+            (
+                "workspace.memory.update",
+                json!({"enabled": false, "dailyTokenCap": 0}),
+            ),
+            ("workspace.memory.update", json!({})),
+            ("workspace.work_tier.update", json!({"mode": "always"})),
+            (
+                "workspace.work_tier.update",
+                json!({"mode": "ask", "autoTarget": "cloud"}),
+            ),
+            ("workspace.work_tier.update", json!({"mode": "auto"})),
+            (
+                "workspace.work_tier.update",
+                json!({"mode": "ask", "scope": "member"}),
+            ),
+        ] {
+            assert_eq!(
+                validate_pure(id, &args, 0),
+                Err(ProposalRefusal::InvalidArguments),
+                "{id} {args}"
+            );
+        }
+        for (id, args) in [
+            ("workspace.unfurl.update", json!({"enabled": false})),
+            ("workspace.memory.update", json!({"enabled": false})),
+            ("workspace.memory.update", json!({"paused": true})),
+            (
+                "workspace.work_tier.update",
+                json!({"mode": "auto", "autoTarget": "cloud"}),
+            ),
+            ("workspace.work_tier.update", json!({"mode": "t1_only"})),
+        ] {
+            assert!(validate_pure(id, &args, 0).is_ok(), "{id} {args}");
+        }
+    }
+
+    /// H7 / H13-A16 (pure half): asking for an app install answers with the honest
+    /// line — never `NotAllowed`'s generic hand-off, never a card.
+    #[test]
+    fn an_install_request_answers_that_the_route_does_not_exist_yet() {
+        let refused = validate_pure(
+            "plugin.install",
+            &json!({"pluginId": "com.momo.plugins.notion"}),
+            0,
+        );
+        let Err(ProposalRefusal::NotYetAvailable(line)) = refused else {
+            panic!("expected NotYetAvailable, got {refused:?}");
+        };
+        assert!(line.contains("아직 설치 경로가 없어요"), "{line}");
+        assert!(line.starts_with("Notion 앱은"), "{line}");
+        assert!(not_yet_available("webhook.create", &json!({})).is_none());
+        assert!(not_yet_available("channel.create", &json!({})).is_none());
     }
 }
