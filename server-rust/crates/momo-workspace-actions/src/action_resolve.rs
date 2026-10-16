@@ -149,6 +149,24 @@ pub enum ActionArgs {
         members: Vec<ResolvedMember>,
         already_in: Vec<Uuid>,
     },
+    /// `workspace.unfurl.update` (ADR-0201 증보 v2 H6-1). `before` is the switch as
+    /// [`resolve_action_in_tx`] found it (a missing row reads as on, ADR-0170 D4).
+    WorkspaceUnfurlUpdate { enabled: bool, before: Option<bool> },
+    /// `workspace.memory.update` (H6-1). `enabled` is `Some(false)` or `None` —
+    /// a card never turns team memory on. Nothing is resolved: the proposing
+    /// worker's role cannot read `mem_*` (migration 101), so the card is drawn
+    /// from the arguments alone and the executor reads the switch itself.
+    WorkspaceMemoryUpdate {
+        enabled: Option<bool>,
+        paused: Option<bool>,
+    },
+    /// `workspace.work_tier.update` (H6-1): the workspace default. `before` is the
+    /// stored `(mode, autoTarget)` as [`resolve_action_in_tx`] found it.
+    WorkspaceWorkTierUpdate {
+        mode: &'static str,
+        auto_target: Option<String>,
+        before: Option<(String, Option<String>)>,
+    },
     /// `agent.profile.update` (증보 v3 V3-2). `target` and `before` are filled by
     /// [`resolve_action_in_tx`]; `None` target handle = the proposer itself.
     AgentProfileUpdate {
@@ -349,6 +367,9 @@ pub fn validated_action_args_from(
         actions::ACTION_WORKSPACE_SETTINGS_UPDATE => workspace_settings_update_args(args),
         actions::ACTION_AGENT_PROFILE_UPDATE => agent_profile_update_args(args, origin),
         actions::ACTION_AGENT_INVITE => agent_invite_args(args),
+        actions::ACTION_WORKSPACE_UNFURL_UPDATE => workspace_unfurl_update_args(args),
+        actions::ACTION_WORKSPACE_MEMORY_UPDATE => workspace_memory_update_args(args),
+        actions::ACTION_WORKSPACE_WORK_TIER_UPDATE => workspace_work_tier_update_args(args),
         // Fail closed. A registry entry with no normaliser must be an error and
         // not an unvalidated passthrough — `every_action_has_a_normaliser` is
         // what makes this arm unreachable rather than merely unlikely.
@@ -709,6 +730,158 @@ pub fn settings_display(value: Option<&Value>) -> Option<String> {
         ),
         other => Some(other.to_string()),
     }
+}
+
+/// One required/optional boolean argument. `null` is **not** an omission here: a
+/// switch an approver reads must be one of two words, never a third.
+fn boolean_arg(
+    object: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<Option<bool>, ActionRejection> {
+    match object.get(key) {
+        None => Ok(None),
+        Some(Value::Bool(value)) => Ok(Some(*value)),
+        Some(_) => Err(ActionRejection::new("argument must be a boolean")),
+    }
+}
+
+/// `workspace.unfurl.update` (ADR-0201 증보 v2 H6-1): `{enabled}`, required — the
+/// body `PUT …/unfurl-settings` takes.
+pub fn workspace_unfurl_update_args(args: &Value) -> Result<ValidatedActionArgs, ActionRejection> {
+    let object = args
+        .as_object()
+        .ok_or_else(|| ActionRejection::new("action args must be an object"))?;
+    closed_keys(object, &["enabled"])?;
+    let enabled = boolean_arg(object, "enabled")?
+        .ok_or_else(|| ActionRejection::new("enabled is required"))?;
+    Ok(ValidatedActionArgs {
+        summary: None,
+        normalized: json!({ "enabled": enabled }),
+        rows: Vec::new(),
+        args: ActionArgs::WorkspaceUnfurlUpdate {
+            enabled,
+            before: None,
+        },
+    })
+}
+
+/// `workspace.memory.update` (H6-1): `{enabled?: false, paused?}`, one at least.
+/// `enabled: true` is refused here as well as by the published schema's
+/// `const:false` — turning team memory on sends channel text to a provider, and
+/// that is an admin's choice in settings after reading the team notice (ADR-0196).
+pub fn workspace_memory_update_args(args: &Value) -> Result<ValidatedActionArgs, ActionRejection> {
+    let object = args
+        .as_object()
+        .ok_or_else(|| ActionRejection::new("action args must be an object"))?;
+    closed_keys(object, &["enabled", "paused"])?;
+    let enabled = boolean_arg(object, "enabled")?;
+    let paused = boolean_arg(object, "paused")?;
+    if enabled == Some(true) {
+        return Err(ActionRejection::new(
+            "team memory cannot be turned on from a card",
+        ));
+    }
+    if enabled.is_none() && paused.is_none() {
+        return Err(ActionRejection::new("enabled or paused is required"));
+    }
+    let mut normalized = serde_json::Map::new();
+    if let Some(enabled) = enabled {
+        normalized.insert("enabled".into(), json!(enabled));
+    }
+    if let Some(paused) = paused {
+        normalized.insert("paused".into(), json!(paused));
+    }
+    Ok(ValidatedActionArgs {
+        summary: None,
+        normalized: Value::Object(normalized),
+        rows: actions::memory_update_rows(enabled, paused),
+        args: ActionArgs::WorkspaceMemoryUpdate { enabled, paused },
+    })
+}
+
+/// `workspace.work_tier.update` (H6-1): `{mode, autoTarget?}`, proved by the REST
+/// route's own validators (`validated_tier_mode`, `validated_auto_target` — the
+/// cross-field rule included). Whether the target host may serve the workspace is
+/// a database question and is asked by the resolver.
+pub fn workspace_work_tier_update_args(
+    args: &Value,
+) -> Result<ValidatedActionArgs, ActionRejection> {
+    let object = args
+        .as_object()
+        .ok_or_else(|| ActionRejection::new("action args must be an object"))?;
+    closed_keys(object, &["mode", "autoTarget"])?;
+    let raw_mode = match object.get("mode") {
+        Some(Value::String(mode)) => mode.as_str(),
+        _ => return Err(ActionRejection::new("mode is required")),
+    };
+    let mode = momo_settings::validated_tier_mode(raw_mode)
+        .map_err(|error| ActionRejection::new(error.to_string()))?;
+    let raw_target = optional_string(object, "autoTarget")?;
+    if raw_target
+        .is_some_and(|target| target.len() as u64 > actions::WORK_TIER_AUTO_TARGET_MAX_BYTES)
+    {
+        return Err(ActionRejection::new("autoTarget is out of range"));
+    }
+    let auto_target = momo_settings::validated_auto_target(raw_target, mode)
+        .map_err(|error| ActionRejection::new(error.to_string()))?;
+    let mut normalized = serde_json::Map::new();
+    normalized.insert("mode".into(), json!(mode));
+    if let Some(target) = &auto_target {
+        normalized.insert("autoTarget".into(), json!(target));
+    }
+    Ok(ValidatedActionArgs {
+        summary: None,
+        normalized: Value::Object(normalized),
+        rows: Vec::new(),
+        args: ActionArgs::WorkspaceWorkTierUpdate {
+            mode,
+            auto_target,
+            before: None,
+        },
+    })
+}
+
+/// The workspace's link-preview switch as stored: a missing row is **on**
+/// (ADR-0170 D4, `momo_unfurl::load_setting_in_tx`'s default). Read here rather
+/// than through `momo-unfurl` so this crate does not pull in its fetcher.
+pub async fn unfurl_enabled_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+) -> Result<bool, DbError> {
+    let stored: Option<bool> = momo_db::sqlx::query_scalar(
+        "SELECT enabled FROM workspace_unfurl_setting WHERE workspace_id = $1",
+    )
+    .bind(workspace_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(stored.unwrap_or(true))
+}
+
+/// How a work-tier target reads on a card: 「oort Cloud」, a work host's display
+/// name (quoted — it is user text), or 「(없는 호스트)」 for an id that names no
+/// host of this workspace any more.
+pub async fn work_tier_target_label_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    target: &str,
+) -> Result<String, DbError> {
+    if target == "cloud" {
+        return Ok("oort Cloud".to_string());
+    }
+    let Ok(host_id) = Uuid::parse_str(target) else {
+        return Ok("(없는 호스트)".to_string());
+    };
+    let name: Option<String> = momo_db::sqlx::query_scalar(
+        "SELECT display_name FROM work_host WHERE id = $1 AND workspace_id = $2",
+    )
+    .bind(host_id)
+    .bind(workspace_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(match name {
+        Some(name) => serde_json::to_string(&name).unwrap_or_default(),
+        None => "(없는 호스트)".to_string(),
+    })
 }
 
 pub fn hosted_channels_grant_args(args: &Value) -> Result<ValidatedActionArgs, ActionRejection> {
@@ -1627,6 +1800,78 @@ pub async fn resolve_action_with_origin_in_tx(
             validated.rows = rows;
             GateSubject::Workspace
         }
+        ActionArgs::WorkspaceUnfurlUpdate { enabled, before } => {
+            if !proposer_is_live_agent_in_tx(conn, workspace_id, proposer_member_id).await? {
+                return Ok(Err(ActionRejection::new("proposer is not an active agent")));
+            }
+            let current = unfurl_enabled_in_tx(conn, workspace_id).await?;
+            // A proposal that changes nothing is not a proposal.
+            if current == *enabled {
+                return Ok(Err(ActionRejection::new("nothing to change")));
+            }
+            *before = Some(current);
+            validated.rows = actions::unfurl_update_rows(current, *enabled);
+            GateSubject::Workspace
+        }
+        ActionArgs::WorkspaceMemoryUpdate { .. } => {
+            if !proposer_is_live_agent_in_tx(conn, workspace_id, proposer_member_id).await? {
+                return Ok(Err(ActionRejection::new("proposer is not an active agent")));
+            }
+            // The rows were drawn from the arguments by the normaliser; there is
+            // nothing in the workspace to resolve (see the variant's note).
+            GateSubject::Workspace
+        }
+        ActionArgs::WorkspaceWorkTierUpdate {
+            mode,
+            auto_target,
+            before,
+        } => {
+            if !proposer_is_live_agent_in_tx(conn, workspace_id, proposer_member_id).await? {
+                return Ok(Err(ActionRejection::new("proposer is not an active agent")));
+            }
+            let current = momo_settings::load_tier_policy(
+                conn,
+                workspace_id,
+                momo_settings::TierScope::Workspace,
+            )
+            .await?;
+            if current.mode == *mode && current.auto_target == *auto_target {
+                return Ok(Err(ActionRejection::new("nothing to change")));
+            }
+            // The REST route's registry check: the host must be live and
+            // workspace-scoped (`FOR SHARE`, so it cannot be revoked under us).
+            if momo_settings::tier_target_allowed(
+                conn,
+                workspace_id,
+                momo_settings::TierScope::Workspace,
+                auto_target.as_deref(),
+            )
+            .await?
+            .is_err()
+            {
+                return Ok(Err(ActionRejection::new("auto target is not available")));
+            }
+            let before_label = match &current.auto_target {
+                Some(target) => {
+                    Some(work_tier_target_label_in_tx(conn, workspace_id, target).await?)
+                }
+                None => None,
+            };
+            let after_label = match auto_target.as_deref() {
+                Some(target) => {
+                    Some(work_tier_target_label_in_tx(conn, workspace_id, target).await?)
+                }
+                None => None,
+            };
+            validated.rows = actions::work_tier_update_rows(
+                &current.mode,
+                before_label.as_deref(),
+                mode,
+                after_label.as_deref(),
+            );
+            *before = Some((current.mode, current.auto_target));
+            GateSubject::Workspace
+        }
         ActionArgs::HostedChannelsGrant {
             channel_refs,
             connection,
@@ -1981,6 +2226,13 @@ pub async fn resolve_action_with_origin_in_tx(
             "avatar": avatar_pin(avatar),
         }),
         ActionArgs::InviteCreate { .. } => Value::Null,
+        // What the card said 「현재」 was: a switch flipped in between re-asks.
+        ActionArgs::WorkspaceUnfurlUpdate { before, .. } => json!({"enabled": before}),
+        ActionArgs::WorkspaceMemoryUpdate { .. } => Value::Null,
+        ActionArgs::WorkspaceWorkTierUpdate { before, .. } => json!({
+            "mode": before.as_ref().map(|(mode, _)| mode.clone()),
+            "autoTarget": before.as_ref().and_then(|(_, target)| target.clone()),
+        }),
         ActionArgs::AgentInvite { handle, .. } => json!({"handle": handle}),
         ActionArgs::ChannelCreate { members, .. } => {
             json!({"members": members.iter().map(|m| m.id.to_string()).collect::<Vec<_>>()})

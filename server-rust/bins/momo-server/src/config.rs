@@ -77,6 +77,8 @@ pub struct Config {
     /// 설정 표면 settings (B4.2) — provider master key, the env provider tier,
     /// and the instance-operator allow-list. Fail-closed by default.
     pub settings: SettingsConfig,
+    /// ADR-0203 — the operator's declaration about a co-hosted agent.
+    pub cohosted: CohostedAgentConfig,
     /// MOMO-300 rate-limit knobs (B4.3) — consumed by the public join and
     /// claim writes. **On by default**, because those routes are unauthenticated
     /// writes on the instance.
@@ -1659,6 +1661,36 @@ impl std::fmt::Debug for SettingsConfig {
     }
 }
 
+/// ADR-0203 (#3883) — what the operator declared about a co-hosted agent.
+///
+/// * `declared`: the operator wrote `HERMES_BASE_URL` (Q1 (a): the same variable,
+///   so no second egress-exempt input). [`momo_settings::ProviderConfig`] fills
+///   a localhost default when it is unset, so that default must never be read as
+///   a declaration: with `declared == false` the feature makes **zero** network
+///   calls and shows nothing.
+/// * `tools_locked`: `OORT_COHOSTED_AGENT_TOOLS_LOCKED` — the operator's own
+///   statement that they followed the tool-lock checklist (D6). It is an
+///   attestation, not a verification; the server cannot see the agent's tools.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CohostedAgentConfig {
+    pub declared: bool,
+    pub tools_locked: bool,
+}
+
+impl CohostedAgentConfig {
+    pub fn from_env() -> CohostedAgentConfig {
+        CohostedAgentConfig {
+            declared: env("HERMES_BASE_URL").is_some(),
+            tools_locked: matches!(
+                env("OORT_COHOSTED_AGENT_TOOLS_LOCKED")
+                    .map(|value| value.trim().to_ascii_lowercase())
+                    .as_deref(),
+                Some("1") | Some("true") | Some("yes") | Some("on")
+            ),
+        }
+    }
+}
+
 /// #2960: the egress policy the 「연결 확인」 probe dials under — the same inputs
 /// the agent-worker's provider client reads (`bins/momo-agent-worker/src/config.rs`
 /// `egress_policy`), so the probe reaches exactly what a real turn would. There
@@ -2100,6 +2132,7 @@ impl Config {
         // one silently merges two blast radii, so it is fatal here rather than
         // discovered after a leak.
         let settings = SettingsConfig::from_env();
+        let cohosted = CohostedAgentConfig::from_env();
         if let Some(message) = settings.boot_error(&jwt_secret, &webhook) {
             return Err(ConfigError::InvalidSecurity(message));
         }
@@ -2130,6 +2163,7 @@ impl Config {
             agent_gateway,
             realtime,
             settings,
+            cohosted,
             rate_limit: RateLimitConfig::from_env(),
             agent_port: AgentPortConfig::from_env()?,
             mentions: MentionSettings::from_env(),

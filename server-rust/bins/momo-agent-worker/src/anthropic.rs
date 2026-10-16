@@ -176,6 +176,19 @@ fn anthropic_tool(tool: &Value) -> Value {
     if tool.get("input_schema").is_some() {
         return tool.clone();
     }
+    // The provider's own web search — `{"type":"web_search_…","name":…}` — is
+    // already in Anthropic's shape and has no schema to re-home (ADR-0201 증보 v2
+    // H5). Only that server tool rides through: `web_fetch_…`, `code_execution_…`
+    // or `computer_…` in an operator's `tool_schema` are re-shaped into inert
+    // custom tools like before, so no profile can switch on a fetch/exec path
+    // (H9-I6) through this door.
+    if tool
+        .get("type")
+        .and_then(Value::as_str)
+        .is_some_and(|kind| kind.starts_with("web_search_"))
+    {
+        return tool.clone();
+    }
     let function = tool.get("function").unwrap_or(tool);
     let Some(name) = function.get("name").and_then(Value::as_str) else {
         return tool.clone();
@@ -216,6 +229,7 @@ pub struct MessageStream {
     cache_read_tokens: i64,
     cache_creation_tokens: i64,
     output_tokens: Option<i64>,
+    web_search_requests: i64,
     stop_reason: Option<String>,
     outcome: Option<Result<ChatCompletion, ProviderError>>,
     events: usize,
@@ -441,6 +455,10 @@ impl MessageStream {
         if let Some(value) = read("output_tokens") {
             self.output_tokens = Some(value);
         }
+        // Cumulative on `message_delta`, so the last report wins.
+        if let Some(value) = web_searches_of(usage) {
+            self.web_search_requests = value;
+        }
     }
 
     fn settle(&mut self) -> Result<ChatCompletion, ProviderError> {
@@ -478,6 +496,7 @@ impl MessageStream {
             tool_calls,
             usage,
             self.stop_reason.as_deref(),
+            self.web_search_requests,
         )
     }
 }
@@ -509,6 +528,7 @@ fn completion(
     tool_calls: Vec<ProviderToolCall>,
     usage: Option<ChatUsage>,
     stop_reason: Option<&str>,
+    web_search_requests: i64,
 ) -> Result<ChatCompletion, ProviderError> {
     if text.trim().is_empty() && tool_calls.is_empty() {
         return Err(ProviderError::InvalidResponse(format!(
@@ -520,7 +540,58 @@ fn completion(
         text,
         usage,
         tool_calls,
+        web_search_requests: web_search_requests.clamp(0, i32::MAX as i64) as i32,
     })
+}
+
+/// `usage.server_tool_use.web_search_requests` — what Anthropic bills a search by
+/// (ADR-0201 증보 v2 H5). Absent ⇒ `None`.
+fn web_searches_of(usage: &Value) -> Option<i64> {
+    usage
+        .pointer("/server_tool_use/web_search_requests")
+        .and_then(Value::as_i64)
+}
+
+/// The provider's own server-side web search tool for a team-AI call
+/// (ADR-0201 증보 v2 H5). Only search: `web_fetch` and code execution are never
+/// offered (an arbitrary URL is an exfiltration path).
+///
+/// The type string follows the model (claude-api skill reference, cached
+/// 2026-09-25): the dynamic-filtering `web_search_20260209` exists on Opus
+/// 4.6+/Sonnet 4.6+ and the 5-series (Fable, Mythos, Opus 5/5.5, Sonnet 5/5.5);
+/// every other model, and Vertex AI (basic variant only), gets
+/// `web_search_20250305`. `runtime-unverified` against the live API.
+pub fn web_search_tool(model: &str, base_url: &str, max_uses: i64) -> Value {
+    json!({
+        "type": web_search_tool_type(model, base_url),
+        "name": "web_search",
+        "max_uses": max_uses,
+    })
+}
+
+pub fn web_search_tool_type(model: &str, base_url: &str) -> &'static str {
+    const BASIC: &str = "web_search_20250305";
+    const FILTERING: &str = "web_search_20260209";
+    if base_url.to_ascii_lowercase().contains("googleapis.com") {
+        return BASIC;
+    }
+    let model = model.trim().to_ascii_lowercase();
+    let model = model.strip_prefix("anthropic.").unwrap_or(&model);
+    let newer = [
+        "claude-fable-",
+        "claude-mythos-",
+        "claude-opus-5",
+        "claude-sonnet-5",
+        "claude-opus-4-6",
+        "claude-opus-4-7",
+        "claude-opus-4-8",
+        "claude-sonnet-4-6",
+    ];
+    if newer.iter().any(|prefix| model.starts_with(prefix)) {
+        FILTERING
+    } else {
+        BASIC
+    }
 }
 
 /// An Anthropic error object (`{"type":"error","error":{"type","message"}}`).
@@ -600,6 +671,7 @@ pub fn parse_message(body: &str) -> Result<ChatCompletion, ProviderError> {
         tool_calls,
         usage,
         payload.get("stop_reason").and_then(Value::as_str),
+        payload.get("usage").and_then(web_searches_of).unwrap_or(0),
     )
 }
 
@@ -890,5 +962,145 @@ mod tests {
             parse_message(&empty),
             Err(ProviderError::InvalidResponse(_))
         ));
+    }
+
+    /// ADR-0201 증보 v2 H5: a server tool rides through byte for byte (a bogus
+    /// `input_schema` would turn it into a custom tool the model has to "call"),
+    /// while an OpenAI function still re-shapes.
+    #[test]
+    fn a_server_web_search_tool_passes_through_unchanged() {
+        let search = web_search_tool("claude-sonnet-5-5", "https://api.anthropic.com/v1", 3);
+        let request = ChatRequest {
+            model: "claude-sonnet-5-5".into(),
+            messages: vec![ChatMessage::user("q")],
+            max_tokens: Some(100),
+            tools: vec![
+                search.clone(),
+                json!({"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}),
+            ],
+            momo_tools: Vec::new(),
+        };
+        let body = build_request_body(&request);
+        assert_eq!(body["tools"][0], search);
+        assert_eq!(
+            body["tools"][0],
+            json!({"type":"web_search_20260209","name":"web_search","max_uses":3})
+        );
+        assert!(body["tools"][0].get("input_schema").is_none());
+        assert_eq!(
+            body["tools"][1],
+            json!({"name":"lookup","input_schema":{"type":"object"}})
+        );
+        assert!(!body.to_string().contains("web_fetch"));
+
+        // #3899 review: only web search rides through. A fetch / exec server tool
+        // smuggled in an operator `tool_schema` comes out as an inert custom tool.
+        for smuggled in [
+            json!({"type":"web_fetch_20250910","name":"web_fetch","max_uses":5}),
+            json!({"type":"code_execution_20250825","name":"code_execution"}),
+        ] {
+            let request = ChatRequest {
+                model: "claude-sonnet-5-5".into(),
+                messages: vec![ChatMessage::user("q")],
+                max_tokens: Some(100),
+                tools: vec![smuggled.clone()],
+                momo_tools: Vec::new(),
+            };
+            let rendered = &build_request_body(&request)["tools"][0];
+            assert!(rendered.get("type").is_none(), "{rendered}");
+            assert_eq!(rendered["input_schema"], json!({"type":"object"}));
+        }
+    }
+
+    #[test]
+    fn the_search_type_follows_the_model_and_the_platform() {
+        for model in [
+            "claude-opus-5-5",
+            "claude-sonnet-5-5",
+            "claude-sonnet-5",
+            "claude-fable-5-1",
+            "claude-opus-4-8",
+            "claude-sonnet-4-6",
+            "anthropic.claude-opus-5-5",
+        ] {
+            assert_eq!(
+                web_search_tool_type(model, "https://api.anthropic.com/v1"),
+                "web_search_20260209",
+                "{model}"
+            );
+        }
+        for model in [
+            "claude-haiku-4-5",
+            "claude-sonnet-4-5",
+            "claude-opus-4-5",
+            "unknown",
+        ] {
+            assert_eq!(
+                web_search_tool_type(model, "https://api.anthropic.com/v1"),
+                "web_search_20250305",
+                "{model}"
+            );
+        }
+        assert_eq!(
+            web_search_tool_type(
+                "claude-opus-5-5",
+                "https://us-east5-aiplatform.googleapis.com/v1"
+            ),
+            "web_search_20250305",
+            "Vertex has the basic variant only"
+        );
+    }
+
+    /// A searched answer: `server_tool_use` / `web_search_tool_result` blocks are
+    /// not tool calls the worker must run, the text survives, and the billed
+    /// search count is reported.
+    #[test]
+    fn a_searched_answer_reports_its_search_count_and_no_tool_call() {
+        let mut raw = sse(
+            "message_start",
+            json!({"type":"message_start","message":{"usage":{"input_tokens":30,"output_tokens":0}}}),
+        );
+        raw.push_str(&sse("content_block_start", json!({"type":"content_block_start","index":0,
+            "content_block":{"type":"server_tool_use","id":"srvtoolu_1","name":"web_search","input":{}}})));
+        raw.push_str(&sse(
+            "content_block_delta",
+            json!({"type":"content_block_delta","index":0,
+            "delta":{"type":"input_json_delta","partial_json":"{\"query\":\"oort\"}"}}),
+        ));
+        raw.push_str(&sse(
+            "content_block_start",
+            json!({"type":"content_block_start","index":1,
+            "content_block":{"type":"web_search_tool_result","tool_use_id":"srvtoolu_1",
+            "content":[{"type":"web_search_result","url":"https://example.com","title":"t"}]}}),
+        ));
+        raw.push_str(&sse(
+            "content_block_start",
+            json!({"type":"content_block_start","index":2,
+            "content_block":{"type":"text","text":""}}),
+        ));
+        raw.push_str(&sse(
+            "content_block_delta",
+            json!({"type":"content_block_delta","index":2,
+            "delta":{"type":"text_delta","text":"찾아봤어요."}}),
+        ));
+        raw.push_str(&sse(
+            "message_delta",
+            json!({"type":"message_delta","delta":{"stop_reason":"end_turn"},
+            "usage":{"output_tokens":12,"server_tool_use":{"web_search_requests":2}}}),
+        ));
+        raw.push_str(&sse("message_stop", json!({"type":"message_stop"})));
+        let completion = drive_chunked(&raw, 40, &DiscardDeltas).expect("searched answer");
+        assert_eq!(completion.text, "찾아봤어요.");
+        assert!(
+            completion.tool_calls.is_empty(),
+            "a server tool is not ours to run"
+        );
+        assert_eq!(completion.web_search_requests, 2);
+
+        let body = json!({"type":"message","content":[{"type":"text","text":"네"}],
+            "stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":2,
+            "server_tool_use":{"web_search_requests":1}}})
+        .to_string();
+        assert_eq!(parse_message(&body).unwrap().web_search_requests, 1);
     }
 }

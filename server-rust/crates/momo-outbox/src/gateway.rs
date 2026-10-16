@@ -296,6 +296,13 @@ o.workspace_id = $1 \
               AND o.partition_key = $2 \
               AND lower(o.payload->>'agent_member_id') = lower($2::text) \
               AND (o.lease_expires_at IS NULL OR o.lease_expires_at <= now()) \
+              AND NOT EXISTS ( \
+                SELECT 1 FROM agent_run r \
+                 WHERE r.workspace_id = o.workspace_id \
+                   AND r.id::text = lower(o.payload->>'run_id') \
+                   AND r.status::text IN ('awaiting_approval', 'succeeded', 'failed', \
+                                          'cancelled', 'timed_out') \
+              ) \
               AND EXISTS ( \
                 SELECT 1 \
                   FROM member m \
@@ -341,6 +348,56 @@ o.workspace_id = $1 \
                      ) \
                 )) \
               )";
+
+/// Why a delivery job was closed because its run had already settled (#3903): the
+/// operator reads this on the row.
+pub const RUN_SETTLED_JOB_LAST_ERROR: &str = "run already settled; job closed";
+
+/// Close the pending gateway jobs of one agent whose run is already over (#3903).
+///
+/// Approval decisions, approval expiry and a server-side run end settle the RUN but not
+/// the job that carried it, so a leased job outlived its run, its lease expired, and
+/// every claim handed the same dead work to the agent again (measured on prod: one
+/// `timed_out` run re-claimed every ~40 minutes for 12 hours). The claim predicate
+/// ([`CLAIMABLE_JOB_PREDICATE`]) now refuses such a job; this closes it so it does not
+/// sit `pending` forever, with the same `done` shape a cancelled run's job gets.
+///
+/// Only `succeeded`/`failed`/`cancelled`/`timed_out` runs: an `awaiting_approval` run is
+/// parked, not over, and its job is left as it is. Never touches another agent's rows.
+/// Returns how many jobs were closed.
+pub async fn retire_settled_run_hosted_jobs_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE outbox o \
+            SET status = 'done', \
+                processed_at = now(), \
+                last_error = $3, \
+                lease_owner = NULL, \
+                lease_acquired_at = NULL, \
+                lease_expires_at = NULL \
+          WHERE o.workspace_id = $1 \
+            AND o.kind = 'agent_job' \
+            AND o.method = 'gateway' \
+            AND o.status = 'pending' \
+            AND o.partition_key = $2 \
+            AND lower(o.payload->>'agent_member_id') = lower($2::text) \
+            AND EXISTS ( \
+              SELECT 1 FROM agent_run r \
+               WHERE r.workspace_id = o.workspace_id \
+                 AND r.id::text = lower(o.payload->>'run_id') \
+                 AND r.status::text IN ('succeeded', 'failed', 'cancelled', 'timed_out') \
+            )",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .bind(RUN_SETTLED_JOB_LAST_ERROR)
+    .execute(&mut *conn)
+    .await?;
+    Ok(result.rows_affected())
+}
 
 async fn claim_gateway_jobs(
     conn: &mut PgConnection,

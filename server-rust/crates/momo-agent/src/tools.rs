@@ -381,13 +381,56 @@ pub fn catalog_definitions() -> Vec<ToolDefinition> {
         ToolDefinition {
             name: WORKSPACE_ACTION_PROPOSE,
             description: "Propose ONE simple workspace change that the person who asked wants \
-             (change an agent's name or profile, create a channel, add people to a channel). \
+             (change an agent's name or profile, create a channel, add people to a channel, \
+             change the workspace welcome text or role labels, turn link previews on or off, \
+             turn team memory off or pause it, change how work resumes when a host is lost). \
              This only makes an approval card: nothing changes until a person approves it, so \
              say you proposed it, never that it is done. Use only the listed actionIds. Do not \
              use it for anything else, and never put a key, token or password in `args`.",
             parameters: workspace_action_propose_parameters(),
         },
     ]
+}
+
+/// The `args` description: each allowed action's keys, read from the registry's
+/// own schemas (`?` = optional), so the model is told the shape the server checks
+/// and a key added to a schema reaches the model without a second edit.
+fn workspace_action_args_description() -> String {
+    let mut lines = vec![
+        "The change's arguments (the action's own schema). Handles without @. Keys by actionId:"
+            .to_string(),
+    ];
+    for id in crate::actions::TEAM_AI_ACTION_IDS {
+        let Some(action) = crate::actions::action_by_id(id) else {
+            continue;
+        };
+        let schema = action.args_schema();
+        let required: Vec<&str> = schema["required"]
+            .as_array()
+            .map(|keys| keys.iter().filter_map(Value::as_str).collect())
+            .unwrap_or_default();
+        let keys: Vec<String> = schema["properties"]
+            .as_object()
+            .map(|properties| {
+                properties
+                    .keys()
+                    .map(|key| {
+                        if required.contains(&key.as_str()) {
+                            key.clone()
+                        } else {
+                            format!("{key}?")
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        lines.push(format!("{id} {{{}}}", keys.join(", ")));
+    }
+    lines.push(
+        "workspace.memory.update can only turn memory off (enabled:false) or pause/resume it."
+            .to_string(),
+    );
+    lines.join(" ")
 }
 
 /// `workspace_action_propose`'s published schema — the enum is the team AI's
@@ -403,7 +446,7 @@ fn workspace_action_propose_parameters() -> Value {
             },
             "args": {
                 "type": "object",
-                "description": "The change's arguments (the action's own schema). Handles without @."
+                "description": workspace_action_args_description()
             },
             "rationale": {
                 "type": "string",

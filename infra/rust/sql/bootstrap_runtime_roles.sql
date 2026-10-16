@@ -494,3 +494,33 @@ BEGIN
   END IF;
 END
 $$;
+
+-- BEGIN helper-read (#3894; ADR-0201 증보 v2 H4-2). Identical in bootstrap_roles.sql and
+-- bootstrap_runtime_roles.sql; a no-op before migration 138. The team AI's read tools run as the
+-- worker with `SET LOCAL ROLE momo_helper_read` (NOBYPASSRLS, SELECT only), so momo_worker may SET
+-- that role but never inherits it, and no other runtime role is a member.
+DO $$
+DECLARE
+  r text;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_helper_read') THEN
+    RETURN;
+  END IF;
+  FOREACH r IN ARRAY ARRAY['momo_app', 'momo_relay', 'momo_notifier'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r)
+       AND pg_has_role(r, 'momo_helper_read', 'MEMBER') THEN
+      EXECUTE format('REVOKE momo_helper_read FROM %I', r);
+    END IF;
+  END LOOP;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_worker') THEN
+    GRANT momo_helper_read TO momo_worker WITH INHERIT FALSE, SET TRUE;
+    IF pg_has_role('momo_worker', 'momo_helper_read', 'USAGE') THEN
+      RAISE EXCEPTION 'momo_worker must hold momo_helper_read with INHERIT FALSE (SET only)';
+    END IF;
+  END IF;
+  IF (SELECT rolbypassrls OR rolsuper FROM pg_roles WHERE rolname = 'momo_helper_read') THEN
+    RAISE EXCEPTION 'momo_helper_read must be NOSUPERUSER NOBYPASSRLS';
+  END IF;
+END
+$$;
+-- END helper-read
