@@ -125,6 +125,7 @@ interface MountProps {
   receipts?: ReadonlyMap<string, ApprovalReceipt>;
   jumpTarget?: {messageId: string; seq: number | null; token: number};
   jumpPills?: boolean;
+  selfSendToken?: number;
 }
 
 /** 승인 카드의 컨트롤(`ApprovalDecision`)이 세션과 질의 클라이언트를 요구한다. */
@@ -150,6 +151,7 @@ function element(listRef: ListRef, over: MountProps) {
           approvalOffline={false}
           jumpTarget={over.jumpTarget}
           jumpPills={over.jumpPills ?? false}
+          selfSendToken={over.selfSendToken}
           listRef={listRef as never}
         />
       </SessionProvider>
@@ -312,7 +314,9 @@ describe.each([[false], [true]])('jumpPills=%s', jumpPills => {
       // 깨뜨리면: `landedHighlight.ts` 의 `decided` 에서 영수증 검사를 빼면 이 단정이 빨갛다.
     });
 
-    it('다른 기기·만료 — 다시 읽기로 카드 상태가 바뀌어 들어온다', async () => {
+    it('다른 기기·알림 버튼 — 서버가 카드를 알려(message.edited, #3771) 카드 상태가 바뀌어 들어온다', async () => {
+      // 이 시험은 사슬의 **끝**만 재생한다: 목록이 새 카드를 받은 뒤의 props. 사슬 전체
+      // (레일 → `useTimeline` → 목록)는 `pushTap.test.tsx` 의 레일 시험이 돈다.
       const {rerender} = mount(base);
       rerender({jumpTarget: JUMP});
       await advance(400);
@@ -324,13 +328,14 @@ describe.each([[false], [true]])('jumpPills=%s', jumpPills => {
       // 깨뜨리면: `decided` 에서 `card.status !== 'pending'` 검사를 빼면 빨갛다.
     });
 
-    it('대기 원장에서 **있다가 사라지면** 결정이다 — 알림 버튼·다른 기기', async () => {
+    it('대기 원장에서 **있다가 사라지면** 결정이다 — 카드가 아직 대기로 남은 길', async () => {
       const {rerender} = mount(base);
       rerender({jumpTarget: JUMP});
       await advance(400);
       expect(landedIds()).toEqual([APPROVAL_ID]);
 
-      // 카드 스냅샷은 아직 대기다(서버는 결정을 방송하지 않는다). 원장만 안다.
+      // 카드 스냅샷은 아직 대기다 — 카드 행을 알리지 않는 길(만료·취소·옛 서버)이거나 그
+      // 프레임보다 원장 재조회가 먼저 온 순서다. 이때는 원장만 안다.
       rerender({jumpTarget: JUMP, gates: NO_GATES});
 
       expect(landedIds()).toEqual([]);
@@ -469,6 +474,27 @@ describe.each([[false], [true]])('jumpPills=%s', jumpPills => {
       expect(landedIds()).toEqual([APPROVAL_ID]);
       await advance(500);
       expect(landedIds()).toEqual([]);
+    });
+
+    it('이동이 거둬져 끝나지 않아도 시계가 영영 안 켜지지는 않는다 — 전송이 걸린 이동을 거둔다', async () => {
+      // 새 요청(전송·「최신으로」·「안읽음으로」)은 걸린 이동을 판정 없이 거두고, 거둔 이동은
+      // `onLanded` 를 부르지 않는다. 그 착지가 다시 손가락만 기다리면 #3921 이전의 결함이
+      // 좁은 길로 남는다 — 백스톱(1.6초) 뒤에 시계가 켜진다.
+      const {rerender} = mount(base);
+      rerender({jumpTarget: JUMP});
+      await advance(100);
+      expect(landedIds()).toEqual([APPROVAL_ID]);
+
+      rerender({jumpTarget: JUMP, selfSendToken: 1}); // 사람이 전송한다 → 이동이 거둬진다
+
+      // 이동이 끝나는 길이 없다: 이동 끝 + 2초(≈0.4 + 2 초)로는 거둬지지 않는다. 상한은 백스톱
+      // (1.6초) + 시한(2초) = 3.7초다.
+      await advance(2500); // 2.6초
+      expect(landedIds()).toEqual([APPROVAL_ID]);
+
+      await advance(1400); // 4.0초
+      expect(landedIds()).toEqual([]);
+      // 깨뜨리면: 시계 효과의 백스톱(`landedHoldMs === null` 갈래)을 지우면 영영 남아 빨갛다.
     });
   });
 

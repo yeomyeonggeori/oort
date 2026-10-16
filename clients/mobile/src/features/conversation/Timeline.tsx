@@ -2706,8 +2706,27 @@ function TimelineInner({
   // 입력(영수증·원장·카드 상태)이 바뀔 때 도착한다.
 
   // 시계. `holdMs` 가 서야 켜지고(이동이 끝났다), 같은 점프의 것일 때만 거둔다.
+  //
+  // **이동이 끝나지 않고 거둬지는 길이 하나 있다.** 전송·「최신으로」·「안읽음으로」 같은 새
+  // 요청은 걸린 이동을 판정 없이 거두고(`cancelJumpTravel`), 거둔 이동은 `onLanded` 를 부르지
+  // 않는다. 그 착지는 시계가 영영 안 켜져 다시 손가락만 기다린다(#3921 이전의 결함 그대로).
+  // 이동은 백스톱(`JUMP_TRAVEL_MAX_MS`) 안에 반드시 끝나거나 거둬지므로, 그 뒤에도 `holdMs`
+  // 가 비어 있으면 이동이 거둬진 것이다 — 그때 시계를 켠다. 이동이 자연히 끝났다면 그 전에
+  // `holdMs` 가 서서 이 효과가 정리되므로 아무 일도 하지 않는다.
   useEffect(() => {
-    if (landedId === null || landedHoldMs === null) return undefined;
+    if (landedId === null) return undefined;
+    if (landedHoldMs === null) {
+      const backstop = setTimeout(() => {
+        setLanded(current =>
+          current !== null &&
+          current.id === landedId &&
+          current.holdMs === null
+            ? {id: current.id, holdMs: LANDED_HOLD_MS}
+            : current,
+        );
+      }, JUMP_TRAVEL_MAX_MS + 2 * CONVERGE_ROUND_MS);
+      return () => clearTimeout(backstop);
+    }
     const timer = setTimeout(() => {
       setLanded(current =>
         current !== null && current.id === landedId ? null : current,
@@ -2717,8 +2736,10 @@ function TimelineInner({
   }, [landedId, landedHoldMs]);
 
   // 결정. 착지한 행이 승인 요청이고 그 승인이 결정되면 곧바로 거둔다 — 이 기기의 결정
-  // (영수증)도, 다시 읽기로 들어온 다른 기기의 결정·만료(카드 상태)도, 대기 원장에서
-  // 사라진 것도.
+  // (영수증)도, 다른 기기·알림 버튼의 결정(서버가 카드 행을 `message.edited` 로 알려
+  // 레일로 들어온다, #3771 `announce_card_edit`)도, 다시 읽기로 바뀐 카드 상태도, 대기
+  // 원장에서 사라진 것도. 만료·취소가 카드 행을 알리는지는 확인하지 못했다 — 그 길은 원장
+  // 전이와 시한이 받친다.
   //
   // **「원장에 없다」만으로는 결정이 아니다.** 원장은 첫 읽기가 오기 전에는 비어 있고,
   // 알림 탭은 캐시를 무효화만 하므로(`useNotificationTapRouting`) 착지하는 순간 원장에
