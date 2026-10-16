@@ -1,4 +1,5 @@
 import type { RosterMember } from "../../lib/api";
+import { asciiAliases } from "./helperAliases";
 import { mentionTokenAt } from "./mentionSyntax";
 
 // =============================================================================
@@ -46,14 +47,33 @@ export function mentionedAgents(
   const handles = mentionedHandles(text);
   if (handles.length === 0) return [];
   const byHandle = new Map<string, RosterMember>();
+  // 별칭(ADR-0201 v2 H2): 서버가 이미 「실제 멤버가 이긴다」를 지키지만(H2-4), 화면도
+  // 같은 규칙으로 판정해야 두 답이 갈리지 않는다. 누구든(사람 포함) 그 이름을 핸들로 쓰면
+  // 별칭은 아무도 부르지 않는다. 한글 별칭은 멘션 문법이 읽지 못하므로 `asciiAliases` 만.
+  const realHandles = new Set(
+    members
+      .filter((member) => member.status !== "deleted")
+      .map((member) => member.handle.toLowerCase())
+  );
+  for (const member of members) {
+    if (member.kind !== "agent" || member.status !== "active") continue;
+    for (const alias of asciiAliases(member)) {
+      if (!realHandles.has(alias)) byHandle.set(alias, member);
+    }
+  }
   for (const member of members) {
     if (member.kind !== "agent" || member.status !== "active") continue;
     byHandle.set(member.handle.toLowerCase(), member);
   }
   const out: RosterMember[] = [];
+  const picked = new Set<string>();
   for (const handle of handles) {
     const member = byHandle.get(handle);
-    if (member) out.push(member);
+    // `@oort @oort-helper` 는 한 멤버를 두 번 부른 것이다. run도 하나다.
+    if (member && !picked.has(member.id)) {
+      picked.add(member.id);
+      out.push(member);
+    }
   }
   return out;
 }
