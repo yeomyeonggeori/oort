@@ -176,13 +176,16 @@ fn anthropic_tool(tool: &Value) -> Value {
     if tool.get("input_schema").is_some() {
         return tool.clone();
     }
-    // A provider-defined (server) tool — `{"type":"web_search_…","name":…}` —
-    // is already in Anthropic's own shape and has no schema to re-home
-    // (ADR-0201 증보 v2 H5). Only OpenAI's `function` type is re-shaped.
+    // The provider's own web search — `{"type":"web_search_…","name":…}` — is
+    // already in Anthropic's shape and has no schema to re-home (ADR-0201 증보 v2
+    // H5). Only that server tool rides through: `web_fetch_…`, `code_execution_…`
+    // or `computer_…` in an operator's `tool_schema` are re-shaped into inert
+    // custom tools like before, so no profile can switch on a fetch/exec path
+    // (H9-I6) through this door.
     if tool
         .get("type")
         .and_then(Value::as_str)
-        .is_some_and(|kind| kind != "function")
+        .is_some_and(|kind| kind.starts_with("web_search_"))
     {
         return tool.clone();
     }
@@ -989,6 +992,24 @@ mod tests {
             json!({"name":"lookup","input_schema":{"type":"object"}})
         );
         assert!(!body.to_string().contains("web_fetch"));
+
+        // #3899 review: only web search rides through. A fetch / exec server tool
+        // smuggled in an operator `tool_schema` comes out as an inert custom tool.
+        for smuggled in [
+            json!({"type":"web_fetch_20250910","name":"web_fetch","max_uses":5}),
+            json!({"type":"code_execution_20250825","name":"code_execution"}),
+        ] {
+            let request = ChatRequest {
+                model: "claude-sonnet-5-5".into(),
+                messages: vec![ChatMessage::user("q")],
+                max_tokens: Some(100),
+                tools: vec![smuggled.clone()],
+                momo_tools: Vec::new(),
+            };
+            let rendered = &build_request_body(&request)["tools"][0];
+            assert!(rendered.get("type").is_none(), "{rendered}");
+            assert_eq!(rendered["input_schema"], json!({"type":"object"}));
+        }
     }
 
     #[test]

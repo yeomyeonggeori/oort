@@ -790,6 +790,11 @@ impl AgentWorker {
             .as_ref()
             .map(|trace| trace.audit_detail(usage, error_code.unwrap_or("answered")));
         let searches = trace.as_ref().map(|trace| trace.web_searches).unwrap_or(0);
+        // Workspace data or web text reached the model in this request: the answer
+        // must not make the server fetch a URL the model was steered into writing.
+        let withhold_previews = trace
+            .as_ref()
+            .is_some_and(|trace| !trace.tools.is_empty() || trace.web_searches > 0);
         let result = with_tenant_tx(&self.pool, workspace_id, move |conn| {
             let label = label.clone();
             let audit_detail = audit_detail.clone();
@@ -834,6 +839,15 @@ impl AgentWorker {
                     )
                     .await?;
                     message_id = Some(sent.message.id);
+                    if withhold_previews {
+                        team_ai::withhold_link_previews_in_tx(
+                            conn,
+                            workspace_id,
+                            sent.message.id,
+                            agent,
+                        )
+                        .await?;
+                    }
                 }
                 let output = json!({
                     "schema": "momo.agent_run.output.v0",

