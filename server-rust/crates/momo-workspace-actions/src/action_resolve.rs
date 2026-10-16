@@ -26,8 +26,8 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use momo_agent::actions::{
-    self, WorkspaceAction, INVITE_EXPIRES_IN_DAYS_CEILING, INVITE_MAX_USES_CEILING,
-    INVITE_PROPOSABLE_ROLES,
+    self, PluginInstallBefore, WorkspaceAction, INVITE_EXPIRES_IN_DAYS_CEILING,
+    INVITE_MAX_USES_CEILING, INVITE_PROPOSABLE_ROLES,
 };
 use momo_auth::{lock_active_hosted_connection_in_tx, MAX_HOSTED_APPROVED_CHANNELS};
 
@@ -167,6 +167,13 @@ pub enum ActionArgs {
         auto_target: Option<String>,
         before: Option<(String, Option<String>)>,
     },
+    /// `plugin.install` (ADR-0201 증보 v2 H7, #3889): one of the official four.
+    /// `plugin` is filled by [`resolve_action_in_tx`] — the registry row the card
+    /// is drawn from and the decision re-proves.
+    PluginInstall {
+        plugin_id: &'static str,
+        plugin: Option<ResolvedPlugin>,
+    },
     /// `agent.profile.update` (증보 v3 V3-2). `target` and `before` are filled by
     /// [`resolve_action_in_tx`]; `None` target handle = the proposer itself.
     AgentProfileUpdate {
@@ -179,6 +186,26 @@ pub enum ActionArgs {
         target: Option<ResolvedAgentTarget>,
         before: Option<AgentCard>,
     },
+}
+
+/// The registry row a `plugin.install` card is drawn from, read as it is now.
+///
+/// Everything here is bounded and charset-checked by [`read_installable_plugin_in_tx`]
+/// before it can reach a card: the registry is operator-owned, not agent-owned,
+/// but a card is a place text becomes a consent, so a value that does not look
+/// like what it claims to be is a proposal that did not resolve.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedPlugin {
+    /// The static name from `PLUGIN_INSTALL_PLUGINS`, never registry text.
+    pub label: &'static str,
+    pub version: String,
+    /// The SQL-computed digest of the manifest as stored. The card shows *this*
+    /// manifest's egress, and the pin holds this digest: a manifest that changes
+    /// between the card and the decision re-asks instead of being installed
+    /// under a disclosure it no longer matches (ADR-0113 D5).
+    pub digest: String,
+    pub egress_domains: Vec<String>,
+    pub before: PluginInstallBefore,
 }
 
 /// Where a set of action arguments came from. **A proposal comes from an agent; a
@@ -370,6 +397,7 @@ pub fn validated_action_args_from(
         actions::ACTION_WORKSPACE_UNFURL_UPDATE => workspace_unfurl_update_args(args),
         actions::ACTION_WORKSPACE_MEMORY_UPDATE => workspace_memory_update_args(args),
         actions::ACTION_WORKSPACE_WORK_TIER_UPDATE => workspace_work_tier_update_args(args),
+        actions::ACTION_PLUGIN_INSTALL => plugin_install_args(args),
         // Fail closed. A registry entry with no normaliser must be an error and
         // not an unvalidated passthrough — `every_action_has_a_normaliser` is
         // what makes this arm unreachable rather than merely unlikely.
@@ -765,6 +793,37 @@ pub fn workspace_unfurl_update_args(args: &Value) -> Result<ValidatedActionArgs,
     })
 }
 
+/// `plugin.install` (ADR-0201 증보 v2 H7): `{pluginId}`, required, one of the
+/// official four. The id is matched against the static table and the table's own
+/// `&'static str` is what is kept, so nothing an agent typed travels further than
+/// this comparison — the refusals name no value.
+pub fn plugin_install_args(args: &Value) -> Result<ValidatedActionArgs, ActionRejection> {
+    let object = args
+        .as_object()
+        .ok_or_else(|| ActionRejection::new("action args must be an object"))?;
+    closed_keys(object, &["pluginId"])?;
+    let raw = match object.get("pluginId") {
+        Some(Value::String(raw)) => raw.as_str(),
+        Some(_) => return Err(ActionRejection::new("pluginId must be a string")),
+        None => return Err(ActionRejection::new("pluginId is required")),
+    };
+    let Some((plugin_id, _)) = actions::PLUGIN_INSTALL_PLUGINS
+        .iter()
+        .find(|(id, _)| *id == raw)
+    else {
+        return Err(ActionRejection::new("pluginId is not an official plugin"));
+    };
+    Ok(ValidatedActionArgs {
+        summary: None,
+        normalized: json!({ "pluginId": plugin_id }),
+        rows: Vec::new(),
+        args: ActionArgs::PluginInstall {
+            plugin_id,
+            plugin: None,
+        },
+    })
+}
+
 /// `workspace.memory.update` (H6-1): `{enabled?: false, paused?}`, one at least.
 /// `enabled: true` is refused here as well as by the published schema's
 /// `const:false` — turning team memory on sends channel text to a provider, and
@@ -855,6 +914,121 @@ pub async fn unfurl_enabled_in_tx(
     .fetch_optional(&mut *conn)
     .await?;
     Ok(stored.unwrap_or(true))
+}
+
+/// What [`read_installable_plugin_in_tx`] found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PluginRead {
+    /// The app is not installed-and-enabled here: a card may offer it.
+    Installable(InstallablePlugin),
+    /// It already is: there is nothing to approve.
+    AlreadyInstalled,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstallablePlugin {
+    pub version: String,
+    pub digest: String,
+    pub egress_domains: Vec<String>,
+    pub before: PluginInstallBefore,
+}
+
+/// A manifest version as a card may print it: short, one token.
+fn plausible_version(text: &str) -> bool {
+    !text.is_empty()
+        && text.len() <= 32
+        && text
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b".-+_".contains(&byte))
+}
+
+/// A manifest egress domain as a card may print it. Looser than the server's
+/// manifest admission on purpose (that is `momo-server`'s `plugin_manifest`, which
+/// this crate cannot reach and which the install itself re-runs): this is only
+/// "lowercase DNS characters with a dot", so nothing else can be drawn on a card.
+fn plausible_egress_domain(text: &str) -> bool {
+    !text.is_empty()
+        && text.len() <= 253
+        && text.contains('.')
+        && !text.starts_with(['.', '-'])
+        && !text.ends_with(['.', '-'])
+        && text
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || b".-".contains(&byte))
+}
+
+/// The registry row behind a `plugin.install` card and this workspace's install
+/// state of it (ADR-0113 P2: the four, `official`, not revoked). `Ok(None)` is
+/// "does not resolve" — including a manifest whose version or egress list does
+/// not pass the card-text checks.
+///
+/// The digest is computed in SQL (`manifest::text` is Postgres's canonical jsonb
+/// text, which no other process can reproduce), the same expression the registry
+/// seeds and the server's admission use.
+pub async fn read_installable_plugin_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    plugin_id: &str,
+) -> Result<Option<PluginRead>, DbError> {
+    use momo_db::sqlx::Row;
+    let row = momo_db::sqlx::query(
+        "SELECT pr.manifest #>> '{plugin,version}' AS version, \
+                'sha256:' || encode(sha256(convert_to(pr.manifest::text, 'UTF8')), 'hex') AS digest, \
+                COALESCE(pr.manifest #> '{momo,egressDomains}', '[]'::jsonb) AS egress, \
+                wpi.id IS NOT NULL AS has_install, \
+                COALESCE(wpi.revoked_at IS NOT NULL, false) AS removed, \
+                COALESCE(wpi.enabled, false) AS enabled \
+           FROM plugin_registry pr \
+           LEFT JOIN workspace_plugin_install wpi \
+             ON wpi.workspace_id = $1 AND wpi.plugin_id = pr.plugin_id \
+          WHERE pr.plugin_id = $2 AND pr.official AND pr.revoked_at IS NULL",
+    )
+    .bind(workspace_id)
+    .bind(plugin_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let version: Option<String> = row.try_get("version")?;
+    let digest: String = row.try_get("digest")?;
+    let egress: Value = row.try_get("egress")?;
+    let has_install: bool = row.try_get("has_install")?;
+    let removed: bool = row.try_get("removed")?;
+    let enabled: bool = row.try_get("enabled")?;
+
+    let Some(version) = version.filter(|version| plausible_version(version)) else {
+        return Ok(None);
+    };
+    let Some(items) = egress.as_array().filter(|items| items.len() <= 16) else {
+        return Ok(None);
+    };
+    let mut egress_domains = Vec::with_capacity(items.len());
+    for item in items {
+        match item
+            .as_str()
+            .filter(|domain| plausible_egress_domain(domain))
+        {
+            Some(domain) => egress_domains.push(domain.to_string()),
+            None => return Ok(None),
+        }
+    }
+    if has_install && !removed && enabled {
+        return Ok(Some(PluginRead::AlreadyInstalled));
+    }
+    let before = if !has_install {
+        PluginInstallBefore::NotInstalled
+    } else if removed {
+        PluginInstallBefore::Removed
+    } else {
+        PluginInstallBefore::Disabled
+    };
+    Ok(Some(PluginRead::Installable(InstallablePlugin {
+        version,
+        digest,
+        egress_domains,
+        before,
+    })))
 }
 
 /// How a work-tier target reads on a card: 「oort Cloud」, a work host's display
@@ -2135,6 +2309,40 @@ pub async fn resolve_action_with_origin_in_tx(
             *before = Some(card);
             subject
         }
+        ActionArgs::PluginInstall { plugin_id, plugin } => {
+            if !proposer_is_live_agent_in_tx(conn, workspace_id, proposer_member_id).await? {
+                return Ok(Err(ActionRejection::new("proposer is not an active agent")));
+            }
+            // One answer for every way the app is not there to install: not one
+            // of the four, revoked or unofficial in the registry, or a manifest
+            // whose text does not look like what a card may say.
+            let Some(found) = read_installable_plugin_in_tx(conn, workspace_id, plugin_id).await?
+            else {
+                return Ok(Err(ActionRejection::new("plugin did not resolve")));
+            };
+            let Some(label) = actions::plugin_install_label(plugin_id) else {
+                return Ok(Err(ActionRejection::new("plugin did not resolve")));
+            };
+            // A proposal that changes nothing is not a proposal.
+            let PluginRead::Installable(read) = found else {
+                return Ok(Err(ActionRejection::new("nothing to change")));
+            };
+            validated.rows = actions::plugin_install_rows(
+                label,
+                &read.version,
+                &read.egress_domains,
+                read.before,
+            );
+            validated.summary = Some(actions::plugin_install_summary(label));
+            *plugin = Some(ResolvedPlugin {
+                label,
+                version: read.version,
+                digest: read.digest,
+                egress_domains: read.egress_domains,
+                before: read.before,
+            });
+            GateSubject::Workspace
+        }
         ActionArgs::ChannelMemberAdd {
             channel_ref,
             handles,
@@ -2233,6 +2441,13 @@ pub async fn resolve_action_with_origin_in_tx(
             "mode": before.as_ref().map(|(mode, _)| mode.clone()),
             "autoTarget": before.as_ref().and_then(|(_, target)| target.clone()),
         }),
+        // What the card said the app was and reached: a manifest that changed, or an
+        // install that moved, in between re-asks.
+        ActionArgs::PluginInstall { plugin_id, plugin } => json!({
+            "pluginId": plugin_id,
+            "digest": plugin.as_ref().map(|plugin| plugin.digest.clone()),
+            "before": plugin.as_ref().map(|plugin| plugin.before.as_pin()),
+        }),
         ActionArgs::AgentInvite { handle, .. } => json!({"handle": handle}),
         ActionArgs::ChannelCreate { members, .. } => {
             json!({"members": members.iter().map(|m| m.id.to_string()).collect::<Vec<_>>()})
@@ -2274,5 +2489,86 @@ pub fn bounded_integer(
             Ok(Some(value))
         }
         Some(_) => Err(ActionRejection::new("argument must be an integer")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `plugin.install` (H7, #3889): the pure stage takes exactly the official four
+    /// by id and keeps the static table's own string; everything else is refused
+    /// and the refusal names nothing the caller typed.
+    #[test]
+    fn plugin_install_takes_exactly_one_official_id() {
+        for (id, _) in actions::PLUGIN_INSTALL_PLUGINS {
+            let validated = plugin_install_args(&json!({ "pluginId": id })).expect(id);
+            assert_eq!(validated.normalized, json!({ "pluginId": id }));
+            assert!(
+                validated.rows.is_empty(),
+                "the rows come from the resolver, which reads the manifest"
+            );
+            assert!(matches!(
+                validated.args,
+                ActionArgs::PluginInstall { plugin: None, .. }
+            ));
+        }
+        let marker = "sk-live-must-not-echo";
+        for bad in [
+            json!({}),
+            json!({ "pluginId": 7 }),
+            json!({ "pluginId": null }),
+            json!({ "pluginId": "external_webhook" }),
+            json!({ "pluginId": marker }),
+            json!({ "pluginId": "com.momo.plugins.github", "enabled": true }),
+            json!({ "pluginId": "com.momo.plugins.github", "accessToken": marker }),
+            json!("com.momo.plugins.github"),
+            json!(["com.momo.plugins.github"]),
+        ] {
+            let error = plugin_install_args(&bad).expect_err("refused");
+            assert_eq!(error.status, 400, "{bad}");
+            assert!(!error.message.contains(marker), "{error:?}");
+        }
+    }
+
+    /// A card is where registry text becomes a consent: it prints a version only if
+    /// it looks like one and a domain only if it looks like one. Anything else makes
+    /// the proposal not resolve (the install itself re-runs the full manifest
+    /// admission).
+    #[test]
+    fn a_card_prints_only_a_plausible_version_and_plausible_domains() {
+        let long_version = "a".repeat(33);
+        for ok in ["1.0.0", "2026.10.16", "1.0.0-rc.1+build_5"] {
+            assert!(plausible_version(ok), "{ok}");
+        }
+        for bad in ["", " 1.0", "1.0 <b>", "한글", "1\n0", long_version.as_str()] {
+            assert!(!plausible_version(bad), "{bad:?}");
+        }
+        let long_domain = format!("{}.com", "a".repeat(250));
+        for ok in [
+            "api.githubcopilot.com",
+            "mcp.notion.com",
+            "www.googleapis.com",
+            "xn--abc.example.com",
+        ] {
+            assert!(plausible_egress_domain(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "localhost",
+            "-a.com",
+            "a.com-",
+            ".a.com",
+            "a.com.",
+            "API.github.com",
+            "evil.com/path",
+            "a b.com",
+            "a.com\n",
+            "https://a.com",
+            "a.com@b.com",
+            long_domain.as_str(),
+        ] {
+            assert!(!plausible_egress_domain(bad), "{bad:?}");
+        }
     }
 }

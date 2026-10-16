@@ -104,11 +104,12 @@ pub const ACTION_WORKSPACE_MEMORY_UPDATE: &str = "workspace.memory.update";
 /// `PUT …/work-tier-policy` does (ADR-0201 증보 v2 H6-1). Team AI only.
 pub const ACTION_WORKSPACE_WORK_TIER_UPDATE: &str = "workspace.work_tier.update";
 
-/// `plugin.install` — install one official app into the workspace (ADR-0201 증보
-/// v2 H7). **Declared, not executable**: the install route (ADR-0113 P3) does not
-/// exist yet, so it sits in [`DECLARED_NOT_EXECUTABLE`] and a proposal makes no
-/// card. Its contract is fixed here so the slice that opens it (#3889) only moves
-/// it into [`ACTIONS`].
+/// `plugin.install` — install one official app into the workspace, as `POST
+/// …/plugins/{plugin}/install` does (ADR-0201 증보 v2 H7, opened by #3889 once the
+/// install route and its domain function exist, ADR-0113 P3 / #3914). Team AI
+/// only (ADR-0201 H6: the helper was asked for this, external agents were not).
+/// Approving installs and **enables** the app; connecting it (a grant) is never a
+/// card — that is the member's own consent (ADR-0113 D2).
 pub const ACTION_PLUGIN_INSTALL: &str = "plugin.install";
 
 /// What a person is consenting to when they approve (ADR-0186 D3).
@@ -225,15 +226,16 @@ pub const MAX_PENDING_WORKSPACE_ACTIONS: i64 = 3;
 
 /// The actions the workspace's team AI may propose: ADR-0201 D3 v1's four, plus
 /// ADR-0201 증보 v2 H6-1's four (`workspace.settings.update` opened to the helper,
-/// and the three helper-only settings actions). Lives here (not in the proposal
-/// crate) because the team AI's tool schema, built in `tools.rs`, publishes it as
-/// the `actionId` enum — the model is never told an id the server refuses. A new
-/// id here is an ADR amendment, not a code change.
+/// and the three helper-only settings actions), plus H7's `plugin.install` (opened
+/// by #3889). Lives here (not in the proposal crate) because the team AI's tool
+/// schema, built in `tools.rs`, publishes it as the `actionId` enum — the model is
+/// never told an id the server refuses. A new id here is an ADR amendment, not a
+/// code change.
 ///
 /// Still outside (H6-2): `invite.create` and `agent.invite` (one-time secrets),
 /// `hosted.channels.grant` (widens access), and everything declared but not
-/// executable (`plugin.install` until its route exists).
-pub const TEAM_AI_ACTION_IDS: [&str; 8] = [
+/// executable (`webhook.create`, `member.role.set`).
+pub const TEAM_AI_ACTION_IDS: [&str; 9] = [
     ACTION_AGENT_PROFILE_UPDATE,
     ACTION_AGENT_RENAME,
     ACTION_CHANNEL_CREATE,
@@ -242,6 +244,7 @@ pub const TEAM_AI_ACTION_IDS: [&str; 8] = [
     ACTION_WORKSPACE_UNFURL_UPDATE,
     ACTION_WORKSPACE_MEMORY_UPDATE,
     ACTION_WORKSPACE_WORK_TIER_UPDATE,
+    ACTION_PLUGIN_INSTALL,
 ];
 
 /// Whether an action's one-time secret may go to the **proposing agent** instead
@@ -734,11 +737,11 @@ pub const PLUGIN_INSTALL_PLUGINS: [(&str, &str); 4] = [
     ("com.momo.plugins.drive", "Google Drive"),
 ];
 
-/// `plugin.install`'s decided contract (H7), published now so the slice that opens
-/// it (#3889) moves the id and nothing else: Admin decides, no one-time value.
+/// `plugin.install`'s contract (ADR-0201 증보 v2 H7; the row is in [`ACTIONS`] since
+/// #3889): an Admin decides, there is no one-time value.
 pub const PLUGIN_INSTALL_REQUIRED_ROLE: RequiredRole = RequiredRole::Admin;
 pub const PLUGIN_INSTALL_SECRET_DELIVERY: SecretDelivery = SecretDelivery::None;
-/// What approving it will do. Tokens stay on the agent host (ADR-0113 D1-A).
+/// What approving it does. Tokens stay on the agent host (ADR-0113 D1-A).
 pub const PLUGIN_INSTALL_EFFECT: &str =
     "워크스페이스에 표시된 앱을 설치해요. 토큰은 oort에 저장하지 않아요";
 
@@ -763,46 +766,119 @@ pub fn plugin_install_label(plugin_id: &str) -> Option<&'static str> {
         .map(|(_, label)| *label)
 }
 
-/// What the team AI says when asked to install an app while no install route
-/// exists (H7): no card, the honest line. It is built from the declared row's own
-/// `unavailable_reason`, so the catalog (`GET …/actions`) and the helper cannot
-/// give two different reasons. An id outside the official four (or no id) gets
-/// the same answer without a name — the line never repeats a string the model or
-/// a person typed.
-pub fn plugin_install_unavailable_line(args: &Value) -> String {
-    let reason = declared_action(ACTION_PLUGIN_INSTALL)
-        .map(|declared| declared.unavailable_reason)
-        .unwrap_or("아직 설치 경로가 없어요.");
-    let subject = args
-        .get("pluginId")
-        .and_then(Value::as_str)
-        .and_then(plugin_install_label)
-        .map(|label| format!("{label} 앱은"))
-        .unwrap_or_else(|| "앱은".to_string());
-    format!("{subject} {reason} 준비되면 설치 카드를 띄울게요.")
-}
-
-/// The team AI's system-prompt instruction for an app-install request (H7).
+/// The team AI's system-prompt instruction for an app request (H7).
 ///
-/// `workspace_action_propose`'s `actionId` enum is [`TEAM_AI_ACTION_IDS`], which
-/// does not hold `plugin.install`, so a model that keeps to its tool schema never
-/// reaches the server's `NotYetAvailable` answer; without this line it answers an
-/// install request with the generic hand-off instead of H7's sentence. Built from
-/// the same declared row and labels as [`plugin_install_unavailable_line`], so the
-/// prompt, the server fallback and the catalog cannot name different reasons.
+/// Installing is a card an admin approves; connecting (a grant) is never a card —
+/// it is the asking member's own consent, given in their apps screen (ADR-0113 D2),
+/// and the helper neither asks for nor receives a token (D1-A). An app outside the
+/// official four gets the same plain refusal as any other change the helper cannot
+/// make.
 pub fn plugin_install_prompt_line() -> String {
-    let reason = declared_action(ACTION_PLUGIN_INSTALL)
-        .map(|declared| declared.unavailable_reason)
-        .unwrap_or("아직 설치 경로가 없어요.");
     let labels: Vec<&str> = PLUGIN_INSTALL_PLUGINS
         .iter()
         .map(|(_, label)| *label)
         .collect();
     format!(
-        "앱({}) 설치·연결을 부탁받으면 도구를 부르지 말고 \
-         「○○ 앱은 {reason} 준비되면 설치 카드를 띄울게요.」라고 한 줄로 말해(○○은 그 앱 이름).",
+        "앱({}) 설치를 부탁받으면 `{ACTION_PLUGIN_INSTALL}`로 제안해(`pluginId`는 그 앱 하나). \
+         설치는 관리자가 승인해야 돼. 앱 연결(내 권한 허용)은 카드가 아니라 부탁한 사람이 설정의 앱 \
+         화면에서 직접 해. 이 밖의 앱은 아직 설치할 수 없다고 말하고, 토큰이나 키는 묻지 마.",
         labels.join("·")
     )
+}
+
+/// How an app stands in the workspace when its install card is drawn — the card's
+/// 「현재」 half (ADR-0186 D3: before → after in plain words).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginInstallBefore {
+    /// No install row.
+    NotInstalled,
+    /// Installed but switched off.
+    Disabled,
+    /// Installed once and uninstalled since (its grants went with it).
+    Removed,
+}
+
+impl PluginInstallBefore {
+    pub fn word(self) -> &'static str {
+        match self {
+            PluginInstallBefore::NotInstalled => "설치 안 됨",
+            PluginInstallBefore::Disabled => "설치됨(꺼짐)",
+            PluginInstallBefore::Removed => "설치 해제됨",
+        }
+    }
+
+    pub fn as_pin(self) -> &'static str {
+        match self {
+            PluginInstallBefore::NotInstalled => "not_installed",
+            PluginInstallBefore::Disabled => "disabled",
+            PluginInstallBefore::Removed => "removed",
+        }
+    }
+}
+
+/// The `plugin.install` card rows: which app and version, **where it reaches out
+/// to** (ADR-0113 D5 — the approver reads the egress before consenting), and its
+/// state before → after. Everything but the label comes from the registry
+/// manifest the resolver read, bounded and charset-checked there; the label is the
+/// static [`PLUGIN_INSTALL_PLUGINS`] name, never text an agent supplied.
+pub fn plugin_install_rows(
+    label: &str,
+    version: &str,
+    egress_domains: &[String],
+    before: PluginInstallBefore,
+) -> Vec<Value> {
+    vec![
+        action_row("앱", format!("{label} {version}")),
+        action_row(
+            "연결 대상",
+            if egress_domains.is_empty() {
+                "없음".to_string()
+            } else {
+                egress_domains.join(", ")
+            },
+        ),
+        action_row("상태", format!("{} → 설치됨(켜짐)", before.word())),
+        action_row("연결", "각자 설정의 앱 화면에서 내 권한을 직접 허용해요"),
+    ]
+}
+
+/// The card's summary sentence, with the app named (H7: 「워크스페이스에 ○○ 앱을
+/// 설치해요. 토큰은 oort에 저장하지 않아요」).
+pub fn plugin_install_summary(label: &str) -> String {
+    format!(
+        "에이전트가 제안했어요. 승인하면 {} 권한으로 워크스페이스에 {label} 앱을 설치해요. \
+         토큰은 oort에 저장하지 않아요.",
+        PLUGIN_INSTALL_REQUIRED_ROLE.korean()
+    )
+}
+
+/// The outcome line of `plugin.install`.
+pub fn plugin_install_result_body(label: &str) -> String {
+    format!("{label} 앱을 설치했어요")
+}
+
+/// The outcome rows of `plugin.install`: the app, where it reaches, and what comes
+/// next (the install alone gives no agent any access — each member connects).
+pub fn plugin_install_result_rows(
+    label: &str,
+    version: &str,
+    egress_domains: &[String],
+) -> Vec<Value> {
+    vec![
+        action_row("앱", format!("{label} {version}")),
+        action_row(
+            "연결 대상",
+            if egress_domains.is_empty() {
+                "없음".to_string()
+            } else {
+                egress_domains.join(", ")
+            },
+        ),
+        action_row(
+            "다음",
+            "각자 설정의 앱 화면에서 내 권한을 허용하면 에이전트가 써요",
+        ),
+    ]
 }
 
 /// The complete registry. Order is the catalog's order.
@@ -929,6 +1005,20 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         effect: "워크스페이스 기본 작업 이어가기 방식을 표시된 대로 바꿔요",
         args_schema: workspace_work_tier_update_args_schema,
     },
+    // ADR-0201 증보 v2 H7, opened by #3889: the install route (ADR-0113 P3, #3914)
+    // exists, and approving runs its domain function as the approver. Helper only,
+    // like the other v2 additions: external agents were not asked for this.
+    WorkspaceAction {
+        id: ACTION_PLUGIN_INSTALL,
+        title: "앱 설치",
+        summary: "공식 앱 하나를 워크스페이스에 설치해요. 토큰은 oort에 저장하지 않아요.",
+        risk: Risk::Approval,
+        required_role: PLUGIN_INSTALL_REQUIRED_ROLE,
+        secret_delivery: PLUGIN_INSTALL_SECRET_DELIVERY,
+        proposers: Proposers::TeamAiOnly,
+        effect: PLUGIN_INSTALL_EFFECT,
+        args_schema: plugin_install_args_schema,
+    },
 ];
 
 /// An action the product already performs over REST that is **not** proposable
@@ -962,15 +1052,6 @@ pub const DECLARED_NOT_EXECUTABLE: &[DeclaredAction] = &[
         title: "멤버 역할 변경",
         summary: "한 멤버의 워크스페이스 역할을 바꿉니다.",
         unavailable_reason: "다음 배치에서 열립니다.",
-    },
-    // ADR-0201 증보 v2 H7: the contract is fixed (`plugin_install_args_schema`,
-    // `PLUGIN_INSTALL_REQUIRED_ROLE`), the route is not (ADR-0113 P3, #3889). Until
-    // it lands a proposal makes no card — never a card whose executor always fails.
-    DeclaredAction {
-        id: ACTION_PLUGIN_INSTALL,
-        title: "앱 설치",
-        summary: "공식 앱 하나를 워크스페이스에 설치해요. 토큰은 oort에 저장하지 않아요.",
-        unavailable_reason: "아직 설치 경로가 없어요.",
     },
 ];
 
@@ -1901,7 +1982,8 @@ mod tests {
                 "agent.invite",
                 "workspace.unfurl.update",
                 "workspace.memory.update",
-                "workspace.work_tier.update"
+                "workspace.work_tier.update",
+                "plugin.install"
             ]
         );
         assert_eq!(
@@ -1909,15 +1991,16 @@ mod tests {
                 .iter()
                 .map(|declared| declared.id)
                 .collect::<Vec<_>>(),
-            vec!["webhook.create", "member.role.set", "plugin.install"]
+            vec!["webhook.create", "member.role.set"]
         );
     }
 
-    /// ADR-0201 증보 v2 H6 / H13-A13·A14: the helper's list is exactly H6-1's eight,
-    /// every one executable; the three new settings actions are the only
-    /// team-AI-only rows, so the Agent Port's list is the eight v1 actions.
+    /// ADR-0201 증보 v2 H6 / H13-A13·A14 + H7 (#3889): the helper's list is H6-1's
+    /// eight plus `plugin.install`, every one executable; the three settings
+    /// actions and `plugin.install` are the only team-AI-only rows, so the Agent
+    /// Port's list is still the eight v1 actions.
     #[test]
-    fn the_team_ai_list_is_h6_and_only_the_new_settings_actions_are_helper_only() {
+    fn the_team_ai_list_is_h6_plus_plugin_install_and_only_those_are_helper_only() {
         assert_eq!(
             TEAM_AI_ACTION_IDS,
             [
@@ -1929,6 +2012,7 @@ mod tests {
                 "workspace.unfurl.update",
                 "workspace.memory.update",
                 "workspace.work_tier.update",
+                "plugin.install",
             ]
         );
         for id in TEAM_AI_ACTION_IDS {
@@ -1942,7 +2026,6 @@ mod tests {
             ACTION_INVITE_CREATE,
             ACTION_AGENT_INVITE,
             ACTION_HOSTED_CHANNELS_GRANT,
-            ACTION_PLUGIN_INSTALL,
         ] {
             assert!(!TEAM_AI_ACTION_IDS.contains(&banned), "{banned}");
         }
@@ -1956,7 +2039,8 @@ mod tests {
             [
                 ACTION_WORKSPACE_UNFURL_UPDATE,
                 ACTION_WORKSPACE_MEMORY_UPDATE,
-                ACTION_WORKSPACE_WORK_TIER_UPDATE
+                ACTION_WORKSPACE_WORK_TIER_UPDATE,
+                ACTION_PLUGIN_INSTALL
             ]
         );
         assert_eq!(
@@ -2002,18 +2086,21 @@ mod tests {
         assert_eq!(unfurl["required"], json!(["enabled"]));
     }
 
-    /// H7 / H13-A16 (text half): `plugin.install` is declared, not executable; its
-    /// contract is the official four with an Admin decider; and the helper's honest
-    /// line carries the catalog's own reason and never echoes an unknown id.
+    /// H7 (#3889): `plugin.install` is executable — an Admin decides, there is no
+    /// one-time value, only the official four may be named, the helper alone may
+    /// propose it, and the card reads in plain words with the egress on it (D5).
     #[test]
-    fn plugin_install_is_a_declared_contract_with_an_honest_line() {
-        assert!(action_by_id(ACTION_PLUGIN_INSTALL).is_none());
-        let declared = declared_action(ACTION_PLUGIN_INSTALL).expect("declared");
-        assert_eq!(declared.unavailable_reason, "아직 설치 경로가 없어요.");
-        assert_eq!(PLUGIN_INSTALL_REQUIRED_ROLE, RequiredRole::Admin);
-        assert_eq!(PLUGIN_INSTALL_SECRET_DELIVERY, SecretDelivery::None);
+    fn plugin_install_is_an_executable_helper_only_admin_action() {
+        let action = action_by_id(ACTION_PLUGIN_INSTALL).expect("registered");
+        assert!(declared_action(ACTION_PLUGIN_INSTALL).is_none());
+        assert_eq!(action.required_role, RequiredRole::Admin);
+        assert_eq!(action.required_role, PLUGIN_INSTALL_REQUIRED_ROLE);
+        assert_eq!(action.secret_delivery, SecretDelivery::None);
+        assert_eq!(action.proposers, Proposers::TeamAiOnly);
+        assert_eq!(action.risk, Risk::Approval);
         let schema = plugin_install_args_schema();
         assert_eq!(schema["additionalProperties"], json!(false));
+        assert_eq!(schema["required"], json!(["pluginId"]));
         assert_eq!(
             schema["properties"]["pluginId"]["enum"],
             json!([
@@ -2023,15 +2110,68 @@ mod tests {
                 "com.momo.plugins.drive"
             ])
         );
-        let line = plugin_install_unavailable_line(&json!({"pluginId": "com.momo.plugins.github"}));
+        assert_eq!(action.args_schema(), schema);
+
+        let egress = vec!["api.githubcopilot.com".to_string()];
         assert_eq!(
-            line,
-            "GitHub 앱은 아직 설치 경로가 없어요. 준비되면 설치 카드를 띄울게요."
+            plugin_install_rows(
+                "GitHub",
+                "1.0.0",
+                &egress,
+                PluginInstallBefore::NotInstalled
+            ),
+            vec![
+                action_row("앱", "GitHub 1.0.0"),
+                action_row("연결 대상", "api.githubcopilot.com"),
+                action_row("상태", "설치 안 됨 → 설치됨(켜짐)"),
+                action_row("연결", "각자 설정의 앱 화면에서 내 권한을 직접 허용해요"),
+            ]
         );
-        let unknown =
-            plugin_install_unavailable_line(&json!({"pluginId": "evil.plugin <@everyone>"}));
-        assert!(unknown.contains("아직 설치 경로가 없어요"), "{unknown}");
-        assert!(!unknown.contains("evil"), "{unknown}");
+        assert_eq!(
+            plugin_install_rows("Google Drive", "1.0.0", &[], PluginInstallBefore::Disabled)[1],
+            action_row("연결 대상", "없음"),
+            "an empty egress list reads as 없음, never as a missing row"
+        );
+        assert_eq!(
+            plugin_install_summary("GitHub"),
+            "에이전트가 제안했어요. 승인하면 관리자 권한으로 워크스페이스에 GitHub 앱을 설치해요. \
+             토큰은 oort에 저장하지 않아요."
+        );
+        assert_eq!(
+            plugin_install_result_body("GitHub"),
+            "GitHub 앱을 설치했어요"
+        );
+        assert_eq!(
+            plugin_install_result_rows("GitHub", "1.0.0", &egress)[2],
+            action_row(
+                "다음",
+                "각자 설정의 앱 화면에서 내 권한을 허용하면 에이전트가 써요"
+            )
+        );
+        // The label comes from the static table: an id outside the four has none.
+        assert_eq!(
+            plugin_install_label("com.momo.plugins.github"),
+            Some("GitHub")
+        );
+        assert_eq!(plugin_install_label("evil.plugin <@everyone>"), None);
+    }
+
+    /// The prompt names the four apps, sends installs to the card, keeps connecting
+    /// out of it, and promises no route that does not exist.
+    #[test]
+    fn the_prompt_line_proposes_the_install_and_keeps_the_grant_with_the_member() {
+        let line = plugin_install_prompt_line();
+        for (_, label) in PLUGIN_INSTALL_PLUGINS {
+            assert!(line.contains(label), "{line}");
+        }
+        assert!(line.contains(ACTION_PLUGIN_INSTALL), "{line}");
+        assert!(line.contains("관리자가 승인"), "{line}");
+        assert!(
+            line.contains("직접"),
+            "the grant stays the member's own: {line}"
+        );
+        assert!(!line.contains("아직 설치 경로가 없어요"), "{line}");
+        assert!(!line.contains("준비되면"), "{line}");
     }
 
     /// The new cards say before → after in plain words, and the memory card names
