@@ -583,3 +583,34 @@ async fn the_alias_status_is_server_written() {
     assert_eq!(status, 400, "the status key is not PATCH-able");
     assert_eq!(h.alias_status().await["claude"], json!("registered"));
 }
+
+/// H8 calls the switch again on an already-on helper (the next-step card). That
+/// must stay a 200 with the same three aliases — and it must not need UPDATE on
+/// `member_handle_alias`, which migration 137 does not grant `momo_app` (a 42501
+/// there would read as `team_ai_unavailable` and switch the helper OFF).
+#[tokio::test]
+#[ignore = "requires DATABASE_URL (pgvector pg18 superuser)"]
+async fn switching_on_twice_keeps_the_aliases_without_update_rights() {
+    let h = harness().await;
+    sqlx::query("REVOKE UPDATE ON member_handle_alias FROM momo_app")
+        .execute(&h.su)
+        .await
+        .expect("revoke");
+    let helper = h.enable().await;
+    let before = h.aliases().await;
+    let status_before = h.alias_status().await;
+    let (status, body) = h.patch_settings(json!({"team_ai_fast_path": true})).await;
+    assert_eq!(status, 200, "a second switch-on is not a conflict: {body}");
+    assert_eq!(h.aliases().await, before);
+    assert_eq!(before.len(), 3);
+    assert!(before.iter().all(|(_, member)| *member == helper));
+    assert_eq!(h.alias_status().await, status_before);
+    let on: bool = sqlx::query_scalar(
+        "SELECT (settings->>'team_ai_fast_path')::boolean FROM workspace WHERE id = $1",
+    )
+    .bind(h.t.workspace)
+    .fetch_one(&h.su)
+    .await
+    .unwrap();
+    assert!(on, "the helper stays on");
+}

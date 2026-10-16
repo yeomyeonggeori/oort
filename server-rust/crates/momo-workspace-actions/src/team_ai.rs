@@ -296,15 +296,24 @@ pub async fn register_aliases_in_tx(
         let status = if handle_taken {
             AliasStatus::Taken
         } else {
-            let owner: Option<Uuid> = sqlx::query_scalar(
+            // `DO NOTHING`, then read the owner: re-enabling an already-on helper
+            // must not need UPDATE on the table (momo_app holds SELECT/INSERT/
+            // DELETE only, migration 137).
+            sqlx::query(
                 "INSERT INTO member_handle_alias (workspace_id, member_id, alias, alias_norm) \
                  VALUES ($1, $2, $3, $3) \
-                 ON CONFLICT (workspace_id, alias_norm) DO UPDATE \
-                    SET alias_norm = member_handle_alias.alias_norm \
-                 RETURNING member_id",
+                 ON CONFLICT (workspace_id, alias_norm) DO NOTHING",
             )
             .bind(workspace_id)
             .bind(team_ai_member_id)
+            .bind(alias)
+            .execute(&mut *conn)
+            .await?;
+            let owner: Option<Uuid> = sqlx::query_scalar(
+                "SELECT member_id FROM member_handle_alias \
+                  WHERE workspace_id = $1 AND alias_norm = $2",
+            )
+            .bind(workspace_id)
             .bind(alias)
             .fetch_optional(&mut *conn)
             .await?;
@@ -348,28 +357,6 @@ pub async fn register_aliases_in_tx(
     .execute(&mut *conn)
     .await?;
     Ok(outcome)
-}
-
-/// The aliases that call `member_id` right now. A real member holding the same
-/// handle wins even if the release trigger has not run yet (read-time half of
-/// H2-4), so an alias can never address someone else's mention.
-pub async fn live_aliases_in_tx(
-    conn: &mut PgConnection,
-    workspace_id: Uuid,
-    member_id: Uuid,
-) -> Result<Vec<String>, DbError> {
-    Ok(sqlx::query_scalar(
-        "SELECT a.alias_norm FROM member_handle_alias a \
-          WHERE a.workspace_id = $1 AND a.member_id = $2 \
-            AND NOT EXISTS (SELECT 1 FROM member o \
-                             WHERE o.workspace_id = a.workspace_id AND o.id <> a.member_id \
-                               AND o.deleted_at IS NULL AND lower(o.handle) = a.alias_norm) \
-          ORDER BY a.alias_norm",
-    )
-    .bind(workspace_id)
-    .bind(member_id)
-    .fetch_all(&mut *conn)
-    .await?)
 }
 
 /// Turn the switch off: the member stays (history, authorship) but is paused.
