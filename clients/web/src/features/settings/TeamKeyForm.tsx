@@ -12,6 +12,7 @@ import { initialPresetId, teamKeyPresets } from "@momo/core/features/settings/te
 import { BUDGET_INPUT_ERROR, budgetHint, limitsCompanyOf, parseBudgetUsd } from "@momo/core/features/settings/keyLimits";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
+import { SecretInput } from "@/features/settings/SecretInput";
 import { cn } from "@/design/lib/cn";
 import { validateBaseUrl } from "./oauthGrant";
 
@@ -352,10 +353,9 @@ export function TeamKeyForm({
       <label htmlFor={inputId} className={fieldLabel}>
         API 키
       </label>
-      <Input
+      <SecretInput
         id={inputId}
         ref={inputRef}
-        type="password"
         name="team-api-key"
         autoComplete="new-password"
         autoCorrect="off"
@@ -371,6 +371,7 @@ export function TeamKeyForm({
         aria-invalid={fieldError ? true : undefined}
         onInput={() => setConfirmReplace(false)}
         data-testid={tid("key-input")}
+        revealTestId={tid("key-reveal")}
       />
       {fieldError && (
         <p id={errorId} className="break-keep text-meta text-danger" role="alert">

@@ -647,6 +647,29 @@ describe("흐름 ① 구독 로그인 (#2816 모달)", () => {
 describe("흐름 ② 팀 키 (운영자) · 비밀값", () => {
   const SECRET = ["sk", "-test-", "Q7mZ2xL9vB4nR8tK1wE6yU3i"].join("");
 
+  it("눈 버튼(#3885): 기본 가림 → 보기 → 저장하면 칸은 비고 다시 가림, 저장 뒤 키는 어디에도 되보이지 않는다", async () => {
+    vi.mocked(fetchProviderLink).mockResolvedValue(EMPTY_LINK);
+    const host = mountCard();
+    await until(host, "ai-connect-card-team");
+    act(() => q(host, "ai-connect-card-team-key")?.click());
+    const input = (await until(host, "ai-connect-card-key-input")) as HTMLInputElement;
+    const eye = q(host, "ai-connect-card-key-reveal") as HTMLButtonElement;
+    expect(input.type).toBe("password");
+    expect(eye.getAttribute("aria-pressed")).toBe("false");
+    input.value = SECRET;
+    act(() => eye.click());
+    expect(input.type).toBe("text");
+    expect(input.value).toBe(SECRET);
+    expect(input.getAttribute("autocomplete")).toBe("new-password");
+    vi.mocked(putProviderLink).mockImplementation(() => new Promise<ProviderLink>(() => undefined));
+    await act(async () => (q(host, "ai-connect-card-preset-anthropic") as HTMLInputElement).click());
+    await act(async () => (q(host, "ai-connect-card-key-save") as HTMLButtonElement).click());
+    expect(input.value).toBe("");
+    expect(input.type).toBe("password");
+    expect(eye.getAttribute("aria-pressed")).toBe("false");
+    expect(host.textContent).not.toContain(SECRET);
+  });
+
   it("키 넣기 → 저장하고 확인: 기존 PUT → test, 줄이 제자리에서 바뀌고 키는 어디에도 남지 않는다", async () => {
     vi.mocked(fetchProviderLink).mockResolvedValue(EMPTY_LINK);
     const logs = [vi.spyOn(console, "log"), vi.spyOn(console, "info"), vi.spyOn(console, "warn"), vi.spyOn(console, "error")];
