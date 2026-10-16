@@ -383,7 +383,8 @@ pub fn catalog_definitions() -> Vec<ToolDefinition> {
             description: "Propose ONE simple workspace change that the person who asked wants \
              (change an agent's name or profile, create a channel, add people to a channel, \
              change the workspace welcome text or role labels, turn link previews on or off, \
-             turn team memory off or pause it, change how work resumes when a host is lost). \
+             turn team memory off or pause it, change how work resumes when a host is lost, \
+             install one of the official apps GitHub, Notion, Linear or Google Drive). \
              This only makes an approval card: nothing changes until a person approves it, so \
              say you proposed it, never that it is done. Use only the listed actionIds. Do not \
              use it for anything else, and never put a key, token or password in `args`.",
