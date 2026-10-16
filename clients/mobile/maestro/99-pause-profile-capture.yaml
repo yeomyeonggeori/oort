@@ -1,0 +1,25 @@
+appId: app.momo.ios
+name: 99-pause-profile-capture
+---
+# 99-pause-profile-capture — 프로필 시트의 방해 금지 줄과 알림 일시 중지 줄 (#2899, ADR-0204 D2).
+#
+# 표면 `-momoMeasure SHELL-PAUSE-STATUS`(방해 금지 + 기한), `SHELL-PAUSE-NOTIFY`(일시 중지 +
+# 기한), `SHELL-PAUSE-NOTIFY-OPEN`(기한 없는 옛 행)은 진짜 셸 위에 진짜 프로필 시트를 세우고
+# 서버만 하네스의 씨앗이다. 이 흐름은 시트 맨 위를 한 장 찍고 알림 묶음까지 내려 한 장 더 찍는다.
+# 시뮬레이터는 CLI 로 스크롤할 수 없어서 Maestro 가 쓴다. 앞에 `LIGHT-` 를 붙이면 라이트다.
+#
+#   xcrun simctl launch booted app.momo.ios --args \
+#     -momoMeasure SHELL-PAUSE-STATUS -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro test -e SHOT=pause-status-dark clients/mobile/maestro/99-pause-profile-capture.yaml
+- extendedWaitUntil:
+    visible:
+      id: "self-profile-name"
+    timeout: 60000
+# dismiss-dev-logbox 를 부르지 않는다: 프로필 시트에서 그 좌표(92%,94%)는 「알림 켜기」 줄의 끝이다.
+- takeScreenshot: ${SHOT}-top
+- scrollUntilVisible:
+    element:
+      id: "profile-pause-row"
+    direction: DOWN
+    timeout: 20000
+- takeScreenshot: ${SHOT}-notify

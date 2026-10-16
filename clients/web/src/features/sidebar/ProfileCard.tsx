@@ -27,6 +27,7 @@ import {
   PresenceBadge,
   PresenceStatusItems,
 } from "./PresenceControl";
+import { PresenceDndDialog } from "./PresenceDndDialog";
 import { SetStatusDialog } from "./SetStatusDialog";
 import { useCustomStatusView } from "./useCustomStatusView";
 
@@ -88,6 +89,7 @@ export function ProfileCard({
   const [open, setOpen] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [setStatusOpen, setSetStatusOpen] = useState(false);
+  const [dndOpen, setDndOpen] = useState(false);
   const effective = effectivePresence(selfMember?.presenceStatus, connected);
   const { visible: custom, accessible: customName } =
     useCustomStatusView(selfMember);
@@ -182,6 +184,12 @@ export function ProfileCard({
             selfMemberId={selfMemberId}
             selfMember={selfMember}
             onWrote={() => setOpen(false)}
+            onChooseDnd={() => {
+              // 방해 금지는 기한을 고르고 나서야 켜진다(ADR-0204 D2): 메뉴를 닫고
+              // 기한 다이얼로그에 넘긴다. 쓰기는 거기서 한 번 난다.
+              setOpen(false);
+              setDndOpen(true);
+            }}
           />
           <DropdownMenuSeparator />
           <DropdownMenuItem
@@ -242,6 +250,15 @@ export function ProfileCard({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <PresenceDndDialog
+        open={dndOpen}
+        onOpenChange={setDndOpen}
+        workspaceId={workspaceId}
+        selfMemberId={selfMemberId}
+        selfMember={selfMember}
+        opener={triggerRef.current}
+      />
 
       <SetStatusDialog
         open={setStatusOpen}
