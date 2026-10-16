@@ -766,9 +766,9 @@ paths:
         approve, not who may read. Rows with `executable: false` are
         capabilities a later batch opens and always carry a non-null
         `unavailableReason`; they carry no `requiredRole` and no `argsSchema`,
-        because the batch that opens one decides both. `plugin.install` is one
-        (ADR-0201 증보 v2 H7: "아직 설치 경로가 없어요." until the ADR-0113 P3
-        install route exists); a proposal of it makes no card. Nothing here executes:
+        because the batch that opens one decides both (`webhook.create` and
+        `member.role.set` today; `plugin.install` was one until ADR-0113 P3's
+        install route existed, ADR-0201 증보 v2 H7 / #3889). Nothing here executes:
         an agent proposes with `oort_action_propose` and a person's decision is
         what runs the action, with the approver's own authority.
       security: [{bearerAuth: []}]
@@ -14257,7 +14257,15 @@ components:
         (`PUT …/unfurl-settings`, `PATCH …/memory/settings`, `PUT
         …/work-tier-policy`) with the approver's authority, and its result
         `ref` is `{type: workspace_settings, id: <workspace id>}`.
-      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update"]
+        `plugin.install` (`{pluginId}`, one of the four official plugins,
+        admin; ADR-0201 증보 v2 H7, #3889) is team-AI-only the same way. Its
+        card names the app, its version and the domains it reaches out to
+        (ADR-0113 D5), pins the manifest digest it showed, and approving runs
+        `POST …/plugins/{plugin}/install` (enabled) with the approver's
+        authority — the install carries no grant and no token (D1-A, D2); each
+        member connects for themselves. Its result `ref` is the same
+        `{type: workspace_settings, id: <workspace id>}`.
+      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install"]
 
     SuggestableCommandId:
       type: string

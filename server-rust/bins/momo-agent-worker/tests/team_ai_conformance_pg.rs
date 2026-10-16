@@ -21,7 +21,7 @@
 //! | `the_off_switch_closes_the_run_and_calls_no_model` | ignore `team_ai_fast_path` |
 //! | `the_per_requester_ceiling_stops_the_fourth_card` | drop the pending count |
 //! | `the_fast_path_reaches_a_card_within_the_budget` | (measurement, not a gate) |
-//! | `an_install_request_answers_honestly_and_makes_no_card` | drop `not_yet_available` (→ out_of_scope hand-off) or move `plugin.install` into `ACTIONS` |
+//! | `an_install_request_becomes_a_card_that_installs_nothing_until_decided` | take `plugin.install` out of `ACTIONS`/`TEAM_AI_ACTION_IDS`, read the registry as the wrong role (42501), drop the egress row, or skip the `nothing to change` / requester-role refusals |
 //! | `the_helper_raises_the_new_settings_cards_from_the_worker_role` | read `mem_settings` in the memory resolver (42501 as `momo_worker`) or drop an id from `TEAM_AI_ACTION_IDS` |
 
 use std::path::PathBuf;
@@ -975,18 +975,36 @@ async fn the_prompt_names_no_private_channel_and_a_guest_gets_no_member_list() {
     );
 }
 
-/// ADR-0201 증보 v2 H7 / H13-A16: asking the helper to install an app makes **no**
-/// approval row and no card, and the person is told, in the helper's own words,
-/// that the install route does not exist yet — not the generic hand-off.
+/// ADR-0201 증보 v2 H7 (#3889): asking the helper to install an app raises ONE
+/// pending approval card — from the real `momo_worker` role, which reads the registry
+/// and this workspace's install state — that names the app and version and **where it
+/// reaches out to** (ADR-0113 D5), and installs nothing before an admin decides.
+/// An app that is already installed and enabled is not a proposal; an id outside the
+/// official four, and a requester who could not approve it, make no card.
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
-async fn an_install_request_answers_honestly_and_makes_no_card() {
+async fn an_install_request_becomes_a_card_that_installs_nothing_until_decided() {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let pool = momo_worker_pool().await;
     reset_instance(&su).await;
     let t = seed(&su, &pool, true).await;
     seed_link(&su, t.owner_id).await;
+    let installs = |plugin: &'static str| {
+        let (su, workspace) = (su.clone(), t.workspace_id);
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT count(*) FROM workspace_plugin_install WHERE workspace_id = $1 AND plugin_id = $2",
+            )
+            .bind(workspace)
+            .bind(plugin)
+            .fetch_one(&su)
+            .await
+            .unwrap()
+        }
+    };
+
+    // The owner asks: one pending card, the app's own egress on it, nothing installed.
     let provider = Arc::new(MockChatProvider::echo().with_tool_calls([propose(
         "plugin.install",
         json!({"pluginId": "com.momo.plugins.github"}),
@@ -994,22 +1012,141 @@ async fn an_install_request_answers_honestly_and_makes_no_card() {
     let w = worker_with(provider, |_| {}).await;
     let (run_id, _) = enqueue(&pool, &t, t.owner_id, "human", "깃허브 앱 설치해줘", None).await;
     drain(&w).await;
-    assert!(
-        approvals(&su, &t).await.is_empty(),
-        "no card for plugin.install"
-    );
-    let (status, _) = run_status(&su, run_id).await;
-    assert_eq!(status, "succeeded");
-    let last = agent_messages(&su, &t).await.pop().expect("an answer");
-    let body = last.1.expect("a body");
+    let rows = approvals(&su, &t).await;
+    assert_eq!(rows.len(), 1, "one card for plugin.install");
+    let (approval, status, action_type, payload) = rows[0].clone();
     assert_eq!(
-        body,
-        "GitHub 앱은 아직 설치 경로가 없어요. 준비되면 설치 카드를 띄울게요."
+        (status.as_str(), action_type.as_str()),
+        ("pending", "workspace_action")
     );
-    assert_ne!(
-        last.2["kind"], "team_ai.delegate.v1",
-        "not the generic hand-off"
+    assert_eq!(payload["action"]["id"], "plugin.install");
+    assert_eq!(
+        payload["action"]["args"],
+        json!({"pluginId": "com.momo.plugins.github"})
     );
+    assert_eq!(
+        payload["action"]["pins"]["pluginId"], "com.momo.plugins.github",
+        "the card pins the app it was drawn from"
+    );
+    assert!(
+        payload["action"]["pins"]["digest"]
+            .as_str()
+            .is_some_and(|digest| digest.starts_with("sha256:")),
+        "and the manifest it disclosed: {payload}"
+    );
+    assert_eq!(payload["action"]["pins"]["before"], "not_installed");
+    let (run_state, _) = run_status(&su, run_id).await;
+    assert_eq!(run_state, "awaiting_approval");
+    let card = agent_messages(&su, &t)
+        .await
+        .into_iter()
+        .rev()
+        .find(|message| message.2.get("action").is_some())
+        .expect("a card");
+    assert_eq!(card.2["action"]["id"], "plugin.install");
+    assert_eq!(card.2["action"]["required_role"], "admin");
+    let shown = card.2["action"]["rows"].to_string();
+    for must_show in [
+        "GitHub 1.0.0",
+        "api.githubcopilot.com",
+        "설치 안 됨 → 설치됨(켜짐)",
+    ] {
+        assert!(
+            shown.contains(must_show),
+            "{must_show} missing from the card: {shown}"
+        );
+    }
+    assert!(
+        card.2["summary"]
+            .as_str()
+            .is_some_and(|summary| summary.contains("GitHub 앱을 설치해요")
+                && summary.contains("토큰은 oort에 저장하지 않아요")),
+        "the summary names the app and the custody promise: {}",
+        card.2["summary"]
+    );
+    assert_eq!(
+        installs("com.momo.plugins.github").await,
+        0,
+        "nothing installed by a proposal"
+    );
+    sqlx::query("UPDATE approval SET status = 'expired' WHERE workspace_id = $1")
+        .bind(t.workspace_id)
+        .execute(&su)
+        .await
+        .unwrap();
+    let _ = approval;
+
+    // Already installed and enabled: nothing to approve, so no card.
+    let audit: Uuid = sqlx::query_scalar(
+        "INSERT INTO audit_log (workspace_id, actor_member_id, subject_member_id, action) \
+         VALUES ($1, $2, $2, 'plugin.installed') RETURNING id",
+    )
+    .bind(t.workspace_id)
+    .bind(t.owner_id)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO workspace_plugin_install \
+           (workspace_id, plugin_id, enabled, installed_by, installed_audit_id) \
+         VALUES ($1, 'com.momo.plugins.github', true, $2, $3)",
+    )
+    .bind(t.workspace_id)
+    .bind(t.owner_id)
+    .bind(audit)
+    .execute(&su)
+    .await
+    .unwrap();
+    let before = approvals(&su, &t).await.len();
+    let provider = Arc::new(MockChatProvider::echo().with_tool_calls([propose(
+        "plugin.install",
+        json!({"pluginId": "com.momo.plugins.github"}),
+    )]));
+    let w = worker_with(provider, |_| {}).await;
+    let (run_id, _) = enqueue(
+        &pool,
+        &t,
+        t.owner_id,
+        "human",
+        "깃허브 앱 또 설치해줘",
+        None,
+    )
+    .await;
+    drain(&w).await;
+    assert_eq!(
+        approvals(&su, &t).await.len(),
+        before,
+        "no second card for an installed app"
+    );
+    let (run_state, _) = run_status(&su, run_id).await;
+    assert_ne!(run_state, "awaiting_approval");
+
+    // An app outside the official four, and a requester who cannot approve: no card.
+    for (requester, plugin, label) in [
+        (
+            t.owner_id,
+            "external_webhook",
+            "the webhook plugin is not installable from a card",
+        ),
+        (t.owner_id, "com.momo.plugins.unknown", "an unknown app"),
+        (
+            t.member_id,
+            "com.momo.plugins.notion",
+            "a plain member cannot approve an install",
+        ),
+    ] {
+        let before = approvals(&su, &t).await.len();
+        let provider = Arc::new(
+            MockChatProvider::echo()
+                .with_tool_calls([propose("plugin.install", json!({"pluginId": plugin}))]),
+        );
+        let w = worker_with(provider, |_| {}).await;
+        enqueue(&pool, &t, requester, "human", "앱 설치해줘", None).await;
+        drain(&w).await;
+        assert_eq!(approvals(&su, &t).await.len(), before, "{label}: no card");
+    }
+    assert_eq!(installs("com.momo.plugins.notion").await, 0);
+    assert_eq!(installs("external_webhook").await, 0);
 }
 
 /// ADR-0201 증보 v2 H6-1: the three new settings cards (and `workspace.settings.update`,
