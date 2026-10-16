@@ -12,6 +12,7 @@ import {
 } from 'expo-notifications';
 
 import {shouldAskNotifications} from '../features/onboarding/phoneFlow';
+import {dismissApprovalNotifications} from './approvalNotifications';
 import {PUSH_ACTION} from './contract';
 import {parsePushEnvelope, threadRootId, type PushEnvelope} from './envelope';
 
@@ -129,6 +130,67 @@ export interface PushActionContext {
 }
 
 /**
+ * 알림의 「승인」·「거절」 한 번이 뜻하는 일의 전부 (#3926).
+ *
+ * 결정을 보내고, 원장이 답한 대로 결과를 해석하고, 승인이 결정됐으면 그 승인의
+ * 알림을 걷는다. `handlePushResponse`는 봉투와 워크스페이스를 확인한 **뒤에** 이
+ * 함수를 부른다(보안 경계는 그쪽 한 곳이다). 이 함수에는 인자 말고는 알림도,
+ * 화면도, 상태도 없다. iOS 네이티브 처리기(#3931, ADR-0204 D6)가 이 두 버튼을
+ * 넘겨받는 날 JS 쪽에서 바뀌는 것은 이 함수를 부르는 한 줄이고, 네이티브 쪽은 이
+ * 함수가 하는 일(보내기, 원장 답 해석, 걷기)을 그대로 따라 하면 된다.
+ *
+ * ## 걷는 때
+ *
+ * 결정이 기록됐거나(`committed`) 이미 결정돼 있을 때(`superseded`: 다른 기기의
+ * 결정, 만료) 걷는다. 두 경우 모두 그 승인의 버튼은 이제 아무것도 바꾸지 못한다.
+ * 오류일 때는 **걷지 않는다** — 결정이 기록되지 않았고 승인은 여전히 대기다.
+ * 알림이 남아 있어야 사람이 다시 누르거나 눌러서 앱에서 마무리할 수 있다.
+ *
+ * `clientDecisionId`는 호출자가 정할 수 있다. 같은 키로 같은 판정을 다시 보내면
+ * 서버가 원래 영수증을 재생하므로(두 번 눌러도 한 번의 결정), 키를 알림 요청
+ * 식별자에서 결정적으로 만드는 쪽(네이티브 처리기)이 같은 모양으로 부를 수 있다.
+ */
+export async function decideFromNotification(
+  workspaceId: string,
+  approvalId: string,
+  approved: boolean,
+  clientDecisionId: string = newDecisionId(),
+): Promise<PushActionResult> {
+  const outcome = await decideApproval(
+    workspaceId,
+    approvalId,
+    approved,
+    clientDecisionId,
+  );
+  if (outcome.kind === 'error') {
+    return {kind: 'failed', reason: outcome.errorCopy ?? 'decision failed'};
+  }
+  // 기록됐든 이미 결정돼 있든 이 승인은 끝났다. 걷는 일이 실패해도 결정의 결과는
+  // 바뀌지 않으므로(`dismissApprovalNotifications`는 던지지 않는다) 기다리되 묻지 않는다.
+  await dismissApprovalNotifications(approvalId);
+  // `superseded` counts as decided: the approval was already settled
+  // elsewhere (another device, or it expired). Reporting that as a failure
+  // would invite a retry against something that can no longer change.
+  //
+  // But it is NOT the same event as "this tap recorded the decision", and
+  // collapsing the two was a lie in the dangerous direction (2R H5): a
+  // rejection tapped from the lock screen was reported as a rejection even
+  // when the ledger held an APPROVAL. So the two are reported apart, and a
+  // settled one carries the direction the ledger actually holds.
+  if (outcome.kind === 'superseded') {
+    const settled: PushActionResult = {
+      kind: 'decided',
+      approved,
+      record: 'settled',
+    };
+    if (outcome.status === 'approved') settled.recordedApproved = true;
+    if (outcome.status === 'rejected') settled.recordedApproved = false;
+    return settled;
+  }
+  return {kind: 'decided', approved, record: 'pressed'};
+}
+
+/**
  * Turn a notification response into the action it stands for.
  *
  * The workspace equality check is the security boundary, not a sanity check.
@@ -171,36 +233,13 @@ export async function handlePushResponse(
       if (!envelope.approvalId) {
         return {kind: 'ignored', reason: 'no approval on this notification'};
       }
-      const approved = action === PUSH_ACTION.approve;
-      const outcome = await decideApproval(
+      // 결정 로직은 아래 한 함수다. iOS 네이티브 처리기(#3931)가 이 두 버튼을
+      // 넘겨받는 날, 바꿀 곳은 이 호출 하나다.
+      return decideFromNotification(
         envelope.workspaceId,
         envelope.approvalId,
-        approved,
-        newDecisionId(),
+        action === PUSH_ACTION.approve,
       );
-      if (outcome.kind === 'error') {
-        return {kind: 'failed', reason: outcome.errorCopy ?? 'decision failed'};
-      }
-      // `superseded` counts as decided: the approval was already settled
-      // elsewhere (another device, or it expired). Reporting that as a failure
-      // would invite a retry against something that can no longer change.
-      //
-      // But it is NOT the same event as "this tap recorded the decision", and
-      // collapsing the two was a lie in the dangerous direction (2R H5): a
-      // rejection tapped from the lock screen was reported as a rejection even
-      // when the ledger held an APPROVAL. So the two are reported apart, and a
-      // settled one carries the direction the ledger actually holds.
-      if (outcome.kind === 'superseded') {
-        const settled: PushActionResult = {
-          kind: 'decided',
-          approved,
-          record: 'settled',
-        };
-        if (outcome.status === 'approved') settled.recordedApproved = true;
-        if (outcome.status === 'rejected') settled.recordedApproved = false;
-        return settled;
-      }
-      return {kind: 'decided', approved, record: 'pressed'};
     }
 
     case PUSH_ACTION.quickReply: {
