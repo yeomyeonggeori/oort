@@ -294,10 +294,11 @@ pub use run::{
     load_eligible_agent_in_tx, lock_gateway_run_in_tx, lock_run_for_cancel_in_tx,
     mark_run_started_in_tx, park_run_for_approval_in_tx, park_runs_for_control_window_in_tx,
     requeue_run_from_approval_in_tx, resume_runs_from_control_window_in_tx,
-    succeed_parked_run_in_tx, terminal_run_ids_in_tx, trigger_summary, validated_run_limit,
-    AgentRunRow, AgentRunSummaryPage, AgentRunSummaryRow, CancellableRun, CompletionStatusError,
-    CreatedRun, EligibleAgent, GatewayRunSnapshot, NewAgentRun, ParkedRun, RunBindingRejected,
-    RunStatus, RunTrigger, WelcomeKind, TRIGGER_SUMMARY_LIMIT,
+    run_trigger_message_in_tx, succeed_parked_run_in_tx, terminal_run_ids_in_tx, trigger_summary,
+    validated_run_limit, AgentRunRow, AgentRunSummaryPage, AgentRunSummaryRow, CancellableRun,
+    CompletionStatusError, CreatedRun, EligibleAgent, GatewayRunSnapshot, NewAgentRun, ParkedRun,
+    RunBindingRejected, RunStatus, RunTrigger, WelcomeKind, PROP_ANSWERS_MESSAGE_ID,
+    TRIGGER_SUMMARY_LIMIT,
 };
 pub use run_event::{
     append_run_event_in_tx, delete_expired_run_events_in_tx, record_tool_call_in_tx,
