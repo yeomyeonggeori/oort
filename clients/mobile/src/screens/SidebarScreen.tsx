@@ -571,9 +571,11 @@ export default function SidebarScreen({
                   묶음이고, 턴이 없으면 둘 다 없다 — 비어 있는 「작업」 머리 아래에 다른 문(에이전트
                   부르기)이 서 있던 것이 모호함의 원인이었다. 에이전트 목록·작업 목록으로 가는 문은
                   + 메뉴(「AI」·「작업」)와 DM 섹션 메뉴에 그대로 있다. */}
-              {card && !searching ? (
+              {card ? (
                 <>
-                  {onOpenWorkList ? <WorkSeeAllRow onPress={onOpenWorkList} /> : null}
+                  {onOpenWorkList && !searching ? (
+                    <WorkSeeAllRow onPress={onOpenWorkList} />
+                  ) : null}
                   <WorkingCard
                     card={card}
                     directory={directoryQuery.directory}
@@ -1027,7 +1029,7 @@ function WorkSeeAllRow({onPress}: {onPress: () => void}): React.JSX.Element {
       </Text>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="작업 모두 보기"
+        accessibilityLabel="에이전트 작업 모두 보기"
         onPress={onPress}
         hitSlop={space.sm}
         style={({pressed}) => [styles.workSeeAll, pressed && styles.rowPressed]}

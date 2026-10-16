@@ -276,7 +276,7 @@ export default function AgentDetailScreen({
           />
         ) : (
           <View style={styles.card} testID="agent-channels">
-            {placement.present.length > 0 ? (
+            {placement.present.some(channel => channel.name !== undefined) ? (
               <ChannelTags
                 names={placement.present
                   .map(channel => channel.name)

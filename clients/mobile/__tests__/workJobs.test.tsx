@@ -337,7 +337,7 @@ describe('홈 「모두 보기」 (ADR-0202 D6)', () => {
     );
     const button = await waitFor(() => screen.getByTestId('home-work-see-all'));
     expect(screen.getByTestId('home-work-head')).toHaveTextContent('에이전트 작업');
-    expect(button.props.accessibilityLabel).toBe('작업 모두 보기');
+    expect(button.props.accessibilityLabel).toBe('에이전트 작업 모두 보기');
     fireEvent.press(button);
     expect(open).toHaveBeenCalledTimes(1);
   });
