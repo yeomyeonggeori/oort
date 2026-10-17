@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import tailwind from "@tailwindcss/vite";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { availableParallelism } from "node:os";
 import path from "node:path";
 
 // Tauri expects a fixed dev port and does not want Vite to obscure Rust errors.
@@ -170,9 +171,30 @@ export default defineConfig({
   // defineConfig is typed against vitest 2.1's nested Vite 5, so Plugin
   // factories here (`react()`, `tailwind()`, the two below) fail tsc -b
   // TS2769. Intersection lets `test.env` through without that swap.
+  //
+  // Worker cap (#3796). Vitest's default is one fork per core minus one — 17 on
+  // an 18-core machine — and every fork is a full jsdom/Chromium-driving
+  // process. Measured on this tree (shared machine, wall / CPU): 17 forks
+  // 45.5 s / 291 s, 8 forks 41.8 s / 279 s. Eight is not slower and runs
+  // half the processes next to whatever else the machine is doing (the
+  // merge-tree gate shares it with other gates and reviewers). On a smaller
+  // machine `availableParallelism() - 1` keeps the default, so a 4-vCPU CI
+  // runner still gets 3.
   test: {
     env: {
       TZ: "Asia/Seoul",
     },
+    poolOptions: {
+      forks: {
+        // tinypool refuses a max below its (cores - 1) default min, so the floor is stated.
+        minForks: 1,
+        maxForks: Math.min(8, Math.max(availableParallelism() - 1, 1)),
+      },
+    },
   },
-} as import("vite").UserConfig & { test: { env: { TZ: string } } });
+} as import("vite").UserConfig & {
+  test: {
+    env: { TZ: string };
+    poolOptions: { forks: { minForks: number; maxForks: number } };
+  };
+});

@@ -34,6 +34,16 @@ import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 
+// 이 파일은 알림이 **어디에 착지하는가**를 잰다. 착지 틴트가 스스로 물러나는 시한(이동이
+// 끝난 뒤 2초, #3921)은 `landedHighlight3921.test.tsx` 가 가짜 시계로 잰다. 여기서는 실시계
+// 위에서 「제목을 기다린 뒤 `landedIds()`」를 읽는데, 차가운 워커에서 그 사이가 2초를
+// 넘으면 착지가 정상이어도 틴트가 이미 물러나 있다 — 관측이 시한에 기대지 않게 시한만
+// 늘려 둔다. 나머지(결정·손가락)는 진짜 그대로다.
+jest.mock('../src/features/conversation/landedHighlight', () => ({
+  ...jest.requireActual('../src/features/conversation/landedHighlight'),
+  LANDED_HOLD_MS: 10 * 60 * 1000,
+}));
+
 // =============================================================================
 // 알림 본문을 누르면 그 자리로 간다 (#2569, ADR-0187 D4).
 //
@@ -291,6 +301,12 @@ interface FetchOptions {
    * 그 읽기를 붙들어 두려고 있다(#2632 N-3). `undefined` 면 서버 그대로.
    */
   headResponder?: (channelId: string) => Response | Promise<Response> | undefined;
+  /**
+   * `POST …/approvals/{id}/decision` 에 답한다 (#3921). 주지 않으면 결정 요청은 시험을 깨뜨린다 —
+   * **알림 탭은 결정하지 않는다**는 이 파일의 약속이다. 결정은 사람이 카드에서 누른 것이고,
+   * 그 길을 재는 시험만 이 응답자를 든다. 결정이 나가면 그 뒤의 대기 원장 읽기는 비어서 온다.
+   */
+  decisionResponder?: (approvalId: string) => Response | Promise<Response>;
 }
 
 type FetchInit = {method?: string; body?: unknown};
@@ -331,6 +347,8 @@ function serverRows(url: string): unknown[] {
 
 function installFetch(options: FetchOptions = {}): jest.Mock {
   let channelCalls = 0;
+  /** 결정이 서버에 닿았다 — 그 뒤 대기 원장은 비어서 온다(`decisionResponder`). */
+  let decided = false;
   const mock = jest.fn(async (url: string, init?: FetchInit) => {
     if (url.includes('/reactions')) return jsonResponse(200, {});
     if (url.includes('/pins')) return jsonResponse(200, {pins: []});
@@ -393,9 +411,14 @@ function installFetch(options: FetchOptions = {}): jest.Mock {
     }
     if (url.includes('/approvals')) {
       if (init?.method === 'POST') {
-        throw new Error(`a notification tap must never decide: ${url}`);
+        if (options.decisionResponder === undefined) {
+          throw new Error(`a notification tap must never decide: ${url}`);
+        }
+        decided = true;
+        const approvalId = url.split('/approvals/')[1]?.split('/')[0] ?? '';
+        return options.decisionResponder(approvalId);
       }
-      return jsonResponse(200, {approvals: [PENDING_APPROVAL]});
+      return jsonResponse(200, {approvals: decided ? [] : [PENDING_APPROVAL]});
     }
     if (url.includes('/work-sessions/shared')) {
       return jsonResponse(200, {sessions: [], nextCursor: null});
@@ -838,6 +861,95 @@ describe('세 상태 × 대상 종류 (#2569 수용기준 1·3)', () => {
       // 앞 방에서 빗나간 점프의 흔적이 없다.
       expect(screen.queryByTestId('jump-missed')).toBeNull();
     });
+  });
+});
+
+// =============================================================================
+describe('승인 푸시로 도착한 카드의 도착 강조는 결정되면 곧바로 물러난다 (#3921)', () => {
+  // 성재가 본 그대로의 흐름이다: 승인 알림 본문 탭 → 승인 카드에 착지(앰버 강조) → 카드에서
+  // 「승인」. 위 모듈 모킹이 시한을 10분으로 늘려 두었으므로 강조를 거둘 수 있는 것은 결정
+  // 하나뿐이다 — 시계가 거뒀다는 우연으로는 이 시험이 초록이 될 수 없다.
+  it('착지한 승인 카드에서 승인을 누르면 영수증이 서고 같은 순간 강조가 사라진다', async () => {
+    installFetch({
+      decisionResponder: approvalId =>
+        jsonResponse(200, {
+          approvalId,
+          status: 'approved',
+          decidedBy: SELF_ID,
+          decidedAtMs: T0,
+        }),
+    });
+    notificationsMock.getLastNotificationResponse.mockReturnValue(
+      tapResponse(apnsPayload(TARGETS['승인 카드'].aim)),
+    );
+    renderShell();
+
+    await expectLanded('general', APPROVAL_MSG, false);
+    const approve = await waitFor(
+      () => screen.getByTestId(`card-approval-${APPROVAL_ID}-approve`),
+      SETTLE,
+    );
+    expect(landedIds()).toContain(APPROVAL_MSG);
+
+    await act(async () => {
+      fireEvent.press(approve);
+    });
+
+    await waitFor(
+      () => expect(screen.getByText('승인을 기록했어요.')).toBeTruthy(),
+      SETTLE,
+    );
+    await waitFor(() => expect(landedIds()).toHaveLength(0), SETTLE);
+  });
+
+  // 다른 기기(또는 잠금 화면의 알림 버튼)가 먼저 결정하면 서버가 그 카드 행을 `message.edited` 로
+  // 알린다(#3771 `announce_card_edit`) — 폰은 레일에서 그 프레임을 받아 카드 상태를 갈아 끼운다.
+  // 사슬 전체(레일 → `useTimeline` → 목록 → 행)를 도는 시험이다.
+  it('다른 기기가 먼저 결정해 서버가 카드를 message.edited 로 알리면 강조가 곧바로 물러난다', async () => {
+    installFetch();
+    notificationsMock.getLastNotificationResponse.mockReturnValue(
+      tapResponse(apnsPayload(TARGETS['승인 카드'].aim)),
+    );
+    renderShell();
+
+    await expectLanded('general', APPROVAL_MSG, false);
+    expect(landedIds()).toContain(APPROVAL_MSG);
+
+    await act(async () => {
+      channelSub(GENERAL)?.__emit('publication', {
+        data: {
+          type: 'message.edited',
+          v: 1,
+          ts: T0 + 13_500,
+          seq: 13,
+          payload: {
+            id: APPROVAL_MSG,
+            channel_id: GENERAL,
+            seq: 13,
+            type: 'approval_request',
+            body: '툴 호출 승인',
+            author_member_id: HERMES,
+            hlc_ts: 13,
+            hlc_count: 0,
+            state: 'sent',
+            created_at_ms: T0 + 13_000,
+            props: {
+              approval_id: APPROVAL_ID,
+              title: 'github.search_issues 실행 허가',
+              approval_status: 'approved',
+              status: 'approved',
+              decided_by: MINSU,
+              decided_at_ms: T0 + 13_400,
+            },
+          },
+        },
+      });
+    });
+
+    await waitFor(() => expect(landedIds()).toHaveLength(0), SETTLE);
+    // 카드는 그 결정을 말한다 — 컨트롤이 물러나고 칩이 「승인됨」이다.
+    expect(screen.queryByTestId(`card-approval-${APPROVAL_ID}-approve`)).toBeNull();
+    expect(screen.getByText('승인됨')).toBeTruthy();
   });
 });
 

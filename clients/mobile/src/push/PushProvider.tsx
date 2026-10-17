@@ -27,11 +27,13 @@ import {
   readPushGate,
   type PushGate,
 } from './notifications';
+import {revokeOwnDevice} from './devices';
 import {createPushFetchKeeper} from './pushFetchKeeper';
 import {clearPushFetchSession, publishPushFetchSession} from './pushFetchSession';
 import {mintPushFetchToken} from './pushFetchToken';
+import {isPushOptedOut, usePushOptedOut} from './pushOptOut';
 import {useAppIconBadge} from './appBadge';
-import {registerWithRetry} from './registration';
+import {registeredPushDeviceId, registerWithRetry} from './registration';
 import {tapArrival, tapResponseKey, type TapArrival} from './tapArrival';
 
 // =============================================================================
@@ -99,7 +101,11 @@ export default function PushProvider({
 }: {
   children: React.ReactNode;
 }): React.JSX.Element {
-  const {workspaceId} = useSession();
+  const {workspaceId, member} = useSession();
+  const memberId = member.id;
+  // 사람이 이 폰의 푸시를 껐는가 (프로필 시트의 「푸시 알림」 스위치, #3924). 아래 등록은
+  // 이것이 참인 동안 일어나지 않고, 거짓으로 돌아오면 그 변화로 다시 돈다.
+  const optedOut = usePushOptedOut(memberId);
 
   // Held in a ref, not state: nothing renders from these, and re-rendering the
   // whole signed-in tree because a token arrived would be a real cost for no
@@ -179,9 +185,15 @@ export default function PushProvider({
   const prompt = useMemo<PushPrompt>(() => ({gate, ask}), [gate, ask]);
 
   // ---- 1b. Token and registration, once the answer is `granted` ------------
+  //
+  // ## 사람이 껐으면 등록하지 않는다 (#3924, ADR-0204 D1)
+  //
+  // 껐다는 기억(`pushOptOut.ts`)은 앱을 다시 켜도 남는다. 이 가드가 없으면 껐던 폰이 다음
+  // 실행에 스스로 등록해 스위치가 꺼져 있는데 알림이 온다. 켜면(기억이 지워지면) 이
+  // 효과가 다시 돌아 등록한다 — 사람이 앱을 다시 켜지 않아도.
   const granted = gate === 'granted';
   useEffect(() => {
-    if (!granted) return;
+    if (!granted || optedOut) return;
     let cancelled = false;
 
     (async () => {
@@ -214,12 +226,23 @@ export default function PushProvider({
       console.log(
         `${LOG} device registration ${result.outcome.kind} after ${result.attempts} attempt(s)`,
       );
+
+      // 등록이 날아가는 사이에 사람이 껐으면 서버가 그 등록을 스위치의 DELETE **뒤에**
+      // 받았을 수 있다 — 껐다는 기억이 등록보다 먼저 적히므로(`usePushSwitch`) 여기서 보인다.
+      // 되돌리지 않으면 스위치는 꺼져 있고 서버의 토큰은 살아 있다.
+      if (result.outcome.kind === 'registered' && isPushOptedOut(memberId)) {
+        const deviceId = registeredPushDeviceId();
+        if (deviceId !== null) {
+          const undone = await revokeOwnDevice(workspaceId, deviceId);
+          console.log(`${LOG} registration landed after switch-off -> undo ${undone.kind}`);
+        }
+      }
     })().catch(cause => console.error(`${LOG} setup failed`, cause));
 
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, granted]);
+  }, [workspaceId, memberId, granted, optedOut]);
 
   // ---- 2. Keep the extension's session fresh ------------------------------
   // What the extension holds is a push-fetch token minted for it (#3121), not
@@ -262,6 +285,12 @@ export default function PushProvider({
     const onChange = (next: AppStateStatus) => {
       if (next !== 'active') return;
       if (!owesForegroundRetry.current || usedForegroundRetry.current) return;
+      // 등록이 실패한 채 사람이 껐다면 이 빚은 접는다 — 포그라운드로 돌아오는 것이
+      // 껐던 폰을 다시 등록하는 길이 되면 안 된다 (#3924).
+      if (isPushOptedOut(memberId)) {
+        owesForegroundRetry.current = false;
+        return;
+      }
       const token = apnsToken.current;
       const env = apnsEnvironment();
       if (!token || !env) return;
@@ -280,7 +309,7 @@ export default function PushProvider({
 
     const subscription = AppState.addEventListener('change', onChange);
     return () => subscription.remove();
-  }, [workspaceId]);
+  }, [workspaceId, memberId]);
 
   // ---- 4. Notification actions, and where a body tap goes -----------------
   //
