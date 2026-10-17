@@ -130,6 +130,14 @@ jest.mock('expo-notifications', () => ({
   // person allowed badges; `__tests__/appIconBadge.test.tsx` reads the calls.
   setBadgeCountAsync: jest.fn(async () => true),
   getBadgeCountAsync: jest.fn(async () => 0),
+  // #3926 — the notification centre, read and cleared. The default is "nothing
+  // delivered", which is what every suite that decides an approval without
+  // caring about the lock screen wants; `approvalNotifications.test.ts` and
+  // `pushActions.test.ts` fill it per test.
+  getPresentedNotificationsAsync: jest.fn(async () => []),
+  dismissNotificationAsync: jest.fn(async () => {}),
+  // #3931 — sign-out empties the notification centre.
+  dismissAllNotificationsAsync: jest.fn(async () => undefined),
   // Present so that importing it is an error a test can see, rather than
   // `undefined is not a function` at the call site. Nothing in this client may
   // call it: it mints an Expo-service token and routes our notifications through

@@ -20,6 +20,7 @@ import {
   subscribeOwnerOnboarding,
 } from "@/features/onboarding/ownerOnboardingStore";
 import { AppShell } from "@/app/AppShell";
+import { RestoringScreen } from "@/app/RestoringScreen";
 import { Skeleton } from "@/features/common/States";
 import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
 import { ChatShell } from "@/features/chat/ChatShell";
@@ -213,13 +214,10 @@ export function App() {
   }
 
   if (status === "restoring") {
-    // Height-preserving bars, not a spinner or a splash: the shell that is
-    // about to appear occupies this space, so nothing jumps when it does.
-    return (
-      <div data-testid="session-restoring">
-        <Skeleton ready={false} rows={4} className="p-6" />
-      </div>
-    );
+    // Height-preserving bars with the oort loader laid over them (#3961); the
+    // reasoning, and why the old "not a spinner or a splash" no longer holds, is
+    // in RestoringScreen.
+    return <RestoringScreen />;
   }
 
   if (isClaimPath(window.location.pathname) && !session) {

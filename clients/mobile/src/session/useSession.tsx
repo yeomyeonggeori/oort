@@ -24,6 +24,9 @@ import {clearAllAttachmentDrafts} from '../features/attachments/draftStore';
 import {forgetBackgroundOnSignOut} from '../design/background/store';
 import {clearMemberAvatarCache} from '../features/conversation/memberAvatarImage';
 import {revokeDevice} from '../push/devices';
+import {dismissDeliveredNotifications} from '../push/dismissDelivered';
+import {clearPushActionSession} from '../push/pushActionSession';
+import {clearPushOptOut} from '../push/pushOptOut';
 import {registeredPushDeviceId} from '../push/registration';
 
 // =============================================================================
@@ -270,6 +273,19 @@ export function SessionProvider({
     // 끝나며 키 행을 폐기하고, 어떤 행도 받아 주지 않는 키가 다음 사람의 로그인까지
     // 남을 까닭이 없다. 다음 QR 연결이 새 키를 만들고 맥이 다시 승인한다.
     forgetDeviceKeyOnSignOut();
+    // 「이 폰의 푸시를 껐다」는 기억도 지운다 (#3924, ADR-0204 D1). 로그아웃은 서버의 이
+    // 기기 등록도 끝내고(위 `beforeRevoke`), 껐다는 것은 그 로그인에서 사람이 한 선택이다 —
+    // 다음 로그인(다른 사람이든 같은 사람이든)은 처음 보는 폰처럼 등록한다.
+    clearPushOptOut();
+    // 잠금 화면 승인의 자격도 **이 자리에서** 지운다 (#3931, ADR-0204 D6). 서버의 토큰은 이
+    // 로그인 계보가 끝날 때 함께 죽지만, 폰에 남은 사본은 그 사이 앞 사람 이름으로 승인을
+    // 결정할 수 있다. `PushProvider` 가 내려갈 때도 같은 것을 지우나(토큰 만료 같은 다른 길),
+    // 그것은 트리가 내려간 **뒤**다 — 사람이 나가는 순간에는 기다리지 않는다.
+    void clearPushActionSession();
+    // 이미 와 있는 알림도 비운다 (#3931). 승인 요청은 버튼을 단 채 앞 사람의 이름으로 잠금 화면에
+    // 남아 있다 — 자격이 없어 눌러도 결정은 되지 않지만, 로그아웃한 폰에 앞 사람의 요청과 메시지
+    // 미리보기가 남아 있을 이유가 없다.
+    void dismissDeliveredNotifications();
     // 첨부 초안은 더 위험하다: 메모리 안에 구 bearer로 만든 upload session id와
     // native PUT이 살아 있을 수 있다. 화면만 비우지 않고 진행 중 PUT도 취소하며,
     // 늦게 도착한 create/complete 응답도 세션 세대 경계에서 버린다 (#1703).

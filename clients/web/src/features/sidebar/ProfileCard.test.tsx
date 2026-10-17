@@ -7,13 +7,46 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { RosterMember } from "@momo/core/lib/api";
+import type { PresenceWrite, RosterMember } from "@momo/core/lib/api";
+import { PRESENCE_WRITE_FAILED } from "@momo/core/features/presence/model";
+import type { NotificationRulesPatch } from "@momo/core/features/settings/notificationRules";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { AddWorkspaceOpenContext } from "@/features/workspace/useAddWorkspace";
 import { ProfileCard } from "./ProfileCard";
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const MEMBER_ID = "00000000-0000-7000-8000-000000000101";
+
+// 방해 금지 기한 시험(#2899)은 쓰기 두 길을 모두 감시한다: 프로필 메뉴는 `PUT /presence`
+// 하나로만 쓰고, 알림 규칙(`notification-rules`)은 PUT 도 PATCH 도 보내지 않아야 한다.
+// 서버가 방해 금지를 고를 때 같은 트랜잭션에서 일시 중지를 묶어 켜기 때문이다.
+const setPresenceStatus = vi.hoisted(() => vi.fn());
+const putNotificationRules = vi.hoisted(() => vi.fn());
+const patchNotificationRules = vi.hoisted(() => vi.fn());
+
+vi.mock("@momo/core/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
+  return {
+    ...actual,
+    setPresenceStatus: (workspaceId: string, write: PresenceWrite) =>
+      setPresenceStatus(workspaceId, write) as Promise<unknown>,
+  };
+});
+
+vi.mock("@momo/core/features/settings/notificationRules", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("@momo/core/features/settings/notificationRules")
+    >();
+  return {
+    ...actual,
+    putNotificationRules: (...args: unknown[]) => putNotificationRules(...args),
+    patchNotificationRules: (workspaceId: string, patch: NotificationRulesPatch) =>
+      patchNotificationRules(workspaceId, patch),
+  };
+});
+
+let lastClient: QueryClient | null = null;
 
 const reactActEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
@@ -50,6 +83,10 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  setPresenceStatus.mockReset();
+  setPresenceStatus.mockResolvedValue({ status: "dnd" });
+  putNotificationRules.mockReset();
+  patchNotificationRules.mockReset();
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: false,
     media: query,
@@ -124,6 +161,7 @@ function mountCard(
       mutations: { retry: false },
     },
   });
+  lastClient = client;
   const host = document.createElement("div");
   document.body.append(host);
   mountedHost = host;
@@ -542,6 +580,257 @@ describe("ProfileCard 커스텀 상태 (#1889)", () => {
     await vi.waitFor(() => {
       expect(document.querySelector('[data-testid="set-status-dialog"]')).not.toBeNull();
     });
+  });
+});
+
+// ADR-0204 D2 (#2899): 방해 금지도 기한을 고르고 나서야 켜진다. 예전에는 항목 하나가 곧바로
+// `PUT /presence {status: "dnd"}` 를 보냈고, 기한이 없는 그 켜짐이 서버에서 알림 일시 중지를
+// 묶어 켠 채 15일 동안 풀리지 않았다. 지금은 항목이 쓰지 않고 기한 다이얼로그를 열며, 쓰기는
+// 거기서 `{status: "dnd", dndUntilMs}` 하나로 난다.
+describe("ProfileCard 방해 금지 기한 (#2899)", () => {
+  const NOW = new Date(2026, 9, 16, 21, 7, 0, 0).getTime();
+  const at = (day: number, hour: number, minute = 0) =>
+    new Date(2026, 9, day, hour, minute, 0, 0).getTime();
+  const RULES_KEY = ["settings", "notification-rules", WS];
+  const ROSTER_KEY = ["roster", WS];
+
+  const q = <T extends HTMLElement>(testId: string) =>
+    document.querySelector(`[data-testid="${testId}"]`) as T | null;
+
+  /** `Date.now()` 만 고정한다. 타이머는 진짜라 Radix·React 스케줄이 그대로 돈다. */
+  function freezeClock() {
+    vi.useFakeTimers({ toFake: ["Date"], now: NOW });
+  }
+
+  /** 가짜 시계 아래의 `vi.waitFor` 는 한 번 돌 때마다 시계를 50ms 밀므로 누르기 직전에 되돌린다. */
+  async function confirmAtNow() {
+    vi.setSystemTime(NOW);
+    await clickTestId("pause-until-confirm");
+  }
+
+  async function clickTestId(testId: string) {
+    await act(async () => {
+      q(testId)!.click();
+    });
+  }
+
+  function chooseUntil(value: string) {
+    const select = q<HTMLSelectElement>("pause-until-select")!;
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set?.call(
+        select,
+        value
+      );
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  }
+
+  /** 카드를 세우고 명부·규칙 캐시를 씨앗으로 심는다(무효화를 잴 수 있게 관찰자 없이). */
+  function mountSeeded(selfMember: RosterMember) {
+    mountCard(() => undefined, selfMember);
+    lastClient!.setQueryData(ROSTER_KEY, [selfMember]);
+    lastClient!.setQueryData(RULES_KEY, { dnd: false, mentionOverridesMute: false });
+    expect(lastClient!.getQueryState(RULES_KEY)?.isInvalidated).toBe(false);
+  }
+
+  async function openDndDialog() {
+    await openMenu();
+    await clickTestId("presence-option-dnd");
+    await vi.waitFor(() => expect(q("pause-until-dialog")).not.toBeNull());
+  }
+
+  it("항목을 누르면 쓰지 않고 메뉴가 닫히며 기한 다이얼로그가 열린다", async () => {
+    freezeClock();
+    mountSeeded(rosterMember());
+    await openDndDialog();
+
+    expect(setPresenceStatus).not.toHaveBeenCalled();
+    expect(patchNotificationRules).not.toHaveBeenCalled();
+    const dialog = q("pause-until-dialog")!;
+    expect(dialog.textContent).toContain("방해 금지를 언제까지 켤까요?");
+    expect(dialog.textContent).toContain("알림도 함께 멈춰요");
+    await vi.waitFor(() => expect(q("profile-card-menu")).toBeNull());
+    // 지금은 방해 금지가 아니므로 「지금은 …」 줄이 없다.
+    expect(q("pause-until-current")).toBeNull();
+  });
+
+  it("기한을 고르고 확인하면 PUT presence 가 {status, dndUntilMs} 하나로 나가고 규칙은 쓰지 않는다", async () => {
+    freezeClock();
+    mountSeeded(rosterMember());
+    await openDndDialog();
+
+    chooseUntil("30m");
+    await confirmAtNow();
+
+    await vi.waitFor(() => expect(setPresenceStatus).toHaveBeenCalledTimes(1));
+    expect(setPresenceStatus).toHaveBeenCalledWith(WS, {
+      status: "dnd",
+      dndUntilMs: NOW + 30 * 60_000,
+    });
+    // 서버가 같은 트랜잭션에서 일시 중지를 묶어 켠다. 클라이언트가 규칙을 쓰면 묶음이 끊긴다.
+    expect(putNotificationRules).not.toHaveBeenCalled();
+    expect(patchNotificationRules).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(q("pause-until-dialog")).toBeNull());
+  });
+
+  it("쓰고 나면 명부에 방해 금지와 기한이 칠해지고, 알림 규칙 질의는 다시 읽도록 무효화된다", async () => {
+    freezeClock();
+    mountSeeded(rosterMember());
+    await openDndDialog();
+
+    chooseUntil("2h");
+    await confirmAtNow();
+
+    await vi.waitFor(() => expect(q("pause-until-dialog")).toBeNull());
+    const [painted] = lastClient!.getQueryData<RosterMember[]>(ROSTER_KEY)!;
+    expect(painted.presenceStatus).toBe("dnd");
+    expect(painted.dndUntilMs).toBe(NOW + 120 * 60_000);
+    // 설정 › 알림의 스위치가 서버가 묶어 켠 실제 값을 그리게 하는 유일한 길이다.
+    expect(lastClient!.getQueryState(RULES_KEY)?.isInvalidated).toBe(true);
+  });
+
+  it("방해 금지가 아닌 항목으로 나와도 규칙을 다시 읽는다(서버가 켜 둔 일시 중지를 되돌린다)", async () => {
+    freezeClock();
+    mountSeeded(rosterMember({ presenceStatus: "dnd", dndUntilMs: at(16, 21, 30) }));
+    await openMenu();
+
+    await clickTestId("presence-option-away");
+
+    await vi.waitFor(() => expect(setPresenceStatus).toHaveBeenCalledTimes(1));
+    expect(setPresenceStatus).toHaveBeenCalledWith(WS, { status: "away" });
+    expect(putNotificationRules).not.toHaveBeenCalled();
+    expect(patchNotificationRules).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(lastClient!.getQueryState(RULES_KEY)?.isInvalidated).toBe(true);
+    });
+    const [painted] = lastClient!.getQueryData<RosterMember[]>(ROSTER_KEY)!;
+    expect(painted.presenceStatus).toBe("away");
+    expect(painted.dndUntilMs).toBeUndefined();
+  });
+
+  it("이미 방해 금지인 항목은 끝나는 때를 둘째 줄에 말하고, 누르면 기한을 바꾸는 다이얼로그가 열린다", async () => {
+    freezeClock();
+    mountSeeded(rosterMember({ presenceStatus: "dnd", dndUntilMs: at(16, 21, 30) }));
+    await openMenu();
+
+    const note = q("presence-dnd-until")!;
+    expect(note.textContent).toBe("오후 9:30까지");
+    // 둘째 줄은 항목의 이름에 들어 있어 스크린리더가 기한을 함께 읽는다.
+    expect(q("presence-option-dnd")!.textContent).toContain("방해 금지");
+    expect(q("presence-option-dnd")!.textContent).toContain("오후 9:30까지");
+
+    await clickTestId("presence-option-dnd");
+    await vi.waitFor(() => expect(q("pause-until-dialog")).not.toBeNull());
+    expect(q("pause-until-current")!.textContent).toBe("지금은 오후 9:30까지예요.");
+    expect(setPresenceStatus).not.toHaveBeenCalled();
+  });
+
+  it("기한 없는 방해 금지는 「기한 없음 · 기한 정하기」로 보이고 다이얼로그가 그렇게 말한다", async () => {
+    freezeClock();
+    mountSeeded(rosterMember({ presenceStatus: "dnd" }));
+    await openMenu();
+
+    expect(q("presence-dnd-until")!.textContent).toBe("기한 없음 · 기한 정하기");
+
+    await clickTestId("presence-option-dnd");
+    await vi.waitFor(() => expect(q("pause-until-dialog")).not.toBeNull());
+    expect(q("pause-until-current")!.textContent).toBe("지금은 기한이 없어요.");
+  });
+
+  it("끝 시각이 길어도(다음 주 월요일 항목이 만드는 라벨) 둘째 줄을 말줄임으로 자르지 않고 어절로 접는다 (design-review B1)", async () => {
+    freezeClock();
+    mountSeeded(rosterMember({ presenceStatus: "dnd", dndUntilMs: at(19, 9) }));
+    await openMenu();
+
+    const note = q("presence-dnd-until")!;
+    // 메뉴 폭은 192px 라 이 라벨(145px)은 한 줄(126px)에 못 든다. 잘리는 대신 두 줄로 접혀야 한다.
+    expect(note.textContent).toBe("10월 19일(월) 오전 9:00까지");
+    expect(note.className).not.toMatch(/\btruncate\b/);
+    expect(note.className).toMatch(/\bbreak-keep\b/);
+    expect(note.className).toMatch(/\btext-balance\b/);
+  });
+
+  it("방해 금지의 기한이 지났으면 규칙과 명부를 다시 묻는다 — 스스로 풀지는 않는다 (design-review H3)", async () => {
+    freezeClock();
+    const invalidate = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+    mountSeeded(rosterMember({ presenceStatus: "dnd", dndUntilMs: at(16, 21, 0) }));
+    const keys = invalidate.mock.calls.map((call) =>
+      JSON.stringify((call[0] as { queryKey: unknown }).queryKey)
+    );
+    expect(keys).toContain(JSON.stringify(RULES_KEY));
+    expect(keys).toContain(JSON.stringify(ROSTER_KEY));
+    // 서버가 아직 켜져 있다고 답하면(캐시가 그대로) 메뉴는 방해 금지를 그대로 말한다.
+    await openMenu();
+    expect(q("presence-option-dnd")!.getAttribute("aria-checked")).toBe("true");
+    invalidate.mockRestore();
+  });
+
+  it("방해 금지의 기한이 아직 오지 않았으면 다시 묻지 않는다", async () => {
+    freezeClock();
+    const invalidate = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+    mountSeeded(rosterMember({ presenceStatus: "dnd", dndUntilMs: at(16, 22, 0) }));
+    expect(invalidate).not.toHaveBeenCalled();
+    invalidate.mockRestore();
+  });
+
+  it("방해 금지가 아닐 때 항목에는 둘째 줄이 없다", async () => {
+    mountSeeded(rosterMember({ presenceStatus: "away" }));
+    await openMenu();
+    expect(q("presence-dnd-until")).toBeNull();
+  });
+
+  it("쓰기가 실패하면 다이얼로그가 열린 채 이유를 말하고 명부를 되돌린다", async () => {
+    freezeClock();
+    setPresenceStatus.mockRejectedValue(new Error("presence write failed"));
+    mountSeeded(rosterMember());
+    await openDndDialog();
+
+    chooseUntil("1h");
+    await confirmAtNow();
+
+    await vi.waitFor(() => expect(q("pause-until-error")).not.toBeNull());
+    expect(q("pause-until-error")!.textContent).toContain(PRESENCE_WRITE_FAILED);
+    expect(q("pause-until-dialog")).not.toBeNull();
+    const [row] = lastClient!.getQueryData<RosterMember[]>(ROSTER_KEY)!;
+    expect(row.presenceStatus).toBe("auto");
+    expect(row.dndUntilMs).toBeUndefined();
+    // 실패해도 서버가 어디까지 적용했는지는 모르니 규칙은 다시 읽는다.
+    expect(lastClient!.getQueryState(RULES_KEY)?.isInvalidated).toBe(true);
+    expect(patchNotificationRules).not.toHaveBeenCalled();
+  });
+
+  it("키보드: 다이얼로그가 열리면 초점이 안으로 들어가고, Esc 로 닫으면 프로필 카드로 돌아온다", async () => {
+    freezeClock();
+    mountSeeded(rosterMember());
+    await openDndDialog();
+
+    await vi.waitFor(() => {
+      expect(
+        document.activeElement?.closest('[data-testid="pause-until-dialog"]')
+      ).not.toBeNull();
+    });
+
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    await vi.waitFor(() => expect(q("pause-until-dialog")).toBeNull());
+    await vi.waitFor(() => {
+      expect(document.activeElement).toBe(q("profile-card"));
+    });
+    expect(setPresenceStatus).not.toHaveBeenCalled();
+  });
+
+  it("취소하면 아무것도 쓰지 않는다", async () => {
+    freezeClock();
+    mountSeeded(rosterMember());
+    await openDndDialog();
+    chooseUntil("30m");
+
+    await clickTestId("pause-until-cancel");
+
+    await vi.waitFor(() => expect(q("pause-until-dialog")).toBeNull());
+    expect(setPresenceStatus).not.toHaveBeenCalled();
+    expect(lastClient!.getQueryState(RULES_KEY)?.isInvalidated).toBe(false);
   });
 });
 

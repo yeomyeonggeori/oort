@@ -44,7 +44,9 @@ use momo_agent::approval::{
     mark_approval_expired_in_tx, workspaces_with_overdue_approvals, LockedApproval,
 };
 use momo_agent::tools::{ToolResult, TOOL_AUDIT_SCHEMA};
-use momo_agent::{end_parked_run_in_tx, RunStatus};
+use momo_agent::{
+    end_parked_run_in_tx, run_trigger_message_in_tx, RunStatus, PROP_ANSWERS_MESSAGE_ID,
+};
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_tenant_tx, DbError, PgConnection, PgPool};
 use momo_messaging::{cent_channel, send_message_in_tx, MessageType, NewMessage};
@@ -225,6 +227,15 @@ async fn settle_expired_in_tx(
         object.insert("run_id".into(), json!(approval.run_id.to_string()));
         object.insert("status".into(), json!("expired"));
         object.insert("decided_at_ms".into(), json!(now.timestamp_millis()));
+        // ADR-0204 D8 (#3929): this line is the answer to a request that lapsed, so it
+        // names the message it answers — the person who asked is pushed (unless they
+        // are looking at the channel). A run nobody said anything to raise (a work
+        // run) has no trigger and the line stays what it was: silent.
+        if let Some(trigger) =
+            run_trigger_message_in_tx(&mut *conn, workspace_id, approval.run_id).await?
+        {
+            object.insert(PROP_ANSWERS_MESSAGE_ID.into(), json!(trigger.to_string()));
+        }
     }
     send_message_in_tx(
         &mut *conn,

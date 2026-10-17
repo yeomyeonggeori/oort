@@ -417,6 +417,19 @@
   --spacing-kometto-band: 52px;
   --spacing-band-action: 34px;
 
+  /* 오르트 로더 히어로의 한 변 (#3961). 첫 로딩에서 코메토 배지(한 변의 62/128)가
+   * 가운데 서고 위성이 그 둘레를 돈다. 시안 A 「공전」의 큰 자리 그대로 128이다:
+   * 리듬 스케일의 어느 단계도 아니고(최대 32), 안쪽 기하(배지 62·궤도 44·위성 7)가
+   * 전부 이 한 변의 비율이라 한 변이 하나의 이름이어야 한다. 코메토 32px 미만
+   * 금지(docs/brand/mark/README.md)와도 무관하게 넉넉히 위다. */
+  --spacing-loader-hero: 128px;
+
+  /* 줄 옆에 서는 오르트 로더가 문장 줄 위아래로 걸치는 양 (#3961, design-review M-4). 마크 무대
+   * 24가 문장 한 줄(`text-body` 22)보다 2 크다. 위아래로 2씩 물리면 줄 높이는 그대로이고
+   * (래퍼의 `mt-px` 1을 더해 21 ≤ 22) 마크 중심이 첫 줄 중심에 온다. 선택 마커 두께
+   * (`--spacing-marker`)와 값만 같은 **다른 축**이라 이름을 따로 준다. */
+  --spacing-loader-bleed: 2px;
+
   /* 인박스 리마인더 행의 ⋯ 그릇 (#1888 B-2).
    *
    * 그릇은 tap-target(44, 600px 미만) + p-px×2 + border 1px×2 = 48. 행은
@@ -1090,6 +1103,32 @@
 }
 /* `data-focus-ring="always"`: 캐럿이 있는 곳이 곧 **키가 가는 곳**이라 어떻게
  * 잡았든 보여야 하는 표면(원격 조작 화면, DisplayController design-review H-2). */
+
+/* 포인터로 연 행 메뉴는 열림 윤곽을 그리지 않는다 (#3963, 성재 2026-10-16 「우클릭하면 보더가
+ * 표시되는 것」). 사이드바 행의 우클릭 메뉴 트리거(`SidebarRowContextMenu`)는 열려 있는 동안
+ * 인셋 1px 윤곽(`data-[state=open]:outline`)을 입는다 - design-review #1937 N-4 가 세운, **키보드로
+ * 연 메뉴가 어느 행의 것인지 말하는 유일한 표식**이다. 포인터로 연 메뉴에는 그 이유가 없다(사람이
+ * 방금 그 행을 눌렀고, 배경 한 겹이 이미 말한다). 실측(Chromium·WebKit): 우클릭 직후 트리거가
+ * `solid 1px` 이고 캐럿 요소에는 링이 없었다 - 보더의 정체는 포커스 링이 아니라 이 윤곽이었다.
+ *
+ * **누가 열었는가는 트리거가 열린 순간에 적는다**(`data-open-via`, `SidebarRowContextMenu`). 위의
+ * 포커스 링 규칙처럼 전역 모달리티 스탬프(`focusModality.ts`)를 읽는 첫 판은 두 곳에서 틀렸다
+ * (design-review R1 N1): ①포인터로 연 메뉴 안에서 첫 방향키를 누르는 순간 스탬프가 `keyboard` 로
+ * 바뀌어 윤곽이 되살아났다 ②마우스로 행을 누른 뒤 Shift+F10 으로 연 메뉴는 스탬프가 `pointer` 라
+ * 키보드로 열었는데도 표식이 사라졌다(F10 은 스탬프를 올리는 키가 아니다). 열린 방법은 키보드
+ * 소환 경로(`onKeyDown`)가 정확히 안다.
+ *
+ * 이 규칙은 모달리티 속성을 읽지 않으므로 `focusRing.test.ts` 가 재는 「포인터 링 규칙 집합」에도
+ * 속하지 않는다(그 집합은 `:focus-visible` 링을 걷는 규칙이고, 이 규칙은 메뉴의 열림 윤곽이다).
+ * **레이어 밖**이어야 한다: 윤곽을 그리는 것은 utilities 레이어의 클래스라 레이어 안의 규칙은
+ * 특정도·순서와 무관하게 그것을 이기지 못한다(위 규칙과 같은 이유). 키보드 포커스 링
+ * (`focus-visible:focus-ring`)은 건드리지 않는다.
+ *
+ * 클래스 문자열은 컴포넌트에 그대로 남는다 - `tokens.contrast.test.ts` 의 「행 메뉴 열림 표식」이
+ * 그 문자열에서 토큰을 읽어 대비를 잰다. */
+[data-row-menu-trigger][data-state="open"][data-open-via="pointer"] {
+  outline: none;
+}
 
 /* 캐럿 착지점(`tabindex="-1"`: 라우트 상자·설정 제목·곁판 제목 등)은 탭 순서에
  * 없다. 포커스 복귀·진입 포커스가 캐럿을 여기 놓으면 UA 기본 링(outline: auto)이
@@ -1853,6 +1892,22 @@
   &[data-unread] [data-row-icon] {
     color: var(--ink);
   }
+  /* DM 행의 아바타는 24px 이고 글리프는 18px 이다. 둘이 같은 이름 시작 위치를 갖도록 아바타가
+   * 글리프의 **축 위에** 앉는다: 양쪽으로 3px 씩 행 안쪽 여백으로 번진다(18 + 6 = 24). 이름은
+   * 채널 행과 같은 자리에서 시작하고(실측 38px, 번지지 않으면 44px), 아바타의 중심은 글리프의
+   * 중심과 같다 (#3963). */
+  & [data-row-icon][data-icon-kind="avatar"] {
+    margin-inline: -3px;
+  }
+  /* 호버 X(`SidebarRow` 의 `onClose`)가 서 있는 동안: 오른쪽 끝의 것들(알약 · 점 · 뒤따르는
+   * 슬롯)을 내리고 그 자리를 X 에게 비운다. X 는 우측 8px 에서 24px 이므로 이름은 그 왼쪽 4px
+   * 앞(36px)에서 끝난다. 알약은 X 가 사라지면 그대로 돌아온다. */
+  &[data-row-close] {
+    padding-inline-end: 36px;
+  }
+  &[data-row-close] [data-row-trailing] {
+    display: none;
+  }
 }
 @utility sidebar-row-selected {
   background-color: var(--surface);
@@ -2218,6 +2273,19 @@
  * that box instead of growing the menu past the viewport (#1886 M-1). */
 @utility max-w-menu-available {
   max-inline-size: var(--radix-dropdown-menu-content-available-width);
+}
+
+/* 같은 일의 높이 쪽 (#3963 design-review B1). Radix 메뉴(컨텍스트·드롭다운)는 패널에 가용 높이를
+ * 실어 준다(충돌 여백 8px 을 뺀 값). 창보다 긴 메뉴는 창 밖으로 자라는 대신 **판 안에서 스크롤**한다:
+ * 사용자 섹션이 늘면 행 메뉴가 길어지고(상한 50), 맨 아래 항목이 「채널 나가기」라 가장 잃기 쉬운 것이
+ * 가장 위험한 것이다. 변수는 프리미티브마다 이름이 달라 한 패널에는 하나만 서므로 둘을 이어 쓴다.
+ * 어느 쪽도 없으면(가용 높이를 모르는 자리) 선언이 무효가 되어 상한이 없는 예전 그대로다. */
+@utility max-h-menu-available {
+  max-block-size: var(
+    --radix-context-menu-content-available-height,
+    var(--radix-dropdown-menu-content-available-height)
+  );
+  overflow-y: auto;
 }
 
 /* Four tabular figures ("100%"). ch follows the face; a pixel box does not
@@ -3844,6 +3912,237 @@
   }
   50.01%,
   100% {
+    opacity: 0;
+  }
+}
+
+/* =============================================================================
+ * 오르트 로더 (#3961), 시안 A 「공전」.
+ * owner 2026-10-17: 「A가 심플하고 좋아보이네. A 방향으로 가자.」
+ *
+ * 링(사람·팀)은 가만히 있고, 위성(에이전트)이 홈에서 나와 한 바퀴 돌고 다시 꽂힌다.
+ * 한 주기 1.8초: 홈에서 나오기 14% · 도는 동안 72% · 꽂히기 14%. 큰 자리(`-hero`)는
+ * 꽂힐 홈이 없어서 코메토 K6 배지 둘레를 멈춤 없이 등속으로 돈다.
+ *
+ * 움직이는 것은 transform(회전·이동·크기)과 opacity뿐이다. 레이아웃을 건드리는
+ * 속성은 키프레임에 들어오지 않는다(OortLoader.test 가 키프레임을 읽어 잠근다).
+ *
+ * 기하는 전부 무대(정사각 한 변)의 비율이다. 인라인 style 이 금지라 크기는 호출자가
+ * `size-6`(24) 또는 `size-loader-hero`(128)로 정하고 안쪽이 비율로 따라간다.
+ * 퍼센트 translate 는 **자기 상자** 기준이라 방사 층이 0×0 이면 한 칸도 못 움직인다:
+ * 궤도·팔·방사 층은 모두 무대와 같은 크기(`inset: 0`)다.
+ *
+ * 값은 마크 정본(OortMark GEOMETRY.small 의 30 격자 무대, 링 중심이 무대 중심)에서
+ * 나온다: 위성 중심까지 홈 9.9/30 · 궤도 12.2/30 · 위성 반지름 3/30(지름 20%).
+ * OortLoader.test 가 이 숫자와 GEOMETRY 가 어긋나는 날을 잡는다.
+ *
+ * 움직임의 선택은 컴포넌트가 `data-motion` 으로 한다.
+ *   full     위 동작.
+ *   reduced  OS 「동작 줄이기」. 회전 대신 정지한 마크 + 투명도 1↔0.5(같은 주기).
+ *   still    진행 중이 아닌 자리(오프라인 등). 정지한 마크, 투명도도 그대로.
+ * `spinner-busy` 는 reduced-motion 에서도 느리게 돈다(회전 자체가 정보라서). 이 로더는
+ * 곁의 문장이 상태를 말하므로, 정지 마크 + 은은한 투명도 변화라는 지시대로 간다.
+ * ========================================================================== */
+
+.oort-loader {
+  position: relative;
+  display: block;
+  flex: none;
+  --oort-loader-period: 1.8s;
+  /* 작은 자리(마크 small, 30 격자 무대): 위성 중심이 링 중심에서 놓이는 거리. */
+  --oort-loader-home: 33%;
+  --oort-loader-out: 40.667%;
+  --oort-loader-dip: 3%;
+  --oort-loader-dot: 20%;
+}
+
+/* 큰 자리(무대 128 = 배지 62 + 궤도 44 + 위성 7): 홈이 없어 home = out. */
+.oort-loader-hero {
+  --oort-loader-home: 34.375%;
+  --oort-loader-out: 34.375%;
+  --oort-loader-dip: 0%;
+  --oort-loader-dot: 10.9375%;
+}
+
+/* 깜빡임 방지: 사다리 한 칸(standard)보다 짧게 끝나는 로딩에는 나타나지 않는다.
+ * 상태 타이머가 아니라 CSS 지연이라 언마운트가 곧 정리다. reduced-motion 에서는 사다리가
+ * 0이라 지연도 0이다: 움직임이 없는 자리에서는 곧바로 서도 해가 작다. */
+.oort-loader-hero,
+.oort-loader-caption {
+  animation: oort-loader-appear var(--motion-fast) var(--motion-ease-standard)
+    var(--motion-standard) backwards;
+}
+
+.oort-loader-body,
+.oort-loader-orbit,
+.oort-loader-arm,
+.oort-loader-radial {
+  position: absolute;
+  inset: 0;
+}
+
+/* 24 격자 마크를 30 격자 무대에 앉힌다: 격자 (4, 2)에서 시작해 한 변 24. 링 구멍의
+ * 중심 (11, 13)이 무대 정중앙 (15, 15)에 온다. 링이 숨 쉬는 중심도 그 구멍이다. */
+.oort-loader-ring {
+  position: absolute;
+  inset-block-start: 6.66667%;
+  inset-inline-start: 13.33333%;
+  inline-size: 80%;
+  block-size: 80%;
+  overflow: visible;
+  transform-origin: 45.83333% 54.16667%;
+}
+
+.oort-loader-badge {
+  position: absolute;
+  inset-block-start: 25.78125%;
+  inset-inline-start: 25.78125%;
+  inline-size: 48.4375%;
+  block-size: 48.4375%;
+}
+
+/* 위성이 놓이는 각도는 링의 홈 쪽(오른쪽 위, -45도)이고, 방사 층이 그 축 위로 민다. */
+.oort-loader-arm {
+  transform: rotate(-45deg);
+}
+
+.oort-loader-radial {
+  transform: translateX(var(--oort-loader-home));
+}
+
+.oort-loader-dot {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: 50%;
+  inline-size: var(--oort-loader-dot);
+  aspect-ratio: 1;
+  border-radius: 9999px;
+  background-color: var(--signal);
+  translate: -50% -50%;
+}
+
+/* 꼬리 점 둘(큰 자리만): 머리 뒤 15도·30도, 작고 옅다. */
+.oort-loader-trail-near {
+  transform: rotate(-60deg);
+}
+
+.oort-loader-trail-far {
+  transform: rotate(-75deg);
+}
+
+.oort-loader-trail-near .oort-loader-dot {
+  inline-size: 8.59375%;
+  opacity: 0.5;
+}
+
+.oort-loader-trail-far .oort-loader-dot {
+  inline-size: 6.25%;
+  opacity: 0.26;
+}
+
+.oort-loader:not([data-motion="full"]) .oort-loader-trail-near,
+.oort-loader:not([data-motion="full"]) .oort-loader-trail-far {
+  display: none;
+}
+
+.oort-loader[data-motion="full"] .oort-loader-orbit {
+  animation: oort-loader-orbit var(--oort-loader-period) infinite;
+}
+
+.oort-loader[data-motion="full"] .oort-loader-radial {
+  animation: oort-loader-radial var(--oort-loader-period) infinite;
+}
+
+.oort-loader[data-motion="full"] .oort-loader-ring {
+  animation: oort-loader-ring var(--oort-loader-period) infinite;
+}
+
+.oort-loader-hero[data-motion="full"] .oort-loader-orbit {
+  animation: oort-loader-orbit-hero var(--oort-loader-period) linear infinite;
+}
+
+.oort-loader-hero[data-motion="full"] .oort-loader-radial {
+  animation: none;
+}
+
+.oort-loader[data-motion="reduced"] .oort-loader-body {
+  animation: oort-loader-breathe var(--oort-loader-period) ease-in-out infinite;
+}
+
+/* 감소된 동작에서 코메토는 투명도도 건드리지 않는다. 숨 쉬는 것은 위성 층뿐이다.
+ * (처음 나타날 때의 페이드인(`oort-loader-appear`, 지연 뒤 한 번)은 이 규칙 밖이다:
+ * 사다리가 0이 되는 감소된 동작에서는 그것도 즉시다.) */
+.oort-loader-hero[data-motion="reduced"] .oort-loader-body {
+  animation: none;
+}
+
+.oort-loader-hero[data-motion="reduced"] .oort-loader-orbit {
+  animation: oort-loader-breathe var(--oort-loader-period) ease-in-out infinite;
+}
+
+@keyframes oort-loader-orbit {
+  0%,
+  14% {
+    transform: rotate(0deg);
+    animation-timing-function: cubic-bezier(0.45, 0.05, 0.25, 1);
+  }
+  86%,
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes oort-loader-orbit-hero {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes oort-loader-radial {
+  0% {
+    transform: translateX(var(--oort-loader-home));
+    animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  14% {
+    transform: translateX(var(--oort-loader-out));
+  }
+  86% {
+    transform: translateX(var(--oort-loader-out));
+    animation-timing-function: cubic-bezier(0.5, 0, 0.2, 1);
+  }
+  94% {
+    transform: translateX(calc(var(--oort-loader-home) - var(--oort-loader-dip)));
+    animation-timing-function: ease-out;
+  }
+  100% {
+    transform: translateX(var(--oort-loader-home));
+  }
+}
+
+/* 위성이 홈에 꽂히는 순간 링이 한 번 숨을 쉰다. */
+@keyframes oort-loader-ring {
+  0%,
+  90%,
+  100% {
+    transform: scale(1);
+  }
+  95% {
+    transform: scale(1.05);
+  }
+}
+
+@keyframes oort-loader-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes oort-loader-appear {
+  from {
     opacity: 0;
   }
 }

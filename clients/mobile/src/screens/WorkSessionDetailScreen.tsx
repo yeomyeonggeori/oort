@@ -33,7 +33,7 @@ import {
   ScreenHeader,
   SectionLabel,
 } from '../design/atoms';
-import {useRefreshControl} from '../design/refresh';
+import {PULL_FILL, usePullRefresh} from '../design/refresh';
 import {
   font,
   line,
@@ -172,7 +172,7 @@ export default function WorkSessionDetailScreen({
   const refetchChannels = channelsQuery.refetch;
   const refetchDirectory = directoryQuery.refetch;
   const refetchEvents = eventsQuery.refetch;
-  const refreshControl = useRefreshControl(
+  const {refreshControl, scrollProps} = usePullRefresh(
     useCallback(
       () =>
         Promise.all([
@@ -338,6 +338,7 @@ export default function WorkSessionDetailScreen({
               agentName={presentation.tool}
               nameOf={nameOf}
               refreshControl={refreshControl}
+              scrollProps={scrollProps}
             />
           </View>
           <View style={mode === 'detail' ? styles.modeBody : styles.modeHidden}>
@@ -345,8 +346,10 @@ export default function WorkSessionDetailScreen({
               contentContainerStyle={[
                 styles.scrollBody,
                 {paddingBottom: Math.max(insets.bottom, space.lg)},
+                PULL_FILL,
               ]}
               refreshControl={refreshControl}
+              {...scrollProps}
               testID="work-detail-scroll">
               <View
                 ref={focusRef}

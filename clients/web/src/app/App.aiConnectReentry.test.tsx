@@ -95,9 +95,15 @@ const session: LoginResponse = {
 let mountedRoot: Root | null = null;
 let mountedHost: HTMLElement | null = null;
 
-beforeAll(() => {
+beforeAll(async () => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
-});
+  // 이 파일의 첫 마운트는 `./App` 모듈 그래프 전체를 처음 읽어 온다(콜드 임포트). 그 값은 기능이
+  // 아니라 그래프의 크기이고 부하에 비례한다 — 실측: 첫 시험 1.5~1.7s(유휴), 54개 CPU 소비자
+  // 아래 2.5~3.2s, 병합 트리 게이트에서는 4.8~5.0s(#3893). 시험 안에서 읽으면 시험의 5s 가
+  // 그 값을 지는데, 여기서 읽으면 시험은 마운트 이후의 동작만 잰다. 훅 한도 60s 는 성능 예산이
+  // 아니라 멈춤 감지용(유휴 실측의 ~35배)이다.
+  await import("./App");
+}, 60_000);
 
 beforeEach(() => {
   shellMounts.count = 0;

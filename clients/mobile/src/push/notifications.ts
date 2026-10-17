@@ -12,13 +12,21 @@ import {
 } from 'expo-notifications';
 
 import {shouldAskNotifications} from '../features/onboarding/phoneFlow';
+import {dismissApprovalNotifications} from './approvalNotifications';
 import {PUSH_ACTION} from './contract';
-import {parsePushEnvelope, threadRootId, type PushEnvelope} from './envelope';
+import {
+  isLockScreenDecidable,
+  parsePushEnvelope,
+  pushPayloadOf,
+  threadRootId,
+  type PushEnvelope,
+} from './envelope';
+import {nativeApprovalHandlerAttached} from './native';
 
 // =============================================================================
 // expo-notifications wiring (goal RN-N1, ADR-0137 D7 정오 5항).
 //
-// ## Why the delegate is never touched here
+// ## Why the delegate is left alone here (and the one place it is not)
 //
 // expo-notifications installs `NotificationCenterManager` as the
 // UNUserNotificationCenter delegate and fans out to registered delegates. Its
@@ -27,12 +35,18 @@ import {parsePushEnvelope, threadRootId, type PushEnvelope} from './envelope';
 // `EmitterModule.definition()`'s OnCreate. That is what forwards responses to
 // this file. Verified in 57.0.8 sources; see the PR for the full note.
 //
-// Because the emitter already delivers `actionIdentifier` to JS, this client
-// needs NO native delegate of its own, and adding one would be actively worse:
-// `NotificationCenterManager.userNotificationCenter(_:didReceive:)` calls the
-// system completion handler UNCONDITIONALLY after polling delegates
-// (NotificationCenterManager.swift:116-124), so a second delegate that also
-// completes would double-call it.
+// Because the emitter already delivers `actionIdentifier` to JS, 답장 and the
+// body tap need NO native delegate of their own. 승인·거절 are the exception
+// (#3931, ADR-0204 D6). `NotificationCenterManager.userNotificationCenter(_:didReceive:)`
+// calls the system completion handler UNCONDITIONALLY after polling its delegates
+// (NotificationCenterManager.swift:116-124), so a process woken for a lock-screen
+// button is told it is done before JS has even started: nothing here could send
+// the request. Those two buttons are therefore answered by
+// `modules/momo-push-action-native`, one more delegate on the same seam that takes
+// a background task synchronously and never calls the completion itself (the
+// manager does; a second call would be the double-completion this paragraph used
+// to warn about). `handlePushResponse` steps aside for them when that module is
+// attached.
 //
 // ## getDevicePushTokenAsync, never getExpoPushTokenAsync
 //
@@ -129,6 +143,67 @@ export interface PushActionContext {
 }
 
 /**
+ * 알림의 「승인」·「거절」 한 번이 뜻하는 일의 전부 (#3926).
+ *
+ * 결정을 보내고, 원장이 답한 대로 결과를 해석하고, 승인이 결정됐으면 그 승인의
+ * 알림을 걷는다. `handlePushResponse`는 봉투와 워크스페이스를 확인한 **뒤에** 이
+ * 함수를 부른다(보안 경계는 그쪽 한 곳이다). 이 함수에는 인자 말고는 알림도,
+ * 화면도, 상태도 없다. iOS 네이티브 처리기(#3931, ADR-0204 D6)가 이 두 버튼을
+ * 넘겨받는 날 JS 쪽에서 바뀌는 것은 이 함수를 부르는 한 줄이고, 네이티브 쪽은 이
+ * 함수가 하는 일(보내기, 원장 답 해석, 걷기)을 그대로 따라 하면 된다.
+ *
+ * ## 걷는 때
+ *
+ * 결정이 기록됐거나(`committed`) 이미 결정돼 있을 때(`superseded`: 다른 기기의
+ * 결정, 만료) 걷는다. 두 경우 모두 그 승인의 버튼은 이제 아무것도 바꾸지 못한다.
+ * 오류일 때는 **걷지 않는다** — 결정이 기록되지 않았고 승인은 여전히 대기다.
+ * 알림이 남아 있어야 사람이 다시 누르거나 눌러서 앱에서 마무리할 수 있다.
+ *
+ * `clientDecisionId`는 호출자가 정할 수 있다. 같은 키로 같은 판정을 다시 보내면
+ * 서버가 원래 영수증을 재생하므로(두 번 눌러도 한 번의 결정), 키를 알림 요청
+ * 식별자에서 결정적으로 만드는 쪽(네이티브 처리기)이 같은 모양으로 부를 수 있다.
+ */
+export async function decideFromNotification(
+  workspaceId: string,
+  approvalId: string,
+  approved: boolean,
+  clientDecisionId: string = newDecisionId(),
+): Promise<PushActionResult> {
+  const outcome = await decideApproval(
+    workspaceId,
+    approvalId,
+    approved,
+    clientDecisionId,
+  );
+  if (outcome.kind === 'error') {
+    return {kind: 'failed', reason: outcome.errorCopy ?? 'decision failed'};
+  }
+  // 기록됐든 이미 결정돼 있든 이 승인은 끝났다. 걷는 일이 실패해도 결정의 결과는
+  // 바뀌지 않으므로(`dismissApprovalNotifications`는 던지지 않는다) 기다리되 묻지 않는다.
+  await dismissApprovalNotifications(approvalId);
+  // `superseded` counts as decided: the approval was already settled
+  // elsewhere (another device, or it expired). Reporting that as a failure
+  // would invite a retry against something that can no longer change.
+  //
+  // But it is NOT the same event as "this tap recorded the decision", and
+  // collapsing the two was a lie in the dangerous direction (2R H5): a
+  // rejection tapped from the lock screen was reported as a rejection even
+  // when the ledger held an APPROVAL. So the two are reported apart, and a
+  // settled one carries the direction the ledger actually holds.
+  if (outcome.kind === 'superseded') {
+    const settled: PushActionResult = {
+      kind: 'decided',
+      approved,
+      record: 'settled',
+    };
+    if (outcome.status === 'approved') settled.recordedApproved = true;
+    if (outcome.status === 'rejected') settled.recordedApproved = false;
+    return settled;
+  }
+  return {kind: 'decided', approved, record: 'pressed'};
+}
+
+/**
  * Turn a notification response into the action it stands for.
  *
  * The workspace equality check is the security boundary, not a sanity check.
@@ -143,16 +218,25 @@ export async function handlePushResponse(
   response: NotificationResponse,
   context: PushActionContext,
 ): Promise<PushActionResult> {
-  const trigger = response.notification.request.trigger as
-    | {type?: string; payload?: unknown}
-    | null;
-  const envelope = parsePushEnvelope(trigger?.payload);
+  const envelope = parsePushEnvelope(pushPayloadOf(response));
   const action = response.actionIdentifier;
 
-  if (action === DEFAULT_ACTION_IDENTIFIER) {
-    // Body tap. Opening the app is always safe, even for an envelope we could
-    // not parse or one from another workspace — navigation is the caller's.
+  if (action === DEFAULT_ACTION_IDENTIFIER || action === PUSH_ACTION.openApproval) {
+    // Body tap, or 「열어서 결정」 (ADR-0204 D7) — which is a body tap that asked
+    // for Face ID first. Opening the app is always safe, even for an envelope we
+    // could not parse or one from another workspace — navigation is the caller's.
     return {kind: 'opened', envelope};
+  }
+
+  // 승인·거절은 iOS 에서 네이티브 처리기가 혼자 맡는다 (#3931, ADR-0204 D6). 같은 버튼을
+  // JS 도 보내면 결정이 두 번 간다(멱등 키가 서로 달라 하나는 409 로 끝나지만, 두 요청이
+  // 서로를 앞지르는 경주가 된다). 처리기가 **붙어 있을 때만** 물러난다 — 이유는
+  // `native.ts` 에 있다. 답장은 그대로 JS 의 몫이다.
+  if (
+    (action === PUSH_ACTION.approve || action === PUSH_ACTION.reject) &&
+    nativeApprovalHandlerAttached()
+  ) {
+    return {kind: 'ignored', reason: 'approval buttons are answered natively'};
   }
 
   if (!envelope) {
@@ -161,46 +245,38 @@ export async function handlePushResponse(
   if (envelope.workspaceId !== context.signedInWorkspaceId.toLowerCase()) {
     return {kind: 'ignored', reason: 'workspace mismatch'};
   }
+  // ADR-0204 D7: an approval the lock screen must not decide (`momo.approval.open`)
+  // names its approval too, but its only button is 「열어서 결정」 — it has no 승인/거절
+  // button to press. This is the line that keeps it so: a 승인/거절 response that
+  // reaches an open envelope anyway (a hand-built one, or a future change that
+  // registers those buttons on the category) is not a decision this client takes
+  // from a notification. Judged here, before the `switch`, so it stands in front of
+  // whatever the approve and reject arms do with the approval id. (`approvalId` is
+  // present on every approval envelope, so the test is the category's.)
+  if (
+    (action === PUSH_ACTION.approve || action === PUSH_ACTION.reject) &&
+    envelope.approvalId &&
+    !isLockScreenDecidable(envelope)
+  ) {
+    return {kind: 'ignored', reason: 'this approval is decided in the app'};
+  }
 
   switch (action) {
     case PUSH_ACTION.approve:
     case PUSH_ACTION.reject: {
       // `parsePushEnvelope` already guarantees approvalId is non-null exactly
-      // when the category is `approval`, so this is a type narrowing, not a
+      // when the category is an approval one, so this is a type narrowing, not a
       // second policy.
       if (!envelope.approvalId) {
         return {kind: 'ignored', reason: 'no approval on this notification'};
       }
-      const approved = action === PUSH_ACTION.approve;
-      const outcome = await decideApproval(
+      // 결정 로직은 아래 한 함수다. iOS 네이티브 처리기(#3931)가 이 두 버튼을
+      // 넘겨받는 날, 바꿀 곳은 이 호출 하나다.
+      return decideFromNotification(
         envelope.workspaceId,
         envelope.approvalId,
-        approved,
-        newDecisionId(),
+        action === PUSH_ACTION.approve,
       );
-      if (outcome.kind === 'error') {
-        return {kind: 'failed', reason: outcome.errorCopy ?? 'decision failed'};
-      }
-      // `superseded` counts as decided: the approval was already settled
-      // elsewhere (another device, or it expired). Reporting that as a failure
-      // would invite a retry against something that can no longer change.
-      //
-      // But it is NOT the same event as "this tap recorded the decision", and
-      // collapsing the two was a lie in the dangerous direction (2R H5): a
-      // rejection tapped from the lock screen was reported as a rejection even
-      // when the ledger held an APPROVAL. So the two are reported apart, and a
-      // settled one carries the direction the ledger actually holds.
-      if (outcome.kind === 'superseded') {
-        const settled: PushActionResult = {
-          kind: 'decided',
-          approved,
-          record: 'settled',
-        };
-        if (outcome.status === 'approved') settled.recordedApproved = true;
-        if (outcome.status === 'rejected') settled.recordedApproved = false;
-        return settled;
-      }
-      return {kind: 'decided', approved, record: 'pressed'};
     }
 
     case PUSH_ACTION.quickReply: {

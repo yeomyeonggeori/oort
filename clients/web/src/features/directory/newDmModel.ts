@@ -1,4 +1,10 @@
 import { uuidEq, type Channel, type RosterMember } from "@momo/core/lib/api";
+import { declaredStatusLabel } from "@momo/core/features/presence/model";
+import {
+  AGENT_HOST_ONLINE_LABEL,
+  agentHostDot,
+  humanPresenceDot,
+} from "@momo/core/features/presence/statusDot";
 
 // =============================================================================
 // 새 DM 모달의 순수 판정 (#3662).
@@ -44,17 +50,18 @@ export type PeerDot = "online" | "away" | "dnd";
  */
 export function peerDot(member: RosterMember | null, nowMs: number): PeerDot | null {
   if (!member) return null;
-  if (member.kind === "agent") return member.hostOnline === true ? "online" : null;
-  if (member.presenceStatus === "away") return "away";
-  if (member.presenceStatus === "dnd") {
-    if (member.dndUntilMs !== undefined && member.dndUntilMs <= nowMs) return null;
-    return "dnd";
-  }
-  return null;
+  // 판정은 코어 한 곳이다(`presence/statusDot.ts`): 사이드바 DM 행의 상태 점(#3964)과 같은 규칙을 읽는다.
+  // 이 모달은 생존 판정을 따로 묻지 않으므로 에이전트는 호스트 연결(`hostOnline`)만 본다.
+  const dot =
+    member.kind === "agent"
+      ? agentHostDot(member.hostOnline)
+      : humanPresenceDot(member, nowMs);
+  if (dot === null) return null;
+  return dot.tone === "ok" ? "online" : dot.tone === "warn" ? "away" : "dnd";
 }
 
 export const PEER_DOT_LABEL: Record<PeerDot, string> = {
-  online: "연결됨",
-  away: "자리 비움",
-  dnd: "방해 금지",
+  online: AGENT_HOST_ONLINE_LABEL,
+  away: declaredStatusLabel("away"),
+  dnd: declaredStatusLabel("dnd"),
 };

@@ -129,6 +129,9 @@ import {bootSpawnPort} from '../src/boot/spawnPort';
 import {workRunFailure} from '@momo/core/features/agents/workRunRequest';
 import {INITIAL_NAV, navReducer} from '../src/nav/state';
 import {ProfilePage, ProfileSheet} from '../src/features/profile/ProfileSheet';
+import {__setPermissionReader} from '../src/push/permissionStatus';
+import {clearPushOptOut, setPushOptedOut} from '../src/push/pushOptOut';
+import {pushDeviceId} from '../src/push/registration';
 import {AppUpdateSheet} from '../src/features/appUpdate/AppUpdateBanner';
 import {seedIosFeedCacheForCapture} from '../src/features/appUpdate/feed';
 import {PageSheet} from '../src/design/PageSheet';
@@ -170,6 +173,10 @@ import {
   composerPlaceholderClauses,
 } from '@momo/core/features/chat/composerCopy';
 import {FixedScheme, useStyles, type ColorScheme} from '../src/design/theme';
+import {PullProbe} from './pullProbe';
+import {PullHold} from './pullHold';
+import {PullRefreshSurface} from './pullRefresh';
+import {OortLoaderSurface} from './oortLoader';
 import TeamBoardScreen from '../src/screens/TeamBoardScreen';
 import WorkJobsScreen from '../src/screens/WorkJobsScreen';
 import {TeamBoardDetailSheet} from '../src/features/work/teamBoard/TeamBoardDetailSheet';
@@ -1338,6 +1345,35 @@ function Frame({label, children}: {label: string; children: React.ReactNode}) {
   );
 }
 
+/**
+ * `Frame` 인데 바닥이 **실제 대화 화면의 바닥**이다 (#3921, design-review M1).
+ *
+ * `Frame` 은 `color.bg` 를 깐다. 대화 목록의 바닥은 다크에서 그 값이 맞지만 라이트에서는
+ * `surface` 다(`ConversationScreen` 의 `screen`: 위 25% 에서 `canvasTop` 이 `surface` 로
+ * 건너가는 그라디언트, 그 아래는 평평한 `surface`). 같은 틴트를 다른 바닥 위에서 찍으면
+ * 사진도, 사진에서 잰 대비 숫자도 거짓이 된다 — 라이트 `warnSurface`(#FFF0DB)의 세기는
+ * `bg` 위에서 1.04:1, 실제 지면 `surface` 위에서 1.11:1 이고 **방향도 다르다**.
+ *
+ * 배경식은 `ConversationScreen` 의 `screen` 과 **같은 식**을 옮겼다 — 한쪽을 고치면 이
+ * 틀도 따라가야 사진이 거짓이 되지 않는다. 가운데 정렬은 점프가 행을 놓는 자리다
+ * (`travelToIndex(index, 0.5, …)`: 목록 화면 가운데 → 그라디언트 아래, 평평한 바닥 위).
+ */
+function ConversationFloor({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  const styles = useStyles(buildStyles);
+  return (
+    <View style={styles.conversationFloor}>
+      <Text style={styles.label}>{label}</Text>
+      <View style={styles.conversationFloorMid}>{children}</View>
+    </View>
+  );
+}
+
 
 // ---- GC-7 (#2948): 에이전트가 제안한 AI 연결 카드 --------------------------------
 //
@@ -2049,8 +2085,18 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     />
   );
 
+  // #3962: 당겨서 새로고침. 계측(`pull-probe`·`pull-hold-*`)과 캡처 표면(`pull-refresh*`).
+  if (name === 'pull-probe') return <PullProbe />;
+  if (name.startsWith('pull-hold-')) return <PullHold which={name.slice('pull-hold-'.length)} />;
+  if (name.startsWith('pull-refresh')) {
+    return <PullRefreshSurface which={name.slice('pull-refresh'.length).replace(/^-/, '')} />;
+  }
   if (name.startsWith('device-key-')) {
     return <DeviceKeySurface which={name.slice('device-key-'.length)} />;
+  }
+  // #3961: 오르트 로더. 연결 띠·첫 로딩은 실제 컴포넌트(`measure/oortLoader.tsx`).
+  if (name.startsWith('oort-loader')) {
+    return <OortLoaderSurface which={name.slice('oort-loader'.length).replace(/^-/, '')} />;
   }
   if (name.startsWith('signed-work-')) {
     return <SignedWorkSurface which={name.slice('signed-work-'.length)} />;
@@ -2875,6 +2921,87 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             />
           ))}
         </Frame>
+      );
+    }
+    // ---- #3921: 알림 도착 강조는 승인이 결정되면 물러난다 ---------------------
+    //
+    // 한 쌍이다. 같은 세 줄(앞 줄 · 승인 카드 · 뒷 줄)에서 가운데 줄만 다르다.
+    //   arrival  도착 직후 — 「승인 대기」 칩과 승인·거부 컨트롤, 그리고 앰버 틴트(`landed`).
+    //   decided  결정 뒤   — 「승인됨」 칩과 영수증, 틴트 없음.
+    // 성재가 본 모순은 「승인됨」 옆에서 앰버가 남은 것이었다. 두 번째 사진에서 그 모순이
+    // 사라졌는지가 논점이라 두 장을 같은 배치로 찍는다. 물러나는 **시간**(이동이 끝난 뒤
+    // 2초, 불투명도 240ms)은 사진에 나오지 않는다 — `__tests__/landedHighlight3921.test.tsx`
+    // 가 가짜 시계로 잰다. 여기 `landed` 는 목록이 건네는 값을 그대로 건넨 것이다.
+    //
+    // 바닥은 `ConversationFloor` — 실제 대화 화면의 바닥이다. 틴트는 바닥 위의 **상대적인**
+    // 세기라(라이트 `warnSurface` 대 `surface` 1.11:1) 바닥이 다르면 사진이 다른 말을 한다.
+    case 'landed3921-arrival':
+    case 'landed3921-decided': {
+      const decided = name === 'landed3921-decided';
+      const at = (min: number) => NOW - (14 - min) * 60_000;
+      const plain = (id: string, seq: number, body: string, min: number) =>
+        ({
+          ...MESSAGE,
+          id,
+          seq,
+          body,
+          authorMemberId: AGENT,
+          createdAtMs: at(min),
+          thread: undefined,
+        }) as Message;
+      const approvalMessage = {
+        ...MESSAGE,
+        id: '00000000-0000-7000-8000-0000000003b1',
+        seq: 81,
+        type: 'approval_request',
+        body: '툴 호출 승인',
+        authorMemberId: AGENT,
+        createdAtMs: at(3),
+        thread: undefined,
+        props: {
+          approval_id: 'ap-3921',
+          title: 'github.search_issues 실행 허가',
+          approval_status: 'pending',
+        },
+      } as unknown as Message;
+      const gates = new Map([
+        ['ap-3921', {approvalId: 'ap-3921', reversible: false, expiresAtMs: null}],
+      ]);
+      const receipts = new Map([
+        ['ap-3921', {note: '승인을 기록했어요.', status: 'approved' as const}],
+      ]);
+      return (
+        <ConversationFloor
+          label={
+            decided
+              ? '결정 뒤 — 「승인됨」 · 틴트 없음 (#3921)'
+              : '도착 직후 — 「승인 대기」 · 앰버 틴트 (#3921)'
+          }>
+          <MessageRow
+            message={plain('l3921-a', 80, '배포 전에 깃허브 이슈를 먼저 찾아볼게요.', 0)}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+          />
+          <MessageRow
+            message={approvalMessage}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+            landed={!decided}
+            approvalGates={decided ? undefined : gates}
+            approvalReceipts={decided ? receipts : undefined}
+          />
+          <MessageRow
+            message={plain('l3921-c', 82, '승인되면 바로 이어서 찾아볼게요.', 6)}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+          />
+        </ConversationFloor>
       );
     }
     // ---- U4-6M (#1103): 아바타 · 문장의 격 · 컴포저 -------------------------
@@ -4228,6 +4355,18 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       );
     case 'shell-inbox':
       return <Shell initialNav={{...INITIAL_NAV, tab: 'inbox'}} />;
+    // #3923: 인박스 맨 위의 멈춤 줄. 진짜 셸의 진짜 인박스이고 서버는 씨앗이다(`seedPause`).
+    // `pause` 는 방해 금지에 묶여 일시 중지가 켜진 흔한 모양(기한 있음), `pause-open` 은 기한 없는
+    // 옛 행(성재 계정의 15일), `pause-dnd` 는 일시 중지는 꺼졌는데 상태만 방해 금지인 모양이다.
+    // `pause-date` 는 기한이 사흘 뒤 아침이라 「10월 20일(화) 오전 9:00까지」처럼 날짜가 붙는 가장 긴 모양
+    // (design-review M3), `pause-failure` 는 쓰기가 늦게 실패하는 서버(`seedPause`)다.
+    case 'shell-inbox-pause':
+    case 'shell-inbox-pause-open':
+    case 'shell-inbox-pause-dnd':
+    case 'shell-inbox-pause-offline':
+    case 'shell-inbox-pause-date':
+    case 'shell-inbox-pause-failure':
+      return <Shell initialNav={{...INITIAL_NAV, tab: 'inbox'}} />;
     case 'shell-search':
       return <Shell initialNav={{...INITIAL_NAV, tab: 'search'}} />;
     // DS2-2b (#2750): + 메뉴와 그 뒤의 두 시트. 배치 비교안 (a)(알약 안 네 번째
@@ -4393,6 +4532,84 @@ export function Surface({name}: {name: string}): React.JSX.Element {
                 onOpenTheme={() => {}}
                 onOpenStatus={() => {}}
                 onOpenDeviceKey={() => {}}
+                onOpenPauseUntil={() => {}}
+                onOpenDndUntil={() => {}}
+                onSignOut={() => {}}
+                onRevealEnd={() => {}}
+              />
+            </View>
+          </View>
+        </Screen>
+      );
+    // #2899: 알림 일시 중지·방해 금지의 기한. 진짜 셸 위의 진짜 프로필 시트이고 서버는 씨앗이다
+    // (`seedPause`). `status`는 방해 금지 줄 오른쪽의 끝나는 때, `notify`는 일시 중지 줄과 그
+    // 아래 기한 줄, `notify-open`은 옛 판이 만든 기한 없는 행(「기한 없음 · 기한 정하기」)이다.
+    // `until*` 은 시트 안의 기한 장이다 — 「직접 고르기」는 Maestro(99-pause-until-capture)가 연다.
+    case 'shell-pause-status':
+    case 'shell-pause-notify':
+    case 'shell-pause-notify-open':
+    case 'shell-pause-until':
+    case 'shell-pause-until-open':
+    case 'shell-pause-until-dnd':
+    case 'shell-pause-until-offline':
+      return (
+        <View style={styles.fill}>
+          <Shell />
+          <ProfileSheet
+            workspaceId={HARNESS_MEMBER.workspaceId}
+            member={HARNESS_MEMBER}
+            directory={makeDirectory(pauseRoster(name))}
+            connected
+            onSignOut={() => {}}
+            onClose={() => {}}
+            initialPage={
+              name === 'shell-pause-until-dnd'
+                ? 'dndUntil'
+                : name.startsWith('shell-pause-until')
+                  ? 'pauseUntil'
+                  : 'profile'
+            }
+          />
+        </View>
+      );
+    // #3924: 프로필 「알림」 묶음의 첫 줄 — 이 폰의 푸시 스위치. 기본 세 상태(켬 · 끔 · OS 거부)에 아래 몇 가지를 더한다.
+    // 시트를 알림 묶음이 머리에 오도록 끌어올려 찍는다. iOS 의 답과 「껐다」는 기억은
+    // `seedPush` 가 정한다 — 스위치·설명·잠김은 배송되는 `usePushSwitch` 가 그 값에서 그린다.
+    // `-ax` 두 판은 접근성 글자 크기(`simctl ui content_size accessibility-extra-extra-large`)용이다:
+    // 위쪽 줄들이 함께 커져 알림 묶음이 더 아래로 밀리므로 끌어올림이 다르다.
+    // `-undetermined` 는 iOS 가 아직 묻지 않은 폰, `-checking` 은 iOS 의 답이 아직 오지 않은 「읽는
+    // 중」이다. `-busy`·`-failed` 는 **눌러야만** 서는 상태라 정지 사진이 아니라
+    // `maestro/99-push-switch-capture.yaml` 이 진짜로 눌러 찍는다(서버 자리만 `seedPush` 의 가짜가 진다).
+    case 'shell-profile-push-on':
+    case 'shell-profile-push-off':
+    case 'shell-profile-push-denied':
+    case 'shell-profile-push-off-ax':
+    case 'shell-profile-push-denied-ax':
+    case 'shell-profile-push-undetermined':
+    case 'shell-profile-push-checking':
+    case 'shell-profile-push-busy':
+    case 'shell-profile-push-failed':
+    case 'shell-profile-push-failed-ax':
+      return (
+        <Screen>
+          <View style={{flex: 1, overflow: 'hidden'}}>
+            <View
+              style={{
+                marginTop: -(name.endsWith('-ax')
+                  ? PUSH_CAPTURE_SCROLL_AX
+                  : PUSH_CAPTURE_SCROLL),
+                height: 6000,
+              }}>
+              <ProfilePage
+                workspaceId={HARNESS_MEMBER.workspaceId}
+                member={HARNESS_MEMBER}
+                directory={makeDirectory(SHELL_ROSTER)}
+                connected
+                onOpenTheme={() => {}}
+                onOpenStatus={() => {}}
+                onOpenDeviceKey={() => {}}
+                onOpenPauseUntil={() => {}}
+                onOpenDndUntil={() => {}}
                 onSignOut={() => {}}
                 onRevealEnd={() => {}}
               />
@@ -4414,6 +4631,23 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             #배포 = 데스크탑에서 seq 3 부터 안 읽음 (서버 unread_count 0 → 합성 8) ·
             #빌드 = 커서 뒤 3개 · #일반 = 다 읽음 (#1964)
           </Text>
+        </View>
+      );
+    // #3964: DM 줄의 상태 점. 사이드바를 **그대로** 세운다(`SidebarScreen`): 사람은 스스로 정한 자리 비움·
+    // 방해 금지, 에이전트는 서버의 생존 판정이 아바타 모서리의 점이 된다. 캡션을 달지 않는다 — 색을 글자가
+    // 설명해 주는 사진은 점이 스스로 말하는지를 증명하지 못한다. `-member` 판은 같은 줄을 일반 멤버가 본
+    // 모양이다(경고가 속 빈 고리로 내려간다).
+    case 'dm-status-dots':
+    case 'dm-status-dots-member':
+    case 'dm-status-dots-states':
+    case 'dm-status-dots-states-member':
+      return (
+        <View style={styles.fill}>
+          <SidebarScreen
+            openChannelId={null}
+            onOpenConversation={() => {}}
+            onOpenSearch={() => {}}
+          />
         </View>
       );
     case 'mark-unread-divider': {
@@ -4461,7 +4695,9 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             team-board · work-detail · agent-sessions ·
             destructive-confirm · search-entry · search-idle ·
             search-searching · search-empty · search-error · search-results ·
-            mark-unread-sidebar · mark-unread-divider
+            mark-unread-sidebar · mark-unread-divider ·
+            landed3921-arrival · landed3921-decided ·
+            dm-status-dots[-member|-states|-states-member]
           </Text>
         </Frame>
       );
@@ -5326,6 +5562,146 @@ const WORK_CONSOLE_SESSIONS = [
 
 /** Seed the exact query keys the shipping Work Console reads, without a socket. */
 /**
+ * #3964 사이드바 상태 점 장의 씨앗. 에이전트의 생존 판정은 서버가 답하는 것이라 하네스는 같은 질의 키
+ * (`['agent-liveness', ws, id]`)에 답을 **미리 꽂는다** — 화면은 배송되는 `useAgentLiveness` 가 읽는 그대로다.
+ * 판정을 `null` 로 꽂으면 「라벨 없음(404)」, 꽂지 않으면 「아직 모름」이다.
+ *
+ *   김인턴   응답함            → 채운 초록           헤르메스  살아 있음·대기 → 채운 초록(Buzz식: 살아 있음)
+ *   코비     꺼짐             → 속 빈 고리           워처      일이 기다림    → 주황(owner 에게만)
+ *   레거시봇  판정 없음+호스트 연결 → 초록            조용봇    판정 없음+안 닿음 → 점 없음(DM 없는 에이전트 줄)
+ *   이도현   평소             → 점 없음              최민수    자리 비움      → 주황
+ *   정하윤   방해 금지         → 빨강
+ *
+ * `-states` 판은 에이전트 판정 **여덟 상태**를 한 화면에 세운다(응답함·살아 있음·조용함·꺼짐·일이 기다림·안 가져감·
+ * 응답 없음·거절됨). 채널은 하나만 둔다(줄이 화면에 다 들어오게).
+ */
+function seedDmStatusDots(surface: string): void {
+  // 서버가 없는 하네스: 질의가 다시 나가도 끝나지 않는 약속으로 둔다(실패하면 세션 만료로 읽혀 캐시가 지워진다).
+  void globalThis.fetch;
+  void globalThis.Headers;
+  globalThis.fetch = (() => new Promise<Response>(() => {})) as typeof fetch;
+  resetAgentWorking();
+  // 하네스 클라이언트는 `gcTime: 0` 이라 관찰자 없는 씨앗은 곧바로 치워진다. 목록은 일부 줄을 **나중 배치**에 그리므로
+  // (`SectionList` 창) 그 줄의 생존 질의는 마운트하기 전에 씨앗이 사라져 점이 서지 못한다. 이 화면의 생존 씨앗만 붙든다.
+  harnessClient.setQueryDefaults(['agent-liveness', ADE_WS], {gcTime: Infinity});
+  harnessClient.setQueryData(['settings', 'workspace', ADE_WS], {
+    id: ADE_WS,
+    slug: 'yeomyeong',
+    name: '여명거리',
+    updatedAtMs: 0,
+  });
+  const humanTemplate = ROSTER.find(m => m.kind === 'human') ?? ROSTER[0];
+  const agentTemplate = ROSTER.find(m => m.kind === 'agent') ?? ROSTER[0];
+  const person = (n: string, displayName: string, handle: string, extra: Record<string, unknown> = {}) => ({
+    ...humanTemplate,
+    id: `00000000-0000-7000-8000-0000000d0${n}`,
+    workspaceId: ADE_WS,
+    displayName,
+    handle,
+    ...extra,
+  });
+  const agent = (n: string, displayName: string, handle: string, extra: Record<string, unknown> = {}) => ({
+    ...agentTemplate,
+    id: `00000000-0000-7000-8000-0000000d0${n}`,
+    workspaceId: ADE_WS,
+    displayName,
+    handle,
+    ...extra,
+  });
+  const viewer = {
+    ...humanTemplate,
+    workspaceId: ADE_WS,
+    role: surface.endsWith('-member') ? 'member' : 'owner',
+  };
+  const stateAgents = {
+    intern: agent('21', '김인턴', 'intern', {hostOnline: true}),
+    hermes: agent('22', '헤르메스', 'hermes', {hostOnline: true}),
+    dawn: agent('27', '새벽봇', 'dawn'),
+    coby: agent('23', '코비', 'coby', {hostOnline: true}),
+    watcher: agent('24', '워처', 'watcher'),
+    woken: agent('28', '깨움봇', 'woken'),
+    stuck: agent('29', '먹통봇', 'stuck'),
+    refused: agent('2a', '막힘봇', 'refused'),
+  };
+  const peers = {
+    dohyun: person('11', '이도현', 'dohyun'),
+    minsu: person('12', '최민수', 'minsu', {presenceStatus: 'away'}),
+    hayun: person('13', '정하윤', 'hayun', {presenceStatus: 'dnd'}),
+    intern: agent('21', '김인턴', 'intern', {hostOnline: true}),
+    hermes: agent('22', '헤르메스', 'hermes', {hostOnline: true}),
+    coby: agent('23', '코비', 'coby', {hostOnline: true}),
+    watcher: agent('24', '워처', 'watcher'),
+    legacy: agent('25', '레거시봇', 'legacy', {hostOnline: true}),
+    quiet: agent('26', '조용봇', 'quiet', {hostOnline: false}),
+  };
+  if (surface.startsWith('dm-status-dots-states')) {
+    harnessClient.setQueryData(['roster', ADE_WS], [viewer, ...Object.values(stateAgents)]);
+    const stateOf: Array<[keyof typeof stateAgents, string]> = [
+      ['intern', 'responsive'],
+      ['hermes', 'alive_idle'],
+      ['dawn', 'quiet'],
+      ['coby', 'inactive'],
+      ['watcher', 'work_waiting'],
+      ['woken', 'woken_not_collected'],
+      ['stuck', 'unresponsive'],
+      ['refused', 'error'],
+    ];
+    for (const [key, state] of stateOf) {
+      harnessClient.setQueryData(['agent-liveness', ADE_WS, stateAgents[key].id.toLowerCase()], {
+        agentMemberId: stateAgents[key].id,
+        state,
+      });
+    }
+    harnessClient.setQueryData(['channels', ADE_WS], [
+      {id: 'ch-general', workspaceId: ADE_WS, kind: 'public' as const, name: '일반', muted: false},
+      ...stateOf.map(([key]) => ({
+        id: `dm-${key}`,
+        workspaceId: ADE_WS,
+        kind: 'dm' as const,
+        muted: false,
+        memberIds: [viewer.id, stateAgents[key].id],
+      })),
+    ]);
+    harnessClient.setQueryData(['read-state', ADE_WS], []);
+    return;
+  }
+  harnessClient.setQueryData(['roster', ADE_WS], [viewer, ...Object.values(peers)]);
+  const liveness = (id: string, state: string | null) =>
+    harnessClient.setQueryData(
+      ['agent-liveness', ADE_WS, id.toLowerCase()],
+      state === null ? null : {agentMemberId: id, state},
+    );
+  liveness(peers.intern.id, 'responsive');
+  liveness(peers.hermes.id, 'alive_idle');
+  liveness(peers.coby.id, 'inactive');
+  liveness(peers.watcher.id, 'work_waiting');
+  liveness(peers.legacy.id, null);
+  liveness(peers.quiet.id, null);
+  const channel = (id: string, name: string) => ({id, workspaceId: ADE_WS, kind: 'public' as const, name, muted: false});
+  const dm = (key: string, peer: {id: string}) => ({
+    id: `dm-${key}`,
+    workspaceId: ADE_WS,
+    kind: 'dm' as const,
+    muted: false,
+    memberIds: [viewer.id, peer.id],
+  });
+  harnessClient.setQueryData(['channels', ADE_WS], [
+    channel('ch-general', '일반'),
+    channel('ch-deploy', '배포'),
+    dm('intern', peers.intern),
+    dm('hermes', peers.hermes),
+    dm('coby', peers.coby),
+    dm('watcher', peers.watcher),
+    dm('legacy', peers.legacy),
+    dm('dohyun', peers.dohyun),
+    dm('minsu', peers.minsu),
+    dm('hayun', peers.hayun),
+  ]);
+  // 다 읽은 줄들: 안 읽음 배지가 점 옆에 서면 점이 읽히는지를 흐린다.
+  harnessClient.setQueryData(['read-state', ADE_WS], []);
+}
+
+/**
  * #1964 사이드바 장의 씨앗. 세 방, 세 가지 읽음 상태 — 마크만 있는 방은 서버가 준
  * 그대로 `unreadCount: 0` 이다. 그 0 이 배지로 새면 이 장은 「다 읽음」 두 줄과
  * 「안 읽음」 한 줄이 된다.
@@ -5529,6 +5905,78 @@ function seedAi(surface: string): void {
   ]);
 }
 
+// #3924: 푸시 스위치 판들. 시뮬레이터에는 알림 권한을 허용·거부로 고정하는 길이 없어
+// (`simctl privacy` 에 notifications 가 없다) iOS 의 답을 하네스가 정한다. 「껐다」는 기억은
+// 진짜 저장소에 적는다 — 하네스의 멤버 id 로 적히므로 이 기기에 로그인한 진짜 멤버의 스위치에는
+// 닿지 않는다(`pushOptOut.ts`). 켬·거부 판은 그 기억을 지워 두고 시작한다.
+/** `shell-profile-notify` 와 같은 끌어올림: 알림 묶음 머리가 화면 위쪽에 오게. */
+const PUSH_CAPTURE_SCROLL = 475;
+const PUSH_CAPTURE_SCROLL_AX = 1160;
+
+function seedPush(surface: string): void {
+  const denied = surface.startsWith('shell-profile-push-denied');
+  // iOS 가 아직 묻지 않은 폰: 허용도 거부도 아니고 다시 물을 수 있다.
+  const undetermined = surface === 'shell-profile-push-undetermined';
+  // 「읽는 중」: iOS 의 답이 영영 오지 않는다 — 스위치 자리의 스피너가 그대로 선다.
+  const reading = surface === 'shell-profile-push-checking';
+  __setPermissionReader(
+    reading
+      ? () => new Promise<{granted: boolean; canAskAgain: boolean}>(() => {})
+      : async () => ({
+          granted: !denied && !undetermined,
+          canAskAgain: !denied,
+        }),
+  );
+  if (surface.startsWith('shell-profile-push-off')) {
+    setPushOptedOut(HARNESS_MEMBER.id, true);
+  } else {
+    clearPushOptOut();
+  }
+  // 눌러야만 서는 두 상태: 켜진 스위치를 사람이 끄면 이 기기를 지우는 DELETE 가 나간다. 그 요청이
+  // 나가려면 이 폰이 서버에 등록된 적이 있어야 하므로 기기 id 를 하나 세운다(`pushDeviceId` 는 없으면
+  // 만든다). 서버 자리만 이 가짜다: `busy` 는 답이 영영 오지 않고(요청 중 잠김), `failed` 는 500 으로
+  // 거절한다(꺼졌다고 말하지 못하고 되돌려져 실패 문장이 선다). 그 밖의 요청은 `seedShell` 처럼 끝나지
+  // 않는다. DELETE 가 몇 번 나갔는지는 로그로 남긴다 — 한 번의 탭이 한 번의 요청이어야 한다.
+  if (
+    surface === 'shell-profile-push-busy' ||
+    surface.startsWith('shell-profile-push-failed')
+  ) {
+    pushDeviceId();
+    const refuse = surface.startsWith('shell-profile-push-failed');
+    let deletes = 0;
+    globalThis.fetch = (async (
+      input: unknown,
+      init?: {method?: string; signal?: AbortSignal},
+    ) => {
+      const url = String(input);
+      if (init?.method === 'DELETE' && url.includes('/devices/')) {
+        deletes += 1;
+        console.log(`[measure-push] DELETE /devices/{id} #${deletes}`);
+        if (!refuse) {
+          // 답이 오지 않는 서버. 진짜 `fetch` 처럼 중단 신호가 오면 거절로 끝난다 — 코어의 15초 기한
+          // (`fetchWithDeadline`)이 그 신호로 걸리므로, 기한이 지나면 `unreachable` 로 끝나 이 상태가
+          // 실패 문장으로 바뀐다(`maestro/99-push-switch-capture.yaml` 의 `EXPECT=timeout` 이 그것을 본다).
+          const startedAt = Date.now();
+          return new Promise<Response>((_, reject) => {
+            init?.signal?.addEventListener('abort', () => {
+              console.log(
+                `[measure-push] DELETE aborted by the client deadline after ${Date.now() - startedAt} ms`,
+              );
+              reject(new Error('aborted'));
+            });
+          });
+        }
+        return {
+          status: 500,
+          ok: false,
+          text: async () => JSON.stringify({error: {code: 'internal'}}),
+        } as unknown as Response;
+      }
+      return new Promise<Response>(() => {});
+    }) as typeof fetch;
+  }
+}
+
 // #3638: 컴포저 호출 판의 서버. 호출 흐름(대상 판정 → 맥 읽기 → 서명 키 확인 → 메시지 전송)은
 // 진짜이고, 서버만 이 가짜다. 시뮬레이터에는 Secure Enclave가 없어 키 저장소가 `unsupported`
 // 로 답하므로 「서명 키가 필요해요」가 **실제로** 뜬다. `flag-off` 판은 서버가 서명 요구를 꺼
@@ -5625,6 +6073,131 @@ function seedDelegate(surface: string): void {
     ['hosted-agents', 'connections', ADE_WS],
     [connection(surface === 'shell-delegate-empty' ? [] : ['ch-agent-lab', 'ch-release'])],
   );
+}
+
+// ---- #2899: 알림 일시 중지·방해 금지의 기한 ------------------------------------
+// 끝나는 때는 지금 + 3시간 — 사진마다 「오후 N:MM까지」가 다르지만 모양이 증거다.
+const PAUSE_UNTIL_AHEAD_MS = 3 * 60 * 60_000;
+
+/** 내 선언 상태가 방해 금지인 표면들. 나머지는 로스터를 그대로 둔다. */
+const PAUSE_DND_SURFACES = new Set([
+  'shell-pause-status',
+  'shell-pause-until-dnd',
+  'shell-inbox-pause',
+  'shell-inbox-pause-open',
+  'shell-inbox-pause-dnd',
+  'shell-inbox-pause-offline',
+  'shell-inbox-pause-date',
+  'shell-inbox-pause-failure',
+]);
+
+/**
+ * 이 표면의 끝나는 때. 날짜 판은 사흘 뒤 오전 9시라 어제·오늘·내일 이름이 아니라 날짜가 붙는 가장 긴 문장이
+ * 된다(「10월 20일(화) 오전 9:00까지」). 나머지는 지금 + 3시간.
+ */
+function pauseUntilFor(surface: string): number {
+  if (surface !== 'shell-inbox-pause-date') return Date.now() + PAUSE_UNTIL_AHEAD_MS;
+  const day = new Date();
+  day.setDate(day.getDate() + 3);
+  day.setHours(9, 0, 0, 0);
+  return day.getTime();
+}
+
+/** 알림 일시 중지·방해 금지 씨앗이 필요한 표면(프로필 시트 판 `shell-pause-*`, 인박스 줄 판 `shell-inbox-pause*`). */
+function isPauseSurface(name: string): boolean {
+  return name.startsWith('shell-pause-') || name.startsWith('shell-inbox-pause');
+}
+
+/** 이 표면에서 내 로스터 행. 방해 금지 표면만 선언 상태와 기한을 갖는다. */
+function pauseRoster(surface: string): typeof SHELL_ROSTER {
+  if (!PAUSE_DND_SURFACES.has(surface)) return SHELL_ROSTER;
+  const until = pauseUntilFor(surface);
+  return SHELL_ROSTER.map(member =>
+    member.id === SELF
+      ? {...member, presenceStatus: 'dnd' as const, dndUntilMs: until}
+      : member,
+  ) as typeof SHELL_ROSTER;
+}
+
+/**
+ * 하네스 클라이언트는 `gcTime: 0` 이라 관찰자가 붙기 전에 뿌린 씨앗이 다음 틱에 치워질 수 있다.
+ * 짐이 큰 기계에서는 그 타이머가 첫 렌더보다 먼저 돌아 일시 중지 줄이 읽는 중(스피너)으로 찍혔다.
+ * 이 표면들은 씨앗이 **보여야** 하므로 `seedShell` 이 질의를 만들기 전에 치우지 않게 한다.
+ */
+function keepPauseSeeds(): void {
+  harnessClient.setDefaultOptions({
+    queries: {...harnessClient.getDefaultOptions().queries, gcTime: Infinity},
+  });
+}
+
+/**
+ * 이 판의 `useOnline` 이 읽는 연결 신호를 못 박는다(design-review H2). 시뮬레이터의 NetInfo 는 시작 직후
+ * 도달성 검사가 끝나기 전에 「끊김」으로 읽히기도 해서(`seedCall` 도 같은 이유로 손을 댄다) 기한 장이 잠겼다
+ * 풀리며 줄이 한 칸 내려앉고, 그 사이에 누른 좌표가 다른 줄을 눌렀다(캡처가 흔들렸다). 구독자에게 처음부터
+ * 정해진 값만 알린다 — 화면은 진짜다.
+ */
+function forceNetwork(online: boolean): void {
+  const forced = {
+    isConnected: online,
+    isInternetReachable: online,
+    type: online ? 'wifi' : 'none',
+    details: null,
+  };
+  (
+    NetInfo as unknown as {
+      addEventListener: (listener: (state: typeof forced) => void) => () => void;
+    }
+  ).addEventListener = listener => {
+    listener(forced);
+    return () => {};
+  };
+}
+
+/** `seedShell` 이 깐 규칙(꺼짐)을 이 표면의 모양으로 덮는다. */
+function seedPause(surface: string): void {
+  forceNetwork(
+    surface !== 'shell-pause-until-offline' && surface !== 'shell-inbox-pause-offline',
+  );
+  const until = pauseUntilFor(surface);
+  const rules =
+    surface === 'shell-pause-status' ||
+    surface === 'shell-pause-notify' ||
+    surface === 'shell-inbox-pause' ||
+    surface === 'shell-inbox-pause-offline' ||
+    surface === 'shell-inbox-pause-date' ||
+    surface === 'shell-inbox-pause-failure'
+      ? {dnd: true, mentionOverridesMute: false, dndUntilMs: until}
+      : surface === 'shell-pause-notify-open' ||
+          surface === 'shell-pause-until-open' ||
+          surface === 'shell-inbox-pause-open'
+        ? {dnd: true, mentionOverridesMute: false}
+        : null;
+  if (rules) harnessClient.setQueryData(['settings', 'notification-rules', ADE_WS], rules);
+  // 인박스 줄은 명부의 내 행(선언 상태)도 읽는다 — 프로필 시트 표면은 로스터를 직접 받지만 이쪽은
+  // 질의 캐시에서 읽는다.
+  if (surface.startsWith('shell-inbox-pause')) {
+    harnessClient.setQueryData(['roster', ADE_WS], pauseRoster(surface));
+  }
+  // 쓰기가 **늦게** 실패하는 서버(design-review H1): 누르면 낙관 칠하기로 줄이 먼저 사라졌다가, 0.6초 뒤
+  // 서버가 500 을 답해 줄이 이유와 함께 돌아온다. 읽기는 끝나지 않는 약속으로 둔다(`seedShell` 과 같은
+  // 이유: 읽기 실패가 세션 만료로 읽혀 캐시가 지워진다).
+  if (surface === 'shell-inbox-pause-failure') {
+    globalThis.fetch = ((_url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET';
+      if (method === 'GET') return new Promise<Response>(() => {});
+      return new Promise<Response>(resolve =>
+        setTimeout(
+          () =>
+            resolve({
+              status: 500,
+              ok: false,
+              text: async () => JSON.stringify({error: {message: 'x'}}),
+            } as unknown as Response),
+          600,
+        ),
+      );
+    }) as typeof fetch;
+  }
 }
 
 function seedShell(surface: string): void {
@@ -6155,6 +6728,24 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     // 판에서 어두운 회색 글자가 종이 위에 그대로 서야 캡션이 읽힌다.
     lockedLabel: {fontSize: 12, color: color.textMuted, paddingBottom: 4},
     root: {flex: 1, backgroundColor: color.bg, paddingTop: 56},
+    /**
+     * `ConversationFloor` — `ConversationScreen` 의 `screen` 과 같은 배경식 (#3921).
+     * 이미지 바닥이면 `bg` 한 장, 아니면 위 25% 에서 `canvasTop` 이 (라이트 `surface` ·
+     * 다크 `bg`) 로 건너가고 그 아래는 평평하다.
+     */
+    conversationFloor: {
+      flex: 1,
+      paddingTop: 56,
+      ...(color.backdrop === 'image'
+        ? {backgroundColor: color.bg}
+        : {
+            experimental_backgroundImage: `linear-gradient(180deg, ${color.canvasTop} 0%, ${
+              color.mode === 'light' ? color.surface : color.bg
+            } 25%)`,
+          }),
+    },
+    /** 틀 안에서 행들을 화면 가운데에 놓는다 — 점프가 행을 놓는 자리. */
+    conversationFloorMid: {flex: 1, justifyContent: 'center'},
     /** 제 `Screen` 을 든 화면을 통째로 세울 때 (#1964). */
     fill: {flex: 1, backgroundColor: color.bg},
     /** 그런 화면 아래의 캡션 — 홈 인디케이터를 비켜 선다. */
@@ -6341,8 +6932,16 @@ if (
 if (
   LAUNCHED !== null &&
   LAUNCHED.kind === 'surface' &&
+  LAUNCHED.name.startsWith('dm-status-dots')
+) {
+  seedDmStatusDots(LAUNCHED.name);
+}
+if (
+  LAUNCHED !== null &&
+  LAUNCHED.kind === 'surface' &&
   LAUNCHED.name.startsWith('shell-')
 ) {
+  if (isPauseSurface(LAUNCHED.name)) keepPauseSeeds();
   seedShell(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-delegate-')) seedDelegate(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-ask-')) seedAsk(LAUNCHED.name);
@@ -6352,4 +6951,6 @@ if (
     seedIosFeedCacheForCapture({latestBuild: 3036, version: '0.1.29', testflight: true});
   }
   if (LAUNCHED.name.startsWith('shell-call-')) seedCall(LAUNCHED.name);
+  if (isPauseSurface(LAUNCHED.name)) seedPause(LAUNCHED.name);
+  if (LAUNCHED.name.startsWith('shell-profile-push-')) seedPush(LAUNCHED.name);
 }

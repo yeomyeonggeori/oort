@@ -25,6 +25,7 @@ import {
   jumpUnreadAccessibilityLabel,
   shouldShowJumpUnread,
 } from '../src/features/conversation/jumpPills';
+import {installAppClock} from './fixtures/fakeClock';
 
 // =============================================================================
 // 폰 타임라인의 안읽음·최신 점프 필 (#1892 — 웹 UnreadPill 의미론의 RN 이식)
@@ -185,7 +186,7 @@ function reportDividerIn() {
 
 async function flushFrame() {
   await act(async () => {
-    await new Promise(resolve => setTimeout(resolve, 0));
+    await jest.advanceTimersByTimeAsync(0);
   });
 }
 
@@ -261,7 +262,7 @@ function atTheEnd() {
 /** 수렴 한 라운드(50ms)를 실제로 흘려보낸다. */
 async function waitRound() {
   await act(async () => {
-    await new Promise(resolve => setTimeout(resolve, 60));
+    await jest.advanceTimersByTimeAsync(60);
   });
 }
 
@@ -301,6 +302,7 @@ function pillSentence(testID: string): string {
 }
 
 beforeEach(() => {
+  installAppClock();
   (AccessibilityInfo.isReduceMotionEnabled as jest.Mock).mockResolvedValue(false);
   (AccessibilityInfo.announceForAccessibility as jest.Mock).mockClear();
   // 프리셋의 목이다 — `spyOn` 은 같은 함수를 돌려주고 `restoreAllMocks` 는 기록을
@@ -310,6 +312,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  jest.useRealTimers();
   // `Keyboard` 는 모듈 하나가 「지금 올라와 있다」를 들고 있다. 다음 시험이 올라온
   // 키보드로 시작하지 않게 내려 둔다.
   (Keyboard as unknown as {_emitter: Emitter})._emitter.emit('keyboardDidHide', {
@@ -548,7 +551,7 @@ describe('위 필 「안읽음으로」', () => {
     fireEvent.press(screen.getByTestId('jump-unread'));
     fireEvent(list(), 'scrollBeginDrag');
     await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 600));
+      await jest.advanceTimersByTimeAsync(600);
     });
 
     expect(focus).not.toHaveBeenCalled();
@@ -876,7 +879,7 @@ describe('점프가 진입을 가져간다 (R1 M-1)', () => {
 
 async function sleep(ms: number) {
   await act(async () => {
-    await new Promise(resolve => setTimeout(resolve, ms));
+    await jest.advanceTimersByTimeAsync(ms);
   });
 }
 

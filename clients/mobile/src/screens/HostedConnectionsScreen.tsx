@@ -25,7 +25,7 @@ import {
   Sentence,
   TapRow,
 } from '../design/atoms';
-import {useRefreshControl} from '../design/refresh';
+import {PULL_FILL, usePullRefresh, type PullScrollProps} from '../design/refresh';
 import {font, line, SAFE_GUTTER, space, type Palette} from '../design/tokens';
 import {useStyles} from '../design/theme';
 import {StatusChip} from '../features/hostedAgents/StatusChip';
@@ -80,8 +80,9 @@ export default function HostedConnectionsScreen({
   }, [connectionsQuery.data, directoryQuery.directory]);
 
   const refetch = connectionsQuery.refetch;
-  const refreshControl = useRefreshControl(
-    useCallback(() => refetch().then(() => undefined), [refetch]),
+  const {refreshControl, scrollProps} = usePullRefresh(
+    // 결과를 버리지 않는다: 오류 상태로 끝났는지를 당겨서 새로고침이 읽는다(#3962).
+    useCallback(() => refetch(), [refetch]),
     'hosted-connections-refresh',
   );
 
@@ -107,6 +108,7 @@ export default function HostedConnectionsScreen({
       }}
       onOpenConnection={onOpenConnection}
       refreshControl={refreshControl}
+      scrollProps={scrollProps}
     />
   );
 }
@@ -131,6 +133,7 @@ export function HostedConnectionsView({
   onRetry,
   onOpenConnection,
   refreshControl,
+  scrollProps,
 }: {
   state: 'loading' | 'denied' | 'error' | 'ready';
   rows: HostedRowItem[];
@@ -140,6 +143,7 @@ export function HostedConnectionsView({
   onRetry: () => void;
   onOpenConnection: (connection: OpenHostedConnection) => void;
   refreshControl?: React.ComponentProps<typeof EmptyState>['refreshControl'];
+  scrollProps?: PullScrollProps;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   return (
@@ -186,6 +190,7 @@ export function HostedConnectionsView({
           headline={HOSTED_LIST_EMPTY_HEADLINE}
           detail={HOSTED_LIST_EMPTY_DETAIL}
           refreshControl={refreshControl}
+          scrollProps={scrollProps}
           testID="hosted-list-empty"
         />
       ) : (
@@ -203,6 +208,7 @@ export function HostedConnectionsView({
           )}
           contentContainerStyle={styles.listContent}
           refreshControl={refreshControl}
+          {...scrollProps}
           testID="hosted-list"
         />
       )}
@@ -261,7 +267,7 @@ function Row({
 
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
-    listContent: {paddingBottom: space.lg},
+    listContent: {paddingBottom: space.lg, ...PULL_FILL},
     lead: {
       paddingHorizontal: SAFE_GUTTER,
       paddingTop: space.md,

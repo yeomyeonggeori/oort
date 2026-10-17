@@ -19,7 +19,7 @@ import {useSession} from '../session/useSession';
 import {getAccessToken, subscribeSession} from '../storage/secureSession';
 import {absoluteApiBase} from '../storage/serverBase';
 import {registerPushCategories} from './categories';
-import {apnsEnvironment, keychainAccessGroup} from './native';
+import {apnsEnvironment, keychainAccessGroup, nativeApprovalHandlerAttached} from './native';
 import {
   askPushPermission,
   fetchApnsToken,
@@ -27,11 +27,21 @@ import {
   readPushGate,
   type PushGate,
 } from './notifications';
+import {revokeOwnDevice} from './devices';
+import {
+  clearPushActionSession,
+  publishPushActionSession,
+  pushActionSessionAvailable,
+  restorePushActionSession,
+} from './pushActionSession';
+import {mintPushActionToken, type MintedPushActionToken} from './pushActionToken';
 import {createPushFetchKeeper} from './pushFetchKeeper';
 import {clearPushFetchSession, publishPushFetchSession} from './pushFetchSession';
 import {mintPushFetchToken} from './pushFetchToken';
+import {isPushOptedOut, usePushOptedOut} from './pushOptOut';
 import {useAppIconBadge} from './appBadge';
-import {registerWithRetry} from './registration';
+import {registeredPushDeviceId, registerWithRetry} from './registration';
+import {useDismissSettledApprovalNotifications} from './settledApprovalNotifications';
 import {tapArrival, tapResponseKey, type TapArrival} from './tapArrival';
 
 // =============================================================================
@@ -99,7 +109,11 @@ export default function PushProvider({
 }: {
   children: React.ReactNode;
 }): React.JSX.Element {
-  const {workspaceId} = useSession();
+  const {workspaceId, member} = useSession();
+  const memberId = member.id;
+  // 사람이 이 폰의 푸시를 껐는가 (프로필 시트의 「푸시 알림」 스위치, #3924). 아래 등록은
+  // 이것이 참인 동안 일어나지 않고, 거짓으로 돌아오면 그 변화로 다시 돈다.
+  const optedOut = usePushOptedOut(memberId);
 
   // Held in a ref, not state: nothing renders from these, and re-rendering the
   // whole signed-in tree because a token arrived would be a real cost for no
@@ -179,9 +193,15 @@ export default function PushProvider({
   const prompt = useMemo<PushPrompt>(() => ({gate, ask}), [gate, ask]);
 
   // ---- 1b. Token and registration, once the answer is `granted` ------------
+  //
+  // ## 사람이 껐으면 등록하지 않는다 (#3924, ADR-0204 D1)
+  //
+  // 껐다는 기억(`pushOptOut.ts`)은 앱을 다시 켜도 남는다. 이 가드가 없으면 껐던 폰이 다음
+  // 실행에 스스로 등록해 스위치가 꺼져 있는데 알림이 온다. 켜면(기억이 지워지면) 이
+  // 효과가 다시 돌아 등록한다 — 사람이 앱을 다시 켜지 않아도.
   const granted = gate === 'granted';
   useEffect(() => {
-    if (!granted) return;
+    if (!granted || optedOut) return;
     let cancelled = false;
 
     (async () => {
@@ -214,12 +234,23 @@ export default function PushProvider({
       console.log(
         `${LOG} device registration ${result.outcome.kind} after ${result.attempts} attempt(s)`,
       );
+
+      // 등록이 날아가는 사이에 사람이 껐으면 서버가 그 등록을 스위치의 DELETE **뒤에**
+      // 받았을 수 있다 — 껐다는 기억이 등록보다 먼저 적히므로(`usePushSwitch`) 여기서 보인다.
+      // 되돌리지 않으면 스위치는 꺼져 있고 서버의 토큰은 살아 있다.
+      if (result.outcome.kind === 'registered' && isPushOptedOut(memberId)) {
+        const deviceId = registeredPushDeviceId();
+        if (deviceId !== null) {
+          const undone = await revokeOwnDevice(workspaceId, deviceId);
+          console.log(`${LOG} registration landed after switch-off -> undo ${undone.kind}`);
+        }
+      }
     })().catch(cause => console.error(`${LOG} setup failed`, cause));
 
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, granted]);
+  }, [workspaceId, memberId, granted, optedOut]);
 
   // ---- 2. Keep the extension's session fresh ------------------------------
   // What the extension holds is a push-fetch token minted for it (#3121), not
@@ -257,11 +288,110 @@ export default function PushProvider({
     };
   }, [workspaceId]);
 
+  // 잠금 화면의 승인·거절을 누가 받는지 한 줄로 남긴다 (#3931). 처리기가 안 붙은 빌드에서는
+  // JS 가 받으므로 종료·정지 상태의 버튼이 예전처럼 죽는다 — 그 차이가 기기 확인
+  // (docs/cicd/11 §3-4)의 첫 질문이다.
+  useEffect(() => {
+    console.log(
+      nativeApprovalHandlerAttached()
+        ? `${LOG} approval buttons: native handler attached`
+        : `${LOG} approval buttons: native handler NOT attached — JS answers them`,
+    );
+  }, []);
+
+  // ---- 2b. 잠금 화면 승인의 자격 (#3931, ADR-0204 D6) ---------------------
+  //
+  // 잠금 화면의 [승인]/[거절]은 이 앱의 JS 가 아니라 네이티브 처리기가 받는다
+  // (`modules/momo-push-action-native`). 그 처리기가 쓰는 bearer 는 앱의 access 토큰이
+  // 아니라 여기서 받아 폰에 놔 두는 `push_action` 토큰이다 — `pushActionToken.ts`,
+  // `pushActionSession.ts`. 위 확장의 토큰과 같은 주기다: 시작 때 받고, 남은 수명이 절반
+  // 아래일 때만 다시 받는다. 다른 점 하나: 서버가 세션당 살아 있는 이 토큰을 4개까지만 내줘서
+  // (초과 429) 실행마다 새로 받으면 6시간 안의 다섯 번째 실행에서 자격이 끊긴다. 그래서
+  // 지난 실행이 놔 둔 것이 아직 살아 있으면(이 사람의 것이고, 이 서버의 것이면) 이어 쓴다.
+  //
+  // ## 이 폰이 푸시를 받는 동안만 둔다
+  //
+  // 푸시를 껐거나(프로필 시트의 스위치, #3924) iOS 가 알림을 막았으면 누를 버튼이 올 일이
+  // 없다. 그런 폰에 승인을 결정할 수 있는 자격을 남겨 둘 이유가 없어서 지운다 — 이 폰을
+  // 해제한 것과 같은 뜻이다. 「아직 모른다」(권한을 읽는 중)는 끈 것이 아니다. 그때 지우면
+  // 실행마다 지웠다 다시 받아 위의 상한을 스스로 태운다.
+  const actionCredential: 'wanted' | 'unwanted' | 'unknown' =
+    optedOut || (gate !== 'checking' && !granted)
+      ? 'unwanted'
+      : granted
+        ? 'wanted'
+        : 'unknown';
+
+  useEffect(() => {
+    if (actionCredential === 'unwanted') {
+      void clearPushActionSession();
+      return;
+    }
+    if (actionCredential === 'unknown') return;
+    // 놓을 곳이 없는 빌드(앱 전용 그룹을 말하지 못한다)는 받지도 않는다. 서버는 세션 계열당 살아
+    // 있는 토큰을 4개까지만 내주는데(초과 429), 놓지 못할 토큰이 그 칸을 시작할 때마다 태운다.
+    if (!pushActionSessionAvailable()) {
+      console.warn(
+        `${LOG} lock-screen approval credential not requested (this build names no app-only keychain group)`,
+      );
+      return;
+    }
+
+    const baseUrl = absoluteApiBase();
+    const keeper = createPushFetchKeeper<MintedPushActionToken>({
+      hasSession: () => getAccessToken() !== null,
+      mint: mintPushActionToken,
+      now: Date.now,
+      restore: () => restorePushActionSession({baseUrl, workspaceId, memberId}),
+      publish: async (token, minted) => {
+        const outcome = await publishPushActionSession({
+          baseUrl,
+          workspaceId,
+          memberId,
+          token,
+          expiresAtMs: minted.expiresAtMs,
+          ttlSeconds: minted.ttlSeconds,
+        });
+        if (outcome.kind === 'published') {
+          // 기기 확인(docs/cicd/11 §3-4)이 grep 하는 줄. 토큰은 적지 않는다 — 남은 분만. (날짜로
+          // 바꾸지 않는다: 서버가 터무니없는 값을 주면 `toISOString()` 이 던져 등록이 끊긴다.)
+          console.log(
+            `${LOG} lock-screen approval credential stored (valid ${Math.round(
+              (minted.expiresAtMs - Date.now()) / 60_000,
+            )} min)`,
+          );
+          return true;
+        }
+        // 시끄럽게: 이 자격이 없으면 잠금 화면 버튼은 「…하지 못했어요 / 눌러서 앱에서 마무리해 주세요」라고만 말하고,
+        // 사람에게는 서버 문제처럼 보인다.
+        console.error(
+          `${LOG} lock-screen approval credential NOT stored (${outcome.kind}) — 승인/거절 will ask to finish in the app`,
+          outcome.kind === 'failed' ? outcome.reason : keychainAccessGroup(),
+        );
+        return false;
+      },
+    });
+    const ensure = () => void keeper.ensureFresh(workspaceId);
+
+    ensure();
+    const unsubscribe = subscribeSession(ensure);
+    return () => {
+      unsubscribe();
+      keeper.dispose();
+    };
+  }, [workspaceId, memberId, actionCredential]);
+
   // ---- 3. The one foreground retry ----------------------------------------
   useEffect(() => {
     const onChange = (next: AppStateStatus) => {
       if (next !== 'active') return;
       if (!owesForegroundRetry.current || usedForegroundRetry.current) return;
+      // 등록이 실패한 채 사람이 껐다면 이 빚은 접는다 — 포그라운드로 돌아오는 것이
+      // 껐던 폰을 다시 등록하는 길이 되면 안 된다 (#3924).
+      if (isPushOptedOut(memberId)) {
+        owesForegroundRetry.current = false;
+        return;
+      }
       const token = apnsToken.current;
       const env = apnsEnvironment();
       if (!token || !env) return;
@@ -280,7 +410,7 @@ export default function PushProvider({
 
     const subscription = AppState.addEventListener('change', onChange);
     return () => subscription.remove();
-  }, [workspaceId]);
+  }, [workspaceId, memberId]);
 
   // ---- 4. Notification actions, and where a body tap goes -----------------
   //
@@ -358,6 +488,10 @@ export default function PushProvider({
     return () => subscription.remove();
   }, [workspaceId, deliverTap]);
 
+  // 다른 곳에서 결정된 승인의 알림을 걷는다(#3926). 앱 안 결정과 알림 버튼은 결정을
+  // 보낸 자리에서 직접 걷고, 이 훅은 남이 한 결정을 대기 승인 목록에서 알아챈다.
+  useDismissSettledApprovalNotifications(workspaceId);
+
   // ---- 5. Sign-out ---------------------------------------------------------
   useEffect(
     () => () => {
@@ -365,6 +499,9 @@ export default function PushProvider({
       // keeps resolving notification bodies with the previous member's token
       // until the server revokes it — the extension never hears about sign-out.
       void clearPushFetchSession();
+      // 잠금 화면 승인의 자격도 같은 이유로 — 로그아웃한 폰이 앞 사람 이름으로 승인을
+      // 결정하게 두지 않는다 (#3931).
+      void clearPushActionSession();
     },
     [],
   );

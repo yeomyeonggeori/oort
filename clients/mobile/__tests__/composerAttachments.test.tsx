@@ -46,6 +46,7 @@ import {pickDocument, pickPhoto} from '../src/features/attachments/picker';
 import {putAttachmentBytes} from '../src/features/attachments/uploadTransport';
 import * as uploadTransport from '../src/features/attachments/uploadTransport';
 import {SessionProvider, useSession} from '../src/session/useSession';
+import {installAppClock} from './fixtures/fakeClock';
 
 const EMPTY = makeDirectory([]);
 const TARGET = {workspaceId: 'ws-1', channelId: 'channel-1'};
@@ -220,6 +221,10 @@ function renderSignedInComposer(): {
 }
 
 beforeEach(() => {
+  // 사진·파일 고르기는 시트가 닫힌 뒤(~400ms 타이머)에 뜬다. 실제 시계의 `waitFor` 1000ms 에서
+  // 그 타이머가 41% 를 먹었다(한 시험 10건 모두 407~414ms 측정) — 가짜 시계에서는 타이머가 가짜
+  // 시간으로 돌아 대기가 횟수 예산이 된다(fixtures/fakeClock.ts).
+  installAppClock();
   (
     AccessibilityInfo.announceForAccessibility as unknown as jest.Mock
   ).mockClear();
@@ -237,6 +242,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   resetAttachmentDraftsForTest();
+  jest.useRealTimers();
 });
 
 describe('picker·native upload 단위 배선', () => {

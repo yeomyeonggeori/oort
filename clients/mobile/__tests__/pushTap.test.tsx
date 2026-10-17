@@ -9,6 +9,7 @@ import {
   waitFor,
   within,
 } from '@testing-library/react-native';
+import {requireOptionalNativeModule} from 'expo-modules-core';
 import * as Notifications from 'expo-notifications';
 import React from 'react';
 import {AccessibilityInfo, AppState, FlatList} from 'react-native';
@@ -33,6 +34,16 @@ import {
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+
+// 이 파일은 알림이 **어디에 착지하는가**를 잰다. 착지 틴트가 스스로 물러나는 시한(이동이
+// 끝난 뒤 2초, #3921)은 `landedHighlight3921.test.tsx` 가 가짜 시계로 잰다. 여기서는 실시계
+// 위에서 「제목을 기다린 뒤 `landedIds()`」를 읽는데, 차가운 워커에서 그 사이가 2초를
+// 넘으면 착지가 정상이어도 틴트가 이미 물러나 있다 — 관측이 시한에 기대지 않게 시한만
+// 늘려 둔다. 나머지(결정·손가락)는 진짜 그대로다.
+jest.mock('../src/features/conversation/landedHighlight', () => ({
+  ...jest.requireActual('../src/features/conversation/landedHighlight'),
+  LANDED_HOLD_MS: 10 * 60 * 1000,
+}));
 
 // =============================================================================
 // 알림 본문을 누르면 그 자리로 간다 (#2569, ADR-0187 D4).
@@ -291,6 +302,12 @@ interface FetchOptions {
    * 그 읽기를 붙들어 두려고 있다(#2632 N-3). `undefined` 면 서버 그대로.
    */
   headResponder?: (channelId: string) => Response | Promise<Response> | undefined;
+  /**
+   * `POST …/approvals/{id}/decision` 에 답한다 (#3921). 주지 않으면 결정 요청은 시험을 깨뜨린다 —
+   * **알림 탭은 결정하지 않는다**는 이 파일의 약속이다. 결정은 사람이 카드에서 누른 것이고,
+   * 그 길을 재는 시험만 이 응답자를 든다. 결정이 나가면 그 뒤의 대기 원장 읽기는 비어서 온다.
+   */
+  decisionResponder?: (approvalId: string) => Response | Promise<Response>;
 }
 
 type FetchInit = {method?: string; body?: unknown};
@@ -331,6 +348,8 @@ function serverRows(url: string): unknown[] {
 
 function installFetch(options: FetchOptions = {}): jest.Mock {
   let channelCalls = 0;
+  /** 결정이 서버에 닿았다 — 그 뒤 대기 원장은 비어서 온다(`decisionResponder`). */
+  let decided = false;
   const mock = jest.fn(async (url: string, init?: FetchInit) => {
     if (url.includes('/reactions')) return jsonResponse(200, {});
     if (url.includes('/pins')) return jsonResponse(200, {pins: []});
@@ -393,9 +412,14 @@ function installFetch(options: FetchOptions = {}): jest.Mock {
     }
     if (url.includes('/approvals')) {
       if (init?.method === 'POST') {
-        throw new Error(`a notification tap must never decide: ${url}`);
+        if (options.decisionResponder === undefined) {
+          throw new Error(`a notification tap must never decide: ${url}`);
+        }
+        decided = true;
+        const approvalId = url.split('/approvals/')[1]?.split('/')[0] ?? '';
+        return options.decisionResponder(approvalId);
       }
-      return jsonResponse(200, {approvals: [PENDING_APPROVAL]});
+      return jsonResponse(200, {approvals: decided ? [] : [PENDING_APPROVAL]});
     }
     if (url.includes('/work-sessions/shared')) {
       return jsonResponse(200, {sessions: [], nextCursor: null});
@@ -842,6 +866,95 @@ describe('세 상태 × 대상 종류 (#2569 수용기준 1·3)', () => {
 });
 
 // =============================================================================
+describe('승인 푸시로 도착한 카드의 도착 강조는 결정되면 곧바로 물러난다 (#3921)', () => {
+  // 성재가 본 그대로의 흐름이다: 승인 알림 본문 탭 → 승인 카드에 착지(앰버 강조) → 카드에서
+  // 「승인」. 위 모듈 모킹이 시한을 10분으로 늘려 두었으므로 강조를 거둘 수 있는 것은 결정
+  // 하나뿐이다 — 시계가 거뒀다는 우연으로는 이 시험이 초록이 될 수 없다.
+  it('착지한 승인 카드에서 승인을 누르면 영수증이 서고 같은 순간 강조가 사라진다', async () => {
+    installFetch({
+      decisionResponder: approvalId =>
+        jsonResponse(200, {
+          approvalId,
+          status: 'approved',
+          decidedBy: SELF_ID,
+          decidedAtMs: T0,
+        }),
+    });
+    notificationsMock.getLastNotificationResponse.mockReturnValue(
+      tapResponse(apnsPayload(TARGETS['승인 카드'].aim)),
+    );
+    renderShell();
+
+    await expectLanded('general', APPROVAL_MSG, false);
+    const approve = await waitFor(
+      () => screen.getByTestId(`card-approval-${APPROVAL_ID}-approve`),
+      SETTLE,
+    );
+    expect(landedIds()).toContain(APPROVAL_MSG);
+
+    await act(async () => {
+      fireEvent.press(approve);
+    });
+
+    await waitFor(
+      () => expect(screen.getByText('승인을 기록했어요.')).toBeTruthy(),
+      SETTLE,
+    );
+    await waitFor(() => expect(landedIds()).toHaveLength(0), SETTLE);
+  });
+
+  // 다른 기기(또는 잠금 화면의 알림 버튼)가 먼저 결정하면 서버가 그 카드 행을 `message.edited` 로
+  // 알린다(#3771 `announce_card_edit`) — 폰은 레일에서 그 프레임을 받아 카드 상태를 갈아 끼운다.
+  // 사슬 전체(레일 → `useTimeline` → 목록 → 행)를 도는 시험이다.
+  it('다른 기기가 먼저 결정해 서버가 카드를 message.edited 로 알리면 강조가 곧바로 물러난다', async () => {
+    installFetch();
+    notificationsMock.getLastNotificationResponse.mockReturnValue(
+      tapResponse(apnsPayload(TARGETS['승인 카드'].aim)),
+    );
+    renderShell();
+
+    await expectLanded('general', APPROVAL_MSG, false);
+    expect(landedIds()).toContain(APPROVAL_MSG);
+
+    await act(async () => {
+      channelSub(GENERAL)?.__emit('publication', {
+        data: {
+          type: 'message.edited',
+          v: 1,
+          ts: T0 + 13_500,
+          seq: 13,
+          payload: {
+            id: APPROVAL_MSG,
+            channel_id: GENERAL,
+            seq: 13,
+            type: 'approval_request',
+            body: '툴 호출 승인',
+            author_member_id: HERMES,
+            hlc_ts: 13,
+            hlc_count: 0,
+            state: 'sent',
+            created_at_ms: T0 + 13_000,
+            props: {
+              approval_id: APPROVAL_ID,
+              title: 'github.search_issues 실행 허가',
+              approval_status: 'approved',
+              status: 'approved',
+              decided_by: MINSU,
+              decided_at_ms: T0 + 13_400,
+            },
+          },
+        },
+      });
+    });
+
+    await waitFor(() => expect(landedIds()).toHaveLength(0), SETTLE);
+    // 카드는 그 결정을 말한다 — 컨트롤이 물러나고 칩이 「승인됨」이다.
+    expect(screen.queryByTestId(`card-approval-${APPROVAL_ID}-approve`)).toBeNull();
+    expect(screen.getByText('승인됨')).toBeTruthy();
+  });
+});
+
+// =============================================================================
 describe('갈 수 없으면 한 문장 — 조용히 무시하지 않는다 (#2569 수용기준 2)', () => {
   it('목록에 없는 방 — 다시 물어도 없으면 사라졌거나 권한이 없다고 말한다', async () => {
     const fetchMock = installFetch();
@@ -1143,6 +1256,10 @@ describe('한 번의 탭은 한 번 착지한다', () => {
     expect(new Set(tokens)).toEqual(new Set([1]));
   });
 
+  // 이유가 둘이다. 승인·거절·답장은 누른 **그 순간**의 행동이라 로그아웃·재로그인으로 트리가
+  // 새로 붙을 때 마지막 응답에서 되풀이하면 안 된다(#2569). 그리고 iOS 에서는 JS 가 이 두 버튼을
+  // 어느 길로도 보내지 않는다 — 네이티브 처리기가 혼자 맡는다(#3931). 아래 「잠금 화면 승인·거절과
+  // 그 결과 줄」이 두 번째 이유를 리스너 길까지 잰다.
   it('잠금 화면의 승인 버튼은 마지막 응답에서 되풀이되지 않는다', async () => {
     const fetchMock = installFetch();
     notificationsMock.getLastNotificationResponse.mockReturnValue(
@@ -1162,6 +1279,92 @@ describe('한 번의 탭은 한 번 착지한다', () => {
         (init as {method?: string} | undefined)?.method === 'POST',
     );
     expect(decisions).toHaveLength(0);
+  });
+
+  // ADR-0204 D7 (#3928) — 「열어서 결정」은 승인·거절과 정반대로 취급한다. 그 버튼은 일을
+  // 하지 않고 앱을 앞으로 불러 카드를 보여 주는 것이 전부라서 본문 탭과 같은 탭이다.
+  // 그러니 마지막 응답으로도 받는다 — 되풀이해도 카드가 열릴 뿐이다.
+  //
+  // 이 시험들이 재는 것은 **착지**다. 「결정을 보내지 않는다」는 단정은 방어선이 아니라
+  // 확인이다: 콜드 런치 경로(`deliverTap`)는 응답을 행동으로 옮기는 `handlePushResponse`를
+  // 부르지 않으므로 거기서는 구조상 결정이 없고, 리스너 경로에서 승인·거절을 막는 것은
+  // `pushApprovalOpen.test.ts`가 잰다.
+  const OPEN_APPROVAL_AIM: Aim = {
+    ...TARGETS['승인 카드'].aim,
+    category: 'momo.approval.open',
+  };
+
+  function approvalDecisions(fetchMock: jest.Mock) {
+    return fetchMock.mock.calls.filter(
+      ([url, init]) =>
+        String(url).includes('/approvals') &&
+        (init as {method?: string} | undefined)?.method === 'POST',
+    );
+  }
+
+  it('「열어서 결정」은 콜드 런치의 마지막 응답이어도 카드에 착지한다', async () => {
+    const fetchMock = installFetch();
+    notificationsMock.getLastNotificationResponse.mockReturnValue(
+      tapResponse(apnsPayload(OPEN_APPROVAL_AIM), PUSH_ACTION.openApproval),
+    );
+    renderShell();
+
+    await expectLanded('general', APPROVAL_MSG, false);
+    expect(approvalDecisions(fetchMock)).toHaveLength(0);
+  });
+
+  it('「열어서 결정」은 앱이 떠 있을 때(리스너)도 카드에 착지한다', async () => {
+    const fetchMock = installFetch();
+    renderShell();
+    await waitForSidebar();
+
+    expect(deliver).not.toBeNull();
+    await act(async () => {
+      deliver?.(
+        tapResponse(apnsPayload(OPEN_APPROVAL_AIM), PUSH_ACTION.openApproval),
+      );
+    });
+
+    await expectLanded('general', APPROVAL_MSG, false);
+    expect(approvalDecisions(fetchMock)).toHaveLength(0);
+  });
+
+  it('「열어서 결정」이 두 길(마지막 응답과 리스너)로 와도 한 번만 착지한다', async () => {
+    installFetch();
+    const launched = tapResponse(
+      apnsPayload(OPEN_APPROVAL_AIM),
+      PUSH_ACTION.openApproval,
+    );
+    notificationsMock.getLastNotificationResponse.mockReturnValue(launched);
+    renderShell();
+    await expectLanded('general', APPROVAL_MSG, false);
+
+    // 같은 응답이 리스너로도 온다.
+    await act(async () => {
+      deliver?.(launched);
+    });
+
+    // 두 번째 착지가 있었다면 점프 토큰이 2 로 올랐다.
+    const tokens = jumpTargets()
+      .filter(target => target.messageId === APPROVAL_MSG)
+      .map(target => target.token);
+    expect(tokens.length).toBeGreaterThan(0);
+    expect(new Set(tokens)).toEqual(new Set([1]));
+  });
+
+  it('open 승인에 온 승인 버튼은 마지막 응답이어도 착지하지 않는다 (탭이 아니다)', async () => {
+    const fetchMock = installFetch();
+    notificationsMock.getLastNotificationResponse.mockReturnValue(
+      tapResponse(apnsPayload(OPEN_APPROVAL_AIM), PUSH_ACTION.approve),
+    );
+    renderShell();
+    await waitForSidebar();
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    });
+
+    expect(screen.queryByTestId('conversation-title')).toBeNull();
+    expect(approvalDecisions(fetchMock)).toHaveLength(0);
   });
 
   it('같은 메시지를 가리키는 두 번째 탭도 다시 착지한다', async () => {
@@ -1197,6 +1400,136 @@ describe('한 번의 탭은 한 번 착지한다', () => {
     expect(screen.getByTestId('tab-home').props.accessibilityState).toEqual({
       selected: true,
     });
+  });
+});
+
+// =============================================================================
+// 잠금 화면 승인·거절과 그 결과 줄 (#3931, ADR-0204 D6).
+//
+// iOS 에서 이 두 버튼은 네이티브 처리기(`modules/momo-push-action-native`)가 JS 없이 받는다.
+// 앱이 살아 있으면 expo 의 EmitterModule 이 같은 응답을 JS 에도 내보내므로, JS 가 물러나지 않으면
+// 결정이 두 번 간다. 처리기는 승인 알림을 한 줄짜리 **로컬 알림**(「승인했어요 · …」,
+// 「승인하지 못했어요 / 눌러서 앱에서 마무리해 주세요」)으로 바꾼다. 로컬 알림에는 푸시 트리거가 없어서
+// 원문은 `content.data.origin` 에 실려 오고, 그 줄을 눌러도 카드로 가야 한다 — 「눌러서 앱에서
+// 마무리해 주세요」라는 문장이 약속한 것이 그 착지다.
+// =============================================================================
+describe('잠금 화면 승인·거절과 그 결과 줄 (#3931, ADR-0204 D6)', () => {
+  const requireNative = requireOptionalNativeModule as unknown as jest.Mock;
+  function nativeHandler(attached: boolean): void {
+    requireNative.mockImplementation((name: string) =>
+      attached && name === 'MomoPushAction' ? {handlesApprovalActions: true} : null,
+    );
+  }
+  afterEach(() => {
+    requireNative.mockReset().mockReturnValue(null);
+  });
+
+  const decisionPosts = (fetchMock: jest.Mock) =>
+    fetchMock.mock.calls.filter(
+      ([url, init]) =>
+        String(url).includes('/approvals') &&
+        (init as {method?: string} | undefined)?.method === 'POST',
+    );
+
+  /** 처리기가 대신 올린 로컬 알림에 대한 본문 탭: 푸시 트리거가 없고 원문은 `data.origin` 이다. */
+  function resultLineTap(origin: unknown) {
+    responseSerial += 1;
+    return {
+      actionIdentifier: Notifications.DEFAULT_ACTION_IDENTIFIER,
+      notification: {
+        date: T0 + responseSerial,
+        request: {
+          identifier: `apns-${responseSerial}`,
+          content: {
+            title: '승인하지 못했어요',
+            body: '눌러서 앱에서 마무리해 주세요',
+            data: {origin},
+          },
+          trigger: null,
+        },
+      },
+    } as unknown as Notifications.NotificationResponse;
+  }
+
+  it('처리기가 붙은 iOS 에서 승인·거절은 JS 가 어느 길로도 보내지 않는다 — 마지막 응답으로도, 살아 있는 리스너로도', async () => {
+    nativeHandler(true);
+    const fetchMock = installFetch();
+    const approval = apnsPayload(TARGETS['승인 카드'].aim);
+    notificationsMock.getLastNotificationResponse.mockReturnValue(
+      tapResponse(approval, PUSH_ACTION.approve),
+    );
+    renderShell();
+    await waitForSidebar();
+
+    await act(async () => {
+      deliver?.(tapResponse(approval, PUSH_ACTION.approve));
+      deliver?.(tapResponse(approval, PUSH_ACTION.reject));
+    });
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    });
+
+    expect(decisionPosts(fetchMock)).toHaveLength(0);
+    // 버튼은 탭이 아니다 — 항법도 만들지 않는다.
+    expect(screen.queryByTestId('conversation-title')).toBeNull();
+  });
+
+  it('(대조) 처리기가 안 붙은 빌드에서는 같은 리스너 응답을 JS 가 결정으로 보낸다 — 위의 0 이 헛돌지 않는다', async () => {
+    nativeHandler(false);
+    const fetchMock = installFetch();
+    renderShell();
+    await waitForSidebar();
+
+    await act(async () => {
+      deliver?.(tapResponse(apnsPayload(TARGETS['승인 카드'].aim), PUSH_ACTION.approve));
+    });
+
+    await waitFor(() => expect(decisionPosts(fetchMock)).toHaveLength(1));
+    expect(String(decisionPosts(fetchMock)[0][0])).toContain(
+      `/approvals/${APPROVAL_ID}/decision`,
+    );
+  });
+
+  it('결과 줄을 누르면 그 승인 카드로 간다 — 앱이 살아 있을 때', async () => {
+    nativeHandler(true);
+    installFetch();
+    renderShell();
+    await waitForSidebar();
+
+    await act(async () => {
+      deliver?.(resultLineTap(apnsPayload(TARGETS['승인 카드'].aim)));
+    });
+
+    await expectLanded('general', APPROVAL_MSG, false);
+    await waitFor(() =>
+      expect(screen.getByTestId(`card-approval-${APPROVAL_ID}-approve`)).toBeTruthy(),
+    );
+  });
+
+  it('결과 줄을 눌러 앱이 뜬 경우(콜드 런치)도 그 카드로 간다', async () => {
+    nativeHandler(true);
+    installFetch();
+    notificationsMock.getLastNotificationResponse.mockReturnValue(
+      resultLineTap(apnsPayload(TARGETS['승인 카드'].aim)),
+    );
+    renderShell();
+
+    await expectLanded('general', APPROVAL_MSG, false);
+    expect(notificationsMock.clearLastNotificationResponse).toHaveBeenCalled();
+  });
+
+  it('원문이 없는 결과 줄(처리기가 페이로드를 읽지 못했던 알림)은 앱만 열고 이유를 한 문장으로 말한다', async () => {
+    nativeHandler(true);
+    installFetch();
+    renderShell();
+    await waitForSidebar();
+
+    await act(async () => {
+      deliver?.(resultLineTap(null));
+    });
+
+    await expectSentence('notification-tap-notice', NOTIFICATION_TAP_COPY.unreadable);
+    expect(screen.queryByTestId('conversation-title')).toBeNull();
   });
 });
 

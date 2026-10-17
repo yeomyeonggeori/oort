@@ -24,6 +24,7 @@ import {
 } from 'react-native';
 import {Sentence} from '../../design/atoms';
 import {CONV_ICON_SIZE, CONV_ICONS} from '../../design/icons';
+import {PULL_FILL, withPullScroll, type PullScrollProps} from '../../design/refresh';
 import {usePalette, useStyles} from '../../design/theme';
 import {
   ds2Radius,
@@ -176,6 +177,8 @@ export interface WorkConversationViewProps {
   /** 닿지 않은 「거부 + 지시」 글을 입력창으로 옮긴다. */
   seed?: {text: string} | null;
   refreshControl?: React.ReactElement<RefreshControlProps>;
+  /** 위성이 당긴 거리를 따라가도록 오프셋을 읽는 스크롤 props (`usePullRefresh().scrollProps`, #3962). */
+  scrollProps?: PullScrollProps;
   /** 캡처 하네스 전용: 처음부터 이 글이 입력창에 들어 있다. */
   initialText?: string;
   autoFocus?: boolean;
@@ -190,6 +193,7 @@ export function WorkConversationView({
   renderPermission,
   seed,
   refreshControl,
+  scrollProps,
   initialText,
   autoFocus,
 }: WorkConversationViewProps): React.JSX.Element {
@@ -264,7 +268,7 @@ export function WorkConversationView({
           <ScrollView
             ref={scrollRef}
             contentContainerStyle={styles.listBody}
-            onScroll={onScroll}
+            {...withPullScroll(onScroll, scrollProps)}
             onScrollBeginDrag={() => {
               userScrolling.current = true;
             }}
@@ -599,6 +603,7 @@ export function WorkConversation({
   agentName,
   nameOf,
   refreshControl,
+  scrollProps,
 }: {
   workspaceId: string;
   memberId: string;
@@ -610,6 +615,7 @@ export function WorkConversation({
   agentName: string;
   nameOf: (memberId: string) => string;
   refreshControl?: React.ReactElement<RefreshControlProps>;
+  scrollProps?: PullScrollProps;
 }): React.JSX.Element {
   const queryClient = useQueryClient();
   const surface = useSignedWorkSurface(workspaceId, memberId, session, events);
@@ -719,6 +725,7 @@ export function WorkConversation({
       renderPermission={renderPermission}
       seed={seed}
       refreshControl={refreshControl}
+      scrollProps={scrollProps}
     />
   );
 }
@@ -753,6 +760,7 @@ const buildStyles = (color: Palette) =>
       paddingTop: space.md,
       paddingBottom: space.lg,
       gap: space.sm,
+      ...PULL_FILL,
     },
     empty: {
       fontSize: font.label,

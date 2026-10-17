@@ -401,6 +401,66 @@ mod tests {
         let _ = std::fs::remove_file(&key_path);
     }
 
+    /// #3930 (ADR-0204 D9): what APNs says about a dead token is in the response
+    /// STATUS and the JSON `reason`. The live sender must hand both to the receipt
+    /// untouched — the notifier invalidates the token from exactly these two fields.
+    #[tokio::test]
+    async fn live_sender_reads_apns_rejection_status_and_reason_from_the_mock() {
+        for (raw_status, apns_status, body, reason) in [
+            (
+                "410 Gone",
+                410,
+                r#"{"reason":"Unregistered","timestamp":1700000000}"#,
+                Some("Unregistered"),
+            ),
+            (
+                "400 Bad Request",
+                400,
+                r#"{"reason":"BadDeviceToken"}"#,
+                Some("BadDeviceToken"),
+            ),
+            (
+                "400 Bad Request",
+                400,
+                r#"{"reason":"DeviceTokenNotForTopic"}"#,
+                Some("DeviceTokenNotForTopic"),
+            ),
+            // no body at all: the status alone, no invented reason
+            ("410 Gone", 410, "", None),
+        ] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let response = format!(
+                "HTTP/1.1 {raw_status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            );
+            tokio::spawn(async move {
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut buffer = vec![0u8; 8192];
+                let _ = stream.read(&mut buffer).await.unwrap();
+                stream.write_all(response.as_bytes()).await.unwrap();
+            });
+            let key_path = temp_p8();
+            let sender = LiveApnsSender::new_with_endpoint(
+                format!("http://{addr}"),
+                ApnsEnvironment::Sandbox,
+                key_path.to_str().unwrap(),
+                "ABCD123456".into(),
+                "TEAM123456".into(),
+            )
+            .unwrap();
+            let dispatch = PushDispatch::decode_closed(TEST_DISPATCH_JSON.as_bytes()).unwrap();
+            let result = sender.send(&dispatch).await.unwrap();
+            assert_eq!(result.status, apns_status, "{raw_status} {body}");
+            assert_eq!(result.reason.as_deref(), reason, "{raw_status} {body}");
+            let receipt = PushReceipt::from(result);
+            assert_eq!(receipt.apns_status, apns_status);
+            assert_eq!(receipt.apns_reason.as_deref(), reason);
+            let _ = std::fs::remove_file(&key_path);
+        }
+    }
+
     #[test]
     fn live_sender_refuses_an_unreadable_p8() {
         let error = match LiveApnsSender::new(

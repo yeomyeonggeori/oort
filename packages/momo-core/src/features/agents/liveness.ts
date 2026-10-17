@@ -1,4 +1,9 @@
-import { ApiError, type AgentLiveness, type AgentLivenessState } from "../../lib/api";
+import {
+  ApiError,
+  type AgentLiveness,
+  type AgentLivenessState,
+  type MembershipRole,
+} from "../../lib/api";
 import { elapsedSpan } from "./runPhase";
 
 // =============================================================================
@@ -103,6 +108,26 @@ export function livenessView(
     case "inactive":
       return base("연결이 꺼져 있어요", "꺼짐", "neutral");
   }
+}
+
+/**
+ * 이 사람이 생존 라벨의 경고에 **할 수 있는 일이 있는가**: 다시 깨울 수 있는 owner/admin 이다
+ * (`WakeAgentButton`). 할 수 있는 일이 없는 경고는 소음이다(design-review U3 M-3).
+ */
+export function mayActOnLiveness(role: MembershipRole | undefined): boolean {
+  return role === "owner" || role === "admin";
+}
+
+/**
+ * 보는 사람에게 맞춘 톤. 경고색(`warn`)은 **할 수 있는 일이 있는 상태**의 색이라 그 사람에게만 경고로
+ * 읽히고, 그 밖의 멤버에게는 같은 사실이 중립이다. 웹·폰의 라벨과 DM 행의 상태 점이 이 한 규칙을 읽는다
+ * (#3964: 규칙이 라벨마다 한 벌씩 있던 자리를 한 곳으로).
+ */
+export function livenessToneFor(
+  view: Pick<LivenessView, "tone">,
+  mayAct: boolean
+): LivenessTone {
+  return view.tone === "warn" && !mayAct ? "neutral" : view.tone;
 }
 
 /** 접근성 이름: 라벨과 뜻을 한 문장으로. */

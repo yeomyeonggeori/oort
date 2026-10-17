@@ -40,7 +40,7 @@ import {
   Screen,
   ScreenHeader,
 } from '../design/atoms';
-import {useRefreshControl} from '../design/refresh';
+import {PULL_FILL, usePullRefresh} from '../design/refresh';
 import {ds2Radius, font, line, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../design/tokens';
 import {useStyles} from '../design/theme';
 import {
@@ -59,6 +59,7 @@ import {
   useNeedsAction,
   type Feed,
 } from '../features/inbox/useInbox';
+import {PauseBanner} from '../features/profile/PauseBanner';
 import {haptics} from '../lib/haptics';
 import {useTabBarClearance} from '../shell/ShellChrome';
 import {useSession} from '../session/useSession';
@@ -309,7 +310,7 @@ export default function InboxScreen({
   // 당겨서 새로고침 (goal RN-B4b / #1026). 각 탭은 이미 자기를 다시 읽는 법을
   // 알고 있으므로(`feed.refetch` = 무효화), 당김은 그것을 부르는 새 입구일 뿐이다 —
   // 탭을 바꾸면 대상도 함께 바뀐다.
-  const refreshControl = useRefreshControl(
+  const {refreshControl, scrollProps} = usePullRefresh(
     mailboxActive ? mailbox.refetch : feed.refetch,
     'inbox-refresh',
   );
@@ -456,6 +457,13 @@ export default function InboxScreen({
     <Screen onCanvas={clearance > 0}>
       <ScreenHeader title="인박스" />
 
+      {/* 알림이 멈춰 있으면 그 사실이 이 화면 맨 위에 한 줄로 선다(ADR-0204 D3, #3923). */}
+      <PauseBanner
+        workspaceId={member.workspaceId}
+        selfId={member.id}
+        active={active}
+      />
+
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -559,6 +567,7 @@ export default function InboxScreen({
             headline={mailboxEmpty(tab as MailboxView, mailbox.source).headline}
             detail={mailboxEmpty(tab as MailboxView, mailbox.source).detail}
             refreshControl={refreshControl}
+            scrollProps={scrollProps}
             testID="inbox-empty"
           />
         ) : (
@@ -599,6 +608,7 @@ export default function InboxScreen({
             }
             contentContainerStyle={[styles.listContent, {paddingBottom: space.lg + clearance}]}
             refreshControl={refreshControl}
+            {...scrollProps}
             testID="inbox-list"
           />
         )
@@ -624,6 +634,7 @@ export default function InboxScreen({
           headline={EMPTY_COPY[filter].headline}
           detail={EMPTY_COPY[filter].detail}
           refreshControl={refreshControl}
+          scrollProps={scrollProps}
           testID="inbox-empty"
         />
       ) : (
@@ -650,6 +661,7 @@ export default function InboxScreen({
           )}
           contentContainerStyle={[styles.listContent, {paddingBottom: space.lg + clearance}]}
           refreshControl={refreshControl}
+          {...scrollProps}
           testID="inbox-list"
         />
       )}
@@ -871,7 +883,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   tabCountLabel: {fontSize: font.caption, fontWeight: '700', color: color.onPrimary},
   tabLabel: {fontSize: font.label, color: color.textMuted},
   tabLabelActive: {color: color.text, fontWeight: '600'},
-  listContent: {paddingBottom: space.lg},
+  listContent: {paddingBottom: space.lg, ...PULL_FILL},
   rowShell: {
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: color.border,
