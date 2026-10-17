@@ -198,11 +198,15 @@ export const PUSH_WORK_COMPLETE_DESCRIPTION =
 // 서버에서 다르다 — 푸시 판정은 이 규칙만 읽는다. 한 낱말이 두 필드를 가리키면
 // 데스크탑에서 「방해 금지」를 켠 사람이 폰의 「방해 금지」 줄에서 반대 설명을
 // 읽게 된다(#2848 design-review H-1). 그래서 이름과 설명을 웹·폰이 여기서 함께 읽는다.
+//
+// 다만 방해 금지를 고르면 서버가 같은 트랜잭션에서 이 규칙도 함께 켠다(ADR-0124 증보 2
+// 「묶어」). 그래서 방해 금지의 설명은 「알림도 함께 멈춰요」다(`PRESENCE_DND_HINT`,
+// #2899). 기한은 둘 다 `dndUntilMs` 하나이고, 고르는 말은 `presence/pauseUntil.ts` 에 있다.
 
 export const NOTIFICATION_PAUSE_LABEL = "알림 일시 중지";
 
 export const NOTIFICATION_PAUSE_DESCRIPTION =
-  "켜면 이 워크스페이스의 모든 알림을 받지 않아요. 멘션과 승인 요청도 포함돼요. 읽지 않은 표시는 그대로 쌓여요.";
+  "켜면 고른 시각까지 이 워크스페이스의 모든 알림을 받지 않아요. 멘션과 승인 요청도 포함돼요. 읽지 않은 표시는 그대로 쌓여요.";
 
 export const MENTION_OVERRIDES_MUTE_DESCRIPTION = `채널 알림을 꺼도 나를 멘션한 알림은 와요. ${NOTIFICATION_PAUSE_LABEL}가 켜져 있으면 멘션도 오지 않아요.`;
 

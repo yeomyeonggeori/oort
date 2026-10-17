@@ -105,12 +105,16 @@ export function presenceTriggerLabel(effective: EffectivePresence): string {
 }
 
 /**
- * 「방해 금지」 선언 상태의 설명 (#2848). 이 상태는 남에게 보이는 표시이고 푸시를
- * 막지 않는다 — 푸시는 알림 규칙의 「알림 일시 중지」가 막는다. 두 낱말의 경계를
- * 한 곳에서 말한다(`features/settings/notificationRules.ts` 의 낱말 주석).
+ * 「방해 금지」 선언 상태의 설명 (#2848 → #2899, ADR-0124 증보 2).
+ *
+ * 이 상태는 남에게 보이는 표시이고, **고르면 서버가 같은 트랜잭션에서 알림 일시 중지도
+ * 함께 켠다**(증보 2 「묶어」). 설명이 두 사실을 모두 말해야 한다. 처음 문장은 「알림은
+ * 「알림 일시 중지」가 멈춥니다」여서 증보 2 의 요구와 반대였고, 방해 금지를 고른 사람이
+ * 알림이 15일 동안 멈춘 것을 화면에서 알 수 없었다(ADR-0204 맥락). 두 낱말의 경계는
+ * `features/settings/notificationRules.ts` 의 낱말 주석에 있다.
  */
 export const PRESENCE_DND_HINT =
-  "다른 사람에게 보이는 표시입니다. 알림은 「알림 일시 중지」가 멈춥니다.";
+  "다른 사람에게 보이는 표시예요. 알림도 함께 멈춰요.";
 
 /** 선언 상태 쓰기가 실패했을 때 (웹 `PresenceControl` 과 같은 문장). */
 export const PRESENCE_WRITE_FAILED = "상태를 바꾸지 못했습니다. 다시 시도하세요.";

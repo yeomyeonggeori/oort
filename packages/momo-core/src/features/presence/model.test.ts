@@ -5,6 +5,7 @@ import {
   effectivePresenceLabel,
   otherMemberDeclaredPresenceLabel,
   presenceTriggerLabel,
+  PRESENCE_DND_HINT,
   PRESENCE_MENU_LABEL,
   PRESENCE_OPTIONS,
 } from "./model";
@@ -72,6 +73,20 @@ describe("presence copy", () => {
     expect(otherMemberDeclaredPresenceLabel(undefined)).toBeNull();
     expect(otherMemberDeclaredPresenceLabel("away")).toBe("자리 비움");
     expect(otherMemberDeclaredPresenceLabel("dnd")).toBe("방해 금지");
+  });
+});
+
+// ADR-0124 증보 2 「묶어」: 방해 금지를 고르면 서버가 알림 일시 중지도 함께 켠다. 처음 문장은
+// 「알림은 「알림 일시 중지」가 멈춥니다」여서 정반대를 말했고, 그 문장을 읽은 사람이 알림이
+// 15일 동안 멈춘 것을 화면에서 알 수 없었다(ADR-0204 맥락, #2899).
+describe("PRESENCE_DND_HINT (ADR-0124 증보 2)", () => {
+  it("says the alerts stop together with the status", () => {
+    expect(PRESENCE_DND_HINT).toContain("알림도 함께 멈춰요");
+  });
+
+  it("no longer sends the reader to the pause switch for the alerts", () => {
+    expect(PRESENCE_DND_HINT).not.toContain("알림 일시 중지");
+    expect(PRESENCE_DND_HINT).not.toContain("멈춥니다");
   });
 });
 
