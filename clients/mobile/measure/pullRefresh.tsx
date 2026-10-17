@@ -1,7 +1,8 @@
 import {onlineManager} from '@tanstack/react-query';
-import React, {useEffect} from 'react';
+import React, {useEffect, useRef} from 'react';
 import {FlatList, StyleSheet, Text, View} from 'react-native';
 import {EmptyState, Screen, ScreenHeader, TapRow} from '../src/design/atoms';
+import {PULL_TRIGGER} from '../src/design/pullRefresh';
 import {PULL_FILL, usePullRefresh} from '../src/design/refresh';
 import {useStyles} from '../src/design/theme';
 import {font, space, type Palette} from '../src/design/tokens';
@@ -16,8 +17,14 @@ import {font, space, type Palette} from '../src/design/tokens';
 //
 //   pull-refresh          재조회가 2.5초 걸린다: 당김 → 새로고침 중 → 물러남이 한 번에 보인다
 //   pull-refresh-hold     재조회가 끝나지 않는다: 「새로고침 중」 자세를 붙잡아 찍는다
-//   pull-refresh-fail     재조회가 1.2초 뒤 실패한다(오류 결과): 로더가 실패 안내 한 줄로 바뀌어 머문 뒤 물러난다
-//   pull-refresh-offline  오프라인이다(`onlineManager`): 재조회를 세우지 않고 바로 실패 안내로 끝난다
+//   pull-refresh-fail     재조회가 1.2초 뒤 실패한다(오류 결과): 목록 위에 실패 안내 한 줄이 서고 **시간으로 사라지지
+//                         않는다**(#3992). 다음 당김이 서면 사라진다
+//   pull-refresh-auto-fail  손가락 없이 실패를 만든다(1.5초 뒤 스스로 한 번, 9초 뒤 한 번 더 `onRefresh` 를 부른다).
+//                         실패 안내가 서는 순간·사라지는 순간의 움직임을 영상으로 잴 때 쓴다(손가락의 타이밍 잡음이 없다)
+//   pull-refresh-offline  오프라인이다(`onlineManager`): 재조회를 세우지 않고 바로 실패 안내로 끝난다(연결을 말하는 문장)
+//   pull-refresh-pin-25|50|75|100  당김을 그 진행도에 **고정**한다(손가락 대신 위쪽 여백과 음수 오프셋으로 그 자리에 둔다).
+//                         위성이 궤도를 도는 각도(25·50·75·100% = 90° 씩)를 같은 자리에서 정확히 찍는다. 100% 는 임계
+//                         바로 아래(-146)다: 임계(-147.3)를 넘으면 표준 컨트롤이 새로고침을 세워 돌기 시작한다
 //   pull-refresh-empty    빈 상태(`EmptyState`)의 당김: 재조회가 끝나지 않는다
 //   pull-refresh-short    두 줄짜리 짧은 목록(`PULL_FILL` 적용): 아래 빈 자리에서도 당겨진다
 //   pull-refresh-short-dead  같은 목록에서 `PULL_FILL` 이 없는 대조군: 아래 빈 자리(화면 y 500)를 당기면 아무 일도 없다
@@ -40,23 +47,51 @@ const ROWS = [
 
 export function PullRefreshSurface({which}: {which: string}): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const listRef = useRef<FlatList<(typeof ROWS)[number]>>(null);
+  // `pin-25` → 0.25. 진행도를 고정하는 판이다(손가락 없이 스크롤 오프셋을 직접 둔다).
+  // `scrollToOffset` 은 음수 오프셋을 `-contentInset.top`(0)으로 잘라 버리고, 위쪽 여백 없이 준 음수 `contentOffset` 도 적용되지 않았다
+  // (iOS 26.5, 둘 다 쉬는 자리 그대로였다). 위쪽 여백(`contentInset.top`)을 같은 크기로 주고 오프셋을 그 음수에 두면 그 자리가 쉬는 자리가 된다.
+  const pin = which.startsWith('pin-') ? Number(which.slice('pin-'.length)) / 100 : null;
+  // 100% 는 임계(-147.3)를 넘지 않게 1pt 아래에 둔다.
+  const pinOffset = pin === null ? null : pin >= 1 ? -(PULL_TRIGGER - 1) : -PULL_TRIGGER * pin;
+  useEffect(() => {
+    if (pinOffset === null) return undefined;
+    // 쉬는 자리에 둔 오프셋은 스크롤 이벤트를 내지 않는다(훅이 머리를 세우려면 이벤트가 와야 한다): 1pt 밀었다가 되돌려 이벤트를 낸다.
+    const timer = setTimeout(() => {
+      listRef.current?.scrollToOffset({offset: pinOffset + 1, animated: false});
+      listRef.current?.scrollToOffset({offset: pinOffset, animated: false});
+    }, 900);
+    return () => clearTimeout(timer);
+  }, [pinOffset]);
   const onRefresh = React.useCallback((): Promise<unknown> => {
-    if (which === 'hold' || which === 'empty' || which.startsWith('short')) return new Promise(() => undefined);
-    if (which === 'fail') {
+    if (which === 'hold' || which === 'empty' || which.startsWith('short') || which.startsWith('pin-')) {
+      return new Promise(() => undefined);
+    }
+    if (which === 'fail' || which === 'auto-fail') {
       return new Promise(resolve => setTimeout(() => resolve([{status: 'error', isError: true}]), 1200));
     }
     return new Promise(resolve => setTimeout(() => resolve([{status: 'success'}]), 2500));
   }, [which]);
-  const {refreshControl, scrollProps} = usePullRefresh(onRefresh, 'pull-surface-refresh');
+  const {refreshControl, scrollProps, notice} = usePullRefresh(onRefresh, 'pull-surface-refresh');
   useEffect(() => {
     if (which !== 'offline') return undefined;
     onlineManager.setOnline(false);
     return () => onlineManager.setOnline(true);
   }, [which]);
+  // 손가락 없이 두 번 당김을 흉내 낸다(표준 컨트롤이 부르는 것과 같은 입구 `onRefresh`).
+  const trigger = refreshControl.props.onRefresh;
+  const triggerRef = useRef(trigger);
+  triggerRef.current = trigger;
+  useEffect(() => {
+    if (which !== 'auto-fail') return undefined;
+    const timers = [1_500, 9_000].map(ms => setTimeout(() => triggerRef.current?.(), ms));
+    return () => timers.forEach(clearTimeout);
+  }, [which]);
   if (which === 'short' || which === 'short-dead') {
     return (
       <Screen>
         <ScreenHeader title="채널" subtitle={which === 'short' ? '짧은 목록' : '짧은 목록 (PULL_FILL 없음)'} />
+        {notice}
         <FlatList
           data={ROWS.slice(0, 2)}
           keyExtractor={row => row[0]}
@@ -80,6 +115,7 @@ export function PullRefreshSurface({which}: {which: string}): React.JSX.Element 
     return (
       <Screen>
         <ScreenHeader title="채널" subtitle="당겨서 새로고침" />
+        {notice}
         <EmptyState
           headline="아직 참여한 채널이 없습니다."
           detail="아래로 당기면 새로 읽어 와요."
@@ -93,7 +129,11 @@ export function PullRefreshSurface({which}: {which: string}): React.JSX.Element 
   return (
     <Screen>
       <ScreenHeader title="채널" subtitle="당겨서 새로고침" />
+      {notice}
       <FlatList
+        ref={listRef}
+        contentInset={pinOffset === null ? undefined : {top: -pinOffset}}
+        contentOffset={pinOffset === null ? undefined : {x: 0, y: pinOffset}}
         data={ROWS}
         keyExtractor={row => row[0]}
         renderItem={({item}) => (

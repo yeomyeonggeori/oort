@@ -17,6 +17,11 @@ import {
   PHASE,
   poseAt,
   readKnots,
+  SCRUB_FILL_MIN,
+  SCRUB_POP_END,
+  SCRUB_TURN,
+  scrubPoseAt,
+  scrubTablesFor,
   tablesFor,
   TRAILS,
 } from '../src/design/brand/oortLoaderTimeline';
@@ -46,6 +51,8 @@ import {
 //   - 웹 키프레임 퍼센트를 바꾸면(또는 PHASE 를 바꾸면) → 웹 대조가 붉다
 //   - 위성 층을 링 뒤(그리는 순서)로 옮기면 → 「링이 위성 위」가 붉다
 //   - `useReduceMotion` 분기를 지우면 → 「동작 줄이기」 단정들이 붉다
+//   - 당김의 각도 표를 상수로 바꾸면(#3992) → 「25·50·75·100% 에서 위성의 자리가 분명히 다르다」가 붉다
+//   - 동작 줄이기의 당김에서 회전을 허용하면(#3992) → 「동작 줄이기: 당겨도 위성은 돌지 않는다」가 붉다
 //
 // 래스터를 다시 만드는 법(rsvg-convert): 마크 정본 링 path(`clients/web/src/design/brand/
 // OortMark.tsx` GEOMETRY.*.ring, 위성 제외)를 `fill="#000000" fill-rule="evenodd"` 로 그린
@@ -183,6 +190,123 @@ describe('시간표(순수) — 한 시계에서 읽는 표', () => {
       expect(out - satelliteRadius).toBeGreaterThan(ringOuter[optical]);
     }
   });
+});
+
+// ---- 1b. 당김(스크럽)의 자세 (#3992) ---------------------------------------------------
+
+/** 정사각 무대(한 변 `size`) 중심에서 본 위성의 자리(pt). 각도는 시계 방향이 양수(화면 y 는 아래). */
+function satelliteXY(radialRatio: number, angleDeg: number, size: number) {
+  const r = radialRatio * size;
+  const a = (angleDeg * Math.PI) / 180;
+  return {x: r * Math.cos(a), y: r * Math.sin(a)};
+}
+const distance = (a: {x: number; y: number}, b: {x: number; y: number}) =>
+  Math.hypot(a.x - b.x, a.y - b.y);
+
+describe('당김(스크럽)의 자세(순수) — 진행도 → 궤도 각도', () => {
+  const PULLS = [0.25, 0.5, 0.75, 1] as const;
+
+  it('진행도 0 은 홈에 꽂힌 자세, 1 은 한 바퀴 돌아 다시 홈의 각도(궤도 위)다', () => {
+    const {units, home, out} = OPTICAL.display;
+    expect(scrubPoseAt('display', 0)).toMatchObject({radial: home / units, angle: HOME_ANGLE});
+    const end = scrubPoseAt('display', 1);
+    expect(end.angle).toBeCloseTo(HOME_ANGLE + SCRUB_TURN, 6);
+    expect(end.angle).toBe(315);
+    expect(end.radial).toBeCloseTo(out / units, 6);
+  });
+
+  it('각도는 진행도에 선형이다: 25·50·75·100% 가 홈에서 90° 씩 떨어진다', () => {
+    const offsets = PULLS.map(p => scrubPoseAt('display', p).angle - HOME_ANGLE);
+    expect(offsets).toEqual([90, 180, 270, 360].map(v => expect.closeTo(v, 6)));
+    // 시안 A 의 도는 곡선(ease-in-out)으로 읽으면 몰린다 — 그 곡선으로는 25·50·75% 가 각각 약 70°·267°·344° 라서
+    // 마지막 두 눈금(344° 와 360°)이 16° 차이다.
+    // 눈금이 등간격이어야 손가락 아래에서 「얼마나 왔나」가 읽힌다.
+    for (let i = 1; i < offsets.length; i += 1) {
+      expect(offsets[i]! - offsets[i - 1]!).toBeCloseTo(90, 6);
+    }
+  });
+
+  it('25·50·75·100% 에서 위성의 자리가 분명히 다르다: 40pt 로더에서 어느 둘도 20pt 이상 떨어져 있다', () => {
+    const size = 40;
+    const spots = PULLS.map(p => {
+      const pose = scrubPoseAt('display', p);
+      return satelliteXY(pose.radial, pose.angle, size);
+    });
+    // 위성 지름은 7pt 이다. 두 자리가 지름의 몇 배 떨어져야 눈이 다른 자리로 읽는다 — 20pt 는 약 3배다.
+    const gaps: number[] = [];
+    for (let i = 0; i < spots.length; i += 1) {
+      for (let j = i + 1; j < spots.length; j += 1) gaps.push(distance(spots[i]!, spots[j]!));
+    }
+    expect(Math.min(...gaps)).toBeGreaterThan(20);
+    // 100% 는 홈의 각도(오른쪽 위)지만 궤도 위라서 홈(0%)과도 다른 자리다.
+    const home = scrubPoseAt('display', 0);
+    expect(distance(spots[3]!, satelliteXY(home.radial, home.angle, size))).toBeGreaterThan(2);
+  });
+
+  it('각도는 매핑이 상수가 아니라 거리를 따른다: 거리가 늘면 각도가 늘고 접히지 않는다', () => {
+    let last = -Infinity;
+    for (let i = 0; i <= 40; i += 1) {
+      const angle = scrubPoseAt('display', i / 40).angle;
+      expect(angle).toBeGreaterThan(last);
+      last = angle;
+    }
+    // 밖은 끝으로 접힌다: 더 당겨도 한 바퀴를 넘지 않고, 음수는 홈이다.
+    expect(scrubPoseAt('display', 3).angle).toBe(scrubPoseAt('display', 1).angle);
+    expect(scrubPoseAt('display', -1).angle).toBe(HOME_ANGLE);
+  });
+
+  it('홈에서 궤도로는 처음 8% 에 먼저 나오고(링을 긁지 않게), 그 뒤로는 궤도 위에 머문다', () => {
+    const {units, home, out} = OPTICAL.display;
+    expect(SCRUB_POP_END).toBeLessThanOrEqual(0.1);
+    expect(scrubPoseAt('display', SCRUB_POP_END).radial).toBeCloseTo(out / units, 6);
+    let last = home / units - 1e-9;
+    for (let i = 0; i <= 40; i += 1) {
+      const p = i / 40;
+      const radial = scrubPoseAt('display', p).radial;
+      expect(radial).toBeGreaterThanOrEqual(last);
+      if (p >= SCRUB_POP_END) expect(radial).toBeCloseTo(out / units, 6);
+      last = radial;
+    }
+    // 위성이 링의 물린 자리에서 빠져나오는 동안(진행도 8%)에는 몸을 거의 돌리지 않는다: 30° 이내다.
+    expect(scrubPoseAt('display', SCRUB_POP_END).angle - HOME_ANGLE).toBeLessThan(30);
+  });
+
+  it('끝의 자세가 이어 돌기의 시작 자세와 같다: 임계를 넘어 새로고침이 서도 위성이 튀지 않는다', () => {
+    for (const optical of ['small', 'display'] as const) {
+      const end = scrubPoseAt(optical, 1);
+      const spinStart = poseAt(optical, PHASE.popEnd);
+      expect(end.radial).toBeCloseTo(spinStart.radial, 6);
+      // 각도는 한 바퀴(360°) 차이를 같은 자리로 본다.
+      expect((((end.angle - spinStart.angle) % 360) + 360) % 360).toBeCloseTo(0, 6);
+    }
+  });
+
+  it('동작 줄이기의 당김: 투명도만 선형으로 차오른다(0.2 에서 1 까지), 위치·각도 표는 쓰지 않는다', () => {
+    expect(SCRUB_FILL_MIN).toBe(0.2);
+    const fills = PULLS.map(p => scrubPoseAt('display', p).fillOpacity);
+    expect(fills).toEqual([0.4, 0.6, 0.8, 1].map(v => expect.closeTo(v, 6)));
+    const tables = scrubTablesFor('small');
+    // 투명도 표는 거리에만 걸린다.
+    expect(tables.fill).toEqual([
+      [0, SCRUB_FILL_MIN],
+      [1, 1],
+    ]);
+  });
+
+  it.each(['small', 'display'] as const)(
+    '%s: 스크럽 표는 입력이 [0, 1] 에서 늘어나기만 한다(Animated 입력 범위 규칙)',
+    optical => {
+      const t = scrubTablesFor(optical);
+      for (const knots of [t.radial, t.angle, t.fill]) {
+        expect(knots[0]![0]).toBe(0);
+        expect(knots[knots.length - 1]![0]).toBe(1);
+        for (let i = 1; i < knots.length; i += 1) {
+          expect(knots[i]![0]).toBeGreaterThanOrEqual(knots[i - 1]![0]);
+          expect(Number.isFinite(knots[i]![1])).toBe(true);
+        }
+      }
+    },
+  );
 });
 
 // ---- 2. 웹 대조 ----------------------------------------------------------------------
@@ -546,29 +670,110 @@ describe('컴포넌트 — 세 갈래와 반복', () => {
   });
 });
 
-describe('컴포넌트 — 당김(progress) · #3962 가 쓴다', () => {
-  it('progress 만 주면 돌지 않고 거리에 따라 위성이 튀어나온다 (0 홈, 1 궤도)', async () => {
+describe('컴포넌트 — 당김(progress) · #3962 가 쓰고 #3992 가 각도로 읽는다', () => {
+  const readSatellite = () => {
+    const transform = flatten(screen.getByTestId('oort-loader-satellite', HIDDEN).props.style)
+      .transform as Array<Record<string, string | number>>;
+    return {
+      angle: parseFloat(String(transform[0]!.rotate)),
+      radial: transform[1]!.translateX as number,
+    };
+  };
+  const stageOpacity = () => flatten(screen.getByTestId('oort-loader', HIDDEN).props.style).opacity as number;
+
+  it('progress 만 주면 돌지 않고 거리에 따라 위성이 궤도를 돈다 (0 홈, 1 한 바퀴)', async () => {
     reduceMotion(false);
     const {handles} = spyOnLoop();
     const progress = new Animated.Value(0);
     render(<OortLoader size={40} progress={progress} />);
     await settle();
     expect(handles).toHaveLength(0);
-    const readX = () =>
-      ((flatten(screen.getByTestId('oort-loader-satellite', HIDDEN).props.style).transform as Array<
-        Record<string, number>
-      >)[1]!).translateX!;
     const {units, home, out} = OPTICAL.display;
-    expect(readX()).toBeCloseTo((home / units) * 40, 4);
+    expect(readSatellite().radial).toBeCloseTo((home / units) * 40, 4);
+    expect(readSatellite().angle).toBe(HOME_ANGLE);
     act(() => progress.setValue(1));
-    expect(readX()).toBeCloseTo((out / units) * 40, 4);
+    expect(readSatellite().radial).toBeCloseTo((out / units) * 40, 4);
+    expect(readSatellite().angle).toBeCloseTo(HOME_ANGLE + 360, 4);
     act(() => progress.setValue(0.5));
-    const mid = readX();
-    expect(mid).toBeGreaterThan((home / units) * 40);
-    expect(mid).toBeLessThan((out / units) * 40);
-    // 당긴 것보다 더 당겨도 궤도 밖으로 나가지 않는다.
+    // 반쯤 당기면 궤도 반 바퀴 — 홈 반대편이다.
+    expect(readSatellite().radial).toBeCloseTo((out / units) * 40, 4);
+    expect(readSatellite().angle).toBeCloseTo(HOME_ANGLE + 180, 4);
+    // 당긴 것보다 더 당겨도 궤도 밖으로 나가지 않고 한 바퀴를 넘지 않는다.
     act(() => progress.setValue(3));
-    expect(readX()).toBeCloseTo((out / units) * 40, 4);
+    expect(readSatellite().radial).toBeCloseTo((out / units) * 40, 4);
+    expect(readSatellite().angle).toBeCloseTo(HOME_ANGLE + 360, 4);
+    // 음수(되감기는 순간의 값)는 홈이다.
+    act(() => progress.setValue(-2));
+    expect(readSatellite().radial).toBeCloseTo((home / units) * 40, 4);
+    expect(readSatellite().angle).toBe(HOME_ANGLE);
+  });
+
+  it('당김 25·50·75·100% 에서 위성의 자리가 분명히 다르다: 컴포넌트가 그린 자리로 잰다(40pt)', async () => {
+    reduceMotion(false);
+    spyOnLoop();
+    const progress = new Animated.Value(0);
+    render(<OortLoader size={40} progress={progress} />);
+    await settle();
+    const spots = [0.25, 0.5, 0.75, 1].map(p => {
+      act(() => progress.setValue(p));
+      const {angle, radial} = readSatellite();
+      // 눈에 보이는 각도는 소수 오차 없이 90° 씩이다.
+      expect(angle).toBeCloseTo(HOME_ANGLE + 360 * p, 4);
+      return satelliteXY(radial / 40, angle, 40);
+    });
+    const gaps: number[] = [];
+    for (let i = 0; i < spots.length; i += 1) {
+      for (let j = i + 1; j < spots.length; j += 1) gaps.push(distance(spots[i]!, spots[j]!));
+    }
+    expect(Math.min(...gaps)).toBeGreaterThan(20);
+  });
+
+  it('당기는 동안 링은 가만하고(숨 쉬지 않고), 꼬리 점도 없다', async () => {
+    reduceMotion(false);
+    spyOnLoop();
+    const progress = new Animated.Value(0.6);
+    render(<OortLoader size={56} progress={progress} />);
+    await settle();
+    const ring = flatten(screen.getByTestId('oort-loader-ring', HIDDEN).props.style);
+    expect((ring.transform as Array<Record<string, number>>)[0]).toEqual({scale: 1});
+    expect(stageOpacity()).toBe(1);
+    expect(screen.queryByTestId('oort-loader-trail-0', HIDDEN)).toBeNull();
+  });
+
+  it('동작 줄이기: 당겨도 위성은 돌지 않는다 — 홈에 꽂힌 채 투명도만 차오른다', async () => {
+    reduceMotion(true);
+    const {handles} = spyOnLoop();
+    const progress = new Animated.Value(0);
+    render(<OortLoader size={40} progress={progress} />);
+    await settle();
+    expect(handles).toHaveLength(0); // 반복도 없다
+    const {units, home} = OPTICAL.display;
+    const seen: number[] = [];
+    for (const p of [0, 0.25, 0.5, 0.75, 1, 3]) {
+      act(() => progress.setValue(p));
+      const {angle, radial} = readSatellite();
+      // 어느 거리에서도 회전도 이동도 없다.
+      expect(angle).toBe(HOME_ANGLE);
+      expect(radial).toBeCloseTo((home / units) * 40, 4);
+      seen.push(stageOpacity());
+    }
+    // 투명도만 당김을 따라 0.2 → 1 로 차오른다.
+    expect(seen[0]).toBeCloseTo(SCRUB_FILL_MIN, 6);
+    expect(seen.slice(0, 5)).toEqual([0.2, 0.4, 0.6, 0.8, 1].map(v => expect.closeTo(v, 6)));
+    expect(seen[5]).toBeCloseTo(1, 6); // 더 당겨도 1 을 넘지 않는다
+  });
+
+  it('동작 줄이기 첫 답이 늦게 와 꺼짐으로 밝혀지면 당김이 투명도에서 각도로 갈아탄다(바디가 새로 선다)', async () => {
+    reduceMotion(false);
+    spyOnLoop();
+    const progress = new Animated.Value(0.5);
+    render(<OortLoader size={40} progress={progress} />);
+    // 첫 답 전: 켜진 것으로 본다 — 위성은 홈에 선 채 투명도만 읽는다.
+    expect(readSatellite().angle).toBe(HOME_ANGLE);
+    expect(stageOpacity()).toBeCloseTo(0.6, 6);
+    await settle();
+    expect(readSatellite().angle).toBeCloseTo(HOME_ANGLE + 180, 4);
+    expect(stageOpacity()).toBe(1);
   });
 
   it('spinning 이 켜지면 당긴 자세(14%)에서 이어 돈다: 시작 위상 14%, 한 주기 뒤 114%', async () => {
@@ -585,6 +790,37 @@ describe('컴포넌트 — 당김(progress) · #3962 가 쓴다', () => {
     const resumed = timings.at(-1)!;
     expect(resumed.config.toValue).toBeCloseTo(PHASE.popEnd + 1, 6);
     expect((resumed.value as unknown as {_value: number})._value).toBeCloseTo(PHASE.popEnd, 6);
+  });
+
+  it('이어 돌기의 첫 자세가 당김의 끝 자세와 같다: 임계에서 위성이 튀지 않는다(컴포넌트가 그린 자리)', async () => {
+    reduceMotion(false);
+    const {timings} = spyOnLoop();
+    const progress = new Animated.Value(1);
+    const view = render(<OortLoader size={40} progress={progress} />);
+    await settle();
+    const before = readSatellite();
+    view.rerender(<OortLoader size={40} progress={progress} spinning />);
+    await settle();
+    // 막 돌기 시작한 시계(14%)에서 그린 위성의 자리.
+    expect((timings.at(-1)!.value as unknown as {_value: number})._value).toBeCloseTo(PHASE.popEnd, 6);
+    const after = readSatellite();
+    expect(after.radial).toBeCloseTo(before.radial, 4);
+    expect((((after.angle - before.angle) % 360) + 360) % 360).toBeCloseTo(0, 4);
+  });
+
+  it('동작 줄이기에서 새로고침이 서면 투명도 숨이 당김의 끝(투명도 1)에서 이어진다: 시작 위상 0', async () => {
+    reduceMotion(true);
+    const {timings} = spyOnLoop();
+    const progress = new Animated.Value(1);
+    const view = render(<OortLoader size={40} progress={progress} />);
+    await settle();
+    expect(stageOpacity()).toBeCloseTo(1, 6);
+    view.rerender(<OortLoader size={40} progress={progress} spinning />);
+    await settle();
+    const resumed = timings.at(-1)!;
+    expect(resumed.config.toValue).toBe(1);
+    expect((resumed.value as unknown as {_value: number})._value).toBe(0);
+    expect(stageOpacity()).toBeCloseTo(1, 6);
   });
 
   it('당김에서 돌던 로더를 놓으면(spinning 해제) 반복이 멈춘다', async () => {

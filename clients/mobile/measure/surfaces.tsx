@@ -4341,6 +4341,17 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     // 같은 수가 인박스 필터 칩에서 두 몫(결정 대기 2 · 멘션 2)으로 보인다.
     case 'shell-inbox-badges':
       return <Shell initialNav={{...INITIAL_NAV, tab: 'inbox'}} />;
+    // #3992: 실제 셸·실제 화면에서 **당김이 실패**하는 판(캐시된 목록이 있는 홈·인박스). 씨앗은 평소 판과 같고,
+    // 요청은 처음 12초 동안 끝나지 않다가(씨앗이 첫 그림에서 오류로 바뀌지 않게) 그 뒤부터는 곧바로 전송 오류로 끝난다.
+    // 12초 뒤에 당긴다: 실패 안내가 목록 위에 서서 시간이 지나도 사라지지 않는다.
+    case 'shell-home-pullfail':
+      return (
+        <RealtimeContext.Provider value={CONNECTED_RAIL}>
+          <Shell />
+        </RealtimeContext.Provider>
+      );
+    case 'shell-inbox-pullfail':
+      return <Shell initialNav={{...INITIAL_NAV, tab: 'inbox'}} />;
     // 「작업 끝남」 푸시를 눌렀을 때 도착하는 곳: 실제 항법 reducer 가 지은 상태 그대로다
     // (홈 탭 위에 작업 목록, 그 위에 세션). 푸시 자체는 시뮬레이터에 보낼 수 없어 도착
     // 화면만 찍는다.
@@ -6210,6 +6221,28 @@ function seedShell(surface: string): void {
   void globalThis.fetch;
   void globalThis.Headers;
   globalThis.fetch = (() => new Promise<Response>(() => {})) as typeof fetch;
+  if (surface === 'shell-home-pullfail' || surface === 'shell-inbox-pullfail') {
+    // #3992: 처음 12초는 요청이 끝나지 않고(기존 하니스의 약속), 그 뒤 새 요청은 곧바로 서버 500 으로 끝난다.
+    // 다만 처음 12초 안에 시작된 읽기는 영영 끝나지 않는 채로 남고 같은 주소의 새 읽기가 그것에 합쳐져서, 이 표면에서 당김은 20초
+    // 상한(`MAX_WAIT_MS`)에 걸려 실패한다(상한 경로를 실제 화면으로 확인하는 판이기도 하다). 빠른 실패의 움직임은 `pull-refresh-fail`.
+    const startedAt = Date.now();
+    // 전송 오류가 아니라 서버가 500 으로 답한다(전송 오류는 쿼리의 재시도 백오프를 길게 탄다).
+    const answer = (status: number): Response =>
+      ({
+        status,
+        ok: status >= 200 && status < 300,
+        headers: {get: () => null},
+        text: async () => (status === 204 ? '' : '{"error":"measure"}'),
+        json: async () => ({error: 'measure'}),
+      }) as unknown as Response;
+    globalThis.fetch = ((url: unknown) => {
+      // NetInfo 의 도달성 확인(`generate_204`)이 500 을 받으면 앱이 「오프라인」으로 읽어 모든 재조회가 멈춘다: 이것만은 늘 답한다.
+      if (String(url).includes('generate_204')) return Promise.resolve(answer(204));
+      return Date.now() - startedAt < 12_000 ? new Promise<Response>(() => {}) : Promise.resolve(answer(500));
+    }) as typeof fetch;
+    // 재시도 없이 바로 실패로 끝나게 한다(캡처가 재시도 백오프 8초를 기다리지 않게).
+    harnessClient.setDefaultOptions({queries: {retry: false}});
+  }
   // ADE 판의 턴이 이 판에 새지 않게 비우고, 홈 판이 고른 것만 넣는다.
   resetAgentWorking();
   harnessClient.setQueryData(['settings', 'workspace', ADE_WS], {
@@ -6294,7 +6327,11 @@ function seedShell(surface: string): void {
 
   // #3342: 프로필 시트의 푸시 종류 스위치(서버 기본은 켬). 씨앗이 없으면 줄이 잠긴다.
   harnessClient.setQueryData(['settings', 'push-kinds', ADE_WS], {workComplete: true});
-  if (surface === 'shell-badges' || surface === 'shell-inbox-badges') {
+  if (
+    surface === 'shell-badges' ||
+    surface === 'shell-inbox-badges' ||
+    surface === 'shell-inbox-pullfail'
+  ) {
     // 결정 대기 승인 둘. 읽음 씨앗(멘션 2)과 합쳐 알약이 4가 된다.
     const pending = (id: string) => ({
       id,
