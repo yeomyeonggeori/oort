@@ -150,7 +150,8 @@ export type SurfaceId =
   | "pluginInstall"
   | "teamMemory"
   | "messageSearch"
-  | "hostedAgentPairing";
+  | "hostedAgentPairing"
+  | "settingsOpenCard";
 
 /** Workd/T3 데몬을 전제하는 표면. 셀프호스트 기본은 모두 숨긴다 (ADR-0183 D4-② · #2166). */
 export const WORK_SURFACE_IDS: readonly SurfaceId[] = [
@@ -498,6 +499,21 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
       "해제 3경로(disconnect, disconnect/complete, cleanup-artifacts/…/acknowledge)도 " +
       "같은 자리에 등록돼 있고, HAP-UX2(#1362)가 에이전트 화면의 연결 탭에서 그 셋을 연다. " +
       "일곱 경로가 한 배포로 함께 오르므로 이 칸 하나가 둘 다를 판정한다.",
+  },
+  settingsOpenCard: {
+    id: "settingsOpenCard",
+    label: "설정 열기 카드",
+    // #3939(E-S6, ADR-0201 v2 H6-4): 도우미가 「설정 화면 열기」 카드를 제안한다.
+    // 옛 서버는 이 명령을 모르므로 카드를 보내지 않는다 — 이 칸이 거짓이 되는 일은
+    // 서버가 이 명령을 거두는 날뿐이고, 그날 카드는 숨고 도우미의 본문 글만 남는다.
+    // 이 표면은 라우트가 아니라 **제안 명령의 허용**이라 404 폴딩(`serverSaysAbsent`)이 없다.
+    provided: true,
+    absentReason: "이 서버는 아직 설정 열기 카드를 제안하지 않아요.",
+    fallback: "도우미의 안내 글대로 설정 화면을 직접 열어 주세요.",
+    measured:
+      "2026-10-18 실측(#3939 PR #4028): server-rust/crates/momo-agent/src/card_suggest.rs " +
+      "SUGGESTABLE_COMMANDS에 settings.open이 있고, 허용목록 네 곳(레지스트리·hosted enum·" +
+      "worker enum·OpenAPI SuggestableCommandId)이 한 시험으로 같다.",
   },
 };
 

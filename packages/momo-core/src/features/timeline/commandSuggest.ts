@@ -75,14 +75,74 @@ const ENVELOPE_KEYS: ReadonlySet<string> = new Set([
  */
 export type AiConnectFocus = AiConnectLine | "mine" | null;
 
+/**
+ * `settings.open`의 section id (#3939 E-S6, ADR-0201 v2 H6-4) — 서버
+ * `momo_agent::card_suggest::SETTINGS_OPEN_SECTIONS`와 같은 열두 값, 같은 순서.
+ * 경로가 아니라 설정 섹션 id다. 라벨은 서버가 파생해 props에 싣지만 화면 문구는
+ * 여기서 다시 만든다(에이전트·메시지 문자열이 카드 제목이 되는 길을 닫는다).
+ * 서버 쪽은 Rust 시험이 이 파일 아닌 설정 목차를 읽어 맞추고, 이 표는
+ * `docs/api/command-suggest-settings-open.golden.json` 시험이 서버와 맞춘다.
+ */
+export const SETTINGS_OPEN_SECTIONS = [
+  "profile",
+  "appearance",
+  "notifications",
+  "shortcuts",
+  "devices",
+  "workspace",
+  "members",
+  "memory",
+  "usage",
+  "code",
+  "updates",
+  "plugins",
+] as const;
+
+export type SettingsOpenSection = (typeof SETTINGS_OPEN_SECTIONS)[number];
+
+/** 서버 `settings_open_label` 표와 같은 글자(골든 시험이 잰다). */
+const SETTINGS_OPEN_LABELS: Readonly<Record<SettingsOpenSection, string>> = {
+  profile: "프로필 설정 열기",
+  appearance: "모양 설정 열기",
+  notifications: "알림 설정 열기",
+  shortcuts: "단축키 설정 열기",
+  devices: "기기 설정 열기",
+  workspace: "워크스페이스 설정 열기",
+  members: "멤버와 초대 열기",
+  memory: "기억 설정 열기",
+  usage: "사용량 열기",
+  code: "실행 호스트 설정 열기",
+  updates: "업데이트 설정 열기",
+  plugins: "앱 열기",
+};
+
+export function settingsOpenLabel(section: SettingsOpenSection): string {
+  return SETTINGS_OPEN_LABELS[section];
+}
+
+/**
+ * `settings.open`의 `args`를 읽는다. 키는 `section` 하나뿐이고 필수이며 enum 안이어야
+ * 한다(서버 `normalize_settings_open_args`와 같다). 아니면 undefined(→ 한 줄 폴백).
+ */
+export function settingsOpenSection(args: unknown): SettingsOpenSection | undefined {
+  if (!isObj(args)) return undefined;
+  for (const key of Object.keys(args)) {
+    if (key !== "section") return undefined;
+  }
+  const section = args["section"];
+  return oneOf(SETTINGS_OPEN_SECTIONS, section) ? section : undefined;
+}
+
 export interface CommandSuggestCard {
   kind: "command_suggest";
-  /** 이 빌드가 아는 명령. v1은 `ai.connect` 하나(G2). */
-  commandId: "ai.connect";
+  /** 이 빌드가 아는 명령(G2): `ai.connect`, `settings.open`(#3939). */
+  commandId: "ai.connect" | "settings.open";
   /** `ok`면 보는 사람별 카드, `degraded`면 누구에게나 한 줄. */
   shape: "ok" | "degraded";
-  /** `ok`일 때만 뜻이 있다. */
+  /** `ok`일 때만 뜻이 있다. `ai.connect` 전용(`settings.open`은 null). */
   focus: AiConnectFocus;
+  /** `settings.open`이고 `ok`일 때만 값이 있다. 그 밖에는 null. */
+  section: SettingsOpenSection | null;
   /** 제안 대상. 서버가 run의 트리거 작성자로 채운 값(G3). */
   forMemberId: string;
   /** 한 줄 문구에 쓰는 대상 이름(멤버 목록에서 찾은 것, props가 아니다). */
@@ -153,9 +213,9 @@ export function commandSuggestCard(
   if (typeof commandId !== "string" || !SUGGESTABLE_CLIENT_IDS.has(commandId)) {
     return null;
   }
-  // v1이 그리는 명령은 이것 하나다. 레지스트리에 새 제안 명령이 생겨도 이 파일이
+  // 이 빌드가 그리는 명령은 이 둘이다. 레지스트리에 새 제안 명령이 생겨도 이 파일이
   // 그 명령의 카드를 모르면 본문 폴백이다(AX-5가 여기에 갈래를 더한다).
-  if (commandId !== "ai.connect") return null;
+  if (commandId !== "ai.connect" && commandId !== "settings.open") return null;
   const forMemberId = envelope["for_member_id"];
   if (typeof forMemberId !== "string" || forMemberId === "") return null;
   const target = memberFor(directory, forMemberId);
@@ -170,14 +230,19 @@ export function commandSuggestCard(
   const labelOk =
     label === undefined ||
     (typeof label === "string" && [...label].length <= COMMAND_SUGGEST_LABEL_MAX);
-  const focus = aiConnectFocus(envelope["args"] ?? {});
-  const degraded = extraKey || !labelOk || focus === undefined;
+  const isSettings = commandId === "settings.open";
+  const focus = isSettings ? null : aiConnectFocus(envelope["args"] ?? {});
+  // `settings.open`은 `args`가 필수다(`?? {}`로 메우지 않는다 — 비면 한 줄 폴백).
+  const section = isSettings ? settingsOpenSection(envelope["args"]) : undefined;
+  const degraded =
+    extraKey || !labelOk || (isSettings ? section === undefined : focus === undefined);
 
   return {
     kind: "command_suggest",
-    commandId: "ai.connect",
+    commandId,
     shape: degraded ? "degraded" : "ok",
-    focus: degraded ? null : (focus as AiConnectFocus),
+    focus: degraded || isSettings ? null : (focus as AiConnectFocus),
+    section: degraded || !isSettings ? null : (section as SettingsOpenSection),
     forMemberId,
     forMemberName: memberNameParts(directory, forMemberId, target.displayName),
     agentName: author.displayName.trim() === "" ? `@${author.handle}` : author.displayName,
@@ -214,8 +279,16 @@ function nameText(name: MemberNameParts): string {
   return name.handle ? `${name.name}(${name.handle})` : name.name;
 }
 
-/** 남에게 보이는 한 줄. 「곽성재에게 AI 계정 연결을 제안했어요」. */
+/**
+ * 남에게 보이는 한 줄. 「곽성재에게 AI 계정 연결을 제안했어요」.
+ * `settings.open`은 「곽성재에게 「알림 설정 열기」 카드를 제안했어요」 — 깨진 제안
+ * (`section` 없음)은 어느 화면인지 말하지 않고 「설정 열기」만 말한다.
+ */
 export function commandSuggestOneLine(card: CommandSuggestCard): string {
+  if (card.commandId === "settings.open") {
+    const what = card.section === null ? "설정 열기" : settingsOpenLabel(card.section);
+    return `${attachRecipient(nameText(card.forMemberName), "person")} 「${what}」 카드를 제안했어요`;
+  }
   return `${attachRecipient(nameText(card.forMemberName), "person")} AI 계정 연결을 제안했어요`;
 }
 
@@ -237,6 +310,12 @@ export const COMMAND_SUGGEST_TEAM_CLOSE = "팀 AI 키 접기";
  */
 export const COMMAND_SUGGEST_PHONE_MINE =
   "구독 로그인은 맥에서 해요. 맥에서 이 카드를 열면 바로 로그인할 수 있어요.";
+
+/** 폰 `settings.open` 카드의 안내: 폰에는 이 설정 화면이 없다(맥·웹에서 연다). */
+export const COMMAND_SUGGEST_SETTINGS_PHONE = "이 설정은 맥·웹에서 열어요.";
+
+/** 대상 본인의 `settings.open` 카드에서 설정으로 가는 버튼. */
+export const COMMAND_SUGGEST_SETTINGS_OPEN = "열기";
 
 /** 폰 카드의 발(키 입력은 폰에서 받지 않는다, Q5). */
 export const COMMAND_SUGGEST_PHONE_FOOT = "키 입력은 맥·웹에서 해요";

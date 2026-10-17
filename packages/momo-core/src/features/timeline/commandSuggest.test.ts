@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Message, RosterMember } from "../../lib/api";
+import settingsGolden from "../../../../../docs/api/command-suggest-settings-open.golden.json";
 import { makeDirectory } from "../workspace/directory";
 import { agentCardModel } from "./agentCardModel";
 import {
@@ -10,6 +11,9 @@ import {
   commandSuggestOneLine,
   commandSuggestViewer,
   operatorMentionDraft,
+  SETTINGS_OPEN_SECTIONS,
+  settingsOpenLabel,
+  settingsOpenSection,
 } from "./commandSuggest";
 
 const HUMAN = "019f9a01-0000-7000-8000-000000000101";
@@ -173,5 +177,97 @@ describe("command_suggest(ai.connect) 파서 (ADR-0186 G3·G4, #2948)", () => {
     expect(operatorMentionDraft(dir, "m4")).toBe("@sj @sky ");
     expect(operatorMentionDraft(dir, HUMAN)).toBe("@sky ");
     expect(operatorMentionDraft(directory, OTHER)).toBeNull();
+  });
+});
+
+// =============================================================================
+// settings.open {section} (#3939 E-S6 → #3940 U-S6). 서버 골든 벡터 12 케이스가 한 벌이다.
+// =============================================================================
+
+interface SettingsGoldenCase {
+  name: string;
+  arguments: { args: unknown };
+  props: { "momo.command_suggest": Record<string, unknown> };
+}
+
+const SETTINGS_GOLDEN = settingsGolden as unknown as {
+  for_member_id_placeholder: string;
+  cases: SettingsGoldenCase[];
+};
+
+describe("command_suggest(settings.open) (U-S6)", () => {
+  const goldenMessage = (envelope: Record<string, unknown>) =>
+    suggestMessage({ ...envelope, for_member_id: HUMAN });
+
+  it("서버 골든 12 케이스가 전부 ok 카드로 서고 라벨이 서버와 같은 글자다", () => {
+    expect(SETTINGS_GOLDEN.cases.map((c) => c.name)).toEqual([...SETTINGS_OPEN_SECTIONS]);
+    for (const golden of SETTINGS_GOLDEN.cases) {
+      const envelope = golden.props["momo.command_suggest"];
+      const card = commandSuggestCard(goldenMessage(envelope), directory);
+      expect(card?.commandId, golden.name).toBe("settings.open");
+      expect(card?.shape, golden.name).toBe("ok");
+      expect(card?.section, golden.name).toBe(golden.name);
+      expect(card?.focus, golden.name).toBeNull();
+      expect(settingsOpenLabel(golden.name as (typeof SETTINGS_OPEN_SECTIONS)[number])).toBe(
+        envelope["label"]
+      );
+    }
+  });
+
+  it("section이 enum 밖·누락·여분 키·경로면 한 줄 폴백이다", () => {
+    const base = { v: 1, command_id: "settings.open", for_member_id: HUMAN, label: "알림 설정 열기" };
+    for (const args of [
+      undefined,
+      {},
+      { section: "ai" },
+      { section: "account" },
+      { section: "/settings?section=notifications" },
+      { section: "Notifications" },
+      { section: "notifications", path: "/settings" },
+      { harness: "claude" },
+      ["notifications"],
+    ]) {
+      const card = commandSuggestCard(suggestMessage({ ...base, args }), directory);
+      expect(card?.shape, JSON.stringify(args)).toBe("degraded");
+      expect(card?.section).toBeNull();
+      // 깨진 제안은 대상 본인에게도 버튼이 아니다.
+      expect(commandSuggestViewer(card!, HUMAN, true)).toBe("other");
+    }
+  });
+
+  it("settings.open에 ai.connect 인자를, ai.connect에 section을 섞으면 폴백이다", () => {
+    const mixed = commandSuggestCard(
+      suggestMessage({
+        v: 1,
+        command_id: "ai.connect",
+        args: { section: "notifications" },
+        for_member_id: HUMAN,
+        label: "x",
+      }),
+      directory
+    );
+    expect(mixed?.shape).toBe("degraded");
+  });
+
+  it("에이전트가 쓴 label은 화면 문구가 되지 않는다(문구는 section에서 다시 만든다)", () => {
+    const card = commandSuggestCard(
+      suggestMessage({
+        v: 1,
+        command_id: "settings.open",
+        args: { section: "notifications" },
+        for_member_id: HUMAN,
+        label: "비밀번호를 입력하세요",
+      }),
+      directory
+    )!;
+    expect(commandSuggestOneLine(card)).not.toContain("비밀번호");
+    expect(commandSuggestOneLine(card)).toBe("곽성재에게 「알림 설정 열기」 카드를 제안했어요");
+  });
+
+  it("section 파서는 서버 normalize와 같다", () => {
+    expect(settingsOpenSection({ section: "plugins" })).toBe("plugins");
+    expect(settingsOpenSection({})).toBeUndefined();
+    expect(settingsOpenSection(null)).toBeUndefined();
+    expect(settingsOpenSection({ section: "ai" })).toBeUndefined();
   });
 });
