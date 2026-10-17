@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import {
   customPauseUntil,
   customPauseUntilMessage,
+  PAUSE_UNTIL_OFFLINE_REASON,
   pauseUntilAtMs,
   pauseUntilConfirmLabel,
   pauseUntilDescription,
@@ -62,7 +63,6 @@ import { useOffline } from "@/features/common/useOffline";
 const SELECT_PLACEHOLDER = "기한을 고르세요";
 const SAVING_LABEL = "저장 중…";
 const CANCEL_LABEL = "취소";
-const OFFLINE_COPY = "연결이 끊겨 지금은 바꿀 수 없어요.";
 
 export function PauseUntilDialog({
   kind,
@@ -172,7 +172,7 @@ export function PauseUntilDialog({
         {offline && (
           <InlineBanner
             tone="neutral"
-            message={OFFLINE_COPY}
+            message={PAUSE_UNTIL_OFFLINE_REASON}
             testId="pause-until-offline"
           />
         )}
@@ -253,11 +253,18 @@ export function PauseUntilDialog({
         ) : null}
 
         <div className="flex flex-wrap justify-end gap-2 pt-1">
+          {/* 저장 중에는 닫는 모든 길을 같은 규칙으로 막는다(Esc·바깥 누름·취소). 취소만 열려 있으면
+              사람이 「취소」를 눌렀는데 쓰기는 나가서 방해 금지·일시 중지가 켜지고, 늦게 온 실패는 닫힌 창
+              대신 다음에 여는 창에 먼저 보인다(design-review H1). */}
           <Button
             type="button"
             variant="secondary"
+            disabled={pending}
             data-testid="pause-until-cancel"
-            onClick={() => onOpenChange(false)}
+            onClick={() => {
+              if (pending) return;
+              onOpenChange(false);
+            }}
           >
             {CANCEL_LABEL}
           </Button>

@@ -124,6 +124,9 @@ import {bootSpawnPort} from '../src/boot/spawnPort';
 import {workRunFailure} from '@momo/core/features/agents/workRunRequest';
 import {INITIAL_NAV, navReducer} from '../src/nav/state';
 import {ProfilePage, ProfileSheet} from '../src/features/profile/ProfileSheet';
+import {__setPermissionReader} from '../src/push/permissionStatus';
+import {clearPushOptOut, setPushOptedOut} from '../src/push/pushOptOut';
+import {pushDeviceId} from '../src/push/registration';
 import {AppUpdateSheet} from '../src/features/appUpdate/AppUpdateBanner';
 import {seedIosFeedCacheForCapture} from '../src/features/appUpdate/feed';
 import {PageSheet} from '../src/design/PageSheet';
@@ -1329,6 +1332,35 @@ function Frame({label, children}: {label: string; children: React.ReactNode}) {
     <View style={styles.root}>
       <Text style={styles.label}>{label}</Text>
       {children}
+    </View>
+  );
+}
+
+/**
+ * `Frame` 인데 바닥이 **실제 대화 화면의 바닥**이다 (#3921, design-review M1).
+ *
+ * `Frame` 은 `color.bg` 를 깐다. 대화 목록의 바닥은 다크에서 그 값이 맞지만 라이트에서는
+ * `surface` 다(`ConversationScreen` 의 `screen`: 위 25% 에서 `canvasTop` 이 `surface` 로
+ * 건너가는 그라디언트, 그 아래는 평평한 `surface`). 같은 틴트를 다른 바닥 위에서 찍으면
+ * 사진도, 사진에서 잰 대비 숫자도 거짓이 된다 — 라이트 `warnSurface`(#FFF0DB)의 세기는
+ * `bg` 위에서 1.04:1, 실제 지면 `surface` 위에서 1.11:1 이고 **방향도 다르다**.
+ *
+ * 배경식은 `ConversationScreen` 의 `screen` 과 **같은 식**을 옮겼다 — 한쪽을 고치면 이
+ * 틀도 따라가야 사진이 거짓이 되지 않는다. 가운데 정렬은 점프가 행을 놓는 자리다
+ * (`travelToIndex(index, 0.5, …)`: 목록 화면 가운데 → 그라디언트 아래, 평평한 바닥 위).
+ */
+function ConversationFloor({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  const styles = useStyles(buildStyles);
+  return (
+    <View style={styles.conversationFloor}>
+      <Text style={styles.label}>{label}</Text>
+      <View style={styles.conversationFloorMid}>{children}</View>
     </View>
   );
 }
@@ -2864,6 +2896,87 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             />
           ))}
         </Frame>
+      );
+    }
+    // ---- #3921: 알림 도착 강조는 승인이 결정되면 물러난다 ---------------------
+    //
+    // 한 쌍이다. 같은 세 줄(앞 줄 · 승인 카드 · 뒷 줄)에서 가운데 줄만 다르다.
+    //   arrival  도착 직후 — 「승인 대기」 칩과 승인·거부 컨트롤, 그리고 앰버 틴트(`landed`).
+    //   decided  결정 뒤   — 「승인됨」 칩과 영수증, 틴트 없음.
+    // 성재가 본 모순은 「승인됨」 옆에서 앰버가 남은 것이었다. 두 번째 사진에서 그 모순이
+    // 사라졌는지가 논점이라 두 장을 같은 배치로 찍는다. 물러나는 **시간**(이동이 끝난 뒤
+    // 2초, 불투명도 240ms)은 사진에 나오지 않는다 — `__tests__/landedHighlight3921.test.tsx`
+    // 가 가짜 시계로 잰다. 여기 `landed` 는 목록이 건네는 값을 그대로 건넨 것이다.
+    //
+    // 바닥은 `ConversationFloor` — 실제 대화 화면의 바닥이다. 틴트는 바닥 위의 **상대적인**
+    // 세기라(라이트 `warnSurface` 대 `surface` 1.11:1) 바닥이 다르면 사진이 다른 말을 한다.
+    case 'landed3921-arrival':
+    case 'landed3921-decided': {
+      const decided = name === 'landed3921-decided';
+      const at = (min: number) => NOW - (14 - min) * 60_000;
+      const plain = (id: string, seq: number, body: string, min: number) =>
+        ({
+          ...MESSAGE,
+          id,
+          seq,
+          body,
+          authorMemberId: AGENT,
+          createdAtMs: at(min),
+          thread: undefined,
+        }) as Message;
+      const approvalMessage = {
+        ...MESSAGE,
+        id: '00000000-0000-7000-8000-0000000003b1',
+        seq: 81,
+        type: 'approval_request',
+        body: '툴 호출 승인',
+        authorMemberId: AGENT,
+        createdAtMs: at(3),
+        thread: undefined,
+        props: {
+          approval_id: 'ap-3921',
+          title: 'github.search_issues 실행 허가',
+          approval_status: 'pending',
+        },
+      } as unknown as Message;
+      const gates = new Map([
+        ['ap-3921', {approvalId: 'ap-3921', reversible: false, expiresAtMs: null}],
+      ]);
+      const receipts = new Map([
+        ['ap-3921', {note: '승인을 기록했어요.', status: 'approved' as const}],
+      ]);
+      return (
+        <ConversationFloor
+          label={
+            decided
+              ? '결정 뒤 — 「승인됨」 · 틴트 없음 (#3921)'
+              : '도착 직후 — 「승인 대기」 · 앰버 틴트 (#3921)'
+          }>
+          <MessageRow
+            message={plain('l3921-a', 80, '배포 전에 깃허브 이슈를 먼저 찾아볼게요.', 0)}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+          />
+          <MessageRow
+            message={approvalMessage}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+            landed={!decided}
+            approvalGates={decided ? undefined : gates}
+            approvalReceipts={decided ? receipts : undefined}
+          />
+          <MessageRow
+            message={plain('l3921-c', 82, '승인되면 바로 이어서 찾아볼게요.', 6)}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+          />
+        </ConversationFloor>
       );
     }
     // ---- U4-6M (#1103): 아바타 · 문장의 격 · 컴포저 -------------------------
@@ -4408,6 +4521,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     case 'shell-pause-until':
     case 'shell-pause-until-open':
     case 'shell-pause-until-dnd':
+    case 'shell-pause-until-offline':
       return (
         <View style={styles.fill}>
           <Shell />
@@ -4427,6 +4541,51 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             }
           />
         </View>
+      );
+    // #3924: 프로필 「알림」 묶음의 첫 줄 — 이 폰의 푸시 스위치. 기본 세 상태(켬 · 끔 · OS 거부)에 아래 몇 가지를 더한다.
+    // 시트를 알림 묶음이 머리에 오도록 끌어올려 찍는다. iOS 의 답과 「껐다」는 기억은
+    // `seedPush` 가 정한다 — 스위치·설명·잠김은 배송되는 `usePushSwitch` 가 그 값에서 그린다.
+    // `-ax` 두 판은 접근성 글자 크기(`simctl ui content_size accessibility-extra-extra-large`)용이다:
+    // 위쪽 줄들이 함께 커져 알림 묶음이 더 아래로 밀리므로 끌어올림이 다르다.
+    // `-undetermined` 는 iOS 가 아직 묻지 않은 폰, `-checking` 은 iOS 의 답이 아직 오지 않은 「읽는
+    // 중」이다. `-busy`·`-failed` 는 **눌러야만** 서는 상태라 정지 사진이 아니라
+    // `maestro/99-push-switch-capture.yaml` 이 진짜로 눌러 찍는다(서버 자리만 `seedPush` 의 가짜가 진다).
+    case 'shell-profile-push-on':
+    case 'shell-profile-push-off':
+    case 'shell-profile-push-denied':
+    case 'shell-profile-push-off-ax':
+    case 'shell-profile-push-denied-ax':
+    case 'shell-profile-push-undetermined':
+    case 'shell-profile-push-checking':
+    case 'shell-profile-push-busy':
+    case 'shell-profile-push-failed':
+    case 'shell-profile-push-failed-ax':
+      return (
+        <Screen>
+          <View style={{flex: 1, overflow: 'hidden'}}>
+            <View
+              style={{
+                marginTop: -(name.endsWith('-ax')
+                  ? PUSH_CAPTURE_SCROLL_AX
+                  : PUSH_CAPTURE_SCROLL),
+                height: 6000,
+              }}>
+              <ProfilePage
+                workspaceId={HARNESS_MEMBER.workspaceId}
+                member={HARNESS_MEMBER}
+                directory={makeDirectory(SHELL_ROSTER)}
+                connected
+                onOpenTheme={() => {}}
+                onOpenStatus={() => {}}
+                onOpenDeviceKey={() => {}}
+                onOpenPauseUntil={() => {}}
+                onOpenDndUntil={() => {}}
+                onSignOut={() => {}}
+                onRevealEnd={() => {}}
+              />
+            </View>
+          </View>
+        </Screen>
       );
     case 'mark-unread-sidebar':
       // 캡션은 **아래**에 단다. 이 화면은 자기 `Screen` 이 안전 영역 위쪽을
@@ -4489,7 +4648,8 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             team-board · work-detail · agent-sessions ·
             destructive-confirm · search-entry · search-idle ·
             search-searching · search-empty · search-error · search-results ·
-            mark-unread-sidebar · mark-unread-divider
+            mark-unread-sidebar · mark-unread-divider ·
+            landed3921-arrival · landed3921-decided
           </Text>
         </Frame>
       );
@@ -5557,6 +5717,78 @@ function seedAi(surface: string): void {
   ]);
 }
 
+// #3924: 푸시 스위치 판들. 시뮬레이터에는 알림 권한을 허용·거부로 고정하는 길이 없어
+// (`simctl privacy` 에 notifications 가 없다) iOS 의 답을 하네스가 정한다. 「껐다」는 기억은
+// 진짜 저장소에 적는다 — 하네스의 멤버 id 로 적히므로 이 기기에 로그인한 진짜 멤버의 스위치에는
+// 닿지 않는다(`pushOptOut.ts`). 켬·거부 판은 그 기억을 지워 두고 시작한다.
+/** `shell-profile-notify` 와 같은 끌어올림: 알림 묶음 머리가 화면 위쪽에 오게. */
+const PUSH_CAPTURE_SCROLL = 475;
+const PUSH_CAPTURE_SCROLL_AX = 1160;
+
+function seedPush(surface: string): void {
+  const denied = surface.startsWith('shell-profile-push-denied');
+  // iOS 가 아직 묻지 않은 폰: 허용도 거부도 아니고 다시 물을 수 있다.
+  const undetermined = surface === 'shell-profile-push-undetermined';
+  // 「읽는 중」: iOS 의 답이 영영 오지 않는다 — 스위치 자리의 스피너가 그대로 선다.
+  const reading = surface === 'shell-profile-push-checking';
+  __setPermissionReader(
+    reading
+      ? () => new Promise<{granted: boolean; canAskAgain: boolean}>(() => {})
+      : async () => ({
+          granted: !denied && !undetermined,
+          canAskAgain: !denied,
+        }),
+  );
+  if (surface.startsWith('shell-profile-push-off')) {
+    setPushOptedOut(HARNESS_MEMBER.id, true);
+  } else {
+    clearPushOptOut();
+  }
+  // 눌러야만 서는 두 상태: 켜진 스위치를 사람이 끄면 이 기기를 지우는 DELETE 가 나간다. 그 요청이
+  // 나가려면 이 폰이 서버에 등록된 적이 있어야 하므로 기기 id 를 하나 세운다(`pushDeviceId` 는 없으면
+  // 만든다). 서버 자리만 이 가짜다: `busy` 는 답이 영영 오지 않고(요청 중 잠김), `failed` 는 500 으로
+  // 거절한다(꺼졌다고 말하지 못하고 되돌려져 실패 문장이 선다). 그 밖의 요청은 `seedShell` 처럼 끝나지
+  // 않는다. DELETE 가 몇 번 나갔는지는 로그로 남긴다 — 한 번의 탭이 한 번의 요청이어야 한다.
+  if (
+    surface === 'shell-profile-push-busy' ||
+    surface.startsWith('shell-profile-push-failed')
+  ) {
+    pushDeviceId();
+    const refuse = surface.startsWith('shell-profile-push-failed');
+    let deletes = 0;
+    globalThis.fetch = (async (
+      input: unknown,
+      init?: {method?: string; signal?: AbortSignal},
+    ) => {
+      const url = String(input);
+      if (init?.method === 'DELETE' && url.includes('/devices/')) {
+        deletes += 1;
+        console.log(`[measure-push] DELETE /devices/{id} #${deletes}`);
+        if (!refuse) {
+          // 답이 오지 않는 서버. 진짜 `fetch` 처럼 중단 신호가 오면 거절로 끝난다 — 코어의 15초 기한
+          // (`fetchWithDeadline`)이 그 신호로 걸리므로, 기한이 지나면 `unreachable` 로 끝나 이 상태가
+          // 실패 문장으로 바뀐다(`maestro/99-push-switch-capture.yaml` 의 `EXPECT=timeout` 이 그것을 본다).
+          const startedAt = Date.now();
+          return new Promise<Response>((_, reject) => {
+            init?.signal?.addEventListener('abort', () => {
+              console.log(
+                `[measure-push] DELETE aborted by the client deadline after ${Date.now() - startedAt} ms`,
+              );
+              reject(new Error('aborted'));
+            });
+          });
+        }
+        return {
+          status: 500,
+          ok: false,
+          text: async () => JSON.stringify({error: {code: 'internal'}}),
+        } as unknown as Response;
+      }
+      return new Promise<Response>(() => {});
+    }) as typeof fetch;
+  }
+}
+
 // #3638: 컴포저 호출 판의 서버. 호출 흐름(대상 판정 → 맥 읽기 → 서명 키 확인 → 메시지 전송)은
 // 진짜이고, 서버만 이 가짜다. 시뮬레이터에는 Secure Enclave가 없어 키 저장소가 `unsupported`
 // 로 답하므로 「서명 키가 필요해요」가 **실제로** 뜬다. `flag-off` 판은 서버가 서명 요구를 꺼
@@ -5695,8 +5927,25 @@ function keepPauseSeeds(): void {
   });
 }
 
+/**
+ * 「연결이 끊긴」 장면(design-review H2): NetInfo 구독자에게 끊김만 알린다. 시뮬레이터를 실제로
+ * 비행기 모드로 두지 않고 이 판의 `useOnline` 이 읽는 신호만 바꾼다 — 화면은 진짜다.
+ */
+function forceOffline(): void {
+  const offline = {isConnected: false, isInternetReachable: false, type: 'none', details: null};
+  (
+    NetInfo as unknown as {
+      addEventListener: (listener: (state: typeof offline) => void) => () => void;
+    }
+  ).addEventListener = listener => {
+    listener(offline);
+    return () => {};
+  };
+}
+
 /** `seedShell` 이 깐 규칙(꺼짐)을 이 표면의 모양으로 덮는다. */
 function seedPause(surface: string): void {
+  if (surface === 'shell-pause-until-offline') forceOffline();
   const until = Date.now() + PAUSE_UNTIL_AHEAD_MS;
   const rules =
     surface === 'shell-pause-status' ||
@@ -6244,6 +6493,24 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     // 판에서 어두운 회색 글자가 종이 위에 그대로 서야 캡션이 읽힌다.
     lockedLabel: {fontSize: 12, color: color.textMuted, paddingBottom: 4},
     root: {flex: 1, backgroundColor: color.bg, paddingTop: 56},
+    /**
+     * `ConversationFloor` — `ConversationScreen` 의 `screen` 과 같은 배경식 (#3921).
+     * 이미지 바닥이면 `bg` 한 장, 아니면 위 25% 에서 `canvasTop` 이 (라이트 `surface` ·
+     * 다크 `bg`) 로 건너가고 그 아래는 평평하다.
+     */
+    conversationFloor: {
+      flex: 1,
+      paddingTop: 56,
+      ...(color.backdrop === 'image'
+        ? {backgroundColor: color.bg}
+        : {
+            experimental_backgroundImage: `linear-gradient(180deg, ${color.canvasTop} 0%, ${
+              color.mode === 'light' ? color.surface : color.bg
+            } 25%)`,
+          }),
+    },
+    /** 틀 안에서 행들을 화면 가운데에 놓는다 — 점프가 행을 놓는 자리. */
+    conversationFloorMid: {flex: 1, justifyContent: 'center'},
     /** 제 `Screen` 을 든 화면을 통째로 세울 때 (#1964). */
     fill: {flex: 1, backgroundColor: color.bg},
     /** 그런 화면 아래의 캡션 — 홈 인디케이터를 비켜 선다. */
@@ -6401,4 +6668,5 @@ if (
   }
   if (LAUNCHED.name.startsWith('shell-call-')) seedCall(LAUNCHED.name);
   if (isPauseSurface(LAUNCHED.name)) seedPause(LAUNCHED.name);
+  if (LAUNCHED.name.startsWith('shell-profile-push-')) seedPush(LAUNCHED.name);
 }

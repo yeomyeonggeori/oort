@@ -23,6 +23,10 @@ import {
   sessionPort,
 } from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+import {
+  installAppClock,
+  SHELL_WAIT_TEST_TIMEOUT_MS,
+} from './fixtures/fakeClock';
 
 // =============================================================================
 // 「에이전트」 — 폰에서 에이전트를 부린다 (goal RN-A1).
@@ -364,7 +368,10 @@ const mmkvStore = (
   jest.requireMock('react-native-mmkv') as {__store: Map<string, string>}
 ).__store;
 
+jest.setTimeout(SHELL_WAIT_TEST_TIMEOUT_MS);
+
 beforeEach(() => {
+  installAppClock();
   mmkvStore.clear();
   __resetSessionStore();
   __resetServerBaseCache();
@@ -377,6 +384,7 @@ afterEach(() => {
   cleanup();
   queryClient?.clear();
   queryClient = null;
+  jest.useRealTimers();
 });
 
 async function openAgentsTab(scheme?: ColorScheme) {

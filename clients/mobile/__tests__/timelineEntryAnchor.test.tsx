@@ -6,6 +6,7 @@ import type {FlatList} from 'react-native';
 import type {TimelineStreamItem} from '@momo/core/features/timeline/model';
 
 import {Timeline} from '../src/features/conversation/Timeline';
+import {installAppClock} from './fixtures/fakeClock';
 
 // =============================================================================
 // 채널을 열면 **제일 아래**다 (goal RN-B4a / #1025)
@@ -124,11 +125,18 @@ function scrolled(offsetY: number, contentHeight: number) {
 
 async function flushFrame() {
   await act(async () => {
-    await new Promise(resolve => setTimeout(resolve, 0));
+    await jest.advanceTimersByTimeAsync(0);
   });
 }
 
-afterEach(cleanup);
+beforeEach(() => {
+  installAppClock();
+});
+
+afterEach(() => {
+  cleanup();
+  jest.useRealTimers();
+});
 
 describe('채널을 열면 최신 메시지 앞이다', () => {
   it('첫 콘텐츠 보고에 곧바로 끝으로 간다', () => {
@@ -220,7 +228,7 @@ describe('그래도 손가락이 이긴다', () => {
     // 돌려주는 것은 콘텐츠가 `ENTRY_QUIET_MS`(150ms) 멈춘 뒤의 도착, 그리고 그 뒤
     // `LANDING_HOLD_MS`(600ms, 도착 + 50ms 부터)의 착지 유지가 끝났을 때다(#2604).
     await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await jest.advanceTimersByTimeAsync(1000);
     });
     spy.mockClear();
     glide.mockClear();

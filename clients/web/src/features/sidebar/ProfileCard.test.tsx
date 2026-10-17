@@ -737,6 +737,42 @@ describe("ProfileCard 방해 금지 기한 (#2899)", () => {
     expect(q("pause-until-current")!.textContent).toBe("지금은 기한이 없어요.");
   });
 
+  it("끝 시각이 길어도(다음 주 월요일 항목이 만드는 라벨) 둘째 줄을 말줄임으로 자르지 않고 어절로 접는다 (design-review B1)", async () => {
+    freezeClock();
+    mountSeeded(rosterMember({ presenceStatus: "dnd", dndUntilMs: at(19, 9) }));
+    await openMenu();
+
+    const note = q("presence-dnd-until")!;
+    // 메뉴 폭은 192px 라 이 라벨(145px)은 한 줄(126px)에 못 든다. 잘리는 대신 두 줄로 접혀야 한다.
+    expect(note.textContent).toBe("10월 19일(월) 오전 9:00까지");
+    expect(note.className).not.toMatch(/\btruncate\b/);
+    expect(note.className).toMatch(/\bbreak-keep\b/);
+    expect(note.className).toMatch(/\btext-balance\b/);
+  });
+
+  it("방해 금지의 기한이 지났으면 규칙과 명부를 다시 묻는다 — 스스로 풀지는 않는다 (design-review H3)", async () => {
+    freezeClock();
+    const invalidate = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+    mountSeeded(rosterMember({ presenceStatus: "dnd", dndUntilMs: at(16, 21, 0) }));
+    const keys = invalidate.mock.calls.map((call) =>
+      JSON.stringify((call[0] as { queryKey: unknown }).queryKey)
+    );
+    expect(keys).toContain(JSON.stringify(RULES_KEY));
+    expect(keys).toContain(JSON.stringify(ROSTER_KEY));
+    // 서버가 아직 켜져 있다고 답하면(캐시가 그대로) 메뉴는 방해 금지를 그대로 말한다.
+    await openMenu();
+    expect(q("presence-option-dnd")!.getAttribute("aria-checked")).toBe("true");
+    invalidate.mockRestore();
+  });
+
+  it("방해 금지의 기한이 아직 오지 않았으면 다시 묻지 않는다", async () => {
+    freezeClock();
+    const invalidate = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+    mountSeeded(rosterMember({ presenceStatus: "dnd", dndUntilMs: at(16, 22, 0) }));
+    expect(invalidate).not.toHaveBeenCalled();
+    invalidate.mockRestore();
+  });
+
   it("방해 금지가 아닐 때 항목에는 둘째 줄이 없다", async () => {
     mountSeeded(rosterMember({ presenceStatus: "away" }));
     await openMenu();

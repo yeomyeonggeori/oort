@@ -251,8 +251,11 @@ export function PresenceStatusItems({
               {dndNote ? (
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span>{declaredStatusLabel(status)}</span>
+                  {/* 말줄임을 쓰지 않는다: 메뉴 폭은 192px 라 「10월 19일(월) 오전 9:00까지」(다음 주
+                      월요일 항목이 만드는 라벨)가 한 줄에 못 든다. 행 높이는 가변이고, 어절 단위로
+                      접어(`break-keep`) 날짜와 시각이 비슷한 길이의 두 줄이 되게 한다(`text-balance`). */}
                   <span
-                    className="truncate text-meta text-ink-muted"
+                    className="break-keep text-balance text-meta text-ink-muted"
                     data-testid="presence-dnd-until"
                   >
                     {dndNote}

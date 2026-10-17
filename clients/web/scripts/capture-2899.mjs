@@ -9,6 +9,11 @@
 //   c. 일시 중지 다이얼로그: 「직접 고르기」를 열어 날짜·시간 칸이 보이는 판
 //   d. 사이드바 프로필 메뉴: 방해 금지 항목에 기한이 보이는 판(+ 기한 없는 행)
 //   e. 방해 금지 다이얼로그: 프로필 메뉴에서 연 판
+//   f. (design-review B1) 긴 끝 시각: 「10월 19일(월) 오전 9:00까지」·「2027년 1월 3일(일) 오전 9:00까지」가
+//      192px 메뉴에서 잘리지 않고 접힌다(글줄 상자의 scrollWidth 로 잰다)
+//   g. (design-review H1) 저장 중에는 「취소」가 잠겨 창이 닫히지 않는다(쓰기 응답을 늦춘다)
+//   h. (design-review H3) 기한이 지난 뒤: 서버에 다시 묻고 서버의 새 답을 그린다 — 꺼졌다고 답하면
+//      온라인이 되고, 아직 켜져 있다고 답하면 그대로다(스스로 풀지 않는다)
 //
 //   npm run build && node scripts/capture-2899.mjs
 //   → OUT_DIR(기본 captures/2899)/<장면>-1440-<light|dark>.png + report.json
@@ -68,6 +73,11 @@ function newServer({ rules = {}, presenceStatus = "auto", dndUntilMs } = {}) {
     dndUntilMs,
     prev: null,
     log: [],
+    rosterGets: 0,
+    /** GET 한 번마다 앞에서 하나를 꺼내 **다음** GET 의 답으로 둔다 — 서버가 시간이 지나 바뀐 것을 흉내 낸다. */
+    rosterAfter: [],
+    /** 있으면 `PUT /presence` 의 응답이 그만큼 늦게 온다(저장 중 상태를 찍는다). */
+    presenceDelayMs: 0,
   };
 }
 
@@ -135,11 +145,21 @@ async function installRoutes(context, server) {
     }
     if (path.endsWith("/presence") && method === "PUT") {
       server.log.push({ method, kind: "presence", body });
+      if (server.presenceDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, server.presenceDelayMs));
       applyPresence(server, body);
       return json(route, { status: server.presenceStatus, ...(server.dndUntilMs !== undefined ? { dndUntilMs: server.dndUntilMs } : {}) });
     }
     if (path.endsWith("/channels")) return json(route, { channels });
-    if (path.endsWith("/roster")) return json(route, { members: rosterRows(server) });
+    if (path.endsWith("/roster")) {
+      server.rosterGets += 1;
+      const answer = rosterRows(server);
+      const next = server.rosterAfter.shift();
+      if (next) {
+        server.presenceStatus = next.presenceStatus;
+        server.dndUntilMs = next.dndUntilMs;
+      }
+      return json(route, { members: answer });
+    }
     if (path.endsWith("/read-state")) return json(route, { read_states: [] });
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
     if (path.endsWith("/work-hosts")) return json(route, { workHosts: [] });
@@ -422,6 +442,92 @@ async function sceneE(browser, origin, scheme, report) {
   await context.close();
 }
 
+async function sceneF(browser, origin, scheme, report) {
+  const tag = scheme;
+  // (1) 다음 주 월요일 오전 9시: 사이드바 메뉴(192px)의 둘째 줄이 두 줄로 접힌다.
+  // (2) 다른 해: 더 길다. 둘 다 말줄임 없이 끝까지 읽혀야 한다.
+  for (const [name, until, text] of [
+    ["nextmon", kst("2026-10-19T09:00:00"), "10월 19일(월) 오전 9:00까지"],
+    ["nextyear", kst("2027-01-03T09:00:00"), "2027년 1월 3일(일) 오전 9:00까지"],
+  ]) {
+    const server = newServer({ presenceStatus: "dnd", dndUntilMs: until, rules: { dnd: true, dndUntilMs: until } });
+    server.prev = { dnd: false, dndUntilMs: undefined };
+    const { context, page } = await openScene(browser, origin, scheme, server);
+    const menu = await openProfileMenu(page);
+    const note = page.getByTestId("presence-dnd-until");
+    check(`f ${tag} ${name} 둘째 줄이 끝까지 읽힌다`, ((await note.textContent()) ?? "").trim() === text, (await note.textContent()) ?? "");
+    const box = await note.evaluate((el) => ({
+      clipped: el.scrollWidth > el.clientWidth + 1,
+      lines: Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)),
+      truncate: getComputedStyle(el).textOverflow === "ellipsis",
+    }));
+    check(`f ${tag} ${name} 글이 가로로 넘쳐 잘리지 않는다`, !box.clipped && !box.truncate, JSON.stringify(box));
+    check(`f ${tag} ${name} 두 줄로 접힌다`, box.lines === 2, JSON.stringify(box));
+    await shoot(page, `menu-dnd-${name}`, tag, menu);
+    report[`f-${tag}-${name}`] = box;
+    await context.close();
+  }
+}
+
+async function sceneG(browser, origin, scheme, report) {
+  const tag = scheme;
+  const server = newServer();
+  server.presenceDelayMs = 1800;
+  const { context, page } = await openScene(browser, origin, scheme, server);
+  await openProfileMenu(page);
+  await page.getByTestId("presence-option-dnd").click();
+  const dialog = page.getByTestId("pause-until-dialog");
+  await dialog.waitFor({ timeout: 5000 });
+  await page.getByTestId("pause-until-select").selectOption("1h");
+  await page.getByTestId("pause-until-confirm").click();
+  await page.waitForFunction(() => document.querySelector('[data-testid="pause-until-confirm"]')?.textContent?.includes("저장 중"), null, { timeout: 5000 });
+  check(`g ${tag} 저장 중에는 취소가 잠겨 있다`, await page.getByTestId("pause-until-cancel").isDisabled());
+  // 잠긴 단추를 억지로 눌러도(force) 창이 닫히지 않는다.
+  await page.getByTestId("pause-until-cancel").click({ force: true }).catch(() => undefined);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(150);
+  check(`g ${tag} 저장 중에는 취소·Esc 로 창이 닫히지 않는다`, (await dialog.count()) === 1);
+  await shoot(page, "dnd-dialog-pending", tag, dialog);
+  await dialog.waitFor({ state: "detached", timeout: 6000 });
+  check(`g ${tag} 쓰기가 끝나면 창이 닫힌다`, (await dialog.count()) === 0);
+  check(`g ${tag} 쓰기는 한 번이고 PUT presence {status, dndUntilMs} 만 싣는다`, writes(server, "presence").length === 1
+    && JSON.stringify(writes(server, "presence")[0].body) === JSON.stringify({ status: "dnd", dndUntilMs: FIXED_NOW + 60 * 60_000 }), JSON.stringify(writes(server, "presence")));
+  await context.close();
+}
+
+async function sceneH(browser, origin, scheme, report) {
+  const tag = scheme;
+  const PAST = kst("2026-10-16T21:00:00"); // 고정한 지금(21:07)보다 7분 앞 — 이미 지났다
+  // (1) 서버가 이제 꺼졌다고 답한다: 첫 읽기는 낡은 방해 금지, 다시 읽으면 자동(온라인).
+  {
+    const server = newServer({ presenceStatus: "dnd", dndUntilMs: PAST, rules: { dnd: true, dndUntilMs: PAST } });
+    server.rosterAfter = [{ presenceStatus: "auto", dndUntilMs: undefined }];
+    const { context, page } = await openScene(browser, origin, scheme, server);
+    await page.waitForFunction(() => document.querySelector('[data-testid="profile-card"]') !== null);
+    await page.waitForTimeout(1500);
+    check(`h ${tag} 기한이 지난 것을 알고 명부를 다시 읽었다(읽기 둘 이상)`, server.rosterGets >= 2, String(server.rosterGets));
+    const effective = await page.getByTestId("presence-badge").first().getAttribute("data-effective").catch(() => null);
+    check(`h ${tag} 서버가 꺼졌다고 답했으니 아바타가 방해 금지가 아니다`, effective !== "dnd", String(effective));
+    const menu = await openProfileMenu(page);
+    check(`h ${tag} 메뉴가 온라인을 고른 것으로 말한다`, (await page.getByTestId("presence-option-auto").getAttribute("aria-checked")) === "true");
+    check(`h ${tag} 지난 시각을 「…까지」로 말하지 않는다`, (await page.getByTestId("presence-dnd-until").count()) === 0);
+    await shoot(page, "menu-after-expiry-server-off", tag, menu);
+    await context.close();
+  }
+  // (2) 서버가 아직 켜져 있다고 답한다(두 시계의 차이): 화면이 스스로 풀지 않는다.
+  {
+    const server = newServer({ presenceStatus: "dnd", dndUntilMs: PAST, rules: { dnd: true, dndUntilMs: PAST } });
+    const { context, page } = await openScene(browser, origin, scheme, server);
+    await page.waitForFunction(() => document.querySelector('[data-testid="profile-card"]') !== null);
+    await page.waitForTimeout(1500);
+    check(`h ${tag} 서버가 켜져 있다고 답해도 한 번 더 물었다`, server.rosterGets >= 2, String(server.rosterGets));
+    const menu = await openProfileMenu(page);
+    check(`h ${tag} 서버가 켜져 있다고 답하는 동안 메뉴는 방해 금지를 그대로 말한다`, (await page.getByTestId("presence-option-dnd").getAttribute("aria-checked")) === "true");
+    await shoot(page, "menu-after-expiry-server-still-on", tag, menu);
+    await context.close();
+  }
+}
+
 async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
   const preview = await startGuardedPreview({ webRoot: WEB_ROOT, port: PORT, portEnvVar: "CAPTURE_PORT" });
@@ -434,6 +540,9 @@ async function main() {
       await sceneC(browser, preview.origin, scheme, report);
       await sceneD(browser, preview.origin, scheme, report);
       await sceneE(browser, preview.origin, scheme, report);
+      await sceneF(browser, preview.origin, scheme, report);
+      await sceneG(browser, preview.origin, scheme, report);
+      await sceneH(browser, preview.origin, scheme, report);
     }
   } finally {
     await browser.close();

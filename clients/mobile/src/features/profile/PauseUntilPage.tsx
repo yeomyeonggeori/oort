@@ -2,6 +2,7 @@ import {
   PRESENCE_WRITE_FAILED,
 } from '@momo/core/features/presence/model';
 import {
+  PAUSE_UNTIL_OFFLINE_REASON,
   pauseUntilAtMs,
   pauseUntilDescription,
   pauseUntilHint,
@@ -17,10 +18,11 @@ import type {RosterMember} from '@momo/core/lib/api';
 import React, {useRef, useState} from 'react';
 import {ActivityIndicator, StyleSheet, View} from 'react-native';
 
-import {GroupRow, GroupSection, Sentence} from '../../design/atoms';
+import {GroupRow, GroupSection, NoticeBlock, Sentence} from '../../design/atoms';
 import {usePalette, useStyles} from '../../design/theme';
 import {font, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
 import {useNow} from '../../lib/useNow';
+import {useOnline} from '../inbox/useOnline';
 import {PauseUntilCustom} from './PauseUntilCustom';
 import {usePauseNotifications, useSetPresence} from './selfStatus';
 
@@ -87,9 +89,13 @@ export function PauseUntilPage({
     setCustomOpen(open => !open);
   };
 
+  // 연결이 끊긴 동안은 쓰기를 세우지 않는다. 끊긴 채 누른 뮤테이션은 낙관값만 칠하고 멈췄다가 재연결 뒤에
+  // 나가는데, 기한은 **절대 시각**이라 그때는 이미 지났을 수 있다(서버가 400 으로 되돌린다) — 사람에게는
+  // 이유 없이 도는 스피너와 사실처럼 그려진 낙관값만 남는다(design-review H2). 이유를 말하고 잠근다.
+  const online = useOnline();
   const busy = kind === 'pause' ? pause.pending : setPresence.isPending;
   // 규칙을 한 번도 못 읽은 채로는 일시 중지 쓰기를 세우지 않는다(`usePauseNotifications`).
-  const locked = busy || (kind === 'pause' && !pause.ready);
+  const locked = busy || !online || (kind === 'pause' && !pause.ready);
 
   // 지금 걸려 있는 것 — 머리에서 한 줄로 말한다.
   const active = kind === 'pause' ? pause.paused : self?.presenceStatus === 'dnd';
@@ -134,6 +140,13 @@ export function PauseUntilPage({
           </Sentence>
         ) : null}
       </View>
+
+      {online ? null : (
+        <NoticeBlock
+          headline={PAUSE_UNTIL_OFFLINE_REASON}
+          testID="pause-until-offline"
+        />
+      )}
 
       <GroupSection label="기한">
         {options.map((option, index) => {
@@ -185,6 +198,7 @@ export function PauseUntilPage({
             kind={kind}
             nowMs={nowMs}
             busy={busy && pendingId === 'custom'}
+            offline={!online}
             onConfirm={atMs => void commit(atMs, 'custom')}
           />
         </View>

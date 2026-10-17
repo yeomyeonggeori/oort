@@ -64,12 +64,15 @@ export function PauseUntilCustom({
   kind,
   nowMs,
   busy,
+  offline,
   onConfirm,
 }: {
   kind: PauseUntilKind;
   /** 분 단위로 틱하는 지금(`useNow`). 「오늘」·지난 날을 가르는 데 쓴다. */
   nowMs: number;
   busy: boolean;
+  /** 연결이 끊겼다 — 확인이 잠긴다(끊긴 동안 쓰기는 대기열에 쌓여 지난 절대 시각으로 나간다). */
+  offline: boolean;
   onConfirm: (atMs: number) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -92,7 +95,7 @@ export function PauseUntilCustom({
   const result = customPauseUntil(dayKey(day), timeKey(time), Date.now());
 
   const confirm = () => {
-    if (busy) return;
+    if (busy || offline) return;
     const fresh = customPauseUntil(dayKey(day), timeKey(time), Date.now());
     if (fresh.ok) onConfirm(fresh.atMs);
   };
@@ -262,7 +265,7 @@ export function PauseUntilCustom({
           label={pauseUntilConfirmLabel(kind)}
           busyLabel="저장 중"
           busy={busy}
-          disabled={!result.ok}
+          disabled={!result.ok || offline}
           onPress={confirm}
           testID="pause-until-confirm"
         />

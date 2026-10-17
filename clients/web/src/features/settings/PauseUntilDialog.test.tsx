@@ -330,6 +330,24 @@ describe("PauseUntilDialog 네 상태", () => {
     expect(onOpenChange).not.toHaveBeenCalled();
   });
 
+  it("저장 중에는 취소도 닫지 않는다 — 닫는 모든 길이 같은 규칙이다 (design-review H1)", async () => {
+    // 취소만 열려 있으면 사람이 「취소」를 눌렀는데 쓰기는 나가서 멈춤이 켜지고, 늦게 온 실패는 닫힌 창
+    // 대신 다음에 여는 창에 먼저 보인다.
+    const onOpenChange = vi.fn();
+    mount({ pending: true, onOpenChange });
+    const cancel = q<HTMLButtonElement>("pause-until-cancel")!;
+    expect(cancel.disabled).toBe(true);
+    await click("pause-until-cancel");
+    expect(onOpenChange).not.toHaveBeenCalled();
+    // 쓰기가 끝나면(저장 중이 아니면) 취소는 다시 닫는다.
+    unmount();
+    const again = vi.fn();
+    mount({ pending: false, onOpenChange: again });
+    expect(q<HTMLButtonElement>("pause-until-cancel")!.disabled).toBe(false);
+    await click("pause-until-cancel");
+    expect(again).toHaveBeenCalledWith(false);
+  });
+
   it("저장 중이 아니면 Esc 와 취소가 닫는다", async () => {
     const onOpenChange = vi.fn();
     mount({ onOpenChange });

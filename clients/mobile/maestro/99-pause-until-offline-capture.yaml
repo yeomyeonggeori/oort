@@ -1,0 +1,19 @@
+appId: app.momo.ios
+name: 99-pause-until-offline-capture
+---
+# 99-pause-until-offline-capture — 연결이 끊겼을 때의 기한 장 (#2899 design-review H2).
+#
+# 표면 `-momoMeasure SHELL-PAUSE-UNTIL-OFFLINE`: 알림 일시 중지의 기한 장을 열되 NetInfo 가 「끊김」을
+# 알린다(`measure/surfaces.tsx` `forceOffline`). 이유 한 줄이 서고 모든 줄이 잠긴다. 앞에 `LIGHT-` 를
+# 붙이면 라이트다.
+#
+#   maestro test -e SHOT=pause-until-offline-dark clients/mobile/maestro/99-pause-until-offline-capture.yaml
+- extendedWaitUntil:
+    visible:
+      id: "pause-until-page"
+    timeout: 60000
+- extendedWaitUntil:
+    visible:
+      id: "pause-until-offline"
+    timeout: 15000
+- takeScreenshot: ${SHOT}

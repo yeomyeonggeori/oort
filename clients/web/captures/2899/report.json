@@ -14,6 +14,16 @@
   "e-light": {
     "overflow": 0
   },
+  "f-light-nextmon": {
+    "clipped": false,
+    "lines": 2,
+    "truncate": false
+  },
+  "f-light-nextyear": {
+    "clipped": false,
+    "lines": 2,
+    "truncate": false
+  },
   "a-dark": {
     "overflow": 0
   },
@@ -28,5 +38,15 @@
   },
   "e-dark": {
     "overflow": 0
+  },
+  "f-dark-nextmon": {
+    "clipped": false,
+    "lines": 2,
+    "truncate": false
+  },
+  "f-dark-nextyear": {
+    "clipped": false,
+    "lines": 2,
+    "truncate": false
   }
 }

@@ -18,6 +18,10 @@ import {resetAgentWorking} from '../src/features/agents/workingSignal';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+import {
+  installAppClock,
+  SHELL_WAIT_TEST_TIMEOUT_MS,
+} from './fixtures/fakeClock';
 
 // =============================================================================
 // 앱을 쓰는 중에 도착한 승인이 인박스에 뜬다 (goal RN-B4d / #1020)
@@ -209,7 +213,7 @@ function statusFrame(over: Record<string, unknown> = {}) {
  */
 async function deliver(data: unknown, delayMs: number): Promise<void> {
   await act(async () => {
-    await new Promise(resolve => setTimeout(resolve, delayMs));
+    await jest.advanceTimersByTimeAsync(delayMs);
     agentSub()?.__emit('publication', {data});
   });
 }
@@ -234,7 +238,10 @@ const mmkvStore = (
   jest.requireMock('react-native-mmkv') as {__store: Map<string, string>}
 ).__store;
 
+jest.setTimeout(SHELL_WAIT_TEST_TIMEOUT_MS);
+
 beforeEach(() => {
+  installAppClock();
   approvalOpen = false;
   mmkvStore.clear();
   __resetSessionStore();
@@ -251,6 +258,7 @@ afterEach(() => {
   queryClient?.clear();
   queryClient = null;
   resetAgentWorking();
+  jest.useRealTimers();
 });
 
 /**

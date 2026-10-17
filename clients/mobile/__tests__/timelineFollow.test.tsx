@@ -6,6 +6,7 @@ import type {FlatList} from 'react-native';
 import type {TimelineStreamItem} from '@momo/core/features/timeline/model';
 
 import {Timeline} from '../src/features/conversation/Timeline';
+import {installAppClock} from './fixtures/fakeClock';
 
 // =============================================================================
 // 끝을 따라가는 규칙은 **둘**이다.
@@ -129,7 +130,7 @@ const ENTRY_HANDS_BACK_MS = 1000;
 
 async function wait(ms: number) {
   await act(async () => {
-    await new Promise(resolve => setTimeout(resolve, ms));
+    await jest.advanceTimersByTimeAsync(ms);
   });
 }
 
@@ -151,7 +152,7 @@ function scrollAwayFromBottom() {
  */
 async function flushFrame() {
   await act(async () => {
-    await new Promise(resolve => setTimeout(resolve, 0));
+    await jest.advanceTimersByTimeAsync(0);
   });
 }
 
@@ -164,7 +165,14 @@ function spyGlide(listRef: ReturnType<typeof mount>['listRef']) {
   return jest.spyOn(listRef.current!, 'scrollToOffset');
 }
 
-afterEach(cleanup);
+beforeEach(() => {
+  installAppClock();
+});
+
+afterEach(() => {
+  cleanup();
+  jest.useRealTimers();
+});
 
 describe('내가 보내면 따라간다', () => {
   it('읽던 자리가 끝이 아니어도 내 메시지로 데려간다', async () => {

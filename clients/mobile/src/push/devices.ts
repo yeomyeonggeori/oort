@@ -1,3 +1,4 @@
+import {ApiError, authedRequest, refreshSession} from '@momo/core/lib/api';
 import {fetchWithDeadline, type HttpResponse} from '@momo/core/lib/http';
 import {apiBase, coreSession} from '@momo/core/runtime/host';
 
@@ -65,12 +66,31 @@ export async function registerDevice(
     topic: PUSH_TOPIC,
   });
 
+  const url = `${apiBase()}/v1/workspaces/${input.workspaceId}/devices`;
   let response: HttpResponse;
   try {
-    response = await fetchWithDeadline(
-      `${apiBase()}/v1/workspaces/${input.workspaceId}/devices`,
-      {method: 'POST', headers: authHeaders(), body},
-    );
+    response = await fetchWithDeadline(url, {
+      method: 'POST',
+      headers: authHeaders(),
+      body,
+    });
+    // 한 번만 회전하고 다시 보낸다 (#3924). 등록은 대개 앱을 켠 직후, 방금 회전한 토큰으로
+    // 일어났다. 이제는 사람이 스위치를 켠 **그때**도 등록한다 — 시트를 열어 둔 채 15분
+    // 수명이 지난 access 토큰으로 가는 것이 현실이다. 그 401 을 「거부됨」으로 읽으면
+    // 재시도 없이 끝나 스위치만 켜진 채 등록이 없다. 끝난 세션을 선언하는 일
+    // (`markAuthExpired`)은 이 호출의 몫이 아니다 — 회전해도 401 이면 그대로 `rejected` 로
+    // 둔다.
+    if (
+      response.status === 401 &&
+      coreSession().getRefreshToken() !== null &&
+      (await refreshSession())
+    ) {
+      response = await fetchWithDeadline(url, {
+        method: 'POST',
+        headers: authHeaders(),
+        body,
+      });
+    }
   } catch (cause) {
     return {
       kind: 'unreachable',
@@ -132,5 +152,55 @@ export async function revokeDevice(
     return response.ok;
   } catch {
     return false;
+  }
+}
+
+export type RevokeOwnDeviceOutcome =
+  /** 서버가 이 기기의 살아 있는 토큰을 무효로 했다. 두 번째 호출도 이 답이다(멱등). */
+  | {kind: 'revoked'}
+  /**
+   * 404 — 서버에 이 기기 행이 없다. 등록이 서버에 닿은 적이 없다는 뜻이고, 그러면
+   * 끌 것이 없다: 「이 폰에 살아 있는 등록이 없다」는 끄려던 결과가 이미 참이다.
+   */
+  | {kind: 'gone'}
+  /** 403·5xx 등 서버가 답하고 거절했다. */
+  | {kind: 'rejected'; status: number}
+  /** 아무도 답하지 않았다(망·기한). */
+  | {kind: 'unreachable'; reason: string};
+
+/**
+ * 사람이 푸시 스위치를 껐다 — 이 폰의 서버 등록을 지운다 (#3924, ADR-0204 D1).
+ *
+ * `revokeDevice` 와 같은 `DELETE` 이지만 **다른 순간**을 위한 다른 함수다. 그쪽은
+ * 로그아웃의 `beforeRevoke` 창에서 로컬 세션이 이미 지워진 뒤 떠나는 토큰을 직접
+ * 들고 가고, 서버 로그아웃을 붙잡지 않도록 4초에서 끊는다. 이쪽은 세션이 살아 있는
+ * 채로 사람이 기다리는 요청이다:
+ *
+ *   * 15분짜리 access 토큰이 이미 죽었을 수 있다(사람이 시트를 열어 둔 채 앉아 있었다).
+ *     코어의 `authedRequest` 가 401 에 한 번 회전하고 다시 보낸다 — 이 요청이 401 로
+ *     끝나면 스위치는 꺼졌다고 말하는데 서버는 계속 보낸다.
+ *   * 결과를 구분해야 한다. 끝난 것(`revoked`·`gone`)과 끝나지 않은 것(`rejected`·
+ *     `unreachable`)을 한 불리언으로 접으면 「이 폰에 등록이 없다」(404)가 실패로 읽혀
+ *     한 번도 등록되지 못한 폰은 영영 끌 수 없다.
+ */
+export async function revokeOwnDevice(
+  workspaceId: string,
+  deviceId: string,
+): Promise<RevokeOwnDeviceOutcome> {
+  try {
+    await authedRequest(`/v1/workspaces/${workspaceId}/devices/${deviceId}`, {
+      method: 'DELETE',
+    });
+    return {kind: 'revoked'};
+  } catch (cause) {
+    if (cause instanceof ApiError) {
+      return cause.status === 404
+        ? {kind: 'gone'}
+        : {kind: 'rejected', status: cause.status};
+    }
+    return {
+      kind: 'unreachable',
+      reason: cause instanceof Error ? cause.message : String(cause),
+    };
   }
 }
