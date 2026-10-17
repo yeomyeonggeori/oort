@@ -1318,6 +1318,46 @@ pub async fn lock_gateway_run_in_tx(
     }))
 }
 
+/// The `message.props` key by which a run's **closing line** says which message it
+/// answers (ADR-0204 D8, #3929).
+///
+/// A final answer already points at the request with `reply_to_id` (ADR-0148 rule 6)
+/// and the push judgment reads that. The other two lines a run can end on — the
+/// approval-expiry result and the stall notice — are written by sweeps and carry no
+/// `reply_to_id`, because a quote would add a block to cards that show none today
+/// (the clients render `reply_to_id` for every message). They carry this key
+/// instead: the same fact, `agent_run.trigger_message_id`, in a place no client
+/// renders. `momo_push::judge_targets` reads both, so one rule — "an agent's line that
+/// answers a person's message pushes that person" — covers all three.
+///
+/// It is written by the producers only for a run that has a trigger. A work run has
+/// none (it is pushed as `work_run_done`, ADR-0162 증보 3 D14), and the other agent
+/// lines that name `props.trigger_message_id` for their own reasons (the hosted-skip
+/// notice) deliberately do **not** use this key and stay silent.
+pub const PROP_ANSWERS_MESSAGE_ID: &str = "answers_message_id";
+
+/// The utterance that started `run_id` (`agent_run.trigger_message_id`) — `None` for
+/// a run nobody said anything to raise (a work run, a welcome) or a run this
+/// workspace does not have.
+///
+/// A plain read, no lock: the sweeps that stamp [`PROP_ANSWERS_MESSAGE_ID`] have just
+/// written the run row in the same transaction, and the column never changes after
+/// the run is created.
+pub async fn run_trigger_message_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+) -> Result<Option<Uuid>, DbError> {
+    let trigger: Option<Option<Uuid>> = sqlx::query_scalar(
+        "SELECT trigger_message_id FROM agent_run WHERE id = $2 AND workspace_id = $1",
+    )
+    .bind(workspace_id)
+    .bind(run_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(trigger.flatten())
+}
+
 /// `queued → running` on the first progress event (Swift :376-389).
 ///
 /// The `WHERE status IN ('queued','running')` guard plus the `CASE` make this
