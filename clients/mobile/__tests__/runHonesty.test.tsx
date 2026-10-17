@@ -8,11 +8,13 @@ import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {act, cleanup, render, screen, waitFor} from '@testing-library/react-native';
 import React from 'react';
+import {StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {AgentLivenessLabel} from '../src/features/agents/AgentLivenessLabel';
+import {darkPalette, lightPalette} from '../src/design/tokens';
 import {WorkingCard} from '../src/screens/SidebarScreen';
 import {AgentActivityBar} from '../src/features/agents/turnSurfaces';
 import {buildWorkingCard, workingStep} from '../src/features/home/workingCard';
@@ -286,6 +288,25 @@ describe('생존 라벨', () => {
     expect(screen.getByTestId('agent-liveness').props.accessibilityLabel).toContain(
       '응답함 3분 전',
     );
+  });
+
+  it('칩의 점은 사이드바 줄의 점과 같은 함수를 읽는다 — 살아 있음·대기도 초록, 꺼짐은 채운 회색(낱말이 곁에 있다)', async () => {
+    const dotColor = () => {
+      const style = StyleSheet.flatten(screen.getByTestId('agent-liveness-dot').props.style) as {
+        backgroundColor?: string;
+      };
+      return style.backgroundColor;
+    };
+    mockFetchLiveness.mockResolvedValue({agentMemberId: AGENT, state: 'alive_idle'});
+    const alive = mount();
+    await screen.findByTestId('agent-liveness-text');
+    expect([lightPalette.ok, darkPalette.ok]).toContain(dotColor());
+    alive.unmount();
+
+    mockFetchLiveness.mockResolvedValue({agentMemberId: AGENT, state: 'inactive'});
+    mount();
+    await screen.findByTestId('agent-liveness-text');
+    expect([lightPalette.textFaint, darkPalette.textFaint]).toContain(dotColor());
   });
 
   it('깨웠지만 안 가져감은 owner/admin에게만 경고색이다', async () => {

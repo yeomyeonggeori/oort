@@ -1,0 +1,19 @@
+appId: app.momo.ios
+name: 99-pause-banner-capture
+---
+# 99-pause-banner-capture — 인박스 맨 위의 멈춤 줄 (#3923, ADR-0204 D3).
+#
+# 표면 `-momoMeasure SHELL-INBOX-PAUSE`(일시 중지 + 기한), `SHELL-INBOX-PAUSE-OPEN`(기한 없는 옛 행),
+# `SHELL-INBOX-PAUSE-DND`(일시 중지는 꺼졌고 상태만 방해 금지)는 진짜 셸의 진짜 인박스를 인박스 탭으로
+# 연다. 서버는 하네스의 씨앗이다. 앞에 `LIGHT-` 를 붙이면 라이트다.
+#
+#   xcrun simctl launch booted app.momo.ios --args \
+#     -momoMeasure SHELL-INBOX-PAUSE -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro test -e SHOT=inbox-pause-dark clients/mobile/maestro/99-pause-banner-capture.yaml
+- extendedWaitUntil:
+    visible:
+      id: "pause-banner"
+    timeout: 60000
+# dismiss-dev-logbox 를 부르지 않는다: 이 줄의 단추가 화면 위쪽이라 좌표가 겹치지 않지만, 시트 판과 같은
+# 규칙을 지킨다(찍을 화면을 가리는 일을 만들지 않는다).
+- takeScreenshot: ${SHOT}
