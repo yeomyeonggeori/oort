@@ -1,0 +1,22 @@
+appId: app.momo.ios
+name: 99-pause-banner-resume-capture
+---
+# 99-pause-banner-resume-capture — 「다시 켜기」를 누르면 일시 중지만 꺼지고 상태가 아직 방해 금지라
+# 「상태는 아직 방해 금지예요 · 풀기」 줄이 서는 것(ADR-0204 D2·D3). 표면 `SHELL-INBOX-PAUSE`.
+#
+# 하네스에는 서버가 없어 쓰기 요청은 끝나지 않는다. 낙관 갱신만으로 두 번째 줄이 선다 — 사람 눈에는
+# 서버가 답한 뒤와 같은 모양이다. 앞에 `LIGHT-` 를 붙이면 라이트다.
+#
+#   maestro test -e SHOT=inbox-pause-resume-dark clients/mobile/maestro/99-pause-banner-resume-capture.yaml
+- extendedWaitUntil:
+    visible:
+      id: "pause-banner"
+    timeout: 60000
+- takeScreenshot: ${SHOT}-before
+- tapOn:
+    id: "pause-banner-action"
+- extendedWaitUntil:
+    visible:
+      text: "풀기"
+    timeout: 15000
+- takeScreenshot: ${SHOT}-after
