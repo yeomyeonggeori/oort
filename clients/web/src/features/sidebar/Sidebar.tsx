@@ -23,7 +23,6 @@ import {
   type AgentWorkingSignal,
 } from "@/features/agents/agentWorkingSignal";
 import { AgentTurnBadge as AgentTurnStatusBadge } from "@/features/agents/AgentTurnBadge";
-import { AgentLivenessLabel } from "@/features/agents/AgentLivenessLabel";
 import {
   agentTurnBadgeCopy,
   UNKNOWN_AGENT_NAME,
@@ -125,11 +124,8 @@ import { DRAWER_SCRIM_MOTION } from "@/design/motion";
 import { MOVE_UNREAD_CHANNEL_SHORTCUT } from "@/app/keyboardShortcuts";
 import { ShortcutHelpDialog } from "@/app/ShortcutHelpDialog";
 import { useOpenNewDm } from "@/features/directory/useNewDm";
-import {
-  PEER_DOT_LABEL,
-  peerDot,
-} from "@/features/directory/newDmModel";
-import { DmAvatar } from "./DmAvatar";
+import { mayActOnLiveness } from "@momo/core/features/agents/liveness";
+import { DmAvatar, DmStatusText } from "./DmAvatar";
 
 // =============================================================================
 // Sidebar (R-1 §1): workspace header, the two global surfaces (인박스 / 활동),
@@ -274,6 +270,8 @@ export function Sidebar({
 
   const selfMember = memberFor(directoryQuery.directory, session.member.id);
   const selfName = selfMember?.displayName ?? session.member.displayName;
+  // 에이전트 생존 경고(경고색)는 다시 깨울 수 있는 사람에게만 경고다(코어 `livenessToneFor`).
+  const viewerMayAct = mayActOnLiveness(selfMember?.role);
 
   // 프로필(#3574): 펼친 동안은 목록 끝의 한 줄, ⌘B 접힘에서만 레일의 아바타. 같은 컴포넌트가
   // 한 번에 한 곳에만 선다(둘이 함께 마운트되면 메뉴·다이얼로그가 둘이 된다).
@@ -632,7 +630,6 @@ export function Sidebar({
         ? dmPeer(channel, directoryQuery.directory, session.member.id)
         : null;
     const dmPeerMember = label.kind === "self" ? (selfMember ?? null) : peer;
-    const dot = channel.kind === "dm" ? peerDot(dmPeerMember, nowMs) : null;
     const rowTurns = applyApprovalWaits(
       agentTurnsInChannel(turnSignals, channel.id, nowMs),
       channel.id,
@@ -659,7 +656,11 @@ export function Sidebar({
         }
         icon={
           channel.kind === "dm" ? (
-            <DmAvatar member={dmPeerMember} nowMs={nowMs} />
+            <DmAvatar
+              member={dmPeerMember}
+              nowMs={nowMs}
+              viewerMayAct={viewerMayAct}
+            />
           ) : channel.kind === "private" ? (
             <Lock className="size-4" />
           ) : (
@@ -680,17 +681,21 @@ export function Sidebar({
         mentionCount={counts.mentionCount}
         trailing={
           <>
-            {dot ? <span className="sr-only">{PEER_DOT_LABEL[dot]}</span> : null}
+            {/* DM 상대의 상태(자리 비움·방해 금지, 에이전트의 생존 판정)는 아바타 모서리의 점이 눈에
+                말하고, 이 숨은 글이 접근 가능한 이름에 이어 말한다 (#3964). 글자 라벨(「꺼짐」)은 행에서
+                뺐다: 낱말은 툴팁과 이 글, 프로필 카드·멤버 목록의 칩이 갖는다. */}
+            {channel.kind === "dm" ? (
+              <DmStatusText
+                member={dmPeerMember}
+                mayAct={viewerMayAct}
+                nowMs={nowMs}
+              />
+            ) : null}
             <AgentTurnBadge
               turns={rowTurns}
               directory={directoryQuery.directory}
               live={railLive}
             />
-            {/* 에이전트와의 DM 행: 열린 턴이 없을 때만 지금 살아 있는가를 한두 낱말로
-                (ADR-0200 D4). 턴이 열려 있으면 그 알약이 이 자리의 말이다. */}
-            {rowTurns.length === 0 && peer?.kind === "agent" && (
-              <AgentLivenessLabel agentId={peer.id} variant="compact" />
-            )}
           </>
         }
         testId="channel-item"
