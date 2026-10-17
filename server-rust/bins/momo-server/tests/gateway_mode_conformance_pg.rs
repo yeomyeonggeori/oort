@@ -618,3 +618,105 @@ async fn b6_2_a_gateway_event_moves_the_run_and_publishes_progress() {
         "…and so does the delta this route used to validate and discard: {rail:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// #4017 — a successful run with nothing to say leaves no placeholder message
+// ---------------------------------------------------------------------------
+
+/// **An empty successful completion settles the run and writes no message.**
+///
+/// The old behaviour posted an English stand-in naming the runtime into the
+/// channel. Now the run still ends (status, bill, rail frame, job settled), the
+/// response says `messageId: null`, a replay of the same completion answers the
+/// same instead of 409, and no agent-authored message exists.
+///
+/// Goes red if the stand-in text comes back, if the message write stops being
+/// conditional (a blank bubble), or if the terminal replay turns into a 409.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn s4017_4_an_empty_success_writes_no_message_but_settles_the_run() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let agent = seed_channel_agent(&su, &tenant, "hermes").await;
+
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, tenant.workspace, &tenant.email).await;
+
+    let created: Value = create_work_run(&http, &base, &token, &tenant, agent, Uuid::new_v4())
+        .await
+        .json()
+        .await
+        .expect("run body");
+    let run_id = created["id"].as_str().expect("run id").to_string();
+    let pending: Value = gateway(http.get(format!(
+        "{base}/v1/workspaces/{}/agents/{agent}/gateway/jobs/pending",
+        tenant.workspace
+    )))
+    .send()
+    .await
+    .expect("claim")
+    .json()
+    .await
+    .expect("pending body");
+    let job = pending["jobs"][0].clone();
+
+    let complete = |http: &reqwest::Client| {
+        gateway(http.post(format!(
+            "{base}/v1/workspaces/{}/agent-runs/{run_id}/gateway/complete",
+            tenant.workspace
+        )))
+        .json(&json!({
+            "job_id": job["id"],
+            "lease_id": job["leaseId"],
+            "status": "succeeded",
+            "body": "   ",
+            "usage": {"promptTokens": 3, "completionTokens": 0},
+        }))
+        .send()
+    };
+
+    let done = complete(&http).await.expect("complete");
+    assert_eq!(done.status(), 200);
+    let done: Value = done.json().await.expect("body");
+    assert_eq!(done["status"], json!("succeeded"));
+    assert!(done["messageId"].is_null(), "{done}");
+    assert!(done["seq"].is_null(), "{done}");
+
+    let run = Uuid::parse_str(&run_id).expect("uuid");
+    let status: String = sqlx::query_scalar("SELECT status::text FROM agent_run WHERE id = $1")
+        .bind(run)
+        .fetch_one(&su)
+        .await
+        .expect("run status");
+    assert_eq!(status, "succeeded", "the run still ends normally");
+    let answered: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM message WHERE workspace_id = $1 AND author_member_id = $2",
+    )
+    .bind(tenant.workspace)
+    .bind(agent)
+    .fetch_one(&su)
+    .await
+    .expect("count");
+    assert_eq!(answered, 0, "no placeholder bubble");
+    let billed: i64 = sqlx::query_scalar("SELECT count(*) FROM usage_ledger WHERE run_id = $1")
+        .bind(run)
+        .fetch_one(&su)
+        .await
+        .expect("count");
+    assert_eq!(billed, 1, "the empty run is still billed once");
+    let rail = rail_frames(&su, tenant.workspace).await;
+    assert!(
+        rail.iter()
+            .any(|frame| frame["data"]["payload"]["phase"] == json!("done")),
+        "the rail is told the turn ended: {rail:?}"
+    );
+
+    let replay = complete(&http).await.expect("replay");
+    assert_eq!(replay.status(), 200, "a replay answers the same");
+    let replay: Value = replay.json().await.expect("body");
+    assert!(replay["messageId"].is_null(), "{replay}");
+}

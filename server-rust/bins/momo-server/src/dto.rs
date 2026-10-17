@@ -2463,8 +2463,9 @@ pub struct AgentGatewayUsageDto {
 pub struct AgentGatewayCompleteResponse {
     pub status: &'static str,
     pub run_id: String,
-    pub message_id: String,
-    pub seq: i64,
+    /// #4017 — `null` when the run succeeded with no text (no message written).
+    pub message_id: Option<String>,
+    pub seq: Option<i64>,
 }
 
 // ---------------------------------------------------------------------------

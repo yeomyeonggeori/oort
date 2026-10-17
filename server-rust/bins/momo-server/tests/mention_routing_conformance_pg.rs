@@ -2381,3 +2381,179 @@ async fn b13_5_a_group_channel_without_a_mention_starts_nothing() {
     assert_eq!(runs[0].1, agent);
     assert_eq!(runs[0].3["addressing"], json!("mention"));
 }
+
+// ---------------------------------------------------------------------------
+// #4017 — 「ㅎㅇ」 then 「반가」 in a 1:1 DM is one turn, not two
+// ---------------------------------------------------------------------------
+
+async fn audit_count(su: &PgPool, workspace: Uuid, action: &str) -> usize {
+    audit_actions(su, workspace)
+        .await
+        .into_iter()
+        .filter(|candidate| candidate == action)
+        .count()
+}
+
+/// **A second bare DM message before pickup joins the waiting turn.**
+///
+/// Two quick bubbles are one utterance to the person. While the DM rule's turn
+/// is still unclaimed, the second message must start no run and no job, write
+/// one `agent.dm.coalesced` audit row, and ride in the waiting job's
+/// `recent_messages` — so the single answer reads both. Once a consumer has
+/// claimed the turn, the next message gets a turn of its own.
+///
+/// Goes red if the coalesce is removed (two runs), if it stops refreshing the
+/// job snapshot (the second message is missing from `recent_messages`), or if
+/// it ignores the claim (a message sent mid-turn is swallowed).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn s4017_1_a_second_dm_message_before_pickup_joins_the_waiting_turn() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let agent = seed_agent(&su, &tenant, "hermes", false).await;
+
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, &tenant).await;
+    let dm = open_dm(&http, &base, &token, &tenant, agent).await;
+
+    send_in_channel(&http, &base, &token, &tenant, dm, Uuid::new_v4(), "ㅎㅇ").await;
+    send_in_channel(&http, &base, &token, &tenant, dm, Uuid::new_v4(), "반가").await;
+
+    let runs = runs_for(&su, tenant.workspace).await;
+    assert_eq!(runs.len(), 1, "two bubbles, one turn: {runs:?}");
+    assert_eq!(runs[0].3["addressing"], json!("dm_implicit"));
+    let jobs = agent_jobs_for(&su, tenant.workspace).await;
+    assert_eq!(jobs.len(), 1, "one run, one job: {jobs:?}");
+    let recent = jobs[0].4["recent_messages"].to_string();
+    assert!(
+        recent.contains("ㅎㅇ") && recent.contains("반가"),
+        "the waiting job reads both messages: {recent}"
+    );
+    assert_eq!(
+        audit_count(&su, tenant.workspace, "agent.dm.coalesced").await,
+        1,
+        "the fold is auditable"
+    );
+    assert_eq!(
+        audit_count(&su, tenant.workspace, "agent.mention.queued").await,
+        1,
+        "only the first message queued a turn"
+    );
+
+    // The turn is claimed and answered once…
+    let worker = worker(Arc::new(MockChatProvider::echo())).await;
+    let stats = worker.drain_once().await.expect("drain");
+    assert_eq!((stats.claimed, stats.answered), (1, 1), "{stats:?}");
+    assert_eq!(messages_by_in(&su, &tenant, dm, agent).await.len(), 1);
+
+    // …and a message after the pickup is a new turn, not swallowed.
+    send_in_channel(&http, &base, &token, &tenant, dm, Uuid::new_v4(), "또 있어").await;
+    let runs = runs_for(&su, tenant.workspace).await;
+    assert_eq!(runs.len(), 2, "after pickup a new turn starts: {runs:?}");
+}
+
+/// A claimed (leased) turn is underway: the next DM message must not be folded
+/// into a job nobody will re-read. Separate from the test above because here
+/// the claim is a gateway-style lease on a still-`pending` row — the shape a
+/// hosted runtime leaves.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn s4017_2_a_leased_dm_turn_is_not_folded_into() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let agent = seed_agent(&su, &tenant, "hermes", false).await;
+
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, &tenant).await;
+    let dm = open_dm(&http, &base, &token, &tenant, agent).await;
+
+    send_in_channel(&http, &base, &token, &tenant, dm, Uuid::new_v4(), "ㅎㅇ").await;
+    sqlx::query(
+        "UPDATE outbox SET lease_owner = gen_random_uuid(), lease_acquired_at = now(), \
+                lease_expires_at = now() + interval '5 minutes' \
+          WHERE workspace_id = $1 AND kind = 'agent_job'",
+    )
+    .bind(tenant.workspace)
+    .execute(&su)
+    .await
+    .expect("lease the job");
+    send_in_channel(&http, &base, &token, &tenant, dm, Uuid::new_v4(), "반가").await;
+
+    let runs = runs_for(&su, tenant.workspace).await;
+    assert_eq!(runs.len(), 2, "a leased turn is underway: {runs:?}");
+    assert_eq!(
+        audit_count(&su, tenant.workspace, "agent.dm.coalesced").await,
+        0
+    );
+}
+
+/// An explicit `@mention` inside the DM is its own turn — it may carry routing
+/// the queued turn never had — and a group DM or channel still needs a mention.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn s4017_3_a_mention_is_never_folded_and_a_group_dm_needs_one() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let agent = seed_agent(&su, &tenant, "hermes", false).await;
+    let other = seed_agent(&su, &tenant, "atlas", false).await;
+
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, &tenant).await;
+    let dm = open_dm(&http, &base, &token, &tenant, agent).await;
+
+    send_in_channel(&http, &base, &token, &tenant, dm, Uuid::new_v4(), "ㅎㅇ").await;
+    send_in_channel(
+        &http,
+        &base,
+        &token,
+        &tenant,
+        dm,
+        Uuid::new_v4(),
+        "@hermes 반가",
+    )
+    .await;
+    let runs = runs_for(&su, tenant.workspace).await;
+    assert_eq!(runs.len(), 2, "a named call keeps its own turn: {runs:?}");
+    assert_eq!(runs[1].3["addressing"], json!("mention"));
+
+    // A group DM (three members) starts nothing without a mention.
+    let group = seed_dm(&su, &tenant, tenant.human, agent).await;
+    join_channel_to(&su, &tenant, group, other).await;
+    send_in_channel(
+        &http,
+        &base,
+        &token,
+        &tenant,
+        group,
+        Uuid::new_v4(),
+        "다들 안녕",
+    )
+    .await;
+    assert_eq!(
+        runs_for(&su, tenant.workspace).await.len(),
+        2,
+        "a group DM still needs a mention"
+    );
+}
+
+async fn join_channel_to(su: &PgPool, tenant: &Tenant, channel: Uuid, member: Uuid) {
+    sqlx::query("INSERT INTO membership (workspace_id, channel_id, member_id) VALUES ($1, $2, $3)")
+        .bind(tenant.workspace)
+        .bind(channel)
+        .bind(member)
+        .execute(su)
+        .await
+        .expect("join channel");
+}
