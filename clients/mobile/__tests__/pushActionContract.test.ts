@@ -240,6 +240,14 @@ describe('처리기가 지키는 규율', () => {
     );
     expect(adapter).toContain('UIApplication.shared.beginBackgroundTask(withName: name, expirationHandler: expiration)');
     expect(adapter).toContain('UIApplication.shared.endBackgroundTask(');
+    // 어댑터는 UIKit 이 준 것을 그대로 돌려준다: 받은 식별자(`.invalid` 이면 nil)를, 끝낼 때는 받은 토큰을. 가짜 토큰을
+    // 돌려주고 호출을 미루거나(`DispatchQueue.main.async`) 다른 식별자로 끝내는 어댑터는 시간 잡기를 헛돌게 한다 —
+    // sim-check 는 이 어댑터를 못 돌리므로(UIKit) 글자로 고정한다 (보안 검수 3차 Low 2).
+    const adapterCode = code(adapter);
+    expect(adapterCode).toMatch(/let id = Self\.onMain \{\s*UIApplication\.shared\.beginBackgroundTask\(withName: name, expirationHandler: expiration\)\s*\}/);
+    expect(adapterCode).toContain('return id == .invalid ? nil : id.rawValue');
+    expect(adapterCode).toContain('UIApplication.shared.endBackgroundTask(UIBackgroundTaskIdentifier(rawValue: token))');
+    expect(adapterCode).not.toMatch(/\.async\b|\basyncAfter\b|\bTask\b|\basync\b|\bawait\b/);
     // 작업 이음새와 알림 이음새가 코어/잡 파일의 프로토콜이다.
     expect(code(JOB)).toMatch(/protocol MomoPushActionBackgroundTasks: Sendable/);
     expect(code(JOB)).toMatch(/protocol MomoPushActionNotifying: Sendable/);

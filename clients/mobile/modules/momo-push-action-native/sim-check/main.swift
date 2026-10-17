@@ -299,8 +299,12 @@ do {
     "a 200 whose JSON has no status is unclear")
   check(C.classify(httpStatus: 200, body: receipt("pending"), direction: .approve) == .failed(.unclearAnswer),
     "a 200 whose status is not a verdict is unclear")
-  check(C.classify(httpStatus: 200, body: receipt("expired"), direction: .approve) == .failed(.unclearAnswer),
-    "a 200 that says expired is unclear (the server answers that with a 409)")
+  // The first call of a key that finds the approval settled is a 409; a RETRY of that key is answered the
+  // stored receipt with a 200 (the server checks idempotency first), so a 200 can say expired or cancelled.
+  check(C.classify(httpStatus: 200, body: receipt("expired"), direction: .approve) == .alreadySettled(.expired),
+    "a 200 replaying an expired receipt says the approval expired")
+  check(C.classify(httpStatus: 200, body: receipt("cancelled"), direction: .reject) == .alreadySettled(.cancelled),
+    "a 200 replaying a cancelled receipt says it was cancelled")
   for status in [201, 202, 204, 206, 299] {
     check(C.classify(httpStatus: status, body: receipt("approved"), direction: .approve) == .failed(.unclearAnswer),
       "a \(status) is not the route's answer: unclear, whatever it carries")
@@ -643,6 +647,8 @@ do {
     intent(userInfo: payload(workspace: "abcdefab-1234-4abc-8def-abcdefabcde0")), session: letteredSession)
   check(letteredOther == .failed(.otherWorkspace) && tlo.requests.isEmpty,
     "and one id apart is another workspace")
+  let (replayedExpiry, _) = await decide(intent(), answer: .success((200, receipt("expired"))))
+  check(replayedExpiry == .alreadySettled(.expired), "the whole decision reports a replayed expiry as already settled")
   let (noReceipt, _) = await decide(intent(), answer: .success((200, Data("<html>".utf8))))
   check(noReceipt == .failed(.unclearAnswer), "a 200 that is not a receipt is not reported as a decision")
   let (offline, _) = await decide(intent(), answer: .failure(URLError(.notConnectedToInternet)))
@@ -946,6 +952,18 @@ final class HeldTransport: MomoPushActionTransport, @unchecked Sendable {
   var sends: Int { lock.lock(); defer { lock.unlock() }; return sendCount }
 }
 
+/// `waitForCompletion` with a deadline: a job that never finishes FAILS a check instead of hanging the run.
+func finished(_ job: MomoPushActionJob, within seconds: Double = 10) async -> Bool {
+  let done = Counter()
+  Task {
+    await job.waitForCompletion()
+    done.value = 1
+  }
+  let deadline = Date().addingTimeInterval(seconds)
+  while Date() < deadline && done.value == 0 { try? await Task.sleep(nanoseconds: 2_000_000) }
+  return done.value == 1
+}
+
 func eventually(timeout: TimeInterval = 5, _ condition: () -> Bool) async -> Bool {
   let deadline = Date().addingTimeInterval(timeout)
   while Date() < deadline {
@@ -979,13 +997,31 @@ struct JobRig {
 }
 
 do {
+  // The clock already ran out: a decision begun on a cancelled task sends nothing.
+  let gate = OpenGate()
+  let transport = FakeTransport(.success((200, receipt("approved"))))
+  let decider = MomoPushActionDecider(
+    credentials: FakeCredentials(session: MomoPushActionSession.decode(sessionJSON()), secret: secret),
+    transport: transport, nowMs: { 1_000_000_000_000 })
+  let work = Task { () -> MomoPushActionOutcome in
+    await gate.wait()
+    return await decider.decide(intent())
+  }
+  work.cancel()
+  gate.open()
+  let outcome = await work.value
+  check(outcome == .failed(.timeLimit) && transport.requests.isEmpty,
+    "a decision begun on a cancelled task sends nothing and is reported as running out of time")
+}
+
+do {
   // the answer comes back first
   let rig = JobRig()
   rig.transport.answer(.success((200, receipt("approved"))))
   rig.job.start()
   check(rig.events.all.first == "begin", "the background task is taken inside start(), before anything is awaited")
   check(rig.tasks.beginNames == ["oort.push-action.decision"], "exactly one task, with its name")
-  await rig.job.waitForCompletion()
+  check(await finished(rig.job), "the job finishes")
   check(
     rig.events.all == ["begin", "send", "apply:승인했어요 · 그록봇", "applied", "end:41"],
     "begin, THEN the request, then the one line, and only after the line is placed the task is given back")
@@ -997,7 +1033,7 @@ do {
   let rig = JobRig(intent(.reject))
   rig.transport.answer(.success((403, receipt("opens_in_app"))))
   rig.job.start()
-  await rig.job.waitForCompletion()
+  check(await finished(rig.job), "the job finishes")
   check(
     rig.events.all == ["begin", "send", "apply:거절하지 못했어요", "applied", "end:41"],
     "a refusal is a line and an end of the task, the same as a success")
@@ -1007,7 +1043,7 @@ do {
   // nothing to send: the task is still taken and still given back
   let rig = JobRig(intent(), session: nil)
   rig.job.start()
-  await rig.job.waitForCompletion()
+  check(await finished(rig.job), "the job finishes")
   check(
     rig.events.all == ["begin", "apply:승인하지 못했어요", "applied", "end:41"] && rig.transport.sends == 0,
     "no token: no request, one line, the task given back")
@@ -1017,7 +1053,7 @@ do {
   // an unreadable notification: the same
   let rig = JobRig(intent(userInfo: ["aps": [:]]))
   rig.job.start()
-  await rig.job.waitForCompletion()
+  check(await finished(rig.job), "the job finishes")
   check(rig.events.all == ["begin", "apply:승인하지 못했어요", "applied", "end:41"] && rig.transport.sends == 0,
     "an unreadable payload: no request, one line, the task given back")
 }
@@ -1028,7 +1064,7 @@ do {
   rig.job.start()
   check(await eventually { rig.transport.isWaiting }, "the request is in flight")
   rig.tasks.expire()
-  await rig.job.waitForCompletion()
+  check(await finished(rig.job), "the job finishes")
   check(
     rig.events.all == ["begin", "send", "post:결과를 확인하지 못했어요", "end:41"],
     "when time runs out the line is posted without waiting, then the task is given back, in that order")
@@ -1051,7 +1087,7 @@ do {
   check(rig.notifier.posted.isEmpty, "the expiry does not write a second line over the first")
   check(rig.events.count("end:41") == 1, "but it does give the task back before it returns")
   gate.open()
-  await rig.job.waitForCompletion()
+  check(await finished(rig.job), "the job finishes")
   check(
     rig.events.all == ["begin", "send", "apply:승인했어요 · 그록봇", "end:41", "applied"],
     "and when the line finishes the task is not ended again")
@@ -1062,7 +1098,7 @@ do {
   let rig = JobRig()
   rig.transport.answer(.success((200, receipt("approved"))))
   rig.job.start()
-  await rig.job.waitForCompletion()
+  check(await finished(rig.job), "the job finishes")
   let before = rig.events.all
   rig.tasks.expire()
   check(rig.events.all == before, "an expiration after the end changes nothing (no second line, no second end)")
@@ -1074,7 +1110,7 @@ do {
   rig.tasks.refuse = true
   rig.transport.answer(.success((200, receipt("approved"))))
   rig.job.start()
-  await rig.job.waitForCompletion()
+  check(await finished(rig.job), "the job finishes")
   check(
     rig.events.all == ["begin", "send", "apply:승인했어요 · 그록봇", "applied"],
     "a refused task: the request still goes, the line is still placed, and nothing is ended that was never taken")
@@ -1087,7 +1123,7 @@ do {
   let rig = JobRig()
   rig.tasks.expireInsideBegin = true
   rig.job.start()
-  await rig.job.waitForCompletion()
+  check(await finished(rig.job), "the job finishes")
   check(
     rig.events.all == ["begin", "post:결과를 확인하지 못했어요", "end:41"],
     "an expiry inside begin: one line, the task given back the moment there is one, and no request after the clock")
@@ -1101,7 +1137,7 @@ do {
   rig.job.start()
   check(await eventually { rig.transport.isWaiting }, "the 거절 is in flight")
   rig.tasks.expire()
-  await rig.job.waitForCompletion()
+  check(await finished(rig.job), "the job finishes")
   check(rig.notifier.posted.first?.text == "결과를 확인하지 못했어요",
     "an expired 거절 also says the result is unknown, not 「거절하지 못했어요」")
 }
@@ -1111,7 +1147,7 @@ do {
   let rig = JobRig()
   rig.transport.answer(.failure(URLError(.networkConnectionLost)))
   rig.job.start()
-  await rig.job.waitForCompletion()
+  check(await finished(rig.job), "the job finishes")
   check(
     rig.events.all == ["begin", "send", "apply:결과를 확인하지 못했어요", "applied", "end:41"],
     "a connection lost after the request left: the line says the result is unknown, and the task is given back")

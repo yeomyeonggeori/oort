@@ -1,4 +1,4 @@
-import type {NotificationResponse} from 'expo-notifications';
+import type {NotificationRequest, NotificationResponse} from 'expo-notifications';
 
 import {
   PUSH_CATEGORY,
@@ -136,7 +136,16 @@ export function parsePushEnvelope(payload: unknown): PushEnvelope | null {
  * 것은 이 앱뿐이고, 원격 입력이 로컬 입력으로 둔갑하는 길은 없어야 한다.
  */
 export function pushPayloadOf(response: NotificationResponse): unknown {
-  const request = response.notification.request;
+  return pushPayloadOfRequest(response.notification.request);
+}
+
+/**
+ * 같은 규칙을, 응답이 아니라 알림 센터에 **배달돼 있는** 알림에 쓴다 (`approvalNotifications.ts`).
+ * 결정된 승인의 알림을 걷을 때 처리기가 올린 결과 줄(트리거 없음, 원문은 `content.data.origin`)도
+ * 그 승인의 것으로 알아봐야 한다 — 안 그러면 앱에서 마무리한 뒤에도 「눌러서 앱에서 마무리해
+ * 주세요」가 잠금 화면에 남는다.
+ */
+export function pushPayloadOfRequest(request: NotificationRequest): unknown {
   const trigger = request.trigger as {payload?: unknown} | null;
   if (trigger?.payload !== undefined) {
     return trigger.payload;

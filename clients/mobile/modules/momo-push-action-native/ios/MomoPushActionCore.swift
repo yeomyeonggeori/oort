@@ -329,14 +329,20 @@ enum MomoPushActionClassifier {
     switch httpStatus {
     case 200:
       // The server's own receipt (`decision_receipt`, always with a `status`) is what
-      // makes this a decision. A 200 with no readable verdict (a proxy's page, a
-      // changed body) says nothing about the ledger, so it is not reported as one.
-      guard let ledger, ledger == .approved || ledger == .rejected else {
-        return .failed(.unclearAnswer)
+      // makes this an answer. A 200 with no readable status (a proxy's page, a changed
+      // body) says nothing about the ledger, so it is not reported as one.
+      guard let ledger else { return .failed(.unclearAnswer) }
+      switch ledger {
+      case .approved, .rejected:
+        // The ledger can only contradict the button here if the server is wrong;
+        // saying what it holds is still the one thing that cannot mislead.
+        return ledger == direction.ledgerStatus ? .decided(direction) : .alreadySettled(ledger)
+      case .expired, .cancelled:
+        // A REPLAY of a key whose first call found the approval settled: the server
+        // answers the stored receipt with a 200 (`decide_in_tx`, idempotency first), and
+        // the stored receipt says what happened to the approval.
+        return .alreadySettled(ledger)
       }
-      // The ledger can only contradict the button here if the server is wrong;
-      // saying what it holds is still the one thing that cannot mislead.
-      return ledger == direction.ledgerStatus ? .decided(direction) : .alreadySettled(ledger)
     case 201...299: return .failed(.unclearAnswer)
     case 409:
       if let ledger { return .alreadySettled(ledger) }
@@ -464,6 +470,12 @@ struct MomoPushActionDecider: Sendable {
         decisionID: decisionID
       )
     else { return .failed(.badRequest) }
+
+    // Never start a request on a job whose clock has already run out: the line for that
+    // is written, the background task is given back, and a request begun now would be
+    // sent after the process may be suspended. (The check and the send are not atomic;
+    // the transport's own cancellation covers what slips between them.)
+    if Task.isCancelled { return .failed(.timeLimit) }
 
     do {
       let answer = try await transport.send(request)

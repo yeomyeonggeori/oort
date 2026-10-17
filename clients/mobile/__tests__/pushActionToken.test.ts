@@ -32,9 +32,16 @@ function reply(status: number, body: unknown) {
   });
 }
 
+let warn: jest.SpyInstance;
+
 beforeEach(() => {
   mockFetch.mockReset();
   mockSession.access = 'access-token-1';
+  warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+});
+
+afterEach(() => {
+  warn.mockRestore();
 });
 
 describe('토큰 받기', () => {
@@ -107,6 +114,26 @@ describe('토큰 받기', () => {
     reply(200, {token: 'tok', workspaceId: WS, ...fields});
 
     expect(await mintPushActionToken()).toBeNull();
+  });
+
+  it('거절한 응답은 어느 필드가 문턱에 걸렸는지 **이름만** 남긴다 — 서버가 칸 하나를 이미 썼다', async () => {
+    reply(200, {token: 'secret-token-value', expiresAtMs: 1e20, ttlSeconds: 1e12, workspaceId: WS});
+
+    expect(await mintPushActionToken()).toBeNull();
+    expect(warn).toHaveBeenCalledTimes(1);
+    const line = String(warn.mock.calls[0][0]);
+    expect(line).toContain('expiresAtMs');
+    expect(line).toContain('ttlSeconds');
+    expect(line).not.toContain('token,');
+    expect(line).not.toContain('secret-token-value');
+  });
+
+  it('받은 응답은 조용하다 (정상이면 경고가 없다)', async () => {
+    reply(200, {token: 'tok', expiresAtMs: NOW, ttlSeconds: 21_600, workspaceId: WS});
+
+    await mintPushActionToken();
+
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it('문턱 바로 안쪽(수명 일주일)은 받는다 — 막는 것은 터무니없는 값뿐이다', async () => {

@@ -2,6 +2,7 @@ import {requireOptionalNativeModule} from 'expo-modules-core';
 import {DEFAULT_ACTION_IDENTIFIER} from 'expo-notifications';
 
 import {PUSH_ACTION, PUSH_ACTION_NATIVE_MODULE} from '../src/push/contract';
+import {approvalNotificationIds} from '../src/push/approvalNotifications';
 import {parsePushEnvelope, pushPayloadOf} from '../src/push/envelope';
 import {nativeApprovalHandlerAttached} from '../src/push/native';
 import {handlePushResponse} from '../src/push/notifications';
@@ -233,5 +234,55 @@ describe('처리기가 올린 한 줄짜리 로컬 알림을 누르면 카드로
 
     expect(pushPayloadOf(response)).toEqual(payload());
     expect(tapArrival(response, WS)?.kind).toBe('target');
+  });
+});
+
+// =============================================================================
+// 결정된 승인의 알림 걷기(#3926 `approvalNotifications.ts`)가 처리기의 결과 줄도 알아본다.
+//
+// 처리기가 올린 줄은 로컬 알림이라 푸시 트리거가 없고 원문이 `content.data.origin` 에 있다. 걷기가
+// 트리거의 원문만 읽으면 실패 줄(「…마무리해 주세요」)이 앱에서 마무리한 뒤에도 잠금 화면에 남는다.
+// =============================================================================
+describe('결정된 승인의 알림 걷기는 결과 줄도 그 승인의 것으로 안다', () => {
+  const OTHER_APPROVAL = '66666666-6666-4666-8666-666666666666';
+
+  /** 알림 센터에 배달된 알림: `getPresentedNotificationsAsync` 가 돌려주는 모양. */
+  const delivered = (identifier: string, request: {trigger: unknown; data?: unknown}) =>
+    ({
+      date: 0,
+      request: {identifier, content: {title: 't', data: request.data ?? null}, trigger: request.trigger},
+    }) as never;
+
+  it('트리거 없는 결과 줄이 content.data.origin 으로 그 승인에 묶이고, 다른 승인의 줄은 그대로다', () => {
+    const center = [
+      delivered('push-1', {trigger: {type: 'push', payload: payload()}}),
+      delivered('result-line', {trigger: null, data: {origin: payload()}}),
+      delivered('other-approval-line', {
+        trigger: null,
+        data: {origin: payload({momo: {approval_id: OTHER_APPROVAL}})},
+      }),
+      delivered('message-line', {
+        trigger: null,
+        data: {origin: payload({aps: {category: 'momo.message'}, momo: {reason: 'dm', approval_id: undefined}})},
+      }),
+    ];
+
+    expect(approvalNotificationIds(center, APPROVAL)).toEqual(['push-1', 'result-line']);
+  });
+
+  it('원격 푸시는 트리거의 원문만 본다 — content.data.origin 으로 다른 승인의 것인 척할 수 없다', () => {
+    const center = [
+      delivered('spoof', {
+        trigger: {type: 'push', payload: payload({momo: {approval_id: OTHER_APPROVAL}})},
+        data: {origin: payload()},
+      }),
+    ];
+
+    expect(approvalNotificationIds(center, APPROVAL)).toEqual([]);
+  });
+
+  it('원문이 없는 줄은 걷지 않는다 (무엇인지 모르는 것을 지우지 않는다)', () => {
+    expect(approvalNotificationIds([delivered('bare', {trigger: null})], APPROVAL)).toEqual([]);
+    expect(approvalNotificationIds([delivered('junk', {trigger: null, data: {origin: 42}})], APPROVAL)).toEqual([]);
   });
 });

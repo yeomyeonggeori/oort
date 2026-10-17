@@ -34,6 +34,33 @@ export const PUSH_ACTION_TOKEN_PATH = '/v1/auth/push-action-token';
  */
 const MAX_TTL_SECONDS = 7 * 24 * 60 * 60;
 
+/** 응답에서 폰이 놓아도 되는 값이 아닌 필드의 이름들. 값은 보지 않고 이름만 돌려준다. */
+function rejectedFields(body: Partial<MintedPushActionToken>): string[] {
+  const rejected: string[] = [];
+  if (typeof body.token !== 'string' || body.token.length === 0) {
+    rejected.push('token');
+  }
+  if (
+    typeof body.expiresAtMs !== 'number' ||
+    !Number.isSafeInteger(body.expiresAtMs) ||
+    body.expiresAtMs <= 0
+  ) {
+    rejected.push('expiresAtMs');
+  }
+  if (
+    typeof body.ttlSeconds !== 'number' ||
+    !Number.isSafeInteger(body.ttlSeconds) ||
+    body.ttlSeconds <= 0 ||
+    body.ttlSeconds > MAX_TTL_SECONDS
+  ) {
+    rejected.push('ttlSeconds');
+  }
+  if (typeof body.workspaceId !== 'string' || body.workspaceId.length === 0) {
+    rejected.push('workspaceId');
+  }
+  return rejected;
+}
+
 /**
  * 토큰을 받는다. **어떤 실패에도 null** 이다 — 오프라인, 401(access 토큰이 회전하는
  * 사이), 403(좁은 토큰으로 부른 경우), 409(계열이 아직 없는 세션), 429(세션당 살아 있는
@@ -60,26 +87,20 @@ export async function mintPushActionToken(): Promise<MintedPushActionToken | nul
   }
   try {
     const body = (await response.json()) as Partial<MintedPushActionToken>;
-    if (
-      typeof body.token !== 'string' ||
-      body.token.length === 0 ||
-      typeof body.expiresAtMs !== 'number' ||
-      !Number.isSafeInteger(body.expiresAtMs) ||
-      body.expiresAtMs <= 0 ||
-      typeof body.ttlSeconds !== 'number' ||
-      !Number.isSafeInteger(body.ttlSeconds) ||
-      body.ttlSeconds <= 0 ||
-      body.ttlSeconds > MAX_TTL_SECONDS ||
-      typeof body.workspaceId !== 'string' ||
-      body.workspaceId.length === 0
-    ) {
+    const rejected = rejectedFields(body);
+    if (rejected.length > 0) {
+      // 서버는 이미 이 세션 계열의 칸 하나를 썼다(계열당 살아 있는 토큰 4개). 서버의 수명이 바뀌어 이
+      // 문턱에 걸리기 시작하면 칸이 조용히 소진되므로, **필드 이름만** 남긴다 — 값(토큰)은 적지 않는다.
+      console.warn(`[push] push-action token response rejected (${rejected.join(', ')})`);
       return null;
     }
+    // `rejectedFields` has checked every one of these; only the four known fields are kept.
+    const minted = body as MintedPushActionToken;
     return {
-      token: body.token,
-      expiresAtMs: body.expiresAtMs,
-      ttlSeconds: body.ttlSeconds,
-      workspaceId: body.workspaceId,
+      token: minted.token,
+      expiresAtMs: minted.expiresAtMs,
+      ttlSeconds: minted.ttlSeconds,
+      workspaceId: minted.workspaceId,
     };
   } catch {
     return null;

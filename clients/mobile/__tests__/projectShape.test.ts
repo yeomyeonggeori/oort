@@ -193,6 +193,20 @@ function swiftCode(source: string): string {
         out += '""';
         continue;
       }
+      // An extended regex literal `#/…/#` (any number of `#`): its body may hold `//` or a
+      // quote, which would otherwise be taken for a comment or a string and hide the code after it.
+      if (c === '#') {
+        let hashes = 0;
+        while (source[i + hashes] === '#') hashes += 1;
+        if (source[i + hashes] === '/') {
+          const closer = '/' + '#'.repeat(hashes);
+          i += hashes + 1;
+          while (i < source.length && !source.startsWith(closer, i)) i += 1;
+          i += closer.length;
+          out += '/**/';
+          continue;
+        }
+      }
       if (untilParen) {
         if (c === '(') depth += 1;
         if (c === ')') {
@@ -241,6 +255,14 @@ describe('Swift comment and string removal used by the export-compliance guard (
     );
     expect(code).toContain('f(""');
     expect(code).toContain('let c = AES.GCM.seal(m)');
+  });
+
+  it('does not let a regex literal hide the code after it', () => {
+    const code = swiftCode(
+      ['let r = #/a//b"/#; let c = AES.GCM.seal(m)', 'let q = ##/x/#y/##; import CommonCrypto'].join('\n'),
+    );
+    expect(code).toContain('let c = AES.GCM.seal(m)');
+    expect(code).toContain('import CommonCrypto');
   });
 });
 
@@ -684,7 +706,7 @@ describe('what the upload declares stays true of the code (#2568)', () => {
     // import (`#import`/`#include <CommonCrypto/…>`), a CommonCrypto cipher call
     // (`CCCrypt`, `CCCryptor…`) or a Security-framework key encryption call.
     const nativeCipher =
-      /\bimport\s+(?:CryptoKit|CommonCrypto)\b|#\s*(?:import|include)\s*<CommonCrypto\b|\bCCCrypt(?:or\w*)?\b|\bSecKeyEncrypt\b|\bSecKeyCreateEncryptedData\b/;
+      /\bimport\s+(?:(?:typealias|struct|class|enum|protocol|let|var|func)\s+)?(?:CryptoKit|CommonCrypto)\b|#\s*(?:import|include)\s*<CommonCrypto\b|\bCCCrypt(?:or\w*)?\b|\bSecKeyEncrypt\b|\bSecKeyCreateEncryptedData\b/;
     const native = [
       'ios/MomoMobile',
       'ios/NotificationService',
@@ -721,11 +743,13 @@ describe('what the upload declares stays true of the code (#2568)', () => {
   // count; an interpolated expression does). A cipher whose name is on neither list still
   // has to be spotted by a person, which is why the name list is broad.
   const CRYPTO_NAMES =
-    /\b(?:CC[A-Z]\w*|Sec[A-Z]\w*|kSec\w*|AES\w*|ChaCha\w*|HMAC|HKDF|PBKDF\w*|Curve25519|X25519|Ed25519|P256|P384|P521|SymmetricKey|SealedBox|HPKE|KEM\w*|XWing\w*|MLKEM\w*|MLDSA\w*|Insecure|SecureEnclave|SharedSecret|KeyAgreement|SHA1|SHA384|SHA512|MD5|Nonce|Kyber\w*|Dilithium\w*)\b/;
+    /\b(?:CC[A-Z]\w*|Sec[A-Z]\w*|kSec\w*|AES\w*|ChaCha\w*|HMAC|HKDF|PBKDF\w*|Curve25519|X25519|Ed25519|P256|P384|P521|SymmetricKey|SealedBox|HPKE|KEM\w*|XWing\w*|MLKEM\w*|MLDSA\w*|Insecure|SecureEnclave|SharedSecret|KeyAgreement|MD5|Nonce|Kyber\w*|Dilithium\w*|SLH\w*)\b|\bSHA(?!256\b)\w*/;
+  // Ways to reach a C crypto symbol by NAME, which the identifier list cannot see (the name is a string).
+  const SYMBOL_BACKDOORS = /@_silgen_name|@_cdecl|@_extern|\bdlsym\b|\bdlopen\b/;
   const importsOf = (code: string): string[] =>
     [
       ...code.matchAll(
-        /^[ \t]*(?:@\w+(?:\([^)]*\))?[ \t]+)*(?:(?:public|internal|package|private|fileprivate)[ \t]+)?import[ \t]+(?:(?:typealias|struct|class|enum|protocol|let|var|func)[ \t]+)?([\w.]+)/gm,
+        /(?:^|;)[ \t]*(?:@\w+(?:\([^)]*\))?[ \t]+)*(?:(?:public|internal|package|private|fileprivate)[ \t]+)?import[ \t]+(?:(?:typealias|struct|class|enum|protocol|let|var|func)[ \t]+)?([\w.]+)/gm,
       ),
     ]
       .map(match => match[1])
@@ -736,7 +760,8 @@ describe('what the upload declares stays true of the code (#2568)', () => {
   const breaksAllowlist = (code: string): boolean =>
     JSON.stringify(importsOf(code)) !== JSON.stringify(['CryptoKit', 'Foundation']) ||
     !shaUses(code).every(use => /^SHA256\.hash\(/.test(use)) ||
-    CRYPTO_NAMES.test(code);
+    CRYPTO_NAMES.test(code) ||
+    SYMBOL_BACKDOORS.test(code);
 
   it('keeps that declaration true: the decision key only HASHES (#3931)', () => {
     const code = swiftCode(readFileSync(DECISION_KEY, 'utf8'));
@@ -746,12 +771,17 @@ describe('what the upload declares stays true of the code (#2568)', () => {
     expect(shaUses(code).length).toBeGreaterThan(0);
     expect(shaUses(code).every(use => /^SHA256\.hash\(/.test(use))).toBe(true);
     expect(code.match(CRYPTO_NAMES)?.[0]).toBeUndefined();
+    expect(code.match(SYMBOL_BACKDOORS)?.[0]).toBeUndefined();
     expect(breaksAllowlist(code)).toBe(false);
 
     // No other file in the module may import a crypto module at all.
     const moduleFiles = nativeFiles(join(APP_ROOT, 'modules/momo-push-action-native'));
     expect(
-      moduleFiles.filter(file => /\bimport\s+(?:CryptoKit|CommonCrypto)\b/.test(swiftCode(readFileSync(file, 'utf8')))),
+      moduleFiles.filter(file =>
+        /\bimport\s+(?:(?:typealias|struct|class|enum|protocol|let|var|func)\s+)?(?:CryptoKit|CommonCrypto)\b/.test(
+          swiftCode(readFileSync(file, 'utf8')),
+        ),
+      ),
     ).toEqual([DECISION_KEY]);
   });
 
@@ -770,6 +800,12 @@ describe('what the upload declares stays true of the code (#2568)', () => {
     ['SHA-512', 'func probe(d: Data) { _ = SHA512.hash(data: d) }'],
     ['an incremental SHA-256 hasher', 'func probe() { var hasher = SHA256(); hasher.update(data: Data()) }'],
     ['a submodule import', '@_exported import CryptoKit.Foo'],
+    ['an import after a semicolon on the same line', 'let x = 1; import CommonCrypto'],
+    ['an import after a regex literal', 'let r = #/a//b/#; import CommonCrypto'],
+    ['SHA3', 'func probe(d: Data) { _ = SHA3_256.hash(data: d) }'],
+    ['SLH-DSA', 'func probe() { _ = SLHDSA.self }'],
+    ['a C crypto symbol reached by name', '@_silgen_name("CCHmac") func probe()'],
+    ['dlsym', 'let probe = dlsym(nil, "CCHmac")'],
   ])('the guard sees %s appended to the file', (_name, appended) => {
     const real = readFileSync(DECISION_KEY, 'utf8');
     expect(breaksAllowlist(swiftCode(`${real}\n${appended}\n`))).toBe(true);
