@@ -19,10 +19,10 @@ import '../src/boot/coreHost';
 
 import {CONFIRM_GUARD_MS} from '../src/features/inbox/ApprovalDecision';
 import {resetAgentWorking} from '../src/features/agents/workingSignal';
-import {DISPLAY_GRACE_MS} from '../src/realtime/connectionDisplay';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+import {dropSocketPastDisplayGrace} from './fixtures/displayGrace';
 
 // =============================================================================
 // 「멈춰라」 — 사람이 도는 실행을 세운다 (goal RN-C1, ADR-0132 D1).
@@ -473,12 +473,8 @@ describe('중단을 권하지 않는 자리', () => {
     await openTurn();
     expect(screen.getByTestId(ARM)).toBeTruthy();
 
-    await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 15));
-      client().__emit('disconnected', {});
-      // 표시 유예(#2751)보다 긴 끊김이어야 「끊김」이다. 짧은 재연결은 알리지 않는다.
-      await new Promise(resolve => setTimeout(resolve, DISPLAY_GRACE_MS + 50));
-    });
+    // 표시 유예(#2751)보다 긴 끊김이어야 「끊김」이다. 짧은 재연결은 알리지 않는다.
+    await dropSocketPastDisplayGrace(() => client().__emit('disconnected', {}));
 
     // 마지막으로 확인된 상태를 보고 있는 것이고, 그 실행은 이미 끝났을 수 있다.
     // 끊긴 화면에서 「중단」을 권하는 것은 무엇을 멈추는지 모르는 채 누르게 하는 것.

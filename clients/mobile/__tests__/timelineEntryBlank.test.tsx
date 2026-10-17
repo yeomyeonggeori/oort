@@ -8,6 +8,7 @@ import type {FlatList} from 'react-native';
 
 import type {ApprovalGate} from '../src/features/conversation/approvalGate';
 import {Timeline} from '../src/features/conversation/Timeline';
+import {installAppClock} from './fixtures/fakeClock';
 import {SessionProvider} from '../src/session/useSession';
 
 // =============================================================================
@@ -463,14 +464,22 @@ async function enter(layout: Layout) {
 async function rounds(count: number) {
   for (let round = 0; round < count; round += 1) {
     await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 60));
+      await jest.advanceTimersByTimeAsync(60);
     });
   }
 }
 
+beforeEach(() => {
+  // 진입 수렴은 시간으로 도는 목록의 타이머(150ms 정적·50ms 라운드)이고, 네이티브 이중도 다음 틈을
+  // `setTimeout(0)` 으로 흉내 낸다. 시험이 기다리는 것은 CPU 가 아니라 그 시간이다 — 실제 시계로
+  // 자면 각 시험이 2.1~2.3s 를 자고(CPU 는 0.05~0.1s) 부하가 늘려 줄 수 있는 것은 나머지뿐이다.
+  installAppClock();
+});
+
 afterEach(() => {
   cleanup();
   jest.restoreAllMocks();
+  jest.useRealTimers();
 });
 
 describe('긴 첫 페이지 + 스레드·승인 행 — 목록이 비지 않는다 (#2586)', () => {
@@ -489,7 +498,7 @@ describe('긴 첫 페이지 + 스레드·승인 행 — 목록이 비지 않는�
     fireEvent(screen.getByTestId('timeline-list'), 'scrollBeginDrag');
     await act(async () => {
       native.drag(0);
-      await new Promise(resolve => setTimeout(resolve, 60));
+      await jest.advanceTimersByTimeAsync(60);
     });
     expect(native.visibleRoles()).toEqual(expect.arrayContaining([1, 2, 3]));
     // 그리고 그 자리에 둔다 — 끝으로 도로 끌어내리지 않는다.
@@ -568,7 +577,7 @@ describe('먼 전송 — 방금 보낸 내 메시지가 창 안에 선다 (#2586
     fireEvent(screen.getByTestId('timeline-list'), 'scrollBeginDrag');
     await act(async () => {
       native.drag(400);
-      await new Promise(resolve => setTimeout(resolve, 60));
+      await jest.advanceTimersByTimeAsync(60);
     });
     expect(native.end - native.offset).toBeGreaterThan(BEFORE.viewport); // 먼 전송이다
 
@@ -608,7 +617,7 @@ describe('먼 전송 — 방금 보낸 내 메시지가 창 안에 선다 (#2586
     fireEvent(screen.getByTestId('timeline-list'), 'scrollBeginDrag');
     await act(async () => {
       native.drag(400);
-      await new Promise(resolve => setTimeout(resolve, 60));
+      await jest.advanceTimersByTimeAsync(60);
     });
 
     const sent: Layout = {...BEFORE, cells: [...BEFORE.cells, SENT_H]};
