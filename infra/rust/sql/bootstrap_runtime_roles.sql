@@ -290,6 +290,17 @@ BEGIN
   END IF;
   IF to_regclass('public.push_token') IS NOT NULL THEN
     GRANT SELECT ON TABLE push_token TO momo_notifier;
+    -- ADR-0204 D9 / #3930: APNs 410 / BadDeviceToken / DeviceTokenNotForTopic
+    -- invalidate the token (`UPDATE push_token SET invalidated_at = now(),
+    -- updated_at = now() WHERE id = $1 AND workspace_id = $2 AND invalidated_at IS
+    -- NULL`, settled with the dispatch receipt). Two COLUMNS, never the table: the
+    -- notifier must not be able to rewrite `apns_token`, `member_id` or `device_id`.
+    -- The WHERE columns are covered by the table-level SELECT above. The dev file
+    -- hands the notifier every verb on every table, so only the production-role
+    -- suite (scripts/verify_notifier_prod_roles.sh) can see this line go missing.
+    -- Column shape (no `ON TABLE`): the doctor's table parser must not read it as a
+    -- table grant; scripts/tests/test_notifier_role_grants.sh judges it per column.
+    GRANT UPDATE (invalidated_at, updated_at) ON push_token TO momo_notifier;
   END IF;
   IF to_regclass('public.message') IS NOT NULL THEN
     GRANT SELECT, INSERT, UPDATE ON TABLE message TO momo_notifier;
