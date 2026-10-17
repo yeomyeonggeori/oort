@@ -18615,8 +18615,9 @@ components:
             server-side: `mention_member_ids` (recomputed from the body),
             `momo.stream` (the streaming staleness marker) and
             `momo.harnessRefine` (ADR-0158 — send the `harnessRefine` block
-            instead). Because the map is flat, a structured block cannot be sent
-            through it at all.
+            instead) and `answers_message_id` (ADR-0204 D8 — the message a run's
+            closing line answers, written only by the server). Because the map
+            is flat, a structured block cannot be sent through it at all.
         runId:
           type: string
           format: uuid
