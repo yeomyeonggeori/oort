@@ -47,6 +47,7 @@
     "capture:attachment": "npm run build && ATTACH_GATE_SHOTS=1 node gates/gate-attachment.mjs",
     "build:design": "tsc -b && vite build --mode design",
     "capture:design": "npm run build:design && node scripts/capture-screens.mjs",
+    "capture:oort-loader": "VITE_MOMO_BOOT_RESTORE_BUDGET_MS=60000 vite build --outDir artifacts/dist-oort-loader --emptyOutDir && DIST_DIR=artifacts/dist-oort-loader node scripts/capture-oort-loader.mjs",
     "capture:overlay-layers": "npm run build && npm run build:ade-gate && node scripts/capture-overlay-layers.mjs",
     "capture:usage": "node scripts/capture-usage.mjs",
     "capture:eventsub": "npm run build && node scripts/capture-eventsub.mjs",

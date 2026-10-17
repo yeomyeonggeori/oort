@@ -26,6 +26,10 @@ import {resetAgentWorking} from '../src/features/agents/workingSignal';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+import {
+  installAppClock,
+  SHELL_WAIT_TEST_TIMEOUT_MS,
+} from './fixtures/fakeClock';
 
 jest.mock('@momo/core/features/capabilities/serverSurfaces', () => {
   const actual = jest.requireActual(
@@ -338,7 +342,7 @@ async function deliver(
   delayMs: number,
 ): Promise<void> {
   await act(async () => {
-    await new Promise(resolve => setTimeout(resolve, delayMs));
+    await jest.advanceTimersByTimeAsync(delayMs);
     agentSub(channelId, memberId)?.__emit('publication', {data});
   });
 }
@@ -424,7 +428,10 @@ async function openBothTurns(): Promise<void> {
   );
 }
 
+jest.setTimeout(SHELL_WAIT_TEST_TIMEOUT_MS);
+
 beforeEach(() => {
+  installAppClock();
   mmkvStore.clear();
   __resetSessionStore();
   __resetServerBaseCache();
@@ -440,6 +447,7 @@ afterEach(() => {
   queryClient = null;
   resetAgentWorking();
   jest.restoreAllMocks();
+  jest.useRealTimers();
 });
 
 describe('요약 한 줄 — 두 레일의 합집합을 센다', () => {
@@ -1003,7 +1011,7 @@ describe('「대화로」 — 그 작업을 낳은 줄까지', () => {
     );
     await waitFor(() => expect(releaseBuild).not.toBeNull());
     await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await jest.advanceTimersByTimeAsync(50);
     });
     // 첫 페이지가 오는 중이다. 그 메시지가 있는지 없는지는 아직 모른다.
     expect(jumpNoticeText()).toBeNull();
@@ -1031,7 +1039,7 @@ describe('「대화로」 — 그 작업을 낳은 줄까지', () => {
     });
     await waitFor(() => expect(jumpTargetOf()?.messageId).toBe(rootId));
     await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await jest.advanceTimersByTimeAsync(50);
     });
     expect(jumpNoticeText()).toBeNull();
   });

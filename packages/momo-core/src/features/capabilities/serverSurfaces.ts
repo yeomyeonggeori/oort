@@ -70,6 +70,74 @@ export function serverSaysAbsent(error: unknown): boolean {
   return error instanceof ApiError && ABSENT_STATUSES.includes(error.status);
 }
 
+// -----------------------------------------------------------------------------
+// 쓰기 표면의 탐지: 「앱 설치」 (ADR-0113 증보 2026-10-15 P3, #3860)
+//
+// 읽기 표면은 위 두 겹이면 된다: 목록을 읽다가 404가 오면 그것은 「경로가 없다」이고
+// 접으면 끝이다. **쓰기는 그렇지 않다.** 설치·권한 요청의 404는 「그 앱이 없다」나
+// 「그 권한이 없다」일 수도 있어서(`pluginActionErrorMessage`가 404를 그렇게 읽는다),
+// 눌러 본 뒤의 404로 경로의 유무를 판정하면 없는 경로를 없는 앱이라고 말하게 된다.
+// 게다가 눌러 본 뒤라는 시점 자체가 문제다: 버튼은 이미 사용자 앞에 서 있었다.
+//
+// 그래서 **누르기 전에, 아무것도 바꾸지 않는 요청으로** 묻는다. 설치·권한 경로는
+// POST와 DELETE로만 등록되고, Axum은 등록된 경로에 등록되지 않은 동사가 오면
+// 핸들러를 부르기도 전에 405를 돌려준다. 이 서버는 이미 그렇게 답한다
+// (`agent_port_transport.rs`의 GET·DELETE 405, #1223 전의 agent-runs 목록).
+// 경로가 아예 없으면 404다. 그래서 같은 GET 하나가 둘을 가른다:
+//
+//   405            경로가 서 있다.   → "present"
+//   404 · 501      경로가 없다.       → "absent"
+//   그 밖의 모두    답이 경로에 대한 진술이 아니다(2xx·401·403·429·5xx·네트워크) → "unknown"
+//
+// 2xx를 「있다」로 세지 않는 이유: 이 경로에 GET이 생겼거나 앞단이 대신 답한 것이고,
+// 어느 쪽이든 설치 경로가 서 있다는 증거가 아니다. 모든 경로에 200을 돌려주는 가짜
+// 서버(게이트·캡처 하네스)가 설치를 연 것으로 오판하는 길도 이렇게 막는다.
+//
+// **405를 `serverSaysAbsent`와 반대로 읽는다.** 거기서 405는 「그 동사로는 없다」이고,
+// 여기서는 일부러 그 동사를 틀려서 보낸 것이라 405가 「경로는 있다」다. 그 함수를
+// 여기 쓰면 답이 뒤집힌다. 이 쪽은 반대 방향의 거짓말도 막는다: 모르면(`unknown`)
+// 닫힌 채로 둔다. 눌렀더니 404인 버튼이 이 판정이 막으려는 바로 그 화면이다.
+//
+// 경로 둘(설치, 권한)이 **모두** 서 있을 때만 present다. 하나만 서 있으면 한쪽 버튼은
+// 눌러도 404이므로 absent로 접는다(「앱 설치」는 설치와 권한 변경을 함께 말한다).
+//
+// ---- 엔진 랜딩 시 재확인: 2026-10-17에 쟀다 (설치·권한 네 경로가 라우터에 들어온 날) ----
+// 엔진 #3965·#3967이 네 경로를 올렸고 동기화 PR #3998(edc0949a2)에서 처음 한 트리에 만났다.
+// 그날 살아 있는 서버(격리 PG18, `momo_app` 역할로 띄운 `momo-server`)에 아래 셋을 쟀다.
+// 상태·헤더 원문과 행 수 변화, 사보타주 결과는 docs/planning/ENGINE_HANDOFF.md의 X-P3에 있다.
+//   ① GET …/install, …/grants, …/grants/{scope}가 모두 405다(Allow: POST,DELETE / POST /
+//      DELETE). 핸들러가 불리기 전이라 감사·설치·권한·투영 행이 하나도 생기지 않았다(행 수와
+//      튜플 카운터 모두 0 변화). 라우터에도 이 경로들에 GET이 얹혀 있지 않다.
+//   ② 405는 인증 뒤, 역할 검사 앞에서 난다. 로그인 없음은 401이다(405가 아니다). 그 401에도
+//      Allow 헤더가 실려 있어서, 인증 층이 405 대체 응답을 감싸고 있다는 뜻이다. 로그인한
+//      소유자·관리자·일반 멤버는 모두 405이고, 역할 검사(`require_admin`)는 핸들러 안이라
+//      GET에서는 서지 않는다. 같은 경로에 POST를 보내면 일반 멤버가 403(`workspace admin
+//      required`)을 받는다. 그래서 열려야 하는 사람이 닫히는 일은 없고, 세션이 끝난 사람만
+//      401로 닫힌다(안전한 쪽). 프로브의 모양은 바뀌지 않았다.
+//   ③ CORS를 켠 서버에서 허용 출처(`tauri://localhost`, `http://tauri.localhost`)의 405에
+//      `access-control-allow-origin`과 `vary: origin`이 달린다. 웹뷰가 보내는 사전 요청
+//      (authorization, content-type)도 204로 통과한다. 허용 목록 밖의 출처는 405여도 헤더가
+//      없어 웹뷰가 상태를 읽지 못하고, 프로브는 unknown으로 닫힌다(안전한 쪽).
+// 어긋나면 고칠 것은 프로브의 모양이다. 화면 문구가 아니다. 이 서버의 층이 바뀌는 날(axum
+// 업그레이드, 인증·CORS 층의 위치 변경, 경로 앞에 새 층)은 같은 셋을 다시 잰다.
+// -----------------------------------------------------------------------------
+
+export type PluginInstallVerdict = "present" | "absent" | "unknown";
+
+/**
+ * 설치·권한 경로에 GET을 보낸 상태 코드들로 「앱 설치」의 유무를 판정한다.
+ *
+ * 코드는 경로마다 하나다(설치, 권한). 아직 답이 없으면(`undefined`) 모르는 것이다.
+ */
+export function pluginInstallVerdict(
+  statuses: readonly number[] | undefined
+): PluginInstallVerdict {
+  if (statuses === undefined || statuses.length === 0) return "unknown";
+  // 하나라도 없다고 하면 반쪽이다. 반쪽은 열지 않는다.
+  if (statuses.some((status) => status === 404 || status === 501)) return "absent";
+  return statuses.every((status) => status === 405) ? "present" : "unknown";
+}
+
 export type SurfaceId =
   | "workstreams"
   | "workConsole"
@@ -79,6 +147,7 @@ export type SurfaceId =
   | "huddles"
   | "agentRunHistory"
   | "plugins"
+  | "pluginInstall"
   | "teamMemory"
   | "messageSearch"
   | "hostedAgentPairing";
@@ -324,11 +393,53 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
   plugins: {
     id: "plugins",
     label: "앱",
-    provided: false,
-    absentReason: "이 서버는 아직 앱 설치를 받지 않습니다.",
-    fallback: "에이전트는 앱 없이도 채널에서 바로 일할 수 있습니다.",
+    // ADR-0113 증보 P-U1의 「앱 보기」다. 라벨은 그대로 「앱」이다: 사용자는 이 목적지를
+    // 「앱」이라 부르고(AI 허브 외부 연결의 줄 이름, 위 N4 규칙), 「앱 보기」는 설치와
+    // 갈라 읽기만 말하려는 표면 이름이라 화면에 나가지 않는다.
+    //
+    // 2026-10-16, 이 표에서 뒤집힌 세 번째 줄이다(#3861). 앞 값(false)은 참이었다:
+    // 읽기 둘이 라우터에 없었다. 이 칸이 말하는 것은 **이 코드베이스의 서버가 경로를
+    // 싣는가**이고, 아직 배포되지 않은 서버에 붙으면 404가 와서 `serverSaysAbsent`
+    // 폴딩이 아래 문구를 쓴다(진입점도 그때 접힌다: AI 허브 외부 연결의 「앱」 줄).
+    provided: true,
+    absentReason: "이 서버는 아직 앱 목록을 보여주지 못해요.",
+    fallback: "에이전트는 앱 없이도 채널에서 바로 일할 수 있어요.",
     measured:
-      "GET …/plugins 및 install/grants 6경로: 라우터에 없음(404).",
+      "2026-10-16 실측(#3861, ADR-0113 증보 P-S1): server-rust/bins/momo-server/src/lib.rs에 " +
+      "읽기 둘이 등록됨. GET …/plugins(routes::plugins::list), " +
+      "GET …/plugins/{plugin}(routes::plugins::detail). 공식 네 앱만 답한다. " +
+      "직전 줄은 'GET …/plugins 및 install/grants 6경로: 라우터에 없음(404)'였고, " +
+      "설치·권한 네 경로는 아래 pluginInstall 줄로 갈랐다. 두 읽기가 정말 서 있는지는 " +
+      "clients/web의 pluginRoutes.test.ts가 라우터 소스를 읽어 못으로 박는다.",
+  },
+  pluginInstall: {
+    id: "pluginInstall",
+    label: "앱 설치",
+    // 정적 값은 거짓이다. 판정은 이 표가 아니라 **서버가 보여 준 사실**로 한다
+    // (`pluginInstallVerdict`): 설치·권한 경로에 GET을 보내 405면 서 있고 404면 없다.
+    // 쓰기는 읽기와 달리 404를 접는 폴딩이 못 한다. 설치 요청의 404는 「그 앱이 없다」
+    // 일 수도 있어서, 눌러 본 뒤에 판정하면 없는 경로를 없는 앱으로 말하게 된다.
+    // 표를 손으로 뒤집지 않는 것은 `workConsole` 줄과 같은 이유다.
+    provided: false,
+    absentReason: "이 서버는 아직 앱 설치를 받지 않아요.",
+    // 이 줄은 화면의 닫힌 컨트롤을 설명하는 유일한 문장이고, 세 경우에 모두 참이어야 한다:
+    // 서버에 경로가 없을 때, 서버가 아파서 모를 때, 이미 설치된 앱 옆에서. 그래서 「곧 열려요」
+    // 같은 예측을 하지 않고(클라이언트는 언제 열릴지 모른다) **이 화면이 지금 하는 일**만 말한다.
+    // 막히는 것은 설치만이 아니다: 해제와 내 권한 변경도 함께 말해야 설치된 앱 곁에서 거짓이 되지 않는다.
+    // (독립 design-review #3860 H1)
+    fallback: "지금은 앱 정보와 내 권한을 보기만 할 수 있어요. 설치와 해제, 권한 변경은 여기서 아직 할 수 없어요.",
+    measured:
+      "2026-10-17 실측(동기화 PR #3998, edc0949a2): 엔진 #3965·#3967이 쓰기 네 경로를 올렸다. " +
+      "server-rust/bins/momo-server/src/lib.rs에 POST·DELETE …/plugins/{plugin}/install, " +
+      "POST …/grants, DELETE …/grants/{scope}가 post·delete로만 등록됨(GET 없음). " +
+      "살아 있는 서버(격리 PG18, momo_app 역할)에 GET을 보낸 결과: 로그인한 소유자·관리자·" +
+      "일반 멤버는 install·grants·grants/{scope} 모두 405(Allow는 POST,DELETE / POST / DELETE), " +
+      "로그인 없음은 401. 핸들러가 불리기 전이라 감사·설치·권한·투영 행 변화 0. " +
+      "CORS를 켠 서버에서 허용 출처(tauri://localhost, http://tauri.localhost)의 405에 " +
+      "Access-Control-Allow-Origin·Vary 헤더가 달림. 직전 줄은 '라우터에 없음(404)'이었다. " +
+      "판정은 pluginInstallVerdict가 하고, 네 경로가 정말 post·delete로만 서 있는지는 " +
+      "clients/web의 pluginRoutes.test.ts가 라우터 소스를 읽어 못으로 박는다. " +
+      "원문과 사보타주는 docs/planning/ENGINE_HANDOFF.md의 X-P3.",
   },
   teamMemory: {
     id: "teamMemory",

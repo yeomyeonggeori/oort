@@ -398,11 +398,18 @@ describe("feed", () => {
     for (let i = 0; i < 600; i += 1) events.push(tool(i % 2 ? "read_file" : "bash", `step ${i}`));
     const m = model(events);
     vi.useRealTimers();
-    const t0 = performance.now();
+    // CPU time, not wall time. The budget exists to catch a render that stops being linear in the
+    // number of cards, and that shows up in the CPU the render burns. Wall time also contains however
+    // long this process waited for a core: measured on one machine, the same render took 158-180 ms
+    // idle and 342-505 ms with 36 CPU burners (2.2-3.2x) while its CPU time stayed 323-356 ms vs
+    // 394-410 ms (+15%). The 2 s limit is unchanged -- ~5x the loaded CPU figure -- so a quadratic
+    // regression (which grows the CPU time) still fails it, and a busy machine no longer does.
+    const cpuBefore = process.cpuUsage();
     render(m, { decide: null, reply: null });
-    const ms = performance.now() - t0;
+    const cpu = process.cpuUsage(cpuBefore);
+    const cpuMs = (cpu.user + cpu.system) / 1000;
     expect(host!.querySelectorAll('[data-testid="agent-tool-card"]')).toHaveLength(600);
-    expect(ms).toBeLessThan(2_000);
+    expect(cpuMs).toBeLessThan(2_000);
   });
 });
 

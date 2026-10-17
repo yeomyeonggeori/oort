@@ -190,8 +190,17 @@ export function agentsCard(input: {
 
 // ---- 외부 연결 ----------------------------------------------------------------
 
+/**
+ * 「앱」 줄의 읽기. 다른 줄과 달리 **서버가 그 줄을 싣지 않는** 경우가 있다: 앱 목록 경로가 없는
+ * 서버(404·405·501)다(#3860). 그것은 못 읽은 것(`error`)이 아니다. 「읽지 못했어요」는 사용자에게
+ * 다시 시도하라는 말이고, 이 서버는 몇 번을 다시 물어도 같은 답을 한다. 그래서 칩도 줄도 서지 않는다.
+ */
+export type AppsRead = Read<number> | { state: "absent" };
+
+export const READ_ABSENT: AppsRead = { state: "absent" };
+
 export interface ExternalInput {
-  apps: Read<number>;
+  apps: AppsRead;
   incoming: Read<number>;
   outgoing: Read<number>;
   externalAgents: Read<number>;
@@ -206,17 +215,21 @@ const EXTERNAL_KEYS: ReadonlyArray<[keyof ExternalInput, string]> = [
 
 export function externalCard(input: ExternalInput): HubCardView {
   const base = { ...head("external", "externalConnection"), linkLabel: COPY.openLink.external };
-  const chips: HubChip[] = EXTERNAL_KEYS.map(([key, name]): HubChip => {
+  // 서버가 싣지 않는 줄은 칩도 개수도 없다. 센 것의 집합에서 빠진다(못 읽은 줄과 다르다).
+  const reads = EXTERNAL_KEYS.flatMap(([key, name]): Array<[string, Read<number>]> => {
     const read = input[key];
+    return read.state === "absent" ? [] : [[name, read]];
+  });
+  const chips: HubChip[] = reads.map(([name, read]): HubChip => {
     if (read.state === "ok") return { text: `${name} ${read.value}`, tone: "neutral" };
     if (read.state === "denied") return { text: `${name} ${COPY.chip.operatorOnly}`, tone: "neutral" };
     if (read.state === "error") return { text: `${name} ${COPY.chip.readFailed}`, tone: "warn" };
     return { text: `${name} ${COPY.chip.checking}`, tone: "neutral" };
   });
-  const known = EXTERNAL_KEYS.map(([key]) => input[key]).filter(
-    (read): read is { state: "ok"; value: number } => read.state === "ok"
-  );
-  const complete = known.length === EXTERNAL_KEYS.length;
+  const known = reads
+    .map(([, read]) => read)
+    .filter((read): read is { state: "ok"; value: number } => read.state === "ok");
+  const complete = known.length === reads.length;
   const badge = complete ? COPY.count.items(known.reduce((sum, read) => sum + read.value, 0)) : null;
   return { ...base, badge, chips, note: null };
 }
