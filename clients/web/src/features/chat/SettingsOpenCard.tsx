@@ -11,7 +11,8 @@ import {
   settingsOpenTarget,
 } from "@momo/core/features/timeline/commandSuggest";
 import { Button } from "@/design/ui/button";
-import { isReachableSettingsSection } from "@/features/settings/settingsNav";
+import { useSurfaceProvidedPredicate } from "@/features/capabilities/useSurfaceProvided";
+import { reachableSettingsSections, resolveSettingsSection } from "@/features/settings/settingsNav";
 import type { CommandSuggestSlotProps } from "@/features/timeline/commandSuggestSlot";
 import { AiConnectSuggestion } from "./AiConnectCard";
 
@@ -44,19 +45,36 @@ export function CommandSuggestion(props: CommandSuggestSlotProps) {
   return <AiConnectSuggestion {...props} />;
 }
 
+/**
+ * 이 섹션이 **지금 이 빌드·이 서버에서** 도착할 수 있는가. 설정 라우트와 같은 판정(런타임
+ * 표면 판정 `useSurfaceProvidedPredicate`)을 쓴다 — 정적 표로 물으면 카드는 서는데 라우트가
+ * 그 섹션을 접어 프로필에 떨어지거나, 그 반대가 된다(#2780). 허브로 옮겨 간 옛 id
+ * (`plugins`)는 라우트가 허브로 바꿔 보내므로 늘 도착한다.
+ */
+function useSectionReachable(section: string | null): boolean {
+  const provided = useSurfaceProvidedPredicate();
+  if (section === null) return false;
+  const resolved = resolveSettingsSection(section);
+  if (resolved.kind === "ai-hub") return true;
+  if (resolved.kind === "unknown") return false;
+  return reachableSettingsSections(provided).some((item) => item.id === resolved.id);
+}
+
 export function SettingsOpenSuggestion({ card, viewerMemberId }: CommandSuggestSlotProps) {
   const navigate = useNavigate();
   const headingId = useId();
-  if (!isSurfaceProvided("settingsOpenCard")) return null;
   const section = card.section;
+  const reachable = useSectionReachable(section);
+  if (!isSurfaceProvided("settingsOpenCard")) return null;
+  // 모르는 section(깨진 제안)은 카드를 세우지 않는다: 행의 본문 글이 안내를 한다.
+  if (section === null) return null;
   const viewer = commandSuggestViewer(card, viewerMemberId, false);
-  // 깨진 제안(`degraded`)은 누구에게나 한 줄이다. 남에게도 한 줄이다.
-  if (viewer !== "target" || section === null) {
+  if (viewer !== "target") {
     return (
       <div
         className="ai-card mt-2 flex min-w-0 flex-col gap-2"
         data-testid="settings-suggest"
-        data-viewer={viewer === "target" ? "target-degraded" : "other"}
+        data-viewer="other"
       >
         <p
           className="flex min-w-0 items-center gap-2 rounded-lg bg-sheet px-3 py-2 text-meta text-ink-muted"
@@ -68,7 +86,7 @@ export function SettingsOpenSuggestion({ card, viewerMemberId }: CommandSuggestS
       </div>
     );
   }
-  if (!isReachableSettingsSection(section)) return null;
+  if (!reachable) return null;
   const initial = [...card.agentName.trim()][0]?.toUpperCase() ?? "";
   const label = settingsOpenLabel(section);
   return (

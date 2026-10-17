@@ -14,6 +14,7 @@ import {Sentence} from '../../design/atoms';
 import {usePalette, useStyles} from '../../design/theme';
 import {AI_CONNECT_ICON_SIZE, AI_CONNECT_ICONS} from '../../design/icons';
 import {CONV} from './convDesign';
+import {AI_SUGGEST} from './AiConnectSuggestion';
 
 // =============================================================================
 // 에이전트가 제안한 「설정 열기」 카드 — 폰 (U-S6 #3940, ADR-0201 v2 H6-4, 서버 #3939).
@@ -40,8 +41,10 @@ export function SettingsOpenSuggestion({
   const palette = usePalette();
   if (!isSurfaceProvided('settingsOpenCard')) return null;
   const section = card.section;
+  // 모르는 section(깨진 제안)은 카드를 세우지 않는다: 행의 본문 글이 안내를 한다.
+  if (section === null) return null;
   const viewer = commandSuggestViewer(card, viewerMemberId, false);
-  if (viewer !== 'target' || section === null) {
+  if (viewer !== 'target') {
     return (
       <View style={styles.wrap} testID="settings-suggest-other">
         <View style={styles.oneline} testID="settings-suggest-line">
@@ -102,15 +105,15 @@ function build(color: Palette) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: space.sm,
-      paddingVertical: 10,
+      paddingVertical: AI_SUGGEST.headPadY,
       paddingHorizontal: CONV.cardPad,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: color.border,
     },
     agentMark: {
-      width: 20,
-      height: 20,
-      borderRadius: 5.6,
+      width: AI_SUGGEST.agentMark,
+      height: AI_SUGGEST.agentMark,
+      borderRadius: AI_SUGGEST.agentMarkRadius,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: color.agentSurface,
@@ -120,16 +123,16 @@ function build(color: Palette) {
     section: {paddingHorizontal: CONV.cardPad, paddingVertical: space.sm},
     label: {fontSize: font.body, fontWeight: '600', color: color.text},
     note: {flexDirection: 'row', alignItems: 'flex-start', gap: space.sm, paddingTop: space.sm},
-    noteIcon: {marginTop: 1},
+    noteIcon: {marginTop: AI_SUGGEST.noteIconNudge},
     noteText: {flexShrink: 1, fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},
     icon: {width: AI_CONNECT_ICON_SIZE, height: AI_CONNECT_ICON_SIZE},
     oneline: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: space.sm,
-      paddingVertical: 7,
-      paddingHorizontal: 10,
-      borderRadius: 10,
+      paddingVertical: AI_SUGGEST.onelinePadY,
+      paddingHorizontal: AI_SUGGEST.onelinePadX,
+      borderRadius: AI_SUGGEST.onelineRadius,
       backgroundColor: color.sheet,
       minHeight: TOUCH_TARGET - space.md,
     },

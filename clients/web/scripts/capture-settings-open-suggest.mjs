@@ -250,36 +250,6 @@ async function login(page) {
   await page.getByTestId("channel-item").first().waitFor();
 }
 
-const PRESETS = [
-  { id: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1", format: "openai" },
-  { id: "anthropic", label: "Anthropic (Claude)", baseUrl: "https://api.anthropic.com/v1", format: "anthropic" },
-  { id: "xai", label: "xAI (Grok)", baseUrl: "https://api.x.ai/v1", format: "openai" },
-  { id: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", format: "openai" },
-];
-const KEY_LINK = {
-  schema: "momo.provider_link.v0", configured: true, source: "database", mode: "external-hermes",
-  baseUrl: "https://api.anthropic.com/v1", endpointLabel: "Anthropic", bearerConfigured: true,
-  bearerLast4: "7c1e", availability: "live", keyConfigured: true, updatedAtMs: Date.now() - 3 * 86_400_000,
-  diagnostics: [], credentialKind: "anthropic-key", presets: PRESETS,
-};
-const probe = (ok, reason) => ({
-  schema: "momo.provider_link.test.v0", ok, reason, source: "database", mode: "external-hermes",
-  endpointLabel: "Anthropic", checkedAtMs: Date.now(),
-});
-
-/** 팀 연결 대역. `testHold`가 있으면 확인 응답을 그 약속이 풀릴 때까지 붙든다. */
-function teamRoute({ link = KEY_LINK, test = probe(true), testHold = null, denied = false } = {}) {
-  return async (route, request, path) => {
-    if (denied) return json(route, { error: { code: "forbidden", message: "operator required" } }, 403);
-    if (path.endsWith("/test")) {
-      if (testHold) await testHold;
-      return json(route, test);
-    }
-    if (path.endsWith("/chain")) return json(route, { error: { code: "not_found", message: "none" } }, 404);
-    return json(route, link);
-  };
-}
-
 const outDir = resolve(webRoot, "captures/3940");
 
 async function scene(browser, { width, scheme, name, as, args, label, act, expectCard = true }) {
@@ -335,7 +305,7 @@ const SCENES = [
     },
   },
   { name: "other", as: SKY, args: { section: "notifications" }, expect: { viewer: "other", controls: 0 } },
-  { name: "unknown-section", as: SUNG, args: { section: "no-such-section" }, expect: { viewer: "other", controls: 0 } },
+  { name: "unknown-section", as: SUNG, args: { section: "no-such-section" }, expectCard: false, expect: { shown: false } },
   { name: "unreachable-updates", as: SUNG, args: { section: "updates" }, label: "업데이트 설정 열기", expectCard: false, expect: { shown: false } },
 ];
 

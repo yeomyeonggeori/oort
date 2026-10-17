@@ -3,6 +3,8 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message, RosterMember } from "@momo/core/lib/api";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
@@ -64,6 +66,32 @@ function cardFor(args: unknown, label = "알림 설정 열기") {
   return commandSuggestCard(message, directory)!;
 }
 
+const SESSION: SessionContextValue = {
+  session: {
+    accessToken: "access",
+    refreshToken: "refresh",
+    member: { id: HUMAN, workspaceId: "w", kind: "human", displayName: "곽성재", handle: "sj" },
+    realtimeWebSocketUrl: "wss://example.test/connection/websocket",
+  },
+  workspaceId: "w",
+  realtime: null,
+  connStatus: "connected",
+  logout: () => undefined,
+  replaceSessionMember: () => undefined,
+};
+
+/** 표면 판정 훅(`useSurfaceProvidedPredicate`)이 세션·쿼리 문맥을 요구한다. 호스트 목록은 못 받아 「없음」이다. */
+function Providers({ children }: { children: React.ReactNode }) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return (
+    <QueryClientProvider client={client}>
+      <SessionProvider value={SESSION}>
+        <MemoryRouter initialEntries={["/c/general"]}>{children}</MemoryRouter>
+      </SessionProvider>
+    </QueryClientProvider>
+  );
+}
+
 function Where() {
   const location = useLocation();
   return <output data-testid="where">{location.pathname + location.search}</output>;
@@ -71,7 +99,7 @@ function Where() {
 
 function mount(card: ReturnType<typeof cardFor>, viewer: string | undefined) {
   return render(
-    <MemoryRouter initialEntries={["/c/general"]}>
+    <Providers>
       <CommandSuggestion
         card={card}
         viewerMemberId={viewer}
@@ -80,7 +108,7 @@ function mount(card: ReturnType<typeof cardFor>, viewer: string | undefined) {
         rootId={undefined}
       />
       <Where />
-    </MemoryRouter>
+    </Providers>
   );
 }
 
@@ -111,11 +139,56 @@ describe("SettingsOpenSuggestion", () => {
     expect(screen.queryByRole("button")).toBeNull();
   });
 
-  it("모르는 section(깨진 제안)은 대상에게도 한 줄이고 버튼이 없다 — 글로 폴백", () => {
-    mount(cardFor({ section: "no-such-section" }), HUMAN);
-    expect(screen.getByTestId("settings-suggest").getAttribute("data-viewer")).toBe("other");
-    expect(screen.queryByRole("button")).toBeNull();
-    expect(screen.getByTestId("settings-suggest-line").textContent).toContain("「설정 열기」");
+  it("모르는 section(깨진 제안)은 누구에게도 카드가 서지 않는다 — 본문 글로 폴백", () => {
+    for (const viewer of [HUMAN, OTHER]) {
+      const { container, unmount } = mount(cardFor({ section: "no-such-section" }), viewer);
+      expect(container.querySelector("[data-testid='settings-suggest']")).toBeNull();
+      expect(screen.queryByRole("button")).toBeNull();
+      unmount();
+    }
+  });
+
+  it("plugins는 허브로 옮겨 간 옛 id라 늘 도착한다 — 설정 라우트로 보낸다", () => {
+    mount(cardFor({ section: "plugins" }, "앱 설정 열기"), HUMAN);
+    expect(screen.getByTestId("settings-suggest-label").textContent).toContain("앱 설정");
+    fireEvent.click(screen.getByTestId("settings-suggest-open"));
+    expect(screen.getByTestId("where").textContent).toContain("/settings?section=plugins");
+  });
+
+  it("서버가 표면을 싣지 않는 섹션(작업 호스트)은 대상에게도 카드가 서지 않는다", () => {
+    const real = surfaces.isSurfaceProvided;
+    vi.spyOn(surfaces, "isSurfaceProvided").mockImplementation((id) =>
+      id === "work" ? false : real(id)
+    );
+    const { container } = mount(cardFor({ section: "code" }, "실행 호스트 설정 열기"), HUMAN);
+    expect(container.querySelector("[data-testid='settings-suggest']")).toBeNull();
+  });
+
+  it("ai.connect 제안은 여전히 연결 카드 자리로 간다(분기가 settings.open만 가른다)", () => {
+    const message = {
+      id: "m2", channelId: "c1", seq: 2, hlcTs: 0, hlcCount: 0, authorMemberId: AGENT,
+      type: "text", body: "b", state: "sent", createdAtMs: 0,
+      props: {
+        [COMMAND_SUGGEST_PROP_KEY]: {
+          v: 1, command_id: "ai.connect", args: {}, for_member_id: HUMAN, label: "내 AI 계정 연결",
+        },
+      },
+    } as unknown as Message;
+    const card = commandSuggestCard(message, directory)!;
+    expect(card.commandId).toBe("ai.connect");
+    // settings 카드는 이 제안을 그리지 않는다(자기 testid가 없다).
+    const { container } = render(
+      <Providers>
+        <SettingsOpenSuggestion
+          card={card}
+          viewerMemberId={OTHER}
+          directory={directory}
+          channelId="c1"
+          rootId={undefined}
+        />
+      </Providers>
+    );
+    expect(container.querySelector("[data-testid='settings-suggest-label']")).toBeNull();
   });
 
   it("serverSurfaces가 꺼져 있으면(옛 서버) 카드가 서지 않는다", () => {
@@ -134,7 +207,7 @@ describe("SettingsOpenSuggestion", () => {
 
   it("SettingsOpenSuggestion을 직접 그려도 같은 카드다", () => {
     const direct = render(
-      <MemoryRouter>
+      <Providers>
         <SettingsOpenSuggestion
           card={cardFor({ section: "notifications" })}
           viewerMemberId={HUMAN}
@@ -142,7 +215,7 @@ describe("SettingsOpenSuggestion", () => {
           channelId="c1"
           rootId={undefined}
         />
-      </MemoryRouter>
+      </Providers>
     );
     expect(direct.getByTestId("settings-suggest")).toBeTruthy();
   });

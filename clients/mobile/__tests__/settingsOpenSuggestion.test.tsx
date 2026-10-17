@@ -100,10 +100,15 @@ describe('SettingsOpenSuggestion (phone)', () => {
     expect(screen.queryByTestId('settings-suggest-target')).toBeNull();
   });
 
-  it('모르는 section은 대상에게도 한 줄(글로 폴백)이다', () => {
-    render(<SettingsOpenSuggestion card={cardFor({section: 'nope'})} viewerMemberId={HUMAN} />);
-    expect(screen.queryByTestId('settings-suggest-target')).toBeNull();
-    expect(screen.getByTestId('settings-suggest-line')).toBeTruthy();
+  it('모르는 section(깨진 제안)은 누구에게도 카드가 서지 않는다 — 본문 글로 폴백', () => {
+    for (const viewer of [HUMAN, OTHER]) {
+      const view = render(
+        <SettingsOpenSuggestion card={cardFor({section: 'nope'})} viewerMemberId={viewer} />,
+      );
+      expect(screen.queryByTestId('settings-suggest-target')).toBeNull();
+      expect(screen.queryByTestId('settings-suggest-line')).toBeNull();
+      view.unmount();
+    }
   });
 
   it('serverSurfaces가 꺼져 있으면 카드가 서지 않는다', () => {

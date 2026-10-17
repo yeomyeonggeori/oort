@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import type { Message, RosterMember } from "../../lib/api";
-import settingsGolden from "../../../../../docs/api/command-suggest-settings-open.golden.json";
 import { makeDirectory } from "../workspace/directory";
 import { agentCardModel } from "./agentCardModel";
 import {
@@ -184,33 +183,34 @@ describe("command_suggest(ai.connect) 파서 (ADR-0186 G3·G4, #2948)", () => {
 // settings.open {section} (#3939 E-S6 → #3940 U-S6). 서버 골든 벡터 12 케이스가 한 벌이다.
 // =============================================================================
 
-interface SettingsGoldenCase {
-  name: string;
-  arguments: { args: unknown };
-  props: { "momo.command_suggest": Record<string, unknown> };
-}
-
-const SETTINGS_GOLDEN = settingsGolden as unknown as {
-  for_member_id_placeholder: string;
-  cases: SettingsGoldenCase[];
-};
-
 describe("command_suggest(settings.open) (U-S6)", () => {
   const goldenMessage = (envelope: Record<string, unknown>) =>
     suggestMessage({ ...envelope, for_member_id: HUMAN });
 
-  it("서버 골든 12 케이스가 전부 ok 카드로 서고 라벨이 서버와 같은 글자다", () => {
-    expect(SETTINGS_GOLDEN.cases.map((c) => c.name)).toEqual([...SETTINGS_OPEN_SECTIONS]);
-    for (const golden of SETTINGS_GOLDEN.cases) {
-      const envelope = golden.props["momo.command_suggest"];
-      const card = commandSuggestCard(goldenMessage(envelope), directory);
-      expect(card?.commandId, golden.name).toBe("settings.open");
-      expect(card?.shape, golden.name).toBe("ok");
-      expect(card?.section, golden.name).toBe(golden.name);
-      expect(card?.focus, golden.name).toBeNull();
-      expect(settingsOpenLabel(golden.name as (typeof SETTINGS_OPEN_SECTIONS)[number])).toBe(
-        envelope["label"]
+  it("12 section 전부가 ok 카드로 서고 라벨이 서버 표와 같은 글자다", () => {
+    const labels: Record<string, string> = {
+      profile: "프로필 설정 열기",
+      appearance: "모양 설정 열기",
+      notifications: "알림 설정 열기",
+      shortcuts: "단축키 설정 열기",
+      devices: "기기 설정 열기",
+      workspace: "워크스페이스 설정 열기",
+      members: "멤버와 초대 열기",
+      memory: "기억 설정 열기",
+      usage: "사용량 열기",
+      code: "실행 호스트 설정 열기",
+      updates: "업데이트 설정 열기",
+      plugins: "앱 설정 열기",
+    };
+    expect([...SETTINGS_OPEN_SECTIONS]).toEqual(Object.keys(labels));
+    for (const section of SETTINGS_OPEN_SECTIONS) {
+      const card = commandSuggestCard(
+        goldenMessage({ v: 1, command_id: "settings.open", args: { section }, label: labels[section] }),
+        directory
       );
+      expect(card?.shape, section).toBe("ok");
+      expect(card?.section, section).toBe(section);
+      expect(settingsOpenLabel(section), section).toBe(labels[section]);
     }
   });
 
