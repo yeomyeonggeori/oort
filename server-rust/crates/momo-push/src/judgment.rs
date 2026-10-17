@@ -43,6 +43,53 @@
 //!   fails any of these selects NO reason — like the idle card it must not fall
 //!   through to `dm`, so turning the switch off really silences it. Everyone else
 //!   in the channel is judged as for any message.
+//! * **An agent's answer to you (ADR-0204 D8, #3929)** — a run's closing line pushes
+//!   the person whose message the run answered: the final answer, the approval-expiry
+//!   result, the stall notice. "Answers" is a fact the line carries — `reply_to_id`
+//!   (the final answer, ADR-0148 rule 6) or `props.answers_message_id`
+//!   ([`momo_agent::PROP_ANSWERS_MESSAGE_ID`], the two lines a sweep writes) — and the
+//!   asker is the author of the message it names, in the same channel. Only an
+//!   **agent's** line that belongs to a **run** counts: a work-session card quotes the
+//!   owner's message too, but it has no run, and tool lines, rejection lines and
+//!   notices carry neither marker. The wire reason is the existing `mention`; the
+//!   asker is not pushed while they are reading the channel (the same 30 s
+//!   [`WORK_COMPLETE_FOREGROUND_WINDOW_SECS`] as the work reasons). In a DM the `dm`
+//!   arm has already answered, with its old rules: this arm is for everywhere else.
+//!
+//!   Everything else about the asker is the ordinary rules of a `mention`: a muted
+//!   channel silences it unless the asker kept 「멘션은 예외」, DND silences it, and a
+//!   person who left the channel is not a recipient at all (`left_at IS NULL` in the
+//!   recipients join). A *failed* run's closing line is an answer like any other — the
+//!   asker hears that it failed. A `type=work` run's requester is not this arm's
+//!   business: `work_run_done` sits above it, and a work run raised from the work
+//!   surface has no trigger message for the sweeps to point at, so its expiry and
+//!   stall lines carry no marker. An agent can name any message of the room in
+//!   `reply_to_id` when it sends over REST or the Agent Port (ADR-0148's quote); that
+//!   is no more reach than its `@mention` already has, and the line must still belong
+//!   to a run. Those REST sends (`send_message_with_mentions_in_tx`) record the quoted
+//!   author as *mentioned*, so they are judged by the explicit-mention arm above — with
+//!   no reading window — and never reach this one: only the worker's and the gateway's
+//!   sends (`send_message_in_tx`, which records no mentions) do. The two paths differ
+//!   in the window because ADR-0120 gives mentions none and D8 gives answers one.
+//!
+//!   **Known gap (independent review H1) — a streamed *worker* answer is judged once,
+//!   when it OPENS.** The in-process worker (`MessageStream`) writes one answer in two
+//!   steps: the opening slice is the INSERT — the only write the 011 trigger turns into
+//!   a candidate — and `commit_turn`'s closing slice is an UPDATE that enqueues
+//!   nothing. So the reading window is read against the *opening* slice, and the
+//!   finished answer is never judged: an asker who sent the question and put the phone
+//!   down within 30 s of the first words is held back, and then never told. (Not
+//!   affected: single-INSERT answers — the hosted gateway's `complete`, the team-AI
+//!   helper's sends, both sweeps' lines, a worker turn that never opened a stream — and
+//!   REST streamers, whose opening `POST` already names the quoted author as mentioned.)
+//!   The two `known_gap_h1_*` tests in `push_conformance_pg` pin this. Closing it needs
+//!   a candidate at the stream close and a window read at judgment time — a second
+//!   producer of `push_candidate` rows, which `OutboxKind::PushCandidate` and
+//!   `docs/architecture/overview.md` reserve for the 011 trigger — so it waits for a
+//!   decision rather than being decided here. (The window is also a decision in its
+//!   own right: ADR-0204 D8 writes it as 「30초 안에 움직였으면」, and a chat answer that
+//!   arrives within 30 s of the asker's own question — whose arrival moved their
+//!   cursor — is "reading" even without streaming. That is the ADR as written.)
 //! * **Mute (ADR-0124)** — the per-channel `notification_pref` row suppresses
 //!   every reason, mentions and approvals included. Read at judgment time; no
 //!   cache.
@@ -59,8 +106,12 @@
 //!   column — the presence write sets the pause in its own transaction
 //!   (「묶어」), so judgment still reads one ledger and never `member`.
 //!
-//! Reason precedence per member is `approval_request > mention > dm`, expressed
-//! by the `CASE` arm order below. Suppression precedence across the two ledgers
+//! Reason precedence per member is the `CASE` arm order below: the three work
+//! reasons (`resume_offer`, `work_session_idle`, `work_run_done` — each claims its
+//! message for the one person it names) > `approval_request` > `mention` > `dm` > an
+//! agent's answer to you. That last arm never outranks a mention or a DM, and only a
+//! person nothing else selected reaches it, so one message carries one reason.
+//! Suppression precedence across the two ledgers
 //! is `dnd > channel-mute(with mention exception) > deliver`, expressed by the
 //! `WHERE` clause: absence of a `notification_rule` row is `dnd=false,
 //! mention_overrides_mute=false`, which is the pre-증보 behaviour exactly.
@@ -87,6 +138,7 @@
 use std::collections::HashMap;
 
 use momo_agent::actions::opens_in_app;
+use momo_agent::PROP_ANSWERS_MESSAGE_ID;
 use momo_db::DbError;
 use serde_json::Value;
 use sqlx::{PgConnection, Row};
@@ -149,6 +201,12 @@ pub async fn judge_targets(
                   m.client_msg_id, \
                   m.created_at, \
                   m.root_id, \
+                  m.reply_to_id, \
+                  CASE WHEN m.props->>$5::text \
+                            ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' \
+                       THEN (m.props->>$5::text)::uuid END AS answers_message_id, \
+                  (SELECT au.kind::text FROM member au \
+                    WHERE au.workspace_id = $1 AND au.id = m.author_member_id) AS author_kind, \
                   c.kind::text AS channel_kind \
              FROM message m \
              JOIN channel c ON c.id = m.channel_id \
@@ -173,6 +231,16 @@ pub async fn judge_targets(
               AND EXISTS ( \
                 SELECT 1 FROM hosted_agent_connection hc \
                  WHERE hc.workspace_id = $1 AND hc.agent_member_id = r.agent_member_id) \
+         ), \
+         asked AS ( \
+           SELECT t.author_member_id AS asker_id \
+             FROM msg \
+             JOIN message t \
+               ON t.workspace_id = $1 \
+              AND t.channel_id = msg.channel_id \
+              AND t.id = COALESCE(msg.reply_to_id, msg.answers_message_id) \
+            WHERE msg.author_kind = 'agent' \
+              AND msg.run_id IS NOT NULL \
          ), \
          recipients AS ( \
            SELECT ms.member_id, \
@@ -239,6 +307,18 @@ pub async fn judge_targets(
                        WHERE lower(t.v) = lower(ms.member_id::text) \
                     ) THEN 'mention' \
                     WHEN (SELECT channel_kind FROM msg) = 'dm' THEN 'dm' \
+                    WHEN mem.id = (SELECT asker_id FROM asked) THEN \
+                      CASE WHEN NOT EXISTS ( \
+                            SELECT 1 FROM read_state seen \
+                             WHERE seen.workspace_id = $1 \
+                               AND seen.channel_id = (SELECT channel_id FROM msg) \
+                               AND seen.member_id = mem.id \
+                               AND seen.last_read_seq > 0 \
+                               AND ( seen.last_read_seq >= (SELECT seq FROM msg) \
+                                     OR seen.last_read_at >= (SELECT created_at FROM msg) \
+                                          - make_interval(secs => $4::double precision) ) \
+                            ) \
+                        THEN 'mention' END \
                     ELSE NULL \
                   END AS reason \
              FROM membership ms \
@@ -318,6 +398,7 @@ pub async fn judge_targets(
     .bind(message_id)
     .bind(WORK_COMPLETE_MIN_RAN_MS)
     .bind(WORK_COMPLETE_FOREGROUND_WINDOW_SECS)
+    .bind(PROP_ANSWERS_MESSAGE_ID)
     .fetch_all(&mut *conn)
     .await?;
 

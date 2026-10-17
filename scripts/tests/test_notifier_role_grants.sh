@@ -147,12 +147,15 @@ SCAN_SCOPE = [
             "end_stalled_run_in_tx",
             "lock_driver_runs_in_tx",
             "resume_runs_from_control_window_in_tx",
+            "run_trigger_message_in_tx",
         ],
         "why": (
             "approval_sweep.rs:169 end_parked_run_in_tx; "
             "run_stall_sweep.rs end_stalled_run_in_tx (ADR-0200 D1-4); "
             "control_window_sweep.rs:67 resume_runs_from_control_window_in_tx "
-            "(audit_log ⋈ work_control SELECT)."
+            "(audit_log ⋈ work_control SELECT); "
+            "approval_sweep.rs / run_stall_sweep.rs run_trigger_message_in_tx "
+            "(ADR-0204 D8, #3929: agent_run.trigger_message_id, stamped on the closing line)."
         ),
     },
     {
