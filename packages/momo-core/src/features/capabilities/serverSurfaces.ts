@@ -101,19 +101,25 @@ export function serverSaysAbsent(error: unknown): boolean {
 // 경로 둘(설치, 권한)이 **모두** 서 있을 때만 present다. 하나만 서 있으면 한쪽 버튼은
 // 눌러도 404이므로 absent로 접는다(「앱 설치」는 설치와 권한 변경을 함께 말한다).
 //
-// ---- 엔진 랜딩 시 재확인 (설치·권한 네 경로가 라우터에 들어오는 순간) ----------
-// 이 판정의 「없다」 쪽(404)만 실측됐다. 쓰기 경로가 아직 어느 브랜치에도 없기 때문이다.
-// 「있다」 쪽(405)은 Axum의 등록된 경로 규칙에 기댄 것이다. 랜딩 직후 살아 있는 서버
-// 한 대에 대고 아래 셋을 재고 결과를 ENGINE_HANDOFF에 적는다.
-//   ① GET …/install 과 GET …/grants 가 둘 다 405인가. 핸들러가 불리기 전이라
-//      아무것도 바뀌지 않아야 한다(감사 행·설치 행이 생기지 않는다).
-//   ② 경로 앞에 역할 검사 층이 있으면 일반 멤버는 405 대신 403을 받을 수 있다. 그러면
-//      판정은 unknown이 되고 화면은 닫힌 채 남는다(안전한 쪽). 열려야 하는 사람에게
-//      닫혀 있다면 고칠 것은 이 프로브의 모양이다. 지금의 인증 층(`auth::require_principal`)은
-//      `route_layer`라서 405가 인증 앞에서 나는지 뒤에서 나는지도 이때 함께 잰다.
-//   ③ CORS를 켠 서버(데스크탑 셸)에서도 405가 헤더를 달고 오는가. `cors.rs`는 허용된
-//      출처의 모든 응답에 헤더를 단다. 헤더가 없으면 상태를 읽을 수 없어 unknown이다.
-// 어긋나면 고칠 것은 프로브의 모양이다. 화면 문구가 아니다.
+// ---- 엔진 랜딩 시 재확인: 2026-10-17에 쟀다 (설치·권한 네 경로가 라우터에 들어온 날) ----
+// 엔진 #3965·#3967이 네 경로를 올렸고 동기화 PR #3998(edc0949a2)에서 처음 한 트리에 만났다.
+// 그날 살아 있는 서버(격리 PG18, `momo_app` 역할로 띄운 `momo-server`)에 아래 셋을 쟀다.
+// 상태·헤더 원문과 행 수 변화, 사보타주 결과는 docs/planning/ENGINE_HANDOFF.md의 X-P3에 있다.
+//   ① GET …/install, …/grants, …/grants/{scope}가 모두 405다(Allow: POST,DELETE / POST /
+//      DELETE). 핸들러가 불리기 전이라 감사·설치·권한·투영 행이 하나도 생기지 않았다(행 수와
+//      튜플 카운터 모두 0 변화). 라우터에도 이 경로들에 GET이 얹혀 있지 않다.
+//   ② 405는 인증 뒤, 역할 검사 앞에서 난다. 로그인 없음은 401이다(405가 아니다). 그 401에도
+//      Allow 헤더가 실려 있어서, 인증 층이 405 대체 응답을 감싸고 있다는 뜻이다. 로그인한
+//      소유자·관리자·일반 멤버는 모두 405이고, 역할 검사(`require_admin`)는 핸들러 안이라
+//      GET에서는 서지 않는다. 같은 경로에 POST를 보내면 일반 멤버가 403(`workspace admin
+//      required`)을 받는다. 그래서 열려야 하는 사람이 닫히는 일은 없고, 세션이 끝난 사람만
+//      401로 닫힌다(안전한 쪽). 프로브의 모양은 바뀌지 않았다.
+//   ③ CORS를 켠 서버에서 허용 출처(`tauri://localhost`, `http://tauri.localhost`)의 405에
+//      `access-control-allow-origin`과 `vary: origin`이 달린다. 웹뷰가 보내는 사전 요청
+//      (authorization, content-type)도 204로 통과한다. 허용 목록 밖의 출처는 405여도 헤더가
+//      없어 웹뷰가 상태를 읽지 못하고, 프로브는 unknown으로 닫힌다(안전한 쪽).
+// 어긋나면 고칠 것은 프로브의 모양이다. 화면 문구가 아니다. 이 서버의 층이 바뀌는 날(axum
+// 업그레이드, 인증·CORS 층의 위치 변경, 경로 앞에 새 층)은 같은 셋을 다시 잰다.
 // -----------------------------------------------------------------------------
 
 export type PluginInstallVerdict = "present" | "absent" | "unknown";
@@ -423,10 +429,17 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
     // (독립 design-review #3860 H1)
     fallback: "지금은 앱 정보와 내 권한을 보기만 할 수 있어요. 설치와 해제, 권한 변경은 여기서 아직 할 수 없어요.",
     measured:
-      "2026-10-16 실측(#3861 직후): POST/DELETE …/plugins/{plugin}/install, POST …/grants, " +
-      "DELETE …/grants/{scope}: 라우터에 없음(404). ADR-0113 증보 P3가 쓰기를 다음 단계로 " +
-      "미뤘다. 판정은 pluginInstallVerdict가 한다. 엔진이 네 경로를 올리면 " +
-      "clients/web의 pluginRoutes.test.ts가 빨개지며 이 프로브를 다시 재라고 요구한다.",
+      "2026-10-17 실측(동기화 PR #3998, edc0949a2): 엔진 #3965·#3967이 쓰기 네 경로를 올렸다. " +
+      "server-rust/bins/momo-server/src/lib.rs에 POST·DELETE …/plugins/{plugin}/install, " +
+      "POST …/grants, DELETE …/grants/{scope}가 post·delete로만 등록됨(GET 없음). " +
+      "살아 있는 서버(격리 PG18, momo_app 역할)에 GET을 보낸 결과: 로그인한 소유자·관리자·" +
+      "일반 멤버는 install·grants·grants/{scope} 모두 405(Allow는 POST,DELETE / POST / DELETE), " +
+      "로그인 없음은 401. 핸들러가 불리기 전이라 감사·설치·권한·투영 행 변화 0. " +
+      "CORS를 켠 서버에서 허용 출처(tauri://localhost, http://tauri.localhost)의 405에 " +
+      "Access-Control-Allow-Origin·Vary 헤더가 달림. 직전 줄은 '라우터에 없음(404)'이었다. " +
+      "판정은 pluginInstallVerdict가 하고, 네 경로가 정말 post·delete로만 서 있는지는 " +
+      "clients/web의 pluginRoutes.test.ts가 라우터 소스를 읽어 못으로 박는다. " +
+      "원문과 사보타주는 docs/planning/ENGINE_HANDOFF.md의 X-P3.",
   },
   teamMemory: {
     id: "teamMemory",

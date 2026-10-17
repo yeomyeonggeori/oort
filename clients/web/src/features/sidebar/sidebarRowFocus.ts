@@ -79,6 +79,29 @@ export function focusSidebarChannelRow(
 }
 
 /**
+ * 이 채널의 행이 사라진 뒤 캐럿이 갈 이웃 행의 채널 id (#3963 DM 닫기).
+ *
+ * 「옮겨간 행으로 넘긴다」(위)와 반대 방향의 같은 문제다: 닫은 DM 은 **없어지므로** 넘길 행이
+ * 없고, 그대로 두면 캐럿은 `<body>` 에 떨어져 사이드바로 돌아오는 데 수십 탭이 든다. 이웃을
+ * 고르는 규칙은 목록에서 항목을 지울 때의 관용이다 - **다음 행**(지운 자리로 올라온다), 없으면
+ * 이전 행. 이웃은 지우기 **전에** 잡아야 한다: 지운 뒤에는 DOM 에서 자리를 못 찾는다.
+ *
+ * 로빙의 정거장(`ROW_SELECTOR`)만 센다. 접힌 섹션의 행은 DOM 에 없으므로 자연히 빠진다.
+ */
+export function neighborSidebarChannelRowId(
+  root: ParentNode,
+  channelId: string
+): string | null {
+  const key = channelId.trim().toLowerCase();
+  const rows = Array.from(root.querySelectorAll<HTMLElement>(ROW_SELECTOR));
+  const index = rows.findIndex(
+    (row) => (row.dataset.channelId ?? "").trim().toLowerCase() === key
+  );
+  if (index < 0) return null;
+  return (rows[index + 1] ?? rows[index - 1])?.dataset.channelId ?? null;
+}
+
+/**
  * 다음 프레임에 넘긴다 (위 「왜 rAF 인가」).
  *
  * `requestAnimationFrame` 이 없는 곳(구형 웹뷰·서버 렌더)에서는 그냥 아무 일도

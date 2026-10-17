@@ -8,7 +8,8 @@
 //!     over every response, and a seeded `access_token` key is refused
 //!   ③ another workspace's install / grant rows never reach my catalog or my
 //!     policy (RLS), and neither does another member's grant (member-scoped)
-//!   ④ a caller who is no longer an active member gets 404, not a catalog
+//!   ④ a caller who is no longer an active member gets 404, not a catalog (and
+//!     403 on the P3 writes — `plugin_registry_write_conformance_pg.rs`)
 //!   ⑤ the bytes equal `server/Fixtures/plugin-wire/*.json`, which
 //!     `clients/web/src/lib/pluginApi.test.ts` feeds through the deployed core
 //!     parser (`pluginCatalogFromWire` / `pluginDetailFromWire`)
@@ -932,11 +933,11 @@ async fn a_revoked_grant_or_a_disabled_or_revoked_install_never_reaches_my_polic
     );
 }
 
-// ---- ④ membership + P3 boundary ------------------------------------------------
+// ---- ④ membership -----------------------------------------------------------------
 
 #[tokio::test]
 #[ignore]
-async fn a_former_member_gets_404_and_install_routes_stay_absent() {
+async fn a_former_member_gets_404_on_reads_and_403_on_writes() {
     let _guard = test_lock().await;
     let env = env().await;
     let workspace = seed_workspace(&env.su, "plugins-member").await;
@@ -946,38 +947,52 @@ async fn a_former_member_gets_404_and_install_routes_stay_absent() {
     let (status, _) = get(&env, &token, &catalog_path(workspace)).await;
     assert_eq!(status, 200, "an active member reads the catalog");
 
-    // P3: the writes are not mounted yet.
-    for (method, path) in [
+    // P3 (#3914) mounted the four writes. A plain member is refused each of
+    // them for its own reason — never a 404 from a route that is not there.
+    let writes = [
         (
             reqwest::Method::POST,
             format!("{}/install", detail_path(workspace, GITHUB)),
+            json!({"enabled": true}),
+            403,
         ),
         (
             reqwest::Method::DELETE,
             format!("{}/install", detail_path(workspace, GITHUB)),
+            json!({}),
+            403,
         ),
         (
             reqwest::Method::POST,
             format!("{}/grants", detail_path(workspace, GITHUB)),
+            json!({"scope": "github:read"}),
+            409,
         ),
         (
             reqwest::Method::DELETE,
             format!("{}/grants/github:read", detail_path(workspace, GITHUB)),
+            json!({}),
+            404,
         ),
-    ] {
+    ];
+    for (method, path, body, expected) in writes {
         let response = env
             .http
             .request(method.clone(), format!("{}{path}", env.base))
             .bearer_auth(&token)
-            .json(&json!({"scope": "github:read", "enabled": true}))
+            .json(&body)
             .send()
             .await
             .expect("write route");
-        assert_eq!(
-            response.status(),
-            404,
-            "{method} {path} stays unmounted (P3)"
-        );
+        let status = response.status().as_u16();
+        let reply: Value = response.json().await.unwrap_or(Value::Null);
+        assert_eq!(status, expected, "{method} {path}: {reply}");
+        if expected == 404 {
+            assert_eq!(
+                reply["error"]["message"], "plugin grant not found",
+                "{method} {path}: the 404 is a missing grant, not a missing route"
+            );
+        }
     }
     let (status, _) = get(&env, &token, &detail_path(workspace, "Bad Id!")).await;
     assert_eq!(status, 400, "an id outside the registry grammar");
