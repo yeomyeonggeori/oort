@@ -1,8 +1,12 @@
+import * as Notifications from 'expo-notifications';
 import {DEFAULT_ACTION_IDENTIFIER} from 'expo-notifications';
 
 import {PUSH_ACTION} from '../src/push/contract';
 import {parsePushEnvelope, threadRootId} from '../src/push/envelope';
-import {handlePushResponse} from '../src/push/notifications';
+import {
+  decideFromNotification,
+  handlePushResponse,
+} from '../src/push/notifications';
 
 // =============================================================================
 // The fourth step of the loop ADR-0120 D2-A describes: id-only -> fetch ->
@@ -286,5 +290,166 @@ describe('notification actions', () => {
       signedInWorkspaceId: WS,
     });
     expect(result.kind).toBe('ignored');
+  });
+});
+
+// =============================================================================
+// 결정된 승인의 알림을 걷는다 (#3926, ADR-0204 D6 마지막 줄).
+//
+// 알림 버튼으로 결정하면 **그 승인의** 배달된 알림이 걷힌다 — 누른 알림 하나만이 아니라
+// 같은 승인의 다른 알림까지, 그리고 다른 승인의 알림은 그대로. 결정이 기록되지 않았으면
+// (오류) 걷지 않는다: 알림이 남아 있어야 사람이 다시 누르거나 앱에서 마무리할 수 있다.
+// =============================================================================
+
+const OTHER_APPROVAL = '66666666-6666-4666-8666-666666666666';
+
+const mockPresented = jest.mocked(Notifications.getPresentedNotificationsAsync);
+const mockDismiss = jest.mocked(Notifications.dismissNotificationAsync);
+
+function delivered(identifier: string, body: unknown) {
+  return {
+    date: 0,
+    request: {identifier, content: {}, trigger: {type: 'push', payload: body}},
+  } as unknown as Notifications.Notification;
+}
+
+/** 알림 센터: 이 승인의 알림 둘, 다른 승인 하나, 메시지 하나. */
+function notificationCenter() {
+  return [
+    delivered('tapped', payload()),
+    delivered('other-approval', payload({momo: {approval_id: OTHER_APPROVAL}})),
+    delivered('same-approval-again', payload()),
+    delivered(
+      'a-message',
+      payload({
+        aps: {category: 'momo.message'},
+        momo: {reason: 'dm', approval_id: undefined},
+      }),
+    ),
+  ];
+}
+
+function dismissedIds(): string[] {
+  return mockDismiss.mock.calls.map(([identifier]) => identifier);
+}
+
+describe('decided approvals leave the notification centre', () => {
+  beforeEach(() => {
+    mockPresented.mockReset().mockResolvedValue(notificationCenter());
+    mockDismiss.mockReset().mockResolvedValue(undefined);
+    jest.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('dismisses every delivered notification of the approval it recorded, and nothing else', async () => {
+    const result = await handlePushResponse(response(PUSH_ACTION.approve), {
+      signedInWorkspaceId: WS,
+    });
+
+    expect(result).toEqual({kind: 'decided', approved: true, record: 'pressed'});
+    expect(dismissedIds().sort()).toEqual(['same-approval-again', 'tapped']);
+  });
+
+  it('does the same for a rejection', async () => {
+    await handlePushResponse(response(PUSH_ACTION.reject), {
+      signedInWorkspaceId: WS,
+    });
+
+    expect(dismissedIds().sort()).toEqual(['same-approval-again', 'tapped']);
+  });
+
+  it('also dismisses when the ledger already held a decision (settled elsewhere)', async () => {
+    mockDecideApproval.mockResolvedValue({kind: 'superseded', status: 'approved'});
+
+    const result = await handlePushResponse(response(PUSH_ACTION.reject), {
+      signedInWorkspaceId: WS,
+    });
+
+    expect(result).toEqual({
+      kind: 'decided',
+      approved: false,
+      record: 'settled',
+      recordedApproved: true,
+    });
+    expect(dismissedIds().sort()).toEqual(['same-approval-again', 'tapped']);
+  });
+
+  it('keeps the notifications when the decision was not recorded', async () => {
+    mockDecideApproval.mockResolvedValue({kind: 'error', errorCopy: '서버가 응답하지 않았습니다.'});
+
+    const result = await handlePushResponse(response(PUSH_ACTION.approve), {
+      signedInWorkspaceId: WS,
+    });
+
+    expect(result.kind).toBe('failed');
+    expect(mockPresented).not.toHaveBeenCalled();
+    expect(mockDismiss).not.toHaveBeenCalled();
+  });
+
+  it('a notification centre that cannot be read does not undo a recorded decision', async () => {
+    mockPresented.mockRejectedValue(new Error('native module unavailable'));
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await handlePushResponse(response(PUSH_ACTION.approve), {
+      signedInWorkspaceId: WS,
+    });
+
+    expect(result).toEqual({kind: 'decided', approved: true, record: 'pressed'});
+    warn.mockRestore();
+  });
+
+  it('leaves the notification centre alone for a body tap, a reply and another workspace', async () => {
+    await handlePushResponse(response(DEFAULT_ACTION_IDENTIFIER), {
+      signedInWorkspaceId: WS,
+    });
+    await handlePushResponse(
+      response(
+        PUSH_ACTION.quickReply,
+        payload({
+          aps: {category: 'momo.message'},
+          momo: {reason: 'dm', approval_id: undefined},
+        }),
+        'ok',
+      ),
+      {signedInWorkspaceId: WS},
+    );
+    await handlePushResponse(response(PUSH_ACTION.approve), {
+      signedInWorkspaceId: OTHER_WS,
+    });
+
+    expect(mockPresented).not.toHaveBeenCalled();
+    expect(mockDismiss).not.toHaveBeenCalled();
+  });
+});
+
+describe('decideFromNotification: the one function a native handler takes over', () => {
+  beforeEach(() => {
+    mockPresented.mockReset().mockResolvedValue(notificationCenter());
+    mockDismiss.mockReset().mockResolvedValue(undefined);
+    jest.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('sends the decision under the idempotency key its caller holds', async () => {
+    await decideFromNotification(WS, APPROVAL, true, 'notification-request-key');
+
+    expect(mockDecideApproval).toHaveBeenCalledWith(
+      WS,
+      APPROVAL,
+      true,
+      'notification-request-key',
+    );
+  });
+
+  it('mints a key when the caller holds none', async () => {
+    await decideFromNotification(WS, APPROVAL, false);
+
+    expect(mockDecideApproval).toHaveBeenCalledWith(WS, APPROVAL, false, 'decision-1');
   });
 });

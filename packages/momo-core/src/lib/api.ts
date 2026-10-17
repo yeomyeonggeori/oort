@@ -1123,15 +1123,25 @@ function bindRefreshKey(retry: number): void {
 }
 
 /**
- * Authenticated exchange with exactly one 401 rotation. A 401 that survives
- * the rotation ends the session (`markAuthExpired`); only that owner may
- * declare expiry. `init.body` is always a string here, so replaying it on the
- * retry is safe.
+ * Authenticated exchange with exactly one 401 rotation, answering with the
+ * response **whatever its status** (#3926). A 401 that survives the rotation
+ * ends the session (`markAuthExpired`); only that owner may declare expiry.
+ * `init.body` is always a string here, so replaying it on the retry is safe,
+ * and it is the SAME string: a body that carries an idempotency key carries the
+ * same key on the retry, so the server replays instead of recording twice.
  *
- * Exported so sibling modules (linked devices, …) reuse this path instead of
- * growing a private fetch wrapper that skips rotation.
+ * This is the half of `authedRequest` for callers whose non-2xx answers ARE the
+ * contract. The approval decision answers 403/404/409 with the same receipt
+ * schema as 200, and `authedRequest` would throw that body away
+ * (`features/timeline/approvalDecision.ts`). Before this existed that caller
+ * made a private raw fetch, which skipped the rotation: a phone that had been in
+ * the background past the access token's life lost the decision with a 401.
+ *
+ * There is one rotation and no loop. A rotation that does not produce a usable
+ * token leaves the first 401 as the answer, and a second 401 after a rotation
+ * is the answer too; neither starts another rotation.
  */
-export async function authedRequest(
+export async function authedResponse(
   path: string,
   init: RequestInit = {}
 ): Promise<HttpResponse> {
@@ -1142,6 +1152,20 @@ export async function authedRequest(
     }
   }
   if (res.status === 401) coreSession().markAuthExpired();
+  return res;
+}
+
+/**
+ * `authedResponse` that throws the server's error for any non-2xx answer.
+ *
+ * Exported so sibling modules (linked devices, …) reuse this path instead of
+ * growing a private fetch wrapper that skips rotation.
+ */
+export async function authedRequest(
+  path: string,
+  init: RequestInit = {}
+): Promise<HttpResponse> {
+  const res = await authedResponse(path, init);
   if (!res.ok) throw parseError(res);
   return res;
 }
