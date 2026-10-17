@@ -77,7 +77,10 @@
 //!   slice is the INSERT — which the 011 trigger turns into a candidate — and
 //!   `commit_turn`'s closing slice is an UPDATE. A line that is still streaming
 //!   (`momo.stream.streaming = true`) is therefore **held** by this arm: it has no
-//!   answer yet, only the first words. The write that ends it enqueues the second
+//!   answer yet, only the first words. So is one a retried turn froze between two attempts
+//!   (`momo.stream.provisional = true`, written by the worker's between-attempts freeze): it
+//!   reads `streaming: false, outcome: failed` like the end of a turn that really failed, but
+//!   the turn is going to reopen it. The write that ends it enqueues the second
 //!   candidate (`momo_messaging::stream_message_body_in_tx` →
 //!   `momo_outbox::emit_stream_closed_push_candidate`), and this arm judges the finished
 //!   answer then — with "reading" read at **judgment time** (`now()`), not at the opening
@@ -109,21 +112,23 @@
 //!   explicit-mention arm at their opening, as before; the close candidate finds that
 //!   person's push already settled (`collapse_id`) and is skipped. One that quotes nobody has
 //!   no asker for this arm. A stream that is never closed is never judged by this arm — a
-//!   producer that died and whose run nobody closed, but also a close the domain refuses
-//!   (the agent left the channel, the message was deleted); the opening candidate has long
-//!   been consumed, so there is nothing left to judge it. Not settled here and left to the
-//!   ADR's wording: a chat answer that arrives within 30 s of the asker's own question is
-//!   "reading" even without streaming, because the question moved their cursor (ADR-0204
-//!   D8: 「30초 안에 움직였으면」).
+//!   producer that died and whose run nobody closed, a close the domain refuses (the agent
+//!   left the channel, the message was deleted), and a retried turn's freeze whose job is
+//!   never reclaimed (nothing reopens it and nothing ends it); the opening candidate has
+//!   long been consumed, so there is nothing left to judge it.
 //!
-//!   *A provisional freeze looks like a close.* A retried turn's freeze between two attempts
-//!   is `streaming: false` with `outcome: failed` — the state of a turn that really failed —
-//!   and this SQL cannot tell the two apart. It stays safe because the opening candidate is
-//!   judged while the stream is open, within a moment of its INSERT, and the freeze itself
-//!   enqueues nothing. Only a candidate judged *late* — a notifier that was down for longer
-//!   than an attempt, or a judgment that failed transiently and was requeued — can land
-//!   inside the freeze and push the half answer; the settled `collapse_id` then skips the
-//!   real close. Rare, and accepted.
+//!   Not settled here and left to the ADR's wording: a chat answer that arrives within 30 s
+//!   of the asker's own question is "reading" even without streaming, because the question
+//!   moved their cursor (ADR-0204 D8: 「30초 안에 움직였으면」).
+//!
+//!   *A provisional freeze is not a close.* `streaming: false` with `outcome: failed` is also
+//!   how a turn that really failed ends, and a candidate judged inside a retried turn's freeze
+//!   — the opening candidate when the notifier is a moment late, a judgment that was requeued
+//!   — would push the asker the half answer, and spend the message's one push slot
+//!   (`collapse_id` is per message) so the finished answer's push is skipped. The marker is
+//!   what tells them apart: this arm holds a `provisional` block like an open stream, and the
+//!   write that ends the turn (the retry's commit, or the terminal close when the retries
+//!   never reopen the stream) enqueues the candidate that pushes.
 //!
 //!   *The close candidate re-judges the whole message*, not only this arm, against the
 //!   ledgers as they are at that moment: the mute and DND rows, the asker's membership, a
@@ -251,7 +256,8 @@ pub async fn judge_targets(
                   m.created_at, \
                   m.root_id, \
                   m.reply_to_id, \
-                  COALESCE((m.props->$6::text)->>'streaming', '') = 'true' AS streaming, \
+                  (COALESCE((m.props->$6::text)->>'streaming', '') = 'true' \
+                   OR COALESCE((m.props->$6::text)->>'provisional', '') = 'true') AS streaming, \
                   jsonb_exists(m.props, $6::text) AS streamed, \
                   CASE WHEN m.props->>$5::text \
                             ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' \

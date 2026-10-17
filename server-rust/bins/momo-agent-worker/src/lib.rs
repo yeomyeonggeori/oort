@@ -2289,8 +2289,9 @@ impl AgentWorker {
     /// cancel for a stuck job.
     ///
     /// `between_attempts` marks the freeze a retried turn leaves while its job waits out a
-    /// backoff: the same write, but provisional — the next attempt reopens this message,
-    /// so it is not where the answer ends and announces nothing (ADR-0204 증보 1 D8-a).
+    /// backoff (always `Failed`): the same write, but provisional — the block says it is a
+    /// pause (`provisional: true`), announces nothing, and is still found by the turn's
+    /// terminal close, even when no attempt reopens it (ADR-0204 증보 1 D8-a).
     async fn close_stopped_stream(
         &self,
         workspace_id: Uuid,
@@ -2298,6 +2299,10 @@ impl AgentWorker {
         outcome: StreamCloseOutcome,
         between_attempts: bool,
     ) {
+        debug_assert!(
+            !between_attempts || outcome == StreamCloseOutcome::Failed,
+            "the freeze between attempts is always a failure"
+        );
         let closed = if between_attempts {
             stream::freeze_run_stream_between_attempts(&self.pool, workspace_id, run_id).await
         } else {
@@ -2311,7 +2316,13 @@ impl AgentWorker {
                 run_id = %run_id,
                 message_id = %message_id,
                 outcome = outcome.wire(),
-                "streamed message closed by a stopped run"
+                between_attempts,
+                "streamed message {}",
+                if between_attempts {
+                    "frozen until the next attempt"
+                } else {
+                    "closed by a stopped run"
+                }
             ),
             Err(error) => tracing::warn!(
                 run_id = %run_id,
@@ -2515,9 +2526,11 @@ impl AgentWorker {
     /// it is marked.
     ///
     /// `retrying` is true when another attempt follows this failure. The freeze the
-    /// failure leaves in the channel is then provisional — the retry reopens the same
-    /// message — and announces nothing; a failure that ends the turn closes the stream for
-    /// good, and that close is the one that tells the asker (ADR-0204 증보 1 D8-a, #3987).
+    /// failure leaves in the channel is then provisional — marked as a pause, announcing
+    /// nothing, expected to be reopened by the retry; a failure that ends the turn closes the
+    /// stream for good, and that close is the one that tells the asker (ADR-0204 증보 1 D8-a,
+    /// #3987). It finds a block an earlier attempt froze even when no attempt reopened it:
+    /// a provider that is still down on the last attempt fails before it streams a word.
     async fn mark_run_failed(
         &self,
         workspace_id: Uuid,
@@ -4050,8 +4063,16 @@ fn transport_or_env(
 }
 
 /// `props` on a successful reply — Swift `finalMessageProps` (:2336-2354).
-/// The revision of a message that is **still streaming**, `None` when it is not
-/// one — never streamed, or already closed (#1161).
+/// The revision of a message whose stream the commit still has to **end**, `None` when there
+/// is none — never streamed, or already closed (#1161).
+///
+/// That is a stream that is still streaming, and also one an earlier attempt of this turn
+/// froze provisionally (`provisional: true`, ADR-0204 증보 1 D8-a): the retry that follows a
+/// freeze may answer without streaming a word — an OAuth replay, a wire that does not stream
+/// — and the commit's `send` then dedupes into the frozen row. The commit is the end of the
+/// turn, so it ends that message too: the finished answer replaces the half answer and the
+/// closing slice announces it. Reading only `streaming: true` here left the half answer
+/// standing under a `succeeded` run, with nothing to announce.
 ///
 /// Read off the projection the send handed back rather than with a second query:
 /// on a deduped send that projection *is* the stored row, which is exactly the
@@ -4061,7 +4082,9 @@ fn transport_or_env(
 /// matters — does not delegate a second time.
 fn open_stream_rev(props: &Value) -> Option<i64> {
     let stream = props.get(STREAM_PROPS_KEY)?;
-    if stream.get("streaming").and_then(Value::as_bool) != Some(true) {
+    let streaming = stream.get("streaming").and_then(Value::as_bool) == Some(true);
+    let frozen_for_a_retry = stream.get("provisional").and_then(Value::as_bool) == Some(true);
+    if !streaming && !frozen_for_a_retry {
         return None;
     }
     stream.get("rev").and_then(Value::as_i64)
@@ -4480,6 +4503,23 @@ mod tests {
             Some(7),
             "an outcome and `streaming: true` cannot both be true, but if a producer \
              ever writes it the close is still the honest move"
+        );
+        assert_eq!(
+            open_stream_rev(&json!({
+                STREAM_PROPS_KEY: {
+                    "rev": 7, "streaming": false, "outcome": "failed", "provisional": true
+                }
+            })),
+            Some(7),
+            "a freeze between attempts is still to be ended: the commit that follows it \
+             closes the message it froze"
+        );
+        assert_eq!(
+            open_stream_rev(&json!({
+                STREAM_PROPS_KEY: { "rev": 7, "streaming": false, "outcome": "failed" }
+            })),
+            None,
+            "the same words without the marker are the end of a turn that failed"
         );
     }
 }

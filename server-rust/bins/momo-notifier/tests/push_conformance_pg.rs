@@ -66,9 +66,10 @@
 //! | `a_dm_streamed_answer_is_pushed_by_the_dm_arm_at_its_opening_and_not_again_at_its_close` | hold the `dm` arm for a streaming line, or push the DM peer twice |
 //! | `a_short_answer_is_pushed_once_when_it_opens_and_closes_before_anyone_judges_it` | judge the opening and the closing candidate as two pushes |
 //! | `a_stream_that_was_stopped_or_failed_is_told_like_a_finished_one` | skip the close candidate for a closing write that carries an `outcome` |
-//! | `a_streamed_answers_window_is_thirty_seconds_wide_at_the_close` | widen or narrow the streamed branch's window (the 20 s and 40 s askers bracket 30) |
+//! | `a_streamed_answers_window_is_thirty_seconds_wide_at_the_close` | widen or narrow the streamed branch's window (the 15 s and 45 s askers bracket 30) |
 //! | `known_gap_a_stream_watched_longer_than_the_window_from_a_standing_cursor_is_pushed` | (pins the M2 cost) change what a cursor that stood still for 45 s means before a presence signal exists |
 //! | `a_retried_streams_freeze_between_attempts_announces_nothing_and_its_real_close_announces_once` | let a `provisional` freeze enqueue the candidate, or ignore the flag |
+//! | `a_candidate_judged_while_a_retried_stream_is_frozen_is_held` | judge a `provisional` freeze as a closed stream (drop `provisional` from the judgment's `streaming`), so a late candidate pushes the half answer and spends the message's push slot |
 //! | `closing_a_stream_enqueues_exactly_one_candidate_and_only_for_an_open_stream` | enqueue on every final write, on a slice, for a stale final write on an open stream, or for a message that never streamed; change the candidate's `method` / `partition_key` from the trigger's |
 //! | `two_final_writes_racing_to_close_one_stream_enqueue_one_candidate` | read the stored props before taking the message's row lock |
 
@@ -4492,14 +4493,15 @@ async fn a_streamed_answer_is_not_pushed_to_an_asker_who_was_moving_their_cursor
         .all(|(status, _)| status == "done"));
 }
 
-/// The width of the window a streamed answer is judged against. A cursor that moved 20
+/// The width of the window a streamed answer is judged against. A cursor that moved 15
 /// seconds before the close is inside the 30 and the asker is not pushed; one that stopped
-/// 40 seconds before is outside and the asker is — in the same drain, for two streams that
+/// 45 seconds before is outside and the asker is — in the same drain, for two streams that
 /// both opened two minutes ago (so neither verdict can come from the stream's own age).
 ///
-/// The pair brackets 30 on both sides: a window narrowed to 10 seconds pushes the first
-/// asker, one widened to 90 stays silent for the second. (The 5-second and 118-second cases
-/// of the tests around this one leave everything between them unpinned.)
+/// The pair brackets 30 on both sides, 15 seconds clear of it each way so a slow drain cannot
+/// tip either: a window narrowed to 10 seconds pushes the first asker, one widened to 90 stays
+/// silent for the second. (The 5-second and 118-second cases of the tests around this one
+/// leave everything between them unpinned.)
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
 async fn a_streamed_answers_window_is_thirty_seconds_wide_at_the_close() {
@@ -4525,7 +4527,7 @@ async fn a_streamed_answers_window_is_thirty_seconds_wide_at_the_close() {
         &room,
         inside,
         message_seq(&su, inside_stream).await,
-        "now() - interval '20 seconds'",
+        "now() - interval '15 seconds'",
     )
     .await;
     set_read_cursor_at(
@@ -4533,7 +4535,7 @@ async fn a_streamed_answers_window_is_thirty_seconds_wide_at_the_close() {
         &room,
         outside,
         message_seq(&su, outside_stream).await,
-        "now() - interval '40 seconds'",
+        "now() - interval '45 seconds'",
     )
     .await;
 
@@ -4545,12 +4547,12 @@ async fn a_streamed_answers_window_is_thirty_seconds_wide_at_the_close() {
     assert_eq!(stats.claimed, 2);
     assert!(
         people_woken(&room, &sent, inside_stream).is_empty(),
-        "20 seconds is inside the 30-second window: {sent:?}"
+        "15 seconds is inside the 30-second window: {sent:?}"
     );
     assert_eq!(
         people_woken(&room, &sent, outside_stream),
         BTreeSet::from([outside]),
-        "40 seconds is outside it: {sent:?}"
+        "45 seconds is outside it: {sent:?}"
     );
 }
 
@@ -4905,10 +4907,12 @@ async fn a_short_answer_is_pushed_once_when_it_opens_and_closes_before_anyone_ju
 /// A stream a human stopped, or one whose provider died, is closed with an `outcome` and
 /// leaves its frozen text in the channel (ADR-0155). That is still the end of the answer,
 /// and the asker is told like for a finished one — they learn it stopped. (This includes an
-/// asker who pressed stop themselves when their cursor stood still for the window: pressing
-/// stop does not move a read cursor, and the server cannot tell them from one who left.
-/// Whether a stopped stream should skip the person who stopped it is a product decision the
-/// ADR did not make; the close is judged by what the message says, not how it ended.)
+/// asker who pressed stop themselves: the server does not move a read cursor when a stop is
+/// pressed — the stop writes a line, and a client that reports that line read moves the
+/// cursor, which this suite does not model — so an asker whose cursor stood still for the
+/// window is indistinguishable from one who left. Whether a stopped stream should skip the
+/// person who stopped it is a product decision the ADR did not make; the close is judged by
+/// what the message says, not how it ended.)
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
 async fn a_stream_that_was_stopped_or_failed_is_told_like_a_finished_one() {
@@ -5067,6 +5071,71 @@ async fn a_retried_streams_freeze_between_attempts_announces_nothing_and_its_rea
     assert_eq!(people_woken(&room, &sent, ended), BTreeSet::from([ASKER]));
 }
 
+/// **Review of #3987, M2.** A candidate that is judged late — the notifier was busy, or the
+/// judgment failed once and was requeued — can land inside a retried turn's freeze: the
+/// opening candidate is still waiting when the worker freezes the half answer for the
+/// backoff. The message then reads `streaming: false, outcome: failed`, exactly like the end
+/// of a turn that really failed, and judging it as closed would push the asker the half
+/// answer — and, `collapse_id` being per message, spend the slot the real answer needs.
+///
+/// A provisional freeze says on the message itself that it is not the end, and the answer arm
+/// holds it like a stream that is still open. The candidate is consumed with no push; the
+/// close that ends the turn enqueues the next one, which pushes once.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn a_candidate_judged_while_a_retried_stream_is_frozen_is_held() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let room = seed_approval_room(&su).await;
+    let pool = momo_notifier_pool().await;
+
+    set_read_cursor(&su, &room, ASKER, "now() - interval '5 minutes'").await;
+    let question = human_says(&su, &room, room.channel_id, room.id(ASKER)).await;
+    let run = chat_run_for(&su, &room, room.channel_id, Some(question), "running").await;
+    drain_room_full(&su, &pool, &room).await; // the question's own candidate: nobody to push
+    let streamed = open_streamed_answer(&su, &room, run, question).await;
+
+    // The opening candidate is NOT drained yet: the freeze lands before it is judged.
+    let slice = write_stream_slice(&su, &room, streamed, 1, false, None).await;
+    assert!(matches!(slice, StreamOutcome::Applied(_)));
+    let freeze = write_stream_edit(
+        &su,
+        &room,
+        streamed,
+        2,
+        true,
+        Some(StreamCloseOutcome::Failed),
+        true,
+    )
+    .await;
+    assert!(matches!(freeze, StreamOutcome::Applied(_)), "{freeze:?}");
+
+    let (stats, sent) = drain_room_full(&su, &pool, &room).await;
+    assert_eq!(
+        stats.claimed, 1,
+        "the opening candidate is judged now, inside the freeze"
+    );
+    assert!(
+        hits_for(&sent, streamed).is_empty(),
+        "a frozen-for-a-retry answer is not the answer: held, not pushed: {sent:?}"
+    );
+
+    // The retry reopens it and the turn ends: one push, of the finished answer.
+    let reopened = write_stream_slice(&su, &room, streamed, 3, false, None).await;
+    assert!(matches!(reopened, StreamOutcome::Applied(_)));
+    let closed = write_stream_slice(&su, &room, streamed, 4, true, None).await;
+    assert!(matches!(closed, StreamOutcome::Applied(_)));
+    let (stats, sent) = drain_room_full(&su, &pool, &room).await;
+    assert_eq!(stats.claimed, 1);
+    assert_eq!(
+        people_woken(&room, &sent, streamed),
+        BTreeSet::from([ASKER]),
+        "the finished answer reaches the asker who was away: {sent:?}"
+    );
+    assert_eq!(hits_for(&sent, streamed).len(), device_total(ASKER));
+}
+
 /// The producer: the closing write — and only it — enqueues the second candidate.
 /// Exactly one per stream; none for a slice, for a second final write (a producer's retry
 /// at a higher revision), for a stale write, or for a message that never streamed.
@@ -5212,22 +5281,24 @@ async fn closing_a_stream_enqueues_exactly_one_candidate_and_only_for_an_open_st
     );
 }
 
-/// Wait until some backend of this database is blocked on a lock.
-async fn wait_until_a_writer_is_blocked_on_a_lock(su: &PgPool) {
+/// Wait until the backend with `pid` is blocked on a lock — and no other: a waiter of some
+/// other test in the same database must not count.
+async fn wait_until_backend_is_blocked_on_a_lock(su: &PgPool, pid: i32) {
     for _ in 0..200 {
-        let blocked: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM pg_stat_activity \
-              WHERE datname = current_database() AND wait_event_type = 'Lock'",
+        let blocked: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM pg_stat_activity \
+                             WHERE pid = $1 AND wait_event_type = 'Lock')",
         )
+        .bind(pid)
         .fetch_one(su)
         .await
         .expect("read pg_stat_activity");
-        if blocked > 0 {
+        if blocked {
             return;
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
-    panic!("the second writer never blocked on the message's row lock");
+    panic!("the second writer (backend {pid}) never blocked on the message's row lock");
 }
 
 /// Two final writes racing to close one stream enqueue one candidate between them.
@@ -5256,6 +5327,7 @@ async fn two_final_writes_racing_to_close_one_stream_enqueue_one_candidate() {
     let author = room.requester;
     let (locked_tx, locked_rx) = tokio::sync::oneshot::channel::<()>();
     let (commit_tx, commit_rx) = tokio::sync::oneshot::channel::<()>();
+    let (pid_tx, pid_rx) = tokio::sync::oneshot::channel::<i32>();
 
     // Writer A: the close at revision 2. It holds the row lock until told to commit.
     let writer_a = {
@@ -5285,7 +5357,11 @@ async fn two_final_writes_racing_to_close_one_stream_enqueue_one_candidate() {
             .await
         })
     };
-    locked_rx.await.expect("writer A holds the row lock");
+    if locked_rx.await.is_err() {
+        // A ended before it took the lock: say why, instead of hanging on it.
+        let outcome = writer_a.await.expect("join A");
+        panic!("writer A never reached the point of holding the row lock: {outcome:?}");
+    }
 
     // Writer B: another close, at revision 3, queued behind A's lock.
     let writer_b = {
@@ -5293,6 +5369,10 @@ async fn two_final_writes_racing_to_close_one_stream_enqueue_one_candidate() {
         tokio::spawn(async move {
             with_tenant_tx(&su, workspace, move |conn| {
                 Box::pin(async move {
+                    let pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+                        .fetch_one(&mut *conn)
+                        .await?;
+                    let _ = pid_tx.send(pid);
                     let applied = stream_message_body_in_tx(
                         conn,
                         workspace,
@@ -5313,7 +5393,8 @@ async fn two_final_writes_racing_to_close_one_stream_enqueue_one_candidate() {
             .await
         })
     };
-    wait_until_a_writer_is_blocked_on_a_lock(&su).await;
+    let writer_b_pid = pid_rx.await.expect("writer B reports its backend");
+    wait_until_backend_is_blocked_on_a_lock(&su, writer_b_pid).await;
     commit_tx.send(()).expect("let writer A commit");
 
     let a = writer_a.await.expect("join A").expect("A commits");

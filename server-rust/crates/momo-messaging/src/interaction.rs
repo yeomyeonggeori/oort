@@ -615,16 +615,22 @@ pub struct StreamEdit {
     pub outcome: Option<StreamCloseOutcome>,
     /// ADR-0204 증보 1 D8-a (#3987) — a final write the writer **expects to reopen**: the
     /// worker's freeze between two attempts of a retried turn. It freezes and marks the
-    /// message exactly as any close does, but it is not the answer's end, so it enqueues
-    /// **no** push candidate. The reopening slice is an ordinary slice, and the close that
-    /// really ends the turn is an ordinary close — it is the one that enqueues the candidate.
+    /// message exactly as any close does (`streaming: false`, the `outcome`), but it is not
+    /// the answer's end, so it enqueues **no** push candidate — and it says so on the message
+    /// itself: the block also carries a server-owned `provisional: true`, which is what lets
+    /// everything that asks "is this answer still to be ended?" answer yes for a frozen
+    /// block — the turn's terminal close ([`open_stream_message_for_run_in_tx`]), the
+    /// worker's commit, the push judgment — instead of mistaking the pause for the end.
     ///
-    /// Without it a retried turn would announce the message at the freeze — while it holds
-    /// only the half answer the provider got to, and a retry is still pending — and that
-    /// push would spend the message's one push slot (`collapse_id` is per message), so the
-    /// finished answer's push at the real close would be skipped as already settled. Only
-    /// meaningful together with `is_final`; the message route and every other writer say
-    /// `false`, and nothing on the wire can ask for it.
+    /// The marker lasts until the next write that is not a provisional freeze: the retry's
+    /// first slice replaces the whole block (`streaming: true`, no marker), and the write
+    /// that ends the turn — a close of any outcome — replaces it with a plain closed block.
+    /// Without the marker a retried turn either announces the half answer at the freeze (the
+    /// push settles `collapse_id`, which is per message, so the finished answer's push is
+    /// skipped), or, if no later attempt reopens the stream, is never announced at all.
+    ///
+    /// Only meaningful together with `is_final` (ignored otherwise). The message route and
+    /// every other writer say `false`, and nothing on the wire can ask for it.
     pub provisional: bool,
 }
 
@@ -719,15 +725,38 @@ fn stream_is_open(props: &Value) -> bool {
         == Some(&Value::Bool(true))
 }
 
+/// Is this message's `momo.stream` block a **provisional freeze** — closed for now, with the
+/// writer's own word that the stream is going to reopen?
+///
+/// The server-owned `provisional: true` of [`StreamEdit::provisional`]. Only a block that
+/// says `streaming: false` can carry it (a slice replaces the whole block), but the check is
+/// the key alone: it is never written any other way.
+fn stream_is_provisional(props: &Value) -> bool {
+    props
+        .get(STREAM_PROPS_KEY)
+        .and_then(|stream| stream.get("provisional"))
+        == Some(&Value::Bool(true))
+}
+
+/// Is this message's stream still **to be ended** — open (`streaming: true`), or frozen
+/// provisionally and waiting for its turn to either reopen it or end it?
+///
+/// What a closing write must find to count as the end of the answer, and what the turn's
+/// terminal close looks for.
+fn stream_awaits_its_end(props: &Value) -> bool {
+    stream_is_open(props) || stream_is_provisional(props)
+}
+
 /// Is this write the one that ENDS a streamed answer — the one that earns the message its
 /// closing push candidate (ADR-0204 증보 1 D8-a)?
 ///
-/// A final write on a block that is still open. A [`StreamEdit::provisional`] freeze is
-/// final and does close the block, but the writer says the stream is going to reopen (a
-/// retried turn between two attempts), so it is not the end; nor is a slice, a final write
-/// on an already-closed block, or one on a message that never streamed.
+/// A final write that does not call itself provisional, on a block that is still to be ended:
+/// open, or frozen provisionally by an earlier attempt that no later attempt reopened. A
+/// provisional freeze is final and does close the block, but the writer says the stream is
+/// going to reopen, so it is not the end; nor is a slice, a final write on an already-closed
+/// block, or one on a message that never streamed.
 fn ends_the_answer(edit: &StreamEdit, stored_props: &Value) -> bool {
-    edit.is_final && !edit.provisional && stream_is_open(stored_props)
+    edit.is_final && !edit.provisional && stream_awaits_its_end(stored_props)
 }
 
 /// The revision already stored on a message, `0` when it has never streamed.
@@ -880,15 +909,18 @@ pub async fn emit_message_edited_in_tx(
 /// while it is open and judges it, at the moment it closes, as the finished answer it now
 /// is.
 ///
-/// What is the close: a final write ([`StreamEdit::is_final`]) on a block that is still
-/// `streaming: true`, whatever its `outcome` — a stopped or failed answer is still the
-/// end of the answer, and the asker is told like for a finished one. What is not: a slice;
-/// a second final write on a block that is already closed; a final write on a message
-/// that never streamed; and a [`StreamEdit::provisional`] freeze, which the writer itself
-/// says is not the end (a retried turn between two attempts). A retried turn therefore
-/// announces once, at the close that ends it. Should a producer reopen and end a stream
-/// more than once for any other reason, each end is a candidate, and the duplicates are
-/// the dispatch log's to absorb (`collapse_id` is per message), not this function's.
+/// What is the close: a final write ([`StreamEdit::is_final`]) on a block that is still to be
+/// ended — `streaming: true`, or frozen provisionally and never reopened — whatever its
+/// `outcome`: a stopped or failed answer is still the end of the answer, and the asker is told
+/// like for a finished one. What is not: a slice; a second final write on a block that is
+/// already closed; a final write on a message that never streamed; and a
+/// [`StreamEdit::provisional`] freeze, which the writer itself says is not the end (a retried
+/// turn between two attempts — the block is marked, so the turn's terminal close and the push
+/// judgment can tell it from an end). A retried turn therefore announces once, at the write
+/// that ends it, whether or not an attempt reopened the stream in between. Should a producer
+/// reopen and end a stream more than once for any other reason, each end is a candidate, and
+/// the duplicates are the dispatch log's to absorb (`collapse_id` is per message), not this
+/// function's.
 ///
 /// Every other guard is [`edit_message_in_tx`]'s, unchanged: author-only,
 /// channel membership, no tombstones, and RLS confines the lock to the tenant.
@@ -951,6 +983,11 @@ pub async fn stream_message_body_in_tx(
     if let Some(outcome) = edit.outcome {
         stream_props["outcome"] = Value::String(outcome.wire().to_string());
     }
+    // ADR-0204 증보 1 D8-a — a pause, not an end: said on the message, so that every later
+    // reader of the block can tell it from a close. Absent otherwise, like `outcome`.
+    if edit.is_final && edit.provisional {
+        stream_props["provisional"] = Value::Bool(true);
+    }
     // `||` is a shallow merge — the producer's own props keys survive a slice
     // (`patch_message_props_in_tx` documents the same choice for approval cards).
     //
@@ -991,10 +1028,10 @@ pub async fn stream_message_body_in_tx(
     // enqueues the one push candidate that judges it now, in the same transaction.
     //
     // Once per stream END: `closes_the_stream` is true only for the final, non-provisional
-    // write of a block that was still open. A slice (`is_final: false`), a second final
-    // write at a higher revision, a final write on a message that never streamed, and a
-    // provisional freeze all leave it false — and a stale slice never reaches this line
-    // (it returned above).
+    // write of a block that was still to be ended (open, or frozen provisionally). A slice
+    // (`is_final: false`), a second final write at a higher revision, a final write on a
+    // message that never streamed, and a provisional freeze all leave it false — and a stale
+    // slice never reaches this line (it returned above).
     if closes_the_stream {
         let message = &projection.message;
         emit_stream_closed_push_candidate(
@@ -1027,6 +1064,9 @@ pub struct OpenStreamMessage {
     pub body: String,
     /// The revision already stored; the closing slice is this plus one.
     pub rev: i64,
+    /// The block is a provisional freeze ([`StreamEdit::provisional`]), not a stream that is
+    /// streaming: a turn's terminal close ends it, a second freeze has nothing to do.
+    pub provisional: bool,
 }
 
 /// Find the still-open streamed message of a run, if it has one (ADR-0155).
@@ -1037,10 +1077,11 @@ pub struct OpenStreamMessage {
 /// is re-claimed by a different worker entirely. The run id is the one name all
 /// three share.
 ///
-/// "Still open" is `streaming: true` — which is also what makes calling this
-/// twice harmless. Once the closing slice lands the flag is `false`, so a
-/// retried cancel finds nothing and writes nothing, and the first marking is
-/// never overwritten by a second one.
+/// "Still open" is `streaming: true` — or a provisional freeze (`provisional: true`, a retried
+/// turn's pause between two attempts), which is still to be ended by the turn: if no attempt
+/// reopened it, the terminal close finds it here and ends it. Either way, calling this twice
+/// is harmless. Once the closing slice lands both flags are gone, so a retried cancel finds
+/// nothing and writes nothing, and the first marking is never overwritten by a second one.
 ///
 /// Returns at most one row: a turn is one message by construction (the opening
 /// write is idempotent on the run id), and `ORDER BY seq` makes "at most one"
@@ -1049,16 +1090,18 @@ pub async fn open_stream_message_for_run_in_tx(
     conn: &mut PgConnection,
     run_id: Uuid,
 ) -> Result<Option<OpenStreamMessage>, DbError> {
-    /// `(id, channel_id, author_member_id, body, rev)` as Postgres hands it back.
-    type OpenStreamRow = (Uuid, Uuid, Uuid, Option<String>, Option<i64>);
+    /// `(id, channel_id, author_member_id, body, rev, provisional)` as Postgres hands it back.
+    type OpenStreamRow = (Uuid, Uuid, Uuid, Option<String>, Option<i64>, bool);
 
     let row: Option<OpenStreamRow> = sqlx::query_as(
         "SELECT id, channel_id, author_member_id, body, \
-                (props -> $2 ->> 'rev')::bigint \
+                (props -> $2 ->> 'rev')::bigint, \
+                COALESCE((props -> $2 ->> 'provisional') = 'true', false) \
            FROM message \
           WHERE run_id = $1 \
             AND deleted_at IS NULL \
-            AND (props -> $2 ->> 'streaming') = 'true' \
+            AND ((props -> $2 ->> 'streaming') = 'true' \
+                 OR (props -> $2 ->> 'provisional') = 'true') \
           ORDER BY seq \
           LIMIT 1",
     )
@@ -1066,7 +1109,7 @@ pub async fn open_stream_message_for_run_in_tx(
     .bind(STREAM_PROPS_KEY)
     .fetch_optional(&mut *conn)
     .await?;
-    let Some((message_id, channel_id, author_member_id, body, rev)) = row else {
+    let Some((message_id, channel_id, author_member_id, body, rev, provisional)) = row else {
         return Ok(None);
     };
     // A streamed message always has a non-empty body (the domain refuses an
@@ -1080,6 +1123,7 @@ pub async fn open_stream_message_for_run_in_tx(
         author_member_id,
         body: body.unwrap_or_default(),
         rev: rev.unwrap_or(0),
+        provisional,
     }))
 }
 
@@ -1664,16 +1708,59 @@ mod tests {
         assert!(!stream_is_open(&json!({ STREAM_PROPS_KEY: null })));
     }
 
-    /// ADR-0204 증보 1 D8-a (#3987): which writes END a streamed answer. Exactly the final,
-    /// non-provisional write of a block that is still open — whatever its outcome. The
-    /// provisional freeze of a retried turn is the case that decides the push: count it as
-    /// an end and the half answer is announced between two attempts.
+    /// ADR-0204 증보 1 D8-a (#3987): a provisional freeze is a block the writer has closed
+    /// for now and says it will reopen. It is told apart from a real close by one server-owned
+    /// key, and only that key — `streaming: false` with `outcome: failed` is also what a turn
+    /// that really failed leaves.
     #[test]
-    fn only_a_final_non_provisional_write_of_an_open_block_ends_the_answer() {
+    fn a_provisional_freeze_is_the_block_that_carries_the_marker() {
+        let frozen = json!({
+            STREAM_PROPS_KEY: { "rev": 4, "streaming": false, "outcome": "failed", "provisional": true }
+        });
+        assert!(stream_is_provisional(&frozen));
+        assert!(!stream_is_open(&frozen), "it is closed, not streaming");
+        assert!(stream_awaits_its_end(&frozen));
+
+        let failed_for_good = json!({
+            STREAM_PROPS_KEY: { "rev": 4, "streaming": false, "outcome": "failed" }
+        });
+        assert!(
+            !stream_is_provisional(&failed_for_good) && !stream_awaits_its_end(&failed_for_good),
+            "the same words without the marker are the end of a turn that failed"
+        );
         let open = json!({ STREAM_PROPS_KEY: { "rev": 3, "streaming": true } });
-        let closed = json!({ STREAM_PROPS_KEY: { "rev": 4, "streaming": false } });
+        assert!(!stream_is_provisional(&open) && stream_awaits_its_end(&open));
+        for lookalike in [
+            json!({}),
+            json!({ STREAM_PROPS_KEY: {} }),
+            json!({ STREAM_PROPS_KEY: { "provisional": "true" } }),
+            json!({ STREAM_PROPS_KEY: { "provisional": false } }),
+            json!({ STREAM_PROPS_KEY: "provisional" }),
+            json!({ "provisional": true }),
+        ] {
+            assert!(
+                !stream_is_provisional(&lookalike) && !stream_awaits_its_end(&lookalike),
+                "{lookalike}"
+            );
+        }
+    }
+
+    /// ADR-0204 증보 1 D8-a (#3987): which writes END a streamed answer, over every write
+    /// (final or not, provisional or not) against every state a block can be in. A final,
+    /// non-provisional write ends the answer when the block is still to be ended — open, or
+    /// frozen provisionally and never reopened — and only then. The provisional freeze of a
+    /// retried turn is the case that decides the push: count it as an end and the half answer
+    /// is announced between two attempts; fail to count the later close of a frozen block as
+    /// an end and a turn whose retries never reopen the stream is never announced at all.
+    #[test]
+    fn only_a_final_non_provisional_write_of_a_block_awaiting_its_end_ends_the_answer() {
+        let open = json!({ STREAM_PROPS_KEY: { "rev": 3, "streaming": true } });
+        let frozen = json!({
+            STREAM_PROPS_KEY: { "rev": 4, "streaming": false, "outcome": "failed", "provisional": true }
+        });
+        let closed = json!({ STREAM_PROPS_KEY: { "rev": 5, "streaming": false } });
         let plain = json!({ "source": "agent_worker.final_text.v0" });
-        let edit =
+        let write =
             |is_final: bool, provisional: bool, outcome: Option<StreamCloseOutcome>| StreamEdit {
                 rev: 9,
                 is_final,
@@ -1681,30 +1768,41 @@ mod tests {
                 provisional,
             };
 
-        assert!(ends_the_answer(&edit(true, false, None), &open));
-        for outcome in [StreamCloseOutcome::Cancelled, StreamCloseOutcome::Failed] {
+        for (name, state, ends) in [
+            ("open", &open, true),
+            ("provisionally frozen", &frozen, true),
+            ("closed", &closed, false),
+            ("never streamed", &plain, false),
+        ] {
+            // the end of a turn — normal, stopped or failed
+            assert_eq!(
+                ends_the_answer(&write(true, false, None), state),
+                ends,
+                "{name}"
+            );
+            for outcome in [StreamCloseOutcome::Cancelled, StreamCloseOutcome::Failed] {
+                assert_eq!(
+                    ends_the_answer(&write(true, false, Some(outcome)), state),
+                    ends,
+                    "{name} / {outcome:?}"
+                );
+            }
+            // a pause is never the end, whatever it lands on
             assert!(
-                ends_the_answer(&edit(true, false, Some(outcome)), &open),
-                "a stopped or failed answer is still the end of the answer: {outcome:?}"
+                !ends_the_answer(&write(true, true, Some(StreamCloseOutcome::Failed)), state),
+                "{name}: a provisional freeze"
+            );
+            assert!(!ends_the_answer(&write(true, true, None), state), "{name}");
+            // a slice is never an end
+            assert!(
+                !ends_the_answer(&write(false, false, None), state),
+                "{name}: a slice"
+            );
+            assert!(
+                !ends_the_answer(&write(false, true, None), state),
+                "{name}: a slice"
             );
         }
-        assert!(
-            !ends_the_answer(&edit(true, true, Some(StreamCloseOutcome::Failed)), &open),
-            "a provisional freeze (a retried turn between attempts) is not the end"
-        );
-        assert!(!ends_the_answer(&edit(true, true, None), &open));
-        assert!(
-            !ends_the_answer(&edit(false, false, None), &open),
-            "a slice"
-        );
-        assert!(
-            !ends_the_answer(&edit(true, false, None), &closed),
-            "an already-closed block cannot close again"
-        );
-        assert!(
-            !ends_the_answer(&edit(true, false, None), &plain),
-            "a message that never streamed has no answer to end"
-        );
     }
 
     /// ADR-0155 — the outcome vocabulary is closed, and its two spellings are

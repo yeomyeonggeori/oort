@@ -17,7 +17,10 @@
 //! channel, and [`close_run_stream`] is what happens to it. ADR-0155 chose
 //! **freeze and mark** over tombstone — the person who pressed stop pressed it
 //! because of the text they had already read, and deleting that text deletes
-//! their reason along with it.
+//! their reason along with it. A failed attempt that has retries left freezes its
+//! half answer the same way but *provisionally*
+//! ([`freeze_run_stream_between_attempts`]): it is a pause, marked as one, and the
+//! turn's terminal close ends it if no attempt reopens it (ADR-0204 증보 1 D8-a).
 //!
 //! The in-process producer is [`crate::partial::run_partial_pump`], which owns
 //! the window; the **closing** slice is not written here at all but inside the
@@ -344,7 +347,9 @@ impl MessageStream {
 ///
 /// Returns `Ok(None)` when there is nothing open — no streamed message, or one
 /// already closed. Since #1161 that means either the turn was stopped before it
-/// said anything, or it was stopped twice. Callers log an `Err` and move on: ADR-0155
+/// said anything, or it was stopped twice. (A stream an earlier attempt of the turn froze
+/// for a retry — [`freeze_run_stream_between_attempts`] — counts as open: it is still to be
+/// ended, and this is the call that ends it.) Callers log an `Err` and move on: ADR-0155
 /// chose defensive rendering over a server sweeper precisely so that a failed
 /// close is a cosmetic loss rather than a stuck message. The run's terminal
 /// status is already durable, so a client seeing "run ended, stream still open"
@@ -363,14 +368,22 @@ pub async fn close_run_stream(
 ///
 /// The same write as [`close_run_stream`] with [`StreamCloseOutcome::Failed`] — the
 /// half answer stays, marked, while the job waits out its backoff — except that it is
-/// *provisional*: the next attempt reopens this very message, so this freeze is not where
-/// the answer ends and it enqueues no push candidate. The close that really ends the turn
-/// (the commit, a stop, or the last attempt's own failure through [`close_run_stream`])
-/// announces it, once.
+/// *provisional*: the block is marked `provisional: true`, the next attempt is expected to
+/// reopen this very message, and this freeze is not where the answer ends, so it enqueues no
+/// push candidate. The write that really ends the turn announces it, once: the commit, a
+/// stop, or the last attempt's own failure through [`close_run_stream`] — and it finds a
+/// block frozen here even if no attempt reopened it (a provider still down on the last
+/// attempt fails before it streams a word), because the marker says the block is still to be
+/// ended.
 ///
 /// Announcing here instead would push the half answer — the text up to where the provider
 /// died — and spend the message's one push slot on it (`collapse_id` is per message), so
-/// the finished answer's push would be swallowed as already settled.
+/// the finished answer's push would be swallowed as already settled. A block that is
+/// already frozen is left alone: a second freeze would only repeat the first.
+///
+/// A job that is never reclaimed after this freeze leaves the message as it is, marked
+/// `failed` and never announced — the same "stream nobody closes" the push judgment
+/// documents.
 pub async fn freeze_run_stream_between_attempts(
     pool: &PgPool,
     workspace_id: Uuid,
@@ -394,6 +407,11 @@ async fn close_open_stream_of_run(
     let Some(open) = open else {
         return Ok(None);
     };
+    // A second freeze of a block that is already frozen has nothing to say: the next attempt
+    // failed before it reopened the stream. (A terminal close of it does: that ends the turn.)
+    if provisional && open.provisional {
+        return Ok(None);
+    }
 
     let message_id = open.message_id;
     let author_member_id = open.author_member_id;

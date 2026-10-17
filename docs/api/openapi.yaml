@@ -18824,6 +18824,17 @@ components:
             non-final slice is a 400, because "this is how it ended" and "more is
             coming" cannot both be true. Any other value is a 400.
 
+            **Not a request field, but a state a reader may meet** (ADR-0204 증보 1
+            D8-a): while an in-process agent turn waits to retry after a provider
+            failure, the server freezes the half answer exactly like a failed close
+            (`streaming: false`, `outcome: failed`) and also writes the server-owned
+            `props["momo.stream"].provisional: true` — "closed for now, the writer
+            expects to reopen". It cannot be sent here (this endpoint never writes
+            it), the retry's first slice replaces the whole block so the key vanishes,
+            and the write that ends the turn replaces it with a plain closed block.
+            Clients can ignore it: the block already says `streaming: false` and
+            `outcome: failed`, which is what they draw.
+
     StreamOpen:
       type: object
       description: >

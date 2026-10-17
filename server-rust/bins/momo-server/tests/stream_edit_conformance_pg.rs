@@ -591,6 +591,25 @@ async fn seventeen_writes_leave_one_growing_message_and_one_seq() {
         json!(false),
         "the final slice says the text has stopped arriving"
     );
+    // ADR-0204 증보 1 D8-a (#3987): over REST the producer's last PATCH is the end of its
+    // answer — the one write that enqueues the closing push candidate — and nothing on the
+    // wire can ask for a pause: the block says plainly that it is closed.
+    assert!(
+        props["momo.stream"].get("provisional").is_none(),
+        "a REST streamer's final slice is an end, not a provisional freeze: {props}"
+    );
+    let closing_candidates: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE kind::text = 'push_candidate' \
+            AND payload->>'message_id' = $1 AND payload->>'source' = 'stream_closed'",
+    )
+    .bind(&message_id)
+    .fetch_one(&su)
+    .await
+    .expect("count the closing candidates");
+    assert_eq!(
+        closing_candidates, 1,
+        "seventeen slices enqueue one closing candidate, on the final one"
+    );
 
     // 4 — one `message.new` then 16 `message.edited`, all at the same seq, each
     //     carrying the body a renderer needs.
