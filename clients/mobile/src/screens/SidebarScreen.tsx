@@ -37,7 +37,7 @@ import {
 } from '../design/atoms';
 import {GlassSurface} from '../design/glass';
 import {HOME_ICONS, HOME_ICON_SIZE, type HomeIconName} from '../design/icons';
-import {useRefreshControl} from '../design/refresh';
+import {PULL_FILL, usePullRefresh} from '../design/refresh';
 import {type Directory} from '@momo/core/features/workspace/directory';
 import {
   ds2Radius,
@@ -378,7 +378,7 @@ export default function SidebarScreen({
   const refetchChannels = channelsQuery.refetch;
   const refetchDirectory = directoryQuery.refetch;
   const refetchReadStates = readStates.refetch;
-  const refreshControl = useRefreshControl(
+  const {refreshControl, scrollProps} = usePullRefresh(
     useCallback(
       () =>
         Promise.all([
@@ -573,6 +573,7 @@ export default function SidebarScreen({
           // 생겼다(DS2-2b #2750) — 소유자·관리자에게만 서므로 그 조건을 함께 말한다.
           detail="아래 +에서 새 DM을 시작하고, 소유자·관리자는 새 채널도 만들 수 있습니다. 멤버 추가는 데스크톱에서 할 수 있습니다."
           refreshControl={refreshControl}
+          scrollProps={scrollProps}
           testID="channels-empty"
         />
       ) : (
@@ -658,6 +659,7 @@ export default function SidebarScreen({
           keyboardDismissMode="on-drag"
           contentContainerStyle={[styles.listContent, {paddingBottom: HOME.scrollBottom + clearance}]}
           refreshControl={refreshControl}
+          {...scrollProps}
           testID="sidebar-list"
         />
       )}
@@ -1291,7 +1293,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   },
 
   // ---- 목록 ------------------------------------------------------------------
-  listContent: {paddingTop: HOME.scrollTop, paddingHorizontal: HOME.scrollX},
+  listContent: {paddingTop: HOME.scrollTop, paddingHorizontal: HOME.scrollX, ...PULL_FILL},
   bannerWrap: {paddingBottom: space.sm, paddingHorizontal: HOME.scrollX},
   noticeWrap: {paddingTop: space.md},
   filterWrap: {paddingBottom: space.md},
