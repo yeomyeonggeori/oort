@@ -2,7 +2,7 @@ import React, {useEffect, useRef} from 'react';
 import {Animated, Easing, StyleSheet, View} from 'react-native';
 import {useReduceMotion} from '../../lib/useReduceMotion';
 import {useStyles} from '../../design/theme';
-import type {Palette} from '../../design/tokens';
+import {radius, space, type Palette} from '../../design/tokens';
 
 // =============================================================================
 // 「답하는 중」 점 셋 (#4020). 에이전트가 요청을 가져가 답을 쓰는 동안만 서는 줄의
@@ -73,6 +73,6 @@ export function RespondingDots(): React.JSX.Element {
 
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
-    row: {flexDirection: 'row', alignItems: 'center', gap: 3, alignSelf: 'center'},
-    dot: {width: 4, height: 4, borderRadius: 2, backgroundColor: color.agent},
+    row: {flexDirection: 'row', alignItems: 'center', gap: space.xs, alignSelf: 'center'},
+    dot: {width: 4, height: 4, borderRadius: radius.pill, backgroundColor: color.agent},
   });

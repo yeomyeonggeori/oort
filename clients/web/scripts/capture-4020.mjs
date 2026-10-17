@@ -37,9 +37,6 @@ const GENERAL = "00000000-0000-7000-8000-000000000202";
 const RUN_A = "0199aa11-2222-7000-8000-0000000000a1";
 const RUN_B = "0199aa11-2222-7000-8000-0000000000a2";
 const RUN_C = "0199aa11-2222-7000-8000-0000000000a3";
-const RUN_D = "0199aa11-2222-7000-8000-0000000000a4";
-const RUN_E = "0199aa11-2222-7000-8000-0000000000a5";
-const RUN_F = "0199aa11-2222-7000-8000-0000000000a6";
 
 const person = (id, kind, displayName, handle, extra = {}) => ({
   id, workspaceId, kind, status: "active", displayName, handle, channelCount: 2,

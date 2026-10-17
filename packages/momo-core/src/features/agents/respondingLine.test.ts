@@ -45,7 +45,7 @@ const BAD_BELL: DoorbellFact = { lastAtMs: T, failed: true, count: 1 };
 
 describe("컴포저 줄: 가져가서 쓰는 동안만 「답하는 중」", () => {
   it("가져감·작업 중은 답하는 중이다", () => {
-    const claimed = lineOf({ phase: "claimed", status: "claimed", leaseState: "live", claimedAtMs: T });
+    const claimed = lineOf({ phase: "claimed", status: "queued", leaseState: "live", claimedAtMs: T });
     const running = lineOf({ phase: "running", status: "running", leaseState: "live", startedAtMs: T });
     expect(isRespondingLine(claimed)).toBe(true);
     expect(isRespondingLine(running)).toBe(true);
@@ -56,7 +56,7 @@ describe("컴포저 줄: 가져가서 쓰는 동안만 「답하는 중」", () 
   it("아직 아무도 가져가지 않은 대기·승인 대기·소식 끊긴 가져감은 답하는 중이 아니다", () => {
     const queued = lineOf({ queuePosition: 2 });
     const waiting = lineOf({ phase: "awaiting_approval", status: "awaiting_approval" });
-    const stale = lineOf({ phase: "claimed", status: "claimed", leaseState: "stale", claimedAtMs: T });
+    const stale = lineOf({ phase: "claimed", status: "queued", leaseState: "stale", claimedAtMs: T });
     for (const line of [queued, waiting, stale]) {
       expect(isRespondingLine(line)).toBe(false);
       expect(activityText(line)).not.toContain("답하는 중");
