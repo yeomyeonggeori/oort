@@ -23,6 +23,9 @@ pub const ALLOWED_SETTINGS_KEYS: &[&str] = &[
     // also provisions/pauses the member. The member id is server-written and is
     // deliberately NOT here.
     "team_ai_fast_path",
+    // ADR-0201 증보 v2 H5: the helper's provider-side web search (absent = on).
+    // `team_ai_alias_status` is server-written and deliberately NOT here.
+    "team_ai_web_search",
 ];
 
 /// Human membership roles that may carry a display override. Agent labels are
@@ -69,6 +72,8 @@ pub enum WorkspaceSettingsInvalid {
     WelcomeAgentMemberIdShape,
     #[error("team_ai_fast_path must be true or false")]
     TeamAiFastPathShape,
+    #[error("team_ai_web_search must be true or false")]
+    TeamAiWebSearchShape,
     #[error("welcome_prompt must be a string")]
     WelcomePromptShape,
     #[error("welcome_prompt must be at most {MAX_WELCOME_PROMPT_CHARS} characters")]
@@ -123,6 +128,13 @@ fn validate_settings_value(key: &str, value: &Value) -> Result<(), WorkspaceSett
                 Ok(())
             } else {
                 Err(WorkspaceSettingsInvalid::TeamAiFastPathShape)
+            }
+        }
+        "team_ai_web_search" => {
+            if value.is_boolean() {
+                Ok(())
+            } else {
+                Err(WorkspaceSettingsInvalid::TeamAiWebSearchShape)
             }
         }
         _ => Err(WorkspaceSettingsInvalid::UnknownKey(key.to_string())),

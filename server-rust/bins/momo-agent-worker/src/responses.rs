@@ -332,6 +332,7 @@ fn decode_response(payload: &Value, streamed: &str) -> Result<ChatCompletion, Pr
     }
 
     Ok(ChatCompletion {
+        web_search_requests: 0,
         text,
         usage,
         tool_calls,
@@ -1051,6 +1052,7 @@ mod tests {
         assert_eq!(
             parse_response(body),
             Ok(ChatCompletion {
+                web_search_requests: 0,
                 tool_calls: Vec::new(),
                 text: "안녕하세요".to_string(),
                 usage: Some(ChatUsage {
@@ -1252,6 +1254,7 @@ mod tests {
         assert_eq!(
             drive(&[body.as_bytes()]),
             Ok(ChatCompletion {
+                web_search_requests: 0,
                 tool_calls: Vec::new(),
                 text: "답".to_string(),
                 usage: Some(ChatUsage {

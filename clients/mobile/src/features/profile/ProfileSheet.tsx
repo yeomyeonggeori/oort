@@ -33,7 +33,6 @@ import {
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   ActivityIndicator,
-  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -67,15 +66,21 @@ import {
 } from '../../design/tokens';
 import {useNow} from '../../lib/useNow';
 import {
-  pushPermissionDetail,
-  usePushPermission,
-} from '../../push/permissionStatus';
-import {usePushPrompt} from '../../push/PushProvider';
+  PUSH_SWITCH_LABEL,
+  PUSH_SWITCH_OFF_FAILED,
+  pushSwitchDetail,
+  usePushSwitch,
+} from '../../push/usePushSwitch';
 import {getServerBase} from '../../storage/serverBase';
 import {Avatar} from '../conversation/Avatar';
 import {formatRealtimeDiagnostics} from '../../realtime/diagnostics';
 import {COPY_RECEIPT_MS, copyText} from '../conversation/copy';
 import {currentAppVersionLabel} from './appVersion';
+import {
+  AppUpdateBanner,
+  AppUpdateSheet,
+} from '../appUpdate/AppUpdateBanner';
+import {useAppUpdateOffer} from '../appUpdate/useAppUpdateOffer';
 import {
   usePauseNotifications,
   usePushKinds,
@@ -365,14 +370,16 @@ export function ProfilePage({
   const styles = useStyles(buildStyles);
   const palette = usePalette();
   const {choice, themeId} = useTheme();
-  const push = usePushPermission();
+  const push = usePushSwitch(workspaceId, member.id);
   const setPresence = useSetPresence(workspaceId, member.id);
   const pause = usePauseNotifications(workspaceId);
   const kinds = usePushKinds(workspaceId);
-  const prompt = usePushPrompt();
   const now = useNow();
   const [confirming, setConfirming] = useState(false);
   const [diagCopied, setDiagCopied] = useState(false);
+  // 새 버전 배너(#3905): 「내 상태」 위에 새 판이 있는 동안 상시 선다.
+  const updateOffer = useAppUpdateOffer();
+  const [updateSheetOpen, setUpdateSheetOpen] = useState(false);
 
   // 버전 줄을 길게 누르면 실시간 연결 기록을 복사한다(#2751). 폰 소켓이 왜
   // 끊겼는지는 서버 로그로 판정되지 않았고, 이유 코드는 클라이언트에만 있다.
@@ -425,6 +432,7 @@ export function ProfilePage({
       : pause.paused
         ? '직접 끌 때까지 이 워크스페이스의 알림을 받지 않습니다.'
         : NOTIFICATION_PAUSE_DESCRIPTION;
+  const pushDetail = pushSwitchDetail(push);
   const choosePresence = (status: PresenceStatus) => {
     if (setPresence.isPending || status === declared) return;
     setPresence.mutate({status});
@@ -488,6 +496,20 @@ export function ProfilePage({
           </View>
         ) : null}
       </View>
+
+      {updateOffer ? (
+        <AppUpdateBanner
+          offer={updateOffer}
+          onPress={() => setUpdateSheetOpen(true)}
+          testID="profile-update-banner"
+        />
+      ) : null}
+      {updateSheetOpen && updateOffer ? (
+        <AppUpdateSheet
+          offer={updateOffer}
+          onClose={() => setUpdateSheetOpen(false)}
+        />
+      ) : null}
 
       {declared ? (
         <GroupSection label={PRESENCE_MENU_LABEL}>
@@ -567,32 +589,53 @@ export function ProfilePage({
       </GroupSection>
 
       <GroupSection label="알림">
+        {/* 이 폰의 스위치 (#3924, ADR-0204 D1). 켬 = OS 허용 + 사람이 끄지 않음. 끄면 이 기기의
+            서버 등록만 지워지고(데스크탑·다른 기기는 그대로), 다시 켜기 전에는 앱을 다시
+            켜도 등록하지 않는다. OS 가 막았으면 누르는 것이 허용 창(묻지 않음)·iOS 설정(거부)을
+            연다 — 두 길 다 스위치가 대신 서므로 따로 줄을 두지 않는다. */}
         <GroupRow
-          title="푸시 알림"
-          detail={pushPermissionDetail(push)}
+          title={PUSH_SWITCH_LABEL}
+          detail={pushDetail}
+          onPress={push.toggle}
+          accessibilityRole="switch"
+          accessibilityState={{
+            checked: push.on,
+            disabled: push.busy || push.permission === 'checking',
+          }}
+          accessibilityLabel={PUSH_SWITCH_LABEL}
+          accessibilityHint={pushDetail}
+          trailing={
+            push.permission === 'checking' ? (
+              // 권한을 아직 읽지 못했으면 「꺼짐」을 그리지 않는다 — 허용한 사람에게 거짓이다.
+              <ActivityIndicator
+                color={palette.textMuted}
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+                testID="profile-push-loading"
+              />
+            ) : (
+              <Switch
+                value={push.on}
+                onValueChange={() => push.toggle()}
+                disabled={push.busy}
+                trackColor={{false: palette.border, true: palette.ok}}
+                ios_backgroundColor={palette.border}
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+                testID="profile-push-switch"
+              />
+            )
+          }
           testID="profile-push-row"
         />
-        {push === 'undetermined' ? (
-          <GroupRow
-            title="알림 켜기"
-            tone="accent"
-            chevron
-            separated
-            onPress={() => void prompt.ask()}
-            accessibilityHint="iOS 알림 허용 창을 엽니다."
-            testID="profile-push-ask"
-          />
-        ) : null}
-        {push === 'denied' ? (
-          <GroupRow
-            title="설정에서 알림 켜기"
-            tone="accent"
-            chevron
-            separated
-            onPress={() => void Linking.openSettings()}
-            accessibilityHint="iOS 설정의 이 앱 화면을 엽니다."
-            testID="profile-push-settings"
-          />
+        {push.failed ? (
+          <Sentence
+            style={styles.rowFailure}
+            accessibilityLiveRegion="polite"
+            testID="push-failure"
+          >
+            {PUSH_SWITCH_OFF_FAILED}
+          </Sentence>
         ) : null}
         <GroupRow
           title={NOTIFICATION_PAUSE_LABEL}

@@ -21,6 +21,8 @@
 //! | `the_off_switch_closes_the_run_and_calls_no_model` | ignore `team_ai_fast_path` |
 //! | `the_per_requester_ceiling_stops_the_fourth_card` | drop the pending count |
 //! | `the_fast_path_reaches_a_card_within_the_budget` | (measurement, not a gate) |
+//! | `an_install_request_answers_honestly_and_makes_no_card` | drop `not_yet_available` (→ out_of_scope hand-off) or move `plugin.install` into `ACTIONS` |
+//! | `the_helper_raises_the_new_settings_cards_from_the_worker_role` | read `mem_settings` in the memory resolver (42501 as `momo_worker`) or drop an id from `TEAM_AI_ACTION_IDS` |
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -971,4 +973,128 @@ async fn the_prompt_names_no_private_channel_and_a_guest_gets_no_member_list() {
         !system.contains("성재") && !system.contains("그록봇"),
         "a guest is shown no member list: {system}"
     );
+}
+
+/// ADR-0201 증보 v2 H7 / H13-A16: asking the helper to install an app makes **no**
+/// approval row and no card, and the person is told, in the helper's own words,
+/// that the install route does not exist yet — not the generic hand-off.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn an_install_request_answers_honestly_and_makes_no_card() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool, true).await;
+    seed_link(&su, t.owner_id).await;
+    let provider = Arc::new(MockChatProvider::echo().with_tool_calls([propose(
+        "plugin.install",
+        json!({"pluginId": "com.momo.plugins.github"}),
+    )]));
+    let w = worker_with(provider, |_| {}).await;
+    let (run_id, _) = enqueue(&pool, &t, t.owner_id, "human", "깃허브 앱 설치해줘", None).await;
+    drain(&w).await;
+    assert!(
+        approvals(&su, &t).await.is_empty(),
+        "no card for plugin.install"
+    );
+    let (status, _) = run_status(&su, run_id).await;
+    assert_eq!(status, "succeeded");
+    let last = agent_messages(&su, &t).await.pop().expect("an answer");
+    let body = last.1.expect("a body");
+    assert_eq!(
+        body,
+        "GitHub 앱은 아직 설치 경로가 없어요. 준비되면 설치 카드를 띄울게요."
+    );
+    assert_ne!(
+        last.2["kind"], "team_ai.delegate.v1",
+        "not the generic hand-off"
+    );
+}
+
+/// ADR-0201 증보 v2 H6-1: the three new settings cards (and `workspace.settings.update`,
+/// now opened to the helper) are raised by the real worker, on the real
+/// `momo_worker` role — which is barred from every `mem_*` table, so the memory card
+/// must be drawn without reading team memory's switch. Nothing changes before a
+/// person decides.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn the_helper_raises_the_new_settings_cards_from_the_worker_role() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool, true).await;
+    seed_link(&su, t.owner_id).await;
+    for (action_id, args, required_role) in [
+        (
+            "workspace.memory.update",
+            json!({"enabled": false}),
+            "admin",
+        ),
+        (
+            "workspace.unfurl.update",
+            json!({"enabled": false}),
+            "workspace_operator",
+        ),
+        (
+            "workspace.work_tier.update",
+            json!({"mode": "auto", "autoTarget": "cloud"}),
+            "admin",
+        ),
+        (
+            "workspace.settings.update",
+            json!({"welcomePrompt": "어서 오세요"}),
+            "workspace_operator",
+        ),
+    ] {
+        let before = approvals(&su, &t).await.len();
+        let provider =
+            Arc::new(MockChatProvider::echo().with_tool_calls([propose(action_id, args.clone())]));
+        let w = worker_with(provider, |_| {}).await;
+        let (run_id, _) = enqueue(&pool, &t, t.owner_id, "human", "설정 바꿔줘", None).await;
+        drain(&w).await;
+        let rows = approvals(&su, &t).await;
+        assert_eq!(rows.len(), before + 1, "{action_id} raised one card");
+        let (_, status, action_type, payload) = rows
+            .iter()
+            .find(|row| row.3["action"]["id"] == action_id && row.1 == "pending")
+            .expect("the card's approval")
+            .clone();
+        assert_eq!(status, "pending");
+        assert_eq!(action_type, "workspace_action");
+        assert_eq!(payload["action"]["args"], args, "{action_id}");
+        let (run_status, _) = run_status(&su, run_id).await;
+        assert_eq!(run_status, "awaiting_approval", "{action_id}");
+        let card = agent_messages(&su, &t)
+            .await
+            .into_iter()
+            .rev()
+            .find(|message| message.2.get("action").is_some())
+            .expect("a card");
+        assert_eq!(card.2["action"]["id"], action_id);
+        assert_eq!(card.2["action"]["required_role"], required_role);
+        // Settle this card out of band so the requester's pending cap (3) does
+        // not refuse the next one; nothing is executed by expiring it.
+        sqlx::query("UPDATE approval SET status = 'expired' WHERE workspace_id = $1")
+            .bind(t.workspace_id)
+            .execute(&su)
+            .await
+            .unwrap();
+    }
+    // Nothing executed: no unfurl row, no memory row, no tier row, prompt unset.
+    for table in [
+        "workspace_unfurl_setting",
+        "mem_settings",
+        "work_tier_policy",
+    ] {
+        let count: i64 = sqlx::query_scalar(&format!(
+            "SELECT count(*) FROM {table} WHERE workspace_id = $1"
+        ))
+        .bind(t.workspace_id)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+        assert_eq!(count, 0, "{table} changed before anyone approved");
+    }
 }
