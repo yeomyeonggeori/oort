@@ -356,7 +356,7 @@ do {
   check(Copy.failed(.reject) == "거절하지 못했어요", "a 거절 that failed does not say 승인")
   check(Copy.failedDetail == "눌러서 앱에서 마무리해 주세요", "the next step is one 해요체 sentence")
   check(Copy.unknownResult == "결과를 확인하지 못했어요", "when the answer never came: the result is unknown, not 「못했어요」")
-  check(Copy.unknownResultDetail == "앱에서 확인해 주세요", "and the card in the app is where it is known")
+  check(Copy.unknownResultDetail == "눌러서 앱에서 확인해 주세요", "and the card in the app is where it is known, one tap away like the other failure's next step")
   check(!Copy.unknownResult.contains("승인") && !Copy.unknownResult.contains("거절"),
     "the unknown-result line names neither verdict (it cannot know which, if any, was recorded)")
 
@@ -420,7 +420,7 @@ do {
       if maybeRecorded.contains(reason) {
         check(
           line == MomoPushActionLine(
-            text: "결과를 확인하지 못했어요", detail: "앱에서 확인해 주세요", alerts: true, removesSiblings: false),
+            text: "결과를 확인하지 못했어요", detail: "눌러서 앱에서 확인해 주세요", alerts: true, removesSiblings: false),
           "failure \(reason.rawValue) (\(direction.approved ? "승인" : "거절")): the result is unknown, for either button")
       } else {
         check(
@@ -459,7 +459,7 @@ do {
     "and carries its next step as the body, so a clipped title never hides it")
   let unknownLine = MomoPushActionPlanner.line(for: .failed(.timeLimit), intent: intent(request: "apns-collapse-7"))
   let unknown = MomoPushActionPlanner.notice(for: unknownLine, intent: intent(request: "apns-collapse-7"))
-  check(unknown.title == "결과를 확인하지 못했어요" && unknown.body == "앱에서 확인해 주세요" && unknown.alerts
+  check(unknown.title == "결과를 확인하지 못했어요" && unknown.body == "눌러서 앱에서 확인해 주세요" && unknown.alerts
     && unknown.identifier == "apns-collapse-7" && unknown.categoryIdentifier == "",
     "an unknown result alerts, says where to look, and replaces the same slot without buttons")
   check((unknown.userInfo[MomoPushActionContract.originKey] as? [String: Any]) != nil,

@@ -530,7 +530,7 @@ enum MomoPushActionCopy {
   /// which tells the truth. The idempotency key makes pressing again in the app safe.
   /// (Both the independent design review and the security review of #3931 raised it.)
   static let unknownResult = "결과를 확인하지 못했어요"
-  static let unknownResultDetail = "앱에서 확인해 주세요"
+  static let unknownResultDetail = "눌러서 앱에서 확인해 주세요"
 
   /// What to do next, shown as the notification's body. The tap lands on the
   /// approval's card, which is where it is finished.
