@@ -303,6 +303,14 @@ o.workspace_id = $1 \
                    AND r.status::text IN ('awaiting_approval', 'succeeded', 'failed', \
                                           'cancelled', 'timed_out') \
               ) \
+              AND NOT EXISTS ( \
+                SELECT 1 FROM agent ca \
+                 WHERE ca.workspace_id = o.workspace_id \
+                   AND ca.member_id = o.partition_key \
+                   AND ca.connector_owner_human_id IS NOT NULL \
+                   AND lower(COALESCE(o.payload->>'author_member_id', '')) \
+                       <> lower(ca.connector_owner_human_id::text) \
+              ) \
               AND EXISTS ( \
                 SELECT 1 \
                   FROM member m \
@@ -399,6 +407,76 @@ pub async fn retire_settled_run_hosted_jobs_in_tx(
     Ok(result.rows_affected())
 }
 
+/// Why a delivery job was closed unclaimed: the agent runs its owner's connected
+/// apps and the job's author is not that owner (ADR-0113 증보 2 E3, #3938).
+pub const CONNECTOR_OWNER_ONLY_JOB_LAST_ERROR: &str = "connector owner only; job closed";
+/// `audit_log.action` of that closure, one row per closed run.
+pub const CONNECTOR_OWNER_JOB_CLOSED_ACTION: &str = "agent.connector_owner.job_closed";
+
+/// Close the pending gateway jobs of one agent that were written **before** it
+/// was marked as running its owner's apps, by someone other than that owner
+/// (#3938, 결재: claim 시점 재확인, fail-closed).
+///
+/// The claim predicate ([`CLAIMABLE_JOB_PREDICATE`]) already refuses such a job,
+/// so it is never leased and its prompt never leaves the server; this closes it
+/// so it does not sit `pending` forever: the job `done` with a reason, the still
+/// queued run `cancelled`, and one audit row per run. A job with no author is
+/// foreign too (fail-closed). Runs in the claiming transaction, so a rolled-back
+/// claim takes the closure with it, and a concurrent mark change is read live.
+pub async fn close_connector_foreign_jobs_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "WITH closed AS ( \
+           UPDATE outbox o \
+              SET status = 'done', processed_at = now(), last_error = $3, \
+                  lease_owner = NULL, lease_acquired_at = NULL, lease_expires_at = NULL \
+            WHERE o.workspace_id = $1 \
+              AND o.kind = 'agent_job' \
+              AND o.method = 'gateway' \
+              AND o.status = 'pending' \
+              AND o.partition_key = $2 \
+              AND EXISTS ( \
+                SELECT 1 FROM agent ca \
+                 WHERE ca.workspace_id = o.workspace_id \
+                   AND ca.member_id = o.partition_key \
+                   AND ca.connector_owner_human_id IS NOT NULL \
+                   AND lower(COALESCE(o.payload->>'author_member_id', '')) \
+                       <> lower(ca.connector_owner_human_id::text) \
+              ) \
+           RETURNING o.workspace_id, lower(o.payload->>'run_id') AS run_id \
+         ), cancelled AS ( \
+           UPDATE agent_run r \
+              SET status = 'cancelled'::run_status, \
+                  error = jsonb_build_object('code', 'connector_owner_only', \
+                                             'reason', 'job queued before the agent was marked'), \
+                  deadline_at = NULL, updated_at = now(), finished_at = now() \
+             FROM closed c \
+            WHERE r.workspace_id = c.workspace_id AND r.id::text = c.run_id \
+              AND r.status IN ('queued','paused') \
+           RETURNING r.id, r.workspace_id \
+         ), audited AS ( \
+           INSERT INTO audit_log (workspace_id, subject_member_id, action, target_type, \
+                                  target_id, run_id, detail) \
+           SELECT x.workspace_id, $2, $4, 'agent_run', x.id, x.id, \
+                  jsonb_build_object('schema', 'momo.agent_connector_owner.job_closed.v0', \
+                                     'reason', 'connector_owner_non_owner') \
+             FROM cancelled x \
+           RETURNING 1 \
+         ) \
+         SELECT 1",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .bind(CONNECTOR_OWNER_ONLY_JOB_LAST_ERROR)
+    .bind(CONNECTOR_OWNER_JOB_CLOSED_ACTION)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
 async fn claim_gateway_jobs(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -407,6 +485,9 @@ async fn claim_gateway_jobs(
     hosted_connection_id: Option<Uuid>,
     lease_seconds: i64,
 ) -> Result<Vec<ClaimedGatewayJob>, sqlx::Error> {
+    // E3 (#3938): foreign-author jobs of a connector agent are closed first, in
+    // this transaction; the predicate below refuses them regardless.
+    close_connector_foreign_jobs_in_tx(&mut *conn, workspace_id, agent_member_id).await?;
     // `$3 IS NULL` selects the managed branch, so both callers execute one
     // prepared statement whose only difference is which hosted predicate is
     // live. Two SQL literals would be two things to keep in step.
