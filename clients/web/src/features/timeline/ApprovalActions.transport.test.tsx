@@ -48,7 +48,7 @@ const RECEIPT = () =>
 
 /** 상태를 가진 호스트 세션과 fetch. 모자란 응답은 던지되, 던지기 전에 기록한다. */
 function stage(answers: Array<Response | Error>) {
-  const session = { access: "access-old", refresh: "refresh-1" };
+  const session = { access: "access-old", refresh: "refresh-1", expired: 0 };
   installCoreHost({
     apiBase: () => "",
     absoluteApiBase: () => "https://oort.test",
@@ -62,7 +62,9 @@ function stage(answers: Array<Response | Error>) {
         session.access = access;
         session.refresh = refresh;
       },
-      markAuthExpired: () => {},
+      markAuthExpired: () => {
+        session.expired += 1;
+      },
       clearSession: () => {},
     },
   });
@@ -82,7 +84,7 @@ function stage(answers: Array<Response | Error>) {
       return next;
     })
   );
-  return { sent };
+  return { sent, session };
 }
 
 let host: HTMLDivElement;
@@ -140,7 +142,7 @@ describe("승인 컨트롤은 죽은 접근 토큰으로도 한 번 누르면 �
   });
 
   it("갱신이 거절되면 결정을 알리지 않고 빨간 한 줄로 로그인 만료를 말한다", async () => {
-    const { sent } = stage([UNAUTHORIZED(), UNAUTHORIZED()]);
+    const { sent, session } = stage([UNAUTHORIZED(), UNAUTHORIZED()]);
     const onSettled = vi.fn();
 
     await pressApprove(onSettled);
@@ -150,6 +152,29 @@ describe("승인 컨트롤은 죽은 접근 토큰으로도 한 번 누르면 �
     const error = host.querySelector('[data-testid="approval-error"]');
     expect(error?.getAttribute("role")).toBe("alert");
     expect(error?.textContent).toMatch(/로그인이 만료/);
+    // 서버가 갱신을 거절했다: 세션이 끝났다는 선언이 나간다(닿지 못한 갈래와 갈리는 지점).
+    expect(session.expired).toBeGreaterThan(0);
+    // 다시 누를 자리는 남아 있다: 보내는 중에 갇히지 않는다.
+    const button = host.querySelector('[data-testid="approval-approve"]');
+    expect(button?.getAttribute("data-busy")).toBeNull();
+  });
+
+  // #3993. 잠금 화면에서 돌아와 누른 순간 무선이 아직 깨는 중이면 갱신이 서버에 닿지 못한다.
+  // 그것은 세션이 끝났다는 뜻이 아니다: 사용자는 로그아웃 화면이 아니라 「연결을 확인하고 다시
+  // 눌러 주세요」 한 줄을 보고, 같은 자리에서 다시 누를 수 있어야 한다.
+  it("갱신에 닿지 못하면 로그인 만료가 아니라 연결 문구 한 줄이고, 세션은 그대로다", async () => {
+    const { sent, session } = stage([UNAUTHORIZED(), new TypeError("network down")]);
+    const onSettled = vi.fn();
+
+    await pressApprove(onSettled);
+
+    expect(sent.map((request) => request.path)).toEqual([DECISION_PATH, REFRESH_PATH]);
+    expect(onSettled).not.toHaveBeenCalled();
+    const error = host.querySelector('[data-testid="approval-error"]');
+    expect(error?.getAttribute("role")).toBe("alert");
+    expect(error?.textContent).toMatch(/서버에 닿지 못했어요/);
+    expect(error?.textContent).not.toMatch(/로그인이 만료/);
+    expect(session.expired).toBe(0);
     // 다시 누를 자리는 남아 있다: 보내는 중에 갇히지 않는다.
     const button = host.querySelector('[data-testid="approval-approve"]');
     expect(button?.getAttribute("data-busy")).toBeNull();
