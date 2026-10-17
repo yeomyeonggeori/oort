@@ -159,6 +159,11 @@ export function SidebarRow({
     const leave = () => setHovered(false);
     row.addEventListener("mouseenter", enter);
     row.addEventListener("mouseleave", leave);
+    // 구독이 늦게 붙는 길(design-review R4 M1): 닫을 수 없던 행이 포인터를 그 위에 둔 채 닫을 수 있게 바뀌면 - 안 읽음 DM 을
+    // 클릭해 열자마자 읽는 중이라 안 읽음이 0 으로 접히는 때, 새 메시지를 읽는 때 - `mouseenter` 는 이미 지나가서 오지 않는다.
+    // 지금 포인터가 행 안에 있는지는 `:hover` 가 답한다. 우클릭 메뉴(포털)로 건너간 포인터는 행의 자손 위가 아니라
+    // 거짓이다: 위의 네이티브 leave 와 같은 판정이다.
+    if (row.matches(":hover")) setHovered(true);
     return () => {
       row.removeEventListener("mouseenter", enter);
       row.removeEventListener("mouseleave", leave);

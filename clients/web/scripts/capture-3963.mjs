@@ -33,6 +33,9 @@
 //      않는다(H1). 일부러 고르는 클릭은 열린 직후여도 고른다.
 //   S4/S5. 넘치는 메뉴는 열리는 순간 「아래에 더 있다」가 보이고(스크롤 막대가 자리를 차지한다), 넘치지 않는
 //      메뉴에는 막대가 없다(H2).
+//   (design-review R4 수리분)
+//   V. 살아 있는 전환: 포인터를 둔 채 안 읽음 DM 을 열면(읽는 중이라 닫을 수 있게 바뀐다) 행을 벗어났다 다시 들어오지
+//      않아도 X 가 선다(M1). 호버 구독이 늦게 붙으면 mouseenter 는 이미 지나갔다.
 // =============================================================================
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -560,6 +563,7 @@ async function runEngine(browserType, engine, origin) {
   }
   await scenarioOverflow(browserType, engine, origin);
   await scenarioQuickRightClick(browserType, engine, origin);
+  await scenarioLiveTransition(browserType, engine, origin);
   if (full) {
     await scenarioZeroChannels(browserType, engine, origin);
     await scenarioProjection(browserType, engine, origin);
@@ -706,6 +710,43 @@ async function scenarioQuickRightClick(browserType, engine, origin) {
       });
       await page.waitForTimeout(300);
       check(engine, scheme, "Q3 메뉴 안에서 누른 채 다른 항목 위에서 떼는 선택은 열린 직후(400ms 안)여도 그 항목을 고른다", picked.hits.length === 1 && picked.hits[0].includes("알림") && picked.sinceOpenMs < 400, picked);
+    });
+  } finally {
+    await context.close();
+    await browser.close();
+  }
+}
+
+// ── V. 살아 있는 전환: 포인터를 둔 채 안 읽음 DM 을 열면 X 가 선다(design-review R4 M1) ─────────
+// 닫기를 내미는 규칙이 안 읽음 수에 따라 켜지고 꺼지게 된 뒤로, 행은 포인터가 이미 그 위에 있는 채로 「닫을 수 있음」으로 바뀐다.
+// 호버 구독이 그때 붙으면 `mouseenter` 는 이미 지나가서 행을 벗어났다 다시 들어올 때까지 X 가 서지 않았다.
+async function scenarioLiveTransition(browserType, engine, origin) {
+  const scheme = "light";
+  const state = newState();
+  const { browser, context, page } = await open(browserType, origin, scheme, state, undefined, null);
+  try {
+    await attempt(engine, scheme, "V.live-transition", async () => {
+      await page.getByTestId("dm-avatar").first().waitFor({ timeout: 20_000 });
+      await page.mouse.move(900, 450);
+      await rowOf(page, dmId(1)).hover();
+      await page.waitForTimeout(400);
+      const rest = (await page.getByTestId("dm-close").count()) === 0 && (await rowOf(page, dmId(1)).locator('[data-testid="unread-count"]').count()) === 1;
+      check(engine, scheme, "V1 안 읽음 DM 위에 포인터를 둔 동안은 X 가 없고 알약이 있다", rest, null);
+      // 클릭: 포인터는 그 자리에 머문 채 DM 이 열린다. 열린 DM 은 읽는 중이라 안 읽음이 0 으로 접히고 닫을 수 있게 바뀐다.
+      const at = await rowOf(page, dmId(1)).boundingBox();
+      const writesBefore = state.writes.length; // 로그인·첫 대화 열기가 쓴 것은 제외한다
+      const putsBefore = state.puts.length;
+      await rowOf(page, dmId(1)).click();
+      await page.waitForURL(new RegExp(`/c/${dmId(1)}$`), { timeout: 5_000 });
+      const stands = await page.getByTestId("dm-close").waitFor({ timeout: 4_000 }).then(() => true, () => false);
+      const pill = await rowOf(page, dmId(1)).locator('[data-testid="unread-count"]').count();
+      check(engine, scheme, "V2 포인터를 움직이지 않고 연 DM(읽는 중, 알약 없음)에 X 가 선다 - 행을 벗어났다 다시 들어올 필요가 없다", stands && pill === 0, { stands, pill, rowAt: at });
+      if (engine === "chromium" && SHOTS) await page.screenshot({ path: resolve(OUT_DIR, `${PREFIX}-hover-dm-open-live-${scheme}.png`), clip: { x: 0, y: 0, width: 420, height: 900 } });
+      // X 가 서는 것은 쓰기가 아니다: 전환이 보낸 서버 쓰기는 읽음 PUT 뿐이고(이 하네스의 빈 타임라인은 그것도 보내지 않는다)
+      // 멤버십·선호 쓰기는 0건이며, 읽음 PUT 이 있다면 DM 을 연 explicit_open 만이다.
+      const otherWrites = state.writes.slice(writesBefore).filter((w) => !/\/channels\/[^/]+\/read-state$/.test(w));
+      const puts = state.puts.slice(putsBefore);
+      check(engine, scheme, "V3 전환 중 서버 쓰기는 DM 을 연 읽음 PUT(explicit_open) 뿐이다 - X 가 서는 것·호버는 쓰기가 아니다", otherWrites.length === 0 && puts.every((p) => p.channel === dmId(1) && p.body.read_intent === "explicit_open"), { otherWrites, puts });
     });
   } finally {
     await context.close();

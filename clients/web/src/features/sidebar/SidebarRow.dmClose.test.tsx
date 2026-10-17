@@ -42,6 +42,28 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function tree(
+  props: Partial<Parameters<typeof SidebarRow>[0]>,
+  wrapLink?: (link: ReactElement) => ReactElement
+): ReactElement {
+  return createElement(
+    MemoryRouter,
+    { initialEntries: ["/"] },
+    createElement(
+      "ul",
+      null,
+      createElement(SidebarRow, {
+        to: "/c/00000000-0000-7000-8000-000000000301",
+        icon: createElement("span", null, "이"),
+        label: "이도현",
+        testId: "channel-item",
+        wrapLink,
+        ...props,
+      })
+    )
+  );
+}
+
 function mount(
   props: Partial<Parameters<typeof SidebarRow>[0]> = {},
   wrapLink?: (link: ReactElement) => ReactElement
@@ -51,24 +73,14 @@ function mount(
   document.body.append(host);
   root = createRoot(host);
   act(() => {
-    root?.render(
-      createElement(
-        MemoryRouter,
-        { initialEntries: ["/"] },
-        createElement(
-          "ul",
-          null,
-          createElement(SidebarRow, {
-            to: "/c/00000000-0000-7000-8000-000000000301",
-            icon: createElement("span", null, "이"),
-            label: "이도현",
-            testId: "channel-item",
-            wrapLink,
-            ...props,
-          })
-        )
-      )
-    );
+    root?.render(tree(props, wrapLink));
+  });
+}
+
+/** 같은 루트에 다른 프롭으로 다시 그린다 - 행 요소(`<li>`)는 그대로 남는다. */
+function update(props: Partial<Parameters<typeof SidebarRow>[0]>): void {
+  act(() => {
+    root?.render(tree(props));
   });
 }
 
@@ -149,6 +161,49 @@ describe("호버 X 가 말하는 것", () => {
     host?.remove();
     mount();
     expect(link().querySelector("[data-row-icon]")?.hasAttribute("data-icon-kind")).toBe(false);
+  });
+});
+
+describe("닫을 수 없던 행이 포인터를 둔 채 닫을 수 있게 바뀔 때 (design-review R4 M1)", () => {
+  // 닫기를 내미는 규칙이 안 읽음 수에 따라 켜지고 꺼지면서(소유자 결정 2026-10-17), 호버 구독은 행이 닫을 수 있게 바뀌는
+  // 순간에야 붙는다. 포인터가 이미 행 위에 있었으면 `mouseenter` 는 지나갔으니, 지금 포인터가 어디 있는지를 `:hover` 로 묻는다.
+  // jsdom 은 `:hover` 를 모른다(항상 거짓): 행 요소에 포인터가 어디 있다는 답을 건다.
+  function pointerIsOver(over: boolean): void {
+    const row = li();
+    const original = row.matches.bind(row);
+    row.matches = (selector: string) => (selector === ":hover" ? over : original(selector));
+  }
+
+  it("포인터가 행 위에 머문 채 닫을 수 있게 바뀌면 mouseenter 없이 X 가 선다", () => {
+    mount({ unreadCount: 2 }); // 안 읽음이 있어 닫기를 내밀지 않는다: 구독도 없다
+    pointerIsOver(true);
+    expect(x()).toBeNull();
+    update({ unreadCount: 0, onClose: () => undefined }); // 열어서 읽는 중: 닫을 수 있다
+    expect(x()).not.toBeNull();
+    expect(link().hasAttribute("data-row-close")).toBe(true);
+  });
+
+  it("포인터가 행 밖이면 닫을 수 있게 바뀌어도 X 는 서지 않는다 - 호버할 때만 선다", () => {
+    mount({ unreadCount: 2 });
+    pointerIsOver(false);
+    update({ unreadCount: 0, onClose: () => undefined });
+    expect(x()).toBeNull();
+    enter();
+    expect(x()).not.toBeNull();
+  });
+
+  it("닫을 수 없게 되면 내려가고, 포인터가 머문 채 다시 닫을 수 있게 되면 또 선다", () => {
+    mount({ onClose: () => undefined });
+    pointerIsOver(true);
+    enter();
+    expect(x()).not.toBeNull();
+    update({ unreadCount: 3 }); // 새 메시지: 안 읽음이 생겨 닫기를 내밀지 않는다
+    expect(x()).toBeNull();
+    expect(link().hasAttribute("data-row-close")).toBe(false);
+    update({ unreadCount: 0, onClose: () => undefined }); // 읽었다: 포인터는 아직 행 위에 있다
+    expect(x()).not.toBeNull();
+    leave(); // 행을 떠나면 내려간다
+    expect(x()).toBeNull();
   });
 });
 
