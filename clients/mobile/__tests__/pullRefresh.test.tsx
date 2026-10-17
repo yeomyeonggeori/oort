@@ -34,6 +34,7 @@ import {FixedScheme} from '../src/design/theme';
 //   - 화면의 목록에서 `{...scrollProps}` 를 빼면 → 「모든 화면이 scrollProps 를 펼친다」(소스 스캔)가 붉다
 //   - 머리를 음수 top 으로 되돌리면 → 「레이아웃은 내용 맨 위(top 0)이고 transform 으로 올린다」가 붉다
 //   - 목록·빈 상태가 PULL_FILL 을 빠뜨리면 → 「빈 자리에서도 당겨진다」와 소스 스캔이 붉다
+//   - 실패 안내에 고정 lineHeight 를 다시 넣으면 → 「실패 안내는 Dynamic Type 에 상한이 있고」가 붉다
 //   - 돌아오는 동안의 래치(spun)를 지우면 → 「끝난 뒤 내용이 돌아오는 동안에도 위성은 계속 돈다」가 붉다
 // =============================================================================
 
@@ -449,6 +450,8 @@ describe('실패는 시각으로도 선다', () => {
     const text = screen.getByTestId('pull-refresh-failed', HIDDEN);
     expect(text.props.maxFontSizeMultiplier).toBe(BAR_CONTROL_MAX_SCALE);
     expect(text.props.numberOfLines).toBe(2);
+    // 줄 높이를 고정하지 않는다: 글자가 상한까지 자라도 줄이 겹치거나 잘리지 않고 글자 크기를 따른다.
+    expect(flatten(text.props.style).lineHeight).toBeUndefined();
   });
 
   it('실패 안내의 접근성: role alert, 이름은 안내 문장, busy 가 아니다', async () => {
