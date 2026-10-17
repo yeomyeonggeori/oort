@@ -17,6 +17,7 @@ export {
   agentLabel,
   agentLabelAsSubject,
   agentTurnBadgeCopy,
+  isRespondingLine,
   MAX_ACTIVITY_LINES,
   TURN_STALE_SENTENCE,
   turnHubSentence,

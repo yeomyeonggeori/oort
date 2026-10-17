@@ -100,36 +100,65 @@ export function agentLabelAsSubject(parts: AgentNameParts): string {
 }
 
 /**
+ * 에이전트가 요청을 가져가 답을 쓰는 중인 줄인가 (#4020). 대화 화면 컴포저 위의 줄이
+ * 「답하는 중」이라고 말하는 조건이고, 점 애니메이션이 도는 조건이기도 하다.
+ *
+ * - 진행 보고가 있는 턴(`working`)이다.
+ * - 또는 서버가 「가져감」이라 답한 run이고, 가져간 뒤 소식이 끊기지 않았다
+ *   (`leaseState !== "stale"`). 소식이 끊긴 가져감에 점을 돌리면 아무도 일하지 않는 줄이
+ *   일하는 것처럼 보인다.
+ *
+ * 대기 중(`queued`, 아직 아무도 가져가지 않음)과 승인 대기는 포함하지 않는다. 그 둘은
+ * 「답하는 중」이 아니다: 에이전트가 쓰고 있지 않다.
+ */
+export function isRespondingLine(line: AgentActivityLine): boolean {
+  if (line.state === "working") return true;
+  return (
+    line.state === "queued" &&
+    line.server?.phase === "claimed" &&
+    line.server.leaseState !== "stale"
+  );
+}
+
+/**
  * What follows the name on a composer line. Split out because the name is drawn
  * in the agent token and the rest is not, while the tests need the sentence.
+ *
+ * 「답하는 중」은 대화 화면의 이 줄에만 쓰는 낱말이다(#4020, 성재 결재). 사이드바
+ * 알약·작업 패널은 계속 「작업 중」이다. 줄임표는 이 문장에 없다: 화면이 점으로
+ * 그리고(움직이거나, 동작 줄이기에서는 멈춘 채로), 보조기술은 문장만 읽는다.
  */
 export function activitySuffix(line: AgentActivityLine): string {
   if (line.state === "awaiting_approval") {
     return `${particleFor(line.name.name)} 승인을 기다립니다`;
   }
-  if (line.state === "queued") {
-    // 아직 시작하지 않은 run에는 「작업 중」이라는 낱말을 쓰지 않는다(ADR-0200).
-    // 서버가 말해 준 단계(대기 n번째·가져감)가 있으면 그대로, 없으면 대기 중이다.
-    return line.server === undefined
-      ? `${particleFor(line.name.name)} 대기 중`
-      : `: ${runPhaseLabel(line.server)}`;
+  if (isRespondingLine(line)) {
+    return `${particleFor(line.name.name)} 답하는 중`; // design-preflight-allow: 성재가 #4020에서 정한 문장(「grok이 답하는 중…」). 「명사 + 중」 규칙은 진행 라벨 자리용이고 이것은 주어가 있는 문장 조각이다.
   }
-  return line.headline === undefined
-    ? `${particleFor(line.name.name)} 작업 중`
-    : `: ${line.headline}`;
+  // 아직 시작하지 않은 run에는 「작업 중」이라는 낱말을 쓰지 않는다(ADR-0200).
+  // 서버가 말해 준 단계(대기 n번째·가져감)가 있으면 그대로, 없으면 대기 중이다.
+  return line.server === undefined
+    ? `${particleFor(line.name.name)} 대기 중`
+    : `: ${runPhaseLabel(line.server)}`;
 }
 
 /**
  * 활동 줄 옆에 붙는 근거 한 줄(「11분째 기다려요 · 에이전트 앞에 2건」). 시간이 흐르면
- * 숫자가 바뀌므로 접근성 이름이 아니라 보이는 보조 글에만 쓴다.
+ * 숫자가 바뀌므로 접근성 이름이 아니라 보이는 보조 글에만 쓴다. 에이전트가 보고한
+ * 진행 단계(headline)는 이 줄 맨 앞에 선다: 「답하는 중」이라는 문장을 지키고, 단계는
+ * 그 곁의 보조 글이다.
  */
 export function activityDetail(
   line: AgentActivityLine,
   nowMs: number
 ): string | undefined {
-  if (line.server === undefined) return undefined;
   if (line.state === "awaiting_approval") return undefined;
-  return runPhaseDetail(line.server, nowMs);
+  const parts: string[] = [];
+  if (line.headline !== undefined && line.headline !== "") parts.push(line.headline);
+  const server =
+    line.server === undefined ? undefined : runPhaseDetail(line.server, nowMs);
+  if (server !== undefined) parts.push(server);
+  return parts.length === 0 ? undefined : parts.join(" · ");
 }
 
 /** The whole line as one string (titles, tests, accessible names). */
