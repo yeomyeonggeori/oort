@@ -28,7 +28,8 @@ import { pauseUntilStateLabel } from "./pauseUntil";
 //
 // 기한이 지났는지를 이 파일이 판정해 줄을 내리지 않는다. 클라이언트 시계로 풀면 서버와 어긋난
 // 채로 「멈춰 있지 않다」고 말하게 된다(서버는 푸시 판정 시점에 기한을 비교한다). 기한이 지난 줄은
-// 그대로 남고, `pauseBannerElapsed` 가 「서버에 다시 물을 때」만 알려 준다. 줄이 사라지는 것은
+// 그대로 남는다. 줄이 기대는 기한은 `untilMs` 로 내보내고, 그것이 지났을 때 서버에 다시 묻는 것은
+// 호출자의 몫이다(`pauseUntilElapsed`, 두 클라의 `useRecheckWhenElapsed`). 줄이 사라지는 것은
 // 서버의 새 답이 도착했을 때다.
 // =============================================================================
 
@@ -69,7 +70,7 @@ export interface PauseBanner {
   action: string;
   /** 화면 낭독용 한 문장 — 「알림 일시 중지 중 · 오후 9:30까지 · 다시 켜기」. */
   label: string;
-  /** 이 줄이 기대는 기한. 지나면 서버에 다시 물을 때다(`pauseBannerElapsed`). */
+  /** 이 줄이 기대는 기한. 지나면 서버에 다시 물을 때다(`pauseUntilElapsed`). */
   untilMs?: number;
 }
 
@@ -106,15 +107,4 @@ export function pauseBanner(
     };
   }
   return null;
-}
-
-/**
- * 줄이 기대는 기한이 지났는가 — **서버에 다시 물을 때**다. 줄을 내리는 판정이 아니다: 줄은
- * 서버의 새 답이 도착해 `pauseBanner` 가 `null` 을 낼 때 사라진다.
- */
-export function pauseBannerElapsed(
-  banner: PauseBanner | null,
-  nowMs: number
-): boolean {
-  return banner?.untilMs !== undefined && banner.untilMs <= nowMs;
 }

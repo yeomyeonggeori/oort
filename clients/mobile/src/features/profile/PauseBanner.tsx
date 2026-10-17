@@ -1,9 +1,9 @@
 import {PRESENCE_WRITE_FAILED} from '@momo/core/features/presence/model';
 import {
   pauseBanner,
-  pauseBannerElapsed,
   type PauseBannerKind,
 } from '@momo/core/features/presence/pauseBanner';
+import {PAUSE_UNTIL_OFFLINE_REASON} from '@momo/core/features/presence/pauseUntil';
 import {NOTIFICATION_PAUSE_SAVE_FAILED} from '@momo/core/features/settings/notificationRules';
 import {memberFor} from '@momo/core/features/workspace/directory';
 import {useQueryClient} from '@tanstack/react-query';
@@ -22,10 +22,12 @@ import {
   type Palette,
 } from '../../design/tokens';
 import {useNow} from '../../lib/useNow';
+import {useOnline} from '../inbox/useOnline';
 import {useDirectory, workspaceKeys} from '../workspace/queries';
 import {
   notificationRulesKey,
   usePauseNotifications,
+  useRecheckWhenElapsed,
   useSetPresence,
 } from './selfStatus';
 
@@ -41,7 +43,8 @@ import {
 //   * 아니면 줄이 없다(자리도 없다).
 //
 // 어느 줄이 서는지와 문장은 코어(`presence/pauseBanner.ts`)가 정한다. 웹 사이드바가 같은 것을
-// 쓴다.
+// 쓴다. 제목과 기한은 두 줄로 쌓는다(웹 사이드바 폭에서는 한 줄에 못 들어 의도한 두 줄로 쌓았고, 같은
+// 줄이 두 표면에서 같은 모양이도록 폰도 같게 한다). 문장 전체는 단추의 접근 이름이 갖는다.
 //
 // ## 쓰기는 새 길이 없다
 //
@@ -54,8 +57,15 @@ import {
 //
 // 서버가 만료를 판정한다(푸시 판정 시점 비교). 폰이 타이머로 풀면 서버와 어긋난 채로 「멈춰 있지
 // 않다」고 말한다. 대신 **다시 묻는다**: 인박스 탭이 보이게 되거나 앱이 앞으로 돌아오면, 그리고 줄이
-// 기대는 기한이 지난 동안은 분 틱마다 규칙과 명부를 다시 읽는다. 줄은 서버의 새 답이 올 때 사라진다.
-// 서버가 아직 켜져 있다고 답하면(두 시계의 차이) 줄은 그대로 남고 다음 틱에 다시 묻는다.
+// 기대는 기한이 지나면(`useRecheckWhenElapsed` — 프로필 시트와 같은 훅) 규칙과 명부를 다시 읽는다.
+// 줄은 서버의 새 답이 올 때 사라진다. 서버가 아직 켜져 있다고 답하면(두 시계의 차이) 줄은 그대로
+// 남고 분 틱마다 다시 묻는다.
+//
+// ## 끊겨 있으면 단추 자리에 이유를 말한다
+//
+// 끊긴 채 누른 뮤테이션은 낙관값만 칠하고 멈췄다가 재연결 뒤에 나간다 — 줄은 사라졌는데 서버는 아직
+// 모른다. 그래서 끊긴 동안은 단추를 거두고 그 자리에 이유를 말한다(승인 컨트롤이 오프라인에서 하는 것과
+// 같다: 버튼을 남겨 두지도, 말없이 치우지도 않는다).
 // =============================================================================
 
 export function PauseBanner({
@@ -71,6 +81,7 @@ export function PauseBanner({
   const styles = useStyles(buildStyles);
   const client = useQueryClient();
   const now = useNow();
+  const online = useOnline();
   const pause = usePauseNotifications(workspaceId);
   const {directory} = useDirectory(workspaceId);
   const setPresence = useSetPresence(workspaceId, selfId);
@@ -86,7 +97,9 @@ export function PauseBanner({
     },
     now,
   );
-  const elapsed = pauseBannerElapsed(banner, now);
+
+  // 줄이 기대는 기한이 지나면 서버에 다시 묻는다(스스로 내려가지 않는다).
+  useRecheckWhenElapsed(workspaceId, banner?.untilMs);
 
   // 서버에 다시 묻는다. 규칙과 명부 둘 다다 — 일시 중지 줄은 규칙, 방해 금지 줄은 명부에 기댄다.
   const refresh = useCallback(() => {
@@ -108,12 +121,6 @@ export function PauseBanner({
     return () => subscription.remove();
   }, [active, refresh]);
 
-  // 줄이 기대는 기한이 지났다 — 서버가 뭐라고 하는지 묻는다. 서버가 아직 켜져 있다고 답하면 줄은
-  // 남고, 분 틱(`now`)이 돌 때마다 다시 묻는다. 서버 답이 줄을 지운다.
-  useEffect(() => {
-    if (elapsed) refresh();
-  }, [elapsed, now, refresh]);
-
   // 실패 문장은 **누른 줄에만** 붙는다. 줄이 사라졌다 다시 서면 옛 실패가 새 줄에 남지 않는다.
   const [attempted, setAttempted] = useState<PauseBannerKind | null>(null);
   const kind = banner?.kind ?? null;
@@ -127,14 +134,16 @@ export function PauseBanner({
   const failed =
     attempted === banner.kind &&
     (banner.kind === 'paused' ? pause.failed : setPresence.isError);
-  const failure = failed
-    ? banner.kind === 'paused'
-      ? NOTIFICATION_PAUSE_SAVE_FAILED
-      : PRESENCE_WRITE_FAILED
-    : null;
+  const note = !online
+    ? PAUSE_UNTIL_OFFLINE_REASON
+    : failed
+      ? banner.kind === 'paused'
+        ? NOTIFICATION_PAUSE_SAVE_FAILED
+        : PRESENCE_WRITE_FAILED
+      : null;
 
   const press = () => {
-    if (busy) return;
+    if (busy || !online) return;
     setAttempted(banner.kind);
     if (banner.kind === 'paused') pause.resume();
     else setPresence.mutate({status: 'auto'});
@@ -145,45 +154,47 @@ export function PauseBanner({
       <View style={styles.row}>
         {/* 단추 이름이 문장 전체(`banner.label`)인 것은 새 버전 배너와 같다: 컨트롤 목록에서 「다시
             켜기」 하나만 읽히면 무엇을 다시 켜는지 모른다. */}
-        <Sentence
-          style={styles.text}
-          numberOfLines={3}
-          maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
-          testID="pause-banner-text">
-          <Text
+        <View style={styles.text}>
+          <Sentence
             style={styles.title}
-            maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
+            numberOfLines={2}
+            maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+            testID="pause-banner-title">
             {banner.title}
-          </Text>
+          </Sentence>
           {banner.detail === undefined ? null : (
             <Text
               style={styles.detail}
-              maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
-              {` · ${banner.detail}`}
+              numberOfLines={1}
+              maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+              testID="pause-banner-detail">
+              {banner.detail}
             </Text>
           )}
-        </Sentence>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={banner.label}
-          accessibilityState={{busy, disabled: busy}}
-          disabled={busy}
-          onPress={press}
-          style={({pressed}) => [styles.action, pressed && styles.pressed]}
-          testID="pause-banner-action">
-          <Text
-            style={styles.actionLabel}
-            maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
-            {banner.action}
-          </Text>
-        </Pressable>
+        </View>
+        {online ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={banner.label}
+            accessibilityState={{busy, disabled: busy}}
+            disabled={busy}
+            onPress={press}
+            style={({pressed}) => [styles.action, pressed && styles.pressed]}
+            testID="pause-banner-action">
+            <Text
+              style={styles.actionLabel}
+              maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
+              {banner.action}
+            </Text>
+          </Pressable>
+        ) : null}
       </View>
-      {failure === null ? null : (
+      {note === null ? null : (
         <Sentence
           accessibilityLiveRegion="polite"
-          style={styles.failure}
-          testID="pause-banner-failure">
-          {failure}
+          style={online ? styles.failure : styles.offline}
+          testID={online ? 'pause-banner-failure' : 'pause-banner-offline'}>
+          {note}
         </Sentence>
       )}
     </View>
@@ -205,9 +216,9 @@ const buildStyles = (color: Palette) =>
       backgroundColor: color.surface,
     },
     row: {flexDirection: 'row', alignItems: 'center', columnGap: space.md},
-    text: {flex: 1},
+    text: {flex: 1, gap: space.xs},
     title: {fontSize: font.label, fontWeight: '600', color: color.text},
-    detail: {fontSize: font.label, color: color.textMuted},
+    detail: {fontSize: font.meta, color: color.textMuted},
     action: {
       minHeight: TOUCH_TARGET,
       justifyContent: 'center',
@@ -219,4 +230,5 @@ const buildStyles = (color: Palette) =>
     actionLabel: {fontSize: font.label, fontWeight: '700', color: color.accentText},
     pressed: {opacity: 0.85},
     failure: {fontSize: font.meta, color: color.dangerText, lineHeight: 18},
+    offline: {fontSize: font.meta, color: color.textMuted, lineHeight: 18},
   });

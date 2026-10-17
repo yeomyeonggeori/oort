@@ -296,7 +296,14 @@ async function settledAfterReads() {
 
 const presenceWrites = () => server.writes.filter(w => w.path === 'presence');
 const rulesWrites = () => server.writes.filter(w => w.path === 'notification-rules');
-const bannerText = () => screen.getByTestId('pause-banner-text');
+/** 줄의 제목과 (있으면) 기한을 「 · 」로 이은 글 — 화면에서는 두 줄로 쌓인다. */
+const lineOf = (hidden = false) => {
+  const title = screen.getByTestId('pause-banner-title', {includeHiddenElements: hidden}).props
+    .children as string;
+  const detail = screen.queryByTestId('pause-banner-detail', {includeHiddenElements: hidden})?.props
+    .children as string | undefined;
+  return detail === undefined ? title : `${title} · ${detail}`;
+};
 const action = () => screen.getByTestId('pause-banner-action');
 
 describe('인박스 맨 위의 멈춤 줄 (ADR-0204 D3)', () => {
@@ -306,7 +313,10 @@ describe('인박스 맨 위의 멈춤 줄 (ADR-0204 D3)', () => {
     await openInbox();
     await shownBanner();
 
-    expect(bannerText()).toHaveTextContent('알림 일시 중지 중 · 오후 9:30까지');
+    expect(lineOf()).toBe('알림 일시 중지 중 · 오후 9:30까지');
+    // 제목과 기한은 두 칸으로 쌓인다(웹 사이드바와 같은 모양). 문장 전체는 단추의 이름이다.
+    expect(screen.getByTestId('pause-banner-title')).toHaveTextContent('알림 일시 중지 중');
+    expect(screen.getByTestId('pause-banner-detail')).toHaveTextContent('오후 9:30까지');
     expect(action()).toHaveTextContent('다시 켜기');
     expect(action().props.accessibilityLabel).toBe('알림 일시 중지 중 · 오후 9:30까지 · 다시 켜기');
     expect(action().props.accessibilityRole).toBe('button');
@@ -339,7 +349,7 @@ describe('인박스 맨 위의 멈춤 줄 (ADR-0204 D3)', () => {
     server.rules = {dnd: true, mentionOverridesMute: false};
     await openInbox();
     await shownBanner();
-    expect(bannerText()).toHaveTextContent('알림 일시 중지 중 · 기한 없음');
+    expect(lineOf()).toBe('알림 일시 중지 중 · 기한 없음');
     expect(action().props.accessibilityLabel).toBe('알림 일시 중지 중 · 기한 없음 · 다시 켜기');
   });
 
@@ -362,7 +372,8 @@ describe('인박스 맨 위의 멈춤 줄 (ADR-0204 D3)', () => {
     server.self = selfRow({presenceStatus: 'dnd', dndUntilMs: at(17, 9)});
     await openInbox();
     await shownBanner();
-    expect(bannerText()).toHaveTextContent('상태는 아직 방해 금지예요');
+    expect(lineOf()).toBe('상태는 아직 방해 금지예요');
+    expect(screen.queryByTestId('pause-banner-detail')).toBeNull();
     expect(action()).toHaveTextContent('풀기');
     expect(action().props.accessibilityLabel).toBe('상태는 아직 방해 금지예요 · 풀기');
   });
@@ -373,7 +384,7 @@ describe('인박스 맨 위의 멈춤 줄 (ADR-0204 D3)', () => {
     server.self = selfRow({presenceStatus: 'dnd', dndUntilMs: at(16, 22, 0)});
     await openInbox();
     await shownBanner();
-    expect(bannerText()).toHaveTextContent('알림 일시 중지 중 · 오후 10:00까지');
+    expect(lineOf()).toBe('알림 일시 중지 중 · 오후 10:00까지');
     expect(action()).toHaveTextContent('다시 켜기');
   });
 });
@@ -407,7 +418,7 @@ describe('「다시 켜기」와 「풀기」 — 쓰기 모양', () => {
     await waitFor(() => expect(rulesWrites()).toHaveLength(1), {timeout: 10_000});
     expect(rulesWrites()[0].body).toEqual({dnd: false});
     await waitFor(() => expect(action()).toHaveTextContent('풀기'), {timeout: 10_000});
-    expect(bannerText()).toHaveTextContent('상태는 아직 방해 금지예요');
+    expect(lineOf()).toBe('상태는 아직 방해 금지예요');
     expect(presenceWrites()).toEqual([]);
   });
 
@@ -441,7 +452,7 @@ describe('「다시 켜기」와 「풀기」 — 쓰기 모양', () => {
     expect(screen.getByTestId('pause-banner-failure')).toHaveTextContent(
       '알림 설정을 바꾸지 못했어요. 다시 시도하세요.',
     );
-    expect(bannerText()).toHaveTextContent('알림 일시 중지 중 · 오후 10:00까지');
+    expect(lineOf()).toBe('알림 일시 중지 중 · 오후 10:00까지');
 
     // 다시 눌러 성공하면 이유가 걷힌다.
     server.rulesWriteFails = false;
@@ -486,7 +497,7 @@ describe('「다시 켜기」와 「풀기」 — 쓰기 모양', () => {
     server.rules = {dnd: true, mentionOverridesMute: false, dndUntilMs: at(16, 23, 0)};
     emit('active');
     await shownBanner();
-    expect(bannerText()).toHaveTextContent('알림 일시 중지 중 · 오후 11:00까지');
+    expect(lineOf()).toBe('알림 일시 중지 중 · 오후 11:00까지');
     expect(screen.queryByTestId('pause-banner-failure')).toBeNull();
   });
 });
@@ -496,7 +507,6 @@ describe('만료는 서버가 말한다 — 스스로 내려가지 않고 다시
   // 「기한이 지나서 다시 물었다」와 「탭이 열려서 다시 물었다」를 가를 수 없다. 숨은 탭 안의 줄도
   // 같은 훅이 돌고 있으므로 `includeHiddenElements` 로 그 줄을 본다.
   const hiddenBanner = () => screen.getByTestId('pause-banner', {includeHiddenElements: true});
-  const hiddenText = () => screen.getByTestId('pause-banner-text', {includeHiddenElements: true});
 
   it('기한이 지난 줄은 서버에 다시 묻고, 답이 오기 전에는 서 있다가 서버가 꺼졌다고 답하면 사라진다', async () => {
     freezeClock(FRI_2107);
@@ -506,14 +516,14 @@ describe('만료는 서버가 말한다 — 스스로 내려가지 않고 다시
     server.rulesAfter = [{dnd: false, mentionOverridesMute: false}];
     server.holdRulesGetAt = 2;
     await mountHome();
-    expect(hiddenText()).toHaveTextContent('알림 일시 중지 중 · 오후 9:00까지');
+    expect(lineOf(true)).toBe('알림 일시 중지 중 · 오후 9:00까지');
 
     // 탭도 앱 전환도 없이 기한이 지났다는 이유만으로 두 번째 읽기가 나간다.
     await waitFor(() => expect(server.heldRulesGet).not.toBeNull(), {timeout: 10_000});
     expect(server.rulesGets).toBe(2);
     // 서버 답이 오기 전: 줄은 그대로다.
     expect(hiddenBanner()).toBeTruthy();
-    expect(hiddenText()).toHaveTextContent('알림 일시 중지 중 · 오후 9:00까지');
+    expect(lineOf(true)).toBe('알림 일시 중지 중 · 오후 9:00까지');
 
     await act(async () => {
       server.heldRulesGet?.();
@@ -536,7 +546,7 @@ describe('만료는 서버가 말한다 — 스스로 내려가지 않고 다시
     });
     // 서버가 두 번 다 켜져 있다고 답했다. 기한이 지났다는 이유로 줄을 내리지 않는다.
     expect(hiddenBanner()).toBeTruthy();
-    expect(hiddenText()).toHaveTextContent('알림 일시 중지 중 · 오후 9:00까지');
+    expect(lineOf(true)).toBe('알림 일시 중지 중 · 오후 9:00까지');
   });
 
   it('방해 금지 줄도 방해 금지의 기한이 지나면 다시 묻는다', async () => {
@@ -544,7 +554,7 @@ describe('만료는 서버가 말한다 — 스스로 내려가지 않고 다시
     // 일시 중지는 꺼졌고 상태만 방해 금지인데 그 기한이 이미 지났다(명부 캐시가 낡았다).
     server.self = selfRow({presenceStatus: 'dnd', dndUntilMs: at(16, 21, 0)});
     await mountHome();
-    expect(hiddenText()).toHaveTextContent('상태는 아직 방해 금지예요');
+    expect(lineOf(true)).toBe('상태는 아직 방해 금지예요');
     await waitFor(() => expect(server.rosterGets).toBeGreaterThanOrEqual(2), {timeout: 10_000});
     await waitFor(() => expect(server.rulesGets).toBeGreaterThanOrEqual(2), {timeout: 10_000});
   });
@@ -623,5 +633,58 @@ describe('다시 읽는 때 — 탭이 보이게 될 때, 앱이 앞으로 돌�
     fireEvent.press(screen.getByTestId('tab-inbox'));
     await waitFor(() => expect(server.rulesGets).toBeGreaterThan(before), {timeout: 10_000});
     await waitFor(() => expect(screen.queryByTestId('pause-banner')).toBeNull(), {timeout: 10_000});
+  });
+});
+
+const netInfo = (
+  jest.requireMock('@react-native-community/netinfo') as {
+    default: {
+      __emit: (state: {isConnected: boolean | null; isInternetReachable: boolean | null}) => void;
+    };
+  }
+).default;
+
+describe('끊겨 있으면 단추 자리에 이유를 말한다 (#2899 H2 와 같은 이유)', () => {
+  // 끊긴 채 누른 뮤테이션은 낙관값만 칠하고 멈췄다가 재연결 뒤에 나간다 — 줄은 사라졌는데 서버는 아직
+  // 모른다. 승인 컨트롤이 오프라인에서 하는 것처럼 단추를 남겨 두지도, 말없이 치우지도 않는다.
+  afterEach(() => {
+    act(() => netInfo.__emit({isConnected: true, isInternetReachable: true}));
+  });
+
+  it('끊기면 단추를 거두고 이유를 말하며 줄은 그대로 서 있다. 다시 이어지면 단추가 돌아온다', async () => {
+    freezeClock(FRI_2107);
+    server.rules = {dnd: true, mentionOverridesMute: false, dndUntilMs: at(16, 22, 0)};
+    await openInbox();
+    await shownBanner();
+    expect(action()).toBeTruthy();
+
+    act(() => netInfo.__emit({isConnected: false, isInternetReachable: false}));
+    await waitFor(() =>
+      expect(screen.getByTestId('pause-banner-offline')).toHaveTextContent(
+        '연결이 끊겨 지금은 바꿀 수 없어요.',
+      ),
+    );
+    expect(screen.queryByTestId('pause-banner-action')).toBeNull();
+    expect(lineOf()).toBe('알림 일시 중지 중 · 오후 10:00까지');
+    expect(server.writes).toEqual([]);
+
+    act(() => netInfo.__emit({isConnected: true, isInternetReachable: true}));
+    await waitFor(() => expect(screen.getByTestId('pause-banner-action')).toBeTruthy());
+    expect(screen.queryByTestId('pause-banner-offline')).toBeNull();
+    fireEvent.press(action());
+    await waitFor(() => expect(rulesWrites()).toHaveLength(1));
+    expect(rulesWrites()[0].body).toEqual({dnd: false});
+  });
+
+  it('방해 금지 줄도 같다 — 끊긴 동안은 「풀기」를 세우지 않는다', async () => {
+    freezeClock(FRI_2107);
+    server.self = selfRow({presenceStatus: 'dnd', dndUntilMs: at(17, 9)});
+    await openInbox();
+    await shownBanner();
+    act(() => netInfo.__emit({isConnected: false, isInternetReachable: false}));
+    await waitFor(() => expect(screen.getByTestId('pause-banner-offline')).toBeTruthy());
+    expect(screen.queryByTestId('pause-banner-action')).toBeNull();
+    expect(lineOf()).toBe('상태는 아직 방해 금지예요');
+    expect(server.writes).toEqual([]);
   });
 });

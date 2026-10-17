@@ -34,6 +34,12 @@ const ME = "00000000-0000-7000-8000-000000000101";
 const fetchNotificationRules = vi.hoisted(() => vi.fn());
 const patchNotificationRules = vi.hoisted(() => vi.fn());
 const setPresenceStatus = vi.hoisted(() => vi.fn());
+const connection = vi.hoisted(() => ({ offline: false }));
+
+// 연결 신호는 세션 컨텍스트에 기대므로(`useOffline`) 시험이 값을 쥔다.
+vi.mock("@/features/common/useOffline", () => ({
+  useOffline: () => connection.offline,
+}));
 
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
@@ -98,6 +104,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  connection.offline = false;
   // 시계만 가짜다: 기한 계산이 고정된 지금을 읽고, 분 틱은 시험이 손으로 넘긴다. 타이머·약속은 진짜다.
   vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
   vi.setSystemTime(FRI_2107);
@@ -387,6 +394,42 @@ describe("만료는 서버가 말한다 — 스스로 내려가지 않고 다시
     await mount();
     await flush(30);
     expect(fetchNotificationRules).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("끊겨 있으면 단추 자리에 이유를 말한다 (#2899 H2 와 같은 이유)", () => {
+  // 끊긴 채 누른 뮤테이션은 낙관값만 칠하고 멈췄다가 재연결 뒤에 나간다 — 줄은 사라졌는데 서버는 아직
+  // 모른다. 승인 컨트롤이 오프라인에서 하는 것처럼 단추를 남겨 두지도, 말없이 치우지도 않는다.
+  const offlineLine = () => document.querySelector('[data-testid="pause-banner-offline"]');
+
+  it("끊기면 단추를 거두고 이유를 말하며 줄은 그대로 서 있다. 다시 이어지면 단추가 돌아온다", async () => {
+    fetchNotificationRules.mockResolvedValue(rules({ dnd: true, dndUntilMs: at(16, 22, 0) }));
+    const { rerender } = await mount();
+    expect(button()).not.toBeNull();
+    expect(offlineLine()).toBeNull();
+
+    connection.offline = true;
+    await rerender(rosterMember());
+    expect(button()).toBeNull();
+    expect(offlineLine()?.textContent).toContain("연결이 끊겨 지금은 바꿀 수 없어요.");
+    expect(lineText()).toBe("알림 일시 중지 중 · 오후 10:00까지");
+    expect(patchNotificationRules).not.toHaveBeenCalled();
+
+    connection.offline = false;
+    await rerender(rosterMember());
+    expect(button()).not.toBeNull();
+    expect(offlineLine()).toBeNull();
+    await press(button());
+    expect(patchNotificationRules).toHaveBeenCalledWith(WS, { dnd: false });
+  });
+
+  it("방해 금지 줄도 같다 — 끊긴 동안은 「풀기」를 세우지 않는다", async () => {
+    connection.offline = true;
+    await mount(rosterMember({ presenceStatus: "dnd", dndUntilMs: at(17, 9) }));
+    expect(button()).toBeNull();
+    expect(offlineLine()).not.toBeNull();
+    expect(lineText()).toBe("상태는 아직 방해 금지예요");
+    expect(setPresenceStatus).not.toHaveBeenCalled();
   });
 });
 

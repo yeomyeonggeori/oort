@@ -3,9 +3,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { RosterMember } from "@momo/core/lib/api";
 import {
   pauseBanner,
-  pauseBannerElapsed,
   type PauseBannerKind,
 } from "@momo/core/features/presence/pauseBanner";
+import { PAUSE_UNTIL_OFFLINE_REASON } from "@momo/core/features/presence/pauseUntil";
 import { PRESENCE_WRITE_FAILED } from "@momo/core/features/presence/model";
 import {
   fetchNotificationRules,
@@ -14,7 +14,9 @@ import {
   type NotificationRules,
 } from "@momo/core/features/settings/notificationRules";
 import { InlineBanner } from "@/features/common/States";
+import { useOffline } from "@/features/common/useOffline";
 import { notificationRulesQueryKey } from "@/features/settings/notificationRulesKey";
+import { useRecheckWhenElapsed } from "@/features/settings/useRecheckWhenElapsed";
 import { useSelfPresenceWrite } from "./useSelfPresenceWrite";
 
 // =============================================================================
@@ -44,20 +46,15 @@ import { useSelfPresenceWrite } from "./useSelfPresenceWrite";
 // 있지 않다」고 말한다. 대신 **다시 묻는다**: 창이 다시 보이거나 포커스를 받을 때, 그리고 줄이 기대는
 // 기한이 지난 동안은 분 틱마다 규칙과 명부를 다시 읽는다. 줄은 서버의 새 답이 올 때 사라진다. 서버가
 // 아직 켜져 있다고 답하면(두 시계의 차이) 줄은 남고 다음 틱에 다시 묻는다.
-// 웹의 질의 클라이언트는 포커스 재조회가 꺼져 있다(`app/queryClient.ts`) — 그래서 여기서 직접 건다.
+// 웹의 질의 클라이언트는 포커스 재조회가 꺼져 있다(`app/queryClient.ts`) — 그래서 창 포커스·보임은
+// 여기서 직접 걸고, 기한이 지난 뒤의 다시 묻기는 설정·프로필 카드와 같은 훅(`useRecheckWhenElapsed`)이 한다.
+//
+// ## 끊겨 있으면 단추 자리에 이유를 말한다
+//
+// 끊긴 채 누른 뮤테이션은 낙관값만 칠하고 멈췄다가 재연결 뒤에 나간다 — 줄은 사라졌는데 서버는 아직
+// 모른다. 그래서 끊긴 동안은 단추를 거두고 그 자리에 이유를 말한다(승인 컨트롤이 오프라인에서 하는 것과
+// 같다: 버튼을 남겨 두지도, 말없이 치우지도 않는다).
 // =============================================================================
-
-const MINUTE_MS = 60_000;
-
-/** 분 단위로 틱하는 지금. 이 줄 하나가 쥔 타이머다(줄이 없어도 돈다 — 있다가 없어졌다 다시 서는 줄이라서). */
-function useMinuteNow(): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), MINUTE_MS);
-    return () => window.clearInterval(id);
-  }, []);
-  return now;
-}
 
 /** 일시 중지만 끈 뒤의 낙관 칠하기: 꺼지면 기한도 사라진다(서버가 지운다). */
 function paintResumed(rules: NotificationRules): NotificationRules {
@@ -77,7 +74,7 @@ export function PauseBanner({
   selfMember: RosterMember | null | undefined;
 }) {
   const client = useQueryClient();
-  const now = useMinuteNow();
+  const offline = useOffline();
   const rulesKey = notificationRulesQueryKey(workspaceId);
 
   const rules = useQuery({
@@ -109,9 +106,11 @@ export function PauseBanner({
       declared: selfMember?.presenceStatus,
       declaredUntilMs: selfMember?.dndUntilMs,
     },
-    now
+    Date.now()
   );
-  const elapsed = pauseBannerElapsed(banner, now);
+
+  // 줄이 기대는 기한이 지나면 서버에 다시 묻는다(스스로 내려가지 않는다). 설정·프로필 카드와 같은 훅이다.
+  useRecheckWhenElapsed(workspaceId, banner?.untilMs);
 
   // 서버에 다시 묻는다. 규칙과 명부 둘 다다 — 일시 중지 줄은 규칙, 방해 금지 줄은 명부에 기댄다.
   const refresh = useCallback(() => {
@@ -131,12 +130,6 @@ export function PauseBanner({
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [refresh]);
-
-  // 줄이 기대는 기한이 지났다 — 서버가 뭐라고 하는지 묻는다. 서버가 아직 켜져 있다고 답하면 줄은
-  // 남고, 분 틱(`now`)이 돌 때마다 다시 묻는다. 서버 답이 줄을 지운다.
-  useEffect(() => {
-    if (elapsed) refresh();
-  }, [elapsed, now, refresh]);
 
   // 실패 문장은 **누른 줄에만** 붙는다. 줄이 사라졌다 다시 서면 옛 실패가 새 줄에 남지 않는다.
   const [attempted, setAttempted] = useState<PauseBannerKind | null>(null);
@@ -158,7 +151,7 @@ export function PauseBanner({
     : null;
 
   const press = () => {
-    if (busy) return;
+    if (busy || offline) return;
     setAttempted(banner.kind);
     if (banner.kind === "paused") resume.mutate();
     else release.mutate({ status: "auto" });
@@ -194,11 +187,21 @@ export function PauseBanner({
             )}
           </span>
         }
-        actionLabel={banner.action}
+        // 끊겨 있으면 단추를 거두고 아래 줄이 이유를 말한다.
+        actionLabel={offline ? undefined : banner.action}
         actionBusy={busy}
-        onAction={press}
+        onAction={offline ? undefined : press}
       />
-      {failure === null ? null : (
+      {offline ? (
+        <InlineBanner
+          tone="neutral"
+          separator={false}
+          className="px-3"
+          testId="pause-banner-offline"
+          message={PAUSE_UNTIL_OFFLINE_REASON}
+        />
+      ) : null}
+      {failure === null || offline ? null : (
         <InlineBanner
           tone="error"
           separator={false}

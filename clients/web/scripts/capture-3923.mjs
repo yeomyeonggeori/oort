@@ -9,6 +9,7 @@
 //   c. 일시 중지는 꺼졌는데 상태만 방해 금지: 「상태는 아직 방해 금지예요」 + 「풀기」
 //   d. 흐름: 방해 금지에 묶여 일시 중지가 켜진 판에서 「다시 켜기」 → 둘째 줄 → 「풀기」 → 줄 없음
 //   e. 만료: 기한이 지난 줄은 서버에 다시 묻는다(서버가 아직 켜져 있다면 남고, 꺼졌다면 사라진다)
+//   f. 끊겨 있으면 단추 자리에 이유를 말한다(단추를 거두고, 줄은 그대로 서 있다)
 //
 //   npm run build && node scripts/capture-3923.mjs
 //   → OUT_DIR(기본 captures/3923)/<장면>-1440-<light|dark>.png + report.json
@@ -375,6 +376,29 @@ async function sceneE(browser, origin, scheme, report) {
   await second.context.close();
 }
 
+async function sceneF(browser, origin, scheme, report) {
+  const tag = scheme;
+  const server = newServer({ rules: { dnd: true, dndUntilMs: UNTIL_2230 }, presenceStatus: "dnd", dndUntilMs: UNTIL_2230 });
+  const { context, page } = await openScene(browser, origin, scheme, server);
+  await waitBanner(page);
+  check(`f ${tag} 이어져 있을 때는 단추가 있다`, (await page.getByTestId("pause-banner-line").locator("button").count()) === 1);
+  // 브라우저를 끊는다(`navigator.onLine` 과 offline 이벤트).
+  await context.setOffline(true);
+  await page.getByTestId("pause-banner-offline").waitFor({ timeout: 5000 });
+  check(`f ${tag} 끊기면 이유를 말한다`, ((await page.getByTestId("pause-banner-offline").textContent()) ?? "").includes("연결이 끊겨 지금은 바꿀 수 없어요."));
+  check(`f ${tag} 끊기면 단추를 거둔다`, (await page.getByTestId("pause-banner-line").locator("button").count()) === 0);
+  check(`f ${tag} 줄은 그대로 서 있다`, (await bannerText(page)) === "알림 일시 중지 중 · 오후 10:30까지", await bannerText(page));
+  check(`f ${tag} 끊긴 동안 쓰기가 없다`, server.log.filter((entry) => entry.method !== "GET" ).length === 0);
+  const overflow = await noOverflow(page);
+  check(`f ${tag} 가로 스크롤 없음`, overflow <= 0, String(overflow));
+  await shoot(page, "banner-offline", tag, footBlock(page));
+  await context.setOffline(false);
+  await page.getByTestId("pause-banner-line").locator("button").waitFor({ timeout: 5000 });
+  check(`f ${tag} 다시 이어지면 단추가 돌아온다`, (await page.getByTestId("pause-banner-offline").count()) === 0);
+  report[`f-${tag}`] = { overflow };
+  await context.close();
+}
+
 async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
   const preview = await startGuardedPreview({ webRoot: WEB_ROOT, port: PORT, portEnvVar: "CAPTURE_PORT" });
@@ -387,6 +411,7 @@ async function main() {
       await sceneC(browser, preview.origin, scheme, report);
       await sceneD(browser, preview.origin, scheme, report);
       await sceneE(browser, preview.origin, scheme, report);
+      await sceneF(browser, preview.origin, scheme, report);
     }
   } finally {
     await browser.close();

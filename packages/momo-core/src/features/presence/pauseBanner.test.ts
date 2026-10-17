@@ -5,7 +5,6 @@ import {
   PAUSE_BANNER_PAUSED_TITLE,
   PAUSE_BANNER_RESUME_ACTION,
   pauseBanner,
-  pauseBannerElapsed,
 } from "./pauseBanner";
 
 // 시험은 로컬 시계 생성자로 시각을 만든다(`pauseUntil.test.ts` 와 같은 이유 — 이 기기의 달력으로
@@ -108,29 +107,23 @@ describe("pauseBanner — 어느 줄이 서는가 (ADR-0204 D3)", () => {
   });
 });
 
-describe("pauseBannerElapsed — 서버에 다시 물을 때", () => {
-  const paused = (untilMs?: number) =>
-    pauseBanner({ rulesReady: true, paused: true, untilMs }, NOW);
-
-  it("줄이 기대는 기한이 지났으면 참이다(지금과 같은 시각도 지난 것이다)", () => {
-    expect(pauseBannerElapsed(paused(at(16, 21, 6)), NOW)).toBe(true);
-    expect(pauseBannerElapsed(paused(NOW), NOW)).toBe(true);
+describe("pauseBanner — 줄이 기대는 기한", () => {
+  it("일시 중지 줄은 일시 중지의 기한을, 방해 금지 줄은 방해 금지의 기한을 내보낸다", () => {
+    expect(
+      pauseBanner({ rulesReady: true, paused: true, untilMs: at(16, 22, 0) }, NOW)?.untilMs
+    ).toBe(at(16, 22, 0));
+    expect(
+      pauseBanner(
+        { rulesReady: true, paused: false, declared: "dnd", declaredUntilMs: at(17, 9) },
+        NOW
+      )?.untilMs
+    ).toBe(at(17, 9));
   });
 
-  it("아직 오지 않은 기한이면 거짓이다", () => {
-    expect(pauseBannerElapsed(paused(at(16, 21, 8)), NOW)).toBe(false);
-  });
-
-  it("기한 없는 행과 줄이 없는 경우는 다시 물을 이유가 없다", () => {
-    expect(pauseBannerElapsed(paused(undefined), NOW)).toBe(false);
-    expect(pauseBannerElapsed(null, NOW)).toBe(false);
-  });
-
-  it("방해 금지 줄은 방해 금지의 기한을 기대고, 그 기한이 지나면 다시 물을 때다", () => {
-    const dnd = (declaredUntilMs?: number) =>
-      pauseBanner({ rulesReady: true, paused: false, declared: "dnd", declaredUntilMs }, NOW);
-    expect(pauseBannerElapsed(dnd(at(16, 20, 0)), NOW)).toBe(true);
-    expect(pauseBannerElapsed(dnd(at(17, 9)), NOW)).toBe(false);
-    expect(pauseBannerElapsed(dnd(undefined), NOW)).toBe(false);
+  it("기한 없는 행은 기한을 내보내지 않는다(다시 물을 이유가 없다)", () => {
+    expect(pauseBanner({ rulesReady: true, paused: true }, NOW)?.untilMs).toBeUndefined();
+    expect(
+      pauseBanner({ rulesReady: true, paused: false, declared: "dnd" }, NOW)?.untilMs
+    ).toBeUndefined();
   });
 });

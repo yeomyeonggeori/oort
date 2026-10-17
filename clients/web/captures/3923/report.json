@@ -1,0 +1,26 @@
+{
+  "a-light": {
+    "overflow": 0,
+    "banner": {
+      "x": 70,
+      "y": 820,
+      "width": 242,
+      "height": 68
+    }
+  },
+  "f-light": {
+    "overflow": 0
+  },
+  "a-dark": {
+    "overflow": 0,
+    "banner": {
+      "x": 70,
+      "y": 820,
+      "width": 242,
+      "height": 68
+    }
+  },
+  "f-dark": {
+    "overflow": 0
+  }
+}
