@@ -726,6 +726,10 @@ describe('기한 장 — 연결이 끊기면 이유를 말하고 잠근다 (desi
         '연결이 끊겨 지금은 바꿀 수 없어요.',
       ),
     );
+    // 끊기는 순간 읽어 준다: 안내 상자의 겉이 라이브 영역이다(재검수 N4).
+    let wrapper = within(sheet).getByTestId('pause-until-offline').parent;
+    while (wrapper && wrapper.props.accessibilityLiveRegion === undefined) wrapper = wrapper.parent;
+    expect(wrapper?.props.accessibilityLiveRegion).toBe('polite');
     for (const id of OPTION_IDS) {
       expect(
         within(sheet).getByTestId(`pause-until-option-${id}`).props.accessibilityState,
@@ -853,6 +857,28 @@ describe('기한이 지나면 시트가 서버에 다시 묻는다 (design-revie
       within(sheet).getByTestId('presence-option-dnd').props.accessibilityState,
     ).toMatchObject({selected: true});
     expect(within(sheet).getByTestId('profile-dnd-until-row')).toHaveTextContent(/오후 9:00까지/);
+  });
+
+  it('일시 중지 규칙만 기한이 지났어도(상태는 방해 금지가 아니다) 시트가 다시 묻는다', async () => {
+    freezeClock(FRI_2107);
+    // 명부에는 기한이 없다(상태는 자동). 규칙만 21:00 에 끝났어야 하는데 이 기기의 캐시는 아직 켜져 있다고
+    // 기억한다 — 시트는 두 기한 중 규칙의 기한도 알아야 한다(재검수 N3).
+    const invalidate = jest.spyOn(QueryClient.prototype, 'invalidateQueries');
+    const sheet = await openSheetWithCache({
+      roster: [selfRow()],
+      rules: {dnd: true, mentionOverridesMute: false, dndUntilMs: at(16, 21, 0)},
+    });
+    await waitFor(() => {
+      expect(askedKeys(invalidate)).toContain(ROSTER_KEY);
+      expect(askedKeys(invalidate)).toContain(RULES_KEY);
+    });
+    // 서버의 새 답(꺼짐)을 그린다.
+    await waitFor(() =>
+      expect(
+        within(sheet).getByTestId('profile-pause-row').props.accessibilityState,
+      ).toMatchObject({checked: false}),
+    );
+    expect(within(sheet).queryByTestId('profile-pause-until-row')).toBeNull();
   });
 
   it('기한이 아직 오지 않았으면 다시 묻지 않는다', async () => {

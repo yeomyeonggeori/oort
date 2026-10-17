@@ -141,11 +141,14 @@ export function PauseUntilPage({
         ) : null}
       </View>
 
+      {/* 끊기는 순간 읽어 준다(`NoticeBlock` 자신에는 라이브 영역이 없다 — 재검수 N4). */}
       {online ? null : (
-        <NoticeBlock
-          headline={PAUSE_UNTIL_OFFLINE_REASON}
-          testID="pause-until-offline"
-        />
+        <View accessibilityLiveRegion="polite">
+          <NoticeBlock
+            headline={PAUSE_UNTIL_OFFLINE_REASON}
+            testID="pause-until-offline"
+          />
+        </View>
       )}
 
       <GroupSection label="기한">

@@ -469,7 +469,7 @@ async function sceneF(browser, origin, scheme, report) {
   }
 }
 
-async function sceneG(browser, origin, scheme, report) {
+async function sceneG(browser, origin, scheme) {
   const tag = scheme;
   const server = newServer();
   server.presenceDelayMs = 1800;
@@ -495,7 +495,7 @@ async function sceneG(browser, origin, scheme, report) {
   await context.close();
 }
 
-async function sceneH(browser, origin, scheme, report) {
+async function sceneH(browser, origin, scheme) {
   const tag = scheme;
   const PAST = kst("2026-10-16T21:00:00"); // 고정한 지금(21:07)보다 7분 앞 — 이미 지났다
   // (1) 서버가 이제 꺼졌다고 답한다: 첫 읽기는 낡은 방해 금지, 다시 읽으면 자동(온라인).
@@ -506,8 +506,10 @@ async function sceneH(browser, origin, scheme, report) {
     await page.waitForFunction(() => document.querySelector('[data-testid="profile-card"]') !== null);
     await page.waitForTimeout(1500);
     check(`h ${tag} 기한이 지난 것을 알고 명부를 다시 읽었다(읽기 둘 이상)`, server.rosterGets >= 2, String(server.rosterGets));
-    const effective = await page.getByTestId("presence-badge").first().getAttribute("data-effective").catch(() => null);
-    check(`h ${tag} 서버가 꺼졌다고 답했으니 아바타가 방해 금지가 아니다`, effective !== "dnd", String(effective));
+    // 정본 testid 는 `presence-control`(아바타 배지)이고 `data-effective` 가 효과 상태다. 이 값을 직접 읽는다 —
+    // 없는 testid 를 읽어 null 로 통과하던 단언(재검수 N2)이 아니라, 낡은 상태(dnd)에서는 실제로 실패한다.
+    const effective = await page.getByTestId("presence-control").first().getAttribute("data-effective", { timeout: 3000 });
+    check(`h ${tag} 서버가 꺼졌다고 답했으니 아바타가 온라인이다(방해 금지가 아니다)`, effective === "online", String(effective));
     const menu = await openProfileMenu(page);
     check(`h ${tag} 메뉴가 온라인을 고른 것으로 말한다`, (await page.getByTestId("presence-option-auto").getAttribute("aria-checked")) === "true");
     check(`h ${tag} 지난 시각을 「…까지」로 말하지 않는다`, (await page.getByTestId("presence-dnd-until").count()) === 0);
@@ -521,6 +523,8 @@ async function sceneH(browser, origin, scheme, report) {
     await page.waitForFunction(() => document.querySelector('[data-testid="profile-card"]') !== null);
     await page.waitForTimeout(1500);
     check(`h ${tag} 서버가 켜져 있다고 답해도 한 번 더 물었다`, server.rosterGets >= 2, String(server.rosterGets));
+    const stillEffective = await page.getByTestId("presence-control").first().getAttribute("data-effective", { timeout: 3000 });
+    check(`h ${tag} 서버가 켜져 있다고 답하는 동안 아바타는 방해 금지 그대로다(스스로 풀지 않는다)`, stillEffective === "dnd", String(stillEffective));
     const menu = await openProfileMenu(page);
     check(`h ${tag} 서버가 켜져 있다고 답하는 동안 메뉴는 방해 금지를 그대로 말한다`, (await page.getByTestId("presence-option-dnd").getAttribute("aria-checked")) === "true");
     await shoot(page, "menu-after-expiry-server-still-on", tag, menu);
@@ -541,8 +545,8 @@ async function main() {
       await sceneD(browser, preview.origin, scheme, report);
       await sceneE(browser, preview.origin, scheme, report);
       await sceneF(browser, preview.origin, scheme, report);
-      await sceneG(browser, preview.origin, scheme, report);
-      await sceneH(browser, preview.origin, scheme, report);
+      await sceneG(browser, preview.origin, scheme);
+      await sceneH(browser, preview.origin, scheme);
     }
   } finally {
     await browser.close();
