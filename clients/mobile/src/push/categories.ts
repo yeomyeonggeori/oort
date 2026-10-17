@@ -48,7 +48,7 @@ const APPROVE_ACTION: Notifications.NotificationAction = {
 
 const REJECT_ACTION: Notifications.NotificationAction = {
   identifier: PUSH_ACTION.reject,
-  buttonTitle: '거절',
+  buttonTitle: '거부',
   options: {...REQUIRES_AUTH, isDestructive: true},
 };
 
