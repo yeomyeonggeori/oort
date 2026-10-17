@@ -191,6 +191,13 @@ async function scene(browser, origin, scheme) {
   check(`${scheme} 카드: 길이를 모르면 「받는 중」이고 바이트·% 없음`, line === "받는 중" && !BYTES.test(line), line);
   check(`${scheme} 카드: 길이를 모르면 막대는 불확정`, (await bar().getAttribute("value")) === null);
   await shot("3-unknown-total");
+  // 불확정 막대는 움직인다(빈 트랙이면 얼어 보인다): 두 프레임의 조각 위치가 다르다
+  const drift = () => bar().evaluate((el) => getComputedStyle(el).backgroundPositionX);
+  const d1 = await drift();
+  await page.waitForTimeout(350);
+  await shot("3b-unknown-total-frame2");
+  const d2 = await drift();
+  check(`${scheme} 카드: 불확정 막대가 흐른다(조각 위치가 변한다)`, d1 !== d2, `${d1} -> ${d2}`);
   await page.screenshot({ path: resolve(OUT_DIR, `3-full-${scheme}.png`) });
 
   // 설정 > 업데이트: 같은 상태가 설정 화면에도 같은 말로 선다
@@ -202,6 +209,8 @@ async function scene(browser, origin, scheme) {
   check(`${scheme} 설정: 길이를 모르면 「받는 중」`, sline === "받는 중", sline);
   check(`${scheme} 설정: 불확정 막대가 있다`, (await page.locator("[data-testid=update-progress] progress").count()) === 1);
   await page.screenshot({ path: resolve(OUT_DIR, `4-settings-unknown-${scheme}.png`) });
+  await page.waitForTimeout(350);
+  await page.screenshot({ path: resolve(OUT_DIR, `4b-settings-unknown-frame2-${scheme}.png`) });
   await page.evaluate(() => window.__emit("momo:update-progress", { downloaded: 7_500_000, total: 10_000_000 }));
   await page.waitForTimeout(250);
   const kline = (await page.getByTestId("update-progress").textContent()) ?? "";
