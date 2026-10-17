@@ -37,6 +37,7 @@ jest.mock('../src/push/native', () => ({
   apnsEnvironment: () => 'sandbox',
   keychainAccessGroup: () => 'YWQQFQM38J.app.momo.ios.shared',
   pushNativeModuleAvailable: () => true,
+  nativeApprovalHandlerAttached: () => false,
 }));
 
 // =============================================================================

@@ -481,8 +481,15 @@ describe('what the upload declares stays true of the code (#2568)', () => {
     APP_ROOT,
     'modules/momo-device-key-native/ios/MomoRefreshKeyStore.swift',
   );
-  /** The only files allowed to import CryptoKit: enclave signatures. */
+  /** The only files allowed to import CryptoKit to SIGN: enclave signatures. */
   const SIGNING_KEY_STORES = [DEVICE_KEY_STORE, REFRESH_KEY_STORE];
+  /** The only file allowed to import CryptoKit to HASH (#3931): the idempotency
+   *  key of a lock-screen decision. */
+  const DECISION_KEY = join(
+    APP_ROOT,
+    'modules/momo-push-action-native/ios/MomoPushActionDecisionKey.swift',
+  );
+  const HASHING_FILES = [DECISION_KEY];
 
   function nativeFiles(dir: string, acc: string[] = []): string[] {
     for (const entry of readdirSync(dir)) {
@@ -555,12 +562,37 @@ describe('what the upload declares stays true of the code (#2568)', () => {
     ]
       .flatMap(dir => nativeFiles(join(APP_ROOT, dir)))
       .filter(file => !SIGNING_KEY_STORES.includes(file))
+      .filter(file => !HASHING_FILES.includes(file))
       // The simulator check verifies momo-wire's vector signature with a
       // CryptoKit PUBLIC key (#3106). It is a test program: the podspec links
       // only `ios/`, so it never ships.
       .filter(file => !file.includes('/momo-device-key-native/sim-check/'))
       .filter(file => nativeCipher.test(readFileSync(file, 'utf8')));
     expect(native).toEqual([]);
+  });
+
+  // #3931: the third sanctioned CryptoKit import, and the only one that does not
+  // sign. A lock-screen 승인/거절 is answered without a screen, and the server's
+  // idempotency key for it (`client_decision_id`) must be one nobody else can
+  // compute from the notification's public ids — so it is a SHA-256 over a secret
+  // that never leaves the phone's app-only keychain group. That is hashing, which
+  // is not encryption, and it is the same reading the signing keys above rest on
+  // (authentication, not confidentiality). What would make the reading false is a
+  // cipher or a keyed primitive creeping into this file, and this test is what
+  // notices: it may only SHA-256, no cipher, no HMAC, no key object, no enclave,
+  // and no other file in the module may import CryptoKit at all.
+  it('keeps that declaration true: the decision key only HASHES (#3931)', () => {
+    const code = readFileSync(DECISION_KEY, 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/.*$/gm, '');
+    expect(code).toMatch(/\bimport\s+CryptoKit\b/);
+    expect(code).toMatch(/\bSHA256\.hash\(/);
+    expect(code).not.toMatch(
+      /\b(?:AES|ChaChaPoly|SealedBox|HPKE|SymmetricKey|KeyAgreement|sharedSecretFromKeyAgreement|HMAC|Insecure|Curve25519|P256|P384|P521|SecureEnclave|SecKey\w*|CCCrypt\w*)\b/,
+    );
+    const importers = nativeFiles(join(APP_ROOT, 'modules/momo-push-action-native'))
+      .filter(file => /\bimport\s+(?:CryptoKit|CommonCrypto)\b/.test(readFileSync(file, 'utf8')));
+    expect(importers).toEqual([DECISION_KEY]);
   });
 
   // #3106: the refresh key is the second sanctioned CryptoKit import — a

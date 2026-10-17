@@ -10,7 +10,7 @@ import {
 } from 'expo-notifications';
 
 import type {PushCategory, PushReason} from './contract';
-import {parsePushEnvelope, threadRootId} from './envelope';
+import {parsePushEnvelope, pushPayloadOf, threadRootId} from './envelope';
 
 // =============================================================================
 // 알림 본문을 누르면 어디로 가는가 (#2569, ADR-0187 D4).
@@ -82,10 +82,7 @@ export function tapArrival(
   if (!response || response.actionIdentifier !== DEFAULT_ACTION_IDENTIFIER) {
     return null;
   }
-  const trigger = response.notification.request.trigger as
-    | {payload?: unknown}
-    | null;
-  const envelope = parsePushEnvelope(trigger?.payload);
+  const envelope = parsePushEnvelope(pushPayloadOf(response));
   if (!envelope) return {kind: 'unavailable', reason: 'unreadable'};
   if (envelope.workspaceId !== signedInWorkspaceId.toLowerCase()) {
     return {kind: 'unavailable', reason: 'other-workspace'};
