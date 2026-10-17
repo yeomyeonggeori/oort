@@ -2,7 +2,7 @@
 
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PresenceWrite, RosterMember } from "@momo/core/lib/api";
 import type {
@@ -126,10 +126,37 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+/** 실제 네트워크처럼 늦게 답하는 약속. 낙관 칠하기와 롤백이 서로 다른 렌더에 오게 한다(design-review H1). */
+const later = <T,>(outcome: T | Error, ms: number) =>
+  new Promise<T>((resolve, reject) =>
+    globalThis.setTimeout(
+      () => (outcome instanceof Error ? reject(outcome) : resolve(outcome)),
+      ms
+    )
+  );
+
 async function flush(ms = 0) {
   await act(async () => {
     await new Promise((resolve) => globalThis.setTimeout(resolve, ms));
   });
+}
+
+const ROSTER_KEY = ["roster", WS];
+
+/**
+ * 사이드바가 하듯 내 행을 **명부 질의 캐시에서** 읽는다. 그래야 「풀기」의 낙관 칠하기(`useSelfPresenceWrite`
+ * 가 명부 캐시에 칠한다)가 줄 모양을 실제로 바꾼다 — 행을 속성으로 박아 두면 낙관 구간이 시험에 없다
+ * (design-review H1: 실제 네트워크에서만 보이던 결함). 질의는 꺼져 있어(`enabled: false`) 다시 읽기가
+ * 시험이 심은 캐시를 덮지 않는다.
+ */
+function Host() {
+  const roster = useQuery<RosterMember[]>({
+    queryKey: ROSTER_KEY,
+    queryFn: () => Promise.reject(new Error("unused")),
+    enabled: false,
+  });
+  const me = roster.data?.find((row) => row.id === ME);
+  return createElement(PauseBanner, { workspaceId: WS, selfMemberId: ME, selfMember: me });
 }
 
 async function mount(selfMember: RosterMember | undefined = rosterMember()) {
@@ -145,16 +172,9 @@ async function mount(selfMember: RosterMember | undefined = rosterMember()) {
   mountedRoot = createRoot(host);
   const render = (member: RosterMember | undefined) =>
     act(async () => {
+      client.setQueryData<RosterMember[]>(ROSTER_KEY, member ? [member] : []);
       mountedRoot?.render(
-        createElement(
-          QueryClientProvider,
-          { client },
-          createElement(PauseBanner, {
-            workspaceId: WS,
-            selfMemberId: ME,
-            selfMember: member,
-          })
-        )
+        createElement(QueryClientProvider, { client }, createElement(Host))
       );
       await Promise.resolve();
     });
@@ -171,7 +191,7 @@ const detailText = () => document.querySelector('[data-testid="pause-banner-deta
 const lineText = () =>
   [titleText(), detailText()].filter((part) => part !== undefined).join(" · ");
 const button = () =>
-  document.querySelector('[data-testid="pause-banner-line"] button') as HTMLButtonElement;
+  document.querySelector('[data-testid="pause-banner-action"]') as HTMLButtonElement;
 const failure = () => document.querySelector('[data-testid="pause-banner-failure"]');
 const press = async (node: HTMLElement) => {
   await act(async () => {
@@ -298,6 +318,81 @@ describe("「다시 켜기」와 「풀기」 — 쓰기 모양", () => {
     expect(button().textContent).toBe("풀기");
   });
 
+  it("서버가 늦게 실패해도 이유가 뜬다 — 낙관 칠하기가 줄을 먼저 지운 뒤 되돌려져도 (design-review H1)", async () => {
+    // 실제 네트워크: 누르면 낙관 칠하기로 줄이 먼저 사라지고, 한참 뒤 서버가 실패해 되돌려진다. 이전 구현은
+    // 「누른 줄」 표식을 줄 모양이 바뀐 그 순간에 지워서 이유 문장이 한 번도 뜨지 않았다.
+    fetchNotificationRules.mockResolvedValue(rules({ dnd: true, dndUntilMs: at(16, 22, 0) }));
+    patchNotificationRules.mockImplementation(() => later(new Error("500"), 150));
+    await mount();
+    await press(button());
+
+    // 낙관 구간: 줄은 이미 사라졌고(방해 금지에 묶여 있지 않다) 서버는 아직 답하지 않았다.
+    expect(banner()).toBeNull();
+    await flush(300);
+    // 서버가 실패하면 줄이 되돌아오고, 이유가 함께 선다.
+    expect(banner()?.getAttribute("data-kind")).toBe("paused");
+    expect(failure()?.textContent).toBe("알림 설정을 바꾸지 못했어요. 다시 시도하세요.");
+    expect(failure()?.getAttribute("role")).toBe("alert");
+    expect(lineText()).toBe("알림 일시 중지 중 · 오후 10:00까지");
+  });
+
+  it("「풀기」가 늦게 실패해도 이유가 뜬다", async () => {
+    setPresenceStatus.mockImplementation(() => later(new Error("500"), 150));
+    await mount(rosterMember({ presenceStatus: "dnd", dndUntilMs: at(17, 9) }));
+    await press(button());
+    expect(banner()).toBeNull();
+    await flush(300);
+    expect(failure()?.textContent).toBe("상태를 바꾸지 못했습니다. 다시 시도하세요.");
+    expect(button().textContent).toBe("풀기");
+  });
+
+  it("쓰기가 나는 동안 같은 자리에 올라온 반대 행동은 받지 않는다 — 더블클릭이 상태 해제를 보내지 않는다 (design-review M1)", async () => {
+    fetchNotificationRules.mockResolvedValue(rules({ dnd: true, dndUntilMs: at(16, 22, 0) }));
+    patchNotificationRules.mockImplementation(() => later(rules(), 120));
+    await mount(rosterMember({ presenceStatus: "dnd", dndUntilMs: at(16, 22, 0) }));
+    expect(button().textContent).toBe("다시 켜기");
+    await press(button());
+    // 낙관 칠하기로 같은 자리의 단추가 곧바로 「풀기」가 됐다.
+    expect(button().textContent).toBe("풀기");
+    // 더블클릭의 둘째 누름: 상태 해제를 보내면 안 된다.
+    await press(button());
+    await flush(250);
+    expect(patchNotificationRules).toHaveBeenCalledTimes(1);
+    expect(setPresenceStatus).not.toHaveBeenCalled();
+  });
+
+  it("보호 시간이 지나도 쓰기가 끝나기 전에는 반대 행동을 받지 않는다 — 느린 망", async () => {
+    fetchNotificationRules.mockResolvedValue(rules({ dnd: true, dndUntilMs: at(16, 22, 0) }));
+    patchNotificationRules.mockImplementation(() => later(rules(), 300));
+    await mount(rosterMember({ presenceStatus: "dnd", dndUntilMs: at(16, 22, 0) }));
+    await press(button());
+    expect(button().textContent).toBe("풀기");
+    // 망이 느려 쓰기가 아직 끝나지 않았는데 보호 시간은 이미 지났다.
+    vi.setSystemTime(FRI_2107 + 3_000);
+    await press(button());
+    expect(setPresenceStatus).not.toHaveBeenCalled();
+    await flush(500);
+    expect(patchNotificationRules).toHaveBeenCalledTimes(1);
+    expect(setPresenceStatus).not.toHaveBeenCalled();
+  });
+
+  it("서버가 곧바로 확정해도 방금 누른 줄과 다른 종류의 단추는 잠깐 받지 않고, 지나면 받는다", async () => {
+    fetchNotificationRules.mockResolvedValue(rules({ dnd: true, dndUntilMs: at(16, 22, 0) }));
+    await mount(rosterMember({ presenceStatus: "dnd", dndUntilMs: at(16, 22, 0) }));
+    await press(button());
+    expect(patchNotificationRules).toHaveBeenCalledTimes(1);
+    // 서버가 확정했다(쓰기는 끝났다) — 그래도 방금 누른 직후의 반대 종류 단추다.
+    expect(button().textContent).toBe("풀기");
+    await press(button());
+    expect(setPresenceStatus).not.toHaveBeenCalled();
+
+    // 시간이 지나면 「풀기」는 정상으로 일한다.
+    vi.setSystemTime(FRI_2107 + 3_000);
+    await press(button());
+    expect(setPresenceStatus).toHaveBeenCalledTimes(1);
+    expect(setPresenceStatus).toHaveBeenCalledWith(WS, { status: "auto" });
+  });
+
   it("실패 문장은 그 줄에만 붙는다 — 줄이 사라졌다 다시 서면 옛 실패가 남지 않는다", async () => {
     fetchNotificationRules.mockResolvedValue(rules({ dnd: true, dndUntilMs: at(16, 22, 0) }));
     patchNotificationRules.mockRejectedValueOnce(new Error("500"));
@@ -412,6 +507,7 @@ describe("끊겨 있으면 단추 자리에 이유를 말한다 (#2899 H2 와 �
     await rerender(rosterMember());
     expect(button()).toBeNull();
     expect(offlineLine()?.textContent).toContain("연결이 끊겨 지금은 바꿀 수 없어요.");
+    expect(offlineLine()?.getAttribute("role")).toBe("status");
     expect(lineText()).toBe("알림 일시 중지 중 · 오후 10:00까지");
     expect(patchNotificationRules).not.toHaveBeenCalled();
 

@@ -10,6 +10,8 @@
 //   d. 흐름: 방해 금지에 묶여 일시 중지가 켜진 판에서 「다시 켜기」 → 둘째 줄 → 「풀기」 → 줄 없음
 //   e. 만료: 기한이 지난 줄은 서버에 다시 묻는다(서버가 아직 켜져 있다면 남고, 꺼졌다면 사라진다)
 //   f. 끊겨 있으면 단추 자리에 이유를 말한다(단추를 거두고, 줄은 그대로 서 있다)
+//   g. 쓰기가 **늦게** 실패하면(design-review H1) 낙관 칠하기로 사라졌던 줄이 이유와 함께 돌아온다
+//   h. 날짜가 붙는 기한(「10월 19일(월) 오전 9:00까지」) — 사이드바 폭에서 가장 긴 문장(design-review M3)
 //
 //   npm run build && node scripts/capture-3923.mjs
 //   → OUT_DIR(기본 captures/3923)/<장면>-1440-<light|dark>.png + report.json
@@ -70,6 +72,11 @@ function newServer({ rules = {}, presenceStatus = "auto", dndUntilMs } = {}) {
     log: [],
     rulesGets: 0,
     rulesAfter: [],
+    /** 쓰기(PATCH·PUT)가 이만큼 늦게 답한다. 낙관 칠하기가 서버 답보다 먼저 보이게 한다. */
+    writeDelayMs: 0,
+    /** 이 쓰기가 실패(500)로 끝난다. */
+    failRulesWrite: false,
+    failPresenceWrite: false,
   };
 }
 
@@ -126,6 +133,8 @@ async function installRoutes(context, server) {
     if (path.endsWith("/notification-rules")) {
       server.log.push({ method, kind: "notification-rules", body });
       if (method === "PATCH" || method === "PUT") {
+        if (server.writeDelayMs > 0) await new Promise((done) => setTimeout(done, server.writeDelayMs));
+        if (server.failRulesWrite) return json(route, { error: { message: "capture-forced-failure" } }, 500);
         if (body.dnd !== undefined) server.rules.dnd = body.dnd;
         if (body.mentionOverridesMute !== undefined) server.rules.mentionOverridesMute = body.mentionOverridesMute;
         if (body.dndUntilMs !== undefined) server.rules.dndUntilMs = body.dndUntilMs ?? undefined;
@@ -144,6 +153,8 @@ async function installRoutes(context, server) {
     }
     if (path.endsWith("/presence") && method === "PUT") {
       server.log.push({ method, kind: "presence", body });
+      if (server.writeDelayMs > 0) await new Promise((done) => setTimeout(done, server.writeDelayMs));
+      if (server.failPresenceWrite) return json(route, { error: { message: "capture-forced-failure" } }, 500);
       applyPresence(server, body);
       return json(route, { status: server.presenceStatus, ...(server.dndUntilMs !== undefined ? { dndUntilMs: server.dndUntilMs } : {}) });
     }
@@ -290,7 +301,7 @@ async function sceneA(browser, origin, scheme, report) {
   const { context, page } = await openScene(browser, origin, scheme, server);
   await waitBanner(page);
   check(`a ${tag} 줄이 「알림 일시 중지 중 · 오후 10:30까지」`, (await bannerText(page)) === "알림 일시 중지 중 · 오후 10:30까지", await bannerText(page));
-  check(`a ${tag} 단추 글자가 「다시 켜기」`, ((await page.getByTestId("pause-banner-line").locator("button").textContent()) ?? "").trim() === "다시 켜기");
+  check(`a ${tag} 단추 글자가 「다시 켜기」`, ((await page.getByTestId("pause-banner-action").textContent()) ?? "").trim() === "다시 켜기");
   check(`a ${tag} 묶음의 이름이 문장 전체`, (await banner(page).getAttribute("aria-label")) === "알림 일시 중지 중 · 오후 10:30까지 · 다시 켜기");
   const foot = page.getByTestId("sidebar-profile-foot");
   const fb = await foot.boundingBox();
@@ -299,8 +310,26 @@ async function sceneA(browser, origin, scheme, report) {
   check(`a ${tag} 줄이 사이드바 폭 안에 있다`, bb !== null && bb.x >= 0 && bb.x + bb.width <= 320, JSON.stringify(bb));
   const overflow = await noOverflow(page);
   check(`a ${tag} 가로 스크롤 없음`, overflow <= 0, String(overflow));
+  // 그릇(design-review M4): 사이드바의 흰 면 카드(검색 입구·지금 카드와 같은 문법) — 각진 평평한 띠가 아니다.
+  const card = page.getByTestId("pause-banner-line").locator("xpath=..");
+  const look = await card.evaluate((node) => {
+    const style = getComputedStyle(node);
+    return { radius: parseFloat(style.borderTopLeftRadius), shadow: style.boxShadow, background: style.backgroundColor };
+  });
+  check(`a ${tag} 그릇이 둥글고(반경 12px 이상) 그림자가 있다`, look.radius >= 12 && look.shadow !== "none", JSON.stringify(look));
+  // 글자 크기: 제목은 프로필 줄의 이름(14px)과 같고 기한은 둘째 줄(12px)과 같다 — 본문 15px 가 아니다.
+  const sizes = await page.evaluate(() => {
+    const px = (id) => parseFloat(getComputedStyle(document.querySelector(`[data-testid="${id}"]`)).fontSize);
+    return { title: px("pause-banner-title"), detail: px("pause-banner-detail"), selfName: px("self-name") };
+  });
+  check(`a ${tag} 제목이 프로필 이름과 같은 크기, 기한이 더 작다`, sizes.title === sizes.selfName && sizes.detail < sizes.title, JSON.stringify(sizes));
+  // 카드 왼쪽 안쪽 여백: 글자 첫 줄이 프로필 카드의 아바타 왼쪽과 가깝다(4px 이내로 맞는지 잰다).
+  const avatarBox = await page.getByTestId("profile-card").locator("span").first().boundingBox();
+  const titleBox = await page.getByTestId("pause-banner-title").boundingBox();
+  const offsetX = avatarBox && titleBox ? Math.round((titleBox.x - avatarBox.x) * 10) / 10 : null;
+  check(`a ${tag} 제목 글자가 프로필 아바타 왼쪽과 8px 안에서 맞는다`, offsetX !== null && Math.abs(offsetX) <= 8, String(offsetX));
   await shoot(page, "banner-paused", tag, footBlock(page));
-  report[`a-${tag}`] = { overflow, banner: bb };
+  report[`a-${tag}`] = { overflow, banner: bb, look, sizes, titleOffsetX: offsetX };
   await context.close();
 }
 
@@ -320,7 +349,7 @@ async function sceneC(browser, origin, scheme) {
   const { context, page } = await openScene(browser, origin, scheme, server);
   await waitBanner(page);
   check(`c ${tag} 줄이 「상태는 아직 방해 금지예요」`, (await bannerText(page)) === "상태는 아직 방해 금지예요", await bannerText(page));
-  check(`c ${tag} 단추 글자가 「풀기」`, ((await page.getByTestId("pause-banner-line").locator("button").textContent()) ?? "").trim() === "풀기");
+  check(`c ${tag} 단추 글자가 「풀기」`, ((await page.getByTestId("pause-banner-action").textContent()) ?? "").trim() === "풀기");
   check(`c ${tag} 종류가 dnd`, (await banner(page).getAttribute("data-kind")) === "dnd");
   await shoot(page, "banner-dnd-only", tag, footBlock(page));
   await context.close();
@@ -334,14 +363,20 @@ async function sceneD(browser, origin, scheme) {
   const { context, page } = await openScene(browser, origin, scheme, server);
   await waitBanner(page);
   check(`d ${tag} 둘 다 켜져 있으면 일시 중지 줄이 먼저다`, (await banner(page).getAttribute("data-kind")) === "paused");
-  await page.getByTestId("pause-banner-line").locator("button").click();
+  await page.getByTestId("pause-banner-action").click();
   await page.waitForFunction(() => document.querySelector('[data-testid="pause-banner"]')?.getAttribute("data-kind") === "dnd", null, { timeout: 5000 });
   const patches = writes(server, "notification-rules");
   check(`d ${tag} 「다시 켜기」는 PATCH {dnd:false} 하나만 보낸다`, patches.length === 1 && patches[0].method === "PATCH" && JSON.stringify(patches[0].body) === JSON.stringify({ dnd: false }), JSON.stringify(patches));
   check(`d ${tag} 상태 쓰기는 하지 않는다`, writes(server, "presence").length === 0);
   check(`d ${tag} 둘째 줄이 「상태는 아직 방해 금지예요」`, (await bannerText(page)) === "상태는 아직 방해 금지예요", await bannerText(page));
   await shoot(page, "banner-after-resume", tag, footBlock(page));
-  await page.getByTestId("pause-banner-line").locator("button").click();
+  // 더블클릭의 둘째 누름(design-review M1): 방금 「다시 켜기」를 누른 같은 자리에 올라온 「풀기」는 잠깐 받지 않는다.
+  await page.getByTestId("pause-banner-action").click();
+  await page.waitForTimeout(400);
+  check(`d ${tag} 방금 누른 직후의 「풀기」는 상태 쓰기를 보내지 않는다(보호 시간)`, writes(server, "presence").length === 0, JSON.stringify(writes(server, "presence")));
+  // 시계가 못 박혀 있어 보호 시간(1.5초)이 흐르지 않는다 — 사람이 잠깐 뒤에 누르는 것을 3초 앞으로 옮겨 흉내 낸다.
+  await context.clock.setFixedTime(FIXED_NOW + 3_000);
+  await page.getByTestId("pause-banner-action").click();
   await banner(page).waitFor({ state: "detached", timeout: 5000 });
   const presence = writes(server, "presence");
   check(`d ${tag} 「풀기」는 PUT presence {status:auto} 하나만 보낸다`, presence.length === 1 && JSON.stringify(presence[0].body) === JSON.stringify({ status: "auto" }), JSON.stringify(presence));
@@ -381,21 +416,103 @@ async function sceneF(browser, origin, scheme, report) {
   const server = newServer({ rules: { dnd: true, dndUntilMs: UNTIL_2230 }, presenceStatus: "dnd", dndUntilMs: UNTIL_2230 });
   const { context, page } = await openScene(browser, origin, scheme, server);
   await waitBanner(page);
-  check(`f ${tag} 이어져 있을 때는 단추가 있다`, (await page.getByTestId("pause-banner-line").locator("button").count()) === 1);
+  check(`f ${tag} 이어져 있을 때는 단추가 있다`, (await page.getByTestId("pause-banner-action").count()) === 1);
   // 브라우저를 끊는다(`navigator.onLine` 과 offline 이벤트).
   await context.setOffline(true);
   await page.getByTestId("pause-banner-offline").waitFor({ timeout: 5000 });
   check(`f ${tag} 끊기면 이유를 말한다`, ((await page.getByTestId("pause-banner-offline").textContent()) ?? "").includes("연결이 끊겨 지금은 바꿀 수 없어요."));
-  check(`f ${tag} 끊기면 단추를 거둔다`, (await page.getByTestId("pause-banner-line").locator("button").count()) === 0);
+  check(`f ${tag} 끊기면 단추를 거둔다`, (await page.getByTestId("pause-banner-action").count()) === 0);
   check(`f ${tag} 줄은 그대로 서 있다`, (await bannerText(page)) === "알림 일시 중지 중 · 오후 10:30까지", await bannerText(page));
   check(`f ${tag} 끊긴 동안 쓰기가 없다`, server.log.filter((entry) => entry.method !== "GET" ).length === 0);
   const overflow = await noOverflow(page);
   check(`f ${tag} 가로 스크롤 없음`, overflow <= 0, String(overflow));
   await shoot(page, "banner-offline", tag, footBlock(page));
   await context.setOffline(false);
-  await page.getByTestId("pause-banner-line").locator("button").waitFor({ timeout: 5000 });
+  await page.getByTestId("pause-banner-action").waitFor({ timeout: 5000 });
   check(`f ${tag} 다시 이어지면 단추가 돌아온다`, (await page.getByTestId("pause-banner-offline").count()) === 0);
   report[`f-${tag}`] = { overflow };
+  await context.close();
+}
+
+async function sceneG(browser, origin, scheme, report) {
+  const tag = scheme;
+  // 실제 네트워크처럼 쓰기가 늦게(0.8초) 실패한다. 누르면 낙관 칠하기로 줄이 먼저 사라졌다가, 서버가 실패하면
+  // 줄이 되돌아오며 이유를 말해야 한다(design-review H1 — 이전 구현은 이 장면에서 이유가 한 번도 뜨지 않았다).
+  const server = newServer({ rules: { dnd: true, dndUntilMs: UNTIL_2230 } });
+  server.writeDelayMs = 800;
+  server.failRulesWrite = true;
+  const { context, page } = await openScene(browser, origin, scheme, server);
+  await waitBanner(page);
+  await page.getByTestId("pause-banner-action").click();
+  // 낙관 구간: 줄이 이미 사라졌고 서버는 아직 답하지 않았다.
+  await banner(page).waitFor({ state: "detached", timeout: 3000 });
+  check(`g ${tag} 낙관 구간: 줄이 먼저 사라졌고 쓰기가 나갔다`, writes(server, "notification-rules").length === 1);
+  // 서버가 실패하면 줄이 이유와 함께 돌아온다.
+  await page.getByTestId("pause-banner-failure").waitFor({ timeout: 6000 });
+  const failure = ((await page.getByTestId("pause-banner-failure").textContent()) ?? "").trim();
+  check(`g ${tag} 실패하면 이유가 선다`, failure === "알림 설정을 바꾸지 못했어요. 다시 시도하세요.", failure);
+  check(`g ${tag} 줄이 되돌아왔다`, (await bannerText(page)) === "알림 일시 중지 중 · 오후 10:30까지", await bannerText(page));
+  check(`g ${tag} 이유는 줄의 그릇 안에서 단추 아래에 선다`, await page.getByTestId("pause-banner-failure").evaluate((node) => node.closest(".glass") !== null));
+  check(`g ${tag} 알림(role=alert)으로 읽힌다`, (await page.getByTestId("pause-banner-failure").getAttribute("role")) === "alert");
+  const overflow = await noOverflow(page);
+  check(`g ${tag} 가로 스크롤 없음`, overflow <= 0, String(overflow));
+  await shoot(page, "banner-failure", tag, footBlock(page));
+  // 다시 눌러 성공하면 걷힌다(같은 줄의 다시 시도는 막지 않는다).
+  server.failRulesWrite = false;
+  await page.getByTestId("pause-banner-action").click();
+  await banner(page).waitFor({ state: "detached", timeout: 5000 });
+  check(`g ${tag} 다시 눌러 성공하면 줄과 이유가 함께 걷힌다`, (await page.getByTestId("pause-banner-failure").count()) === 0);
+  report[`g-${tag}`] = { overflow, failure };
+  await context.close();
+
+  // 「풀기」도 같다.
+  const second = newServer({ presenceStatus: "dnd", dndUntilMs: UNTIL_2230 });
+  second.writeDelayMs = 800;
+  second.failPresenceWrite = true;
+  const opened = await openScene(browser, origin, scheme, second);
+  await waitBanner(opened.page);
+  await opened.page.getByTestId("pause-banner-action").click();
+  await banner(opened.page).waitFor({ state: "detached", timeout: 3000 });
+  await opened.page.getByTestId("pause-banner-failure").waitFor({ timeout: 6000 });
+  const dndFailure = ((await opened.page.getByTestId("pause-banner-failure").textContent()) ?? "").trim();
+  check(`g ${tag} 「풀기」가 늦게 실패해도 이유가 선다`, dndFailure === "상태를 바꾸지 못했습니다. 다시 시도하세요.", dndFailure);
+  await shoot(opened.page, "banner-dnd-failure", tag, footBlock(opened.page));
+  await opened.context.close();
+}
+
+async function sceneH(browser, origin, scheme, report) {
+  const tag = scheme;
+  // 다음 주 월요일 오전 9시: 오늘·내일 이름이 아니라 날짜가 붙는 가장 긴 문장(design-review M3).
+  const monday = kst("2026-10-19T09:00:00");
+  const server = newServer({ rules: { dnd: true, dndUntilMs: monday }, presenceStatus: "dnd", dndUntilMs: monday });
+  const { context, page } = await openScene(browser, origin, scheme, server);
+  await waitBanner(page);
+  const text = await bannerText(page);
+  check(`h ${tag} 날짜가 붙은 기한을 말한다`, text === "알림 일시 중지 중 · 10월 19일(월) 오전 9:00까지", text);
+  // 줄 수와 넘침: 기한 문장이 접혀도(두 줄) 단추와 겹치거나 카드 밖으로 넘치지 않는다.
+  const geometry = await page.evaluate(() => {
+    const rect = (id) => document.querySelector(`[data-testid="${id}"]`).getBoundingClientRect();
+    const card = document.querySelector('[data-testid="pause-banner-line"]').parentElement.getBoundingClientRect();
+    const detail = document.querySelector('[data-testid="pause-banner-detail"]');
+    const lineHeight = parseFloat(getComputedStyle(detail).lineHeight);
+    const title = rect("pause-banner-title");
+    const action = rect("pause-banner-action");
+    const d = detail.getBoundingClientRect();
+    return {
+      detailLines: Math.round(d.height / lineHeight),
+      detailRight: d.right,
+      actionLeft: action.left,
+      cardRight: card.right,
+      actionRight: action.right,
+      titleRight: title.right,
+    };
+  });
+  check(`h ${tag} 기한 글자가 단추와 겹치지 않는다`, geometry.detailRight <= geometry.actionLeft + 0.5, JSON.stringify(geometry));
+  check(`h ${tag} 단추가 카드 안에 있다`, geometry.actionRight <= geometry.cardRight + 0.5, JSON.stringify(geometry));
+  const overflow = await noOverflow(page);
+  check(`h ${tag} 가로 스크롤 없음`, overflow <= 0, String(overflow));
+  await shoot(page, "banner-date", tag, footBlock(page));
+  report[`h-${tag}`] = { overflow, text, ...geometry };
   await context.close();
 }
 
@@ -412,6 +529,8 @@ async function main() {
       await sceneD(browser, preview.origin, scheme);
       await sceneE(browser, preview.origin, scheme);
       await sceneF(browser, preview.origin, scheme, report);
+      await sceneG(browser, preview.origin, scheme, report);
+      await sceneH(browser, preview.origin, scheme, report);
     }
   } finally {
     await browser.close();

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { RosterMember } from "@momo/core/lib/api";
 import {
@@ -13,7 +13,7 @@ import {
   patchNotificationRules,
   type NotificationRules,
 } from "@momo/core/features/settings/notificationRules";
-import { InlineBanner } from "@/features/common/States";
+import { Button } from "@/design/ui/button";
 import { useOffline } from "@/features/common/useOffline";
 import { notificationRulesQueryKey } from "@/features/settings/notificationRulesKey";
 import { useRecheckWhenElapsed } from "@/features/settings/useRecheckWhenElapsed";
@@ -32,7 +32,16 @@ import { useSelfPresenceWrite } from "./useSelfPresenceWrite";
 //
 // 어느 줄이 서는지와 문장은 코어(`presence/pauseBanner.ts`)가 정한다. 폰 인박스가 같은 것을 쓴다.
 // 프로필 카드는 전체가 하나의 버튼이라 그 안에 단추를 둘 수 없다(중첩된 상호작용) — 그래서 이 줄은
-// 카드의 **형제**다. 디자인 시스템의 `InlineBanner`(neutral) 문법을 그대로 쓴다.
+// 카드의 **형제**다.
+//
+// ## 그릇은 사이드바의 「지금 카드」와 같은 문법이다 (design-review M4)
+//
+// 처음에는 `InlineBanner`(neutral)를 그대로 썼는데, 그 상자는 반경 0의 평평한 띠이고 `bg-surface-hover`
+// 를 입는다. 둥근 사이드바 안에서 혼자 각진 띠였고, 사이드바 범위에서는 호버 채움(`--band-fill`)이라
+// 프로필 카드를 호버했을 때의 색과 같았다 — 정적인 그릇이 상호작용 상태 토큰을 입은 것이다. 그래서
+// 사이드바가 흰 면을 쓰는 방식(`glass band-surface` + rest 그림자, 검색 입구·지금 카드와 같다)으로 짓고,
+// 글자는 프로필 줄과 같은 역할로 맞춘다(제목은 이름과 같은 `text-label`, 기한은 둘째 줄과 같은
+// `text-meta` 약한 글자). 실패·오프라인 이유는 그 흰 면 **안**에 서서 단추 바로 아래에서 말한다.
 //
 // ## 쓰기는 새 길이 없다
 //
@@ -49,12 +58,29 @@ import { useSelfPresenceWrite } from "./useSelfPresenceWrite";
 // 웹의 질의 클라이언트는 포커스 재조회가 꺼져 있다(`app/queryClient.ts`) — 그래서 창 포커스·보임은
 // 여기서 직접 걸고, 기한이 지난 뒤의 다시 묻기는 설정·프로필 카드와 같은 훅(`useRecheckWhenElapsed`)이 한다.
 //
+// ## 실패 이유는 낙관 칠하기와 독립으로 붙는다 (design-review H1)
+//
+// 「다시 켜기」「풀기」를 누르면 낙관 칠하기가 서버 답보다 먼저 줄을 바꾼다(줄이 사라지거나 방해 금지
+// 줄로 바뀐다). 서버가 실패하면 되돌려 줄이 다시 서는데, 이때 「누른 줄」 표식이 줄 모양이 바뀐 순간에 이미
+// 지워져 있으면 이유 문장이 한 번도 뜨지 않는다(줄이 사라졌다가 이유 없이 되돌아온다 — 이 이슈가 막으려던
+// 것과 같은 모양이다). 그래서 실패는 **쓰기의 `onError`** 가 알리고, 어느 줄(종류·기한)에 대한 실패인지와
+// 함께 들고 있다. 다른 줄이 서 있을 때는 붙지 않는다.
+//
+// ## 같은 자리에서 반대 행동이 올라오지 않게 (design-review M1)
+//
+// 「다시 켜기」를 누르면 같은 자리의 단추가 낙관 칠하기로 곧바로 「풀기」가 된다. 더블클릭의 둘째 누름이
+// 원치 않은 방해 금지 해제를 보내지 않도록, 쓰기가 **어느 것이든** 날고 있는 동안은 누르지 않고, 방금 누른
+// 줄과 다른 종류의 단추는 잠깐(`FLIP_GUARD_MS`) 받지 않는다. 같은 줄의 다시 시도는 막지 않는다.
+//
 // ## 끊겨 있으면 단추 자리에 이유를 말한다
 //
 // 끊긴 채 누른 뮤테이션은 낙관값만 칠하고 멈췄다가 재연결 뒤에 나간다 — 줄은 사라졌는데 서버는 아직
 // 모른다. 그래서 끊긴 동안은 단추를 거두고 그 자리에 이유를 말한다(승인 컨트롤이 오프라인에서 하는 것과
 // 같다: 버튼을 남겨 두지도, 말없이 치우지도 않는다).
 // =============================================================================
+
+/** 방금 누른 줄과 **다른 종류**의 단추를 받지 않는 시간. 같은 줄의 다시 시도는 막지 않는다. */
+const FLIP_GUARD_MS = 1500;
 
 /** 일시 중지만 끈 뒤의 낙관 칠하기: 꺼지면 기한도 사라진다(서버가 지운다). */
 function paintResumed(rules: NotificationRules): NotificationRules {
@@ -131,30 +157,42 @@ export function PauseBanner({
     };
   }, [refresh]);
 
-  // 실패 문장은 **누른 줄에만** 붙는다. 줄이 사라졌다 다시 서면 옛 실패가 새 줄에 남지 않는다.
-  const [attempted, setAttempted] = useState<PauseBannerKind | null>(null);
-  const kind = banner?.kind ?? null;
-  useEffect(() => {
-    if (attempted !== null && kind !== attempted) setAttempted(null);
-  }, [attempted, kind]);
+  // 실패는 쓰기의 `onError` 가 알린다 — 낙관 칠하기가 줄 모양을 바꾼 것과 독립이다(위 「실패 이유」).
+  // 어느 줄(종류·기한)에 대한 실패인지 함께 들고 있어, 다른 줄이 서 있을 때는 붙지 않는다. 줄이 사라졌다
+  // 다시 서도 기한이 다르면 옛 실패가 새 줄에 남지 않는다.
+  const [failure, setFailure] = useState<{
+    kind: PauseBannerKind;
+    untilMs?: number;
+  } | null>(null);
+  const lastPress = useRef<{ kind: PauseBannerKind; at: number } | null>(null);
+  // 어느 쓰기든 날고 있으면 단추를 받지 않는다(더블클릭의 둘째 누름이 반대 행동이 되지 않게).
+  const pending = resume.isPending || release.isPending;
 
   if (banner === null) return null;
 
-  const busy = banner.kind === "paused" ? resume.isPending : release.isPending;
   const failed =
-    attempted === banner.kind &&
-    (banner.kind === "paused" ? resume.isError : release.isError);
-  const failure = failed
+    failure !== null &&
+    failure.kind === banner.kind &&
+    failure.untilMs === banner.untilMs;
+  const failureText = failed
     ? banner.kind === "paused"
       ? NOTIFICATION_PAUSE_SAVE_FAILED
       : PRESENCE_WRITE_FAILED
     : null;
 
   const press = () => {
-    if (busy || offline) return;
-    setAttempted(banner.kind);
-    if (banner.kind === "paused") resume.mutate();
-    else release.mutate({ status: "auto" });
+    if (pending || offline) return;
+    const previous = lastPress.current;
+    const now = Date.now();
+    // 방금 다른 종류의 줄을 누른 직후에 같은 자리에 올라온 단추는 더블클릭의 둘째 누름일 수 있다.
+    if (previous !== null && previous.kind !== banner.kind && now - previous.at < FLIP_GUARD_MS) {
+      return;
+    }
+    lastPress.current = { kind: banner.kind, at: now };
+    setFailure(null);
+    const onError = () => setFailure({ kind: banner.kind, untilMs: banner.untilMs });
+    if (banner.kind === "paused") resume.mutate(undefined, { onError });
+    else release.mutate({ status: "auto" }, { onError });
   };
 
   return (
@@ -166,49 +204,54 @@ export function PauseBanner({
       data-kind={banner.kind}
       className="pt-2"
     >
-      <InlineBanner
-        tone="neutral"
-        separator={false}
-        testId="pause-banner-line"
-        // 프로필 카드의 아바타 왼쪽 끝에 글자 첫 줄이 맞도록 안쪽 여백을 한 칸 줄인다.
-        className="px-3"
-        message={
-          // 사이드바 폭에서는 「알림 일시 중지 중 · 오후 10:30까지」가 한 줄에 못 든다. 우연히 끊기면 가운뎃점이
-          // 줄 끝에 매달리므로 제목과 기한을 의도한 두 줄로 쌓는다(문장 전체는 묶음의 접근 이름이 갖는다).
-          // 방해 금지 줄처럼 제목만 있는 줄이 접히면 두 줄이 비슷한 길이로 접힌다(`text-balance`).
-          <span className="block text-balance">
-            <span className="block font-medium" data-testid="pause-banner-title">
+      <div className="glass band-surface flex flex-col gap-1 rounded-lg px-3 py-2 text-ink shadow-sm">
+        <div className="flex items-center gap-2" data-testid="pause-banner-line">
+          {/* 사이드바 폭에서는 「알림 일시 중지 중 · 오후 10:30까지」가 한 줄에 못 든다. 우연히 끊기면 가운뎃점이
+              줄 끝에 매달리므로 제목과 기한을 의도한 두 줄로 쌓는다(문장 전체는 묶음의 접근 이름이 갖는다).
+              어절에서 끊고(`break-keep`), 접히면 두 줄이 비슷한 길이로 접힌다(`text-balance`). */}
+          <span className="flex min-w-0 flex-1 flex-col break-keep text-balance">
+            <span className="text-label font-medium" data-testid="pause-banner-title">
               {banner.title}
             </span>
             {banner.detail === undefined ? null : (
-              <span className="block text-ink-muted" data-testid="pause-banner-detail">
+              <span className="text-meta text-ink-muted" data-testid="pause-banner-detail">
                 {banner.detail}
               </span>
             )}
           </span>
-        }
-        // 끊겨 있으면 단추를 거두고 아래 줄이 이유를 말한다.
-        actionLabel={offline ? undefined : banner.action}
-        actionBusy={busy}
-        onAction={offline ? undefined : press}
-      />
-      {offline ? (
-        <InlineBanner
-          tone="neutral"
-          separator={false}
-          className="px-3"
-          testId="pause-banner-offline"
-          message={PAUSE_UNTIL_OFFLINE_REASON}
-        />
-      ) : null}
-      {failure === null || offline ? null : (
-        <InlineBanner
-          tone="error"
-          separator={false}
-          testId="pause-banner-failure"
-          message={failure}
-        />
-      )}
+          {/* 끊겨 있으면 단추를 거두고 아래 줄이 이유를 말한다. */}
+          {offline ? null : (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="shrink-0"
+              aria-busy={pending || undefined}
+              data-testid="pause-banner-action"
+              onClick={press}
+            >
+              {banner.action}
+            </Button>
+          )}
+        </div>
+        {offline ? (
+          <p
+            role="status"
+            className="break-keep text-balance text-meta text-ink-muted"
+            data-testid="pause-banner-offline"
+          >
+            {PAUSE_UNTIL_OFFLINE_REASON}
+          </p>
+        ) : failureText === null ? null : (
+          <p
+            role="alert"
+            className="break-keep text-balance text-meta text-danger"
+            data-testid="pause-banner-failure"
+          >
+            {failureText}
+          </p>
+        )}
+      </div>
     </div>
   );
 }

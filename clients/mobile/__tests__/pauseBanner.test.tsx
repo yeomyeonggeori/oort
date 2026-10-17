@@ -74,6 +74,8 @@ interface Server {
   rulesReadFails: boolean;
   rulesWriteFails: boolean;
   presenceFails: boolean;
+  /** 쓰기(PATCH·PUT) 응답이 이만큼 늦게 온다 — 실제 네트워크에서는 낙관 칠하기가 서버 답보다 먼저 보인다. */
+  writeDelayMs: number;
   /** 있으면 규칙 GET 의 **n 번째 답**이 이 약속이 풀릴 때까지 끝나지 않는다. */
   holdRulesGetAt: number | null;
   heldRulesGet: (() => void) | null;
@@ -108,8 +110,13 @@ function jsonResponse(status: number, body: unknown): Response {
   } as unknown as Response;
 }
 
+const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
 function installFetch(): void {
   globalThis.fetch = jest.fn(async (url: string, init?: RequestInit) => {
+    // 요청이 들어온 순간의 서버를 쥔다: 늦게 답하는 쓰기(`writeDelayMs`)가 시험이 끝난 뒤 깨어나도 **다음 시험의
+    // 서버**를 건드리지 않는다(모듈 변수 `server` 는 시험마다 새로 만들어진다).
+    const s = server;
     const method = init?.method ?? 'GET';
     if (url.includes('/notification-rules/push-kinds')) {
       return jsonResponse(200, {workComplete: true});
@@ -117,39 +124,41 @@ function installFetch(): void {
     if (url.includes('/notification-rules')) {
       if (method === 'PUT' || method === 'PATCH') {
         const body = JSON.parse(String(init?.body));
-        server.writes.push({path: 'notification-rules', method, body});
-        if (server.rulesWriteFails) return jsonResponse(500, {error: {message: 'x'}});
-        const next: Rules = {...server.rules, ...body};
+        s.writes.push({path: 'notification-rules', method, body});
+        if (s.writeDelayMs > 0) await delay(s.writeDelayMs);
+        if (s.rulesWriteFails) return jsonResponse(500, {error: {message: 'x'}});
+        const next: Rules = {...s.rules, ...body};
         // 끄면 기한도 지워진다(서버).
         if (body.dnd === false || body.dndUntilMs === null) delete next.dndUntilMs;
-        server.rules = next;
-        return jsonResponse(200, server.rules);
+        s.rules = next;
+        return jsonResponse(200, s.rules);
       }
-      server.rulesGets += 1;
-      if (server.rulesReadFails) return jsonResponse(500, {error: {message: 'x'}});
-      const answer = {...server.rules};
-      const nth = server.rulesGets;
-      const next = server.rulesAfter.shift();
-      if (next) server.rules = next;
-      if (server.holdRulesGetAt === nth) {
+      s.rulesGets += 1;
+      if (s.rulesReadFails) return jsonResponse(500, {error: {message: 'x'}});
+      const answer = {...s.rules};
+      const nth = s.rulesGets;
+      const next = s.rulesAfter.shift();
+      if (next) s.rules = next;
+      if (s.holdRulesGetAt === nth) {
         await new Promise<void>(resolve => {
-          server.heldRulesGet = resolve;
+          s.heldRulesGet = resolve;
         });
       }
       return jsonResponse(200, answer);
     }
     if (url.includes('/presence')) {
       const body = JSON.parse(String(init?.body ?? '{}'));
-      server.writes.push({path: 'presence', method, body});
-      if (server.presenceFails) return jsonResponse(500, {error: {message: 'x'}});
-      const next: SelfRow = {...server.self, presenceStatus: body.status};
+      s.writes.push({path: 'presence', method, body});
+      if (s.writeDelayMs > 0) await delay(s.writeDelayMs);
+      if (s.presenceFails) return jsonResponse(500, {error: {message: 'x'}});
+      const next: SelfRow = {...s.self, presenceStatus: body.status};
       if (body.status !== 'dnd') delete next.dndUntilMs;
-      server.self = next;
+      s.self = next;
       return jsonResponse(200, {status: body.status});
     }
     if (url.includes('/roster')) {
-      server.rosterGets += 1;
-      return jsonResponse(200, {members: [server.self]});
+      s.rosterGets += 1;
+      return jsonResponse(200, {members: [s.self]});
     }
     if (url.includes('/channels') && !url.includes('/messages')) {
       return jsonResponse(200, {
@@ -233,6 +242,7 @@ beforeEach(() => {
     rulesReadFails: false,
     rulesWriteFails: false,
     presenceFails: false,
+    writeDelayMs: 0,
     holdRulesGetAt: null,
     heldRulesGet: null,
     writes: [],
@@ -474,6 +484,104 @@ describe('「다시 켜기」와 「풀기」 — 쓰기 모양', () => {
       '상태를 바꾸지 못했습니다. 다시 시도하세요.',
     );
     expect(action()).toHaveTextContent('풀기');
+  });
+
+  it('서버가 늦게 실패해도 이유가 뜬다 — 낙관 칠하기가 줄을 먼저 바꾼 뒤 되돌려져도 (design-review H1)', async () => {
+    freezeClock(FRI_2107);
+    // 실제 네트워크: 누르면 낙관 칠하기로 줄이 먼저 사라지고, 한참 뒤 서버가 실패해 되돌려진다. 이전 구현은
+    // 「누른 줄」 표식을 줄 모양이 바뀐 그 순간에 지워서 이유 문장이 한 번도 뜨지 않았다.
+    server.rules = {dnd: true, mentionOverridesMute: false, dndUntilMs: at(16, 22, 0)};
+    server.rulesWriteFails = true;
+    server.writeDelayMs = 150;
+    await openInbox();
+    await shownBanner();
+    fireEvent.press(action());
+
+    // 낙관 구간: 줄은 이미 사라졌고(방해 금지에 묶여 있지 않다) 서버는 아직 답하지 않았다.
+    await waitFor(() => expect(screen.queryByTestId('pause-banner')).toBeNull());
+    // 서버가 실패하면 줄이 되돌아오고, 이유가 함께 선다.
+    await waitFor(() => expect(screen.getByTestId('pause-banner-failure')).toBeTruthy());
+    expect(screen.getByTestId('pause-banner-failure')).toHaveTextContent(
+      '알림 설정을 바꾸지 못했어요. 다시 시도하세요.',
+    );
+    expect(lineOf()).toBe('알림 일시 중지 중 · 오후 10:00까지');
+  });
+
+  it('「풀기」가 늦게 실패해도 이유가 뜬다', async () => {
+    freezeClock(FRI_2107);
+    server.self = selfRow({presenceStatus: 'dnd', dndUntilMs: at(17, 9)});
+    server.presenceFails = true;
+    server.writeDelayMs = 150;
+    await openInbox();
+    await shownBanner();
+    fireEvent.press(action());
+    await waitFor(() => expect(screen.queryByTestId('pause-banner')).toBeNull());
+    await waitFor(() => expect(screen.getByTestId('pause-banner-failure')).toBeTruthy());
+    expect(screen.getByTestId('pause-banner-failure')).toHaveTextContent(
+      '상태를 바꾸지 못했습니다. 다시 시도하세요.',
+    );
+    expect(action()).toHaveTextContent('풀기');
+  });
+
+  it('쓰기가 나는 동안 같은 자리에 올라온 반대 행동은 받지 않는다 — 더블탭이 상태 해제를 보내지 않는다 (design-review M1)', async () => {
+    freezeClock(FRI_2107);
+    server.rules = {dnd: true, mentionOverridesMute: false, dndUntilMs: at(16, 22, 0)};
+    server.self = selfRow({presenceStatus: 'dnd', dndUntilMs: at(16, 22, 0)});
+    server.writeDelayMs = 120;
+    await openInbox();
+    await shownBanner();
+    expect(action()).toHaveTextContent('다시 켜기');
+    fireEvent.press(action());
+    // 낙관 칠하기로 같은 자리의 단추가 곧바로 「풀기」가 된다.
+    await waitFor(() => expect(action()).toHaveTextContent('풀기'));
+    // 더블탭의 둘째 누름: 상태 해제를 보내면 안 된다.
+    fireEvent.press(action());
+    await waitFor(() => expect(rulesWrites()).toHaveLength(1));
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 200));
+    });
+    expect(presenceWrites()).toEqual([]);
+
+    // 서버가 확정하고 시간이 지난 뒤에는 「풀기」가 정상으로 일한다.
+    freezeClock(FRI_2107 + 3_000);
+    await waitFor(() => expect(action()).toHaveTextContent('풀기'));
+    fireEvent.press(action());
+    await waitFor(() => expect(presenceWrites()).toHaveLength(1));
+    expect(presenceWrites()[0].body).toEqual({status: 'auto'});
+  });
+
+  it('보호 시간이 지나도 쓰기가 끝나기 전에는 반대 행동을 받지 않는다 — 느린 망', async () => {
+    freezeClock(FRI_2107);
+    server.rules = {dnd: true, mentionOverridesMute: false, dndUntilMs: at(16, 22, 0)};
+    server.self = selfRow({presenceStatus: 'dnd', dndUntilMs: at(16, 22, 0)});
+    server.writeDelayMs = 400;
+    await openInbox();
+    await shownBanner();
+    fireEvent.press(action());
+    await waitFor(() => expect(action()).toHaveTextContent('풀기'));
+    // 망이 느려 쓰기가 아직 끝나지 않았는데 보호 시간은 이미 지났다.
+    freezeClock(FRI_2107 + 3_000);
+    fireEvent.press(action());
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 600));
+    });
+    expect(presenceWrites()).toEqual([]);
+    expect(rulesWrites()).toHaveLength(1);
+  });
+
+  it('쓰기가 나는 동안은 같은 줄의 단추도 눌리지 않는다', async () => {
+    freezeClock(FRI_2107);
+    server.rules = {dnd: true, mentionOverridesMute: false, dndUntilMs: at(16, 22, 0)};
+    server.writeDelayMs = 150;
+    await openInbox();
+    await shownBanner();
+    fireEvent.press(action());
+    fireEvent.press(action());
+    await waitFor(() => expect(rulesWrites()).toHaveLength(1));
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 250));
+    });
+    expect(rulesWrites()).toHaveLength(1);
   });
 
   it('실패 문장은 그 줄에만 붙는다 — 줄이 사라졌다 다시 서면 옛 실패가 남지 않는다', async () => {

@@ -15,6 +15,7 @@ import {useStyles} from '../../design/theme';
 import {
   ds2Radius,
   font,
+  line,
   radius,
   SAFE_GUTTER,
   space,
@@ -61,12 +62,30 @@ import {
 // 줄은 서버의 새 답이 올 때 사라진다. 서버가 아직 켜져 있다고 답하면(두 시계의 차이) 줄은 그대로
 // 남고 분 틱마다 다시 묻는다.
 //
+// ## 실패 이유는 낙관 칠하기와 독립으로 붙는다 (design-review H1)
+//
+// 「다시 켜기」「풀기」를 누르면 낙관 칠하기가 서버 답보다 먼저 줄을 바꾼다(줄이 사라지거나 방해 금지
+// 줄로 바뀐다). 서버가 실패하면 되돌려 줄이 다시 서는데, 이때 「누른 줄」 표식이 줄 모양이 바뀐 순간에 이미
+// 지워져 있으면 이유 문장이 한 번도 뜨지 않는다(줄이 사라졌다가 이유 없이 되돌아온다 — 이 이슈가 막으려던
+// 것과 같은 모양이다). 그래서 실패는 **쓰기의 `onError`** 가 알리고, 어느 줄(종류·기한)에 대한 실패인지와
+// 함께 들고 있다. 다른 줄이 서 있을 때는 붙지 않는다 — 줄이 사라졌다 다시 서도 기한이 다르면 옛 실패가
+// 새 줄에 남지 않는다.
+//
+// ## 같은 자리에서 반대 행동이 올라오지 않게 (design-review M1)
+//
+// 「다시 켜기」를 누르면 같은 자리의 단추가 낙관 칠하기로 곧바로 「풀기」가 된다. 더블탭의 둘째 누름이
+// 원치 않은 방해 금지 해제를 보내지 않도록, 쓰기가 **어느 것이든** 날고 있는 동안은 누르지 않고, 방금 누른
+// 줄과 다른 종류의 단추는 잠깐(`FLIP_GUARD_MS`) 받지 않는다. 같은 줄의 다시 시도는 막지 않는다.
+//
 // ## 끊겨 있으면 단추 자리에 이유를 말한다
 //
 // 끊긴 채 누른 뮤테이션은 낙관값만 칠하고 멈췄다가 재연결 뒤에 나간다 — 줄은 사라졌는데 서버는 아직
 // 모른다. 그래서 끊긴 동안은 단추를 거두고 그 자리에 이유를 말한다(승인 컨트롤이 오프라인에서 하는 것과
 // 같다: 버튼을 남겨 두지도, 말없이 치우지도 않는다).
 // =============================================================================
+
+/** 방금 누른 줄과 **다른 종류**의 단추를 받지 않는 시간. 같은 줄의 다시 시도는 막지 않는다. */
+const FLIP_GUARD_MS = 1500;
 
 export function PauseBanner({
   workspaceId,
@@ -121,19 +140,18 @@ export function PauseBanner({
     return () => subscription.remove();
   }, [active, refresh]);
 
-  // 실패 문장은 **누른 줄에만** 붙는다. 줄이 사라졌다 다시 서면 옛 실패가 새 줄에 남지 않는다.
-  const [attempted, setAttempted] = useState<PauseBannerKind | null>(null);
-  const kind = banner?.kind ?? null;
-  useEffect(() => {
-    if (attempted !== null && kind !== attempted) setAttempted(null);
-  }, [attempted, kind]);
+  // 실패는 쓰기의 `onError` 가 알린다 — 낙관 칠하기가 줄 모양을 바꾼 것과 독립이다(위 「실패 이유」).
+  // 어느 줄(종류·기한)에 대한 실패인지 함께 들고 있어, 다른 줄이 서 있을 때는 붙지 않는다.
+  const [failure, setFailure] = useState<{kind: PauseBannerKind; untilMs?: number} | null>(
+    null,
+  );
+  const lastPress = useRef<{kind: PauseBannerKind; at: number} | null>(null);
+  const pending = pause.pending || setPresence.isPending;
 
   if (banner === null) return null;
 
-  const busy = banner.kind === 'paused' ? pause.pending : setPresence.isPending;
   const failed =
-    attempted === banner.kind &&
-    (banner.kind === 'paused' ? pause.failed : setPresence.isError);
+    failure !== null && failure.kind === banner.kind && failure.untilMs === banner.untilMs;
   const note = !online
     ? PAUSE_UNTIL_OFFLINE_REASON
     : failed
@@ -143,10 +161,22 @@ export function PauseBanner({
       : null;
 
   const press = () => {
-    if (busy || !online) return;
-    setAttempted(banner.kind);
-    if (banner.kind === 'paused') pause.resume();
-    else setPresence.mutate({status: 'auto'});
+    if (pending || !online) return;
+    const previous = lastPress.current;
+    const pressedAt = Date.now();
+    // 방금 다른 종류의 줄을 누른 직후에 같은 자리에 올라온 단추는 더블탭의 둘째 누름일 수 있다.
+    if (
+      previous !== null &&
+      previous.kind !== banner.kind &&
+      pressedAt - previous.at < FLIP_GUARD_MS
+    ) {
+      return;
+    }
+    lastPress.current = {kind: banner.kind, at: pressedAt};
+    setFailure(null);
+    const onError = () => setFailure({kind: banner.kind, untilMs: banner.untilMs});
+    if (banner.kind === 'paused') pause.resume({onError});
+    else setPresence.mutate({status: 'auto'}, {onError});
   };
 
   return (
@@ -162,22 +192,24 @@ export function PauseBanner({
             testID="pause-banner-title">
             {banner.title}
           </Sentence>
+          {/* `Sentence`: iOS 기본 줄바꿈은 한글을 글자 단위로 끊어 「9:00까 / 지」처럼 마지막 한 음절이 둘째 줄에
+              홀로 남는다(AX5 + 날짜가 붙는 기한에서 실측). 어절 우선 줄바꿈(`hangul-word`)이 한 자리에 있다. */}
           {banner.detail === undefined ? null : (
-            <Text
+            <Sentence
               style={styles.detail}
-              numberOfLines={1}
+              numberOfLines={2}
               maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
               testID="pause-banner-detail">
               {banner.detail}
-            </Text>
+            </Sentence>
           )}
         </View>
         {online ? (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={banner.label}
-            accessibilityState={{busy, disabled: busy}}
-            disabled={busy}
+            accessibilityState={{busy: pending, disabled: pending}}
+            disabled={pending}
             onPress={press}
             style={({pressed}) => [styles.action, pressed && styles.pressed]}
             testID="pause-banner-action">
@@ -192,6 +224,7 @@ export function PauseBanner({
       {note === null ? null : (
         <Sentence
           accessibilityLiveRegion="polite"
+          maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
           style={online ? styles.failure : styles.offline}
           testID={online ? 'pause-banner-failure' : 'pause-banner-offline'}>
           {note}
@@ -204,6 +237,8 @@ export function PauseBanner({
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
     banner: {
+      // 헤더의 아래 헤어라인에 붙지 않게 위 여백을 준다(아래 여백과 같다 — design-review M2).
+      marginTop: space.md,
       marginHorizontal: SAFE_GUTTER,
       marginBottom: space.md,
       paddingVertical: space.sm,
@@ -229,6 +264,6 @@ const buildStyles = (color: Palette) =>
     },
     actionLabel: {fontSize: font.label, fontWeight: '700', color: color.accentText},
     pressed: {opacity: 0.85},
-    failure: {fontSize: font.meta, color: color.dangerText, lineHeight: 18},
-    offline: {fontSize: font.meta, color: color.textMuted, lineHeight: 18},
+    failure: {fontSize: font.meta, color: color.dangerText, lineHeight: line.label},
+    offline: {fontSize: font.meta, color: color.textMuted, lineHeight: line.label},
   });
