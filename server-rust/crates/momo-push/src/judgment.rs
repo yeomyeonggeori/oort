@@ -114,10 +114,12 @@
 //!   no asker for this arm. A stream that is never closed is never judged by this arm — a
 //!   producer that died and whose run nobody closed, a close the domain refuses (the agent
 //!   left the channel, the message was deleted), and a retried turn's freeze that no path
-//!   ever ends — its job is never reclaimed, or its run is parked on an approval that is
-//!   then rejected, expires or is cancelled (those routes close no stream, an open one
-//!   included); the opening candidate has long been consumed, so there is nothing left to
-//!   judge it.
+//!   ever ends — its job is never reclaimed, its run is parked on an approval that is then
+//!   rejected, expires or is cancelled (those routes close no stream, an open one included),
+//!   or a refused turn's run was cancelled before the refusal; and a close the worker
+//!   attempts after its transaction and that fails (a database error) is only logged, as
+//!   ADR-0155 chose for a best-effort close; the opening candidate has long been consumed,
+//!   so there is nothing left to judge it.
 //!
 //!   Not settled here and left to the ADR's wording: a chat answer that arrives within 30 s
 //!   of the asker's own question is "reading" even without streaming, because the question
@@ -142,12 +144,10 @@
 //!
 //!   *Roll-out.* A notifier that holds streaming lines depends on the producer that
 //!   enqueues the closing candidate: ship the producers (server, agent-worker) first or
-//!   together. The other order leaves a streamed answer held and never judged; an old
-//!   notifier with the new producers is harmless in the ordinary case (it judges the closing
-//!   candidate like the opening, and `collapse_id` keeps it to one push) — except around a
-//!   retried turn's freeze, which an old notifier does not know to hold: a candidate it
-//!   judges inside the freeze can still push the half answer. Producers and notifier are
-//!   shipped together to keep that window short.
+//!   together. The other order leaves a streamed answer held and never judged. An old
+//!   notifier with the new producers is harmless: it holds no stream at all, so it judges
+//!   the opening candidate when the stream opens, as before, and the closing candidate as
+//!   one more opening — `collapse_id` keeps it to one push.
 //! * **Mute (ADR-0124)** — the per-channel `notification_pref` row suppresses
 //!   every reason, mentions and approvals included. Read at judgment time; no
 //!   cache.

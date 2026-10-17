@@ -381,10 +381,11 @@ pub async fn close_run_stream(
 /// the finished answer's push would be swallowed as already settled. A block that is
 /// already frozen is left alone: a second freeze would only repeat the first.
 ///
-/// A freeze that no path ever ends — the job is never reclaimed, or the run is parked on an
-/// approval that is rejected, expires or is cancelled (those routes close no stream) — leaves
-/// the message as it is, marked `failed` and never announced: the same "stream nobody closes"
-/// the push judgment documents.
+/// A freeze that no path ever ends — the job is never reclaimed, the run is parked on an
+/// approval that is rejected, expires or is cancelled (those routes close no stream), or a
+/// close the worker attempts after its transaction fails — leaves the message as it is,
+/// marked `failed` and never announced: the same "stream nobody closes" the push judgment
+/// documents.
 pub async fn freeze_run_stream_between_attempts(
     pool: &PgPool,
     workspace_id: Uuid,

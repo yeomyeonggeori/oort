@@ -939,6 +939,11 @@ async fn a_zero_revision_and_a_tombstone_are_both_refused_by_name() {
 /// ordinary final slice: the key is not read, the block comes back without it, and the write
 /// is the end of the answer (one closing push candidate). The pause belongs to the in-process
 /// worker's retry; a REST producer that could ask for it could mute its own answer's push.
+///
+/// The `200` stands on the request decoder ignoring keys it does not know (`StreamEditRequest`
+/// has no `deny_unknown_fields`, though the OpenAPI schema says `additionalProperties: false`).
+/// If the decoder is ever tightened, this becomes a `400` and the premise changes — the point of
+/// the test, that the marker cannot be written from the wire, stands either way.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
 async fn a_producer_cannot_ask_for_a_provisional_freeze_over_the_wire() {

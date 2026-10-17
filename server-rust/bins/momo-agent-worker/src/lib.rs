@@ -2321,7 +2321,7 @@ impl AgentWorker {
                 if between_attempts {
                     "frozen until the next attempt"
                 } else {
-                    "closed by a stopped run"
+                    "closed with the run that ended"
                 }
             ),
             Err(error) => tracing::warn!(
@@ -2960,6 +2960,10 @@ impl AgentWorker {
     /// Close a turn the worker must not run: the run `failed`, one #2871
     /// system line (throttled per person, thread, reason and window), audit and
     /// rail frame, all in one transaction. No model is called; the job is done.
+    ///
+    /// A stream an earlier attempt left behind is ended after that transaction, as a separate
+    /// best-effort write ([`Self::close_stopped_stream`]) — only when this call finished the
+    /// run (a cancelled or vanished run is left to its own paths).
     async fn settle_refused_turn(
         &self,
         job: &ClaimedAgentJob,
