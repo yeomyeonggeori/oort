@@ -101,6 +101,48 @@ pub struct UnclaimedThreadTurn {
     pub job_outbox_id: i64,
 }
 
+/// #4017 — the 1:1 DM twin of [`find_unclaimed_thread_run_in_tx`]: a queued run
+/// of `agent_member_id` in `channel_id` that the **DM rule** started
+/// (`input.addressing = 'dm_implicit'`) and whose job nobody has picked up.
+///
+/// Two quick messages (「ㅎㅇ」 then 「반가」) are one utterance to the person, so
+/// the second one is folded into the first turn's conversation instead of
+/// starting a second run. Only a `dm_implicit` run qualifies: a run born of an
+/// explicit `@mention` may carry a routing choice (model, effort) the new
+/// message did not make. The same `FOR UPDATE OF o` lock as the thread twin
+/// keeps a claimer from leasing the job between this read and the send's commit.
+pub async fn find_unclaimed_dm_run_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+    channel_id: Uuid,
+) -> Result<Option<UnclaimedThreadTurn>, DbError> {
+    let found: Option<(Uuid, i64)> = sqlx::query_as(
+        "SELECT r.id, o.id FROM outbox o \
+           JOIN agent_run r ON r.workspace_id = o.workspace_id \
+                           AND upper(r.id::text) = upper(o.payload->>'run_id') \
+          WHERE o.workspace_id = $1 \
+            AND o.kind = 'agent_job' \
+            AND o.partition_key = $2 \
+            AND o.status = 'pending' \
+            AND o.lease_owner IS NULL \
+            AND r.agent_member_id = $2 AND r.channel_id = $3 \
+            AND r.status = 'queued' \
+            AND r.input->>'addressing' = 'dm_implicit' \
+          ORDER BY r.created_at DESC LIMIT 1 \
+          FOR UPDATE OF o",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .bind(channel_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(found.map(|(run_id, job_outbox_id)| UnclaimedThreadTurn {
+        run_id,
+        job_outbox_id,
+    }))
+}
+
 /// A queued run of `agent_member_id` whose trigger message is in the thread
 /// `root_id` (the root itself or any reply in it) **and whose job no consumer
 /// has picked up yet** — W2's 「수령 전」.

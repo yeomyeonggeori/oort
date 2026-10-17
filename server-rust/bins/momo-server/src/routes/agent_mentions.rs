@@ -100,13 +100,13 @@
 //!   `runId` made the follow-up possible; it did not make it correct by default.
 
 use momo_agent::{
-    create_agent_run_in_tx, find_unclaimed_thread_run_in_tx, load_dm_audience_in_tx,
-    load_mention_candidates_in_tx, load_thread_wake_target_in_tx, mention_diagnostic_detail,
-    mention_job_broadcast_payload, mention_job_payload, mention_run_input, paused_mention_body,
-    paused_mention_props, resolve_dm_addressing, resolve_mention_routing, stamp_addressing,
-    Addressing, DmAddressing, MentionCandidate, MentionRouting, MentionTrigger, NewAgentRun,
-    RequestedRouting, RunTrigger, MENTION_JOB_METHOD_GATEWAY, MENTION_JOB_METHOD_WORKER,
-    THREAD_REPLY_WAKE_REASON,
+    create_agent_run_in_tx, find_unclaimed_dm_run_in_tx, find_unclaimed_thread_run_in_tx,
+    load_dm_audience_in_tx, load_mention_candidates_in_tx, load_thread_wake_target_in_tx,
+    mention_diagnostic_detail, mention_job_broadcast_payload, mention_job_payload,
+    mention_run_input, paused_mention_body, paused_mention_props, resolve_dm_addressing,
+    resolve_mention_routing, stamp_addressing, Addressing, DmAddressing, MentionCandidate,
+    MentionRouting, MentionTrigger, NewAgentRun, RequestedRouting, RunTrigger,
+    MENTION_JOB_METHOD_GATEWAY, MENTION_JOB_METHOD_WORKER, THREAD_REPLY_WAKE_REASON,
 };
 use momo_agent::{
     hosted_skip_notice_body_with_owner, hosted_skip_notice_key, hosted_skip_notice_props,
@@ -144,6 +144,9 @@ const MODEL_PREF_IGNORED_ACTION: &str = "agent.profile.model_pref.ignored";
 /// the mention outcomes' diagnostic schema.
 const THREAD_WAKE_QUEUED_ACTION: &str = "agent.thread_wake.queued";
 const THREAD_WAKE_SKIPPED_ACTION: &str = "agent.thread_wake.skipped";
+/// #4017 — a 1:1 DM message folded into the same agent's still-unclaimed
+/// `dm_implicit` run instead of starting a second one.
+const DM_COALESCED_ACTION: &str = "agent.dm.coalesced";
 const THREAD_WAKE_COALESCED_ACTION: &str = "agent.thread_wake.coalesced";
 
 /// Everything the routing needs about the message that triggered it.
@@ -485,6 +488,74 @@ pub(crate) async fn route_agent_mentions_in_tx(
             Ok(routing) => routing,
             Err(invalid) => return Ok(Err(ApiError::bad_request(invalid.to_string()))),
         };
+        // #4017 — 「ㅎㅇ」 then 「반가」: the person said one thing in two bubbles.
+        // When the DM rule's turn for this agent has not been picked up yet, the
+        // new message joins that turn's conversation (the job's
+        // `recent_messages` is re-read, anchored on this message) and no second
+        // run starts. A claimed turn is underway and its answer cannot take the
+        // new message in, so that case falls through to a turn of its own. Only
+        // a bare, top-level DM message qualifies: an `@mention` or a `routing`
+        // block is a choice a queued turn did not make, and a thread reply would
+        // be answered under the first message's thread. The folded turn keeps the
+        // first message as its trigger (the answer quotes it); the later one is
+        // read from the refreshed `recent_messages`.
+        if *addressing == Addressing::DirectMessage
+            && send.routing.is_none()
+            && send.root_id.is_none()
+        {
+            if let Some(pending) = find_unclaimed_dm_run_in_tx(
+                &mut *conn,
+                send.workspace_id,
+                agent.member_id,
+                send.channel_id,
+            )
+            .await?
+            {
+                if context_window.is_none() {
+                    context_window = Some(
+                        agent_context_window_in_tx(
+                            &mut *conn,
+                            send.channel_id,
+                            send.message_id,
+                            send.context_max_messages,
+                        )
+                        .await?,
+                    );
+                }
+                let window = context_window.clone().unwrap_or_default();
+                let refreshed = momo_outbox::refresh_pending_agent_job_recent_messages_in_tx(
+                    &mut *conn,
+                    send.workspace_id,
+                    pending.job_outbox_id,
+                    &Value::Array(window),
+                )
+                .await?;
+                if refreshed {
+                    let mut detail = mention_diagnostic_detail(
+                        &trigger,
+                        agent,
+                        "coalesced_into_queued_run",
+                        Some(pending.run_id),
+                        None,
+                        None,
+                        None,
+                    );
+                    stamp_addressing(&mut detail, Addressing::DirectMessage);
+                    write_audit(
+                        &mut *conn,
+                        &AuditEntry::new(send.workspace_id, DM_COALESCED_ACTION)
+                            .by(send.author_member_id)
+                            .about(agent.member_id)
+                            .target("message", send.message_id)
+                            .via_token(send.via_token_id)
+                            .run(pending.run_id)
+                            .with_schema(MENTION_DIAGNOSTIC_SCHEMA, detail),
+                    )
+                    .await?;
+                    continue;
+                }
+            }
+        }
         // The run key is the same on both addressing paths —
         // `mention:<message>:<agent>` — so an @mention and the DM rule pointing
         // at the same agent collapse into one run at the SoT even if the union
