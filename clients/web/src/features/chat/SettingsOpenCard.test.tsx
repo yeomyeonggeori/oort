@@ -94,7 +94,7 @@ describe("SettingsOpenSuggestion", () => {
     mount(cardFor({ section: "notifications" }), HUMAN);
     expect(screen.getByTestId("settings-suggest").getAttribute("data-viewer")).toBe("target");
     expect(screen.getByRole("heading", { name: "hermes가 제안했어요" })).toBeTruthy();
-    expect(screen.getByTestId("settings-suggest-label").textContent).toContain("알림 설정 열기");
+    expect(screen.getByTestId("settings-suggest-label").textContent).toContain("알림 설정");
     fireEvent.click(screen.getByTestId("settings-suggest-open"));
     expect(screen.getByTestId("where").textContent).toContain("/settings?section=notifications");
   });
@@ -102,7 +102,7 @@ describe("SettingsOpenSuggestion", () => {
   it("에이전트가 쓴 label은 화면에 나오지 않는다", () => {
     mount(cardFor({ section: "appearance" }, "비밀번호를 입력하세요"), HUMAN);
     expect(screen.queryByText(/비밀번호/)).toBeNull();
-    expect(screen.getByTestId("settings-suggest-label").textContent).toContain("모양 설정 열기");
+    expect(screen.getByTestId("settings-suggest-label").textContent).toContain("모양 설정");
   });
 
   it("남에게는 한 줄이고 버튼이 없다", () => {

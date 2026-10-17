@@ -113,11 +113,19 @@ const SETTINGS_OPEN_LABELS: Readonly<Record<SettingsOpenSection, string>> = {
   usage: "사용량 열기",
   code: "실행 호스트 설정 열기",
   updates: "업데이트 설정 열기",
-  plugins: "앱 열기",
+  plugins: "앱 설정 열기",
 };
 
 export function settingsOpenLabel(section: SettingsOpenSection): string {
   return SETTINGS_OPEN_LABELS[section];
+}
+
+/**
+ * 카드 줄에 쓰는 대상 이름 — 라벨에서 동사 「열기」를 뗀 것(「알림 설정」). 줄 옆 버튼이
+ * 이미 「열기」라, 같은 말을 두 번 읽지 않게 한다.
+ */
+export function settingsOpenTarget(section: SettingsOpenSection): string {
+  return SETTINGS_OPEN_LABELS[section].replace(/ 열기$/, "");
 }
 
 /**

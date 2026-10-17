@@ -77,7 +77,7 @@ describe('SettingsOpenSuggestion (phone)', () => {
     render(<SettingsOpenSuggestion card={cardFor({section: 'notifications'})} viewerMemberId={HUMAN} />);
     expect(screen.getByTestId('settings-suggest-target')).toBeTruthy();
     expect(screen.getByText('hermes가 제안했어요')).toBeTruthy();
-    expect(screen.getByTestId('settings-suggest-label').props.children).toBe('알림 설정 열기');
+    expect(screen.getByTestId('settings-suggest-label').props.children).toBe('알림 설정');
     expect(screen.getByText('이 설정은 맥·웹에서 열어요.')).toBeTruthy();
     expect(screen.queryByRole('button')).toBeNull();
   });
@@ -90,7 +90,7 @@ describe('SettingsOpenSuggestion (phone)', () => {
       />,
     );
     expect(screen.queryByText(/비밀번호/)).toBeNull();
-    expect(screen.getByTestId('settings-suggest-label').props.children).toBe('모양 설정 열기');
+    expect(screen.getByTestId('settings-suggest-label').props.children).toBe('모양 설정');
   });
 
   it('남에게는 한 줄이다', () => {

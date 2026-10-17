@@ -1,6 +1,6 @@
 import { useId } from "react";
 import { useNavigate } from "react-router-dom";
-import { ExternalLink, Settings } from "lucide-react";
+import { ArrowRight, Settings } from "lucide-react";
 import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
 import {
   COMMAND_SUGGEST_SETTINGS_OPEN,
@@ -8,6 +8,7 @@ import {
   commandSuggestOneLine,
   commandSuggestViewer,
   settingsOpenLabel,
+  settingsOpenTarget,
 } from "@momo/core/features/timeline/commandSuggest";
 import { Button } from "@/design/ui/button";
 import { isReachableSettingsSection } from "@/features/settings/settingsNav";
@@ -52,7 +53,11 @@ export function SettingsOpenSuggestion({ card, viewerMemberId }: CommandSuggestS
   // 깨진 제안(`degraded`)은 누구에게나 한 줄이다. 남에게도 한 줄이다.
   if (viewer !== "target" || section === null) {
     return (
-      <div className="ai-card mt-2 flex min-w-0 flex-col gap-2" data-testid="settings-suggest" data-viewer="other">
+      <div
+        className="ai-card mt-2 flex min-w-0 flex-col gap-2"
+        data-testid="settings-suggest"
+        data-viewer={viewer === "target" ? "target-degraded" : "other"}
+      >
         <p
           className="flex min-w-0 items-center gap-2 rounded-lg bg-sheet px-3 py-2 text-meta text-ink-muted"
           data-testid="settings-suggest-line"
@@ -88,16 +93,18 @@ export function SettingsOpenSuggestion({ card, viewerMemberId }: CommandSuggestS
       <div className="flex min-w-0 items-center gap-3 px-3 py-3">
         <Settings className="size-4 shrink-0 text-icon" aria-hidden="true" />
         <span className="min-w-0 flex-1 break-keep text-body text-ink" data-testid="settings-suggest-label">
-          {label}
+          {settingsOpenTarget(section)}
         </span>
         <Button
           type="button"
           size="sm"
+          // 눌리는 면은 좁은 폭에서 44(`tap-target`), 보이는 모양은 그대로(design-review #3940 H).
+          className="tap-target"
           onClick={() => navigate(`/settings?section=${section}`)}
           aria-label={label}
           data-testid="settings-suggest-open"
         >
-          <ExternalLink aria-hidden="true" />
+          <ArrowRight aria-hidden="true" />
           {COMMAND_SUGGEST_SETTINGS_OPEN}
         </Button>
       </div>

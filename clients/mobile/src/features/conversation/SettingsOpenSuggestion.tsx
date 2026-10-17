@@ -6,7 +6,7 @@ import {
   commandSuggestHead,
   commandSuggestOneLine,
   commandSuggestViewer,
-  settingsOpenLabel,
+  settingsOpenTarget,
   type CommandSuggestCard,
 } from '@momo/core/features/timeline/commandSuggest';
 import {font, line, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
@@ -45,11 +45,6 @@ export function SettingsOpenSuggestion({
     return (
       <View style={styles.wrap} testID="settings-suggest-other">
         <View style={styles.oneline} testID="settings-suggest-line">
-          <Image
-            source={AI_CONNECT_ICONS.plug}
-            style={[styles.icon, {tintColor: palette.icon}]}
-            accessibilityIgnoresInvertColors
-          />
           <Text style={styles.onelineText} lineBreakStrategyIOS="hangul-word">
             {commandSuggestOneLine(card)}
           </Text>
@@ -73,8 +68,11 @@ export function SettingsOpenSuggestion({
         </Text>
       </View>
       <View style={styles.section}>
-        <Text style={styles.label} testID="settings-suggest-label">
-          {settingsOpenLabel(section)}
+        <Text
+          style={styles.label}
+          lineBreakStrategyIOS="hangul-word"
+          testID="settings-suggest-label">
+          {settingsOpenTarget(section)}
         </Text>
         <View style={styles.note}>
           <Image
