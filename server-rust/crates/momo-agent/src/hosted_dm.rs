@@ -99,12 +99,17 @@ pub fn hosted_dm_delivery(
 ) -> HostedDmDelivery {
     if let Some(kind) = owner_only_gate(
         agent.owner_only.as_ref(),
+        agent.connector_owner.as_ref(),
         caller_member_id,
         subscription_agents_enabled,
         claude_subscription_agents_enabled,
     ) {
         return match kind {
-            SubscriptionNoticeKind::NonOwner => HostedDmDelivery::OwnerOnly,
+            // E3 (#3938): the connector refusal reads as 「owner only」 too —
+            // the caller is told it is the owner's alone, not that a switch is off.
+            SubscriptionNoticeKind::NonOwner | SubscriptionNoticeKind::ConnectorNonOwner => {
+                HostedDmDelivery::OwnerOnly
+            }
             SubscriptionNoticeKind::ClaudePaused => HostedDmDelivery::ClaudeSubscriptionPaused,
             _ => HostedDmDelivery::SubscriptionDisabled,
         };

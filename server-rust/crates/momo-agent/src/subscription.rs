@@ -68,6 +68,10 @@ pub const SUBSCRIPTION_NOTICE_AUDIT_SCHEMA: &str = "momo.agent.subscription_noti
 
 /// The mention skip reasons this ADR adds (`agent.mention.skipped`).
 pub const SKIP_OWNER_ONLY_NON_OWNER: &str = "owner_only_non_owner";
+/// #3938 (ADR-0113 증보 2 E3): a person other than the owner called an agent
+/// that runs the owner's connected apps. Mention, DM, thread wake and the
+/// A2A/system/non-person senders all end here, under one reason word.
+pub const SKIP_CONNECTOR_OWNER_NON_OWNER: &str = "connector_owner_non_owner";
 pub const SKIP_SUBSCRIPTION_AGENTS_DISABLED: &str = "subscription_agents_disabled";
 /// ADR-0198 증보 1 D7 (#3592): the owner mentioned (or DM'd) their own personal
 /// agent. The server starts nothing — the owner's client sends a signed spawn
@@ -133,7 +137,16 @@ pub struct OwnerOnlyScope {
     pub personal_agent: bool,
 }
 
-/// The three sentences (ADR-0193 D4·D5·D6).
+/// #3938 (ADR-0113 증보 2 E3): the human whose connected apps this agent runs
+/// (`agent.connector_owner_human_id`). Present on the candidate exactly when the
+/// column is set; the delivery rule is then 「작성자 = 이 사람」 and nothing else.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectorOwner {
+    pub owner_member_id: Uuid,
+    pub owner_display_name: String,
+}
+
+/// The three sentences (ADR-0193 D4·D5·D6), plus E3's connector sentence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SubscriptionNoticeKind {
     /// D4 — someone other than the owner called.
@@ -149,6 +162,9 @@ pub enum SubscriptionNoticeKind {
     /// D14·D17 증보 2026-10-03 (#3397) — the agent is a Claude subscription agent
     /// and this instance has not opted in (「회색·문의 중」).
     ClaudePaused,
+    /// ADR-0113 증보 2 E3 (#3938) — the agent runs its owner's connected apps
+    /// and someone else called.
+    ConnectorNonOwner,
 }
 
 impl SubscriptionNoticeKind {
@@ -160,6 +176,7 @@ impl SubscriptionNoticeKind {
             Self::OfflineQueued | Self::OfflineNotQueued => "offline",
             Self::Disabled => "disabled",
             Self::ClaudePaused => "claude_paused",
+            Self::ConnectorNonOwner => "connector_non_owner",
         }
     }
 }
@@ -169,6 +186,9 @@ impl SubscriptionNoticeKind {
 /// (ADR-0193 D5: others see "offline" and nothing more).
 pub fn subscription_notice_body(kind: SubscriptionNoticeKind, scope: &OwnerOnlyScope) -> String {
     match kind {
+        SubscriptionNoticeKind::ConnectorNonOwner => {
+            connector_owner_notice_body(&scope.owner_display_name)
+        }
         SubscriptionNoticeKind::NonOwner => format!(
             "{}의 개인 에이전트예요. 팀이 함께 부르는 에이전트는 AI 화면에서 만들 수 있어요.",
             // #2900: the owner chose this name; it must not become markup.
@@ -193,6 +213,14 @@ pub fn subscription_notice_body(kind: SubscriptionNoticeKind, scope: &OwnerOnlyS
     }
 }
 
+/// ADR-0113 증보 2 E3: the one sentence said, in the agent's name, to a person
+/// who called an agent that runs the owner's connected apps. Only the owner's
+/// display name is interpolated (#2900: it must not become markup).
+pub fn connector_owner_notice_body(owner_display_name: &str) -> String {
+    let name = crate::inert_display_name(owner_display_name);
+    format!("이 에이전트는 {name}님의 앱 권한으로 움직여서, {name}님만 부를 수 있어요.")
+}
+
 /// Decide whether an addressed `owner_only` agent may be called at all.
 ///
 /// `None` = not refused here (not `owner_only`, or the owner with the path on);
@@ -204,10 +232,21 @@ pub fn subscription_notice_body(kind: SubscriptionNoticeKind, scope: &OwnerOnlyS
 /// owner, with the switch off, is told the D6 sentence.
 pub fn owner_only_gate(
     scope: Option<&OwnerOnlyScope>,
+    connector_owner: Option<&ConnectorOwner>,
     author_member_id: Uuid,
     subscription_agents_enabled: bool,
     claude_subscription_agents_enabled: bool,
 ) -> Option<SubscriptionNoticeKind> {
+    // ADR-0113 증보 2 E3 (#3938) — the connector branch comes first and is
+    // independent of `scope`: an agent that runs its owner's apps need not be a
+    // subscription agent at all (a Hermes or a hosted vendor agent is not), and
+    // migration 089 ties `owner_only` to a subscription harness. Whoever is not
+    // the owner is refused here whatever the instance switches say.
+    if let Some(connector) = connector_owner {
+        if author_member_id != connector.owner_member_id {
+            return Some(SubscriptionNoticeKind::ConnectorNonOwner);
+        }
+    }
     let scope = scope?;
     if author_member_id != scope.owner_member_id {
         return Some(SubscriptionNoticeKind::NonOwner);
@@ -452,6 +491,79 @@ pub async fn mark_agent_owner_only_in_tx(
     .execute(&mut *conn)
     .await?;
     Ok(updated.rows_affected() == 1)
+}
+
+/// What [`set_connector_owner_in_tx`] decided.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectorOwnerChange {
+    /// The mark now reads as asked (a repeat of the same value is a no-op).
+    Applied { enabled: bool },
+    /// No active agent with that id in the workspace.
+    NoSuchAgent,
+    /// The caller is not the agent's owner (`agent.owner_human_id`). Also the
+    /// answer for an agent with no owner: nobody may turn the mark on for it.
+    NotOwner,
+}
+
+/// ADR-0113 증보 2 E3 — turn the 「앱 실행 장소」 mark on or off.
+///
+/// **Only the agent's own owner**, in either direction (the issue: 「켜고 끄는
+/// 사람은 그 에이전트의 소유자 본인뿐」). Off is immediate: the next trigger is
+/// judged on the cleared column. The row is locked so a concurrent delivery
+/// decision sees one value or the other, never a torn read.
+pub async fn set_connector_owner_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+    actor_member_id: Uuid,
+    enabled: bool,
+) -> Result<ConnectorOwnerChange, DbError> {
+    let owner: Option<Option<Uuid>> = sqlx::query_scalar(
+        "SELECT a.owner_human_id \
+           FROM agent a \
+           JOIN member m ON m.workspace_id = a.workspace_id AND m.id = a.member_id \
+          WHERE a.workspace_id = $1 AND a.member_id = $2 \
+            AND m.kind = 'agent' AND m.status = 'active' AND m.deleted_at IS NULL \
+            FOR UPDATE OF a",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(owner) = owner else {
+        return Ok(ConnectorOwnerChange::NoSuchAgent);
+    };
+    if owner != Some(actor_member_id) {
+        return Ok(ConnectorOwnerChange::NotOwner);
+    }
+    sqlx::query(
+        "UPDATE agent SET connector_owner_human_id = CASE WHEN $3 THEN owner_human_id END, \
+                updated_at = now() \
+          WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .bind(enabled)
+    .execute(&mut *conn)
+    .await?;
+    Ok(ConnectorOwnerChange::Applied { enabled })
+}
+
+/// The human whose apps this agent runs, or `None` for an ordinary agent.
+/// Surfaces that hold only an agent id (the work-request route) ask this.
+pub async fn agent_connector_owner_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<Option<Uuid>, DbError> {
+    let owner: Option<Option<Uuid>> = sqlx::query_scalar(
+        "SELECT connector_owner_human_id FROM agent WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(owner.flatten())
 }
 
 /// Is `agent_member_id` an `owner_only` agent? Used by surfaces that only need
@@ -953,29 +1065,80 @@ mod tests {
         }
     }
 
+    fn connector(owner: Uuid) -> ConnectorOwner {
+        ConnectorOwner {
+            owner_member_id: owner,
+            owner_display_name: "세은".into(),
+        }
+    }
+
+    /// #3938 (ADR-0113 증보 2 E3): the connector branch refuses everyone but the
+    /// owner, with or without a subscription scope, and whatever the instance
+    /// switches say; the owner passes (the ordinary checks run next).
+    #[test]
+    fn the_connector_branch_refuses_everyone_but_the_owner() {
+        let owner = Uuid::from_u128(0xC0);
+        let other = Uuid::from_u128(0xC1);
+        let c = connector(owner);
+        // A workspace-scoped agent (no `OwnerOnlyScope`): the case 089 cannot express.
+        assert_eq!(
+            owner_only_gate(None, Some(&c), other, true, true),
+            Some(SubscriptionNoticeKind::ConnectorNonOwner)
+        );
+        assert_eq!(
+            owner_only_gate(None, Some(&c), other, false, false),
+            Some(SubscriptionNoticeKind::ConnectorNonOwner)
+        );
+        assert_eq!(owner_only_gate(None, Some(&c), owner, true, true), None);
+        // Both marks on: the connector sentence comes first for a non-owner.
+        let s = scope(owner);
+        assert_eq!(
+            owner_only_gate(Some(&s), Some(&c), other, false, false),
+            Some(SubscriptionNoticeKind::ConnectorNonOwner)
+        );
+        // No mark: nothing changes for anybody.
+        assert_eq!(owner_only_gate(None, None, other, true, true), None);
+    }
+
+    #[test]
+    fn the_connector_sentence_names_the_owner_and_has_its_own_throttle_bucket() {
+        assert_eq!(
+            connector_owner_notice_body("세은"),
+            "이 에이전트는 세은님의 앱 권한으로 움직여서, 세은님만 부를 수 있어요."
+        );
+        assert_eq!(
+            SubscriptionNoticeKind::ConnectorNonOwner.as_str(),
+            "connector_non_owner"
+        );
+        assert_ne!(
+            SubscriptionNoticeKind::ConnectorNonOwner.as_str(),
+            SubscriptionNoticeKind::NonOwner.as_str()
+        );
+    }
+
     #[test]
     fn the_gate_refuses_a_non_owner_before_the_switch_and_the_owner_only_when_off() {
         let owner = Uuid::from_u128(1);
         let other = Uuid::from_u128(2);
         let s = scope(owner);
         assert_eq!(
-            owner_only_gate(None, other, true, true),
+            owner_only_gate(None, None, other, true, true),
             None,
             "workspace agents"
         );
-        assert_eq!(owner_only_gate(None, other, false, false), None);
+        assert_eq!(owner_only_gate(None, None, other, false, false), None);
         assert_eq!(
-            owner_only_gate(Some(&s), other, true, true),
+            owner_only_gate(Some(&s), None, other, true, true),
             Some(SubscriptionNoticeKind::NonOwner)
         );
         assert_eq!(
-            owner_only_gate(Some(&s), other, false, false),
+            owner_only_gate(Some(&s), None, other, false, false),
             Some(SubscriptionNoticeKind::NonOwner),
             "a non-owner hears whose agent this is, never the operator's switch"
         );
-        assert_eq!(owner_only_gate(Some(&s), owner, true, true), None);
+        assert_eq!(owner_only_gate(Some(&s), None, owner, true, true), None);
         assert_eq!(
-            owner_only_gate(Some(&s), owner, false, true),
+            owner_only_gate(Some(&s), None, owner, false, true),
             Some(SubscriptionNoticeKind::Disabled)
         );
     }
@@ -993,20 +1156,20 @@ mod tests {
         };
         for (subscription, claude) in [(false, false), (true, false), (false, true), (true, true)] {
             assert_eq!(
-                owner_only_gate(Some(&personal), owner, subscription, claude),
+                owner_only_gate(Some(&personal), None, owner, subscription, claude),
                 None,
                 "the owner of a personal agent is never refused by an instance switch \
                  ({subscription}, {claude})"
             );
             assert_eq!(
-                owner_only_gate(Some(&personal), other, subscription, claude),
+                owner_only_gate(Some(&personal), None, other, subscription, claude),
                 Some(SubscriptionNoticeKind::NonOwner),
                 "a teammate hears whose agent this is ({subscription}, {claude})"
             );
         }
         // The hosted subscription agent next to it is unchanged.
         assert_eq!(
-            owner_only_gate(Some(&scope(owner)), owner, false, false),
+            owner_only_gate(Some(&scope(owner)), None, owner, false, false),
             Some(SubscriptionNoticeKind::Disabled)
         );
     }
@@ -1019,17 +1182,20 @@ mod tests {
         let owner = Uuid::from_u128(1);
         let claude = scope(owner);
         assert_eq!(
-            owner_only_gate(Some(&claude), owner, true, false),
+            owner_only_gate(Some(&claude), None, owner, true, false),
             Some(SubscriptionNoticeKind::ClaudePaused),
             "flag off: refused, with a reason, not dropped"
         );
-        assert_eq!(owner_only_gate(Some(&claude), owner, true, true), None);
+        assert_eq!(
+            owner_only_gate(Some(&claude), None, owner, true, true),
+            None
+        );
         let codex = OwnerOnlyScope {
             harness: SubscriptionHarness::Codex,
             ..scope(owner)
         };
         assert_eq!(
-            owner_only_gate(Some(&codex), owner, true, false),
+            owner_only_gate(Some(&codex), None, owner, true, false),
             None,
             "Codex is not affected"
         );
@@ -1038,7 +1204,7 @@ mod tests {
             ..scope(owner)
         };
         assert_eq!(
-            owner_only_gate(Some(&personal_key), owner, true, false),
+            owner_only_gate(Some(&personal_key), None, owner, true, false),
             None,
             "a personal API key is not a subscription"
         );

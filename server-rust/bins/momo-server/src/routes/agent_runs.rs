@@ -183,6 +183,24 @@ pub async fn create(
                 else {
                     return Ok(Err(ApiError::not_found("active channel agent not found")));
                 };
+                // ADR-0113 증보 2 E3 (#3938) — an agent that runs its owner's
+                // connected apps takes a work request from that human only
+                // (`type=work` passes the same predicate as a mention). Before
+                // every write and every hosted question; there is no thread to
+                // answer in, so the refusal is the response itself. `require_human`
+                // above already keeps an agent or work host out.
+                if let Some(connector_owner) =
+                    momo_agent::agent_connector_owner_in_tx(conn, workspace_id, agent_member_id)
+                        .await?
+                {
+                    if connector_owner != actor_member_id {
+                        return Ok(Err(ApiError::coded(
+                            StatusCode::FORBIDDEN,
+                            "connector_owner_only",
+                            "this agent runs its owner's apps and takes requests from its owner only",
+                        )));
+                    }
+                }
                 // ADR-0193 D4·D6 (#2815) — a work request is a call, and a
                 // subscription agent takes calls from its owner only (and from
                 // nobody while the operator's switch is off). Checked before
