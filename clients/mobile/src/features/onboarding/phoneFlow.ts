@@ -219,7 +219,7 @@ export const NOTIFY_MENTION_LABEL = '나를 부른 멘션·답·DM';
  * `REJECT_ACTION`). 미리 보기가 실제와 다른 버튼을 보이면 거짓이라 시험이 둘을 대조한다.
  */
 export const NOTIFY_APPROVE_BUTTON = '승인';
-export const NOTIFY_REJECT_BUTTON = '거절';
+export const NOTIFY_REJECT_BUTTON = '거부';
 
 /**
  * 알림 예시 카드. **사람 이름을 넣지 않는다**(누구의 폰에서나 참이어야 한다). 제목은

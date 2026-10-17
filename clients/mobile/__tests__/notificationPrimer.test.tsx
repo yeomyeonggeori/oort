@@ -270,7 +270,7 @@ describe('M3 어떤 알림을 받을까요? (#3925, ADR-0204 D4)', () => {
     expect(buttons[0]).not.toHaveTextContent(/허용|나중에|알림 켜기/);
   });
 
-  it('does not count the switch or the pictured [승인][거절] as buttons, hidden ones included', async () => {
+  it('does not count the switch or the pictured [승인][거부] as buttons, hidden ones included', async () => {
     await mountPrimer();
     // 스위치는 `switch` 역할이다.
     expect(
@@ -370,7 +370,7 @@ describe('M3 어떤 알림을 받을까요? (#3925, ADR-0204 D4)', () => {
       NOTIFY_APPROVE_BUTTON,
       NOTIFY_REJECT_BUTTON,
     ]);
-    // 그리고 iOS는 거절을 붉게 그린다(`isDestructive`). 미리 보기도 그렇게 그린다.
+    // 그리고 iOS는 거부를 붉게 그린다(`isDestructive`). 미리 보기도 그렇게 그린다.
     expect(approval![1][1].options?.isDestructive).toBe(true);
   });
 

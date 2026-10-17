@@ -8,7 +8,7 @@
 //
 // **바뀌지 않은 것**(D8, Apple HIG)
 //   - 창 앞의 버튼은 [계속] 하나다. 스위치는 버튼이 아니라 `switch` 역할이고, 미리
-//     보기의 [승인][거절]은 그림이다(눌리지 않고 보조기술에서도 숨긴다).
+//     보기의 [승인][거부]은 그림이다(눌리지 않고 보조기술에서도 숨긴다).
 //   - 거절은 iOS 창의 「허용 안 함」이 받고, 거절돼도 앱은 온전히 쓴다(심사 지침 4.5.4).
 //     거부하면 같은 자리에서 한 장 더 서서 「프로필 › 알림에서 켤 수 있어요」를 말하고,
 //     [시작하기] 하나로 내려간다.
@@ -318,7 +318,7 @@ function WorkKind({kinds}: {kinds: PrimerKinds}): React.JSX.Element {
 
 /**
  * 알림 예시. **장식이다**: 읽으면 진짜 알림이 온 줄 안다. 그래서 보조기술에서 통째로
- * 숨기고, 종류 이름 줄과 설명이 같은 내용을 대신 말한다. [승인][거절]도 눌리지 않는 그림
+ * 숨기고, 종류 이름 줄과 설명이 같은 내용을 대신 말한다. [승인][거부]도 눌리지 않는 그림
  * 이다(`Pressable`이 아니다).
  */
 function NoticeSample({
@@ -526,7 +526,7 @@ const buildStyles = (color: Palette) =>
       backgroundColor: color.surfaceMuted,
     },
     actionLabel: {color: color.text, fontSize: font.label, fontWeight: '600'},
-    // iOS는 `isDestructive` 버튼의 제목을 붉게 그린다(`categories.ts`의 거절).
+    // iOS는 `isDestructive` 버튼의 제목을 붉게 그린다(`categories.ts`의 거부).
     actionDestructive: {color: color.danger},
     hint: {
       color: color.textMuted,
