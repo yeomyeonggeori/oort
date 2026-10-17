@@ -70,9 +70,10 @@ use uuid::Uuid;
 
 /// The approval a push candidate is the card of, as the judgment read it.
 ///
-/// `payload` is the **routing projection** of `approval.payload` — only the keys
-/// the shared functions read (`action.id`, `action.pins`, `execution`, `origin`),
-/// never the card's arguments or rationale. See `judgment.rs`.
+/// `payload` is the **routing projection** of `approval.payload` — only the paths
+/// the shared functions read (`action.id`, `action.pins`, `execution`, `origin`, and for
+/// `opens_in_app` the tool's name and a bare avatar marker), never the card's arguments
+/// or rationale. See `judgment.rs`.
 #[derive(Debug, Clone)]
 pub struct ApprovalCard {
     pub approval_id: Uuid,

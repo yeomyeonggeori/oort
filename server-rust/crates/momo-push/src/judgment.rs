@@ -74,12 +74,15 @@
 //! through a **projection** of its payload: only the keys the shared functions
 //! read — the audience's (`action.id`, `action.pins`, `execution`, `origin`; see
 //! `momo_agent::decider`) and the open-in-app list's (`tool_call.name`, and a bare
-//! marker for whether `action.args` has an `avatar` key; see
+//! marker for whether `action.args` is an object with an `avatar` key; see
 //! `momo_agent::actions::opens_in_app`) — never the card's argument values,
 //! `arguments` or rationale. That is a boundary (the card's text does not enter this
 //! process) and a bound (a model-sized tool input is not copied once per recipient
-//! and device). `tests/judgment_projection.rs` fails if the statement reads any other
-//! path of the payload.
+//! and device). `tests/judgment_projection.rs` fails if the statement reads a path of
+//! the payload that nobody listed, or reaches the approval row any other way. The
+//! projection and `opens_in_app` must agree on every card (the decision route calls the
+//! same function on the whole payload): the category test in `push_conformance_pg`
+//! asserts it for each card of its table.
 
 use std::collections::HashMap;
 
@@ -271,7 +274,8 @@ pub async fn judge_targets(
                               'id', a.payload#>'{action,id}', \
                               'pins', a.payload#>'{action,pins}', \
                               'args', CASE \
-                                WHEN jsonb_exists(a.payload#>'{action,args}', 'avatar') \
+                                WHEN jsonb_typeof(a.payload#>'{action,args}') = 'object' \
+                                 AND jsonb_exists(a.payload#>'{action,args}', 'avatar') \
                                   THEN jsonb_build_object('avatar', true) \
                                 ELSE '{}'::jsonb END), \
                   'tool_call', jsonb_build_object('name', a.payload#>'{tool_call,name}'), \

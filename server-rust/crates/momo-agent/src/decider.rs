@@ -30,11 +30,12 @@
 //! [`crate::in_place_grant::is_in_place_grant`]) and — through
 //! [`crate::approval::reference_execution_host`] and
 //! [`crate::approval::offers_host_choice`] — `execution`. The push judgment
-//! projects exactly these keys out of `approval.payload`
-//! (`momo_push::judge_targets`: it never copies a card's arguments or rationale into
-//! the notifier), so a function added here that reads another key must be added to
-//! that projection in the same change; `approval_push_audience_conformance_pg` is
-//! what notices when it was not.
+//! projects these keys — and the two paths [`crate::actions::opens_in_app`] reads,
+//! `tool_call.name` and whether `action.args` is an object with an `avatar` key — out of
+//! `approval.payload` (`momo_push::judge_targets`: it never copies a card's arguments or
+//! rationale into the notifier), so a function added here that reads another key must
+//! be added to that projection in the same change; `approval_push_audience_conformance_pg`
+//! is what notices when it was not.
 //!
 //! What stays out of here is *evaluation*: whether a given person is an admin or
 //! an agent's owner is answered by the primitives the route has always called

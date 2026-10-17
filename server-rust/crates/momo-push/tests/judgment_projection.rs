@@ -14,33 +14,53 @@
 //! This is a source-level pin: a statement text cannot be asked what it selects at
 //! runtime without running a database, and the failure it guards (somebody "simplifies"
 //! the projection back to the raw column, or adds a path to it) changes no result a
-//! conformance test could see. It is an **allow-list over every read of the column**,
-//! so a path nobody listed here cannot be added quietly. It lives in its own file so
-//! that no string in it is found in the file it reads.
+//! conformance test could see. It is an **allow-list over every way the statement can
+//! reach the approval row**: each read of the column must be a listed path, the row
+//! cannot be taken whole (`to_jsonb(a)`, `a.*`, a second alias), and the word `payload`
+//! may appear in the statement only as that column or as the output alias. What it
+//! cannot see — a *new* spelling nobody thought of — the review of a change to this
+//! statement still has to. It lives in its own file so that no string in it is found in
+//! the file it reads.
 
 const JUDGMENT: &str = include_str!("../src/judgment.rs");
 
 /// Every path of `approval.payload` the judgment statement may read, as the text that
 /// follows the column reference `a.payload`.
-const ALLOWED_READS: [&str; 6] = [
+const ALLOWED_READS: [&str; 7] = [
     "#>'{action,id}'",
     "#>'{action,pins}'",
-    // Presence of one key, never its value: only valid as `jsonb_exists(<this>, 'avatar')`.
+    // Presence of one key, never its value — and only on an object, so that the answer
+    // is the one `opens_in_app` gives the whole payload: `jsonb_typeof(<this>) = 'object'`
+    // and `jsonb_exists(<this>, 'avatar')`.
+    "#>'{action,args}') = 'object'",
     "#>'{action,args}', 'avatar')",
     "#>'{tool_call,name}'",
     "->'execution'",
     "->'origin'",
 ];
 
-/// The column references in the source: byte offsets of `a.payload` that are not the
+/// The judgment statement itself: from its first CTE to its `ORDER BY` — not the module
+/// documentation above it, which names the column in prose.
+fn statement() -> &'static str {
+    let start = JUDGMENT
+        .find("WITH msg AS (")
+        .expect("the judgment statement starts with `WITH msg AS (`");
+    let end = start
+        + JUDGMENT[start..]
+            .find("ORDER BY r.member_id, t.id")
+            .expect("the judgment statement ends with its ORDER BY");
+    &JUDGMENT[start..end]
+}
+
+/// The column references in the statement: byte offsets of `a.payload` that are not the
 /// tail of a longer identifier.
 fn column_reads() -> Vec<usize> {
     const COLUMN: &str = "a.payload";
-    JUDGMENT
-        .match_indices(COLUMN)
+    let sql = statement();
+    sql.match_indices(COLUMN)
         .map(|(at, _)| at)
         .filter(|&at| {
-            JUDGMENT[..at]
+            sql[..at]
                 .chars()
                 .next_back()
                 .is_none_or(|before| !(before.is_alphanumeric() || before == '_' || before == '.'))
@@ -50,13 +70,14 @@ fn column_reads() -> Vec<usize> {
 
 #[test]
 fn every_read_of_the_approval_payload_is_a_listed_path() {
+    let sql = statement();
     let reads = column_reads();
     assert!(
         !reads.is_empty(),
         "the judgment no longer reads the approval payload through `a.payload` — update this pin"
     );
     for at in reads {
-        let rest = &JUDGMENT[at + "a.payload".len()..];
+        let rest = &sql[at + "a.payload".len()..];
         assert!(
             ALLOWED_READS.iter().any(|ok| rest.starts_with(ok)),
             "the judgment statement reads `a.payload` at a path that is not listed in \
@@ -71,32 +92,100 @@ fn every_read_of_the_approval_payload_is_a_listed_path() {
 fn every_listed_path_is_read() {
     // The other direction: a path the statement stopped reading is a path the shared
     // functions no longer get, and a stale entry here would hide the next addition.
+    let sql = statement();
     let reads = column_reads();
     for ok in ALLOWED_READS {
         assert!(
             reads
                 .iter()
-                .any(|&at| JUDGMENT[at + "a.payload".len()..].starts_with(ok)),
+                .any(|&at| sql[at + "a.payload".len()..].starts_with(ok)),
             "ALLOWED_READS lists {ok:?} but the judgment statement does not read it"
         );
     }
 }
 
 #[test]
-fn the_avatar_is_asked_about_never_selected() {
-    // `action.args` holds the card's arguments. The one place the statement may touch
-    // it is the presence test for the avatar key, and the test's result is a boolean
-    // marker — the avatar object itself is not in the projection.
-    let args = "a.payload#>'{action,args}'";
-    let reads: Vec<usize> = JUDGMENT.match_indices(args).map(|(at, _)| at).collect();
-    assert_eq!(reads.len(), 1, "exactly one read of the card's arguments");
-    let at = reads[0];
-    assert!(
-        JUDGMENT[..at].ends_with("jsonb_exists("),
-        "the card's arguments are read only inside `jsonb_exists(…, 'avatar')`"
+fn the_word_payload_means_the_column_or_the_output_alias_and_nothing_else() {
+    // A second alias for the approval (`ap.payload`), an unqualified `payload`, a quoted
+    // or spaced spelling (`a."payload"`, `a . payload`), a capitalised one — none of them
+    // contain the text `a.payload`, so the allow-list above cannot see them. They all
+    // contain the word, though, so the word is what is counted: every occurrence is
+    // either `a.payload` (checked above) or the `approval_payload` output column.
+    let sql = statement().to_lowercase();
+    for (at, _) in sql.match_indices("payload") {
+        let before = &sql[..at];
+        let is_column = before.ends_with("a.")
+            && !before[..before.len() - 2]
+                .ends_with(|c: char| c.is_alphanumeric() || c == '_' || c == '.');
+        let is_output_alias = before.ends_with("approval_");
+        assert!(
+            is_column || is_output_alias,
+            "the word `payload` appears in the judgment statement outside `a.payload` and the \
+             `approval_payload` alias: …{}…",
+            &sql[at.saturating_sub(24)..(at + 24).min(sql.len())]
+        );
+    }
+}
+
+#[test]
+fn the_approval_row_cannot_be_taken_whole() {
+    let sql = statement().to_lowercase();
+    // The approval is joined once, under the alias the pin above reads.
+    assert_eq!(
+        sql.matches("join approval ").count(),
+        1,
+        "the statement must join the approval table exactly once"
     );
     assert!(
-        JUDGMENT[at..].contains("jsonb_build_object('avatar', true)"),
+        sql.contains("join approval a "),
+        "the approval is aliased `a`; the allow-list reads `a.payload`"
+    );
+    assert!(
+        !sql.contains("from approval"),
+        "the approval table is reached only through the one join"
+    );
+    // Whole-row spellings: the card's arguments, rationale and everything else with it.
+    for whole_row in [
+        "to_jsonb(a",
+        "to_json(a",
+        "row_to_json(a",
+        "jsonb_build_object(a",
+        "a.*",
+        "a .",
+        "a.\"",
+        "(a)",
+    ] {
+        assert!(
+            !sql.contains(whole_row),
+            "the judgment statement takes the approval row whole (`{whole_row}`): its payload would be \
+             copied into the notifier once per recipient and device"
+        );
+    }
+}
+
+#[test]
+fn the_avatar_is_asked_about_never_selected() {
+    // `action.args` holds the card's arguments. The one place the statement may touch it
+    // is the presence test for the avatar key — on an object — and the test's result is
+    // a boolean marker: the avatar object itself is not in the projection.
+    let sql = statement();
+    let args = "a.payload#>'{action,args}'";
+    let reads: Vec<usize> = sql.match_indices(args).map(|(at, _)| at).collect();
+    assert_eq!(
+        reads.len(),
+        2,
+        "exactly two reads of the card's arguments: the object test and the key test"
+    );
+    assert!(
+        sql[..reads[0]].ends_with("jsonb_typeof("),
+        "the first read of the card's arguments is `jsonb_typeof(…) = 'object'`"
+    );
+    assert!(
+        sql[..reads[1]].ends_with("jsonb_exists("),
+        "the second read of the card's arguments is `jsonb_exists(…, 'avatar')`"
+    );
+    assert!(
+        sql[reads[1]..].contains("jsonb_build_object('avatar', true)"),
         "the avatar presence is carried as a bare marker, not as the avatar"
     );
 }

@@ -341,23 +341,37 @@ pub fn changes_avatar(payload: &Value) -> bool {
 ///    there is nothing here to classify; the producer that gives them one adds its
 ///    arm in this function.
 ///
-/// Everything else this build **knows** — any other tool call, a workspace action it
-/// carries that mints nothing shown once and shows no picture — is decidable from the
-/// lock screen behind Face ID, as before.
+/// Everything else this build **knows** — any other *named* tool call, a workspace
+/// action it carries that mints nothing shown once and shows no picture — is decidable
+/// from the lock screen behind Face ID, as before (ADR-0204 D7: 「기본은 inline이고, open
+/// 목록은 서버 코드 한 곳에 둔다」).
 ///
-/// **What it does not know it opens.** ADR-0204 「보안·경계 요약」: 「무엇인지 모르는
+/// **A tool name outside the catalog is such a named tool call, and it is inline.** It is
+/// not an unknown shape: an operator's own `agent.tool_schema` function reaches the
+/// approval inbox under a name momo does not own (`tools::momo_tool_name`), and opening
+/// every one of them would take the banner away from tools nobody asked to take it from.
+/// The price is the rolling-deploy window of a *new* open tool: until the notifier is as
+/// new as the server, the new name reads as an operator's tool. Deploy them together.
+///
+/// **What it does not understand it opens.** ADR-0204 「보안·경계 요약」: 「무엇인지 모르는
 /// 알림에는 버튼이 없다」. A workspace action this build's registry does not carry (the
 /// notifier is older than the server that wrote the card — a rolling deploy — or the
 /// action was retired), a workspace action whose payload names none, a tool call whose
-/// payload names no tool, and an `action_type` that is not one of the three producers
-/// write today all answer `true`: the cost of a wrong guess is a card opened in the
-/// app, the cost of the other wrong guess is an approval nobody could look at.
+/// payload names no tool (a card with nothing to say what it is), and an `action_type`
+/// that is not one of the three producers write today all answer `true`: the cost of a
+/// wrong guess is a card opened in the app, the cost of the other wrong guess is an
+/// approval nobody could look at.
 ///
 /// ## What it may read
 ///
-/// Only `action.id`, `action.args` **keys**, `tool_call.name`, `execution` — the keys
-/// the push judgment's payload projection carries (`momo_push` `judgment.rs`; a source
-/// pin there fails if the projection and this list drift). Never an argument's value.
+/// Only `action.id`, whether `action.args` is an object with an `avatar` key,
+/// `tool_call.name`, `execution` — the paths the push judgment's payload projection
+/// carries (`momo_push` `judgment.rs`). Never an argument's value. The projection and
+/// this function must say the same thing about the same card: the push judges the
+/// projection, the decision route (#3977) the whole payload.
+/// `push_conformance_pg::an_approval_that_must_be_opened_…` asserts exactly that for
+/// every card of its table, and `momo-push/tests/judgment_projection.rs` fails if the
+/// statement reads a path of the payload nobody listed.
 pub fn opens_in_app(action_type: &str, payload: &Value) -> bool {
     if crate::approval::offers_host_choice(payload) {
         return true;
@@ -2991,7 +3005,8 @@ mod tests {
             crate::tools::ACTION_TYPE_TOOL_CALL,
             &serde_json::json!({"tool_call": {"call_id": "c1"}})
         ));
-        // The shapes it does know stay decidable from the lock screen.
+        // A named tool call stays decidable from the lock screen — whatever the name. (A
+        // name outside the catalog is an operator's own tool, not an unknown shape.)
         assert!(!opens_in_app(
             crate::tools::ACTION_TYPE_TOOL_CALL,
             &serde_json::json!({"tool_call": {"name": "x"}})
@@ -3019,6 +3034,8 @@ mod tests {
             (ACTION_AGENT_RENAME, false),
             (ACTION_HOSTED_CHANNELS_GRANT, false),
             (ACTION_WORKSPACE_SETTINGS_UPDATE, false),
+            // False for a card with no `avatar` key; one with it is opened (see
+            // `a_profile_update_that_changes_the_avatar_opens_in_the_app`).
             (ACTION_AGENT_PROFILE_UPDATE, false),
             (ACTION_WORKSPACE_UNFURL_UPDATE, false),
             (ACTION_WORKSPACE_MEMORY_UPDATE, false),
@@ -3089,6 +3106,60 @@ mod tests {
                 "action": {"id": ACTION_CHANNEL_CREATE, "args": {}},
             })
         ));
+    }
+
+    /// A tool the catalog does not carry is an operator's own (`agent.tool_schema`, see
+    /// `tools::momo_tool_name`): momo does not own its name and cannot say the lock screen
+    /// is unfit for it, so it keeps the default — inline. Pinned so that the asymmetry with
+    /// 「모르는 workspace action은 open」 is a recorded choice and not an accident. A name
+    /// that merely *resembles* the handoff is such a tool too.
+    #[test]
+    fn an_operators_own_tool_is_decided_where_it_is_shown() {
+        let call = |name: &str| serde_json::json!({"tool_call": {"name": name}});
+        for name in [
+            "github.search_issues",
+            "send_message",
+            "work.session.login_handoff_v2",
+            "work_session_login_handoff",
+            "work.session.login",
+        ] {
+            assert!(
+                !crate::tools::is_executable(name),
+                "{name} is in the catalog after all"
+            );
+            assert!(
+                !opens_in_app(crate::tools::ACTION_TYPE_TOOL_CALL, &call(name)),
+                "{name}"
+            );
+        }
+    }
+
+    /// The tools whose approval IS the human's act (`ApprovalReason::HumanIsTheAction`:
+    /// nobody can pre-approve typing somebody else's password) are the ones the lock
+    /// screen cannot stand in for. Today that is the login handoff, and it is on the open
+    /// list; a tool that joins that class without joining the list fails here.
+    #[test]
+    fn a_tool_whose_approval_is_the_humans_act_is_opened_in_the_app() {
+        let mut found = Vec::new();
+        for name in crate::tools::CATALOG {
+            if crate::tools::approval_reason(name, None)
+                == crate::tools::ApprovalReason::HumanIsTheAction
+            {
+                found.push(*name);
+                assert!(
+                    opens_in_app(
+                        crate::tools::ACTION_TYPE_TOOL_CALL,
+                        &serde_json::json!({"tool_call": {"name": name}})
+                    ),
+                    "{name} is the human's own act but is not on OPEN_IN_APP_TOOL_NAMES"
+                );
+            }
+        }
+        assert_eq!(
+            found,
+            [crate::tools::WORK_SESSION_LOGIN_HANDOFF],
+            "the class of tools whose approval is the human's act changed — decide each one"
+        );
     }
 
     /// Every tool this server can execute has its lock-screen decision written down,
@@ -3182,7 +3253,9 @@ mod tests {
                 "{label}"
             );
         }
-        // `args` that are not an object name no avatar.
+        // `args` that are not an object name no avatar — and the push judgment's projection
+        // agrees (it asks `jsonb_typeof(args) = 'object'` before it looks for the key;
+        // Postgres' `jsonb_exists` alone would say yes to `["avatar"]` and to `"avatar"`).
         assert!(!changes_avatar(&update(serde_json::json!("avatar"))));
         assert!(!changes_avatar(&update(serde_json::json!(["avatar"]))));
         assert!(!changes_avatar(&serde_json::json!({})));

@@ -2529,6 +2529,16 @@ fn cards(room: &ApprovalRoom) -> Vec<Card> {
             audience: vec![Who::Owner, Who::Admin, Who::AgentOwner],
             category: open,
         },
+        // Not reachable (the resolver stores an object), but it is the one input on which
+        // Postgres' `jsonb_exists` alone would disagree with `opens_in_app`: it says yes
+        // to an array holding the text "avatar". The projection asks for an object first.
+        Card {
+            label: "agent.profile.update whose args are not an object: no avatar key, decided as words",
+            action_type: "workspace_action",
+            payload: profile_update(room, json!(["avatar"])),
+            audience: vec![Who::Owner, Who::Admin, Who::AgentOwner],
+            category: inline,
+        },
         Card {
             label: "channel.create: workspace admins",
             action_type: "workspace_action",
@@ -2680,6 +2690,20 @@ async fn an_approval_that_must_be_opened_is_the_open_category_and_the_rest_are_i
     let pool = momo_notifier_pool().await;
 
     let cards = cards(&room);
+    // The function the decision route calls (#3977: `via=push_action` on an approval that
+    // `opens_in_app` is refused) reads the WHOLE payload; the push reads the routing
+    // projection of it. A card they disagree on is a banner button the route then
+    // refuses, or an app-only card the route would have decided — so the table ties the
+    // three together: what is written down, what the whole-payload function says, and
+    // (below) the category the projection-fed judgment actually sent.
+    for card in &cards {
+        assert_eq!(
+            momo_agent::actions::opens_in_app(card.action_type, &card.payload),
+            card.category == "momo.approval.open",
+            "{}: `opens_in_app` on the whole payload must agree with the table and with the push",
+            card.label
+        );
+    }
     let mut messages = Vec::new();
     for card in &cards {
         let (approval, message) = approval_card(&su, &room, card.action_type, &card.payload).await;
