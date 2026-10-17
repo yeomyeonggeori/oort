@@ -236,6 +236,74 @@ export function tablesFor(optical: LoaderOptical): LoaderTables {
   };
 }
 
+// ---- 당김(스크럽)의 자세 (#3992) ---------------------------------------------------
+//
+// 당겨서 새로고침(#3962)의 표시는 시간표(위)를 시간이 아니라 **손가락의 거리**로 읽는다. 처음 판은 시간표의
+// 처음 14%(홈에서 궤도로 나오는 구간)를 되감았는데, 40pt 로더에서 그 구간의 위성은 약 3pt 만 움직여서
+// 당김이 눈에 거의 안 읽혔다(#3989 검수 L1, 성재 2026-10-17 「3개 다 권장으로 ㄱㄱ」).
+//
+// 그래서 당김의 입력 `p`(0~1, 표준 컨트롤이 새로고침을 세우는 거리가 1)는 **궤도 각도**로 매핑한다:
+//
+//   각도  p = 0 → 홈(-45°),  p = 1 → 한 바퀴 돌아 다시 -45°(+360°). **p 에 선형이다**: 시안 A 의 도는 구간은
+//         느리게 시작해 빨라졌다 느려지는 곡선(`CURVES.spin`)인데, 그 곡선으로 당기면 25%·50%·75% 가 각각
+//         약 10°·220°·345° 에 몰려 75% 와 100% 가 같은 자리로 읽힌다. 손가락 아래의 눈금은 **등간격**이어야
+//         한다(25·50·75·100% = 90°씩).
+//   거리  처음 `SCRUB_POP_END` 에 홈에서 궤도로 **먼저** 나온다(웹과 같은 `CURVES.pop`). 각도는 처음부터 흐르지만
+//         이 구간의 회전은 몇 도 안 되고, 위성이 링의 홈(물린 자리)에서 빠져나온 뒤에야 몸을 돌려야
+//         링 둘레를 긁지 않는다.
+//
+// 끝(p = 1)의 자세가 곧 **이어 돌기의 시작 자세**다: 각도 315° ≡ -45°, 거리 궤도. 시간표의 14%(`PHASE.popEnd`)
+// 자세와 같아서 임계를 넘어 새로고침이 서도 위성이 튀지 않는다(시험이 두 자세를 같게 못 박는다).
+//
+// 이 표는 웹 키프레임의 거울이 아니다(웹 로더는 당기지 않는다): `oortLoader.test.tsx` 가 웹 대조로 읽는
+// 이름(`PHASE`·`CURVES`·`TRAILS`…)은 건드리지 않고 이 절만 더했다.
+
+/** 위성이 홈에서 궤도로 다 나오는 당김 진행도(앞 8%). 표준 컨트롤 기준 약 12pt 의 당김이다. */
+export const SCRUB_POP_END = 0.08;
+
+/** 동작 줄이기에서 당김의 투명도가 출발하는 값. 1 에서 끝나고 그 사이는 당김에 선형이다. */
+export const SCRUB_FILL_MIN = 0.2;
+
+/** 한 번 당기는 동안 위성이 도는 각도(도). 한 바퀴. */
+export const SCRUB_TURN = 360;
+
+export interface ScrubTables {
+  /** 위성 중심 거리 / 무대 한 변. 입력은 당김 진행도 0~1. */
+  radial: Knot[];
+  /** 위성 각도(도). 입력은 당김 진행도 0~1. */
+  angle: Knot[];
+  /** 동작 줄이기: 로더의 투명도. 입력은 당김 진행도 0~1. */
+  fill: Knot[];
+}
+
+export function scrubTablesFor(optical: LoaderOptical): ScrubTables {
+  const {units, home, out} = OPTICAL[optical];
+  return {
+    radial: join(
+      eased(bezier(CURVES.pop), 0, SCRUB_POP_END, home / units, out / units, SAMPLES.pop),
+      hold(SCRUB_POP_END, 1, out / units),
+    ),
+    angle: [
+      [0, HOME_ANGLE],
+      [1, HOME_ANGLE + SCRUB_TURN],
+    ],
+    fill: [
+      [0, SCRUB_FILL_MIN],
+      [1, 1],
+    ],
+  };
+}
+
+/** 당김 진행도 `p`(0~1, 밖은 끝으로 접힌다)의 자세. 단위는 `poseAt` 과 같다. */
+export function scrubPoseAt(optical: LoaderOptical, p: number) {
+  const tables = scrubTablesFor(optical);
+  return {
+    radial: readKnots(tables.radial, p),
+    angle: readKnots(tables.angle, p),
+    fillOpacity: readKnots(tables.fill, p),
+  };
+}
+
 // ---- 표 읽기 (시험과 정적 자세가 쓴다) ------------------------------------------
 
 /** 표를 선분으로 읽는다. `Animated.interpolate` 의 한 입력 범위 읽기와 같다. */

@@ -316,6 +316,7 @@ export function Shell({
         <View style={styles.tabBody}>
           <TabPane active={nav.tab === 'home'}>
             <SidebarScreen
+              active={nav.tab === 'home'}
               openChannelId={nav.conversation?.channelId ?? null}
               onOpenConversation={onOpenConversation}
               onOpenSearch={onOpenSearch}
@@ -396,6 +397,7 @@ export function Shell({
           onBack={onBack}
           testID="agent-list-pane">
           <AgentsScreen
+            active={nav.agentList && nav.agent === null && nav.hosted === null}
             onOpenAgent={onOpenAgent}
             onOpenHostedList={onOpenHostedList}
             onBack={onBack}
@@ -445,6 +447,7 @@ export function Shell({
           onBack={onBack}
           testID="hosted-list-pane">
           <HostedConnectionsScreen
+            active={nav.hosted.kind === 'list'}
             onBack={onBack}
             onOpenConnection={onOpenHostedConnection}
           />
