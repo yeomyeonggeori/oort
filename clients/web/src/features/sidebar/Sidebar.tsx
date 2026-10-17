@@ -99,6 +99,7 @@ import {
 } from "./sidebarRowFocus";
 import {
   closeDmOnDevice,
+  dmCloseOffered,
   closedAtSeqOf,
   dmHiddenByClosure,
   indexFallbackChannelId,
@@ -349,10 +350,10 @@ export function Sidebar({
       phase: readPhase,
     })
   );
-  // 닫기는 **읽음 투영이 준비된 뒤에만** 내민다(design-review R1 M1): 닫을 때 워터마크로 서버의
-  // 최신 seq 를 적는데, 투영이 오기 전(또는 못 읽은 동안)에는 그 기준이 없다. 0 으로 적으면 투영이
-  // 도착하는 순간 「최신 > 0」이 되어 방금 닫은 대화가 되살아난다. 없는 기준으로 닫는 문은 열지 않는다.
-  const canCloseDm = readPhase === "ready";
+  // 닫기는 행마다 `dmCloseOffered` 가 정한다(호버 X 와 메뉴 항목이 같은 함수를 읽는다): **읽음 투영이 준비된
+  // 뒤에만**(design-review R1 M1: 닫을 때 워터마크로 서버의 최신 seq 를 적는데, 투영이 오기 전에는 그 기준이
+  // 없다 - 0 으로 적으면 투영이 도착하는 순간 방금 닫은 대화가 되살아난다) 그리고 **안 읽은 메시지(멘션 포함)가
+  // 없을 때만**(소유자 결정 2026-10-17 「안 읽음 있으면 X 숨김」). 읽고 나면 다시 보인다.
   const visibleDms = useMemo(
     () =>
       dms.filter(
@@ -607,6 +608,13 @@ export function Sidebar({
     options: { inStarredSection?: boolean } = {}
   ) {
     const counts = unreadCountFor(channel);
+    const closeOffered =
+      channel.kind === "dm" &&
+      dmCloseOffered({
+        phase: readPhase,
+        unreadCount: counts.unreadCount,
+        mentionCount: counts.mentionCount,
+      });
     // A DM row is named after a person, and this workspace holds two members
     // called 김인턴, so the row carries the handle whenever the name alone does
     // not decide which one it is. 이름은 어느 표면에서나 같은 한 함수(channelLabelParts)가
@@ -666,9 +674,7 @@ export function Sidebar({
         // 호버 X 는 포인터 표면의 문이다: 터치에는 호버가 없고, 그 표면의 길은 (아직) 없다 -
         // 폰 길게 누르기 메뉴는 BT-1 이 서랍 스크롤과의 충돌로 닫아 둔 자리다.
         onClose={
-          channel.kind === "dm" && !touchSurface && canCloseDm
-            ? () => closeDmRow(channel)
-            : undefined
+          closeOffered && !touchSurface ? () => closeDmRow(channel) : undefined
         }
         closeLabel={channel.kind === "dm" ? dmCloseButtonLabel(label.text) : undefined}
         unreadCount={counts.unreadCount}
@@ -718,9 +724,7 @@ export function Sidebar({
                 ? () => sidebarPrefs.toggleStar(channel.id)
                 : undefined
             }
-            onCloseDm={
-              channel.kind === "dm" && canCloseDm ? () => closeDmRow(channel) : undefined
-            }
+            onCloseDm={closeOffered ? () => closeDmRow(channel) : undefined}
           >
             {link}
           </SidebarRowContextMenu>

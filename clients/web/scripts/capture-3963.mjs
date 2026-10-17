@@ -25,6 +25,9 @@
 //   Z. 채널이 없는 멤버의 첫 DM: X 가 정말 닫는다 — 본문도 다음 대화로 간다(H1).
 //   P. 읽음 투영이 느리거나 실패하면 닫기를 내밀지 않는다(M1).
 //   O. 열린 길: 포인터로 연 메뉴 안의 방향키, 마우스 뒤의 Shift+F10(N1).
+//   (소유자 결정 2026-10-17 「안 읽음 있으면 X 숨김」)
+//   U. 안 읽은 메시지(멘션 포함)가 있는 DM 에는 호버 X 도 우클릭 메뉴의 「사이드바에서 닫기」도 없고, 읽고 나면 다시 보인다.
+//      닫기·호버·메뉴는 읽음 커서를 건드리지 않는다(서버 쓰기 0건).
 //   (design-review R2 수리분)
 //   Q. 메뉴를 연 제스처의 뗌: 누름·뗌 간격 0 의 우클릭(트랙패드 두 손가락 탭)이 막 열린 판의 항목을 실행하지
 //      않는다(H1). 일부러 고르는 클릭은 열린 직후여도 고른다.
@@ -299,20 +302,21 @@ async function runEngine(browserType, engine, origin) {
         check(engine, scheme, "B5 X가 글자와 겹치지 않는다(안 읽음 없는 DM)", quiet.hits.length === 0, quiet.hits);
         check(engine, scheme, "B6 X가 행 안쪽에 있고 24px 이다", quiet.insideRow && quiet.size[0] === 24 && quiet.size[1] === 24, quiet.size);
         await shot("hover-dm");
-        // 안 읽음 알약이 있는 DM: 이 시험이 빈손이 아니도록 쉴 때 알약이 실제로 보이는지부터 잰다.
+        // 안 읽음 알약이 있는 DM(이도현): 소유자 결정 2026-10-17 「안 읽음 있으면 X 숨김」 - 호버해도 X가 서지 않는다.
+        // 이 시험이 빈손이 아니도록 쉴 때 알약이 실제로 보이는지부터 잰다.
         await page.mouse.move(900, 450);
         await page.waitForTimeout(100);
         const restPill = await rowOf(page, dmId(1)).locator('[data-testid="unread-count"]').boundingBox();
         check(engine, scheme, "B5a 쉴 때 안 읽음 알약이 보인다(아래 B5b가 빈손이 아니다)", restPill !== null && restPill.width > 0, restPill);
+        const writesBeforeHover = state.writes.length;
         await rowOf(page, dmId(1)).hover();
-        await page.getByTestId("dm-close").waitFor({ timeout: 2_000 });
-        const pilled = await overlapOf(page, dmId(1));
-        check(engine, scheme, "B5b 안 읽음 알약이 있는 DM: X가 서면 알약이 내려가고 겹치지 않는다", pilled.hits.length === 0, pilled.hits);
-        check(engine, scheme, "B5c X가 선 동안 알약은 화면에 없다", (await rowOf(page, dmId(1)).locator('[data-testid="unread-count"]').boundingBox()) === null, null);
+        await page.waitForTimeout(400);
+        check(engine, scheme, "B5b 안 읽음이 있는 DM: 호버해도 X가 서지 않는다(소유자 결정 2026-10-17)", (await page.getByTestId("dm-close").count()) === 0, null);
+        check(engine, scheme, "B5c 안 읽음이 있는 DM: 호버 중에도 알약이 그대로 보인다", (await rowOf(page, dmId(1)).locator('[data-testid="unread-count"]').boundingBox()) !== null, null);
+        await shot("hover-dm-unread");
         await page.mouse.move(900, 450);
         await page.waitForTimeout(100);
-        check(engine, scheme, "B8 호버를 떼면 알약이 돌아오고 X가 사라진다",
-          (await rowOf(page, dmId(1)).locator('[data-testid="unread-count"]').boundingBox()) !== null && (await page.getByTestId("dm-close").count()) === 0, null);
+        check(engine, scheme, "B8 호버만으로는 서버에 쓰지 않는다(읽음 커서를 건드리지 않는다)", state.writes.length === writesBeforeHover, state.writes.slice(writesBeforeHover));
         // 에이전트 DM: 쉴 때는 생존 라벨(「꺼짐」)이 보이고, X가 서면 겹치지 않는다.
         await rowOf(page, dmId(4)).locator('[data-testid="agent-liveness"]').waitFor({ timeout: 5_000 }).catch(() => undefined);
         const restLabel = await rowOf(page, dmId(4)).locator('[data-testid="agent-liveness"]').boundingBox();
@@ -338,7 +342,7 @@ async function runEngine(browserType, engine, origin) {
       });
 
       // ── C. 우클릭(포인터) ────────────────────────────────────────────────────
-      for (const [what, id] of [["채널(안 읽음 없음)", chId(4)], ["현재 보는 채널", chId(2)], ["DM", dmId(1)]]) {
+      for (const [what, id] of [["채널(안 읽음 없음)", chId(4)], ["현재 보는 채널", chId(2)], ["DM(읽음)", dmId(2)], ["DM(안 읽음)", dmId(1)]]) {
         await attempt(engine, scheme, `C.${what}`, async () => {
           await rowOf(page, id).click({ button: "right" });
           await page.getByTestId("channel-row-menu").waitFor({ timeout: 5_000 });
@@ -352,14 +356,19 @@ async function runEngine(browserType, engine, origin) {
           check(engine, scheme, `C6 ${what}: 열린 행 틴트의 모서리 반경이 호버 채움(링크)과 같다`, o.radius !== null && o.radius.trigger === o.radius.link, o.radius);
           if (id === chId(4)) await shot("menu-channel", { x: 0, y: 0, width: 760, height: 900 });
           if (id === chId(2)) await shot("menu-channel-selected", { x: 0, y: 0, width: 760, height: 900 });
-          if (id === dmId(1)) await shot("menu-dm", { x: 0, y: 0, width: 760, height: 900 });
+          if (id === dmId(2)) await shot("menu-dm", { x: 0, y: 0, width: 760, height: 900 });
+          if (id === dmId(1)) await shot("menu-dm-unread", { x: 0, y: 0, width: 760, height: 900 });
           if (full && id === chId(4)) {
             const texts = await menuTexts(page);
             check(engine, scheme, "E1 채널 메뉴 항목과 순서", JSON.stringify(texts) === JSON.stringify(["복사", "이름 복사하기", "링크 복사하기", "ID 복사하기", "---", "섹션으로 이동", "채널 섹션으로", "출시 준비", "---", "읽지 않음으로 표시하기", "알림 끄기", "별표 붙이기", "---", "채널 나가기"]), texts);
           }
+          if (full && id === dmId(2)) {
+            const texts = await menuTexts(page);
+            check(engine, scheme, "E2 읽은 DM 메뉴 항목과 순서(닫기 포함)", JSON.stringify(texts) === JSON.stringify(["복사", "이름 복사하기", "링크 복사하기", "ID 복사하기", "---", "읽지 않음으로 표시하기", "알림 끄기", "---", "사이드바에서 닫기"]), texts);
+          }
           if (full && id === dmId(1)) {
             const texts = await menuTexts(page);
-            check(engine, scheme, "E2 DM 메뉴 항목과 순서", JSON.stringify(texts) === JSON.stringify(["복사", "이름 복사하기", "링크 복사하기", "ID 복사하기", "---", "읽음 처리하기", "알림 끄기", "---", "사이드바에서 닫기"]), texts);
+            check(engine, scheme, "E2b 안 읽음이 있는 DM 메뉴에는 「사이드바에서 닫기」가 없다(소유자 결정 2026-10-17)", JSON.stringify(texts) === JSON.stringify(["복사", "이름 복사하기", "링크 복사하기", "ID 복사하기", "---", "읽음 처리하기", "알림 끄기"]), texts);
           }
           await closeMenu(page);
           // 메뉴를 닫은 뒤(포인터 모달리티): 캐럿이 어디로 돌아갔든 링이 서지 않는다.
@@ -525,6 +534,23 @@ async function runEngine(browserType, engine, origin) {
           await rowOf(page, dmId(5)).waitFor({ timeout: 5_000 });
           check(engine, scheme, "F5 새 메시지가 오면 닫은 DM이 다시 나타난다", (await rowOf(page, dmId(5)).count()) === 1, null);
           await shot("after-reappear");
+          // U. 소유자 결정 2026-10-17 「안 읽음 있으면 X 숨김」: 다시 나타난 DM 은 안 읽음이 있으니 X가 없고, 읽고 나면 다시 선다.
+          await page.mouse.move(900, 450);
+          await rowOf(page, dmId(5)).hover();
+          await page.waitForTimeout(400);
+          check(engine, scheme, "U1 닫았다가 새 메시지로 다시 나타난 DM(안 읽음 1)에는 호버해도 X가 없다", (await page.getByTestId("dm-close").count()) === 0 && (await rowOf(page, dmId(5)).locator('[data-testid="unread-count"]').count()) === 1, null);
+          // 읽는다(다른 기기에서 읽은 것과 같다: 이 목 서버의 투영이 읽음으로 돌아선다). 이 하네스의 빈 타임라인은 DM 을 열어도 읽음을 쓰지
+          // 않으므로 투영을 직접 읽음으로 둔다 - 규칙은 「읽고 나면」이고 읽는 길을 가리지 않는다.
+          state.read[dmId(5)][0] = state.read[dmId(5)][1];
+          await page.reload({ waitUntil: "domcontentloaded" });
+          if ((await page.getByTestId("login-email").count()) > 0) await login(page);
+          await page.getByTestId("dm-avatar").first().waitFor({ timeout: 20_000 });
+          await page.mouse.move(900, 450);
+          await rowOf(page, dmId(5)).hover();
+          const xBack = await page.getByTestId("dm-close").waitFor({ timeout: 8_000 }).then(() => true, () => false);
+          check(engine, scheme, "U2 읽고 나면(안 읽음 0) 같은 DM에 X가 다시 선다", xBack && (await rowOf(page, dmId(5)).locator('[data-testid="unread-count"]').count()) === 0, null);
+          check(engine, scheme, "U3 호버·메뉴·닫기는 읽음 커서를 쓰지 않는다: 이 DM 에 나간 읽음 PUT 0건", state.puts.every((p) => p.channel !== dmId(5)), state.puts.map((p) => p.channel));
+          await shot("after-read-x-back");
         });
       }
     } finally {

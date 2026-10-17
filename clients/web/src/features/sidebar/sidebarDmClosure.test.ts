@@ -5,6 +5,7 @@ import {
   closeDmOnDevice,
   closedAtSeqOf,
   closedDmsFor,
+  dmCloseOffered,
   dmHiddenByClosure,
   indexFallbackChannelId,
   parseClosedDmLedger,
@@ -73,6 +74,37 @@ describe("dmHiddenByClosure: 새 메시지가 오면 다시 나타난다", () =>
     expect(
       dmHiddenByClosure({ closedAtSeq: 12, latestSeq: undefined, isOpen: false, phase: "error" })
     ).toBe(false);
+  });
+});
+
+describe("dmCloseOffered: 안 읽음이 있으면 닫기를 내밀지 않는다 (소유자 결정 2026-10-17)", () => {
+  const ready = { phase: "ready" as const, unreadCount: 0, mentionCount: 0 };
+
+  it("읽을 것이 없고 투영이 준비됐을 때만 내민다", () => {
+    expect(dmCloseOffered(ready)).toBe(true);
+  });
+
+  it("안 읽은 메시지가 있으면 내밀지 않는다", () => {
+    expect(dmCloseOffered({ ...ready, unreadCount: 1 })).toBe(false);
+    expect(dmCloseOffered({ ...ready, unreadCount: 40 })).toBe(false);
+  });
+
+  it("멘션이 있으면 안 읽음 수가 0 이어도 내밀지 않는다(멘션 포함)", () => {
+    expect(dmCloseOffered({ ...ready, mentionCount: 1 })).toBe(false);
+  });
+
+  it("읽고 나면(둘 다 0) 다시 내민다", () => {
+    expect(dmCloseOffered({ ...ready, unreadCount: 2, mentionCount: 1 })).toBe(false);
+    expect(dmCloseOffered({ ...ready, unreadCount: 0, mentionCount: 0 })).toBe(true);
+  });
+
+  it("읽음 투영이 오는 중이거나 못 읽었으면 안 읽음이 없어도 내밀지 않는다(기준 seq 가 없다)", () => {
+    expect(dmCloseOffered({ ...ready, phase: "loading" })).toBe(false);
+    expect(dmCloseOffered({ ...ready, phase: "error" })).toBe(false);
+  });
+
+  it("음수로 들어온 이상한 값은 읽은 것으로 본다(0 이하)", () => {
+    expect(dmCloseOffered({ ...ready, unreadCount: -1, mentionCount: -3 })).toBe(true);
   });
 });
 
