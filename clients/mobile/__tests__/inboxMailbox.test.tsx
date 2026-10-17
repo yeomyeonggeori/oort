@@ -341,13 +341,16 @@ describe('인박스 구 서버 후퇴 (#3684)', () => {
 // 인박스 당겨서 새로고침 (#3962): 클라이언트 조합 경로의 재조회는 키 접두사 **무효화**로 여러 쿼리를 다시 읽는다.
 // `invalidateQueries()` 는 쿼리가 실패해도 `undefined` 로 조용히 끝나서, 이 경로를 거친 당김이 실패에 성공
 // 햅틱을 냈다(그리고 캐시된 항목이 있는 인박스는 실패를 화면 어디에도 말하지 않는다). 지금은 재조회가 실패까지
-// 돌려주고, 당김이 그것을 경고 햅틱과 머리의 실패 안내로 전한다.
+// 돌려주고, 당김이 그것을 경고 햅틱과 목록 위의 실패 안내 한 줄로 전한다. 그 한 줄은 **시간으로 사라지지 않는다**(#3992):
+// 다음 당김이 서거나, 실패한 쿼리가 다시 읽히거나, 화면(탭·칩)을 떠날 때 거둔다 — 실제 인박스·실제 셸·실제 QueryClient 로 잰다.
 //
 // 가짜인 것은 `fetch` 가 무엇을 답하는가뿐이다. 아래 둘은 같은 인박스를 같은 방식으로 당기고 `/messages` 만
 // 다르게 답하게 한다.
 //
 // red proof: `useMailbox` 의 무효화를 `invalidateAndReport` 에서 맨 `invalidateQueries` 로 되돌리면 → 실패 시험이 붉다.
 //   에이전트 피드의 `ignoreError: serverSaysAbsent` 를 빼면 → 「이 서버에 실행 이력 경로가 없으면」이 붉다.
+//   안내에 시간 제한(1.6초 타이머)을 되돌리면 → 「실패 안내는 시간으로 사라지지 않는다」가 붉다.
+//   인박스가 `usePullRefresh` 에 `{active, resetKey}` 를 안 넘기면 → 「탭을 옮기면」·「칩을 옮기면」이 붉다.
 // =============================================================================
 describe('인박스 당겨서 새로고침 (#3962)', () => {
   const haptic = jest.requireMock('expo-haptics') as {__calls: string[]};
@@ -356,6 +359,8 @@ describe('인박스 당겨서 새로고침 (#3962)', () => {
     act(() => {
       screen.getByTestId('inbox-list').props.refreshControl.props.onRefresh();
     });
+  /** 목록 위의 실패 안내(#3992). */
+  const failedNotice = () => screen.queryByTestId('pull-refresh-failed', {includeHiddenElements: true});
 
   beforeEach(() => {
     haptic.__calls.length = 0;
@@ -369,8 +374,64 @@ describe('인박스 당겨서 새로고침 (#3962)', () => {
     world.failMessages = true; // 목록은 이미 캐시돼 있다: 화면에는 항목이 그대로 남는다
     pullInbox();
     await waitFor(() => expect(notifications()).toEqual(['notification:warning']), {timeout: 10_000});
-    expect(screen.queryByTestId('pull-refresh-failed', {includeHiddenElements: true})).not.toBeNull();
+    // 안내는 컨트롤이 닫힌 뒤에 선다(잠깐 뒤).
+    await waitFor(() => expect(failedNotice()).not.toBeNull(), {timeout: 10_000});
     expect(rowKeys().length).toBeGreaterThan(0);
+  });
+
+  /** 실패한 당김 하나를 거쳐 안내가 선 인박스. 실패한 쿼리를 되살릴 수 있게 세계를 돌려준다. */
+  async function inboxWithFailureNotice() {
+    const world = fullWorld();
+    installFetch(world);
+    await openInbox();
+    await waitFor(() => expect(rowKeys().length).toBe(5), {timeout: 10_000});
+    world.failMessages = true;
+    pullInbox();
+    await waitFor(() => expect(failedNotice()).not.toBeNull(), {timeout: 10_000});
+    return world;
+  }
+
+  it('실패 안내는 시간으로 사라지지 않는다: 옛 1.6초가 지나고도 실제 인박스에 서 있다', async () => {
+    await inboxWithFailureNotice();
+    await new Promise(resolve => setTimeout(resolve, 2_000));
+    expect(failedNotice()).not.toBeNull();
+    expect(rowKeys().length).toBeGreaterThan(0);
+  });
+
+  it('다음 당김이 서면 안내가 사라진다', async () => {
+    const world = await inboxWithFailureNotice();
+    world.failMessages = false;
+    pullInbox();
+    expect(failedNotice()).toBeNull();
+    await waitFor(() => expect(notifications()).toEqual(['notification:warning', 'notification:success']), {
+      timeout: 10_000,
+    });
+    expect(failedNotice()).toBeNull();
+  });
+
+  it('실패한 쿼리가 다시 읽히면(재연결 뒤 재조회 따위) 안내가 사라진다', async () => {
+    const world = await inboxWithFailureNotice();
+    world.failMessages = false;
+    await act(async () => {
+      await queryClient!.invalidateQueries();
+    });
+    await waitFor(() => expect(failedNotice()).toBeNull(), {timeout: 10_000});
+  });
+
+  it('칩을 옮기면 안내가 사라진다: 다른 목록 위에서는 거짓이다', async () => {
+    await inboxWithFailureNotice();
+    fireEvent.press(screen.getByTestId('inbox-tab-dm'));
+    expect(failedNotice()).toBeNull();
+    fireEvent.press(screen.getByTestId('inbox-tab-all'));
+    expect(failedNotice()).toBeNull(); // 돌아와도 옛 실패는 서 있지 않다
+  });
+
+  it('탭을 옮기면(홈으로) 안내가 사라지고, 인박스로 돌아와도 서 있지 않다', async () => {
+    await inboxWithFailureNotice();
+    fireEvent.press(screen.getByTestId('tab-home'));
+    expect(failedNotice()).toBeNull();
+    fireEvent.press(screen.getByTestId('tab-inbox'));
+    expect(failedNotice()).toBeNull();
   });
 
   it('멘션 탭(승인 원장이 아닌 무효화 피드)도 읽기가 실패하면 경고다', async () => {
@@ -424,6 +485,6 @@ describe('인박스 당겨서 새로고침 (#3962)', () => {
     await waitFor(() => expect(rowKeys().length).toBe(5), {timeout: 10_000});
     pullInbox();
     await waitFor(() => expect(notifications()).toEqual(['notification:success']), {timeout: 10_000});
-    expect(screen.queryByTestId('pull-refresh-failed', {includeHiddenElements: true})).toBeNull();
+    expect(failedNotice()).toBeNull();
   });
 });

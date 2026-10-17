@@ -261,6 +261,7 @@ export default function SidebarScreen({
   onOpenWorkList,
   notificationNotice = null,
   onDismissNotificationNotice,
+  active = true,
 }: {
   openChannelId: string | null;
   onOpenConversation: (channelId: string, title: string) => void;
@@ -295,6 +296,12 @@ export default function SidebarScreen({
    */
   notificationNotice?: string | null;
   onDismissNotificationNotice?: () => void;
+  /**
+   * 지금 이 탭이 보이는가 (#3992). 이 화면은 언마운트되지 않고 `AppShell` 이 탭을 숨기기만 하므로, 당겨서
+   * 새로고침의 실패 안내(「화면을 떠날 때까지」 남는다)는 이 값이 거짓이 될 때 거둔다. 기본 `true`: 셸 밖에서
+   * 단독으로 마운트하는 하네스·시험에서는 「안 보인다」가 조용한 기본이 되지 않게.
+   */
+  active?: boolean;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
@@ -378,7 +385,7 @@ export default function SidebarScreen({
   const refetchChannels = channelsQuery.refetch;
   const refetchDirectory = directoryQuery.refetch;
   const refetchReadStates = readStates.refetch;
-  const {refreshControl, scrollProps} = usePullRefresh(
+  const {refreshControl, scrollProps, notice} = usePullRefresh(
     useCallback(
       () =>
         Promise.all([
@@ -389,6 +396,7 @@ export default function SidebarScreen({
       [refetchChannels, refetchDirectory, refetchReadStates],
     ),
     'sidebar-refresh',
+    {active},
   );
 
   const openDm = useMutation({
@@ -523,6 +531,10 @@ export default function SidebarScreen({
           />
         </View>
       ) : null}
+
+      {/* 당겨서 새로고침이 실패했다는 한 줄(#3992). 시간으로 사라지지 않고, 다음 당김·성공 재조회·화면을
+          떠날 때 거둔다. */}
+      {notice}
     </>
   );
 

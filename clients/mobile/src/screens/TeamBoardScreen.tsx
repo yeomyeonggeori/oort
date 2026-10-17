@@ -169,9 +169,12 @@ export default function TeamBoardScreen({
   }, [openId]);
 
   const refetchList = list.refetch;
-  const {refreshControl, scrollProps} = usePullRefresh(
+  // 이 화면에는 이미 지속 실패 배너(`staleFailure`)와 오프라인 고지가 있다: 같은 일을 두 번 말하지 않게, 당김의 실패
+  // 안내(`notice`)는 그 둘이 없을 때의 **대체**로만 선다(아래 고지 자리). 필터를 바꾸면(`resetKey`) 다른 목록의 일이다.
+  const {refreshControl, scrollProps, notice} = usePullRefresh(
     useCallback(() => refetchList(), [refetchList]),
     'team-board-refresh',
+    {active, resetKey: filter},
   );
 
   const hasData = list.data !== undefined;
@@ -231,7 +234,9 @@ export default function TeamBoardScreen({
             testID="team-board-stale-error"
           />
         </View>
-      ) : null}
+      ) : (
+        notice
+      )}
       {goneNotice ? (
         <NoticeBlock
           headline={TEAM_BOARD_COPY.goneTitle}

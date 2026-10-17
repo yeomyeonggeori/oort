@@ -15,6 +15,7 @@ import {
   PHASE,
   TRAILS,
   TRAIL_MIN_SIZE,
+  scrubTablesFor,
   tablesFor,
   type Knot,
 } from './oortLoaderTimeline';
@@ -45,11 +46,15 @@ import {
 //                 첫 답이 오기 전에는 켜진 것으로 본다(`useReduceMotion`).
 //   정지(still)   진행 중이 아닌 자리. 위성을 홈에 꽂은 마크, 투명도도 그대로.
 //
-// ## 당김(progress) — #3962 가 쓴다
+// ## 당김(progress) — #3962 가 쓰고 #3992 가 각도로 읽는다
 //
-// `progress`(0~1, 당긴 거리)를 주면 로더는 돌지 않고 **그 거리만큼 위성이 튀어나온 자세**로
-// 선다(시간표의 처음 14% 를 손가락으로 되감는다). `spinning` 이 켜지면 그 자세에서 이어
-// 돈다: 시작 위상이 14% 이고 시간표가 주기 함수라 이음새가 없다.
+// `progress`(0~1, 당긴 거리)를 주면 로더는 돌지 않고 **그 거리만큼 위성이 궤도를 돈 자세**로 선다:
+// 처음 8% 에 홈에서 궤도로 나오고, 각도는 거리에 **선형**으로 흘러 p = 1 에서 한 바퀴(-45° → 315°)다
+// (`oortLoaderTimeline.ts` 「당김의 자세」: 25·50·75·100% = 90° 씩). `spinning` 이 켜지면 그 자세에서 이어
+// 돈다: p = 1 의 자세가 곧 시간표 14% 의 시작 자세라 이음새가 없다.
+//
+// 동작 줄이기가 켜져 있으면 회전도 이동도 없다: 위성은 홈에 꽂힌 채이고 **투명도만** 당김을 따라
+// 차오른다(`fill`, 0.2 → 1). 임계를 넘어 새로고침이 서면 그 1 에서 투명도 숨(1 ↔ 0.5)이 이어진다.
 //
 // ## 모드가 바뀌면 바디를 새로 세운다 (`key`)
 //
@@ -91,7 +96,7 @@ const ranges = (knots: readonly Knot[], scale = 1) => ({
   outputRange: knots.map(k => k[1] * scale),
 });
 
-type LoaderMode = 'still' | 'scrub' | 'breathe' | 'spin';
+type LoaderMode = 'still' | 'scrub' | 'fill' | 'breathe' | 'spin';
 
 export function OortLoader(loader: OortLoaderProps): React.JSX.Element {
   const reduceMotion = useReduceMotion();
@@ -99,7 +104,9 @@ export function OortLoader(loader: OortLoaderProps): React.JSX.Element {
   const mode: LoaderMode = loader.still
     ? 'still'
     : scrubbing
-      ? 'scrub'
+      ? reduceMotion
+        ? 'fill'
+        : 'scrub'
       : reduceMotion
         ? 'breathe'
         : 'spin';
@@ -124,8 +131,12 @@ function LoaderBody({
   const full = mode === 'spin';
   const breathing = mode === 'breathe';
   const scrubbing = mode === 'scrub';
-  /** 당김에서 이어 도는 로더는 위성이 다 나온 14% 에서 시작한다. */
-  const startPhase = progress !== undefined ? PHASE.popEnd : 0;
+  const filling = mode === 'fill';
+  /**
+   * 당김에서 이어 도는 로더는 위성이 다 나온 14% 에서 시작한다. 동작 줄이기의 숨(투명도)은 당김의 끝(투명도 1)에서
+   * 이어야 하므로 처음(1)에서 시작한다: 시간표의 14% 에서는 이미 0.9 쯤으로 내려와 있어 숨이 한 번 튄다.
+   */
+  const startPhase = full && progress !== undefined ? PHASE.popEnd : 0;
 
   const clock = useRef(new Animated.Value(0)).current;
   const zero = useRef(new Animated.Value(0)).current;
@@ -147,12 +158,13 @@ function LoaderBody({
     return () => loop.stop();
   }, [running, startPhase, clock]);
 
+  // 당긴 거리(0~1). 더 당겨도 궤도 밖으로 나가지 않게 접는다.
   const scrubClock = useMemo(
     () =>
       progress
         ? progress.interpolate({
             inputRange: [0, 1],
-            outputRange: [0, PHASE.popEnd],
+            outputRange: [0, 1],
             extrapolate: 'clamp',
           })
         : null,
@@ -161,15 +173,18 @@ function LoaderBody({
 
   /** 위성·링의 자세를 읽는 시계: 움직임이면 반복 시계, 당김이면 거리, 그 밖에는 홈(0). */
   const poseClock = full ? clock : scrubbing && scrubClock ? scrubClock : zero;
-  /** 투명도 숨은 동작 줄이기에서만 시계를 읽는다. */
-  const breatheClock = breathing ? clock : zero;
+  /** 투명도를 읽는 시계: 동작 줄이기의 숨은 반복 시계, 동작 줄이기의 당김은 거리다. */
+  const opacityClock = breathing ? clock : filling && scrubClock ? scrubClock : zero;
 
   const dotDiameter = (size * 2 * geometry.satelliteRadius) / geometry.units;
   const withTrails = full && size >= TRAIL_MIN_SIZE;
 
   const motion = useMemo(() => {
-    const radial = ranges(tables.radial, size);
-    const angle = ranges(tables.angle);
+    // 당김은 거리(0~1)로 읽는 자기 표를, 그 밖은 시간(0~2)으로 읽는 시간표를 쓴다.
+    const scrub = scrubTablesFor(optical);
+    const pose = scrubbing ? scrub : tables;
+    const radial = ranges(pose.radial, size);
+    const angle = ranges(pose.angle);
     const trailAngle = (offset: number) => ({
       inputRange: angle.inputRange,
       outputRange: angle.outputRange.map(v => `${v - offset}deg`),
@@ -180,15 +195,16 @@ function LoaderBody({
         inputRange: angle.inputRange,
         outputRange: angle.outputRange.map(v => `${v}deg`),
       }),
-      scale: poseClock.interpolate(ranges(tables.ring)),
-      opacity: breatheClock.interpolate(ranges(tables.breathe)),
+      // 당기는 동안 링은 가만하다(숨은 꽂히는 순간의 것이다).
+      scale: scrubbing ? 1 : poseClock.interpolate(ranges(tables.ring)),
+      opacity: opacityClock.interpolate(ranges(filling ? scrub.fill : tables.breathe)),
       trails: TRAILS.map(trail => ({
         rotate: poseClock.interpolate(trailAngle(trail.offset)),
         opacity: poseClock.interpolate(ranges(tables.trail(trail.opacity))),
         diameter: dotDiameter * trail.scale,
       })),
     };
-  }, [poseClock, breatheClock, tables, size, dotDiameter]);
+  }, [poseClock, opacityClock, tables, scrubbing, filling, optical, size, dotDiameter]);
 
   const dot = (
     diameter: number,

@@ -172,7 +172,8 @@ export default function WorkSessionDetailScreen({
   const refetchChannels = channelsQuery.refetch;
   const refetchDirectory = directoryQuery.refetch;
   const refetchEvents = eventsQuery.refetch;
-  const {refreshControl, scrollProps} = usePullRefresh(
+  // 실패하면 그 한 줄(`notice`)이 두 보기 위에 남는다(#3992). 다른 세션을 비추거나(`resetKey`) 다른 층이 덮으면(`active`) 거둔다.
+  const {refreshControl, scrollProps, notice} = usePullRefresh(
     useCallback(
       () =>
         Promise.all([
@@ -191,6 +192,7 @@ export default function WorkSessionDetailScreen({
       ],
     ),
     'work-detail-refresh',
+    {active, resetKey: sessionId},
   );
 
   // A pushed native-style surface must take VoiceOver away from the row hidden
@@ -325,6 +327,8 @@ export default function WorkSessionDetailScreen({
           titleTestID="work-detail-title"
         />
         <ModeSwitch mode={mode} onChange={changeMode} />
+        {/* 상세 보기에는 이미 오프라인 고지와 지속 실패 배너가 있다: 같은 일을 두 번 말하지 않는다. */}
+        {mode === 'detail' && (!online || sessionsQuery.isError) ? null : notice}
         <Animated.View style={[styles.modeBody, {opacity: fade}]}>
           {/* 두 보기를 함께 마운트해 둔다: 전환해도 쓰던 지시 초안·전송 중 말풍선·스크롤 위치가 남는다. */}
           <View style={mode === 'chat' ? styles.modeBody : styles.modeHidden}>
