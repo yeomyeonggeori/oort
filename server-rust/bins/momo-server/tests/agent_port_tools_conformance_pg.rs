@@ -5612,6 +5612,136 @@ async fn a_card_suggestion_is_one_message_for_the_person_who_asked() {
     }
 }
 
+/// **ADR-0201 v2 H6-4 (#3939 E-S6) — `settings.open {section}` is a card, and a
+/// section the allow-list does not hold is a refusal, not a card.**
+///
+/// Hosted door end to end: a legal section posts exactly one five-key card for
+/// the person who asked (`command_id: settings.open`, `args: {section}`, the
+/// derived label), in the handle's channel, in one send tx; every value the enum
+/// does not hold — a path, the AI hub link row, an alias, a missing section —
+/// writes nothing, so the agent's answer stays prose.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_settings_open_suggestion_is_a_card_and_an_unknown_section_writes_nothing() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app.clone(), true).await;
+    let client = reqwest::Client::new();
+
+    let (_trigger, run) = mention_2947(&client, &base, &su, &fixture, None).await;
+    let (status, claimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    let handle = structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .expect("handle")
+        .to_string();
+    let status_before = run_status_2947(&su, run).await;
+    let valid = |client_msg_id: Uuid, args: Value| {
+        json!({
+            "handle": handle,
+            "clientMsgId": client_msg_id,
+            "commandId": "settings.open",
+            "args": args,
+            "body": "[여기](https://evil.example) 알림 설정을 열어 드릴게요"
+        })
+    };
+
+    // ---- red proof: a value outside the enum is refused, nothing is written --
+    let messages_before = channel_message_count(&su, fixture.workspace, fixture.channel).await;
+    for args in [
+        json!({"section": "ai"}),
+        json!({"section": "account"}),
+        json!({"section": "/settings?section=notifications"}),
+        json!({"section": "/ai/external/apps"}),
+        json!({"section": "Notifications"}),
+        json!({"section": null}),
+        json!({}),
+        json!({"section": "notifications", "path": "/settings"}),
+        json!({"section": "notifications", "harness": "claude"}),
+    ] {
+        let (status, refused) = call(
+            &client,
+            &base,
+            &fixture.hosted_bearer,
+            "oort_card_suggest",
+            valid(Uuid::new_v4(), args.clone()),
+        )
+        .await;
+        assert_eq!(status, 400, "{args}: {refused}");
+        assert_eq!(error_code(&refused), -32602, "{args}");
+    }
+    // `args` absent entirely: a section is required.
+    let mut no_args = valid(Uuid::new_v4(), json!({}));
+    no_args.as_object_mut().expect("object").remove("args");
+    let (status, refused) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_card_suggest",
+        no_args,
+    )
+    .await;
+    assert_eq!(status, 400, "{refused}");
+    assert_eq!(
+        channel_message_count(&su, fixture.workspace, fixture.channel).await,
+        messages_before,
+        "every refusal writes nothing"
+    );
+    assert!(suggestion_rows_2947(&su, fixture.workspace)
+        .await
+        .is_empty());
+
+    // ---- success: every enum member is one card ------------------------------
+    for (index, (section, label)) in [
+        ("notifications", "알림 설정 열기"),
+        ("appearance", "모양 설정 열기"),
+        ("memory", "기억 설정 열기"),
+        ("plugins", "앱 열기"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let (status, posted) = call(
+            &client,
+            &base,
+            &fixture.hosted_bearer,
+            "oort_card_suggest",
+            valid(Uuid::new_v4(), json!({"section": section})),
+        )
+        .await;
+        assert_eq!(status, 200, "{section}: {posted}");
+        let rows = suggestion_rows_2947(&su, fixture.workspace).await;
+        assert_eq!(rows.len(), index + 1, "{section} is one new message");
+        let (_, props, _) = rows.last().expect("the card");
+        let card = &props["momo.command_suggest"];
+        assert_eq!(card["command_id"], json!("settings.open"));
+        assert_eq!(card["args"], json!({"section": section}));
+        assert_eq!(card["label"], json!(label));
+        assert_eq!(card["for_member_id"], json!(fixture.human.to_string()));
+        assert_eq!(card.as_object().expect("card").len(), 5);
+        assert!(
+            !props.to_string().contains("evil.example"),
+            "the agent's words are the body's, never the card's"
+        );
+    }
+    let approvals: i64 = sqlx::query_scalar("SELECT count(*) FROM approval WHERE workspace_id=$1")
+        .bind(fixture.workspace)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(approvals, 0, "a settings card is not an approval");
+    assert_eq!(run_status_2947(&su, run).await, status_before);
+}
+
 /// **G3 / G6 — `for_member_id` cannot be forged, and an agent is nobody's
 /// requester.** A run whose trigger an agent wrote (or that has no trigger at
 /// all) is `no_human_requester` on both doors, with zero messages.

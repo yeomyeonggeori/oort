@@ -1100,6 +1100,11 @@ oort_card_suggest {handle, clientMsgId, commandId: "ai.connect", args, body}
   평소대로 이어서 작업을 끝낸다.
 - 인박스만 읽는 루틴은 handle이 없다. 그때는 `oort_message_post`로 답하고
   입력창에 `/연결`을 치라고 알려 준다. 같은 카드가 그 사람 화면에 열린다.
+- 같은 도구가 `commandId: "settings.open"`(ADR-0201 v2 H6-4)도 받는다. 설정 화면
+  하나(예: 알림)를 가리키는 카드다. `args`는 정확히 `{"section": <id>}`이고
+  `section` ∈ `profile | appearance | notifications | shortcuts | devices |
+  workspace | members | memory | usage | code | updates | plugins`(`plugins`는 앱
+  화면)다. 경로가 아니라 섹션 id다. 다른 값은 거절되니 글로 답한다.
 
 #### 3.3.17 도어벨 (실시간 wake)
 
