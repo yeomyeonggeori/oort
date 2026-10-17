@@ -578,6 +578,17 @@ async function installMocks(context) {
       capabilities: [],
     }, 201);
   });
+  // #3860: 「앱 설치」 버튼은 서버가 설치·권한 경로를 싣고 있을 때만 선다. 화면은 누르기 전에
+  // 그 경로에 GET을 보내 묻고(`probePluginWriteRoutes`), 405면 「경로는 있고 그 동사는 아니다」로
+  // 읽는다. 이 게이트의 서버는 두 경로를 POST·DELETE로 싣는 서버라 GET에는 405를 답한다.
+  // 하네스가 자기 서버를 스스로 진술하는 것이고, 앱이 설치를 열 자리를 몰래 여는 것이 아니다
+  // (serverSurfaces.ts 「게이트 빌드의 이음매」와 같은 원칙).
+  // **위의 grants 핸들러보다 나중에 등록한다**: Playwright는 마지막에 등록한 일치부터 본다.
+  // GET이 아니면 fallback으로 위 핸들러(설치·권한 쓰기 시나리오)에 그대로 넘긴다.
+  await context.route(/\/v1\/workspaces\/[^/]+\/plugins\/[^/]+\/(install|grants)$/, (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    return json(route, { error: { code: "method_not_allowed", message: "method not allowed" } }, 405);
+  });
 }
 
 /** Resting y of the sidebar nav in a shell that has not been pushed anywhere.
@@ -1131,7 +1142,7 @@ async function assertPluginScopeConsent(page, size) {
     error: document.querySelector('[data-testid="plugin-scope-consent-error"]')?.textContent,
     policyCauseCount: (
       document.querySelector('[data-testid="plugin-scope-consent-error"]')?.textContent
-        ?.match(/이 앱은 워크스페이스 정책이나 내 역할상 변경할 수 없습니다\\./g) ?? []
+        ?.match(/이 앱은 워크스페이스 정책이나 내 역할상 변경할 수 없어요\\./g) ?? []
     ).length,
   }))()`);
   check(
@@ -1187,7 +1198,7 @@ async function assertPluginScopeConsent(page, size) {
   await retainedAttempt.waitFor({ state: "visible" });
   check(
     `${size.name} 전량 실패 뒤 취소해도 패널에 시도 기록이 남는다`,
-    (await retainedAttempt.textContent())?.includes("허용하지 못했습니다") === true
+    (await retainedAttempt.textContent())?.includes("허용하지 못했어요") === true
   );
 
   await grant.click();
