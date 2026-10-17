@@ -13,6 +13,12 @@ import { reloadDesktopNotificationKindsForTest } from "@/features/notifications/
 const WS = "00000000-0000-7000-8000-000000000001";
 const MEMBER_ID = "00000000-0000-7000-8000-000000000101";
 
+// 시험 시계는 로컬 시계 생성자로 만든다(2026-10-16 금요일 21:07). 기한 문구는 이 기기의 달력으로
+// 읽히므로 에폭 상수를 박지 않는다.
+const at = (day: number, hour: number, minute = 0) =>
+  new Date(2026, 9, day, hour, minute, 0, 0).getTime();
+const NOW = at(16, 21, 7);
+
 const fetchNotificationRules = vi.hoisted(() => vi.fn());
 const putNotificationRules = vi.hoisted(() => vi.fn());
 const patchNotificationRules = vi.hoisted(() => vi.fn());
@@ -102,8 +108,49 @@ afterEach(() => {
   mountedHost?.remove();
   mountedHost = null;
   reloadDesktopNotificationKindsForTest(null);
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
+
+/** `Date.now()` 만 고정한다. 타이머는 진짜라 Radix·React 스케줄이 그대로 돈다. */
+function freezeClock() {
+  vi.useFakeTimers({ toFake: ["Date"], now: NOW });
+}
+
+const q = <T extends HTMLElement>(testId: string) =>
+  document.querySelector(`[data-testid="${testId}"]`) as T | null;
+
+function chooseUntil(value: string) {
+  const select = q<HTMLSelectElement>("pause-until-select")!;
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set?.call(select, value);
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+
+async function click(testId: string) {
+  await act(async () => {
+    q(testId)!.click();
+  });
+}
+
+/**
+ * 확인을 누른다. `vi.waitFor` 는 가짜 시계 아래에서 한 번 돌 때마다 시계를 50ms 씩 밀어서,
+ * 기다린 만큼 「30분」의 끝 시각도 밀린다. 누르기 직전에 시계를 NOW 로 되돌려 기대값이
+ * 정확히 NOW 에서 센 값이 되게 한다.
+ */
+async function confirmAtNow() {
+  vi.setSystemTime(NOW);
+  await click("pause-until-confirm");
+}
+
+/** 스위치를 눌러 기한 다이얼로그를 열고, 한 선택을 골라 확인한다. */
+async function pauseWith(choice: string) {
+  await click("notification-rules-dnd");
+  await vi.waitFor(() => expect(q("pause-until-dialog")).not.toBeNull());
+  chooseUntil(choice);
+  await confirmAtNow();
+}
 
 function sessionValue(): SessionContextValue {
   return {
@@ -155,7 +202,10 @@ async function mountSection(offline = false): Promise<HTMLElement> {
 }
 
 describe("NotificationRulesSection DND regression", () => {
-  it("writes the DND toggle as a one-field PATCH (#3042)", async () => {
+  // ADR-0204 D2 (#2899): 일시 중지는 기한을 고르고 나서야 켜진다. 예전에는 스위치 한 번이
+  // `{dnd: true}` 를 곧바로 보냈고, 그 기한 없는 켜짐이 15일 동안 풀리지 않았다.
+  it("스위치를 켜려 하면 쓰지 않고 기한 다이얼로그를 연다", async () => {
+    freezeClock();
     const host = await mountSection();
     await vi.waitFor(() => {
       expect(
@@ -164,23 +214,234 @@ describe("NotificationRulesSection DND regression", () => {
     });
     expect(fetchNotificationRules).toHaveBeenCalledWith(WS);
 
-    const dnd = host.querySelector(
-      '[data-testid="notification-rules-dnd"]'
-    ) as HTMLButtonElement;
-    await act(async () => {
-      dnd.click();
+    await click("notification-rules-dnd");
+    await vi.waitFor(() => expect(q("pause-until-dialog")).not.toBeNull());
+
+    expect(patchNotificationRules).not.toHaveBeenCalled();
+    expect(putNotificationRules).not.toHaveBeenCalled();
+    expect(q("notification-rules-dnd")!.getAttribute("aria-checked")).toBe("false");
+    expect(q("pause-until-dialog")!.textContent).toContain("알림을 언제까지 멈출까요?");
+  });
+
+  it("기한을 고르고 확인하면 {dnd, dndUntilMs} 만 PATCH 로 보내고 스위치가 켜진다 (#3042)", async () => {
+    freezeClock();
+    const host = await mountSection();
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="notification-rules-dnd"]')).not.toBeNull();
     });
+
+    await pauseWith("1h");
+
     await vi.waitFor(() => {
       expect(patchNotificationRules).toHaveBeenCalledTimes(1);
     });
-    expect(patchNotificationRules).toHaveBeenCalledWith(WS, { dnd: true });
+    expect(patchNotificationRules).toHaveBeenCalledWith(WS, {
+      dnd: true,
+      dndUntilMs: NOW + 60 * 60_000,
+    });
     expect(putNotificationRules).not.toHaveBeenCalled();
     await vi.waitFor(() => {
-      const now = host.querySelector(
-        '[data-testid="notification-rules-dnd"]'
-      ) as HTMLButtonElement;
-      expect(now.getAttribute("aria-checked")).toBe("true");
+      expect(q("notification-rules-dnd")!.getAttribute("aria-checked")).toBe("true");
     });
+    await vi.waitFor(() => expect(q("pause-until-dialog")).toBeNull());
+    // 스위치 아래 한 줄이 기한을 말하고, 단추는 「기한 바꾸기」다.
+    const until = q("notification-rules-until")!;
+    expect(until.textContent).toContain("오후 10:07까지");
+    expect(until.textContent).toContain("이 워크스페이스의 알림을 받지 않아요.");
+    expect(q("notification-rules-until-edit")!.textContent).toBe("기한 바꾸기");
+  });
+
+  it("끄는 쪽은 기한 없이 {dnd:false} 한 필드다", async () => {
+    stored = { dnd: true, mentionOverridesMute: false, dndUntilMs: at(16, 21, 30) };
+    freezeClock();
+    const host = await mountSection();
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="notification-rules-dnd"]')).not.toBeNull();
+    });
+    expect(q("notification-rules-dnd")!.getAttribute("aria-checked")).toBe("true");
+
+    await click("notification-rules-dnd");
+
+    await vi.waitFor(() => expect(patchNotificationRules).toHaveBeenCalledTimes(1));
+    expect(patchNotificationRules).toHaveBeenCalledWith(WS, { dnd: false });
+    expect(q("pause-until-dialog")).toBeNull();
+    await vi.waitFor(() => expect(q("notification-rules-until")).toBeNull());
+  });
+
+  // 클릭이 단추에 포커스를 주지 않는 WebKit(데스크탑 셸)에서도 닫힌 뒤 돌아갈 곳이 있어야 한다.
+  // 부르는 쪽이 `opener` 로 그 단추를 직접 넘기므로, jsdom 에서도 `click()` 이 포커스를 주지
+  // 않는데 포커스가 돌아온다는 것이 그 계약의 증거다.
+  it("키보드: 취소하면 다이얼로그가 닫히고 초점이 부른 단추로 돌아온다", async () => {
+    stored = { dnd: false, mentionOverridesMute: false };
+    freezeClock();
+    const host = await mountSection();
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="notification-rules-dnd"]')).not.toBeNull();
+    });
+
+    await click("notification-rules-dnd");
+    await vi.waitFor(() => expect(q("pause-until-dialog")).not.toBeNull());
+    await click("pause-until-cancel");
+    await vi.waitFor(() => expect(q("pause-until-dialog")).toBeNull());
+    await vi.waitFor(() => expect(document.activeElement).toBe(q("notification-rules-dnd")));
+    expect(patchNotificationRules).not.toHaveBeenCalled();
+  });
+
+  it("키보드: 「기한 바꾸기」에서 연 다이얼로그는 닫히면 그 단추로 돌아온다", async () => {
+    stored = { dnd: true, mentionOverridesMute: false, dndUntilMs: at(16, 21, 30) };
+    freezeClock();
+    const host = await mountSection();
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="notification-rules-until-edit"]')).not.toBeNull();
+    });
+
+    await click("notification-rules-until-edit");
+    await vi.waitFor(() => expect(q("pause-until-dialog")).not.toBeNull());
+    await click("pause-until-cancel");
+    await vi.waitFor(() => expect(q("pause-until-dialog")).toBeNull());
+    await vi.waitFor(() => expect(document.activeElement).toBe(q("notification-rules-until-edit")));
+  });
+
+  it("꺼져 있으면 기한 줄이 없다", async () => {
+    const host = await mountSection();
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="notification-rules-dnd"]')).not.toBeNull();
+    });
+    expect(q("notification-rules-until")).toBeNull();
+  });
+
+  it("기한이 있는 행은 기한과 「기한 바꾸기」를 보이고, 누르면 지금 기한을 말하는 다이얼로그가 열린다", async () => {
+    stored = { dnd: true, mentionOverridesMute: false, dndUntilMs: at(16, 21, 30) };
+    freezeClock();
+    const host = await mountSection();
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="notification-rules-until"]')).not.toBeNull();
+    });
+    expect(q("notification-rules-until")!.textContent).toContain("오후 9:30까지");
+    const edit = q<HTMLButtonElement>("notification-rules-until-edit")!;
+    expect(edit.textContent).toBe("기한 바꾸기");
+    expect(edit.className).toContain("tap-target");
+
+    await click("notification-rules-until-edit");
+    await vi.waitFor(() => expect(q("pause-until-dialog")).not.toBeNull());
+    expect(q("pause-until-current")!.textContent).toBe("지금은 오후 9:30까지예요.");
+
+    chooseUntil("2h");
+    await confirmAtNow();
+    await vi.waitFor(() => expect(patchNotificationRules).toHaveBeenCalledTimes(1));
+    expect(patchNotificationRules).toHaveBeenCalledWith(WS, {
+      dnd: true,
+      dndUntilMs: NOW + 120 * 60_000,
+    });
+    await vi.waitFor(() => {
+      expect(q("notification-rules-until")!.textContent).toContain("오후 11:07까지");
+    });
+  });
+
+  it("기한 없는 행은 「기한 없음 · 기한 정하기」 단추로 보이고, 눌러 기한을 걸 수 있다", async () => {
+    stored = { dnd: true, mentionOverridesMute: false };
+    freezeClock();
+    const host = await mountSection();
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="notification-rules-until"]')).not.toBeNull();
+    });
+    const until = q("notification-rules-until")!;
+    expect(until.textContent).toContain("이 워크스페이스의 알림을 받지 않아요.");
+    expect(until.textContent).not.toMatch(/오전|오후/);
+    const edit = q<HTMLButtonElement>("notification-rules-until-edit")!;
+    expect(edit.tagName).toBe("BUTTON");
+    expect(edit.textContent).toBe("기한 없음 · 기한 정하기");
+
+    await click("notification-rules-until-edit");
+    await vi.waitFor(() => expect(q("pause-until-dialog")).not.toBeNull());
+    expect(q("pause-until-current")!.textContent).toBe("지금은 기한이 없어요.");
+
+    chooseUntil("30m");
+    await confirmAtNow();
+    await vi.waitFor(() => expect(patchNotificationRules).toHaveBeenCalledTimes(1));
+    expect(patchNotificationRules).toHaveBeenCalledWith(WS, {
+      dnd: true,
+      dndUntilMs: NOW + 30 * 60_000,
+    });
+    await vi.waitFor(() => {
+      expect(q("notification-rules-until-edit")!.textContent).toBe("기한 바꾸기");
+    });
+  });
+
+  it("일시 중지의 기한이 지났으면 서버에 다시 묻고, 서버가 꺼졌다고 답하면 스위치가 꺼진다 (design-review H3)", async () => {
+    // 첫 답: 기한이 이미 지난 채 켜져 있다. 두 번째 답: 서버가 꺼졌다고 답한다.
+    stored = { dnd: true, mentionOverridesMute: false, dndUntilMs: at(16, 21, 0) };
+    fetchNotificationRules.mockImplementationOnce(async () => ({ ...stored }));
+    fetchNotificationRules.mockImplementationOnce(async () => ({
+      dnd: false,
+      mentionOverridesMute: false,
+    }));
+    freezeClock();
+    await mountSection();
+    // 탭도 포커스도 없이 기한이 지났다는 이유만으로 두 번째 읽기가 나간다.
+    await vi.waitFor(() => expect(fetchNotificationRules).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => {
+      expect(q("notification-rules-dnd")!.getAttribute("aria-checked")).toBe("false");
+    });
+    expect(q("notification-rules-until")).toBeNull();
+  });
+
+  it("서버가 아직 켜져 있다고 답하면(시계 차이) 스위치와 줄이 그대로다 — 스스로 풀지 않는다", async () => {
+    stored = { dnd: true, mentionOverridesMute: false, dndUntilMs: at(16, 21, 0) };
+    freezeClock();
+    await mountSection();
+    await vi.waitFor(() => expect(fetchNotificationRules).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    expect(q("notification-rules-dnd")!.getAttribute("aria-checked")).toBe("true");
+    expect(q("notification-rules-until")!.textContent).toContain("오후 9:00까지");
+  });
+
+  it("기한이 아직 오지 않았으면 다시 묻지 않는다", async () => {
+    stored = { dnd: true, mentionOverridesMute: false, dndUntilMs: at(16, 22, 0) };
+    freezeClock();
+    await mountSection();
+    await vi.waitFor(() => expect(q("notification-rules-until")).not.toBeNull());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    expect(fetchNotificationRules).toHaveBeenCalledTimes(1);
+  });
+
+  it("서버 답을 기다리는 동안에도 고른 기한이 줄에 먼저 보인다", async () => {
+    freezeClock();
+    patchNotificationRules.mockImplementation(() => new Promise(() => undefined));
+    const host = await mountSection();
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="notification-rules-dnd"]')).not.toBeNull();
+    });
+
+    await pauseWith("2h");
+
+    await vi.waitFor(() => {
+      expect(q("notification-rules-until")!.textContent).toContain("오후 11:07까지");
+    });
+    expect(q("notification-rules-dnd")!.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("기한을 거는 쓰기가 실패하면 다이얼로그가 이유를 말하고 스위치는 꺼진 채다", async () => {
+    freezeClock();
+    patchNotificationRules.mockRejectedValue(new ApiError(500, "boom"));
+    const host = await mountSection();
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="notification-rules-dnd"]')).not.toBeNull();
+    });
+
+    await pauseWith("1h");
+
+    await vi.waitFor(() => expect(q("pause-until-error")).not.toBeNull());
+    expect(q("pause-until-error")!.textContent).toContain("알림 일시 중지를 걸지 못했어요.");
+    // 카드 위 배너는 모달 뒤에 가려 있으니 같은 말을 두 곳에서 하지 않는다.
+    expect(q("notification-rules-save-error")).toBeNull();
+    expect(q("pause-until-dialog")).not.toBeNull();
+    expect(q("notification-rules-dnd")!.getAttribute("aria-checked")).toBe("false");
+    expect(q("notification-rules-until")).toBeNull();
   });
 
   // #3042 race regression. This panel read the rule, then the phone changed the
@@ -267,6 +528,16 @@ describe("NotificationRulesSection DND regression", () => {
     expect(fetchNotificationRules).toHaveBeenCalledTimes(2);
   });
 
+  it("오프라인이면 켜진 일시 중지의 기한 단추도 잠긴다", async () => {
+    stored = { dnd: true, mentionOverridesMute: false, dndUntilMs: at(16, 21, 30) };
+    freezeClock();
+    const host = await mountSection(true);
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="notification-rules-until-edit"]')).not.toBeNull();
+    });
+    expect(q<HTMLButtonElement>("notification-rules-until-edit")!.disabled).toBe(true);
+  });
+
   it("오프라인이면 두 스위치가 잠기고 이유 문장을 가리킨다", async () => {
     const host = await mountSection(true);
     await vi.waitFor(() => {
@@ -284,19 +555,37 @@ describe("NotificationRulesSection DND regression", () => {
     expect(patchNotificationRules).not.toHaveBeenCalled();
   });
 
-  it("저장이 실패하면 스위치를 되돌리고 이유를 보인다", async () => {
+  it("기한 없이 쓰는 저장이 실패하면 스위치를 되돌리고 카드에서 이유를 보인다", async () => {
+    patchNotificationRules.mockRejectedValue(new ApiError(500, "boom"));
+    const host = await mountSection();
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="notification-rules-mention"]')).not.toBeNull();
+    });
+    const mention = () =>
+      host.querySelector('[data-testid="notification-rules-mention"]') as HTMLButtonElement;
+    await act(async () => {
+      mention().click();
+    });
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="notification-rules-save-error"]')).not.toBeNull();
+    });
+    expect(mention().getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("켜진 일시 중지를 끄는 저장이 실패하면 스위치를 되돌린다", async () => {
+    stored = { dnd: true, mentionOverridesMute: false, dndUntilMs: at(16, 21, 30) };
+    freezeClock();
     patchNotificationRules.mockRejectedValue(new ApiError(500, "boom"));
     const host = await mountSection();
     await vi.waitFor(() => {
       expect(host.querySelector('[data-testid="notification-rules-dnd"]')).not.toBeNull();
     });
-    const dnd = () => host.querySelector('[data-testid="notification-rules-dnd"]') as HTMLButtonElement;
-    await act(async () => {
-      dnd().click();
-    });
+    await click("notification-rules-dnd");
     await vi.waitFor(() => {
-      expect(host.querySelector('[data-testid="notification-rules-save-error"]')).not.toBeNull();
+      expect(q("notification-rules-save-error")).not.toBeNull();
     });
-    expect(dnd().getAttribute("aria-checked")).toBe("false");
+    expect(q("notification-rules-dnd")!.getAttribute("aria-checked")).toBe("true");
+    // 되돌린 켜짐에는 기한 줄도 함께 돌아와 있다.
+    expect(q("notification-rules-until")!.textContent).toContain("오후 9:30까지");
   });
 });

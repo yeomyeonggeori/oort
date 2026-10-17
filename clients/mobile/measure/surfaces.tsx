@@ -4520,12 +4520,45 @@ export function Surface({name}: {name: string}): React.JSX.Element {
                 onOpenTheme={() => {}}
                 onOpenStatus={() => {}}
                 onOpenDeviceKey={() => {}}
+                onOpenPauseUntil={() => {}}
+                onOpenDndUntil={() => {}}
                 onSignOut={() => {}}
                 onRevealEnd={() => {}}
               />
             </View>
           </View>
         </Screen>
+      );
+    // #2899: 알림 일시 중지·방해 금지의 기한. 진짜 셸 위의 진짜 프로필 시트이고 서버는 씨앗이다
+    // (`seedPause`). `status`는 방해 금지 줄 오른쪽의 끝나는 때, `notify`는 일시 중지 줄과 그
+    // 아래 기한 줄, `notify-open`은 옛 판이 만든 기한 없는 행(「기한 없음 · 기한 정하기」)이다.
+    // `until*` 은 시트 안의 기한 장이다 — 「직접 고르기」는 Maestro(99-pause-until-capture)가 연다.
+    case 'shell-pause-status':
+    case 'shell-pause-notify':
+    case 'shell-pause-notify-open':
+    case 'shell-pause-until':
+    case 'shell-pause-until-open':
+    case 'shell-pause-until-dnd':
+    case 'shell-pause-until-offline':
+      return (
+        <View style={styles.fill}>
+          <Shell />
+          <ProfileSheet
+            workspaceId={HARNESS_MEMBER.workspaceId}
+            member={HARNESS_MEMBER}
+            directory={makeDirectory(pauseRoster(name))}
+            connected
+            onSignOut={() => {}}
+            onClose={() => {}}
+            initialPage={
+              name === 'shell-pause-until-dnd'
+                ? 'dndUntil'
+                : name.startsWith('shell-pause-until')
+                  ? 'pauseUntil'
+                  : 'profile'
+            }
+          />
+        </View>
       );
     // #3924: 프로필 「알림」 묶음의 첫 줄 — 이 폰의 푸시 스위치. 기본 세 상태(켬 · 끔 · OS 거부)에 아래 몇 가지를 더한다.
     // 시트를 알림 묶음이 머리에 오도록 끌어올려 찍는다. iOS 의 답과 「껐다」는 기억은
@@ -4563,6 +4596,8 @@ export function Surface({name}: {name: string}): React.JSX.Element {
                 onOpenTheme={() => {}}
                 onOpenStatus={() => {}}
                 onOpenDeviceKey={() => {}}
+                onOpenPauseUntil={() => {}}
+                onOpenDndUntil={() => {}}
                 onSignOut={() => {}}
                 onRevealEnd={() => {}}
               />
@@ -5870,6 +5905,70 @@ function seedDelegate(surface: string): void {
   );
 }
 
+// ---- #2899: 알림 일시 중지·방해 금지의 기한 ------------------------------------
+// 끝나는 때는 지금 + 3시간 — 사진마다 「오후 N:MM까지」가 다르지만 모양이 증거다.
+const PAUSE_UNTIL_AHEAD_MS = 3 * 60 * 60_000;
+
+/** 이 표면에서 내 로스터 행. 방해 금지 표면만 선언 상태와 기한을 갖는다. */
+function pauseRoster(surface: string): typeof SHELL_ROSTER {
+  if (surface !== 'shell-pause-status' && surface !== 'shell-pause-until-dnd') {
+    return SHELL_ROSTER;
+  }
+  const until = Date.now() + PAUSE_UNTIL_AHEAD_MS;
+  return SHELL_ROSTER.map(member =>
+    member.id === SELF
+      ? {...member, presenceStatus: 'dnd' as const, dndUntilMs: until}
+      : member,
+  ) as typeof SHELL_ROSTER;
+}
+
+/**
+ * 하네스 클라이언트는 `gcTime: 0` 이라 관찰자가 붙기 전에 뿌린 씨앗이 다음 틱에 치워질 수 있다.
+ * 짐이 큰 기계에서는 그 타이머가 첫 렌더보다 먼저 돌아 일시 중지 줄이 읽는 중(스피너)으로 찍혔다.
+ * 이 표면들은 씨앗이 **보여야** 하므로 `seedShell` 이 질의를 만들기 전에 치우지 않게 한다.
+ */
+function keepPauseSeeds(): void {
+  harnessClient.setDefaultOptions({
+    queries: {...harnessClient.getDefaultOptions().queries, gcTime: Infinity},
+  });
+}
+
+/**
+ * 이 판의 `useOnline` 이 읽는 연결 신호를 못 박는다(design-review H2). 시뮬레이터의 NetInfo 는 시작 직후
+ * 도달성 검사가 끝나기 전에 「끊김」으로 읽히기도 해서(`seedCall` 도 같은 이유로 손을 댄다) 기한 장이 잠겼다
+ * 풀리며 줄이 한 칸 내려앉고, 그 사이에 누른 좌표가 다른 줄을 눌렀다(캡처가 흔들렸다). 구독자에게 처음부터
+ * 정해진 값만 알린다 — 화면은 진짜다.
+ */
+function forceNetwork(online: boolean): void {
+  const forced = {
+    isConnected: online,
+    isInternetReachable: online,
+    type: online ? 'wifi' : 'none',
+    details: null,
+  };
+  (
+    NetInfo as unknown as {
+      addEventListener: (listener: (state: typeof forced) => void) => () => void;
+    }
+  ).addEventListener = listener => {
+    listener(forced);
+    return () => {};
+  };
+}
+
+/** `seedShell` 이 깐 규칙(꺼짐)을 이 표면의 모양으로 덮는다. */
+function seedPause(surface: string): void {
+  forceNetwork(surface !== 'shell-pause-until-offline');
+  const until = Date.now() + PAUSE_UNTIL_AHEAD_MS;
+  const rules =
+    surface === 'shell-pause-status' || surface === 'shell-pause-notify'
+      ? {dnd: true, mentionOverridesMute: false, dndUntilMs: until}
+      : surface === 'shell-pause-notify-open' || surface === 'shell-pause-until-open'
+        ? {dnd: true, mentionOverridesMute: false}
+        : null;
+  if (rules) harnessClient.setQueryData(['settings', 'notification-rules', ADE_WS], rules);
+}
+
 function seedShell(surface: string): void {
   // 셸은 명시적으로 켜진 질의(인박스·에이전트 레일)도 세운다. 서버가 없는 하네스에서
   // 그 요청이 실패하면 세션 만료로 읽혀 캐시가 통째로 지워지고(`useSession` 의
@@ -6588,6 +6687,7 @@ if (
   LAUNCHED.kind === 'surface' &&
   LAUNCHED.name.startsWith('shell-')
 ) {
+  if (LAUNCHED.name.startsWith('shell-pause-')) keepPauseSeeds();
   seedShell(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-delegate-')) seedDelegate(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-ask-')) seedAsk(LAUNCHED.name);
@@ -6597,5 +6697,6 @@ if (
     seedIosFeedCacheForCapture({latestBuild: 3036, version: '0.1.29', testflight: true});
   }
   if (LAUNCHED.name.startsWith('shell-call-')) seedCall(LAUNCHED.name);
+  if (LAUNCHED.name.startsWith('shell-pause-')) seedPause(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-profile-push-')) seedPush(LAUNCHED.name);
 }

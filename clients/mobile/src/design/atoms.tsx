@@ -618,7 +618,12 @@ export function GroupRow({
   accessibilityLabel?: string;
   accessibilityHint?: string;
   accessibilityRole?: 'button' | 'radio' | 'switch';
-  accessibilityState?: {selected?: boolean; checked?: boolean; disabled?: boolean};
+  accessibilityState?: {
+    selected?: boolean;
+    checked?: boolean;
+    disabled?: boolean;
+    expanded?: boolean;
+  };
   /** 누를 수 없는 동안(읽는 중·쓰는 중). 줄은 보이되 흐려지고 눌리지 않는다. */
   disabled?: boolean;
   /** 제목 앞의 작은 표지(상태 점 등). 장식이라 읽히지 않게 넘긴다. */

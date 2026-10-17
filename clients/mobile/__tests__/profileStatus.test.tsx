@@ -30,9 +30,10 @@ import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 //   1. 온라인·자리 비움·방해 금지를 시트에서 고르면 `PUT /presence` 가 그 상태
 //      **하나만** 싣고 나간다(상태 글 키는 건드리지 않는다). 알약은 바로 바뀌고,
 //      실패하면 되돌아가며 그렇게 말한다.
-//   2. 알림 일시 중지는 `PATCH /notification-rules {dnd}` 이고, **멘션 예외를
-//      싣지 않는다**(#3042) — 통째 PUT 은 읽은 뒤 웹이 바꾼 예외를 지운다. 읽기
-//      전·읽기 실패 때는 스위치가 잠긴다.
+//   2. 알림 일시 중지는 `PATCH /notification-rules {dnd, dndUntilMs}` 이고, **멘션
+//      예외를 싣지 않는다**(#3042) — 통째 PUT 은 읽은 뒤 웹이 바꾼 예외를 지운다. 읽기
+//      전·읽기 실패 때는 스위치가 잠긴다. 켜는 쓰기는 **기한을 고른 뒤에만** 나간다
+//      (ADR-0204 D2, #2899) — 기한을 고르는 장과 방해 금지 묶음은 `profilePauseUntil.test.tsx`.
 //   3. 상태 글은 시트 안의 한 장에서 이모지·글·지우기 시간을 고르고, 선언 상태는
 //      그대로 둔 채 저장한다. 저장된 만료는 「지금대로」로 남길 수 있다.
 //
@@ -64,7 +65,7 @@ type SelfRow = Record<string, unknown>;
 
 interface Server {
   self: SelfRow;
-  rules: {dnd: boolean; mentionOverridesMute: boolean};
+  rules: {dnd: boolean; mentionOverridesMute: boolean; dndUntilMs?: number};
   /** 규칙 GET 의 답을 바꾼다: 'ok' | 'fail' | 'hang'. */
   rulesRead: 'ok' | 'fail' | 'hang';
   /**
@@ -287,11 +288,14 @@ describe('상태를 시트에서 바로 바꾼다 (#2848)', () => {
     );
   });
 
-  it('이미 고른 상태를 다시 누르면 아무것도 보내지 않는다', async () => {
+  it('이미 고른 상태를 다시 누르면 아무것도 보내지 않는다 (방해 금지는 기한 장이 열린다)', async () => {
     const sheet = await openSheet();
     fireEvent.press(within(sheet).getByTestId('presence-option-dnd'));
+    // 방해 금지는 눌러서 기한을 바꾸는 길이다 — 열릴 뿐 쓰지는 않는다.
+    expect(within(sheet).getByTestId('pause-until-page')).toBeTruthy();
     await new Promise(resolve => setTimeout(resolve, 20));
     expect(presencePuts()).toHaveLength(0);
+    expect(rulesPuts()).toHaveLength(0);
   });
 
   it('쓰기가 실패하면 알약을 되돌리고 그렇게 말한다', async () => {
@@ -311,16 +315,22 @@ describe('상태를 시트에서 바로 바꾼다 (#2848)', () => {
     );
   });
 
-  it('방해 금지 줄은 푸시를 멈추는 것이 아니라고 말한다', async () => {
+  // ADR-0124 증보 2 「묶어」: 방해 금지를 고르면 서버가 알림 일시 중지도 함께 켠다. 옛 문장은
+  // 「알림은 「알림 일시 중지」가 멈춥니다」여서 정반대를 말했다(ADR-0204 맥락, #2899).
+  it('방해 금지 줄은 알림도 함께 멈춘다고 말한다', async () => {
     const sheet = await openSheet();
-    expect(
-      within(sheet).getByTestId('presence-option-dnd').props.accessibilityHint,
-    ).toContain('알림 일시 중지');
+    const hint = within(sheet).getByTestId('presence-option-dnd').props
+      .accessibilityHint as string;
+    expect(hint).toContain('알림도 함께 멈춰요');
+    expect(hint).not.toContain('멈춥니다');
+    expect(within(sheet).getByTestId('presence-option-dnd')).toHaveTextContent(
+      /알림도 함께 멈춰요/,
+    );
   });
 });
 
 describe('알림 일시 중지 (#2848)', () => {
-  it('스위치 줄이 스위치로 읽히고, 켜면 일시 중지 하나만 PATCH 로 싣는다', async () => {
+  it('스위치 줄이 스위치로 읽히고, 켜려 하면 쓰지 않고 기한 장이 열린다', async () => {
     const sheet = await openSheet();
     const row = within(sheet).getByTestId('profile-pause-row');
     await waitFor(() =>
@@ -331,17 +341,44 @@ describe('알림 일시 중지 (#2848)', () => {
 
     fireEvent.press(row);
 
+    // 기한을 고르기 전에는 아무것도 쓰지 않고 스위치는 꺼진 채다(ADR-0204 D2).
+    expect(within(sheet).getByTestId('pause-until-page')).toBeTruthy();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(rulesPuts()).toHaveLength(0);
+  });
+
+  it('기한을 고르면 일시 중지 하나와 그 기한만 PATCH 로 싣는다', async () => {
+    const sheet = await openSheet();
+    await waitFor(() =>
+      expect(
+        within(sheet).getByTestId('profile-pause-row').props.accessibilityState,
+      ).toMatchObject({disabled: false}),
+    );
+    fireEvent.press(within(sheet).getByTestId('profile-pause-row'));
+    const before = Date.now();
+    fireEvent.press(within(sheet).getByTestId('pause-until-option-1h'));
+
     await waitFor(() => expect(rulesPuts()).toHaveLength(1));
     // 멘션 예외는 싣지 않는다 — 서버가 도착한 때의 값을 지킨다(#3042).
-    expect(rulesPuts()[0]).toMatchObject({method: 'PATCH', body: {dnd: true}});
-    expect(server.rules).toEqual({dnd: true, mentionOverridesMute: true});
+    expect(rulesPuts()[0]).toMatchObject({method: 'PATCH'});
+    const body = rulesPuts()[0].body as {dnd: boolean; dndUntilMs: number};
+    expect(Object.keys(body).sort()).toEqual(['dnd', 'dndUntilMs']);
+    expect(body.dnd).toBe(true);
+    expect(body.dndUntilMs).toBeGreaterThanOrEqual(before + 59 * 60_000);
+    expect(body.dndUntilMs).toBeLessThanOrEqual(Date.now() + 60 * 60_000);
+    expect(server.rules).toMatchObject({dnd: true, mentionOverridesMute: true});
+    // 장이 닫히고 프로필로 돌아와 스위치가 켜진 채 기한을 말한다.
     await waitFor(() =>
       expect(
         within(sheet).getByTestId('profile-pause-row').props.accessibilityState,
       ).toMatchObject({checked: true}),
     );
+    expect(within(sheet).queryByTestId('pause-until-page')).toBeNull();
     expect(within(sheet).getByTestId('profile-pause-row')).toHaveTextContent(
-      /직접 끌 때까지/,
+      /이 워크스페이스의 알림을 받지 않아요/,
+    );
+    expect(within(sheet).getByTestId('profile-pause-until-row')).toHaveTextContent(
+      /까지 · 기한 바꾸기/,
     );
   });
 
@@ -412,7 +449,15 @@ describe('알림 일시 중지 (#2848)', () => {
     }) as unknown as typeof fetch;
 
     fireEvent.press(within(sheet).getByTestId('profile-pause-row'));
-    await waitFor(() => expect(within(sheet).getByTestId('pause-failure')).toBeTruthy());
+    fireEvent.press(within(sheet).getByTestId('pause-until-option-30m'));
+    // 실패하면 기한 장에 남아 그렇게 말한다(프로필로 돌아가 켜진 척하지 않는다).
+    await waitFor(() =>
+      expect(within(sheet).getByTestId('pause-until-failure')).toHaveTextContent(
+        '알림 설정을 바꾸지 못했어요. 다시 시도하세요.',
+      ),
+    );
+    expect(within(sheet).getByTestId('pause-until-page')).toBeTruthy();
+    fireEvent.press(within(sheet).getByTestId('profile-back'));
     expect(
       within(sheet).getByTestId('profile-pause-row').props.accessibilityState,
     ).toMatchObject({checked: false});
@@ -437,10 +482,15 @@ describe('알림 일시 중지는 다른 기기의 변경을 지우지 않는다
     server.rules = {dnd: false, mentionOverridesMute: true};
 
     fireEvent.press(within(sheet).getByTestId('profile-pause-row'));
+    fireEvent.press(within(sheet).getByTestId('pause-until-option-1h'));
 
     await waitFor(() => expect(rulesPuts()).toHaveLength(1));
-    expect(rulesPuts()[0].body).toEqual({dnd: true});
-    expect(server.rules).toEqual({dnd: true, mentionOverridesMute: true});
+    // 싣는 것은 일시 중지와 그 기한뿐이다 — 멘션 예외 키는 없다.
+    expect(Object.keys(rulesPuts()[0].body as object).sort()).toEqual([
+      'dnd',
+      'dndUntilMs',
+    ]);
+    expect(server.rules).toMatchObject({dnd: true, mentionOverridesMute: true});
   });
 
   // #3042 경합 회귀. 폰이 규칙을 읽은 **뒤**, 쓰기가 닿기 전에 웹이 멘션 예외를
@@ -453,9 +503,10 @@ describe('알림 일시 중지는 다른 기기의 변경을 지우지 않는다
     server.afterRead = {mentionOverridesMute: true};
 
     fireEvent.press(within(sheet).getByTestId('profile-pause-row'));
+    fireEvent.press(within(sheet).getByTestId('pause-until-option-1h'));
 
     await waitFor(() => expect(rulesPuts()).toHaveLength(1));
-    expect(server.rules).toEqual({dnd: true, mentionOverridesMute: true});
+    expect(server.rules).toMatchObject({dnd: true, mentionOverridesMute: true});
   });
 
   it('한 번 읽은 뒤 재조회가 실패해도 켜진 스위치와 「불러오지 못했습니다」가 함께 서지 않는다', async () => {
@@ -485,7 +536,13 @@ describe('알림 일시 중지는 다른 기기의 변경을 지우지 않는다
     expect(row).not.toHaveTextContent(/불러오지 못했습니다/);
     expect(row.props.accessibilityHint).not.toMatch(/불러오지 못했습니다/);
     expect(within(sheet).queryByTestId('profile-pause-retry')).toBeNull();
-    expect(row).toHaveTextContent(/직접 끌 때까지/);
+    // 서버에 기한 없는 행이 있다 — 옛 판이 만든 것이다. 「직접 끌 때까지」라는 약속은 이제 없고,
+    // 대신 별도 줄이 「기한 없음 · 기한 정하기」로 말한다(ADR-0204 D2).
+    expect(row).toHaveTextContent(/이 워크스페이스의 알림을 받지 않아요/);
+    expect(row).not.toHaveTextContent(/직접 끌 때까지/);
+    expect(within(sheet).getByTestId('profile-pause-until-row')).toHaveTextContent(
+      /기한 없음 · 기한 정하기/,
+    );
   });
 });
 
