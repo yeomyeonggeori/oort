@@ -23,7 +23,6 @@ import {
   revokePluginScope,
   type PluginCatalogItem,
   type PluginDetail,
-  type PluginManifestTool,
   type PluginMutation,
   type PluginPolicyTool,
 } from "@momo/core/lib/api";
@@ -31,29 +30,31 @@ import { SectionShell, StatusChip } from "@/features/settings/SettingsFields";
 import { serverSaysAbsent } from "@momo/core/features/capabilities/serverSurfaces";
 import { SurfaceUnavailableSection } from "@/features/capabilities/SurfaceUnavailable";
 import {
+  PLUGIN_READONLY_COPY as COPY,
   actionErrorForPlugin,
   activePluginScopes,
   administratorNames,
-  approvalLabel,
   callerPolicySummary,
   declaredPluginScopes,
   focusPluginActionAfterErrorDismissal,
   focusPluginScopeChangeFallback,
-  identifiableScopeSentence,
   isWorkspaceAdmin,
   nonAdminInstallGuidance,
   pluginActionButtonState,
   pluginActionConfirmation,
   pluginConsentScopeAction,
+  pluginControlsVisible,
   pluginDetailErrorMessage,
+  pluginIconText,
+  pluginLicenseLabel,
   pluginMarketplaceNeedsDetailFocus,
   pluginRoleState,
   pluginScopeChangeFallbackKind,
   pluginScopeConsentCompletion,
   pluginScopeChangeMessage,
   pluginScopeChangeTone,
+  pluginSubtitle,
   remainingPluginScopes,
-  riskLabel,
   settlePluginScopeChanges,
   scopeSentence,
   toolsForPluginScope,
@@ -64,6 +65,15 @@ import {
   type PluginScopeChangeOutcome,
   type PluginScopeConsentFailure,
 } from "./model";
+import {
+  PluginEgressDisclosure,
+  PluginIcon,
+  PluginInstallClosedNotice,
+  PluginStatusRows,
+  PluginToolList,
+  scopeRiskAndApprovalBadges,
+} from "./PluginInfoBlocks";
+import { useInstallAvailability, type InstallAvailability } from "./useInstallAvailability";
 
 type Filter = "all" | "installed" | "permitted";
 const FILTERS: { id: Filter; label: string }[] = [
@@ -150,6 +160,13 @@ export function PluginSection({ offline }: { offline: boolean }) {
     enabled: selectedId !== null,
     retry: false,
   });
+
+  // 「앱 설치」: 설치·권한 버튼은 서버가 그 경로를 싣고 있을 때만 선다(useInstallAvailability).
+  // 이 훅은 아래의 「서버에 앱 표면이 없다」 조기 반환보다 앞에 있어야 한다(훅 순서).
+  const installAvailability = useInstallAvailability(
+    workspaceId,
+    catalogQuery.data?.plugins[0]?.pluginId
+  );
 
   const mutation = useMutation<PluginMutation | PluginScopeChangeOutcome[], unknown, PluginAction>({
     mutationFn: async (action: PluginAction) => {
@@ -263,9 +280,11 @@ export function PluginSection({ offline }: { offline: boolean }) {
     };
   }, [catalogQuery.data, detailsQuery.data, mutation.isPending, scopeFocusAfterChange]);
 
+  // 설치·권한 변경은 서버가 그 경로를 싣고 있을 때만 열린다. 읽기만 되는 서버에서 「관리해요」라고
+  // 현재형으로 말하면 이 머리말이 화면의 첫 거짓말이 되므로, 두 경우에 모두 참인 말만 쓴다.
   const lines = [
-    "워크스페이스에 설치할 앱과 내 사용 권한을 관리해요.",
-    "앱이 연결할 외부 도메인과 현재 내게 허용된 도구 정책을 함께 확인할 수 있어요.",
+    "공식 앱이 할 수 있는 일과 내가 허용한 권한을 확인해요.",
+    "앱이 연결하는 곳과 내게 허용된 도구도 함께 볼 수 있어요.",
   ];
 
   // 미제공일 때의 머리말. 위 두 줄을 그대로 쓰면 구획이 스스로를 반박한다:
@@ -276,7 +295,7 @@ export function PluginSection({ offline }: { offline: boolean }) {
   // 다른 세 표면(작업 흐름·활동·에이전트 허브)에는 이 문제가 없다. 그쪽 머리말은
   // 라벨 한 단어뿐이라 부정할 본문을 갖고 있지 않다.
   const unavailableLines = [
-    "이 서버에서는 앱을 설치하거나 권한을 관리할 수 없어요.",
+    "이 서버에서는 아직 앱을 볼 수 없어요.",
   ];
 
   // 이 서버가 앱 표면을 싣지 않았다 (goal B12). 판정은 정적 표가 아니라 **서버가
@@ -306,28 +325,16 @@ export function PluginSection({ offline }: { offline: boolean }) {
 
   return (
     <SectionShell title="앱" lines={lines} wide>
-      <div className="plugin-marketplace-controls">
-        <label className="flex min-w-0 flex-col gap-1" htmlFor="plugin-search">
-          <span className="text-meta text-ink-muted">앱 검색</span>
-          <Input
-            id="plugin-search"
-            type="search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="이름 또는 용도 검색"
-          />
-        </label>
-        <label className="flex min-w-0 flex-col gap-1" htmlFor="plugin-filter">
-          <span className="text-meta text-ink-muted">보기</span>
-          <Select
-            id="plugin-filter"
-            value={filter}
-            onChange={(event) => setFilter(event.target.value as Filter)}
-          >
-            {FILTERS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-          </Select>
-        </label>
-      </div>
+      {/* 공식 네 앱은 한눈에 읽힌다. 걸러 볼 목록이 아닌데 검색 상자가 서면 이 화면이 더 큰
+          마켓인 척한다. 목록이 길어지는 날(커뮤니티 앱) 컨트롤이 돌아온다(`pluginControlsVisible`). */}
+      {catalogQuery.data && pluginControlsVisible(catalogQuery.data.plugins.length) && (
+        <PluginCatalogControls
+          query={query}
+          onQuery={setQuery}
+          filter={filter}
+          onFilter={setFilter}
+        />
+      )}
 
       {catalogQuery.isPending && <PluginMarketplaceSkeleton />}
       {catalogQuery.isError && (
@@ -340,10 +347,10 @@ export function PluginSection({ offline }: { offline: boolean }) {
       )}
       {catalogQuery.data && visible.length === 0 && (
         <EmptyInvite
-          headline="설치할 수 있는 앱이 없어요."
+          headline={catalogQuery.data.plugins.length === 0 ? COPY.empty.headline : COPY.empty.filteredHeadline}
           detail={catalogQuery.data.plugins.length === 0
-            ? "서버에 등록된 앱이 아직 없어요."
-            : "검색어나 보기를 바꿔 다른 앱을 확인하세요."}
+            ? COPY.empty.noneRegistered
+            : COPY.empty.filtered}
           actions={catalogQuery.data.plugins.length > 0 ? (
             <Button variant="outline" size="sm" onClick={() => { setQuery(""); setFilter("all"); }}>
               필터 지우기
@@ -383,11 +390,11 @@ export function PluginSection({ offline }: { offline: boolean }) {
                       : "plugin-marketplace-row flex w-full flex-col gap-2 p-3 text-left active:bg-surface-pressed focus-visible:focus-ring disabled:cursor-wait"}
                   >
                     <span className="flex min-w-0 flex-wrap items-center gap-2">
-                      <span className="flex size-control shrink-0 items-center justify-center rounded-sm border border-line bg-surface-raised text-body font-semibold text-ink" aria-hidden="true">
-                        {plugin.iconText?.trim() || plugin.name.trim().charAt(0).toLocaleUpperCase()}
-                      </span>
+                      <PluginIcon plugin={plugin} />
                       <span className="text-body font-semibold text-ink">{plugin.name}</span>
-                      {plugin.official && <StatusChip tone="accent">공식</StatusChip>}
+                      {/* 공식 네 앱에서 이 칩은 상수다. 신호색(선택 채움)을 상수에 쓰지 않고, 선택된 줄에서 칩이
+                          채움에 묻히지도 않게 옆의 설치 상태 칩과 같은 중립 톤으로 둔다(독립 design-review M5). */}
+                      {plugin.official && <StatusChip tone="muted">공식</StatusChip>}
                       {/* 다이얼로그와 같은 중립 톤이다(MOMO-676 M-1). MOMO-642 7이
                           동의 다이얼로그의 같은 문자열을 ok 초록에서 내린 근거는
                           "위험 칩과 경쟁하지 않는 다른 표면"이었는데, 마켓플레이스는
@@ -400,10 +407,17 @@ export function PluginSection({ offline }: { offline: boolean }) {
                           이 표면에서 색은 위험 신호의 것이다. */}
                       <StatusChip tone="muted">{workspaceInstallationLabel(plugin)}</StatusChip>
                     </span>
-                    <span className="text-meta text-ink-muted">{plugin.description}</span>
-                    <span className="flex flex-wrap gap-2 text-meta text-ink-muted">
-                      <span>{callerPolicySummary(policy)}</span>
-                      {plugin.egressDomains.length > 0 && <span>외부 연결: {plugin.egressDomains.join(", ")}</span>}
+                    {/* 서버의 `description`은 영어 매니페스트 문구라서 공식 앱은 한 줄 소개로 바꿔 말한다. */}
+                    <span className="text-meta text-ink-muted">{pluginSubtitle(plugin)}</span>
+                    <span className="text-meta text-ink-muted">
+                      {callerPolicySummary(policy)}
+                      {plugin.egressDomains.length > 0 && (
+                        <>
+                          <span aria-hidden="true">{" · "}</span>
+                          {/* 도메인은 쉼표 뒤에서 줄을 바꾼다. 글자 중간에서 끊기면 주소를 못 읽는다. */}
+                          <span className="break-words">연결 {plugin.egressDomains.join(", ")}</span>
+                        </>
+                      )}
                     </span>
                   </button>
                 </li>
@@ -430,6 +444,7 @@ export function PluginSection({ offline }: { offline: boolean }) {
                 onRetryDirectory={() => void directoryQuery.refetch()}
                 offline={offline}
                 policyTools={catalogQuery.data.toolsByPlugin.get(selected.pluginId) ?? []}
+                installAvailability={installAvailability}
                 busy={mutation.isPending}
                 pendingAction={mutation.isPending ? mutation.variables : undefined}
                 actionError={actionError}
@@ -502,11 +517,49 @@ export function PluginSection({ offline }: { offline: boolean }) {
   );
 }
 
+/** 검색과 보기. 목록이 한눈에 읽히는 길이를 넘을 때만 선다(`pluginControlsVisible`). */
+function PluginCatalogControls({
+  query,
+  onQuery,
+  filter,
+  onFilter,
+}: {
+  query: string;
+  onQuery: (value: string) => void;
+  filter: Filter;
+  onFilter: (value: Filter) => void;
+}) {
+  return (
+    <div className="plugin-marketplace-controls">
+      <label className="flex min-w-0 flex-col gap-1" htmlFor="plugin-search">
+        <span className="text-meta text-ink-muted">앱 검색</span>
+        <Input
+          id="plugin-search"
+          type="search"
+          value={query}
+          onChange={(event) => onQuery(event.target.value)}
+          placeholder="이름 또는 용도 검색"
+        />
+      </label>
+      <label className="flex min-w-0 flex-col gap-1" htmlFor="plugin-filter">
+        <span className="text-meta text-ink-muted">보기</span>
+        <Select
+          id="plugin-filter"
+          value={filter}
+          onChange={(event) => onFilter(event.target.value as Filter)}
+        >
+          {FILTERS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+        </Select>
+      </label>
+    </div>
+  );
+}
+
 function PluginDetailPanel({
   plugin, detail, isPending, isError, error, onRetry, canManage, roleState,
-  managerNames, onRetryDirectory, offline, policyTools, busy, pendingAction, actionError,
-  scopeChange, onDismissScopeChange, actionErrorRef, onDismissActionError, onAction, onOpenScopeConsent,
-  grantScopeButtonRef, revokeScopeButtonRef,
+  managerNames, onRetryDirectory, offline, policyTools, installAvailability, busy, pendingAction,
+  actionError, scopeChange, onDismissScopeChange, actionErrorRef, onDismissActionError, onAction,
+  onOpenScopeConsent, grantScopeButtonRef, revokeScopeButtonRef,
 }: {
   plugin: PluginCatalogItem;
   detail: PluginDetail | undefined;
@@ -520,6 +573,8 @@ function PluginDetailPanel({
   onRetryDirectory: () => void;
   offline: boolean;
   policyTools: PluginPolicyTool[];
+  /** 설치·권한 버튼이 설 수 있는가(`useInstallAvailability`). 아래 한 곳에서만 읽는다. */
+  installAvailability: InstallAvailability;
   busy: boolean;
   pendingAction: PluginAction | undefined;
   actionError: string | null;
@@ -546,34 +601,49 @@ function PluginDetailPanel({
 
   const scopes = declaredPluginScopes(detail.tools);
   const activeScopes = activePluginScopes(detail.tools, policyTools);
+  const allowedToolNames = new Set(policyTools.map((tool) => tool.name));
+  const hasPublisherInfo = Boolean(
+    detail.publisherName || detail.license || detail.provenanceURL
+      || detail.termsURL || detail.privacyPolicyURL
+  );
   return (
-    <section className="flex min-w-0 break-keep flex-col gap-3 rounded-md border border-line bg-surface-raised p-4" aria-label={`${plugin.name} 상세`} data-testid="plugin-detail">
+    <section className="flex min-w-0 break-keep flex-col gap-4 rounded-md border border-line bg-surface-raised p-4" aria-label={`${plugin.name} 상세`} data-testid="plugin-detail">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex min-w-0 flex-col gap-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-body font-semibold text-ink">{detail.name}</h3>
-            {detail.official && <StatusChip tone="accent">공식</StatusChip>}
+        <div className="flex min-w-0 items-start gap-3">
+          <PluginIcon plugin={detail} />
+          <div className="flex min-w-0 flex-col gap-1">
+            <div className="flex flex-wrap items-center gap-2">
+              {/* 앱 이름은 아래 섹션 제목(body 굵게)보다 한 단 위다: 이 패널의 주인이 누구인지가 먼저 읽힌다. */}
+              <h3 className="text-title font-semibold text-ink">{detail.name}</h3>
+              {detail.official && <StatusChip tone="muted">공식</StatusChip>}
+            </div>
+            <p className="text-meta text-ink-muted">{pluginSubtitle(detail)} · 버전 {detail.version}</p>
           </div>
-          <p className="text-meta text-ink-muted">버전 {detail.version}</p>
         </div>
         <div className="flex min-w-0 flex-col gap-2 lg:items-end">
-          <PluginActions
-            plugin={plugin}
-            detail={detail}
-            scopes={scopes}
-            activeScopes={activeScopes}
-            canManage={canManage}
-            roleState={roleState}
-            managerNames={managerNames}
-            onRetryDirectory={onRetryDirectory}
-            offline={offline}
-            busy={busy}
-            pendingAction={pendingAction}
-            onAction={onAction}
-            onOpenScopeConsent={onOpenScopeConsent}
-            grantScopeButtonRef={grantScopeButtonRef}
-            revokeScopeButtonRef={revokeScopeButtonRef}
-          />
+          {/* 설치·권한을 바꾸는 줄은 **서버가 그 경로를 싣고 있을 때만** 선다. 눌렀더니 404인 버튼이
+              이 화면의 가장 나쁜 모양이어서, 확인이 끝나기 전에는 버튼도 안내도 그리지 않고
+              (checking), 없거나 모르면 버튼 대신 차분한 안내 한 줄이 같은 자리에 선다(closed).
+              이 아래의 정보 블록은 어느 쪽에서도 같은 말을 한다. */}
+          {installAvailability === "open" && (
+            <PluginActions
+              plugin={plugin}
+              detail={detail}
+              scopes={scopes}
+              activeScopes={activeScopes}
+              canManage={canManage}
+              roleState={roleState}
+              managerNames={managerNames}
+              onRetryDirectory={onRetryDirectory}
+              offline={offline}
+              busy={busy}
+              pendingAction={pendingAction}
+              onAction={onAction}
+              onOpenScopeConsent={onOpenScopeConsent}
+              grantScopeButtonRef={grantScopeButtonRef}
+              revokeScopeButtonRef={revokeScopeButtonRef}
+            />
+          )}
           {scopeChange && (
             <InlineBanner
               tone={pluginScopeChangeTone(scopeChange.outcomes)}
@@ -596,25 +666,27 @@ function PluginDetailPanel({
         </div>
       </div>
 
-      <dl className="flex flex-col gap-2">
-        {detail.publisherName && <DetailRow label="배포자" value={detail.publisherVerified ? `${detail.publisherName}, oort 레지스트리가 확인했어요` : detail.publisherName} />}
-        {detail.license && <DetailRow label="라이선스" value={detail.license} />}
-        {detail.provenanceURL && <DetailLink label="출처" href={detail.provenanceURL} />}
-        {detail.termsURL && <DetailLink label="이용약관" href={detail.termsURL} />}
-        {detail.privacyPolicyURL && <DetailLink label="개인정보 처리방침" href={detail.privacyPolicyURL} />}
-        {detail.egressDomains.length > 0 && <DetailRow label="외부 연결" value={detail.egressDomains.join(", ")} />}
-      </dl>
-
       <div className="flex flex-col gap-2">
-        <h4 className="text-body font-semibold text-ink">도구와 권한</h4>
-        {detail.tools.length === 0 ? (
-          <p className="text-body text-ink-muted">서버가 표시할 도구 정보를 보내지 않았어요.</p>
-        ) : (
-          <ul className="flex flex-col overflow-hidden rounded-md border border-line">
-            {detail.tools.map((tool) => <ToolRow key={tool.name} tool={tool} />)}
-          </ul>
-        )}
+        <PluginStatusRows plugin={detail} activeScopes={activeScopes} toolCount={policyTools.length} />
+        {installAvailability === "closed" && <PluginInstallClosedNotice />}
       </div>
+
+      <PluginToolList tools={detail.tools} allowedToolNames={allowedToolNames} />
+
+      <PluginEgressDisclosure domains={detail.egressDomains} />
+
+      {hasPublisherInfo && (
+        <div className="flex flex-col gap-2">
+          <h4 className="text-body font-semibold text-ink">{COPY.publisher.heading}</h4>
+          <dl className="flex flex-col gap-2">
+            {detail.publisherName && <DetailRow label="배포자" value={detail.publisherVerified ? `${detail.publisherName}, oort 레지스트리가 확인했어요` : detail.publisherName} />}
+            {detail.license && <DetailRow label="라이선스" value={pluginLicenseLabel(detail.license)} />}
+            {detail.provenanceURL && <DetailLink label="출처" href={detail.provenanceURL} />}
+            {detail.termsURL && <DetailLink label="이용약관" href={detail.termsURL} />}
+            {detail.privacyPolicyURL && <DetailLink label="개인정보 처리방침" href={detail.privacyPolicyURL} />}
+          </dl>
+        </div>
+      )}
     </section>
   );
 }
@@ -711,11 +783,6 @@ function PluginActions({
     <div className="flex flex-col gap-2" aria-busy={busy || undefined}>
       {roleUnknownNotice}
       {scopes.length === 0 && <p className="max-w-pane text-meta text-ink-muted">허용할 권한이 없어요.</p>}
-      {activeScopes.length > 0 && (
-        <p className="max-w-pane text-meta text-ink-muted">
-          현재 허용: {activeScopes.map(identifiableScopeSentence).join(", ")}
-        </p>
-      )}
       <div key="plugin-actions" className="flex flex-wrap items-center gap-2">
         {grantableScopes.length > 0 && <PluginScopeConsentButton
           kind="grant"
@@ -868,56 +935,10 @@ function PluginActionButton({
   );
 }
 
-type ScopeBadge = {
-  label: string;
-  tone: "muted" | "warn" | "danger";
-};
-
-function scopeRiskAndApprovalBadges(tools: readonly PluginManifestTool[]): ScopeBadge[] {
-  const badges = tools.flatMap((tool): ScopeBadge[] => {
-    const approval = approvalLabel(tool.approvalTier);
-    const result: ScopeBadge[] = [];
-    if (approval) {
-      result.push({
-        label: `승인: ${approval}`,
-        tone: tool.approvalTier === "network_write"
-          ? "danger"
-          : tool.approvalTier === "workspace_write" ? "warn" : "muted",
-      });
-    }
-    if (tool.risk) {
-      result.push({
-        label: `위험도: ${riskLabel(tool.risk)}`,
-        tone: tool.risk === "admin" ? "danger" : tool.risk === "write" ? "warn" : "muted",
-      });
-    }
-    return result;
-  });
-  return [...new Map(badges.map((badge) => [badge.label, badge])).values()];
-}
-
-function ToolRow({ tool }: { tool: PluginManifestTool }) {
-  const badges = scopeRiskAndApprovalBadges([tool]);
-  return (
-    <li className="flex flex-col gap-1 border-b border-line p-3 last:border-b-0">
-      <span className="text-body font-medium text-ink">{tool.name}</span>
-      {tool.description && <span className="text-meta text-ink-muted">{tool.description}</span>}
-      <span className="text-meta text-ink-muted">
-        {tool.scopes.map(identifiableScopeSentence).join(", ")}
-      </span>
-      {badges.length > 0 && (
-        <span className="flex flex-wrap gap-1">
-          {badges.map((badge) => (
-            <StatusChip key={badge.label} tone={badge.tone}>{badge.label}</StatusChip>
-          ))}
-        </span>
-      )}
-    </li>
-  );
-}
-
 function DetailRow({ label, value }: { label: string; value: string }) {
-  return <div className="flex min-w-0 flex-col gap-px"><dt className="text-meta text-ink-muted">{label}</dt><dd className="break-all text-body text-ink">{value}</dd></div>;
+  // break-words: 한국어 문장(「…oort 레지스트리가 확인했어요」)은 어절에서 끊고, 줄보다 긴 토큰(도메인)만 그 안에서 끊는다.
+  // break-all은 「레지스트리/가」처럼 어절 중간을 잘랐다(독립 design-review N4).
+  return <div className="flex min-w-0 flex-col gap-px"><dt className="text-meta text-ink-muted">{label}</dt><dd className="break-words text-body text-ink">{value}</dd></div>;
 }
 
 function DetailLink({ label, href }: { label: string; href: string }) {
@@ -951,8 +972,7 @@ function PluginScopeConsentDialog({
   const selected = new Set(selectedScopes);
   const hasSelection = selectedScopes.length > 0;
   const canConfirm = !pending && hasSelection;
-  const appIcon = consent.plugin.iconText?.trim()
-    || consent.plugin.name.trim().charAt(0).toLocaleUpperCase();
+  const appIcon = pluginIconText(consent.plugin);
 
   useEffect(() => {
     if (!error) return;
@@ -1188,7 +1208,7 @@ function PluginScopeConsentDialog({
           {isGrant && (
             <dl className="flex flex-col gap-2 border-t border-line pt-3">
               {consent.plugin.publisherName && <DetailRow label="배포자" value={consent.plugin.publisherVerified ? `${consent.plugin.publisherName}, oort 레지스트리가 확인했어요` : consent.plugin.publisherName} />}
-              {consent.plugin.license && <DetailRow label="라이선스" value={consent.plugin.license} />}
+              {consent.plugin.license && <DetailRow label="라이선스" value={pluginLicenseLabel(consent.plugin.license)} />}
               {consent.plugin.provenanceURL && <DetailLink label="출처" href={consent.plugin.provenanceURL} />}
               {consent.plugin.egressDomains.length > 0 && <DetailRow label="외부 연결" value={consent.plugin.egressDomains.join(", ")} />}
               {consent.plugin.termsURL && <DetailLink label="이용약관" href={consent.plugin.termsURL} />}
