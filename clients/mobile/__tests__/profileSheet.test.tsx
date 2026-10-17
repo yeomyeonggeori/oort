@@ -45,7 +45,7 @@ import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 //   2. 머리 오른쪽 아바타가 시트를 연다 — 이름·@핸들·상태가 그 안에 있다
 //   3. 테마는 시트 안 한 줄에서 열리는 선택지이고, 고른 것이 저장된다
 //   4. 로그아웃은 시트 안의 파괴 행이고, 한 번 확인한 뒤에만 세션을 지운다
-//   5. 알림 권한이 꺼져 있으면 그렇게 말하고, 설정으로 가는 문을 준다
+//   5. 알림 권한이 꺼져 있으면 그렇게 말하고, 스위치를 누르면 설정이 열린다 (#3924)
 //   6. 서버 주소와 앱 버전·빌드가 보인다
 //
 // 서버 뒤는 `shell.test.tsx` 와 같은 방식으로 fetch 하나만 가짜다.
@@ -318,15 +318,22 @@ describe('프로필 시트', () => {
     );
   });
 
-  it('알림이 허용돼 있으면 그렇게 말하고 설정 문은 없다', async () => {
+  it('알림이 허용돼 있으면 스위치가 켜져 있고 이 폰으로 받는다고 말한다 (#3924)', async () => {
     await openSheet();
     await waitFor(() =>
-      expect(screen.getByTestId('profile-push-row')).toHaveTextContent(/켜져 있습니다/),
+      expect(screen.getByTestId('profile-push-row')).toHaveTextContent(
+        /이 폰으로 알림을 받아요/,
+      ),
     );
+    const row = screen.getByTestId('profile-push-row');
+    expect(row.props.accessibilityRole).toBe('switch');
+    expect(row.props.accessibilityState).toMatchObject({checked: true});
+    // 예전의 두 줄(알림 켜기 · 설정에서 알림 켜기)은 스위치가 대신한다.
+    expect(screen.queryByTestId('profile-push-ask')).toBeNull();
     expect(screen.queryByTestId('profile-push-settings')).toBeNull();
   });
 
-  it('알림이 거부돼 있으면 그렇게 말하고, 설정을 여는 문을 준다', async () => {
+  it('알림이 거부돼 있으면 스위치는 꺼져 있고, 누르면 설정을 연다 (#3924)', async () => {
     permissions.mockImplementation(async () => ({
       granted: false,
       canAskAgain: false,
@@ -338,10 +345,15 @@ describe('프로필 시트', () => {
 
     await openSheet();
     await waitFor(() =>
-      expect(screen.getByTestId('profile-push-row')).toHaveTextContent(/꺼져 있습니다/),
+      expect(screen.getByTestId('profile-push-row')).toHaveTextContent(
+        /iOS 설정에서 알림이 꺼져 있어요/,
+      ),
     );
+    expect(screen.getByTestId('profile-push-row').props.accessibilityState).toMatchObject({
+      checked: false,
+    });
     await act(async () => {
-      fireEvent.press(screen.getByTestId('profile-push-settings'));
+      fireEvent.press(screen.getByTestId('profile-push-row'));
     });
     expect(openSettings).toHaveBeenCalledTimes(1);
   });

@@ -40,6 +40,10 @@ import {
 } from '../src/shell/ShellChrome';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+import {
+  installAppClock,
+  SHELL_WAIT_TEST_TIMEOUT_MS,
+} from './fixtures/fakeClock';
 
 // =============================================================================
 // DS2-2 (#2714) — 폰 셸: 알약 탭바 셋 + 페이지 시트 (ADR-0189 D1)
@@ -210,7 +214,10 @@ const mmkvStore = (
   jest.requireMock('react-native-mmkv') as {__store: Map<string, string>}
 ).__store;
 
+jest.setTimeout(SHELL_WAIT_TEST_TIMEOUT_MS);
+
 beforeEach(() => {
+  installAppClock();
   mmkvStore.clear();
   __resetSessionStore();
   __resetServerBaseCache();
@@ -247,6 +254,7 @@ afterEach(() => {
   queryClient = null;
   resetBlurSupportForTests();
   resetLiquidGlassSupportForTests();
+  jest.useRealTimers();
 });
 
 const flat = (testID: string) =>
