@@ -168,6 +168,58 @@ pub fn decode_receipt(body: &[u8]) -> DispatchOutcome {
     }
 }
 
+/// How many bytes of a refusing relay's body are read at all.
+const REFUSAL_BODY_READ_LIMIT: usize = 256;
+
+/// How many characters of it are kept in the settled reason.
+const REFUSAL_BODY_KEEP_CHARS: usize = 160;
+
+/// The part of a relay's refusal body worth keeping: the first
+/// [`REFUSAL_BODY_KEEP_CHARS`] characters, lossily decoded, with control
+/// characters dropped (a log line and an audit row are not the place for a
+/// newline or an escape sequence a hostile relay chose) and the ends trimmed.
+///
+/// The relay's `400`s carry a one-line plain-text reason (`dispatch APNs
+/// environment does not match relay`, ...). Keeping it makes the settled
+/// `push_dispatch_log.apns_reason` and the `push.relay.refused` audit row explain
+/// themselves, instead of the bare `HTTP 400` that sent an operator to the relay's
+/// source (ADR-0204 D9).
+pub fn refusal_excerpt(body: &[u8]) -> String {
+    let limited = &body[..body.len().min(REFUSAL_BODY_READ_LIMIT)];
+    let text: String = String::from_utf8_lossy(limited)
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(REFUSAL_BODY_KEEP_CHARS)
+        .collect();
+    text.trim().to_string()
+}
+
+/// `HTTP 400` or `HTTP 400: <excerpt>`.
+pub fn reason_with_excerpt(reason: String, excerpt: &str) -> String {
+    if excerpt.is_empty() {
+        reason
+    } else {
+        format!("{reason}: {excerpt}")
+    }
+}
+
+/// Read at most [`REFUSAL_BODY_READ_LIMIT`] bytes of a refusing relay's body. A
+/// relay that streams forever, or whose body fails midway, costs no more than the
+/// status line already told us.
+async fn read_refusal_body(mut response: reqwest::Response) -> Vec<u8> {
+    let mut body: Vec<u8> = Vec::new();
+    while body.len() < REFUSAL_BODY_READ_LIMIT {
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                let room = REFUSAL_BODY_READ_LIMIT - body.len();
+                body.extend_from_slice(&chunk[..chunk.len().min(room)]);
+            }
+            Ok(None) | Err(_) => break,
+        }
+    }
+    body
+}
+
 #[async_trait::async_trait]
 impl PushDispatcher for RelayHttpDispatcher {
     async fn dispatch(&self, dispatch: &PushDispatch) -> DispatchOutcome {
@@ -210,7 +262,21 @@ impl PushDispatcher for RelayHttpDispatcher {
 
         let status = response.status().as_u16();
         if let Some(outcome) = classify_relay_status(status) {
-            return outcome;
+            // A permanent refusal keeps the start of the relay's own explanation.
+            // `classify_relay_status` stays the pure status table it was.
+            return match outcome {
+                DispatchOutcome::PermanentFailure {
+                    relay_http_status,
+                    reason,
+                } => {
+                    let excerpt = refusal_excerpt(&read_refusal_body(response).await);
+                    DispatchOutcome::PermanentFailure {
+                        relay_http_status,
+                        reason: reason_with_excerpt(reason, &excerpt),
+                    }
+                }
+                other => other,
+            };
         }
         match response.bytes().await {
             Ok(bytes) => decode_receipt(&bytes),
@@ -272,6 +338,46 @@ mod tests {
                 apns_reason: Some("BadDeviceToken".to_string())
             }
         );
+    }
+
+    #[test]
+    fn a_refusal_keeps_the_start_of_the_relays_own_explanation() {
+        assert_eq!(
+            refusal_excerpt(b"dispatch APNs environment does not match relay"),
+            "dispatch APNs environment does not match relay"
+        );
+        assert_eq!(
+            reason_with_excerpt(
+                "HTTP 400".to_string(),
+                &refusal_excerpt(b"dispatch APNs environment does not match relay\n")
+            ),
+            "HTTP 400: dispatch APNs environment does not match relay"
+        );
+        // nothing to say -> the status line alone, as before
+        assert_eq!(reason_with_excerpt("HTTP 403".to_string(), ""), "HTTP 403");
+        assert_eq!(refusal_excerpt(b""), "");
+        assert_eq!(refusal_excerpt(b" \r\n\t "), "");
+    }
+
+    #[test]
+    fn the_excerpt_is_bounded_and_carries_no_control_characters() {
+        let long = "x".repeat(5_000);
+        assert_eq!(refusal_excerpt(long.as_bytes()).chars().count(), 160);
+        // Bytes past the read limit are never looked at. The padding is control
+        // characters, which the filter drops, so only the read limit — not the
+        // 160-character cap — can hide what follows it.
+        let mut late = vec![0x01u8; REFUSAL_BODY_READ_LIMIT + 44];
+        late.extend_from_slice(b"SECRET-PAST-THE-LIMIT");
+        assert_eq!(refusal_excerpt(&late), "");
+        let hostile = "ok\x1b[31m red\nnext\rline\0end";
+        let cleaned = refusal_excerpt(hostile.as_bytes());
+        assert!(
+            cleaned.chars().all(|c| !c.is_control()),
+            "control characters must not survive: {cleaned:?}"
+        );
+        assert!(cleaned.contains("ok"), "{cleaned:?}");
+        // invalid UTF-8 is replaced, not an error
+        assert!(!refusal_excerpt(&[0xff, 0xfe, b'o', b'k']).is_empty());
     }
 
     #[test]

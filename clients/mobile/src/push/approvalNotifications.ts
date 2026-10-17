@@ -4,7 +4,7 @@ import {
   type Notification,
 } from 'expo-notifications';
 
-import {parsePushEnvelope} from './envelope';
+import {parsePushEnvelope, pushPayloadOfRequest} from './envelope';
 
 // =============================================================================
 // 결정된 승인의 알림을 알림 센터에서 걷는다 (#3926, ADR-0204 D6 마지막 줄).
@@ -46,8 +46,8 @@ export function approvalNotificationIds(
   const wanted = approvalId.toLowerCase();
   const ids: string[] = [];
   for (const notification of presented) {
-    const trigger = notification.request.trigger as {payload?: unknown} | null;
-    const envelope = parsePushEnvelope(trigger?.payload);
+    // 원격 푸시는 트리거의 원문을, 네이티브 처리기가 올린 결과 줄(#3931)은 `content.data.origin`을 든다.
+    const envelope = parsePushEnvelope(pushPayloadOfRequest(notification.request));
     if (envelope !== null && envelope.approvalId === wanted) {
       ids.push(notification.request.identifier);
     }

@@ -142,6 +142,7 @@ pub mod a2a;
 pub mod actions;
 pub mod approval;
 pub mod card_suggest;
+pub mod decider;
 pub mod dm;
 pub mod effort;
 pub mod error;
@@ -214,6 +215,7 @@ pub use card_suggest::{
     SuggestionRequester, ValidatedSuggestion, COMMAND_AI_CONNECT, COMMAND_SUGGEST_PROPS_KEY,
     SUGGESTABLE_COMMANDS,
 };
+pub use decider::{action_required_role, decider_gate, gate_plan, pinned_target_agent, GatePlan};
 pub use tools::{
     approval_reason, is_executable, requires_approval, ApprovalReason, ToolCall, ToolGrant,
     ToolResult, ACTION_TYPE_TOOL_CALL, AUDIT_APPROVAL_REQUESTED, AUDIT_TOOL_EXECUTED,
@@ -292,10 +294,11 @@ pub use run::{
     load_eligible_agent_in_tx, lock_gateway_run_in_tx, lock_run_for_cancel_in_tx,
     mark_run_started_in_tx, park_run_for_approval_in_tx, park_runs_for_control_window_in_tx,
     requeue_run_from_approval_in_tx, resume_runs_from_control_window_in_tx,
-    succeed_parked_run_in_tx, terminal_run_ids_in_tx, trigger_summary, validated_run_limit,
-    AgentRunRow, AgentRunSummaryPage, AgentRunSummaryRow, CancellableRun, CompletionStatusError,
-    CreatedRun, EligibleAgent, GatewayRunSnapshot, NewAgentRun, ParkedRun, RunBindingRejected,
-    RunStatus, RunTrigger, WelcomeKind, TRIGGER_SUMMARY_LIMIT,
+    run_trigger_message_in_tx, succeed_parked_run_in_tx, terminal_run_ids_in_tx, trigger_summary,
+    validated_run_limit, AgentRunRow, AgentRunSummaryPage, AgentRunSummaryRow, CancellableRun,
+    CompletionStatusError, CreatedRun, EligibleAgent, GatewayRunSnapshot, NewAgentRun, ParkedRun,
+    RunBindingRejected, RunStatus, RunTrigger, WelcomeKind, PROP_ANSWERS_MESSAGE_ID,
+    TRIGGER_SUMMARY_LIMIT,
 };
 pub use run_event::{
     append_run_event_in_tx, delete_expired_run_events_in_tx, record_tool_call_in_tx,

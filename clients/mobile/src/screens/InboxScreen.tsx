@@ -59,6 +59,7 @@ import {
   useNeedsAction,
   type Feed,
 } from '../features/inbox/useInbox';
+import {PauseBanner} from '../features/profile/PauseBanner';
 import {haptics} from '../lib/haptics';
 import {useTabBarClearance} from '../shell/ShellChrome';
 import {useSession} from '../session/useSession';
@@ -459,6 +460,13 @@ export default function InboxScreen({
   return (
     <Screen onCanvas={clearance > 0}>
       <ScreenHeader title="인박스" />
+
+      {/* 알림이 멈춰 있으면 그 사실이 이 화면 맨 위에 한 줄로 선다(ADR-0204 D3, #3923). */}
+      <PauseBanner
+        workspaceId={member.workspaceId}
+        selfId={member.id}
+        active={active}
+      />
 
       <ScrollView
         horizontal

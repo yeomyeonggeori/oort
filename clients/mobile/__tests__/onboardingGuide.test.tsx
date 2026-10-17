@@ -1,7 +1,7 @@
 // 온보딩 2.0 공통 틀의 폰 짝 (#2807 OB2-1): KomettoGuide · OnboardingDots · 바닥.
-import {act, cleanup, render, screen} from '@testing-library/react-native';
+import {act, cleanup, render, screen, within} from '@testing-library/react-native';
 import React from 'react';
-import {AccessibilityInfo, StyleSheet} from 'react-native';
+import {AccessibilityInfo, ScrollView, StyleSheet, Text} from 'react-native';
 import {
   KOMETTO_EXPRESSIONS,
   ONBOARDING_DOT_ROLES,
@@ -18,6 +18,7 @@ import {
   OnboardingCanvas,
   OnboardingDots,
 } from '../src/features/onboarding/KomettoGuide';
+import {OnboardingPhoneScreen} from '../src/features/onboarding/OnboardingControls';
 
 function wrap(node: React.ReactElement, scheme: ColorScheme = 'light') {
   return <FixedScheme scheme={scheme}>{node}</FixedScheme>;
@@ -178,5 +179,58 @@ describe('바닥과 매핑 (폰)', () => {
 
   it('maps every expression id to a picture in one place', () => {
     expect(Object.keys(KOMETTO_EXPRESSION_ASSETS).sort()).toEqual([...KOMETTO_EXPRESSIONS].sort());
+  });
+});
+
+describe('화면 뼈대의 행동 자리 (폰)', () => {
+  function frame(pinBottom?: boolean) {
+    return wrap(
+      <OnboardingPhoneScreen
+        testID="frame"
+        pinBottom={pinBottom}
+        bottom={<Text testID="action">계속</Text>}
+      >
+        <Text testID="content">질문</Text>
+      </OnboardingPhoneScreen>,
+    );
+  }
+
+  it('puts the action after the content, inside the scroll, by default (M0·M2·M-a·M-b stay as they were)', () => {
+    render(frame());
+    const scroll = screen.UNSAFE_getByType(ScrollView);
+    expect(within(scroll).getByTestId('content')).toBeTruthy();
+    expect(within(scroll).getByTestId('action')).toBeTruthy();
+    expect(screen.queryByTestId('frame-pinned')).toBeNull();
+    expect(screen.queryByTestId('frame-fade')).toBeNull();
+  });
+
+  it('pinBottom takes the action out of the scroll, and the content stays in it', () => {
+    render(frame(true));
+    const scroll = screen.UNSAFE_getByType(ScrollView);
+    expect(within(scroll).getByTestId('content')).toBeTruthy();
+    expect(within(scroll).queryByTestId('action')).toBeNull();
+    expect(within(screen.getByTestId('frame-pinned')).getByTestId('action')).toBeTruthy();
+  });
+
+  it('melts the content into the canvas above a pinned action: the same recipe as the shell scroll fade, and it never takes a touch', () => {
+    render(frame(true));
+    const fade = screen.getByTestId('frame-fade');
+    expect(fade.props.pointerEvents).toBe('none');
+    // 같은 색의 알파 0에서 바닥 그라데이션의 아래 정지점(`canvasBottom`)으로 — 손으로 쓴 색이 아니다.
+    expect(StyleSheet.flatten(fade.props.style).experimental_backgroundImage).toBe(
+      `linear-gradient(180deg, ${lightPalette.canvasBottom}00 0%, ${lightPalette.canvasBottom} 62%)`,
+    );
+  });
+
+  it('pins nothing when there is no action to pin', () => {
+    render(
+      wrap(
+        <OnboardingPhoneScreen testID="frame" pinBottom>
+          <Text>질문</Text>
+        </OnboardingPhoneScreen>,
+      ),
+    );
+    expect(screen.queryByTestId('frame-pinned')).toBeNull();
+    expect(screen.queryByTestId('frame-fade')).toBeNull();
   });
 });

@@ -555,11 +555,23 @@ fn reject_secret_like_keys(value: &Value, path: &str) -> Checked<()> {
 
 /// Whether a JSON key names a credential-shaped field. Exposed so the route's
 /// response tests apply the very same list to what leaves the server.
+///
+/// Spelling does not hide a key: separators (`_`, `-`, `.`, space) and case are
+/// folded away on both sides, so `access_token`, `accessToken`, `Access-Token`
+/// and `ACCESS TOKEN` are one thing. (The bare words `token` and `secret` are not
+/// in the list on purpose — a tool may legitimately name an input `pageToken`.)
 pub fn is_secret_like_key(key: &str) -> bool {
-    let normalized = key.to_lowercase();
+    let folded = fold_key(key);
     FORBIDDEN_KEY_FRAGMENTS
         .iter()
-        .any(|fragment| normalized.contains(fragment))
+        .any(|fragment| folded.contains(&fold_key(fragment)))
+}
+
+fn fold_key(key: &str) -> String {
+    key.chars()
+        .filter(|character| !matches!(character, '_' | '-' | '.' | ' '))
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 fn require_keys(object: &Object, expected: &[&str], path: &str) -> Checked<()> {
@@ -891,16 +903,14 @@ mod tests {
                 .and_then(Value::as_object_mut)
                 .expect("object at path")
                 .insert(key.to_string(), json!("x"));
+            // Every spelling is a credential: `clientSecret` used to slip past the
+            // fragment list (only the snake_case form was in it) and be refused by
+            // the exact-key rule instead; folding the spelling closes that.
             let error = reason(&manifest);
-            if key == "clientSecret" {
-                // Not in the fragment list — refused by the exact-key rule instead.
-                assert!(error.starts_with("unknown or missing field"), "{error}");
-            } else {
-                assert!(
-                    error.starts_with("secret-like manifest field is forbidden"),
-                    "{key}: {error}"
-                );
-            }
+            assert!(
+                error.starts_with("secret-like manifest field is forbidden"),
+                "{key}: {error}"
+            );
         }
         // Inside an inputSchema the property names are free-form, so only the
         // fragment list stands between a schema and a credential parameter.
@@ -1107,5 +1117,44 @@ mod tests {
         assert!(!is_sha256_digest("sha256:AAAA"));
         assert!(is_secret_like_key("X_Access_Token"));
         assert!(!is_secret_like_key("query"));
+    }
+
+    /// A credential does not stop being one because of how its key is spelled:
+    /// snake, camel, kebab, spaced and dotted forms of each forbidden fragment are
+    /// caught; ordinary names that merely contain the word `token` are not.
+    #[test]
+    fn a_credential_key_is_caught_in_every_spelling() {
+        for key in [
+            "access_token",
+            "accessToken",
+            "Access-Token",
+            "ACCESS TOKEN",
+            "oauth.token",
+            "refreshToken",
+            "clientSecret",
+            "client-secret",
+            "apiKey",
+            "X-Api-Key",
+            "api_key",
+            "bearerToken",
+            "privateKey",
+            "Authorization",
+            "passwordHash",
+            "userCredentials",
+        ] {
+            assert!(is_secret_like_key(key), "{key}");
+        }
+        for key in [
+            "query",
+            "pageToken",
+            "maxTokens",
+            "tokens",
+            "secretary",
+            "keyword",
+            "description",
+            "scopes",
+        ] {
+            assert!(!is_secret_like_key(key), "{key}");
+        }
     }
 }

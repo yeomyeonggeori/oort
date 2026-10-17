@@ -109,15 +109,36 @@ public enum MomoPushCategory: String, CaseIterable, Codable, Sendable, Hashable,
     case message = "momo.message"
     case mention = "momo.mention"
     case approval = "momo.approval"
+    /// ADR-0204 D7: an approval the lock screen must not decide (it mints a value shown once,
+    /// or asks which host). One 「열어서 결정」 button, no 승인·거절. Names its approval like `.approval`.
+    case approvalOpen = "momo.approval.open"
     case work = "momo.work"
 
     public var id: String { rawValue }
+
+    /// Both approval categories carry an `approval_id`; no other category does.
+    public var carriesApprovalID: Bool { self == .approval || self == .approvalOpen }
+}
+
+/// ADR-0204 D7: 본문을 못 받은(자리표시로 남은) 승인 알림은 잠금 화면에서 승인·거부할 수 없다.
+/// 무엇인지 모르는 것에 [승인]/[거부] 버튼을 두지 않고 「열어서 결정」 하나로 낮춘다. 순수 함수라
+/// 확장 밖에서 시험된다 (`sim-check`). 승인 카테고리가 아니면 손대지 않는다.
+public enum MomoPushCategoryDemotion {
+    /// - Parameters:
+    ///   - current: 알림이 지금 들고 있는 `categoryIdentifier`.
+    ///   - resolved: 확장이 보낸 사람·본문을 실제로 채웠는가.
+    public static func categoryIdentifier(current: String, resolved: Bool) -> String {
+        guard !resolved, current == MomoPushCategory.approval.rawValue else { return current }
+        return MomoPushCategory.approvalOpen.rawValue
+    }
 }
 
 public enum MomoPushActionIdentifier {
     public static let quickReply = "momo.action.quick-reply"
     public static let approve = "momo.action.approve"
     public static let reject = "momo.action.reject"
+    /// The single button of `.approvalOpen`: opens the app on the approval's card. Decides nothing.
+    public static let openApproval = "momo.action.open-approval"
 }
 
 public struct PushFetchSession: Codable, Equatable, Sendable {
@@ -216,8 +237,8 @@ public enum MomoPushParser {
               !payload.collapseID.isEmpty,
               root.aps.badge >= 0,
               ["dm", "mention", "approval_request", "resume_offer", "work_session_idle", "work_run_done"].contains(payload.reason),
-              (root.aps.category == .approval) == (approvalID.flatMap(UUID.init(uuidString:)) != nil),
-              (root.aps.category == .approval || approvalID == nil)
+              root.aps.category.carriesApprovalID == (approvalID.flatMap(UUID.init(uuidString:)) != nil),
+              (root.aps.category.carriesApprovalID || approvalID == nil)
         else {
             throw MomoPushError.invalidEnvelope
         }

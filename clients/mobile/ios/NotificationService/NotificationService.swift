@@ -33,6 +33,9 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
             return
         }
         bestAttemptContent = content
+        // ADR-0204 D7: 아래 어느 길로든 본문을 못 채우고 끝나면 승인 버튼을 뗀다(fail-open 도 마찬가지).
+        content.categoryIdentifier = MomoPushCategoryDemotion.categoryIdentifier(
+            current: content.categoryIdentifier, resolved: false)
         guard let envelope = try? MomoPushParser.parse(userInfo: request.content.userInfo),
               let data = MomoKeychainValueStore().data(
                 for: MomoPushContract.pushFetchSessionAccount
@@ -47,6 +50,7 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
         let resolver = PushNotificationResolver(fetcher: MomoPushRESTFetcher())
         // UNMutableNotificationContent는 non-Sendable — 클로저에는 문자열 fallback만 넘긴다.
         let fallback = PushDisplayContent(title: content.title, body: content.body)
+        let originalCategory = request.content.categoryIdentifier
         resolutionTask = Task { [weak self] in
             let display = await resolver.resolve(
                 envelope: envelope,
@@ -56,6 +60,11 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
             guard !Task.isCancelled, let self, let updated = self.bestAttemptContent else { return }
             updated.title = display.title
             updated.body = display.body
+            // 채워졌을 때만 원래 카테고리(버튼)로 돌려놓는다.
+            let resolved = display.title != fallback.title || display.body != fallback.body
+            if resolved {
+                updated.categoryIdentifier = originalCategory
+            }
             self.finish(with: updated)
         }
     }

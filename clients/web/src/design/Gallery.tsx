@@ -22,6 +22,7 @@ import {
 import {
   ContextMenu,
   ContextMenuContent,
+  ContextMenuGroup,
   ContextMenuItem,
   ContextMenuLabel,
   ContextMenuRadioGroup,
@@ -566,9 +567,11 @@ function ContextMenuSpecimen() {
             <ContextMenuLabel data-gallery-export="ContextMenuLabel">
               메시지
             </ContextMenuLabel>
-            <ContextMenuItem data-gallery-export="ContextMenuItem">
-              답글
-            </ContextMenuItem>
+            <ContextMenuGroup data-gallery-export="ContextMenuGroup">
+              <ContextMenuItem data-gallery-export="ContextMenuItem">
+                답글
+              </ContextMenuItem>
+            </ContextMenuGroup>
             <ContextMenuSeparator data-gallery-export="ContextMenuSeparator" />
             <ContextMenuRadioGroup
               data-gallery-export="ContextMenuRadioGroup"

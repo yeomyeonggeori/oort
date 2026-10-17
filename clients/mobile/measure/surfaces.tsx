@@ -110,6 +110,11 @@ import {
 } from '@momo/core/features/workbench/permissionPreview';
 import {ThemeControl} from '../src/design/ThemeControl';
 import {parseExecutionPlan} from '@momo/core/lib/executionPlan';
+import {
+  NotificationPrimer,
+  type PrimerKinds,
+} from '../src/features/onboarding/NotificationPrimer';
+import {noteConnectRoute} from '../src/features/onboarding/phoneFlow';
 import {measureMode} from './root';
 import {Shell} from '../src/shell/AppShell';
 import {
@@ -2099,6 +2104,12 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   // N3 (#3595): 작업 상세의 「대화」 모드. 배송되는 말풍선·입력창을 고정 데이터로 세운다.
   if (name.startsWith('work-chat')) {
     return <WorkChatSurface which={name.slice('work-chat'.length).replace(/^-/, '')} />;
+  }
+  // #3925: 첫 실행 알림 단계(M3). 배송되는 화면에 상태별 값을 건넨다.
+  if (name.startsWith('notify-primer')) {
+    return (
+      <NotifyPrimerSurface which={name.slice('notify-primer'.length).replace(/^-/, '')} />
+    );
   }
 
   switch (name) {
@@ -4355,6 +4366,18 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       );
     case 'shell-inbox':
       return <Shell initialNav={{...INITIAL_NAV, tab: 'inbox'}} />;
+    // #3923: 인박스 맨 위의 멈춤 줄. 진짜 셸의 진짜 인박스이고 서버는 씨앗이다(`seedPause`).
+    // `pause` 는 방해 금지에 묶여 일시 중지가 켜진 흔한 모양(기한 있음), `pause-open` 은 기한 없는
+    // 옛 행(성재 계정의 15일), `pause-dnd` 는 일시 중지는 꺼졌는데 상태만 방해 금지인 모양이다.
+    // `pause-date` 는 기한이 사흘 뒤 아침이라 「10월 20일(화) 오전 9:00까지」처럼 날짜가 붙는 가장 긴 모양
+    // (design-review M3), `pause-failure` 는 쓰기가 늦게 실패하는 서버(`seedPause`)다.
+    case 'shell-inbox-pause':
+    case 'shell-inbox-pause-open':
+    case 'shell-inbox-pause-dnd':
+    case 'shell-inbox-pause-offline':
+    case 'shell-inbox-pause-date':
+    case 'shell-inbox-pause-failure':
+      return <Shell initialNav={{...INITIAL_NAV, tab: 'inbox'}} />;
     case 'shell-search':
       return <Shell initialNav={{...INITIAL_NAV, tab: 'search'}} />;
     // DS2-2b (#2750): + 메뉴와 그 뒤의 두 시트. 배치 비교안 (a)(알약 안 네 번째
@@ -4621,6 +4644,23 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           </Text>
         </View>
       );
+    // #3964: DM 줄의 상태 점. 사이드바를 **그대로** 세운다(`SidebarScreen`): 사람은 스스로 정한 자리 비움·
+    // 방해 금지, 에이전트는 서버의 생존 판정이 아바타 모서리의 점이 된다. 캡션을 달지 않는다 — 색을 글자가
+    // 설명해 주는 사진은 점이 스스로 말하는지를 증명하지 못한다. `-member` 판은 같은 줄을 일반 멤버가 본
+    // 모양이다(경고가 속 빈 고리로 내려간다).
+    case 'dm-status-dots':
+    case 'dm-status-dots-member':
+    case 'dm-status-dots-states':
+    case 'dm-status-dots-states-member':
+      return (
+        <View style={styles.fill}>
+          <SidebarScreen
+            openChannelId={null}
+            onOpenConversation={() => {}}
+            onOpenSearch={() => {}}
+          />
+        </View>
+      );
     case 'mark-unread-divider': {
       const read = markAt3Cursor10({channelId: 'ch-deploy'});
       return (
@@ -4667,7 +4707,8 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             destructive-confirm · search-entry · search-idle ·
             search-searching · search-empty · search-error · search-results ·
             mark-unread-sidebar · mark-unread-divider ·
-            landed3921-arrival · landed3921-decided
+            landed3921-arrival · landed3921-decided ·
+            dm-status-dots[-member|-states|-states-member]
           </Text>
         </Frame>
       );
@@ -5532,6 +5573,146 @@ const WORK_CONSOLE_SESSIONS = [
 
 /** Seed the exact query keys the shipping Work Console reads, without a socket. */
 /**
+ * #3964 사이드바 상태 점 장의 씨앗. 에이전트의 생존 판정은 서버가 답하는 것이라 하네스는 같은 질의 키
+ * (`['agent-liveness', ws, id]`)에 답을 **미리 꽂는다** — 화면은 배송되는 `useAgentLiveness` 가 읽는 그대로다.
+ * 판정을 `null` 로 꽂으면 「라벨 없음(404)」, 꽂지 않으면 「아직 모름」이다.
+ *
+ *   김인턴   응답함            → 채운 초록           헤르메스  살아 있음·대기 → 채운 초록(Buzz식: 살아 있음)
+ *   코비     꺼짐             → 속 빈 고리           워처      일이 기다림    → 주황(owner 에게만)
+ *   레거시봇  판정 없음+호스트 연결 → 초록            조용봇    판정 없음+안 닿음 → 점 없음(DM 없는 에이전트 줄)
+ *   이도현   평소             → 점 없음              최민수    자리 비움      → 주황
+ *   정하윤   방해 금지         → 빨강
+ *
+ * `-states` 판은 에이전트 판정 **여덟 상태**를 한 화면에 세운다(응답함·살아 있음·조용함·꺼짐·일이 기다림·안 가져감·
+ * 응답 없음·거절됨). 채널은 하나만 둔다(줄이 화면에 다 들어오게).
+ */
+function seedDmStatusDots(surface: string): void {
+  // 서버가 없는 하네스: 질의가 다시 나가도 끝나지 않는 약속으로 둔다(실패하면 세션 만료로 읽혀 캐시가 지워진다).
+  void globalThis.fetch;
+  void globalThis.Headers;
+  globalThis.fetch = (() => new Promise<Response>(() => {})) as typeof fetch;
+  resetAgentWorking();
+  // 하네스 클라이언트는 `gcTime: 0` 이라 관찰자 없는 씨앗은 곧바로 치워진다. 목록은 일부 줄을 **나중 배치**에 그리므로
+  // (`SectionList` 창) 그 줄의 생존 질의는 마운트하기 전에 씨앗이 사라져 점이 서지 못한다. 이 화면의 생존 씨앗만 붙든다.
+  harnessClient.setQueryDefaults(['agent-liveness', ADE_WS], {gcTime: Infinity});
+  harnessClient.setQueryData(['settings', 'workspace', ADE_WS], {
+    id: ADE_WS,
+    slug: 'yeomyeong',
+    name: '여명거리',
+    updatedAtMs: 0,
+  });
+  const humanTemplate = ROSTER.find(m => m.kind === 'human') ?? ROSTER[0];
+  const agentTemplate = ROSTER.find(m => m.kind === 'agent') ?? ROSTER[0];
+  const person = (n: string, displayName: string, handle: string, extra: Record<string, unknown> = {}) => ({
+    ...humanTemplate,
+    id: `00000000-0000-7000-8000-0000000d0${n}`,
+    workspaceId: ADE_WS,
+    displayName,
+    handle,
+    ...extra,
+  });
+  const agent = (n: string, displayName: string, handle: string, extra: Record<string, unknown> = {}) => ({
+    ...agentTemplate,
+    id: `00000000-0000-7000-8000-0000000d0${n}`,
+    workspaceId: ADE_WS,
+    displayName,
+    handle,
+    ...extra,
+  });
+  const viewer = {
+    ...humanTemplate,
+    workspaceId: ADE_WS,
+    role: surface.endsWith('-member') ? 'member' : 'owner',
+  };
+  const stateAgents = {
+    intern: agent('21', '김인턴', 'intern', {hostOnline: true}),
+    hermes: agent('22', '헤르메스', 'hermes', {hostOnline: true}),
+    dawn: agent('27', '새벽봇', 'dawn'),
+    coby: agent('23', '코비', 'coby', {hostOnline: true}),
+    watcher: agent('24', '워처', 'watcher'),
+    woken: agent('28', '깨움봇', 'woken'),
+    stuck: agent('29', '먹통봇', 'stuck'),
+    refused: agent('2a', '막힘봇', 'refused'),
+  };
+  const peers = {
+    dohyun: person('11', '이도현', 'dohyun'),
+    minsu: person('12', '최민수', 'minsu', {presenceStatus: 'away'}),
+    hayun: person('13', '정하윤', 'hayun', {presenceStatus: 'dnd'}),
+    intern: agent('21', '김인턴', 'intern', {hostOnline: true}),
+    hermes: agent('22', '헤르메스', 'hermes', {hostOnline: true}),
+    coby: agent('23', '코비', 'coby', {hostOnline: true}),
+    watcher: agent('24', '워처', 'watcher'),
+    legacy: agent('25', '레거시봇', 'legacy', {hostOnline: true}),
+    quiet: agent('26', '조용봇', 'quiet', {hostOnline: false}),
+  };
+  if (surface.startsWith('dm-status-dots-states')) {
+    harnessClient.setQueryData(['roster', ADE_WS], [viewer, ...Object.values(stateAgents)]);
+    const stateOf: Array<[keyof typeof stateAgents, string]> = [
+      ['intern', 'responsive'],
+      ['hermes', 'alive_idle'],
+      ['dawn', 'quiet'],
+      ['coby', 'inactive'],
+      ['watcher', 'work_waiting'],
+      ['woken', 'woken_not_collected'],
+      ['stuck', 'unresponsive'],
+      ['refused', 'error'],
+    ];
+    for (const [key, state] of stateOf) {
+      harnessClient.setQueryData(['agent-liveness', ADE_WS, stateAgents[key].id.toLowerCase()], {
+        agentMemberId: stateAgents[key].id,
+        state,
+      });
+    }
+    harnessClient.setQueryData(['channels', ADE_WS], [
+      {id: 'ch-general', workspaceId: ADE_WS, kind: 'public' as const, name: '일반', muted: false},
+      ...stateOf.map(([key]) => ({
+        id: `dm-${key}`,
+        workspaceId: ADE_WS,
+        kind: 'dm' as const,
+        muted: false,
+        memberIds: [viewer.id, stateAgents[key].id],
+      })),
+    ]);
+    harnessClient.setQueryData(['read-state', ADE_WS], []);
+    return;
+  }
+  harnessClient.setQueryData(['roster', ADE_WS], [viewer, ...Object.values(peers)]);
+  const liveness = (id: string, state: string | null) =>
+    harnessClient.setQueryData(
+      ['agent-liveness', ADE_WS, id.toLowerCase()],
+      state === null ? null : {agentMemberId: id, state},
+    );
+  liveness(peers.intern.id, 'responsive');
+  liveness(peers.hermes.id, 'alive_idle');
+  liveness(peers.coby.id, 'inactive');
+  liveness(peers.watcher.id, 'work_waiting');
+  liveness(peers.legacy.id, null);
+  liveness(peers.quiet.id, null);
+  const channel = (id: string, name: string) => ({id, workspaceId: ADE_WS, kind: 'public' as const, name, muted: false});
+  const dm = (key: string, peer: {id: string}) => ({
+    id: `dm-${key}`,
+    workspaceId: ADE_WS,
+    kind: 'dm' as const,
+    muted: false,
+    memberIds: [viewer.id, peer.id],
+  });
+  harnessClient.setQueryData(['channels', ADE_WS], [
+    channel('ch-general', '일반'),
+    channel('ch-deploy', '배포'),
+    dm('intern', peers.intern),
+    dm('hermes', peers.hermes),
+    dm('coby', peers.coby),
+    dm('watcher', peers.watcher),
+    dm('legacy', peers.legacy),
+    dm('dohyun', peers.dohyun),
+    dm('minsu', peers.minsu),
+    dm('hayun', peers.hayun),
+  ]);
+  // 다 읽은 줄들: 안 읽음 배지가 점 옆에 서면 점이 읽히는지를 흐린다.
+  harnessClient.setQueryData(['read-state', ADE_WS], []);
+}
+
+/**
  * #1964 사이드바 장의 씨앗. 세 방, 세 가지 읽음 상태 — 마크만 있는 방은 서버가 준
  * 그대로 `unreadCount: 0` 이다. 그 0 이 배지로 새면 이 장은 「다 읽음」 두 줄과
  * 「안 읽음」 한 줄이 된다.
@@ -5909,12 +6090,39 @@ function seedDelegate(surface: string): void {
 // 끝나는 때는 지금 + 3시간 — 사진마다 「오후 N:MM까지」가 다르지만 모양이 증거다.
 const PAUSE_UNTIL_AHEAD_MS = 3 * 60 * 60_000;
 
+/** 내 선언 상태가 방해 금지인 표면들. 나머지는 로스터를 그대로 둔다. */
+const PAUSE_DND_SURFACES = new Set([
+  'shell-pause-status',
+  'shell-pause-until-dnd',
+  'shell-inbox-pause',
+  'shell-inbox-pause-open',
+  'shell-inbox-pause-dnd',
+  'shell-inbox-pause-offline',
+  'shell-inbox-pause-date',
+  'shell-inbox-pause-failure',
+]);
+
+/**
+ * 이 표면의 끝나는 때. 날짜 판은 사흘 뒤 오전 9시라 어제·오늘·내일 이름이 아니라 날짜가 붙는 가장 긴 문장이
+ * 된다(「10월 20일(화) 오전 9:00까지」). 나머지는 지금 + 3시간.
+ */
+function pauseUntilFor(surface: string): number {
+  if (surface !== 'shell-inbox-pause-date') return Date.now() + PAUSE_UNTIL_AHEAD_MS;
+  const day = new Date();
+  day.setDate(day.getDate() + 3);
+  day.setHours(9, 0, 0, 0);
+  return day.getTime();
+}
+
+/** 알림 일시 중지·방해 금지 씨앗이 필요한 표면(프로필 시트 판 `shell-pause-*`, 인박스 줄 판 `shell-inbox-pause*`). */
+function isPauseSurface(name: string): boolean {
+  return name.startsWith('shell-pause-') || name.startsWith('shell-inbox-pause');
+}
+
 /** 이 표면에서 내 로스터 행. 방해 금지 표면만 선언 상태와 기한을 갖는다. */
 function pauseRoster(surface: string): typeof SHELL_ROSTER {
-  if (surface !== 'shell-pause-status' && surface !== 'shell-pause-until-dnd') {
-    return SHELL_ROSTER;
-  }
-  const until = Date.now() + PAUSE_UNTIL_AHEAD_MS;
+  if (!PAUSE_DND_SURFACES.has(surface)) return SHELL_ROSTER;
+  const until = pauseUntilFor(surface);
   return SHELL_ROSTER.map(member =>
     member.id === SELF
       ? {...member, presenceStatus: 'dnd' as const, dndUntilMs: until}
@@ -5958,15 +6166,49 @@ function forceNetwork(online: boolean): void {
 
 /** `seedShell` 이 깐 규칙(꺼짐)을 이 표면의 모양으로 덮는다. */
 function seedPause(surface: string): void {
-  forceNetwork(surface !== 'shell-pause-until-offline');
-  const until = Date.now() + PAUSE_UNTIL_AHEAD_MS;
+  forceNetwork(
+    surface !== 'shell-pause-until-offline' && surface !== 'shell-inbox-pause-offline',
+  );
+  const until = pauseUntilFor(surface);
   const rules =
-    surface === 'shell-pause-status' || surface === 'shell-pause-notify'
+    surface === 'shell-pause-status' ||
+    surface === 'shell-pause-notify' ||
+    surface === 'shell-inbox-pause' ||
+    surface === 'shell-inbox-pause-offline' ||
+    surface === 'shell-inbox-pause-date' ||
+    surface === 'shell-inbox-pause-failure'
       ? {dnd: true, mentionOverridesMute: false, dndUntilMs: until}
-      : surface === 'shell-pause-notify-open' || surface === 'shell-pause-until-open'
+      : surface === 'shell-pause-notify-open' ||
+          surface === 'shell-pause-until-open' ||
+          surface === 'shell-inbox-pause-open'
         ? {dnd: true, mentionOverridesMute: false}
         : null;
   if (rules) harnessClient.setQueryData(['settings', 'notification-rules', ADE_WS], rules);
+  // 인박스 줄은 명부의 내 행(선언 상태)도 읽는다 — 프로필 시트 표면은 로스터를 직접 받지만 이쪽은
+  // 질의 캐시에서 읽는다.
+  if (surface.startsWith('shell-inbox-pause')) {
+    harnessClient.setQueryData(['roster', ADE_WS], pauseRoster(surface));
+  }
+  // 쓰기가 **늦게** 실패하는 서버(design-review H1): 누르면 낙관 칠하기로 줄이 먼저 사라졌다가, 0.6초 뒤
+  // 서버가 500 을 답해 줄이 이유와 함께 돌아온다. 읽기는 끝나지 않는 약속으로 둔다(`seedShell` 과 같은
+  // 이유: 읽기 실패가 세션 만료로 읽혀 캐시가 지워진다).
+  if (surface === 'shell-inbox-pause-failure') {
+    globalThis.fetch = ((_url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET';
+      if (method === 'GET') return new Promise<Response>(() => {});
+      return new Promise<Response>(resolve =>
+        setTimeout(
+          () =>
+            resolve({
+              status: 500,
+              ok: false,
+              text: async () => JSON.stringify({error: {message: 'x'}}),
+            } as unknown as Response),
+          600,
+        ),
+      );
+    }) as typeof fetch;
+  }
 }
 
 function seedShell(surface: string): void {
@@ -6612,6 +6854,48 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     },
   });
 
+// ---- #3925 첫 실행 알림 단계 (ADR-0204 D4) --------------------------------------
+//
+// 배송되는 `NotificationPrimer`에 상태를 건넨다. 게이트가 아니라 화면이다: 게이트는 푸시
+// 프로바이더의 답을 읽는데 하네스는 그 답을 심을 수 없다. 스위치는 눌러 볼 수 있다.
+//
+//   NOTIFY-PRIMER               첫 화면(작업 끝남 켬). `LIGHT-` 접두사로 라이트
+//   NOTIFY-PRIMER-OFF           스위치를 끈 상태: 작업 끝남 예시가 한 단 물러난다
+//   NOTIFY-PRIMER-LOADING       서버 값을 읽는 중: 스위치 대신 표시기
+//   NOTIFY-PRIMER-FAILED        쓰기 실패 문장(스위치는 되돌아와 있다)
+//   NOTIFY-PRIMER-LOAD-FAILED   읽기 실패 문장
+//   NOTIFY-PRIMER-ABSENT        이 경로를 모르는 서버: 작업 끝남 줄이 없다
+//   NOTIFY-PRIMER-DENIED        iOS 창을 거부한 뒤 안내
+function NotifyPrimerSurface({which}: {which: string}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  // 앱에서는 연결 화면이 적어 두는 한 칸이다: QR 경로의 세 번째 점.
+  noteConnectRoute('qr');
+  const [on, setOn] = React.useState(which !== 'off');
+  const kinds: PrimerKinds = {
+    absent: which === 'absent',
+    ready: which !== 'loading' && which !== 'load-failed',
+    workComplete: on,
+    loadFailed: which === 'load-failed',
+    pending: false,
+    failed: which === 'failed',
+    setWorkComplete: next => setOn(next),
+  };
+  return (
+    <View style={styles.fill}>
+      {which === 'denied' ? (
+        <NotificationPrimer mode="declined" onDone={() => {}} />
+      ) : (
+        <NotificationPrimer
+          mode="ask"
+          busy={false}
+          onContinue={() => {}}
+          kinds={kinds}
+        />
+      )}
+    </View>
+  );
+}
+
 // 위 독스트링의 이유로 렌더 밖에서 한 번. **파일 맨 아래**인 것은 `harnessClient`
 // 가 `const` 라 그 선언보다 먼저 부르면 TDZ 로 터지기 때문이고(실측: 첫 시도가
 // "Cannot read property 'setQueryData' of undefined" 로 찍혔다), 다른 표면들은 이
@@ -6685,9 +6969,16 @@ if (
 if (
   LAUNCHED !== null &&
   LAUNCHED.kind === 'surface' &&
+  LAUNCHED.name.startsWith('dm-status-dots')
+) {
+  seedDmStatusDots(LAUNCHED.name);
+}
+if (
+  LAUNCHED !== null &&
+  LAUNCHED.kind === 'surface' &&
   LAUNCHED.name.startsWith('shell-')
 ) {
-  if (LAUNCHED.name.startsWith('shell-pause-')) keepPauseSeeds();
+  if (isPauseSurface(LAUNCHED.name)) keepPauseSeeds();
   seedShell(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-delegate-')) seedDelegate(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-ask-')) seedAsk(LAUNCHED.name);
@@ -6697,6 +6988,6 @@ if (
     seedIosFeedCacheForCapture({latestBuild: 3036, version: '0.1.29', testflight: true});
   }
   if (LAUNCHED.name.startsWith('shell-call-')) seedCall(LAUNCHED.name);
-  if (LAUNCHED.name.startsWith('shell-pause-')) seedPause(LAUNCHED.name);
+  if (isPauseSurface(LAUNCHED.name)) seedPause(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-profile-push-')) seedPush(LAUNCHED.name);
 }

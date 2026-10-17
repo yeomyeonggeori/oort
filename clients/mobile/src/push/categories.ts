@@ -48,8 +48,26 @@ const APPROVE_ACTION: Notifications.NotificationAction = {
 
 const REJECT_ACTION: Notifications.NotificationAction = {
   identifier: PUSH_ACTION.reject,
-  buttonTitle: '거절',
+  buttonTitle: '거부',
   options: {...REQUIRES_AUTH, isDestructive: true},
+};
+
+/**
+ * 「열어서 결정」 — the one button of an approval the lock screen must not decide
+ * (ADR-0204 D7).
+ *
+ * It asks for the same Face ID / passcode the inline buttons do, and then OPENS the
+ * app on the card: `opensAppToForeground: true`, the opposite of the two buttons
+ * above. That is the whole point of the category — a one-time value (an invite
+ * link, a pairing code) has nowhere to be shown on a banner, and a spawn that asks
+ * which machine to run on cannot be answered by a button that carries no choice.
+ * The button decides nothing; `tapArrival` treats its response as a tap on the
+ * notification and lands on the card.
+ */
+const OPEN_APPROVAL_ACTION: Notifications.NotificationAction = {
+  identifier: PUSH_ACTION.openApproval,
+  buttonTitle: '열어서 결정',
+  options: {isAuthenticationRequired: true, opensAppToForeground: true},
 };
 
 /** Category id → its buttons. `work` intentionally has none: it reports that an
@@ -60,6 +78,7 @@ export const PUSH_CATEGORY_ACTIONS: ReadonlyArray<
   [PUSH_CATEGORY.message, [REPLY_ACTION]],
   [PUSH_CATEGORY.mention, [REPLY_ACTION]],
   [PUSH_CATEGORY.approval, [APPROVE_ACTION, REJECT_ACTION]],
+  [PUSH_CATEGORY.approvalOpen, [OPEN_APPROVAL_ACTION]],
   [PUSH_CATEGORY.work, []],
 ];
 

@@ -75,6 +75,7 @@ pub mod human_control;
 pub mod issue;
 pub mod jwt;
 pub mod owner_claim;
+pub mod push_action_token;
 pub mod push_fetch_token;
 pub mod realtime;
 pub mod refresh_proof;
@@ -177,6 +178,12 @@ pub use owner_claim::{
     IssuedPasswordReset, PasswordChangeMutation, PasswordResetIssueError,
     CLAIM_KIND_OWNER_BOOTSTRAP, CLAIM_KIND_PASSWORD_RESET, OWNER_CLAIM_TOKEN_LEN,
     OWNER_CLAIM_TTL_SECONDS,
+};
+pub use push_action_token::{
+    live_push_action_count, lock_push_action_mints_in_tx, push_action_route_allowed,
+    push_action_session_live, sign_push_action, verify_app_push_action, AUDIT_VIA_PUSH_ACTION,
+    MAX_LIVE_PUSH_ACTION_PER_LINEAGE, PUSH_ACTION_TTL_SECONDS, SCOPE_PUSH_ACTION,
+    SESSION_LABEL_PUSH_ACTION, TYP_PUSH_ACTION,
 };
 pub use push_fetch_token::{
     live_push_fetch_count, push_fetch_route_allowed, push_fetch_session_live, sign_push_fetch,
