@@ -1,4 +1,4 @@
-import { useCallback, useState, type ReactElement } from "react";
+import { useCallback, useRef, useState, type ReactElement } from "react";
 import type { Channel, MembershipRole, ReadState } from "@momo/core/lib/api";
 import {
   ContextMenu,
@@ -113,6 +113,7 @@ export function SidebarRowContextMenu({
   onMoveToSection,
   starred = false,
   onToggleStar,
+  onCloseDm,
 }: {
   /** 이 행의 링크. 트리거 상자가 이것을 감싼다. */
   children: ReactElement;
@@ -138,8 +139,19 @@ export function SidebarRowContextMenu({
    */
   starred?: boolean;
   onToggleStar?: () => void;
+  /**
+   * DM 행의 「사이드바에서 닫기」 (#3963). 손이 없으면(채널 행·터치) 항목이 서지 않는다.
+   * 닫는 일의 실행(원장 · 착지 · 이웃 행 캐럿)은 사이드바가 지고, 이 파일은 그릇과 입력만 정한다.
+   */
+  onCloseDm?: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  // 이 메뉴를 **누가** 열었는가 (#3963, design-review R1 N1). 열림 윤곽(`tokens.css` 「포인터로 연
+  // 행 메뉴」)은 키보드로 연 메뉴만의 표식이고, 그 갈림은 전역 모달리티 스탬프가 아니라 **열린 순간의
+  // 길**이 정한다: 키보드 소환 경로(`onKeyDown`)가 아는 사실이다. 스탬프를 읽으면 포인터로 연 메뉴 안의
+  // 첫 방향키가 윤곽을 되살리고, 마우스로 행을 누른 뒤 Shift+F10 으로 연 메뉴는 표식을 잃는다.
+  const [openVia, setOpenVia] = useState<"pointer" | "keyboard">("pointer");
+  const summoning = useRef(false);
   const touchSurface = useHoverNone();
   const enabled = !touchSurface;
   // H-1 의 수리가 사는 한 자리. 손잡이를 감싸는 쪽을 고른 이유는 그것이 **행을
@@ -171,6 +183,9 @@ export function SidebarRowContextMenu({
           handOffFocus();
         }
       : undefined,
+    // 닫으면 이 행이 사라지므로 캐럿은 **이웃 행**으로 가야 한다. 이웃은 지우기 전에 잡아야 해서
+    // `handOffFocus`(옮겨간 그 행으로)와 다른 규칙이고, 그 계산은 사이드바의 `closeDmRow` 가 한다.
+    onCloseDm,
   });
   // 층을 세우지만, **이 층의 handle 은 결코 불리지 않는다** (design-review
   // #1937 N-2). 아래 층(폰 서랍·작업 패널)을 실제로 지키는 것은 이 줄이 아니라
@@ -190,6 +205,8 @@ export function SidebarRowContextMenu({
       <ContextMenu
         open={open}
         onOpenChange={(next) => {
+          // 열리는 순간에만 적는다. 닫혀 있는 동안은 속성이 없다(트리거의 `data-open-via` 줄).
+          if (next) setOpenVia(summoning.current ? "keyboard" : "pointer");
           setOpen(next);
           // 닫히면 이전 실패는 다음 열기까지 따라오지 않는다.
           if (!next) actions.clearError();
@@ -235,13 +252,37 @@ export function SidebarRowContextMenu({
           // 「이 행의 메뉴가 열려 있다」가 섞이지 않는다. 이 선택은 주석이 아니라
           // `tokens.contrast.test.ts` 의 `describe("행 메뉴 열림 표식")` 이 이
           // 파일의 클래스에서 토큰을 읽어 잰다.
-          className="block rounded-sm data-[state=open]:bg-surface-hover data-[state=open]:outline data-[state=open]:outline-1 data-[state=open]:-outline-offset-1 data-[state=open]:outline-ink-muted"
+          //
+          // ## 이 윤곽은 키보드로 연 메뉴만의 것이다 (#3963, 성재 2026-10-16)
+          //
+          // 「우클릭하면 보더가 표시된다」- 이 윤곽이 그 보더였다. 실측(Chromium·WebKit,
+          // `scripts/capture-3963.mjs`): 우클릭 직후 열린 트리거의 outline 이 `solid 1px`,
+          // 캐럿 요소(메뉴)에는 링이 없다. 위 N-4 가 이 윤곽을 세운 이유는 「포인터는 hover 가
+          // 대신 말해 준다」의 반대편 - **키보드로 연 메뉴가 어느 행의 것인지 말하는 유일한 표식**
+          // 이었다. 포인터로 연 메뉴에는 그 이유가 없다(사람이 방금 그 행을 눌렀다).
+          //
+          // 그래서 클래스는 그대로 두고(위 대비 시험이 이 문자열에서 토큰을 읽는다) **포인터로 연**
+          // 메뉴(`data-open-via="pointer"`)에서만 윤곽을 걷는다: `tokens.css` 의 「포인터로 연 행
+          // 메뉴」. 레이어 밖 규칙이다. 키보드 포커스 링(`focus-visible:focus-ring`)과 키보드로 연
+          // 메뉴의 윤곽은 그대로다.
+          data-open-via={open ? openVia : undefined}
+          // 열린 행의 틴트는 호버 채움과 **같은 반경**이다(행 `sidebar-row` 의 `--radius-md`). 예전의
+          // `rounded-sm`(6px)은 1px 윤곽이 가리고 있던 4px 차이를 윤곽이 걷히자 드러냈다(design-review
+          // R1 M3: 열린 행의 모서리가 호버보다 좁았다).
+          className="block rounded-md data-[state=open]:bg-surface-hover data-[state=open]:outline data-[state=open]:outline-1 data-[state=open]:-outline-offset-1 data-[state=open]:outline-ink-muted"
           onKeyDown={(event) => {
             if (!enabled || !isContextMenuSummonKey(event)) return;
             // 브라우저의 네이티브 소환을 막고 같은 문으로 들어간다. 막지 않으면
             // 같은 한 번의 키가 메뉴를 두 번 연다.
             event.preventDefault();
-            summonAt(event.currentTarget);
+            // 열리는 길을 적는다: 소환 동안만 `keyboard` 이고(디스패치는 동기다), 끝나면 우클릭의
+            // 기본값(`pointer`)으로 돌아간다.
+            summoning.current = true;
+            try {
+              summonAt(event.currentTarget);
+            } finally {
+              summoning.current = false;
+            }
           }}
         >
           {children}

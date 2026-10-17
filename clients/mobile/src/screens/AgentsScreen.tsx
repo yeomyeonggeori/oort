@@ -94,6 +94,7 @@ export default function AgentsScreen({
   onOpenAgent,
   onOpenHostedList,
   onBack,
+  active = true,
 }: {
   onOpenAgent: (agent: {
     memberId: string;
@@ -111,6 +112,12 @@ export default function AgentsScreen({
    * 탭이던 때는 없었다.
    */
   onBack?: () => void;
+  /**
+   * 지금 이 층이 맨 위에 보이는가 (#3992). 층은 닫혀도 마운트된 채 숨기만 하므로, 당겨서 새로고침의 실패 안내
+   * (「화면을 떠날 때까지」 남는다)는 이 값이 거짓이 될 때 거둔다. 기본 `true`: 셸 밖 하네스·시험에서는 「안 보인다」가
+   * 조용한 기본이 되지 않게.
+   */
+  active?: boolean;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {workspaceId} = useSession();
@@ -173,13 +180,14 @@ export default function AgentsScreen({
   const refetchDirectory = directoryQuery.refetch;
   const refetchChannels = channelsQuery.refetch;
   const refetchSessions = sessionsQuery.refetch;
-  const {refreshControl, scrollProps} = usePullRefresh(
+  const {refreshControl, scrollProps, notice} = usePullRefresh(
     useCallback(
       () =>
         Promise.all([refetchDirectory(), refetchChannels(), refetchSessions()]),
       [refetchDirectory, refetchChannels, refetchSessions],
     ),
     'agents-refresh',
+    {active},
   );
   const nowMs = Date.now();
   const railLive = railStatus === 'connected';
@@ -217,6 +225,9 @@ export default function AgentsScreen({
           testID="agent-sessions-error"
         />
       ) : null}
+
+      {/* 당겨서 새로고침이 실패했다는 한 줄(#3992). 시간으로 사라지지 않는다. */}
+      {notice}
 
       {loading ? (
         <LoadingState

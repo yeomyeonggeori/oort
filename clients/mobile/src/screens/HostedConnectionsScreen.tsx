@@ -54,9 +54,15 @@ import type {OpenHostedConnection} from '../nav/state';
 export default function HostedConnectionsScreen({
   onBack,
   onOpenConnection,
+  active = true,
 }: {
   onBack: () => void;
   onOpenConnection: (connection: OpenHostedConnection) => void;
+  /**
+   * 지금 이 목록이 맨 위에 보이는가 (#3992). 목록은 상세가 열려 있는 동안에도 마운트된 채 밑에 남으므로, 당겨서
+   * 새로고침의 실패 안내(「화면을 떠날 때까지」 남는다)는 이 값이 거짓이 될 때 거둔다. 기본 `true`.
+   */
+  active?: boolean;
 }): React.JSX.Element {
   const {workspaceId} = useSession();
   const connectionsQuery = useHostedConnections(workspaceId);
@@ -80,10 +86,11 @@ export default function HostedConnectionsScreen({
   }, [connectionsQuery.data, directoryQuery.directory]);
 
   const refetch = connectionsQuery.refetch;
-  const {refreshControl, scrollProps} = usePullRefresh(
+  const {refreshControl, scrollProps, notice} = usePullRefresh(
     // 결과를 버리지 않는다: 오류 상태로 끝났는지를 당겨서 새로고침이 읽는다(#3962).
     useCallback(() => refetch(), [refetch]),
     'hosted-connections-refresh',
+    {active},
   );
 
   const denied = isHostedOperatorDenied(connectionsQuery.error);
@@ -109,6 +116,7 @@ export default function HostedConnectionsScreen({
       onOpenConnection={onOpenConnection}
       refreshControl={refreshControl}
       scrollProps={scrollProps}
+      notice={notice}
     />
   );
 }
@@ -134,6 +142,7 @@ export function HostedConnectionsView({
   onOpenConnection,
   refreshControl,
   scrollProps,
+  notice,
 }: {
   state: 'loading' | 'denied' | 'error' | 'ready';
   rows: HostedRowItem[];
@@ -144,6 +153,8 @@ export function HostedConnectionsView({
   onOpenConnection: (connection: OpenHostedConnection) => void;
   refreshControl?: React.ComponentProps<typeof EmptyState>['refreshControl'];
   scrollProps?: PullScrollProps;
+  /** 당겨서 새로고침의 실패 안내 한 줄(`usePullRefresh().notice`, #3992). 목록 바로 위에 선다. */
+  notice?: React.ReactNode;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   return (
@@ -166,6 +177,8 @@ export function HostedConnectionsView({
           testID="hosted-list-offline"
         />
       ) : null}
+
+      {notice}
 
       {state === 'loading' ? (
         <LoadingState

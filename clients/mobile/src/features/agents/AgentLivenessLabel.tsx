@@ -1,7 +1,10 @@
 import {
+  livenessToneFor,
   livenessView,
+  mayActOnLiveness,
   type LivenessTone,
 } from '@momo/core/features/agents/liveness';
+import {agentDotTone} from '@momo/core/features/presence/statusDot';
 import {memberFor} from '@momo/core/features/workspace/directory';
 import React from 'react';
 import {StyleSheet, Text, View} from 'react-native';
@@ -37,10 +40,12 @@ export function AgentLivenessLabel({
     return null;
   }
   const view = livenessView(liveness, nowMs);
-  const role = memberFor(directory, member.id)?.role;
-  const mayAct = role === 'owner' || role === 'admin';
-  const tone: LivenessTone =
-    view.tone === 'warn' && !mayAct ? 'neutral' : view.tone;
+  // 경고색은 할 수 있는 일이 있는 사람(owner/admin)에게만 경고다. 규칙은 core 한 곳이다 (#3964).
+  const mayAct = mayActOnLiveness(memberFor(directory, member.id)?.role);
+  const tone: LivenessTone = livenessToneFor(view, mayAct);
+  // 점의 톤은 사이드바 줄의 점과 같은 함수다(소유자 결정 2026-10-17 「Buzz식: 초록=살아 있음, 회색 고리=꺼짐」: 살아 있음·대기도
+  // 초록이다. 칩은 낱말이 곁에 있어 꺼짐도 채운 점이다). 글자 색은 위 `tone`.
+  const dotTone = agentDotTone(view, mayAct);
   return (
     <View
       accessible
@@ -50,8 +55,8 @@ export function AgentLivenessLabel({
       <View
         style={[
           styles.dot,
-          tone === 'ok' && styles.dotOk,
-          tone === 'warn' && styles.dotWarn,
+          dotTone === 'ok' && styles.dotOk,
+          dotTone === 'warn' && styles.dotWarn,
         ]}
         testID="agent-liveness-dot"
       />

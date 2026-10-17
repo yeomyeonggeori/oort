@@ -1,4 +1,4 @@
-import React, {useEffect, useRef, useState} from 'react';
+import React, {useEffect, useRef, useState, useSyncExternalStore} from 'react';
 import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
@@ -18,7 +18,9 @@ import {usePushPrompt} from '../../push/PushProvider';
 import {useSession} from '../../session/useSession';
 import {
   consumeQrKeyEnrollment,
+  isNotifyPrimerHeld,
   qrKeyEnrollmentArmed,
+  subscribeNotifyPrimerHeld,
 } from '../onboarding/phoneFlow';
 import type {DeviceKeyView} from '../../deviceKey/enrollment';
 import {DEVICE_KEY_TITLE} from './copy';
@@ -73,6 +75,13 @@ export function linkSheetIntro(view: DeviceKeyView): string {
 export function DeviceKeyLinkGate(): React.JSX.Element | null {
   const {workspaceId} = useSession();
   const {gate} = usePushPrompt();
+  // M3이 거부 뒤 안내까지 서 있는 동안 붙든다(ADR-0204 D4, #3925). 게이트만 보면 거부
+  // 직후 M3 위로 이 시트가 오른다 — 네이티브 `Modal`이라 무엇이 떠 있든 그 위에 선다.
+  const primerHeld = useSyncExternalStore(
+    subscribeNotifyPrimerHeld,
+    isNotifyPrimerHeld,
+    isNotifyPrimerHeld,
+  );
   // 들여다보기만 하고, 소비는 효과에서 한다 — 초기화 함수는 두 번 불릴 수 있다.
   const [armed] = useState(qrKeyEnrollmentArmed);
   const [open, setOpen] = useState(armed);
@@ -90,7 +99,7 @@ export function DeviceKeyLinkGate(): React.JSX.Element | null {
   if (!open) return null;
   // M3(알림 미리 안내)가 먼저다 — 두 화면이 겹치면 어느 쪽이 무엇을 묻는지
   // 모른다.
-  if (gate === 'ask' || gate === 'checking') return null;
+  if (gate === 'ask' || gate === 'checking' || primerHeld) return null;
   return (
     <PageSheet
       onClose={() => setOpen(false)}

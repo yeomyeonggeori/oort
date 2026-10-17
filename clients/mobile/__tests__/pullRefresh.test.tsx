@@ -1,24 +1,27 @@
-import {act, cleanup, fireEvent, render, screen} from '@testing-library/react-native';
+import {act, cleanup, fireEvent, render, screen, within} from '@testing-library/react-native';
 import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
-import {AccessibilityInfo, Animated, FlatList, StyleSheet, Text} from 'react-native';
+import {AccessibilityInfo, Animated, FlatList, LayoutAnimation, StyleSheet, Text} from 'react-native';
 
-import {onlineManager, QueryClient, QueryObserver} from '@tanstack/react-query';
+import {ApiError} from '@momo/core/lib/api';
+import {onlineManager, QueryClient, QueryClientProvider, QueryObserver} from '@tanstack/react-query';
 import {withPullScroll, usePullRefresh} from '../src/design/refresh';
 import {invalidateAndReport} from '../src/query/invalidateReport';
 import {PULL_FILL, PULL_TRIGGER} from '../src/design/pullRefresh';
-import {OPTICAL, PHASE} from '../src/design/brand/oortLoaderTimeline';
-import {BAR_CONTROL_MAX_SCALE, EmptyState} from '../src/design/atoms';
+import {HOME_ANGLE, OPTICAL, PHASE, SCRUB_FILL_MIN} from '../src/design/brand/oortLoaderTimeline';
+import {EmptyState} from '../src/design/atoms';
 import {FixedScheme} from '../src/design/theme';
+import {lightPalette} from '../src/design/tokens';
 
 // =============================================================================
-// 당겨서 새로고침 + 햅틱 (#3962). `usePullRefresh` 가 표준 `RefreshControl`(역학) 위에 얹는 것:
-//   · 당기는 동안 목록 위 넘친 자리에 오르트 로더 머리가 서고, 새로고침이 서면 당긴 자세에서 이어 돈다
+// 당겨서 새로고침 + 햅틱 (#3962) + 실패 안내의 지속과 궤도 당김 (#3992). `usePullRefresh` 가 표준 `RefreshControl`(역학) 위에 얹는 것:
+//   · 당기는 동안 목록 위 넘친 자리에 오르트 로더 머리가 서고(위성이 당긴 만큼 궤도를 돈다), 새로고침이 서면 당긴 자세에서 이어 돈다
 //   · 임계 통과의 가벼운 햅틱 1회: 표준 컨트롤이 새로고침을 세우는 순간(`onRefresh`)에 낸다. 이 컨트롤은
 //     손가락이 닿은 채로 임계를 넘는 순간 `onRefresh` 를 부른다(iOS 26.5 시뮬레이터에서 잰 것). 한 번의
 //     새로고침에 한 번이고, 스크롤 이벤트로는 울리지 않는다(`lib/haptics.ts` 계약)
-//   · 완료 success, 실패 warning
+//   · 완료 success, 실패 warning. 실패하면 「새로고침하지 못했어요. 다시 당겨 보세요.」 한 줄이 목록 위에 서고
+//     **시간으로 사라지지 않는다**: 다음 당김이 서거나, 실패한 쿼리가 다시 읽히거나, 화면을 떠날 때까지 남는다
 //   · 시스템 스피너를 감췄으므로 「새로고침 중」을 접근성으로 낭독하고 머리가 이름을 진다
 //   · 실제 재조회(onRefresh)는 한 당김에 한 번이고, 끝나면 표시가 물러난다
 //
@@ -36,6 +39,16 @@ import {FixedScheme} from '../src/design/theme';
 //   - 목록·빈 상태가 PULL_FILL 을 빠뜨리면 → 「빈 자리에서도 당겨진다」와 소스 스캔이 붉다
 //   - 실패 안내에 고정 lineHeight 를 다시 넣으면 → 「실패 안내는 Dynamic Type 에 상한이 있고」가 붉다
 //   - 돌아오는 동안의 래치(spun)를 지우면 → 「끝난 뒤 내용이 돌아오는 동안에도 위성은 계속 돈다」가 붉다
+//   - 실패 안내에 1.6초 타이머를 되돌리면(#3992) → 「안내는 시간으로 사라지지 않는다」가 붉다
+//   - 당김 시작(handleRefresh)이 안내를 거두지 않으면 → 「다음 당김이 서면 안내가 사라진다」가 붉다
+//   - 성공 재조회 구독을 지우면 → 「실패한 쿼리가 다시 읽히면 안내가 사라진다」가 붉다
+//   - 안내를 컨트롤이 닫히기 전에 세우면(기다림 제거) → 「컨트롤이 닫히기 전에는 안내가 서지 않는다」가 붉다
+//   - 넘침을 보지 않고 세우면 → 「손가락이 잡고 있는 동안은 서지 않는다」가 붉다
+//   - 걷을 때 틀을 바로 지우면(접지 않으면) → 「한 번에 지워지지 않고 잰 높이에서 0 으로 접힌다」가 붉다
+//   - 다시 읽은 쿼리 대신 캐시 전체의 오류를 기다리면 → 「당김과 무관한 쿼리의 오류는 기다리지 않는다」가 붉다
+//   - `active` 효과를 지우면 → 「화면을 떠나면 안내가 사라진다」가 붉다
+//   - 당김의 각도 표를 상수로 바꾸면 → 「당김이 위성의 궤도 각도로 보인다」가 붉다
+//   - 동작 줄이기의 당김에서 회전을 허용하면 → 「동작 줄이기: 당겨도 위성은 돌지 않는다」가 붉다
 // =============================================================================
 
 jest.useFakeTimers();
@@ -61,31 +74,76 @@ beforeEach(() => {
 function Harness({
   onRefresh,
   empty = false,
+  active,
+  resetKey,
 }: {
   onRefresh: () => Promise<unknown> | void;
   empty?: boolean;
+  active?: boolean;
+  resetKey?: unknown;
 }): React.JSX.Element {
-  const {refreshControl, scrollProps} = usePullRefresh(onRefresh, 'harness-refresh');
+  const {refreshControl, scrollProps, notice} = usePullRefresh(onRefresh, 'harness-refresh', {
+    active,
+    resetKey,
+  });
+  // 화면이 하는 대로: 안내는 목록 바로 위, 레이아웃 안에 둔다.
   if (empty) {
     return (
-      <EmptyState
-        headline="비어 있어요."
-        refreshControl={refreshControl}
-        scrollProps={scrollProps}
-        testID="harness-list"
-      />
+      <>
+        {notice}
+        <EmptyState
+          headline="비어 있어요."
+          refreshControl={refreshControl}
+          scrollProps={scrollProps}
+          testID="harness-list"
+        />
+      </>
     );
   }
   return (
-    <FlatList
-      data={['a', 'b', 'c']}
-      keyExtractor={item => item}
-      renderItem={({item}) => <Text>{item}</Text>}
-      refreshControl={refreshControl}
-      {...scrollProps}
-      testID="harness-list"
-    />
+    <>
+      {notice}
+      <FlatList
+        data={['a', 'b', 'c']}
+        keyExtractor={item => item}
+        renderItem={({item}) => <Text>{item}</Text>}
+        refreshControl={refreshControl}
+        {...scrollProps}
+        testID="harness-list"
+      />
+    </>
   );
+}
+
+/** 실제 QueryClient 를 거는 하니스(훅이 캐시를 읽어 「성공 재조회」를 안다). */
+function withClient(client: QueryClient, ui: React.ReactElement): React.JSX.Element {
+  return <QueryClientProvider client={client}>{ui}</QueryClientProvider>;
+}
+
+/** gcTime 무한: 기본 5분 가비지 타이머를 세우지 않는다. */
+const newClient = () => new QueryClient({defaultOptions: {queries: {gcTime: Infinity}}});
+
+/** 관찰자가 붙은(활성) 쿼리. `state.ok` 를 바꾸면 다음 읽기가 성공하거나 실패한다. */
+function controlledQuery(
+  client: QueryClient,
+  key: string,
+  state: {ok: boolean; error?: Error},
+): () => void {
+  const observer = new QueryObserver(client, {
+    queryKey: [key, 'ws'],
+    queryFn: () => (state.ok ? Promise.resolve('data') : Promise.reject(state.error ?? new Error('down'))),
+    retry: false,
+  });
+  return observer.subscribe(() => undefined);
+}
+
+/** 쿼리 읽기·알림(setTimeout 0)이 모두 흐르게 한다. */
+async function queriesSettle() {
+  await act(async () => {
+    for (let i = 0; i < 40; i += 1) await Promise.resolve();
+    jest.advanceTimersByTime(0);
+    for (let i = 0; i < 40; i += 1) await Promise.resolve();
+  });
 }
 
 function scrollEvent(y: number) {
@@ -106,6 +164,10 @@ const control = () => screen.getByTestId('harness-list').props.refreshControl as
   refreshing: boolean;
 }>;
 const header = () => screen.queryByTestId('pull-refresh-header', HIDDEN);
+const FAILED = '새로고침하지 못했어요. 다시 당겨 보세요.';
+const OFFLINE = '연결이 없어요. 연결되면 다시 당겨 보세요.';
+/** 목록 위의 실패 안내(레이아웃 안). 머리(로더 자리)의 것이 아니다. */
+const notice = () => screen.queryByTestId('pull-refresh-notice', HIDDEN);
 const impacts = () => haptic.__calls.filter(c => c.startsWith('impact:'));
 const notifications = () => haptic.__calls.filter(c => c.startsWith('notification:'));
 
@@ -133,6 +195,23 @@ async function flush(ms = 0) {
 
 function reduceMotion(value: boolean) {
   jest.spyOn(AccessibilityInfo, 'isReduceMotionEnabled').mockResolvedValue(value);
+}
+
+/**
+ * 실패한 당김이 끝나고 안내가 서기까지(ms), 넘치지 않은 목록 기준: 최소 표시 창 450 + 컨트롤이 닫히기를 기다림 350
+ * (`NOTICE_FIRST_MS`) + 닫힘을 본 뒤 한 번 더 100(`NOTICE_POLL_MS`). 시험이 이 숫자를 따로 적어 두는 것은 의도다:
+ * 훅의 상수가 바뀌면(특히 기다림이 사라지면) 「컨트롤이 닫히기 전에는 안내가 서지 않는다」가 붉어야 한다.
+ */
+const NOTICE_READY_MS = 450 + 350 + 100 + 20;
+
+/**
+ * 실패한 당김 하나를 안내가 설 때까지 보낸다: 최소 표시 창 → (넘쳐 있었다면 컨트롤이 닫히며 스크롤이 제자리로 돌아온다)
+ * → 닫히기를 기다림 → 안내. `overscrolled` 는 목록이 넘친 채 당겨졌다는 뜻이다(`scrollTo(-임계)` 로 당긴 시험).
+ */
+async function runFailure(overscrolled = false) {
+  await flush(460); // 새로고침이 끝난다(경고 햅틱)
+  if (overscrolled) scrollTo(0); // 컨트롤이 닫히며 스크롤이 돌아온다
+  await flush(NOTICE_READY_MS - 460);
 }
 
 describe('임계 햅틱 (표준 컨트롤이 새로고침을 세우는 순간)', () => {
@@ -280,26 +359,77 @@ describe('실제 재조회와 표시', () => {
     expect(lift!.translateY).toBe(-(style.height as number));
   });
 
-  it('당기는 동안 위성이 당긴 거리만큼 튀어나온다(스크럽): 임계에서 궤도, 그 너머도 궤도', async () => {
+  /** 머리의 로더가 그린 위성의 자세: 각도(도)와 중심 거리(pt). */
+  const satellitePose = () => {
+    const transform = flatten(screen.getByTestId('pull-refresh-loader-satellite', HIDDEN).props.style)
+      .transform as Array<Record<string, string | number>>;
+    return {angle: parseFloat(String(transform[0]!.rotate)), radial: transform[1]!.translateX as number};
+  };
+  const loaderOpacity = () => flatten(screen.getByTestId('pull-refresh-loader', HIDDEN).props.style).opacity as number;
+
+  it('당김이 위성의 궤도 각도로 보인다: 25·50·75·100% 가 홈에서 90° 씩 돌아간 자리다', async () => {
     reduceMotion(false);
     render(<Harness onRefresh={() => undefined} />);
     scrollTo(-1);
     await flush(0); // 머리가 서고 감소된 동작 응답(false)이 도착한다
-    const x = () =>
-      ((flatten(screen.getByTestId('pull-refresh-loader-satellite', HIDDEN).props.style).transform as Array<
-        Record<string, number>
-      >)[1]!).translateX!;
     const {units, home, out} = OPTICAL.display;
     const size = 40;
-    expect(x()).toBeGreaterThanOrEqual((home / units) * size - 1e-6);
-    scrollTo(-PULL_TRIGGER / 2);
-    const mid = x();
-    expect(mid).toBeGreaterThan((home / units) * size);
-    expect(mid).toBeLessThan((out / units) * size);
-    scrollTo(-PULL_TRIGGER);
-    expect(x()).toBeCloseTo((out / units) * size, 4);
+    scrollTo(-0.5);
+    expect(satellitePose().radial).toBeGreaterThanOrEqual((home / units) * size - 1e-6);
+    const spots: Array<{x: number; y: number}> = [];
+    for (const p of [0.25, 0.5, 0.75, 1]) {
+      scrollTo(-PULL_TRIGGER * p);
+      const {angle, radial} = satellitePose();
+      expect(angle).toBeCloseTo(HOME_ANGLE + 360 * p, 3);
+      expect(radial).toBeCloseTo((out / units) * size, 3); // 궤도 위에서 돈다(링을 긁지 않는다)
+      const rad = (angle * Math.PI) / 180;
+      spots.push({x: radial * Math.cos(rad), y: radial * Math.sin(rad)});
+    }
+    // 어느 두 진행도도 위성이 20pt 이상 떨어진 자리에 있다(지름 7pt 의 약 3배): 손가락 아래에서 눈이 구분한다.
+    for (let i = 0; i < spots.length; i += 1) {
+      for (let j = i + 1; j < spots.length; j += 1) {
+        expect(Math.hypot(spots[i]!.x - spots[j]!.x, spots[i]!.y - spots[j]!.y)).toBeGreaterThan(20);
+      }
+    }
+    // 임계 너머로 더 당겨도 한 바퀴를 넘지 않는다.
     scrollTo(-PULL_TRIGGER * 2);
-    expect(x()).toBeCloseTo((out / units) * size, 4);
+    expect(satellitePose().angle).toBeCloseTo(HOME_ANGLE + 360, 3);
+    // 손가락을 되돌리면 위성이 거꾸로 감겨 돌아간다(진행도를 그대로 따른다).
+    scrollTo(-PULL_TRIGGER * 0.25);
+    expect(satellitePose().angle).toBeCloseTo(HOME_ANGLE + 90, 3);
+  });
+
+  it('동작 줄이기: 당겨도 위성은 돌지 않는다 — 홈에 꽂힌 채 투명도만 차오른다', async () => {
+    reduceMotion(true);
+    render(<Harness onRefresh={() => undefined} />);
+    scrollTo(-1);
+    await flush(0);
+    const {units, home} = OPTICAL.display;
+    const seen: number[] = [];
+    for (const p of [0.25, 0.5, 0.75, 1, 2]) {
+      scrollTo(-PULL_TRIGGER * p);
+      const {angle, radial} = satellitePose();
+      expect(angle).toBe(HOME_ANGLE); // 회전이 없다
+      expect(radial).toBeCloseTo((home / units) * 40, 3); // 이동도 없다
+      seen.push(loaderOpacity());
+    }
+    expect(seen.slice(0, 4)).toEqual([0.4, 0.6, 0.8, 1].map(v => expect.closeTo(v, 5)));
+    expect(seen[4]).toBeCloseTo(1, 5);
+    expect(SCRUB_FILL_MIN).toBe(0.2);
+  });
+
+  it('손가락이 닿은 채 임계를 넘으면 위성은 한 바퀴를 다 돌아 이어 돌 자세(홈 각도, 궤도)에 서 있다', async () => {
+    reduceMotion(false);
+    render(<Harness onRefresh={() => new Promise(() => undefined)} />);
+    scrollTo(-1);
+    await flush(0);
+    scrollTo(-PULL_TRIGGER);
+    const before = satellitePose();
+    release(); // 임계에서 컨트롤이 새로고침을 세운다
+    await flush(0);
+    const after = satellitePose();
+    expect(after.radial).toBeCloseTo(before.radial, 3);
+    expect((((after.angle - before.angle) % 360) + 360) % 360).toBeCloseTo(0, 3);
   });
 
   it('놓으면 당긴 자세(14%)에서 이어 돈다: 로더 반복이 하나 서고 시작 위상이 14% 다', async () => {
@@ -377,92 +507,611 @@ describe('실제 재조회와 표시', () => {
   });
 });
 
-const FAILED = '새로고침하지 못했어요. 다시 당겨 보세요.';
-const OFFLINE = '연결이 없어요. 연결되면 다시 당겨 보세요.';
-const failedNotice = () => screen.queryByTestId('pull-refresh-failed', HIDDEN);
-
-describe('실패는 시각으로도 선다', () => {
-  it('실패하면 머리의 로더가 한 줄로 바뀐다: 경고 햅틱과 같은 순간, 낭독도 한다', async () => {
+describe('실패는 시각으로도 서고, 시간으로 사라지지 않는다 (#3992)', () => {
+  it('실패하면 목록 위에 안내 한 줄이 선다: 경고 햅틱은 응답이 도착한 순간, 안내와 낭독은 컨트롤이 닫힌 뒤', async () => {
     const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
     announce.mockClear();
     render(<Harness onRefresh={() => Promise.resolve([{status: 'error', isError: true}])} />);
     release();
     await flush(0);
     // 최소 표시 창 안에서는 아직 로더다.
-    expect(failedNotice()).toBeNull();
+    expect(notice()).toBeNull();
     expect(screen.queryByTestId('pull-refresh-loader', HIDDEN)).not.toBeNull();
     await flush(460);
+    // 응답이 손에 닿는다: 경고 햅틱과 낭독. 안내 상자는 아직이다(컨트롤이 닫히는 중이다).
     expect(notifications()).toEqual(['notification:warning']);
-    expect(failedNotice()).not.toBeNull();
-    expect(screen.getByText(FAILED, HIDDEN)).toBeTruthy();
-    expect(screen.queryByTestId('pull-refresh-loader', HIDDEN)).toBeNull();
+    expect(announce).not.toHaveBeenCalledWith(FAILED); // 낭독은 안내가 서는 커밋과 같이 나간다
+    expect(notice()).toBeNull();
+    await flush(NOTICE_READY_MS - 460);
+    expect(notice()).not.toBeNull();
     expect(announce).toHaveBeenLastCalledWith(FAILED);
+    expect(announce.mock.calls.filter(c => c[0] === FAILED)).toHaveLength(1); // 낭독은 한 번
+    // 문구는 오너 확정 그대로다(2026-10-17).
+    expect(screen.getByText(FAILED, HIDDEN)).toBeTruthy();
+  });
+
+  it('컨트롤이 닫히기 전에는 안내가 서지 않는다: 닫히는 시간(350ms)이 지나기 전에는 상자가 없다', async () => {
+    render(<Harness onRefresh={() => Promise.reject(new Error('boom'))} />);
+    release();
+    await flush(460);
+    for (const ms of [100, 100, 100]) {
+      await flush(ms);
+      expect(notice()).toBeNull(); // 560, 660, 760
+    }
+    await flush(NOTICE_READY_MS - 760);
+    expect(notice()).not.toBeNull();
+  });
+
+  it('손가락이 잡고 있는 동안은 서지 않는다: 스크롤이 넘침에서 돌아온 뒤 한 박자 쉬고 선다', async () => {
+    render(<Harness onRefresh={() => Promise.reject(new Error('boom'))} />);
+    scrollTo(-PULL_TRIGGER - 5);
+    release();
+    await flush(460);
+    await flush(2_050); // 손가락이 아직 잡고 있다(컨트롤은 손가락이 떨어져야 닫힌다). 확인은 100ms 마다 돌고 있다
+    expect(notice()).toBeNull();
+    expect(control().props.refreshing).toBe(false); // 새로고침은 끝났다: 안내만 기다린다
+    scrollTo(0); // 놓았고 컨트롤이 닫혔다
+    await flush(50);
+    expect(notice()).toBeNull(); // 다음 확인까지
+    await flush(100);
+    expect(notice()).toBeNull(); // 닫힘을 한 번 봤다: 한 번 더 쉰다
+    await flush(100);
+    expect(notice()).not.toBeNull();
+  });
+
+  it('손가락이 3초가 지나도 놓지 않으면 안내는 그냥 선다(보이지 않는 실패가 영영 서지 않는 것이 더 나쁘다)', async () => {
+    render(<Harness onRefresh={() => Promise.reject(new Error('boom'))} />);
+    scrollTo(-PULL_TRIGGER - 5);
+    release();
+    await flush(460);
+    await flush(2_900);
+    expect(notice()).toBeNull();
+    await flush(300);
+    expect(notice()).not.toBeNull();
+  });
+
+  it('안내를 기다리는 동안 다음 당김이 서면 기다리던 안내는 취소된다: 옛 실패가 뒤늦게 서지 않는다', async () => {
+    const results = [Promise.reject(new Error('boom')), new Promise(() => undefined)];
+    const onRefresh = jest.fn(() => results.shift() as Promise<unknown>);
+    render(<Harness onRefresh={onRefresh} />);
+    release();
+    await flush(460);
+    await flush(200); // 컨트롤이 닫히기를 기다리는 중
+    expect(notice()).toBeNull();
+    release(); // 새 당김이 선다(진행 중이 아니므로 받아들여진다)
+    expect(onRefresh).toHaveBeenCalledTimes(2);
+    await flush(5_000);
+    expect(notice()).toBeNull(); // 옛 실패는 서지 않는다
+    expect(control().props.refreshing).toBe(true);
+  });
+
+  it('실패 안내는 머리(로더가 서는 자리)의 것이 아니다: 머리는 실패 중에도 로더만 그리고, 안내는 따로 선다', async () => {
+    render(<Harness onRefresh={() => Promise.reject(new Error('boom'))} />);
+    scrollTo(-PULL_TRIGGER - 5);
+    release();
+    await flush(460); // 실패했다. 컨트롤은 아직 열려 있다(넘친 채): 머리가 서 있다
+    const head = screen.getByTestId('pull-refresh-header', HIDDEN);
+    expect(within(head).queryByText(FAILED, HIDDEN)).toBeNull();
+    expect(within(head).queryByTestId('pull-refresh-failed', HIDDEN)).toBeNull();
+    expect(within(head).queryByTestId('pull-refresh-loader', HIDDEN)).not.toBeNull();
+    // 머리의 이름은 「새로고침 중」 하나다(실패는 안내가 진다).
+    expect(head.props.accessibilityRole).toBe('progressbar');
+    expect(notice()).toBeNull();
+    // 컨트롤이 닫히면 머리가 걷히고, 안내가 목록 위에 선다.
+    await flush(NOTICE_READY_MS - 460);
+    scrollTo(0);
+    await flush(300);
+    expect(header()).toBeNull();
+    expect(notice()).not.toBeNull();
   });
 
   it('성공하면 실패 안내가 서지 않는다', async () => {
     render(<Harness onRefresh={() => Promise.resolve([{status: 'success'}])} />);
     release();
     await flush(500);
-    expect(failedNotice()).toBeNull();
+    expect(notice()).toBeNull();
     expect(notifications()).toEqual(['notification:success']);
   });
 
-  it('안내는 열린 채 잠깐 머문 뒤 물러난다: 그동안 새 당김은 막힌다', async () => {
+  it('실패하면 새로고침이 끝난다: 컨트롤이 닫혀(refreshing 거짓) 안내가 떠 있어도 다음 당김이 선다', async () => {
     const onRefresh = jest.fn(() => Promise.reject(new Error('boom')));
     render(<Harness onRefresh={onRefresh} />);
     release();
-    await flush(460); // 안내가 섰다
-    expect(control().props.refreshing).toBe(true);
-    release(); // 안내가 떠 있는 동안의 당김은 무시된다
-    expect(onRefresh).toHaveBeenCalledTimes(1);
-    await flush(1000);
-    expect(control().props.refreshing).toBe(true); // 아직 머문다
-    await flush(700);
+    await runFailure();
+    expect(notice()).not.toBeNull();
+    // 옛 판은 안내가 머리에 머무느라 컨트롤을 1.6초 열어 두었고 그동안 새 당김이 막혔다.
     expect(control().props.refreshing).toBe(false);
-    release(); // 끝난 뒤의 새 당김은 선다
+    release();
     expect(onRefresh).toHaveBeenCalledTimes(2);
     await flush(0);
   });
 
-  it('물러나는 동안(머리가 걷힐 때까지) 로더로 되돌아가지 않고, 새 당김이 서면 안내가 지워진다', async () => {
+  it('안내는 시간으로 사라지지 않는다: 1.6초가 한참 지나도(10초, 1분) 서 있다', async () => {
+    render(<Harness onRefresh={() => Promise.reject(new Error('boom'))} />);
+    release();
+    await runFailure();
+    expect(notice()).not.toBeNull();
+    for (const ms of [1_700, 10_000, 60_000]) {
+      await flush(ms);
+      expect(notice()).not.toBeNull();
+      expect(screen.getByText(FAILED, HIDDEN)).toBeTruthy();
+      expect(control().props.refreshing).toBe(false);
+    }
+  });
+
+  it('다음 당김이 서면(onRefresh) 안내가 사라지고, 로더가 안내 없이 새로 시작한다', async () => {
     const results = [Promise.reject(new Error('boom')), new Promise(() => undefined)];
     const onRefresh = jest.fn(() => results.shift() as Promise<unknown>);
     render(<Harness onRefresh={onRefresh} />);
     scrollTo(-PULL_TRIGGER - 5);
     release();
-    await flush(460);
-    await flush(1700); // 안내가 끝나고 내용이 돌아오는 중
-    scrollTo(-30);
-    expect(failedNotice()).not.toBeNull();
-    expect(screen.queryByTestId('pull-refresh-loader', HIDDEN)).toBeNull();
-    scrollTo(0); // 제자리로 돌아왔다: 머리가 걷힌다
-    expect(header()).toBeNull();
+    await runFailure(true);
+    expect(notice()).not.toBeNull();
+    await flush(5_000);
+    expect(notice()).not.toBeNull(); // 아직 서 있다
+    scrollTo(0);
     scrollTo(-PULL_TRIGGER - 5);
-    release(); // 새 당김: 안내 없이 로더로 시작한다
-    expect(failedNotice()).toBeNull();
+    release(); // 새 당김
+    expect(notice()).toBeNull();
     expect(screen.queryByTestId('pull-refresh-loader', HIDDEN)).not.toBeNull();
+    expect(control().props.refreshing).toBe(true);
   });
 
-  it('실패 안내는 Dynamic Type 에 상한이 있고 두 줄까지 접힌다(머리 64pt 안에 선다)', async () => {
+  it('손가락만 대고 임계 전에 놓은 당김은 안내를 거두지 않는다(새로고침이 서지 않았다)', async () => {
     render(<Harness onRefresh={() => Promise.reject(new Error('boom'))} />);
     release();
-    await flush(460);
+    await runFailure();
+    expect(notice()).not.toBeNull();
+    for (const y of [-10, -60, -PULL_TRIGGER + 20, -30, 0]) scrollTo(y);
+    expect(notice()).not.toBeNull();
+  });
+
+  it('목록 스크롤(내용이 제자리로 돌아와도)이 안내를 거두지 않는다', async () => {
+    render(<Harness onRefresh={() => Promise.reject(new Error('boom'))} />);
+    scrollTo(-PULL_TRIGGER - 5);
+    release();
+    await runFailure(true);
+    scrollTo(-30);
+    scrollTo(0);
+    scrollTo(400);
+    scrollTo(0);
+    await flush(5_000);
+    expect(notice()).not.toBeNull();
+  });
+
+  it('안내는 Dynamic Type 에 줄 높이가 묶이지 않고, 한글은 어절 단위로 줄바꿈한다', async () => {
+    render(<Harness onRefresh={() => Promise.reject(new Error('boom'))} />);
+    release();
+    await runFailure();
     const text = screen.getByTestId('pull-refresh-failed', HIDDEN);
-    expect(text.props.maxFontSizeMultiplier).toBe(BAR_CONTROL_MAX_SCALE);
-    expect(text.props.numberOfLines).toBe(2);
-    // 줄 높이를 고정하지 않는다: 글자가 상한까지 자라도 줄이 겹치거나 잘리지 않고 글자 크기를 따른다.
+    // 줄 높이를 고정하지 않는다: 글자가 커져도 줄이 겹치거나 잘리지 않고 글자 크기를 따른다.
     expect(flatten(text.props.style).lineHeight).toBeUndefined();
+    expect(text.props.lineBreakStrategyIOS).toBe('hangul-word');
+    // 줄 수를 막지 않는다: 안내는 레이아웃 안에 서서 필요한 만큼 접힌다(머리의 64pt 에 갇히지 않는다).
+    expect(text.props.numberOfLines).toBeUndefined();
   });
 
-  it('실패 안내의 접근성: role alert, 이름은 안내 문장, busy 가 아니다', async () => {
+  it('안내의 접근성: alert 역할, 이름은 안내 문장 그대로', async () => {
     render(<Harness onRefresh={() => Promise.reject(new Error('boom'))} />);
     release();
-    await flush(460);
-    const node = screen.getByTestId('pull-refresh-header', HIDDEN);
+    await runFailure();
+    const node = screen.getByTestId('pull-refresh-notice', HIDDEN);
     expect(node.props.accessible).toBe(true);
     expect(node.props.accessibilityRole).toBe('alert');
     expect(node.props.accessibilityLabel).toBe(FAILED);
-    expect(node.props.accessibilityState).toEqual({busy: false});
+  });
+
+  it('모양은 지속 실패 배너(FailureBanner)와 같은 어휘다: 바탕·테두리·글자가 danger 계열 토큰이다', async () => {
+    render(
+      <FixedScheme scheme="light">
+        <Harness onRefresh={() => Promise.reject(new Error('boom'))} />
+      </FixedScheme>,
+    );
+    release();
+    await runFailure();
+    const palette = lightPalette;
+    const text = screen.getByTestId('pull-refresh-failed', HIDDEN);
+    expect(flatten(text.props.style).color).toBe(palette.dangerText);
+    // 글자의 바로 바깥 상자가 안내 상자다.
+    const box = flatten(screen.UNSAFE_getByProps({testID: 'pull-refresh-failed'}).parent!.props.style);
+    expect(box.backgroundColor).toBe(palette.dangerSurface);
+    expect(box.borderColor).toBe(palette.dangerBorder);
+  });
+
+  describe('성공 재조회 — 실패한 쿼리가 다시 읽히면 안내는 거짓이 되어 사라진다', () => {
+    /** 실패한 쿼리 하나를 가진 하니스를 세우고 안내가 선 데까지 간다. */
+    async function failedPull(client: QueryClient, keys: string[]) {
+      const view = render(
+        withClient(
+          client,
+          <Harness onRefresh={() => invalidateAndReport(client, keys.map(key => [key, 'ws']))} />,
+        ),
+      );
+      release();
+      await queriesSettle();
+      await runFailure();
+      expect(notice()).not.toBeNull();
+      return view;
+    }
+
+    it('실패한 쿼리가 다시 읽히면(소켓 재연결 뒤 재조회·다시 시도·백그라운드) 안내가 사라진다', async () => {
+      const client = newClient();
+      const state = {ok: false};
+      const stop = controlledQuery(client, 'feed', state);
+      await queriesSettle();
+      await failedPull(client, ['feed']);
+      await flush(60_000);
+      expect(notice()).not.toBeNull(); // 아직 실패한 채라 서 있다
+      // 화면 바깥에서(소켓이 다시 붙어 재조회가 돈다) 같은 쿼리가 성공한다.
+      state.ok = true;
+      await act(async () => {
+        void client.invalidateQueries({queryKey: ['feed', 'ws']});
+      });
+      await queriesSettle();
+      expect(notice()).toBeNull();
+      stop();
+    });
+
+    it('실패하지 않은 다른 쿼리의 성공은 안내를 지우지 않는다', async () => {
+      const client = newClient();
+      const state = {ok: false};
+      const stops = [controlledQuery(client, 'feed', state), controlledQuery(client, 'other', {ok: true})];
+      await queriesSettle();
+      await failedPull(client, ['feed']);
+      await act(async () => {
+        void client.invalidateQueries({queryKey: ['other', 'ws']});
+      });
+      await queriesSettle();
+      expect(client.getQueryState(['other', 'ws'])?.status).toBe('success');
+      expect(notice()).not.toBeNull();
+      stops.forEach(stop => stop());
+    });
+
+    it('당김과 무관한 쿼리의 오류는 기다리지 않는다: 이 당김이 다시 읽은 쿼리만 본다', async () => {
+      const client = newClient();
+      const feed = {ok: false};
+      // 같은 캐시의 다른 화면 쿼리: 오류 상태로 남아 있고 이 당김은 건드리지 않는다.
+      const stops = [controlledQuery(client, 'feed', feed), controlledQuery(client, 'unrelated', {ok: false})];
+      await queriesSettle();
+      await failedPull(client, ['feed']);
+      expect(client.getQueryState(['unrelated', 'ws'])?.status).toBe('error');
+      feed.ok = true;
+      await act(async () => {
+        void client.invalidateQueries({queryKey: ['feed', 'ws']});
+      });
+      await queriesSettle();
+      // 무관한 쿼리는 여전히 실패지만 안내는 이 화면의 데이터가 다시 읽히면 거짓이 된다.
+      expect(client.getQueryState(['unrelated', 'ws'])?.status).toBe('error');
+      expect(notice()).toBeNull();
+      stops.forEach(stop => stop());
+    });
+
+    it('실패한 쿼리가 둘이면 둘 다 읽혀야 사라진다', async () => {
+      const client = newClient();
+      const a = {ok: false};
+      const b = {ok: false};
+      const stops = [controlledQuery(client, 'a', a), controlledQuery(client, 'b', b)];
+      await queriesSettle();
+      await failedPull(client, ['a', 'b']);
+      a.ok = true;
+      await act(async () => {
+        void client.invalidateQueries({queryKey: ['a', 'ws']});
+      });
+      await queriesSettle();
+      expect(notice()).not.toBeNull(); // b 는 아직 실패다
+      b.ok = true;
+      await act(async () => {
+        void client.invalidateQueries({queryKey: ['b', 'ws']});
+      });
+      await queriesSettle();
+      expect(notice()).toBeNull();
+      stops.forEach(stop => stop());
+    });
+
+    it('서버가 그 경로를 모른다고 답한(404) 쿼리는 기다리지 않는다: 낫지 않는 알려진 상태다', async () => {
+      const client = newClient();
+      const real = {ok: false};
+      const absent = {ok: false, error: new ApiError(404, 'no such route')};
+      const stops = [controlledQuery(client, 'real', real), controlledQuery(client, 'absent', absent)];
+      await queriesSettle();
+      await failedPull(client, ['real', 'absent']);
+      real.ok = true;
+      await act(async () => {
+        void client.invalidateQueries({queryKey: ['real', 'ws']});
+      });
+      await queriesSettle();
+      // 404 쿼리는 영영 성공하지 않지만 안내를 붙들지 않는다.
+      expect(client.getQueryState(['absent', 'ws'])?.status).toBe('error');
+      expect(notice()).toBeNull();
+      stops.forEach(stop => stop());
+    });
+
+    it('안내가 서기 전에(최소 표시 창 안에) 이미 다시 읽힌 쿼리는 바로 거둔다', async () => {
+      const client = newClient();
+      const state = {ok: false};
+      const stop = controlledQuery(client, 'feed', state);
+      await queriesSettle();
+      render(withClient(client, <Harness onRefresh={() => invalidateAndReport(client, [['feed', 'ws']])} />));
+      release();
+      await queriesSettle(); // 쿼리는 실패했고 최소 표시 창이 아직 열려 있다
+      expect(notice()).toBeNull();
+      state.ok = true; // 창이 닫히기 전에 백그라운드 재조회가 성공한다
+      await act(async () => {
+        void client.invalidateQueries({queryKey: ['feed', 'ws']});
+      });
+      await queriesSettle();
+      await flush(NOTICE_READY_MS);
+      expect(notifications()).toEqual(['notification:warning']); // 당김 자체는 실패였다
+      expect(notice()).toBeNull(); // 그러나 안내를 세울 이유는 이미 없다
+      stop();
+    });
+
+    it('상한(20초)에 걸려 끝난 당김은 늦게 도착한 성공이 안내를 거둔다', async () => {
+      const client = newClient();
+      let resolveData: (value: string) => void = () => undefined;
+      const observer = new QueryObserver(client, {
+        queryKey: ['slow', 'ws'],
+        queryFn: () => new Promise<string>(resolve => (resolveData = resolve)),
+        retry: false,
+      });
+      const stop = observer.subscribe(() => undefined);
+      render(withClient(client, <Harness onRefresh={() => client.invalidateQueries({queryKey: ['slow', 'ws']})} />));
+      release();
+      await flush(20_500);
+      expect(notice()).not.toBeNull(); // 상한이 실패로 끝냈다
+      expect(client.getQueryState(['slow', 'ws'])?.fetchStatus).toBe('fetching');
+      await flush(60_000);
+      expect(notice()).not.toBeNull();
+      resolveData('late');
+      await queriesSettle();
+      expect(notice()).toBeNull(); // 데이터가 늦게나마 들어왔다
+      stop();
+    });
+
+    it('당김이 끝나면 캐시 구독이 풀린다: 진행 중에 화면이 닫혀도 새지 않는다', async () => {
+      const client = newClient();
+      const stop = controlledQuery(client, 'feed', {ok: true});
+      await queriesSettle();
+      const listeners = () =>
+        (client.getQueryCache() as unknown as {listeners: Set<unknown>}).listeners.size;
+      const base = listeners();
+      const view = render(
+        withClient(client, <Harness onRefresh={() => new Promise(() => undefined)} />),
+      );
+      release();
+      expect(listeners()).toBe(base + 1); // 당김이 다시 읽는 쿼리를 모으는 구독
+      view.unmount(); // 끝나지 않은 채 닫힌다
+      expect(listeners()).toBe(base);
+      stop();
+    });
+
+    it('캐시된 데이터가 있는 쿼리가 상한(20초)에 걸리면 안내가 서고 남는다: 읽는 중인 쿼리는 「읽힘」이 아니다', async () => {
+      const client = newClient();
+      client.setQueryData(['cached', 'ws'], 'old');
+      let resolveData: (value: string) => void = () => undefined;
+      const observer = new QueryObserver(client, {
+        queryKey: ['cached', 'ws'],
+        queryFn: () => new Promise<string>(resolve => (resolveData = resolve)),
+        retry: false,
+        staleTime: 0,
+      });
+      const stop = observer.subscribe(() => undefined);
+      render(withClient(client, <Harness onRefresh={() => client.invalidateQueries({queryKey: ['cached', 'ws']})} />));
+      release();
+      await flush(20_500);
+      await flush(NOTICE_READY_MS);
+      expect(client.getQueryState(['cached', 'ws'])?.status).toBe('success'); // 캐시가 있어 상태는 성공이다
+      expect(notice()).not.toBeNull();
+      await flush(5_000);
+      expect(notice()).not.toBeNull();
+      resolveData('new');
+      await queriesSettle();
+      expect(notice()).toBeNull();
+      stop();
+    });
+
+    it('안내가 서 있는 동안 캐시 구독이 하나 있고, 안내가 사라지거나 화면이 닫히면 풀린다(새는 구독이 없다)', async () => {
+      const client = newClient();
+      const state = {ok: false};
+      const stop = controlledQuery(client, 'feed', state);
+      await queriesSettle();
+      const listeners = () =>
+        (client.getQueryCache() as unknown as {listeners: Set<unknown>}).listeners.size;
+      const base = listeners();
+      const view = await failedPull(client, ['feed']);
+      expect(listeners()).toBe(base + 1);
+      view.unmount();
+      expect(listeners()).toBe(base);
+      stop();
+    });
+  });
+
+  describe('화면을 떠나면 사라진다', () => {
+    it('active 가 거짓이 되면(탭이 숨는다) 안내가 사라진다 — 돌아와도 옛 실패가 서 있지 않다', async () => {
+      const onRefresh = () => Promise.reject(new Error('boom'));
+      const view = render(<Harness onRefresh={onRefresh} active />);
+      release();
+      await runFailure();
+      expect(notice()).not.toBeNull();
+      view.rerender(<Harness onRefresh={onRefresh} active={false} />);
+      expect(notice()).toBeNull();
+      view.rerender(<Harness onRefresh={onRefresh} active />);
+      expect(notice()).toBeNull();
+    });
+
+    it('보이는 동안(active 참)에는 서 있다', async () => {
+      const onRefresh = () => Promise.reject(new Error('boom'));
+      const view = render(<Harness onRefresh={onRefresh} active />);
+      release();
+      await runFailure();
+      view.rerender(<Harness onRefresh={onRefresh} active />);
+      await flush(30_000);
+      expect(notice()).not.toBeNull();
+    });
+
+    it('응답이 오기 전에 떠났으면 안내를 세우지 않는다(돌아왔을 때 옛 실패가 서 있게 된다)', async () => {
+      const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
+      let fail: (reason: unknown) => void = () => undefined;
+      const onRefresh = () => new Promise<never>((_, reject) => (fail = reject));
+      const view = render(<Harness onRefresh={onRefresh} active />);
+      release();
+      announce.mockClear();
+      view.rerender(<Harness onRefresh={onRefresh} active={false} />);
+      fail(new Error('late boom'));
+      await flush(NOTICE_READY_MS);
+      expect(notice()).toBeNull();
+      expect(announce).not.toHaveBeenCalled(); // 안 보이는 화면의 실패를 낭독하지 않는다
+      view.rerender(<Harness onRefresh={onRefresh} active />);
+      expect(notice()).toBeNull();
+    });
+
+    it('언마운트하면 안내도 함께 사라진다(다시 마운트한 화면에 옛 실패가 서지 않는다)', async () => {
+      const onRefresh = () => Promise.reject(new Error('boom'));
+      const view = render(<Harness onRefresh={onRefresh} />);
+      release();
+      await runFailure();
+      expect(notice()).not.toBeNull();
+      view.unmount();
+      render(<Harness onRefresh={onRefresh} />);
+      expect(notice()).toBeNull();
+    });
+
+    it('언마운트한 화면에서는 상한(20초) 타이머도 햅틱을 내지 않는다', async () => {
+      const view = render(<Harness onRefresh={() => new Promise(() => undefined)} />);
+      release();
+      await flush(0);
+      view.unmount();
+      await flush(25_000);
+      expect(notifications()).toEqual([]);
+    });
+
+    it('다루는 목록이 바뀌면(resetKey) 이전 목록의 실패는 거둔다', async () => {
+      const onRefresh = () => Promise.reject(new Error('boom'));
+      const view = render(<Harness onRefresh={onRefresh} resetKey="all" />);
+      release();
+      await runFailure();
+      expect(notice()).not.toBeNull();
+      view.rerender(<Harness onRefresh={onRefresh} resetKey="all" />);
+      expect(notice()).not.toBeNull(); // 같은 목록이면 서 있다
+      view.rerender(<Harness onRefresh={onRefresh} resetKey="mentions" />);
+      expect(notice()).toBeNull();
+    });
+  });
+});
+
+describe('안내가 서고 걷히는 움직임 (#3992)', () => {
+  /** 안내 상자의 레이아웃 이벤트(화면이 알려 주는 높이). 이 높이가 접히는 움직임의 시작이다. */
+  const measure = (height: number) =>
+    fireEvent(screen.getByTestId('pull-refresh-notice', HIDDEN), 'layout', {
+      nativeEvent: {layout: {x: 0, y: 0, width: 358, height}},
+    });
+  const collapsing = () => screen.queryByTestId('pull-refresh-notice-collapsing', HIDDEN);
+  /** 실패 안내가 선 하니스. 감소된 동작 응답이 도착해 있다(`reduceMotion` 값대로). */
+  async function withNotice() {
+    const onRefresh = jest.fn(() => Promise.reject(new Error('boom')));
+    render(<Harness onRefresh={onRefresh} />);
+    await flush(0);
+    release();
+    await runFailure();
+    expect(notice()).not.toBeNull();
+    return onRefresh;
+  }
+
+  it('세울 때 네이티브 레이아웃 전환을 한 번 건다 — 목록이 안내 높이만큼 미끄러져 내려온다', async () => {
+    reduceMotion(false);
+    const configure = jest.spyOn(LayoutAnimation, 'configureNext');
+    render(<Harness onRefresh={() => Promise.reject(new Error('boom'))} />);
+    await flush(0);
+    configure.mockClear();
+    release();
+    await runFailure();
+    expect(notice()).not.toBeNull();
+    expect(configure).toHaveBeenCalledTimes(1);
+  });
+
+  it('동작 줄이기에서는 전환을 걸지 않는다: 바로 선다', async () => {
+    reduceMotion(true);
+    const configure = jest.spyOn(LayoutAnimation, 'configureNext');
+    render(<Harness onRefresh={() => Promise.reject(new Error('boom'))} />);
+    await flush(0);
+    configure.mockClear();
+    release();
+    await runFailure();
+    expect(notice()).not.toBeNull();
+    expect(configure).not.toHaveBeenCalled();
+  });
+
+  it('다음 당김이 서면 안내는 한 번에 지워지지 않고 잰 높이에서 0 으로 접힌다(목록이 손 아래에서 뛰지 않는다)', async () => {
+    reduceMotion(false);
+    await withNotice();
+    measure(57);
+    release(); // 다음 당김: 손가락이 목록을 끌고 있는 순간
+    // 틀은 접히는 틀로 바뀌었고 첫 그림은 잰 높이 그대로다(눈에는 이어진다).
+    expect(notice()).toBeNull();
+    const node = collapsing();
+    expect(node).not.toBeNull();
+    expect(flatten(node!.props.style).height).toBe(57);
+    expect(flatten(node!.props.style).overflow).toBe('hidden');
+    await flush(80);
+    const mid = flatten(collapsing()!.props.style).height as number;
+    expect(mid).toBeGreaterThan(0);
+    expect(mid).toBeLessThan(57);
+    await flush(200);
+    expect(collapsing()).toBeNull(); // 접힘이 끝나면 틀을 치운다
+    expect(notice()).toBeNull();
+  });
+
+  it('접히는 동안은 보조기술에서 숨는다(곧 사라질 문장을 읽지 않는다)', async () => {
+    reduceMotion(false);
+    await withNotice();
+    measure(57);
+    release();
+    const node = collapsing()!;
+    expect(node.props.accessibilityElementsHidden).toBe(true);
+    expect(node.props.importantForAccessibility).toBe('no-hide-descendants');
+  });
+
+  it('접히는 안내를 걷을 때는 레이아웃 전환을 걸지 않는다: 당기는 동안의 커밋이 그 전환을 먹는다', async () => {
+    reduceMotion(false);
+    await withNotice();
+    measure(57);
+    const configure = jest.spyOn(LayoutAnimation, 'configureNext');
+    configure.mockClear();
+    release();
+    await flush(300);
+    expect(configure).not.toHaveBeenCalled();
+  });
+
+  it('동작 줄이기에서는 접힘 없이 바로 지워진다', async () => {
+    reduceMotion(true);
+    await withNotice();
+    measure(57);
+    release();
+    expect(notice()).toBeNull();
+    expect(collapsing()).toBeNull();
+  });
+
+  it('높이를 잰 적이 없으면(레이아웃 이벤트가 안 왔다) 접을 것이 없어 바로 지워진다', async () => {
+    reduceMotion(false);
+    await withNotice();
+    release();
+    expect(notice()).toBeNull();
+    expect(collapsing()).toBeNull();
+  });
+
+  it('접히는 도중에 화면을 떠나도(언마운트) 타이머·구독이 남지 않는다', async () => {
+    reduceMotion(false);
+    const onRefresh = jest.fn(() => Promise.reject(new Error('boom')));
+    const view = render(<Harness onRefresh={onRefresh} />);
+    await flush(0);
+    release();
+    await runFailure();
+    measure(57);
+    release();
+    expect(collapsing()).not.toBeNull();
+    view.unmount();
+    await flush(1_000);
+    expect(onRefresh).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -475,17 +1124,50 @@ describe('오프라인과 늦은 응답', () => {
     expect(onRefresh).not.toHaveBeenCalled();
     expect(impacts()).toEqual(['impact:light']); // 당김의 임계 햅틱은 그대로다
     expect(control().props.refreshing).toBe(true);
-    await flush(460);
+    await runFailure();
     expect(notifications()).toEqual(['notification:warning']);
-    expect(failedNotice()).not.toBeNull();
-    // 오프라인의 안내는 같은 처방(다시 당겨 보세요)이 아니라 연결을 말한다.
+    expect(notice()).not.toBeNull();
+    // 오프라인의 안내는 같은 처방(다시 당겨 보세요)이 아니라 연결을 말한다. 문구는 오너 확정 그대로다.
     expect(screen.getByText(OFFLINE, HIDDEN)).toBeTruthy();
     expect(screen.queryByText(FAILED, HIDDEN)).toBeNull();
-    await flush(1700);
+    // 시간으로는 사라지지 않고, 컨트롤은 닫혀 있다.
+    await flush(60_000);
+    expect(notice()).not.toBeNull();
     expect(control().props.refreshing).toBe(false);
-    onlineManager.setOnline(true);
-    release(); // 연결이 돌아오면 다시 당길 수 있다
+    // 연결이 돌아오면 다시 당길 수 있다.
+    act(() => onlineManager.setOnline(true));
+    release();
     expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('연결이 돌아오면 오프라인 안내는 사라진다: 「연결이 없어요」는 연결이 있으면 거짓이다', async () => {
+    onlineManager.setOnline(false);
+    render(<Harness onRefresh={() => new Promise(() => undefined)} />);
+    release();
+    await runFailure();
+    expect(notice()).not.toBeNull();
+    act(() => onlineManager.setOnline(true));
+    expect(notice()).toBeNull();
+  });
+
+  it('안내가 서기 전에 연결이 돌아오면 서지 않는다', async () => {
+    onlineManager.setOnline(false);
+    render(<Harness onRefresh={() => new Promise(() => undefined)} />);
+    release();
+    await flush(460);
+    act(() => onlineManager.setOnline(true));
+    await flush(NOTICE_READY_MS);
+    expect(notice()).toBeNull();
+  });
+
+  it('연결이 돌아오기 전에는 서 있다: 다른 쪽 연결 신호(offline 유지)로는 사라지지 않는다', async () => {
+    onlineManager.setOnline(false);
+    render(<Harness onRefresh={() => new Promise(() => undefined)} />);
+    release();
+    await runFailure();
+    act(() => onlineManager.setOnline(false));
+    await flush(30_000);
+    expect(notice()).not.toBeNull();
   });
 
   it('응답이 상한(20초) 안에 안 오면 실패로 끝내고, 늦게 온 답은 무시한다', async () => {
@@ -503,7 +1185,7 @@ describe('오프라인과 늦은 응답', () => {
     expect(control().props.refreshing).toBe(true);
     await flush(1_500);
     expect(notifications()).toEqual(['notification:warning']);
-    expect(failedNotice()).not.toBeNull();
+    expect(notice()).not.toBeNull();
     answer([{status: 'success'}]); // 늦게 온 성공
     await flush(5_000);
     expect(notifications()).toEqual(['notification:warning']); // success 가 뒤따르지 않는다
@@ -534,55 +1216,35 @@ describe('오프라인과 늦은 응답', () => {
 });
 
 describe('실제 react-query 실패 경로 (결과를 버리는 무효화 모양이 성공으로 읽히지 않는다)', () => {
-  /** gcTime 무한: 기본 5분 가비지 타이머를 세우지 않는다. */
-  const newClient = () => new QueryClient({defaultOptions: {queries: {gcTime: Infinity}}});
-  /** 관찰자가 붙은(활성) 쿼리. 실패하거나 성공하는 queryFn 을 준다. */
-  function activeQuery(client: QueryClient, key: string, ok: boolean) {
-    const observer = new QueryObserver(client, {
-      queryKey: [key, 'ws'],
-      queryFn: () => (ok ? Promise.resolve('data') : Promise.reject(new Error('down'))),
-      retry: false,
-    });
-    const unsubscribe = observer.subscribe(() => undefined);
-    return unsubscribe;
-  }
-  async function queriesSettle() {
-    await act(async () => {
-      for (let i = 0; i < 40; i += 1) await Promise.resolve();
-      jest.advanceTimersByTime(0);
-      for (let i = 0; i < 40; i += 1) await Promise.resolve();
-    });
-  }
-
   it('invalidateAndReport: 쿼리가 실패하면 warning 이다', async () => {
     const client = newClient();
-    const stop = activeQuery(client, 'bad', false);
+    const stop = controlledQuery(client, 'bad', {ok: false});
     await queriesSettle();
     render(<Harness onRefresh={() => invalidateAndReport(client, [['bad', 'ws']])} />);
     release();
     await queriesSettle();
-    await flush(500);
+    await runFailure();
     expect(notifications()).toEqual(['notification:warning']);
-    expect(failedNotice()).not.toBeNull();
+    expect(notice()).not.toBeNull();
     stop();
   });
 
   it('invalidateAndReport: 쿼리가 성공하면 success 이다', async () => {
     const client = newClient();
-    const stop = activeQuery(client, 'good', true);
+    const stop = controlledQuery(client, 'good', {ok: true});
     await queriesSettle();
     render(<Harness onRefresh={() => invalidateAndReport(client, [['good', 'ws']])} />);
     release();
     await queriesSettle();
     await flush(500);
     expect(notifications()).toEqual(['notification:success']);
-    expect(failedNotice()).toBeNull();
+    expect(notice()).toBeNull();
     stop();
   });
 
   it('결과를 버리는 옛 모양(invalidateQueries 만)은 실패를 못 본다: 그래서 이 모양을 쓰지 않는다', async () => {
     const client = newClient();
-    const stop = activeQuery(client, 'bad', false);
+    const stop = controlledQuery(client, 'bad', {ok: false});
     await queriesSettle();
     render(<Harness onRefresh={() => client.invalidateQueries({queryKey: ['bad', 'ws']})} />);
     release();
@@ -596,7 +1258,7 @@ describe('실제 react-query 실패 경로 (결과를 버리는 무효화 모양
 
   it('여러 쿼리 중 하나만 실패해도 실패다(묶음 재조회)', async () => {
     const client = newClient();
-    const stops = [activeQuery(client, 'a', true), activeQuery(client, 'b', false)];
+    const stops = [controlledQuery(client, 'a', {ok: true}), controlledQuery(client, 'b', {ok: false})];
     await queriesSettle();
     render(
       <Harness
@@ -802,6 +1464,32 @@ describe('모든 화면이 scrollProps 를 펼친다 (소스 스캔, src 전수)
     expect(`${rel} PULL_FILL x${fills >= 2 ? '2+' : fills}`).toBe(`${rel} PULL_FILL x2+`);
   });
 
+  // 실패 안내(#3992)는 목록 위 레이아웃 안에 **화면이** 놓는다(훅은 요소만 돌려준다). 빠뜨리면 실패해도 haptics 만 울리고
+  // 화면에는 아무 흔적이 없다 — 이 안내가 고치려는 결함과 같은 모양이라 소스를 읽어 막는다.
+  // 호출은 인수가 있다(`usePullRefresh(onRefresh, …)`). 머리말·주석의 `usePullRefresh()` 언급은 호출이 아니다.
+  const callers = users.filter(u => /\busePullRefresh\((?!\))/.test(u.text));
+  const RENDERS_NOTICE = /\{notice\}|:\s*\(?\s*notice\s*\)?\s*\}|notice=\{notice\}/;
+
+  it('스캔이 훅을 부르는 일곱 화면을 모두 찾는다', () => {
+    expect(callers.map(u => u.rel).sort()).toEqual(
+      [
+        'src/screens/InboxScreen.tsx',
+        'src/screens/SidebarScreen.tsx',
+        'src/screens/AgentsScreen.tsx',
+        'src/screens/WorkJobsScreen.tsx',
+        'src/screens/TeamBoardScreen.tsx',
+        'src/screens/HostedConnectionsScreen.tsx',
+        'src/screens/WorkSessionDetailScreen.tsx',
+      ].sort(),
+    );
+  });
+
+  it.each(callers.map(u => u.rel))('%s: 훅이 돌려준 notice 를 받아 목록 위에 그린다', rel => {
+    const text = callers.find(u => u.rel === rel)!.text;
+    expect(`${rel} destructures=${/\{[^}]*\bnotice\b[^}]*\}\s*=\s*usePullRefresh\(/.test(text)}`).toBe(`${rel} destructures=true`);
+    expect(`${rel} renders=${RENDERS_NOTICE.test(text)}`).toBe(`${rel} renders=true`);
+  });
+
   it('일곱 화면은 refreshControl 바로 다음 줄에 scrollProps 를 둔다(모양을 하나로 둔다)', () => {
     for (const rel of KNOWN.filter(f => f.startsWith('src/screens/'))) {
       const lines = users.find(u => u.rel === rel)!.text.split('\n');
@@ -810,6 +1498,38 @@ describe('모든 화면이 scrollProps 를 펼친다 (소스 스캔, src 전수)
         expect(`${rel}:${i + 1} ${lines[i + 1]!.trim()}`).toMatch(/ (\{\.\.\.scrollProps\}|scrollProps=\{scrollProps\})$/);
       });
     }
+  });
+
+  const shellSrc = fs.readFileSync(path.join(SRC, 'shell', 'AppShell.tsx'), 'utf8');
+  it.each([
+    ['SidebarScreen', /<SidebarScreen\s+active=\{nav\.tab === 'home'\}/],
+    ['AgentsScreen', /<AgentsScreen\s+active=\{nav\.agentList && nav\.agent === null && nav\.hosted === null\}/],
+    ['HostedConnectionsScreen', /<HostedConnectionsScreen\s+active=\{nav\.hosted\.kind === 'list'\}/],
+  ])('AppShell 이 %s 에 보이는지(active)를 넘긴다: 빠지면 숨은 탭에 옛 실패가 남는다', (_name, pattern) => {
+    expect(shellSrc).toMatch(pattern);
+  });
+
+  it.each([
+    'src/screens/SidebarScreen.tsx',
+    'src/screens/AgentsScreen.tsx',
+    'src/screens/HostedConnectionsScreen.tsx',
+    'src/screens/InboxScreen.tsx',
+  ])('%s: 보이는지(active)를 usePullRefresh 의 옵션으로 넘긴다(검수 M5)', rel => {
+    const text = users.find(u => u.rel === rel)!.text;
+    expect(text).toMatch(/usePullRefresh\((?:[^;]|\n)*?\{active\b[^}]*\}\s*,?\s*\)/);
+  });
+
+  it('호스팅 연결 목록 래퍼가 notice 를 보기에 넘긴다', () => {
+    const text = users.find(u => u.rel === 'src/screens/HostedConnectionsScreen.tsx')!.text;
+    expect(text).toMatch(/notice=\{notice\}/);
+  });
+
+  it.each([
+    ['src/screens/WorkJobsScreen.tsx'],
+    ['src/screens/TeamBoardScreen.tsx'],
+  ])('%s: 필터(목록)가 바뀌면 안내를 거두도록 resetKey 를 넘긴다', rel => {
+    const text = users.find(u => u.rel === rel)!.text;
+    expect(text).toMatch(/\{active, resetKey: filter\}/);
   });
 
   it('옛 훅 이름(useRefreshControl)은 어디에도 남지 않았다', () => {

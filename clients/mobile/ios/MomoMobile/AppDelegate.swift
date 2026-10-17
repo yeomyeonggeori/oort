@@ -4,6 +4,9 @@
 // import the same module at different access levels, and a bare `import` is
 // "ambiguous implicit" rather than internal — it fails the build outright.
 internal import Expo
+// `internal` for the same reason: ExpoModulesProvider.swift imports every module that
+// declares a Module — MomoPushActionNative included — as `internal import`.
+internal import MomoPushActionNative
 import React
 import React_RCTAppDelegate
 import ReactAppDependencyProvider
@@ -29,7 +32,10 @@ import UIKit
 // claim it if something else got there first, logging and giving up
 // (NotificationCenterManager.swift:51-60) — after which expo's JS listeners are
 // dead. Our notification handling attaches through its public multi-delegate
-// seam from JS instead; see src/push/notifications.ts.
+// seam instead, and it is NOT set here either: JS-side handling (답장, body taps)
+// rides expo's own emitter (src/push/notifications.ts), and the lock screen's
+// 승인/거절 is answered by one more delegate on that seam, attached below
+// (#3931, ADR-0204 D6).
 // =============================================================================
 
 @main
@@ -43,6 +49,16 @@ class AppDelegate: ExpoAppDelegate {
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
+    // FIRST, before React Native exists. A phone that is locked and has not run oort
+    // for hours is launched in the background for a lock-screen 승인/거절 and the
+    // response arrives right after this method returns; expo's own JS-facing
+    // delegate only appears once the bridge is up, and by then expo has parked the
+    // response and told iOS it is finished. This one holds a background task from
+    // inside `didReceive` (modules/momo-push-action-native). It also makes sure
+    // expo's NotificationCenterManager has claimed UNUserNotificationCenter.delegate,
+    // which iOS requires before this method returns.
+    MomoPushActionInstaller.install()
+
     let delegate = ReactNativeDelegate()
     // ExpoReactNativeFactory, not RCTReactNativeFactory: it routes root-view
     // creation through ExpoReactDelegate, which is how Expo modules take part in

@@ -119,6 +119,9 @@ PODS:
     - ExpoModulesCore
   - MomoKeyboardNative (1.0.0):
     - ExpoModulesCore
+  - MomoPushActionNative (1.0.0):
+    - ExpoModulesCore
+    - ExpoNotifications
   - MomoPushNative (1.0.0):
     - ExpoModulesCore
   - NitroMmkv (4.3.2):
@@ -2164,6 +2167,7 @@ DEPENDENCIES:
   - MomoBackgroundTaskNative (from `../modules/momo-background-task-native/ios`)
   - MomoDeviceKeyNative (from `../modules/momo-device-key-native/ios`)
   - MomoKeyboardNative (from `../modules/momo-keyboard-native/ios`)
+  - MomoPushActionNative (from `../modules/momo-push-action-native/ios`)
   - MomoPushNative (from `../modules/momo-push-native/ios`)
   - NitroMmkv (from `../node_modules/react-native-mmkv`)
   - NitroModules (from `../node_modules/react-native-nitro-modules`)
@@ -2312,6 +2316,8 @@ EXTERNAL SOURCES:
     :path: "../modules/momo-device-key-native/ios"
   MomoKeyboardNative:
     :path: "../modules/momo-keyboard-native/ios"
+  MomoPushActionNative:
+    :path: "../modules/momo-push-action-native/ios"
   MomoPushNative:
     :path: "../modules/momo-push-native/ios"
   NitroMmkv:
@@ -2504,6 +2510,7 @@ SPEC CHECKSUMS:
   MomoBackgroundTaskNative: 75a5fd03f072d40976a6be7f2e8a7d40c49cc736
   MomoDeviceKeyNative: 2aa502b968215f65772fbec852ce09be8d3b0b51
   MomoKeyboardNative: d57ac23397a03cd0d9f8484e3f1c38a16ed87663
+  MomoPushActionNative: 13135de79c5c59cad621ba2399cf30f49ce11c9d
   MomoPushNative: c9da9159bd25034adfc6cb2496213f5b481afe04
   NitroMmkv: 85a251e15c39d7c95fe58cf40786fa126b8d143c
   NitroModules: 452230d9b63c6c3f59dd97eeaa27ec3449271d4a
