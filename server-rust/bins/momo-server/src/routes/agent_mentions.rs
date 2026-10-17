@@ -720,7 +720,13 @@ fn delivery_gate(agent: &MentionCandidate, send: &MentionSend<'_>) -> DeliveryGa
     {
         // `owner_only_gate` returns `None` for the owner of a personal agent, so
         // neither instance switch (#3626 L2) can refuse it here.
-        return DeliveryGate::PersonalAgent(owner_gate());
+        // E3: a connector refusal keeps its own shape (silent for a non-person)
+        // even on a personal agent.
+        let gate = owner_gate();
+        if gate == Some(SubscriptionNoticeKind::ConnectorNonOwner) {
+            return connector_refusal(send);
+        }
+        return DeliveryGate::PersonalAgent(gate);
     }
     if !agent.is_channel_member {
         return DeliveryGate::NotChannelMember;
@@ -729,11 +735,7 @@ fn delivery_gate(agent: &MentionCandidate, send: &MentionSend<'_>) -> DeliveryGa
         // E3: a connector refusal is judged first inside `owner_only_gate`;
         // whether anyone is told depends on who called. Only a person is.
         if kind == SubscriptionNoticeKind::ConnectorNonOwner {
-            return if send.author_is_human && !send.author_is_agent {
-                DeliveryGate::ConnectorOwner(kind)
-            } else {
-                DeliveryGate::ConnectorOwnerNonPerson
-            };
+            return connector_refusal(send);
         }
         return DeliveryGate::OwnerOnly(kind);
     }
@@ -756,6 +758,16 @@ fn delivery_gate(agent: &MentionCandidate, send: &MentionSend<'_>) -> DeliveryGa
     }
     DeliveryGate::Open {
         hosted_connection_id,
+    }
+}
+
+/// E3: the refusal of a connector agent's non-owner caller. Only a person is
+/// told; an agent, work host or system-shaped author is refused silently.
+fn connector_refusal(send: &MentionSend<'_>) -> DeliveryGate {
+    if send.author_is_human && !send.author_is_agent {
+        DeliveryGate::ConnectorOwner(SubscriptionNoticeKind::ConnectorNonOwner)
+    } else {
+        DeliveryGate::ConnectorOwnerNonPerson
     }
 }
 
@@ -2235,6 +2247,21 @@ mod tests {
         assert_eq!(
             DeliveryGate::ConnectorOwnerNonPerson.skip_reason(),
             SKIP_CONNECTOR_OWNER_NON_OWNER
+        );
+        // A personal agent with the mark: same shapes, not the personal NonOwner arm.
+        let mut personal = agent.clone();
+        personal.owner_only = Some(momo_agent::OwnerOnlyScope {
+            owner_member_id: owner,
+            owner_display_name: "세은".into(),
+            harness: momo_agent::SubscriptionHarness::Codex,
+            recently_seen: true,
+            reconnectable: false,
+            uses_owner_key: false,
+            personal_agent: true,
+        });
+        assert_eq!(
+            delivery_gate(&personal, &non_person),
+            DeliveryGate::ConnectorOwnerNonPerson
         );
         // No mark: a stranger's call is the ordinary agent's ordinary call.
         agent.connector_owner = None;
