@@ -23,7 +23,8 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
 });
 
 // =============================================================================
-// 보낸 메시지 아래 상태 줄 (#3824). 단계의 말은 core가 갖고 거기서 검증된다. 여기서
+// 보낸 메시지 아래 상태 줄 (#3824, #4020에서 「사람이 알아야 하는 상태」로 좁힘). 평소의
+// 영수증(받았어요 → 가져감 → 완료)은 타임라인 본 줄에 서지 않는다. 단계의 말은 core가 갖고 거기서 검증된다. 여기서
 // 지키는 것: 줄이 서는가, 깨우는 신호를 원장에서 `?include=doorbell`로 읽는가, 그 행의
 // 프레임이 오면 30초를 기다리지 않고 다시 읽는가, 모르는 원장 종류가 와도 줄이 서는가.
 // =============================================================================
@@ -100,6 +101,8 @@ const settle = async () => {
   });
 };
 
+const rows = () => [...(host?.querySelectorAll('[data-testid="message-run-status-row"]') ?? [])];
+
 const steps = () =>
   [...(host?.querySelectorAll('[data-testid="message-run-status-steps"] [data-step]') ?? [])].map(
     (node) => node.getAttribute("data-step")
@@ -125,20 +128,11 @@ describe("MessageRunStatus", () => {
   it("run이 없으면 아무것도 그리지 않는다(옛 서버·에이전트를 부르지 않은 메시지)", async () => {
     mount([]);
     await settle();
-    expect(host?.querySelector('[data-testid="message-run-status"]')).toBeNull();
+    expect(rows()).toHaveLength(0);
     expect(fetchEvents).not.toHaveBeenCalled();
   });
 
-  it("받았어요가 곧바로 서고, 원장의 깨우는 신호가 오면 그 단계가 더해진다", async () => {
-    fetchEvents.mockResolvedValue({ runId: RUN, events: [{ ordinal: 1, kind: "queued", createdAtMs: T - 3_000 }] });
-    mount([run()]);
-    // 원장을 읽기 전에도 「받았어요」는 이미 사실이다.
-    expect(steps()).toEqual(["received"]);
-    await settle();
-    expect(fetchEvents).toHaveBeenCalledWith(WS, RUN, { includeDoorbell: true });
-    expect(steps()).toEqual(["received"]);
-
-    // 깨우는 신호 프레임: 진행 지문은 그대로지만 원장을 다시 읽는다.
+  it("평소의 진행은 줄을 세우지 않는다: 대기(깨우는 신호 정상)·가져감·작업 중·완료·취소", async () => {
     fetchEvents.mockResolvedValue({
       runId: RUN,
       events: [
@@ -146,15 +140,41 @@ describe("MessageRunStatus", () => {
         { ordinal: 2, kind: "doorbell_rung", code: "leading_ok", createdAtMs: T - 2_500 },
       ],
     });
-    act(() => notifyRunLedgerFrame(RUN));
+    mount([run()]);
     await settle();
-    expect(fetchEvents).toHaveBeenCalledTimes(2);
-    expect(steps()).toEqual(["received", "woken"]);
-    expect(host?.textContent).toContain("받았어요 → 깨우는 신호 보냄");
-    expect(host?.textContent).toContain("째 기다려요");
+    // 깨우는 신호는 읽어서 확인한다(닿지 않았으면 줄이 서야 하므로). 정상이면 줄이 없다.
+    expect(fetchEvents).toHaveBeenCalledWith(WS, RUN, { includeDoorbell: true });
+    expect(rows()).toHaveLength(0);
+
+    for (const extra of [
+      { phase: "claimed", status: "queued", leaseState: "live", claimedAtMs: T - 5_000 },
+      {
+        phase: "running",
+        status: "running",
+        leaseState: "live",
+        claimedAtMs: T - 2 * 60_000,
+        startedAtMs: T - 2 * 60_000,
+        lastEventAtMs: T - 60_000,
+      },
+      { phase: "succeeded", status: "succeeded", finishedAtMs: T - 1_000 },
+      { phase: "cancelled", status: "cancelled", endReason: "human_cancelled", finishedAtMs: T - 1_000 },
+    ] as Partial<AgentRunProgress>[]) {
+      act(() => root?.unmount());
+      host?.remove();
+      mount([run(extra)]);
+      await settle();
+      expect(rows(), String(extra.phase)).toHaveLength(0);
+    }
   });
 
-  it("모르는 원장 종류가 섞여 와도 줄이 선다", async () => {
+  it("작업이 시작된 run은 원장을 새로 묻지 않는다", async () => {
+    mount([run({ phase: "running", status: "running", leaseState: "live", startedAtMs: T - 60_000 })]);
+    await settle();
+    expect(fetchEvents).not.toHaveBeenCalled();
+    expect(rows()).toHaveLength(0);
+  });
+
+  it("깨우는 신호가 닿지 않았으면 줄이 선다(모르는 원장 종류가 섞여 와도)", async () => {
     fetchEvents.mockResolvedValue(
       agentRunLedgerFromWire({
         runId: RUN,
@@ -166,44 +186,75 @@ describe("MessageRunStatus", () => {
       })
     );
     mount([run()]);
+    // 원장을 읽기 전에는 줄이 없다: 닿았는지 모르는 채로 「받았어요」만 그리지 않는다.
+    expect(rows()).toHaveLength(0);
     await settle();
     expect(steps()).toEqual(["received", "woken"]);
     expect(host?.textContent).toContain("깨우는 신호가 닿지 않음");
   });
 
-  it("작업이 시작된 run은 원장을 새로 묻지 않고 phase로 말한다", async () => {
-    mount([
-      run({
-        phase: "running",
-        status: "running",
-        leaseState: "live",
-        claimedAtMs: T - 2 * 60_000,
-        startedAtMs: T - 2 * 60_000,
-        lastEventAtMs: T - 60_000,
-      }),
-    ]);
+  it("나중에 깨우는 신호가 닿지 않은 것이 원장에 오면(프레임) 그때 줄이 선다", async () => {
+    fetchEvents.mockResolvedValue({ runId: RUN, events: [{ ordinal: 1, kind: "queued", createdAtMs: T - 3_000 }] });
+    mount([run()]);
     await settle();
-    expect(fetchEvents).not.toHaveBeenCalled();
-    expect(steps()).toEqual(["received", "claimed", "working"]);
-    expect(host?.querySelector('[data-testid="message-run-status-detail"]')?.textContent).toBe(
-      "2분째 · 마지막 보고 1분 전"
-    );
+    expect(rows()).toHaveLength(0);
+    fetchEvents.mockResolvedValue({
+      runId: RUN,
+      events: [
+        { ordinal: 1, kind: "queued", createdAtMs: T - 3_000 },
+        { ordinal: 2, kind: "doorbell_rung", code: "urgent_failed", createdAtMs: T - 2_000 },
+      ],
+    });
+    act(() => notifyRunLedgerFrame(RUN));
+    await settle();
+    expect(fetchEvents).toHaveBeenCalledTimes(2);
+    expect(steps()).toEqual(["received", "woken"]);
   });
 
-  it("끝난 run은 결과와 걸린 시간을 말한다", async () => {
-    mount([
-      run({
-        phase: "succeeded",
-        status: "succeeded",
-        claimedAtMs: T - 200_000,
-        startedAtMs: T - 199_000,
-        finishedAtMs: T - 3_000 + 192_000,
-        createdAtMs: T - 3_000,
-      }),
-    ]);
+  it("실패·시간 초과·승인 대기·가져간 뒤 소식 끊김은 줄이 선다", async () => {
+    const trouble: [Partial<AgentRunProgress>, string[], string][] = [
+      [
+        {
+          phase: "failed",
+          status: "failed",
+          claimedAtMs: T - 200_000,
+          startedAtMs: T - 199_000,
+          finishedAtMs: T - 3_000 + 192_000,
+          createdAtMs: T - 3_000,
+        },
+        ["received", "claimed", "result"],
+        "실패",
+      ],
+      [
+        { phase: "timed_out", status: "timed_out", endReason: "lease_abandoned", finishedAtMs: T - 1_000 },
+        ["received", "result"],
+        "신호 소실",
+      ],
+      [
+        { phase: "awaiting_approval", status: "awaiting_approval", leaseState: "live", claimedAtMs: T - 9_000, startedAtMs: T - 8_000 },
+        ["received", "claimed", "working", "approval"],
+        "승인 대기",
+      ],
+      [
+        { phase: "claimed", status: "queued", leaseState: "stale", claimedAtMs: T - 6 * 60_000 },
+        ["received", "claimed"],
+        "소식이 없어요",
+      ],
+    ];
+    for (const [extra, expected, word] of trouble) {
+      act(() => root?.unmount());
+      host?.remove();
+      fetchEvents.mockResolvedValue({ runId: RUN, events: [] });
+      mount([run(extra)]);
+      await settle();
+      expect(steps(), word).toEqual(expected);
+      expect(host?.textContent, word).toContain(word);
+    }
+  });
+
+  it("줄이 모두 빠지면 DOM에 아무것도 남지 않는다(타임라인 행에 빈 여백을 남기지 않는다)", async () => {
+    mount([run({ phase: "succeeded", status: "succeeded", finishedAtMs: T - 1_000 })]);
     await settle();
-    expect(steps()).toEqual(["received", "claimed", "result"]);
-    expect(host?.textContent).toContain("완료");
-    expect(host?.textContent).toContain("3분 12초 걸림");
+    expect(host?.childElementCount ?? 0).toBe(0);
   });
 });

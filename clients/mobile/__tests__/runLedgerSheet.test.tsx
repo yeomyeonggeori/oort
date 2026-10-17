@@ -141,40 +141,32 @@ describe('폰 기록 시트 (#3824)', () => {
   });
 });
 
-describe('폰 메시지 아래 상태 줄 (#3824)', () => {
-  it('받았어요가 서고, 깨우는 신호 프레임이 오면 단계가 더해지며, 누르면 기록 시트가 열린다', async () => {
-    const now = Date.now();
-    const queued = progress({
-      status: 'queued',
-      phase: 'queued',
-      claimedAtMs: undefined,
-      startedAtMs: undefined,
-      finishedAtMs: undefined,
-      createdAtMs: now - 3 * SEC,
-    });
-    mockFetchEvents.mockResolvedValue({
-      runId: RUN,
-      events: [{ordinal: 1, kind: 'queued', createdAtMs: now - 3 * SEC}],
-    });
+describe('폰 메시지 아래 상태 줄 (#3824, #4020: 사람이 알아야 하는 상태만)', () => {
+  const mount = (run: AgentRunProgress) =>
     render(
       wrap(
         <MessageRunStatus
           messageId={MSG}
           channelId={CH}
-          createdAtMs={now - 3 * SEC}
-          runs={[queued]}
+          createdAtMs={Date.now() - 3 * SEC}
+          runs={[run]}
           directory={directory}
         />,
       ),
     );
-    expect(screen.getByTestId('message-run-status-step-received')).toBeTruthy();
-    // 「12분째」가 「12분 / 째」로 갈리지 않게(#3824 리뷰, RUN-STATUS 캡처).
-    expect(screen.getByTestId('message-run-status-text').props.lineBreakStrategyIOS).toBe(
-      'hangul-word',
-    );
-    await waitFor(() => expect(mockFetchEvents).toHaveBeenCalledTimes(1));
-    expect(screen.queryByTestId('message-run-status-step-woken')).toBeNull();
+  const base = (extra: Partial<AgentRunProgress>) =>
+    progress({
+      status: 'queued',
+      phase: 'queued',
+      claimedAtMs: undefined,
+      startedAtMs: undefined,
+      finishedAtMs: undefined,
+      createdAtMs: Date.now() - 3 * SEC,
+      ...extra,
+    });
 
+  it('평소의 진행·완료는 줄을 세우지 않는다: 깨우는 신호가 닿은 대기·가져감·작업 중·완료·취소', async () => {
+    const now = Date.now();
     mockFetchEvents.mockResolvedValue({
       runId: RUN,
       events: [
@@ -182,13 +174,61 @@ describe('폰 메시지 아래 상태 줄 (#3824)', () => {
         {ordinal: 2, kind: 'doorbell_rung', code: 'leading_ok', createdAtMs: now - 2 * SEC},
       ],
     });
-    act(() => notifyRunLedgerFrame(RUN));
+    for (const extra of [
+      {},
+      {status: 'claimed', phase: 'claimed', leaseState: 'live', claimedAtMs: now - 5 * SEC},
+      {status: 'running', phase: 'running', leaseState: 'live', startedAtMs: now - 60 * SEC},
+      {status: 'succeeded', phase: 'succeeded', finishedAtMs: now - SEC},
+      {status: 'cancelled', phase: 'cancelled', endReason: 'human_cancelled', finishedAtMs: now - SEC},
+    ] as Partial<AgentRunProgress>[]) {
+      const view = mount(base(extra));
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(screen.queryByTestId(`message-run-status-row-${RUN}`)).toBeNull();
+      view.unmount();
+    }
+  });
+
+  it('깨우는 신호가 닿지 않으면 줄이 서고, 누르면 기록 시트가 열린다', async () => {
+    const now = Date.now();
+    mockFetchEvents.mockResolvedValue({
+      runId: RUN,
+      events: [
+        {ordinal: 1, kind: 'queued', createdAtMs: now - 3 * SEC},
+        {ordinal: 2, kind: 'doorbell_rung', code: 'urgent_failed', createdAtMs: now - 2 * SEC},
+      ],
+    });
+    mount(base({}));
+    // 원장을 읽기 전에는 줄이 없다: 닿았는지 모르는 채로 「받았어요」만 그리지 않는다.
+    expect(screen.queryByTestId(`message-run-status-row-${RUN}`)).toBeNull();
     await waitFor(() =>
       expect(screen.getByTestId('message-run-status-step-woken')).toBeTruthy(),
     );
-
+    // 「12분째」가 「12분 / 째」로 갈리지 않게(#3824 리뷰, RUN-STATUS 캡처).
+    expect(screen.getByTestId('message-run-status-text').props.lineBreakStrategyIOS).toBe(
+      'hangul-word',
+    );
     fireEvent.press(screen.getByTestId(`message-run-status-row-${RUN}`));
     await waitFor(() => expect(screen.getByTestId('run-ledger-sheet')).toBeTruthy());
+  });
+
+  it('실패·시간 초과·승인 대기·가져간 뒤 소식 끊김은 줄이 선다', async () => {
+    const now = Date.now();
+    mockFetchEvents.mockResolvedValue({runId: RUN, events: []});
+    for (const extra of [
+      {status: 'failed', phase: 'failed', claimedAtMs: now - 9 * SEC, finishedAtMs: now - SEC},
+      {status: 'timed_out', phase: 'timed_out', endReason: 'lease_abandoned', finishedAtMs: now - SEC},
+      {status: 'awaiting_approval', phase: 'awaiting_approval', leaseState: 'live', claimedAtMs: now - 9 * SEC, startedAtMs: now - 8 * SEC},
+      {status: 'claimed', phase: 'claimed', leaseState: 'stale', claimedAtMs: now - 6 * MIN},
+    ] as Partial<AgentRunProgress>[]) {
+      const view = mount(base(extra));
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(screen.getByTestId(`message-run-status-row-${RUN}`)).toBeTruthy();
+      view.unmount();
+    }
   });
 
   it('run이 없으면 아무것도 그리지 않는다(옛 서버)', () => {

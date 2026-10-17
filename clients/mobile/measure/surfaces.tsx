@@ -80,6 +80,7 @@ import {StopTurnControl} from '../src/features/agents/StopTurnControl';
 import {AdeControlPanel} from '../src/features/ade/AdeControlPanel';
 import {AdeSummaryLine} from '../src/features/ade/AdeSummaryLine';
 import {AgentActivityBar} from '../src/features/agents/turnSurfaces';
+import {signalFromProgress} from '@momo/core/features/agents/runPhase';
 import {markAgentWorking, resetAgentWorking} from '../src/features/agents/workingSignal';
 import type {ChannelRail} from '../src/realtime/channelRail';
 import {RealtimeContext} from '../src/realtime/RealtimeProvider';
@@ -2118,6 +2119,9 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       return <RunStatusSurface />;
     case 'run-ledger':
       return <RunLedgerSurface />;
+    // #4020: 영수증은 사람이 알아야 하는 상태에만 서고, 컴포저 위가 「답하는 중」을 말한다.
+    case 'responding':
+      return <RespondingSurface />;
     case 'quote-ready': {
       const draft = quoteDraftFor({
         ...MESSAGE,
@@ -5300,10 +5304,12 @@ function RunStatusSurface(): React.JSX.Element {
     body,
     createdAtMs: at,
   });
+  // #4020: 평소의 진행·완료는 줄이 없다(아래 둘째·셋째 글). 깨우는 신호가 닿지 않은
+  // 대기와 실패만 글 아래에 선다.
   const woken = runFixture(RUN_IDS.woken, 'm-run-1', {});
   seedRunLedger(RUN_IDS.woken, [
     {ordinal: 1, kind: 'queued', createdAtMs: t - 4_000},
-    {ordinal: 2, kind: 'doorbell_rung', code: 'leading_ok', createdAtMs: t - 3_500},
+    {ordinal: 2, kind: 'doorbell_rung', code: 'urgent_failed', createdAtMs: t - 3_500},
   ]);
   const working = runFixture(RUN_IDS.working, 'm-run-2', {
     phase: 'running',
@@ -5318,26 +5324,26 @@ function RunStatusSurface(): React.JSX.Element {
     {ordinal: 1, kind: 'queued', createdAtMs: t - 12 * 60_000 - 20_000},
     {ordinal: 2, kind: 'doorbell_rung', code: 'leading_ok', createdAtMs: t - 12 * 60_000 - 19_000},
   ]);
-  const done = runFixture(RUN_IDS.done, 'm-run-3', {
-    phase: 'succeeded',
-    status: 'succeeded',
+  const failed = runFixture(RUN_IDS.done, 'm-run-3', {
+    phase: 'failed',
+    status: 'failed',
     createdAtMs: t - 40 * 60_000,
     claimedAtMs: t - 40 * 60_000 + 12_000,
     startedAtMs: t - 40 * 60_000 + 14_000,
     finishedAtMs: t - 40 * 60_000 + 192_000,
   });
   return (
-    <Frame label="보낸 메시지 아래 상태 줄 (#3824)">
+    <Frame label="보낸 메시지 아래: 실패·막힘만 줄이 선다 (#3824·#4020)">
       <MessageRow
         message={sent('m-run-3', '@grokbot 어제 회의 요약해 줄래요?', t - 40 * 60_000)}
         startsGroup
         directory={DIRECTORY}
         chips={[]}
         nowMs={t}
-        runStatus={[done]}
+        runStatus={[failed]}
       />
       <MessageRow
-        message={sent('m-run-2', '@grokbot 릴리스 노트 초안 써 줄래요?', t - 12 * 60_000 - 20_000)}
+        message={sent('m-run-2', '@grokbot 릴리스 노트 초안 써 줄래요? (진행 중: 줄 없음)', t - 12 * 60_000 - 20_000)}
         startsGroup
         directory={DIRECTORY}
         chips={[]}
@@ -5353,6 +5359,97 @@ function RunStatusSurface(): React.JSX.Element {
         runStatus={[woken]}
       />
     </Frame>
+  );
+}
+
+/**
+ * #4020: 에이전트가 가져가 쓰는 동안 컴포저 위가 「답하는 중」 + 얼굴 + 점을 말하고,
+ * 끝난 run의 영수증은 글 아래에 없다. 실패한 run만 남는다. 동작 줄이기에서는 점이 멈춘다
+ * (시뮬레이터 설정으로 찍는다).
+ */
+function RespondingSurface(): React.JSX.Element {
+  const t = Date.now();
+  const mine = (id: string, body: string, at: number): Message => ({
+    ...MESSAGE,
+    id,
+    authorMemberId: SELF,
+    thread: undefined,
+    body,
+    createdAtMs: at,
+  });
+  const failed = runFixture(RUN_IDS.done, 'm-resp-1', {
+    phase: 'failed',
+    status: 'failed',
+    createdAtMs: t - 9 * 60_000,
+    claimedAtMs: t - 9 * 60_000 + 5_000,
+    startedAtMs: t - 9 * 60_000 + 6_000,
+    finishedAtMs: t - 8 * 60_000,
+  });
+  const answered = runFixture(RUN_IDS.woken, 'm-resp-2', {
+    phase: 'succeeded',
+    status: 'succeeded',
+    createdAtMs: t - 6 * 60_000,
+    claimedAtMs: t - 6 * 60_000 + 3_000,
+    startedAtMs: t - 6 * 60_000 + 4_000,
+    finishedAtMs: t - 5 * 60_000,
+  });
+  const running = runFixture(RUN_IDS.working, 'm-resp-3', {
+    phase: 'running',
+    status: 'running',
+    leaseState: 'live',
+    createdAtMs: t - 20_000,
+    claimedAtMs: t - 15_000,
+    startedAtMs: t - 14_000,
+    lastEventAtMs: t - 3_000,
+  });
+  const turn = signalFromProgress(running);
+  return (
+    <ConversationFloor label="답하는 중 (#4020)">
+      <MessageRow
+        message={mine('m-resp-1', '어제 올린 보고서 요약 부탁해요', t - 9 * 60_000)}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={t}
+        runStatus={[failed]}
+      />
+      <MessageRow
+        message={mine('m-resp-2', 'ㅎㅇ', t - 6 * 60_000)}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={t}
+        runStatus={[answered]}
+      />
+      <MessageRow
+        message={{
+          ...MESSAGE,
+          id: 'm-resp-reply',
+          authorMemberId: AGENT,
+          thread: undefined,
+          body: '안녕하세요! 필요한 일 있으면 편하게 말씀해 주세요.',
+          createdAtMs: t - 5 * 60_000,
+        }}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={t}
+      />
+      <MessageRow
+        message={mine('m-resp-3', '이번 주 일정 정리해 줘', t - 20_000)}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={t}
+        runStatus={[running]}
+      />
+      <AgentActivityBar
+        turns={turn === null ? [] : [turn]}
+        directory={DIRECTORY}
+        nowMs={t}
+        live
+      />
+    </ConversationFloor>
   );
 }
 
