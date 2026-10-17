@@ -81,7 +81,17 @@ impl PushReason {
 pub enum PushCategory {
     Message,
     Mention,
+    /// An approval the lock screen may decide: 승인·거절, Face ID required.
     Approval,
+    /// An approval that must be opened in the app to be decided (ADR-0204 D7,
+    /// #3928): one 「열어서 결정」 button. Chosen by
+    /// [`momo_agent::actions::opens_in_app`] — the one list.
+    ///
+    /// **Deploy order:** the relay first (it refuses a category it does not
+    /// know), then the server, then the app. An app build that predates the
+    /// category cannot decode it and fails open to the placeholder, with no
+    /// buttons — which is the safe way for it to fail.
+    ApprovalOpen,
     Work,
 }
 
@@ -91,8 +101,16 @@ impl PushCategory {
             PushCategory::Message => "momo.message",
             PushCategory::Mention => "momo.mention",
             PushCategory::Approval => "momo.approval",
+            PushCategory::ApprovalOpen => "momo.approval.open",
             PushCategory::Work => "momo.work",
         }
+    }
+
+    /// Both approval categories name the approval they are about
+    /// (`approval_id`), and no other category does: the relay, the NSE and the app
+    /// each reject the pair the other way round.
+    pub fn carries_approval_id(self) -> bool {
+        matches!(self, PushCategory::Approval | PushCategory::ApprovalOpen)
     }
 }
 
@@ -102,10 +120,15 @@ impl PushCategory {
 /// (`NotifierService.swift:268-276`) — the branch order is load-bearing, since
 /// a `resume_offer` is an `approval_request` message that must still group as
 /// work rather than as an approval.
+///
+/// `opens_in_app` is [`momo_agent::actions::opens_in_app`] answered for the
+/// approval this message is the card of (ADR-0204 D7); it matters only for an
+/// `approval_request` message and is ignored for every other shape.
 pub fn category_for(
     message_type: &str,
     props_kind: Option<&str>,
     reason: PushReason,
+    opens_in_app: bool,
 ) -> PushCategory {
     if matches!(props_kind, Some("resume_offer") | Some("work_session_idle"))
         || reason == PushReason::WorkRunDone
@@ -113,7 +136,11 @@ pub fn category_for(
         return PushCategory::Work;
     }
     if message_type == "approval_request" {
-        return PushCategory::Approval;
+        return if opens_in_app {
+            PushCategory::ApprovalOpen
+        } else {
+            PushCategory::Approval
+        };
     }
     if props_kind == Some("work_session") {
         return PushCategory::Work;
@@ -196,10 +223,10 @@ impl PushDispatch {
     /// no channel name. There is no way to place conversation content on this
     /// wire without changing the type — which is the point.
     pub fn new(target: &DispatchTarget) -> Self {
-        // An approval id is meaningful only for the approval category; the relay
-        // rejects the pair otherwise (`PushDispatch.swift:76-80`), and so does
-        // the NSE.
-        let approval_id = if target.category == PushCategory::Approval {
+        // An approval id is meaningful only for the two approval categories; the
+        // relay rejects the pair otherwise (`PushDispatch.swift:76-80`), and so
+        // does the NSE.
+        let approval_id = if target.category.carries_approval_id() {
             target.approval_id.map(hyphenated_lower)
         } else {
             None
@@ -404,43 +431,51 @@ mod tests {
             "absent approval_id must be omitted, not null"
         );
 
-        target.category = PushCategory::Approval;
-        target.reason = PushReason::ApprovalRequest;
-        let with = PushDispatch::new(&target);
-        assert_eq!(
-            with.approval_id.as_deref(),
-            Some(approval.hyphenated().to_string().as_str())
-        );
+        // Both approval categories name their approval — the open one needs it more
+        // than the inline one, since it is the only handle the app has to open the
+        // card (ADR-0204 D7) and to clear the notification once it is decided.
+        for category in [PushCategory::Approval, PushCategory::ApprovalOpen] {
+            target.category = category;
+            target.reason = PushReason::ApprovalRequest;
+            let with = PushDispatch::new(&target);
+            assert_eq!(
+                with.approval_id.as_deref(),
+                Some(approval.hyphenated().to_string().as_str()),
+                "{category:?}"
+            );
+        }
     }
 
     /// Parity with `NotifierWorkerTests.testPayloadCategoriesPreserveJudgmentPrecedence`.
     #[test]
     fn category_precedence_matches_swift() {
         assert_eq!(
-            category_for("text", None, PushReason::Dm),
+            category_for("text", None, PushReason::Dm, false),
             PushCategory::Message
         );
         assert_eq!(
-            category_for("text", None, PushReason::Mention),
+            category_for("text", None, PushReason::Mention, false),
             PushCategory::Mention
         );
         assert_eq!(
             category_for(
                 "approval_request",
                 Some("work_control_approval"),
-                PushReason::ApprovalRequest
+                PushReason::ApprovalRequest,
+                false
             ),
             PushCategory::Approval
         );
         assert_eq!(
-            category_for("system", Some("work_session"), PushReason::Dm),
+            category_for("system", Some("work_session"), PushReason::Dm, false),
             PushCategory::Work
         );
         assert_eq!(
             category_for(
                 "approval_request",
                 Some("resume_offer"),
-                PushReason::ResumeOffer
+                PushReason::ResumeOffer,
+                false
             ),
             PushCategory::Work,
             "a resume offer is an approval_request message that must still group as work"
@@ -449,7 +484,8 @@ mod tests {
             category_for(
                 "system",
                 Some("work_session_idle"),
-                PushReason::WorkSessionIdle
+                PushReason::WorkSessionIdle,
+                false
             ),
             PushCategory::Work
         );
@@ -457,9 +493,66 @@ mod tests {
         // reason says it is a work-run completion (#3517).
         for message_type in ["text", "system"] {
             assert_eq!(
-                category_for(message_type, None, PushReason::WorkRunDone),
+                category_for(message_type, None, PushReason::WorkRunDone, false),
                 PushCategory::Work
             );
+        }
+    }
+
+    /// ADR-0204 D7: an approval whose action must be opened in the app is the
+    /// `momo.approval.open` category; everything else about the shape is read first.
+    #[test]
+    fn an_approval_that_opens_in_the_app_is_its_own_category() {
+        assert_eq!(
+            category_for("approval_request", None, PushReason::ApprovalRequest, true),
+            PushCategory::ApprovalOpen
+        );
+        assert_eq!(
+            category_for("approval_request", None, PushReason::ApprovalRequest, false),
+            PushCategory::Approval
+        );
+        // The flag is about an approval card; it does not turn anything else into one.
+        assert_eq!(
+            category_for("text", None, PushReason::Dm, true),
+            PushCategory::Message
+        );
+        assert_eq!(
+            category_for("text", None, PushReason::Mention, true),
+            PushCategory::Mention
+        );
+        // And the work shapes keep their grouping even on an approval_request row:
+        // a resume offer is not an approval to decide from anywhere.
+        assert_eq!(
+            category_for(
+                "approval_request",
+                Some("resume_offer"),
+                PushReason::ResumeOffer,
+                true
+            ),
+            PushCategory::Work
+        );
+    }
+
+    /// The category vocabulary is exactly these five strings. The relay validator
+    /// (`momo-push-relay/src/dispatch.rs` `ALLOWED_CATEGORIES`), the phone's
+    /// `clients/mobile/src/push/contract.ts` and the Swift `MomoPushCategory` each
+    /// spell the same set and pin their own copy, so adding a category here without
+    /// widening them turns one of those red instead of silently 400-ing in prod.
+    #[test]
+    fn the_category_vocabulary_is_the_five_wire_categories() {
+        // (category, wire string, does it name an approval) — written out, not derived
+        // from the string: the relay's rule is an exact list, not a prefix, and an oracle
+        // that computed it would agree with any new `momo.approval.*` by construction.
+        let all = [
+            (PushCategory::Message, "momo.message", false),
+            (PushCategory::Mention, "momo.mention", false),
+            (PushCategory::Approval, "momo.approval", true),
+            (PushCategory::ApprovalOpen, "momo.approval.open", true),
+            (PushCategory::Work, "momo.work", false),
+        ];
+        for (category, label, names_an_approval) in all {
+            assert_eq!(category.as_str(), label);
+            assert_eq!(category.carries_approval_id(), names_an_approval, "{label}");
         }
     }
 

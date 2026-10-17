@@ -267,11 +267,11 @@ mod tests {
         );
     }
 
-    /// ADR-0201 증보 v2 H7: `plugin.install`'s declared contract names exactly the
-    /// official plugins the registry reads show, so the slice that opens it cannot
-    /// inherit a stale list.
+    /// ADR-0201 증보 v2 H7 (#3889): `plugin.install` names exactly the official
+    /// plugins the registry reads show, and is an executable, admin-decided,
+    /// helper-only row of the catalog.
     #[test]
-    fn plugin_install_names_exactly_the_official_plugins() {
+    fn plugin_install_names_exactly_the_official_plugins_and_is_executable() {
         let declared: Vec<&str> = actions::PLUGIN_INSTALL_PLUGINS
             .iter()
             .map(|(id, _)| *id)
@@ -281,9 +281,24 @@ mod tests {
             .into_iter()
             .find(|row| row.id == actions::ACTION_PLUGIN_INSTALL)
             .expect("plugin.install is in the catalog");
-        assert!(!row.executable);
-        assert_eq!(row.unavailable_reason, Some("아직 설치 경로가 없어요."));
-        assert!(row.required_role.is_none() && row.args_schema.is_none());
+        assert!(row.executable);
+        assert_eq!(row.unavailable_reason, None);
+        assert_eq!(row.required_role, Some("admin"));
+        assert_eq!(row.secret_delivery, Some("none"));
+        let schema = row
+            .args_schema
+            .expect("an executable row publishes its schema");
+        assert_eq!(schema["required"], json!(["pluginId"]));
+        assert_eq!(
+            schema["properties"]["pluginId"]["enum"],
+            json!(crate::routes::plugins::OFFICIAL_PLUGIN_IDS)
+        );
+        // Through the Agent Port it is refused like an unknown id (helper only).
+        assert!(actions::proposable_action_by_id(
+            actions::ACTION_PLUGIN_INSTALL,
+            actions::ProposalDoor::AgentPort
+        )
+        .is_none());
     }
 
     /// **ADR-0186 증보 — the approver roles are one list in two places.**

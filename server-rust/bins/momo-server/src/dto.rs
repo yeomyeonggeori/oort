@@ -3210,6 +3210,18 @@ pub struct PushFetchTokenResponse {
     pub workspace_id: String,
 }
 
+/// `POST /v1/auth/push-action-token` response (#3927, ADR-0204 D6). `token` is the
+/// lock screen's credential: one request (`POST …/approvals/{approval}/decision`),
+/// no refresh half (`momo_auth::push_action_token`).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PushActionTokenResponse {
+    pub token: String,
+    pub expires_at_ms: i64,
+    pub ttl_seconds: i64,
+    pub workspace_id: String,
+}
+
 /// Centrifugo subscribe-proxy callback body (Swift `SubscribeProxyRequest`,
 /// `DTOs.swift:906-911`).
 ///

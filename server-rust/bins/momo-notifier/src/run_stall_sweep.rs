@@ -28,7 +28,9 @@
 //! the progress rail is told (a "working" badge clears), the channel gets one system line,
 //! and one audit row says why. The actor is the clock, not a member.
 
-use momo_agent::{end_stalled_run_in_tx, RunStatus};
+use momo_agent::{
+    end_stalled_run_in_tx, run_trigger_message_in_tx, RunStatus, PROP_ANSWERS_MESSAGE_ID,
+};
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_tenant_tx, DbError, PgConnection, PgPool};
 use momo_messaging::{send_message_in_tx, MessageType, NewMessage};
@@ -201,6 +203,20 @@ async fn settle_stalled_run_in_tx(
             StallKind::LeaseAbandoned => LINE_LEASE_ABANDONED,
             StallKind::UnclaimedExpired => LINE_UNCLAIMED_EXPIRED,
         };
+        let mut props = json!({
+            "kind": "agent_run_timed_out",
+            "code": run.kind.code(),
+            "run_id": run.run_id.to_string(),
+        });
+        // ADR-0204 D8 (#3929): the stall notice answers the request the run was raised
+        // for, so it names that message and the person who asked is pushed (unless they
+        // are looking at the channel). A run with no trigger keeps a silent line.
+        if let (Some(trigger), Some(object)) = (
+            run_trigger_message_in_tx(&mut *conn, workspace_id, run.run_id).await?,
+            props.as_object_mut(),
+        ) {
+            object.insert(PROP_ANSWERS_MESSAGE_ID.into(), json!(trigger.to_string()));
+        }
         send_message_in_tx(
             &mut *conn,
             workspace_id,
@@ -209,11 +225,7 @@ async fn settle_stalled_run_in_tx(
                 author_member_id: run.agent_member_id,
                 message_type: MessageType::System,
                 body: Some(line.to_string()),
-                props: json!({
-                    "kind": "agent_run_timed_out",
-                    "code": run.kind.code(),
-                    "run_id": run.run_id.to_string(),
-                }),
+                props,
                 root_id: None,
                 reply_to_id: None,
                 // One line per run (the run ends exactly once). NOT the run id itself:
