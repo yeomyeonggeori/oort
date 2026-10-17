@@ -11,6 +11,31 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+## [0.1.29] - 2026-10-17
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.29>. Tag target: `main=3475f06c`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. No database migration (the schema stays at 138). `bootstrap_runtime_roles` gains two column-scoped grants for `momo_notifier`, both additive: `UPDATE (invalidated_at, updated_at)` on `push_token` and `SELECT (workspace_id, member_id, role)` on `workspace_membership`. No new environment variable. Deploy the push relay before the app: the relay now accepts the `momo.approval.open` notification category, and a push with that category is rejected by an older relay.
+
+### Added
+- Server: a lock-screen approval credential (ADR-0204 D6, #3927, #3977). A `push_action` token lasts 6 hours and is good for one allowed path only; an approval that has to open the app answers 403 `opens_in_app`.
+- Server: approval notifications are split into their own category, `momo.approval.open`, and an approval push goes only to people who may decide it (ADR-0204 D7, #3928, #3971).
+- Server: pushes for an agent you called (ADR-0204 D8, #3929, #3986). The reply, the expiry and the stop of an agent you mentioned reach you as the new wire reason `mention`; nothing is sent while you are watching (a 30-second "watching" window).
+- Server: plugin install, grant and revoke write paths, four official plugins (ADR-0113 P3, #3914, #3965), and the team AI helper's `plugin.install` approval card now runs through the same domain function (ADR-0201 v2 H7, #3889, #3967). This is the item the 0.1.28 notes listed under "Not in this release".
+- Phone: "Push notifications" is a switch for this phone (ADR-0204 D1, #3924, #3974). Turning it off removes only this device and the app does not register it again by itself.
+- Phone: pause and do-not-disturb take an end time, and the pause says that notifications pause with it (#2899, #3991).
+- Web, desktop and phone: the oort loader ("orbit"), used for lost connection, reconnecting and first loading (#3961, #3972); on the phone, pull to refresh uses it with haptics, and the failure, offline and empty states are covered too (#3962, #3989).
+
+### Changed
+- Web and desktop: the "Apps" screen is read-only, and showing apps and installing one follow what the server reports (ADR-0113 addendum P-U1, #3860, #3966).
+- Phone: the notification arrival highlight no longer lingers after an approval; it clears as soon as the approval is decided and, after a move, two seconds later, and a held finger keeps it (#3921, #3979).
+
+### Fixed
+- Server: when APNs answers 410 or BadDeviceToken, the notifier invalidates that device token instead of retrying it (ADR-0204 D9, #3930, #3973).
+- Phone: an approval decision that meets a 401 refreshes the session and retries, and a decided approval is removed from the notification tray (ADR-0204 D6, #3926, #3968).
+- Release: the `server-rust/Dockerfile` dependency-cache COPY list is checked against the workspace members in every PR, so a new crate can no longer break only the image build (the 0.1.27 publish failure, #3876, #3917).
+
+### Documentation
+- ADR-0204 phone notifications v2 and its addendum 1 (#3922, #3934, #3988, #3990); the plugin v2 ADRs: ADR-0113 addendum 2, ADR-0188 section 8.9, ADR-0203 addendum and ADR-0205 (#3935, #3970).
+
 ## [0.1.28] - 2026-10-16
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.28>. Tag target: `main=31d03297`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. Three database migrations since 0.1.27 (136-138): the schema moves from 135 to 138. 136 adds the RLS FORCE table `agent_provider_pin` (one row per agent, a link reference only, no credential columns; writes need the instance-operator `app.provider_link_admin` setting); 137 adds the RLS FORCE table `provider_key_budget` (the operator-entered monthly credit per provider, operator-only) and 11 global Anthropic `model_pricing` rows; 138 adds the RLS FORCE table `member_handle_alias` with a trigger on `member`, the column `usage_ledger.web_search_requests`, and the new read-only role `momo_helper_read` (NOLOGIN, NOBYPASSRLS, SELECT only). `bootstrap_runtime_roles` grants `momo_helper_read` to `momo_worker` with INHERIT FALSE (SET only) and revokes it from the other runtime roles. Two new optional environment variables, both with defaults: `TEAM_AI_DAILY_SEARCH_CAP` (default 50) and `OORT_COHOSTED_AGENT_TOOLS_LOCKED` (unset means the Hermes connect button stays off).

@@ -1326,7 +1326,7 @@ impl AgentWorker {
             Ok(ToolDisposition::StepExhausted) => {
                 // G3 said no. The run ends rather than looping, and the channel
                 // is told by the `tool_result` the same transaction wrote.
-                self.mark_run_failed(job.workspace_id, run_id, "tool step cap reached")
+                self.mark_run_failed(job.workspace_id, run_id, "tool step cap reached", false)
                     .await;
                 self.settle_done(job.id, Some("tool step cap reached"))
                     .await;
@@ -2105,6 +2105,7 @@ impl AgentWorker {
                                 rev: rev + 1,
                                 is_final: true,
                                 outcome: close_outcome,
+                                provisional: false,
                             },
                         )
                         .await?;
@@ -2272,7 +2273,7 @@ impl AgentWorker {
         // cosmetic write able to fail the whole commit and get the job retried —
         // and the retry would find the same cancelled run and try again forever.
         if let Some(outcome) = commit.closing_outcome() {
-            self.close_stopped_stream(workspace_id, run_id, outcome)
+            self.close_stopped_stream(workspace_id, run_id, outcome, false)
                 .await;
         }
         Ok(commit)
@@ -2286,13 +2287,28 @@ impl AgentWorker {
     /// over a server sweeper, so a message left `final: false` under a terminal
     /// run still draws the same tail. Escalating here would trade a correct
     /// cancel for a stuck job.
+    ///
+    /// `between_attempts` marks the freeze a retried turn leaves while its job waits out a
+    /// backoff (always `Failed`): the same write, but provisional — the block says it is a
+    /// pause (`provisional: true`), announces nothing, and is still found by the turn's
+    /// terminal close, even when no attempt reopens it (ADR-0204 증보 1 D8-a).
     async fn close_stopped_stream(
         &self,
         workspace_id: Uuid,
         run_id: Uuid,
         outcome: StreamCloseOutcome,
+        between_attempts: bool,
     ) {
-        match stream::close_run_stream(&self.pool, workspace_id, run_id, outcome).await {
+        debug_assert!(
+            !between_attempts || outcome == StreamCloseOutcome::Failed,
+            "the freeze between attempts is always a failure"
+        );
+        let closed = if between_attempts {
+            stream::freeze_run_stream_between_attempts(&self.pool, workspace_id, run_id).await
+        } else {
+            stream::close_run_stream(&self.pool, workspace_id, run_id, outcome).await
+        };
+        match closed {
             // The common case today: the turn posted its answer in one write, so
             // there was never an open stream to close. Silent on purpose.
             Ok(None) => {}
@@ -2300,7 +2316,13 @@ impl AgentWorker {
                 run_id = %run_id,
                 message_id = %message_id,
                 outcome = outcome.wire(),
-                "streamed message closed by a stopped run"
+                between_attempts,
+                "streamed message {}",
+                if between_attempts {
+                    "frozen until the next attempt"
+                } else {
+                    "closed with the run that ended"
+                }
             ),
             Err(error) => tracing::warn!(
                 run_id = %run_id,
@@ -2326,6 +2348,9 @@ impl AgentWorker {
         endpoint: &ProviderEndpoint,
     ) -> Settlement {
         let reason = redact_secrets(reason, &endpoint.bearer);
+        // Decided before the run is marked, because the mark leaves a freeze in the
+        // channel and the freeze has to know whether another attempt follows it.
+        let last_attempt = job.attempts >= self.config.max_attempts;
         // Swift `updateRunStatus(.error)` runs before the requeue decision
         // (:555), so a run that is between attempts reads as `failed` rather
         // than `running`. That is not cosmetic: G1's live-run count
@@ -2335,11 +2360,11 @@ impl AgentWorker {
         // because `failed` is in the claimable set.
         if let Ok(payload) = serde_json::from_str::<AgentJobPayload>(&job.payload) {
             if let Some(run_id) = payload.run_id {
-                self.mark_run_failed(job.workspace_id, run_id, &reason)
+                self.mark_run_failed(job.workspace_id, run_id, &reason, !last_attempt)
                     .await;
             }
         }
-        if job.attempts >= self.config.max_attempts {
+        if last_attempt {
             tracing::error!(
                 outbox_id = job.id,
                 attempts = job.attempts,
@@ -2499,7 +2524,20 @@ impl AgentWorker {
     /// world where a dying turn left nothing behind; on the streaming path it
     /// leaves a sentence that stops mid-word, which is worse than nothing until
     /// it is marked.
-    async fn mark_run_failed(&self, workspace_id: Uuid, run_id: Uuid, reason: &str) {
+    ///
+    /// `retrying` is true when another attempt follows this failure. The freeze the
+    /// failure leaves in the channel is then provisional — marked as a pause, announcing
+    /// nothing, expected to be reopened by the retry; a failure that ends the turn closes the
+    /// stream for good, and that close is the one that tells the asker (ADR-0204 증보 1 D8-a,
+    /// #3987). It finds a block an earlier attempt froze even when no attempt reopened it:
+    /// a provider that is still down on the last attempt fails before it streams a word.
+    async fn mark_run_failed(
+        &self,
+        workspace_id: Uuid,
+        run_id: Uuid,
+        reason: &str,
+        retrying: bool,
+    ) {
         let reason = reason.to_string();
         let result = with_tenant_tx(&self.pool, workspace_id, move |conn| {
             Box::pin(async move {
@@ -2538,8 +2576,13 @@ impl AgentWorker {
             // path is also reached between retry attempts, where the next
             // attempt may yet answer.
             Ok(true) => {
-                self.close_stopped_stream(workspace_id, run_id, StreamCloseOutcome::Failed)
-                    .await;
+                self.close_stopped_stream(
+                    workspace_id,
+                    run_id,
+                    StreamCloseOutcome::Failed,
+                    retrying,
+                )
+                .await;
             }
             // The run was cancelled, or vanished. A cancel closes its own stream
             // through `commit_turn`, with its own outcome — overwriting it with
@@ -2917,6 +2960,10 @@ impl AgentWorker {
     /// Close a turn the worker must not run: the run `failed`, one #2871
     /// system line (throttled per person, thread, reason and window), audit and
     /// rail frame, all in one transaction. No model is called; the job is done.
+    ///
+    /// A stream an earlier attempt left behind is ended after that transaction, as a separate
+    /// best-effort write ([`Self::close_stopped_stream`]) — only when this call finished the
+    /// run (a cancelled or vanished run is left to its own paths).
     async fn settle_refused_turn(
         &self,
         job: &ClaimedAgentJob,
@@ -2941,10 +2988,10 @@ impl AgentWorker {
             Box::pin(async move {
                 let Some(snapshot) = lock_gateway_run_in_tx(conn, workspace_id, run_id).await?
                 else {
-                    return Ok(());
+                    return Ok(false);
                 };
                 if snapshot.status == RunStatus::Cancelled {
-                    return Ok(());
+                    return Ok(false);
                 }
                 // Answers land in the main timeline (root_id None), so the line
                 // does too, and the throttle keys on the channel.
@@ -3050,12 +3097,28 @@ impl AgentWorker {
                     RunStatus::Failed,
                 )
                 .await?;
-                Ok(())
+                Ok(true)
             })
         })
         .await;
         match result {
-            Ok(()) => {
+            Ok(finished) => {
+                // ADR-0204 증보 1 D8-a: a refusal can end a turn that an earlier attempt had
+                // already streamed into — the attempt froze its half answer for a retry
+                // (`provisional`), and the retry is refused before it runs (the key was
+                // removed, the pin came undone). The notice above dedupes into that very
+                // message (`client_msg_id = run_id`), so nothing else ends it: end the
+                // stream here, like every other path that finishes the run. A turn that never
+                // streamed finds nothing to close.
+                if finished {
+                    self.close_stopped_stream(
+                        workspace_id,
+                        run_id,
+                        StreamCloseOutcome::Failed,
+                        false,
+                    )
+                    .await;
+                }
                 self.settle_done(job.id, Some(&code)).await;
                 Settlement::Skipped
             }
@@ -4020,8 +4083,16 @@ fn transport_or_env(
 }
 
 /// `props` on a successful reply — Swift `finalMessageProps` (:2336-2354).
-/// The revision of a message that is **still streaming**, `None` when it is not
-/// one — never streamed, or already closed (#1161).
+/// The revision of a message whose stream the commit still has to **end**, `None` when there
+/// is none — never streamed, or already closed (#1161).
+///
+/// That is a stream that is still streaming, and also one an earlier attempt of this turn
+/// froze provisionally (`provisional: true`, ADR-0204 증보 1 D8-a): the retry that follows a
+/// freeze may answer without streaming a word — an OAuth replay, a wire that does not stream
+/// — and the commit's `send` then dedupes into the frozen row. The commit is the end of the
+/// turn, so it ends that message too: the finished answer replaces the half answer and the
+/// closing slice announces it. Reading only `streaming: true` here left the half answer
+/// standing under a `succeeded` run, with nothing to announce.
 ///
 /// Read off the projection the send handed back rather than with a second query:
 /// on a deduped send that projection *is* the stored row, which is exactly the
@@ -4031,7 +4102,9 @@ fn transport_or_env(
 /// matters — does not delegate a second time.
 fn open_stream_rev(props: &Value) -> Option<i64> {
     let stream = props.get(STREAM_PROPS_KEY)?;
-    if stream.get("streaming").and_then(Value::as_bool) != Some(true) {
+    let streaming = stream.get("streaming").and_then(Value::as_bool) == Some(true);
+    let frozen_for_a_retry = stream.get("provisional").and_then(Value::as_bool) == Some(true);
+    if !streaming && !frozen_for_a_retry {
         return None;
     }
     stream.get("rev").and_then(Value::as_i64)
@@ -4450,6 +4523,23 @@ mod tests {
             Some(7),
             "an outcome and `streaming: true` cannot both be true, but if a producer \
              ever writes it the close is still the honest move"
+        );
+        assert_eq!(
+            open_stream_rev(&json!({
+                STREAM_PROPS_KEY: {
+                    "rev": 7, "streaming": false, "outcome": "failed", "provisional": true
+                }
+            })),
+            Some(7),
+            "a freeze between attempts is still to be ended: the commit that follows it \
+             closes the message it froze"
+        );
+        assert_eq!(
+            open_stream_rev(&json!({
+                STREAM_PROPS_KEY: { "rev": 7, "streaming": false, "outcome": "failed" }
+            })),
+            None,
+            "the same words without the marker are the end of a turn that failed"
         );
     }
 }

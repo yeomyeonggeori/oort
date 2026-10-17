@@ -17,13 +17,91 @@
 //! | [`agent_job::claim_agent_job_batch`](crate::agent_job::claim_agent_job_batch) | `agent_job` | `publish` |
 //! | [`claim_push_candidate_batch`] | `push_candidate` | any |
 //!
-//! The rows themselves are produced by the `push_candidate_enqueue_trg` AFTER
-//! INSERT trigger on `message` (`011_push_notifier.sql:47-69`) — in the same
-//! transaction as the source message, which is what makes a candidate
-//! impossible to lose and impossible to observe before its message commits. No
-//! application code emits this kind (see [`emit::OutboxKind::PushCandidate`](crate::emit::OutboxKind)).
+//! The rows are produced by **two** writers, both in the same transaction as the
+//! write that earns the candidate — which is what makes a candidate impossible to
+//! lose and impossible to observe before its source commits:
+//!
+//! 1. the `push_candidate_enqueue_trg` AFTER INSERT trigger on `message`
+//!    (`011_push_notifier.sql:47-69`): one per message, unconditional;
+//! 2. the write that ENDS a streamed message — `momo_messaging::stream_message_body_in_tx`
+//!    on a final write that is not provisional, over a stream that is open (`streaming:
+//!    true → false`) or that a retried turn froze for a retry and never reopened
+//!    (`provisional: true`, which the ending replaces) — through
+//!    [`emit_stream_closed_push_candidate`] (ADR-0204 증보 1 D8-a, #3987): one more,
+//!    because a streamed answer is *born* unfinished and the trigger fires only at its
+//!    birth. Same payload shape plus `source: "stream_closed"`; the
+//!    notifier cannot tell them apart and does not need to (judgment reads the message,
+//!    not the candidate). A person whose push for the message has already settled is
+//!    skipped when the second candidate is judged (`collapse_id` and the dispatch-log
+//!    unique index); a push that was only attempted and failed is retried, not duplicated.
+//!
+//! No other code emits this kind (see [`emit::OutboxKind::PushCandidate`](crate::emit::OutboxKind)).
 
-use sqlx::PgPool;
+use serde_json::{json, Value};
+use sqlx::{PgExecutor, PgPool};
+use uuid::Uuid;
+
+use crate::emit::{emit_outbox, OutboxKind};
+
+/// `payload.schema` of every `push_candidate` row, whichever of the two writers made it.
+pub const PUSH_CANDIDATE_SCHEMA: &str = "momo.push_candidate.v1";
+
+/// `payload.source` of the candidate a streamed message's closing write enqueues. The
+/// trigger's rows do not carry the key.
+pub const PUSH_CANDIDATE_SOURCE_STREAM_CLOSED: &str = "stream_closed";
+
+/// The payload of the candidate a stream's closing write enqueues: the trigger's
+/// (`011_push_notifier.sql:47-69`) — ids and the message type label, never a body —
+/// plus `source`.
+pub fn stream_closed_candidate_payload(
+    message_id: Uuid,
+    channel_id: Uuid,
+    author_member_id: Uuid,
+    message_type: &str,
+) -> Value {
+    json!({
+        "schema": PUSH_CANDIDATE_SCHEMA,
+        "message_id": message_id,
+        "channel_id": channel_id,
+        "author_member_id": author_member_id,
+        "message_type": message_type,
+        "source": PUSH_CANDIDATE_SOURCE_STREAM_CLOSED,
+    })
+}
+
+/// Enqueue the candidate for a streamed message that has just been closed (ADR-0204 증보 1
+/// D8-a, #3987). Call it **inside the transaction of the closing write** — the candidate
+/// then commits or rolls back with the close, exactly as the trigger's does with the
+/// insert. Same row shape as the trigger's (`method = 'notify'`, `partition_key =
+/// channel_id`); returns the new `outbox.id`.
+///
+/// The caller owns the question "did the answer just end?": the candidate is for the end of a
+/// streamed answer and for nothing else — a final write that is not provisional, on a stream
+/// that was open or frozen for a retry. Not a slice, not a second final write on a block
+/// that is already closed, not a message that never streamed, and not a provisional freeze
+/// (the close a retried turn leaves between two attempts, which the next attempt reopens or
+/// the turn's terminal close ends).
+pub async fn emit_stream_closed_push_candidate<'e, E>(
+    executor: E,
+    workspace_id: Uuid,
+    message_id: Uuid,
+    channel_id: Uuid,
+    author_member_id: Uuid,
+    message_type: &str,
+) -> Result<i64, sqlx::Error>
+where
+    E: PgExecutor<'e>,
+{
+    emit_outbox(
+        executor,
+        workspace_id,
+        OutboxKind::PushCandidate,
+        "notify",
+        &stream_closed_candidate_payload(message_id, channel_id, author_member_id, message_type),
+        Some(channel_id),
+    )
+    .await
+}
 
 /// A claimed `push_candidate` row, flipped to `processing`.
 ///
@@ -100,4 +178,44 @@ pub async fn reclaim_stuck_push_candidates(pool: &PgPool) -> Result<u64, sqlx::E
     .execute(pool)
     .await?;
     Ok(result.rows_affected())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The candidate's keys are the trigger's (`011_push_notifier.sql:52-60`) plus
+    /// `source`. The notifier decodes only `message_id` and `channel_id`, but the other
+    /// ids and the type label are part of the row's shape for anyone reading the feed —
+    /// and a body, a name or any text must not be among them (ADR-0120 D2: id-only).
+    #[test]
+    fn the_close_candidate_has_the_triggers_shape_plus_its_source() {
+        let (message, channel, author) =
+            (Uuid::from_u128(1), Uuid::from_u128(2), Uuid::from_u128(3));
+        let payload = stream_closed_candidate_payload(message, channel, author, "text");
+        let mut keys: Vec<&str> = payload
+            .as_object()
+            .expect("an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "author_member_id",
+                "channel_id",
+                "message_id",
+                "message_type",
+                "schema",
+                "source"
+            ]
+        );
+        assert_eq!(payload["schema"], PUSH_CANDIDATE_SCHEMA);
+        assert_eq!(payload["source"], PUSH_CANDIDATE_SOURCE_STREAM_CLOSED);
+        assert_eq!(payload["message_id"], message.to_string());
+        assert_eq!(payload["channel_id"], channel.to_string());
+        assert_eq!(payload["author_member_id"], author.to_string());
+        assert_eq!(payload["message_type"], "text");
+    }
 }
