@@ -304,7 +304,7 @@ async function sceneA(browser, origin, scheme, report) {
   await context.close();
 }
 
-async function sceneB(browser, origin, scheme, report) {
+async function sceneB(browser, origin, scheme) {
   const tag = scheme;
   const server = newServer({ rules: { dnd: true }, presenceStatus: "dnd" });
   const { context, page } = await openScene(browser, origin, scheme, server);
@@ -314,7 +314,7 @@ async function sceneB(browser, origin, scheme, report) {
   await context.close();
 }
 
-async function sceneC(browser, origin, scheme, report) {
+async function sceneC(browser, origin, scheme) {
   const tag = scheme;
   const server = newServer({ presenceStatus: "dnd", dndUntilMs: UNTIL_2230 });
   const { context, page } = await openScene(browser, origin, scheme, server);
@@ -326,7 +326,7 @@ async function sceneC(browser, origin, scheme, report) {
   await context.close();
 }
 
-async function sceneD(browser, origin, scheme, report) {
+async function sceneD(browser, origin, scheme) {
   const tag = scheme;
   // 방해 금지에 묶여 일시 중지가 켜진 흔한 모양.
   const server = newServer({ rules: { dnd: true, dndUntilMs: UNTIL_2230 }, presenceStatus: "dnd", dndUntilMs: UNTIL_2230 });
@@ -351,7 +351,7 @@ async function sceneD(browser, origin, scheme, report) {
   await context.close();
 }
 
-async function sceneE(browser, origin, scheme, report) {
+async function sceneE(browser, origin, scheme) {
   const tag = scheme;
   // 첫 답: 기한(21:00)이 이미 지난 채 켜져 있다. 둘째 답: 서버가 꺼졌다고 답한다.
   const server = newServer({ rules: { dnd: true, dndUntilMs: kst("2026-10-16T21:00:00") } });
@@ -407,10 +407,10 @@ async function main() {
   try {
     for (const scheme of ["light", "dark"]) {
       await sceneA(browser, preview.origin, scheme, report);
-      await sceneB(browser, preview.origin, scheme, report);
-      await sceneC(browser, preview.origin, scheme, report);
-      await sceneD(browser, preview.origin, scheme, report);
-      await sceneE(browser, preview.origin, scheme, report);
+      await sceneB(browser, preview.origin, scheme);
+      await sceneC(browser, preview.origin, scheme);
+      await sceneD(browser, preview.origin, scheme);
+      await sceneE(browser, preview.origin, scheme);
       await sceneF(browser, preview.origin, scheme, report);
     }
   } finally {
