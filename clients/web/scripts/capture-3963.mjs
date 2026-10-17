@@ -11,6 +11,7 @@
 //
 //   npm run build && node scripts/capture-3963.mjs
 //   OUT_DIR=… PREFIX=c3963 ENGINES=chromium,webkit node scripts/capture-3963.mjs
+//   SCENARIOS=V …   (살아 있는 전환 장면 V 만)
 //
 // 재는 것:
 //   A. 쉴 때: 채널 행과 DM 행의 높이·이름 시작 위치·호버 배경이 같은가.
@@ -34,8 +35,9 @@
 //   S4/S5. 넘치는 메뉴는 열리는 순간 「아래에 더 있다」가 보이고(스크롤 막대가 자리를 차지한다), 넘치지 않는
 //      메뉴에는 막대가 없다(H2).
 //   (design-review R4 수리분)
-//   V. 살아 있는 전환: 포인터를 둔 채 안 읽음 DM 을 열면(읽는 중이라 닫을 수 있게 바뀐다) 행을 벗어났다 다시 들어오지
-//      않아도 X 가 선다(M1). 호버 구독이 늦게 붙으면 mouseenter 는 이미 지나갔다.
+//   V. 살아 있는 전환: 포인터를 둔 채 안 읽음 DM 을 열면(읽는 중이라 닫을 수 있게 바뀐다) X 는 포인터가 움직인 뒤에 선다.
+//      바로 서지 않으면(V2·V3) 알약을 누른 자리의 둘째 클릭(더블클릭)이 방금 뜬 X 를 누르지 못하고, 움직이면 서서(V4) 행을
+//      벗어났다 다시 들어올 필요가 없다(R4 M1: 호버 구독이 늦게 붙으면 mouseenter 는 이미 지나갔다).
 // =============================================================================
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -262,6 +264,11 @@ async function overlapOf(page, id) {
 }
 
 async function runEngine(browserType, engine, origin) {
+  // SCENARIOS=V: 살아 있는 전환(V)만 돌린다. 그 장면 하나를 깨 보는 사보타주가 전체 장면을 다시 돌리지 않게 한다.
+  if (process.env.SCENARIOS === "V") {
+    await scenarioLiveTransition(browserType, engine, origin);
+    return;
+  }
   const full = engine === "chromium";
   for (const scheme of full ? ["light", "dark"] : ["light"]) {
     const state = newState();
@@ -717,9 +724,11 @@ async function scenarioQuickRightClick(browserType, engine, origin) {
   }
 }
 
-// ── V. 살아 있는 전환: 포인터를 둔 채 안 읽음 DM 을 열면 X 가 선다(design-review R4 M1) ─────────
+// ── V. 살아 있는 전환: 포인터를 둔 채 안 읽음 DM 을 열면 X 는 움직인 뒤에 선다(R4 M1 + 마이크로 델타 H) ─────────
 // 닫기를 내미는 규칙이 안 읽음 수에 따라 켜지고 꺼지게 된 뒤로, 행은 포인터가 이미 그 위에 있는 채로 「닫을 수 있음」으로 바뀐다.
-// 호버 구독이 그때 붙으면 `mouseenter` 는 이미 지나가서 행을 벗어났다 다시 들어올 때까지 X 가 서지 않았다.
+// 호버 구독이 그때 붙으면 `mouseenter` 는 이미 지나가서 행을 벗어났다 다시 들어올 때까지 X 가 서지 않았다(M1). 그렇다고 X 를 바로
+// 세우면 알약을 누른 포인터 바로 밑에 서서, 같은 자리의 둘째 클릭(더블클릭)이 방금 뜬 X 를 눌러 읽으려고 연 DM 을 열자마자
+// 닫았다(마이크로 델타 H). 그래서 포인터가 움직인 뒤에 선다.
 async function scenarioLiveTransition(browserType, engine, origin) {
   const scheme = "light";
   const state = newState();
@@ -732,21 +741,40 @@ async function scenarioLiveTransition(browserType, engine, origin) {
       await page.waitForTimeout(400);
       const rest = (await page.getByTestId("dm-close").count()) === 0 && (await rowOf(page, dmId(1)).locator('[data-testid="unread-count"]').count()) === 1;
       check(engine, scheme, "V1 안 읽음 DM 위에 포인터를 둔 동안은 X 가 없고 알약이 있다", rest, null);
-      // 클릭: 포인터는 그 자리에 머문 채 DM 이 열린다. 열린 DM 은 읽는 중이라 안 읽음이 0 으로 접히고 닫을 수 있게 바뀐다.
-      const at = await rowOf(page, dmId(1)).boundingBox();
+      // 알약 자리를 누른다(안 읽음을 읽으러 가는 가장 흔한 클릭). 열린 DM 은 읽는 중이라 안 읽음이 0 으로 접히고 닫을 수 있게
+      // 바뀌는데, 포인터는 알약이 있던 그 자리에 그대로 있다 - 새로 뜰 X 가 정확히 그 자리를 덮는다.
+      const pill = await rowOf(page, dmId(1)).locator('[data-testid="unread-count"]').boundingBox();
+      const px = Math.round(pill.x + pill.width / 2);
+      const py = Math.round(pill.y + pill.height / 2);
       const writesBefore = state.writes.length; // 로그인·첫 대화 열기가 쓴 것은 제외한다
       const putsBefore = state.puts.length;
-      await rowOf(page, dmId(1)).click();
+      await page.mouse.click(px, py);
       await page.waitForURL(new RegExp(`/c/${dmId(1)}$`), { timeout: 5_000 });
+      await page.waitForTimeout(600); // 바로 세우던 때라면 X 가 벌써 떴을 시간(12~60ms)을 한참 넘긴다
+      const standing = await page.getByTestId("dm-close").count();
+      const pillLeft = await rowOf(page, dmId(1)).locator('[data-testid="unread-count"]').count();
+      check(engine, scheme, "V2 포인터를 움직이지 않은 동안은 열린 DM(알약 없음)에도 X 가 없다 - 알약 자리 바로 밑에 서지 않는다", standing === 0 && pillLeft === 0, { standing, pillLeft, pill });
+      // 더블클릭의 둘째 클릭: 같은 자리를 여러 간격으로 다시 누른다. 읽으려고 연 DM 이 닫히면 안 된다.
+      const gaps = [40, 100, 250, 700];
+      for (const gap of gaps) {
+        await page.waitForTimeout(gap);
+        await page.mouse.click(px, py);
+      }
+      await page.waitForTimeout(300);
+      const stored = await page.evaluate((k) => localStorage.getItem(k), CLOSED_KEY);
+      const parsed = stored ? JSON.parse(stored) : null;
+      const stillThere = (await rowOf(page, dmId(1)).count()) === 1;
+      check(engine, scheme, `V3 같은 자리를 ${gaps.join("·")}ms 간격으로 다시 눌러도 DM 이 닫히지 않는다(행이 남고, 주소가 그 DM 이고, 원장이 비어 있다)`, stillThere && page.url().endsWith(`/c/${dmId(1)}`) && parsed?.[workspaceId]?.[dmId(1)] === undefined, { stillThere, url: page.url(), parsed });
+      // 움직이면 X 가 선다: 행 안에서 20px(이벤트 한 번의 휙). 열린 DM 은 닫을 수 있다.
+      await page.mouse.move(px - 20, py);
       const stands = await page.getByTestId("dm-close").waitFor({ timeout: 4_000 }).then(() => true, () => false);
-      const pill = await rowOf(page, dmId(1)).locator('[data-testid="unread-count"]').count();
-      check(engine, scheme, "V2 포인터를 움직이지 않고 연 DM(읽는 중, 알약 없음)에 X 가 선다 - 행을 벗어났다 다시 들어올 필요가 없다", stands && pill === 0, { stands, pill, rowAt: at });
+      check(engine, scheme, "V4 포인터가 행 안에서 움직이면(20px) X 가 선다 - 행을 벗어났다 다시 들어올 필요가 없다", stands, null);
       if (engine === "chromium" && SHOTS) await page.screenshot({ path: resolve(OUT_DIR, `${PREFIX}-hover-dm-open-live-${scheme}.png`), clip: { x: 0, y: 0, width: 420, height: 900 } });
       // X 가 서는 것은 쓰기가 아니다: 전환이 보낸 서버 쓰기는 읽음 PUT 뿐이고(이 하네스의 빈 타임라인은 그것도 보내지 않는다)
       // 멤버십·선호 쓰기는 0건이며, 읽음 PUT 이 있다면 DM 을 연 explicit_open 만이다.
       const otherWrites = state.writes.slice(writesBefore).filter((w) => !/\/channels\/[^/]+\/read-state$/.test(w));
       const puts = state.puts.slice(putsBefore);
-      check(engine, scheme, "V3 전환 중 서버 쓰기는 DM 을 연 읽음 PUT(explicit_open) 뿐이다 - X 가 서는 것·호버는 쓰기가 아니다", otherWrites.length === 0 && puts.every((p) => p.channel === dmId(1) && p.body.read_intent === "explicit_open"), { otherWrites, puts });
+      check(engine, scheme, "V5 전환 중 서버 쓰기는 DM 을 연 읽음 PUT(explicit_open) 뿐이다 - X 가 서는 것·호버는 쓰기가 아니다", otherWrites.length === 0 && puts.every((p) => p.channel === dmId(1) && p.body.read_intent === "explicit_open"), { otherWrites, puts });
     });
   } finally {
     await context.close();

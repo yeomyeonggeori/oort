@@ -12,6 +12,7 @@ import { DM_CLOSE_LABEL } from "@momo/core/features/channels/model";
 import { cn } from "@/design/lib/cn";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
 import { AttentionDot, AttentionPill } from "./AttentionBadge";
+import { ensurePointerTrail, lastPointerAt } from "./pointerTrail";
 import { badgeFor, type DotTone } from "./sidebarBadge";
 import {
   shouldShowSectionActions,
@@ -122,6 +123,12 @@ export interface SidebarRowProps {
   iconKind?: "glyph" | "avatar";
 }
 
+/**
+ * 행이 포인터를 그 위에 둔 채 닫을 수 있게 바뀔 때, X 를 세우려면 포인터가 알려진 마지막 자리에서 움직여야 하는 거리(px).
+ * 손의 흔들림(1~3px)은 넘고, 일부러 X 쪽으로 가는 움직임(알약에서 X 까지 20px 남짓)에는 한참 못 미친다.
+ */
+const CLOSE_REVEAL_TRAVEL_PX = 8;
+
 export function SidebarRow({
   to,
   icon,
@@ -155,16 +162,56 @@ export function SidebarRow({
   useEffect(() => {
     const row = rowRef.current;
     if (!closable || row === null) return;
-    const enter = () => setHovered(true);
-    const leave = () => setHovered(false);
+    ensurePointerTrail();
+    // 「이미 행 위에 있던 포인터」를 지켜보는 중이면 그것을 걷는 함수(아래 설명). 지켜보는 동안에는 X 가 포인터의 움직임 뒤에만 선다.
+    let unwatch: (() => void) | null = null;
+    let anchor: { x: number; y: number } | null = null;
+    /** 지켜보기의 기준 자리에서 `CLOSE_REVEAL_TRAVEL_PX` 이상 움직였는가. 기준이 없으면(포인터를 처음 본다) 이 이벤트가 기준이다. */
+    const travelled = (event: MouseEvent): boolean => {
+      if (anchor === null) {
+        anchor = { x: event.clientX, y: event.clientY };
+        return false;
+      }
+      return Math.hypot(event.clientX - anchor.x, event.clientY - anchor.y) >= CLOSE_REVEAL_TRAVEL_PX;
+    };
+    const reveal = () => {
+      unwatch?.();
+      setHovered(true);
+    };
+    // 평소의 호버는 mouseenter 한 번에 선다. 지켜보는 동안의 mouseenter 는 움직임이 따라온 것만 센다: Chromium 은 눌린 알약처럼
+    // 포인터 밑의 요소가 사라지면 호버 사슬을 다시 세우며 행에 합성 mouseenter 를 쏜다(포인터는 그대로, 12ms 뒤).
+    const enter = (event: MouseEvent) => {
+      if (unwatch !== null && !travelled(event)) return;
+      reveal();
+    };
+    const move = (event: MouseEvent) => {
+      if (travelled(event)) reveal();
+    };
+    const leave = () => {
+      unwatch?.();
+      setHovered(false);
+    };
     row.addEventListener("mouseenter", enter);
     row.addEventListener("mouseleave", leave);
     // 구독이 늦게 붙는 길(design-review R4 M1): 닫을 수 없던 행이 포인터를 그 위에 둔 채 닫을 수 있게 바뀌면 - 안 읽음 DM 을
     // 클릭해 열자마자 읽는 중이라 안 읽음이 0 으로 접히는 때, 새 메시지를 읽는 때 - `mouseenter` 는 이미 지나가서 오지 않는다.
     // 지금 포인터가 행 안에 있는지는 `:hover` 가 답한다. 우클릭 메뉴(포털)로 건너간 포인터는 행의 자손 위가 아니라
     // 거짓이다: 위의 네이티브 leave 와 같은 판정이다.
-    if (row.matches(":hover")) setHovered(true);
+    //
+    // 그 길에서는 X 를 바로 세우지 않고 **포인터가 움직인 뒤에** 세운다(마이크로 델타 H): 알약을 누른 포인터는 X 가 설 바로
+    // 그 자리에 있어서, 같은 자리의 둘째 클릭(더블클릭)이 방금 뜬 X 를 눌러 읽으려고 연 DM 을 열자마자 닫았다. 흔들림(몇 px)은
+    // 움직임이 아니다: 알려진 마지막 포인터 자리에서 `CLOSE_REVEAL_TRAVEL_PX` 이상 떨어져야 한다. 이벤트 한 번으로 크게 움직여도
+    // 선다(이동은 이벤트 수가 아니라 거리다).
+    if (row.matches(":hover")) {
+      anchor = lastPointerAt();
+      row.addEventListener("mousemove", move);
+      unwatch = () => {
+        row.removeEventListener("mousemove", move);
+        unwatch = null;
+      };
+    }
     return () => {
+      unwatch?.();
       row.removeEventListener("mouseenter", enter);
       row.removeEventListener("mouseleave", leave);
       setHovered(false);
