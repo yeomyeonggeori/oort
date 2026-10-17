@@ -48,7 +48,31 @@ const ALLOWED_REASONS: &[&str] = &[
     "work_session_idle",
     "work_run_done",
 ];
-const ALLOWED_CATEGORIES: &[&str] = &["momo.message", "momo.mention", "momo.approval", "momo.work"];
+/// The closed category vocabulary. `momo.approval.open` is ADR-0204 D7 (#3928):
+/// an approval that must be opened in the app to be decided (one 「열어서 결정」
+/// button, no lock-screen 승인·거절).
+///
+/// **Deploy order (ADR-0120 A-6):** ship this relay BEFORE the notifier that can
+/// emit `momo.approval.open`. An old relay answers an unknown category with a
+/// closed-vocabulary refusal, so the notifier's first such dispatch would fail
+/// permanently (a 400 is settled, not retried). An old *app* is the other way
+/// round and is safe: it cannot decode the category, fails open to the placeholder
+/// and shows no buttons.
+const ALLOWED_CATEGORIES: &[&str] = &[
+    "momo.message",
+    "momo.mention",
+    "momo.approval",
+    "momo.approval.open",
+    "momo.work",
+];
+
+/// Does this category name an approval? Both approval categories carry
+/// `approval_id`, and no other category may. An exact list, not a prefix: a
+/// category this relay does not know is refused before this is asked, and a future
+/// `momo.approval.*` must decide for itself.
+fn carries_approval_id(category: &str) -> bool {
+    matches!(category, "momo.approval" | "momo.approval.open")
+}
 
 /// APNs `aps.sound` per category (#2669).
 ///
@@ -57,6 +81,7 @@ const ALLOWED_CATEGORIES: &[&str] = &["momo.message", "momo.mention", "momo.appr
 /// | `momo.message` | `default` | A DM: a person wrote to you. |
 /// | `momo.mention` | `default` | Someone named you. |
 /// | `momo.approval` | `default` | An agent is waiting on your decision. |
+/// | `momo.approval.open` | `default` | The same wait, for an approval that is decided in the app (ADR-0204 D7). It is no quieter: the person is just as needed. |
 /// | `momo.work` | `default` | It reaches one person through the same judgment as the rows above: a work-session card in your DM or naming you, the owner-only `resume_offer` (itself an `approval_request` message), or the owner-only `work_session_idle` 「작업 끝남」. The category follows the message's shape, not its urgency, so a silent row would make a DM quieter just because it carries a card. |
 ///
 /// `"default"` is the system sound. The person's own settings (sound off for
@@ -76,6 +101,7 @@ const CATEGORY_SOUNDS: &[(&str, Option<&str>)] = &[
     ("momo.message", Some("default")),
     ("momo.mention", Some("default")),
     ("momo.approval", Some("default")),
+    ("momo.approval.open", Some("default")),
     ("momo.work", Some("default")),
 ];
 
@@ -148,7 +174,7 @@ impl PushDispatch {
         let dispatch: PushDispatch =
             serde_json::from_value(value.clone()).map_err(|_| DispatchError::InvalidFieldSet)?;
         let mut expected: BTreeSet<&str> = REQUIRED_KEYS.iter().copied().collect();
-        if dispatch.category == "momo.approval" {
+        if carries_approval_id(&dispatch.category) {
             expected.insert("approval_id");
         }
         let actual: BTreeSet<&str> = object.keys().map(String::as_str).collect();
@@ -188,7 +214,7 @@ impl PushDispatch {
             return Err(DispatchError::Category);
         }
         let approval_present = self.approval_id.is_some();
-        if (self.category == "momo.approval") != approval_present {
+        if carries_approval_id(&self.category) != approval_present {
             return Err(DispatchError::ApprovalId);
         }
         if let Some(approval_id) = &self.approval_id {
@@ -376,7 +402,7 @@ mod tests {
                 "\"reason\":\"mention\"",
                 &format!("\"reason\":\"{reason}\""),
             );
-        if category == "momo.approval" {
+        if carries_approval_id(category) {
             json = json.replace(
                 "\"channel_id\"",
                 "\"approval_id\":\"55555555-5555-5555-5555-555555555555\",\"channel_id\"",
@@ -397,6 +423,7 @@ mod tests {
             ("momo.message", "dm", Some("default")),
             ("momo.mention", "mention", Some("default")),
             ("momo.approval", "approval_request", Some("default")),
+            ("momo.approval.open", "approval_request", Some("default")),
             ("momo.work", "resume_offer", Some("default")),
             ("momo.work", "work_session_idle", Some("default")),
         ];
@@ -483,6 +510,84 @@ mod tests {
             &format!("\"approval_id\":\"{approval_id}\",\"channel_id\""),
         );
         assert!(PushDispatch::decode_closed(invalid.as_bytes()).is_err());
+    }
+
+    /// ADR-0204 D7 (#3928): `momo.approval.open` is an accepted category, it names
+    /// its approval exactly as `momo.approval` does, and it sounds like it.
+    #[test]
+    fn the_open_approval_category_is_accepted_and_names_its_approval() {
+        let approval_id = "55555555-5555-5555-5555-555555555555";
+        let json = DISPATCH_JSON
+            .replace("\"reason\":\"mention\"", "\"reason\":\"approval_request\"")
+            .replace(
+                "\"category\":\"momo.mention\"",
+                "\"category\":\"momo.approval.open\"",
+            )
+            .replace(
+                "\"channel_id\"",
+                &format!("\"approval_id\":\"{approval_id}\",\"channel_id\""),
+            );
+        let dispatch = PushDispatch::decode_closed(json.as_bytes()).unwrap();
+        assert_eq!(dispatch.category, "momo.approval.open");
+        let encoded = serde_json::to_vec(&ApnsPayload::from_dispatch(&dispatch)).unwrap();
+        let object: Value = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(object["aps"]["category"], "momo.approval.open");
+        assert_eq!(object["aps"]["sound"], "default");
+        assert_eq!(object["momo"]["approval_id"], approval_id);
+        assert_eq!(object["momo"]["reason"], "approval_request");
+
+        // The open category without its approval is the same refusal the inline one gets.
+        let without = json.replace(&format!("\"approval_id\":\"{approval_id}\","), "");
+        assert_eq!(
+            PushDispatch::decode_closed(without.as_bytes()).unwrap_err(),
+            DispatchError::InvalidFieldSet
+        );
+        // And an approval id on a non-approval category is still refused.
+        let on_work = DISPATCH_JSON.replace(
+            "\"channel_id\"",
+            &format!("\"approval_id\":\"{approval_id}\",\"channel_id\""),
+        );
+        assert!(PushDispatch::decode_closed(on_work.as_bytes()).is_err());
+    }
+
+    /// The category list is closed. A near-miss of the new name is refused rather
+    /// than read as "something approval-shaped".
+    #[test]
+    fn a_category_next_to_the_open_one_is_still_refused() {
+        for category in [
+            "momo.approval.opened",
+            "momo.approval.",
+            "momo.approval.open ",
+            "momo.approvals",
+            "momo.approval.OPEN",
+        ] {
+            let json = DISPATCH_JSON
+                .replace("\"reason\":\"mention\"", "\"reason\":\"approval_request\"")
+                .replace(
+                    "\"category\":\"momo.mention\"",
+                    &format!("\"category\":\"{category}\""),
+                );
+            assert_eq!(
+                PushDispatch::decode_closed(json.as_bytes()).unwrap_err(),
+                DispatchError::Category,
+                "{category:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_category_vocabulary_is_exactly_five() {
+        let expected: BTreeSet<&str> = [
+            "momo.message",
+            "momo.mention",
+            "momo.approval",
+            "momo.approval.open",
+            "momo.work",
+        ]
+        .into_iter()
+        .collect();
+        let allowed: BTreeSet<&str> = ALLOWED_CATEGORIES.iter().copied().collect();
+        assert_eq!(allowed, expected);
     }
 
     #[test]

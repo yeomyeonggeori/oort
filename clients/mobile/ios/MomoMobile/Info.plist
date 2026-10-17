@@ -46,6 +46,9 @@
 	     없이만 쓴다(src/storage/kv.ts). 「켜지 않았으니 사용이 아니다」는 해석이다.
 	     기기 키(#3026, ADR-0146 D-1)는 Secure Enclave ECDSA 「서명」만 한다(CryptoKit,
 	     modules/momo-device-key-native). 인증·전자서명 용도라 면제 범주로 읽었다 — owner 재확인 항목.
+	     잠금 화면 승인(#3931)의 멱등 키는 SHA-256 「해시」만 한다(CryptoKit, 기기에서 나가지 않는
+	     비밀 위의 해시 — modules/momo-push-action-native/ios/MomoPushActionDecisionKey.swift).
+	     암호화가 아니라 같은 인증 범주로 읽었고, 이 파일 하나만 그렇다 — 같은 owner 재확인 항목.
 	     코드 쪽 전제는 __tests__/projectShape.test.ts 가 기계로 지킨다. 그 시험이 깨지면 이
 	     값을 다시 판단한다. 이 키가 없으면 빌드마다 ASC 가 수출 규정 질문을 띄우고, 답하기
 	     전에는 테스터가 설치하지 못한다. -->

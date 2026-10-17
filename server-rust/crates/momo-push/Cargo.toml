@@ -16,6 +16,14 @@ momo-messaging = { path = "../momo-messaging" }
 # momo-auth (it owns that table); this crate only calls it. momo-auth depends on
 # neither this crate nor momo-messaging, so the edge adds no cycle.
 momo-auth = { path = "../momo-auth" }
+# ADR-0204 D7 (#3928): who may decide an approval is the decision route's rule,
+# not a push-flavoured copy of it. `momo-agent` owns the pure gate
+# (`decider_gate`, `reference_execution_host`) and `agent_owner_in_tx`; `momo-t3`
+# owns `remote_host_owner_in_tx`. The push judgment CALLS the functions the
+# route calls. Neither depends on this crate (momo-agent -> momo-db; momo-t3 ->
+# momo-db, momo-provider, momo-wire), so the edges add no cycle.
+momo-agent = { path = "../momo-agent" }
+momo-t3 = { path = "../momo-t3" }
 
 async-trait.workspace = true
 chrono.workspace = true
@@ -23,6 +31,7 @@ serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]

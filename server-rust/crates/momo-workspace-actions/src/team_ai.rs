@@ -736,17 +736,6 @@ pub enum ProposalRefusal {
     TargetBusy,
     /// The run is no longer in a state that can be parked.
     RunNotParkable,
-    /// The action is declared but has no route yet (ADR-0201 증보 v2 H7:
-    /// `plugin.install`). No card is made; the person is told this sentence,
-    /// built by the registry from the declared row's own reason.
-    NotYetAvailable(String),
-}
-
-/// The honest answer for a declared-but-not-executable action the team AI is
-/// asked for, or `None` for any other id (H7: only `plugin.install` today).
-pub fn not_yet_available(action_id: &str, raw_args: &Value) -> Option<String> {
-    (action_id == actions::ACTION_PLUGIN_INSTALL && actions::declared_action(action_id).is_some())
-        .then(|| actions::plugin_install_unavailable_line(raw_args))
 }
 
 /// The provenance recorded on the approval and the audit row. **Ids, a model
@@ -891,9 +880,6 @@ pub async fn propose_in_tx(
     rationale: Option<&str>,
 ) -> Result<Result<ProposalOk, ProposalRefusal>, DbError> {
     let workspace_id = context.workspace_id;
-    if let Some(line) = not_yet_available(action_id, raw_args) {
-        return Ok(Err(ProposalRefusal::NotYetAvailable(line)));
-    }
     if !is_team_ai_action(action_id) {
         return Ok(Err(ProposalRefusal::NotAllowed));
     }
@@ -1141,9 +1127,6 @@ pub fn validate_pure(
     raw_args: &Value,
     now_ms: i64,
 ) -> Result<(), ProposalRefusal> {
-    if let Some(line) = not_yet_available(action_id, raw_args) {
-        return Err(ProposalRefusal::NotYetAvailable(line));
-    }
     if !is_team_ai_action(action_id) {
         return Err(ProposalRefusal::NotAllowed);
     }
@@ -1297,24 +1280,24 @@ pub fn delegate_client_msg_id(source_message_id: Option<Uuid>, agent: Uuid) -> U
 mod tests {
     use super::*;
 
-    /// ADR-0201 증보 v2 H13-A13 (was v1 acceptance 1): the allow-list is exactly
-    /// H6-1's eight, each in the registry, and nothing that returns a secret or
-    /// widens access is in it.
+    /// ADR-0201 증보 v2 H13-A13 (was v1 acceptance 1) + H7 (#3889): the allow-list
+    /// is H6-1's eight plus `plugin.install`, each in the registry, and nothing
+    /// that returns a secret or widens access is in it.
     #[test]
-    fn the_allow_list_is_the_eight_and_excludes_secret_and_access_actions() {
+    fn the_allow_list_is_the_nine_and_excludes_secret_and_access_actions() {
         for id in TEAM_AI_ACTION_IDS {
             assert!(
                 actions::action_by_id(id).is_some(),
                 "{id} is not in the registry"
             );
         }
-        assert_eq!(TEAM_AI_ACTION_IDS.len(), 8);
+        assert_eq!(TEAM_AI_ACTION_IDS.len(), 9);
         assert!(is_team_ai_action(actions::ACTION_WORKSPACE_SETTINGS_UPDATE));
+        assert!(is_team_ai_action(actions::ACTION_PLUGIN_INSTALL));
         for banned in [
             actions::ACTION_INVITE_CREATE,
             actions::ACTION_AGENT_INVITE,
             actions::ACTION_HOSTED_CHANNELS_GRANT,
-            actions::ACTION_PLUGIN_INSTALL,
         ] {
             assert!(!is_team_ai_action(banned), "{banned} must not be allowed");
         }
@@ -1372,26 +1355,28 @@ mod tests {
         assert_eq!(prompt.matches("```").count(), 2);
     }
 
-    /// H7 / H13-A16 (model half): `plugin.install` is not in the tool's `actionId`
-    /// enum, so a model that keeps to its schema can only give H7's sentence if
-    /// the prompt tells it to. The prompt carries the declared row's own reason and
-    /// every official app's name — the same source as the server's fallback line.
+    /// H7 (#3889): `plugin.install` is in the tool's `actionId` enum, and the prompt
+    /// tells the model to propose it for an app request, to leave connecting to the
+    /// member, and to ask for no token.
     #[test]
-    fn the_prompt_tells_the_model_how_to_answer_an_install_request() {
+    fn the_prompt_sends_an_install_request_to_the_card_and_the_grant_to_the_member() {
         let prompt = system_prompt(&Roster::default(), WebSearch::Available);
-        let reason = actions::declared_action(actions::ACTION_PLUGIN_INSTALL)
-            .expect("declared")
-            .unavailable_reason;
-        assert!(prompt.contains(reason), "{prompt}");
-        assert!(
-            prompt.contains("준비되면 설치 카드를 띄울게요."),
-            "{prompt}"
-        );
+        assert!(prompt.contains(actions::ACTION_PLUGIN_INSTALL), "{prompt}");
         for (_, label) in actions::PLUGIN_INSTALL_PLUGINS {
             assert!(prompt.contains(label), "{label} missing: {prompt}");
         }
-        // The id itself is not offered: the tool enum stays H6-1's eight.
-        assert!(!prompt.contains(actions::ACTION_PLUGIN_INSTALL), "{prompt}");
+        assert!(prompt.contains("관리자가 승인해야 돼"), "{prompt}");
+        assert!(
+            prompt.contains("직접 해"),
+            "the grant is the member's: {prompt}"
+        );
+        assert!(!prompt.contains("아직 설치 경로가 없어요"), "{prompt}");
+        assert!(
+            !prompt.contains("준비되면 설치 카드를 띄울게요"),
+            "{prompt}"
+        );
+        // The helper is never asked to carry a credential.
+        assert!(prompt.contains("토큰이나 키는 묻지 마"), "{prompt}");
     }
 
     /// H13-A5: v2 answers ordinary questions — the v1 refusal sentence and the
@@ -1540,21 +1525,31 @@ mod tests {
         }
     }
 
-    /// H7 / H13-A16 (pure half): asking for an app install answers with the honest
-    /// line — never `NotAllowed`'s generic hand-off, never a card.
+    /// H7 (#3889, pure half): an app install is a proposal like any other — the
+    /// official four pass, anything else is refused without saying which rule broke.
     #[test]
-    fn an_install_request_answers_that_the_route_does_not_exist_yet() {
-        let refused = validate_pure(
-            "plugin.install",
-            &json!({"pluginId": "com.momo.plugins.notion"}),
-            0,
-        );
-        let Err(ProposalRefusal::NotYetAvailable(line)) = refused else {
-            panic!("expected NotYetAvailable, got {refused:?}");
-        };
-        assert!(line.contains("아직 설치 경로가 없어요"), "{line}");
-        assert!(line.starts_with("Notion 앱은"), "{line}");
-        assert!(not_yet_available("webhook.create", &json!({})).is_none());
-        assert!(not_yet_available("channel.create", &json!({})).is_none());
+    fn an_install_request_is_validated_like_any_other_proposal() {
+        for plugin in actions::PLUGIN_INSTALL_PLUGINS {
+            assert!(
+                validate_pure("plugin.install", &json!({"pluginId": plugin.0}), 0).is_ok(),
+                "{}",
+                plugin.0
+            );
+        }
+        for bad in [
+            json!({}),
+            json!({"pluginId": "external_webhook"}),
+            json!({"pluginId": "com.momo.plugins.unknown"}),
+            json!({"pluginId": 7}),
+            json!({"pluginId": "com.momo.plugins.github", "enabled": false}),
+            json!({"pluginId": "com.momo.plugins.github", "accessToken": "x"}),
+            json!("com.momo.plugins.github"),
+        ] {
+            assert_eq!(
+                validate_pure("plugin.install", &bad, 0),
+                Err(ProposalRefusal::InvalidArguments),
+                "{bad}"
+            );
+        }
     }
 }

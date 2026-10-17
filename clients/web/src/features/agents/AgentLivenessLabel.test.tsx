@@ -176,15 +176,36 @@ describe("생존 라벨", () => {
     }
   });
 
-  it("좁은 자리는 눈에는 한두 낱말, 보조기술에는 라벨 한 줄이고 뜻은 title뿐이다", async () => {
+  it("사이드바 DM 행용 compact 변형은 없다 (#3964): 행은 글자 대신 아바타 점이 말한다", async () => {
     answer("woken_not_collected");
-    const el = mount(createElement(AgentLivenessLabel, { agentId: AGENT, variant: "compact" }));
+    const el = mount(createElement(AgentLivenessLabel, { agentId: AGENT }));
     await settle();
     const node = el.querySelector('[data-testid="agent-liveness"]');
-    expect(node?.querySelector(".truncate")?.textContent).toBe("안 가져감");
-    expect(node?.querySelector(".truncate")?.getAttribute("aria-hidden")).toBe("true");
-    expect(node?.querySelector(".sr-only")?.textContent).toBe("깨웠지만 아직 안 가져감");
-    expect(node?.getAttribute("title")).toContain("다시 깨울 수 있어요");
+    // 칩은 낱말 전체를 그린다(짧은 낱말 「안 가져감」이 아니라).
+    expect(node?.querySelector(".truncate")?.textContent).toBe("깨웠지만 아직 안 가져감");
+    expect(node?.hasAttribute("data-variant")).toBe(false);
+  });
+
+  it("칩의 점은 아바타 점과 같은 함수(agentDotTone)와 한 클래스 맵을 읽는다: 한 상태가 한 색 (#3964, 소유자 결정 2026-10-17)", async () => {
+    // [상태, 칩 글자 색의 생존 톤(data-tone), 점 톤(data-dot-tone), 점 클래스]. 살아 있음·대기도 초록이다(Buzz식).
+    const cases: [AgentLivenessState, string, string, string][] = [
+      ["responsive", "ok", "ok", "bg-ok"],
+      ["alive_idle", "neutral", "ok", "bg-ok"],
+      ["quiet", "neutral", "muted", "bg-ink-muted"],
+      ["inactive", "neutral", "muted", "bg-ink-muted"],
+      ["work_waiting", "warn", "warn", "bg-warn"],
+    ];
+    for (const [state, tone, dotTone, dotClass] of cases) {
+      answer(state, 1);
+      const el = mount(createElement(AgentLivenessLabel, { agentId: AGENT }));
+      await settle();
+      const node = el.querySelector('[data-testid="agent-liveness"]');
+      expect(node?.getAttribute("data-tone"), state).toBe(tone);
+      expect(node?.getAttribute("data-dot-tone"), state).toBe(dotTone);
+      expect(node?.querySelector("span[aria-hidden]")?.className, state).toContain(dotClass);
+      act(() => root?.unmount());
+      host?.remove();
+    }
   });
 
   it("넓은 자리는 뜻을 보조기술에 한 번만 준다 (title로 또 주지 않는다)", async () => {

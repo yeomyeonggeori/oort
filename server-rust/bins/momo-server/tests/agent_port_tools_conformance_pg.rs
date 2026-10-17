@@ -18466,12 +18466,14 @@ async fn the_helper_settings_cards_execute_as_the_approver_and_nobody_else() {
     }
 }
 
-/// ADR-0201 증보 v2 H13-A13·A14·A16 — what never becomes a card:
-/// * the three helper-only ids through the Agent Port (`oort_action_propose`) —
-///   refused like an unknown id, zero approvals;
+/// ADR-0201 증보 v2 H13-A13·A14 + H7 (#3889) — what never becomes a card:
+/// * the helper-only ids (the three settings actions and `plugin.install`) through
+///   the Agent Port (`oort_action_propose`) — refused like an unknown id, zero
+///   approvals;
 /// * an unknown or V9-closed settings key, and `memory {enabled:true}`, from the
 ///   helper — `InvalidArguments`, zero approvals;
-/// * `plugin.install` from the helper — the honest line, zero approvals.
+/// * `plugin.install` with an id outside the official four, or with any key but
+///   `pluginId`, from the helper — `InvalidArguments`, zero approvals.
 #[tokio::test]
 #[ignore = "needs verifier-owned isolated PostgreSQL 18"]
 async fn the_helper_only_and_declared_actions_make_no_card_where_they_must_not() {
@@ -18494,6 +18496,10 @@ async fn the_helper_only_and_declared_actions_make_no_card_where_they_must_not()
         (
             "workspace.work_tier.update",
             json!({"mode": "auto", "autoTarget": "cloud"}),
+        ),
+        (
+            "plugin.install",
+            json!({"pluginId": "com.momo.plugins.github"}),
         ),
     ] {
         let before = approval_count_3900(&su, workspace).await;
@@ -18560,6 +18566,20 @@ async fn the_helper_only_and_declared_actions_make_no_card_where_they_must_not()
             "workspace.work_tier.update",
             json!({"mode": "auto", "autoTarget": Uuid::new_v4().to_string()}),
         ),
+        ("plugin.install", json!({})),
+        ("plugin.install", json!({"pluginId": "external_webhook"})),
+        (
+            "plugin.install",
+            json!({"pluginId": "com.momo.plugins.nope"}),
+        ),
+        (
+            "plugin.install",
+            json!({"pluginId": "com.momo.plugins.github", "enabled": false}),
+        ),
+        (
+            "plugin.install",
+            json!({"pluginId": "com.momo.plugins.github", "accessToken": "sk-x"}),
+        ),
     ] {
         let refused = helper_propose_3900(&su, &worker, &fixture, helper, action_id, args.clone())
             .await
@@ -18583,23 +18603,403 @@ async fn the_helper_only_and_declared_actions_make_no_card_where_they_must_not()
     .expect_err("nothing to change");
     assert_eq!(refused, ProposalRefusal::InvalidArguments);
     assert_eq!(approval_count_3900(&su, workspace).await, before);
+}
 
-    // ---- plugin.install: the honest line, no card ---------------------------
-    let refused = helper_propose_3900(
+// ---------------------------------------------------------------------------
+// ADR-0201 증보 v2 H7 (#3889) — the `plugin.install` card
+// ---------------------------------------------------------------------------
+
+/// `(enabled, installed_by, revoked)` of the workspace's install row, if any.
+async fn plugin_install_state_3889(
+    su: &PgPool,
+    workspace: Uuid,
+    plugin: &str,
+) -> Option<(bool, Uuid, bool)> {
+    sqlx::query_as(
+        "SELECT enabled, installed_by, revoked_at IS NOT NULL FROM workspace_plugin_install \
+          WHERE workspace_id = $1 AND plugin_id = $2",
+    )
+    .bind(workspace)
+    .bind(plugin)
+    .fetch_optional(su)
+    .await
+    .expect("install state")
+}
+
+/// The newest `plugin.installed` audit row of the workspace: actor, subject, run,
+/// target type and the detail.
+async fn plugin_installed_audit_3889(
+    su: &PgPool,
+    workspace: Uuid,
+) -> (
+    Option<Uuid>,
+    Option<Uuid>,
+    Option<Uuid>,
+    Option<String>,
+    Value,
+) {
+    sqlx::query_as(
+        "SELECT actor_member_id, subject_member_id, run_id, target_type, detail FROM audit_log \
+          WHERE workspace_id = $1 AND action = 'plugin.installed' \
+          ORDER BY created_at DESC, id DESC LIMIT 1",
+    )
+    .bind(workspace)
+    .fetch_one(su)
+    .await
+    .expect("a plugin.installed audit row")
+}
+
+/// The rest of an audit detail once the card's own provenance keys are removed.
+fn without_provenance_3889(mut detail: Value) -> Value {
+    if let Some(object) = detail.as_object_mut() {
+        object.remove("via_agent");
+        object.remove("approval_id");
+    }
+    detail
+}
+
+/// ADR-0201 증보 v2 H7 / ADR-0186 D2 (#3889) — the app-install card, end to end:
+/// * a proposal installs nothing and shows the app, its version and **where it
+///   reaches out to** (ADR-0113 D5);
+/// * a plain member's approval is 403 `role_required`, nothing is installed, the
+///   card stays decidable; an agent cannot decide at all;
+/// * the owner's approval installs **enabled**, as the approver, with
+///   `plugin.installed` audit naming the helper (`via_agent`), the approval and the
+///   run — and the effect equals the REST route's: uninstalling and installing
+///   through `POST …/install` leaves the same row state and the same audit detail
+///   (minus the card's provenance);
+/// * a rejected card installs nothing;
+/// * a manifest that changed after the card was drawn (the egress the approver
+///   read is no longer the egress) makes the approval a 409 `action_args_invalid`
+///   and installs nothing — the digest pin is what holds this;
+/// * an install made through REST in the meantime makes the card stale, not a
+///   second install.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_plugin_install_card_installs_as_the_approver_and_equals_the_rest_route() {
+    const GITHUB: &str = "com.momo.plugins.github";
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let worker = momo_worker_pool_3900().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let plain_jwt = seed_plain_member(&su, &fixture).await;
+    let workspace = fixture.workspace;
+    let helper = enable_helper_3900(&su, &fixture).await;
+    let install_path = format!("{base}/v1/workspaces/{workspace}/plugins/{GITHUB}/install");
+
+    // ---- 1. a proposal: a card that says what it will do, and nothing done ----
+    let proposed = helper_propose_3900(
         &su,
         &worker,
         &fixture,
         helper,
         "plugin.install",
-        json!({"pluginId": "com.momo.plugins.linear"}),
+        json!({"pluginId": GITHUB}),
     )
     .await
-    .expect_err("no card for an install");
+    .unwrap_or_else(|refusal| panic!("plugin.install: {refusal:?}"));
+    let approval = proposed.approval_id;
+    let (rows, role) = card_rows_3900(&su, proposed.card_message_id).await;
+    assert_eq!(role, json!("admin"));
+    let shown = rows.to_string();
+    for must_show in [
+        "GitHub 1.0.0",
+        "api.githubcopilot.com",
+        "설치 안 됨 → 설치됨(켜짐)",
+    ] {
+        assert!(shown.contains(must_show), "{must_show} missing: {shown}");
+    }
     assert_eq!(
-        refused,
-        ProposalRefusal::NotYetAvailable(
-            "Linear 앱은 아직 설치 경로가 없어요. 준비되면 설치 카드를 띄울게요.".into()
-        )
+        approval_args_3900(&su, approval).await,
+        json!({"pluginId": GITHUB})
     );
-    assert_eq!(approval_count_3900(&su, workspace).await, before);
+    assert_eq!(
+        plugin_install_state_3889(&su, workspace, GITHUB).await,
+        None
+    );
+
+    // ---- 2. who may decide ----------------------------------------------------
+    let (status, _h, refused) = decide_as(
+        &client,
+        &base,
+        workspace,
+        &plain_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["status"], "role_required");
+    assert_eq!(
+        plugin_install_state_3889(&su, workspace, GITHUB).await,
+        None,
+        "a plain member's approval installs nothing"
+    );
+    let agent_try = client
+        .post(format!(
+            "{base}/v1/workspaces/{workspace}/approvals/{approval}/decision"
+        ))
+        .bearer_auth(&fixture.hosted_bearer)
+        .json(&json!({"approvalId": approval, "approve": true,
+                      "clientDecisionId": Uuid::new_v4()}))
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        matches!(agent_try.status().as_u16(), 401 | 403),
+        "an agent decided"
+    );
+    assert_eq!(
+        plugin_install_state_3889(&su, workspace, GITHUB).await,
+        None
+    );
+
+    // ---- 3. the owner approves: the install, as the owner, naming the helper ----
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        workspace,
+        &fixture.human_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(approved["result"]["actionId"], json!("plugin.install"));
+    assert_eq!(
+        approved["result"]["ref"],
+        json!({"type": "workspace_settings", "id": workspace.to_string()})
+    );
+    let by_card = plugin_install_state_3889(&su, workspace, GITHUB)
+        .await
+        .expect("installed by the card");
+    assert_eq!(
+        by_card,
+        (true, fixture.human, false),
+        "enabled, by the approver"
+    );
+    let (actor, subject, run, target_type, detail) =
+        plugin_installed_audit_3889(&su, workspace).await;
+    assert_eq!(actor, Some(fixture.human));
+    assert_eq!(
+        subject,
+        Some(helper),
+        "the audit is about the helper's proposal"
+    );
+    assert!(run.is_some(), "and carries the run");
+    assert_eq!(target_type.as_deref(), Some("plugin_install"));
+    assert_eq!(detail["via_agent"], json!(helper.to_string()));
+    assert_eq!(detail["approval_id"], json!(approval.to_string()));
+    assert_eq!(detail["plugin_id"], json!(GITHUB));
+    assert_eq!(detail["egress_domains"], json!(["api.githubcopilot.com"]));
+    // The outcome line is the helper's, in the channel.
+    let outcome: Option<String> = sqlx::query_scalar(
+        "SELECT body FROM message WHERE workspace_id = $1 AND author_member_id = $2 \
+         AND type = 'tool_result' ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(workspace)
+    .bind(helper)
+    .fetch_optional(&su)
+    .await
+    .unwrap();
+    assert_eq!(outcome.as_deref(), Some("GitHub 앱을 설치했어요"));
+    // No grant came with it: connecting is each member's own consent (D2).
+    let grants: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM plugin_grant WHERE workspace_id = $1 AND plugin_id = $2",
+    )
+    .bind(workspace)
+    .bind(GITHUB)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(grants, 0);
+
+    // ---- 4. the same effect as the REST route ---------------------------------
+    let removed = client
+        .delete(&install_path)
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(removed.status().as_u16(), 200);
+    let reinstalled = client
+        .post(&install_path)
+        .bearer_auth(&fixture.human_jwt)
+        .header("content-type", "application/json")
+        .body(r#"{"enabled":true}"#)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        reinstalled.status().as_u16(),
+        200,
+        "the row existed: restored"
+    );
+    let by_rest = plugin_install_state_3889(&su, workspace, GITHUB)
+        .await
+        .expect("installed by REST");
+    assert_eq!(
+        by_rest, by_card,
+        "the card and the route leave the same row state"
+    );
+    let (rest_actor, rest_subject, rest_run, rest_target, rest_detail) =
+        plugin_installed_audit_3889(&su, workspace).await;
+    assert_eq!(rest_actor, actor);
+    assert_eq!(
+        rest_subject,
+        Some(fixture.human),
+        "REST: the actor is its own subject"
+    );
+    assert!(rest_run.is_none());
+    assert_eq!(rest_target, target_type);
+    assert!(rest_detail.get("via_agent").is_none(), "{rest_detail}");
+    assert_eq!(
+        without_provenance_3889(detail),
+        without_provenance_3889(rest_detail),
+        "the same audit detail once the card's provenance keys are set aside"
+    );
+
+    // ---- 5. a rejected card installs nothing -----------------------------------
+    let removed = client
+        .delete(&install_path)
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(removed.status().as_u16(), 200);
+    let proposed = helper_propose_3900(
+        &su,
+        &worker,
+        &fixture,
+        helper,
+        "plugin.install",
+        json!({"pluginId": GITHUB}),
+    )
+    .await
+    .expect("a card for a removed app");
+    let (rows, _) = card_rows_3900(&su, proposed.card_message_id).await;
+    assert!(
+        rows.to_string().contains("설치 해제됨 → 설치됨(켜짐)"),
+        "an uninstalled app reads as 설치 해제됨: {rows}"
+    );
+    let (status, _h, rejected) = decide_as(
+        &client,
+        &base,
+        workspace,
+        &fixture.human_jwt,
+        proposed.approval_id,
+        false,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{rejected}");
+    let state = plugin_install_state_3889(&su, workspace, GITHUB).await;
+    assert_eq!(
+        state.map(|(enabled, _, revoked)| (enabled, revoked)),
+        Some((false, true)),
+        "still uninstalled after a rejection"
+    );
+
+    // ---- 6. a manifest that changed under the card re-asks ----------------------
+    let proposed = helper_propose_3900(
+        &su,
+        &worker,
+        &fixture,
+        helper,
+        "plugin.install",
+        json!({"pluginId": GITHUB}),
+    )
+    .await
+    .expect("a card");
+    let (manifest_text, digest): (String, String) = sqlx::query_as(
+        "SELECT manifest::text, manifest_digest FROM plugin_registry WHERE plugin_id = $1",
+    )
+    .bind(GITHUB)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let mut widened: Value = serde_json::from_str(&manifest_text).unwrap();
+    widened["momo"]["egressDomains"] = json!(["api.githubcopilot.com", "evil.example.com"]);
+    sqlx::query(
+        "UPDATE plugin_registry SET manifest = $2::jsonb, \
+                manifest_digest = 'sha256:' || encode(sha256(convert_to(($2::jsonb)::text, 'UTF8')), 'hex') \
+          WHERE plugin_id = $1",
+    )
+    .bind(GITHUB)
+    .bind(widened.to_string())
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, _h, stale) = decide_as(
+        &client,
+        &base,
+        workspace,
+        &fixture.human_jwt,
+        proposed.approval_id,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    // Put the registry row back before anything can fail on its state.
+    sqlx::query("UPDATE plugin_registry SET manifest = $2::jsonb, manifest_digest = $3 WHERE plugin_id = $1")
+        .bind(GITHUB)
+        .bind(&manifest_text)
+        .bind(&digest)
+        .execute(&su)
+        .await
+        .unwrap();
+    assert_eq!(status, 409, "{stale}");
+    assert_eq!(stale["status"], "action_args_invalid");
+    let state = plugin_install_state_3889(&su, workspace, GITHUB).await;
+    assert_eq!(
+        state.map(|(enabled, _, revoked)| (enabled, revoked)),
+        Some((false, true)),
+        "the approver never consented to the widened egress"
+    );
+
+    // ---- 7. an install made meanwhile makes the card stale, not a second install --
+    let reinstalled = client
+        .post(&install_path)
+        .bearer_auth(&fixture.human_jwt)
+        .header("content-type", "application/json")
+        .body(r#"{"enabled":true}"#)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reinstalled.status().as_u16(), 200);
+    let audits = sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM audit_log WHERE workspace_id = $1 AND action = 'plugin.installed'",
+    )
+    .bind(workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let (status, _h, stale) = decide_as(
+        &client,
+        &base,
+        workspace,
+        &fixture.human_jwt,
+        proposed.approval_id,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{stale}");
+    assert_eq!(stale["status"], "action_args_invalid");
+    let after = sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM audit_log WHERE workspace_id = $1 AND action = 'plugin.installed'",
+    )
+    .bind(workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        after, audits,
+        "the stale card installed nothing and wrote no audit row"
+    );
 }

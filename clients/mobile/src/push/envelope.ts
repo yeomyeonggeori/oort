@@ -1,3 +1,5 @@
+import type {NotificationRequest, NotificationResponse} from 'expo-notifications';
+
 import {
   PUSH_CATEGORY,
   PUSH_ENVELOPE_SCHEMA,
@@ -99,11 +101,18 @@ export function parsePushEnvelope(payload: unknown): PushEnvelope | null {
   const rawApprovalId = str(momo, 'approval_id')?.toLowerCase() ?? null;
   const approvalId = rawApprovalId && UUID.test(rawApprovalId) ? rawApprovalId : null;
 
-  // PushNotification.swift:189-190, kept as one biconditional rather than two
+  // PushNotification.swift:227-228, kept as one biconditional rather than two
   // loose checks: an approval push MUST carry a usable approval id, and a
   // non-approval push must NOT carry one. Splitting these lets an approval id
   // ride along on a plain message and be acted on by the wrong branch.
-  const isApproval = category === PUSH_CATEGORY.approval;
+  //
+  // Both approval categories name their approval (ADR-0204 D7): the open one needs
+  // the id to land on the card, and to clear the notification once it is decided.
+  // Naming the approval is NOT permission to decide it from here — only the inline
+  // category's buttons may (`handlePushResponse` checks the category again).
+  const isApproval =
+    category === PUSH_CATEGORY.approval ||
+    category === PUSH_CATEGORY.approvalOpen;
   if (isApproval !== (approvalId !== null)) return null;
 
   return {
@@ -120,8 +129,53 @@ export function parsePushEnvelope(payload: unknown): PushEnvelope | null {
   };
 }
 
+/**
+ * 알림 응답이 들고 온 봉투 원문 (#3931).
+ *
+ * 원격 푸시는 `trigger.payload` 에 APNs `userInfo` 를 들고 온다. 잠금 화면 승인을 네이티브
+ * 처리기가 받은 뒤 원래 알림을 대신해 올리는 **한 줄짜리 로컬 알림**(`승인했어요 · …`,
+ * `승인하지 못했어요` + 본문 `눌러서 앱에서 마무리해 주세요`)에는 푸시 트리거가 없다. 그 줄을 눌러도 카드로
+ * 가려면 원문이 어딘가에 있어야 해서, 처리기가 `content.data.origin` 에 그대로 실어 둔다
+ * (`MomoPushActionContract.originKey`).
+ *
+ * 순서가 보안 경계다: 푸시 트리거의 원문이 있으면 **그것만** 읽는다. 원격 푸시의 본문이
+ * `origin` 이라는 키를 싣고 있어도 이 함수는 그쪽을 보지 않는다 — 로컬 알림을 만들 수 있는
+ * 것은 이 앱뿐이고, 원격 입력이 로컬 입력으로 둔갑하는 길은 없어야 한다.
+ */
+export function pushPayloadOf(response: NotificationResponse): unknown {
+  return pushPayloadOfRequest(response.notification.request);
+}
+
+/**
+ * 같은 규칙을, 응답이 아니라 알림 센터에 **배달돼 있는** 알림에 쓴다 (`approvalNotifications.ts`).
+ * 결정된 승인의 알림을 걷을 때 처리기가 올린 결과 줄(트리거 없음, 원문은 `content.data.origin`)도
+ * 그 승인의 것으로 알아봐야 한다 — 안 그러면 앱에서 마무리한 뒤에도 「눌러서 앱에서 마무리해
+ * 주세요」가 잠금 화면에 남는다.
+ */
+export function pushPayloadOfRequest(request: NotificationRequest): unknown {
+  const trigger = request.trigger as {payload?: unknown} | null;
+  if (trigger?.payload !== undefined) {
+    return trigger.payload;
+  }
+  const data = request.content?.data as {origin?: unknown} | null | undefined;
+  return data?.origin;
+}
+
 /** The thread root, or null when the notification is not in a thread.
  *  Mirrors `MomoPushEnvelope.threadRootID` (PushNotification.swift:118-120). */
 export function threadRootId(envelope: PushEnvelope): string | null {
   return envelope.threadId === envelope.channelId ? null : envelope.threadId;
+}
+
+/**
+ * May this notification's 승인·거절 buttons decide its approval (ADR-0204 D7)?
+ *
+ * Only the inline category may. `momo.approval.open` names its approval too (so the
+ * app can land on the card and clear the notification once it is decided) but it is
+ * decided in the app, behind a card that can show what a banner cannot. An allow
+ * list of one, on purpose: a future approval category that is not added here is
+ * not decidable from a notification until someone decides that it should be.
+ */
+export function isLockScreenDecidable(envelope: PushEnvelope): boolean {
+  return envelope.category === PUSH_CATEGORY.approval;
 }

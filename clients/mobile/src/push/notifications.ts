@@ -14,12 +14,19 @@ import {
 import {shouldAskNotifications} from '../features/onboarding/phoneFlow';
 import {dismissApprovalNotifications} from './approvalNotifications';
 import {PUSH_ACTION} from './contract';
-import {parsePushEnvelope, threadRootId, type PushEnvelope} from './envelope';
+import {
+  isLockScreenDecidable,
+  parsePushEnvelope,
+  pushPayloadOf,
+  threadRootId,
+  type PushEnvelope,
+} from './envelope';
+import {nativeApprovalHandlerAttached} from './native';
 
 // =============================================================================
 // expo-notifications wiring (goal RN-N1, ADR-0137 D7 정오 5항).
 //
-// ## Why the delegate is never touched here
+// ## Why the delegate is left alone here (and the one place it is not)
 //
 // expo-notifications installs `NotificationCenterManager` as the
 // UNUserNotificationCenter delegate and fans out to registered delegates. Its
@@ -28,12 +35,18 @@ import {parsePushEnvelope, threadRootId, type PushEnvelope} from './envelope';
 // `EmitterModule.definition()`'s OnCreate. That is what forwards responses to
 // this file. Verified in 57.0.8 sources; see the PR for the full note.
 //
-// Because the emitter already delivers `actionIdentifier` to JS, this client
-// needs NO native delegate of its own, and adding one would be actively worse:
-// `NotificationCenterManager.userNotificationCenter(_:didReceive:)` calls the
-// system completion handler UNCONDITIONALLY after polling delegates
-// (NotificationCenterManager.swift:116-124), so a second delegate that also
-// completes would double-call it.
+// Because the emitter already delivers `actionIdentifier` to JS, 답장 and the
+// body tap need NO native delegate of their own. 승인·거절 are the exception
+// (#3931, ADR-0204 D6). `NotificationCenterManager.userNotificationCenter(_:didReceive:)`
+// calls the system completion handler UNCONDITIONALLY after polling its delegates
+// (NotificationCenterManager.swift:116-124), so a process woken for a lock-screen
+// button is told it is done before JS has even started: nothing here could send
+// the request. Those two buttons are therefore answered by
+// `modules/momo-push-action-native`, one more delegate on the same seam that takes
+// a background task synchronously and never calls the completion itself (the
+// manager does; a second call would be the double-completion this paragraph used
+// to warn about). `handlePushResponse` steps aside for them when that module is
+// attached.
 //
 // ## getDevicePushTokenAsync, never getExpoPushTokenAsync
 //
@@ -205,16 +218,25 @@ export async function handlePushResponse(
   response: NotificationResponse,
   context: PushActionContext,
 ): Promise<PushActionResult> {
-  const trigger = response.notification.request.trigger as
-    | {type?: string; payload?: unknown}
-    | null;
-  const envelope = parsePushEnvelope(trigger?.payload);
+  const envelope = parsePushEnvelope(pushPayloadOf(response));
   const action = response.actionIdentifier;
 
-  if (action === DEFAULT_ACTION_IDENTIFIER) {
-    // Body tap. Opening the app is always safe, even for an envelope we could
-    // not parse or one from another workspace — navigation is the caller's.
+  if (action === DEFAULT_ACTION_IDENTIFIER || action === PUSH_ACTION.openApproval) {
+    // Body tap, or 「열어서 결정」 (ADR-0204 D7) — which is a body tap that asked
+    // for Face ID first. Opening the app is always safe, even for an envelope we
+    // could not parse or one from another workspace — navigation is the caller's.
     return {kind: 'opened', envelope};
+  }
+
+  // 승인·거절은 iOS 에서 네이티브 처리기가 혼자 맡는다 (#3931, ADR-0204 D6). 같은 버튼을
+  // JS 도 보내면 결정이 두 번 간다(멱등 키가 서로 달라 하나는 409 로 끝나지만, 두 요청이
+  // 서로를 앞지르는 경주가 된다). 처리기가 **붙어 있을 때만** 물러난다 — 이유는
+  // `native.ts` 에 있다. 답장은 그대로 JS 의 몫이다.
+  if (
+    (action === PUSH_ACTION.approve || action === PUSH_ACTION.reject) &&
+    nativeApprovalHandlerAttached()
+  ) {
+    return {kind: 'ignored', reason: 'approval buttons are answered natively'};
   }
 
   if (!envelope) {
@@ -223,12 +245,27 @@ export async function handlePushResponse(
   if (envelope.workspaceId !== context.signedInWorkspaceId.toLowerCase()) {
     return {kind: 'ignored', reason: 'workspace mismatch'};
   }
+  // ADR-0204 D7: an approval the lock screen must not decide (`momo.approval.open`)
+  // names its approval too, but its only button is 「열어서 결정」 — it has no 승인/거절
+  // button to press. This is the line that keeps it so: a 승인/거절 response that
+  // reaches an open envelope anyway (a hand-built one, or a future change that
+  // registers those buttons on the category) is not a decision this client takes
+  // from a notification. Judged here, before the `switch`, so it stands in front of
+  // whatever the approve and reject arms do with the approval id. (`approvalId` is
+  // present on every approval envelope, so the test is the category's.)
+  if (
+    (action === PUSH_ACTION.approve || action === PUSH_ACTION.reject) &&
+    envelope.approvalId &&
+    !isLockScreenDecidable(envelope)
+  ) {
+    return {kind: 'ignored', reason: 'this approval is decided in the app'};
+  }
 
   switch (action) {
     case PUSH_ACTION.approve:
     case PUSH_ACTION.reject: {
       // `parsePushEnvelope` already guarantees approvalId is non-null exactly
-      // when the category is `approval`, so this is a type narrowing, not a
+      // when the category is an approval one, so this is a type narrowing, not a
       // second policy.
       if (!envelope.approvalId) {
         return {kind: 'ignored', reason: 'no approval on this notification'};

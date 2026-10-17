@@ -9,7 +9,9 @@ import * as liveness from "./liveness";
 import {
   canOfferWake,
   livenessAccessibleName,
+  livenessToneFor,
   livenessView,
+  mayActOnLiveness,
   toolErrorText,
   wakeCooldownLabel,
   wakeFailureText,
@@ -142,5 +144,29 @@ describe("응답 파서", () => {
     expect(parsed).toEqual({ agentMemberId: "abc", state: "alive_idle", lastSignalAtMs: NOW });
     expect(() => agentLivenessFromWire({ agentMemberId: "a", state: "online" })).toThrow(WireShapeError);
     expect(() => agentLivenessFromWire({ state: "quiet" })).toThrow(WireShapeError);
+  });
+});
+
+describe("보는 사람에게 맞춘 톤 (#3964): 경고는 할 수 있는 사람에게만", () => {
+  it("경고 톤은 owner/admin 에게만 경고이고, 그 밖에는 같은 사실이 중립이다", () => {
+    const warn = view("work_waiting");
+    expect(warn.tone).toBe("warn");
+    expect(livenessToneFor(warn, true)).toBe("warn");
+    expect(livenessToneFor(warn, false)).toBe("neutral");
+  });
+
+  it("ok 와 neutral 은 보는 사람과 무관하다", () => {
+    for (const mayAct of [true, false]) {
+      expect(livenessToneFor(view("responsive", 1), mayAct)).toBe("ok");
+      expect(livenessToneFor(view("inactive"), mayAct)).toBe("neutral");
+    }
+  });
+
+  it("다시 깨울 수 있는 역할은 owner/admin 이다", () => {
+    expect(mayActOnLiveness("owner")).toBe(true);
+    expect(mayActOnLiveness("admin")).toBe(true);
+    expect(mayActOnLiveness("member")).toBe(false);
+    expect(mayActOnLiveness("guest")).toBe(false);
+    expect(mayActOnLiveness(undefined)).toBe(false);
   });
 });

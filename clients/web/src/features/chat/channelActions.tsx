@@ -22,9 +22,11 @@ import {
   CHANNEL_LEAVE_CONFIRM_TITLE,
   CHANNEL_LEAVE_LABEL,
   CHANNEL_MARK_READ_FAILURE,
+  CHANNEL_MARK_UNREAD_FAILURE,
   CHANNEL_MUTE_FAILURE,
 } from "@momo/core/features/channels/model";
 import {
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
@@ -32,6 +34,7 @@ import {
   DropdownMenuSeparator,
 } from "@/design/ui/dropdown-menu";
 import {
+  ContextMenuGroup,
   ContextMenuItem,
   ContextMenuLabel,
   ContextMenuRadioGroup,
@@ -58,6 +61,7 @@ import {
 } from "@/features/workspace/useWorkspace";
 import {
   channelActionAvailability,
+  channelActionClusterTitle,
   channelActionItemsForSurface,
   channelActionKeepsMenuOpen,
   type ChannelActionAvailability,
@@ -115,6 +119,12 @@ export interface ChannelActionTarget {
    */
   starred?: boolean;
   onToggleStar?: () => void;
+  /**
+   * DM 을 이 기기의 사이드바에서 닫는다 (#3963). 손이 없으면 「사이드바에서 닫기」가 서지
+   * 않는다 - 별표·배치와 같은 규율이다. 닫는 일의 실행(원장 기록 · 열려 있으면 착지 · 이웃
+   * 행으로 캐럿)은 사이드바가 지고, 여기서는 항목을 내고 부르기만 한다.
+   */
+  onCloseDm?: () => void;
 }
 
 export interface ChannelActions {
@@ -158,6 +168,7 @@ export function useChannelActions({
   onMoveToSection,
   starred = false,
   onToggleStar,
+  onCloseDm,
 }: ChannelActionTarget): ChannelActions {
   const client = useQueryClient();
   const navigate = useNavigate();
@@ -174,6 +185,7 @@ export function useChannelActions({
     })
   );
   const nameCopy = useClipboardCopy(title);
+  const idCopy = useClipboardCopy(channel.id);
 
   const muteMutation = useMutation({
     mutationFn: (muted: boolean) =>
@@ -212,6 +224,32 @@ export function useChannelActions({
       invalidateReadStates();
     },
     onError: () => setError(CHANNEL_MARK_READ_FAILURE),
+  });
+
+  // 「읽지 않음으로 표시」 (#3963). 다 읽은 채널의 **가장 최근 메시지**를 첫 안 읽음으로
+  // 남긴다: `mark_unread_before_seq` 에 최신 seq 를 싣고, 읽음 커서는 그대로 광고한다(서버가
+  // `max(current, min(요청, latestSeq))` 로 죄므로 뒤로 가지 않는다). 사유는 `mark_unread` 다 -
+  // `read_intent` 를 싣지 않는다. `explicit_open` 을 실으면 표시를 세운 같은 트랜잭션이 그
+  // 표시를 지운다(`advertiseReadState.ts` 머리말 5번). 메시지 ⋯ 의 「여기부터 안 읽음」과
+  // 같은 와이어이고 다른 것은 어느 seq 를 고르는가뿐이다.
+  const markUnreadMutation = useMutation({
+    mutationFn: () => {
+      if (!readState) throw new Error("no read state");
+      return advertiseReadState(
+        workspaceId,
+        channel.id,
+        readState.lastReadSeq,
+        "mark_unread",
+        { markUnreadBeforeSeq: readState.latestSeq }
+      );
+    },
+    onSuccess: (state) => {
+      setError(null);
+      onActionSucceeded();
+      applyReadStateToCache(client, workspaceId, state);
+      invalidateReadStates();
+    },
+    onError: () => setError(CHANNEL_MARK_UNREAD_FAILURE),
   });
 
   // ## 목록에서 지우는 시점 — 낙관이 다이얼로그를 죽였다 (design-review #1937 H-1)
@@ -279,6 +317,12 @@ export function useChannelActions({
         sectionCount: onMoveToSection ? sections?.length ?? 0 : 0,
         canStar: Boolean(onToggleStar),
         hasMemorySettings: isSurfaceProvided("teamMemory"),
+        // 투영이 있고, 다 읽었고, 메시지가 하나라도 있을 때만(빈 채널에는 표시할 메시지가 없다).
+        canMarkUnread:
+          readState != null &&
+          readState.latestSeq > 0 &&
+          composedUnreadCount(readState) === 0,
+        canCloseDm: Boolean(onCloseDm),
       }),
     [
       channel,
@@ -287,6 +331,7 @@ export function useChannelActions({
       sections?.length,
       onMoveToSection,
       onToggleStar,
+      onCloseDm,
     ]
   );
 
@@ -294,6 +339,7 @@ export function useChannelActions({
     muted: channel.muted,
     copiedLink: linkCopy.copied,
     copiedName: nameCopy.copied,
+    copiedId: idCopy.copied,
     starred,
     sections,
     currentSectionId,
@@ -328,6 +374,7 @@ export function useChannelActions({
     // 서버 표면이라 문제가 없다.
     if (key === "mute" && muteMutation.isPending) return;
     if (key === "mark-read" && markReadMutation.isPending) return;
+    if (key === "mark-unread" && markUnreadMutation.isPending) return;
     switch (key) {
       case "mute":
         muteMutation.mutate(!channel.muted);
@@ -335,11 +382,23 @@ export function useChannelActions({
       case "mark-read":
         markReadMutation.mutate();
         return;
+      case "mark-unread":
+        markUnreadMutation.mutate();
+        return;
       case "copy-link":
         runCopy(linkCopy.copy);
         return;
       case "copy-name":
         runCopy(nameCopy.copy);
+        return;
+      case "copy-id":
+        runCopy(idCopy.copy);
+        return;
+      case "close-dm":
+        // 왕복이 없다. 닫기는 이 기기의 원장 한 칸이고(`sidebarDmClosure.ts`), 서버도 상대 쪽
+        // 멤버십도 건드리지 않는다. 그래서 되돌릴 것도 기다릴 것도 없다.
+        setError(null);
+        onCloseDm?.();
         return;
       case "star":
         // 왕복이 없다. 별표는 사이드바 payload 의 한 칸이고 저장은 디바운스가
@@ -361,6 +420,7 @@ export function useChannelActions({
   function isPending(key: ChannelActionKey): boolean {
     if (key === "mute") return muteMutation.isPending;
     if (key === "mark-read") return markReadMutation.isPending;
+    if (key === "mark-unread") return markUnreadMutation.isPending;
     return false;
   }
 
@@ -545,6 +605,78 @@ function ChannelActionMenuRow({
 }
 
 /**
+ * 같은 무리의 연속 항목을 한 덩어리로 묶는다. 정본 차례가 무리 단위로 단조라서 한 무리가
+ * 둘로 갈라지는 일은 없다.
+ */
+function clusterRuns(items: ChannelActionItem[]): ChannelActionItem[][] {
+  const runs: ChannelActionItem[][] = [];
+  for (const item of items) {
+    const last = runs[runs.length - 1];
+    if (last && last[0].cluster === item.cluster) last.push(item);
+    else runs.push([item]);
+  }
+  return runs;
+}
+
+/**
+ * 한 무리의 행들. 제목이 있는 무리(「복사」)는 제목 + 그룹으로, 없는 무리는 행만 선다.
+ *
+ * 제목은 서브메뉴가 아니라 **화면에 남는 행들 위의 제목**이다(위 `ChannelSectionMoveGroup` 과
+ * 같은 문법, 이유는 `channelActionModel.ts` 머리말). 제목은 `useId` 로 자기 id 를 갖고 그룹이
+ * `aria-labelledby` 로 되짚는다 - Radix 의 Label 은 aria 를 하나도 걸어 주지 않는다.
+ * 그릇은 `ChannelSectionMoveGroup` 처럼 **표면이 고른다**: 오늘 이 무리는 행 메뉴에만 서지만
+ * 열쇠 하나를 헤더에 더하는 사람이 Radix 루트 없는 조각을 렌더하지 않게.
+ */
+function ChannelActionClusterRows({
+  surface,
+  prefix,
+  run,
+  actions,
+  onHandOff,
+}: {
+  surface: ChannelActionSurface;
+  prefix: string;
+  run: ChannelActionItem[];
+  actions: ChannelActions;
+  onHandOff: (key: ChannelActionKey) => void;
+}) {
+  const labelId = useId();
+  const title = channelActionClusterTitle(run[0].cluster);
+  const rows = run.map((item) =>
+    item.sections ? (
+      <ChannelSectionMoveGroup
+        key={item.key}
+        surface={surface}
+        prefix={prefix}
+        item={item}
+        actions={actions}
+        onHandOff={onHandOff}
+      />
+    ) : (
+      <ChannelActionMenuRow
+        key={item.key}
+        surface={surface}
+        prefix={prefix}
+        item={item}
+        actions={actions}
+        onHandOff={onHandOff}
+      />
+    )
+  );
+  if (title === undefined) return <>{rows}</>;
+  const Group = surface === "header" ? DropdownMenuGroup : ContextMenuGroup;
+  const Label = surface === "header" ? DropdownMenuLabel : ContextMenuLabel;
+  return (
+    <>
+      <Label id={labelId} data-testid={`${prefix}-${run[0].cluster}-group`}>
+        {title}
+      </Label>
+      <Group aria-labelledby={labelId}>{rows}</Group>
+    </>
+  );
+}
+
+/**
  * 한 메뉴의 항목 전량. 그릇만 다르고(드롭다운 / 컨텍스트) 나머지는 같다 —
  * `MessageActionMenuItems` 와 같은 갈래이고, 같은 이유다.
  */
@@ -589,26 +721,16 @@ export function ChannelActionMenuItems({
           />
         </div>
       )}
-      {actions.items(surface).map((item) => (
-        <Fragment key={item.key}>
-          {item.separatorBefore && <Separator />}
-          {item.sections ? (
-            <ChannelSectionMoveGroup
-              surface={surface}
-              prefix={prefix}
-              item={item}
-              actions={actions}
-              onHandOff={onHandOff}
-            />
-          ) : (
-            <ChannelActionMenuRow
-              surface={surface}
-              prefix={prefix}
-              item={item}
-              actions={actions}
-              onHandOff={onHandOff}
-            />
-          )}
+      {clusterRuns(actions.items(surface)).map((run) => (
+        <Fragment key={run[0].cluster}>
+          {run[0].separatorBefore && <Separator />}
+          <ChannelActionClusterRows
+            surface={surface}
+            prefix={prefix}
+            run={run}
+            actions={actions}
+            onHandOff={onHandOff}
+          />
         </Fragment>
       ))}
     </>
