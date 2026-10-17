@@ -405,7 +405,6 @@ export function usePullRefresh(
         haptics.warning();
         // 응답이 오기 전에 화면을 떠났으면(탭을 옮겼으면) 안내를 세우지 않는다: 돌아왔을 때 옛 실패가 서 있게 된다.
         if (!activeRef.current) return;
-        AccessibilityInfo.announceForAccessibility?.(copy);
         // 안내는 컨트롤이 다 닫힌 뒤에 선다(위 `NOTICE_FIRST_MS`).
         const next: Failure = {copy, queries, offline: cause === 'offline'};
         const since = Date.now();
@@ -425,6 +424,8 @@ export function usePullRefresh(
             settleRef.current = setTimeout(tick, NOTICE_POLL_MS);
             return;
           }
+          // 낭독은 안내가 서는 커밋과 같이 나간다(문장을 먼저 듣고 화면의 안내를 한참 뒤에 만나지 않게).
+          AccessibilityInfo.announceForAccessibility?.(copy);
           setNotice(next);
         };
         settleRef.current = setTimeout(tick, NOTICE_FIRST_MS);
@@ -475,10 +476,14 @@ export function usePullRefresh(
     if (queryClient !== undefined && failure.queries.length > 0) {
       const cache = queryClient.getQueryCache();
       const waiting = new Set(failure.queries);
-      // 안내가 서기 전에 이미 다시 읽힌(또는 캐시에서 사라진) 쿼리는 기다리지 않는다.
+      // 안내가 서기 전에 이미 다시 읽힌(또는 캐시에서 사라진) 쿼리는 기다리지 않는다. 「읽힘」은 성공 상태이면서 **읽는 중이
+      // 아닌** 것이다: 캐시된 데이터가 있는 쿼리는 재조회 중에도 `status` 가 `success` 라서, 상한(20초)에 걸려 아직 도는 쿼리를
+      // 상태만 보고 빼면 안내가 서자마자 지워진다(검수 H1).
       for (const hash of [...waiting]) {
         const query = cache.get(hash);
-        if (query === undefined || query.state.status === 'success') waiting.delete(hash);
+        if (query === undefined || (query.state.status === 'success' && query.state.fetchStatus === 'idle')) {
+          waiting.delete(hash);
+        }
       }
       if (waiting.size === 0) {
         setNotice(null);

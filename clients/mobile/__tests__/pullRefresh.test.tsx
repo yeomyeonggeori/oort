@@ -508,7 +508,7 @@ describe('실제 재조회와 표시', () => {
 });
 
 describe('실패는 시각으로도 서고, 시간으로 사라지지 않는다 (#3992)', () => {
-  it('실패하면 목록 위에 안내 한 줄이 선다: 경고 햅틱·낭독은 응답이 도착한 순간, 안내는 컨트롤이 닫힌 뒤', async () => {
+  it('실패하면 목록 위에 안내 한 줄이 선다: 경고 햅틱은 응답이 도착한 순간, 안내와 낭독은 컨트롤이 닫힌 뒤', async () => {
     const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
     announce.mockClear();
     render(<Harness onRefresh={() => Promise.resolve([{status: 'error', isError: true}])} />);
@@ -520,10 +520,11 @@ describe('실패는 시각으로도 서고, 시간으로 사라지지 않는다 
     await flush(460);
     // 응답이 손에 닿는다: 경고 햅틱과 낭독. 안내 상자는 아직이다(컨트롤이 닫히는 중이다).
     expect(notifications()).toEqual(['notification:warning']);
-    expect(announce).toHaveBeenLastCalledWith(FAILED);
+    expect(announce).not.toHaveBeenCalledWith(FAILED); // 낭독은 안내가 서는 커밋과 같이 나간다
     expect(notice()).toBeNull();
     await flush(NOTICE_READY_MS - 460);
     expect(notice()).not.toBeNull();
+    expect(announce).toHaveBeenLastCalledWith(FAILED);
     // 문구는 오너 확정 그대로다(2026-10-17).
     expect(screen.getByText(FAILED, HIDDEN)).toBeTruthy();
   });
@@ -883,6 +884,31 @@ describe('실패는 시각으로도 서고, 시간으로 사라지지 않는다 
       stop();
     });
 
+    it('캐시된 데이터가 있는 쿼리가 상한(20초)에 걸리면 안내가 서고 남는다: 읽는 중인 쿼리는 「읽힘」이 아니다', async () => {
+      const client = newClient();
+      client.setQueryData(['cached', 'ws'], 'old');
+      let resolveData: (value: string) => void = () => undefined;
+      const observer = new QueryObserver(client, {
+        queryKey: ['cached', 'ws'],
+        queryFn: () => new Promise<string>(resolve => (resolveData = resolve)),
+        retry: false,
+        staleTime: 0,
+      });
+      const stop = observer.subscribe(() => undefined);
+      render(withClient(client, <Harness onRefresh={() => client.invalidateQueries({queryKey: ['cached', 'ws']})} />));
+      release();
+      await flush(20_500);
+      await flush(NOTICE_READY_MS);
+      expect(client.getQueryState(['cached', 'ws'])?.status).toBe('success'); // 캐시가 있어 상태는 성공이다
+      expect(notice()).not.toBeNull();
+      await flush(5_000);
+      expect(notice()).not.toBeNull();
+      resolveData('new');
+      await queriesSettle();
+      expect(notice()).toBeNull();
+      stop();
+    });
+
     it('안내가 서 있는 동안 캐시 구독이 하나 있고, 안내가 사라지거나 화면이 닫히면 풀린다(새는 구독이 없다)', async () => {
       const client = newClient();
       const state = {ok: false};
@@ -1120,6 +1146,16 @@ describe('오프라인과 늦은 응답', () => {
     await runFailure();
     expect(notice()).not.toBeNull();
     act(() => onlineManager.setOnline(true));
+    expect(notice()).toBeNull();
+  });
+
+  it('안내가 서기 전에 연결이 돌아오면 서지 않는다', async () => {
+    onlineManager.setOnline(false);
+    render(<Harness onRefresh={() => new Promise(() => undefined)} />);
+    release();
+    await flush(460);
+    act(() => onlineManager.setOnline(true));
+    await flush(NOTICE_READY_MS);
     expect(notice()).toBeNull();
   });
 
@@ -1461,6 +1497,28 @@ describe('모든 화면이 scrollProps 를 펼친다 (소스 스캔, src 전수)
         expect(`${rel}:${i + 1} ${lines[i + 1]!.trim()}`).toMatch(/ (\{\.\.\.scrollProps\}|scrollProps=\{scrollProps\})$/);
       });
     }
+  });
+
+  const shellSrc = fs.readFileSync(path.join(SRC, 'shell', 'AppShell.tsx'), 'utf8');
+  it.each([
+    ['SidebarScreen', /<SidebarScreen\s+active=\{nav\.tab === 'home'\}/],
+    ['AgentsScreen', /<AgentsScreen\s+active=\{nav\.agentList && nav\.agent === null && nav\.hosted === null\}/],
+    ['HostedConnectionsScreen', /<HostedConnectionsScreen\s+active=\{nav\.hosted\.kind === 'list'\}/],
+  ])('AppShell 이 %s 에 보이는지(active)를 넘긴다: 빠지면 숨은 탭에 옛 실패가 남는다', (_name, pattern) => {
+    expect(shellSrc).toMatch(pattern);
+  });
+
+  it('호스팅 연결 목록 래퍼가 notice 를 보기에 넘긴다', () => {
+    const text = users.find(u => u.rel === 'src/screens/HostedConnectionsScreen.tsx')!.text;
+    expect(text).toMatch(/notice=\{notice\}/);
+  });
+
+  it.each([
+    ['src/screens/WorkJobsScreen.tsx'],
+    ['src/screens/TeamBoardScreen.tsx'],
+  ])('%s: 필터(목록)가 바뀌면 안내를 거두도록 resetKey 를 넘긴다', rel => {
+    const text = users.find(u => u.rel === rel)!.text;
+    expect(text).toMatch(/\{active, resetKey: filter\}/);
   });
 
   it('옛 훅 이름(useRefreshControl)은 어디에도 남지 않았다', () => {
