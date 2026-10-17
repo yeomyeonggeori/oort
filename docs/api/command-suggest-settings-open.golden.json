@@ -13,6 +13,6 @@
     {"name": "usage", "arguments": {"commandId": "settings.open", "args": {"section": "usage"}, "body": "설정에서 바로 열 수 있어요."}, "props": {"momo.command_suggest": {"v": 1, "command_id": "settings.open", "args": {"section": "usage"}, "for_member_id": "00000000-0000-7000-8000-000000000101", "label": "사용량 열기"}}},
     {"name": "code", "arguments": {"commandId": "settings.open", "args": {"section": "code"}, "body": "설정에서 바로 열 수 있어요."}, "props": {"momo.command_suggest": {"v": 1, "command_id": "settings.open", "args": {"section": "code"}, "for_member_id": "00000000-0000-7000-8000-000000000101", "label": "실행 호스트 설정 열기"}}},
     {"name": "updates", "arguments": {"commandId": "settings.open", "args": {"section": "updates"}, "body": "설정에서 바로 열 수 있어요."}, "props": {"momo.command_suggest": {"v": 1, "command_id": "settings.open", "args": {"section": "updates"}, "for_member_id": "00000000-0000-7000-8000-000000000101", "label": "업데이트 설정 열기"}}},
-    {"name": "plugins", "arguments": {"commandId": "settings.open", "args": {"section": "plugins"}, "body": "설정에서 바로 열 수 있어요."}, "props": {"momo.command_suggest": {"v": 1, "command_id": "settings.open", "args": {"section": "plugins"}, "for_member_id": "00000000-0000-7000-8000-000000000101", "label": "앱 열기"}}}
+    {"name": "plugins", "arguments": {"commandId": "settings.open", "args": {"section": "plugins"}, "body": "설정에서 바로 열 수 있어요."}, "props": {"momo.command_suggest": {"v": 1, "command_id": "settings.open", "args": {"section": "plugins"}, "for_member_id": "00000000-0000-7000-8000-000000000101", "label": "앱 설정 열기"}}}
   ]
 }

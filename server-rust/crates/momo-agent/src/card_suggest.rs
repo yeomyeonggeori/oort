@@ -385,7 +385,7 @@ fn settings_open_label(args: &Value) -> &'static str {
         Some("usage") => "사용량 열기",
         Some("code") => "실행 호스트 설정 열기",
         Some("updates") => "업데이트 설정 열기",
-        Some("plugins") => "앱 열기",
+        Some("plugins") => "앱 설정 열기",
         // Unreachable through `validate_suggestion` (the normaliser refuses
         // anything else); a generic row rather than a panic.
         _ => "설정 열기",

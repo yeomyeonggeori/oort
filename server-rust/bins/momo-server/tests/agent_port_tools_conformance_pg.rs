@@ -5705,7 +5705,7 @@ async fn a_settings_open_suggestion_is_a_card_and_an_unknown_section_writes_noth
         ("notifications", "알림 설정 열기"),
         ("appearance", "모양 설정 열기"),
         ("memory", "기억 설정 열기"),
-        ("plugins", "앱 열기"),
+        ("plugins", "앱 설정 열기"),
     ]
     .into_iter()
     .enumerate()
