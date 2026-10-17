@@ -469,7 +469,7 @@ async function sceneF(browser, origin, scheme, report) {
   }
 }
 
-async function sceneG(browser, origin, scheme, report) {
+async function sceneG(browser, origin, scheme) {
   const tag = scheme;
   const server = newServer();
   server.presenceDelayMs = 1800;
@@ -495,7 +495,7 @@ async function sceneG(browser, origin, scheme, report) {
   await context.close();
 }
 
-async function sceneH(browser, origin, scheme, report) {
+async function sceneH(browser, origin, scheme) {
   const tag = scheme;
   const PAST = kst("2026-10-16T21:00:00"); // 고정한 지금(21:07)보다 7분 앞 — 이미 지났다
   // (1) 서버가 이제 꺼졌다고 답한다: 첫 읽기는 낡은 방해 금지, 다시 읽으면 자동(온라인).
@@ -541,8 +541,8 @@ async function main() {
       await sceneD(browser, preview.origin, scheme, report);
       await sceneE(browser, preview.origin, scheme, report);
       await sceneF(browser, preview.origin, scheme, report);
-      await sceneG(browser, preview.origin, scheme, report);
-      await sceneH(browser, preview.origin, scheme, report);
+      await sceneG(browser, preview.origin, scheme);
+      await sceneH(browser, preview.origin, scheme);
     }
   } finally {
     await browser.close();
