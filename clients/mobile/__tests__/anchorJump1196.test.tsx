@@ -18,6 +18,10 @@ import {jumpMissedNotice} from '../src/features/conversation/jumpNotice';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+import {
+  installAppClock,
+  SHELL_WAIT_TEST_TIMEOUT_MS,
+} from './fixtures/fakeClock';
 
 /**
  * 고정 목록의 문은 머리 ⋮ 메뉴 안이다 (DS2-4 #2716). 메뉴는 ActionSheetIOS 라 시험에서는
@@ -290,11 +294,14 @@ async function openFromSearch(): Promise<void> {
 async function pullOlder(): Promise<void> {
   await act(async () => {
     fireEvent(screen.getByTestId('timeline-list'), 'startReached');
-    await new Promise(resolve => setTimeout(resolve, 0));
+    await jest.advanceTimersByTimeAsync(0);
   });
 }
 
+jest.setTimeout(SHELL_WAIT_TEST_TIMEOUT_MS);
+
 beforeEach(() => {
+  installAppClock();
   mmkvStore.clear();
   __resetSessionStore();
   __resetServerBaseCache();
@@ -308,6 +315,7 @@ afterEach(() => {
   queryClient?.clear();
   queryClient = null;
   jest.restoreAllMocks();
+  jest.useRealTimers();
 });
 
 describe('#1196 — 검색 진입 앵커가 착지한다', () => {

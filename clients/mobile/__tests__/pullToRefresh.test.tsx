@@ -9,6 +9,10 @@ import '../src/boot/coreHost';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+import {
+  installAppClock,
+  SHELL_WAIT_TEST_TIMEOUT_MS,
+} from './fixtures/fakeClock';
 
 // =============================================================================
 // 당겨서 새로고침 (goal RN-B4b / #1026)
@@ -178,7 +182,10 @@ const mmkvStore = (
   jest.requireMock('react-native-mmkv') as {__store: Map<string, string>}
 ).__store;
 
+jest.setTimeout(SHELL_WAIT_TEST_TIMEOUT_MS);
+
 beforeEach(() => {
+  installAppClock();
   mmkvStore.clear();
   __resetSessionStore();
   __resetServerBaseCache();
@@ -190,6 +197,7 @@ afterEach(() => {
   cleanup();
   queryClient?.clear();
   queryClient = null;
+  jest.useRealTimers();
 });
 
 describe('채널 목록', () => {

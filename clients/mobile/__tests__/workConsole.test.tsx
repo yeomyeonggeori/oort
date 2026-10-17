@@ -22,6 +22,10 @@ import {
   sessionPort,
 } from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+import {
+  installAppClock,
+  SHELL_WAIT_TEST_TIMEOUT_MS,
+} from './fixtures/fakeClock';
 
 jest.mock('@momo/core/features/capabilities/serverSurfaces', () => {
   const actual = jest.requireActual(
@@ -346,7 +350,15 @@ const mmkvStore = (
   jest.requireMock('react-native-mmkv') as {__store: Map<string, string>}
 ).__store;
 
+jest.setTimeout(SHELL_WAIT_TEST_TIMEOUT_MS);
+
 beforeEach(() => {
+  // 셸 이동은 비동기 파도의 사슬이고 파도마다 트리 전체의 동기 렌더로 끝난다. 실제 시계의
+  // `waitFor` 1000ms 는 그 렌더 두 번이 굶는 기계에서(각 400~580ms) 통째로 사라진다 —
+  // 제품은 멀쩡한데 대기가 먼저 죽는다(#3796). 가짜 시계에서는 대기가 「50ms 가짜 시간 + 한
+  // 번 양보」를 20번 도는 횟수 예산이라 CPU 가 굶어도 예산이 줄지 않는다. 자세한 근거는
+  // fixtures/fakeClock.ts.
+  installAppClock();
   mmkvStore.clear();
   __resetSessionStore();
   __resetServerBaseCache();
