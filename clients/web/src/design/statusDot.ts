@@ -25,7 +25,7 @@ export const STATUS_DOT_FILL_CLASS: Readonly<Record<StatusDotTone, string>> = {
 };
 
 /**
- * 아바타 모서리의 점(DM 행: 글자가 없다) - **모양이 말한다**. 살아 있는 톤(ok·warn·danger)은 채운 점이고, 꺼짐을 뜻하는
+ * 아바타 모서리의 점(DM 행: 글자가 없다) - **모양이 말한다**. 채움이 있는 톤(ok·warn·danger)은 채운 점이고, 꺼짐을 뜻하는
  * `muted`(조용함·꺼짐)는 **속이 빈 고리**다: 프로필 카드의 오프라인 배지(`PresenceControl`)와 같은 문법이라 「오프라인은
  * 채움이 없는 고리 - 채운 점과도, 아무것도 없는 것과도 다르다」. 살아 있음(채운 초록)과 꺼짐(고리)이 한 점이 되지 않는다
  * (design-review #3964 H1). 테두리 한 겹(`border-surface`)은 점이 아바타에서 떨어져 보이게 하는 면색 고리다.
