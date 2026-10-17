@@ -104,11 +104,12 @@ pub const ACTION_WORKSPACE_MEMORY_UPDATE: &str = "workspace.memory.update";
 /// `PUT …/work-tier-policy` does (ADR-0201 증보 v2 H6-1). Team AI only.
 pub const ACTION_WORKSPACE_WORK_TIER_UPDATE: &str = "workspace.work_tier.update";
 
-/// `plugin.install` — install one official app into the workspace (ADR-0201 증보
-/// v2 H7). **Declared, not executable**: the install route (ADR-0113 P3) does not
-/// exist yet, so it sits in [`DECLARED_NOT_EXECUTABLE`] and a proposal makes no
-/// card. Its contract is fixed here so the slice that opens it (#3889) only moves
-/// it into [`ACTIONS`].
+/// `plugin.install` — install one official app into the workspace, as `POST
+/// …/plugins/{plugin}/install` does (ADR-0201 증보 v2 H7, opened by #3889 once the
+/// install route and its domain function exist, ADR-0113 P3 / #3914). Team AI
+/// only (ADR-0201 H6: the helper was asked for this, external agents were not).
+/// Approving installs and **enables** the app; connecting it (a grant) is never a
+/// card — that is the member's own consent (ADR-0113 D2).
 pub const ACTION_PLUGIN_INSTALL: &str = "plugin.install";
 
 /// What a person is consenting to when they approve (ADR-0186 D3).
@@ -225,15 +226,16 @@ pub const MAX_PENDING_WORKSPACE_ACTIONS: i64 = 3;
 
 /// The actions the workspace's team AI may propose: ADR-0201 D3 v1's four, plus
 /// ADR-0201 증보 v2 H6-1's four (`workspace.settings.update` opened to the helper,
-/// and the three helper-only settings actions). Lives here (not in the proposal
-/// crate) because the team AI's tool schema, built in `tools.rs`, publishes it as
-/// the `actionId` enum — the model is never told an id the server refuses. A new
-/// id here is an ADR amendment, not a code change.
+/// and the three helper-only settings actions), plus H7's `plugin.install` (opened
+/// by #3889). Lives here (not in the proposal crate) because the team AI's tool
+/// schema, built in `tools.rs`, publishes it as the `actionId` enum — the model is
+/// never told an id the server refuses. A new id here is an ADR amendment, not a
+/// code change.
 ///
 /// Still outside (H6-2): `invite.create` and `agent.invite` (one-time secrets),
 /// `hosted.channels.grant` (widens access), and everything declared but not
-/// executable (`plugin.install` until its route exists).
-pub const TEAM_AI_ACTION_IDS: [&str; 8] = [
+/// executable (`webhook.create`, `member.role.set`).
+pub const TEAM_AI_ACTION_IDS: [&str; 9] = [
     ACTION_AGENT_PROFILE_UPDATE,
     ACTION_AGENT_RENAME,
     ACTION_CHANNEL_CREATE,
@@ -242,6 +244,7 @@ pub const TEAM_AI_ACTION_IDS: [&str; 8] = [
     ACTION_WORKSPACE_UNFURL_UPDATE,
     ACTION_WORKSPACE_MEMORY_UPDATE,
     ACTION_WORKSPACE_WORK_TIER_UPDATE,
+    ACTION_PLUGIN_INSTALL,
 ];
 
 /// Whether an action's one-time secret may go to the **proposing agent** instead
@@ -269,6 +272,133 @@ impl SecretDelivery {
             SecretDelivery::OptIn => "opt_in",
             SecretDelivery::Always => "always",
         }
+    }
+}
+
+/// The actions whose approval **mints a value that is shown once** — the invite
+/// link (`result.secretOnce.kind` = [`SECRET_ONCE_INVITE_LINK`]) and the pairing
+/// code ([`SECRET_ONCE_PAIRING`]).
+///
+/// ADR-0204 D7 keeps these off the lock screen: approving one mints a value that is
+/// handed back exactly once — in the decision response to the approver's client, or
+/// to the proposer's claim — and a banner button has nowhere to receive it. The
+/// person would approve from a banner and the value would be gone. The list is written out
+/// instead of derived from [`SecretDelivery`] because delivery to the *proposing
+/// agent* and minting a secret for the *approver* are different facts that happen
+/// to coincide today. Two tests hold it: every action that delivers a secret is
+/// here, and every registered action has its lock-screen decision **written down**
+/// (`every_registered_action_has_a_recorded_lock_screen_decision`) — an action
+/// that mints a value for the approver without delivering it to the agent has no
+/// `SecretDelivery` to trip the first, and trips the second.
+pub const ONE_TIME_SECRET_ACTION_IDS: [&str; 2] = [ACTION_INVITE_CREATE, ACTION_AGENT_INVITE];
+
+/// Tool calls whose approval is **opened in the app** because the lock screen cannot
+/// show what the approver is being asked to look at (planner decision 2026-10-17).
+///
+/// `work.session.login_handoff` stops a run in front of a login screen and asks a
+/// person to log in on the session's own screen (LIVE-4): what they approve is
+/// *which* session and *why*, on a card that carries the deep link to it. A banner
+/// 승인 would consent to a handoff nobody had looked at. Matched on the tool name
+/// as [`crate::tools::normalize`] reads it — the same reading the card's own props
+/// use ([`crate::approval::login_handoff_session_id`]).
+pub const OPEN_IN_APP_TOOL_NAMES: [&str; 1] = [crate::tools::WORK_SESSION_LOGIN_HANDOFF];
+
+/// Does this `agent.profile.update` card change the agent's **avatar**? True when its
+/// arguments carry an `avatar` key at all — a preset, an attachment, an image the
+/// server staged for the approver to preview, or `null` (remove it).
+///
+/// Planner decision 2026-10-17: a picture cannot be judged from a banner. The
+/// approver looks at the staged image on the card (`approvals.avatar_preview`) and
+/// then decides; a lock-screen 승인 would approve pixels nobody saw. Only the key's
+/// *presence* is read — never its value — so the judgment's payload projection can
+/// carry the answer as a bare marker.
+pub fn changes_avatar(payload: &Value) -> bool {
+    payload
+        .get("action")
+        .and_then(|action| action.get("args"))
+        .and_then(Value::as_object)
+        .is_some_and(|args| args.contains_key("avatar"))
+}
+
+/// Must this approval be opened in the app to be decided — i.e. may its push
+/// **not** carry the lock-screen 승인·거절 buttons? (ADR-0204 D7: the category
+/// `momo.approval.open` instead of `momo.approval`.)
+///
+/// The one list, in the one place; `momo_push::category_for` reads it and nothing
+/// else decides. Five kinds of approval belong on it:
+///
+/// 1. an action that mints a value shown once ([`ONE_TIME_SECRET_ACTION_IDS`]);
+/// 2. an approval whose card asks the approver to **choose a host**
+///    ([`crate::approval::offers_host_choice`] — every `work.spawn` card does).
+///    A banner 승인 would take the card's default machine without the person
+///    having looked at the picker;
+/// 3. a tool call the lock screen cannot show ([`OPEN_IN_APP_TOOL_NAMES`] — the login
+///    handoff, planner decision 2026-10-17);
+/// 4. an `agent.profile.update` that changes the avatar ([`changes_avatar`], same
+///    decision);
+/// 5. ADR-0188 D5's work-host permission requests. They are `work_permission_request`
+///    rows with no `approval` row and no `approval_request` message today, so
+///    there is nothing here to classify; the producer that gives them one adds its
+///    arm in this function.
+///
+/// Everything else this build **knows** — any other *named* tool call, a workspace
+/// action it carries that mints nothing shown once and shows no picture — is decidable
+/// from the lock screen behind Face ID, as before (ADR-0204 D7: 「기본은 inline이고, open
+/// 목록은 서버 코드 한 곳에 둔다」).
+///
+/// **A tool name outside the catalog is such a named tool call, and it is inline.** It is
+/// not an unknown shape: an operator's own `agent.tool_schema` function reaches the
+/// approval inbox under a name momo does not own (`tools::momo_tool_name`), and opening
+/// every one of them would take the banner away from tools nobody asked to take it from.
+/// The price is the rolling-deploy window of a *new* open tool: until the notifier is as
+/// new as the server, the new name reads as an operator's tool. Deploy them together.
+///
+/// **What it does not understand it opens.** ADR-0204 「보안·경계 요약」: 「무엇인지 모르는
+/// 알림에는 버튼이 없다」. A workspace action this build's registry does not carry (the
+/// notifier is older than the server that wrote the card — a rolling deploy — or the
+/// action was retired), a workspace action whose payload names none, a tool call whose
+/// payload names no tool (a card with nothing to say what it is), and an `action_type`
+/// that is not one of the three producers write today all answer `true`: the cost of a
+/// wrong guess is a card opened in the app, the cost of the other wrong guess is an
+/// approval nobody could look at.
+///
+/// ## What it may read
+///
+/// Only `action.id`, whether `action.args` is an object with an `avatar` key,
+/// `tool_call.name`, `execution` — the paths the push judgment's payload projection
+/// carries (`momo_push` `judgment.rs`). Never an argument's value. The projection and
+/// this function must say the same thing about the same card: the push judges the
+/// projection, the decision route (#3977) the whole payload.
+/// `push_conformance_pg::an_approval_that_must_be_opened_…` asserts exactly that for
+/// every card of its table, and `momo-push/tests/judgment_projection.rs` fails if the
+/// statement reads a path of the payload nobody listed.
+pub fn opens_in_app(action_type: &str, payload: &Value) -> bool {
+    if crate::approval::offers_host_choice(payload) {
+        return true;
+    }
+    match action_type {
+        // Decided where it is shown, behind Face ID — unless the card is one the lock
+        // screen cannot show.
+        crate::tools::ACTION_TYPE_TOOL_CALL => payload
+            .get("tool_call")
+            .and_then(|call| call.get("name"))
+            .and_then(Value::as_str)
+            .is_none_or(|name| {
+                let name = crate::tools::normalize(name);
+                OPEN_IN_APP_TOOL_NAMES
+                    .iter()
+                    .any(|open| crate::tools::normalize(open) == name)
+            }),
+        ACTION_TYPE_WORKSPACE_ACTION => payload
+            .get("action")
+            .and_then(|action| action.get("id"))
+            .and_then(Value::as_str)
+            .is_none_or(|id| {
+                action_by_id(id).is_none()
+                    || ONE_TIME_SECRET_ACTION_IDS.contains(&id)
+                    || (id == ACTION_AGENT_PROFILE_UPDATE && changes_avatar(payload))
+            }),
+        _ => true,
     }
 }
 
@@ -690,11 +820,11 @@ pub const PLUGIN_INSTALL_PLUGINS: [(&str, &str); 4] = [
     ("com.momo.plugins.drive", "Google Drive"),
 ];
 
-/// `plugin.install`'s decided contract (H7), published now so the slice that opens
-/// it (#3889) moves the id and nothing else: Admin decides, no one-time value.
+/// `plugin.install`'s contract (ADR-0201 증보 v2 H7; the row is in [`ACTIONS`] since
+/// #3889): an Admin decides, there is no one-time value.
 pub const PLUGIN_INSTALL_REQUIRED_ROLE: RequiredRole = RequiredRole::Admin;
 pub const PLUGIN_INSTALL_SECRET_DELIVERY: SecretDelivery = SecretDelivery::None;
-/// What approving it will do. Tokens stay on the agent host (ADR-0113 D1-A).
+/// What approving it does. Tokens stay on the agent host (ADR-0113 D1-A).
 pub const PLUGIN_INSTALL_EFFECT: &str =
     "워크스페이스에 표시된 앱을 설치해요. 토큰은 oort에 저장하지 않아요";
 
@@ -719,46 +849,119 @@ pub fn plugin_install_label(plugin_id: &str) -> Option<&'static str> {
         .map(|(_, label)| *label)
 }
 
-/// What the team AI says when asked to install an app while no install route
-/// exists (H7): no card, the honest line. It is built from the declared row's own
-/// `unavailable_reason`, so the catalog (`GET …/actions`) and the helper cannot
-/// give two different reasons. An id outside the official four (or no id) gets
-/// the same answer without a name — the line never repeats a string the model or
-/// a person typed.
-pub fn plugin_install_unavailable_line(args: &Value) -> String {
-    let reason = declared_action(ACTION_PLUGIN_INSTALL)
-        .map(|declared| declared.unavailable_reason)
-        .unwrap_or("아직 설치 경로가 없어요.");
-    let subject = args
-        .get("pluginId")
-        .and_then(Value::as_str)
-        .and_then(plugin_install_label)
-        .map(|label| format!("{label} 앱은"))
-        .unwrap_or_else(|| "앱은".to_string());
-    format!("{subject} {reason} 준비되면 설치 카드를 띄울게요.")
-}
-
-/// The team AI's system-prompt instruction for an app-install request (H7).
+/// The team AI's system-prompt instruction for an app request (H7).
 ///
-/// `workspace_action_propose`'s `actionId` enum is [`TEAM_AI_ACTION_IDS`], which
-/// does not hold `plugin.install`, so a model that keeps to its tool schema never
-/// reaches the server's `NotYetAvailable` answer; without this line it answers an
-/// install request with the generic hand-off instead of H7's sentence. Built from
-/// the same declared row and labels as [`plugin_install_unavailable_line`], so the
-/// prompt, the server fallback and the catalog cannot name different reasons.
+/// Installing is a card an admin approves; connecting (a grant) is never a card —
+/// it is the asking member's own consent, given in their apps screen (ADR-0113 D2),
+/// and the helper neither asks for nor receives a token (D1-A). An app outside the
+/// official four gets the same plain refusal as any other change the helper cannot
+/// make.
 pub fn plugin_install_prompt_line() -> String {
-    let reason = declared_action(ACTION_PLUGIN_INSTALL)
-        .map(|declared| declared.unavailable_reason)
-        .unwrap_or("아직 설치 경로가 없어요.");
     let labels: Vec<&str> = PLUGIN_INSTALL_PLUGINS
         .iter()
         .map(|(_, label)| *label)
         .collect();
     format!(
-        "앱({}) 설치·연결을 부탁받으면 도구를 부르지 말고 \
-         「○○ 앱은 {reason} 준비되면 설치 카드를 띄울게요.」라고 한 줄로 말해(○○은 그 앱 이름).",
+        "앱({}) 설치를 부탁받으면 `{ACTION_PLUGIN_INSTALL}`로 제안해(`pluginId`는 그 앱 하나). \
+         설치는 관리자가 승인해야 돼. 앱 연결(내 권한 허용)은 카드가 아니라 부탁한 사람이 설정의 앱 \
+         화면에서 직접 해. 이 밖의 앱은 아직 설치할 수 없다고 말하고, 토큰이나 키는 묻지 마.",
         labels.join("·")
     )
+}
+
+/// How an app stands in the workspace when its install card is drawn — the card's
+/// 「현재」 half (ADR-0186 D3: before → after in plain words).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginInstallBefore {
+    /// No install row.
+    NotInstalled,
+    /// Installed but switched off.
+    Disabled,
+    /// Installed once and uninstalled since (its grants went with it).
+    Removed,
+}
+
+impl PluginInstallBefore {
+    pub fn word(self) -> &'static str {
+        match self {
+            PluginInstallBefore::NotInstalled => "설치 안 됨",
+            PluginInstallBefore::Disabled => "설치됨(꺼짐)",
+            PluginInstallBefore::Removed => "설치 해제됨",
+        }
+    }
+
+    pub fn as_pin(self) -> &'static str {
+        match self {
+            PluginInstallBefore::NotInstalled => "not_installed",
+            PluginInstallBefore::Disabled => "disabled",
+            PluginInstallBefore::Removed => "removed",
+        }
+    }
+}
+
+/// The `plugin.install` card rows: which app and version, **where it reaches out
+/// to** (ADR-0113 D5 — the approver reads the egress before consenting), and its
+/// state before → after. Everything but the label comes from the registry
+/// manifest the resolver read, bounded and charset-checked there; the label is the
+/// static [`PLUGIN_INSTALL_PLUGINS`] name, never text an agent supplied.
+pub fn plugin_install_rows(
+    label: &str,
+    version: &str,
+    egress_domains: &[String],
+    before: PluginInstallBefore,
+) -> Vec<Value> {
+    vec![
+        action_row("앱", format!("{label} {version}")),
+        action_row(
+            "연결 대상",
+            if egress_domains.is_empty() {
+                "없음".to_string()
+            } else {
+                egress_domains.join(", ")
+            },
+        ),
+        action_row("상태", format!("{} → 설치됨(켜짐)", before.word())),
+        action_row("연결", "각자 설정의 앱 화면에서 내 권한을 직접 허용해요"),
+    ]
+}
+
+/// The card's summary sentence, with the app named (H7: 「워크스페이스에 ○○ 앱을
+/// 설치해요. 토큰은 oort에 저장하지 않아요」).
+pub fn plugin_install_summary(label: &str) -> String {
+    format!(
+        "에이전트가 제안했어요. 승인하면 {} 권한으로 워크스페이스에 {label} 앱을 설치해요. \
+         토큰은 oort에 저장하지 않아요.",
+        PLUGIN_INSTALL_REQUIRED_ROLE.korean()
+    )
+}
+
+/// The outcome line of `plugin.install`.
+pub fn plugin_install_result_body(label: &str) -> String {
+    format!("{label} 앱을 설치했어요")
+}
+
+/// The outcome rows of `plugin.install`: the app, where it reaches, and what comes
+/// next (the install alone gives no agent any access — each member connects).
+pub fn plugin_install_result_rows(
+    label: &str,
+    version: &str,
+    egress_domains: &[String],
+) -> Vec<Value> {
+    vec![
+        action_row("앱", format!("{label} {version}")),
+        action_row(
+            "연결 대상",
+            if egress_domains.is_empty() {
+                "없음".to_string()
+            } else {
+                egress_domains.join(", ")
+            },
+        ),
+        action_row(
+            "다음",
+            "각자 설정의 앱 화면에서 내 권한을 허용하면 에이전트가 써요",
+        ),
+    ]
 }
 
 /// The complete registry. Order is the catalog's order.
@@ -885,6 +1088,20 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         effect: "워크스페이스 기본 작업 이어가기 방식을 표시된 대로 바꿔요",
         args_schema: workspace_work_tier_update_args_schema,
     },
+    // ADR-0201 증보 v2 H7, opened by #3889: the install route (ADR-0113 P3, #3914)
+    // exists, and approving runs its domain function as the approver. Helper only,
+    // like the other v2 additions: external agents were not asked for this.
+    WorkspaceAction {
+        id: ACTION_PLUGIN_INSTALL,
+        title: "앱 설치",
+        summary: "공식 앱 하나를 워크스페이스에 설치해요. 토큰은 oort에 저장하지 않아요.",
+        risk: Risk::Approval,
+        required_role: PLUGIN_INSTALL_REQUIRED_ROLE,
+        secret_delivery: PLUGIN_INSTALL_SECRET_DELIVERY,
+        proposers: Proposers::TeamAiOnly,
+        effect: PLUGIN_INSTALL_EFFECT,
+        args_schema: plugin_install_args_schema,
+    },
 ];
 
 /// An action the product already performs over REST that is **not** proposable
@@ -918,15 +1135,6 @@ pub const DECLARED_NOT_EXECUTABLE: &[DeclaredAction] = &[
         title: "멤버 역할 변경",
         summary: "한 멤버의 워크스페이스 역할을 바꿉니다.",
         unavailable_reason: "다음 배치에서 열립니다.",
-    },
-    // ADR-0201 증보 v2 H7: the contract is fixed (`plugin_install_args_schema`,
-    // `PLUGIN_INSTALL_REQUIRED_ROLE`), the route is not (ADR-0113 P3, #3889). Until
-    // it lands a proposal makes no card — never a card whose executor always fails.
-    DeclaredAction {
-        id: ACTION_PLUGIN_INSTALL,
-        title: "앱 설치",
-        summary: "공식 앱 하나를 워크스페이스에 설치해요. 토큰은 oort에 저장하지 않아요.",
-        unavailable_reason: "아직 설치 경로가 없어요.",
     },
 ];
 
@@ -1857,7 +2065,8 @@ mod tests {
                 "agent.invite",
                 "workspace.unfurl.update",
                 "workspace.memory.update",
-                "workspace.work_tier.update"
+                "workspace.work_tier.update",
+                "plugin.install"
             ]
         );
         assert_eq!(
@@ -1865,15 +2074,16 @@ mod tests {
                 .iter()
                 .map(|declared| declared.id)
                 .collect::<Vec<_>>(),
-            vec!["webhook.create", "member.role.set", "plugin.install"]
+            vec!["webhook.create", "member.role.set"]
         );
     }
 
-    /// ADR-0201 증보 v2 H6 / H13-A13·A14: the helper's list is exactly H6-1's eight,
-    /// every one executable; the three new settings actions are the only
-    /// team-AI-only rows, so the Agent Port's list is the eight v1 actions.
+    /// ADR-0201 증보 v2 H6 / H13-A13·A14 + H7 (#3889): the helper's list is H6-1's
+    /// eight plus `plugin.install`, every one executable; the three settings
+    /// actions and `plugin.install` are the only team-AI-only rows, so the Agent
+    /// Port's list is still the eight v1 actions.
     #[test]
-    fn the_team_ai_list_is_h6_and_only_the_new_settings_actions_are_helper_only() {
+    fn the_team_ai_list_is_h6_plus_plugin_install_and_only_those_are_helper_only() {
         assert_eq!(
             TEAM_AI_ACTION_IDS,
             [
@@ -1885,6 +2095,7 @@ mod tests {
                 "workspace.unfurl.update",
                 "workspace.memory.update",
                 "workspace.work_tier.update",
+                "plugin.install",
             ]
         );
         for id in TEAM_AI_ACTION_IDS {
@@ -1898,7 +2109,6 @@ mod tests {
             ACTION_INVITE_CREATE,
             ACTION_AGENT_INVITE,
             ACTION_HOSTED_CHANNELS_GRANT,
-            ACTION_PLUGIN_INSTALL,
         ] {
             assert!(!TEAM_AI_ACTION_IDS.contains(&banned), "{banned}");
         }
@@ -1912,7 +2122,8 @@ mod tests {
             [
                 ACTION_WORKSPACE_UNFURL_UPDATE,
                 ACTION_WORKSPACE_MEMORY_UPDATE,
-                ACTION_WORKSPACE_WORK_TIER_UPDATE
+                ACTION_WORKSPACE_WORK_TIER_UPDATE,
+                ACTION_PLUGIN_INSTALL
             ]
         );
         assert_eq!(
@@ -1958,18 +2169,21 @@ mod tests {
         assert_eq!(unfurl["required"], json!(["enabled"]));
     }
 
-    /// H7 / H13-A16 (text half): `plugin.install` is declared, not executable; its
-    /// contract is the official four with an Admin decider; and the helper's honest
-    /// line carries the catalog's own reason and never echoes an unknown id.
+    /// H7 (#3889): `plugin.install` is executable — an Admin decides, there is no
+    /// one-time value, only the official four may be named, the helper alone may
+    /// propose it, and the card reads in plain words with the egress on it (D5).
     #[test]
-    fn plugin_install_is_a_declared_contract_with_an_honest_line() {
-        assert!(action_by_id(ACTION_PLUGIN_INSTALL).is_none());
-        let declared = declared_action(ACTION_PLUGIN_INSTALL).expect("declared");
-        assert_eq!(declared.unavailable_reason, "아직 설치 경로가 없어요.");
-        assert_eq!(PLUGIN_INSTALL_REQUIRED_ROLE, RequiredRole::Admin);
-        assert_eq!(PLUGIN_INSTALL_SECRET_DELIVERY, SecretDelivery::None);
+    fn plugin_install_is_an_executable_helper_only_admin_action() {
+        let action = action_by_id(ACTION_PLUGIN_INSTALL).expect("registered");
+        assert!(declared_action(ACTION_PLUGIN_INSTALL).is_none());
+        assert_eq!(action.required_role, RequiredRole::Admin);
+        assert_eq!(action.required_role, PLUGIN_INSTALL_REQUIRED_ROLE);
+        assert_eq!(action.secret_delivery, SecretDelivery::None);
+        assert_eq!(action.proposers, Proposers::TeamAiOnly);
+        assert_eq!(action.risk, Risk::Approval);
         let schema = plugin_install_args_schema();
         assert_eq!(schema["additionalProperties"], json!(false));
+        assert_eq!(schema["required"], json!(["pluginId"]));
         assert_eq!(
             schema["properties"]["pluginId"]["enum"],
             json!([
@@ -1979,15 +2193,68 @@ mod tests {
                 "com.momo.plugins.drive"
             ])
         );
-        let line = plugin_install_unavailable_line(&json!({"pluginId": "com.momo.plugins.github"}));
+        assert_eq!(action.args_schema(), schema);
+
+        let egress = vec!["api.githubcopilot.com".to_string()];
         assert_eq!(
-            line,
-            "GitHub 앱은 아직 설치 경로가 없어요. 준비되면 설치 카드를 띄울게요."
+            plugin_install_rows(
+                "GitHub",
+                "1.0.0",
+                &egress,
+                PluginInstallBefore::NotInstalled
+            ),
+            vec![
+                action_row("앱", "GitHub 1.0.0"),
+                action_row("연결 대상", "api.githubcopilot.com"),
+                action_row("상태", "설치 안 됨 → 설치됨(켜짐)"),
+                action_row("연결", "각자 설정의 앱 화면에서 내 권한을 직접 허용해요"),
+            ]
         );
-        let unknown =
-            plugin_install_unavailable_line(&json!({"pluginId": "evil.plugin <@everyone>"}));
-        assert!(unknown.contains("아직 설치 경로가 없어요"), "{unknown}");
-        assert!(!unknown.contains("evil"), "{unknown}");
+        assert_eq!(
+            plugin_install_rows("Google Drive", "1.0.0", &[], PluginInstallBefore::Disabled)[1],
+            action_row("연결 대상", "없음"),
+            "an empty egress list reads as 없음, never as a missing row"
+        );
+        assert_eq!(
+            plugin_install_summary("GitHub"),
+            "에이전트가 제안했어요. 승인하면 관리자 권한으로 워크스페이스에 GitHub 앱을 설치해요. \
+             토큰은 oort에 저장하지 않아요."
+        );
+        assert_eq!(
+            plugin_install_result_body("GitHub"),
+            "GitHub 앱을 설치했어요"
+        );
+        assert_eq!(
+            plugin_install_result_rows("GitHub", "1.0.0", &egress)[2],
+            action_row(
+                "다음",
+                "각자 설정의 앱 화면에서 내 권한을 허용하면 에이전트가 써요"
+            )
+        );
+        // The label comes from the static table: an id outside the four has none.
+        assert_eq!(
+            plugin_install_label("com.momo.plugins.github"),
+            Some("GitHub")
+        );
+        assert_eq!(plugin_install_label("evil.plugin <@everyone>"), None);
+    }
+
+    /// The prompt names the four apps, sends installs to the card, keeps connecting
+    /// out of it, and promises no route that does not exist.
+    #[test]
+    fn the_prompt_line_proposes_the_install_and_keeps_the_grant_with_the_member() {
+        let line = plugin_install_prompt_line();
+        for (_, label) in PLUGIN_INSTALL_PLUGINS {
+            assert!(line.contains(label), "{line}");
+        }
+        assert!(line.contains(ACTION_PLUGIN_INSTALL), "{line}");
+        assert!(line.contains("관리자가 승인"), "{line}");
+        assert!(
+            line.contains("직접"),
+            "the grant stays the member's own: {line}"
+        );
+        assert!(!line.contains("아직 설치 경로가 없어요"), "{line}");
+        assert!(!line.contains("준비되면"), "{line}");
     }
 
     /// The new cards say before → after in plain words, and the memory card names
@@ -2650,5 +2917,370 @@ mod tests {
         // The grant saturates instead of wrapping into the past.
         let near_max = secret_claim_grant(i64::MAX - 1);
         assert_eq!(near_max["deadlineMs"], serde_json::json!(i64::MAX));
+    }
+
+    /// ADR-0204 D7: the open list is the actions that mint a value shown once.
+    /// Every id on it is a registered action (a typo would open nothing, silently),
+    /// and every action that hands a secret to the proposing agent is on it — so a
+    /// new secret-minting action cannot ship deciding from the lock screen.
+    #[test]
+    fn the_open_list_names_registered_actions_and_covers_every_secret_delivery() {
+        for id in ONE_TIME_SECRET_ACTION_IDS {
+            assert!(
+                action_by_id(id).is_some(),
+                "{id} is not a registered action"
+            );
+        }
+        for action in ACTIONS {
+            if action.secret_delivery != SecretDelivery::None {
+                assert!(
+                    ONE_TIME_SECRET_ACTION_IDS.contains(&action.id),
+                    "{} delivers a one-time secret but is not on the open list",
+                    action.id
+                );
+            }
+        }
+        assert_eq!(
+            ONE_TIME_SECRET_ACTION_IDS,
+            [ACTION_INVITE_CREATE, ACTION_AGENT_INVITE]
+        );
+    }
+
+    #[test]
+    fn a_secret_minting_action_opens_in_the_app_and_an_ordinary_one_does_not() {
+        let card = |id: &str| serde_json::json!({"action": {"id": id, "args": {}}});
+        for id in ONE_TIME_SECRET_ACTION_IDS {
+            assert!(
+                opens_in_app(ACTION_TYPE_WORKSPACE_ACTION, &card(id)),
+                "{id}"
+            );
+        }
+        for action in ACTIONS {
+            if !ONE_TIME_SECRET_ACTION_IDS.contains(&action.id) {
+                assert!(
+                    !opens_in_app(ACTION_TYPE_WORKSPACE_ACTION, &card(action.id)),
+                    "{} mints nothing shown once and picks no host",
+                    action.id
+                );
+            }
+        }
+        // Only a *workspace action* reads the id: a tool call whose payload merely
+        // contains an action block is still a tool call.
+        let tool_call_with_an_action_block = serde_json::json!({
+            "tool_call": {"name": crate::tools::WORK_SESSION_END},
+            "action": {"id": ACTION_INVITE_CREATE, "args": {}},
+        });
+        assert!(!opens_in_app("tool_call", &tool_call_with_an_action_block));
+    }
+
+    /// ADR-0204 「무엇인지 모르는 알림에는 버튼이 없다」: a shape this build does not
+    /// know is opened, not decided from a banner.
+    #[test]
+    fn a_shape_this_build_does_not_know_is_never_decided_from_a_banner() {
+        let card = |id: &str| serde_json::json!({"action": {"id": id, "args": {}}});
+        // A workspace action the registry does not carry — e.g. one a newer server
+        // wrote — and one whose payload names no action at all.
+        assert!(opens_in_app(
+            ACTION_TYPE_WORKSPACE_ACTION,
+            &card("no.such.action")
+        ));
+        assert!(opens_in_app(
+            ACTION_TYPE_WORKSPACE_ACTION,
+            &serde_json::json!({})
+        ));
+        // An action type none of today's producers writes.
+        assert!(opens_in_app("deploy", &serde_json::json!({})));
+        assert!(opens_in_app("", &serde_json::json!({})));
+        // A tool call that names no tool — there is nothing to say it is safe to
+        // decide from a banner.
+        assert!(opens_in_app(
+            crate::tools::ACTION_TYPE_TOOL_CALL,
+            &serde_json::json!({})
+        ));
+        assert!(opens_in_app(
+            crate::tools::ACTION_TYPE_TOOL_CALL,
+            &serde_json::json!({"tool_call": {"name": null}})
+        ));
+        assert!(opens_in_app(
+            crate::tools::ACTION_TYPE_TOOL_CALL,
+            &serde_json::json!({"tool_call": {"call_id": "c1"}})
+        ));
+        // A named tool call stays decidable from the lock screen — whatever the name. (A
+        // name outside the catalog is an operator's own tool, not an unknown shape.)
+        assert!(!opens_in_app(
+            crate::tools::ACTION_TYPE_TOOL_CALL,
+            &serde_json::json!({"tool_call": {"name": "x"}})
+        ));
+        assert!(!opens_in_app(
+            ACTION_TYPE_WORKSPACE_ACTION,
+            &card(ACTION_CHANNEL_CREATE)
+        ));
+    }
+
+    /// The lock-screen decision for every registered action, written out. The question
+    /// each row answers: **does approving it show the approver a value once?** (an
+    /// invite link, a pairing code — a banner button has nowhere to show it). The table
+    /// is exhaustive on purpose: an action added to the registry fails here until
+    /// someone says which side it is on, instead of defaulting to a lock-screen 승인
+    /// that mints something nobody sees. (`SecretDelivery` cannot do this job — it says
+    /// whether the *proposing agent* may receive a value, which is a different fact.)
+    #[test]
+    fn every_registered_action_has_a_recorded_lock_screen_decision() {
+        let recorded: &[(&str, bool)] = &[
+            (ACTION_INVITE_CREATE, true), // the invite link is shown once
+            (ACTION_AGENT_INVITE, true),  // the pairing code is shown once
+            (ACTION_CHANNEL_CREATE, false),
+            (ACTION_CHANNEL_MEMBER_ADD, false),
+            (ACTION_AGENT_RENAME, false),
+            (ACTION_HOSTED_CHANNELS_GRANT, false),
+            (ACTION_WORKSPACE_SETTINGS_UPDATE, false),
+            // False for a card with no `avatar` key; one with it is opened (see
+            // `a_profile_update_that_changes_the_avatar_opens_in_the_app`).
+            (ACTION_AGENT_PROFILE_UPDATE, false),
+            (ACTION_WORKSPACE_UNFURL_UPDATE, false),
+            (ACTION_WORKSPACE_MEMORY_UPDATE, false),
+            (ACTION_WORKSPACE_WORK_TIER_UPDATE, false),
+            // Installs one official app; "the token is not stored in oort", so there is
+            // no value to show the approver once (ADR-0113 P3, ADR-0201 증보 v2 H7).
+            (ACTION_PLUGIN_INSTALL, false),
+        ];
+        let registered: std::collections::BTreeSet<&str> =
+            ACTIONS.iter().map(|action| action.id).collect();
+        let written: std::collections::BTreeSet<&str> =
+            recorded.iter().map(|(id, _)| *id).collect();
+        assert_eq!(
+            registered, written,
+            "a registered action has no lock-screen decision recorded here (or a row \
+             names an action that is gone): decide whether approving it shows the \
+             approver a value once, add it to ONE_TIME_SECRET_ACTION_IDS if so, and \
+             record the row"
+        );
+        let card = |id: &str| serde_json::json!({"action": {"id": id, "args": {}}});
+        for (id, opens) in recorded {
+            assert_eq!(
+                opens_in_app(ACTION_TYPE_WORKSPACE_ACTION, &card(id)),
+                *opens,
+                "{id}"
+            );
+        }
+    }
+
+    /// Planner decision 2026-10-17: the login handoff is approved with the card in
+    /// front of you — which session, why — so its push offers 「열어서 결정」 only.
+    #[test]
+    fn the_login_handoff_opens_in_the_app_whatever_its_spelling() {
+        let call = |name: &str| serde_json::json!({"tool_call": {"name": name}});
+        assert_eq!(
+            OPEN_IN_APP_TOOL_NAMES,
+            [crate::tools::WORK_SESSION_LOGIN_HANDOFF]
+        );
+        // The tool name is read the way the card's own props read it
+        // (`login_handoff_session_id`): trimmed, lower-cased, `-` as `_`.
+        for spelling in [
+            "work.session.login_handoff",
+            "Work.Session.Login_Handoff",
+            "  work.session.login-handoff ",
+        ] {
+            assert!(
+                opens_in_app(crate::tools::ACTION_TYPE_TOOL_CALL, &call(spelling)),
+                "{spelling:?}"
+            );
+        }
+        // The tools beside it are decided where they are shown.
+        for name in [
+            crate::tools::WORK_SESSION_END,
+            crate::tools::WORK_SESSION_SPAWN,
+            "work.session.login",
+            "work.session.login_handoff.extra",
+        ] {
+            assert!(
+                !opens_in_app(crate::tools::ACTION_TYPE_TOOL_CALL, &call(name)),
+                "{name:?}"
+            );
+        }
+        // And only as a tool call: the same name on a workspace action reads the id.
+        assert!(!opens_in_app(
+            ACTION_TYPE_WORKSPACE_ACTION,
+            &serde_json::json!({
+                "tool_call": {"name": crate::tools::WORK_SESSION_LOGIN_HANDOFF},
+                "action": {"id": ACTION_CHANNEL_CREATE, "args": {}},
+            })
+        ));
+    }
+
+    /// A tool the catalog does not carry is an operator's own (`agent.tool_schema`, see
+    /// `tools::momo_tool_name`): momo does not own its name and cannot say the lock screen
+    /// is unfit for it, so it keeps the default — inline. Pinned so that the asymmetry with
+    /// 「모르는 workspace action은 open」 is a recorded choice and not an accident. A name
+    /// that merely *resembles* the handoff is such a tool too.
+    #[test]
+    fn an_operators_own_tool_is_decided_where_it_is_shown() {
+        let call = |name: &str| serde_json::json!({"tool_call": {"name": name}});
+        for name in [
+            "github.search_issues",
+            "send_message",
+            "work.session.login_handoff_v2",
+            "work_session_login_handoff",
+            "work.session.login",
+        ] {
+            assert!(
+                !crate::tools::is_executable(name),
+                "{name} is in the catalog after all"
+            );
+            assert!(
+                !opens_in_app(crate::tools::ACTION_TYPE_TOOL_CALL, &call(name)),
+                "{name}"
+            );
+        }
+    }
+
+    /// The tools whose approval IS the human's act (`ApprovalReason::HumanIsTheAction`:
+    /// nobody can pre-approve typing somebody else's password) are the ones the lock
+    /// screen cannot stand in for. Today that is the login handoff, and it is on the open
+    /// list; a tool that joins that class without joining the list fails here.
+    #[test]
+    fn a_tool_whose_approval_is_the_humans_act_is_opened_in_the_app() {
+        let mut found = Vec::new();
+        for name in crate::tools::CATALOG {
+            if crate::tools::approval_reason(name, None)
+                == crate::tools::ApprovalReason::HumanIsTheAction
+            {
+                found.push(*name);
+                assert!(
+                    opens_in_app(
+                        crate::tools::ACTION_TYPE_TOOL_CALL,
+                        &serde_json::json!({"tool_call": {"name": name}})
+                    ),
+                    "{name} is the human's own act but is not on OPEN_IN_APP_TOOL_NAMES"
+                );
+            }
+        }
+        assert_eq!(
+            found,
+            [crate::tools::WORK_SESSION_LOGIN_HANDOFF],
+            "the class of tools whose approval is the human's act changed — decide each one"
+        );
+    }
+
+    /// Every tool this server can execute has its lock-screen decision written down,
+    /// like the actions: adding one to the catalog fails here until someone says
+    /// whether the lock screen can show what is being approved.
+    #[test]
+    fn every_catalog_tool_has_a_recorded_lock_screen_decision() {
+        let recorded: &[(&str, bool)] = &[
+            (crate::tools::WORK_SESSION_END, false),
+            // A spawn opens through the host picker it carries (`offers_host_choice`,
+            // see `a_card_that_asks_for_a_host_opens_in_the_app_whatever_its_type`);
+            // a spawn call that has no picker is decided where it is shown.
+            (crate::tools::WORK_SESSION_SPAWN, false),
+            (crate::tools::WORK_SESSION_LOGIN_HANDOFF, true), // planner 2026-10-17
+            // These run without a card of their own, or raise a workspace action whose
+            // card is classified by that action's id.
+            (crate::tools::CARD_SUGGEST, false),
+            (crate::tools::MEMORY_SUGGEST, false),
+            (crate::tools::WORKSPACE_ACTION_PROPOSE, false),
+        ];
+        let catalog: std::collections::BTreeSet<&str> =
+            crate::tools::CATALOG.iter().copied().collect();
+        let written: std::collections::BTreeSet<&str> =
+            recorded.iter().map(|(name, _)| *name).collect();
+        assert_eq!(
+            catalog, written,
+            "a tool in the catalog has no lock-screen decision recorded here (or a row \
+             names a tool that is gone): decide whether the lock screen can show what \
+             is being approved, add it to OPEN_IN_APP_TOOL_NAMES if not, and record the row"
+        );
+        for (name, opens) in recorded {
+            assert_eq!(
+                opens_in_app(
+                    crate::tools::ACTION_TYPE_TOOL_CALL,
+                    &serde_json::json!({"tool_call": {"name": name}})
+                ),
+                *opens,
+                "{name}"
+            );
+        }
+    }
+
+    /// Planner decision 2026-10-17: a picture is not approved from a banner. An
+    /// `agent.profile.update` that carries an `avatar` key — preset, attachment, a
+    /// staged image, or `null` to remove it — is opened; the same action changing only
+    /// words is not.
+    #[test]
+    fn a_profile_update_that_changes_the_avatar_opens_in_the_app() {
+        let update = |args: serde_json::Value| serde_json::json!({"action": {"id": ACTION_AGENT_PROFILE_UPDATE, "args": args}});
+        let sha = "a".repeat(64);
+        for (label, args) in [
+            (
+                "a staged image",
+                serde_json::json!({"avatar": {
+                    "source": "staged",
+                    "imageId": "11111111-1111-4111-8111-111111111111",
+                    "sha256": sha,
+                    "origin": "generated",
+                }}),
+            ),
+            (
+                "a preset",
+                serde_json::json!({"avatar": {"source": "preset", "presetId": "p1"}}),
+            ),
+            (
+                "an attachment",
+                serde_json::json!({"avatar": {"source": "attachment", "attachmentId": "a"}}),
+            ),
+            ("a removal", serde_json::json!({"avatar": null})),
+            (
+                "words and a picture",
+                serde_json::json!({"tagline": "새 소개", "avatar": {"source": "preset", "presetId": "p1"}}),
+            ),
+        ] {
+            assert!(
+                opens_in_app(ACTION_TYPE_WORKSPACE_ACTION, &update(args)),
+                "{label}"
+            );
+        }
+        for (label, args) in [
+            ("words only", serde_json::json!({"tagline": "새 소개"})),
+            ("a name", serde_json::json!({"displayName": "새 이름"})),
+            (
+                "a status",
+                serde_json::json!({"statusText": "회의 중", "statusEmoji": "📅"}),
+            ),
+            ("no arguments", serde_json::json!({})),
+        ] {
+            assert!(
+                !opens_in_app(ACTION_TYPE_WORKSPACE_ACTION, &update(args)),
+                "{label}"
+            );
+        }
+        // `args` that are not an object name no avatar — and the push judgment's projection
+        // agrees (it asks `jsonb_typeof(args) = 'object'` before it looks for the key;
+        // Postgres' `jsonb_exists` alone would say yes to `["avatar"]` and to `"avatar"`).
+        assert!(!changes_avatar(&update(serde_json::json!("avatar"))));
+        assert!(!changes_avatar(&update(serde_json::json!(["avatar"]))));
+        assert!(!changes_avatar(&serde_json::json!({})));
+        // The key matters on the profile update only — another action carrying one
+        // is still decided by its own id.
+        assert!(!opens_in_app(
+            ACTION_TYPE_WORKSPACE_ACTION,
+            &serde_json::json!({"action": {
+                "id": ACTION_CHANNEL_CREATE,
+                "args": {"avatar": {"source": "preset", "presetId": "p1"}},
+            }})
+        ));
+    }
+
+    #[test]
+    fn a_card_that_asks_for_a_host_opens_in_the_app_whatever_its_type() {
+        let spawn = serde_json::json!({
+            "execution": {"tool": "codex", "host_candidates": [], "default_host_id": null}
+        });
+        assert!(opens_in_app("work.spawn", &spawn));
+        assert!(opens_in_app("tool_call", &spawn));
+        // A tool call with no picker is decided where it is shown.
+        assert!(!opens_in_app(
+            "tool_call",
+            &serde_json::json!({"tool_call": {"name": "x"}})
+        ));
     }
 }

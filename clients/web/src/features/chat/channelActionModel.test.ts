@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  CHANNEL_COPY_GROUP_LABEL,
+  CHANNEL_COPY_ID_DONE_LABEL,
+  CHANNEL_COPY_ID_LABEL,
   CHANNEL_LEAVE_LABEL,
   CHANNEL_MARK_READ_LABEL,
+  CHANNEL_MARK_UNREAD_LABEL,
   CHANNEL_MUTE_LABEL,
   CHANNEL_TOPIC_VIEW_LABEL,
   CHANNEL_UNMUTE_LABEL,
@@ -13,6 +17,7 @@ import {
 import type { Channel } from "@momo/core/lib/api";
 import {
   channelActionAvailability,
+  channelActionClusterTitle,
   channelActionItems,
   channelActionItemsForSurface,
   channelActionKeepsMenuOpen,
@@ -111,6 +116,65 @@ describe("channelActionAvailability", () => {
     expect(dm.mute).toBe(true);
     expect(dm.copyLink).toBe(true);
     expect(dm.copyName).toBe(true);
+    expect(dm.copyId).toBe(true);
+  });
+
+  // ---- #3963 ---------------------------------------------------------------
+
+  it("읽지 않음으로 표시는 읽음 처리의 반대 방향이다 — 둘이 함께 서지 않는다", () => {
+    const read = channelActionAvailability({
+      channel: channel(),
+      selfRole: "owner",
+      unreadCount: 0,
+      canMarkUnread: true,
+    });
+    expect(read.markUnread).toBe(true);
+    expect(read.markRead).toBe(false);
+    // 안 읽음이 이미 있으면 「읽음 처리」가 서고, 호출부가 true 를 넘겨도 겹치지 않는다.
+    const unread = channelActionAvailability({
+      channel: channel(),
+      selfRole: "owner",
+      unreadCount: 3,
+      canMarkUnread: true,
+    });
+    expect(unread.markRead).toBe(true);
+    expect(unread.markUnread).toBe(false);
+    // 투영을 든 호출부가 허락하지 않으면(투영 없음 · 빈 채널) 서지 않는다.
+    expect(
+      channelActionAvailability({
+        channel: channel(),
+        selfRole: "owner",
+        unreadCount: 0,
+      }).markUnread
+    ).toBe(false);
+  });
+
+  it("DM 닫기는 DM 이고 닫을 손이 있을 때만 선다", () => {
+    const dmChannel = channel({ kind: "dm", name: undefined });
+    const base = { selfRole: "owner" as const, unreadCount: 0 };
+    expect(
+      channelActionAvailability({ channel: dmChannel, ...base, canCloseDm: true })
+        .closeDm
+    ).toBe(true);
+    // 손이 없으면 눌러도 아무 일이 없는 항목이 된다.
+    expect(channelActionAvailability({ channel: dmChannel, ...base }).closeDm).toBe(
+      false
+    );
+    // 채널에는 닫기가 없다 - 채널을 사이드바에서 치우는 문은 「나가기」다.
+    expect(
+      channelActionAvailability({ channel: channel(), ...base, canCloseDm: true })
+        .closeDm
+    ).toBe(false);
+  });
+
+  it("ID 복사는 어느 채널에든 있다", () => {
+    expect(
+      channelActionAvailability({
+        channel: channel({ kind: "private" }),
+        selfRole: "member",
+        unreadCount: 0,
+      }).copyId
+    ).toBe(true);
   });
 });
 
@@ -121,13 +185,14 @@ describe("channelActionItems", () => {
     unreadCount: 2,
   });
 
-  it("정본 순서: 상태 → 꺼내기 → 파괴", () => {
+  it("정본 순서: 주제 → 복사 → 상태 → 파괴", () => {
     expect(keysOf(channelActionItems(ALL, REST))).toEqual([
       "topic",
+      "copy-name",
+      "copy-link",
+      "copy-id",
       "mark-read",
       "mute",
-      "copy-link",
-      "copy-name",
       "leave",
     ]);
   });
@@ -138,17 +203,22 @@ describe("channelActionItems", () => {
     expect(idle.find((i) => i.key === "copy-link")?.label).toBe(
       COPY_LINK_ACTION_LABEL
     );
+    expect(idle.find((i) => i.key === "copy-id")?.label).toBe(CHANNEL_COPY_ID_LABEL);
 
     const after = channelActionItems(ALL, {
       muted: true,
       copiedLink: true,
       copiedName: true,
+      copiedId: true,
     });
     expect(after.find((i) => i.key === "mute")?.label).toBe(CHANNEL_UNMUTE_LABEL);
     expect(after.find((i) => i.key === "copy-link")?.label).toBe(
       COPY_LINK_DONE_LABEL
     );
     expect(after.find((i) => i.key === "copy-name")?.label).toContain("복사됨");
+    expect(after.find((i) => i.key === "copy-id")?.label).toBe(
+      CHANNEL_COPY_ID_DONE_LABEL
+    );
   });
 
   it("나가기만 파괴적이다", () => {
@@ -162,8 +232,26 @@ describe("channelActionItems", () => {
   it("구분선은 무리가 바뀌는 자리에만 선다", () => {
     const items = channelActionItems(ALL, REST);
     const separated = items.filter((i) => i.separatorBefore).map((i) => i.key);
-    // 주제 → 상태 무리, 상태 → 꺼내기 무리, 꺼내기 → 파괴.
-    expect(separated).toEqual(["mark-read", "copy-link", "leave"]);
+    // 주제 → 복사, 복사 → 상태, 상태 → 파괴. 같은 무리 안(복사 셋 · 읽음/알림)에는 선이 없다.
+    expect(separated).toEqual(["copy-name", "mark-read", "leave"]);
+  });
+
+  it("모든 항목이 무리를 든다 — 구분선의 단위가 항목마다 있다", () => {
+    expect(
+      channelActionItems(ALL, REST).map((i) => [i.key, i.cluster])
+    ).toEqual([
+      ["topic", "info"],
+      ["copy-name", "copy"],
+      ["copy-link", "copy"],
+      ["copy-id", "copy"],
+      ["mark-read", "state"],
+      ["mute", "state"],
+      ["leave", "danger"],
+    ]);
+    expect(channelActionClusterTitle("copy")).toBe(CHANNEL_COPY_GROUP_LABEL);
+    // 제목이 없는 무리는 행만 선다. 섹션 이동은 항목이 자기 제목을 든다.
+    expect(channelActionClusterTitle("state")).toBeUndefined();
+    expect(channelActionClusterTitle("place")).toBeUndefined();
   });
 });
 
@@ -187,6 +275,23 @@ describe("channelActionItemsForSurface", () => {
     ).toBe(CHANNEL_TOPIC_VIEW_LABEL);
   });
 
+  it("헤더 ⋮ 의 구분선은 예전 그대로다: 주제 │ 알림 · 기억 │ 나가기", () => {
+    const withMemory = channelActionAvailability({
+      channel: channel({ topic: "배포 로그" }),
+      selfRole: "owner",
+      unreadCount: 2,
+      hasMemorySettings: true,
+    });
+    const header = channelActionItemsForSurface("header", withMemory, REST);
+    expect(keysOf(header)).toEqual(["topic", "mute", "memory", "leave"]);
+    expect(header.map((i) => [i.key, Boolean(i.separatorBefore)])).toEqual([
+      ["topic", false],
+      ["mute", true],
+      ["memory", false],
+      ["leave", true],
+    ]);
+  });
+
   it("항목의 열쇠는 표면이 짓는 testid 의 절반이다", () => {
     // `channel-topic`·`channel-row-mark-read` 는 접두사 + testKey 다. 게이트가
     // 그 이름으로 누르므로 열쇠가 조용히 바뀌면 안 된다.
@@ -196,20 +301,22 @@ describe("channelActionItemsForSurface", () => {
     expect(
       channelActionItemsForSurface("row", ALL, REST).map((i) => i.testKey)
     ).toEqual([
+      "copy-name",
+      "copy-link",
+      "copy-id",
       "mark-read",
       "mute-toggle",
-      "copy-link",
-      "copy-name",
       "leave",
     ]);
   });
 
   it("행 우클릭은 「열지 않고 조작한다」만 든다", () => {
     expect(keysOf(channelActionItemsForSurface("row", ALL, REST))).toEqual([
+      "copy-name",
+      "copy-link",
+      "copy-id",
       "mark-read",
       "mute",
-      "copy-link",
-      "copy-name",
       "leave",
     ]);
     expect(
@@ -217,6 +324,54 @@ describe("channelActionItemsForSurface", () => {
         (i) => i.key === "mark-read"
       )?.label
     ).toBe(CHANNEL_MARK_READ_LABEL);
+  });
+
+  it("행 메뉴는 Buzz 의 차례다: 복사 │ 섹션 │ 읽음·알림·별표 │ 나가기", () => {
+    const full = channelActionAvailability({
+      channel: channel({ topic: "배포 로그" }),
+      selfRole: "owner",
+      unreadCount: 0,
+      sectionCount: 1,
+      canStar: true,
+      canMarkUnread: true,
+    });
+    const items = channelActionItemsForSurface("row", full, {
+      ...REST,
+      sections: [{ id: "sec-1", label: "출시 준비" }],
+    });
+    expect(items.map((i) => [i.key, Boolean(i.separatorBefore)])).toEqual([
+      ["copy-name", false],
+      ["copy-link", false],
+      ["copy-id", false],
+      ["move-to-section", true],
+      ["mark-unread", true],
+      ["mute", false],
+      ["star", false],
+      ["leave", true],
+    ]);
+  });
+
+  it("DM 행 메뉴: 복사 │ 읽음·알림 │ 닫기. 나가기·섹션·별표는 없다", () => {
+    const dm = channelActionAvailability({
+      channel: channel({ kind: "dm", name: undefined }),
+      selfRole: "owner",
+      unreadCount: 1,
+      sectionCount: 3,
+      canStar: true,
+      canCloseDm: true,
+    });
+    const items = channelActionItemsForSurface("row", dm, REST);
+    expect(items.map((i) => [i.key, Boolean(i.separatorBefore)])).toEqual([
+      ["copy-name", false],
+      ["copy-link", false],
+      ["copy-id", false],
+      ["mark-read", true],
+      ["mute", false],
+      ["close-dm", true],
+    ]);
+    expect(items.find((i) => i.key === "close-dm")?.label).toBe("사이드바에서 닫기");
+    // 닫기는 파괴적이지 않다(대화가 지워지지 않는다): 빨강 행이 아니다.
+    expect(items.find((i) => i.key === "close-dm")?.tone).toBeUndefined();
   });
 
   it("두 표면이 같은 순서를 읽는다 — 겹치는 항목의 차례가 뒤집히지 않는다", () => {
@@ -229,9 +384,25 @@ describe("channelActionItemsForSurface", () => {
 
   it("걸러낸 뒤 맨 위 항목은 구분선을 이지 않는다", () => {
     const row = channelActionItemsForSurface("row", ALL, REST);
-    expect(row[0].key).toBe("mark-read");
+    expect(row[0].key).toBe("copy-name");
     expect(row[0].separatorBefore).toBeFalsy();
-    // 안 읽음이 없어 첫 항목이 알림으로 바뀌어도 마찬가지다.
+    // 헤더는 주제가 빠지면 알림이 맨 위가 된다. 거르기 **전**에 선을 정했다면 그 알림이
+    // 선을 이고 섰을 자리다.
+    const noTopic = channelActionItemsForSurface(
+      "header",
+      channelActionAvailability({
+        channel: channel(),
+        selfRole: "owner",
+        unreadCount: 0,
+      }),
+      REST
+    );
+    expect(noTopic[0].key).toBe("mute");
+    expect(noTopic[0].separatorBefore).toBeFalsy();
+  });
+
+  it("거른 뒤 이웃한 항목이 같은 무리면 선이 없고, 무리가 통째로 빠져도 선이 겹치지 않는다", () => {
+    // 행 메뉴에서 읽음 처리가 빠져도(= 다 읽음) 복사 │ 알림 │ 나가기 로 선은 둘이다.
     const read = channelActionItemsForSurface(
       "row",
       channelActionAvailability({
@@ -241,8 +412,11 @@ describe("channelActionItemsForSurface", () => {
       }),
       REST
     );
-    expect(read[0].key).toBe("mute");
-    expect(read[0].separatorBefore).toBeFalsy();
+    expect(keysOf(read)).toEqual(["copy-name", "copy-link", "copy-id", "mute", "leave"]);
+    expect(read.filter((i) => i.separatorBefore).map((i) => i.key)).toEqual([
+      "mute",
+      "leave",
+    ]);
   });
 
   it("DM 행에는 나가기가 없다", () => {
@@ -255,7 +429,13 @@ describe("channelActionItemsForSurface", () => {
       }),
       REST
     );
-    expect(keysOf(dm)).toEqual(["mark-read", "mute", "copy-link", "copy-name"]);
+    expect(keysOf(dm)).toEqual([
+      "copy-name",
+      "copy-link",
+      "copy-id",
+      "mark-read",
+      "mute",
+    ]);
   });
 });
 
@@ -275,8 +455,23 @@ describe("진행 낱말과 메뉴 이름 (design-review #1937)", () => {
     // 복사는 영수증이 낱말을 바꾸고, 다이얼로그 인계는 왕복이 아니다.
     expect(busy.get("copy-link")).toBeUndefined();
     expect(busy.get("copy-name")).toBeUndefined();
+    expect(busy.get("copy-id")).toBeUndefined();
     expect(busy.get("topic")).toBeUndefined();
     expect(busy.get("leave")).toBeUndefined();
+  });
+
+  it("읽지 않음으로 표시도 왕복이라 진행 낱말을 든다 (#3963)", () => {
+    const unread = channelActionItems(
+      channelActionAvailability({
+        channel: channel(),
+        selfRole: "owner",
+        unreadCount: 0,
+        canMarkUnread: true,
+      }),
+      REST
+    ).find((i) => i.key === "mark-unread");
+    expect(unread?.label).toBe(CHANNEL_MARK_UNREAD_LABEL);
+    expect(unread?.busyLabel).toBe("읽지 않음으로 표시 중");
   });
 
   it("진행 낱말도 방향을 지킨다", () => {
@@ -306,6 +501,16 @@ describe("channelActionKeepsMenuOpen", () => {
   it("다이얼로그로 넘기는 것은 메뉴를 닫는다", () => {
     expect(channelActionKeepsMenuOpen("leave")).toBe(false);
     expect(channelActionKeepsMenuOpen("topic")).toBe(false);
+  });
+
+  it("ID 복사는 영수증이 항목 자신의 낱말이라 열어 둔다 (#3963)", () => {
+    expect(channelActionKeepsMenuOpen("copy-id")).toBe(true);
+  });
+
+  it("읽지 않음으로 표시는 실패 배너를 읽도록 열어 두고, DM 닫기는 행이 사라지므로 닫는다 (#3963)", () => {
+    expect(channelActionKeepsMenuOpen("mark-unread")).toBe(true);
+    // 닫는 순간 이 행과 메뉴를 이고 있던 트리거가 함께 언마운트된다 - 남기려 해도 남지 않는다.
+    expect(channelActionKeepsMenuOpen("close-dm")).toBe(false);
   });
 });
 
@@ -387,7 +592,8 @@ describe("섹션으로 이동", () => {
     expect(move?.currentSectionId).toBe("sec-1");
   });
 
-  it("정본 차례에서 상태 무리의 끝에 선다", () => {
+  it("정본 차례에서 복사 다음, 상태 무리 앞에 선다", () => {
+    // Buzz 의 차례다(#3963): 복사 │ 섹션 이동 │ 읽음·알림·별표. 앞 판은 상태 무리의 끝이었다.
     const available = channelActionAvailability({
       channel: channel({ topic: "출시 일정" }),
       selfRole: "owner",
@@ -396,11 +602,12 @@ describe("섹션으로 이동", () => {
     });
     expect(channelActionItems(available, WITH_SECTIONS).map((i) => i.key)).toEqual([
       "topic",
+      "copy-name",
+      "copy-link",
+      "copy-id",
+      "move-to-section",
       "mark-read",
       "mute",
-      "move-to-section",
-      "copy-link",
-      "copy-name",
       "leave",
     ]);
   });

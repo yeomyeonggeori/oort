@@ -1,0 +1,40 @@
+appId: app.momo.ios
+name: 99-pause-until-capture
+---
+# 99-pause-until-capture — 시트 안의 기한 장과 「직접 고르기」 (#2899, ADR-0204 D2).
+#
+# 표면 `-momoMeasure SHELL-PAUSE-UNTIL`(알림 일시 중지의 기한 장), `SHELL-PAUSE-UNTIL-DND`
+# (방해 금지의 기한 장), `SHELL-PAUSE-UNTIL-OPEN`(기한 없는 행이 걸린 채 연 장)은 시트를 그 장에서
+# 연다. 이 흐름은 목록 한 장, 「직접 고르기」를 연 달력 한 장, 시각 칩과 확인 단추까지 내린 한 장을 찍는다.
+#
+#   xcrun simctl launch booted app.momo.ios --args \
+#     -momoMeasure SHELL-PAUSE-UNTIL -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro test -e SHOT=pause-until-dark clients/mobile/maestro/99-pause-until-capture.yaml
+- extendedWaitUntil:
+    visible:
+      id: "pause-until-page"
+    timeout: 60000
+# dismiss-dev-logbox 를 부르지 않는다: 시트 안에서 그 좌표(92%,94%)는 누르는 줄 위일 수 있다.
+- takeScreenshot: ${SHOT}-list
+# 큰 글씨(Dynamic Type AX5)에서는 「직접 고르기」 줄이 첫 화면 밖이다. 보이게 내린 뒤 누른다 —
+# 기본 크기에서는 이미 보여서 바로 지나간다.
+- scrollUntilVisible:
+    element:
+      id: "pause-until-option-custom"
+    direction: DOWN
+    timeout: 60000
+- tapOn:
+    id: "pause-until-option-custom"
+- extendedWaitUntil:
+    visible:
+      id: "pause-until-custom"
+    timeout: 10000
+# 열리면 시트가 달력의 윗변으로 내려온다(`onReveal`). 움직임이 끝난 뒤에 찍는다.
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-custom-calendar
+- scrollUntilVisible:
+    element:
+      id: "pause-until-confirm"
+    direction: DOWN
+    timeout: 60000
+- takeScreenshot: ${SHOT}-custom-time

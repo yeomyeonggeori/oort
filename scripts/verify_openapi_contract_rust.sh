@@ -2111,6 +2111,16 @@ append_secret_with_derivatives "$PUSH_FETCH_SECRET"
 guard_jq '(.ttlSeconds == 21600) and (.expiresAtMs | type == "number")' \
   "push-fetch token lives six hours"
 
+# #3927 (ADR-0204 D6) — the lock screen's one-request token, the push-fetch
+# token's twin. Same source (the login ACCESS), same six hours, its own budget;
+# its secret is registered so it can never reach diagnostics.
+sample push-action-token post "/v1/auth/push-action-token" "/v1/auth/push-action-token" 200 \
+  "" "$ACCESS"
+PUSH_ACTION_SECRET="$(printf '%s' "$RESPONSE_BODY" | jq -r '.token // empty')"
+append_secret_with_derivatives "$PUSH_ACTION_SECRET"
+guard_jq '(.ttlSeconds == 21600) and (.expiresAtMs | type == "number")' \
+  "push-action token lives six hours"
+
 # ADR-0180 D5 / #2491 — linked-device list + revoke. Login ACCESS is the
 # issuer, not a linked row. Two redeem sessions become the 200 list (one
 # `current: true`). lastSeenAt is omitted until the access row is touched;

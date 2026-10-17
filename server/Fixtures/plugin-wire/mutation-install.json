@@ -1,0 +1,10 @@
+{
+  "auditRef": "00000000-0000-0000-0000-000000000000",
+  "capabilities": [],
+  "egressDomains": [
+    "api.githubcopilot.com"
+  ],
+  "enabled": true,
+  "pluginId": "com.momo.plugins.github",
+  "status": "enabled"
+}
