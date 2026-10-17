@@ -41,6 +41,7 @@ import {mintPushFetchToken} from './pushFetchToken';
 import {isPushOptedOut, usePushOptedOut} from './pushOptOut';
 import {useAppIconBadge} from './appBadge';
 import {registeredPushDeviceId, registerWithRetry} from './registration';
+import {useDismissSettledApprovalNotifications} from './settledApprovalNotifications';
 import {tapArrival, tapResponseKey, type TapArrival} from './tapArrival';
 
 // =============================================================================
@@ -486,6 +487,10 @@ export default function PushProvider({
 
     return () => subscription.remove();
   }, [workspaceId, deliverTap]);
+
+  // 다른 곳에서 결정된 승인의 알림을 걷는다(#3926). 앱 안 결정과 알림 버튼은 결정을
+  // 보낸 자리에서 직접 걷고, 이 훅은 남이 한 결정을 대기 승인 목록에서 알아챈다.
+  useDismissSettledApprovalNotifications(workspaceId);
 
   // ---- 5. Sign-out ---------------------------------------------------------
   useEffect(

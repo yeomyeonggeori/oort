@@ -9,7 +9,7 @@ import {
   ScreenHeader,
   TapRow,
 } from '../design/atoms';
-import {useRefreshControl} from '../design/refresh';
+import {PULL_FILL, usePullRefresh} from '../design/refresh';
 import {font, line, radius, slopTo, space, type Palette} from '../design/tokens';
 import {useStyles} from '../design/theme';
 import {RUNNING_SESSION_PILL} from '@momo/core/features/agents/agentOps';
@@ -173,7 +173,7 @@ export default function AgentsScreen({
   const refetchDirectory = directoryQuery.refetch;
   const refetchChannels = channelsQuery.refetch;
   const refetchSessions = sessionsQuery.refetch;
-  const refreshControl = useRefreshControl(
+  const {refreshControl, scrollProps} = usePullRefresh(
     useCallback(
       () =>
         Promise.all([refetchDirectory(), refetchChannels(), refetchSessions()]),
@@ -237,6 +237,7 @@ export default function AgentsScreen({
           headline="아직 에이전트가 없습니다."
           detail="에이전트를 만드는 것은 데스크톱에서 할 수 있어요."
           refreshControl={refreshControl}
+          scrollProps={scrollProps}
           testID="agents-empty"
         />
       ) : (
@@ -262,6 +263,7 @@ export default function AgentsScreen({
           )}
           contentContainerStyle={styles.listContent}
           refreshControl={refreshControl}
+          {...scrollProps}
           testID="agents-list"
         />
       )}
@@ -363,7 +365,7 @@ function Row({
 }
 
 const buildStyles = (color: Palette) => StyleSheet.create({
-  listContent: {paddingBottom: space.lg},
+  listContent: {paddingBottom: space.lg, ...PULL_FILL},
   // 재워진 에이전트는 흐려진다. 상태 문구가 이미 말하고 있으므로 이것은
   // 두 번째 신호이지 유일한 신호가 아니다 — 색만으로 말하지 않는다.
   avatarPaused: {opacity: 0.5},

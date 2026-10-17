@@ -126,12 +126,14 @@ describe('머리 — 원형 뒤로 · ⋮ 메뉴 · 허들 자리 · 연결 띠'
     expect(onPress).toHaveBeenCalled();
   });
 
-  it('연결 상태는 부제가 아니라 띠다 — 연결됐으면 아무 말도 없다', () => {
+  it('연결 상태는 부제가 아니라 띠다 — 연결됐으면 아무 말도 없다', async () => {
     const calm = header({subtitle: '6명'});
     expect(screen.queryByTestId('connection-banner')).toBeNull();
     expect(screen.getByTestId('conversation-subtitle')).toHaveTextContent('6명');
     calm.unmount();
     header({subtitle: '6명', railStatus: 'disconnected'});
+    // 띠의 오르트 로더가 「동작 줄이기」 첫 답을 받는다(#3961). 흘려보내 act 밖 갱신을 막는다.
+    await act(async () => {});
     expect(screen.getByTestId('connection-banner')).toHaveTextContent('연결이 끊겼습니다');
     // 부제는 방의 정체를 그대로 말한다 — 연결 문장으로 바뀌지 않는다.
     expect(screen.getByTestId('conversation-subtitle')).toHaveTextContent('6명');
