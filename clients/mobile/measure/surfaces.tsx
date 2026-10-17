@@ -168,6 +168,10 @@ import {
   composerPlaceholderClauses,
 } from '@momo/core/features/chat/composerCopy';
 import {FixedScheme, useStyles, type ColorScheme} from '../src/design/theme';
+import {PullProbe} from './pullProbe';
+import {PullHold} from './pullHold';
+import {PullRefreshSurface} from './pullRefresh';
+import {OortLoaderSurface} from './oortLoader';
 import TeamBoardScreen from '../src/screens/TeamBoardScreen';
 import WorkJobsScreen from '../src/screens/WorkJobsScreen';
 import {TeamBoardDetailSheet} from '../src/features/work/teamBoard/TeamBoardDetailSheet';
@@ -2076,8 +2080,18 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     />
   );
 
+  // #3962: 당겨서 새로고침. 계측(`pull-probe`·`pull-hold-*`)과 캡처 표면(`pull-refresh*`).
+  if (name === 'pull-probe') return <PullProbe />;
+  if (name.startsWith('pull-hold-')) return <PullHold which={name.slice('pull-hold-'.length)} />;
+  if (name.startsWith('pull-refresh')) {
+    return <PullRefreshSurface which={name.slice('pull-refresh'.length).replace(/^-/, '')} />;
+  }
   if (name.startsWith('device-key-')) {
     return <DeviceKeySurface which={name.slice('device-key-'.length)} />;
+  }
+  // #3961: 오르트 로더. 연결 띠·첫 로딩은 실제 컴포넌트(`measure/oortLoader.tsx`).
+  if (name.startsWith('oort-loader')) {
+    return <OortLoaderSurface which={name.slice('oort-loader'.length).replace(/^-/, '')} />;
   }
   if (name.startsWith('signed-work-')) {
     return <SignedWorkSurface which={name.slice('signed-work-'.length)} />;

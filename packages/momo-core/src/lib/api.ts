@@ -1123,15 +1123,25 @@ function bindRefreshKey(retry: number): void {
 }
 
 /**
- * Authenticated exchange with exactly one 401 rotation. A 401 that survives
- * the rotation ends the session (`markAuthExpired`); only that owner may
- * declare expiry. `init.body` is always a string here, so replaying it on the
- * retry is safe.
+ * Authenticated exchange with exactly one 401 rotation, answering with the
+ * response **whatever its status** (#3926). A 401 that survives the rotation
+ * ends the session (`markAuthExpired`); only that owner may declare expiry.
+ * `init.body` is always a string here, so replaying it on the retry is safe,
+ * and it is the SAME string: a body that carries an idempotency key carries the
+ * same key on the retry, so the server replays instead of recording twice.
  *
- * Exported so sibling modules (linked devices, …) reuse this path instead of
- * growing a private fetch wrapper that skips rotation.
+ * This is the half of `authedRequest` for callers whose non-2xx answers ARE the
+ * contract. The approval decision answers 403/404/409 with the same receipt
+ * schema as 200, and `authedRequest` would throw that body away
+ * (`features/timeline/approvalDecision.ts`). Before this existed that caller
+ * made a private raw fetch, which skipped the rotation: a phone that had been in
+ * the background past the access token's life lost the decision with a 401.
+ *
+ * There is one rotation and no loop. A rotation that does not produce a usable
+ * token leaves the first 401 as the answer, and a second 401 after a rotation
+ * is the answer too; neither starts another rotation.
  */
-export async function authedRequest(
+export async function authedResponse(
   path: string,
   init: RequestInit = {}
 ): Promise<HttpResponse> {
@@ -1142,6 +1152,20 @@ export async function authedRequest(
     }
   }
   if (res.status === 401) coreSession().markAuthExpired();
+  return res;
+}
+
+/**
+ * `authedResponse` that throws the server's error for any non-2xx answer.
+ *
+ * Exported so sibling modules (linked devices, …) reuse this path instead of
+ * growing a private fetch wrapper that skips rotation.
+ */
+export async function authedRequest(
+  path: string,
+  init: RequestInit = {}
+): Promise<HttpResponse> {
+  const res = await authedResponse(path, init);
   if (!res.ok) throw parseError(res);
   return res;
 }
@@ -2150,6 +2174,39 @@ export async function revokePluginScope(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/plugins/${encodeURIComponent(pluginId)}/grants/${encodeURIComponent(scope)}`,
     { method: "DELETE" }
   ));
+}
+
+/**
+ * 「앱 설치」 탐지: 설치·권한 경로가 이 서버에 서 있는지 **바꾸는 것 없이** 묻는다
+ * (ADR-0113 증보 P3, #3860).
+ *
+ * 두 경로(`…/install`, `…/grants`)에 GET을 보내고 상태 코드만 돌려준다. 두 경로는
+ * POST·DELETE로만 등록되므로, 서 있으면 라우터가 핸들러를 부르기 전에 405를 돌려주고
+ * 없으면 404다. GET이어야 한다: 쓰기 동사로 물으면 서 있는 경로가 실제로 실행된다.
+ * 읽는 법(405가 「있다」)과 엔진 랜딩 시 재확인은 `pluginInstallVerdict`가 갖고 있다.
+ *
+ * 경로에 실리는 `pluginId`는 카탈로그가 준 실제 앱이어야 한다. 앞에 앱 조회 층이 서도
+ * 같은 답이 오게 하려는 것이다.
+ *
+ * `ApiError`는 상태 코드로 접는다(그것이 이 함수의 답이다). 네트워크 실패는 그대로
+ * 던진다: 아무도 답하지 않은 것은 경로에 대한 진술이 아니다.
+ */
+export async function probePluginWriteRoutes(
+  workspaceId: string,
+  pluginId: string,
+  signal?: AbortSignal
+): Promise<number[]> {
+  const root = `/v1/workspaces/${encodeURIComponent(workspaceId)}/plugins/${encodeURIComponent(pluginId)}`;
+  return Promise.all(
+    ["install", "grants"].map(async (leaf) => {
+      try {
+        return (await authedRequest(`${root}/${leaf}`, { signal })).status;
+      } catch (error) {
+        if (error instanceof ApiError) return error.status;
+        throw error;
+      }
+    })
+  );
 }
 
 interface WireReadState {

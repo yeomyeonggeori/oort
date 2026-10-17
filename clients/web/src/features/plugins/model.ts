@@ -319,12 +319,15 @@ export function toolsForPluginScope(
   return tools.filter((tool) => tool.scopes.includes(scope));
 }
 
+/**
+ * 목록 한 줄이 말하는 「내가 허용한 도구」. 위험도는 상세의 도구 줄이 칩으로 말한다.
+ * 목록에서 위험도를 또 말하면 같은 사실이 두 곳에서 다른 모양이 된다.
+ */
 export function callerPolicySummary(
   tools: readonly { risk: string }[] | undefined
 ): string {
-  if (!tools?.length) return "내 권한 도구: 없음";
-  const risks = [...new Set(tools.map((tool) => riskLabel(tool.risk)))];
-  return `내 권한 도구 위험도: ${risks.join(", ")}`;
+  if (!tools?.length) return "허용한 도구 없음";
+  return `허용한 도구 ${tools.length}개`;
 }
 
 export function workspaceInstallationLabel({
@@ -417,3 +420,147 @@ export function pluginActionConfirmation(action: Extract<PluginAction, {
     confirmLabel: "설치 해제",
   };
 }
+
+// ---- 읽기 전용 카탈로그 (#3860, ADR-0113 증보 P-U1) ---------------------------------
+//
+// 서버가 설치·권한 경로를 싣지 않는 동안(`pluginInstall`) 「앱」 화면은 읽기만 한다. 아래는
+// 그 화면이 말하는 문장들이다. 문장은 사실만 옮긴다: 매니페스트와 서버 답에 있는 것만
+// 쓰고, 서버가 아직 하지 않는 일(에이전트가 이 앱을 실제로 부른다는 약속, 토큰을 어디에
+// 둔다는 보증)은 말하지 않는다. 설치 화면이 열리면 같은 문장이 그대로 맞아야 한다.
+
+/** 서버가 주는 `iconText`가 없을 때 쓰는 타일 글자: 이름의 머리글자 둘까지("Google Drive"는 "GD"). */
+export function pluginIconText(plugin: { name: string; iconText?: string }): string {
+  const given = plugin.iconText?.trim();
+  if (given) return given;
+  const initials = plugin.name
+    .trim()
+    .split(/\s+/)
+    .filter((word) => word !== "")
+    .slice(0, 2)
+    .map((word) => [...word][0]?.toLocaleUpperCase() ?? "")
+    .join("");
+  return initials === "" ? "?" : initials;
+}
+
+/**
+ * 공식 네 앱의 한 줄 소개. 서버가 주는 `description`은 영어 매니페스트 문구
+ * ("Official GitHub hosted MCP integration")라서 한국어 목록에 그대로 서면 읽는 사람이
+ * 영어와 내부 약어를 먼저 만난다. 이 표는 **서비스가 무엇인지**만 말하고 oort가 그것으로
+ * 무엇을 하는지는 말하지 않는다(그건 아래 「할 수 있는 일」이 매니페스트에서 읽는다).
+ * 그래서 도구가 늘어도 이 문장은 틀리지 않는다. 표에 없는 앱은 서버 문구로 돌아간다.
+ */
+const OFFICIAL_APP_SUBTITLE: Readonly<Record<string, string>> = {
+  "com.momo.plugins.github": "코드 저장소와 이슈",
+  "com.momo.plugins.notion": "문서와 페이지",
+  "com.momo.plugins.linear": "이슈와 작업 추적",
+  "com.momo.plugins.drive": "공유 드라이브의 파일",
+};
+
+export function pluginSubtitle(plugin: { pluginId: string; description: string }): string {
+  return OFFICIAL_APP_SUBTITLE[plugin.pluginId.toLowerCase()] ?? plugin.description;
+}
+
+/**
+ * 목록을 걸러 보는 컨트롤(검색, 보기)이 서는 최소 개수. 공식 네 앱은 한눈에 읽혀서 걸러 볼
+ * 것이 없고, 컨트롤이 있으면 오히려 이 목록이 더 큰 마켓인 것처럼 말한다. 한 화면에 선 채
+ * 읽히는 개수(여섯 줄)를 넘으면 컨트롤이 돌아온다(커뮤니티 앱이 들어오는 날).
+ */
+export const PLUGIN_CONTROLS_MAX_GLANCEABLE = 6;
+
+export function pluginControlsVisible(catalogSize: number): boolean {
+  return catalogSize > PLUGIN_CONTROLS_MAX_GLANCEABLE;
+}
+
+/** 서버가 허용한 라이선스 표기(`ALLOWED_SPDX`) 가운데 SPDX가 아닌 하나는 읽을 수 있는 이름으로 보인다. */
+const LICENSE_LABEL: Readonly<Record<string, string>> = {
+  "LicenseRef-Linear-Hosted-Service": "Linear 호스팅 서비스 약관",
+};
+
+export function pluginLicenseLabel(spdx: string): string {
+  return LICENSE_LABEL[spdx] ?? spdx;
+}
+
+/** 이 워크스페이스에서의 설치 상태. 사람의 권한(`myGrantSentence`)과 따로 말한다. */
+export function workspaceInstallSentence({
+  installed,
+  enabled,
+}: {
+  installed: boolean;
+  enabled: boolean;
+}): string {
+  if (!installed) return "설치하지 않았어요";
+  // 목록 칩(「워크스페이스 비활성」)과 같은 말이고, 설치가 열리면 돌아오는 「다시 활성화」 단추와도 짝이다.
+  return enabled ? "설치돼 있어요" : "설치했지만 비활성이에요";
+}
+
+/**
+ * 내가 허용한 권한. 서버의 실효 정책(`toolPolicy`)이 말하는 것만 옮긴다. 설치가 아니라 정책에서
+ * 읽으므로 설치돼 있어도 비어 있을 수 있다.
+ *
+ * **비활성인 설치는 따로 말한다.** 서버의 정책 질의는 grant를 설치가 켜져 있을 때만 센다
+ * (`POLICY_SQL`: `wpi.enabled AND wpi.revoked_at IS NULL`). 그래서 꺼진 앱에서 비어 있는 정책은
+ * 「허용한 적 없다」가 아니라 「지금 적용되는 것이 없다」다. 앞의 말은 이 화면이 모르는 사실이다.
+ * 괄호 안은 「허용한 도구」로 쓴다: 「할 수 있는 일」 위의 「이 앱의 도구는 N개」(선언된 수)와
+ * 같은 낱말이 다른 수를 가리키면 둘이 어긋나는 날 한쪽이 거짓으로 읽힌다.
+ */
+export function myGrantSentence(
+  activeScopes: readonly string[],
+  toolCount: number,
+  plugin: { installed: boolean; enabled: boolean } = { installed: true, enabled: true }
+): string {
+  if (activeScopes.length === 0 && toolCount === 0) {
+    return plugin.installed && !plugin.enabled
+      ? "비활성인 동안은 적용되는 권한이 없어요"
+      : "허용한 권한이 없어요";
+  }
+  if (activeScopes.length === 0) return `허용한 도구 ${toolCount}개`;
+  return `${activeScopes.map(identifiableScopeSentence).join(", ")} (허용한 도구 ${toolCount}개)`;
+}
+
+/** 매니페스트의 도구를 한 줄로: 몇 개이고 어떤 종류인가. 도구가 없으면 줄 자체가 없다. */
+export function pluginToolsSummary(tools: readonly { risk?: string }[]): string | null {
+  if (tools.length === 0) return null;
+  const counts = new Map<string, number>();
+  for (const tool of tools) {
+    const label = riskLabel(tool.risk ?? "");
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  if (counts.size === 1 && counts.has(riskLabel("read"))) {
+    return `이 앱의 도구는 ${tools.length}개이고, 모두 읽기 도구예요.`;
+  }
+  const parts = [...counts].map(([label, count]) => `${label} ${count}개`);
+  return `이 앱의 도구는 ${tools.length}개예요: ${parts.join(", ")}.`;
+}
+
+export const PLUGIN_READONLY_COPY = {
+  tools: {
+    heading: "할 수 있는 일",
+    none: "서버가 표시할 도구 정보를 보내지 않았어요.",
+    // 허용의 방향은 사람이 앱에 맡기는 쪽이다(설치가 열리면 돌아오는 「내 사용 허용」·「내 권한 회수」 단추와 같다).
+    // 「내게 허용됨」은 거꾸로 읽혀서 쓰지 않는다.
+    allowed: "내가 허용함",
+  },
+  egress: {
+    heading: "연결하는 곳",
+    // 괄호 바로 뒤에 조사를 두지 않는다: `)` 뒤는 keep-all에서도 줄바꿈이 허용돼 900px에서 「이」가
+    // 줄 머리에 홀로 남았다(독립 design-review #3860 M1). 조사 고아는 `latin_particle`이 못 잡는다.
+    lead: "이 앱을 쓰면 아래 주소로 요청이 나가요. 에이전트가 도구에 넘긴 검색어 같은 내용은 그 요청에 담기고, 돌아온 내용은 에이전트가 읽어요.",
+    none: "이 앱이 연결하는 주소를 서버가 알려 주지 않았어요.",
+  },
+  publisher: {
+    // 이용약관·개인정보 링크는 매니페스트가 줄 때만 선다. 네 앱 모두 주지 않는 오늘 「약관」을 제목에 두면 거짓이다.
+    heading: "배포자 정보",
+  },
+  status: {
+    workspace: "이 워크스페이스",
+    mine: "내 권한",
+  },
+  empty: {
+    // 서버에 앱이 하나도 없을 때. 「아직」은 시간의 말이라 걸러서 빈 경우에는 쓰지 않는다.
+    headline: "보여 줄 앱이 아직 없어요.",
+    noneRegistered: "서버에 등록된 공식 앱이 생기면 여기에 나타나요.",
+    // 앱은 있는데 검색·보기가 다 걸러 낸 경우(목록이 일곱을 넘어 컨트롤이 설 때만 생긴다).
+    filteredHeadline: "맞는 앱이 없어요.",
+    filtered: "검색어나 보기를 바꿔 다른 앱을 확인하세요.",
+  },
+} as const;
