@@ -1,3 +1,4 @@
+const os = require('os');
 const path = require('path');
 
 /**
@@ -7,7 +8,26 @@ const path = require('path');
  */
 const CORE_SRC = path.resolve(__dirname, '../../packages/momo-core/src');
 
+/**
+ * Worker cap (#3796). Jest's default is `cores - 1`; on an 18-core machine that is
+ * 17 workers, each a full RN environment, and the suite cannot use them: its
+ * longest single file is ~15 s and the whole run is ~80 CPU-seconds, so it stops
+ * getting faster at about 8 workers. Measured on this tree (shared machine, warm
+ * cache, wall / CPU):
+ *
+ *     17 workers  17.1 s / 98.6 s     8 workers  15.2 s / 80.7 s
+ *      6 workers  21.0 s / 77.1 s     4 workers  37.7 s / 75.5 s
+ *
+ * Eight is as fast as seventeen and spends ~18% less CPU (every worker re-pays
+ * module loading), and it puts 9 fewer processes in the run queue of whatever else
+ * the machine is doing — the merge-tree gate is routinely run next to other
+ * gates, reviewers and builds. `availableParallelism() - 1` keeps jest's default on
+ * smaller machines (a 4-vCPU CI runner still gets 3).
+ */
+const MAX_WORKERS = Math.min(8, Math.max(os.availableParallelism() - 1, 1));
+
 module.exports = {
+  maxWorkers: MAX_WORKERS,
   preset: '@react-native/jest-preset',
   moduleNameMapper: {
     '^@momo/core/(.*)$': `${CORE_SRC}/$1`,
@@ -28,6 +48,9 @@ module.exports = {
     'node_modules/(?!((jest-)?react-native|@react-native(-community)?|react-native-url-polyfill|react-native-keychain|react-native-mmkv|react-native-nitro-modules|react-native-safe-area-context|centrifuge|@tanstack)/)',
   ],
   setupFiles: ['<rootDir>/jest.setup.js'],
+  // Runs after the test framework is installed, because it needs `beforeAll`.
+  // See the header of `jest.warm.js` for why a cold transform cache needs it.
+  setupFilesAfterEnv: ['<rootDir>/jest.warm.js'],
   testEnvironment: 'node',
   // Explicit, so a shared fixture placed next to the tests is not itself
   // collected as a suite and failed for containing no tests.
