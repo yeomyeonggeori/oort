@@ -187,9 +187,11 @@ export function UpdateSection() {
 /**
  * Download progress. The bar is a native `<progress>` driven by value/max
  * attributes: CSP forbids the inline width an ordinary div bar would need, and
- * the platform control already announces itself to a screen reader. It is only
- * drawn when a length is known; an indeterminate bar that never fills is the
- * kind of perpetual motion that says nothing.
+ * the platform control already announces itself to a screen reader. With no
+ * length it is drawn WITHOUT `value`, which is the native indeterminate bar
+ * (same as the sidebar card): a gauge that fills a width it does not know would
+ * be a lie, but no gauge at all left 「0 B」 standing alone and looked frozen
+ * (#4019). The words under it say 「받는 중」 instead of a byte count.
  */
 function InstallProgress({
   state,
@@ -199,15 +201,17 @@ function InstallProgress({
   const percent = progressPercent(state.downloaded, state.total);
   return (
     <div className="flex flex-col gap-1" data-testid="update-progress">
-      {percent !== null && state.total !== null && (
-        <progress
-          className="progress-bar"
-          value={state.downloaded}
-          max={state.total}
-          aria-label="업데이트 내려받는 중"
-        />
-      )}
-      <p className="font-mono text-meta text-ink-muted" data-numeric>
+      <progress
+        className="progress-bar"
+        {...(percent !== null && state.total !== null
+          ? { value: state.downloaded, max: state.total }
+          : {})}
+        aria-label="업데이트 내려받는 중"
+      />
+      <p
+        className={`${percent !== null ? "font-mono " : ""}text-meta text-ink-muted`}
+        data-numeric={percent !== null ? true : undefined}
+      >
         {progressLabel(state.downloaded, state.total)}
         {percent !== null ? ` (${percent}%)` : ""}
       </p>

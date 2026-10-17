@@ -104,23 +104,30 @@ export function formatBytes(bytes: number): string {
 }
 
 /**
- * "3.2 / 12.4 MB" while a length is known, "3.2 MB" when it is not.
+ * "3.2 / 12.4 MB" while a length is known, "받는 중" when it is not (#4019).
  *
  * The shared unit is printed once. Two units in one label ("3.2 MB / 12.4 MB")
  * makes the reader parse the string instead of the ratio, which is the only
  * thing the label is for.
+ *
+ * With no length there is no ratio, and a bare byte count is worse than none:
+ * before the first chunk it read 「0 B」 and looked frozen (2026-10-16 staging
+ * update run). The honest unknown is a word, not a number.
  */
 export function progressLabel(
   downloaded: number,
   total: number | null
 ): string {
-  if (total === null || total <= 0) return formatBytes(downloaded);
+  if (total === null || total <= 0) return PROGRESS_UNKNOWN_LABEL;
   const done = formatBytes(downloaded);
   const all = formatBytes(total);
   const unit = all.slice(all.indexOf(" "));
   const short = done.endsWith(unit) ? done.slice(0, -unit.length) : done;
   return `${short} / ${all}`;
 }
+
+/** What the gauge says while the size is not known (no Content-Length yet). */
+export const PROGRESS_UNKNOWN_LABEL = "받는 중";
 
 /**
  * The publish date, rendered in the reader's locale, or null when the manifest
