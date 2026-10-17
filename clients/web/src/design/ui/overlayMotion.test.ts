@@ -444,16 +444,82 @@ describe.skipIf(!chromiumAvailable)(
       };
     }
 
+    /**
+     * Escape → removal, timed by the PAGE's own clock.
+     *
+     * This used to be `evaluate(now)` → press → `waitFor(detached)` →
+     * `evaluate(now - start)`: three Playwright/CDP round trips sat inside the
+     * number, so the `< 500` and `< 80` upper bounds below measured the test
+     * runner's latency as much as the overlay's exit. They are the only
+     * assertions here that move with machine load rather than with the product
+     * (the lower bounds cannot: an exit animation never finishes early).
+     * `panelMotion.test.ts` already separates the two (`measureInPageDetach`,
+     * "observeLag"); this is the same probe, reduced to what this file reads.
+     * A capture-phase keydown stamps t0 and a MutationObserver stamps t1, both
+     * with `performance.now()` in the page; a removal the observer never saw is
+     * an error, not a pass.
+     */
     async function unmountDwell(
       page: import("playwright").Page,
       selector: string,
       close: () => Promise<void>
     ): Promise<number> {
-      const t0 = await page.evaluate(() => performance.now());
+      await page.evaluate((sel) => {
+        const target = window as Window & {
+          __dwellProbe?: { t0: number; t1: number };
+        };
+        const probe = { t0: 0, t1: 0 };
+        const onKey = (event: KeyboardEvent) => {
+          if (probe.t0 === 0 && event.key === "Escape") probe.t0 = performance.now();
+        };
+        document.addEventListener("keydown", onKey, true);
+        const observer = new MutationObserver(() => {
+          if (probe.t1 !== 0 || document.querySelector(sel)) return;
+          probe.t1 = performance.now();
+          observer.disconnect();
+          document.removeEventListener("keydown", onKey, true);
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+        target.__dwellProbe = probe;
+      }, selector);
       await close();
       await page.locator(selector).waitFor({ state: "detached", timeout: 2_000 });
-      return page.evaluate((start) => performance.now() - start, t0);
+      const probe = await page.evaluate(
+        () =>
+          (window as Window & { __dwellProbe?: { t0: number; t1: number } })
+            .__dwellProbe ?? null
+      );
+      if (!probe || probe.t0 === 0 || probe.t1 === 0) {
+        throw new Error(`in-page dwell probe missed ${selector}`);
+      }
+      return probe.t1 - probe.t0;
     }
+
+    it("the in-page dwell probe reports the interval Escape -> removal (calibration)", async () => {
+      // The probe replaced a measurement that read the same thing through three CDP
+      // round trips. A probe that silently returned 0 (or a constant) would make every
+      // `dwell >= N` below fail loudly, but one that returned a plausible wrong number
+      // would not -- so check it against a page that removes its node a KNOWN 250 ms
+      // after Escape. Lower bound: a timer never completes early (5 ms of clock slop);
+      // upper bound is only the "did not hang" guard, not a timing claim.
+      const { chromium } = await import("playwright");
+      const browser = await chromium.launch();
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          `<!doctype html><html><body><div id="target">x</div><script>
+            document.addEventListener("keydown", (e) => {
+              if (e.key === "Escape") setTimeout(() => document.getElementById("target")?.remove(), 250);
+            });
+          </script></body></html>`
+        );
+        const dwell = await unmountDwell(page, "#target", () => page.keyboard.press("Escape"));
+        expect(dwell, `calibration dwell ${dwell}ms for a 250ms removal`).toBeGreaterThanOrEqual(245);
+        expect(dwell).toBeLessThan(2_000);
+      } finally {
+        await browser.close();
+      }
+    }, 60_000);
 
     it("product dialog (SectionDeleteConfirmDialog) overlay opens at 200ms and close dwell is ≥140ms", async () => {
       const { browser, page } = await launchProbe();
@@ -500,58 +566,98 @@ describe.skipIf(!chromiumAvailable)(
     }
 
     /**
-     * Wait for `data-state=closed` on a pinned node, then sample at `delayMs`
-     * in the same in-page turn. Stop (connected=false) once the node detaches.
-     * 30/60/90 sits inside CLOSE.dialog (150ms) with margin; 120 was 30ms
-     * inside the exit and flaked under full-suite CDP load (#1997 H-1).
+     * Hold the closing overlay at `delayMs` INTO its exit animation and read it there.
+     *
+     * What the test needs is "at 30 / 60 / 90 ms of the exit, the closed overlay is
+     * still mounted and click-through". The first version sampled with an in-page
+     * `setTimeout(delayMs)` armed after the Escape had already gone through CDP, so
+     * the sample landed wherever the machine let it: on a starved browser the timer
+     * ran after the 150 ms exit had finished and the node was already detached
+     * (`t+60ms overlay data-state: expected null to be 'closed'`) -- the harness, not
+     * the overlay. Now the exit is on a clock the test owns: a MutationObserver armed
+     * BEFORE the Escape sees `data-state` flip to `closed` in the same task, forces
+     * the style recalc that creates the CSS animation, pauses it and sets its
+     * `currentTime` to `delayMs`. A paused animation never fires `animationend`, so
+     * Radix `Presence` keeps the node mounted for as long as the test needs to read
+     * and click, however slow the machine is; `releaseHeldExit` finishes it.
+     * pointer-events is not animated -- it comes from the `closed` class -- so the
+     * value read is the one a real finger would meet at that point of the exit.
      */
-    async function sampleClosedOverlayAfter(
+    async function armExitHold(
       page: import("playwright").Page,
       overlaySelector: string,
       delayMs: number
-    ): Promise<{ connected: boolean; state: string | null; pointerEvents: string }> {
-      return page.evaluate(
-        ({ selector, ms }) =>
-          new Promise((resolve, reject) => {
-            const el = document.querySelector(selector);
+    ): Promise<void> {
+      await page.evaluate(
+        ({ selector, ms }) => {
+          const target = window as Window & {
+            __heldExit?: Animation[];
+            __heldExitRead?: Promise<{
+              connected: boolean;
+              state: string | null;
+              pointerEvents: string;
+              held: number;
+            }>;
+          };
+          const el = document.querySelector(selector);
+          target.__heldExit = [];
+          target.__heldExitRead = new Promise((resolve, reject) => {
             if (!el) {
-              resolve({ connected: false, state: null, pointerEvents: "" });
+              reject(new Error(`${selector} is not mounted`));
               return;
             }
-            const waitClosed = (deadline: number) => {
-              if (!el.isConnected) {
-                resolve({ connected: false, state: null, pointerEvents: "" });
-                return;
+            const observer = new MutationObserver(() => {
+              if (el.getAttribute("data-state") !== "closed") return;
+              observer.disconnect();
+              void getComputedStyle(el).animationName; // style recalc: the exit animation exists after this
+              const held = el.getAnimations();
+              for (const animation of held) {
+                animation.pause();
+                animation.currentTime = ms;
               }
-              if (el.getAttribute("data-state") === "closed") {
-                window.setTimeout(() => {
-                  if (!el.isConnected) {
-                    resolve({ connected: false, state: null, pointerEvents: "" });
-                    return;
-                  }
-                  resolve({
-                    connected: true,
-                    state: el.getAttribute("data-state"),
-                    pointerEvents: getComputedStyle(el).pointerEvents,
-                  });
-                }, ms);
-                return;
-              }
-              if (performance.now() > deadline) {
-                reject(new Error(`${selector} never reached data-state=closed`));
-                return;
-              }
-              requestAnimationFrame(() => waitClosed(deadline));
-            };
-            waitClosed(performance.now() + 500);
-          }),
+              target.__heldExit = held;
+              resolve({
+                connected: el.isConnected,
+                state: el.getAttribute("data-state"),
+                pointerEvents: getComputedStyle(el).pointerEvents,
+                held: held.length,
+              });
+            });
+            observer.observe(el, { attributes: true, attributeFilter: ["data-state"] });
+          });
+        },
         { selector: overlaySelector, ms: delayMs }
       );
+    }
+
+    async function readHeldExit(page: import("playwright").Page) {
+      return page.evaluate(
+        () =>
+          (
+            window as Window & {
+              __heldExitRead?: Promise<{
+                connected: boolean;
+                state: string | null;
+                pointerEvents: string;
+                held: number;
+              }>;
+            }
+          ).__heldExitRead
+      );
+    }
+
+    async function releaseHeldExit(page: import("playwright").Page): Promise<void> {
+      await page.evaluate(() => {
+        for (const animation of (window as Window & { __heldExit?: Animation[] }).__heldExit ?? []) {
+          animation.finish();
+        }
+      });
     }
 
     it("Escape then click-behind at 30/60/90ms lands; open overlay still blocks", async () => {
       const { browser, page } = await launchProbe();
       const overlaySelector = ".bg-scrim";
+      const dialogPanelSelector = '[data-testid="sidebar-section-delete-confirm"]';
       try {
         const open = async () => {
           await page.getByTestId("open-dialog").click();
@@ -569,24 +675,44 @@ describe.skipIf(!chromiumAvailable)(
         ).toBe(blockedBefore);
 
         for (const delay of [30, 60, 90]) {
-          const lingering = page.locator(overlaySelector).first();
-          if ((await lingering.count()) > 0) {
-            if ((await lingering.getAttribute("data-state")) === "open") {
-              await page.keyboard.press("Escape");
-            }
-            await lingering.waitFor({ state: "detached", timeout: 2_000 });
-          }
+          // Every round starts from a dialog that is GONE -- scrim AND panel. Two holes, both
+          // seen with the machine starved:
+          //  1. `count()` then `getAttribute()` is two round trips and the second auto-waits
+          //     (30 s) for a node the first one saw. The previous round's `releaseHeldExit` lets
+          //     the held exit finish, Radix unmounts the node in between, and the wait hangs on a
+          //     node that is gone (`locator.getAttribute: Timeout 30000ms exceeded`). So the
+          //     state is read in ONE step, in the page.
+          //  2. Only the scrim's exit is held and released by the test; the panel's exit runs on
+          //     the browser's own clock and can finish AFTER the scrim is gone. Reopening onto
+          //     that still-mounted closed panel makes Radix re-present the old node with focus on
+          //     the opener (outside it), and it dismisses itself at once -- the dialog never reaches
+          //     `data-state="open"` (`open()` timing out). So the wait is for both to be detached.
+          // 10 s is a hang guard for a wait that ends the moment the nodes are gone, not a budget.
+          const lingering = await page.evaluate(
+            (selector) => document.querySelector(selector)?.getAttribute("data-state") ?? null,
+            overlaySelector
+          );
+          if (lingering === "open") await page.keyboard.press("Escape");
+          await page.waitForFunction(
+            ([scrim, panel]) => !document.querySelector(scrim) && !document.querySelector(panel),
+            [overlaySelector, dialogPanelSelector] as [string, string],
+            { timeout: 10_000 }
+          );
           await open();
+          await armExitHold(page, overlaySelector, delay);
           await page.keyboard.press("Escape");
-          const sample = await sampleClosedOverlayAfter(page, overlaySelector, delay);
-          expect(sample.state, `t+${delay}ms overlay data-state`).toBe("closed");
-          expect(sample.pointerEvents, `t+${delay}ms overlay pointer-events`).toBe("none");
+          const sample = await readHeldExit(page);
+          expect(sample?.held, `t+${delay}ms the exit animation was held`).toBeGreaterThan(0);
+          expect(sample?.connected, `t+${delay}ms overlay still mounted`).toBe(true);
+          expect(sample?.state, `t+${delay}ms overlay data-state`).toBe("closed");
+          expect(sample?.pointerEvents, `t+${delay}ms overlay pointer-events`).toBe("none");
           const before = await behindClicks(page);
           await page.mouse.click(x, y);
           expect(
             await behindClicks(page),
             `t+${delay}ms click behind ${overlaySelector}`
           ).toBe(before + 1);
+          await releaseHeldExit(page);
         }
       } finally {
         await browser.close();

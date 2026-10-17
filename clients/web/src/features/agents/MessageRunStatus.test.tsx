@@ -87,9 +87,16 @@ function mount(runs: AgentRunProgress[]) {
   return render;
 }
 
+// 5 ms of the fake clock, not of the wall clock. The chain being waited for (mount -> effect ->
+// query -> mocked fetch -> notify batching on setTimeout(0) -> render) hops through timers armed
+// AFTER the wait started, and a real 5 ms sleep returns as soon as ITS timer fires -- on a starved
+// machine that is before the later hops ran (seen: ["received"] where ["received","woken"] was
+// expected). Advancing the fake clock runs every timer due inside the window, including the ones the
+// advance itself causes, so the chain finishes in the order it would have run and the wait is as long
+// as the work, not as long as the machine's mood.
 const settle = async () => {
   await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await vi.advanceTimersByTimeAsync(5);
   });
 };
 
@@ -102,6 +109,8 @@ beforeAll(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 });
 beforeEach(() => {
+  // Timers only: `Date`, `performance`, the microtask queue and React's scheduler stay real.
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
   fetchEvents.mockReset();
 });
 afterEach(() => {
@@ -109,6 +118,7 @@ afterEach(() => {
   host?.remove();
   root = null;
   host = null;
+  vi.useRealTimers();
 });
 
 describe("MessageRunStatus", () => {
