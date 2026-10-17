@@ -4401,6 +4401,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     case 'shell-pause-until':
     case 'shell-pause-until-open':
     case 'shell-pause-until-dnd':
+    case 'shell-pause-until-offline':
       return (
         <View style={styles.fill}>
           <Shell />
@@ -5676,8 +5677,25 @@ function keepPauseSeeds(): void {
   });
 }
 
+/**
+ * 「연결이 끊긴」 장면(design-review H2): NetInfo 구독자에게 끊김만 알린다. 시뮬레이터를 실제로
+ * 비행기 모드로 두지 않고 이 판의 `useOnline` 이 읽는 신호만 바꾼다 — 화면은 진짜다.
+ */
+function forceOffline(): void {
+  const offline = {isConnected: false, isInternetReachable: false, type: 'none', details: null};
+  (
+    NetInfo as unknown as {
+      addEventListener: (listener: (state: typeof offline) => void) => () => void;
+    }
+  ).addEventListener = listener => {
+    listener(offline);
+    return () => {};
+  };
+}
+
 /** `seedShell` 이 깐 규칙(꺼짐)을 이 표면의 모양으로 덮는다. */
 function seedPause(surface: string): void {
+  if (surface === 'shell-pause-until-offline') forceOffline();
   const until = Date.now() + PAUSE_UNTIL_AHEAD_MS;
   const rules =
     surface === 'shell-pause-status' || surface === 'shell-pause-notify'

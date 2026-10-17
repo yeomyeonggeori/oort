@@ -3,7 +3,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { useRecheckWhenElapsed } from "./useRecheckWhenElapsed";
 
 // =============================================================================
@@ -27,7 +27,7 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 let mountedRoot: Root | null = null;
 let mountedHost: HTMLElement | null = null;
 let client: QueryClient;
-let invalidate: ReturnType<typeof vi.spyOn>;
+let invalidate: MockInstance<QueryClient["invalidateQueries"]>;
 
 function Probe({ untilMs }: { untilMs: number | undefined }) {
   useRecheckWhenElapsed(WS, untilMs);
