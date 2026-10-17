@@ -43,7 +43,7 @@
 //! | `a_hosted_work_run_push_needs_a_requester_a_hosted_work_run_and_the_agents_own_answer` | drop the audit-requester, `input.type`, hosted-connection, status or author predicates in `wrun` |
 //! | `a_hosted_work_run_push_respects_the_work_complete_switch` | drop `work_run_done` from the `work_complete_push` filter |
 //! | `an_approval_push_goes_only_to_the_people_who_may_approve_it` (ADR-0204 D7, #3928) | drop the `may_approve_in_tx` narrowing in `judge_targets`, or make `decider_gate` ignore the registry role |
-//! | `an_approval_that_must_be_opened_is_the_open_category_and_the_rest_are_inline` | drop an action from `ONE_TIME_SECRET_ACTION_IDS`, or stop `opens_in_app` reading `offers_host_choice` |
+//! | `an_approval_that_must_be_opened_is_the_open_category_and_the_rest_are_inline` | drop an action from `ONE_TIME_SECRET_ACTION_IDS`, stop `opens_in_app` reading `offers_host_choice`, drop the login handoff from `OPEN_IN_APP_TOOL_NAMES` or the avatar test from the profile update (planner 2026-10-17), or drop `tool_call.name` / the avatar marker from the judgment's payload projection |
 //! | `an_approval_card_with_no_approval_row_pushes_nobody` | let a card with no `approval` row fall through to a target (the relay would 400 it forever) |
 //! | `an_approval_row_of_another_channel_is_not_the_card_of_this_message` | drop `a.channel_id = (SELECT channel_id FROM msg)` from the approval join in `judge_targets` |
 //! | `an_approval_card_a_person_may_not_decide_does_not_leak_through_a_dm_or_a_mention` | let the narrowed `approval_request` reason fall back to `dm` / `mention` |
@@ -2431,6 +2431,15 @@ fn workspace_action(id: &str, pins: Value) -> Value {
     json!({"action": {"id": id, "args": {}, "pins": pins}})
 }
 
+/// An `agent.profile.update` card for the room's agent, with these arguments.
+fn profile_update(room: &ApprovalRoom, args: Value) -> Value {
+    json!({"action": {
+        "id": "agent.profile.update",
+        "args": args,
+        "pins": {"target": room.pet.to_string()},
+    }})
+}
+
 fn spawn_payload(
     room: &ApprovalRoom,
     default_host: Option<Uuid>,
@@ -2467,6 +2476,58 @@ fn cards(room: &ApprovalRoom) -> Vec<Card> {
             payload: json!({"tool_call": {"call_id": "c1", "name": "send_message"}}),
             audience: EVERYONE.to_vec(),
             category: inline,
+        },
+        // Planner decision 2026-10-17: the lock screen cannot show what is being
+        // approved, so these two are opened in the app.
+        Card {
+            label: "the login handoff: any member of the room; which session and why is read on the card",
+            action_type: "tool_call",
+            payload: json!({"tool_call": {
+                "call_id": "c2",
+                "name": "work.session.login_handoff",
+                "arguments_json": {
+                    "session_id": "11111111-1111-4111-8111-111111111111",
+                    "reason": "로그인이 필요해요",
+                },
+            }}),
+            audience: EVERYONE.to_vec(),
+            category: open,
+        },
+        Card {
+            label: "a tool call that names no tool: nothing says a banner is enough",
+            action_type: "tool_call",
+            payload: json!({"tool_call": {"call_id": "c3"}}),
+            audience: EVERYONE.to_vec(),
+            category: open,
+        },
+        Card {
+            label: "agent.profile.update, words only: admins and the agent's owner; the lock screen decides",
+            action_type: "workspace_action",
+            payload: profile_update(room, json!({"tagline": "새 소개"})),
+            audience: vec![Who::Owner, Who::Admin, Who::AgentOwner],
+            category: inline,
+        },
+        Card {
+            label: "agent.profile.update with a staged picture: admins and the agent's owner; the app shows the picture",
+            action_type: "workspace_action",
+            payload: profile_update(
+                room,
+                json!({"tagline": "새 소개", "avatar": {
+                    "source": "staged",
+                    "imageId": "22222222-2222-4222-8222-222222222222",
+                    "sha256": "a".repeat(64),
+                    "origin": "generated",
+                }}),
+            ),
+            audience: vec![Who::Owner, Who::Admin, Who::AgentOwner],
+            category: open,
+        },
+        Card {
+            label: "agent.profile.update removing the picture: opened too — the change is to the picture",
+            action_type: "workspace_action",
+            payload: profile_update(room, json!({"avatar": null})),
+            audience: vec![Who::Owner, Who::Admin, Who::AgentOwner],
+            category: open,
         },
         Card {
             label: "channel.create: workspace admins",
@@ -2604,7 +2665,8 @@ async fn an_approval_push_goes_only_to_the_people_who_may_approve_it() {
 
 /// **ADR-0204 D7, the category.** The lock screen decides an approval behind Face
 /// ID (`momo.approval`) except where a banner cannot do the job: an action that
-/// mints a value shown once, and a spawn that asks which machine. Those are
+/// mints a value shown once, a spawn that asks which machine, the login handoff and
+/// a profile update that changes the picture (planner 2026-10-17). Those are
 /// `momo.approval.open` — one 「열어서 결정」 button, no 승인·거절.
 ///
 /// Both categories name their approval.

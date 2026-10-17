@@ -71,11 +71,15 @@
 //! enum labels and a count — nothing this module returns can carry prose.
 //!
 //! The one table read here that does hold prose is `approval`, and it is read
-//! through a **projection** of its payload: only the keys the shared audience
-//! functions read (`action.id`, `action.pins`, `execution`, `origin` — see
-//! `momo_agent::decider`), never the card's `args`, `arguments` or rationale. That
-//! is a boundary (the card's text does not enter this process) and a bound (a
-//! model-sized tool input is not copied once per recipient and device).
+//! through a **projection** of its payload: only the keys the shared functions
+//! read — the audience's (`action.id`, `action.pins`, `execution`, `origin`; see
+//! `momo_agent::decider`) and the open-in-app list's (`tool_call.name`, and a bare
+//! marker for whether `action.args` has an `avatar` key; see
+//! `momo_agent::actions::opens_in_app`) — never the card's argument values,
+//! `arguments` or rationale. That is a boundary (the card's text does not enter this
+//! process) and a bound (a model-sized tool input is not copied once per recipient
+//! and device). `tests/judgment_projection.rs` fails if the statement reads any other
+//! path of the payload.
 
 use std::collections::HashMap;
 
@@ -265,7 +269,12 @@ pub async fn judge_targets(
                 jsonb_build_object( \
                   'action', jsonb_build_object( \
                               'id', a.payload#>'{action,id}', \
-                              'pins', a.payload#>'{action,pins}'), \
+                              'pins', a.payload#>'{action,pins}', \
+                              'args', CASE \
+                                WHEN jsonb_exists(a.payload#>'{action,args}', 'avatar') \
+                                  THEN jsonb_build_object('avatar', true) \
+                                ELSE '{}'::jsonb END), \
+                  'tool_call', jsonb_build_object('name', a.payload#>'{tool_call,name}'), \
                   'execution', a.payload->'execution', \
                   'origin', a.payload->'origin') AS approval_payload \
            FROM recipients r \
