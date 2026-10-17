@@ -31,10 +31,10 @@ import {
   ZOMBIE_CLEAR_MS,
 } from '../src/features/agents/workingSignal';
 import {color} from '../src/design/tokens';
-import {DISPLAY_GRACE_MS} from '../src/realtime/connectionDisplay';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+import {dropSocketPastDisplayGrace} from './fixtures/displayGrace';
 
 // =============================================================================
 // 폰의 「작업 중」 — 실시간 턴 신호 (goal RN-T2).
@@ -339,11 +339,7 @@ async function replay(publications: unknown[], delayMs: number): Promise<void> {
  * point of the two flags.
  */
 async function cutSocket(): Promise<void> {
-  await act(async () => {
-    await new Promise(resolve => setTimeout(resolve, 15));
-    client().__emit('disconnected', {});
-    await new Promise(resolve => setTimeout(resolve, DISPLAY_GRACE_MS + 50));
-  });
+  await dropSocketPastDisplayGrace(() => client().__emit('disconnected', {}));
 }
 
 let queryClient: QueryClient | null = null;

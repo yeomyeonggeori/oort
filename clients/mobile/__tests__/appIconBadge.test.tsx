@@ -12,6 +12,10 @@ import '../src/boot/coreHost';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+import {
+  installAppClock,
+  SHELL_WAIT_TEST_TIMEOUT_MS,
+} from './fixtures/fakeClock';
 
 // =============================================================================
 // 앱 아이콘 배지가 서버의 안읽음 합계를 따른다 (#2670, ADR-0109).
@@ -289,7 +293,7 @@ let queryClient: QueryClient | null = null;
 
 async function settle(ms = 25) {
   await act(async () => {
-    await new Promise(resolve => setTimeout(resolve, ms));
+    await jest.advanceTimersByTimeAsync(ms);
   });
 }
 
@@ -321,7 +325,12 @@ async function leaveRoom() {
   await waitFor(() => expect(screen.queryByTestId('timeline-list')).toBeNull());
 }
 
+jest.setTimeout(SHELL_WAIT_TEST_TIMEOUT_MS);
+
 beforeEach(() => {
+  // 배지 쓰기는 앱의 디바운스 타이머 뒤에 온다. 실제 시계로 기다리면 `waitFor` 1000ms 중
+  // 600ms 가 그 타이머이고(주변 부하 0 에서 실측), 남는 400ms 가 그 위의 모든 CPU 여유였다.
+  installAppClock();
   mmkvStore.clear();
   __resetSessionStore();
   __resetServerBaseCache();
@@ -350,7 +359,8 @@ afterEach(async () => {
   appStateListen.mockImplementation(presetAppStateListen);
   // Unmounting writes 0 (sign-out). Let that write land here rather than in the
   // next test's record.
-  await new Promise(resolve => setTimeout(resolve, 0));
+  await jest.advanceTimersByTimeAsync(0);
+  jest.useRealTimers();
 });
 
 describe('앱 아이콘 배지는 서버의 안읽음 합계를 따른다 (#2670)', () => {

@@ -39,7 +39,6 @@ import {
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   ActivityIndicator,
-  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -73,10 +72,11 @@ import {
 } from '../../design/tokens';
 import {useNow} from '../../lib/useNow';
 import {
-  pushPermissionDetail,
-  usePushPermission,
-} from '../../push/permissionStatus';
-import {usePushPrompt} from '../../push/PushProvider';
+  PUSH_SWITCH_LABEL,
+  PUSH_SWITCH_OFF_FAILED,
+  pushSwitchDetail,
+  usePushSwitch,
+} from '../../push/usePushSwitch';
 import {getServerBase} from '../../storage/serverBase';
 import {Avatar} from '../conversation/Avatar';
 import {formatRealtimeDiagnostics} from '../../realtime/diagnostics';
@@ -427,11 +427,10 @@ export function ProfilePage({
   const styles = useStyles(buildStyles);
   const palette = usePalette();
   const {choice, themeId} = useTheme();
-  const push = usePushPermission();
+  const push = usePushSwitch(workspaceId, member.id);
   const setPresence = useSetPresence(workspaceId, member.id);
   const pause = usePauseNotifications(workspaceId);
   const kinds = usePushKinds(workspaceId);
-  const prompt = usePushPrompt();
   const now = useNow();
   const [confirming, setConfirming] = useState(false);
   const [diagCopied, setDiagCopied] = useState(false);
@@ -490,6 +489,7 @@ export function ProfilePage({
       : pause.paused
         ? PAUSE_ACTIVE_NOTE
         : NOTIFICATION_PAUSE_DESCRIPTION;
+  const pushDetail = pushSwitchDetail(push);
   // 켜진 스위치는 한 번에 끄고, 꺼진 스위치는 기한을 고르는 장으로 간다(ADR-0204 D2).
   const togglePause = () => {
     if (pauseLocked) return;
@@ -679,32 +679,53 @@ export function ProfilePage({
       </GroupSection>
 
       <GroupSection label="알림">
+        {/* 이 폰의 스위치 (#3924, ADR-0204 D1). 켬 = OS 허용 + 사람이 끄지 않음. 끄면 이 기기의
+            서버 등록만 지워지고(데스크탑·다른 기기는 그대로), 다시 켜기 전에는 앱을 다시
+            켜도 등록하지 않는다. OS 가 막았으면 누르는 것이 허용 창(묻지 않음)·iOS 설정(거부)을
+            연다 — 두 길 다 스위치가 대신 서므로 따로 줄을 두지 않는다. */}
         <GroupRow
-          title="푸시 알림"
-          detail={pushPermissionDetail(push)}
+          title={PUSH_SWITCH_LABEL}
+          detail={pushDetail}
+          onPress={push.toggle}
+          accessibilityRole="switch"
+          accessibilityState={{
+            checked: push.on,
+            disabled: push.busy || push.permission === 'checking',
+          }}
+          accessibilityLabel={PUSH_SWITCH_LABEL}
+          accessibilityHint={pushDetail}
+          trailing={
+            push.permission === 'checking' ? (
+              // 권한을 아직 읽지 못했으면 「꺼짐」을 그리지 않는다 — 허용한 사람에게 거짓이다.
+              <ActivityIndicator
+                color={palette.textMuted}
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+                testID="profile-push-loading"
+              />
+            ) : (
+              <Switch
+                value={push.on}
+                onValueChange={() => push.toggle()}
+                disabled={push.busy}
+                trackColor={{false: palette.border, true: palette.ok}}
+                ios_backgroundColor={palette.border}
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+                testID="profile-push-switch"
+              />
+            )
+          }
           testID="profile-push-row"
         />
-        {push === 'undetermined' ? (
-          <GroupRow
-            title="알림 켜기"
-            tone="accent"
-            chevron
-            separated
-            onPress={() => void prompt.ask()}
-            accessibilityHint="iOS 알림 허용 창을 엽니다."
-            testID="profile-push-ask"
-          />
-        ) : null}
-        {push === 'denied' ? (
-          <GroupRow
-            title="설정에서 알림 켜기"
-            tone="accent"
-            chevron
-            separated
-            onPress={() => void Linking.openSettings()}
-            accessibilityHint="iOS 설정의 이 앱 화면을 엽니다."
-            testID="profile-push-settings"
-          />
+        {push.failed ? (
+          <Sentence
+            style={styles.rowFailure}
+            accessibilityLiveRegion="polite"
+            testID="push-failure"
+          >
+            {PUSH_SWITCH_OFF_FAILED}
+          </Sentence>
         ) : null}
         <GroupRow
           title={NOTIFICATION_PAUSE_LABEL}
