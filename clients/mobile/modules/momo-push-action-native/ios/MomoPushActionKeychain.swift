@@ -4,7 +4,7 @@ import Security
 // =============================================================================
 // The keychain half of a lock-screen decision (#3931, ADR-0204 D6).
 //
-// Two items, one service, ONE access group — the app-only group
+// Two items in TWO services, ONE access group — the app-only group
 // (`…app.momo.ios.devicekey`), never the shared one the notification extension
 // reads. A credential that can approve things must not be somewhere a second
 // binary can reach, which is why the group is read from the plist key the
@@ -12,12 +12,23 @@ import Security
 // credential" and never "the default group" (an item written or read without a
 // group goes to the FIRST entitlement group, and that is the shared one).
 //
-//   push-action-session   written by JS (src/push/pushActionSession.ts):
-//                         base URL, workspace, the token, when it lapses.
-//   device-secret-v1      written HERE, once, 32 random bytes. It is what makes
-//                         the decision's idempotency key unguessable
-//                         (MomoPushActionDecisionKey.swift) and it must outlive
-//                         every token re-mint, so JS never touches it.
+//   app.momo.ios.pushaction          written by JS (src/push/pushActionSession.ts):
+//     push-action-session            base URL, workspace, the token, when it lapses.
+//   app.momo.ios.pushaction.secret   written HERE, once, 32 random bytes. It is what
+//     device-secret-v1               makes the decision's idempotency key unguessable
+//                                    (MomoPushActionDecisionKey.swift) and it must
+//                                    outlive every token re-mint.
+//
+// ## Why two SERVICES, not two accounts
+//
+// react-native-keychain's `setGenericPassword` first deletes EVERY generic-password
+// item of the service in that group — its query names the service and the group,
+// never the account (RNKeychainManager.m `deletePasswordsForOptions`) — and its
+// `getGenericPassword` has no account filter either. Two accounts under one service
+// would have JS wipe the secret on every publish, and a read that can return the
+// wrong one of the two. One service per item is also how every other item JS writes
+// in this app already lives. The independent security review of #3931 found this
+// (finding 1); the Jest keychain mock is keyed by service and so cannot.
 //
 // Both are `AfterFirstUnlockThisDeviceOnly` and not synchronizable: a lock-screen
 // button is pressed on a phone that has been unlocked since boot, and neither
@@ -106,10 +117,10 @@ struct MomoPushActionKeychain: MomoPushActionCredentials {
   /// the account, the access group, not synchronizable) — pushFetchSession.ts
   /// documents the correspondence line by line, and the extension has read an
   /// item of the same shape since #3121.
-  func query(account: String) -> [String: Any] {
+  func query(service: String, account: String) -> [String: Any] {
     [
       kSecClass as String: kSecClassGenericPassword,
-      kSecAttrService as String: MomoPushActionContract.keychainService,
+      kSecAttrService as String: service,
       kSecAttrAccount as String: account,
       kSecAttrAccessGroup as String: accessGroup,
       kSecAttrSynchronizable as String: false,
@@ -117,7 +128,10 @@ struct MomoPushActionKeychain: MomoPushActionCredentials {
   }
 
   func readSession() -> MomoPushActionSession? {
-    let answer = client.copyData(query(account: MomoPushActionContract.sessionAccount))
+    let answer = client.copyData(
+      query(
+        service: MomoPushActionContract.keychainService,
+        account: MomoPushActionContract.sessionAccount))
     guard answer.status == errSecSuccess, let data = answer.data else { return nil }
     return MomoPushActionSession.decode(data)
   }
@@ -130,7 +144,9 @@ struct MomoPushActionKeychain: MomoPushActionCredentials {
     Self.secretLock.lock()
     defer { Self.secretLock.unlock() }
 
-    let address = query(account: MomoPushActionContract.deviceSecretAccount)
+    let address = query(
+      service: MomoPushActionContract.deviceSecretService,
+      account: MomoPushActionContract.deviceSecretAccount)
     let existing = client.copyData(address)
     switch existing.status {
     case errSecSuccess:

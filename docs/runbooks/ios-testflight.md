@@ -264,7 +264,7 @@ TestFlight 빌드는 **production** APNs 토큰을 만든다. 네 곳이 모두 
 - 이 판단은 [M7](../cicd/03-store-readiness-gate.md) 스토어 등급 S-7 법무 검토 항목에 올라 있다. owner가 확인하기 전에는 확정된 신고로 다루지 않는다.
 
 **지키는 것과 지키지 않는 것**
-- `projectShape.test.ts`가 코드 쪽 사실을 기계로 지킨다: MMKV 키·`encrypt(`·`recrypt(`·WebCrypto `subtle` 사용, crypto 계열 의존성, 네이티브 cipher 호출(CommonCrypto 가져오기·`CCCrypt`·`CCCryptor…`·SecKey 암호화)을 막는다. CryptoKit 가져오기는 서명 키 저장소 둘(Secure Enclave 서명)과 위 SHA-256 파일 하나(해시 전용: `SHA256.hash`만, 암호·HMAC·키 객체·엔클레이브 금지)에만 허용하고, 모듈 안의 다른 파일이 가져오면 실패한다. 시험이 깨지면 이 값을 다시 판단한다.
+- `projectShape.test.ts`가 코드 쪽 사실을 기계로 지킨다: MMKV 키·`encrypt(`·`recrypt(`·WebCrypto `subtle` 사용, crypto 계열 의존성, 네이티브 cipher 호출(CommonCrypto 가져오기·`CCCrypt`·`CCCryptor…`·SecKey 암호화)을 막는다. CryptoKit 가져오기는 서명 키 저장소 둘(Secure Enclave 서명)과 위 SHA-256 파일 하나에만 허용하고, 모듈 안의 다른 파일이 가져오면 실패한다. SHA-256 파일은 **허용 목록**으로 지킨다: 가져오기는 정확히 Foundation·CryptoKit, CryptoKit에서 쓰는 것은 `SHA256.hash(` 하나이며, 그 밖의 암호 이름(`CC…`·`Sec…`·`kSec…`·AES·ChaCha·HMAC·HKDF·`SymmetricKey`·Curve25519·P256·엔클레이브 …)이 주석·문자열 밖의 코드에 나오면 실패한다. 시험이 깨지면 이 값을 다시 판단한다.
 - 바이너리 쪽 사실은 기계로 지키지 않는다. 의존성을 올린 뒤 첫 업로드 전에 내보낸 앱의 `nm -u`로 다시 본다.
 
 ## 9. Xcode Cloud (현행과 맞는 부분)

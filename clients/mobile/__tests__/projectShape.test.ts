@@ -113,6 +113,137 @@ describe('comment removal used by the code guards (review of #2587)', () => {
   });
 });
 
+// Swift source with its comments AND string text removed, for the allowlist guard on the one
+// file that hashes (#3931). Code inside a string interpolation (`"\(SHA256.hash(...))"`) is
+// code and stays; the words inside a string or a comment are not code and go. A pattern cannot
+// do this (a `//` inside a string, a `"` inside an interpolation, a nested block comment, a raw
+// `#"…"#` string), the same way it could not for TypeScript above, so this is a small scanner.
+function swiftCode(source: string): string {
+  let i = 0;
+  let out = '';
+
+  const rawHashesAt = (at: number): number => {
+    let n = 0;
+    while (source[at + n] === '#') n += 1;
+    return source[at + n] === '"' ? n : -1;
+  };
+
+  // `i` is on the opening delimiter (any number of `#`, then `"` or three of them). Leaves `i`
+  // after the closing one.
+  const skipString = (): void => {
+    const hashes = rawHashesAt(i);
+    i += hashes;
+    const multiline = source.startsWith('"""', i);
+    i += multiline ? 3 : 1;
+    const closer = (multiline ? '"""' : '"') + '#'.repeat(hashes);
+    while (i < source.length) {
+      if (source.startsWith(closer, i)) {
+        i += closer.length;
+        return;
+      }
+      if (source[i] === '\\' && source.startsWith('#'.repeat(hashes), i + 1)) {
+        const after = i + 1 + hashes;
+        if (source[after] === '(') {
+          // Interpolation: the expression is code.
+          i = after + 1;
+          out += ' (';
+          scanCode(true);
+          out += ') ';
+          continue;
+        }
+        i = after + 1; // an escaped character
+        continue;
+      }
+      i += 1;
+    }
+  };
+
+  const skipBlockComment = (): void => {
+    let depth = 0;
+    while (i < source.length) {
+      if (source.startsWith('/*', i)) {
+        depth += 1;
+        i += 2;
+      } else if (source.startsWith('*/', i)) {
+        depth -= 1;
+        i += 2;
+        if (depth === 0) return;
+      } else {
+        i += 1;
+      }
+    }
+  };
+
+  // With `untilParen`, returns at the `)` that closes the interpolation (leaving `i` after it).
+  const scanCode = (untilParen: boolean): void => {
+    let depth = 0;
+    while (i < source.length) {
+      const c = source[i];
+      if (c === '/' && source[i + 1] === '/') {
+        while (i < source.length && source[i] !== '\n') i += 1;
+        continue;
+      }
+      if (c === '/' && source[i + 1] === '*') {
+        skipBlockComment();
+        out += ' ';
+        continue;
+      }
+      if (c === '"' || (c === '#' && rawHashesAt(i) >= 0)) {
+        skipString();
+        out += '""';
+        continue;
+      }
+      if (untilParen) {
+        if (c === '(') depth += 1;
+        if (c === ')') {
+          if (depth === 0) {
+            i += 1;
+            return;
+          }
+          depth -= 1;
+        }
+      }
+      out += c;
+      i += 1;
+    }
+  };
+
+  scanCode(false);
+  return out;
+}
+
+describe('Swift comment and string removal used by the export-compliance guard (#3931)', () => {
+  it('drops comments and string text, keeps code, including code inside an interpolation', () => {
+    const source = [
+      '// import CommonCrypto and CCHmac, named in a line comment',
+      '/* AES.GCM.seal /* nested */ still a comment: HKDF */',
+      'import CryptoKit',
+      'let url = "https://example.com//AES/*not a comment*/"',
+      'let raw = #"a "quoted" HMAC and \\#(SHA256.hash(data: d))"#',
+      'let text = """',
+      '  multi-line ChaChaPoly',
+      '  """',
+      'let shown = "digest \\(SymmetricKey(size: .bits256)) end"',
+      'let tail = hash(data) // trailing HKDF',
+    ].join('\n');
+    const code = swiftCode(source);
+    for (const kept of ['import CryptoKit', 'SHA256.hash(data: d)', 'SymmetricKey(size: .bits256)', 'let tail = hash(data)']) {
+      expect(code).toContain(kept);
+    }
+    for (const dropped of ['CommonCrypto', 'CCHmac', 'AES', 'nested', 'HKDF', 'ChaChaPoly', 'quoted', 'HMAC', 'example.com']) {
+      expect(code).not.toContain(dropped);
+    }
+  });
+
+  it('does not let a quote inside an interpolation or a comment marker inside a string end the scan early', () => {
+    const code = swiftCode(
+      ['let a = "x \\(f("y // z")) w"', 'let b = "/* open"', 'let c = AES.GCM.seal(m)'].join('\n'),
+    );
+    expect(code).toContain('f(""');
+    expect(code).toContain('let c = AES.GCM.seal(m)');
+  });
+});
+
 describe('the iOS project survives (ADR-0137 D7 정오 7항)', () => {
   it('still has its Xcode project', () => {
     // `expo prebuild` without `--platform android` REGENERATES ios/. One run is
@@ -579,20 +710,75 @@ describe('what the upload declares stays true of the code (#2568)', () => {
   // is not encryption, and it is the same reading the signing keys above rest on
   // (authentication, not confidentiality). What would make the reading false is a
   // cipher or a keyed primitive creeping into this file, and this test is what
-  // notices: it may only SHA-256, no cipher, no HMAC, no key object, no enclave,
-  // and no other file in the module may import CryptoKit at all.
+  // notices.
+  //
+  // It is an ALLOWLIST, not a list of banned names (the independent security review of
+  // #3931 got past the first version with `import CommonCrypto` + `CCHmac`, and `HKDF`
+  // was never on it): the file may import exactly Foundation and CryptoKit, and the only
+  // thing it may take from CryptoKit is `SHA256.hash(`. Any other name that belongs to a
+  // crypto API — a CryptoKit type, a CommonCrypto `CC…` call, a Security `Sec…`/`kSec…`
+  // symbol — fails it, wherever it appears in code (comments and string text do not
+  // count; an interpolated expression does). A cipher whose name is on neither list still
+  // has to be spotted by a person, which is why the name list is broad.
+  const CRYPTO_NAMES =
+    /\b(?:CC[A-Z]\w*|Sec[A-Z]\w*|kSec\w*|AES\w*|ChaCha\w*|HMAC|HKDF|PBKDF\w*|Curve25519|X25519|Ed25519|P256|P384|P521|SymmetricKey|SealedBox|HPKE|KEM\w*|XWing\w*|MLKEM\w*|MLDSA\w*|Insecure|SecureEnclave|SharedSecret|KeyAgreement|SHA1|SHA384|SHA512|MD5|Nonce|Kyber\w*|Dilithium\w*)\b/;
+  const importsOf = (code: string): string[] =>
+    [
+      ...code.matchAll(
+        /^[ \t]*(?:@\w+(?:\([^)]*\))?[ \t]+)*(?:(?:public|internal|package|private|fileprivate)[ \t]+)?import[ \t]+(?:(?:typealias|struct|class|enum|protocol|let|var|func)[ \t]+)?([\w.]+)/gm,
+      ),
+    ]
+      .map(match => match[1])
+      .sort();
+  const shaUses = (code: string): string[] =>
+    [...code.matchAll(/\bSHA256\b[^\n]{0,12}/g)].map(match => match[0]);
+  /** True when the code breaks the allowlist: another import, a SHA256 use that is not `.hash(`, or a crypto name. */
+  const breaksAllowlist = (code: string): boolean =>
+    JSON.stringify(importsOf(code)) !== JSON.stringify(['CryptoKit', 'Foundation']) ||
+    !shaUses(code).every(use => /^SHA256\.hash\(/.test(use)) ||
+    CRYPTO_NAMES.test(code);
+
   it('keeps that declaration true: the decision key only HASHES (#3931)', () => {
-    const code = readFileSync(DECISION_KEY, 'utf8')
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/\/\/.*$/gm, '');
-    expect(code).toMatch(/\bimport\s+CryptoKit\b/);
-    expect(code).toMatch(/\bSHA256\.hash\(/);
-    expect(code).not.toMatch(
-      /\b(?:AES|ChaChaPoly|SealedBox|HPKE|SymmetricKey|KeyAgreement|sharedSecretFromKeyAgreement|HMAC|Insecure|Curve25519|P256|P384|P521|SecureEnclave|SecKey\w*|CCCrypt\w*)\b/,
-    );
-    const importers = nativeFiles(join(APP_ROOT, 'modules/momo-push-action-native'))
-      .filter(file => /\bimport\s+(?:CryptoKit|CommonCrypto)\b/.test(readFileSync(file, 'utf8')));
-    expect(importers).toEqual([DECISION_KEY]);
+    const code = swiftCode(readFileSync(DECISION_KEY, 'utf8'));
+
+    expect(importsOf(code)).toEqual(['CryptoKit', 'Foundation']);
+    // The one thing taken from CryptoKit, and it is used.
+    expect(shaUses(code).length).toBeGreaterThan(0);
+    expect(shaUses(code).every(use => /^SHA256\.hash\(/.test(use))).toBe(true);
+    expect(code.match(CRYPTO_NAMES)?.[0]).toBeUndefined();
+    expect(breaksAllowlist(code)).toBe(false);
+
+    // No other file in the module may import a crypto module at all.
+    const moduleFiles = nativeFiles(join(APP_ROOT, 'modules/momo-push-action-native'));
+    expect(
+      moduleFiles.filter(file => /\bimport\s+(?:CryptoKit|CommonCrypto)\b/.test(swiftCode(readFileSync(file, 'utf8')))),
+    ).toEqual([DECISION_KEY]);
+  });
+
+  // Mutation probes for the guard itself: each of these, appended to the real file, must be
+  // seen. A guard that cannot fail proves nothing (the same reason `swiftCode` has its own
+  // tests above).
+  it.each([
+    ['CommonCrypto HMAC', 'import CommonCrypto\nfunc probe() { var mac = [UInt8](repeating: 0, count: 32); CCHmac(CCHmacAlgorithm(kCCHmacAlgSHA256), "k", 1, "d", 1, &mac) }'],
+    ['CommonCrypto without a cipher call, only the import', 'import CommonCrypto'],
+    ['HKDF key derivation', 'func probe(s: Data) { _ = HKDF<SHA256>.deriveKey(inputKeyMaterial: SymmetricKey(data: s), outputByteCount: 32) }'],
+    ['AES-GCM', 'func probe(d: Data, k: SymmetricKey) { _ = try? AES.GCM.seal(d, using: k) }'],
+    ['ChaCha', 'func probe(d: Data, k: SymmetricKey) { _ = try? ChaChaPoly.seal(d, using: k) }'],
+    ['HMAC', 'func probe(d: Data, k: SymmetricKey) { _ = HMAC<SHA256>.authenticationCode(for: d, using: k) }'],
+    ['a Security key', 'import Security\nfunc probe() { _ = SecKeyCreateRandomKey([:] as CFDictionary, nil) }'],
+    ['a cipher inside a string interpolation', 'let probe = "\\(AES.GCM.Nonce())"'],
+    ['SHA-512', 'func probe(d: Data) { _ = SHA512.hash(data: d) }'],
+    ['an incremental SHA-256 hasher', 'func probe() { var hasher = SHA256(); hasher.update(data: Data()) }'],
+    ['a submodule import', '@_exported import CryptoKit.Foo'],
+  ])('the guard sees %s appended to the file', (_name, appended) => {
+    const real = readFileSync(DECISION_KEY, 'utf8');
+    expect(breaksAllowlist(swiftCode(`${real}\n${appended}\n`))).toBe(true);
+  });
+
+  it('and ignores the same words in a comment or in string text (the guard does not cry wolf)', () => {
+    const real = readFileSync(DECISION_KEY, 'utf8');
+    const harmless = '// import CommonCrypto; CCHmac(HKDF<SHA256>) AES.GCM\nlet note = "AES.GCM and HMAC and import Security"\n/* SecKeyCreateRandomKey */';
+    expect(breaksAllowlist(swiftCode(`${real}\n${harmless}\n`))).toBe(false);
   });
 
   // #3106: the refresh key is the second sanctioned CryptoKit import — a

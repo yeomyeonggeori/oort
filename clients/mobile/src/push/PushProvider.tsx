@@ -31,6 +31,7 @@ import {revokeOwnDevice} from './devices';
 import {
   clearPushActionSession,
   publishPushActionSession,
+  pushActionSessionAvailable,
   restorePushActionSession,
 } from './pushActionSession';
 import {mintPushActionToken, type MintedPushActionToken} from './pushActionToken';
@@ -326,6 +327,14 @@ export default function PushProvider({
       return;
     }
     if (actionCredential === 'unknown') return;
+    // 놓을 곳이 없는 빌드(앱 전용 그룹을 말하지 못한다)는 받지도 않는다. 서버는 세션 계열당 살아
+    // 있는 토큰을 4개까지만 내주는데(초과 429), 놓지 못할 토큰이 그 칸을 시작할 때마다 태운다.
+    if (!pushActionSessionAvailable()) {
+      console.warn(
+        `${LOG} lock-screen approval credential not requested (this build names no app-only keychain group)`,
+      );
+      return;
+    }
 
     const baseUrl = absoluteApiBase();
     const keeper = createPushFetchKeeper<MintedPushActionToken>({

@@ -67,6 +67,15 @@ function appOnlyGroup(): string | null {
   return appOnlyGroupFrom(keychainAccessGroup());
 }
 
+/**
+ * 이 빌드가 앱 전용 그룹을 말할 수 있는가. 못 하면 놓을 곳이 없으니 **받지도 않는다**: 서버는
+ * 세션 계열당 살아 있는 이 토큰을 4개까지만 내주므로(초과 429), 놓지 못할 토큰으로 칸을
+ * 태울 이유가 없다 (#3931 보안 검수).
+ */
+export function pushActionSessionAvailable(): boolean {
+  return appOnlyGroup() !== null;
+}
+
 /** 토큰이 만료되기 전에 다시 불러야 한다(`pushFetchKeeper.ts` 가 때를 정한다). */
 export async function publishPushActionSession(
   input: PushActionSessionInput,
@@ -99,8 +108,13 @@ export async function publishPushActionSession(
  * 폰에서 이 자격을 지운다 — 로그아웃, 이 폰의 푸시를 끈 것, OS 가 알림을 막은 것.
  *
  * 서버의 토큰은 세션이 끝날 때 함께 죽지만(ADR-0204 D6) 그 사이 폰에 남은 사본이
- * 승인을 결정할 수 있다. 처리기가 만든 기기 비밀(`device-secret-v1`)도 같은 서비스
- * 아래에 있어 함께 지워진다: 다음 로그인은 처음 보는 폰이다.
+ * 승인을 결정할 수 있다.
+ *
+ * 처리기가 만드는 기기 비밀은 이 서비스 아래에 **없다.** react-native-keychain 의
+ * `setGenericPassword`/`resetGenericPassword` 는 계정이 아니라 서비스 단위로 지우므로(그룹
+ * 안의 그 서비스 항목 전부) 같은 서비스에 두면 토큰을 새로 놓을 때마다 비밀이 사라지고,
+ * 잠금 화면에 떠 있는 알림의 멱등 키가 그 밑에서 바뀐다. 비밀은 자기 서비스에 있고(Swift
+ * `deviceSecretService`), 아무도 가리키지 않는 무작위 값이라 로그아웃에도 남는다.
  */
 export async function clearPushActionSession(): Promise<void> {
   const accessGroup = appOnlyGroup();

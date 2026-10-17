@@ -29,9 +29,13 @@ enum MomoPushActionContract {
   /// error anywhere, the item is simply never found.
   static let keychainService = "app.momo.ios.pushaction"
   static let sessionAccount = "push-action-session"
-  /// Written by THIS module, not by JS, so it survives every token re-mint:
-  /// regenerating it would change the idempotency key of a notification that is
-  /// still on the lock screen.
+  /// Written by THIS module, not by JS, in a SERVICE of its own: JS's
+  /// `setGenericPassword` deletes every item of ITS service before it writes, so a
+  /// secret sharing that service would be wiped by every token publish and the
+  /// idempotency key of a notification still on the lock screen would change under
+  /// it (finding 1 of the #3931 security review). It outlives token re-mints,
+  /// sign-out and the push switch: a random value that names no one.
+  static let deviceSecretService = "app.momo.ios.pushaction.secret"
   static let deviceSecretAccount = "device-secret-v1"
 
   /// The Info.plist key that names the APP-ONLY group (`MomoDeviceKeyStore` reads
@@ -187,7 +191,7 @@ struct MomoPushActionSession: Equatable, Sendable {
 // MARK: - what one tap comes to
 
 /// Why a decision did not happen. Only the NAME is ever logged.
-enum MomoPushActionFailure: String, Equatable, Sendable {
+enum MomoPushActionFailure: String, CaseIterable, Equatable, Sendable {
   /// The payload is not one this module reads, so there is nothing to decide.
   case unreadableNotification
   /// The notification is still the relay's placeholder, so the person never saw
@@ -213,10 +217,29 @@ enum MomoPushActionFailure: String, Equatable, Sendable {
   /// 409 with no settled status: the key is bound to the other verdict.
   case conflict
   case server
+  /// An answer that says no and is not one of the above (400, a redirect this
+  /// module refuses to follow, ...): the server refused it, nothing was written.
   case unexpected
+  /// A 2xx that is not a receipt this module can read as 승인 or 거절. The server
+  /// answered "ok" to something, so the decision may well be recorded; saying it
+  /// was not would be a guess, and so would saying it was.
+  case unclearAnswer
   case network
   /// iOS ran out of background time before the request answered.
   case timeLimit
+
+  /// Whether the server may have recorded the decision even though this phone
+  /// never saw a usable answer: the request left and the reply did not come back
+  /// (a lost connection, a timeout, a cancelled wait), the server broke after
+  /// taking it (5xx), or it said "ok" in a form nobody here can read. Everything
+  /// else was refused, or never sent, before anything was written. The sentence
+  /// differs: 「못했어요」 would be a false statement for these.
+  var mayHaveBeenRecorded: Bool {
+    switch self {
+    case .network, .timeLimit, .server, .unclearAnswer: return true
+    default: return false
+    }
+  }
 }
 
 /// What the server's ledger says about an approval that was already settled.
@@ -305,14 +328,16 @@ enum MomoPushActionClassifier {
     let ledger = ledgerStatus(in: body)
     switch httpStatus {
     case 200:
+      // The server's own receipt (`decision_receipt`, always with a `status`) is what
+      // makes this a decision. A 200 with no readable verdict (a proxy's page, a
+      // changed body) says nothing about the ledger, so it is not reported as one.
+      guard let ledger, ledger == .approved || ledger == .rejected else {
+        return .failed(.unclearAnswer)
+      }
       // The ledger can only contradict the button here if the server is wrong;
       // saying what it holds is still the one thing that cannot mislead.
-      if let ledger, ledger != direction.ledgerStatus,
-        ledger == .approved || ledger == .rejected
-      {
-        return .alreadySettled(ledger)
-      }
-      return .decided(direction)
+      return ledger == direction.ledgerStatus ? .decided(direction) : .alreadySettled(ledger)
+    case 201...299: return .failed(.unclearAnswer)
     case 409:
       if let ledger { return .alreadySettled(ledger) }
       return .failed(.conflict)
@@ -353,6 +378,22 @@ protocol MomoPushActionTransport: Sendable {
   func send(_ request: URLRequest) async throws -> (status: Int, body: Data)
 }
 
+/// The alert the relay put in the payload (`aps.alert`) — the text the notification
+/// carried BEFORE the extension rewrote it. A notification whose shown title and
+/// body still equal it was never resolved.
+struct MomoPushActionRelayAlert: Equatable, Sendable {
+  let title: String
+  let body: String
+
+  static func read(userInfo: [AnyHashable: Any]) -> MomoPushActionRelayAlert? {
+    guard let aps = userInfo["aps"] as? [String: Any],
+      let alert = aps["alert"] as? [String: Any],
+      let title = alert["title"] as? String, let body = alert["body"] as? String
+    else { return nil }
+    return MomoPushActionRelayAlert(title: title, body: body)
+  }
+}
+
 struct MomoPushActionIntent: Sendable {
   let direction: MomoPushActionDirection
   /// The notification's request identifier — the APNs collapse id. The same on
@@ -366,12 +407,24 @@ struct MomoPushActionIntent: Sendable {
   let envelope: MomoPushActionEnvelope?
   /// The notification's `userInfo`, as JSON, to carry onto the result line.
   let origin: Data?
+  /// What the relay sent as the alert, when the payload still has it.
+  let relayAlert: MomoPushActionRelayAlert?
 
-  /// False while the notification still reads 「oort / 새 알림」 — both halves, so a
-  /// sender who happens to be called oort is not mistaken for the relay.
+  /// False while nobody rewrote the notification: its shown title and body are
+  /// still what the relay sent (`aps.alert`, read from the payload itself, so a
+  /// change to the relay's copy cannot make an unseen approval look resolved) or,
+  /// when the payload has no alert to compare, the known placeholder 「oort / 새 알림」.
+  /// Both halves must match, so a sender who happens to be called oort is not
+  /// mistaken for the relay.
   var contentWasResolved: Bool {
     let shownTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
     let shownBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let relayAlert,
+      shownTitle == relayAlert.title.trimmingCharacters(in: .whitespacesAndNewlines),
+      shownBody == relayAlert.body.trimmingCharacters(in: .whitespacesAndNewlines)
+    {
+      return false
+    }
     return !(shownTitle == MomoPushActionContract.placeholderTitle
       && shownBody == MomoPushActionContract.placeholderBody)
   }
@@ -471,6 +524,14 @@ enum MomoPushActionCopy {
     direction.approved ? "승인하지 못했어요" : "거절하지 못했어요"
   }
 
+  /// When the request left and no answer came back (or the server broke after
+  /// taking it) the decision MAY be on the ledger, so the line must not say it
+  /// was not made: it says the result is unknown and sends the person to the card,
+  /// which tells the truth. The idempotency key makes pressing again in the app safe.
+  /// (Both the independent design review and the security review of #3931 raised it.)
+  static let unknownResult = "결과를 확인하지 못했어요"
+  static let unknownResultDetail = "앱에서 확인해 주세요"
+
   /// What to do next, shown as the notification's body. The tap lands on the
   /// approval's card, which is where it is finished.
   static let failedDetail = "눌러서 앱에서 마무리해 주세요"
@@ -523,6 +584,13 @@ enum MomoPushActionPlanner {
         detail: nil,
         alerts: false,
         removesSiblings: true
+      )
+    case .failed(let reason) where reason.mayHaveBeenRecorded:
+      return MomoPushActionLine(
+        text: MomoPushActionCopy.unknownResult,
+        detail: MomoPushActionCopy.unknownResultDetail,
+        alerts: true,
+        removesSiblings: false
       )
     case .failed:
       return MomoPushActionLine(

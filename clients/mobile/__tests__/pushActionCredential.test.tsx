@@ -24,9 +24,10 @@ import {
 } from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 
+const mockNative = {group: 'YWQQFQM38J.app.momo.ios.shared' as string | null};
 jest.mock('../src/push/native', () => ({
   apnsEnvironment: () => 'sandbox',
-  keychainAccessGroup: () => 'YWQQFQM38J.app.momo.ios.shared',
+  keychainAccessGroup: () => mockNative.group,
   pushNativeModuleAvailable: () => true,
   nativeApprovalHandlerAttached: () => false,
 }));
@@ -193,6 +194,7 @@ async function settle() {
 const mmkvStore = (jest.requireMock('react-native-mmkv') as {__store: Map<string, string>}).__store;
 
 beforeEach(async () => {
+  mockNative.group = 'YWQQFQM38J.app.momo.ios.shared';
   mmkvStore.clear();
   keychain.__items.clear();
   keychain.setGenericPassword.mockClear();
@@ -294,21 +296,38 @@ describe('푸시를 받는 폰에는 자격을 둔다', () => {
     expect(stored()?.actionToken).toBe('push-action-token-2');
   });
 
-  it('서버가 터무니없는 만료 시각을 줘도 놓는 일이 끊기지 않는다 (날짜로 바꾸다 던지지 않는다)', async () => {
-    mintExpiry = 1e20; // `new Date(1e20).toISOString()` 은 RangeError 다.
+  // 처리기가 읽을 수 없는 값을 폰에 놓고 「놓았다」고 믿는 것이 가장 나쁜 경우다: 만료 시각은 Swift 가
+  // `Int64` 로 디코드하므로 정수가 아니거나 안전한 범위를 넘으면 자격이 조용히 없는 것이 된다.
+  // 문턱은 받는 자리(`mintPushActionToken`)이고, 그 값은 키체인에 닿지 않는다.
+  it.each([
+    ['지수 표기의 터무니없는 만료 시각', 1e20],
+    ['정수가 아닌 만료 시각', 1.5],
+    ['음수 만료 시각', -1],
+  ])('서버가 %s 를 주면 받지 않는다 — 폰에는 아무것도 놓이지 않고 시작 한 번에 한 번만 묻는다', async (_name, expiry) => {
+    mintExpiry = expiry;
 
     launch();
+    await waitFor(() => expect(mints()).toHaveLength(1));
+    await settle();
 
-    await waitFor(() => expect(stored()).not.toBeNull());
-    expect(stored()!.expiresAtMs).toBe(1e20);
-    // 놓였다고 키퍼가 **안다** — 세션이 회전해도(15분마다) 다시 받지 않는다. 놓는 줄에서 던졌다면
-    // 키퍼는 놓지 못한 것으로 알고 회전마다 새로 받아 서버의 계열당 4개 상한을 태운다.
-    await settle();
-    act(() => {
-      sessionPort.applyLogin({...LOGIN_BODY, accessToken: 'access-token-2'});
-    });
-    await settle();
+    expect(stored()).toBeNull();
+    expect(
+      keychain.setGenericPassword.mock.calls.filter(call => call[2]?.service === PUSH_ACTION_KEYCHAIN_SERVICE),
+    ).toHaveLength(0);
+    // 돌려받은 값을 고쳐 달라고 조르지 않는다: 이 시작에서 더 묻지 않았다.
     expect(mints()).toHaveLength(1);
+  });
+
+  it('앱 전용 그룹을 말하지 못하는 빌드는 받지도 않는다 — 놓지 못할 토큰으로 서버의 4개 칸을 태우지 않는다', async () => {
+    mockNative.group = null;
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    launch();
+    await settle();
+
+    expect(mints()).toHaveLength(0);
+    expect(stored()).toBeNull();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('lock-screen approval credential not requested'));
   });
 
   it.each([404, 429, 403, 409, 500])(
@@ -394,6 +413,27 @@ describe('로그아웃하면 지운다', () => {
   it('signOut() 이 그 자리에서 지운다 — 트리가 내려가기를 기다리지 않는다', async () => {
     launch();
     await waitFor(() => expect(stored()).not.toBeNull());
+
+    act(() => signOut());
+
+    await waitFor(() => expect(stored()).toBeNull());
+  });
+
+  it('signOut() 이 알림 센터도 비운다 — 앞 사람의 승인 요청이 로그아웃한 폰의 잠금 화면에 남지 않는다', async () => {
+    launch();
+    await waitFor(() => expect(stored()).not.toBeNull());
+    const dismiss = Notifications.dismissAllNotificationsAsync as jest.Mock;
+    dismiss.mockClear();
+
+    act(() => signOut());
+
+    expect(dismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it('알림 센터를 못 비워도 로그아웃은 계속된다', async () => {
+    launch();
+    await waitFor(() => expect(stored()).not.toBeNull());
+    (Notifications.dismissAllNotificationsAsync as jest.Mock).mockRejectedValueOnce(new Error('denied'));
 
     act(() => signOut());
 

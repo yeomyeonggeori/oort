@@ -7,6 +7,7 @@ import {
 import {
   clearPushActionSession,
   publishPushActionSession,
+  pushActionSessionAvailable,
   restorePushActionSession,
 } from '../src/push/pushActionSession';
 
@@ -122,6 +123,62 @@ describe('놓는 곳', () => {
     ];
     expect(groups.length).toBe(3);
     expect(groups.every(group => group === APP_ONLY)).toBe(true);
+  });
+});
+
+describe('받아도 되는 빌드인가', () => {
+  it('앱 전용 그룹을 말할 수 있으면 참이다', () => {
+    expect(pushActionSessionAvailable()).toBe(true);
+  });
+
+  it('그룹을 못 정하면(plist 키 없음, 모르는 이름) 거짓이다 — 놓을 곳이 없으면 받지도 않는다', () => {
+    mockGroup.value = null;
+    expect(pushActionSessionAvailable()).toBe(false);
+    mockGroup.value = 'YWQQFQM38J.something.else';
+    expect(pushActionSessionAvailable()).toBe(false);
+  });
+});
+
+// 기기 비밀(Swift 가 만드는 32바이트)은 이 자격과 **다른 서비스**에 산다. react-native-keychain 의
+// `setGenericPassword`/`resetGenericPassword` 는 계정이 아니라 서비스 단위로 그룹 안의 항목을 전부
+// 지운다(RNKeychainManager.m) — 같은 서비스에 두면 토큰을 새로 놓을 때마다 비밀이 사라지고, 잠금 화면에
+// 떠 있는 알림의 멱등 키가 그 밑에서 바뀐다 (독립 보안 검수 1번). 시험용 키체인은 서비스를 키로
+// 삼으므로 실제 동작과 같은 입자로 잴 수 있다.
+describe('기기 비밀은 이 자격의 서비스 밖에 있다', () => {
+  const SECRET_SERVICE = 'app.momo.ios.pushaction.secret';
+  const plantSecret = () =>
+    keychain.__items.set(SECRET_SERVICE, {username: 'device-secret-v1', password: 'secret', options: {}});
+
+  it('놓기·이어 쓰기·사람이 바뀐 폰에서 지우기·지우기 어느 쪽도 비밀을 건드리지 않는다', async () => {
+    plantSecret();
+
+    await publishPushActionSession(input);
+    await publishPushActionSession({...input, token: 'push-action-token-2'});
+    await restorePushActionSession({baseUrl: BASE, workspaceId: WS, memberId: MEMBER}, () => NOW);
+    await restorePushActionSession(
+      {baseUrl: BASE, workspaceId: WS, memberId: '99999999-9999-4999-8999-999999999999'},
+      () => NOW,
+    );
+    await clearPushActionSession();
+
+    expect(keychain.__items.get(SECRET_SERVICE)?.password).toBe('secret');
+    // 지워진 것은 이 자격뿐이다.
+    expect(keychain.__items.has(PUSH_ACTION_KEYCHAIN_SERVICE)).toBe(false);
+  });
+
+  it('JS 가 키체인에 대는 서비스는 이 자격의 하나뿐이다', async () => {
+    await publishPushActionSession(input);
+    await restorePushActionSession({baseUrl: BASE, workspaceId: WS, memberId: MEMBER}, () => NOW);
+    await clearPushActionSession();
+
+    const services = [
+      ...keychain.setGenericPassword.mock.calls.map(call => call[2]?.service),
+      ...keychain.getGenericPassword.mock.calls.map(call => call[0]?.service),
+      ...keychain.resetGenericPassword.mock.calls.map(call => call[0]?.service),
+    ];
+    expect(services).toHaveLength(3);
+    expect(new Set(services)).toEqual(new Set([PUSH_ACTION_KEYCHAIN_SERVICE]));
+    expect(PUSH_ACTION_KEYCHAIN_SERVICE).not.toBe(SECRET_SERVICE);
   });
 });
 

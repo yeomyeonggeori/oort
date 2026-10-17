@@ -17,17 +17,21 @@ import Foundation
 // So the key is derived from the notification's request identifier and the
 // action — which makes it the same on every tap of that button, with no store
 // to keep — AND from a secret that never leaves this phone's app-only keychain
-// group (`MomoPushActionKeychain.deviceSecret()`). A 256-bit secret in a hash
+// group (`MomoPushActionKeychain.readDeviceSecret()`). A 256-bit secret in a hash
 // means nobody else can name the key before the tap sends it.
 //
 // ## Why this file is separate
 //
-// It is the one place this module imports CryptoKit, and it only HASHES:
-// SHA-256, nothing keyed and nothing that decrypts. The export-compliance
-// declaration in Info.plist (`ITSAppUsesNonExemptEncryption = false`) rests on
-// the phone's cryptography being OS-provided, signing, or hashing, and
-// `__tests__/projectShape.test.ts` holds this file to "hash only" by name. A
-// second CryptoKit import anywhere else in this module fails that test.
+// It is the one place this module imports CryptoKit, and the only primitive it
+// touches is SHA-256: a hash over a secret-prefixed, length-framed message — an
+// authentication construction (a keyed hash, in effect), with no confidentiality
+// primitive anywhere: nothing that encrypts or decrypts, no key object, no HMAC
+// API, no enclave. The export-compliance declaration in Info.plist
+// (`ITSAppUsesNonExemptEncryption = false`) rests on the phone's cryptography being
+// OS-provided, signing, or hashing, and `__tests__/projectShape.test.ts` holds this
+// file to that with an ALLOWLIST (its imports are exactly Foundation and CryptoKit,
+// and no crypto identifier but SHA256 appears in its code). A second CryptoKit
+// import anywhere else in this module fails that test too.
 // =============================================================================
 
 enum MomoPushActionDecisionKey {

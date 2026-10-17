@@ -89,6 +89,32 @@ describe('토큰 받기', () => {
     expect(await mintPushActionToken()).toBeNull();
   });
 
+  // 서버가 거짓말을 해도 폰에 놓이는 것은 Swift 가 읽을 수 있는 값이어야 한다: 만료 시각은 `Int64` 로
+  // 디코드되므로 정수가 아니거나 안전한 정수 범위를 넘으면 처리기는 「자격 없음」으로 조용히 죽는데,
+  // JS 는 놓았다고 믿는다. 문턱은 여기다.
+  it.each([
+    ['만료 시각이 지수 표기의 터무니없는 값이다', {expiresAtMs: 1e20, ttlSeconds: 21_600}],
+    ['만료 시각이 정수가 아니다', {expiresAtMs: NOW + 0.5, ttlSeconds: 21_600}],
+    ['만료 시각이 0 이다', {expiresAtMs: 0, ttlSeconds: 21_600}],
+    ['만료 시각이 음수이다', {expiresAtMs: -NOW, ttlSeconds: 21_600}],
+    ['만료 시각이 안전한 정수를 넘는다', {expiresAtMs: Number.MAX_SAFE_INTEGER + 2, ttlSeconds: 21_600}],
+    ['수명이 정수가 아니다', {expiresAtMs: NOW, ttlSeconds: 21_600.5}],
+    ['수명이 일주일을 넘는다', {expiresAtMs: NOW, ttlSeconds: 7 * 24 * 3600 + 1}],
+    ['수명이 터무니없다', {expiresAtMs: NOW, ttlSeconds: 1e12}],
+    ['수명이 문자열이다', {expiresAtMs: NOW, ttlSeconds: '21600'}],
+    ['만료 시각이 문자열이다', {expiresAtMs: String(NOW), ttlSeconds: 21_600}],
+  ])('터무니없는 값(%s)은 null 이다', async (_name, fields) => {
+    reply(200, {token: 'tok', workspaceId: WS, ...fields});
+
+    expect(await mintPushActionToken()).toBeNull();
+  });
+
+  it('문턱 바로 안쪽(수명 일주일)은 받는다 — 막는 것은 터무니없는 값뿐이다', async () => {
+    reply(200, {token: 'tok', expiresAtMs: NOW, ttlSeconds: 7 * 24 * 3600, workspaceId: WS});
+
+    expect(await mintPushActionToken()).toMatchObject({ttlSeconds: 7 * 24 * 3600});
+  });
+
   it('JSON 이 아닌 200 도 null 이다', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,

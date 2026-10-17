@@ -26,6 +26,15 @@ export interface MintedPushActionToken {
 export const PUSH_ACTION_TOKEN_PATH = '/v1/auth/push-action-token';
 
 /**
+ * 서버가 내주는 수명은 6시간이다. 이 상한은 그보다 한참 위(일주일)로, 정상 응답을 막으려는 것이
+ * 아니라 터무니없는 값(수년짜리 수명, 지수 표기의 만료 시각)이 키퍼의 「남은 수명이 절반」 계산과
+ * 폰에 놓이는 항목을 오염시키지 못하게 하는 문턱이다. 받은 값은 Swift 가 `Int64` 로 디코드하므로
+ * 정수가 아닌 값이나 Int64 를 넘는 값은 거기서 「자격 없음」으로 조용히 죽는다 — 여기서 먼저
+ * 거절해야 JS 가 「놓았다」고 믿는 일이 없다.
+ */
+const MAX_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+/**
  * 토큰을 받는다. **어떤 실패에도 null** 이다 — 오프라인, 401(access 토큰이 회전하는
  * 사이), 403(좁은 토큰으로 부른 경우), 409(계열이 아직 없는 세션), 429(세션당 살아 있는
  * 토큰 4개 상한), 이 라우트가 없는 옛 서버(404). 부른 쪽은 아무것도 놓지 말고 다음 세션
@@ -55,10 +64,12 @@ export async function mintPushActionToken(): Promise<MintedPushActionToken | nul
       typeof body.token !== 'string' ||
       body.token.length === 0 ||
       typeof body.expiresAtMs !== 'number' ||
-      !Number.isFinite(body.expiresAtMs) ||
+      !Number.isSafeInteger(body.expiresAtMs) ||
+      body.expiresAtMs <= 0 ||
       typeof body.ttlSeconds !== 'number' ||
-      !Number.isFinite(body.ttlSeconds) ||
+      !Number.isSafeInteger(body.ttlSeconds) ||
       body.ttlSeconds <= 0 ||
+      body.ttlSeconds > MAX_TTL_SECONDS ||
       typeof body.workspaceId !== 'string' ||
       body.workspaceId.length === 0
     ) {

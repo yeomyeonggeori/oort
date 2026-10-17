@@ -46,10 +46,6 @@ import os
 // header of src/push/notifications.ts warned about.
 // =============================================================================
 
-private enum MomoPushActionLog {
-  static let logger = Logger(subsystem: "app.momo.ios", category: "push-action")
-}
-
 // MARK: - the network
 
 /// One ephemeral session, no cookies and no cache, that does not follow a
@@ -57,7 +53,12 @@ private enum MomoPushActionLog {
 final class MomoPushActionURLSessionTransport: NSObject, MomoPushActionTransport,
   URLSessionTaskDelegate, @unchecked Sendable
 {
-  private lazy var session: URLSession = {
+  /// Built once, in `init`: a lazily built session could be built twice by two taps
+  /// that arrive together.
+  private var session: URLSession!
+
+  override init() {
+    super.init()
     let configuration = URLSessionConfiguration.ephemeral
     configuration.timeoutIntervalForRequest = MomoPushActionRequestBuilder.timeoutSeconds
     configuration.timeoutIntervalForResource = MomoPushActionRequestBuilder.timeoutSeconds + 5
@@ -65,8 +66,8 @@ final class MomoPushActionURLSessionTransport: NSObject, MomoPushActionTransport
     configuration.httpCookieStorage = nil
     configuration.urlCache = nil
     configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-    return URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
-  }()
+    session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+  }
 
   func send(_ request: URLRequest) async throws -> (status: Int, body: Data) {
     let (data, response) = try await session.data(for: request)
@@ -107,12 +108,13 @@ extension MomoPushActionIntent {
       // `data(withJSONObject:)` raises an Objective-C exception on anything that
       // is not JSON, which `try?` does not catch.
       origin: JSONSerialization.isValidJSONObject(userInfo)
-        ? try? JSONSerialization.data(withJSONObject: userInfo) : nil
+        ? try? JSONSerialization.data(withJSONObject: userInfo) : nil,
+      relayAlert: MomoPushActionRelayAlert.read(userInfo: userInfo)
     )
   }
 }
 
-struct MomoPushActionNotifier: Sendable {
+struct MomoPushActionNotifier: MomoPushActionNotifying {
   private func request(for line: MomoPushActionLine, intent: MomoPushActionIntent)
     -> UNNotificationRequest
   {
@@ -159,101 +161,25 @@ struct MomoPushActionNotifier: Sendable {
   }
 }
 
-// MARK: - one tap
+// MARK: - background time
 
-/// One 승인/거절, from the `didReceive` that carried it to the line that answers
-/// it. The background task and the request race the clock; exactly one of
-/// "the request answered" and "iOS ran out of time" writes the result line, and
-/// the task is ended exactly once whichever comes first.
-final class MomoPushActionJob: @unchecked Sendable {
-  private let intent: MomoPushActionIntent
-  private let decider: MomoPushActionDecider
-  private let notifier: MomoPushActionNotifier
-
-  private let lock = NSLock()
-  private var terminalClaimed = false
-  private var backgroundTask = UIBackgroundTaskIdentifier.invalid
-  private var backgroundTaskEnded = false
-  private var work: Task<Void, Never>?
-
-  init(
-    intent: MomoPushActionIntent,
-    decider: MomoPushActionDecider,
-    notifier: MomoPushActionNotifier
-  ) {
-    self.intent = intent
-    self.decider = decider
-    self.notifier = notifier
-  }
-
-  /// MUST run synchronously inside `didReceive`, on the main thread: asking for
-  /// background time later, from the task, is asking after the completion handler
-  /// has already told iOS this response is finished.
-  func start() {
+/// UIApplication behind the job's two-method seam. UIApplication belongs to the main
+/// actor; both callers are on the main queue in practice (`didReceive`, iOS's
+/// expiration handler), and the hop covers the end of a task that finished on a
+/// background thread.
+struct MomoPushActionUIKitTasks: MomoPushActionBackgroundTasks {
+  func begin(name: String, expiration: @escaping @Sendable () -> Void) -> Int? {
     let id = Self.onMain {
-      UIApplication.shared.beginBackgroundTask(withName: "oort.push-action.decision") {
-        [weak self] in
-        self?.timeRanOut()
-      }
+      UIApplication.shared.beginBackgroundTask(withName: name, expirationHandler: expiration)
     }
-    // `.invalid` is iOS refusing (no time to give): the request still goes, it
-    // just has no more time than the process happens to have.
-    lock.withLock { backgroundTask = id }
-    let task = Task { await self.run() }
-    lock.withLock { work = task }
+    return id == .invalid ? nil : id.rawValue
   }
 
-  private func run() async {
-    let outcome = await decider.decide(intent)
-    guard claimResult() else { return }
-    MomoPushActionLog.logger.notice(
-      "[push] action \(self.intent.direction.approved ? "approve" : "reject", privacy: .public) -> \(outcome.logName, privacy: .public)"
-    )
-    await notifier.apply(
-      MomoPushActionPlanner.line(for: outcome, intent: intent), intent: intent)
-    endBackgroundTask()
+  func end(_ token: Int) {
+    Self.onMain { UIApplication.shared.endBackgroundTask(UIBackgroundTaskIdentifier(rawValue: token)) }
   }
 
-  /// iOS calls this on the main queue when the extra time is gone. The task MUST
-  /// be ended before this returns or the process is killed for overrunning, so it
-  /// is ended here whatever else happens. The request is cancelled; the
-  /// server may still have received it, which is what the idempotency key is for —
-  /// the card in the app will say the truth.
-  private func timeRanOut() {
-    let task = lock.withLock { work }
-    task?.cancel()
-    if claimResult() {
-      MomoPushActionLog.logger.notice(
-        "[push] action \(self.intent.direction.approved ? "approve" : "reject", privacy: .public) -> failed(timeLimit)"
-      )
-      notifier.postWithoutWaiting(
-        MomoPushActionPlanner.line(for: .failed(.timeLimit), intent: intent), intent: intent)
-    }
-    endBackgroundTask()
-  }
-
-  private func claimResult() -> Bool {
-    lock.withLock {
-      if terminalClaimed { return false }
-      terminalClaimed = true
-      return true
-    }
-  }
-
-  private func endBackgroundTask() {
-    let id: UIBackgroundTaskIdentifier? = lock.withLock {
-      if backgroundTaskEnded { return nil }
-      backgroundTaskEnded = true
-      return backgroundTask
-    }
-    guard let id, id != .invalid else { return }
-    Self.onMain { UIApplication.shared.endBackgroundTask(id) }
-  }
-
-  /// UIApplication belongs to the main actor. Both callers are on the main queue
-  /// in practice (`didReceive`, iOS's expiration handler); the hop covers the
-  /// end of a task that finished on a background thread.
-  private static func onMain<T>(_ body: @MainActor () -> T) -> T {
+  private static func onMain<T: Sendable>(_ body: @MainActor () -> T) -> T {
     if Thread.isMainThread { return MainActor.assumeIsolated(body) }
     return DispatchQueue.main.sync { MainActor.assumeIsolated(body) }
   }
@@ -276,7 +202,10 @@ public final class MomoPushActionHandler: NSObject, NotificationDelegate {
       transport: transport,
       nowMs: { Int64(Date().timeIntervalSince1970 * 1000) }
     )
-    MomoPushActionJob(intent: intent, decider: decider, notifier: MomoPushActionNotifier()).start()
+    MomoPushActionJob(
+      intent: intent, decider: decider, notifier: MomoPushActionNotifier(),
+      tasks: MomoPushActionUIKitTasks()
+    ).start()
     return true
   }
 }
@@ -295,7 +224,12 @@ public enum MomoPushActionInstaller {
   /// JS steps aside for 승인/거절 only when something native has really taken
   /// them over.
   public static var isInstalled: Bool {
-    state.lock.withLock { state.handler != nil }
+    guard state.lock.withLock({ state.handler != nil }) else { return false }
+    // expo gives up claiming UNUserNotificationCenter.delegate when something else got
+    // there first (NotificationCenterManager.swift:51-60), and then NOTHING reaches this
+    // handler: a handler added to a list nobody calls is not a handler. JS stepping
+    // aside for it would leave the buttons dead.
+    return (UNUserNotificationCenter.current().delegate as AnyObject?) === NotificationCenterManager.shared
   }
 
   /// Attach to expo-notifications' delegate list. Reaching

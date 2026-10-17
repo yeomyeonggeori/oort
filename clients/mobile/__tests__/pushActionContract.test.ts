@@ -27,11 +27,22 @@ const swift = (name: string) => read(join(MODULE, 'ios', name));
 const CORE = swift('MomoPushActionCore.swift');
 const HANDLER = swift('MomoPushActionHandler.swift');
 const KEYCHAIN = swift('MomoPushActionKeychain.swift');
+const JOB = swift('MomoPushActionJob.swift');
 const MODULE_SWIFT = swift('MomoPushActionNativeModule.swift');
 
 /** `/* … */` 와 `// …` 를 걷어 낸다 — 설명이 금지한 API 의 이름을 말하는 것은 금지가 아니다. */
 const code = (src: string) =>
   src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/[^:"]\/\/.*$/gm, '');
+
+/** 디렉터리 아래의 ts/tsx 파일들. */
+function sourceTree(dir: string, acc: string[] = []): string[] {
+  for (const entry of readdirSync(dir, {withFileTypes: true})) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) sourceTree(full, acc);
+    else if (/\.tsx?$/.test(entry.name)) acc.push(full);
+  }
+  return acc;
+}
 
 /** `static let <name> = "<value>"` 한 줄에서 값을 꺼낸다. */
 function constant(source: string, name: string): string {
@@ -76,11 +87,26 @@ describe('같은 키체인 항목을 가리킨다 (JS 가 쓰고 Swift 가 읽�
     expect(jsKeys.sort()).toEqual(['actionToken', 'baseURL', 'expiresAtMs', 'memberID', 'ttlSeconds', 'workspaceID']);
   });
 
-  it('기기 비밀은 JS 가 만지지 않는 별도 계정이다', () => {
+  // react-native-keychain 의 `setGenericPassword`/`resetGenericPassword` 는 **서비스 단위로** 그룹 안의
+  // 항목을 전부 지우고(계정은 보지 않는다, RNKeychainManager.m), `getGenericPassword` 에도 계정 필터가
+  // 없다. 기기 비밀이 JS 가 쓰는 서비스에 있으면 토큰을 놓을 때마다 비밀이 사라진다 — 독립 보안 검수
+  // 1번이 잡았고, 시험용 키체인이 서비스를 키로 삼아 이 입자로는 보이지 않던 것이다.
+  it('기기 비밀은 JS 가 쓰는 것과 **다른 서비스**에 있다 (JS 의 쓰기·지우기가 서비스 전체를 지운다)', () => {
+    const secretService = constant(CORE, 'deviceSecretService');
+    expect(secretService).not.toBe(PUSH_ACTION_KEYCHAIN_SERVICE);
+    expect(secretService).not.toBe(constant(CORE, 'keychainService'));
     expect(constant(CORE, 'deviceSecretAccount')).not.toBe(PUSH_ACTION_SESSION_ACCOUNT);
+    // 읽는 쪽이 각자의 서비스로 질의한다.
+    const keychain = code(KEYCHAIN);
+    expect(keychain).toMatch(/service:\s*MomoPushActionContract\.deviceSecretService/);
+    expect(keychain).toMatch(/service:\s*MomoPushActionContract\.keychainService/);
     // 주석은 걷고 본다 — 지우기 쪽 설명이 그 이름을 말하는 것은 쓰는 것이 아니다.
     const js = code(read(join(APP_ROOT, 'src/push/pushActionSession.ts')));
     expect(js).not.toContain('device-secret');
+    expect(js).not.toContain(secretService);
+    // 다른 어떤 JS 도 이 서비스를 가리키지 않는다.
+    const offenders = sourceTree(join(APP_ROOT, 'src')).filter(file => read(file).includes(secretService));
+    expect(offenders).toEqual([]);
   });
 });
 
@@ -127,7 +153,14 @@ describe('JS 가 처리기를 알아보는 이름', () => {
 
   it('상수는 처리기가 실제로 붙었는지를 말한다 — 모듈이 링크됐다는 뜻이 아니다', () => {
     expect(code(MODULE_SWIFT)).toContain('MomoPushActionInstaller.isInstalled');
-    expect(code(HANDLER)).toMatch(/static var isInstalled: Bool \{\s*state\.lock\.withLock \{ state\.handler != nil \}/);
+    const installed = code(
+      HANDLER.slice(HANDLER.indexOf('public static var isInstalled'), HANDLER.indexOf('public static func install()')),
+    );
+    // 처리기를 목록에 넣었다는 것 …
+    expect(installed).toMatch(/state\.handler != nil/);
+    // … 그리고 expo 가 UNUserNotificationCenter.delegate 를 실제로 잡고 있다는 것. 다른 것이 먼저 잡았으면 expo 는
+    // 물러나고(NotificationCenterManager.swift:51-60) 목록은 아무도 부르지 않는다 — 그때 JS 가 물러나면 버튼이 죽는다.
+    expect(installed).toMatch(/UNUserNotificationCenter\.current\(\)\.delegate[^\n]*===\s*NotificationCenterManager\.shared/);
   });
 
   it('autolinking 이 이 모듈을 찾고, 알림 쪽 의존이 선언돼 있다', () => {
@@ -156,24 +189,63 @@ describe('처리기가 지키는 규율', () => {
     expect(appDelegate).toMatch(/^internal import MomoPushActionNative$/m);
   });
 
-  it('didReceive 에서 동기로 백그라운드 시간을 잡고, 완료 핸들러는 부르지 않는다', () => {
+  it('didReceive 는 동기로 일을 시작하고 완료 핸들러는 부르지 않는다 — 시간 잡기가 호출 스택 밖으로 밀려나지 않는다', () => {
     const body = HANDLER.slice(
       HANDLER.indexOf('public func didReceive('),
       HANDLER.indexOf('/// What AppDelegate calls.'),
     );
     expect(body).toContain('MomoPushActionJob(');
     expect(body).toContain('.start()');
+    // 백그라운드 시간은 `didReceive` 안에서, 아무것도 기다리기 **전에** 잡아야 한다. 처리기 본문에 비동기가
+    // 한 글자라도 끼면(`Task {`, `DispatchQueue`, `async`, `await`) 시간을 잡는 줄이 호출 스택 밖으로 밀려나
+    // 그 사이 완료 핸들러가 불린 뒤에 잡게 된다 — 보안 검수가 첫 구현에서 잡은 결함이다.
+    expect(code(body)).not.toMatch(/\b(?:Task|DispatchQueue|async|await|Thread|OperationQueue)\b/);
     // 승인·거절만 `true`, 나머지는 `false` — 본문 탭이 콜드 런치에서 EmitterModule 로 가는 길을 먹지 않는다.
     expect(body).toMatch(/guard let intent = MomoPushActionIntent\(response: response\) else \{ return false \}/);
     expect(body.match(/return true/g)).toHaveLength(1);
     // 완료는 NotificationCenterManager 가 부른다 — 두 번 부르지 않는다.
     expect(code(HANDLER)).not.toMatch(/completionHandler\s*\(\s*\)/);
+    expect(code(JOB)).not.toMatch(/completionHandler/);
+  });
 
-    const job = HANDLER.slice(HANDLER.indexOf('final class MomoPushActionJob'));
-    const start = job.slice(job.indexOf('func start()'), job.indexOf('private func run()'));
-    expect(start).toContain('beginBackgroundTask(withName:');
-    // 시간을 잡은 **뒤에** 일을 띄운다.
-    expect(start.indexOf('beginBackgroundTask')).toBeLessThan(start.indexOf('Task {'));
+  it('시간을 일보다 먼저 잡고, 시간이 다하면 결과를 먼저 가로챈 뒤 취소하고, 작업은 한 번만 끝낸다', () => {
+    const job = code(JOB);
+    // `start()`: 시간을 잡는 호출이 일을 띄우는 `Task {` 보다 앞선다.
+    const start = job.slice(job.indexOf('func start()'), job.indexOf('func waitForCompletion()'));
+    expect(start).toContain('tasks.begin(');
+    expect(start.indexOf('tasks.begin(')).toBeGreaterThan(-1);
+    expect(start.indexOf('tasks.begin(')).toBeLessThan(start.indexOf('Task {'));
+    // `begin` 이 돌아오기 전에 만료 핸들러가 먼저 돌 수 있다 — 끝내 달라는 요청은 기억돼서 토큰이 생기는 즉시 지켜진다.
+    expect(job).toContain('endRequested');
+    // `timeRanOut()`: 결과를 가로챈 **뒤에** 취소한다(취소가 요청을 깨워 꼬리가 같은 줄을 쓰려 달려든다).
+    const ran = job.slice(job.indexOf('private func timeRanOut()'), job.indexOf('private func claimResult()'));
+    expect(ran.indexOf('claimResult()')).toBeGreaterThan(-1);
+    expect(ran.indexOf('claimResult()')).toBeLessThan(ran.indexOf('.cancel()'));
+    expect(ran).toContain('postWithoutWaiting(');
+    expect(ran).toContain('endBackgroundTask()');
+    // 끝내기는 한 번: 이미 끝냈다는 표시가 있다.
+    const end = job.slice(job.indexOf('private func endBackgroundTask()'));
+    expect(end).toContain('backgroundTaskEnded');
+    expect(end).toContain('tasks.end(');
+    // 일이 끝나면(`run()`) 줄을 쓴 뒤 작업을 끝낸다.
+    const run = job.slice(job.indexOf('private func run()'), job.indexOf('private func timeRanOut()'));
+    expect(run).toContain('claimResult()');
+    expect(run.indexOf('notifier.apply(')).toBeLessThan(run.indexOf('endBackgroundTask()'));
+  });
+
+  it('UIApplication 은 두 줄 이음새 뒤에만 있다 — 실제 어댑터는 시간 잡기·끝내기 그대로다', () => {
+    const adapter = HANDLER.slice(
+      HANDLER.indexOf('struct MomoPushActionUIKitTasks'),
+      HANDLER.indexOf('// MARK: - the delegate'),
+    );
+    expect(adapter).toContain('UIApplication.shared.beginBackgroundTask(withName: name, expirationHandler: expiration)');
+    expect(adapter).toContain('UIApplication.shared.endBackgroundTask(');
+    // 작업 이음새와 알림 이음새가 코어/잡 파일의 프로토콜이다.
+    expect(code(JOB)).toMatch(/protocol MomoPushActionBackgroundTasks: Sendable/);
+    expect(code(JOB)).toMatch(/protocol MomoPushActionNotifying: Sendable/);
+    // 잡 파일은 UIKit 을 모른다 — sim-check 가 가짜로 돌릴 수 있는 까닭이다.
+    expect(code(JOB)).not.toMatch(/import\s+(?:UIKit|UserNotifications|ExpoNotifications)/);
+    expect(code(CORE)).not.toMatch(/import\s+(?:UIKit|UserNotifications|ExpoNotifications)/);
   });
 
   it('승인·거절이 아닌 응답과 승인 카테고리가 아닌 알림은 만지지 않는다', () => {
@@ -181,6 +253,9 @@ describe('처리기가 지키는 규율', () => {
     expect(intent).toContain('MomoPushActionDirection(actionIdentifier: response.actionIdentifier)');
     expect(intent).toContain('content.categoryIdentifier == MomoPushActionContract.approvalCategory');
     expect(intent.match(/return nil/g)).toHaveLength(2);
+    // 릴레이가 보낸 알림 문구는 **페이로드에서** 읽어 확장이 덮어쓴 글과 견준다 — 이 줄이 빠지면 처리기는 「oort / 새 알림」
+    // 한 쌍만 자리표시로 알아본다(릴레이가 문구를 바꾸는 날 모르는 알림을 승인하게 된다).
+    expect(intent).toContain('relayAlert: MomoPushActionRelayAlert.read(userInfo: userInfo)');
   });
 
   it('요청은 리다이렉트를 따라가지 않고 쿠키·캐시를 쓰지 않는다 (bearer 가 그 요청에만 머문다)', () => {
@@ -191,12 +266,16 @@ describe('처리기가 지키는 규율', () => {
     expect(transport).toMatch(/willPerformHTTPRedirection[\s\S]*completionHandler\(nil\)/);
   });
 
-  it('토큰·응답 본문·식별자를 로그에 쓰지 않는다', () => {
-    const logged = [...code(HANDLER).matchAll(/logger\.\w+\(\s*"([^"]*)"/g)].map(m => m[1]).join('\n');
+  it('토큰·응답 본문·식별자를 로그에 쓰지 않는다 (처리기·잡 두 파일의 모든 로그)', () => {
+    const sources = code(HANDLER) + '\n' + code(JOB);
+    const logs = [...sources.matchAll(/logger\.\w+\(\s*"([^"]*)"/g)].map(m => m[1]);
+    // 로그가 실제로 있다(검사가 헛돌지 않는다).
+    expect(logs.length).toBeGreaterThanOrEqual(5);
+    const logged = logs.join('\n');
     expect(logged).toContain('[push] action');
     expect(logged).not.toMatch(/token|secret|body|approval|workspace|bearer/i);
     // 그 로그 문장에 보간되는 값은 방향과 결과 이름뿐이다.
-    const interpolated = [...code(HANDLER).matchAll(/logger\.\w+\([\s\S]*?\)\s*\n/g)].map(m => m[0]).join('\n');
+    const interpolated = [...sources.matchAll(/logger\.\w+\([\s\S]*?\)\s*\n/g)].map(m => m[0]).join('\n');
     for (const value of interpolated.matchAll(/\\\(([^)]*?)(?:,|\))/g)) {
       expect(value[1]).toMatch(/direction\.approved|outcome\.logName/);
     }
@@ -288,12 +367,12 @@ describe('이 자격은 알림 확장이 읽는 곳에 닿지 않는다', () => 
 // =============================================================================
 // Swift 쪽 판정을 **실제로 컴파일해 돌린다.** 위의 시험들은 Swift 소스를 글자로 읽을 뿐이고,
 // 멱등 키의 값·응답 해석·문장·키체인 논리는 컴파일된 코드만이 증명한다. 모듈의 UIKit 없는 절반
-// (`MomoPushActionCore/DecisionKey/Keychain`)을 `sim-check/main.swift` 와 함께 `swiftc` 로 빌드해
+// (`MomoPushActionCore/DecisionKey/Keychain/Job`)을 `sim-check/main.swift` 와 함께 `swiftc` 로 빌드해
 // 이 Mac 에서 돌린다(`sim-check/run.sh`, 기본 인자 없음). macOS 가 아니면(리눅스 CI) 건너뛴다.
 // =============================================================================
 const onMac = process.platform === 'darwin';
 (onMac ? describe : describe.skip)('Swift 쪽 판정 (macOS 에서 컴파일해 실행)', () => {
-  it('sim-check 가 PASS 한다 — 멱등 키 벡터, 페이로드·자격 읽기, 요청, 응답 해석, 문장, 키체인 논리', () => {
+  it('sim-check 가 PASS 한다 — 멱등 키 벡터, 페이로드·자격 읽기, 요청, 응답 해석, 문장, 키체인 논리, 백그라운드 시간 잡의 순서', () => {
     let output = '';
     try {
       output = execFileSync('bash', [join(MODULE, 'sim-check/run.sh')], {
@@ -308,6 +387,6 @@ const onMac = process.platform === 'darwin';
     expect(output).toMatch(/^PASS$/m);
     expect(output).not.toMatch(/^FAIL:/m);
     // 검사 수가 크게 줄었다면 누군가 검사를 지운 것이다.
-    expect((output.match(/^ok:/gm) ?? []).length).toBeGreaterThanOrEqual(170);
+    expect((output.match(/^ok:/gm) ?? []).length).toBeGreaterThanOrEqual(270);
   }, 180_000);
 });

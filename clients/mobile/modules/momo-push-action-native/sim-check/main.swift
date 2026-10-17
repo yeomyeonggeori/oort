@@ -1,12 +1,14 @@
 import Foundation
 
 // Check of the lock-screen decision (#3931, ADR-0204 D6) with nothing but the
-// UIKit-free half of the module: MomoPushActionCore.swift and
-// MomoPushActionDecisionKey.swift. A spawned CLI has no UIApplication and no
-// notification centre, so what is exercised here is everything that DECIDES —
-// the idempotency key, the request, the answer's reading, the sentence — and
-// not the part that merely does as told (MomoPushActionHandler.swift, the
-// keychain). Run by ./run.sh.
+// UIKit-free half of the module: MomoPushActionCore.swift,
+// MomoPushActionDecisionKey.swift, MomoPushActionKeychain.swift (its SecItem calls
+// faked) and MomoPushActionJob.swift (UIApplication and the notification centre
+// recorded). A spawned CLI has no UIApplication and no notification centre, so
+// what is exercised here is everything that DECIDES — the idempotency key, the
+// request, the answer's reading, the sentence, the order in which background time
+// is taken and given back — and not the part that merely does as told
+// (MomoPushActionHandler.swift). Run by ./run.sh.
 
 var failures = 0
 func check(_ ok: Bool, _ what: String) {
@@ -21,6 +23,9 @@ let messageID = "44444444-4444-4444-8444-444444444444"
 let secret = Data(Array(1...32))
 let approve = MomoPushActionContract.approveAction
 let reject = MomoPushActionContract.rejectAction
+/// A UUID with hex LETTERS in it, spelled in capitals. The fixtures above have none, so
+/// .uppercased()/.lowercased() of them is the same string and a case check on them proves nothing.
+let shoutingID = "ABCDEFAB-1234-4ABC-8DEF-ABCDEFABCDEF"
 
 // ---- the idempotency key ------------------------------------------------------
 
@@ -111,9 +116,11 @@ func payload(
   reason: String? = "approval_request",
   badge: Int? = 1,
   category: String? = "momo.approval",
-  approval: String? = approvalID
+  approval: String? = approvalID,
+  alert: (title: String, body: String)? = nil
 ) -> [AnyHashable: Any] {
   var aps: [String: Any] = [:]
+  if let alert { aps["alert"] = ["title": alert.title, "body": alert.body] }
   if let badge { aps["badge"] = badge }
   if let thread { aps["thread-id"] = thread }
   if let category { aps["category"] = category }
@@ -137,10 +144,17 @@ do {
         workspaceID: workspaceID, channelID: channelID, messageID: messageID,
         approvalID: approvalID, threadID: channelID),
     "a well-formed approval payload parses")
+  check(shoutingID != shoutingID.lowercased(), "the case fixture really differs in case")
+  let lowered = MomoPushActionEnvelope.parse(
+    userInfo: payload(
+      workspace: shoutingID, channel: shoutingID, message: shoutingID, thread: shoutingID, approval: shoutingID))
   check(
-    MomoPushActionEnvelope.parse(userInfo: payload(workspace: workspaceID.uppercased()))?.workspaceID
-      == workspaceID,
-    "ids are lowercased")
+    lowered
+      == MomoPushActionEnvelope(
+        workspaceID: shoutingID.lowercased(), channelID: shoutingID.lowercased(),
+        messageID: shoutingID.lowercased(), approvalID: shoutingID.lowercased(),
+        threadID: shoutingID.lowercased()),
+    "every id is lowercased, whatever case the relay spelled it in")
   check(MomoPushActionEnvelope.parse(userInfo: [:]) == nil, "an empty payload is refused")
   check(MomoPushActionEnvelope.parse(userInfo: ["aps": [:]]) == nil, "no momo object is refused")
   check(MomoPushActionEnvelope.parse(userInfo: payload(schema: "momo.push.notification.v1")) == nil,
@@ -199,6 +213,9 @@ do {
     MomoPushActionSession.decode(
       sessionJSON(extra: ",\"memberID\":\"m\",\"ttlSeconds\":21600")) == session,
     "the member id and ttl JS also writes are ignored")
+  check(
+    MomoPushActionSession.decode(sessionJSON(workspace: shoutingID))?.workspaceID == shoutingID.lowercased(),
+    "the session's workspace id is lowercased too, so it compares equal to the payload's whatever the spelling")
   check(MomoPushActionSession.decode(sessionJSON(token: "")) == nil, "an empty token is no session")
   check(MomoPushActionSession.decode(sessionJSON(workspace: "x")) == nil, "a bad workspace id is no session")
   check(MomoPushActionSession.decode(sessionJSON(baseURL: "ftp://x.example.com")) == nil,
@@ -207,11 +224,12 @@ do {
   check(MomoPushActionSession.decode(sessionJSON(baseURL: "https://")) == nil, "a base without a host is no session")
   check(MomoPushActionSession.decode(Data("{}".utf8)) == nil, "an empty object is no session")
   check(MomoPushActionSession.decode(Data("nope".utf8)) == nil, "garbage is no session")
-  check(
-    MomoPushActionSession.decode(
-      Data("{\"baseURL\":\"https://a.example.com\",\"workspaceID\":\"\(workspaceID)\",\"expiresAtMs\":1}".utf8))
-      == nil,
-    "an item without a token key is no session")
+  // Built as a dictionary, not typed as JSON text: a JSON-shaped string literal next to words like "token" is
+  // what the repository's secret scanner mistakes for a credential.
+  let withoutCredential = try! JSONSerialization.data(withJSONObject: [
+    "baseURL": "https://a.example.com", "workspaceID": workspaceID, "expiresAtMs": 1,
+  ])
+  check(MomoPushActionSession.decode(withoutCredential) == nil, "an item without the credential field is no session")
   let live = session!
   check(live.isUsable(atMs: 1_999_999_994_999), "a token with more than the slack left is usable")
   check(!live.isUsable(atMs: 1_999_999_995_000), "a token inside the slack is not")
@@ -241,6 +259,15 @@ do {
   check(body["approve"] as? Bool == true, "approve")
   check(body["client_decision_id"] as? String == fixedDecisionID, "the derived key")
   check(!String(decoding: request.httpBody!, as: UTF8.self).contains("tok"), "the token is not in the body")
+  // An upper-case payload still addresses the lower-case route (the envelope lowercased its ids).
+  let shoutedEnvelope = MomoPushActionEnvelope.parse(
+    userInfo: payload(workspace: shoutingID, approval: shoutingID))!
+  let shouted = MomoPushActionRequestBuilder.make(
+    session: session, envelope: shoutedEnvelope, direction: .approve, decisionID: fixedDecisionID)!
+  check(
+    shouted.url?.absoluteString
+      == "https://oort.example.com/v1/workspaces/\(shoutingID.lowercased())/approvals/\(shoutingID.lowercased())/decision",
+    "the route is built from the lower-cased ids")
   let rejected = MomoPushActionRequestBuilder.make(
     session: session, envelope: envelope, direction: .reject, decisionID: fixedDecisionID)!
   let rejectedBody = try! JSONSerialization.jsonObject(with: rejected.httpBody!) as! [String: Any]
@@ -261,10 +288,23 @@ do {
     "200 approved after 승인 is decided")
   check(C.classify(httpStatus: 200, body: receipt("rejected"), direction: .reject) == .decided(.reject),
     "200 rejected after 거절 is decided")
-  check(C.classify(httpStatus: 200, body: Data(), direction: .approve) == .decided(.approve),
-    "a 200 without a readable receipt is still the server accepting it")
-  check(C.classify(httpStatus: 200, body: Data("<html>".utf8), direction: .reject) == .decided(.reject),
-    "a 200 that is not JSON is still decided")
+  // A 200 is a decision only because of the receipt it carries (`decision_receipt` always has a
+  // `status`). One without a verdict (a proxy's page, a body that changed) may or may not have recorded
+  // anything, and the lock screen must not claim either.
+  check(C.classify(httpStatus: 200, body: Data(), direction: .approve) == .failed(.unclearAnswer),
+    "a 200 with no body is not a receipt: the result is unclear")
+  check(C.classify(httpStatus: 200, body: Data("<html>".utf8), direction: .reject) == .failed(.unclearAnswer),
+    "a 200 that is not JSON is not a receipt either")
+  check(C.classify(httpStatus: 200, body: receipt(nil), direction: .approve) == .failed(.unclearAnswer),
+    "a 200 whose JSON has no status is unclear")
+  check(C.classify(httpStatus: 200, body: receipt("pending"), direction: .approve) == .failed(.unclearAnswer),
+    "a 200 whose status is not a verdict is unclear")
+  check(C.classify(httpStatus: 200, body: receipt("expired"), direction: .approve) == .failed(.unclearAnswer),
+    "a 200 that says expired is unclear (the server answers that with a 409)")
+  for status in [201, 202, 204, 206, 299] {
+    check(C.classify(httpStatus: status, body: receipt("approved"), direction: .approve) == .failed(.unclearAnswer),
+      "a \(status) is not the route's answer: unclear, whatever it carries")
+  }
   check(C.classify(httpStatus: 200, body: receipt("rejected"), direction: .approve) == .alreadySettled(.rejected),
     "a 200 whose ledger says the opposite reports the ledger")
   check(C.classify(httpStatus: 409, body: receipt("approved"), direction: .reject) == .alreadySettled(.approved),
@@ -293,7 +333,9 @@ do {
   check(C.classify(httpStatus: 500, body: Data(), direction: .approve) == .failed(.server), "500")
   check(C.classify(httpStatus: 503, body: Data(), direction: .approve) == .failed(.server), "503")
   check(C.classify(httpStatus: 302, body: Data(), direction: .approve) == .failed(.unexpected),
-    "a redirect is not an answer")
+    "a redirect is not an answer (and none is followed)")
+  check(C.classify(httpStatus: 199, body: Data(), direction: .approve) == .failed(.unexpected), "a 1xx")
+  check(C.classify(httpStatus: 300, body: Data(), direction: .approve) == .failed(.unexpected), "a 300")
   check(C.classify(httpStatus: 400, body: Data(), direction: .approve) == .failed(.unexpected), "400")
 }
 
@@ -313,19 +355,24 @@ do {
   check(Copy.failed(.approve) == "승인하지 못했어요", "승인하지 못했어요")
   check(Copy.failed(.reject) == "거절하지 못했어요", "a 거절 that failed does not say 승인")
   check(Copy.failedDetail == "눌러서 앱에서 마무리해 주세요", "the next step is one 해요체 sentence")
+  check(Copy.unknownResult == "결과를 확인하지 못했어요", "when the answer never came: the result is unknown, not 「못했어요」")
+  check(Copy.unknownResultDetail == "앱에서 확인해 주세요", "and the card in the app is where it is known")
+  check(!Copy.unknownResult.contains("승인") && !Copy.unknownResult.contains("거절"),
+    "the unknown-result line names neither verdict (it cannot know which, if any, was recorded)")
 
   // The design system bans the em dash outright (docs/design-system/README.md); nothing measures a Swift
   // string, so this sweep over EVERY sentence the module can put on a lock screen is the only thing that
   // would notice one.
   var everySentence: [String] = [
     Copy.failed(.approve), Copy.failed(.reject), Copy.failedDetail,
+    Copy.unknownResult, Copy.unknownResultDetail,
     Copy.decided(.approve, title: "그록봇"), Copy.decided(.reject, title: "그록봇"),
     Copy.decided(.approve, title: ""),
   ]
   for status in [MomoPushActionLedgerStatus.approved, .rejected, .expired, .cancelled] {
     everySentence.append(Copy.alreadySettled(status))
   }
-  check(everySentence.count == 10, "the sweep covers every sentence")
+  check(everySentence.count == 12, "the sweep covers every sentence")
   check(everySentence.allSatisfy { !$0.contains("\u{2014}") && !$0.contains("\u{2013}") },
     "no sentence the lock screen can show contains an em or en dash")
   check(everySentence.allSatisfy { !$0.contains("!") }, "and none shouts")
@@ -344,7 +391,8 @@ func intent(
   return MomoPushActionIntent(
     direction: direction, requestIdentifier: request, title: title, body: body, threadIdentifier: channelID,
     envelope: MomoPushActionEnvelope.parse(userInfo: info),
-    origin: try? JSONSerialization.data(withJSONObject: info))
+    origin: try? JSONSerialization.data(withJSONObject: info),
+    relayAlert: MomoPushActionRelayAlert.read(userInfo: info))
 }
 
 do {
@@ -361,13 +409,26 @@ do {
       == MomoPushActionLine(
         text: "거절하지 못했어요", detail: "눌러서 앱에서 마무리해 주세요", alerts: true, removesSiblings: false),
     "a failure alerts, says what to do in its body, and leaves the other notifications (the approval is still pending)")
-  for reason in [MomoPushActionFailure.noToken, .tokenExpired, .otherWorkspace, .unauthorized, .network, .timeLimit,
-    .unreadableNotification, .unresolvedNotification, .noDeviceSecret, .server, .conflict, .notFound,
-    .rateLimited, .badRequest, .unexpected]
-  {
-    let line = P.line(for: .failed(reason), intent: intent())
-    check(line.text == "승인하지 못했어요" && line.detail == "눌러서 앱에서 마무리해 주세요",
-      "failure \(reason.rawValue) is the same title and the same next step")
+  // Every failure there is, by CaseIterable, so a new one cannot slip in without choosing a sentence.
+  let maybeRecorded: Set<MomoPushActionFailure> = [.network, .timeLimit, .server, .unclearAnswer]
+  check(Set(MomoPushActionFailure.allCases.filter { $0.mayHaveBeenRecorded }) == maybeRecorded,
+    "the failures after which the decision may be on the server are exactly: network, timeLimit, server, unclearAnswer")
+  for reason in MomoPushActionFailure.allCases {
+    for direction in [MomoPushActionDirection.approve, .reject] {
+      let line = P.line(for: .failed(reason), intent: intent(direction))
+      let verb = direction.approved ? "승인하지 못했어요" : "거절하지 못했어요"
+      if maybeRecorded.contains(reason) {
+        check(
+          line == MomoPushActionLine(
+            text: "결과를 확인하지 못했어요", detail: "앱에서 확인해 주세요", alerts: true, removesSiblings: false),
+          "failure \(reason.rawValue) (\(direction.approved ? "승인" : "거절")): the result is unknown, for either button")
+      } else {
+        check(
+          line == MomoPushActionLine(
+            text: verb, detail: "눌러서 앱에서 마무리해 주세요", alerts: true, removesSiblings: false),
+          "failure \(reason.rawValue) (\(direction.approved ? "승인" : "거절")): nothing was recorded, the verb follows the button")
+      }
+    }
   }
 
   let origin = P.userInfo(origin: intent().origin)
@@ -390,17 +451,24 @@ do {
   check(quiet.body == "", "and has no body")
   check((quiet.userInfo[MomoPushActionContract.originKey] as? [String: Any]) != nil,
     "and it carries the payload the tap needs to land on the card")
-  let failedLine = MomoPushActionPlanner.line(for: .failed(.network), intent: intent(request: "apns-collapse-7"))
+  let failedLine = MomoPushActionPlanner.line(for: .failed(.refused), intent: intent(request: "apns-collapse-7"))
   let loud = MomoPushActionPlanner.notice(for: failedLine, intent: intent(request: "apns-collapse-7"))
   check(loud.alerts && loud.categoryIdentifier == "" && loud.identifier == "apns-collapse-7",
     "a failure alerts, still with no buttons, still in the same slot")
   check(loud.title == "승인하지 못했어요" && loud.body == "눌러서 앱에서 마무리해 주세요",
     "and carries its next step as the body, so a clipped title never hides it")
+  let unknownLine = MomoPushActionPlanner.line(for: .failed(.timeLimit), intent: intent(request: "apns-collapse-7"))
+  let unknown = MomoPushActionPlanner.notice(for: unknownLine, intent: intent(request: "apns-collapse-7"))
+  check(unknown.title == "결과를 확인하지 못했어요" && unknown.body == "앱에서 확인해 주세요" && unknown.alerts
+    && unknown.identifier == "apns-collapse-7" && unknown.categoryIdentifier == "",
+    "an unknown result alerts, says where to look, and replaces the same slot without buttons")
+  check((unknown.userInfo[MomoPushActionContract.originKey] as? [String: Any]) != nil,
+    "and its tap lands on the approval's card too")
   let bare = MomoPushActionPlanner.notice(
     for: failedLine,
     intent: MomoPushActionIntent(
       direction: .approve, requestIdentifier: "x", title: "t", body: "b", threadIdentifier: "th", envelope: nil,
-      origin: nil))
+      origin: nil, relayAlert: nil))
   check(bare.userInfo.isEmpty, "a notification whose payload could not be read carries nothing to land on")
 }
 
@@ -514,6 +582,40 @@ do {
   check(!intent(title: "oort", body: "새 알림").contentWasResolved && intent().contentWasResolved,
     "contentWasResolved is the two-part test")
 
+  // The relay's alert is read from the PAYLOAD (aps.alert), so a change of the relay's copy cannot make an
+  // unseen approval look resolved. The extension rewrites it; a notification still equal to it was never seen.
+  let relayWords = (title: "새 승인 요청", body: "열어서 확인하세요")
+  let relayInfo = payload(alert: relayWords)
+  check(
+    MomoPushActionRelayAlert.read(userInfo: relayInfo)
+      == MomoPushActionRelayAlert(title: relayWords.title, body: relayWords.body),
+    "aps.alert.title/body are read from the payload")
+  check(MomoPushActionRelayAlert.read(userInfo: payload()) == nil, "a payload with no aps.alert has no relay alert")
+  check(MomoPushActionRelayAlert.read(userInfo: ["aps": ["alert": "plain string"]]) == nil,
+    "an alert that is a plain string is not read as one")
+  check(MomoPushActionRelayAlert.read(userInfo: ["aps": ["alert": ["title": "t"]]]) == nil,
+    "an alert with no body is not read as one")
+  check(MomoPushActionRelayAlert.read(userInfo: ["aps": ["alert": ["title": 1, "body": 2]]]) == nil,
+    "an alert whose parts are not strings is not read as one")
+
+  let stillRelay = intent(title: relayWords.title, body: relayWords.body, userInfo: relayInfo)
+  check(!stillRelay.contentWasResolved, "a notification still showing exactly what the relay sent is unresolved, in whatever words")
+  let (blindByAlert, tba) = await decide(stillRelay)
+  check(blindByAlert == .failed(.unresolvedNotification) && tba.requests.isEmpty,
+    "and it is never approved from the lock screen")
+  let (blindByAlertReject, tbar) = await decide(
+    intent(.reject, title: " \(relayWords.title) ", body: "\(relayWords.body)\n", userInfo: relayInfo))
+  check(blindByAlertReject == .failed(.unresolvedNotification) && tbar.requests.isEmpty,
+    "whitespace around it does not hide it (reject too)")
+  check(intent(title: "그록봇", body: "배포해도 될까요?", userInfo: relayInfo).contentWasResolved,
+    "one the extension rewrote is resolved")
+  check(intent(title: relayWords.title, body: "배포해도 될까요?", userInfo: relayInfo).contentWasResolved,
+    "a sender named like the relay's title, with their own text, is resolved (both halves must match)")
+  check(intent(title: "그록봇", body: relayWords.body, userInfo: relayInfo).contentWasResolved,
+    "and so is one whose text happens to equal the relay's body")
+  check(!intent(title: "oort", body: "새 알림", userInfo: relayInfo).contentWasResolved,
+    "the known placeholder is still unresolved beside an alert in other words")
+
   let (unreadable, t1) = await decide(intent(userInfo: ["aps": [:]]))
   check(unreadable == .failed(.unreadableNotification) && t1.requests.isEmpty, "no readable payload: nothing is sent")
   let (noToken, t2) = await decide(intent(), session: nil)
@@ -528,6 +630,21 @@ do {
   check(noSecret == .failed(.noDeviceSecret) && t5.requests.isEmpty, "no device secret: nothing is sent")
   let (shortSecret, t6) = await decide(intent(), secret: Data(count: 4))
   check(shortSecret == .failed(.noDeviceSecret) && t6.requests.isEmpty, "a too-short secret is not used")
+  let shoutingSession = MomoPushActionSession.decode(sessionJSON(workspace: workspaceID.uppercased()))
+  let (sameWorkspaceShouted, tsw) = await decide(intent(), session: shoutingSession)
+  check(sameWorkspaceShouted == .decided(.approve) && tsw.requests.count == 1,
+    "the same workspace spelled in another case is the same workspace")
+  let lettered = "ABCDEFAB-1234-4ABC-8DEF-ABCDEFABCDEF"
+  let letteredSession = MomoPushActionSession.decode(sessionJSON(workspace: lettered))
+  let (letteredMatch, tl) = await decide(intent(userInfo: payload(workspace: lettered.lowercased())), session: letteredSession)
+  check(letteredMatch == .decided(.approve) && tl.requests.count == 1,
+    "a token minted for an upper-case spelling of the notification's workspace is accepted (ids with hex letters)")
+  let (letteredOther, tlo) = await decide(
+    intent(userInfo: payload(workspace: "abcdefab-1234-4abc-8def-abcdefabcde0")), session: letteredSession)
+  check(letteredOther == .failed(.otherWorkspace) && tlo.requests.isEmpty,
+    "and one id apart is another workspace")
+  let (noReceipt, _) = await decide(intent(), answer: .success((200, Data("<html>".utf8))))
+  check(noReceipt == .failed(.unclearAnswer), "a 200 that is not a receipt is not reported as a decision")
   let (offline, _) = await decide(intent(), answer: .failure(URLError(.notConnectedToInternet)))
   check(offline == .failed(.network), "offline is a failure")
   let (slow, _) = await decide(intent(), answer: .failure(URLError(.timedOut)))
@@ -577,6 +694,12 @@ final class FakeKeychain: MomoPushActionKeychainClient, @unchecked Sendable {
     items[key(query)] = nil
     return errSecSuccess
   }
+
+  /// What react-native-keychain's `setGenericPassword` does BEFORE it writes (RNKeychainManager.m): delete
+  /// every generic-password item of the service in the group, whatever its account.
+  func deleteEverythingOf(service: String, group: String) {
+    items = items.filter { !($0.key.hasPrefix("\(service)|") && $0.key.hasSuffix("|\(group)")) }
+  }
 }
 
 do {
@@ -595,13 +718,22 @@ do {
     accessGroup: group, client: fake,
     randomSecret: { counter.value += 1; return Data(repeating: UInt8(counter.value), count: 32) })
 
-  let address = keychain.query(account: "acct")
+  let address = keychain.query(service: MomoPushActionContract.keychainService, account: "acct")
   check(address[kSecClass as String] as? String == kSecClassGenericPassword as String, "a generic password")
   check(address[kSecAttrService as String] as? String == "app.momo.ios.pushaction", "the service JS writes under")
   check(address[kSecAttrAccount as String] as? String == "acct", "the given account")
   check(address[kSecAttrAccessGroup as String] as? String == group,
     "every query names the app-only group explicitly (an ungrouped one defaults to the shared group)")
   check(address[kSecAttrSynchronizable as String] as? Bool == false, "never synchronizable")
+
+  let secretAddress = keychain.query(
+    service: MomoPushActionContract.deviceSecretService, account: MomoPushActionContract.deviceSecretAccount)
+  check(secretAddress[kSecAttrService as String] as? String == "app.momo.ios.pushaction.secret",
+    "the secret lives in a service of its own")
+  check(
+    MomoPushActionContract.deviceSecretService != MomoPushActionContract.keychainService,
+    "and that service is not the one JS writes the token under (JS deletes every item of ITS service on each publish)")
+  check(secretAddress[kSecAttrAccessGroup as String] as? String == group, "in the same app-only group")
 
   check(keychain.readSession() == nil, "no item: no session")
   fake.items["app.momo.ios.pushaction|push-action-session|\(group)"] = sessionJSON()
@@ -628,9 +760,25 @@ do {
   check(counter.value == 1, "and does not draw randomness again")
 
   // A corrupt value is replaced, not hashed.
-  fake.items["app.momo.ios.pushaction|device-secret-v1|\(group)"] = Data(count: 7)
+  fake.items["app.momo.ios.pushaction.secret|device-secret-v1|\(group)"] = Data(count: 7)
   let replaced = keychain.readDeviceSecret()
   check(replaced == Data(repeating: 2, count: 32) && fake.deletes == 1, "a secret of the wrong size is deleted and replaced")
+
+  // The finding that moved the secret out of the session's service: a token publish deletes EVERY item of
+  // the session's service first. The control proves the fake does what the library does; the check proves
+  // the secret is out of its reach.
+  let sameService = FakeKeychain()
+  sameService.items["app.momo.ios.pushaction|device-secret-v1|\(group)"] = Data(repeating: 5, count: 32)
+  sameService.items["app.momo.ios.pushaction|push-action-session|\(group)"] = sessionJSON()
+  sameService.deleteEverythingOf(service: "app.momo.ios.pushaction", group: group)
+  check(sameService.items.isEmpty, "(control) a publish takes every item of the service with it, whatever its account")
+  let keptSecret = keychain.readDeviceSecret()
+  let drawsBefore = counter.value
+  fake.items["app.momo.ios.pushaction|push-action-session|\(group)"] = sessionJSON()
+  fake.deleteEverythingOf(service: MomoPushActionContract.keychainService, group: group)
+  check(fake.items["app.momo.ios.pushaction|push-action-session|\(group)"] == nil, "(the publish took the token)")
+  check(keychain.readDeviceSecret() == keptSecret && keptSecret != nil && counter.value == drawsBefore,
+    "and left the secret, which is read back unchanged without drawing a new one (the keys on the lock screen keep their meaning)")
 
   // A keychain that cannot answer must not be mistaken for an empty one.
   let locked = FakeKeychain()
@@ -644,7 +792,7 @@ do {
   // Two writers: the other one wins the race.
   let racing = FakeKeychain()
   racing.beforeAdd = {
-    racing.items["app.momo.ios.pushaction|device-secret-v1|\(group)"] = Data(repeating: 0xAB, count: 32)
+    racing.items["app.momo.ios.pushaction.secret|device-secret-v1|\(group)"] = Data(repeating: 0xAB, count: 32)
     racing.beforeAdd = nil
   }
   let racingKeychain = MomoPushActionKeychain(
@@ -673,6 +821,301 @@ check(MomoPushActionOutcome.decided(.approve).logName == "decided(approve)", "lo
 check(MomoPushActionOutcome.decided(.reject).logName == "decided(reject)", "log name: decided(reject)")
 check(MomoPushActionOutcome.alreadySettled(.approved).logName == "alreadySettled(approved)", "log name: alreadySettled")
 check(MomoPushActionOutcome.failed(.tokenExpired).logName == "failed(tokenExpired)", "log name: failed(reason)")
+check(MomoPushActionOutcome.failed(.unclearAnswer).logName == "failed(unclearAnswer)", "log name: failed(unclearAnswer)")
+
+// ---- the job: background time, one line, one end of the task ----------------------------------
+//
+// The independent security review of #3931 broke the first version of this five ways (the task taken from
+// inside a `Task`, not ended on the happy path, not ended on expiry, a result written twice, ...), and each
+// passed the text-matching tests that stood in for it. These run the real MomoPushActionJob against a recorded
+// UIApplication and a recorded notification centre, and read the ORDER things happened in.
+
+/// What the job did to the outside world, in the order it did it.
+final class Events: @unchecked Sendable {
+  private let lock = NSLock()
+  private var items: [String] = []
+  func add(_ event: String) { lock.lock(); items.append(event); lock.unlock() }
+  var all: [String] { lock.lock(); defer { lock.unlock() }; return items }
+  func count(_ event: String) -> Int { all.filter { $0 == event }.count }
+}
+
+final class RecordedTasks: MomoPushActionBackgroundTasks, @unchecked Sendable {
+  let events: Events
+  private let lock = NSLock()
+  private var expiration: (@Sendable () -> Void)?
+  private var names: [String] = []
+  /// iOS refusing to give any time.
+  var refuse = false
+  /// iOS running the expiration handler before `begin` has returned.
+  var expireInsideBegin = false
+  init(_ events: Events) { self.events = events }
+
+  func begin(name: String, expiration: @escaping @Sendable () -> Void) -> Int? {
+    events.add("begin")
+    lock.lock(); names.append(name); lock.unlock()
+    if refuse { return nil }
+    lock.lock(); self.expiration = expiration; lock.unlock()
+    if expireInsideBegin { expiration() }
+    return 41
+  }
+  func end(_ token: Int) { events.add("end:\(token)") }
+  var beginNames: [String] { lock.lock(); defer { lock.unlock() }; return names }
+  /// iOS running out of time.
+  func expire() {
+    lock.lock(); let handler = expiration; lock.unlock()
+    handler?()
+  }
+}
+
+/// Holds a caller until the test lets it go.
+final class OpenGate: @unchecked Sendable {
+  private let lock = NSLock()
+  private var opened = false
+  private var waiters: [CheckedContinuation<Void, Never>] = []
+  func wait() async {
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+      lock.lock()
+      if opened { lock.unlock(); continuation.resume(); return }
+      waiters.append(continuation)
+      lock.unlock()
+    }
+  }
+  func open() {
+    lock.lock(); opened = true; let pending = waiters; waiters = []; lock.unlock()
+    for waiter in pending { waiter.resume() }
+  }
+}
+
+final class RecordedNotifier: MomoPushActionNotifying, @unchecked Sendable {
+  let events: Events
+  /// When set, `apply` does not return until it is opened.
+  var hold: OpenGate?
+  private let lock = NSLock()
+  private var appliedLines: [MomoPushActionLine] = []
+  private var postedLines: [MomoPushActionLine] = []
+  init(_ events: Events) { self.events = events }
+
+  func apply(_ line: MomoPushActionLine, intent: MomoPushActionIntent) async {
+    lock.withLock { appliedLines.append(line) }
+    events.add("apply:\(line.text)")
+    if let hold { await hold.wait() }
+    events.add("applied")
+  }
+  func postWithoutWaiting(_ line: MomoPushActionLine, intent: MomoPushActionIntent) {
+    lock.lock(); postedLines.append(line); lock.unlock()
+    events.add("post:\(line.text)")
+  }
+  var applied: [MomoPushActionLine] { lock.lock(); defer { lock.unlock() }; return appliedLines }
+  var posted: [MomoPushActionLine] { lock.lock(); defer { lock.unlock() }; return postedLines }
+}
+
+/// A server that answers when the test says so, and that notices being cancelled.
+final class HeldTransport: MomoPushActionTransport, @unchecked Sendable {
+  typealias Answer = Result<(status: Int, body: Data), Error>
+  let events: Events
+  private let lock = NSLock()
+  private var continuation: CheckedContinuation<(status: Int, body: Data), Error>?
+  private var released: Answer?
+  private var cancelled = false
+  private var sendCount = 0
+  init(_ events: Events) { self.events = events }
+
+  func send(_ request: URLRequest) async throws -> (status: Int, body: Data) {
+    events.add("send")
+    lock.withLock { sendCount += 1 }
+    return try await withTaskCancellationHandler {
+      try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(status: Int, body: Data), Error>) in
+        lock.lock()
+        if let released { lock.unlock(); continuation.resume(with: released); return }
+        if cancelled { lock.unlock(); continuation.resume(throwing: CancellationError()); return }
+        self.continuation = continuation
+        lock.unlock()
+      }
+    } onCancel: {
+      lock.lock(); cancelled = true; let pending = continuation; continuation = nil; lock.unlock()
+      pending?.resume(throwing: CancellationError())
+    }
+  }
+
+  /// The server answering (before or after the request is in flight).
+  func answer(_ result: Answer) {
+    lock.lock(); released = result; let pending = continuation; continuation = nil; lock.unlock()
+    pending?.resume(with: result)
+  }
+  var isWaiting: Bool { lock.lock(); defer { lock.unlock() }; return continuation != nil }
+  var sends: Int { lock.lock(); defer { lock.unlock() }; return sendCount }
+}
+
+func eventually(timeout: TimeInterval = 5, _ condition: () -> Bool) async -> Bool {
+  let deadline = Date().addingTimeInterval(timeout)
+  while Date() < deadline {
+    if condition() { return true }
+    try? await Task.sleep(nanoseconds: 2_000_000)
+  }
+  return condition()
+}
+
+struct JobRig {
+  let events = Events()
+  let tasks: RecordedTasks
+  let notifier: RecordedNotifier
+  let transport: HeldTransport
+  let job: MomoPushActionJob
+
+  init(
+    _ intent: MomoPushActionIntent = intent(),
+    session: MomoPushActionSession? = MomoPushActionSession.decode(sessionJSON())
+  ) {
+    tasks = RecordedTasks(events)
+    notifier = RecordedNotifier(events)
+    transport = HeldTransport(events)
+    job = MomoPushActionJob(
+      intent: intent,
+      decider: MomoPushActionDecider(
+        credentials: FakeCredentials(session: session, secret: secret), transport: transport,
+        nowMs: { 1_000_000_000_000 }),
+      notifier: notifier, tasks: tasks)
+  }
+}
+
+do {
+  // the answer comes back first
+  let rig = JobRig()
+  rig.transport.answer(.success((200, receipt("approved"))))
+  rig.job.start()
+  check(rig.events.all.first == "begin", "the background task is taken inside start(), before anything is awaited")
+  check(rig.tasks.beginNames == ["oort.push-action.decision"], "exactly one task, with its name")
+  await rig.job.waitForCompletion()
+  check(
+    rig.events.all == ["begin", "send", "apply:승인했어요 · 그록봇", "applied", "end:41"],
+    "begin, THEN the request, then the one line, and only after the line is placed the task is given back")
+  check(rig.notifier.posted.isEmpty, "the expiration path wrote nothing")
+}
+
+do {
+  // a failure ends the task too
+  let rig = JobRig(intent(.reject))
+  rig.transport.answer(.success((403, receipt("opens_in_app"))))
+  rig.job.start()
+  await rig.job.waitForCompletion()
+  check(
+    rig.events.all == ["begin", "send", "apply:거절하지 못했어요", "applied", "end:41"],
+    "a refusal is a line and an end of the task, the same as a success")
+}
+
+do {
+  // nothing to send: the task is still taken and still given back
+  let rig = JobRig(intent(), session: nil)
+  rig.job.start()
+  await rig.job.waitForCompletion()
+  check(
+    rig.events.all == ["begin", "apply:승인하지 못했어요", "applied", "end:41"] && rig.transport.sends == 0,
+    "no token: no request, one line, the task given back")
+}
+
+do {
+  // an unreadable notification: the same
+  let rig = JobRig(intent(userInfo: ["aps": [:]]))
+  rig.job.start()
+  await rig.job.waitForCompletion()
+  check(rig.events.all == ["begin", "apply:승인하지 못했어요", "applied", "end:41"] && rig.transport.sends == 0,
+    "an unreadable payload: no request, one line, the task given back")
+}
+
+do {
+  // the clock wins
+  let rig = JobRig()
+  rig.job.start()
+  check(await eventually { rig.transport.isWaiting }, "the request is in flight")
+  rig.tasks.expire()
+  await rig.job.waitForCompletion()
+  check(
+    rig.events.all == ["begin", "send", "post:결과를 확인하지 못했어요", "end:41"],
+    "when time runs out the line is posted without waiting, then the task is given back, in that order")
+  check(rig.notifier.applied.isEmpty, "and the request that was cancelled writes no second line")
+  check(rig.notifier.posted.count == 1 && rig.events.count("end:41") == 1, "one line, one end")
+
+  rig.tasks.expire()
+  check(rig.events.all.count == 4, "a second expiration changes nothing")
+}
+
+do {
+  // the answer arrives, then the clock runs out while the line is being placed
+  let rig = JobRig()
+  let gate = OpenGate()
+  rig.notifier.hold = gate
+  rig.transport.answer(.success((200, receipt("approved"))))
+  rig.job.start()
+  check(await eventually { rig.events.all.contains("apply:승인했어요 · 그록봇") }, "the line is being placed")
+  rig.tasks.expire()
+  check(rig.notifier.posted.isEmpty, "the expiry does not write a second line over the first")
+  check(rig.events.count("end:41") == 1, "but it does give the task back before it returns")
+  gate.open()
+  await rig.job.waitForCompletion()
+  check(
+    rig.events.all == ["begin", "send", "apply:승인했어요 · 그록봇", "end:41", "applied"],
+    "and when the line finishes the task is not ended again")
+}
+
+do {
+  // the answer wins, then the clock fires anyway
+  let rig = JobRig()
+  rig.transport.answer(.success((200, receipt("approved"))))
+  rig.job.start()
+  await rig.job.waitForCompletion()
+  let before = rig.events.all
+  rig.tasks.expire()
+  check(rig.events.all == before, "an expiration after the end changes nothing (no second line, no second end)")
+}
+
+do {
+  // iOS gives no time at all
+  let rig = JobRig()
+  rig.tasks.refuse = true
+  rig.transport.answer(.success((200, receipt("approved"))))
+  rig.job.start()
+  await rig.job.waitForCompletion()
+  check(
+    rig.events.all == ["begin", "send", "apply:승인했어요 · 그록봇", "applied"],
+    "a refused task: the request still goes, the line is still placed, and nothing is ended that was never taken")
+  rig.tasks.expire()
+  check(rig.events.all.count == 4, "and there is no handler to fire")
+}
+
+do {
+  // iOS runs the expiration handler before begin has returned
+  let rig = JobRig()
+  rig.tasks.expireInsideBegin = true
+  rig.job.start()
+  await rig.job.waitForCompletion()
+  check(
+    rig.events.all == ["begin", "post:결과를 확인하지 못했어요", "end:41"],
+    "an expiry inside begin: one line, the task given back the moment there is one, and no request after the clock")
+  check(rig.transport.sends == 0, "nothing was sent")
+  check(rig.notifier.applied.isEmpty, "and nothing applied")
+}
+
+do {
+  // the cancelled request is the same outcome the line is written for
+  let rig = JobRig(intent(.reject))
+  rig.job.start()
+  check(await eventually { rig.transport.isWaiting }, "the 거절 is in flight")
+  rig.tasks.expire()
+  await rig.job.waitForCompletion()
+  check(rig.notifier.posted.first?.text == "결과를 확인하지 못했어요",
+    "an expired 거절 also says the result is unknown, not 「거절하지 못했어요」")
+}
+
+do {
+  // a lost connection is the same unknown result, through the normal path
+  let rig = JobRig()
+  rig.transport.answer(.failure(URLError(.networkConnectionLost)))
+  rig.job.start()
+  await rig.job.waitForCompletion()
+  check(
+    rig.events.all == ["begin", "send", "apply:결과를 확인하지 못했어요", "applied", "end:41"],
+    "a connection lost after the request left: the line says the result is unknown, and the task is given back")
+}
 
 print(failures == 0 ? "PASS" : "FAILED (\(failures))")
 exit(failures == 0 ? 0 : 1)

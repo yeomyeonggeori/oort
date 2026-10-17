@@ -2,8 +2,10 @@
 # Compile the UIKit-free half of MomoPushActionNative (#3931) with main.swift and
 # run it. Checks the idempotency key (against vectors computed independently),
 # the payload and credential readers, the request, the answer's reading, the
-# sentences, and the whole decision with a faked keychain and network. Compiler
-# warnings fail the run.
+# sentences, the whole decision with a faked keychain and network, and the
+# background-time job (begin before the request, one result line, one end of the
+# task) with a recorded UIApplication and notification centre. Compiler warnings
+# fail the run.
 #
 #   bash modules/momo-push-action-native/sim-check/run.sh                # on this Mac
 #   bash modules/momo-push-action-native/sim-check/run.sh <simulator-udid>   # in a booted simulator
@@ -21,6 +23,7 @@ SOURCES=(
   "$HERE/../ios/MomoPushActionCore.swift"
   "$HERE/../ios/MomoPushActionDecisionKey.swift"
   "$HERE/../ios/MomoPushActionKeychain.swift"
+  "$HERE/../ios/MomoPushActionJob.swift"
   "$HERE/main.swift"
 )
 if [ -z "$UDID" ]; then
