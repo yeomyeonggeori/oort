@@ -35,14 +35,14 @@ pub enum OutboxKind {
     ///    [`emit_outbox`] call for this kind next to a message *insert* would be a
     ///    *duplicate* candidate, not a missing one.
     /// 2. [`crate::push::emit_stream_closed_push_candidate`], called by
-    ///    `momo_messaging::stream_message_body_in_tx` in the transaction of a streamed
-    ///    message's **closing** write (`streaming: true → false`) — ADR-0204 증보 1
-    ///    D8-a (#3987). A streamed answer is born unfinished, so the trigger judges it
-    ///    at its birth; the close is the moment it becomes the answer, and no INSERT
-    ///    happens then, so the trigger is silent. That is the only case the trigger
-    ///    cannot cover, and the only reason this is not "an invitation to enqueue one":
-    ///    a third writer needs the same kind of decision (an Accepted ADR), not a copy
-    ///    of this call.
+    ///    `momo_messaging::stream_message_body_in_tx` in the transaction of the write that
+    ///    ENDS a streamed message (`streaming: true → false`, and not a provisional
+    ///    freeze between a retried turn's attempts) — ADR-0204 증보 1 D8-a (#3987). A
+    ///    streamed answer is born unfinished, so the trigger judges it at its birth; the
+    ///    end is the moment it becomes the answer, and no INSERT happens then, so the
+    ///    trigger is silent. That is the one second writer the ADR allows, and why this is
+    ///    not "an invitation to enqueue one": a third writer needs the same kind of
+    ///    decision (an Accepted ADR), not a copy of this call.
     ///
     /// The variant exists so the Rust enum is a faithful mirror of the DB enum and so
     /// consumers can name the label.

@@ -292,6 +292,7 @@ impl MessageStream {
             // A slice that arrives is never a stopping — the only writer of an
             // outcome is `close_run_stream`, on a turn that has already ended.
             outcome: None,
+            provisional: false,
         };
 
         let outcome = with_tenant_tx(&self.pool, workspace_id, move |conn| {
@@ -354,6 +355,38 @@ pub async fn close_run_stream(
     run_id: Uuid,
     outcome: StreamCloseOutcome,
 ) -> Result<Option<Uuid>, StreamError> {
+    close_open_stream_of_run(pool, workspace_id, run_id, outcome, false).await
+}
+
+/// The freeze a **retried** turn leaves in the channel between two attempts
+/// (ADR-0204 증보 1 D8-a, #3987).
+///
+/// The same write as [`close_run_stream`] with [`StreamCloseOutcome::Failed`] — the
+/// half answer stays, marked, while the job waits out its backoff — except that it is
+/// *provisional*: the next attempt reopens this very message, so this freeze is not where
+/// the answer ends and it enqueues no push candidate. The close that really ends the turn
+/// (the commit, a stop, or the last attempt's own failure through [`close_run_stream`])
+/// announces it, once.
+///
+/// Announcing here instead would push the half answer — the text up to where the provider
+/// died — and spend the message's one push slot on it (`collapse_id` is per message), so
+/// the finished answer's push would be swallowed as already settled.
+pub async fn freeze_run_stream_between_attempts(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    run_id: Uuid,
+) -> Result<Option<Uuid>, StreamError> {
+    close_open_stream_of_run(pool, workspace_id, run_id, StreamCloseOutcome::Failed, true).await
+}
+
+/// The one write behind [`close_run_stream`] and [`freeze_run_stream_between_attempts`].
+async fn close_open_stream_of_run(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    outcome: StreamCloseOutcome,
+    provisional: bool,
+) -> Result<Option<Uuid>, StreamError> {
     let open = with_tenant_tx(pool, workspace_id, move |conn| {
         Box::pin(async move { open_stream_message_for_run_in_tx(conn, run_id).await })
     })
@@ -369,6 +402,7 @@ pub async fn close_run_stream(
         rev: open.rev + 1,
         is_final: true,
         outcome: Some(outcome),
+        provisional,
     };
     with_tenant_tx(pool, workspace_id, move |conn| {
         Box::pin(async move {

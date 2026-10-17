@@ -521,6 +521,7 @@ async fn an_agent_cannot_stream_into_a_humans_message() {
                     rev: 1,
                     is_final: false,
                     outcome: None,
+                    provisional: false,
                 },
             )
             .await
@@ -774,6 +775,7 @@ async fn an_outcome_on_a_non_final_slice_is_refused() {
                     rev: rev_before + 1,
                     is_final: false,
                     outcome: Some(momo_messaging::StreamCloseOutcome::Cancelled),
+                    provisional: false,
                 },
             )
             .await
@@ -867,6 +869,7 @@ async fn a_slice_at_a_revision_already_spent_changes_nothing() {
                         rev,
                         is_final: true,
                         outcome: Some(momo_messaging::StreamCloseOutcome::Cancelled),
+                        provisional: false,
                     },
                 )
                 .await

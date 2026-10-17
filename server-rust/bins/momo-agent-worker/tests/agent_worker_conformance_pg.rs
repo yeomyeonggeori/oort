@@ -44,6 +44,9 @@
 //! | `uxc_a_1_a_completion_report_rides_the_ordinary_turn_message` | leave the report fence in the body, stop merging the card into the turn's props, take `elapsed_ms` from the model instead of `agent_run.started_at`, or give the card its own `message_type`/row instead of the turn's |
 //! | `uxc_a_2_a_streamed_report_lands_on_the_message_the_reader_watched` | drop the props patch a deduped commit needs, move it after the closing slice (the row moves with no frame to say so), or stop cutting the fence out of the streamed slices |
 //! | `uxc_a_3_a_report_without_prose_never_commits_its_own_envelope` | make the empty-body fallback reach for the raw turn text again (the envelope lands in the channel as prose), drop the card when there is no sentence to hang it under, or measure `elapsed_ms` against this host's wall clock instead of the database's |
+//! | `a_provider_death_mid_answer_freezes_what_the_reader_already_read` | overwrite the half answer with the degraded notice, or leave the stopped stream without its close candidate (ADR-0204 증보 1 D8-a) |
+//! | `a_retried_streamed_turn_announces_its_answer_once_at_the_close_that_ends_it` | make the freeze between two attempts enqueue a candidate (drop the `provisional` flag, or pass `false` from `settle_retryable`), or drop the retry's own close |
+//! | `a_streamed_turn_whose_last_attempt_dies_announces_the_half_answer_it_leaves` | pass `provisional: true` for the last attempt too, so a turn that ran out of attempts is never announced |
 //!
 //! The DB-free half of the report's conformance — the producer against the core
 //! contract file it must match — is `completion_report_conformance.rs`, which
@@ -51,12 +54,17 @@
 
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use async_trait::async_trait;
 use momo_agent::{create_agent_run_in_tx, A2aLimits, NewAgentRun, RunTrigger};
 use momo_agent_worker::a2a::{route_a2a_mentions_in_tx, A2aSend};
-use momo_agent_worker::provider::{ChatProvider, MockChatProvider, ProviderError};
+use momo_agent_worker::provider::{
+    ChatCompletion, ChatProvider, ChatRequest, DeltaSink, MockChatProvider, ProviderEndpoint,
+    ProviderError,
+};
 use momo_agent_worker::{AgentWorker, WorkerConfig};
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::{with_tenant_tx, PgPool};
@@ -1492,6 +1500,11 @@ async fn a_provider_death_mid_answer_freezes_what_the_reader_already_read() {
         "「응답이 끊김」, not 「중단됨」 — nobody pressed stop: {stream}"
     );
     assert_eq!(stream["streaming"], json!(false));
+    assert_eq!(
+        stream_closed_candidates(&su, message_id).await,
+        1,
+        "a turn that ends here is the end of the answer: the asker is told (ADR-0204 증보 1 D8-a)"
+    );
 
     assert_eq!(run_status(&su, run_id).await, "failed");
     assert_eq!(
@@ -1500,6 +1513,194 @@ async fn a_provider_death_mid_answer_freezes_what_the_reader_already_read() {
     );
     let (status, _, _) = job_row(&su, job_id).await;
     assert_eq!(status, "failed");
+}
+
+/// A provider that dies once — after a half answer has already reached the channel — and
+/// answers the next time it is asked: the shape of an outage a retry gets past.
+struct DiesOnceThenAnswers {
+    calls: AtomicUsize,
+    first: MockChatProvider,
+    then: MockChatProvider,
+}
+
+impl DiesOnceThenAnswers {
+    fn this_turn(&self) -> &MockChatProvider {
+        if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+            &self.first
+        } else {
+            &self.then
+        }
+    }
+}
+
+#[async_trait]
+impl ChatProvider for DiesOnceThenAnswers {
+    async fn complete(
+        &self,
+        endpoint: &ProviderEndpoint,
+        request: &ChatRequest,
+    ) -> Result<ChatCompletion, ProviderError> {
+        self.this_turn().complete(endpoint, request).await
+    }
+
+    async fn complete_streaming(
+        &self,
+        endpoint: &ProviderEndpoint,
+        request: &ChatRequest,
+        sink: &dyn DeltaSink,
+    ) -> Result<ChatCompletion, ProviderError> {
+        self.this_turn()
+            .complete_streaming(endpoint, request, sink)
+            .await
+    }
+}
+
+/// **The retried streamed turn (review of #3987, M1).** The provider dies after half an
+/// answer is already in the channel, and the job has attempts left. The worker freezes the
+/// half answer while the job waits out its backoff (`mark_run_failed`, ADR-0155), and the
+/// next attempt reopens the SAME message and closes it for real.
+///
+/// The freeze is not where the answer ends, so it announces nothing — and the close that
+/// does end the turn announces exactly once. Announce at the freeze and the asker is told an
+/// answer arrived while the message holds half of one and a retry is pending; `collapse_id`
+/// is per message, so that early push also settles the message and the real close's push is
+/// skipped as already settled. Make the between-attempts freeze announce again and the first
+/// closing-candidate count goes red; drop the retry's close and the second does.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
+async fn a_retried_streamed_turn_announces_its_answer_once_at_the_close_that_ends_it() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let tenant = seed_tenant(&su).await;
+
+    let (run_id, _trigger_message_id, job_id) =
+        enqueue_mention_turn(&su, &tenant, tenant.agent_id, "@hermes 두 번 시도해 줘").await;
+
+    let provider = Arc::new(DiesOnceThenAnswers {
+        calls: AtomicUsize::new(0),
+        // A 5xx: an outage worth another attempt, after the reader has seen the beginning.
+        first: MockChatProvider::failing(ProviderError::HttpStatus(
+            503,
+            "upstream model is unavailable".to_string(),
+        ))
+        .streaming_text("생각해 보면 그건", 2, Duration::from_millis(900)),
+        then: MockChatProvider::echo().streaming(2, Duration::from_millis(900)),
+    });
+    let mut config = base_config();
+    config.max_attempts = 5;
+    let worker = build_worker(provider.clone(), config).await;
+
+    // ---- attempt 1: half an answer reaches the channel, then the provider dies --------
+    let stats = worker.drain_once().await.expect("drain");
+    assert_eq!(stats.requeued, 1, "a 5xx with budget left is retried");
+    let messages = agent_messages(&su, &tenant, tenant.agent_id).await;
+    assert_eq!(messages.len(), 1, "the half answer is in the channel");
+    let (message_id, _, body, _) = messages.into_iter().next().unwrap();
+    assert_eq!(body, "생각해 보면 그건");
+    let frozen = stream_props(&su, message_id).await;
+    assert_eq!(
+        frozen["streaming"],
+        json!(false),
+        "frozen for the wait: {frozen}"
+    );
+    assert_eq!(frozen["outcome"], json!("failed"), "…and marked: {frozen}");
+    assert_eq!(
+        stream_closed_candidates(&su, message_id).await,
+        0,
+        "the freeze between two attempts is not the end of the answer: no candidate"
+    );
+
+    // ---- attempt 2: the same message is reopened and closed for real ------------------
+    sqlx::query("UPDATE outbox SET available_at = now() WHERE id = $1")
+        .bind(job_id)
+        .execute(&su)
+        .await
+        .expect("let the backoff end");
+    let stats = worker.drain_once().await.expect("drain");
+    assert_eq!(stats.answered, 1, "the retry answered");
+    let messages = agent_messages(&su, &tenant, tenant.agent_id).await;
+    assert_eq!(messages.len(), 1, "the retry reopened the message it froze");
+    let (retried_id, _, body, _) = messages.into_iter().next().unwrap();
+    assert_eq!(retried_id, message_id);
+    assert_eq!(
+        body, "mock: [성재] @hermes 두 번 시도해 줘",
+        "the finished answer stands"
+    );
+    let finished = stream_props(&su, message_id).await;
+    assert_eq!(finished["streaming"], json!(false));
+    assert!(
+        finished.get("outcome").is_none(),
+        "the reopened block carries no mark of the first attempt's death: {finished}"
+    );
+    assert_eq!(
+        stream_closed_candidates(&su, message_id).await,
+        1,
+        "the commit's close is the one that announces the answer"
+    );
+    let candidates: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE kind::text = 'push_candidate' \
+            AND payload->>'message_id' = $1",
+    )
+    .bind(message_id.to_string())
+    .fetch_one(&su)
+    .await
+    .expect("count the candidates");
+    assert_eq!(
+        candidates, 2,
+        "the INSERT's and the end's — not one for every freeze and close along the way"
+    );
+    assert_eq!(run_status(&su, run_id).await, "succeeded");
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 2, "two attempts");
+}
+
+/// The other side of the retry boundary: a streamed turn whose LAST attempt dies. Nothing
+/// follows that failure, so the freeze it leaves is the end of the answer and it announces.
+/// Without this, "never announce a freeze" would pass the retried-turn test above and leave
+/// a turn that ran out of attempts silent.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
+async fn a_streamed_turn_whose_last_attempt_dies_announces_the_half_answer_it_leaves() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let tenant = seed_tenant(&su).await;
+
+    let (run_id, _trigger_message_id, job_id) =
+        enqueue_mention_turn(&su, &tenant, tenant.agent_id, "@hermes 마지막 시도").await;
+
+    let provider = Arc::new(
+        MockChatProvider::failing(ProviderError::HttpStatus(
+            503,
+            "upstream model is unavailable".to_string(),
+        ))
+        .streaming_text("생각해 보면 그건", 2, Duration::from_millis(900)),
+    );
+    let mut config = base_config();
+    config.max_attempts = 1; // the claim's own increment exhausts the budget
+    let worker = build_worker(provider.clone(), config).await;
+    let stats = worker.drain_once().await.expect("drain");
+    assert_eq!(stats.failed, 1, "an exhausted job stops");
+    assert_eq!(stats.requeued, 0);
+
+    let messages = agent_messages(&su, &tenant, tenant.agent_id).await;
+    assert_eq!(
+        messages.len(),
+        1,
+        "the half answer and the failure are one message"
+    );
+    let (message_id, _, body, _) = messages.into_iter().next().unwrap();
+    assert_eq!(body, "생각해 보면 그건");
+    let frozen = stream_props(&su, message_id).await;
+    assert_eq!(frozen["streaming"], json!(false));
+    assert_eq!(frozen["outcome"], json!("failed"), "{frozen}");
+    assert_eq!(
+        stream_closed_candidates(&su, message_id).await,
+        1,
+        "no attempt follows, so this freeze is the end of the answer and it announces (D8-a)"
+    );
+    assert_eq!(run_status(&su, run_id).await, "failed");
+    assert_eq!(job_row(&su, job_id).await.0, "failed");
 }
 
 /// HAP-E3 production exclusion is enforced by the actual worker consumer and

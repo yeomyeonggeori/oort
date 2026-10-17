@@ -1794,6 +1794,7 @@ async fn closing_a_stream_enqueues_its_candidate_as_every_role_that_writes_a_str
                         rev: 1,
                         is_final: true,
                         outcome: None,
+                        provisional: false,
                     },
                 )
                 .await

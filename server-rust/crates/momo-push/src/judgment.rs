@@ -77,26 +77,67 @@
 //!   slice is the INSERT — which the 011 trigger turns into a candidate — and
 //!   `commit_turn`'s closing slice is an UPDATE. A line that is still streaming
 //!   (`momo.stream.streaming = true`) is therefore **held** by this arm: it has no
-//!   answer yet, only the first words. The write that closes it enqueues the second
+//!   answer yet, only the first words. The write that ends it enqueues the second
 //!   candidate (`momo_messaging::stream_message_body_in_tx` →
 //!   `momo_outbox::emit_stream_closed_push_candidate`), and this arm judges the finished
-//!   answer then — with "reading" read at **that moment** (`now()`), not at the opening
+//!   answer then — with "reading" read at **judgment time** (`now()`), not at the opening
 //!   slice (`created_at`), and without the `last_read_seq >= seq` shortcut: a cursor that
 //!   reached the line when its first words arrived says they saw it begin, not that they
 //!   are still there. So an asker who left during the stream is pushed once, at the
 //!   close; one who was moving their cursor in the 30 s before it is not; and one who
-//!   was away from the start gets one push, not an opening one and a closing one. A
-//!   line that never streamed (the hosted gateway's `complete`, the team-AI helper's
-//!   sends, both sweeps' lines, a worker turn that never opened a stream) is judged at
-//!   its INSERT exactly as before — `created_at`, with the `seq` shortcut. REST
-//!   streamers (prime/hermes) are judged by the explicit-mention arm at their opening, as
-//!   before (their opening `POST` names the quoted author as mentioned); the close
-//!   candidate finds that person already pushed (`collapse_id`) and does nothing. Not
-//!   settled here and left to the ADR's wording: a chat answer that arrives within 30 s
-//!   of the asker's own question is "reading" even without streaming, because the
-//!   question moved their cursor (ADR-0204 D8: 「30초 안에 움직였으면」). A stream that is
-//!   never closed (a producer that died and whose run nobody closed) is never judged by
-//!   this arm.
+//!   was away from the start gets one push, not an opening one and a closing one.
+//!
+//!   *Judgment time is when the notifier processes the candidate.* That is the moment of
+//!   the close while the notifier keeps up (a second or two), and later by exactly its
+//!   lag when it does not: the question the window asks is "are they looking at this
+//!   channel right now?", and it is asked when the push would go out.
+//!
+//!   *What the window cannot tell.* A person's cursor — and `last_read_at` with it — moves
+//!   only when `last_read_seq` does (`read_state.rs`), and a stream spends no `seq`. So an
+//!   asker who watched a stream for longer than 30 s from a cursor that stood still looks,
+//!   to the server, exactly like one who left during it, and is pushed at the close
+//!   (`known_gap_a_stream_watched_longer_than_the_window_from_a_standing_cursor_is_pushed`
+//!   pins it). The cost is a banner for a person who was looking; the alternative is the
+//!   H1 silence for one who was not. A presence signal is the way to tell them apart, and
+//!   is a follow-up.
+//!
+//!   *Streams this arm does not judge at all.* A line that never streamed (the hosted
+//!   gateway's `complete`, the team-AI helper's sends, both sweeps' lines, a worker turn
+//!   that never opened a stream) is judged at its INSERT exactly as before — `created_at`,
+//!   with the `seq` shortcut. REST streamers (prime/hermes) whose opening `POST` quotes the
+//!   asker's message name that author as *mentioned*, so they are judged by the
+//!   explicit-mention arm at their opening, as before; the close candidate finds that
+//!   person's push already settled (`collapse_id`) and is skipped. One that quotes nobody has
+//!   no asker for this arm. A stream that is never closed is never judged by this arm — a
+//!   producer that died and whose run nobody closed, but also a close the domain refuses
+//!   (the agent left the channel, the message was deleted); the opening candidate has long
+//!   been consumed, so there is nothing left to judge it. Not settled here and left to the
+//!   ADR's wording: a chat answer that arrives within 30 s of the asker's own question is
+//!   "reading" even without streaming, because the question moved their cursor (ADR-0204
+//!   D8: 「30초 안에 움직였으면」).
+//!
+//!   *A provisional freeze looks like a close.* A retried turn's freeze between two attempts
+//!   is `streaming: false` with `outcome: failed` — the state of a turn that really failed —
+//!   and this SQL cannot tell the two apart. It stays safe because the opening candidate is
+//!   judged while the stream is open, within a moment of its INSERT, and the freeze itself
+//!   enqueues nothing. Only a candidate judged *late* — a notifier that was down for longer
+//!   than an attempt, or a judgment that failed transiently and was requeued — can land
+//!   inside the freeze and push the half answer; the settled `collapse_id` then skips the
+//!   real close. Rare, and accepted.
+//!
+//!   *The close candidate re-judges the whole message*, not only this arm, against the
+//!   ledgers as they are at that moment: the mute and DND rows, the asker's membership, a
+//!   run's status. A person who muted the channel or left it between the opening and the
+//!   close is judged as muted or gone; a hosted agent's `type=work` answer streamed over REST
+//!   is also judged by `work_run_done` at its close, and can push its requester there if the
+//!   run ended after the opening. The mentions recorded at the INSERT are not touched by the
+//!   close.
+//!
+//!   *Roll-out.* A notifier that holds streaming lines depends on the producer that
+//!   enqueues the closing candidate: ship the producers (server, agent-worker) first or
+//!   together. The other order leaves a streamed answer held and never judged; an old
+//!   notifier with the new producers is harmless (it judges the closing candidate like the
+//!   opening, and `collapse_id` keeps it to one push).
 //! * **Mute (ADR-0124)** — the per-channel `notification_pref` row suppresses
 //!   every reason, mentions and approvals included. Read at judgment time; no
 //!   cache.
