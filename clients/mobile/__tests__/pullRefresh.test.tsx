@@ -377,6 +377,7 @@ describe('실제 재조회와 표시', () => {
 });
 
 const FAILED = '새로고침하지 못했어요. 다시 당겨 보세요.';
+const OFFLINE = '연결이 없어요. 연결되면 다시 당겨 보세요.';
 const failedNotice = () => screen.queryByTestId('pull-refresh-failed', HIDDEN);
 
 describe('실패는 시각으로도 선다', () => {
@@ -474,6 +475,9 @@ describe('오프라인과 늦은 응답', () => {
     await flush(460);
     expect(notifications()).toEqual(['notification:warning']);
     expect(failedNotice()).not.toBeNull();
+    // 오프라인의 안내는 같은 처방(다시 당겨 보세요)이 아니라 연결을 말한다.
+    expect(screen.getByText(OFFLINE, HIDDEN)).toBeTruthy();
+    expect(screen.queryByText(FAILED, HIDDEN)).toBeNull();
     await flush(1700);
     expect(control().props.refreshing).toBe(false);
     onlineManager.setOnline(true);

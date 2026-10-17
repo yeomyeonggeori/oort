@@ -81,7 +81,8 @@ import {font, SAFE_GUTTER, space, type Palette} from './tokens';
 // 다른 흔적이 없기 때문에 이 한 줄이 유일한 시각 신호다.
 //
 // 오프라인이면 요청을 세우지 않는다: react-query 쿼리는 연결될 때까지 멈춰 있어서(`networkMode: 'online'`)
-// 재조회가 끝나지 않고 로더가 영영 돌며 busy 가 남는다. 읽을 수 없다는 사실을 바로 실패로 전한다.
+// 재조회가 끝나지 않고 로더가 영영 돌며 busy 가 남는다. 읽을 수 없다는 사실을 바로 실패로 전한다(문장은
+// 「다시 당겨 보세요」 대신 연결을 말한다: 같은 처방이 같은 결과를 부르므로).
 // 연결돼 있는데 응답이 늦는 경우도 `MAX_WAIT_MS` 가 같은 모양으로 끝낸다(요청 자체는 멈추지 않는다).
 //
 // ## 스피너에 바닥을 깔아 두는 이유
@@ -117,6 +118,8 @@ const FAIL_NOTICE_MS = 1600;
 const ANNOUNCE_REFRESHING = '새로고침 중';
 /** 실패 안내 문장(머리에 쓰이고 낭독된다). */
 const FAILED_COPY = '새로고침하지 못했어요. 다시 당겨 보세요.';
+/** 오프라인이면 같은 처방(「다시 당겨 보세요」)이 같은 결과를 부르므로 연결을 말한다. */
+const OFFLINE_COPY = '연결이 없어요. 연결되면 다시 당겨 보세요.';
 
 /** 목록에 펼치는 스크롤 props. 위성이 당긴 거리를 따라가도록 오프셋을 읽는 길이다. */
 export type PullScrollProps = Pick<ScrollViewProps, 'onScroll' | 'scrollEventThrottle'>;
@@ -144,8 +147,8 @@ export function usePullRefresh(
   const [refreshing, setRefreshing] = useState(false);
   /** 손가락이 목록을 위로 넘겼다(또는 새로고침 중이다): 로더 머리를 그린다. */
   const [shown, setShown] = useState(false);
-  /** 실패 안내를 머리에 세운다(머리가 걷힐 때까지 남는다: 물러나는 내내 로더로 되돌아가지 않게). */
-  const [failed, setFailed] = useState(false);
+  /** 실패 안내 문장. 있으면 머리의 로더가 이 한 줄로 바뀐다(머리가 걷힐 때까지 남는다: 물러나는 내내 로더로 되돌아가지 않게). */
+  const [notice, setNotice] = useState<string | null>(null);
   /** 진행 중인 당김. 손가락이 두 번 당겨도 요청은 하나다. */
   const busyRef = useRef(false);
   const mountedRef = useRef(true);
@@ -171,13 +174,13 @@ export function usePullRefresh(
     busyRef.current = true;
     // 임계 통과: 표준 컨트롤이 새로고침을 세우는 이 순간이 곧 햅틱이 울릴 때다(위 「햅틱」).
     haptics.light();
-    setFailed(false);
+    setNotice(null);
     setShown(true);
     setRefreshing(true);
     AccessibilityInfo.announceForAccessibility?.(ANNOUNCE_REFRESHING);
     const startedAt = Date.now();
     let finished = false;
-    const finish = (isFailed: boolean) => {
+    const finish = (isFailed: boolean, copy: string = FAILED_COPY) => {
       if (finished) return; // 상한이 먼저 끝냈으면 늦게 온 답은 무시한다
       finished = true;
       if (capRef.current !== undefined) {
@@ -197,8 +200,8 @@ export function usePullRefresh(
         }
         // 실패: 안내가 서는 순간이 곧 응답이 손에 닿는 순간이다. 안내는 열린 채 잠깐 머문다.
         haptics.warning();
-        AccessibilityInfo.announceForAccessibility?.(FAILED_COPY);
-        setFailed(true);
+        AccessibilityInfo.announceForAccessibility?.(copy);
+        setNotice(copy);
         timerRef.current = setTimeout(() => {
           timerRef.current = undefined;
           busyRef.current = false;
@@ -208,7 +211,7 @@ export function usePullRefresh(
     };
     // 오프라인이면 요청을 세우지 않는다(위 「실패는 시각으로도 선다」).
     if (!onlineManager.isOnline()) {
-      finish(true);
+      finish(true, OFFLINE_COPY);
       return;
     }
     capRef.current = setTimeout(() => finish(true), MAX_WAIT_MS);
@@ -239,7 +242,7 @@ export function usePullRefresh(
           pull.setValue(0);
           if (!busyRef.current) {
             setShown(false);
-            setFailed(false);
+            setNotice(null);
           }
         }
       },
@@ -251,7 +254,7 @@ export function usePullRefresh(
   useEffect(() => {
     if (!refreshing && !overscrollRef.current) {
       setShown(false);
-      setFailed(false);
+      setNotice(null);
     }
   }, [refreshing]);
 
@@ -260,7 +263,7 @@ export function usePullRefresh(
       refreshing={refreshing}
       onRefresh={handleRefresh}
       shown={shown}
-      failed={failed}
+      notice={notice}
       pull={pull}
       testID={testID}
     />
@@ -297,12 +300,12 @@ function PullRefreshControl({
   refreshing,
   onRefresh,
   shown,
-  failed,
+  notice,
   pull,
   testID,
 }: RefreshControlProps & {
   shown: boolean;
-  failed: boolean;
+  notice: string | null;
   pull: Animated.Value;
 }): React.JSX.Element {
   return (
@@ -314,7 +317,7 @@ function PullRefreshControl({
         tintColor="transparent"
         testID={testID}
       />
-      {shown ? <PullHeader pull={pull} refreshing={refreshing} failed={failed} /> : null}
+      {shown ? <PullHeader pull={pull} refreshing={refreshing} notice={notice} /> : null}
     </>
   );
 }
@@ -323,11 +326,11 @@ function PullRefreshControl({
 function PullHeader({
   pull,
   refreshing,
-  failed,
+  notice,
 }: {
   pull: Animated.Value;
   refreshing: boolean;
-  failed: boolean;
+  notice: string | null;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   // 조금 당기면 곧 보이고(25%), 더 당겨도 그대로다. 안 당긴 채로는 보이지 않는다.
@@ -352,18 +355,18 @@ function PullHeader({
       // 시스템 스피너를 감췄으므로 이 띠가 「지금 새로고침 중」(실패하면 그 사실)이라는 말을 진다.
       // 로더 자신은 장식이다.
       accessible={refreshing}
-      accessibilityRole={failed ? 'alert' : 'progressbar'}
-      accessibilityLabel={failed ? FAILED_COPY : ANNOUNCE_REFRESHING}
-      accessibilityState={{busy: refreshing && !failed}}
+      accessibilityRole={notice !== null ? 'alert' : 'progressbar'}
+      accessibilityLabel={notice ?? ANNOUNCE_REFRESHING}
+      accessibilityState={{busy: refreshing && notice === null}}
       style={headerStyle}
       testID="pull-refresh-header">
-      {failed ? (
+      {notice !== null ? (
         <Text
           style={styles.notice}
           numberOfLines={2}
           maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
           testID="pull-refresh-failed">
-          {FAILED_COPY}
+          {notice}
         </Text>
       ) : (
         <OortLoader
