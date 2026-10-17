@@ -65,8 +65,9 @@ use axum::middleware::Next;
 use axum::response::Response;
 use momo_auth::{
     agent_bearer_workspace_id, classify_agent_bearer_in_tx, finalize_agent_bearer_use_in_tx,
-    is_gateway_callback_route, push_fetch_route_allowed, push_fetch_session_live,
-    required_agent_scope, resolve_agent_bearer_in_tx, token_state, verify_app_access,
+    is_gateway_callback_route, push_action_route_allowed, push_action_session_live,
+    push_fetch_route_allowed, push_fetch_session_live, required_agent_scope,
+    resolve_agent_bearer_in_tx, token_state, verify_app_access, verify_app_push_action,
     verify_app_push_fetch, AgentBearerClass, AgentBearerIdentity, AgentBearerResolution, AuthError,
     Principal, PrincipalKind, TokenState, AUDIT_DETAIL_SCHEMA,
 };
@@ -91,6 +92,42 @@ pub const GATEWAY_SECRET_HEADER: &str = "x-momo-agent-gateway-secret";
 /// Swift carries the same bit as `AppRequestContext.usedLegacyAgentGatewaySecret`.
 #[derive(Debug, Clone, Copy)]
 pub struct LegacyGatewaySecret;
+
+/// Marker inserted when a request authenticated with a `push_action` token — the
+/// lock-screen credential (#3927, ADR-0204 D6) — rather than an ordinary access
+/// token.
+///
+/// The `Principal` it travels beside is deliberately indistinguishable from an
+/// access token's: a person, in a workspace, with a `token_id`. The marker adds
+/// no authority, and no handler may read it as a reason to ALLOW anything — it may
+/// only narrow. It exists so the one route that token may reach can say, in the
+/// audit log, which door the decision came through (`detail.via = "push_action"`)
+/// and can refuse the approvals that must be opened in the app (`opens_in_app`),
+/// and so the two token-minting routes can refuse a narrow bearer a second time
+/// (the route list already does, before the database). Only this middleware
+/// inserts it, on the one arm that verified that `typ`, so a request cannot carry
+/// it in.
+#[derive(Debug, Clone, Copy)]
+pub struct PushActionCredential;
+
+/// Marker inserted when a request authenticated with a `push_fetch` token — the
+/// notification extension's narrow credential (#3121). Its only reader is the pair
+/// of token-minting routes, which refuse a narrow bearer (no self-renewal, and no
+/// narrow token mints the other kind) as a second line behind the route list.
+#[derive(Debug, Clone, Copy)]
+pub struct PushFetchCredential;
+
+/// The narrow, lineage-bound tokens `require_principal` is taught to accept
+/// besides an access token. Each has its own `typ`, its own closed route list
+/// (judged before the database) and the same derived life: valid only while its
+/// session lineage holds a live refresh row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NarrowToken {
+    /// The notification extension's two reads (#3121, ADR-0188 §8.7).
+    PushFetch,
+    /// The lock screen's one decision (#3927, ADR-0204 D6).
+    PushAction,
+}
 
 /// The credential behind a gateway callback: a member-naming agent bearer, or
 /// the process-level legacy secret.
@@ -689,23 +726,40 @@ pub async fn require_principal(
         request.extensions_mut().insert(principal);
         return Ok(next.run(request).await);
     }
-    let mut is_push_fetch = false;
+    let mut narrow: Option<NarrowToken> = None;
     let mut principal = match verify_app_access(&raw_token, &state.jwt_secret) {
         Ok(principal) => principal,
-        // #3121 — the notification extension's token has its own `typ`, so the
-        // access verifier refuses it above; it is taught to exactly this spot.
-        // Its route list is judged BEFORE the database, like the agent bearer's:
-        // anything off the list is a 403 that never becomes a query.
+        // #3121 / #3927 — the two narrow tokens have their own `typ`s, so the
+        // access verifier refuses them above; they are taught to exactly this
+        // spot, one `typ` per verifier. A route list is judged BEFORE the
+        // database, like the agent bearer's: anything off the list is a 403 that
+        // never becomes a query.
         Err(AuthError::NotAccessToken) => {
-            let principal = verify_app_push_fetch(&raw_token, &state.jwt_secret)
-                .map_err(|_| ApiError::unauthorized("not an access token"))?;
-            if !push_fetch_route_allowed(&method, &path, principal.workspace_id) {
-                return Err(ApiError::forbidden(
-                    "push-fetch token is not allowed for this route",
-                ));
+            match verify_app_push_fetch(&raw_token, &state.jwt_secret) {
+                Ok(principal) => {
+                    if !push_fetch_route_allowed(&method, &path, principal.workspace_id) {
+                        return Err(ApiError::forbidden(
+                            "push-fetch token is not allowed for this route",
+                        ));
+                    }
+                    narrow = Some(NarrowToken::PushFetch);
+                    principal
+                }
+                // Not the extension's token (a different `typ`): the one other
+                // `typ` this spot knows is the lock screen's.
+                Err(AuthError::NotAccessToken) => {
+                    let principal = verify_app_push_action(&raw_token, &state.jwt_secret)
+                        .map_err(|_| ApiError::unauthorized("not an access token"))?;
+                    if !push_action_route_allowed(&method, &path, principal.workspace_id) {
+                        return Err(ApiError::forbidden(
+                            "push-action token is not allowed for this route",
+                        ));
+                    }
+                    narrow = Some(NarrowToken::PushAction);
+                    principal
+                }
+                Err(_) => return Err(ApiError::unauthorized("not an access token")),
             }
-            is_push_fetch = true;
-            principal
         }
         Err(error) => {
             return Err(match error {
@@ -726,16 +780,18 @@ pub async fn require_principal(
     let state_of_token = with_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
             let state = token_state(conn, &raw_token).await.map_err(DbError::from)?;
-            // #3121 — the extension's token is valid only while the session it
-            // was minted under can still rotate (derived, not swept).
-            if is_push_fetch {
-                if let TokenState::Active { id } = state {
-                    if !push_fetch_session_live(conn, id)
-                        .await
-                        .map_err(DbError::from)?
-                    {
-                        return Ok(TokenState::Revoked { id });
-                    }
+            // #3121 / #3927 — a narrow token is valid only while the session it
+            // was minted under can still rotate (derived, not swept). Each kind
+            // is judged on its OWN label, so a row of the other kind is not live
+            // for this one.
+            if let (Some(kind), TokenState::Active { id }) = (narrow, state) {
+                let live = match kind {
+                    NarrowToken::PushFetch => push_fetch_session_live(conn, id).await,
+                    NarrowToken::PushAction => push_action_session_live(conn, id).await,
+                }
+                .map_err(DbError::from)?;
+                if !live {
+                    return Ok(TokenState::Revoked { id });
                 }
             }
             Ok(state)
@@ -750,6 +806,15 @@ pub async fn require_principal(
             .map_err(|rejection| ApiError::unauthorized(rejection.message()))?,
     );
 
+    match narrow {
+        Some(NarrowToken::PushAction) => {
+            request.extensions_mut().insert(PushActionCredential);
+        }
+        Some(NarrowToken::PushFetch) => {
+            request.extensions_mut().insert(PushFetchCredential);
+        }
+        None => {}
+    }
     request.extensions_mut().insert(principal);
     Ok(next.run(request).await)
 }

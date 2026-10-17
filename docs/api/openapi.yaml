@@ -382,6 +382,65 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/auth/push-action-token:
+    post:
+      tags: [auth]
+      operationId: authPushActionToken
+      summary: Mint the lock screen's one-request approval token (ADR-0204 D6, #3927).
+      description: >
+        Human access bearer only. Returns a `typ = push_action` token that the
+        phone parks in its app-only keychain group (never the group the
+        notification extension reads) so a native handler, woken by a
+        lock-screen 승인/거절 button with no screen and no JS runtime, can send
+        exactly ONE request: `POST /v1/workspaces/{workspaceId}/approvals/{approvalId}/decision`
+        in the token's own workspace (403 anywhere else - any other path,
+        method, trailing segment, another workspace, the compatibility route
+        `POST /v1/agent-runs/{runId}/approval-decisions` - before any query).
+        It only replaces the bearer on that request: the decision route keeps
+        every check it has (a person, an active member of the approval's
+        channel, the required role, expiry, idempotency), so the token adds no
+        authority. It has no refresh half, cannot mint another token (of either
+        kind), and lives 6 hours or until the session it was minted under can
+        no longer rotate (logout with its refresh half, refresh-reuse sweep,
+        password change, suspension, removal) - whichever is first. A session
+        holds at most 4 live push-action tokens, also under parallel requests (the
+        `push_fetch` token has its own budget). Decisions made with it are audited with `detail.via =
+        "push_action"`.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Token minted.
+          headers:
+            Cache-Control:
+              description: Always `no-store` - a bearer credential in a body is never cached.
+              schema:
+                type: string
+            Pragma:
+              description: Always `no-cache`.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushActionTokenResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller is not a signed-in person (agent bearer, work host, or either narrow token - the push-fetch token and the push-action token itself).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The session has no lineage yet (a pre-088 session); refresh and ask again.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
   /v1/auth/device-link:
     post:
       tags: [auth]
@@ -10189,6 +10248,28 @@ paths:
         Every response on this operation is sent `Cache-Control: no-store` and
         `Pragma: no-cache`, on all outcomes rather than only the one that mints
         something.
+
+
+        ADR-0204 D6 (#3927) - besides an access token, this is the ONE route a
+        `typ = push_action` token (`POST /v1/auth/push-action-token`) may call,
+        and only in its own workspace. The token substitutes for the access
+        bearer and adds nothing: every check above applies to the person it was
+        minted for exactly as it would to their access token, so a token minted
+        for someone who may not decide this approval gets the same 403
+        `forbidden` receipt. Retrying with the same `client_decision_id` (the
+        native handler derives it from the notification request and the action)
+        replays the original receipt. Audit rows of the decision's own - the
+        generic `approval.approved|rejected|expired` row and an executed action's
+        `action.approved` row - carry `detail.via = "push_action"`; the rows an
+        executed action writes for its own effect (`channel.created`, ...) name the
+        token through `via_token_id` instead.
+
+        The token is refused (403, receipt `status: opens_in_app`, approve or
+        reject, whatever the body says) for the approvals that must be opened in
+        the app (ADR-0204 D7): an action that mints a value shown once (an invite
+        link, an agent pairing code) and an approval whose card asks the approver
+        to pick a host. It only ever narrows this route: an access token still
+        decides them.
       security:
         - bearerAuth: []
       parameters:
@@ -12804,6 +12885,22 @@ components:
         token:
           type: string
           description: A `typ = push_fetch` JWT. Not an access token; refused everywhere but the two reads above.
+        expiresAtMs:
+          type: integer
+          format: int64
+        ttlSeconds:
+          type: integer
+        workspaceId:
+          type: string
+          format: uuid
+
+    PushActionTokenResponse:
+      type: object
+      required: [token, expiresAtMs, ttlSeconds, workspaceId]
+      properties:
+        token:
+          type: string
+          description: A `typ = push_action` JWT. Not an access token and not a `push_fetch` token; refused everywhere but the approval decision of its own workspace.
         expiresAtMs:
           type: integer
           format: int64
@@ -20489,7 +20586,8 @@ components:
         remote_host_shell_refused, member_host_agent_control_refused,
         not_found, bad_request, expired,
         action_unavailable, action_args_invalid, public_origin_unavailable,
-        run_not_parked, or the approval's current status on a 409).
+        run_not_parked, opens_in_app (a `push_action` token on an approval that
+        must be decided in the app), or the approval's current status on a 409).
 
 
         NOTATION (SRV-B5c): camelCase, matching the deployed Rust server. See
