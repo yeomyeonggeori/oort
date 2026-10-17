@@ -5881,12 +5881,24 @@ function seedShell(surface: string): void {
   void globalThis.Headers;
   globalThis.fetch = (() => new Promise<Response>(() => {})) as typeof fetch;
   if (surface === 'shell-home-pullfail' || surface === 'shell-inbox-pullfail') {
-    // #3992: 처음 12초는 요청이 끝나지 않는다. 그 뒤로는 곧바로 전송 오류로 끝난다(캐시는 그대로 두고 당김만 실패한다).
+    // #3992: 처음 12초는 요청이 끝나지 않고(기존 하니스의 약속), 그 뒤 새 요청은 곧바로 서버 500 으로 끝난다.
+    // 다만 처음 12초 안에 시작된 읽기는 영영 끝나지 않는 채로 남고 같은 주소의 새 읽기가 그것에 합쳐져서, 이 표면에서 당김은 20초
+    // 상한(`MAX_WAIT_MS`)에 걸려 실패한다(상한 경로를 실제 화면으로 확인하는 판이기도 하다). 빠른 실패의 움직임은 `pull-refresh-fail`.
     const startedAt = Date.now();
-    globalThis.fetch = (() =>
-      Date.now() - startedAt < 12_000
-        ? new Promise<Response>(() => {})
-        : Promise.reject(new TypeError('Network request failed'))) as typeof fetch;
+    // 전송 오류가 아니라 서버가 500 으로 답한다(전송 오류는 쿼리의 재시도 백오프를 길게 탄다).
+    const answer = (status: number): Response =>
+      ({
+        status,
+        ok: status >= 200 && status < 300,
+        headers: {get: () => null},
+        text: async () => (status === 204 ? '' : '{"error":"measure"}'),
+        json: async () => ({error: 'measure'}),
+      }) as unknown as Response;
+    globalThis.fetch = ((url: unknown) => {
+      // NetInfo 의 도달성 확인(`generate_204`)이 500 을 받으면 앱이 「오프라인」으로 읽어 모든 재조회가 멈춘다: 이것만은 늘 답한다.
+      if (String(url).includes('generate_204')) return Promise.resolve(answer(204));
+      return Date.now() - startedAt < 12_000 ? new Promise<Response>(() => {}) : Promise.resolve(answer(500));
+    }) as typeof fetch;
     // 재시도 없이 바로 실패로 끝나게 한다(캡처가 재시도 백오프 8초를 기다리지 않게).
     harnessClient.setDefaultOptions({queries: {retry: false}});
   }

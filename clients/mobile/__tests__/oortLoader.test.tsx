@@ -218,7 +218,8 @@ describe('당김(스크럽)의 자세(순수) — 진행도 → 궤도 각도', 
   it('각도는 진행도에 선형이다: 25·50·75·100% 가 홈에서 90° 씩 떨어진다', () => {
     const offsets = PULLS.map(p => scrubPoseAt('display', p).angle - HOME_ANGLE);
     expect(offsets).toEqual([90, 180, 270, 360].map(v => expect.closeTo(v, 6)));
-    // 시안 A 의 도는 곡선(ease-in-out)으로 읽으면 몰린다 — 그 표로는 25·50·75% 가 각각 약 10°·220°·345° 다.
+    // 시안 A 의 도는 곡선(ease-in-out)으로 읽으면 몰린다 — 그 곡선으로는 25·50·75% 가 각각 약 70°·267°·344° 라서
+    // 마지막 두 눈금(344° 와 360°)이 16° 차이다.
     // 눈금이 등간격이어야 손가락 아래에서 「얼마나 왔나」가 읽힌다.
     for (let i = 1; i < offsets.length; i += 1) {
       expect(offsets[i]! - offsets[i - 1]!).toBeCloseTo(90, 6);
