@@ -1,0 +1,6 @@
+{
+  "name": "momo-push-action-native",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local Expo module (#3931, ADR-0204 D6). Answers a lock-screen 승인/거절 button natively, with no screen and no JS runtime: it attaches to expo-notifications' multi-delegate seam at app launch, holds a background task while ONE decision request is in the air, and replaces the notification with a one-line local result. The credential is the app-only push_action token (src/push/pushActionSession.ts writes it). The JS surface is one constant, read through requireOptionalNativeModule('MomoPushAction') in src/push/native.ts, so JS can tell whether this handler exists before it steps aside."
+}

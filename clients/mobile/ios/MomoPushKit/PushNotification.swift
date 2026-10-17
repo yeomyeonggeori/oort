@@ -120,6 +120,19 @@ public enum MomoPushCategory: String, CaseIterable, Codable, Sendable, Hashable,
     public var carriesApprovalID: Bool { self == .approval || self == .approvalOpen }
 }
 
+/// ADR-0204 D7: 본문을 못 받은(자리표시로 남은) 승인 알림은 잠금 화면에서 승인·거부할 수 없다.
+/// 무엇인지 모르는 것에 [승인]/[거부] 버튼을 두지 않고 「열어서 결정」 하나로 낮춘다. 순수 함수라
+/// 확장 밖에서 시험된다 (`sim-check`). 승인 카테고리가 아니면 손대지 않는다.
+public enum MomoPushCategoryDemotion {
+    /// - Parameters:
+    ///   - current: 알림이 지금 들고 있는 `categoryIdentifier`.
+    ///   - resolved: 확장이 보낸 사람·본문을 실제로 채웠는가.
+    public static func categoryIdentifier(current: String, resolved: Bool) -> String {
+        guard !resolved, current == MomoPushCategory.approval.rawValue else { return current }
+        return MomoPushCategory.approvalOpen.rawValue
+    }
+}
+
 public enum MomoPushActionIdentifier {
     public static let quickReply = "momo.action.quick-reply"
     public static let approve = "momo.action.approve"

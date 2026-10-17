@@ -163,6 +163,32 @@ describe("refreshRetry — the one policy both hosts use", () => {
     expect(refreshRetry(403, undefined, true, false)).toBe("sign-out");
   });
 
+  // #3993. A server that is failing (5xx), busy (429, which openapi lists for this
+  // route) or too slow (408) has looked at nothing: a deploy or a database blip
+  // answers 5xx to a refresh token that is perfectly good. Sabotage: drop the
+  // `>= 500` line (every 5xx signs out again) — RED; drop the 429 or the 408 — RED
+  // on that status; widen it to `>= 403` or `>= 400` (the member-is-gone 403, even
+  // a 401, stop signing out) — RED on the 4xx lines.
+  it("keeps the session when the server did not look at the token, whatever the proof state", () => {
+    for (const status of [500, 502, 503, 504, 429, 408]) {
+      for (const proved of [true, false]) {
+        for (const plainRetried of [true, false]) {
+          expect(refreshRetry(status, undefined, proved, plainRetried)).toBe("keep");
+        }
+      }
+    }
+    // The server's own verdicts, and everything else, keep their old reading. A
+    // table rather than the two or three neighbours that came to mind: widening
+    // `undecided()` to 400 or to 409 stayed green until the neighbours were listed
+    // (independent review of #3993).
+    for (const status of [400, 403, 404, 405, 409, 410, 422, 499]) {
+      for (const proved of [true, false]) {
+        expect(refreshRetry(status, undefined, proved, false)).toBe("sign-out");
+      }
+    }
+    expect(refreshRetry(401, undefined, false, false)).toBe("sign-out");
+  });
+
   it("reads the server's clock from Date", () => {
     expect(serverSkewMs("Mon, 28 Sep 2026 00:10:00 GMT", Date.parse("2026-09-28T00:00:00Z"))).toBe(
       600_000
@@ -244,6 +270,22 @@ describe("phone: the core POSTs, the host signs", () => {
     h.reply(refused("refresh_proof_stale"), refused("refresh_proof_stale"), refused("refresh_proof_stale"));
     await expect(refreshSessionOutcome()).resolves.toBe("unreachable");
     expect(h.sent).toHaveLength(3);
+    expect(h.events).toEqual([]);
+    expect(h.refresh()).toBe("rt-0");
+  });
+
+  // #3993. A 5xx used to be a sign-out (`status !== 401`), and `restoreSession()`
+  // wiped the stored token on it. Now the rotation ends without a verdict after
+  // ONE post — no re-sign loop against a server that is already failing.
+  it("a server error on a proved refresh posts once and keeps the session", async () => {
+    const h = harness({ signer: true });
+    h.reply(
+      { status: 503, body: { error: { message: "unavailable" } } },
+      pair(1),
+      pair(2)
+    );
+    await expect(refreshSessionOutcome()).resolves.toBe("unreachable");
+    expect(h.sent).toHaveLength(1);
     expect(h.events).toEqual([]);
     expect(h.refresh()).toBe("rt-0");
   });

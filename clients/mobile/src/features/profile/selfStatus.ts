@@ -254,10 +254,14 @@ export function usePauseNotifications(workspaceId: string) {
       await mutation.mutateAsync({paused: true, untilMs});
       return true;
     },
-    resume: () => {
+    /**
+     * 일시 중지를 끈다. `options.onError` 는 이 쓰기가 실패해 낙관값이 되돌려진 **뒤에** 불린다 — 호출자가
+     * 「누른 줄에 이유를 붙이는」 일을 낙관 칠하기가 줄 모양을 바꾼 것과 독립으로 할 수 있게(인박스 멈춤 줄).
+     */
+    resume: (options?: {onError?: () => void}) => {
       // 한 번은 읽어야 스위치가 선다(모르는 상태를 「꺼짐」으로 그리지 않게).
       if (rules === undefined || mutation.isPending) return;
-      mutation.mutate({paused: false});
+      mutation.mutate({paused: false}, options);
     },
   };
 }

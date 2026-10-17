@@ -68,6 +68,12 @@ describe('인라인 승인 — 잠금 화면에서 승인·거절', () => {
   });
 });
 
+describe('버튼 낱말 (D2: 앱 안 승인 UI와 같은 「거부」)', () => {
+  it('인라인 승인의 두 버튼은 「승인」·「거부」다 — 「거절」이 아니다', () => {
+    expect(actionsOf(PUSH_CATEGORY.approval).map(action => action.buttonTitle)).toEqual(['승인', '거부']);
+  });
+});
+
 describe('열어서 결정하는 승인 — 잠금 화면은 결정하지 않는다 (ADR-0204 D7)', () => {
   it('버튼은 「열어서 결정」 하나다', () => {
     const actions = actionsOf(PUSH_CATEGORY.approvalOpen);

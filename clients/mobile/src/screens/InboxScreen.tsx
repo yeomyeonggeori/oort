@@ -59,6 +59,7 @@ import {
   useNeedsAction,
   type Feed,
 } from '../features/inbox/useInbox';
+import {PauseBanner} from '../features/profile/PauseBanner';
 import {haptics} from '../lib/haptics';
 import {useTabBarClearance} from '../shell/ShellChrome';
 import {useSession} from '../session/useSession';
@@ -309,9 +310,13 @@ export default function InboxScreen({
   // 당겨서 새로고침 (goal RN-B4b / #1026). 각 탭은 이미 자기를 다시 읽는 법을
   // 알고 있으므로(`feed.refetch` = 무효화), 당김은 그것을 부르는 새 입구일 뿐이다 —
   // 탭을 바꾸면 대상도 함께 바뀐다.
-  const {refreshControl, scrollProps} = usePullRefresh(
+  //
+  // 실패하면 그 한 줄(`notice`)이 목록 위에 남는다(#3992): 캐시된 항목이 있으면 실패해도 화면 어디에도 흔적이
+  // 없어서, 눈을 돌린 사람이 놓치기 쉽다. 탭을 옮기면(`resetKey`) 다른 목록의 일이라 거두고, 탭이 숨으면(`active`) 거둔다.
+  const {refreshControl, scrollProps, notice} = usePullRefresh(
     mailboxActive ? mailbox.refetch : feed.refetch,
     'inbox-refresh',
+    {active, resetKey: tab},
   );
 
   // 탭이 열리는 순간 원장을 다시 읽는다 (#1020). `active` 가 거짓→참으로 바뀔 때만
@@ -456,6 +461,13 @@ export default function InboxScreen({
     <Screen onCanvas={clearance > 0}>
       <ScreenHeader title="인박스" />
 
+      {/* 알림이 멈춰 있으면 그 사실이 이 화면 맨 위에 한 줄로 선다(ADR-0204 D3, #3923). */}
+      <PauseBanner
+        workspaceId={member.workspaceId}
+        selfId={member.id}
+        active={active}
+      />
+
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -544,6 +556,8 @@ export default function InboxScreen({
           testID="inbox-agents-partial"
         />
       ) : null}
+
+      {notice}
 
       {mailboxActive ? (
         mailbox.isLoading && mailbox.entries.length === 0 ? (

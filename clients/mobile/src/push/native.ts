@@ -1,6 +1,7 @@
 import {requireOptionalNativeModule} from 'expo-modules-core';
 
 import {NSE_KEYCHAIN_ACCESS_GROUP} from '../storage/keychainGroups';
+import {PUSH_ACTION_NATIVE_MODULE} from './contract';
 
 // =============================================================================
 // The two values only the native build knows (goal RN-N1).
@@ -84,4 +85,29 @@ export function keychainAccessGroup(): string | null {
  *  by tests that need to skip device-only paths. */
 export function pushNativeModuleAvailable(): boolean {
   return nativeModule != null;
+}
+
+interface MomoPushActionConstants {
+  /** True only once `MomoPushActionInstaller.install()` has attached the
+   *  handler (modules/momo-push-action-native). */
+  readonly handlesApprovalActions?: boolean;
+}
+
+/**
+ * 이 폰에서 잠금 화면의 승인·거절을 네이티브 처리기가 **실제로** 맡고 있는가
+ * (#3931, ADR-0204 D6).
+ *
+ * 참일 때만 `handlePushResponse` 가 그 두 버튼에서 물러난다. 이 모듈이 없는 빌드(시험,
+ * 옛 바이너리 위의 새 JS)나 `install()` 이 불리지 않은 시작 경로에서 물러나면, 버튼이
+ * 아무 일도 하지 않는다 — 소리 없이. 그래서 「iOS 이면」이 아니라 「처리기가 붙어
+ * 있으면」이다. 프로덕션 iOS 빌드에서는 늘 참이라 ADR 의 문장과 같다.
+ *
+ * 부를 때마다 읽는다(상수라 값싸다): 시험이 모듈 적재 뒤에 답을 바꿀 수 있고, 셋업이
+ * 늦게 끝나는 빌드에서도 첫 호출의 답이 영원히 굳지 않는다.
+ */
+export function nativeApprovalHandlerAttached(): boolean {
+  return (
+    requireOptionalNativeModule<MomoPushActionConstants>(PUSH_ACTION_NATIVE_MODULE)
+      ?.handlesApprovalActions === true
+  );
 }
