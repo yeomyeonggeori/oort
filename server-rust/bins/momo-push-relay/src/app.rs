@@ -219,6 +219,34 @@ mod tests {
         (AppState::stub_from_config(&config), seed)
     }
 
+    /// Like [`stub_state`], but the stubbed APNs answers `status` / `reason` and the
+    /// relay may be pinned to one APNs environment.
+    fn stub_state_answering(
+        status: i32,
+        reason: Option<&str>,
+        apns_environment: Option<crate::config::ApnsEnvironment>,
+    ) -> (AppState, [u8; 32]) {
+        let seed = [9u8; 32];
+        let public = SigningKey::from_bytes(&seed).verifying_key().to_bytes();
+        let mut servers = HashMap::new();
+        servers.insert(SERVER_ID.to_string(), public);
+        let config = RelayConfig {
+            host: "127.0.0.1".into(),
+            port: 28195,
+            servers,
+            rate_limit_per_minute: 60,
+            sender_mode: crate::config::SenderMode::Stub,
+            stub_capture_path: None,
+            stub_status: status,
+            stub_reason: reason.map(str::to_string),
+            apns_environment,
+            apns_key_path: None,
+            apns_key_id: None,
+            apns_team_id: None,
+        };
+        (AppState::stub_from_config(&config), seed)
+    }
+
     async fn serve(state: AppState) -> String {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -286,6 +314,53 @@ mod tests {
         assert!(!captured.contains("secret"));
         assert!(!captured.contains("apns_token"));
         let _ = std::fs::remove_file(&capture);
+    }
+
+    /// #3930 (ADR-0204 D9): the notifier invalidates a push token from the APNs
+    /// answer it reads in the relay's RECEIPT. An APNs rejection of the device
+    /// (410, 400 BadDeviceToken / DeviceTokenNotForTopic) is therefore an HTTP 200
+    /// carrying `apns_status` + `apns_reason` verbatim — never a relay error status,
+    /// which the notifier reads as "the deployment is wrong" and does not act on.
+    #[tokio::test]
+    async fn an_apns_rejection_of_the_device_travels_as_an_http_200_receipt_with_its_reason() {
+        for (apns_status, reason) in [
+            (410, "Unregistered"),
+            (400, "BadDeviceToken"),
+            (400, "DeviceTokenNotForTopic"),
+            (403, "ExpiredProviderToken"),
+        ] {
+            let (state, seed) = stub_state_answering(apns_status, Some(reason), None);
+            let base = serve(state).await;
+            let body = TEST_DISPATCH_JSON.as_bytes();
+            let signature = sign(&seed, body);
+            let (status, bytes) = post_push(&base, SERVER_ID, &signature, body).await;
+            assert_eq!(
+                status, 200,
+                "APNs {apns_status} {reason} is not a relay error"
+            );
+            let receipt: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(receipt["apns_status"], apns_status, "{reason}");
+            assert_eq!(receipt["apns_reason"], reason);
+        }
+    }
+
+    /// The relay's OWN 400 is a different thing from APNs' 400: a plain-text body
+    /// that explains itself, which the notifier keeps (a bounded excerpt) in the
+    /// settled reason and the `push.relay.refused` audit row.
+    #[tokio::test]
+    async fn the_relays_own_environment_refusal_is_a_plain_400_that_explains_itself() {
+        let (state, seed) =
+            stub_state_answering(200, None, Some(crate::config::ApnsEnvironment::Production));
+        let base = serve(state).await;
+        // TEST_DISPATCH_JSON is a sandbox dispatch.
+        let body = TEST_DISPATCH_JSON.as_bytes();
+        let signature = sign(&seed, body);
+        let (status, bytes) = post_push(&base, SERVER_ID, &signature, body).await;
+        assert_eq!(status, 400);
+        assert_eq!(
+            String::from_utf8(bytes).unwrap(),
+            "dispatch APNs environment does not match relay"
+        );
     }
 
     #[tokio::test]

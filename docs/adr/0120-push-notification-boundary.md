@@ -1,6 +1,7 @@
 # ADR-0120: 푸시 알림 경계 — Dawn 운영 push relay + 서버 notifier
 
 - Status: **Accepted** (2026-07-15, 성재 — 권고안 D1-A~D5-A 전체 승인. Dawn 운영 항목(Apple Developer 계정·relay 배포)은 별도 실행 결정, 서버측 P-1/P-2는 웹 배치 후 발급). **부록 A(`work_session_idle` 5번째 reason): Accepted 2026-10-02, 성재 — 범위 한정(내가 시작한 세션·1분 이상·앱 비활성). A-8 참조.**
+- 증보: 2026-10-16 **ADR-0204** — D7(카테고리 `momo.approval.open` 추가, NSE 자리표시면 버튼 떼기, 승인 푸시는 결정 가능한 사람에게만), D8(에이전트 답·멈춤 → 요청자에게 와이어 `mention`, 보고 있으면 억제), D9(410·`BadDeviceToken` 무효화 = D4 이행). 어휘 증보는 relay 먼저(A-6 순서). 본문 결정은 바꾸지 않았다.
 - 관련: `research/15-platform-expansion/01`(Slack 판정 교훈)·`02` §2-1(4사 relay 구조), ADR-0109(unread — 판정의 데이터 기반), ADR-0004(자격증명 비유입 — 같은 결의 content 비유입), ux-bible P8(알림 예산)·P9(판정 로직은 서버 한 곳)·P10(관측 내장), 로드맵 M5·EP-IOS(MOMO-040~043 승계)
 - 발단: 성재 인프라 발제(2026-07-15) 중 푸시. iOS(M5)의 전제조건이며 Dawn 운영 인프라가 필요해 **리드타임이 가장 긴 항목** — 웹 우선 결정과 무관하게 draft를 선행한다.
 

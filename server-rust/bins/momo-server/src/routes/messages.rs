@@ -33,7 +33,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{Extension, Json};
-use momo_agent::{terminal_run_ids_in_tx, RunBindingRejected};
+use momo_agent::{terminal_run_ids_in_tx, RunBindingRejected, PROP_ANSWERS_MESSAGE_ID};
 use momo_auth::Principal;
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_tenant_tx, DbError};
@@ -88,11 +88,19 @@ const SERVER_OWNED_PROPS_KEY: &str = "mention_member_ids";
 /// session-thread message as the owner's **signed** instruction, written only
 /// by `POST …/work-sessions/{session}/instructions` beside the control it
 /// names. A plain chat send must not be able to look like one.
-const SERVER_OWNED_PROPS_KEYS: [&str; 4] = [
+///
+/// [`PROP_ANSWERS_MESSAGE_ID`] (#3929, ADR-0204 D8) is the same case as the key
+/// before it: the push judgment **trusts** it to decide whom to wake — the person
+/// whose message an agent's closing line answers — and only the sweeps that write
+/// those lines (`approval_sweep`, `run_stall_sweep`, through `send_message_in_tx`,
+/// never this route) may say it. A client that could write it could point a push
+/// at anybody in a channel without naming them.
+const SERVER_OWNED_PROPS_KEYS: [&str; 5] = [
     SERVER_OWNED_PROPS_KEY,
     STREAM_PROPS_KEY,
     HARNESS_REFINE_PROPS_KEY,
     INSTRUCTION_PROPS_KEY,
+    PROP_ANSWERS_MESSAGE_ID,
 ];
 
 /// `momo.instruction` — see [`crate::routes::work_instructions`].
@@ -1761,7 +1769,17 @@ mod tests {
             INSTRUCTION_PROPS_KEY.to_string(),
             r#"{"mode":"interrupt"}"#.to_string(),
         );
+        // #3929 — a client cannot point a push at someone by naming a message the
+        // judgment would read as "this line answers it".
+        props.insert(
+            PROP_ANSWERS_MESSAGE_ID.to_string(),
+            "11111111-1111-4111-8111-111111111111".to_string(),
+        );
         let value = props_value(Some(&props));
+        assert!(
+            value.get(PROP_ANSWERS_MESSAGE_ID).is_none(),
+            "answers_message_id is server-owned and must be stripped"
+        );
         assert!(
             value.get(INSTRUCTION_PROPS_KEY).is_none(),
             "momo.instruction is server-owned and must be stripped"
