@@ -4,7 +4,7 @@ import {
   mayActOnLiveness,
   type LivenessTone,
 } from "@momo/core/features/agents/liveness";
-import { STATUS_DOT_TONE_OF_LIVENESS } from "@momo/core/features/presence/statusDot";
+import { agentDotTone } from "@momo/core/features/presence/statusDot";
 import { useSession } from "@/app/session";
 import { cn } from "@/design/lib/cn";
 import { STATUS_DOT_FILL_CLASS } from "@/design/statusDot";
@@ -21,8 +21,9 @@ import { WakeAgentButton } from "./WakeAgentButton";
 // 이 칩의 점은 색만으로 상태를 말하지 않는다 — 낱말이 항상 곁에 있다.
 //
 // 사이드바 DM 행에는 이 칩이 없다 (#3964): 행은 글자 대신 아바타 모서리의 점(`DmAvatar`)이 같은 판정을
-// 같은 색 체계로 말한다. 점의 색은 코어의 한 표(`STATUS_DOT_TONE_OF_LIVENESS`)와 한 클래스 맵
-// (`design/statusDot.ts`)를 읽으므로 칩과 점이 한 상태에 다른 색을 칠할 수 없다.
+// 같은 색 체계로 말한다. 점의 톤은 코어의 한 함수(`agentDotTone`)가 정하고 클래스는 한 맵
+// (`design/statusDot.ts`)이 매기므로 칩과 점이 한 상태에 다른 색을 칠할 수 없다(소유자 결정 2026-10-17
+// 「Buzz식: 초록=살아 있음, 회색 고리=꺼짐」: 살아 있음·대기도 초록이다. 낱말은 칩이 말한다).
 // =============================================================================
 
 const TEXT_CLASS: Readonly<Record<LivenessTone, string>> = {
@@ -48,6 +49,8 @@ export function AgentLivenessLabel({
   // (할 수 있는 일이 없는 경고는 소음이다, design-review U3 M-3). 규칙은 코어 한 곳이다.
   const mayAct = mayActOnLiveness(memberFor(directory, session.member.id)?.role);
   const tone: LivenessTone = livenessToneFor(view, mayAct);
+  // 점의 톤은 아바타 점과 같은 함수다(칩의 글자 색은 아래 `tone`).
+  const dotTone = agentDotTone(view, mayAct);
   return (
     <span
       className={cn(
@@ -58,12 +61,13 @@ export function AgentLivenessLabel({
       data-testid="agent-liveness"
       data-state={view.state}
       data-tone={tone}
+      data-dot-tone={dotTone}
     >
       <span
         aria-hidden="true"
         className={cn(
           "size-2 shrink-0 rounded-full",
-          STATUS_DOT_FILL_CLASS[STATUS_DOT_TONE_OF_LIVENESS[tone]]
+          STATUS_DOT_FILL_CLASS[dotTone]
         )}
       />
       <span className="min-w-0 truncate">{view.text}</span>

@@ -3,7 +3,7 @@ import type { AgentLivenessState, RosterMember } from "../../lib/api";
 import { livenessView } from "../agents/liveness";
 import {
   AGENT_HOST_ONLINE_LABEL,
-  STATUS_DOT_TONE_OF_LIVENESS,
+  agentDotTone,
   agentHostDot,
   agentLivenessDot,
   dmPeerStatusDot,
@@ -16,14 +16,15 @@ const NOW = 1_800_000_000_000;
 
 describe("에이전트 생존 판정 → 점 (대응표)", () => {
   // 이 표가 PR 본문의 대응표다. 톤은 `livenessView` 가 정하고(서버 판정을 다시 판정하지 않는다), 점은 그것을 옮긴다.
-  // 낱말이 없는 자리라 **모양이 말한다**: 채운 점 = 신호가 오고 있다(ok · idle), 속 빈 고리 = 응답을 기대하기 어렵다
-  // (muted). warn 은 다시 깨울 수 있는 사람(owner/admin)에게만 경고이고 그 밖의 멤버에게는 속 빈 고리로 내려간다.
+  // Buzz식(소유자 결정 2026-10-17 「Buzz식: 초록=살아 있음, 회색 고리=꺼짐」): 채운 초록 = 살아 있음(응답함·살아 있음·대기),
+  // 속 빈 고리 = 꺼짐(조용함·꺼짐). warn 은 다시 깨울 수 있는 사람(owner/admin)에게만 채운 주황이고 그 밖의 멤버에게는
+  // 속 빈 고리로 내려간다.
   const TABLE: ReadonlyArray<
     readonly [AgentLivenessState, StatusDotTone, StatusDotTone]
   > = [
     // 상태, owner/admin 에게, 일반 멤버에게
     ["responsive", "ok", "ok"],
-    ["alive_idle", "idle", "idle"],
+    ["alive_idle", "ok", "ok"],
     ["quiet", "muted", "muted"],
     ["inactive", "muted", "muted"],
     ["work_waiting", "warn", "muted"],
@@ -60,25 +61,35 @@ describe("에이전트 생존 판정 → 점 (대응표)", () => {
     expect(statusDotTooltip(dot)).toBe(`${view.text}. ${view.meaning}`);
   });
 
-  it("칩은 생존 톤 셋을 점 톤 셋으로 옮긴다(neutral 은 한 색: 낱말이 곁에서 가른다)", () => {
-    expect(STATUS_DOT_TONE_OF_LIVENESS).toEqual({
-      ok: "ok",
-      warn: "warn",
-      neutral: "muted",
-    });
+  it("응답함과 살아 있음·대기는 같은 초록이다 — 소유자 결정 2026-10-17 「Buzz식: 초록=살아 있음, 회색 고리=꺼짐」", () => {
+    for (const mayAct of [true, false]) {
+      expect(agentLivenessDot({ state: "responsive" }, NOW, mayAct).tone).toBe("ok");
+      expect(agentLivenessDot({ state: "alive_idle" }, NOW, mayAct).tone).toBe("ok");
+    }
+    // 둘의 차이는 낱말이 말한다.
+    expect(agentLivenessDot({ state: "alive_idle" }, NOW, true).label).toBe("살아 있음 · 대기 중");
+    expect(agentLivenessDot({ state: "responsive" }, NOW, true).label).not.toBe("살아 있음 · 대기 중");
   });
 
   it("**살아 있음과 꺼짐은 다른 점이다** — 낱말이 없는 자리에서 한 점이 되면 「꺼져 있다는 거야?」에 답하지 못한다 (design-review H1)", () => {
     for (const mayAct of [true, false]) {
-      const idle = agentLivenessDot({ state: "alive_idle" }, NOW, mayAct);
+      const alive = agentLivenessDot({ state: "alive_idle" }, NOW, mayAct);
       const off = agentLivenessDot({ state: "inactive" }, NOW, mayAct);
-      expect(idle.tone).toBe("idle");
+      expect(alive.tone).toBe("ok");
       expect(off.tone).toBe("muted");
-      expect(idle.tone).not.toBe(off.tone);
+      expect(alive.tone).not.toBe(off.tone);
     }
   });
 
-  it("채운 점은 신호가 오는 상태(응답함·살아 있음)뿐이고, 신호가 없는 상태는 전부 속 빈 고리다(일반 멤버 시점)", () => {
+  it("조용함·꺼짐은 보는 사람과 무관하게 속 빈 고리(꺼짐)다", () => {
+    for (const state of ["quiet", "inactive"] as const) {
+      for (const mayAct of [true, false]) {
+        expect(agentLivenessDot({ state }, NOW, mayAct).tone).toBe("muted");
+      }
+    }
+  });
+
+  it("채운 점은 살아 있는 상태(응답함·살아 있음)뿐이고, 나머지는 전부 속 빈 고리다(일반 멤버 시점)", () => {
     const filled: AgentLivenessState[] = [];
     const hollow: AgentLivenessState[] = [];
     for (const [state, , forMember] of TABLE) {
@@ -90,11 +101,11 @@ describe("에이전트 생존 판정 → 점 (대응표)", () => {
     );
   });
 
-  it("idle 은 alive_idle 에만 선다: 어떤 보는 사람·상태 조합에서도 다른 상태가 idle 이 되지 않는다", () => {
+  it("생존 칩이 읽는 함수(agentDotTone)와 점이 같은 톤을 낸다 — 한 상태가 두 자리에서 다른 색이 되지 않는다", () => {
     for (const [state] of TABLE) {
       for (const mayAct of [true, false]) {
-        const tone = agentLivenessDot({ state }, NOW, mayAct).tone;
-        expect(tone === "idle").toBe(state === "alive_idle");
+        const view = livenessView({ state }, NOW);
+        expect(agentDotTone(view, mayAct)).toBe(agentLivenessDot({ state }, NOW, mayAct).tone);
       }
     }
   });
@@ -169,7 +180,7 @@ describe("dmPeerStatusDot: DM 상대 한 명", () => {
     ).toBe("warn");
   });
 
-  it("**회색(idle·muted) 점은 에이전트에만 선다** — 사람에게는 어떤 입력으로도 회색이 나오지 않는다", () => {
+  it("**회색(muted) 점은 에이전트에만 선다** — 사람에게는 어떤 입력으로도 회색이 나오지 않는다", () => {
     for (const presenceStatus of [undefined, "auto", "away", "dnd"] as const) {
       for (const dndUntilMs of [undefined, NOW - 1, NOW + 1]) {
         for (const liveness of [undefined, null, { state: "inactive" as const }]) {
@@ -179,7 +190,6 @@ describe("dmPeerStatusDot: DM 상대 한 명", () => {
             liveness,
           });
           expect(dot?.tone).not.toBe("muted");
-          expect(dot?.tone).not.toBe("idle");
         }
       }
     }

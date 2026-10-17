@@ -186,20 +186,23 @@ describe("생존 라벨", () => {
     expect(node?.hasAttribute("data-variant")).toBe(false);
   });
 
-  it("칩의 점은 코어의 한 표와 한 클래스 맵을 읽는다: 톤마다 같은 색 (#3964)", async () => {
-    const cases: [AgentLivenessState, string, string][] = [
-      ["responsive", "ok", "bg-ok"],
-      ["alive_idle", "neutral", "bg-ink-muted"],
-      ["inactive", "neutral", "bg-ink-muted"],
-      ["work_waiting", "warn", "bg-warn"],
+  it("칩의 점은 아바타 점과 같은 함수(agentDotTone)와 한 클래스 맵을 읽는다: 한 상태가 한 색 (#3964, 소유자 결정 2026-10-17)", async () => {
+    // [상태, 칩 글자 색의 생존 톤(data-tone), 점 톤(data-dot-tone), 점 클래스]. 살아 있음·대기도 초록이다(Buzz식).
+    const cases: [AgentLivenessState, string, string, string][] = [
+      ["responsive", "ok", "ok", "bg-ok"],
+      ["alive_idle", "neutral", "ok", "bg-ok"],
+      ["quiet", "neutral", "muted", "bg-ink-muted"],
+      ["inactive", "neutral", "muted", "bg-ink-muted"],
+      ["work_waiting", "warn", "warn", "bg-warn"],
     ];
-    for (const [state, tone, dotClass] of cases) {
+    for (const [state, tone, dotTone, dotClass] of cases) {
       answer(state, 1);
       const el = mount(createElement(AgentLivenessLabel, { agentId: AGENT }));
       await settle();
       const node = el.querySelector('[data-testid="agent-liveness"]');
-      expect(node?.getAttribute("data-tone")).toBe(tone);
-      expect(node?.querySelector("span[aria-hidden]")?.className).toContain(dotClass);
+      expect(node?.getAttribute("data-tone"), state).toBe(tone);
+      expect(node?.getAttribute("data-dot-tone"), state).toBe(dotTone);
+      expect(node?.querySelector("span[aria-hidden]")?.className, state).toContain(dotClass);
       act(() => root?.unmount());
       host?.remove();
     }

@@ -9,14 +9,13 @@ import {useStyles} from '../../design/theme';
 // (`@momo/core/features/presence/statusDot`)가 정하고, 이 파일은 그 톤을 폰의 팔레트 토큰에 매긴다 -
 // `presence/model.ts` 머리말의 분업이다(웹은 Tailwind 클래스, 폰은 토큰 객체).
 //
-//   ok → `ok` · warn → `warn` · danger → `danger` · idle → **채운 회색**(`textFaint`) · muted → **속이 빈 고리**
-//   (`textFaint` 선 + 면 채움)
+//   ok → `ok` · warn → `warn` · danger → `danger` · muted → **속이 빈 고리**(`textFaint` 선 + 면 채움)
 //
-// 낱말이 곁에 없는 자리라 모양이 말한다: 채운 점 = 신호가 오고 있다(응답함·살아 있음), 속 빈 고리 = 응답을 기대하기
-// 어렵다(조용함·꺼짐). 살아 있지만 일이 없는 에이전트(idle)와 꺼진 에이전트(muted)가 한 점이면 점이 「꺼져 있다는
-// 거야?」에 답하지 못한다(design-review #3964 H1). 웹과 같은 이유·같은 표다. 선은 `textFaint`(컨트롤 테두리 3:1
-// 자리)라 면 위에서 보인다. 둘레의 면색 고리(`surface`)는 점이 아바타에서 떨어져 보이게 하는 것이고, 웹 `border-surface`
-// 와 같다.
+// Buzz식(소유자 결정 2026-10-17 「Buzz식: 초록=살아 있음, 회색 고리=꺼짐」): 낱말이 곁에 없는 자리라 모양이 말한다 -
+// 채운 초록 = 살아 있음(응답함·살아 있음·대기), 속 빈 회색 고리 = 꺼짐(조용함·꺼짐). 살아 있음과 꺼짐이 한 점이면 점이
+// 「꺼져 있다는 거야?」에 답하지 못한다(design-review #3964 H1). 웹과 같은 이유·같은 표다. 선은 `textFaint`(컨트롤
+// 테두리 3:1 자리)라 면 위에서 보인다. 둘레의 면색 고리(`surface`)는 점이 아바타에서 떨어져 보이게 하는 것이고, 웹
+// `border-surface` 와 같다.
 //
 // 보조기술에는 나가지 않는다: 행은 접근성 원소 하나이고 그 라벨이 상태를 말한다(`Row`).
 // =============================================================================
@@ -56,6 +55,5 @@ const buildStyles = (color: Palette) =>
     ok: {backgroundColor: color.ok},
     warn: {backgroundColor: color.warn},
     danger: {backgroundColor: color.danger},
-    idle: {backgroundColor: color.textFaint},
     muted: {backgroundColor: color.surface, borderColor: color.textFaint},
   });

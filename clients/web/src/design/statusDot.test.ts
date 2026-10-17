@@ -13,9 +13,7 @@ import { STATUS_DOT_BADGE_CLASS, STATUS_DOT_FILL_CLASS } from "./statusDot";
 // test.ts` 와 같은 방법).
 // =============================================================================
 
-const TONES: readonly StatusDotTone[] = ["ok", "warn", "danger", "idle", "muted"];
-/** 프로필 카드 존재 배지(`PresenceControl.effectiveBadgeClass`)가 아는 톤: online·away·dnd·offline. `idle` 은 에이전트에만 있다. */
-const PRESENCE_TONES: readonly StatusDotTone[] = ["ok", "warn", "danger", "muted"];
+const TONES: readonly StatusDotTone[] = ["ok", "warn", "danger", "muted"];
 
 const presenceControl = readFileSync(
   new URL("../features/sidebar/PresenceControl.tsx", import.meta.url),
@@ -28,7 +26,7 @@ describe("상태 점 클래스 (#3964)", () => {
     // 같은 파일의 `optionDotClass`(메뉴 옆 점: `bg-ok` 만)와 섞이지 않게 그 함수 몸통만 읽는다.
     const badgeFn = /function effectiveBadgeClass[\s\S]*?\n\}\n/.exec(presenceControl)?.[0] ?? "";
     expect(badgeFn).toContain("case \"online\"");
-    for (const tone of PRESENCE_TONES) {
+    for (const tone of TONES) {
       expect(badgeFn, tone).toContain(`return "${STATUS_DOT_BADGE_CLASS[tone]}";`);
     }
   });
@@ -43,22 +41,20 @@ describe("상태 점 클래스 (#3964)", () => {
     }
   });
 
-  it("모양이 말한다: 채운 회색(idle: 살아 있음)과 속 빈 고리(muted: 아님)는 다른 점이다 — 칩은 둘 다 채운 회색이다", () => {
-    // 칩은 neutral 셋을 한 색(채운 회색)으로 그린다: 곁의 낱말이 가른다.
+  it("Buzz식(소유자 결정 2026-10-17): 살아 있음은 채운 초록, 꺼짐은 속 빈 회색 고리 — 칩의 꺼짐 점은 낱말이 곁에 있어 채운 회색이다", () => {
+    // 칩은 글자가 곁에 있다: 꺼짐도 채운 회색 점 + 낱말.
     expect(STATUS_DOT_FILL_CLASS.muted).toBe("bg-ink-muted");
-    expect(STATUS_DOT_FILL_CLASS.idle).toBe("bg-ink-muted");
-    // 낱말이 없는 아바타 점은 모양으로 가른다(design-review #3964 H1).
-    expect(STATUS_DOT_BADGE_CLASS.idle.split(" ")).toEqual(["bg-ink-muted", "border-surface"]);
+    // 글자가 없는 아바타 점은 모양으로 가른다(design-review #3964 H1): 살아 있음 = 채운 초록, 꺼짐 = 속 빈 고리.
+    expect(STATUS_DOT_BADGE_CLASS.ok.split(" ")).toEqual(["bg-ok", "border-surface"]);
     expect(STATUS_DOT_BADGE_CLASS.muted.split(" ")).toEqual(["bg-surface", "border-line-strong"]);
-    expect(STATUS_DOT_BADGE_CLASS.idle).not.toBe(STATUS_DOT_BADGE_CLASS.muted);
-    // 채운 회색(`bg-ink-muted`)은 `idle` 뿐이다 - 속 빈 고리가 채운 회색으로 돌아가면 「꺼짐」이 「있음」으로 읽힌다.
+    // 채운 회색(`bg-ink-muted`)은 아바타 점 어디에도 없다 - 속 빈 고리가 채운 회색으로 돌아가면 「꺼짐」이 「있음」으로 읽힌다.
     for (const tone of TONES) {
-      expect(STATUS_DOT_BADGE_CLASS[tone].includes("bg-ink-muted")).toBe(tone === "idle");
+      expect(STATUS_DOT_BADGE_CLASS[tone]).not.toContain("bg-ink-muted");
     }
   });
 
   it("살아 있는 톤은 면색 고리(border-surface)를 두른다: 점이 아바타에서 떨어져 보인다", () => {
-    for (const tone of ["ok", "warn", "danger", "idle"] as const) {
+    for (const tone of ["ok", "warn", "danger"] as const) {
       expect(STATUS_DOT_BADGE_CLASS[tone]).toContain("border-surface");
     }
   });

@@ -749,13 +749,14 @@ describe("DM 행의 상태 점 (#3964)", () => {
     expect(visible).not.toContain("연결이 꺼져");
   });
 
-  it("에이전트: 생존 판정이 점이 된다 — 응답함은 채운 초록, 살아 있음은 채운 회색, 꺼짐은 속이 빈 고리", async () => {
-    // 모양이 말한다(낱말이 없는 자리): 채운 점 = 신호가 오고 있다, 속 빈 고리 = 응답을 기대하기 어렵다.
-    // 「살아 있지만 일이 없는」 에이전트와 「꺼진」 에이전트가 한 점이면 점이 질문에 답하지 못한다 (#3964 H1).
+  it("에이전트: 생존 판정이 점이 된다 — 응답함·살아 있음은 채운 초록, 꺼짐은 속이 빈 회색 고리 (Buzz식, 소유자 결정 2026-10-17)", async () => {
+    // 모양이 말한다(낱말이 없는 자리): 채운 초록 = 살아 있음, 속 빈 고리 = 꺼짐. 「살아 있지만 일이 없는」 에이전트와
+    // 「꺼진」 에이전트가 한 점이면 점이 질문에 답하지 못한다 (#3964 H1). 응답함과 살아 있음·대기는 낱말이 가른다.
     const cases: Array<[string, string, string[], string[]]> = [
       ["responsive", "ok", ["bg-ok", "border-surface"], ["bg-surface", "bg-ink-muted"]],
-      ["alive_idle", "idle", ["bg-ink-muted", "border-surface"], ["bg-surface", "bg-ok"]],
+      ["alive_idle", "ok", ["bg-ok", "border-surface"], ["bg-surface", "bg-ink-muted"]],
       ["inactive", "muted", ["bg-surface", "border-line-strong"], ["bg-ok", "bg-ink-muted"]],
+      ["quiet", "muted", ["bg-surface", "border-line-strong"], ["bg-ok", "bg-ink-muted"]],
     ];
     for (const [state, tone, has, lacks] of cases) {
       liveness.byAgent.set(PEER_AGENT, state);
@@ -799,8 +800,8 @@ describe("DM 행의 상태 점 (#3964)", () => {
     for (const id of [DM_ID(1), DM_ID(2), DM_ID(6)]) {
       expect(dotOf(host, id)).toBeNull();
     }
-    // 그리고 회색(idle·muted)이 어디 있든 그것은 에이전트 행이다.
-    const gray = [...host.querySelectorAll('[data-testid="dm-peer-dot"][data-tone="muted"], [data-testid="dm-peer-dot"][data-tone="idle"]')];
+    // 그리고 회색(muted: 속 빈 고리)이 어디 있든 그것은 에이전트 행이다.
+    const gray = [...host.querySelectorAll('[data-testid="dm-peer-dot"][data-tone="muted"]')];
     expect(gray).toHaveLength(1);
     expect(gray[0].closest('[data-testid="channel-item"]')?.getAttribute("data-channel-id")).toBe(AGENT_DM);
   });

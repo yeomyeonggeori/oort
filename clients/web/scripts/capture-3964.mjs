@@ -4,6 +4,7 @@
 //
 // 성재(2026-10-16): 「꺼짐은 뭐야? 에이전트고 꺼져있는 상태라는거야? 프로필의 상태 칩으로 표시해.
 // buzz UI 참고해.」 DM 행은 글자 라벨 대신 아바타 모서리의 상태 점으로 사람·에이전트의 상태를 말한다.
+// 성재 결정(2026-10-17, AskUserQuestion): 「Buzz식: 초록=살아 있음, 회색 고리=꺼짐 (Recommended)」.
 //
 // 이 스크립트는 **재는 것**이 먼저이고 찍는 것이 그 다음이다. `check()`는 틀리면 기록하고 끝 코드를 1로
 // 만든다(대기는 전부 실패할 수 있는 waitFor/expect). 같은 스크립트를 변경 전 번들과 변경 후 번들에 돌려
@@ -13,17 +14,16 @@
 //   OUT_DIR=… PREFIX=c3964 ENGINES=chromium,webkit node scripts/capture-3964.mjs
 //
 // 재는 것:
-//   A. 행 구성: DM 행 15개의 점이 상태마다 맞는 색 역할·모양이다. 낱말이 없는 자리라 **모양이 말한다**: 채운 점 =
-//      신호가 오고 있다(응답함=초록, 살아 있음·대기=채운 회색, 사람 자리 비움=주황·방해 금지=빨강), 속 빈 고리 =
-//      응답을 기대하기 어렵다(조용함·꺼짐). 경고(일이 밀림·안 가져감·응답 없음·거절됨)는 owner 에게만 주황, 호스트 폴백=초록,
-//      판정을 모르면 점 없음, 평범한 사람·나간 멤버=점 없음. 색은 **토큰의 계산값**과 맞댄다. **살아 있음과 꺼짐은 한 점이
-//      아니다**(design-review #3964 H1).
+//   A. 행 구성: DM 행 15개의 점이 상태마다 맞는 색 역할·모양이다(Buzz식). 낱말이 없는 자리라 **모양이 말한다**: 채운 초록 =
+//      살아 있음(응답함 · 살아 있음·대기), 속 빈 회색 고리 = 꺼짐(조용함·꺼짐), 채운 주황 = 경고(일이 밀림·안 가져감·응답
+//      없음·거절됨: owner 에게만), 사람 자리 비움=주황·방해 금지=빨강, 호스트 폴백=초록, 판정을 모르면 점 없음, 평범한
+//      사람·나간 멤버=점 없음. 색은 **토큰의 계산값**과 맞댄다. **살아 있음과 꺼짐은 한 점이 아니다**(design-review #3964 H1).
 //      점은 8x8 이고 아바타의 오른쪽 아래 모서리에 앉으며, 이름은 점이 있든 없든 같은 x 에서 시작한다.
 //   B. 글자 라벨 미노출: 행의 눈에 보이는 글자에 「꺼짐」 같은 상태 낱말이 없다.
 //   C. 접근성: 숨은 글에 「이름, 상태」, 툴팁(title)에 낱말과 뜻.
 //   D. 나간 멤버: 이니셜을 지어내지 않고 기본 아바타.
-//   E. 같은 색 체계: 멤버 목록의 에이전트 칩과 DM 행 점이 같은 톤이다.
-//   F. 보는 사람이 일반 멤버이면 경고가 속 빈 고리로 내려가고, 살아 있음(채운 회색)은 그대로다.
+//   E. 같은 색 체계: 멤버 목록의 에이전트 칩의 점이 DM 행 점과 같은 함수(agentDotTone)가 정한 톤이다(살아 있음·대기도 초록).
+//   F. 보는 사람이 일반 멤버이면 경고가 속 빈 고리로 내려가고, 살아 있음(채운 초록)은 그대로다.
 // =============================================================================
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -61,7 +61,7 @@ const ROWS = [
   { n: 3, peer: person("13", "최민수", "minsu", { presenceStatus: "away" }), tone: "warn", what: "자리 비움: 주황" },
   { n: 4, peer: person("15", "정하윤", "hayun", { presenceStatus: "dnd" }), tone: "danger", what: "방해 금지: 빨강" },
   { n: 5, peer: agent("14", "김인턴", "intern", { hostOnline: true }), live: "responsive", tone: "ok", what: "에이전트 응답함: 초록" },
-  { n: 6, peer: agent("16", "헤르메스", "hermes", { hostOnline: true }), live: "alive_idle", tone: "idle", what: "에이전트 살아 있음·대기: 채운 회색(신호는 온다)" },
+  { n: 6, peer: agent("16", "헤르메스", "hermes", { hostOnline: true }), live: "alive_idle", tone: "ok", what: "에이전트 살아 있음·대기: 채운 초록(Buzz식: 살아 있음)" },
   { n: 7, peer: agent("17", "코비", "coby", { hostOnline: true }), live: "inactive", tone: "muted", what: "에이전트 꺼짐: 속 빈 회색 고리(호스트가 닿아 있어도 판정이 이긴다)" },
   { n: 8, peer: agent("18", "워처", "watcher"), live: "work_waiting", tone: "warn", what: "일이 기다림: owner 에게 주황" },
   { n: 9, peer: agent("19", "레거시봇", "legacy", { hostOnline: true }), live: null, tone: "ok", what: "판정 없음(404)+호스트 연결: 초록" },
@@ -241,19 +241,18 @@ async function runEngine(browserType, engine, origin) {
           const name = `A${r.n} ${r.peer.displayName}: ${r.what}`;
           if (r.tone === null) {
             check(engine, scheme, name, row.tone === null && row.bg === null, { tone: row.tone });
-          } else if (r.tone === "idle") {
-            // 채운 회색 + 면색 고리(속 빈 고리가 아니다).
-            check(engine, scheme, name, row.tone === "idle" && row.bg === colors.inkMuted && row.borderColor === colors.surface, { tone: row.tone, bg: row.bg, border: row.borderColor, want: [colors.inkMuted, colors.surface] });
           } else if (r.tone === "muted") {
             check(engine, scheme, name, row.tone === "muted" && row.bg === colors.surface && row.borderColor === colors.lineStrong, { tone: row.tone, bg: row.bg, border: row.borderColor, want: [colors.surface, colors.lineStrong] });
           } else {
             check(engine, scheme, name, row.tone === r.tone && row.bg === colors[r.tone], { tone: row.tone, bg: row.bg, want: colors[r.tone] });
           }
         }
-        // H1: 살아 있음(헤르메스)과 꺼짐(코비)은 한 점이 아니다 - 채움 vs 속 빈 고리.
-        const idleRow = await readRow(page, dmId(6));
+        // H1: 살아 있음(헤르메스: 채운 초록)과 꺼짐(코비: 속 빈 고리)은 한 점이 아니다. 응답함(김인턴)과 살아 있음은 같은 초록이다.
+        const aliveRow = await readRow(page, dmId(6));
+        const respRow = await readRow(page, dmId(5));
         const offRow = await readRow(page, dmId(7));
-        check(engine, scheme, "AS4 살아 있음과 꺼짐은 다른 점이다(채운 회색 vs 속 빈 고리): 배경이 다르다", idleRow.bg !== null && offRow.bg !== null && idleRow.bg !== offRow.bg && idleRow.tone !== offRow.tone, { idle: [idleRow.tone, idleRow.bg], off: [offRow.tone, offRow.bg] });
+        check(engine, scheme, "AS4 살아 있음과 꺼짐은 다른 점이다(채운 초록 vs 속 빈 고리): 배경이 다르다", aliveRow.bg !== null && offRow.bg !== null && aliveRow.bg !== offRow.bg && aliveRow.tone !== offRow.tone, { alive: [aliveRow.tone, aliveRow.bg], off: [offRow.tone, offRow.bg] });
+        check(engine, scheme, "AS5 응답함과 살아 있음·대기는 같은 초록이다(Buzz식, 소유자 결정 2026-10-17)", aliveRow.tone === "ok" && respRow.tone === "ok" && aliveRow.bg === respRow.bg, { alive: [aliveRow.tone, aliveRow.bg], responsive: [respRow.tone, respRow.bg] });
         // 크기: 8px 점(테두리 포함).
         const sample = await readRow(page, dmId(5));
         check(engine, scheme, "AS1 점의 크기는 8x8 이다(테두리 포함)", sample.size && sample.size[0] === 8 && sample.size[1] === 8, sample.size);
@@ -315,17 +314,17 @@ async function runEngine(browserType, engine, origin) {
             const id = row.getAttribute("data-member-id");
             const chip = row.querySelector('[data-testid="agent-liveness"]');
             const dot = chip?.querySelector("span[aria-hidden]");
-            return [id, chip ? { tone: chip.getAttribute("data-tone"), state: chip.getAttribute("data-state"), bg: getComputedStyle(dot).backgroundColor, text: chip.textContent } : null];
+            return [id, chip ? { tone: chip.getAttribute("data-tone"), dotTone: chip.getAttribute("data-dot-tone"), state: chip.getAttribute("data-state"), bg: getComputedStyle(dot).backgroundColor, text: chip.textContent } : null];
           })));
           const inkMuted = await tokenColor(page, "--ink-muted");
-          const want = (r) => ({ ok: "ok", warn: "warn", idle: "neutral", muted: "neutral" })[r.tone];
+          // 칩의 점 색: 살아 있음(ok)=초록, 경고(warn)=주황, 꺼짐(muted)=채운 회색(글자가 곁에 있다).
+          const chipColor = { ok: colors.ok, warn: colors.warn, muted: inkMuted };
           for (const r of ROWS.filter((x) => x.peer.kind === "agent" && x.live && x.live !== "pending")) {
             const chip = chips[r.peer.id];
-            const name = `E${r.n} 멤버 목록 칩과 DM 행 점이 같은 톤: ${r.peer.displayName}(${r.live})`;
-            // 칩의 톤(ok/neutral/warn)이 점의 톤(ok/muted/warn)과 같은 표의 같은 칸이다.
-            check(engine, scheme, name, chip !== null && chip.tone === want(r), { chip, dotTone: r.tone });
-            if (r.tone === "ok") check(engine, scheme, `${name}: 칩의 점 색이 점과 같다`, chip.bg === colors.ok, { chip: chip.bg, ok: colors.ok });
-            if (r.tone === "muted" || r.tone === "idle") check(engine, scheme, `${name}: 칩의 점은 채운 회색(글자가 곁에 있다)`, chip.bg === inkMuted, { chip: chip.bg, inkMuted });
+            const name = `E${r.n} 멤버 목록 칩의 점이 DM 행 점과 같은 톤: ${r.peer.displayName}(${r.live})`;
+            // 칩과 점이 같은 함수(agentDotTone)의 톤이다: 살아 있음·대기도 초록.
+            check(engine, scheme, name, chip !== null && chip.dotTone === r.tone, { chip, dotTone: r.tone });
+            check(engine, scheme, `${name}: 칩의 점 색이 그 톤의 색이다`, chip !== null && chip.bg === chipColor[r.tone], { chip: chip?.bg, want: chipColor[r.tone] });
           }
           if (SHOTS) await page.screenshot({ path: resolve(OUT_DIR, `${PREFIX}-members-chips-${scheme}.png`) });
           await page.getByTestId("nav-directory").click();
@@ -344,7 +343,7 @@ async function runEngine(browserType, engine, origin) {
       await attempt(engine, "light", "F.member", async () => {
         await page.waitForTimeout(900);
         const surface = await tokenColor(page, "--surface");
-        const inkMuted = await tokenColor(page, "--ink-muted");
+        const okColor = await tokenColor(page, "--ok");
         const demoted = [];
         for (const r of WARN_ROWS) {
           const row = await readRow(page, dmId(r.n));
@@ -354,7 +353,7 @@ async function runEngine(browserType, engine, origin) {
         check(engine, "light", "F2 낱말은 그대로다(같은 사실, 같은 낱말)", demoted.find((d) => d.n === 8)?.text === ", 일이 기다리는 중", demoted.map((d) => d.text));
         const idle = await readRow(page, dmId(6));
         const resp = await readRow(page, dmId(5));
-        check(engine, "light", "F3 일반 멤버에게도 살아 있음은 채운 회색, 응답함은 초록 그대로다(강등은 경고만)", idle.tone === "idle" && idle.bg === inkMuted && resp.tone === "ok", { idle: [idle.tone, idle.bg], resp: resp.tone });
+        check(engine, "light", "F3 일반 멤버에게도 살아 있음은 채운 초록, 응답함도 초록 그대로다(강등은 경고만)", idle.tone === "ok" && idle.bg === okColor && resp.tone === "ok" && resp.bg === okColor, { alive: [idle.tone, idle.bg], resp: [resp.tone, resp.bg] });
       });
     } finally {
       await context.close();

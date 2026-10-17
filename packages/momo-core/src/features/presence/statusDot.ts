@@ -10,17 +10,17 @@
 //   사람     스스로 정한 **자리 비움**(warn)·**방해 금지**(danger)만. 웹 명부에는 다른 사람의 접속 여부가
 //            없어서 「온라인」 초록 점은 근거가 없다(design-review #1889 H-3). 회색 오프라인 점도 없다:
 //            로스터가 그것을 모른다.
-//   에이전트 서버가 파생한 **생존 판정**(`livenessView`)을 점으로 옮긴다. 낱말이 곁에 없는 자리라 **모양이 말한다**:
+//   에이전트 서버가 파생한 **생존 판정**(`livenessView`)을 점으로 옮긴다(Buzz식, 소유자 결정 2026-10-17
+//            「Buzz식: 초록=살아 있음, 회색 고리=꺼짐」). 낱말이 곁에 없는 자리라 **모양이 말한다**:
 //
-//              채운 초록  ok     응답함(최근에 일을 했다)
-//              채운 회색  idle   살아 있음 · 대기 중(신호는 오는데 일은 안 가져간다: 맡길 일이 없을 수 있다)
-//              속 빈 고리 muted  조용함·꺼짐(신호가 없다) - 그리고 일반 멤버에게는 아래 경고 넷도 이쪽
+//              채운 초록  ok     살아 있음 - 응답함(최근에 일을 했다) · 살아 있음 · 대기 중(신호는 온다)
+//              속 빈 고리 muted  꺼짐 - 조용함(신호가 한동안 없다) · 연결이 꺼져 있어요 - 그리고 일반 멤버에게는 아래 경고 넷도 이쪽
 //              채운 주황  warn   일이 안 가져가짐·응답 없음·거절됨(다시 깨울 수 있는 owner/admin 에게만)
 //
-//            채운 점 = 「신호가 오고 있다」, 속 빈 고리 = 「지금 응답을 기대하기 어렵다」. 살아 있지만 일이 없는 에이전트와
-//            꺼진 에이전트가 한 점이 되면 이 점이 답해야 할 질문(「꺼져 있다는 거야?」)에 답하지 못한다(design-review
-//            #3964 H1). 생존 **칩**은 neutral 셋을 한 색(채운 회색)으로 그려도 곁의 낱말이 가르므로 그 표
-//            (`STATUS_DOT_TONE_OF_LIVENESS`)는 그대로다.
+//            채운 점 = 「살아 있다」, 속 빈 고리 = 「꺼져 있다(지금 응답을 기대하기 어렵다)」. 응답함과 살아 있음·대기가 한 색인
+//            것은 결정이다: 점이 답하는 질문은 「꺼져 있다는 거야?」 하나이고(성재 2026-10-16), 응답함과 대기의 차이는
+//            낱말(툴팁·접근 가능한 이름·칩)이 말한다. 생존 **칩**의 점도 같은 함수(`agentDotTone`)를 읽는다: 한 상태가 두 자리에서
+//            다른 색이 되지 않는다.
 //            warn 은 **다시 깨울 수 있는 사람(owner/admin)에게만** 경고다(`livenessToneFor`). 그 밖의 멤버는 같은
 //            사실이 중립이라 속 빈 고리로 내려간다(그에게 「일을 안 가져간다」는 「지금 맡겨도 응답이 없다」다).
 //            생존 라벨이 없는 에이전트(호스티드가 아님: 서버가 404)는 명부의 호스트 연결(`hostOnline`)만으로
@@ -36,12 +36,11 @@ import type { AgentLiveness, RosterMember } from "../../lib/api";
 import {
   livenessToneFor,
   livenessView,
-  type LivenessTone,
   type LivenessView,
 } from "../agents/liveness";
 import { declaredStatusLabel } from "./model";
 
-export type StatusDotTone = "ok" | "warn" | "danger" | "idle" | "muted";
+export type StatusDotTone = "ok" | "warn" | "danger" | "muted";
 
 export interface StatusDot {
   tone: StatusDotTone;
@@ -51,33 +50,23 @@ export interface StatusDot {
   meaning?: string;
 }
 
-/**
- * 생존 톤 → 점 톤: 에이전트 생존 **칩**(`AgentLivenessLabel`)이 읽는 표. 칩은 낱말이 곁에 있어 neutral 셋을 한 색
- * (`muted`: 채운 회색)으로 그린다. 낱말이 없는 아바타 점은 이 표를 한 칸 더 갈라 쓴다(`agentDotTone`).
- */
-export const STATUS_DOT_TONE_OF_LIVENESS: Readonly<
-  Record<LivenessTone, StatusDotTone>
-> = {
-  ok: "ok",
-  warn: "warn",
-  neutral: "muted",
-};
-
 /** 생존 판정이 없는 에이전트가 호스트에 닿아 있을 때의 낱말. 새 DM 모달의 점과 같은 낱말이다. */
 export const AGENT_HOST_ONLINE_LABEL = "연결됨";
 
 /**
- * 낱말이 없는 자리(아바타 모서리)의 톤. 칩은 neutral 셋을 한 색으로 그려도 곁의 낱말이 가르지만 점은 **모양이 말해야 한다**:
- * 보는 사람에게 맞춘 톤(`livenessToneFor`)이 neutral 이면 **살아 있는가**로 가른다 - 신호가 오는 `alive_idle` 은 채운
- * 회색(`idle`), 나머지(조용함·꺼짐, 그리고 일반 멤버에게 강등된 경고)는 속 빈 고리(`muted`).
+ * 에이전트 한 판정의 점 톤 - **아바타 점과 생존 칩이 같은 함수를 읽는다**(소유자 결정 2026-10-17 「Buzz식: 초록=살아 있음,
+ * 회색 고리=꺼짐」). 보는 사람에게 맞춘 생존 톤(`livenessToneFor`)이 ok·warn 이면 그대로이고, neutral 은 **살아 있는가**로
+ * 가른다: 신호가 오는 `alive_idle` 은 초록(살아 있음), 나머지(조용함·꺼짐, 그리고 일반 멤버에게 강등된 경고)는 속 빈
+ * 고리(`muted`: 꺼짐).
  */
 export function agentDotTone(
   view: Pick<LivenessView, "state" | "tone">,
   mayAct: boolean
 ): StatusDotTone {
   const tone = livenessToneFor(view, mayAct);
-  if (tone !== "neutral") return STATUS_DOT_TONE_OF_LIVENESS[tone];
-  return view.state === "alive_idle" ? "idle" : "muted";
+  if (tone === "warn") return "warn";
+  if (tone === "ok") return "ok";
+  return view.state === "alive_idle" ? "ok" : "muted";
 }
 
 /** 에이전트의 생존 판정 → 점. `mayAct` 는 보는 사람이 경고에 할 수 있는 일이 있는가. */
