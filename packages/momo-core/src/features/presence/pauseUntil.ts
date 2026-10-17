@@ -147,6 +147,20 @@ export function pauseUntilLabel(atMs: number, nowMs: number): string {
   return `${absoluteDate(at, now)} ${clock}까지`;
 }
 
+/**
+ * 알고 있는 기한이 이미 지났는가(지금과 같은 시각도 지난 것이다). **서버에 다시 물을 때**다 —
+ * 화면이 스스로 멈춤을 풀었다고 말하는 판정이 아니다. 서버는 만료 시각에 이벤트를 보내지 않고
+ * (`RosterMember.dndUntilMs`), 클라이언트의 질의 캐시는 30초 동안 신선하다고 믿으므로, 기한이 지난
+ * 줄은 다시 읽어야 서버의 답(`auto` / `dnd:false`)을 그린다. 서버 시계와 이 기기 시계가 다르면 지났다고
+ * 본 뒤에도 서버가 아직 켜져 있다고 답할 수 있다 — 그 답이 이긴다(ADR-0204 D2·D3).
+ */
+export function pauseUntilElapsed(
+  untilMs: number | undefined,
+  nowMs: number
+): boolean {
+  return untilMs !== undefined && untilMs <= nowMs;
+}
+
 /** 기한 없는 행의 이름 — 「기한 없음」. */
 export const PAUSE_UNTIL_NONE_LABEL = "기한 없음";
 
@@ -215,6 +229,13 @@ export function customPauseUntil(
 // ---- 문장 ---------------------------------------------------------------------
 
 export const PAUSE_UNTIL_INVALID_MESSAGE = "날짜와 시각을 확인하세요.";
+
+/**
+ * 연결이 끊겼을 때 기한 장이 말하는 이유. 폰은 끊긴 동안 쓰기를 잠그고(대기열에 쌓인 뮤테이션은
+ * 낙관값만 칠한 채 멈췄다가 재연결 뒤에 **지난 절대 시각**으로 나가 400 으로 되돌아온다), 웹은
+ * 같은 문장으로 확인을 잠근다. 두 표면이 같은 상황에 같은 말을 한다.
+ */
+export const PAUSE_UNTIL_OFFLINE_REASON = "연결이 끊겨 지금은 바꿀 수 없어요.";
 export const PAUSE_UNTIL_PAST_MESSAGE =
   "지난 시각은 고를 수 없어요. 다른 시각을 고르세요.";
 

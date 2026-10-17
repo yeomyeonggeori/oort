@@ -7,6 +7,7 @@ import { presenceTriggerLabel } from "@momo/core/features/presence/model";
 import { useSession } from "@/app/session";
 import { useOpenAddWorkspace } from "@/features/workspace/useAddWorkspace";
 import { rememberSettingsOpener } from "@/features/settings/settingsFocus";
+import { useRecheckWhenElapsed } from "@/features/settings/useRecheckWhenElapsed";
 import { Button } from "@/design/ui/button";
 import {
   Dialog,
@@ -90,6 +91,8 @@ export function ProfileCard({
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [setStatusOpen, setSetStatusOpen] = useState(false);
   const [dndOpen, setDndOpen] = useState(false);
+  // 방해 금지의 기한이 지나면 서버에 다시 묻는다(아바타 점·메뉴가 서버의 새 답을 그린다, #2899 H3).
+  useRecheckWhenElapsed(workspaceId, selfMember?.dndUntilMs);
   const effective = effectivePresence(selfMember?.presenceStatus, connected);
   const { visible: custom, accessible: customName } =
     useCustomStatusView(selfMember);

@@ -3,9 +3,11 @@ import {
   customPauseUntil,
   customPauseUntilMessage,
   PAUSE_UNTIL_NONE_ACTION_LABEL,
+  PAUSE_UNTIL_OFFLINE_REASON,
   PAUSE_UNTIL_OPTIONS,
   pauseUntilAtMs,
   pauseUntilDescription,
+  pauseUntilElapsed,
   pauseUntilHint,
   pauseUntilLabel,
   pauseUntilOptions,
@@ -212,5 +214,23 @@ describe("titles and descriptions", () => {
     // 누르면 곧바로 켜진다 — 확인 단계가 없다는 것을 읽어 줘야 하는 줄이다.
     expect(pauseUntilPresetHint("pause")).toBe("누르면 이 시각까지 알림을 멈춰요.");
     expect(pauseUntilPresetHint("dnd")).toBe("누르면 이 시각까지 방해 금지를 켜요.");
+  });
+});
+
+describe("pauseUntilElapsed — 서버에 다시 물을 때", () => {
+  it("기한이 지났으면 참이다(지금과 같은 시각도 지난 것이다)", () => {
+    expect(pauseUntilElapsed(at(16, 21, 6), FRI_2107)).toBe(true);
+    expect(pauseUntilElapsed(FRI_2107, FRI_2107)).toBe(true);
+  });
+
+  it("아직 오지 않았거나 기한이 없으면 거짓이다", () => {
+    expect(pauseUntilElapsed(at(16, 21, 8), FRI_2107)).toBe(false);
+    expect(pauseUntilElapsed(undefined, FRI_2107)).toBe(false);
+  });
+});
+
+describe("연결이 끊겼을 때의 이유", () => {
+  it("해요체로 이유를 말한다", () => {
+    expect(PAUSE_UNTIL_OFFLINE_REASON).toBe("연결이 끊겨 지금은 바꿀 수 없어요.");
   });
 });

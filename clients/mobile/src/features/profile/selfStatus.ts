@@ -13,8 +13,11 @@ import {
   type NotificationRules,
   type PushKinds,
 } from '@momo/core/features/settings/notificationRules';
+import {pauseUntilElapsed} from '@momo/core/features/presence/pauseUntil';
 import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
+import {useEffect, useState} from 'react';
 
+import {useNow} from '../../lib/useNow';
 import {workspaceKeys} from '../workspace/queries';
 
 // =============================================================================
@@ -59,6 +62,47 @@ import {workspaceKeys} from '../workspace/queries';
 
 export const notificationRulesKey = (workspaceId: string) =>
   ['settings', 'notification-rules', workspaceId] as const;
+
+/** `setTimeout` 은 이 값을 넘는 지연을 즉시 실행으로 읽는다(32비트). 더 먼 기한은 분 틱이 맡는다. */
+const MAX_TIMER_MS = 2_147_483_647;
+/** 타이머가 기한보다 조금 일찍 깨어도 「지났다」가 참이 되도록 두는 여유. */
+const RECHECK_SLACK_MS = 500;
+
+/**
+ * 알고 있는 기한이 지나면 서버에 다시 묻는다 (ADR-0204 D2·D3, #2899 design-review H3).
+ *
+ * 방해 금지와 알림 일시 중지의 만료는 서버가 판정한다. 서버는 만료 시각에 이벤트를 보내지 않고
+ * (`RosterMember.dndUntilMs`) 질의 캐시는 30초 동안 신선하다고 믿으며 포커스 재조회도 꺼져 있다
+ * (`query/queryClient.ts`). 아무것도 하지 않으면 기한이 지난 뒤에도 시트가 낡은 방해 금지 줄과
+ * 「오후 10:30까지」를 말한다.
+ *
+ * 이 훅은 **화면을 스스로 풀지 않는다.** 기한이 지난 것을 알면 규칙과 명부를 다시 읽을 뿐이고, 줄이
+ * 사라지는 것은 서버의 새 답이 도착했을 때다. 서버가 아직 켜져 있다고 답하면(두 시계의 차이) 화면은
+ * 그대로이고 분 틱마다 다시 묻는다. 기한이 오는 순간에 한 번 깨어(분 틱을 기다리지 않는다) 묻는다.
+ */
+export function useRecheckWhenElapsed(
+  workspaceId: string,
+  untilMs: number | undefined,
+): void {
+  const client = useQueryClient();
+  const tick = useNow();
+  const [, wake] = useState(0);
+
+  useEffect(() => {
+    if (untilMs === undefined) return;
+    const wait = untilMs - Date.now();
+    if (wait <= 0 || wait > MAX_TIMER_MS) return;
+    const id = setTimeout(() => wake(n => n + 1), wait + RECHECK_SLACK_MS);
+    return () => clearTimeout(id);
+  }, [untilMs]);
+
+  const elapsed = pauseUntilElapsed(untilMs, Date.now());
+  useEffect(() => {
+    if (!elapsed) return;
+    void client.invalidateQueries({queryKey: notificationRulesKey(workspaceId)});
+    void client.invalidateQueries({queryKey: workspaceKeys.roster(workspaceId)});
+  }, [client, elapsed, tick, workspaceId]);
+}
 
 function patchSelf(
   rows: RosterMember[] | undefined,

@@ -25,6 +25,7 @@ import { Button } from "@/design/ui/button";
 import { Switch } from "@/design/ui/switch";
 import { notificationRulesQueryKey } from "./notificationRulesKey";
 import { PauseUntilDialog } from "./PauseUntilDialog";
+import { useRecheckWhenElapsed } from "./useRecheckWhenElapsed";
 import { SettingsRow } from "./shell/SettingsRow";
 import { SettingsSection } from "./shell/SettingsSection";
 import { CardBody } from "./workTierPolicy";
@@ -119,6 +120,8 @@ export function NotificationRulesSection({ offline }: { offline: boolean }) {
   });
 
   const current = rules.data ?? DEFAULT_NOTIFICATION_RULES;
+  // 일시 중지의 기한이 지나면 서버에 다시 묻는다(스위치가 서버의 새 답을 그린다, #2899 H3).
+  useRecheckWhenElapsed(workspaceId, current.dnd ? current.dndUntilMs : undefined);
   const pauseSaveFailed = save.isError && save.variables?.dndUntilMs !== undefined;
 
   // 포커스를 돌려줄 자리는 호출한 단추다. 클릭이 단추에 포커스를 주지 않는 WebKit(데스크탑

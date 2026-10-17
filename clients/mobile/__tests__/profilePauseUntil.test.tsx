@@ -1,6 +1,7 @@
 import type {Member} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -69,6 +70,11 @@ interface Server {
   memo: {dnd: boolean; dndUntilMs?: number} | null;
   /** 규칙 GET 이 몇 번 왔나 — 「방해 금지를 쓴 뒤 다시 읽는다」를 잰다. */
   rulesGets: number;
+  /** GET 한 번마다 앞에서 하나를 꺼내 **다음** GET 의 답으로 둔다 — 서버가 시간이 지나 바뀐 것을 흉내 낸다. */
+  rosterAfter: SelfRow[];
+  rulesAfter: Rules[];
+  /** 명부 GET 이 몇 번 왔나 — 시험이 첫 읽기가 끝난 뒤에 낡은 캐시를 심는다. */
+  rosterGets: number;
   presenceFails: boolean;
   rulesWriteFails: boolean;
   /** 명부 GET 이 끝나지 않는다 — 서버 답이 오기 전의 **낙관 갱신**만 남겨 본다. */
@@ -123,7 +129,10 @@ function installFetch(): void {
         return jsonResponse(200, server.rules);
       }
       server.rulesGets += 1;
-      return jsonResponse(200, {...server.rules});
+      const answer = {...server.rules};
+      const nextRules = server.rulesAfter.shift();
+      if (nextRules) server.rules = nextRules;
+      return jsonResponse(200, answer);
     }
     if (url.includes('/presence')) {
       const body = JSON.parse(String(init?.body ?? '{}'));
@@ -171,7 +180,11 @@ function installFetch(): void {
     }
     if (url.includes('/roster')) {
       if (server.rosterHangs) return new Promise<Response>(() => {});
-      return jsonResponse(200, {members: [server.self]});
+      server.rosterGets += 1;
+      const answerRow = server.self;
+      const nextRow = server.rosterAfter.shift();
+      if (nextRow) server.self = nextRow;
+      return jsonResponse(200, {members: [answerRow]});
     }
     if (url.includes('/read-state')) return jsonResponse(200, {read_states: []});
     if (url.includes('/messages')) return jsonResponse(200, {messages: []});
@@ -217,6 +230,9 @@ beforeEach(() => {
     rules: {dnd: false, mentionOverridesMute: true},
     memo: null,
     rulesGets: 0,
+    rosterAfter: [],
+    rulesAfter: [],
+    rosterGets: 0,
     presenceFails: false,
     rulesWriteFails: false,
     rosterHangs: false,
@@ -680,6 +696,208 @@ describe('기한 장 — 머리 문장의 줄바꿈', () => {
     expect(
       within(sheet).getByTestId('pause-until-description').props.lineBreakStrategyIOS,
     ).toBe('hangul-word');
+  });
+});
+
+const netInfo = (
+  jest.requireMock('@react-native-community/netinfo') as {
+    default: {
+      __emit: (state: {isConnected: boolean | null; isInternetReachable: boolean | null}) => void;
+    };
+  }
+).default;
+
+describe('기한 장 — 연결이 끊기면 이유를 말하고 잠근다 (design-review H2)', () => {
+  // 끊긴 채 누른 뮤테이션은 낙관값만 칠하고 멈췄다가 재연결 뒤에 나가는데, 기한은 **절대 시각**이라
+  // 그때는 이미 지났을 수 있다(서버가 400 으로 되돌린다). 그래서 끊긴 동안은 아예 쓰기를 세우지 않는다.
+  afterEach(() => {
+    act(() => netInfo.__emit({isConnected: true, isInternetReachable: true}));
+  });
+
+  it('끊기면 이유 한 줄이 서고 모든 줄이 잠기며, 눌러도 쓰지 않는다. 다시 이어지면 풀린다', async () => {
+    freezeClock(FRI_2107);
+    const sheet = await openSheet();
+    fireEvent.press(within(sheet).getByTestId('profile-pause-row'));
+    expect(within(sheet).queryByTestId('pause-until-offline')).toBeNull();
+
+    act(() => netInfo.__emit({isConnected: false, isInternetReachable: false}));
+    await waitFor(() =>
+      expect(within(sheet).getByTestId('pause-until-offline')).toHaveTextContent(
+        '연결이 끊겨 지금은 바꿀 수 없어요.',
+      ),
+    );
+    for (const id of OPTION_IDS) {
+      expect(
+        within(sheet).getByTestId(`pause-until-option-${id}`).props.accessibilityState,
+      ).toMatchObject({disabled: true});
+    }
+    fireEvent.press(within(sheet).getByTestId('pause-until-option-30m'));
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 40));
+    });
+    expect(server.writes).toEqual([]);
+
+    act(() => netInfo.__emit({isConnected: true, isInternetReachable: true}));
+    await waitFor(() => expect(within(sheet).queryByTestId('pause-until-offline')).toBeNull());
+    fireEvent.press(within(sheet).getByTestId('pause-until-option-30m'));
+    await waitFor(() => expect(rulesWrites()).toHaveLength(1));
+    expect(rulesWrites()[0].body).toEqual({dnd: true, dndUntilMs: FRI_2107 + 30 * 60_000});
+  });
+
+  it('방해 금지 장도 같다 — 끊긴 동안은 PUT /presence 를 세우지 않는다', async () => {
+    freezeClock(FRI_2107);
+    const sheet = await openSheet();
+    fireEvent.press(within(sheet).getByTestId('presence-option-dnd'));
+    act(() => netInfo.__emit({isConnected: false, isInternetReachable: false}));
+    await waitFor(() => expect(within(sheet).getByTestId('pause-until-offline')).toBeTruthy());
+    fireEvent.press(within(sheet).getByTestId('pause-until-option-1h'));
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 40));
+    });
+    expect(presenceWrites()).toEqual([]);
+  });
+
+  it('「직접 고르기」를 연 채 끊겨도 확인이 잠기고 쓰지 않는다', async () => {
+    freezeClock(FRI_2107);
+    const sheet = await openSheet();
+    fireEvent.press(within(sheet).getByTestId('profile-pause-row'));
+    fireEvent.press(within(sheet).getByTestId('pause-until-option-custom'));
+    expect(within(sheet).getByTestId('pause-until-custom')).toBeTruthy();
+    expect(
+      within(sheet).getByTestId('pause-until-confirm').props.accessibilityState,
+    ).toMatchObject({disabled: false});
+
+    act(() => netInfo.__emit({isConnected: false, isInternetReachable: false}));
+    await waitFor(() =>
+      expect(
+        within(sheet).getByTestId('pause-until-confirm').props.accessibilityState,
+      ).toMatchObject({disabled: true}),
+    );
+    fireEvent.press(within(sheet).getByTestId('pause-until-confirm'));
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 40));
+    });
+    expect(server.writes).toEqual([]);
+  });
+});
+
+describe('기한이 지나면 시트가 서버에 다시 묻는다 (design-review H3)', () => {
+  /** 셸을 세우고, 이 기기의 캐시에 낡은 명부·규칙을 심은 채 프로필 시트를 연다. */
+  async function openSheetWithCache(cache: {roster: SelfRow[]; rules: Rules}) {
+    renderShell();
+    await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
+    // 셸의 첫 명부 읽기가 끝난 뒤에 심는다 — 그 답이 낡은 캐시를 덮어쓰지 않게.
+    await waitFor(() => expect(server.rosterGets).toBeGreaterThanOrEqual(1));
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 30));
+    });
+    queryClient!.setQueryData(['roster', WS], cache.roster);
+    queryClient!.setQueryData(['settings', 'notification-rules', WS], cache.rules);
+    fireEvent.press(screen.getByTestId('profile-avatar'));
+    const sheet = screen.getByTestId('profile-sheet');
+    await waitFor(() =>
+      expect(within(sheet).getByTestId('presence-option-auto')).toBeTruthy(),
+    );
+    return sheet;
+  }
+
+  const askedKeys = (spy: jest.SpyInstance) =>
+    spy.mock.calls.map(call => JSON.stringify((call[0] as {queryKey: unknown}).queryKey));
+  const ROSTER_KEY = JSON.stringify(['roster', WS]);
+  const RULES_KEY = JSON.stringify(['settings', 'notification-rules', WS]);
+
+  it('지난 기한을 알면 규칙과 명부를 다시 읽고, 서버가 꺼졌다고 답하면 줄이 사라진다', async () => {
+    freezeClock(FRI_2107);
+    // 서버의 지금 값은 꺼짐이다(`beforeEach` 의 기본). 낡은 것은 이 기기의 캐시다: 기한(21:00)이 이미
+    // 지난 채 방해 금지와 일시 중지가 켜져 있다고 기억한다. 캐시는 신선(staleTime 30초)이라 시트를
+    // 여는 것만으로는 다시 읽지 않는다 — 기한이 지났다는 사실이 읽게 해야 한다.
+    const invalidate = jest.spyOn(QueryClient.prototype, 'invalidateQueries');
+    const sheet = await openSheetWithCache({
+      roster: [selfRow({presenceStatus: 'dnd', dndUntilMs: at(16, 21, 0)})],
+      rules: {dnd: true, mentionOverridesMute: false, dndUntilMs: at(16, 21, 0)},
+    });
+    await waitFor(() => {
+      expect(askedKeys(invalidate)).toContain(ROSTER_KEY);
+      expect(askedKeys(invalidate)).toContain(RULES_KEY);
+    });
+    // 서버의 새 답을 그린다: 방해 금지가 풀리고 일시 중지 스위치가 꺼진다.
+    await waitFor(() =>
+      expect(within(sheet).queryByTestId('profile-dnd-until-row')).toBeNull(),
+    );
+    expect(
+      within(sheet).getByTestId('presence-option-auto').props.accessibilityState,
+    ).toMatchObject({selected: true});
+    await waitFor(() =>
+      expect(
+        within(sheet).getByTestId('profile-pause-row').props.accessibilityState,
+      ).toMatchObject({checked: false}),
+    );
+    expect(within(sheet).queryByTestId('profile-pause-until-row')).toBeNull();
+  });
+
+  it('서버가 아직 켜져 있다고 답하면(시계 차이) 줄이 그대로다 — 스스로 풀지 않는다', async () => {
+    freezeClock(FRI_2107);
+    // 서버도 여전히 켜져 있다고 답한다(두 시계의 차이). 기한이 지났다는 이유로 화면이 풀면 안 된다.
+    server.self = selfRow({presenceStatus: 'dnd', dndUntilMs: at(16, 21, 0)});
+    server.rules = {dnd: true, mentionOverridesMute: false, dndUntilMs: at(16, 21, 0)};
+    const invalidate = jest.spyOn(QueryClient.prototype, 'invalidateQueries');
+    const sheet = await openSheetWithCache({
+      roster: [server.self],
+      rules: server.rules,
+    });
+    await waitFor(() => expect(askedKeys(invalidate)).toContain(ROSTER_KEY));
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 60));
+    });
+    expect(
+      within(sheet).getByTestId('presence-option-dnd').props.accessibilityState,
+    ).toMatchObject({selected: true});
+    expect(within(sheet).getByTestId('profile-dnd-until-row')).toHaveTextContent(/오후 9:00까지/);
+  });
+
+  it('기한이 아직 오지 않았으면 다시 묻지 않는다', async () => {
+    freezeClock(FRI_2107);
+    server.self = selfRow({presenceStatus: 'dnd', dndUntilMs: at(16, 22, 0)});
+    server.rules = {dnd: true, mentionOverridesMute: false, dndUntilMs: at(16, 22, 0)};
+    const invalidate = jest.spyOn(QueryClient.prototype, 'invalidateQueries');
+    const sheet = await openSheet();
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 60));
+    });
+    expect(within(sheet).getByTestId('profile-dnd-until-row')).toBeTruthy();
+    expect(askedKeys(invalidate)).not.toContain(ROSTER_KEY);
+    expect(askedKeys(invalidate)).not.toContain(RULES_KEY);
+  });
+
+  it('기한이 없는 행(옛 판이 만든 것)은 만료가 없으니 다시 묻지 않는다', async () => {
+    server.self = selfRow({presenceStatus: 'dnd'});
+    server.rules = {dnd: true, mentionOverridesMute: false};
+    const invalidate = jest.spyOn(QueryClient.prototype, 'invalidateQueries');
+    await openSheet();
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 60));
+    });
+    expect(askedKeys(invalidate)).not.toContain(ROSTER_KEY);
+    expect(askedKeys(invalidate)).not.toContain(RULES_KEY);
+  });
+});
+
+describe('일시 중지 줄의 힌트 (design-review L4)', () => {
+  it('꺼진 스위치는 누르면 기한 장이 열린다고 알리고, 켜진 스위치는 그렇게 알리지 않는다', async () => {
+    freezeClock(FRI_2107);
+    const sheet = await openSheet();
+    expect(within(sheet).getByTestId('profile-pause-row').props.accessibilityHint).toBe(
+      '누르면 알림을 멈출 기한을 골라요.',
+    );
+  });
+
+  it('켜져 있으면 힌트가 기한을 고르라고 하지 않는다(누르면 곧바로 꺼진다)', async () => {
+    freezeClock(FRI_2107);
+    server.rules = {dnd: true, mentionOverridesMute: false, dndUntilMs: at(16, 22, 0)};
+    const sheet = await openSheet();
+    expect(within(sheet).getByTestId('profile-pause-row').props.accessibilityHint).not.toMatch(
+      /기한을 골라요/,
+    );
   });
 });
 

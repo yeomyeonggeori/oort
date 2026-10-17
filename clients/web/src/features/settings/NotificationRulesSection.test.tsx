@@ -368,6 +368,47 @@ describe("NotificationRulesSection DND regression", () => {
     });
   });
 
+  it("일시 중지의 기한이 지났으면 서버에 다시 묻고, 서버가 꺼졌다고 답하면 스위치가 꺼진다 (design-review H3)", async () => {
+    // 첫 답: 기한이 이미 지난 채 켜져 있다. 두 번째 답: 서버가 꺼졌다고 답한다.
+    stored = { dnd: true, mentionOverridesMute: false, dndUntilMs: at(16, 21, 0) };
+    fetchNotificationRules.mockImplementationOnce(async () => ({ ...stored }));
+    fetchNotificationRules.mockImplementationOnce(async () => ({
+      dnd: false,
+      mentionOverridesMute: false,
+    }));
+    freezeClock();
+    await mountSection();
+    // 탭도 포커스도 없이 기한이 지났다는 이유만으로 두 번째 읽기가 나간다.
+    await vi.waitFor(() => expect(fetchNotificationRules).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => {
+      expect(q("notification-rules-dnd")!.getAttribute("aria-checked")).toBe("false");
+    });
+    expect(q("notification-rules-until")).toBeNull();
+  });
+
+  it("서버가 아직 켜져 있다고 답하면(시계 차이) 스위치와 줄이 그대로다 — 스스로 풀지 않는다", async () => {
+    stored = { dnd: true, mentionOverridesMute: false, dndUntilMs: at(16, 21, 0) };
+    freezeClock();
+    await mountSection();
+    await vi.waitFor(() => expect(fetchNotificationRules).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    expect(q("notification-rules-dnd")!.getAttribute("aria-checked")).toBe("true");
+    expect(q("notification-rules-until")!.textContent).toContain("오후 9:00까지");
+  });
+
+  it("기한이 아직 오지 않았으면 다시 묻지 않는다", async () => {
+    stored = { dnd: true, mentionOverridesMute: false, dndUntilMs: at(16, 22, 0) };
+    freezeClock();
+    await mountSection();
+    await vi.waitFor(() => expect(q("notification-rules-until")).not.toBeNull());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    expect(fetchNotificationRules).toHaveBeenCalledTimes(1);
+  });
+
   it("서버 답을 기다리는 동안에도 고른 기한이 줄에 먼저 보인다", async () => {
     freezeClock();
     patchNotificationRules.mockImplementation(() => new Promise(() => undefined));

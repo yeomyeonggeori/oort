@@ -90,6 +90,7 @@ import {useAppUpdateOffer} from '../appUpdate/useAppUpdateOffer';
 import {
   usePauseNotifications,
   usePushKinds,
+  useRecheckWhenElapsed,
   useSetPresence,
 } from './selfStatus';
 import {PauseUntilPage} from './PauseUntilPage';
@@ -258,6 +259,19 @@ function SheetBody({
   useEffect(() => {
     scrollRef.current?.scrollTo({y: 0, animated: false});
   }, [page]);
+
+  // 시트가 열려 있는 동안(어느 장이든) 알고 있는 기한이 지나면 서버에 다시 묻는다. 서버는 만료에
+  // 이벤트를 보내지 않아서, 가만두면 지난 시각을 「…까지」로 말하는 방해 금지 줄이 남는다(design-review
+  // H3). 화면을 스스로 풀지 않는다 — 서버의 새 답이 온 뒤에 그린다.
+  const sheetPause = usePauseNotifications(workspaceId);
+  const sheetSelf = memberFor(directory, member.id);
+  const knownDeadlines = [sheetSelf?.dndUntilMs, sheetPause.untilMs].filter(
+    (at): at is number => at !== undefined,
+  );
+  useRecheckWhenElapsed(
+    workspaceId,
+    knownDeadlines.length > 0 ? Math.min(...knownDeadlines) : undefined,
+  );
 
   return (
     <View style={styles.root}>
@@ -705,7 +719,10 @@ export function ProfilePage({
             disabled: pauseLocked,
           }}
           accessibilityLabel={NOTIFICATION_PAUSE_LABEL}
-          accessibilityHint={pauseDetail}
+          // 꺼진 스위치는 누르면 켜지는 대신 기한 장이 열린다 — 방해 금지 줄의 힌트와 같은 말로 알린다.
+          accessibilityHint={
+            pause.ready && !pause.paused ? '누르면 알림을 멈출 기한을 골라요.' : pauseDetail
+          }
           trailing={
             pause.ready ? (
               <Switch
