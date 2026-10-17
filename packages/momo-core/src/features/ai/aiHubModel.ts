@@ -178,8 +178,11 @@ export const AI_EXTERNAL_ROWS: readonly AiExternalRow[] = [
     title: AI_EXTERNAL_SUBSECTIONS.apps,
     legacy: null,
     detailLegacy: null,
-    summary: "워크스페이스에 설치한 앱과 쓸 수 있는 도구를 관리해요.",
-    detail: ["워크스페이스에 설치한 앱과, 에이전트가 쓸 수 있는 도구를 관리해요."],
+    // 설치·권한 변경은 서버가 그 경로를 싣고 있을 때만 열린다(`pluginInstall`, #3860).
+    // 이 문구는 두 경우에 모두 참이어야 해서 「관리해요」를 쓰지 않는다. 읽기만 되는
+    // 서버에서 관리한다고 말하면 이 줄이 화면의 첫 거짓말이 된다.
+    summary: "공식 앱이 할 수 있는 일과 내가 허용한 권한을 확인해요.",
+    detail: ["공식 앱이 할 수 있는 일, 연결하는 곳, 내가 허용한 권한을 확인해요."],
     countNoun: "설치",
     path: `${AI_EXTERNAL_BASE_PATH}/apps`,
     fromSettings: "plugins",

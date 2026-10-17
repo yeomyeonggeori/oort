@@ -31,6 +31,10 @@ import {
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+import {
+  installAppClock,
+  SHELL_WAIT_TEST_TIMEOUT_MS,
+} from './fixtures/fakeClock';
 
 // =============================================================================
 // 「버벅임」을 숫자로 잠근다 (goal RN-P2a / #997)
@@ -260,7 +264,7 @@ async function openConversation() {
 /** Let every already-resolved promise and zero-delay timer run out. */
 async function settle(ms = 25) {
   await act(async () => {
-    await new Promise(resolve => setTimeout(resolve, ms));
+    await jest.advanceTimersByTimeAsync(ms);
   });
 }
 
@@ -274,7 +278,10 @@ function mountedRows(): number {
   return screen.getAllByTestId('message-row').length;
 }
 
+jest.setTimeout(SHELL_WAIT_TEST_TIMEOUT_MS);
+
 beforeEach(() => {
+  installAppClock();
   mmkvStore.clear();
   __resetSessionStore();
   __resetServerBaseCache();
@@ -290,6 +297,7 @@ afterEach(() => {
   queryClient?.clear();
   queryClient = null;
   resetAgentWorking();
+  jest.useRealTimers();
   // `captureAppState` 아래의 스파이를 되돌린다. 테스트가 중간에 던져도 다음
   // 테스트가 남의 stub 위에서 도는 일이 없어야 한다.
   jest.restoreAllMocks();
@@ -524,7 +532,7 @@ describe('대화 화면이 다시 그려질 때 메시지 행이 치르는 값',
             payload: framePayload(seq),
           },
         });
-        await new Promise(resolve => setTimeout(resolve, 20));
+        await jest.advanceTimersByTimeAsync(20);
       });
     }
     await settle(700);
