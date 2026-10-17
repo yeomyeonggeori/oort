@@ -1,6 +1,7 @@
 import type {Member} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -69,6 +70,8 @@ interface World {
   afterMessages: Record<string, unknown[]>;
   failMessages?: boolean;
   failApprovals?: boolean;
+  /** 에이전트 실행 이력 경로의 응답 상태. 404 면 이 서버엔 그 경로가 없다(미제공). */
+  agentRunsStatus?: number;
   /** 없으면 구 서버: `GET /inbox`가 404다. */
   inbox?: {pages: Record<string, unknown>; failStatus?: number};
 }
@@ -121,7 +124,11 @@ function installFetch(world: World) {
       if (world.failApprovals) return json(500, {error: {code: 'internal', message: 'x'}});
       return json(200, {approvals: parsed.searchParams.get('status') === 'pending' ? world.approvals : []});
     }
-    if (target.includes('/agent-runs')) return json(200, {runs: []});
+    if (target.includes('/agent-runs')) {
+      return world.agentRunsStatus
+        ? json(world.agentRunsStatus, {error: {code: 'not_found', message: 'absent'}})
+        : json(200, {runs: []});
+    }
     if (target.includes('/roster')) return json(200, {members: ROSTER});
     if (target.includes('/read-state')) return json(200, {read_states: world.readStates});
     if (target.includes('/replies')) {
@@ -327,5 +334,96 @@ describe('인박스 구 서버 후퇴 (#3684)', () => {
     await waitFor(() => expect(rowKeys().length).toBe(5));
     expect(inboxCalls(mock)).toHaveLength(1);
     expect(screen.queryByTestId('inbox-tab-reply')).toBeNull();
+  });
+});
+
+// =============================================================================
+// 인박스 당겨서 새로고침 (#3962): 클라이언트 조합 경로의 재조회는 키 접두사 **무효화**로 여러 쿼리를 다시 읽는다.
+// `invalidateQueries()` 는 쿼리가 실패해도 `undefined` 로 조용히 끝나서, 이 경로를 거친 당김이 실패에 성공
+// 햅틱을 냈다(그리고 캐시된 항목이 있는 인박스는 실패를 화면 어디에도 말하지 않는다). 지금은 재조회가 실패까지
+// 돌려주고, 당김이 그것을 경고 햅틱과 머리의 실패 안내로 전한다.
+//
+// 가짜인 것은 `fetch` 가 무엇을 답하는가뿐이다. 아래 둘은 같은 인박스를 같은 방식으로 당기고 `/messages` 만
+// 다르게 답하게 한다.
+//
+// red proof: `useMailbox` 의 무효화를 `invalidateAndReport` 에서 맨 `invalidateQueries` 로 되돌리면 → 실패 시험이 붉다.
+//   에이전트 피드의 `ignoreError: serverSaysAbsent` 를 빼면 → 「이 서버에 실행 이력 경로가 없으면」이 붉다.
+// =============================================================================
+describe('인박스 당겨서 새로고침 (#3962)', () => {
+  const haptic = jest.requireMock('expo-haptics') as {__calls: string[]};
+  const notifications = () => haptic.__calls.filter(c => c.startsWith('notification:'));
+  const pullInbox = () =>
+    act(() => {
+      screen.getByTestId('inbox-list').props.refreshControl.props.onRefresh();
+    });
+
+  beforeEach(() => {
+    haptic.__calls.length = 0;
+  });
+
+  it('DM·멘션·스레드를 읽는 쿼리가 실패하면 당김은 경고 햅틱과 실패 안내로 끝난다', async () => {
+    const world = fullWorld();
+    installFetch(world);
+    await openInbox();
+    await waitFor(() => expect(rowKeys().length).toBe(5), {timeout: 10_000});
+    world.failMessages = true; // 목록은 이미 캐시돼 있다: 화면에는 항목이 그대로 남는다
+    pullInbox();
+    await waitFor(() => expect(notifications()).toEqual(['notification:warning']), {timeout: 10_000});
+    expect(screen.queryByTestId('pull-refresh-failed', {includeHiddenElements: true})).not.toBeNull();
+    expect(rowKeys().length).toBeGreaterThan(0);
+  });
+
+  it('멘션 탭(승인 원장이 아닌 무효화 피드)도 읽기가 실패하면 경고다', async () => {
+    const world = fullWorld();
+    installFetch(world);
+    await openInbox();
+    await waitFor(() => expect(rowKeys().length).toBe(5), {timeout: 10_000});
+    fireEvent.press(screen.getByTestId('inbox-tab-mentions'));
+    await waitFor(() => expect(screen.getByTestId('inbox-list')).toBeTruthy(), {timeout: 10_000});
+    world.failMessages = true;
+    pullInbox();
+    await waitFor(() => expect(notifications()).toEqual(['notification:warning']), {timeout: 10_000});
+  });
+
+  it('에이전트 탭(승인·런 원장 무효화 피드)도 원장 읽기가 실패하면 경고다', async () => {
+    const world = fullWorld();
+    installFetch(world);
+    await openInbox();
+    await waitFor(() => expect(rowKeys().length).toBe(5), {timeout: 10_000});
+    fireEvent.press(screen.getByTestId('inbox-tab-agents'));
+    await waitFor(() => expect(screen.queryByTestId('inbox-list') ?? screen.queryByTestId('inbox-empty')).toBeTruthy(), {
+      timeout: 10_000,
+    });
+    world.failApprovals = true;
+    act(() => {
+      (screen.queryByTestId('inbox-list') ?? screen.getByTestId('inbox-empty')).props.refreshControl.props.onRefresh();
+    });
+    await waitFor(() => expect(notifications()).toEqual(['notification:warning']), {timeout: 10_000});
+  });
+
+  it('에이전트 탭: 이 서버에 실행 이력 경로가 없으면(404) 실패가 아니다 — 화면이 미제공으로 접는 오류다', async () => {
+    const world = fullWorld();
+    installFetch(world);
+    await openInbox();
+    await waitFor(() => expect(rowKeys().length).toBe(5), {timeout: 10_000});
+    fireEvent.press(screen.getByTestId('inbox-tab-agents'));
+    await waitFor(() => expect(screen.queryByTestId('inbox-list') ?? screen.queryByTestId('inbox-empty')).toBeTruthy(), {
+      timeout: 10_000,
+    });
+    world.agentRunsStatus = 404;
+    act(() => {
+      (screen.queryByTestId('inbox-list') ?? screen.getByTestId('inbox-empty')).props.refreshControl.props.onRefresh();
+    });
+    await waitFor(() => expect(notifications()).toEqual(['notification:success']), {timeout: 10_000});
+    expect(screen.queryByTestId('pull-refresh-failed', {includeHiddenElements: true})).toBeNull();
+  });
+
+  it('모두 잘 읽히면 성공 햅틱이고 실패 안내는 없다', async () => {
+    installFetch(fullWorld());
+    await openInbox();
+    await waitFor(() => expect(rowKeys().length).toBe(5), {timeout: 10_000});
+    pullInbox();
+    await waitFor(() => expect(notifications()).toEqual(['notification:success']), {timeout: 10_000});
+    expect(screen.queryByTestId('pull-refresh-failed', {includeHiddenElements: true})).toBeNull();
   });
 });
