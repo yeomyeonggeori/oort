@@ -49,6 +49,54 @@ describe("koreanParticle", () => {
   });
 });
 
+describe("particleFor: Latin names are read aloud (#4025)", () => {
+  it("closed endings k t p m n l take 이/을/은/과", () => {
+    expect(attachParticle("grok")).toBe("grok이"); // 그록
+    expect(attachParticle("Slack")).toBe("Slack이");
+    expect(attachParticle("Notion", "object")).toBe("Notion을");
+    expect(attachParticle("Zoom", "topic")).toBe("Zoom은");
+    expect(attachParticle("Gmail")).toBe("Gmail이");
+    expect(attachParticle("Chat", "with")).toBe("Chat과");
+    expect(attachParticle("Map")).toBe("Map이");
+    expect(attachParticle("Bing")).toBe("Bing이"); // ng via the n
+    expect(attachParticle("kim-intern")).toBe("kim-intern이"); // 인턴
+    expect(attachParticle("Block")).toBe("Block이"); // ck 블록
+  });
+
+  it("open endings keep 가/를/는/와", () => {
+    expect(attachParticle("Hermes")).toBe("Hermes가");
+    expect(attachParticle("Claude")).toBe("Claude가");
+    expect(attachParticle("Figma")).toBe("Figma가");
+    expect(attachParticle("GitHub")).toBe("GitHub가");
+    expect(attachParticle("Linear", "object")).toBe("Linear를");
+    expect(attachParticle("API")).toBe("API가");
+    expect(attachParticle("oort")).toBe("oort가"); // 오르트: t after a consonant
+    expect(attachParticle("Next")).toBe("Next가"); // 넥스트
+    expect(attachParticle("Park")).toBe("Park가"); // 파크
+    expect(attachParticle("Hermes", "with")).toBe("Hermes와");
+  });
+
+  it("spells a vowel-less acronym by its last letter name", () => {
+    expect(attachParticle("SDK")).toBe("SDK가"); // 케이
+    expect(attachParticle("GPT")).toBe("GPT가"); // 티
+    expect(attachParticle("SQL")).toBe("SQL이"); // 엘
+    expect(attachParticle("PM")).toBe("PM이"); // 엠
+    expect(attachParticle("GROK")).toBe("GROK이"); // has a vowel: read as a word
+  });
+
+  it("ignores trailing punctuation and defaults to open for non-letters", () => {
+    expect(particleFor("grok.")).toBe("이");
+    expect(particleFor("(Slack)")).toBe("이");
+    expect(particleFor("MOMO-613")).toBe("가");
+    expect(particleFor("")).toBe("가");
+    expect(particleFor("🙂")).toBe("가");
+  });
+
+  it("leaves hasFinalConsonant Hangul-only", () => {
+    expect(hasFinalConsonant("grok")).toBe(false);
+  });
+});
+
 describe("directionParticle (로 / 으로)", () => {
   // The measured defect: "provider가 503로 답했습니다." was on screen, and the
   // status codes an operator meets most (500, 503, 400, 403, 406) are exactly

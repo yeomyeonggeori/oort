@@ -67,13 +67,57 @@ export function hasFinalConsonant(word: string): boolean {
   return (codePoint - HANGUL_FIRST) % JONGSEONG_SLOTS !== 0;
 }
 
+// ---- Latin endings -----------------------------------------------------------
+//
+// "grok가 답해요" was on a phone. A Latin name is read aloud in Korean, and the
+// reading is what decides the particle, so the last LETTERS are read the way a
+// loanword is: m n l (and ng) and a k t p straight after a vowel or in ck close the syllable
+// (grok 그록, Slack 슬랙, Notion 노션, Zoom 줌, Gmail 지메일), everything else
+// ends open (Hermes 허미즈, Claude 클로드, Figma 피그마, Hub 허브: a final b d g
+// gets a vowel added, a final s x z f etc. too).
+//
+// Two judgement calls, both stated so they are not rediscovered:
+//   - An all-caps word with no vowel (SDK, GPT, SQL, PM) is spelled letter by
+//     letter, so its last LETTER NAME decides: only L, M, N, R close (엘 엠 엔
+//     알). With a vowel (API, GROK) it is read as a word and takes the rule above.
+//   - Unknown territory is open (가/를/는): digits, symbols, emoji, a word with
+//     no letters. That is the pre-existing default and it is the one a reader
+//     forgives most often.
+// m n l (and so ng) always close. A stop k t p closes only straight after a
+// vowel or in "ck" (grok 그록, Slack 슬랙, Chat 챗, Map 맵); after a consonant
+// it gets a vowel added (Oort 오르트, Park 파크, Next 넥스트, Script 스크립트).
+const LATIN_CLOSED_ENDING = /(?:ng|[mnl]|ck|[aeiouy][ktp])$/i;
+const LATIN_SPELLED_CLOSED = /[lmnr]$/i;
+
+/** Does a word ending in a Latin letter close its spoken last syllable? */
+function latinEndsClosed(word: string): boolean {
+  // Strip trailing non-letters so "grok." and "(grok)" decide on the k.
+  const trimmed = word.replace(/[^\p{L}]+$/u, "");
+  if (!/[A-Za-z]$/.test(trimmed)) return false;
+  const letters = trimmed.match(/[A-Za-z]+$/)?.[0] ?? "";
+  const isSpelledAcronym =
+    letters.length >= 2 && letters === letters.toUpperCase() && !/[AEIOU]/.test(letters);
+  if (isSpelledAcronym) return LATIN_SPELLED_CLOSED.test(letters);
+  return LATIN_CLOSED_ENDING.test(letters);
+}
+
+/** Final consonant for the purpose of choosing a particle: Hangul or a Latin reading. */
+function takesFinalForm(word: string): boolean {
+  if (hasFinalConsonant(word)) return true;
+  const codePoint = lastSpokenCodePoint(word);
+  if (codePoint === null) return false;
+  const isLatin =
+    (codePoint >= 0x41 && codePoint <= 0x5a) || (codePoint >= 0x61 && codePoint <= 0x7a);
+  return isLatin && latinEndsClosed(word);
+}
+
 /** The particle alone, for callers that must place it after a qualifier. */
 export function particleFor(word: string, pair: ParticlePair = "subject"): string {
   const [withFinal, withoutFinal] = PAIRS[pair];
-  return hasFinalConsonant(word) ? withFinal : withoutFinal;
+  return takesFinalForm(word) ? withFinal : withoutFinal;
 }
 
-/** "김인턴" + subject -> "김인턴이"; "Hermes" + subject -> "Hermes가". */
+/** "김인턴" + subject -> "김인턴이"; "Hermes" + subject -> "Hermes가"; "grok" -> "grok이". */
 export function attachParticle(word: string, pair: ParticlePair = "subject"): string {
   return `${word}${particleFor(word, pair)}`;
 }
