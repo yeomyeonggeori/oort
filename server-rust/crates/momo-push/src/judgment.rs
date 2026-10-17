@@ -72,24 +72,82 @@
 //!   sends (`send_message_in_tx`, which records no mentions) do. The two paths differ
 //!   in the window because ADR-0120 gives mentions none and D8 gives answers one.
 //!
-//!   **Known gap (independent review H1) — a streamed *worker* answer is judged once,
-//!   when it OPENS.** The in-process worker (`MessageStream`) writes one answer in two
-//!   steps: the opening slice is the INSERT — the only write the 011 trigger turns into
-//!   a candidate — and `commit_turn`'s closing slice is an UPDATE that enqueues
-//!   nothing. So the reading window is read against the *opening* slice, and the
-//!   finished answer is never judged: an asker who sent the question and put the phone
-//!   down within 30 s of the first words is held back, and then never told. (Not
-//!   affected: single-INSERT answers — the hosted gateway's `complete`, the team-AI
-//!   helper's sends, both sweeps' lines, a worker turn that never opened a stream — and
-//!   REST streamers, whose opening `POST` already names the quoted author as mentioned.)
-//!   The two `known_gap_h1_*` tests in `push_conformance_pg` pin this. Closing it needs
-//!   a candidate at the stream close and a window read at judgment time — a second
-//!   producer of `push_candidate` rows, which `OutboxKind::PushCandidate` and
-//!   `docs/architecture/overview.md` reserve for the 011 trigger — so it waits for a
-//!   decision rather than being decided here. (The window is also a decision in its
-//!   own right: ADR-0204 D8 writes it as 「30초 안에 움직였으면」, and a chat answer that
-//!   arrives within 30 s of the asker's own question — whose arrival moved their
-//!   cursor — is "reading" even without streaming. That is the ADR as written.)
+//!   **A streamed answer is judged when it closes (ADR-0204 증보 1 D8-a, #3987).** The
+//!   in-process worker (`MessageStream`) writes one answer in two steps: the opening
+//!   slice is the INSERT — which the 011 trigger turns into a candidate — and
+//!   `commit_turn`'s closing slice is an UPDATE. A line that is still streaming
+//!   (`momo.stream.streaming = true`) is therefore **held** by this arm: it has no
+//!   answer yet, only the first words. So is one a retried turn froze between two attempts
+//!   (`momo.stream.provisional = true`, written by the worker's between-attempts freeze): it
+//!   reads `streaming: false, outcome: failed` like the end of a turn that really failed, but
+//!   the turn expects to reopen it. The write that ends it enqueues the second
+//!   candidate (`momo_messaging::stream_message_body_in_tx` →
+//!   `momo_outbox::emit_stream_closed_push_candidate`), and this arm judges the finished
+//!   answer then — with "reading" read at **judgment time** (`now()`), not at the opening
+//!   slice (`created_at`), and without the `last_read_seq >= seq` shortcut: a cursor that
+//!   reached the line when its first words arrived says they saw it begin, not that they
+//!   are still there. So an asker who left during the stream is pushed once, at the
+//!   close; one who was moving their cursor in the 30 s before it is not; and one who
+//!   was away from the start gets one push, not an opening one and a closing one.
+//!
+//!   *Judgment time is when the notifier processes the candidate.* That is the moment of
+//!   the close while the notifier keeps up (a second or two), and later by exactly its
+//!   lag when it does not: the question the window asks is "are they looking at this
+//!   channel right now?", and it is asked when the push would go out.
+//!
+//!   *What the window cannot tell.* A person's cursor — and `last_read_at` with it — moves
+//!   only when `last_read_seq` does (`read_state.rs`), and a stream spends no `seq`. So an
+//!   asker who watched a stream for longer than 30 s from a cursor that stood still looks,
+//!   to the server, exactly like one who left during it, and is pushed at the close
+//!   (`known_gap_a_stream_watched_longer_than_the_window_from_a_standing_cursor_is_pushed`
+//!   pins it). The cost is a banner for a person who was looking; the alternative is the
+//!   H1 silence for one who was not. A presence signal is the way to tell them apart, and
+//!   is a follow-up.
+//!
+//!   *Streams this arm does not judge at all.* A line that never streamed (the hosted
+//!   gateway's `complete`, the team-AI helper's sends, both sweeps' lines, a worker turn
+//!   that never opened a stream) is judged at its INSERT exactly as before — `created_at`,
+//!   with the `seq` shortcut. REST streamers (prime/hermes) whose opening `POST` quotes the
+//!   asker's message name that author as *mentioned*, so they are judged by the
+//!   explicit-mention arm at their opening, as before; the close candidate finds that
+//!   person's push already settled (`collapse_id`) and is skipped. One that quotes nobody has
+//!   no asker for this arm. A stream that is never closed is never judged by this arm — a
+//!   producer that died and whose run nobody closed, a close the domain refuses (the agent
+//!   left the channel, the message was deleted), and a retried turn's freeze that no path
+//!   ever ends — its job is never reclaimed, its run is parked on an approval that is then
+//!   rejected, expires or is cancelled (those routes close no stream, an open one included),
+//!   or a refused turn's run was cancelled before the refusal; and a close the worker
+//!   attempts after its transaction and that fails (a database error) is only logged, as
+//!   ADR-0155 chose for a best-effort close; the opening candidate has long been consumed,
+//!   so there is nothing left to judge it.
+//!
+//!   Not settled here and left to the ADR's wording: a chat answer that arrives within 30 s
+//!   of the asker's own question is "reading" even without streaming, because the question
+//!   moved their cursor (ADR-0204 D8: 「30초 안에 움직였으면」).
+//!
+//!   *A provisional freeze is not a close.* `streaming: false` with `outcome: failed` is also
+//!   how a turn that really failed ends, and a candidate judged inside a retried turn's freeze
+//!   — the opening candidate when the notifier is a moment late, a judgment that was requeued
+//!   — would push the asker the half answer, and spend the message's one push slot
+//!   (`collapse_id` is per message) so the finished answer's push is skipped. The marker is
+//!   what tells them apart: this arm holds a `provisional` block like an open stream, and the
+//!   write that ends the turn (the retry's commit, or the terminal close when the retries
+//!   never reopen the stream) enqueues the candidate that pushes.
+//!
+//!   *The close candidate re-judges the whole message*, not only this arm, against the
+//!   ledgers as they are at that moment: the mute and DND rows, the asker's membership, a
+//!   run's status. A person who muted the channel or left it between the opening and the
+//!   close is judged as muted or gone; a hosted agent's `type=work` answer streamed over REST
+//!   is also judged by `work_run_done` at its close, and can push its requester there if the
+//!   run ended after the opening. The mentions recorded at the INSERT are not touched by the
+//!   close.
+//!
+//!   *Roll-out.* A notifier that holds streaming lines depends on the producer that
+//!   enqueues the closing candidate: ship the producers (server, agent-worker) first or
+//!   together. The other order leaves a streamed answer held and never judged. An old
+//!   notifier with the new producers is harmless: it holds no stream at all, so it judges
+//!   the opening candidate when the stream opens, as before, and the closing candidate as
+//!   one more opening — `collapse_id` keeps it to one push.
 //! * **Mute (ADR-0124)** — the per-channel `notification_pref` row suppresses
 //!   every reason, mentions and approvals included. Read at judgment time; no
 //!   cache.
@@ -140,6 +198,7 @@ use std::collections::HashMap;
 use momo_agent::actions::opens_in_app;
 use momo_agent::PROP_ANSWERS_MESSAGE_ID;
 use momo_db::DbError;
+use momo_messaging::STREAM_PROPS_KEY;
 use serde_json::Value;
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
@@ -202,6 +261,9 @@ pub async fn judge_targets(
                   m.created_at, \
                   m.root_id, \
                   m.reply_to_id, \
+                  (COALESCE((m.props->$6::text)->>'streaming', '') = 'true' \
+                   OR COALESCE((m.props->$6::text)->>'provisional', '') = 'true') AS streaming, \
+                  jsonb_exists(m.props, $6::text) AS streamed, \
                   CASE WHEN m.props->>$5::text \
                             ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' \
                        THEN (m.props->>$5::text)::uuid END AS answers_message_id, \
@@ -308,15 +370,20 @@ pub async fn judge_targets(
                     ) THEN 'mention' \
                     WHEN (SELECT channel_kind FROM msg) = 'dm' THEN 'dm' \
                     WHEN mem.id = (SELECT asker_id FROM asked) THEN \
-                      CASE WHEN NOT EXISTS ( \
+                      CASE WHEN NOT (SELECT streaming FROM msg) \
+                            AND NOT EXISTS ( \
                             SELECT 1 FROM read_state seen \
                              WHERE seen.workspace_id = $1 \
                                AND seen.channel_id = (SELECT channel_id FROM msg) \
                                AND seen.member_id = mem.id \
                                AND seen.last_read_seq > 0 \
-                               AND ( seen.last_read_seq >= (SELECT seq FROM msg) \
-                                     OR seen.last_read_at >= (SELECT created_at FROM msg) \
-                                          - make_interval(secs => $4::double precision) ) \
+                               AND CASE WHEN (SELECT streamed FROM msg) \
+                                    THEN seen.last_read_at >= now() \
+                                           - make_interval(secs => $4::double precision) \
+                                    ELSE ( seen.last_read_seq >= (SELECT seq FROM msg) \
+                                           OR seen.last_read_at >= (SELECT created_at FROM msg) \
+                                                - make_interval(secs => $4::double precision) ) \
+                                    END \
                             ) \
                         THEN 'mention' END \
                     ELSE NULL \
@@ -399,6 +466,7 @@ pub async fn judge_targets(
     .bind(WORK_COMPLETE_MIN_RAN_MS)
     .bind(WORK_COMPLETE_FOREGROUND_WINDOW_SECS)
     .bind(PROP_ANSWERS_MESSAGE_ID)
+    .bind(STREAM_PROPS_KEY)
     .fetch_all(&mut *conn)
     .await?;
 
