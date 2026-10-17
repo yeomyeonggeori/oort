@@ -57,7 +57,50 @@ describe('the JS push contract matches the Swift the extension runs', () => {
     expect(PUSH_CATEGORY.message).toBe(swiftCase('message'));
     expect(PUSH_CATEGORY.mention).toBe(swiftCase('mention'));
     expect(PUSH_CATEGORY.approval).toBe(swiftCase('approval'));
+    // ADR-0204 D7 (#3928): the approval the lock screen must not decide.
+    expect(PUSH_CATEGORY.approvalOpen).toBe(swiftCase('approvalOpen'));
     expect(PUSH_CATEGORY.work).toBe(swiftCase('work'));
+  });
+
+  it('has exactly the same set of categories — a name in one place only is drift', () => {
+    // Pairwise equality above cannot see a category that exists on one side only
+    // (the relay would send it, the other side would not decode it, and the
+    // notification would silently lose its buttons).
+    const block = SWIFT.match(/enum MomoPushCategory[^{]*\{([\s\S]*?)\n\}/);
+    if (!block) throw new Error('no MomoPushCategory enum in the Swift source');
+    const swiftValues = [...block[1].matchAll(/case\s+\w+\s*=\s*"([^"]+)"/g)].map(
+      m => m[1],
+    );
+    expect([...swiftValues].sort()).toEqual(Object.values(PUSH_CATEGORY).sort());
+  });
+
+  it('names the same categories as the relay and the server that sends them (ADR-0204 D7: four places)', () => {
+    // The category set lives in four places: the relay that validates it, the server
+    // that chooses it (`momo-push`), the phone, and the extension. JS↔Swift is
+    // compared above; this closes the other two sides. A category the server sends
+    // that the relay does not know is a 400 the relay settles for good; one the relay
+    // accepts that the phone does not register is a notification without buttons —
+    // and neither throws anywhere.
+    const read = (path: string) => readFileSync(join(APP_ROOT, '../..', path), 'utf8');
+    const relay = read('server-rust/bins/momo-push-relay/src/dispatch.rs');
+    const sender = read('server-rust/crates/momo-push/src/dispatch.rs');
+    const wanted = Object.values(PUSH_CATEGORY).sort();
+
+    const allowed = relay.match(/const ALLOWED_CATEGORIES: &\[&str\] = &\[([\s\S]*?)\];/);
+    if (!allowed) throw new Error('no ALLOWED_CATEGORIES in the relay source');
+    // Every quoted string in the block, not only the ones shaped like today's names:
+    // a category spelled with an underscore or a digit must not slip past the match.
+    expect([...allowed[1].matchAll(/"([^"]+)"/g)].map(m => m[1]).sort()).toEqual(wanted);
+
+    const sounds = relay.match(/const CATEGORY_SOUNDS: [^=]*= &\[([\s\S]*?)\];/);
+    if (!sounds) throw new Error('no CATEGORY_SOUNDS in the relay source');
+    expect(
+      [...sounds[1].matchAll(/\("([^"]+)",/g)].map(m => m[1]).sort(),
+    ).toEqual(wanted);
+
+    expect(
+      [...sender.matchAll(/PushCategory::\w+ => "([^"]+)"/g)].map(m => m[1]).sort(),
+    ).toEqual(wanted);
   });
 
   it('uses the same action identifiers', () => {
@@ -66,6 +109,38 @@ describe('the JS push contract matches the Swift the extension runs', () => {
     expect(PUSH_ACTION.quickReply).toBe(swiftConstant('quickReply'));
     expect(PUSH_ACTION.approve).toBe(swiftConstant('approve'));
     expect(PUSH_ACTION.reject).toBe(swiftConstant('reject'));
+    // The single button of `momo.approval.open` (ADR-0204 D7).
+    expect(PUSH_ACTION.openApproval).toBe(swiftConstant('openApproval'));
+  });
+
+  it('has exactly the same set of action identifiers', () => {
+    const block = SWIFT.match(/enum MomoPushActionIdentifier \{([\s\S]*?)\n\}/);
+    if (!block) throw new Error('no MomoPushActionIdentifier enum in the Swift source');
+    const swiftValues = [
+      ...block[1].matchAll(/static let \w+\s*=\s*"([^"]+)"/g),
+    ].map(m => m[1]);
+    expect([...swiftValues].sort()).toEqual(Object.values(PUSH_ACTION).sort());
+  });
+
+  it('names the same categories as carrying an approval id (ADR-0204 D7)', () => {
+    // Both approval categories name their approval; no other category may. The
+    // Swift parser and `parsePushEnvelope` each enforce that as one biconditional,
+    // and this pins the SET it ranges over to the same two on both sides.
+    const predicate = SWIFT.match(/var carriesApprovalID: Bool \{([^}]*)\}/);
+    if (!predicate) throw new Error('no carriesApprovalID in the Swift source');
+    const swiftApprovalCategories = [...predicate[1].matchAll(/\.(\w+)/g)]
+      .map(m => swiftCase(m[1]))
+      .sort();
+    expect(swiftApprovalCategories).toEqual(
+      [PUSH_CATEGORY.approval, PUSH_CATEGORY.approvalOpen].sort(),
+    );
+    // And the Swift parser gates the id on that predicate, in both directions.
+    expect(SWIFT).toContain(
+      'root.aps.category.carriesApprovalID == (approvalID.flatMap(UUID.init(uuidString:)) != nil)',
+    );
+    expect(SWIFT).toContain(
+      '(root.aps.category.carriesApprovalID || approvalID == nil)',
+    );
   });
 
   it('gates on the same payload schema and reasons', () => {

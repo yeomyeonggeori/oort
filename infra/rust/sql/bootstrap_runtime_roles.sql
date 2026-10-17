@@ -290,6 +290,17 @@ BEGIN
   END IF;
   IF to_regclass('public.push_token') IS NOT NULL THEN
     GRANT SELECT ON TABLE push_token TO momo_notifier;
+    -- ADR-0204 D9 / #3930: APNs 410 / BadDeviceToken / DeviceTokenNotForTopic
+    -- invalidate the token (`UPDATE push_token SET invalidated_at = now(),
+    -- updated_at = now() WHERE id = $1 AND workspace_id = $2 AND invalidated_at IS
+    -- NULL`, settled with the dispatch receipt). Two COLUMNS, never the table: the
+    -- notifier must not be able to rewrite `apns_token`, `member_id` or `device_id`.
+    -- The WHERE columns are covered by the table-level SELECT above. The dev file
+    -- hands the notifier every verb on every table, so only the production-role
+    -- suite (scripts/verify_notifier_prod_roles.sh) can see this line go missing.
+    -- Column shape (no `ON TABLE`): the doctor's table parser must not read it as a
+    -- table grant; scripts/tests/test_notifier_role_grants.sh judges it per column.
+    GRANT UPDATE (invalidated_at, updated_at) ON push_token TO momo_notifier;
   END IF;
   IF to_regclass('public.message') IS NOT NULL THEN
     GRANT SELECT, INSERT, UPDATE ON TABLE message TO momo_notifier;
@@ -456,6 +467,14 @@ BEGIN
   END IF;
   IF to_regclass('public.hosted_agent_connection') IS NOT NULL THEN
     GRANT SELECT (workspace_id, agent_member_id) ON hosted_agent_connection TO momo_notifier;
+  END IF;
+  -- ADR-0204 D7 / #3928: an approval's push goes to the people who MAY approve it,
+  -- and "may" starts with the workspace role. `momo_messaging::active_workspace_role`
+  -- — the very read the decision route's `require_admin` makes — selects `role`
+  -- where `workspace_id` and `member_id` match (and joins `member`, already
+  -- granted). Exactly those three columns; `joined_at` / `updated_at` are not read.
+  IF to_regclass('public.workspace_membership') IS NOT NULL THEN
+    GRANT SELECT (workspace_id, member_id, role) ON workspace_membership TO momo_notifier;
   END IF;
   IF to_regclass('public.huddle') IS NOT NULL THEN
     GRANT SELECT ON TABLE huddle TO momo_notifier;

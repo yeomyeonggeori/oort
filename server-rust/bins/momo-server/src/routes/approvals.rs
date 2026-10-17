@@ -68,7 +68,8 @@ use momo_agent::actions::{
     agent_profile_update_result_body, agent_rename_result_body, channel_create_result_body,
     channel_create_result_rows, channel_member_add_result_body, channel_member_add_rows,
     invite_result_body, invite_result_rows, last_attempt_patch, memory_update_result_body,
-    memory_update_result_rows, result_client_msg_id, unfurl_update_result_body, unfurl_update_rows,
+    memory_update_result_rows, plugin_install_result_body, plugin_install_result_rows,
+    result_client_msg_id, unfurl_update_result_body, unfurl_update_rows,
     work_tier_update_result_body, work_tier_update_rows, workspace_settings_result_body,
     ActionResult, ActionResultNext, RequiredRole, SecretDelivery, ACTION_APPROVED_AUDIT_SCHEMA,
     ACTION_RESULT_EXECUTED, ACTION_TYPE_WORKSPACE_ACTION, AUDIT_ACTION_APPROVED,
@@ -90,16 +91,19 @@ use momo_agent::approval::{
     decision_stamp_in_tx, default_execution_host, existing_decision_in_tx,
     is_active_channel_member_in_tx, is_active_human_member_in_tx, list_approvals_in_tx,
     lock_approval_in_tx, mark_approval_decided_in_tx, mark_approval_expired_in_tx,
-    normalized_reason, offers_host_choice, record_decision_in_tx, resume_job_payload,
-    selectable_host_ids, validated_limit, validated_status, ApprovalListRow, LockedApproval,
+    normalized_reason, offers_host_choice, record_decision_in_tx, reference_execution_host,
+    resume_job_payload, selectable_host_ids, validated_limit, validated_status, ApprovalListRow,
+    LockedApproval,
 };
+use momo_agent::decider::{action_required_role, decider_gate, GatePlan};
 use momo_agent::tools::{ToolResult, TOOL_AUDIT_SCHEMA};
 use momo_agent::{
     end_parked_run_in_tx, requeue_run_from_approval_in_tx, succeed_parked_run_in_tx, RunStatus,
 };
 use momo_auth::{
     append_approved_channels_in_tx, grant_hosted_channels_in_tx,
-    lock_active_hosted_connection_in_tx, Principal, PrincipalKind, MAX_HOSTED_APPROVED_CHANNELS,
+    lock_active_hosted_connection_in_tx, Principal, PrincipalKind, AUDIT_VIA_PUSH_ACTION,
+    MAX_HOSTED_APPROVED_CHANNELS,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::PgConnection;
@@ -121,17 +125,19 @@ use momo_t3::work_control::{spawn_host_ineligible_reason_in_tx, work_control_id}
 use serde_json::{json, Value};
 use uuid::Uuid;
 
+use crate::auth::PushActionCredential;
 use crate::config::T3Settings;
 use crate::dto::{
     ApprovalDecisionReceipt, ApprovalDecisionRequest, ApprovalDto, ApprovalListQuery,
     ApprovalListResponse, SecretOnceDto,
 };
 use crate::error::ApiError;
+use crate::plugin_writes::{self, Actor, Provenance};
 use crate::realtime_advert::derive_same_origin_http_base;
 use crate::routes::actions::{
     profile_changes, resolve_stored_action_in_tx, ActionArgs, AvatarIntent, GateSubject,
-    ResolvedAgentTarget, ResolvedChannel, ResolvedConnection, ResolvedMember, SettingPatch,
-    SettingsBefore, StatusIntent,
+    ResolvedAgentTarget, ResolvedChannel, ResolvedConnection, ResolvedMember, ResolvedPlugin,
+    SettingPatch, SettingsBefore, StatusIntent,
 };
 use crate::routes::agents::require_profile_editor_in_tx;
 use crate::routes::invites::require_admin;
@@ -277,6 +283,11 @@ const RUN_NOT_PARKED: &str = "run_not_parked";
 /// 증보 v3 V3-3a). 400, and the approval is not consumed.
 const DELIVER_SECRET_NOT_SUPPORTED: &str = "deliver_secret_not_supported";
 
+/// The receipt `status` of a lock-screen decision refused because the approval must
+/// be opened in the app (ADR-0204 D7): the native handler turns any 403 into 「눌러서
+/// 앱에서 마무리」 (D6).
+const OPENS_IN_APP: &str = "opens_in_app";
+
 /// The sentinel itself. Namespaced and versioned so it cannot collide with a
 /// genuine `sqlx::Error::Protocol` message from the driver.
 const RUN_NOT_PARKED_SENTINEL: &str = "momo.approvals.run_not_parked.v1";
@@ -365,6 +376,12 @@ pub async fn decide_by_approval(
     Extension(principal): Extension<Principal>,
     Path((workspace, approval)): Path<(String, String)>,
     headers: HeaderMap,
+    // Present only when the middleware verified a `typ = push_action` token — the
+    // lock screen's credential (#3927, ADR-0204 D6). It names the door in the audit
+    // log and may only NARROW the route (`opens_in_app` is refused for it): it is
+    // never a reason to allow anything an access token could not, because the token
+    // adds no authority.
+    credential: Option<Extension<PushActionCredential>>,
     Json(request): Json<ApprovalDecisionRequest>,
 ) -> Result<Response, ApiError> {
     let workspace_id = workspace_scope(&workspace, &principal)?;
@@ -383,6 +400,7 @@ pub async fn decide_by_approval(
         None,
         &headers,
         request,
+        credential.map(|_| AUDIT_VIA_PUSH_ACTION),
     )
     .await
 }
@@ -403,6 +421,8 @@ pub async fn decide_by_run(
     let run_id = path_uuid(&run, "invalid run id")?;
     let workspace_id = principal.workspace_id;
     let approval_id = request.approval_id;
+    // Not a door the lock-screen token can use (the middleware's route list has
+    // exactly one entry), so there is never a credential to name here.
     decide(
         state,
         principal,
@@ -411,6 +431,7 @@ pub async fn decide_by_run(
         Some(run_id),
         &headers,
         request,
+        None,
     )
     .await
 }
@@ -441,6 +462,7 @@ impl Decision {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn decide(
     state: AppState,
     principal: Principal,
@@ -449,6 +471,7 @@ async fn decide(
     route_run_id: Option<Uuid>,
     headers: &HeaderMap,
     request: ApprovalDecisionRequest,
+    credential_via: Option<&'static str>,
 ) -> Result<Response, ApiError> {
     // **ADR-0188 D3 (R0) — the decision route takes a person, and only a
     // person.**
@@ -502,6 +525,7 @@ async fn decide(
                     route_run_id,
                     member_id,
                     via_token_id,
+                    credential_via,
                     approve,
                     reason: reason.as_deref(),
                     client_decision_id,
@@ -573,6 +597,12 @@ struct DecisionInput<'a> {
     route_run_id: Option<Uuid>,
     member_id: Uuid,
     via_token_id: Option<Uuid>,
+    /// The door the decider came through when it was not an ordinary access
+    /// token (`Some("push_action")` for the lock screen's token, #3927) —
+    /// stamped into `detail.via` of the decision's own audit rows by [`stamp_via`]
+    /// and read by the `opens_in_app` refusal. It can only narrow what the decider
+    /// may do; it is never an input to a grant.
+    credential_via: Option<&'static str>,
     approve: bool,
     reason: Option<&'a str>,
     client_decision_id: Uuid,
@@ -592,6 +622,29 @@ struct DecisionInput<'a> {
     /// `MentionSettings::context_max_messages` — the recent-conversation window
     /// of the job an approved in-place channel grant releases (ADR-0162 증보 5 G3).
     context_max_messages: i64,
+}
+
+/// Name the door a decision came through in one of its OWN audit rows
+/// (`detail.via`), when it was not an ordinary access token (#3927).
+///
+/// `via_token_id` already points every row at the exact `token` row, whose label
+/// says the same thing; this is the human-readable half, on the rows a reader
+/// asks "how was this decided?" of. A `via` the row already carries is left
+/// alone — the in-place grant's `channels.granted` row uses that key for which
+/// door the *grant* came through, and a credential must not overwrite it. A
+/// non-object detail is returned unchanged.
+fn stamp_via(via: Option<&'static str>, mut detail: Value) -> Value {
+    if let (Some(via), Some(object)) = (via, detail.as_object_mut()) {
+        object.entry("via").or_insert_with(|| json!(via));
+    }
+    detail
+}
+
+/// Would this decision hand a value-shown-once to the lock screen's credential?
+/// A pure function so the rule is testable: no seeded approval reaches the call
+/// site while the `opens_in_app` refusal in front of it holds (that is the point).
+fn shows_a_value_to_the_lock_screen(credential_via: Option<&str>, secret_present: bool) -> bool {
+    credential_via.is_some() && secret_present
 }
 
 /// Whether the action a `workspace_action` payload names offers its one-time
@@ -716,6 +769,30 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
             input.member_id,
             "forbidden",
             "not a member of this approval channel",
+            StatusCode::FORBIDDEN,
+            now,
+        )));
+    }
+
+    // **The lock screen's credential never decides an approval that must be
+    // opened in the app** (ADR-0204 D6/D7, security review of #3927): one that mints
+    // a value shown once (an invite link, a pairing code — `agent.invite` would put
+    // the code in THIS response's body) or whose card asks the approver to pick a
+    // host. The push is categorised the same way (`momo.approval.open`, no buttons),
+    // but that is the client's half; this is the server's, so a mis-categorised card,
+    // a stale notification or a leaked token cannot turn a banner tap into those
+    // effects. Approve and reject alike (the open category has neither button).
+    // Judged straight after the membership gate — a non-member keeps its 403/404 —
+    // and before anything is read or written for the decision. The credential only
+    // ever NARROWS the route here; it never grants (the token adds no authority).
+    if input.credential_via.is_some()
+        && momo_agent::actions::opens_in_app(&approval.action_type, &approval.payload)
+    {
+        return Ok(Ok(refusal(
+            approval.id,
+            input.member_id,
+            OPENS_IN_APP,
+            "this approval must be decided in the app",
             StatusCode::FORBIDDEN,
             now,
         )));
@@ -938,6 +1015,7 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
             &approval,
             input.member_id,
             input.via_token_id,
+            input.credential_via,
             input.approve,
             input.client_decision_id,
             control_id,
@@ -973,8 +1051,12 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
     // member could cancel somebody else's request and the outcome line would
     // claim 「관리자가 … 승인하지 않아서」 (independent review of #3858). Refused
     // like the approve half — nothing spent, run still held, card still pending.
+    //
+    // The condition is `decider_gate`'s reject half — the same function the push
+    // judgment reads (ADR-0204 D7), so what the route refuses and who the push
+    // wakes are one rule.
     if !input.approve
-        && momo_agent::in_place_grant::is_in_place_grant(&approval.payload)
+        && decider_gate(&approval.action_type, &approval.payload, false) == GatePlan::Admin
         && require_admin(conn, input.workspace_id, input.member_id)
             .await?
             .is_err()
@@ -1053,7 +1135,12 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
             .target("approval", approval.id)
             .via_token(input.via_token_id)
             .run(approval.run_id)
-            .with_schema(TOOL_AUDIT_SCHEMA, event.clone()),
+            .with_schema(
+                TOOL_AUDIT_SCHEMA,
+                // A copy: `event` is also the resume job's input and the
+                // broadcast, and neither is told which credential decided.
+                stamp_via(input.credential_via, event.clone()),
+            ),
     )
     .await?;
 
@@ -1200,24 +1287,6 @@ enum Execution {
     Refused(Decision),
 }
 
-/// How a role is judged — the one `match` over [`RequiredRole`] (exhaustive, so a
-/// new variant must choose its gate here). `None` (a card whose action this
-/// build no longer carries) takes the strictest rule, admin.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum GatePlan {
-    Admin,
-    Operator,
-    TargetAgent,
-}
-
-fn gate_plan(role: Option<RequiredRole>) -> GatePlan {
-    match role {
-        Some(RequiredRole::AgentEditor) => GatePlan::TargetAgent,
-        Some(RequiredRole::WorkspaceOperator) => GatePlan::Operator,
-        Some(RequiredRole::Admin) | None => GatePlan::Admin,
-    }
-}
-
 /// Announce a card the decision route just rewrote (#3771).
 ///
 /// `patch_message_props_in_tx` and `patch_and_prune_message_props_in_tx` move
@@ -1356,10 +1425,23 @@ async fn execute_workspace_action(
     // The `match` is exhaustive on purpose: the registry publishes a
     // `required_role` per action, and calling `require_admin` unconditionally
     // would make a second action with a different gate silently admin-gated.
-    // Adding a `RequiredRole` variant fails to compile here, which is where the
-    // decision about its gate belongs.
+    // Adding a `RequiredRole` variant fails to compile in
+    // `momo_agent::decider::gate_plan`, which is where the decision about its
+    // gate belongs — and, because that is also what the push judgment reads
+    // (`decider_gate`, ADR-0204 D7), the new gate reaches the notification
+    // audience in the same change instead of drifting from it.
     let required_role = action_required_role(&approval.payload);
-    let subject_free_gate = match gate_plan(required_role) {
+    let subject_free_gate = match decider_gate(&approval.action_type, &approval.payload, true) {
+        // A workspace action always takes a role; `decider_gate` only answers
+        // "no role" for approvals that are not workspace actions, and this
+        // function is reached for nothing else. If that ever stops being true the
+        // gate must not quietly vanish: roll the decision back instead of waving
+        // it through.
+        GatePlan::ChannelMember => {
+            return Err(protocol_error(
+                "workspace action reached the executor with no role gate",
+            ));
+        }
         // Judged against the target agent, which step 2 resolves.
         GatePlan::TargetAgent => None,
         GatePlan::Operator => Some(if input.operator_scope {
@@ -1700,6 +1782,19 @@ async fn execute_workspace_action(
                 Execution::Refused(decision) => return Ok(Ok(decision)),
             }
         }
+        ActionArgs::PluginInstall {
+            plugin_id,
+            plugin: Some(plugin),
+        } => match execute_plugin_install(conn, approval, input, now, plugin_id, plugin).await? {
+            Execution::Ran(executed) => executed,
+            Execution::Refused(decision) => return Ok(Ok(decision)),
+        },
+        // The resolver always fills `plugin`; an install that reached the executor
+        // without one has no manifest the approver was shown, and rolling back is
+        // the safe answer.
+        ActionArgs::PluginInstall { plugin: None, .. } => {
+            return Err(protocol_error("plugin.install resolved without a plugin"));
+        }
     };
 
     // ---- 3b. who receives the one-time value (ADR-0186 증보 v3 V3-3a/V3-5) -----
@@ -1735,6 +1830,17 @@ async fn execute_workspace_action(
             }
         }
         momo_agent::grant_secret_claim_in_tx(conn, approval.id, &grant).await?;
+    }
+    // **Backstop where the value is born** (security review of #3927). A lock-screen
+    // decision is refused up front for every action on the open list, so no value to
+    // show once should exist here for it. This catches the class that list cannot:
+    // a future action that mints a value for the APPROVER (`SecretDelivery::None`)
+    // and was never put on it. The transaction rolls back — nothing is committed and
+    // nothing is shown.
+    if shows_a_value_to_the_lock_screen(input.credential_via, executed.secret_once.is_some()) {
+        return Err(protocol_error(
+            "a lock-screen decision must not produce a value shown once",
+        ));
     }
     if action.id == momo_agent::actions::ACTION_AGENT_INVITE {
         let chosen = if deliver_to_agent {
@@ -1778,13 +1884,16 @@ async fn execute_workspace_action(
             .run(approval.run_id)
             .with_schema(
                 ACTION_APPROVED_AUDIT_SCHEMA,
-                json!({
-                    "action_id": action.id,
-                    "approval_id": approval.id.to_string(),
-                    "proposed_by": approval.requested_by.to_string(),
-                    "decided_by": input.member_id.to_string(),
-                    "ref": action_ref_value,
-                }),
+                stamp_via(
+                    input.credential_via,
+                    json!({
+                        "action_id": action.id,
+                        "approval_id": approval.id.to_string(),
+                        "proposed_by": approval.requested_by.to_string(),
+                        "decided_by": input.member_id.to_string(),
+                        "ref": action_ref_value,
+                    }),
+                ),
             ),
     )
     .await?;
@@ -2313,6 +2422,74 @@ async fn execute_workspace_unfurl_update(
         secret_once: None,
         next: None,
     })
+}
+
+/// `plugin.install` (ADR-0201 증보 v2 H7, #3889): the write `POST
+/// …/plugins/{plugin}/install` makes — [`plugin_writes::install`], the very
+/// function that route calls, with the **approver** as the actor (their role is
+/// judged a second time inside it, with the manifest's own `serverPolicy`) and
+/// the install **enabled**, which is what the card said. Its audit row
+/// (`plugin.installed`) is written by that function and carries `via_agent` and
+/// `approval_id`, so the install is recorded as what it did, once, naming the
+/// helper that asked.
+///
+/// A refusal inside it happens before its first write, so it is a refusal here
+/// too and the approval stays pending: a role the manifest's policy does not
+/// admit is a 403 `role_required`; anything else (the app was revoked in the
+/// registry, its manifest stopped passing admission) is the stale card.
+async fn execute_plugin_install(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
+    plugin_id: &str,
+    plugin: &ResolvedPlugin,
+) -> Result<Execution, momo_db::DbError> {
+    let provenance = Provenance {
+        subject_member_id: Some(approval.requested_by),
+        run_id: Some(approval.run_id),
+        via_agent: Some(approval.requested_by),
+        approval_id: Some(approval.id),
+    };
+    let actor = Actor {
+        member_id: input.member_id,
+        via_token_id: input.via_token_id,
+    };
+    match plugin_writes::install(
+        conn,
+        input.workspace_id,
+        plugin_id,
+        Some(true),
+        actor,
+        &provenance,
+    )
+    .await?
+    {
+        Ok(_installed) => Ok(Execution::Ran(Executed {
+            audits: Vec::new(),
+            ref_type: REF_TYPE_WORKSPACE_SETTINGS,
+            ref_id: input.workspace_id,
+            result_body: plugin_install_result_body(plugin.label),
+            result_rows: plugin_install_result_rows(
+                plugin.label,
+                &plugin.version,
+                &plugin.egress_domains,
+            ),
+            secret_once: None,
+            next: None,
+        })),
+        Err(error) if error.status == StatusCode::FORBIDDEN => Ok(Execution::Refused(refusal(
+            approval.id,
+            input.member_id,
+            ROLE_REQUIRED,
+            "this app's install policy does not allow your role",
+            StatusCode::FORBIDDEN,
+            now,
+        ))),
+        Err(_) => Ok(Execution::Refused(args_invalid_refusal(
+            approval, input, now,
+        ))),
+    }
 }
 
 /// `workspace.memory.update` (H6-1): the write `PATCH …/memory/settings` makes,
@@ -3082,22 +3259,6 @@ async fn execute_invite_create(
     }))
 }
 
-/// The `required_role` the registry publishes for this proposal's action.
-///
-/// `None` when the payload names an action this build no longer carries — the
-/// gate then falls back to the strictest rule v1 has (admin), and the
-/// `action_unavailable` refusal below is what actually answers. Reading the
-/// role before resolving the action keeps the **authority** check first, which
-/// is the order ADR-0186 D2 spells out: a non-admin must not be able to learn
-/// which actions this server still offers by tapping approve.
-fn action_required_role(payload: &Value) -> Option<RequiredRole> {
-    let action_id = payload
-        .get("action")
-        .and_then(|action| action.get("id"))
-        .and_then(Value::as_str)?;
-    action_by_id(action_id).map(|action| action.required_role)
-}
-
 /// `payload.action.args`, or a value the normaliser will refuse.
 ///
 /// Returning `&Value::Null` rather than defaulting to `{}` keeps a payload with
@@ -3262,6 +3423,7 @@ async fn settle_expired(
     approval: &LockedApproval,
     member_id: Uuid,
     via_token_id: Option<Uuid>,
+    credential_via: Option<&'static str>,
     approve: bool,
     client_decision_id: Uuid,
     control_id: Option<Uuid>,
@@ -3309,7 +3471,7 @@ async fn settle_expired(
             .target("approval", approval.id)
             .via_token(via_token_id)
             .run(approval.run_id)
-            .with_schema(TOOL_AUDIT_SCHEMA, event.clone()),
+            .with_schema(TOOL_AUDIT_SCHEMA, stamp_via(credential_via, event.clone())),
     )
     .await?;
 
@@ -3383,7 +3545,8 @@ pub(crate) async fn expire_run(
 ///   recomputed.
 /// * **Rejecting** — nothing will run, so it is the host **the card** points at:
 ///   its default, else the host the request itself named
-///   ([`requested_execution_host`] — a tool-path card can pre-select nothing).
+///   ([`momo_agent::approval::requested_execution_host`] — a tool-path card can
+///   pre-select nothing).
 ///   The decider's pick is **ignored** (ADR-0188 R0.1, #2582). It chooses
 ///   nothing on a rejection, so all it could still choose is which ownership
 ///   rule applies — and a team box is a selectable candidate on every card, so
@@ -3399,24 +3562,10 @@ fn decision_reference_host(
     if input.approve {
         return host_choice.selected;
     }
-    if !offers_host_choice(&approval.payload) {
-        return None;
-    }
-    default_execution_host(&approval.payload)
-        .or_else(|| requested_execution_host(&approval.payload))
-}
-
-/// `execution.requested_host_id` — the host the request itself named: the
-/// REST ledger's `target_host_id`, or the `work.session.spawn` tool's `host_id`
-/// argument (`momo_t3::work_control::spawn_execution_object` writes it on both
-/// producers). What a rejection is judged against when the card pre-selected
-/// nothing.
-fn requested_execution_host(payload: &Value) -> Option<Uuid> {
-    payload
-        .get("execution")
-        .and_then(|execution| execution.get("requested_host_id"))
-        .and_then(Value::as_str)
-        .and_then(|raw| Uuid::parse_str(raw).ok())
+    // The card's own host: `reference_execution_host` is the one definition, shared
+    // with the push judgment (ADR-0204 D7) so the notification wakes the owner of
+    // the very machine this rejection would be judged against.
+    reference_execution_host(&approval.payload)
 }
 
 /// `execution.tool` — the tool a spawn card asks to start, as
@@ -3862,6 +4011,7 @@ mod tests {
             route_run_id: None,
             member_id: Uuid::from_u128(7),
             via_token_id: None,
+            credential_via: None,
             approve,
             reason: None,
             client_decision_id: Uuid::from_u128(8),
@@ -3956,23 +4106,6 @@ mod tests {
         );
     }
 
-    /// Each role maps to its own gate, and an unknown action takes the strictest
-    /// one: collapsing `AgentEditor` or `WorkspaceOperator` into `Admin` would
-    /// silently change who may approve.
-    #[test]
-    fn each_required_role_has_its_own_gate_and_unknown_is_admin() {
-        assert_eq!(gate_plan(Some(RequiredRole::Admin)), GatePlan::Admin);
-        assert_eq!(gate_plan(None), GatePlan::Admin);
-        assert_eq!(
-            gate_plan(Some(RequiredRole::WorkspaceOperator)),
-            GatePlan::Operator
-        );
-        assert_eq!(
-            gate_plan(Some(RequiredRole::AgentEditor)),
-            GatePlan::TargetAgent
-        );
-    }
-
     /// The link is built by concatenation, so the code's alphabet is checked
     /// rather than assumed: `momo_generate_invite_code` (003) is base64url.
     #[test]
@@ -3986,5 +4119,91 @@ mod tests {
                 "{unsafe_code} would truncate or re-target the link"
             );
         }
+    }
+
+    /// #3927 — the door a decision came through is named in the decision's own
+    /// audit row, and only when there is a door to name.
+    #[test]
+    fn a_credential_is_named_in_the_audit_detail_only_when_there_is_one() {
+        let event = json!({"action": "decided", "status": "approved"});
+        assert_eq!(stamp_via(None, event.clone()), event);
+        assert_eq!(
+            stamp_via(Some(AUDIT_VIA_PUSH_ACTION), event.clone()),
+            json!({"action": "decided", "status": "approved", "via": "push_action"})
+        );
+        // The caller's copy is untouched: the broadcast and the resume job are
+        // built from the unstamped event.
+        assert!(event.get("via").is_none());
+    }
+
+    /// The lock screen's token is NARROWER than the access token it was minted
+    /// beside, never wider: its only scope is the documentary `push:action`, so it
+    /// carries no `platform:read` and a platform operator who is not an admin gets
+    /// `role_required` for the operator-gated settings actions with it, where their
+    /// access token would pass. Pinned so nobody "fixes" it by copying the caller's
+    /// scopes into the token.
+    #[test]
+    fn the_token_carries_no_operator_standing() {
+        let issued = momo_auth::sign_push_action(Uuid::from_u128(1), Uuid::from_u128(2), "s3cret")
+            .expect("sign");
+        let principal = momo_auth::verify_app_push_action(&issued.token, "s3cret").expect("verify");
+        assert_eq!(
+            principal.scopes,
+            vec![momo_auth::SCOPE_PUSH_ACTION.to_string()]
+        );
+        assert!(!has_platform_read_scope(&principal));
+    }
+
+    /// The backstop's truth table: only the lock screen's credential WITH a value to
+    /// show once is stopped; an access token (no `credential_via`) gets its value, and
+    /// a credentialed decision that produced nothing proceeds.
+    #[test]
+    fn a_value_shown_once_never_reaches_the_lock_screen_credential() {
+        assert!(shows_a_value_to_the_lock_screen(
+            Some(AUDIT_VIA_PUSH_ACTION),
+            true
+        ));
+        assert!(!shows_a_value_to_the_lock_screen(
+            Some(AUDIT_VIA_PUSH_ACTION),
+            false
+        ));
+        assert!(!shows_a_value_to_the_lock_screen(None, true));
+        assert!(!shows_a_value_to_the_lock_screen(None, false));
+    }
+
+    /// The `opens_in_app` refusal is a receipt like every other expected failure,
+    /// and it executes nothing.
+    #[test]
+    fn opens_in_app_is_a_receipt_like_every_other_expected_failure() {
+        let decision = refusal(
+            Uuid::from_u128(1),
+            Uuid::from_u128(2),
+            OPENS_IN_APP,
+            "this approval must be decided in the app",
+            StatusCode::FORBIDDEN,
+            Utc::now(),
+        );
+        assert_eq!(decision.status, StatusCode::FORBIDDEN);
+        assert!(decision.secret_once.is_none());
+        let receipt: ApprovalDecisionReceipt =
+            serde_json::from_value(decision.receipt).expect("receipt decodes");
+        assert_eq!(receipt.status, "opens_in_app");
+        assert!(receipt.result.is_none());
+    }
+
+    /// A row that already says which door ITS action came through keeps saying it
+    /// (`channels.granted`'s `via: in_place_grant`); the credential does not
+    /// overwrite it, and a non-object detail is passed through, not wrapped.
+    #[test]
+    fn stamping_never_overwrites_an_existing_via_or_wraps_a_scalar() {
+        let granted = json!({"channel_ids": [], "via": "in_place_grant"});
+        assert_eq!(
+            stamp_via(Some(AUDIT_VIA_PUSH_ACTION), granted.clone()),
+            granted
+        );
+        assert_eq!(
+            stamp_via(Some(AUDIT_VIA_PUSH_ACTION), json!("scalar")),
+            json!("scalar")
+        );
     }
 }

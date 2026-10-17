@@ -109,15 +109,23 @@ public enum MomoPushCategory: String, CaseIterable, Codable, Sendable, Hashable,
     case message = "momo.message"
     case mention = "momo.mention"
     case approval = "momo.approval"
+    /// ADR-0204 D7: an approval the lock screen must not decide (it mints a value shown once,
+    /// or asks which host). One 「열어서 결정」 button, no 승인·거절. Names its approval like `.approval`.
+    case approvalOpen = "momo.approval.open"
     case work = "momo.work"
 
     public var id: String { rawValue }
+
+    /// Both approval categories carry an `approval_id`; no other category does.
+    public var carriesApprovalID: Bool { self == .approval || self == .approvalOpen }
 }
 
 public enum MomoPushActionIdentifier {
     public static let quickReply = "momo.action.quick-reply"
     public static let approve = "momo.action.approve"
     public static let reject = "momo.action.reject"
+    /// The single button of `.approvalOpen`: opens the app on the approval's card. Decides nothing.
+    public static let openApproval = "momo.action.open-approval"
 }
 
 public struct PushFetchSession: Codable, Equatable, Sendable {
@@ -216,8 +224,8 @@ public enum MomoPushParser {
               !payload.collapseID.isEmpty,
               root.aps.badge >= 0,
               ["dm", "mention", "approval_request", "resume_offer", "work_session_idle", "work_run_done"].contains(payload.reason),
-              (root.aps.category == .approval) == (approvalID.flatMap(UUID.init(uuidString:)) != nil),
-              (root.aps.category == .approval || approvalID == nil)
+              root.aps.category.carriesApprovalID == (approvalID.flatMap(UUID.init(uuidString:)) != nil),
+              (root.aps.category.carriesApprovalID || approvalID == nil)
         else {
             throw MomoPushError.invalidEnvelope
         }

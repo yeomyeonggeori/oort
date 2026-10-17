@@ -69,7 +69,7 @@ MOMO_APNS_ALLOW_STUB=1 \
 MOMO_APNS_STUB_STATUS=410 \
 MOMO_APNS_STUB_REASON=Unregistered \
 MOMO_APNS_STUB_CAPTURE_PATH="$CAPTURE" \
-MOMO_PUSH_RELAY_RATE_LIMIT_PER_MINUTE=7 \
+MOMO_PUSH_RELAY_RATE_LIMIT_PER_MINUTE=8 \
 MOMO_PUSH_RELAY_HOST=127.0.0.1 \
 MOMO_PUSH_RELAY_PORT="$PORT" \
 "$BIN" >"$TMP_ROOT/relay.log" 2>&1 &
@@ -155,11 +155,15 @@ test "$STATUS" = 400
 
 # ADR-0120 부록 A (Accepted 2026-10-02, #3341): the reason vocabulary is five.
 # Every reason is accepted on the category the judgment pairs it with, and one
-# outside the set is a 400 (the closed validator, not a pass-through). The five
-# accepted bodies use five of the window's seven slots (the first body above
-# used one), so the rate-limit step below still sees exactly two left.
+# outside the set is a 400 (the closed validator, not a pass-through). ADR-0204 D7
+# (#3928) adds the category `momo.approval.open`: an approval that is decided in
+# the app. It names its approval exactly like `momo.approval`, so the same reason
+# rides on both. The six accepted bodies use six of the window's eight slots (the
+# first body above used one more), so the rate-limit step below still sees exactly
+# one slot left for its accepted body and the one after it is the 429.
 reason_n=0
 for pair in "dm momo.message" "mention momo.mention" "approval_request momo.approval" \
+            "approval_request momo.approval.open" \
             "resume_offer momo.work" "work_session_idle momo.work"; do
   reason="${pair% *}"; category="${pair#* }"
   reason_n=$((reason_n + 1))
@@ -167,7 +171,7 @@ for pair in "dm momo.message" "mention momo.mention" "approval_request momo.appr
   RBODY="$TMP_ROOT/reason-$reason.json"
   jq -c --arg r "$reason" --arg c "$category" --arg id "$msg_id" \
     '.reason=$r | .category=$c | .message_id=$id | .collapse_id=("m-"+$id)
-     | if $c == "momo.approval" then .approval_id="66666666-6666-6666-6666-666666666666" else . end' \
+     | if ($c == "momo.approval" or $c == "momo.approval.open") then .approval_id="66666666-6666-6666-6666-666666666666" else . end' \
     "$BODY" >"$RBODY"
   STATUS="$(curl -sS -o /dev/null -w '%{http_code}' \
     -H 'Content-Type: application/json' \
@@ -187,6 +191,31 @@ STATUS="$(curl -sS -o /dev/null -w '%{http_code}' \
   --data-binary "@$UNKNOWN" "http://127.0.0.1:$PORT/v1/push")"
 echo "[sabotage] reason outside the five -> HTTP $STATUS (expect 400)"
 test "$STATUS" = 400
+
+# ADR-0204 D7 (#3928): the category list is closed too. A near-miss of the new
+# name is refused, and `momo.approval.open` without its approval id is refused
+# exactly as `momo.approval` is. Neither consumes a rate-limit slot (only accepted
+# dispatches count).
+for case_name in nearmiss-category open-without-approval; do
+  CASE_BODY="$TMP_ROOT/$case_name.json"
+  case "$case_name" in
+    nearmiss-category)
+      # No approval id on purpose: the refusal must come from the closed category
+      # list, not from the field-set check that a stray `approval_id` would trip first.
+      jq -c '.reason="approval_request" | .category="momo.approval.opened"
+             | .message_id="88888888-8888-8888-8888-888888888888"' "$BODY" >"$CASE_BODY" ;;
+    open-without-approval)
+      jq -c '.reason="approval_request" | .category="momo.approval.open"
+             | .message_id="99999999-9999-9999-9999-999999999999"' "$BODY" >"$CASE_BODY" ;;
+  esac
+  STATUS="$(curl -sS -o /dev/null -w '%{http_code}' \
+    -H 'Content-Type: application/json' \
+    -H 'X-Momo-Server-Id: verify-server' \
+    -H "X-Momo-Push-Signature: $(sign_body "$CASE_BODY")" \
+    --data-binary "@$CASE_BODY" "http://127.0.0.1:$PORT/v1/push")"
+  echo "[sabotage] $case_name -> HTTP $STATUS (expect 400)"
+  test "$STATUS" = 400
+done
 
 # Rate limit counts distinct accepted dispatches. Replay of the first body
 # did not consume a second slot, so the next unique body fills the window
@@ -225,6 +254,12 @@ if grep -Eiq 'message_body|display_name|handle|channel_name|apns_token' "$TMP_RO
   echo "id-only APNs payload widened with conversation/token content" >&2
   exit 1
 fi
+
+# ADR-0204 D7 (#3928): the open category reaches APNs as itself — exactly one of the
+# accepted dispatches, naming its approval, with the same sound as the inline one.
+test "$(jq -s -r 'map(select(.aps.category == "momo.approval.open"))
+                  | map(.momo.approval_id + "|" + .aps.sound) | join(",")' "$CAPTURE")" \
+  = "66666666-6666-6666-6666-666666666666|default"
 
 # Capture assertions finished — stop the listener so boot-refusal processes
 # cannot collide on the same port if a config check ever reached bind.

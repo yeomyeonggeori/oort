@@ -7,6 +7,12 @@ import {
   PRESENCE_WRITE_FAILED,
 } from '@momo/core/features/presence/model';
 import {
+  PAUSE_ACTIVE_NOTE,
+  PAUSE_UNTIL_CHANGE_ACTION,
+  PAUSE_UNTIL_NONE_ACTION_LABEL,
+  pauseUntilLabel,
+} from '@momo/core/features/presence/pauseUntil';
+import {
   NOTIFICATION_PAUSE_DESCRIPTION,
   NOTIFICATION_PAUSE_LABEL,
   NOTIFICATION_PAUSE_LOAD_FAILED,
@@ -84,8 +90,10 @@ import {useAppUpdateOffer} from '../appUpdate/useAppUpdateOffer';
 import {
   usePauseNotifications,
   usePushKinds,
+  useRecheckWhenElapsed,
   useSetPresence,
 } from './selfStatus';
+import {PauseUntilPage} from './PauseUntilPage';
 import {StatusPage} from './StatusPage';
 import {DEVICE_KEY_TITLE, deviceKeyCopy} from '../deviceKey/copy';
 import {DeviceKeyPanel} from '../deviceKey/DeviceKeyPanel';
@@ -131,14 +139,19 @@ import {MemoryPauseSection} from '../memory/MemoryPauseSection';
 // 갖고, 「알림」 묶음에 알림 일시 중지 스위치가 선다. 쓰기는 `selfStatus.ts` 가
 // 서버의 기존 두 계약으로만 한다.
 //
-// **방해 금지와 알림 일시 중지는 서버에서 다른 필드다.** 방해 금지(선언 상태)는
-// 남에게 보이는 표시이고 푸시를 막지 않는다. 푸시를 멈추는 것은 알림 일시
-// 중지(`notification_rule.dnd`)다. 둘을 묶을지는 제품 결정이라 여기서 몰래 묶지
-// 않고, 방해 금지 줄의 설명이 그 차이를 말한다.
+// **방해 금지와 알림 일시 중지는 서버에서 다른 필드지만 묶여 있다**(ADR-0124 증보 2
+// 「묶어」, 성재 결재 2026-09-27). 방해 금지(선언 상태)를 고르면 서버가 같은 트랜잭션에서
+// 알림 일시 중지(`notification_rule.dnd`)도 같은 기한으로 켜고, 풀면 켜기 전 값으로 돌린다.
+// 그래서 방해 금지 줄의 설명이 「알림도 함께 멈춰요」다. 폰은 방해 금지를 쓰며
+// notification-rules 를 쓰지 않는다 — 쓰고 나서 **다시 읽어** 일시 중지 스위치가 실제
+// 값을 보이게 한다(`selfStatus.ts`).
 //
-// 일시 중지의 시간(30분·1시간·내일까지)은 없다. 서버에 만료가 없어서, 폰이 타이머로
-// 흉내 내면 앱이 잠든 동안 일시 중지가 풀리지 않는다 — 켜 둔 사람은 「1시간」
-// 뒤에도 푸시를 못 받는다. 만료는 서버 계약이 생긴 뒤에 싣는다.
+// 두 스위치는 **기한을 고르고서야 켜진다**(ADR-0204 D2, #2899): 30분 · 1시간 · 2시간 ·
+// 내일 오전 9시 · 다음 주 월요일 오전 9시 · 직접 고르기. 「직접 끌 때까지」는 없다. 기한은
+// 서버 `dndUntilMs` 로만 보내고, 만료는 서버가 푸시 판정 시점에 비교한다 — 폰이 타이머로
+// 풀면 앱이 잠든 동안 어긋난다(그래서 풀리는 순간의 화면은 서버 재조회 값을 믿는다). 이미 있는
+// 기한 없는 행(옛 판이 만든 것)은 「기한 없음 · 기한 정하기」로 보이고, 판정은 바꾸지 않는다.
+// 기한을 고르는 곳은 시트 안의 한 장이다(`PauseUntilPage`).
 //
 // ## 연결된 기기
 //
@@ -153,13 +166,21 @@ import {MemoryPauseSection} from '../memory/MemoryPauseSection';
 // 번 뜨는 시트와 같은 판이다. 승인은 맥이 한다 — 이 장은 맥의 어디를 열지 말한다.
 // =============================================================================
 
-export type Page = 'profile' | 'theme' | 'status' | 'deviceKey';
+export type Page =
+  | 'profile'
+  | 'theme'
+  | 'status'
+  | 'deviceKey'
+  | 'pauseUntil'
+  | 'dndUntil';
 
 const PAGE_TITLE: Record<Page, string> = {
   profile: '내 프로필',
   theme: '테마',
   status: CUSTOM_STATUS_DIALOG_TITLE,
   deviceKey: DEVICE_KEY_TITLE,
+  pauseUntil: NOTIFICATION_PAUSE_LABEL,
+  dndUntil: declaredStatusLabel('dnd'),
 };
 
 export function ProfileSheet({
@@ -227,11 +248,30 @@ function SheetBody({
     () => scrollRef.current?.scrollToEnd({animated: true}),
     [],
   );
+  // 장의 윗변에서 잰 `y` 에 시트가 장 앞에 두는 위쪽 여백(`content.paddingTop`)을 더한다.
+  const revealAt = useCallback(
+    (y: number) =>
+      scrollRef.current?.scrollTo({y: y + space.xl - space.md, animated: true}),
+    [],
+  );
   // 장이 바뀌면 맨 위에서 시작한다 — 프로필을 내려 둔 채 「상태 글 ›」을 누르면 새
   // 장의 입력 칸이 머리 밑에 숨어 있었다(#2848 캡처).
   useEffect(() => {
     scrollRef.current?.scrollTo({y: 0, animated: false});
   }, [page]);
+
+  // 시트가 열려 있는 동안(어느 장이든) 알고 있는 기한이 지나면 서버에 다시 묻는다. 서버는 만료에
+  // 이벤트를 보내지 않아서, 가만두면 지난 시각을 「…까지」로 말하는 방해 금지 줄이 남는다(design-review
+  // H3). 화면을 스스로 풀지 않는다 — 서버의 새 답이 온 뒤에 그린다.
+  const sheetPause = usePauseNotifications(workspaceId);
+  const sheetSelf = memberFor(directory, member.id);
+  const knownDeadlines = [sheetSelf?.dndUntilMs, sheetPause.untilMs].filter(
+    (at): at is number => at !== undefined,
+  );
+  useRecheckWhenElapsed(
+    workspaceId,
+    knownDeadlines.length > 0 ? Math.min(...knownDeadlines) : undefined,
+  );
 
   return (
     <View style={styles.root}>
@@ -308,6 +348,15 @@ function SheetBody({
             nowMs={Date.now()}
             onDone={() => setPage('profile')}
           />
+        ) : page === 'pauseUntil' || page === 'dndUntil' ? (
+          <PauseUntilPage
+            kind={page === 'dndUntil' ? 'dnd' : 'pause'}
+            workspaceId={workspaceId}
+            selfId={member.id}
+            self={memberFor(directory, member.id) ?? undefined}
+            onDone={() => setPage('profile')}
+            onReveal={revealAt}
+          />
         ) : (
           <ProfilePage
             workspaceId={workspaceId}
@@ -317,6 +366,8 @@ function SheetBody({
             onOpenTheme={() => setPage('theme')}
             onOpenStatus={() => setPage('status')}
             onOpenDeviceKey={() => setPage('deviceKey')}
+            onOpenPauseUntil={() => setPage('pauseUntil')}
+            onOpenDndUntil={() => setPage('dndUntil')}
             onSignOut={onSignOut}
             onRevealEnd={revealEnd}
           />
@@ -353,6 +404,8 @@ export function ProfilePage({
   onOpenTheme,
   onOpenStatus,
   onOpenDeviceKey,
+  onOpenPauseUntil,
+  onOpenDndUntil,
   onSignOut,
   onRevealEnd,
 }: {
@@ -363,6 +416,10 @@ export function ProfilePage({
   onOpenTheme: () => void;
   onOpenStatus: () => void;
   onOpenDeviceKey: () => void;
+  /** 알림 일시 중지를 켜거나 기한을 바꾸는 장(`PauseUntilPage kind="pause"`). */
+  onOpenPauseUntil: () => void;
+  /** 방해 금지를 켜거나 기한을 바꾸는 장(`PauseUntilPage kind="dnd"`). */
+  onOpenDndUntil: () => void;
   onSignOut: () => void;
   /** 확인 블록이 열리면 시트를 끝까지 내린다 — 두 버튼이 접힌 곳 아래에 서지 않게. */
   onRevealEnd: () => void;
@@ -430,11 +487,23 @@ export function ProfilePage({
     : !pause.ready
       ? '알림 설정을 확인하는 중입니다.'
       : pause.paused
-        ? '직접 끌 때까지 이 워크스페이스의 알림을 받지 않습니다.'
+        ? PAUSE_ACTIVE_NOTE
         : NOTIFICATION_PAUSE_DESCRIPTION;
   const pushDetail = pushSwitchDetail(push);
+  // 켜진 스위치는 한 번에 끄고, 꺼진 스위치는 기한을 고르는 장으로 간다(ADR-0204 D2).
+  const togglePause = () => {
+    if (pauseLocked) return;
+    if (pause.paused) pause.resume();
+    else onOpenPauseUntil();
+  };
   const choosePresence = (status: PresenceStatus) => {
-    if (setPresence.isPending || status === declared) return;
+    if (setPresence.isPending) return;
+    // 방해 금지도 기한을 고르고서야 켜진다. 이미 방해 금지여도 같은 장이 열려 기한을 바꾼다.
+    if (status === 'dnd') {
+      onOpenDndUntil();
+      return;
+    }
+    if (status === declared) return;
     setPresence.mutate({status});
   };
   const server = getServerBase();
@@ -533,7 +602,11 @@ export function ProfilePage({
                   accessibilityRole="radio"
                   accessibilityState={{selected}}
                   accessibilityLabel={label}
-                  accessibilityHint={detail}
+                  accessibilityHint={
+                    status === 'dnd'
+                      ? `${PRESENCE_DND_HINT} 누르면 기한을 골라요.`
+                      : undefined
+                  }
                   leading={
                     <View
                       style={[styles.optionDot, optionDotTone(styles, status)]}
@@ -554,6 +627,23 @@ export function ProfilePage({
               );
             })}
           </View>
+          {/* 방해 금지가 켜져 있으면 끝나는 때와 그것을 바꾸는 길을 줄로 둔다(알림 일시 중지와
+              같은 문법). 기한 없는 행(옛 판이 만든 것)은 「기한 없음 · 기한 정하기」다(ADR-0204 D2). */}
+          {declared === 'dnd' ? (
+            <GroupRow
+              title={
+                self?.dndUntilMs === undefined
+                  ? PAUSE_UNTIL_NONE_ACTION_LABEL
+                  : `${pauseUntilLabel(self.dndUntilMs, now)} · ${PAUSE_UNTIL_CHANGE_ACTION}`
+              }
+              tone="accent"
+              chevron
+              separated
+              onPress={onOpenDndUntil}
+              accessibilityHint="방해 금지를 켜 두는 기한을 고르는 화면을 열어요."
+              testID="profile-dnd-until-row"
+            />
+          ) : null}
           <GroupRow
             title={CUSTOM_STATUS_MENU_LABEL}
             value={customLine ?? '없음'}
@@ -643,19 +733,22 @@ export function ProfilePage({
           separated
           // 줄 전체를 흐리지 않는다 — 읽기 실패 문장까지 흐려지면 「읽지 말라」가
           // 된다(#2848 리뷰 M-1). 잠김은 스위치 자신과 접근성 상태가 말한다.
-          onPress={() => pause.setPaused(!pause.paused)}
+          onPress={togglePause}
           accessibilityRole="switch"
           accessibilityState={{
             checked: pause.paused,
             disabled: pauseLocked,
           }}
           accessibilityLabel={NOTIFICATION_PAUSE_LABEL}
-          accessibilityHint={pauseDetail}
+          // 꺼진 스위치는 누르면 켜지는 대신 기한 장이 열린다 — 방해 금지 줄의 힌트와 같은 말로 알린다.
+          accessibilityHint={
+            pause.ready && !pause.paused ? '누르면 알림을 멈출 기한을 골라요.' : pauseDetail
+          }
           trailing={
             pause.ready ? (
               <Switch
                 value={pause.paused}
-                onValueChange={next => pause.setPaused(next)}
+                onValueChange={togglePause}
                 disabled={pauseLocked}
                 trackColor={{false: palette.border, true: palette.ok}}
                 ios_backgroundColor={palette.border}
@@ -675,6 +768,24 @@ export function ProfilePage({
           }
           testID="profile-pause-row"
         />
+        {/* 켜져 있으면 끝나는 때와 그것을 바꾸는 길을 따로 줄로 둔다 — 위 줄은 스위치라
+            누르면 꺼지므로 같은 줄에 「기한 바꾸기」를 얹지 않는다. 기한 없는 행(옛 판이 만든
+            것)은 「기한 없음 · 기한 정하기」다(ADR-0204 D2). */}
+        {pause.ready && pause.paused ? (
+          <GroupRow
+            title={
+              pause.untilMs === undefined
+                ? PAUSE_UNTIL_NONE_ACTION_LABEL
+                : `${pauseUntilLabel(pause.untilMs, now)} · ${PAUSE_UNTIL_CHANGE_ACTION}`
+            }
+            tone="accent"
+            chevron
+            separated
+            onPress={onOpenPauseUntil}
+            accessibilityHint="알림을 멈추는 기한을 고르는 화면을 열어요."
+            testID="profile-pause-until-row"
+          />
+        ) : null}
         {pause.loadFailed ? (
           <GroupRow
             title="다시 불러오기"

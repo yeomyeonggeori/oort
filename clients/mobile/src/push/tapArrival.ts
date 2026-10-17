@@ -9,7 +9,7 @@ import {
   type NotificationResponse,
 } from 'expo-notifications';
 
-import type {PushCategory, PushReason} from './contract';
+import {PUSH_ACTION, type PushCategory, type PushReason} from './contract';
 import {parsePushEnvelope, threadRootId} from './envelope';
 
 // =============================================================================
@@ -69,17 +69,26 @@ export type TapArrival =
   | {kind: 'unavailable'; reason: 'unreadable' | 'other-workspace'};
 
 /**
- * 한 번의 응답이 가리키는 곳. **본문 탭이 아니면 null** 이다.
+ * 한 번의 응답이 가리키는 곳. **본문 탭(과 「열어서 결정」)이 아니면 null** 이다.
  *
  * 승인·거절·빠른 답장 버튼은 여기서 다루지 않는다. 그것들은 앱을 앞으로 부르지
  * 않고(`categories.ts` 의 `opensAppToForeground: false`) 자기 일을 한다 — 거기서
  * 화면을 옮기는 것은 사람이 누른 것이 아니다.
+ *
+ * 「열어서 결정」(`PUSH_ACTION.openApproval`, ADR-0204 D7)은 예외다. 그 버튼은 일을
+ * 하지 않고 **앱을 앞으로 불러** 승인 카드를 보여 주는 것이 일의 전부라서, 본문 탭과
+ * 같은 탭이다. 그래서 콜드 런치의 마지막 응답으로도 받는다 — 되풀이해도 카드가
+ * 열릴 뿐 결정이 기록되지 않는다(승인·거절과 다른 점).
  */
 export function tapArrival(
   response: NotificationResponse | null | undefined,
   signedInWorkspaceId: string,
 ): TapArrival | null {
-  if (!response || response.actionIdentifier !== DEFAULT_ACTION_IDENTIFIER) {
+  if (
+    !response ||
+    (response.actionIdentifier !== DEFAULT_ACTION_IDENTIFIER &&
+      response.actionIdentifier !== PUSH_ACTION.openApproval)
+  ) {
     return null;
   }
   const trigger = response.notification.request.trigger as
