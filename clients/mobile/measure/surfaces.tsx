@@ -4344,6 +4344,18 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       );
     case 'shell-inbox':
       return <Shell initialNav={{...INITIAL_NAV, tab: 'inbox'}} />;
+    // #3923: 인박스 맨 위의 멈춤 줄. 진짜 셸의 진짜 인박스이고 서버는 씨앗이다(`seedPause`).
+    // `pause` 는 방해 금지에 묶여 일시 중지가 켜진 흔한 모양(기한 있음), `pause-open` 은 기한 없는
+    // 옛 행(성재 계정의 15일), `pause-dnd` 는 일시 중지는 꺼졌는데 상태만 방해 금지인 모양이다.
+    // `pause-date` 는 기한이 사흘 뒤 아침이라 「10월 20일(화) 오전 9:00까지」처럼 날짜가 붙는 가장 긴 모양
+    // (design-review M3), `pause-failure` 는 쓰기가 늦게 실패하는 서버(`seedPause`)다.
+    case 'shell-inbox-pause':
+    case 'shell-inbox-pause-open':
+    case 'shell-inbox-pause-dnd':
+    case 'shell-inbox-pause-offline':
+    case 'shell-inbox-pause-date':
+    case 'shell-inbox-pause-failure':
+      return <Shell initialNav={{...INITIAL_NAV, tab: 'inbox'}} />;
     case 'shell-search':
       return <Shell initialNav={{...INITIAL_NAV, tab: 'search'}} />;
     // DS2-2b (#2750): + 메뉴와 그 뒤의 두 시트. 배치 비교안 (a)(알약 안 네 번째
@@ -6056,12 +6068,39 @@ function seedDelegate(surface: string): void {
 // 끝나는 때는 지금 + 3시간 — 사진마다 「오후 N:MM까지」가 다르지만 모양이 증거다.
 const PAUSE_UNTIL_AHEAD_MS = 3 * 60 * 60_000;
 
+/** 내 선언 상태가 방해 금지인 표면들. 나머지는 로스터를 그대로 둔다. */
+const PAUSE_DND_SURFACES = new Set([
+  'shell-pause-status',
+  'shell-pause-until-dnd',
+  'shell-inbox-pause',
+  'shell-inbox-pause-open',
+  'shell-inbox-pause-dnd',
+  'shell-inbox-pause-offline',
+  'shell-inbox-pause-date',
+  'shell-inbox-pause-failure',
+]);
+
+/**
+ * 이 표면의 끝나는 때. 날짜 판은 사흘 뒤 오전 9시라 어제·오늘·내일 이름이 아니라 날짜가 붙는 가장 긴 문장이
+ * 된다(「10월 20일(화) 오전 9:00까지」). 나머지는 지금 + 3시간.
+ */
+function pauseUntilFor(surface: string): number {
+  if (surface !== 'shell-inbox-pause-date') return Date.now() + PAUSE_UNTIL_AHEAD_MS;
+  const day = new Date();
+  day.setDate(day.getDate() + 3);
+  day.setHours(9, 0, 0, 0);
+  return day.getTime();
+}
+
+/** 알림 일시 중지·방해 금지 씨앗이 필요한 표면(프로필 시트 판 `shell-pause-*`, 인박스 줄 판 `shell-inbox-pause*`). */
+function isPauseSurface(name: string): boolean {
+  return name.startsWith('shell-pause-') || name.startsWith('shell-inbox-pause');
+}
+
 /** 이 표면에서 내 로스터 행. 방해 금지 표면만 선언 상태와 기한을 갖는다. */
 function pauseRoster(surface: string): typeof SHELL_ROSTER {
-  if (surface !== 'shell-pause-status' && surface !== 'shell-pause-until-dnd') {
-    return SHELL_ROSTER;
-  }
-  const until = Date.now() + PAUSE_UNTIL_AHEAD_MS;
+  if (!PAUSE_DND_SURFACES.has(surface)) return SHELL_ROSTER;
+  const until = pauseUntilFor(surface);
   return SHELL_ROSTER.map(member =>
     member.id === SELF
       ? {...member, presenceStatus: 'dnd' as const, dndUntilMs: until}
@@ -6105,15 +6144,49 @@ function forceNetwork(online: boolean): void {
 
 /** `seedShell` 이 깐 규칙(꺼짐)을 이 표면의 모양으로 덮는다. */
 function seedPause(surface: string): void {
-  forceNetwork(surface !== 'shell-pause-until-offline');
-  const until = Date.now() + PAUSE_UNTIL_AHEAD_MS;
+  forceNetwork(
+    surface !== 'shell-pause-until-offline' && surface !== 'shell-inbox-pause-offline',
+  );
+  const until = pauseUntilFor(surface);
   const rules =
-    surface === 'shell-pause-status' || surface === 'shell-pause-notify'
+    surface === 'shell-pause-status' ||
+    surface === 'shell-pause-notify' ||
+    surface === 'shell-inbox-pause' ||
+    surface === 'shell-inbox-pause-offline' ||
+    surface === 'shell-inbox-pause-date' ||
+    surface === 'shell-inbox-pause-failure'
       ? {dnd: true, mentionOverridesMute: false, dndUntilMs: until}
-      : surface === 'shell-pause-notify-open' || surface === 'shell-pause-until-open'
+      : surface === 'shell-pause-notify-open' ||
+          surface === 'shell-pause-until-open' ||
+          surface === 'shell-inbox-pause-open'
         ? {dnd: true, mentionOverridesMute: false}
         : null;
   if (rules) harnessClient.setQueryData(['settings', 'notification-rules', ADE_WS], rules);
+  // 인박스 줄은 명부의 내 행(선언 상태)도 읽는다 — 프로필 시트 표면은 로스터를 직접 받지만 이쪽은
+  // 질의 캐시에서 읽는다.
+  if (surface.startsWith('shell-inbox-pause')) {
+    harnessClient.setQueryData(['roster', ADE_WS], pauseRoster(surface));
+  }
+  // 쓰기가 **늦게** 실패하는 서버(design-review H1): 누르면 낙관 칠하기로 줄이 먼저 사라졌다가, 0.6초 뒤
+  // 서버가 500 을 답해 줄이 이유와 함께 돌아온다. 읽기는 끝나지 않는 약속으로 둔다(`seedShell` 과 같은
+  // 이유: 읽기 실패가 세션 만료로 읽혀 캐시가 지워진다).
+  if (surface === 'shell-inbox-pause-failure') {
+    globalThis.fetch = ((_url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET';
+      if (method === 'GET') return new Promise<Response>(() => {});
+      return new Promise<Response>(resolve =>
+        setTimeout(
+          () =>
+            resolve({
+              status: 500,
+              ok: false,
+              text: async () => JSON.stringify({error: {message: 'x'}}),
+            } as unknown as Response),
+          600,
+        ),
+      );
+    }) as typeof fetch;
+  }
 }
 
 function seedShell(surface: string): void {
@@ -6815,7 +6888,7 @@ if (
   LAUNCHED.kind === 'surface' &&
   LAUNCHED.name.startsWith('shell-')
 ) {
-  if (LAUNCHED.name.startsWith('shell-pause-')) keepPauseSeeds();
+  if (isPauseSurface(LAUNCHED.name)) keepPauseSeeds();
   seedShell(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-delegate-')) seedDelegate(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-ask-')) seedAsk(LAUNCHED.name);
@@ -6825,6 +6898,6 @@ if (
     seedIosFeedCacheForCapture({latestBuild: 3036, version: '0.1.29', testflight: true});
   }
   if (LAUNCHED.name.startsWith('shell-call-')) seedCall(LAUNCHED.name);
-  if (LAUNCHED.name.startsWith('shell-pause-')) seedPause(LAUNCHED.name);
+  if (isPauseSurface(LAUNCHED.name)) seedPause(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-profile-push-')) seedPush(LAUNCHED.name);
 }

@@ -1,0 +1,22 @@
+appId: app.momo.ios
+name: 99-pause-banner-failure-capture
+---
+# 99-pause-banner-failure-capture — 「다시 켜기」를 눌렀는데 서버가 늦게 실패하면, 낙관 칠하기로 사라졌던
+# 줄이 이유와 함께 돌아오는 것(#3923, design-review H1). 표면 `SHELL-INBOX-PAUSE-FAILURE`.
+#
+# 하네스의 쓰기는 0.6초 뒤 500 으로 끝난다(`seedPause`). 이 흐름은 누르기 전(`-before`)과 이유가 선 뒤
+# (`-after`)를 찍는다. 앞에 `LIGHT-` 를 붙이면 라이트다.
+#
+#   maestro test -e SHOT=inbox-pause-failure-dark clients/mobile/maestro/99-pause-banner-failure-capture.yaml
+- extendedWaitUntil:
+    visible:
+      id: "pause-banner"
+    timeout: 60000
+- takeScreenshot: ${SHOT}-before
+- tapOn:
+    id: "pause-banner-action"
+- extendedWaitUntil:
+    visible:
+      id: "pause-banner-failure"
+    timeout: 30000
+- takeScreenshot: ${SHOT}-after
