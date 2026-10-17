@@ -42,10 +42,11 @@ export interface LandedApproval {
    * 카드가 컨트롤 대신 영수증이나 「승인됨」 칩을 세우는 판정(`readApprovalCard`)과 같은 두
    * 근거다.
    *
-   * 이 근거에 **안 닿을 수 있는 길**이 있다: 만료다. 만료 sweep 은 `approval` 행을 갱신하고
-   * 카드 행을 알리는 대신 새 `tool_result` 줄을 올린다(`approval_sweep.rs`
-   * `settle_expired_in_tx`) — 카드 props 를 바꾸는 호출은 거기서 찾지 못했다. 취소는 확인하지
-   * 못했다. 그 길은 대기 원장 전이와 시한이 받친다.
+   * 이 근거에 **안 닿을 수 있는 길**이 있다: 만료와 취소다. 서버는 둘 다 `approval` 행만 갱신하고
+   * (`approval_sweep.rs` `settle_expired_in_tx` · `approval.rs` `cancel_pending_approvals_for_run_in_tx`)
+   * 카드 행을 알리는 대신 새 줄(만료 `tool_result` · 취소 시스템 줄)을 올린다 — 카드 props 를
+   * 바꾸거나 `message.edited` 를 내보내는 호출은 두 길에서 찾지 못했다. 카드는 대기로 남는다.
+   * 그 길은 대기 원장 전이와 시한이 받친다.
    */
   decided: boolean;
   /**

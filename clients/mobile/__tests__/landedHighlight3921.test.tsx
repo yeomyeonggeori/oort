@@ -339,8 +339,8 @@ describe.each([[false], [true]])('jumpPills=%s', jumpPills => {
       await advance(400);
       expect(landedIds()).toEqual([APPROVAL_ID]);
 
-      // 카드 스냅샷은 아직 대기다 — 카드 행을 알리지 않는 길(만료·취소·옛 서버)이거나 그
-      // 프레임보다 원장 재조회가 먼저 온 순서다. 이때는 원장만 안다.
+      // 카드 스냅샷은 아직 대기다 — 카드 행을 알리지 않는 길(만료·취소: 서버는 `approval` 행만
+      // 갱신하고 새 줄을 올린다)이거나 그 프레임보다 원장 재조회가 먼저 온 순서다. 이때는 원장만 안다.
       rerender({jumpTarget: JUMP, gates: NO_GATES});
 
       expect(landedIds()).toEqual([]);
@@ -716,7 +716,7 @@ describe('LandedTintFade — 행 하나의 전환', () => {
   // 상태**이지 커밋 한 번의 중간이 아니다. 「한 커밋」은 첫째 시험이 `Profiler` 로 센다.
   // 시험은 React 트리까지만 본다: 화면 픽셀로는 재지 않았다(design-review M-1·N-8).
 
-  it('덮개는 그릇이 배경을 벗는 같은 커밋에 선다 — 효과로 미루면 한 프레임이 깜빡인다', () => {
+  it('덮개는 `landed` 가 뒤집히는 그 한 커밋에 선다 — 효과로 미루면 커밋이 둘이 되어 한 프레임이 깜빡인다', () => {
     const phases: string[] = [];
     const tree = (landed: boolean) => (
       <Profiler
@@ -733,7 +733,9 @@ describe('LandedTintFade — 행 하나의 전환', () => {
     view.rerender(tree(false));
 
     // 커밋 한 번이 덮개까지 그렸다. `wasLanded` 비교를 렌더 중 파생 상태에서 효과로 미루면 배경만
-    // 벗은 커밋이 먼저 그려지고(덮개 없음) 효과가 덮개를 세우는 둘째 커밋이 따른다.
+    // 벗은 커밋이 먼저 그려지고(덮개 없음) 효과가 덮개를 세우는 둘째 커밋이 따른다. 여기서 세는 것은
+    // 덮개 쪽 커밋이다 — 그릇의 배경은 같은 `landed` prop 이 한 렌더에서 그릇 스타일과
+    // `LandedTintFade` 두 곳에 닿는 구조(`MessageRow`)가 같은 커밋에 벗기며, 시험이 직접 세지는 않는다.
     expect(phases).toEqual(['update']);
     expect(fadeOverlay()).not.toBeNull();
   });
