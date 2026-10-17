@@ -1187,6 +1187,7 @@ async fn stream_edit(
         rev: stream.rev,
         is_final: stream.is_final,
         outcome,
+        provisional: false,
     };
 
     let outcome = tenant_tx_or_reject(&state.pool, workspace_id, move |conn| {

@@ -140,7 +140,10 @@ pub struct PumpReport {
 /// precede a commit, a tool call, a provider death and a cancel, and only the
 /// settle path can tell those apart. `commit_turn` writes the closing slice
 /// inside the transaction that ends the run; the stop paths write theirs through
-/// [`crate::stream::close_run_stream`] with an ADR-0155 `outcome`.
+/// [`crate::stream::close_run_stream`] with an ADR-0155 `outcome`; and a failed attempt
+/// that has retries left writes a *provisional* freeze through
+/// [`crate::stream::freeze_run_stream_between_attempts`], which the next attempt reopens
+/// (or the turn's terminal close ends) — see that function.
 ///
 /// The stream is taken by value because the pump is `tokio::spawn`ed alongside
 /// the provider read and must own everything it touches for the length of the

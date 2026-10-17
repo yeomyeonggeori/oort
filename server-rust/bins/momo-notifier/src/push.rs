@@ -1,7 +1,8 @@
 //! The push-candidate drain — the third `NotifierWorker` loop (ADR-0120 D3).
 //!
 //! Port of `workers/NotifierWorker/.../NotifierService.swift`. Candidates are
-//! enqueued by the 011 trigger in the same transaction as their source message;
+//! enqueued in the same transaction as the write that earns them — the 011 trigger on a
+//! message INSERT, and the write that ends a streamed message (ADR-0204 증보 1 D8-a);
 //! this loop turns them into id-only dispatches.
 //!
 //! ## Delivery contract

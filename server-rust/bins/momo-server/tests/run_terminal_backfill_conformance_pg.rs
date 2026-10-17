@@ -369,6 +369,7 @@ async fn grow_stream(app: &PgPool, tenant: &Tenant, message_id: Uuid, rev: i64) 
                     rev,
                     is_final: false,
                     outcome: None,
+                    provisional: false,
                 },
             )
             .await?;
@@ -600,6 +601,7 @@ async fn a_closed_stream_asks_no_questions_about_its_run() {
                     rev: 1,
                     is_final: true,
                     outcome: Some(momo_messaging::StreamCloseOutcome::Cancelled),
+                    provisional: false,
                 },
             )
             .await?;

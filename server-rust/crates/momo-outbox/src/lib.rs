@@ -66,7 +66,11 @@ pub use gateway::{
     GATEWAY_LEASE_SECONDS, HOSTED_DISCONNECT_JOB_LAST_ERROR, HOSTED_LEASE_SECONDS_DEFAULT,
     HOSTED_LEASE_SECONDS_MAX, HOSTED_LEASE_SECONDS_MIN,
 };
-pub use push::{claim_push_candidate_batch, reclaim_stuck_push_candidates, ClaimedPushCandidate};
+pub use push::{
+    claim_push_candidate_batch, emit_stream_closed_push_candidate, reclaim_stuck_push_candidates,
+    stream_closed_candidate_payload, ClaimedPushCandidate, PUSH_CANDIDATE_SCHEMA,
+    PUSH_CANDIDATE_SOURCE_STREAM_CLOSED,
+};
 pub use relay::{
     backoff_seconds, claim_batch, claim_broadcast_batch, mark_done, mark_failed, requeue,
     ClaimedRow, NOTIFY_CHANNEL,
