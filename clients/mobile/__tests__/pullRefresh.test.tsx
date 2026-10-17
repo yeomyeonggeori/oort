@@ -525,6 +525,7 @@ describe('실패는 시각으로도 서고, 시간으로 사라지지 않는다 
     await flush(NOTICE_READY_MS - 460);
     expect(notice()).not.toBeNull();
     expect(announce).toHaveBeenLastCalledWith(FAILED);
+    expect(announce.mock.calls.filter(c => c[0] === FAILED)).toHaveLength(1); // 낭독은 한 번
     // 문구는 오너 확정 그대로다(2026-10-17).
     expect(screen.getByText(FAILED, HIDDEN)).toBeTruthy();
   });
@@ -1506,6 +1507,16 @@ describe('모든 화면이 scrollProps 를 펼친다 (소스 스캔, src 전수)
     ['HostedConnectionsScreen', /<HostedConnectionsScreen\s+active=\{nav\.hosted\.kind === 'list'\}/],
   ])('AppShell 이 %s 에 보이는지(active)를 넘긴다: 빠지면 숨은 탭에 옛 실패가 남는다', (_name, pattern) => {
     expect(shellSrc).toMatch(pattern);
+  });
+
+  it.each([
+    'src/screens/SidebarScreen.tsx',
+    'src/screens/AgentsScreen.tsx',
+    'src/screens/HostedConnectionsScreen.tsx',
+    'src/screens/InboxScreen.tsx',
+  ])('%s: 보이는지(active)를 usePullRefresh 의 옵션으로 넘긴다(검수 M5)', rel => {
+    const text = users.find(u => u.rel === rel)!.text;
+    expect(text).toMatch(/usePullRefresh\((?:[^;]|\n)*?\{active\b[^}]*\}\s*,?\s*\)/);
   });
 
   it('호스팅 연결 목록 래퍼가 notice 를 보기에 넘긴다', () => {
