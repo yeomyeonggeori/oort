@@ -9,6 +9,7 @@
 //! | `only_the_agents_owner_turns_the_mark_on_or_off` | non-owner member, workspace admin, unknown agent → 403/404 in both directions and the column is untouched; owner on/off/on is idempotent with one audit row per change; an unknown body key is refused; the database refuses any value but the owner | `set_connector_owner_in_tx` owner check; `agent_connector_owner_is_owner` CHECK |
 //! | `a_non_owners_call_is_not_delivered_and_answered_once` | owner mention/DM → job, 0 notice; non-owner mention → 0 job, 0 inbox event, 1 notice (threaded, owner named), throttled on repeat, 1 more after 11 min; DM → 0 job + notice; plain thread reply → not in the inbox; work request → 403 `connector_owner_only`; mark off → the same stranger is delivered | `owner_only_gate` connector arm; `subscription_notice` connector body; inbox fan-out predicate (both queries); `agent_runs::create` check |
 //! | `a_thread_wake_by_a_non_owner_is_silent_and_the_owners_wakes` | non-owner plain reply in an agent-opened thread → 0 run, 0 agent line, one `agent.thread_wake.skipped` with the connector reason; owner reply → 1 wake run | the connector arm in `delivery_gate` |
+//! | `a_job_queued_before_the_mark_is_closed_at_claim_not_run` | job + inbox message written by a stranger while the mark was off → mark on → `oort_jobs_claim` takes only the owner's job; the stranger's job is `done` with its reason, its run `cancelled`, one audit row; `oort_inbox_read` hides the stranger's message and shows the owner's | the claim predicate + `close_connector_foreign_jobs_in_tx`; the inbox `visible` re-check |
 //! | `the_welcome_opener_is_the_owners_alone` | `resolve_welcome_target_in_tx`: a stranger is not welcomed by the connector agent, the owner is | `load_welcome_agent_in_tx` predicate |
 //!
 //! Non-person authors (agent / work host) are pinned by the unit test
@@ -41,6 +42,8 @@ use uuid::Uuid;
 
 const TEST_JWT_SECRET: &str = "connector-owner-pg-conformance-signing-secret";
 const AUDIENCE: &str = "/v1/mcp/agent-port";
+const PATH: &str = "/v1/mcp/agent-port";
+const MODERN_VERSION: &str = "2026-07-28";
 const NOTICE_SOURCE: &str = "server.subscription_agent.notice.v1";
 const CONNECTOR_REASON: &str = "connector_owner_non_owner";
 
@@ -229,6 +232,7 @@ struct Fixture {
     outsider: Uuid,
     /// Workspace-scoped hosted agent owned by `owner`, live connection.
     agent: Uuid,
+    bearer: String,
     handle: String,
     /// An ownerless agent.
     orphan: Uuid,
@@ -391,6 +395,7 @@ async fn seed(su: &PgPool) -> Fixture {
         outsider_jwt,
         outsider,
         agent,
+        bearer,
         handle,
         orphan,
         channel: rooms[0],
@@ -1012,4 +1017,184 @@ async fn the_welcome_opener_is_the_owners_alone() {
     );
     assert_eq!(resolve(f.owner).await, Some(f.agent), "the owner is");
     let _ = (&su, f.dm_owner);
+}
+
+async fn port_call(
+    client: &reqwest::Client,
+    base: &str,
+    bearer: &str,
+    tool: &str,
+    arguments: Value,
+) -> Value {
+    let body = json!({
+        "jsonrpc": "2.0",
+        "id": Uuid::new_v4().to_string(),
+        "method": "tools/call",
+        "params": {
+            "_meta": {
+                "io.modelcontextprotocol/protocolVersion": MODERN_VERSION,
+                "io.modelcontextprotocol/clientCapabilities": {}
+            },
+            "name": tool,
+            "arguments": arguments,
+        }
+    });
+    let response = client
+        .post(format!("{base}{PATH}"))
+        .header("content-type", "application/json")
+        .header("accept", "application/json, text/event-stream")
+        .header("mcp-protocol-version", MODERN_VERSION)
+        .header("mcp-method", "tools/call")
+        .header("mcp-name", tool)
+        .bearer_auth(bearer)
+        .json(&body)
+        .send()
+        .await
+        .expect("tools/call");
+    let value: Value = response.json().await.expect("body");
+    assert!(
+        value.get("error").is_none() && value["result"]["isError"] != json!(true),
+        "{tool}: {value}"
+    );
+    value["result"]["structuredContent"].clone()
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (#3938)"]
+async fn a_job_queued_before_the_mark_is_closed_at_claim_not_run() {
+    let (su, _app, f, base, client) = setup().await;
+    let mention = format!("@{} 메일 확인해 줘", f.handle);
+
+    // Mark OFF: a stranger's and the owner's calls are both queued.
+    let stranger_msg = send(
+        &client,
+        &base,
+        &f,
+        &f.outsider_jwt,
+        f.channel,
+        None,
+        &mention,
+    )
+    .await;
+    let owner_msg = send(&client, &base, &f, &f.owner_jwt, f.channel, None, &mention).await;
+    assert_eq!(jobs(&su, &f).await, 2);
+    let queued: Vec<(i64, String, Option<String>)> = sqlx::query_as(
+        "SELECT o.id, upper(o.payload->>'author_member_id'), o.status::text FROM outbox o \
+          WHERE o.workspace_id=$1 AND o.kind='agent_job' AND o.partition_key=$2 ORDER BY o.id",
+    )
+    .bind(f.workspace)
+    .bind(f.agent)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(queued.len(), 2);
+
+    // Mark ON afterwards. Nothing is retired by the toggle itself.
+    assert_eq!(
+        put_mark(
+            &client,
+            &base,
+            &f,
+            &f.owner_jwt,
+            f.agent,
+            json!({"enabled": true})
+        )
+        .await,
+        200
+    );
+    let still_pending: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE workspace_id=$1 AND kind='agent_job' AND partition_key=$2 AND status='pending'",
+    )
+    .bind(f.workspace)
+    .bind(f.agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(still_pending, 2, "the toggle does not bulk-retire");
+
+    // The inbox read hides the stranger's message and shows the owner's.
+    let inbox = port_call(
+        &client,
+        &base,
+        &f.bearer,
+        "oort_inbox_read",
+        json!({"limit": 50}),
+    )
+    .await;
+    let events = inbox["events"].as_array().expect("events");
+    let seen = |id: Uuid| {
+        events.iter().any(|e| {
+            e["messageId"] == json!(id.to_string())
+                || e["messageId"] == json!(id.to_string().to_uppercase())
+        })
+    };
+    assert!(
+        seen(owner_msg),
+        "the owner's queued message is readable: {inbox}"
+    );
+    assert!(
+        !seen(stranger_msg),
+        "the stranger's queued message is not: {inbox}"
+    );
+
+    // The claim takes the owner's job only.
+    let claimed = port_call(
+        &client,
+        &base,
+        &f.bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    let claimed_jobs = claimed["jobs"].as_array().expect("jobs");
+    assert_eq!(
+        claimed_jobs.len(),
+        1,
+        "only the owner's job is handed over: {claimed}"
+    );
+    assert!(
+        claimed
+            .to_string()
+            .contains(&owner_msg.to_string().to_uppercase())
+            || claimed.to_string().contains(&owner_msg.to_string())
+    );
+
+    // The stranger's job is closed, its run cancelled, one audit row.
+    let closed: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT status::text, last_error FROM outbox WHERE workspace_id=$1 AND kind='agent_job' \
+          AND partition_key=$2 AND status='done'",
+    )
+    .bind(f.workspace)
+    .bind(f.agent)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(closed.len(), 1, "{closed:?}");
+    assert_eq!(
+        closed[0].1.as_deref(),
+        Some("connector owner only; job closed")
+    );
+    let cancelled: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM agent_run WHERE workspace_id=$1 AND agent_member_id=$2 AND status='cancelled' AND error->>'code'='connector_owner_only'",
+    )
+    .bind(f.workspace)
+    .bind(f.agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(cancelled, 1);
+    assert_eq!(
+        skip_reasons(&su, &f, "agent.connector_owner.job_closed").await,
+        vec![CONNECTOR_REASON.to_string()]
+    );
+    // A second claim is quiet: the closed job is not resurrected.
+    let again = port_call(
+        &client,
+        &base,
+        &f.bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(again["jobs"].as_array().map_or(0, Vec::len), 0);
 }

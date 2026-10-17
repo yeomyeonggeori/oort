@@ -1211,3 +1211,55 @@ async fn an_agent_running_the_owners_apps_is_never_delegated_to() {
     let stats = drain(&worker).await;
     assert!(stats.delegated >= 1, "the control is delegated: {stats:?}");
 }
+
+/// #3938 (결재: claim 시점 재확인): a job a teammate queued while the team agent
+/// was unmarked is closed unrun once the owner marks it as running their apps;
+/// the owner's own job on the same agent still runs (the zero is not vacuous).
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn a_job_queued_before_the_mark_is_closed_unrun_by_the_worker() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let t = seed_with(&su, false).await;
+    let provider = Arc::new(MockChatProvider::echo());
+    let worker = AgentWorker::new(
+        momo_worker_pool().await,
+        provider.clone() as Arc<dyn ChatProvider>,
+        worker_config(Some(TEAM_ENV_BEARER)),
+    );
+    send(&su, &t, t.teammate_id, &format!("@{TEAM} 먼저 부탁"), true).await;
+    sqlx::query("UPDATE agent SET connector_owner_human_id = owner_human_id WHERE member_id = $1")
+        .bind(t.team_agent_id)
+        .execute(&su)
+        .await
+        .unwrap();
+    let stats = drain(&worker).await;
+    assert_eq!(stats.answered, 0, "{stats:?}");
+    assert!(
+        provider.calls().is_empty(),
+        "no model call for a stranger's queued job"
+    );
+    let cancelled: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM agent_run WHERE workspace_id=$1 AND agent_member_id=$2 \
+            AND status='cancelled' AND error->>'code'='connector_owner_only'",
+    )
+    .bind(t.workspace_id)
+    .bind(t.team_agent_id)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(cancelled, 1);
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND action='agent.connector_owner.job_closed'",
+    )
+    .bind(t.workspace_id)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+
+    send(&su, &t, t.owner_id, &format!("@{TEAM} 제 부탁"), true).await;
+    let stats = drain(&worker).await;
+    assert_eq!(stats.answered, 1, "the owner's job runs: {stats:?}");
+}

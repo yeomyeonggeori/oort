@@ -729,6 +729,10 @@ pub async fn list_hosted_inbox_in_tx(
     .fetch_all(&mut *conn)
     .await?;
 
+    // ADR-0113 증보 2 E3 (#3938): the `visible` column also re-checks, at read
+    // time, that a message event of an agent running its owner's apps was written
+    // by that owner. A message queued before the mark, by anyone else, is hidden
+    // (fail-closed: an unreadable author is "anyone else").
     let rows = sqlx::query(
         "SELECT e.inbox_seq,e.event_kind,e.source_message_id,e.source_channel_id, \
                 e.source_message_seq,e.source_outbox_id,e.source_run_id, \
@@ -737,7 +741,15 @@ pub async fn list_hosted_inbox_in_tx(
                    WHERE visible.workspace_id=e.workspace_id \
                      AND visible.channel_id=e.source_channel_id \
                      AND visible.member_id=e.agent_member_id \
-                     AND visible.left_at IS NULL)) AS visible \
+                     AND visible.left_at IS NULL) \
+                 AND NOT (e.event_kind='message' AND EXISTS ( \
+                   SELECT 1 FROM agent ca \
+                    WHERE ca.workspace_id=e.workspace_id AND ca.member_id=e.agent_member_id \
+                      AND ca.connector_owner_human_id IS NOT NULL \
+                      AND ca.connector_owner_human_id IS DISTINCT FROM ( \
+                        SELECT sm.author_member_id FROM message sm \
+                         WHERE sm.workspace_id=e.workspace_id AND sm.id=e.source_message_id)))) \
+                 AS visible \
            FROM hosted_agent_inbox_event e \
           WHERE e.workspace_id=$1 AND e.connection_id=$2 AND e.agent_member_id=$3 \
             AND e.inbox_seq > $4 \
