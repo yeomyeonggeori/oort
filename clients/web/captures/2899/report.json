@@ -1,0 +1,52 @@
+{
+  "a-light": {
+    "overflow": 0
+  },
+  "b-light": {
+    "overflow": 0
+  },
+  "c-light": {
+    "overflow": 0
+  },
+  "d-light": {
+    "overflow": 0
+  },
+  "e-light": {
+    "overflow": 0
+  },
+  "f-light-nextmon": {
+    "clipped": false,
+    "lines": 2,
+    "truncate": false
+  },
+  "f-light-nextyear": {
+    "clipped": false,
+    "lines": 2,
+    "truncate": false
+  },
+  "a-dark": {
+    "overflow": 0
+  },
+  "b-dark": {
+    "overflow": 0
+  },
+  "c-dark": {
+    "overflow": 0
+  },
+  "d-dark": {
+    "overflow": 0
+  },
+  "e-dark": {
+    "overflow": 0
+  },
+  "f-dark-nextmon": {
+    "clipped": false,
+    "lines": 2,
+    "truncate": false
+  },
+  "f-dark-nextyear": {
+    "clipped": false,
+    "lines": 2,
+    "truncate": false
+  }
+}

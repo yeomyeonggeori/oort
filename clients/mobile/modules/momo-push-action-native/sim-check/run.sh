@@ -24,6 +24,7 @@ SOURCES=(
   "$HERE/../ios/MomoPushActionDecisionKey.swift"
   "$HERE/../ios/MomoPushActionKeychain.swift"
   "$HERE/../ios/MomoPushActionJob.swift"
+  "$HERE/../../../ios/MomoPushKit/PushNotification.swift"
   "$HERE/main.swift"
 )
 if [ -z "$UDID" ]; then

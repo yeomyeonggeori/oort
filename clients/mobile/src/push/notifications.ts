@@ -15,6 +15,7 @@ import {shouldAskNotifications} from '../features/onboarding/phoneFlow';
 import {dismissApprovalNotifications} from './approvalNotifications';
 import {PUSH_ACTION} from './contract';
 import {
+  isLockScreenDecidable,
   parsePushEnvelope,
   pushPayloadOf,
   threadRootId,
@@ -220,9 +221,10 @@ export async function handlePushResponse(
   const envelope = parsePushEnvelope(pushPayloadOf(response));
   const action = response.actionIdentifier;
 
-  if (action === DEFAULT_ACTION_IDENTIFIER) {
-    // Body tap. Opening the app is always safe, even for an envelope we could
-    // not parse or one from another workspace — navigation is the caller's.
+  if (action === DEFAULT_ACTION_IDENTIFIER || action === PUSH_ACTION.openApproval) {
+    // Body tap, or 「열어서 결정」 (ADR-0204 D7) — which is a body tap that asked
+    // for Face ID first. Opening the app is always safe, even for an envelope we
+    // could not parse or one from another workspace — navigation is the caller's.
     return {kind: 'opened', envelope};
   }
 
@@ -243,12 +245,27 @@ export async function handlePushResponse(
   if (envelope.workspaceId !== context.signedInWorkspaceId.toLowerCase()) {
     return {kind: 'ignored', reason: 'workspace mismatch'};
   }
+  // ADR-0204 D7: an approval the lock screen must not decide (`momo.approval.open`)
+  // names its approval too, but its only button is 「열어서 결정」 — it has no 승인/거절
+  // button to press. This is the line that keeps it so: a 승인/거절 response that
+  // reaches an open envelope anyway (a hand-built one, or a future change that
+  // registers those buttons on the category) is not a decision this client takes
+  // from a notification. Judged here, before the `switch`, so it stands in front of
+  // whatever the approve and reject arms do with the approval id. (`approvalId` is
+  // present on every approval envelope, so the test is the category's.)
+  if (
+    (action === PUSH_ACTION.approve || action === PUSH_ACTION.reject) &&
+    envelope.approvalId &&
+    !isLockScreenDecidable(envelope)
+  ) {
+    return {kind: 'ignored', reason: 'this approval is decided in the app'};
+  }
 
   switch (action) {
     case PUSH_ACTION.approve:
     case PUSH_ACTION.reject: {
       // `parsePushEnvelope` already guarantees approvalId is non-null exactly
-      // when the category is `approval`, so this is a type narrowing, not a
+      // when the category is an approval one, so this is a type narrowing, not a
       // second policy.
       if (!envelope.approvalId) {
         return {kind: 'ignored', reason: 'no approval on this notification'};

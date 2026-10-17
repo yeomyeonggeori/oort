@@ -15,7 +15,13 @@
 //!   projection persisted at insert time. Judgment **never re-parses the body**;
 //!   it never even reads it.
 //! * **Approval request** — an `approval_request` message notifies the humans
-//!   who can decide it, excluding the requesting agent.
+//!   who **may approve it**, excluding the requesting agent: active human members
+//!   of its channel that the decision route would let through (ADR-0204 D7; the
+//!   rule is read through [`crate::approvers::may_approve_in_tx`], which asks the
+//!   same functions the route asks). Everyone else in the channel sees the card
+//!   and hears nothing. A card with no `approval` row (a message that merely has
+//!   the type) has nobody to ask and pushes nobody — the relay would refuse the
+//!   dispatch anyway, since an approval category must name its approval.
 //! * **Resume offer** — the owning member of the orphaned session.
 //! * **Work complete (`work_session_idle`, ADR-0120 부록 A, #3341)** — only the
 //!   member who started the session, only when the turn ran at least
@@ -37,6 +43,53 @@
 //!   fails any of these selects NO reason — like the idle card it must not fall
 //!   through to `dm`, so turning the switch off really silences it. Everyone else
 //!   in the channel is judged as for any message.
+//! * **An agent's answer to you (ADR-0204 D8, #3929)** — a run's closing line pushes
+//!   the person whose message the run answered: the final answer, the approval-expiry
+//!   result, the stall notice. "Answers" is a fact the line carries — `reply_to_id`
+//!   (the final answer, ADR-0148 rule 6) or `props.answers_message_id`
+//!   ([`momo_agent::PROP_ANSWERS_MESSAGE_ID`], the two lines a sweep writes) — and the
+//!   asker is the author of the message it names, in the same channel. Only an
+//!   **agent's** line that belongs to a **run** counts: a work-session card quotes the
+//!   owner's message too, but it has no run, and tool lines, rejection lines and
+//!   notices carry neither marker. The wire reason is the existing `mention`; the
+//!   asker is not pushed while they are reading the channel (the same 30 s
+//!   [`WORK_COMPLETE_FOREGROUND_WINDOW_SECS`] as the work reasons). In a DM the `dm`
+//!   arm has already answered, with its old rules: this arm is for everywhere else.
+//!
+//!   Everything else about the asker is the ordinary rules of a `mention`: a muted
+//!   channel silences it unless the asker kept 「멘션은 예외」, DND silences it, and a
+//!   person who left the channel is not a recipient at all (`left_at IS NULL` in the
+//!   recipients join). A *failed* run's closing line is an answer like any other — the
+//!   asker hears that it failed. A `type=work` run's requester is not this arm's
+//!   business: `work_run_done` sits above it, and a work run raised from the work
+//!   surface has no trigger message for the sweeps to point at, so its expiry and
+//!   stall lines carry no marker. An agent can name any message of the room in
+//!   `reply_to_id` when it sends over REST or the Agent Port (ADR-0148's quote); that
+//!   is no more reach than its `@mention` already has, and the line must still belong
+//!   to a run. Those REST sends (`send_message_with_mentions_in_tx`) record the quoted
+//!   author as *mentioned*, so they are judged by the explicit-mention arm above — with
+//!   no reading window — and never reach this one: only the worker's and the gateway's
+//!   sends (`send_message_in_tx`, which records no mentions) do. The two paths differ
+//!   in the window because ADR-0120 gives mentions none and D8 gives answers one.
+//!
+//!   **Known gap (independent review H1) — a streamed *worker* answer is judged once,
+//!   when it OPENS.** The in-process worker (`MessageStream`) writes one answer in two
+//!   steps: the opening slice is the INSERT — the only write the 011 trigger turns into
+//!   a candidate — and `commit_turn`'s closing slice is an UPDATE that enqueues
+//!   nothing. So the reading window is read against the *opening* slice, and the
+//!   finished answer is never judged: an asker who sent the question and put the phone
+//!   down within 30 s of the first words is held back, and then never told. (Not
+//!   affected: single-INSERT answers — the hosted gateway's `complete`, the team-AI
+//!   helper's sends, both sweeps' lines, a worker turn that never opened a stream — and
+//!   REST streamers, whose opening `POST` already names the quoted author as mentioned.)
+//!   The two `known_gap_h1_*` tests in `push_conformance_pg` pin this. Closing it needs
+//!   a candidate at the stream close and a window read at judgment time — a second
+//!   producer of `push_candidate` rows, which `OutboxKind::PushCandidate` and
+//!   `docs/architecture/overview.md` reserve for the 011 trigger — so it waits for a
+//!   decision rather than being decided here. (The window is also a decision in its
+//!   own right: ADR-0204 D8 writes it as 「30초 안에 움직였으면」, and a chat answer that
+//!   arrives within 30 s of the asker's own question — whose arrival moved their
+//!   cursor — is "reading" even without streaming. That is the ADR as written.)
 //! * **Mute (ADR-0124)** — the per-channel `notification_pref` row suppresses
 //!   every reason, mentions and approvals included. Read at judgment time; no
 //!   cache.
@@ -53,8 +106,12 @@
 //!   column — the presence write sets the pause in its own transaction
 //!   (「묶어」), so judgment still reads one ledger and never `member`.
 //!
-//! Reason precedence per member is `approval_request > mention > dm`, expressed
-//! by the `CASE` arm order below. Suppression precedence across the two ledgers
+//! Reason precedence per member is the `CASE` arm order below: the three work
+//! reasons (`resume_offer`, `work_session_idle`, `work_run_done` — each claims its
+//! message for the one person it names) > `approval_request` > `mention` > `dm` > an
+//! agent's answer to you. That last arm never outranks a mention or a DM, and only a
+//! person nothing else selected reaches it, so one message carries one reason.
+//! Suppression precedence across the two ledgers
 //! is `dnd > channel-mute(with mention exception) > deliver`, expressed by the
 //! `WHERE` clause: absence of a `notification_rule` row is `dnd=false,
 //! mention_overrides_mute=false`, which is the pre-증보 behaviour exactly.
@@ -62,12 +119,32 @@
 //! ## What is *not* read
 //!
 //! `message.body` appears nowhere in these statements. A target carries ids,
-//! enum labels and a count — there is no column here that could carry prose.
+//! enum labels and a count — nothing this module returns can carry prose.
+//!
+//! The one table read here that does hold prose is `approval`, and it is read
+//! through a **projection** of its payload: only the keys the shared functions
+//! read — the audience's (`action.id`, `action.pins`, `execution`, `origin`; see
+//! `momo_agent::decider`) and the open-in-app list's (`tool_call.name`, and a bare
+//! marker for whether `action.args` is an object with an `avatar` key; see
+//! `momo_agent::actions::opens_in_app`) — never the card's argument values,
+//! `arguments` or rationale. That is a boundary (the card's text does not enter this
+//! process) and a bound (a model-sized tool input is not copied once per recipient
+//! and device). `tests/judgment_projection.rs` fails if the statement reads a path of
+//! the payload that nobody listed, or reaches the approval row any other way. The
+//! projection and `opens_in_app` must agree on every card (the decision route calls the
+//! same function on the whole payload): the category test in `push_conformance_pg`
+//! asserts it for each card of its table.
 
+use std::collections::HashMap;
+
+use momo_agent::actions::opens_in_app;
+use momo_agent::PROP_ANSWERS_MESSAGE_ID;
 use momo_db::DbError;
+use serde_json::Value;
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
+use crate::approvers::{ApprovalCard, CardAudience};
 use crate::dispatch::{category_for, PushCategory, PushReason};
 
 /// A work turn must have run at least this long (ms) to earn a 「작업 끝남」 push
@@ -124,6 +201,12 @@ pub async fn judge_targets(
                   m.client_msg_id, \
                   m.created_at, \
                   m.root_id, \
+                  m.reply_to_id, \
+                  CASE WHEN m.props->>$5::text \
+                            ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' \
+                       THEN (m.props->>$5::text)::uuid END AS answers_message_id, \
+                  (SELECT au.kind::text FROM member au \
+                    WHERE au.workspace_id = $1 AND au.id = m.author_member_id) AS author_kind, \
                   c.kind::text AS channel_kind \
              FROM message m \
              JOIN channel c ON c.id = m.channel_id \
@@ -148,6 +231,16 @@ pub async fn judge_targets(
               AND EXISTS ( \
                 SELECT 1 FROM hosted_agent_connection hc \
                  WHERE hc.workspace_id = $1 AND hc.agent_member_id = r.agent_member_id) \
+         ), \
+         asked AS ( \
+           SELECT t.author_member_id AS asker_id \
+             FROM msg \
+             JOIN message t \
+               ON t.workspace_id = $1 \
+              AND t.channel_id = msg.channel_id \
+              AND t.id = COALESCE(msg.reply_to_id, msg.answers_message_id) \
+            WHERE msg.author_kind = 'agent' \
+              AND msg.run_id IS NOT NULL \
          ), \
          recipients AS ( \
            SELECT ms.member_id, \
@@ -214,6 +307,18 @@ pub async fn judge_targets(
                        WHERE lower(t.v) = lower(ms.member_id::text) \
                     ) THEN 'mention' \
                     WHEN (SELECT channel_kind FROM msg) = 'dm' THEN 'dm' \
+                    WHEN mem.id = (SELECT asker_id FROM asked) THEN \
+                      CASE WHEN NOT EXISTS ( \
+                            SELECT 1 FROM read_state seen \
+                             WHERE seen.workspace_id = $1 \
+                               AND seen.channel_id = (SELECT channel_id FROM msg) \
+                               AND seen.member_id = mem.id \
+                               AND seen.last_read_seq > 0 \
+                               AND ( seen.last_read_seq >= (SELECT seq FROM msg) \
+                                     OR seen.last_read_at >= (SELECT created_at FROM msg) \
+                                          - make_interval(secs => $4::double precision) ) \
+                            ) \
+                        THEN 'mention' END \
                     ELSE NULL \
                   END AS reason \
              FROM membership ms \
@@ -242,7 +347,20 @@ pub async fn judge_targets(
                 COALESCE((SELECT root_id FROM msg), (SELECT channel_id FROM msg)) AS thread_id, \
                 (SELECT message_type FROM msg) AS message_type, \
                 (SELECT props_kind FROM msg) AS props_kind, \
-                a.id AS approval_id \
+                a.id AS approval_id, \
+                a.action_type AS approval_action_type, \
+                jsonb_build_object( \
+                  'action', jsonb_build_object( \
+                              'id', a.payload#>'{action,id}', \
+                              'pins', a.payload#>'{action,pins}', \
+                              'args', CASE \
+                                WHEN jsonb_typeof(a.payload#>'{action,args}') = 'object' \
+                                 AND jsonb_exists(a.payload#>'{action,args}', 'avatar') \
+                                  THEN jsonb_build_object('avatar', true) \
+                                ELSE '{}'::jsonb END), \
+                  'tool_call', jsonb_build_object('name', a.payload#>'{tool_call,name}'), \
+                  'execution', a.payload->'execution', \
+                  'origin', a.payload->'origin') AS approval_payload \
            FROM recipients r \
            JOIN push_token t \
              ON t.member_id = r.member_id \
@@ -261,6 +379,7 @@ pub async fn judge_targets(
            LEFT JOIN approval a \
              ON a.workspace_id = $1 \
             AND a.request_message_id = $2 \
+            AND a.channel_id = (SELECT channel_id FROM msg) \
           WHERE r.reason IS NOT NULL \
             AND NOT ( \
               COALESCE(nr.dnd, false) \
@@ -279,10 +398,19 @@ pub async fn judge_targets(
     .bind(message_id)
     .bind(WORK_COMPLETE_MIN_RAN_MS)
     .bind(WORK_COMPLETE_FOREGROUND_WINDOW_SECS)
+    .bind(PROP_ANSWERS_MESSAGE_ID)
     .fetch_all(&mut *conn)
     .await?;
 
     let mut targets = Vec::with_capacity(rows.len());
+    // One answer per person per card: a member with three devices is asked once. And
+    // one resolution per card: the gate it puts on its decider and the owner of the
+    // machine it is about do not depend on who is being asked. (Keyed by approval, not
+    // just by person: `approval.request_message_id` is not unique in the schema, and a
+    // message that two approval rows claim must not let the second reuse the first's
+    // answers.)
+    let mut may_approve: HashMap<(Uuid, Uuid), bool> = HashMap::new();
+    let mut audiences: HashMap<Uuid, CardAudience> = HashMap::new();
     for row in rows {
         let reason_label: String = row.get("reason");
         let Some(reason) = PushReason::from_db(&reason_label) else {
@@ -295,10 +423,63 @@ pub async fn judge_targets(
         };
         let message_type: String = row.get("message_type");
         let props_kind: Option<String> = row.get("props_kind");
-        let category = category_for(&message_type, props_kind.as_deref(), reason);
+        let member_id: Uuid = row.get("member_id");
+
+        // The approval this message is the card of, when it is one.
+        let card = row
+            .get::<Option<Uuid>, _>("approval_id")
+            .map(|approval_id| ApprovalCard {
+                approval_id,
+                action_type: row.get("approval_action_type"),
+                payload: row.get::<Value, _>("approval_payload"),
+            });
+
+        // ADR-0204 D7 — an approval request goes to the people who may approve it.
+        // The SQL above chose every active human in the room; the decision route's
+        // role/owner conditions narrow that here, through the functions the route
+        // calls (`crate::approvers`). Only the `approval_request` reason is
+        // narrowed: a resume offer, a work card or a mention on the same message
+        // were chosen by their own rules.
+        if reason == PushReason::ApprovalRequest {
+            let Some(card) = card.as_ref() else {
+                // A card with no `approval` row has nobody to ask. Silent in the
+                // result, loud in the log: this used to surface as the relay's 400.
+                tracing::warn!(
+                    workspace_id = %workspace_id,
+                    message_id = %message_id,
+                    "approval_request message has no approval row; nobody is pushed"
+                );
+                continue;
+            };
+            let key = (card.approval_id, member_id);
+            let allowed = match may_approve.get(&key) {
+                Some(answer) => *answer,
+                None => {
+                    let audience = match audiences.get(&card.approval_id) {
+                        Some(audience) => audience.clone(),
+                        None => {
+                            let resolved = CardAudience::resolve(conn, workspace_id, card).await?;
+                            audiences.insert(card.approval_id, resolved.clone());
+                            resolved
+                        }
+                    };
+                    let answer = audience.allows(conn, workspace_id, member_id).await?;
+                    may_approve.insert(key, answer);
+                    answer
+                }
+            };
+            if !allowed {
+                continue;
+            }
+        }
+
+        let opens = card
+            .as_ref()
+            .is_some_and(|card| opens_in_app(&card.action_type, &card.payload));
+        let category = category_for(&message_type, props_kind.as_deref(), reason, opens);
 
         targets.push(JudgedTarget {
-            member_id: row.get("member_id"),
+            member_id,
             token_id: row.get("token_id"),
             device_id: row.get("device_id"),
             device_platform: row.get("platform"),
@@ -308,10 +489,10 @@ pub async fn judge_targets(
             reason,
             thread_id: row.get("thread_id"),
             category,
-            // An approval id is meaningful only for the approval category —
+            // An approval id is meaningful only for the two approval categories —
             // the relay and the NSE both reject the pair otherwise.
-            approval_id: if category == PushCategory::Approval {
-                row.get("approval_id")
+            approval_id: if category.carries_approval_id() {
+                card.as_ref().map(|card| card.approval_id)
             } else {
                 None
             },

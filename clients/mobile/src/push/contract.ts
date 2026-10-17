@@ -44,36 +44,49 @@ export const KEYCHAIN_ACCESS_GROUP_INFO_KEY = 'MomoKeychainAccessGroup';
  *  The APNs topic is the APP's bundle id, never the extension's. */
 export const PUSH_TOPIC = 'app.momo.ios';
 
-/** `MomoPushCategory` — PushNotification.swift:78-85. The category decides which
- *  action buttons the notification carries. */
+/** `MomoPushCategory` — PushNotification.swift:108-121. The category decides which
+ *  action buttons the notification carries.
+ *
+ *  `approvalOpen` is ADR-0204 D7 (#3928): an approval the lock screen must NOT
+ *  decide — it mints a value shown once, or it asks the approver to pick a host.
+ *  Its one button opens the card (after Face ID); there is no 승인 or 거절 on it.
+ *  The server chooses between the two (`momo_agent::actions::opens_in_app`); an
+ *  app build that predates this value cannot decode it and shows the notification
+ *  without buttons, which is the safe way to fail. Both approval categories carry
+ *  an `approval_id`. */
 export const PUSH_CATEGORY = {
   message: 'momo.message',
   mention: 'momo.mention',
   approval: 'momo.approval',
+  approvalOpen: 'momo.approval.open',
   work: 'momo.work',
 } as const;
 
 export type PushCategory = (typeof PUSH_CATEGORY)[keyof typeof PUSH_CATEGORY];
 
-/** `MomoPushActionIdentifier` — PushNotification.swift:87-91.
+/** `MomoPushActionIdentifier` — PushNotification.swift:123-129.
  *
  *  These are the identifiers that must survive the trip to JS. RNFirebase was
  *  disqualified precisely because it does not forward them (ADR-0137 D7 정오 5);
  *  expo-notifications passes `response.actionIdentifier` through untouched
- *  (NotificationRecords.swift:457), remapping only the system default action. */
+ *  (NotificationRecords.swift:457), remapping only the system default action.
+ *
+ *  `openApproval` is the single 「열어서 결정」 button of `approvalOpen` (ADR-0204
+ *  D7): it opens the app on the approval's card. It decides nothing. */
 export const PUSH_ACTION = {
   quickReply: 'momo.action.quick-reply',
   approve: 'momo.action.approve',
   reject: 'momo.action.reject',
+  openApproval: 'momo.action.open-approval',
 } as const;
 
 export type PushAction = (typeof PUSH_ACTION)[keyof typeof PUSH_ACTION];
 
-/** Payload schema gate — PushNotification.swift:180. The extension refuses any
+/** Payload schema gate — PushNotification.swift:218. The extension refuses any
  *  envelope whose schema string is not exactly this, so JS must not be laxer. */
 export const PUSH_ENVELOPE_SCHEMA = 'momo.push.notification.v2';
 
-/** Accepted `reason` values — PushNotification.swift:218 (the `contains` gate).
+/** Accepted `reason` values — PushNotification.swift:226 (the `contains` gate).
  *
  *  Five since ADR-0120 부록 A (Accepted 2026-10-02, #3341): `work_session_idle`
  *  is the 「작업 끝남」 push. The server only sends it to the member who started

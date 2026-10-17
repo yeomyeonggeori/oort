@@ -61,8 +61,8 @@ describe("표면 판정표", () => {
     // `features/agents/agentRunHistoryRoutes.test.ts`)이고, 둘은 함께 읽어야 한다.
     //
     // `plugins`(앱 보기)는 2026-10-16에 뒤집혔다(#3861이 읽기 둘을 올렸다). 설치·권한
-    // 네 경로는 아직 없어서 `pluginInstall`(앱 설치)은 거짓으로 남고, 그 줄은 표 대신
-    // 서버가 보여 준 사실로 켜진다(아래 「앱 설치 탐지」).
+    // 네 경로는 2026-10-17에 라우터에 들어왔지만(#3965·#3967) `pluginInstall`(앱 설치)은
+    // 그래도 거짓으로 남는다: 그 줄은 표 대신 서버가 보여 준 사실로 켜진다(아래 「앱 설치 탐지」).
     for (const id of [
       "messageSearch",
       "approvals",

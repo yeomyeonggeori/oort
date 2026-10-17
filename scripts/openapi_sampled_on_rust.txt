@@ -134,6 +134,8 @@ POST /v1/auth/logout
 POST /v1/auth/realtime-token
 # #3121 — NSE narrow token (ADR-0188 §8.7)
 POST /v1/auth/push-fetch-token
+# #3927 — lock-screen decision token (ADR-0204 D6)
+POST /v1/auth/push-action-token
 # ADR-0180 D5 / #2491 — list is two redeem sessions, one current; revoke
 # samples 204, 400 cannot_revoke_current, and 404. Issue/redeem stay
 # fixtures (not on this list) until a later add.

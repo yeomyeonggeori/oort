@@ -8,6 +8,7 @@
 - 기안: Opus 5.5 worker(#2754). O4(D2 초안화)는 PR #2794 검수 뒤 planner가 위임 범위 안에서 판정했다.
 - 근거 자료: 제안서 `claudedocs/agent-workspace-2.0/brief.md` §2.4(공식 원격 기능), §2.5(Railway), §3.7(원격 터미널 세팅 네 경로), §3.9(커넥터). gitignore 대상이라 로컬에만 있다.
 - 증보: ADR-0125(호스트 등록 경로. 0125 머리에 역방향 줄), ADR-0188 D6·§8.1(설정 묶음 예외. 0188 D6과 §8.5에 역방향 줄)
+- 증보: 2026-10-16 **D3·D7 Q9** — D3 「MCP 서버」 행에 앱(커넥터) 원격 MCP 항목(`pluginId`·`tools[risk]`·`manifestDigest`)과 도구 목록의 `tool_grants` 교집합, 등급별 세션 허락을 더하는 모양은 [ADR-0188](0188-phone-remote-work-host.md) §8.9가 정한다(표의 거부 조건은 그대로). D7 Q9의 「서버가 토큰을 쥐는 MCP 카탈로그는 A5 뒤」는 그대로이고, 사람 토큰 없는 앱 카탈로그 확장과 실행 경로는 [ADR-0113](0113-connector-credential-plugin-boundary.md) 증보 2가, GitHub App 자격증명(인스턴스 통합 자격증명, 사람 토큰 아님)은 [ADR-0205](0205-github-app-integration.md)가 A5에 앞서 좁게 정한다. 행동 명령 #2785(서버가 실행하는 「행동」)는 그대로 A5를 기다린다 — 이번 앱 쓰기는 「각자 에이전트」 경로의 벤더 MCP 도구이고 서버 실행 행동이 아니다. 본문 결정은 바꾸지 않았다.
 - 관계: ADR-0171(봉인·write-only URL 모양), ADR-0180(QR 기기 연결), ADR-0113·0147(커넥터 커스터디), ADR-0157(샌드박스 네트워크), ADR-0191(계정 프로필)
 
 ## Context

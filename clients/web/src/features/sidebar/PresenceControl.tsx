@@ -1,9 +1,6 @@
 import { useId, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check } from "lucide-react";
 import {
-  setPresenceStatus,
-  uuidEq,
   type EffectivePresence,
   type PresenceStatus,
   type RosterMember,
@@ -13,6 +10,10 @@ import {
   PRESENCE_MENU_LABEL,
   PRESENCE_OPTIONS,
 } from "@momo/core/features/presence/model";
+import {
+  PAUSE_UNTIL_NONE_ACTION_LABEL,
+  pauseUntilLabel,
+} from "@momo/core/features/presence/pauseUntil";
 import {
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
@@ -25,6 +26,7 @@ import {
   renderableAvatarUrl,
 } from "@momo/core/features/workspace/avatar";
 import { useMemberAvatar } from "./useMemberAvatar";
+import { useSelfPresenceWrite } from "./useSelfPresenceWrite";
 
 // =============================================================================
 // Self presence (ADR-0160 ③, 프레즌스 6b). UX-D4 (#1756) moved the trigger: the
@@ -152,50 +154,28 @@ export function PresenceStatusItems({
   selfMemberId,
   selfMember,
   onWrote,
+  onChooseDnd,
 }: {
   workspaceId: string;
   selfMemberId: string;
   selfMember: RosterMember | null | undefined;
   /** Called after a successful durable write so the owning card can close. */
   onWrote?: () => void;
+  /**
+   * 방해 금지는 기한을 고르고 나서야 켜진다(ADR-0204 D2). 이 항목은 쓰지 않고 이 콜백으로
+   * 기한 다이얼로그를 열게 한다. 이미 방해 금지인 때도 연다: 기한을 바꾸는 길이 이것뿐이다.
+   */
+  onChooseDnd: () => void;
 }) {
-  const client = useQueryClient();
   const [failed, setFailed] = useState(false);
   const menuLabelId = useId();
 
   const declared = selfMember?.presenceStatus;
   const current: PresenceStatus = declared ?? "auto";
 
-  const mutation = useMutation({
-    mutationFn: (status: PresenceStatus) =>
-      setPresenceStatus(workspaceId, { status }),
-    onMutate: async (status) => {
-      // Optimistic: paint the new status onto the roster cache the profile row
-      // and every member surface read from, then reconcile with the server.
-      await client.cancelQueries({ queryKey: ["roster", workspaceId] });
-      const previous = client.getQueryData<RosterMember[]>(["roster", workspaceId]);
-      client.setQueryData<RosterMember[]>(["roster", workspaceId], (rows) =>
-        rows?.map((row) =>
-          uuidEq(row.id, selfMemberId) ? { ...row, presenceStatus: status } : row
-        )
-      );
-      return { previous };
-    },
-    onError: (_error, _status, context) => {
-      if (context?.previous) {
-        client.setQueryData(["roster", workspaceId], context.previous);
-      }
-      setFailed(true);
-    },
-    onSuccess: () => {
-      setFailed(false);
-      onWrote?.();
-      // The server broadcast is the truth co-members see; re-read so this device
-      // matches it (and any change made on another device). PUT is the durable
-      // ③ write (REST→PG→outbox→relay); availability ② is not this request.
-      void client.invalidateQueries({ queryKey: ["roster", workspaceId] });
-    },
-  });
+  // The write (optimistic paint, rollback, roster and notification-rules refresh)
+  // is shared with the do-not-disturb dialog: see `useSelfPresenceWrite`.
+  const mutation = useSelfPresenceWrite(workspaceId, selfMemberId);
 
   return (
     <>
@@ -225,28 +205,65 @@ export function PresenceStatusItems({
       <DropdownMenuRadioGroup value={current} aria-labelledby={menuLabelId}>
         {PRESENCE_OPTIONS.map((status) => {
           const isCurrent = status === current;
+          // 방해 금지가 켜져 있으면 끝나는 때를 둘째 줄에 말한다(기한 없는 행은 「기한 없음 ·
+          // 기한 정하기」). 줄을 누르면 기한 다이얼로그가 열리므로 그 문장이 곧 안내다.
+          const dndNote =
+            status === "dnd" && isCurrent
+              ? selfMember?.dndUntilMs === undefined
+                ? PAUSE_UNTIL_NONE_ACTION_LABEL
+                : pauseUntilLabel(selfMember.dndUntilMs, Date.now())
+              : null;
           return (
             <DropdownMenuRadioItem
               key={status}
               value={status}
               data-testid={`presence-option-${status}`}
               disabled={mutation.isPending}
+              className={dndNote ? "h-auto min-h-control py-1" : undefined}
               onSelect={(event) => {
                 // One REST round trip; keep the menu open on failure so the
                 // banner above is readable (the mute toggle's discipline).
                 event.preventDefault();
+                if (status === "dnd") {
+                  onChooseDnd();
+                  return;
+                }
                 if (isCurrent) {
                   onWrote?.();
                   return;
                 }
-                mutation.mutate(status);
+                mutation.mutate(
+                  { status },
+                  {
+                    onSuccess: () => {
+                      setFailed(false);
+                      onWrote?.();
+                    },
+                    onError: () => setFailed(true),
+                  }
+                );
               }}
             >
               <span
                 aria-hidden="true"
                 className={cn("size-2 shrink-0 rounded-full", optionDotClass(status))}
               />
-              <span className="flex-1">{declaredStatusLabel(status)}</span>
+              {dndNote ? (
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span>{declaredStatusLabel(status)}</span>
+                  {/* 말줄임을 쓰지 않는다: 메뉴 폭은 192px 라 「10월 19일(월) 오전 9:00까지」(다음 주
+                      월요일 항목이 만드는 라벨)가 한 줄에 못 든다. 행 높이는 가변이고, 어절 단위로
+                      접어(`break-keep`) 날짜와 시각이 비슷한 길이의 두 줄이 되게 한다(`text-balance`). */}
+                  <span
+                    className="break-keep text-balance text-meta text-ink-muted"
+                    data-testid="presence-dnd-until"
+                  >
+                    {dndNote}
+                  </span>
+                </span>
+              ) : (
+                <span className="flex-1">{declaredStatusLabel(status)}</span>
+              )}
               {isCurrent && (
                 <Check className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
               )}

@@ -1991,14 +1991,17 @@ version = "0.0.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "momo-agent",
  "momo-auth",
  "momo-db",
  "momo-messaging",
+ "momo-t3",
  "serde",
  "serde_json",
  "sqlx",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
  "uuid",
 ]
 

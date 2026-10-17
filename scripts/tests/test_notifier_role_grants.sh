@@ -147,12 +147,15 @@ SCAN_SCOPE = [
             "end_stalled_run_in_tx",
             "lock_driver_runs_in_tx",
             "resume_runs_from_control_window_in_tx",
+            "run_trigger_message_in_tx",
         ],
         "why": (
             "approval_sweep.rs:169 end_parked_run_in_tx; "
             "run_stall_sweep.rs end_stalled_run_in_tx (ADR-0200 D1-4); "
             "control_window_sweep.rs:67 resume_runs_from_control_window_in_tx "
-            "(audit_log ⋈ work_control SELECT)."
+            "(audit_log ⋈ work_control SELECT); "
+            "approval_sweep.rs / run_stall_sweep.rs run_trigger_message_in_tx "
+            "(ADR-0204 D8, #3929: agent_run.trigger_message_id, stamped on the closing line)."
         ),
     },
     {
@@ -162,6 +165,46 @@ SCAN_SCOPE = [
         # migration 120's agent_run trigger (derived below) asks the same.
         "column_reads": {"hosted_agent_connection": ["workspace_id", "agent_member_id"]},
         "why": "push.rs:139 judge_targets / :212 unread_badge",
+    },
+    {
+        # ADR-0204 D7 (#3928): judge_targets narrows an approval's audience to the
+        # people the decision route would let through, by calling the same reads the
+        # route calls. approvers.rs holds no SQL of its own; the three scopes below
+        # are the functions it calls.
+        "path": "server-rust/crates/momo-push/src/approvers.rs",
+        "mode": "all",
+        "why": "judgment.rs judge_targets → may_approve_in_tx (no SQL; calls the three reads below)",
+    },
+    {
+        "path": "server-rust/crates/momo-messaging/src/identity.rs",
+        "mode": "symbols",
+        "symbols": ["active_workspace_role"],
+        # `SELECT wm.role … FROM workspace_membership wm JOIN member m ON
+        # (workspace_id, id) WHERE wm.workspace_id AND wm.member_id` — and nothing else
+        # of the table (joined_at / updated_at are never read), hence column grants.
+        "column_reads": {"workspace_membership": ["workspace_id", "member_id", "role"]},
+        "why": "approvers.rs CardAudience::allows: the agent-editor gate (require_profile_editor_in_tx calls this twin)",
+    },
+    {
+        "path": "server-rust/crates/momo-auth/src/workspace_authorization.rs",
+        "mode": "symbols",
+        "symbols": ["active_workspace_role"],
+        # The same statement as the messaging twin above: `require_admin` calls THIS
+        # one, so the admin / operator arm of the audience does too.
+        "column_reads": {"workspace_membership": ["workspace_id", "member_id", "role"]},
+        "why": "approvers.rs CardAudience::allows: the admin gate (require_admin calls this twin)",
+    },
+    {
+        "path": "server-rust/crates/momo-agent/src/provisioning.rs",
+        "mode": "symbols",
+        "symbols": ["agent_owner_in_tx"],
+        "why": "approvers.rs may_approve_in_tx: the owner arm of require_profile_editor_in_tx (agent ⋈ member, both already granted)",
+    },
+    {
+        "path": "server-rust/crates/momo-t3/src/work_control.rs",
+        "mode": "symbols",
+        "symbols": ["remote_host_owner_in_tx"],
+        "why": "approvers.rs may_approve_in_tx: ADR-0188 D3 host owner (work_host, already granted)",
     },
     {
         "path": "server-rust/crates/momo-push/src/dispatch_log.rs",
@@ -333,7 +376,7 @@ LADDER_SITES = (
 )
 
 NOT_SCANNED = [
-    "momo-t3/reattach.rs, terminal_attach.rs, work_control.rs, provision.rs, cloud_host.rs — R2: not on the notifier call graph",
+    "momo-t3/reattach.rs, terminal_attach.rs, work_control.rs (except remote_host_owner_in_tx, scanned since #3928), provision.rs, cloud_host.rs — R2: not on the notifier call graph",
     "billing.rs topup/admission/start_usage — REST / agent-worker",
     "approval.rs create_pending / approval_decision — REST human decision",
     "message.rs thread/attachment/list — REST send extras; notifier uses ThreadPolicy::Skip",
@@ -554,12 +597,129 @@ def parse_column_grants(text):
     return grants
 
 
+# Tables the notifier may UPDATE only through a column-scoped GRANT. A table-level
+# `GRANT … UPDATE ON TABLE <t>` on one of these is a problem even though every scanned
+# statement would be covered by it — the point of the column list is the writes the
+# notifier must NOT be able to make (#3930: it must not rewrite where a push goes).
+COLUMN_SCOPED_UPDATE_ONLY = {
+    "push_token": "#3930: the notifier retires a dead token; it must not rewrite apns_token, member_id or device_id",
+}
+
+COLUMN_UPDATE_GRANT_RE = re.compile(
+    r'GRANT\s+UPDATE\s*\(([^)]*)\)\s+ON\s+([a-z][a-z0-9_]*)\s+TO\s+momo_notifier',
+    re.I | re.S,
+)
+
+
+def parse_column_update_grants(text):
+    """`GRANT UPDATE (a, b) ON <table> TO momo_notifier` → {table: {a, b}}.
+
+    The same shape discipline as the SELECT column grants (no `ON TABLE`): the
+    doctor / table-grant parsers never read a column grant as a table grant, and
+    a statement that writes any other column of the table is a problem below
+    (#3930: `push_token.invalidated_at, updated_at` is the first column-scoped
+    write; a notifier must not be able to rewrite `apns_token` or `member_id`)."""
+    grants = {}
+    for m in COLUMN_UPDATE_GRANT_RE.finditer(text):
+        cols = {c.strip().lower() for c in m.group(1).split(",") if c.strip()}
+        grants.setdefault(m.group(2).lower(), set()).update(cols)
+    return grants
+
+
+UPDATE_SET_RE = re.compile(
+    r'(?i)\bUPDATE\s+(?:ONLY\s+)?(?:public\.)?([a-z][a-z0-9_]*)\s+'
+    r'(?:(?:AS\s+)?[a-z][a-z0-9_]*\s+)?SET\s+'
+)
+SET_END_RE = re.compile(r'(?i)(?:WHERE|FROM|RETURNING)\b')
+IDENT_RE = re.compile(r'^[a-z_][a-z0-9_]*$', re.I)
+
+
+def set_list_columns(sql, start):
+    """The target columns of a `SET a = …, b = …` list that begins at `start`.
+
+    Reads Rust-literal SQL: depth-aware (so `COALESCE(a, b)` and `now()` do not
+    split), skips single-quoted strings, treats the `\\` of a line continuation as
+    a space, and ends at a depth-0 WHERE / FROM / RETURNING, the closing quote of
+    the literal, or `;`. Returns (columns, parsed_ok)."""
+    parts, current = [], []
+    depth, i, n = 0, start, len(sql)
+    while i < n:
+        ch = sql[i]
+        if ch == "'":
+            j = sql.find("'", i + 1)
+            j = n - 1 if j < 0 else j
+            current.append(sql[i:j + 1])
+            i = j + 1
+            continue
+        if ch == '(':
+            depth += 1
+        elif ch == ')':
+            if depth == 0:
+                break
+            depth -= 1
+        elif depth == 0 and ch in '";':
+            break
+        elif depth == 0 and ch == ',':
+            parts.append("".join(current))
+            current = []
+            i += 1
+            continue
+        elif depth == 0 and (i == 0 or not (sql[i - 1].isalnum() or sql[i - 1] == '_')):
+            if SET_END_RE.match(sql, i):
+                break
+        if ch == '\\':
+            ch = ' '
+        current.append(ch)
+        i += 1
+    parts.append("".join(current))
+    columns, ok = set(), True
+    for part in parts:
+        if not part.strip():
+            ok = False
+            continue
+        left = part.split('=', 1)[0].strip()
+        if not IDENT_RE.match(left):
+            ok = False
+            continue
+        columns.add(left.lower())
+    return columns, ok
+
+
+def parse_update_columns(sql):
+    """`UPDATE <table> SET …` statements in `sql` → ({table: columns}, unparsed)."""
+    writes, unparsed = {}, []
+    # A Rust string continuation (`\` + newline + indent) is whitespace to SQL.
+    sql = re.sub(r'\\\r?\n\s*', ' ', sql)
+    for m in UPDATE_SET_RE.finditer(sql):
+        table = m.group(1).lower()
+        if table in SKIP_IDENT:
+            continue
+        columns, ok = set_list_columns(sql, m.end())
+        writes.setdefault(table, set()).update(columns)
+        if not ok:
+            unparsed.append(table)
+    return writes, unparsed
+
+
 def collect_column_reads():
     reads = {}
     for entry in SCAN_SCOPE:
         for table, cols in entry.get("column_reads", {}).items():
             reads.setdefault(table, set()).update(cols)
     return reads
+
+
+def collect_column_writes(extra_by_path=None):
+    """Columns every scanned `UPDATE … SET` writes, per table (+ unparseable ones)."""
+    extra_by_path = extra_by_path or {}
+    writes, unparsed = {}, []
+    for entry in SCAN_SCOPE:
+        extra = extra_by_path.get(entry["path"], "")
+        found, bad = parse_update_columns(corpus_for(entry, extra))
+        for table, cols in found.items():
+            writes.setdefault(table, set()).update(cols)
+        unparsed.extend(bad)
+    return writes, sorted(set(unparsed))
 
 
 def parse_grants(text):
@@ -702,10 +862,43 @@ def collect_used(extra_by_path=None):
     return used, deletes
 
 
-def compare(used, grants, real, col_grants=None, col_reads=None):
+def compare(used, grants, real, col_grants=None, col_reads=None,
+            col_update_grants=None, col_writes=None, unparsed_updates=None):
     problems = []
     col_grants = col_grants if col_grants is not None else COLUMN_GRANTS
     col_reads = col_reads if col_reads is not None else COLUMN_READS
+    col_update_grants = (
+        col_update_grants if col_update_grants is not None else COLUMN_UPDATE_GRANTS
+    )
+    col_writes = col_writes if col_writes is not None else COLUMN_WRITES
+    unparsed_updates = (
+        unparsed_updates if unparsed_updates is not None else UNPARSED_UPDATES
+    )
+    # #3930: a table written through a column-scoped GRANT UPDATE (…). The columns
+    # the scanned statements SET must equal the granted ones — a column more is a
+    # write the production role does not have, a column less is an over-grant.
+    for table, why in sorted(COLUMN_SCOPED_UPDATE_ONLY.items()):
+        if "UPDATE" in grants.get(table, set()):
+            problems.append(f"table-level UPDATE {table} (must stay column-scoped; {why})")
+    for table, cols in sorted(col_update_grants.items()):
+        if "UPDATE" in grants.get(table, set()) and table not in COLUMN_SCOPED_UPDATE_ONLY:
+            problems.append(
+                f"table-level UPDATE {table} next to a column-scoped GRANT UPDATE (…)"
+            )
+        if table in unparsed_updates:
+            problems.append(
+                f"UPDATE {table}: a SET list in the scan scope cannot be parsed, so the "
+                "column grant cannot be proven to cover it"
+            )
+        written = col_writes.get(table, set())
+        for col in sorted(written - cols):
+            problems.append(
+                f"column write {table}.{col} not in GRANT UPDATE (…) ON {table}"
+            )
+        for col in sorted(cols - written):
+            problems.append(
+                f"over-grant column write {table}.{col} (no scanned statement writes it)"
+            )
     for table, cols in sorted(col_reads.items()):
         have = col_grants.get(table, set())
         if "SELECT" in grants.get(table, set()):
@@ -732,6 +925,8 @@ def compare(used, grants, real, col_grants=None, col_reads=None):
                 continue
             if verb == "SELECT" and table in col_reads:
                 continue  # column-scoped read: judged by the column rules above
+            if verb == "UPDATE" and table in col_update_grants:
+                continue  # column-scoped write: judged by the column rules above
             if verb not in have:
                 have_s = ",".join(sorted(have)) if have else "(none)"
                 problems.append(
@@ -773,7 +968,9 @@ for line in NOT_SCANNED:
 real = public_tables()
 grants = parse_grants(bootstrap.read_text(encoding="utf-8"))
 COLUMN_GRANTS = parse_column_grants(bootstrap.read_text(encoding="utf-8"))
+COLUMN_UPDATE_GRANTS = parse_column_update_grants(bootstrap.read_text(encoding="utf-8"))
 COLUMN_READS = collect_column_reads()
+COLUMN_WRITES, UNPARSED_UPDATES = collect_column_writes()
 used, deletes = collect_used()
 used_real = {t: v for t, v in used.items() if t in real}
 
@@ -890,6 +1087,72 @@ print(
     f"({[p for p in probs_g if 'hosted_agent_connection' in p][0]})"
 )
 
+# (h) #3930: the grant that lets the notifier invalidate a dead push token. The dev
+# bootstrap gives the notifier every verb, so only this scan and the production-role
+# suite can see it go missing. Drop the column UPDATE grant → RED.
+probs_h = compare(used_real, grants, real, col_update_grants={})
+if not any("statement UPDATE push_token not in GRANT" in p for p in probs_h):
+    fail(f"sabotage drop push_token column UPDATE GRANT stayed GREEN (problems={probs_h})")
+print(
+    "[test-notifier-role-grants] ok: sabotage drop GRANT UPDATE (invalidated_at, updated_at) "
+    f"ON push_token → RED ({[p for p in probs_h if 'push_token' in p][0]})"
+)
+
+# (h2) #3930: a statement that writes another column of push_token → RED. The grant is
+# two columns on purpose: a notifier must not be able to rewrite `apns_token`.
+writes_h2, bad_h2 = collect_column_writes(
+    extra_by_path={
+        "server-rust/crates/momo-push/src/dispatch_log.rs": (
+            'UPDATE push_token SET invalidated_at = now(), apns_token = $3 WHERE id = $1'
+        )
+    }
+)
+probs_h2 = compare(used_real, grants, real, col_writes=writes_h2, unparsed_updates=bad_h2)
+if not any("column write push_token.apns_token not in GRANT UPDATE" in p for p in probs_h2):
+    fail(f"sabotage SET apns_token in the scanned source stayed GREEN (problems={probs_h2})")
+print(
+    "[test-notifier-role-grants] ok: sabotage UPDATE push_token SET apns_token in scanned source "
+    f"→ RED ({[p for p in probs_h2 if 'apns_token' in p][0]})"
+)
+
+# (h3) #3930: widening the column grant to the whole table → RED.
+grants_h3 = {t: set(vs) for t, vs in grants.items()}
+grants_h3["push_token"] = {"SELECT", "UPDATE"}
+probs_h3 = compare(used_real, grants_h3, real)
+if not any("table-level UPDATE push_token" in p for p in probs_h3):
+    fail(f"sabotage table-level UPDATE push_token stayed GREEN (problems={probs_h3})")
+print(
+    "[test-notifier-role-grants] ok: sabotage table-level GRANT UPDATE ON push_token "
+    f"→ RED ({[p for p in probs_h3 if 'push_token' in p][0]})"
+)
+
+# (h4) #3930: a third column in the grant that no statement writes → RED.
+col_h4 = {t: set(c) for t, c in COLUMN_UPDATE_GRANTS.items()}
+col_h4["push_token"].add("apns_token")
+probs_h4 = compare(used_real, grants, real, col_update_grants=col_h4)
+if not any("over-grant column write push_token.apns_token" in p for p in probs_h4):
+    fail(f"sabotage over-granted push_token column stayed GREEN (problems={probs_h4})")
+print(
+    "[test-notifier-role-grants] ok: sabotage GRANT UPDATE (…, apns_token) ON push_token "
+    f"→ RED ({[p for p in probs_h4 if 'apns_token' in p][0]})"
+)
+
+# (h5) #3930: a SET list the reader cannot parse never silently passes → RED.
+writes_h5, bad_h5 = collect_column_writes(
+    extra_by_path={
+        "server-rust/crates/momo-push/src/dispatch_log.rs": (
+            'UPDATE push_token SET (invalidated_at, updated_at) = (now(), now()) WHERE id = $1'
+        )
+    }
+)
+probs_h5 = compare(used_real, grants, real, col_writes=writes_h5, unparsed_updates=bad_h5)
+if not any("push_token: a SET list in the scan scope cannot be parsed" in p for p in probs_h5):
+    fail(f"sabotage unparseable SET list stayed GREEN (problems={probs_h5})")
+print(
+    "[test-notifier-role-grants] ok: sabotage tuple-form SET list on push_token "
+    f"→ RED ({[p for p in probs_h5 if 'cannot be parsed' in p][0]})"
+)
+
 # (f) #3377: a share-retention DELETE in the scanned notifier source → RED.
 used_f, dels_f = collect_used(
     extra_by_path={
@@ -960,6 +1223,9 @@ print(
 print("[test-notifier-role-grants] used verbs:")
 for table in sorted(used_real):
     print(f"  {table}: {', '.join(sorted(used_real[table]))}")
+print("[test-notifier-role-grants] column-scoped UPDATE (granted == written):")
+for table in sorted(COLUMN_UPDATE_GRANTS):
+    print(f"  {table}: {', '.join(sorted(COLUMN_UPDATE_GRANTS[table]))}")
 PY
 
 echo "[test-notifier-role-grants] PASS"

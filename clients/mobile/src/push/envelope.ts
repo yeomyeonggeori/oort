@@ -101,11 +101,18 @@ export function parsePushEnvelope(payload: unknown): PushEnvelope | null {
   const rawApprovalId = str(momo, 'approval_id')?.toLowerCase() ?? null;
   const approvalId = rawApprovalId && UUID.test(rawApprovalId) ? rawApprovalId : null;
 
-  // PushNotification.swift:189-190, kept as one biconditional rather than two
+  // PushNotification.swift:227-228, kept as one biconditional rather than two
   // loose checks: an approval push MUST carry a usable approval id, and a
   // non-approval push must NOT carry one. Splitting these lets an approval id
   // ride along on a plain message and be acted on by the wrong branch.
-  const isApproval = category === PUSH_CATEGORY.approval;
+  //
+  // Both approval categories name their approval (ADR-0204 D7): the open one needs
+  // the id to land on the card, and to clear the notification once it is decided.
+  // Naming the approval is NOT permission to decide it from here — only the inline
+  // category's buttons may (`handlePushResponse` checks the category again).
+  const isApproval =
+    category === PUSH_CATEGORY.approval ||
+    category === PUSH_CATEGORY.approvalOpen;
   if (isApproval !== (approvalId !== null)) return null;
 
   return {
@@ -158,4 +165,17 @@ export function pushPayloadOfRequest(request: NotificationRequest): unknown {
  *  Mirrors `MomoPushEnvelope.threadRootID` (PushNotification.swift:118-120). */
 export function threadRootId(envelope: PushEnvelope): string | null {
   return envelope.threadId === envelope.channelId ? null : envelope.threadId;
+}
+
+/**
+ * May this notification's 승인·거절 buttons decide its approval (ADR-0204 D7)?
+ *
+ * Only the inline category may. `momo.approval.open` names its approval too (so the
+ * app can land on the card and clear the notification once it is decided) but it is
+ * decided in the app, behind a card that can show what a banner cannot. An allow
+ * list of one, on purpose: a future approval category that is not added here is
+ * not decidable from a notification until someone decides that it should be.
+ */
+export function isLockScreenDecidable(envelope: PushEnvelope): boolean {
+  return envelope.category === PUSH_CATEGORY.approval;
 }

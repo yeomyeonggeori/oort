@@ -500,11 +500,11 @@ struct MomoPushActionDecider: Sendable {
 // MARK: - the line that replaces the notification
 
 enum MomoPushActionCopy {
-  /// 「승인했어요 · {제목}」 / 「거절했어요 · {제목}」. A title that says nothing —
+  /// 「승인했어요 · {제목}」 / 「거부했어요 · {제목}」. A title that says nothing —
   /// empty, or the relay's placeholder because the extension could not fetch the
   /// body — is left off rather than printed.
   static func decided(_ direction: MomoPushActionDirection, title: String) -> String {
-    let verb = direction.approved ? "승인했어요" : "거절했어요"
+    let verb = direction.approved ? "승인했어요" : "거부했어요"
     let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
     if trimmed.isEmpty || trimmed == MomoPushActionContract.placeholderTitle { return verb }
     return "\(verb) · \(trimmed)"
@@ -517,7 +517,7 @@ enum MomoPushActionCopy {
   static func alreadySettled(_ status: MomoPushActionLedgerStatus) -> String {
     switch status {
     case .approved: return "이미 승인된 요청이에요"
-    case .rejected: return "이미 거절된 요청이에요"
+    case .rejected: return "이미 거부된 요청이에요"
     case .expired: return "이미 만료된 요청이에요"
     case .cancelled: return "이미 취소된 요청이에요"
     }
@@ -535,7 +535,7 @@ enum MomoPushActionCopy {
   ///    sentence in the BODY (`failedDetail`) instead of a noun-tail on a one-line
   ///    title that iOS would truncate at its end — the end being the instruction.
   static func failed(_ direction: MomoPushActionDirection) -> String {
-    direction.approved ? "승인하지 못했어요" : "거절하지 못했어요"
+    direction.approved ? "승인하지 못했어요" : "거부하지 못했어요"
   }
 
   /// When the request left and no answer came back (or the server broke after

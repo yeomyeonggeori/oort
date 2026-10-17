@@ -348,16 +348,16 @@ do {
 do {
   typealias Copy = MomoPushActionCopy
   check(Copy.decided(.approve, title: "그록봇") == "승인했어요 · 그록봇", "승인했어요 · {제목}")
-  check(Copy.decided(.reject, title: "그록봇") == "거절했어요 · 그록봇", "거절했어요 · {제목}")
+  check(Copy.decided(.reject, title: "그록봇") == "거부했어요 · 그록봇", "거부했어요 · {제목}")
   check(Copy.decided(.approve, title: "  그록봇\n") == "승인했어요 · 그록봇", "the title is trimmed")
   check(Copy.decided(.approve, title: "") == "승인했어요", "an empty title is left off")
-  check(Copy.decided(.reject, title: "oort") == "거절했어요", "the relay's placeholder title is left off")
+  check(Copy.decided(.reject, title: "oort") == "거부했어요", "the relay's placeholder title is left off")
   check(Copy.alreadySettled(.approved) == "이미 승인된 요청이에요", "이미 승인된 요청이에요")
-  check(Copy.alreadySettled(.rejected) == "이미 거절된 요청이에요", "이미 거절된 요청이에요")
+  check(Copy.alreadySettled(.rejected) == "이미 거부된 요청이에요", "이미 거부된 요청이에요")
   check(Copy.alreadySettled(.expired) == "이미 만료된 요청이에요", "이미 만료된 요청이에요")
   check(Copy.alreadySettled(.cancelled) == "이미 취소된 요청이에요", "이미 취소된 요청이에요")
   check(Copy.failed(.approve) == "승인하지 못했어요", "승인하지 못했어요")
-  check(Copy.failed(.reject) == "거절하지 못했어요", "a 거절 that failed does not say 승인")
+  check(Copy.failed(.reject) == "거부하지 못했어요", "a 거절 that failed does not say 승인")
   check(Copy.failedDetail == "눌러서 앱에서 마무리해 주세요", "the next step is one 해요체 sentence")
   check(Copy.unknownResult == "결과를 확인하지 못했어요", "when the answer never came: the result is unknown, not 「못했어요」")
   check(Copy.unknownResultDetail == "눌러서 앱에서 확인해 주세요", "and the card in the app is where it is known, one tap away like the other failure's next step")
@@ -411,7 +411,7 @@ do {
   check(
     failed
       == MomoPushActionLine(
-        text: "거절하지 못했어요", detail: "눌러서 앱에서 마무리해 주세요", alerts: true, removesSiblings: false),
+        text: "거부하지 못했어요", detail: "눌러서 앱에서 마무리해 주세요", alerts: true, removesSiblings: false),
     "a failure alerts, says what to do in its body, and leaves the other notifications (the approval is still pending)")
   // Every failure there is, by CaseIterable, so a new one cannot slip in without choosing a sentence.
   let maybeRecorded: Set<MomoPushActionFailure> = [.network, .timeLimit, .server, .unclearAnswer]
@@ -420,7 +420,7 @@ do {
   for reason in MomoPushActionFailure.allCases {
     for direction in [MomoPushActionDirection.approve, .reject] {
       let line = P.line(for: .failed(reason), intent: intent(direction))
-      let verb = direction.approved ? "승인하지 못했어요" : "거절하지 못했어요"
+      let verb = direction.approved ? "승인하지 못했어요" : "거부하지 못했어요"
       if maybeRecorded.contains(reason) {
         check(
           line == MomoPushActionLine(
@@ -1035,7 +1035,7 @@ do {
   rig.job.start()
   check(await finished(rig.job), "the job finishes")
   check(
-    rig.events.all == ["begin", "send", "apply:거절하지 못했어요", "applied", "end:41"],
+    rig.events.all == ["begin", "send", "apply:거부하지 못했어요", "applied", "end:41"],
     "a refusal is a line and an end of the task, the same as a success")
 }
 
@@ -1139,7 +1139,7 @@ do {
   rig.tasks.expire()
   check(await finished(rig.job), "the job finishes")
   check(rig.notifier.posted.first?.text == "결과를 확인하지 못했어요",
-    "an expired 거절 also says the result is unknown, not 「거절하지 못했어요」")
+    "an expired 거절 also says the result is unknown, not 「거부하지 못했어요」")
 }
 
 do {
@@ -1151,6 +1151,25 @@ do {
   check(
     rig.events.all == ["begin", "send", "apply:결과를 확인하지 못했어요", "applied", "end:41"],
     "a connection lost after the request left: the line says the result is unknown, and the task is given back")
+}
+
+// ---- NSE demotion (ADR-0204 D7): an unresolved approval loses 승인/거부 -------------------------
+
+do {
+  typealias D = MomoPushCategoryDemotion
+  check(D.categoryIdentifier(current: "momo.approval", resolved: false) == "momo.approval.open",
+    "an approval the extension could not fill in becomes the open-only category")
+  check(D.categoryIdentifier(current: "momo.approval", resolved: true) == "momo.approval",
+    "a resolved approval keeps its buttons")
+  for other in ["momo.approval.open", "momo.message", "momo.mention", "momo.work", ""] {
+    check(D.categoryIdentifier(current: other, resolved: false) == other, "\(other.isEmpty ? "(none)" : other) is never touched")
+  }
+  check(MomoPushCategory.approvalOpen.rawValue == "momo.approval.open", "the target category is the one JS registers")
+  check(MomoPushActionContract.approvalCategory == MomoPushCategory.approval.rawValue,
+    "the handler and the kit agree on the inline approval category")
+  check(MomoPushActionContract.placeholderTitle == MomoPushContract.placeholderTitle
+    && MomoPushActionContract.placeholderBody == MomoPushContract.placeholderBody,
+    "the handler's placeholder is the kit's")
 }
 
 print(failures == 0 ? "PASS" : "FAILED (\(failures))")

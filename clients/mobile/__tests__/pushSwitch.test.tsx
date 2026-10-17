@@ -278,6 +278,8 @@ function launch() {
               onOpenTheme={() => {}}
               onOpenStatus={() => {}}
               onOpenDeviceKey={() => {}}
+              onOpenPauseUntil={() => {}}
+              onOpenDndUntil={() => {}}
               onSignOut={() => signOut()}
               onRevealEnd={() => {}}
             />

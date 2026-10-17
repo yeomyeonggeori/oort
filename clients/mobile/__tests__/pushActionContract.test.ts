@@ -398,3 +398,16 @@ const onMac = process.platform === 'darwin';
     expect((output.match(/^ok:/gm) ?? []).length).toBeGreaterThanOrEqual(270);
   }, 180_000);
 });
+
+describe('NSE: 본문을 못 채운 승인은 「열어서 결정」으로 낮춘다 (ADR-0204 D7)', () => {
+  const NSE = read(join(APP_ROOT, 'ios/NotificationService/NotificationService.swift'));
+
+  it('어느 길로 끝나든 먼저 낮추고, 채워졌을 때만 원래 카테고리로 되돌린다', () => {
+    const body = code(NSE);
+    // fail-open(세션·봉투 없음)도 이 낮춤을 지난다: 낮춤이 guard 보다 앞선다.
+    expect(body.indexOf('MomoPushCategoryDemotion.categoryIdentifier(')).toBeGreaterThan(-1);
+    expect(body.indexOf('MomoPushCategoryDemotion.categoryIdentifier(')).toBeLessThan(body.indexOf('guard let envelope'));
+    expect(body).toMatch(/if resolved \{\s*updated\.categoryIdentifier = originalCategory/);
+    expect(body).toMatch(/let resolved = display\.title != fallback\.title \|\| display\.body != fallback\.body/);
+  });
+});
