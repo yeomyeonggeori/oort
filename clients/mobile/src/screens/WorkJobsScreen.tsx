@@ -37,7 +37,7 @@ import {
   SectionLabel,
   TapRow,
 } from '../design/atoms';
-import {useRefreshControl} from '../design/refresh';
+import {PULL_FILL, usePullRefresh} from '../design/refresh';
 import {useStyles} from '../design/theme';
 import {
   font,
@@ -146,7 +146,7 @@ export default function WorkJobsScreen({
   }, [openId]);
 
   const refetchList = list.refetch;
-  const refreshControl = useRefreshControl(
+  const {refreshControl, scrollProps} = usePullRefresh(
     useCallback(() => refetchList(), [refetchList]),
     'work-jobs-refresh',
   );
@@ -227,6 +227,7 @@ export default function WorkJobsScreen({
           headline={filter === 'mine' ? WORK_JOBS_COPY.emptyMineTitle : WORK_JOBS_COPY.emptyTeamTitle}
           detail={filter === 'mine' ? WORK_JOBS_COPY.emptyMineBody : WORK_JOBS_COPY.emptyTeamBody}
           refreshControl={refreshControl}
+          scrollProps={scrollProps}
           testID="work-jobs-empty"
         />
       ) : (
@@ -269,6 +270,7 @@ export default function WorkJobsScreen({
           }
           contentContainerStyle={styles.listContent}
           refreshControl={refreshControl}
+          {...scrollProps}
           testID="work-jobs-list"
         />
       )}
@@ -436,7 +438,7 @@ const buildStyles = (color: Palette) =>
     filterSelected: {borderColor: color.accent, backgroundColor: color.accentSurface},
     filterLabel: {fontSize: font.label, lineHeight: line.label, color: color.textMuted},
     filterLabelSelected: {color: color.accentText, fontWeight: '700'},
-    listContent: {paddingBottom: space.lg},
+    listContent: {paddingBottom: space.lg, ...PULL_FILL},
     bannerWrap: {paddingHorizontal: SAFE_GUTTER, paddingVertical: space.sm},
     rowBody: {flex: 1, gap: space.xs, paddingVertical: space.xs},
     rowTitle: {fontSize: font.body, lineHeight: line.body, color: color.text, fontWeight: '600'},
