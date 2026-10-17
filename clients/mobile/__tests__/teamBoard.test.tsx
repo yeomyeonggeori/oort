@@ -31,6 +31,10 @@ import {
   sessionPort,
 } from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+import {
+  installTimersOnlyClock,
+  SHELL_WAIT_TEST_TIMEOUT_MS,
+} from './fixtures/fakeClock';
 
 // 「작업」 팀 보드 한 열 판 (#2864). 이 시험은 화면 단위다: 서버가 걸러 준 줄만 그리고,
 // 상태 순서로 서고, 「내 것」은 주인이 나인 줄이고, 시트는 읽기 전용이다.
@@ -247,8 +251,14 @@ const mmkvStore = (
   jest.requireMock('react-native-mmkv') as {__store: Map<string, string>}
 ).__store;
 
+jest.setTimeout(SHELL_WAIT_TEST_TIMEOUT_MS);
+
 beforeEach(() => {
   jest.spyOn(Date, 'now').mockImplementation(testNow);
+  // 시험이 `Date.now` 를 직접 쥐고 있으니(`testNow`) 시계는 타이머만 가짜로 돌린다 —
+  // `Date` 까지 바꾸면 위 스파이가 지워진다. 판 읽기·구독 디바운스의 기다림은 가짜 시간으로
+  // 흐르므로 `waitFor` 예산이 벽시계가 아니라 횟수다(fixtures/fakeClock.ts).
+  installTimersOnlyClock();
   mmkvStore.clear();
   __resetSessionStore();
   __resetServerBaseCache();
@@ -597,7 +607,7 @@ describe('실시간은 신호이고 읽기가 진실이다', () => {
     const rail = fakeRail();
     renderBoard({active: false}, rail.value);
     await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await jest.advanceTimersByTimeAsync(50);
     });
     expect(sharedReads(mock)).toBe(0);
     expect(rail.signals.size).toBe(0);
@@ -865,7 +875,7 @@ describe('앱 복귀 재조회 (#3589 N9) — 단계에는 realtime이 없다', 
     renderBoard({active: false});
     act(() => emit('active'));
     await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await jest.advanceTimersByTimeAsync(50);
     });
     expect(sharedReads(mock)).toBe(0);
   });

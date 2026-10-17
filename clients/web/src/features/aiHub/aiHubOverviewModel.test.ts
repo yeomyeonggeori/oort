@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { HostedAgentConnection } from "@momo/core/features/hostedAgents/model";
 import type { RosterMember } from "@momo/core/lib/api";
 import {
+  READ_ABSENT,
   READ_LOADING,
   accountsCard,
   agentsCard,
@@ -112,6 +113,20 @@ describe("외부 연결 카드", () => {
     const card = externalCard({ apps: ok(2), incoming: { state: "denied" }, outgoing: { state: "error" }, externalAgents: READ_LOADING });
     expect(card.badge).toBeNull();
     expect(texts(card)).toEqual(["앱 2", "채널로 들어오는 주소 소유자·관리자만 볼 수 있어요", "밖으로 보내는 알림 읽지 못했어요", "외부 에이전트 연결 확인하는 중이에요"]);
+  });
+
+  it("서버가 앱 목록을 싣지 않으면 「앱」 칩이 서지 않고 합계는 나머지 셋으로 낸다 (#3860)", () => {
+    const ok = (n: number) => ({ state: "ok" as const, value: n });
+    const card = externalCard({ apps: READ_ABSENT, incoming: ok(1), outgoing: ok(2), externalAgents: ok(1) });
+    // 「읽지 못했어요」가 아니다: 이 서버는 몇 번을 다시 물어도 같은 답을 한다.
+    expect(texts(card)).toEqual(["채널로 들어오는 주소 1", "밖으로 보내는 알림 2", "외부 에이전트 연결 1"]);
+    expect(card.badge).toBe("4개");
+  });
+
+  it("앱이 없는 서버에서도 나머지 줄이 못 읽히면 합계를 막는다", () => {
+    const card = externalCard({ apps: READ_ABSENT, incoming: { state: "error" }, outgoing: READ_LOADING, externalAgents: READ_LOADING });
+    expect(card.badge).toBeNull();
+    expect(texts(card).some((text) => text.startsWith("앱"))).toBe(false);
   });
 
   it("내 구독 연결은 외부 에이전트로 세지 않는다", () => {
