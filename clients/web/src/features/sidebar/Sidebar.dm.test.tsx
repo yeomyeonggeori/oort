@@ -481,16 +481,16 @@ describe("DM 호버 X (#3963)", () => {
     );
   });
 
-  it("X 가 선 동안 링크가 알린다: 알약·점을 내리고 그 자리를 비운다(tokens.css)", async () => {
-    setReadStates([readState(DM_ID(1), 12, 10)]);
+  it("X 가 선 동안 링크가 알린다: 오른쪽 끝 덩어리를 내리고 그 자리를 비운다(tokens.css)", async () => {
+    // 안 읽음이 있는 DM 에는 X 가 서지 않으므로(소유자 결정 2026-10-17) 알약과 X 는 한 행에 함께 서지 않는다.
+    // 오른쪽 끝에는 그래도 점·알약·뒤따르는 슬롯(생존 라벨)이 설 수 있어 그 덩어리 하나가 내려간다.
     const host = await mount();
-    const link = dmRow(host, DM_ID(1));
+    const link = dmRow(host, DM_ID(3));
     expect(link.hasAttribute("data-row-close")).toBe(false);
-    enterRow(host, DM_ID(1));
+    expect(link.querySelector("[data-row-trailing]")).not.toBeNull();
+    enterRow(host, DM_ID(3));
     expect(link.hasAttribute("data-row-close")).toBe(true);
-    // 알약은 오른쪽 끝 덩어리 안에 있고, 그 덩어리 하나가 내려간다.
-    expect(link.querySelector('[data-row-trailing] [data-testid="unread-count"]')).not.toBeNull();
-    leaveRow(host, DM_ID(1));
+    leaveRow(host, DM_ID(3));
     expect(link.hasAttribute("data-row-close")).toBe(false);
   });
 
@@ -507,6 +507,147 @@ describe("DM 호버 X (#3963)", () => {
     const host = await mount();
     enterRow(host, DM_ID(1));
     expect(closeButton(host)).toBeNull();
+  });
+});
+
+describe("DM 닫기는 안 읽음이 없을 때만 (#3963, 소유자 결정 2026-10-17 「안 읽음 있으면 X 숨김」)", () => {
+  const menuOpen = () => document.querySelector('[data-testid="channel-row-menu"]') !== null;
+  const menuCloseItem = () => document.querySelector('[data-testid="channel-row-close-dm"]');
+  const rightClickRow = (host: HTMLElement, channelId: string) =>
+    act(() => {
+      dmRow(host, channelId).dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 12, clientY: 40 })
+      );
+    });
+  const flush = () =>
+    act(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+  const escapeMenu = async () => {
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    await flush();
+  };
+
+  beforeAll(() => {
+    // Radix 메뉴가 jsdom 에서 열리도록(`SidebarRowContextMenu.test.tsx` 와 같은 대역).
+    HTMLElement.prototype.scrollIntoView = () => undefined;
+    HTMLElement.prototype.hasPointerCapture = () => false;
+    HTMLElement.prototype.setPointerCapture = () => undefined;
+    HTMLElement.prototype.releasePointerCapture = () => undefined;
+    if (typeof globalThis.ResizeObserver === "undefined") {
+      globalThis.ResizeObserver = class ResizeObserver {
+        observe() { return undefined; }
+        unobserve() { return undefined; }
+        disconnect() { return undefined; }
+      };
+    }
+  });
+
+  it("안 읽은 메시지가 있는 DM 은 호버해도 X 가 서지 않는다 — 알약은 그대로다", async () => {
+    setReadStates([readState(DM_ID(1), 12, 10)]);
+    const host = await mount();
+    enterRow(host, DM_ID(1));
+    expect(closeButton(host)).toBeNull();
+    expect(dmRow(host, DM_ID(1)).querySelector('[data-testid="unread-count"]')?.textContent).toBe("2");
+    // 같은 목록의 읽은 DM 에는 선다: 규칙은 행마다다.
+    leaveRow(host, DM_ID(1));
+    enterRow(host, DM_ID(2));
+    expect(closeButton(host)).not.toBeNull();
+  });
+
+  it("멘션이 있으면 X 가 서지 않는다(멘션 포함) — 안 읽음 수가 0 이어도", async () => {
+    // 안 읽음 + 멘션
+    setReadStates([{ ...readState(DM_ID(1), 12, 10), mentionCount: 1 }]);
+    const host = await mount();
+    enterRow(host, DM_ID(1));
+    expect(closeButton(host)).toBeNull();
+    leaveRow(host, DM_ID(1));
+    // 멘션만(수가 0 인 투영도 멘션 알약은 선다)
+    setReadStates([{ ...readState(DM_ID(1), 12), mentionCount: 1 }]);
+    await rerender();
+    enterRow(host, DM_ID(1));
+    expect(closeButton(host)).toBeNull();
+  });
+
+  it("읽고 나면(투영의 안 읽음이 0 이 되면) X 가 다시 선다", async () => {
+    setReadStates([readState(DM_ID(1), 12, 10)]);
+    const host = await mount();
+    enterRow(host, DM_ID(1));
+    expect(closeButton(host)).toBeNull();
+    leaveRow(host, DM_ID(1));
+    // 다 읽었다.
+    setReadStates([readState(DM_ID(1), 12, 12)]);
+    await rerender();
+    expect(dmRow(host, DM_ID(1)).querySelector('[data-testid="unread-count"]')).toBeNull();
+    enterRow(host, DM_ID(1));
+    expect(closeButton(host)).not.toBeNull();
+    // 다시 안 읽음이 생기면 사라진다(호버 중이어도).
+    setReadStates([readState(DM_ID(1), 13, 12)]);
+    await rerender();
+    expect(closeButton(host)).toBeNull();
+  });
+
+  it("「읽지 않음으로 표시하기」로 안 읽음이 되면(합성 안 읽음) X 는 사라진다", async () => {
+    // 서버 unread_count 는 0 인데 마크가 있어 합성 안 읽음이 선다(ADR-0178).
+    setReadStates([{ ...readState(DM_ID(1), 12), markedUnreadBeforeSeq: 12 }]);
+    const host = await mount();
+    enterRow(host, DM_ID(1));
+    expect(dmRow(host, DM_ID(1)).querySelector('[data-testid="unread-count"]')).not.toBeNull();
+    expect(closeButton(host)).toBeNull();
+  });
+
+  it("우클릭 메뉴의 「사이드바에서 닫기」도 같은 규칙이다 — 안 읽음이 있으면 항목이 없고 읽은 DM 에는 있다", async () => {
+    setReadStates([readState(DM_ID(1), 12, 10), readState(DM_ID(2), 9)]);
+    const host = await mount();
+    rightClickRow(host, DM_ID(1));
+    await flush();
+    expect(menuOpen()).toBe(true);
+    expect(menuCloseItem()).toBeNull();
+    await escapeMenu();
+    rightClickRow(host, DM_ID(2));
+    await flush();
+    expect(menuOpen()).toBe(true);
+    expect(menuCloseItem()?.textContent).toContain("사이드바에서 닫기");
+  });
+
+  it("지금 열려 있는 DM 은 읽고 있는 것이라 안 읽음이 있던 DM 이어도 닫을 수 있다", async () => {
+    setReadStates([readState(DM_ID(1), 12, 10)]);
+    const host = await mount(`/c/${DM_ID(1)}`);
+    expect(dmRow(host, DM_ID(1)).querySelector('[data-testid="unread-count"]')).toBeNull();
+    enterRow(host, DM_ID(1));
+    expect(closeButton(host)).not.toBeNull();
+  });
+
+  it("읽음 투영이 오는 중이거나 못 읽었으면 안 읽음이 없어도 X 가 없다(기준 seq 가 없다)", async () => {
+    readStatesQuery.isPending = true;
+    readStatesQuery.data = undefined;
+    const host = await mount();
+    enterRow(host, DM_ID(2));
+    expect(closeButton(host)).toBeNull();
+  });
+
+  it("닫기는 읽음 커서를 건드리지 않는다: 닫을 때 서버에 쓰는 요청(PUT·POST·DELETE)이 나가지 않는다", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    try {
+      setReadStates([readState(DM_ID(2), 9)]);
+      const host = await mount();
+      await flush();
+      const writes = () =>
+        fetchSpy.mock.calls.filter(([, init]) => {
+          const method = (init as RequestInit | undefined)?.method?.toUpperCase();
+          return method !== undefined && method !== "GET";
+        });
+      const before = writes().length;
+      enterRow(host, DM_ID(2));
+      act(() => closeButton(host)!.click());
+      await flush();
+      expect(rowIds(host)).not.toContain(DM_ID(2));
+      expect(writes().length).toBe(before);
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 });
 

@@ -44,21 +44,15 @@ import { useSyncExternalStore } from "react";
 // 항목은 워크스페이스마다 200 개까지다(`CLOSED_DMS_PER_WORKSPACE_MAX`). 넘으면 **가장 먼저
 // 닫은 것**부터 잊는다. 잊힌 DM 은 사이드바에 다시 나타날 뿐이다.
 //
-// ## 닫은 DM 의 안 읽음은 어떻게 세는가 (design-review R2 M1 - **결정 필요**)
+// ## 안 읽음이 있는 DM 은 닫기를 내밀지 않는다 (소유자 결정 2026-10-17)
 //
-// 이 PR 의 동작(사실): 닫기는 읽음 커서를 건드리지 않고(서버 쓰기 0건) 사이드바의 행과 그 알약만 감춘다. 그래서 닫을
-// 때 안 읽음·멘션이 있던 DM 은 **사이드바 밖의 집계에 그대로 남을 수 있다**. 기본 설정에서 그 집계는 `needsMe`
-// (승인 + 응답 필요 칸 + 안 읽은 **멘션**: `useNeedsMeCount`)이고 탭 제목·인박스·레일 배지가 읽는다 - 그러므로 기본에서
-// 남는 것은 멘션·인용이 있는 닫은 DM 이다. 일반 안 읽음은 「안 읽은 DM도 합산」(`dockDm`, 기본 끔)을 켠 독 배지에만 더해진다
-// (`dockBadgeCount`). 행이 없는데 숫자가 남는 모양이다. 닫기 전에 이미 다 읽은 DM(보통의 경우)에는 해당이 없다.
+// 성재(AskUserQuestion): 「안 읽음 있으면 X 숨김 (Recommended)」. 안 읽은 메시지(**멘션 포함**)가 있는 DM 행에는
+// 호버 X 도 우클릭 메뉴의 「사이드바에서 닫기」도 없고(둘이 **같은 한 함수**, `dmCloseOffered`, 를 읽는다), 읽고 나면
+// 다시 보인다. 닫기는 읽음 커서를 건드리지 않는다(서버 쓰기 0건) - 읽지 않은 것을 가리지 않으므로 「행은 없는데 숫자만
+// 사이드바 밖 집계(독 배지·탭 제목·인박스·레일의 멘션 합)에 남는」 모양이 생길 길이 없다(design-review R2 M1 이 짚은 것을
+// 길 (c)로 닫았다). 열려 있는 DM 은 읽고 있는 것이라 안 읽음이 0 으로 접혀 있고(`sidebarUnreadCounts`) 닫을 수 있다.
 //
-// 고르는 길(서버 계약 없이 가능하나 제품 판단이다):
-//   (a) 닫기 = 읽음 처리(커서를 최신으로): 숫자가 사라진다. 대신 닫기가 다른 기기에도 읽음을 쓴다.
-//   (b) 집계에서 닫은 DM 을 뺀다: 원장을 집계 훅이 읽어야 하고, 기기 로컬이라 기기마다 숫자가 다르며, **닫은 DM 의 멘션을
-//       조용히 지운다**(출처 없는 숫자보다 나쁜 실패일 수 있다).
-//   (c) 안 읽음이 있는 DM 은 닫기를 내밀지 않는다: 가장 단순하나 닫고 싶은 사람을 막는다.
-// 이 PR 은 어느 것도 고르지 않았다 - 소유자 결정을 기다린다. 어느 길이든 바뀌는 곳은 `closeDmRow`(사이드바)와
-// 그 집계들이고, 이 모듈의 원장 모양은 바뀌지 않는다. 닫은 DM 은 ⌘K 에 계속 나온다(복구 길).
+// 닫은 뒤에 새 메시지가 오면 DM 이 다시 나타나고(위 seq 비교) 그때는 안 읽음이 있으므로 X 가 없다 - 읽어야 다시 닫을 수 있다.
 //
 // ## 읽음 투영이 없을 때 닫기가 보이지 않는 이유 (design-review R2 M2 - 수용)
 //
@@ -195,6 +189,25 @@ export function readProjectionPhase(query: {
   if (query.isPending) return "loading";
   if (query.isError === true && query.data === undefined) return "error";
   return "ready";
+}
+
+/**
+ * 이 DM 에 닫기를 내미는가 - 호버 X 와 우클릭 메뉴의 「사이드바에서 닫기」가 **같은 한 함수**를 읽는다.
+ *
+ *   * 읽음 투영이 **준비된 뒤에만**(R1 M1): 닫을 때 워터마크로 적을 최신 seq 가 있어야 한다.
+ *   * **안 읽은 메시지(멘션 포함)가 있으면 내밀지 않는다**(소유자 결정 2026-10-17, 머리말). 읽고 나면 다시 보인다.
+ *
+ * `unreadCount`·`mentionCount` 는 행이 보여 주는 값 그대로다(`sidebarUnreadCounts`: 합성 안 읽음 포함, 지금 읽고
+ * 있는 DM 은 0). 행의 알약과 닫기가 같은 사실을 말한다.
+ */
+export function dmCloseOffered(input: {
+  phase: ReadProjectionPhase;
+  unreadCount: number;
+  mentionCount: number;
+}): boolean {
+  return (
+    input.phase === "ready" && input.unreadCount <= 0 && input.mentionCount <= 0
+  );
 }
 
 /**
