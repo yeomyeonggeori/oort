@@ -392,21 +392,29 @@ mod tests {
         let tool_args = &published["properties"]["args"];
         assert_eq!(tool_args["type"], json!(["object", "null"]));
         assert_eq!(tool_args["additionalProperties"], json!(false));
-        assert_eq!(
-            momo_agent::SUGGESTABLE_COMMANDS.len(),
-            1,
-            "v1 is one command; widen this test with the second"
-        );
-        let registry_args = momo_agent::SUGGESTABLE_COMMANDS[0].args_schema();
+        // `args` is one closed object carrying every command's keys; each
+        // property's enum is measured against the registry's own schema.
+        let mut registry_properties = serde_json::Map::new();
+        for command in momo_agent::SUGGESTABLE_COMMANDS {
+            for (name, schema) in command.args_schema()["properties"]
+                .as_object()
+                .expect("registry args")
+            {
+                assert!(
+                    registry_properties
+                        .insert(name.clone(), schema.clone())
+                        .is_none(),
+                    "two suggestable commands both declare args.{name}"
+                );
+            }
+        }
         let tool_properties = tool_args["properties"].as_object().expect("tool args");
-        let registry_properties = registry_args["properties"]
-            .as_object()
-            .expect("registry args");
-        assert_eq!(
-            tool_properties.keys().collect::<Vec<_>>(),
-            registry_properties.keys().collect::<Vec<_>>()
-        );
-        for (name, registry_property) in registry_properties {
+        let mut tool_keys: Vec<&String> = tool_properties.keys().collect();
+        let mut registry_keys: Vec<&String> = registry_properties.keys().collect();
+        tool_keys.sort();
+        registry_keys.sort();
+        assert_eq!(tool_keys, registry_keys);
+        for (name, registry_property) in &registry_properties {
             assert_eq!(
                 tool_properties[name].get("enum"),
                 registry_property.get("enum"),

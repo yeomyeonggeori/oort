@@ -109,6 +109,18 @@ describe("command_suggest(ai.connect) 파서 (ADR-0186 G3·G4, #2948)", () => {
       ["for_member_id 없음", suggestMessage({ ...G3, for_member_id: undefined })],
       ["for_member_id 숫자", suggestMessage({ ...G3, for_member_id: 5 })],
       ["멤버 목록에 없는 대상", suggestMessage({ ...G3, for_member_id: "nobody" })],
+      // 서버가 이미 허용한 `settings.open`(#3939)이라도 이 파서는 카드를 그리지 않는다 —
+      // 렌더는 #3940(U-S6)이 얹기 전까지 본문 글로 남는다.
+      [
+        "settings.open(카드 렌더 전)",
+        suggestMessage({
+          v: 1,
+          command_id: "settings.open",
+          args: { section: "notifications" },
+          for_member_id: HUMAN,
+          label: "알림 설정 열기",
+        }),
+      ],
       ["작성자가 사람", suggestMessage(G3, { authorMemberId: OTHER })],
       ["작성자를 모름", suggestMessage(G3, { authorMemberId: "ghost" })],
       ["지워진 행", suggestMessage(G3, { state: "deleted" } as Partial<Message>)],

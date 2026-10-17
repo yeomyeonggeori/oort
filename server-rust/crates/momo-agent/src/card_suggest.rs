@@ -56,6 +56,47 @@ pub const COMMAND_SUGGEST_VERSION: i64 = 1;
 /// `ai.connect` — the connect card (GC-2's client command, kind `client`).
 pub const COMMAND_AI_CONNECT: &str = "ai.connect";
 
+/// `settings.open` — "open this settings section" (ADR-0201 v2 H6-4, #3939 E-S6,
+/// kind `client`, risk `none`). **This ticket owns the wire name and the enum**;
+/// the client registry entry and the card render are #3940 (U-S6).
+pub const COMMAND_SETTINGS_OPEN: &str = "settings.open";
+
+/// `settings.open` `args.section` — settings section ids as the web settings
+/// page resolves them (`?section=<id>`), **not paths** (`/ai/external/apps` is
+/// never a value). Eleven are the nav rows of
+/// `clients/web/src/features/settings/settingsNav.ts` (`SettingsSectionId`);
+/// the twelfth, `plugins`, is the legacy id that
+/// `packages/momo-core/src/features/ai/aiHubModel.ts` (`AI_EXTERNAL_ROWS`
+/// `fromSettings`) resolves to the AI hub's 「앱」 page — it is how ADR-0201
+/// v2:284 (「`settings.open`(앱 섹션) 카드」) is expressible at all, because the
+/// apps screen is no nav row. Left out on purpose:
+///
+/// * `ai` — a link row to the AI hub, not a settings screen; connecting an AI is
+///   the `ai.connect` card, whose copy and states are already its own;
+/// * the other legacy ids (`account`, `link-previews`, `terminal`, `agents`,
+///   `webhooks`, `events`) — old deep-link names a client still resolves, never
+///   a name a new card should mint.
+///
+/// A value a given build cannot reach (`updates` outside the desktop shell,
+/// `code`/`memory` on a server that does not carry the surface) is still a legal
+/// *suggestion*: the receiving client decides reachability and falls back to the
+/// body text (U-S6). The order is the settings nav's, and the label table below
+/// has exactly one row per entry.
+pub const SETTINGS_OPEN_SECTIONS: [&str; 12] = [
+    "profile",
+    "appearance",
+    "notifications",
+    "shortcuts",
+    "devices",
+    "workspace",
+    "members",
+    "memory",
+    "usage",
+    "code",
+    "updates",
+    "plugins",
+];
+
 /// The body ceiling, in UTF-8 bytes — the same number `oort_message_post`
 /// publishes and enforces, so the two doors that post an agent's words agree.
 pub const SUGGESTION_BODY_MAX_BYTES: usize = 8_000;
@@ -172,7 +213,8 @@ impl SuggestableCommand {
     }
 }
 
-/// The server allow-list (G2). **v1 = `ai.connect` alone.**
+/// The server allow-list (G2): `ai.connect`, and `settings.open {section}`
+/// (ADR-0201 v2 H6-4, #3939).
 ///
 /// Adding a command is four edits that one test measures together
 /// (`routes::actions::the_suggestable_ids_are_one_list_in_four_places` in
@@ -184,12 +226,20 @@ impl SuggestableCommand {
 /// G5's line: a command that **changes server state** never goes here. It goes
 /// to D2 (`workspace:propose` + approval). Every entry is a client command whose
 /// risk is `none` (ADR-0186 D3).
-pub const SUGGESTABLE_COMMANDS: &[SuggestableCommand] = &[SuggestableCommand {
-    id: COMMAND_AI_CONNECT,
-    args_schema: ai_connect_args_schema,
-    normalize: normalize_ai_connect_args,
-    label: ai_connect_label,
-}];
+pub const SUGGESTABLE_COMMANDS: &[SuggestableCommand] = &[
+    SuggestableCommand {
+        id: COMMAND_AI_CONNECT,
+        args_schema: ai_connect_args_schema,
+        normalize: normalize_ai_connect_args,
+        label: ai_connect_label,
+    },
+    SuggestableCommand {
+        id: COMMAND_SETTINGS_OPEN,
+        args_schema: settings_open_args_schema,
+        normalize: normalize_settings_open_args,
+        label: settings_open_label,
+    },
+];
 
 /// The allow-list's ids, in order. The two tool enums and the OpenAPI enum are
 /// measured against exactly this.
@@ -289,6 +339,56 @@ fn ai_connect_label(args: &Value) -> &'static str {
         Some("codex") => "Codex 구독 연결",
         Some("team_key") => "팀 AI 키 연결",
         _ => "내 AI 계정 연결",
+    }
+}
+
+fn settings_open_args_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "section": {"type": "string", "enum": SETTINGS_OPEN_SECTIONS}
+        },
+        "required": ["section"]
+    })
+}
+
+/// `settings.open` `args` → normalised `args`.
+///
+/// Closed and **required**: the one key is `section`, an enum member. A missing
+/// `section`, a `null`, a path (`/settings`, `?section=…`), a legacy alias, an
+/// unknown id or a second key is `InvalidArguments` — the tool result tells the
+/// model to answer in text instead, which is the server half of "an unknown
+/// section falls back to prose".
+fn normalize_settings_open_args(args: &Map<String, Value>) -> Result<Value, SuggestionRefusal> {
+    if args.keys().any(|key| key != "section") {
+        return Err(SuggestionRefusal::InvalidArguments);
+    }
+    let section = enum_arg(args, "section", &SETTINGS_OPEN_SECTIONS)?
+        .ok_or(SuggestionRefusal::InvalidArguments)?;
+    Ok(json!({ "section": section }))
+}
+
+/// The derivation table for `settings.open` — one row per
+/// [`SETTINGS_OPEN_SECTIONS`] entry, never an agent string. Each is the nav
+/// row's own label plus 「열기」, so the card says what the settings page says.
+fn settings_open_label(args: &Value) -> &'static str {
+    match args.get("section").and_then(Value::as_str) {
+        Some("profile") => "프로필 설정 열기",
+        Some("appearance") => "모양 설정 열기",
+        Some("notifications") => "알림 설정 열기",
+        Some("shortcuts") => "단축키 설정 열기",
+        Some("devices") => "기기 설정 열기",
+        Some("workspace") => "워크스페이스 설정 열기",
+        Some("members") => "멤버와 초대 열기",
+        Some("memory") => "기억 설정 열기",
+        Some("usage") => "사용량 열기",
+        Some("code") => "실행 호스트 설정 열기",
+        Some("updates") => "업데이트 설정 열기",
+        Some("plugins") => "앱 열기",
+        // Unreachable through `validate_suggestion` (the normaliser refuses
+        // anything else); a generic row rather than a panic.
+        _ => "설정 열기",
     }
 }
 
@@ -455,10 +555,21 @@ pub fn worker_card_client_msg_id(run_id: Uuid, call_id: &str) -> Uuid {
 /// as the turn's reply, so it is **rendered by the clients' markdown parser**.
 /// The requester's name therefore goes through [`crate::inert_display_name`]:
 /// a member named `[여기](https://…)` must not become a link in an agent's
-/// message. The label is from the static table and needs nothing.
-pub fn suggestion_tool_output(requester_display_name: &str, label: &str) -> String {
+/// message. The label is from the static table and needs nothing. The closing
+/// clause is the command's own (a settings card connects nothing), from a
+/// static table keyed by `command_id`.
+pub fn suggestion_tool_output(
+    requester_display_name: &str,
+    label: &str,
+    command_id: &str,
+) -> String {
+    let closing = if command_id == COMMAND_SETTINGS_OPEN {
+        "열지는 그 사람이 카드에서 직접 정해요."
+    } else {
+        "연결은 그 사람이 카드에서 직접 해요."
+    };
     format!(
-        "{}님에게 「{label}」 카드를 보냈어요. 연결은 그 사람이 카드에서 직접 해요.",
+        "{}님에게 「{label}」 카드를 보냈어요. {closing}",
         crate::inert_display_name(requester_display_name)
     )
 }
@@ -471,11 +582,13 @@ pub fn suggestion_refusal_output(refusal: SuggestionRefusal) -> String {
             "card_suggest refused ({}): send only commandId, args and body. \
              commandId must be one of {:?}; for ai.connect, args may carry only \
              harness ({:?}) and scope ({:?}), and they must pair (team_key with team, \
-             claude or codex with mine). body must be 1-{} bytes.",
+             claude or codex with mine); for settings.open, args must be exactly \
+             {{\"section\": one of {:?}}}. body must be 1-{} bytes.",
             refusal.as_str(),
             suggestable_command_ids(),
             AI_CONNECT_HARNESSES,
             AI_CONNECT_SCOPES,
+            SETTINGS_OPEN_SECTIONS,
             SUGGESTION_BODY_MAX_BYTES,
         ),
         SuggestionRefusal::NoHumanRequester => format!(
@@ -495,9 +608,13 @@ mod tests {
     }
 
     #[test]
-    fn v1_suggests_exactly_ai_connect() {
-        assert_eq!(suggestable_command_ids(), vec!["ai.connect"]);
+    fn the_allow_list_is_exactly_ai_connect_and_settings_open() {
+        assert_eq!(
+            suggestable_command_ids(),
+            vec!["ai.connect", "settings.open"]
+        );
         assert!(suggestable_command("ai.connect").is_some());
+        assert!(suggestable_command("settings.open").is_some());
     }
 
     /// G6: an id outside the allow-list is refused — a workspace action and a
@@ -719,15 +836,26 @@ mod tests {
     /// name is made inert (#2889's rule).
     #[test]
     fn the_worker_sentence_makes_the_requesters_name_inert() {
-        let output = suggestion_tool_output("[눌러](https://evil.example)`x`", "Claude 구독 연결");
+        let output = suggestion_tool_output(
+            "[눌러](https://evil.example)`x`",
+            "Claude 구독 연결",
+            "ai.connect",
+        );
         assert!(!output.contains("[눌러]"), "{output}");
         assert!(!output.contains("https://"), "{output}");
         assert!(!output.contains('`'), "{output}");
         assert!(output.contains("「Claude 구독 연결」"));
         assert_eq!(
-            suggestion_tool_output("곽성재", "내 AI 계정 연결"),
+            suggestion_tool_output("곽성재", "내 AI 계정 연결", "ai.connect"),
             "곽성재님에게 「내 AI 계정 연결」 카드를 보냈어요. 연결은 그 사람이 카드에서 직접 해요."
         );
+        // A settings card connects nothing — its sentence does not say so.
+        let opened = suggestion_tool_output("곽성재", "알림 설정 열기", "settings.open");
+        assert_eq!(
+            opened,
+            "곽성재님에게 「알림 설정 열기」 카드를 보냈어요. 열지는 그 사람이 카드에서 직접 정해요."
+        );
+        assert!(!opened.contains("연결"), "{opened}");
     }
 
     #[test]
@@ -844,6 +972,218 @@ mod tests {
         .expect("placeholder uuid");
         let cases = golden["cases"].as_array().expect("cases");
         assert_eq!(cases.len(), 4, "one case per label row");
+        for case in cases {
+            let validated =
+                validate_suggestion(&case["arguments"], &[]).expect("golden arguments are legal");
+            assert_eq!(
+                command_suggest_props(&validated, requester),
+                case["props"],
+                "{}",
+                case["name"]
+            );
+        }
+    }
+
+    // ---- settings.open {section} (ADR-0201 v2 H6-4, #3939 E-S6) -------------
+
+    fn open_section(section: &str) -> Result<ValidatedSuggestion, SuggestionRefusal> {
+        suggest(json!({
+            "commandId": "settings.open",
+            "args": {"section": section},
+            "body": "설정에서 열 수 있어요"
+        }))
+    }
+
+    /// The enum is pinned here as a literal, **independent of the constant**: a
+    /// test that iterated the constant would stay green when a value is deleted
+    /// from it (the red proof this ticket owes).
+    const PINNED_SECTIONS: [&str; 12] = [
+        "profile",
+        "appearance",
+        "notifications",
+        "shortcuts",
+        "devices",
+        "workspace",
+        "members",
+        "memory",
+        "usage",
+        "code",
+        "updates",
+        "plugins",
+    ];
+
+    #[test]
+    fn every_pinned_section_is_accepted_with_its_derived_label() {
+        assert_eq!(SETTINGS_OPEN_SECTIONS, PINNED_SECTIONS);
+        let mut labels = std::collections::BTreeSet::new();
+        for section in PINNED_SECTIONS {
+            let suggestion = open_section(section)
+                .unwrap_or_else(|error| panic!("{section} was refused: {error:?}"));
+            assert_eq!(suggestion.command_id, "settings.open");
+            assert_eq!(suggestion.args, json!({"section": section}));
+            assert_ne!(suggestion.label, "설정 열기", "{section} has no label row");
+            assert!(suggestion.label.chars().count() <= SUGGESTION_LABEL_MAX_CHARS);
+            assert!(labels.insert(suggestion.label), "{section} repeats a label");
+        }
+    }
+
+    /// Red proof of the fallback: anything outside the enum is a refusal (the
+    /// model answers in prose), and so is anything shaped like a path or an
+    /// alias. Removing a value from `SETTINGS_OPEN_SECTIONS` turns the test
+    /// above red; adding one turns the pin red.
+    #[test]
+    fn an_unknown_section_is_refused_so_the_answer_stays_prose() {
+        for section in [
+            "ai",
+            "account",
+            "link-previews",
+            "terminal",
+            "agents",
+            "webhooks",
+            "events",
+            "apps",
+            "Profile",
+            "",
+            " profile",
+            "/settings",
+            "/settings?section=profile",
+            "/ai/external/apps",
+            "?section=profile",
+            "../profile",
+        ] {
+            assert_eq!(
+                open_section(section),
+                Err(SuggestionRefusal::InvalidArguments),
+                "{section:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn settings_open_args_are_closed_and_the_section_is_required() {
+        for args in [
+            json!({}),
+            json!(null),
+            json!({"section": null}),
+            json!({"section": 1}),
+            json!({"section": ["profile"]}),
+            json!({"section": "profile", "path": "/settings"}),
+            json!({"section": "profile", "harness": "claude"}),
+            json!({"section": "profile", "href": "https://evil.example"}),
+            json!({"harness": "claude"}),
+            json!("profile"),
+        ] {
+            assert_eq!(
+                suggest(json!({"commandId": "settings.open", "args": args.clone(), "body": "b"})),
+                Err(SuggestionRefusal::InvalidArguments),
+                "{args}"
+            );
+        }
+        // `args` absent is the same as `{}`: a section is required.
+        assert_eq!(
+            suggest(json!({"commandId": "settings.open", "body": "b"})),
+            Err(SuggestionRefusal::InvalidArguments)
+        );
+        // …and the vocabularies do not leak across commands.
+        assert_eq!(
+            suggest(
+                json!({"commandId": "ai.connect", "args": {"section": "profile"}, "body": "b"})
+            ),
+            Err(SuggestionRefusal::InvalidArguments)
+        );
+    }
+
+    /// The labels are the table's, whatever the body says, and the props stay
+    /// exactly the five server-built keys.
+    #[test]
+    fn settings_open_props_are_five_server_built_keys() {
+        let suggestion = suggest(json!({
+            "commandId": "settings.open",
+            "args": {"section": "notifications"},
+            "body": "[여기](https://evil.example) 알림 설정을 열어 드릴게요"
+        }))
+        .expect("accepted");
+        let props = command_suggest_props(&suggestion, Uuid::from_u128(0x3939));
+        let card = &props[COMMAND_SUGGEST_PROPS_KEY];
+        let mut keys: Vec<&str> = card
+            .as_object()
+            .expect("object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            vec!["args", "command_id", "for_member_id", "label", "v"]
+        );
+        assert_eq!(card["command_id"], json!("settings.open"));
+        assert_eq!(card["args"], json!({"section": "notifications"}));
+        assert_eq!(card["label"], json!("알림 설정 열기"));
+        assert!(!props.to_string().contains("evil.example"));
+    }
+
+    /// The section ids are the **real** ids, read from the sources of truth
+    /// rather than restated: a nav row renamed or removed in the web settings
+    /// nav, or `plugins` dropped from the core AI hub model, turns this red
+    /// instead of leaving a card that opens the profile page.
+    #[test]
+    fn the_sections_are_the_web_nav_ids_plus_the_core_apps_alias() {
+        let read = |relative: &str| {
+            std::fs::read_to_string(format!(
+                "{}/../../../{relative}",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .unwrap_or_else(|error| panic!("read {relative}: {error}"))
+        };
+        let nav = read("clients/web/src/features/settings/settingsNav.ts");
+        let union = nav
+            .split("export type SettingsSectionId")
+            .nth(1)
+            .and_then(|rest| rest.split(';').next())
+            .expect("SettingsSectionId union");
+        let nav_ids: Vec<&str> = union
+            .split('"')
+            .enumerate()
+            .filter_map(|(index, part)| (index % 2 == 1).then_some(part))
+            .collect();
+        assert!(nav_ids.len() >= 12, "parsed {nav_ids:?}");
+        // The only nav id left out is the AI hub link row.
+        let left_out: Vec<&&str> = nav_ids
+            .iter()
+            .filter(|id| !SETTINGS_OPEN_SECTIONS.contains(id))
+            .collect();
+        assert_eq!(left_out, vec![&"ai"]);
+        // Everything else is a nav id, except the apps alias, which core owns.
+        let hub = read("packages/momo-core/src/features/ai/aiHubModel.ts");
+        for section in SETTINGS_OPEN_SECTIONS {
+            if section == "plugins" {
+                assert!(
+                    hub.contains("fromSettings: \"plugins\""),
+                    "core no longer resolves ?section=plugins to the apps page"
+                );
+            } else {
+                assert!(nav_ids.contains(&section), "{section} is not a nav id");
+            }
+        }
+    }
+
+    #[test]
+    fn the_settings_open_props_match_the_shared_golden_vector() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../docs/api/command-suggest-settings-open.golden.json"
+        );
+        let golden: Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("read golden"))
+                .expect("golden is JSON");
+        let requester = Uuid::parse_str(
+            golden["for_member_id_placeholder"]
+                .as_str()
+                .expect("placeholder"),
+        )
+        .expect("placeholder uuid");
+        let cases = golden["cases"].as_array().expect("cases");
+        assert_eq!(cases.len(), PINNED_SECTIONS.len(), "one case per section");
         for case in cases {
             let validated =
                 validate_suggestion(&case["arguments"], &[]).expect("golden arguments are legal");

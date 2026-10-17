@@ -1332,6 +1332,12 @@ oort_card_suggest {handle, clientMsgId, commandId: "ai.connect", args, body}
 - A routine that only reads the inbox holds no handle. It answers with
   `oort_message_post` instead and tells the person to type `/연결` in the
   message box, which opens the same card on their own screen.
+- The same tool also takes `commandId: "settings.open"` (ADR-0201 v2 H6-4)
+  to point a person at one settings screen (e.g. notifications). Its `args`
+  is exactly `{"section": <id>}`, `section` ∈ `profile | appearance |
+  notifications | shortcuts | devices | workspace | members | memory | usage |
+  code | updates | plugins` (`plugins` is the apps page). A section id, never
+  a path; any other value is refused, so answer in text instead.
 
 #### 3.3.17 Doorbell (realtime wake)
 

@@ -362,7 +362,7 @@ pub fn catalog_definitions() -> Vec<ToolDefinition> {
             // connect an AI), that the card does the connecting (so it must
             // not walk them through settings or ask for a key), and that the
             // title is not its to write.
-            description: "Show the person who asked you a card they can act on              in place — use `ai.connect` when they ask to connect an AI              subscription or a team API key. Put your short answer in `body`;              the card itself is drawn by their app from their own settings, so              do not explain settings steps and never ask for a key, token or              password. The card's title and recipient are set by the server.",
+            description: "Show the person who asked you a card they can act on              in place — use `ai.connect` when they ask to connect an AI              subscription or a team API key, and `settings.open` (with `args.section`) when they ask where a setting is. Put your short answer in `body`;              the card itself is drawn by their app from their own settings, so              do not explain settings steps and never ask for a key, token or              password. The card's title and recipient are set by the server.",
             parameters: card_suggest_parameters(),
         },
         ToolDefinition {
@@ -464,23 +464,33 @@ fn workspace_action_propose_parameters() -> Value {
 /// drift test in `momo-server` still reads it back as a *third* list, because a
 /// hand edit here would otherwise pass silently.
 fn card_suggest_parameters() -> Value {
-    let commands = &crate::card_suggest::SUGGESTABLE_COMMANDS;
-    // v1 has one command, so its args schema is the tool's; a second command
-    // turns this into a union, and `the_card_suggest_definition_embeds_the_allow_list`
-    // says so rather than drifting.
-    let args = commands
-        .first()
-        .map(|command| command.args_schema())
-        .unwrap_or_else(
-            || json!({"type": "object", "additionalProperties": false, "properties": {}}),
-        );
+    let commands = crate::card_suggest::SUGGESTABLE_COMMANDS;
+    // One closed `args` object whose properties are every command's, merged. The
+    // per-command rule (which keys, which pairs, which are required) is the
+    // normaliser's, not this schema's: JSON-Schema `oneOf` is not portable across
+    // the providers the worker speaks to, so the schema is the first fence and
+    // `validate_suggestion` is the gate. Property names do not collide across
+    // commands (`harness`/`scope` vs `section`); the drift test reads this back.
+    let mut properties = serde_json::Map::new();
+    for command in commands {
+        if let Some(own) = command.args_schema()["properties"].as_object() {
+            for (name, schema) in own {
+                let clash = properties.insert(name.clone(), schema.clone());
+                assert!(
+                    clash.is_none(),
+                    "two suggestable commands both declare args.{name}"
+                );
+            }
+        }
+    }
+    let args = json!({"type": "object", "additionalProperties": false, "properties": properties});
     json!({
         "type": "object",
         "properties": {
             "commandId": {
                 "type": "string",
                 "enum": crate::card_suggest::suggestable_command_ids(),
-                "description": "Which card. `ai.connect` is the AI connection card."
+                "description": "Which card. `ai.connect` is the AI connection card (args: harness, scope). `settings.open` opens one settings section (args: section, required)."
             },
             "args": args,
             "body": {
@@ -1454,14 +1464,25 @@ mod tests {
             .collect();
         keys.sort_unstable();
         assert_eq!(keys, vec!["args", "body", "commandId"]);
+        // `args` is one closed object whose properties are every command's.
+        let args = &parameters["properties"]["args"];
+        assert_eq!(args["additionalProperties"], json!(false));
+        let mut expected = serde_json::Map::new();
+        for command in crate::card_suggest::SUGGESTABLE_COMMANDS {
+            for (name, schema) in command.args_schema()["properties"]
+                .as_object()
+                .expect("a command's args are an object")
+            {
+                assert!(
+                    expected.insert(name.clone(), schema.clone()).is_none(),
+                    "two suggestable commands both declare args.{name}"
+                );
+            }
+        }
+        assert_eq!(args["properties"], Value::Object(expected));
         assert_eq!(
-            crate::card_suggest::SUGGESTABLE_COMMANDS.len(),
-            1,
-            "v1 is one command; widen this definition into a union with the second"
-        );
-        assert_eq!(
-            parameters["properties"]["args"],
-            crate::card_suggest::SUGGESTABLE_COMMANDS[0].args_schema()
+            args["properties"]["section"]["enum"],
+            json!(crate::card_suggest::SETTINGS_OPEN_SECTIONS)
         );
         assert!(definition.description.contains("never ask for a key"));
         assert!(is_executable(CARD_SUGGEST));
