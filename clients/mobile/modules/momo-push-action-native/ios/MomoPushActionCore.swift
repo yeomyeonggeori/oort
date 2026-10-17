@@ -473,8 +473,10 @@ struct MomoPushActionDecider: Sendable {
 
     // Never start a request on a job whose clock has already run out: the line for that
     // is written, the background task is given back, and a request begun now would be
-    // sent after the process may be suspended. (The check and the send are not atomic;
-    // the transport's own cancellation covers what slips between them.)
+    // sent after the process may be suspended. (The check and the send are not atomic,
+    // and cancelling a URLSession call interrupts the WAIT, not a send already under way:
+    // what slips between them is a request the line has already told the person about —
+    // 「결과를 확인하지 못했어요」 does not claim that nothing happened.)
     if Task.isCancelled { return .failed(.timeLimit) }
 
     do {

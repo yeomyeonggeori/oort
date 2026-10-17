@@ -745,11 +745,11 @@ describe('what the upload declares stays true of the code (#2568)', () => {
   const CRYPTO_NAMES =
     /\b(?:CC[A-Z]\w*|Sec[A-Z]\w*|kSec\w*|AES\w*|ChaCha\w*|HMAC|HKDF|PBKDF\w*|Curve25519|X25519|Ed25519|P256|P384|P521|SymmetricKey|SealedBox|HPKE|KEM\w*|XWing\w*|MLKEM\w*|MLDSA\w*|Insecure|SecureEnclave|SharedSecret|KeyAgreement|MD5|Nonce|Kyber\w*|Dilithium\w*|SLH\w*)\b|\bSHA(?!256\b)\w*/;
   // Ways to reach a C crypto symbol by NAME, which the identifier list cannot see (the name is a string).
-  const SYMBOL_BACKDOORS = /@_silgen_name|@_cdecl|@_extern|\bdlsym\b|\bdlopen\b/;
+  const SYMBOL_BACKDOORS = /@_silgen_name|@_cdecl|@_extern|\bdlsym\b|\bdlopen\b|\bCFBundleGetFunctionPointer\w*/;
   const importsOf = (code: string): string[] =>
     [
       ...code.matchAll(
-        /(?:^|;)[ \t]*(?:@\w+(?:\([^)]*\))?[ \t]+)*(?:(?:public|internal|package|private|fileprivate)[ \t]+)?import[ \t]+(?:(?:typealias|struct|class|enum|protocol|let|var|func)[ \t]+)?([\w.]+)/gm,
+        /(?<![\w.])(?:@\w+(?:\([^)]*\))?\s+)*(?:(?:public|internal|package|private|fileprivate)\s+)?import\s+(?:(?:typealias|struct|class|enum|protocol|let|var|func)\s+)?([\w.]+)/g,
       ),
     ]
       .map(match => match[1])
@@ -778,7 +778,7 @@ describe('what the upload declares stays true of the code (#2568)', () => {
     const moduleFiles = nativeFiles(join(APP_ROOT, 'modules/momo-push-action-native'));
     expect(
       moduleFiles.filter(file =>
-        /\bimport\s+(?:(?:typealias|struct|class|enum|protocol|let|var|func)\s+)?(?:CryptoKit|CommonCrypto)\b/.test(
+        /(?<![\w.])import\s+(?:(?:typealias|struct|class|enum|protocol|let|var|func)\s+)?(?:CryptoKit|CommonCrypto)\b/.test(
           swiftCode(readFileSync(file, 'utf8')),
         ),
       ),
@@ -806,6 +806,9 @@ describe('what the upload declares stays true of the code (#2568)', () => {
     ['SLH-DSA', 'func probe() { _ = SLHDSA.self }'],
     ['a C crypto symbol reached by name', '@_silgen_name("CCHmac") func probe()'],
     ['dlsym', 'let probe = dlsym(nil, "CCHmac")'],
+    ['a symbol looked up through a bundle', 'let probe = CFBundleGetFunctionPointerForName(nil, "CCHmac" as CFString)'],
+    ['an import with a newline after the keyword', 'import\nCommonCrypto'],
+    ['an import with a form feed after the keyword', 'import\fCommonCrypto'],
   ])('the guard sees %s appended to the file', (_name, appended) => {
     const real = readFileSync(DECISION_KEY, 'utf8');
     expect(breaksAllowlist(swiftCode(`${real}\n${appended}\n`))).toBe(true);
