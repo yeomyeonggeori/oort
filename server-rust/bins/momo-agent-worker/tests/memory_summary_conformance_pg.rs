@@ -2259,6 +2259,115 @@ async fn a_streaming_marker_older_than_thirty_minutes_no_longer_blocks_the_curso
     reset_instance(&su).await;
 }
 
+/// ADR-0204 증보 1 D8-a (#3987): a half answer a retried turn froze between two attempts is
+/// "not final yet" to the summariser, like a live stream — the retry rewrites it, so the cursor
+/// waits in front of it instead of citing text the message is about to stop holding. The same
+/// message with the marker gone (a turn that really failed) is summarised like any other.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to an isolated pgvector/pg18 DB"]
+async fn a_message_frozen_for_a_retry_holds_the_cursor_like_a_live_stream() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let fx = seed(&su).await;
+    configure_summary_row(&su, fx.human).await;
+    let wp = momo_worker_pool().await;
+    let mut ids = Vec::new();
+    for body in ["하나", "둘", "셋", "넷"] {
+        ids.push(post(&wp, &fx, fx.agent, body).await);
+    }
+    // 「둘」 is the half answer of attempt 1: frozen, marked failed, and told to expect a retry.
+    sqlx::query(
+        "UPDATE message SET props = jsonb_build_object('momo.stream', jsonb_build_object( \
+             'rev', 3, 'streaming', false, 'outcome', 'failed', 'provisional', true)) \
+          WHERE id = $1",
+    )
+    .bind(ids[1].0)
+    .execute(&su)
+    .await
+    .unwrap();
+    let provider = Recorder::new();
+    let worker = worker_with(&provider, memory_config()).await;
+    let stats = worker.summary_sweep().await;
+    // The window stops in front of 「둘」: it holds 「하나」 and nothing after it.
+    assert_eq!(
+        stats.windows, 1,
+        "RED output: the cursor did not stop at the frozen answer: {stats:?}"
+    );
+    let prompt = provider.prompt(0);
+    assert!(prompt.contains("하나"), "{prompt}");
+    assert!(
+        !prompt.contains("둘") && !prompt.contains("셋") && !prompt.contains("넷"),
+        "RED output: the summary read past a half answer that is waiting for its retry: {prompt}"
+    );
+
+    // The same message after the turn really failed — no marker — is just a message.
+    sqlx::query(
+        "UPDATE message SET props = jsonb_build_object('momo.stream', jsonb_build_object( \
+             'rev', 4, 'streaming', false, 'outcome', 'failed')) \
+          WHERE id = $1",
+    )
+    .bind(ids[1].0)
+    .execute(&su)
+    .await
+    .unwrap();
+    let provider = Recorder::new();
+    let worker = worker_with(&provider, memory_config()).await;
+    let stats = worker.summary_sweep().await;
+    assert!(stats.windows >= 1, "RED output: {stats:?}");
+    assert!(
+        provider.prompt(0).contains("둘") && provider.prompt(0).contains("셋"),
+        "a failed answer with no marker is summarised like any other"
+    );
+    reset_instance(&su).await;
+}
+
+/// The sibling of M-5 for a freeze that nothing ever resumed: a `provisional` marker older than
+/// thirty minutes is a retry that never came, not a pause — it must not freeze the channel's
+/// summary for good. (The thirty-minute bound is on the whole "not final yet" test, the marker
+/// included; the hold above is only as long as it.)
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to an isolated pgvector/pg18 DB"]
+async fn a_frozen_for_a_retry_marker_older_than_thirty_minutes_no_longer_blocks_the_cursor() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let fx = seed(&su).await;
+    configure_summary_row(&su, fx.human).await;
+    let wp = momo_worker_pool().await;
+    let mut ids = Vec::new();
+    for body in ["하나", "둘", "셋"] {
+        ids.push(post(&wp, &fx, fx.agent, body).await);
+    }
+    sqlx::query(
+        "UPDATE message SET props = jsonb_build_object('momo.stream', jsonb_build_object( \
+             'rev', 3, 'streaming', false, 'outcome', 'failed', 'provisional', true)) \
+          WHERE id = $1",
+    )
+    .bind(ids[1].0)
+    .execute(&su)
+    .await
+    .unwrap();
+    // The turn it was waiting for never resumed: the message is an hour old.
+    sqlx::query("UPDATE message SET created_at = now() - interval '1 hour' WHERE id = $1")
+        .bind(ids[1].0)
+        .execute(&su)
+        .await
+        .unwrap();
+    let provider = Recorder::new();
+    let worker = worker_with(&provider, memory_config()).await;
+    let stats = worker.summary_sweep().await;
+    assert_eq!(
+        stats.windows, 1,
+        "RED output: a pause nobody resumed froze the channel: {stats:?}"
+    );
+    assert!(
+        provider.prompt(0).contains("둘") && provider.prompt(0).contains("셋"),
+        "the old frozen message is summarised like any other"
+    );
+    reset_instance(&su).await;
+}
+
 // --- re-review round (#3191): H-A, M-i, M-ii, L-i -------------------------------------
 
 /// H-A: `mem_definer` may lock a message row (`FOR KEY SHARE`, needed by `mem_apply_digest`)

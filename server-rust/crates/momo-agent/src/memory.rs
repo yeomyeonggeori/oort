@@ -767,7 +767,8 @@ impl SourceMessage {
 
 const SOURCE_COLS: &str = "m.id, m.seq, m.root_id, a.display_name AS author_name, \
      (a.kind = 'agent') AS author_is_agent, COALESCE(m.body, '') AS body, m.created_at, \
-     m.edited_at, COALESCE((m.props -> 'momo.stream' ->> 'streaming') = 'true', false) \
+     m.edited_at, COALESCE((m.props -> 'momo.stream' ->> 'streaming') = 'true' \
+                           OR (m.props -> 'momo.stream' ->> 'provisional') = 'true', false) \
      AND m.created_at > now() - interval '30 minutes' AS streaming";
 
 /// The same liveness rule everywhere: a text message with a body, not deleted.
@@ -775,6 +776,11 @@ const SOURCE_COLS: &str = "m.id, m.seq, m.root_id, a.display_name AS author_name
 /// A DM (M-3, ADR-0196 D9) only counts from the moment its latest current member joined: what the two humans
 /// said to each other before is never read (`mem_apply_digest` refuses it as evidence too).
 /// A `streaming` marker older than 30 minutes is a crashed writer, not a live stream (M-5).
+///
+/// "Streaming" here is "not final yet": a stream that is open, and also one a retried turn froze
+/// between two attempts (`momo.stream.provisional`, ADR-0204 증보 1 D8-a) — the retry will
+/// rewrite that half answer, and a digest that took it as evidence would cite text the message
+/// no longer holds (a stream write stamps no `edited_at`, so nothing would invalidate the ref).
 const LIVE: &str = "m.type = 'text' AND m.deleted_at IS NULL AND m.state <> 'deleted' \
      AND m.body IS NOT NULL AND btrim(m.body) <> '' \
      AND (NOT EXISTS (SELECT 1 FROM channel dc WHERE dc.id = m.channel_id AND dc.kind = 'dm') \

@@ -591,6 +591,25 @@ async fn seventeen_writes_leave_one_growing_message_and_one_seq() {
         json!(false),
         "the final slice says the text has stopped arriving"
     );
+    // ADR-0204 증보 1 D8-a (#3987): over REST the producer's last PATCH is the end of its
+    // answer — the one write that enqueues the closing push candidate — and nothing on the
+    // wire can ask for a pause: the block says plainly that it is closed.
+    assert!(
+        props["momo.stream"].get("provisional").is_none(),
+        "a REST streamer's final slice is an end, not a provisional freeze: {props}"
+    );
+    let closing_candidates: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE kind::text = 'push_candidate' \
+            AND payload->>'message_id' = $1 AND payload->>'source' = 'stream_closed'",
+    )
+    .bind(&message_id)
+    .fetch_one(&su)
+    .await
+    .expect("count the closing candidates");
+    assert_eq!(
+        closing_candidates, 1,
+        "seventeen slices enqueue one closing candidate, on the final one"
+    );
 
     // 4 — one `message.new` then 16 `message.edited`, all at the same seq, each
     //     carrying the body a renderer needs.
@@ -914,6 +933,79 @@ async fn a_zero_revision_and_a_tombstone_are_both_refused_by_name() {
 // ---------------------------------------------------------------------------
 // #6 — ADR-0155: the wire shape of a stream that was stopped
 // ---------------------------------------------------------------------------
+
+/// ADR-0204 증보 1 D8-a (#3987): nothing on the wire can ask for a provisional freeze. A
+/// `PATCH` that adds `provisional: true` to its `stream` block — or to the body — is an
+/// ordinary final slice: the key is not read, the block comes back without it, and the write
+/// is the end of the answer (one closing push candidate). The pause belongs to the in-process
+/// worker's retry; a REST producer that could ask for it could mute its own answer's push.
+///
+/// The `200` stands on the request decoder ignoring keys it does not know (`StreamEditRequest`
+/// has no `deny_unknown_fields`, though the OpenAPI schema says `additionalProperties: false`).
+/// If the decoder is ever tightened, this becomes a `400` and the premise changes — the point of
+/// the test, that the marker cannot be written from the wire, stands either way.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn a_producer_cannot_ask_for_a_provisional_freeze_over_the_wire() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fx = seed(&su, &app_pool).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, fx.workspace, &fx.author).await;
+
+    // A stream the producer opened as a stream (the opening marker): only that has an answer
+    // to end. (A message that never streamed has none, so its final write announces nothing.)
+    let (status, opened) = open_streaming(
+        &http,
+        &base,
+        &token,
+        &fx,
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        "절반쯤 쓰다가",
+    )
+    .await;
+    assert_eq!(status, 201, "the opening write lands: {opened}");
+    let message_id = opened["id"].as_str().expect("message id").to_string();
+    let response = http
+        .patch(format!(
+            "{base}/v1/workspaces/{}/messages/{message_id}",
+            fx.workspace
+        ))
+        .bearer_auth(&token)
+        .json(&json!({
+            "body": "절반쯤 쓰다가 끝냈어요.",
+            "provisional": true,
+            "stream": {"rev": 1, "final": true, "provisional": true},
+        }))
+        .send()
+        .await
+        .expect("send a final slice that asks for a pause");
+    assert_eq!(
+        response.status(),
+        200,
+        "an unknown key is not an error: the slice is simply an ordinary final one"
+    );
+
+    let uuid = Uuid::parse_str(&message_id).expect("uuid");
+    let (_, _, _, props) = stored(&su, uuid).await;
+    assert!(
+        props["momo.stream"].get("provisional").is_none(),
+        "the wire cannot write the marker: {props}"
+    );
+    assert_eq!(props["momo.stream"]["streaming"], json!(false));
+    let closing: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE kind::text = 'push_candidate' \
+            AND payload->>'message_id' = $1 AND payload->>'source' = 'stream_closed'",
+    )
+    .bind(&message_id)
+    .fetch_one(&su)
+    .await
+    .expect("count the closing candidates");
+    assert_eq!(closing, 1, "it was the end of the answer, and it announced");
+}
 
 /// The optional field, proved from the outside: a closing slice may name an
 /// `outcome`, and the response and the row both carry it.
