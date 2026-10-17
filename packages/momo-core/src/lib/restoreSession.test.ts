@@ -75,6 +75,29 @@ describe("restoreSession — 침묵과 거절을 구분한다", () => {
     expect(marked).not.toHaveBeenCalled();
   });
 
+  // #3993. 서버가 배포 중이거나 DB가 순간 흔들려 5xx로 답하는 것은 갱신 토큰을 보고
+  // 거절한 것이 아니다. 예전에는 비-401을 전부 거절로 읽어서(`refreshRetry`), 그런
+  // 순간에 앱을 여는 것만으로 저장된 토큰이 지워지고 영구 로그아웃이었다.
+  it("서버가 고장 나 있어도(5xx) 자격증명을 **지우지 않는다** (배포 중 시작)", async () => {
+    const { base, cleared, marked } = port();
+    install(base);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ error: { message: "unavailable" } }), {
+            status: 503,
+            headers: { "Content-Type": "application/json" },
+          })
+      )
+    );
+
+    await expect(restoreSession()).resolves.toBeNull();
+
+    expect(cleared).not.toHaveBeenCalled(); // ← 5xx를 다시 거절로 읽으면 여기가 빨개진다
+    expect(marked).not.toHaveBeenCalled();
+  });
+
   it("서버가 거절하면 지운다 (세션이 진짜 끝났다)", async () => {
     const { base, cleared, marked } = port();
     install(base);
@@ -113,6 +136,28 @@ describe("refreshSessionOutcome — 세 결말이 구별된다", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response("{}", { status: 401 }))
+    );
+    await expect(refreshSessionOutcome()).resolves.toBe("rejected");
+  });
+
+  // 429는 서버가 바쁜 것(openapi가 이 라우트에 문서화한 응답), 408은 기다리다 만 것이다.
+  it.each([500, 502, 503, 504, 429, 408])(
+    "서버 응답 %i는 unreachable — 서버가 토큰을 보지 않았으니 세션을 판정하지 않았다 (#3993)",
+    async (status) => {
+      install(port().base);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response("{}", { status }))
+      );
+      await expect(refreshSessionOutcome()).resolves.toBe("unreachable");
+    }
+  );
+
+  it("멤버가 비활성(403)이면 rejected — 서버가 판정했다 (#3993에서도 그대로)", async () => {
+    install(port().base);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{}", { status: 403 }))
     );
     await expect(refreshSessionOutcome()).resolves.toBe("rejected");
   });
