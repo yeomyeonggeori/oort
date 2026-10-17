@@ -19,14 +19,40 @@ use std::collections::{BTreeSet, HashSet};
 use serde_json::{Map, Value};
 
 pub const SCHEMA_VERSION: &str = "momo.plugin.v1";
-pub const SUPPORTED_PROTOCOL_VERSIONS: [&str; 1] = ["2025-06-18"];
+/// MCP protocol revisions a manifest may pin. Vendors answer on different
+/// revisions (ADR-0113 증보 2 E2), so this is a list; anything else — including
+/// a revision newer than this server knows — is refused.
+pub const SUPPORTED_PROTOCOL_VERSIONS: [&str; 3] = ["2025-03-26", "2025-06-18", "2025-11-25"];
 pub const SUPPORTED_TRANSPORTS: [&str; 1] = ["streamable_http"];
-pub const ALLOWED_SPDX: [&str; 5] = [
+pub const ALLOWED_SPDX: [&str; 9] = [
     "MIT",
     "Apache-2.0",
     "BSD-2-Clause",
     "BSD-3-Clause",
     "LicenseRef-Linear-Hosted-Service",
+    "LicenseRef-Google-Hosted-Service",
+    "LicenseRef-Atlassian-Hosted-Service",
+    "LicenseRef-Slack-Hosted-Service",
+    "LicenseRef-Notion-Hosted-Service",
+];
+/// ADR-0113 증보 2 E4 grade C (delete / permission / share / merge / code push)
+/// is left out of every official manifest: a tool that is not listed is the
+/// strongest refusal, because no executor is guaranteed to read `deny`.
+/// Entries are vendor tool names (the part after the `<plugin>.` prefix),
+/// lower-case with `-`/`_`/space removed (see `fold_tool_name`). A trailing
+/// `*` matches any suffix.
+pub const GRADE_C_TOOL_NAMES: [&str; 11] = [
+    "delete_event",
+    "share_file",
+    "trash_file",
+    "merge_pull_request",
+    "push_files",
+    "create_or_update_file",
+    "delete_file",
+    "delete_jira",
+    "manage_jira",
+    "notion-delete-*",
+    "notion-move-pages",
 ];
 pub const ALLOWED_PLUGIN_RISKS: [&str; 4] = ["low", "medium", "high", "critical"];
 pub const ALLOWED_TOOL_RISKS: [&str; 3] = ["read", "write", "admin"];
@@ -227,10 +253,17 @@ pub fn validate_manifest(manifest_text: &str) -> Checked<ValidatedPluginManifest
     .into_iter()
     .collect();
     let momo_keys: BTreeSet<&str> = momo.keys().map(String::as_str).collect();
-    let mut hosted_keys = base_momo_keys.clone();
-    hosted_keys.insert("hosted");
-    if momo_keys != base_momo_keys && momo_keys != hosted_keys {
+    // `hosted` and `preview` are optional additive keys (preview = Google
+    // 「미리보기」 chip, ADR-0113 증보 2 E2).
+    let mut allowed_momo_keys = base_momo_keys.clone();
+    allowed_momo_keys.insert("hosted");
+    allowed_momo_keys.insert("preview");
+    if !base_momo_keys.is_subset(&momo_keys) || !momo_keys.is_subset(&allowed_momo_keys) {
         return rejected("unknown or missing field at momo");
+    }
+    match momo.get("preview") {
+        None | Some(Value::Bool(_)) => {}
+        Some(_) => return rejected("momo.preview must be a boolean"),
     }
     let hosted = match momo.get("hosted") {
         None => false,
@@ -352,6 +385,9 @@ pub fn validate_manifest(manifest_text: &str) -> Checked<ValidatedPluginManifest
         let tool_name = nonempty(string(tool, "name", &path)?, "tool name")?;
         if !tool_names.insert(tool_name.to_string()) {
             return rejected("duplicate tool name");
+        }
+        if is_grade_c_tool_name(tool_name) {
+            return rejected("grade C tool is not admitted");
         }
         nonempty(string(tool, "description", &path)?, "tool description")?;
         let input_schema = object(tool, "inputSchema", &path)?;
@@ -551,6 +587,39 @@ fn reject_secret_like_keys(value: &Value, path: &str) -> Checked<()> {
         }
         _ => Ok(()),
     }
+}
+
+fn fold_tool_name(name: &str) -> String {
+    name.chars()
+        .filter(|c| !matches!(c, '-' | '_') && !c.is_whitespace())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+/// True when `tool_name` (`<plugin>.<vendor tool>` or a bare vendor name) is a
+/// grade C tool (E4). Every dot-separated suffix and the whole name are
+/// checked, case-, separator- and whitespace-insensitively.
+pub fn is_grade_c_tool_name(tool_name: &str) -> bool {
+    let patterns: Vec<(String, bool)> = GRADE_C_TOOL_NAMES
+        .iter()
+        .map(|entry| match entry.strip_suffix('*') {
+            Some(prefix) => (fold_tool_name(prefix), true),
+            None => (fold_tool_name(entry), false),
+        })
+        .collect();
+    let mut candidates = vec![fold_tool_name(tool_name)];
+    for (index, _) in tool_name.match_indices('.') {
+        candidates.push(fold_tool_name(&tool_name[index + 1..]));
+    }
+    candidates.iter().any(|candidate| {
+        patterns.iter().any(|(pattern, prefix)| {
+            if *prefix {
+                candidate.starts_with(pattern.as_str())
+            } else {
+                candidate == pattern
+            }
+        })
+    })
 }
 
 /// Whether a JSON key names a credential-shaped field. Exposed so the route's
@@ -798,14 +867,144 @@ mod tests {
                 .unwrap_or_else(|error| panic!("{id} rejected: {error}"));
             assert_eq!(manifest.plugin_id, id);
             assert!(!manifest.tools.is_empty());
+            // ADR-0113 증보 2 E4: writes are admitted (grades A/B); grade C is
+            // what no official manifest may carry.
             assert!(manifest
                 .tools
                 .iter()
-                .all(|tool| tool.risk == "read" && tool.approval_tier == "read_only"));
+                .all(|tool| !is_grade_c_tool_name(&tool.name)));
         }
         let drive = validate_manifest(FIXTURES[3].1).expect("drive admitted");
         assert!(drive.hosted, "drive is the momo-hosted path-C MCP");
         assert_eq!(drive.mcp_url, "/v1/mcp/drive");
+    }
+
+    /// Rename the github fixture's first tool (and its tier entry) to `name`.
+    fn with_tool_named(name: &str) -> Value {
+        let mut manifest = github();
+        let old = manifest["mcp"]["tools"][0]["name"]
+            .as_str()
+            .expect("tool name")
+            .to_string();
+        manifest["mcp"]["tools"][0]["name"] = json!(name);
+        let tiers = manifest["momo"]["approvalTier"]
+            .as_object_mut()
+            .expect("tiers");
+        let tier = tiers.remove(&old).expect("tier");
+        tiers.insert(name.to_string(), tier);
+        manifest
+    }
+
+    /// ADR-0113 증보 2 E4 grade C: no official manifest may list these.
+    #[test]
+    fn grade_c_tool_names_are_refused() {
+        let grade_c = [
+            "calendar.delete_event",
+            "drive.share_file",
+            "drive.trash_file",
+            "github.merge_pull_request",
+            "github.push_files",
+            "github.create_or_update_file",
+            "github.delete_file",
+            "jira.delete_jira",
+            "jira.manage_jira",
+            "notion.notion-delete-pages",
+            "notion.notion-delete-comment",
+            "notion.notion-move-pages",
+            "Github.Merge_Pull_Request",
+            "calendar.google.delete_event",
+            "calendar.delete-event",
+            "calendar.deleteEvent",
+            "notion.notion_delete_pages",
+            "drive. share_file",
+        ];
+        for name in grade_c {
+            assert_eq!(
+                reason(&with_tool_named(name)),
+                "grade C tool is not admitted",
+                "{name}"
+            );
+        }
+        // Near misses stay admitted (the guard is a name list, not a substring).
+        for name in [
+            "github.list_repositories",
+            "calendar.create_event",
+            "notion.notion-search",
+        ] {
+            validate_manifest(&with_tool_named(name).to_string())
+                .unwrap_or_else(|error| panic!("{name} wrongly refused: {error}"));
+        }
+    }
+
+    /// Grade A/B writes are admitted by the validator (E4 table).
+    #[test]
+    fn a_write_tool_with_an_approval_card_is_admitted() {
+        let mut manifest = github();
+        manifest["mcp"]["tools"][0]["risk"] = json!("write");
+        manifest["mcp"]["tools"][0]["approvalPolicy"] = json!("always");
+        manifest["momo"]["approvalTier"]["github.list_repositories"] = json!("network_write");
+        let admitted = validate_manifest(&manifest.to_string()).expect("write admitted");
+        assert_eq!(admitted.tools[0].risk, "write");
+        assert_eq!(admitted.tools[0].approval_tier, "network_write");
+    }
+
+    #[test]
+    fn momo_preview_is_an_optional_boolean() {
+        let mut manifest = github();
+        manifest["momo"]["preview"] = json!(true);
+        let admitted = validate_manifest(&manifest.to_string()).expect("preview admitted");
+        assert_eq!(admitted.json["momo"]["preview"], json!(true));
+        let mut both = github();
+        both["momo"]["preview"] = json!(false);
+        both["momo"]["hosted"] = json!(false);
+        validate_manifest(&both.to_string()).expect("preview + hosted admitted");
+        let mut missing_base = github();
+        missing_base["momo"]["preview"] = json!(true);
+        missing_base["momo"]
+            .as_object_mut()
+            .expect("momo")
+            .remove("risk");
+        assert_eq!(reason(&missing_base), "unknown or missing field at momo");
+        let mut extra = github();
+        extra["momo"]["preview"] = json!(true);
+        extra["momo"]["beta"] = json!(true);
+        assert_eq!(reason(&extra), "unknown or missing field at momo");
+        let mut wrong = github();
+        wrong["momo"]["preview"] = json!("yes");
+        assert_eq!(reason(&wrong), "momo.preview must be a boolean");
+    }
+
+    #[test]
+    fn hosted_service_license_refs_are_admitted_and_gpl_is_not() {
+        for spdx in [
+            "LicenseRef-Google-Hosted-Service",
+            "LicenseRef-Atlassian-Hosted-Service",
+            "LicenseRef-Slack-Hosted-Service",
+            "LicenseRef-Notion-Hosted-Service",
+        ] {
+            let mut manifest = github();
+            manifest["plugin"]["license"] = json!({ "spdx": spdx, "kind": "hosted_only" });
+            validate_manifest(&manifest.to_string())
+                .unwrap_or_else(|error| panic!("{spdx} rejected: {error}"));
+        }
+        let mut other = github();
+        other["plugin"]["license"] =
+            json!({ "spdx": "LicenseRef-Unknown-Hosted-Service", "kind": "hosted_only" });
+        assert_eq!(reason(&other), "license is not admitted");
+    }
+
+    #[test]
+    fn every_supported_protocol_version_is_admitted() {
+        for version in SUPPORTED_PROTOCOL_VERSIONS {
+            let mut manifest = github();
+            manifest["mcp"]["protocolVersion"] = json!(version);
+            validate_manifest(&manifest.to_string())
+                .unwrap_or_else(|error| panic!("{version} rejected: {error}"));
+        }
+        assert!(SUPPORTED_PROTOCOL_VERSIONS.len() > 1);
+        let mut unknown = github();
+        unknown["mcp"]["protocolVersion"] = json!("2099-01-01");
+        assert_eq!(reason(&unknown), "unknown MCP protocol");
     }
 
     // ---- the mismatch checks (each one is the only thing that refuses) ----
