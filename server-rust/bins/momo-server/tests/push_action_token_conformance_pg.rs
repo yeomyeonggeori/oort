@@ -29,7 +29,7 @@
 //! | `an_access_only_logout_leaves_the_session_and_so_the_token` | (documents the derived-life rule) |
 //! | `the_row_is_a_session_row_of_the_callers_lineage` | change the label, kind or lineage the mint route records |
 //! | `the_token_adds_no_authority` | skip the channel-membership or role check for a push-action principal |
-//! | `a_lock_screen_tap_cannot_decide_what_must_be_opened_in_the_app` | drop the `opens_in_app` refusal in `decide_in_tx`, apply it to approve only, or move it before the membership gate |
+//! | `a_lock_screen_tap_cannot_decide_what_must_be_opened_in_the_app` | drop the `opens_in_app` refusal in `decide_in_tx`, apply it to approve only, or move it before the membership gate; drop the login handoff from `OPEN_IN_APP_TOOL_NAMES` or the avatar test from the profile update (planner 2026-10-17, #3928) |
 //! | `a_decision_replays_idempotently` | key the replay on the credential instead of the decision id |
 //! | `the_audit_rows_say_which_door_the_decision_came_through` | drop `stamp_via` at the generic, executor or expiry audit row, or stamp the shared `event` |
 //!
@@ -1458,8 +1458,10 @@ async fn the_token_adds_no_authority() {
 #[ignore = "needs Postgres + runtime roles (DATABASE_URL)"]
 async fn a_lock_screen_tap_cannot_decide_what_must_be_opened_in_the_app() {
     // ADR-0204 D7 on the SERVER side: approvals that mint a value shown once and
-    // approvals whose card asks the approver to pick a host are never decided with
-    // the lock screen's credential, approve or reject, whatever the body says. The
+    // approvals whose card asks the approver to pick a host — and, by the planner's
+    // decision of 2026-10-17, the login handoff and a profile update that changes the
+    // avatar — are never decided with the lock screen's credential, approve or reject,
+    // whatever the body says. The
     // push category (`momo.approval.open`) is the client's half of the same rule.
     let _guard = test_lock().await;
     let w = world().await;
@@ -1483,6 +1485,23 @@ async fn a_lock_screen_tap_cannot_decide_what_must_be_opened_in_the_app() {
         "tool_call": {"call_id": "pat-spawn", "name": "work.session.spawn", "arguments": {}},
         "execution": {"tool": "codex", "host_candidates": [], "default_host_id": null},
     });
+    // Planner decision 2026-10-17 (#3928): the lock screen cannot show what these two
+    // ask the approver to look at, so the server refuses them to the lock screen too.
+    // The login handoff: which session, and why a person must log in, is read on the card.
+    let login_handoff = json!({
+        "tool_call": {
+            "call_id": "pat-handoff",
+            "name": "work.session.login_handoff",
+            "arguments": {"session_id": Uuid::new_v4().to_string(), "reason": "로그인이 필요해요"},
+        },
+    });
+    // A profile update that changes the picture: the approver looks at the staged image.
+    let avatar_update = momo_agent::actions::workspace_action_payload(
+        momo_agent::actions::ACTION_AGENT_PROFILE_UPDATE,
+        &json!({"avatar": {"source": "preset", "presetId": "comet"}}),
+        None,
+        w.agent,
+    );
     let members_before = w.count("member").await;
     let agents_before = w.count("agent").await;
     let invites_before = w.count("invite_code").await;
@@ -1492,6 +1511,12 @@ async fn a_lock_screen_tap_cannot_decide_what_must_be_opened_in_the_app() {
         ("agent.invite", "workspace_action", agent_invite),
         ("invite.create", "workspace_action", invite_create),
         ("a spawn card that offers a host", "tool_call", spawn),
+        ("the login handoff", "tool_call", login_handoff),
+        (
+            "a profile update that changes the avatar",
+            "workspace_action",
+            avatar_update,
+        ),
     ] {
         let (_, approval) = w.seed_parked_approval(action_type, payload).await;
         seeded.push((label, approval));

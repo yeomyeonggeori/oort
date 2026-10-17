@@ -468,6 +468,14 @@ BEGIN
   IF to_regclass('public.hosted_agent_connection') IS NOT NULL THEN
     GRANT SELECT (workspace_id, agent_member_id) ON hosted_agent_connection TO momo_notifier;
   END IF;
+  -- ADR-0204 D7 / #3928: an approval's push goes to the people who MAY approve it,
+  -- and "may" starts with the workspace role. `momo_messaging::active_workspace_role`
+  -- — the very read the decision route's `require_admin` makes — selects `role`
+  -- where `workspace_id` and `member_id` match (and joins `member`, already
+  -- granted). Exactly those three columns; `joined_at` / `updated_at` are not read.
+  IF to_regclass('public.workspace_membership') IS NOT NULL THEN
+    GRANT SELECT (workspace_id, member_id, role) ON workspace_membership TO momo_notifier;
+  END IF;
   IF to_regclass('public.huddle') IS NOT NULL THEN
     GRANT SELECT ON TABLE huddle TO momo_notifier;
   END IF;

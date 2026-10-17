@@ -279,44 +279,127 @@ impl SecretDelivery {
 /// link (`result.secretOnce.kind` = [`SECRET_ONCE_INVITE_LINK`]) and the pairing
 /// code ([`SECRET_ONCE_PAIRING`]).
 ///
-/// ADR-0204 D7 keeps these off the lock screen: the one place the value would be
-/// shown is the approval card, and a banner button has nowhere to show it. The
-/// approver would approve and the value would be gone. The list is written out
+/// ADR-0204 D7 keeps these off the lock screen: approving one mints a value that is
+/// handed back exactly once — in the decision response to the approver's client, or
+/// to the proposer's claim — and a banner button has nowhere to receive it. The
+/// person would approve from a banner and the value would be gone. The list is written out
 /// instead of derived from [`SecretDelivery`] because delivery to the *proposing
 /// agent* and minting a secret for the *approver* are different facts that happen
-/// to coincide today; a test pins that every action that delivers a secret is
-/// here, so adding one without opening it fails instead of shipping.
+/// to coincide today. Two tests hold it: every action that delivers a secret is
+/// here, and every registered action has its lock-screen decision **written down**
+/// (`every_registered_action_has_a_recorded_lock_screen_decision`) — an action
+/// that mints a value for the approver without delivering it to the agent has no
+/// `SecretDelivery` to trip the first, and trips the second.
 pub const ONE_TIME_SECRET_ACTION_IDS: [&str; 2] = [ACTION_INVITE_CREATE, ACTION_AGENT_INVITE];
+
+/// Tool calls whose approval is **opened in the app** because the lock screen cannot
+/// show what the approver is being asked to look at (planner decision 2026-10-17).
+///
+/// `work.session.login_handoff` stops a run in front of a login screen and asks a
+/// person to log in on the session's own screen (LIVE-4): what they approve is
+/// *which* session and *why*, on a card that carries the deep link to it. A banner
+/// 승인 would consent to a handoff nobody had looked at. Matched on the tool name
+/// as [`crate::tools::normalize`] reads it — the same reading the card's own props
+/// use ([`crate::approval::login_handoff_session_id`]).
+pub const OPEN_IN_APP_TOOL_NAMES: [&str; 1] = [crate::tools::WORK_SESSION_LOGIN_HANDOFF];
+
+/// Does this `agent.profile.update` card change the agent's **avatar**? True when its
+/// arguments carry an `avatar` key at all — a preset, an attachment, an image the
+/// server staged for the approver to preview, or `null` (remove it).
+///
+/// Planner decision 2026-10-17: a picture cannot be judged from a banner. The
+/// approver looks at the staged image on the card (`approvals.avatar_preview`) and
+/// then decides; a lock-screen 승인 would approve pixels nobody saw. Only the key's
+/// *presence* is read — never its value — so the judgment's payload projection can
+/// carry the answer as a bare marker.
+pub fn changes_avatar(payload: &Value) -> bool {
+    payload
+        .get("action")
+        .and_then(|action| action.get("args"))
+        .and_then(Value::as_object)
+        .is_some_and(|args| args.contains_key("avatar"))
+}
 
 /// Must this approval be opened in the app to be decided — i.e. may its push
 /// **not** carry the lock-screen 승인·거절 buttons? (ADR-0204 D7: the category
 /// `momo.approval.open` instead of `momo.approval`.)
 ///
 /// The one list, in the one place; `momo_push::category_for` reads it and nothing
-/// else decides. Three kinds of approval belong on it:
+/// else decides. Five kinds of approval belong on it:
 ///
 /// 1. an action that mints a value shown once ([`ONE_TIME_SECRET_ACTION_IDS`]);
 /// 2. an approval whose card asks the approver to **choose a host**
 ///    ([`crate::approval::offers_host_choice`] — every `work.spawn` card does).
 ///    A banner 승인 would take the card's default machine without the person
 ///    having looked at the picker;
-/// 3. ADR-0188 D5's work-host permission requests. They are `work_permission_request`
+/// 3. a tool call the lock screen cannot show ([`OPEN_IN_APP_TOOL_NAMES`] — the login
+///    handoff, planner decision 2026-10-17);
+/// 4. an `agent.profile.update` that changes the avatar ([`changes_avatar`], same
+///    decision);
+/// 5. ADR-0188 D5's work-host permission requests. They are `work_permission_request`
 ///    rows with no `approval` row and no `approval_request` message today, so
 ///    there is nothing here to classify; the producer that gives them one adds its
 ///    arm in this function.
 ///
-/// Everything else (a tool call, an ordinary workspace action) is decidable from
-/// the lock screen behind Face ID, as before.
+/// Everything else this build **knows** — any other *named* tool call, a workspace
+/// action it carries that mints nothing shown once and shows no picture — is decidable
+/// from the lock screen behind Face ID, as before (ADR-0204 D7: 「기본은 inline이고, open
+/// 목록은 서버 코드 한 곳에 둔다」).
+///
+/// **A tool name outside the catalog is such a named tool call, and it is inline.** It is
+/// not an unknown shape: an operator's own `agent.tool_schema` function reaches the
+/// approval inbox under a name momo does not own (`tools::momo_tool_name`), and opening
+/// every one of them would take the banner away from tools nobody asked to take it from.
+/// The price is the rolling-deploy window of a *new* open tool: until the notifier is as
+/// new as the server, the new name reads as an operator's tool. Deploy them together.
+///
+/// **What it does not understand it opens.** ADR-0204 「보안·경계 요약」: 「무엇인지 모르는
+/// 알림에는 버튼이 없다」. A workspace action this build's registry does not carry (the
+/// notifier is older than the server that wrote the card — a rolling deploy — or the
+/// action was retired), a workspace action whose payload names none, a tool call whose
+/// payload names no tool (a card with nothing to say what it is), and an `action_type`
+/// that is not one of the three producers write today all answer `true`: the cost of a
+/// wrong guess is a card opened in the app, the cost of the other wrong guess is an
+/// approval nobody could look at.
+///
+/// ## What it may read
+///
+/// Only `action.id`, whether `action.args` is an object with an `avatar` key,
+/// `tool_call.name`, `execution` — the paths the push judgment's payload projection
+/// carries (`momo_push` `judgment.rs`). Never an argument's value. The projection and
+/// this function must say the same thing about the same card: the push judges the
+/// projection, the decision route (#3977) the whole payload.
+/// `push_conformance_pg::an_approval_that_must_be_opened_…` asserts exactly that for
+/// every card of its table, and `momo-push/tests/judgment_projection.rs` fails if the
+/// statement reads a path of the payload nobody listed.
 pub fn opens_in_app(action_type: &str, payload: &Value) -> bool {
     if crate::approval::offers_host_choice(payload) {
         return true;
     }
-    action_type == ACTION_TYPE_WORKSPACE_ACTION
-        && payload
+    match action_type {
+        // Decided where it is shown, behind Face ID — unless the card is one the lock
+        // screen cannot show.
+        crate::tools::ACTION_TYPE_TOOL_CALL => payload
+            .get("tool_call")
+            .and_then(|call| call.get("name"))
+            .and_then(Value::as_str)
+            .is_none_or(|name| {
+                let name = crate::tools::normalize(name);
+                OPEN_IN_APP_TOOL_NAMES
+                    .iter()
+                    .any(|open| crate::tools::normalize(open) == name)
+            }),
+        ACTION_TYPE_WORKSPACE_ACTION => payload
             .get("action")
             .and_then(|action| action.get("id"))
             .and_then(Value::as_str)
-            .is_some_and(|id| ONE_TIME_SECRET_ACTION_IDS.contains(&id))
+            .is_none_or(|id| {
+                action_by_id(id).is_none()
+                    || ONE_TIME_SECRET_ACTION_IDS.contains(&id)
+                    || (id == ACTION_AGENT_PROFILE_UPDATE && changes_avatar(payload))
+            }),
+        _ => true,
+    }
 }
 
 /// How long after the approval the proposer may claim the value (V3-4 (4)).
@@ -2883,10 +2966,307 @@ mod tests {
         }
         // Only a *workspace action* reads the id: a tool call whose payload merely
         // contains an action block is still a tool call.
-        assert!(!opens_in_app("tool_call", &card(ACTION_INVITE_CREATE)));
-        assert!(!opens_in_app(
+        let tool_call_with_an_action_block = serde_json::json!({
+            "tool_call": {"name": crate::tools::WORK_SESSION_END},
+            "action": {"id": ACTION_INVITE_CREATE, "args": {}},
+        });
+        assert!(!opens_in_app("tool_call", &tool_call_with_an_action_block));
+    }
+
+    /// ADR-0204 「무엇인지 모르는 알림에는 버튼이 없다」: a shape this build does not
+    /// know is opened, not decided from a banner.
+    #[test]
+    fn a_shape_this_build_does_not_know_is_never_decided_from_a_banner() {
+        let card = |id: &str| serde_json::json!({"action": {"id": id, "args": {}}});
+        // A workspace action the registry does not carry — e.g. one a newer server
+        // wrote — and one whose payload names no action at all.
+        assert!(opens_in_app(
+            ACTION_TYPE_WORKSPACE_ACTION,
+            &card("no.such.action")
+        ));
+        assert!(opens_in_app(
             ACTION_TYPE_WORKSPACE_ACTION,
             &serde_json::json!({})
+        ));
+        // An action type none of today's producers writes.
+        assert!(opens_in_app("deploy", &serde_json::json!({})));
+        assert!(opens_in_app("", &serde_json::json!({})));
+        // A tool call that names no tool — there is nothing to say it is safe to
+        // decide from a banner.
+        assert!(opens_in_app(
+            crate::tools::ACTION_TYPE_TOOL_CALL,
+            &serde_json::json!({})
+        ));
+        assert!(opens_in_app(
+            crate::tools::ACTION_TYPE_TOOL_CALL,
+            &serde_json::json!({"tool_call": {"name": null}})
+        ));
+        assert!(opens_in_app(
+            crate::tools::ACTION_TYPE_TOOL_CALL,
+            &serde_json::json!({"tool_call": {"call_id": "c1"}})
+        ));
+        // A named tool call stays decidable from the lock screen — whatever the name. (A
+        // name outside the catalog is an operator's own tool, not an unknown shape.)
+        assert!(!opens_in_app(
+            crate::tools::ACTION_TYPE_TOOL_CALL,
+            &serde_json::json!({"tool_call": {"name": "x"}})
+        ));
+        assert!(!opens_in_app(
+            ACTION_TYPE_WORKSPACE_ACTION,
+            &card(ACTION_CHANNEL_CREATE)
+        ));
+    }
+
+    /// The lock-screen decision for every registered action, written out. The question
+    /// each row answers: **does approving it show the approver a value once?** (an
+    /// invite link, a pairing code — a banner button has nowhere to show it). The table
+    /// is exhaustive on purpose: an action added to the registry fails here until
+    /// someone says which side it is on, instead of defaulting to a lock-screen 승인
+    /// that mints something nobody sees. (`SecretDelivery` cannot do this job — it says
+    /// whether the *proposing agent* may receive a value, which is a different fact.)
+    #[test]
+    fn every_registered_action_has_a_recorded_lock_screen_decision() {
+        let recorded: &[(&str, bool)] = &[
+            (ACTION_INVITE_CREATE, true), // the invite link is shown once
+            (ACTION_AGENT_INVITE, true),  // the pairing code is shown once
+            (ACTION_CHANNEL_CREATE, false),
+            (ACTION_CHANNEL_MEMBER_ADD, false),
+            (ACTION_AGENT_RENAME, false),
+            (ACTION_HOSTED_CHANNELS_GRANT, false),
+            (ACTION_WORKSPACE_SETTINGS_UPDATE, false),
+            // False for a card with no `avatar` key; one with it is opened (see
+            // `a_profile_update_that_changes_the_avatar_opens_in_the_app`).
+            (ACTION_AGENT_PROFILE_UPDATE, false),
+            (ACTION_WORKSPACE_UNFURL_UPDATE, false),
+            (ACTION_WORKSPACE_MEMORY_UPDATE, false),
+            (ACTION_WORKSPACE_WORK_TIER_UPDATE, false),
+            // Installs one official app; "the token is not stored in oort", so there is
+            // no value to show the approver once (ADR-0113 P3, ADR-0201 증보 v2 H7).
+            (ACTION_PLUGIN_INSTALL, false),
+        ];
+        let registered: std::collections::BTreeSet<&str> =
+            ACTIONS.iter().map(|action| action.id).collect();
+        let written: std::collections::BTreeSet<&str> =
+            recorded.iter().map(|(id, _)| *id).collect();
+        assert_eq!(
+            registered, written,
+            "a registered action has no lock-screen decision recorded here (or a row \
+             names an action that is gone): decide whether approving it shows the \
+             approver a value once, add it to ONE_TIME_SECRET_ACTION_IDS if so, and \
+             record the row"
+        );
+        let card = |id: &str| serde_json::json!({"action": {"id": id, "args": {}}});
+        for (id, opens) in recorded {
+            assert_eq!(
+                opens_in_app(ACTION_TYPE_WORKSPACE_ACTION, &card(id)),
+                *opens,
+                "{id}"
+            );
+        }
+    }
+
+    /// Planner decision 2026-10-17: the login handoff is approved with the card in
+    /// front of you — which session, why — so its push offers 「열어서 결정」 only.
+    #[test]
+    fn the_login_handoff_opens_in_the_app_whatever_its_spelling() {
+        let call = |name: &str| serde_json::json!({"tool_call": {"name": name}});
+        assert_eq!(
+            OPEN_IN_APP_TOOL_NAMES,
+            [crate::tools::WORK_SESSION_LOGIN_HANDOFF]
+        );
+        // The tool name is read the way the card's own props read it
+        // (`login_handoff_session_id`): trimmed, lower-cased, `-` as `_`.
+        for spelling in [
+            "work.session.login_handoff",
+            "Work.Session.Login_Handoff",
+            "  work.session.login-handoff ",
+        ] {
+            assert!(
+                opens_in_app(crate::tools::ACTION_TYPE_TOOL_CALL, &call(spelling)),
+                "{spelling:?}"
+            );
+        }
+        // The tools beside it are decided where they are shown.
+        for name in [
+            crate::tools::WORK_SESSION_END,
+            crate::tools::WORK_SESSION_SPAWN,
+            "work.session.login",
+            "work.session.login_handoff.extra",
+        ] {
+            assert!(
+                !opens_in_app(crate::tools::ACTION_TYPE_TOOL_CALL, &call(name)),
+                "{name:?}"
+            );
+        }
+        // And only as a tool call: the same name on a workspace action reads the id.
+        assert!(!opens_in_app(
+            ACTION_TYPE_WORKSPACE_ACTION,
+            &serde_json::json!({
+                "tool_call": {"name": crate::tools::WORK_SESSION_LOGIN_HANDOFF},
+                "action": {"id": ACTION_CHANNEL_CREATE, "args": {}},
+            })
+        ));
+    }
+
+    /// A tool the catalog does not carry is an operator's own (`agent.tool_schema`, see
+    /// `tools::momo_tool_name`): momo does not own its name and cannot say the lock screen
+    /// is unfit for it, so it keeps the default — inline. Pinned so that the asymmetry with
+    /// 「모르는 workspace action은 open」 is a recorded choice and not an accident. A name
+    /// that merely *resembles* the handoff is such a tool too.
+    #[test]
+    fn an_operators_own_tool_is_decided_where_it_is_shown() {
+        let call = |name: &str| serde_json::json!({"tool_call": {"name": name}});
+        for name in [
+            "github.search_issues",
+            "send_message",
+            "work.session.login_handoff_v2",
+            "work_session_login_handoff",
+            "work.session.login",
+        ] {
+            assert!(
+                !crate::tools::is_executable(name),
+                "{name} is in the catalog after all"
+            );
+            assert!(
+                !opens_in_app(crate::tools::ACTION_TYPE_TOOL_CALL, &call(name)),
+                "{name}"
+            );
+        }
+    }
+
+    /// The tools whose approval IS the human's act (`ApprovalReason::HumanIsTheAction`:
+    /// nobody can pre-approve typing somebody else's password) are the ones the lock
+    /// screen cannot stand in for. Today that is the login handoff, and it is on the open
+    /// list; a tool that joins that class without joining the list fails here.
+    #[test]
+    fn a_tool_whose_approval_is_the_humans_act_is_opened_in_the_app() {
+        let mut found = Vec::new();
+        for name in crate::tools::CATALOG {
+            if crate::tools::approval_reason(name, None)
+                == crate::tools::ApprovalReason::HumanIsTheAction
+            {
+                found.push(*name);
+                assert!(
+                    opens_in_app(
+                        crate::tools::ACTION_TYPE_TOOL_CALL,
+                        &serde_json::json!({"tool_call": {"name": name}})
+                    ),
+                    "{name} is the human's own act but is not on OPEN_IN_APP_TOOL_NAMES"
+                );
+            }
+        }
+        assert_eq!(
+            found,
+            [crate::tools::WORK_SESSION_LOGIN_HANDOFF],
+            "the class of tools whose approval is the human's act changed — decide each one"
+        );
+    }
+
+    /// Every tool this server can execute has its lock-screen decision written down,
+    /// like the actions: adding one to the catalog fails here until someone says
+    /// whether the lock screen can show what is being approved.
+    #[test]
+    fn every_catalog_tool_has_a_recorded_lock_screen_decision() {
+        let recorded: &[(&str, bool)] = &[
+            (crate::tools::WORK_SESSION_END, false),
+            // A spawn opens through the host picker it carries (`offers_host_choice`,
+            // see `a_card_that_asks_for_a_host_opens_in_the_app_whatever_its_type`);
+            // a spawn call that has no picker is decided where it is shown.
+            (crate::tools::WORK_SESSION_SPAWN, false),
+            (crate::tools::WORK_SESSION_LOGIN_HANDOFF, true), // planner 2026-10-17
+            // These run without a card of their own, or raise a workspace action whose
+            // card is classified by that action's id.
+            (crate::tools::CARD_SUGGEST, false),
+            (crate::tools::MEMORY_SUGGEST, false),
+            (crate::tools::WORKSPACE_ACTION_PROPOSE, false),
+        ];
+        let catalog: std::collections::BTreeSet<&str> =
+            crate::tools::CATALOG.iter().copied().collect();
+        let written: std::collections::BTreeSet<&str> =
+            recorded.iter().map(|(name, _)| *name).collect();
+        assert_eq!(
+            catalog, written,
+            "a tool in the catalog has no lock-screen decision recorded here (or a row \
+             names a tool that is gone): decide whether the lock screen can show what \
+             is being approved, add it to OPEN_IN_APP_TOOL_NAMES if not, and record the row"
+        );
+        for (name, opens) in recorded {
+            assert_eq!(
+                opens_in_app(
+                    crate::tools::ACTION_TYPE_TOOL_CALL,
+                    &serde_json::json!({"tool_call": {"name": name}})
+                ),
+                *opens,
+                "{name}"
+            );
+        }
+    }
+
+    /// Planner decision 2026-10-17: a picture is not approved from a banner. An
+    /// `agent.profile.update` that carries an `avatar` key — preset, attachment, a
+    /// staged image, or `null` to remove it — is opened; the same action changing only
+    /// words is not.
+    #[test]
+    fn a_profile_update_that_changes_the_avatar_opens_in_the_app() {
+        let update = |args: serde_json::Value| serde_json::json!({"action": {"id": ACTION_AGENT_PROFILE_UPDATE, "args": args}});
+        let sha = "a".repeat(64);
+        for (label, args) in [
+            (
+                "a staged image",
+                serde_json::json!({"avatar": {
+                    "source": "staged",
+                    "imageId": "11111111-1111-4111-8111-111111111111",
+                    "sha256": sha,
+                    "origin": "generated",
+                }}),
+            ),
+            (
+                "a preset",
+                serde_json::json!({"avatar": {"source": "preset", "presetId": "p1"}}),
+            ),
+            (
+                "an attachment",
+                serde_json::json!({"avatar": {"source": "attachment", "attachmentId": "a"}}),
+            ),
+            ("a removal", serde_json::json!({"avatar": null})),
+            (
+                "words and a picture",
+                serde_json::json!({"tagline": "새 소개", "avatar": {"source": "preset", "presetId": "p1"}}),
+            ),
+        ] {
+            assert!(
+                opens_in_app(ACTION_TYPE_WORKSPACE_ACTION, &update(args)),
+                "{label}"
+            );
+        }
+        for (label, args) in [
+            ("words only", serde_json::json!({"tagline": "새 소개"})),
+            ("a name", serde_json::json!({"displayName": "새 이름"})),
+            (
+                "a status",
+                serde_json::json!({"statusText": "회의 중", "statusEmoji": "📅"}),
+            ),
+            ("no arguments", serde_json::json!({})),
+        ] {
+            assert!(
+                !opens_in_app(ACTION_TYPE_WORKSPACE_ACTION, &update(args)),
+                "{label}"
+            );
+        }
+        // `args` that are not an object name no avatar — and the push judgment's projection
+        // agrees (it asks `jsonb_typeof(args) = 'object'` before it looks for the key;
+        // Postgres' `jsonb_exists` alone would say yes to `["avatar"]` and to `"avatar"`).
+        assert!(!changes_avatar(&update(serde_json::json!("avatar"))));
+        assert!(!changes_avatar(&update(serde_json::json!(["avatar"]))));
+        assert!(!changes_avatar(&serde_json::json!({})));
+        // The key matters on the profile update only — another action carrying one
+        // is still decided by its own id.
+        assert!(!opens_in_app(
+            ACTION_TYPE_WORKSPACE_ACTION,
+            &serde_json::json!({"action": {
+                "id": ACTION_CHANNEL_CREATE,
+                "args": {"avatar": {"source": "preset", "presetId": "p1"}},
+            }})
         ));
     }
 

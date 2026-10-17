@@ -42,9 +42,17 @@
 //! | `a_hosted_work_run_under_a_minute_or_just_read_is_silent_not_a_dm` | drop the `ran_ms >= $3` / `read_state` predicates in the `work_run_done` arm |
 //! | `a_hosted_work_run_push_needs_a_requester_a_hosted_work_run_and_the_agents_own_answer` | drop the audit-requester, `input.type`, hosted-connection, status or author predicates in `wrun` |
 //! | `a_hosted_work_run_push_respects_the_work_complete_switch` | drop `work_run_done` from the `work_complete_push` filter |
+//! | `an_approval_push_goes_only_to_the_people_who_may_approve_it` (ADR-0204 D7, #3928) | drop the `may_approve_in_tx` narrowing in `judge_targets`, or make `decider_gate` ignore the registry role |
+//! | `an_approval_that_must_be_opened_is_the_open_category_and_the_rest_are_inline` | drop an action from `ONE_TIME_SECRET_ACTION_IDS`, stop `opens_in_app` reading `offers_host_choice`, drop the login handoff from `OPEN_IN_APP_TOOL_NAMES` or the avatar test from the profile update (planner 2026-10-17), or drop `tool_call.name` / the avatar marker from the judgment's payload projection |
+//! | `an_approval_card_with_no_approval_row_pushes_nobody` | let a card with no `approval` row fall through to a target (the relay would 400 it forever) |
+//! | `an_approval_row_of_another_channel_is_not_the_card_of_this_message` | drop `a.channel_id = (SELECT channel_id FROM msg)` from the approval join in `judge_targets` |
+//! | `an_approval_card_a_person_may_not_decide_does_not_leak_through_a_dm_or_a_mention` | let the narrowed `approval_request` reason fall back to `dm` / `mention` |
+//! | `a_resume_offer_keeps_its_owner_audience_with_no_approval_row` | apply the approval narrowing to reasons other than `approval_request` |
 
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
@@ -55,6 +63,7 @@ use momo_messaging::{
 };
 use momo_notifier::{PushConfig, PushDrain};
 use momo_push::{DispatchOutcome, PushDispatch, PushDispatcher};
+use serde_json::{json, Value};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::Row;
 use uuid::Uuid;
@@ -2086,4 +2095,913 @@ async fn a_hosted_work_run_push_respects_the_work_complete_switch() {
         "the switch is per kind — a DM still notifies: {sent:?}"
     );
     let _ = done_msg;
+}
+
+// ---------------------------------------------------------------------------
+// approval requests — who is woken, and by which category (ADR-0204 D7, #3928)
+// ---------------------------------------------------------------------------
+//
+// An `approval_request` card is pushed to the people who MAY APPROVE it — the
+// decision route's own conditions, asked through the functions the route calls —
+// and its category says whether the lock screen may decide it (`momo.approval`) or
+// the app must open the card (`momo.approval.open`).
+//
+// The room below holds one person for every answer those conditions can give. The
+// mirror image — the real decision route refusing exactly the people left out here
+// — is measured in `momo-server/tests/approval_push_audience_conformance_pg.rs`.
+
+/// The kinds of person an approval card can meet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+enum Who {
+    /// A workspace owner: passes every role condition.
+    Owner,
+    /// A workspace admin: passes every role condition.
+    Admin,
+    /// A plain member: decides a tool call and nothing gated.
+    Member,
+    /// A plain member who owns the agent an `agent_editor` card is about.
+    AgentOwner,
+    /// A plain member who owns the one member-scoped work host.
+    HostOwner,
+}
+
+const EVERYONE: [Who; 5] = [
+    Who::Owner,
+    Who::Admin,
+    Who::Member,
+    Who::AgentOwner,
+    Who::HostOwner,
+];
+
+struct ApprovalRoom {
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    /// The agent that asks for approvals.
+    requester: Uuid,
+    /// The agent an `agent_editor` card names; owned by [`Who::AgentOwner`].
+    pet: Uuid,
+    run_id: Uuid,
+    people: BTreeMap<Who, Uuid>,
+    /// Every seeded device, by the wire spelling of its id → its person.
+    devices: HashMap<String, Who>,
+    /// A member-scoped host owned by [`Who::HostOwner`].
+    laptop: Uuid,
+    /// A workspace-scoped host.
+    team_box: Uuid,
+    seq: AtomicI64,
+}
+
+impl ApprovalRoom {
+    fn id(&self, who: Who) -> Uuid {
+        self.people[&who]
+    }
+
+    fn device_count(&self, who: Who) -> usize {
+        self.devices.values().filter(|owner| **owner == who).count()
+    }
+
+    fn next_seq(&self) -> i64 {
+        self.seq.fetch_add(1, Ordering::SeqCst)
+    }
+}
+
+/// How many devices each person owns: two for an admin and a plain member, so a
+/// person judged once is still pushed on every device they own (and a person
+/// judged out is out on all of them).
+fn device_total(who: Who) -> usize {
+    match who {
+        Who::Admin | Who::Member => 2,
+        _ => 1,
+    }
+}
+
+async fn seed_member_with(su: &PgPool, workspace: Uuid, kind: &str, handle: &str) -> Uuid {
+    let id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member (id, workspace_id, kind, status, display_name, handle) \
+         VALUES ($1, $2, $3::member_kind, 'active', $4, $5)",
+    )
+    .bind(id)
+    .bind(workspace)
+    .bind(kind)
+    .bind(handle)
+    .bind(format!("{handle}-{}", id.simple()))
+    .execute(su)
+    .await
+    .expect("seed member");
+    id
+}
+
+async fn seed_workspace_role(su: &PgPool, workspace: Uuid, member: Uuid, role: &str) {
+    sqlx::query(
+        "INSERT INTO workspace_membership (workspace_id, member_id, role) \
+         VALUES ($1, $2, $3::membership_role)",
+    )
+    .bind(workspace)
+    .bind(member)
+    .bind(role)
+    .execute(su)
+    .await
+    .expect("seed workspace membership");
+}
+
+async fn seed_agent_owned_by(su: &PgPool, workspace: Uuid, handle: &str, owner: Uuid) -> Uuid {
+    let agent = seed_member_with(su, workspace, "agent", handle).await;
+    sqlx::query(
+        "INSERT INTO agent (member_id, workspace_id, model, base_url, max_concurrent_runs, \
+                            max_run_steps, owner_human_id) \
+         VALUES ($1, $2, 'hermes-agent', 'https://gateway.invalid/v1', 4, 50, $3)",
+    )
+    .bind(agent)
+    .bind(workspace)
+    .bind(owner)
+    .execute(su)
+    .await
+    .expect("seed agent");
+    seed_workspace_role(su, workspace, agent, "member").await;
+    agent
+}
+
+async fn seed_work_host_row(
+    su: &PgPool,
+    workspace: Uuid,
+    scope: &str,
+    owner: Uuid,
+    host_type: &str,
+) -> Uuid {
+    let host = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO work_host (id, workspace_id, scope, owner_member_id, type, display_name, \
+                                public_key, capabilities, last_seen_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, '{}'::jsonb, clock_timestamp())",
+    )
+    .bind(host)
+    .bind(workspace)
+    .bind(scope)
+    .bind(owner)
+    .bind(host_type)
+    .bind(format!("{scope}-host"))
+    .bind("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+    .execute(su)
+    .await
+    .expect("seed work host");
+    host
+}
+
+/// One device + an active push token for `member`; returns the device id.
+async fn seed_device_for(su: &PgPool, workspace: Uuid, member: Uuid) -> Uuid {
+    let device = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO device (id, workspace_id, member_id, platform) \
+         VALUES ($1, $2, $3, 'ios'::device_platform)",
+    )
+    .bind(device)
+    .bind(workspace)
+    .bind(member)
+    .execute(su)
+    .await
+    .expect("seed device");
+    sqlx::query(
+        "INSERT INTO push_token (workspace_id, device_id, member_id, apns_token, env, topic) \
+         VALUES ($1, $2, $3, $4, 'sandbox'::push_env, 'kim.dawn.momo.e2e')",
+    )
+    .bind(workspace)
+    .bind(device)
+    .bind(member)
+    .bind(Uuid::new_v4().simple().to_string().repeat(2))
+    .execute(su)
+    .await
+    .expect("seed push token");
+    device
+}
+
+async fn seed_approval_room(su: &PgPool) -> ApprovalRoom {
+    let workspace_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO workspace (id, slug, name) VALUES ($1, $2, $2)")
+        .bind(workspace_id)
+        .bind(workspace_id.to_string())
+        .execute(su)
+        .await
+        .expect("seed workspace");
+
+    let mut people = BTreeMap::new();
+    for (who, role) in [
+        (Who::Owner, "owner"),
+        (Who::Admin, "admin"),
+        (Who::Member, "member"),
+        (Who::AgentOwner, "member"),
+        (Who::HostOwner, "member"),
+    ] {
+        let id = seed_member_with(su, workspace_id, "human", &format!("{who:?}")).await;
+        seed_workspace_role(su, workspace_id, id, role).await;
+        people.insert(who, id);
+    }
+
+    let requester = seed_agent_owned_by(su, workspace_id, "requester", people[&Who::Owner]).await;
+    let pet = seed_agent_owned_by(su, workspace_id, "pet", people[&Who::AgentOwner]).await;
+
+    let channel_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO channel (id, workspace_id, kind, name) VALUES ($1, $2, 'public', $3)")
+        .bind(channel_id)
+        .bind(workspace_id)
+        .bind(format!("room-{}", &channel_id.simple().to_string()[..8]))
+        .execute(su)
+        .await
+        .expect("seed channel");
+    sqlx::query("INSERT INTO channel_seq (channel_id, workspace_id, last_seq) VALUES ($1, $2, 0)")
+        .bind(channel_id)
+        .bind(workspace_id)
+        .execute(su)
+        .await
+        .expect("seed channel_seq");
+    for member in people.values().copied().chain([requester, pet]) {
+        sqlx::query(
+            "INSERT INTO membership (workspace_id, channel_id, member_id) VALUES ($1, $2, $3)",
+        )
+        .bind(workspace_id)
+        .bind(channel_id)
+        .bind(member)
+        .execute(su)
+        .await
+        .expect("seed channel membership");
+    }
+
+    let mut devices = HashMap::new();
+    for (&who, &member) in &people {
+        for _ in 0..device_total(who) {
+            let device = seed_device_for(su, workspace_id, member).await;
+            devices.insert(device.to_string(), who);
+        }
+    }
+
+    let laptop =
+        seed_work_host_row(su, workspace_id, "member", people[&Who::HostOwner], "app").await;
+    let team_box =
+        seed_work_host_row(su, workspace_id, "workspace", people[&Who::Owner], "workd").await;
+
+    let run_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO agent_run \
+           (id, workspace_id, agent_member_id, channel_id, status, input, idempotency_key) \
+         VALUES ($1, $2, $3, $4, 'awaiting_approval'::run_status, $5, $6)",
+    )
+    .bind(run_id)
+    .bind(workspace_id)
+    .bind(requester)
+    .bind(channel_id)
+    .bind(json!({"type": "chat"}))
+    .bind(format!("approval-room:{run_id}"))
+    .execute(su)
+    .await
+    .expect("seed agent run");
+
+    ApprovalRoom {
+        workspace_id,
+        channel_id,
+        requester,
+        pet,
+        run_id,
+        people,
+        devices,
+        laptop,
+        team_box,
+        seq: AtomicI64::new(1),
+    }
+}
+
+/// An `approval_request` card and the `approval` row it renders, as the producers
+/// leave them. The message insert fires the 011 trigger (one push candidate).
+/// Returns `(approval id, message id)`.
+async fn approval_card(
+    su: &PgPool,
+    room: &ApprovalRoom,
+    action_type: &str,
+    payload: &Value,
+) -> (Uuid, Uuid) {
+    let approval_id = Uuid::new_v4();
+    let seq = room.next_seq();
+    let message_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO message \
+           (workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, body, props) \
+         VALUES ($1, $2, $3, $3, 0, $4, 'approval_request', 'Approve it', \
+                 jsonb_build_object('approval_id', $5::text, 'action_type', $6::text)) \
+         RETURNING id",
+    )
+    .bind(room.workspace_id)
+    .bind(room.channel_id)
+    .bind(seq)
+    .bind(room.requester)
+    .bind(approval_id.to_string())
+    .bind(action_type)
+    .fetch_one(su)
+    .await
+    .expect("insert approval_request card (fires push_candidate_enqueue_trg)");
+    sqlx::query(
+        "INSERT INTO approval \
+           (id, workspace_id, run_id, channel_id, request_message_id, requested_by, \
+            action_type, payload, status, expires_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', now() + interval '1 hour')",
+    )
+    .bind(approval_id)
+    .bind(room.workspace_id)
+    .bind(room.run_id)
+    .bind(room.channel_id)
+    .bind(message_id)
+    .bind(room.requester)
+    .bind(action_type)
+    .bind(payload)
+    .execute(su)
+    .await
+    .expect("insert approval");
+    (approval_id, message_id)
+}
+
+/// One approval shape, and what ADR-0204 D7 says about it.
+struct Card {
+    label: &'static str,
+    action_type: &'static str,
+    payload: Value,
+    /// Who is woken: the people who may approve it.
+    audience: Vec<Who>,
+    /// `momo.approval` (the lock screen decides) or `momo.approval.open` (the app does).
+    category: &'static str,
+}
+
+fn workspace_action(id: &str, pins: Value) -> Value {
+    json!({"action": {"id": id, "args": {}, "pins": pins}})
+}
+
+/// An `agent.profile.update` card for the room's agent, with these arguments.
+fn profile_update(room: &ApprovalRoom, args: Value) -> Value {
+    json!({"action": {
+        "id": "agent.profile.update",
+        "args": args,
+        "pins": {"target": room.pet.to_string()},
+    }})
+}
+
+fn spawn_payload(
+    room: &ApprovalRoom,
+    default_host: Option<Uuid>,
+    requested: Option<Uuid>,
+) -> Value {
+    json!({
+        "execution": {
+            "kind": "work_session_spawn",
+            "tool": "codex",
+            "label": "refactor",
+            "requested_host_id": requested.map(|id| id.to_string()),
+            "default_host_id": default_host.map(|id| id.to_string()),
+            "host_candidates": [
+                {"host_id": room.laptop.to_string(), "selectable": true},
+                {"host_id": room.team_box.to_string(), "selectable": true},
+            ],
+        }
+    })
+}
+
+/// Every approval shape the decision route tells apart, with the audience and the
+/// category the ADR gives it. The audience column is the decision route's own rule
+/// written out by hand (the route's refusals are checked against it in
+/// `approval_push_audience_conformance_pg`), so this table can be read without
+/// reading the code that computes it.
+fn cards(room: &ApprovalRoom) -> Vec<Card> {
+    let inline = "momo.approval";
+    let open = "momo.approval.open";
+    let admins = vec![Who::Owner, Who::Admin];
+    vec![
+        Card {
+            label: "a tool call: any member of the room",
+            action_type: "tool_call",
+            payload: json!({"tool_call": {"call_id": "c1", "name": "send_message"}}),
+            audience: EVERYONE.to_vec(),
+            category: inline,
+        },
+        // Planner decision 2026-10-17: the lock screen cannot show what is being
+        // approved, so these two are opened in the app.
+        Card {
+            label: "the login handoff: any member of the room; which session and why is read on the card",
+            action_type: "tool_call",
+            payload: json!({"tool_call": {
+                "call_id": "c2",
+                "name": "work.session.login_handoff",
+                "arguments_json": {
+                    "session_id": "11111111-1111-4111-8111-111111111111",
+                    "reason": "로그인이 필요해요",
+                },
+            }}),
+            audience: EVERYONE.to_vec(),
+            category: open,
+        },
+        Card {
+            label: "a tool call that names no tool: nothing says a banner is enough",
+            action_type: "tool_call",
+            payload: json!({"tool_call": {"call_id": "c3"}}),
+            audience: EVERYONE.to_vec(),
+            category: open,
+        },
+        Card {
+            label: "agent.profile.update, words only: admins and the agent's owner; the lock screen decides",
+            action_type: "workspace_action",
+            payload: profile_update(room, json!({"tagline": "새 소개"})),
+            audience: vec![Who::Owner, Who::Admin, Who::AgentOwner],
+            category: inline,
+        },
+        Card {
+            label: "agent.profile.update with a staged picture: admins and the agent's owner; the app shows the picture",
+            action_type: "workspace_action",
+            payload: profile_update(
+                room,
+                json!({"tagline": "새 소개", "avatar": {
+                    "source": "staged",
+                    "imageId": "22222222-2222-4222-8222-222222222222",
+                    "sha256": "a".repeat(64),
+                    "origin": "generated",
+                }}),
+            ),
+            audience: vec![Who::Owner, Who::Admin, Who::AgentOwner],
+            category: open,
+        },
+        Card {
+            label: "agent.profile.update removing the picture: opened too — the change is to the picture",
+            action_type: "workspace_action",
+            payload: profile_update(room, json!({"avatar": null})),
+            audience: vec![Who::Owner, Who::Admin, Who::AgentOwner],
+            category: open,
+        },
+        // Not reachable (the resolver stores an object), but it is the one input on which
+        // Postgres' `jsonb_exists` alone would disagree with `opens_in_app`: it says yes
+        // to an array holding the text "avatar". The projection asks for an object first.
+        Card {
+            label: "agent.profile.update whose args are not an object: no avatar key, decided as words",
+            action_type: "workspace_action",
+            payload: profile_update(room, json!(["avatar"])),
+            audience: vec![Who::Owner, Who::Admin, Who::AgentOwner],
+            category: inline,
+        },
+        Card {
+            label: "channel.create: workspace admins",
+            action_type: "workspace_action",
+            payload: workspace_action("channel.create", json!({})),
+            audience: admins.clone(),
+            category: inline,
+        },
+        Card {
+            label: "workspace.settings.update: operator, which a row can only see as an admin",
+            action_type: "workspace_action",
+            payload: workspace_action("workspace.settings.update", json!({})),
+            audience: admins.clone(),
+            category: inline,
+        },
+        Card {
+            label: "agent.rename: admins and the target agent's owner",
+            action_type: "workspace_action",
+            payload: workspace_action("agent.rename", json!({"target": room.pet.to_string()})),
+            audience: vec![Who::Owner, Who::Admin, Who::AgentOwner],
+            category: inline,
+        },
+        Card {
+            label: "invite.create: admins; the link is shown once, so the app opens it",
+            action_type: "workspace_action",
+            payload: workspace_action("invite.create", json!({})),
+            audience: admins.clone(),
+            category: open,
+        },
+        Card {
+            label: "agent.invite: admins; the pairing code is shown once, so the app opens it",
+            action_type: "workspace_action",
+            payload: workspace_action("agent.invite", json!({})),
+            audience: admins,
+            category: open,
+        },
+        Card {
+            label: "spawn onto the owner's own laptop (card default): that owner only",
+            action_type: "work.spawn",
+            payload: spawn_payload(room, Some(room.laptop), Some(room.laptop)),
+            audience: vec![Who::HostOwner],
+            category: open,
+        },
+        Card {
+            label: "spawn the request named a laptop and the card chose nothing: that owner only",
+            action_type: "work.spawn",
+            payload: spawn_payload(room, None, Some(room.laptop)),
+            audience: vec![Who::HostOwner],
+            category: open,
+        },
+        Card {
+            label: "spawn onto a team box: any member of the room",
+            action_type: "work.spawn",
+            payload: spawn_payload(room, Some(room.team_box), Some(room.team_box)),
+            audience: EVERYONE.to_vec(),
+            category: open,
+        },
+    ]
+}
+
+/// Drain the room's candidates through `pool` and return what was dispatched.
+async fn drain_room(su: &PgPool, pool: &PgPool, room: &ApprovalRoom) -> Vec<PushDispatch> {
+    focus_candidates(su, &[room.workspace_id]).await;
+    let relay = RecordingDispatcher::accepting();
+    drain(pool, relay.clone())
+        .drain_once(128)
+        .await
+        .expect("drain");
+    relay.sent()
+}
+
+fn people_woken(room: &ApprovalRoom, sent: &[PushDispatch], message: Uuid) -> BTreeSet<Who> {
+    sent.iter()
+        .filter(|dispatch| dispatch.message_id == message.to_string())
+        .map(|dispatch| room.devices[&dispatch.device_id])
+        .collect()
+}
+
+/// **ADR-0204 D7, the audience.** An approval request used to wake every human in
+/// its channel — including the ones the decision route would refuse, who then held a
+/// lock-screen 승인 button that answers 403. It now wakes the people who MAY approve
+/// it, on every device they own.
+///
+/// Revert the narrowing in `judge_targets`, or make `decider_gate` ignore the
+/// registry role, and the plain member is woken for an admin action.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn an_approval_push_goes_only_to_the_people_who_may_approve_it() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let room = seed_approval_room(&su).await;
+    let pool = momo_notifier_pool().await;
+
+    let cards = cards(&room);
+    let mut sent_cards = Vec::new();
+    for card in &cards {
+        let (approval, message) = approval_card(&su, &room, card.action_type, &card.payload).await;
+        sent_cards.push((approval, message));
+    }
+    let sent = drain_room(&su, &pool, &room).await;
+
+    for (card, (approval, message)) in cards.iter().zip(&sent_cards) {
+        let woken = people_woken(&room, &sent, *message);
+        let expected: BTreeSet<Who> = card.audience.iter().copied().collect();
+        assert_eq!(woken, expected, "{}", card.label);
+
+        let hits: Vec<&PushDispatch> = sent
+            .iter()
+            .filter(|dispatch| dispatch.message_id == message.to_string())
+            .collect();
+        // Judged once per person, pushed on every device they own.
+        let devices: usize = card
+            .audience
+            .iter()
+            .map(|who| room.device_count(*who))
+            .sum();
+        assert_eq!(
+            hits.len(),
+            devices,
+            "{}: every device of every decider",
+            card.label
+        );
+        for hit in hits {
+            assert_eq!(hit.reason, "approval_request", "{}", card.label);
+            assert_eq!(
+                hit.approval_id.as_deref(),
+                Some(approval.to_string().as_str()),
+                "{}: the push names its approval",
+                card.label
+            );
+        }
+    }
+}
+
+/// **ADR-0204 D7, the category.** The lock screen decides an approval behind Face
+/// ID (`momo.approval`) except where a banner cannot do the job: an action that
+/// mints a value shown once, a spawn that asks which machine, the login handoff and
+/// a profile update that changes the picture (planner 2026-10-17). Those are
+/// `momo.approval.open` — one 「열어서 결정」 button, no 승인·거절.
+///
+/// Both categories name their approval.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn an_approval_that_must_be_opened_is_the_open_category_and_the_rest_are_inline() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let room = seed_approval_room(&su).await;
+    let pool = momo_notifier_pool().await;
+
+    let cards = cards(&room);
+    // The function the decision route calls (#3977: `via=push_action` on an approval that
+    // `opens_in_app` is refused) reads the WHOLE payload; the push reads the routing
+    // projection of it. A card they disagree on is a banner button the route then
+    // refuses, or an app-only card the route would have decided — so the table ties the
+    // three together: what is written down, what the whole-payload function says, and
+    // (below) the category the projection-fed judgment actually sent.
+    for card in &cards {
+        assert_eq!(
+            momo_agent::actions::opens_in_app(card.action_type, &card.payload),
+            card.category == "momo.approval.open",
+            "{}: `opens_in_app` on the whole payload must agree with the table and with the push",
+            card.label
+        );
+    }
+    let mut messages = Vec::new();
+    for card in &cards {
+        let (approval, message) = approval_card(&su, &room, card.action_type, &card.payload).await;
+        messages.push((approval, message));
+    }
+    let sent = drain_room(&su, &pool, &room).await;
+
+    for (card, (approval, message)) in cards.iter().zip(&messages) {
+        let hits: Vec<&PushDispatch> = sent
+            .iter()
+            .filter(|dispatch| dispatch.message_id == message.to_string())
+            .collect();
+        assert!(!hits.is_empty(), "{}: somebody is woken", card.label);
+        for hit in hits {
+            assert_eq!(hit.category, card.category, "{}", card.label);
+            assert_eq!(
+                hit.approval_id.as_deref(),
+                Some(approval.to_string().as_str()),
+                "{}: both approval categories name their approval",
+                card.label
+            );
+        }
+    }
+}
+
+/// A message that merely has the type `approval_request` — no `approval` row — has
+/// nobody to ask. It used to reach the relay as a `momo.approval` push with no
+/// approval id, which the relay refuses with a 400 and the candidate then failed
+/// permanently. It is now settled with nobody woken.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn an_approval_card_with_no_approval_row_pushes_nobody() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let room = seed_approval_room(&su).await;
+    let pool = momo_notifier_pool().await;
+
+    let message: Uuid = sqlx::query_scalar(
+        "INSERT INTO message \
+           (workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, body, props) \
+         VALUES ($1, $2, $3, $3, 0, $4, 'approval_request', 'orphan card', '{}'::jsonb) \
+         RETURNING id",
+    )
+    .bind(room.workspace_id)
+    .bind(room.channel_id)
+    .bind(room.next_seq())
+    .bind(room.requester)
+    .fetch_one(&su)
+    .await
+    .expect("insert a card with no approval row");
+
+    let sent = drain_room(&su, &pool, &room).await;
+    assert!(
+        people_woken(&room, &sent, message).is_empty(),
+        "no approval row, nobody to ask: {sent:?}"
+    );
+    assert!(
+        sent.iter()
+            .all(|dispatch| dispatch.message_id != message.to_string()),
+        "and nothing reached the relay for it"
+    );
+    // One claim (`attempts` counts claims), settled `done` — not parked for a retry
+    // and not failed.
+    assert_eq!(
+        candidate_status(&su, room.workspace_id).await,
+        vec![("done".to_string(), 1)],
+        "the candidate is settled, not retried or failed"
+    );
+}
+
+/// `approval.request_message_id` is not unique and not tied to a channel by the schema.
+/// The approval a message is "the card of" must also belong to that message's own
+/// channel — the route authorizes against the approval's channel, so an audience built
+/// from a different one would wake the wrong room. (No producer writes this shape; the
+/// join makes the structure, not the producers' good manners, the guarantee.) The
+/// control is the same card before the move: a tool call, which wakes everybody.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn an_approval_row_of_another_channel_is_not_the_card_of_this_message() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let room = seed_approval_room(&su).await;
+    let pool = momo_notifier_pool().await;
+
+    let tool_call = json!({"tool_call": {"call_id": "c1", "name": "send_message"}});
+    let (_, control) = approval_card(&su, &room, "tool_call", &tool_call).await;
+    let (moved, message) = approval_card(&su, &room, "tool_call", &tool_call).await;
+
+    let elsewhere = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO channel (id, workspace_id, kind, name) VALUES ($1, $2, 'public', 'elsewhere')",
+    )
+    .bind(elsewhere)
+    .bind(room.workspace_id)
+    .execute(&su)
+    .await
+    .expect("seed another channel");
+    sqlx::query("UPDATE approval SET channel_id = $2 WHERE id = $1")
+        .bind(moved)
+        .bind(elsewhere)
+        .execute(&su)
+        .await
+        .expect("move the approval row to another channel");
+
+    let sent = drain_room(&su, &pool, &room).await;
+    assert_eq!(
+        people_woken(&room, &sent, control).len(),
+        EVERYONE.len(),
+        "the unmoved tool call still wakes the whole room: {sent:?}"
+    );
+    assert!(
+        people_woken(&room, &sent, message).is_empty(),
+        "an approval row that belongs to another channel is not this message's card: {sent:?}"
+    );
+}
+
+/// A person the decision route would refuse must not get the card another way. The
+/// judgment CASE gives `approval_request` precedence over `mention` and `dm`, so
+/// narrowing the audience has to DROP the person — not hand them the next reason.
+/// In a DM with the agent, and even when the card mentions them by name, the plain
+/// member hears nothing for an admin-gated card, while a tool call in the same room
+/// still reaches them (so the silence is the narrowing, not a broken room).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn an_approval_card_a_person_may_not_decide_does_not_leak_through_a_dm_or_a_mention() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let room = seed_approval_room(&su).await;
+    let pool = momo_notifier_pool().await;
+    let member = room.id(Who::Member);
+
+    // A DM between the plain member and the requesting agent.
+    let dm = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO channel (id, workspace_id, kind, name, dm_key) VALUES ($1, $2, 'dm', $3, $4)",
+    )
+    .bind(dm)
+    .bind(room.workspace_id)
+    .bind("dm")
+    .bind(dm.simple().to_string())
+    .execute(&su)
+    .await
+    .expect("seed dm");
+    sqlx::query("INSERT INTO channel_seq (channel_id, workspace_id, last_seq) VALUES ($1, $2, 0)")
+        .bind(dm)
+        .bind(room.workspace_id)
+        .execute(&su)
+        .await
+        .expect("seed dm channel_seq");
+    for participant in [member, room.requester] {
+        sqlx::query(
+            "INSERT INTO membership (workspace_id, channel_id, member_id) VALUES ($1, $2, $3)",
+        )
+        .bind(room.workspace_id)
+        .bind(dm)
+        .bind(participant)
+        .execute(&su)
+        .await
+        .expect("seed dm membership");
+    }
+
+    // An admin-gated card in the DM that also names the member in `props`.
+    let admin_only = workspace_action("channel.create", json!({}));
+    let gated = Uuid::new_v4();
+    let gated_message: Uuid = sqlx::query_scalar(
+        "INSERT INTO message \
+           (workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, body, props) \
+         VALUES ($1, $2, 1, 1, 0, $3, 'approval_request', 'Approve it', \
+                 jsonb_build_object('approval_id', $4::text, \
+                                    'mention_member_ids', jsonb_build_array($5::text))) \
+         RETURNING id",
+    )
+    .bind(room.workspace_id)
+    .bind(dm)
+    .bind(room.requester)
+    .bind(gated.to_string())
+    .bind(member.to_string())
+    .fetch_one(&su)
+    .await
+    .expect("insert gated card in the dm");
+    sqlx::query(
+        "INSERT INTO approval \
+           (id, workspace_id, run_id, channel_id, request_message_id, requested_by, \
+            action_type, payload, status, expires_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, 'workspace_action', $7, 'pending', \
+                 now() + interval '1 hour')",
+    )
+    .bind(gated)
+    .bind(room.workspace_id)
+    .bind(room.run_id)
+    .bind(dm)
+    .bind(gated_message)
+    .bind(room.requester)
+    .bind(&admin_only)
+    .execute(&su)
+    .await
+    .expect("insert gated approval");
+
+    // The positive control: a tool call in the same DM, which the member may decide.
+    let ungated = Uuid::new_v4();
+    let ungated_message: Uuid = sqlx::query_scalar(
+        "INSERT INTO message \
+           (workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, body, props) \
+         VALUES ($1, $2, 2, 2, 0, $3, 'approval_request', 'Approve it', \
+                 jsonb_build_object('approval_id', $4::text)) \
+         RETURNING id",
+    )
+    .bind(room.workspace_id)
+    .bind(dm)
+    .bind(room.requester)
+    .bind(ungated.to_string())
+    .fetch_one(&su)
+    .await
+    .expect("insert ungated card in the dm");
+    sqlx::query(
+        "INSERT INTO approval \
+           (id, workspace_id, run_id, channel_id, request_message_id, requested_by, \
+            action_type, payload, status, expires_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, 'tool_call', $7, 'pending', now() + interval '1 hour')",
+    )
+    .bind(ungated)
+    .bind(room.workspace_id)
+    .bind(room.run_id)
+    .bind(dm)
+    .bind(ungated_message)
+    .bind(room.requester)
+    .bind(json!({"tool_call": {"call_id": "c2", "name": "send_message"}}))
+    .execute(&su)
+    .await
+    .expect("insert ungated approval");
+
+    let sent = drain_room(&su, &pool, &room).await;
+    let leaked: Vec<&PushDispatch> = sent
+        .iter()
+        .filter(|dispatch| dispatch.message_id == gated_message.to_string())
+        .collect();
+    assert!(
+        leaked.is_empty(),
+        "the member may not decide it, so it reaches them as neither approval, mention nor dm: {leaked:?}"
+    );
+    let control: Vec<&PushDispatch> = sent
+        .iter()
+        .filter(|dispatch| dispatch.message_id == ungated_message.to_string())
+        .collect();
+    assert_eq!(
+        control.len(),
+        device_total(Who::Member),
+        "the same DM still reaches the member for a card they may decide: {sent:?}"
+    );
+    assert!(control
+        .iter()
+        .all(|dispatch| dispatch.reason == "approval_request"
+            && dispatch.category == "momo.approval"));
+}
+
+/// The narrowing belongs to the `approval_request` REASON, not to every
+/// `approval_request`-typed message. A resume offer is one of those (it groups as
+/// work, and has no `approval` row): it still reaches the session's owner — a plain
+/// member who could decide nothing gated — on the work category, with no approval id.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn a_resume_offer_keeps_its_owner_audience_with_no_approval_row() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let room = seed_approval_room(&su).await;
+    let pool = momo_notifier_pool().await;
+    let owner_of_session = room.id(Who::Member);
+
+    let message: Uuid = sqlx::query_scalar(
+        "INSERT INTO message \
+           (workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, body, props) \
+         VALUES ($1, $2, $3, $3, 0, $4, 'approval_request', 'resume?', \
+                 jsonb_build_object('kind', 'resume_offer', 'owner_member_id', $5::text)) \
+         RETURNING id",
+    )
+    .bind(room.workspace_id)
+    .bind(room.channel_id)
+    .bind(room.next_seq())
+    .bind(room.requester)
+    .bind(owner_of_session.to_string())
+    .fetch_one(&su)
+    .await
+    .expect("insert resume offer");
+
+    let sent = drain_room(&su, &pool, &room).await;
+    let hits: Vec<&PushDispatch> = sent
+        .iter()
+        .filter(|dispatch| dispatch.message_id == message.to_string())
+        .collect();
+    assert_eq!(hits.len(), device_total(Who::Member), "{hits:?}");
+    for hit in hits {
+        assert_eq!(room.devices[&hit.device_id], Who::Member);
+        assert_eq!(hit.reason, "resume_offer");
+        assert_eq!(hit.category, "momo.work");
+        assert_eq!(hit.approval_id, None);
+    }
 }

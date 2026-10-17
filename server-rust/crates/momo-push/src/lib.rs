@@ -30,6 +30,7 @@
 //!   [`momo_outbox::push`](../momo_outbox/push/index.html), which owns that
 //!   table (invariant #3).
 
+pub mod approvers;
 pub mod candidate;
 pub mod device;
 pub mod dispatch;
@@ -37,6 +38,7 @@ pub mod dispatch_log;
 pub mod error;
 pub mod judgment;
 
+pub use approvers::{may_approve_in_tx, ApprovalCard, CardAudience};
 pub use candidate::PushCandidate;
 pub use device::{
     invalidate_member_push_tokens_in_tx, invalidate_session_push_tokens_in_tx, list_devices,

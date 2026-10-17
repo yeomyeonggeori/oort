@@ -25,6 +25,7 @@
 //! | `the_notifier_role_has_no_delete_and_no_table_it_does_not_name` | add DELETE / `ALL TABLES` for `momo_notifier` |
 //! | `a_hosted_work_run_push_and_run_status_trigger_run_as_the_notifier_role` (#3553) | drop `GRANT SELECT (workspace_id, agent_member_id) ON hosted_agent_connection` — the push judgment `wrun` arm and the migration-120 `agent_run` trigger both read it |
 //! | `a_hosted_work_run_push_and_run_status_trigger_run_as_the_notifier_role` (#3740) | drop `GRANT SELECT, INSERT ON agent_run_event TO momo_notifier` — the migration-128 ledger trigger appends as the invoking role (verified red: `permission denied for table agent_run_event`) |
+//! | `an_approval_audience_is_judged_as_the_production_notifier_role` (ADR-0204 D7, #3928) | drop `GRANT SELECT (workspace_id, member_id, role) ON workspace_membership` — `may_approve_in_tx` reads it for every role-gated card (verified red: `permission denied for table workspace_membership`); or drop the `agent` / `work_host` SELECT the agent-owner and host-owner arms read |
 //! | `the_personal_agent_member_trigger_runs_as_every_role_that_writes_member` (#3591) | drop `GRANT UPDATE ON agent` from a role that can UPDATE `member` (the migration-123 trigger updates `agent` as the invoking role), or add the trigger's table to a lockdown |
 //! | `the_other_runtime_roles_reach_every_table_the_migrations_created` | a new table that `app`/`relay`/`worker` cannot read or write, or a cloud-box lockdown that drifts |
 //! | `a_dead_push_token_is_invalidated_by_the_production_notifier_role` (#3930) | drop `GRANT UPDATE (invalidated_at, updated_at) ON push_token TO momo_notifier` — the settle's `UPDATE push_token` dies with `permission denied for table push_token`, and rolls back to its savepoint, so ONLY this suite sees it; widen the grant past those two columns and the denied-write half goes red |
@@ -1214,6 +1215,321 @@ async fn the_personal_agent_member_trigger_runs_as_every_role_that_writes_member
         failures.is_empty(),
         "role failures:\n{}",
         failures.join("\n")
+    );
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0204 D7 (#3928) — the approval audience reads, as the production role
+// ---------------------------------------------------------------------------
+
+/// Three approval cards, each of which sends `judge_targets` down a different read:
+///
+/// | card | the read that decides who is woken | table |
+/// |---|---|---|
+/// | an admin-gated workspace action | `active_workspace_role` | `workspace_membership` (column grant) |
+/// | an `agent_editor` action | `active_workspace_role` + `agent_owner_in_tx` | `workspace_membership`, `agent` |
+/// | a spawn whose card sits on a member's laptop | `remote_host_owner_in_tx` | `work_host` |
+struct AudienceFixture {
+    workspace: Uuid,
+    owner: Uuid,
+    admin: Uuid,
+    agent_owner: Uuid,
+    host_owner: Uuid,
+    admin_card: Uuid,
+    editor_card: Uuid,
+    spawn_card: Uuid,
+}
+
+async fn seed_audience_fixture(su: &PgPool) -> AudienceFixture {
+    let workspace = Uuid::new_v4();
+    sqlx::query("INSERT INTO workspace (id, slug, name) VALUES ($1, $2, $2)")
+        .bind(workspace)
+        .bind(workspace.to_string())
+        .execute(su)
+        .await
+        .expect("workspace");
+
+    let mut people = Vec::new();
+    for (handle, role) in [
+        ("owner", "owner"),
+        ("admin", "admin"),
+        ("plain", "member"),
+        ("agentowner", "member"),
+        ("hostowner", "member"),
+    ] {
+        let id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO member (id, workspace_id, kind, status, display_name, handle) \
+             VALUES ($1, $2, 'human', 'active', $3, $3)",
+        )
+        .bind(id)
+        .bind(workspace)
+        .bind(handle)
+        .execute(su)
+        .await
+        .expect("human");
+        sqlx::query(
+            "INSERT INTO workspace_membership (workspace_id, member_id, role) \
+             VALUES ($1, $2, $3::membership_role)",
+        )
+        .bind(workspace)
+        .bind(id)
+        .bind(role)
+        .execute(su)
+        .await
+        .expect("workspace membership");
+        people.push(id);
+    }
+    let (owner, admin, _plain, agent_owner, host_owner) =
+        (people[0], people[1], people[2], people[3], people[4]);
+
+    let requester = Uuid::new_v4();
+    let pet = Uuid::new_v4();
+    for (id, handle, owned_by) in [(requester, "requester", owner), (pet, "pet", agent_owner)] {
+        sqlx::query(
+            "INSERT INTO member (id, workspace_id, kind, status, display_name, handle) \
+             VALUES ($1, $2, 'agent', 'active', $3, $3)",
+        )
+        .bind(id)
+        .bind(workspace)
+        .bind(handle)
+        .execute(su)
+        .await
+        .expect("agent member");
+        sqlx::query(
+            "INSERT INTO agent (member_id, workspace_id, model, base_url, max_concurrent_runs, \
+                                max_run_steps, owner_human_id) \
+             VALUES ($1, $2, 'hermes-agent', 'https://gateway.invalid/v1', 4, 50, $3)",
+        )
+        .bind(id)
+        .bind(workspace)
+        .bind(owned_by)
+        .execute(su)
+        .await
+        .expect("agent");
+    }
+
+    let channel = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO channel (id, workspace_id, kind, name) VALUES ($1, $2, 'public', 'c')",
+    )
+    .bind(channel)
+    .bind(workspace)
+    .execute(su)
+    .await
+    .expect("channel");
+    sqlx::query("INSERT INTO channel_seq (channel_id, workspace_id, last_seq) VALUES ($1, $2, 0)")
+        .bind(channel)
+        .bind(workspace)
+        .execute(su)
+        .await
+        .expect("channel_seq");
+    for member in people.iter().copied().chain([requester, pet]) {
+        sqlx::query(
+            "INSERT INTO membership (workspace_id, channel_id, member_id) VALUES ($1, $2, $3)",
+        )
+        .bind(workspace)
+        .bind(channel)
+        .bind(member)
+        .execute(su)
+        .await
+        .expect("membership");
+    }
+    // Every human has a device: a target that is not returned is then the narrowing,
+    // not a missing token.
+    for human in &people {
+        let device = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO device (id, workspace_id, member_id, platform) \
+             VALUES ($1, $2, $3, 'ios'::device_platform)",
+        )
+        .bind(device)
+        .bind(workspace)
+        .bind(human)
+        .execute(su)
+        .await
+        .expect("device");
+        sqlx::query(
+            "INSERT INTO push_token (workspace_id, device_id, member_id, apns_token, env, topic) \
+             VALUES ($1, $2, $3, $4, 'sandbox'::push_env, 'kim.dawn.momo.e2e')",
+        )
+        .bind(workspace)
+        .bind(device)
+        .bind(human)
+        .bind(Uuid::new_v4().simple().to_string().repeat(2))
+        .execute(su)
+        .await
+        .expect("push token");
+    }
+
+    let laptop = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO work_host (id, workspace_id, scope, owner_member_id, type, display_name, \
+                                public_key, capabilities, last_seen_at) \
+         VALUES ($1, $2, 'member', $3, 'app', 'laptop', $4, '{}'::jsonb, clock_timestamp())",
+    )
+    .bind(laptop)
+    .bind(workspace)
+    .bind(host_owner)
+    .bind("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+    .execute(su)
+    .await
+    .expect("laptop");
+
+    let run = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO agent_run \
+           (id, workspace_id, agent_member_id, channel_id, status, input, idempotency_key) \
+         VALUES ($1, $2, $3, $4, 'awaiting_approval', jsonb_build_object('type', 'chat'), $5)",
+    )
+    .bind(run)
+    .bind(workspace)
+    .bind(requester)
+    .bind(channel)
+    .bind(format!("t:{run}"))
+    .execute(su)
+    .await
+    .expect("run");
+
+    let mut cards = Vec::new();
+    for (seq, (action_type, payload)) in [
+        (
+            "workspace_action",
+            serde_json::json!({"action": {"id": "channel.create", "args": {}}}),
+        ),
+        (
+            "workspace_action",
+            serde_json::json!({"action": {"id": "agent.rename", "args": {},
+                                          "pins": {"target": pet.to_string()}}}),
+        ),
+        (
+            "work.spawn",
+            serde_json::json!({"execution": {
+                "kind": "work_session_spawn", "tool": "codex", "label": "x",
+                "requested_host_id": laptop.to_string(),
+                "default_host_id": laptop.to_string(),
+                "host_candidates": [{"host_id": laptop.to_string(), "selectable": true}]}}),
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let approval = Uuid::new_v4();
+        let message: Uuid = sqlx::query_scalar(
+            "INSERT INTO message \
+               (workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, body, props) \
+             VALUES ($1, $2, $3, $3, 0, $4, 'approval_request', 'Approve it', \
+                     jsonb_build_object('approval_id', $5::text)) \
+             RETURNING id",
+        )
+        .bind(workspace)
+        .bind(channel)
+        .bind(seq as i64 + 1)
+        .bind(requester)
+        .bind(approval.to_string())
+        .fetch_one(su)
+        .await
+        .expect("approval card (fires push_candidate_enqueue_trg)");
+        sqlx::query(
+            "INSERT INTO approval \
+               (id, workspace_id, run_id, channel_id, request_message_id, requested_by, \
+                action_type, payload, status, expires_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', now() + interval '1 hour')",
+        )
+        .bind(approval)
+        .bind(workspace)
+        .bind(run)
+        .bind(channel)
+        .bind(message)
+        .bind(requester)
+        .bind(action_type)
+        .bind(&payload)
+        .execute(su)
+        .await
+        .expect("approval");
+        cards.push(message);
+    }
+
+    AudienceFixture {
+        workspace,
+        owner,
+        admin,
+        agent_owner,
+        host_owner,
+        admin_card: cards[0],
+        editor_card: cards[1],
+        spawn_card: cards[2],
+    }
+}
+
+/// ADR-0204 D7 (#3928): `judge_targets` now asks who MAY approve an
+/// `approval_request`. Those reads — `workspace_membership.role`, `agent.owner_human_id`,
+/// `work_host.owner_member_id` — run as `momo_notifier`, which the dev bootstrap would
+/// hand every table and the production file does not. The column grant on
+/// `workspace_membership` is the new one; this is the only test that EXECUTES it.
+///
+/// It has to be a real card in a room with real people. The first test above also
+/// calls `judge_targets` as the notifier, but with a message id that does not exist: no
+/// row comes back, the per-target loop never runs, and `may_approve_in_tx` is never
+/// called — deleting the grant would leave that test green.
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
+async fn an_approval_audience_is_judged_as_the_production_notifier_role() {
+    let db = ProdDb::create().await;
+    let seeded = seed_audience_fixture(&db.su).await;
+    let notifier = db.role("momo_notifier", "momo_notifier_dev_pw").await;
+    let mut report = Report { failures: vec![] };
+
+    for (label, card, expected) in [
+        (
+            "admin-gated action (reads workspace_membership)",
+            seeded.admin_card,
+            vec![seeded.owner, seeded.admin],
+        ),
+        (
+            "agent_editor action (reads workspace_membership + agent)",
+            seeded.editor_card,
+            vec![seeded.owner, seeded.admin, seeded.agent_owner],
+        ),
+        (
+            "spawn on a member's laptop (reads work_host)",
+            seeded.spawn_card,
+            vec![seeded.host_owner],
+        ),
+    ] {
+        let mut conn = notifier.acquire().await.expect("acquire");
+        match momo_push::judge_targets(&mut conn, seeded.workspace, card).await {
+            Ok(targets) => {
+                let mut got: Vec<Uuid> = targets.iter().map(|t| t.member_id).collect();
+                got.sort();
+                got.dedup();
+                let mut want = expected;
+                want.sort();
+                if got != want {
+                    report
+                        .failures
+                        .push(format!("{label}: expected {want:?}, got {got:?}"));
+                }
+                if targets
+                    .iter()
+                    .any(|t| t.reason.as_str() != "approval_request")
+                {
+                    report
+                        .failures
+                        .push(format!("{label}: a target with another reason"));
+                }
+            }
+            Err(error) => report
+                .failures
+                .push(format!("{label} (as momo_notifier): {error}")),
+        }
+    }
+
+    db.finish().await;
+    assert!(
+        report.failures.is_empty(),
+        "the approval audience failed as the production notifier role:\n  {}",
+        report.failures.join("\n  ")
     );
 }
 

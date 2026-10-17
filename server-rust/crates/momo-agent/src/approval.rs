@@ -879,6 +879,36 @@ pub fn default_execution_host(payload: &Value) -> Option<Uuid> {
         .and_then(|raw| Uuid::parse_str(raw).ok())
 }
 
+/// `execution.requested_host_id` — the host the request itself named: the
+/// REST ledger's `target_host_id`, or the `work.session.spawn` tool's `host_id`
+/// argument (`momo_t3::work_control::spawn_execution_object` writes it on both
+/// producers). What a rejection is judged against when the card pre-selected
+/// nothing.
+pub fn requested_execution_host(payload: &Value) -> Option<Uuid> {
+    payload
+        .get("execution")
+        .and_then(|execution| execution.get("requested_host_id"))
+        .and_then(Value::as_str)
+        .and_then(|raw| Uuid::parse_str(raw).ok())
+}
+
+/// The host a decision about this approval is **about** when its decider picks
+/// none: the card's pre-selected host, else the one the request named — and
+/// `None` for an approval that asks no host question at all (every approval that
+/// is not a spawn).
+///
+/// This is the one definition of "the card's host". The decision route judges a
+/// rejection against it (`approvals::decision_reference_host`, ADR-0188 R0.1 Low
+/// 2: a rejection is judged on the card, not the pick), and the push judgment
+/// asks it to decide who is worth waking (`momo_push::judge_targets`, ADR-0204
+/// D7), so the two cannot name different machines.
+pub fn reference_execution_host(payload: &Value) -> Option<Uuid> {
+    if !offers_host_choice(payload) {
+        return None;
+    }
+    default_execution_host(payload).or_else(|| requested_execution_host(payload))
+}
+
 /// `message.props` for the `approval_request` row — Swift
 /// `approvalRequestProps` (:1787-1810).
 ///
