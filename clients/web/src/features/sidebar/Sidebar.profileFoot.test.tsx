@@ -124,6 +124,23 @@ vi.mock("@momo/core/features/sidebar/api", async (importOriginal) => {
   };
 });
 
+// 멈춤 줄(#3923)이 읽는 알림 규칙. 기본은 멈춤 없음이고, 시험이 켠다.
+const notificationRules = vi.hoisted(() => ({
+  current: { dnd: false, mentionOverridesMute: false } as {
+    dnd: boolean;
+    mentionOverridesMute: boolean;
+    dndUntilMs?: number;
+  },
+}));
+vi.mock("@momo/core/features/settings/notificationRules", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@momo/core/features/settings/notificationRules")>();
+  return {
+    ...actual,
+    fetchNotificationRules: async () => ({ ...notificationRules.current }),
+  };
+});
+
 vi.mock("@momo/core/features/settings/api", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@momo/core/features/settings/api")>();
@@ -217,6 +234,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  notificationRules.current = { dnd: false, mentionOverridesMute: false };
   channelsQuery.isLoading = false;
   channelsQuery.groups = { channels: [engine, general], dms: [] };
   channelsQuery.data = [engine, general];
@@ -324,6 +342,49 @@ describe("사이드바 하단 프로필 (#3574)", () => {
     const collapsed = await mount({ collapsed: true });
     expect(collapsed.querySelector('[data-testid="update-pill"]')).toBeNull();
     resetUpdateStoreForTest();
+  });
+
+  it("멈춤 줄(#3923): 프로필 줄 **아래**에 같은 안전 영역 묶음으로 서고, 프로필 줄 안에는 들어가지 않는다", async () => {
+    notificationRules.current = { dnd: true, mentionOverridesMute: false, dndUntilMs: 1_800_000_900_000 };
+    const host = await mount();
+    const banner = await vi.waitFor(() => {
+      const node = host.querySelector('[data-testid="pause-banner"]');
+      expect(node).not.toBeNull();
+      return node as HTMLElement;
+    });
+    const foot = host.querySelector('[data-testid="sidebar-profile-foot"]') as HTMLElement;
+    // 프로필 카드는 전체가 버튼이라 그 안에 단추를 둘 수 없다: 줄은 카드의 형제이고 프로필 줄의 **다음** 형제다.
+    expect(foot.contains(banner)).toBe(false);
+    expect(foot.nextElementSibling).toBe(banner);
+    // 안전 영역(홈 인디케이터)은 둘이 함께 진다.
+    expect(foot.parentElement?.className).toMatch(/\bsafe-area-bottom\b/);
+    expect(foot.parentElement?.contains(banner)).toBe(true);
+    // 프로필 줄 자체는 여전히 띠·구분선 없이 한 줄이다.
+    expect(foot.className).not.toMatch(/\b(border|bg-|divide)/);
+    expect(foot.className).not.toMatch(/safe-area-bottom/);
+  });
+
+  it("멈춤 줄(#3923): 멈춤이 없으면 줄도 자리도 없다", async () => {
+    const host = await mount();
+    await vi.waitFor(() =>
+      expect(host.querySelector('[data-testid="sidebar-profile-foot"]')).not.toBeNull()
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(host.querySelector('[data-testid="pause-banner"]')).toBeNull();
+  });
+
+  it("멈춤 줄(#3923): 접힘(⌘B)에서는 서지 않는다 — 그 자리에는 레일의 아바타만 있다", async () => {
+    notificationRules.current = { dnd: true, mentionOverridesMute: false };
+    const host = await mount({ collapsed: true });
+    await vi.waitFor(() =>
+      expect(host.querySelector('[data-testid="workspace-rail"]')).not.toBeNull()
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(host.querySelector('[data-testid="pause-banner"]')).toBeNull();
   });
 });
 

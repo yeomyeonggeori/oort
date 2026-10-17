@@ -1,5 +1,5 @@
 import {memberAvatarContentPath} from '@momo/core/features/workspace/avatar';
-import {refreshSession} from '@momo/core/lib/api';
+import {rotateAfterUnauthorized} from '@momo/core/lib/api';
 import {apiBase, coreSession} from '@momo/core/runtime/host';
 import {Directory, File, Paths} from 'expo-file-system';
 import {useEffect, useState} from 'react';
@@ -157,8 +157,24 @@ async function download(path: string, destination: File): Promise<File> {
     return await send();
   } catch (error: unknown) {
     if (!isUnauthorized(error)) throw error;
-    if (coreSession().getRefreshToken() !== null && (await refreshSession())) {
-      return send();
+    // 401 한 번에 회전 한 번. 어떻게 끝났는지를 읽는 규칙은 코어의 것이고(#3997,
+    // `rotateAfterUnauthorized`) 여기서 다시 적지 않는다.
+    //   회전됨        → 새 토큰으로 한 번 더 받는다.
+    //   거절·토큰 없음 → 세션이 끝났다. 여기서 선언하고 이 다운로드는 실패로 던진다.
+    //   닿지 못함      → 코어가 연결 오류를 던진다. 선언하지 않고 이 다운로드만 실패한다
+    //                    (이니셜이 서고, 잠금 화면에서 돌아와 무선이 깨는 사이의 끊김이
+    //                    로그아웃이 되지 않는다. 다음 요청이 다시 갱신한다. 같은 아바타는
+    //                    실패 기억 `FAILURE_TTL_MS` 가 지난 뒤에 다시 묻는다).
+    if (coreSession().getRefreshToken() !== null && (await rotateAfterUnauthorized())) {
+      try {
+        return await send();
+      } catch (retried: unknown) {
+        // 새 토큰도 거절됐다: 서버가 방금 세션을 끝냈다(재사용 탐지로 계보가 쓸려
+        // 나간 경우 등). 코어 `authedResponse`·바이트 헬퍼, 첨부(`content.ts`)가
+        // 이미 이 401 을 세션 종료로 선언한다 — 이 길만 조용히 지나치지 않는다.
+        if (isUnauthorized(retried)) coreSession().markAuthExpired();
+        throw retried;
+      }
     }
     coreSession().markAuthExpired();
     throw error;

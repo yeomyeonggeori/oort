@@ -136,6 +136,8 @@ jest.mock('expo-notifications', () => ({
   // `pushActions.test.ts` fill it per test.
   getPresentedNotificationsAsync: jest.fn(async () => []),
   dismissNotificationAsync: jest.fn(async () => {}),
+  // #3931 — sign-out empties the notification centre.
+  dismissAllNotificationsAsync: jest.fn(async () => undefined),
   // Present so that importing it is an error a test can see, rather than
   // `undefined is not a function` at the call site. Nothing in this client may
   // call it: it mints an Expo-service token and routes our notifications through

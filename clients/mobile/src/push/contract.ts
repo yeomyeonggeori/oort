@@ -22,6 +22,20 @@ export const PUSH_KEYCHAIN_SERVICE = 'app.momo.ios.session';
 /** `MomoPushContract.pushFetchSessionAccount` — PushNotification.swift:9. */
 export const PUSH_FETCH_SESSION_ACCOUNT = 'push-fetch-session';
 
+/** `MomoPushActionContract.keychainService` — modules/momo-push-action-native/ios/
+ *  MomoPushActionCore.swift (#3931, ADR-0204 D6). The lock screen's 승인/거절 is
+ *  answered by native code with a `push_action` token this app parks here. A
+ *  DIFFERENT service from the extension's on purpose, and written only into the
+ *  APP-ONLY access group: see `pushActionSession.ts`. */
+export const PUSH_ACTION_KEYCHAIN_SERVICE = 'app.momo.ios.pushaction';
+
+/** `MomoPushActionContract.sessionAccount` — the same file. */
+export const PUSH_ACTION_SESSION_ACCOUNT = 'push-action-session';
+
+/** The name the native handler's Expo module answers to
+ *  (`MomoPushActionNativeModule`, `Name("MomoPushAction")`). */
+export const PUSH_ACTION_NATIVE_MODULE = 'MomoPushAction';
+
 /** `MomoPushContract.keychainAccessGroupInfoKey` — PushNotification.swift:6.
  *  The Info.plist key both processes read to learn the access group. */
 export const KEYCHAIN_ACCESS_GROUP_INFO_KEY = 'MomoKeychainAccessGroup';

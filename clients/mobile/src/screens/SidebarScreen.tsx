@@ -2,7 +2,12 @@ import {ApiError, openDirectMessage, uuidEq} from '@momo/core/lib/api';
 import {NetworkError} from '@momo/core/lib/http';
 import {attachParticle} from '@momo/core/lib/koreanParticle';
 import {serverSurface} from '@momo/core/features/capabilities/serverSurfaces';
-import {channelLabel} from '@momo/core/features/workspace/directory';
+import {channelLabel, memberFor} from '@momo/core/features/workspace/directory';
+import {mayActOnLiveness} from '@momo/core/features/agents/liveness';
+import {
+  dmPeerStatusDot,
+  type StatusDot as StatusDotModel,
+} from '@momo/core/features/presence/statusDot';
 import {TURN_STALE_SENTENCE} from '@momo/core/features/agents/turnCopy';
 import {coreSession} from '@momo/core/runtime/host';
 import {useMutation} from '@tanstack/react-query';
@@ -45,7 +50,9 @@ import {
   type Palette,
 } from '../design/tokens';
 import {usePalette, useStyles} from '../design/theme';
+import {useAgentLiveness} from '../features/agents/useAgentLiveness';
 import {useAgentWorkingSignals} from '../features/agents/workingSignal';
+import {StatusDot} from '../features/presence/StatusDot';
 import {useCollapsedSections, visibleRows} from '../features/home/collapsedSections';
 import {buildWorkingCard, type WorkingCardModel} from '../features/home/workingCard';
 import {workspaceHeading, type WorkspaceLogo} from '../features/home/workspaceLogo';
@@ -254,6 +261,7 @@ export default function SidebarScreen({
   onOpenWorkList,
   notificationNotice = null,
   onDismissNotificationNotice,
+  active = true,
 }: {
   openChannelId: string | null;
   onOpenConversation: (channelId: string, title: string) => void;
@@ -288,6 +296,12 @@ export default function SidebarScreen({
    */
   notificationNotice?: string | null;
   onDismissNotificationNotice?: () => void;
+  /**
+   * 지금 이 탭이 보이는가 (#3992). 이 화면은 언마운트되지 않고 `AppShell` 이 탭을 숨기기만 하므로, 당겨서
+   * 새로고침의 실패 안내(「화면을 떠날 때까지」 남는다)는 이 값이 거짓이 될 때 거둔다. 기본 `true`: 셸 밖에서
+   * 단독으로 마운트하는 하네스·시험에서는 「안 보인다」가 조용한 기본이 되지 않게.
+   */
+  active?: boolean;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
@@ -371,7 +385,7 @@ export default function SidebarScreen({
   const refetchChannels = channelsQuery.refetch;
   const refetchDirectory = directoryQuery.refetch;
   const refetchReadStates = readStates.refetch;
-  const {refreshControl, scrollProps} = usePullRefresh(
+  const {refreshControl, scrollProps, notice} = usePullRefresh(
     useCallback(
       () =>
         Promise.all([
@@ -382,6 +396,7 @@ export default function SidebarScreen({
       [refetchChannels, refetchDirectory, refetchReadStates],
     ),
     'sidebar-refresh',
+    {active},
   );
 
   const openDm = useMutation({
@@ -516,6 +531,10 @@ export default function SidebarScreen({
           />
         </View>
       ) : null}
+
+      {/* 당겨서 새로고침이 실패했다는 한 줄(#3992). 시간으로 사라지지 않고, 다음 당김·성공 재조회·화면을
+          떠날 때 거둔다. */}
+      {notice}
     </>
   );
 
@@ -817,6 +836,30 @@ function AgentSquare({
   );
 }
 
+/**
+ * DM 줄의 상대 상태 점 (#3964). 판정은 core 의 한 함수(`dmPeerStatusDot`)이고 웹 `DmAvatar` 와 같다:
+ * 사람은 스스로 정한 자리 비움·방해 금지만, 에이전트는 서버의 생존 판정(`useAgentLiveness`: 쿼리 키가 웹과
+ * 같고 같은 에이전트를 묻는 다른 표면과 한 요청을 나눠 쓴다). 채널 줄에는 점이 없다. 모르면 점이 없다.
+ *
+ * 행마다 훅이지만 `SectionList` 가 보이는 줄만 그리므로 쿼리도 보이는 에이전트만큼만 선다. 사람 줄에는
+ * 쿼리가 서지 않는다.
+ */
+function useRowStatusDot(row: SidebarRow, directory: Directory): StatusDotModel | null {
+  const {member} = useSession();
+  const peer =
+    row.kind === 'channel' || row.avatarMemberId === null
+      ? null
+      : memberFor(directory, row.avatarMemberId);
+  const agentId = peer?.kind === 'agent' ? peer.id : null;
+  const read = useAgentLiveness(agentId);
+  return dmPeerStatusDot({
+    member: peer,
+    liveness: agentId === null ? undefined : read.liveness,
+    mayAct: mayActOnLiveness(memberFor(directory, member.id)?.role),
+    nowMs: agentId === null ? Date.now() : read.nowMs,
+  });
+}
+
 function Row({
   row,
   directory,
@@ -832,6 +875,7 @@ function Row({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const status = useRowStatusDot(row, directory);
   const unread = row.unreadCount > 0 || row.mentionCount > 0;
   let lead: React.ReactNode;
   if (row.kind === 'channel') {
@@ -855,10 +899,28 @@ function Row({
   } else {
     lead = <View style={styles.faceBlank} />;
   }
+  // 상태 점은 얼굴 모서리에 앉는다. 점이 있는 줄만 얼굴 크기의 상자로 감싸므로(점 없는 줄의 구조는 그대로다)
+  // 얼굴의 자리는 움직이지 않는다.
+  const face =
+    status === null ? (
+      lead
+    ) : (
+      <View style={styles.face} testID="home-row-face">
+        {lead}
+        <View style={styles.statusAnchor}>
+          <StatusDot tone={status.tone} testID="home-row-status-dot" />
+        </View>
+      </View>
+    );
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={row.accessibilityLabel}
+      // 글자 라벨(「꺼짐」)은 줄에서 뺐다: 상태는 점이 눈에, 이 낭독 라벨이 귀에 말한다.
+      accessibilityLabel={
+        status === null
+          ? row.accessibilityLabel
+          : `${row.accessibilityLabel}, ${status.label}`
+      }
       accessibilityState={{selected, busy}}
       onPress={onPress}
       style={({pressed}) => [
@@ -867,7 +929,7 @@ function Row({
         pressed && styles.rowPressed,
       ]}
       testID={`sidebar-row-${row.key}`}>
-      {lead}
+      {face}
       <View style={styles.rowName}>
         <Text
           style={[
@@ -1314,6 +1376,9 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     borderWidth: 1,
     borderColor: color.border,
   },
+  // 상태 점이 있는 줄의 얼굴 상자(점의 절대 위치 기준). 크기는 얼굴과 같다.
+  face: {width: HOME.rowFace, height: HOME.rowFace},
+  statusAnchor: {position: 'absolute', right: -2, bottom: -2},
   agentSquare: {
     backgroundColor: color.agentSurface,
     alignItems: 'center',

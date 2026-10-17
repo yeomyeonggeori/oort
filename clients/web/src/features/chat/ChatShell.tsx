@@ -29,6 +29,11 @@ import {
   type OpenedReadSnapshot,
 } from "@/features/chat/openedReadState";
 import { useSession } from "@/app/session";
+import {
+  indexFallbackChannelId,
+  readProjectionPhase,
+  useClosedDms,
+} from "@/features/sidebar/sidebarDmClosure";
 import { applyFirstAgentFocus } from "@/features/welcome/firstAgentStore";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import {
@@ -196,10 +201,19 @@ export function ChatShell() {
   // The index route lands on the first channel the server actually returned.
   // Nothing is hardcoded: a workspace with no channels renders the empty state
   // instead of pointing at an id that may not exist here.
+  //
+  // 닫은 DM(#3963, `sidebarDmClosure.ts`)은 이 폴백의 후보가 아니다. 사이드바가 같은 함수로 열린 대화를
+  // 정하므로, 채널이 없는 멤버의 첫 DM 을 닫으면 본문도 다음 DM(없으면 빈 상태)으로 간다.
+  const closedDms = useClosedDms(workspaceId);
   const channelId =
     params.channelId ??
-    channelsQuery.groups.channels[0]?.id ??
-    channelsQuery.groups.dms[0]?.id ??
+    indexFallbackChannelId({
+      channels: channelsQuery.groups.channels,
+      dms: channelsQuery.groups.dms,
+      closed: closedDms,
+      latestSeqOf: (id) => unreadFor(readStates.byChannel, id)?.latestSeq,
+      phase: readProjectionPhase(readStates),
+    }) ??
     null;
 
   const channel = useMemo(

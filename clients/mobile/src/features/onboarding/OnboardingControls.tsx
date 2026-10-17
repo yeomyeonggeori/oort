@@ -44,6 +44,11 @@ export const PHONE_OB = {
   heroGap: 12,
   /** `.p-bottom{gap:10px}` */
   bottomGap: 10,
+  /**
+   * 붙든 행동 위에서 스크롤 내용이 녹아 사라지는 높이(이 화면이 더한 값, 4px 격자 위).
+   * 내용 끝과 행동 사이의 바닥 여백도 이 값이라, 끝까지 스크롤하면 마지막 줄은 흐려지지 않는다.
+   */
+  pinFade: 24,
   /** `.btn.lg{height:54px;border-radius:14px;font-size:16.5px}` */
   buttonLg: 54,
   buttonLgRadius: 14,
@@ -73,6 +78,15 @@ export const PHONE_OB = {
 /**
  * 새벽하늘 바닥 위 폰 온보딩 한 장(`.p-body`). 위 막대 · 가운데(질문) · 아래(행동).
  * 가운데가 넘치면(큰 글씨·작은 폰) 전체가 스크롤한다. 가로로는 넘치지 않는다.
+ *
+ * 기본은 행동(`bottom`)이 내용 **뒤**에 서서 함께 스크롤한다. M0·M2는 내용이 짧아 이
+ * 모양 그대로 둔다. 내용이 한 화면을 넘는 장(M3, #3925)만 `pinBottom`으로 행동을 스크롤
+ * 밖 바닥에 붙든다: 내용만 스크롤하고, 가장 짧은 폰(375x667)이나 큰 글씨에서도 주 행동이
+ * 첫 화면에 온전히 보인다. 바닥에는 행동만 서서(내용에 속한 안내 줄은 스크롤한다) 큰 글씨에서도
+ * 바닥이 화면을 먹지 않는다. 내용은 행동 위에서 녹아 사라진다(`pinFade`).
+ *
+ * **입력칸이 있는 장은 이 옵션을 켜지 않는다.** 붙든 바닥은 키보드를 피하지 않아서 키보드가
+ * 행동을 가린다.
  */
 export function OnboardingPhoneScreen({
   top,
@@ -80,6 +94,7 @@ export function OnboardingPhoneScreen({
   bottom,
   mainStyle,
   decoration,
+  pinBottom = false,
   testID,
 }: {
   top?: React.ReactNode;
@@ -88,30 +103,62 @@ export function OnboardingPhoneScreen({
   mainStyle?: StyleProp<ViewStyle>;
   /** 바닥 위, 내용 아래에 까는 장식(다크 M0의 별). */
   decoration?: React.ReactNode;
+  /** 행동을 스크롤 밖 바닥에 붙든다. 꺼 두면(M0·M2) 행동이 내용 뒤에서 함께 스크롤한다. */
+  pinBottom?: boolean;
   testID?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
+  const hasBottom = Boolean(bottom);
+  const pinned = pinBottom && hasBottom;
+  const floor = Math.max(insets.bottom, PHONE_OB.bottom);
+  const scroller = (
+    <ScrollView
+      style={styles.flex}
+      contentContainerStyle={[
+        styles.body,
+        {
+          paddingTop: insets.top,
+          // 붙은 행동은 바닥 여백을 스스로 갖는다(`pinned`). 내용 끝에는 페이드만큼만 둔다.
+          paddingBottom: pinned ? PHONE_OB.pinFade : floor,
+        },
+      ]}
+      keyboardShouldPersistTaps="handled"
+      alwaysBounceVertical={false}
+      testID={testID}
+    >
+      {top}
+      <View style={[styles.main, mainStyle]}>{children}</View>
+      {hasBottom && !pinned ? (
+        <View style={styles.bottom}>{bottom}</View>
+      ) : null}
+    </ScrollView>
+  );
   return (
     <OnboardingCanvas>
       {decoration}
-      <ScrollView
-        style={styles.flex}
-        contentContainerStyle={[
-          styles.body,
-          {
-            paddingTop: insets.top,
-            paddingBottom: Math.max(insets.bottom, PHONE_OB.bottom),
-          },
-        ]}
-        keyboardShouldPersistTaps="handled"
-        alwaysBounceVertical={false}
-        testID={testID}
-      >
-        {top}
-        <View style={[styles.main, mainStyle]}>{children}</View>
-        {bottom ? <View style={styles.bottom}>{bottom}</View> : null}
-      </ScrollView>
+      {pinned ? (
+        <View style={styles.flex}>
+          {scroller}
+          {/* 내용이 붙은 행동 밑으로 잘리는 선을 지운다. 24는 기본~큰 글씨의 한 줄을 덮는다(가장 큰
+              글씨의 한 줄은 더 높아 반쯤 걸릴 수 있다). 누름은 가로채지 않는다. */}
+          <View
+            pointerEvents="none"
+            style={styles.pinFade}
+            testID={testID ? `${testID}-fade` : undefined}
+          />
+        </View>
+      ) : (
+        scroller
+      )}
+      {pinned ? (
+        <View
+          style={[styles.pinned, {paddingBottom: floor}]}
+          testID={testID ? `${testID}-pinned` : undefined}
+        >
+          {bottom}
+        </View>
+      ) : null}
     </OnboardingCanvas>
   );
 }
@@ -412,6 +459,21 @@ const buildStyles = (color: Palette) =>
     },
     // 큰 글씨에서 flexGrow 여백이 0으로 줄어도 질문과 행동이 한 덩어리로 붙지 않게.
     bottom: {gap: PHONE_OB.bottomGap, paddingTop: PHONE_OB.mainGapWide},
+    // `bottom`과 같은 세로 리듬(행동 사이 10)이되 스크롤 밖에 선다.
+    pinned: {gap: PHONE_OB.bottomGap, paddingHorizontal: PHONE_OB.gutter},
+    // 셸의 `ScrollFade`와 같은 처방(ShellChrome.tsx): 같은 색의 알파 0에서 시작해(`transparent`는
+    // 검정 투명이라 회색 띠가 선다) 바닥 그라데이션의 아래 정지점(`canvasBottom`)으로 녹고, 62%부터
+    // 불투명이라 행동 바로 위에 글자가 유령처럼 비치지 않는다.
+    // 이 자리의 바닥색은 그 정지점과 가까워서(375x667 캡처에서 라이트·다크 모두 4단계 이내)
+    // 이음새가 서지 않는다.
+    pinFade: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 0,
+      height: PHONE_OB.pinFade,
+      experimental_backgroundImage: `linear-gradient(180deg, ${color.canvasBottom}00 0%, ${color.canvasBottom} 62%)`,
+    },
     topBar: {
       minHeight: PHONE_OB.topBar,
       flexDirection: 'row',

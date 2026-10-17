@@ -22,7 +22,12 @@
 // screen can point this device at another server, and the Tauri shell must.
 // =============================================================================
 
-import { fetchWithDeadline, NetworkError, type HttpResponse } from "./http";
+import {
+  fetchWithDeadline,
+  NetworkError,
+  REQUEST_TIMEOUT_MS,
+  type HttpResponse,
+} from "./http";
 import { apiBase, coreSession, type RefreshDeviceProof } from "../runtime/host";
 import { parseExecutionPlan, type SpawnExecutionPlan } from "./executionPlan";
 import { restoredLoginResponse } from "./sessionModel";
@@ -785,6 +790,14 @@ function parseError(res: HttpResponse): ApiError {
  * signed the user out for good**, on web and on mobile alike. The comment in the
  * catch branch below already said the session must not be declared dead there;
  * the caller simply had no way to honour it.
+ *
+ * `unreachable` is every answer that decided nothing: no connection, a blown
+ * deadline, a lock that never came free, and a server that says it could not or
+ * would not look at the token — a **5xx** (a deploy, a database blip), a **429**
+ * (rate limited, which `docs/api/openapi.yaml` lists for this route) or a **408**
+ * (#3993). None of those is "the session is over" any more than a dropped
+ * connection is. The server says that with a 401 (refused, spent, reused, proof
+ * refused) or a 403 (the member is gone), and those stay `rejected`.
  */
 export type RefreshOutcome = "rotated" | "rejected" | "unreachable";
 
@@ -819,6 +832,11 @@ interface Rotation {
 //   any other 401 on a       re-sign ONCE, then sign out — two recoveries of the
 //   proved refresh           same device racing: the loser gets a plain 401
 //                            (client contract MUST 2)
+//   5xx, 429, 408            keep the session, give this rotation up (#3993): a
+//                            server that is failing, busy or too slow has
+//                            decided nothing about it
+//   any other status         sign out (as before; 403 is the server's "the member
+//                            is gone")
 //
 // A lost answer (timeout, app killed) needs nothing here: the stored token is
 // kept, and the next rotation presents it with a fresh proof — the server
@@ -834,8 +852,19 @@ export const REFRESH_PROOF_CODES = [
 /** At most this many refresh POSTs per rotation (1 + retries). */
 export const MAX_REFRESH_ATTEMPTS = 3;
 
-/** What one refused refresh attempt means for the next one. */
-export type RefreshRetry = "sign-out" | "re-sign" | "re-sign-with-server-time";
+/**
+ * What one refused refresh attempt means for the next one. `keep` is not a
+ * retry: the rotation ends without a verdict and the session stays as it is.
+ */
+export type RefreshRetry = "sign-out" | "re-sign" | "re-sign-with-server-time" | "keep";
+
+/**
+ * A status that says the server did not look at the refresh token: it is failing
+ * (5xx), busy (429) or too slow (408). Not a verdict on the session (#3993).
+ */
+function undecided(status: number): boolean {
+  return status >= 500 || status === 429 || status === 408;
+}
 
 /**
  * The retry policy, pure. `plainRetried`: a plain 401 on a proved refresh
@@ -847,6 +876,12 @@ export function refreshRetry(
   proved: boolean,
   plainRetried: boolean
 ): RefreshRetry {
+  // These used to fall through to the line below, so a deploy or a database blip
+  // during a refresh signed the person out — and `restoreSession()` wiped the
+  // stored token for good. Every other status keeps its old reading: 401 and 403
+  // are the server's own verdicts, and the rest was never a case this route
+  // answered.
+  if (undecided(status)) return "keep";
   if (status !== 401) return "sign-out";
   if (code === "refresh_proof_stale") return "re-sign-with-server-time";
   if (code === "refresh_proof_replayed") return "re-sign";
@@ -945,7 +980,9 @@ async function refreshAttempt(
 /**
  * Attempts until a pair, a sign-out, or `MAX_REFRESH_ATTEMPTS`. Returns the
  * pair (and whether it is a handle), or null for a sign-out. Throws when
- * nothing answered.
+ * nothing answered, or when all the server could say was that it is failing
+ * (`keep`, #3993): the caller reads a throw as `unreachable`, never as a
+ * sign-out.
  */
 async function refreshWithRetries(
   refreshToken: string,
@@ -959,6 +996,7 @@ async function refreshWithRetries(
     if (answer.pair) return { pair: answer.pair, handle: answer.handle };
     const retry = refreshRetry(answer.status, answer.code, answer.proved, plainRetried);
     if (retry === "sign-out") return null;
+    if (retry === "keep") throw new Error(`refresh answered ${answer.status}`);
     if (retry === "re-sign-with-server-time") {
       skewMs = serverSkewMs(answer.date, Date.now()) ?? skewMs;
     } else if (answer.code !== "refresh_proof_replayed") {
@@ -997,10 +1035,10 @@ function rotateSession(): Promise<Rotation> {
         ? await session.exclusiveRotation(rotateOnce)
         : await rotateOnce();
     } catch {
-      // Offline, unreachable server, a blown deadline, or a cross-context lock
-      // that never came free: the caller keeps rendering cached content (P15)
-      // and the session is not declared dead, because nothing answered to say
-      // it is.
+      // Offline, unreachable server, a blown deadline, a cross-context lock that
+      // never came free, or a server that said it could not look at the token
+      // (5xx, 429, 408): the caller keeps rendering cached content (P15) and the
+      // session is not declared dead, because nothing answered to say it is.
       return { outcome: "unreachable", pair: null };
     } finally {
       rotationInFlight = null;
@@ -1123,9 +1161,51 @@ function bindRefreshKey(retry: number): void {
 }
 
 /**
+ * The one rotation a 401 gets, read for what it proved about the session
+ * (#3993). Every request helper that meets a 401 with a refresh token in hand
+ * goes through here, so "is the session over" has one answer.
+ *
+ * Exported for a host whose own transport meets the 401 — the phone's native file
+ * downloads, which cannot go through `authedResponse` — so that the rule is not
+ * written a second time there (#3997).
+ *
+ *   rotated      → true: send the request again with the new token.
+ *   rejected     → false: the server looked at the refresh token and ended the
+ *                  session (refused, spent, reused, the member is gone). The
+ *                  caller still holds the 401 and declares the end with its own
+ *                  `markAuthExpired()` right there — not behind a retry or a
+ *                  timer, and not after the network comes back. (A refusal the
+ *                  server gave has already been declared by the rotation itself;
+ *                  the caller's declaration is idempotent and covers what the
+ *                  rotation cannot see: nothing was left to present, or the new
+ *                  token met a 401 again.)
+ *   unreachable  → throws a `NetworkError`. The connection dropped between the
+ *                  401 and the rotation (a subway, a lift, a radio still waking
+ *                  after the lock screen), the deadline blew, or the server could
+ *                  only answer 5xx, 429 or 408: nothing decided anything, so
+ *                  the session is not declared over — the rule `restoreSession()`
+ *                  and the phone's boot gate already keep. The 401 is not the
+ *                  answer either: it described an expired access token, and
+ *                  every caller that reads a 401 as "log in again" would lie. A
+ *                  `NetworkError` is the failure they already render ("could not
+ *                  reach the server, check the connection and try again"); the
+ *                  next request, or the reconnect, rotates again.
+ */
+export async function rotateAfterUnauthorized(): Promise<boolean> {
+  const outcome = await refreshSessionOutcome();
+  if (outcome === "unreachable") {
+    throw new NetworkError("unreachable", REQUEST_TIMEOUT_MS);
+  }
+  return outcome === "rotated";
+}
+
+/**
  * Authenticated exchange with exactly one 401 rotation, answering with the
- * response **whatever its status** (#3926). A 401 that survives the rotation
- * ends the session (`markAuthExpired`); only that owner may declare expiry.
+ * response **whatever its status** (#3926). A 401 that survives a rotation the
+ * server refused, or that the new token meets again, ends the session
+ * (`markAuthExpired`); only that owner may declare expiry. A rotation that never
+ * reached the server declares nothing and fails the request as a `NetworkError`
+ * (see `rotateAfterUnauthorized`, #3993).
  * `init.body` is always a string here, so replaying it on the retry is safe,
  * and it is the SAME string: a body that carries an idempotency key carries the
  * same key on the retry, so the server replays instead of recording twice.
@@ -1137,9 +1217,9 @@ function bindRefreshKey(retry: number): void {
  * made a private raw fetch, which skipped the rotation: a phone that had been in
  * the background past the access token's life lost the decision with a 401.
  *
- * There is one rotation and no loop. A rotation that does not produce a usable
- * token leaves the first 401 as the answer, and a second 401 after a rotation
- * is the answer too; neither starts another rotation.
+ * There is one rotation and no loop. A rotation the server refused leaves the
+ * first 401 as the answer, and a second 401 after a rotation is the answer too;
+ * neither starts another rotation.
  */
 export async function authedResponse(
   path: string,
@@ -1147,7 +1227,7 @@ export async function authedResponse(
 ): Promise<HttpResponse> {
   let res = await rawRequest(path, init, coreSession().getAccessToken());
   if (res.status === 401 && coreSession().getRefreshToken()) {
-    if (await refreshSession()) {
+    if (await rotateAfterUnauthorized()) {
       res = await rawRequest(path, init, coreSession().getAccessToken());
     }
   }
@@ -2413,7 +2493,7 @@ export async function fetchUnfurlImage(
   };
   let res = await send(coreSession().getAccessToken());
   if (res.status === 401 && coreSession().getRefreshToken()) {
-    if (await refreshSession()) res = await send(coreSession().getAccessToken());
+    if (await rotateAfterUnauthorized()) res = await send(coreSession().getAccessToken());
   }
   if (res.status === 401) coreSession().markAuthExpired();
   if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
@@ -2818,7 +2898,7 @@ export async function fetchAttachmentContent(
   };
   let res = await send(coreSession().getAccessToken());
   if (res.status === 401 && coreSession().getRefreshToken()) {
-    if (await refreshSession()) res = await send(coreSession().getAccessToken());
+    if (await rotateAfterUnauthorized()) res = await send(coreSession().getAccessToken());
   }
   if (res.status === 401) coreSession().markAuthExpired();
   if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
@@ -2908,7 +2988,7 @@ async function fetchAvatarBlob(
   };
   let res = await send(coreSession().getAccessToken());
   if (res.status === 401 && coreSession().getRefreshToken()) {
-    if (await refreshSession()) res = await send(coreSession().getAccessToken());
+    if (await rotateAfterUnauthorized()) res = await send(coreSession().getAccessToken());
   }
   if (res.status === 401) coreSession().markAuthExpired();
   if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
