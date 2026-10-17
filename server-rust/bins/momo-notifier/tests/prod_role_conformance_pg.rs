@@ -28,6 +28,7 @@
 //! | `an_approval_audience_is_judged_as_the_production_notifier_role` (ADR-0204 D7, #3928) | drop `GRANT SELECT (workspace_id, member_id, role) ON workspace_membership` — `may_approve_in_tx` reads it for every role-gated card (verified red: `permission denied for table workspace_membership`); or drop the `agent` / `work_host` SELECT the agent-owner and host-owner arms read |
 //! | `the_personal_agent_member_trigger_runs_as_every_role_that_writes_member` (#3591) | drop `GRANT UPDATE ON agent` from a role that can UPDATE `member` (the migration-123 trigger updates `agent` as the invoking role), or add the trigger's table to a lockdown |
 //! | `the_other_runtime_roles_reach_every_table_the_migrations_created` | a new table that `app`/`relay`/`worker` cannot read or write, or a cloud-box lockdown that drifts |
+//! | `a_dead_push_token_is_invalidated_by_the_production_notifier_role` (#3930) | drop `GRANT UPDATE (invalidated_at, updated_at) ON push_token TO momo_notifier` — the settle's `UPDATE push_token` dies with `permission denied for table push_token`, and rolls back to its savepoint, so ONLY this suite sees it; widen the grant past those two columns and the denied-write half goes red |
 //!
 //! Why #3553 got through anyway: the first test below already called
 //! `judge_targets` as the notifier (Postgres checks table privileges when a
@@ -54,7 +55,9 @@ use momo_notifier::{
     approval_sweep, control_window_sweep, FixedAdapterResolver, Notifier, NotifierConfig,
     PushConfig,
 };
-use momo_push::{DispatchOutcome, PushDispatch, PushDispatcher};
+use momo_push::{
+    settle_dispatch_and_invalidate, DispatchOutcome, PushDispatch, PushDispatcher, SettleOutcome,
+};
 use momo_t3::MockProviderAdapter;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use uuid::Uuid;
@@ -1526,6 +1529,175 @@ async fn an_approval_audience_is_judged_as_the_production_notifier_role() {
     assert!(
         report.failures.is_empty(),
         "the approval audience failed as the production notifier role:\n  {}",
+        report.failures.join("\n  ")
+    );
+}
+
+/// Answers every dispatch the way APNs answers a token that was uninstalled.
+struct DeadTokenPush;
+
+#[async_trait::async_trait]
+impl PushDispatcher for DeadTokenPush {
+    async fn dispatch(&self, _dispatch: &PushDispatch) -> DispatchOutcome {
+        DispatchOutcome::Accepted {
+            apns_status: 410,
+            apns_reason: Some("Unregistered".to_string()),
+        }
+    }
+}
+
+/// ADR-0204 D9 / #3930 — a dead APNs token is invalidated by the PRODUCTION
+/// notifier role. The dev role file hands `momo_notifier` every verb on every
+/// table, so no other `push_*` suite can see a missing `UPDATE` grant on
+/// `push_token` — the v0.1.16 shape (`permission denied for table …` only in
+/// production). The invalidation also runs in a SAVEPOINT, so the production
+/// failure would be a log line and a token that is never retired: this suite is
+/// the only place it turns red.
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
+async fn a_dead_push_token_is_invalidated_by_the_production_notifier_role() {
+    let db = ProdDb::create().await;
+    let seeded = seed_hosted_work_run(&db.su).await;
+    let notifier = db.role("momo_notifier", "momo_notifier_dev_pw").await;
+    let mut report = Report { failures: vec![] };
+
+    let token_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM push_token WHERE workspace_id = $1 AND member_id = $2")
+            .bind(seeded.workspace)
+            .bind(seeded.requester)
+            .fetch_one(&db.su)
+            .await
+            .expect("the requester's push token");
+    let invalidated = |su: PgPool| async move {
+        sqlx::query_scalar::<_, bool>(
+            "SELECT invalidated_at IS NOT NULL FROM push_token WHERE id = $1",
+        )
+        .bind(token_id)
+        .fetch_one(&su)
+        .await
+        .expect("read push_token")
+    };
+
+    // (1) The settle itself, as the production role, so a missing grant is NAMED:
+    // the drain below swallows it (SAVEPOINT) and could only say "not invalidated".
+    let log_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO push_dispatch_log \
+           (workspace_id, message_id, member_id, push_token_id, collapse_id) \
+         VALUES ($1, $2, $3, $4, 'm:prod-role-direct') RETURNING id",
+    )
+    .bind(seeded.workspace)
+    .bind(seeded.answer)
+    .bind(seeded.requester)
+    .bind(token_id)
+    .fetch_one(&db.su)
+    .await
+    .expect("claim a dispatch-log row");
+    let workspace = seeded.workspace;
+    let outcome = momo_db::tenant::with_tenant_tx(&notifier, workspace, move |conn| {
+        Box::pin(async move {
+            settle_dispatch_and_invalidate(
+                conn,
+                workspace,
+                log_id,
+                token_id,
+                410,
+                Some("Unregistered"),
+            )
+            .await
+        })
+    })
+    .await;
+    match outcome {
+        Ok(SettleOutcome::Invalidated(_)) => {}
+        Ok(SettleOutcome::InvalidationFailed { error, .. }) => report.failures.push(format!(
+            "settle_dispatch_and_invalidate (as momo_notifier): the UPDATE failed: {error}"
+        )),
+        Ok(other) => report.failures.push(format!(
+            "settle_dispatch_and_invalidate (as momo_notifier): expected Invalidated, got {other:?}"
+        )),
+        Err(error) => report.failures.push(format!(
+            "settle_dispatch_and_invalidate (as momo_notifier): {error}"
+        )),
+    }
+    if !invalidated(db.su.clone()).await {
+        report
+            .failures
+            .push("the token was not invalidated by the settle (as momo_notifier)".to_string());
+    }
+    let status: Option<i32> =
+        sqlx::query_scalar("SELECT apns_status FROM push_dispatch_log WHERE id = $1")
+            .bind(log_id)
+            .fetch_one(&db.su)
+            .await
+            .expect("read the settled log row");
+    if status != Some(410) {
+        report.failures.push(format!(
+            "the receipt was not settled with the invalidation: {status:?}"
+        ));
+    }
+
+    // (2) End to end through the drain: claim -> judge -> dispatch (410) -> settle.
+    sqlx::query("UPDATE push_token SET invalidated_at = NULL WHERE id = $1")
+        .bind(token_id)
+        .execute(&db.su)
+        .await
+        .expect("revive the token");
+    let drain = PushDrain::new(
+        notifier.clone(),
+        PushConfig::for_target(),
+        Arc::new(DeadTokenPush),
+    );
+    report.check(
+        "push drain (410)",
+        "momo_notifier",
+        drain.drain_once(16).await,
+    );
+    if !invalidated(db.su.clone()).await {
+        report.failures.push(
+            "push drain (as momo_notifier): a 410 left the token active — the invalidating UPDATE \
+             was denied or skipped (check GRANT UPDATE (invalidated_at, updated_at) ON push_token)"
+                .to_string(),
+        );
+    }
+
+    // (3) The grant is two columns and nothing else: the notifier must not be able
+    // to rewrite where a push goes, whose it is, or delete the row.
+    for (what, sql) in [
+        (
+            "apns_token",
+            "UPDATE push_token SET apns_token = 'x' WHERE id = $1",
+        ),
+        (
+            "member_id",
+            "UPDATE push_token SET member_id = member_id WHERE id = $1",
+        ),
+        (
+            "device_id",
+            "UPDATE push_token SET device_id = device_id WHERE id = $1",
+        ),
+        ("topic", "UPDATE push_token SET topic = 'x' WHERE id = $1"),
+        (
+            "created_at",
+            "UPDATE push_token SET created_at = now() WHERE id = $1",
+        ),
+        ("DELETE", "DELETE FROM push_token WHERE id = $1"),
+    ] {
+        match sqlx::query(sql).bind(token_id).execute(&notifier).await {
+            Ok(_) => report.failures.push(format!(
+                "momo_notifier could write push_token ({what}) — the grant must be exactly \
+                 UPDATE (invalidated_at, updated_at)"
+            )),
+            Err(error) if error.to_string().contains("permission denied") => {}
+            Err(error) => report.failures.push(format!(
+                "momo_notifier push_token ({what}): unexpected error {error}"
+            )),
+        }
+    }
+
+    db.finish().await;
+    assert!(
+        report.failures.is_empty(),
+        "push token invalidation as the production notifier role failed:\n  {}",
         report.failures.join("\n  ")
     );
 }
