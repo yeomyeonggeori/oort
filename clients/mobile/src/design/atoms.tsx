@@ -13,6 +13,8 @@ import {
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from './tokens';
 import {usePalette, useStyles} from './theme';
+import {PULL_FILL} from './pullRefresh';
+import type {PullScrollProps} from './refresh';
 
 // =============================================================================
 // The shell's shared pieces.
@@ -319,6 +321,7 @@ export function EmptyState({
   headline,
   detail,
   refreshControl,
+  scrollProps,
   testID,
 }: {
   headline: string;
@@ -332,6 +335,8 @@ export function EmptyState({
    * 스크롤할 수 있는 몸을 얻는다 — 하는 말은 그대로다.
    */
   refreshControl?: React.ReactElement<RefreshControlProps>;
+  /** 위성이 당긴 거리를 따라가도록 오프셋을 읽는 스크롤 props (`usePullRefresh().scrollProps`, #3962). */
+  scrollProps?: PullScrollProps;
   testID?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -354,8 +359,10 @@ export function EmptyState({
       // 스크롤뷰는 제스처를 시작조차 하지 않으므로, 이 한 줄이 없으면 컨트롤은
       // 붙어 있는데 아무 일도 일어나지 않는다 — 고치려는 결함과 같은 모양이다.
       alwaysBounceVertical
-      contentContainerStyle={styles.stateBlock}
+      // 내용이 뷰포트를 채워야 아래 빈 자리에서도 당겨진다(`PULL_FILL` 의 이유).
+      contentContainerStyle={[styles.stateBlock, PULL_FILL]}
       refreshControl={refreshControl}
+      {...scrollProps}
       testID={testID}>
       {body}
     </ScrollView>
