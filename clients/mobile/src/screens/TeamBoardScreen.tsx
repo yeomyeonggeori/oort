@@ -35,7 +35,7 @@ import {
   SectionLabel,
   TapRow,
 } from '../design/atoms';
-import {useRefreshControl} from '../design/refresh';
+import {PULL_FILL, usePullRefresh} from '../design/refresh';
 import {useStyles} from '../design/theme';
 import {
   font,
@@ -169,7 +169,7 @@ export default function TeamBoardScreen({
   }, [openId]);
 
   const refetchList = list.refetch;
-  const refreshControl = useRefreshControl(
+  const {refreshControl, scrollProps} = usePullRefresh(
     useCallback(() => refetchList(), [refetchList]),
     'team-board-refresh',
   );
@@ -271,6 +271,7 @@ export default function TeamBoardScreen({
               : TEAM_BOARD_COPY.emptyBody
           }
           refreshControl={refreshControl}
+          scrollProps={scrollProps}
           testID="team-board-empty"
         />
       ) : (
@@ -327,6 +328,7 @@ export default function TeamBoardScreen({
           }
           contentContainerStyle={styles.listContent}
           refreshControl={refreshControl}
+          {...scrollProps}
           testID="team-board-list"
         />
       )}
@@ -516,7 +518,7 @@ const buildStyles = (color: Palette) =>
       lineHeight: line.body,
       color: color.text,
     },
-    listContent: {paddingBottom: space.lg},
+    listContent: {paddingBottom: space.lg, ...PULL_FILL},
     bannerWrap: {paddingHorizontal: SAFE_GUTTER, paddingVertical: space.sm},
     rowBody: {flex: 1, gap: space.xs, paddingVertical: space.xs},
     rowTitle: {

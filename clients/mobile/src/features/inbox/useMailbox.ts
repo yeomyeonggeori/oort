@@ -34,6 +34,7 @@ import {
 } from '@tanstack/react-query';
 import {useCallback, useMemo} from 'react';
 import {useNow} from '../../lib/useNow';
+import {invalidateAndReport} from '../../query/invalidateReport';
 import {useSession} from '../../session/useSession';
 import {useChannels, useReadStates} from '../workspace/queries';
 import {
@@ -416,8 +417,12 @@ function useComposedMailbox(
     return Promise.all([
       readStates.refetch(),
       needsAction.refetch(),
-      ...['inbox-dm', 'inbox-mentions', 'inbox-thread-roots', 'inbox-thread-reply'].map(
-        key => client.invalidateQueries({queryKey: [key, workspaceId]}),
+      // 무효화는 실패해도 조용히 끝난다: 실패까지 말해 주는 쪽으로 읽는다(#3962).
+      invalidateAndReport(
+        client,
+        ['inbox-dm', 'inbox-mentions', 'inbox-thread-roots', 'inbox-thread-reply'].map(
+          key => [key, workspaceId],
+        ),
       ),
     ]);
   }, [readStates, needsAction, client, workspaceId]);

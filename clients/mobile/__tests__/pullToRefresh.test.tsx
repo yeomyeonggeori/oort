@@ -7,6 +7,8 @@ import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import AppShell from '../src/shell/AppShell';
+import HostedConnectionsScreen from '../src/screens/HostedConnectionsScreen';
+import {SessionProvider} from '../src/session/useSession';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 import {
@@ -312,5 +314,48 @@ describe('대화 타임라인은 빠져 있다 — 빠뜨린 것이 아니라', 
     // 리얼타임이 이 표면의 정본이고, 위로 당기는 제스처는 이미 이력 페이지네이션의
     // 것이다. 둘을 한 제스처에 겹치면 「더 읽기」와 「다시 읽기」가 같은 손짓이 된다.
     expect(screen.queryByTestId('timeline-empty')?.props.refreshControl).toBeUndefined();
+  });
+});
+
+// =============================================================================
+// 호스팅 연결 (#3962): 이 화면의 재조회는 옛 훅 때 `refetch().then(() => undefined)` 로 **결과를 버렸다**(훅이
+// 결과를 안 봐서 필요했던 줄). 새 훅은 결과의 오류 상태를 읽어 실패 햅틱과 실패 안내를 내므로 결과를 그대로
+// 돌려준다. 이 시험이 그 줄이 되살아나는 것을 막는다.
+//
+// red proof: `HostedConnectionsScreen` 의 재조회를 `refetch().then(() => undefined)` 로 되돌리면 → 붉다.
+// =============================================================================
+describe('호스팅 연결 당김 (#3962)', () => {
+  const haptic = jest.requireMock('expo-haptics') as {__calls: string[]};
+  const notifications = () => haptic.__calls.filter(c => c.startsWith('notification:'));
+
+  it('목록 읽기가 실패하면 당김은 경고 햅틱과 실패 안내로 끝난다', async () => {
+    haptic.__calls.length = 0;
+    installFetch();
+    const inner = globalThis.fetch as unknown as jest.Mock;
+    let failHosted = false;
+    globalThis.fetch = jest.fn(async (url: string, init?: unknown) => {
+      if (String(url).includes('hosted')) {
+        return failHosted
+          ? jsonResponse(500, {error: {code: 'internal', message: 'x'}})
+          : jsonResponse(200, {connections: []});
+      }
+      return inner(url, init);
+    }) as unknown as typeof fetch;
+    queryClient = new QueryClient({
+      defaultOptions: {queries: {retry: false, gcTime: 0}, mutations: {retry: false, gcTime: 0}},
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SessionProvider member={SELF}>
+          <HostedConnectionsScreen onBack={() => undefined} onOpenConnection={() => undefined} />
+        </SessionProvider>
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId('hosted-list-empty')).toBeTruthy());
+    failHosted = true;
+    pull('hosted-list-empty');
+    await waitFor(() => expect(notifications()).toEqual(['notification:warning']), {timeout: 5000});
+    // 이 화면은 읽기가 실패하면 목록을 통째로 오류 상태로 바꿔 스스로 말한다(머리가 선 빈 상태 스크롤뷰는 내려간다).
+    expect(screen.queryByTestId('hosted-list-error')).not.toBeNull();
   });
 });

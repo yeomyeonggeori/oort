@@ -14,6 +14,7 @@ const reads = vi.hoisted(() => ({
 }));
 vi.mock("./useAiHubOverview", () => ({
   useExternalReads: () => ({ input: reads.input, hosted: {}, hostedBots: reads.bots }),
+  useAppsRead: () => reads.input.apps,
 }));
 const body = (id: string) => () => createElement("div", { "data-testid": `body-${id}` });
 vi.mock("@/features/plugins/PluginSection", () => ({ PluginSection: body("apps") }));
@@ -111,6 +112,44 @@ describe("외부 연결 목차 (AIH-8)", () => {
     const again = await mountAt("/");
     expect(again.querySelector('[data-testid="ai-external-chip-hostedBotInvite"]')?.textContent).toBe("소유자·관리자만 볼 수 있어요");
     reads.bots = { state: "ok", value: 1 };
+  });
+
+  it("서버가 앱 목록을 싣지 않으면 「앱」 줄이 접힌다: 네 줄만 서고 칩도 없다 (#3860)", async () => {
+    reads.input = { apps: { state: "absent" }, incoming: OK(1), outgoing: OK(2), externalAgents: OK(1) };
+    const el = await mountAt("/");
+    const rows = [...el.querySelectorAll('[data-testid^="ai-external-row-"]')];
+    expect(rows.map((r) => r.querySelector("h3")?.firstChild?.textContent)).toEqual([
+      "채널로 들어오는 주소",
+      "밖으로 보내는 알림",
+      "외부 에이전트 연결",
+      "호스티드 봇 초대",
+    ]);
+    // 접힌 줄은 칩도 열기 링크도 남기지 않는다. 「읽지 못했어요」는 다시 시도하라는 말이다.
+    expect(el.querySelector('[data-testid="ai-external-row-apps"]')).toBeNull();
+    expect(el.querySelector('[data-testid="ai-external-chip-apps"]')).toBeNull();
+    expect(el.querySelector('[data-testid="ai-external-open-apps"]')).toBeNull();
+    expect(el.textContent).not.toContain("읽지 못했어요");
+  });
+
+  it("앱 목록이 없는 서버에서 직접 연 상세는 제목과 돌아가기만 남기고 머리말 설명을 접는다 (#3860 M2)", async () => {
+    reads.input = { apps: { state: "absent" }, incoming: OK(0), outgoing: OK(0), externalAgents: OK(0) };
+    const el = await mountAt("/apps");
+    expect(el.querySelector('[data-testid="ai-external-detail-apps"] h2')?.firstChild?.textContent).toBe("앱");
+    expect(el.querySelector('[data-testid="ai-external-back"]')).not.toBeNull();
+    // 본문이 「보여주지 못해요」라고 말할 자리 위에서 머리말이 「확인해요」라고 약속하지 않는다.
+    expect(el.querySelector('[data-testid="ai-external-detail-apps"]')?.textContent).not.toContain("확인해요");
+    // 서 있는 서버에서는 그대로 선다.
+    act(() => root?.unmount());
+    host?.remove();
+    reads.input = { apps: OK(2), incoming: OK(0), outgoing: OK(0), externalAgents: OK(0) };
+    const normal = await mountAt("/apps");
+    expect(normal.querySelector('[data-testid="ai-external-detail-apps"]')?.textContent).toContain("확인해요");
+  });
+
+  it("앱 줄의 문구는 읽기만 되는 서버에서도 참이다: 관리한다고 말하지 않는다 (#3860)", () => {
+    const apps = AI_EXTERNAL_ROWS.find((row) => row.id === "apps");
+    expect(apps?.summary).not.toMatch(/관리/);
+    expect(apps?.detail.join(" ")).not.toMatch(/관리/);
   });
 
   it("새 문구가 옛 말(합류 등)을 되살리지 않는다", () => {
