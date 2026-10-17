@@ -23,6 +23,7 @@ import {
 import {useQueries, useQuery, useQueryClient} from '@tanstack/react-query';
 import {useCallback, useMemo} from 'react';
 import {useNow} from '../../lib/useNow';
+import {invalidateAndReport} from '../../query/invalidateReport';
 import {
   readIntentWire,
   type ReadAdvertisementReason,
@@ -326,12 +327,15 @@ export function useMentions(enabled: boolean): Feed {
   // `{...query, byChannel}`, a fresh identity every render, which would make this
   // callback unstable and quietly break the first `useEffect` that lists it as a
   // dependency (the next batch's timeline will).
-  const refetch = useCallback(() => {
-    return Promise.all([
-      client.invalidateQueries({queryKey: workspaceKeys.readState(workspaceId)}),
-      client.invalidateQueries({queryKey: ['inbox-mentions', workspaceId]}),
-    ]);
-  }, [client, workspaceId]);
+  const refetch = useCallback(
+    () =>
+      // 실패까지 말해 준다: 당겨서 새로고침이 실패에 성공 햅틱을 내지 않게(#3962).
+      invalidateAndReport(client, [
+        workspaceKeys.readState(workspaceId),
+        ['inbox-mentions', workspaceId],
+      ]),
+    [client, workspaceId],
+  );
 
   return {
     items,
@@ -447,9 +451,9 @@ export function useAgentFeed(enabled: boolean, ownedBy: string): Feed {
   // this callback was created.
   const refetch = useCallback(
     () =>
-      Promise.all([
-        client.invalidateQueries({queryKey: ['approvals', workspaceId]}),
-        client.invalidateQueries({queryKey: ['agent-runs', workspaceId]}),
+      invalidateAndReport(client, [
+        ['approvals', workspaceId],
+        ['agent-runs', workspaceId],
       ]),
     [client, workspaceId],
   );
