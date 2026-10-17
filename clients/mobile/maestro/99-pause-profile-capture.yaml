@@ -23,4 +23,6 @@ name: 99-pause-profile-capture
       id: "profile-pause-row"
     direction: DOWN
     timeout: 60000
+    # 큰 글씨(AX5)에서는 줄이 화면보다 커서 100% 보일 수 없다 — 절반이 보이면 찾은 것으로 친다.
+    visibilityPercentage: 50
 - takeScreenshot: ${SHOT}-notify
