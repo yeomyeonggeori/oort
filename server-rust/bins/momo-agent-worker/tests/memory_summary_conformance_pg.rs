@@ -2290,7 +2290,7 @@ async fn a_message_frozen_for_a_retry_holds_the_cursor_like_a_live_stream() {
     let worker = worker_with(&provider, memory_config()).await;
     let stats = worker.summary_sweep().await;
     for window in 0..stats.windows {
-        let prompt = provider.prompt(window as usize);
+        let prompt = provider.prompt(window);
         assert!(
             !prompt.contains("둘") && !prompt.contains("셋") && !prompt.contains("넷"),
             "RED output: the summary read past a half answer that is waiting for its retry: {prompt}"
