@@ -70,6 +70,8 @@ interface World {
   afterMessages: Record<string, unknown[]>;
   failMessages?: boolean;
   failApprovals?: boolean;
+  /** 에이전트 실행 이력 경로의 응답 상태. 404 면 이 서버엔 그 경로가 없다(미제공). */
+  agentRunsStatus?: number;
   /** 없으면 구 서버: `GET /inbox`가 404다. */
   inbox?: {pages: Record<string, unknown>; failStatus?: number};
 }
@@ -122,7 +124,11 @@ function installFetch(world: World) {
       if (world.failApprovals) return json(500, {error: {code: 'internal', message: 'x'}});
       return json(200, {approvals: parsed.searchParams.get('status') === 'pending' ? world.approvals : []});
     }
-    if (target.includes('/agent-runs')) return json(200, {runs: []});
+    if (target.includes('/agent-runs')) {
+      return world.agentRunsStatus
+        ? json(world.agentRunsStatus, {error: {code: 'not_found', message: 'absent'}})
+        : json(200, {runs: []});
+    }
     if (target.includes('/roster')) return json(200, {members: ROSTER});
     if (target.includes('/read-state')) return json(200, {read_states: world.readStates});
     if (target.includes('/replies')) {
@@ -341,6 +347,7 @@ describe('인박스 구 서버 후퇴 (#3684)', () => {
 // 다르게 답하게 한다.
 //
 // red proof: `useMailbox` 의 무효화를 `invalidateAndReport` 에서 맨 `invalidateQueries` 로 되돌리면 → 실패 시험이 붉다.
+//   에이전트 피드의 `ignoreError: serverSaysAbsent` 를 빼면 → 「이 서버에 실행 이력 경로가 없으면」이 붉다.
 // =============================================================================
 describe('인박스 당겨서 새로고침 (#3962)', () => {
   const haptic = jest.requireMock('expo-haptics') as {__calls: string[]};
@@ -392,6 +399,23 @@ describe('인박스 당겨서 새로고침 (#3962)', () => {
       (screen.queryByTestId('inbox-list') ?? screen.getByTestId('inbox-empty')).props.refreshControl.props.onRefresh();
     });
     await waitFor(() => expect(notifications()).toEqual(['notification:warning']), {timeout: 10_000});
+  });
+
+  it('에이전트 탭: 이 서버에 실행 이력 경로가 없으면(404) 실패가 아니다 — 화면이 미제공으로 접는 오류다', async () => {
+    const world = fullWorld();
+    installFetch(world);
+    await openInbox();
+    await waitFor(() => expect(rowKeys().length).toBe(5), {timeout: 10_000});
+    fireEvent.press(screen.getByTestId('inbox-tab-agents'));
+    await waitFor(() => expect(screen.queryByTestId('inbox-list') ?? screen.queryByTestId('inbox-empty')).toBeTruthy(), {
+      timeout: 10_000,
+    });
+    world.agentRunsStatus = 404;
+    act(() => {
+      (screen.queryByTestId('inbox-list') ?? screen.getByTestId('inbox-empty')).props.refreshControl.props.onRefresh();
+    });
+    await waitFor(() => expect(notifications()).toEqual(['notification:success']), {timeout: 10_000});
+    expect(screen.queryByTestId('pull-refresh-failed', {includeHiddenElements: true})).toBeNull();
   });
 
   it('모두 잘 읽히면 성공 햅틱이고 실패 안내는 없다', async () => {

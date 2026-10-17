@@ -12,7 +12,7 @@ import {
   type ScrollViewProps,
 } from 'react-native';
 import {haptics} from '../lib/haptics';
-import {PULL_NOTICE_MAX_SCALE} from './atoms';
+import {BAR_CONTROL_MAX_SCALE} from './atoms';
 import {OortLoader} from './brand/OortLoader';
 import {
   PULL_HEADER_HEIGHT,
@@ -24,7 +24,7 @@ import {
 // 화면이 `usePullRefresh` 를 가져오는 한 줄에서 같이 가져오게 다시 내보낸다.
 export {PULL_FILL} from './pullRefresh';
 import {useStyles} from './theme';
-import {line, font, SAFE_GUTTER, space, type Palette} from './tokens';
+import {font, SAFE_GUTTER, space, type Palette} from './tokens';
 
 // =============================================================================
 // 당겨서 새로고침 (goal RN-B4b / #1026, 오르트 로더 #3962)
@@ -221,9 +221,10 @@ export function usePullRefresh(
 
   const scrollProps = useMemo<PullScrollProps>(
     () => ({
-      // 0 은 제스처당 한 번만 보내고(평범한 ScrollView 의 기본), 위성이 당김을 따라가려면 프레임마다
-      // 와야 한다. Fabric 은 한 프레임(1/60초) 이하의 값을 제한 없음으로 읽는다(`RCTScrollViewComponentView.mm`
-      // `updateProps`, RN 0.86.2) — 목록의 기본값(0.0001)과 같은 뜻이라 이벤트가 버려지지 않는다.
+      // 위성이 당김을 따라가려면 이벤트가 프레임마다 와야 한다. RN 0.86.2 Fabric 은 16 이하의 값을 제한 없음으로
+      // 읽는다(`ScrollView.js`: 「Values <= 16 will disable throttling, regardless of the refresh rate」,
+      // `RCTScrollViewComponentView.mm` `updateProps`: 1/60초 이하는 0) — 목록의 기본값(0.0001)과 같은 뜻이라
+      // 이벤트가 버려지지 않는다. 이 값은 그 기본이 바뀌어도 프레임마다 오게 하는 명시다.
       scrollEventThrottle: 16,
       onScroll: (event: NativeSyntheticEvent<NativeScrollEvent>) => {
         const y = event.nativeEvent.contentOffset.y;
@@ -360,7 +361,7 @@ function PullHeader({
         <Text
           style={styles.notice}
           numberOfLines={2}
-          maxFontSizeMultiplier={PULL_NOTICE_MAX_SCALE}
+          maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
           testID="pull-refresh-failed">
           {FAILED_COPY}
         </Text>
@@ -402,10 +403,10 @@ const layout = StyleSheet.create({
 
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
-    // 오류 어휘는 다른 화면과 같다(`ErrorState` 의 제목이 `color.danger`). 두 줄까지 접히되 머리(64pt) 안에 선다.
+    // 오류 어휘는 다른 화면과 같다(`ErrorState` 의 제목이 `color.danger`). 두 줄까지 접히되 머리(64pt) 안에 선다:
+    // 크롬의 상한(`BAR_CONTROL_MAX_SCALE`)까지 자라고, 줄 높이는 글자 크기를 따른다(고정하지 않는다).
     notice: {
       fontSize: font.label,
-      lineHeight: line.label,
       color: color.danger,
       fontWeight: '500',
       textAlign: 'center',

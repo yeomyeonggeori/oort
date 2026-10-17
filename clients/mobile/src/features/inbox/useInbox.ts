@@ -451,10 +451,15 @@ export function useAgentFeed(enabled: boolean, ownedBy: string): Feed {
   // this callback was created.
   const refetch = useCallback(
     () =>
-      invalidateAndReport(client, [
-        ['approvals', workspaceId],
-        ['agent-runs', workspaceId],
-      ]),
+      invalidateAndReport(
+        client,
+        [
+          ['approvals', workspaceId],
+          ['agent-runs', workspaceId],
+        ],
+        // 이 서버에는 그 원장이 없다는 답은 화면이 미제공 상태로 접는다(`absent`): 실패가 아니다.
+        {ignoreError: serverSaysAbsent},
+      ),
     [client, workspaceId],
   );
 

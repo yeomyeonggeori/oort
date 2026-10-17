@@ -12,6 +12,7 @@ import {invalidateAndReport} from '../src/query/invalidateReport';
 //   - 오류 검사를 지우고 늘 success 로 답하면 → 「실패한 쿼리」가 붉다
 //   - `type: 'active'` 를 지우면 → 「관찰자 없는 옛 오류는 이번 재조회와 무관하다」가 붉다
 //   - 무효화를 빼면 → 「활성 쿼리를 다시 읽는다」가 붉다
+//   - `ignoreError` 를 무시하면 → 「ignoreError 가 걸러 낸 오류는 실패로 세지 않고」가 붉다
 // =============================================================================
 
 /** gcTime 을 무한으로: 기본 5분 가비지 타이머가 남아 시험 프로세스가 끝나지 않는다. */
@@ -83,6 +84,30 @@ describe('invalidateAndReport', () => {
     ).rejects.toThrow('old');
     expect(client.getQueryState(['a', 'ws'])?.status).toBe('error');
     await expect(invalidateAndReport(client, [['a', 'ws']])).resolves.toEqual({status: 'success', isError: false});
+  });
+
+  it('ignoreError 가 걸러 낸 오류는 실패로 세지 않고, 걸러지지 않은 오류는 센다', async () => {
+    const client = newClient();
+    const stops = [
+      observe(client, ['a', 'ws'], () => Promise.resolve('ok')),
+      observe(client, ['b', 'ws'], () => Promise.reject(new RangeError('이 서버엔 없다'))),
+    ];
+    const ignoreRange = (error: unknown) => error instanceof RangeError;
+    await expect(
+      invalidateAndReport(client, [['a', 'ws'], ['b', 'ws']], {ignoreError: ignoreRange}),
+    ).resolves.toEqual({status: 'success', isError: false});
+    // 같은 오류를 걸러 내지 않으면 실패다.
+    await expect(invalidateAndReport(client, [['a', 'ws'], ['b', 'ws']])).resolves.toEqual({
+      status: 'error',
+      isError: true,
+    });
+    // 걸러 낸 것 말고 진짜 오류가 하나라도 있으면 실패다.
+    const real = observe(client, ['c', 'ws'], () => Promise.reject(new Error('down')));
+    await expect(
+      invalidateAndReport(client, [['b', 'ws'], ['c', 'ws']], {ignoreError: ignoreRange}),
+    ).resolves.toEqual({status: 'error', isError: true});
+    real();
+    stops.forEach(stop => stop());
   });
 
   it('실패했던 쿼리가 다시 읽혀 성공하면 success 다', async () => {

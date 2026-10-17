@@ -9,7 +9,7 @@ import {withPullScroll, usePullRefresh} from '../src/design/refresh';
 import {invalidateAndReport} from '../src/query/invalidateReport';
 import {PULL_FILL, PULL_TRIGGER} from '../src/design/pullRefresh';
 import {OPTICAL, PHASE} from '../src/design/brand/oortLoaderTimeline';
-import {EmptyState, PULL_NOTICE_MAX_SCALE} from '../src/design/atoms';
+import {BAR_CONTROL_MAX_SCALE, EmptyState} from '../src/design/atoms';
 import {FixedScheme} from '../src/design/theme';
 
 // =============================================================================
@@ -446,7 +446,7 @@ describe('실패는 시각으로도 선다', () => {
     release();
     await flush(460);
     const text = screen.getByTestId('pull-refresh-failed', HIDDEN);
-    expect(text.props.maxFontSizeMultiplier).toBe(PULL_NOTICE_MAX_SCALE);
+    expect(text.props.maxFontSizeMultiplier).toBe(BAR_CONTROL_MAX_SCALE);
     expect(text.props.numberOfLines).toBe(2);
   });
 
@@ -760,7 +760,10 @@ describe('모든 화면이 scrollProps 를 펼친다 (소스 스캔, src 전수)
     rel: path.relative(path.join(__dirname, '..'), file),
     text: fs.readFileSync(file, 'utf8'),
   }));
-  const users = sources.filter(({text}) => text.includes(SITE));
+  // `refreshControl={refreshControl}` 리터럴뿐 아니라 훅을 부르는 모든 파일이 대상이다(변수 이름을 바꿔도 빠지지 않게).
+  const users = sources.filter(
+    ({rel, text}) => rel !== 'src/design/refresh.tsx' && (text.includes(SITE) || /\busePullRefresh\(/.test(text)),
+  );
 
   // 바닥: 지금 걸려 있는 곳이 스캔에서 빠지지 않는다(스캔이 헛돌아 0건을 찾는 일을 막는다).
   const KNOWN = [
@@ -785,6 +788,7 @@ describe('모든 화면이 scrollProps 를 펼친다 (소스 스캔, src 전수)
     const spreads = (text.match(SPREAD) ?? []).length;
     expect(`${rel} sites=${sites} spreads=${spreads}`).toBe(`${rel} sites=${sites} spreads=${Math.max(spreads, sites)}`);
     expect(spreads).toBeGreaterThanOrEqual(sites);
+    expect(spreads).toBeGreaterThan(0); // 훅을 부르는 파일은 `scrollProps` 를 어딘가에 펼친다
     // 내용 컨테이너가 뷰포트를 채워야 짧은 목록의 빈 자리에서도 당겨진다(`PULL_FILL`). 빠뜨리면 눈에 띄지 않는 먹통이 된다.
     // 가져오기만 하고 쓰지 않는 것을 잡으려고 두 번 이상(가져오기 + 사용)을 요구한다.
     const fills = (text.match(/PULL_FILL/g) ?? []).length;

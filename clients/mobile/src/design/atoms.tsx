@@ -73,8 +73,6 @@ export const STACK_PILL_SCALE = 1.5;
 export const SAS_MAX_SCALE = 1.35;
 /** 아바타 이니셜 — 32 상자에 13pt 한 글자가 여백을 지키는 끝. */
 export const AVATAR_INITIAL_MAX_SCALE = 1.3;
-/** 당겨서 새로고침 머리의 실패 안내(#3962) — 64pt 고정 높이에 두 줄까지 서는 일시적 안내라 그 높이를 넘지 않는 끝. */
-export const PULL_NOTICE_MAX_SCALE = 1.4;
 
 /** Every tappable thing in this app is at least this tall. */
 const hitStyle = {minHeight: TOUCH_TARGET, justifyContent: 'center'} as const;
