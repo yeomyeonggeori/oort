@@ -13,6 +13,55 @@ import { menuRowClass } from "@/design/ui/dropdown-menu";
 // Positioning, collision handling, arrow-key roving and focus restoration
 // remain Radix's responsibility.
 
+// =============================================================================
+// 메뉴를 연 제스처의 뗌은 항목이 받지 않는다 (#3963 design-review R2 H1)
+//
+// macOS 는 `contextmenu` 를 **누르는 순간** 쏘고 메뉴는 그 순간 열린다. 트랙패드 두 손가락 탭은 누름과
+// 뗌이 몇 ms 사이라서, 그 제스처의 `pointerup` 이 판이 자리를 잡기 전(첫 프레임: 창 왼쪽 위, 투명하지만
+// 히트 테스트는 받는다)에 서 있던 항목 위로 떨어진다. Radix `MenuItem` 은 「누름 없는 뗌」을 「눌러서
+// 끌어 온 선택」으로 읽어 `click()` 하므로(`react-menu` 의 `onPointerUp`), 포인터 아래 항목이 메뉴가
+// 열리는 순간 실행된다 - 섹션 이동·알림 끄기·읽지 않음 표시처럼 서버에 쓰는 항목도 그렇다. 실측: 섹션
+// 6개·창 높이 480 에서 행의 왼쪽(x=100)을 누름·뗌 간격 0 으로 우클릭하면 새 페이지의 첫 시도에서 항목이
+// 실행되고 `PUT sidebar-prefs` 가 나갔다.
+//
+// 그래서 **메뉴를 연 제스처의 뗌**을 항목이 받지 않게 한다. 조건은 둘이다: 메뉴 안에서 누른 적이 없고
+// (`pointerdown`), 마지막 `contextmenu` 로부터 `OPENING_GESTURE_MS` 가 지나지 않았다. 둘을 다 채우면
+// 캡처 단계에서 삼킨다. 메뉴 안에서 누른 뒤의 뗌(= 일부러 고른 클릭)과 그 시간이 지난 뒤의 뗌(= 오래
+// 눌러 끌어서 고르기)은 건드리지 않는다. 이 프리미티브를 쓰는 모든 우클릭 메뉴(메시지 행·세션 목록
+// 포함)가 같은 보호를 받는다.
+// =============================================================================
+
+/** 메뉴를 연 제스처의 뗌이라고 볼 시간(ms). 열림 직후 첫 프레임 몇 개가 문제이고, 사람이 일부러 고르는 속도보다는 짧다. */
+export const OPENING_GESTURE_MS = 400;
+
+const openingGesture = { at: Number.NEGATIVE_INFINITY, pressedInside: false };
+let openingClockInstalled = false;
+
+/**
+ * 모든 `contextmenu` 를 캡처로 들어 시계를 맞춘다. 메뉴는 이 이벤트로 열리고(Radix 트리거) 키보드
+ * (Shift+F10·메뉴 키)도 같은 이벤트다. 열린 메뉴는 하나뿐이므로 모듈 하나의 시계로 충분하다.
+ */
+function installOpeningGestureClock(): void {
+  if (openingClockInstalled || typeof document === "undefined") return;
+  openingClockInstalled = true;
+  document.addEventListener(
+    "contextmenu",
+    () => {
+      openingGesture.at = performance.now();
+      openingGesture.pressedInside = false;
+    },
+    true
+  );
+}
+installOpeningGestureClock();
+
+function isOpeningGestureRelease(): boolean {
+  return (
+    !openingGesture.pressedInside &&
+    performance.now() - openingGesture.at < OPENING_GESTURE_MS
+  );
+}
+
 export const ContextMenu = ContextMenuPrimitive.Root;
 export const ContextMenuTrigger = ContextMenuPrimitive.Trigger;
 /**
@@ -29,24 +78,52 @@ export const ContextMenuContent = React.forwardRef<
     /** MenuContentImpl reads this; public MenuContentProps omits it as private. */
     onOpenAutoFocus?: (event: Event) => void;
   }
->(({ className, container, onOpenAutoFocus, ...props }, ref) => (
-  <ContextMenuPrimitive.Portal container={container ?? undefined}>
-    <ContextMenuPrimitive.Content
-      ref={ref}
-      collisionPadding={8}
-      className={cn(
-        "layer-overlay-surface min-w-pane-sm max-h-menu-available overscroll-contain rounded-lg border border-line bg-surface-raised p-1 text-ink shadow-lg",
-        POPOVER_MOTION,
-        className
-      )}
-      {...props}
-      {...({ onOpenAutoFocus } as React.ComponentPropsWithoutRef<
-        typeof ContextMenuPrimitive.Content
-      >)}
-      data-overlay-layer="surface"
-    />
-  </ContextMenuPrimitive.Portal>
-));
+>(
+  (
+    {
+      className,
+      container,
+      onOpenAutoFocus,
+      onPointerDownCapture,
+      onPointerUpCapture,
+      ...props
+    },
+    ref
+  ) => {
+    React.useEffect(installOpeningGestureClock, []);
+    return (
+      <ContextMenuPrimitive.Portal container={container ?? undefined}>
+        <ContextMenuPrimitive.Content
+          ref={ref}
+          collisionPadding={8}
+          className={cn(
+            // `scrollbar-visible`: 넘치는 판은 열리는 순간 「아래에 더 있다」를 보여야 한다(R2 H2). macOS
+            // 오버레이 스크롤바는 스크롤을 시작한 뒤에야 나타난다.
+            "layer-overlay-surface min-w-pane-sm max-h-menu-available overscroll-contain scrollbar-visible rounded-lg border border-line bg-surface-raised p-1 text-ink shadow-lg",
+            POPOVER_MOTION,
+            className
+          )}
+          {...props}
+          {...({ onOpenAutoFocus } as React.ComponentPropsWithoutRef<
+            typeof ContextMenuPrimitive.Content
+          >)}
+          onPointerDownCapture={(event) => {
+            openingGesture.pressedInside = true;
+            onPointerDownCapture?.(event);
+          }}
+          onPointerUpCapture={(event) => {
+            onPointerUpCapture?.(event);
+            if (isOpeningGestureRelease()) {
+              event.stopPropagation();
+              event.preventDefault();
+            }
+          }}
+          data-overlay-layer="surface"
+        />
+      </ContextMenuPrimitive.Portal>
+    );
+  }
+);
 ContextMenuContent.displayName = ContextMenuPrimitive.Content.displayName;
 
 export const ContextMenuItem = React.forwardRef<

@@ -25,6 +25,11 @@
 //   Z. 채널이 없는 멤버의 첫 DM: X 가 정말 닫는다 — 본문도 다음 대화로 간다(H1).
 //   P. 읽음 투영이 느리거나 실패하면 닫기를 내밀지 않는다(M1).
 //   O. 열린 길: 포인터로 연 메뉴 안의 방향키, 마우스 뒤의 Shift+F10(N1).
+//   (design-review R2 수리분)
+//   Q. 메뉴를 연 제스처의 뗌: 누름·뗌 간격 0 의 우클릭(트랙패드 두 손가락 탭)이 막 열린 판의 항목을 실행하지
+//      않는다(H1). 일부러 고르는 클릭은 열린 직후여도 고른다.
+//   S4/S5. 넘치는 메뉴는 열리는 순간 「아래에 더 있다」가 보이고(스크롤 막대가 자리를 차지한다), 넘치지 않는
+//      메뉴에는 막대가 없다(H2).
 // =============================================================================
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -162,8 +167,8 @@ async function login(page) {
   await page.getByTestId("dm-avatar").first().waitFor({ timeout: 20_000 });
 }
 
-async function open(browserType, origin, scheme, state, viewport = { width: 1440, height: 900 }, ready = "sidebar-section-sec-1") {
-  const browser = await browserType.launch();
+async function open(browserType, origin, scheme, state, viewport = { width: 1440, height: 900 }, ready = "sidebar-section-sec-1", launch = {}) {
+  const browser = await browserType.launch(launch);
   const context = await browser.newContext({ viewport, colorScheme: scheme, serviceWorkers: "block", reducedMotion: "reduce" });
   await installMocks(context, state);
   await context.addInitScript((server) => { try { if (!localStorage.getItem("momo.web.server.v1")) localStorage.setItem("momo.web.server.v1", server); } catch { /* 저장소 없는 캡처 */ } }, origin);
@@ -528,6 +533,7 @@ async function runEngine(browserType, engine, origin) {
     }
   }
   await scenarioOverflow(browserType, engine, origin);
+  await scenarioQuickRightClick(browserType, engine, origin);
   if (full) {
     await scenarioZeroChannels(browserType, engine, origin);
     await scenarioProjection(browserType, engine, origin);
@@ -539,7 +545,10 @@ async function scenarioOverflow(browserType, engine, origin) {
   const scheme = "light";
   const sections = Array.from({ length: 6 }, (_, i) => ({ id: `sec-${i + 1}`, name: `섹션 ${i + 1} 팀 운영`, order: i, channelIds: i === 0 ? [chId(5)] : [] }));
   const state = newState({ prefs: { version: 1, sections, starredChannelIds: [chId(3)] } });
-  const { browser, context, page } = await open(browserType, origin, scheme, state, { width: 1100, height: 480 });
+  // 헤드리스 Chromium 은 기본으로 `--hide-scrollbars` 라 막대가 자리를 차지하지 않는다. 막대가 보이는지(S4)를 재려면
+  // 그 기본 인자를 뺀다(WebKit 은 해당 없음).
+  const launch = engine === "chromium" ? { ignoreDefaultArgs: ["--hide-scrollbars"] } : {};
+  const { browser, context, page } = await open(browserType, origin, scheme, state, { width: 1100, height: 480 }, "sidebar-section-sec-1", launch);
   try {
     await attempt(engine, scheme, "S.menu-overflow", async () => {
       await rowOf(page, chId(4)).click({ button: "right" });
@@ -554,6 +563,15 @@ async function scenarioOverflow(browserType, engine, origin) {
       });
       check(engine, scheme, "S1 1100x480 에서 섹션 6개: 메뉴 판이 창 안에 있다", m.top >= -0.5 && m.bottom <= m.vh + 0.5, m);
       check(engine, scheme, "S2 넘치는 메뉴는 판 안에서 스크롤한다(overflow-y: auto, 내용 > 판)", m.overflowY === "auto" && m.scrollHeight > m.clientHeight, m);
+      // H2: macOS 오버레이 스크롤바는 스크롤을 시작한 뒤에야 나타난다. 열린 **직후** 막대가 자리를 차지해야(= 오버레이가
+      // 아니어야) 「아래에 더 있다」가 보인다.
+      const bar = await page.evaluate(() => {
+        const el = document.querySelector('[data-testid="channel-row-menu"]');
+        const st = getComputedStyle(el);
+        const borders = Number.parseFloat(st.borderLeftWidth) + Number.parseFloat(st.borderRightWidth);
+        return { bar: Math.round((el.offsetWidth - el.clientWidth - borders) * 10) / 10, scrollTop: el.scrollTop };
+      });
+      check(engine, scheme, "S4 넘치는 메뉴는 스크롤하기 전에도 스크롤 막대가 보인다(자리를 차지한다: 오버레이가 아니다)", bar.bar >= 6 && bar.scrollTop === 0, bar);
       if (engine === "chromium" && SHOTS) await page.screenshot({ path: resolve(OUT_DIR, `${PREFIX}-menu-overflow-${scheme}.png`) });
       await page.keyboard.press("End");
       await page.waitForTimeout(250);
@@ -567,6 +585,101 @@ async function scenarioOverflow(browserType, engine, origin) {
       check(engine, scheme, "S3 키보드 End 로 마지막 항목(채널 나가기)에 닿고, 그 항목이 판 안·창 안에 보인다", last.id === "channel-row-leave" && last.inPanel && last.inViewport, last);
       if (engine === "chromium" && SHOTS) await page.screenshot({ path: resolve(OUT_DIR, `${PREFIX}-menu-overflow-end-${scheme}.png`) });
       await closeMenu(page);
+      // S5: 창이 커서 안 넘치면 막대가 없다(자리를 차지하지 않는다 = 메뉴 폭이 달라지지 않는다).
+      await page.setViewportSize({ width: 1100, height: 900 });
+      await page.waitForTimeout(300);
+      await rowOf(page, chId(4)).click({ button: "right" });
+      await page.getByTestId("channel-row-menu").waitFor({ timeout: 5_000 });
+      await page.waitForTimeout(300);
+      const fit = await page.evaluate(() => {
+        const el = document.querySelector('[data-testid="channel-row-menu"]');
+        const st = getComputedStyle(el);
+        const borders = Number.parseFloat(st.borderLeftWidth) + Number.parseFloat(st.borderRightWidth);
+        return { bar: Math.round((el.offsetWidth - el.clientWidth - borders) * 10) / 10, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight };
+      });
+      check(engine, scheme, "S5 넘치지 않는 메뉴에는 스크롤 막대가 없다", fit.scrollHeight <= fit.clientHeight && fit.bar === 0, fit);
+      await closeMenu(page);
+    });
+  } finally {
+    await context.close();
+    await browser.close();
+  }
+}
+
+// ── Q. 메뉴를 연 제스처의 뗌(design-review R2 H1) ──────────────────────────────────
+//
+// macOS 두 손가락 탭 = 누름과 뗌이 몇 ms 사이. 그 뗌이 막 열린 판(첫 프레임: 창 왼쪽 위, 투명)의 항목 위로 떨어지면
+// Radix 가 그 항목을 실행했다(수리 전: 새 페이지의 첫 우클릭에서 `PUT sidebar-prefs`). 섹션 6개·창 높이 480 이라
+// 행이 판 높이 안쪽에 있고, 포인터는 행의 왼쪽(x=100)이다. 항목 실행은 캡처 단계의 click 으로 센다.
+async function scenarioQuickRightClick(browserType, engine, origin) {
+  const scheme = "light";
+  const sections = Array.from({ length: 6 }, (_, i) => ({ id: `sec-${i + 1}`, name: `섹션 ${i + 1} 팀 운영`, order: i, channelIds: i === 0 ? [chId(5)] : [] }));
+  const state = newState({ prefs: { version: 1, sections, starredChannelIds: [chId(3)] } });
+  const { browser, context, page } = await open(browserType, origin, scheme, state, { width: 1100, height: 480 });
+  try {
+    await attempt(engine, scheme, "Q.quick-right-click", async () => {
+      await page.evaluate(() => {
+        window.__hits = [];
+        window.__ctxAt = 0;
+        document.addEventListener("contextmenu", () => { window.__ctxAt = performance.now(); }, true);
+        document.addEventListener("click", (e) => {
+          const it = e.target.closest?.('[role="menuitemradio"],[role="menuitem"]');
+          if (it) window.__hits.push((it.textContent ?? "").trim());
+        }, true);
+      });
+      await page.waitForTimeout(900);
+      await rowOf(page, chId(4)).scrollIntoViewIfNeeded();
+      await page.waitForTimeout(900);
+      const box = await page.evaluate((id) => {
+        const r = document.querySelector(`[data-testid="channel-item"][data-channel-id="${id}"]`).getBoundingClientRect();
+        return { left: r.left, y: r.top + r.height / 2 };
+      }, chId(4));
+      const y = box.y;
+      // 행 안의 x(워크스페이스 레일 위에서 우클릭하면 다른 메뉴·네이티브 메뉴가 선다): 행 왼쪽에서 28·16·56·96px.
+      const xFirst = Math.round(box.left + 28);
+      const writesBefore = state.writes.length; // 로그인·첫 대화 열기가 쓴 것은 제외한다
+      const gesture = async (x, holdMs, settleMs = 500) => {
+        await page.mouse.move(x, y);
+        await page.mouse.down({ button: "right" });
+        if (holdMs > 0) await page.waitForTimeout(holdMs);
+        await page.mouse.up({ button: "right" });
+        await page.waitForTimeout(settleMs);
+      };
+      const menuOpen = async () => (await page.getByTestId("channel-row-menu").count()) > 0;
+      // Q1: 새 페이지의 첫 우클릭, 누름·뗌 간격 0, 행의 왼쪽. 수리 전 번들에서 첫 시도에 항목이 실행됐다.
+      await gesture(xFirst, 0);
+      const first = { hits: await page.evaluate(() => window.__hits), open: await menuOpen(), writes: state.writes.slice(writesBefore) };
+      check(engine, scheme, "Q1 누름·뗌 간격 0 의 첫 우클릭: 포인터 아래 항목이 실행되지 않고 메뉴는 열려 있다", first.hits.length === 0 && first.open && first.writes.length === 0, first);
+      if (first.open) await closeMenu(page);
+      // Q2: 같은 페이지에서 위치·반복을 바꿔(행의 왼쪽 구간 안) 같은 일이 없다.
+      const misses = [];
+      for (const x of [16, 56, 96].map((d) => Math.round(box.left + d))) {
+        for (let i = 0; i < 4; i += 1) {
+          await page.evaluate(() => { window.__hits = []; });
+          await gesture(x, 0, 300);
+          const hits = await page.evaluate(() => window.__hits);
+          if (hits.length > 0) misses.push({ x, hits });
+          if (await menuOpen()) await closeMenu(page);
+          await page.mouse.move(900, 300);
+          await page.waitForTimeout(80);
+        }
+      }
+      check(engine, scheme, "Q2 위치 3곳 x 4번, 간격 0: 항목이 한 번도 실행되지 않는다(서버 쓰기 0건)", misses.length === 0 && state.writes.length === writesBefore, { misses, writes: state.writes.slice(writesBefore) });
+      // Q3: 메뉴 안에서 누른 채 다른 항목 위에서 떼는 선택(끌어서 고르기)은 열린 직후여도 고른다 — 삼키는 것은 메뉴를 연
+      // 제스처의 뗌뿐이다. 이 길은 Radix 의 pointerup 만이 고르므로(떼는 항목에는 누름이 없다) 뗌을 통째로 삼키면 막힌다.
+      await page.evaluate(() => { window.__hits = []; });
+      await gesture(xFirst, 80, 0);
+      await page.waitForSelector('[data-testid="channel-row-mute-toggle"]', { state: "attached", timeout: 5_000 });
+      const picked = await page.evaluate(() => {
+        const from = document.querySelector('[data-testid="channel-row-copy-name"]');
+        const to = document.querySelector('[data-testid="channel-row-mute-toggle"]');
+        const at = performance.now();
+        from.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, button: 0, pointerType: "mouse" }));
+        to.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, cancelable: true, button: 0, pointerType: "mouse" }));
+        return { hits: window.__hits, sinceOpenMs: Math.round(at - window.__ctxAt) };
+      });
+      await page.waitForTimeout(300);
+      check(engine, scheme, "Q3 메뉴 안에서 누른 채 다른 항목 위에서 떼는 선택은 열린 직후(400ms 안)여도 그 항목을 고른다", picked.hits.length === 1 && picked.hits[0].includes("알림") && picked.sinceOpenMs < 400, picked);
     });
   } finally {
     await context.close();

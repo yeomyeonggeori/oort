@@ -138,6 +138,20 @@ describe("행 메뉴는 창보다 길어지면 판 안에서 스크롤한다 (de
     );
     expect(panel).toMatch(/"layer-overlay-surface[^"]*\bmax-h-menu-available\b/);
   });
+
+  it("판은 열린 직후부터 스크롤 막대가 보인다 — 오버레이 막대는 스크롤을 시작한 뒤에야 나타난다 (design-review R2 H2)", () => {
+    const panel = CONTEXT_MENU_SOURCE.slice(
+      CONTEXT_MENU_SOURCE.indexOf("export const ContextMenuContent"),
+      CONTEXT_MENU_SOURCE.indexOf("export const ContextMenuItem")
+    );
+    expect(panel).toMatch(/"layer-overlay-surface[^"]*\bscrollbar-visible\b/);
+    // 그 유틸리티가 자리를 차지하는 막대(8px)를 정의한다. 막대가 오버레이면 「아래에 더 있다」가 첫 화면에 없다.
+    const bar = topLevelBlocks(TOKENS_CSS).find(
+      (block) => block.head === "@utility scrollbar-visible"
+    );
+    expect(bar).toBeDefined();
+    expect(squash(bar!.body)).toMatch(/&::-webkit-scrollbar \{ width: 8px; height: 8px; \}/);
+  });
 });
 
 describe("sidebar-row 유틸리티: X 자리와 아바타 축", () => {
