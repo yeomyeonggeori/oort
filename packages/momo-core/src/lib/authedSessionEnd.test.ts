@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   installCoreHost,
   resetCoreHost,
+  type HostRefreshAnswer,
   type RefreshDeviceProof,
   type SessionPort,
 } from "../runtime/host";
@@ -34,7 +35,12 @@ import { NetworkError, REQUEST_TIMEOUT_MS } from "./http";
 //   B. ①은 갱신 응답이 온 **그 자리에서** 선언한다(보안 경계). 재시도·타이머·네트워크를
 //      기다리지 않는다. 서버가 세션을 끝냈다고 말했는데 화면이 늦게 따라오면 안 된다.
 //   C. 닿지 못한 일이 다음 요청의 갱신을 막지 않는다.
-//   D. 같은 규칙이 바이트를 받는 세 헬퍼(미리보기 이미지·첨부·아바타)에도 선다.
+//   D. 같은 규칙이 바이트를 받는 세 헬퍼(미리보기 이미지·첨부·아바타)에도 선다. 그 헬퍼들은
+//      회전과 별개로 자기 `markAuthExpired()` 줄을 갖고 있고, 회전이 선언하지 않는 경우
+//      (갱신 토큰 없음·잠금 구간에서 토큰이 사라짐·갱신 뒤 재전송도 401)에는 그 줄이 유일한
+//      선언자다. 그래서 헬퍼마다 「정확히 한 번」을 따로 못박는다(독립 검수 F2).
+//   E. 갱신 도중 저장소가 다른 세션으로 바뀌어도 그 새 계정을 만료시키지 않는다.
+//   F. 데스크탑 셸(`refreshThroughHost`)이 답하는 경로도 같은 분류를 쓴다.
 //
 // 세션 목은 상태를 가진다. 어느 쪽이 선언했는지(회전 자신인가, `authedResponse`인가)가
 // 갈리는 시험이 있어서, 선언 횟수를 센다. `expired > 0`만 보는 단정은 한쪽이 지워져도
@@ -88,6 +94,10 @@ interface StageOptions {
   /** 갱신 키가 있는 호스트(폰·데스크탑): 증명을 달아 갱신한다. */
   signer?: boolean;
   exclusiveRotation?: SessionPort["exclusiveRotation"];
+  /** 데스크탑 셸처럼 호스트가 갱신 POST를 직접 한다. 호출 수는 `hostCalls`로 센다. */
+  host?: () => HostRefreshAnswer | null;
+  /** 갱신 POST가 나가는 순간 한 번 불린다(응답이 오기 전에 저장소가 움직이는 경우). */
+  duringRefresh?: () => void;
 }
 
 function stage(script: Scripted[], options: StageOptions = {}) {
@@ -95,8 +105,11 @@ function stage(script: Scripted[], options: StageOptions = {}) {
     access: "access-old",
     refresh: "refresh-1",
     expired: 0,
+    /** 로컬 자격증명을 지운 횟수. 닿지 못한 일은 이것을 건드리면 안 된다. */
+    cleared: 0,
     rotated: [] as string[],
   };
+  let hostCalls = 0;
   const port: SessionPort = {
     getAccessToken: () => session.access,
     getRefreshToken: () => session.refresh,
@@ -117,8 +130,17 @@ function stage(script: Scripted[], options: StageOptions = {}) {
     markAuthExpired: () => {
       session.expired += 1;
     },
-    clearSession: () => {},
+    clearSession: () => {
+      session.cleared += 1;
+    },
   };
+  if (options.host) {
+    const answer = options.host;
+    port.refreshThroughHost = async () => {
+      hostCalls += 1;
+      return answer();
+    };
+  }
   if (options.signer) {
     let nonce = 0;
     port.signRefreshProof = async (request): Promise<RefreshDeviceProof> => {
@@ -150,6 +172,7 @@ function stage(script: Scripted[], options: StageOptions = {}) {
         bearer: new Headers(init?.headers).get("Authorization"),
         body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
       });
+      if (String(url).endsWith(REFRESH_PATH)) options.duringRefresh?.();
       const next = queue.shift();
       // 모자라면 던지되, 던지기 전에 기록했다: 예상 밖의 요청(루프)은 경로 목록 단정에서 드러난다.
       if (next === undefined) throw new Error(`unexpected request ${String(url)}`);
@@ -162,7 +185,12 @@ function stage(script: Scripted[], options: StageOptions = {}) {
       return next;
     })
   );
-  return { session, sent, paths: () => sent.map((request) => request.path) };
+  return {
+    session,
+    sent,
+    paths: () => sent.map((request) => request.path),
+    hostCalls: () => hostCalls,
+  };
 }
 
 async function failureOf(call: () => Promise<unknown>): Promise<unknown> {
@@ -202,7 +230,9 @@ describe("A. 갱신이 닿지 못하면 로그인 만료를 선언하지 않는�
     expect(session.expired).toBe(0);
     // 결정 한 번, 갱신 한 번. 다시 보내지도 갱신을 되풀이하지도 않는다.
     expect(paths()).toEqual([LIST_PATH, REFRESH_PATH]);
-    // 세션은 건드리지 않았다: 갱신 토큰도 접근 토큰도 그대로다.
+    // 세션은 건드리지 않았다: 갱신 토큰도 접근 토큰도 그대로다. 저장소를 지웠는지는
+    // `clearSession` 호출을 세어야 보인다(값만 보면 지운 뒤에도 문자열은 남는다).
+    expect(session.cleared).toBe(0);
     expect(session.refresh).toBe("refresh-1");
     expect(session.access).toBe("access-old");
     expect(session.rotated).toEqual([]);
@@ -231,8 +261,10 @@ describe("A. 갱신이 닿지 못하면 로그인 만료를 선언하지 않는�
     expect(paths()).toEqual([LIST_PATH, REFRESH_PATH]);
   });
 
-  it.each([500, 502, 503, 504])(
-    "갱신 서버가 %i로 답해도 같다: 고장 난 서버는 세션을 판정하지 않았다",
+  // 5xx는 서버가 고장 난 것, 429는 서버가 바쁜 것(openapi가 이 라우트에 문서화한 응답),
+  // 408은 서버가 기다리다 만 것이다. 어느 쪽도 갱신 토큰을 보고 내린 판정이 아니다.
+  it.each([500, 502, 503, 504, 429, 408])(
+    "갱신 서버가 %i로 답해도 같다: 서버가 토큰을 보지 않았으니 세션을 판정하지 않았다",
     async (status) => {
       const { session, paths } = stage([UNAUTHORIZED(), FAILING(status)]);
 
@@ -240,6 +272,7 @@ describe("A. 갱신이 닿지 못하면 로그인 만료를 선언하지 않는�
 
       expectUnreachable(failure);
       expect(session.expired).toBe(0);
+      expect(session.cleared).toBe(0);
       expect(paths()).toEqual([LIST_PATH, REFRESH_PATH]);
       expect(session.refresh).toBe("refresh-1");
     }
@@ -279,6 +312,89 @@ describe("A. 갱신이 닿지 못하면 로그인 만료를 선언하지 않는�
     expectUnreachable(second);
     expect(session.expired).toBe(0);
     expect(sent.filter((request) => request.path === REFRESH_PATH)).toHaveLength(1);
+  });
+});
+
+describe("A'. 한 갱신의 뒷 시도에서 서버 오류가 와도 세션을 지킨다 (#3993)", () => {
+  // 증명한 갱신은 stale이면 서버 시각으로 한 번 다시 서명한다. 그 다시 서명한 시도가 5xx를
+  // 받으면 서버는 아직 아무 판정도 하지 않은 것이다. 이전에는 sign-out이었다.
+  it("stale 401 뒤 재서명한 시도가 503이면 유지한다: 세 번째 시도는 없다", async () => {
+    const { session, paths } = stage(
+      [
+        UNAUTHORIZED(),
+        reply(401, { error: { message: "stale", code: "refresh_proof_stale" } }),
+        FAILING(503),
+        // 이 아래는 소비돼서는 안 된다.
+        ROTATED(),
+      ],
+      { signer: true }
+    );
+
+    const failure = await failureOf(() => authedRequest(LIST_PATH));
+
+    expectUnreachable(failure);
+    expect(session.expired).toBe(0);
+    expect(session.cleared).toBe(0);
+    expect(paths()).toEqual([LIST_PATH, REFRESH_PATH, REFRESH_PATH]);
+  });
+
+  // 같은 규칙을 데스크탑 셸이 갱신을 대신 보내는 경로도 쓴다: 셸은 상태 코드를 그대로
+  // 코어에 넘기고 토큰을 지우지 않는다(`session_refresh/mod.rs`). 분류는 코어의 몫이다.
+  it("셸이 503으로 답하면 유지한다: 셸을 한 번만 부르고 연결 오류로 끝난다", async () => {
+    const { session, paths, hostCalls } = stage([UNAUTHORIZED()], {
+      host: () => ({ status: 503, proved: true }),
+    });
+
+    const failure = await failureOf(() => authedRequest(LIST_PATH));
+
+    expectUnreachable(failure);
+    expect(hostCalls()).toBe(1);
+    expect(session.expired).toBe(0);
+    expect(session.cleared).toBe(0);
+    // 셸이 갱신을 전담하므로 코어는 갱신 POST를 직접 보내지 않는다.
+    expect(paths()).toEqual([LIST_PATH]);
+  });
+
+  it("셸이 저장된 토큰이 없다고(401 session_absent) 답하면 그 자리에서 선언한다", async () => {
+    vi.useFakeTimers();
+    const { session, paths, hostCalls } = stage([UNAUTHORIZED()], {
+      host: () => ({ status: 401, code: "session_absent", proved: false }),
+    });
+
+    const failure = await failureOf(() => authedRequest(LIST_PATH));
+
+    expectSessionEnded(failure);
+    expect(hostCalls()).toBe(1);
+    expect(session.expired).toBeGreaterThan(0);
+    expect(paths()).toEqual([LIST_PATH]);
+  });
+});
+
+describe("E. 갱신 도중 저장소가 다른 세션으로 바뀌어도 그 계정을 만료시키지 않는다 (#3993)", () => {
+  // 다른 탭이 다른 계정으로 로그인해 저장소를 갈아엎은 사이에 이 탭의 갱신이 끝난다. 갱신은
+  // 이 탭이 내민 세션의 것이라 새 계정에 적용되지 않고(`rotateOnce`), 그 쌍은 폐기된다. 이
+  // 갈래는 예전에는 401이 남아 `markAuthExpired()`로 새로 들어온 계정을 로그아웃시킬 수 있었다.
+  it("새 계정의 토큰은 그대로이고 만료 선언도 없다", async () => {
+    const stolen = "refresh-of-someone-else";
+    // 시험 안에서 `session`은 `stage`가 돌려주므로, 훅은 그 참조를 닫고 쓴다.
+    let moved: () => void = () => {};
+    const { session, paths } = stage(
+      [UNAUTHORIZED(), ROTATED(), reply(200, { status: "revoked" })],
+      { duringRefresh: () => moved() }
+    );
+    moved = () => {
+      session.refresh = stolen;
+    };
+
+    const failure = await failureOf(() => authedRequest(LIST_PATH));
+
+    expectUnreachable(failure);
+    expect(session.expired).toBe(0);
+    expect(session.cleared).toBe(0);
+    expect(session.refresh).toBe(stolen);
+    // 갱신으로 받은 쌍은 아무도 쥐지 않으므로 이 탭이 쓰지 않는다.
+    expect(session.rotated).toEqual([]);
+    expect(paths().slice(0, 2)).toEqual([LIST_PATH, REFRESH_PATH]);
   });
 });
 
@@ -478,6 +594,47 @@ describe.each(BLOB_CASES)("D. %s", (_name, path, call) => {
     expectSessionEnded(failure);
     expect(session.expired).toBeGreaterThan(0);
     expect(paths()).toEqual([path, REFRESH_PATH]);
+  });
+
+  // 아래 셋은 헬퍼 자신의 `markAuthExpired()` 줄이 유일한 선언자가 되는 경우다. 앞의 「거절」
+  // 시험은 회전이 스스로 선언하는 경로라서 헬퍼의 선언 줄을 지워도 초록으로 남았다(독립
+  // 검수 F2: 세 헬퍼의 줄을 지워도 코어 전체가 통과했다). `toBe(1)`은 그 한 번이 누구의
+  // 것인지까지 가린다: 회전이 선언하지 않았으니 헬퍼가 했어야 한다.
+  it("잠금 구간에서 갱신 토큰이 사라졌으면 갱신 요청 없이 그 자리에서 한 번 선언한다", async () => {
+    const { session, paths } = stage([UNAUTHORIZED()], {
+      // 다른 탭이 로그아웃한 사이 호스트의 배타 구간이 저장소를 다시 읽으면 내밀 토큰이 없다.
+      exclusiveRotation: async <T>(work: () => Promise<T>): Promise<T> => {
+        session.refresh = "";
+        return work();
+      },
+    });
+
+    const failure = await failureOf(call);
+
+    expectSessionEnded(failure);
+    expect(session.expired).toBe(1);
+    expect(paths()).toEqual([path]);
+  });
+
+  it("갱신은 됐는데 새 토큰으로 다시 받은 것도 401이면 한 번 선언한다: 루프가 없다", async () => {
+    const { session, paths } = stage([UNAUTHORIZED(), ROTATED(), UNAUTHORIZED()]);
+
+    const failure = await failureOf(call);
+
+    expectSessionEnded(failure);
+    expect(session.expired).toBe(1);
+    expect(paths()).toEqual([path, REFRESH_PATH, path]);
+  });
+
+  it("갱신 토큰이 아예 없으면 갱신 없이 한 번 선언한다", async () => {
+    const { session, paths } = stage([UNAUTHORIZED()]);
+    session.refresh = "";
+
+    const failure = await failureOf(call);
+
+    expectSessionEnded(failure);
+    expect(session.expired).toBe(1);
+    expect(paths()).toEqual([path]);
   });
 
   it("갱신이 되면 새 토큰으로 다시 받는다", async () => {

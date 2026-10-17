@@ -140,8 +140,9 @@ describe("refreshSessionOutcome — 세 결말이 구별된다", () => {
     await expect(refreshSessionOutcome()).resolves.toBe("rejected");
   });
 
-  it.each([500, 502, 503, 504])(
-    "서버 오류(%i)는 unreachable — 고장 난 서버는 세션을 판정하지 않았다 (#3993)",
+  // 429는 서버가 바쁜 것(openapi가 이 라우트에 문서화한 응답), 408은 기다리다 만 것이다.
+  it.each([500, 502, 503, 504, 429, 408])(
+    "서버 응답 %i는 unreachable — 서버가 토큰을 보지 않았으니 세션을 판정하지 않았다 (#3993)",
     async (status) => {
       install(port().base);
       vi.stubGlobal(

@@ -792,12 +792,12 @@ function parseError(res: HttpResponse): ApiError {
  * the caller simply had no way to honour it.
  *
  * `unreachable` is every answer that decided nothing: no connection, a blown
- * deadline, a lock that never came free, and a **server error** (5xx, #3993). A
- * 5xx comes from a server that is failing — a deploy, a database blip — not from
- * one that has looked at the refresh token and refused it, so it is not "the
- * session is over" any more than a dropped connection is. The server says that
- * with a 401 (refused, spent, reused, proof refused) or a 403 (the member is
- * gone), and those stay `rejected`.
+ * deadline, a lock that never came free, and a server that says it could not or
+ * would not look at the token — a **5xx** (a deploy, a database blip), a **429**
+ * (rate limited, which `docs/api/openapi.yaml` lists for this route) or a **408**
+ * (#3993). None of those is "the session is over" any more than a dropped
+ * connection is. The server says that with a 401 (refused, spent, reused, proof
+ * refused) or a 403 (the member is gone), and those stay `rejected`.
  */
 export type RefreshOutcome = "rotated" | "rejected" | "unreachable";
 
@@ -832,8 +832,11 @@ interface Rotation {
 //   any other 401 on a       re-sign ONCE, then sign out — two recoveries of the
 //   proved refresh           same device racing: the loser gets a plain 401
 //                            (client contract MUST 2)
-//   any 5xx                  keep the session, give this rotation up (#3993):
-//                            a failing server has decided nothing about it
+//   5xx, 429, 408            keep the session, give this rotation up (#3993): a
+//                            server that is failing, busy or too slow has
+//                            decided nothing about it
+//   any other status         sign out (as before; 403 is the server's "the member
+//                            is gone")
 //
 // A lost answer (timeout, app killed) needs nothing here: the stored token is
 // kept, and the next rotation presents it with a fresh proof — the server
@@ -856,6 +859,14 @@ export const MAX_REFRESH_ATTEMPTS = 3;
 export type RefreshRetry = "sign-out" | "re-sign" | "re-sign-with-server-time" | "keep";
 
 /**
+ * A status that says the server did not look at the refresh token: it is failing
+ * (5xx), busy (429) or too slow (408). Not a verdict on the session (#3993).
+ */
+function undecided(status: number): boolean {
+  return status >= 500 || status === 429 || status === 408;
+}
+
+/**
  * The retry policy, pure. `plainRetried`: a plain 401 on a proved refresh
  * already had its one retry in this rotation.
  */
@@ -865,11 +876,12 @@ export function refreshRetry(
   proved: boolean,
   plainRetried: boolean
 ): RefreshRetry {
-  // A server error is not a verdict on the refresh token (#3993). It used to fall
-  // through to the line below, so a deploy or a database blip during a refresh
-  // signed the person out — and `restoreSession()` wiped the stored token for
-  // good. The 4xx that ARE verdicts (403: the member is gone) still sign out.
-  if (status >= 500) return "keep";
+  // These used to fall through to the line below, so a deploy or a database blip
+  // during a refresh signed the person out — and `restoreSession()` wiped the
+  // stored token for good. Every other status keeps its old reading: 401 and 403
+  // are the server's own verdicts, and the rest was never a case this route
+  // answered.
+  if (undecided(status)) return "keep";
   if (status !== 401) return "sign-out";
   if (code === "refresh_proof_stale") return "re-sign-with-server-time";
   if (code === "refresh_proof_replayed") return "re-sign";
@@ -1023,10 +1035,10 @@ function rotateSession(): Promise<Rotation> {
         ? await session.exclusiveRotation(rotateOnce)
         : await rotateOnce();
     } catch {
-      // Offline, unreachable server, a blown deadline, a cross-context lock
-      // that never came free, or a server that could only answer 5xx: the caller
-      // keeps rendering cached content (P15) and the session is not declared
-      // dead, because nothing answered to say it is.
+      // Offline, unreachable server, a blown deadline, a cross-context lock that
+      // never came free, or a server that said it could not look at the token
+      // (5xx, 429, 408): the caller keeps rendering cached content (P15) and the
+      // session is not declared dead, because nothing answered to say it is.
       return { outcome: "unreachable", pair: null };
     } finally {
       rotationInFlight = null;
@@ -1162,11 +1174,11 @@ function bindRefreshKey(retry: number): void {
  *   unreachable  → throws a `NetworkError`. The connection dropped between the
  *                  401 and the rotation (a subway, a lift, a radio still waking
  *                  after the lock screen), the deadline blew, or the server could
- *                  only answer 5xx: nothing decided anything, so the session is
- *                  not declared over — the rule `restoreSession()` and the
- *                  phone's boot gate already keep. The 401 is not the answer
- *                  either: it described an expired access token, and every
- *                  caller that reads a 401 as "log in again" would lie. A
+ *                  only answer 5xx, 429 or 408: nothing decided anything, so
+ *                  the session is not declared over — the rule `restoreSession()`
+ *                  and the phone's boot gate already keep. The 401 is not the
+ *                  answer either: it described an expired access token, and
+ *                  every caller that reads a 401 as "log in again" would lie. A
  *                  `NetworkError` is the failure they already render ("could not
  *                  reach the server, check the connection and try again"); the
  *                  next request, or the reconnect, rotates again.
