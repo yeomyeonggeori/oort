@@ -15,6 +15,7 @@ import {
   fetchMemberAvatar,
   fetchUnfurlImage,
   fetchWorkspaceAvatar,
+  rotateAfterUnauthorized,
   sendMessage,
 } from "./api";
 import { NetworkError, REQUEST_TIMEOUT_MS } from "./http";
@@ -646,4 +647,66 @@ describe.each(BLOB_CASES)("D. %s", (_name, path, call) => {
     expect(sent[2]?.bearer).toBe("Bearer access-new");
     expect(session.expired).toBe(0);
   });
+});
+
+// ---- 공개 면: 폰의 파일 다운로드가 직접 부른다 (#3997) -----------------------------
+// 폰의 첨부·아바타는 네이티브 다운로더(`File.downloadFileAsync`)로 받아서 `authedResponse`를
+// 탈 수 없다. 그 두 곳이 갱신을 읽는 규칙을 손으로 다시 적지 않도록 코어가 이 헬퍼를 내보낸다.
+// 위 시험들은 `authedResponse`와 바이트 헬퍼를 통해 이 규칙을 재고, 여기서는 폰이 기대는
+// 세 갈래의 계약 자체를 직접 못박는다: true = 다시 받는다, false = 호출자가 선언한다,
+// 던짐 = 선언 없이 그 요청만 실패한다.
+describe("rotateAfterUnauthorized — 다운로드가 직접 쓰는 세 갈래 (#3997)", () => {
+  it("갱신이 되면 true: 새 토큰이 저장소에 들어 있고 선언은 없다", async () => {
+    const { session, paths } = stage([ROTATED()]);
+
+    await expect(rotateAfterUnauthorized()).resolves.toBe(true);
+
+    expect(paths()).toEqual([REFRESH_PATH]);
+    expect(session.access).toBe("access-new");
+    expect(session.refresh).toBe("refresh-2");
+    expect(session.expired).toBe(0);
+  });
+
+  it("서버가 갱신을 거절하면 false: 세션이 끝났다", async () => {
+    const { session, paths } = stage([REUSED()]);
+
+    await expect(rotateAfterUnauthorized()).resolves.toBe(false);
+
+    expect(paths()).toEqual([REFRESH_PATH]);
+    expect(session.expired).toBeGreaterThan(0);
+  });
+
+  it("내밀 갱신 토큰이 없으면 false: 갱신 요청 없이 호출자가 선언할 차례다", async () => {
+    const { session, paths } = stage([]);
+    session.refresh = "";
+
+    await expect(rotateAfterUnauthorized()).resolves.toBe(false);
+
+    expect(paths()).toEqual([]);
+  });
+
+  it("닿지 못하면 NetworkError: 선언 없이 던지고 저장소는 그대로다", async () => {
+    const { session, paths } = stage(["down"]);
+
+    const failure = await failureOf(rotateAfterUnauthorized);
+
+    expectUnreachable(failure);
+    expect(paths()).toEqual([REFRESH_PATH]);
+    expect(session.expired).toBe(0);
+    expect(session.cleared).toBe(0);
+    expect(session.refresh).toBe("refresh-1");
+  });
+
+  it.each([500, 503, 429, 408])(
+    "서버가 %i로 답해도 NetworkError: 서버가 토큰을 보지 않았다",
+    async (status) => {
+      const { session, paths } = stage([FAILING(status)]);
+
+      const failure = await failureOf(rotateAfterUnauthorized);
+
+      expectUnreachable(failure);
+      expect(paths()).toEqual([REFRESH_PATH]);
+      expect(session.expired).toBe(0);
+    }
+  );
 });
