@@ -3,24 +3,74 @@
     "overflow": 0,
     "banner": {
       "x": 70,
-      "y": 820,
+      "y": 824,
       "width": 242,
-      "height": 68
-    }
+      "height": 64
+    },
+    "look": {
+      "radius": 14,
+      "shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(255, 255, 255, 0) 0px 1px 0px 0px inset, rgba(40, 30, 20, 0.05) 0px 1px 2px 0px, rgba(40, 30, 20, 0.14) 0px 8px 24px -10px, rgba(0, 0, 0, 0) 0px 10px 28px -12px",
+      "background": "rgba(255, 254, 252, 0.74)"
+    },
+    "sizes": {
+      "title": 14,
+      "detail": 12,
+      "selfName": 14
+    },
+    "titleOffsetX": 3
   },
   "f-light": {
     "overflow": 0
+  },
+  "g-light": {
+    "overflow": 0,
+    "failure": "알림 설정을 바꾸지 못했어요. 다시 시도하세요."
+  },
+  "h-light": {
+    "overflow": 0,
+    "text": "알림 일시 중지 중 · 10월 19일(월) 오전 9:00까지",
+    "detailLines": 2,
+    "detailRight": 222.375,
+    "actionLeft": 230.375,
+    "cardRight": 312,
+    "actionRight": 299,
+    "titleRight": 222.375
   },
   "a-dark": {
     "overflow": 0,
     "banner": {
       "x": 70,
-      "y": 820,
+      "y": 824,
       "width": 242,
-      "height": 68
-    }
+      "height": 64
+    },
+    "look": {
+      "radius": 14,
+      "shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(255, 255, 255, 0.04) 0px 1px 0px 0px inset, rgba(0, 0, 0, 0) 0px 1px 2px 0px, rgba(0, 0, 0, 0) 0px 8px 24px -10px, rgba(0, 0, 0, 0.6) 0px 10px 28px -12px",
+      "background": "rgba(32, 35, 43, 0.72)"
+    },
+    "sizes": {
+      "title": 14,
+      "detail": 12,
+      "selfName": 14
+    },
+    "titleOffsetX": 3
   },
   "f-dark": {
     "overflow": 0
+  },
+  "g-dark": {
+    "overflow": 0,
+    "failure": "알림 설정을 바꾸지 못했어요. 다시 시도하세요."
+  },
+  "h-dark": {
+    "overflow": 0,
+    "text": "알림 일시 중지 중 · 10월 19일(월) 오전 9:00까지",
+    "detailLines": 2,
+    "detailRight": 222.375,
+    "actionLeft": 230.375,
+    "cardRight": 312,
+    "actionRight": 299,
+    "titleRight": 222.375
   }
 }
