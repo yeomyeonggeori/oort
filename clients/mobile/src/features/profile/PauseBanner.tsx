@@ -87,6 +87,14 @@ import {
 /** 방금 누른 줄과 **다른 종류**의 단추를 받지 않는 시간. 같은 줄의 다시 시도는 막지 않는다. */
 const FLIP_GUARD_MS = 1500;
 
+/**
+ * 기한 줄이 접힐 때 「9:00 / 까지」처럼 조사만 둘째 줄에 홀로 남지 않게 한다. iOS 는 숫자와 한글 사이를 끊을 수 있는
+ * 자리로 보고(`hangul-word` 는 한글 **낱말** 우선일 뿐 숫자-한글 경계를 막지 않는다), 가장 큰 글씨(AX5)에서 날짜가
+ * 붙는 기한이 실제로 그렇게 끊겼다(캡처). 단어 결합자(U+2060)는 보이지 않는 글자라 읽히는 문장은 그대로다.
+ */
+const WORD_JOINER = '\u2060';
+const joinSuffix = (text: string): string => text.replace(/([0-9])까지$/, `$1${WORD_JOINER}까지`);
+
 export function PauseBanner({
   workspaceId,
   selfId,
@@ -200,7 +208,7 @@ export function PauseBanner({
               numberOfLines={2}
               maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
               testID="pause-banner-detail">
-              {banner.detail}
+              {joinSuffix(banner.detail)}
             </Sentence>
           )}
         </View>

@@ -307,11 +307,14 @@ async function settledAfterReads() {
 const presenceWrites = () => server.writes.filter(w => w.path === 'presence');
 const rulesWrites = () => server.writes.filter(w => w.path === 'notification-rules');
 /** 줄의 제목과 (있으면) 기한을 「 · 」로 이은 글 — 화면에서는 두 줄로 쌓인다. */
+/** 기한 줄의 보이지 않는 단어 결합자(U+2060). 그려진 글에서 걷어내고 코어 문장과 견준다. */
+const WORD_JOINER = '\u2060';
 const lineOf = (hidden = false) => {
   const title = screen.getByTestId('pause-banner-title', {includeHiddenElements: hidden}).props
     .children as string;
-  const detail = screen.queryByTestId('pause-banner-detail', {includeHiddenElements: hidden})?.props
-    .children as string | undefined;
+  const rawDetail = screen.queryByTestId('pause-banner-detail', {includeHiddenElements: hidden})
+    ?.props.children as string | undefined;
+  const detail = rawDetail?.split(WORD_JOINER).join('');
   return detail === undefined ? title : `${title} · ${detail}`;
 };
 const action = () => screen.getByTestId('pause-banner-action');
@@ -326,7 +329,8 @@ describe('인박스 맨 위의 멈춤 줄 (ADR-0204 D3)', () => {
     expect(lineOf()).toBe('알림 일시 중지 중 · 오후 9:30까지');
     // 제목과 기한은 두 칸으로 쌓인다(웹 사이드바와 같은 모양). 문장 전체는 단추의 이름이다.
     expect(screen.getByTestId('pause-banner-title')).toHaveTextContent('알림 일시 중지 중');
-    expect(screen.getByTestId('pause-banner-detail')).toHaveTextContent('오후 9:30까지');
+    // 기한 줄은 숫자 뒤의 「까지」를 한 낱말로 묶는다(가장 큰 글씨에서 조사만 둘째 줄에 홀로 남던 줄바꿈).
+    expect(screen.getByTestId('pause-banner-detail').props.children).toBe(`오후 9:30${WORD_JOINER}까지`);
     expect(action()).toHaveTextContent('다시 켜기');
     expect(action().props.accessibilityLabel).toBe('알림 일시 중지 중 · 오후 9:30까지 · 다시 켜기');
     expect(action().props.accessibilityRole).toBe('button');
@@ -360,7 +364,24 @@ describe('인박스 맨 위의 멈춤 줄 (ADR-0204 D3)', () => {
     await openInbox();
     await shownBanner();
     expect(lineOf()).toBe('알림 일시 중지 중 · 기한 없음');
+    // 「까지」가 없는 기한 줄에는 결합자가 붙지 않는다.
+    expect(screen.getByTestId('pause-banner-detail').props.children).toBe('기한 없음');
     expect(action().props.accessibilityLabel).toBe('알림 일시 중지 중 · 기한 없음 · 다시 켜기');
+  });
+
+  it('날짜가 붙는 먼 기한도 한 줄 문장으로 말하고, 「까지」는 숫자 뒤에서 묶인다', async () => {
+    freezeClock(FRI_2107);
+    // 2026-10-19 는 월요일이다(「다음 주 월요일 오전 9시까지」 프리셋의 모양).
+    server.rules = {dnd: true, mentionOverridesMute: false, dndUntilMs: at(19, 9)};
+    await openInbox();
+    await shownBanner();
+    expect(lineOf()).toBe('알림 일시 중지 중 · 10월 19일(월) 오전 9:00까지');
+    expect(screen.getByTestId('pause-banner-detail').props.children).toBe(
+      `10월 19일(월) 오전 9:00${WORD_JOINER}까지`,
+    );
+    expect(action().props.accessibilityLabel).toBe(
+      '알림 일시 중지 중 · 10월 19일(월) 오전 9:00까지 · 다시 켜기',
+    );
   });
 
   it('일시 중지도 방해 금지도 아니면 줄이 없다', async () => {
@@ -545,6 +566,31 @@ describe('「다시 켜기」와 「풀기」 — 쓰기 모양', () => {
     // 서버가 확정하고 시간이 지난 뒤에는 「풀기」가 정상으로 일한다.
     freezeClock(FRI_2107 + 3_000);
     await waitFor(() => expect(action()).toHaveTextContent('풀기'));
+    fireEvent.press(action());
+    await waitFor(() => expect(presenceWrites()).toHaveLength(1));
+    expect(presenceWrites()[0].body).toEqual({status: 'auto'});
+  });
+
+  it('서버가 곧바로 확정해도 방금 누른 줄과 다른 종류의 단추는 잠깐 받지 않고, 지나면 받는다 (보호 시간만)', async () => {
+    freezeClock(FRI_2107);
+    server.rules = {dnd: true, mentionOverridesMute: false, dndUntilMs: at(16, 22, 0)};
+    server.self = selfRow({presenceStatus: 'dnd', dndUntilMs: at(16, 22, 0)});
+    await openInbox();
+    await shownBanner();
+    fireEvent.press(action());
+    await waitFor(() => expect(rulesWrites()).toHaveLength(1));
+    // 쓰기가 끝났다(단추가 다시 눌릴 수 있다). 같은 자리에는 「풀기」가 서 있다.
+    await waitFor(() => expect(action()).toBeEnabled());
+    expect(action()).toHaveTextContent('풀기');
+    // 쓰기 잠금은 풀렸어도 방금 누른 직후의 반대 종류 단추다: 상태 해제를 보내지 않는다.
+    fireEvent.press(action());
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 150));
+    });
+    expect(presenceWrites()).toEqual([]);
+
+    // 시간이 지나면 「풀기」는 정상으로 일한다.
+    freezeClock(FRI_2107 + 3_000);
     fireEvent.press(action());
     await waitFor(() => expect(presenceWrites()).toHaveLength(1));
     expect(presenceWrites()[0].body).toEqual({status: 'auto'});
