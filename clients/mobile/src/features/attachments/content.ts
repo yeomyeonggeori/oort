@@ -1,4 +1,4 @@
-import { refreshSession, type MessageAttachment } from '@momo/core/lib/api';
+import { rotateAfterUnauthorized, type MessageAttachment } from '@momo/core/lib/api';
 import { apiBase, coreSession } from '@momo/core/runtime/host';
 import { Directory, File, Paths } from 'expo-file-system';
 import { useEffect, useState } from 'react';
@@ -140,7 +140,11 @@ export async function downloadAttachmentFile(
         ) {
           throw error;
         }
-        if (!(await refreshSession())) throw error;
+        // 회전이 어떻게 끝났는지 읽는 규칙은 코어의 것이다(#3997): 거절이면 `false` 라서
+        // 원래의 401 이 바깥 catch 로 가 선언되고, 서버에 닿지 못했으면 코어가 연결
+        // 오류를 던진다. 그 문구는 401 로 읽히지 않으므로 바깥 catch 가 선언하지 않고,
+        // 이 다운로드만 실패한다(다음 요청이 다시 갱신한다).
+        if (!(await rotateAfterUnauthorized())) throw error;
         return await streamToFile(
           workspaceId,
           channelId,
