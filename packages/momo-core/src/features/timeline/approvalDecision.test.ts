@@ -382,7 +382,7 @@ describe("결정 전송은 401이면 한 번 갱신하고 같은 요청을 다�
   });
 
   it("갱신에 닿지 못해도 오류로 끝난다: 되풀이하지 않는다", async () => {
-    const { sent } = stage([UNAUTHORIZED(), new TypeError("network down")]);
+    const { session, sent } = stage([UNAUTHORIZED(), new TypeError("network down")]);
 
     const outcome = await decideApproval(WS, APPROVAL, true, KEY);
 
@@ -391,6 +391,57 @@ describe("결정 전송은 401이면 한 번 갱신하고 같은 요청을 다�
       DECISION_PATH,
       REFRESH_PATH,
     ]);
+    // 닿지 못한 것은 세션이 끝났다는 뜻이 아니다 (#3993). 잠금 화면에서 돌아와 누른 순간
+    // 무선이 아직 깨는 중이었을 뿐이므로, 「다시 로그인」이 아니라 「연결을 확인하고 다시
+    // 눌러 주세요」라고 말하고, 만료를 선언하지 않는다.
+    expect(outcome.errorCopy).toMatch(/서버에 닿지 못했어요/);
+    expect(outcome.errorCopy).not.toMatch(/로그인이 만료/);
+    expect(session.expired).toBe(0);
+  });
+
+  it("갱신 서버가 오류(503)로 답해도 로그인 만료로 말하지 않는다", async () => {
+    const { session } = stage([
+      UNAUTHORIZED(),
+      answer(503, { error: { message: "unavailable" } }),
+    ]);
+
+    const outcome = await decideApproval(WS, APPROVAL, true, KEY);
+
+    expect(outcome.kind).toBe("error");
+    expect(outcome.errorCopy).toMatch(/서버에 닿지 못했어요/);
+    expect(outcome.errorCopy).not.toMatch(/로그인이 만료/);
+    expect(session.expired).toBe(0);
+  });
+
+  it("닿지 못한 뒤 같은 키로 다시 누르면 그때 갱신해서 결정된다", async () => {
+    const { session, sent } = stage([
+      // 첫 시도: 끊겨 있었다.
+      UNAUTHORIZED(),
+      new TypeError("network down"),
+      // 다시 누름: 연결이 돌아왔다.
+      UNAUTHORIZED(),
+      ROTATED(),
+      RECEIPT(),
+    ]);
+
+    const first = await decideApproval(WS, APPROVAL, true, KEY);
+    const second = await decideApproval(WS, APPROVAL, true, KEY);
+
+    expect(first.kind).toBe("error");
+    expect(second.kind).toBe("committed");
+    expect(sent.map((request) => request.path)).toEqual([
+      DECISION_PATH,
+      REFRESH_PATH,
+      DECISION_PATH,
+      REFRESH_PATH,
+      DECISION_PATH,
+    ]);
+    // 두 번의 결정은 같은 결정이다: 같은 멱등 키가 두 번 나갔다.
+    expect(sent[0]?.body?.client_decision_id).toBe(KEY);
+    expect(sent[4]?.body?.client_decision_id).toBe(KEY);
+    expect(sent[4]?.bearer).toBe("Bearer access-new");
+    expect(session.refresh).toBe("refresh-2");
+    expect(session.expired).toBe(0);
   });
 
   it("갱신은 됐는데 다시 보낸 것도 401이면 거기서 끝난다: 루프가 없다", async () => {
