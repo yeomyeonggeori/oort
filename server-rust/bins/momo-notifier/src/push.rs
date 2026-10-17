@@ -37,8 +37,10 @@ use momo_outbox::{
     reclaim_stuck_push_candidates, requeue, ClaimedPushCandidate,
 };
 use momo_push::{
-    claim_dispatch, collapse_id, judge_targets, settle_dispatch, unread_badge, DispatchClaim,
-    DispatchOutcome, DispatchTarget, JudgedTarget, PushCandidate, PushDispatch, PushDispatcher,
+    claim_dispatch, collapse_id, judge_targets, settle_dispatch_and_invalidate,
+    settle_relay_refusal, unread_badge, DispatchClaim, DispatchOutcome, DispatchTarget,
+    JudgedTarget, PushCandidate, PushDispatch, PushDispatcher, RefusalOutcome, RelayRefusal,
+    SettleOutcome,
 };
 use uuid::Uuid;
 
@@ -266,7 +268,7 @@ impl PushDrain {
                 apns_status,
                 apns_reason,
             } => {
-                self.settle(workspace_id, log_id, apns_status, apns_reason)
+                self.settle_receipt(workspace_id, log_id, target, apns_status, apns_reason)
                     .await;
                 Ok(true)
             }
@@ -277,20 +279,16 @@ impl PushDrain {
                 // Settle with the relay's REAL status and a `relay_http:`
                 // prefix, so a later token-invalidation pass can never mistake a
                 // relay-level 400 for an APNs BadDeviceToken and revoke healthy
-                // tokens (review #424 M1).
+                // tokens (review #424 M1). A relay 400 also leaves one audit row
+                // per token per hour and NEVER invalidates the token (ADR-0204 D9).
                 tracing::error!(
                     collapse_id = %collapse,
                     relay_http_status,
                     reason = %reason,
                     "permanent dispatch failure; settled with the relay status"
                 );
-                self.settle(
-                    workspace_id,
-                    log_id,
-                    relay_http_status,
-                    Some(format!("relay_http: {reason}")),
-                )
-                .await;
+                self.settle_refusal(workspace_id, log_id, target, relay_http_status, &reason)
+                    .await;
                 Ok(true)
             }
             DispatchOutcome::TransientFailure(reason) => {
@@ -299,27 +297,114 @@ impl PushDrain {
         }
     }
 
-    async fn settle(
+    /// Record the relay's APNs receipt and, when it says the token is dead,
+    /// invalidate the token in the same transaction (ADR-0204 D9).
+    async fn settle_receipt(
         &self,
         workspace_id: Uuid,
         log_id: Uuid,
+        target: &JudgedTarget,
         apns_status: i32,
         apns_reason: Option<String>,
     ) {
+        let token_id = target.token_id;
         let result = with_tenant_tx(&self.pool, workspace_id, move |conn| {
             Box::pin(async move {
-                settle_dispatch(conn, log_id, apns_status, apns_reason.as_deref()).await
+                settle_dispatch_and_invalidate(
+                    conn,
+                    workspace_id,
+                    log_id,
+                    token_id,
+                    apns_status,
+                    apns_reason.as_deref(),
+                )
+                .await
             })
         })
         .await;
-        if let Err(error) = result {
-            // The dispatch happened; failing to record it means a redelivered
-            // candidate will re-send. Loud, but not fatal.
-            tracing::error!(
-                %log_id,
+        match result {
+            Ok(SettleOutcome::Invalidated(reason)) => tracing::warn!(
+                %token_id,
+                apns_status,
+                reason = reason.as_str(),
+                "APNs says the push token is dead; invalidated"
+            ),
+            Ok(SettleOutcome::InvalidationFailed { reason, error }) => tracing::error!(
+                %token_id,
+                apns_status,
+                reason = reason.as_str(),
                 error = %error,
-                "failed to settle a dispatch that was already sent"
-            );
+                "APNs says the push token is dead but invalidating it failed; the receipt is \
+                 recorded. Does momo_notifier have UPDATE (invalidated_at, updated_at) on \
+                 push_token (bootstrap_runtime_roles.sql)?"
+            ),
+            Ok(SettleOutcome::NoLiveToken(_) | SettleOutcome::Settled) => {}
+            Err(error) => {
+                // The dispatch happened; failing to record it means a redelivered
+                // candidate will re-send. Loud, but not fatal.
+                tracing::error!(
+                    %log_id,
+                    error = %error,
+                    "failed to settle a dispatch that was already sent"
+                );
+            }
+        }
+    }
+
+    /// Record a refusal by the relay itself (not an APNs receipt). Never touches
+    /// the token; a relay `400` writes the deduplicated audit row.
+    async fn settle_refusal(
+        &self,
+        workspace_id: Uuid,
+        log_id: Uuid,
+        target: &JudgedTarget,
+        relay_http_status: i32,
+        reason: &str,
+    ) {
+        let token_id = target.token_id;
+        let apns_env = target.apns_env.clone();
+        let apns_topic = target.apns_topic.clone();
+        let device_platform = target.device_platform.clone();
+        let reason = reason.to_string();
+        let result = with_tenant_tx(&self.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                settle_relay_refusal(
+                    conn,
+                    workspace_id,
+                    log_id,
+                    &RelayRefusal {
+                        relay_http_status,
+                        reason: &reason,
+                        token_id,
+                        apns_env: &apns_env,
+                        apns_topic: &apns_topic,
+                        device_platform: &device_platform,
+                    },
+                )
+                .await
+            })
+        })
+        .await;
+        match result {
+            Ok(RefusalOutcome::Audited) => tracing::warn!(
+                %token_id,
+                relay_http_status,
+                "relay refused a dispatch with a 400; audited (push.relay.refused), token kept"
+            ),
+            Ok(RefusalOutcome::AuditFailed { error }) => tracing::error!(
+                %token_id,
+                relay_http_status,
+                error = %error,
+                "relay refused a dispatch with a 400; the refusal is recorded but its audit row failed"
+            ),
+            Ok(RefusalOutcome::Settled | RefusalOutcome::AuditedRecently) => {}
+            Err(error) => {
+                tracing::error!(
+                    %log_id,
+                    error = %error,
+                    "failed to settle a dispatch the relay refused"
+                );
+            }
         }
     }
 
