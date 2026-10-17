@@ -142,6 +142,10 @@ pub struct MentionCandidate {
     /// — a subscription agent only its owner may call. `None` for every other
     /// agent, which is every agent that existed before migration 089.
     pub owner_only: Option<crate::subscription::OwnerOnlyScope>,
+    /// ADR-0113 증보 2 E3 (#3938): `Some` when `agent.connector_owner_human_id`
+    /// is set — the agent runs its owner's connected apps, so only that human's
+    /// calls are delivered. Independent of [`Self::owner_only`].
+    pub connector_owner: Option<crate::subscription::ConnectorOwner>,
     /// `agent.owner_human_id` for every agent, not only `owner_only` ones.
     /// ADR-0162 증보 2: whose 1:1 DM opens on its own, and whose approval a
     /// DM with anyone else waits for.
@@ -226,7 +230,10 @@ pub async fn load_mention_candidates_in_tx(
                      AND acr.status = 'confirmed' \
                 ) AS is_external_runtime, \
                 a.invocation_scope, a.subscription_harness, a.owner_human_id, a.uses_owner_key, \
-                a.personal_agent, a.thread_reply_wake, \
+                a.personal_agent, a.thread_reply_wake, a.connector_owner_human_id, \
+                (SELECT c.display_name FROM member c \
+                  WHERE c.workspace_id = m.workspace_id AND c.id = a.connector_owner_human_id) \
+                  AS connector_owner_display_name, \
                 (SELECT o.display_name FROM member o \
                   WHERE o.workspace_id = m.workspace_id AND o.id = a.owner_human_id) \
                   AS owner_display_name, \
@@ -337,6 +344,7 @@ pub async fn load_mention_candidates_in_tx(
                 .map_err(DbError::from)?,
             is_channel_member: row.try_get("is_channel_member").map_err(DbError::from)?,
             owner_only: owner_only_scope(row)?,
+            connector_owner: connector_owner(row)?,
             owner_member_id: row.try_get("owner_human_id").map_err(DbError::from)?,
             owner_display_name: row.try_get("owner_display_name").map_err(DbError::from)?,
             hosted_confirmed_by_owner: row
@@ -366,6 +374,24 @@ pub async fn agent_display_name_in_tx(
     .fetch_optional(&mut *conn)
     .await?;
     Ok(name)
+}
+
+/// The candidate's connector-owner facts, or `None` for an ordinary agent.
+fn connector_owner(
+    row: &sqlx::postgres::PgRow,
+) -> Result<Option<crate::subscription::ConnectorOwner>, DbError> {
+    let owner: Option<Uuid> = row
+        .try_get("connector_owner_human_id")
+        .map_err(DbError::from)?;
+    let name: Option<String> = row
+        .try_get("connector_owner_display_name")
+        .map_err(DbError::from)?;
+    Ok(
+        owner.map(|owner_member_id| crate::subscription::ConnectorOwner {
+            owner_member_id,
+            owner_display_name: name.unwrap_or_default(),
+        }),
+    )
 }
 
 /// The candidate's `owner_only` facts, or `None` for a workspace agent.
@@ -971,6 +997,7 @@ mod tests {
             hosted_channel_approved: false,
             is_channel_member: true,
             owner_only: None,
+            connector_owner: None,
             owner_member_id: None,
             owner_display_name: None,
             hosted_confirmed_by_owner: false,

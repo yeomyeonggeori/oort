@@ -1565,6 +1565,13 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/agents/{agent}/provider-pin",
             get(routes::agent_provider_pin::get).put(routes::agent_provider_pin::put),
         )
+        // #3938 (ADR-0113 증보 2 E3) — the 「앱 실행 장소」 mark. The agent's own
+        // owner, a person, in both directions; absent from the agent-route
+        // allow-list.
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/connector-owner",
+            put(routes::agent_connector_owner::put),
+        )
         .route(
             "/v1/workspaces/{ws}/agents/{agent}/allowed-models",
             get(routes::agents::allowed_models),

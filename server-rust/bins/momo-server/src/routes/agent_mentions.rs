@@ -100,6 +100,14 @@
 //!   `runId` made the follow-up possible; it did not make it correct by default.
 
 use momo_agent::{
+    connector_owner_notice_body, lock_and_find_recent_notice_in_tx, notice_root, notice_thread_key,
+    owner_only_gate, subscription_notice_body, subscription_notice_props, SubscriptionNoticeKind,
+    CLAUDE_SUBSCRIPTION_AGENT_PAUSED, SKIP_CONNECTOR_OWNER_NON_OWNER, SKIP_OWNER_ONLY_NON_OWNER,
+    SKIP_PERSONAL_AGENT_CLIENT_SIGNS, SKIP_SUBSCRIPTION_AGENTS_DISABLED,
+    SUBSCRIPTION_NOTICE_AUDIT_SCHEMA, SUBSCRIPTION_NOTICE_POSTED_ACTION,
+    SUBSCRIPTION_NOTICE_THROTTLED_ACTION,
+};
+use momo_agent::{
     create_agent_run_in_tx, find_unclaimed_dm_run_in_tx, find_unclaimed_thread_run_in_tx,
     load_dm_audience_in_tx, load_mention_candidates_in_tx, load_thread_wake_target_in_tx,
     mention_diagnostic_detail, mention_job_broadcast_payload, mention_job_payload,
@@ -114,13 +122,6 @@ use momo_agent::{
     HOSTED_SKIP_NOTICE_AUDIT_SCHEMA, HOSTED_SKIP_NOTICE_KIND, HOSTED_SKIP_NOTICE_POSTED_ACTION,
     HOSTED_SKIP_NOTICE_SOURCE, HOSTED_SKIP_NOTICE_THROTTLED_ACTION,
     HOSTED_SKIP_NOTICE_THROTTLE_SECONDS,
-};
-use momo_agent::{
-    lock_and_find_recent_notice_in_tx, notice_root, notice_thread_key, owner_only_gate,
-    subscription_notice_body, subscription_notice_props, SubscriptionNoticeKind,
-    CLAUDE_SUBSCRIPTION_AGENT_PAUSED, SKIP_OWNER_ONLY_NON_OWNER, SKIP_PERSONAL_AGENT_CLIENT_SIGNS,
-    SKIP_SUBSCRIPTION_AGENTS_DISABLED, SUBSCRIPTION_NOTICE_AUDIT_SCHEMA,
-    SUBSCRIPTION_NOTICE_POSTED_ACTION, SUBSCRIPTION_NOTICE_THROTTLED_ACTION,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{DbError, PgConnection};
@@ -346,6 +347,35 @@ pub(crate) async fn route_agent_mentions_in_tx(
                 )
                 .await?;
                 subscription_notice(&mut *conn, &send, agent, kind).await?;
+                continue;
+            }
+            // ADR-0113 증보 2 E3 (#3938) — a person other than the owner called
+            // an agent that runs the owner's apps: no job, no inbox row, and one
+            // sentence in the agent's name (throttled).
+            DeliveryGate::ConnectorOwner(kind) => {
+                skip(
+                    &mut *conn,
+                    &send,
+                    &trigger,
+                    agent,
+                    *addressing,
+                    gate.skip_reason(),
+                )
+                .await?;
+                subscription_notice(&mut *conn, &send, agent, kind).await?;
+                continue;
+            }
+            // Not a person: nobody called, so nothing is said.
+            DeliveryGate::ConnectorOwnerNonPerson => {
+                skip(
+                    &mut *conn,
+                    &send,
+                    &trigger,
+                    agent,
+                    *addressing,
+                    gate.skip_reason(),
+                )
+                .await?;
                 continue;
             }
             DeliveryGate::HostedDeliveryNotEnabled => {
@@ -613,6 +643,14 @@ enum DeliveryGate {
     /// Before every hosted-delivery question, on purpose: a non-owner's call is
     /// refused whatever the delivery state is.
     OwnerOnly(SubscriptionNoticeKind),
+    /// ADR-0113 증보 2 E3 (#3938) — the agent runs its owner's connected apps
+    /// and a **person** other than the owner called. Refused with the owner's
+    /// name in one sentence (throttled like D6), nothing delivered.
+    ConnectorOwner(SubscriptionNoticeKind),
+    /// Same refusal, but the caller is not a person (an agent's A2A mention, a
+    /// work host, a system or webhook-shaped author): nobody called, so nobody
+    /// is told. Audit only.
+    ConnectorOwnerNonPerson,
     /// ADR-0162 HAP-E5's production feature gate is closed.
     HostedDeliveryNotEnabled,
     /// A hosted agent with no ACTIVE, proved connection. Never a fallback to a
@@ -643,6 +681,9 @@ impl DeliveryGate {
                 CLAUDE_SUBSCRIPTION_AGENT_PAUSED
             }
             DeliveryGate::OwnerOnly(_) => SKIP_SUBSCRIPTION_AGENTS_DISABLED,
+            DeliveryGate::ConnectorOwner(_) | DeliveryGate::ConnectorOwnerNonPerson => {
+                SKIP_CONNECTOR_OWNER_NON_OWNER
+            }
             DeliveryGate::HostedDeliveryNotEnabled => HostedSkipReason::DeliveryNotEnabled.as_str(),
             DeliveryGate::HostedConnectionUnavailable => {
                 HostedSkipReason::ConnectionUnavailable.as_str()
@@ -666,6 +707,7 @@ fn delivery_gate(agent: &MentionCandidate, send: &MentionSend<'_>) -> DeliveryGa
     let owner_gate = || {
         owner_only_gate(
             agent.owner_only.as_ref(),
+            agent.connector_owner.as_ref(),
             send.author_member_id,
             send.subscription_agents_enabled,
             send.claude_subscription_agents_enabled,
@@ -678,12 +720,23 @@ fn delivery_gate(agent: &MentionCandidate, send: &MentionSend<'_>) -> DeliveryGa
     {
         // `owner_only_gate` returns `None` for the owner of a personal agent, so
         // neither instance switch (#3626 L2) can refuse it here.
-        return DeliveryGate::PersonalAgent(owner_gate());
+        // E3: a connector refusal keeps its own shape (silent for a non-person)
+        // even on a personal agent.
+        let gate = owner_gate();
+        if gate == Some(SubscriptionNoticeKind::ConnectorNonOwner) {
+            return connector_refusal(send);
+        }
+        return DeliveryGate::PersonalAgent(gate);
     }
     if !agent.is_channel_member {
         return DeliveryGate::NotChannelMember;
     }
     if let Some(kind) = owner_gate() {
+        // E3: a connector refusal is judged first inside `owner_only_gate`;
+        // whether anyone is told depends on who called. Only a person is.
+        if kind == SubscriptionNoticeKind::ConnectorNonOwner {
+            return connector_refusal(send);
+        }
         return DeliveryGate::OwnerOnly(kind);
     }
     let hosted_connection_id = if agent.hosted_delivery_disabled {
@@ -705,6 +758,16 @@ fn delivery_gate(agent: &MentionCandidate, send: &MentionSend<'_>) -> DeliveryGa
     }
     DeliveryGate::Open {
         hosted_connection_id,
+    }
+}
+
+/// E3: the refusal of a connector agent's non-owner caller. Only a person is
+/// told; an agent, work host or system-shaped author is refused silently.
+fn connector_refusal(send: &MentionSend<'_>) -> DeliveryGate {
+    if send.author_is_human && !send.author_is_agent {
+        DeliveryGate::ConnectorOwner(SubscriptionNoticeKind::ConnectorNonOwner)
+    } else {
+        DeliveryGate::ConnectorOwnerNonPerson
     }
 }
 
@@ -1639,8 +1702,18 @@ async fn subscription_notice(
     agent: &MentionCandidate,
     kind: SubscriptionNoticeKind,
 ) -> Result<(), DbError> {
-    let Some(scope) = agent.owner_only.as_ref() else {
-        return Ok(());
+    // E3 (#3938): the connector sentence needs only the connector owner's name —
+    // an agent that is not `owner_only` has no `OwnerOnlyScope` to read it from.
+    let body = if kind == SubscriptionNoticeKind::ConnectorNonOwner {
+        let Some(connector) = agent.connector_owner.as_ref() else {
+            return Ok(());
+        };
+        connector_owner_notice_body(&connector.owner_display_name)
+    } else {
+        let Some(scope) = agent.owner_only.as_ref() else {
+            return Ok(());
+        };
+        subscription_notice_body(kind, scope)
     };
     let thread_key = notice_thread_key(send.channel_id, send.root_id);
     let recent = lock_and_find_recent_notice_in_tx(
@@ -1679,7 +1752,7 @@ async fn subscription_notice(
             channel_id: send.channel_id,
             author_member_id: agent.member_id,
             message_type: MessageType::Text,
-            body: Some(subscription_notice_body(kind, scope)),
+            body: Some(body),
             props: subscription_notice_props(
                 kind,
                 send.author_member_id,
@@ -1909,6 +1982,7 @@ mod tests {
             hosted_channel_approved: false,
             is_channel_member: true,
             owner_only: None,
+            connector_owner: None,
             owner_member_id: None,
             owner_display_name: None,
             hosted_confirmed_by_owner: false,
@@ -2120,6 +2194,78 @@ mod tests {
             "hosted_channel_unapproved"
         );
         assert_eq!(DeliveryGate::Paused.skip_reason(), "agent_paused");
+    }
+
+    /// ADR-0113 증보 2 E3 (#3938): an agent that runs its owner's apps is called
+    /// by that human alone. A person other than the owner is told (one
+    /// sentence); anyone who is not a person — an agent's A2A mention, a work
+    /// host, a system or webhook-shaped author — is refused silently. The owner
+    /// passes to the ordinary checks, and no mark changes nothing.
+    #[test]
+    fn the_connector_owner_gate_tells_a_person_and_stays_silent_for_the_rest() {
+        let owner = Uuid::from_u128(1);
+        let other_person = Uuid::from_u128(5);
+        let mut agent = candidate(Uuid::from_u128(2), "appagent");
+        agent.connector_owner = Some(momo_agent::ConnectorOwner {
+            owner_member_id: owner,
+            owner_display_name: "세은".into(),
+        });
+        let open = DeliveryGate::Open {
+            hosted_connection_id: None,
+        };
+
+        assert_eq!(delivery_gate(&agent, &send_for(owner)), open);
+        assert_eq!(
+            delivery_gate(&agent, &send_for(other_person)),
+            DeliveryGate::ConnectorOwner(SubscriptionNoticeKind::ConnectorNonOwner)
+        );
+        // Not a person: a work host / webhook / system author.
+        let non_person = MentionSend {
+            author_is_human: false,
+            ..send_for(other_person)
+        };
+        assert_eq!(
+            delivery_gate(&agent, &non_person),
+            DeliveryGate::ConnectorOwnerNonPerson
+        );
+        // An agent author (A2A) — even one that claims the owner's member id is
+        // not a person (`author_is_human` is the principal's kind, not an id).
+        let a2a = MentionSend {
+            author_is_agent: true,
+            author_is_human: false,
+            ..send_for(other_person)
+        };
+        assert_eq!(
+            delivery_gate(&agent, &a2a),
+            DeliveryGate::ConnectorOwnerNonPerson
+        );
+        // Both refusals share one reason word, so one query answers for both.
+        assert_eq!(
+            DeliveryGate::ConnectorOwner(SubscriptionNoticeKind::ConnectorNonOwner).skip_reason(),
+            SKIP_CONNECTOR_OWNER_NON_OWNER
+        );
+        assert_eq!(
+            DeliveryGate::ConnectorOwnerNonPerson.skip_reason(),
+            SKIP_CONNECTOR_OWNER_NON_OWNER
+        );
+        // A personal agent with the mark: same shapes, not the personal NonOwner arm.
+        let mut personal = agent.clone();
+        personal.owner_only = Some(momo_agent::OwnerOnlyScope {
+            owner_member_id: owner,
+            owner_display_name: "세은".into(),
+            harness: momo_agent::SubscriptionHarness::Codex,
+            recently_seen: true,
+            reconnectable: false,
+            uses_owner_key: false,
+            personal_agent: true,
+        });
+        assert_eq!(
+            delivery_gate(&personal, &non_person),
+            DeliveryGate::ConnectorOwnerNonPerson
+        );
+        // No mark: a stranger's call is the ordinary agent's ordinary call.
+        agent.connector_owner = None;
+        assert_eq!(delivery_gate(&agent, &send_for(other_person)), open);
     }
 
     /// The wake's three outcomes are their own actions, distinct from the

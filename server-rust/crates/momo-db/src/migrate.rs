@@ -631,12 +631,15 @@ mod tests {
     /// trigger when a real member takes that handle), the NOBYPASSRLS SELECT-only
     /// `momo_helper_read` role the read tools `SET LOCAL ROLE` into, and
     /// `usage_ledger.web_search_requests`.
+    ///
+    /// 139 is #3938's `agent.connector_owner_human_id` (ADR-0113 증보 2 E3): the mark that an agent
+    /// runs its owner's connected apps, so only the owner's calls are delivered.
     #[test]
-    fn discovers_contiguous_migrations_001_to_138() {
+    fn discovers_contiguous_migrations_001_to_139() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=138).collect();
+        let expected: Vec<i64> = (1..=139).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -644,7 +647,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=138 under {}",
+            "expected contiguous 001..=139 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -652,7 +655,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("138_team_ai_helper_v2"));
+            .starts_with("139_agent_connector_owner"));
     }
 
     #[test]
