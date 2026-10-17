@@ -177,11 +177,16 @@ describe("refreshRetry — the one policy both hosts use", () => {
         }
       }
     }
-    // The server's own verdicts, and everything else, keep their old reading.
-    expect(refreshRetry(403, undefined, false, false)).toBe("sign-out");
-    expect(refreshRetry(499, undefined, true, false)).toBe("sign-out");
+    // The server's own verdicts, and everything else, keep their old reading. A
+    // table rather than the two or three neighbours that came to mind: widening
+    // `undecided()` to 400 or to 409 stayed green until the neighbours were listed
+    // (independent review of #3993).
+    for (const status of [400, 403, 404, 405, 409, 410, 422, 499]) {
+      for (const proved of [true, false]) {
+        expect(refreshRetry(status, undefined, proved, false)).toBe("sign-out");
+      }
+    }
     expect(refreshRetry(401, undefined, false, false)).toBe("sign-out");
-    expect(refreshRetry(404, undefined, true, false)).toBe("sign-out");
   });
 
   it("reads the server's clock from Date", () => {
