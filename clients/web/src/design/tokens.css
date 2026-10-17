@@ -3916,6 +3916,37 @@
   }
 }
 
+/* 「답하는 중」 점 (#4020). 에이전트가 요청을 가져가 답을 쓰는 동안만 서는 점 셋의
+ * 투명도 파도다. 움직임이 곧 정보(아직 쓰는 중)이고, 투명도만 바꾼다(transform·layout
+ * 없음). 동작 줄이기에서는 움직임을 걷어내고 점이 멈춘 채 서 있다: 곁의 문장
+ * 「답하는 중」이 상태를 말하므로 정보는 그대로다. 점마다 지연이 다르다. */
+@utility responding-dot {
+  animation: momo-responding 1.2s ease-in-out infinite;
+
+  &:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+
+  &:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+@keyframes momo-responding {
+  0%,
+  80%,
+  100% {
+    opacity: 0.3;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
 /* 버튼 안 스피너 (R-1 5장 "연결 검증 중 인라인 스피너(버튼 내부), 폼은 락").
  * caret-stream과 같은 이유로 reduced-motion에서 사라지지 않고 **느려진다**:
  * 회전이 곧 "아직 진행 중"이라는 정보이고, 모션만 걷어내면 정보까지 함께

@@ -8,6 +8,7 @@ import {
   activityLines,
   activitySuffix,
   activityText,
+  isRespondingLine,
   TURN_STALE_SENTENCE,
   UNKNOWN_AGENT_NAME,
   type AgentActivityLine,
@@ -18,6 +19,8 @@ import React, {useMemo} from 'react';
 import {StyleSheet, Text, View} from 'react-native';
 import {font, radius, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
+import {Avatar} from '../conversation/Avatar';
+import {RespondingDots} from './RespondingDots';
 
 // =============================================================================
 // The two 「작업 중」 surfaces on the phone (goal RN-T2).
@@ -82,6 +85,9 @@ export function AgentTurnBadge({
     </View>
   );
 }
+
+/** 「답하는 중」 줄의 얼굴 크기(dp). 줄 높이(meta 글자 한 줄)와 같은 자리를 쓴다. */
+const RESPONDING_FACE = 16;
 
 /**
  * One flat line per open turn in a channel, oldest first, all shown at once.
@@ -181,6 +187,7 @@ export function AgentActivityBar({
             line={line}
             nowMs={nowMs}
             live={live}
+            directory={directory}
             testID={`${testID}-row-${line.memberId}`}
             stop={
               // 끊긴 레일에서는 중단을 권하지 않는다. 마지막으로 확인된 상태를
@@ -254,12 +261,15 @@ function ActivityRow({
   line,
   nowMs,
   live,
+  directory,
   stop,
   testID,
 }: {
   line: AgentActivityLine;
   nowMs: number;
   live: boolean;
+  /** 「답하는 중」 줄에 서는 에이전트의 작은 얼굴을 위한 명부. */
+  directory: Directory;
   /** 이 줄의 실행을 멈추는 컨트롤, 또는 null. 화면이 만들어 준다. */
   stop?: React.ReactNode;
   /** 이 행이 확정 패널을 감쌀 수 있는 모양인지 테스트가 확인할 수 있게 (2R H1). */
@@ -274,8 +284,16 @@ function ActivityRow({
     line.state === 'working' &&
     line.startedAtMs !== undefined;
   const detail = activityDetail(line, nowMs);
+  // 에이전트가 요청을 가져가 답을 쓰는 중이면 얼굴과 점이 붙는다(#4020). 끊긴 레일에서는
+  // 둘 다 뺀다: 아무도 일하는 중이 아닌 줄에 움직임을 두지 않는다.
+  const responding = live && isRespondingLine(line);
   return (
     <View style={styles.activityRow} testID={testID}>
+      {responding ? (
+        <View style={styles.activityFace} testID="responding-avatar">
+          <Avatar directory={directory} memberId={line.memberId} size={RESPONDING_FACE} />
+        </View>
+      ) : null}
       <Text
         accessibilityLabel={activityText(line)}
         numberOfLines={1}
@@ -292,6 +310,7 @@ function ActivityRow({
         ) : null}
         {activitySuffix(line)}
       </Text>
+      {responding ? <RespondingDots /> : null}
       {detail !== undefined ? (
         // 서버가 아는 run의 근거 한 줄(n분째 기다려요 · 앞에 m건 / 가져간 뒤 n분째 소식이
         // 없어요 / 마지막 보고 n분 전). 사실만 적고 판정은 하지 않는다 — 「끊김」은 서버가
@@ -346,6 +365,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     // property explicitly (`MessageRow.tsx` reaction bar, and four more).
     flexWrap: 'wrap',
   },
+  // 얼굴은 줄(meta 글자) 높이에 맞춘 작은 자리다. 행이 baseline 정렬이라 가운데로 뺀다.
+  activityFace: {alignSelf: 'center'},
   activityText: {fontSize: font.meta, color: color.textMuted},
   activityTextFlex: {flexShrink: 1},
   activityName: {color: color.agent},
