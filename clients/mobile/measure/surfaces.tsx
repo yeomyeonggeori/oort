@@ -110,6 +110,11 @@ import {
 } from '@momo/core/features/workbench/permissionPreview';
 import {ThemeControl} from '../src/design/ThemeControl';
 import {parseExecutionPlan} from '@momo/core/lib/executionPlan';
+import {
+  NotificationPrimer,
+  type PrimerKinds,
+} from '../src/features/onboarding/NotificationPrimer';
+import {noteConnectRoute} from '../src/features/onboarding/phoneFlow';
 import {measureMode} from './root';
 import {Shell} from '../src/shell/AppShell';
 import {
@@ -2099,6 +2104,12 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   // N3 (#3595): 작업 상세의 「대화」 모드. 배송되는 말풍선·입력창을 고정 데이터로 세운다.
   if (name.startsWith('work-chat')) {
     return <WorkChatSurface which={name.slice('work-chat'.length).replace(/^-/, '')} />;
+  }
+  // #3925: 첫 실행 알림 단계(M3). 배송되는 화면에 상태별 값을 건넨다.
+  if (name.startsWith('notify-primer')) {
+    return (
+      <NotifyPrimerSurface which={name.slice('notify-primer'.length).replace(/^-/, '')} />
+    );
   }
 
   switch (name) {
@@ -6805,6 +6816,48 @@ const buildStyles = (color: Palette) => StyleSheet.create({
       paddingBottom: 4,
     },
   });
+
+// ---- #3925 첫 실행 알림 단계 (ADR-0204 D4) --------------------------------------
+//
+// 배송되는 `NotificationPrimer`에 상태를 건넨다. 게이트가 아니라 화면이다: 게이트는 푸시
+// 프로바이더의 답을 읽는데 하네스는 그 답을 심을 수 없다. 스위치는 눌러 볼 수 있다.
+//
+//   NOTIFY-PRIMER               첫 화면(작업 끝남 켬). `LIGHT-` 접두사로 라이트
+//   NOTIFY-PRIMER-OFF           스위치를 끈 상태: 작업 끝남 예시가 한 단 물러난다
+//   NOTIFY-PRIMER-LOADING       서버 값을 읽는 중: 스위치 대신 표시기
+//   NOTIFY-PRIMER-FAILED        쓰기 실패 문장(스위치는 되돌아와 있다)
+//   NOTIFY-PRIMER-LOAD-FAILED   읽기 실패 문장
+//   NOTIFY-PRIMER-ABSENT        이 경로를 모르는 서버: 작업 끝남 줄이 없다
+//   NOTIFY-PRIMER-DENIED        iOS 창을 거부한 뒤 안내
+function NotifyPrimerSurface({which}: {which: string}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  // 앱에서는 연결 화면이 적어 두는 한 칸이다: QR 경로의 세 번째 점.
+  noteConnectRoute('qr');
+  const [on, setOn] = React.useState(which !== 'off');
+  const kinds: PrimerKinds = {
+    absent: which === 'absent',
+    ready: which !== 'loading' && which !== 'load-failed',
+    workComplete: on,
+    loadFailed: which === 'load-failed',
+    pending: false,
+    failed: which === 'failed',
+    setWorkComplete: next => setOn(next),
+  };
+  return (
+    <View style={styles.fill}>
+      {which === 'denied' ? (
+        <NotificationPrimer mode="declined" onDone={() => {}} />
+      ) : (
+        <NotificationPrimer
+          mode="ask"
+          busy={false}
+          onContinue={() => {}}
+          kinds={kinds}
+        />
+      )}
+    </View>
+  );
+}
 
 // 위 독스트링의 이유로 렌더 밖에서 한 번. **파일 맨 아래**인 것은 `harnessClient`
 // 가 `const` 라 그 선언보다 먼저 부르면 TDZ 로 터지기 때문이고(실측: 첫 시도가

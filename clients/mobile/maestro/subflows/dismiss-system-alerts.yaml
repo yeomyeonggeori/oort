@@ -22,6 +22,12 @@ name: dismiss-system-alerts
 #                          `openLink`) hands oort a URL while it is already
 #                          running. Without this tap the flow stares at the
 #                          dialog and every selector under it fails.
+#
+#   M3's 거부 뒤 안내         not a system alert, but it is what stands over the app
+#   (#3925, ADR-0204 D4)   right after the 「허용 안 함」 above: one sentence saying
+#                          where to turn notifications on, one button 「시작하기」.
+#                          A modal overlay hides the hierarchy under it the same
+#                          way, so the loops that wait for `sidebar-list` tap it.
 - runFlow:
     when:
       visible: "지금 안 함"
@@ -37,3 +43,10 @@ name: dismiss-system-alerts
       visible: "열기"
     commands:
       - tapOn: "열기"
+- runFlow:
+    when:
+      visible:
+        id: "notify-declined-continue"
+    commands:
+      - tapOn:
+          id: "notify-declined-continue"

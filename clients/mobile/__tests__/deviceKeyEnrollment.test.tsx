@@ -31,7 +31,11 @@ import {
 import {DeviceKeyPanel} from '../src/features/deviceKey/DeviceKeyPanel';
 import {resetPlaceHeldForTests, useDeviceKey} from '../src/features/deviceKey/useDeviceKey';
 import {deviceLinkDevice} from '../src/features/deviceLink/deviceIdentity';
-import {noteConnectRoute, resetConnectRoute} from '../src/features/onboarding/phoneFlow';
+import {
+  noteConnectRoute,
+  resetConnectRoute,
+  setNotifyPrimerHeld,
+} from '../src/features/onboarding/phoneFlow';
 import {SessionProvider, useSession} from '../src/session/useSession';
 import {__setNonSecretStore} from '../src/storage/kv';
 import {
@@ -935,6 +939,20 @@ describe('the QR link gate', () => {
       await webFingerprint(KEY),
     );
     expect(mockNative!.sign).not.toHaveBeenCalled();
+  });
+
+  it('waits for the notification primer while it is held (ADR-0204 D4), then shows the sheet', async () => {
+    // M3이 거부 뒤 안내까지 서 있는 동안 푸시 게이트는 이미 `ask`를 벗어났다. 게이트만
+    // 보면 이 시트가 M3 위로 오른다 — 키는 만들되 시트는 M3이 끝난 뒤에 선다.
+    noteConnectRoute('qr');
+    setNotifyPrimerHeld(true);
+    renderGate();
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    await act(async () => {});
+    expect(screen.queryByTestId('device-key-link-sheet')).toBeNull();
+    act(() => setNotifyPrimerHeld(false));
+    await waitFor(() => expect(screen.getByTestId('device-key-link-sheet')).toBeTruthy());
+    expect(posts()).toHaveLength(1);
   });
 
   it('on a simulator: says so honestly and registers nothing', async () => {
