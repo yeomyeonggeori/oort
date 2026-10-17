@@ -2259,6 +2259,65 @@ async fn a_streaming_marker_older_than_thirty_minutes_no_longer_blocks_the_curso
     reset_instance(&su).await;
 }
 
+/// ADR-0204 증보 1 D8-a (#3987): a half answer a retried turn froze between two attempts is
+/// "not final yet" to the summariser, like a live stream — the retry rewrites it, so the cursor
+/// waits in front of it instead of citing text the message is about to stop holding. The same
+/// message with the marker gone (a turn that really failed) is summarised like any other.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to an isolated pgvector/pg18 DB"]
+async fn a_message_frozen_for_a_retry_holds_the_cursor_like_a_live_stream() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let fx = seed(&su).await;
+    configure_summary_row(&su, fx.human).await;
+    let wp = momo_worker_pool().await;
+    let mut ids = Vec::new();
+    for body in ["하나", "둘", "셋", "넷"] {
+        ids.push(post(&wp, &fx, fx.agent, body).await);
+    }
+    // 「둘」 is the half answer of attempt 1: frozen, marked failed, and told to expect a retry.
+    sqlx::query(
+        "UPDATE message SET props = jsonb_build_object('momo.stream', jsonb_build_object( \
+             'rev', 3, 'streaming', false, 'outcome', 'failed', 'provisional', true)) \
+          WHERE id = $1",
+    )
+    .bind(ids[1].0)
+    .execute(&su)
+    .await
+    .unwrap();
+    let provider = Recorder::new();
+    let worker = worker_with(&provider, memory_config()).await;
+    let stats = worker.summary_sweep().await;
+    for window in 0..stats.windows {
+        let prompt = provider.prompt(window as usize);
+        assert!(
+            !prompt.contains("둘") && !prompt.contains("셋") && !prompt.contains("넷"),
+            "RED output: the summary read past a half answer that is waiting for its retry: {prompt}"
+        );
+    }
+
+    // The same message after the turn really failed — no marker — is just a message.
+    sqlx::query(
+        "UPDATE message SET props = jsonb_build_object('momo.stream', jsonb_build_object( \
+             'rev', 4, 'streaming', false, 'outcome', 'failed')) \
+          WHERE id = $1",
+    )
+    .bind(ids[1].0)
+    .execute(&su)
+    .await
+    .unwrap();
+    let provider = Recorder::new();
+    let worker = worker_with(&provider, memory_config()).await;
+    let stats = worker.summary_sweep().await;
+    assert!(stats.windows >= 1, "RED output: {stats:?}");
+    assert!(
+        provider.prompt(0).contains("둘") && provider.prompt(0).contains("셋"),
+        "a failed answer with no marker is summarised like any other"
+    );
+    reset_instance(&su).await;
+}
+
 // --- re-review round (#3191): H-A, M-i, M-ii, L-i -------------------------------------
 
 /// H-A: `mem_definer` may lock a message row (`FOR KEY SHARE`, needed by `mem_apply_digest`)

@@ -2984,10 +2984,10 @@ impl AgentWorker {
             Box::pin(async move {
                 let Some(snapshot) = lock_gateway_run_in_tx(conn, workspace_id, run_id).await?
                 else {
-                    return Ok(());
+                    return Ok(false);
                 };
                 if snapshot.status == RunStatus::Cancelled {
-                    return Ok(());
+                    return Ok(false);
                 }
                 // Answers land in the main timeline (root_id None), so the line
                 // does too, and the throttle keys on the channel.
@@ -3093,12 +3093,28 @@ impl AgentWorker {
                     RunStatus::Failed,
                 )
                 .await?;
-                Ok(())
+                Ok(true)
             })
         })
         .await;
         match result {
-            Ok(()) => {
+            Ok(finished) => {
+                // ADR-0204 증보 1 D8-a: a refusal can end a turn that an earlier attempt had
+                // already streamed into — the attempt froze its half answer for a retry
+                // (`provisional`), and the retry is refused before it runs (the key was
+                // removed, the pin came undone). The notice above dedupes into that very
+                // message (`client_msg_id = run_id`), so nothing else ends it: end the
+                // stream here, like every other path that finishes the run. A turn that never
+                // streamed finds nothing to close.
+                if finished {
+                    self.close_stopped_stream(
+                        workspace_id,
+                        run_id,
+                        StreamCloseOutcome::Failed,
+                        false,
+                    )
+                    .await;
+                }
                 self.settle_done(job.id, Some(&code)).await;
                 Settlement::Skipped
             }

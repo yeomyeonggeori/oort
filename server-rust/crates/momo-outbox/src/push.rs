@@ -24,10 +24,12 @@
 //! 1. the `push_candidate_enqueue_trg` AFTER INSERT trigger on `message`
 //!    (`011_push_notifier.sql:47-69`): one per message, unconditional;
 //! 2. the write that ENDS a streamed message — `momo_messaging::stream_message_body_in_tx`
-//!    when `streaming` goes `true → false` and the writer does not call the close
-//!    provisional — through [`emit_stream_closed_push_candidate`] (ADR-0204 증보 1 D8-a,
-//!    #3987): one more, because a streamed answer is *born* unfinished and the trigger
-//!    fires only at its birth. Same payload shape plus `source: "stream_closed"`; the
+//!    on a final write that is not provisional, over a stream that is open (`streaming:
+//!    true → false`) or that a retried turn froze for a retry and never reopened
+//!    (`provisional: true`, which the ending replaces) — through
+//!    [`emit_stream_closed_push_candidate`] (ADR-0204 증보 1 D8-a, #3987): one more,
+//!    because a streamed answer is *born* unfinished and the trigger fires only at its
+//!    birth. Same payload shape plus `source: "stream_closed"`; the
 //!    notifier cannot tell them apart and does not need to (judgment reads the message,
 //!    not the candidate). A person whose push for the message has already settled is
 //!    skipped when the second candidate is judged (`collapse_id` and the dispatch-log
@@ -73,10 +75,12 @@ pub fn stream_closed_candidate_payload(
 /// insert. Same row shape as the trigger's (`method = 'notify'`, `partition_key =
 /// channel_id`); returns the new `outbox.id`.
 ///
-/// The caller owns the question "did the answer just end?": the candidate is for the
-/// `streaming: true → false` transition and for nothing else (not a slice, not a second
-/// final write, not a message that never streamed, and not a provisional freeze — the
-/// close a retried turn leaves between two attempts, which the next attempt reopens).
+/// The caller owns the question "did the answer just end?": the candidate is for the end of a
+/// streamed answer and for nothing else — a final write that is not provisional, on a stream
+/// that was open or frozen for a retry. Not a slice, not a second final write on a block
+/// that is already closed, not a message that never streamed, and not a provisional freeze
+/// (the close a retried turn leaves between two attempts, which the next attempt reopens or
+/// the turn's terminal close ends).
 pub async fn emit_stream_closed_push_candidate<'e, E>(
     executor: E,
     workspace_id: Uuid,

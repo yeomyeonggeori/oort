@@ -710,6 +710,164 @@ async fn a_cancelled_run_freezes_its_message_and_marks_how_it_ended() {
     );
 }
 
+/// **A retried turn's pause, from the stream's own entry points** (ADR-0204 증보 1 D8-a, review
+/// of #3987). The worker's tests reach these through a whole turn, where the failure commit
+/// that follows a last attempt ends a frozen message anyway; here the two calls are made
+/// directly, so each one has to do its own job.
+///
+/// * [`freeze_run_stream_between_attempts`] closes an open stream as a pause: the block says
+///   `provisional: true`, the half answer stays, no candidate is enqueued — and a second freeze
+///   of a block that is already frozen writes nothing (the attempt in between failed before it
+///   reopened anything).
+/// * [`close_run_stream`] is the turn's terminal close and FINDS a frozen block (it is still to
+///   be ended): it re-marks it with the turn's real outcome, takes the marker off, and enqueues
+///   the one candidate. A repeat finds nothing.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
+async fn a_provisional_freeze_is_found_and_ended_by_the_turns_terminal_close() {
+    use momo_agent_worker::stream::{close_run_stream, freeze_run_stream_between_attempts};
+    use momo_messaging::{open_stream_message_for_run_in_tx, StreamCloseOutcome};
+
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let tenant = seed_tenant(&su).await;
+    let run_id = seed_run(&app, &tenant).await;
+
+    let mut stream = MessageStream::new(
+        app.clone(),
+        tenant.workspace_id,
+        tenant.channel_id,
+        tenant.agent_id,
+        run_id,
+        None,
+        serde_json::json!({}),
+    );
+    stream
+        .push("답을 절반쯤 쓰다가", false)
+        .await
+        .expect("the first slice lands");
+    stream
+        .push(" 여기서", false)
+        .await
+        .expect("the second slice lands");
+    let message_id = stream.message_id().expect("the stream opened a message");
+    let half_answer = stream.body().to_string();
+
+    // ---- the freeze between two attempts ------------------------------------------------
+    let frozen = freeze_run_stream_between_attempts(&app, tenant.workspace_id, run_id)
+        .await
+        .expect("the freeze runs");
+    assert_eq!(
+        frozen,
+        Some(message_id),
+        "it froze the stream the run opened"
+    );
+    let (body, _, _, props) = row(&su, message_id).await;
+    let block = props.get("momo.stream").expect("the marker survives");
+    assert_eq!(block["streaming"], serde_json::json!(false), "{block}");
+    assert_eq!(block["outcome"], serde_json::json!("failed"), "{block}");
+    assert_eq!(
+        block["provisional"],
+        serde_json::json!(true),
+        "the freeze says on the message that it is a pause: {block}"
+    );
+    assert_eq!(
+        body.as_deref(),
+        Some(half_answer.as_str()),
+        "the half answer stays"
+    );
+    assert_eq!(
+        stream_closed_candidates(&su, message_id).await,
+        0,
+        "a pause is not the end of the answer"
+    );
+
+    // The turn's own lookup sees the pause as a stream still to be ended.
+    let workspace_id = tenant.workspace_id;
+    let found = momo_db::with_tenant_tx(&app, workspace_id, move |conn| {
+        Box::pin(async move { open_stream_message_for_run_in_tx(conn, run_id).await })
+    })
+    .await
+    .expect("the lookup runs")
+    .expect("a frozen block is still found");
+    assert_eq!(found.message_id, message_id);
+    assert!(found.provisional, "…and reported as a pause: {found:?}");
+
+    // ---- a second freeze has nothing to say ---------------------------------------------
+    let rev_frozen = block["rev"].as_i64();
+    let again = freeze_run_stream_between_attempts(&app, tenant.workspace_id, run_id)
+        .await
+        .expect("a second freeze runs");
+    assert_eq!(again, None, "a block that is already frozen is left alone");
+    let (_, _, _, props_again) = row(&su, message_id).await;
+    assert_eq!(
+        props_again["momo.stream"]["rev"].as_i64(),
+        rev_frozen,
+        "…and spends no revision"
+    );
+
+    // ---- the turn ends: a stop finds the pause and ends it with ITS outcome --------------
+    let closed = close_run_stream(
+        &app,
+        tenant.workspace_id,
+        run_id,
+        StreamCloseOutcome::Cancelled,
+    )
+    .await
+    .expect("the terminal close runs");
+    assert_eq!(
+        closed,
+        Some(message_id),
+        "the terminal close finds a frozen block"
+    );
+    let (body, _, _, props_closed) = row(&su, message_id).await;
+    let ended = props_closed.get("momo.stream").expect("still marked");
+    assert_eq!(
+        ended["outcome"],
+        serde_json::json!("cancelled"),
+        "the turn's real outcome replaces the pause's: {ended}"
+    );
+    assert_eq!(ended["streaming"], serde_json::json!(false));
+    assert!(
+        ended.get("provisional").is_none(),
+        "the marker goes with the pause: {ended}"
+    );
+    assert_eq!(
+        ended["rev"].as_i64(),
+        rev_frozen.map(|rev| rev + 1),
+        "one revision for the ending"
+    );
+    assert_eq!(
+        body.as_deref(),
+        Some(half_answer.as_str()),
+        "the text is untouched"
+    );
+    assert_eq!(
+        stream_closed_candidates(&su, message_id).await,
+        1,
+        "the end of the answer is announced, once"
+    );
+
+    // ---- and a repeat finds nothing ------------------------------------------------------
+    let repeat = close_run_stream(
+        &app,
+        tenant.workspace_id,
+        run_id,
+        StreamCloseOutcome::Failed,
+    )
+    .await
+    .expect("a repeat runs");
+    assert_eq!(repeat, None, "an ended stream is not still to be ended");
+    assert_eq!(stream_closed_candidates(&su, message_id).await, 1);
+    let (_, _, _, props_repeat) = row(&su, message_id).await;
+    assert_eq!(
+        props_repeat["momo.stream"]["outcome"],
+        serde_json::json!("cancelled"),
+        "「중단됨」 is not overwritten by a later 「응답이 끊김」"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // #5 — ADR-0155 RED proof: an ending cannot be claimed mid-stream
 // ---------------------------------------------------------------------------

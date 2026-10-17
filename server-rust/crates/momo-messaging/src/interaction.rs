@@ -618,9 +618,10 @@ pub struct StreamEdit {
     /// message exactly as any close does (`streaming: false`, the `outcome`), but it is not
     /// the answer's end, so it enqueues **no** push candidate — and it says so on the message
     /// itself: the block also carries a server-owned `provisional: true`, which is what lets
-    /// everything that asks "is this answer still to be ended?" answer yes for a frozen
-    /// block — the turn's terminal close ([`open_stream_message_for_run_in_tx`]), the
-    /// worker's commit, the push judgment — instead of mistaking the pause for the end.
+    /// the readers that ask "is this answer still to be ended?" answer yes for a frozen
+    /// block instead of mistaking the pause for the end: the turn's terminal close
+    /// ([`open_stream_message_for_run_in_tx`]), the worker's commit, the closing write
+    /// itself, the push judgment, and the team-memory summariser's "not final yet" hold.
     ///
     /// The marker lasts until the next write that is not a provisional freeze: the retry's
     /// first slice replaces the whole block (`streaming: true`, no marker), and the write
@@ -902,9 +903,9 @@ pub async fn emit_message_edited_in_tx(
 /// ## The close is also a push candidate (ADR-0204 증보 1 D8-a, #3987)
 ///
 /// A streamed message is INSERTed unfinished, and the 011 trigger turns that INSERT —
-/// the opening slice — into the message's first push candidate. The write that **closes**
-/// the stream (`streaming: true → false`) is an UPDATE, which the trigger never sees, so
-/// this function enqueues the second candidate itself, in the same transaction
+/// the opening slice — into the message's first push candidate. The write that **ends**
+/// the stream (typically `streaming: true → false`) is an UPDATE, which the trigger never
+/// sees, so this function enqueues the second candidate itself, in the same transaction
 /// ([`emit_stream_closed_push_candidate`]). Push judgment holds a streamed answer back
 /// while it is open and judges it, at the moment it closes, as the finished answer it now
 /// is.

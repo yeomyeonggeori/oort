@@ -70,6 +70,7 @@
 //! | `known_gap_a_stream_watched_longer_than_the_window_from_a_standing_cursor_is_pushed` | (pins the M2 cost) change what a cursor that stood still for 45 s means before a presence signal exists |
 //! | `a_retried_streams_freeze_between_attempts_announces_nothing_and_its_real_close_announces_once` | let a `provisional` freeze enqueue the candidate, or ignore the flag |
 //! | `a_candidate_judged_while_a_retried_stream_is_frozen_is_held` | judge a `provisional` freeze as a closed stream (drop `provisional` from the judgment's `streaming`), so a late candidate pushes the half answer and spends the message's push slot |
+//! | `a_pause_announced_as_an_end_would_settle_the_push_the_real_answer_needs` | (a control, not a revert) the premise the `provisional` marker rests on: one push per message, so a push of the half answer swallows the finished answer's |
 //! | `closing_a_stream_enqueues_exactly_one_candidate_and_only_for_an_open_stream` | enqueue on every final write, on a slice, for a stale final write on an open stream, or for a message that never streamed; change the candidate's `method` / `partition_key` from the trigger's |
 //! | `two_final_writes_racing_to_close_one_stream_enqueue_one_candidate` | read the stored props before taking the message's row lock |
 
@@ -5134,6 +5135,72 @@ async fn a_candidate_judged_while_a_retried_stream_is_frozen_is_held() {
         "the finished answer reaches the asker who was away: {sent:?}"
     );
     assert_eq!(hits_for(&sent, streamed).len(), device_total(ASKER));
+}
+
+/// **The premise, pinned (review of #3987, L5).** Why a retried turn's freeze must not be an
+/// announcement. Write the same freeze as a plain close — what the stream's writer does for a
+/// turn that really ended — and the half answer is pushed to the asker; `collapse_id` is per
+/// message, so that push settles every device, and the push for the finished answer, a moment
+/// later, finds them all settled and goes nowhere. The asker is told once, with half a
+/// sentence, and never with the answer.
+///
+/// This is not a test of the fix (it passes however the freeze is written) — it is what the
+/// `provisional` marker exists to prevent, kept next to the tests that prove the marker works.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn a_pause_announced_as_an_end_would_settle_the_push_the_real_answer_needs() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let room = seed_approval_room(&su).await;
+    let pool = momo_notifier_pool().await;
+
+    set_read_cursor(&su, &room, ASKER, "now() - interval '5 minutes'").await;
+    let question = human_says(&su, &room, room.channel_id, room.id(ASKER)).await;
+    let run = chat_run_for(&su, &room, room.channel_id, Some(question), "running").await;
+    let streamed = open_streamed_answer(&su, &room, run, question).await;
+    drain_room_full(&su, &pool, &room).await; // the opening: held while the stream is open
+
+    // The provider dies mid-answer and the freeze is written as an END (not provisional).
+    let slice = write_stream_slice(&su, &room, streamed, 1, false, None).await;
+    assert!(matches!(slice, StreamOutcome::Applied(_)));
+    let freeze = write_stream_edit(
+        &su,
+        &room,
+        streamed,
+        2,
+        true,
+        Some(StreamCloseOutcome::Failed),
+        false,
+    )
+    .await;
+    assert!(matches!(freeze, StreamOutcome::Applied(_)), "{freeze:?}");
+    let (_, sent) = drain_room_full(&su, &pool, &room).await;
+    assert_eq!(
+        hits_for(&sent, streamed).len(),
+        device_total(ASKER),
+        "the half answer is pushed to every device: {sent:?}"
+    );
+
+    // The retry reopens the message and finishes it. Its push finds every device settled.
+    let reopened = write_stream_slice(&su, &room, streamed, 3, false, None).await;
+    assert!(matches!(reopened, StreamOutcome::Applied(_)));
+    let closed = write_stream_slice(&su, &room, streamed, 4, true, None).await;
+    assert!(matches!(closed, StreamOutcome::Applied(_)));
+    let (stats, sent) = drain_room_full(&su, &pool, &room).await;
+    assert_eq!(
+        stats.claimed, 1,
+        "the finished answer's candidate is judged"
+    );
+    assert_eq!(
+        stats.skipped_already_settled,
+        device_total(ASKER),
+        "…and every device it would reach was already settled by the half answer's push"
+    );
+    assert!(
+        hits_for(&sent, streamed).is_empty(),
+        "the asker is never told the answer arrived: {sent:?}"
+    );
 }
 
 /// The producer: the closing write — and only it — enqueues the second candidate.

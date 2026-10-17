@@ -80,7 +80,7 @@
 //!   answer yet, only the first words. So is one a retried turn froze between two attempts
 //!   (`momo.stream.provisional = true`, written by the worker's between-attempts freeze): it
 //!   reads `streaming: false, outcome: failed` like the end of a turn that really failed, but
-//!   the turn is going to reopen it. The write that ends it enqueues the second
+//!   the turn expects to reopen it. The write that ends it enqueues the second
 //!   candidate (`momo_messaging::stream_message_body_in_tx` →
 //!   `momo_outbox::emit_stream_closed_push_candidate`), and this arm judges the finished
 //!   answer then — with "reading" read at **judgment time** (`now()`), not at the opening
@@ -113,9 +113,11 @@
 //!   person's push already settled (`collapse_id`) and is skipped. One that quotes nobody has
 //!   no asker for this arm. A stream that is never closed is never judged by this arm — a
 //!   producer that died and whose run nobody closed, a close the domain refuses (the agent
-//!   left the channel, the message was deleted), and a retried turn's freeze whose job is
-//!   never reclaimed (nothing reopens it and nothing ends it); the opening candidate has
-//!   long been consumed, so there is nothing left to judge it.
+//!   left the channel, the message was deleted), and a retried turn's freeze that no path
+//!   ever ends — its job is never reclaimed, or its run is parked on an approval that is
+//!   then rejected, expires or is cancelled (those routes close no stream, an open one
+//!   included); the opening candidate has long been consumed, so there is nothing left to
+//!   judge it.
 //!
 //!   Not settled here and left to the ADR's wording: a chat answer that arrives within 30 s
 //!   of the asker's own question is "reading" even without streaming, because the question
@@ -141,8 +143,11 @@
 //!   *Roll-out.* A notifier that holds streaming lines depends on the producer that
 //!   enqueues the closing candidate: ship the producers (server, agent-worker) first or
 //!   together. The other order leaves a streamed answer held and never judged; an old
-//!   notifier with the new producers is harmless (it judges the closing candidate like the
-//!   opening, and `collapse_id` keeps it to one push).
+//!   notifier with the new producers is harmless in the ordinary case (it judges the closing
+//!   candidate like the opening, and `collapse_id` keeps it to one push) — except around a
+//!   retried turn's freeze, which an old notifier does not know to hold: a candidate it
+//!   judges inside the freeze can still push the half answer. Producers and notifier are
+//!   shipped together to keep that window short.
 //! * **Mute (ADR-0124)** — the per-channel `notification_pref` row suppresses
 //!   every reason, mentions and approvals included. Read at judgment time; no
 //!   cache.

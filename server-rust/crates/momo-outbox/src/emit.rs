@@ -36,8 +36,9 @@ pub enum OutboxKind {
     ///    *duplicate* candidate, not a missing one.
     /// 2. [`crate::push::emit_stream_closed_push_candidate`], called by
     ///    `momo_messaging::stream_message_body_in_tx` in the transaction of the write that
-    ///    ENDS a streamed message (`streaming: true → false`, and not a provisional
-    ///    freeze between a retried turn's attempts) — ADR-0204 증보 1 D8-a (#3987). A
+    ///    ENDS a streamed message — a final write on an open stream (`streaming: true →
+    ///    false`) or on one a retried turn froze and never reopened, and never a
+    ///    provisional freeze between its attempts — ADR-0204 증보 1 D8-a (#3987). A
     ///    streamed answer is born unfinished, so the trigger judges it at its birth; the
     ///    end is the moment it becomes the answer, and no INSERT happens then, so the
     ///    trigger is silent. That is the one second writer the ADR allows, and why this is

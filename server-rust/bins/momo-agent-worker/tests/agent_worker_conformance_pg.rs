@@ -46,11 +46,12 @@
 //! | `uxc_a_3_a_report_without_prose_never_commits_its_own_envelope` | make the empty-body fallback reach for the raw turn text again (the envelope lands in the channel as prose), drop the card when there is no sentence to hang it under, or measure `elapsed_ms` against this host's wall clock instead of the database's |
 //! | `a_provider_death_mid_answer_freezes_what_the_reader_already_read` | overwrite the half answer with the degraded notice, or leave the stopped stream without its close candidate (ADR-0204 증보 1 D8-a) |
 //! | `a_retried_streamed_turn_announces_its_answer_once_at_the_close_that_ends_it` | make the freeze between two attempts enqueue a candidate (drop the `provisional` flag, or pass `false` from `settle_retryable`), or drop the retry's own close |
-//! | `a_retried_turn_that_is_still_down_on_its_last_attempt_announces_the_frozen_half_answer` | make the turn's terminal close look only for `streaming: true` (ignore the `provisional` freeze), or let a failed attempt that never reopened the stream write a second freeze |
+//! | `a_retried_turn_that_is_still_down_on_its_last_attempt_announces_the_frozen_half_answer` | let a failed attempt that never reopened the stream write a second freeze, or make BOTH of the last attempt's closes (the terminal close's lookup and the failure commit's `open_stream_rev`) ignore a `provisional` freeze — either one alone is covered by the other, and caught by the step-cap and refused-for-good tests |
 //! | `a_retried_turn_that_is_refused_for_good_announces_the_frozen_half_answer` | make the failure turn's commit ignore a `provisional` freeze (`open_stream_rev`) |
 //! | `a_retry_that_answers_in_one_piece_finishes_the_message_it_froze_and_announces_once` | the same, on the success path: the commit dedupes into the frozen row and leaves the half answer under a `succeeded` run |
 //! | `a_retried_turn_that_runs_out_of_steps_announces_the_frozen_half_answer` | hand `mark_run_failed` the retry flag from the step-cap path, so a run that is over leaves its stream frozen for good |
-//! | `a_streamed_turn_whose_last_attempt_dies_announces_the_half_answer_it_leaves` | pass `provisional: true` for the last attempt too, so a turn that ran out of attempts is never announced |
+//! | `a_retried_turn_that_is_refused_before_it_runs_announces_the_frozen_half_answer` | leave `settle_refused_turn` without a stream close: a refusal notice dedupes into the frozen message and nothing else would ever end it |
+//! | `a_streamed_turn_whose_last_attempt_dies_announces_the_half_answer_it_leaves` | hand the last attempt the retry flag: the commit that follows still ends the message, but only after a frame that told readers the turn was coming back (`provisional_frames`) |
 //!
 //! The DB-free half of the report's conformance — the producer against the core
 //! contract file it must match — is `completion_report_conformance.rs`, which
@@ -1144,6 +1145,24 @@ async fn stream_closed_candidates(su: &PgPool, message_id: Uuid) -> i64 {
     .expect("count the closing candidates")
 }
 
+/// How many `message.edited` frames this message published while its stream block said
+/// `provisional: true` — how many times the turn announced "closed for now" to its readers.
+/// The turn that ends the message never adds one: a failure that has no retry left closes it
+/// for good, and a freeze followed at once by the commit's close would be a pause that was
+/// never a pause.
+async fn provisional_frames(su: &PgPool, message_id: Uuid) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM outbox \
+          WHERE kind::text = 'broadcast' AND payload->'data'->>'type' = 'message.edited' \
+            AND payload->'data'->'payload'->>'id' = $1 \
+            AND payload->'data'->'payload'->'props'->'momo.stream'->>'provisional' = 'true'",
+    )
+    .bind(message_id.to_string())
+    .fetch_one(su)
+    .await
+    .expect("count the frames published while the stream was frozen")
+}
+
 async fn stream_props(su: &PgPool, message_id: Uuid) -> Value {
     let props: Value = sqlx::query_scalar("SELECT props FROM message WHERE id = $1")
         .bind(message_id)
@@ -1509,6 +1528,11 @@ async fn a_provider_death_mid_answer_freezes_what_the_reader_already_read() {
         1,
         "a turn that ends here is the end of the answer: the asker is told (ADR-0204 증보 1 D8-a)"
     );
+    assert_eq!(
+        provisional_frames(&su, message_id).await,
+        0,
+        "a turn that cannot be retried never calls its stop a pause"
+    );
 
     assert_eq!(run_status(&su, run_id).await, "failed");
     assert_eq!(
@@ -1660,6 +1684,11 @@ async fn a_retried_streamed_turn_announces_its_answer_once_at_the_close_that_end
         candidates, 2,
         "the INSERT's and the end's — not one for every freeze and close along the way"
     );
+    assert_eq!(
+        provisional_frames(&su, message_id).await,
+        1,
+        "one pause, between the two attempts"
+    );
     assert_eq!(run_status(&su, run_id).await, "succeeded");
     assert_eq!(provider.calls.load(Ordering::SeqCst), 2, "two attempts");
 }
@@ -1708,6 +1737,13 @@ async fn a_streamed_turn_whose_last_attempt_dies_announces_the_half_answer_it_le
         stream_closed_candidates(&su, message_id).await,
         1,
         "no attempt follows, so this freeze is the end of the answer and it announces (D8-a)"
+    );
+    assert_eq!(
+        provisional_frames(&su, message_id).await,
+        0,
+        "no attempt follows, so the freeze is never announced to readers as a pause: hand the \
+         last attempt the retry flag and the commit that follows would still end the message, \
+         but only after a frame that said the turn was coming back"
     );
     assert_eq!(run_status(&su, run_id).await, "failed");
     assert_eq!(job_row(&su, job_id).await.0, "failed");
@@ -1819,6 +1855,12 @@ async fn a_retried_turn_that_is_still_down_on_its_last_attempt_announces_the_fro
         1,
         "the end of a turn that ran out of attempts is announced exactly once, even though \
          no attempt reopened the stream after its earlier freeze"
+    );
+    assert_eq!(
+        provisional_frames(&su, message_id).await,
+        1,
+        "one pause, after the first attempt: not a second one for the attempt that never \
+         reopened the stream, and none for the last"
     );
     assert_eq!(run_status(&su, run_id).await, "failed");
     assert_eq!(job_row(&su, job_id).await.0, "failed");
@@ -1991,6 +2033,77 @@ async fn a_retried_turn_that_runs_out_of_steps_announces_the_frozen_half_answer(
         stream_closed_candidates(&su, message_id).await,
         1,
         "a run ended by its step cap announces the half answer it leaves, once"
+    );
+    assert_eq!(run_status(&su, run_id).await, "failed");
+}
+
+/// **Review of #3987, M1.** The same half answer and freeze, and then the retry is REFUSED
+/// before it runs: the team key was removed while the job waited out its backoff, so the next
+/// worker to claim it has no model to call and closes the run with a refusal notice
+/// (`settle_refused_turn`). That is a fourth way a turn ends, and it posts its notice with
+/// `client_msg_id = run_id` — the notice dedupes into the very message the first attempt
+/// froze, so nothing else would ever end that message. A refusal that does not end the stream
+/// leaves a half answer marked as a pause, forever held and never announced.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
+async fn a_retried_turn_that_is_refused_before_it_runs_announces_the_frozen_half_answer() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let tenant = seed_tenant(&su).await;
+
+    let (run_id, _trigger_message_id, job_id) =
+        enqueue_mention_turn(&su, &tenant, tenant.agent_id, "@hermes 키가 사라진 날").await;
+
+    // attempt 1, on a worker that still has the team key: half an answer, then death.
+    let provider = dies_once_after_half_an_answer(MockChatProvider::echo());
+    let mut config = base_config();
+    config.max_attempts = 5;
+    let worker = build_worker(provider.clone(), config).await;
+    let stats = worker.drain_once().await.expect("drain");
+    assert_eq!(stats.requeued, 1);
+    let (message_id, _, _, _) = agent_messages(&su, &tenant, tenant.agent_id)
+        .await
+        .into_iter()
+        .next()
+        .expect("the half answer is in the channel");
+    let frozen = stream_props(&su, message_id).await;
+    assert_eq!(frozen["provisional"], json!(true), "{frozen}");
+    assert_eq!(stream_closed_candidates(&su, message_id).await, 0);
+
+    // The key is gone when the retry is claimed: a worker with none refuses the turn.
+    let keyless_provider = Arc::new(MockChatProvider::echo());
+    let keyless = build_worker(
+        keyless_provider.clone(),
+        tune(WorkerConfig::for_target(database_url())),
+    )
+    .await;
+    let_the_backoff_end(&su, job_id).await;
+    let stats = keyless.drain_once().await.expect("drain");
+    assert_eq!(stats.skipped, 1, "a refused turn settles without an answer");
+    assert!(
+        keyless_provider.calls().is_empty(),
+        "a refused turn calls no model"
+    );
+
+    let messages = agent_messages(&su, &tenant, tenant.agent_id).await;
+    assert_eq!(
+        messages.len(),
+        1,
+        "the refusal notice deduped into the frozen message"
+    );
+    assert_eq!(messages[0].2, "생각해 보면 그건");
+    let ended = stream_props(&su, message_id).await;
+    assert_eq!(ended["streaming"], json!(false));
+    assert_eq!(ended["outcome"], json!("failed"), "{ended}");
+    assert!(
+        ended.get("provisional").is_none(),
+        "the refusal ended the turn: {ended}"
+    );
+    assert_eq!(
+        stream_closed_candidates(&su, message_id).await,
+        1,
+        "a turn that is refused after it streamed announces the half answer it leaves, once"
     );
     assert_eq!(run_status(&su, run_id).await, "failed");
 }

@@ -18832,8 +18832,9 @@ components:
             expects to reopen". It cannot be sent here (this endpoint never writes
             it), the retry's first slice replaces the whole block so the key vanishes,
             and the write that ends the turn replaces it with a plain closed block.
-            Clients can ignore it: the block already says `streaming: false` and
-            `outcome: failed`, which is what they draw.
+            If nothing ever ends the turn (its job is never reclaimed) the marker stays,
+            and the block keeps saying `outcome: failed`. Clients can ignore it: the block
+            already says `streaming: false` and `outcome: failed`, which is what they draw.
 
     StreamOpen:
       type: object
