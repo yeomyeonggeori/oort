@@ -6,6 +6,7 @@ import React from 'react';
 import type {FlatList} from 'react-native';
 
 import {Timeline, type PillState} from '../src/features/conversation/Timeline';
+import {installAppClock} from './fixtures/fakeClock';
 
 // =============================================================================
 // 옛 페이지 문은 「앉았다」와 함께 열린다 — 어느 길로 앉았든 (#2680 R1 H-1)
@@ -82,9 +83,16 @@ const HISTORY = [1, 2, 3, 4, 5, 6, 7, 8].map(message);
 
 const list = () => screen.getByTestId('timeline-list');
 
+/**
+ * 가짜 시계를 `ms` 만큼 흘린다. 이 파일의 시험은 목록의 타이머(진입이 앉는 150ms 정적, 점프의
+ * 1500ms 한도, 착지 뒤 유지)가 도는 만큼의 **시간**을 기다리는 것이지 CPU 를 기다리는 것이
+ * 아니다. 실제 시계로 기다리면 두 시험이 각각 2.9s·3.4s 를 자고(CPU 는 0.1~0.6s) jest 5s 한도의
+ * 여유가 부하에 줄어든다. 가짜 시계에서는 같은 시간이 즉시 흐르고, 앱의 타이머는 같은 순서로
+ * 같은 시각에 돈다(`fixtures/fakeClock.ts`).
+ */
 async function sleep(ms: number) {
   await act(async () => {
-    await new Promise(resolve => setTimeout(resolve, ms));
+    await jest.advanceTimersByTimeAsync(ms);
   });
 }
 
@@ -134,7 +142,14 @@ function mount(onStartReached: () => void, pills: React.MutableRefObject<PillSta
   );
 }
 
-afterEach(() => cleanup());
+beforeEach(() => {
+  installAppClock();
+});
+
+afterEach(() => {
+  cleanup();
+  jest.useRealTimers();
+});
 
 /** 진입을 시작하고, 필을 누르고(앉기 전이거나 뒤), 착지를 기다리고, 손가락으로 맨 위에 간다. */
 async function pillThenTop(pressBeforeSettle: boolean) {

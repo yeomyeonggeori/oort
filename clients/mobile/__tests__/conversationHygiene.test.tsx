@@ -934,10 +934,12 @@ describe('#1076 — 인용 점프가 도착했다고 말한다', () => {
     });
   });
 
-  it('사라짐이 타이머가 아니라 손가락이다', () => {
+  it('사라짐: 손가락은 언제나 거두고, 시계는 이동이 끝나기 전에 켜지 않는다 (#3921)', () => {
     // 웹은 1,600ms 타이머를 쓴다. 폰의 점프는 애니메이션이고 실패 시 한 번 더
-    // 돌므로, 시한은 이동과 경주한다 — 그래서 기준을 바꿨다. 그 결정은 코드에
-    // 있어야 하고, 이 단정이 그것이 되돌려지는 순간 말을 한다.
+    // 돌므로, 시한을 점프 시각부터 재면 이동과 경주한다 — #1076 이 시한을 버린 이유다.
+    // #3921 은 시한을 되살리되 **시작하는 순간**을 이동의 끝으로 옮겼다. 행동은
+    // `landedHighlight3921.test.tsx` 가 가짜 시계로 잰다. 여기서는 소스에 남아야 하는
+    // 두 결정이 되돌려지는 순간 말을 한다.
     const timeline = fs.readFileSync(
       path.resolve(SRC_DIR, 'features/conversation/Timeline.tsx'),
       'utf8',
@@ -945,9 +947,19 @@ describe('#1076 — 인용 점프가 도착했다고 말한다', () => {
     const code = timeline
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/^\s*\/\/.*$/gm, '');
-    expect(code).toMatch(/onScrollBeginDrag[\s\S]{0,400}setLandedId\(null\)/);
-    // 타이머로 거두지 않는다.
-    expect(code).not.toMatch(/setTimeout\([^)]*setLandedId/);
+    // ① 손가락은 시한이 있어도 거둔다.
+    expect(code).toMatch(/onScrollBeginDrag[\s\S]{0,400}setLanded\(null\)/);
+    // ② 점프가 틴트를 세울 때는 시계(`holdMs`)가 `null` 이다 — 시한은 이동의 끝에서만 선다.
+    expect(code).toMatch(/\{id: landingId, holdMs: null\}/);
+    // ③ 시계를 켜는 자리는 둘뿐이다: 이동이 끝난 순간(`onLanded`)과, 이동이 판정 없이 거둬진
+    // 착지를 위한 백스톱(`JUMP_TRAVEL_MAX_MS` 뒤에도 `holdMs` 가 비어 있을 때). 둘 다 이동이
+    // 끝났거나 끝났어야 하는 시점이다. 사용처는 import 하나와 이 둘 — 넷째가 생기면 점프
+    // 시각에 시계를 켜는 길이 열린 것이다.
+    expect(code).toMatch(/holdMs: LANDED_HOLD_MS \+ delayMs/);
+    expect(code).toMatch(
+      /current\.holdMs === null\s*\?\s*\{id: current\.id, holdMs: LANDED_HOLD_MS\}/,
+    );
+    expect(code.match(/LANDED_HOLD_MS/g)).toHaveLength(3);
   });
 });
 

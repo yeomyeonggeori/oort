@@ -68,6 +68,20 @@ export const NON_SECRET_KEYS = {
    */
   pushDeviceId: 'momo.mobile.push.device-id.v1',
   /**
+   * 「이 폰으로는 푸시를 받지 않는다」고 **사람이 스위치로 껐다** (#3924, ADR-0204 D1).
+   * 값은 껐던 사람의 멤버 id 하나다 — 없으면 끈 적이 없다. `PushProvider` 가 이 값이 지금
+   * 로그인한 멤버와 같으면 다음 실행에도 이 기기를 서버에 다시 등록하지 않는다.
+   *
+   * 멤버 id 인 이유: 로그아웃 없이 세션이 끝난 뒤(토큰 만료) 다른 사람이 이 폰에 들어오면
+   * 앞 사람의 「껐다」가 그 사람의 알림을 막으면 안 된다. 명시적 로그아웃은 이 값을
+   * 지운다(`session/useSession.tsx`).
+   *
+   * 비밀이 아니다(멤버 id 는 `sessionMetadata` 에도 평문으로 있다). 잃으면 이 폰이 다음
+   * 실행에 다시 등록될 뿐이고, 사람이 스위치를 한 번 더 끄면 된다. MMKV 는 앱을 지우면
+   * 함께 지워진다 — 재설치한 폰이 새로 시작해야 하는 것과 같은 수명이다.
+   */
+  pushOptOut: 'momo.mobile.push.opt-out.v1',
+  /**
    * 아직 보내지 않은 글 (goal U4-6M · 감사 H-10). 채널·스레드별 한 덩이의 JSON
    * 지도이고, 접기·수명 규칙은 `features/conversation/drafts.ts` 가 진다.
    *
