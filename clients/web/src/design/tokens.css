@@ -3731,8 +3731,11 @@
  * only way to draw a bar whose length is data is to let the platform control do
  * it from its value/max attributes. It is styled here because the pseudo
  * elements that paint it cannot be reached from a utility class. Tokens only,
- * so it follows the scheme like everything else, and no animation: it moves
- * exactly as fast as the bytes arrive. */
+ * so it follows the scheme like everything else. A determinate bar has no
+ * animation: it moves exactly as fast as the bytes arrive. The one exception is
+ * `:indeterminate` (no value, i.e. no Content-Length yet, #4019): `appearance:
+ * none` strips the platform's own sweep, so without the drift below the bar is
+ * an empty track and reads as frozen. */
 /* 프로필 줄 위에 서는 업데이트 카드(#3904). 폭은 사이드바 목록 열에서 양쪽 안쪽 여백(16px씩)을
  * 뺀 값이다: 카드가 그 열보다 넓으면 본문 위로 넘어가 「줄에 붙은 카드」가 아니라
  * 「떠다니는 창」으로 읽힌다. 창이 더 좁아지면(드로어 폭) 화면 안에 머문다. */
@@ -3759,6 +3762,32 @@
 
   &::-moz-progress-bar {
     background: var(--accent);
+  }
+
+  /* 길이를 모르는 막대(value 없음): 트랙 위를 한 조각이 흐른다. 움직임이 곧 정보다
+   * (SKILL §4): 멈춰 있으면 「0%」로 읽힌다. 업로드 막대의 같은 문제 풀이
+   * (`progress[data-upload-progress]:indeterminate`)와 같은 조각·키프레임이다.
+   * 줄인 움직임에서도 끄지 않고 `steps()` 로 느리게 한다. */
+  &:indeterminate {
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      var(--accent) 50%,
+      transparent 100%
+    );
+    background-size: 40% 100%;
+    background-repeat: no-repeat;
+    animation: momo-upload-drift 1.1s linear infinite;
+  }
+
+  &:indeterminate::-webkit-progress-bar {
+    background-color: transparent;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    &:indeterminate {
+      animation: momo-upload-drift 3.2s steps(6, end) infinite;
+    }
   }
 
   /* The fill colour is the bar's meaning, and a bar means two different things
