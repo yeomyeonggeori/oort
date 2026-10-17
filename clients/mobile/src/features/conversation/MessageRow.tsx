@@ -146,6 +146,7 @@ import {
   type ApprovalGate,
   type ApprovalReceipt,
 } from './approvalGate';
+import {LandedTintFade} from './LandedTintFade';
 
 /** 표가 없는 표면(측정 하네스·검색 미리보기)에서 매번 새 Map 을 짓지 않으려고. */
 const EMPTY_GATES: ReadonlyMap<string, ApprovalGate> = new Map();
@@ -2105,7 +2106,8 @@ export interface MessageRowProps {
    *
    * 목록이 든다. 행이 스스로 알 수 없는 사실이기도 하지만, 무엇보다 **한 번에 한
    * 행만** 참이어야 하고 그것을 아는 것은 목록뿐이다. 표시가 언제 물러나는지는
-   * `styles.rowLanded` 주석에 있다.
+   * `styles.rowLanded` 주석과 `landedHighlight.ts` 머리말에 있고, 물러나는 **모양**은
+   * `LandedTintFade` 가 든다 — 이 prop 이 참에서 거짓이 되는 순간에만 일한다.
    */
   landed?: boolean;
   nowMs: number;
@@ -2797,6 +2799,9 @@ function MessageRowInner({
       ]}
       testID="message-row"
       {...longPress.handlers}>
+      {/* 틴트가 **물러나는 순간**의 덮개 (#3921). 서 있는 동안은 아무것도 그리지 않는다 —
+          위 그릇이 배경으로 입는다. 첫 자식이라 내용 뒤에 깔린다. */}
+      <LandedTintFade landed={landed === true} />
       <Pressable
         // The tap rule is above. The row stays pressable even when it has no
         // door and no actions (a tombstone), because with the keyboard up every
@@ -3413,8 +3418,9 @@ export function sameMessageRowProps(
     a.directory === b.directory &&
     a.pausedRepeat === b.pausedRepeat &&
     // 둘 다 스칼라라 동일성 비교로 충분하다. `landed` 는 점프 한 번에 두 번
-    // 바뀌고(세우기·거두기) 그때 붙어 있는 행이 전부 비교를 한 번씩 지나는데,
-    // 다시 그려지는 것은 참이 된 행과 거짓이 된 행 둘뿐이다.
+    // 바뀌고(세우기·거두기 — 거두는 길은 결정·시한·손가락 셋, #3921) 그때 붙어 있는
+    // 행이 전부 비교를 한 번씩 지나는데, 다시 그려지는 것은 참이 된 행과 거짓이 된
+    // 행 둘뿐이다.
     a.deletedRepeat === b.deletedRepeat &&
     // 이슈 #1112. 스칼라라 동일성으로 충분하고, 한 행의 고정 여부가 바뀔 때만
     // 그 행이 다시 그려진다 — 채널의 다른 고정은 이 행을 건드리지 않는다.
@@ -3829,18 +3835,57 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    * 그래서 이 세 값의 배경 위 세기는 정렬 전과 같다. 안 따라갔다면 배경만 밝아져
    * 물듦이 고도보다 조용해졌을 것이다(1.08 대 1.10 — 뜻이 뒤집힌다).
    *
-   * ## 언제 사라지는가 — 시간이 아니라 손가락
+   * ## 현행 값과 색 판정 (#3921, 새벽하늘 실측)
    *
-   * 웹은 1,600ms 타이머를 쓴다(`inbox/anchor.ts`). 폰에서 그 값을 베끼면 타이머가
-   * **이동 애니메이션과 경주한다**: 점프는 `scrollToIndex({animated: true})` 이고,
-   * 목표 행이 아직 측정되지 않았으면 `onScrollToIndexFailed` 가 한 번 더 돈다.
-   * 그 사이에 표시가 꺼지면 사람은 도착한 자리에서 아무 표시도 못 본다 — 표시가
-   * 없는 것보다 나쁘다(있다고 약속하고 안 준 것이므로).
+   * 위 두 절의 hex·거리·대비는 #1155·#1164 시점의 값이다. 팔레트는 그 뒤 core 표
+   * 새벽하늘(ADR-0189 D5)로 옮겨 갔고 웹의 `accent` 는 호박이 아니라 `signal`(주황)이
+   * 됐다. 같은 질문을 현행 값으로 다시 쟀다 — 배경은 각 클라의 목록 바닥(웹 `--pane`,
+   * 폰 `ConversationScreen` 의 `screen`: 다크 `bg`, 라이트 `surface`)이다.
    *
-   * 그래서 기준은 **사람이 화면을 다시 가져가는 순간**이다: `onScrollBeginDrag`
-   * — 유리에 닿은 손가락. 이 목록은 그 신호를 이미 「읽는 사람이 주도권을
-   * 되찾았다」는 뜻으로 쓰고 있다(따라가기 보정이 물러나는 자리와 같은 신호).
-   * 표시를 세운 것이 사람의 동작이었으므로, 거두는 것도 사람의 동작이다.
+   *             웹 착지 틴트 `signal-soft`           폰 `warnSurface` (`warn-soft`)
+   *   다크      #392418 · 색상각 50° · 1.19:1       #372E1B · 색상각 85° · 1.30:1
+   *   라이트    #FBE9DE · 색상각 54° · 1.17:1       #FFF0DB · 색상각 76° · 1.11:1
+   *
+   * **판정: 색은 바꾸지 않는다.**
+   *
+   *   - 뜻이 그대로다. 웹 값과 같아지려면 `accentSurface`(= `signal-soft`)로 가야 하는데,
+   *     그 색은 폰에서 아직 「내가 한 것」(보내기 버튼 · 내 반응 칩)이다 — `conversationVisual`
+   *     H-2 가 못박은 뜻이고, 착지 틴트가 그 색을 입으면 `conversationHygiene` 의 착지 단정
+   *     (「도착한 행이 물든다」: 틴트는 `warnSurface`)이 빨갛다. 두 클라가 「여기를 보라」를
+   *     서로 다른 토큰이 맡는 것은 설계다(`approvalNote.ts` 색 계약: 웹 `--accent` ↔ 폰
+   *     `warn`). 세기는 같은 자릿수다(다크 +0.11 · 라이트 −0.06) — 모양이 아니라 물듦이라는
+   *     주장은 그대로 선다.
+   *   - 「경고처럼 읽혔다」의 원인은 색상이 아니라 **지속**이었다. 이 값은 대기 상태 칩
+   *     (「승인 대기」)의 채움과 **같은 값**이다. 칩은 「승인됨」으로 바뀌고 행은 앰버로
+   *     남으면 한 카드가 한 화면에서 「끝났다」와 「남았다」를 함께 말한다(성재 실측,
+   *     2026-10-16). 아래 세 규칙이 그 모순을 없앤다 — 2초 서 있다 녹는 색은 상태가
+   *     아니라 도착 신호로 읽힌다.
+   *   - 세기를 바꾸는 일은 이 변경의 몫이 아니다. 토큰 값(`warn-soft`)이 정하고, 바꾸려면
+   *     `docs/design-system/README.md` §6 의 절차다.
+   *
+   * ## 언제 사라지는가 — 결정이 먼저, 보인 뒤 2초, 손가락은 언제나 (#3921)
+   *
+   * 이 절의 옛 제목은 「시간이 아니라 손가락」이었다. 시한을 버린 이유는 정당했다 — 웹의
+   * 1,600ms 를 베끼면 타이머가 **이동 애니메이션과 경주한다**: 점프는
+   * `scrollToIndex({animated: true})` 이고, 목표 행이 아직 측정되지 않았으면
+   * `onScrollToIndexFailed` 가 한 번 더 돈다. 그 사이에 표시가 꺼지면 사람은 도착한 자리에서
+   * 아무 표시도 못 본다 — 표시가 없는 것보다 나쁘다(있다고 약속하고 안 준 것이므로).
+   *
+   * 그러나 손가락 하나만 남기자 반대편 결함이 났다. 스크롤하지 않는 사람에게 표시는
+   * 영영 남았고, 승인 카드에서는 그것이 「아직 처리할 것」으로 읽혔다. 그래서 경주를 없애는
+   * 쪽으로 규칙을 고쳤다 — 시한을 버리는 것이 아니라 **시한이 시작되는 순간을 고른다**.
+   *
+   *   1. 승인이 결정되면 곧바로. 착지한 행이 승인 요청이고 그 승인이 결정됐다(영수증 ·
+   *      카드 상태 · 대기 원장에서 사라짐)는 것은 이 행의 틴트가 약속한 「아직 할 일이
+   *      있다」가 거짓이 됐다는 뜻이다. 판정은 `landedHighlight.ts`.
+   *   2. 이동이 **끝난 뒤** 2초. 시계는 점프의 이동이 멎은 순간(`Timeline` 의
+   *      `endJumpTravel` → `onLanded`)에 켜진다 — 애니메이션과 `onScrollToIndexFailed`
+   *      회복이 모두 지난 뒤다. 시계가 켜지기 전에는 경주할 시계가 없다.
+   *   3. 손가락(`onScrollBeginDrag`). 사람이 화면을 다시 가져가면 「방금 여기로 왔다」는
+   *      더는 사실이 아니다. #1076 부터의 규칙이고 시계의 앞이든 뒤든 먼저 온다.
+   *
+   * 물러나는 모양은 `LandedTintFade` 가 든다: 그릇이 배경을 벗는 그 커밋에 같은 색의
+   * 덮개가 불투명도 1 에서 0 으로 녹는다. 「동작 줄이기」면 덮개 없이 즉시다.
    */
   rowLanded: {backgroundColor: color.warnSurface},
   // 그룹 사이는 `CONV.groupGap`. 안쪽이 이미 절반씩 물고 있으므로 차이만 더한다.
