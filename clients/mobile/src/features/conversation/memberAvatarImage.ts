@@ -163,7 +163,8 @@ async function download(path: string, destination: File): Promise<File> {
     //   거절·토큰 없음 → 세션이 끝났다. 여기서 선언하고 이 다운로드는 실패로 던진다.
     //   닿지 못함      → 코어가 연결 오류를 던진다. 선언하지 않고 이 다운로드만 실패한다
     //                    (이니셜이 서고, 잠금 화면에서 돌아와 무선이 깨는 사이의 끊김이
-    //                    로그아웃이 되지 않는다. 다음 요청이 다시 갱신한다).
+    //                    로그아웃이 되지 않는다. 다음 요청이 다시 갱신한다. 같은 아바타는
+    //                    실패 기억 `FAILURE_TTL_MS` 가 지난 뒤에 다시 묻는다).
     if (coreSession().getRefreshToken() !== null && (await rotateAfterUnauthorized())) {
       try {
         return await send();

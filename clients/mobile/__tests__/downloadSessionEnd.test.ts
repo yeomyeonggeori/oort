@@ -1,4 +1,4 @@
-import {login} from '@momo/core/lib/api';
+import * as coreApi from '@momo/core/lib/api';
 import {NetworkError} from '@momo/core/lib/http';
 import {coreSession} from '@momo/core/runtime/host';
 
@@ -18,6 +18,7 @@ import {
   __adoptPersisted,
   __resetSessionStore,
   getAuthExpired,
+  subscribeSession,
 } from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 
@@ -38,6 +39,11 @@ import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 // (`rotateOnce`). 그래서 「거절 뒤 선언」 단정만으로는 폰이 자기 선언 줄을 지워도 초록
 // 으로 남는다. 폰의 줄이 **유일한 선언자**인 경우를 따로 둔다: 갱신 토큰이 없을 때(회전이
 // 아예 일어나지 않는다)와, 갱신은 됐는데 새 토큰으로 받은 것도 401일 때(회전은 성공이다).
+//
+// 반대쪽 가드도 따로 재야 한다(독립 검수): 「401 일 때만 갱신한다」는 첫 가드와 「재시도가
+// 401 일 때만 선언한다」는 둘째 가드를 지우면, 회전이 성공한 직후 재시도가 401 이 아닌
+// 오류(끊김·404·5xx)로 실패하는 것이 다시 거짓 로그아웃이 된다. 그 가지가 없던 동안은 두
+// 가드를 지워도 모든 시험이 초록이었다.
 // =============================================================================
 
 const WS = '22222222-2222-4222-8222-222222222222';
@@ -127,11 +133,12 @@ beforeEach(async () => {
   fetchMock = jest.fn();
   globalThis.fetch = fetchMock as unknown as typeof fetch;
   fetchMock.mockResolvedValueOnce(reply(200, LOGIN_BODY));
-  await login('a@example.com', 'pw');
+  await coreApi.login('a@example.com', 'pw');
   fetchMock.mockClear();
 });
 
 afterEach(() => {
+  jest.restoreAllMocks();
   jest.useRealTimers();
   fsMock.__reset();
   __resetSessionStore();
@@ -178,6 +185,21 @@ describe.each([avatar, attachment])('$name', subject => {
       },
     );
 
+    it('연결 오류의 문구가 401 처럼 읽혀도 선언하지 않는다 — 문구가 아니라 종류로 가른다', async () => {
+      // 첨부의 바깥 catch 는 오류 메시지를 정규식으로 읽어 선언한다. 코어의 연결 오류 문구가
+      // 훗날 바뀌어 401 로 읽혀도 서버에 닿지 못한 일은 인가 판정이 아니다.
+      const loud = Object.assign(new NetworkError('unreachable', 15_000), {
+        message: 'HTTP 401 unauthorized',
+      });
+      jest.spyOn(coreApi, 'rotateAfterUnauthorized').mockRejectedValueOnce(loud);
+      fsMock.__state.failures = [unauthorized()];
+
+      const result = await subject.run();
+
+      expect(result.file).toBe(false);
+      expect(getAuthExpired()).toBe(false);
+    });
+
     it('동시에 401 을 받은 다운로드들은 갱신 하나를 나눠 쓰고 모두 선언 없이 실패한다', async () => {
       fsMock.__state.failures = [unauthorized(), unauthorized()];
       fetchMock.mockRejectedValueOnce(new TypeError('network down'));
@@ -197,13 +219,15 @@ describe.each([avatar, attachment])('$name', subject => {
       fsMock.__state.failures = [unauthorized()];
       fetchMock.mockRejectedValueOnce(new TypeError('network down'));
       expect((await subject.run()).file).toBe(false);
+      // 선언은 **여기서** 봐야 한다. 둘째 갱신의 `applyRotation` 이 플래그를 지우므로, 끝에서
+      // 보면 첫 실패가 선언했어도 초록으로 남는다(독립 검수).
+      expect(getAuthExpired()).toBe(false);
 
       jest.setSystemTime(1_000_000 + FAILURE_TTL_MS + 1);
       fsMock.__state.failures = [unauthorized()];
       fetchMock.mockResolvedValueOnce(ROTATED());
       expect((await subject.run()).file).toBe(true);
 
-      expect(getAuthExpired()).toBe(false);
       expect(refreshCalls()).toHaveLength(2);
       // 첫 갱신은 닿지 못해 토큰이 쓰이지 않았으니 둘째 갱신이 같은 토큰을 낸다.
       const bodies = refreshCalls().map(([, init]) => JSON.parse(String(init?.body)));
@@ -228,6 +252,18 @@ describe.each([avatar, attachment])('$name', subject => {
       // 다시 받지도 갱신을 되풀이하지도 않는다.
       expect(downloads()).toHaveLength(1);
       expect(refreshCalls()).toHaveLength(1);
+    });
+
+    it('동시에 401 을 받은 다운로드들은 거절을 함께 받고 모두 실패하며 선언한다', async () => {
+      fsMock.__state.failures = [unauthorized(), unauthorized()];
+      fetchMock.mockResolvedValueOnce(REUSED());
+
+      const [first, second] = await Promise.all([subject.run(0), subject.run(1)]);
+
+      expect(first.file).toBe(false);
+      expect(second.file).toBe(false);
+      expect(refreshCalls()).toHaveLength(1);
+      expect(getAuthExpired()).toBe(true);
     });
 
     it('갱신 토큰이 없으면 갱신 요청 없이 선언한다 — 회전이 없으니 폰의 자기 줄만 선언할 수 있다', async () => {
@@ -258,6 +294,65 @@ describe.each([avatar, attachment])('$name', subject => {
   });
 
   describe('갱신이 되면 새 토큰으로 한 번 다시 받는다', () => {
+    it.each([
+      ['끊김', () => new Error('The Internet connection appears to be offline.')],
+      ['404', () => new Error('response has status 404')],
+      ['503', () => new Error('server returned HTTP 503')],
+    ])('회전은 됐는데 재시도가 401 이 아닌 %s 로 실패하면 선언하지 않는다', async (_label, make) => {
+      // 둘째 가드(재시도가 401 일 때만 선언)의 반대쪽. 무선이 아직 깨는 중이라 재시도만 끊긴
+      // 경우가 바로 이 이슈가 막으려던 거짓 로그아웃이다.
+      fsMock.__state.failures = [unauthorized(), make()];
+      fetchMock.mockResolvedValueOnce(ROTATED());
+
+      const result = await subject.run();
+
+      expect(result.file).toBe(false);
+      expect(downloads()).toHaveLength(2);
+      expect(refreshCalls()).toHaveLength(1);
+      expect(getAuthExpired()).toBe(false);
+    });
+
+    it('첫 오류가 401 이 아니면 갱신을 시도하지도 선언하지도 않는다', async () => {
+      // 첫 가드(401 일 때만 갱신한다)의 반대쪽.
+      fsMock.__state.failures = [new Error('response has status 503')];
+
+      const result = await subject.run();
+
+      expect(result.file).toBe(false);
+      expect(downloads()).toHaveLength(1);
+      expect(refreshCalls()).toHaveLength(0);
+      expect(getAuthExpired()).toBe(false);
+    });
+
+    it('회전이 성공하는 경로에서는 선언이 한 순간도 켜지지 않는다', async () => {
+      // `applyRotation` 이 플래그를 지우므로 끝에서 `getAuthExpired()` 만 보면 중간에 켜졌다 꺼진
+      // 선언(= 인증 게이트가 로그인 화면으로 한 번 넘어가는 깜박임)을 놓친다. 구독으로 본다.
+      const seen: boolean[] = [];
+      const unsubscribe = subscribeSession(() => seen.push(getAuthExpired()));
+      fsMock.__state.failures = [unauthorized()];
+      fetchMock.mockResolvedValueOnce(ROTATED());
+
+      const result = await subject.run();
+      unsubscribe();
+
+      expect(result.file).toBe(true);
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen.every(flag => flag === false)).toBe(true);
+    });
+
+    it('동시에 401 을 받은 다운로드들은 갱신 하나로 둘 다 새 토큰으로 받는다', async () => {
+      fsMock.__state.failures = [unauthorized(), unauthorized()];
+      fetchMock.mockResolvedValueOnce(ROTATED());
+
+      const [first, second] = await Promise.all([subject.run(0), subject.run(1)]);
+
+      expect(first.file).toBe(true);
+      expect(second.file).toBe(true);
+      expect(refreshCalls()).toHaveLength(1);
+      expect(getAuthExpired()).toBe(false);
+      expect(downloads()).toHaveLength(4);
+    });
+
     it('선언 없이 파일을 얻는다', async () => {
       fsMock.__state.failures = [unauthorized()];
       fetchMock.mockResolvedValueOnce(ROTATED());

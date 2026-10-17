@@ -1,4 +1,5 @@
 import { rotateAfterUnauthorized, type MessageAttachment } from '@momo/core/lib/api';
+import { NetworkError } from '@momo/core/lib/http';
 import { apiBase, coreSession } from '@momo/core/runtime/host';
 import { Directory, File, Paths } from 'expo-file-system';
 import { useEffect, useState } from 'react';
@@ -73,6 +74,10 @@ function authHeaders(): Record<string, string> {
 }
 
 function isUnauthorized(error: unknown): boolean {
+  // 서버에 닿지 못한 실패(코어 `rotateAfterUnauthorized` 가 던지는 연결 오류)는 문구가 무엇이든
+  // 인가 판정이 아니다. 아래 정규식은 메시지를 읽으므로, 그 문구가 훗날 바뀌어 401 처럼
+  // 읽혀도 바깥 catch 의 선언으로 새지 않게 종류로 먼저 거른다(#3997).
+  if (error instanceof NetworkError) return false;
   return /(?:status(?: code)?\s*[:=]?\s*401|http\s*401|unauthori[sz]ed)/i.test(
     error instanceof Error ? error.message : String(error),
   );

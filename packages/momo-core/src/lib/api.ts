@@ -1174,7 +1174,11 @@ function bindRefreshKey(retry: number): void {
  *                  session (refused, spent, reused, the member is gone). The
  *                  caller still holds the 401 and declares the end with its own
  *                  `markAuthExpired()` right there — not behind a retry or a
- *                  timer, and not after the network comes back.
+ *                  timer, and not after the network comes back. (A refusal the
+ *                  server gave has already been declared by the rotation itself;
+ *                  the caller's declaration is idempotent and covers what the
+ *                  rotation cannot see: nothing was left to present, or the new
+ *                  token met a 401 again.)
  *   unreachable  → throws a `NetworkError`. The connection dropped between the
  *                  401 and the rotation (a subway, a lift, a radio still waking
  *                  after the lock screen), the deadline blew, or the server could
