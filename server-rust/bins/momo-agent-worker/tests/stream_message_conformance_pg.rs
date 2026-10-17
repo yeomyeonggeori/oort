@@ -258,6 +258,20 @@ async fn message_count(su: &PgPool, channel_id: Uuid) -> i64 {
         .expect("count messages")
 }
 
+/// Push candidates enqueued by the stream's CLOSING write for this message (ADR-0204
+/// 증보 1 D8-a, #3987). The 011 trigger's candidate — the opening slice's — has no `source`.
+async fn stream_closed_candidates(su: &PgPool, message_id: Uuid) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM outbox \
+          WHERE kind::text = 'push_candidate' AND payload->>'message_id' = $1 \
+            AND payload->>'source' = 'stream_closed'",
+    )
+    .bind(message_id.to_string())
+    .fetch_one(su)
+    .await
+    .expect("count the closing candidates")
+}
+
 async fn broadcast_types(su: &PgPool, channel_id: Uuid) -> Vec<String> {
     sqlx::query_scalar(
         "SELECT payload->'data'->>'type' FROM outbox \
@@ -330,6 +344,14 @@ async fn an_agent_grows_one_message_across_seventeen_deltas() {
         "an agent assembling an answer never claims a human revised it"
     );
     assert_eq!(props["momo.stream"]["streaming"], Value::Bool(false));
+
+    // 17 deltas, one close, one push candidate for the finished answer (as the runtime
+    // `momo_app` role — the candidate is written in the closing slice's transaction).
+    assert_eq!(
+        stream_closed_candidates(&su, message_id).await,
+        1,
+        "the finished answer is judged for a push once, when it closes — not per delta"
+    );
 
     let types = broadcast_types(&su, tenant.channel_id).await;
     assert_eq!(types[0], "message.new");
@@ -618,6 +640,11 @@ async fn a_cancelled_run_freezes_its_message_and_marks_how_it_ended() {
     .expect("there was an open stream to close");
     assert_eq!(closed, message_id, "it closed the message the run opened");
 
+    assert_eq!(
+        stream_closed_candidates(&su, message_id).await,
+        1,
+        "a stopped stream is closed too — the freeze enqueues the closing candidate (D8-a)"
+    );
     let (body, state, edited_at_ms, props) = row(&su, message_id).await;
     let stream_props = props
         .get("momo.stream")
@@ -662,6 +689,11 @@ async fn a_cancelled_run_freezes_its_message_and_marks_how_it_ended() {
     assert_eq!(
         again, None,
         "6 — a closed stream is not open, so the retry finds nothing to close"
+    );
+    assert_eq!(
+        stream_closed_candidates(&su, message_id).await,
+        1,
+        "6 — and the retry that found nothing to close enqueued nothing"
     );
     let (_, _, _, props_again) = row(&su, message_id).await;
     let stream_again = props_again.get("momo.stream").expect("still marked");

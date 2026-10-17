@@ -26,15 +26,26 @@ pub enum OutboxKind {
     AgentJob,
     /// Push-notification candidate, consumed by the NotifierWorker.
     ///
-    /// **No application code emits this kind.** The rows are produced by the
-    /// `push_candidate_enqueue_trg` AFTER INSERT trigger on `message`
-    /// (`011_push_notifier.sql:47-69`), which runs inside the same transaction
-    /// as the source message — that is what makes the candidate impossible to
-    /// lose and impossible to observe before its message commits (ADR-0120 D3).
-    /// A server-side [`emit_outbox`] call for this kind would therefore be a
-    /// *duplicate* candidate, not a missing one. The variant exists so the Rust
-    /// enum is a faithful mirror of the DB enum (and so consumers can name the
-    /// label) — not as an invitation to enqueue one.
+    /// **Two writers emit this kind, and no others.**
+    ///
+    /// 1. The `push_candidate_enqueue_trg` AFTER INSERT trigger on `message`
+    ///    (`011_push_notifier.sql:47-69`) — one per message, inside the transaction of
+    ///    the insert. That is what makes the candidate impossible to lose and
+    ///    impossible to observe before its message commits (ADR-0120 D3). An
+    ///    [`emit_outbox`] call for this kind next to a message *insert* would be a
+    ///    *duplicate* candidate, not a missing one.
+    /// 2. [`crate::push::emit_stream_closed_push_candidate`], called by
+    ///    `momo_messaging::stream_message_body_in_tx` in the transaction of a streamed
+    ///    message's **closing** write (`streaming: true → false`) — ADR-0204 증보 1
+    ///    D8-a (#3987). A streamed answer is born unfinished, so the trigger judges it
+    ///    at its birth; the close is the moment it becomes the answer, and no INSERT
+    ///    happens then, so the trigger is silent. That is the only case the trigger
+    ///    cannot cover, and the only reason this is not "an invitation to enqueue one":
+    ///    a third writer needs the same kind of decision (an Accepted ADR), not a copy
+    ///    of this call.
+    ///
+    /// The variant exists so the Rust enum is a faithful mirror of the DB enum and so
+    /// consumers can name the label.
     PushCandidate,
     /// Outbound webhook delivery.
     WebhookDelivery,

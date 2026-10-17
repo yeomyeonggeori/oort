@@ -45,7 +45,7 @@ use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
 use momo_db::DbError;
-use momo_outbox::{emit_outbox, OutboxKind};
+use momo_outbox::{emit_outbox, emit_stream_closed_push_candidate, OutboxKind};
 use momo_wire::payload::BroadcastPayload;
 use serde_json::{json, Map, Value};
 use sqlx::{PgConnection, Row};
@@ -689,6 +689,18 @@ pub fn open_stream_run_id(props: &Value) -> Option<Uuid> {
         .and_then(|raw| Uuid::parse_str(raw).ok())
 }
 
+/// Is this message's `momo.stream` block still open — `streaming: true`?
+///
+/// The state a closing write ends. A message that never streamed has no block and so is
+/// not "open"; a block that already says `streaming: false` is closed. Written only by
+/// [`stream_message_body_in_tx`] (and the opening marker, [`opening_stream_props`]).
+fn stream_is_open(props: &Value) -> bool {
+    props
+        .get(STREAM_PROPS_KEY)
+        .and_then(|stream| stream.get("streaming"))
+        == Some(&Value::Bool(true))
+}
+
 /// The revision already stored on a message, `0` when it has never streamed.
 fn stored_stream_rev(props: &Value) -> i64 {
     props
@@ -829,6 +841,16 @@ pub async fn emit_message_edited_in_tx(
 /// growing slices leave them alone: the arrival of a stop is no more a revision
 /// than the arrival of an answer.
 ///
+/// ## The close is also a push candidate (ADR-0204 증보 1 D8-a, #3987)
+///
+/// A streamed message is INSERTed unfinished, and the 011 trigger turns that INSERT —
+/// the opening slice — into the message's one push candidate. The write that **closes**
+/// the stream (`streaming: true → false`) is an UPDATE, which the trigger never sees,
+/// so this function enqueues the second candidate itself, in the same transaction, once
+/// per stream ([`emit_stream_closed_push_candidate`]). Push judgment holds a streamed
+/// answer back while it is open and judges it, at the moment it closes, as the finished
+/// answer it now is.
+///
 /// Every other guard is [`edit_message_in_tx`]'s, unchanged: author-only,
 /// channel membership, no tombstones, and RLS confines the lock to the tenant.
 pub async fn stream_message_body_in_tx(
@@ -864,7 +886,11 @@ pub async fn stream_message_body_in_tx(
 
     // Read under the lock taken above, so the compare-and-set below cannot
     // interleave with a concurrent slice of the same message.
-    let stored_rev = stored_stream_rev(&message_props_in_tx(&mut *conn, message_id).await?);
+    let stored_props = message_props_in_tx(&mut *conn, message_id).await?;
+    let stored_rev = stored_stream_rev(&stored_props);
+    // Whether THIS write is the one that closes the stream: decided here, under the
+    // same lock, from the state it is about to end.
+    let closes_the_stream = edit.is_final && stream_is_open(&stored_props);
     if edit.rev <= stored_rev {
         let Some(current) = reread_interaction_in_tx(&mut *conn, message_id).await? else {
             return Ok(Err(InteractionRefused::NotFound));
@@ -920,6 +946,27 @@ pub async fn stream_message_body_in_tx(
         Some(projection.message.channel_id),
     )
     .await?;
+    // ADR-0204 증보 1 D8-a (#3987): the close is when a streamed answer BECOMES the
+    // answer, and it is an UPDATE — the 011 trigger judged the message once, at its
+    // opening slice, and will not judge it again. So the write that ends the stream
+    // enqueues the one push candidate that judges it now, in the same transaction.
+    //
+    // Exactly once per stream: `closes_the_stream` is true only for the final write of a
+    // block that was still open. A slice (`is_final: false`), a second final write at a
+    // higher revision, and a final write on a message that never streamed all leave it
+    // false — and a stale slice never reaches this line (it returned above).
+    if closes_the_stream {
+        let message = &projection.message;
+        emit_stream_closed_push_candidate(
+            &mut *conn,
+            workspace_id,
+            message.id,
+            message.channel_id,
+            message.author_member_id,
+            message.message_type.as_db_label(),
+        )
+        .await?;
+    }
     Ok(Ok(StreamOutcome::Applied(projection)))
 }
 
@@ -1554,6 +1601,28 @@ pub async fn channel_pins(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ADR-0204 증보 1 D8-a (#3987): only a block that is still `streaming: true` is a stream
+    /// the next final write would CLOSE — and so only that one earns the closing push
+    /// candidate. A message that never streamed, a block already closed, and lookalikes
+    /// (`"true"` as text, a non-object block) are not open.
+    #[test]
+    fn only_a_block_that_says_streaming_true_is_an_open_stream() {
+        let open = json!({ STREAM_PROPS_KEY: { "rev": 3, "streaming": true } });
+        assert!(stream_is_open(&open));
+        let closed = json!({ STREAM_PROPS_KEY: { "rev": 4, "streaming": false } });
+        assert!(!stream_is_open(&closed));
+        let stopped =
+            json!({ STREAM_PROPS_KEY: { "rev": 4, "streaming": false, "outcome": "cancelled" } });
+        assert!(!stream_is_open(&stopped));
+        assert!(!stream_is_open(&json!({})), "a message that never streamed");
+        assert!(!stream_is_open(&json!({ STREAM_PROPS_KEY: {} })), "no flag");
+        assert!(!stream_is_open(
+            &json!({ STREAM_PROPS_KEY: { "streaming": "true" } })
+        ));
+        assert!(!stream_is_open(&json!({ STREAM_PROPS_KEY: "streaming" })));
+        assert!(!stream_is_open(&json!({ STREAM_PROPS_KEY: null })));
+    }
 
     /// ADR-0155 — the outcome vocabulary is closed, and its two spellings are
     /// the ones the ADR and the OpenAPI enum name.

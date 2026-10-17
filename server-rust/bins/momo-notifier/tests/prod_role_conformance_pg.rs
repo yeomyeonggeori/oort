@@ -29,6 +29,7 @@
 //! | `the_personal_agent_member_trigger_runs_as_every_role_that_writes_member` (#3591) | drop `GRANT UPDATE ON agent` from a role that can UPDATE `member` (the migration-123 trigger updates `agent` as the invoking role), or add the trigger's table to a lockdown |
 //! | `the_other_runtime_roles_reach_every_table_the_migrations_created` | a new table that `app`/`relay`/`worker` cannot read or write, or a cloud-box lockdown that drifts |
 //! | `a_dead_push_token_is_invalidated_by_the_production_notifier_role` (#3930) | drop `GRANT UPDATE (invalidated_at, updated_at) ON push_token TO momo_notifier` — the settle's `UPDATE push_token` dies with `permission denied for table push_token`, and rolls back to its savepoint, so ONLY this suite sees it; widen the grant past those two columns and the denied-write half goes red |
+//! | `closing_a_stream_enqueues_its_candidate_as_every_role_that_writes_a_stream` (ADR-0204 증보 1 D8-a, #3987) | revoke `INSERT` on `outbox` from `momo_app` or `momo_worker` (the stream's closing write enqueues the `push_candidate` as the invoking role — the same privilege the 011 trigger already needs for the opening INSERT), or give the outbox a kind-specific lockdown |
 //!
 //! Why #3553 got through anyway: the first test below already called
 //! `judge_targets` as the notifier (Postgres checks table privileges when a
@@ -47,6 +48,10 @@ use momo_agent::{end_parked_run_in_tx, RunStatus};
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::PgPool;
 use momo_drive::StubDriveArchive;
+use momo_messaging::{
+    opening_stream_props, send_message_in_tx, stream_message_body_in_tx, MessageType, NewMessage,
+    StreamEdit, STREAM_PROPS_KEY,
+};
 use momo_notifier::avatar_reclaim::AvatarReclaimer;
 use momo_notifier::inbox_retention_sweep::sweep_read_inbox_items;
 use momo_notifier::push::PushDrain;
@@ -1699,5 +1704,126 @@ async fn a_dead_push_token_is_invalidated_by_the_production_notifier_role() {
         report.failures.is_empty(),
         "push token invalidation as the production notifier role failed:\n  {}",
         report.failures.join("\n  ")
+    );
+}
+
+/// ADR-0204 증보 1 D8-a (#3987): the write that closes a streamed message also enqueues the
+/// message's second push candidate, **as the role that closes it**. In production that is
+/// `momo_app` (the REST `PATCH` with a `stream` block, in a tenant transaction) and
+/// `momo_worker` (the agent worker's commit and cancel). Both can already write the outbox —
+/// the 011 trigger inserts a candidate as the role that inserts the message — but a new
+/// writer is a new place for "permission denied" to surface only in production, so this
+/// opens and closes a stream as each of the two under the PRODUCTION grants
+/// (`bootstrap_runtime_roles.sql`, applied in the Railway order), and reads the candidate back.
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
+async fn closing_a_stream_enqueues_its_candidate_as_every_role_that_writes_a_stream() {
+    let db = ProdDb::create().await;
+    let (workspace, owner, agent) = seed_personal_agent(&db.su).await;
+    let channel = Uuid::new_v4();
+    sqlx::query("INSERT INTO channel (id, workspace_id, kind, name) VALUES ($1, $2, 'public', 'stream-roles')")
+        .bind(channel)
+        .bind(workspace)
+        .execute(&db.su)
+        .await
+        .expect("channel");
+    sqlx::query("INSERT INTO channel_seq (channel_id, workspace_id, last_seq) VALUES ($1, $2, 0)")
+        .bind(channel)
+        .bind(workspace)
+        .execute(&db.su)
+        .await
+        .expect("channel_seq");
+    for member in [owner, agent] {
+        sqlx::query(
+            "INSERT INTO membership (workspace_id, channel_id, member_id) VALUES ($1, $2, $3)",
+        )
+        .bind(workspace)
+        .bind(channel)
+        .bind(member)
+        .execute(&db.su)
+        .await
+        .expect("membership");
+    }
+
+    let mut failures: Vec<String> = vec![];
+    for (role, password) in [
+        ("momo_app", "momo_app_dev_pw"),
+        ("momo_worker", "momo_worker_dev_pw"),
+    ] {
+        let pool = db.role(role, password).await;
+        let run = Uuid::new_v4();
+        let opened = momo_db::tenant::with_tenant_tx(&pool, workspace, move |conn| {
+            Box::pin(async move {
+                send_message_in_tx(
+                    conn,
+                    workspace,
+                    NewMessage {
+                        channel_id: channel,
+                        author_member_id: agent,
+                        message_type: MessageType::Text,
+                        body: Some("답을 쓰는 중".to_string()),
+                        props: serde_json::json!({ STREAM_PROPS_KEY.to_string(): opening_stream_props() }),
+                        root_id: None,
+                        reply_to_id: None,
+                        client_msg_id: Some(run),
+                        run_id: None,
+                        hlc_ts: None,
+                        hlc_count: None,
+                    },
+                )
+                .await
+            })
+        })
+        .await;
+        let message = match opened {
+            Ok(sent) => sent.message.id,
+            Err(error) => {
+                failures.push(format!("{role} open: {error}"));
+                continue;
+            }
+        };
+        let closed = momo_db::tenant::with_tenant_tx(&pool, workspace, move |conn| {
+            Box::pin(async move {
+                stream_message_body_in_tx(
+                    conn,
+                    workspace,
+                    message,
+                    agent,
+                    "답이 끝났어요",
+                    StreamEdit {
+                        rev: 1,
+                        is_final: true,
+                        outcome: None,
+                    },
+                )
+                .await
+            })
+        })
+        .await;
+        match closed {
+            Err(error) => failures.push(format!("{role} close: {error}")),
+            Ok(Err(refused)) => failures.push(format!("{role} close refused: {refused}")),
+            Ok(Ok(_)) => {
+                let candidates: i64 = sqlx::query_scalar(
+                    "SELECT count(*) FROM outbox WHERE kind = 'push_candidate' \
+                        AND payload->>'message_id' = $1 AND payload->>'source' = 'stream_closed'",
+                )
+                .bind(message.to_string())
+                .fetch_one(&db.su)
+                .await
+                .expect("count the closing candidate");
+                if candidates != 1 {
+                    failures.push(format!(
+                        "{role}: {candidates} closing candidates, expected 1"
+                    ));
+                }
+            }
+        }
+    }
+    db.finish().await;
+    assert!(
+        failures.is_empty(),
+        "closing a stream under the production grants failed:\n  {}",
+        failures.join("\n  ")
     );
 }

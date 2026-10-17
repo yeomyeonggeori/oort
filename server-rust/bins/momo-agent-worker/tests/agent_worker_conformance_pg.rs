@@ -1118,6 +1118,20 @@ fn bytes_of(stats: &[(String, i64, i64)], kind: &str) -> i64 {
         .unwrap_or(0)
 }
 
+/// How many push candidates a stream's CLOSING write enqueued for this message
+/// (ADR-0204 증보 1 D8-a, #3987) — the trigger's INSERT candidate does not carry `source`.
+async fn stream_closed_candidates(su: &PgPool, message_id: Uuid) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM outbox \
+          WHERE kind::text = 'push_candidate' AND payload->>'message_id' = $1 \
+            AND payload->>'source' = 'stream_closed'",
+    )
+    .bind(message_id.to_string())
+    .fetch_one(su)
+    .await
+    .expect("count the closing candidates")
+}
+
 async fn stream_props(su: &PgPool, message_id: Uuid) -> Value {
     let props: Value = sqlx::query_scalar("SELECT props FROM message WHERE id = $1")
         .bind(message_id)
@@ -1217,6 +1231,28 @@ async fn a_streaming_turn_grows_one_message_and_the_commit_finishes_it() {
         rev >= 3,
         "four coalescing windows plus the close should have spent several \
          revisions, not one: {rev}"
+    );
+
+    // ADR-0204 증보 1 D8-a (#3987): the close the commit transaction wrote is also the
+    // answer's second push candidate — one, however many slices came before it. (The
+    // trigger judged the message once, at its opening slice, when it was only the
+    // first words.)
+    assert_eq!(
+        stream_closed_candidates(&su, message_id).await,
+        1,
+        "the commit's closing slice enqueues exactly one push candidate for the finished answer"
+    );
+    let candidates: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE kind::text = 'push_candidate' \
+            AND payload->>'message_id' = $1",
+    )
+    .bind(message_id.to_string())
+    .fetch_one(&su)
+    .await
+    .expect("count the candidates");
+    assert_eq!(
+        candidates, 2,
+        "the INSERT's candidate and the close's — no slice added one"
     );
 
     // No 수정됨 badge. An answer arriving is not a revision of itself.
@@ -1379,6 +1415,11 @@ async fn a_cancel_during_a_streaming_turn_leaves_exactly_one_frozen_message() {
          answer's clothes: {stream}"
     );
     assert_eq!(stream["streaming"], json!(false));
+    assert_eq!(
+        stream_closed_candidates(&su, message_id).await,
+        1,
+        "freezing a stopped stream is a close too — the asker is told it stopped (D8-a)"
+    );
     assert_eq!(
         run_status(&su, run_id).await,
         "cancelled",

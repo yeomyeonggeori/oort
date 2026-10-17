@@ -56,6 +56,17 @@
 //! | `an_answer_to_a_message_elsewhere_or_by_an_agent_pushes_no_one` | drop the same-channel join or the human-recipient filter |
 //! | `an_answer_that_mentions_somebody_keeps_the_mention_rules` | apply the window to explicit mentions, or let the `asked` arm outrank them |
 //! | `a_work_run_answer_stays_work_run_done_for_its_requester` | move the `asked` arm above the `work_run_done` arm |
+//! | `a_streamed_answer_is_pushed_at_its_close_to_an_asker_who_left_during_it` (ADR-0204 증보 1 D8-a, #3987) | stop `stream_message_body_in_tx` enqueueing the close candidate, or read the window at the opening slice (`created_at`), or let the `seq` shortcut stand for a streamed line |
+//! | `a_streamed_answer_is_not_pushed_to_an_asker_who_was_moving_their_cursor_just_before_it_closed` | drop the `read_state` window from the streamed branch of the `asked` arm |
+//! | `an_asker_who_was_away_from_the_start_gets_one_push_at_the_close_not_two` | stop holding a still-streaming line in the `asked` arm (`NOT streaming`) |
+//! | `the_window_is_read_when_the_answer_closes_not_when_it_opened` | read a streamed line's window against `created_at` instead of `now()` |
+//! | `a_cursor_that_reached_the_first_words_does_not_stand_for_having_read_the_end` | apply the `last_read_seq >= seq` shortcut to a streamed line |
+//! | `a_single_insert_answer_keeps_its_own_creation_time_as_the_window_basis` | read every line's window against `now()` (the single-INSERT paths must keep `created_at` and the `seq` shortcut) |
+//! | `a_close_adds_no_second_push_for_a_person_the_opening_already_pushed` | send a second dispatch for the same message (drop the `collapse_id`/dispatch-log arbitration) |
+//! | `a_dm_streamed_answer_is_pushed_by_the_dm_arm_at_its_opening_and_not_again_at_its_close` | hold the `dm` arm for a streaming line, or push the DM peer twice |
+//! | `a_short_answer_is_pushed_once_when_it_opens_and_closes_before_anyone_judges_it` | judge the opening and the closing candidate as two pushes |
+//! | `a_stream_that_was_stopped_or_failed_is_told_like_a_finished_one` | skip the close candidate for a closing write that carries an `outcome` |
+//! | `closing_a_stream_enqueues_exactly_one_candidate_and_only_for_an_open_stream` | enqueue on every final write, on a slice, or for a message that never streamed |
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
@@ -3207,28 +3218,61 @@ fn hits_for(sent: &[PushDispatch], message: Uuid) -> Vec<&PushDispatch> {
 }
 
 async fn set_read_cursor(su: &PgPool, room: &ApprovalRoom, who: Who, last_read_at_sql: &str) {
+    set_read_cursor_at(su, room, who, 1, last_read_at_sql).await;
+}
+
+/// The asker's read cursor in the room's channel: it reached `last_read_seq` at
+/// `last_read_at_sql` (a SQL timestamp expression).
+async fn set_read_cursor_at(
+    su: &PgPool,
+    room: &ApprovalRoom,
+    who: Who,
+    last_read_seq: i64,
+    last_read_at_sql: &str,
+) {
     sqlx::query(&format!(
         "INSERT INTO read_state (workspace_id, channel_id, member_id, last_read_seq, last_read_at) \
-         VALUES ($1, $2, $3, 1, {last_read_at_sql}) \
+         VALUES ($1, $2, $3, $4, {last_read_at_sql}) \
          ON CONFLICT (channel_id, member_id) DO UPDATE \
-            SET last_read_seq = 1, last_read_at = {last_read_at_sql}"
+            SET last_read_seq = $4, last_read_at = {last_read_at_sql}"
     ))
     .bind(room.workspace_id)
     .bind(room.channel_id)
     .bind(room.id(who))
+    .bind(last_read_seq)
     .execute(su)
     .await
     .expect("set the read cursor");
 }
 
+/// A message's `seq` — what a read cursor has to reach to "cover" it.
+async fn message_seq(su: &PgPool, message: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT seq FROM message WHERE id = $1")
+        .bind(message)
+        .fetch_one(su)
+        .await
+        .expect("read the seq of a message")
+}
+
+/// Make a message look `secs` old: it was written that long ago. (For a streamed answer
+/// the row's `created_at` is its OPENING slice — "the stream opened two minutes ago".)
+async fn age_message(su: &PgPool, message: Uuid, secs: i64) {
+    sqlx::query("UPDATE message SET created_at = now() - make_interval(secs => $2::double precision) WHERE id = $1")
+        .bind(message)
+        .bind(secs as f64)
+        .execute(su)
+        .await
+        .expect("age the message");
+}
+
 /// Bring the channel counter up to the rows a fixture wrote by hand, so a real send takes
 /// the next sequence like any other.
-async fn catch_up_channel_seq(su: &PgPool, room: &ApprovalRoom) {
+async fn catch_up_channel_seq(su: &PgPool, channel_id: Uuid) {
     sqlx::query(
         "UPDATE channel_seq SET last_seq = COALESCE((SELECT max(seq) FROM message WHERE channel_id = $1), 0) \
           WHERE channel_id = $1",
     )
-    .bind(room.channel_id)
+    .bind(channel_id)
     .execute(su)
     .await
     .expect("channel_seq catch-up");
@@ -3240,18 +3284,35 @@ async fn catch_up_channel_seq(su: &PgPool, room: &ApprovalRoom) {
 /// from the first byte, the quote and the run from the first slice, `client_msg_id` =
 /// the run id. This INSERT is what the 011 trigger turns into a candidate.
 async fn open_streamed_answer(su: &PgPool, room: &ApprovalRoom, run: Uuid, request: Uuid) -> Uuid {
-    catch_up_channel_seq(su, room).await;
+    open_streamed_answer_in(su, room, room.channel_id, run, request, json!({})).await
+}
+
+/// [`open_streamed_answer`] in any channel of the room, with `extra_props` merged into the
+/// opening props (a REST streamer's opening names the quoted author in `mention_member_ids`).
+async fn open_streamed_answer_in(
+    su: &PgPool,
+    room: &ApprovalRoom,
+    channel_id: Uuid,
+    run: Uuid,
+    request: Uuid,
+    extra_props: Value,
+) -> Uuid {
+    catch_up_channel_seq(su, channel_id).await;
     let workspace = room.workspace_id;
+    let mut props = json!({
+        "source": "agent_worker.final_text.v0",
+        "run_id": run,
+        STREAM_PROPS_KEY.to_string(): opening_stream_props(),
+    });
+    if let (Some(into), Some(extra)) = (props.as_object_mut(), extra_props.as_object()) {
+        into.extend(extra.clone());
+    }
     let input = NewMessage {
-        channel_id: room.channel_id,
+        channel_id,
         author_member_id: room.requester,
         message_type: MessageType::Text,
         body: Some("네, 확인해 볼게요".to_string()),
-        props: json!({
-            "source": "agent_worker.final_text.v0",
-            "run_id": run,
-            STREAM_PROPS_KEY.to_string(): opening_stream_props(),
-        }),
+        props,
         root_id: None,
         reply_to_id: Some(request),
         client_msg_id: Some(run),
@@ -3268,15 +3329,16 @@ async fn open_streamed_answer(su: &PgPool, room: &ApprovalRoom, run: Uuid, reque
     .id
 }
 
-/// The CLOSING slice of that answer, by the real `stream_message_body_in_tx` — what
-/// `commit_turn` writes inside the transaction that ends the run, and what a REST
-/// streamer's last `PATCH` does. `streaming` goes `true -> false`.
-async fn close_streamed_answer(
+/// One write of the streaming edit contract, by the real `stream_message_body_in_tx`:
+/// revision `rev`, final or not, optionally carrying how the stream ended.
+async fn write_stream_slice(
     su: &PgPool,
     room: &ApprovalRoom,
     message: Uuid,
+    rev: i64,
+    is_final: bool,
     outcome: Option<StreamCloseOutcome>,
-) {
+) -> StreamOutcome {
     let workspace = room.workspace_id;
     let author = room.requester;
     with_tenant_tx(su, workspace, move |conn| {
@@ -3286,27 +3348,43 @@ async fn close_streamed_answer(
                 workspace,
                 message,
                 author,
-                "네, 확인했어요. 결과는 이래요.",
+                if is_final {
+                    "네, 확인했어요. 결과는 이래요."
+                } else {
+                    "네, 확인해 볼게요. 먼저 살펴보면"
+                },
                 StreamEdit {
-                    rev: 1,
-                    is_final: true,
+                    rev,
+                    is_final,
                     outcome,
                 },
             )
             .await?;
-            assert!(
-                matches!(applied, Ok(StreamOutcome::Applied(_))),
-                "the closing slice was not applied: {applied:?}"
-            );
-            Ok::<_, DbError>(())
+            Ok::<_, DbError>(applied.expect("the domain did not refuse the slice"))
         })
     })
     .await
-    .expect("close the streamed answer");
+    .expect("write the slice")
+}
+
+/// The CLOSING slice of that answer — what `commit_turn` writes inside the transaction
+/// that ends the run, and what a REST streamer's last `PATCH` does. `streaming` goes
+/// `true -> false`; the stream's revision after the opening is 1.
+async fn close_streamed_answer(
+    su: &PgPool,
+    room: &ApprovalRoom,
+    message: Uuid,
+    outcome: Option<StreamCloseOutcome>,
+) {
+    let applied = write_stream_slice(su, room, message, 1, true, outcome).await;
+    assert!(
+        matches!(applied, StreamOutcome::Applied(_)),
+        "the closing slice was not applied: {applied:?}"
+    );
 }
 
 /// How many push candidates exist for `message` — the 011 trigger's one per INSERT, plus
-/// anything else that enqueued one.
+/// the stream close's.
 async fn candidates_of(su: &PgPool, message: Uuid) -> i64 {
     sqlx::query_scalar(
         "SELECT count(*) FROM outbox \
@@ -3318,20 +3396,76 @@ async fn candidates_of(su: &PgPool, message: Uuid) -> i64 {
     .expect("count the candidates of a message")
 }
 
-/// [`drain_room`] that also says how many candidates the drain claimed — "claimed 0" is
-/// the proof that nothing was waiting to be judged.
-async fn drain_room_counted(
+/// How many of them were enqueued by a stream's closing write (`source: stream_closed`).
+async fn closing_candidates_of(su: &PgPool, message: Uuid) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM outbox \
+          WHERE kind = 'push_candidate' AND payload->>'message_id' = $1 \
+            AND payload->>'source' = 'stream_closed'",
+    )
+    .bind(message.to_string())
+    .fetch_one(su)
+    .await
+    .expect("count the closing candidates of a message")
+}
+
+/// [`drain_room`] that also hands back the drain's tally — "claimed 0" is the proof that
+/// nothing was waiting to be judged, "skipped_already_settled" that a person was already
+/// pushed for the message.
+async fn drain_room_full(
     su: &PgPool,
     pool: &PgPool,
     room: &ApprovalRoom,
-) -> (usize, Vec<PushDispatch>) {
+) -> (momo_notifier::DrainStats, Vec<PushDispatch>) {
     focus_candidates(su, &[room.workspace_id]).await;
     let relay = RecordingDispatcher::accepting();
     let stats = drain(pool, relay.clone())
         .drain_once(128)
         .await
         .expect("drain");
-    (stats.claimed, relay.sent())
+    (stats, relay.sent())
+}
+
+/// [`drain_room`] that also says how many candidates the drain claimed.
+async fn drain_room_counted(
+    su: &PgPool,
+    pool: &PgPool,
+    room: &ApprovalRoom,
+) -> (usize, Vec<PushDispatch>) {
+    let (stats, sent) = drain_room_full(su, pool, room).await;
+    (stats.claimed, sent)
+}
+
+/// A DM between `member` and the room's agent; returns its channel id.
+async fn seed_dm(su: &PgPool, room: &ApprovalRoom, member: Uuid) -> Uuid {
+    let dm = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO channel (id, workspace_id, kind, name, dm_key) VALUES ($1, $2, 'dm', 'dm', $3)",
+    )
+    .bind(dm)
+    .bind(room.workspace_id)
+    .bind(dm.simple().to_string())
+    .execute(su)
+    .await
+    .expect("seed dm");
+    sqlx::query("INSERT INTO channel_seq (channel_id, workspace_id, last_seq) VALUES ($1, $2, 0)")
+        .bind(dm)
+        .bind(room.workspace_id)
+        .execute(su)
+        .await
+        .expect("seed dm channel_seq");
+    for participant in [member, room.requester] {
+        sqlx::query(
+            "INSERT INTO membership (workspace_id, channel_id, member_id) VALUES ($1, $2, $3)",
+        )
+        .bind(room.workspace_id)
+        .bind(dm)
+        .bind(participant)
+        .execute(su)
+        .await
+        .expect("seed dm membership");
+    }
+    dm
 }
 
 /// **The point of D8.** A person asks an agent something in a channel and walks away.
@@ -3589,33 +3723,7 @@ async fn a_dm_keeps_its_dm_reason_for_an_agents_answer_and_ignores_the_window() 
     let pool = momo_notifier_pool().await;
     let asker = room.id(ASKER);
 
-    let dm = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO channel (id, workspace_id, kind, name, dm_key) VALUES ($1, $2, 'dm', 'dm', $3)",
-    )
-    .bind(dm)
-    .bind(room.workspace_id)
-    .bind(dm.simple().to_string())
-    .execute(&su)
-    .await
-    .expect("seed dm");
-    sqlx::query("INSERT INTO channel_seq (channel_id, workspace_id, last_seq) VALUES ($1, $2, 0)")
-        .bind(dm)
-        .bind(room.workspace_id)
-        .execute(&su)
-        .await
-        .expect("seed dm channel_seq");
-    for participant in [asker, room.requester] {
-        sqlx::query(
-            "INSERT INTO membership (workspace_id, channel_id, member_id) VALUES ($1, $2, $3)",
-        )
-        .bind(room.workspace_id)
-        .bind(dm)
-        .bind(participant)
-        .execute(&su)
-        .await
-        .expect("seed dm membership");
-    }
+    let dm = seed_dm(&su, &room, asker).await;
     // The asker is reading the DM right now — which would hold back an answer
     // anywhere else.
     sqlx::query(
@@ -4182,45 +4290,46 @@ async fn a_run_that_ended_badly_still_tells_the_asker() {
 }
 
 // ---------------------------------------------------------------------------
-// KNOWN GAP — independent review H1: a STREAMED answer is judged once, when it opens
+// a STREAMED answer is judged when it closes (ADR-0204 증보 1 D8-a, #3987)
 // ---------------------------------------------------------------------------
 //
-// The in-process worker (`MessageStream`) and the REST streamers write one answer in two
-// steps: the OPENING slice is the INSERT, and a later write closes the same row
-// (`stream_message_body_in_tx`, `streaming: true -> false`). The 011 trigger fires on
-// INSERT only, so the answer is judged ONCE — when it opens, against whatever the asker's
-// read cursor was then — and the close enqueues nothing.
+// The in-process worker writes one answer in two steps: the OPENING slice is the INSERT
+// (the 011 trigger's one candidate) and a later write closes the same row
+// (`stream_message_body_in_tx`, `streaming: true -> false`). Until #3987 the answer was
+// judged once, at its birth, against a read cursor the question had just moved — and the
+// finished answer never. Now
 //
-// The two tests below PIN THAT, with the real writers (`send_message_in_tx`,
-// `stream_message_body_in_tx`), so the follow-up has an exact target. They describe what
-// the code does today, not what D8 wants: when the follow-up lands (a candidate at the
-// stream close, a window read at judgment time) they are meant to change. Do not read
-// them as a requirement.
+//   * a line that is still streaming is HELD by the answer arm: it is only the first words;
+//   * the closing write enqueues one more candidate, in its own transaction;
+//   * that judgment reads "reading" at the moment of the close (`now()`), and does not let a
+//     cursor that reached the line's first words stand for having read the end.
+//
+// Everything below is built with the real writers (`send_message_in_tx`,
+// `stream_message_body_in_tx`), so the shapes are the ones production has. A stream that
+// "opened two minutes ago" is the real opening with `created_at` moved back
+// ([`age_message`]) — the judgment cannot tell the difference, and no test sleeps.
 
-/// The case the review found. The asker sent the question and put the phone down: their
-/// read cursor moved two seconds before the answer's first words. The first words are
-/// judged against that cursor — the asker is "reading", held back — and when the answer
-/// finishes nothing is judged again, so they are never told, even once the cursor has
-/// plainly gone cold.
+/// **#3987 acceptance 1.** The asker sent the question and watched the answer begin: two
+/// minutes ago their cursor reached the opening slice (it covers the line's `seq`). Then
+/// they put the phone down. While the answer streamed there was nothing to push — only the
+/// first words. When it closes they are pushed once, now, on every device.
 ///
-/// The control is a single-INSERT answer for another asker in the SAME drain: it pushes,
-/// so the silence is the streamed shape and not a judgment that pushes nobody.
+/// The control is a single-INSERT answer for another asker in the SAME first drain: it
+/// pushes, so the opening's silence is the hold and not a judgment that pushes nobody.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
-async fn known_gap_h1_a_streamed_answer_is_judged_when_it_opens_and_never_when_it_closes() {
+async fn a_streamed_answer_is_pushed_at_its_close_to_an_asker_who_left_during_it() {
     let _guard = drain_test_lock().await;
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let room = seed_approval_room(&su).await;
     let pool = momo_notifier_pool().await;
 
-    let asker = ASKER;
     let control_asker = Who::AgentOwner;
-    set_read_cursor(&su, &room, asker, "now() - interval '2 seconds'").await;
     set_read_cursor(&su, &room, control_asker, "now() - interval '5 minutes'").await;
 
     // Hand-written rows first; the real send comes last (it takes the next channel seq).
-    let question = human_says(&su, &room, room.channel_id, room.id(asker)).await;
+    let question = human_says(&su, &room, room.channel_id, room.id(ASKER)).await;
     let run = chat_run_for(&su, &room, room.channel_id, Some(question), "running").await;
     let control_question = human_says(&su, &room, room.channel_id, room.id(control_asker)).await;
     let control_run = chat_run_for(
@@ -4234,7 +4343,13 @@ async fn known_gap_h1_a_streamed_answer_is_judged_when_it_opens_and_never_when_i
     let control = final_answer(&su, &room, control_run, control_question).await;
     let streamed = open_streamed_answer(&su, &room, run, question).await;
 
-    let (_, sent) = drain_room_counted(&su, &pool, &room).await;
+    // The stream opened two minutes ago; the asker's cursor reached it two seconds later.
+    age_message(&su, streamed, 120).await;
+    let seq = message_seq(&su, streamed).await;
+    set_read_cursor_at(&su, &room, ASKER, seq, "now() - interval '118 seconds'").await;
+
+    // ---- the opening candidate: nothing to push yet -----------------------------------
+    let (_, sent) = drain_room_full(&su, &pool, &room).await;
     assert_eq!(
         people_woken(&room, &sent, control),
         BTreeSet::from([control_asker]),
@@ -4242,7 +4357,7 @@ async fn known_gap_h1_a_streamed_answer_is_judged_when_it_opens_and_never_when_i
     );
     assert!(
         hits_for(&sent, streamed).is_empty(),
-        "the asker's cursor moved 2 s before the first words, so the opening is held back: {sent:?}"
+        "a line that is still streaming is held — it is the first words, not the answer: {sent:?}"
     );
     assert_eq!(
         candidates_of(&su, streamed).await,
@@ -4250,30 +4365,120 @@ async fn known_gap_h1_a_streamed_answer_is_judged_when_it_opens_and_never_when_i
         "the INSERT's candidate"
     );
 
+    // ---- the stream closes ------------------------------------------------------------
     close_streamed_answer(&su, &room, streamed, None).await;
     assert_eq!(
         candidates_of(&su, streamed).await,
-        1,
-        "KNOWN GAP: closing the stream enqueues no candidate (011 fires on INSERT only)"
+        2,
+        "the closing write enqueues the second candidate"
     );
+    assert_eq!(closing_candidates_of(&su, streamed).await, 1);
 
-    // Time passes; the asker is plainly away now. Nothing is waiting to be judged.
-    set_read_cursor(&su, &room, asker, "now() - interval '10 minutes'").await;
-    let (claimed, sent) = drain_room_counted(&su, &pool, &room).await;
-    assert_eq!(claimed, 0, "nothing is left to claim for this room");
-    assert!(
-        sent.is_empty(),
-        "KNOWN GAP: the finished answer reaches an asker who has left: {sent:?}"
+    let (stats, sent) = drain_room_full(&su, &pool, &room).await;
+    assert_eq!(
+        stats.claimed, 1,
+        "exactly the closing candidate was waiting"
     );
+    assert_eq!(
+        people_woken(&room, &sent, streamed),
+        BTreeSet::from([ASKER]),
+        "the asker left during the stream, so the finished answer reaches them: {sent:?}"
+    );
+    let hits = hits_for(&sent, streamed);
+    assert_eq!(
+        hits.len(),
+        device_total(ASKER),
+        "every device they own, once"
+    );
+    for hit in hits {
+        assert_eq!(hit.reason, "mention");
+        assert_eq!(hit.category, "momo.mention");
+        assert_eq!(hit.approval_id, None);
+    }
+
+    // ---- and nothing is left to judge -------------------------------------------------
+    let (claimed, sent) = drain_room_counted(&su, &pool, &room).await;
+    assert_eq!(claimed, 0);
+    assert!(sent.is_empty(), "{sent:?}");
 }
 
-/// The other half of the same fact. An asker who is already away when the answer OPENS is
-/// pushed — at the first words, on every device — and is not pushed again when it ends.
-/// (The push is id-only; the notification extension renders whatever the message holds
-/// when it runs, which for a long answer may already be more than the first slice.)
+/// **#3987 acceptance 1, the other half.** An asker whose cursor moved in the 30 seconds
+/// before the stream closed is looking at the channel and is not pushed — and, in the same
+/// drain, an asker who is away is: the second stream is the control.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
-async fn known_gap_h1_an_away_asker_is_told_when_a_streamed_answer_opens_and_not_when_it_ends() {
+async fn a_streamed_answer_is_not_pushed_to_an_asker_who_was_moving_their_cursor_just_before_it_closed(
+) {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let room = seed_approval_room(&su).await;
+    let pool = momo_notifier_pool().await;
+
+    let watcher = ASKER;
+    let away = Who::AgentOwner;
+    let q_watcher = human_says(&su, &room, room.channel_id, room.id(watcher)).await;
+    let run_watcher = chat_run_for(&su, &room, room.channel_id, Some(q_watcher), "running").await;
+    let q_away = human_says(&su, &room, room.channel_id, room.id(away)).await;
+    let run_away = chat_run_for(&su, &room, room.channel_id, Some(q_away), "running").await;
+    let watcher_stream = open_streamed_answer(&su, &room, run_watcher, q_watcher).await;
+    let away_stream = open_streamed_answer(&su, &room, run_away, q_away).await;
+    for stream in [watcher_stream, away_stream] {
+        age_message(&su, stream, 120).await;
+    }
+    // The watcher's client advanced their cursor five seconds ago; the other asker's cursor
+    // reached their stream's first words but has not moved for ten minutes.
+    set_read_cursor_at(
+        &su,
+        &room,
+        watcher,
+        message_seq(&su, watcher_stream).await,
+        "now() - interval '5 seconds'",
+    )
+    .await;
+    set_read_cursor_at(
+        &su,
+        &room,
+        away,
+        message_seq(&su, away_stream).await,
+        "now() - interval '10 minutes'",
+    )
+    .await;
+
+    let (_, sent) = drain_room_full(&su, &pool, &room).await;
+    for stream in [watcher_stream, away_stream] {
+        assert!(
+            hits_for(&sent, stream).is_empty(),
+            "held while streaming: {sent:?}"
+        );
+    }
+    close_streamed_answer(&su, &room, watcher_stream, None).await;
+    close_streamed_answer(&su, &room, away_stream, None).await;
+
+    let (stats, sent) = drain_room_full(&su, &pool, &room).await;
+    assert_eq!(stats.claimed, 2, "both closing candidates were judged");
+    assert!(
+        people_woken(&room, &sent, watcher_stream).is_empty(),
+        "the watcher moved their cursor five seconds ago: {sent:?}"
+    );
+    assert_eq!(
+        people_woken(&room, &sent, away_stream),
+        BTreeSet::from([away]),
+        "the control: the away asker is pushed in the same drain: {sent:?}"
+    );
+    // The watched candidate settled as done: nobody to push is a completed candidate.
+    assert!(candidate_status(&su, room.workspace_id)
+        .await
+        .iter()
+        .all(|(status, _)| status == "done"));
+}
+
+/// **#3987 acceptance 2.** An asker who was away from the very first word does not get an
+/// opening push with half a sentence and then another at the end: the opening is held, and
+/// the close is the one push. (Before: they got the opening one and never the end.)
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn an_asker_who_was_away_from_the_start_gets_one_push_at_the_close_not_two() {
     let _guard = drain_test_lock().await;
     ensure_schema_and_roles();
     let su = superuser_pool().await;
@@ -4285,26 +4490,429 @@ async fn known_gap_h1_an_away_asker_is_told_when_a_streamed_answer_opens_and_not
     let run = chat_run_for(&su, &room, room.channel_id, Some(question), "running").await;
     let streamed = open_streamed_answer(&su, &room, run, question).await;
 
-    let (_, sent) = drain_room_counted(&su, &pool, &room).await;
-    assert_eq!(
-        people_woken(&room, &sent, streamed),
-        BTreeSet::from([ASKER]),
-        "an away asker is told when the answer opens: {sent:?}"
+    // The opening: the asker is away, and still nothing is sent — the line is streaming.
+    let (stats, opening) = drain_room_full(&su, &pool, &room).await;
+    assert!(stats.claimed >= 1);
+    assert!(
+        hits_for(&opening, streamed).is_empty(),
+        "an away asker is not pushed the first words: {opening:?}"
     );
-    let hits = hits_for(&sent, streamed);
-    assert_eq!(hits.len(), device_total(ASKER), "every device they own");
+    assert_eq!(stats.dispatched, 0);
+    assert!(candidate_status(&su, room.workspace_id)
+        .await
+        .iter()
+        .all(|(status, _)| status == "done"));
+
+    // Held does not mean forgotten: drain again while the stream is still open, and still
+    // nothing — an unclosed stream is never judged by this arm.
+    let (_, again) = drain_room_full(&su, &pool, &room).await;
+    assert!(again.is_empty(), "{again:?}");
+
+    close_streamed_answer(&su, &room, streamed, None).await;
+    let (_, closing) = drain_room_full(&su, &pool, &room).await;
+    let hits = hits_for(&closing, streamed);
+    assert_eq!(
+        hits.len(),
+        device_total(ASKER),
+        "one push per device, at the close: {closing:?}"
+    );
     for hit in hits {
         assert_eq!(hit.reason, "mention");
         assert_eq!(hit.category, "momo.mention");
-        assert_eq!(hit.approval_id, None);
+    }
+
+    let (claimed, later) = drain_room_counted(&su, &pool, &room).await;
+    assert_eq!(claimed, 0);
+    assert!(later.is_empty());
+}
+
+/// The window is read **when the answer closes**, not when it opened. The stream opened two
+/// minutes ago; the asker's cursor moved twenty seconds after that and not since. Against
+/// the opening (`created_at`) they were "reading"; at the close they have been gone for
+/// 100 seconds. (The cursor does NOT cover the line's `seq` here, so the only thing in play
+/// is the basis the window is measured from.)
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn the_window_is_read_when_the_answer_closes_not_when_it_opened() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let room = seed_approval_room(&su).await;
+    let pool = momo_notifier_pool().await;
+
+    let question = human_says(&su, &room, room.channel_id, room.id(ASKER)).await;
+    let run = chat_run_for(&su, &room, room.channel_id, Some(question), "running").await;
+    let streamed = open_streamed_answer(&su, &room, run, question).await;
+    age_message(&su, streamed, 120).await;
+    assert!(
+        message_seq(&su, streamed).await > 1,
+        "the cursor below does not cover the line"
+    );
+    set_read_cursor_at(&su, &room, ASKER, 1, "now() - interval '100 seconds'").await;
+
+    drain_room_full(&su, &pool, &room).await;
+    close_streamed_answer(&su, &room, streamed, None).await;
+    let (_, sent) = drain_room_full(&su, &pool, &room).await;
+    assert_eq!(
+        people_woken(&room, &sent, streamed),
+        BTreeSet::from([ASKER]),
+        "100 seconds before the close is away, even though it is 20 seconds after the opening: {sent:?}"
+    );
+}
+
+/// A cursor that reached the first words says the asker saw the answer BEGIN — not that
+/// they are still there at the end. Here the cursor covers the line's `seq` (they read the
+/// opening slice) but has not moved for ten minutes: the shortcut that suppresses a
+/// single-INSERT answer the asker has already read must not apply to a streamed one.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn a_cursor_that_reached_the_first_words_does_not_stand_for_having_read_the_end() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let room = seed_approval_room(&su).await;
+    let pool = momo_notifier_pool().await;
+
+    let question = human_says(&su, &room, room.channel_id, room.id(ASKER)).await;
+    let run = chat_run_for(&su, &room, room.channel_id, Some(question), "running").await;
+    let streamed = open_streamed_answer(&su, &room, run, question).await;
+    age_message(&su, streamed, 120).await;
+    let seq = message_seq(&su, streamed).await;
+    set_read_cursor_at(&su, &room, ASKER, seq, "now() - interval '10 minutes'").await;
+
+    drain_room_full(&su, &pool, &room).await;
+    close_streamed_answer(&su, &room, streamed, None).await;
+    let (_, sent) = drain_room_full(&su, &pool, &room).await;
+    assert_eq!(
+        people_woken(&room, &sent, streamed),
+        BTreeSet::from([ASKER]),
+        "covering the first words' seq is not reading the end: {sent:?}"
+    );
+}
+
+/// **#3987 acceptance 3, the boundary.** Everything that is not streamed keeps the window
+/// it always had: measured from the line's own `created_at`, with the `seq` shortcut.
+/// Three askers are answered by single-INSERT lines written two minutes ago and judged
+/// now (a late drain, a retried candidate):
+///
+/// * cursor moved 100 s ago — 20 s *after* the answer arrived: they were reading it → not pushed;
+/// * cursor moved 200 s ago — 80 s *before* it arrived, covering nothing: away → pushed;
+/// * cursor 600 s old but covering the answer's `seq`: they have read it → not pushed.
+///
+/// Reading these against `now()` instead would push the first and the third.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn a_single_insert_answer_keeps_its_own_creation_time_as_the_window_basis() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let room = seed_approval_room(&su).await;
+    let pool = momo_notifier_pool().await;
+
+    let reading_after = Who::Member;
+    let away_before = Who::Admin;
+    let saw_it = Who::AgentOwner;
+    let mut answers = Vec::new();
+    for asker in [reading_after, away_before, saw_it] {
+        let question = human_says(&su, &room, room.channel_id, room.id(asker)).await;
+        let run = chat_run_for(&su, &room, room.channel_id, Some(question), "succeeded").await;
+        let answer = final_answer(&su, &room, run, question).await;
+        age_message(&su, answer, 120).await;
+        answers.push((asker, answer));
+    }
+    let seq_of = |asker: Who| {
+        answers
+            .iter()
+            .find(|(who, _)| *who == asker)
+            .map(|(_, answer)| *answer)
+            .expect("an answer for this asker")
+    };
+    set_read_cursor_at(
+        &su,
+        &room,
+        reading_after,
+        1,
+        "now() - interval '100 seconds'",
+    )
+    .await;
+    set_read_cursor_at(&su, &room, away_before, 1, "now() - interval '200 seconds'").await;
+    let covered = message_seq(&su, seq_of(saw_it)).await;
+    set_read_cursor_at(
+        &su,
+        &room,
+        saw_it,
+        covered,
+        "now() - interval '600 seconds'",
+    )
+    .await;
+
+    let (_, sent) = drain_room_full(&su, &pool, &room).await;
+    for (asker, answer) in &answers {
+        let woken = people_woken(&room, &sent, *answer);
+        if *asker == away_before {
+            assert_eq!(woken, BTreeSet::from([away_before]), "{asker:?}: {sent:?}");
+        } else {
+            assert!(woken.is_empty(), "{asker:?} had read it: {sent:?}");
+        }
+    }
+}
+
+/// A REST streamer's opening names the quoted author as mentioned, so the explicit-mention
+/// arm pushes at the opening (no window); the close then finds that person already pushed
+/// for this message (`collapse_id` and the dispatch-log unique index) and sends nothing.
+/// The asker is even "reading" — the mention arm does not care, and neither does the
+/// dedupe.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn a_close_adds_no_second_push_for_a_person_the_opening_already_pushed() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let room = seed_approval_room(&su).await;
+    let pool = momo_notifier_pool().await;
+
+    set_read_cursor(&su, &room, ASKER, "now()").await;
+    let question = human_says(&su, &room, room.channel_id, room.id(ASKER)).await;
+    let run = chat_run_for(&su, &room, room.channel_id, Some(question), "running").await;
+    let streamed = open_streamed_answer_in(
+        &su,
+        &room,
+        room.channel_id,
+        run,
+        question,
+        json!({ "mention_member_ids": [room.id(ASKER).to_string()] }),
+    )
+    .await;
+
+    let (_, opening) = drain_room_full(&su, &pool, &room).await;
+    let hits = hits_for(&opening, streamed);
+    assert_eq!(
+        hits.len(),
+        device_total(ASKER),
+        "pushed at the opening: {opening:?}"
+    );
+    assert!(hits.iter().all(|hit| hit.reason == "mention"));
+
+    close_streamed_answer(&su, &room, streamed, None).await;
+    let (stats, closing) = drain_room_full(&su, &pool, &room).await;
+    assert_eq!(stats.claimed, 1, "the closing candidate was judged");
+    assert_eq!(stats.dispatched, 0, "and sent nothing: {closing:?}");
+    assert_eq!(
+        stats.skipped_already_settled,
+        device_total(ASKER),
+        "every device already had its push for this message"
+    );
+    assert!(closing.is_empty());
+}
+
+/// The same in a DM: the `dm` arm pushes the peer at the opening whether or not they are
+/// reading (as it always did), the answer arm is not involved, and the close adds nothing.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn a_dm_streamed_answer_is_pushed_by_the_dm_arm_at_its_opening_and_not_again_at_its_close() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let room = seed_approval_room(&su).await;
+    let pool = momo_notifier_pool().await;
+    let asker = room.id(ASKER);
+
+    let dm = seed_dm(&su, &room, asker).await;
+    let question = human_says(&su, &room, dm, asker).await;
+    let run = chat_run_for(&su, &room, dm, Some(question), "running").await;
+    let streamed = open_streamed_answer_in(&su, &room, dm, run, question, json!({})).await;
+
+    let (_, opening) = drain_room_full(&su, &pool, &room).await;
+    let hits = hits_for(&opening, streamed);
+    assert_eq!(
+        hits.len(),
+        device_total(ASKER),
+        "the DM peer is pushed at the opening: {opening:?}"
+    );
+    for hit in hits {
+        assert_eq!(hit.reason, "dm");
+        assert_eq!(hit.category, "momo.message");
     }
 
     close_streamed_answer(&su, &room, streamed, None).await;
-    assert_eq!(candidates_of(&su, streamed).await, 1);
-    let (claimed, sent) = drain_room_counted(&su, &pool, &room).await;
-    assert_eq!(claimed, 0, "KNOWN GAP: the close is never judged");
-    assert!(
-        hits_for(&sent, streamed).is_empty(),
-        "KNOWN GAP: no second push at the end: {sent:?}"
+    let (stats, closing) = drain_room_full(&su, &pool, &room).await;
+    assert_eq!(stats.claimed, 1);
+    assert_eq!(stats.dispatched, 0, "{closing:?}");
+    assert_eq!(stats.skipped_already_settled, device_total(ASKER));
+}
+
+/// A short answer opens and closes before anyone has judged it: both candidates are
+/// pending in the same drain. The asker is away; they are pushed once. Whichever candidate
+/// is judged first sends; the other finds the push already settled.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn a_short_answer_is_pushed_once_when_it_opens_and_closes_before_anyone_judges_it() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let room = seed_approval_room(&su).await;
+    let pool = momo_notifier_pool().await;
+
+    set_read_cursor(&su, &room, ASKER, "now() - interval '5 minutes'").await;
+    let question = human_says(&su, &room, room.channel_id, room.id(ASKER)).await;
+    let run = chat_run_for(&su, &room, room.channel_id, Some(question), "running").await;
+    let streamed = open_streamed_answer(&su, &room, run, question).await;
+    close_streamed_answer(&su, &room, streamed, None).await;
+    assert_eq!(candidates_of(&su, streamed).await, 2);
+
+    let (stats, sent) = drain_room_full(&su, &pool, &room).await;
+    assert!(stats.claimed >= 2);
+    assert_eq!(
+        hits_for(&sent, streamed).len(),
+        device_total(ASKER),
+        "once per device, not once per candidate: {sent:?}"
+    );
+    assert_eq!(
+        stats.skipped_already_settled,
+        device_total(ASKER),
+        "the second candidate found every push already settled"
+    );
+}
+
+/// A stream a human stopped, or one whose provider died, is closed with an `outcome` and
+/// leaves its frozen text in the channel (ADR-0155). That is still the end of the answer,
+/// and the asker is told like for a finished one — they learn it stopped. (Whoever pressed
+/// stop has a cursor that moved if they were looking; this is for the one who was not.)
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn a_stream_that_was_stopped_or_failed_is_told_like_a_finished_one() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let room = seed_approval_room(&su).await;
+    let pool = momo_notifier_pool().await;
+
+    set_read_cursor(&su, &room, ASKER, "now() - interval '5 minutes'").await;
+    let mut streams = Vec::new();
+    for outcome in [StreamCloseOutcome::Cancelled, StreamCloseOutcome::Failed] {
+        let question = human_says(&su, &room, room.channel_id, room.id(ASKER)).await;
+        let run = chat_run_for(&su, &room, room.channel_id, Some(question), "running").await;
+        streams.push((outcome, run, question));
+    }
+    let mut opened = Vec::new();
+    for (outcome, run, question) in streams {
+        opened.push((
+            outcome,
+            open_streamed_answer(&su, &room, run, question).await,
+        ));
+    }
+    drain_room_full(&su, &pool, &room).await;
+    for (outcome, stream) in &opened {
+        close_streamed_answer(&su, &room, *stream, Some(*outcome)).await;
+    }
+    let (_, sent) = drain_room_full(&su, &pool, &room).await;
+    for (outcome, stream) in &opened {
+        assert_eq!(
+            people_woken(&room, &sent, *stream),
+            BTreeSet::from([ASKER]),
+            "a stream that ended {outcome:?} is still an answer's end: {sent:?}"
+        );
+    }
+}
+
+/// The producer: the closing write — and only it — enqueues the second candidate.
+/// Exactly one per stream; none for a slice, for a second final write (a producer's retry
+/// at a higher revision), for a stale write, or for a message that never streamed.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn closing_a_stream_enqueues_exactly_one_candidate_and_only_for_an_open_stream() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let room = seed_approval_room(&su).await;
+
+    // A line that never streamed (hand-written rows first; the real send comes last).
+    let plain = agent_says(&su, &room, AgentLine::new(room.channel_id)).await;
+    let question = human_says(&su, &room, room.channel_id, room.id(ASKER)).await;
+    let run = chat_run_for(&su, &room, room.channel_id, Some(question), "running").await;
+    let streamed = open_streamed_answer(&su, &room, run, question).await;
+    assert_eq!(
+        candidates_of(&su, streamed).await,
+        1,
+        "the INSERT's candidate"
+    );
+    assert_eq!(closing_candidates_of(&su, streamed).await, 0);
+
+    // A slice grows the answer; it is not the end.
+    let slice = write_stream_slice(&su, &room, streamed, 1, false, None).await;
+    assert!(matches!(slice, StreamOutcome::Applied(_)));
+    assert_eq!(
+        closing_candidates_of(&su, streamed).await,
+        0,
+        "a slice is not a close"
+    );
+
+    // The close.
+    let closed = write_stream_slice(&su, &room, streamed, 2, true, None).await;
+    assert!(matches!(closed, StreamOutcome::Applied(_)));
+    assert_eq!(closing_candidates_of(&su, streamed).await, 1);
+    assert_eq!(candidates_of(&su, streamed).await, 2);
+
+    // Its payload is the trigger's, ids only, plus the source — and the notifier decodes it.
+    let payload: Value = sqlx::query_scalar(
+        "SELECT payload FROM outbox \
+          WHERE kind = 'push_candidate' AND payload->>'message_id' = $1 \
+            AND payload->>'source' = 'stream_closed'",
+    )
+    .bind(streamed.to_string())
+    .fetch_one(&su)
+    .await
+    .expect("the closing candidate");
+    assert_eq!(payload["schema"], "momo.push_candidate.v1");
+    assert_eq!(payload["message_id"], streamed.to_string());
+    assert_eq!(payload["channel_id"], room.channel_id.to_string());
+    assert_eq!(payload["author_member_id"], room.requester.to_string());
+    assert_eq!(payload["message_type"], "text");
+    let decoded = momo_push::PushCandidate::decode(&payload.to_string()).expect("decodes");
+    assert_eq!(decoded.message_id, streamed);
+    assert_eq!(decoded.channel_id, room.channel_id);
+    for body_like in ["body", "text", "content", "display_name"] {
+        assert!(
+            payload.get(body_like).is_none(),
+            "the candidate is id-only: {payload}"
+        );
+    }
+    let method: String = sqlx::query_scalar(
+        "SELECT method FROM outbox WHERE kind = 'push_candidate' \
+            AND payload->>'message_id' = $1 AND payload->>'source' = 'stream_closed'",
+    )
+    .bind(streamed.to_string())
+    .fetch_one(&su)
+    .await
+    .expect("method");
+    assert_eq!(method, "notify", "the same method as the trigger's rows");
+
+    // A second final write at a higher revision is applied (a producer's retry) but is not
+    // a close: the block is already closed.
+    let again = write_stream_slice(&su, &room, streamed, 3, true, None).await;
+    assert!(matches!(again, StreamOutcome::Applied(_)));
+    assert_eq!(
+        closing_candidates_of(&su, streamed).await,
+        1,
+        "closed once, judged once"
+    );
+
+    // A stale final write (revision not above the stored one) changes nothing at all.
+    let stale = write_stream_slice(&su, &room, streamed, 2, true, None).await;
+    assert!(matches!(stale, StreamOutcome::Stale(_)));
+    assert_eq!(closing_candidates_of(&su, streamed).await, 1);
+
+    // A message that never streamed has no stream to close.
+    let written = write_stream_slice(&su, &room, plain, 1, true, None).await;
+    assert!(matches!(written, StreamOutcome::Applied(_)));
+    assert_eq!(
+        closing_candidates_of(&su, plain).await,
+        0,
+        "a final write on a message that never streamed is not a close"
+    );
+    assert_eq!(
+        candidates_of(&su, plain).await,
+        1,
+        "only the INSERT's candidate"
     );
 }
