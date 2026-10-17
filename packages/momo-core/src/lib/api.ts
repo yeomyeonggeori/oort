@@ -1165,6 +1165,10 @@ function bindRefreshKey(retry: number): void {
  * (#3993). Every request helper that meets a 401 with a refresh token in hand
  * goes through here, so "is the session over" has one answer.
  *
+ * Exported for a host whose own transport meets the 401 — the phone's native file
+ * downloads, which cannot go through `authedResponse` — so that the rule is not
+ * written a second time there (#3997).
+ *
  *   rotated      → true: send the request again with the new token.
  *   rejected     → false: the server looked at the refresh token and ended the
  *                  session (refused, spent, reused, the member is gone). The
@@ -1183,7 +1187,7 @@ function bindRefreshKey(retry: number): void {
  *                  reach the server, check the connection and try again"); the
  *                  next request, or the reconnect, rotates again.
  */
-async function rotateAfterUnauthorized(): Promise<boolean> {
+export async function rotateAfterUnauthorized(): Promise<boolean> {
   const outcome = await refreshSessionOutcome();
   if (outcome === "unreachable") {
     throw new NetworkError("unreachable", REQUEST_TIMEOUT_MS);
