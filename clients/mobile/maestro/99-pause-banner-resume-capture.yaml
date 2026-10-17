@@ -15,8 +15,9 @@ name: 99-pause-banner-resume-capture
 - takeScreenshot: ${SHOT}-before
 - tapOn:
     id: "pause-banner-action"
+# 단추의 접근 이름이 문장 전체(「상태는 아직 방해 금지예요 · 풀기」)라서 글자 그대로가 아니라 포함으로 찾는다.
 - extendedWaitUntil:
     visible:
-      text: "풀기"
+      text: ".*풀기.*"
     timeout: 15000
 - takeScreenshot: ${SHOT}-after

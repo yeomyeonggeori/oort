@@ -4336,6 +4336,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     case 'shell-inbox-pause':
     case 'shell-inbox-pause-open':
     case 'shell-inbox-pause-dnd':
+    case 'shell-inbox-pause-offline':
       return <Shell initialNav={{...INITIAL_NAV, tab: 'inbox'}} />;
     case 'shell-search':
       return <Shell initialNav={{...INITIAL_NAV, tab: 'search'}} />;
@@ -5898,6 +5899,7 @@ const PAUSE_DND_SURFACES = new Set([
   'shell-inbox-pause',
   'shell-inbox-pause-open',
   'shell-inbox-pause-dnd',
+  'shell-inbox-pause-offline',
 ]);
 
 /** 알림 일시 중지·방해 금지 씨앗이 필요한 표면(프로필 시트 판 `shell-pause-*`, 인박스 줄 판 `shell-inbox-pause*`). */
@@ -5952,12 +5954,15 @@ function forceNetwork(online: boolean): void {
 
 /** `seedShell` 이 깐 규칙(꺼짐)을 이 표면의 모양으로 덮는다. */
 function seedPause(surface: string): void {
-  forceNetwork(surface !== 'shell-pause-until-offline');
+  forceNetwork(
+    surface !== 'shell-pause-until-offline' && surface !== 'shell-inbox-pause-offline',
+  );
   const until = Date.now() + PAUSE_UNTIL_AHEAD_MS;
   const rules =
     surface === 'shell-pause-status' ||
     surface === 'shell-pause-notify' ||
-    surface === 'shell-inbox-pause'
+    surface === 'shell-inbox-pause' ||
+    surface === 'shell-inbox-pause-offline'
       ? {dnd: true, mentionOverridesMute: false, dndUntilMs: until}
       : surface === 'shell-pause-notify-open' ||
           surface === 'shell-pause-until-open' ||
