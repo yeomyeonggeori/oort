@@ -70,7 +70,7 @@ import { useSelfPresenceWrite } from "./useSelfPresenceWrite";
 //
 // 「다시 켜기」를 누르면 같은 자리의 단추가 낙관 칠하기로 곧바로 「풀기」가 된다. 더블클릭의 둘째 누름이
 // 원치 않은 방해 금지 해제를 보내지 않도록, 쓰기가 **어느 것이든** 날고 있는 동안은 누르지 않고, 방금 누른
-// 줄과 다른 종류의 단추는 잠깐(`FLIP_GUARD_MS`) 받지 않는다. 같은 줄의 다시 시도는 막지 않는다.
+// 줄과 다른 종류의 단추는 잠깐(`FLIP_WINDOW_MS`) 받지 않는다. 같은 줄의 다시 시도는 막지 않는다.
 //
 // ## 끊겨 있으면 단추 자리에 이유를 말한다
 //
@@ -79,8 +79,12 @@ import { useSelfPresenceWrite } from "./useSelfPresenceWrite";
 // 같다: 버튼을 남겨 두지도, 말없이 치우지도 않는다).
 // =============================================================================
 
-/** 방금 누른 줄과 **다른 종류**의 단추를 받지 않는 시간. 같은 줄의 다시 시도는 막지 않는다. */
-const FLIP_GUARD_MS = 1500;
+/**
+ * 방금 누른 줄과 **다른 종류**의 단추를 받지 않는 시간. 같은 줄의 다시 시도는 막지 않는다.
+ * 이름이 `*_GUARD_MS` 가 아닌 이유: 그 이름은 캡처 시계 레지스트리(`captureClock.test.ts`)가 「고정 시계에서 열 수
+ * 없는 시간 문」으로 읽는데, 이 창은 첫 누름을 막지 않는 더블클릭 창이다(캡처 장면 D 가 시계를 앞당겨 단정한다).
+ */
+const FLIP_WINDOW_MS = 1500;
 
 /** 일시 중지만 끈 뒤의 낙관 칠하기: 꺼지면 기한도 사라진다(서버가 지운다). */
 function paintResumed(rules: NotificationRules): NotificationRules {
@@ -185,7 +189,7 @@ export function PauseBanner({
     const previous = lastPress.current;
     const now = Date.now();
     // 방금 다른 종류의 줄을 누른 직후에 같은 자리에 올라온 단추는 더블클릭의 둘째 누름일 수 있다.
-    if (previous !== null && previous.kind !== banner.kind && now - previous.at < FLIP_GUARD_MS) {
+    if (previous !== null && previous.kind !== banner.kind && now - previous.at < FLIP_WINDOW_MS) {
       return;
     }
     lastPress.current = { kind: banner.kind, at: now };
