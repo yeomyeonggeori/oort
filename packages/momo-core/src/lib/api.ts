@@ -1150,28 +1150,26 @@ function bindRefreshKey(retry: number): void {
 
 /**
  * The one rotation a 401 gets, read for what it proved about the session
- * (#3993). Every helper below that sends a request, meets a 401 and has a refresh
- * token to try goes through here, so "when is the session over" is answered once.
+ * (#3993). Every request helper that meets a 401 with a refresh token in hand
+ * goes through here, so "is the session over" has one answer.
  *
- *   rotated      → `true`: a usable token is in hand, send the request again.
- *   rejected     → `false`: the server looked at the refresh token and ended the
+ *   rotated      → true: send the request again with the new token.
+ *   rejected     → false: the server looked at the refresh token and ended the
  *                  session (refused, spent, reused, the member is gone). The
- *                  caller still holds the 401 it started from, and its own
- *                  `markAuthExpired()` declares the end right there — not behind
- *                  a retry, a timer or a wait for the network.
- *   unreachable  → throws a `NetworkError`. Nothing decided anything: the
- *                  connection dropped between the 401 and the rotation (a
- *                  subway, a lift, a radio still waking after the lock screen),
- *                  the deadline blew, or the server could only answer 5xx.
- *                  **Nothing is proven about the session**, so it is not declared
- *                  over — the same rule `restoreSession()` and the phone's boot
- *                  gate already keep for a launch with no signal. And the 401 is
- *                  not the answer either: it described an expired access token,
- *                  not the person's standing, and every caller that turns a 401
- *                  into "log in again" would tell a lie. A `NetworkError` is the
- *                  failure all of them already render ("could not reach the
- *                  server, check the connection and try again"), and the next
- *                  request or the reconnect rotates again.
+ *                  caller still holds the 401 and declares the end with its own
+ *                  `markAuthExpired()` right there — not behind a retry or a
+ *                  timer, and not after the network comes back.
+ *   unreachable  → throws a `NetworkError`. The connection dropped between the
+ *                  401 and the rotation (a subway, a lift, a radio still waking
+ *                  after the lock screen), the deadline blew, or the server could
+ *                  only answer 5xx: nothing decided anything, so the session is
+ *                  not declared over — the rule `restoreSession()` and the
+ *                  phone's boot gate already keep. The 401 is not the answer
+ *                  either: it described an expired access token, and every
+ *                  caller that reads a 401 as "log in again" would lie. A
+ *                  `NetworkError` is the failure they already render ("could not
+ *                  reach the server, check the connection and try again"); the
+ *                  next request, or the reconnect, rotates again.
  */
 async function rotateAfterUnauthorized(): Promise<boolean> {
   const outcome = await refreshSessionOutcome();
