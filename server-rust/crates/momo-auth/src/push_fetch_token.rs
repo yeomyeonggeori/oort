@@ -103,6 +103,27 @@ pub async fn live_push_fetch_count(
     member_id: Uuid,
     session_id: Uuid,
 ) -> Result<i64, sqlx::Error> {
+    live_narrow_token_count(
+        conn,
+        workspace_id,
+        member_id,
+        session_id,
+        SESSION_LABEL_PUSH_FETCH,
+    )
+    .await
+}
+
+/// The count behind [`live_push_fetch_count`], keyed by the row `label` so the
+/// other lineage-bound narrow token (`push_action`, ADR-0204 D6) counts its own
+/// rows with the same statement instead of a copy of it. The label is a bind
+/// parameter, never interpolated: a caller counts exactly one kind of row.
+pub(crate) async fn live_narrow_token_count(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    session_id: Uuid,
+    label: &str,
+) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar::<_, i64>(
         "SELECT count(*) \
            FROM token \
@@ -110,13 +131,14 @@ pub async fn live_push_fetch_count(
             AND actor_member_id = $2 \
             AND session_id = $3 \
             AND kind = 'session' \
-            AND label = 'push_fetch' \
+            AND label = $4 \
             AND revoked_at IS NULL \
             AND (expires_at IS NULL OR expires_at > now())",
     )
     .bind(workspace_id)
     .bind(member_id)
     .bind(session_id)
+    .bind(label)
     .fetch_one(&mut *conn)
     .await
 }
@@ -130,6 +152,20 @@ pub async fn push_fetch_session_live(
     conn: &mut PgConnection,
     token_id: Uuid,
 ) -> Result<bool, sqlx::Error> {
+    narrow_token_session_live(conn, token_id, SESSION_LABEL_PUSH_FETCH).await
+}
+
+/// The liveness rule behind [`push_fetch_session_live`], keyed by the label the
+/// row MUST carry. The label predicate is the typ-confusion guard: a row of the
+/// other narrow token, checked against this label, is simply not live, so a
+/// token can never borrow the life of a row that was minted for a different
+/// purpose. Shared with `push_action` (ADR-0204 D6) so both tokens end on the
+/// same rule, not on two copies of it that could drift.
+pub(crate) async fn narrow_token_session_live(
+    conn: &mut PgConnection,
+    token_id: Uuid,
+    label: &str,
+) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS ( \
            SELECT 1 \
@@ -139,13 +175,14 @@ pub async fn push_fetch_session_live(
               AND r.actor_member_id = p.actor_member_id \
               AND r.session_id = p.session_id \
             WHERE p.id = $1 \
-              AND p.label = 'push_fetch' \
+              AND p.label = $2 \
               AND r.kind = 'session' \
               AND r.label = 'refresh' \
               AND r.revoked_at IS NULL \
               AND (r.expires_at IS NULL OR r.expires_at > now()))",
     )
     .bind(token_id)
+    .bind(label)
     .fetch_one(&mut *conn)
     .await
 }
