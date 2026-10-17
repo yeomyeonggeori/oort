@@ -1,4 +1,4 @@
-import {ApiError, authedRequest, refreshSession} from '@momo/core/lib/api';
+import {ApiError, authedRequest, rotateAfterUnauthorized} from '@momo/core/lib/api';
 import {fetchWithDeadline, type HttpResponse} from '@momo/core/lib/http';
 import {apiBase, coreSession} from '@momo/core/runtime/host';
 
@@ -79,11 +79,12 @@ export async function registerDevice(
     // 수명이 지난 access 토큰으로 가는 것이 현실이다. 그 401 을 「거부됨」으로 읽으면
     // 재시도 없이 끝나 스위치만 켜진 채 등록이 없다. 끝난 세션을 선언하는 일
     // (`markAuthExpired`)은 이 호출의 몫이 아니다 — 회전해도 401 이면 그대로 `rejected` 로
-    // 둔다.
+    // 둔다. 갱신이 서버에 닿지 못하면 코어가 `NetworkError` 를 던지고, 아래 catch 가
+    // `unreachable` 로 접어 재시도 정책이 일하게 한다 (#4008).
     if (
       response.status === 401 &&
       coreSession().getRefreshToken() !== null &&
-      (await refreshSession())
+      (await rotateAfterUnauthorized())
     ) {
       response = await fetchWithDeadline(url, {
         method: 'POST',
