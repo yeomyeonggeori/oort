@@ -58,12 +58,18 @@ export function OortMark({
   className,
   title,
   optical = "small",
+  ringOnly = false,
 }: {
   className?: string;
   /** 넘기면 접근 가능한 이름이 되고, 넘기지 않으면 장식으로 감춰진다. */
   title?: string;
   /** 그려질 크기. 32px 이하는 small(기본), 그보다 큰 자리는 display. */
   optical?: keyof typeof GEOMETRY;
+  /**
+   * 링만 그린다. 오르트 로더(#3961)가 위성을 따로 움직이므로, 같은 path를 쓰되
+   * 위성은 로더 쪽 원이 맡는다. 마크 자리에서는 쓰지 않는다.
+   */
+  ringOnly?: boolean;
 }) {
   const geometry = GEOMETRY[optical];
   return (
@@ -77,7 +83,7 @@ export function OortMark({
       aria-hidden={title ? undefined : "true"}
     >
       <path d={geometry.ring} />
-      <path d={geometry.satellite} />
+      {!ringOnly && <path d={geometry.satellite} />}
     </svg>
   );
 }

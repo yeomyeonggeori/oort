@@ -1,5 +1,5 @@
-import { NetworkError, fetchWithDeadline, type HttpResponse } from "../../lib/http";
-import { apiBase, coreSession } from "../../runtime/host";
+import { authedResponse } from "../../lib/api";
+import { NetworkError, type HttpResponse } from "../../lib/http";
 import {
   ABSENT_STATUSES,
   serverSurface,
@@ -22,11 +22,19 @@ import {
 // expired, which is a normal state transition for the card, not an error. A
 // wrapper that throws it away would force the UI to lie about what happened.
 //
+// It does go through `authedResponse`, the half of `request<T>()` that keeps the
+// answer (#3926): ONE session rotation on a 401, then the same request again.
+// This used to be a private raw fetch with the bearer it found in memory, so a
+// phone that had been in the background past the access token's life lost the
+// decision to a 401, the one place where nobody is looking at the screen to see
+// it fail. A rotation that does not help ends in an error, never in a loop.
+//
 // Idempotency: `client_decision_id` is caller-held. Retrying the SAME decision
 // reuses the key; the server replays the original receipt. A 409 whose receipt
 // status is `idempotency_conflict` means the server holds that key bound to a
 // DIFFERENT decision, so replaying it can only conflict again and the retry has
-// to mint a fresh key.
+// to mint a fresh key. The rotation's replay is the same request, body and key
+// included, so it can never be a second decision.
 // =============================================================================
 
 /**
@@ -201,6 +209,10 @@ export function sendFailureCopy(cause: unknown): string {
  * 규칙이 두 벌로 갈라지면 한쪽만 고쳐지는 날이 온다.
  */
 export function unsettledAnswerClause(status: number): string {
+  // 401은 세션을 한 번 갱신하고 다시 보낸 뒤에도 서버가 로그인을 알아보지 못한
+  // 답이다(`authedResponse`). 「다시 눌러 주세요」는 성공할 수 없는 재시도를
+  // 시키는 문장이라, 눌러서 될 일이 아니라 다시 로그인할 일이라고 말한다.
+  if (status === 401) return "로그인이 만료됐어요. 다시 로그인하면 결정할 수 있어요.";
   if (status === 429) return "요청이 잦아 서버가 이번 결정을 받지 않았어요.";
   if (status >= 500) return "서버가 오류로 답했어요. 잠시 뒤에 다시 눌러 주세요.";
   return "서버가 이 결정을 받지 않았어요. 다시 눌러 주세요.";
@@ -239,22 +251,18 @@ export async function decideApproval(
   clientDecisionId: string,
   hostId?: string
 ): Promise<DecisionOutcome> {
-  const headers = new Headers({ "Content-Type": "application/json" });
-  const token = coreSession().getAccessToken();
-  if (token) headers.set("Authorization", `Bearer ${token}`);
-
   // Deadline, not an open-ended wait (MOMO-609): an approval card stuck on its
   // busy state is the one place where "still working" and "never sent" look
-  // identical, and the person is deciding whether to press it again.
+  // identical, and the person is deciding whether to press it again. Every
+  // request `authedResponse` makes, the rotation's included, carries one.
   let response: HttpResponse;
   try {
-    response = await fetchWithDeadline(
-      `${apiBase()}/v1/workspaces/${encodeURIComponent(
+    response = await authedResponse(
+      `/v1/workspaces/${encodeURIComponent(
         workspaceId
       )}/approvals/${encodeURIComponent(approvalId)}/decision`,
       {
         method: "POST",
-        headers,
         body: JSON.stringify({
           approval_id: approvalId,
           approve,

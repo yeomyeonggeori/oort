@@ -23,8 +23,8 @@ import { SectionHeadingContext } from "@/features/settings/SettingsFields";
 import { WebhookSection } from "@/features/settings/WebhookSection";
 import { PersonalAssistantsList } from "@/features/hostedAgents/PersonalAssistantsList";
 import { HUB_CHIP_TONE } from "./AiHubOverview";
-import type { ChipTone, ExternalInput, Read } from "./aiHubOverviewModel";
-import { useExternalReads } from "./useAiHubOverview";
+import type { AppsRead, ChipTone, ExternalInput, Read } from "./aiHubOverviewModel";
+import { useAppsRead, useExternalReads } from "./useAiHubOverview";
 
 // =============================================================================
 // 「외부 연결」 구획 (AIH-8, #3438, 플랜 §2·§7, 시안 panel-external).
@@ -56,15 +56,15 @@ function PaneHead() {
   );
 }
 
-function countChip(row: AiExternalRow, read: Read<number> | null): { text: string; tone: ChipTone } | null {
-  if (read === null || row.countNoun === null) return null;
+function countChip(row: AiExternalRow, read: AppsRead | null): { text: string; tone: ChipTone } | null {
+  if (read === null || read.state === "absent" || row.countNoun === null) return null;
   if (read.state === "ok") return { text: `${row.countNoun} ${read.value}`, tone: "neutral" };
   if (read.state === "denied") return { text: AI_HUB_OVERVIEW_COPY.chip.operatorOnly, tone: "neutral" };
   if (read.state === "error") return { text: AI_HUB_OVERVIEW_COPY.chip.readFailed, tone: "warn" };
   return null;
 }
 
-function readFor(id: AiExternalRowId, input: ExternalInput, hostedBots: Read<number>): Read<number> {
+function readFor(id: AiExternalRowId, input: ExternalInput, hostedBots: Read<number>): AppsRead {
   return id === "hostedBotInvite" ? hostedBots : input[id];
 }
 
@@ -124,7 +124,9 @@ function Index() {
       <PaneHead />
       {isSurfaceProvided("hostedAgentPairing") && <PersonalAssistantsList className="mb-8" />}
       <ul className="flex min-w-0 flex-col" aria-label={glossaryEntry("externalConnection").term}>
-        {AI_EXTERNAL_ROWS.map((row) => (
+        {/* 서버가 앱 목록을 싣지 않으면 「앱」 줄은 접힌다(#3860). 열면 접힌 화면만 만나는 진입점은
+            세우지 않는다. 같은 서버가 「읽지 못했어요」를 말하는 것도 거짓이라 칩도 함께 빠진다. */}
+        {AI_EXTERNAL_ROWS.filter((row) => row.id !== "apps" || input.apps.state !== "absent").map((row) => (
           <RowItem key={row.id} row={row} input={input} hostedBots={hostedBots} restoreFocus={from === row.id} />
         ))}
       </ul>
@@ -145,7 +147,7 @@ function Index() {
   );
 }
 
-function DetailHead({ row }: { row: AiExternalRow }) {
+function DetailHead({ row, quiet = false }: { row: AiExternalRow; quiet?: boolean }) {
   const headingRef = useRef<HTMLHeadingElement>(null);
   // 상세로 들어오면 포커스를 제목으로 옮겨 화면이 바뀐 것을 읽어 준다(설정 셸의 headingRef와 같은 방식).
   useEffect(() => {
@@ -166,7 +168,9 @@ function DetailHead({ row }: { row: AiExternalRow }) {
         {row.title}
         {row.detailLegacy && <span className="ml-2 text-body font-normal text-ink-muted">({row.detailLegacy})</span>}
       </h2>
-      {row.detail.map((line) => (
+      {/* quiet: 서버가 이 구획을 싣지 않으면 머리말의 설명 줄도 접는다. 설명은 현재형으로 약속하는데
+          본문이 바로 아래에서 부정하면 화면이 스스로를 반박한다. 제목과 돌아가기는 남는다. */}
+      {!quiet && row.detail.map((line) => (
         <p key={line} className="max-w-2xl break-keep text-body text-ink-muted">
           {line}
         </p>
@@ -175,12 +179,30 @@ function DetailHead({ row }: { row: AiExternalRow }) {
   );
 }
 
-function Detail({ id, children }: { id: AiExternalRowId; children: ReactNode }) {
+function Detail({
+  id,
+  quiet = false,
+  children,
+}: {
+  id: AiExternalRowId;
+  quiet?: boolean;
+  children: ReactNode;
+}) {
   return (
     <div className="flex min-w-0 flex-col" data-testid={`ai-hub-external-${id}`}>
-      <DetailHead row={aiExternalRow(id)} />
+      <DetailHead row={aiExternalRow(id)} quiet={quiet} />
       <SectionHeadingContext.Provider value={false}>{children}</SectionHeadingContext.Provider>
     </div>
+  );
+}
+
+/** 앱 상세. 서버가 앱 목록을 싣지 않으면(접힌 줄로 직접 들어온 경우) 머리말 설명은 서지 않는다. */
+function AppsDetail({ offline }: { offline: boolean }) {
+  const apps = useAppsRead();
+  return (
+    <Detail id="apps" quiet={apps.state === "absent"}>
+      <PluginSection offline={offline} />
+    </Detail>
   );
 }
 
@@ -188,14 +210,7 @@ export function AiExternalPane({ offline, workspaceId, memberId }: PaneProps) {
   return (
     <Routes>
       <Route index element={<Index />} />
-      <Route
-        path="apps"
-        element={
-          <Detail id="apps">
-            <PluginSection offline={offline} />
-          </Detail>
-        }
-      />
+      <Route path="apps" element={<AppsDetail offline={offline} />} />
       <Route
         path="incoming"
         element={
