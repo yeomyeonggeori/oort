@@ -9,18 +9,21 @@ import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfac
 // 아니라 웹 스위트에 있는지 설명한다: 코어는 `node:fs`를 못 쓴다). 이 파일은 둘을 잰다.
 //
 //   앱 보기(`plugins`)   읽기 둘이 GET으로만 서 있다 ⇔ 표가 provided.
-//   앱 설치(`pluginInstall`)  쓰기 넷이 **아직 서 있지 않다**. 서 있으면 이 파일이 빨개진다.
+//   앱 설치(`pluginInstall`)  쓰기 넷이 WRITES의 동사(POST·DELETE)로만 서 있고 **GET이 없다**.
 //
-// 두 번째가 일부러 빨개지게 만든 자리다. 「앱 설치」는 표가 아니라 **서버가 보여 준 사실**로
-// 켜진다(GET을 보내 405면 서 있다, `pluginInstallVerdict`). 그 405는 쓰기 경로가 POST·DELETE로만
-// 등록돼 있다는 전제 위에 서 있고, 그 전제는 이 파일이 쓰기 경로를 처음 보는 날에야 처음
-// 재볼 수 있다. 그날 이 파일이 아래 메시지를 들고 빨개지고, 고치는 사람은 ①프로브를 살아 있는
-// 서버에 대고 재고 ②`pluginInstall.measured`를 고치고 ③이 단정을 「서 있어야 한다」로 뒤집는다.
-// 그 순서를 건너뛰고 지나가는 길이 없다: 초록이 되는 방법이 그 셋뿐이다.
+// 두 번째는 처음에 「아직 서 있지 않다」로 걸어 둔 확인 장치였고, 2026-10-17에 한 번 발동했다.
+// 「앱 설치」는 표가 아니라 **서버가 보여 준 사실**로 켜진다(GET을 보내 405면 서 있다,
+// `pluginInstallVerdict`). 그 405는 쓰기 경로가 POST·DELETE로만 등록돼 있다는 전제 위에 서
+// 있고, 엔진 #3965·#3967이 네 경로를 올려 동기화 PR #3998에서 두 쪽이 처음 한 트리에 만난 날
+// 이 파일이 빨개졌다. 그날 메시지의 순서를 그대로 따랐다: ①살아 있는 서버에 GET을 보내 재고
+// ②`pluginInstall.measured`를 그날의 실측으로 고치고 ③이 단정을 뒤집었다. 원문은
+// docs/planning/ENGINE_HANDOFF.md의 X-P3다. 지금 이 단정이 지키는 것은 그 전제다: 네 경로가
+// 모두 서 있고, 어느 경로에도 GET이 없다.
 //
-// red proof:
+// red proof (2026-10-17 사보타주로 확인했다. 변이와 결과 원문은 같은 X-P3):
 //   · `lib.rs`에서 읽기 라우트 하나를 지우면 이 파일이 그 경로 이름을 부르며 빨개진다.
-//   · 쓰기 라우트(예: `…/plugins/{plugin}/install`)를 얹으면 「앱 설치」 단정이 빨개진다.
+//   · 쓰기 라우트 하나를 지우면 「쓰기 동사로만 서 있다」 단정이 그 경로 이름을 부르며 빨개진다.
+//   · 쓰기 경로에 `get(…)`을 얹으면(405가 사라져 프로브가 영영 닫힌다) 같은 단정이 빨개진다.
 //   · `provided`만 되돌려도 「앱 보기」 단정이 빨개진다.
 //   · 코어가 설치 경로를 바꾸고 프로브를 두면 「프로브가 재는 경로」 단정이 빨개진다.
 //
@@ -128,20 +131,29 @@ describe("앱 — 표와 라우터가 같은 말을 하는가", () => {
       expect(isSurfaceProvided("pluginInstall")).toBe(false);
     });
 
-    it("쓰기 넷은 아직 라우터에 없다 (서 있다면 아래 메시지를 따른다)", () => {
-      const mounted = WRITES.filter(({ path }) => routes.has(path));
-      expect(
-        mounted.map(({ path }) => path),
-        [
-          "엔진이 설치·권한 쓰기 경로를 올렸다. 이 단정을 지우고 지나가지 말고 순서대로 한다:",
-          "  1) 살아 있는 서버 한 대에 GET …/plugins/{id}/install 과 …/grants 를 보내 둘 다 405인지 잰다",
-          "     (serverSurfaces.ts `pluginInstallVerdict` 아래 「엔진 랜딩 시 재확인」 ①②③).",
-          "     핸들러가 불리기 전이라 감사 행·설치 행이 생기지 않아야 한다.",
-          "  2) 라우터에서 이 경로들에 GET 이 얹히지 않았는지 본다. GET 이 있으면 405가 오지 않아 프로브가 영영 닫힌다.",
-          "  3) serverSurfaces.ts `pluginInstall.measured` 를 그날의 실측으로 고친다.",
-          "  4) 이 단정을 「넷이 모두 WRITES 의 동사로만 서 있다」로 뒤집는다.",
-        ].join("\n")
-      ).toEqual([]);
+    it.each(WRITES)("$path 는 쓰기 동사로만 서 있다 (GET 이 없다)", ({ path, verbs }) => {
+      const expected: string[] = [...verbs].sort();
+      const mounted = [...(routes.get(path) ?? [])].sort();
+      const extra = mounted.filter((verb) => !expected.includes(verb));
+      const lines = [`${path} 의 동사 [${mounted.join(", ")}] 가 기대 [${expected.join(", ")}] 와 다르다.`];
+      if (extra.includes("get")) {
+        lines.push(
+          "GET 이 얹혔다. 405 가 오지 않아 「앱 설치」 프로브(probePluginWriteRoutes)가 영영 닫힌다.",
+          "GET 을 걷는다. 이 경로를 정말 읽어야 한다면 프로브의 모양부터 다시 정하고,",
+          "serverSurfaces.ts `pluginInstallVerdict` 아래 「엔진 랜딩 시 재확인」 ①②③ 을 살아 있는 서버에 다시 잰다."
+        );
+      } else if (mounted.length === 0) {
+        lines.push(
+          "경로가 라우터에서 사라졌다. 클라는 이 경로를 이미 부른다(`installPlugin` 외).",
+          "프로브는 404 를 「없다」로 접지만, 서버가 정말 이 경로를 내렸다면 먼저 그 결정을 확인한다."
+        );
+      } else {
+        lines.push(
+          "쓰기 동사의 집합이 바뀌었다. WRITES 와 코어 클라(api.ts)를 함께 고치고,",
+          "프로브가 보내는 GET 에 405 가 오는지(Allow 에 그 동사가 있고 GET 이 없는지) 살아 있는 서버에 다시 잰다."
+        );
+      }
+      expect(mounted, lines.join("\n")).toEqual(expected);
     });
 
     it("프로브가 재는 경로가 코어가 실제로 부르는 쓰기 경로다", () => {
