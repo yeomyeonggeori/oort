@@ -405,6 +405,62 @@ grep -Fxq "PROVIDER_LINK_MASTER_KEY=${TOKEN_WHIN}" "$SANDBOX/whk-plink.env" || \
 assert_webhook_case whk-plink "$SANDBOX/whk-plink.env" 2 fail blocker 'PROVIDER_LINK_MASTER_KEY'
 pass "④ PROVIDER_LINK_MASTER_KEY == 웹훅 마스터키 → fail(blocker), exit 2 (boot_error 동형)"
 
+# ⑤~⑧ #3947 / ADR-0205 D1·D2 — env.github_app_master_key (정확히 1 레코드).
+TOKEN_GHAPP="$(openssl rand -hex 12)"
+github_env() {
+  # usage: github_env <dest> <key-value|-> [<public-origin>]
+  local dest="$1" val="$2" origin="${3:-}"
+  awk -v v="$val" -v o="$origin" '
+    index($0, "CENTRIFUGO_ALLOWED_ORIGINS=") == 1 && o != "" { print $0 " " o; next }
+    { print }
+    END { if (v != "-") print "GITHUB_APP_MASTER_KEY=" v }
+  ' "$VALID" >"$dest"
+  chmod 600 "$dest"
+}
+assert_github_case() {
+  # usage: assert_github_case <label> <env> <want-exit> <want-status> <want-severity> <needle>
+  local label="$1" env="$2" want_exit="$3" want_status="$4" want_sev="$5" needle="$6"
+  local out="$SANDBOX/${label}.json" err="$SANDBOX/${label}.err" code status sev detail fix n
+  code="$(run_doctor "$env" "$out" "$err" --json)"
+  validate_schema "$out" || fail "$label JSON schema"
+  # "*" = exit not under test: a public origin makes public.* probes hit the
+  # (unreachable) fake domain, which is unrelated to this record.
+  [ "$want_exit" = "*" ] || [ "$code" = "$want_exit" ] || fail "$label exit $code (want $want_exit); stderr=$(cat "$err")"
+  status="$(check_field "$out" env.github_app_master_key status)"
+  sev="$(check_field "$out" env.github_app_master_key severity)"
+  detail="$(check_field "$out" env.github_app_master_key detail)"
+  fix="$(check_field "$out" env.github_app_master_key fix)"
+  [ "$status" = "$want_status" ] || fail "$label status $status (want $want_status); detail=$detail"
+  [ "$sev" = "$want_sev" ] || fail "$label severity $sev (want $want_sev)"
+  printf '%s %s' "$detail" "$fix" | grep -Fq "$needle" || \
+    fail "$label detail/fix lacks '$needle': $detail / $fix"
+  n="$(jq -r '[.checks[] | select(.id == "env.github_app_master_key")] | length' "$out")"
+  [ "$n" = "1" ] || fail "$label emitted $n env.github_app_master_key records (want 1)"
+  if grep -F -- "$TOKEN_GHAPP" "$out" "$err" >/dev/null; then
+    fail "$label leaked the GITHUB_APP_MASTER_KEY value"
+  fi
+  assert_no_secret_leak "$label json" "$out"
+}
+# ⑤ 키 없음 → minor info(PASS 판정 유지, exit 0), 503 문구 + 공개 주소 문구.
+assert_github_case gh-absent "$VALID" 0 info minor '공개 주소가 없어 GitHub 알림을 받을 수 없어요'
+printf '%s' "$(check_field "$SANDBOX/gh-absent.json" env.github_app_master_key detail)" | grep -Fq 'GitHub 알림 표면 503' || \
+  fail "⑤ absent detail lacks 503 wording"
+pass "⑤ GITHUB_APP_MASTER_KEY 없음 → minor info, 503 + 공개 주소 문구, exit 0"
+# ⑥ 키 있음 + 공개 HTTPS 없음 → info, 같은 문장, 값 비유입.
+github_env "$SANDBOX/gh-nopublic.env" "$TOKEN_GHAPP"
+assert_github_case gh-nopublic "$SANDBOX/gh-nopublic.env" 0 info minor '공개 주소가 없어 GitHub 알림을 받을 수 없어요'
+pass "⑥ 키 있음 + 공개 HTTPS 없음 → minor info, 값 비유입"
+# ⑦ 키 있음 + 공개 HTTPS → pass.
+github_env "$SANDBOX/gh-public.env" "$TOKEN_GHAPP" "https://chat.example.test"
+assert_github_case gh-public "$SANDBOX/gh-public.env" "*" pass minor '공개 HTTPS 주소 있음'
+pass "⑦ 키 있음 + 공개 HTTPS → pass"
+# ⑧ 다른 마스터키 재사용 → blocker fail, exit 2 (config.rs 재사용 거부와 동형).
+for reuse in "$TOKEN_JWT:JWT_HMAC" "$TOKEN_PLINK:PROVIDER_LINK_MASTER_KEY" "$TOKEN_WHIN:WEBHOOK_INGRESS_MASTER_KEY" "$TOKEN_WHOUT:OUTBOUND_WEBHOOK_MASTER_KEY"; do
+  github_env "$SANDBOX/gh-reuse.env" "${reuse%%:*}"
+  assert_github_case "gh-reuse-${reuse##*:}" "$SANDBOX/gh-reuse.env" 2 fail blocker "${reuse##*:}"
+done
+pass "⑧ GITHUB_APP_MASTER_KEY 가 JWT·PROVIDER_LINK·웹훅 두 키 중 하나를 재사용 → fail(blocker), exit 2"
+
 # -----------------------------------------------------------------------------
 # 4. role password ≠ DATABASE_URL → fail blocker
 # -----------------------------------------------------------------------------
@@ -446,8 +502,8 @@ validate_schema "$OUT" || fail "unknown platform JSON schema: $(head -c 400 "$OU
 [ "$(check_field "$OUT" env.platform status)" = "fail" ] || \
   fail "unknown platform env.platform status=$(check_field "$OUT" env.platform status) detail=$(check_field "$OUT" env.platform detail)"
 UNK_COUNT="$(jq -r '.checks[].id' "$OUT" | wc -l | tr -d '[:space:]')"
-[ "$UNK_COUNT" = "35" ] || \
-  fail "unknown platform check id count ${UNK_COUNT} != 35 (env.platform extra on the normal 34)"
+[ "$UNK_COUNT" = "36" ] || \
+  fail "unknown platform check id count ${UNK_COUNT} != 36 (env.platform extra on the normal 35)"
 if grep -F -- "$TOKEN_PG" "$OUT" "$ERR" >/dev/null; then
   fail "unknown platform leaked password"
 fi
@@ -571,12 +627,12 @@ printf '%s' "$SQL_FN" | grep -Eq '^SELECT 1;?$' && \
 T1_IDS="$SANDBOX/t1.ids"
 jq -r '.checks[].id' "$SANDBOX/status.out" | sort >"$T1_IDS"
 # status --json includes the same checks as doctor plus image; ids come from doctor.
-# Normal case is 34 (#2066 added env.webhook_master_keys). 35 is not the happy path:
+# Normal case is 35 (#2066 added env.webhook_master_keys, #3947 env.github_app_master_key). 36 is not the happy path:
 #   - stack.migrate_files (info) when server/Migrations and /opt/momo/migrations
 #     are both missing (see the missing-dir probe above)
 #   - env.platform (fail) when MOMO_SELF_HOST_PLATFORM is not a platform_profiles row
 T1_COUNT="$(wc -l <"$T1_IDS" | tr -d '[:space:]')"
-[ "$T1_COUNT" = "34" ] || fail "T1 check id count ${T1_COUNT} != 34 (normal case)"
+[ "$T1_COUNT" = "35" ] || fail "T1 check id count ${T1_COUNT} != 35 (normal case)"
 
 PG_PORT="$(pick_port 25432)"
 MOCK_PORT="$(pick_port 18765)"
@@ -807,7 +863,7 @@ validate_schema "$OUT" || fail "T2 doctor JSON schema: $(head -c 400 "$OUT")"
 T2_IDS="$SANDBOX/t2.ids"
 jq -r '.checks[].id' "$OUT" | sort >"$T2_IDS"
 T2_COUNT="$(wc -l <"$T2_IDS" | tr -d '[:space:]')"
-[ "$T2_COUNT" = "34" ] || fail "T2 check id count ${T2_COUNT} != 34 (normal case)"
+[ "$T2_COUNT" = "35" ] || fail "T2 check id count ${T2_COUNT} != 35 (normal case)"
 [ "$T1_COUNT" = "$T2_COUNT" ] || \
   fail "T2 check id count ${T2_COUNT} != T1 ${T1_COUNT}"
 cmp -s "$T1_IDS" "$T2_IDS" || \

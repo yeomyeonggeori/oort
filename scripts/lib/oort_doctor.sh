@@ -165,7 +165,7 @@ oort_doctor_skip_env_rest() {
   for id in \
     env.mode env.duplicate_keys env.scalars env.required_keys \
     env.bool.doorbell env.bool.hosted_delivery env.bool.unfurl \
-    env.platform_admin_emails env.provider_link_master_key \
+    env.platform_admin_emails env.provider_link_master_key env.github_app_master_key \
     env.drive_archive_backend env.centrifugo_ws_url env.role_passwords \
     env.digest env.attestation \
     port.web port.api port.centrifugo
@@ -324,6 +324,11 @@ oort_doctor_check_env() {
     if [ "$key" = "MOMO_LIVEKIT_NODE_IP" ]; then
       continue
     fi
+    # ADR-0205 D1 / #3947: absent means only the GitHub 알림 surface is 503, so
+    # it is judged (as minor) by env.github_app_master_key, not as a missing key.
+    if [ "$key" = "GITHUB_APP_MASTER_KEY" ]; then
+      continue
+    fi
     if ! oort_doctor_has "$key"; then
       missing="${missing} ${key}"
     fi
@@ -409,6 +414,9 @@ EOF
   #   재사용하면 api 는 기동하지 않는다(SettingsConfig::boot_error 3분기).
   #   doctor 가 이 조합을 보지 않으면 verdict PASS 인데 부팅이 실패한다.
   oort_doctor_check_webhook_master_keys
+
+  # ADR-0205 D1 / #3947 — GitHub 앱 봉인 키 + 공개 HTTPS 주소.
+  oort_doctor_check_github_app_master_key
 
   if ! oort_doctor_has MOMO_DRIVE_ARCHIVE_BACKEND; then
     oort_doctor_record env.drive_archive_backend blocker fail \
@@ -569,6 +577,68 @@ oort_doctor_check_webhook_master_keys() {
 
   oort_doctor_record env.webhook_master_keys blocker pass \
     "웹훅 마스터키 2종 present ($(oort_doctor_length_class "$ingress") / $(oort_doctor_length_class "$outbound")), JWT 와 분리됨" ""
+}
+
+# ADR-0205 D1·D2 / #3947 — GITHUB_APP_MASTER_KEY.
+#
+# Exactly one `env.github_app_master_key` record. The key is optional: absent
+# means only the GitHub 알림 surface answers 503, so that is `minor`, not a
+# blocker. Reusing another master key is a boot refusal (`SettingsConfig::
+# boot_error`), so that arm is a blocker. A present key without a public HTTPS
+# origin still cannot receive GitHub deliveries (ADR-0205 D2) — said plainly,
+# as info. Values are never printed, only length classes.
+oort_doctor_github_public_https_origin() {
+  local tok
+  oort_doctor_has CENTRIFUGO_ALLOWED_ORIGINS || return 1
+  for tok in $(oort_doctor_get CENTRIFUGO_ALLOWED_ORIGINS); do
+    oort_doctor_origin_is_loopback_or_tauri "$tok" && continue
+    case "$tok" in
+      https://*) return 0 ;;
+    esac
+  done
+  return 1
+}
+
+oort_doctor_check_github_app_master_key() {
+  local value other other_key public=1
+  oort_doctor_github_public_https_origin || public=0
+
+  value=""
+  if oort_doctor_has GITHUB_APP_MASTER_KEY; then
+    value="$(oort_doctor_get GITHUB_APP_MASTER_KEY)"
+  fi
+  if [ -z "$value" ]; then
+    if [ "$public" -eq 0 ]; then
+      oort_doctor_record env.github_app_master_key minor info \
+        "GITHUB_APP_MASTER_KEY 없음 — GitHub 알림 표면 503. 공개 주소가 없어 GitHub 알림을 받을 수 없어요" \
+        "GitHub 알림이 필요하면 공개 HTTPS 주소를 먼저 붙이고(--public-origin), scripts/oort upgrade 로 키를 백필하라. 없어도 나머지 기능은 정상이다."
+    else
+      oort_doctor_record env.github_app_master_key minor info \
+        "GITHUB_APP_MASTER_KEY 없음 — GitHub 알림 표면 503 (나머지는 정상)" \
+        "GitHub 알림이 필요하면 scripts/oort upgrade (또는 scripts/self_host_env.sh --ensure-managed-keys) 로 키를 넣고 api 를 재시작하라."
+    fi
+    return 0
+  fi
+
+  for other_key in JWT_HMAC WEBHOOK_INGRESS_MASTER_KEY OUTBOUND_WEBHOOK_MASTER_KEY PROVIDER_LINK_MASTER_KEY; do
+    oort_doctor_has "$other_key" || continue
+    other="$(oort_doctor_get "$other_key")"
+    if [ -n "$other" ] && [ "$value" = "$other" ]; then
+      oort_doctor_record env.github_app_master_key blocker fail \
+        "GITHUB_APP_MASTER_KEY 가 ${other_key} 를 재사용한다 — api 기동 거부" \
+        "GitHub 마스터키는 다른 마스터키와 같을 수 없다(한 키 유출이 GitHub 자격증명 유출이 된다). GITHUB_APP_MASTER_KEY 만 openssl rand -hex 24 로 새로 만들고 api 를 재시작하라. 이미 봉인해 둔 GitHub 앱 자격증명은 다시 등록해야 한다."
+      return 0
+    fi
+  done
+
+  if [ "$public" -eq 0 ]; then
+    oort_doctor_record env.github_app_master_key minor info \
+      "GITHUB_APP_MASTER_KEY present ($(oort_doctor_length_class "$value")) — 공개 주소가 없어 GitHub 알림을 받을 수 없어요" \
+      "GitHub 는 공개 HTTPS 웹훅 주소로만 알림을 보낸다. 로컬·NAT 설치는 받을 수 없다(docs/SELF_HOST.md §GitHub 알림)."
+    return 0
+  fi
+  oort_doctor_record env.github_app_master_key minor pass \
+    "GITHUB_APP_MASTER_KEY present ($(oort_doctor_length_class "$value")), 공개 HTTPS 주소 있음" ""
 }
 
 oort_doctor_pair_password() {

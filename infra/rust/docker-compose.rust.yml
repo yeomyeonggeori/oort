@@ -349,6 +349,11 @@ services:
       # a row. The provider key itself does not: it lives in the database and the
       # worker re-reads it within its 2 s cache window (docs/SELF_HOST.md §5).
       PROVIDER_LINK_MASTER_KEY: ${PROVIDER_LINK_MASTER_KEY:-}
+      # ADR-0205 D1 / #3947 — seals the GitHub App private key and webhook
+      # secret. Optional `:-`: unset ⇒ only the GitHub 알림 surface answers 503,
+      # every other route is untouched. api ONLY: agent-worker and hermes never
+      # receive it (ADR-0203 D6-2 — the helper must not hold an oort secret).
+      GITHUB_APP_MASTER_KEY: ${GITHUB_APP_MASTER_KEY:-}
       PLATFORM_ADMIN_EMAILS: ${PLATFORM_ADMIN_EMAILS:-}
       # SH-6a-e / #2215 — operator opt-in for a same-machine OpenAI-compatible
       # provider. Optional `:-`: unset keeps today's default deny. The two

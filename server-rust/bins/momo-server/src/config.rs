@@ -77,6 +77,9 @@ pub struct Config {
     /// 설정 표면 settings (B4.2) — provider master key, the env provider tier,
     /// and the instance-operator allow-list. Fail-closed by default.
     pub settings: SettingsConfig,
+    /// ADR-0205 D1 — the GitHub App's dedicated master key (optional: absent closes only the
+    /// GitHub surface with a 503).
+    pub github: GithubAppSettings,
     /// ADR-0203 — the operator's declaration about a co-hosted agent.
     pub cohosted: CohostedAgentConfig,
     /// MOMO-300 rate-limit knobs (B4.3) — consumed by the public join and
@@ -1763,6 +1766,67 @@ impl SettingsConfig {
     }
 }
 
+/// ADR-0205 D1 (#3947) — the GitHub App's sealing key.
+///
+/// `master_key` is `GITHUB_APP_MASTER_KEY`, an **independent** root: the App's private key and
+/// webhook secrets are sealed under `SHA256("momo.github_app.key.v1\n" || key)`.
+///
+/// * absent ⇒ every `/v1/integrations/github/*` route answers **503** and nothing else changes
+///   (the same shape `PROVIDER_LINK_MASTER_KEY` has for the AI-연결 family);
+/// * equal to the JWT secret or to the provider-link / webhook ingress / outbound master key ⇒
+///   the boot is **refused**: reuse would make a leak of any of them open the App's credentials
+///   (which, with `contents: read`, reach installed repositories' code — ADR-0205 D6), or the
+///   reverse.
+///
+/// Held in memory only; never logged, never echoed — [`Debug`] reports presence.
+#[derive(Clone, Default)]
+pub struct GithubAppSettings {
+    pub master_key: Option<String>,
+}
+
+impl GithubAppSettings {
+    pub fn from_env() -> GithubAppSettings {
+        GithubAppSettings {
+            master_key: env("GITHUB_APP_MASTER_KEY"),
+        }
+    }
+
+    /// The reuse guard (ADR-0205 D1). **Absence is not an error** — it closes the surface.
+    /// `provider_link_master_key` is passed in (not re-read from the environment) so the
+    /// comparison is decidable in a unit test and uses the same resolved value the provider
+    /// surface does (the #2066 lesson).
+    pub fn boot_error(
+        &self,
+        jwt_secret: &str,
+        webhook: &WebhookSettings,
+        provider_link_master_key: Option<&str>,
+    ) -> Option<&'static str> {
+        let key = self.master_key.as_deref()?;
+        if key == jwt_secret {
+            return Some("GITHUB_APP_MASTER_KEY must not reuse JWT_HMAC");
+        }
+        if webhook.outbound_master_key == key {
+            return Some("GITHUB_APP_MASTER_KEY must not reuse OUTBOUND_WEBHOOK_MASTER_KEY");
+        }
+        if webhook.ingress_master_key == key {
+            return Some("GITHUB_APP_MASTER_KEY must not reuse WEBHOOK_INGRESS_MASTER_KEY");
+        }
+        if provider_link_master_key == Some(key) {
+            return Some("GITHUB_APP_MASTER_KEY must not reuse PROVIDER_LINK_MASTER_KEY");
+        }
+        None
+    }
+}
+
+impl std::fmt::Debug for GithubAppSettings {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("GithubAppSettings")
+            .field("master_key_configured", &self.master_key.is_some())
+            .finish()
+    }
+}
+
 /// `PLATFORM_ADMIN_EMAILS` → lowercased, comma-split, blanks dropped.
 fn platform_admin_emails_from_env() -> Vec<String> {
     env("PLATFORM_ADMIN_EMAILS")
@@ -2136,6 +2200,16 @@ impl Config {
         if let Some(message) = settings.boot_error(&jwt_secret, &webhook) {
             return Err(ConfigError::InvalidSecurity(message));
         }
+        // ADR-0205 D1 (#3947): the GitHub App key is an independent root. Absent is fine (503);
+        // a key shared with JWT / provider link / either webhook root refuses the boot.
+        let github = GithubAppSettings::from_env();
+        if let Some(message) = github.boot_error(
+            &jwt_secret,
+            &webhook,
+            settings.provider_link_master_key.as_deref(),
+        ) {
+            return Err(ConfigError::InvalidSecurity(message));
+        }
 
         // ADR-0151: the one Drive misconfiguration that is fatal — see
         // [`DriveSettings::boot_error`] for why a *missing* archive is not.
@@ -2163,6 +2237,7 @@ impl Config {
             agent_gateway,
             realtime,
             settings,
+            github,
             cohosted,
             rate_limit: RateLimitConfig::from_env(),
             agent_port: AgentPortConfig::from_env()?,
@@ -3370,6 +3445,60 @@ mod tests {
             settings("its-own-key").boot_error("jwt-secret", &keys),
             None
         );
+    }
+
+    /// ADR-0205 D1 / acceptance 8: the GitHub key may reuse none of the other four roots.
+    #[test]
+    fn the_github_app_master_key_may_reuse_no_other_root() {
+        let github = |key: &str| GithubAppSettings {
+            master_key: Some(key.to_string()),
+        };
+        let keys = webhook("ingress-key", "outbound-key");
+        let provider = Some("provider-key");
+
+        assert_eq!(
+            github("jwt-secret").boot_error("jwt-secret", &keys, provider),
+            Some("GITHUB_APP_MASTER_KEY must not reuse JWT_HMAC")
+        );
+        assert_eq!(
+            github("outbound-key").boot_error("jwt-secret", &keys, provider),
+            Some("GITHUB_APP_MASTER_KEY must not reuse OUTBOUND_WEBHOOK_MASTER_KEY")
+        );
+        assert_eq!(
+            github("ingress-key").boot_error("jwt-secret", &keys, provider),
+            Some("GITHUB_APP_MASTER_KEY must not reuse WEBHOOK_INGRESS_MASTER_KEY")
+        );
+        assert_eq!(
+            github("provider-key").boot_error("jwt-secret", &keys, provider),
+            Some("GITHUB_APP_MASTER_KEY must not reuse PROVIDER_LINK_MASTER_KEY")
+        );
+        assert_eq!(
+            github("its-own-key").boot_error("jwt-secret", &keys, provider),
+            None
+        );
+        // No provider key configured: nothing to collide with, and the others still apply.
+        assert_eq!(
+            github("its-own-key").boot_error("jwt-secret", &keys, None),
+            None
+        );
+    }
+
+    /// Absence closes the GitHub surface; it never refuses a boot.
+    #[test]
+    fn an_absent_github_app_master_key_is_not_a_boot_error() {
+        let keys = webhook("ingress-key", "outbound-key");
+        assert_eq!(
+            GithubAppSettings::default().boot_error("jwt-secret", &keys, Some("provider-key")),
+            None
+        );
+        let rendered = format!(
+            "{:?}",
+            GithubAppSettings {
+                master_key: Some("super-secret-github-key".to_string())
+            }
+        );
+        assert!(rendered.contains("master_key_configured: true"));
+        assert!(!rendered.contains("super-secret"), "{rendered}");
     }
 
     #[test]

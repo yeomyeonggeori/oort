@@ -62,6 +62,7 @@ pub mod cloud_box_runner;
 pub mod crypto;
 pub mod default_ai;
 pub mod egress;
+pub mod github_app;
 pub mod invite;
 pub mod join;
 pub mod key_budget;
@@ -91,6 +92,13 @@ pub use default_ai::{
     StoredDefaultAi, GUARDRAIL_OFF, MAX_MODEL_ID_BYTES, MAX_PROBE_MODEL_IDS, TEAM_LINK_SOURCE,
 };
 pub use egress::{is_non_public_ip, EgressDenied, EgressPolicy};
+pub use github_app::{
+    build_manifest, consume_manifest_claim, default_app_name, insert_github_app,
+    insert_manifest_claim, is_valid_org_login, looks_like_pem_private_key,
+    manifest_registration_url, new_state_token, read_github_app_status, seal_github_secret,
+    state_hash, state_workspace_hint, upsert_github_app, GithubAppStatus, ManifestOwner,
+    NewGithubApp, GITHUB_DEFAULT_EVENTS, GITHUB_DEFAULT_PERMISSIONS,
+};
 pub use invite::{
     clamp_invite_list_limit, create_invite, list_invite_redemptions, list_invites,
     normalized_invite_role, normalized_revoke_reason, read_invite, redeem_invite_for_member,
