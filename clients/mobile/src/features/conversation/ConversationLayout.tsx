@@ -111,6 +111,16 @@ import {KeyboardPane} from '../../lib/keyboardPane';
  */
 export const KEYBOARD_GAP = space.xs;
 
+/**
+ * 쉬는 상태의 바닥 여백. 홈 인디케이터가 있는 기기는 그 인셋(34)이고, 없는 기기(iPhone SE, 인셋 0)는
+ * 틈 하나(4)다(#4044). 둘 다 `KEYBOARD_GAP` 이상이어야 올라간 동안의 틈이 어느 기기에서나 4 다:
+ * 틈 = 패딩 - 네이티브에 넘기는 `bottomInset`(`패딩 - GAP`, 0 미만 아님)이라, 인셋 0 에서 패딩이 0
+ * 이면 틈도 0 이 되어 알약이 키보드에 붙는다. 내려갔을 때 알약이 화면 바닥에 붙던 것도 같이 풀린다.
+ */
+export function restingBottomPadding(bottomInset: number): number {
+  return Math.max(bottomInset, KEYBOARD_GAP);
+}
+
 export function ConversationLayout({
   list,
   composer,
@@ -134,8 +144,8 @@ export function ConversationLayout({
         // `키보드 높이 - bottomInset` 만큼 올리므로, 인셋을 틈만큼 덜 넘기면 그만큼 더
         // 올라간다. 쉬는 상태의 여백(패딩)은 그대로 상수다 — 두 규칙(움직이는 것은
         // 변환, 안 움직이는 것은 상수)이 둘 다 산다.
-        bottomInset={Math.max(0, insets.bottom - KEYBOARD_GAP)}
-        style={[styles.root, {paddingBottom: insets.bottom}]}
+        bottomInset={Math.max(0, restingBottomPadding(insets.bottom) - KEYBOARD_GAP)}
+        style={[styles.root, {paddingBottom: restingBottomPadding(insets.bottom)}]}
         testID="conversation-layout">
         <View style={styles.list}>{list}</View>
         <View testID="composer-dock">{composer}</View>
