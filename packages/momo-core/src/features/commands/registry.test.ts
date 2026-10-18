@@ -65,12 +65,18 @@ describe("명령 레지스트리", () => {
     expect(ids).not.toContain("settings.open");
   });
 
-  it("client 명령은 ai.connect·view.sidebar 둘이다 — 나머지는 전부 navigate(#2943·#3299)", () => {
+  it("client 명령은 ai.connect·ai.apps·view.sidebar 셋이다 — 나머지는 전부 navigate(#2943·#3299·#3950)", () => {
     const agents = [{ id: "a-1", displayName: "김인턴", handle: "intern" }];
     for (const command of visibleCommands(
       env({ agents, sidebarList: { collapsed: false } })
     )) {
-      if (command.id === "ai.connect" || command.id === TOGGLE_SIDEBAR_COMMAND_ID) continue;
+      if (
+        command.id === "ai.connect" ||
+        command.id === "ai.apps" ||
+        command.id === TOGGLE_SIDEBAR_COMMAND_ID
+      ) {
+        continue;
+      }
       expect(command.kind).toBe("navigate");
     }
   });
@@ -94,7 +100,10 @@ describe("명령 레지스트리", () => {
     expect(bare).not.toContain("create.channel");
     expect(bare).not.toContain("nav.workConsole");
     expect(bare).not.toContain("nav.workstreams");
-    expect(bare.length).toBe(full.length - 4);
+    // `ai.apps`(#3950)도 앱 표면이 없으면 팔레트에서 빠진다.
+    expect(full).toContain("ai.apps");
+    expect(bare).not.toContain("ai.apps");
+    expect(bare.length).toBe(full.length - 5);
   });
 
   it("표면 이름은 판정표에서 들고 온다 — 손으로 다시 적지 않는다", () => {
@@ -375,7 +384,7 @@ describe("ai.connect (#2943 GC-2)", () => {
 
   it("슬래시 이름은 client 명령만 갖는다", () => {
     const slash = slashCommands();
-    expect(slash.map((command) => command.id)).toEqual(["ai.connect"]);
+    expect(slash.map((command) => command.id)).toEqual(["ai.connect", "ai.apps"]);
     for (const command of visibleCommands(env())) {
       if (command.slash !== undefined) expect(command.kind).toBe("client");
     }

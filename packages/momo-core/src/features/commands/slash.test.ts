@@ -8,7 +8,7 @@ const labels = (query: string) =>
 
 describe("슬래시 후보 (#2942 GC-1)", () => {
   it("`/`만 치면 레지스트리의 client 명령과 그 인자가 선다", () => {
-    expect(labels("")).toEqual(["/연결", "/연결 claude", "/연결 codex", "/연결 팀키"]);
+    expect(labels("")).toEqual(["/연결", "/연결 claude", "/연결 codex", "/연결 팀키", "/앱"]);
   });
 
   it("앞머리로 고르고, 친 글자 수를 강조 길이로 준다(시안 `/연`)", () => {

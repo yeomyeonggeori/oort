@@ -33,10 +33,19 @@
 // 으로만 오간다: 렌더는 클라이언트의 일이다.
 // =============================================================================
 
-import { serverSurface, type SurfaceId } from "../capabilities/serverSurfaces";
+import {
+  isSurfaceProvided,
+  serverSurface,
+  type SurfaceId,
+} from "../capabilities/serverSurfaces";
 import { attachDirection } from "../../lib/koreanParticle";
 import { WORK_CONSOLE_VIEW_PATH, WORK_NAV, WORK_PATH } from "../workbench/workTab";
-import { AI_HUB_PATH, AI_HUB_SECTIONS, glossaryEntry } from "../ai/aiHubModel";
+import {
+  AI_EXTERNAL_ROWS,
+  AI_HUB_PATH,
+  AI_HUB_SECTIONS,
+  glossaryEntry,
+} from "../ai/aiHubModel";
 
 /**
  * 팔레트가 명령을 묶는 갈래.
@@ -257,6 +266,13 @@ interface StaticCommand extends Command {
   readonly metaFor?: (env: CommandEnv) => string;
   /** 환경에 따라 바뀌는 이름. 있으면 `title`보다 앞선다(#3299 「접기/열기」). */
   readonly titleFor?: (env: CommandEnv) => string;
+  /**
+   * 슬래시 목록에 서려면 이 서버가 싣고 있어야 하는 표면(`slashCommands`). 팔레트의
+   * `available`은 환경을 받지만 슬래시 목록은 환경 없이 불리므로, 서버 표면 판정만 이름으로 건다.
+   */
+  readonly slashSurface?: SurfaceId;
+  /** `false`면 폰의 슬래시 목록에 서지 않는다(폰에는 이 명령이 갈 화면이 아직 없다). */
+  readonly slashOnPhone?: boolean;
 }
 
 /** 탐색 패널 접기 명령의 id. 단축키 정본(`toggle-sidebar`)의 `paletteCommandId`가 가리킨다. */
@@ -482,6 +498,33 @@ const STATIC_COMMANDS: readonly StaticCommand[] = [
     run: runAiConnect,
   },
   {
+    // `/앱` (#3950 U-S2): 앱 화면(AI › 외부 연결 › 앱)으로 간다. 서버 상태를 바꾸지 않고
+    // 메시지로 나가지도 않는 `client` 명령이다. 앱 표면을 싣지 않는 서버에서는 슬래시 목록과
+    // 팔레트 모두에서 숨는다(`plugins` 표면 하나로 판정). 앱 *명령* 슬래시(`/gmail …`)나
+    // `@GitHub` 별칭은 이 줄이 아니다(보류, 새 ADR).
+    id: "ai.apps",
+    title: "앱",
+    group: "settings",
+    kind: "client",
+    keywords: ["앱", "apps", "연결", "gmail", "캘린더", "드라이브", "github"],
+    icon: "ai-hub",
+    testId: "switcher-ai-apps",
+    available: (env) => env.isSurfaceProvided("plugins"),
+    slashSurface: "plugins",
+    slashOnPhone: false,
+    slash: {
+      name: "앱",
+      aliases: ["apps"],
+      hint: "앱 화면으로 이동 · 메시지로 보내지 않아요",
+      fallbackHint: "앱 화면으로 이동 · 메시지로 보내지 않아요",
+      args: [],
+    },
+    run: navigateTo(
+      AI_EXTERNAL_ROWS.find((row) => row.id === "apps")?.path ?? "/ai/external/apps",
+      "앱"
+    ),
+  },
+  {
     // 에이전트가 제안하는 「설정 열기」 카드의 명령 id (#3939 E-S6, ADR-0201 v2 H6-4).
     // 와이어 이름·section enum의 주인은 서버(`momo_agent::card_suggest`)이고, 카드 렌더와
     // 팔레트·슬래시 진입점은 #3940(U-S6)이 얹는다. 지금은 허용목록과 같은 집합을
@@ -646,12 +689,25 @@ export function visibleCommands(env: CommandEnv): readonly Command[] {
  * 이 기기에서 끝나야 하므로(brief §3.1), 서버 상태를 바꾸는 명령이나 단순 이동은
  * 이 목록에 서지 않는다.
  */
-export function slashCommands(): readonly Command[] {
+export function slashCommands(
+  options: { platform?: "web" | "phone" } = {}
+): readonly Command[] {
   return STATIC_COMMANDS.filter(
-    (command) => command.kind === "client" && command.slash !== undefined
+    (command) =>
+      command.kind === "client" &&
+      command.slash !== undefined &&
+      // 이 서버가 싣지 않는 표면의 명령은 목록에 서지 않는다(옛 서버에서 숨김).
+      (command.slashSurface === undefined || isSurfaceProvided(command.slashSurface)) &&
+      (options.platform !== "phone" || command.slashOnPhone !== false)
   ).map(
-    ({ available: _available, metaFor: _metaFor, titleFor: _titleFor, ...command }) =>
-      command
+    ({
+      available: _available,
+      metaFor: _metaFor,
+      titleFor: _titleFor,
+      slashSurface: _slashSurface,
+      slashOnPhone: _slashOnPhone,
+      ...command
+    }) => command
   );
 }
 

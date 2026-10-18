@@ -178,6 +178,7 @@ import {PullProbe} from './pullProbe';
 import {PullHold} from './pullHold';
 import {PullRefreshSurface} from './pullRefresh';
 import {DmConversationSurface} from './dmConversation';
+import {AppsTailSurface} from './appsTail';
 import {OortLoaderSurface} from './oortLoader';
 import TeamBoardScreen from '../src/screens/TeamBoardScreen';
 import WorkJobsScreen from '../src/screens/WorkJobsScreen';
@@ -2114,6 +2115,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   }
   if (name.startsWith('device-key-')) {
     return <DeviceKeySurface which={name.slice('device-key-'.length)} />;
+  }
+  // #3950: 「쓴 앱」 꼬리·막힘 문장(실제 MessageRow).
+  if (name.startsWith('apps-tail')) {
+    return <AppsTailSurface which={name.slice('apps-tail'.length).replace(/^-/, '')} />;
   }
   // #4016: DM 대화 화면(실제 머리·레이아웃·타임라인·컴포저).
   if (name.startsWith('dm-conversation')) {

@@ -114,11 +114,15 @@ import {
   useTeamAiDelegateSend,
 } from './TeamAiDelegateStrip';
 import {
+  APP_NOTICE_ACTION_NAME,
+  AppNoticeLine,
   TEAM_AI_CITATION_ACTION_PREFIX,
   TeamAiReplyMeta,
+  appNoticeSpoken,
   teamAiCitationActions,
   teamAiReplySpoken,
 } from './TeamAiReplyMeta';
+import {appsOnWebUrl, useAppNotice, useAppsTailContext} from './appsTail';
 import {teamAiReplyMetaFor} from '@momo/core/features/timeline/teamAiReply';
 import {
   delegateButtonLabel,
@@ -2305,7 +2309,16 @@ function MessageRowInner({
   // 도우미가 넘기는 줄(ADR-0201 D5). 이 키를 보내지 않는 서버에서는 늘 null 이다.
   const teamAiDelegate = useMemo(() => teamAiDelegateFor(message), [message]);
   // 도우미 답의 꼬리(ADR-0201 v2): 찾아본 것 · 출처 · 모델 라벨. 칸이 없으면 null.
-  const teamAiReply = useMemo(() => teamAiReplyMetaFor(message), [message]);
+  // 같은 꼬리에 「쓴 앱」 줄(E8·E10, #3950)이 붙는다: 보고가 있는 에이전트 답에만.
+  const appsTail = useAppsTailContext(message, directory, actions?.workspaceId);
+  const teamAiReply = useMemo(
+    () => teamAiReplyMetaFor(message, appsTail),
+    [message, appsTail],
+  );
+  // 앱을 쓰다 막혔을 때의 한 문장(+ 행동 하나). 칸이 없으면 null.
+  const appNotice = useAppNotice(message, actions?.workspaceId, nowMs);
+  // 폰의 행동은 「웹에서 열기」 하나다. 열 곳(서버 주소)을 모르면 세우지 않는다.
+  const appNoticeWebUrl = appNotice?.action ? appsOnWebUrl() : null;
   // 손가락(띠의 버튼)과 로터(아래 `accessibilityActions`)가 같은 보내기와 상태를 쓴다
   // (#3844 design-review H-1). 행이 접근성 원소 하나라 띠의 버튼에 VoiceOver 가 닿지 않는다.
   const teamAiSend = useTeamAiDelegateSend({
@@ -2592,6 +2605,9 @@ function MessageRowInner({
         case 'momoProfile':
           actions?.onOpenProfile?.(message.authorMemberId);
           return;
+        case APP_NOTICE_ACTION_NAME:
+          if (appNoticeWebUrl !== null) openLink(appNoticeWebUrl);
+          return;
         default:
           if (event.nativeEvent.actionName.startsWith(TEAM_AI_CITATION_ACTION_PREFIX)) {
             const index = Number(
@@ -2622,6 +2638,7 @@ function MessageRowInner({
       linkOnce,
       teamAiSend,
       teamAiReply,
+      appNoticeWebUrl,
     ],
   );
 
@@ -2646,6 +2663,10 @@ function MessageRowInner({
     });
     // 도우미 답의 웹 출처(ADR-0201 v2 H5). 꼬리의 링크와 같은 `openLink` 로 연다.
     if (!deleted) list.push(...teamAiCitationActions(teamAiReply));
+    // 막힘 문장의 행동(웹에서 열기). 손가락은 문장 옆 링크를 누른다.
+    if (!deleted && appNotice?.action && appNoticeWebUrl !== null) {
+      list.push({name: APP_NOTICE_ACTION_NAME, label: appNotice.action.label});
+    }
     if (actionable) list.push({name: 'momoActions', label: '메시지 액션'});
     if (actions?.onOpenProfile && memberFor(directory, message.authorMemberId)) {
       list.push({name: 'momoProfile', label: '작성자 프로필 보기'});
@@ -2699,6 +2720,8 @@ function MessageRowInner({
     decisionRotor,
     teamAiSend.pressable,
     teamAiReply,
+    appNotice,
+    appNoticeWebUrl,
   ]);
 
   const authorLabel = memberNameParts(
@@ -2785,7 +2808,8 @@ function MessageRowInner({
           teamAiSend,
           approvalOffline === true,
         ),
-        // 도우미 답의 꼬리(찾아본 것 · 모델 라벨 · 출처 수).
+        // 앱을 쓰다 막힌 문장, 그리고 도우미 답의 꼬리(쓴 앱 · 찾아본 것 · 모델 라벨 · 출처 수).
+        ...appNoticeSpoken(appNotice),
         ...teamAiReplySpoken(teamAiReply),
       ].join(', ')}
       accessibilityActions={accessibilityActions}
@@ -2993,6 +3017,17 @@ function MessageRowInner({
                 card={suggestion}
                 viewerMemberId={actions?.myMemberId}
                 offline={approvalOffline === true}
+              />
+            ) : null}
+
+            {appNotice ? (
+              <AppNoticeLine
+                notice={appNotice}
+                onAction={
+                  appNoticeWebUrl === null
+                    ? null
+                    : () => openLink(appNoticeWebUrl)
+                }
               />
             ) : null}
 
