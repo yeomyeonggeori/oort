@@ -10,6 +10,12 @@ vi.mock("@momo/core/lib/api", async (orig) => ({
   touchChannelViewing: send,
 }));
 
+const desktop = vi.hoisted(() => ({ on: false }));
+vi.mock("@/lib/tauri", async (orig) => ({
+  ...(await orig<typeof import("@/lib/tauri")>()),
+  isDesktop: () => desktop.on,
+}));
+
 import { resetViewingBeatForTests } from "@momo/core/features/readState/viewingBeat";
 import { useChannelViewingBeat } from "./useChannelViewingBeat";
 
@@ -23,6 +29,7 @@ beforeEach(() => {
   send.mockResolvedValue(undefined);
   visibility = "visible";
   focused = true;
+  desktop.on = false;
   vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility);
   vi.spyOn(document, "hasFocus").mockImplementation(() => focused);
 });
@@ -71,6 +78,18 @@ describe("useChannelViewingBeat", () => {
     expect(send).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(1);
     await act(async () => void (await vi.advanceTimersByTimeAsync(15_000)));
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it("데스크탑은 hasFocus()가 false여도 처음부터 보낸다(이벤트로만 추적)", async () => {
+    desktop.on = true;
+    focused = false;
+    renderHook(() => useChannelViewingBeat("w", "c"));
+    expect(send).toHaveBeenCalledTimes(1);
+    act(() => void window.dispatchEvent(new Event("blur")));
+    await act(async () => void (await vi.advanceTimersByTimeAsync(60_000)));
+    expect(send).toHaveBeenCalledTimes(1);
+    act(() => void window.dispatchEvent(new Event("focus")));
     expect(send).toHaveBeenCalledTimes(2);
   });
 });

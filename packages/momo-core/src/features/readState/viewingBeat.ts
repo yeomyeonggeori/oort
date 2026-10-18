@@ -21,6 +21,9 @@ import { ApiError, touchChannelViewing } from "../../lib/api";
 /** 서버가 요구하는 주기(15초)이고 상한은 20초다. 상한을 넘기지 않는다. */
 export const VIEWING_BEAT_INTERVAL_MS = 15_000;
 
+/** 이만큼 지나도 끝나지 않은 요청은 죽은 것으로 보고 다음 주기에 새로 보낸다. */
+const STALE_IN_FLIGHT_MS = 30_000;
+
 /** 화면이 앞에 있는지 알려 주는 클라이언트별 어댑터. */
 export interface ForegroundPort {
   isForeground(): boolean;
@@ -46,7 +49,8 @@ const defaultDeps: ViewingBeatDeps = {
 interface Entry {
   holders: number;
   timer: unknown;
-  inFlight: boolean;
+  /** 요청을 보낸 시각(ms), 없으면 null. 응답이 끝내 안 오는 요청이 타이머를 죽이지 않게 한다. */
+  inFlightAt: number | null;
   foreground: boolean;
   unsubscribe: () => void;
   workspaceId: string;
@@ -75,8 +79,13 @@ function stopTimer(entry: Entry, deps: ViewingBeatDeps): void {
 }
 
 function beat(entry: Entry, deps: ViewingBeatDeps): void {
-  if (entry.inFlight || legacyServers.has(entry.serverKey)) return;
-  entry.inFlight = true;
+  if (legacyServers.has(entry.serverKey)) return;
+  const now = Date.now();
+  if (entry.inFlightAt !== null && now - entry.inFlightAt < STALE_IN_FLIGHT_MS) {
+    return;
+  }
+  entry.inFlightAt = now;
+  const mine = now;
   let result: Promise<void>;
   try {
     result = deps.send(entry.workspaceId, entry.channelId);
@@ -85,10 +94,10 @@ function beat(entry: Entry, deps: ViewingBeatDeps): void {
   }
   result.then(
     () => {
-      entry.inFlight = false;
+      if (entry.inFlightAt === mine) entry.inFlightAt = null;
     },
     (error: unknown) => {
-      entry.inFlight = false;
+      if (entry.inFlightAt === mine) entry.inFlightAt = null;
       if (isLegacyViewingRefusal(error)) {
         legacyServers.add(entry.serverKey);
         stopTimer(entry, deps);
@@ -126,7 +135,7 @@ export function holdChannelViewing(
     const created: Entry = {
       holders: 0,
       timer: null,
-      inFlight: false,
+      inFlightAt: null,
       foreground: foreground.isForeground(),
       unsubscribe: () => {},
       workspaceId,

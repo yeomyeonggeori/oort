@@ -149,6 +149,16 @@ describe("viewing beat", () => {
     expect(send).toHaveBeenCalledTimes(3);
   });
 
+  it("응답이 끝내 오지 않아도 30초 뒤 주기에는 다시 보낸다", async () => {
+    send.mockImplementationOnce(() => new Promise<void>(() => {}));
+    const fg = fakeForeground();
+    holdChannelViewing("w", "c", fg.port, deps);
+    await tick(VIEWING_BEAT_INTERVAL_MS);
+    expect(send).toHaveBeenCalledTimes(1);
+    await tick(VIEWING_BEAT_INTERVAL_MS);
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
   it("응답이 늦으면 겹쳐 보내지 않는다", async () => {
     let resolve: () => void = () => {};
     send.mockImplementationOnce(
@@ -156,7 +166,7 @@ describe("viewing beat", () => {
     );
     const fg = fakeForeground();
     holdChannelViewing("w", "c", fg.port, deps);
-    await tick(VIEWING_BEAT_INTERVAL_MS * 2);
+    await tick(VIEWING_BEAT_INTERVAL_MS);
     expect(send).toHaveBeenCalledTimes(1);
     resolve();
     await tick(VIEWING_BEAT_INTERVAL_MS);
