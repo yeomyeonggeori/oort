@@ -474,6 +474,89 @@ assert_filter_fixture malformed-pages \
   '[[{"filename":17,"status":"modified"}]]' \
   true true
 
+# The node lane is not under test here; this only keeps its expectation honest.
+node_expected_for() {
+  case "$1" in
+    clients/web/*|clients/mobile/*|packages/*|server/Fixtures/*) echo true ;;
+    *) echo false ;;
+  esac
+}
+
+# --- #4055: every file Rust reads outside its own tree must select the cargo lane.
+# Derived half: pr_ci_rust_external_inputs.py scans the Rust sources for
+# include_str!/include_bytes!/include! and CARGO_MANIFEST_DIR paths, so a NEW
+# reference to a file outside server-rust/ and src-tauri/ turns this red until
+# the rust filter covers it. A directory target is probed with a new file in it.
+RUST_INPUTS="$(python3 "$SCRIPT_DIR/pr_ci_rust_external_inputs.py" "$REPO_ROOT")" \
+  || fail "pr_ci_rust_external_inputs.py failed"
+# The scanner must not go blind: these references exist today and must be seen.
+for anchor in \
+  'server/Migrations/080_hosted_agent_doorbell.sql' \
+  'server/Fixtures/plugin-manifests/github.json' \
+  'packages/momo-core/src/lib/http.ts' \
+  'docs/api/human-control-signing.vectors.json' \
+  'docs/SELF_HOST_AGENT.md' \
+  'infra/rust/sql/' \
+  'infra/centrifugo.json' \
+  'server/Fixtures/plugin-wire/' \
+  'packages/momo-core/src/features/timeline/' \
+  'clients/web/src/features/settings/settingsNav.ts'; do
+  grep -Fxq "$anchor" <<<"$RUST_INPUTS" \
+    || fail "rust input scanner no longer reports $anchor"
+done
+rust_input_count=0
+while IFS= read -r rust_input; do
+  [ -n "$rust_input" ] || continue
+  probe="$rust_input"
+  case "$rust_input" in */) probe="${rust_input}new-file.probe" ;; esac
+  rust_input_count=$((rust_input_count + 1))
+  assert_filter_fixture "rust-input-$(printf '%s' "$rust_input" | tr -c 'A-Za-z0-9\n' '_')" \
+    '{"changed_files":1}' \
+    "[[{\"filename\":\"$probe\",\"status\":\"modified\"}]]" \
+    true "$(node_expected_for "$probe")"
+done <<<"$RUST_INPUTS"
+[ "$rust_input_count" -ge 20 ] || fail "only $rust_input_count rust inputs found"
+
+# Pinned floor: the filter may widen, never narrow. These stay covered even if
+# the Rust reference that motivated them is later deleted.
+for pinned in \
+  docs/api/openapi.yaml \
+  docs/api/work-instruction.golden.json \
+  docs/api/human-control-signing-v4.vectors.json \
+  server/Migrations/080_hosted_agent_doorbell.sql \
+  server/Fixtures/plugin-manifests/drive.json \
+  packages/momo-core/src/lib/http.ts \
+  clients/web/src/lib/session.ts \
+  clients/web/src/features/settings/settingsNav.ts \
+  packages/momo-core/src/features/ai/aiHubModel.ts \
+  packages/momo-core/src/features/timeline/completionReport.ts \
+  server/Fixtures/plugin-wire/mutation-new.json \
+  infra/prod/centrifugo.prod.json \
+  infra/rust/sql/new.sql; do
+  assert_filter_fixture "pinned-$(printf '%s' "$pinned" | tr -c 'A-Za-z0-9\n' '_')" \
+    '{"changed_files":1}' \
+    "[[{\"filename\":\"$pinned\",\"status\":\"modified\"}]]" \
+    true "$(node_expected_for "$pinned")"
+done
+# Neighbours Rust never reads stay out (the filter must not become match-all).
+for neighbour in \
+  docs/README.md \
+  docs/api/notes.md \
+  packages/momo-core/src/lib/api.ts \
+  clients/web/src/lib/other.ts \
+  scripts/desktop/other.sh \
+  server/other.txt \
+  infra/other.yml \
+  infra/rust/docker-compose.rust.yml \
+  clients/mobile/src/x.ts \
+  clients/web/src/features/settings/other.ts \
+  packages/momo-core/src/lib/http.ts.bak; do
+  assert_filter_fixture "neighbour-$(printf '%s' "$neighbour" | tr -c 'A-Za-z0-9\n' '_')" \
+    '{"changed_files":1}' \
+    "[[{\"filename\":\"$neighbour\",\"status\":\"modified\"}]]" \
+    false "$(node_expected_for "$neighbour")"
+done
+
 for required in \
   '  push:' \
   '  schedule:' \
