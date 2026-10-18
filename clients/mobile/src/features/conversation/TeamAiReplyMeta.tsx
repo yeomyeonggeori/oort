@@ -157,7 +157,7 @@ export function appNoticeSpoken(notice: AppNotice | null): string[] {
 function build(color: Palette) {
   return StyleSheet.create({
     wrap: {marginTop: space.xs, gap: space.xs},
-    apps: {gap: 1},
+    apps: {gap: 0},
     notice: {marginTop: space.xs, gap: space.xs},
     noticeText: {fontSize: font.meta, lineHeight: line.meta, color: color.text},
     noticeAction: {minHeight: TOUCH_TARGET, justifyContent: 'center'},

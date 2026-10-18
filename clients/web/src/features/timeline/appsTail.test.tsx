@@ -199,7 +199,7 @@ describe("쓴 앱 꼬리 (E8·E10)", () => {
     const view = await mount(row(reply(HERMES_PROPS)));
     expect(fetchAgentRunDetail).toHaveBeenCalledWith(WS, RUN);
     expect(view.querySelector('[data-testid="apps-used-line"]')?.textContent).toContain(
-      "쓴 앱: Gmail 검색 2회 · 곽성재 명의 · gmailmcp.googleapis.com · Hermes에서 · 실행 장소 보고"
+      "쓴 앱(실행 장소 보고): Gmail 검색 2회 · 곽성재 명의 · gmailmcp.googleapis.com · Hermes에서"
     );
     // DM·모름이면 노출 줄은 없다.
     expect(view.querySelector('[data-testid="apps-exposure-line"]')).toBeNull();
@@ -212,7 +212,7 @@ describe("쓴 앱 꼬리 (E8·E10)", () => {
     expect(view.querySelector('[data-testid="apps-personal-note"]')?.textContent).toContain(
       "요약만 올리는 게 원칙이에요"
     );
-    expect(exposure?.textContent).toContain("oort가 확인하지 못해요");
+    expect(exposure?.textContent).toContain("oort는 지키는지 확인하지 못해요");
   });
 
   it("보고가 없으면 꼬리 자체가 없다(영수증을 만들지 않는다)", async () => {
@@ -245,6 +245,14 @@ describe("쓴 앱 꼬리 (E8·E10)", () => {
     message.replyTo = { ...message.replyTo!, authorMemberId: HERMES };
     const view = await mount(row(message));
     expect(view.querySelector('[data-testid="apps-used-line"]')?.textContent).not.toContain("명의");
+  });
+
+  it("사람이 쓴 메시지에 같은 props 를 실어도 꼬리를 달지 않고 run 도 부르지 않는다(표시 위조)", async () => {
+    const message = reply(HERMES_PROPS);
+    message.authorMemberId = OTHER;
+    const view = await mount(row(message), 12);
+    expect(fetchAgentRunDetail).not.toHaveBeenCalled();
+    expect(view.querySelector('[data-testid="apps-used-tail"]')).toBeNull();
   });
 
   it("run 조회가 실패하면 꼬리만 없고 답은 그대로다", async () => {

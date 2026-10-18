@@ -6,8 +6,9 @@ import {
   type Message,
 } from "@momo/core/lib/api";
 import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
-import { appNoticeFor, type AppNotice } from "@momo/core/features/timeline/appNotice";
+import { appNoticeFor, hasAppNotice, isWorkingAppNotice, type AppNotice } from "@momo/core/features/timeline/appNotice";
 import {
+  appsRunIdOf,
   appsRunSiteOf,
   type AppsTailContext,
   type AppsTailPlugin,
@@ -33,13 +34,13 @@ import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 export const ChannelAudienceContext = createContext<number | null>(null);
 
 /** 이 메시지가 「쓴 앱」을 가질 수 있는 에이전트 답인가: 성공한 게이트웨이 답 + run id. */
-function runIdOf(message: Pick<Message, "props" | "state">): string | null {
-  if (message.state === "deleted") return null;
-  const props = message.props;
-  if (!props || appsRunSiteOf(props) === null) return null;
-  if (props["status"] === "failed") return null;
-  const runId = props["run_id"];
-  return typeof runId === "string" && runId !== "" ? runId : null;
+function runIdOf(
+  message: Pick<Message, "props" | "state" | "authorMemberId">,
+  directory: Directory
+): string | null {
+  // props 는 사람이 쓴 메시지에도 실을 수 있다: 에이전트 멤버가 쓴 답에만 꼬리를 단다.
+  if (memberFor(directory, message.authorMemberId)?.kind !== "agent") return null;
+  return appsRunIdOf(message);
 }
 
 export function useAppsTailContext(
@@ -48,8 +49,8 @@ export function useAppsTailContext(
 ): AppsTailContext | undefined {
   const { workspaceId } = useSession();
   const audience = useContext(ChannelAudienceContext);
-  const runId = runIdOf(message);
-  const provided = isSurfaceProvided("plugins");
+  const runId = runIdOf(message, directory);
+  const provided = isSurfaceProvided("plugins") && isSurfaceProvided("appsUsedTail");
   const ws = workspaceId.toLowerCase();
 
   const catalog = useQuery({
@@ -110,10 +111,7 @@ function useMinuteNow(active: boolean): number {
  */
 export function useAppNotice(message: Message): AppNotice | null {
   const { workspaceId } = useSession();
-  const has =
-    message.state !== "deleted" &&
-    typeof message.props?.["app_notice"] === "object" &&
-    message.props["app_notice"] !== null;
+  const has = hasAppNotice(message);
   const provided = isSurfaceProvided("plugins");
   const catalog = useQuery({
     queryKey: ["plugins", workspaceId.toLowerCase()],
@@ -129,9 +127,7 @@ export function useAppNotice(message: Message): AppNotice | null {
     }
     return map;
   }, [catalog.data]);
-  const working =
-    has &&
-    (message.props?.["app_notice"] as { kind?: unknown } | undefined)?.kind === "working";
+  const working = has && isWorkingAppNotice(message);
   const nowMs = useMinuteNow(working);
   return has ? appNoticeFor(message, { surface: "web", plugins, nowMs }) : null;
 }

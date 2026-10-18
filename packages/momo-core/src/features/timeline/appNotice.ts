@@ -141,7 +141,9 @@ export function parseAppNotice(props: Props, env: AppNoticeEnv): AppNotice | nul
         sentence:
           site === "mac"
             ? "내 맥이 꺼져 있어서 못 했어요. 맥을 켜면 다시 해 볼게요."
-            : `${attachParticle(where ?? "실행 장소", "subject")} 꺼져 있어서 못 했어요.`,
+            : where === null
+              ? "에이전트가 있는 곳이 꺼져 있어서 못 했어요."
+              : `${attachParticle(where, "subject")} 꺼져 있어서 못 했어요.`,
         action: null,
         progress: false,
       };
@@ -150,7 +152,7 @@ export function parseAppNotice(props: Props, env: AppNoticeEnv): AppNotice | nul
         kind: "site_silent",
         sentence:
           where === null
-            ? "실행 장소가 답하지 않아요."
+            ? "에이전트가 답하지 않아요."
             : `${attachParticle(where, "subject")} 답하지 않아요.`,
         action: null,
         progress: false,
@@ -192,7 +194,7 @@ export function parseAppNotice(props: Props, env: AppNoticeEnv): AppNotice | nul
       const known = host !== null && (plugin?.egressDomains ?? []).includes(host);
       return {
         kind: "egress_blocked",
-        sentence: `이 실행 장소에서 ${known ? `${host}에` : "바깥에"} 연결할 수 없어요.`,
+        sentence: `에이전트가 ${known ? `${host}에` : "바깥에"} 연결할 수 없어요.`,
         action: null,
         progress: false,
       };
@@ -220,12 +222,22 @@ export function parseAppNotice(props: Props, env: AppNoticeEnv): AppNotice | nul
           : null;
       return {
         kind: "working",
-        sentence: `${where ?? "실행 장소"}에서 하는 중${minutes === null ? "" : ` · ${minutes}분째`}`,
+        sentence: `${where ?? "에이전트가 있는 곳"}에서 하는 중${minutes === null ? "" : ` · ${minutes}분째`}`,
         action: null,
         progress: true,
       };
     }
   }
+}
+
+/** 이 메시지가 막힘 문장 칸을 들고 있는가(앱 목록 조회 여부를 가르는 값). */
+export function hasAppNotice(message: Pick<Message, "props" | "state">): boolean {
+  return message.state !== "deleted" && record(message.props?.["app_notice"]) !== null;
+}
+
+/** 진행 중(`working`) 안내인가: 분 시계를 돌릴지 가른다. */
+export function isWorkingAppNotice(message: Pick<Message, "props">): boolean {
+  return record(message.props?.["app_notice"])?.["kind"] === "working";
 }
 
 /** 행이 부르는 입구. 지워진 행에는 없다. */

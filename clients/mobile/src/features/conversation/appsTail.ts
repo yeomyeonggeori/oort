@@ -1,5 +1,5 @@
 import {createContext, useContext, useMemo} from 'react';
-import {useQuery} from '@tanstack/react-query';
+import {QueryClient, QueryClientContext, useQuery} from '@tanstack/react-query';
 import {
   fetchAgentRunDetail,
   listPlugins,
@@ -10,10 +10,12 @@ import {isSurfaceProvided} from '@momo/core/features/capabilities/serverSurfaces
 import {
   APPS_SCREEN_PATH,
   appNoticeFor,
+  hasAppNotice,
   type AppNotice,
 } from '@momo/core/features/timeline/appNotice';
 import {
-  appsRunSiteOf,
+  appsRunIdOf,
+  appsRunSiteOfMessage,
   type AppsTailContext,
   type AppsTailPlugin,
 } from '@momo/core/features/timeline/teamAiReply';
@@ -27,19 +29,22 @@ import {memberFor, type Directory} from '@momo/core/features/workspace/directory
 // 조회는 조용히 한다: 켜진 앱이 하나도 없으면 run 을 부르지 않고, 실패해도 꼬리만 없다.
 // =============================================================================
 
+// 질의 공급자가 없는 자리(공급자 없이 행만 세우는 화면·시험)에서도 행이 죽지 않게 한다: 그때는
+// 조회를 하지 않고 꼬리·문장도 없다. 조회가 켜지는 것은 공급자가 있을 때뿐이다.
+const NO_PROVIDER_CLIENT = new QueryClient();
+
 /** 이 채널을 읽는 사람 수. DM 이거나 모르면 null. 대화 화면이 내린다. */
 export const ChannelAudienceContext = createContext<number | null>(null);
 
-function runIdOf(message: Pick<Message, 'props' | 'state'>): string | null {
-  if (message.state === 'deleted') {
+function runIdOf(
+  message: Pick<Message, 'props' | 'state' | 'authorMemberId'>,
+  directory: Directory,
+): string | null {
+  // props 는 사람이 쓴 메시지에도 실을 수 있다: 에이전트 멤버가 쓴 답에만 꼬리를 단다.
+  if (memberFor(directory, message.authorMemberId)?.kind !== 'agent') {
     return null;
   }
-  const props = message.props;
-  if (!props || appsRunSiteOf(props) === null || props.status === 'failed') {
-    return null;
-  }
-  const runId = props.run_id;
-  return typeof runId === 'string' && runId !== '' ? runId : null;
+  return appsRunIdOf(message);
 }
 
 function pluginMap(
@@ -61,10 +66,12 @@ export function useAppsTailContext(
   workspaceId: string | undefined,
 ): AppsTailContext | undefined {
   const audience = useContext(ChannelAudienceContext);
-  const runId = runIdOf(message);
-  const provided = isSurfaceProvided('plugins');
+  const provider = useContext(QueryClientContext);
+  const client = provider ?? NO_PROVIDER_CLIENT;
+  const runId = runIdOf(message, directory);
+  const provided = isSurfaceProvided('plugins') && isSurfaceProvided('appsUsedTail');
   const ws = (workspaceId ?? '').toLowerCase();
-  const ready = provided && runId !== null && ws !== '';
+  const ready = provider !== undefined && provided && runId !== null && ws !== '';
 
   const catalog = useQuery({
     queryKey: ['plugins', ws],
@@ -72,7 +79,7 @@ export function useAppsTailContext(
     retry: false,
     enabled: ready,
     staleTime: 60_000,
-  });
+  }, client);
   const anyInstalled = catalog.data?.plugins.some(plugin => plugin.installed) ?? false;
   const run = useQuery({
     queryKey: ['agent-run-apps-used', ws, runId],
@@ -82,7 +89,7 @@ export function useAppsTailContext(
     retry: false,
     staleTime: Infinity,
     enabled: ready && anyInstalled,
-  });
+  }, client);
 
   const appsUsed = run.data ?? null;
   const trigger = message.replyTo?.authorMemberId;
@@ -100,10 +107,10 @@ export function useAppsTailContext(
             appsUsed,
             plugins,
             onBehalfOf,
-            site: appsRunSiteOf(message.props),
+            site: appsRunSiteOfMessage(message),
             audience,
           },
-    [appsUsed, plugins, onBehalfOf, message.props, audience],
+    [appsUsed, plugins, onBehalfOf, message, audience],
   );
 }
 
@@ -116,18 +123,16 @@ export function useAppNotice(
   workspaceId: string | undefined,
   nowMs: number,
 ): AppNotice | null {
-  const has =
-    message.state !== 'deleted' &&
-    typeof message.props?.app_notice === 'object' &&
-    message.props.app_notice !== null;
+  const has = hasAppNotice(message);
   const ws = (workspaceId ?? '').toLowerCase();
+  const provider = useContext(QueryClientContext);
   const catalog = useQuery({
     queryKey: ['plugins', ws],
     queryFn: () => listPlugins(workspaceId as string),
     retry: false,
-    enabled: has && isSurfaceProvided('plugins') && ws !== '',
+    enabled: provider !== undefined && has && isSurfaceProvided('plugins') && ws !== '',
     staleTime: 60_000,
-  });
+  }, provider ?? NO_PROVIDER_CLIENT);
   const plugins = useMemo(() => pluginMap(catalog.data?.plugins), [catalog.data]);
   return has
     ? appNoticeFor(message, {surface: 'phone', plugins, nowMs})

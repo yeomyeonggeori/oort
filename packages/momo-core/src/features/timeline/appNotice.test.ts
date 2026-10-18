@@ -27,7 +27,7 @@ describe("막힘 문장 표", () => {
     expect(notice({ kind: "site_silent", site: "hermes" })?.sentence).toBe(
       "Hermes가 답하지 않아요."
     );
-    expect(notice({ kind: "site_silent" })?.sentence).toBe("실행 장소가 답하지 않아요.");
+    expect(notice({ kind: "site_silent" })?.sentence).toBe("에이전트가 답하지 않아요.");
   });
 
   it("로그인 끊김: 내 맥은 「다시 로그인」 행동, Hermes 는 운영자 몫이라 행동이 없다", () => {
@@ -59,11 +59,11 @@ describe("막힘 문장 표", () => {
     );
     expect(
       notice({ kind: "egress_blocked", plugin_id: "gmail", host: "gmailmcp.googleapis.com" })?.sentence
-    ).toBe("이 실행 장소에서 gmailmcp.googleapis.com에 연결할 수 없어요.");
+    ).toBe("에이전트가 gmailmcp.googleapis.com에 연결할 수 없어요.");
     // 앱 목록이 모르는 주소는 말하지 않는다(응답이 문장에 새지 않는다).
     expect(
       notice({ kind: "egress_blocked", plugin_id: "gmail", host: "evil.example.com" })?.sentence
-    ).toBe("이 실행 장소에서 바깥에 연결할 수 없어요.");
+    ).toBe("에이전트가 바깥에 연결할 수 없어요.");
   });
 
   it("허용 안 함: 웹은 「앱 열기」, 폰은 데스크탑·웹 안내 + 「웹에서 열기」 하나", () => {

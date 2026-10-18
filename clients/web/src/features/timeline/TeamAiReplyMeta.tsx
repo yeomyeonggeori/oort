@@ -41,7 +41,7 @@ export function TeamAiReplyMeta({ meta }: { meta: Meta }) {
     >
       {meta.appsLine !== null && (
         <div className="flex min-w-0 flex-col gap-px" data-testid="apps-used-tail">
-          <p className="min-w-0 break-keep text-meta text-ink-muted" data-testid="apps-used-line">
+          <p className="min-w-0 break-keep text-meta text-ink-muted [overflow-wrap:anywhere]" data-testid="apps-used-line">
             <span aria-hidden="true">{meta.appsLine}</span>
             <span className="sr-only">{meta.appsSpoken}</span>
           </p>

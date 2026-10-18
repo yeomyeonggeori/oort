@@ -121,7 +121,7 @@ describe("쓴 앱 꼬리", () => {
   it("예시 줄을 그대로 만든다 — 앱·횟수 · 명의 · 연결 주소 · 실행 장소 · 자기 보고", () => {
     const meta = parseTeamAiReplyMeta({ source: "hermes_gateway", run_id: "r1" }, ctx());
     expect(meta?.appsLine).toBe(
-      `쓴 앱: Gmail 검색 2회 · 곽성재 명의 · gmailmcp.googleapis.com · Hermes에서 · ${APPS_TAIL_SELF_REPORT}`
+      `쓴 앱(${APPS_TAIL_SELF_REPORT}): Gmail 검색 2회 · 곽성재 명의 · gmailmcp.googleapis.com · Hermes에서`
     );
     // 도구 줄·모델 칩은 도우미(team_ai) 답의 것이다.
     expect(meta?.toolsLine).toBeNull();
@@ -146,7 +146,7 @@ describe("쓴 앱 꼬리", () => {
       ctx({ onBehalfOf: null, site: null, plugins: new Map() })
     );
     // 앱 목록에 없는 앱의 원문 id 는 사람에게 보이지 않는다.
-    expect(meta?.appsLine).toBe(`쓴 앱: 다른 앱 검색 2회 · ${APPS_TAIL_SELF_REPORT}`);
+    expect(meta?.appsLine).toBe(`쓴 앱(${APPS_TAIL_SELF_REPORT}): 다른 앱 검색 2회`);
     expect(meta?.appsLine).not.toContain("gmail");
     expect(meta?.appsLine).not.toContain("명의");
     expect(meta?.appsLine).not.toContain("에서");
@@ -235,6 +235,7 @@ describe("쓴 앱 꼬리", () => {
     expect(personal?.personalNote).toBe(APPS_PERSONAL_NOTE);
     expect(APPS_PERSONAL_NOTE).toContain("요약만");
     expect(APPS_PERSONAL_NOTE).toContain("확인하지 못해요");
+    expect(APPS_PERSONAL_NOTE.length).toBeLessThan(48);
     // 강제처럼 쓰지 않는다.
     expect(APPS_PERSONAL_NOTE).not.toMatch(/막아|금지|보장/);
     // 개인 앱이 아니면(GitHub) 안내는 없고, DM 이면 둘 다 없다.
@@ -247,6 +248,18 @@ describe("쓴 앱 꼬리", () => {
     expect(
       parseTeamAiReplyMeta({ source: "hermes_gateway" }, ctx({ audience: null }))?.personalNote
     ).toBeNull();
+  });
+
+  it("공식 앱 id 가 점으로 이어진 모양이어도 개인 앱으로 판정한다", () => {
+    const dotted = parseTeamAiReplyMeta(
+      { source: "hermes_gateway" },
+      ctx({
+        audience: 5,
+        appsUsed: [{ pluginId: "com.momo.plugins.gmail", tool: "search_threads", calls: 1 }],
+        plugins: new Map([["com.momo.plugins.gmail", GMAIL]]),
+      })
+    );
+    expect(dotted?.personalNote).toBe(APPS_PERSONAL_NOTE);
   });
 
   it("지워진 메시지에는 꼬리가 없다", () => {

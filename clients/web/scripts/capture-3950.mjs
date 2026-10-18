@@ -231,7 +231,7 @@ async function tailScenes(browser, origin, scheme, viewport) {
     await page.screenshot({ path: resolve(OUT_DIR, `c3950-1a-tail-channel-${tag}.png`) });
     const visibleLine = (n) => page.getByTestId("apps-used-line").nth(n).locator("span[aria-hidden='true']").textContent();
     const first = await visibleLine(0);
-    check(`${tag} 꼬리 한 줄`, first.replace(/\s+/g, " ").includes("쓴 앱: Gmail 검색 2회 · 곽성재 명의 · gmailmcp.googleapis.com · Hermes에서 · 실행 장소 보고"), first);
+    check(`${tag} 꼬리 한 줄`, first.replace(/\s+/g, " ").includes("쓴 앱(실행 장소 보고): Gmail 검색 2회 · 곽성재 명의 · gmailmcp.googleapis.com · Hermes에서"), first);
     const exposure = await page.getByTestId("apps-exposure-line").first().textContent();
     check(`${tag} 노출 줄: 이 채널 5명`, exposure.includes("이 채널 5명에게 보여요"), exposure);
     check(`${tag} 개인 앱 안내`, (await page.getByTestId("apps-personal-note").count()) === 1);
@@ -291,7 +291,7 @@ async function noticeScenes(browser, origin, scheme, base) {
     "Gmail 로그인이 끊겼어요. 운영자가 다시 로그인해야 해요.",
     "실행 중에 허용이 회수돼서 여기서 멈췄어요. 이미 한 일은 그대로예요.",
     "GitHub가 잠시 요청을 막았어요. 1분 뒤 다시 해 주세요.",
-    "이 실행 장소에서 gmailmcp.googleapis.com에 연결할 수 없어요.",
+    "에이전트가 gmailmcp.googleapis.com에 연결할 수 없어요.",
     "먼저 내 사용을 허용해 주세요.",
     "Hermes에서 하는 중 · 3분째",
   ];

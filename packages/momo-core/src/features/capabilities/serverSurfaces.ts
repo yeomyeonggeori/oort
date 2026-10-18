@@ -151,7 +151,8 @@ export type SurfaceId =
   | "teamMemory"
   | "messageSearch"
   | "hostedAgentPairing"
-  | "settingsOpenCard";
+  | "settingsOpenCard"
+  | "appsUsedTail";
 
 /** Workd/T3 데몬을 전제하는 표면. 셀프호스트 기본은 모두 숨긴다 (ADR-0183 D4-② · #2166). */
 export const WORK_SURFACE_IDS: readonly SurfaceId[] = [
@@ -499,6 +500,20 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
       "해제 3경로(disconnect, disconnect/complete, cleanup-artifacts/…/acknowledge)도 " +
       "같은 자리에 등록돼 있고, HAP-UX2(#1362)가 에이전트 화면의 연결 탭에서 그 셋을 연다. " +
       "일곱 경로가 한 배포로 함께 오르므로 이 칸 하나가 둘 다를 판정한다.",
+  },
+  appsUsedTail: {
+    id: "appsUsedTail",
+    label: "쓴 앱 꼬리",
+    // #3950(ADR-0113 증보 2 E8): 에이전트 답의 「쓴 앱」 꼬리는 run 상세의 `appsUsed`를 읽는다.
+    // 이 칸이 거짓이 되는 날은 서버가 그 키를 거두는 날뿐이고, 그날 꼬리는 숨고 답 본문만 남는다.
+    // 필드가 없는 옛 서버는 run 상세에 키가 없어서 같은 모양으로 꼬리가 없다(조회만 한 번 헛든다).
+    provided: true,
+    absentReason: "이 서버는 아직 에이전트가 쓴 앱을 알려 주지 않아요.",
+    fallback: "에이전트의 답 본문은 그대로 볼 수 있어요.",
+    measured:
+      "2026-10-18 실측(#3946 PR #4035): GET …/agent-runs/{run} 응답에 최상위 appsUsed " +
+      "([{pluginId, tool, calls}], 보고가 없으면 키 없음)가 더해짐. 서버 규칙은 " +
+      "server-rust/bins/momo-server/src/routes/apps_used.rs, 클라이언트는 appsUsedFromWire가 같은 규칙으로 읽는다.",
   },
   settingsOpenCard: {
     id: "settingsOpenCard",

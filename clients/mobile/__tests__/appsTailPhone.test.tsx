@@ -177,12 +177,12 @@ describe('쓴 앱 꼬리 (폰)', () => {
     await waitFor(() => expect(screen.getByTestId('apps-used-line')).toBeTruthy());
     expect(mockRunDetail).toHaveBeenCalledWith(WS, RUN);
     expect(screen.getByTestId('apps-used-line')).toHaveTextContent(
-      '쓴 앱: Gmail 검색 2회 · 곽성재 명의 · gmailmcp.googleapis.com · Hermes에서 · 실행 장소 보고',
+      '쓴 앱(실행 장소 보고): Gmail 검색 2회 · 곽성재 명의 · gmailmcp.googleapis.com · Hermes에서',
     );
     const exposure = screen.getByTestId('apps-exposure-line');
     expect(exposure).toHaveTextContent(/이 채널 12명에게 보여요/);
     expect(exposure).toHaveTextContent(/요약만 올리는 게 원칙이에요/);
-    expect(exposure).toHaveTextContent(/oort가 확인하지 못해요/);
+    expect(exposure).toHaveTextContent(/oort는 지키는지 확인하지 못해요/);
     const label = screen.getByTestId('message-row').props.accessibilityLabel as string;
     expect(label).toContain('쓴 앱');
     expect(label).toContain('이 채널 12명에게 보여요');

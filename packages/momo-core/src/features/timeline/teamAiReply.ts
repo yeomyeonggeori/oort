@@ -130,6 +130,23 @@ export function appsRunSiteOf(props: Props): AppsRunSite | null {
   return props?.["source"] === "hermes_gateway" ? "hermes" : null;
 }
 
+/** 같은 판정을 메시지째로 부르는 입구(폰은 메시지 props 를 스스로 읽지 않는다). */
+export function appsRunSiteOfMessage(message: Pick<Message, "props">): AppsRunSite | null {
+  return appsRunSiteOf(message.props);
+}
+
+/**
+ * 「쓴 앱」을 조회할 만한 답인가: 성공한 게이트웨이 답이고 run id 가 있다. 있으면 그 run id.
+ * (작성자가 에이전트인지는 화면이 멤버 목록으로 따로 본다.)
+ */
+export function appsRunIdOf(message: Pick<Message, "props" | "state">): string | null {
+  if (message.state === "deleted") return null;
+  const props = message.props;
+  if (!props || appsRunSiteOf(props) === null || props["status"] === "failed") return null;
+  const runId = props["run_id"];
+  return typeof runId === "string" && runId !== "" ? runId : null;
+}
+
 export function appsRunSiteLabel(site: AppsRunSite): string {
   return site === "hermes" ? "Hermes" : "내 맥";
 }
@@ -202,7 +219,7 @@ export const APPS_TAIL_PREFIX = "쓴 앱";
 export const APPS_TAIL_SELF_REPORT = "실행 장소 보고";
 /** 개인 앱 안내: 「요약만」은 원칙이고, 지키는지는 oort 가 확인하지 못한다(강제가 아니다). */
 export const APPS_PERSONAL_NOTE =
-  "개인 앱 내용은 요약만 올리는 게 원칙이에요. 지키는지는 실행 장소 몫이라 oort가 확인하지 못해요.";
+  "개인 앱은 요약만 올리는 게 원칙이에요. oort는 지키는지 확인하지 못해요.";
 const DOMAINS_SHOWN = 2;
 
 /** 도구 이름 앞 낱말 → 사람 말. 모르는 앞 낱말은 말하지 않는다(원문 id 를 보이지 않는다). */
@@ -253,7 +270,8 @@ function appsTail(ctx: AppsTailContext, entries: readonly AppsUsedEntry[]): Apps
       const host = clean(domain, 80);
       if (host !== null && !domains.includes(host)) domains.push(host);
     }
-    if (PERSONAL_APP_IDS.has(id)) personal = true;
+    // 공식 앱 id 는 `com.momo.plugins.gmail` 처럼 점으로 이어진 모양일 수 있다: 끝 토큰으로 판정한다.
+    if (PERSONAL_APP_IDS.has(id) || PERSONAL_APP_IDS.has(id.split(".").pop() ?? "")) personal = true;
   }
   const owner = clean(ctx.onBehalfOf, 24);
   const shown = domains.slice(0, DOMAINS_SHOWN);
@@ -264,15 +282,15 @@ function appsTail(ctx: AppsTailContext, entries: readonly AppsUsedEntry[]): Apps
       ? `${shown.join(", ")}${domains.length > shown.length ? ` 외 ${domains.length - shown.length}곳` : ""}`
       : null,
     ctx.site ? `${appsRunSiteLabel(ctx.site)}에서` : null,
-    APPS_TAIL_SELF_REPORT,
   ].filter((part): part is string => part !== null);
   const audience =
     ctx.audience !== null && Number.isInteger(ctx.audience) && ctx.audience > 0
       ? ctx.audience
       : null;
   return {
-    line: `${APPS_TAIL_PREFIX}: ${parts.join(" · ")}`,
-    spoken: `${APPS_TAIL_PREFIX}, ${parts.join(", ")}`,
+    // 「실행 장소 보고」는 앱·횟수가 실행 장소의 자기 보고라는 표기다. 명의·연결 주소는 oort 가 아는 값이다.
+    line: `${APPS_TAIL_PREFIX}(${APPS_TAIL_SELF_REPORT}): ${parts.join(" · ")}`,
+    spoken: `${APPS_TAIL_PREFIX}, ${APPS_TAIL_SELF_REPORT}, ${parts.join(", ")}`,
     exposure: audience === null ? null : `이 채널 ${audience}명에게 보여요`,
     personalNote: audience !== null && personal ? APPS_PERSONAL_NOTE : null,
   };
