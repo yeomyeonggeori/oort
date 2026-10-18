@@ -2060,6 +2060,14 @@ pub struct AgentRunResponse {
     /// top-level key is ignored rather than refused.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_reported: Option<Value>,
+    /// ADR-0113 증보 2 E8 (#3946) — 「쓴 앱」: `[{pluginId, tool, calls}]`, the
+    /// execution site's **own report** of the connector apps it used (never
+    /// verified by the server; a vendor path may report nothing). Absent when
+    /// the run reported none, so a run without it serializes exactly as before.
+    /// A deployed client builds its run from named fields, so the extra key is
+    /// ignored rather than refused.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub apps_used: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub started_at_ms: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2429,6 +2437,11 @@ pub struct AgentGatewayCompleteRequest {
     pub error: Option<String>,
     #[serde(default)]
     pub usage: Option<AgentGatewayUsageDto>,
+    /// ADR-0113 증보 2 E8 (#3946) — `[{pluginId, tool, calls}]`, the execution
+    /// site's own report of the connector apps it used. Validated by
+    /// `routes::apps_used`; absent for a path that reports nothing.
+    #[serde(default, rename = "appsUsed", alias = "apps_used")]
+    pub apps_used: Option<serde_json::Value>,
 }
 
 /// Swift `AgentGatewayUsage` (:2287-2347).
