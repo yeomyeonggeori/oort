@@ -145,3 +145,20 @@ it('올라온 키보드와 컴포저 사이의 틈은 스케일 가장 작은 �
   expect(gapAboveKeyboard).toBe(KEYBOARD_GAP);
   expect(KEYBOARD_GAP).toBe(space.xs);
 });
+
+it.each([0, 20, 34])(
+  '하단 인셋 %i 인 기기에서도 올라온 키보드와의 틈은 같은 한 칸이다 (#4044)',
+  bottom => {
+    // iPhone SE(홈 인디케이터 없음, 인셋 0)에서 틈이 0 이 되어 알약이 키보드에 붙던 것(#4016 잔여).
+    const safeArea = require('react-native-safe-area-context');
+    const insets = jest
+      .spyOn(safeArea, 'useSafeAreaInsets')
+      .mockReturnValue({top: 20, left: 0, right: 0, bottom});
+    render(<ConversationLayout list={<Text>목록</Text>} composer={<View />} />);
+    insets.mockRestore();
+    const pane = screen.getByTestId('conversation-layout');
+    const resting = paneStyle().paddingBottom as number;
+    expect(resting).toBeGreaterThanOrEqual(KEYBOARD_GAP);
+    expect(resting - (pane.props.bottomInset as number)).toBe(KEYBOARD_GAP);
+  },
+);
