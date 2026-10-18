@@ -20,7 +20,7 @@ import {
   resolveAgentWorkingSignals,
   ZOMBIE_CLEAR_MS,
 } from "./agentWorkingSignal";
-import { activityLines, activityText, agentTurnBadgeCopy } from "./turnCopy";
+import { activityDetail, activityLines, activityText, agentTurnBadgeCopy } from "./turnCopy";
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const GENERAL = "00000000-0000-7000-8000-000000000201";
@@ -549,8 +549,13 @@ describe("turn copy: the two surfaces say the same thing", () => {
 
   it("attaches the right Korean particle to each name", () => {
     expect(activityLines(turns, nameFor).lines.map(activityText)).toEqual([
-      "Hermes: 빌드 확인 중",
-      "김인턴(@kim-intern)이 작업 중",
+      "Hermes가 답하는 중",
+      "김인턴(@kim-intern)이 답하는 중",
+    ]);
+    // 에이전트가 보고한 단계는 문장을 바꾸지 않고 곁의 보조 글이 된다(#4020).
+    expect(activityLines(turns, nameFor).lines.map((l) => activityDetail(l, NOW))).toEqual([
+      "빌드 확인 중",
+      undefined,
     ]);
   });
 
@@ -580,7 +585,7 @@ describe("turn copy: the two surfaces say the same thing", () => {
   it("names an agent the roster has not loaded without inventing one", () => {
     expect(
       activityLines(turns, () => ({ name: "에이전트" })).lines.map(activityText)
-    ).toEqual(["에이전트: 빌드 확인 중", "에이전트가 작업 중"]);
+    ).toEqual(["에이전트가 답하는 중", "에이전트가 답하는 중"]);
   });
 
   it("caps the composer at three lines and counts the rest", () => {
@@ -633,7 +638,7 @@ describe("turn copy: the two surfaces say the same thing", () => {
     );
     // Both are still lines in the composer, each with its own state.
     expect(activityLines(mixed, nameFor).lines.map(activityText)).toEqual([
-      "Hermes: 빌드 확인 중",
+      "Hermes가 답하는 중",
       "김인턴(@kim-intern)이 승인을 기다립니다",
     ]);
   });

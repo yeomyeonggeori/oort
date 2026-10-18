@@ -1137,7 +1137,7 @@ export function MessageRow({
         {/* 내가 보낸 메시지가 에이전트를 불렀으면 그 일의 상태 한 줄 (#3824). 칩보다
             안쪽이다: 칩은 남들의 반응이고, 이 줄은 이 메시지가 일으킨 일이다. */}
         {runStatus !== undefined && (
-          <div className="mt-1 flex min-w-0" data-testid="message-run-status-slot">
+          <div className="flex min-w-0 flex-col empty:hidden" data-testid="message-run-status-slot">
             <MessageRunStatus
               messageId={message.id}
               channelId={message.channelId}

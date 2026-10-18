@@ -93,9 +93,11 @@ describe("progress", () => {
     expect(formatBytes(12_400_000)).toBe("12.4 MB");
   });
 
-  it("shows the total only when there is one", () => {
+  it("shows the total only when there is one, and a word (never bytes) when there is not", () => {
     expect(progressLabel(3_200_000, 12_400_000)).toBe("3.2 / 12.4 MB");
-    expect(progressLabel(3_200_000, null)).toBe("3.2 MB");
+    expect(progressLabel(3_200_000, null)).toBe("받는 중");
+    expect(progressLabel(0, null)).toBe("받는 중");
+    expect(progressLabel(3_200_000, 0)).toBe("받는 중");
   });
 });
 

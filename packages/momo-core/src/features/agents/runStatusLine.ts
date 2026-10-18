@@ -137,6 +137,39 @@ export function runStatusText(line: RunStatusLine): string {
 }
 
 /**
+ * 이 run의 영수증 줄을 메시지 아래에 남기는가 (#4020).
+ *
+ * 평소의 「받았어요 → 가져감 → 완료 · 48초 걸림」은 메시지마다 붙으면 소음이다. 진행은
+ * 컴포저 위 「답하는 중」 한 줄이 말하고, 끝난 일은 답 메시지가 말한다. 그래서 대화
+ * 타임라인의 본 줄에는 **사람이 알아야 하는 상태**만 남긴다.
+ *
+ *   남긴다  실패 · 시간 초과(신호 소실 포함) · 승인 대기 · 일시 정지 ·
+ *           가져간 뒤 소식이 끊김(lease stale) · 깨우는 신호가 닿지 않음
+ *   뺀다    대기 · 가져감 · 작업 중 · 완료 · 취소됨
+ *
+ * 취소됨을 뺀다: 취소는 사람이 직접 한 일이라 알릴 새 소식이 아니고, 중단 영수증이
+ * 따로 있다. 진행을 따로 보는 곳(작업 패널·기록 시트)은 이 판정과 무관하게 그대로다.
+ */
+export function keepsRunReceipt(
+  progress: AgentRunProgress,
+  doorbell: DoorbellFact | null
+): boolean {
+  switch (progress.phase) {
+    case "failed":
+    case "timed_out":
+    case "awaiting_approval":
+    case "paused":
+      return true;
+    case "claimed":
+      return progress.leaseState === "stale" || doorbell?.failed === true;
+    case "queued":
+      return doorbell?.failed === true;
+    default:
+      return false;
+  }
+}
+
+/**
  * 메시지 id → 그 메시지가 일으킨 run들. 목록(타임라인)이 한 번 계산해 행에 넘긴다:
  * 행마다 스토어를 구독하면 아무 run이나 바뀔 때 화면의 모든 줄이 다시 그려진다.
  * 같은 메시지가 여러 에이전트를 불렀으면 먼저 생긴 run이 위다.

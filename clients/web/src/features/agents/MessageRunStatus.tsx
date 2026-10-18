@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { AgentRunProgress } from "@momo/core/lib/api";
 import {
   doorbellFactOf,
+  keepsRunReceipt,
   runStatusLine,
   runStatusText,
   wantsDoorbellFact,
@@ -24,6 +25,10 @@ import { openWorkPanel } from "./workLogStore";
 //
 // 말은 core `runStatusLine`이 정하고, 여기는 그것을 메시지 행 아래에 그리는 일뿐이다.
 // run 목록은 타임라인이 한 번 모아 행에 넘긴다(행이 스토어를 구독하지 않는다).
+//
+// #4020: 평소의 영수증(받았어요 → 가져감 → 완료)은 대화 타임라인 본 줄에서 뺐다. 진행은
+// 컴포저 위 「답하는 중」이 말한다. 이 줄은 **사람이 알아야 하는 상태**(실패·시간 초과·
+// 승인 대기·소식 끊김·깨우는 신호 불발)에만 선다 — 판정은 core `keepsRunReceipt`.
 //
 // 원장(깨우는 신호)은 아직 시작 전인 run에만 읽는다. 작업 패널과 같은 캐시 키라서 두
 // 표면이 같은 순간에 다른 단계를 말하지 않는다. 진행 읽기를 싣지 않는 옛 서버에서는
@@ -60,8 +65,9 @@ export function MessageRunStatus({
   }, [messageId]);
 
   if (runs.length === 0) return null;
+  // 래퍼 없이 행만 낸다: 행이 모두 빠지면 DOM에 아무것도 남지 않아 자리(여백)도 없다.
   return (
-    <div className="flex flex-col gap-1" data-testid="message-run-status">
+    <>
       {runs.map((progress) => (
         <RunStatusRow
           key={progress.id}
@@ -70,7 +76,7 @@ export function MessageRunStatus({
           showName={true}
         />
       ))}
-    </div>
+    </>
   );
 }
 
@@ -90,8 +96,10 @@ function RunStatusRow({
   const ledger = useQuery({ ...runLedgerQueryOptions(workspaceId, key), enabled: wants });
   useRunLedgerFrames(wants ? key : null, ledger.refetch);
   const doorbell = useMemo(() => doorbellFactOf(ledger.data?.events), [ledger.data]);
-  const open = isOpenRunPhase(progress.phase);
-  const nowMs = useTickingNow(open);
+  // 줄을 남기지 않는 run은 시계도 돌리지 않는다(행마다 1초 재렌더를 만들 이유가 없다).
+  const keeps = keepsRunReceipt(progress, doorbell);
+  const nowMs = useTickingNow(keeps && isOpenRunPhase(progress.phase));
+  if (!keeps) return null;
   const line = runStatusLine(progress, doorbell, nowMs);
   const name = agentLabel(memberNameParts(directory, progress.agentMemberId, UNKNOWN_AGENT_NAME));
   const text = runStatusText(line);
@@ -117,7 +125,7 @@ function RunStatusRow({
       data-testid="message-run-status-row"
       data-run-id={progress.id}
       data-phase={progress.phase}
-      className="flex min-w-0 max-w-full flex-wrap items-baseline gap-x-2 self-start rounded-sm text-left text-timestamp text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+      className="mt-1 flex min-w-0 max-w-full flex-wrap items-baseline gap-x-2 self-start rounded-sm text-left text-timestamp text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
     >
       {showName && <span className="shrink-0 text-agent">{name}</span>}
       <span

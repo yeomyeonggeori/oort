@@ -156,7 +156,7 @@ describe("RED PROOF ② 증명 전에는 테스트 멘션이 열리지 않는다
     // 손으로 적은 「을」이 화면에 나갔던 자리다(캡처 레인 실측): 핸들은 라틴
     // 문자로 끝나는 것이 기본이라 그 조사는 「를」이어야 한다.
     expect(testMentionSentence("#general", "kim-intern")).toContain(
-      "@kim-intern를 부르면"
+      "@kim-intern을 부르면"
     );
     expect(testMentionSentence("#엔진", "김인턴")).toContain("@김인턴을 부르면");
   });

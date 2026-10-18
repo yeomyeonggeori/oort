@@ -8,6 +8,8 @@ import {
   DIVIDER_SPACE,
   recoveryDividerLabel,
   recoveryDividerSegments,
+  pruneRecoveryMarkers,
+  RECOVERY_MARKER_TTL_MS,
   ROW_SPACE,
   unreadDividerLabel,
   unreadDividerSegments,
@@ -303,5 +305,31 @@ describe("색 계약 (D-2)", () => {
       "danger",
       "quiet",
     ]);
+  });
+});
+
+describe("복구 표지는 상시로 남지 않는다 (#4016)", () => {
+  const markers = [{ id: "r1", seq: 10 }];
+
+  it("표지보다 새 메시지(seq > 표지)가 오면 걷힌다", () => {
+    expect(pruneRecoveryMarkers(markers, [{ seq: 11 }])).toEqual([]);
+  });
+
+  it("복구된 구간 안의 행(seq <= 표지)은 걷지 않고 같은 배열을 돌려준다", () => {
+    expect(pruneRecoveryMarkers(markers, [{ seq: 9 }, { seq: 10 }])).toBe(markers);
+    expect(pruneRecoveryMarkers(markers, [])).toBe(markers);
+  });
+
+  it("여러 표지 중 지나간 것만 걷는다", () => {
+    const two = [
+      { id: "a", seq: 10 },
+      { id: "b", seq: 20 },
+    ];
+    expect(pruneRecoveryMarkers(two, [{ seq: 15 }])).toEqual([{ id: "b", seq: 20 }]);
+  });
+
+  it("시간 제한은 읽을 만큼은 길고 상시는 아니다", () => {
+    expect(RECOVERY_MARKER_TTL_MS).toBeGreaterThanOrEqual(5_000);
+    expect(RECOVERY_MARKER_TTL_MS).toBeLessThanOrEqual(30_000);
   });
 });

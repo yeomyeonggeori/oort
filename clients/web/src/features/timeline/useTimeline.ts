@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  pruneRecoveryMarkers,
+  RECOVERY_MARKER_TTL_MS,
+} from "@momo/core/features/timeline/divider";
+import {
   deleteMessage as deleteMessageRequest,
   editMessage as editMessageRequest,
   fetchChannelPins,
@@ -344,18 +348,32 @@ export function useTimeline(
       // 장부 ref 는 updater 밖에서 맞춘다 (`updatePending` 과 같은 이유:
       // React 는 updater 를 돌리고 결과를 버릴 수 있다).
       setState((s) => reconcileMessages(s, batch));
+      // 복구 표지는 더 새로운 메시지가 오면 걷힌다(#4016). 표지는 배치 **뒤**에 서므로 방금 선 표지는 남는다.
+      setRecoveryMarkers((markers) => pruneRecoveryMarkers(markers, batch));
     },
     [authorMemberId]
   );
 
+  const markerTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const addMarker = useCallback((source: RecoveryMarker["source"]) => {
     const seq = newestSeqRef.current;
     if (seq === null) return;
     markerCounterRef.current += 1;
-    setRecoveryMarkers((markers) => [
-      ...markers,
-      { id: `recovery-${markerCounterRef.current}`, seq, source },
-    ]);
+    const id = `recovery-${markerCounterRef.current}`;
+    setRecoveryMarkers((markers) => [...markers, { id, seq, source }]);
+    // 새 메시지가 오지 않아도 일정 시간 뒤 스스로 걷힌다(#4016).
+    const timer = setTimeout(() => {
+      markerTimersRef.current.delete(timer);
+      setRecoveryMarkers((markers) => markers.filter((m) => m.id !== id));
+    }, RECOVERY_MARKER_TTL_MS);
+    markerTimersRef.current.add(timer);
+  }, []);
+  useEffect(() => {
+    const timers = markerTimersRef.current;
+    return () => {
+      for (const timer of timers) clearTimeout(timer);
+      timers.clear();
+    };
   }, []);
 
   // ---- optimistic send (M10) ------------------------------------------------

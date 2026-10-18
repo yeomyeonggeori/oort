@@ -207,7 +207,7 @@ function SuggestedCard({
  * 값마다 시안 CSS 원문을 옆에 적는다(`convDesign.ts`의 `CONV`와 같은 규율: 스타일시트에
  * 숫자를 흩지 않고 한 자리에서 출처를 읽게 한다).
  */
-const AI_SUGGEST = {
+export const AI_SUGGEST = {
   /** 폰 `.ag{width:20px;height:20px;font-size:10px;border-radius:28%}`. */
   agentMark: 20,
   agentMarkRadius: 5.6,

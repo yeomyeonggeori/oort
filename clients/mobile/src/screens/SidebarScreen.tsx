@@ -67,6 +67,7 @@ import {
   useChannels,
   useDirectory,
   useReadStates,
+  useRememberOpenedDm,
   useWorkspaceIdentity,
 } from '../features/workspace/queries';
 import {Avatar} from '../features/conversation/Avatar';
@@ -399,9 +400,11 @@ export default function SidebarScreen({
     {active},
   );
 
+  const rememberOpenedDm = useRememberOpenedDm(workspaceId);
   const openDm = useMutation({
     mutationFn: (memberId: string) => openDirectMessage(workspaceId, memberId),
     onSuccess: opened => {
+      rememberOpenedDm(opened.channel);
       // The SERVER decides which channel this pair maps to; the response is the
       // authority, and its label is resolved through the core exactly as a row's
       // would be so the header does not read differently from the list.

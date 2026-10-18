@@ -66,50 +66,17 @@ function mountComposer(agent: RosterMember) {
 
 afterEach(cleanup);
 
-describe('DM 힌트는 이름을 보고 조사를 고른다', () => {
-  it('받침 없는 이름 — 「루나가 답합니다」', () => {
-    // 성재가 본 그 이름이다. 「루나」는 나로 끝나 받침이 없으므로 열린 형태다.
-    mountComposer(
-      member({
-        id: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
-        kind: 'agent',
-        displayName: '루나',
-        handle: 'luna',
-      }),
-    );
-    expect(screen.getByText('멘션 없이 바로 말하면 루나가 답합니다.')).toBeTruthy();
-  });
-
-  it('받침 있는 이름 — 「김인턴이 답합니다」', () => {
-    mountComposer(
-      member({
-        id: 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb',
-        kind: 'agent',
-        displayName: '김인턴',
-        handle: 'kim-intern',
-      }),
-    );
-    expect(
-      screen.getByText('멘션 없이 바로 말하면 김인턴이 답합니다.'),
-    ).toBeTruthy();
-  });
-
-  it('라틴 이름은 열린 형태 — 「Hermes가 답합니다」', () => {
-    // 영문 이름의 폴백은 병기가 아니라 **열린 형태**다. 「Hermes」를 한국어로 읽는
-    // 방식이 하나로 정해져 있지 않으므로 받침을 추측하지 않는다는 것이
-    // `koreanParticle` 이 이미 내린 판단이고, 여기서 두 번째 규칙을 세우지 않는다.
-    // 병기(`Hermes이(가)`)는 그 판단을 화면에 흘리는 것이지 정직한 폴백이 아니다.
-    mountComposer(
-      member({
-        id: 'dddddddd-1111-4111-8111-dddddddddddd',
-        kind: 'agent',
-        displayName: 'Hermes',
-        handle: 'hermes',
-      }),
-    );
-    expect(
-      screen.getByText('멘션 없이 바로 말하면 Hermes가 답합니다.'),
-    ).toBeTruthy();
+describe('에이전트 DM 입력창 위에는 「멘션 없이 바로 말하면 …」 안내가 없다 (#4016)', () => {
+  // 성재 3047: 정상일 때마다 서는 안내는 뺀다. 이름의 조사(루나가·김인턴이·Hermes가)를 고르던 규칙은
+  // 이제 답하지 **않는** 경우의 문장(`dmComposerHint` 의 경고 상태)에서만 쓰이고, 그 문장은 서버 상태를
+  // 받는 `useDmDeliveryHint` 의 몫이다. 여기서는 세 종류의 이름 모두에서 안내가 사라졌음을 못 박는다.
+  it.each([
+    ['루나', 'luna', 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa'],
+    ['김인턴', 'kim-intern', 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb'],
+    ['Hermes', 'hermes', 'dddddddd-1111-4111-8111-dddddddddddd'],
+  ])('%s 이름이어도 안내 문장이 없다', (displayName, handle, id) => {
+    mountComposer(member({id, kind: 'agent', displayName, handle}));
+    expect(screen.queryByText(/멘션 없이 바로 말하면/)).toBeNull();
   });
 });
 
