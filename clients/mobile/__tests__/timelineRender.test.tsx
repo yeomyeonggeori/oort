@@ -282,15 +282,21 @@ describe('행이 말하는 것', () => {
     expect(screen.getByText('2')).toBeTruthy();
   });
 
-  it('에이전트는 이름으로 구별되고 책임자를 밝힌다', () => {
+  it('에이전트는 이름으로 구별되고 책임자를 밝힌다 — 「에이전트」 배지는 눈에 없고 낭독에만 있다 (#4065)', () => {
     renderTimeline({
       messages: [
         message(1, {authorMemberId: 'cccccccc-1111-4111-8111-cccccccccccc'}),
       ],
     });
-    expect(screen.getByText('에이전트')).toBeTruthy();
+    expect(screen.queryByText('에이전트')).toBeNull();
+    expect(screen.getByLabelText(/^헤르메스, 에이전트, /)).toBeTruthy();
     // ADR-0131: an agent has a human who is accountable for it.
     expect(screen.getByText('곽성재님이 관리')).toBeTruthy();
+  });
+
+  it('사람 행의 낭독 라벨에는 「에이전트」가 없다 (#4065)', () => {
+    renderTimeline({messages: [message(1, {authorMemberId: OTHER})]});
+    expect(screen.queryByLabelText(/에이전트/)).toBeNull();
   });
 
   it('실패한 서버 행은 그 자리에서 다시 보내기를 준다', () => {
