@@ -634,12 +634,18 @@ mod tests {
     ///
     /// 139 is #3938's `agent.connector_owner_human_id` (ADR-0113 증보 2 E3): the mark that an agent
     /// runs its owner's connected apps, so only the owner's calls are delivered.
+    ///
+    /// 140 is #3947's GitHub App storage (ADR-0205 D1·D2·D5·D6): the singleton `github_app` (sealed
+    /// pem + webhook secrets, no `client_secret` column), the instance-global
+    /// `github_app_installation` routing table (both FORCE RLS behind the `app.github_app_admin` /
+    /// `app.github_ingress` GUCs), and the tenant `github_link_claim`, `github_channel_subscription`
+    /// and `github_receipt` (ENABLE + FORCE + `ws_isolation`).
     #[test]
-    fn discovers_contiguous_migrations_001_to_139() {
+    fn discovers_contiguous_migrations_001_to_140() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=139).collect();
+        let expected: Vec<i64> = (1..=140).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -647,7 +653,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=139 under {}",
+            "expected contiguous 001..=140 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -655,7 +661,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("139_agent_connector_owner"));
+            .starts_with("140_github_app"));
     }
 
     #[test]

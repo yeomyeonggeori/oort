@@ -284,6 +284,10 @@ pub struct AppState {
     /// (`HERMES_BASE_URL` set, tool-lock attested). Default: nothing declared,
     /// which keeps the whole feature silent and offline.
     pub cohosted: Arc<routes::cohosted_agent::CohostedAgentState>,
+    /// ADR-0205 (#3947) — the GitHub App surface: the dedicated sealing key and the one
+    /// outbound hop (the manifest code → credentials conversion). Default: no key, so every
+    /// `/v1/integrations/github/*` route answers 503 and the rest of the server is untouched.
+    pub github: Arc<routes::github_app::GithubAppState>,
 }
 
 impl AppState {
@@ -323,6 +327,7 @@ impl AppState {
                     routes::provider_link::PROBE_TIMEOUT,
                 ),
             ))),
+            github: Arc::new(routes::github_app::GithubAppState::default()),
             cohosted: Arc::new(routes::cohosted_agent::CohostedAgentState::new(
                 config::CohostedAgentConfig::default(),
                 Arc::new(momo_provider_probe::GuardedProviderProbe::new(
@@ -331,6 +336,28 @@ impl AppState {
                 )),
             )),
         }
+    }
+
+    /// ADR-0205 — attach the GitHub App sealing key (`GITHUB_APP_MASTER_KEY`). The converter
+    /// stays whatever it was (the production one unless a test replaced it).
+    pub fn with_github(mut self, settings: config::GithubAppSettings) -> Self {
+        self.github = Arc::new(routes::github_app::GithubAppState::new(
+            settings,
+            self.github.converter.clone(),
+        ));
+        self
+    }
+
+    /// Replace the GitHub manifest-conversion hop — conformance tests with a scripted one.
+    pub fn with_github_converter(
+        mut self,
+        converter: Arc<dyn momo_github::GithubAppConverter>,
+    ) -> Self {
+        self.github = Arc::new(routes::github_app::GithubAppState::new(
+            self.github.settings.clone(),
+            converter,
+        ));
+        self
     }
 
     /// ADR-0203 — attach the operator's declaration and the probe that dials the
@@ -1657,6 +1684,18 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/event-subscriptions",
             get(routes::event_subscriptions::list).post(routes::event_subscriptions::create),
         )
+        // ADR-0205 (#3947) — the GitHub App registration surface, operator side. Instance-global
+        // like `/v1/provider/link` (one App per instance), so the same MOMO-583 operator gate;
+        // the write verbs take the stricter listed-operator form. All 503 without
+        // GITHUB_APP_MASTER_KEY. The unauthenticated GitHub redirect lives on the public router.
+        .route(
+            "/v1/integrations/github/app",
+            get(routes::github_app::get).put(routes::github_app::paste),
+        )
+        .route(
+            "/v1/integrations/github/app/manifest",
+            post(routes::github_app::start_manifest),
+        )
         // ADR-0162 증보 1 / HAP-E7 — the resource owner's half of an OAuth
         // authorization request. Inside the bearer middleware because the only
         // caller is a logged-in human owner/admin: the browser redirect that
@@ -1829,6 +1868,17 @@ pub fn build_app(state: AppState) -> Router {
             get(routes::cloud_box_runner::boxes).route_layer(axum::middleware::from_fn_with_state(
                 state.clone(),
                 routes::cloud_box_runner::refused_credential_budget,
+            )),
+        )
+        // ADR-0205 D2 (#3947) — GitHub sends the operator's browser here after the manifest is
+        // approved. Public by construction (a top-level navigation carries no bearer); the
+        // one-time, hash-only, one-hour `state` minted by `POST …/app/manifest` is the only
+        // authority, and it is spent before any outbound call. Own per-IP budget.
+        .route(
+            "/v1/integrations/github/app/callback",
+            get(routes::github_app::callback).route_layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                rate_limit::per_ip_github_callback,
             )),
         )
         // #1265 / ADR-0115 — public ingress. Authenticated by HMAC headers or
