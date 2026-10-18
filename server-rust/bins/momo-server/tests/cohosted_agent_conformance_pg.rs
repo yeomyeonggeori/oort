@@ -313,6 +313,7 @@ async fn start_server(pool: PgPool, d: Declared<'_>) -> String {
         CohostedAgentConfig {
             declared: d.declared,
             tools_locked: d.tools_locked,
+            ..Default::default()
         },
         Arc::new(GuardedProviderProbe::new(
             EgressPolicy {

@@ -140,8 +140,10 @@
 
 pub mod a2a;
 pub mod actions;
+pub mod app_tool_grants;
 pub mod approval;
 pub mod card_suggest;
+pub mod connector_trial;
 pub mod decider;
 pub mod dm;
 pub mod effort;
@@ -228,6 +230,10 @@ pub use a2a::{
     DEFAULT_MAX_CHAIN_COST_MICRO_USD, DEFAULT_MAX_CHAIN_TOKENS, DEFAULT_MAX_CONSECUTIVE_AUTO,
     DEFAULT_MAX_STEPS, SCHEMA_DEPTH_CEILING,
 };
+pub use app_tool_grants::{
+    attach_tool_grants, granted_apps_from_payload, host_app_tools, load_app_tool_grants_in_tx,
+    AppToolGrant, TOOL_GRANTS_KEY,
+};
 pub use dm::{
     load_dm_audience_in_tx, resolve_dm_addressing, stamp_addressing, Addressing,
     ChannelParticipant, DmAddressing, DmAudience,
@@ -312,6 +318,12 @@ pub use run_progress::{
     ToolTallyRow,
 };
 // ADR-0200 증보 2026-10-15 R1 — the workspace "running now" read (#3847).
+pub use connector_trial::{
+    agent_is_operator_env_pinned_in_tx, connector_trial_facts_in_tx, connector_trial_notice_body,
+    connector_trial_stop, other_operator_env_pinned_in_tx, parse_connector_apps,
+    trial_candidate_facts_in_tx, ungranted_apps, workspace_has_other_trial_agent_in_tx,
+    ConnectorTrialAttest, ConnectorTrialFacts, ConnectorTrialStop,
+};
 pub use run_progress::{
     active_run_cursor_in_tx, list_active_run_progress_base_in_tx, validated_active_run_limit,
     visible_active_run_counts_in_tx, workspace_active_run_totals_in_tx, ActiveRunScope,
@@ -324,18 +336,20 @@ pub use status::{
     AGENT_STATUS_EVENT_VERSION,
 };
 pub use subscription::{
-    agent_claude_subscription_blocked_in_tx, agent_is_owner_only_in_tx, callable_by,
-    claude_subscription_blocked, count_owner_subscription_agents_in_tx, default_name_candidates,
+    agent_claude_subscription_blocked_in_tx, agent_connector_owner_in_tx,
+    agent_is_owner_only_in_tx, callable_by, claude_subscription_blocked,
+    connector_owner_notice_body, count_owner_subscription_agents_in_tx, default_name_candidates,
     derive_brain, device_slug, find_subscription_agent_by_device_in_tx, harness_name_suffix,
     load_agent_read_facts_in_tx, load_invocation_scopes_in_tx, load_member_naming_in_tx,
     lock_and_find_recent_notice_in_tx, lock_and_find_recent_server_notice_in_tx,
     lock_subscription_registration_in_tx, mark_agent_owner_only_in_tx, notice_root,
     notice_thread_key, owner_only_gate, release_subscription_device_in_tx,
-    set_subscription_device_in_tx, subscription_notice_body, subscription_notice_key,
-    subscription_notice_props, valid_device_id, AgentBrain, AgentReadFacts, OwnerOnlyScope,
-    PersonalAgentFacts, RecentNotice, SubscriptionHarness, SubscriptionNoticeKind,
-    CALLABLE_BY_EVERYONE, CALLABLE_BY_OWNER_ONLY, CLAUDE_SUBSCRIPTION_AGENT_PAUSED,
-    HOSTED_RECENTLY_SEEN_SQL, INVOCATION_SCOPE_OWNER_ONLY, INVOCATION_SCOPE_WORKSPACE,
+    set_connector_owner_in_tx, set_subscription_device_in_tx, subscription_notice_body,
+    subscription_notice_key, subscription_notice_props, valid_device_id, AgentBrain,
+    AgentReadFacts, ConnectorOwner, ConnectorOwnerChange, OwnerOnlyScope, PersonalAgentFacts,
+    RecentNotice, SubscriptionHarness, SubscriptionNoticeKind, CALLABLE_BY_EVERYONE,
+    CALLABLE_BY_OWNER_ONLY, CLAUDE_SUBSCRIPTION_AGENT_PAUSED, HOSTED_RECENTLY_SEEN_SQL,
+    INVOCATION_SCOPE_OWNER_ONLY, INVOCATION_SCOPE_WORKSPACE, SKIP_CONNECTOR_OWNER_NON_OWNER,
     SKIP_OWNER_ONLY_NON_OWNER, SKIP_PERSONAL_AGENT_CLIENT_SIGNS, SKIP_SUBSCRIPTION_AGENTS_DISABLED,
     SUBSCRIPTION_AGENTS_PER_HARNESS_LIMIT, SUBSCRIPTION_AGENT_ONLINE_WINDOW_SECONDS,
     SUBSCRIPTION_NOTICE_AUDIT_SCHEMA, SUBSCRIPTION_NOTICE_POSTED_ACTION,
@@ -343,8 +357,8 @@ pub use subscription::{
     SUBSCRIPTION_NOTICE_THROTTLE_SECONDS,
 };
 pub use thread_wake::{
-    find_unclaimed_thread_run_in_tx, load_thread_wake_target_in_tx, UnclaimedThreadTurn,
-    THREAD_REPLY_WAKE_REASON,
+    find_unclaimed_dm_run_in_tx, find_unclaimed_thread_run_in_tx, load_thread_wake_target_in_tx,
+    UnclaimedThreadTurn, THREAD_REPLY_WAKE_REASON,
 };
 pub use usage::{
     budget_state, chain_usage_in_tx, provider_spend_in_tx, record_run_usage_in_tx,

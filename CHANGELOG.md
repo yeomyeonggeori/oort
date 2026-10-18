@@ -11,6 +11,24 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+## [0.1.30] - 2026-10-17
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.30>. Tag target: `main=73deda08`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. No database migration (the schema stays at 138). `bootstrap_runtime_roles` is unchanged. No new environment variable. Deploy order: the push relay, the API, then the agent worker (the new producer), the relay and the webhook sender, and the notifier last, so that no new push candidate reaches a notifier that cannot judge it.
+
+### Added
+- Server: a streamed agent reply now gets its push decision again when it closes (ADR-0204 addendum 1 D8-a, #3987, #4003). If you called an agent and stepped away, the finished reply reaches you as one push per device. The stream's opening and its closing are two producers of the same push candidate and the existing collapse id and dispatch log keep them from sending twice. A stream that is still open is held back, and a turn that will be retried leaves no half-answer push. A cancelled or failed stream is announced too, because a stop is also the end of an answer.
+- Phone: the lock-screen Approve / Deny buttons are handled by a native handler that sends one decision with the `push_action` token and replaces the notification with a one-line result, so they work while the app is closed or suspended (ADR-0204 D6, #3931, #3994). An approval whose sender and text the notification extension could not fill is lowered to "open to decide", and the lock-screen word is "Deny" everywhere. Device behaviour is runtime-unverified until the device matrix runs on a phone.
+- Phone: the first-run notification step is "What notifications do you want?", with a preview of each kind and a switch for "work finished" (ADR-0204 D4, #3925, #3975).
+- Phone and web: a paused notification state is visible. The phone inbox and the web sidebar show one line, "until ... · turn back on" (ADR-0204 D3, #3923, #4002).
+- Web and desktop: an agent's status is a dot on its avatar instead of the word "off". A filled dot means signals are arriving; a hollow ring means a reply is unlikely (#3964, #3985).
+
+### Changed
+- Web and desktop: sidebar channel and DM rows share one hover and right-click behaviour. A DM shows an X on hover that closes it in the sidebar on this device only (it comes back with a new message; a DM with unread messages has no X), the right-click menu follows a fixed order, the outline that appeared after a right-click is gone, and the gesture that opens the menu can no longer trigger an item (#3963, #3984).
+- Phone: pull to refresh shows its progress as the satellite's orbit angle, and a failure notice stays until the next pull instead of disappearing on a timer (#3992, #4006).
+
+### Fixed
+- Web, desktop and phone: a session refresh that could not reach the server is no longer treated as a login expiry. Only a refresh the server rejects ends the session; avatar and attachment downloads on the phone follow the same rule (#3993, #3997, #3995, #4007).
+
 ## [0.1.29] - 2026-10-17
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.29>. Tag target: `main=3475f06c`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. No database migration (the schema stays at 138). `bootstrap_runtime_roles` gains two column-scoped grants for `momo_notifier`, both additive: `UPDATE (invalidated_at, updated_at)` on `push_token` and `SELECT (workspace_id, member_id, role)` on `workspace_membership`. No new environment variable. Deploy the push relay before the app: the relay now accepts the `momo.approval.open` notification category, and a push with that category is rejected by an older relay.

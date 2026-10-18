@@ -320,7 +320,46 @@ fn run_complete_schema() -> Value {
                     "reasoningTokens": token_count()
                 }
             })),
-            "artifacts": nullable(artifacts_schema())
+            "artifacts": nullable(artifacts_schema()),
+            // ADR-0113 증보 2 E8 (#3946) — which connector apps this run used.
+            "appsUsed": nullable(apps_used_schema())
+        }
+    })
+}
+
+/// Most entries `appsUsed` takes (ADR-0113 증보 2 E8).
+pub const MAX_APPS_USED_ENTRIES: u64 = 16;
+/// Longest `appsUsed[].tool`, in bytes. The adapter also holds it to an ASCII
+/// identifier (`[A-Za-z0-9][A-Za-z0-9._:-]*`); the schema states the length.
+pub const MAX_APPS_USED_TOOL_BYTES: u64 = 64;
+/// Every key one `appsUsed` entry has — and the only ones it may have.
+pub const APPS_USED_ENTRY_KEYS: [&str; 3] = ["pluginId", "tool", "calls"];
+
+/// ADR-0113 증보 2 E8 — 「쓴 앱」: app id, tool name, call count and nothing else.
+///
+/// `additionalProperties:false` is the defence: an argument, a result, a URL or a
+/// token has no key, so it can neither be sent nor stored. It is the execution
+/// site's own report; the server does not verify it.
+fn apps_used_schema() -> Value {
+    json!({
+        "type": "array",
+        "maxItems": MAX_APPS_USED_ENTRIES,
+        "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": APPS_USED_ENTRY_KEYS,
+            "properties": {
+                // 3..=128 characters of the registry's plugin-id alphabet; the
+                // adapter checks the alphabet.
+                "pluginId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128,
+                    "description": BYTE_BOUND_NOTE
+                },
+                "tool": required_text(MAX_APPS_USED_TOOL_BYTES),
+                "calls": integer(1, MAX_REPORTED_COUNT)
+            }
         }
     })
 }
@@ -876,7 +915,10 @@ pub const TOOL_CATALOG: [ToolDescriptor; 13] = [
                       nextAction (merge_ok, please_test, blocked or none) and commitSha (7 to \
                       40 hex characters); \
                       toolCounts {run, edit, read, search, web, other} counts work done \
-                      inside your own machine. People see these as your own report. If the \
+                      inside your own machine. appsUsed [{pluginId, tool, calls}] lists the connector apps \
+                      you used, as ids, tool names and call counts only (at most 16, one \
+                      per app and tool); never put arguments, results or credentials in it. \
+                      People see these as your own report. If the \
                       call is refused with -32602 and error.data names an artifacts field, \
                       fix only that field and call again with the same leaseHandle, at most \
                       2 times; if it is still refused, complete without artifacts and write \
@@ -2555,6 +2597,55 @@ mod tests {
             ToolFailure::InvalidArguments.message(),
             "invalid tool arguments"
         );
+    }
+
+    /// ADR-0113 증보 2 E8 (#3946) — `appsUsed` is published closed and bounded:
+    /// three keys per entry, a count from 1, at most `MAX_APPS_USED_ENTRIES`
+    /// entries. An argument, a result or a token has no key to ride on.
+    #[test]
+    fn apps_used_is_published_closed_and_bounded() {
+        let complete = TOOL_CATALOG
+            .iter()
+            .find(|tool| tool.name == TOOL_RUN_COMPLETE)
+            .expect("oort_run_complete");
+        let schema = complete.input_schema();
+        let apps = &schema["properties"]["appsUsed"];
+        assert_eq!(apps["maxItems"], json!(MAX_APPS_USED_ENTRIES));
+        assert_eq!(apps["items"]["additionalProperties"], json!(false));
+        let mut declared: Vec<&str> = apps["items"]["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        declared.sort_unstable();
+        let mut expected = APPS_USED_ENTRY_KEYS.to_vec();
+        expected.sort_unstable();
+        assert_eq!(declared, expected);
+        assert_eq!(apps["items"]["required"], json!(APPS_USED_ENTRY_KEYS));
+
+        let entry = json!({"pluginId": "gmail", "tool": "create_draft", "calls": 1});
+        let args =
+            |apps: Value| json!({"leaseHandle": "x", "status": "succeeded", "appsUsed": apps});
+        assert_eq!(validate_arguments(complete, &args(json!([entry]))), Ok(()));
+        // `null` is "no report", like every optional property.
+        assert_eq!(validate_arguments(complete, &args(Value::Null)), Ok(()));
+        for bad in [
+            json!([{"pluginId": "gmail", "tool": "t", "calls": 1, "body": "x"}]),
+            json!([{"pluginId": "gmail", "tool": "t"}]),
+            json!([{"pluginId": "ab", "tool": "t", "calls": 1}]),
+            json!([{"pluginId": "gmail", "tool": "t", "calls": 0}]),
+            json!([{"pluginId": "gmail", "tool": "t", "calls": MAX_REPORTED_COUNT + 1}]),
+            json!([{"pluginId": "gmail", "tool": "t".repeat(65), "calls": 1}]),
+            Value::Array(vec![entry.clone(); MAX_APPS_USED_ENTRIES as usize + 1]),
+            json!("gmail"),
+        ] {
+            assert_eq!(
+                validate_arguments(complete, &args(bad.clone())),
+                Err(ToolFailure::InvalidArguments),
+                "{bad}"
+            );
+        }
     }
 
     /// Every closed path the wire may name exists in the published schema, so a

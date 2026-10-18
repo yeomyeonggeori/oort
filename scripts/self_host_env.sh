@@ -1035,6 +1035,31 @@ ensure_webhook_master_keys() {
     "$(stack_restart_hint)" >&2
 }
 
+# ADR-0205 D1 / #3947 — GitHub App 봉인 마스터키를 기존 env 에 백필한다.
+#
+# 웹훅 키와 달리 이행 복사 대상이 없다(이 키로 봉인된 값이 아직 없다). 그래서
+# 독립 난수를 만든다. add-only: 이미 있는 값(운영자가 정한 키)은 절대 덮어쓰지
+# 않는다. 덮어쓰면 그 키로 봉인한 GitHub 앱 자격증명이 열리지 않게 된다. 값은
+# stdout/stderr 어디에도 출력하지 않는다.
+ensure_github_app_master_key() {
+  local count value
+  count="$(env_key_count GITHUB_APP_MASTER_KEY)"
+  [ "$count" -le 1 ] ||
+    fail "${ENV_FILE}의 GITHUB_APP_MASTER_KEY 항목은 최대 한 번만 있어야 한다."
+  [ "$count" -eq 0 ] || return 0
+  value="$(gen)"
+  validate_env_scalar GITHUB_APP_MASTER_KEY "$value"
+  {
+    printf '\n# --- GitHub 앱 마스터키 (#3947 / ADR-0205 D1, 기존 env에 추가) -------------\n'
+    printf '# GitHub 앱 개인키·webhook secret 을 DB 에 봉인하는 독립 키다. 다른 키와 같은\n'
+    printf '# 값이면 api 가 기동을 거부한다. 반영에는 api 재시작이 필요하다(프로세스 env).\n'
+    printf 'GITHUB_APP_MASTER_KEY=%s\n' "$(quote_env_file_value "$value")"
+  } >>"$ENV_FILE"
+  printf '[self-host] GitHub 앱 마스터키 백필: 1키 추가(GITHUB_APP_MASTER_KEY). 값은 출력하지 않는다.\n' >&2
+  printf '[self-host] 이미 떠 있는 스택이라면 api를 재시작해야 반영된다: %s\n' \
+    "$(stack_restart_hint)" >&2
+}
+
 # #1696 / ADR-0169 — local file archive, for env files written before it existed.
 #
 # Same add-only rule as `ensure_operator_allowlist`: these keys are not secrets.
@@ -1473,6 +1498,7 @@ platform_value_for() {
     CENT_API_KEY) printf '%s' "$CENT_API_SECRET" ;;
     CENT_PROXY_SECRET) printf '%s' "$CENT_PROXY_SECRET_VALUE" ;;
     PROVIDER_LINK_MASTER_KEY) printf '%s' "$PROVIDER_LINK_SECRET" ;;
+    GITHUB_APP_MASTER_KEY) printf '%s' "$GITHUB_APP_SECRET" ;;
     WEBHOOK_INGRESS_MASTER_KEY) printf '%s' "$WEBHOOK_INGRESS_SECRET" ;;
     OUTBOUND_WEBHOOK_MASTER_KEY) printf '%s' "$OUTBOUND_WEBHOOK_SECRET" ;;
     MOMO_WEB_PORT) printf '%s' "8080" ;;
@@ -1553,6 +1579,8 @@ emit_managed_platform_env() {
   CENT_API_SECRET="$(platform_secret CENT_API_KEY)"
   CENT_PROXY_SECRET_VALUE="$(platform_secret CENT_PROXY_SECRET)"
   PROVIDER_LINK_SECRET="$(platform_secret PROVIDER_LINK_MASTER_KEY)"
+  # ADR-0205 D1 (#3947): independent sealing key for the GitHub App credential.
+  GITHUB_APP_SECRET="$(platform_secret GITHUB_APP_MASTER_KEY)"
   # ADR-0004 증보 4 D1 (#2066). Independent from JWT_HMAC and from each other on
   # a **new** install: a webhook secret is derived from these, so sharing one
   # with the token signing key makes a JWT rotation invalidate every issued
@@ -1575,7 +1603,7 @@ emit_managed_platform_env() {
 
   for key in PROJECT IMAGE APP_PASSWORD RELAY_PASSWORD WORKER_PASSWORD \
              NOTIFIER_PASSWORD JWT_SECRET CENT_TOKEN_SECRET CENT_API_SECRET \
-             CENT_PROXY_SECRET_VALUE PROVIDER_LINK_SECRET \
+             CENT_PROXY_SECRET_VALUE PROVIDER_LINK_SECRET GITHUB_APP_SECRET \
              WEBHOOK_INGRESS_SECRET OUTBOUND_WEBHOOK_SECRET OWNER_EMAIL SITE_HOST \
              CSP CENTRIFUGO_ORIGINS APP_DATABASE_URL RELAY_DB_URL NOTIFIER_DB_URL; do
     validate_env_scalar "$key" "$(eval "printf '%s' \"\${$key}\"")"
@@ -2055,6 +2083,7 @@ if [ -e "$ENV_FILE" ]; then
   # #2066: before the early exit, so `oort upgrade` (which calls
   # `--ensure-managed-keys`) is the backfill ADR-0004 증보 4 D2(a) promises.
   ensure_webhook_master_keys
+  ensure_github_app_master_key
   if [ "$REQUESTED_ACTION" = "ensure-managed-keys" ]; then
     exit 0
   fi
@@ -2171,6 +2200,8 @@ CENT_TOKEN_SECRET="$(gen)"
 CENT_API_SECRET="$(gen)"
 CENT_PROXY_SECRET_VALUE="$(gen)"
 PROVIDER_LINK_SECRET="$(gen)"
+# ADR-0205 D1 (#3947) — GitHub 앱 봉인 키, 새 설치는 처음부터 독립 난수.
+GITHUB_APP_SECRET="$(gen)"
 # ADR-0004 증보 4 D1 (#2066) — 새 설치는 처음부터 독립 난수 2개.
 WEBHOOK_INGRESS_SECRET="$(gen)"
 OUTBOUND_WEBHOOK_SECRET="$(gen)"
@@ -2195,7 +2226,7 @@ fi
 # Keep every interpolation used by the env-file sink on the same scalar guard.
 for key in MODE IMAGE PG_PASSWORD APP_PASSWORD RELAY_PASSWORD WORKER_PASSWORD \
            NOTIFIER_PASSWORD JWT_SECRET CENT_TOKEN_SECRET CENT_API_SECRET \
-           CENT_PROXY_SECRET_VALUE PROVIDER_LINK_SECRET WEB_PORT API_PORT \
+           CENT_PROXY_SECRET_VALUE PROVIDER_LINK_SECRET GITHUB_APP_SECRET WEB_PORT API_PORT \
            CENT_PORT OWNER_EMAIL SELF_HOST_DESKTOP_CORS_ORIGINS \
            SELF_HOST_DESKTOP_CENTRIFUGO_ORIGINS CENTRIFUGO_ORIGINS \
            DRIVE_LOCAL_DIR DRIVE_VOLUME DRIVE_LOCAL_BASE PG_HOST PG_PORT; do
@@ -2242,6 +2273,9 @@ CENT_TOKEN_HMAC=$CENT_TOKEN_SECRET
 CENT_API_KEY=$CENT_API_SECRET
 CENT_PROXY_SECRET=$CENT_PROXY_SECRET_VALUE
 PROVIDER_LINK_MASTER_KEY=$PROVIDER_LINK_SECRET
+# ADR-0205 D1 (#3947) — GitHub 앱 개인키·webhook secret 을 DB 에 봉인하는 독립 키.
+# 비어 있으면 GitHub 알림 표면만 503 이다. 다른 마스터키와 같은 값은 기동 거부.
+GITHUB_APP_MASTER_KEY=$GITHUB_APP_SECRET
 # ADR-0004 증보 4 (#2066) — 웹훅 마스터키 2종. 인바운드(native ingress)와
 # 아웃바운드(이벤트구독·doorbell) secret 이 각각 이 키에서 파생된다. JWT_HMAC 과
 # 분리돼 있으므로 JWT 를 회전해도 이미 발급한 webhook secret 은 살아 있다.

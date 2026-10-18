@@ -69,6 +69,10 @@ pub enum HostedDmDelivery {
     /// (ADR-0193 D18, #3397). Same word as the mention skip reason, the work
     /// request 409 and `brainUnavailableReason`.
     ClaudeSubscriptionPaused,
+    /// #3948 (ADR-0203 증보 K2·K4): the owner's 「커넥터 시험」 is stopped — an
+    /// attestation is gone, the workspace has more than one person, or an app
+    /// lost the owner's grant.
+    ConnectorTrialStopped,
 }
 
 impl HostedDmDelivery {
@@ -83,6 +87,7 @@ impl HostedDmDelivery {
             Self::DeliveryDisabled => "delivery_disabled",
             Self::SubscriptionDisabled => "subscription_disabled",
             Self::ClaudeSubscriptionPaused => "claude_subscription_agent_paused",
+            Self::ConnectorTrialStopped => "connector_trial_stopped",
         }
     }
 }
@@ -96,18 +101,36 @@ pub fn hosted_dm_delivery(
     hosted_delivery_enabled: bool,
     subscription_agents_enabled: bool,
     claude_subscription_agents_enabled: bool,
+    connector_trial: &crate::connector_trial::ConnectorTrialAttest,
 ) -> HostedDmDelivery {
     if let Some(kind) = owner_only_gate(
         agent.owner_only.as_ref(),
+        agent.connector_owner.as_ref(),
         caller_member_id,
         subscription_agents_enabled,
         claude_subscription_agents_enabled,
     ) {
         return match kind {
-            SubscriptionNoticeKind::NonOwner => HostedDmDelivery::OwnerOnly,
+            // E3 (#3938): the connector refusal reads as 「owner only」 too —
+            // the caller is told it is the owner's alone, not that a switch is off.
+            SubscriptionNoticeKind::NonOwner | SubscriptionNoticeKind::ConnectorNonOwner => {
+                HostedDmDelivery::OwnerOnly
+            }
             SubscriptionNoticeKind::ClaudePaused => HostedDmDelivery::ClaudeSubscriptionPaused,
             _ => HostedDmDelivery::SubscriptionDisabled,
         };
+    }
+    // #3948: the caller is the owner here (a non-owner was refused above).
+    if crate::connector_trial::connector_trial_stop(
+        agent
+            .connector_owner
+            .as_ref()
+            .and_then(|connector| connector.trial.as_ref()),
+        connector_trial,
+    )
+    .is_some()
+    {
+        return HostedDmDelivery::ConnectorTrialStopped;
     }
     // ADR-0198 증보 1 D7: a personal agent is never hosted. The owner's DM with
     // it is answered by the owner's own Mac through a signed spawn, so there is
