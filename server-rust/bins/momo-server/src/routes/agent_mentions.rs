@@ -2052,6 +2052,9 @@ mod tests {
         agent.connector_owner = Some(momo_agent::ConnectorOwner {
             owner_member_id: owner,
             owner_display_name: "세은".into(),
+            // This unit pins who the delegated user is; a stopped trial never
+            // reaches job assembly (`delivery_gate` refuses first).
+            trial: None,
         });
         assert_eq!(delegated_app_user(&agent, owner), Some(owner));
         assert_eq!(delegated_app_user(&agent, stranger), None);
