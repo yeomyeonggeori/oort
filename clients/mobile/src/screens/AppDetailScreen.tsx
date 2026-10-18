@@ -81,6 +81,7 @@ export default function AppDetailScreen({
       state={state}
       view={view}
       policyKnown={policyKnown}
+      policyFailed={catalogQuery.isError}
       offline={!online}
       staleAtMs={detailQuery.dataUpdatedAt}
       webUrl={appsOnWebUrl()}
@@ -100,6 +101,7 @@ export function AppDetailView({
   state,
   view,
   policyKnown,
+  policyFailed = false,
   offline,
   staleAtMs,
   webUrl,
@@ -111,6 +113,8 @@ export function AppDetailView({
   state: AppDetailState;
   view?: PhoneAppDetail;
   policyKnown: boolean;
+  /** 목록 질의가 실패해 내 권한을 모른다. 조용히 비우지 않고 한 줄로 말한다. */
+  policyFailed?: boolean;
   offline: boolean;
   staleAtMs?: number;
   /** 「웹에서 열기」가 여는 주소. 서버 주소를 모르면 null — 열 수 없는 버튼을 세우지 않는다. */
@@ -162,6 +166,7 @@ export function AppDetailView({
           <Ready
             view={view}
             policyKnown={policyKnown}
+            policyFailed={policyFailed}
             webUrl={webUrl}
             onOpenWeb={onOpenWeb}
           />
@@ -174,11 +179,13 @@ export function AppDetailView({
 function Ready({
   view,
   policyKnown,
+  policyFailed,
   webUrl,
   onOpenWeb,
 }: {
   view: PhoneAppDetail;
   policyKnown: boolean;
+  policyFailed: boolean;
   webUrl: string | null;
   onOpenWeb: (url: string) => void;
 }): React.JSX.Element {
@@ -215,6 +222,12 @@ function Ready({
           <Field label={COPY.statusMine} value={view.statusMine} testID="app-detail-status-mine" />
         ) : null}
       </View>
+
+      {policyFailed ? (
+        <Sentence style={styles.plain} testID="app-detail-policy-unknown">
+          {COPY.policyUnknown}
+        </Sentence>
+      ) : null}
 
       {/* ---- 폰 허용 경로: 문장 하나 + 행동 하나 ------------------------------- */}
       {blocked ? (

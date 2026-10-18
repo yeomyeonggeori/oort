@@ -54,6 +54,7 @@ export const PHONE_APPS_COPY = {
   detailLoading: "앱 정보를 불러오는 중이에요.",
   detailErrorHeadline: "앱 정보를 읽지 못했어요.",
   detailErrorDetail: "잠시 뒤에 다시 시도해 주세요.",
+  policyUnknown: "내 권한은 지금 확인하지 못했어요. 잠시 뒤에 다시 열어 주세요.",
   toolsHeading: "할 수 있는 일",
   toolsNone: "서버가 표시할 도구 정보를 보내지 않았어요.",
   toolAllowed: "내가 허용함",

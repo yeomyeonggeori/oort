@@ -25,7 +25,9 @@ import {
 import {INITIAL_NAV, navReducer, type NavState} from '../src/nav/state';
 import {MessageRow} from '../src/features/conversation/MessageRow';
 import {SessionProvider} from '../src/session/useSession';
+import {AppDetailView} from '../src/screens/AppDetailScreen';
 import {AppsView} from '../src/screens/AppsScreen';
+import {phoneAppDetail} from '@momo/core/features/plugins/phoneApps';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
@@ -523,5 +525,45 @@ describe('plugin.install 승인 카드 · 결과 카드 (폰 렌더, #3893 대�
     expect(within(card).getByText('GitHub 1.0.0')).toBeTruthy();
     expect(within(card).getByText('각자 설정의 앱 화면에서 내 권한을 허용하면 에이전트가 써요')).toBeTruthy();
     expect(screen.queryByTestId('action-result-secret-once')).toBeNull();
+  });
+});
+
+describe('내 권한을 모를 때 (목록 질의 실패)', () => {
+  const view = phoneAppDetail(
+    {
+      pluginId: NOTION,
+      name: 'Notion',
+      version: '1.0.0',
+      description: 'd',
+      official: true,
+      installed: true,
+      enabled: true,
+      egressDomains: [],
+      recommendedFor: [],
+      tools: [],
+    },
+    undefined,
+  );
+  const props = {
+    title: 'Notion',
+    state: 'ready' as const,
+    view,
+    offline: false,
+    webUrl: `${BASE}/settings?section=plugins`,
+    onBack: () => {},
+    onRetry: () => {},
+    onOpenWeb: () => {},
+  };
+
+  it('막힘이라고 짐작하지 않고, 이유를 한 줄로 말한다', () => {
+    render(<AppDetailView {...props} policyKnown={false} policyFailed />);
+    expect(screen.queryByTestId('app-detail-blocked')).toBeNull();
+    expect(screen.getByTestId('app-detail-policy-unknown')).toBeTruthy();
+  });
+
+  it('아직 오는 중이면 아무 말도 하지 않는다', () => {
+    render(<AppDetailView {...props} policyKnown={false} />);
+    expect(screen.queryByTestId('app-detail-blocked')).toBeNull();
+    expect(screen.queryByTestId('app-detail-policy-unknown')).toBeNull();
   });
 });

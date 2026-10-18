@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import * as phone from "@momo/core/features/plugins/phoneApps";
 import * as web from "./model";
+import { resolveSettingsSection } from "../settings/settingsNav";
 
 const SCOPES = [
   "repo:read",
@@ -78,5 +79,10 @@ describe("폰 앱 모델 = 웹 앱 모델", () => {
     expect(phone.PHONE_APPS_COPY.statusMine).toBe(copy.status.mine);
     expect(phone.PHONE_APPS_COPY.emptyHeadline).toBe(copy.empty.headline);
     expect(phone.PHONE_APPS_COPY.emptyDetail).toBe(copy.empty.noneRegistered);
+  });
+
+  it("폰 「웹에서 열기」의 section id 를 웹이 앱 화면으로 푼다", () => {
+    const section = new URL(`https://x${phone.appsOnWebPath()}`).searchParams.get("section") ?? "";
+    expect(resolveSettingsSection(section)).toEqual({ kind: "ai-hub", path: "/ai/external/apps" });
   });
 });
