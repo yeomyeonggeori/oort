@@ -617,11 +617,6 @@ function Author({
           {parts.handle}
         </Text>
       ) : null}
-      {isAgent ? (
-        <View style={styles.agentTag}>
-          <Text style={styles.agentTagText}>에이전트</Text>
-        </View>
-      ) : null}
       {owner ? (
         <Text style={styles.authorMeta} numberOfLines={1}>
           {`${owner.displayName}님이 관리`}
@@ -2781,6 +2776,7 @@ function MessageRowInner({
         rowAccessibilityLabel({
         message,
         authorLabel,
+        authorIsAgent: memberFor(directory, message.authorMemberId)?.kind === 'agent',
         chips,
         tail,
         deleted,
@@ -3530,6 +3526,7 @@ export function rowPressedBackground(color: Palette): string {
 export function rowAccessibilityLabel({
   message,
   authorLabel,
+  authorIsAgent = false,
   chips,
   tail,
   deleted,
@@ -3539,6 +3536,13 @@ export function rowAccessibilityLabel({
 }: {
   message: Message;
   authorLabel: string;
+  /**
+   * 작성자가 에이전트인가. 이름 옆 「에이전트」 배지는 눈에서 뺐다(#4065) —
+   * 에이전트임은 눈에는 이름 색·아바타가 나르고, 귀에는 이 낱말이 나른다.
+   * 행이 한 접근성 원소라 배지 글자는 어차피 읽히지 않았으므로, 낭독의 정본은
+   * 이 라벨 한 곳이다.
+   */
+  authorIsAgent?: boolean;
   chips: ReactionChip[];
   tail: string[];
   deleted: boolean;
@@ -3566,7 +3570,7 @@ export function rowAccessibilityLabel({
   quoted?: string | null;
 }): string {
   const parts = [
-    authorLabel,
+    authorIsAgent ? `${authorLabel}, 에이전트` : authorLabel,
     timeLabel(message.createdAtMs),
     replyTo ?? '',
     quoted ?? '',
@@ -3595,7 +3599,7 @@ export function rowAccessibilityLabel({
 //
 // ## 메시지처럼 생겼지만 메시지가 아니다
 //
-// 이름줄은 진짜 행과 같은 모양이다(에이전트 색, 에이전트 태그, 책임자) — 그것이
+// 이름줄은 진짜 행과 같은 모양이다(에이전트 색, 책임자) — 그것이
 // 이 칸이 **누구의 답을 기다리는 자리**인지 말하는 방법이기 때문이다. 대신 본문
 // 자리는 비어 있고, 그 비어 있음을 한 낱말로 적는다. 시각도, 반응도, 길게 누르기도
 // 없다: 아직 아무것도 일어나지 않았으므로 할 수 있는 일도 없다.
@@ -3625,7 +3629,7 @@ export function WorkingRow({
     <View
       // 한 행 = 한 접근성 원소, 메시지 행과 같은 규칙. 문장 하나로 읽힌다.
       accessible
-      accessibilityLabel={`${parts.name} 작업 중, 답을 기다리는 중입니다`}
+      accessibilityLabel={`${parts.name}, 에이전트, 작업 중, 답을 기다리는 중입니다`}
       style={[styles.row, styles.rowStartsGroup]}
       testID={`working-row-${memberId}`}>
       <View style={[styles.rowInner, styles.rowAvatarReserve]}>
@@ -3643,9 +3647,6 @@ export function WorkingRow({
               {parts.handle}
             </Text>
           ) : null}
-          <View style={styles.agentTag}>
-            <Text style={styles.agentTagText}>에이전트</Text>
-          </View>
           {owner ? (
             <Text style={styles.authorMeta} numberOfLines={1}>
               {`${owner.displayName}님이 관리`}
@@ -3970,13 +3971,6 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   authorNameAgent: {color: color.agent},
   authorHandle: {fontSize: font.meta, color: color.textFaint},
   authorMeta: {fontSize: font.meta, color: color.textFaint},
-  agentTag: {
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-    borderRadius: radius.sm,
-    backgroundColor: color.agentSurface,
-  },
-  agentTagText: {fontSize: font.caption, color: color.agent, fontWeight: '600'},
   // 그룹 머리의 시각. 연속 행의 것과 **같은 밝기**여야 한다 — 위 주석 참조.
   time: {fontSize: font.meta, color: color.textMuted},
   // 앱이 말하는 문장이다 — 구분축은 `appVoice.ts` 의 `※` 가 든다. 인용 안의

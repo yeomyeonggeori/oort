@@ -894,6 +894,14 @@ export function MessageRow({
               >
                 {isAgent ? `@${author?.handle ?? name}` : name}
               </span>
+              {/* 「에이전트」 배지는 눈에서 뺐다(#4065): 눈에는 이름 색(--agent)과 둥근
+                  사각 아바타가 에이전트임을 나르고, 귀에는 이 낱말이 나른다. 색은
+                  보조기술에 닿지 않으므로 글자 없이 두면 정보가 사라진다. */}
+              {isAgent && (
+                <span className="sr-only" data-testid="row-agent-sr">
+                  , 에이전트
+                </span>
+              )}
               {owner && (
                 <span className="truncate text-meta text-ink-muted">
                   · {owner.displayName} 님이 관리
