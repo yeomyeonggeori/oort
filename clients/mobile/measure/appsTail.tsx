@@ -84,6 +84,14 @@ export function AppsTailSurface({which}: {which: string}): React.JSX.Element {
   let audience: number | null = 5;
   if (which === 'notices-a') {
     rows = NOTICES_A.map((n, i) => reply(`n${i}`, i + 2, '답을 만들지 못했어요.', bad(n)));
+  } else if (which === 'notices-c') {
+    // #4058: 실행 장소가 없는 문(Agent Port) — 문장만, 행동 없음.
+    rows = [reply('p', 2, '답을 만들지 못했어요.', bad({kind: 'login_lost', plugin_id: 'gmail'}))];
+    // #4058: system 행(정지·건너뜀 줄)은 본문이 이미 그 문장이다: 앱 문장을 또 붙이지 않는다.
+    rows.push({
+      ...reply('sys', 20, 'Hermes가 꺼져 있어서 못 했어요.', bad({kind: 'site_off', site: 'hermes'})),
+      type: 'system',
+    } as Message);
   } else if (which === 'notices-b') {
     rows = NOTICES_B.map((n, i) => reply(`n${i}`, i + 2, '답을 만들지 못했어요.', bad(n)));
   } else {
