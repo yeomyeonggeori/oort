@@ -2221,3 +2221,117 @@ async fn an_app_that_lost_the_owners_grant_stops_delivery() {
     .await;
     assert_eq!(jobs(&su, &fx).await, 3, "install disabled → stopped");
 }
+
+/// The claim-time half of 「배달 직전마다 활성 사람 멤버를 다시 센다」 (#3948 K2-3), on
+/// the gateway lane (`method='gateway'`, claimed by `oort_jobs_claim`): two of the
+/// owner's jobs are queued while the agent is plain; it is then marked and pinned to
+/// the operator's env link. With one active person the claim hands the first over;
+/// once the workspace has three again the second is closed unrun with its own
+/// reason (not the foreign-author one), its run cancelled and one audit row written.
+/// (The fixture agent is a hosted dial-in agent: that is the lane whose claim SQL is
+/// under test, the trial rule in it does not care how the agent got its pin.)
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (#3948)"]
+async fn a_trial_job_is_closed_at_claim_when_the_workspace_grew() {
+    let (su, _app, f, base, client) = setup().await;
+    let mention = format!("@{} 메일 확인해 줘", f.handle);
+    send(&client, &base, &f, &f.owner_jwt, f.channel, None, &mention).await;
+    let second_msg = send(&client, &base, &f, &f.owner_jwt, f.channel, None, &mention).await;
+    assert_eq!(jobs(&su, &f).await, 2, "two owner jobs queued while plain");
+
+    assert_eq!(
+        put_mark(
+            &client,
+            &base,
+            &f,
+            &f.owner_jwt,
+            f.agent,
+            json!({"enabled": true})
+        )
+        .await,
+        200
+    );
+    sqlx::query(
+        "INSERT INTO agent_provider_pin(agent_member_id, workspace_id, kind, pinned_by) \
+         VALUES($1,$2,'operator_env',$3)",
+    )
+    .bind(f.agent)
+    .bind(f.workspace)
+    .bind(f.owner)
+    .execute(&su)
+    .await
+    .unwrap();
+
+    // Control: one active person (the owner) -> exactly one job is handed over.
+    sqlx::query(
+        "UPDATE member SET status='suspended' WHERE workspace_id=$1 AND kind='human' AND id <> $2",
+    )
+    .bind(f.workspace)
+    .bind(f.owner)
+    .execute(&su)
+    .await
+    .unwrap();
+    let first = port_call(
+        &client,
+        &base,
+        &f.bearer,
+        "oort_jobs_claim",
+        json!({"limit": 1}),
+    )
+    .await;
+    assert_eq!(
+        first["jobs"].as_array().map_or(0, Vec::len),
+        1,
+        "one person: delivered: {first}"
+    );
+
+    // The workspace grows again: the other queued job is NOT handed over, it is closed.
+    sqlx::query("UPDATE member SET status='active' WHERE workspace_id=$1 AND kind='human'")
+        .bind(f.workspace)
+        .execute(&su)
+        .await
+        .unwrap();
+    let later = port_call(
+        &client,
+        &base,
+        &f.bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(
+        later["jobs"].as_array().map_or(0, Vec::len),
+        0,
+        "three people: nothing handed over: {later}"
+    );
+    let closed: Vec<Option<String>> = sqlx::query_scalar(
+        "SELECT last_error FROM outbox WHERE workspace_id=$1 AND kind='agent_job' \
+          AND partition_key=$2 AND status='done'",
+    )
+    .bind(f.workspace)
+    .bind(f.agent)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        closed,
+        vec![Some(
+            "connector trial: workspace no longer has exactly one person; job closed".to_string()
+        )],
+        "{second_msg}"
+    );
+    let cancelled: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM agent_run WHERE workspace_id=$1 AND agent_member_id=$2 \
+            AND status='cancelled' AND error->>'code'='connector_trial_members'",
+    )
+    .bind(f.workspace)
+    .bind(f.agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(cancelled, 1);
+    assert_eq!(
+        skip_reasons(&su, &f, "agent.connector_owner.job_closed").await,
+        vec!["connector_trial_members".to_string()]
+    );
+}
