@@ -92,6 +92,15 @@ describe("plugin API wire boundary", () => {
     });
   });
 
+  it("reads momo.hosted so the consent window can tell a server-held connection apart (#3943)", () => {
+    // 서버가 연결을 들고 있는 앱(팀 공유 드라이브)만 true다. 필드가 없으면 undefined(옛 서버는 D1-A로 읽는다).
+    expect(pluginDetailFromWire(detailFixture).hosted).toBeUndefined();
+    const hostedManifest = { ...githubManifest, momo: { ...githubManifest.momo, hosted: true } };
+    expect(pluginDetailFromWire({
+      plugin: { ...detailFixture.plugin, manifest: hostedManifest },
+    }).hosted).toBe(true);
+  });
+
   it("keeps optional display metadata absent until the server sends it", () => {
     expect(pluginDetailFromWire(detailFixture).termsURL).toBeUndefined();
     const display = pluginDetailFromWire({

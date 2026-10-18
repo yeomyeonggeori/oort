@@ -1043,11 +1043,17 @@ async function assertPluginScopeConsent(page, size) {
     JSON.stringify(layout)
   );
 
+  // 허용 창은 권한마다 따로 동의받는다(#3943): 아무것도 고르지 않은 채 열린다. 그래서 「선택 0개」
+  // 상태는 따로 비우지 않아도 열자마자 서 있고, 아래에서 사람이 하나씩 고른다.
   const scopeCheckboxes = dialog.getByRole("checkbox");
   const scopeCount = await scopeCheckboxes.count();
-  for (let index = 0; index < scopeCount; index += 1) {
-    await scopeCheckboxes.nth(index).click();
-  }
+  check(
+    `${size.name} 허용 창은 아무것도 고르지 않은 채 열리고 동의 두 줄이 선다`,
+    scopeCount > 0 &&
+      (await dialog.getByRole("checkbox", { checked: true }).count()) === 0 &&
+      (await page.getByTestId("plugin-consent-custody").textContent())?.includes("토큰은 oort에 없어요") === true &&
+      (await page.getByTestId("plugin-consent-custody").textContent())?.includes("처음 쓸 때 실행 장소에서 로그인해요") === true
+  );
   // 0선택 상태에서 "왜 못 하는가"를 말하는 문장은 이 라벨 하나뿐이다. 그것이
   // 읽히는지까지 재지 않으면, 이 단정은 문장이 opacity-50으로 2.20:1까지
   // 내려가도 통과한다(MOMO-642 R1 H-1이 실제로 그렇게 통과했다). 그래서 여기서
@@ -1203,6 +1209,9 @@ async function assertPluginScopeConsent(page, size) {
 
   await grant.click();
   await dialog.waitFor({ state: "visible" });
+  for (let index = 0; index < scopeCount; index += 1) {
+    await scopeCheckboxes.nth(index).click();
+  }
   await confirm.click();
   await dialog.waitFor({ state: "hidden" });
   const revoke = page.getByTestId("plugin-scope-revoke");
