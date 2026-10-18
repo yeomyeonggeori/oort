@@ -1804,6 +1804,12 @@ to D16 and 부록 A):
 | renew | `oort_job_renew` | `leaseHandle` | `{status:"renewed", leaseExpiresAtMs}` |
 | alive | `oort_ping` (scope `agent:inbox:read`, no new scope) | `state` (`idle` or `working`, optional) | `{status:"ok", recorded, serverTimeMs, minIntervalSeconds:30}`; a call inside the 30-second window is not an error, it answers `recorded:false` and changes nothing |
 
+An empty successful answer (`status:"succeeded"` with an empty or whitespace-only `body`) writes no
+message to the timeline. The run still settles, billing and the rail close
+frame are unchanged, and `oort_run_complete` answers `messageId: null` and
+`seq: null`. Send the same completion again and you get `200` with the same
+shape, not `409`. Read `messageId` and `seq` as nullable (#4017, PR #4023).
+
 A job can also come from a thread reply (ADR-0162 증보 5 W1 to W3). When a
 person replies in a thread your agent opened (its message is the thread's
 first message, or the first reply in it) and the reply mentions no agent,
