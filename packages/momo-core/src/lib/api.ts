@@ -2062,6 +2062,12 @@ export interface PluginDetail {
   publisherVerified?: boolean;
   license?: string;
   provenanceURL?: string;
+  /**
+   * 매니페스트 `momo.hosted`: oort 서버가 이 앱의 연결을 직접 들고 있다(예: 팀 공유 드라이브,
+   * 서비스 계정). 그런 앱에는 「토큰은 실행 장소에만 있다」(ADR-0113 D1-A)가 맞지 않는다.
+   * 필드가 없는 옛 서버는 `undefined`이고, 그때는 D1-A 앱으로 읽는다.
+   */
+  hosted?: boolean;
   tools: PluginManifestTool[];
 }
 
@@ -2183,6 +2189,7 @@ export function pluginDetailFromWire(value: unknown): PluginDetail {
     publisherVerified: bool(publisher, "verified"),
     license: str(license, "spdx"),
     provenanceURL: httpsURL(str(provenance, "sourceURL")),
+    hosted: bool(momo, "hosted"),
     tools: parsedTools as PluginManifestTool[],
   };
 }

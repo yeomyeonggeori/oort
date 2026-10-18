@@ -42,6 +42,8 @@ import {
   nonAdminInstallGuidance,
   pluginActionButtonState,
   pluginActionConfirmation,
+  pluginConnectionChipLabel,
+  pluginConsentCustodyLines,
   pluginConsentScopeAction,
   pluginControlsVisible,
   pluginDetailErrorMessage,
@@ -58,7 +60,6 @@ import {
   settlePluginScopeChanges,
   scopeSentence,
   toolsForPluginScope,
-  workspaceInstallationLabel,
   type PluginAction,
   type PluginRoleState,
   type PluginScopeChangeKind,
@@ -405,7 +406,7 @@ export function PluginSection({ offline }: { offline: boolean }) {
                           칩은 색 없이도 말한다: 설치됨/비활성/미설치는 세 문자열이
                           이미 구분하고 있고(StatusChip은 색에만 의미를 싣지 않는다),
                           이 표면에서 색은 위험 신호의 것이다. */}
-                      <StatusChip tone="muted">{workspaceInstallationLabel(plugin)}</StatusChip>
+                      <StatusChip tone="muted">{pluginConnectionChipLabel(plugin, policy?.length ?? 0)}</StatusChip>
                     </span>
                     {/* 서버의 `description`은 영어 매니페스트 문구라서 공식 앱은 한 줄 소개로 바꿔 말한다. */}
                     <span className="text-meta text-ink-muted">{pluginSubtitle(plugin)}</span>
@@ -616,6 +617,8 @@ function PluginDetailPanel({
               {/* 앱 이름은 아래 섹션 제목(body 굵게)보다 한 단 위다: 이 패널의 주인이 누구인지가 먼저 읽힌다. */}
               <h3 className="text-title font-semibold text-ink">{detail.name}</h3>
               {detail.official && <StatusChip tone="muted">공식</StatusChip>}
+              {/* 목록 줄과 같은 읽기다(`pluginConnectionChipLabel`): 두 곳이 따로 계산하지 않는다. */}
+              <StatusChip tone="muted">{pluginConnectionChipLabel(plugin, policyTools.length)}</StatusChip>
             </div>
             <p className="text-meta text-ink-muted">{pluginSubtitle(detail)} · 버전 {detail.version}</p>
           </div>
@@ -965,7 +968,11 @@ function PluginScopeConsentDialog({
   onDismissError: () => void;
   onConfirm: (scopes: string[]) => void;
 }) {
-  const [selectedScopes, setSelectedScopes] = useState<string[]>(() => consent.scopes);
+  // 허용은 권한마다 따로 동의받는다: 허용 창은 아무것도 고르지 않은 채 열리고, 사람이 고른 권한만
+  // 요청이 된다. 회수는 거두는 쪽이라 모두 골라 둔 채 열려서 빼는 것으로 좁힌다.
+  const [selectedScopes, setSelectedScopes] = useState<string[]>(() =>
+    consent.kind === "grant" ? [] : consent.scopes
+  );
   const actionErrorRef = useRef<HTMLDivElement>(null);
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
   const isGrant = consent.kind === "grant";
@@ -1039,7 +1046,7 @@ function PluginScopeConsentDialog({
             </legend>
             <p className="text-meta text-ink-muted">
               {isGrant
-                ? "권한마다 연결된 도구와 데이터 범위를 확인한 뒤 계속하세요."
+                ? "권한마다 연결된 도구와 데이터 범위를 확인하고, 허용할 권한만 직접 골라 주세요."
                 : "회수하면 선택한 권한에 연결된 아래 도구를 더 이상 사용할 수 없어요."}
             </p>
             {/* The ONE live region for selection state. Unchecking the last box
@@ -1166,6 +1173,19 @@ function PluginScopeConsentDialog({
               <DialogDescription>
                 선택한 권한으로 사용할 수 있던 도구가 내 사용자 정책에서 제거돼요.
               </DialogDescription>
+            )}
+            {isGrant && pluginConsentCustodyLines(consent.plugin).length > 0 && (
+              // 허용이 무엇을 맡기는 일이 아닌지 결정 앞에서 말한다(ADR-0113 D1-A). 두 줄은 서로
+              // 다른 사실이라 목록으로 선다.
+              <ul
+                // 안심 문장은 결정의 근거라서 곁의 설명(muted)보다 한 단 위, 본문 톤이다(design-review M2).
+                className="flex flex-col gap-1 text-body text-ink"
+                data-testid="plugin-consent-custody"
+              >
+                {pluginConsentCustodyLines(consent.plugin).map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
             )}
             {isGrant && consent.plugin.installed && consent.plugin.enabled && managerNames.length > 0 && (
               <div className="flex flex-wrap items-center gap-2">

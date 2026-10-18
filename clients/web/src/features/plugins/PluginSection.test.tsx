@@ -4,7 +4,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { serverSurface } from "@momo/core/features/capabilities/serverSurfaces";
-import type { MembershipRole } from "@momo/core/lib/api";
+import { ApiError, type MembershipRole } from "@momo/core/lib/api";
+import { NO_INSTALLER_SENTENCE } from "./model";
 // 서버가 실제로 준 바이트다(server-rust 시험이 못박는다, #3859). 지어낸 응답이 아니다.
 import catalogWire from "../../../../../server/Fixtures/plugin-wire/catalog.json";
 import githubDetailWire from "../../../../../server/Fixtures/plugin-wire/detail-github.json";
@@ -36,6 +37,9 @@ const h = vi.hoisted(() => ({
   probe: vi.fn(),
   listError: null as unknown,
   role: "owner" as string,
+  /** 나 말고 디렉터리에 있는 사람들(관리자 안내 시험이 쓴다). */
+  others: [] as Array<Record<string, unknown>>,
+  grant: vi.fn(),
 }));
 
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
@@ -53,6 +57,8 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
       return actual.pluginDetailFromWire(wire);
     },
     probePluginWriteRoutes: (...args: unknown[]) => h.probe(...args),
+    // 쓰기는 호출 횟수와 인자를 센다: 「동의 없이 grant POST 0」은 이 mock의 호출 수로 잰다.
+    grantPluginScope: (...args: unknown[]) => h.grant(...args),
   };
 });
 
@@ -68,6 +74,7 @@ vi.mock("@/features/workspace/useWorkspace", () => ({
     directory: {
       members: [
         { id: ME, kind: "human", status: "active", role: h.role, displayName: "곽성재", handle: "seongjae" },
+        ...h.others,
       ],
     },
   }),
@@ -103,6 +110,8 @@ beforeEach(() => {
   ]);
   h.listError = null;
   h.role = "owner";
+  h.others = [];
+  h.grant.mockReset();
   h.probe.mockReset();
   // 기본은 오늘의 서버: 설치·권한 경로가 라우터에 없다.
   h.probe.mockResolvedValue([404, 404]);
@@ -210,9 +219,9 @@ describe("읽기 전용: 설치·권한 경로가 없는 서버 (오늘의 Rust 
     const row = (id: string) => (q(el, `plugin-catalog-${id}`)?.textContent ?? "").replace(/\s+/g, " ");
     // 서버의 정책 투영(toolPolicy)에 GitHub 도구 둘이 실려 있다.
     expect(row(GITHUB)).toContain("허용한 도구 2개");
-    expect(row(GITHUB)).toContain("워크스페이스 설치됨");
-    expect(row(LINEAR)).toContain("워크스페이스 비활성");
-    expect(row(NOTION)).toContain("워크스페이스 미설치");
+    expect(row(GITHUB)).toContain("설치됨 · 내가 허용함");
+    expect(row(LINEAR)).toContain("설치했지만 비활성");
+    expect(row(NOTION)).toContain("미설치");
     expect(row(NOTION)).toContain("허용한 도구 없음");
     // 한 줄: 내 허용 상태 · 연결하는 곳.
     expect(row(DRIVE)).toContain("허용한 도구 없음 · 연결 www.googleapis.com, oauth2.googleapis.com");
@@ -438,9 +447,10 @@ describe("열림: 설치·권한 경로가 서 있는 서버 (405, 405)", () => 
     h.role = "member";
     const el = await mount();
     await openDetail(el, NOTION);
-    await until(() => (q(el, "plugin-detail")?.textContent ?? "").includes("관리자"));
+    await until(() => (q(el, "plugin-detail")?.textContent ?? "").includes(NO_INSTALLER_SENTENCE));
     expect(writeControls(el)).toEqual([]);
-    expect(text(el, "plugin-detail")).toContain("앱 설치는 워크스페이스 관리자만 할 수 있어요.");
+    // 부탁할 사람이 목록에 없으면(이 시험의 디렉터리에는 나뿐이다) 활성 관리자가 없는 상태다.
+    expect(text(el, "plugin-detail")).toContain(NO_INSTALLER_SENTENCE);
   });
 });
 
@@ -519,5 +529,237 @@ describe("서버가 앱 목록을 싣지 않을 때와 비었을 때", () => {
     // 「설치할 수 있는」은 읽기만 되는 서버에서 약속이 된다.
     expect(text(el, "plugins-empty")).not.toContain("설치할 수 있는");
     expect(h.probe).not.toHaveBeenCalled();
+  });
+});
+
+
+// =============================================================================
+// #3943 (U-2): 설치가 열린 서버 위의 동의 창·관리자 안내·연결 상태.
+// =============================================================================
+
+const NOTION_WRITE_TOOL = {
+  name: "notion.update_page",
+  description: "페이지의 내용을 고칩니다.",
+  inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  risk: "write",
+  approvalPolicy: "require_approval",
+  schemaDigest: `sha256:${"c".repeat(64)}`,
+  scopes: ["notion:write"],
+};
+
+/** 노션을 설치·활성으로 두고 권한 둘(읽기·쓰기)을 선언하게 한다. 내가 허용한 도구는 `allowed`가 정한다. */
+function installNotion(allowed: string[]) {
+  const manifest = {
+    ...notionManifest,
+    mcp: { ...notionManifest.mcp, tools: [...notionManifest.mcp.tools, NOTION_WRITE_TOOL] },
+    momo: {
+      ...notionManifest.momo,
+      approvalTier: { ...notionManifest.momo.approvalTier, "notion.update_page": "workspace_write" },
+    },
+  };
+  const detail = detailWire(manifest) as { plugin: Record<string, unknown> };
+  detail.plugin.installed = true;
+  detail.plugin.enabled = true;
+  h.details.set(NOTION, detail);
+  const catalog = JSON.parse(JSON.stringify(catalogWire)) as {
+    plugins: Array<Record<string, unknown>>;
+    toolPolicy: { plugins: Array<{ pluginId: string; tools: unknown[] }> };
+  };
+  const item = catalog.plugins.find((plugin) => plugin.pluginId === NOTION);
+  if (item) Object.assign(item, { installed: true, enabled: true });
+  const tools = [
+    { name: "notion.search", risk: "read", approvalTier: "read_only" },
+    { name: "notion.update_page", risk: "write", approvalTier: "workspace_write" },
+  ].filter((tool) => allowed.includes(tool.name));
+  catalog.toolPolicy.plugins = catalog.toolPolicy.plugins.filter((entry) => entry.pluginId !== NOTION);
+  if (tools.length > 0) catalog.toolPolicy.plugins.push({ pluginId: NOTION, tools });
+  h.catalog = catalog;
+}
+
+const click = async (el: HTMLElement, testId: string) =>
+  act(async () => {
+    (q(el, testId) as HTMLElement).click();
+  });
+
+describe("관리자 안내: 설치는 관리자만 한다 (U-2)", () => {
+  beforeEach(() => h.probe.mockResolvedValue([405, 405]));
+
+  it("관리자가 있으면 멤버에게 「○○님(관리자)에게 설치를 요청하세요」를 보이고 설치 버튼은 없다", async () => {
+    h.role = "member";
+    h.others = [
+      { id: "a1", kind: "human", status: "active", role: "admin", displayName: "김관리", handle: "kim" },
+    ];
+    const el = await mount();
+    await openDetail(el, NOTION);
+    await until(() => (q(el, "plugin-detail")?.textContent ?? "").includes("(관리자)"));
+    expect(text(el, "plugin-detail")).toContain("김관리님(관리자)에게 설치를 요청하세요.");
+    expect(text(el, "plugin-detail")).not.toContain(NO_INSTALLER_SENTENCE);
+    expect(writeControls(el)).toEqual([]);
+  });
+
+  it("활성 관리자가 없으면(정지·에이전트뿐) 「설치할 사람이 없어요」를 그대로 보인다", async () => {
+    h.role = "member";
+    h.others = [
+      { id: "a2", kind: "human", status: "suspended", role: "admin", displayName: "정지", handle: "stop" },
+      { id: "a3", kind: "agent", status: "active", role: "admin", displayName: "봇", handle: "bot" },
+    ];
+    const el = await mount();
+    await openDetail(el, NOTION);
+    await until(() => (q(el, "plugin-detail")?.textContent ?? "").includes("설치할 사람이 없어요"));
+    expect(text(el, "plugin-detail")).toContain(
+      "이 워크스페이스에 앱을 설치할 사람이 없어요. 소유자 계정을 확인해 주세요."
+    );
+    expect(text(el, "plugin-detail")).not.toContain("(관리자)에게");
+    expect(writeControls(el)).toEqual([]);
+  });
+
+  it("관리자 본인에게는 안내 대신 설치 버튼이 선다", async () => {
+    h.role = "admin";
+    const el = await mount();
+    await openDetail(el, NOTION);
+    await until(() => writeControls(el).length > 0);
+    expect(writeControls(el)).toEqual(["워크스페이스에 설치"]);
+    expect(text(el, "plugin-detail")).not.toContain("설치를 요청하세요");
+    expect(text(el, "plugin-detail")).not.toContain(NO_INSTALLER_SENTENCE);
+  });
+});
+
+// 동의 창은 포털로 문서 맨 아래에 서므로 호스트가 아니라 문서에서 찾는다.
+const dq = (testId: string) => document.querySelector(`[data-testid="${testId}"]`);
+const dtext = (testId: string) => (dq(testId)?.textContent ?? "").replace(/\s+/g, " ").trim();
+const clickDoc = async (testId: string) =>
+  act(async () => {
+    (dq(testId) as HTMLElement).click();
+  });
+
+describe("허용 동의: 동의 없이는 grant POST가 나가지 않는다 (U-2 red proof)", () => {
+  beforeEach(() => h.probe.mockResolvedValue([405, 405]));
+
+  async function openGrantDialog() {
+    installNotion([]);
+    h.role = "member"; // 내 사용 허용은 설치와 달리 본인이 직접 누르는 일이다: 관리자가 아니어도 된다.
+    const el = await mount();
+    await openDetail(el, NOTION);
+    await until(() => q(el, "plugin-scope-grant"));
+    await click(el, "plugin-scope-grant");
+    await until(() => dq("plugin-scope-consent"));
+    return el;
+  }
+
+  it("창을 열기만 하거나 닫아도 POST는 0이고, 아무것도 고르지 않은 채 열린다", async () => {
+    await openGrantDialog();
+    expect(h.grant).toHaveBeenCalledTimes(0);
+    // 권한마다 따로 동의: 모두 미리 골라 두지 않는다.
+    expect(dtext("plugin-scope-selection-count")).toBe("2개 중 0개 선택");
+    expect((dq("plugin-scope-notion:read") as HTMLInputElement).checked).toBe(false);
+    expect((dq("plugin-scope-notion:write") as HTMLInputElement).checked).toBe(false);
+    // 고른 것이 없으면 확인 버튼을 눌러도 아무것도 나가지 않는다.
+    await clickDoc("plugin-scope-confirm");
+    await flush();
+    expect(h.grant).toHaveBeenCalledTimes(0);
+    await clickDoc("plugin-scope-cancel");
+    await flush();
+    expect(dq("plugin-scope-consent")).toBeNull();
+    expect(h.grant).toHaveBeenCalledTimes(0);
+  });
+
+  it("동의 창에 두 줄이 서고, 그 앱의 토큰이 oort에 없다고 말한다", async () => {
+    await openGrantDialog();
+    const lines = [...(dq("plugin-consent-custody")?.querySelectorAll("li") ?? [])].map((li) => li.textContent);
+    expect(lines).toEqual(["토큰은 oort에 없어요", "처음 쓸 때 실행 장소에서 로그인해요"]);
+  });
+
+  it("서버가 연결을 들고 있는 앱(hosted, 팀 공유 드라이브)의 동의 창에는 두 줄이 서지 않는다", async () => {
+    // 같은 두 줄을 서버가 직접 연결을 들고 있는 앱에 말하면 거짓이다(ADR-0113 D1-A는 사람별 OAuth 앱의 계약이다).
+    installNotion([]);
+    const drive = detailWire(driveManifest) as { plugin: Record<string, unknown> };
+    drive.plugin.installed = true;
+    drive.plugin.enabled = true;
+    h.details.set(DRIVE, drive);
+    const catalog = h.catalog as { plugins: Array<Record<string, unknown>> };
+    Object.assign(catalog.plugins.find((plugin) => plugin.pluginId === DRIVE) ?? {}, { installed: true, enabled: true });
+    h.role = "member";
+    const el = await mount();
+    await openDetail(el, DRIVE);
+    await until(() => q(el, "plugin-scope-grant"));
+    await click(el, "plugin-scope-grant");
+    await until(() => dq("plugin-scope-consent"));
+    expect(dq("plugin-consent-custody")).toBeNull();
+    expect(dtext("plugin-scope-consent")).not.toContain("토큰은 oort에 없어요");
+  });
+
+  it("고른 권한만 권한마다 한 번씩 나간다: 고르지 않은 권한은 나가지 않는다", async () => {
+    await openGrantDialog();
+    h.grant.mockResolvedValue({
+      pluginId: NOTION, status: "granted", enabled: true, capabilities: [],
+    });
+    await clickDoc("plugin-scope-notion:read");
+    await clickDoc("plugin-scope-confirm");
+    await until(() => h.grant.mock.calls.length > 0);
+    await flush();
+    expect(h.grant).toHaveBeenCalledTimes(1);
+    expect(h.grant.mock.calls[0]).toEqual([WS, NOTION, "notion:read"]);
+  });
+
+  it("여러 권한 중 일부가 실패해도 화면은 서버가 지금 말하는 상태와 같다", async () => {
+    const el = await openGrantDialog();
+    h.grant.mockImplementation(async (_ws: string, _plugin: string, scope: string) => {
+      if (scope === "notion:write") throw new ApiError(403, "forbidden");
+      // 서버는 읽기 한 권한만 받아들였다: 다음 카탈로그 읽기가 그 사실을 싣는다.
+      installNotion(["notion.search"]);
+      return { pluginId: NOTION, scope, status: "granted", enabled: true, capabilities: [] };
+    });
+    await clickDoc("plugin-scope-notion:read");
+    await clickDoc("plugin-scope-notion:write");
+    await clickDoc("plugin-scope-confirm");
+    await until(() => q(el, "plugin-scope-change-result"));
+    await until(() => text(el, "plugin-status-mine").includes("notion 읽기 권한"));
+    expect(h.grant.mock.calls.map((call) => call[2])).toEqual(["notion:read", "notion:write"]);
+    const receipt = text(el, "plugin-scope-change-result");
+    expect(receipt).toContain("1개 권한을 허용했어요");
+    expect(receipt).toContain("1개는 변경하지 못했어요");
+    // 영수증이 아니라 서버 상태가 화면의 사실이다: 쓰기는 허용되지 않았고 읽기만 허용됐다.
+    expect(text(el, "plugin-status-mine")).toContain("notion 읽기 권한");
+    expect(text(el, "plugin-status-mine")).not.toContain("쓰기 권한");
+    expect(text(el, "plugin-detail")).toContain("설치됨 · 내가 허용함");
+    // 남은 쓰기 권한은 다시 허용할 수 있다.
+    expect(q(el, "plugin-scope-grant")).not.toBeNull();
+  });
+});
+
+describe("연결 상태 1·2칸이 목록과 상세에서 같다 (U-2)", () => {
+  beforeEach(() => h.probe.mockResolvedValue([405, 405]));
+
+  it("미설치(1칸)와 설치됨·내 허용 없음(2칸)", async () => {
+    const el = await mount();
+    await openDetail(el, NOTION);
+    const chipOf = (id: string) => (q(el, `plugin-catalog-${id}`)?.textContent ?? "");
+    expect(chipOf(NOTION)).toContain("미설치");
+    expect(text(el, "plugin-detail")).toContain("미설치");
+    // 설치하고 허용하지 않은 앱: 같은 함수가 목록과 상세에 같은 이름을 준다.
+    installNotion([]);
+    act(() => root?.unmount());
+    host?.remove();
+    root = null;
+    host = null;
+    const second = await mount();
+    await openDetail(second, NOTION);
+    expect(text(second, `plugin-catalog-${NOTION}`)).toContain("설치됨 · 내 허용 없음");
+    expect(text(second, "plugin-detail")).toContain("설치됨 · 내 허용 없음");
+  });
+});
+
+describe("옛 서버에서는 설치 표면이 없다 (U-2 serverSurfaces 숨김)", () => {
+  it("설치·권한 경로가 404인 서버는 관리자에게도 설치·허용 버튼과 동의 창이 없다", async () => {
+    installNotion([]);
+    h.role = "owner";
+    h.probe.mockResolvedValue([404, 404]);
+    const el = await mount();
+    await openDetail(el, NOTION);
+    await until(() => q(el, "plugin-install-closed"));
+    expect(writeControls(el)).toEqual([]);
+    expect(q(el, "plugin-scope-grant")).toBeNull();
+    expect(q(el, "plugin-scope-consent")).toBeNull();
+    expect(h.grant).toHaveBeenCalledTimes(0);
   });
 });
