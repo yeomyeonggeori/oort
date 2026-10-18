@@ -1138,6 +1138,11 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels/{ch}/read-state",
             put(routes::read_state::update),
         )
+        // presence heartbeat (ADR-0204 증보 3, #4018): "I have this channel on screen".
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/viewing",
+            put(routes::viewing::touch),
+        )
         // inbox (ADR-0199, #3681): the member's own "to me" list. Humans only;
         // the member is the bearer, never a request field.
         .route("/v1/workspaces/{ws}/inbox", get(routes::inbox::list))

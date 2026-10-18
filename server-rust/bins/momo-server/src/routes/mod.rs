@@ -89,6 +89,7 @@ pub mod terminal_attach;
 /// ADR-0170 — link unfurl settings, message-level remove, image proxy.
 pub mod unfurl;
 pub mod usage;
+pub mod viewing;
 /// #1265 — public signed + Slack-compatible ingress (ADR-0115).
 pub mod webhook_ingress;
 /// #1222 — 인바운드 웹훅 설치 관리 (ADR-0115).

@@ -10065,6 +10065,48 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/channels/{channelId}/viewing:
+    put:
+      tags: [read-state]
+      operationId: touchChannelViewing
+      summary: Presence heartbeat - "I have this channel on screen".
+      description: >
+        A client that is showing the channel (app in the foreground, channel
+        open) sends this about every 15 seconds. The server stamps the
+        caller's last-seen time for the channel; the push judgment treats a
+        stamp younger than 30 seconds as "looking at this channel" and holds
+        the push (ADR-0204 amendment 3, #4018). Unlike the read cursor it needs
+        no `seq`, so it covers a long streamed answer. Stop sending when the
+        channel leaves the screen or the app goes to the background; the
+        stamp expires on its own. The owner is always the authenticated
+        principal; there is no body and no member id. A beat younger than 5
+        seconds after the previous one is accepted and not rewritten. A
+        client that never sends it keeps the cursor-only behavior.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      responses:
+        "204":
+          description: Recorded.
+        "400":
+          description: The ids are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Not a member of this channel, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
   /v1/workspaces/{workspaceId}/dms:
     get:
       tags: [dms]

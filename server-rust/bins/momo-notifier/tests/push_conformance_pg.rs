@@ -67,7 +67,9 @@
 //! | `a_short_answer_is_pushed_once_when_it_opens_and_closes_before_anyone_judges_it` | judge the opening and the closing candidate as two pushes |
 //! | `a_stream_that_was_stopped_or_failed_is_told_like_a_finished_one` | skip the close candidate for a closing write that carries an `outcome` |
 //! | `a_streamed_answers_window_is_thirty_seconds_wide_at_the_close` | widen or narrow the streamed branch's window (the 15 s and 45 s askers bracket 30) |
-//! | `known_gap_a_stream_watched_longer_than_the_window_from_a_standing_cursor_is_pushed` | (pins the M2 cost) change what a cursor that stood still for 45 s means before a presence signal exists |
+//! | `a_stream_watched_longer_than_the_window_from_a_standing_cursor_is_pushed_without_a_heartbeat` | (the old-client edge, #4018) make a stale cursor alone read as "looking" |
+//! | `a_stream_watched_longer_than_the_window_is_not_pushed_while_the_heartbeat_is_fresh` | drop the `channel_viewing` clause from the `asked` arm |
+//! | `a_stale_heartbeat_or_one_for_another_channel_does_not_keep_the_push_back` | widen the heartbeat window, or drop the channel match from it |
 //! | `a_retried_streams_freeze_between_attempts_announces_nothing_and_its_real_close_announces_once` | let a `provisional` freeze enqueue the candidate, or ignore the flag |
 //! | `a_candidate_judged_while_a_retried_stream_is_frozen_is_held` | judge a `provisional` freeze as a closed stream (drop `provisional` from the judgment's `streaming`), so a late candidate pushes the half answer and spends the message's push slot |
 //! | `a_pause_announced_as_an_end_would_settle_the_push_the_real_answer_needs` | (a control, not a revert) the premise the `provisional` marker rests on: one push per message, so a push of the half answer swallows the finished answer's |
@@ -4685,20 +4687,18 @@ async fn a_streamed_answers_window_is_thirty_seconds_wide_at_the_close() {
     );
 }
 
-/// **A known gap, pinned (review of #3987, M2).** An asker who watched a stream to its end
-/// from a cursor that stood still is pushed at the close.
+/// **The old-client edge (#3987 M2, kept by #4018).** An asker whose client sends no heartbeat
+/// and who watched a stream to its end from a cursor that stood still is pushed at the close.
 ///
 /// A read cursor — and `last_read_at` with it — moves only when `last_read_seq` does, and a
 /// stream spends no `seq`: after the client marks the opening slice read, nothing moves the
-/// cursor for the rest of a long answer, whether the person kept looking or put the phone
-/// down. The server cannot tell them apart, so past the window it pushes both; the cost is a
-/// banner for someone who was looking, and the alternative is the H1 silence for someone who
-/// was not (a banner for a phone that is in the person's hand is also the case #2592 leaves
-/// to a follow-up). A presence signal is the fix; when it lands, this test is rewritten, not
-/// deleted.
+/// cursor for the rest of a long answer. Without a presence beat the server cannot tell
+/// looking from gone, so past the window it pushes. The heartbeat (next test) is the fix for
+/// clients that send it; this one pins that the cursor alone is unchanged for those that do not.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
-async fn known_gap_a_stream_watched_longer_than_the_window_from_a_standing_cursor_is_pushed() {
+async fn a_stream_watched_longer_than_the_window_from_a_standing_cursor_is_pushed_without_a_heartbeat(
+) {
     let _guard = drain_test_lock().await;
     ensure_schema_and_roles();
     let su = superuser_pool().await;
@@ -4727,9 +4727,146 @@ async fn known_gap_a_stream_watched_longer_than_the_window_from_a_standing_curso
     assert_eq!(
         people_woken(&room, &sent, streamed),
         BTreeSet::from([ASKER]),
-        "the known cost of the window: a standing cursor reads as 'gone' after 30 seconds: \
-         {sent:?}"
+        "no heartbeat, cursor 45 s old: reads as gone: {sent:?}"
     );
+}
+
+/// The same asker, same standing cursor, but the client beat 10 seconds before the close:
+/// they are looking, so nothing is pushed (#4018).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn a_stream_watched_longer_than_the_window_is_not_pushed_while_the_heartbeat_is_fresh() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let room = seed_approval_room(&su).await;
+    let pool = momo_notifier_pool().await;
+
+    let question = human_says(&su, &room, room.channel_id, room.id(ASKER)).await;
+    let run = chat_run_for(&su, &room, room.channel_id, Some(question), "running").await;
+    let streamed = open_streamed_answer(&su, &room, run, question).await;
+    age_message(&su, streamed, 50).await;
+    set_read_cursor_at(
+        &su,
+        &room,
+        ASKER,
+        message_seq(&su, streamed).await,
+        "now() - interval '45 seconds'",
+    )
+    .await;
+    set_viewing(
+        &su,
+        room.workspace_id,
+        room.channel_id,
+        room.id(ASKER),
+        "10",
+    )
+    .await;
+    drain_room_full(&su, &pool, &room).await;
+    close_streamed_answer(&su, &room, streamed, None).await;
+
+    let (_, sent) = drain_room_full(&su, &pool, &room).await;
+    assert!(
+        people_woken(&room, &sent, streamed).is_empty(),
+        "a beat 10 s ago is inside the window: {sent:?}"
+    );
+}
+
+/// What does not count as looking: a beat older than the window, and a beat for another
+/// channel. Each asker below stands on a 45 s-old cursor.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn a_stale_heartbeat_or_one_for_another_channel_does_not_keep_the_push_back() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let room = seed_approval_room(&su).await;
+    let pool = momo_notifier_pool().await;
+
+    let stale = ASKER;
+    let other_channel = Who::AgentOwner;
+    let q_stale = human_says(&su, &room, room.channel_id, room.id(stale)).await;
+    let run_stale = chat_run_for(&su, &room, room.channel_id, Some(q_stale), "running").await;
+    let q_other = human_says(&su, &room, room.channel_id, room.id(other_channel)).await;
+    let run_other = chat_run_for(&su, &room, room.channel_id, Some(q_other), "running").await;
+    let stale_stream = open_streamed_answer(&su, &room, run_stale, q_stale).await;
+    let other_stream = open_streamed_answer(&su, &room, run_other, q_other).await;
+    for (stream, who) in [(stale_stream, stale), (other_stream, other_channel)] {
+        age_message(&su, stream, 120).await;
+        set_read_cursor_at(
+            &su,
+            &room,
+            who,
+            message_seq(&su, stream).await,
+            "now() - interval '45 seconds'",
+        )
+        .await;
+    }
+    // ASKER's beat for this channel is 45 s old (stale). AgentOwner's only beat is fresh but
+    // for a different channel.
+    set_viewing(
+        &su,
+        room.workspace_id,
+        room.channel_id,
+        room.id(stale),
+        "45",
+    )
+    .await;
+    let elsewhere = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO channel (id, workspace_id, kind, name) VALUES ($1, $2, 'public', 'elsewhere-viewing')",
+    )
+    .bind(elsewhere)
+    .bind(room.workspace_id)
+    .execute(&su)
+    .await
+    .expect("seed another channel");
+    set_viewing(
+        &su,
+        room.workspace_id,
+        elsewhere,
+        room.id(other_channel),
+        "2",
+    )
+    .await;
+
+    drain_room_full(&su, &pool, &room).await;
+    close_streamed_answer(&su, &room, stale_stream, None).await;
+    close_streamed_answer(&su, &room, other_stream, None).await;
+
+    let (_, sent) = drain_room_full(&su, &pool, &room).await;
+    assert_eq!(
+        people_woken(&room, &sent, stale_stream),
+        BTreeSet::from([stale]),
+        "a 45 s-old beat is outside the window: {sent:?}"
+    );
+    assert_eq!(
+        people_woken(&room, &sent, other_stream),
+        BTreeSet::from([other_channel]),
+        "a beat for another channel is not looking at this one: {sent:?}"
+    );
+}
+
+/// A presence beat `age_secs` seconds old (SQL integer literal) for `member` in `channel`.
+async fn set_viewing(
+    su: &PgPool,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    member: Uuid,
+    age_secs: &str,
+) {
+    sqlx::query(&format!(
+        "INSERT INTO channel_viewing (workspace_id, channel_id, member_id, seen_at) \
+         VALUES ($1, $2, $3, now() - interval '{age_secs} seconds') \
+         ON CONFLICT (channel_id, member_id) DO UPDATE \
+            SET seen_at = now() - interval '{age_secs} seconds'"
+    ))
+    .bind(workspace_id)
+    .bind(channel_id)
+    .bind(member)
+    .execute(su)
+    .await
+    .expect("set the presence beat");
 }
 
 /// **#3987 acceptance 2.** An asker who was away from the very first word does not get an

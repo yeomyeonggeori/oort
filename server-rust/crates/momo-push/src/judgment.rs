@@ -95,14 +95,17 @@
 //!   lag when it does not: the question the window asks is "are they looking at this
 //!   channel right now?", and it is asked when the push would go out.
 //!
-//!   *What the window cannot tell.* A person's cursor — and `last_read_at` with it — moves
-//!   only when `last_read_seq` does (`read_state.rs`), and a stream spends no `seq`. So an
-//!   asker who watched a stream for longer than 30 s from a cursor that stood still looks,
-//!   to the server, exactly like one who left during it, and is pushed at the close
-//!   (`known_gap_a_stream_watched_longer_than_the_window_from_a_standing_cursor_is_pushed`
-//!   pins it). The cost is a banner for a person who was looking; the alternative is the
-//!   H1 silence for one who was not. A presence signal is the way to tell them apart, and
-//!   is a follow-up.
+//!   *What the cursor cannot tell, and the heartbeat that can* (ADR-0204 증보 3, #4018). A
+//!   person's cursor — and `last_read_at` with it — moves only when `last_read_seq` does
+//!   (`read_state.rs`), and a stream spends no `seq`. So an asker who watched a stream for
+//!   longer than 30 s from a cursor that stood still looks, to the cursor alone, like one
+//!   who left. A client with the channel on screen therefore beats
+//!   `PUT .../channels/{ch}/viewing` (`channel_viewing.seen_at`), and this arm also reads
+//!   that stamp inside the same window: a fresh beat means "looking", whatever the cursor
+//!   says. The two signals OR together (either one inside the window suppresses the push),
+//!   so a client that predates the heartbeat keeps today's cursor-only behaviour
+//!   (`a_stream_watched_longer_than_the_window_from_a_standing_cursor_is_pushed_without_a_heartbeat`
+//!   pins that edge; `..._is_not_pushed_while_the_heartbeat_is_fresh` pins the fix).
 //!
 //!   *Streams this arm does not judge at all.* A line that never streamed (the hosted
 //!   gateway's `complete`, the team-AI helper's sends, both sweeps' lines, a worker turn
@@ -384,6 +387,15 @@ pub async fn judge_targets(
                                            OR seen.last_read_at >= (SELECT created_at FROM msg) \
                                                 - make_interval(secs => $4::double precision) ) \
                                     END \
+                            ) \
+                            AND NOT EXISTS ( \
+                            SELECT 1 FROM channel_viewing viewing \
+                             WHERE viewing.workspace_id = $1 \
+                               AND viewing.channel_id = (SELECT channel_id FROM msg) \
+                               AND viewing.member_id = mem.id \
+                               AND viewing.seen_at >= CASE WHEN (SELECT streamed FROM msg) \
+                                    THEN now() ELSE (SELECT created_at FROM msg) END \
+                                    - make_interval(secs => $4::double precision) \
                             ) \
                         THEN 'mention' END \
                     ELSE NULL \

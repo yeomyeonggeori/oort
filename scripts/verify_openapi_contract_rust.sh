@@ -3816,6 +3816,11 @@ sample read-state-put put \
 guard_jq --argjson s "$GATE_MESSAGE_SEQ" '.last_read_seq == $s' \
   "read cursor records the requested seq"
 
+# 존재 신호(하트비트, ADR-0204 증보 3 / #4018): 본문 없는 204. 소유자는 bearer.
+sample channel-viewing-put put \
+  "/v1/workspaces/{workspaceId}/channels/{channelId}/viewing" \
+  "/v1/workspaces/$WS/channels/$GENERAL_CHANNEL_ID/viewing" 204 "" "$ACCESS"
+
 sample read-state-list get "/v1/workspaces/{workspaceId}/read-state" \
   "/v1/workspaces/$WS/read-state" 200 "" "$ACCESS"
 guard_jq --arg id "$GENERAL_CHANNEL_ID" \
