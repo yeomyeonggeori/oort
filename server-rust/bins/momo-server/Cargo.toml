@@ -80,6 +80,12 @@ momo-unfurl = { path = "../../crates/momo-unfurl" }
 # `{base}/models` (or OpenRouter `{base}/key`) — and what it returns carries
 # labels and provider-stated numbers only, never a body or an error string.
 momo-provider-probe = { path = "../../crates/momo-provider-probe" }
+# #3947 E-GH1 / ADR-0205 D2·D8: the crate owns the HTTP client for the one call
+# phase 1 makes to GitHub (the manifest code → credentials conversion), so this
+# manifest still does not. Its whole API is `GithubAppConverter::convert_manifest`
+# — one egress-guarded POST to a host fixed at construction — and what it returns
+# has no `client_secret` field and redacts the two secrets under Debug.
+momo-github = { path = "../../crates/momo-github" }
 
 axum.workspace = true
 tokio = { workspace = true, features = ["net", "signal", "sync", "time"] }

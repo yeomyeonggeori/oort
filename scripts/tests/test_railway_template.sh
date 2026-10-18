@@ -200,12 +200,12 @@ if ! diff -u "$canon" "$got" >"$TMP_ROOT/keys.diff"; then
   fail "key-set diff not empty"
 fi
 key_count="$(wc -l <"$canon" | tr -d ' ')"
-[ "$key_count" = "46" ] || fail "key-set count expected 46 got $key_count"
+[ "$key_count" = "47" ] || fail "key-set count expected 47 got $key_count"
 grep -Fxq 'MOMO_SELF_HOST_PLATFORM=railway' "$happy_env" || \
   fail "T2 stdout missing MOMO_SELF_HOST_PLATFORM=railway stamp"
 pass "key-set equality (diff empty) count=$key_count"
 
-# #2438 — --railway --claim swaps password ↔ claim; count stays 46 (#2066: +2).
+# #2438 — --railway --claim swaps password ↔ claim; count stays 47 (#2066: +2).
 claim_env="$TMP_ROOT/railway-claim.env"
 claim_ec="$(
   run_railway "$claim_env" env \
@@ -236,7 +236,7 @@ if ! diff -u "$TMP_ROOT/claim.expected.keys" "$TMP_ROOT/claim.got.keys" \
   fail "--railway --claim key-set diff not empty"
 fi
 claim_count="$(wc -l <"$TMP_ROOT/claim.got.keys" | tr -d ' ')"
-[ "$claim_count" = "46" ] || fail "--railway --claim key-set count expected 46 got $claim_count"
+[ "$claim_count" = "47" ] || fail "--railway --claim key-set count expected 47 got $claim_count"
 pass "key-set --claim equality (diff empty) count=$claim_count (password variant $key_count; 1:1 swap)"
 
 # ---------------------------------------------------------------------------

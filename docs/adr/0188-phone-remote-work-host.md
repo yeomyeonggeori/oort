@@ -13,6 +13,7 @@
 - 증보: 2026-09-29 **§8.7** — R1 진입 조건 「NSE 토큰 축소」의 구현 계약(#3121): `push_fetch` 토큰, 허용 경로 둘, 수명, 키체인 그룹 이동과 마이그레이션. 결재 인용: R2 결재 「전부 권장대로」(2026-09-28), Q11 「R1 미결 항목은 병렬로 닫는다」, R2-E10 보안 검수 M2(#3030). 본문 결정은 바꾸지 않았다.
 - 증보: 2026-10-07 **§8.8** — Status Accepted. 호스트 목록 가시성(#3583): 남의 `scope=member` 호스트는 존재·온라인만 보이고 기기 이름·공개키·기능 목록은 가린다. 결재 인용: 성재 2026-10-07 「필드만 줄이기 (Recommended)」. 본문 결정은 바꾸지 않았다.
 - 증보: 2026-10-16 **ADR-0204 D6** — 잠금 화면 승인·거절용 `push_action` 토큰: §8.7 `push_fetch`와 같은 모양(typ JWT, 세션 계열 생존 규칙, 6시간, 계열당 4개)이고 허용 경로는 승인 결정 하나, 앱 전용 키체인 그룹에만 둔다. 작업 호스트 권한은 여전히 잠금 화면에서 결정하지 않는다(D7 open 카테고리). 정본은 ADR-0204. 본문 결정은 바꾸지 않았다.
+- 증보: 2026-10-18 **§8.9 [확인 필요] 3개 닫음**(M-S0 #3941 실측, `docs/planning/research/2026-10-18-mcp-oauth-injection-spike-m-s0.md`): 주입 위치 = Claude는 `session/new` `mcpServers`만(`settings.json` 아님), 토큰 = 기본 키체인(Claude는 프로필 해시로 분리), client id = Codex `oauth.client_id`·Claude `oauth.clientId`. 4번(claude.ai 계정 커넥터)은 runtime-unverified.
 - 증보: 2026-10-16 **§8.9** — 앱(커넥터) 원격 MCP를 내 맥 세션에 싣는 모양(ADR-0113 증보 2의 workd 경로). ADR-0192 D3 설정 묶음의 MCP 항목에 「앱 항목」을 더한다. 읽기 도구의 host 자동 허락(R) 한 가지는 Proposed로 적었고 별도 확인 전에는 열지 않는다. 결재 인용: 성재 2026-10-16 「각자 + 1인 워크스페이스에서 Hermes 시험 (추천)」, 「코덱스 앱이나 다른 그록봇류 앱처럼 …」. **D5·D6 본문과 §3 불변식은 바꾸지 않았다.**
 - Deciders: 성재
 - 발제: ADR-0187 D3 — 성재 「그 정도 수준의 원격 작업 그리고 알림 시스템 그리고 데스크탑에서 사용자들이 했던 걸 트래킹하고 온전히 독까지 요청할 수 있는 마치 코덱스나 클라우드에 iOS 앱 같은 느낌」, D2 「테이스케일 안 쓰고 iOS 앱을 쓰는 걸 목표로」
@@ -527,11 +528,11 @@ R1 진입 조건 「알림 확장(NSE) 토큰은 알림 읽기 전용으로 좁�
 - 기각한 (b) 「서버가 job마다 `tool_grants`로 매니페스트 URL을 주입」: 서버가 침해되면 임의 MCP 서버를 소유자 맥에 붙일 수 있다. D3의 「서버는 목록과 내용을 함께 바꿀 수 없다」를 깨므로, 하려면 별도 red proof와 결재가 필요하다. (a)는 #2787·R2가 먼저라 늦지만 새 신뢰 경로를 만들지 않는다.
 
 **주입 지점.**
-- Claude: host가 spawn마다 다시 쓰는 설정 층(`settingSources: []` + `strictMcpConfig: true` 아래의 host 소유 `settings.json` `mcpServers`, policy.rs 모듈 문서 :24-31) 또는 ACP `session/new`의 `mcpServers`. **`--mcp-config` 인자는 쓰지 않는다** — 인자 금지 바늘(`mcp`)을 풀지 않는다. 둘 중 어느 쪽인지는 M-S0에서 claude-agent-acp 실측으로 정한다 [확인 필요: M-S0].
+- Claude: **ACP `session/new`의 `mcpServers`만** 쓴다. host 소유 `settings.json` `mcpServers`는 격리를 끈 대조에서도 읽히지 않아 후보가 아니다(`settings.json`에는 그 키가 없다). **`--mcp-config` 인자는 쓰지 않는다** — 인자 금지 바늘(`mcp`)을 풀지 않는다. [V: M-S0 실측 2026-10-18, `docs/planning/research/2026-10-18-mcp-oauth-injection-spike-m-s0.md` §1]
 - Codex: `config.toml` `mcp_servers` 항목만(D3 그대로). `plugins`·`apps`·`remote_plugin` feature 끄기(§8.1 조건 2)는 그대로다 — 앱 연결은 Codex 자체 앱 마켓이 아니라 이 항목으로만 한다.
 - 원격 HTTP 항목만 받는다(`transport = streamable_http`, 매니페스트 검증기와 같다). 앱 항목으로 stdio 서버를 띄우지 않는다 — D3 잔여 위험(stdio 기동은 권한 다리 밖)을 앱 경로에서 늘리지 않는다.
-- 항목의 `env`·`headers`에 리터럴 값이 있으면 거부(D3 그대로). OAuth는 하네스가 그 host 안에서 한다(ADR-0125 D9 연결 카드). 토큰은 host 전용 프로필 폴더(ADR-0191 D1)에 남는다 [확인 필요: Claude Code·Codex가 원격 MCP OAuth 토큰을 어디에 두는지, 프로필 폴더 밖(키체인 등)으로 새는지 — M-S0 실측. 밖이면 이 절을 다시 연다].
-- DCR 없는 서버(Google·GitHub·Slack)의 미리 등록한 client 값은 묶음에 넣지 않는다(시크릿 금지). 하네스가 client id 설정을 받는 방법 [확인 필요: M-S0] — 받지 못하면 그 앱은 이 경로에서 v1 「미지원」으로 표시하고, Google은 Hermes 시험과 하네스 자체 커넥터(ADR-0113 증보 2 E6) 실측을 먼저 한다. Google 세 앱은 ADR-0113 증보 2 G-S0(dawn.kim의 Developer Preview 가입·OAuth client 준비) 전까지 어느 경로에서도 열지 않는다.
+- 항목의 `env`·`headers`에 리터럴 값이 있으면 거부(D3 그대로). OAuth는 하네스가 그 host 안에서 한다(ADR-0125 D9 연결 카드). 토큰은 하네스 기본값이면 **프로필 폴더 밖 macOS 키체인**에 남는다 [V: M-S0, §2]. Claude는 서비스 이름이 `CLAUDE_CONFIG_DIR` 해시로 갈려 프로필마다 항목이 따로고(ADR-0191 D1 :74와 같은 모양), 키체인이 없는 환경에서는 저장되지 않는다(평문 폴백 없음). Codex는 키체인 항목이 `CODEX_HOME`으로 갈리지 않으며 `config.toml` `mcp_oauth_credentials_store = "file"`로 `$CODEX_HOME/.credentials.json`에 둘 수 있다. **조건에 따라 이 절을 다시 연다**: 프로필 폴더 안 보관을 요구하면 Codex는 `file`로, Claude는 대안이 없어 ADR-0191 :74의 키체인 수용을 확인해야 한다(소유자 판단)..
+- DCR 없는 서버(Google·GitHub·Slack)의 미리 등록한 client 값은 묶음에 넣지 않는다(시크릿 금지). 하네스가 client id 설정을 받는 방법은 있다 [V: M-S0, §3]: Codex는 `config.toml` `[mcp_servers.<이름>.oauth] client_id`, Claude는 항목의 `oauth: {clientId, callbackPort}`(ACP 어댑터는 `session/new` `mcpServers`의 `oauth`를 버리므로 `_meta.claudeCode.options.mcpServers`로 실어야 하고, 어댑터 경유 시작은 runtime-unverified). 받지 못하는 경로(Claude의 어댑터 경유 OAuth가 실패하면)는 — 받지 못하면 그 앱은 이 경로에서 v1 「미지원」으로 표시하고, Google은 Hermes 시험과 하네스 자체 커넥터(ADR-0113 증보 2 E6) 실측을 먼저 한다. Google 세 앱은 ADR-0113 증보 2 G-S0(dawn.kim의 Developer Preview 가입·OAuth client 준비) 전까지 어느 경로에서도 열지 않는다.
 
 **도구 호출과 등급(ADR-0113 증보 2 E4).**
 - 모든 앱 도구 호출은 권한 다리(D5·§8.6)로 온다. 결정자는 host 소유자 본인뿐이다(D3).

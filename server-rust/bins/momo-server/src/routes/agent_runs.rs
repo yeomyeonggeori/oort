@@ -156,6 +156,7 @@ pub async fn create(
         state.agent_port.config.claude_subscription_agents_enabled;
     let hosted_delivery_enabled = state.agent_port.config.hosted_delivery_enabled;
     let gateway_enabled = state.agent_gateway.enabled();
+    let connector_trial = state.cohosted.config.attest();
     // With the managed gateway off AND hosted delivery closed no agent can take
     // a work run, so the answer needs no transaction (the pre-#3515 fast path,
     // and the same precedence over the membership/agent lookups). When either
@@ -183,6 +184,39 @@ pub async fn create(
                 else {
                     return Ok(Err(ApiError::not_found("active channel agent not found")));
                 };
+                // ADR-0113 증보 2 E3 (#3938) — an agent that runs its owner's
+                // connected apps takes a work request from that human only
+                // (`type=work` passes the same predicate as a mention). Before
+                // every write and every hosted question; there is no thread to
+                // answer in, so the refusal is the response itself. `require_human`
+                // above already keeps an agent or work host out.
+                if let Some(connector_owner) =
+                    momo_agent::agent_connector_owner_in_tx(conn, workspace_id, agent_member_id)
+                        .await?
+                {
+                    if connector_owner != actor_member_id {
+                        return Ok(Err(ApiError::coded(
+                            StatusCode::FORBIDDEN,
+                            "connector_owner_only",
+                            "this agent runs its owner's apps and takes requests from its owner only",
+                        )));
+                    }
+                    // #3948 (ADR-0203 증보 K2·K4) — the owner, but a 「커넥터 시험」
+                    // that is stopped right now takes no request: re-measured here,
+                    // not remembered from when it was turned on.
+                    let facts =
+                        momo_agent::connector_trial_facts_in_tx(conn, workspace_id, agent_member_id)
+                            .await?;
+                    if let Some(stop) =
+                        momo_agent::connector_trial_stop(facts.as_ref(), &connector_trial)
+                    {
+                        return Ok(Err(ApiError::coded(
+                            StatusCode::CONFLICT,
+                            stop.skip_reason(),
+                            momo_agent::connector_trial_notice_body(stop),
+                        )));
+                    }
+                }
                 // ADR-0193 D4·D6 (#2815) — a work request is a call, and a
                 // subscription agent takes calls from its owner only (and from
                 // nobody while the operator's switch is off). Checked before

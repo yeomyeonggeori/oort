@@ -51,7 +51,8 @@ use momo_agent::{
     load_a2a_gate_snapshot_in_tx, load_mention_candidates_in_tx, mention_diagnostic_detail,
     mention_job_broadcast_payload, mention_job_payload, mention_run_input, paused_mention_body,
     paused_mention_props, resolve_mention_routing, A2aBlock, A2aLimits, MentionCandidate,
-    MentionTrigger, NewAgentRun, RunTrigger, SKIP_OWNER_ONLY_NON_OWNER,
+    MentionTrigger, NewAgentRun, RunTrigger, SKIP_CONNECTOR_OWNER_NON_OWNER,
+    SKIP_OWNER_ONLY_NON_OWNER,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{DbError, PgConnection};
@@ -205,6 +206,22 @@ pub async fn route_a2a_mentions_in_tx(
                 &trigger,
                 agent,
                 SKIP_OWNER_ONLY_NON_OWNER,
+                None,
+            )
+            .await?;
+            continue;
+        }
+        // ADR-0113 증보 2 E3 (#3938) — an agent that runs its owner's connected
+        // apps is called by that human alone; an agent is never that human. Same
+        // shape as the refusal above: audit only, no line, and
+        // `evaluate_a2a_spawn` refuses the same target again from its own read.
+        if agent.connector_owner.is_some() {
+            skip_reason(
+                &mut *conn,
+                &send,
+                &trigger,
+                agent,
+                SKIP_CONNECTOR_OWNER_NON_OWNER,
                 None,
             )
             .await?;
@@ -708,6 +725,7 @@ mod tests {
             hosted_channel_approved: false,
             is_channel_member: true,
             owner_only: None,
+            connector_owner: None,
             owner_member_id: None,
             owner_display_name: None,
             hosted_confirmed_by_owner: false,

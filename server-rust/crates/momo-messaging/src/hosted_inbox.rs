@@ -219,6 +219,7 @@ pub async fn append_message_reference_in_tx(
              ON a.workspace_id=hc.workspace_id AND a.member_id=hc.agent_member_id \
           WHERE hc.workspace_id=$1 AND hc.agent_member_id=$3 AND hc.id=$4 \
             AND (a.invocation_scope <> 'owner_only' OR a.owner_human_id=$5) \
+            AND (a.connector_owner_human_id IS NULL OR a.connector_owner_human_id=$5) \
             AND hc.status='active' AND hc.proved_at IS NOT NULL \
             AND t.kind='agent_bearer' \
             AND t.credential_class IN ('hosted_active','hosted_oauth_access') \
@@ -324,6 +325,11 @@ pub async fn append_message_reference_in_tx(
 /// other message in an approved channel — reaches a hosted runtime (and, via
 /// the inbox counter, its doorbell), so it is where "a non-owner's message is
 /// not delivered" is enforced for everything that is not a mention job.
+///
+/// ADR-0113 증보 2 E3 (#3938): an agent that runs its owner's connected apps
+/// (`connector_owner_human_id`) is a recipient only of that human's messages —
+/// the same author predicate, independent of `owner_only`, and not subject to
+/// the instance's subscription switches (it is not a subscription predicate).
 pub async fn hosted_inbox_recipients_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -351,6 +357,7 @@ pub async fn hosted_inbox_recipients_in_tx(
                  OR ($4 AND a.owner_human_id=$3 \
                      AND ($5 OR a.uses_owner_key \
                           OR COALESCE(a.subscription_harness,'claude_code') <> 'claude_code'))) \
+            AND (a.connector_owner_human_id IS NULL OR a.connector_owner_human_id=$3) \
             AND hc.status='active' AND hc.proved_at IS NOT NULL \
             AND t.kind='agent_bearer' \
             AND t.credential_class IN ('hosted_active','hosted_oauth_access') \
@@ -722,6 +729,10 @@ pub async fn list_hosted_inbox_in_tx(
     .fetch_all(&mut *conn)
     .await?;
 
+    // ADR-0113 증보 2 E3 (#3938): the `visible` column also re-checks, at read
+    // time, that a message event of an agent running its owner's apps was written
+    // by that owner. A message queued before the mark, by anyone else, is hidden
+    // (fail-closed: an unreadable author is "anyone else").
     let rows = sqlx::query(
         "SELECT e.inbox_seq,e.event_kind,e.source_message_id,e.source_channel_id, \
                 e.source_message_seq,e.source_outbox_id,e.source_run_id, \
@@ -730,7 +741,15 @@ pub async fn list_hosted_inbox_in_tx(
                    WHERE visible.workspace_id=e.workspace_id \
                      AND visible.channel_id=e.source_channel_id \
                      AND visible.member_id=e.agent_member_id \
-                     AND visible.left_at IS NULL)) AS visible \
+                     AND visible.left_at IS NULL) \
+                 AND NOT (e.event_kind='message' AND EXISTS ( \
+                   SELECT 1 FROM agent ca \
+                    WHERE ca.workspace_id=e.workspace_id AND ca.member_id=e.agent_member_id \
+                      AND ca.connector_owner_human_id IS NOT NULL \
+                      AND ca.connector_owner_human_id IS DISTINCT FROM ( \
+                        SELECT sm.author_member_id FROM message sm \
+                         WHERE sm.workspace_id=e.workspace_id AND sm.id=e.source_message_id)))) \
+                 AS visible \
            FROM hosted_agent_inbox_event e \
           WHERE e.workspace_id=$1 AND e.connection_id=$2 AND e.agent_member_id=$3 \
             AND e.inbox_seq > $4 \
