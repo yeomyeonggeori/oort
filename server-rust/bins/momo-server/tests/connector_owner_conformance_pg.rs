@@ -1854,6 +1854,20 @@ async fn a_person_joining_after_the_trial_is_on_stops_delivery_with_one_notice()
     let (_, view) = get_trial(&client, &base, &t, &t.operator_jwt).await;
     assert_eq!(view["enabled"], true);
     assert_eq!(view["stopped"], "members", "{view}");
+    // The DM screen's own delivery state says it too (not 「열려 있어요」).
+    let dm_state: Value = client
+        .get(format!(
+            "{base}/v1/workspaces/{}/channels/{}/agent-dm-delivery",
+            t.workspace, t.dm
+        ))
+        .bearer_auth(&t.operator_jwt)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(dm_state["state"], "connector_trial_stopped", "{dm_state}");
 
     // Red proof 3: the other person's own mention is the owner sentence, not delivery.
     // (Their token: a session row for the bare member.)
@@ -1894,7 +1908,8 @@ async fn a_person_joining_after_the_trial_is_on_stops_delivery_with_one_notice()
     .unwrap();
     assert_eq!(owner_sentences, 1);
 
-    // Control: the second person leaves, and the very same owner mention is a job again.
+    // Control: the second person leaves, and the very same owner mention is a job again,
+    // and the DM state is no longer the stopped one.
     deactivate(&su, &t, second).await;
     sqlx::query("UPDATE message SET created_at = created_at - interval '11 minutes' WHERE workspace_id=$1 AND author_member_id=$2")
         .bind(t.workspace)
@@ -1913,6 +1928,19 @@ async fn a_person_joining_after_the_trial_is_on_stops_delivery_with_one_notice()
     )
     .await;
     assert_eq!(jobs(&su, &fx).await, 2, "counted live: delivered again");
+    let dm_state: Value = client
+        .get(format!(
+            "{base}/v1/workspaces/{}/channels/{}/agent-dm-delivery",
+            t.workspace, t.dm
+        ))
+        .bearer_auth(&t.operator_jwt)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(dm_state["state"], "not_hosted", "{dm_state}");
 }
 
 #[tokio::test]
