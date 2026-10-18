@@ -1980,8 +1980,15 @@ compose `agents` 프로파일은 아직 없어요(Railway 경로가 검증된 �
 검증이 아니에요.** oort는 Hermes의 도구, `mcp_servers`, 토큰 볼륨을 볼 수 없어요.
 
 1. **oort 쪽 준비.** 워크스페이스의 활성 사람이 정확히 1명(본인)이에요. 앱은
-   본인이 직접 설치·허용했어요(설정 › 앱). 나중에 어떤 경로로든 두 번째 사람이
-   들어오면 다음 메시지부터 멈춰요.
+   본인이 직접 설치·허용했어요(설정 › 앱). 그 워크스페이스에서 운영자 env 링크에
+   고정된 에이전트는 이 Hermes **하나뿐**이에요. Hermes는 토큰 볼륨이 하나라서
+   거기에 닿는 다른 에이전트는 누가 불렀든 앱을 쓸 수 있어요(시험을 켤 때, 그리고
+   켜 둔 동안 에이전트를 하나 더 고정할 때 둘 다 `409`로 거절해요). 나중에 어떤
+   경로로든 두 번째 사람이 들어오면 다음 메시지부터 멈춰요. **oort가 강제하지
+   않는 것:** 같은 인스턴스의 *다른* 워크스페이스에서 이 Hermes에 고정된
+   에이전트, 그리고 고정도 팀 링크도 없어서 워커가 `HERMES_BASE_URL`로 보내는
+   에이전트예요. 이 Hermes는 전용으로 두고, 인스턴스가 팀의 기본 모델 링크로 쓰고
+   있으면 시험을 켜지 마세요.
 2. **Hermes `config.yaml`**: 앱마다 항목 하나, `mcp_servers`에 다른 것은 두지 않아요.
 
 ```yaml
@@ -1995,6 +2002,8 @@ mcp_servers:
     sampling: {enabled: false} # Hermes 기본값은 켜짐이에요
     tools:
       include: [<정확한 도구 이름, 읽기 도구만, 글롭 없음>]
+      resources: false         # Hermes 기본값은 켜짐이고 `include` 밖이에요
+      prompts: false           # 같아요
 ```
 
    키는 앱 id에서 `com.momo.plugins.`를 뗀 뒤 소문자로 하고 `-`·`.`를 `_`로
@@ -2010,9 +2019,11 @@ mcp_servers:
    따로 깜빡할 스위치가 없어요).
    - Hermes 서비스에도 `OORT_COHOSTED_AGENT_CONNECTOR_APPS=<oort와 같은 목록>`이
      있고, 서버 항목이 그 앱과 **1:1**이에요.
-   - 모든 서버가 원격 `https://` 주소예요(`command`·`args` 없음).
+   - 모든 서버가 원격 한 줄 `https://` 주소예요(`command`·`args` 없음).
    - `trust`가 정확히 `untrusted`이고 `sampling.enabled`가 명시적으로 `false`예요.
-   - `tools.include`가 비지 않은 정확한 이름 목록이에요(`*`·`?`·`[` 없음).
+   - `tools.include`가 비지 않은 정확한 이름 목록이고(`*`·`?`·`[` 없음),
+     `tools.resources`·`tools.prompts`가 명시적 `false`예요(Hermes는 서버마다
+     리소스·프롬프트 읽기 도구를 `include` 밖에 기본으로 켜 둬요).
    - `cronjob`·`delegation`·`web`이 `agent.disabled_toolsets`에 있어요.
    - §3.4.1의 도구 잠금 규칙(허용목록·승인·CORS·키 길이·YOLO 없음·텔레메트리 끔)도
      그대로 지켜져야 해요.
@@ -2035,11 +2046,14 @@ mcp_servers:
    `409 connector_trial_members`(활성 사람이 정확히 1명이 아님),
    `409 connector_trial_apps`(목록의 앱 중 내 활성 허용이 없는 것이 있음),
    `409 connector_trial_not_cohosted`(연결한 Hermes 에이전트가 아님),
+   `409 connector_trial_shared`(같은 Hermes에 고정된 다른 에이전트가 있음),
    `403`(운영자가 아님). 같은 경로의 `GET`은 켜져 있는지, 지금 배달이 멈춘 이유
    (`attest` | `members` | `apps`)가 있는지 보여 줘요.
 7. **켜져 있는 동안** Hermes는 본인만 부를 수 있어요(멘션·DM·작업 요청). 메시지마다
    세 사실을 다시 재요. 하나라도 어긋나면 Hermes 이름으로 한 문장이 오고, 고칠
-   때까지 아무것도 배달되지 않아요.
+   때까지 그 메시지는 배달되지 않아요. 이미 쌓인 작업은 워커가 가져갈 때 다시
+   보지만 사람 수만 봐요. 환영 인사와 승인 재개 작업은 선언·허용을 다시 보지
+   않아요.
 8. **회수 순서:** 시험 끄기(`{"enabled":false}`, 배달이 바로 멈춰요) -> 벤더 쪽
    연결 해제 -> `/opt/data/mcp-tokens/<server>.json`과 `mcp_servers` 항목 삭제 ->
    메일 본문이 남았을 수 있으면 `sessions/`도 삭제. 뒤의 세 가지는 oort가 대신하지

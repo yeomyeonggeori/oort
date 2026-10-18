@@ -2332,8 +2332,16 @@ verification** — oort cannot see Hermes' tools, its `mcp_servers` or its token
 volume.
 
 1. **Prerequisites in oort.** The workspace has exactly one active person (you).
-   You installed and granted each app yourself (설정 › 앱). A second person added
-   later — by any path — stops the trial at the next message.
+   You installed and granted each app yourself (설정 › 앱). The Hermes agent is the
+   **only** agent pinned to the operator env link in that workspace: Hermes has one
+   token volume, so any other agent that reaches it can use the apps whoever called
+   that agent (turning the trial on, and pinning one more agent while it is on, are
+   both refused with `409`). A second person added later — by any path — stops the
+   trial at the next message. **Not enforced by oort:** an agent in *another*
+   workspace of the same instance pinned to this Hermes, and agents with no pin
+   and no team link, which the worker sends to `HERMES_BASE_URL`. Keep this Hermes
+   dedicated; do not turn the trial on when the instance uses it as the team's
+   default model link.
 2. **Hermes `config.yaml`**, one entry per app, nothing else under `mcp_servers`:
 
 ```yaml
@@ -2347,6 +2355,8 @@ mcp_servers:
     sampling: {enabled: false} # Hermes' default is on
     tools:
       include: [<exact tool names, read tools only, no globs>]
+      resources: false         # Hermes' default is on, and it is outside `include`
+      prompts: false           # same
 ```
 
    The key is the app id without `com.momo.plugins.`, lowercase, `-` and `.`
@@ -2361,9 +2371,11 @@ mcp_servers:
    the opt-in, so there is no second switch to forget):
    - the Hermes service has `OORT_COHOSTED_AGENT_CONNECTOR_APPS=<the same list
      oort holds>` and the servers are **one to one** with those apps;
-   - every server is a remote `https://` URL (no `command`/`args`);
+   - every server is a remote single-line `https://` URL (no `command`/`args`);
    - `trust` is exactly `untrusted`, `sampling.enabled` is explicitly `false`;
-   - `tools.include` is a non-empty list of exact names (no `*`, `?`, `[`);
+   - `tools.include` is a non-empty list of exact names (no `*`, `?`, `[`), and
+     `tools.resources` and `tools.prompts` are explicitly `false` (Hermes adds
+     resource/prompt reader tools per server outside `include`, on by default);
    - `cronjob`, `delegation` and `web` are in `agent.disabled_toolsets`;
    - and every tool-lock rule of §3.4.1 still holds (the allow-list, approvals,
      CORS, key length, no YOLO, telemetry off).
@@ -2387,11 +2399,15 @@ mcp_servers:
    `409 connector_trial_members` (not exactly one active person),
    `409 connector_trial_apps` (a listed app has no active grant of yours),
    `409 connector_trial_not_cohosted` (not the connected Hermes agent),
+   `409 connector_trial_shared` (another agent is pinned to the same Hermes),
    `403` (not the operator). `GET` on the same path shows whether it is on and why
    delivery is stopped right now (`attest` | `members` | `apps`).
 7. **While it is on**, only you can call Hermes (mention, DM, work request); every
    message re-checks the three facts. When one fails you get one sentence in
-   Hermes' name and nothing is delivered until you fix it.
+   Hermes' name and the message is not delivered until you fix it. Work already
+   queued is judged again by the worker when it takes it, but only for the people
+   count; a welcome opener and an approval resume are not re-checked against the
+   declarations or the grants.
 8. **Revoke in this order:** turn the trial off (`{"enabled":false}`; delivery stops
    at once), disconnect the app at the vendor, delete
    `/opt/data/mcp-tokens/<server>.json` and the `mcp_servers` entry, and delete

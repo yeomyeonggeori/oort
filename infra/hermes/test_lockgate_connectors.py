@@ -27,7 +27,7 @@ def healthy():
         "auth": "oauth",
         "trust": "untrusted",
         "sampling": {"enabled": False},
-        "tools": {"include": ["search_threads", "get_thread"]},
+        "tools": {"include": ["search_threads", "get_thread"], "resources": False, "prompts": False},
     }
     return {
         "agent": {"disabled_toolsets": ["terminal", "code_execution", "browser", "cronjob", "delegation", "web"]},
@@ -85,13 +85,32 @@ class ConnectorRules(unittest.TestCase):
                 cfg["mcp_servers"]["gmail"]["sampling"] = value
             self.assertOnly(self.problems(cfg), "sampling.enabled must be explicitly false")
 
+    def test_the_resource_and_prompt_doors_must_be_explicitly_closed(self):
+        for door in ("resources", "prompts"):
+            for value in (None, True, "false", 0):
+                cfg = healthy()
+                if value is None:
+                    del cfg["mcp_servers"]["gmail"]["tools"][door]
+                else:
+                    cfg["mcp_servers"]["gmail"]["tools"][door] = value
+                self.assertOnly(self.problems(cfg), f"tools.{door} must be explicitly false")
+
+    def test_the_url_must_be_one_clean_https_address(self):
+        for url in ("https://a.example/x\nhttp://b.example", "https://a.example/ x", "", None, 5, "https://"):
+            cfg = healthy()
+            if url is None:
+                del cfg["mcp_servers"]["gmail"]["url"]
+            else:
+                cfg["mcp_servers"]["gmail"]["url"] = url
+            self.assertOnly(self.problems(cfg), ".url must be a single-line https:// address")
+
     def test_include_must_be_a_nonempty_exact_list(self):
         for include in (None, [], "get_thread", [""], ["get_*"], ["get_thread", "list?"], ["[ab]"]):
             cfg = healthy()
             if include is None:
                 del cfg["mcp_servers"]["gmail"]["tools"]
             else:
-                cfg["mcp_servers"]["gmail"]["tools"] = {"include": include}
+                cfg["mcp_servers"]["gmail"]["tools"] = {"include": include, "resources": False, "prompts": False}
             self.assertTrue(self.problems(cfg), f"include={include!r} must be refused")
 
     def test_a_local_process_or_plain_http_server_is_refused(self):
@@ -100,7 +119,7 @@ class ConnectorRules(unittest.TestCase):
         self.assertOnly(self.problems(cfg), "command/args")
         cfg = healthy()
         cfg["mcp_servers"]["gmail"]["url"] = "http://mcp.example.com/mcp"
-        self.assertOnly(self.problems(cfg), "must be https://")
+        self.assertOnly(self.problems(cfg), "single-line https:// address")
 
     def test_cronjob_delegation_and_web_must_stay_disabled(self):
         for toolset in lockgate.CONNECTOR_REQUIRED_DISABLED:

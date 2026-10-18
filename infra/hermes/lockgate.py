@@ -54,6 +54,7 @@ APPS_ENV = "OORT_COHOSTED_AGENT_CONNECTOR_APPS"  # the same list as oort's env, 
 PLUGIN_PREFIX = "com.momo.plugins."
 PLUGIN_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{2,127}$")  # plugin_registry_id_ck
 CONNECTOR_REQUIRED_DISABLED = ("cronjob", "delegation", "web")  # K4-1 on top of D6
+HTTPS_URL_RE = re.compile(r"^https://[^\s]+$")  # one line, no whitespace: a value Hermes reads as ONE address
 GLOB_CHARS = ("*", "?", "[")  # Hermes matches `tools.include` entries containing these as fnmatch globs
 
 
@@ -113,8 +114,8 @@ def connector_problems(cfg, env):
             continue
         if "command" in server or "args" in server:
             problems.append(f"{label} must be a remote server: command/args would run a local process")
-        if not str(server.get("url", "")).startswith("https://"):
-            problems.append(f"{label}.url must be https://")
+        if not isinstance(server.get("url"), str) or not HTTPS_URL_RE.match(server["url"]):
+            problems.append(f"{label}.url must be a single-line https:// address")
         # Hermes: a missing `trust` means FULL; only the literal value below keeps the write gate on.
         if server.get("trust") != "untrusted":
             problems.append(f"{label}.trust must be exactly 'untrusted' (missing means full)")
@@ -123,6 +124,11 @@ def connector_problems(cfg, env):
         if not isinstance(sampling, dict) or sampling.get("enabled") is not False:
             problems.append(f"{label}.sampling.enabled must be explicitly false (default is on)")
         tools = server.get("tools")
+        # Hermes registers resource and prompt UTILITY tools (list/read_resource, list/get_prompt) per server
+        # outside `tools.include`, and both default to ON: only an explicit false closes that second door.
+        for door in ("resources", "prompts"):
+            if not isinstance(tools, dict) or tools.get(door) is not False:
+                problems.append(f"{label}.tools.{door} must be explicitly false (default is on, outside tools.include)")
         include = tools.get("include") if isinstance(tools, dict) else None
         if not isinstance(include, list) or not include or not all(isinstance(x, str) and x for x in include):
             problems.append(f"{label}.tools.include must be a non-empty list of tool names")
