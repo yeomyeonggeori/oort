@@ -213,7 +213,10 @@ pub async fn add_repositories(
         return Ok(());
     }
     let ids: Vec<i64> = repositories.iter().map(|repo| repo.id).collect();
-    let names: Vec<String> = repositories.iter().map(|repo| repo.full_name.clone()).collect();
+    let names: Vec<String> = repositories
+        .iter()
+        .map(|repo| repo.full_name.clone())
+        .collect();
     let privates: Vec<bool> = repositories.iter().map(|repo| repo.private).collect();
     sqlx::query(
         "INSERT INTO github_installation_repository \
@@ -320,7 +323,12 @@ pub async fn list_unlinked_installations(
     .fetch_all(&mut *conn)
     .await?;
     rows.iter()
-        .map(|row| Ok((decode_installation(row)?, row.try_get::<i64, _>("repo_count")?)))
+        .map(|row| {
+            Ok((
+                decode_installation(row)?,
+                row.try_get::<i64, _>("repo_count")?,
+            ))
+        })
         .collect::<Result<_, sqlx::Error>>()
         .map_err(DbError::from)
 }
@@ -406,10 +414,7 @@ pub async fn record_claim_installation(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinkOutcome {
     /// This call linked the installation to `workspace_id`.
-    Linked {
-        workspace_id: Uuid,
-        member_id: Uuid,
-    },
+    Linked { workspace_id: Uuid, member_id: Uuid },
     /// Already linked to that workspace (a repeated signal): nothing changed.
     AlreadyLinked { workspace_id: Uuid },
     /// Linked to a different workspace: the claim cannot take it (409).
@@ -432,10 +437,11 @@ pub async fn try_link_installation(
     installation_id: i64,
     restrict_to_claim: Option<Uuid>,
 ) -> Result<LinkOutcome, DbError> {
-    // Lock the routing row first so two simultaneous signals serialise here.
+    // Two simultaneous signals serialise on `lock_installation_link`, taken by the caller; the
+    // `WHERE workspace_id IS NULL` below is the atomic guard that makes the link happen once.
     let installation: Option<(Option<Uuid>, bool)> = sqlx::query_as(
         "SELECT workspace_id, removed_at IS NOT NULL FROM github_app_installation \
-          WHERE installation_id = $1 FOR UPDATE",
+          WHERE installation_id = $1",
     )
     .bind(installation_id)
     .fetch_optional(&mut *conn)
@@ -514,6 +520,130 @@ pub async fn try_link_installation(
     })
 }
 
+/// Serialise the two signals of one installation's link. Both the setup-URL path and the signed
+/// `installation.*` path take this first, so a simultaneous pair cannot each miss the other's
+/// uncommitted half (T1 writes the claim while T2 writes the row, neither sees the other).
+pub async fn lock_installation_link(
+    conn: &mut PgConnection,
+    installation_id: i64,
+) -> Result<(), DbError> {
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(format!("github-install-link:{installation_id}"))
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
+}
+
+/// Look a live install claim up by its state hash without changing it (needs `app.github_link`).
+pub async fn peek_install_claim(
+    conn: &mut PgConnection,
+    hash: &[u8],
+) -> Result<Option<PendingClaim>, DbError> {
+    let row: Option<(Uuid, Uuid)> = sqlx::query_as(
+        "SELECT id, member_id FROM github_link_claim \
+          WHERE state_hash = $1 AND purpose = 'install' \
+            AND consumed_at IS NULL AND expires_at > now()",
+    )
+    .bind(hash)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(row.map(|(claim_id, member_id)| PendingClaim {
+        claim_id,
+        member_id,
+    }))
+}
+
+/// What the signed-event path found, before anything is linked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkCandidate {
+    NoInstallation,
+    AlreadyLinked {
+        workspace_id: Uuid,
+    },
+    /// Exactly one live claim names the installation. The caller must confirm, under that
+    /// workspace's RLS scope, that the minter is **still** an owner/admin before completing.
+    Candidate {
+        claim_id: Uuid,
+        workspace_id: Uuid,
+        member_id: Uuid,
+    },
+    NoClaim,
+    Ambiguous,
+}
+
+/// The read half of the signed-event link (needs `app.github_link`, and
+/// [`lock_installation_link`] first).
+pub async fn find_link_candidate(
+    conn: &mut PgConnection,
+    installation_id: i64,
+) -> Result<LinkCandidate, DbError> {
+    let installation: Option<(Option<Uuid>, bool)> = sqlx::query_as(
+        "SELECT workspace_id, removed_at IS NOT NULL FROM github_app_installation \
+          WHERE installation_id = $1",
+    )
+    .bind(installation_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some((linked_to, removed)) = installation else {
+        return Ok(LinkCandidate::NoInstallation);
+    };
+    if let Some(workspace_id) = linked_to {
+        return Ok(LinkCandidate::AlreadyLinked { workspace_id });
+    }
+    if removed {
+        return Ok(LinkCandidate::NoInstallation);
+    }
+    let claims: Vec<(Uuid, Uuid, Uuid)> = sqlx::query_as(
+        "SELECT id, workspace_id, member_id FROM github_link_claim \
+          WHERE installation_id = $1 AND purpose = 'install' \
+            AND consumed_at IS NULL AND expires_at > now() \
+          ORDER BY created_at LIMIT 3",
+    )
+    .bind(installation_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(match claims.as_slice() {
+        [] => LinkCandidate::NoClaim,
+        [(claim_id, workspace_id, member_id)] => LinkCandidate::Candidate {
+            claim_id: *claim_id,
+            workspace_id: *workspace_id,
+            member_id: *member_id,
+        },
+        _ => LinkCandidate::Ambiguous,
+    })
+}
+
+/// The write half: link the installation and spend the claim. `false` when the row was no longer
+/// unlinked (someone else won).
+pub async fn complete_link(
+    conn: &mut PgConnection,
+    installation_id: i64,
+    claim_id: Uuid,
+    workspace_id: Uuid,
+) -> Result<bool, DbError> {
+    let updated = sqlx::query(
+        "UPDATE github_app_installation \
+            SET workspace_id = $2, linked_at = now(), updated_at = now() \
+          WHERE installation_id = $1 AND workspace_id IS NULL AND removed_at IS NULL",
+    )
+    .bind(installation_id)
+    .bind(workspace_id)
+    .execute(&mut *conn)
+    .await?
+    .rows_affected();
+    discard_claim(conn, claim_id).await?;
+    Ok(updated == 1)
+}
+
+/// Spend a claim without linking (its minter is no longer an owner/admin).
+pub async fn discard_claim(conn: &mut PgConnection, claim_id: Uuid) -> Result<(), DbError> {
+    sqlx::query("UPDATE github_link_claim SET consumed_at = now() WHERE id = $1")
+        .bind(claim_id)
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
+}
+
 /// The instance operator links an installation by hand (admin GUC). 409-shaped on a conflict.
 pub async fn operator_link_installation(
     conn: &mut PgConnection,
@@ -522,7 +652,7 @@ pub async fn operator_link_installation(
 ) -> Result<LinkOutcome, DbError> {
     let existing: Option<(Option<Uuid>, bool)> = sqlx::query_as(
         "SELECT workspace_id, removed_at IS NOT NULL FROM github_app_installation \
-          WHERE installation_id = $1 FOR UPDATE",
+          WHERE installation_id = $1",
     )
     .bind(installation_id)
     .fetch_optional(&mut *conn)
@@ -796,7 +926,10 @@ pub async fn matching_subscriptions(
         "SELECT {SUBSCRIPTION_PROJECTION} FROM github_channel_subscription \
           WHERE workspace_id = $1 AND installation_id = $2 AND active \
             AND ((repo_id IS NOT NULL AND repo_id = $3) \
-                 OR lower(repo_full_name) = lower($4)) \
+                 OR (repo_id IS NULL AND lower(repo_full_name) = lower($4))) \
+            AND EXISTS (SELECT 1 FROM channel c \
+                         WHERE c.id = github_channel_subscription.channel_id \
+                           AND c.workspace_id = $1 AND c.archived_at IS NULL) \
           ORDER BY created_at, id"
     ))
     .bind(workspace_id)

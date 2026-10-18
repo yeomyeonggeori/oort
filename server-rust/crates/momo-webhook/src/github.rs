@@ -165,7 +165,10 @@ pub fn repositories(payload: &Value, key: &str) -> Vec<RepositoryRef> {
             Some(RepositoryRef {
                 id,
                 full_name: full_name.to_string(),
-                private: entry.get("private").and_then(Value::as_bool).unwrap_or(true),
+                private: entry
+                    .get("private")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(true),
             })
         })
         .take(MAX_REPOSITORIES_PER_EVENT)
@@ -303,7 +306,10 @@ pub fn render_notification(event: &str, payload: &Value) -> Option<Notification>
 
 fn pull_label(pull: &Value) -> Option<(String, Option<String>)> {
     let number = pull.get("number")?.as_i64()?;
-    let title = inline_text(pull.get("title").and_then(Value::as_str).unwrap_or(""), TITLE_MAX_CHARS);
+    let title = inline_text(
+        pull.get("title").and_then(Value::as_str).unwrap_or(""),
+        TITLE_MAX_CHARS,
+    );
     let url = https_url(pull, &["html_url"]).map(str::to_string);
     let label = if title.is_empty() {
         format!("#{number}")
@@ -390,7 +396,10 @@ fn render_issue(action: &str, payload: &Value) -> Option<Notification> {
         _ => return None,
     };
     let number = issue.get("number")?.as_i64()?;
-    let title = inline_text(issue.get("title").and_then(Value::as_str).unwrap_or(""), TITLE_MAX_CHARS);
+    let title = inline_text(
+        issue.get("title").and_then(Value::as_str).unwrap_or(""),
+        TITLE_MAX_CHARS,
+    );
     let label = if title.is_empty() {
         format!("#{number}")
     } else {
@@ -421,7 +430,10 @@ fn render_comment(action: &str, payload: &Value) -> Option<Notification> {
         "이슈에"
     };
     let number = issue.get("number")?.as_i64()?;
-    let title = inline_text(issue.get("title").and_then(Value::as_str).unwrap_or(""), TITLE_MAX_CHARS);
+    let title = inline_text(
+        issue.get("title").and_then(Value::as_str).unwrap_or(""),
+        TITLE_MAX_CHARS,
+    );
     let label = if title.is_empty() {
         format!("#{number}")
     } else {
@@ -460,7 +472,10 @@ fn render_check_suite(action: &str, payload: &Value) -> Option<Notification> {
         _ => return None,
     };
     let branch = inline_text(
-        suite.get("head_branch").and_then(Value::as_str).unwrap_or(""),
+        suite
+            .get("head_branch")
+            .and_then(Value::as_str)
+            .unwrap_or(""),
         100,
     );
     let sha = suite.get("head_sha").and_then(Value::as_str).unwrap_or("");
@@ -472,10 +487,7 @@ fn render_check_suite(action: &str, payload: &Value) -> Option<Notification> {
         }
         _ => None,
     };
-    let app = inline_text(
-        text(suite, &["app", "name"]).unwrap_or("체크"),
-        60,
-    );
+    let app = inline_text(text(suite, &["app", "name"]).unwrap_or("체크"), 60);
     let where_ = if branch.is_empty() {
         short.clone()
     } else {
@@ -493,7 +505,11 @@ fn render_check_suite(action: &str, payload: &Value) -> Option<Notification> {
 }
 
 fn render_push(payload: &Value) -> Option<Notification> {
-    if payload.get("deleted").and_then(Value::as_bool).unwrap_or(false) {
+    if payload
+        .get("deleted")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
         return None;
     }
     let reference = payload.get("ref")?.as_str()?;
@@ -543,12 +559,19 @@ fn render_release(action: &str, payload: &Value) -> Option<Notification> {
         return None;
     }
     let release = payload.get("release")?;
-    if release.get("draft").and_then(Value::as_bool).unwrap_or(false) {
+    if release
+        .get("draft")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
         return None;
     }
     let who = actor(payload);
     let tag = inline_text(release.get("tag_name").and_then(Value::as_str)?, 100);
-    let name = inline_text(release.get("name").and_then(Value::as_str).unwrap_or(""), TITLE_MAX_CHARS);
+    let name = inline_text(
+        release.get("name").and_then(Value::as_str).unwrap_or(""),
+        TITLE_MAX_CHARS,
+    );
     let label = if name.is_empty() || name == tag {
         tag
     } else {
@@ -601,12 +624,32 @@ mod tests {
         assert!(!github_signature_matches("other", body, &good));
         assert!(!github_signature_matches(SECRET, b"{}", &good));
         // the legacy SHA-1 form and a bare digest are never accepted
-        assert!(!github_signature_matches(SECRET, body, &good.replace("sha256=", "sha1=")));
-        assert!(!github_signature_matches(SECRET, body, good.trim_start_matches("sha256=")));
-        assert!(!github_signature_matches(SECRET, body, &format!("v1={}", &good[7..])));
+        assert!(!github_signature_matches(
+            SECRET,
+            body,
+            &good.replace("sha256=", "sha1=")
+        ));
+        assert!(!github_signature_matches(
+            SECRET,
+            body,
+            good.trim_start_matches("sha256=")
+        ));
+        assert!(!github_signature_matches(
+            SECRET,
+            body,
+            &format!("v1={}", &good[7..])
+        ));
         // truncated / extended / non-hex / empty
-        assert!(!github_signature_matches(SECRET, body, &good[..good.len() - 2]));
-        assert!(!github_signature_matches(SECRET, body, &format!("{good}00")));
+        assert!(!github_signature_matches(
+            SECRET,
+            body,
+            &good[..good.len() - 2]
+        ));
+        assert!(!github_signature_matches(
+            SECRET,
+            body,
+            &format!("{good}00")
+        ));
         assert!(!github_signature_matches(SECRET, body, "sha256=zz"));
         assert!(!github_signature_matches(SECRET, body, "sha256="));
         assert!(!github_signature_matches(SECRET, body, ""));
@@ -623,7 +666,9 @@ mod tests {
 
     #[test]
     fn delivery_ids_fit_the_receipt_column() {
-        assert!(valid_github_delivery_id("72d3162e-cc78-11e3-81ab-4c9367dc0958"));
+        assert!(valid_github_delivery_id(
+            "72d3162e-cc78-11e3-81ab-4c9367dc0958"
+        ));
         for bad in ["", "a b", "a/b", "id;drop", &"x".repeat(101)] {
             assert!(!valid_github_delivery_id(bad), "{bad}");
         }
@@ -651,18 +696,35 @@ mod tests {
         assert_eq!(opened.feature, "pulls");
         assert_eq!(opened.repo_full_name, "acme/widgets");
         assert_eq!(opened.repo_id, Some(7));
-        assert!(opened.body.contains("@alice님이 PR을 열었어요"), "{}", opened.body);
+        assert!(
+            opened.body.contains("@alice님이 PR을 열었어요"),
+            "{}",
+            opened.body
+        );
         // markdown delimiters and the newline in the title are neutralised
-        assert!(opened.body.contains("[#12 Fix (the) bug now](https://github.com/acme/widgets/pull/12)"));
-        let merged = render_notification("pull_request", &pr("closed", json!({"merged": true}))).unwrap();
+        assert!(opened
+            .body
+            .contains("[#12 Fix (the) bug now](https://github.com/acme/widgets/pull/12)"));
+        let merged =
+            render_notification("pull_request", &pr("closed", json!({"merged": true}))).unwrap();
         assert!(merged.body.contains("병합했어요"));
         let closed = render_notification("pull_request", &pr("closed", json!({}))).unwrap();
         assert!(closed.body.contains("닫았어요"));
-        let ready = render_notification("pull_request", &pr("ready_for_review", json!({}))).unwrap();
+        let ready =
+            render_notification("pull_request", &pr("ready_for_review", json!({}))).unwrap();
         assert!(ready.body.contains("리뷰 준비"));
         // actions oort does not announce
-        for quiet in ["synchronize", "labeled", "edited", "assigned", "review_requested"] {
-            assert!(render_notification("pull_request", &pr(quiet, json!({}))).is_none(), "{quiet}");
+        for quiet in [
+            "synchronize",
+            "labeled",
+            "edited",
+            "assigned",
+            "review_requested",
+        ] {
+            assert!(
+                render_notification("pull_request", &pr(quiet, json!({}))).is_none(),
+                "{quiet}"
+            );
         }
     }
 
@@ -701,7 +763,12 @@ mod tests {
             "review": {"state": "approved", "body": "LGTM", "html_url": "https://github.com/acme/widgets/pull/12#r1"},
             "pull_request": {"number": 12, "title": "T", "html_url": "https://github.com/acme/widgets/pull/12"}
         });
-        assert_eq!(render_notification("pull_request_review", &review).unwrap().feature, "reviews");
+        assert_eq!(
+            render_notification("pull_request_review", &review)
+                .unwrap()
+                .feature,
+            "reviews"
+        );
 
         let comment = json!({
             "action": "created", "sender": {"login": "dave"},
@@ -709,23 +776,37 @@ mod tests {
             "issue": {"number": 3, "title": "T", "html_url": "https://github.com/acme/widgets/issues/3"},
             "comment": {"body": "hello", "html_url": "https://github.com/acme/widgets/issues/3#c1"}
         });
-        assert_eq!(render_notification("issue_comment", &comment).unwrap().feature, "comments");
+        assert_eq!(
+            render_notification("issue_comment", &comment)
+                .unwrap()
+                .feature,
+            "comments"
+        );
 
-        let suite = |conclusion: &str| json!({
-            "action": "completed", "sender": {"login": "ci"},
-            "repository": {"id": 7, "full_name": "acme/widgets", "html_url": "https://github.com/acme/widgets"},
-            "check_suite": {"conclusion": conclusion, "head_branch": "feat", "head_sha": "abcdef0123456789", "app": {"name": "CI"}}
-        });
-        assert_eq!(render_notification("check_suite", &suite("failure")).unwrap().feature, "checks");
+        let suite = |conclusion: &str| {
+            json!({
+                "action": "completed", "sender": {"login": "ci"},
+                "repository": {"id": 7, "full_name": "acme/widgets", "html_url": "https://github.com/acme/widgets"},
+                "check_suite": {"conclusion": conclusion, "head_branch": "feat", "head_sha": "abcdef0123456789", "app": {"name": "CI"}}
+            })
+        };
+        assert_eq!(
+            render_notification("check_suite", &suite("failure"))
+                .unwrap()
+                .feature,
+            "checks"
+        );
         assert!(render_notification("check_suite", &suite("success")).is_none());
 
-        let push = |reference: &str, deleted: bool| json!({
-            "ref": reference, "deleted": deleted, "sender": {"login": "erin"},
-            "pusher": {"name": "erin"},
-            "compare": "https://github.com/acme/widgets/compare/a...b",
-            "repository": {"id": 7, "full_name": "acme/widgets", "default_branch": "main"},
-            "commits": [{"message": "first\nbody"}, {"message": "second line\nbody"}]
-        });
+        let push = |reference: &str, deleted: bool| {
+            json!({
+                "ref": reference, "deleted": deleted, "sender": {"login": "erin"},
+                "pusher": {"name": "erin"},
+                "compare": "https://github.com/acme/widgets/compare/a...b",
+                "repository": {"id": 7, "full_name": "acme/widgets", "default_branch": "main"},
+                "commits": [{"message": "first\nbody"}, {"message": "second line\nbody"}]
+            })
+        };
         let pushed = render_notification("push", &push("refs/heads/main", false)).unwrap();
         assert_eq!(pushed.feature, "commits");
         assert!(pushed.body.contains("커밋 2개"));
@@ -739,13 +820,24 @@ mod tests {
             "repository": {"id": 7, "full_name": "acme/widgets"},
             "release": {"tag_name": "v1.0.0", "name": "First", "draft": false, "html_url": "https://github.com/acme/widgets/releases/tag/v1.0.0"}
         });
-        assert_eq!(render_notification("release", &release).unwrap().feature, "releases");
+        assert_eq!(
+            render_notification("release", &release).unwrap().feature,
+            "releases"
+        );
     }
 
     #[test]
     fn unknown_events_and_lifecycle_events_render_nothing() {
         let payload = json!({"zen": "Keep it logically awesome.", "repository": {"id": 1, "full_name": "a/b"}});
-        for event in ["ping", "installation", "installation_repositories", "star", "fork", "workflow_run", ""] {
+        for event in [
+            "ping",
+            "installation",
+            "installation_repositories",
+            "star",
+            "fork",
+            "workflow_run",
+            "",
+        ] {
             assert!(render_notification(event, &payload).is_none(), "{event}");
         }
     }

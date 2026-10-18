@@ -46,24 +46,26 @@ use momo_auth::{active_workspace_role, Principal};
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_github_app_admin_tx, with_github_tx, GithubGuc, GithubScope};
 use momo_messaging::{MessageType, NewMessage};
-use momo_settings::github_ingress::{
-    add_repositories, channel_kind, delete_subscription, ensure_author_in_channel,
-    ensure_workspace_author, find_installation, find_repository, find_workspace_author,
-    insert_install_claim, insert_receipt, learn_subscription_repo_id, list_repositories,
-    list_subscriptions, list_unlinked_installations, list_workspace_installations,
-    mark_installation, matching_subscriptions, operator_link_installation,
-    read_app_slug, read_webhook_secrets, record_claim_installation, remove_repositories,
-    replace_repositories, set_installation_subscriptions_active,
-    set_repository_subscriptions_active, try_link_installation, upsert_installation,
-    upsert_subscription, InstallationFacts, InstallationMark, InstallationRecord, LinkOutcome,
-    NewSubscription, RepositoryFacts, SubscriptionRecord, INSTALL_STATE_TTL_SECONDS,
-};
 use momo_settings::github_app::open_github_webhook_secret;
+use momo_settings::github_ingress::{
+    add_repositories, channel_kind, complete_link, delete_subscription, discard_claim,
+    ensure_author_in_channel, ensure_workspace_author, find_installation, find_link_candidate,
+    find_repository, find_workspace_author, insert_install_claim, insert_receipt,
+    learn_subscription_repo_id, list_repositories, list_subscriptions, list_unlinked_installations,
+    list_workspace_installations, lock_installation_link, mark_installation,
+    matching_subscriptions, operator_link_installation, peek_install_claim, read_app_slug,
+    read_webhook_secrets, record_claim_installation, remove_repositories, replace_repositories,
+    set_installation_subscriptions_active, set_repository_subscriptions_active,
+    try_link_installation, upsert_installation, upsert_subscription, InstallationFacts,
+    InstallationMark, InstallationRecord, LinkCandidate, LinkOutcome, NewSubscription,
+    RepositoryFacts, SubscriptionRecord, INSTALL_STATE_TTL_SECONDS,
+};
 use momo_settings::{new_state_token, state_hash, state_workspace_hint};
 use momo_webhook::{
-    deterministic_client_message_id, github_signature_matches, installation_id as payload_installation_id,
-    installation_info, is_known_feature, render_notification, repositories as payload_repositories,
-    valid_github_delivery_id, GITHUB_DEFAULT_FEATURES, GITHUB_MAXIMUM_BODY_BYTES,
+    deterministic_client_message_id, github_signature_matches,
+    installation_id as payload_installation_id, installation_info, is_known_feature,
+    render_notification, repositories as payload_repositories, valid_github_delivery_id,
+    GITHUB_DEFAULT_FEATURES, GITHUB_MAXIMUM_BODY_BYTES,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -194,8 +196,9 @@ type RateReservation = Arc<Mutex<Option<(String, u64)>>>;
 struct Shared {
     /// The installation lifecycle writes already ran in the resolve step (unlinked path).
     applied: bool,
-    /// Set when this delivery performed the link; names the claim's minter for the audit row.
-    linked_by: Option<Uuid>,
+    /// A single live claim names this installation: `(claim, minter)`. Linked in the tenant
+    /// body, after the minter is confirmed to still be an owner/admin.
+    pending_link: Option<(Uuid, Uuid)>,
 }
 
 /// The facts a signed, parsed delivery carries into the transaction.
@@ -335,7 +338,10 @@ async fn write_link_audit(
     via: &str,
 ) -> Result<(), momo_db::DbError> {
     let mut entry = AuditEntry::new(workspace_id, AUDIT_INSTALLATION_LINKED)
-        .target("github_installation", installation_audit_target(installation_id))
+        .target(
+            "github_installation",
+            installation_audit_target(installation_id),
+        )
         .with_schema(
             AUDIT_SCHEMA,
             json!({ "installation_id": installation_id, "via": via }),
@@ -390,11 +396,18 @@ pub async fn receive(
     };
     let mut candidates = vec![sealed.current];
     candidates.extend(sealed.previous);
-    let verified = candidates.iter().any(|boxed| {
-        open_github_webhook_secret(boxed, &key)
-            .map(|secret| github_signature_matches(&secret, &raw_body, &signature))
-            .unwrap_or(false)
-    });
+    let verified = candidates
+        .iter()
+        .any(|boxed| match open_github_webhook_secret(boxed, &key) {
+            Ok(secret) => github_signature_matches(&secret, &raw_body, &signature),
+            Err(_) => {
+                // A wrong GITHUB_APP_MASTER_KEY or a corrupt box refuses every delivery: say so.
+                tracing::error!(
+                    "github webhook secret could not be opened with GITHUB_APP_MASTER_KEY"
+                );
+                false
+            }
+        });
     if !verified {
         return Err(ApiError::unauthorized(INVALID_SIGNATURE));
     }
@@ -409,8 +422,7 @@ pub async fn receive(
     }
     let Some(installation_id) = payload_installation_id(&payload) else {
         return Ok(
-            ReceiveOutcome::Ok(ReceiveResponse::ignored(&event, "no_installation"))
-                .into_response(),
+            ReceiveOutcome::Ok(ReceiveResponse::ignored(&event, "no_installation")).into_response(),
         );
     };
     let action = payload
@@ -468,6 +480,9 @@ pub async fn receive(
         move |conn| {
             Box::pin(async move {
                 let delivery = resolve_delivery;
+                if is_installation_event(&delivery.event) {
+                    lock_installation_link(conn, delivery.installation_id).await?;
+                }
                 let known = find_installation(conn, delivery.installation_id).await?;
                 if let Some(record) = &known {
                     if let Some(workspace_id) = record.workspace_id {
@@ -502,22 +517,25 @@ pub async fn receive(
                     Ok(mut shared) => shared.applied = true,
                     Err(poisoned) => poisoned.into_inner().applied = true,
                 }
-                // `installation.created`: the second signal. Meet any pending claim.
+                // `installation.created`: the second signal. Meet any pending claim — the link
+                // itself is completed in the body, under the claim's workspace scope, once its
+                // minter is confirmed to still be an owner/admin.
                 if delivery.event == "installation" && delivery.action == "created" {
-                    match try_link_installation(conn, delivery.installation_id, None).await? {
-                        LinkOutcome::Linked {
+                    match find_link_candidate(conn, delivery.installation_id).await? {
+                        LinkCandidate::Candidate {
+                            claim_id,
                             workspace_id,
                             member_id,
                         } => {
                             match resolve_shared.lock() {
-                                Ok(mut shared) => shared.linked_by = Some(member_id),
+                                Ok(mut shared) => shared.pending_link = Some((claim_id, member_id)),
                                 Err(poisoned) => {
-                                    poisoned.into_inner().linked_by = Some(member_id)
+                                    poisoned.into_inner().pending_link = Some((claim_id, member_id))
                                 }
                             }
                             return Ok(GithubScope::Tenant(workspace_id));
                         }
-                        LinkOutcome::AlreadyLinked { workspace_id } => {
+                        LinkCandidate::AlreadyLinked { workspace_id } => {
                             return Ok(GithubScope::Tenant(workspace_id));
                         }
                         _ => {}
@@ -580,13 +598,28 @@ pub async fn receive(
                     return Ok(Ok(ReceiveOutcome::Ok(response)));
                 }
 
-                let (applied, linked_by) = match body_shared.lock() {
-                    Ok(shared) => (shared.applied, shared.linked_by),
+                let (applied, pending_link) = match body_shared.lock() {
+                    Ok(shared) => (shared.applied, shared.pending_link),
                     Err(poisoned) => {
                         let shared = poisoned.into_inner();
-                        (shared.applied, shared.linked_by)
+                        (shared.applied, shared.pending_link)
                     }
                 };
+                let mut linked_by = None;
+                if let Some((claim_id, member_id)) = pending_link {
+                    // The claim's minter must STILL be an owner/admin: a demoted or removed
+                    // admin's pending claim is dead, however it got its installation id.
+                    let role = active_workspace_role(conn, workspace_id, member_id).await?;
+                    if role.is_some_and(|role| role.is_admin()) {
+                        if complete_link(conn, delivery.installation_id, claim_id, workspace_id)
+                            .await?
+                        {
+                            linked_by = Some(member_id);
+                        }
+                    } else {
+                        discard_claim(conn, claim_id).await?;
+                    }
+                }
 
                 if is_installation_event(&delivery.event) {
                     let effect = if applied {
@@ -606,7 +639,9 @@ pub async fn receive(
                         )
                         .await?;
                     }
-                    return Ok(Ok(ReceiveOutcome::Ok(ReceiveResponse::new(&delivery.event))));
+                    return Ok(Ok(ReceiveOutcome::Ok(ReceiveResponse::new(
+                        &delivery.event,
+                    ))));
                 }
 
                 // A repository event: render, then fan out to the channels that asked for it.
@@ -780,18 +815,22 @@ pub async fn setup(State(state): State<AppState>, Query(query): Query<SetupQuery
         move |_| Box::pin(async move { Ok(GithubScope::Tenant(workspace_id)) }),
         move |conn, _| {
             Box::pin(async move {
+                lock_installation_link(conn, installation_id).await?;
+                let Some(minter) = peek_install_claim(conn, &hash).await? else {
+                    return Ok(Ok(SetupOutcome::Word("state_invalid")));
+                };
+                // The minter must still be an owner/admin of that workspace — checked BEFORE the
+                // installation id is written, so a demoted admin's state records nothing.
+                let role = active_workspace_role(conn, workspace_id, minter.member_id).await?;
+                if !role.is_some_and(|role| role.is_admin()) {
+                    return Ok(Ok(SetupOutcome::Word("not_admin")));
+                }
                 let Some(claim) = record_claim_installation(conn, &hash, installation_id).await?
                 else {
                     return Ok(Ok(SetupOutcome::Word("state_invalid")));
                 };
-                // The minter must still be an owner/admin of that workspace.
-                let role = active_workspace_role(conn, workspace_id, claim.member_id).await?;
-                if !role.is_some_and(|role| role.is_admin()) {
-                    return Ok(Ok(SetupOutcome::Word("not_admin")));
-                }
                 Ok(Ok(
-                    match try_link_installation(conn, installation_id, Some(claim.claim_id))
-                        .await?
+                    match try_link_installation(conn, installation_id, Some(claim.claim_id)).await?
                     {
                         LinkOutcome::Linked { member_id, .. } => {
                             write_link_audit(
@@ -975,15 +1014,18 @@ pub async fn workspace_overview(
     master_key(&state)?;
     let member_id = principal.member_id;
     let channel_filter = match query.channel_id.as_deref() {
-        Some(raw) => Some(
-            Uuid::parse_str(raw).map_err(|_| ApiError::bad_request("invalid channelId"))?,
-        ),
+        Some(raw) => {
+            Some(Uuid::parse_str(raw).map_err(|_| ApiError::bad_request("invalid channelId"))?)
+        }
         None => None,
     };
 
     type Overview = (
         bool,
-        Vec<(InstallationRecord, Vec<momo_settings::github_ingress::RepositoryRecord>)>,
+        Vec<(
+            InstallationRecord,
+            Vec<momo_settings::github_ingress::RepositoryRecord>,
+        )>,
         Vec<SubscriptionRecord>,
     );
     let outcome: DbRejectable<Overview> =
@@ -1087,7 +1129,9 @@ pub async fn subscribe(
     }
     let repository = request.repository.trim().to_string();
     if !is_repository_name(&repository) {
-        return Err(ApiError::bad_request("repository must look like owner/name"));
+        return Err(ApiError::bad_request(
+            "repository must look like owner/name",
+        ));
     }
     let features: Vec<String> = match request.features {
         Some(list) => {
@@ -1195,7 +1239,10 @@ pub async fn subscribe(
             })
         })
         .await;
-    Ok(Json(subscription_dto(settle_db("github.subscribe", outcome)?)))
+    Ok(Json(subscription_dto(settle_db(
+        "github.subscribe",
+        outcome,
+    )?)))
 }
 
 /// `DELETE /v1/workspaces/{ws}/github/subscriptions/{id}`.
@@ -1218,7 +1265,8 @@ pub async fn unsubscribe(
                 if let Err(rejection) = authorize_admin(conn, workspace_id, member_id).await? {
                     return Ok(Err(rejection));
                 }
-                let Some(removed) = delete_subscription(conn, workspace_id, subscription_id).await?
+                let Some(removed) =
+                    delete_subscription(conn, workspace_id, subscription_id).await?
                 else {
                     return Ok(Err(ApiError::not_found("subscription not found")));
                 };
@@ -1335,36 +1383,38 @@ pub async fn operator_link(
         &[GithubGuc::Link],
         move |_| Box::pin(async move { Ok(GithubScope::Tenant(operator_workspace)) }),
         move |conn, _| {
-        Box::pin(async move {
-            let outcome = operator_link_installation(conn, installation_id, target).await?;
-            if matches!(outcome, LinkOutcome::Linked { .. }) {
-                write_audit(
-                    conn,
-                    &AuditEntry::new(operator_workspace, AUDIT_INSTALLATION_LINKED)
-                        .by(member_id)
-                        .via_token(via_token)
-                        .target(
-                            "github_installation",
-                            installation_audit_target(installation_id),
-                        )
-                        .with_schema(
-                            AUDIT_SCHEMA,
-                            json!({
-                                "installation_id": installation_id,
-                                "via": "operator",
-                                "workspace_id": target.to_string(),
-                            }),
-                        ),
-                )
-                .await?;
-            }
-            Ok(Ok(outcome))
-        })
+            Box::pin(async move {
+                let outcome = operator_link_installation(conn, installation_id, target).await?;
+                if matches!(outcome, LinkOutcome::Linked { .. }) {
+                    write_audit(
+                        conn,
+                        &AuditEntry::new(operator_workspace, AUDIT_INSTALLATION_LINKED)
+                            .by(member_id)
+                            .via_token(via_token)
+                            .target(
+                                "github_installation",
+                                installation_audit_target(installation_id),
+                            )
+                            .with_schema(
+                                AUDIT_SCHEMA,
+                                json!({
+                                    "installation_id": installation_id,
+                                    "via": "operator",
+                                    "workspace_id": target.to_string(),
+                                }),
+                            ),
+                    )
+                    .await?;
+                }
+                Ok(Ok(outcome))
+            })
         },
     )
     .await;
     match settle_db("github.operator_link", outcome)? {
-        LinkOutcome::Linked { .. } | LinkOutcome::AlreadyLinked { .. } => Ok(StatusCode::NO_CONTENT),
+        LinkOutcome::Linked { .. } | LinkOutcome::AlreadyLinked { .. } => {
+            Ok(StatusCode::NO_CONTENT)
+        }
         LinkOutcome::LinkedElsewhere => Err(ApiError::coded(
             StatusCode::CONFLICT,
             "github_installation_linked_elsewhere",
@@ -1396,8 +1446,18 @@ mod tests {
             assert!(is_repository_name(good), "{good}");
         }
         for bad in [
-            "", "acme", "acme/", "/x", "a/b/c", "a b/c", "-/..", "acme/..", "acme/.",
-            "ac;me/x", "acme/x y", &format!("{}/x", "a".repeat(40)),
+            "",
+            "acme",
+            "acme/",
+            "/x",
+            "a/b/c",
+            "a b/c",
+            "-/..",
+            "acme/..",
+            "acme/.",
+            "ac;me/x",
+            "acme/x y",
+            &format!("{}/x", "a".repeat(40)),
         ] {
             assert!(!is_repository_name(bad), "{bad}");
         }

@@ -35,8 +35,8 @@
 //! `Cargo.toml`). The delivery transport lives in the sender binary.
 
 pub mod crypto;
-pub mod github;
 pub mod doorbell;
+pub mod github;
 pub mod ingress;
 pub mod installations;
 pub mod outbound;
@@ -63,9 +63,10 @@ pub use doorbell::{
     RING_COOLDOWN_SECONDS, RING_HOURLY_LIMIT,
 };
 pub use github::{
-    github_signature, github_signature_matches, installation_id, installation_info, is_known_feature,
-    render_notification, repositories, valid_github_delivery_id, InstallationInfo, Notification,
-    RepositoryRef, GITHUB_DEFAULT_FEATURES, GITHUB_FEATURES, GITHUB_MAXIMUM_BODY_BYTES,
+    github_signature, github_signature_matches, installation_id, installation_info,
+    is_known_feature, render_notification, repositories, valid_github_delivery_id,
+    InstallationInfo, Notification, RepositoryRef, GITHUB_DEFAULT_FEATURES, GITHUB_FEATURES,
+    GITHUB_MAXIMUM_BODY_BYTES,
 };
 pub use ingress::{
     attach_receipt_message, insert_receipt, load_native_ingress, load_native_receipt,

@@ -285,8 +285,7 @@ async fn reset_github(su: &PgPool) {
 }
 
 fn pem() -> String {
-    "-----BEGIN RSA PRIVATE KEY-----\nPEM-MARKER-INGRESS\n-----END RSA PRIVATE KEY-----"
-        .to_string()
+    "-----BEGIN RSA PRIVATE KEY-----\nPEM-MARKER-INGRESS\n-----END RSA PRIVATE KEY-----".to_string()
 }
 
 /// Everything one test needs: two workspaces (A is also the instance operator), a server with a
@@ -368,8 +367,18 @@ impl Env {
         secret: Option<&str>,
     ) -> (u16, Value) {
         let body = serde_json::to_vec(payload).unwrap();
-        self.deliver_raw(event, delivery, body, secret.map(|s| format!("sha256={}", github_signature(s, &serde_json::to_vec(payload).unwrap()))))
-            .await
+        self.deliver_raw(
+            event,
+            delivery,
+            body,
+            secret.map(|s| {
+                format!(
+                    "sha256={}",
+                    github_signature(s, &serde_json::to_vec(payload).unwrap())
+                )
+            }),
+        )
+        .await
     }
 
     async fn deliver_raw(
@@ -405,12 +414,14 @@ impl Env {
             .execute(&self.su)
             .await
             .expect("seed channel");
-        sqlx::query("INSERT INTO channel_seq (channel_id, workspace_id, last_seq) VALUES ($1, $2, 0)")
-            .bind(id)
-            .bind(workspace)
-            .execute(&self.su)
-            .await
-            .expect("seed channel_seq");
+        sqlx::query(
+            "INSERT INTO channel_seq (channel_id, workspace_id, last_seq) VALUES ($1, $2, 0)",
+        )
+        .bind(id)
+        .bind(workspace)
+        .execute(&self.su)
+        .await
+        .expect("seed channel_seq");
         id
     }
 
@@ -432,7 +443,10 @@ impl Env {
     async fn link_state(&self, token: &str, workspace: Uuid) -> String {
         let response = self
             .http
-            .post(format!("{}/v1/workspaces/{workspace}/github/link", self.base))
+            .post(format!(
+                "{}/v1/workspaces/{workspace}/github/link",
+                self.base
+            ))
             .bearer_auth(token)
             .send()
             .await
@@ -463,13 +477,16 @@ impl Env {
     }
 
     async fn installation_workspace(&self, installation: i64) -> Option<Option<Uuid>> {
-        sqlx::query_scalar("SELECT workspace_id FROM github_app_installation WHERE installation_id = $1")
-            .bind(installation)
-            .fetch_optional(&self.su)
-            .await
-            .unwrap()
+        sqlx::query_scalar(
+            "SELECT workspace_id FROM github_app_installation WHERE installation_id = $1",
+        )
+        .bind(installation)
+        .fetch_optional(&self.su)
+        .await
+        .unwrap()
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn subscribe(
         &self,
         token: &str,
@@ -604,7 +621,15 @@ async fn a_bad_or_missing_signature_is_401_and_writes_nothing() {
     env.link_a(901, &[(1, "acme/widgets", false)]).await;
     let channel = env.channel(env.a.workspace, "public", "gh-sig").await;
     let (status, _) = env
-        .subscribe(&env.token_a, env.a.workspace, channel, 901, "acme/widgets", None, false)
+        .subscribe(
+            &env.token_a,
+            env.a.workspace,
+            channel,
+            901,
+            "acme/widgets",
+            None,
+            false,
+        )
         .await;
     assert_eq!(status, 200);
 
@@ -618,7 +643,12 @@ async fn a_bad_or_missing_signature_is_401_and_writes_nothing() {
     // Control: the same request with the right signature is accepted, so the 401s below are
     // the signature check and nothing else.
     let (control, response) = env
-        .deliver_raw("pull_request", "sig-control", body.clone(), Some(good.clone()))
+        .deliver_raw(
+            "pull_request",
+            "sig-control",
+            body.clone(),
+            Some(good.clone()),
+        )
         .await;
     assert_eq!((control, response["delivered"].as_u64()), (200, Some(1)));
 
@@ -637,13 +667,26 @@ async fn a_bad_or_missing_signature_is_401_and_writes_nothing() {
         ("empty", Some(String::new())),
     ] {
         let (status, _) = env
-            .deliver_raw("pull_request", &format!("sig-{}", label.replace(' ', "-")), body.clone(), signature)
+            .deliver_raw(
+                "pull_request",
+                &format!("sig-{}", label.replace(' ', "-")),
+                body.clone(),
+                signature,
+            )
             .await;
         assert_eq!(status, 401, "{label}");
     }
-    assert_eq!(env.count("github_receipt").await, receipts + 1, "only the control left a receipt");
+    assert_eq!(
+        env.count("github_receipt").await,
+        receipts + 1,
+        "only the control left a receipt"
+    );
     assert_eq!(env.count("github_app_installation").await, installs);
-    assert_eq!(env.messages(channel).await, messages + 1, "only the control posted");
+    assert_eq!(
+        env.messages(channel).await,
+        messages + 1,
+        "only the control posted"
+    );
 
     // An unsigned `installation.created` must not create a routing row either.
     let (status, _) = env
@@ -655,7 +698,11 @@ async fn a_bad_or_missing_signature_is_401_and_writes_nothing() {
         )
         .await;
     assert_eq!(status, 401);
-    assert_eq!(env.installation_workspace(902).await, None, "no row from an unsigned event");
+    assert_eq!(
+        env.installation_workspace(902).await,
+        None,
+        "no row from an unsigned event"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -669,7 +716,15 @@ async fn a_redelivered_delivery_is_a_duplicate_and_the_channel_has_one_message()
     env.link_a(911, &[(2, "acme/api", false)]).await;
     let channel = env.channel(env.a.workspace, "public", "gh-dup").await;
     let (status, _) = env
-        .subscribe(&env.token_a, env.a.workspace, channel, 911, "acme/api", None, false)
+        .subscribe(
+            &env.token_a,
+            env.a.workspace,
+            channel,
+            911,
+            "acme/api",
+            None,
+            false,
+        )
         .await;
     assert_eq!(status, 200);
 
@@ -678,13 +733,20 @@ async fn a_redelivered_delivery_is_a_duplicate_and_the_channel_has_one_message()
         .deliver("pull_request", "dup-1", &payload, Some(SECRET_1))
         .await;
     assert_eq!(first, 200);
-    assert_eq!((body["duplicate"].as_bool(), body["delivered"].as_u64()), (Some(false), Some(1)));
+    assert_eq!(
+        (body["duplicate"].as_bool(), body["delivered"].as_u64()),
+        (Some(false), Some(1))
+    );
     let (again, body) = env
         .deliver("pull_request", "dup-1", &payload, Some(SECRET_1))
         .await;
     assert_eq!(again, 200);
     assert_eq!(body["duplicate"], json!(true));
-    assert_eq!(env.messages(channel).await, 1, "the same delivery posts once");
+    assert_eq!(
+        env.messages(channel).await,
+        1,
+        "the same delivery posts once"
+    );
 
     // A different delivery of the same event is a new message.
     let (_, body) = env
@@ -704,12 +766,16 @@ async fn a_redelivered_delivery_is_a_duplicate_and_the_channel_has_one_message()
     .fetch_one(&env.su)
     .await
     .unwrap();
-    assert_eq!((kind.as_str(), name.as_str(), humans), ("agent", "GitHub", 0));
-    let text: String = sqlx::query_scalar("SELECT body FROM message WHERE channel_id = $1 ORDER BY seq LIMIT 1")
-        .bind(channel)
-        .fetch_one(&env.su)
-        .await
-        .unwrap();
+    assert_eq!(
+        (kind.as_str(), name.as_str(), humans),
+        ("agent", "GitHub", 0)
+    );
+    let text: String =
+        sqlx::query_scalar("SELECT body FROM message WHERE channel_id = $1 ORDER BY seq LIMIT 1")
+            .bind(channel)
+            .fetch_one(&env.su)
+            .await
+            .unwrap();
     assert!(text.contains("@alice님이 PR을 열었어요"), "{text}");
 }
 
@@ -726,13 +792,28 @@ async fn a_link_needs_both_signals_in_either_order_and_never_from_a_forgery() {
     let state = env.link_state(&env.token_a, env.a.workspace).await;
     let (status, location) = env.setup(1001, &state).await;
     assert_eq!(status, 303);
-    assert!(location.unwrap().contains("githubInstall=pending"), "setup alone only pends");
-    assert_eq!(env.installation_workspace(1001).await, None, "no signed event: nothing linked");
+    assert!(
+        location.unwrap().contains("githubInstall=pending"),
+        "setup alone only pends"
+    );
+    assert_eq!(
+        env.installation_workspace(1001).await,
+        None,
+        "no signed event: nothing linked"
+    );
     let (status, _) = env
-        .deliver("installation", "order-a", &installation_created(1001, "acme", &[]), Some(SECRET_1))
+        .deliver(
+            "installation",
+            "order-a",
+            &installation_created(1001, "acme", &[]),
+            Some(SECRET_1),
+        )
         .await;
     assert_eq!(status, 200);
-    assert_eq!(env.installation_workspace(1001).await, Some(Some(env.a.workspace)));
+    assert_eq!(
+        env.installation_workspace(1001).await,
+        Some(Some(env.a.workspace))
+    );
     let linked_audits: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM audit_log WHERE action = 'github.installation_linked' AND workspace_id = $1",
     )
@@ -742,8 +823,13 @@ async fn a_link_needs_both_signals_in_either_order_and_never_from_a_forgery() {
     .unwrap();
     assert_eq!(linked_audits, 1, "exactly one link");
     // The signed event repeated under a new delivery id changes nothing.
-    env.deliver("installation", "order-a-again", &installation_created(1001, "acme", &[]), Some(SECRET_1))
-        .await;
+    env.deliver(
+        "installation",
+        "order-a-again",
+        &installation_created(1001, "acme", &[]),
+        Some(SECRET_1),
+    )
+    .await;
     let linked_audits: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM audit_log WHERE action = 'github.installation_linked' AND workspace_id IN ($1, $2)",
     )
@@ -755,27 +841,54 @@ async fn a_link_needs_both_signals_in_either_order_and_never_from_a_forgery() {
     assert_eq!(linked_audits, 1);
 
     // (b) signed event first (a row without a workspace), then the setup URL.
-    env.deliver("installation", "order-b", &installation_created(1002, "beta", &[]), Some(SECRET_1))
-        .await;
-    assert_eq!(env.installation_workspace(1002).await, Some(None), "event alone: row, no workspace");
+    env.deliver(
+        "installation",
+        "order-b",
+        &installation_created(1002, "beta", &[]),
+        Some(SECRET_1),
+    )
+    .await;
+    assert_eq!(
+        env.installation_workspace(1002).await,
+        Some(None),
+        "event alone: row, no workspace"
+    );
     let state = env.link_state(&env.token_a, env.a.workspace).await;
     let (status, location) = env.setup(1002, &state).await;
     assert_eq!(status, 303);
     assert!(location.unwrap().contains("githubInstall=linked"));
-    assert_eq!(env.installation_workspace(1002).await, Some(Some(env.a.workspace)));
+    assert_eq!(
+        env.installation_workspace(1002).await,
+        Some(Some(env.a.workspace))
+    );
 
     // (c) forgeries link nothing.
-    env.deliver("installation", "order-c", &installation_created(1003, "gamma", &[]), Some(SECRET_1))
-        .await;
+    env.deliver(
+        "installation",
+        "order-c",
+        &installation_created(1003, "gamma", &[]),
+        Some(SECRET_1),
+    )
+    .await;
     for (label, forged) in [
         ("no state at all", String::new()),
         ("garbage", "not-a-state".to_string()),
-        ("well-shaped but never minted", format!("{}.{}", env.a.workspace, "ab".repeat(32))),
-        ("another workspace's shape", format!("{}.{}", env.b.workspace, "cd".repeat(32))),
+        (
+            "well-shaped but never minted",
+            format!("{}.{}", env.a.workspace, "ab".repeat(32)),
+        ),
+        (
+            "another workspace's shape",
+            format!("{}.{}", env.b.workspace, "cd".repeat(32)),
+        ),
     ] {
         let (status, _) = env.setup(1003, &forged).await;
         assert!(status == 303 || status == 409, "{label}: {status}");
-        assert_eq!(env.installation_workspace(1003).await, Some(None), "{label}");
+        assert_eq!(
+            env.installation_workspace(1003).await,
+            Some(None),
+            "{label}"
+        );
     }
     // A spent state cannot link again; an expired one cannot link at all.
     let state = env.link_state(&env.token_a, env.a.workspace).await;
@@ -784,7 +897,10 @@ async fn a_link_needs_both_signals_in_either_order_and_never_from_a_forgery() {
         .await
         .unwrap();
     let (_, location) = env.setup(1003, &state).await;
-    assert!(location.unwrap().contains("githubInstall=state_invalid"), "expired");
+    assert!(
+        location.unwrap().contains("githubInstall=state_invalid"),
+        "expired"
+    );
     assert_eq!(env.installation_workspace(1003).await, Some(None));
 
     // (d) two live claims naming one installation: neither is auto-linked (the forged-id shape).
@@ -792,8 +908,13 @@ async fn a_link_needs_both_signals_in_either_order_and_never_from_a_forgery() {
     let state_b = env.link_state(&env.token_b, env.b.workspace).await;
     env.setup(1004, &state_a).await;
     env.setup(1004, &state_b).await;
-    env.deliver("installation", "order-d", &installation_created(1004, "delta", &[]), Some(SECRET_1))
-        .await;
+    env.deliver(
+        "installation",
+        "order-d",
+        &installation_created(1004, "delta", &[]),
+        Some(SECRET_1),
+    )
+    .await;
     assert_eq!(
         env.installation_workspace(1004).await,
         Some(None),
@@ -803,7 +924,10 @@ async fn a_link_needs_both_signals_in_either_order_and_never_from_a_forgery() {
     // A workspace admin cannot mint a state for another workspace.
     let response = env
         .http
-        .post(format!("{}/v1/workspaces/{}/github/link", env.base, env.b.workspace))
+        .post(format!(
+            "{}/v1/workspaces/{}/github/link",
+            env.base, env.b.workspace
+        ))
         .bearer_auth(&env.token_a)
         .send()
         .await
@@ -855,7 +979,15 @@ async fn an_installation_belongs_to_one_workspace_and_events_never_cross_tenants
     let channel_a = env.channel(env.a.workspace, "public", "gh-a").await;
     let channel_b = env.channel(env.b.workspace, "public", "gh-b").await;
     let (status, _) = env
-        .subscribe(&env.token_a, env.a.workspace, channel_a, 1101, "acme/shared-name", None, false)
+        .subscribe(
+            &env.token_a,
+            env.a.workspace,
+            channel_a,
+            1101,
+            "acme/shared-name",
+            None,
+            false,
+        )
         .await;
     assert_eq!(status, 200);
 
@@ -863,22 +995,39 @@ async fn an_installation_belongs_to_one_workspace_and_events_never_cross_tenants
     let state_b = env.link_state(&env.token_b, env.b.workspace).await;
     let (status, _) = env.setup(1101, &state_b).await;
     assert_eq!(status, 409, "claiming an installation linked elsewhere");
-    assert_eq!(env.installation_workspace(1101).await, Some(Some(env.a.workspace)));
+    assert_eq!(
+        env.installation_workspace(1101).await,
+        Some(Some(env.a.workspace))
+    );
     // The operator cannot silently re-point it either.
     let response = env
         .http
-        .post(format!("{}/v1/integrations/github/installations/1101/link", env.base))
+        .post(format!(
+            "{}/v1/integrations/github/installations/1101/link",
+            env.base
+        ))
         .bearer_auth(&env.token_a)
         .json(&json!({"workspaceId": env.b.workspace.to_string()}))
         .send()
         .await
         .unwrap();
     assert_eq!(response.status(), 409);
-    assert_eq!(env.installation_workspace(1101).await, Some(Some(env.a.workspace)));
+    assert_eq!(
+        env.installation_workspace(1101).await,
+        Some(Some(env.a.workspace))
+    );
 
     // B cannot subscribe to A's installation (it cannot even see it).
     let (status, _) = env
-        .subscribe(&env.token_b, env.b.workspace, channel_b, 1101, "acme/shared-name", None, false)
+        .subscribe(
+            &env.token_b,
+            env.b.workspace,
+            channel_b,
+            1101,
+            "acme/shared-name",
+            None,
+            false,
+        )
         .await;
     assert_eq!(status, 404);
     // And the database refuses a subscription row that names another workspace's installation.
@@ -890,7 +1039,10 @@ async fn an_installation_belongs_to_one_workspace_and_events_never_cross_tenants
     .bind(channel_b)
     .execute(&env.su)
     .await;
-    assert!(forced.is_err(), "the guard trigger refuses a cross-workspace subscription");
+    assert!(
+        forced.is_err(),
+        "the guard trigger refuses a cross-workspace subscription"
+    );
 
     // The event reaches A's channel and only A's.
     let (_, body) = env
@@ -907,24 +1059,53 @@ async fn an_installation_belongs_to_one_workspace_and_events_never_cross_tenants
 
     // RLS as the real role: a tenant session sees only its own linked installation, never an
     // unlinked or another workspace's one.
-    env.deliver("installation", "cross-unlinked", &installation_created(1102, "ghost", &[(12, "ghost/x", true)]), Some(SECRET_1))
-        .await;
+    env.deliver(
+        "installation",
+        "cross-unlinked",
+        &installation_created(1102, "ghost", &[(12, "ghost/x", true)]),
+        Some(SECRET_1),
+    )
+    .await;
     let app = momo_app_pool().await;
     let tenant_a = env.a.workspace.to_string();
     let tenant_b = env.b.workspace.to_string();
     let as_a = [("app.workspace_id", tenant_a.as_str())];
     let as_b = [("app.workspace_id", tenant_b.as_str())];
-    assert_eq!(count_as_app(&app, &as_a, "github_app_installation").await, 1);
-    assert_eq!(count_as_app(&app, &as_b, "github_app_installation").await, 0);
-    assert_eq!(count_as_app(&app, &as_a, "github_installation_repository").await, 1);
-    assert_eq!(count_as_app(&app, &as_b, "github_installation_repository").await, 0);
-    assert_eq!(count_as_app(&app, &as_a, "github_app").await, 0, "the sealed App is invisible");
-    assert_eq!(count_as_app(&app, &as_a, "github_app_public").await, 1, "its slug is not secret");
+    assert_eq!(
+        count_as_app(&app, &as_a, "github_app_installation").await,
+        1
+    );
+    assert_eq!(
+        count_as_app(&app, &as_b, "github_app_installation").await,
+        0
+    );
+    assert_eq!(
+        count_as_app(&app, &as_a, "github_installation_repository").await,
+        1
+    );
+    assert_eq!(
+        count_as_app(&app, &as_b, "github_installation_repository").await,
+        0
+    );
+    assert_eq!(
+        count_as_app(&app, &as_a, "github_app").await,
+        0,
+        "the sealed App is invisible"
+    );
+    assert_eq!(
+        count_as_app(&app, &as_a, "github_app_public").await,
+        1,
+        "its slug is not secret"
+    );
     // A tenant session cannot link: UPDATE sees no row.
     assert_eq!(
-        as_app(&app, &as_b, "UPDATE github_app_installation SET workspace_id = workspace_id")
-            .await
-            .unwrap(),
+        as_app(
+            &app,
+            &as_b,
+            "UPDATE github_app_installation SET workspace_id = workspace_id"
+        )
+        .await
+        .unwrap(),
         0
     );
     assert!(
@@ -941,9 +1122,14 @@ async fn an_installation_belongs_to_one_workspace_and_events_never_cross_tenants
     // The link GUC opens the install claims and the installation columns — and nothing else.
     let link = [("app.github_link", "on")];
     assert_eq!(count_as_app(&app, &link, "github_app").await, 0);
-    assert_eq!(count_as_app(&app, &link, "github_app_installation").await, 2);
     assert_eq!(
-        as_app(&app, &link, "UPDATE github_app SET slug = 'x'").await.unwrap(),
+        count_as_app(&app, &link, "github_app_installation").await,
+        2
+    );
+    assert_eq!(
+        as_app(&app, &link, "UPDATE github_app SET slug = 'x'")
+            .await
+            .unwrap(),
         0
     );
     assert!(as_app(
@@ -963,14 +1149,24 @@ async fn an_installation_belongs_to_one_workspace_and_events_never_cross_tenants
     .execute(&env.su)
     .await
     .unwrap();
-    let live_installs: i64 = sqlx::query_scalar("SELECT count(*) FROM github_link_claim WHERE purpose = 'install'")
-        .fetch_one(&env.su)
-        .await
-        .unwrap();
-    assert_eq!(count_as_app(&app, &link, "github_link_claim").await, live_installs);
+    let live_installs: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM github_link_claim WHERE purpose = 'install'")
+            .fetch_one(&env.su)
+            .await
+            .unwrap();
+    assert_eq!(
+        count_as_app(&app, &link, "github_link_claim").await,
+        live_installs
+    );
     // Ordinary tenant isolation still holds for claims and the author table.
-    assert_eq!(count_as_app(&app, &as_b, "github_workspace_author").await, 0);
-    assert_eq!(count_as_app(&app, &as_a, "github_workspace_author").await, 1);
+    assert_eq!(
+        count_as_app(&app, &as_b, "github_workspace_author").await,
+        0
+    );
+    assert_eq!(
+        count_as_app(&app, &as_a, "github_workspace_author").await,
+        1
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -981,44 +1177,83 @@ async fn an_installation_belongs_to_one_workspace_and_events_never_cross_tenants
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
 async fn suspend_and_delete_silence_a_channel_and_unsuspend_restores_it() {
     let env = env().await;
-    env.link_a(1201, &[(21, "acme/one", false), (22, "acme/two", false)]).await;
+    env.link_a(1201, &[(21, "acme/one", false), (22, "acme/two", false)])
+        .await;
     let channel = env.channel(env.a.workspace, "public", "gh-life").await;
     let other = env.channel(env.a.workspace, "public", "gh-life-two").await;
     for (channel, repo) in [(channel, "acme/one"), (other, "acme/two")] {
         let (status, _) = env
-            .subscribe(&env.token_a, env.a.workspace, channel, 1201, repo, None, false)
+            .subscribe(
+                &env.token_a,
+                env.a.workspace,
+                channel,
+                1201,
+                repo,
+                None,
+                false,
+            )
             .await;
         assert_eq!(status, 200);
     }
 
     let event = |n: i64| pull_request_opened(1201, (21, "acme/one"), n);
-    let (_, body) = env.deliver("pull_request", "life-1", &event(1), Some(SECRET_1)).await;
+    let (_, body) = env
+        .deliver("pull_request", "life-1", &event(1), Some(SECRET_1))
+        .await;
     assert_eq!(body["delivered"].as_u64(), Some(1));
     assert_eq!(env.messages(channel).await, 1);
 
     // suspend: silence.
     let (status, _) = env
-        .deliver("installation", "life-suspend", &installation_action(1201, "suspend"), Some(SECRET_1))
+        .deliver(
+            "installation",
+            "life-suspend",
+            &installation_action(1201, "suspend"),
+            Some(SECRET_1),
+        )
         .await;
     assert_eq!(status, 200);
-    let (status, body) = env.deliver("pull_request", "life-2", &event(2), Some(SECRET_1)).await;
-    assert_eq!((status, body["ignored"].as_str()), (200, Some("installation_inactive")));
+    let (status, body) = env
+        .deliver("pull_request", "life-2", &event(2), Some(SECRET_1))
+        .await;
+    assert_eq!(
+        (status, body["ignored"].as_str()),
+        (200, Some("installation_inactive"))
+    );
     assert_eq!(env.messages(channel).await, 1, "no message while suspended");
 
     // unsuspend: the next event posts again.
-    env.deliver("installation", "life-unsuspend", &installation_action(1201, "unsuspend"), Some(SECRET_1))
+    env.deliver(
+        "installation",
+        "life-unsuspend",
+        &installation_action(1201, "unsuspend"),
+        Some(SECRET_1),
+    )
+    .await;
+    let (_, body) = env
+        .deliver("pull_request", "life-3", &event(3), Some(SECRET_1))
         .await;
-    let (_, body) = env.deliver("pull_request", "life-3", &event(3), Some(SECRET_1)).await;
     assert_eq!(body["delivered"].as_u64(), Some(1));
     assert_eq!(env.messages(channel).await, 2);
 
     // A stale redelivery of the old `suspend` is a duplicate and must not re-suspend.
     let (_, body) = env
-        .deliver("installation", "life-suspend", &installation_action(1201, "suspend"), Some(SECRET_1))
+        .deliver(
+            "installation",
+            "life-suspend",
+            &installation_action(1201, "suspend"),
+            Some(SECRET_1),
+        )
         .await;
     assert_eq!(body["duplicate"], json!(true));
-    let (_, body) = env.deliver("pull_request", "life-4", &event(4), Some(SECRET_1)).await;
-    assert_eq!(body["delivered"].as_u64(), Some(1), "the duplicate suspend changed nothing");
+    let (_, body) = env
+        .deliver("pull_request", "life-4", &event(4), Some(SECRET_1))
+        .await;
+    assert_eq!(
+        body["delivered"].as_u64(),
+        Some(1),
+        "the duplicate suspend changed nothing"
+    );
     assert_eq!(env.messages(channel).await, 3);
 
     // installation_repositories.removed switches that repository's subscriptions off; .added back on.
@@ -1027,9 +1262,20 @@ async fn suspend_and_delete_silence_a_channel_and_unsuspend_restores_it() {
         "installation": {"id": 1201, "account": {"login": "acme", "type": "Organization"}, "repository_selection": "selected"},
         "repositories_removed": [{"id": 22, "full_name": "acme/two", "private": false}],
     });
-    env.deliver("installation_repositories", "life-removed", &removed, Some(SECRET_1)).await;
+    env.deliver(
+        "installation_repositories",
+        "life-removed",
+        &removed,
+        Some(SECRET_1),
+    )
+    .await;
     let (_, body) = env
-        .deliver("pull_request", "life-5", &pull_request_opened(1201, (22, "acme/two"), 5), Some(SECRET_1))
+        .deliver(
+            "pull_request",
+            "life-5",
+            &pull_request_opened(1201, (22, "acme/two"), 5),
+            Some(SECRET_1),
+        )
         .await;
     assert_eq!(body["ignored"].as_str(), Some("no_subscription"));
     assert_eq!(env.messages(other).await, 0);
@@ -1038,23 +1284,42 @@ async fn suspend_and_delete_silence_a_channel_and_unsuspend_restores_it() {
         "installation": {"id": 1201, "account": {"login": "acme", "type": "Organization"}, "repository_selection": "selected"},
         "repositories_added": [{"id": 22, "full_name": "acme/two", "private": false}],
     });
-    env.deliver("installation_repositories", "life-added", &added, Some(SECRET_1)).await;
+    env.deliver(
+        "installation_repositories",
+        "life-added",
+        &added,
+        Some(SECRET_1),
+    )
+    .await;
     let (_, body) = env
-        .deliver("pull_request", "life-6", &pull_request_opened(1201, (22, "acme/two"), 6), Some(SECRET_1))
+        .deliver(
+            "pull_request",
+            "life-6",
+            &pull_request_opened(1201, (22, "acme/two"), 6),
+            Some(SECRET_1),
+        )
         .await;
     assert_eq!(body["delivered"].as_u64(), Some(1));
     assert_eq!(env.messages(other).await, 1);
 
     // deleted: silence, and every subscription is switched off.
-    env.deliver("installation", "life-deleted", &installation_action(1201, "deleted"), Some(SECRET_1))
+    env.deliver(
+        "installation",
+        "life-deleted",
+        &installation_action(1201, "deleted"),
+        Some(SECRET_1),
+    )
+    .await;
+    let (_, body) = env
+        .deliver("pull_request", "life-7", &event(7), Some(SECRET_1))
         .await;
-    let (_, body) = env.deliver("pull_request", "life-7", &event(7), Some(SECRET_1)).await;
     assert_eq!(body["ignored"].as_str(), Some("installation_inactive"));
     assert_eq!(env.messages(channel).await, 3);
-    let active: i64 = sqlx::query_scalar("SELECT count(*) FROM github_channel_subscription WHERE active")
-        .fetch_one(&env.su)
-        .await
-        .unwrap();
+    let active: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM github_channel_subscription WHERE active")
+            .fetch_one(&env.su)
+            .await
+            .unwrap();
     assert_eq!(active, 0);
 }
 
@@ -1094,20 +1359,33 @@ async fn an_oversize_body_is_413_a_ping_is_200_and_an_unknown_event_is_200_with_
     let env = env().await;
     env.link_a(1301, &[(31, "acme/size", false)]).await;
     let channel = env.channel(env.a.workspace, "public", "gh-size").await;
-    env.subscribe(&env.token_a, env.a.workspace, channel, 1301, "acme/size", None, false)
-        .await;
+    env.subscribe(
+        &env.token_a,
+        env.a.workspace,
+        channel,
+        1301,
+        "acme/size",
+        None,
+        false,
+    )
+    .await;
 
     // Over the ceiling: 413 before a byte of the body is read, and nothing is written. A raw
     // socket is used because the server answers (and closes) while a client library is still
     // writing the 5 MiB, which surfaces there as a reset instead of the status.
     let receipts = env.count("github_receipt").await;
     for length in [5 * 1024 * 1024 + 1, 25 * 1024 * 1024] {
-        assert_eq!(oversize_status(&env.base, length, "sha256=00").await, 413, "{length}");
+        assert_eq!(
+            oversize_status(&env.base, length, "sha256=00").await,
+            413,
+            "{length}"
+        );
     }
     assert_eq!(env.count("github_receipt").await, receipts);
 
     // Exactly at the ceiling is accepted (a JSON document padded with whitespace).
-    let mut at_limit = serde_json::to_vec(&pull_request_opened(1301, (31, "acme/size"), 1)).unwrap();
+    let mut at_limit =
+        serde_json::to_vec(&pull_request_opened(1301, (31, "acme/size"), 1)).unwrap();
     at_limit.resize(5 * 1024 * 1024, b' ');
     let signature = format!("sha256={}", github_signature(SECRET_1, &at_limit));
     let (status, body) = env
@@ -1118,11 +1396,18 @@ async fn an_oversize_body_is_413_a_ping_is_200_and_an_unknown_event_is_200_with_
     // ping: signed, 200, nothing written.
     let before = env.messages(channel).await;
     let (status, body) = env
-        .deliver("ping", "size-ping", &json!({"zen": "Keep it logically awesome."}), Some(SECRET_1))
+        .deliver(
+            "ping",
+            "size-ping",
+            &json!({"zen": "Keep it logically awesome."}),
+            Some(SECRET_1),
+        )
         .await;
     assert_eq!((status, body["event"].as_str()), (200, Some("ping")));
     // An unsigned ping is still refused.
-    let (status, _) = env.deliver("ping", "size-ping-2", &json!({"zen": "x"}), None).await;
+    let (status, _) = env
+        .deliver("ping", "size-ping-2", &json!({"zen": "x"}), None)
+        .await;
     assert_eq!(status, 401);
 
     // Unknown event: 200 and no message.
@@ -1130,17 +1415,31 @@ async fn an_oversize_body_is_413_a_ping_is_200_and_an_unknown_event_is_200_with_
         let payload = json!({"action": "created", "installation": {"id": 1301},
                              "repository": {"id": 31, "full_name": "acme/size"}, "sender": {"login": "x"}});
         let (status, body) = env
-            .deliver(event, &format!("size-{}", event.replace('_', "-")), &payload, Some(SECRET_1))
+            .deliver(
+                event,
+                &format!("size-{}", event.replace('_', "-")),
+                &payload,
+                Some(SECRET_1),
+            )
             .await;
         assert_eq!(status, 200, "{event}");
         assert!(body["delivered"].as_u64().unwrap_or(0) == 0, "{event}");
     }
-    assert_eq!(env.messages(channel).await, before, "ping and unknown events post nothing");
+    assert_eq!(
+        env.messages(channel).await,
+        before,
+        "ping and unknown events post nothing"
+    );
     // Unannounced actions of a known event also post nothing.
     let mut labeled = pull_request_opened(1301, (31, "acme/size"), 9);
     labeled["action"] = json!("labeled");
-    let (status, body) = env.deliver("pull_request", "size-labeled", &labeled, Some(SECRET_1)).await;
-    assert_eq!((status, body["ignored"].as_str()), (200, Some("event_not_announced")));
+    let (status, body) = env
+        .deliver("pull_request", "size-labeled", &labeled, Some(SECRET_1))
+        .await;
+    assert_eq!(
+        (status, body["ignored"].as_str()),
+        (200, Some("event_not_announced"))
+    );
     assert_eq!(env.messages(channel).await, before);
 }
 
@@ -1161,7 +1460,9 @@ async fn the_previous_webhook_secret_verifies_only_inside_the_overlap_window() {
         let (status, _) = env.deliver("ping", delivery, &payload, Some(secret)).await;
         assert_eq!(status, 200, "inside the overlap window {secret} verifies");
     }
-    let (status, _) = env.deliver("ping", "rot-bad", &payload, Some("never-the-secret")).await;
+    let (status, _) = env
+        .deliver("ping", "rot-bad", &payload, Some("never-the-secret"))
+        .await;
     assert_eq!(status, 401);
 
     // The window ends: the previous value is refused, the current one still passes.
@@ -1169,9 +1470,13 @@ async fn the_previous_webhook_secret_verifies_only_inside_the_overlap_window() {
         .execute(&env.su)
         .await
         .unwrap();
-    let (status, _) = env.deliver("ping", "rot-old-2", &payload, Some(SECRET_1)).await;
+    let (status, _) = env
+        .deliver("ping", "rot-old-2", &payload, Some(SECRET_1))
+        .await;
     assert_eq!(status, 401, "after the window the old secret is refused");
-    let (status, _) = env.deliver("ping", "rot-new-2", &payload, Some(SECRET_2)).await;
+    let (status, _) = env
+        .deliver("ping", "rot-new-2", &payload, Some(SECRET_2))
+        .await;
     assert_eq!(status, 200);
 }
 
@@ -1183,7 +1488,11 @@ async fn the_previous_webhook_secret_verifies_only_inside_the_overlap_window() {
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
 async fn a_private_repository_needs_an_explicit_confirmation_for_a_public_channel() {
     let env = env().await;
-    env.link_a(1401, &[(41, "acme/secret-sauce", true), (42, "acme/open", false)]).await;
+    env.link_a(
+        1401,
+        &[(41, "acme/secret-sauce", true), (42, "acme/open", false)],
+    )
+    .await;
     let public = env.channel(env.a.workspace, "public", "gh-pub").await;
     let private = env.channel(env.a.workspace, "private", "gh-priv").await;
     let subs = |env: &Env| {
@@ -1198,43 +1507,109 @@ async fn a_private_repository_needs_an_explicit_confirmation_for_a_public_channe
 
     // Private repo, public channel, no confirmation: refused with the coded 409, zero rows.
     let (status, body) = env
-        .subscribe(&env.token_a, env.a.workspace, public, 1401, "acme/secret-sauce", None, false)
+        .subscribe(
+            &env.token_a,
+            env.a.workspace,
+            public,
+            1401,
+            "acme/secret-sauce",
+            None,
+            false,
+        )
         .await;
     assert_eq!(status, 409);
-    assert_eq!(body["error"]["code"].as_str(), Some("private_repository_requires_confirmation"), "{body}");
+    assert_eq!(
+        body["error"]["code"].as_str(),
+        Some("private_repository_requires_confirmation"),
+        "{body}"
+    );
     assert_eq!(subs(&env).await, 0, "no row without the confirmation");
     // A repository the server cannot place in the list is treated as possibly private.
     let (status, body) = env
-        .subscribe(&env.token_a, env.a.workspace, public, 1401, "acme/not-listed", None, false)
+        .subscribe(
+            &env.token_a,
+            env.a.workspace,
+            public,
+            1401,
+            "acme/not-listed",
+            None,
+            false,
+        )
         .await;
-    assert_eq!(status, 404, "a 'selected' installation lists everything it can see: {body}");
+    assert_eq!(
+        status, 404,
+        "a 'selected' installation lists everything it can see: {body}"
+    );
     assert_eq!(subs(&env).await, 0);
 
     // A public repo in a public channel needs none.
     let (status, _) = env
-        .subscribe(&env.token_a, env.a.workspace, public, 1401, "acme/open", None, false)
+        .subscribe(
+            &env.token_a,
+            env.a.workspace,
+            public,
+            1401,
+            "acme/open",
+            None,
+            false,
+        )
         .await;
     assert_eq!(status, 200);
     // A private repo in a private channel needs none.
     let (status, _) = env
-        .subscribe(&env.token_a, env.a.workspace, private, 1401, "acme/secret-sauce", None, false)
+        .subscribe(
+            &env.token_a,
+            env.a.workspace,
+            private,
+            1401,
+            "acme/secret-sauce",
+            None,
+            false,
+        )
         .await;
     assert_eq!(status, 200);
     assert_eq!(subs(&env).await, 2);
     // With the explicit confirmation the public channel may have the private repository.
     let (status, body) = env
-        .subscribe(&env.token_a, env.a.workspace, public, 1401, "acme/secret-sauce", None, true)
+        .subscribe(
+            &env.token_a,
+            env.a.workspace,
+            public,
+            1401,
+            "acme/secret-sauce",
+            None,
+            true,
+        )
         .await;
-    assert_eq!((status, body["privateConfirmed"].as_bool()), (200, Some(true)));
+    assert_eq!(
+        (status, body["privateConfirmed"].as_bool()),
+        (200, Some(true))
+    );
     assert_eq!(subs(&env).await, 3);
 
     // Validation: unknown feature, DM channel, malformed repository, non-admin.
     let (status, _) = env
-        .subscribe(&env.token_a, env.a.workspace, public, 1401, "acme/open", Some(&["pulls", "nonsense"]), false)
+        .subscribe(
+            &env.token_a,
+            env.a.workspace,
+            public,
+            1401,
+            "acme/open",
+            Some(&["pulls", "nonsense"]),
+            false,
+        )
         .await;
     assert_eq!(status, 400);
     let (status, _) = env
-        .subscribe(&env.token_a, env.a.workspace, public, 1401, "not a repo", None, false)
+        .subscribe(
+            &env.token_a,
+            env.a.workspace,
+            public,
+            1401,
+            "not a repo",
+            None,
+            false,
+        )
         .await;
     assert_eq!(status, 400);
     let response = env
@@ -1249,7 +1624,10 @@ async fn a_private_repository_needs_an_explicit_confirmation_for_a_public_channe
     // Unsubscribe.
     let overview: Value = env
         .http
-        .get(format!("{}/v1/workspaces/{}/github", env.base, env.a.workspace))
+        .get(format!(
+            "{}/v1/workspaces/{}/github",
+            env.base, env.a.workspace
+        ))
         .bearer_auth(&env.token_a)
         .send()
         .await
@@ -1258,11 +1636,23 @@ async fn a_private_repository_needs_an_explicit_confirmation_for_a_public_channe
         .await
         .unwrap();
     assert_eq!(overview["installations"].as_array().unwrap().len(), 1);
-    assert_eq!(overview["installations"][0]["repositories"].as_array().unwrap().len(), 2);
-    let id = overview["subscriptions"][0]["id"].as_str().unwrap().to_string();
+    assert_eq!(
+        overview["installations"][0]["repositories"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    let id = overview["subscriptions"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let response = env
         .http
-        .delete(format!("{}/v1/workspaces/{}/github/subscriptions/{id}", env.base, env.a.workspace))
+        .delete(format!(
+            "{}/v1/workspaces/{}/github/subscriptions/{id}",
+            env.base, env.a.workspace
+        ))
         .bearer_auth(&env.token_a)
         .send()
         .await
@@ -1283,40 +1673,84 @@ async fn commits_and_releases_reach_only_the_channels_that_turned_them_on() {
     let plain = env.channel(env.a.workspace, "public", "gh-plain").await;
     let rich = env.channel(env.a.workspace, "public", "gh-rich").await;
     let (status, _) = env
-        .subscribe(&env.token_a, env.a.workspace, plain, 1501, "acme/feat", None, false)
+        .subscribe(
+            &env.token_a,
+            env.a.workspace,
+            plain,
+            1501,
+            "acme/feat",
+            None,
+            false,
+        )
         .await;
     assert_eq!(status, 200);
     let (status, _) = env
-        .subscribe(&env.token_a, env.a.workspace, rich, 1501, "acme/feat", Some(&["pulls", "commits", "releases"]), false)
+        .subscribe(
+            &env.token_a,
+            env.a.workspace,
+            rich,
+            1501,
+            "acme/feat",
+            Some(&["pulls", "commits", "releases"]),
+            false,
+        )
         .await;
     assert_eq!(status, 200);
 
     let (_, body) = env
-        .deliver("push", "feat-push", &push_event(1501, (51, "acme/feat")), Some(SECRET_1))
+        .deliver(
+            "push",
+            "feat-push",
+            &push_event(1501, (51, "acme/feat")),
+            Some(SECRET_1),
+        )
         .await;
     assert_eq!(body["delivered"].as_u64(), Some(1));
-    assert_eq!((env.messages(plain).await, env.messages(rich).await), (0, 1), "push");
+    assert_eq!(
+        (env.messages(plain).await, env.messages(rich).await),
+        (0, 1),
+        "push"
+    );
     let (_, body) = env
-        .deliver("release", "feat-release", &release_published(1501, (51, "acme/feat")), Some(SECRET_1))
+        .deliver(
+            "release",
+            "feat-release",
+            &release_published(1501, (51, "acme/feat")),
+            Some(SECRET_1),
+        )
         .await;
     assert_eq!(body["delivered"].as_u64(), Some(1));
-    assert_eq!((env.messages(plain).await, env.messages(rich).await), (0, 2), "release");
+    assert_eq!(
+        (env.messages(plain).await, env.messages(rich).await),
+        (0, 2),
+        "release"
+    );
     // A default-on event reaches both.
     let (_, body) = env
-        .deliver("pull_request", "feat-pr", &pull_request_opened(1501, (51, "acme/feat"), 1), Some(SECRET_1))
+        .deliver(
+            "pull_request",
+            "feat-pr",
+            &pull_request_opened(1501, (51, "acme/feat"), 1),
+            Some(SECRET_1),
+        )
         .await;
     assert_eq!(body["delivered"].as_u64(), Some(2));
-    assert_eq!((env.messages(plain).await, env.messages(rich).await), (1, 3));
+    assert_eq!(
+        (env.messages(plain).await, env.messages(rich).await),
+        (1, 3)
+    );
     // A push to a non-default branch is silent even where commits are on.
     let mut feature_branch = push_event(1501, (51, "acme/feat"));
     feature_branch["ref"] = json!("refs/heads/feature");
-    env.deliver("push", "feat-push-2", &feature_branch, Some(SECRET_1)).await;
+    env.deliver("push", "feat-push-2", &feature_branch, Some(SECRET_1))
+        .await;
     assert_eq!(env.messages(rich).await, 3);
     // The repository id was learnt from the first event.
-    let learnt: i64 = sqlx::query_scalar("SELECT count(*) FROM github_channel_subscription WHERE repo_id = 51")
-        .fetch_one(&env.su)
-        .await
-        .unwrap();
+    let learnt: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM github_channel_subscription WHERE repo_id = 51")
+            .fetch_one(&env.su)
+            .await
+            .unwrap();
     assert_eq!(learnt, 2);
 }
 
@@ -1328,8 +1762,13 @@ async fn commits_and_releases_reach_only_the_channels_that_turned_them_on() {
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
 async fn only_the_instance_operator_sees_unlinked_installations_and_can_attach_one() {
     let env = env().await;
-    env.deliver("installation", "op-1", &installation_created(1601, "orphan-org", &[(61, "orphan-org/a", true)]), Some(SECRET_1))
-        .await;
+    env.deliver(
+        "installation",
+        "op-1",
+        &installation_created(1601, "orphan-org", &[(61, "orphan-org/a", true)]),
+        Some(SECRET_1),
+    )
+    .await;
     assert_eq!(env.installation_workspace(1601).await, Some(None));
 
     // Workspace B's owner is not an instance operator: the list is closed to them.
@@ -1343,18 +1782,28 @@ async fn only_the_instance_operator_sees_unlinked_installations_and_can_attach_o
     assert_eq!(denied.status(), 403);
     let denied = env
         .http
-        .post(format!("{}/v1/integrations/github/installations/1601/link", env.base))
+        .post(format!(
+            "{}/v1/integrations/github/installations/1601/link",
+            env.base
+        ))
         .bearer_auth(&env.token_b)
         .json(&json!({"workspaceId": env.b.workspace.to_string()}))
         .send()
         .await
         .unwrap();
     assert_eq!(denied.status(), 403);
-    assert_eq!(env.installation_workspace(1601).await, Some(None), "a refused caller linked nothing");
+    assert_eq!(
+        env.installation_workspace(1601).await,
+        Some(None),
+        "a refused caller linked nothing"
+    );
     // B's own overview never shows the orphan.
     let overview: Value = env
         .http
-        .get(format!("{}/v1/workspaces/{}/github", env.base, env.b.workspace))
+        .get(format!(
+            "{}/v1/workspaces/{}/github",
+            env.base, env.b.workspace
+        ))
         .bearer_auth(&env.token_b)
         .send()
         .await
@@ -1381,17 +1830,26 @@ async fn only_the_instance_operator_sees_unlinked_installations_and_can_attach_o
 
     let attached = env
         .http
-        .post(format!("{}/v1/integrations/github/installations/1601/link", env.base))
+        .post(format!(
+            "{}/v1/integrations/github/installations/1601/link",
+            env.base
+        ))
         .bearer_auth(&env.token_a)
         .json(&json!({"workspaceId": env.b.workspace.to_string()}))
         .send()
         .await
         .unwrap();
     assert_eq!(attached.status(), 204);
-    assert_eq!(env.installation_workspace(1601).await, Some(Some(env.b.workspace)));
+    assert_eq!(
+        env.installation_workspace(1601).await,
+        Some(Some(env.b.workspace))
+    );
     let missing = env
         .http
-        .post(format!("{}/v1/integrations/github/installations/1601/link", env.base))
+        .post(format!(
+            "{}/v1/integrations/github/installations/1601/link",
+            env.base
+        ))
         .bearer_auth(&env.token_a)
         .json(&json!({"workspaceId": Uuid::new_v4().to_string()}))
         .send()
@@ -1406,8 +1864,16 @@ async fn the_per_installation_budget_answers_429_and_writes_one_audit_row_per_bu
     let env = env_with(2, true).await;
     env.link_a(1701, &[(71, "acme/rate", false)]).await;
     let channel = env.channel(env.a.workspace, "public", "gh-rate").await;
-    env.subscribe(&env.token_a, env.a.workspace, channel, 1701, "acme/rate", None, false)
-        .await;
+    env.subscribe(
+        &env.token_a,
+        env.a.workspace,
+        channel,
+        1701,
+        "acme/rate",
+        None,
+        false,
+    )
+    .await;
     // `link_a` and `subscribe` already spent part of the budget for installation 1701; wait it out
     // by counting only what follows.
     let mut statuses = Vec::new();
@@ -1441,11 +1907,15 @@ async fn the_per_installation_budget_answers_429_and_writes_one_audit_row_per_bu
     .unwrap();
     assert_eq!(mode, "github");
     // A denied delivery left no receipt, so GitHub's redelivery after the window posts normally.
-    let receipts: i64 = sqlx::query_scalar("SELECT count(*) FROM github_receipt WHERE delivery_id LIKE 'rate-%'")
-        .fetch_one(&env.su)
-        .await
-        .unwrap();
-    assert_eq!(receipts as usize, statuses.iter().filter(|s| **s == 200).count());
+    let receipts: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM github_receipt WHERE delivery_id LIKE 'rate-%'")
+            .fetch_one(&env.su)
+            .await
+            .unwrap();
+    assert_eq!(
+        receipts as usize,
+        statuses.iter().filter(|s| **s == 200).count()
+    );
 }
 
 #[tokio::test]
@@ -1480,7 +1950,12 @@ async fn without_the_master_key_the_receive_and_subscribe_surfaces_are_503() {
         format!("/v1/workspaces/{}/github", a.workspace),
         "/v1/integrations/github/installations".to_string(),
     ] {
-        let response = http.get(format!("{base}{path}")).bearer_auth(&token).send().await.unwrap();
+        let response = http
+            .get(format!("{base}{path}"))
+            .bearer_auth(&token)
+            .send()
+            .await
+            .unwrap();
         assert_eq!(response.status(), 503, "{path}");
     }
     let response = http
@@ -1491,7 +1966,9 @@ async fn without_the_master_key_the_receive_and_subscribe_surfaces_are_503() {
         .unwrap();
     assert_eq!(response.status(), 503);
     let setup = http
-        .get(format!("{base}/v1/integrations/github/setup?installation_id=1&state=x"))
+        .get(format!(
+            "{base}/v1/integrations/github/setup?installation_id=1&state=x"
+        ))
         .send()
         .await
         .unwrap();
@@ -1499,4 +1976,161 @@ async fn without_the_master_key_the_receive_and_subscribe_surfaces_are_503() {
     // Another route is unaffected.
     let health = http.get(format!("{base}/healthz")).send().await.unwrap();
     assert!(health.status().as_u16() < 500, "{}", health.status());
+}
+
+// ---------------------------------------------------------------------------
+// review findings: demoted minter, concurrent signals, repo rename, archived channel
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_demoted_minters_state_links_nothing_by_either_path() {
+    let env = env().await;
+    // Path 1: demoted before the setup URL is opened: the id is never recorded.
+    let state = env.link_state(&env.token_a, env.a.workspace).await;
+    sqlx::query("UPDATE workspace_membership SET role = 'member' WHERE member_id = $1")
+        .bind(env.a.member)
+        .execute(&env.su)
+        .await
+        .unwrap();
+    let (status, location) = env.setup(1801, &state).await;
+    assert_eq!(status, 303);
+    assert!(location.unwrap().contains("githubInstall=not_admin"));
+    let recorded: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM github_link_claim WHERE installation_id = 1801")
+            .fetch_one(&env.su)
+            .await
+            .unwrap();
+    assert_eq!(
+        recorded, 0,
+        "a demoted admin's state records no installation id"
+    );
+    // Path 2: demoted AFTER the setup URL recorded the id, before the signed event arrives.
+    sqlx::query("UPDATE workspace_membership SET role = 'owner' WHERE member_id = $1")
+        .bind(env.a.member)
+        .execute(&env.su)
+        .await
+        .unwrap();
+    let state = env.link_state(&env.token_a, env.a.workspace).await;
+    env.setup(1802, &state).await;
+    sqlx::query("UPDATE workspace_membership SET role = 'member' WHERE member_id = $1")
+        .bind(env.a.member)
+        .execute(&env.su)
+        .await
+        .unwrap();
+    env.deliver(
+        "installation",
+        "dm-1",
+        &installation_created(1802, "acme", &[]),
+        Some(SECRET_1),
+    )
+    .await;
+    assert_eq!(
+        env.installation_workspace(1802).await,
+        Some(None),
+        "the signed event did not link"
+    );
+    let live: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM github_link_claim WHERE installation_id = 1802 AND consumed_at IS NULL",
+    )
+    .fetch_one(&env.su)
+    .await
+    .unwrap();
+    assert_eq!(live, 0, "the dead claim was spent");
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn simultaneous_signals_always_link_exactly_once() {
+    let env = Arc::new(env().await);
+    for round in 0..8_i64 {
+        let installation = 1900 + round;
+        let state = env.link_state(&env.token_a, env.a.workspace).await;
+        let setup = {
+            let env = Arc::clone(&env);
+            let state = state.clone();
+            tokio::spawn(async move { env.setup(installation, &state).await })
+        };
+        let event = {
+            let env = Arc::clone(&env);
+            tokio::spawn(async move {
+                env.deliver(
+                    "installation",
+                    &format!("race-{round}"),
+                    &installation_created(installation, "acme", &[]),
+                    Some(SECRET_1),
+                )
+                .await
+            })
+        };
+        let _ = tokio::join!(setup, event);
+        assert_eq!(
+            env.installation_workspace(installation).await,
+            Some(Some(env.a.workspace)),
+            "round {round}: two concurrent halves must still meet"
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_renamed_repository_does_not_inherit_the_old_names_subscription_and_archived_channels_are_skipped(
+) {
+    let env = env().await;
+    env.link_a(2001, &[(81, "acme/foo", false), (82, "acme/other", false)])
+        .await;
+    let channel = env.channel(env.a.workspace, "public", "gh-rename").await;
+    let archived = env.channel(env.a.workspace, "public", "gh-archived").await;
+    for ch in [channel, archived] {
+        let (status, _) = env
+            .subscribe(
+                &env.token_a,
+                env.a.workspace,
+                ch,
+                2001,
+                "acme/foo",
+                None,
+                false,
+            )
+            .await;
+        assert_eq!(status, 200);
+    }
+    // The first event teaches the subscriptions repo id 81.
+    let (_, body) = env
+        .deliver(
+            "pull_request",
+            "rn-1",
+            &pull_request_opened(2001, (81, "acme/foo"), 1),
+            Some(SECRET_1),
+        )
+        .await;
+    assert_eq!(body["delivered"].as_u64(), Some(2));
+    // A different repository (id 99) now carries the same name: it must not reach the channel.
+    let (_, body) = env
+        .deliver(
+            "pull_request",
+            "rn-2",
+            &pull_request_opened(2001, (99, "acme/foo"), 2),
+            Some(SECRET_1),
+        )
+        .await;
+    assert_eq!(body["ignored"].as_str(), Some("no_subscription"), "{body}");
+    assert_eq!(env.messages(channel).await, 1);
+    // An archived channel stops receiving.
+    sqlx::query("UPDATE channel SET archived_at = now() WHERE id = $1")
+        .bind(archived)
+        .execute(&env.su)
+        .await
+        .unwrap();
+    let (_, body) = env
+        .deliver(
+            "pull_request",
+            "rn-3",
+            &pull_request_opened(2001, (81, "acme/foo"), 3),
+            Some(SECRET_1),
+        )
+        .await;
+    assert_eq!(body["delivered"].as_u64(), Some(1));
+    assert_eq!(env.messages(archived).await, 1, "no post after archiving");
+    assert_eq!(env.messages(channel).await, 2);
 }

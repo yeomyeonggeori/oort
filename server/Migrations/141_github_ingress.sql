@@ -160,25 +160,17 @@ CREATE POLICY github_app_installation_select ON github_app_installation
         AND workspace_id = NULLIF(current_setting('app.workspace_id', true), '')::uuid)
   );
 
+-- The link branch of UPDATE reaches only a row that is still unlinked (workspace_id IS NULL): an
+-- already-linked installation cannot be re-pointed through the narrow GUC even by a bug in code.
 DROP POLICY IF EXISTS github_app_installation_update ON github_app_installation;
 CREATE POLICY github_app_installation_update ON github_app_installation
   FOR UPDATE
   USING (current_setting('app.github_ingress', true) = 'on'
          OR current_setting('app.github_app_admin', true) = 'on'
-         OR current_setting('app.github_link', true) = 'on')
+         OR (current_setting('app.github_link', true) = 'on' AND workspace_id IS NULL))
   WITH CHECK (current_setting('app.github_ingress', true) = 'on'
               OR current_setting('app.github_app_admin', true) = 'on'
               OR current_setting('app.github_link', true) = 'on');
-
--- 140's ws_isolation cast `current_setting('app.workspace_id', true)::uuid` raises on an empty
--- string (a pooled connection that once ran a tenant tx keeps the placeholder as ''), and the
--- link transaction runs WITHOUT a workspace GUC while PostgreSQL still evaluates every permissive
--- policy. NULLIF turns "no workspace" into "no rows" instead of an error; the isolation it gives
--- is unchanged.
-DROP POLICY IF EXISTS ws_isolation ON github_link_claim;
-CREATE POLICY ws_isolation ON github_link_claim
-  USING (workspace_id = NULLIF(current_setting('app.workspace_id', true), '')::uuid)
-  WITH CHECK (workspace_id = NULLIF(current_setting('app.workspace_id', true), '')::uuid);
 
 -- github_link_claim: a cross-workspace read/update of the *install* claims, link GUC only.
 -- The manifest claim (purpose 'app_manifest') is never reachable through this branch.
@@ -192,6 +184,29 @@ CREATE POLICY github_link_claim_link_update ON github_link_claim
   FOR UPDATE
   USING (current_setting('app.github_link', true) = 'on' AND purpose = 'install')
   WITH CHECK (current_setting('app.github_link', true) = 'on' AND purpose = 'install');
+
+-- Through the link GUC a claim may only be spent (consumed_at) or told its installation_id; who
+-- minted it, for which workspace and until when are immutable on that path.
+CREATE OR REPLACE FUNCTION github_link_claim_link_guard()
+RETURNS trigger LANGUAGE plpgsql
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+  IF current_setting('app.github_link', true) = 'on'
+     AND (NEW.workspace_id, NEW.member_id, NEW.state_hash, NEW.purpose, NEW.expires_at, NEW.created_at)
+         IS DISTINCT FROM
+         (OLD.workspace_id, OLD.member_id, OLD.state_hash, OLD.purpose, OLD.expires_at, OLD.created_at)
+  THEN
+    RAISE EXCEPTION 'github_link_claim: the link path may only record installation_id or spend a claim'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+
+DROP TRIGGER IF EXISTS github_link_claim_link_guard ON github_link_claim;
+CREATE TRIGGER github_link_claim_link_guard
+  BEFORE UPDATE ON github_link_claim
+  FOR EACH ROW EXECUTE FUNCTION github_link_claim_link_guard();
 
 CREATE INDEX IF NOT EXISTS github_link_claim_install_idx
   ON github_link_claim (installation_id)
