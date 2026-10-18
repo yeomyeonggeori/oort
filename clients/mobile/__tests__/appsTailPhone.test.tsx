@@ -247,7 +247,9 @@ describe('막힘 문장 (폰)', () => {
     act(() => {
       fireEvent(row, 'accessibilityAction', {nativeEvent: {actionName: rotor?.name}});
     });
-    expect(open).toHaveBeenCalledWith('https://oort.test/ai/external/apps');
+    // 화면 경로가 아니라 설정 section id 로 잇는다(#3951): 웹이 그 id 를 앱 화면으로 풀어 준다.
+    expect(open).toHaveBeenCalledWith('https://oort.test/settings?section=plugins');
+    expect(String(open.mock.calls[0][0])).not.toContain('/ai/external/apps');
     expect(row.props.accessibilityLabel).toContain('이 앱은 데스크탑이나 웹에서 허용해 주세요.');
     open.mockRestore();
   });

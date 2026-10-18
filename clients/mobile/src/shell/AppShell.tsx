@@ -38,6 +38,8 @@ import AgentsScreen from '../screens/AgentsScreen';
 import ConversationScreen from '../screens/ConversationScreen';
 import HostedConnectionDetailScreen from '../screens/HostedConnectionDetailScreen';
 import HostedConnectionsScreen from '../screens/HostedConnectionsScreen';
+import AppDetailScreen from '../screens/AppDetailScreen';
+import AppsScreen from '../screens/AppsScreen';
 import InboxScreen from '../screens/InboxScreen';
 import SearchScreen from '../screens/SearchScreen';
 import SidebarScreen from '../screens/SidebarScreen';
@@ -221,6 +223,12 @@ export function Shell({
     () => dispatch({type: 'openHostedList'}),
     [],
   );
+  const onOpenApps = useCallback(() => dispatch({type: 'openAppsList'}), []);
+  const onOpenApp = useCallback(
+    (pluginId: string, name: string) =>
+      dispatch({type: 'openApp', pluginId, name}),
+    [],
+  );
   const onOpenHostedConnection = useCallback(
     (connection: OpenHostedConnection) =>
       dispatch({type: 'openHostedConnection', connection}),
@@ -294,7 +302,8 @@ export function Shell({
     nav.agent !== null ||
     nav.workList ||
     nav.workSession !== null ||
-    nav.hosted !== null;
+    nav.hosted !== null ||
+    nav.apps !== null;
   // 메뉴가 열린 채 다른 길(알림 탭 등)로 층이 서면 메뉴를 **접는다**. 숨기기만 하면
   // 층이 닫힐 때 아무도 부르지 않은 메뉴가 다시 뜬다(design-review L1).
   useEffect(() => {
@@ -467,6 +476,36 @@ export function Shell({
         </EdgeSwipeBack>
       ) : null}
 
+      {/* 「앱」 읽기 (U-4 #3951). 목록 위에 상세가 뜨고, 목록은 상세가 열려 있는 동안에도 마운트된 채 밑에
+          남아 뒤로가 리마운트 없이 드러난다(호스티드 연결 층과 같은 모양). 설치·허용은 이 층에 없다. */}
+      {nav.apps ? (
+        <EdgeSwipeBack
+          accessibilityViewIsModal={nav.apps.kind === 'list'}
+          style={styles.overlay}
+          onBack={onBack}
+          testID="apps-list-pane">
+          <AppsScreen
+            active={nav.apps.kind === 'list'}
+            onBack={onBack}
+            onOpenApp={onOpenApp}
+          />
+        </EdgeSwipeBack>
+      ) : null}
+
+      {nav.apps?.kind === 'detail' ? (
+        <EdgeSwipeBack
+          accessibilityViewIsModal
+          style={styles.overlay}
+          onBack={onBack}
+          testID="apps-detail-pane">
+          <AppDetailScreen
+            pluginId={nav.apps.pluginId}
+            name={nav.apps.name}
+            onBack={onBack}
+          />
+        </EdgeSwipeBack>
+      ) : null}
+
       {/* ## 좌측 엣지에서 밀면 닫힌다 (goal RN-U2)
           성재: "화면 좌측을 슥 넘기면 뒤로가게 해주면 안돼?"
 
@@ -522,6 +561,10 @@ export function Shell({
           onOpenAgentList={() => {
             setAi(false);
             onOpenAgentList();
+          }}
+          onOpenApps={() => {
+            setAi(false);
+            onOpenApps();
           }}
           onAskMac={harness => {
             setAi(false);
