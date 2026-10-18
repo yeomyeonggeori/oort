@@ -13,6 +13,9 @@ process.env.MEASURE_OUT_DIR = out;
 const opener = path.join(out, 'open.sh');
 fs.writeFileSync(opener, '#!/bin/sh\ncurl -s -o /dev/null -L "$1"\n', { mode: 0o755 });
 process.env.MEASURE_OPEN_CMD = opener;
+const stray = path.join(out, 'open-stray.sh');
+// First a stray callback with the wrong state (must not abort the login), then the real flow.
+fs.writeFileSync(stray, '#!/bin/sh\nru=$(printf %s "$1" | sed -n \'s/.*redirect_uri=\\([^&]*\\).*/\\1/p\' | sed \'s/%3A/:/g;s/%2F/\\//g\')\ncurl -s -o /dev/null "$ru?state=wrong&code=evil"\ncurl -s -o /dev/null -L "$1"\n', { mode: 0o755 });
 const { APPS, measure, schemaDigest, canonical } = await import('./measure_tools_list.mjs');
 
 const SECRET_TOKEN = 'tok-SECRET-123';
@@ -49,6 +52,7 @@ function fakeVendor() {
       if (u.pathname === '/token') {
         const p = new URLSearchParams(body);
         assert.ok(p.get('code_verifier'));
+        assert.equal(p.get('resource'), `${origin}/mcp`, 'RFC 8707 resource on the token request');
         return json(200, { access_token: SECRET_TOKEN });
       }
       return json(404, {});
@@ -100,4 +104,32 @@ test('--login keeps the signed-in list apart from an unauthenticated one (.auth.
   s.close();
   const files = fs.readdirSync(out).filter((f) => f.startsWith('fake3.')).sort();
   assert.deepEqual(files, ['fake3.auth.digests.json', 'fake3.auth.meta.json', 'fake3.auth.tools-list.json']);
+});
+
+test('a stray callback with the wrong state does not abort the login', async () => {
+  const { s, origin } = await fakeVendor();
+  APPS.fake4 = { url: `${origin}/mcp`, auth: 'dcr' };
+  process.env.MEASURE_OPEN_CMD = stray;
+  try {
+    assert.match(await measure('fake4', { probeOnly: false, forceLogin: false }), /2 tools/);
+  } finally {
+    process.env.MEASURE_OPEN_CMD = opener;
+    s.close();
+  }
+});
+
+test('a missing browser opener fails with a fixed message that carries no auth URL', async () => {
+  const { s, origin } = await fakeVendor();
+  APPS.fake5 = { url: `${origin}/mcp`, auth: 'dcr' };
+  process.env.MEASURE_OPEN_CMD = path.join(out, 'no-such-opener');
+  try {
+    await assert.rejects(measure('fake5', { probeOnly: false, forceLogin: false }), (e) => {
+      assert.match(e.message, /could not launch the browser opener/);
+      assert.ok(!/client_id|state=|code_challenge|redirect_uri/.test(e.message + (e.stack || '')));
+      return true;
+    });
+  } finally {
+    process.env.MEASURE_OPEN_CMD = opener;
+    s.close();
+  }
 });

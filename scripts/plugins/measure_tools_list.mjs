@@ -37,6 +37,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 
 const OUT_DIR = process.env.MEASURE_OUT_DIR || path.join(os.homedir(), '.cache', 'momo-scratch', '3944-measure');
 const GOOGLE_CLIENT_FILE = path.join(os.homedir(), '.momo-secrets', 'google-oauth-hermes-k-s1b.json');
@@ -138,6 +139,7 @@ async function mcpList(url, token) {
     tools.push(...(j.result.tools || []));
     cursor = j.result.nextCursor;
     if (!cursor) break;
+    if (page === 19) return { ok: false, stage: 'tools/list', status: 200, rpcError: 'more-than-20-pages' };
   }
   return {
     ok: true,
@@ -174,53 +176,86 @@ async function discoverAs(mcpUrl, wwwAuth) {
   return { prm, as };
 }
 
+const safeCode = (v) => (typeof v === 'string' && /^[A-Za-z0-9_.-]{1,40}$/.test(v) ? v : 'unspecified');
+// https only (plain http only for a loopback host, which the offline test uses).
+const needHttps = (u, what) => {
+  const x = new URL(u);
+  const loopback = ['127.0.0.1', 'localhost', '[::1]'].includes(x.hostname);
+  if (x.protocol !== 'https:' && !(loopback && x.protocol === 'http:')) throw new Error(`${what} must be https`);
+  return x;
+};
+
 function openBrowser(url) {
-  // `open` (macOS). Never log the URL: it carries client_id / state.
-  const p = spawn(process.env.MEASURE_OPEN_CMD || 'open', [url], { stdio: 'ignore', detached: true });
-  p.unref();
+  // `open` (macOS). Never log the URL: it carries client_id / state. A spawn
+  // failure is turned into a fixed string (Node would dump spawnargs = the URL).
+  return new Promise((resolve, reject) => {
+    const p = spawn(process.env.MEASURE_OPEN_CMD || 'open', [url], { stdio: 'ignore', detached: true });
+    p.once('error', () => reject(new Error('could not launch the browser opener (open)')));
+    p.once('spawn', () => { p.unref(); resolve(); });
+  });
 }
 
-// Loopback PKCE: returns an access token (memory only).
-async function loopbackLogin({ label, authEndpoint, tokenEndpoint, clientId, clientSecret, scope, extraAuthParams = {} }) {
+// Loopback PKCE: returns an access token (memory only). `port` 0 = any free port;
+// DCR clients register one exact redirect URI, so they pass the reserved port.
+async function loopbackLogin({ label, authEndpoint, tokenEndpoint, clientId, clientSecret, scope, port = 0, extraAuthParams = {}, tokenExtraParams = {} }) {
+  const authUrl = needHttps(authEndpoint, 'authorization endpoint');
+  needHttps(tokenEndpoint, 'token endpoint');
   const verifier = b64url(crypto.randomBytes(48));
   const challenge = b64url(crypto.createHash('sha256').update(verifier).digest());
   const state = b64url(crypto.randomBytes(16));
   let resolveCode; let rejectCode;
   const codeP = new Promise((res, rej) => { resolveCode = res; rejectCode = rej; });
   const server = http.createServer((req, res) => {
-    const u = new URL(req.url, 'http://127.0.0.1');
+    let u;
+    try { u = new URL(req.url, 'http://127.0.0.1'); } catch { res.writeHead(400).end(); return; }
     if (u.pathname !== '/callback') { res.writeHead(404).end(); return; }
-    res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
-    if (u.searchParams.get('state') !== state) { res.end('state mismatch'); rejectCode(new Error('state mismatch')); return; }
-    if (u.searchParams.get('error')) { res.end('login failed'); rejectCode(new Error(`authorization error: ${u.searchParams.get('error')}`)); return; }
-    res.end('Done. You can close this tab.');
-    resolveCode(u.searchParams.get('code'));
+    const text = (code, body) => { res.writeHead(code, { 'content-type': 'text/plain; charset=utf-8' }); res.end(body); };
+    // A stray request with the wrong state must not abort a login in progress.
+    if (u.searchParams.get('state') !== state) { text(400, 'state mismatch'); return; }
+    if (u.searchParams.get('error')) { text(400, 'login failed'); rejectCode(new Error(`authorization error: ${safeCode(u.searchParams.get('error'))}`)); return; }
+    const code = u.searchParams.get('code');
+    if (!code) { text(400, 'missing code'); return; }
+    text(200, 'Done. You can close this tab.');
+    resolveCode(code);
   });
-  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  await new Promise((resolve, reject) => {
+    server.once('error', () => reject(new Error('could not bind the loopback port')));
+    server.listen(port, '127.0.0.1', resolve);
+  });
   const redirectUri = `http://127.0.0.1:${server.address().port}/callback`;
-  const a = new URL(authEndpoint);
   const q = {
     response_type: 'code', client_id: clientId, redirect_uri: redirectUri, state,
     code_challenge: challenge, code_challenge_method: 'S256', ...extraAuthParams,
   };
   if (scope) q.scope = scope;
-  for (const [k, v] of Object.entries(q)) a.searchParams.set(k, v);
-  log(`[${label}] opening browser for consent at ${a.host} - click through, waiting up to 5 min...`);
-  openBrowser(a.toString());
+  for (const [k, v] of Object.entries(q)) authUrl.searchParams.set(k, v);
   const timer = setTimeout(() => rejectCode(new Error('login timed out')), LOGIN_WAIT_MS);
   try {
+    log(`[${label}] opening browser for consent at ${authUrl.host} - click through, waiting up to 5 min...`);
+    await openBrowser(authUrl.toString());
     const code = await codeP;
     const form = new URLSearchParams({
-      grant_type: 'authorization_code', code, redirect_uri: redirectUri, client_id: clientId, code_verifier: verifier,
+      grant_type: 'authorization_code', code, redirect_uri: redirectUri, client_id: clientId, code_verifier: verifier, ...tokenExtraParams,
     });
     if (clientSecret) form.set('client_secret', clientSecret);
-    const r = await fetchT(tokenEndpoint, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' }, body: form });
+    const r = await fetchT(tokenEndpoint, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' }, body: form });
     const j = await r.json().catch(() => ({}));
-    if (r.status !== 200 || !j.access_token) throw new Error(`token exchange failed: HTTP ${r.status} ${j.error || ''}`.trim());
+    if (r.status !== 200 || typeof j.access_token !== 'string') throw new Error(`token exchange failed: HTTP ${r.status} ${safeCode(j.error)}`);
     return j.access_token;
   } finally {
     clearTimeout(timer);
     server.close();
+  }
+}
+
+function readGoogleClient() {
+  try {
+    const c = JSON.parse(fs.readFileSync(GOOGLE_CLIENT_FILE, 'utf8')).installed;
+    if (!c?.client_id || !c?.auth_uri || !c?.token_uri) throw new Error('shape');
+    return c;
+  } catch {
+    // Fixed message on purpose: a JSON SyntaxError can quote file contents.
+    throw new Error(`cannot read the Google desktop client file (${GOOGLE_CLIENT_FILE})`);
   }
 }
 
@@ -231,7 +266,8 @@ async function tokenFor(name, app, wwwAuth) {
     } catch { throw new Error('gh auth token failed (gh auth login first)'); }
   }
   if (app.auth === 'google') {
-    const raw = JSON.parse(fs.readFileSync(GOOGLE_CLIENT_FILE, 'utf8')).installed;
+    const raw = readGoogleClient();
+    const hint = process.env.MEASURE_GOOGLE_LOGIN_HINT;
     return loopbackLogin({
       label: name,
       authEndpoint: raw.auth_uri,
@@ -239,48 +275,39 @@ async function tokenFor(name, app, wwwAuth) {
       clientId: raw.client_id,
       clientSecret: raw.client_secret,
       scope: GOOGLE_SCOPES[name].join(' '),
-      extraAuthParams: { access_type: 'online', login_hint: 'kwak@dawn.kim' },
+      extraAuthParams: { access_type: 'online', ...(hint ? { login_hint: hint } : {}) },
     });
   }
   // DCR
   const { prm, as } = await discoverAs(app.url, wwwAuth);
   if (!as?.registration_endpoint) throw new Error('no registration_endpoint (DCR unavailable)');
-  // Redirect port must be known at registration: reserve one, register, then reuse.
+  needHttps(as.registration_endpoint, 'registration endpoint');
+  // Redirect port must be known at registration: reserve one, register, then bind it.
   const probe = http.createServer(); await new Promise((r) => probe.listen(0, '127.0.0.1', r));
   const port = probe.address().port; await new Promise((r) => probe.close(r));
   const redirectUri = `http://127.0.0.1:${port}/callback`;
   const reg = await fetchT(as.registration_endpoint, {
-    method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' },
+    method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/json', accept: 'application/json' },
     body: JSON.stringify({
       client_name: 'oort tools/list measure', redirect_uris: [redirectUri],
       grant_types: ['authorization_code'], response_types: ['code'], token_endpoint_auth_method: 'none',
     }),
   });
   const rj = await reg.json().catch(() => ({}));
-  if (!(reg.status === 200 || reg.status === 201) || !rj.client_id) throw new Error(`DCR failed: HTTP ${reg.status} ${rj.error || ''}`.trim());
+  if (!(reg.status === 200 || reg.status === 201) || typeof rj.client_id !== 'string') throw new Error(`DCR failed: HTTP ${reg.status} ${safeCode(rj.error)}`);
   // allScopes: every scope the resource advertises EXCEPT delete:/manage: ones,
   // so the consent screen never grants destructive scopes just to list tools.
+  // Otherwise: the scope the 401 challenge named, else the resource's own list.
+  const challengeScope = /scope="([^"]+)"/.exec(wwwAuth || '')?.[1];
   const wantScope = app.allScopes
     ? (prm?.scopes_supported || []).filter((x) => !/^(delete|manage):/.test(x)).join(' ')
-    : (/scope="([^"]+)"/.exec(wwwAuth || '')?.[1] ?? '');
-  return loopbackLoginFixedPort({
+    : (challengeScope ?? (prm?.scopes_supported || []).join(' '));
+  // RFC 8707: the resource indicator goes on the authorize AND the token request.
+  return loopbackLogin({
     label: name, authEndpoint: as.authorization_endpoint, tokenEndpoint: as.token_endpoint,
     clientId: rj.client_id, scope: wantScope, port,
-    extraAuthParams: { resource: app.url },
+    extraAuthParams: { resource: app.url }, tokenExtraParams: { resource: app.url },
   });
-}
-
-// DCR clients registered one exact redirect URI, so bind that port.
-async function loopbackLoginFixedPort(opts) {
-  const { port, ...rest } = opts;
-  const orig = http.createServer;
-  http.createServer = function patched(...args) {
-    const s = orig.apply(this, args);
-    const listen = s.listen.bind(s);
-    s.listen = (p, ...r) => listen(p === 0 ? port : p, ...r);
-    return s;
-  };
-  try { return await loopbackLogin(rest); } finally { http.createServer = orig; }
 }
 
 function save(name, result, meta, variant = '') {
@@ -290,7 +317,10 @@ function save(name, result, meta, variant = '') {
   if (result.ok) {
     w('tools-list', { tools: result.tools });
     const digests = {};
-    for (const t of result.tools) digests[t.name] = schemaDigest(t);
+    for (const t of result.tools) {
+      if (digests[t.name]) throw new Error(`duplicate tool name in tools/list: ${t.name}`);
+      digests[t.name] = schemaDigest(t);
+    }
     w('digests', digests);
   }
   w('meta', { app: name, endpoint: APPS[name].url, measuredAt: new Date().toISOString(), digestRule: 'sha256(canonical JSON of {inputSchema,name})', ...meta });
@@ -305,7 +335,8 @@ async function measure(name, { probeOnly, forceLogin }) {
     wwwAuth = unauth.wwwAuthenticate ?? null;
     if (unauth.ok) {
       save(name, unauth, { auth: 'none', serverInfo: unauth.serverInfo, protocolVersion: unauth.protocolVersion, toolCount: unauth.tools.length });
-      return `${name}: ${unauth.tools.length} tools (no auth needed)  ${unauth.tools.map((t) => t.name).join(' ')}`;
+      const hint = app.auth === 'google' ? `\n  (unauthenticated list can be narrower than the signed-in one: also run ! scripts/plugins/measure_tools_list.sh ${name} --login)` : '';
+      return `${name}: ${unauth.tools.length} tools (no auth needed)  ${unauth.tools.map((t) => t.name).join(' ')}${hint}`;
     }
   }
   if (probeOnly) {
@@ -325,6 +356,7 @@ async function main() {
   const flags = new Set(args.filter((a) => a.startsWith('--')));
   const target = args.find((a) => !a.startsWith('--'));
   if (!target) { log('usage: measure_tools_list.sh <app|google|all> [--probe] [--login]\napps: ' + Object.keys(APPS).join(' ')); process.exit(2); }
+  if (flags.has('--probe') && flags.has('--login')) { log('--probe and --login are mutually exclusive'); process.exit(2); }
   const names = target === 'all' ? Object.keys(APPS)
     : target === 'google' ? Object.keys(APPS).filter((n) => n.startsWith('google-'))
     : [target];
@@ -339,4 +371,4 @@ async function main() {
 }
 
 export { discoverAs, APPS, measure };
-if (import.meta.url === `file://${process.argv[1]}`) await main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main();
