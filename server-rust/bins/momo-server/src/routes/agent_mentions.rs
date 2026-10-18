@@ -82,9 +82,10 @@
 //!
 //! ## What is deliberately not ported (see the PR body)
 //!
-//! * **The Context Packet** (`context_packet_id` / `memory_refs` / `tool_grants`)
-//!   — the memory plane is not on this server, and the B5.1 worker consumes none
-//!   of the three.
+//! * **The Context Packet** (`context_packet_id` / `memory_refs`) — the memory
+//!   plane is not on this server, and the B5.1 worker consumes neither.
+//!   `tool_grants` is NOT that projection: it is the ADR-0113 증보 2 E5 app-grant
+//!   evidence, written only for an agent with apps attached (#3945).
 //! * **A2A causality.** An agent-authored mention needs the source run
 //!   (`agent_run.input`'s `parent_run_id`/`depth`) to enforce the depth cap.
 //!   Rather than create a depth-0 run — which would make the A2A hop cap
@@ -790,6 +791,43 @@ struct Turn<'a> {
     announce_offline_queue: bool,
 }
 
+/// The delegated user of an app-attached agent's job: the trigger's author, and
+/// only when that author is the agent's connector owner. The delivery gates
+/// already refuse anyone else on the mention and thread-wake paths; the
+/// granted-card path rebuilds its job from a stored `author_member_id` with no
+/// gate in between, so the check is repeated here rather than assumed.
+fn delegated_app_user(agent: &MentionCandidate, author_member_id: Uuid) -> Option<Uuid> {
+    agent
+        .connector_owner
+        .as_ref()
+        .filter(|connector| connector.owner_member_id == author_member_id)
+        .map(|_| author_member_id)
+}
+
+/// ADR-0113 증보 2 E5 (#3945): put the delegated user's live app consents on a
+/// mention job — evidence and audit, never enforcement (that is the executing
+/// path's job). Only an agent with apps attached gets the key; a job whose
+/// author is not the connector owner gets an empty list.
+async fn attach_app_tool_grants_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    trigger: &MentionTrigger<'_>,
+    agent: &MentionCandidate,
+    payload: &mut Value,
+) -> Result<(), DbError> {
+    if agent.connector_owner.is_none() {
+        return Ok(());
+    }
+    let grants = match delegated_app_user(agent, trigger.author_member_id) {
+        Some(member) => {
+            momo_agent::load_app_tool_grants_in_tx(&mut *conn, workspace_id, member).await?
+        }
+        None => Vec::new(),
+    };
+    momo_agent::attach_tool_grants(payload, &grants);
+    Ok(())
+}
+
 /// Write one agent turn inside the send transaction: run → job → hosted inbox
 /// reference | managed wake broadcast → rail opening frame → audit.
 ///
@@ -859,6 +897,8 @@ async fn enqueue_turn_in_tx(
         "worker"
     };
     let mut payload = mention_job_payload(trigger, agent, routing, created.id, window, 0, delivery);
+    attach_app_tool_grants_in_tx(&mut *conn, send.workspace_id, trigger, agent, &mut payload)
+        .await?;
     if let (Some(reason), Some(object)) = (turn.wake_reason, payload.as_object_mut()) {
         object.insert("wake_reason".into(), Value::String(reason.to_string()));
     }
@@ -1600,7 +1640,7 @@ pub(crate) async fn enqueue_granted_mention_job_in_tx(
         context_max_messages,
     )
     .await?;
-    let payload = mention_job_payload(
+    let mut payload = mention_job_payload(
         &trigger,
         agent,
         &routing,
@@ -1609,6 +1649,7 @@ pub(crate) async fn enqueue_granted_mention_job_in_tx(
         0,
         MENTION_JOB_METHOD_GATEWAY,
     );
+    attach_app_tool_grants_in_tx(&mut *conn, workspace_id, &trigger, agent, &mut payload).await?;
     let job_outbox_id = momo_outbox::emit_outbox(
         &mut *conn,
         workspace_id,
@@ -1960,6 +2001,22 @@ async fn paused(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #3945: the delegated user is the author only while the author is the
+    /// connector owner; anyone else, or an agent with no apps, has none.
+    #[test]
+    fn the_delegated_app_user_is_the_connector_owner_alone() {
+        let owner = Uuid::from_u128(7);
+        let stranger = Uuid::from_u128(8);
+        let mut agent = candidate(Uuid::from_u128(2), "appagent");
+        assert_eq!(delegated_app_user(&agent, owner), None, "no apps attached");
+        agent.connector_owner = Some(momo_agent::ConnectorOwner {
+            owner_member_id: owner,
+            owner_display_name: "세은".into(),
+        });
+        assert_eq!(delegated_app_user(&agent, owner), Some(owner));
+        assert_eq!(delegated_app_user(&agent, stranger), None);
+    }
 
     fn candidate(member_id: Uuid, handle: &str) -> MentionCandidate {
         MentionCandidate {
