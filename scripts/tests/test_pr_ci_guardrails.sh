@@ -433,6 +433,10 @@ assert_filter_fixture api-vectors-only \
   '{"changed_files":1}' \
   '[[{"filename":"docs/api/human-control-signing-v4.vectors.json","status":"modified"}]]' \
   true false
+assert_filter_fixture api-vector-singular \
+  '{"changed_files":1}' \
+  '[[{"filename":"docs/api/refresh-proof.vector.json","status":"modified"}]]' \
+  true false
 # A neighbouring docs file Rust never reads stays out of the cargo lane.
 assert_filter_fixture api-neighbour-doc \
   '{"changed_files":1}' \
