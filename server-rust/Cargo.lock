@@ -1863,6 +1863,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "momo-github"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "momo-egress",
+ "momo-settings",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "momo-mcp"
 version = "0.0.0"
 dependencies = [
@@ -2063,6 +2078,7 @@ dependencies = [
  "momo-db",
  "momo-drive",
  "momo-ephemeral",
+ "momo-github",
  "momo-mcp",
  "momo-messaging",
  "momo-notifier",
