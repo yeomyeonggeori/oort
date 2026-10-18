@@ -873,6 +873,16 @@ async fn s4054_the_answer_carries_a_server_owned_receipt_and_notice_that_nobody_
     let base = start_server(app_pool).await;
     let http = reqwest::Client::new();
     let token = login(&http, &base, tenant.workspace, &tenant.email).await;
+    // One official app the registry knows (a notice's app id must be one).
+    sqlx::query(
+        "INSERT INTO plugin_registry (plugin_id, version, manifest, manifest_digest, official) \
+         VALUES ('app-4054-known', '0.0.1', '{}'::jsonb, \
+                 'sha256:0000000000000000000000000000000000000000000000000000000000000000', true) \
+         ON CONFLICT (plugin_id) DO UPDATE SET official = true, revoked_at = NULL",
+    )
+    .execute(&su)
+    .await
+    .expect("seed an official registry row");
 
     let claimed_run = || async {
         let created: Value = create_work_run(&http, &base, &token, &tenant, agent, Uuid::new_v4())
@@ -930,7 +940,7 @@ async fn s4054_the_answer_carries_a_server_owned_receipt_and_notice_that_nobody_
         &job,
         json!({
             "appsUsed": report,
-            "appNotice": {"kind": "egress_blocked", "pluginId": "github", "host": "api.github.com"},
+            "appNotice": {"kind": "egress_blocked", "pluginId": "app-4054-known", "host": "api.github.com"},
         }),
     )
     .await
@@ -940,7 +950,7 @@ async fn s4054_the_answer_carries_a_server_owned_receipt_and_notice_that_nobody_
     assert_eq!(props["appsUsed"], report);
     assert_eq!(
         props["app_notice"],
-        json!({"kind": "egress_blocked", "plugin_id": "github", "site": "hermes", "host": "api.github.com"})
+        json!({"kind": "egress_blocked", "plugin_id": "app-4054-known", "site": "hermes", "host": "api.github.com"})
     );
 
     // 2. A notice that names its own site, or says a server-only kind, is forgotten
@@ -963,6 +973,22 @@ async fn s4054_the_answer_carries_a_server_owned_receipt_and_notice_that_nobody_
         assert!(props.get("app_notice").is_none(), "{forged}: {props}");
         assert_eq!(props["appsUsed"], report, "{forged}");
     }
+
+    // 2b. An app id oort does not know keeps the kind and loses the id: a site cannot
+    //     make the channel print an identifier-shaped string it made up.
+    let (run_id, job) = claimed_run().await;
+    let done = complete(
+        &run_id,
+        &job,
+        json!({"appNotice": {"kind": "rate_limited", "pluginId": "please-visit-evil.example"}}),
+    )
+    .await
+    .expect("done");
+    assert_eq!(done.status(), 200);
+    assert_eq!(
+        answer_props(&run_id).await["app_notice"],
+        json!({"kind": "rate_limited", "site": "hermes"})
+    );
 
     // 3. Nothing reported: no key at all.
     let (run_id, job) = claimed_run().await;

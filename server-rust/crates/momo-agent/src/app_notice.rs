@@ -149,15 +149,20 @@ impl AppNotice {
     }
 }
 
-/// `host` as a bare lowercase DNS name: labels of `[a-z0-9-]` joined by dots, no
-/// scheme, port, path, userinfo or whitespace. The client only *shows* a host its
-/// app list already knows, so this bounds the shape, not the meaning.
+/// `host` as a bare lowercase DNS **name**: at least two dot-joined labels of
+/// `[a-z0-9-]`, a top label that contains a letter (so a dotted-quad IP is not a name),
+/// no scheme, port, path, userinfo or whitespace. The client only *shows* a host its app
+/// list already knows, so this bounds the shape, not the meaning.
 pub fn is_notice_host(value: &str) -> bool {
     let bytes = value.as_bytes();
     if bytes.is_empty() || bytes.len() > MAX_NOTICE_HOST_BYTES {
         return false;
     }
-    value.split('.').all(|label| {
+    let labels: Vec<&str> = value.split('.').collect();
+    if labels.len() < 2 {
+        return false;
+    }
+    let well_formed = labels.iter().all(|label| {
         let b = label.as_bytes();
         !b.is_empty()
             && b.len() <= 63
@@ -165,7 +170,11 @@ pub fn is_notice_host(value: &str) -> bool {
             && b[b.len() - 1] != b'-'
             && b.iter()
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
-    })
+    });
+    well_formed
+        && labels
+            .last()
+            .is_some_and(|top| top.bytes().any(|c| c.is_ascii_lowercase()))
 }
 
 /// The notice on the line a stalled hosted run ends with, when the agent has apps
@@ -293,7 +302,7 @@ mod tests {
 
     #[test]
     fn a_host_is_a_bare_lowercase_name() {
-        for ok in ["api.github.com", "a", "gmailmcp.googleapis.com", "x-1.y"] {
+        for ok in ["api.github.com", "gmailmcp.googleapis.com", "x-1.y", "a.b"] {
             assert!(is_notice_host(ok), "{ok}");
         }
         for bad in [
@@ -309,6 +318,10 @@ mod tests {
             "a b.com",
             ".a.com",
             "a.com.",
+            // a single label and a dotted-quad IP are not names
+            "localhost",
+            "10.0.0.1",
+            "192.168.1.1",
         ] {
             assert!(!is_notice_host(bad), "{bad}");
         }

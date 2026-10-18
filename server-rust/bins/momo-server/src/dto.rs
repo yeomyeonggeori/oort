@@ -2445,7 +2445,7 @@ pub struct AgentGatewayCompleteRequest {
     /// #4054 — `{kind, pluginId?, host?}`, the execution site's own report of why
     /// an app blocked the run. Validated by `routes::app_notice`; a malformed one
     /// is dropped here (the Agent Port refuses it instead). `site` is not a key.
-    #[serde(default, rename = "appNotice", alias = "app_notice")]
+    #[serde(default, rename = "appNotice")]
     pub app_notice: Option<serde_json::Value>,
 }
 

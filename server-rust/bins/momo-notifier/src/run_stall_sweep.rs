@@ -287,3 +287,30 @@ async fn settle_stalled_run_in_tx(
     .await?;
     Ok(true)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use momo_agent::AppNoticeKind;
+
+    /// #4054 — `momo_agent::stall_app_notice` matches the stall's closed code by
+    /// string (the agent crate cannot see `StallKind`); this pins the two spellings to
+    /// the real codes, so renaming one without the other fails here, not in production.
+    #[test]
+    fn the_stall_codes_map_to_the_two_site_facts() {
+        let kind_of =
+            |kind: StallKind| stall_app_notice(kind.code(), true).map(|notice| notice.kind);
+        assert_eq!(
+            kind_of(StallKind::LeaseAbandoned),
+            Some(AppNoticeKind::SiteSilent)
+        );
+        assert_eq!(
+            kind_of(StallKind::UnclaimedExpired),
+            Some(AppNoticeKind::SiteOff)
+        );
+        assert_eq!(
+            stall_app_notice(StallKind::LeaseAbandoned.code(), false),
+            None
+        );
+    }
+}

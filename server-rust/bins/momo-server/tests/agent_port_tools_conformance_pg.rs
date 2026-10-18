@@ -7036,9 +7036,18 @@ async fn apps_used_is_self_reported_audited_once_and_carries_no_body_or_secret_3
         {"pluginId": "google-calendar", "tool": "list_events", "calls": 3},
         {"pluginId": "gmail", "tool": "create_draft", "calls": 1}
     ]);
+    sqlx::query(
+        "INSERT INTO plugin_registry (plugin_id, version, manifest, manifest_digest, official) \
+         VALUES ('app-4054-known', '0.0.1', '{}'::jsonb, \
+                 'sha256:0000000000000000000000000000000000000000000000000000000000000000', true) \
+         ON CONFLICT (plugin_id) DO UPDATE SET official = true, revoked_at = NULL",
+    )
+    .execute(&su)
+    .await
+    .expect("seed an official registry row");
     let (status, done) = complete(json!({
         "leaseHandle": handle, "status": "succeeded", "body": "일정을 봤어요", "appsUsed": report,
-        "appNotice": {"kind": "login_lost", "pluginId": "gmail"}
+        "appNotice": {"kind": "login_lost", "pluginId": "app-4054-known"}
     }))
     .await;
     assert_eq!(status, 200, "{done}");
@@ -7057,7 +7066,7 @@ async fn apps_used_is_self_reported_audited_once_and_carries_no_body_or_secret_3
     assert_eq!(answer_props["appsUsed"], report);
     assert_eq!(
         answer_props["app_notice"],
-        json!({"kind": "login_lost", "plugin_id": "gmail"})
+        json!({"kind": "login_lost", "plugin_id": "app-4054-known"})
     );
 
     let audits = tool_used_audits_3946(&su, run).await;

@@ -721,6 +721,22 @@ pub(crate) async fn complete_gateway_run_in_tx(
         });
     }
 
+    // #4054 — a reported app id is shape-checked at the door; here it must also be an
+    // app oort knows (an official, unrevoked registry row), or the notice keeps its
+    // kind and loses the id. Otherwise a site could attribute a block to any
+    // identifier-shaped string and the channel would print it.
+    let app_notice = match app_notice {
+        Some(mut notice) => {
+            if let Some(plugin_id) = notice.plugin_id.as_deref() {
+                if !known_official_plugin_in_tx(conn, plugin_id).await? {
+                    notice.plugin_id = None;
+                }
+            }
+            Some(notice)
+        }
+        None => None,
+    };
+
     // 1. the final message — the messenger's own write path, keyed by
     //    the run id so a replay can never produce a second one.
     //    #4017: a successful run with nothing to say writes none (see
@@ -1911,6 +1927,22 @@ fn timeline_body(body: Option<&str>, succeeded: bool, safe_error: Option<&str>) 
 }
 
 /// Swift `timelineProps` (:1513-1529).
+/// Is `plugin_id` an official, unrevoked row of the plugin registry (the global
+/// catalogue, not a workspace's install)?
+async fn known_official_plugin_in_tx(
+    conn: &mut PgConnection,
+    plugin_id: &str,
+) -> Result<bool, momo_db::DbError> {
+    let known: bool = momo_db::sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM plugin_registry \
+                         WHERE plugin_id = $1 AND official AND revoked_at IS NULL)",
+    )
+    .bind(plugin_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(known)
+}
+
 fn timeline_props(
     run: &GatewayRunSnapshot,
     run_id: Uuid,

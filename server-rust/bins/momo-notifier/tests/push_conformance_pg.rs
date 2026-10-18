@@ -3774,6 +3774,36 @@ async fn the_stall_sweeps_line_says_site_silent_only_for_an_agent_with_apps() {
         .expect("insert a stalled hosted run");
         runs.push(run);
     }
+    // …and a queued run whose job no site took for a day (the unclaimed case).
+    let unclaimed_question = human_says(&su, &room, room.channel_id, asker).await;
+    let unclaimed = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO agent_run \
+           (id, workspace_id, agent_member_id, channel_id, trigger_message_id, status, input, \
+            idempotency_key, created_at, updated_at) \
+         VALUES ($1, $2, $3, $4, $5, 'queued', $6, $7, now() - interval '30 hours', \
+                 now() - interval '30 hours')",
+    )
+    .bind(unclaimed)
+    .bind(room.workspace_id)
+    .bind(with_apps)
+    .bind(room.channel_id)
+    .bind(unclaimed_question)
+    .bind(json!({"type": "chat"}))
+    .bind(format!("answer:{unclaimed}"))
+    .execute(&su)
+    .await
+    .expect("insert an unclaimed hosted run");
+    sqlx::query(
+        "INSERT INTO outbox (workspace_id, kind, method, payload, partition_key) \
+         VALUES ($1, 'agent_job', 'publish', $2, $3)",
+    )
+    .bind(room.workspace_id)
+    .bind(json!({"run_id": unclaimed.to_string()}))
+    .bind(with_apps)
+    .execute(&su)
+    .await
+    .expect("the job nobody claimed");
     sqlx::query(
         "UPDATE channel_seq SET last_seq = COALESCE((SELECT max(seq) FROM message WHERE channel_id = $1), 0) \
           WHERE channel_id = $1",
@@ -3822,6 +3852,10 @@ async fn the_stall_sweeps_line_says_site_silent_only_for_an_agent_with_apps() {
         json!({"kind": "site_silent"}),
         "the server's own observation, no `site`: {app_props}"
     );
+    // A job no site took is no site there to answer, not a quiet one.
+    let unclaimed_props = notice_of(unclaimed).await;
+    assert_eq!(unclaimed_props["code"], json!("unclaimed_expired"));
+    assert_eq!(unclaimed_props["app_notice"], json!({"kind": "site_off"}));
 }
 
 /// A DM already pushes every message to the other person, as `dm`, with no reading
