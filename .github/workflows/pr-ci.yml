@@ -174,10 +174,20 @@ jobs:
           #     openapi만 바꾼 PR은 cargo 레인이 skip되어 base에서 빨강이
           #     된다(#4042, PR #4032·#4039 전례). 새 파일을 Rust 시험이 읽게
           #     되면 이 패턴이 덮는지 확인한다.
+          #   · 그 밖에 Rust 소스가 `include_str!`/`read_to_string`/
+          #     `CARGO_MANIFEST_DIR`로 읽는 server-rust·src-tauri 밖 파일
+          #     (`server/Migrations/`·`server/Fixtures/plugin-manifests/`·
+          #     `infra/rust/sql/`·`docs/SELF_HOST_AGENT.md`·
+          #     `scripts/desktop/build_workd_sidecar.sh`·core `http.ts`와
+          #     `__fixtures__`·web `session.ts`/`tokens.css`/work `__fixtures__`·
+          #     mobile `__tests__/fixtures/`)도 같다(#4055).
+          #     `scripts/tests/test_pr_ci_guardrails.sh`가
+          #     `pr_ci_rust_external_inputs.py`로 그 경로를 소스에서 뽑아 이
+          #     필터가 덮는지 확인한다. 새 참조가 생기면 그 시험이 빨개진다.
           rust=false
           node=false
           printf '%s\n' "$files" | grep -Eq \
-            '^(server-rust/|clients/desktop/src-tauri/|deny\.toml$|scripts/check_cargo_licenses\.sh$|scripts/generate_ghcr_notice_bundle\.py$|scripts/check_ghcr_notice_bundle\.sh$|scripts/check_debian_copyrights\.sh$|scripts/tests/test_ghcr_notice_bundle\.sh$|legal/generated/|legal/THIRD_PARTY_NOTICES\.md$|NOTICE$|docs/api/openapi\.yaml$|docs/api/[^/]+\.golden\.json$|docs/api/[^/]+\.vectors?\.json$|\.github/workflows/pr-ci\.yml$)' \
+            '^(server-rust/|clients/desktop/src-tauri/|deny\.toml$|scripts/check_cargo_licenses\.sh$|scripts/generate_ghcr_notice_bundle\.py$|scripts/check_ghcr_notice_bundle\.sh$|scripts/check_debian_copyrights\.sh$|scripts/tests/test_ghcr_notice_bundle\.sh$|legal/generated/|legal/THIRD_PARTY_NOTICES\.md$|NOTICE$|docs/api/openapi\.yaml$|docs/api/[^/]+\.golden\.json$|docs/api/[^/]+\.vectors?\.json$|server/Migrations/|server/Fixtures/plugin-manifests/|infra/rust/sql/|docs/SELF_HOST_AGENT\.md$|scripts/desktop/build_workd_sidecar\.sh$|packages/momo-core/src/lib/http\.ts$|packages/momo-core/src/features/auth/__fixtures__/|packages/momo-core/src/features/workbench/__fixtures__/|clients/web/src/lib/session\.ts$|clients/web/src/design/tokens\.css$|clients/web/src/features/work/__fixtures__/|clients/mobile/__tests__/fixtures/|\.github/workflows/pr-ci\.yml$)' \
             && rust=true
           printf '%s\n' "$files" | grep -Eq \
             '^(clients/web/|clients/mobile/|packages/|server/Fixtures/|package\.json$|package-lock\.json$|scripts/check_npm_licenses\.mjs$|\.github/workflows/pr-ci\.yml$)' \
