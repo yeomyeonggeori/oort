@@ -46,6 +46,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // B4.2: whether the two settings gates are open. A boolean and a count —
         // never the master key, never an operator's address.
         provider_link_configurable = config.settings.provider_link_master_key.is_some(),
+        // ADR-0205 D1: whether the GitHub surface can seal. A boolean — never the key.
+        github_app_configurable = config.github.master_key.is_some(),
         instance_operators = config.settings.platform_admin_emails.len(),
         // B4.3: what guards the one unauthenticated write (`POST /v1/join`).
         rate_limit_per_ip = config.rate_limit.per_ip_limit,
@@ -217,6 +219,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // PROVIDER_LINK_MASTER_KEY, and the instance-global surfaces admit only a
     // `platform:read` token unless PLATFORM_ADMIN_EMAILS lists someone.
     .with_settings(config.settings.clone())
+    // ADR-0205 D1: the GitHub surface stays 503 unless the operator supplied
+    // GITHUB_APP_MASTER_KEY (an independent root; reuse of another master key refused the boot).
+    .with_github(config.github.clone())
     // #2960: 「연결 확인」 dials the provider under the operator's egress policy
     // (the worker's inputs). The default state already holds a guarded probe
     // limited to public addresses; this adds the operator's own opt-ins.

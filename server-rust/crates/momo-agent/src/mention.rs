@@ -142,6 +142,10 @@ pub struct MentionCandidate {
     /// — a subscription agent only its owner may call. `None` for every other
     /// agent, which is every agent that existed before migration 089.
     pub owner_only: Option<crate::subscription::OwnerOnlyScope>,
+    /// ADR-0113 증보 2 E3 (#3938): `Some` when `agent.connector_owner_human_id`
+    /// is set — the agent runs its owner's connected apps, so only that human's
+    /// calls are delivered. Independent of [`Self::owner_only`].
+    pub connector_owner: Option<crate::subscription::ConnectorOwner>,
     /// `agent.owner_human_id` for every agent, not only `owner_only` ones.
     /// ADR-0162 증보 2: whose 1:1 DM opens on its own, and whose approval a
     /// DM with anyone else waits for.
@@ -176,8 +180,10 @@ pub async fn load_mention_candidates_in_tx(
     workspace_id: Uuid,
     channel_id: Uuid,
 ) -> Result<Vec<MentionCandidate>, DbError> {
-    let rows = sqlx::query(
-        "SELECT m.id, m.handle, m.display_name, \
+    // #3948: the trial facts are one shared SQL fragment (`connector_trial`), so
+    // the work-request route and this loader cannot read different definitions of
+    // 「한 사람」 and 「활성 grant」.
+    let sql = "SELECT m.id, m.handle, m.display_name, \
                 a.model, a.model_source, a.system_prompt, a.max_run_steps, a.tool_schema, a.config, \
                 w.settings AS workspace_settings, \
                 ap.instructions, ap.model_pref, ap.effort_pref, ap.enabled_tools, \
@@ -226,7 +232,11 @@ pub async fn load_mention_candidates_in_tx(
                      AND acr.status = 'confirmed' \
                 ) AS is_external_runtime, \
                 a.invocation_scope, a.subscription_harness, a.owner_human_id, a.uses_owner_key, \
-                a.personal_agent, a.thread_reply_wake, \
+                a.personal_agent, a.thread_reply_wake, a.connector_owner_human_id, \
+                (SELECT c.display_name FROM member c \
+                  WHERE c.workspace_id = m.workspace_id AND c.id = a.connector_owner_human_id) \
+                  AS connector_owner_display_name, \
+                {trial_facts}, \
                 (SELECT o.display_name FROM member o \
                   WHERE o.workspace_id = m.workspace_id AND o.id = a.owner_human_id) \
                   AS owner_display_name, \
@@ -269,13 +279,14 @@ pub async fn load_mention_candidates_in_tx(
             AND m.kind = 'agent' \
             AND m.status = 'active' \
             AND m.deleted_at IS NULL \
-          ORDER BY m.created_at ASC, m.id ASC",
-    )
-    .bind(workspace_id)
-    .bind(channel_id)
-    .bind(crate::subscription::SUBSCRIPTION_AGENT_ONLINE_WINDOW_SECONDS as f64)
-    .fetch_all(&mut *conn)
-    .await?;
+          ORDER BY m.created_at ASC, m.id ASC"
+        .replace("{trial_facts}", crate::connector_trial::TRIAL_FACTS_SQL);
+    let rows = sqlx::query(&sql)
+        .bind(workspace_id)
+        .bind(channel_id)
+        .bind(crate::subscription::SUBSCRIPTION_AGENT_ONLINE_WINDOW_SECONDS as f64)
+        .fetch_all(&mut *conn)
+        .await?;
 
     let mut candidates = Vec::with_capacity(rows.len());
     for row in &rows {
@@ -337,6 +348,7 @@ pub async fn load_mention_candidates_in_tx(
                 .map_err(DbError::from)?,
             is_channel_member: row.try_get("is_channel_member").map_err(DbError::from)?,
             owner_only: owner_only_scope(row)?,
+            connector_owner: connector_owner(row)?,
             owner_member_id: row.try_get("owner_human_id").map_err(DbError::from)?,
             owner_display_name: row.try_get("owner_display_name").map_err(DbError::from)?,
             hosted_confirmed_by_owner: row
@@ -366,6 +378,36 @@ pub async fn agent_display_name_in_tx(
     .fetch_optional(&mut *conn)
     .await?;
     Ok(name)
+}
+
+/// The candidate's connector-owner facts, or `None` for an ordinary agent.
+fn connector_owner(
+    row: &sqlx::postgres::PgRow,
+) -> Result<Option<crate::subscription::ConnectorOwner>, DbError> {
+    let owner: Option<Uuid> = row
+        .try_get("connector_owner_human_id")
+        .map_err(DbError::from)?;
+    let name: Option<String> = row
+        .try_get("connector_owner_display_name")
+        .map_err(DbError::from)?;
+    let humans: Option<i64> = row
+        .try_get("connector_trial_active_humans")
+        .map_err(DbError::from)?;
+    let granted: Option<Vec<String>> = row
+        .try_get("connector_trial_granted_apps")
+        .map_err(DbError::from)?;
+    Ok(
+        owner.map(|owner_member_id| crate::subscription::ConnectorOwner {
+            owner_member_id,
+            owner_display_name: name.unwrap_or_default(),
+            trial: humans.map(
+                |active_humans| crate::connector_trial::ConnectorTrialFacts {
+                    active_humans,
+                    granted_apps: granted.unwrap_or_default(),
+                },
+            ),
+        }),
+    )
 }
 
 /// The candidate's `owner_only` facts, or `None` for a workspace agent.
@@ -723,8 +765,10 @@ pub fn mention_run_input(
 /// (`momo_agent_worker::payload::AgentJobPayload`), and its unit test pins the
 /// key names including the ones it ignores. Two keys are deliberately absent
 /// here and named in the PR body's deviation list: `context_packet*` and
-/// `memory_refs`/`tool_grants` (the memory plane is not ported), which Swift
-/// fills from `issueContextPacket`.
+/// `memory_refs` (the memory plane is not ported), which Swift fills from
+/// `issueContextPacket`. `tool_grants` is not written here either: the route
+/// adds the ADR-0113 증보 2 E5 app evidence after this call, and only for an
+/// agent with apps attached (`app_tool_grants`, #3945).
 #[allow(clippy::too_many_arguments)]
 pub fn mention_job_payload(
     trigger: &MentionTrigger<'_>,
@@ -971,6 +1015,7 @@ mod tests {
             hosted_channel_approved: false,
             is_channel_member: true,
             owner_only: None,
+            connector_owner: None,
             owner_member_id: None,
             owner_display_name: None,
             hosted_confirmed_by_owner: false,

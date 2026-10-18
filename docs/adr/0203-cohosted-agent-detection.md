@@ -240,3 +240,42 @@ D6의 다섯 조건은 그대로이고, 커넥터 시험이면 아래를 **모�
 
 - D6-1~5(터미널·코드 실행·브라우저 끔, oort 비밀값 미전달, 공개 도메인 없음, 키·승인 설정, 운영자 attest), D7의 보존·백업·삭제 규칙(목록만 늘었다), D2 프로브 두 요청, D3 인스턴스 운영자만.
 - 도우미(oort 팀 AI)는 이 시험과 무관하다. Hermes 시험 멤버는 도우미가 아니고, 도우미는 앱 도구를 부르지 않는다(ADR-0201 H4·H7·H9-I1).
+
+### K-S1a 실측 결과 (2026-10-18, #3942) — 증보 [확인 필요] 닫기
+
+상세와 근거는 `docs/planning/research/2026-10-18-hermes-mcp-connector-spike-k-s1a.md`. 로컬 Docker(v0.22.2) + 모의 MCP, 실제 키 없음.
+
+- **토큰 경로 [V]**: `/opt/data/mcp-tokens/<server>.json`(+ `.client.json`·`.meta.json`·`.refresh.lock`), 0700/0600, uid 10000.
+- **`mcp-*` 기본 포함 [V]**: 든다. `platform_toolsets` 미설정이면 설정된 MCP 서버가 `api_server`에 붙고, 모델에는 지연 카탈로그(`tool_search`·`tool_describe`·`tool_call`)로 보인다. 도구 이름 `mcp__<server>__<tool>`, 레지스트리 toolset `mcp-<server>`. `agent.disabled_toolsets` 24종은 MCP를 막지 않고 `/v1/toolsets`에는 나오지 않는다. 체크리스트에 `no_mcp` 또는 서버 이름을 명시하는 줄이 필요하다(소스 확인).
+- **로그인 [V]**: 헤드리스 브라우저 흐름은 인가 URL 출력 후 stdin에서 리디렉션 URL을 받는다. `redirect_uri`는 `http://127.0.0.1:<임의 포트>/callback`(`oauth.redirect_port`로 고정). `oauth.flow: device`는 AS에 `device_authorization_endpoint`가 있으면 동작한다.
+- **쓰기 승인 H-S2 [V]**: 스트리밍에서만 `event: approval.request`(`request_id`, `run_id`=completion id, `choices`)가 오고 `POST /v1/runs/{run_id}/approval`로 답한다. 비스트리밍은 즉시 거부. 대기 상한 300초 후 거부로 닫힌다. `unattended_mode: deny`는 이 경로를 막지 않는다. D5는 바꿀 필요가 없고 ADR-0004 증보는 이 이유로는 필요 없다.
+- **갱신 실패 신호 [V]**: 구조화 신호 없음(health·capabilities·toolsets 불변). `agent.log`·`errors.log`(gateway.log 아님)의 `hit a permanent error, parking …`와 도구 결과 `MCP call failed: MCPError: Connection closed`뿐이다. oort의 「벤더 로그인 만료」는 능동 프로브에서 추정하는 상태이며 단정하지 않는다.
+- **한도·불통 [V]**: 429·503이 구분되지 않는 같은 문구, 서버 불통은 15초 뒤 `Connection closed`.
+- 남은 `runtime-unverified`: 실제 벤더(K-S1b), `approvals.timeout` 변경, `no_mcp`·서버별 도구 허용 키, `/v1/runs` 승인, Railway.
+
+
+### K-S2 구현 결과 (2026-10-18, #3948) — K2·K4를 서버 규칙으로, 그리고 잠금 게이트 규칙 변경
+
+결재·방향은 바꾸지 않았다. 이름 후보를 확정하고, 이 슬라이스가 정한 것을 적는다.
+
+- **이름 확정**: `OORT_COHOSTED_AGENT_CONNECTORS_LOCKED`(K4 커넥터 attest), `OORT_COHOSTED_AGENT_CONNECTOR_APPS`(켜 둔 앱 id, 쉼표 구분. 형식이 틀린 id 하나가 목록 전체를 무효로 한다), 기존 `OORT_COHOSTED_AGENT_TOOLS_LOCKED`(D6). 서버는 이 셋을 **`api` 서비스 env에서만** 읽는다.
+- **켜기·끄기·보기**: `PUT /v1/workspaces/{ws}/agents/{agent}/connector-trial {"enabled":bool}`, `GET` 같은 경로. 둘 다 인스턴스 운영자 전용(D3)이고, 에이전트는 운영자 본인이 연결한 Hermes(`agent.owner_human_id` = 운영자, `agent_provider_pin.kind='operator_env'`)여야 한다. 저장하는 값은 #3938의 `agent.connector_owner_human_id` 하나이고 쓰는 길도 `set_connector_owner_in_tx` 하나다(마이그레이션 없음). 켤 때 순서대로 `409 connector_trial_not_cohosted`(운영자 env에 고정된 Hermes가 아님) → `409 connector_trial_attest` → `409 connector_trial_shared`(같은 Hermes에 고정된 다른 에이전트) → `409 connector_trial_members`(활성 사람 멤버 `member.kind='human' AND status='active' AND deleted_at IS NULL` ≠ 1) → `409 connector_trial_apps`(켜 둔 앱 ⊄ 소유자의 활성 grant) 중 하나로 거절하고, 거절은 아무것도 기록하지 않는다. 변경마다 감사 한 행(`agent.connector_trial.updated`, 앱 id만).
+- **「활성 grant」의 정의**: `plugin_grant.status='active'`이고 `revoked_at IS NULL`이며, 같은 앱의 `workspace_plugin_install`이 `enabled`이고 `revoked_at IS NULL`. 설치가 꺼지면 grant 행이 남아도 활성이 아니다. 팀 AI 도구(`team_ai_tools.rs`)의 「connected」와 같은 grant 술어에 설치 조건을 더한 것이다.
+- **배달 직전 재확인 = 「시험 에이전트」에만**: 시험 에이전트는 표시(`connector_owner_human_id`)가 있고 **운영자 env 링크에 고정된** 에이전트다. 같은 표시를 쓰는 다른 에이전트(workd 등 사람별 토큰)는 사람 수·attest로 판정하지 않는다. 판정은 DB 사실(사람 수, 소유자의 활성 grant 앱 목록)을 후보 조회에 실어 오고 서버 env attest와 **순수 함수 한 개**(`connector_trial_stop`)로 비교한다 — 순서는 attest → 사람 수 → grant. 같은 함수가 멘션·DM·스레드 깨우기(`delivery_gate`), 1:1 DM 상태(`agent-dm-delivery` → `connector_trial_stopped`), 작업 요청(`409 connector_trial_*`)에 걸린다. 멈추면 job 0·inbox 0이고 소유자에게 문장 하나(자기 쓰로틀 버킷)를 에이전트 이름으로 남긴다: 사람이 늘면 K2-3의 문장 그대로, grant 회수는 「실행 중에 허용이 회수돼서 Hermes 앱 시험을 멈췄어요. 허용을 되돌리거나, Hermes에서 그 앱 연결을 지워 주세요.」, attest 부재는 「서버에 앱 시험 선언이 없어서 Hermes 앱 시험을 멈췄어요. 운영자가 체크리스트를 다시 확인하고 선언을 넣어 주세요.」 소유자가 아닌 사람·에이전트는 이 판정 앞의 #3938 갈래에서 이미 거절된다.
+- **워커**: 이미 쌓인 job은 워커가 가져갈 때 **사람 수만** 다시 센다. 2명 이상이면 모델을 부르지 않고 run `cancelled`(`connector_trial_members`)·job `done`·감사 한 행으로 닫는다. 워커는 attest·grant를 읽지 않는다(아래 남은 것). 게이트웨이 claim도 같은 규칙을 가진다(아래 한계 2).
+- **일반 표시 라우트는 Hermes를 켜지 못한다**: `PUT …/connector-owner`로 운영자 env에 고정된 에이전트를 **켜면** `409 connector_trial_route_required`. 끄기는 소유자에게 계속 열려 있다. 켜기의 문턱(사람 1명·attest·grant·전용 Hermes)을 건너뛴 켜기를 만들지 않는다. 반대 순서(표시를 먼저 켜고 나중에 고정)는 켜기 검사와 감사를 거치지 않지만, 배달 판정은 표시+고정이면 똑같이 적용되므로 새는 길은 아니다.
+- **자기 선언 표기**: 응답 `note`와 `attested.selfDeclared=true`가 「운영자의 자기 선언이고 oort의 검증이 아니다」를 말한다. 서버는 응답·감사 어디에도 앱 id 외의 attest 내용을 쓰지 않는다.
+- **같은 Hermes를 타는 다른 에이전트(독립 검수 H1)**: Hermes는 토큰 볼륨이 하나라서 거기에 닿는 **모든** 에이전트가 앱을 쓸 수 있다 — 표시된 에이전트 하나만 판정해서는 부족하다. 그래서 (a) 켜기는 같은 워크스페이스에 운영자 env 링크에 고정된 다른 에이전트가 있으면 `409 connector_trial_shared`, (b) 표시된 시험 에이전트가 있는 동안 `PUT …/provider-pin`으로 다른 에이전트를 `operator_env`에 고정하면 `409 connector_trial_on`. 연결(`cohosted-agent/connect`)은 워크스페이스당 하나만 만들므로 이미 막혀 있다. **서버가 강제하지 못하는 것**: 같은 인스턴스의 *다른 워크스페이스*에서 이 Hermes에 고정된 에이전트(API는 다른 테넌트 행을 읽지 못한다 — BYPASSRLS 금지), 그리고 고정도 팀 링크도 없어서 워커가 `HERMES_BASE_URL`로 보내는 에이전트(env 폴백). 이 둘은 「이 Hermes는 시험 전용으로 둔다」는 운영자 선언에 남고 체크리스트에 적었다. 결정이 필요하면 후속(소유자 질문).
+- **알려진 한계(남은 것)**: (1) `OORT_COHOSTED_AGENT_*` attest는 `api`만 읽는다 — job이 쓰인 뒤 attest나 grant가 바뀌면 이미 쓰인 job은 워커가 그대로 실행한다(새 job은 쓰이지 않는다. 사람 수만 워커가 다시 센다). 환영 인사(welcome)와 승인 재개(`resume_approval`) job은 **쓰는 시점에도** attest·grant를 보지 않는다(소유자 본인의 1회성 호출이고 워커가 사람 수는 다시 센다). 워커 env에도 같은 attest를 요구하는 것은 운영 부담이 늘어서 하지 않았고 필요하면 후속이다. (2) 게이트웨이·호스티드 claim(`oort_jobs_claim`, `method='gateway'`)도 **사람 수는** 다시 센다 — `momo-outbox/src/gateway.rs`의 `trial_members_stop_sql!`이 claim 술어와 닫기 UPDATE(`close_connector_foreign_jobs_in_tx`)에 같은 정의로 들어 있고, 표시된 시험 에이전트의 소유자 job도 워크스페이스가 한 명이 아니면 `connector_trial_members`로 닫는다(이미 임대된 job은 건드리지 않는다). attest·grant는 claim 시점에 보지 않는다(쓰는 시점에만). 호스티드 inbox 읽기에는 걸지 않았다. 근거: Hermes를 부르는 길은 워커의 provider 클라이언트 하나이고 고정(pin)은 그 워커가 어느 링크를 쓸지만 바꾼다 — 호스티드·gateway 런타임은 oort를 거쳐 Hermes를 부르지 않는다. 그래도 같은 에이전트가 두 길에 모두 있을 수 있어(고정과 호스티드 연결을 함께 막는 코드는 없다) claim 쪽도 닫았다. (3) 워커가 job을 닫을 때는 소유자에게 문장 없이 감사 한 행만 남긴다(안내는 쓰는 시점의 멘션에서만 간다). (4) 서버는 실제 Hermes의 `mcp_servers`·도구·토큰을 볼 수 없다(attest만). (5) 실제 벤더 왕복은 `runtime-unverified`(K-S1b).
+
+#### 잠금 게이트(`lockgate.py`) 규칙 변경 — 커넥터 시험을 켤 때
+
+기존 게이트(ADR-0203 D6, Railway 시작 명령이 이미지 엔트리포인트 앞에서 실행)는 `mcp_servers`가 **비어 있어야** 통과했다(K-S1a: 「커넥터를 켜는 구현에서는 게이트 규칙을 바꿔야 한다」). 바뀐 규칙: **`mcp_servers`가 비어 있으면 전과 같고, 비어 있지 않으면 시험 규칙 전부를 만족할 때만 통과한다.** 별도 스위치는 없다 — 서버 항목을 쓰는 것이 곧 시험을 켜는 뜻이라, 깜빡해서 느슨한 채 통과하는 길이 없다. 시험 규칙(하나라도 어기면 exit 3, 나머지 D6 규칙은 그대로 함께 적용):
+
+1. Hermes 서비스에도 `OORT_COHOSTED_AGENT_CONNECTOR_APPS`가 있고(oort와 같은 값), `mcp_servers` 키 집합이 그 앱 집합과 **1:1**이다. 키는 앱 id에서 `com.momo.plugins.`를 떼고 소문자로 한 뒤 `-`·`.`를 `_`로 바꾼 값(Hermes가 `-`/`_`를 같게 본다).
+2. 서버마다 원격 한 줄 `https://` url(공백·개행 없음, `command`·`args` 금지 — 로컬 프로세스 실행).
+3. `trust`가 정확히 `untrusted`(Hermes는 값이 없으면 `full`로 본다 — K-S1a 소스 확인), `sampling.enabled`가 명시적 `false`(기본값이 켜짐).
+4. `tools.include`가 비지 않은 **정확한 이름** 목록(`*`·`?`·`[`가 있으면 Hermes가 fnmatch 글롭으로 읽는다), 그리고 `tools.resources`·`tools.prompts`가 명시적 `false` — Hermes는 서버마다 리소스·프롬프트 읽기 도구(`list/read_resource`, `list/get_prompt`)를 **`include` 밖에서** 기본 켜짐으로 등록하므로 `include`만으로는 읽기 도구 목록이 닫히지 않는다(#3948 독립 검수로 발견, Hermes v0.22.2 소스 `mcp_tool_registration.py`).
+5. `agent.disabled_toolsets`에 `cronjob`·`delegation`·`web`(K4-1).
+
+게이트는 **설정**을 본다. K-S1a 실측대로 MCP 도구는 `/v1/toolsets`에 나오지 않고 `disabled_toolsets`가 막지도 않으므로, 허용목록 검사도 기동 뒤 리포트도 벤더 서버가 실제로 내놓는 도구를 증명하지 못한다 — 그것은 K4의 운영자 attest다. 스크립트는 레포 `infra/hermes/lockgate.py`에 있고 규칙은 Docker 없이 `infra/hermes/test_lockgate_connectors.py`로, 실제 Hermes 이미지(v0.22.2 digest 고정)로는 게이트 매트릭스 행으로 확인했다(#3948 PR 본문).

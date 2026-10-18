@@ -82,9 +82,10 @@
 //!
 //! ## What is deliberately not ported (see the PR body)
 //!
-//! * **The Context Packet** (`context_packet_id` / `memory_refs` / `tool_grants`)
-//!   — the memory plane is not on this server, and the B5.1 worker consumes none
-//!   of the three.
+//! * **The Context Packet** (`context_packet_id` / `memory_refs`) — the memory
+//!   plane is not on this server, and the B5.1 worker consumes neither.
+//!   `tool_grants` is NOT that projection: it is the ADR-0113 증보 2 E5 app-grant
+//!   evidence, written only for an agent with apps attached (#3945).
 //! * **A2A causality.** An agent-authored mention needs the source run
 //!   (`agent_run.input`'s `parent_run_id`/`depth`) to enforce the depth cap.
 //!   Rather than create a depth-0 run — which would make the A2A hop cap
@@ -100,13 +101,21 @@
 //!   `runId` made the follow-up possible; it did not make it correct by default.
 
 use momo_agent::{
-    create_agent_run_in_tx, find_unclaimed_thread_run_in_tx, load_dm_audience_in_tx,
-    load_mention_candidates_in_tx, load_thread_wake_target_in_tx, mention_diagnostic_detail,
-    mention_job_broadcast_payload, mention_job_payload, mention_run_input, paused_mention_body,
-    paused_mention_props, resolve_dm_addressing, resolve_mention_routing, stamp_addressing,
-    Addressing, DmAddressing, MentionCandidate, MentionRouting, MentionTrigger, NewAgentRun,
-    RequestedRouting, RunTrigger, MENTION_JOB_METHOD_GATEWAY, MENTION_JOB_METHOD_WORKER,
-    THREAD_REPLY_WAKE_REASON,
+    connector_owner_notice_body, lock_and_find_recent_notice_in_tx, notice_root, notice_thread_key,
+    owner_only_gate, subscription_notice_body, subscription_notice_props, SubscriptionNoticeKind,
+    CLAUDE_SUBSCRIPTION_AGENT_PAUSED, SKIP_CONNECTOR_OWNER_NON_OWNER, SKIP_OWNER_ONLY_NON_OWNER,
+    SKIP_PERSONAL_AGENT_CLIENT_SIGNS, SKIP_SUBSCRIPTION_AGENTS_DISABLED,
+    SUBSCRIPTION_NOTICE_AUDIT_SCHEMA, SUBSCRIPTION_NOTICE_POSTED_ACTION,
+    SUBSCRIPTION_NOTICE_THROTTLED_ACTION,
+};
+use momo_agent::{
+    create_agent_run_in_tx, find_unclaimed_dm_run_in_tx, find_unclaimed_thread_run_in_tx,
+    load_dm_audience_in_tx, load_mention_candidates_in_tx, load_thread_wake_target_in_tx,
+    mention_diagnostic_detail, mention_job_broadcast_payload, mention_job_payload,
+    mention_run_input, paused_mention_body, paused_mention_props, resolve_dm_addressing,
+    resolve_mention_routing, stamp_addressing, Addressing, DmAddressing, MentionCandidate,
+    MentionRouting, MentionTrigger, NewAgentRun, RequestedRouting, RunTrigger,
+    MENTION_JOB_METHOD_GATEWAY, MENTION_JOB_METHOD_WORKER, THREAD_REPLY_WAKE_REASON,
 };
 use momo_agent::{
     hosted_skip_notice_body_with_owner, hosted_skip_notice_key, hosted_skip_notice_props,
@@ -114,13 +123,6 @@ use momo_agent::{
     HOSTED_SKIP_NOTICE_AUDIT_SCHEMA, HOSTED_SKIP_NOTICE_KIND, HOSTED_SKIP_NOTICE_POSTED_ACTION,
     HOSTED_SKIP_NOTICE_SOURCE, HOSTED_SKIP_NOTICE_THROTTLED_ACTION,
     HOSTED_SKIP_NOTICE_THROTTLE_SECONDS,
-};
-use momo_agent::{
-    lock_and_find_recent_notice_in_tx, notice_root, notice_thread_key, owner_only_gate,
-    subscription_notice_body, subscription_notice_props, SubscriptionNoticeKind,
-    CLAUDE_SUBSCRIPTION_AGENT_PAUSED, SKIP_OWNER_ONLY_NON_OWNER, SKIP_PERSONAL_AGENT_CLIENT_SIGNS,
-    SKIP_SUBSCRIPTION_AGENTS_DISABLED, SUBSCRIPTION_NOTICE_AUDIT_SCHEMA,
-    SUBSCRIPTION_NOTICE_POSTED_ACTION, SUBSCRIPTION_NOTICE_THROTTLED_ACTION,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{DbError, PgConnection};
@@ -144,6 +146,9 @@ const MODEL_PREF_IGNORED_ACTION: &str = "agent.profile.model_pref.ignored";
 /// the mention outcomes' diagnostic schema.
 const THREAD_WAKE_QUEUED_ACTION: &str = "agent.thread_wake.queued";
 const THREAD_WAKE_SKIPPED_ACTION: &str = "agent.thread_wake.skipped";
+/// #4017 — a 1:1 DM message folded into the same agent's still-unclaimed
+/// `dm_implicit` run instead of starting a second one.
+const DM_COALESCED_ACTION: &str = "agent.dm.coalesced";
 const THREAD_WAKE_COALESCED_ACTION: &str = "agent.thread_wake.coalesced";
 
 /// Everything the routing needs about the message that triggered it.
@@ -182,6 +187,10 @@ pub(crate) struct MentionSend<'a> {
     /// Off (the default) means a Claude subscription agent is not dispatched
     /// to, whenever it was registered.
     pub claude_subscription_agents_enabled: bool,
+    /// #3948 (ADR-0203 증보 K2·K4) — what the operator declared about Hermes's
+    /// connectors, read from the server's environment. Only a 「커넥터 시험」
+    /// agent is judged by it ([`momo_agent::connector_trial_stop`]).
+    pub connector_trial: &'a momo_agent::ConnectorTrialAttest,
     pub context_max_messages: i64,
     /// ADR-0162 증보 5 G5 — `MentionSettings::hosted_inplace_grant_enabled`.
     pub inplace_grant_enabled: bool,
@@ -345,6 +354,50 @@ pub(crate) async fn route_agent_mentions_in_tx(
                 subscription_notice(&mut *conn, &send, agent, kind).await?;
                 continue;
             }
+            // ADR-0113 증보 2 E3 (#3938) — a person other than the owner called
+            // an agent that runs the owner's apps: no job, no inbox row, and one
+            // sentence in the agent's name (throttled).
+            DeliveryGate::ConnectorOwner(kind) => {
+                skip(
+                    &mut *conn,
+                    &send,
+                    &trigger,
+                    agent,
+                    *addressing,
+                    gate.skip_reason(),
+                )
+                .await?;
+                subscription_notice(&mut *conn, &send, agent, kind).await?;
+                continue;
+            }
+            // #3948 — the owner called a stopped 「커넥터 시험」: no job, no inbox
+            // row, one sentence in the agent's name naming what to fix.
+            DeliveryGate::ConnectorTrial(stop) => {
+                skip(
+                    &mut *conn,
+                    &send,
+                    &trigger,
+                    agent,
+                    *addressing,
+                    gate.skip_reason(),
+                )
+                .await?;
+                subscription_notice(&mut *conn, &send, agent, stop.into()).await?;
+                continue;
+            }
+            // Not a person: nobody called, so nothing is said.
+            DeliveryGate::ConnectorOwnerNonPerson => {
+                skip(
+                    &mut *conn,
+                    &send,
+                    &trigger,
+                    agent,
+                    *addressing,
+                    gate.skip_reason(),
+                )
+                .await?;
+                continue;
+            }
             DeliveryGate::HostedDeliveryNotEnabled => {
                 skip(
                     &mut *conn,
@@ -485,6 +538,74 @@ pub(crate) async fn route_agent_mentions_in_tx(
             Ok(routing) => routing,
             Err(invalid) => return Ok(Err(ApiError::bad_request(invalid.to_string()))),
         };
+        // #4017 — 「ㅎㅇ」 then 「반가」: the person said one thing in two bubbles.
+        // When the DM rule's turn for this agent has not been picked up yet, the
+        // new message joins that turn's conversation (the job's
+        // `recent_messages` is re-read, anchored on this message) and no second
+        // run starts. A claimed turn is underway and its answer cannot take the
+        // new message in, so that case falls through to a turn of its own. Only
+        // a bare, top-level DM message qualifies: an `@mention` or a `routing`
+        // block is a choice a queued turn did not make, and a thread reply would
+        // be answered under the first message's thread. The folded turn keeps the
+        // first message as its trigger (the answer quotes it); the later one is
+        // read from the refreshed `recent_messages`.
+        if *addressing == Addressing::DirectMessage
+            && send.routing.is_none()
+            && send.root_id.is_none()
+        {
+            if let Some(pending) = find_unclaimed_dm_run_in_tx(
+                &mut *conn,
+                send.workspace_id,
+                agent.member_id,
+                send.channel_id,
+            )
+            .await?
+            {
+                if context_window.is_none() {
+                    context_window = Some(
+                        agent_context_window_in_tx(
+                            &mut *conn,
+                            send.channel_id,
+                            send.message_id,
+                            send.context_max_messages,
+                        )
+                        .await?,
+                    );
+                }
+                let window = context_window.clone().unwrap_or_default();
+                let refreshed = momo_outbox::refresh_pending_agent_job_recent_messages_in_tx(
+                    &mut *conn,
+                    send.workspace_id,
+                    pending.job_outbox_id,
+                    &Value::Array(window),
+                )
+                .await?;
+                if refreshed {
+                    let mut detail = mention_diagnostic_detail(
+                        &trigger,
+                        agent,
+                        "coalesced_into_queued_run",
+                        Some(pending.run_id),
+                        None,
+                        None,
+                        None,
+                    );
+                    stamp_addressing(&mut detail, Addressing::DirectMessage);
+                    write_audit(
+                        &mut *conn,
+                        &AuditEntry::new(send.workspace_id, DM_COALESCED_ACTION)
+                            .by(send.author_member_id)
+                            .about(agent.member_id)
+                            .target("message", send.message_id)
+                            .via_token(send.via_token_id)
+                            .run(pending.run_id)
+                            .with_schema(MENTION_DIAGNOSTIC_SCHEMA, detail),
+                    )
+                    .await?;
+                    continue;
+                }
+            }
+        }
         // The run key is the same on both addressing paths —
         // `mention:<message>:<agent>` — so an @mention and the DM rule pointing
         // at the same agent collapse into one run at the SoT even if the union
@@ -542,6 +663,19 @@ enum DeliveryGate {
     /// Before every hosted-delivery question, on purpose: a non-owner's call is
     /// refused whatever the delivery state is.
     OwnerOnly(SubscriptionNoticeKind),
+    /// ADR-0113 증보 2 E3 (#3938) — the agent runs its owner's connected apps
+    /// and a **person** other than the owner called. Refused with the owner's
+    /// name in one sentence (throttled like D6), nothing delivered.
+    ConnectorOwner(SubscriptionNoticeKind),
+    /// Same refusal, but the caller is not a person (an agent's A2A mention, a
+    /// work host, a system or webhook-shaped author): nobody called, so nobody
+    /// is told. Audit only.
+    ConnectorOwnerNonPerson,
+    /// #3948 (ADR-0203 증보 K2·K4) — the owner called, but the 「커넥터 시험」 is
+    /// stopped right now (an attestation is gone, the workspace has more than one
+    /// person, or an app lost the owner's grant). Re-measured on every delivery.
+    /// No job, no inbox row, one sentence to the owner (throttled).
+    ConnectorTrial(momo_agent::ConnectorTrialStop),
     /// ADR-0162 HAP-E5's production feature gate is closed.
     HostedDeliveryNotEnabled,
     /// A hosted agent with no ACTIVE, proved connection. Never a fallback to a
@@ -572,6 +706,10 @@ impl DeliveryGate {
                 CLAUDE_SUBSCRIPTION_AGENT_PAUSED
             }
             DeliveryGate::OwnerOnly(_) => SKIP_SUBSCRIPTION_AGENTS_DISABLED,
+            DeliveryGate::ConnectorOwner(_) | DeliveryGate::ConnectorOwnerNonPerson => {
+                SKIP_CONNECTOR_OWNER_NON_OWNER
+            }
+            DeliveryGate::ConnectorTrial(stop) => stop.skip_reason(),
             DeliveryGate::HostedDeliveryNotEnabled => HostedSkipReason::DeliveryNotEnabled.as_str(),
             DeliveryGate::HostedConnectionUnavailable => {
                 HostedSkipReason::ConnectionUnavailable.as_str()
@@ -595,6 +733,7 @@ fn delivery_gate(agent: &MentionCandidate, send: &MentionSend<'_>) -> DeliveryGa
     let owner_gate = || {
         owner_only_gate(
             agent.owner_only.as_ref(),
+            agent.connector_owner.as_ref(),
             send.author_member_id,
             send.subscription_agents_enabled,
             send.claude_subscription_agents_enabled,
@@ -607,13 +746,35 @@ fn delivery_gate(agent: &MentionCandidate, send: &MentionSend<'_>) -> DeliveryGa
     {
         // `owner_only_gate` returns `None` for the owner of a personal agent, so
         // neither instance switch (#3626 L2) can refuse it here.
-        return DeliveryGate::PersonalAgent(owner_gate());
+        // E3: a connector refusal keeps its own shape (silent for a non-person)
+        // even on a personal agent.
+        let gate = owner_gate();
+        if gate == Some(SubscriptionNoticeKind::ConnectorNonOwner) {
+            return connector_refusal(send);
+        }
+        return DeliveryGate::PersonalAgent(gate);
     }
     if !agent.is_channel_member {
         return DeliveryGate::NotChannelMember;
     }
     if let Some(kind) = owner_gate() {
+        // E3: a connector refusal is judged first inside `owner_only_gate`;
+        // whether anyone is told depends on who called. Only a person is.
+        if kind == SubscriptionNoticeKind::ConnectorNonOwner {
+            return connector_refusal(send);
+        }
         return DeliveryGate::OwnerOnly(kind);
+    }
+    // #3948: the caller is the owner (a non-owner was refused above). A 「커넥터
+    // 시험」 agent is delivered to only while all three facts still hold.
+    if let Some(stop) = momo_agent::connector_trial_stop(
+        agent
+            .connector_owner
+            .as_ref()
+            .and_then(|connector| connector.trial.as_ref()),
+        send.connector_trial,
+    ) {
+        return DeliveryGate::ConnectorTrial(stop);
     }
     let hosted_connection_id = if agent.hosted_delivery_disabled {
         if !send.hosted_delivery_enabled {
@@ -637,6 +798,16 @@ fn delivery_gate(agent: &MentionCandidate, send: &MentionSend<'_>) -> DeliveryGa
     }
 }
 
+/// E3: the refusal of a connector agent's non-owner caller. Only a person is
+/// told; an agent, work host or system-shaped author is refused silently.
+fn connector_refusal(send: &MentionSend<'_>) -> DeliveryGate {
+    if send.author_is_human && !send.author_is_agent {
+        DeliveryGate::ConnectorOwner(SubscriptionNoticeKind::ConnectorNonOwner)
+    } else {
+        DeliveryGate::ConnectorOwnerNonPerson
+    }
+}
+
 /// What kind of turn [`enqueue_turn_in_tx`] is writing. Everything else about
 /// the turn — run, job, inbox reference, wake broadcast, rail frame, audit — is
 /// the same for a mention and a thread-reply wake (W4 「같은 어휘」).
@@ -654,6 +825,43 @@ struct Turn<'a> {
     /// ADR-0193 D5's 「이어서 답할게요」 line for an offline subscription agent.
     /// Only a call earns that sentence; a wake (nobody called) stays silent.
     announce_offline_queue: bool,
+}
+
+/// The delegated user of an app-attached agent's job: the trigger's author, and
+/// only when that author is the agent's connector owner. The delivery gates
+/// already refuse anyone else on the mention and thread-wake paths; the
+/// granted-card path rebuilds its job from a stored `author_member_id` with no
+/// gate in between, so the check is repeated here rather than assumed.
+fn delegated_app_user(agent: &MentionCandidate, author_member_id: Uuid) -> Option<Uuid> {
+    agent
+        .connector_owner
+        .as_ref()
+        .filter(|connector| connector.owner_member_id == author_member_id)
+        .map(|_| author_member_id)
+}
+
+/// ADR-0113 증보 2 E5 (#3945): put the delegated user's live app consents on a
+/// mention job — evidence and audit, never enforcement (that is the executing
+/// path's job). Only an agent with apps attached gets the key; a job whose
+/// author is not the connector owner gets an empty list.
+async fn attach_app_tool_grants_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    trigger: &MentionTrigger<'_>,
+    agent: &MentionCandidate,
+    payload: &mut Value,
+) -> Result<(), DbError> {
+    if agent.connector_owner.is_none() {
+        return Ok(());
+    }
+    let grants = match delegated_app_user(agent, trigger.author_member_id) {
+        Some(member) => {
+            momo_agent::load_app_tool_grants_in_tx(&mut *conn, workspace_id, member).await?
+        }
+        None => Vec::new(),
+    };
+    momo_agent::attach_tool_grants(payload, &grants);
+    Ok(())
 }
 
 /// Write one agent turn inside the send transaction: run → job → hosted inbox
@@ -725,6 +933,8 @@ async fn enqueue_turn_in_tx(
         "worker"
     };
     let mut payload = mention_job_payload(trigger, agent, routing, created.id, window, 0, delivery);
+    attach_app_tool_grants_in_tx(&mut *conn, send.workspace_id, trigger, agent, &mut payload)
+        .await?;
     if let (Some(reason), Some(object)) = (turn.wake_reason, payload.as_object_mut()) {
         object.insert("wake_reason".into(), Value::String(reason.to_string()));
     }
@@ -1466,7 +1676,7 @@ pub(crate) async fn enqueue_granted_mention_job_in_tx(
         context_max_messages,
     )
     .await?;
-    let payload = mention_job_payload(
+    let mut payload = mention_job_payload(
         &trigger,
         agent,
         &routing,
@@ -1475,6 +1685,7 @@ pub(crate) async fn enqueue_granted_mention_job_in_tx(
         0,
         MENTION_JOB_METHOD_GATEWAY,
     );
+    attach_app_tool_grants_in_tx(&mut *conn, workspace_id, &trigger, agent, &mut payload).await?;
     let job_outbox_id = momo_outbox::emit_outbox(
         &mut *conn,
         workspace_id,
@@ -1568,8 +1779,21 @@ async fn subscription_notice(
     agent: &MentionCandidate,
     kind: SubscriptionNoticeKind,
 ) -> Result<(), DbError> {
-    let Some(scope) = agent.owner_only.as_ref() else {
-        return Ok(());
+    // E3 (#3938): the connector sentence needs only the connector owner's name —
+    // an agent that is not `owner_only` has no `OwnerOnlyScope` to read it from.
+    let body = if let Some(stop) = kind.connector_trial_stop() {
+        // #3948: the trial sentences name nobody; only the owner is ever told.
+        momo_agent::connector_trial_notice_body(stop).to_string()
+    } else if kind == SubscriptionNoticeKind::ConnectorNonOwner {
+        let Some(connector) = agent.connector_owner.as_ref() else {
+            return Ok(());
+        };
+        connector_owner_notice_body(&connector.owner_display_name)
+    } else {
+        let Some(scope) = agent.owner_only.as_ref() else {
+            return Ok(());
+        };
+        subscription_notice_body(kind, scope)
     };
     let thread_key = notice_thread_key(send.channel_id, send.root_id);
     let recent = lock_and_find_recent_notice_in_tx(
@@ -1608,7 +1832,7 @@ async fn subscription_notice(
             channel_id: send.channel_id,
             author_member_id: agent.member_id,
             message_type: MessageType::Text,
-            body: Some(subscription_notice_body(kind, scope)),
+            body: Some(body),
             props: subscription_notice_props(
                 kind,
                 send.author_member_id,
@@ -1817,6 +2041,25 @@ async fn paused(
 mod tests {
     use super::*;
 
+    /// #3945: the delegated user is the author only while the author is the
+    /// connector owner; anyone else, or an agent with no apps, has none.
+    #[test]
+    fn the_delegated_app_user_is_the_connector_owner_alone() {
+        let owner = Uuid::from_u128(7);
+        let stranger = Uuid::from_u128(8);
+        let mut agent = candidate(Uuid::from_u128(2), "appagent");
+        assert_eq!(delegated_app_user(&agent, owner), None, "no apps attached");
+        agent.connector_owner = Some(momo_agent::ConnectorOwner {
+            owner_member_id: owner,
+            owner_display_name: "세은".into(),
+            // This unit pins who the delegated user is; a stopped trial never
+            // reaches job assembly (`delivery_gate` refuses first).
+            trial: None,
+        });
+        assert_eq!(delegated_app_user(&agent, owner), Some(owner));
+        assert_eq!(delegated_app_user(&agent, stranger), None);
+    }
+
     fn candidate(member_id: Uuid, handle: &str) -> MentionCandidate {
         MentionCandidate {
             member_id,
@@ -1838,6 +2081,7 @@ mod tests {
             hosted_channel_approved: false,
             is_channel_member: true,
             owner_only: None,
+            connector_owner: None,
             owner_member_id: None,
             owner_display_name: None,
             hosted_confirmed_by_owner: false,
@@ -1961,6 +2205,13 @@ mod tests {
         assert!(MENTION_DIAGNOSTIC_SCHEMA.ends_with(".v0"));
     }
 
+    /// Nothing attested — what a server without the trial variables holds.
+    static NO_ATTEST: momo_agent::ConnectorTrialAttest = momo_agent::ConnectorTrialAttest {
+        tools_locked: false,
+        connectors_locked: false,
+        apps: Vec::new(),
+    };
+
     fn send_for(author: Uuid) -> MentionSend<'static> {
         MentionSend {
             workspace_id: Uuid::from_u128(100),
@@ -1978,6 +2229,7 @@ mod tests {
             hosted_delivery_enabled: true,
             subscription_agents_enabled: true,
             claude_subscription_agents_enabled: true,
+            connector_trial: &NO_ATTEST,
             context_max_messages: 30,
             routing: None,
             // The in-place grant door (#3857) is off here: these units pin the
@@ -2049,6 +2301,79 @@ mod tests {
             "hosted_channel_unapproved"
         );
         assert_eq!(DeliveryGate::Paused.skip_reason(), "agent_paused");
+    }
+
+    /// ADR-0113 증보 2 E3 (#3938): an agent that runs its owner's apps is called
+    /// by that human alone. A person other than the owner is told (one
+    /// sentence); anyone who is not a person — an agent's A2A mention, a work
+    /// host, a system or webhook-shaped author — is refused silently. The owner
+    /// passes to the ordinary checks, and no mark changes nothing.
+    #[test]
+    fn the_connector_owner_gate_tells_a_person_and_stays_silent_for_the_rest() {
+        let owner = Uuid::from_u128(1);
+        let other_person = Uuid::from_u128(5);
+        let mut agent = candidate(Uuid::from_u128(2), "appagent");
+        agent.connector_owner = Some(momo_agent::ConnectorOwner {
+            owner_member_id: owner,
+            owner_display_name: "세은".into(),
+            trial: None,
+        });
+        let open = DeliveryGate::Open {
+            hosted_connection_id: None,
+        };
+
+        assert_eq!(delivery_gate(&agent, &send_for(owner)), open);
+        assert_eq!(
+            delivery_gate(&agent, &send_for(other_person)),
+            DeliveryGate::ConnectorOwner(SubscriptionNoticeKind::ConnectorNonOwner)
+        );
+        // Not a person: a work host / webhook / system author.
+        let non_person = MentionSend {
+            author_is_human: false,
+            ..send_for(other_person)
+        };
+        assert_eq!(
+            delivery_gate(&agent, &non_person),
+            DeliveryGate::ConnectorOwnerNonPerson
+        );
+        // An agent author (A2A) — even one that claims the owner's member id is
+        // not a person (`author_is_human` is the principal's kind, not an id).
+        let a2a = MentionSend {
+            author_is_agent: true,
+            author_is_human: false,
+            ..send_for(other_person)
+        };
+        assert_eq!(
+            delivery_gate(&agent, &a2a),
+            DeliveryGate::ConnectorOwnerNonPerson
+        );
+        // Both refusals share one reason word, so one query answers for both.
+        assert_eq!(
+            DeliveryGate::ConnectorOwner(SubscriptionNoticeKind::ConnectorNonOwner).skip_reason(),
+            SKIP_CONNECTOR_OWNER_NON_OWNER
+        );
+        assert_eq!(
+            DeliveryGate::ConnectorOwnerNonPerson.skip_reason(),
+            SKIP_CONNECTOR_OWNER_NON_OWNER
+        );
+        // A personal agent with the mark: same shapes, not the personal NonOwner arm.
+        let mut personal = agent.clone();
+        personal.owner_only = Some(momo_agent::OwnerOnlyScope {
+            owner_member_id: owner,
+            owner_display_name: "세은".into(),
+            harness: momo_agent::SubscriptionHarness::Codex,
+            recently_seen: true,
+            reconnectable: false,
+            uses_owner_key: false,
+            personal_agent: true,
+        });
+        assert_eq!(
+            delivery_gate(&personal, &non_person),
+            DeliveryGate::ConnectorOwnerNonPerson
+        );
+        // No mark: a stranger's call is the ordinary agent's ordinary call.
+        agent.connector_owner = None;
+        assert_eq!(delivery_gate(&agent, &send_for(other_person)), open);
     }
 
     /// The wake's three outcomes are their own actions, distinct from the

@@ -6833,6 +6833,225 @@ async fn the_code_result_contract_names_the_bad_field_and_reads_back_as_agent_re
     assert_eq!(read["output"]["artifacts"]["branch"], json!("feat/old"));
 }
 
+/// Every key of a JSON value, recursively.
+fn keys_of_3946(value: &Value, out: &mut Vec<String>) {
+    match value {
+        Value::Object(map) => {
+            for (key, inner) in map {
+                out.push(key.clone());
+                keys_of_3946(inner, out);
+            }
+        }
+        Value::Array(items) => items.iter().for_each(|item| keys_of_3946(item, out)),
+        _ => {}
+    }
+}
+
+async fn tool_used_audits_3946(su: &PgPool, run: Uuid) -> Vec<(Value, Option<Uuid>)> {
+    sqlx::query_as(
+        "SELECT detail, actor_member_id FROM audit_log \
+          WHERE action='connector.tool_used' AND run_id=$1 ORDER BY created_at",
+    )
+    .bind(run)
+    .fetch_all(su)
+    .await
+    .expect("connector.tool_used audits")
+}
+
+/// ADR-0113 증보 2 E8 (#3946) — the execution site's 「쓴 앱」 self-report.
+///
+/// * a malformed report (unknown key, a marker posing as a tool name, a duplicate
+///   pair, a zero count) refuses the WHOLE completion before any write: the run
+///   is untouched, no `connector.tool_used` row exists, and the marker appears
+///   nowhere in `audit_log`, the run, or the answer;
+/// * the valid report is stored under `output.appsUsed`, leaves exactly ONE
+///   audit row whose keys sit inside the closed allowlist (none credential-like),
+///   and reads back as `appsUsed` on the run detail;
+/// * a replay of the completion neither doubles the row nor re-reports;
+/// * a run that reported nothing has no `appsUsed` key and no audit row;
+/// * a stored row that was tampered with (an extra key) is dropped on read.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn apps_used_is_self_reported_audited_once_and_carries_no_body_or_secret_3946() {
+    const MARKER: &str = "MARK3946TOKENBYTES";
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (handle, run) = claimed_run_3516(&client, &base, &su, &fixture).await;
+    let complete = |args: Value| {
+        let (client, base, bearer) = (&client, &base, &fixture.hosted_bearer);
+        async move { call(client, base, bearer, "oort_run_complete", args).await }
+    };
+    let detail = |run: Uuid| {
+        let (client, base, jwt, ws) = (&client, &base, &fixture.human_jwt, fixture.workspace);
+        async move {
+            let response = client
+                .get(format!("{base}/v1/workspaces/{ws}/agent-runs/{run}"))
+                .bearer_auth(jwt)
+                .send()
+                .await
+                .expect("run detail");
+            assert_eq!(response.status().as_u16(), 200);
+            response.json::<Value>().await.expect("run detail body")
+        }
+    };
+    let before = run_record_3516(&su, run).await;
+    let messages_before = channel_message_count(&su, fixture.workspace, fixture.channel).await;
+
+    // 1. Malformed reports: each refuses the whole completion, writes nothing.
+    let entry = json!({"pluginId": "google-calendar", "tool": "list_events", "calls": 2});
+    let bad_reports = [
+        // an unknown key — a token has nowhere to ride (refused by the published schema)
+        json!([{"pluginId": "google-calendar", "tool": "list_events", "calls": 2, "token": MARKER}]),
+        // free text posing as a tool name (refused by the adapter)
+        json!([{"pluginId": "google-calendar", "tool": format!("{MARKER} secret"), "calls": 2}]),
+        json!([{"pluginId": "google-calendar", "tool": format!("a={MARKER}"), "calls": 2}]),
+        // a plugin id outside the registry alphabet
+        json!([{"pluginId": format!("Bad {MARKER}"), "tool": "list_events", "calls": 2}]),
+        // a zero / fractional count, a duplicate pair, too many entries
+        json!([{"pluginId": "google-calendar", "tool": "list_events", "calls": 0}]),
+        json!([{"pluginId": "google-calendar", "tool": "list_events", "calls": 1.5}]),
+        json!([entry.clone(), entry.clone()]),
+        Value::Array(
+            (0..17)
+                .map(
+                    |i| json!({"pluginId": "google-calendar", "tool": format!("t{i}"), "calls": 1}),
+                )
+                .collect(),
+        ),
+        // not an array
+        json!({"pluginId": "google-calendar", "tool": "list_events", "calls": 2}),
+    ];
+    for bad in bad_reports {
+        let (status, answer) = complete(json!({
+            "leaseHandle": handle, "status": "succeeded", "body": "done", "appsUsed": bad
+        }))
+        .await;
+        assert_eq!(status, 400, "{bad} -> {answer}");
+        assert_eq!(error_code(&answer), -32602, "{answer}");
+        assert!(!answer.to_string().contains(MARKER), "{answer}");
+    }
+    assert_eq!(
+        run_record_3516(&su, run).await,
+        before,
+        "nothing was written"
+    );
+    assert_eq!(
+        channel_message_count(&su, fixture.workspace, fixture.channel).await,
+        messages_before
+    );
+    assert!(tool_used_audits_3946(&su, run).await.is_empty());
+    let marker_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE workspace_id = $2 \
+            AND detail::text LIKE '%' || $1 || '%'",
+    )
+    .bind(MARKER)
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(marker_rows, 0, "no refused byte reached the audit log");
+
+    // 2. The valid report completes; stored, audited once, read back.
+    let report = json!([
+        {"pluginId": "google-calendar", "tool": "list_events", "calls": 3},
+        {"pluginId": "gmail", "tool": "create_draft", "calls": 1}
+    ]);
+    let (status, done) = complete(json!({
+        "leaseHandle": handle, "status": "succeeded", "body": "일정을 봤어요", "appsUsed": report
+    }))
+    .await;
+    assert_eq!(status, 200, "{done}");
+    let (_, output) = run_record_3516(&su, run).await;
+    assert_eq!(output["appsUsed"], report);
+
+    let audits = tool_used_audits_3946(&su, run).await;
+    assert_eq!(audits.len(), 1, "one line per completion");
+    let (audit, actor) = &audits[0];
+    assert_eq!(*actor, Some(fixture.hosted_agent), "the reporting agent");
+    assert_eq!(audit["schema"], json!("momo.connector.tool_used.v0"));
+    assert_eq!(audit["source"], json!("agent_reported"));
+    assert_eq!(audit["total_calls"], json!(4));
+    assert_eq!(audit["apps"], report);
+    let mut keys = Vec::new();
+    keys_of_3946(audit, &mut keys);
+    let allowlist = [
+        "schema",
+        "run_id",
+        "source",
+        "apps",
+        "total_calls",
+        "pluginId",
+        "tool",
+        "calls",
+    ];
+    for key in &keys {
+        assert!(
+            allowlist.contains(&key.as_str()),
+            "key {key} is not allowlisted"
+        );
+        assert!(
+            !momo_server::plugin_manifest::is_secret_like_key(key),
+            "key {key} reads like a credential"
+        );
+    }
+
+    // 3. The run detail carries it, labelled as the run's own field.
+    let read = detail(run).await;
+    assert_eq!(read["appsUsed"], report, "{read}");
+    assert!(read.get("agentReported").is_none(), "{read}");
+
+    // 4. A replay re-reports nothing and doubles nothing.
+    let (status, replay) = complete(json!({
+        "leaseHandle": handle, "status": "succeeded", "body": "일정을 봤어요", "appsUsed": report
+    }))
+    .await;
+    assert_eq!(status, 200, "{replay}");
+    assert_eq!(tool_used_audits_3946(&su, run).await.len(), 1);
+
+    // 5. A tampered stored row is dropped on read, never echoed.
+    sqlx::query(
+        "UPDATE agent_run SET output = jsonb_set(output, '{appsUsed,0,token}', to_jsonb($2::text)) \
+          WHERE id = $1",
+    )
+    .bind(run)
+    .bind(MARKER)
+    .execute(&su)
+    .await
+    .unwrap();
+    let read = detail(run).await;
+    assert!(read.get("appsUsed").is_none(), "{read}");
+    assert!(read["output"].get("appsUsed").is_none(), "{read}");
+    assert!(
+        !read.to_string().contains(MARKER),
+        "a tampered byte is echoed nowhere in the response: {read}"
+    );
+
+    // 6. A run that reported nothing — the key absent, `null`, or `[]` — has no
+    //    key anywhere and no audit row.
+    for quiet_args in [
+        json!({}),
+        json!({"appsUsed": null}),
+        json!({"appsUsed": []}),
+    ] {
+        let (quiet_handle, quiet_run) = claimed_run_3516(&client, &base, &su, &fixture).await;
+        assert_ne!(quiet_run, run);
+        let mut args = json!({"leaseHandle": quiet_handle, "status": "succeeded", "body": "done"});
+        args.as_object_mut()
+            .unwrap()
+            .extend(quiet_args.as_object().unwrap().clone());
+        let (status, answer) = complete(args).await;
+        assert_eq!(status, 200, "{quiet_args} -> {answer}");
+        let read = detail(quiet_run).await;
+        assert!(read.get("appsUsed").is_none(), "{read}");
+        assert!(read["output"].get("appsUsed").is_none(), "{read}");
+        assert!(tool_used_audits_3946(&su, quiet_run).await.is_empty());
+    }
+}
+
 #[tokio::test]
 #[ignore = "needs verifier-owned isolated PostgreSQL 18"]
 async fn a_dead_lease_cannot_grow_the_audit_log_with_bad_reports() {

@@ -172,6 +172,12 @@ pub struct A2aGateSnapshot {
     /// than from the mention candidate, so this refusal does not share a
     /// failure with the routing's own check (#2897).
     pub target_owner_only: bool,
+    /// The **target** runs its owner's connected apps
+    /// (`agent.connector_owner_human_id IS NOT NULL`, ADR-0113 증보 2 E3, #3938),
+    /// read from the column itself like [`Self::target_owner_only`] so this
+    /// refusal does not share a failure with the routing's own check. An agent
+    /// is never that owner, so no agent may start it.
+    pub target_connector_owner: bool,
 }
 
 /// Why a delegation did not happen. Each variant carries the numbers that
@@ -206,6 +212,10 @@ pub enum A2aBlock {
     /// person, may call it, so no agent ever may (ADR-0193 D4, #2897). The
     /// second of two independent refusals; the routing refuses first.
     OwnerOnlyTarget,
+    /// The target runs its owner's connected apps — only that human may call it,
+    /// so no agent ever may (ADR-0113 증보 2 E3, #3938). Audit only, no line:
+    /// nobody called, and the line would announce a person's connected agent.
+    ConnectorOwnerTarget,
 }
 
 impl A2aBlock {
@@ -225,6 +235,7 @@ impl A2aBlock {
             A2aBlock::ChainBudget { .. } => "a2a_chain_budget",
             A2aBlock::SelfMention => "a2a_self_mention",
             A2aBlock::OwnerOnlyTarget => "a2a_owner_only_target",
+            A2aBlock::ConnectorOwnerTarget => "a2a_connector_owner_target",
         }
     }
 
@@ -237,9 +248,10 @@ impl A2aBlock {
             A2aBlock::Concurrency { .. } => Some("G1"),
             A2aBlock::ConsecutiveAuto { .. } => Some("G2"),
             A2aBlock::StepCap { .. } => Some("G3"),
-            A2aBlock::ChainBudget { .. } | A2aBlock::SelfMention | A2aBlock::OwnerOnlyTarget => {
-                None
-            }
+            A2aBlock::ChainBudget { .. }
+            | A2aBlock::SelfMention
+            | A2aBlock::OwnerOnlyTarget
+            | A2aBlock::ConnectorOwnerTarget => None,
         }
     }
 
@@ -253,7 +265,10 @@ impl A2aBlock {
     /// An owner-only target does not either: nobody asked it anything, and
     /// the line would announce a person's private agent to the room.
     pub fn is_visible(&self) -> bool {
-        !matches!(self, A2aBlock::SelfMention | A2aBlock::OwnerOnlyTarget)
+        !matches!(
+            self,
+            A2aBlock::SelfMention | A2aBlock::OwnerOnlyTarget | A2aBlock::ConnectorOwnerTarget
+        )
     }
 
     /// The channel line, in the register `paused_mention_body` established:
@@ -302,6 +317,9 @@ impl A2aBlock {
             ),
             A2aBlock::SelfMention => format!("{head}. 자기 자신은 위임 대상이 아니에요."),
             A2aBlock::OwnerOnlyTarget => format!("{head}. 개인 에이전트는 위임 대상이 아니에요."),
+            A2aBlock::ConnectorOwnerTarget => {
+                format!("{head}. 앱을 붙인 에이전트는 위임 대상이 아니에요.")
+            }
         }
     }
 
@@ -353,7 +371,7 @@ impl A2aBlock {
                 detail.insert("chain_tokens".into(), json!(chain_tokens));
                 detail.insert("chain_cost_micro_usd".into(), json!(chain_cost_micro_usd));
             }
-            A2aBlock::SelfMention | A2aBlock::OwnerOnlyTarget => {}
+            A2aBlock::SelfMention | A2aBlock::OwnerOnlyTarget | A2aBlock::ConnectorOwnerTarget => {}
         }
         Value::Object(detail)
     }
@@ -370,6 +388,11 @@ pub fn evaluate_a2a_spawn(snapshot: &A2aGateSnapshot, limits: &A2aLimits) -> Res
     // person's subscription agent something another agent may start.
     if snapshot.target_owner_only {
         return Err(A2aBlock::OwnerOnlyTarget);
+    }
+    // ADR-0113 증보 2 E3 (#3938) — likewise: an agent is never the connector
+    // owner, whatever the budgets say.
+    if snapshot.target_connector_owner {
+        return Err(A2aBlock::ConnectorOwnerTarget);
     }
     // G1 — the target agent's semaphore. Only runs that are *actually executing*
     // count; a run parked on a human approval must not starve a delegation.
@@ -481,6 +504,7 @@ pub async fn load_a2a_gate_snapshot_in_tx(
     let concurrency = sqlx::query(
         "SELECT a.max_concurrent_runs, \
                 (a.invocation_scope = 'owner_only') AS target_owner_only, \
+                (a.connector_owner_human_id IS NOT NULL) AS target_connector_owner, \
                 ( SELECT count(*)::int FROM agent_run r \
                    WHERE r.workspace_id = $1 \
                      AND r.agent_member_id = $2 \
@@ -512,6 +536,9 @@ pub async fn load_a2a_gate_snapshot_in_tx(
     let target_owner_only: bool = concurrency
         .try_get("target_owner_only")
         .map_err(DbError::from)?;
+    let target_connector_owner: bool = concurrency
+        .try_get("target_connector_owner")
+        .map_err(DbError::from)?;
 
     let chain = crate::usage::chain_usage_in_tx(&mut *conn, workspace_id, source_run_id).await?;
 
@@ -525,6 +552,7 @@ pub async fn load_a2a_gate_snapshot_in_tx(
         chain_tokens: chain.total_tokens,
         chain_cost_micro_usd: chain.cost_micro_usd,
         target_owner_only,
+        target_connector_owner,
     }))
 }
 
@@ -543,6 +571,7 @@ mod tests {
             chain_tokens: 0,
             chain_cost_micro_usd: 0,
             target_owner_only: false,
+            target_connector_owner: false,
         }
     }
 
@@ -561,6 +590,22 @@ mod tests {
         assert_eq!(block, A2aBlock::OwnerOnlyTarget);
         assert_eq!(block.reason_code(), "a2a_owner_only_target");
         assert!(!block.is_visible(), "no line announces a private agent");
+        assert!(block.gate().is_none());
+    }
+
+    /// #3938 (ADR-0113 증보 2 E3): a target that runs its owner's connected apps
+    /// is refused by the policy itself, ahead of every cap, with no channel line.
+    #[test]
+    fn a_connector_owner_target_is_refused_by_the_policy_itself() {
+        let limits = A2aLimits::default();
+        let connector = A2aGateSnapshot {
+            target_connector_owner: true,
+            ..clear()
+        };
+        let block = evaluate_a2a_spawn(&connector, &limits).expect_err("refused");
+        assert_eq!(block, A2aBlock::ConnectorOwnerTarget);
+        assert_eq!(block.reason_code(), "a2a_connector_owner_target");
+        assert!(!block.is_visible(), "no line announces a connected agent");
         assert!(block.gate().is_none());
     }
 
@@ -588,6 +633,7 @@ mod tests {
             },
             A2aBlock::SelfMention,
             A2aBlock::OwnerOnlyTarget,
+            A2aBlock::ConnectorOwnerTarget,
         ];
         for name in ["[x](https://evil.example)", "https://evil.example/login"] {
             for block in &blocks {
@@ -724,6 +770,7 @@ mod tests {
             chain_tokens: i64::MAX / 2,
             chain_cost_micro_usd: i64::MAX / 2,
             target_owner_only: false,
+            target_connector_owner: false,
         };
         assert!(matches!(
             evaluate_a2a_spawn(&all, &limits),
@@ -825,6 +872,7 @@ mod tests {
             },
             A2aBlock::SelfMention,
             A2aBlock::OwnerOnlyTarget,
+            A2aBlock::ConnectorOwnerTarget,
         ];
         let mut codes: Vec<&str> = blocks.iter().map(A2aBlock::reason_code).collect();
         let total = codes.len();

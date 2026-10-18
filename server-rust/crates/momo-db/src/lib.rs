@@ -26,8 +26,8 @@ pub use error::DbError;
 pub use migrate::{run_migrations, MigrationReport, SeedMode};
 pub use pool::{connect, PoolConfig};
 pub use tenant::{
-    rebind_tenant_guc, with_provider_link_admin_tx, with_provider_quota_ingest_tx, with_tenant_tx,
-    with_tenant_tx_prelude,
+    rebind_tenant_guc, with_github_app_admin_tx, with_provider_link_admin_tx,
+    with_provider_quota_ingest_tx, with_tenant_tx, with_tenant_tx_prelude,
 };
 
 // Re-export the sqlx types domain crates build on, so B1+ crates depend on one

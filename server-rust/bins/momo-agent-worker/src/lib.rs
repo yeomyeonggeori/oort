@@ -585,6 +585,25 @@ impl AgentWorker {
             "processing agent_job"
         );
 
+        // ADR-0113 증보 2 E3 (#3938, 결재: claim 시점 재확인) — an agent that runs
+        // its owner's connected apps takes a job from its owner only. A job
+        // queued before the mark by anyone else is closed here, unrun: fail-closed
+        // on a missing author, and a failed read is retried, never run.
+        match self.connector_owner_refusal(&job, &payload).await {
+            Ok(None) => {}
+            Ok(Some(refusal)) => {
+                return self
+                    .settle_connector_owner_refused(&job, &payload, refusal)
+                    .await
+            }
+            Err(error) => {
+                let endpoint = self.resolve_transport().await.endpoint;
+                return self
+                    .settle_retryable(&job, &format!("connector-owner check: {error}"), &endpoint)
+                    .await;
+            }
+        }
+
         // #2924 (review-2922 M1) — the one chokepoint every agent job passes,
         // whichever door wrote it: a subscription agent is never run here, on
         // the team key, even for its owner. Before the welcome's preparation
@@ -2845,6 +2864,92 @@ impl AgentWorker {
         }
     }
 
+    /// E3 (#3938): is the job's agent marked as running its owner's apps while the
+    /// job's author is not that owner? Read live, in the job's own workspace.
+    ///
+    /// #3948 (ADR-0203 증보 K2-3): a 「커넥터 시험」 agent (marked and pinned to the
+    /// operator's env link) is also not run while the workspace has any number of
+    /// active people but one — counted now, so a job queued before the second
+    /// person joined is closed unrun. The operator's attestations are the server's
+    /// environment and are judged where the job is written (the mention and
+    /// work-request gates); this worker does not read them (REMAINING).
+    async fn connector_owner_refusal(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &AgentJobPayload,
+    ) -> Result<Option<ConnectorRefusal>, momo_db::DbError> {
+        let (workspace_id, agent_member_id) = (job.workspace_id, payload.agent_member_id);
+        let author = payload.author_member_id;
+        with_tenant_tx(&self.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                let owner =
+                    momo_agent::agent_connector_owner_in_tx(conn, workspace_id, agent_member_id)
+                        .await?;
+                let Some(owner) = owner else {
+                    return Ok(None);
+                };
+                if author != Some(owner) {
+                    return Ok(Some(ConnectorRefusal::NonOwner));
+                }
+                let facts =
+                    momo_agent::connector_trial_facts_in_tx(conn, workspace_id, agent_member_id)
+                        .await?;
+                Ok(facts
+                    .is_some_and(|facts| facts.active_humans != 1)
+                    .then_some(ConnectorRefusal::TrialMembers))
+            })
+        })
+        .await
+    }
+
+    /// E3 (#3938): close a job the worker must not run because its author is not
+    /// the connector owner (or, #3948, because the trial's workspace grew): the
+    /// run `cancelled`, one audit row naming the reason, the job `done`. No model
+    /// call, nothing retried.
+    async fn settle_connector_owner_refused(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &AgentJobPayload,
+        refusal: ConnectorRefusal,
+    ) -> Settlement {
+        let (workspace_id, agent_member_id) = (job.workspace_id, payload.agent_member_id);
+        let run_id = payload.run_id;
+        let (code, reason) = (refusal.code(), refusal.reason());
+        let closed = with_tenant_tx(&self.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                if let Some(run_id) = run_id {
+                    momo_agent::cancel_run_in_tx(
+                        conn,
+                        workspace_id,
+                        run_id,
+                        &json!({"code": code, "reason": "job queued before the agent was marked or the workspace grew"}),
+                    )
+                    .await?;
+                }
+                let mut entry = AuditEntry::new(workspace_id, "agent.connector_owner.job_closed")
+                    .about(agent_member_id)
+                    .with_schema(
+                        "momo.agent_connector_owner.job_closed.v0",
+                        json!({"reason": reason}),
+                    );
+                if let Some(run_id) = run_id {
+                    entry = entry.run(run_id);
+                }
+                write_audit(conn, &entry).await?;
+                Ok(())
+            })
+        })
+        .await;
+        if let Err(error) = closed {
+            let endpoint = self.resolve_transport().await.endpoint;
+            return self
+                .settle_retryable(job, &format!("connector-owner close: {error}"), &endpoint)
+                .await;
+        }
+        self.settle_done(job.id, Some(code)).await;
+        Settlement::Skipped
+    }
+
     /// Which kind of `owner_only` agent is the job's agent, if any? Read in the
     /// job's own workspace (RLS), from the two columns migrations 089 and 117
     /// make one-way.
@@ -3949,6 +4054,36 @@ const PROVIDER_AUTH_FAILED: &str = "provider_auth_failed";
 /// #2897 — the run's error code (and the job's done reason) when a turn found
 /// no team key. The same word as the #2871 line's `props.reason`.
 const PROVIDER_REQUIRED: &str = "provider_required";
+/// #3938 — the run error / outbox reason of a job closed because the agent runs
+/// its owner's apps and the job's author is not the owner.
+const CONNECTOR_OWNER_ONLY: &str = "connector_owner_only";
+const CONNECTOR_TRIAL_MEMBERS: &str = "connector_trial_members";
+
+/// Why the worker will not run a job of a connector agent (#3938, #3948).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConnectorRefusal {
+    /// The author is not the connector owner (E3).
+    NonOwner,
+    /// A 「커넥터 시험」 whose workspace no longer has exactly one active person (K2-3).
+    TrialMembers,
+}
+
+impl ConnectorRefusal {
+    fn code(self) -> &'static str {
+        match self {
+            Self::NonOwner => CONNECTOR_OWNER_ONLY,
+            Self::TrialMembers => CONNECTOR_TRIAL_MEMBERS,
+        }
+    }
+
+    fn reason(self) -> &'static str {
+        match self {
+            Self::NonOwner => momo_agent::SKIP_CONNECTOR_OWNER_NON_OWNER,
+            Self::TrialMembers => momo_agent::ConnectorTrialStop::Members.skip_reason(),
+        }
+    }
+}
+
 /// #2924 — the run error / outbox reason of a subscription agent's job that
 /// reached the team worker.
 const OWNER_ONLY_NOT_WORKER: &str = "owner_only_not_worker";

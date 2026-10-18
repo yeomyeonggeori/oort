@@ -364,6 +364,24 @@ pub async fn per_ip_device_link(
     .await
 }
 
+/// Per-IP gate for the GitHub App manifest callback (ADR-0205 D2). Reuses the claim budget (no
+/// new env) on an independent key so it cannot starve — or be starved by — claim / QR redeem.
+pub async fn per_ip_github_callback(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    gate_per_ip(
+        state,
+        request,
+        next,
+        "ip:github-callback",
+        |config| config.claim_per_ip_limit,
+        "/v1/integrations/github/app/callback",
+    )
+    .await
+}
+
 /// Per-IP budget for **refused** upload capabilities (#2628; #2631 review R12).
 ///
 /// Mounted with `route_layer` on `/__momo_stub/drive/uploads/{token}`, but it

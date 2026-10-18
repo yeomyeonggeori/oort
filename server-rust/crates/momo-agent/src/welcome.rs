@@ -363,6 +363,7 @@ async fn load_welcome_agent_in_tx(
                  OR ($5 AND a.owner_human_id = $4 \
                      AND ($6 OR a.uses_owner_key \
                           OR COALESCE(a.subscription_harness, 'claude_code') <> 'claude_code'))) \
+            AND (a.connector_owner_human_id IS NULL OR a.connector_owner_human_id = $4) \
           ORDER BY m.created_at ASC, m.id ASC",
     )
     .bind(workspace_id)
