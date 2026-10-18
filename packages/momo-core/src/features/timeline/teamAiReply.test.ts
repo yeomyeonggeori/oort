@@ -91,3 +91,167 @@ describe("parseTeamAiReplyMeta", () => {
     ).toBeNull();
   });
 });
+
+// ---- 「쓴 앱」 꼬리 (ADR-0113 증보 2 E8·E10, #3950 U-S2) --------------------------------------
+import {
+  APPS_PERSONAL_NOTE,
+  APPS_TAIL_SELF_REPORT,
+  appsRunSiteOf,
+  type AppsTailContext,
+} from "./teamAiReply";
+
+const GMAIL = { name: "Gmail", egressDomains: ["gmailmcp.googleapis.com"] };
+const GITHUB = { name: "GitHub", egressDomains: ["api.githubcopilot.com"] };
+
+function ctx(overrides: Partial<AppsTailContext> = {}): AppsTailContext {
+  return {
+    appsUsed: [{ pluginId: "gmail", tool: "search_threads", calls: 2 }],
+    plugins: new Map([
+      ["gmail", GMAIL],
+      ["github", GITHUB],
+    ]),
+    onBehalfOf: "곽성재",
+    site: "hermes",
+    audience: null,
+    ...overrides,
+  };
+}
+
+describe("쓴 앱 꼬리", () => {
+  it("예시 줄을 그대로 만든다 — 앱·횟수 · 명의 · 연결 주소 · 실행 장소 · 자기 보고", () => {
+    const meta = parseTeamAiReplyMeta({ source: "hermes_gateway", run_id: "r1" }, ctx());
+    expect(meta?.appsLine).toBe(
+      `쓴 앱: Gmail 검색 2회 · 곽성재 명의 · gmailmcp.googleapis.com · Hermes에서 · ${APPS_TAIL_SELF_REPORT}`
+    );
+    // 도구 줄·모델 칩은 도우미(team_ai) 답의 것이다.
+    expect(meta?.toolsLine).toBeNull();
+    expect(meta?.modelChip).toBeNull();
+    expect(meta?.appsSpoken).toContain("쓴 앱");
+  });
+
+  it("보고가 없으면 줄 자체가 없다(영수증을 만들지 않는다)", () => {
+    expect(
+      parseTeamAiReplyMeta({ source: "hermes_gateway" }, ctx({ appsUsed: null }))
+    ).toBeNull();
+    expect(
+      parseTeamAiReplyMeta({ source: "hermes_gateway" }, ctx({ appsUsed: [] }))
+    ).toBeNull();
+    // 컨텍스트가 아예 없는 호출(옛 호출처)도 변화 0.
+    expect(parseTeamAiReplyMeta({ source: "hermes_gateway", run_id: "r" })).toBeNull();
+  });
+
+  it("모르는 조각은 짐작해서 채우지 않는다: 명의·실행 장소·앱 이름", () => {
+    const meta = parseTeamAiReplyMeta(
+      { source: "hermes_gateway" },
+      ctx({ onBehalfOf: null, site: null, plugins: new Map() })
+    );
+    // 앱 목록에 없는 앱의 원문 id 는 사람에게 보이지 않는다.
+    expect(meta?.appsLine).toBe(`쓴 앱: 다른 앱 검색 2회 · ${APPS_TAIL_SELF_REPORT}`);
+    expect(meta?.appsLine).not.toContain("gmail");
+    expect(meta?.appsLine).not.toContain("명의");
+    expect(meta?.appsLine).not.toContain("에서");
+  });
+
+  it("도구 이름이 섞이면 동사를 붙이지 않고 횟수만 합친다", () => {
+    const meta = parseTeamAiReplyMeta(
+      { source: "hermes_gateway" },
+      ctx({
+        appsUsed: [
+          { pluginId: "gmail", tool: "search_threads", calls: 2 },
+          { pluginId: "gmail", tool: "create_draft", calls: 1 },
+          { pluginId: "github", tool: "list_issues", calls: 4 },
+        ],
+      })
+    );
+    expect(meta?.appsLine).toContain("Gmail 3회, GitHub 목록 4회");
+    expect(meta?.appsLine).not.toContain("search_threads");
+  });
+
+  it("props 에 같은 모양이 실리면 그것도 읽는다(전방 호환), run 쪽이 먼저다", () => {
+    const fromProps = parseTeamAiReplyMeta(
+      {
+        source: "hermes_gateway",
+        appsUsed: [{ pluginId: "github", tool: "get_issue", calls: 1 }],
+      },
+      ctx({ appsUsed: null })
+    );
+    expect(fromProps?.appsLine).toContain("GitHub 읽기 1회");
+    const both = parseTeamAiReplyMeta(
+      {
+        source: "hermes_gateway",
+        appsUsed: [{ pluginId: "github", tool: "get_issue", calls: 1 }],
+      },
+      ctx()
+    );
+    expect(both?.appsLine).toContain("Gmail 검색 2회");
+  });
+
+  it("서버와 같은 닫힌 규칙: 모르는 키가 하나라도 있으면 보고 전체를 버린다", () => {
+    for (const bad of [
+      [{ pluginId: "gmail", tool: "search_threads", calls: 2, body: "메일 본문" }],
+      [{ pluginId: "gmail", tool: "has space", calls: 2 }],
+      [{ pluginId: "gmail", tool: "t", calls: 0 }],
+      [{ pluginId: "gmail", tool: "t", calls: 1.5 }],
+      [
+        { pluginId: "gmail", tool: "t", calls: 1 },
+        { pluginId: "gmail", tool: "t", calls: 2 },
+      ],
+    ]) {
+      expect(
+        parseTeamAiReplyMeta({ source: "hermes_gateway" }, ctx({ appsUsed: bad as never }))
+      ).toBeNull();
+    }
+  });
+
+  it("도우미(team_ai) 답에는 앱 줄이 서지 않는다 — 도우미는 앱 도구를 부르지 않는다(E7)", () => {
+    const meta = parseTeamAiReplyMeta(
+      { source: "team_ai", model_label: "Claude Sonnet 4.5" },
+      ctx()
+    );
+    expect(meta?.appsLine).toBeNull();
+    expect(meta?.modelChip).toBe("팀 AI · Claude Sonnet 4.5");
+  });
+
+  it("실행 장소는 메시지 표식으로 아는 곳만 말한다", () => {
+    expect(appsRunSiteOf({ source: "hermes_gateway" })).toBe("hermes");
+    expect(appsRunSiteOf({ source: "something_else" })).toBeNull();
+    expect(appsRunSiteOf(undefined)).toBeNull();
+  });
+
+  it("채널 노출(E10): 채널이면 둘째 줄에 n명, DM(null)이면 없다", () => {
+    expect(
+      parseTeamAiReplyMeta({ source: "hermes_gateway" }, ctx({ audience: 12 }))?.exposureLine
+    ).toBe("이 채널 12명에게 보여요");
+    for (const audience of [null, 0, -1, 1.5]) {
+      expect(
+        parseTeamAiReplyMeta({ source: "hermes_gateway" }, ctx({ audience: audience as never }))
+          ?.exposureLine
+      ).toBeNull();
+    }
+  });
+
+  it("개인 앱을 채널에 올리면 「요약만」은 원칙이고 확인하지 못한다고 함께 말한다", () => {
+    const personal = parseTeamAiReplyMeta({ source: "hermes_gateway" }, ctx({ audience: 5 }));
+    expect(personal?.personalNote).toBe(APPS_PERSONAL_NOTE);
+    expect(APPS_PERSONAL_NOTE).toContain("요약만");
+    expect(APPS_PERSONAL_NOTE).toContain("확인하지 못해요");
+    // 강제처럼 쓰지 않는다.
+    expect(APPS_PERSONAL_NOTE).not.toMatch(/막아|금지|보장/);
+    // 개인 앱이 아니면(GitHub) 안내는 없고, DM 이면 둘 다 없다.
+    const github = parseTeamAiReplyMeta(
+      { source: "hermes_gateway" },
+      ctx({ audience: 5, appsUsed: [{ pluginId: "github", tool: "get_issue", calls: 1 }] })
+    );
+    expect(github?.exposureLine).toBe("이 채널 5명에게 보여요");
+    expect(github?.personalNote).toBeNull();
+    expect(
+      parseTeamAiReplyMeta({ source: "hermes_gateway" }, ctx({ audience: null }))?.personalNote
+    ).toBeNull();
+  });
+
+  it("지워진 메시지에는 꼬리가 없다", () => {
+    expect(
+      teamAiReplyMetaFor({ props: { source: "hermes_gateway" }, state: "deleted" } as never, ctx())
+    ).toBeNull();
+  });
+});

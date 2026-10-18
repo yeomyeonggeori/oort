@@ -1,5 +1,6 @@
 import React from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
+import type {AppNotice} from '@momo/core/features/timeline/appNotice';
 import {
   TEAM_AI_SOURCES_LABEL,
   type TeamAiReplyMeta as Meta,
@@ -27,6 +28,20 @@ export function TeamAiReplyMeta({meta}: {meta: Meta}): React.JSX.Element {
   const styles = useStyles(build);
   return (
     <View style={styles.wrap} testID="team-ai-reply-meta">
+      {meta.appsLine !== null ? (
+        <View style={styles.apps} testID="apps-used-tail">
+          <Sentence style={styles.meta} testID="apps-used-line">
+            {meta.appsLine}
+          </Sentence>
+          {meta.exposureLine !== null ? (
+            <Sentence style={styles.meta} testID="apps-exposure-line">
+              {meta.personalNote !== null
+                ? `${meta.exposureLine} · ${meta.personalNote}`
+                : meta.exposureLine}
+            </Sentence>
+          ) : null}
+        </View>
+      ) : null}
       {meta.toolsLine !== null || meta.modelChip !== null ? (
         <View style={styles.topLine}>
           {meta.toolsLine !== null ? (
@@ -74,6 +89,9 @@ export function TeamAiReplyMeta({meta}: {meta: Meta}): React.JSX.Element {
 export function teamAiReplySpoken(meta: Meta | null): string[] {
   if (meta === null) return [];
   const parts: string[] = [];
+  if (meta.appsSpoken !== null) parts.push(meta.appsSpoken);
+  if (meta.exposureLine !== null) parts.push(meta.exposureLine);
+  if (meta.personalNote !== null) parts.push(meta.personalNote);
   if (meta.toolsSpoken !== null) parts.push(meta.toolsSpoken);
   if (meta.modelChip !== null) parts.push(meta.modelChip);
   if (meta.citations.length > 0) {
@@ -93,9 +111,56 @@ export function teamAiCitationActions(
   }));
 }
 
+// ---- 막힘 문장 (plugins-v2-plan 2.5절, #3950) ----------------------------------------
+//
+// 한 문장과 행동 하나. 행이 접근성 원소 하나라 행동은 로터(`momoAppNotice`)로도 닿는다.
+// 진행 중 안내는 흐린 글씨, 막힘은 본문색이다. 경고색·아이콘으로 소리치지 않는다.
+
+/** 로터 행동 이름. */
+export const APP_NOTICE_ACTION_NAME = 'momoAppNotice';
+
+/** 폰의 행동은 모두 「웹에서 열기」 하나다. 열 곳을 모르면(`canAct` 거짓) 행동을 세우지 않는다. */
+export function AppNoticeLine({
+  notice,
+  onAction,
+}: {
+  notice: AppNotice;
+  onAction: (() => void) | null;
+}): React.JSX.Element {
+  const styles = useStyles(build);
+  return (
+    <View style={styles.notice} testID="app-notice">
+      <Sentence
+        style={notice.progress ? styles.meta : styles.noticeText}
+        testID="app-notice-sentence">
+        {notice.sentence}
+      </Sentence>
+      {notice.action !== null && onAction !== null ? (
+        <Pressable
+          onPress={onAction}
+          hitSlop={space.sm}
+          accessibilityRole="link"
+          testID="app-notice-action"
+          style={({pressed}) => [styles.noticeAction, pressed && styles.pressed]}>
+          <Text style={styles.sourceTitle}>{notice.action.label}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+/** 행의 낭독에 붙일 막힘 문장. */
+export function appNoticeSpoken(notice: AppNotice | null): string[] {
+  return notice === null ? [] : [notice.sentence];
+}
+
 function build(color: Palette) {
   return StyleSheet.create({
     wrap: {marginTop: space.xs, gap: space.xs},
+    apps: {gap: 1},
+    notice: {marginTop: space.xs, gap: space.xs},
+    noticeText: {fontSize: font.meta, lineHeight: line.meta, color: color.text},
+    noticeAction: {minHeight: TOUCH_TARGET, justifyContent: 'center'},
     topLine: {
       flexDirection: 'row',
       flexWrap: 'wrap',
