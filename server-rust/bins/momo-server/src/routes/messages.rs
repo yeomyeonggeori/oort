@@ -637,6 +637,8 @@ pub async fn send(
     let subscription_agents_enabled = state.agent_port.config.subscription_agents_enabled;
     let claude_subscription_agents_enabled =
         state.agent_port.config.claude_subscription_agents_enabled;
+    // #3948: the operator's attestation, read once per send (an env value, not a row).
+    let connector_trial = state.cohosted.config.attest();
     let context_max_messages = state.mentions.context_max_messages;
     let inplace_grant_enabled = state.mentions.hosted_inplace_grant_enabled;
     // ADR-0158 D2 — the refinement block becomes props here, *before* the
@@ -793,6 +795,7 @@ pub async fn send(
                         hosted_delivery_enabled,
                         subscription_agents_enabled,
                         claude_subscription_agents_enabled,
+                        connector_trial: &connector_trial,
                         context_max_messages,
                         inplace_grant_enabled,
                         routing: requested_routing.as_ref(),

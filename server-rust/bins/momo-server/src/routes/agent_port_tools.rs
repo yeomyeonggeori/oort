@@ -961,6 +961,8 @@ async fn message_post(
     let subscription_agents_enabled = state.agent_port.config.subscription_agents_enabled;
     let claude_subscription_agents_enabled =
         state.agent_port.config.claude_subscription_agents_enabled;
+    // #3948: the operator's attestation, read once per send (an env value, not a row).
+    let connector_trial = state.cohosted.config.attest();
     let context_max_messages = state.mentions.context_max_messages;
 
     let outcome = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
@@ -1051,6 +1053,7 @@ async fn message_post(
                         hosted_delivery_enabled,
                         subscription_agents_enabled,
                         claude_subscription_agents_enabled,
+                        connector_trial: &connector_trial,
                         context_max_messages,
                         // An agent's send never raises the in-place card (G1).
                         inplace_grant_enabled: false,

@@ -180,8 +180,10 @@ pub async fn load_mention_candidates_in_tx(
     workspace_id: Uuid,
     channel_id: Uuid,
 ) -> Result<Vec<MentionCandidate>, DbError> {
-    let rows = sqlx::query(
-        "SELECT m.id, m.handle, m.display_name, \
+    // #3948: the trial facts are one shared SQL fragment (`connector_trial`), so
+    // the work-request route and this loader cannot read different definitions of
+    // 「한 사람」 and 「활성 grant」.
+    let sql = "SELECT m.id, m.handle, m.display_name, \
                 a.model, a.model_source, a.system_prompt, a.max_run_steps, a.tool_schema, a.config, \
                 w.settings AS workspace_settings, \
                 ap.instructions, ap.model_pref, ap.effort_pref, ap.enabled_tools, \
@@ -234,6 +236,7 @@ pub async fn load_mention_candidates_in_tx(
                 (SELECT c.display_name FROM member c \
                   WHERE c.workspace_id = m.workspace_id AND c.id = a.connector_owner_human_id) \
                   AS connector_owner_display_name, \
+                {trial_facts}, \
                 (SELECT o.display_name FROM member o \
                   WHERE o.workspace_id = m.workspace_id AND o.id = a.owner_human_id) \
                   AS owner_display_name, \
@@ -276,13 +279,14 @@ pub async fn load_mention_candidates_in_tx(
             AND m.kind = 'agent' \
             AND m.status = 'active' \
             AND m.deleted_at IS NULL \
-          ORDER BY m.created_at ASC, m.id ASC",
-    )
-    .bind(workspace_id)
-    .bind(channel_id)
-    .bind(crate::subscription::SUBSCRIPTION_AGENT_ONLINE_WINDOW_SECONDS as f64)
-    .fetch_all(&mut *conn)
-    .await?;
+          ORDER BY m.created_at ASC, m.id ASC"
+        .replace("{trial_facts}", crate::connector_trial::TRIAL_FACTS_SQL);
+    let rows = sqlx::query(&sql)
+        .bind(workspace_id)
+        .bind(channel_id)
+        .bind(crate::subscription::SUBSCRIPTION_AGENT_ONLINE_WINDOW_SECONDS as f64)
+        .fetch_all(&mut *conn)
+        .await?;
 
     let mut candidates = Vec::with_capacity(rows.len());
     for row in &rows {
@@ -386,10 +390,22 @@ fn connector_owner(
     let name: Option<String> = row
         .try_get("connector_owner_display_name")
         .map_err(DbError::from)?;
+    let humans: Option<i64> = row
+        .try_get("connector_trial_active_humans")
+        .map_err(DbError::from)?;
+    let granted: Option<Vec<String>> = row
+        .try_get("connector_trial_granted_apps")
+        .map_err(DbError::from)?;
     Ok(
         owner.map(|owner_member_id| crate::subscription::ConnectorOwner {
             owner_member_id,
             owner_display_name: name.unwrap_or_default(),
+            trial: humans.map(
+                |active_humans| crate::connector_trial::ConnectorTrialFacts {
+                    active_humans,
+                    granted_apps: granted.unwrap_or_default(),
+                },
+            ),
         }),
     )
 }

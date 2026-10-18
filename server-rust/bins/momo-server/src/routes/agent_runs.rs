@@ -156,6 +156,7 @@ pub async fn create(
         state.agent_port.config.claude_subscription_agents_enabled;
     let hosted_delivery_enabled = state.agent_port.config.hosted_delivery_enabled;
     let gateway_enabled = state.agent_gateway.enabled();
+    let connector_trial = state.cohosted.config.attest();
     // With the managed gateway off AND hosted delivery closed no agent can take
     // a work run, so the answer needs no transaction (the pre-#3515 fast path,
     // and the same precedence over the membership/agent lookups). When either
@@ -198,6 +199,21 @@ pub async fn create(
                             StatusCode::FORBIDDEN,
                             "connector_owner_only",
                             "this agent runs its owner's apps and takes requests from its owner only",
+                        )));
+                    }
+                    // #3948 (ADR-0203 증보 K2·K4) — the owner, but a 「커넥터 시험」
+                    // that is stopped right now takes no request: re-measured here,
+                    // not remembered from when it was turned on.
+                    let facts =
+                        momo_agent::connector_trial_facts_in_tx(conn, workspace_id, agent_member_id)
+                            .await?;
+                    if let Some(stop) =
+                        momo_agent::connector_trial_stop(facts.as_ref(), &connector_trial)
+                    {
+                        return Ok(Err(ApiError::coded(
+                            StatusCode::CONFLICT,
+                            stop.skip_reason(),
+                            momo_agent::connector_trial_notice_body(stop),
                         )));
                     }
                 }

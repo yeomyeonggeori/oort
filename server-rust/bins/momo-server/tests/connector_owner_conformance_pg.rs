@@ -35,7 +35,9 @@ use momo_db::sqlx;
 use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use momo_db::PgPool;
 use momo_messaging::{send_message_in_tx, MessageType, NewMessage};
-use momo_server::config::{AgentGatewayMode, AgentGatewaySettings, AgentPortConfig};
+use momo_server::config::{
+    AgentGatewayMode, AgentGatewaySettings, AgentPortConfig, CohostedAgentConfig, SettingsConfig,
+};
 use momo_server::{build_app, AppState};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -136,10 +138,31 @@ fn ensure_schema_and_roles() {
 }
 
 async fn start_server(pool: PgPool) -> String {
+    start_server_with(pool, CohostedAgentConfig::default(), None).await
+}
+
+/// `cohosted` is what the operator declared in the server's environment (#3948);
+/// `operator_email` is the one address on `PLATFORM_ADMIN_EMAILS`.
+async fn start_server_with(
+    pool: PgPool,
+    cohosted: CohostedAgentConfig,
+    operator_email: Option<String>,
+) -> String {
     let state = AppState::new(
         pool,
         TEST_JWT_SECRET.to_string(),
         "ws://127.0.0.1:8000/connection/websocket".to_string(),
+    )
+    .with_settings(SettingsConfig {
+        platform_admin_emails: operator_email.into_iter().collect(),
+        ..SettingsConfig::default()
+    })
+    .with_cohosted(
+        cohosted,
+        std::sync::Arc::new(momo_provider_probe::GuardedProviderProbe::new(
+            momo_settings::EgressPolicy::default(),
+            std::time::Duration::from_secs(5),
+        )),
     )
     .with_agent_gateway(AgentGatewaySettings {
         mode: AgentGatewayMode::Gateway,
@@ -1197,4 +1220,1118 @@ async fn a_job_queued_before_the_mark_is_closed_at_claim_not_run() {
     )
     .await;
     assert_eq!(again["jobs"].as_array().map_or(0, Vec::len), 0);
+}
+
+// ===========================================================================
+// #3948 K-S2 — 「커넥터 시험」 (ADR-0203 증보 K2·K4, red proof 1~6)
+//
+// A workspace of ONE person whose Hermes (pinned to the operator's env link) reads
+// that person's apps. The agent here is a managed, non-hosted agent, so a delivery
+// is an `agent_job` outbox row and a refusal is zero such rows. Every assertion
+// counts rows; the control that proves each zero is not vacuous is a delivered job
+// in the same test.
+//
+// | test | proves (red proof) | goes red if |
+// |---|---|---|
+// | `the_trial_turns_on_only_for_the_operator_with_one_person_and_both_attests` | 1 two active people → 409 `connector_trial_members`, 0 marks; 4 each of the three attestation inputs missing → 409 `connector_trial_attest`, 0 marks; 5 an unlisted-grant app → 409 `connector_trial_apps`; 6 a non-operator → 403, 0 marks; an unpinned agent → 409; the generic route cannot mark the pinned agent | the operator gate, the people count, the attest check, the grant check, the pin check, or the generic route's pin refusal |
+// | `a_person_joining_after_the_trial_is_on_stops_delivery_with_one_notice` | 2 a second person added by a direct row (no invite) → the owner's mention, DM and work request deliver 0; one notice with the ADR sentence, throttled; the stranger gets the owner sentence (3); gone → delivered again | the people count in the candidate query or `delivery_gate`; the work-request check; the DM state |
+// | `the_attestation_leaving_the_environment_stops_delivery` | 4 each attest input removed on a running trial → 0 delivery, one notice; restored → delivered | the attest arm of `connector_trial_stop` or its wiring |
+// | `an_app_that_lost_the_owners_grant_stops_delivery` | 5 grant revoked / install revoked for a listed app → 0 delivery, one notice; an unlisted app's grant changing does not | the grant arm / the install join |
+// ===========================================================================
+
+const APP_A: &str = "com.momo.plugins.github";
+const APP_B: &str = "com.momo.plugins.notion";
+
+struct Trial {
+    workspace: Uuid,
+    operator: Uuid,
+    operator_jwt: String,
+    operator_email: String,
+    /// The operator's Hermes: managed, pinned to the operator's env link.
+    agent: Uuid,
+    handle: String,
+    /// An agent the operator owns that is NOT pinned (a workd-style agent).
+    unpinned: Uuid,
+    channel: Uuid,
+    dm: Uuid,
+}
+
+impl Trial {
+    fn fx(&self) -> Fixture {
+        // The shared helpers (`count`, `jobs`, ...) read three ids from a Fixture.
+        Fixture {
+            workspace: self.workspace,
+            owner: self.operator,
+            owner_jwt: self.operator_jwt.clone(),
+            admin_jwt: String::new(),
+            outsider_jwt: String::new(),
+            outsider: Uuid::nil(),
+            agent: self.agent,
+            bearer: String::new(),
+            handle: self.handle.clone(),
+            orphan: Uuid::nil(),
+            channel: self.channel,
+            dm_owner: self.dm,
+            dm_outsider: Uuid::nil(),
+        }
+    }
+}
+
+async fn seed_trial(su: &PgPool) -> Trial {
+    let workspace = Uuid::new_v4();
+    sqlx::query("INSERT INTO workspace(id, slug, name) VALUES($1,$2,$2)")
+        .bind(workspace)
+        .bind(format!("trial-{}", workspace.simple()))
+        .execute(su)
+        .await
+        .expect("workspace");
+    let (operator, operator_jwt) = seed_human(su, workspace, "owner", "운영자").await;
+    let operator_email = format!("{operator}@connector.test");
+    let mut agents = Vec::new();
+    for (label, pinned) in [("hermes", true), ("loose", false)] {
+        let id = Uuid::new_v4();
+        let handle = format!("{label}{}", &id.simple().to_string()[..8]);
+        insert_member(su, workspace, id, "agent", &handle).await;
+        sqlx::query(
+            "INSERT INTO agent(member_id, workspace_id, model, base_url, owner_human_id) \
+             VALUES($1,$2,'hermes-agent','https://cohosted-agent.invalid/v1',$3)",
+        )
+        .bind(id)
+        .bind(workspace)
+        .bind(operator)
+        .execute(su)
+        .await
+        .expect("agent");
+        sqlx::query("INSERT INTO workspace_membership(workspace_id, member_id, role) VALUES($1,$2,'member')")
+            .bind(workspace)
+            .bind(id)
+            .execute(su)
+            .await
+            .expect("agent membership");
+        sqlx::query("INSERT INTO agent_profile(agent_member_id, workspace_id, updated_by, paused) VALUES($1,$2,$3,false)")
+            .bind(id)
+            .bind(workspace)
+            .bind(operator)
+            .execute(su)
+            .await
+            .expect("agent profile");
+        if pinned {
+            sqlx::query(
+                "INSERT INTO agent_provider_pin(agent_member_id, workspace_id, kind, pinned_by) \
+                 VALUES($1,$2,'operator_env',$3)",
+            )
+            .bind(id)
+            .bind(workspace)
+            .bind(operator)
+            .execute(su)
+            .await
+            .expect("pin");
+        }
+        agents.push((id, handle));
+    }
+    let mut rooms = Vec::new();
+    for (kind, name) in [("public", Some("apps")), ("dm", None)] {
+        let id = Uuid::new_v4();
+        sqlx::query("INSERT INTO channel(id, workspace_id, kind, name, dm_key) VALUES($1,$2,$3::channel_kind,$4,$5)")
+            .bind(id)
+            .bind(workspace)
+            .bind(kind)
+            .bind(name.map(|n| format!("{n}-{}", id.simple())))
+            .bind((kind == "dm").then(|| format!("dm-{}", id.simple())))
+            .execute(su)
+            .await
+            .expect("channel");
+        sqlx::query("INSERT INTO channel_seq(channel_id, workspace_id, last_seq) VALUES($1,$2,0)")
+            .bind(id)
+            .bind(workspace)
+            .execute(su)
+            .await
+            .expect("channel_seq");
+        let members = if kind == "dm" {
+            vec![operator, agents[0].0]
+        } else {
+            vec![operator, agents[0].0, agents[1].0]
+        };
+        for member in members {
+            sqlx::query(
+                "INSERT INTO membership(workspace_id, channel_id, member_id) VALUES($1,$2,$3)",
+            )
+            .bind(workspace)
+            .bind(id)
+            .bind(member)
+            .execute(su)
+            .await
+            .expect("membership");
+        }
+        rooms.push(id);
+    }
+    Trial {
+        workspace,
+        operator,
+        operator_jwt,
+        operator_email,
+        agent: agents[0].0,
+        handle: agents[0].1.clone(),
+        unpinned: agents[1].0,
+        channel: rooms[0],
+        dm: rooms[1],
+    }
+}
+
+/// An install (enabled) and an active grant of `app` for `member`.
+async fn grant_app(su: &PgPool, t: &Trial, member: Uuid, app: &str) {
+    let audit: Uuid = sqlx::query_scalar(
+        "INSERT INTO audit_log (workspace_id, actor_member_id, subject_member_id, action) \
+         VALUES ($1, $2, $2, 'plugin.grant') RETURNING id",
+    )
+    .bind(t.workspace)
+    .bind(member)
+    .fetch_one(su)
+    .await
+    .expect("audit");
+    sqlx::query(
+        "INSERT INTO workspace_plugin_install (workspace_id, plugin_id, enabled, installed_by, installed_audit_id) \
+         VALUES ($1, $2, true, $3, $4) ON CONFLICT (workspace_id, plugin_id) DO NOTHING",
+    )
+    .bind(t.workspace)
+    .bind(app)
+    .bind(member)
+    .bind(audit)
+    .execute(su)
+    .await
+    .expect("install");
+    sqlx::query(
+        "INSERT INTO plugin_grant (workspace_id, member_id, plugin_id, scope, granted_by, granted_audit_id) \
+         VALUES ($1, $2, $3, 'read', $2, $4)",
+    )
+    .bind(t.workspace)
+    .bind(member)
+    .bind(app)
+    .bind(audit)
+    .execute(su)
+    .await
+    .expect("grant");
+}
+
+async fn revoke_grant(su: &PgPool, t: &Trial, member: Uuid, app: &str) {
+    let audit: Uuid = sqlx::query_scalar(
+        "INSERT INTO audit_log (workspace_id, actor_member_id, subject_member_id, action) \
+         VALUES ($1, $2, $2, 'plugin.revoke') RETURNING id",
+    )
+    .bind(t.workspace)
+    .bind(member)
+    .fetch_one(su)
+    .await
+    .expect("audit");
+    let n = sqlx::query(
+        "UPDATE plugin_grant SET status='revoked', revoked_at=now(), revoked_audit_id=$4 \
+          WHERE workspace_id=$1 AND member_id=$2 AND plugin_id=$3",
+    )
+    .bind(t.workspace)
+    .bind(member)
+    .bind(app)
+    .bind(audit)
+    .execute(su)
+    .await
+    .expect("revoke")
+    .rows_affected();
+    assert_eq!(n, 1);
+}
+
+async fn restore_grant(su: &PgPool, t: &Trial, member: Uuid, app: &str) {
+    sqlx::query(
+        "UPDATE plugin_grant SET status='active', revoked_at=NULL, revoked_audit_id=NULL \
+          WHERE workspace_id=$1 AND member_id=$2 AND plugin_id=$3",
+    )
+    .bind(t.workspace)
+    .bind(member)
+    .bind(app)
+    .execute(su)
+    .await
+    .expect("restore");
+}
+
+/// Another person, added by a bare row: no invite, no join route.
+async fn add_person_directly(su: &PgPool, t: &Trial, handle: &str) -> Uuid {
+    let (id, _jwt) = seed_human(su, t.workspace, "member", handle).await;
+    id
+}
+
+async fn deactivate(su: &PgPool, t: &Trial, member: Uuid) {
+    sqlx::query("UPDATE member SET status='suspended' WHERE workspace_id=$1 AND id=$2")
+        .bind(t.workspace)
+        .bind(member)
+        .execute(su)
+        .await
+        .expect("deactivate");
+}
+
+fn attested(apps: &[&str]) -> CohostedAgentConfig {
+    CohostedAgentConfig {
+        declared: false,
+        tools_locked: true,
+        connectors_locked: true,
+        connector_apps: apps.iter().map(|a| (*a).to_string()).collect(),
+    }
+}
+
+/// `(status, code)` of `PUT …/connector-trial`.
+async fn put_trial(
+    client: &reqwest::Client,
+    base: &str,
+    t: &Trial,
+    jwt: &str,
+    agent: Uuid,
+    body: Value,
+) -> (u16, Option<String>) {
+    let response = client
+        .put(format!(
+            "{base}/v1/workspaces/{}/agents/{agent}/connector-trial",
+            t.workspace
+        ))
+        .bearer_auth(jwt)
+        .json(&body)
+        .send()
+        .await
+        .expect("put trial");
+    let status = response.status().as_u16();
+    let value: Value = response.json().await.unwrap_or(Value::Null);
+    let code = value["error"]["code"]
+        .as_str()
+        .or(value["code"].as_str())
+        .map(str::to_string);
+    (status, code)
+}
+
+async fn get_trial(client: &reqwest::Client, base: &str, t: &Trial, jwt: &str) -> (u16, Value) {
+    let response = client
+        .get(format!(
+            "{base}/v1/workspaces/{}/agents/{}/connector-trial",
+            t.workspace, t.agent
+        ))
+        .bearer_auth(jwt)
+        .send()
+        .await
+        .expect("get trial");
+    let status = response.status().as_u16();
+    (status, response.json().await.unwrap_or(Value::Null))
+}
+
+/// How many agents of the workspace carry the mark.
+async fn marks(su: &PgPool, t: &Trial) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM agent WHERE workspace_id=$1 AND connector_owner_human_id IS NOT NULL",
+    )
+    .bind(t.workspace)
+    .fetch_one(su)
+    .await
+    .unwrap()
+}
+
+async fn trial_audits(su: &PgPool, t: &Trial) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND action='agent.connector_trial.updated'",
+    )
+    .bind(t.workspace)
+    .fetch_one(su)
+    .await
+    .unwrap()
+}
+
+/// `(body, kind)` of the trial notices the agent said, oldest first.
+async fn trial_notices(su: &PgPool, t: &Trial) -> Vec<(String, String)> {
+    sqlx::query_as(
+        "SELECT body, props->>'subscription_notice' FROM message \
+          WHERE workspace_id=$1 AND author_member_id=$2 AND props->>'source'=$3 \
+            AND props->>'subscription_notice' LIKE 'connector_trial_%' ORDER BY seq",
+    )
+    .bind(t.workspace)
+    .bind(t.agent)
+    .bind(NOTICE_SOURCE)
+    .fetch_all(su)
+    .await
+    .unwrap()
+}
+
+async fn trial_setup() -> (PgPool, PgPool, Trial, reqwest::Client) {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let t = seed_trial(&su).await;
+    grant_app(&su, &t, t.operator, APP_A).await;
+    grant_app(&su, &t, t.operator, APP_B).await;
+    let app = momo_app_pool().await;
+    (su, app, t, reqwest::Client::new())
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (#3948)"]
+async fn the_trial_turns_on_only_for_the_operator_with_one_person_and_both_attests() {
+    let (su, app, t, client) = trial_setup().await;
+    let on = json!({"enabled": true});
+    let operator = Some(t.operator_email.clone());
+    let good = start_server_with(app.clone(), attested(&[APP_A, APP_B]), operator.clone()).await;
+
+    // Red proof 1 + 6: a second ACTIVE person, added without any invite.
+    let second = add_person_directly(&su, &t, "동료").await;
+    let second_jwt = momo_auth::sign_access(second, t.workspace, &[], TEST_JWT_SECRET)
+        .expect("jwt")
+        .token;
+    sqlx::query(
+        "INSERT INTO token(workspace_id, kind, actor_member_id, token_hash, scopes, label) \
+         VALUES($1,'session',$2,digest($3::text,'sha256'),ARRAY[]::text[],'second')",
+    )
+    .bind(t.workspace)
+    .bind(second)
+    .bind(&second_jwt)
+    .execute(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        put_trial(&client, &good, &t, &t.operator_jwt, t.agent, on.clone()).await,
+        (409, Some("connector_trial_members".to_string())),
+        "two active people"
+    );
+    assert_eq!(marks(&su, &t).await, 0, "nothing recorded");
+    assert_eq!(trial_audits(&su, &t).await, 0);
+    // A person who is not an instance operator: 403 whatever the people count.
+    assert_eq!(
+        put_trial(&client, &good, &t, &second_jwt, t.agent, on.clone())
+            .await
+            .0,
+        403
+    );
+    assert_eq!(get_trial(&client, &good, &t, &second_jwt).await.0, 403);
+    assert_eq!(marks(&su, &t).await, 0);
+    // The second person leaves; now the control is the same request succeeding.
+    deactivate(&su, &t, second).await;
+
+    // Red proof 6, the case only the instance-operator gate can refuse: the agent's own
+    // owner, an admin of the workspace, whose address is not on PLATFORM_ADMIN_EMAILS.
+    let not_listed = start_server_with(
+        app.clone(),
+        attested(&[APP_A, APP_B]),
+        Some("someone-else@connector.test".to_string()),
+    )
+    .await;
+    assert_eq!(
+        put_trial(
+            &client,
+            &not_listed,
+            &t,
+            &t.operator_jwt,
+            t.agent,
+            on.clone()
+        )
+        .await
+        .0,
+        403,
+        "owner of the agent, but not an instance operator"
+    );
+    assert_eq!(
+        get_trial(&client, &not_listed, &t, &t.operator_jwt).await.0,
+        403
+    );
+    assert_eq!(marks(&su, &t).await, 0);
+
+    // Red proof 4: each attestation input missing alone, then the control.
+    let missing = [
+        CohostedAgentConfig {
+            tools_locked: false,
+            ..attested(&[APP_A, APP_B])
+        },
+        CohostedAgentConfig {
+            connectors_locked: false,
+            ..attested(&[APP_A, APP_B])
+        },
+        attested(&[]),
+    ];
+    for config in missing {
+        let base = start_server_with(app.clone(), config, operator.clone()).await;
+        assert_eq!(
+            put_trial(&client, &base, &t, &t.operator_jwt, t.agent, on.clone()).await,
+            (409, Some("connector_trial_attest".to_string()))
+        );
+        assert_eq!(marks(&su, &t).await, 0);
+    }
+    // Red proof 5 at enable time: an app on in Hermes that the owner never granted.
+    let ungranted = start_server_with(
+        app.clone(),
+        attested(&[APP_A, "com.momo.plugins.linear"]),
+        operator.clone(),
+    )
+    .await;
+    assert_eq!(
+        put_trial(
+            &client,
+            &ungranted,
+            &t,
+            &t.operator_jwt,
+            t.agent,
+            on.clone()
+        )
+        .await,
+        (409, Some("connector_trial_apps".to_string()))
+    );
+    assert_eq!(marks(&su, &t).await, 0);
+    // Only the co-hosted (pinned) agent can be tried; the closed body; a stranger agent id.
+    assert_eq!(
+        put_trial(&client, &good, &t, &t.operator_jwt, t.unpinned, on.clone()).await,
+        (409, Some("connector_trial_not_cohosted".to_string()))
+    );
+    assert_eq!(
+        put_trial(
+            &client,
+            &good,
+            &t,
+            &t.operator_jwt,
+            t.agent,
+            json!({"enabled": true, "ownerId": second})
+        )
+        .await
+        .0,
+        422
+    );
+    assert_eq!(
+        put_trial(
+            &client,
+            &good,
+            &t,
+            &t.operator_jwt,
+            Uuid::new_v4(),
+            on.clone()
+        )
+        .await
+        .0,
+        404
+    );
+    // Hermes has one token volume: while another agent of the workspace is pinned to
+    // it too, the trial cannot be turned on (that agent would reach the same apps).
+    sqlx::query(
+        "INSERT INTO agent_provider_pin(agent_member_id, workspace_id, kind, pinned_by) \
+         VALUES($1,$2,'operator_env',$3)",
+    )
+    .bind(t.unpinned)
+    .bind(t.workspace)
+    .bind(t.operator)
+    .execute(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        put_trial(&client, &good, &t, &t.operator_jwt, t.agent, on.clone()).await,
+        (409, Some("connector_trial_shared".to_string()))
+    );
+    assert_eq!(marks(&su, &t).await, 0);
+    sqlx::query("DELETE FROM agent_provider_pin WHERE agent_member_id=$1")
+        .bind(t.unpinned)
+        .execute(&su)
+        .await
+        .unwrap();
+    // The generic mark route cannot turn the pinned agent on behind the trial's back.
+    let generic = client
+        .put(format!(
+            "{good}/v1/workspaces/{}/agents/{}/connector-owner",
+            t.workspace, t.agent
+        ))
+        .bearer_auth(&t.operator_jwt)
+        .json(&on)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(generic.status().as_u16(), 409);
+    assert_eq!(marks(&su, &t).await, 0);
+
+    // Control: everything in place → on, the mark is the operator, one audit row,
+    // idempotent; the response says it is a self-declaration.
+    assert_eq!(
+        put_trial(&client, &good, &t, &t.operator_jwt, t.agent, on.clone())
+            .await
+            .0,
+        200
+    );
+    assert_eq!(marks(&su, &t).await, 1);
+    assert_eq!(mark(&su, &t.fx(), t.agent).await, Some(t.operator));
+    assert_eq!(
+        put_trial(&client, &good, &t, &t.operator_jwt, t.agent, on.clone())
+            .await
+            .0,
+        200
+    );
+    assert_eq!(trial_audits(&su, &t).await, 1, "one change, one row");
+    let (status, view) = get_trial(&client, &good, &t, &t.operator_jwt).await;
+    assert_eq!(status, 200, "{view}");
+    assert_eq!(view["enabled"], true);
+    assert!(view["stopped"].is_null(), "flowing: {view}");
+    assert_eq!(view["attested"]["selfDeclared"], true);
+    assert!(
+        view["note"].as_str().unwrap_or("").contains("자기 선언"),
+        "{view}"
+    );
+    // While it is on, no second agent can be put on the same Hermes through the pin
+    // route (409, nothing written); after it is off the same request is accepted.
+    let pin_put = |agent: Uuid| {
+        let client = client.clone();
+        let url = format!(
+            "{good}/v1/workspaces/{}/agents/{agent}/provider-pin",
+            t.workspace
+        );
+        let jwt = t.operator_jwt.clone();
+        async move {
+            let response = client
+                .put(url)
+                .bearer_auth(jwt)
+                .json(&json!({"kind": "operator_env"}))
+                .send()
+                .await
+                .unwrap();
+            let status = response.status().as_u16();
+            let value: Value = response.json().await.unwrap_or(Value::Null);
+            (
+                status,
+                value["error"]["code"]
+                    .as_str()
+                    .or(value["code"].as_str())
+                    .map(str::to_string),
+            )
+        }
+    };
+    let pins = || async {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM agent_provider_pin WHERE workspace_id=$1 AND kind='operator_env'",
+        )
+        .bind(t.workspace)
+        .fetch_one(&su)
+        .await
+        .unwrap()
+    };
+    assert_eq!(pins().await, 1);
+    assert_eq!(
+        pin_put(t.unpinned).await,
+        (409, Some("connector_trial_on".to_string()))
+    );
+    assert_eq!(pins().await, 1, "nothing was pinned");
+    // Off is the operator's, immediate, and audited once.
+    assert_eq!(
+        put_trial(
+            &client,
+            &good,
+            &t,
+            &t.operator_jwt,
+            t.agent,
+            json!({"enabled": false})
+        )
+        .await
+        .0,
+        200
+    );
+    assert_eq!(marks(&su, &t).await, 0);
+    assert_eq!(trial_audits(&su, &t).await, 2);
+    assert_eq!(pin_put(t.unpinned).await.0, 200, "trial off: pin accepted");
+    assert_eq!(pins().await, 2);
+}
+
+/// Turn the trial on through the route, with `apps` attested, on a running server.
+async fn enable_trial(
+    su: &PgPool,
+    app: &PgPool,
+    client: &reqwest::Client,
+    t: &Trial,
+    apps: &[&str],
+) -> String {
+    let base = start_server_with(app.clone(), attested(apps), Some(t.operator_email.clone())).await;
+    assert_eq!(
+        put_trial(
+            client,
+            &base,
+            t,
+            &t.operator_jwt,
+            t.agent,
+            json!({"enabled": true})
+        )
+        .await
+        .0,
+        200
+    );
+    assert_eq!(marks(su, t).await, 1);
+    base
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (#3948)"]
+async fn a_person_joining_after_the_trial_is_on_stops_delivery_with_one_notice() {
+    let (su, app, t, client) = trial_setup().await;
+    let base = enable_trial(&su, &app, &client, &t, &[APP_A, APP_B]).await;
+    let fx = t.fx();
+    let mention = format!("@{} 메일 확인해 줘", t.handle);
+
+    // Control: with one person the owner's mention is a job and nobody is told anything.
+    send(
+        &client,
+        &base,
+        &fx,
+        &t.operator_jwt,
+        t.channel,
+        None,
+        &mention,
+    )
+    .await;
+    assert_eq!(jobs(&su, &fx).await, 1);
+    assert!(trial_notices(&su, &t).await.is_empty());
+
+    // A second person arrives by a bare row (no invite). The next mention of the owner
+    // delivers 0 and is answered once, with the ADR's sentence.
+    let second = add_person_directly(&su, &t, "동료").await;
+    let first = send(
+        &client,
+        &base,
+        &fx,
+        &t.operator_jwt,
+        t.channel,
+        None,
+        &mention,
+    )
+    .await;
+    assert_eq!(jobs(&su, &fx).await, 1, "nothing delivered");
+    let said = trial_notices(&su, &t).await;
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert_eq!(
+        said[0].0,
+        "워크스페이스에 사람이 늘어서 Hermes 앱 시험을 멈췄어요. Hermes의 앱 연결을 지우거나, 사람별 분리가 생길 때까지 기다려 주세요."
+    );
+    assert_eq!(said[0].1, "connector_trial_members");
+    assert_eq!(
+        skip_reasons(&su, &fx, "agent.mention.skipped")
+            .await
+            .last()
+            .map(String::as_str),
+        Some("connector_trial_members")
+    );
+    let _ = first;
+    // Throttled, not repeated.
+    send(
+        &client,
+        &base,
+        &fx,
+        &t.operator_jwt,
+        t.channel,
+        None,
+        &mention,
+    )
+    .await;
+    assert_eq!(trial_notices(&su, &t).await.len(), 1);
+    assert_eq!(jobs(&su, &fx).await, 1);
+
+    // The DM (no mention) and the work request stop too.
+    send(&client, &base, &fx, &t.operator_jwt, t.dm, None, "안녕").await;
+    assert_eq!(jobs(&su, &fx).await, 1, "a DM delivers nothing either");
+    let runs_before = runs(&su, &fx).await;
+    let response = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/agent-runs",
+            t.workspace, t.channel
+        ))
+        .bearer_auth(&t.operator_jwt)
+        .json(
+            &json!({"agent_member_id": t.agent, "client_run_id": Uuid::new_v4(),
+                      "input": {"type": "work", "title": "t", "brief": "b"}}),
+        )
+        .send()
+        .await
+        .unwrap();
+    let status = response.status().as_u16();
+    let body: Value = response.json().await.unwrap_or(Value::Null);
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(
+        body["error"]["code"].as_str().or(body["code"].as_str()),
+        Some("connector_trial_members"),
+        "{body}"
+    );
+    assert_eq!(runs(&su, &fx).await, runs_before, "no run was written");
+    let (_, view) = get_trial(&client, &base, &t, &t.operator_jwt).await;
+    assert_eq!(view["enabled"], true);
+    assert_eq!(view["stopped"], "members", "{view}");
+    // The DM screen's own delivery state says it too (not 「열려 있어요」).
+    let dm_state: Value = client
+        .get(format!(
+            "{base}/v1/workspaces/{}/channels/{}/agent-dm-delivery",
+            t.workspace, t.dm
+        ))
+        .bearer_auth(&t.operator_jwt)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(dm_state["state"], "connector_trial_stopped", "{dm_state}");
+
+    // Red proof 3: the other person's own mention is the owner sentence, not delivery.
+    // (Their token: a session row for the bare member.)
+    let second_jwt = momo_auth::sign_access(second, t.workspace, &[], TEST_JWT_SECRET)
+        .expect("jwt")
+        .token;
+    sqlx::query(
+        "INSERT INTO token(workspace_id, kind, actor_member_id, token_hash, scopes, label) \
+         VALUES($1,'session',$2,digest($3::text,'sha256'),ARRAY[]::text[],'second')",
+    )
+    .bind(t.workspace)
+    .bind(second)
+    .bind(&second_jwt)
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO membership(workspace_id, channel_id, member_id) VALUES($1,$2,$3)")
+        .bind(t.workspace)
+        .bind(t.channel)
+        .bind(second)
+        .execute(&su)
+        .await
+        .unwrap();
+    send(&client, &base, &fx, &second_jwt, t.channel, None, &mention).await;
+    assert_eq!(
+        jobs(&su, &fx).await,
+        1,
+        "a stranger's call delivers nothing"
+    );
+    let owner_sentences: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM message WHERE workspace_id=$1 AND author_member_id=$2 \
+           AND props->>'subscription_notice'='connector_non_owner'",
+    )
+    .bind(t.workspace)
+    .bind(t.agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(owner_sentences, 1);
+
+    // Control: the second person leaves, and the very same owner mention is a job again,
+    // and the DM state is no longer the stopped one.
+    deactivate(&su, &t, second).await;
+    sqlx::query("UPDATE message SET created_at = created_at - interval '11 minutes' WHERE workspace_id=$1 AND author_member_id=$2")
+        .bind(t.workspace)
+        .bind(t.agent)
+        .execute(&su)
+        .await
+        .unwrap();
+    send(
+        &client,
+        &base,
+        &fx,
+        &t.operator_jwt,
+        t.channel,
+        None,
+        &mention,
+    )
+    .await;
+    assert_eq!(jobs(&su, &fx).await, 2, "counted live: delivered again");
+    let dm_state: Value = client
+        .get(format!(
+            "{base}/v1/workspaces/{}/channels/{}/agent-dm-delivery",
+            t.workspace, t.dm
+        ))
+        .bearer_auth(&t.operator_jwt)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(dm_state["state"], "not_hosted", "{dm_state}");
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (#3948)"]
+async fn the_attestation_leaving_the_environment_stops_delivery() {
+    let (su, app, t, client) = trial_setup().await;
+    let _on = enable_trial(&su, &app, &client, &t, &[APP_A, APP_B]).await;
+    let fx = t.fx();
+    let mention = format!("@{} 메일 확인해 줘", t.handle);
+    let operator = Some(t.operator_email.clone());
+
+    // Same database, same mark; only the server's environment differs.
+    let complete =
+        start_server_with(app.clone(), attested(&[APP_A, APP_B]), operator.clone()).await;
+    send(
+        &client,
+        &complete,
+        &fx,
+        &t.operator_jwt,
+        t.channel,
+        None,
+        &mention,
+    )
+    .await;
+    assert_eq!(jobs(&su, &fx).await, 1, "control: attested → delivered");
+
+    let broken = [
+        (
+            "tools lock gone",
+            CohostedAgentConfig {
+                tools_locked: false,
+                ..attested(&[APP_A, APP_B])
+            },
+        ),
+        (
+            "connector attest gone",
+            CohostedAgentConfig {
+                connectors_locked: false,
+                ..attested(&[APP_A, APP_B])
+            },
+        ),
+        ("app list gone", attested(&[])),
+    ];
+    for (n, (label, config)) in broken.into_iter().enumerate() {
+        let base = start_server_with(app.clone(), config, operator.clone()).await;
+        // Age the previous notice out of the throttle so each variant must speak.
+        sqlx::query("UPDATE message SET created_at = created_at - interval '11 minutes' WHERE workspace_id=$1 AND author_member_id=$2")
+            .bind(t.workspace)
+            .bind(t.agent)
+            .execute(&su)
+            .await
+            .unwrap();
+        send(
+            &client,
+            &base,
+            &fx,
+            &t.operator_jwt,
+            t.channel,
+            None,
+            &mention,
+        )
+        .await;
+        assert_eq!(jobs(&su, &fx).await, 1, "{label}: nothing delivered");
+        let said = trial_notices(&su, &t).await;
+        assert_eq!(said.len(), n + 1, "{label}: one notice each: {said:?}");
+        assert_eq!(said[n].1, "connector_trial_attest", "{label}");
+        let (_, view) = get_trial(&client, &base, &t, &t.operator_jwt).await;
+        assert_eq!(view["stopped"], "attest", "{label}: {view}");
+    }
+
+    // Restored → delivered again.
+    send(
+        &client,
+        &complete,
+        &fx,
+        &t.operator_jwt,
+        t.channel,
+        None,
+        &mention,
+    )
+    .await;
+    assert_eq!(jobs(&su, &fx).await, 2);
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (#3948)"]
+async fn an_app_that_lost_the_owners_grant_stops_delivery() {
+    let (su, app, t, client) = trial_setup().await;
+    let base = enable_trial(&su, &app, &client, &t, &[APP_A, APP_B]).await;
+    let fx = t.fx();
+    let mention = format!("@{} 메일 확인해 줘", t.handle);
+    let age = || async {
+        sqlx::query("UPDATE message SET created_at = created_at - interval '11 minutes' WHERE workspace_id=$1 AND author_member_id=$2")
+            .bind(t.workspace)
+            .bind(t.agent)
+            .execute(&su)
+            .await
+            .unwrap();
+    };
+
+    send(
+        &client,
+        &base,
+        &fx,
+        &t.operator_jwt,
+        t.channel,
+        None,
+        &mention,
+    )
+    .await;
+    assert_eq!(jobs(&su, &fx).await, 1, "control: both apps granted");
+
+    // A grant for an app Hermes does not have on changes nothing.
+    grant_app(&su, &t, t.operator, "com.momo.plugins.linear").await;
+    revoke_grant(&su, &t, t.operator, "com.momo.plugins.linear").await;
+    age().await;
+    send(
+        &client,
+        &base,
+        &fx,
+        &t.operator_jwt,
+        t.channel,
+        None,
+        &mention,
+    )
+    .await;
+    assert_eq!(jobs(&su, &fx).await, 2, "an unlisted app is not judged");
+
+    // The owner revokes a listed app's grant while Hermes still has it on.
+    revoke_grant(&su, &t, t.operator, APP_B).await;
+    send(
+        &client,
+        &base,
+        &fx,
+        &t.operator_jwt,
+        t.channel,
+        None,
+        &mention,
+    )
+    .await;
+    assert_eq!(jobs(&su, &fx).await, 2, "nothing delivered");
+    let said = trial_notices(&su, &t).await;
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert_eq!(said[0].1, "connector_trial_apps");
+    let (_, view) = get_trial(&client, &base, &t, &t.operator_jwt).await;
+    assert_eq!(view["stopped"], "apps", "{view}");
+
+    // Granted again → delivered.
+    restore_grant(&su, &t, t.operator, APP_B).await;
+    age().await;
+    send(
+        &client,
+        &base,
+        &fx,
+        &t.operator_jwt,
+        t.channel,
+        None,
+        &mention,
+    )
+    .await;
+    assert_eq!(jobs(&su, &fx).await, 3);
+
+    // An admin uninstalling the app (install revoked) with the grant row untouched
+    // is the same: the grant is not active without an enabled install.
+    sqlx::query(
+        "UPDATE workspace_plugin_install SET enabled=false WHERE workspace_id=$1 AND plugin_id=$2",
+    )
+    .bind(t.workspace)
+    .bind(APP_A)
+    .execute(&su)
+    .await
+    .unwrap();
+    age().await;
+    send(
+        &client,
+        &base,
+        &fx,
+        &t.operator_jwt,
+        t.channel,
+        None,
+        &mention,
+    )
+    .await;
+    assert_eq!(jobs(&su, &fx).await, 3, "install disabled → stopped");
+}
+
+/// The claim-time half of 「배달 직전마다 활성 사람 멤버를 다시 센다」 (#3948 K2-3), on
+/// the gateway lane (`method='gateway'`, claimed by `oort_jobs_claim`): two of the
+/// owner's jobs are queued while the agent is plain; it is then marked and pinned to
+/// the operator's env link. With one active person the claim hands the first over;
+/// once the workspace has three again the second is closed unrun with its own
+/// reason (not the foreign-author one), its run cancelled and one audit row written.
+/// (The fixture agent is a hosted dial-in agent: that is the lane whose claim SQL is
+/// under test, the trial rule in it does not care how the agent got its pin.)
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (#3948)"]
+async fn a_trial_job_is_closed_at_claim_when_the_workspace_grew() {
+    let (su, _app, f, base, client) = setup().await;
+    let mention = format!("@{} 메일 확인해 줘", f.handle);
+    send(&client, &base, &f, &f.owner_jwt, f.channel, None, &mention).await;
+    let second_msg = send(&client, &base, &f, &f.owner_jwt, f.channel, None, &mention).await;
+    assert_eq!(jobs(&su, &f).await, 2, "two owner jobs queued while plain");
+
+    assert_eq!(
+        put_mark(
+            &client,
+            &base,
+            &f,
+            &f.owner_jwt,
+            f.agent,
+            json!({"enabled": true})
+        )
+        .await,
+        200
+    );
+    sqlx::query(
+        "INSERT INTO agent_provider_pin(agent_member_id, workspace_id, kind, pinned_by) \
+         VALUES($1,$2,'operator_env',$3)",
+    )
+    .bind(f.agent)
+    .bind(f.workspace)
+    .bind(f.owner)
+    .execute(&su)
+    .await
+    .unwrap();
+
+    // Control: one active person (the owner) -> exactly one job is handed over.
+    sqlx::query(
+        "UPDATE member SET status='suspended' WHERE workspace_id=$1 AND kind='human' AND id <> $2",
+    )
+    .bind(f.workspace)
+    .bind(f.owner)
+    .execute(&su)
+    .await
+    .unwrap();
+    let first = port_call(
+        &client,
+        &base,
+        &f.bearer,
+        "oort_jobs_claim",
+        json!({"limit": 1}),
+    )
+    .await;
+    assert_eq!(
+        first["jobs"].as_array().map_or(0, Vec::len),
+        1,
+        "one person: delivered: {first}"
+    );
+
+    // The workspace grows again: the other queued job is NOT handed over, it is closed.
+    sqlx::query("UPDATE member SET status='active' WHERE workspace_id=$1 AND kind='human'")
+        .bind(f.workspace)
+        .execute(&su)
+        .await
+        .unwrap();
+    let later = port_call(
+        &client,
+        &base,
+        &f.bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(
+        later["jobs"].as_array().map_or(0, Vec::len),
+        0,
+        "three people: nothing handed over: {later}"
+    );
+    let closed: Vec<Option<String>> = sqlx::query_scalar(
+        "SELECT last_error FROM outbox WHERE workspace_id=$1 AND kind='agent_job' \
+          AND partition_key=$2 AND status='done'",
+    )
+    .bind(f.workspace)
+    .bind(f.agent)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        closed,
+        vec![Some(
+            "connector trial: workspace no longer has exactly one person; job closed".to_string()
+        )],
+        "{second_msg}"
+    );
+    let cancelled: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM agent_run WHERE workspace_id=$1 AND agent_member_id=$2 \
+            AND status='cancelled' AND error->>'code'='connector_trial_members'",
+    )
+    .bind(f.workspace)
+    .bind(f.agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(cancelled, 1);
+    assert_eq!(
+        skip_reasons(&su, &f, "agent.connector_owner.job_closed").await,
+        vec!["connector_trial_members".to_string()]
+    );
 }

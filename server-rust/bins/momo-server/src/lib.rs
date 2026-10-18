@@ -1599,6 +1599,13 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/agents/{agent}/connector-owner",
             put(routes::agent_connector_owner::put),
         )
+        // #3948 (ADR-0203 증보 K2·K4) — the 「커넥터 시험」: instance operator
+        // only, both verbs; absent from the agent-route allow-list.
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/connector-trial",
+            get(routes::cohosted_agent::get_connector_trial)
+                .put(routes::cohosted_agent::put_connector_trial),
+        )
         .route(
             "/v1/workspaces/{ws}/agents/{agent}/allowed-models",
             get(routes::agents::allowed_models),

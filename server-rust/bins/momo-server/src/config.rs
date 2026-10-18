@@ -1674,22 +1674,43 @@ impl std::fmt::Debug for SettingsConfig {
 /// * `tools_locked`: `OORT_COHOSTED_AGENT_TOOLS_LOCKED` — the operator's own
 ///   statement that they followed the tool-lock checklist (D6). It is an
 ///   attestation, not a verification; the server cannot see the agent's tools.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CohostedAgentConfig {
     pub declared: bool,
     pub tools_locked: bool,
+    /// #3948 (ADR-0203 증보 K4): `OORT_COHOSTED_AGENT_CONNECTORS_LOCKED` — the
+    /// operator's own statement that Hermes's connectors follow the checklist
+    /// (`trust: untrusted`, `sampling` off, an exact `tools.include`, no write
+    /// tools). Self-declared, not verified by oort.
+    pub connectors_locked: bool,
+    /// #3948: `OORT_COHOSTED_AGENT_CONNECTOR_APPS` — the app ids the operator
+    /// switched on in Hermes. Empty when unset or when any entry is malformed.
+    pub connector_apps: Vec<String>,
 }
 
 impl CohostedAgentConfig {
     pub fn from_env() -> CohostedAgentConfig {
+        Self::from_lookup(env)
+    }
+
+    /// [`from_env`](Self::from_env) over any lookup, so the parse is testable
+    /// without touching the process environment.
+    pub fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> CohostedAgentConfig {
+        let attest = momo_agent::ConnectorTrialAttest::from_env(&lookup);
         CohostedAgentConfig {
-            declared: env("HERMES_BASE_URL").is_some(),
-            tools_locked: matches!(
-                env("OORT_COHOSTED_AGENT_TOOLS_LOCKED")
-                    .map(|value| value.trim().to_ascii_lowercase())
-                    .as_deref(),
-                Some("1") | Some("true") | Some("yes") | Some("on")
-            ),
+            declared: lookup("HERMES_BASE_URL").is_some(),
+            tools_locked: attest.tools_locked,
+            connectors_locked: attest.connectors_locked,
+            connector_apps: attest.apps,
+        }
+    }
+
+    /// The attestation the delivery gate compares against.
+    pub fn attest(&self) -> momo_agent::ConnectorTrialAttest {
+        momo_agent::ConnectorTrialAttest {
+            tools_locked: self.tools_locked,
+            connectors_locked: self.connectors_locked,
+            apps: self.connector_apps.clone(),
         }
     }
 }
