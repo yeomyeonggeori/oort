@@ -45,7 +45,8 @@ import {__resetSpawnPort} from '../src/features/work/ask/spawnPort';
 //   ④ 링크의 section id     `appsOnWebPath` 가 경로를 돌려주면 「section=plugins」 단정이 붉어진다.
 //   ⑤ 설치 컨트롤 부재      상세에 설치 단추를 하나 세우면 「버튼은 뒤로가기 말고 없다」가 붉어진다.
 //   ⑥ 서버 미제공           `serverSaysAbsent` 분기를 지우면 404 시험이 붉어진다.
-//   ⑦ 카드 렌더             `workspaceActionLabel` 의 `plugin.install` 행을 지우면 인박스 줄이 붉어진다.
+//   ⑦ 카드 렌더             `isWorkspaceWideAction` 이 `plugin.install` 을 설정 액션으로 읽으면 「전체 줄 없음」이 붉어진다.
+//   ⑧ 웹 모델과 같은 글자    코어 `riskLabel` 한 글자를 바꾸면 웹 parity 시험이 붉어진다(`phoneAppsParity.test.ts`).
 // =============================================================================
 
 const WS = '22222222-2222-4222-8222-222222222222';
