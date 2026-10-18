@@ -354,6 +354,11 @@ services:
       # every other route is untouched. api ONLY: agent-worker and hermes never
       # receive it (ADR-0203 D6-2 — the helper must not hold an oort secret).
       GITHUB_APP_MASTER_KEY: ${GITHUB_APP_MASTER_KEY:-}
+      # ADR-0205 D2 / #3947 — the absolute https origin GitHub is told to call back
+      # (webhook + manifest redirect). Optional `:-`: unset or non-https leaves the
+      # GitHub 앱 만들기 flow answering 409 `public_address_required`; nothing else reads
+      # it here. The same variable the t3 overlay and docs/SELF_HOST.md already name.
+      MOMO_PUBLIC_BASE_URL: ${MOMO_PUBLIC_BASE_URL:-}
       PLATFORM_ADMIN_EMAILS: ${PLATFORM_ADMIN_EMAILS:-}
       # SH-6a-e / #2215 — operator opt-in for a same-machine OpenAI-compatible
       # provider. Optional `:-`: unset keeps today's default deny. The two

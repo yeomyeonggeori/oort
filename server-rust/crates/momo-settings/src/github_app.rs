@@ -655,17 +655,27 @@ mod tests {
     /// at its definition (before the `#[cfg(test)]` marker) and in tests.
     #[test]
     fn the_pem_open_function_has_no_call_site_outside_this_file() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .canonicalize()
+            .expect("canonical manifest dir");
+        let root = manifest
+            .join("../..")
+            .canonicalize()
+            .expect("server-rust root");
         let mut files = Vec::new();
         rust_sources(&root, &mut files);
         assert!(files.len() > 100, "the walk found {} files", files.len());
-        let this_file = Path::new(file!()).file_name().unwrap().to_owned();
+        // Exactly this file, by canonical path: a second `github_app.rs` elsewhere (the route
+        // module has the same name) must NOT inherit the exemption.
+        let this_file = manifest.join("src/github_app.rs");
+        assert!(
+            files.contains(&this_file),
+            "the walk must reach this very file"
+        );
         let needle = ["open_github", "_pem"].concat();
         let mut offenders = Vec::new();
         for path in &files {
-            if path.file_name() == Some(this_file.as_os_str())
-                && path.to_string_lossy().contains("momo-settings")
-            {
+            if *path == this_file {
                 continue;
             }
             let Ok(text) = std::fs::read_to_string(path) else {
