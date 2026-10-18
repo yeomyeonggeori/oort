@@ -224,20 +224,27 @@ async function tailScenes(browser, origin, scheme, viewport) {
   // 1. 채널
   {
     const { context, page } = await open(browser, origin, scheme, viewport, marketing);
-    await page.getByTestId("apps-used-line").first().waitFor({ timeout: 12_000 });
+    await page.getByTestId("apps-used-line").first().waitFor({ timeout: 25_000 });
     await page.waitForTimeout(600);
     await page.getByTestId("apps-used-tail").first().evaluate((el) => el.scrollIntoView({ block: "center" }));
     await page.waitForTimeout(300);
-    await page.screenshot({ path: resolve(OUT_DIR, `c3950-1a-tail-channel-${tag}.png`) });
-    const visibleLine = (n) => page.getByTestId("apps-used-line").nth(n).locator("span[aria-hidden='true']").textContent();
+    const visibleLine = (n) => page.getByTestId("apps-used-line").nth(n).textContent();
     const first = await visibleLine(0);
-    check(`${tag} 꼬리 한 줄`, first.replace(/\s+/g, " ").includes("쓴 앱(실행 장소 보고): Gmail 검색 2회 · 곽성재 명의 · gmailmcp.googleapis.com · Hermes에서"), first);
-    const exposure = await page.getByTestId("apps-exposure-line").first().textContent();
-    check(`${tag} 노출 줄: 이 채널 5명`, exposure.includes("이 채널 5명에게 보여요"), exposure);
-    check(`${tag} 개인 앱 안내`, (await page.getByTestId("apps-personal-note").count()) === 1);
+    check(`${tag} 꼬리 한 줄`, first === "쓴 앱: Gmail 검색 2회 · Hermes에서 · 이 채널 5명에게 보여요", first);
     const second = await visibleLine(1);
     check(`${tag} 둘째 꼬리: GitHub 한 앱, 도구 섞이면 횟수만`, second.includes("GitHub 4회"), second);
-    check(`${tag} GitHub 답에는 개인 앱 안내 없음`, (await page.getByTestId("apps-personal-note").count()) === 1);
+    check(`${tag} 접힌 동안 명의·주소는 없다`, (await page.getByTestId("apps-details").count()) === 0);
+    const tailBox = await page.getByTestId("apps-used-tail").first().boundingBox();
+    check(`${tag} 꼬리 높이: 390에서도 두 줄 이하`, tailBox.height <= 48, String(tailBox.height));
+    await page.getByTestId("apps-details-toggle").first().click();
+    await page.waitForTimeout(200);
+    const details = await page.getByTestId("apps-details").first().textContent();
+    check(`${tag} 자세히: 명의·연결·자기 보고·개인 앱 안내`, ["곽성재 명의로 썼어요.", "연결: gmailmcp.googleapis.com", "oort는 확인하지 못해요", "요약만 올리는 게 원칙이에요"].every((t) => details.includes(t)), details);
+    await page.screenshot({ path: resolve(OUT_DIR, `c3950-1c-tail-channel-details-${tag}.png`) });
+    await page.getByTestId("apps-details-toggle").first().click();
+    await page.getByTestId("apps-used-tail").first().evaluate((el) => el.scrollIntoView({ block: "center" }));
+    await page.waitForTimeout(200);
+    await page.screenshot({ path: resolve(OUT_DIR, `c3950-1a-tail-channel-${tag}.png`) });
     check(`${tag} 가로 넘침 0`, (await overflowX(page)) === 0);
     await page.getByTestId("apps-used-tail").nth(1).evaluate((el) => el.scrollIntoView({ block: "center" }));
     await page.waitForTimeout(200);
@@ -247,7 +254,7 @@ async function tailScenes(browser, origin, scheme, viewport) {
   // 2. DM
   {
     const { context, page } = await open(browser, origin, scheme, viewport, dm);
-    await page.getByTestId("apps-used-line").first().waitFor({ timeout: 12_000 });
+    await page.getByTestId("apps-used-line").first().waitFor({ timeout: 25_000 });
     await page.waitForTimeout(500);
     await page.screenshot({ path: resolve(OUT_DIR, `c3950-2-tail-dm-${tag}.png`) });
     check(`${tag} DM: 꼬리는 있고 노출 줄은 없다`, (await page.getByTestId("apps-exposure-line").count()) === 0);
@@ -261,7 +268,7 @@ async function noticeScenes(browser, origin, scheme, base) {
   // 목록은 가상화돼 있다. 아홉 줄이 한 번에 그려지도록 키 큰 창에서 한 장으로 찍는다.
   const viewport = { width: base.width, height: base.width >= 1000 ? 2300 : 3300 };
   const { context, page } = await open(browser, origin, scheme, viewport, blocked);
-  await page.getByTestId("app-notice").first().waitFor({ timeout: 12_000 });
+  await page.getByTestId("app-notice").first().waitFor({ timeout: 25_000 });
   await page.waitForTimeout(600);
   await page.evaluate(() => { const el = document.querySelector("[data-testid='app-notice']"); let n = el?.parentElement; while (n && n.scrollHeight <= n.clientHeight + 4) n = n.parentElement; if (n) n.scrollTop = 0; });
   // 목록은 가상화돼 있다: 위에서 아래로 훑으며 보인 줄을 모은다.
@@ -316,7 +323,7 @@ async function oldServerScenes(browser, origin) {
   scenario.old = true;
   for (const [channelId, name] of [[marketing, "마케팅"], [blocked, "막힘"]]) {
     const { context, page } = await open(browser, origin, "light", viewport, channelId);
-    await page.getByText(channelId === marketing ? "견적 관련 메일 두 건" : "(1) site_off").first().waitFor({ timeout: 12_000 });
+    await page.getByText(channelId === marketing ? "견적 관련 메일 두 건" : "(1) site_off").first().waitFor({ timeout: 25_000 });
     await page.waitForTimeout(1200);
     check(`옛 서버 #${name}: 꼬리 없음`, (await page.getByTestId("apps-used-tail").count()) === 0);
     check(`옛 서버 #${name}: 막힘 문장 없음`, (await page.getByTestId("app-notice").count()) === 0);

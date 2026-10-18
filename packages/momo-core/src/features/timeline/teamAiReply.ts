@@ -159,7 +159,9 @@ export interface TeamAiReplyMeta {
   appsLine: string | null;
   /** 같은 사실을 스크린리더가 읽는 문장. */
   appsSpoken: string | null;
-  /** 채널 노출 줄(E10). 채널이 아니거나 앱 보고가 없으면 null. */
+  /** 「자세히」 뒤에 접어 두는 줄들: 명의 · 연결 주소 · 자기 보고 안내 · 개인 앱 안내. 앱 보고가 없으면 빈 배열. */
+  appsDetails: string[];
+  /** 채널 노출(E10) 문구. 기본 꼬리 줄에 들어 있다. 채널이 아니거나 앱 보고가 없으면 null. */
   exposureLine: string | null;
   /** 개인 앱을 채널에 올렸을 때의 안내: 「요약만」은 원칙이고 oort 가 확인하지 못한다. */
   personalNote: string | null;
@@ -216,7 +218,8 @@ const NO_APPS_CONTEXT: AppsTailContext = {
 };
 
 export const APPS_TAIL_PREFIX = "쓴 앱";
-export const APPS_TAIL_SELF_REPORT = "실행 장소 보고";
+export const APPS_TAIL_SELF_REPORT = "앱과 횟수는 에이전트가 알려 준 대로예요. oort는 확인하지 못해요.";
+export const APPS_DETAIL_TOGGLE = { open: "자세히", close: "접기" } as const;
 /** 개인 앱 안내: 「요약만」은 원칙이고, 지키는지는 oort 가 확인하지 못한다(강제가 아니다). */
 export const APPS_PERSONAL_NOTE =
   "개인 앱은 요약만 올리는 게 원칙이에요. oort는 지키는지 확인하지 못해요.";
@@ -239,6 +242,7 @@ function verbOf(tool: string): string | null {
 interface AppsTail {
   line: string;
   spoken: string;
+  details: string[];
   exposure: string | null;
   personalNote: string | null;
 }
@@ -275,24 +279,34 @@ function appsTail(ctx: AppsTailContext, entries: readonly AppsUsedEntry[]): Apps
   }
   const owner = clean(ctx.onBehalfOf, 24);
   const shown = domains.slice(0, DOMAINS_SHOWN);
-  const parts = [
-    apps.join(", "),
-    owner ? `${owner} 명의` : null,
-    shown.length > 0
-      ? `${shown.join(", ")}${domains.length > shown.length ? ` 외 ${domains.length - shown.length}곳` : ""}`
-      : null,
-    ctx.site ? `${appsRunSiteLabel(ctx.site)}에서` : null,
-  ].filter((part): part is string => part !== null);
   const audience =
     ctx.audience !== null && Number.isInteger(ctx.audience) && ctx.audience > 0
       ? ctx.audience
       : null;
+  const exposure = audience === null ? null : `이 채널 ${audience}명에게 보여요`;
+  const personalNote = audience !== null && personal ? APPS_PERSONAL_NOTE : null;
+  // 기본 꼬리는 **한 줄**이다(메시지마다 영수증이 되지 않게): 앱·횟수 · 실행 장소 · 노출.
+  const parts = [
+    apps.join(", "),
+    ctx.site ? `${appsRunSiteLabel(ctx.site)}에서` : null,
+    exposure,
+  ].filter((part): part is string => part !== null);
+  // 나머지는 「자세히」 뒤에 둔다: 명의·연결 주소(oort 가 아는 값), 자기 보고 안내, 개인 앱 안내.
+  const details = [
+    owner ? `${owner} 명의로 썼어요.` : null,
+    shown.length > 0
+      ? `연결: ${shown.join(", ")}${domains.length > shown.length ? ` 외 ${domains.length - shown.length}곳` : ""}`
+      : null,
+    APPS_TAIL_SELF_REPORT,
+    personalNote,
+  ].filter((part): part is string => part !== null);
   return {
-    // 「실행 장소 보고」는 앱·횟수가 실행 장소의 자기 보고라는 표기다. 명의·연결 주소는 oort 가 아는 값이다.
-    line: `${APPS_TAIL_PREFIX}(${APPS_TAIL_SELF_REPORT}): ${parts.join(" · ")}`,
-    spoken: `${APPS_TAIL_PREFIX}, ${APPS_TAIL_SELF_REPORT}, ${parts.join(", ")}`,
-    exposure: audience === null ? null : `이 채널 ${audience}명에게 보여요`,
-    personalNote: audience !== null && personal ? APPS_PERSONAL_NOTE : null,
+    line: `${APPS_TAIL_PREFIX}: ${parts.join(" · ")}`,
+    // 낭독은 접힌 것도 전부 읽는다.
+    spoken: `${APPS_TAIL_PREFIX}, ${[...parts, ...details].join(", ")}`,
+    details,
+    exposure,
+    personalNote,
   };
 }
 
@@ -363,6 +377,7 @@ export function parseTeamAiReplyMeta(
   const meta: TeamAiReplyMeta = {
     appsLine: tail?.line ?? null,
     appsSpoken: tail?.spoken ?? null,
+    appsDetails: tail?.details ?? [],
     exposureLine: tail?.exposure ?? null,
     personalNote: tail?.personalNote ?? null,
     toolsLine,

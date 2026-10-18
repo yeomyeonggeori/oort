@@ -1,7 +1,8 @@
-import React from 'react';
+import React, {useState} from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
 import type {AppNotice} from '@momo/core/features/timeline/appNotice';
 import {
+  APPS_DETAIL_TOGGLE,
   TEAM_AI_SOURCES_LABEL,
   type TeamAiReplyMeta as Meta,
 } from '@momo/core/features/timeline/teamAiReply';
@@ -26,6 +27,7 @@ export const TEAM_AI_CITATION_ACTION_PREFIX = 'momoCitation:';
 
 export function TeamAiReplyMeta({meta}: {meta: Meta}): React.JSX.Element {
   const styles = useStyles(build);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   return (
     <View style={styles.wrap} testID="team-ai-reply-meta">
       {meta.appsLine !== null ? (
@@ -33,13 +35,25 @@ export function TeamAiReplyMeta({meta}: {meta: Meta}): React.JSX.Element {
           <Sentence style={styles.meta} testID="apps-used-line">
             {meta.appsLine}
           </Sentence>
-          {meta.exposureLine !== null ? (
-            <Sentence style={styles.meta} testID="apps-exposure-line">
-              {meta.personalNote !== null
-                ? `${meta.exposureLine} · ${meta.personalNote}`
-                : meta.exposureLine}
-            </Sentence>
-          ) : null}
+          {/* 접힌 줄은 행의 낭독 라벨이 이미 읽는다: 손가락용 손잡이다. */}
+          <Pressable
+            onPress={() => setDetailsOpen(open => !open)}
+            hitSlop={space.sm}
+            accessibilityRole="button"
+            accessibilityState={{expanded: detailsOpen}}
+            testID="apps-details-toggle"
+            style={({pressed}) => [styles.detailToggle, pressed && styles.pressed]}>
+            <Text style={styles.sourceTitle}>
+              {detailsOpen ? APPS_DETAIL_TOGGLE.close : APPS_DETAIL_TOGGLE.open}
+            </Text>
+          </Pressable>
+          {detailsOpen
+            ? meta.appsDetails.map(detail => (
+                <Sentence key={detail} style={styles.meta} testID="apps-detail-line">
+                  {detail}
+                </Sentence>
+              ))
+            : null}
         </View>
       ) : null}
       {meta.toolsLine !== null || meta.modelChip !== null ? (
@@ -90,8 +104,6 @@ export function teamAiReplySpoken(meta: Meta | null): string[] {
   if (meta === null) return [];
   const parts: string[] = [];
   if (meta.appsSpoken !== null) parts.push(meta.appsSpoken);
-  if (meta.exposureLine !== null) parts.push(meta.exposureLine);
-  if (meta.personalNote !== null) parts.push(meta.personalNote);
   if (meta.toolsSpoken !== null) parts.push(meta.toolsSpoken);
   if (meta.modelChip !== null) parts.push(meta.modelChip);
   if (meta.citations.length > 0) {
@@ -158,6 +170,7 @@ function build(color: Palette) {
   return StyleSheet.create({
     wrap: {marginTop: space.xs, gap: space.xs},
     apps: {gap: 0},
+    detailToggle: {minHeight: TOUCH_TARGET, justifyContent: 'center', alignSelf: 'flex-start'},
     notice: {marginTop: space.xs, gap: space.xs},
     noticeText: {fontSize: font.meta, lineHeight: line.meta, color: color.text},
     noticeAction: {minHeight: TOUCH_TARGET, justifyContent: 'center'},

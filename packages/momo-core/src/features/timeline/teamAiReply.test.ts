@@ -120,9 +120,14 @@ function ctx(overrides: Partial<AppsTailContext> = {}): AppsTailContext {
 describe("쓴 앱 꼬리", () => {
   it("예시 줄을 그대로 만든다 — 앱·횟수 · 명의 · 연결 주소 · 실행 장소 · 자기 보고", () => {
     const meta = parseTeamAiReplyMeta({ source: "hermes_gateway", run_id: "r1" }, ctx());
-    expect(meta?.appsLine).toBe(
-      `쓴 앱(${APPS_TAIL_SELF_REPORT}): Gmail 검색 2회 · 곽성재 명의 · gmailmcp.googleapis.com · Hermes에서`
-    );
+    // 기본 꼬리는 한 줄이다: 앱·횟수 · 실행 장소. 나머지는 「자세히」 뒤에 접힌다.
+    expect(meta?.appsLine).toBe("쓴 앱: Gmail 검색 2회 · Hermes에서");
+    expect(meta?.appsDetails).toEqual([
+      "곽성재 명의로 썼어요.",
+      "연결: gmailmcp.googleapis.com",
+      APPS_TAIL_SELF_REPORT,
+    ]);
+    expect(meta?.appsLine?.length).toBeLessThan(40);
     // 도구 줄·모델 칩은 도우미(team_ai) 답의 것이다.
     expect(meta?.toolsLine).toBeNull();
     expect(meta?.modelChip).toBeNull();
@@ -146,9 +151,10 @@ describe("쓴 앱 꼬리", () => {
       ctx({ onBehalfOf: null, site: null, plugins: new Map() })
     );
     // 앱 목록에 없는 앱의 원문 id 는 사람에게 보이지 않는다.
-    expect(meta?.appsLine).toBe(`쓴 앱(${APPS_TAIL_SELF_REPORT}): 다른 앱 검색 2회`);
+    expect(meta?.appsLine).toBe("쓴 앱: 다른 앱 검색 2회");
     expect(meta?.appsLine).not.toContain("gmail");
-    expect(meta?.appsLine).not.toContain("명의");
+    expect(meta?.appsDetails).toEqual([APPS_TAIL_SELF_REPORT]);
+    expect(meta?.appsDetails.join()).not.toContain("명의");
     expect(meta?.appsLine).not.toContain("에서");
   });
 
@@ -222,6 +228,10 @@ describe("쓴 앱 꼬리", () => {
     expect(
       parseTeamAiReplyMeta({ source: "hermes_gateway" }, ctx({ audience: 12 }))?.exposureLine
     ).toBe("이 채널 12명에게 보여요");
+    // 노출은 기본 꼬리 줄에 들어 있다(접지 않는다).
+    expect(
+      parseTeamAiReplyMeta({ source: "hermes_gateway" }, ctx({ audience: 12 }))?.appsLine
+    ).toBe("쓴 앱: Gmail 검색 2회 · Hermes에서 · 이 채널 12명에게 보여요");
     for (const audience of [null, 0, -1, 1.5]) {
       expect(
         parseTeamAiReplyMeta({ source: "hermes_gateway" }, ctx({ audience: audience as never }))
@@ -233,6 +243,10 @@ describe("쓴 앱 꼬리", () => {
   it("개인 앱을 채널에 올리면 「요약만」은 원칙이고 확인하지 못한다고 함께 말한다", () => {
     const personal = parseTeamAiReplyMeta({ source: "hermes_gateway" }, ctx({ audience: 5 }));
     expect(personal?.personalNote).toBe(APPS_PERSONAL_NOTE);
+    // 한 줄을 늘리지 않게 「자세히」 뒤에 있고, 낭독은 접힌 것까지 읽는다.
+    expect(personal?.appsDetails).toContain(APPS_PERSONAL_NOTE);
+    expect(personal?.appsLine).not.toContain("요약만");
+    expect(personal?.appsSpoken).toContain(APPS_PERSONAL_NOTE);
     expect(APPS_PERSONAL_NOTE).toContain("요약만");
     expect(APPS_PERSONAL_NOTE).toContain("확인하지 못해요");
     expect(APPS_PERSONAL_NOTE.length).toBeLessThan(48);

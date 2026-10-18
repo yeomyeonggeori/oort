@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, useState } from "react";
 import { ExternalLink } from "lucide-react";
 import { Link } from "react-router-dom";
 import {
@@ -8,6 +8,7 @@ import {
 import {
   citationAccessibleName,
   TEAM_AI_SOURCES_LABEL,
+  APPS_DETAIL_TOGGLE,
   type TeamAiReplyMeta as Meta,
 } from "@momo/core/features/timeline/teamAiReply";
 import { isDesktop, openExternalUrl } from "@/lib/tauri";
@@ -34,6 +35,8 @@ import { isDesktop, openExternalUrl } from "@/lib/tauri";
 
 export function TeamAiReplyMeta({ meta }: { meta: Meta }) {
   const sourcesId = useId();
+  const detailsId = useId();
+  const [detailsOpen, setDetailsOpen] = useState(false);
   return (
     <div
       className="mt-1 flex min-w-0 flex-col gap-1"
@@ -41,17 +44,29 @@ export function TeamAiReplyMeta({ meta }: { meta: Meta }) {
     >
       {meta.appsLine !== null && (
         <div className="flex min-w-0 flex-col gap-px" data-testid="apps-used-tail">
-          <p className="min-w-0 break-keep text-meta text-ink-muted [overflow-wrap:anywhere]" data-testid="apps-used-line">
-            <span aria-hidden="true">{meta.appsLine}</span>
+          <p className="min-w-0 break-keep text-meta text-ink-muted [overflow-wrap:anywhere]">
+            <span aria-hidden="true" data-testid="apps-used-line">{meta.appsLine}</span>
             <span className="sr-only">{meta.appsSpoken}</span>
+            {/* 접힌 줄은 낭독에서 이미 읽혔다: 버튼은 눈으로 펴는 손잡이다. */}
+            <button
+              type="button"
+              aria-expanded={detailsOpen}
+              aria-controls={detailsId}
+              data-testid="apps-details-toggle"
+              onClick={() => setDetailsOpen((open) => !open)}
+              className="press ml-2 rounded-sm py-1 text-signal-text underline decoration-line-strong underline-offset-2 hover:text-ink focus-visible:focus-ring"
+            >
+              {detailsOpen ? APPS_DETAIL_TOGGLE.close : APPS_DETAIL_TOGGLE.open}
+            </button>
           </p>
-          {meta.exposureLine !== null && (
-            <p className="min-w-0 break-keep text-meta text-ink-muted" data-testid="apps-exposure-line">
-              {meta.exposureLine}
-              {meta.personalNote !== null && (
-                <span data-testid="apps-personal-note"> · {meta.personalNote}</span>
-              )}
-            </p>
+          {detailsOpen && (
+            <ul id={detailsId} aria-hidden="true" className="flex min-w-0 flex-col gap-px" data-testid="apps-details">
+              {meta.appsDetails.map((line) => (
+                <li key={line} className="min-w-0 break-keep text-meta text-ink-muted [overflow-wrap:anywhere]">
+                  {line}
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       )}

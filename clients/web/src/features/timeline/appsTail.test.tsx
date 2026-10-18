@@ -195,24 +195,36 @@ const row = (message: Message) =>
   createElement(MessageRow, { message, startsGroup: true, directory: DIRECTORY });
 
 describe("쓴 앱 꼬리 (E8·E10)", () => {
-  it("run 의 보고를 모아 한 줄로 세운다: 앱 · 명의 · 연결 주소 · 실행 장소 · 실행 장소 보고", async () => {
+  it("run 의 보고를 모아 한 줄로 세운다: 앱·횟수 · 실행 장소, 나머지는 「자세히」 뒤", async () => {
     const view = await mount(row(reply(HERMES_PROPS)));
     expect(fetchAgentRunDetail).toHaveBeenCalledWith(WS, RUN);
-    expect(view.querySelector('[data-testid="apps-used-line"]')?.textContent).toContain(
-      "쓴 앱(실행 장소 보고): Gmail 검색 2회 · 곽성재 명의 · gmailmcp.googleapis.com · Hermes에서"
+    expect(view.querySelector('[data-testid="apps-used-line"]')?.textContent).toBe(
+      "쓴 앱: Gmail 검색 2회 · Hermes에서"
     );
-    // DM·모름이면 노출 줄은 없다.
-    expect(view.querySelector('[data-testid="apps-exposure-line"]')).toBeNull();
+    // 접힌 동안 명의·연결 주소는 화면에 없다.
+    expect(view.querySelector('[data-testid="apps-details"]')).toBeNull();
+    const toggle = view.querySelector<HTMLButtonElement>('[data-testid="apps-details-toggle"]');
+    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+    act(() => toggle?.click());
+    const details = view.querySelector('[data-testid="apps-details"]')?.textContent ?? "";
+    expect(details).toContain("곽성재 명의로 썼어요.");
+    expect(details).toContain("연결: gmailmcp.googleapis.com");
+    // 자기 보고 안내가 화면에 있다(수용기준 9).
+    expect(details).toContain("에이전트가 알려 준 대로예요. oort는 확인하지 못해요.");
+    expect(view.querySelector('[data-testid="apps-details-toggle"]')?.textContent).toBe("접기");
   });
 
-  it("채널이면 둘째 줄에 「이 채널 n명에게 보여요」와, 개인 앱의 「요약만」 원칙·확인 불가 안내", async () => {
+  it("채널이면 같은 한 줄에 「이 채널 n명에게 보여요」, 개인 앱의 「요약만」 원칙·확인 불가 안내는 자세히에", async () => {
     const view = await mount(row(reply(HERMES_PROPS)), 12);
-    const exposure = view.querySelector('[data-testid="apps-exposure-line"]');
-    expect(exposure?.textContent).toContain("이 채널 12명에게 보여요");
-    expect(view.querySelector('[data-testid="apps-personal-note"]')?.textContent).toContain(
-      "요약만 올리는 게 원칙이에요"
+    expect(view.querySelector('[data-testid="apps-used-line"]')?.textContent).toBe(
+      "쓴 앱: Gmail 검색 2회 · Hermes에서 · 이 채널 12명에게 보여요"
     );
-    expect(exposure?.textContent).toContain("oort는 지키는지 확인하지 못해요");
+    act(() => view.querySelector<HTMLButtonElement>('[data-testid="apps-details-toggle"]')?.click());
+    const details = view.querySelector('[data-testid="apps-details"]')?.textContent ?? "";
+    expect(details).toContain("요약만 올리는 게 원칙이에요");
+    expect(details).toContain("oort는 지키는지 확인하지 못해요");
+    // 스크린리더는 접힌 것까지 한 번에 읽는다.
+    expect(view.querySelector('[data-testid="apps-used-tail"] .sr-only')?.textContent).toContain("요약만 올리는 게 원칙이에요");
   });
 
   it("보고가 없으면 꼬리 자체가 없다(영수증을 만들지 않는다)", async () => {
@@ -244,7 +256,8 @@ describe("쓴 앱 꼬리 (E8·E10)", () => {
     const message = reply(HERMES_PROPS);
     message.replyTo = { ...message.replyTo!, authorMemberId: HERMES };
     const view = await mount(row(message));
-    expect(view.querySelector('[data-testid="apps-used-line"]')?.textContent).not.toContain("명의");
+    act(() => view.querySelector<HTMLButtonElement>('[data-testid="apps-details-toggle"]')?.click());
+    expect(view.querySelector('[data-testid="apps-details"]')?.textContent).not.toContain("명의");
   });
 
   it("사람이 쓴 메시지에 같은 props 를 실어도 꼬리를 달지 않고 run 도 부르지 않는다(표시 위조)", async () => {

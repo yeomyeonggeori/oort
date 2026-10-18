@@ -172,26 +172,31 @@ afterEach(() => {
 });
 
 describe('쓴 앱 꼬리 (폰)', () => {
-  it('한 줄을 세우고, 채널이면 노출 줄·개인 앱 안내를 더하고, 행 낭독에도 싣는다', async () => {
+  it('한 줄을 세우고, 나머지는 「자세히」 뒤에 접고, 행 낭독에는 접힌 것까지 싣는다', async () => {
     renderRow(reply(HERMES_PROPS), 12);
     await waitFor(() => expect(screen.getByTestId('apps-used-line')).toBeTruthy());
     expect(mockRunDetail).toHaveBeenCalledWith(WS, RUN);
     expect(screen.getByTestId('apps-used-line')).toHaveTextContent(
-      '쓴 앱(실행 장소 보고): Gmail 검색 2회 · 곽성재 명의 · gmailmcp.googleapis.com · Hermes에서',
+      '쓴 앱: Gmail 검색 2회 · Hermes에서 · 이 채널 12명에게 보여요',
     );
-    const exposure = screen.getByTestId('apps-exposure-line');
-    expect(exposure).toHaveTextContent(/이 채널 12명에게 보여요/);
-    expect(exposure).toHaveTextContent(/요약만 올리는 게 원칙이에요/);
-    expect(exposure).toHaveTextContent(/oort는 지키는지 확인하지 못해요/);
+    expect(screen.queryByTestId('apps-detail-line')).toBeNull();
+    fireEvent.press(screen.getByTestId('apps-details-toggle'));
+    const details = screen.getAllByTestId('apps-detail-line').map(n => n.props.children).join('|');
+    expect(details).toContain('곽성재 명의로 썼어요.');
+    expect(details).toContain('연결: gmailmcp.googleapis.com');
+    expect(details).toContain('oort는 확인하지 못해요');
+    expect(details).toContain('요약만 올리는 게 원칙이에요');
     const label = screen.getByTestId('message-row').props.accessibilityLabel as string;
     expect(label).toContain('쓴 앱');
     expect(label).toContain('이 채널 12명에게 보여요');
+    expect(label).toContain('요약만 올리는 게 원칙이에요');
   });
 
   it('DM(노출 수 없음)에는 둘째 줄이 없다', async () => {
     renderRow(reply(HERMES_PROPS), null);
     await waitFor(() => expect(screen.getByTestId('apps-used-line')).toBeTruthy());
-    expect(screen.queryByTestId('apps-exposure-line')).toBeNull();
+    expect(screen.getByTestId('apps-used-line')).toHaveTextContent('쓴 앱: Gmail 검색 2회 · Hermes에서');
+    expect(screen.getByTestId('apps-used-line')).not.toHaveTextContent(/이 채널/);
   });
 
   it('보고가 없으면 꼬리가 없다', async () => {
