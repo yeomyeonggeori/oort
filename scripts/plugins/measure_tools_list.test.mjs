@@ -2,6 +2,7 @@
 // Offline: a fake vendor (MCP + DCR OAuth) proves the login path end to end,
 // that tokens/client ids never reach the output files, and the digest rule.
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -18,8 +19,9 @@ const stray = path.join(out, 'open-stray.sh');
 fs.writeFileSync(stray, '#!/bin/sh\nru=$(printf %s "$1" | sed -n \'s/.*redirect_uri=\\([^&]*\\).*/\\1/p\' | sed \'s/%3A/:/g;s/%2F/\\//g\')\ncurl -s -o /dev/null "$ru?state=wrong&code=evil"\ncurl -s -o /dev/null -L "$1"\n', { mode: 0o755 });
 const { APPS, measure, schemaDigest, canonical } = await import('./measure_tools_list.mjs');
 
-const SECRET_TOKEN = 'tok-SECRET-123';
-const CLIENT_ID = 'client-SECRET-456';
+// Random per run, so no secret-shaped literal sits in the source.
+const SECRET_TOKEN = `t${crypto.randomUUID()}`;
+const CLIENT_ID = `c${crypto.randomUUID()}`;
 function fakeVendor() {
   let origin = '';
   const s = http.createServer((req, res) => {
