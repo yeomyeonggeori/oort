@@ -1,7 +1,5 @@
 // @vitest-environment jsdom
-// Render the real MessageRow and assert the grant→class seam on the row
-// element. arrivalWiring.test.ts greps cannot see substitutions (B9),
-// relocations (B12), or a second ChatShell consume binding going missing.
+// 실제 MessageRow를 그려 「에이전트」 배지가 눈에는 없고 낭독 낱말로만 남는지 본다 (#4065).
 
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";

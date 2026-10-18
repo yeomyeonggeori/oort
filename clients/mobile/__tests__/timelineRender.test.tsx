@@ -4,6 +4,7 @@ import type {PendingMessage} from '@momo/core/features/timeline/model';
 import {cleanup, render, screen} from '@testing-library/react-native';
 import React from 'react';
 
+import {WorkingRow} from '../src/features/conversation/MessageRow';
 import {Timeline} from '../src/features/conversation/Timeline';
 
 // =============================================================================
@@ -292,6 +293,16 @@ describe('행이 말하는 것', () => {
     expect(screen.getByLabelText(/^헤르메스, 에이전트, /)).toBeTruthy();
     // ADR-0131: an agent has a human who is accountable for it.
     expect(screen.getByText('곽성재님이 관리')).toBeTruthy();
+  });
+
+  it('「작업 중」 행도 배지 없이 낭독에만 「에이전트」를 말한다 (#4065)', () => {
+    render(
+      <WorkingRow memberId="cccccccc-1111-4111-8111-cccccccccccc" directory={DIRECTORY} />,
+    );
+    expect(screen.queryByText('에이전트')).toBeNull();
+    expect(
+      screen.getByLabelText('헤르메스, 에이전트, 작업 중, 답을 기다리는 중입니다'),
+    ).toBeTruthy();
   });
 
   it('사람 행의 낭독 라벨에는 「에이전트」가 없다 (#4065)', () => {
