@@ -186,6 +186,10 @@ pub(crate) struct MentionSend<'a> {
     /// Off (the default) means a Claude subscription agent is not dispatched
     /// to, whenever it was registered.
     pub claude_subscription_agents_enabled: bool,
+    /// #3948 (ADR-0203 증보 K2·K4) — what the operator declared about Hermes's
+    /// connectors, read from the server's environment. Only a 「커넥터 시험」
+    /// agent is judged by it ([`momo_agent::connector_trial_stop`]).
+    pub connector_trial: &'a momo_agent::ConnectorTrialAttest,
     pub context_max_messages: i64,
     /// ADR-0162 증보 5 G5 — `MentionSettings::hosted_inplace_grant_enabled`.
     pub inplace_grant_enabled: bool,
@@ -363,6 +367,21 @@ pub(crate) async fn route_agent_mentions_in_tx(
                 )
                 .await?;
                 subscription_notice(&mut *conn, &send, agent, kind).await?;
+                continue;
+            }
+            // #3948 — the owner called a stopped 「커넥터 시험」: no job, no inbox
+            // row, one sentence in the agent's name naming what to fix.
+            DeliveryGate::ConnectorTrial(stop) => {
+                skip(
+                    &mut *conn,
+                    &send,
+                    &trigger,
+                    agent,
+                    *addressing,
+                    gate.skip_reason(),
+                )
+                .await?;
+                subscription_notice(&mut *conn, &send, agent, stop.into()).await?;
                 continue;
             }
             // Not a person: nobody called, so nothing is said.
@@ -651,6 +670,11 @@ enum DeliveryGate {
     /// work host, a system or webhook-shaped author): nobody called, so nobody
     /// is told. Audit only.
     ConnectorOwnerNonPerson,
+    /// #3948 (ADR-0203 증보 K2·K4) — the owner called, but the 「커넥터 시험」 is
+    /// stopped right now (an attestation is gone, the workspace has more than one
+    /// person, or an app lost the owner's grant). Re-measured on every delivery.
+    /// No job, no inbox row, one sentence to the owner (throttled).
+    ConnectorTrial(momo_agent::ConnectorTrialStop),
     /// ADR-0162 HAP-E5's production feature gate is closed.
     HostedDeliveryNotEnabled,
     /// A hosted agent with no ACTIVE, proved connection. Never a fallback to a
@@ -684,6 +708,7 @@ impl DeliveryGate {
             DeliveryGate::ConnectorOwner(_) | DeliveryGate::ConnectorOwnerNonPerson => {
                 SKIP_CONNECTOR_OWNER_NON_OWNER
             }
+            DeliveryGate::ConnectorTrial(stop) => stop.skip_reason(),
             DeliveryGate::HostedDeliveryNotEnabled => HostedSkipReason::DeliveryNotEnabled.as_str(),
             DeliveryGate::HostedConnectionUnavailable => {
                 HostedSkipReason::ConnectionUnavailable.as_str()
@@ -738,6 +763,17 @@ fn delivery_gate(agent: &MentionCandidate, send: &MentionSend<'_>) -> DeliveryGa
             return connector_refusal(send);
         }
         return DeliveryGate::OwnerOnly(kind);
+    }
+    // #3948: the caller is the owner (a non-owner was refused above). A 「커넥터
+    // 시험」 agent is delivered to only while all three facts still hold.
+    if let Some(stop) = momo_agent::connector_trial_stop(
+        agent
+            .connector_owner
+            .as_ref()
+            .and_then(|connector| connector.trial.as_ref()),
+        send.connector_trial,
+    ) {
+        return DeliveryGate::ConnectorTrial(stop);
     }
     let hosted_connection_id = if agent.hosted_delivery_disabled {
         if !send.hosted_delivery_enabled {
@@ -1704,7 +1740,10 @@ async fn subscription_notice(
 ) -> Result<(), DbError> {
     // E3 (#3938): the connector sentence needs only the connector owner's name —
     // an agent that is not `owner_only` has no `OwnerOnlyScope` to read it from.
-    let body = if kind == SubscriptionNoticeKind::ConnectorNonOwner {
+    let body = if let Some(stop) = kind.connector_trial_stop() {
+        // #3948: the trial sentences name nobody; only the owner is ever told.
+        momo_agent::connector_trial_notice_body(stop).to_string()
+    } else if kind == SubscriptionNoticeKind::ConnectorNonOwner {
         let Some(connector) = agent.connector_owner.as_ref() else {
             return Ok(());
         };
@@ -2106,6 +2145,13 @@ mod tests {
         assert!(MENTION_DIAGNOSTIC_SCHEMA.ends_with(".v0"));
     }
 
+    /// Nothing attested — what a server without the trial variables holds.
+    static NO_ATTEST: momo_agent::ConnectorTrialAttest = momo_agent::ConnectorTrialAttest {
+        tools_locked: false,
+        connectors_locked: false,
+        apps: Vec::new(),
+    };
+
     fn send_for(author: Uuid) -> MentionSend<'static> {
         MentionSend {
             workspace_id: Uuid::from_u128(100),
@@ -2123,6 +2169,7 @@ mod tests {
             hosted_delivery_enabled: true,
             subscription_agents_enabled: true,
             claude_subscription_agents_enabled: true,
+            connector_trial: &NO_ATTEST,
             context_max_messages: 30,
             routing: None,
             // The in-place grant door (#3857) is off here: these units pin the
@@ -2209,6 +2256,7 @@ mod tests {
         agent.connector_owner = Some(momo_agent::ConnectorOwner {
             owner_member_id: owner,
             owner_display_name: "세은".into(),
+            trial: None,
         });
         let open = DeliveryGate::Open {
             hosted_connection_id: None,

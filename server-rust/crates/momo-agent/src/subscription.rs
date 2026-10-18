@@ -144,6 +144,10 @@ pub struct OwnerOnlyScope {
 pub struct ConnectorOwner {
     pub owner_member_id: Uuid,
     pub owner_display_name: String,
+    /// #3948 (ADR-0203 증보 K2·K4): `Some` when the agent is also pinned to the
+    /// operator's own env link — the co-hosted Hermes on a 「커넥터 시험」.
+    /// Judged by [`crate::connector_trial::connector_trial_stop`].
+    pub trial: Option<crate::connector_trial::ConnectorTrialFacts>,
 }
 
 /// The three sentences (ADR-0193 D4·D5·D6), plus E3's connector sentence.
@@ -165,6 +169,38 @@ pub enum SubscriptionNoticeKind {
     /// ADR-0113 증보 2 E3 (#3938) — the agent runs its owner's connected apps
     /// and someone else called.
     ConnectorNonOwner,
+    /// #3948 (ADR-0203 증보 K2) — the 「커넥터 시험」 stopped because the
+    /// workspace no longer has exactly one active person.
+    ConnectorTrialMembers,
+    /// #3948 (ADR-0113 증보 2 E5) — an app switched on in Hermes lost the
+    /// owner's grant.
+    ConnectorTrialApps,
+    /// #3948 (ADR-0203 증보 K4) — an operator attestation left the environment.
+    ConnectorTrialAttest,
+}
+
+impl SubscriptionNoticeKind {
+    /// The trial stop this kind announces, if it is one.
+    pub fn connector_trial_stop(self) -> Option<crate::connector_trial::ConnectorTrialStop> {
+        use crate::connector_trial::ConnectorTrialStop;
+        match self {
+            Self::ConnectorTrialMembers => Some(ConnectorTrialStop::Members),
+            Self::ConnectorTrialApps => Some(ConnectorTrialStop::Apps),
+            Self::ConnectorTrialAttest => Some(ConnectorTrialStop::Attest),
+            _ => None,
+        }
+    }
+}
+
+impl From<crate::connector_trial::ConnectorTrialStop> for SubscriptionNoticeKind {
+    fn from(stop: crate::connector_trial::ConnectorTrialStop) -> Self {
+        use crate::connector_trial::ConnectorTrialStop;
+        match stop {
+            ConnectorTrialStop::Members => Self::ConnectorTrialMembers,
+            ConnectorTrialStop::Apps => Self::ConnectorTrialApps,
+            ConnectorTrialStop::Attest => Self::ConnectorTrialAttest,
+        }
+    }
 }
 
 impl SubscriptionNoticeKind {
@@ -177,6 +213,9 @@ impl SubscriptionNoticeKind {
             Self::Disabled => "disabled",
             Self::ClaudePaused => "claude_paused",
             Self::ConnectorNonOwner => "connector_non_owner",
+            Self::ConnectorTrialMembers => "connector_trial_members",
+            Self::ConnectorTrialApps => "connector_trial_apps",
+            Self::ConnectorTrialAttest => "connector_trial_attest",
         }
     }
 }
@@ -189,6 +228,12 @@ pub fn subscription_notice_body(kind: SubscriptionNoticeKind, scope: &OwnerOnlyS
         SubscriptionNoticeKind::ConnectorNonOwner => {
             connector_owner_notice_body(&scope.owner_display_name)
         }
+        SubscriptionNoticeKind::ConnectorTrialMembers
+        | SubscriptionNoticeKind::ConnectorTrialApps
+        | SubscriptionNoticeKind::ConnectorTrialAttest => kind
+            .connector_trial_stop()
+            .map(|stop| crate::connector_trial::connector_trial_notice_body(stop).to_string())
+            .unwrap_or_default(),
         SubscriptionNoticeKind::NonOwner => format!(
             "{}의 개인 에이전트예요. 팀이 함께 부르는 에이전트는 AI 화면에서 만들 수 있어요.",
             // #2900: the owner chose this name; it must not become markup.
@@ -1069,6 +1114,7 @@ mod tests {
         ConnectorOwner {
             owner_member_id: owner,
             owner_display_name: "세은".into(),
+            trial: None,
         }
     }
 

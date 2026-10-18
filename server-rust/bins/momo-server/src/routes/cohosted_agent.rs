@@ -658,3 +658,279 @@ pub async fn connect(
     )
         .into_response())
 }
+
+// ---------------------------------------------------------------------------
+// 「커넥터 시험」 (#3948 K-S2, ADR-0203 증보 2026-10-16 K2·K4)
+// ---------------------------------------------------------------------------
+//
+// ```text
+// PUT /v1/workspaces/{ws}/agents/{agent}/connector-trial   {"enabled": true|false}
+// GET /v1/workspaces/{ws}/agents/{agent}/connector-trial
+// ```
+//
+// A Hermes on the operator's own server can read **one person's** apps (Gmail,
+// Calendar, Drive) with that person's own tokens, because Hermes keeps one token
+// volume and has no per-person isolation (ADR-0203 K1). The server therefore
+// enforces what the operator's checklist only asks for:
+//
+// * **Operator only, both verbs** (`require_instance_operator_write`), and the
+//   agent must be the operator's own co-hosted agent: pinned to the operator's env
+//   link and owned by the operator. The stored mark is #3938's
+//   `agent.connector_owner_human_id`, written through the one writer
+//   (`set_connector_owner_in_tx`); this route never names a human.
+// * **Turning on** needs, in this order: both attestations and an app list in the
+//   server's environment (`409 connector_trial_attest`), exactly one active human
+//   in the workspace (`409 connector_trial_members`), and every listed app in the
+//   owner's active grants (`409 connector_trial_apps`). A refused request writes
+//   nothing.
+// * **Delivery re-measures all three, every time** (`momo_agent::connector_trial_stop`
+//   — the mention/DM/thread-wake gate, the DM state, the work request, and the
+//   worker's people count). Turning on is not a promise that it stays valid.
+// * **An attestation is the operator's own statement, not oort's verification.**
+//   The server cannot see Hermes's tools, `mcp_servers` or token volume; every
+//   response says so.
+
+const TRIAL_SCHEMA: &str = "momo.cohosted_agent.connector_trial.v0";
+const TRIAL_AUDIT_SCHEMA: &str = "momo.cohosted_agent.connector_trial.audit.v0";
+const TRIAL_AUDIT_ACTION: &str = "agent.connector_trial.updated";
+const SELF_DECLARED_NOTE: &str =
+    "이 선언은 운영자의 자기 선언이에요. oort가 Hermes의 도구나 앱 연결을 검증한 것이 아니에요.";
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PutConnectorTrialRequest {
+    pub enabled: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrialAttestDto {
+    tools_locked: bool,
+    connectors_locked: bool,
+    /// The app ids the operator says are switched on in Hermes (ids only).
+    apps: Vec<String>,
+    /// Always true: what the operator declared is not something oort verified.
+    self_declared: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorTrialResponse {
+    schema: &'static str,
+    agent_id: String,
+    enabled: bool,
+    /// While enabled: why delivery is stopped right now (`attest` | `members` |
+    /// `apps`), or absent when it is flowing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stopped: Option<&'static str>,
+    attested: TrialAttestDto,
+    note: &'static str,
+}
+
+fn attest_dto(attest: &momo_agent::ConnectorTrialAttest) -> TrialAttestDto {
+    TrialAttestDto {
+        tools_locked: attest.tools_locked,
+        connectors_locked: attest.connectors_locked,
+        apps: attest.apps.clone(),
+        self_declared: true,
+    }
+}
+
+fn trial_refusal(code: &'static str, message: &'static str) -> ApiError {
+    ApiError::coded(StatusCode::CONFLICT, code, message)
+}
+
+/// `PUT /v1/workspaces/{ws}/agents/{agent}/connector-trial`.
+pub async fn put_connector_trial(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, agent)): Path<(String, String)>,
+    Json(request): Json<PutConnectorTrialRequest>,
+) -> Result<Json<ConnectorTrialResponse>, ApiError> {
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    // Authority first: a stranger learns nothing about the agent or the trial.
+    require_instance_operator_write(&state, &principal).await?;
+    let agent_member_id = crate::routes::shared::path_uuid(&agent, "invalid agent id")?;
+    let actor = principal.member_id;
+    let via_token = audit_via_token_id(&principal);
+    let enabled = request.enabled;
+    let attest = state.cohosted.config.attest();
+    let audit_attest = attest.clone();
+
+    settle_db(
+        "cohosted_agent.connector_trial.put",
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                // Lock the agent row first: the checks below and the write see one
+                // agent. It must be the operator's own co-hosted agent.
+                let owner: Option<Option<Uuid>> = momo_db::sqlx::query_scalar(
+                    "SELECT a.owner_human_id FROM agent a \
+                       JOIN member m ON m.workspace_id = a.workspace_id AND m.id = a.member_id \
+                      WHERE a.workspace_id = $1 AND a.member_id = $2 \
+                        AND m.kind = 'agent' AND m.status = 'active' AND m.deleted_at IS NULL \
+                        FOR UPDATE OF a",
+                )
+                .bind(workspace_id)
+                .bind(agent_member_id)
+                .fetch_optional(&mut *conn)
+                .await?;
+                let Some(owner) = owner else {
+                    return Ok(Err(ApiError::not_found("active agent not found")));
+                };
+                if owner != Some(actor) {
+                    return Ok(Err(ApiError::forbidden(
+                        "only the operator who connected this agent can change this",
+                    )));
+                }
+                let before = momo_agent::agent_connector_owner_in_tx(
+                    conn,
+                    workspace_id,
+                    agent_member_id,
+                )
+                .await?
+                .is_some();
+
+                if enabled {
+                    if !momo_agent::agent_is_operator_env_pinned_in_tx(
+                        conn,
+                        workspace_id,
+                        agent_member_id,
+                    )
+                    .await?
+                    {
+                        return Ok(Err(trial_refusal(
+                            "connector_trial_not_cohosted",
+                            "같은 서버에 연결한 Hermes 에이전트에서만 앱 시험을 켤 수 있어요.",
+                        )));
+                    }
+                    if !attest.is_complete() {
+                        return Ok(Err(trial_refusal(
+                            "connector_trial_attest",
+                            "서버에 도구 잠금 선언, 앱 시험 선언, 켜 둔 앱 목록이 모두 있어야 켤 수 있어요. 이것은 운영자의 자기 선언이고 oort가 검증하지 않아요.",
+                        )));
+                    }
+                    let facts =
+                        momo_agent::trial_candidate_facts_in_tx(conn, workspace_id, actor).await?;
+                    if facts.active_humans != 1 {
+                        return Ok(Err(trial_refusal(
+                            "connector_trial_members",
+                            "활성 사람 멤버가 정확히 1명인 워크스페이스에서만 앱 시험을 켤 수 있어요.",
+                        )));
+                    }
+                    if !momo_agent::ungranted_apps(&attest, &facts.granted_apps).is_empty() {
+                        return Ok(Err(trial_refusal(
+                            "connector_trial_apps",
+                            "켜 둔 앱 중 소유자의 활성 허용이 없는 앱이 있어요. 앱을 허용하거나 목록에서 빼 주세요.",
+                        )));
+                    }
+                }
+
+                match momo_agent::set_connector_owner_in_tx(
+                    conn,
+                    workspace_id,
+                    agent_member_id,
+                    actor,
+                    enabled,
+                )
+                .await?
+                {
+                    momo_agent::ConnectorOwnerChange::NoSuchAgent => {
+                        return Ok(Err(ApiError::not_found("active agent not found")));
+                    }
+                    momo_agent::ConnectorOwnerChange::NotOwner => {
+                        return Ok(Err(ApiError::forbidden(
+                            "only the operator who connected this agent can change this",
+                        )));
+                    }
+                    momo_agent::ConnectorOwnerChange::Applied { .. } => {}
+                }
+                if before != enabled {
+                    write_audit(
+                        conn,
+                        &AuditEntry::new(workspace_id, TRIAL_AUDIT_ACTION)
+                            .by(actor)
+                            .about(agent_member_id)
+                            .target("agent", agent_member_id)
+                            .via_token(via_token)
+                            .with_schema(
+                                TRIAL_AUDIT_SCHEMA,
+                                json!({
+                                    "enabled": enabled,
+                                    "apps": audit_attest.apps,
+                                    "self_declared": true,
+                                }),
+                            ),
+                    )
+                    .await?;
+                }
+                Ok(Ok(()))
+            })
+        })
+        .await,
+    )?;
+
+    let attested = attest_dto(&state.cohosted.config.attest());
+    Ok(Json(ConnectorTrialResponse {
+        schema: TRIAL_SCHEMA,
+        agent_id: agent_member_id.to_string(),
+        enabled,
+        stopped: None,
+        attested,
+        note: SELF_DECLARED_NOTE,
+    }))
+}
+
+/// `GET /v1/workspaces/{ws}/agents/{agent}/connector-trial` — the mark and, while
+/// it is on, why delivery is stopped right now. Reads only; operator only.
+pub async fn get_connector_trial(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, agent)): Path<(String, String)>,
+) -> Result<Json<ConnectorTrialResponse>, ApiError> {
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    require_instance_operator_write(&state, &principal).await?;
+    let agent_member_id = crate::routes::shared::path_uuid(&agent, "invalid agent id")?;
+    let attest = state.cohosted.config.attest();
+    let judged = attest.clone();
+
+    let (enabled, stopped) = settle_db(
+        "cohosted_agent.connector_trial.get",
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                let known: bool = momo_db::sqlx::query_scalar(
+                    "SELECT EXISTS (SELECT 1 FROM agent a \
+                       JOIN member m ON m.workspace_id = a.workspace_id AND m.id = a.member_id \
+                      WHERE a.workspace_id = $1 AND a.member_id = $2 \
+                        AND m.kind = 'agent' AND m.status = 'active' AND m.deleted_at IS NULL)",
+                )
+                .bind(workspace_id)
+                .bind(agent_member_id)
+                .fetch_one(&mut *conn)
+                .await?;
+                if !known {
+                    return Ok(Err(ApiError::not_found("active agent not found")));
+                }
+                let marked =
+                    momo_agent::agent_connector_owner_in_tx(conn, workspace_id, agent_member_id)
+                        .await?
+                        .is_some();
+                let facts =
+                    momo_agent::connector_trial_facts_in_tx(conn, workspace_id, agent_member_id)
+                        .await?;
+                let stopped = momo_agent::connector_trial_stop(facts.as_ref(), &judged)
+                    .map(momo_agent::ConnectorTrialStop::as_str);
+                Ok(Ok((marked, stopped)))
+            })
+        })
+        .await,
+    )?;
+
+    Ok(Json(ConnectorTrialResponse {
+        schema: TRIAL_SCHEMA,
+        agent_id: agent_member_id.to_string(),
+        enabled,
+        stopped,
+        attested: attest_dto(&attest),
+        note: SELF_DECLARED_NOTE,
+    }))
+}

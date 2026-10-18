@@ -23,8 +23,15 @@
 //!    queued is rewritten here: a job already written was delivered to the owner.
 //! 4. **Idempotent.** Repeating the same value is a `200` with no second audit
 //!    row.
+//! 5. **Not for the co-hosted Hermes (#3948).** An agent pinned to the operator's
+//!    own env link runs one person's apps on a runtime with no per-person token
+//!    isolation, so it is marked only through the 「커넥터 시험」 route
+//!    (`PUT …/connector-trial`: operator, one person, attestations, grants).
+//!    Turning the mark **on** here is a `409 connector_trial_route_required`;
+//!    turning it off stays open to the owner.
 
 use axum::extract::{Path, State};
+use axum::http::StatusCode;
 use axum::{Extension, Json};
 use momo_agent::{set_connector_owner_in_tx, ConnectorOwnerChange};
 use momo_auth::Principal;
@@ -75,6 +82,20 @@ pub async fn put(
         "agent_connector_owner.put",
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
+                if enabled
+                    && momo_agent::agent_is_operator_env_pinned_in_tx(
+                        conn,
+                        workspace_id,
+                        agent_member_id,
+                    )
+                    .await?
+                {
+                    return Ok(Err(ApiError::coded(
+                        StatusCode::CONFLICT,
+                        "connector_trial_route_required",
+                        "the co-hosted agent is marked through the connector trial route only",
+                    )));
+                }
                 let before =
                     momo_agent::agent_connector_owner_in_tx(conn, workspace_id, agent_member_id)
                         .await?

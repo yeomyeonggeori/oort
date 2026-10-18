@@ -1970,6 +1970,81 @@ agent:
 compose `agents` 프로파일은 아직 없어요(Railway 경로가 검증된 뒤로 미뤘어요).
 실제 Railway에서 `0.0.0.0`과 `::`를 재 보는 일도 남아 있어요.
 
+### 3.4.2 Railway: Hermes 「커넥터 시험」 (ADR-0203 증보, #3948)
+
+선택 사항이에요. §3.4.1을 마치고 Hermes를 연결한 뒤에 읽어요. 1인 워크스페이스의
+**한 사람**이 자기 앱(Gmail·캘린더·드라이브)을 Hermes로 읽어 보는 시험이에요
+(읽기만). Hermes는 토큰 볼륨이 하나이고 사람별 분리가 없어서, 체크리스트를 서버
+규칙으로 올렸어요. 활성 사람 멤버가 정확히 1명이 아니면 켜 주지 않고, **배달
+직전마다** 다시 재요. **아래 두 선언은 운영자 본인의 자기 선언이지 oort의
+검증이 아니에요.** oort는 Hermes의 도구, `mcp_servers`, 토큰 볼륨을 볼 수 없어요.
+
+1. **oort 쪽 준비.** 워크스페이스의 활성 사람이 정확히 1명(본인)이에요. 앱은
+   본인이 직접 설치·허용했어요(설정 › 앱). 나중에 어떤 경로로든 두 번째 사람이
+   들어오면 다음 메시지부터 멈춰요.
+2. **Hermes `config.yaml`**: 앱마다 항목 하나, `mcp_servers`에 다른 것은 두지 않아요.
+
+```yaml
+agent:
+  disabled_toolsets: [terminal, code_execution, browser, cronjob, delegation, web]
+mcp_servers:
+  gmail:                       # com.momo.plugins.gmail -> 키 "gmail"
+    url: https://<벤더 MCP 주소>
+    auth: oauth
+    trust: untrusted           # Hermes는 값이 없으면 "full"로 봐요
+    sampling: {enabled: false} # Hermes 기본값은 켜짐이에요
+    tools:
+      include: [<정확한 도구 이름, 읽기 도구만, 글롭 없음>]
+```
+
+   키는 앱 id에서 `com.momo.plugins.`를 뗀 뒤 소문자로 하고 `-`·`.`를 `_`로
+   바꾼 값이에요(`com.momo.plugins.google-calendar` -> `google_calendar`.
+   Hermes는 `-`와 `_`를 같게 봐요). 데이터를 바꾸는 도구는 `tools.include`에
+   넣지 않아요.
+3. **Hermes 잠금 게이트가 커넥터에 맞게 바뀌어요**
+   ([`infra/hermes/lockgate.py`](../infra/hermes/lockgate.py), Railway 시작 명령이
+   이미지 엔트리포인트 앞에서 돌리는 스크립트). 전에는 `mcp_servers` 항목이
+   하나라도 있으면 부팅이 멈췄어요(exit 3). 이제 `mcp_servers`가 **비어 있으면**
+   전과 똑같이 판정하고, **비어 있지 않으면** 아래를 모두 만족할 때만 통과해요.
+   하나라도 어기면 exit 3이에요(서버 항목을 쓰는 것 자체가 시험을 켜는 뜻이라
+   따로 깜빡할 스위치가 없어요).
+   - Hermes 서비스에도 `OORT_COHOSTED_AGENT_CONNECTOR_APPS=<oort와 같은 목록>`이
+     있고, 서버 항목이 그 앱과 **1:1**이에요.
+   - 모든 서버가 원격 `https://` 주소예요(`command`·`args` 없음).
+   - `trust`가 정확히 `untrusted`이고 `sampling.enabled`가 명시적으로 `false`예요.
+   - `tools.include`가 비지 않은 정확한 이름 목록이에요(`*`·`?`·`[` 없음).
+   - `cronjob`·`delegation`·`web`이 `agent.disabled_toolsets`에 있어요.
+   - §3.4.1의 도구 잠금 규칙(허용목록·승인·CORS·키 길이·YOLO 없음·텔레메트리 끔)도
+     그대로 지켜져야 해요.
+   게이트가 보는 것은 **설정**이에요. MCP 도구는 `GET /v1/toolsets`에 나오지
+   않고 `disabled_toolsets`가 막지도 않아서(K-S1a 실측) 게이트의 허용목록도
+   기동 뒤 리포트도 벤더 서버가 무엇을 내놓는지 증명하지 못해요. 그 부분은
+   운영자의 선언으로 남아요. 규칙은 Docker 없이
+   `python3 -m unittest infra/hermes/test_lockgate_connectors.py`로 확인해요.
+4. **로그인**은 Hermes 셸에서 `hermes mcp login <server>`로 해요(리디렉션 URL을
+   붙여 넣어요. `oauth.redirect_port`로 포트를 고정할 수 있어요). 내 컴퓨터의
+   토큰 파일을 복사하지 마세요.
+5. **oort `api` 서비스에 선언해요**(라우트를 받는 서비스예요. 다른 서비스는
+   필요 없어요): `OORT_COHOSTED_AGENT_CONNECTORS_LOCKED=1`(2~3번을 따랐다는
+   선언), `OORT_COHOSTED_AGENT_CONNECTOR_APPS=com.momo.plugins.gmail,com.momo.plugins.google-calendar`
+   (Hermes에 켜 둔 앱, 쉼표 구분. 형식이 틀린 id가 하나라도 있으면 목록 전체가
+   무효예요). §3.4.1의 `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`도 있어야 해요.
+6. **켜기**는 Hermes를 연결한 인스턴스 운영자가
+   `PUT /v1/workspaces/{ws}/agents/{agent}/connector-trial` `{"enabled":true}`로 해요.
+   `409 connector_trial_attest`(선언이나 앱 목록 없음),
+   `409 connector_trial_members`(활성 사람이 정확히 1명이 아님),
+   `409 connector_trial_apps`(목록의 앱 중 내 활성 허용이 없는 것이 있음),
+   `409 connector_trial_not_cohosted`(연결한 Hermes 에이전트가 아님),
+   `403`(운영자가 아님). 같은 경로의 `GET`은 켜져 있는지, 지금 배달이 멈춘 이유
+   (`attest` | `members` | `apps`)가 있는지 보여 줘요.
+7. **켜져 있는 동안** Hermes는 본인만 부를 수 있어요(멘션·DM·작업 요청). 메시지마다
+   세 사실을 다시 재요. 하나라도 어긋나면 Hermes 이름으로 한 문장이 오고, 고칠
+   때까지 아무것도 배달되지 않아요.
+8. **회수 순서:** 시험 끄기(`{"enabled":false}`, 배달이 바로 멈춰요) -> 벤더 쪽
+   연결 해제 -> `/opt/data/mcp-tokens/<server>.json`과 `mcp_servers` 항목 삭제 ->
+   메일 본문이 남았을 수 있으면 `sessions/`도 삭제. 뒤의 세 가지는 oort가 대신하지
+   않아요.
+
 ### 3.5 Fly
 
 T1. compose 절차는 볼륨 달린 Fly VM 1대 위의 §3.2다. 카탈로그:

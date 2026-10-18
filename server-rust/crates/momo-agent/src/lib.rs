@@ -142,6 +142,7 @@ pub mod a2a;
 pub mod actions;
 pub mod approval;
 pub mod card_suggest;
+pub mod connector_trial;
 pub mod decider;
 pub mod dm;
 pub mod effort;
@@ -312,6 +313,11 @@ pub use run_progress::{
     ToolTallyRow,
 };
 // ADR-0200 증보 2026-10-15 R1 — the workspace "running now" read (#3847).
+pub use connector_trial::{
+    agent_is_operator_env_pinned_in_tx, connector_trial_facts_in_tx, connector_trial_notice_body,
+    connector_trial_stop, parse_connector_apps, trial_candidate_facts_in_tx, ungranted_apps,
+    ConnectorTrialAttest, ConnectorTrialFacts, ConnectorTrialStop,
+};
 pub use run_progress::{
     active_run_cursor_in_tx, list_active_run_progress_base_in_tx, validated_active_run_limit,
     visible_active_run_counts_in_tx, workspace_active_run_totals_in_tx, ActiveRunScope,
