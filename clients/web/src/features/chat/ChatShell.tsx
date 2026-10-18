@@ -29,6 +29,7 @@ import {
   type OpenedReadSnapshot,
 } from "@/features/chat/openedReadState";
 import { useSession } from "@/app/session";
+import { useChannelViewingBeat } from "@/features/chat/useChannelViewingBeat";
 import {
   indexFallbackChannelId,
   readProjectionPhase,
@@ -313,6 +314,9 @@ export function ChatShell() {
     workspaceId,
     stressCount > 0 ? null : channelId
   );
+
+  // 「보고 있음」 존재 신호 (ADR-0204 증보 3, #4063): 이 채널이 앞에 있는 동안만.
+  useChannelViewingBeat(workspaceId, channelId, stressCount === 0);
 
   // Unread boundary is the row as it stood when the channel was OPENED
   // (cursor AND mark). Advancing the cursor, or the open's own

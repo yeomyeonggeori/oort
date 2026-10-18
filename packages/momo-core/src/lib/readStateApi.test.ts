@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { installCoreHost, resetCoreHost, type SessionPort } from "../runtime/host";
-import { fetchReadStates, updateReadState } from "./api";
+import { fetchReadStates, touchChannelViewing, updateReadState } from "./api";
 
 function installHost(): void {
   const session: SessionPort = {
@@ -131,5 +131,31 @@ describe("read-state wire (ADR-0178 / PR #1961 snake_case)", () => {
       mark_unread_before_seq: 3,
     });
     expect(putBody(fetchMock)).not.toHaveProperty("read_intent");
+  });
+});
+
+describe("touchChannelViewing", () => {
+  it("PUT .../channels/{ch}/viewing 를 본문 없이 보낸다", async () => {
+    installHost();
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await touchChannelViewing("w 1", "c/1");
+    const call = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(call[0]).toBe(
+      "https://oort.test/v1/workspaces/w%201/channels/c%2F1/viewing"
+    );
+    expect(call[1].method).toBe("PUT");
+    expect(call[1].body ?? undefined).toBeUndefined();
+  });
+
+  it("404는 ApiError(status 404)로 던진다", async () => {
+    installHost();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ error: { message: "nf" } }, 404))
+    );
+    await expect(touchChannelViewing("w", "c")).rejects.toMatchObject({
+      status: 404,
+    });
   });
 });
