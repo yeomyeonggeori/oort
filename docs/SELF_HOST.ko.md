@@ -642,6 +642,55 @@ Dawn에 server id + 공개키만 넘긴 뒤:
 오버레이 키) pending `push_candidate`를 outbox 실패로 본다. 오버레이가
 없으면 개수만 **info**이지 fail이 아니다.
 
+## GitHub 알림 (ADR-0205)
+
+인스턴스는 GitHub PR·이슈·체크 소식을 채널로 받을 수 있다. 사람의 토큰이 아니라
+**이 인스턴스가 가진 GitHub 앱 하나**로 받는다. 운영자(`PLATFORM_ADMIN_EMAILS`)가
+oort의 매니페스트 흐름으로 앱을 한 번 등록하면, 서버가 앱 개인키와 webhook
+secret을 DB에 봉인한다. 이 단계는 자격증명 저장·봉인까지이고, 이벤트 수신과
+채널 구독은 다음 슬라이스에서 온다.
+
+**전제**
+
+- api에 닿는 **공개 HTTPS 주소**(“공개 오리진으로 열기” 참고)를
+  **`MOMO_PUBLIC_BASE_URL=https://<호스트>`** 로 env에 정해야 한다. api가 이 변수로
+  GitHub에 콜백 주소를 알려 주고, 이 값이 없거나 절대 https가 아니면 「GitHub 앱
+  만들기」는 409 `public_address_required`로 답한다. GitHub는 공개 HTTPS
+  주소로만 웹훅을 보내므로 루프백·NAT 뒤 설치는 받을 수 없다.
+  `scripts/oort doctor`가 「공개 주소가 없어 GitHub 알림을 받을 수 없어요」라고
+  알려 준다(실패가 아니라 안내).
+- `GITHUB_APP_MASTER_KEY` — 봉인 전용 독립 키(도메인 `momo.github_app.key.v1`).
+  새 설치는 생성기가 쓰고, 기존 설치는 `scripts/oort upgrade`가 백필한다(없을
+  때만 추가, 이미 있는 값은 덮어쓰지 않고 출력하지 않는다). **선택**이다: 비어
+  있으면 GitHub 표면만 503이고 나머지 라우트는 그대로다. `JWT_HMAC`, 웹훅
+  마스터키 두 개, `PROVIDER_LINK_MASTER_KEY`와 같은 값이면 api가 기동을
+  거부하고 `oort doctor`가 blocker로 알린다. **api에만** 전달한다 —
+  agent-worker와 Hermes에는 넘기지 않는다.
+
+**앱이 요청하는 권한**(읽기만): `metadata`, `issues`, `pull_requests`,
+`checks`, `contents`. 쓰기 권한은 없다. 설치할 때는 “All repositories”가 아니라
+**“Only select repositories”** 로 한다. `contents: read`는 설치 화면에서 계정
+소유자에게 그대로 보이고, 좁게 설치하면 자격증명이 새도 읽히는 범위가 그
+저장소들로 줄어든다.
+
+**서버가 내려가 있는 동안의 이벤트는 사라진다(1단계).** GitHub는 실패한 전달을
+자동으로 다시 보내지 않는다. 놓친 전달 재조회는 2단계 기능이다.
+
+**`GITHUB_APP_MASTER_KEY` 회전.** 회전은 저장된 자격증명을 다시 봉인하는 일이다
+(옛 키로 열고 새 키로 봉인, 한 트랜잭션 — ADR-0205 D7). 재봉인 명령은 **이
+슬라이스에 아직 없다.** 나오기 전에는 키를 바꾸고 앱을 다시 등록해야 한다(옛 키로
+봉인한 값은 열리지 않으므로 다시 입력). 값만 바꾸고 옛 행이 열리길 기대하지 마라.
+
+**키와 DB 덤프가 함께 유출되면** 설치된 모든 저장소의 PR·이슈·체크와 **코드**
+(`contents`)를 읽을 수 있다. 대응 순서:
+
+1. GitHub에서 앱 개인키를 지우고 webhook secret을 교체한다.
+2. oort에서 새 `GITHUB_APP_MASTER_KEY`를 넣고 api를 재시작한 뒤 새 자격증명을
+   입력(재봉인)한다.
+3. 필요하면 GitHub에서 앱을 삭제하고 다시 등록한다.
+
+“선택한 저장소만” 설치해 두면 1단계의 피해 반경이 작다.
+
 ## 멈추기 · 지우기
 
 3단계의 인자 묶음이 길어서, 아래부터는 함수 하나로 줄여 쓴다. 레포 루트에서

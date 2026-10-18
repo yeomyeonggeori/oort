@@ -420,6 +420,10 @@ generator's output, so the domain comes first:
      copy of it (ADR-0004 증보 4 D2(a) — re-issues nothing) and says so on
      stderr. Without it they are fresh randoms and every issued native ingress /
      event-subscription / doorbell secret dies.
+   - `GITHUB_APP_MASTER_KEY` (ADR-0205, #3947) reaches **api only** (one shared
+     reference, optional: empty ⇒ only the GitHub 알림 surface is 503). Do not add
+     it to agent-worker, relay or any Hermes service. The owner sets the value;
+     the generator emits a fresh random for a new project.
    - `OUTBOUND_WEBHOOK_MASTER_KEY` must reach **webhook-sender as well as api**,
      with the same value (the same shared reference). #2066 deleted the
      binary's `JWT_HMAC` fallback: a sender without it refuses to boot, and one

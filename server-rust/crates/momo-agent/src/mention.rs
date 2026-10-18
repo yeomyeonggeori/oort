@@ -765,8 +765,10 @@ pub fn mention_run_input(
 /// (`momo_agent_worker::payload::AgentJobPayload`), and its unit test pins the
 /// key names including the ones it ignores. Two keys are deliberately absent
 /// here and named in the PR body's deviation list: `context_packet*` and
-/// `memory_refs`/`tool_grants` (the memory plane is not ported), which Swift
-/// fills from `issueContextPacket`.
+/// `memory_refs` (the memory plane is not ported), which Swift fills from
+/// `issueContextPacket`. `tool_grants` is not written here either: the route
+/// adds the ADR-0113 증보 2 E5 app evidence after this call, and only for an
+/// agent with apps attached (`app_tool_grants`, #3945).
 #[allow(clippy::too_many_arguments)]
 pub fn mention_job_payload(
     trigger: &MentionTrigger<'_>,
