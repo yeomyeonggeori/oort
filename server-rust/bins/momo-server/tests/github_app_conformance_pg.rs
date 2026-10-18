@@ -135,6 +135,8 @@ fn ensure_schema_and_roles() {
 struct ScriptedConverter {
     calls: AtomicUsize,
     outcome: Mutex<Result<(), ConvertError>>,
+    /// (login, type) GitHub reports as the new App's owner.
+    owner: (&'static str, &'static str),
 }
 
 impl ScriptedConverter {
@@ -142,6 +144,15 @@ impl ScriptedConverter {
         Arc::new(ScriptedConverter {
             calls: AtomicUsize::new(0),
             outcome: Mutex::new(Ok(())),
+            owner: ("acme", "Organization"),
+        })
+    }
+
+    fn owned_by(login: &'static str, kind: &'static str) -> Arc<ScriptedConverter> {
+        Arc::new(ScriptedConverter {
+            calls: AtomicUsize::new(0),
+            outcome: Mutex::new(Ok(())),
+            owner: (login, kind),
         })
     }
 
@@ -149,6 +160,7 @@ impl ScriptedConverter {
         Arc::new(ScriptedConverter {
             calls: AtomicUsize::new(0),
             outcome: Mutex::new(Err(error)),
+            owner: ("acme", "Organization"),
         })
     }
 
@@ -166,8 +178,8 @@ impl GithubAppConverter for ScriptedConverter {
             app_id: 424242,
             slug: "oort-test".to_string(),
             client_id: "Iv1.conformance".to_string(),
-            owner_login: "acme".to_string(),
-            owner_type: "Organization".to_string(),
+            owner_login: self.owner.0.to_string(),
+            owner_type: self.owner.1.to_string(),
             pem: Plaintext::new(pem(PEM_MARKER)),
             webhook_secret: Plaintext::new(WEBHOOK_MARKER),
         })
@@ -666,11 +678,12 @@ async fn the_manifest_flow_seals_inside_the_callback_and_leaks_nothing() {
             .is_err(),
         "another master key cannot open it"
     );
-    // The PEM box is the same construction under the same domain.
-    let opened =
+    // The slot is bound into the AEAD: the webhook opener is NOT a back door to the PEM column.
+    assert!(
         momo_settings::github_app::open_github_webhook_secret(&pem_box, TEST_GITHUB_MASTER_KEY)
-            .unwrap();
-    assert!(opened.contains(PEM_MARKER));
+            .is_err(),
+        "a PEM box must not open through the webhook-secret opener"
+    );
 
     // The operator view now shows the App, without a single secret.
     let (status, _, body) = seen
@@ -900,28 +913,14 @@ async fn a_dead_state_or_a_failed_conversion_registers_nothing() {
         .unwrap();
     assert_eq!(rows, 0);
     let failed: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM audit_log WHERE workspace_id = $1 AND action = 'github_app.registration_failed' \
-           AND detail->'data'->>'reason' = 'code_rejected'",
+        "SELECT count(*) FROM audit_log WHERE workspace_id = $1 \
+           AND action = 'github_app.registration_failed' AND detail->>'reason' = 'code_rejected'",
     )
     .bind(fixture.workspace)
     .fetch_one(&su)
     .await
     .unwrap();
-    assert!(
-        failed >= 1
-            || {
-                // The schema envelope may nest the payload differently; fall back to a text match.
-                let any: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM audit_log WHERE workspace_id = $1 \
-               AND action = 'github_app.registration_failed' AND detail::text LIKE '%code_rejected%'",
-        )
-        .bind(fixture.workspace)
-        .fetch_one(&su)
-        .await
-        .unwrap();
-                any >= 1
-            }
-    );
+    assert_eq!(failed, 1, "the failure reason is audited as a label");
 }
 
 // ---------------------------------------------------------------------------
@@ -1415,4 +1414,276 @@ async fn rls_hides_the_app_and_other_workspaces_installations_from_a_tenant_sess
     .execute(&su)
     .await
     .is_err());
+}
+
+// ---------------------------------------------------------------------------
+// state binding, concurrency, operator gate (independent review M1, test gaps)
+// ---------------------------------------------------------------------------
+
+async fn start_flow(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    body: Value,
+) -> (String, Value) {
+    let started: Value = http
+        .post(format!("{base}/v1/integrations/github/app/manifest"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    (
+        state_from_registration_url(started["registrationUrl"].as_str().expect("url")),
+        started,
+    )
+}
+
+fn location_of(response: &reqwest::Response) -> String {
+    response
+        .headers()
+        .get("location")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string()
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_state_cannot_be_paired_with_an_app_made_under_another_account() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_github(&su).await;
+    let fixture = seed(&su, "ghowner").await;
+    let http = http();
+
+    // The operator asked for the organization `acme`; GitHub's reply says `evil-corp`.
+    let wrong_login = ScriptedConverter::owned_by("evil-corp", "Organization");
+    let base = start_server(
+        momo_app_pool().await,
+        ServerOptions {
+            operator_emails: &[&fixture.email],
+            github_key: Some(TEST_GITHUB_MASTER_KEY),
+            public_base: Some(PUBLIC_BASE),
+            converter: wrong_login.clone(),
+        },
+    )
+    .await;
+    let token = login(&http, &base, &fixture).await;
+    let (state, _) = start_flow(
+        &http,
+        &base,
+        &token,
+        json!({"ownerType": "organization", "organization": "acme"}),
+    )
+    .await;
+    let response = http
+        .get(format!(
+            "{base}/v1/integrations/github/app/callback?code=abc&state={state}"
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        location_of(&response).contains("githubApp=owner_mismatch"),
+        "{}",
+        location_of(&response)
+    );
+    assert_eq!(wrong_login.calls(), 1);
+    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM github_app")
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(
+        rows, 0,
+        "an App under someone else's account is never stored"
+    );
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE workspace_id = $1 \
+           AND action = 'github_app.registration_failed' AND detail->>'reason' = 'owner_mismatch'",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+
+    // A personal-account flow does not accept an organization-owned App either.
+    sqlx::query("DELETE FROM github_link_claim")
+        .execute(&su)
+        .await
+        .unwrap();
+    let wrong_type = ScriptedConverter::owned_by("acme", "Organization");
+    let base = start_server(
+        momo_app_pool().await,
+        ServerOptions {
+            operator_emails: &[&fixture.email],
+            github_key: Some(TEST_GITHUB_MASTER_KEY),
+            public_base: Some(PUBLIC_BASE),
+            converter: wrong_type.clone(),
+        },
+    )
+    .await;
+    let token = login(&http, &base, &fixture).await;
+    let (state, _) = start_flow(&http, &base, &token, json!({"ownerType": "user"})).await;
+    let response = http
+        .get(format!(
+            "{base}/v1/integrations/github/app/callback?code=abc&state={state}"
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert!(location_of(&response).contains("githubApp=owner_mismatch"));
+
+    // Control: the matching account (case-insensitive login) registers.
+    sqlx::query("DELETE FROM github_link_claim")
+        .execute(&su)
+        .await
+        .unwrap();
+    let matching = ScriptedConverter::owned_by("ACME", "Organization");
+    let base = start_server(
+        momo_app_pool().await,
+        ServerOptions {
+            operator_emails: &[&fixture.email],
+            github_key: Some(TEST_GITHUB_MASTER_KEY),
+            public_base: Some(PUBLIC_BASE),
+            converter: matching.clone(),
+        },
+    )
+    .await;
+    let token = login(&http, &base, &fixture).await;
+    let (state, _) = start_flow(
+        &http,
+        &base,
+        &token,
+        json!({"ownerType": "organization", "organization": "acme"}),
+    )
+    .await;
+    let response = http
+        .get(format!(
+            "{base}/v1/integrations/github/app/callback?code=abc&state={state}"
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert!(location_of(&response).contains("githubApp=created"));
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn two_simultaneous_callbacks_on_one_state_register_exactly_once() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_github(&su).await;
+    let fixture = seed(&su, "ghrace").await;
+    let converter = ScriptedConverter::ok();
+    let base = start_server(
+        momo_app_pool().await,
+        ServerOptions {
+            operator_emails: &[&fixture.email],
+            github_key: Some(TEST_GITHUB_MASTER_KEY),
+            public_base: Some(PUBLIC_BASE),
+            converter: converter.clone(),
+        },
+    )
+    .await;
+    let http = http();
+    let token = login(&http, &base, &fixture).await;
+    let (state, _) = start_flow(
+        &http,
+        &base,
+        &token,
+        json!({"ownerType": "organization", "organization": "acme"}),
+    )
+    .await;
+    let url = format!("{base}/v1/integrations/github/app/callback?code=abc&state={state}");
+    let (a, b, c, d) = tokio::join!(
+        http.get(&url).send(),
+        http.get(&url).send(),
+        http.get(&url).send(),
+        http.get(&url).send()
+    );
+    let outcomes: Vec<String> = [a, b, c, d]
+        .into_iter()
+        .map(|r| location_of(&r.unwrap()))
+        .collect();
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|l| l.contains("githubApp=created"))
+            .count(),
+        1,
+        "{outcomes:?}"
+    );
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|l| l.contains("githubApp=state_invalid"))
+            .count(),
+        3,
+        "{outcomes:?}"
+    );
+    assert_eq!(converter.calls(), 1, "GitHub's one-time code is spent once");
+    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM github_app")
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(rows, 1);
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn only_a_listed_instance_operator_reaches_the_operator_routes() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_github(&su).await;
+    let operator = seed(&su, "ghop").await;
+    let owner_not_listed = seed(&su, "ghnotlisted").await;
+    let base = start_server(
+        momo_app_pool().await,
+        ServerOptions {
+            operator_emails: &[&operator.email],
+            github_key: Some(TEST_GITHUB_MASTER_KEY),
+            public_base: Some(PUBLIC_BASE),
+            converter: ScriptedConverter::ok(),
+        },
+    )
+    .await;
+    let http = http();
+    let token = login(&http, &base, &owner_not_listed).await;
+    let get = http
+        .get(format!("{base}/v1/integrations/github/app"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        get.status(),
+        403,
+        "an ordinary workspace owner is not an instance operator"
+    );
+    let post = http
+        .post(format!("{base}/v1/integrations/github/app/manifest"))
+        .bearer_auth(&token)
+        .json(&json!({"ownerType": "user"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(post.status(), 403);
+    // No bearer at all: the authenticated routes are not reachable anonymously.
+    for request in [
+        http.get(format!("{base}/v1/integrations/github/app")),
+        http.post(format!("{base}/v1/integrations/github/app/manifest"))
+            .json(&json!({"ownerType": "user"})),
+    ] {
+        assert_eq!(request.send().await.unwrap().status(), 401);
+    }
+    let claims: i64 = sqlx::query_scalar("SELECT count(*) FROM github_link_claim")
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(claims, 0, "a refused caller mints no state");
 }

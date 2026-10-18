@@ -33,7 +33,7 @@ use sha2::{Digest, Sha256};
 use sqlx::PgConnection;
 use uuid::Uuid;
 
-use aes_gcm::aead::{Aead, AeadCore, KeyInit, OsRng};
+use aes_gcm::aead::{Aead, AeadCore, KeyInit, OsRng, Payload};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
 
 use crate::crypto::{CryptoError, SEALED_BOX_VERSION};
@@ -80,6 +80,25 @@ pub const GITHUB_DEFAULT_EVENTS: [&str; 7] = [
 // sealing
 // ---------------------------------------------------------------------------
 
+/// Which GitHub App secret a box holds. The slot is bound into the AES-GCM **associated data**,
+/// so a box sealed as the PEM does not authenticate when opened as a webhook secret, and the
+/// other way round. That makes the grep guard on the PEM opener a real boundary instead of a
+/// naming convention: no other opener in this file can read the PEM column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GithubSecretSlot {
+    Pem,
+    WebhookSecret,
+}
+
+impl GithubSecretSlot {
+    fn aad(self) -> &'static [u8] {
+        match self {
+            GithubSecretSlot::Pem => b"momo.github_app.slot.v1:pem",
+            GithubSecretSlot::WebhookSecret => b"momo.github_app.slot.v1:webhook_secret",
+        }
+    }
+}
+
 /// `SHA256("momo.github_app.key.v1\n" || masterKey)`.
 fn symmetric_key(master_key: &str) -> Key<Aes256Gcm> {
     let mut hasher = Sha256::new();
@@ -91,7 +110,11 @@ fn symmetric_key(master_key: &str) -> Key<Aes256Gcm> {
 
 /// Seal a GitHub App secret (the PEM or a webhook secret). Trimmed first, so a
 /// value pasted with a trailing newline seals to the secret the operator meant.
-pub fn seal_github_secret(plaintext: &str, master_key: &str) -> Result<Vec<u8>, CryptoError> {
+pub fn seal_github_secret(
+    plaintext: &str,
+    master_key: &str,
+    slot: GithubSecretSlot,
+) -> Result<Vec<u8>, CryptoError> {
     let trimmed = plaintext.trim();
     if trimmed.is_empty() {
         return Err(CryptoError::EmptyPlaintext);
@@ -99,7 +122,13 @@ pub fn seal_github_secret(plaintext: &str, master_key: &str) -> Result<Vec<u8>, 
     let cipher = Aes256Gcm::new(&symmetric_key(master_key));
     let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
     let ciphertext = cipher
-        .encrypt(&nonce, trimmed.as_bytes())
+        .encrypt(
+            &nonce,
+            Payload {
+                msg: trimmed.as_bytes(),
+                aad: slot.aad(),
+            },
+        )
         .map_err(|_| CryptoError::MalformedCiphertext)?;
     let mut out = Vec::with_capacity(1 + NONCE_LEN + ciphertext.len());
     out.push(SEALED_BOX_VERSION);
@@ -108,7 +137,11 @@ pub fn seal_github_secret(plaintext: &str, master_key: &str) -> Result<Vec<u8>, 
     Ok(out)
 }
 
-fn open_github_secret(sealed: &[u8], master_key: &str) -> Result<String, CryptoError> {
+fn open_github_secret(
+    sealed: &[u8],
+    master_key: &str,
+    slot: GithubSecretSlot,
+) -> Result<String, CryptoError> {
     let (version, body) = sealed
         .split_first()
         .ok_or(CryptoError::MalformedCiphertext)?;
@@ -121,14 +154,20 @@ fn open_github_secret(sealed: &[u8], master_key: &str) -> Result<String, CryptoE
     let (nonce_bytes, ciphertext) = body.split_at(NONCE_LEN);
     let cipher = Aes256Gcm::new(&symmetric_key(master_key));
     let opened = cipher
-        .decrypt(Nonce::from_slice(nonce_bytes), ciphertext)
+        .decrypt(
+            Nonce::from_slice(nonce_bytes),
+            Payload {
+                msg: ciphertext,
+                aad: slot.aad(),
+            },
+        )
         .map_err(|_| CryptoError::MalformedCiphertext)?;
     String::from_utf8(opened).map_err(|_| CryptoError::InvalidUtf8)
 }
 
 /// Open a sealed webhook secret (signature verification — E-GH2).
 pub fn open_github_webhook_secret(sealed: &[u8], master_key: &str) -> Result<String, CryptoError> {
-    open_github_secret(sealed, master_key)
+    open_github_secret(sealed, master_key, GithubSecretSlot::WebhookSecret)
 }
 
 /// Open the sealed App private key.
@@ -136,7 +175,7 @@ pub fn open_github_webhook_secret(sealed: &[u8], master_key: &str) -> Result<Str
 /// **Phase 1 has no caller.** Do not add one outside `#[cfg(test)]`: the
 /// grep guard in this file's tests fails the build of the PR that does.
 pub fn open_github_pem(sealed: &[u8], master_key: &str) -> Result<String, CryptoError> {
-    open_github_secret(sealed, master_key)
+    open_github_secret(sealed, master_key, GithubSecretSlot::Pem)
 }
 
 /// Does `value` look like a PEM private key block? A paste-form sanity check,
@@ -214,7 +253,7 @@ pub fn build_manifest(public_base_url: &str, app_name: &str) -> serde_json::Valu
         },
         "redirect_url": format!("{base}/v1/integrations/github/app/callback"),
         "setup_url": format!("{base}/v1/integrations/github/setup"),
-        "description": "oort가 저장소의 PR·이슈·체크 소식을 채널로 받아 와요. 코드는 읽지 않아요.",
+        "description": "oort가 저장소의 PR·이슈·체크·push·release 소식을 채널로 받아 와요. 코드 읽기 권한(contents: read)은 push·release 알림을 받으려고 요청하고, oort 서버는 알림을 위해 코드를 읽지 않아요.",
         "public": false,
         "request_oauth_on_install": false,
         "default_events": GITHUB_DEFAULT_EVENTS,
@@ -276,6 +315,49 @@ pub fn state_workspace_hint(token: &str) -> Option<Uuid> {
     Uuid::parse_str(workspace).ok()
 }
 
+/// What the operator said the App would belong to. The callback holds GitHub's answer to it:
+/// a state that leaked cannot be paired with a `code` for an App made under another account.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManifestIntent {
+    /// `User` or `Organization`, as GitHub names account types.
+    pub owner_type: String,
+    /// The organization login, when `owner_type` is `Organization`.
+    pub owner_login: Option<String>,
+}
+
+impl ManifestIntent {
+    pub fn from_owner(owner: &ManifestOwner) -> ManifestIntent {
+        match owner {
+            ManifestOwner::User => ManifestIntent {
+                owner_type: "User".to_string(),
+                owner_login: None,
+            },
+            ManifestOwner::Organization(org) => ManifestIntent {
+                owner_type: "Organization".to_string(),
+                owner_login: Some(org.clone()),
+            },
+        }
+    }
+
+    /// Does the account that GitHub says owns the new App match what the operator asked for?
+    /// Logins are case-insensitive on GitHub. A personal-account flow cannot name the login in
+    /// advance (it is whoever approves in their browser), so it pins the account *type* only.
+    pub fn matches(&self, owner_type: &str, owner_login: &str) -> bool {
+        self.owner_type == owner_type
+            && self
+                .owner_login
+                .as_deref()
+                .is_none_or(|expected| expected.eq_ignore_ascii_case(owner_login))
+    }
+}
+
+/// A spent manifest state: who minted it and what they asked for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsumedManifestClaim {
+    pub member_id: Uuid,
+    pub intent: ManifestIntent,
+}
+
 /// Record a manifest-flow state for `member` (the operator who pressed 「GitHub
 /// 앱 만들기」). Runs inside the operator's tenant transaction.
 pub async fn insert_manifest_claim(
@@ -283,14 +365,18 @@ pub async fn insert_manifest_claim(
     workspace_id: Uuid,
     member_id: Uuid,
     hash: &[u8],
+    intent: &ManifestIntent,
 ) -> Result<(), DbError> {
     sqlx::query(
-        "INSERT INTO github_link_claim (workspace_id, member_id, purpose, state_hash, expires_at) \
-         VALUES ($1, $2, 'app_manifest', $3, now() + make_interval(secs => $4))",
+        "INSERT INTO github_link_claim \
+           (workspace_id, member_id, purpose, state_hash, owner_type, owner_login, expires_at) \
+         VALUES ($1, $2, 'app_manifest', $3, $4, $5, now() + make_interval(secs => $6))",
     )
     .bind(workspace_id)
     .bind(member_id)
     .bind(hash)
+    .bind(&intent.owner_type)
+    .bind(intent.owner_login.as_deref())
     .bind(MANIFEST_STATE_TTL_SECONDS as f64)
     .execute(&mut *conn)
     .await?;
@@ -298,24 +384,32 @@ pub async fn insert_manifest_claim(
 }
 
 /// Spend a manifest-flow state: exactly one caller can win, and only before the
-/// state expires. Returns the member who minted it.
+/// state expires. Returns the member who minted it and what they asked for.
 pub async fn consume_manifest_claim(
     conn: &mut PgConnection,
     hash: &[u8],
-) -> Result<Option<Uuid>, DbError> {
-    let member: Option<Uuid> = sqlx::query_scalar(
+) -> Result<Option<ConsumedManifestClaim>, DbError> {
+    let row: Option<(Uuid, String, Option<String>)> = sqlx::query_as(
         "UPDATE github_link_claim \
             SET consumed_at = now() \
           WHERE state_hash = $1 \
             AND purpose = 'app_manifest' \
             AND consumed_at IS NULL \
             AND expires_at > now() \
-          RETURNING member_id",
+          RETURNING member_id, owner_type, owner_login",
     )
     .bind(hash)
     .fetch_optional(&mut *conn)
     .await?;
-    Ok(member)
+    Ok(row.map(
+        |(member_id, owner_type, owner_login)| ConsumedManifestClaim {
+            member_id,
+            intent: ManifestIntent {
+                owner_type,
+                owner_login,
+            },
+        },
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -487,7 +581,12 @@ mod tests {
 
     #[test]
     fn a_sealed_secret_round_trips_under_its_own_master_key() {
-        let sealed = seal_github_secret(&format!("  {PEM}\n"), "github-master").expect("seal");
+        let sealed = seal_github_secret(
+            &format!("  {PEM}\n"),
+            "github-master",
+            GithubSecretSlot::Pem,
+        )
+        .expect("seal");
         assert_eq!(sealed[0], SEALED_BOX_VERSION);
         assert_eq!(
             open_github_pem(&sealed, "github-master").expect("open"),
@@ -503,7 +602,12 @@ mod tests {
     /// string!) must not open a GitHub box, and the reverse.
     #[test]
     fn the_provider_link_domain_cannot_open_a_github_box_even_with_the_same_key_string() {
-        let sealed = seal_github_secret("whsec-marker-0001", "same-string").expect("seal");
+        let sealed = seal_github_secret(
+            "whsec-marker-0001",
+            "same-string",
+            GithubSecretSlot::WebhookSecret,
+        )
+        .expect("seal");
         assert_eq!(
             crate::crypto::open_bearer(&sealed, "same-string"),
             Err(CryptoError::MalformedCiphertext)
@@ -517,13 +621,15 @@ mod tests {
 
     #[test]
     fn another_master_key_and_a_flipped_byte_both_fail() {
-        let mut sealed = seal_github_secret("whsec-marker-0001", "one").expect("seal");
+        let mut sealed =
+            seal_github_secret("whsec-marker-0001", "one", GithubSecretSlot::WebhookSecret)
+                .expect("seal");
         assert!(open_github_webhook_secret(&sealed, "two").is_err());
         let last = sealed.len() - 1;
         sealed[last] ^= 1;
         assert!(open_github_webhook_secret(&sealed, "one").is_err());
         assert_eq!(
-            seal_github_secret("  ", "one"),
+            seal_github_secret("  ", "one", GithubSecretSlot::WebhookSecret),
             Err(CryptoError::EmptyPlaintext)
         );
     }
@@ -626,6 +732,61 @@ mod tests {
         assert!(!looks_like_pem_private_key(
             "-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----"
         ));
+    }
+
+    /// The slot is part of the AEAD, so the webhook opener cannot read the PEM column (and the
+    /// PEM opener cannot read a webhook secret) even under the right master key.
+    #[test]
+    fn a_pem_box_does_not_open_as_a_webhook_secret_and_the_reverse() {
+        let pem_box = seal_github_secret(PEM, "k", GithubSecretSlot::Pem).expect("seal");
+        let hook_box =
+            seal_github_secret("whsec-marker-0001", "k", GithubSecretSlot::WebhookSecret)
+                .expect("seal");
+        assert_eq!(
+            open_github_webhook_secret(&pem_box, "k"),
+            Err(CryptoError::MalformedCiphertext),
+            "the webhook opener must not be a back door to the PEM"
+        );
+        assert_eq!(
+            open_github_pem(&hook_box, "k"),
+            Err(CryptoError::MalformedCiphertext)
+        );
+        assert_eq!(open_github_pem(&pem_box, "k").expect("own slot"), PEM);
+        assert_eq!(
+            open_github_webhook_secret(&hook_box, "k").expect("own slot"),
+            "whsec-marker-0001"
+        );
+    }
+
+    #[test]
+    fn a_manifest_intent_pins_the_account_the_operator_asked_for() {
+        let org = ManifestIntent::from_owner(&ManifestOwner::Organization("Acme".into()));
+        assert!(
+            org.matches("Organization", "acme"),
+            "logins are case-insensitive"
+        );
+        assert!(!org.matches("Organization", "evil-corp"));
+        assert!(
+            !org.matches("User", "acme"),
+            "an org flow does not accept a personal App"
+        );
+        let user = ManifestIntent::from_owner(&ManifestOwner::User);
+        assert!(user.matches("User", "anyone"));
+        assert!(!user.matches("Organization", "acme"));
+    }
+
+    #[test]
+    fn the_manifest_description_does_not_deny_the_contents_permission_it_requests() {
+        let manifest = build_manifest("https://oort.example.com", "oort-test");
+        let description = manifest["description"].as_str().unwrap();
+        assert!(
+            description.contains("contents: read") && description.contains("push"),
+            "the consent screen must say why contents is requested: {description}"
+        );
+        assert!(
+            !description.contains("코드는 읽지 않아요"),
+            "the description must not claim no code access while asking for contents: read"
+        );
     }
 
     // -- acceptance 7: the grep guard ---------------------------------------

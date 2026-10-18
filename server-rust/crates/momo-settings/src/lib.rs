@@ -96,8 +96,9 @@ pub use github_app::{
     build_manifest, consume_manifest_claim, default_app_name, insert_github_app,
     insert_manifest_claim, is_valid_org_login, looks_like_pem_private_key,
     manifest_registration_url, new_state_token, read_github_app_status, seal_github_secret,
-    state_hash, state_workspace_hint, upsert_github_app, GithubAppStatus, ManifestOwner,
-    NewGithubApp, GITHUB_DEFAULT_EVENTS, GITHUB_DEFAULT_PERMISSIONS,
+    state_hash, state_workspace_hint, upsert_github_app, ConsumedManifestClaim, GithubAppStatus,
+    GithubSecretSlot, ManifestIntent, ManifestOwner, NewGithubApp, GITHUB_DEFAULT_EVENTS,
+    GITHUB_DEFAULT_PERMISSIONS,
 };
 pub use invite::{
     clamp_invite_list_limit, create_invite, list_invite_redemptions, list_invites,

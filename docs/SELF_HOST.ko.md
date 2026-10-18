@@ -652,8 +652,11 @@ secret을 DB에 봉인한다. 이 단계는 자격증명 저장·봉인까지이
 
 **전제**
 
-- api에 닿는 **공개 HTTPS 주소**(“공개 오리진으로 열기” 참고). GitHub는 공개
-  HTTPS 주소로만 웹훅을 보내므로 루프백·NAT 뒤 설치는 받을 수 없다.
+- api에 닿는 **공개 HTTPS 주소**(“공개 오리진으로 열기” 참고)를
+  **`MOMO_PUBLIC_BASE_URL=https://<호스트>`** 로 env에 정해야 한다. api가 이 변수로
+  GitHub에 콜백 주소를 알려 주고, 이 값이 없거나 절대 https가 아니면 「GitHub 앱
+  만들기」는 409 `public_address_required`로 답한다. GitHub는 공개 HTTPS
+  주소로만 웹훅을 보내므로 루프백·NAT 뒤 설치는 받을 수 없다.
   `scripts/oort doctor`가 「공개 주소가 없어 GitHub 알림을 받을 수 없어요」라고
   알려 준다(실패가 아니라 안내).
 - `GITHUB_APP_MASTER_KEY` — 봉인 전용 독립 키(도메인 `momo.github_app.key.v1`).

@@ -408,12 +408,14 @@ pass "④ PROVIDER_LINK_MASTER_KEY == 웹훅 마스터키 → fail(blocker), exi
 # ⑤~⑧ #3947 / ADR-0205 D1·D2 — env.github_app_master_key (정확히 1 레코드).
 TOKEN_GHAPP="$(openssl rand -hex 12)"
 github_env() {
-  # usage: github_env <dest> <key-value|-> [<public-origin>]
-  local dest="$1" val="$2" origin="${3:-}"
-  awk -v v="$val" -v o="$origin" '
-    index($0, "CENTRIFUGO_ALLOWED_ORIGINS=") == 1 && o != "" { print $0 " " o; next }
+  # usage: github_env <dest> <key-value|-> [<MOMO_PUBLIC_BASE_URL value>]
+  local dest="$1" val="$2" base="${3:-}"
+  awk -v v="$val" -v b="$base" '
     { print }
-    END { if (v != "-") print "GITHUB_APP_MASTER_KEY=" v }
+    END {
+      if (v != "-") print "GITHUB_APP_MASTER_KEY=" v
+      if (b != "") print "MOMO_PUBLIC_BASE_URL=" b
+    }
   ' "$VALID" >"$dest"
   chmod 600 "$dest"
 }
@@ -450,10 +452,15 @@ pass "⑤ GITHUB_APP_MASTER_KEY 없음 → minor info, 503 + 공개 주소 문�
 github_env "$SANDBOX/gh-nopublic.env" "$TOKEN_GHAPP"
 assert_github_case gh-nopublic "$SANDBOX/gh-nopublic.env" 0 info minor '공개 주소가 없어 GitHub 알림을 받을 수 없어요'
 pass "⑥ 키 있음 + 공개 HTTPS 없음 → minor info, 값 비유입"
-# ⑦ 키 있음 + 공개 HTTPS → pass.
+# ⑦ 키 있음 + 공개 HTTPS(MOMO_PUBLIC_BASE_URL, api 와 같은 규칙) → pass.
 github_env "$SANDBOX/gh-public.env" "$TOKEN_GHAPP" "https://chat.example.test"
-assert_github_case gh-public "$SANDBOX/gh-public.env" "*" pass minor '공개 HTTPS 주소 있음'
-pass "⑦ 키 있음 + 공개 HTTPS → pass"
+assert_github_case gh-public "$SANDBOX/gh-public.env" "*" pass minor '공개 HTTPS 주소(MOMO_PUBLIC_BASE_URL) 있음'
+# api 가 무시하는 값(http, 상대 경로)은 doctor 도 "공개 주소 없음"으로 본다 — 거짓 안심 금지.
+for bad in "http://chat.example.test" "chat.example.test" "https://"; do
+  github_env "$SANDBOX/gh-badbase.env" "$TOKEN_GHAPP" "$bad"
+  assert_github_case gh-badbase "$SANDBOX/gh-badbase.env" 0 info minor '공개 주소가 없어 GitHub 알림을 받을 수 없어요'
+done
+pass "⑦ 키 있음 + 공개 HTTPS(MOMO_PUBLIC_BASE_URL) → pass, http/비절대/호스트 없음은 공개 주소 없음"
 # ⑧ 다른 마스터키 재사용 → blocker fail, exit 2 (config.rs 재사용 거부와 동형).
 for reuse in "$TOKEN_JWT:JWT_HMAC" "$TOKEN_PLINK:PROVIDER_LINK_MASTER_KEY" "$TOKEN_WHIN:WEBHOOK_INGRESS_MASTER_KEY" "$TOKEN_WHOUT:OUTBOUND_WEBHOOK_MASTER_KEY"; do
   github_env "$SANDBOX/gh-reuse.env" "${reuse%%:*}"

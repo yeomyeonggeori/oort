@@ -588,15 +588,18 @@ oort_doctor_check_webhook_master_keys() {
 # origin still cannot receive GitHub deliveries (ADR-0205 D2) — said plainly,
 # as info. Values are never printed, only length classes.
 oort_doctor_github_public_https_origin() {
-  local tok
-  oort_doctor_has CENTRIFUGO_ALLOWED_ORIGINS || return 1
-  for tok in $(oort_doctor_get CENTRIFUGO_ALLOWED_ORIGINS); do
-    oort_doctor_origin_is_loopback_or_tauri "$tok" && continue
-    case "$tok" in
-      https://*) return 0 ;;
-    esac
-  done
-  return 1
+  # Same rule as the api (`T3Settings::ready_public_base_url`): MOMO_PUBLIC_BASE_URL must be an
+  # absolute https URL with a host. Anything else leaves the manifest flow at 409.
+  local url host
+  oort_doctor_has MOMO_PUBLIC_BASE_URL || return 1
+  url="$(oort_doctor_get MOMO_PUBLIC_BASE_URL)"
+  case "$url" in
+    https://?*) ;;
+    *) return 1 ;;
+  esac
+  host="${url#https://}"
+  host="${host%%/*}"
+  [ -n "$host" ]
 }
 
 oort_doctor_check_github_app_master_key() {
@@ -611,7 +614,7 @@ oort_doctor_check_github_app_master_key() {
     if [ "$public" -eq 0 ]; then
       oort_doctor_record env.github_app_master_key minor info \
         "GITHUB_APP_MASTER_KEY 없음 — GitHub 알림 표면 503. 공개 주소가 없어 GitHub 알림을 받을 수 없어요" \
-        "GitHub 알림이 필요하면 공개 HTTPS 주소를 먼저 붙이고(--public-origin), scripts/oort upgrade 로 키를 백필하라. 없어도 나머지 기능은 정상이다."
+        "GitHub 알림이 필요하면 공개 HTTPS 주소를 먼저 붙이고(--public-origin) MOMO_PUBLIC_BASE_URL=https://<호스트> 를 env 에 정한 뒤, scripts/oort upgrade 로 키를 백필하라. 없어도 나머지 기능은 정상이다."
     else
       oort_doctor_record env.github_app_master_key minor info \
         "GITHUB_APP_MASTER_KEY 없음 — GitHub 알림 표면 503 (나머지는 정상)" \
@@ -634,11 +637,11 @@ oort_doctor_check_github_app_master_key() {
   if [ "$public" -eq 0 ]; then
     oort_doctor_record env.github_app_master_key minor info \
       "GITHUB_APP_MASTER_KEY present ($(oort_doctor_length_class "$value")) — 공개 주소가 없어 GitHub 알림을 받을 수 없어요" \
-      "GitHub 는 공개 HTTPS 웹훅 주소로만 알림을 보낸다. 로컬·NAT 설치는 받을 수 없다(docs/SELF_HOST.md §GitHub 알림)."
+      "GitHub 는 공개 HTTPS 웹훅 주소로만 알림을 보낸다. 로컬·NAT 설치는 받을 수 없다. 공개 주소가 있다면 MOMO_PUBLIC_BASE_URL=https://<호스트> 를 env 에 정하고 api 를 재시작하라(docs/SELF_HOST.md §GitHub 알림)."
     return 0
   fi
   oort_doctor_record env.github_app_master_key minor pass \
-    "GITHUB_APP_MASTER_KEY present ($(oort_doctor_length_class "$value")), 공개 HTTPS 주소 있음" ""
+    "GITHUB_APP_MASTER_KEY present ($(oort_doctor_length_class "$value")), 공개 HTTPS 주소(MOMO_PUBLIC_BASE_URL) 있음" ""
 }
 
 oort_doctor_pair_password() {

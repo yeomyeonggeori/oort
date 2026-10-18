@@ -163,6 +163,11 @@ CREATE TABLE IF NOT EXISTS github_link_claim (
   state_hash      bytea NOT NULL,
   -- 'install' 의 setup URL 이 돌려준 값(위조될 수 있어 서명 이벤트와 만나야 확정). 'app_manifest' 는 NULL.
   installation_id bigint,
+  -- 'app_manifest' 의 의도: 운영자가 어느 계정 아래에 앱을 만들겠다고 했나. 콜백이 GitHub 의
+  -- 변환 응답(owner)과 맞대어 본다 — 새어 나간 state 에 남의 code 를 붙이는 길을 막는다.
+  -- 개인 계정 흐름은 로그인을 미리 알 수 없어 type 만 고정한다(owner_login NULL).
+  owner_type      text,
+  owner_login     text,
   expires_at      timestamptz NOT NULL,
   consumed_at     timestamptz,
   created_at      timestamptz NOT NULL DEFAULT now(),
@@ -170,6 +175,11 @@ CREATE TABLE IF NOT EXISTS github_link_claim (
   CONSTRAINT github_link_claim_hash_ck CHECK (octet_length(state_hash) = 32),
   CONSTRAINT github_link_claim_manifest_shape_ck
     CHECK (purpose <> 'app_manifest' OR installation_id IS NULL),
+  CONSTRAINT github_link_claim_owner_ck CHECK (
+    (purpose <> 'app_manifest' OR owner_type IN ('User', 'Organization'))
+    AND (owner_type IS NULL OR owner_type IN ('User', 'Organization'))
+    AND (owner_login IS NULL OR (owner_type = 'Organization' AND length(btrim(owner_login)) BETWEEN 1 AND 39))
+  ),
   CONSTRAINT github_link_claim_state_uq UNIQUE (state_hash)
 );
 

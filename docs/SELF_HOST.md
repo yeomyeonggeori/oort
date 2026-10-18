@@ -717,7 +717,10 @@ channel subscriptions arrive in follow-up slices.
 **Requirements**
 
 - A **public HTTPS address** that reaches the api (see "Open on a public
-  origin"). GitHub only delivers webhooks to a public HTTPS URL, so a
+  origin"), written as **`MOMO_PUBLIC_BASE_URL=https://<host>`** — the api reads
+  that variable to tell GitHub where to call back, and answers 409
+  `public_address_required` to "create the GitHub app" while it is unset or not
+  absolute https. GitHub only delivers webhooks to a public HTTPS URL, so a
   loopback / NAT-only install cannot receive them. `scripts/oort doctor`
   says so: 「공개 주소가 없어 GitHub 알림을 받을 수 없어요」 (info, not a failure).
 - `GITHUB_APP_MASTER_KEY` — a dedicated sealing key (domain

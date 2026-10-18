@@ -36,8 +36,8 @@ use momo_settings::{
     build_manifest, consume_manifest_claim, default_app_name, insert_github_app,
     insert_manifest_claim, is_valid_org_login, looks_like_pem_private_key,
     manifest_registration_url, new_state_token, read_github_app_status, seal_github_secret,
-    state_hash, state_workspace_hint, upsert_github_app, GithubAppStatus, ManifestOwner,
-    NewGithubApp, GITHUB_DEFAULT_EVENTS, GITHUB_DEFAULT_PERMISSIONS,
+    state_hash, state_workspace_hint, upsert_github_app, GithubAppStatus, GithubSecretSlot,
+    ManifestIntent, ManifestOwner, NewGithubApp, GITHUB_DEFAULT_EVENTS, GITHUB_DEFAULT_PERMISSIONS,
 };
 use serde::{Deserialize, Serialize};
 
@@ -245,6 +245,7 @@ pub async fn start_manifest(
     let token = new_state_token(workspace_id)
         .map_err(|error| ApiError::internal("github_app.state", error))?;
     let hash = state_hash(&token);
+    let intent = ManifestIntent::from_owner(&owner);
     let audit_owner = match &owner {
         ManifestOwner::User => serde_json::json!({ "owner_type": "user" }),
         ManifestOwner::Organization(org) => {
@@ -257,7 +258,7 @@ pub async fn start_manifest(
             if read_github_app_status(conn).await?.is_some() {
                 return Ok(false);
             }
-            insert_manifest_claim(conn, workspace_id, member_id, &hash).await?;
+            insert_manifest_claim(conn, workspace_id, member_id, &hash, &intent).await?;
             write_audit(
                 conn,
                 &AuditEntry::new(workspace_id, AUDIT_MANIFEST_STARTED)
@@ -351,18 +352,19 @@ pub async fn callback(
         "github_app.callback.state",
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
-                let Some(member_id) = consume_manifest_claim(conn, &hash).await? else {
+                let Some(claim) = consume_manifest_claim(conn, &hash).await? else {
                     return Ok(Ok(None));
                 };
+                let member_id = claim.member_id;
                 let role = momo_auth::active_workspace_role(conn, workspace_id, member_id).await?;
                 let email =
                     momo_auth::verified_operator_email(conn, workspace_id, member_id).await?;
-                Ok(Ok(Some((member_id, role, email))))
+                Ok(Ok(Some((claim.intent, member_id, role, email))))
             })
         })
         .await,
     );
-    let (member_id, role, email) = match spent {
+    let (intent, member_id, role, email) = match spent {
         Ok(Some(found)) => found,
         Ok(None) => return back_to_client(&base, "state_invalid"),
         Err(error) => return error.into_response(),
@@ -394,10 +396,38 @@ pub async fn callback(
         }
     };
 
+    // 2b. The App must belong to the account the operator asked for. A state that leaked cannot
+    //     be paired with a `code` for an App created under someone else's account: that App
+    //     (which exists at GitHub now) is refused here, and nothing about it is stored.
+    if !intent.matches(&converted.owner_type, &converted.owner_login) {
+        drop(converted);
+        let _ = with_github_app_admin_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                write_audit(
+                    conn,
+                    &AuditEntry::new(workspace_id, AUDIT_REGISTRATION_FAILED)
+                        .by(member_id)
+                        .with_schema(
+                            AUDIT_SCHEMA,
+                            serde_json::json!({ "reason": "owner_mismatch" }),
+                        ),
+                )
+                .await?;
+                Ok(())
+            })
+        })
+        .await;
+        return back_to_client(&base, "owner_mismatch");
+    }
+
     // 3. Seal, store, forget — in this function. The plaintext PEM and webhook secret are
     //    sealed on the next two statements and are not passed anywhere else.
-    let pem_sealed = seal_github_secret(converted.pem.expose(), &key);
-    let webhook_sealed = seal_github_secret(converted.webhook_secret.expose(), &key);
+    let pem_sealed = seal_github_secret(converted.pem.expose(), &key, GithubSecretSlot::Pem);
+    let webhook_sealed = seal_github_secret(
+        converted.webhook_secret.expose(),
+        &key,
+        GithubSecretSlot::WebhookSecret,
+    );
     let (Ok(pem_sealed), Ok(webhook_sealed)) = (pem_sealed, webhook_sealed) else {
         tracing::error!("github app secret could not be sealed");
         return back_to_client(&base, "seal_failed");
@@ -522,10 +552,14 @@ pub async fn paste(
     }
 
     // Seal before anything else touches them; the request body is dropped with this function.
-    let pem_sealed = seal_github_secret(&request.private_key, &key)
+    let pem_sealed = seal_github_secret(&request.private_key, &key, GithubSecretSlot::Pem)
         .map_err(|error| ApiError::internal("github_app.seal", error))?;
-    let webhook_sealed = seal_github_secret(&request.webhook_secret, &key)
-        .map_err(|error| ApiError::internal("github_app.seal", error))?;
+    let webhook_sealed = seal_github_secret(
+        &request.webhook_secret,
+        &key,
+        GithubSecretSlot::WebhookSecret,
+    )
+    .map_err(|error| ApiError::internal("github_app.seal", error))?;
     let slug = request.slug.trim().to_string();
     let client_id = request.client_id.trim().to_string();
     let owner_login = request.owner_login.trim().to_string();
