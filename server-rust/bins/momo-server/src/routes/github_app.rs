@@ -590,8 +590,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_status_response_names_the_permissions_it_asks_for() {
+    #[tokio::test]
+    async fn the_status_response_names_the_permissions_it_asks_for() {
         let state = crate::AppState::new(
             sqlx_lazy_pool(),
             "jwt".to_string(),
