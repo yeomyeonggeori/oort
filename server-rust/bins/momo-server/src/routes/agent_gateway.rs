@@ -75,6 +75,7 @@ use crate::dto::{
     PendingJobsQuery,
 };
 use crate::error::ApiError;
+use crate::routes::apps_used::{validated_apps_used, write_tool_used_audit, AppsUsed};
 use crate::routes::shared::{
     agent_tenant_tx, emit_rail_frame, emit_terminal_agent_status, epoch_ms, path_uuid, settle_db,
 };
@@ -522,6 +523,14 @@ pub async fn complete(
     let via_token_id = principal.as_ref().and_then(|p| p.token_id);
     let actor_member_id = principal.as_ref().map(|p| p.member_id);
     let usage_detail = request.usage.as_ref().map(usage_detail_json);
+    // E8 — the Hermes door reports 「쓴 앱」 too. Unlike the Agent Port, whose
+    // refusal names a field the agent can fix, this door has no way to say what
+    // was wrong, and the report is telemetry riding on the run's final answer:
+    // a malformed one is dropped (nothing stored, nothing audited) rather than
+    // costing the answer. The Port refuses; this door forgets.
+    let apps_used = validated_apps_used(request.apps_used.as_ref())
+        .ok()
+        .flatten();
     let input = GatewayCompleteInput {
         run_id,
         lease: lease_binding(request.job_id, request.lease_id),
@@ -531,6 +540,7 @@ pub async fn complete(
         usage,
         usage_detail,
         artifacts: None,
+        apps_used,
         actor_member_id,
         via_token_id,
         subscription_agents_enabled: state.agent_port.config.subscription_agents_enabled,
@@ -582,6 +592,10 @@ pub(crate) struct GatewayCompleteInput {
     /// ADR-0162 증보 3 D12 — already validated ([`validated_gateway_artifacts`]);
     /// the REST callback is not extended (`None`).
     pub artifacts: Option<GatewayArtifacts>,
+    /// ADR-0113 증보 2 E8 (#3946) — the execution site's 「쓴 앱」 report, already
+    /// validated ([`crate::routes::apps_used::validated_apps_used`]). Stored in
+    /// `output.appsUsed` and audited as one `connector.tool_used` row.
+    pub apps_used: Option<AppsUsed>,
     pub actor_member_id: Option<Uuid>,
     pub via_token_id: Option<Uuid>,
     /// ADR-0193 D6 (#2815) — `AgentPortConfig::subscription_agents_enabled`,
@@ -616,6 +630,7 @@ pub(crate) async fn complete_gateway_run_in_tx(
         usage,
         usage_detail,
         artifacts,
+        apps_used,
         actor_member_id,
         via_token_id,
         subscription_agents_enabled,
@@ -805,6 +820,9 @@ pub(crate) async fn complete_gateway_run_in_tx(
     if let Some(artifacts) = artifacts.as_ref() {
         output.insert("artifacts".into(), artifacts.to_json());
     }
+    if let Some(apps_used) = apps_used.as_ref() {
+        output.insert("appsUsed".into(), apps_used.to_json());
+    }
     let output = Value::Object(output);
     let error_json = (!succeeded).then(|| {
         json!({
@@ -874,6 +892,20 @@ pub(crate) async fn complete_gateway_run_in_tx(
                         "keys": artifacts.keys(),
                     }),
                 ),
+        )
+        .await?;
+    }
+
+    // ADR-0113 증보 2 E8 — one row per completion that carried a 「쓴 앱」 report:
+    // app ids, tool names and counts under the closed key set, never a value.
+    if let Some(apps_used) = apps_used.as_ref() {
+        write_tool_used_audit(
+            conn,
+            workspace_id,
+            run_id,
+            run.agent_member_id,
+            via_token_id,
+            apps_used,
         )
         .await?;
     }

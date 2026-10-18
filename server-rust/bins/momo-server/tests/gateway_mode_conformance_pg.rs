@@ -720,3 +720,132 @@ async fn s4017_4_an_empty_success_writes_no_message_but_settles_the_run() {
     let replay: Value = replay.json().await.expect("body");
     assert!(replay["messageId"].is_null(), "{replay}");
 }
+
+/// ADR-0113 증보 2 E8 (#3946) — the Hermes door reports 「쓴 앱」 too. A valid
+/// report is stored under `output.appsUsed` with exactly one `connector.tool_used`
+/// row; a malformed one is dropped without costing the answer (the run still
+/// settles, nothing stored, nothing audited, no refused byte anywhere); a replay
+/// does not double the line.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn s3946_the_rest_gateway_reports_apps_used_once_and_drops_a_malformed_report() {
+    const MARKER: &str = "MARK3946RESTBYTES";
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let agent = seed_channel_agent(&su, &tenant, "hermes").await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, tenant.workspace, &tenant.email).await;
+
+    // One claimed run per case: (run id, the claimed job).
+    let claimed_run = || async {
+        let created: Value = create_work_run(&http, &base, &token, &tenant, agent, Uuid::new_v4())
+            .await
+            .json()
+            .await
+            .expect("run body");
+        let run_id = created["id"].as_str().expect("run id").to_string();
+        let pending: Value = gateway(http.get(format!(
+            "{base}/v1/workspaces/{}/agents/{agent}/gateway/jobs/pending",
+            tenant.workspace
+        )))
+        .send()
+        .await
+        .expect("claim")
+        .json()
+        .await
+        .expect("pending body");
+        (run_id, pending["jobs"][0].clone())
+    };
+    let complete = |run_id: &str, job: &Value, extra: Value| {
+        let mut body = json!({
+            "job_id": job["id"], "lease_id": job["leaseId"],
+            "status": "succeeded", "body": "done",
+        });
+        body.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        gateway(http.post(format!(
+            "{base}/v1/workspaces/{}/agent-runs/{run_id}/gateway/complete",
+            tenant.workspace
+        )))
+        .json(&body)
+        .send()
+    };
+    let audits = |run: Uuid| {
+        let su = &su;
+        async move {
+            sqlx::query_scalar::<_, Value>(
+                "SELECT detail FROM audit_log WHERE action='connector.tool_used' AND run_id=$1",
+            )
+            .bind(run)
+            .fetch_all(su)
+            .await
+            .expect("audits")
+        }
+    };
+    let output_of = |run: Uuid| {
+        let su = &su;
+        async move {
+            sqlx::query_scalar::<_, Value>("SELECT output FROM agent_run WHERE id = $1")
+                .bind(run)
+                .fetch_one(su)
+                .await
+                .expect("output")
+        }
+    };
+
+    // 1. A valid report: stored, one audit line, a replay adds none.
+    let (run_id, job) = claimed_run().await;
+    let run = Uuid::parse_str(&run_id).expect("uuid");
+    let report = json!([{"pluginId": "github", "tool": "list_pull_requests", "calls": 2}]);
+    let done = complete(&run_id, &job, json!({"appsUsed": report}))
+        .await
+        .expect("done");
+    assert_eq!(done.status(), 200);
+    assert_eq!(output_of(run).await["appsUsed"], report);
+    let rows = audits(run).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["apps"], report);
+    assert_eq!(rows[0]["source"], json!("agent_reported"));
+    let replay = complete(&run_id, &job, json!({"appsUsed": report}))
+        .await
+        .expect("replay");
+    assert_eq!(replay.status(), 200);
+    assert_eq!(audits(run).await.len(), 1);
+
+    // 2. A malformed report (a marker as the tool name) is forgotten, not fatal.
+    let (bad_run_id, bad_job) = claimed_run().await;
+    let bad_run = Uuid::parse_str(&bad_run_id).expect("uuid");
+    let forgotten = complete(
+        &bad_run_id,
+        &bad_job,
+        json!({"appsUsed": [
+            {"pluginId": "google-calendar", "tool": format!("{MARKER} x"), "calls": 1}
+        ]}),
+    )
+    .await
+    .expect("forgotten");
+    assert_eq!(forgotten.status(), 200, "the answer is not lost");
+    let status: String = sqlx::query_scalar("SELECT status::text FROM agent_run WHERE id = $1")
+        .bind(bad_run)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(status, "succeeded");
+    assert!(output_of(bad_run).await.get("appsUsed").is_none());
+    assert!(audits(bad_run).await.is_empty());
+    let marker_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE workspace_id = $2 \
+            AND detail::text LIKE '%' || $1 || '%'",
+    )
+    .bind(MARKER)
+    .bind(tenant.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(marker_rows, 0, "no refused byte reached the audit log");
+}
