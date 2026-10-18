@@ -482,6 +482,23 @@ const STATIC_COMMANDS: readonly StaticCommand[] = [
     run: runAiConnect,
   },
   {
+    // 에이전트가 제안하는 「설정 열기」 카드의 명령 id (#3939 E-S6, ADR-0201 v2 H6-4).
+    // 와이어 이름·section enum의 주인은 서버(`momo_agent::card_suggest`)이고, 카드 렌더와
+    // 팔레트·슬래시 진입점은 #3940(U-S6)이 얹는다. 지금은 허용목록과 같은 집합을
+    // 지키기 위한 등록뿐이라 `available`이 거짓이다 — 팔레트에 줄이 서지 않는다.
+    // 열면 설정 첫 화면으로 간다(섹션 인자를 읽는 쪽은 U-S6).
+    id: "settings.open",
+    title: "설정 열기",
+    group: "settings",
+    kind: "client",
+    keywords: ["설정", "settings"],
+    icon: "settings",
+    testId: "switcher-settings-open",
+    agentSuggestable: true,
+    available: () => false,
+    run: navigateTo("/settings", "설정"),
+  },
+  {
     // 표면 이름은 판정표에서 든다. 진입점과 도착지가 각자 적으면 갈라진다.
     id: "nav.workConsole",
     title: serverSurface("workConsole").label,

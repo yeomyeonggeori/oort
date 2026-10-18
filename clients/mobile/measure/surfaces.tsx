@@ -1419,6 +1419,25 @@ function aiSuggestMessage(): Message {
   } as Message;
 }
 
+function settingsOpenMessage(section: string, label = '알림 설정 열기'): Message {
+  return {
+    ...MESSAGE,
+    id: '00000000-0000-7000-8000-0000000000c8',
+    authorMemberId: AGENT,
+    thread: undefined,
+    body: '알림은 설정에서 바꿀 수 있어요. 아래 카드로 열어 보세요.',
+    props: {
+      'momo.command_suggest': {
+        v: 1,
+        command_id: 'settings.open',
+        args: {section},
+        for_member_id: SELF,
+        label,
+      },
+    },
+  } as Message;
+}
+
 function aiSuggestActions(me: string) {
   return {
     myMemberId: me,
@@ -3199,6 +3218,40 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         <Frame label="에이전트 제안 연결 카드 — 대상 본인 · 운영자 (#2948 GC-7)">
           <MessageRow
             message={aiSuggestMessage()}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+            actions={aiSuggestActions(SELF)}
+          />
+        </Frame>
+      );
+    case 'settings-open-suggest':
+      return (
+        <Frame label="에이전트 제안 설정 열기 카드 — 대상 본인 (U-S6 #3940)">
+          <MessageRow
+            message={settingsOpenMessage('notifications')}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+            actions={aiSuggestActions(SELF)}
+          />
+        </Frame>
+      );
+    case 'settings-open-suggest-others':
+      return (
+        <Frame label="같은 제안 — 그 밖의 멤버(위) · 모르는 section(아래) (U-S6 #3940)">
+          <MessageRow
+            message={settingsOpenMessage('notifications')}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+            actions={aiSuggestActions(OTHER)}
+          />
+          <MessageRow
+            message={settingsOpenMessage('no-such-section')}
             startsGroup
             directory={DIRECTORY}
             chips={[]}
