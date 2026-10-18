@@ -322,7 +322,42 @@ fn run_complete_schema() -> Value {
             })),
             "artifacts": nullable(artifacts_schema()),
             // ADR-0113 증보 2 E8 (#3946) — which connector apps this run used.
-            "appsUsed": nullable(apps_used_schema())
+            "appsUsed": nullable(apps_used_schema()),
+            // #4054 — why an app blocked this run, in the site's own words-as-codes.
+            "appNotice": nullable(app_notice_schema())
+        }
+    })
+}
+
+/// The kinds an execution site may report in `appNotice` (#4054). `site_off` and
+/// `site_silent` are the server's own observations and are not offered.
+pub const APP_NOTICE_REPORTABLE_KINDS: [&str; 5] = [
+    "login_lost",
+    "grant_revoked",
+    "rate_limited",
+    "egress_blocked",
+    "not_allowed",
+];
+/// The only keys `appNotice` has. There is no `site` (the server knows the door)
+/// and no free-text key.
+pub const APP_NOTICE_KEYS: [&str; 3] = ["kind", "pluginId", "host"];
+
+/// #4054 — `appNotice`: a closed code, an optional app id and, for
+/// `egress_blocked` only, a bare host name.
+fn app_notice_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind"],
+        "properties": {
+            "kind": {"type": "string", "enum": APP_NOTICE_REPORTABLE_KINDS},
+            "pluginId": nullable(json!({
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128,
+                "description": BYTE_BOUND_NOTE
+            })),
+            "host": nullable(required_text(253))
         }
     })
 }
@@ -918,7 +953,10 @@ pub const TOOL_CATALOG: [ToolDescriptor; 13] = [
                       inside your own machine. appsUsed [{pluginId, tool, calls}] lists the connector apps \
                       you used, as ids, tool names and call counts only (at most 16, one \
                       per app and tool); never put arguments, results or credentials in it. \
-                      People see these as your own report. If the \
+                      People see these as your own report. If an app \
+                      blocked you, appNotice {kind, pluginId, host} says why with one code: \
+                      login_lost, grant_revoked, rate_limited, egress_blocked or not_allowed \
+                      (host only with egress_blocked, a bare host name); no sentence, no URL. If the \
                       call is refused with -32602 and error.data names an artifacts field, \
                       fix only that field and call again with the same leaseHandle, at most \
                       2 times; if it is still refused, complete without artifacts and write \
@@ -2639,6 +2677,58 @@ mod tests {
             json!([{"pluginId": "gmail", "tool": "t".repeat(65), "calls": 1}]),
             Value::Array(vec![entry.clone(); MAX_APPS_USED_ENTRIES as usize + 1]),
             json!("gmail"),
+        ] {
+            assert_eq!(
+                validate_arguments(complete, &args(bad.clone())),
+                Err(ToolFailure::InvalidArguments),
+                "{bad}"
+            );
+        }
+    }
+
+    /// #4054 — `appNotice` is published closed: three keys, the five reportable
+    /// kinds, no `site` and no free-text key to ride on.
+    #[test]
+    fn app_notice_is_published_closed_and_without_a_site() {
+        let complete = TOOL_CATALOG
+            .iter()
+            .find(|tool| tool.name == TOOL_RUN_COMPLETE)
+            .expect("oort_run_complete");
+        let schema = complete.input_schema();
+        let notice = &schema["properties"]["appNotice"];
+        assert_eq!(notice["additionalProperties"], json!(false));
+        let mut declared: Vec<&str> = notice["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        declared.sort_unstable();
+        let mut expected = APP_NOTICE_KEYS.to_vec();
+        expected.sort_unstable();
+        assert_eq!(declared, expected);
+        assert!(notice["properties"].get("site").is_none());
+        assert_eq!(
+            notice["properties"]["kind"]["enum"],
+            json!(APP_NOTICE_REPORTABLE_KINDS)
+        );
+
+        let args =
+            |notice: Value| json!({"leaseHandle": "x", "status": "failed", "appNotice": notice});
+        assert_eq!(
+            validate_arguments(
+                complete,
+                &args(json!({"kind": "login_lost", "pluginId": "gmail"}))
+            ),
+            Ok(())
+        );
+        assert_eq!(validate_arguments(complete, &args(Value::Null)), Ok(()));
+        for bad in [
+            json!({"kind": "site_off"}),
+            json!({"kind": "login_lost", "site": "mac"}),
+            json!({"kind": "login_lost", "sentence": "x"}),
+            json!({}),
+            json!("login_lost"),
         ] {
             assert_eq!(
                 validate_arguments(complete, &args(bad.clone())),

@@ -45,8 +45,8 @@ use axum::http::StatusCode;
 use axum::Json;
 use momo_agent::{
     completion_status, finish_run_in_tx, is_active_agent_in_tx, lock_gateway_run_in_tx,
-    mark_run_started_in_tx, record_run_usage_in_tx, CompletionStatusError, GatewayRunSnapshot,
-    RunUsageReport,
+    mark_run_started_in_tx, record_run_usage_in_tx, AppNotice, AppNoticeSite,
+    CompletionStatusError, GatewayRunSnapshot, RunUsageReport, PROP_APPS_USED, PROP_APP_NOTICE,
 };
 use momo_auth::Principal;
 use momo_db::audit::{run_event_recorded, write_audit, AuditEntry};
@@ -75,6 +75,7 @@ use crate::dto::{
     PendingJobsQuery,
 };
 use crate::error::ApiError;
+use crate::routes::app_notice::validated_app_notice;
 use crate::routes::apps_used::{validated_apps_used, write_tool_used_audit, AppsUsed};
 use crate::routes::shared::{
     agent_tenant_tx, emit_rail_frame, emit_terminal_agent_status, epoch_ms, path_uuid, settle_db,
@@ -531,6 +532,11 @@ pub async fn complete(
     let apps_used = validated_apps_used(request.apps_used.as_ref())
         .ok()
         .flatten();
+    // #4054 — the site's own 「막힘」 report, same asymmetry: this door forgets a
+    // malformed one. `site` is ours: this door is Hermes' and nobody else's.
+    let app_notice = validated_app_notice(request.app_notice.as_ref(), Some(AppNoticeSite::Hermes))
+        .ok()
+        .flatten();
     let input = GatewayCompleteInput {
         run_id,
         lease: lease_binding(request.job_id, request.lease_id),
@@ -541,6 +547,7 @@ pub async fn complete(
         usage_detail,
         artifacts: None,
         apps_used,
+        app_notice,
         actor_member_id,
         via_token_id,
         subscription_agents_enabled: state.agent_port.config.subscription_agents_enabled,
@@ -596,6 +603,9 @@ pub(crate) struct GatewayCompleteInput {
     /// validated ([`crate::routes::apps_used::validated_apps_used`]). Stored in
     /// `output.appsUsed` and audited as one `connector.tool_used` row.
     pub apps_used: Option<AppsUsed>,
+    /// #4054 — the site's validated 「막힘」 report with the server-authored
+    /// `site`; written to `message.props.app_notice` and nowhere else.
+    pub app_notice: Option<AppNotice>,
     pub actor_member_id: Option<Uuid>,
     pub via_token_id: Option<Uuid>,
     /// ADR-0193 D6 (#2815) — `AgentPortConfig::subscription_agents_enabled`,
@@ -631,6 +641,7 @@ pub(crate) async fn complete_gateway_run_in_tx(
         usage_detail,
         artifacts,
         apps_used,
+        app_notice,
         actor_member_id,
         via_token_id,
         subscription_agents_enabled,
@@ -734,6 +745,8 @@ pub(crate) async fn complete_gateway_run_in_tx(
                         succeeded,
                         usage_detail.clone(),
                         safe_error.as_deref(),
+                        apps_used.as_ref(),
+                        app_notice.as_ref(),
                     ),
                     root_id: None,
                     // ADR-0148 규칙 6 — the same answer the worker gives,
@@ -1904,8 +1917,10 @@ fn timeline_props(
     succeeded: bool,
     usage: Option<Value>,
     error: Option<&str>,
+    apps_used: Option<&AppsUsed>,
+    app_notice: Option<&AppNotice>,
 ) -> Value {
-    json!({
+    let mut props = json!({
         "schema": "momo.agent_gateway.timeline.v0",
         "source": "hermes_gateway",
         "status": if succeeded { "succeeded" } else { "failed" },
@@ -1913,7 +1928,20 @@ fn timeline_props(
         "agent_member_id": run.agent_member_id.to_string(),
         "usage": usage,
         "error": error,
-    })
+    });
+    // #4054 — both keys are server-owned (`momo_agent::SERVER_OWNED_APP_PROPS_KEYS`):
+    // written here from the validated reports, absent when nothing was reported.
+    // The answer carries the receipt so a row need not fetch the run to learn
+    // whether apps were used; "no report" stays "no key", never an empty list.
+    if let Some(object) = props.as_object_mut() {
+        if let Some(apps_used) = apps_used {
+            object.insert(PROP_APPS_USED.into(), apps_used.to_json());
+        }
+        if let Some(app_notice) = app_notice {
+            object.insert(PROP_APP_NOTICE.into(), app_notice.to_json());
+        }
+    }
+    props
 }
 
 /// Redact credential-shaped content out of gateway-reported error text — Swift

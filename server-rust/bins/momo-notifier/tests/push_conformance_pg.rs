@@ -3730,6 +3730,100 @@ async fn an_expired_approval_and_a_stalled_run_reach_the_person_who_asked_throug
     }
 }
 
+/// ADR-0113 증보 2 E8 (#4054): the stall sweep's line says `site_silent` — the SERVER's
+/// observation of a lease nobody renewed — and only for an agent that has apps attached.
+/// An agent without apps keeps the line it always had. Run through the REAL sweep.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn the_stall_sweeps_line_says_site_silent_only_for_an_agent_with_apps() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let room = seed_approval_room(&su).await;
+    let pool = momo_notifier_pool().await;
+    let asker = room.id(ASKER);
+
+    let plain = seed_hosted_sentinel(&su, &room).await;
+    let with_apps = seed_hosted_sentinel(&su, &room).await;
+    sqlx::query("UPDATE agent SET connector_owner_human_id = owner_human_id WHERE member_id = $1")
+        .bind(with_apps)
+        .execute(&su)
+        .await
+        .expect("attach apps to one agent");
+
+    let mut runs = Vec::new();
+    for agent in [plain, with_apps] {
+        let question = human_says(&su, &room, room.channel_id, asker).await;
+        let run = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO agent_run \
+               (id, workspace_id, agent_member_id, channel_id, trigger_message_id, status, input, \
+                idempotency_key, started_at, updated_at) \
+             VALUES ($1, $2, $3, $4, $5, 'running', $6, $7, now() - interval '5 hours', \
+                     now() - interval '4 hours')",
+        )
+        .bind(run)
+        .bind(room.workspace_id)
+        .bind(agent)
+        .bind(room.channel_id)
+        .bind(question)
+        .bind(json!({"type": "chat"}))
+        .bind(format!("answer:{run}"))
+        .execute(&su)
+        .await
+        .expect("insert a stalled hosted run");
+        runs.push(run);
+    }
+    sqlx::query(
+        "UPDATE channel_seq SET last_seq = COALESCE((SELECT max(seq) FROM message WHERE channel_id = $1), 0) \
+          WHERE channel_id = $1",
+    )
+    .bind(room.channel_id)
+    .execute(&su)
+    .await
+    .expect("channel_seq catch-up");
+
+    for _ in 0..50 {
+        let pass = momo_notifier::run_stall_sweep::sweep_stalled_runs(
+            &pool,
+            momo_outbox::StallPolicy::default(),
+            32,
+        )
+        .await
+        .expect("run stall sweep");
+        if pass.lease_abandoned == 0 && pass.unclaimed_expired == 0 {
+            break;
+        }
+    }
+
+    let notice_of = |run: Uuid| {
+        let su = &su;
+        let workspace = room.workspace_id;
+        async move {
+            sqlx::query_scalar::<_, Value>(
+                "SELECT props FROM message WHERE workspace_id = $1 AND run_id = $2 \
+                    AND props->>'kind' = 'agent_run_timed_out'",
+            )
+            .bind(workspace)
+            .bind(run)
+            .fetch_one(su)
+            .await
+            .expect("the sweep wrote the stall notice")
+        }
+    };
+    let plain_props = notice_of(runs[0]).await;
+    assert!(
+        plain_props.get("app_notice").is_none(),
+        "an agent without apps keeps its line: {plain_props}"
+    );
+    let app_props = notice_of(runs[1]).await;
+    assert_eq!(
+        app_props["app_notice"],
+        json!({"kind": "site_silent"}),
+        "the server's own observation, no `site`: {app_props}"
+    );
+}
+
 /// A DM already pushes every message to the other person, as `dm`, with no reading
 /// window. An agent's answer in a DM is such a message and keeps all of that: the
 /// answer arm is for everywhere else. (Putting it above `dm` would turn DM answers into
