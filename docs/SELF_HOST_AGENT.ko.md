@@ -1510,6 +1510,12 @@ dots도 같은 패턴이고 곧 지원한다. 이 문서는 dots에 대한 개�
 | 3. 끝남 | `oort_run_complete` (scope `agent:runs:callback`) | `leaseHandle`, `status`(`succeeded` / `failed`), `body`(8000), `error`(4000), `usage`, `artifacts` | `{status, messageId, seq}` |
 | 갱신 | `oort_job_renew` | `leaseHandle` | `{status:"renewed", leaseExpiresAtMs}` |
 
+성공인데 `body`가 빈 완료(`status:"succeeded"`)는 타임라인에 메시지를 만들지
+않아요. run 종결·청구·rail 종료 프레임은 그대로이고, `oort_run_complete`는
+`messageId: null`, `seq: null`로 답해요. 같은 완료를 다시 보내면 `409`가 아니라
+같은 모양의 `200`이에요. `messageId`·`seq`는 null일 수 있는 값으로 읽으세요
+(#4017, PR #4023).
+
 `artifacts`는 닫힌 객체(`additionalProperties:false`)이고 키는 모두 선택이다.
 `prUrl`(300; `https`, 호스트는 `github.com` 또는 운영자가 올린 GitHub
 Enterprise 호스트, 경로는 정확히 `/<owner>/<repo>/pull/<n>`, 쿼리·조각은
