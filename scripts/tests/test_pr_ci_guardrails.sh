@@ -496,7 +496,11 @@ for anchor in \
   'packages/momo-core/src/lib/http.ts' \
   'docs/api/human-control-signing.vectors.json' \
   'docs/SELF_HOST_AGENT.md' \
-  'infra/rust/sql/'; do
+  'infra/rust/sql/' \
+  'infra/centrifugo.json' \
+  'server/Fixtures/plugin-wire/' \
+  'packages/momo-core/src/features/timeline/' \
+  'clients/web/src/features/settings/settingsNav.ts'; do
   grep -Fxq "$anchor" <<<"$RUST_INPUTS" \
     || fail "rust input scanner no longer reports $anchor"
 done
@@ -522,7 +526,13 @@ for pinned in \
   server/Migrations/080_hosted_agent_doorbell.sql \
   server/Fixtures/plugin-manifests/drive.json \
   packages/momo-core/src/lib/http.ts \
-  clients/web/src/lib/session.ts; do
+  clients/web/src/lib/session.ts \
+  clients/web/src/features/settings/settingsNav.ts \
+  packages/momo-core/src/features/ai/aiHubModel.ts \
+  packages/momo-core/src/features/timeline/completionReport.ts \
+  server/Fixtures/plugin-wire/mutation-new.json \
+  infra/prod/centrifugo.prod.json \
+  infra/rust/sql/new.sql; do
   assert_filter_fixture "pinned-$(printf '%s' "$pinned" | tr -c 'A-Za-z0-9\n' '_')" \
     '{"changed_files":1}' \
     "[[{\"filename\":\"$pinned\",\"status\":\"modified\"}]]" \
@@ -534,7 +544,13 @@ for neighbour in \
   docs/api/notes.md \
   packages/momo-core/src/lib/api.ts \
   clients/web/src/lib/other.ts \
-  scripts/desktop/other.sh; do
+  scripts/desktop/other.sh \
+  server/other.txt \
+  infra/other.yml \
+  infra/rust/docker-compose.rust.yml \
+  clients/mobile/src/x.ts \
+  clients/web/src/features/settings/other.ts \
+  packages/momo-core/src/lib/http.ts.bak; do
   assert_filter_fixture "neighbour-$(printf '%s' "$neighbour" | tr -c 'A-Za-z0-9\n' '_')" \
     '{"changed_files":1}' \
     "[[{\"filename\":\"$neighbour\",\"status\":\"modified\"}]]" \
