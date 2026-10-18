@@ -78,6 +78,7 @@ export function ConversationHeader({
   kind,
   peerId,
   peerStatusTone = null,
+  peerStatusLabel,
   directory,
   onBack,
   menu,
@@ -92,6 +93,8 @@ export function ConversationHeader({
   peerId?: string | null;
   /** DM 상대의 상태 점 톤(#4016). 없으면 점이 없다. 판정은 호출자가 core 로 한다. */
   peerStatusTone?: StatusDotTone | null;
+  /** 점의 낱말(「꺼짐」 등). 점은 낭독에서 숨으므로 제목 라벨이 이 낱말을 대신 읽는다(홈 DM 줄과 같은 규칙). */
+  peerStatusLabel?: string;
   directory: Directory;
   onBack: () => void;
   /** ⋮ 메뉴 항목. 비면 ⋮ 원을 세우지 않는다. */
@@ -156,6 +159,9 @@ export function ConversationHeader({
               ) : null}
               <Text
                 accessibilityRole="header"
+                accessibilityLabel={
+                  peerStatusTone !== null && peerStatusLabel ? `${title}, ${peerStatusLabel}` : undefined
+                }
                 style={styles.title}
                 numberOfLines={1}
                 ellipsizeMode="tail"

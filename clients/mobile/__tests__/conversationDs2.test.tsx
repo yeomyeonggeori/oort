@@ -96,7 +96,10 @@ describe('머리 — 원형 뒤로 · ⋮ 메뉴 · 허들 자리 · 연결 띠'
       kind: 'dm',
       peerId: AGENT,
       peerStatusTone: 'ok',
+      peerStatusLabel: '응답함',
     });
+    // 점은 낭독에서 숨으므로 제목이 상태 낱말을 대신 읽는다.
+    expect(screen.getByTestId('conversation-title').props.accessibilityLabel).toBe('김인턴, 응답함');
     expect(screen.getByTestId('conversation-title-face')).toBeTruthy();
     expect(screen.getByTestId('avatar-agent', {includeHiddenElements: true})).toBeTruthy();
     expect(screen.getByTestId('conversation-title-status-dot', {includeHiddenElements: true})).toBeTruthy();

@@ -1672,6 +1672,7 @@ export default function ConversationScreen({
         kind={channel?.kind}
         peerId={peer?.id ?? null}
         peerStatusTone={peerStatus?.tone ?? null}
+        peerStatusLabel={peerStatus?.label}
         directory={directory}
         onBack={onBack}
         menu={headerMenu}
