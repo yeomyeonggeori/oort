@@ -1558,6 +1558,58 @@ async fn an_inactive_hosted_agent_fails_closed_and_never_falls_back_to_managed()
     );
     assert_notice_broadcast(&su, fixture.workspace, &notices[0]).await;
 
+    // #4054 — an agent WITHOUT apps keeps its line exactly as it was: the apps surface
+    // key is not stamped on it.
+    assert!(
+        notices[0]["props"].get("app_notice").is_none(),
+        "no apps attached, no app_notice: {}",
+        notices[0]["props"]
+    );
+    // …and the same silence, once the agent has apps attached (new thread, so the
+    // 10-minute throttle does not hold the line back), is the SERVER saying the site
+    // is off — with no `site`, because a hosted connection is not known to be a Mac
+    // or Hermes.
+    sqlx::query("UPDATE agent SET connector_owner_human_id = owner_human_id WHERE member_id=$1")
+        .bind(fixture.hosted_agent)
+        .execute(&su)
+        .await
+        .unwrap();
+    let second: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "rootId": sent["id"],
+            "body": format!("@{handle} hello again"),
+        }))
+        .send()
+        .await
+        .expect("second mention send")
+        .json()
+        .await
+        .expect("second mention body");
+    assert!(second["id"].is_string(), "{second}");
+    let with_apps: Vec<Value> = sqlx::query_scalar(
+        "SELECT props FROM message WHERE workspace_id=$1 \
+            AND props->>'kind'='agent_hosted_skip' \
+            AND props->>'reason'='hosted_connection_unavailable' \
+            AND props ? 'app_notice'",
+    )
+    .bind(fixture.workspace)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(with_apps.len(), 1, "one line says site_off: {with_apps:?}");
+    assert_eq!(with_apps[0]["app_notice"], json!({"kind": "site_off"}));
+    sqlx::query("UPDATE agent SET connector_owner_human_id = NULL WHERE member_id=$1")
+        .bind(fixture.hosted_agent)
+        .execute(&su)
+        .await
+        .unwrap();
+
     // The managed agent in the SAME workspace and channel is unaffected.
     let managed_handle = hosted_handle(&su, fixture.managed_agent).await;
     client
@@ -6955,18 +7007,67 @@ async fn apps_used_is_self_reported_audited_once_and_carries_no_body_or_secret_3
     .unwrap();
     assert_eq!(marker_rows, 0, "no refused byte reached the audit log");
 
+    // 1b. #4054 — a malformed `appNotice` refuses the whole completion the same way
+    //     (the Port refuses; the REST door forgets). A `site` is not a key: the
+    //     server alone says where the work ran.
+    for bad in [
+        json!({"kind": "login_lost", "site": "mac"}),
+        json!({"kind": "site_off"}),
+        json!({"kind": "login_lost", "sentence": MARKER}),
+        json!({"kind": "login_lost", "host": "api.example.com"}),
+        json!({"kind": "egress_blocked", "host": format!("https://{MARKER}")}),
+    ] {
+        let (status, answer) = complete(json!({
+            "leaseHandle": handle, "status": "succeeded", "body": "done", "appNotice": bad
+        }))
+        .await;
+        assert_eq!(status, 400, "{bad} -> {answer}");
+        assert_eq!(error_code(&answer), -32602, "{answer}");
+        assert!(!answer.to_string().contains(MARKER), "{answer}");
+    }
+    assert_eq!(
+        run_record_3516(&su, run).await,
+        before,
+        "a refused notice wrote nothing"
+    );
+
     // 2. The valid report completes; stored, audited once, read back.
     let report = json!([
         {"pluginId": "google-calendar", "tool": "list_events", "calls": 3},
         {"pluginId": "gmail", "tool": "create_draft", "calls": 1}
     ]);
+    sqlx::query(
+        "INSERT INTO plugin_registry (plugin_id, version, manifest, manifest_digest, official) \
+         VALUES ('app-4054-known', '0.0.1', '{}'::jsonb, \
+                 'sha256:0000000000000000000000000000000000000000000000000000000000000000', true) \
+         ON CONFLICT (plugin_id) DO UPDATE SET official = true, revoked_at = NULL",
+    )
+    .execute(&su)
+    .await
+    .expect("seed an official registry row");
     let (status, done) = complete(json!({
-        "leaseHandle": handle, "status": "succeeded", "body": "일정을 봤어요", "appsUsed": report
+        "leaseHandle": handle, "status": "succeeded", "body": "일정을 봤어요", "appsUsed": report,
+        "appNotice": {"kind": "login_lost", "pluginId": "app-4054-known"}
     }))
     .await;
     assert_eq!(status, 200, "{done}");
     let (_, output) = run_record_3516(&su, run).await;
     assert_eq!(output["appsUsed"], report);
+    // #4054 — the answer carries the receipt and the notice in server-owned props;
+    // a hosted connection is not known to be a Mac or Hermes, so there is no `site`.
+    let answer_props: Value = sqlx::query_scalar(
+        "SELECT props FROM message WHERE workspace_id = $1 AND run_id = $2 AND client_msg_id = $2",
+    )
+    .bind(fixture.workspace)
+    .bind(run)
+    .fetch_one(&su)
+    .await
+    .expect("the run's answer");
+    assert_eq!(answer_props["appsUsed"], report);
+    assert_eq!(
+        answer_props["app_notice"],
+        json!({"kind": "login_lost", "plugin_id": "app-4054-known"})
+    );
 
     let audits = tool_used_audits_3946(&su, run).await;
     assert_eq!(audits.len(), 1, "one line per completion");

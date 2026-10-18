@@ -140,6 +140,7 @@
 
 pub mod a2a;
 pub mod actions;
+pub mod app_notice;
 pub mod app_tool_grants;
 pub mod approval;
 pub mod card_suggest;
@@ -229,6 +230,12 @@ pub use a2a::{
     A2aLimits, DEFAULT_A2A_MAX_DEPTH, DEFAULT_G1_STALE_RUNNING_SECONDS,
     DEFAULT_MAX_CHAIN_COST_MICRO_USD, DEFAULT_MAX_CHAIN_TOKENS, DEFAULT_MAX_CONSECUTIVE_AUTO,
     DEFAULT_MAX_STEPS, SCHEMA_DEPTH_CEILING,
+};
+pub use app_notice::{
+    app_result_policy, attach_app_result_policy, connection_unavailable_app_notice, is_notice_host,
+    stall_app_notice, AppNotice, AppNoticeKind, AppNoticeSite, APP_RESULT_POLICY_KEY,
+    MAX_NOTICE_HOST_BYTES, PERSONAL_APP_PLUGIN_IDS, PROP_APPS_USED, PROP_APPS_USED_ALIAS,
+    PROP_APP_NOTICE, SERVER_OWNED_APP_PROPS_KEYS, SUMMARY_ONLY_INSTRUCTION,
 };
 pub use app_tool_grants::{
     attach_tool_grants, granted_apps_from_payload, host_app_tools, load_app_tool_grants_in_tx,

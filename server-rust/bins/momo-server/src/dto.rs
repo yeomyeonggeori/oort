@@ -2442,6 +2442,11 @@ pub struct AgentGatewayCompleteRequest {
     /// `routes::apps_used`; absent for a path that reports nothing.
     #[serde(default, rename = "appsUsed", alias = "apps_used")]
     pub apps_used: Option<serde_json::Value>,
+    /// #4054 — `{kind, pluginId?, host?}`, the execution site's own report of why
+    /// an app blocked the run. Validated by `routes::app_notice`; a malformed one
+    /// is dropped here (the Agent Port refuses it instead). `site` is not a key.
+    #[serde(default, rename = "appNotice")]
+    pub app_notice: Option<serde_json::Value>,
 }
 
 /// Swift `AgentGatewayUsage` (:2287-2347).

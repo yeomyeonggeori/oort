@@ -13,6 +13,7 @@ pub mod agent_port_tools;
 pub mod agent_provider_pin;
 pub mod agent_runs;
 pub mod agents;
+pub mod app_notice;
 pub mod approvals;
 pub mod apps_used;
 /// ADR-0151 — the Drive attachment surface: upload session, completion, and the
