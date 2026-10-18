@@ -189,6 +189,7 @@ async fn card_suggest(
     let agent_member_id = context.agent_member_id;
     let client_msg_id = worker_card_client_msg_id(run_id, &call.call_id);
     let label = suggestion.label;
+    let command_id = suggestion.command_id;
 
     let posted = momo_db::with_tenant_tx(pool, workspace_id, move |conn| {
         Box::pin(async move {
@@ -243,9 +244,10 @@ async fn card_suggest(
     .await?;
 
     Ok(match posted {
-        Ok(display_name) => {
-            ToolResult::ok(&call.call_id, suggestion_tool_output(&display_name, label))
-        }
+        Ok(display_name) => ToolResult::ok(
+            &call.call_id,
+            suggestion_tool_output(&display_name, label, command_id),
+        ),
         Err(refusal) => ToolResult::error(&call.call_id, suggestion_refusal_output(refusal)),
     })
 }

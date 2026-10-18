@@ -726,7 +726,7 @@ fn action_propose_schema() -> Value {
 /// `the_suggestable_ids_are_one_list_in_four_places` measures this list, the
 /// registry, the worker's `card_suggest` definition and `docs/api/openapi.yaml`'s
 /// `SuggestableCommandId` together.
-const SUGGESTABLE_COMMAND_IDS: [&str; 1] = ["ai.connect"];
+const SUGGESTABLE_COMMAND_IDS: [&str; 2] = ["ai.connect", "settings.open"];
 
 // `ai.connect`'s argument vocabulary, restated for the same reason. The domain
 // normaliser is the rule (it also enforces the pair `team_key ⇔ team`, which
@@ -735,6 +735,27 @@ const SUGGESTABLE_COMMAND_IDS: [&str; 1] = ["ai.connect"];
 // the registry's own schema.
 const AI_CONNECT_HARNESSES: [&str; 3] = ["claude", "codex", "team_key"];
 const AI_CONNECT_SCOPES: [&str; 2] = ["mine", "team"];
+
+// `settings.open`'s section vocabulary (ADR-0201 v2 H6-4, #3939) — the web
+// settings nav's section ids, never paths. A third restated copy for the same
+// reason; `the_card_suggest_tool_bounds_what_the_registry_normalises` measures it
+// against `momo_agent::card_suggest::SETTINGS_OPEN_SECTIONS`. The domain
+// normaliser makes `section` required for this command (this schema cannot
+// express "required when commandId is settings.open").
+const SETTINGS_OPEN_SECTIONS: [&str; 12] = [
+    "profile",
+    "appearance",
+    "notifications",
+    "shortcuts",
+    "devices",
+    "workspace",
+    "members",
+    "memory",
+    "usage",
+    "code",
+    "updates",
+    "plugins",
+];
 
 /// `oort_card_suggest` — ADR-0186 증보 G1.
 ///
@@ -758,7 +779,8 @@ fn card_suggest_schema() -> Value {
                 "additionalProperties": false,
                 "properties": {
                     "harness": nullable(json!({"type": "string", "enum": AI_CONNECT_HARNESSES})),
-                    "scope": nullable(json!({"type": "string", "enum": AI_CONNECT_SCOPES}))
+                    "scope": nullable(json!({"type": "string", "enum": AI_CONNECT_SCOPES})),
+                    "section": nullable(json!({"type": "string", "enum": SETTINGS_OPEN_SECTIONS}))
                 }
             })),
             "body": required_text(8_000),
@@ -895,7 +917,8 @@ pub const TOOL_CATALOG: [ToolDescriptor; 13] = [
         name: TOOL_CARD_SUGGEST,
         title: "Suggest a card",
         description: "Answer the person who asked with a card they can act on in place \
-                      (ai.connect: connect an AI subscription or a team API key). The \
+                      (ai.connect: connect an AI subscription or a team API key; \
+                      settings.open: open one settings section, e.g. notifications). The \
                       server picks the channel, the recipient and the title; the card \
                       runs nothing until that person taps it on their own device.",
         required_scope: SCOPE_MESSAGES_WRITE,
