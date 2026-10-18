@@ -809,6 +809,21 @@ pub async fn put_connector_trial(
                             "서버에 도구 잠금 선언, 앱 시험 선언, 켜 둔 앱 목록이 모두 있어야 켤 수 있어요. 이것은 운영자의 자기 선언이고 oort가 검증하지 않아요.",
                         )));
                     }
+                    // Hermes has one token volume: any other agent that reaches it can
+                    // use the connected apps whoever called that agent.
+                    if momo_agent::other_operator_env_pinned_in_tx(
+                        conn,
+                        workspace_id,
+                        agent_member_id,
+                    )
+                    .await?
+                        > 0
+                    {
+                        return Ok(Err(trial_refusal(
+                            "connector_trial_shared",
+                            "같은 Hermes를 쓰도록 고정된 다른 에이전트가 있어요. 그 에이전트의 고정을 풀어야 앱 시험을 켤 수 있어요.",
+                        )));
+                    }
                     let facts =
                         momo_agent::trial_candidate_facts_in_tx(conn, workspace_id, actor).await?;
                     if facts.active_humans != 1 {

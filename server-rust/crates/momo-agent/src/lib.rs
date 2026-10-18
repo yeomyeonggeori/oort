@@ -315,7 +315,8 @@ pub use run_progress::{
 // ADR-0200 증보 2026-10-15 R1 — the workspace "running now" read (#3847).
 pub use connector_trial::{
     agent_is_operator_env_pinned_in_tx, connector_trial_facts_in_tx, connector_trial_notice_body,
-    connector_trial_stop, parse_connector_apps, trial_candidate_facts_in_tx, ungranted_apps,
+    connector_trial_stop, other_operator_env_pinned_in_tx, parse_connector_apps,
+    trial_candidate_facts_in_tx, ungranted_apps, workspace_has_other_trial_agent_in_tx,
     ConnectorTrialAttest, ConnectorTrialFacts, ConnectorTrialStop,
 };
 pub use run_progress::{

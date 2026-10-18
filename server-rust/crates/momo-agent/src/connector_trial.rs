@@ -296,6 +296,52 @@ pub async fn trial_candidate_facts_in_tx(
     })
 }
 
+/// Other agents of the workspace that also reach the operator's Hermes (pinned to
+/// the operator's env link). Hermes has one token volume, so every agent that
+/// reaches it can use the connected apps whoever called that agent: a trial is
+/// only sound while the marked agent is the **only** one (the enable route
+/// refuses otherwise, and the pin route refuses to add another while it is on).
+pub async fn other_operator_env_pinned_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    except_agent_member_id: Uuid,
+) -> Result<i64, DbError> {
+    let others: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM agent_provider_pin p \
+           JOIN member m ON m.workspace_id = p.workspace_id AND m.id = p.agent_member_id \
+          WHERE p.workspace_id = $1 AND p.kind = 'operator_env' \
+            AND p.agent_member_id <> $2 AND m.deleted_at IS NULL",
+    )
+    .bind(workspace_id)
+    .bind(except_agent_member_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(others)
+}
+
+/// Is there a trial agent (marked **and** pinned to the operator's env link) in
+/// the workspace other than `except_agent_member_id`? The pin route asks this
+/// before it puts one more agent on the operator's Hermes.
+pub async fn workspace_has_other_trial_agent_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    except_agent_member_id: Uuid,
+) -> Result<bool, DbError> {
+    let any: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM agent a \
+                          JOIN agent_provider_pin p ON p.workspace_id = a.workspace_id \
+                                                    AND p.agent_member_id = a.member_id \
+                         WHERE a.workspace_id = $1 AND a.member_id <> $2 \
+                           AND a.connector_owner_human_id IS NOT NULL \
+                           AND p.kind = 'operator_env')",
+    )
+    .bind(workspace_id)
+    .bind(except_agent_member_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(any)
+}
+
 /// Is this agent pinned to the operator's own env link — the co-hosted Hermes?
 pub async fn agent_is_operator_env_pinned_in_tx(
     conn: &mut PgConnection,

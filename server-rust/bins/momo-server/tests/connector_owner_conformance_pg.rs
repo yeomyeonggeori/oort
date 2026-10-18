@@ -1704,6 +1704,28 @@ async fn the_trial_turns_on_only_for_the_operator_with_one_person_and_both_attes
         .0,
         404
     );
+    // Hermes has one token volume: while another agent of the workspace is pinned to
+    // it too, the trial cannot be turned on (that agent would reach the same apps).
+    sqlx::query(
+        "INSERT INTO agent_provider_pin(agent_member_id, workspace_id, kind, pinned_by) \
+         VALUES($1,$2,'operator_env',$3)",
+    )
+    .bind(t.unpinned)
+    .bind(t.workspace)
+    .bind(t.operator)
+    .execute(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        put_trial(&client, &good, &t, &t.operator_jwt, t.agent, on.clone()).await,
+        (409, Some("connector_trial_shared".to_string()))
+    );
+    assert_eq!(marks(&su, &t).await, 0);
+    sqlx::query("DELETE FROM agent_provider_pin WHERE agent_member_id=$1")
+        .bind(t.unpinned)
+        .execute(&su)
+        .await
+        .unwrap();
     // The generic mark route cannot turn the pinned agent on behind the trial's back.
     let generic = client
         .put(format!(
@@ -1744,6 +1766,49 @@ async fn the_trial_turns_on_only_for_the_operator_with_one_person_and_both_attes
         view["note"].as_str().unwrap_or("").contains("자기 선언"),
         "{view}"
     );
+    // While it is on, no second agent can be put on the same Hermes through the pin
+    // route (409, nothing written); after it is off the same request is accepted.
+    let pin_put = |agent: Uuid| {
+        let client = client.clone();
+        let url = format!(
+            "{good}/v1/workspaces/{}/agents/{agent}/provider-pin",
+            t.workspace
+        );
+        let jwt = t.operator_jwt.clone();
+        async move {
+            let response = client
+                .put(url)
+                .bearer_auth(jwt)
+                .json(&json!({"kind": "operator_env"}))
+                .send()
+                .await
+                .unwrap();
+            let status = response.status().as_u16();
+            let value: Value = response.json().await.unwrap_or(Value::Null);
+            (
+                status,
+                value["error"]["code"]
+                    .as_str()
+                    .or(value["code"].as_str())
+                    .map(str::to_string),
+            )
+        }
+    };
+    let pins = || async {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM agent_provider_pin WHERE workspace_id=$1 AND kind='operator_env'",
+        )
+        .bind(t.workspace)
+        .fetch_one(&su)
+        .await
+        .unwrap()
+    };
+    assert_eq!(pins().await, 1);
+    assert_eq!(
+        pin_put(t.unpinned).await,
+        (409, Some("connector_trial_on".to_string()))
+    );
+    assert_eq!(pins().await, 1, "nothing was pinned");
     // Off is the operator's, immediate, and audited once.
     assert_eq!(
         put_trial(
@@ -1760,6 +1825,8 @@ async fn the_trial_turns_on_only_for_the_operator_with_one_person_and_both_attes
     );
     assert_eq!(marks(&su, &t).await, 0);
     assert_eq!(trial_audits(&su, &t).await, 2);
+    assert_eq!(pin_put(t.unpinned).await.0, 200, "trial off: pin accepted");
+    assert_eq!(pins().await, 2);
 }
 
 /// Turn the trial on through the route, with `apps` attested, on a running server.
