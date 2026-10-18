@@ -109,7 +109,6 @@ function check(name, ok, detail = "") {
   console.log(`${ok ? "ok  " : "FAIL"} ${name}${ok ? "" : ` ${detail}`}`);
   if (!ok) failures.push(name);
 }
-const overflowX = (page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
 async function open(browser, origin, scheme, viewport, channelId) {
   const context = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: "reduce", serviceWorkers: "block", deviceScaleFactor: 2 });
