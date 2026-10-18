@@ -7,8 +7,8 @@ import {
 } from '@momo/core/lib/api';
 import {coreHost} from '@momo/core/runtime/host';
 import {isSurfaceProvided} from '@momo/core/features/capabilities/serverSurfaces';
+import {appsOnWebPath} from '@momo/core/features/plugins/phoneApps';
 import {
-  APPS_SCREEN_PATH,
   appNoticeFor,
   hasAppNotice,
   type AppNotice,
@@ -142,10 +142,10 @@ export function useAppNotice(
 /**
  * 폰의 「웹에서 열기」가 여는 주소: 이 서버의 웹 앱에서 앱 화면. 폰에는 동의 창이 없다
  * (plans 2.6) — 허용은 웹·데스크탑에서 한다. 서버 주소를 모르면 null 이고, 그때 행동은
- * 세우지 않는다(열 수 없는 버튼을 만들지 않는다). 섹션 id 로 잇는 링크는 #3951(U-4)이
- * 맡고, 여기는 화면 경로까지만 안다.
+ * 세우지 않는다(열 수 없는 버튼을 만들지 않는다). 화면은 **설정 section id**(`?section=plugins`,
+ * #3951)로 잇는다: 웹이 그 id 를 앱 화면으로 풀어 주므로, 웹이 화면을 옮겨도 폰의 링크는 낡지 않는다.
  */
 export function appsOnWebUrl(): string | null {
   const base = coreHost().absoluteApiBase().replace(/\/+$/, '');
-  return base === '' ? null : `${base}${APPS_SCREEN_PATH}`;
+  return base === '' ? null : `${base}${appsOnWebPath()}`;
 }

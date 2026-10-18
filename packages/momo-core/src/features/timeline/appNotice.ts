@@ -159,6 +159,16 @@ export function parseAppNotice(props: Props, env: AppNoticeEnv): AppNotice | nul
       };
     case "login_lost":
       // 다시 로그인은 내 맥에서만 내가 할 수 있다. Hermes 는 운영자가 한다.
+      // 실행 장소를 모르면(Agent Port 문은 `site` 가 없다) 누가 할 일인지 짐작하지 않는다:
+      // 문장만 서고 행동은 만들지 않는다.
+      if (site === null) {
+        return {
+          kind: "login_lost",
+          sentence: `${app} 로그인이 끊겼어요.`,
+          action: null,
+          progress: false,
+        };
+      }
       return site === "hermes"
         ? {
             kind: "login_lost",
@@ -230,9 +240,17 @@ export function parseAppNotice(props: Props, env: AppNoticeEnv): AppNotice | nul
   }
 }
 
+/**
+ * 막힘 문장을 붙일 수 있는 행인가. 지워진 행과 `system` 행(정지·건너뜀 줄)은 아니다:
+ * system 행은 본문이 이미 그 사정을 말해서 같은 문장이 두 번 보인다.
+ */
+function noticeable(message: Pick<Message, "state" | "type">): boolean {
+  return message.state !== "deleted" && message.type !== "system";
+}
+
 /** 이 메시지가 막힘 문장 칸을 들고 있는가(앱 목록 조회 여부를 가르는 값). */
-export function hasAppNotice(message: Pick<Message, "props" | "state">): boolean {
-  return message.state !== "deleted" && record(message.props?.["app_notice"]) !== null;
+export function hasAppNotice(message: Pick<Message, "props" | "state" | "type">): boolean {
+  return noticeable(message) && record(message.props?.["app_notice"]) !== null;
 }
 
 /** 진행 중(`working`) 안내인가: 분 시계를 돌릴지 가른다. */
@@ -242,9 +260,9 @@ export function isWorkingAppNotice(message: Pick<Message, "props">): boolean {
 
 /** 행이 부르는 입구. 지워진 행에는 없다. */
 export function appNoticeFor(
-  message: Pick<Message, "props" | "state">,
+  message: Pick<Message, "props" | "state" | "type">,
   env: AppNoticeEnv
 ): AppNotice | null {
-  if (message.state === "deleted") return null;
+  if (!noticeable(message)) return null;
   return parseAppNotice(message.props, env);
 }

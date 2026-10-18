@@ -247,7 +247,9 @@ describe('막힘 문장 (폰)', () => {
     act(() => {
       fireEvent(row, 'accessibilityAction', {nativeEvent: {actionName: rotor?.name}});
     });
-    expect(open).toHaveBeenCalledWith('https://oort.test/ai/external/apps');
+    // 화면 경로가 아니라 설정 section id 로 잇는다(#3951): 웹이 그 id 를 앱 화면으로 풀어 준다.
+    expect(open).toHaveBeenCalledWith('https://oort.test/settings?section=plugins');
+    expect(String(open.mock.calls[0][0])).not.toContain('/ai/external/apps');
     expect(row.props.accessibilityLabel).toContain('이 앱은 데스크탑이나 웹에서 허용해 주세요.');
     open.mockRestore();
   });
@@ -264,6 +266,22 @@ describe('막힘 문장 (폰)', () => {
     expect(screen.getByTestId('app-notice-sentence')).toHaveTextContent(
       '실행 중에 허용이 회수돼서 여기서 멈췄어요. 이미 한 일은 그대로예요.',
     );
+    expect(screen.queryByTestId('app-notice-action')).toBeNull();
+  });
+
+  it('system 행(정지·건너뜀 줄)에는 앱 문장을 붙이지 않는다', () => {
+    renderRow({
+      ...blocked({kind: 'site_off', site: 'mac'}),
+      type: 'system',
+      body: '내 맥이 꺼져 있어서 못 했어요.',
+    } as Message);
+    expect(screen.queryByTestId('app-notice')).toBeNull();
+    expect(mockListPlugins).not.toHaveBeenCalled();
+  });
+
+  it('로그인 끊김(실행 장소 없음, Agent Port 문): 문장만, 행동은 없다', () => {
+    renderRow(blocked({kind: 'login_lost', plugin_id: 'gmail'}));
+    expect(screen.getByTestId('app-notice-sentence')).toHaveTextContent(/로그인이 끊겼어요\.$/);
     expect(screen.queryByTestId('app-notice-action')).toBeNull();
   });
 
