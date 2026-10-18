@@ -35,7 +35,6 @@ import { isDesktop, openExternalUrl } from "@/lib/tauri";
 
 export function TeamAiReplyMeta({ meta }: { meta: Meta }) {
   const sourcesId = useId();
-  const detailsId = useId();
   const [detailsOpen, setDetailsOpen] = useState(false);
   return (
     <div
@@ -52,16 +51,15 @@ export function TeamAiReplyMeta({ meta }: { meta: Meta }) {
             <button
               type="button"
               aria-expanded={detailsOpen}
-              aria-controls={detailsId}
               data-testid="apps-details-toggle"
               onClick={() => setDetailsOpen((open) => !open)}
-              className="press rounded-sm py-1 text-signal-text underline decoration-line-strong underline-offset-2 hover:text-ink focus-visible:focus-ring"
+              className="press rounded-sm py-1 text-ink-muted underline decoration-line-strong underline-offset-2 hover:text-ink focus-visible:focus-ring"
             >
               {detailsOpen ? APPS_DETAIL_TOGGLE.close : APPS_DETAIL_TOGGLE.open}
             </button>
           </p>
           {detailsOpen && (
-            <ul id={detailsId} aria-hidden="true" className="flex min-w-0 flex-col gap-px" data-testid="apps-details">
+            <ul aria-hidden="true" className="flex min-w-0 flex-col gap-px" data-testid="apps-details">
               {meta.appsDetails.map((line) => (
                 <li key={line} className="min-w-0 break-keep text-meta text-ink-muted [overflow-wrap:anywhere]">
                   {line}

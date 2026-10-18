@@ -193,6 +193,14 @@ describe('쓴 앱 꼬리 (폰)', () => {
     expect(label).toContain('요약만 올리는 게 원칙이에요');
   });
 
+  it('「자세히」는 한 줄 높이에 슬롭을 더해 44pt 를 채운다', async () => {
+    const {line, TOUCH_TARGET} = require('../src/design/tokens');
+    renderRow(reply(HERMES_PROPS), 12);
+    await waitFor(() => expect(screen.getByTestId('apps-details-toggle')).toBeTruthy());
+    const slop = screen.getByTestId('apps-details-toggle').props.hitSlop as {top: number; bottom: number};
+    expect(line.meta + slop.top + slop.bottom).toBeGreaterThanOrEqual(TOUCH_TARGET);
+  });
+
   it('DM(노출 수 없음)에는 둘째 줄이 없다', async () => {
     renderRow(reply(HERMES_PROPS), null);
     await waitFor(() => expect(screen.getByTestId('apps-used-line')).toBeTruthy());
