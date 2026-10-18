@@ -76,7 +76,7 @@ pub async fn read_webhook_secrets(
     Ok(row.map(|(current, previous)| SealedWebhookSecrets { current, previous }))
 }
 
-/// The App's non-secret slug (any tenant session may read it; migration 141).
+/// The App's non-secret slug (any tenant session may read it; migration 142).
 pub async fn read_app_slug(conn: &mut PgConnection) -> Result<Option<String>, DbError> {
     Ok(
         sqlx::query_scalar("SELECT slug FROM github_app_public WHERE id = true")

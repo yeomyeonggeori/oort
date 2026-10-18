@@ -14,7 +14,7 @@
 //! * 13 `commits_and_releases_reach_only_the_channels_that_turned_them_on`
 //!
 //! and the supporting rows: the operator-only unlinked list, the per-installation rate budget with
-//! its one audit row, the 503 without the master key, and RLS on the migration-141 tables as
+//! its one audit row, the 503 without the master key, and RLS on the migration-142 tables as
 //! `momo_app`.
 //!
 //! `#[ignore]`: needs a real Postgres, same harness as `github_app_conformance_pg.rs`.
