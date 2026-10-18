@@ -106,8 +106,8 @@ export function PluginInstallClosedNotice() {
  * 연결하는 곳 (ADR-0113 D5): 이 앱을 쓰면 어느 주소와 통신하는가. 설치 결정 앞에 서야 하는
  * 공개라서 설치가 닫혀 있어도 먼저 보인다. 주소는 서버가 매니페스트에서 준 그대로이고,
  * 문장은 그 주소로 무엇이 오가는지만 말한다(도구에 넘긴 내용이 요청에 담기고, 돌아온 내용을
- * 에이전트가 읽는다). 어디에 로그인 정보를 둔다는 보증은 하지 않는다: 앱마다 다르고,
- * 이 화면이 아는 사실이 아니다.
+ * 에이전트가 읽는다). 로그인 정보를 어디에 둔다는 말은 여기서 하지 않는다: 그것은 허용을
+ * 결정하는 순간의 문장이라 허용 동의 창이 말한다(`PLUGIN_CONSENT_CUSTODY_LINES`).
  */
 export function PluginEgressDisclosure({ domains }: { domains: readonly string[] }) {
   const headingId = useId();

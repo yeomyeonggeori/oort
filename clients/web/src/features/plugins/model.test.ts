@@ -32,13 +32,19 @@ import {
   scopeSentence,
   settlePluginScopeChanges,
   workspaceInstallSentence,
-  workspaceInstallationLabel,
+  pluginConnectionChipLabel,
+  NO_INSTALLER_SENTENCE,
+  nonAdminInstallGuidance,
+  pluginConsentCustodyLines,
 } from "./model";
 
 describe("plugin marketplace copy", () => {
   it("names workspace installation separately from my permission", () => {
-    expect(workspaceInstallationLabel({ installed: true, enabled: true }))
-      .toBe("워크스페이스 설치됨");
+    expect(pluginConnectionChipLabel({ installed: true, enabled: true }, 0))
+      .toBe("설치됨 · 내 허용 없음");
+    expect(pluginConnectionChipLabel({ installed: true, enabled: true }, 2))
+      .toBe("설치됨 · 내가 허용함");
+    expect(pluginConnectionChipLabel({ installed: false, enabled: false }, 0)).toBe("미설치");
     expect(callerPolicySummary(undefined)).toBe("허용한 도구 없음");
     expect(callerPolicySummary([])).toBe("허용한 도구 없음");
     // 목록 줄은 개수만 말한다. 위험도는 상세의 도구 줄이 칩으로 말해서 같은 사실이 두 모양이 되지 않는다.
@@ -164,7 +170,7 @@ describe("plugin marketplace copy", () => {
   it("identifies administrators by handle and keeps an action error with its app", () => {
     expect(administratorNames([{
       displayName: "김인턴", handle: "intern-kim", role: "admin", status: "active",
-    }])).toEqual(["김인턴 (@intern-kim)"]);
+    }])).toEqual(["김인턴"]);
     const action = { kind: "install", pluginId: "github", pluginName: "GitHub" } as const;
     const error = new ApiError(403, "plugin serverPolicy rejects installation");
     expect(actionErrorForPlugin(action, "linear", error)).toBeNull();
@@ -361,7 +367,7 @@ describe("읽기 전용 카탈로그의 문장", () => {
     expect(workspaceInstallSentence({ installed: true, enabled: true })).toBe("설치돼 있어요");
     // 목록 칩(「워크스페이스 비활성」)과 같은 말이다: 같은 상태가 화면 둘에서 다른 낱말이 되지 않는다.
     expect(workspaceInstallSentence({ installed: true, enabled: false })).toBe("설치했지만 비활성이에요");
-    expect(workspaceInstallationLabel({ installed: true, enabled: false })).toContain("비활성");
+    expect(pluginConnectionChipLabel({ installed: true, enabled: false }, 0)).toContain("비활성");
   });
 
   it("내 권한은 정책이 싣는 것만 말한다: 설치와 무관하게 비어 있을 수 있다", () => {
@@ -395,5 +401,59 @@ describe("읽기 전용 카탈로그의 문장", () => {
       for (const tool of manifest.mcp.tools) expect(tool.description, tool.name).toMatch(/[가-힣]/);
     }
     expect(OFFICIAL_IDS).toHaveLength(4);
+  });
+});
+
+describe("설치 요청 안내와 관리자 없음 상태 (#3943)", () => {
+  const person = (
+    displayName: string,
+    handle: string,
+    role: "owner" | "admin" | "member",
+    over: Record<string, unknown> = {}
+  ) => ({ displayName, handle, role, status: "active", kind: "human" as const, ...over });
+
+  it("관리자가 있으면 「○○님(관리자)에게 설치를 요청하세요」", () => {
+    expect(nonAdminInstallGuidance(["곽성재"])).toBe("곽성재님(관리자)에게 설치를 요청하세요.");
+    expect(nonAdminInstallGuidance(["곽성재", "김인턴"])).toBe("곽성재님, 김인턴님(관리자)에게 설치를 요청하세요.");
+    expect(nonAdminInstallGuidance(["가", "나", "다", "라"])).toBe("가님, 나님 외 2명(관리자)에게 설치를 요청하세요.");
+  });
+
+  it("활성 관리자가 없으면 부탁할 사람이 없다고 그대로 말한다", () => {
+    expect(NO_INSTALLER_SENTENCE).toBe("이 워크스페이스에 앱을 설치할 사람이 없어요. 소유자 계정을 확인해 주세요.");
+    expect(nonAdminInstallGuidance([])).toBe(NO_INSTALLER_SENTENCE);
+  });
+
+  it("설치할 사람은 활성 상태의 사람 owner·admin뿐이다: 멤버·정지·초대·에이전트는 아니다", () => {
+    const names = administratorNames([
+      person("소유자", "owner1", "owner"),
+      person("관리자", "admin1", "admin"),
+      person("일반", "mem", "member"),
+      person("정지된 관리자", "susp", "admin", { status: "suspended" }),
+      person("초대 중 관리자", "inv", "admin", { status: "invited" }),
+      person("관리자 에이전트", "bot", "admin", { kind: "agent" }),
+      { displayName: "역할 없음", handle: "norole", status: "active", kind: "human" as const },
+    ]);
+    expect(names).toEqual(["소유자", "관리자"]);
+    expect(administratorNames([person("일반", "m", "member")])).toEqual([]);
+  });
+
+  it("이름이 같은 관리자 둘은 핸들로 구별하고, 이름이 비면 핸들이 이름이다", () => {
+    expect(administratorNames([person("김", "a", "admin"), person("김", "b", "owner")]))
+      .toEqual(["김 (@a)", "김 (@b)"]);
+    expect(administratorNames([person("  ", "ghost", "admin")])).toEqual(["@ghost"]);
+  });
+});
+
+describe("허용 동의 창의 두 줄 (#3943)", () => {
+  it("D1-A 앱에는 두 줄을 그대로 보인다", () => {
+    expect(pluginConsentCustodyLines({})).toEqual([
+      "토큰은 oort에 없어요",
+      "처음 쓸 때 실행 장소에서 로그인해요",
+    ]);
+    expect(pluginConsentCustodyLines({ hosted: false })).toHaveLength(2);
+  });
+
+  it("oort 서버가 연결을 들고 있는 앱(hosted)에는 맞지 않는 말이라 하지 않는다", () => {
+    expect(pluginConsentCustodyLines({ hosted: true })).toEqual([]);
   });
 });
