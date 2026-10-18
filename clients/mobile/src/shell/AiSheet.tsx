@@ -1,3 +1,8 @@
+import {
+  aiExternalRow,
+  glossaryEntry,
+} from '@momo/core/features/ai/aiHubModel';
+import {isSurfaceProvided} from '@momo/core/features/capabilities/serverSurfaces';
 import React, {useMemo} from 'react';
 import {ScrollView, StyleSheet, Text, View} from 'react-native';
 
@@ -33,6 +38,10 @@ import {SheetTitleRow} from './NewMessageSheet';
 //   | 에이전트    | 작업 맡기기(N8) · 에이전트 목록 | 늘                                           |
 //   | 내 도구     | 내 맥에 물어보기(T6b)        | 내 맥으로 보내는 길이 연결됨(`spawnPort`)    |
 //   | 개인 에이전트 | 내 개인 에이전트 줄          | 위 + 로스터에 내 `personalAgent`가 있음      |
+//   | 외부 연결   | 앱(읽기)                    | 서버가 앱 목록을 싣는다(`plugins` 표면)      |
+//
+// 「앱」 줄은 U-4(#3951)가 더했다: 폰의 읽기 화면으로 가는 문 하나. 폰에는 동의 창이 없어서 설치·허용은
+// 데스크탑·웹에서 한다. #3388(AI 허브)이 폰에 서면 이 줄은 그 허브의 「외부 연결」로 옮겨 간다.
 //
 // 아래 두 구획은 내 맥으로 보내는 길이 꽂히기(#3638 이후 부팅) 전에는 서지 않는다. 막힌 줄을 흐리게 세워 두지 않고
 // **세우지 않는다** — 누를 수 없는 줄은 이 시트가 풀어 줄 수 없는 약속이다.
@@ -53,6 +62,7 @@ export function AiSheet({
   onDelegate,
   onOpenAgentList,
   onAskMac,
+  onOpenApps,
   gateOpen,
 }: {
   onClose: () => void;
@@ -60,6 +70,8 @@ export function AiSheet({
   onDelegate: () => void;
   /** 「에이전트 부르기」 — 에이전트 목록으로. */
   onOpenAgentList: () => void;
+  /** 「앱」 — 앱 읽기 화면으로. */
+  onOpenApps: () => void;
   /** 「내 맥에 물어보기」 — T6b 시트로. */
   onAskMac: (harness?: HarnessKey) => void;
   /** 시험·캡처가 게이트를 강제한다. 앱은 넘기지 않는다. */
@@ -72,6 +84,7 @@ export function AiSheet({
         onDelegate={onDelegate}
         onOpenAgentList={onOpenAgentList}
         onAskMac={onAskMac}
+        onOpenApps={onOpenApps}
         gateOpen={gateOpen}
       />
     </PageSheet>
@@ -83,12 +96,14 @@ function SheetBody({
   onDelegate,
   onOpenAgentList,
   onAskMac,
+  onOpenApps,
   gateOpen,
 }: {
   onClose: () => void;
   onDelegate: () => void;
   onOpenAgentList: () => void;
   onAskMac: (harness?: HarnessKey) => void;
+  onOpenApps: () => void;
   gateOpen?: boolean;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -101,7 +116,11 @@ function SheetBody({
     () => personalAgentRows(directory.directory.members, member.id),
     [directory.directory.members, member.id],
   );
-  const sections = aiSheetSections({gateOpen: open, personal});
+  const sections = aiSheetSections({
+    gateOpen: open,
+    personal,
+    appsProvided: isSurfaceProvided('plugins'),
+  });
 
   // 호스트 목록은 맥 칩이 설 구획이 있을 때만 읽는다.
   const hostsQuery = useWorkHosts(workspaceId, sections.myTools);
@@ -195,6 +214,23 @@ function SheetBody({
                   testID={`ai-row-personal-${agent.id}`}
                 />
               ))}
+            </GroupSection>
+          </View>
+        ) : null}
+
+        {sections.apps ? (
+          <View style={styles.gap}>
+            <GroupSection
+              label={glossaryEntry('externalConnection').term}
+              testID="ai-section-external">
+              <GroupRow
+                title={aiExternalRow('apps').title}
+                detail={aiExternalRow('apps').summary}
+                chevron
+                onPress={choose(onOpenApps)}
+                accessibilityHint="공식 앱이 할 수 있는 일을 읽는 화면을 엽니다."
+                testID="ai-row-apps"
+              />
             </GroupSection>
           </View>
         ) : null}

@@ -178,6 +178,7 @@ import {PullProbe} from './pullProbe';
 import {PullHold} from './pullHold';
 import {PullRefreshSurface} from './pullRefresh';
 import {DmConversationSurface} from './dmConversation';
+import {AppsSurface} from './apps';
 import {AppsTailSurface} from './appsTail';
 import {OortLoaderSurface} from './oortLoader';
 import TeamBoardScreen from '../src/screens/TeamBoardScreen';
@@ -2115,6 +2116,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   }
   if (name.startsWith('device-key-')) {
     return <DeviceKeySurface which={name.slice('device-key-'.length)} />;
+  }
+  // #3951: 폰 「앱」 읽기 화면(목록·상세·네 상태).
+  if (name.startsWith('apps-') && !name.startsWith('apps-tail')) {
+    return <AppsSurface which={name.slice('apps-'.length)} />;
   }
   // #3950: 「쓴 앱」 꼬리·막힘 문장(실제 MessageRow).
   if (name.startsWith('apps-tail')) {
@@ -4516,6 +4521,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             onDelegate={() => {}}
             onOpenAgentList={() => {}}
             onAskMac={() => {}}
+            onOpenApps={() => {}}
             gateOpen={name !== 'shell-ai-off'}
           />
         </View>
@@ -4531,6 +4537,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             onDelegate={() => {}}
             onOpenAgentList={() => {}}
             onAskMac={() => {}}
+            onOpenApps={() => {}}
           />
         </View>
       );

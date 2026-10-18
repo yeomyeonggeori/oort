@@ -103,16 +103,24 @@ export interface AiSheetSections {
   myTools: boolean;
   /** 개인 에이전트 — 게이트가 열렸고 내 것이 있을 때만. */
   personal: boolean;
+  /**
+   * 외부 연결 › 앱 — 서버가 앱 목록을 싣고 있을 때만(`plugins` 표면, U-4 #3951). 폰에서는 읽기뿐이다
+   * (설치·허용은 데스크탑·웹). #3388 의 AI 허브가 폰에 서면 이 줄은 그 허브의 「외부 연결」로 옮겨 간다.
+   */
+  apps: boolean;
 }
 
 export function aiSheetSections(input: {
   gateOpen: boolean;
   personal: readonly PersonalAgentRow[];
+  /** `isSurfaceProvided('plugins')` — 판정표 한 칸. 옛 서버에서는 줄을 세우지 않는다. */
+  appsProvided: boolean;
 }): AiSheetSections {
   return {
     agents: true,
     myTools: input.gateOpen,
     personal: input.gateOpen && input.personal.length > 0,
+    apps: input.appsProvided,
   };
 }
 
