@@ -50,7 +50,11 @@ import {
   useWorkSessions,
 } from '../features/agents/queries';
 import {WorkStatusBadge} from '../features/work/WorkSessionParts';
-import {useChannels, useDirectory} from '../features/workspace/queries';
+import {
+  useChannels,
+  useDirectory,
+  useRememberOpenedDm,
+} from '../features/workspace/queries';
 import {useSession} from '../session/useSession';
 import {openDmFailureCopy} from './SidebarScreen';
 import type {OpenAgent} from '../nav/state';
@@ -138,9 +142,11 @@ export default function AgentDetailScreen({
     [sessionsQuery.data, agent.memberId],
   );
 
+  const rememberOpenedDm = useRememberOpenedDm(workspaceId);
   const openDm = useMutation({
     mutationFn: () => openDirectMessage(workspaceId, agent.memberId),
     onSuccess: opened => {
+      rememberOpenedDm(opened.channel);
       onOpenConversation(
         opened.channel.id,
         channelLabel(opened.channel, directoryQuery.directory, member.id),

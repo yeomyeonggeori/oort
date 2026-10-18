@@ -180,7 +180,10 @@ export function UpdateButton() {
                 : {})}
               aria-label="업데이트 내려받는 중"
             />
-            <p className="flex justify-between font-mono text-meta text-ink-muted" data-numeric>
+            <p
+              className={`flex justify-between ${percent !== null ? "font-mono " : ""}text-meta text-ink-muted`}
+              data-numeric={percent !== null ? true : undefined}
+            >
               <span>{progressLabel(state.downloaded, state.total)}</span>
               {percent !== null && <span>{percent}%</span>}
             </p>

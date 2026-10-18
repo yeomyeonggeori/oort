@@ -677,8 +677,13 @@ describe('연결이 끊기면 화면이 그렇다고 말한다 (2R H2·M4)', () 
     expect(bar.props.accessible).not.toBe(true);
     // 막대 **안**에서 찾는다: 홈의 「작업 중」 카드(DS2-3)가 대화 층 밑에 마운트된 채
     // 같은 턴을 같은 낱말로 말하므로, 화면 전체에서 찾으면 둘이 걸린다.
-    expect(within(bar).getByLabelText(/김인턴.*승인을 기다립니다|김인턴.*작업 중/)).toBeTruthy();
+    expect(within(bar).getByLabelText(/김인턴.*승인을 기다립니다|김인턴.*답하는 중/)).toBeTruthy();
     expect(screen.getByLabelText(TURN_STALE_SENTENCE)).toBeTruthy();
+    // 끊긴 레일의 줄에는 얼굴도 움직이는 점도 없다(#4020): 아무도 일하는 중이 아니다.
+    expect(
+      within(bar).queryByTestId('responding-dots', {includeHiddenElements: true}),
+    ).toBeNull();
+    expect(within(bar).queryByTestId('responding-avatar')).toBeNull();
     // ③ 헤더 부제가 활동 줄과 같은 말을 한다. 「연결 중…」이면 같은 화면에서 두
     //    문장이 서로를 부정한다 (M3).
     expect(screen.getByTestId('conversation-title').parent).toBeTruthy();
@@ -708,11 +713,17 @@ describe('대화 화면 — 입력창 바로 위에서 턴을 말한다', () => 
     await waitFor(() =>
       expect(screen.getByTestId('composer-working')).toBeTruthy(),
     );
-    // 헤드라인이 아직 없다 — 그래도 "김인턴이 작업 중"은 참이고 읽는 사람이
-    // 원하는 것이다. 없는 헤드라인을 지어내지 않는다.
+    // 헤드라인이 아직 없다 — 그래도 "김인턴이 답하는 중"은 참이고 읽는 사람이
+    // 원하는 것이다. 없는 헤드라인을 지어내지 않는다. (#4020: 대화 화면의 이 줄은
+    // 「작업 중」 대신 「답하는 중」이고, 얼굴과 점이 붙는다.)
     const bar = screen.getByTestId('composer-working');
     expect(bar).toHaveTextContent(/김인턴/);
-    expect(bar).toHaveTextContent(/작업 중/);
+    expect(bar).toHaveTextContent(/답하는 중/);
+    expect(within(bar).getByTestId('responding-avatar')).toBeTruthy();
+    // 점은 보조기술에서 숨겨져 있다(문장이 상태를 말한다): 숨은 원소까지 찾는다.
+    expect(
+      within(bar).getByTestId('responding-dots', {includeHiddenElements: true}),
+    ).toBeTruthy();
 
     // 에이전트가 한 줄을 흘리면 그 줄이 문장을 대신한다.
     await deliver(partialFrame({text: '테스트 3개 남았습니다'}), 30);
@@ -745,6 +756,10 @@ describe('대화 화면 — 입력창 바로 위에서 턴을 말한다', () => 
     );
     const bar = screen.getByTestId('composer-working');
     expect(bar).not.toHaveTextContent(/작업 중/);
+    expect(bar).not.toHaveTextContent(/답하는 중/);
+    expect(
+      within(bar).queryByTestId('responding-dots', {includeHiddenElements: true}),
+    ).toBeNull();
     // 기다리는 대상은 이미 타임라인의 메시지다. 상태 줄이 그것을 다시 인쇄하면
     // 화면이 자기 자신 위에 쌓인다.
     expect(bar).not.toHaveTextContent(/파일을 지울까요/);

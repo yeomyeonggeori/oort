@@ -5,6 +5,7 @@ import {
   type PluginPolicyTool,
 } from "@momo/core/lib/api";
 import { NetworkError } from "@momo/core/lib/http";
+import { pluginConnectionLabel } from "@momo/core/features/plugins/connectionState";
 
 export type PluginAction =
   | { kind: "install"; pluginId: string; pluginName: string }
@@ -330,41 +331,56 @@ export function callerPolicySummary(
   return `허용한 도구 ${tools.length}개`;
 }
 
-export function workspaceInstallationLabel({
-  installed,
-  enabled,
-}: {
-  installed: boolean;
-  enabled: boolean;
-}): string {
-  if (!installed) return "워크스페이스 미설치";
-  return enabled ? "워크스페이스 설치됨" : "워크스페이스 비활성";
+/**
+ * 목록 줄과 상세 머리의 연결 상태 칩. 네 칸 가운데 이 티켓이 재는 1·2칸과 「허용함」 읽기를
+ * 코어의 한 함수(`pluginConnectionLabel`)에서 가져온다. 화면이 「설치됐나」와 「허용했나」를
+ * 따로 계산하지 않는다.
+ */
+export function pluginConnectionChipLabel(
+  plugin: { installed: boolean; enabled: boolean },
+  allowedToolCount: number
+): string {
+  return pluginConnectionLabel({ ...plugin, allowedToolCount });
 }
 
+/** 설치할 사람이 하나도 없을 때의 문장. 이 문장은 그대로 화면에 선다(이슈 #3943 수용기준). */
+export const NO_INSTALLER_SENTENCE =
+  "이 워크스페이스에 앱을 설치할 사람이 없어요. 소유자 계정을 확인해 주세요.";
+
+/**
+ * 「설치할 수 있는 사람」: 서버 멤버 목록에서 활성 상태의 **사람** 관리자(owner·admin).
+ * 에이전트는 설치 버튼을 누를 수 없으니 부탁할 대상이 아니다. 같은 이름이 둘이면 핸들을 붙여
+ * 구별한다.
+ */
 export function administratorNames(
   members: readonly {
     displayName: string;
     handle: string;
+    kind?: "human" | "agent";
     role?: MembershipRole;
     status: string;
   }[]
 ): string[] {
-  return members
-    .filter((member) => member.status === "active" && isWorkspaceAdmin(member.role))
-    .map((member) => {
-      const name = member.displayName.trim();
-      return name ? `${name} (@${member.handle})` : `@${member.handle}`;
-    });
+  const admins = members.filter(
+    (member) => member.status === "active" && member.kind !== "agent" && isWorkspaceAdmin(member.role)
+  );
+  const plain = admins.map((member) => member.displayName.trim() || `@${member.handle}`);
+  return admins.map((member, index) =>
+    plain.filter((name) => name === plain[index]).length > 1
+      ? `${plain[index]} (@${member.handle})`
+      : plain[index]
+  );
 }
 
+/**
+ * 설치 권한이 없는 사람에게 말하는 안내. 관리자가 있으면 「○○님(관리자)에게 설치를 요청하세요」,
+ * 활성 관리자가 하나도 없으면 부탁할 사람이 없다고 사실대로 말한다(`NO_INSTALLER_SENTENCE`).
+ */
 export function nonAdminInstallGuidance(names: readonly string[]): string {
-  const people = names.length <= 2
-    ? names.join(", ")
-    : `${names.slice(0, 2).join(", ")} 외 ${names.length - 2}명`;
-  const next = people
-    ? `${people}에게 설치를 요청하세요.`
-    : "워크스페이스 관리자에게 설치를 요청하세요.";
-  return `앱 설치는 워크스페이스 관리자만 할 수 있어요. ${next}`;
+  if (names.length === 0) return NO_INSTALLER_SENTENCE;
+  const shown = names.slice(0, 2).map((name) => `${name}님`).join(", ");
+  const people = names.length > 2 ? `${shown} 외 ${names.length - 2}명` : shown;
+  return `${people}(관리자)에게 설치를 요청하세요.`;
 }
 
 export function pluginActionErrorMessage(error: unknown): string {
@@ -425,8 +441,9 @@ export function pluginActionConfirmation(action: Extract<PluginAction, {
 //
 // 서버가 설치·권한 경로를 싣지 않는 동안(`pluginInstall`) 「앱」 화면은 읽기만 한다. 아래는
 // 그 화면이 말하는 문장들이다. 문장은 사실만 옮긴다: 매니페스트와 서버 답에 있는 것만
-// 쓰고, 서버가 아직 하지 않는 일(에이전트가 이 앱을 실제로 부른다는 약속, 토큰을 어디에
-// 둔다는 보증)은 말하지 않는다. 설치 화면이 열리면 같은 문장이 그대로 맞아야 한다.
+// 쓰고, 서버가 아직 하지 않는 일(에이전트가 이 앱을 실제로 부른다는 약속)은 말하지 않는다.
+// 설치 화면이 열리면 같은 문장이 그대로 맞아야 한다. 토큰이 어디에 있는지는 이 카탈로그가 아니라
+// 허용 동의 창이 ADR-0113 D1-A를 근거로 말한다(`PLUGIN_CONSENT_CUSTODY_LINES`).
 
 /** 서버가 주는 `iconText`가 없을 때 쓰는 타일 글자: 이름의 머리글자 둘까지("Google Drive"는 "GD"). */
 export function pluginIconText(plugin: { name: string; iconText?: string }): string {
@@ -530,6 +547,23 @@ export function pluginToolsSummary(tools: readonly { risk?: string }[]): string 
   }
   const parts = [...counts].map(([label, count]) => `${label} ${count}개`);
   return `이 앱의 도구는 ${tools.length}개예요: ${parts.join(", ")}.`;
+}
+
+/**
+ * 허용 동의 창의 두 줄 (이슈 #3943, ADR-0113 D1-A·증보 2 E1). 내 허용은 oort에 토큰을 맡기는 일이
+ * 아니다: 앱의 로그인 토큰은 도구를 돌리는 실행 장소에만 있고 oort는 「누가 무엇을 허용했나」
+ * 기록만 가진다. 로그인은 허용할 때가 아니라 그 실행 장소에서 처음 쓸 때 한다.
+ *
+ * **oort 서버가 직접 연결을 들고 있는 앱(`hosted`, 팀 공유 드라이브)에는 두 줄 모두 맞지 않아서
+ * 말하지 않는다.** 그 앱의 연결 문장은 앱 화면 v2(#3949)가 가진다.
+ */
+export const PLUGIN_CONSENT_CUSTODY_LINES = [
+  "토큰은 oort에 없어요",
+  "처음 쓸 때 실행 장소에서 로그인해요",
+] as const;
+
+export function pluginConsentCustodyLines(plugin: { hosted?: boolean }): readonly string[] {
+  return plugin.hosted === true ? [] : PLUGIN_CONSENT_CUSTODY_LINES;
 }
 
 export const PLUGIN_READONLY_COPY = {
