@@ -419,6 +419,30 @@ assert_filter_fixture rename-source \
   '[[{"filename":"docs/renamed.md","previous_filename":"server-rust/Cargo.toml","status":"renamed"}]]' \
   true false
 
+# Rust tests read docs/api files outside server-rust (#4042). An openapi-only
+# change must turn the cargo lane on; the same for a golden or vectors file.
+assert_filter_fixture openapi-only \
+  '{"changed_files":1}' \
+  '[[{"filename":"docs/api/openapi.yaml","status":"modified"}]]' \
+  true false
+assert_filter_fixture api-golden-only \
+  '{"changed_files":1}' \
+  '[[{"filename":"docs/api/command-suggest-settings-open.golden.json","status":"modified"}]]' \
+  true false
+assert_filter_fixture api-vectors-only \
+  '{"changed_files":1}' \
+  '[[{"filename":"docs/api/human-control-signing-v4.vectors.json","status":"modified"}]]' \
+  true false
+assert_filter_fixture api-vector-singular \
+  '{"changed_files":1}' \
+  '[[{"filename":"docs/api/refresh-proof.vector.json","status":"modified"}]]' \
+  true false
+# A neighbouring docs file Rust never reads stays out of the cargo lane.
+assert_filter_fixture api-neighbour-doc \
+  '{"changed_files":1}' \
+  '[[{"filename":"docs/api/notes.md","status":"modified"}]]' \
+  false false
+
 # Metadata says two files but pagination returned one: uncertainty runs all.
 assert_filter_fixture incomplete-pages \
   '{"changed_files":2}' \

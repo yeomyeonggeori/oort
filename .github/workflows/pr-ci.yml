@@ -166,12 +166,18 @@ jobs:
           #   · `server/Fixtures/plugin-manifests/*.json` — `clients/web`의
           #     `features/plugins/model.test.ts`·`lib/pluginApi.test.ts`가
           #     레포 상대경로로 import한다.
-          #   · `docs/api/harness-refine-client-msg-id.golden.json` —
-          #     `momo-messaging/src/refine.rs`가 `include_str!`로 굽는다.
+          #   · `docs/api/openapi.yaml`·`docs/api/*.golden.json`·
+          #     `docs/api/*.vector(s).json` — Rust 시험이 읽는다
+          #     (`include_str!`, `read_to_string`). 예: `routes::actions`의
+          #     `the_suggestable_ids_are_one_list_in_four_places`는 openapi의
+          #     `SuggestableCommandId`를 Rust 등록표와 맞춘다. 이 경로를 빼면
+          #     openapi만 바꾼 PR은 cargo 레인이 skip되어 base에서 빨강이
+          #     된다(#4042, PR #4032·#4039 전례). 새 파일을 Rust 시험이 읽게
+          #     되면 이 패턴이 덮는지 확인한다.
           rust=false
           node=false
           printf '%s\n' "$files" | grep -Eq \
-            '^(server-rust/|clients/desktop/src-tauri/|deny\.toml$|scripts/check_cargo_licenses\.sh$|scripts/generate_ghcr_notice_bundle\.py$|scripts/check_ghcr_notice_bundle\.sh$|scripts/check_debian_copyrights\.sh$|scripts/tests/test_ghcr_notice_bundle\.sh$|legal/generated/|legal/THIRD_PARTY_NOTICES\.md$|NOTICE$|docs/api/harness-refine-client-msg-id\.golden\.json$|\.github/workflows/pr-ci\.yml$)' \
+            '^(server-rust/|clients/desktop/src-tauri/|deny\.toml$|scripts/check_cargo_licenses\.sh$|scripts/generate_ghcr_notice_bundle\.py$|scripts/check_ghcr_notice_bundle\.sh$|scripts/check_debian_copyrights\.sh$|scripts/tests/test_ghcr_notice_bundle\.sh$|legal/generated/|legal/THIRD_PARTY_NOTICES\.md$|NOTICE$|docs/api/openapi\.yaml$|docs/api/[^/]+\.golden\.json$|docs/api/[^/]+\.vectors?\.json$|\.github/workflows/pr-ci\.yml$)' \
             && rust=true
           printf '%s\n' "$files" | grep -Eq \
             '^(clients/web/|clients/mobile/|packages/|server/Fixtures/|package\.json$|package-lock\.json$|scripts/check_npm_licenses\.mjs$|\.github/workflows/pr-ci\.yml$)' \
