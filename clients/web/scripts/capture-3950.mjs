@@ -78,11 +78,13 @@ const RUNS = {
 const gw = (run) => ({ source: "hermes_gateway", status: "succeeded", run_id: run });
 const failed = (note) => ({ source: "hermes_gateway", status: "failed", run_id: "0199aa11-2222-7000-8000-000000003999", app_notice: note });
 
+const SYSTEM_LINE = "Hermes가 꺼져 있어서 못 했어요.";
 const NOTICES = [
   ["site_off · 내 맥", { kind: "site_off", site: "mac" }],
   ["site_silent · Hermes", { kind: "site_silent", site: "hermes" }],
   ["login_lost · 내 맥", { kind: "login_lost", plugin_id: "gmail", site: "mac" }],
   ["login_lost · Hermes", { kind: "login_lost", plugin_id: "gmail", site: "hermes" }],
+  ["login_lost · 문(site 없음, #4058)", { kind: "login_lost", plugin_id: "gmail" }],
   ["grant_revoked", { kind: "grant_revoked" }],
   ["rate_limited", { kind: "rate_limited", plugin_id: "github" }],
   ["egress_blocked", { kind: "egress_blocked", plugin_id: "gmail", host: "gmailmcp.googleapis.com" }],
@@ -115,6 +117,8 @@ function messagesFor(channelId) {
       list.push({ id: `n${index}q`, author: me, body: `(${index + 1}) ${label}` });
       list.push({ id: `n${index}`, author: hermes, type: "text", body: "답을 만들지 못했어요.", props: failed(note), replyToId: `n${index}q` });
     });
+    // #4058: system 행(정지·건너뜀 줄)은 본문이 이미 그 문장이다: 앱 문장을 또 붙이지 않는다.
+    list.push({ id: "sys", author: hermes, type: "system", body: SYSTEM_LINE, props: failed({ kind: "site_off", site: "hermes" }) });
   }
   const bySeq = new Map(list.map((row) => [row.id, row]));
   return list.map((row, index) => {
@@ -274,9 +278,13 @@ async function noticeScenes(browser, origin, scheme, base) {
   // 목록은 가상화돼 있다: 위에서 아래로 훑으며 보인 줄을 모은다.
   const seen = new Map();
   const actionLinks = new Map();
+  const systemSeen = [];
+  let noticeMax = 0;
   for (let step = 0; step < 40; step += 1) {
     const rows = await page.getByTestId("app-notice").evaluateAll((els) =>
       els.map((el) => ({ kind: el.getAttribute("data-kind"), text: el.textContent, action: el.querySelector("[data-testid='app-notice-action']")?.getAttribute("href") ?? null, label: el.querySelector("[data-testid='app-notice-action']")?.textContent ?? null })));
+    systemSeen.push(await page.evaluate((line) => (document.body.innerText.split(line).length - 1), SYSTEM_LINE));
+    noticeMax = Math.max(noticeMax, rows.length);
     for (const row of rows) { seen.set(`${row.kind}|${row.text}`, row.text); if (row.label) actionLinks.set(row.label, row.action); }
     const moved = await page.evaluate(() => {
       const el = document.querySelector("[data-testid='app-notice']");
@@ -305,6 +313,8 @@ async function noticeScenes(browser, origin, scheme, base) {
   for (const text of wanted) check(`${tag} 막힘 문장: ${text}`, joined.includes(text), joined.slice(0, 300));
   check(`${tag} 행동 링크는 둘: 다시 로그인 · 앱 열기`, JSON.stringify([...actionLinks.keys()].sort()) === JSON.stringify(["다시 로그인", "앱 열기"]), JSON.stringify([...actionLinks]));
   check(`${tag} 행동은 앱 화면으로`, [...actionLinks.values()].every((h) => h?.endsWith("/ai/external/apps")), JSON.stringify([...actionLinks]));
+  check(`${tag} system 행: 같은 문장이 두 번 보이지 않는다(보인 적 있고, 최대 1번)`, Math.max(...systemSeen) === 1, JSON.stringify(systemSeen));
+  check(`${tag} 막힘 문장 줄 수는 text 답 수와 같다(system 행 제외)`, [...seen.keys()].length === NOTICES.length, `${[...seen.keys()].length} vs ${NOTICES.length}`);
   check(`${tag} 가로 넘침 0`, (await overflowX(page)) === 0);
   // 위쪽·아래쪽 두 장
   await page.evaluate(() => { const el = document.querySelector("[data-testid='app-notice']"); let n = el?.parentElement; while (n && n.scrollHeight <= n.clientHeight + 4) n = n.parentElement; if (n) n.scrollTop = 0; });
@@ -323,7 +333,7 @@ async function oldServerScenes(browser, origin) {
   scenario.old = true;
   for (const [channelId, name] of [[marketing, "마케팅"], [blocked, "막힘"]]) {
     const { context, page } = await open(browser, origin, "light", viewport, channelId);
-    await page.getByText(channelId === marketing ? "견적 관련 메일 두 건" : "(1) site_off").first().waitFor({ timeout: 25_000 });
+    await page.getByText(channelId === marketing ? "견적 관련 메일 두 건" : SYSTEM_LINE).first().waitFor({ timeout: 25_000 });
     await page.waitForTimeout(1200);
     check(`옛 서버 #${name}: 꼬리 없음`, (await page.getByTestId("apps-used-tail").count()) === 0);
     check(`옛 서버 #${name}: 막힘 문장 없음`, (await page.getByTestId("app-notice").count()) === 0);

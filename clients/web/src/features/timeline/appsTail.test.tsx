@@ -305,6 +305,26 @@ describe("막힘 문장 (2.5절)", () => {
     expect(listPlugins).not.toHaveBeenCalled();
   });
 
+  it("system 행(정지·건너뜀 줄)에는 앱 문장을 붙이지 않는다: 같은 문장이 두 번 보이지 않는다", async () => {
+    const message = {
+      ...blocked({ kind: "site_off", site: "mac" }),
+      type: "system",
+      body: "내 맥이 꺼져 있어서 못 했어요.",
+    } as Message;
+    const view = await mount(row(message));
+    expect(view.querySelector('[data-testid="app-notice"]')).toBeNull();
+    expect(listPlugins).not.toHaveBeenCalled();
+    expect(view.textContent?.split("내 맥이 꺼져 있어서 못 했어요.").length).toBe(2);
+  });
+
+  it("로그인 끊김(실행 장소 없음, Agent Port 문): 문장만, 행동은 만들지 않는다", async () => {
+    const view = await mount(row(blocked({ kind: "login_lost", plugin_id: "gmail" })));
+    expect(view.querySelector('[data-testid="app-notice"]')?.textContent).toContain(
+      "Gmail 로그인이 끊겼어요."
+    );
+    expect(view.querySelector('[data-testid="app-notice-action"]')).toBeNull();
+  });
+
   it("모르는 kind 는 그리지 않는다", async () => {
     const view = await mount(row(blocked({ kind: "explode" })));
     expect(view.querySelector('[data-testid="app-notice"]')).toBeNull();
