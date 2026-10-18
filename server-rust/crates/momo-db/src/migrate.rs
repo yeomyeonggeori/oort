@@ -640,12 +640,17 @@ mod tests {
     /// `github_app_installation` routing table (both FORCE RLS behind the `app.github_app_admin` /
     /// `app.github_ingress` GUCs), and the tenant `github_link_claim`, `github_channel_subscription`
     /// and `github_receipt` (ENABLE + FORCE + `ws_isolation`).
+    ///
+    /// 141 is #3954's GitHub receive/link slice (ADR-0205 D3·D4·D5): the non-secret
+    /// `github_app_public` identity, the installation repository list, the workspace's dedicated
+    /// 「GitHub」 author, the narrow `app.github_link` GUC branches, and
+    /// `github_channel_subscription.private_confirmed_at`.
     #[test]
-    fn discovers_contiguous_migrations_001_to_140() {
+    fn discovers_contiguous_migrations_001_to_141() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=140).collect();
+        let expected: Vec<i64> = (1..=141).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -653,7 +658,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=140 under {}",
+            "expected contiguous 001..=141 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -661,7 +666,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("140_github_app"));
+            .starts_with("141_github_ingress"));
     }
 
     #[test]
