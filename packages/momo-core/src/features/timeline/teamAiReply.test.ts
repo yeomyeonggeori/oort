@@ -120,9 +120,10 @@ function ctx(overrides: Partial<AppsTailContext> = {}): AppsTailContext {
 describe("쓴 앱 꼬리", () => {
   it("예시 줄을 그대로 만든다 — 앱·횟수 · 명의 · 연결 주소 · 실행 장소 · 자기 보고", () => {
     const meta = parseTeamAiReplyMeta({ source: "hermes_gateway", run_id: "r1" }, ctx());
-    // 기본 꼬리는 한 줄이다: 앱·횟수 · 실행 장소. 나머지는 「자세히」 뒤에 접힌다.
-    expect(meta?.appsLine).toBe("쓴 앱: Gmail 검색 2회 · Hermes에서");
+    // 기본 꼬리는 한 줄이고 메시지마다 달라지는 사실(앱·횟수)만 싣는다. 나머지는 「자세히」 뒤.
+    expect(meta?.appsLine).toBe("쓴 앱: Gmail 검색 2회");
     expect(meta?.appsDetails).toEqual([
+      "Hermes에서 실행했어요.",
       "곽성재 명의로 썼어요.",
       "연결: gmailmcp.googleapis.com",
       APPS_TAIL_SELF_REPORT,
@@ -156,6 +157,7 @@ describe("쓴 앱 꼬리", () => {
     expect(meta?.appsDetails).toEqual([APPS_TAIL_SELF_REPORT]);
     expect(meta?.appsDetails.join()).not.toContain("명의");
     expect(meta?.appsLine).not.toContain("에서");
+    expect(meta?.appsDetails.join()).not.toContain("실행했어요");
   });
 
   it("도구 이름이 섞이면 동사를 붙이지 않고 횟수만 합친다", () => {
@@ -231,7 +233,7 @@ describe("쓴 앱 꼬리", () => {
     // 노출은 기본 꼬리 줄에 들어 있다(접지 않는다).
     expect(
       parseTeamAiReplyMeta({ source: "hermes_gateway" }, ctx({ audience: 12 }))?.appsLine
-    ).toBe("쓴 앱: Gmail 검색 2회 · Hermes에서 · 이 채널 12명에게 보여요");
+    ).toBe("쓴 앱: Gmail 검색 2회 · 이 채널 12명에게 보여요");
     for (const audience of [null, 0, -1, 1.5]) {
       expect(
         parseTeamAiReplyMeta({ source: "hermes_gateway" }, ctx({ audience: audience as never }))
@@ -258,6 +260,9 @@ describe("쓴 앱 꼬리", () => {
       ctx({ audience: 5, appsUsed: [{ pluginId: "github", tool: "get_issue", calls: 1 }] })
     );
     expect(github?.exposureLine).toBe("이 채널 5명에게 보여요");
+    // 개인 앱이 아니면 기본 줄에 노출을 싣지 않고(되풀이 방지) 자세히 뒤로 접는다.
+    expect(github?.appsLine).toBe("쓴 앱: GitHub 읽기 1회");
+    expect(github?.appsDetails).toContain("이 채널 5명에게 보여요");
     expect(github?.personalNote).toBeNull();
     expect(
       parseTeamAiReplyMeta({ source: "hermes_gateway" }, ctx({ audience: null }))?.personalNote

@@ -32,21 +32,20 @@ export function TeamAiReplyMeta({meta}: {meta: Meta}): React.JSX.Element {
     <View style={styles.wrap} testID="team-ai-reply-meta">
       {meta.appsLine !== null ? (
         <View style={styles.apps} testID="apps-used-tail">
-          <Sentence style={styles.meta} testID="apps-used-line">
-            {meta.appsLine}
-          </Sentence>
-          {/* 접힌 줄은 행의 낭독 라벨이 이미 읽는다: 손가락용 손잡이다. */}
-          <Pressable
-            onPress={() => setDetailsOpen(open => !open)}
-            hitSlop={space.sm}
-            accessibilityRole="button"
-            accessibilityState={{expanded: detailsOpen}}
-            testID="apps-details-toggle"
-            style={({pressed}) => [styles.detailToggle, pressed && styles.pressed]}>
-            <Text style={styles.sourceTitle}>
+          {/* 접힌 줄은 행의 낭독 라벨이 이미 읽는다: 「자세히」는 손가락용 손잡이이고 줄 끝에 붙는다. */}
+          <Sentence style={styles.meta}>
+            <Text testID="apps-used-line">{meta.appsLine}</Text>
+            {' '}
+            <Text
+              onPress={() => setDetailsOpen(open => !open)}
+              accessibilityRole="button"
+              accessibilityState={{expanded: detailsOpen}}
+              suppressHighlighting
+              testID="apps-details-toggle"
+              style={styles.sourceTitle}>
               {detailsOpen ? APPS_DETAIL_TOGGLE.close : APPS_DETAIL_TOGGLE.open}
             </Text>
-          </Pressable>
+          </Sentence>
           {detailsOpen
             ? meta.appsDetails.map(detail => (
                 <Sentence key={detail} style={styles.meta} testID="apps-detail-line">

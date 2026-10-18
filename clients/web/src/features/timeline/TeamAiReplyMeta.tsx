@@ -48,13 +48,14 @@ export function TeamAiReplyMeta({ meta }: { meta: Meta }) {
             <span aria-hidden="true" data-testid="apps-used-line">{meta.appsLine}</span>
             <span className="sr-only">{meta.appsSpoken}</span>
             {/* 접힌 줄은 낭독에서 이미 읽혔다: 버튼은 눈으로 펴는 손잡이다. */}
+            {" "}
             <button
               type="button"
               aria-expanded={detailsOpen}
               aria-controls={detailsId}
               data-testid="apps-details-toggle"
               onClick={() => setDetailsOpen((open) => !open)}
-              className="press ml-2 rounded-sm py-1 text-signal-text underline decoration-line-strong underline-offset-2 hover:text-ink focus-visible:focus-ring"
+              className="press rounded-sm py-1 text-signal-text underline decoration-line-strong underline-offset-2 hover:text-ink focus-visible:focus-ring"
             >
               {detailsOpen ? APPS_DETAIL_TOGGLE.close : APPS_DETAIL_TOGGLE.open}
             </button>

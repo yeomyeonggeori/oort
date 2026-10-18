@@ -199,7 +199,7 @@ describe("쓴 앱 꼬리 (E8·E10)", () => {
     const view = await mount(row(reply(HERMES_PROPS)));
     expect(fetchAgentRunDetail).toHaveBeenCalledWith(WS, RUN);
     expect(view.querySelector('[data-testid="apps-used-line"]')?.textContent).toBe(
-      "쓴 앱: Gmail 검색 2회 · Hermes에서"
+      "쓴 앱: Gmail 검색 2회"
     );
     // 접힌 동안 명의·연결 주소는 화면에 없다.
     expect(view.querySelector('[data-testid="apps-details"]')).toBeNull();
@@ -207,6 +207,7 @@ describe("쓴 앱 꼬리 (E8·E10)", () => {
     expect(toggle?.getAttribute("aria-expanded")).toBe("false");
     act(() => toggle?.click());
     const details = view.querySelector('[data-testid="apps-details"]')?.textContent ?? "";
+    expect(details).toContain("Hermes에서 실행했어요.");
     expect(details).toContain("곽성재 명의로 썼어요.");
     expect(details).toContain("연결: gmailmcp.googleapis.com");
     // 자기 보고 안내가 화면에 있다(수용기준 9).
@@ -217,7 +218,7 @@ describe("쓴 앱 꼬리 (E8·E10)", () => {
   it("채널이면 같은 한 줄에 「이 채널 n명에게 보여요」, 개인 앱의 「요약만」 원칙·확인 불가 안내는 자세히에", async () => {
     const view = await mount(row(reply(HERMES_PROPS)), 12);
     expect(view.querySelector('[data-testid="apps-used-line"]')?.textContent).toBe(
-      "쓴 앱: Gmail 검색 2회 · Hermes에서 · 이 채널 12명에게 보여요"
+      "쓴 앱: Gmail 검색 2회 · 이 채널 12명에게 보여요"
     );
     act(() => view.querySelector<HTMLButtonElement>('[data-testid="apps-details-toggle"]')?.click());
     const details = view.querySelector('[data-testid="apps-details"]')?.textContent ?? "";

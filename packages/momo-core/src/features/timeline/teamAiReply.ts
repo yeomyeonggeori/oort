@@ -285,14 +285,16 @@ function appsTail(ctx: AppsTailContext, entries: readonly AppsUsedEntry[]): Apps
       : null;
   const exposure = audience === null ? null : `이 채널 ${audience}명에게 보여요`;
   const personalNote = audience !== null && personal ? APPS_PERSONAL_NOTE : null;
-  // 기본 꼬리는 **한 줄**이다(메시지마다 영수증이 되지 않게): 앱·횟수 · 실행 장소 · 노출.
-  const parts = [
-    apps.join(", "),
-    ctx.site ? `${appsRunSiteLabel(ctx.site)}에서` : null,
-    exposure,
-  ].filter((part): part is string => part !== null);
-  // 나머지는 「자세히」 뒤에 둔다: 명의·연결 주소(oort 가 아는 값), 자기 보고 안내, 개인 앱 안내.
+  // 기본 꼬리는 **한 줄**이고 메시지마다 달라지는 사실만 싣는다(채널·에이전트 상수를 되풀이하지
+  // 않는다): 앱·횟수. 채널에 새기 쉬운 **개인 앱**일 때만 노출 수가 그 줄에 붙는다.
+  const parts = [apps.join(", "), personal ? exposure : null].filter(
+    (part): part is string => part !== null
+  );
+  // 나머지는 「자세히」 뒤에 둔다: 실행 장소, 노출(개인 앱이 아닐 때), 명의·연결 주소(oort 가 아는
+  // 값), 자기 보고 안내, 개인 앱 안내.
   const details = [
+    ctx.site ? `${appsRunSiteLabel(ctx.site)}에서 실행했어요.` : null,
+    personal ? null : exposure,
     owner ? `${owner} 명의로 썼어요.` : null,
     shown.length > 0
       ? `연결: ${shown.join(", ")}${domains.length > shown.length ? ` 외 ${domains.length - shown.length}곳` : ""}`
