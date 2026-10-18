@@ -14,7 +14,10 @@ import '../src/boot/coreHost';
 
 import {endedRunIds, resetEndedRuns} from '../src/features/agents/endedRuns';
 import {createChannelRail, type ChannelRail} from '../src/realtime/channelRail';
-import {useTimeline} from '../src/features/conversation/useTimeline';
+import {
+  RECOVERY_MARKER_TTL_MS,
+  useTimeline,
+} from '../src/features/conversation/useTimeline';
 import {
   __resetSessionStore,
   sessionPort,
@@ -293,6 +296,59 @@ describe('받기 — 실시간과 리플레이', () => {
       seq: 26,
       source: 'replay',
     });
+  });
+
+  it('복구 표지는 표지보다 새 메시지가 오면 걷힌다 (#4016)', async () => {
+    installFetch({messages: () => jsonResponse(200, {messages: [message(1)]})});
+    const {rail, subscription} = makeRail();
+    const {result} = renderTimeline(rail);
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    act(() => {
+      subscription().__subscribed({recovered: false});
+    });
+    act(() => {
+      subscription().__subscribed({recovered: true, publications: [frame(2), frame(3)]});
+    });
+    await waitFor(() => expect(result.current.recoveryMarkers.length).toBe(1));
+    // 복구된 구간 안의 행(seq <= 표지)은 표지를 걷지 않는다.
+    act(() => {
+      subscription().__emit('publication', {data: frame(3)});
+    });
+    expect(result.current.recoveryMarkers.length).toBe(1);
+
+    act(() => {
+      subscription().__emit('publication', {data: frame(4)});
+    });
+    expect(result.current.recoveryMarkers).toEqual([]);
+  });
+
+  it('복구 표지는 새 메시지가 없어도 일정 시간 뒤 걷힌다 (#4016)', async () => {
+    jest.useFakeTimers();
+    try {
+      installFetch({messages: () => jsonResponse(200, {messages: [message(1)]})});
+      const {rail, subscription} = makeRail();
+      const {result} = renderTimeline(rail);
+      await waitFor(() => expect(result.current.status).toBe('ready'));
+      act(() => {
+        subscription().__subscribed({recovered: false});
+      });
+      act(() => {
+        subscription().__subscribed({recovered: true, publications: [frame(2)]});
+      });
+      await waitFor(() => expect(result.current.recoveryMarkers.length).toBe(1));
+
+      act(() => {
+        // waitFor 가 가짜 시계를 몇 번 돌렸을 수 있어 경계에서 한참 앞(−1초)과 뒤(+1초)로 잰다.
+        jest.advanceTimersByTime(RECOVERY_MARKER_TTL_MS - 1_000);
+      });
+      expect(result.current.recoveryMarkers.length).toBe(1);
+      act(() => {
+        jest.advanceTimersByTime(2_000);
+      });
+      expect(result.current.recoveryMarkers).toEqual([]);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('복구되지 않은 재구독은 REST ?after 로 메운다', async () => {

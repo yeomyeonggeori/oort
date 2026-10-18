@@ -12,7 +12,7 @@ import {
   fitComposerPlaceholder,
   type ComposerPlaceholderClause,
 } from '@momo/core/features/chat/composerCopy';
-import {attachParticle, type RecipientKind} from '@momo/core/lib/koreanParticle';
+import type {RecipientKind} from '@momo/core/lib/koreanParticle';
 import {
   containsSecretKey,
   SECRET_KEY_BLOCK_COPY,
@@ -1728,18 +1728,6 @@ export function Composer({
             {dmHint}
           </Text>
         ) : null
-      ) : dmAgent && text.trim() === '' ? (
-        <Text style={styles.hint}>
-          {/* 이 자리에 병기형을 적는 것은 번역이 아니라 **기계가 사람 앞에서
-              결정을 미루는 것**이다 (goal RN-B4c / #1027). 규칙은 마지막 음절
-              하나로 전부 결정되고, 그 규칙은 이 레포에 이미 있다 —
-              `@momo/core/lib/koreanParticle`. 라틴·숫자로 끝나는 이름은 열린
-              형태를 받는다: 「Hermes가」, 「루나가」, 「김인턴이」. */}
-          {`멘션 없이 바로 말하면 ${attachParticle(
-            dmAgent.displayName,
-            'subject',
-          )} 답합니다.`}
-        </Text>
       ) : null}
 
       {noticeShown ? (

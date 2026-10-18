@@ -46,10 +46,12 @@ import {
   activityDetail,
   activitySuffix,
   activityText,
+  isRespondingLine,
   TURN_STALE_SENTENCE,
   UNKNOWN_AGENT_NAME,
   type AgentActivityLine,
 } from "@/features/agents/turnCopy";
+import { RespondingAvatar, RespondingDots } from "@/features/agents/RespondingIndicator";
 import { memberFor, memberNameParts } from "@/features/workspace/useWorkspace";
 import { openWorkPanel } from "@/features/agents/workLogStore";
 import {
@@ -264,7 +266,7 @@ function ComposerHint({
  * claim must not look as confirmed as a live one) and one warn-colored line
  * says why, in place, which is what an offline banner is (§5) and not a toast.
  */
-function AgentActivityBar({
+export function AgentActivityBar({
   turns,
   directory,
   nowMs,
@@ -301,9 +303,16 @@ function AgentActivityBar({
       {lines.map((line) => {
         const turn = turns.find((t) => t.memberId === line.memberId);
         const runId = turn?.runId;
+        // 에이전트가 요청을 가져가 답을 쓰는 중이면 얼굴과 점이 붙는다(#4020). 끊긴
+        // 레일(`!live`)에서는 둘 다 뺀다: 아무도 일하는 중이 아닌 줄에 움직임을 두지 않는다.
+        const responding = live && isRespondingLine(line);
         const body = (
           <>
+            {responding && (
+              <RespondingAvatar directory={directory} memberId={line.memberId} />
+            )}
             <ActivityText line={line} live={live} />
+            {responding && <RespondingDots />}
             {/* 서버가 아는 run의 근거 한 줄(n분째 기다려요 · 앞에 m건 / 가져간 뒤
                 n분째 소식이 없어요 / 마지막 보고 n분 전). 사실만 적고 판정은
                 하지 않는다 — 「끊김」은 서버가 알릴 때만 나온다. */}

@@ -90,6 +90,32 @@ describe('머리 — 원형 뒤로 · ⋮ 메뉴 · 허들 자리 · 연결 띠'
     expect(42 + back.props.hitSlop * 2).toBe(TOUCH_TARGET);
   });
 
+  it('DM 머리는 상대 얼굴 + 이름 한 줄이고, 에이전트면 상태 점이 얼굴에 붙는다 (#4016)', () => {
+    header({
+      title: '김인턴',
+      kind: 'dm',
+      peerId: AGENT,
+      peerStatusTone: 'ok',
+      peerStatusLabel: '응답함',
+    });
+    // 점은 낭독에서 숨으므로 제목이 상태 낱말을 대신 읽는다.
+    expect(screen.getByTestId('conversation-title').props.accessibilityLabel).toBe('김인턴, 응답함');
+    expect(screen.getByTestId('conversation-title-face')).toBeTruthy();
+    expect(screen.getByTestId('avatar-agent', {includeHiddenElements: true})).toBeTruthy();
+    expect(screen.getByTestId('conversation-title-status-dot', {includeHiddenElements: true})).toBeTruthy();
+    expect(screen.queryByTestId('conversation-subtitle')).toBeNull();
+  });
+
+  it('점이 없으면(사람·모름) 얼굴만 선다, 채널 머리는 그대로다 (#4016)', () => {
+    const person = header({title: '곽성재', kind: 'dm', peerId: HUMAN, peerStatusTone: null});
+    expect(screen.getByTestId('avatar-human', {includeHiddenElements: true})).toBeTruthy();
+    expect(screen.queryByTestId('conversation-title-status-dot', {includeHiddenElements: true})).toBeNull();
+    person.unmount();
+    header({kind: 'public'});
+    expect(screen.queryByTestId('conversation-title-face')).toBeNull();
+    expect(screen.getByTestId('conversation-title-glyph-public', {includeHiddenElements: true})).toBeTruthy();
+  });
+
   it('⋮ 는 메뉴를 열고, 고른 항목을 실행한다 — 고정 목록의 문이 여기로 왔다', () => {
     const run = jest.fn();
     const spy = jest
@@ -170,8 +196,8 @@ describe('머리 부제 — 방이 무엇인지만, 모르는 것은 짓지 않�
     expect(conversationSubtitle(null, null, DIRECTORY)).toBeUndefined();
   });
 
-  it('DM: 에이전트면 「에이전트」, 사람은 접속 정보가 없으므로 비운다', () => {
-    expect(conversationSubtitle({kind: 'dm'}, {kind: 'agent'}, DIRECTORY)).toBe('에이전트');
+  it('DM: 에이전트도 사람도 부제가 없다 — 얼굴 + 이름 한 줄이다 (#4016)', () => {
+    expect(conversationSubtitle({kind: 'dm'}, {kind: 'agent'}, DIRECTORY)).toBeUndefined();
     expect(conversationSubtitle({kind: 'dm'}, {kind: 'human'}, DIRECTORY)).toBeUndefined();
   });
 });

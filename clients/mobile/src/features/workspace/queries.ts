@@ -110,6 +110,38 @@ export function useChannels(workspaceId: string) {
   return {...query, groups};
 }
 
+/**
+ * 방금 연 DM 을 채널 캐시에 넣는다 (#4016).
+ *
+ * `openDirectMessage` 는 서버가 정한 채널을 돌려주지만, 채널 목록 캐시는 모른다. 아직 DM 이 없던
+ * 에이전트를 처음 눌러 연 대화는 목록에 없어서 `ConversationScreen` 이 `channel === null` 로 서고,
+ * 그러면 DM 머리의 상대 얼굴·「에이전트」 부제·자동 응답 안내가 전부 빠진다(3047 실기기: grok DM
+ * 머리에 이름만). 응답을 캐시에 먼저 넣어 첫 그림부터 DM 으로 서게 하고, 서버 목록은 뒤따라
+ * 다시 읽어 맞춘다.
+ */
+export function useRememberOpenedDm(
+  workspaceId: string,
+): (channel: Channel) => void {
+  const client = useQueryClient();
+  return useCallback(
+    (channel: Channel) => {
+      client.setQueryData<Channel[]>(
+        workspaceKeys.channels(workspaceId),
+        previous => {
+          const rest = (previous ?? []).filter(
+            known => idKey(known.id) !== idKey(channel.id),
+          );
+          return [...rest, channel];
+        },
+      );
+      void client.invalidateQueries({
+        queryKey: workspaceKeys.channels(workspaceId),
+      });
+    },
+    [client, workspaceId],
+  );
+}
+
 export function useReadStates(workspaceId: string) {
   const query = useQuery({
     queryKey: workspaceKeys.readState(workspaceId),

@@ -2,6 +2,7 @@ import type {AgentRunProgress} from '@momo/core/lib/api';
 import {isOpenRunPhase} from '@momo/core/features/agents/runPhase';
 import {
   doorbellFactOf,
+  keepsRunReceipt,
   runStatusLine,
   wantsDoorbellFact,
 } from '@momo/core/features/agents/runStatusLine';
@@ -23,6 +24,10 @@ import {useTickingNow} from './workingSignal';
 // (`runStatusLine`)를 읽는다:
 //
 //   그록봇 · 받았어요 → 깨우는 신호 보냄 → 가져감 → 작업 중 · 12분째 · 마지막 보고 1분 전
+//
+// #4020: 평소의 영수증(받았어요 → 가져감 → 완료)은 대화 타임라인 본 줄에서 뺐다. 진행은
+// 컴포저 위 「답하는 중」이 말한다. 이 줄은 사람이 알아야 하는 상태(실패·시간 초과·승인
+// 대기·소식 끊김·깨우는 신호 불발)에만 선다 — 판정은 core `keepsRunReceipt`.
 //
 // 줄을 누르면 그 run의 기록 시트가 열린다. run 목록은 타임라인이 한 번 모아 행에 넘긴다.
 // 진행 읽기를 싣지 않는 옛 서버에서는 넘길 run이 없어 줄이 서지 않는다.
@@ -89,7 +94,7 @@ function RunStatusRow({
   progress: AgentRunProgress;
   directory: Directory;
   onOpen: () => void;
-}): React.JSX.Element {
+}): React.JSX.Element | null {
   const styles = useStyles(buildStyles);
   const {workspaceId} = useSession();
   const key = progress.id.toLowerCase();
@@ -97,7 +102,11 @@ function RunStatusRow({
   const ledger = useQuery({...runLedgerQueryOptions(workspaceId, key), enabled: wants});
   useRunLedgerFrames(wants ? key : null, ledger.refetch);
   const doorbell = useMemo(() => doorbellFactOf(ledger.data?.events), [ledger.data]);
-  const nowMs = useTickingNow(isOpenRunPhase(progress.phase));
+  const keeps = keepsRunReceipt(progress, doorbell);
+  const nowMs = useTickingNow(keeps && isOpenRunPhase(progress.phase));
+  if (!keeps) {
+    return null;
+  }
   const status = runStatusLine(progress, doorbell, nowMs);
   const name = agentLabel(
     memberNameParts(directory, progress.agentMemberId, UNKNOWN_AGENT_NAME),

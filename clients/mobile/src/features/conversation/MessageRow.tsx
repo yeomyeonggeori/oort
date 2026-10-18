@@ -106,6 +106,7 @@ import {appNote} from './appVoice';
 import {Avatar} from './Avatar';
 import {CONV} from './convDesign';
 import {AiConnectSuggestion} from './AiConnectSuggestion';
+import {SettingsOpenSuggestion} from './SettingsOpenSuggestion';
 import {
   TEAM_AI_DELEGATE_ACTION_PREFIX,
   TeamAiDelegateStrip,
@@ -2982,7 +2983,12 @@ function MessageRowInner({
             ) : null}
 
             {/* 에이전트가 제안한 연결 카드(#2948 GC-7). 본문 아래, 보는 사람별로. */}
-            {suggestion ? (
+            {suggestion?.commandId === 'settings.open' ? (
+              <SettingsOpenSuggestion
+                card={suggestion}
+                viewerMemberId={actions?.myMemberId}
+              />
+            ) : suggestion ? (
               <AiConnectSuggestion
                 card={suggestion}
                 viewerMemberId={actions?.myMemberId}

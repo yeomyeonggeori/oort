@@ -98,7 +98,7 @@ describe("사람은 작성 중, 에이전트는 작업 중", () => {
     }
   });
 
-  it("keeps the agent turn suffix saying 작업 중, so the two never converge", () => {
+  it("keeps the agent turn suffix off 작성 중, so the two never converge", () => {
     // 반대 방향도 못박는다: 에이전트 문구가 「작성 중」으로 새면 봇 래핑이다.
     const agentLine = activitySuffix({
       key: "k",
@@ -106,7 +106,8 @@ describe("사람은 작성 중, 에이전트는 작업 중", () => {
       name: { name: "김인턴" },
       state: "working",
     });
-    expect(agentLine).toContain("작업 중");
+    // 대화 화면의 이 줄은 #4020부터 「답하는 중」이다(사이드바 알약은 계속 「작업 중」).
+    expect(agentLine).toContain("답하는 중");
     expect(agentLine).not.toContain("작성 중");
     expect(typingSentence(["이도현"])).toContain("작성 중");
   });

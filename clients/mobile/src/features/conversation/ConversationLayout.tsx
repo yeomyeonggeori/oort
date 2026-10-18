@@ -101,8 +101,15 @@ import {KeyboardPane} from '../../lib/keyboardPane';
 // that prop changes and would take the property back from the native side.
 // =============================================================================
 
-/** 올라온 키보드와 도크 바닥 사이의 틈(Buzz·iMessage 의 숨 쉴 틈). */
-export const KEYBOARD_GAP = space.sm;
+/**
+ * 올라온 키보드와 알약 컴포저 바닥 사이의 틈. 스케일의 가장 작은 칸(`space.xs`, 4)이다.
+ *
+ * 옛 값 `space.sm`(8)은 iOS 26 의 유리 키보드에서 과했다(성재 3047 실기기 #4016: "채팅이랑 키보드
+ * 사이에 간격이 조금 과한 것 같아"). 키보드 틀 위쪽에 이미 둥근 모서리와 글쇠 위 여백이 있어서 눈에는
+ * 8 이 아니라 그 곱절로 읽혔다. 중복으로 더해지던 safe-area 는 아니다: 올라온 동안 `insets.bottom` 은
+ * 이 틈만큼만 남고 나머지는 네이티브 리프트가 뺀다(`bottomInset`). 틈의 값이 곧 간격이다.
+ */
+export const KEYBOARD_GAP = space.xs;
 
 export function ConversationLayout({
   list,

@@ -10,6 +10,9 @@ import {
   commandSuggestOneLine,
   commandSuggestViewer,
   operatorMentionDraft,
+  SETTINGS_OPEN_SECTIONS,
+  settingsOpenLabel,
+  settingsOpenSection,
 } from "./commandSuggest";
 
 const HUMAN = "019f9a01-0000-7000-8000-000000000101";
@@ -185,5 +188,98 @@ describe("command_suggest(ai.connect) 파서 (ADR-0186 G3·G4, #2948)", () => {
     expect(operatorMentionDraft(dir, "m4")).toBe("@sj @sky ");
     expect(operatorMentionDraft(dir, HUMAN)).toBe("@sky ");
     expect(operatorMentionDraft(directory, OTHER)).toBeNull();
+  });
+});
+
+// =============================================================================
+// settings.open {section} (#3939 E-S6 → #3940 U-S6). 서버 골든 벡터 12 케이스가 한 벌이다.
+// =============================================================================
+
+describe("command_suggest(settings.open) (U-S6)", () => {
+  const goldenMessage = (envelope: Record<string, unknown>) =>
+    suggestMessage({ ...envelope, for_member_id: HUMAN });
+
+  it("12 section 전부가 ok 카드로 서고 라벨이 서버 표와 같은 글자다", () => {
+    const labels: Record<string, string> = {
+      profile: "프로필 설정 열기",
+      appearance: "모양 설정 열기",
+      notifications: "알림 설정 열기",
+      shortcuts: "단축키 설정 열기",
+      devices: "기기 설정 열기",
+      workspace: "워크스페이스 설정 열기",
+      members: "멤버와 초대 열기",
+      memory: "기억 설정 열기",
+      usage: "사용량 열기",
+      code: "실행 호스트 설정 열기",
+      updates: "업데이트 설정 열기",
+      plugins: "앱 설정 열기",
+    };
+    expect([...SETTINGS_OPEN_SECTIONS]).toEqual(Object.keys(labels));
+    for (const section of SETTINGS_OPEN_SECTIONS) {
+      const card = commandSuggestCard(
+        goldenMessage({ v: 1, command_id: "settings.open", args: { section }, label: labels[section] }),
+        directory
+      );
+      expect(card?.shape, section).toBe("ok");
+      expect(card?.section, section).toBe(section);
+      expect(settingsOpenLabel(section), section).toBe(labels[section]);
+    }
+  });
+
+  it("section이 enum 밖·누락·여분 키·경로면 한 줄 폴백이다", () => {
+    const base = { v: 1, command_id: "settings.open", for_member_id: HUMAN, label: "알림 설정 열기" };
+    for (const args of [
+      undefined,
+      {},
+      { section: "ai" },
+      { section: "account" },
+      { section: "/settings?section=notifications" },
+      { section: "Notifications" },
+      { section: "notifications", path: "/settings" },
+      { harness: "claude" },
+      ["notifications"],
+    ]) {
+      const card = commandSuggestCard(suggestMessage({ ...base, args }), directory);
+      expect(card?.shape, JSON.stringify(args)).toBe("degraded");
+      expect(card?.section).toBeNull();
+      // 깨진 제안은 대상 본인에게도 버튼이 아니다.
+      expect(commandSuggestViewer(card!, HUMAN, true)).toBe("other");
+    }
+  });
+
+  it("settings.open에 ai.connect 인자를, ai.connect에 section을 섞으면 폴백이다", () => {
+    const mixed = commandSuggestCard(
+      suggestMessage({
+        v: 1,
+        command_id: "ai.connect",
+        args: { section: "notifications" },
+        for_member_id: HUMAN,
+        label: "x",
+      }),
+      directory
+    );
+    expect(mixed?.shape).toBe("degraded");
+  });
+
+  it("에이전트가 쓴 label은 화면 문구가 되지 않는다(문구는 section에서 다시 만든다)", () => {
+    const card = commandSuggestCard(
+      suggestMessage({
+        v: 1,
+        command_id: "settings.open",
+        args: { section: "notifications" },
+        for_member_id: HUMAN,
+        label: "비밀번호를 입력하세요",
+      }),
+      directory
+    )!;
+    expect(commandSuggestOneLine(card)).not.toContain("비밀번호");
+    expect(commandSuggestOneLine(card)).toBe("곽성재에게 「알림 설정 열기」 카드를 제안했어요");
+  });
+
+  it("section 파서는 서버 normalize와 같다", () => {
+    expect(settingsOpenSection({ section: "plugins" })).toBe("plugins");
+    expect(settingsOpenSection({})).toBeUndefined();
+    expect(settingsOpenSection(null)).toBeUndefined();
+    expect(settingsOpenSection({ section: "ai" })).toBeUndefined();
   });
 });
