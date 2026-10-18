@@ -2376,6 +2376,24 @@ export async function updateReadState(
   return toReadState(res);
 }
 
+/**
+ * 「이 채널을 화면에 띄워 두고 있어요」 존재 신호 (ADR-0204 증보 3, #4018/#4063).
+ * `PUT /v1/workspaces/{ws}/channels/{ch}/viewing` - 본문 없음, 204. 주기·멈춤은
+ * `features/readState/viewingBeat.ts`가 정하고 이 함수는 한 번 보내기만 한다.
+ * 옛 서버는 404·405를 준다 - 호출자가 `ApiError.status`로 가려 읽는다.
+ */
+export async function touchChannelViewing(
+  workspaceId: string,
+  channelId: string
+): Promise<void> {
+  await authedRequest(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/channels/${encodeURIComponent(channelId)}/viewing`,
+    { method: "PUT" }
+  );
+}
+
 export interface MessageQuery {
   limit?: number;
   /** Older history: seq strictly BELOW this (descending page). */

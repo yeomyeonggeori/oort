@@ -113,6 +113,7 @@ import {usePersonalAgentCall} from '../features/conversation/usePersonalAgentCal
 import {useTimeline} from '../features/conversation/useTimeline';
 import {useMarkRead} from '../features/inbox/useInbox';
 import {visitFlushReason} from '../features/readState/advertise';
+import {useViewingBeat} from '../features/readState/useViewingBeat';
 import {
   foldVisitBoundary,
   type VisitBoundary,
@@ -751,6 +752,9 @@ export default function ConversationScreen({
     );
     return () => subscription.remove();
   }, [flushReadCursor]);
+
+  // 「보고 있음」 존재 신호 (ADR-0204 증보 3, #4063): 앞에 있는 동안만 15초 주기.
+  useViewingBeat(workspaceId, channelId);
 
   // ---- 「작성 중」 (ADR-0149) ------------------------------------------------
   //
