@@ -1941,13 +1941,27 @@ async fn hosted_skip_notice(
                 &agent.display_name,
                 agent.owner_display_name.as_deref(),
             )),
-            props: hosted_skip_notice_props(
-                reason,
-                agent.member_id,
-                send.author_member_id,
-                thread_key,
-                send.message_id,
-            ),
+            props: {
+                let mut props = hosted_skip_notice_props(
+                    reason,
+                    agent.member_id,
+                    send.author_member_id,
+                    thread_key,
+                    send.message_id,
+                );
+                // ADR-0113 증보 2 E8 (#4054): "no live connection" is the server's own
+                // observation of a site that is off, said only for an agent that has
+                // apps attached (the surface that reads this key). No `site`: a
+                // hosted connection is not known to be a Mac or Hermes from here.
+                if let (true, Some(notice), Some(object)) = (
+                    reason == HostedSkipReason::ConnectionUnavailable,
+                    momo_agent::connection_unavailable_app_notice(agent.connector_owner.is_some()),
+                    props.as_object_mut(),
+                ) {
+                    object.insert(momo_agent::PROP_APP_NOTICE.into(), notice.to_json());
+                }
+                props
+            },
             // Where the caller spoke: the thread they were in, or the main
             // timeline right under their message (the paused line's place).
             root_id: send.root_id,

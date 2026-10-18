@@ -13,6 +13,7 @@ pub mod agent_port_tools;
 pub mod agent_provider_pin;
 pub mod agent_runs;
 pub mod agents;
+pub mod app_notice;
 pub mod approvals;
 pub mod apps_used;
 /// ADR-0151 — the Drive attachment surface: upload session, completion, and the
@@ -89,6 +90,7 @@ pub mod terminal_attach;
 /// ADR-0170 — link unfurl settings, message-level remove, image proxy.
 pub mod unfurl;
 pub mod usage;
+pub mod viewing;
 /// #1265 — public signed + Slack-compatible ingress (ADR-0115).
 pub mod webhook_ingress;
 /// #1222 — 인바운드 웹훅 설치 관리 (ADR-0115).

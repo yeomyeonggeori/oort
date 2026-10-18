@@ -1,5 +1,5 @@
 -- =============================================================================
--- 141_github_ingress.sql — #3954 E-GH2 (ADR-0205 D3·D4·D5·D6)
+-- 142_github_ingress.sql — #3954 E-GH2 (ADR-0205 D3·D4·D5·D6)
 --
 -- 140 (E-GH1) stored the App, the installation routing table, the one-time claim, the channel
 -- subscription and the delivery ledger. Receiving events and linking an installation needs four

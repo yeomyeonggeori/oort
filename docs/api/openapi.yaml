@@ -10065,6 +10065,48 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/channels/{channelId}/viewing:
+    put:
+      tags: [read-state]
+      operationId: touchChannelViewing
+      summary: Presence heartbeat - "I have this channel on screen".
+      description: >
+        A client that is showing the channel (app in the foreground, channel
+        open) sends this about every 15 seconds. The server stamps the
+        caller's last-seen time for the channel; the push judgment treats a
+        stamp younger than 30 seconds as "looking at this channel" and holds
+        the push (ADR-0204 amendment 3, #4018). Unlike the read cursor it needs
+        no `seq`, so it covers a long streamed answer. Stop sending when the
+        channel leaves the screen or the app goes to the background; the
+        stamp expires on its own. The owner is always the authenticated
+        principal; there is no body and no member id. A beat younger than 5
+        seconds after the previous one is accepted and not rewritten. A
+        client that never sends it keeps the cursor-only behavior.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      responses:
+        "204":
+          description: Recorded.
+        "400":
+          description: The ids are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Not a member of this channel, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
   /v1/workspaces/{workspaceId}/dms:
     get:
       tags: [dms]
@@ -11145,7 +11187,31 @@ paths:
         `connector.tool_used` audit row (ids, tool names and counts only), and
         the run read returns it as a top-level `appsUsed` array, absent when
         nothing was reported. The Hermes REST gateway completion accepts the same
-        `appsUsed` (a malformed one is a 400). Each tool binds an existing domain rather than a second one, and job authority travels only as an opaque `leaseHandle` that
+        `appsUsed` (the code drops a malformed one so telemetry cannot cost the
+        answer; the Agent Port refuses it). ADR-0113 증보 2 E8·E10 (#4054):
+        the answer message written by the completion now also carries the
+        validated `appsUsed` in its own `props.appsUsed` (so a row need not
+        fetch the run), and both doors accept one more optional argument,
+        `appNotice` (the same camelCase name on the Port and the REST body):
+        `{kind, pluginId?, host?}` where `kind` is one of
+        `login_lost`, `grant_revoked`, `rate_limited`, `egress_blocked`,
+        `not_allowed`, `host` is a bare lower-case DNS name (two or more labels, not an IP)
+        allowed only with `egress_blocked`, and nothing else (no `site`, no sentence; an unknown
+        key, a server-only kind such as `site_off`, or a malformed value
+        refuses the whole notice with -32602 on the Port and is dropped on the
+        REST door). It is the site's own report; the server adds `site` from
+        the door (`hermes` for the REST gateway, none for a hosted
+        connection) and writes `props.app_notice` on the answer; a `pluginId` that
+        is not an official, unrevoked registry app is dropped (the kind stays).
+        A completion that writes no answer message (a successful run with no
+        text) writes neither `props` key. A mention job
+        whose granted apps include a personal one (`gmail`, `google-calendar`,
+        `google-drive`) also carries `app_result_policy`
+        `{channel_reply: "summary_only", plugin_ids, instruction}` beside
+        `tool_grants` — an instruction to a self-reporting site, not
+        enforcement. The Hermes REST gateway job payload carries it as is; the
+        Agent Port's `oort_jobs_claim` projection delivers it as
+        `work.appResultPolicy` (the grant evidence itself is not projected). Each tool binds an existing domain rather than a second one, and job authority travels only as an opaque `leaseHandle` that
         carries the channel its work came from, so the confirming human's exact
         channel grant is re-checked on every later verb. Arguments are validated
         against the tool's published `inputSchema` before execution, so
@@ -18634,7 +18700,12 @@ components:
             `momo.stream` (the streaming staleness marker) and
             `momo.harnessRefine` (ADR-0158 — send the `harnessRefine` block
             instead) and `answers_message_id` (ADR-0204 D8 — the message a run's
-            closing line answers, written only by the server). Because the map
+            closing line answers, written only by the server) and, from
+            ADR-0113 증보 2 E8·E10 (#4054), `app_notice`, `appsUsed` and its
+            `apps_used` spelling (the blocked-app sentence and the 「쓴 앱」
+            receipt printed under an agent's name — written only by the
+            completion and the sweeps, so a caller-sent value is dropped, not
+            refused). Webhook-ingress `props` lose the same three. Because the map
             is flat, a structured block cannot be sent through it at all.
         runId:
           type: string
@@ -19348,7 +19419,23 @@ components:
           description: >
             Arbitrary JSON object; includes the server-computed
             `mention_member_ids` array when the message mentions members.
-            Omitted when empty. On a `type: tool_result` row the props are
+            ADR-0113 증보 2 E8·E10 (#4054) adds two **server-owned** optional
+            keys on an agent's answer (never present unless the server wrote
+            them; a client or agent cannot send them): `appsUsed`, the answer's
+            run's validated 「쓴 앱」 report `[{pluginId, tool, calls}]` (the
+            execution site's own report, not a measurement; the key is absent
+            when nothing was reported, never an empty list), and `app_notice`,
+            why an app blocked the run: `{kind, plugin_id?, site?, host?}` with
+            `kind` one of `site_off`, `site_silent`, `login_lost`,
+            `grant_revoked`, `rate_limited`, `egress_blocked`, `not_allowed`.
+            `site` (`mac` or `hermes`) is the server's own knowledge of the
+            door and is absent when it cannot tell; `host` appears only with
+            `egress_blocked`. `site_off` (no live hosted connection, on the
+            skip line) and `site_silent` (the stall sweep's line for a lease
+            nobody renewed; a job no site took for a day says `site_off`) are
+            the server's observations and only for an agent with apps attached;
+            the other five are the execution site's own report, shape-checked
+            only. `working` is not emitted. Omitted when empty. On a `type: tool_result` row the props are
             `{call_id, output, is_error}` and `body` repeats `output`. A tool
             call the server refuses is answered with `is_error: true`, and an
             `output` that names the refusal's stable word in parentheses — the

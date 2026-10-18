@@ -52,6 +52,7 @@ pub mod agent_card;
 pub mod attachment;
 pub mod avatar_reclaim;
 pub mod channel;
+pub mod channel_viewing;
 pub mod dm;
 pub mod error;
 pub mod hosted_inbox;
@@ -109,6 +110,7 @@ pub use channel::{
     CHANNEL_LIST_LIMIT_DEFAULT, CHANNEL_LIST_LIMIT_MAX, CHANNEL_NAME_MAX_CHARS,
     CHANNEL_TOPIC_MAX_CHARS,
 };
+pub use channel_viewing::{touch_channel_viewing_in_tx, ViewingOutcome, VIEWING_MIN_REFRESH_SECS};
 pub use dm::{
     canonical_participants, dm_lock_key, dm_participant_key, list_direct_messages,
     open_direct_message_in_tx, validate_direct_message_target, DirectMessage,
