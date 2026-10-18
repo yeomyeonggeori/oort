@@ -1605,6 +1605,24 @@ async fn the_trial_turns_on_only_for_the_operator_with_one_person_and_both_attes
     // The second person leaves; now the control is the same request succeeding.
     deactivate(&su, &t, second).await;
 
+    // Red proof 6, the case only the instance-operator gate can refuse: the agent's own
+    // owner, an admin of the workspace, whose address is not on PLATFORM_ADMIN_EMAILS.
+    let not_listed = start_server_with(
+        app.clone(),
+        attested(&[APP_A, APP_B]),
+        Some("someone-else@connector.test".to_string()),
+    )
+    .await;
+    assert_eq!(
+        put_trial(&client, &not_listed, &t, &t.operator_jwt, t.agent, on.clone())
+            .await
+            .0,
+        403,
+        "owner of the agent, but not an instance operator"
+    );
+    assert_eq!(get_trial(&client, &not_listed, &t, &t.operator_jwt).await.0, 403);
+    assert_eq!(marks(&su, &t).await, 0);
+
     // Red proof 4: each attestation input missing alone, then the control.
     let missing = [
         CohostedAgentConfig {
