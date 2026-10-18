@@ -1614,13 +1614,23 @@ async fn the_trial_turns_on_only_for_the_operator_with_one_person_and_both_attes
     )
     .await;
     assert_eq!(
-        put_trial(&client, &not_listed, &t, &t.operator_jwt, t.agent, on.clone())
-            .await
-            .0,
+        put_trial(
+            &client,
+            &not_listed,
+            &t,
+            &t.operator_jwt,
+            t.agent,
+            on.clone()
+        )
+        .await
+        .0,
         403,
         "owner of the agent, but not an instance operator"
     );
-    assert_eq!(get_trial(&client, &not_listed, &t, &t.operator_jwt).await.0, 403);
+    assert_eq!(
+        get_trial(&client, &not_listed, &t, &t.operator_jwt).await.0,
+        403
+    );
     assert_eq!(marks(&su, &t).await, 0);
 
     // Red proof 4: each attestation input missing alone, then the control.
