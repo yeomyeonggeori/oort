@@ -69,6 +69,7 @@
 //! | `a_streamed_answers_window_is_thirty_seconds_wide_at_the_close` | widen or narrow the streamed branch's window (the 15 s and 45 s askers bracket 30) |
 //! | `a_stream_watched_longer_than_the_window_from_a_standing_cursor_is_pushed_without_a_heartbeat` | (the old-client edge, #4018) make a stale cursor alone read as "looking" |
 //! | `a_stream_watched_longer_than_the_window_is_not_pushed_while_the_heartbeat_is_fresh` | drop the `channel_viewing` clause from the `asked` arm |
+//! | `a_single_insert_answers_heartbeat_window_is_read_around_its_creation_time` | read the heartbeat against `now()` for a non-streamed line, or widen/narrow its 30 s |
 //! | `a_stale_heartbeat_or_one_for_another_channel_does_not_keep_the_push_back` | widen the heartbeat window, or drop the channel match from it |
 //! | `a_retried_streams_freeze_between_attempts_announces_nothing_and_its_real_close_announces_once` | let a `provisional` freeze enqueue the candidate, or ignore the flag |
 //! | `a_candidate_judged_while_a_retried_stream_is_frozen_is_held` | judge a `provisional` freeze as a closed stream (drop `provisional` from the judgment's `streaming`), so a late candidate pushes the half answer and spends the message's push slot |
@@ -4731,7 +4732,7 @@ async fn a_stream_watched_longer_than_the_window_from_a_standing_cursor_is_pushe
     );
 }
 
-/// The same asker, same standing cursor, but the client beat 10 seconds before the close:
+/// The same asker, same standing cursor, but the client beat 20 seconds before the close:
 /// they are looking, so nothing is pushed (#4018).
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
@@ -4768,7 +4769,7 @@ async fn a_stream_watched_longer_than_the_window_is_not_pushed_while_the_heartbe
     let (_, sent) = drain_room_full(&su, &pool, &room).await;
     assert!(
         people_woken(&room, &sent, streamed).is_empty(),
-        "a beat 10 s ago is inside the window: {sent:?}"
+        "a beat 20 s ago is inside the window: {sent:?}"
     );
 }
 
@@ -4802,7 +4803,7 @@ async fn a_stale_heartbeat_or_one_for_another_channel_does_not_keep_the_push_bac
         )
         .await;
     }
-    // ASKER's beat for this channel is 45 s old (stale). AgentOwner's only beat is fresh but
+    // ASKER's beat for this channel is 40 s old (stale). AgentOwner's only beat is fresh but
     // for a different channel.
     set_viewing(
         &su,
@@ -4838,13 +4839,55 @@ async fn a_stale_heartbeat_or_one_for_another_channel_does_not_keep_the_push_bac
     assert_eq!(
         people_woken(&room, &sent, stale_stream),
         BTreeSet::from([stale]),
-        "a 45 s-old beat is outside the window: {sent:?}"
+        "a 40 s-old beat is outside the window: {sent:?}"
     );
     assert_eq!(
         people_woken(&room, &sent, other_stream),
         BTreeSet::from([other_channel]),
         "a beat for another channel is not looking at this one: {sent:?}"
     );
+}
+
+/// The heartbeat's window basis for a single-INSERT answer is the answer's own `created_at`
+/// (like the cursor's), not `now()`: the answer arrived 120 s ago and is judged now.
+///
+/// * beat 100 s ago, i.e. 20 s *after* it arrived: looking -> quiet;
+/// * beat 140 s ago, i.e. 20 s *before* it arrived: inside the 30 s window -> quiet;
+/// * beat 160 s ago, i.e. 40 s before: outside it -> pushed.
+///
+/// Reading them against `now()` would push the first two. (Review of #4018, M1/M2.)
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn a_single_insert_answers_heartbeat_window_is_read_around_its_creation_time() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let room = seed_approval_room(&su).await;
+    let pool = momo_notifier_pool().await;
+
+    let mut answers = Vec::new();
+    for (asker, age) in [
+        (Who::Member, "100"),
+        (Who::AgentOwner, "140"),
+        (Who::Admin, "160"),
+    ] {
+        let question = human_says(&su, &room, room.channel_id, room.id(asker)).await;
+        let run = chat_run_for(&su, &room, room.channel_id, Some(question), "succeeded").await;
+        let answer = final_answer(&su, &room, run, question).await;
+        age_message(&su, answer, 120).await;
+        set_viewing(&su, room.workspace_id, room.channel_id, room.id(asker), age).await;
+        answers.push((asker, answer));
+    }
+
+    let (_, sent) = drain_room_full(&su, &pool, &room).await;
+    for (asker, answer) in &answers {
+        let woken = people_woken(&room, &sent, *answer);
+        if *asker == Who::Admin {
+            assert_eq!(woken, BTreeSet::from([Who::Admin]), "40 s before: {sent:?}");
+        } else {
+            assert!(woken.is_empty(), "{asker:?} was looking: {sent:?}");
+        }
+    }
 }
 
 /// A presence beat `age_secs` seconds old (SQL integer literal) for `member` in `channel`.
