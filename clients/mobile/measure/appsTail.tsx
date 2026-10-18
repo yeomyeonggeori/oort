@@ -12,7 +12,7 @@ import {SessionProvider} from '../src/session/useSession';
 // 「쓴 앱」 꼬리·막힘 문장 캡처 표면 (#3950). 실제 `MessageRow` 를 세운다. 서버가 없으므로 앱 목록과
 // run 보고는 질의 캐시에 미리 넣는다(훅의 키·모양은 `appsTail.ts` 와 같다).
 //
-//   xcrun simctl launch <udid> app.momo.ios --args -momoMeasure APPS-TAIL-<tail|dm|notices-a|notices-b>
+//   xcrun simctl launch <udid> app.momo.ios --args -momoMeasure APPS-TAIL-<tail|dm|notices-a|notices-b|notices-c>
 //   (라이트: LIGHT-APPS-TAIL-…)
 // =============================================================================
 
