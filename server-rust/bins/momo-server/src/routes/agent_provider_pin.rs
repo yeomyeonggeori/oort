@@ -277,6 +277,9 @@ enum Refusal {
     OwnModelRequired,
     UnknownPosition(i32),
     EnvNotConfigured,
+    /// #3948: a 「커넥터 시험」 is on for another agent of this workspace, and
+    /// Hermes has one token volume shared by every agent that reaches it.
+    ConnectorTrialOn,
 }
 
 pub async fn put(
@@ -341,6 +344,15 @@ pub async fn put(
                         PinChange::OperatorEnv => {
                             if env_label(&env_base_url).is_none() {
                                 return Ok(Err(Refusal::EnvNotConfigured));
+                            }
+                            if momo_agent::workspace_has_other_trial_agent_in_tx(
+                                conn,
+                                workspace_id,
+                                agent_member_id,
+                            )
+                            .await?
+                            {
+                                return Ok(Err(Refusal::ConnectorTrialOn));
                             }
                             (PinKind::OperatorEnv, None, None)
                         }
@@ -411,6 +423,12 @@ pub async fn put(
         Err(Refusal::UnknownPosition(position)) => Err(ApiError::bad_request(format!(
             "linkPosition {position} is not a configured team link"
         ))),
+        Err(Refusal::ConnectorTrialOn) => Err(ApiError::coded(
+            StatusCode::CONFLICT,
+            "connector_trial_on",
+            "an app trial is on for another agent of this workspace; Hermes keeps one token \
+             volume, so no second agent can be pinned to it until the trial is turned off",
+        )),
         Err(Refusal::EnvNotConfigured) => Err(ApiError::bad_request(
             "the operator env link (HERMES_BASE_URL) is not configured on this server",
         )),

@@ -11135,7 +11135,17 @@ paths:
         requires?}` (`rule` one of `enum`, `required`, `forbidden`, `range`,
         `format`, `requires`) and a one-line message naming the field; the
         value sent is never echoed. The run read returns these fields as
-        `agentReported`. Each tool binds an existing domain rather than a second one, and job authority travels only as an opaque `leaseHandle` that
+        `agentReported`. ADR-0113 증보 2 E8 (#3946) adds one more optional
+        argument to `oort_run_complete`, `appsUsed`: `[{pluginId, tool, calls}]`,
+        at most 16 entries, one per app and tool pair, `calls` 1..100000 and
+        nothing else (an unknown key refuses the whole completion with -32602
+        and writes nothing). It is the execution site's own report of the
+        connector apps it used, not a server measurement; a vendor path may
+        report nothing. It is stored in `agent_run.output.appsUsed`, leaves one
+        `connector.tool_used` audit row (ids, tool names and counts only), and
+        the run read returns it as a top-level `appsUsed` array, absent when
+        nothing was reported. The Hermes REST gateway completion accepts the same
+        `appsUsed` (a malformed one is a 400). Each tool binds an existing domain rather than a second one, and job authority travels only as an opaque `leaseHandle` that
         carries the channel its work came from, so the confirming human's exact
         channel grant is re-checked on every later verb. Arguments are validated
         against the tool's published `inputSchema` before execution, so

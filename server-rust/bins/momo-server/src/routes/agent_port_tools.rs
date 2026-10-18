@@ -78,6 +78,7 @@ use crate::routes::agent_gateway::{
     ReportStanding,
 };
 use crate::routes::agent_mentions::{route_agent_mentions_in_tx, MentionSend};
+use crate::routes::apps_used::validated_apps_used;
 use crate::AppState;
 
 /// The cursor argument ceiling, equal to `momo_mcp::tools`' published
@@ -960,6 +961,8 @@ async fn message_post(
     let subscription_agents_enabled = state.agent_port.config.subscription_agents_enabled;
     let claude_subscription_agents_enabled =
         state.agent_port.config.claude_subscription_agents_enabled;
+    // #3948: the operator's attestation, read once per send (an env value, not a row).
+    let connector_trial = state.cohosted.config.attest();
     let context_max_messages = state.mentions.context_max_messages;
 
     let outcome = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
@@ -1050,6 +1053,7 @@ async fn message_post(
                         hosted_delivery_enabled,
                         subscription_agents_enabled,
                         claude_subscription_agents_enabled,
+                        connector_trial: &connector_trial,
                         context_max_messages,
                         // An agent's send never raises the in-place card (G1).
                         inplace_grant_enabled: false,
@@ -1737,6 +1741,11 @@ async fn run_complete(
     let body = optional_str(args, "body", 8_000)?.map(str::to_string);
     let (usage, usage_detail) = usage_from_arguments(args)?;
     let raw_artifacts = args.get("artifacts").cloned();
+    // E8 — format-checked here, outside the transaction, so a malformed report
+    // never opens one. The lease is untouched, so the agent can complete again
+    // without (or with a corrected) `appsUsed`.
+    let apps_used =
+        validated_apps_used(args.get("appsUsed")).map_err(|_| ToolFailure::InvalidArguments)?;
     let secret = state.agent_port.envelope_secret().to_string();
     let subscription_agents_enabled = state.agent_port.config.subscription_agents_enabled;
     let claude_subscription_agents_enabled =
@@ -1814,6 +1823,7 @@ async fn run_complete(
                     usage,
                     usage_detail,
                     artifacts,
+                    apps_used,
                     actor_member_id: Some(caller.agent_member_id),
                     via_token_id: Some(caller.token_id),
                     subscription_agents_enabled,

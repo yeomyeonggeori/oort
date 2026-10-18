@@ -164,8 +164,8 @@ run_generator() {
   ) >"$output" 2>&1
 }
 
-# Canonical 45 = heredoc KEY= lines + public-edge keys. --claim swaps
-# MOMO_INITIAL_OWNER_PASSWORD ↔ MOMO_BOOTSTRAP_CLAIM (count stays 45).
+# Canonical 46 = heredoc KEY= lines + public-edge keys. --claim swaps
+# MOMO_INITIAL_OWNER_PASSWORD ↔ MOMO_BOOTSTRAP_CLAIM (count stays 46).
 # 43 → 45 at #2066: WEBHOOK_INGRESS_MASTER_KEY + OUTBOUND_WEBHOOK_MASTER_KEY
 # became managed keys (ADR-0004 증보 4 D1).
 canonical_keys_from_generator() {
@@ -379,6 +379,8 @@ jq -e \
     .services.api.environment.PROVIDER_LINK_MASTER_KEY == $master and
     .services.api.environment.MOMO_CORS_ALLOWED_ORIGINS == $cors and
     .services["agent-worker"].environment.PROVIDER_LINK_MASTER_KEY == $master and
+    (.services.api.environment | has("GITHUB_APP_MASTER_KEY")) and
+    ([.services | to_entries[] | select(.key != "api") | select(.value.environment | type == "object") | select(.value.environment | has("GITHUB_APP_MASTER_KEY"))] | length == 0) and
     .services.centrifugo.environment.CENTRIFUGO_CLIENT_ALLOWED_ORIGINS == $centrifugo and
     .services.api.environment.MOMO_DRIVE_ARCHIVE_BACKEND == $drive_backend and
     .services.api.environment.MOMO_DRIVE_LOCAL_DIR == $drive_dir and
@@ -1093,17 +1095,19 @@ canonical_keys_from_generator >"$TMP_ROOT/canonical.keys"
 claim_swapped_canonical_keys >"$TMP_ROOT/claim.canonical.keys"
 canon_count="$(grep -c . "$TMP_ROOT/canonical.keys" | tr -d ' ')"
 claim_canon_count="$(grep -c . "$TMP_ROOT/claim.canonical.keys" | tr -d ' ')"
-[ "$canon_count" = "45" ] || {
-  echo "canonical key set must stay 45, got $canon_count" >&2
+[ "$canon_count" = "46" ] || {
+  echo "canonical key set must stay 46, got $canon_count" >&2
   exit 1
 }
-[ "$claim_canon_count" = "45" ] || {
-  echo "claim-swapped canonical key set must stay 45, got $claim_canon_count" >&2
+[ "$claim_canon_count" = "46" ] || {
+  echo "claim-swapped canonical key set must stay 46, got $claim_canon_count" >&2
   exit 1
 }
 # #2066 — the two webhook master keys are part of the contract, not incidental.
 grep -Fxq 'WEBHOOK_INGRESS_MASTER_KEY' "$TMP_ROOT/canonical.keys"
 grep -Fxq 'OUTBOUND_WEBHOOK_MASTER_KEY' "$TMP_ROOT/canonical.keys"
+# #3947 — GITHUB_APP_MASTER_KEY (ADR-0205 D1) is a managed key too: 45 → 46.
+grep -Fxq 'GITHUB_APP_MASTER_KEY' "$TMP_ROOT/canonical.keys"
 grep -Fxq 'MOMO_INITIAL_OWNER_PASSWORD' "$TMP_ROOT/canonical.keys"
 grep -Fxq 'MOMO_BOOTSTRAP_CLAIM' "$TMP_ROOT/claim.canonical.keys"
 if grep -Fxq 'MOMO_BOOTSTRAP_CLAIM' "$TMP_ROOT/canonical.keys"; then
@@ -1279,6 +1283,58 @@ $(cat "$whk/backfill-partial-output")" >&2
 }
 echo "webhook master key backfill: 이행 복사 == JWT_HMAC 원문, add-only, 멱등, 값 비유입"
 
+# #3947 / ADR-0205 D1 — GITHUB_APP_MASTER_KEY 백필: 없으면 독립 난수 1개, 있으면
+# 절대 덮어쓰지 않고, 두 번째 실행은 무변경이며, 값은 로그에 나오지 않는다.
+grep -Fxq 'GITHUB_APP_MASTER_KEY=$GITHUB_APP_SECRET' "$ROOT/scripts/self_host_env.sh" || {
+  echo "generator heredoc no longer carries GITHUB_APP_MASTER_KEY" >&2
+  exit 1
+}
+ghk_pre="$(sed -n 's/^GITHUB_APP_MASTER_KEY=//p' "$whk_env")"
+[ -n "$ghk_pre" ] || {
+  echo "fresh generator env has no GITHUB_APP_MASTER_KEY value" >&2
+  exit 1
+}
+grep -v '^GITHUB_APP_MASTER_KEY=' "$whk_env" >"$whk/pre3947.env"
+cp "$whk/pre3947.env" "$whk_env"
+run_generator "$whk" "$whk/ghk-backfill-output" 49770 --ensure-managed-keys || {
+  echo "--ensure-managed-keys failed (github key):
+$(cat "$whk/ghk-backfill-output")" >&2
+  exit 1
+}
+test "$(grep -c '^GITHUB_APP_MASTER_KEY=' "$whk_env" | tr -d ' ')" = "1" || {
+  echo "github key backfill did not write exactly one line" >&2
+  exit 1
+}
+ghk_new="$(sed -n 's/^GITHUB_APP_MASTER_KEY=//p' "$whk_env" | tr -d "'\"")"
+[ -n "$ghk_new" ] || {
+  echo "github key backfill wrote an empty value" >&2
+  exit 1
+}
+grep -Fq 'GitHub 앱 마스터키 백필: 1키 추가' "$whk/ghk-backfill-output" || {
+  echo "github key backfill did not report exactly 1 added key" >&2
+  exit 1
+}
+if grep -Fq "$ghk_new" "$whk/ghk-backfill-output"; then
+  echo "github key backfill log leaked the key value" >&2
+  exit 1
+fi
+ghk_hash="$(hash_file "$whk_env")"
+run_generator "$whk" "$whk/ghk-backfill-again" 49770 --ensure-managed-keys
+test "$ghk_hash" = "$(hash_file "$whk_env")" || {
+  echo "second github key backfill rewrote the env" >&2
+  exit 1
+}
+ghk_hand='hand-set-github-app-key-3947'
+grep -v '^GITHUB_APP_MASTER_KEY=' "$whk_env" >"$whk/hand3947.env"
+printf 'GITHUB_APP_MASTER_KEY=%s\n' "$ghk_hand" >>"$whk/hand3947.env"
+cp "$whk/hand3947.env" "$whk_env"
+run_generator "$whk" "$whk/ghk-backfill-hand" 49770 --ensure-managed-keys
+test "$(sed -n 's/^GITHUB_APP_MASTER_KEY=//p' "$whk_env")" = "$ghk_hand" || {
+  echo "github key backfill overwrote an operator-set key" >&2
+  exit 1
+}
+echo "github app master key backfill: 독립 난수 1개, add-only, 멱등, 값 비유입"
+
 # Existing password env + --claim must refuse (never silently convert).
 password_to_claim="$(make_fixture password-to-claim)"
 run_generator "$password_to_claim" "$password_to_claim/first-output" 49752 --local-build
@@ -1414,8 +1470,8 @@ cmp "$alias_fixture/railway.out" "$alias_fixture/platform.out" || {
   exit 1
 }
 grep -Fxq 'OORT_SITE_ADDRESS=platform.example.test' "$alias_fixture/platform.out"
-grep -Fq -e '--platform railway 키 46개를 stdout에 썼다' "$alias_fixture/platform.err"
-# #2438 — --railway --claim ≡ --platform railway --claim; 1:1 key swap; count 46.
+grep -Fq -e '--platform railway 키 47개를 stdout에 썼다' "$alias_fixture/platform.err"
+# #2438 — --railway --claim ≡ --platform railway --claim; 1:1 key swap; count 47.
 run_platform_stdout "$alias_fixture" "$alias_fixture/railway-claim.out" \
   "$alias_fixture/railway-claim.err" --railway --claim || {
   cat "$alias_fixture/railway-claim.err" >&2
@@ -1449,16 +1505,16 @@ if ! diff -u "$alias_fixture/claim.expected.keys" "$alias_fixture/claim.keys" \
   exit 1
 fi
 claim_t2_count="$(grep -c . "$alias_fixture/claim.keys" | tr -d ' ')"
-[ "$claim_t2_count" = "46" ] || {
-  echo "--railway --claim key-set count expected 46 got $claim_t2_count" >&2
+[ "$claim_t2_count" = "47" ] || {
+  echo "--railway --claim key-set count expected 47 got $claim_t2_count" >&2
   exit 1
 }
-grep -Fq -e '--platform railway 키 46개를 stdout에 썼다' "$alias_fixture/platform-claim.err"
-echo "T2 --claim stdout count=$claim_t2_count (password variant 46; 1:1 swap)"
+grep -Fq -e '--platform railway 키 47개를 stdout에 썼다' "$alias_fixture/platform-claim.err"
+echo "T2 --claim stdout count=$claim_t2_count (password variant 47; 1:1 swap)"
 # The hand-set keys and the internal hostname suffix come from the same row.
 grep -Fq 'CENT_API_URL,WORKER_DATABASE_URL,CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS' "$alias_fixture/platform.err"
 grep -Fq '.railway.internal' "$alias_fixture/platform.err"
-# T2 stdout is the canonical 45 plus the stamp outside the heredoc. No
+# T2 stdout is the canonical 46 plus the stamp outside the heredoc. No
 # hosted-delivery key, no file. --railway is byte-identical by construction.
 grep -Fxq 'MOMO_SELF_HOST_PLATFORM=railway' "$alias_fixture/platform.out"
 test "$(grep -c '^MOMO_SELF_HOST_PLATFORM=' "$alias_fixture/platform.out")" = "1"
@@ -1567,7 +1623,7 @@ if awk '
   grab && index($0, "MOMO_SELF_HOST_PLATFORM=") == 1 { found = 1 }
   END { exit !found }
 ' "$ROOT/scripts/self_host_env.sh"; then
-  echo "MOMO_SELF_HOST_PLATFORM moved into the heredoc — the canonical 45-key set would grow" >&2
+  echo "MOMO_SELF_HOST_PLATFORM moved into the heredoc — the canonical 46-key set would grow" >&2
   exit 1
 fi
 

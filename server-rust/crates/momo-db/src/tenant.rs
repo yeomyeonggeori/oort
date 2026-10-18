@@ -184,6 +184,36 @@ where
     }
 }
 
+/// Operator GitHub App transaction (#3947 / ADR-0205 D1). Binds `app.workspace_id` (for the
+/// operator's workspace-scoped audit write) and `app.github_app_admin` to unlock the GUC-gated
+/// `github_app` singleton and the operator branch of `github_app_installation`.
+///
+/// Like `app.provider_link_admin`, the GUC is bound **only after** the route's instance-operator
+/// gate (`PLATFORM_ADMIN_EMAILS`); an ordinary tenant transaction never carries it.
+pub async fn with_github_app_admin_tx<T, F>(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    body: F,
+) -> Result<T, DbError>
+where
+    T: Send,
+    F: for<'c> FnOnce(&'c mut PgConnection) -> BoxFuture<'c, Result<T, DbError>> + Send,
+{
+    let mut tx = pool.begin().await?;
+    bind_workspace_guc(&mut tx, workspace_id).await?;
+    bind_admin_guc(&mut tx, "app.github_app_admin").await?;
+    match body(&mut tx).await {
+        Ok(value) => {
+            tx.commit().await?;
+            Ok(value)
+        }
+        Err(err) => {
+            let _ = tx.rollback().await;
+            Err(err)
+        }
+    }
+}
+
 /// Provider quota-snapshot ingest transaction (MOMO-623 / ADR-0135 D2). Binds
 /// `app.workspace_id` (ingesting agent's workspace) and `app.provider_quota_admin`
 /// to unlock the write policy on the instance-global `quota_snapshot` table.
