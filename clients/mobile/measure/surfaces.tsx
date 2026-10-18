@@ -177,6 +177,7 @@ import {FixedScheme, useStyles, type ColorScheme} from '../src/design/theme';
 import {PullProbe} from './pullProbe';
 import {PullHold} from './pullHold';
 import {PullRefreshSurface} from './pullRefresh';
+import {DmConversationSurface} from './dmConversation';
 import {OortLoaderSurface} from './oortLoader';
 import TeamBoardScreen from '../src/screens/TeamBoardScreen';
 import WorkJobsScreen from '../src/screens/WorkJobsScreen';
@@ -2113,6 +2114,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   }
   if (name.startsWith('device-key-')) {
     return <DeviceKeySurface which={name.slice('device-key-'.length)} />;
+  }
+  // #4016: DM 대화 화면(실제 머리·레이아웃·타임라인·컴포저).
+  if (name.startsWith('dm-conversation')) {
+    return <DmConversationSurface which={name.slice('dm-conversation'.length).replace(/^-/, '')} />;
   }
   // #3961: 오르트 로더. 연결 띠·첫 로딩은 실제 컴포넌트(`measure/oortLoader.tsx`).
   if (name.startsWith('oort-loader')) {

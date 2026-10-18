@@ -361,6 +361,27 @@ export function recoveryDividerSegments(
 }
 
 /**
+ * 복구 표지가 새 메시지 없이도 서 있는 시간(ms). 읽을 시간은 주되 상시 표지가 되지 않게 한다
+ * (#4016, 성재 3047: 「재연결됨, 여기까지 복구」가 계속 남아 있다). 두 클라가 같은 수를 쓴다.
+ */
+export const RECOVERY_MARKER_TTL_MS = 12_000;
+
+/**
+ * 표지보다 **새** 메시지가 온 배치가 있으면 그 표지를 걷는다(#4016). 표지는 「여기까지 복구했다」는 한 번의
+ * 알림이라 그 뒤로 대화가 이어지면 할 일을 마친 것이다. 복구된 구간 안의 행(seq <= 표지)은 걷지 않는다.
+ * 바뀐 것이 없으면 **같은 배열**을 돌려준다(불필요한 렌더를 만들지 않는다).
+ */
+export function pruneRecoveryMarkers<M extends { seq: number }>(
+  markers: M[],
+  batch: ReadonlyArray<{ seq: number }>
+): M[] {
+  const kept = markers.filter(
+    (marker) => !batch.some((message) => message.seq > marker.seq)
+  );
+  return kept.length === markers.length ? markers : kept;
+}
+
+/**
  * 복구 표지를 **낭독으로** 들을 때의 문장.
  *
  * 보이는 글자와 읽히는 글자가 일부러 다른 두 번째 자리다(`dayDividerLabel`이 첫

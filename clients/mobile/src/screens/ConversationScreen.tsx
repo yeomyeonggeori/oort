@@ -121,8 +121,11 @@ import {
   useChannels,
   useDirectory,
   useReadStates,
+  useRememberOpenedDm,
   useRoleLabels,
 } from '../features/workspace/queries';
+import {mayActOnLiveness} from '@momo/core/features/agents/liveness';
+import {dmPeerStatusDot} from '@momo/core/features/presence/statusDot';
 import {useNow} from '../lib/useNow';
 import {
   notificationTargetHeld,
@@ -130,6 +133,7 @@ import {
   type NotificationLanding,
 } from '../push/tapArrival';
 import {useRealtime} from '../realtime/RealtimeProvider';
+import {useAgentLiveness} from '../features/agents/useAgentLiveness';
 import {useSession} from '../session/useSession';
 import {useDmDeliveryHint} from '../features/conversation/useDmDeliveryHint';
 import type {MemoryEvidenceLink} from '@momo/core/features/memory/model';
@@ -214,8 +218,8 @@ const NO_RECEIPTS: ReadonlyMap<string, ApprovalReceipt> = new Map();
  * 머리 부제 — 방이 **무엇인지** (시안 A `.a-hd .ttl span` 「6명 · 김인턴 참여 중」).
  *
  * 연결 상태는 여기 없다(DS2-4, owner 표: 연결 문제는 부제가 아니라 배너). 모르는
- * 것은 말하지 않는다: 멤버 목록이 안 왔으면 수를 짓지 않고, 사람 DM 에는 접속
- * 정보가 없으므로 부제가 없다.
+ * 것은 말하지 않는다: 멤버 목록이 안 왔으면 수를 짓지 않는다. DM 은 부제가 없다
+ * (얼굴 + 이름 한 줄, #4016).
  */
 export function conversationSubtitle(
   channel: {kind: string; memberIds?: string[]} | null,
@@ -223,7 +227,9 @@ export function conversationSubtitle(
   directory: Parameters<typeof memberFor>[0],
 ): string | undefined {
   if (channel === null) return undefined;
-  if (channel.kind === 'dm') return peer?.kind === 'agent' ? '에이전트' : undefined;
+  // DM 머리는 얼굴 + 이름 한 줄이다(#4016, 성재: 「두 줄로 표시하니까 좀 구리네」). 상대가 에이전트라는 말은
+  // 얼굴 모양(둥근 사각)과 상태 점이 한다.
+  if (channel.kind === 'dm') return undefined;
   const ids = channel.memberIds;
   if (!ids || ids.length === 0) return undefined;
   const agents = ids
@@ -355,6 +361,7 @@ export default function ConversationScreen({
     [directory, profileMemberId],
   );
 
+  const rememberOpenedDm = useRememberOpenedDm(workspaceId);
   const {
     mutate: openProfileDm,
     reset: resetProfileDm,
@@ -363,6 +370,7 @@ export default function ConversationScreen({
   } = useMutation({
     mutationFn: (memberId: string) => openDirectMessage(workspaceId, memberId),
     onSuccess: opened => {
+      rememberOpenedDm(opened.channel);
       setProfileMemberId(null);
       onOpenConversation?.(
         opened.channel.id,
@@ -394,6 +402,17 @@ export default function ConversationScreen({
     () => (channel ? dmPeer(channel, directory, member.id) : null),
     [channel, directory, member.id],
   );
+
+  // DM 머리의 상대 상태 점 (#4016). 홈 DM 줄과 같은 core 판정(`dmPeerStatusDot`)이고 같은 쿼리 키
+  // (`useAgentLiveness`)라 요청을 나눠 쓴다. 사람은 스스로 정한 상태만, 모르면 점이 없다.
+  const peerAgentId = peer?.kind === 'agent' ? peer.id : null;
+  const peerLiveness = useAgentLiveness(peerAgentId);
+  const peerStatus = dmPeerStatusDot({
+    member: peer,
+    liveness: peerAgentId === null ? undefined : peerLiveness.liveness,
+    mayAct: mayActOnLiveness(memberFor(directory, member.id)?.role),
+    nowMs: peerAgentId === null ? Date.now() : peerLiveness.nowMs,
+  });
 
   const recipientKind = useMemo<'person' | 'place'>(() => {
     if (!channel) return 'place';
@@ -1652,6 +1671,7 @@ export default function ConversationScreen({
         subtitle={headerSubtitle}
         kind={channel?.kind}
         peerId={peer?.id ?? null}
+        peerStatusTone={peerStatus?.tone ?? null}
         directory={directory}
         onBack={onBack}
         menu={headerMenu}
