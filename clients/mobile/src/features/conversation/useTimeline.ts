@@ -28,6 +28,10 @@ import {
   type PinMap,
 } from '@momo/core/features/timeline/pins';
 import {
+  pruneRecoveryMarkers,
+  RECOVERY_MARKER_TTL_MS,
+} from '@momo/core/features/timeline/divider';
+import {
   addPending,
   applyTombstone,
   emptyTimeline,
@@ -225,6 +229,8 @@ export interface UseTimelineResult {
   togglePin: (message: Message) => Promise<void>;
 }
 
+export {RECOVERY_MARKER_TTL_MS};
+
 export function useTimeline(
   rail: ChannelRail | null,
   workspaceId: string,
@@ -278,16 +284,33 @@ export function useTimeline(
     // 오지 않으므로 여기서 아무것도 내놓지 않는다.
     seedEndedRuns(endedStreamRunIds(batch));
     setState(s => reconcileMessages(s, batch));
+    // 복구 표지는 「여기까지 복구했다」는 한 번의 알림이다(#4016). 표지보다 새 메시지가 오면 그 알림은
+    // 할 일을 마쳤으므로 걷는다 — 상시로 남으면 지난 일을 계속 말하는 줄이 된다. 같은 배치로 표지가
+    // 서는 순서는 `addMarker` 가 배치 **뒤**에 부르므로 이 줄이 방금 선 표지를 지우지 않는다.
+    setRecoveryMarkers(markers => pruneRecoveryMarkers(markers, batch));
+  }, []);
+
+  // 새 메시지가 오지 않아도 표지는 오래 남지 않는다 — 일정 시간 뒤에 스스로 걷힌다.
+  const markerTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  useEffect(() => {
+    const timers = markerTimersRef.current;
+    return () => {
+      for (const timer of timers) clearTimeout(timer);
+      timers.clear();
+    };
   }, []);
 
   const addMarker = useCallback((source: RecoveryMarker['source']) => {
     const seq = newestSeqRef.current;
     if (seq === null) return;
     markerCounterRef.current += 1;
-    setRecoveryMarkers(markers => [
-      ...markers,
-      {id: `recovery-${markerCounterRef.current}`, seq, source},
-    ]);
+    const id = `recovery-${markerCounterRef.current}`;
+    setRecoveryMarkers(markers => [...markers, {id, seq, source}]);
+    const timer = setTimeout(() => {
+      markerTimersRef.current.delete(timer);
+      setRecoveryMarkers(markers => markers.filter(marker => marker.id !== id));
+    }, RECOVERY_MARKER_TTL_MS);
+    markerTimersRef.current.add(timer);
   }, []);
 
   // ---- optimistic send ------------------------------------------------------

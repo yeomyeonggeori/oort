@@ -2,7 +2,9 @@ import {act, cleanup, render, screen} from '@testing-library/react-native';
 import React from 'react';
 import {Keyboard, Text, View} from 'react-native';
 
-import {ConversationLayout} from '../src/features/conversation/ConversationLayout';
+
+import {space} from '../src/design/tokens';
+import {ConversationLayout, KEYBOARD_GAP} from '../src/features/conversation/ConversationLayout';
 
 // =============================================================================
 // 컴포저를 밀어 올리는 것이 **레이아웃 속성이 아니고, 이제 JavaScript 도 아니다.**
@@ -124,4 +126,22 @@ it('컴포저와 목록은 둘 다 그 안에 있다', () => {
   expect(screen.getByTestId('list-slot')).toBeTruthy();
   expect(screen.getByTestId('composer-dock')).toBeTruthy();
   expect(screen.getByTestId('composer-slot')).toBeTruthy();
+});
+
+it('올라온 키보드와 컴포저 사이의 틈은 스케일 가장 작은 칸 하나다 (#4016)', () => {
+  // 홈 인디케이터가 있는 기기(하단 인셋 34)에서 잰다. 패널은 인셋만큼 패딩을 상수로 지고, 네이티브는
+  // `키보드 높이 - bottomInset` 만큼 올린다. 그래서 올라간 동안 컴포저 바닥과 키보드 사이는
+  // `insets.bottom - bottomInset` 이다 — 인셋이 한 번 더 쌓이면(중복) 이 값이 34 가 된다.
+  const safeArea = require('react-native-safe-area-context');
+  const insets = jest
+    .spyOn(safeArea, 'useSafeAreaInsets')
+    .mockReturnValue({top: 47, left: 0, right: 0, bottom: 34});
+  render(<ConversationLayout list={<Text>목록</Text>} composer={<View />} />);
+  insets.mockRestore();
+  const pane = screen.getByTestId('conversation-layout');
+  const resting = paneStyle().paddingBottom as number;
+  expect(resting).toBe(34); // 내려가 있으면 홈 인디케이터 영역을 지킨다.
+  const gapAboveKeyboard = resting - (pane.props.bottomInset as number);
+  expect(gapAboveKeyboard).toBe(KEYBOARD_GAP);
+  expect(KEYBOARD_GAP).toBe(space.xs);
 });

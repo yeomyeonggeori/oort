@@ -29,7 +29,7 @@ import {
 } from '../design/tokens';
 import {SHELL_ICONS, SHELL_ICON_SIZE} from '../design/icons';
 import {Avatar} from '../features/conversation/Avatar';
-import {useDirectory} from '../features/workspace/queries';
+import {useDirectory, useRememberOpenedDm} from '../features/workspace/queries';
 import {openDmFailureCopy} from '../screens/SidebarScreen';
 import {useSession} from '../session/useSession';
 
@@ -95,9 +95,11 @@ function SheetBody({
       .sort((a, b) => a.displayName.localeCompare(b.displayName, 'ko'));
   }, [directoryQuery.directory, member.id, query]);
 
+  const rememberOpenedDm = useRememberOpenedDm(workspaceId);
   const openDm = useMutation({
     mutationFn: (memberId: string) => openDirectMessage(workspaceId, memberId),
     onSuccess: opened => {
+      rememberOpenedDm(opened.channel);
       // 머리의 이름은 목록이 쓰는 것과 같은 코어 함수로 푼다 — 같은 방을 두 화면이
       // 다르게 부르지 않게.
       const title = channelLabel(opened.channel, directoryQuery.directory, member.id);

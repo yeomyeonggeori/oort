@@ -21,6 +21,8 @@ import {
 } from '../../design/icons';
 import {usePalette, useStyles} from '../../design/theme';
 import {ds2Radius, font, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import type {StatusDotTone} from '@momo/core/features/presence/statusDot';
+import {StatusDot} from '../presence/StatusDot';
 import {useOnline} from '../inbox/useOnline';
 import {Avatar} from './Avatar';
 import {CONV} from './convDesign';
@@ -75,6 +77,8 @@ export function ConversationHeader({
   subtitle,
   kind,
   peerId,
+  peerStatusTone = null,
+  peerStatusLabel,
   directory,
   onBack,
   menu,
@@ -87,6 +91,10 @@ export function ConversationHeader({
   kind: 'public' | 'private' | 'dm' | undefined;
   /** DM 상대. 있으면 제목 앞에 그 얼굴(28)이 선다. */
   peerId?: string | null;
+  /** DM 상대의 상태 점 톤(#4016). 없으면 점이 없다. 판정은 호출자가 core 로 한다. */
+  peerStatusTone?: StatusDotTone | null;
+  /** 점의 낱말(「꺼짐」 등). 점은 낭독에서 숨으므로 제목 라벨이 이 낱말을 대신 읽는다(홈 DM 줄과 같은 규칙). */
+  peerStatusLabel?: string;
   directory: Directory;
   onBack: () => void;
   /** ⋮ 메뉴 항목. 비면 ⋮ 원을 세우지 않는다. */
@@ -133,7 +141,14 @@ export function ConversationHeader({
           <View style={styles.titleBlock}>
             <View style={styles.titleLine}>
               {kind === 'dm' && peerId ? (
-                <Avatar directory={directory} memberId={peerId} size={CONV.titleFace} ground="muted" />
+                <View style={styles.face} testID="conversation-title-face">
+                  <Avatar directory={directory} memberId={peerId} size={CONV.titleFace} ground="muted" />
+                  {peerStatusTone !== null ? (
+                    <View style={styles.statusAnchor}>
+                      <StatusDot tone={peerStatusTone} testID="conversation-title-status-dot" />
+                    </View>
+                  ) : null}
+                </View>
               ) : kind === 'public' || kind === 'private' ? (
                 <Image
                   accessibilityElementsHidden
@@ -144,6 +159,9 @@ export function ConversationHeader({
               ) : null}
               <Text
                 accessibilityRole="header"
+                accessibilityLabel={
+                  peerStatusTone !== null && peerStatusLabel ? `${title}, ${peerStatusLabel}` : undefined
+                }
                 style={styles.title}
                 numberOfLines={1}
                 ellipsizeMode="tail"
@@ -250,6 +268,8 @@ const buildStyles = (color: Palette) =>
     icon20: {width: CONV_ICON_SIZE.kebab, height: CONV_ICON_SIZE.kebab},
     titleBlock: {flex: 1, minWidth: 0},
     titleLine: {flexDirection: 'row', alignItems: 'center', gap: space.xs},
+    face: {width: CONV.titleFace, height: CONV.titleFace},
+    statusAnchor: {position: 'absolute', right: -2, bottom: -2},
     titleGlyph: {width: CONV.titleGlyph, height: CONV.titleGlyph},
     title: {
       flexShrink: 1,
