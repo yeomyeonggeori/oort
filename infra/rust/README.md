@@ -319,6 +319,7 @@ Rust 바이너리는 prod compose가 쓰는 **이름 그대로** 읽는다.
 | `WEBHOOK_INGRESS_MASTER_KEY` | ✅ `webhook` (ADR-0004 증보 4 / #2066) | 인바운드(ADR-0115 native) ingress secret 파생 루트. **필수**(`${VAR:?}`) — `JWT_HMAC` 폴백은 삭제됐다. 이 키를 바꾸면 발급된 native secret 전원이 무효가 되므로, 기존 설치는 `scripts/oort upgrade` 가 **현재 유효값의 복사**로 백필한다(재발급 0) |
 | `OUTBOUND_WEBHOOK_MASTER_KEY` | ✅ `webhook` (#1222, ADR-0004 증보 4) | 이벤트구독·doorbell **발신** secret 파생 루트. 위와 같은 규칙으로 **필수**다. #2066 이전에는 api 가 이 변수를 아예 받지 못해 `JWT_HMAC` 으로 파생했고, 운영자가 값을 설정하면 api 가 노출한 secret 과 `webhook-sender` 가 서명한 secret 이 어긋났다 |
 | `MOMO_EVENT_SUBSCRIPTION_ALLOW_HTTP` | ✅ `webhook` (#1222, 선택) | `MOMO_ENV=local` **이면서** 이 값이 `1` 일 때만 `http://` 목적지를 받는다. 두 조건을 다 요구하므로 staging/prod 에서는 이 플래그가 효력을 가질 수 없다 |
+| `GITHUB_APP_MASTER_KEY` | ✅ `api` 만 (ADR-0205 D1 / #3947) | GitHub 앱 개인키·webhook secret 을 DB 에 봉인하는 독립 키. **선택**(`${VAR:-}`) — 비어 있으면 GitHub 알림 표면만 503 이고 나머지 라우트는 그대로다. JWT·웹훅 두 키·`PROVIDER_LINK_MASTER_KEY` 와 같은 값이면 기동 거부. `agent-worker`·Hermes 에는 넘기지 않는다(ADR-0203 D6-2) |
 | `PROVIDER_LINK_MASTER_KEY`·`AGENT_*`·`HERMES_*`·`MEMORY_*`·`MOMO_ARCHIVE_BACKEND`·`MOMO_S3_*`·`MOMO_METRICS_*` | ❌ 미소비 | 해당 기능 배치에서 복귀. **부팅을 막지 않는다** |
 | `MOMO_CORS_ALLOWED_ORIGINS` | ✅ `cors` (DESK-1) | MOMO-605 계약 그대로 포팅. 빈값·미설정=미들웨어 미장착=완전 무변경. 이 줄이 "미소비"였던 동안 패키징된 데스크톱은 로그인이 아예 안 됐다 |
 | `MOMO_HOSTED_DELIVERY_ENABLED` | ✅ `agent_port` (HAP-E6) | 기본 off. 소문자 `true` 만 멘션→hosted inbox. 도어벨 선행 게이트. `${VAR:-}` — 미사용 스택에 필수 아님 |

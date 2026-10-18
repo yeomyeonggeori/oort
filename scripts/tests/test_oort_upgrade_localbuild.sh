@@ -347,7 +347,7 @@ file_key_count() {
 
 canonical_keys >"$SANDBOX/canonical.keys"
 CANON_N="$(grep -c . "$SANDBOX/canonical.keys" | tr -d ' ')"
-[ "$CANON_N" = "45" ] || fail "canonical key set must stay 45, got $CANON_N"
+[ "$CANON_N" = "46" ] || fail "canonical key set must stay 46, got $CANON_N"
 
 FRESH="$SANDBOX/fresh.env"
 set +e
@@ -371,8 +371,8 @@ awk '
 chmod 600 "$PRE"
 PRE_N="$(file_key_count "$PRE")"
 FRESH_N="$(file_key_count "$FRESH")"
-[ "$FRESH_N" = "45" ] || fail "fresh local-build env key count ${FRESH_N} != 45"
-[ "$PRE_N" = "43" ] || fail "pre-#2193 env key count ${PRE_N} != 43"
+[ "$FRESH_N" = "46" ] || fail "fresh local-build env key count ${FRESH_N} != 46"
+[ "$PRE_N" = "44" ] || fail "pre-#2193 env key count ${PRE_N} != 44"
 
 compose_config() {
   local envfile="$1" out="$2" err="$3"
@@ -414,7 +414,7 @@ grep -Fq '[self-host] env 보강: 2키 추가(NOTIFIER_POSTGRES_PASSWORD NOTIFIE
   "$BACKFILL_ERR" || \
   fail "backfill stderr missing exact 보강 line: $(cat "$BACKFILL_ERR")"
 POST_N="$(file_key_count "$PRE")"
-[ "$POST_N" = "45" ] || fail "after backfill key count ${POST_N} != 45"
+[ "$POST_N" = "46" ] || fail "after backfill key count ${POST_N} != 46"
 grep -E '^NOTIFIER_POSTGRES_PASSWORD=' "$PRE" >/dev/null || fail "missing NOTIFIER_POSTGRES_PASSWORD"
 grep -E '^NOTIFIER_DATABASE_URL=postgres://momo_notifier:' "$PRE" >/dev/null || \
   fail "missing NOTIFIER_DATABASE_URL"
@@ -426,7 +426,7 @@ SELF_HOST_ENV_FILE="$PRE" "$GENERATOR" --ensure-managed-keys \
 if grep -Fq 'env 보강:' "$SANDBOX/backfill2.err"; then
   fail "second backfill still printed 보강 (should be a no-op)"
 fi
-pass "43-key env → 45 keys; existing values not rewritten"
+pass "44-key env → 46 keys; existing values not rewritten"
 
 if command -v docker >/dev/null 2>&1; then
   POST_CFG_OUT="$SANDBOX/post.config.out"

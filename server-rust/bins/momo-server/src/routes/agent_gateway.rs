@@ -75,6 +75,7 @@ use crate::dto::{
     PendingJobsQuery,
 };
 use crate::error::ApiError;
+use crate::routes::apps_used::{validated_apps_used, write_tool_used_audit, AppsUsed};
 use crate::routes::shared::{
     agent_tenant_tx, emit_rail_frame, emit_terminal_agent_status, epoch_ms, path_uuid, settle_db,
 };
@@ -522,6 +523,14 @@ pub async fn complete(
     let via_token_id = principal.as_ref().and_then(|p| p.token_id);
     let actor_member_id = principal.as_ref().map(|p| p.member_id);
     let usage_detail = request.usage.as_ref().map(usage_detail_json);
+    // E8 — the Hermes door reports 「쓴 앱」 too. Unlike the Agent Port, whose
+    // refusal names a field the agent can fix, this door has no way to say what
+    // was wrong, and the report is telemetry riding on the run's final answer:
+    // a malformed one is dropped (nothing stored, nothing audited) rather than
+    // costing the answer. The Port refuses; this door forgets.
+    let apps_used = validated_apps_used(request.apps_used.as_ref())
+        .ok()
+        .flatten();
     let input = GatewayCompleteInput {
         run_id,
         lease: lease_binding(request.job_id, request.lease_id),
@@ -531,6 +540,7 @@ pub async fn complete(
         usage,
         usage_detail,
         artifacts: None,
+        apps_used,
         actor_member_id,
         via_token_id,
         subscription_agents_enabled: state.agent_port.config.subscription_agents_enabled,
@@ -553,7 +563,7 @@ pub async fn complete(
     Ok(Json(AgentGatewayCompleteResponse {
         status,
         run_id: run_id.to_string(),
-        message_id: message_id.to_string(),
+        message_id: message_id.map(|id| id.to_string()),
         seq,
     }))
 }
@@ -582,6 +592,10 @@ pub(crate) struct GatewayCompleteInput {
     /// ADR-0162 증보 3 D12 — already validated ([`validated_gateway_artifacts`]);
     /// the REST callback is not extended (`None`).
     pub artifacts: Option<GatewayArtifacts>,
+    /// ADR-0113 증보 2 E8 (#3946) — the execution site's 「쓴 앱」 report, already
+    /// validated ([`crate::routes::apps_used::validated_apps_used`]). Stored in
+    /// `output.appsUsed` and audited as one `connector.tool_used` row.
+    pub apps_used: Option<AppsUsed>,
     pub actor_member_id: Option<Uuid>,
     pub via_token_id: Option<Uuid>,
     /// ADR-0193 D6 (#2815) — `AgentPortConfig::subscription_agents_enabled`,
@@ -606,7 +620,7 @@ pub(crate) async fn complete_gateway_run_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     input: GatewayCompleteInput,
-) -> Result<Result<(Uuid, i64, &'static str), ApiError>, momo_db::DbError> {
+) -> Result<Result<(Option<Uuid>, Option<i64>, &'static str), ApiError>, momo_db::DbError> {
     let GatewayCompleteInput {
         run_id,
         lease,
@@ -616,6 +630,7 @@ pub(crate) async fn complete_gateway_run_in_tx(
         usage,
         usage_detail,
         artifacts,
+        apps_used,
         actor_member_id,
         via_token_id,
         subscription_agents_enabled,
@@ -668,8 +683,23 @@ pub(crate) async fn complete_gateway_run_in_tx(
     if terminal {
         let existing =
             find_client_message_in_tx(conn, run.channel_id, run.agent_member_id, run_id).await?;
+        // #4017 — a successful run with no text wrote no message the first
+        // time; replaying its completion answers the same (no message), not 409.
+        if existing.is_none()
+            && run.status.as_db_label() == "succeeded"
+            && existing_output_object_in_tx(conn, run_id)
+                .await?
+                .get("message_id")
+                .is_some_and(Value::is_null)
+        {
+            return Ok(Ok((None, None, "succeeded")));
+        }
         return Ok(match existing {
-            Some(message) => Ok((message.id, message.seq, run.status.as_db_label())),
+            Some(message) => Ok((
+                Some(message.id),
+                Some(message.seq),
+                run.status.as_db_label(),
+            )),
             None => Err(ApiError::new(
                 StatusCode::CONFLICT,
                 format!(
@@ -682,40 +712,47 @@ pub(crate) async fn complete_gateway_run_in_tx(
 
     // 1. the final message — the messenger's own write path, keyed by
     //    the run id so a replay can never produce a second one.
-    let message = send_message_in_tx(
-        conn,
-        workspace_id,
-        NewMessage {
-            channel_id: run.channel_id,
-            author_member_id: run.agent_member_id,
-            message_type: if succeeded {
-                MessageType::Text
-            } else {
-                MessageType::System
-            },
-            body: Some(body_text.clone()),
-            props: timeline_props(
-                &run,
-                run_id,
-                succeeded,
-                usage_detail.clone(),
-                safe_error.as_deref(),
-            ),
-            root_id: None,
-            // ADR-0148 규칙 6 — the same answer the worker gives,
-            // arriving by a different door, so it points at the same
-            // message. Both read `agent_run.trigger_message_id` off
-            // the locked run row rather than off a job payload,
-            // which is what keeps "an agent quotes what it answers"
-            // one rule instead of two implementations of it.
-            reply_to_id: run.trigger_message_id,
-            client_msg_id: Some(run_id),
-            run_id: Some(run_id),
-            hlc_ts: None,
-            hlc_count: None,
-        },
-    )
-    .await?;
+    //    #4017: a successful run with nothing to say writes none (see
+    //    [`timeline_body`]); everything below still settles the run.
+    let message = match body_text {
+        Some(body_text) => Some(
+            send_message_in_tx(
+                conn,
+                workspace_id,
+                NewMessage {
+                    channel_id: run.channel_id,
+                    author_member_id: run.agent_member_id,
+                    message_type: if succeeded {
+                        MessageType::Text
+                    } else {
+                        MessageType::System
+                    },
+                    body: Some(body_text),
+                    props: timeline_props(
+                        &run,
+                        run_id,
+                        succeeded,
+                        usage_detail.clone(),
+                        safe_error.as_deref(),
+                    ),
+                    root_id: None,
+                    // ADR-0148 규칙 6 — the same answer the worker gives,
+                    // arriving by a different door, so it points at the same
+                    // message. Both read `agent_run.trigger_message_id` off
+                    // the locked run row rather than off a job payload,
+                    // which is what keeps "an agent quotes what it answers"
+                    // one rule instead of two implementations of it.
+                    reply_to_id: run.trigger_message_id,
+                    client_msg_id: Some(run_id),
+                    run_id: Some(run_id),
+                    hlc_ts: None,
+                    hlc_count: None,
+                },
+            )
+            .await?,
+        ),
+        None => None,
+    };
 
     // 1b. …and the hosted inbox projection for that answer (ADR-0162 / HAP-E5).
     //
@@ -731,16 +768,18 @@ pub(crate) async fn complete_gateway_run_in_tx(
     //     above no message is written and none is needed: the reference the
     //     first completion appended is already there, and the append is
     //     idempotent anyway.
-    momo_messaging::fan_out_message_reference_in_tx(
-        conn,
-        workspace_id,
-        run.channel_id,
-        message.message.id,
-        run.agent_member_id,
-        subscription_agents_enabled,
-        claude_subscription_agents_enabled,
-    )
-    .await?;
+    if let Some(message) = message.as_ref() {
+        momo_messaging::fan_out_message_reference_in_tx(
+            conn,
+            workspace_id,
+            run.channel_id,
+            message.message.id,
+            run.agent_member_id,
+            subscription_agents_enabled,
+            claude_subscription_agents_enabled,
+        )
+        .await?;
+    }
 
     // 2. the bill.
     let resolved = RunUsageReport::resolve(
@@ -770,13 +809,19 @@ pub(crate) async fn complete_gateway_run_in_tx(
             json!(if succeeded { "succeeded" } else { "failed" }),
         ),
         ("body", json!(body)),
-        ("message_id", json!(message.message.id.to_string())),
+        (
+            "message_id",
+            json!(message.as_ref().map(|m| m.message.id.to_string())),
+        ),
         ("usage", usage_detail.clone().unwrap_or(Value::Null)),
     ] {
         output.insert(key.into(), value);
     }
     if let Some(artifacts) = artifacts.as_ref() {
         output.insert("artifacts".into(), artifacts.to_json());
+    }
+    if let Some(apps_used) = apps_used.as_ref() {
+        output.insert("appsUsed".into(), apps_used.to_json());
     }
     let output = Value::Object(output);
     let error_json = (!succeeded).then(|| {
@@ -851,6 +896,20 @@ pub(crate) async fn complete_gateway_run_in_tx(
         .await?;
     }
 
+    // ADR-0113 증보 2 E8 — one row per completion that carried a 「쓴 앱」 report:
+    // app ids, tool names and counts under the closed key set, never a value.
+    if let Some(apps_used) = apps_used.as_ref() {
+        write_tool_used_audit(
+            conn,
+            workspace_id,
+            run_id,
+            run.agent_member_id,
+            via_token_id,
+            apps_used,
+        )
+        .await?;
+    }
+
     write_audit(
         conn,
         &AuditEntry::new(workspace_id, "agent.gateway.completed")
@@ -863,7 +922,7 @@ pub(crate) async fn complete_gateway_run_in_tx(
                 json!({
                     "status": if succeeded { "succeeded" } else { "failed" },
                     "run_id": run_id.to_string(),
-                    "message_id": message.message.id.to_string(),
+                    "message_id": message.as_ref().map(|m| m.message.id.to_string()),
                     "usage": usage_detail,
                     "source": "hermes_gateway",
                 }),
@@ -872,8 +931,8 @@ pub(crate) async fn complete_gateway_run_in_tx(
     .await?;
 
     Ok(Ok((
-        message.message.id,
-        message.message.seq,
+        message.as_ref().map(|m| m.message.id),
+        message.as_ref().map(|m| m.message.seq),
         if succeeded { "succeeded" } else { "failed" },
     )))
 }
@@ -1817,22 +1876,25 @@ fn usage_detail_json(dto: &AgentGatewayUsageDto) -> Value {
     })
 }
 
-/// Swift `timelineBody` (:1497-1511).
-fn timeline_body(body: Option<&str>, succeeded: bool, safe_error: Option<&str>) -> String {
+/// Swift `timelineBody` (:1497-1511), reshaped by #4017.
+///
+/// `None` = a **successful run that produced no text**: the run still ends
+/// normally (status, receipt, rail frame, bill), but the timeline gets no
+/// message. The old English stand-in named an internal product and told the
+/// reader nothing; an empty answer is not an answer, and a blank-looking
+/// bubble in a 1:1 DM reads as the agent ignoring the person. A failure keeps
+/// its system line, in the product's own voice and without the runtime's name.
+fn timeline_body(body: Option<&str>, succeeded: bool, safe_error: Option<&str>) -> Option<String> {
     if succeeded {
         let text = body.map(str::trim).unwrap_or_default();
-        return if text.is_empty() {
-            "(Hermes gateway returned an empty response.)".to_string()
-        } else {
-            text.to_string()
-        };
+        return (!text.is_empty()).then(|| text.to_string());
     }
-    match safe_error.map(str::trim).filter(|value| !value.is_empty()) {
-        Some(reason) => {
-            format!("Hermes gateway failed before producing a final response: {reason}")
-        }
-        None => "Hermes gateway failed before producing a final response.".to_string(),
-    }
+    Some(
+        match safe_error.map(str::trim).filter(|value| !value.is_empty()) {
+            Some(reason) => format!("답을 만들지 못했어요: {reason}"),
+            None => "답을 만들지 못했어요.".to_string(),
+        },
+    )
 }
 
 /// Swift `timelineProps` (:1513-1529).
@@ -1927,7 +1989,7 @@ pub(crate) fn sanitized_gateway_error(raw: Option<&str>, gateway_secret: &str) -
     .any(|hint| lowered.contains(hint))
     {
         return Some(
-            "Hermes gateway reported an error with redacted credential-shaped content.".to_string(),
+            "에이전트가 오류를 알려 왔지만 민감한 값이 섞여 있어 내용을 가렸어요.".to_string(),
         );
     }
 
@@ -2613,20 +2675,31 @@ mod tests {
     }
 
     #[test]
-    fn the_timeline_body_never_leaves_the_channel_blank() {
+    fn an_empty_success_leaves_no_placeholder_and_a_failure_keeps_its_line() {
+        // #4017: an empty success leaves no message, not a placeholder.
+        assert_eq!(timeline_body(Some("   "), true, None), None);
+        assert_eq!(timeline_body(None, true, None), None);
         assert_eq!(
-            timeline_body(Some("   "), true, None),
-            "(Hermes gateway returned an empty response.)"
+            timeline_body(Some(" done "), true, None).as_deref(),
+            Some("done")
         );
-        assert_eq!(timeline_body(Some(" done "), true, None), "done");
         assert_eq!(
+            timeline_body(None, false, Some("boom")).as_deref(),
+            Some("답을 만들지 못했어요: boom")
+        );
+        assert_eq!(
+            timeline_body(None, false, None).as_deref(),
+            Some("답을 만들지 못했어요.")
+        );
+        for text in [
             timeline_body(None, false, Some("boom")),
-            "Hermes gateway failed before producing a final response: boom"
-        );
-        assert_eq!(
             timeline_body(None, false, None),
-            "Hermes gateway failed before producing a final response."
-        );
+        ]
+        .into_iter()
+        .flatten()
+        {
+            assert!(!text.contains("Hermes"), "no internal runtime name: {text}");
+        }
     }
 
     /// The instance's own secret is the one value this server can redact exactly.
@@ -2690,7 +2763,7 @@ mod tests {
         ] {
             assert_eq!(
                 sanitized_gateway_error(Some(input), "").expect("replaced"),
-                "Hermes gateway reported an error with redacted credential-shaped content."
+                "에이전트가 오류를 알려 왔지만 민감한 값이 섞여 있어 내용을 가렸어요."
             );
         }
     }

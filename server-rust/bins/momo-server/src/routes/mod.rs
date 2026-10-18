@@ -2,6 +2,7 @@
 
 /// ADR-0186 D1 — the workspace action catalog and its argument normaliser.
 pub mod actions;
+pub mod agent_connector_owner;
 pub mod agent_credentials;
 pub mod agent_gateway;
 pub mod agent_mentions;
@@ -13,6 +14,7 @@ pub mod agent_provider_pin;
 pub mod agent_runs;
 pub mod agents;
 pub mod approvals;
+pub mod apps_used;
 /// ADR-0151 — the Drive attachment surface: upload session, completion, and the
 /// content proxy, plus the stub archive's own upload endpoint.
 pub mod attachments;
@@ -35,6 +37,7 @@ pub mod dms;
 pub mod ephemeral;
 /// #1222 — 이벤트 구독: what leaves the workspace, and who said it could.
 pub mod event_subscriptions;
+pub mod github_app;
 pub mod health;
 pub mod hosted_agent_connections;
 pub mod hosted_agent_doorbell;

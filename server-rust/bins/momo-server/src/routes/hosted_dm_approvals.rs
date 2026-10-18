@@ -261,6 +261,7 @@ pub async fn dm_delivery(
     let subscription_agents_enabled = state.agent_port.config.subscription_agents_enabled;
     let claude_subscription_agents_enabled =
         state.agent_port.config.claude_subscription_agents_enabled;
+    let connector_trial = state.cohosted.config.attest();
     let outcome: DbRejectable<AgentDmDeliveryResponse> =
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
@@ -294,6 +295,7 @@ pub async fn dm_delivery(
                     hosted_delivery_enabled,
                     subscription_agents_enabled,
                     claude_subscription_agents_enabled,
+                    &connector_trial,
                 );
                 Ok(Ok(AgentDmDeliveryResponse {
                     channel_id: channel_id.to_string(),

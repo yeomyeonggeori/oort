@@ -1,0 +1,31 @@
+[package]
+name = "momo-github"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# #3947 E-GH1 / ADR-0205 D2·D8 — the one outbound call phase 1 makes to GitHub.
+#
+# A crate rather than a module in momo-server for the reason momo-provider-probe
+# and momo-unfurl are crates: `reqwest` lives HERE, never in momo-server's
+# manifest, so a route handler cannot build an arbitrary outbound request. The
+# only thing the api can reach is `GithubAppConverter::convert_manifest(code)`,
+# which issues exactly one `POST {api}/app-manifests/{code}/conversions` through
+# the #2852 egress guard (guarded DNS resolver, no redirects, no proxy). The
+# host is fixed at construction; no caller supplies a URL.
+[dependencies]
+# `EgressPolicy` is the single authority for which addresses may be reached.
+momo-settings = { path = "../momo-settings" }
+momo-egress = { path = "../momo-egress" }
+
+async-trait.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["net", "time"] }
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util"] }
+axum.workspace = true

@@ -705,6 +705,61 @@ mounted `.p8`. Local stub never contacts Apple and refuses to boot without
 rows then fail the outbox check. Without that overlay they are **info**
 (count only), not fail.
 
+## GitHub notifications (ADR-0205)
+
+The instance can receive GitHub PR / issue / check events into channels. It
+does so with **one GitHub App that this instance owns** (not a person's token).
+The operator (`PLATFORM_ADMIN_EMAILS`) registers the App from oort's manifest
+flow once; the server seals the App's private key and webhook secret in the
+database. This slice stores and seals the credential; receiving events and
+channel subscriptions arrive in follow-up slices.
+
+**Requirements**
+
+- A **public HTTPS address** that reaches the api (see "Open on a public
+  origin"), written as **`MOMO_PUBLIC_BASE_URL=https://<host>`** — the api reads
+  that variable to tell GitHub where to call back, and answers 409
+  `public_address_required` to "create the GitHub app" while it is unset or not
+  absolute https. GitHub only delivers webhooks to a public HTTPS URL, so a
+  loopback / NAT-only install cannot receive them. `scripts/oort doctor`
+  says so: 「공개 주소가 없어 GitHub 알림을 받을 수 없어요」 (info, not a failure).
+- `GITHUB_APP_MASTER_KEY` — a dedicated sealing key (domain
+  `momo.github_app.key.v1`). The generator writes it for new installs and
+  `scripts/oort upgrade` backfills it (add-only, never overwrites a value you
+  set, never printed). It is **optional**: when it is empty only the GitHub
+  surface answers 503 and every other route is unaffected. It must differ from
+  `JWT_HMAC`, both webhook master keys and `PROVIDER_LINK_MASTER_KEY`; reuse
+  makes the api refuse to boot and `oort doctor` reports it as a blocker.
+  It reaches **api only** — never agent-worker or the Hermes service.
+
+**Permissions the App asks for** (read only): `metadata`, `issues`,
+`pull_requests`, `checks`, `contents`. There is no write permission. Install it
+on **"Only select repositories"** rather than "All repositories": the
+`contents: read` permission is visible to the account owner at install time,
+and a narrow install bounds what a leaked credential can read.
+
+**Events during downtime are lost (phase 1).** GitHub does not redeliver a
+failed delivery automatically. While the server is down, events are dropped;
+re-fetching missed deliveries is a phase-2 feature.
+
+**Rotating `GITHUB_APP_MASTER_KEY`.** Rotation means re-sealing the stored
+credential: open it with the old key, seal it with the new key, in one
+transaction (ADR-0205 D7). The re-seal command is **not implemented in this
+slice** — until it ships, rotate by replacing the key and re-registering the
+App (the previously sealed credential becomes unreadable and must be entered
+again). Never rotate by editing the value alone and expecting old rows to open.
+
+**If the key and a database dump leak together**, the holder can read PR /
+issue / check data **and code** (`contents`) of every installed repository.
+Respond in this order:
+
+1. On GitHub, delete the App's private key and replace the webhook secret.
+2. In oort, set a new `GITHUB_APP_MASTER_KEY`, restart the api and enter the
+   new credential (re-seal).
+3. If needed, delete the App on GitHub and register it again.
+
+Installing on selected repositories only keeps step 1's blast radius small.
+
 ## Stop · wipe
 
 The argument bundle from step 3 is long, so from here it is written as one

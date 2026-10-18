@@ -1100,3 +1100,248 @@ async fn the_worker_never_runs_a_subscription_agent_even_for_its_owner() {
     .unwrap();
     assert_eq!(open_jobs, 0, "the job is settled, not retried forever");
 }
+
+/// #3938 (ADR-0113 증보 2 E3): a team agent's answer that mentions an agent
+/// running its owner's connected apps delegates nothing — no agent is that
+/// owner. The target is a plain workspace agent with no hosted connection, so
+/// neither `owner_only` nor the hosted skip can be what refuses it. The control
+/// (mark cleared → the same shape of answer IS delegated) keeps the zero honest.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn an_agent_running_the_owners_apps_is_never_delegated_to() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let t = seed_with(&su, false).await;
+    let app_agent = Uuid::new_v4();
+    let app_handle = "appagent";
+    sqlx::query(
+        "INSERT INTO member (id, workspace_id, kind, status, display_name, handle) \
+         VALUES ($1, $2, 'agent', 'active', $3, $3)",
+    )
+    .bind(app_agent)
+    .bind(t.workspace_id)
+    .bind(app_handle)
+    .execute(&su)
+    .await
+    .expect("member");
+    sqlx::query(
+        "INSERT INTO workspace_membership (workspace_id, member_id, role) VALUES ($1, $2, 'member')",
+    )
+    .bind(t.workspace_id)
+    .bind(app_agent)
+    .execute(&su)
+    .await
+    .expect("workspace_membership");
+    sqlx::query(
+        "INSERT INTO agent (member_id, workspace_id, model, base_url, owner_human_id, \
+                            connector_owner_human_id, max_concurrent_runs, max_run_steps) \
+         VALUES ($1, $2, 'hermes-agent', 'https://gateway.invalid/v1', $3, $3, 4, 50)",
+    )
+    .bind(app_agent)
+    .bind(t.workspace_id)
+    .bind(t.owner_id)
+    .execute(&su)
+    .await
+    .expect("connector agent");
+    sqlx::query(
+        "INSERT INTO agent_profile (agent_member_id, workspace_id, updated_by, paused) \
+         VALUES ($1, $2, $3, false)",
+    )
+    .bind(app_agent)
+    .bind(t.workspace_id)
+    .bind(t.owner_id)
+    .execute(&su)
+    .await
+    .expect("profile");
+    sqlx::query("INSERT INTO membership (workspace_id, channel_id, member_id) VALUES ($1, $2, $3)")
+        .bind(t.workspace_id)
+        .bind(t.channel_id)
+        .bind(app_agent)
+        .execute(&su)
+        .await
+        .expect("membership");
+
+    let provider = Arc::new(MockChatProvider::scripted([
+        ("첫째 부탁", format!("@{app_handle} 메일 읽어 줘")),
+        ("둘째 부탁", format!("@{app_handle} 메일 읽어 줘")),
+    ]));
+    let worker = AgentWorker::new(
+        momo_worker_pool().await,
+        provider.clone() as Arc<dyn ChatProvider>,
+        worker_config(Some(TEAM_ENV_BEARER)),
+    );
+    send(&su, &t, t.teammate_id, &format!("@{TEAM} 첫째 부탁"), true).await;
+    let stats = drain(&worker).await;
+    assert_eq!(
+        stats.delegated, 0,
+        "nothing delegated to the connector agent: {stats:?}"
+    );
+    let reasons: Vec<String> = sqlx::query_scalar(
+        "SELECT COALESCE(detail->>'reason', '') FROM audit_log WHERE workspace_id = $1 \
+            AND action = 'agent.mention.skipped' AND subject_member_id = $2 ORDER BY id",
+    )
+    .bind(t.workspace_id)
+    .bind(app_agent)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        reasons,
+        vec![momo_agent::SKIP_CONNECTOR_OWNER_NON_OWNER.to_string()],
+        "the explicit connector check refused it, with its own reason word"
+    );
+    let runs: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM agent_run WHERE workspace_id = $1 AND agent_member_id = $2",
+    )
+    .bind(t.workspace_id)
+    .bind(app_agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(runs, 0);
+
+    // Control: with the mark cleared the same answer shape is delegated.
+    sqlx::query("UPDATE agent SET connector_owner_human_id = NULL WHERE member_id = $1")
+        .bind(app_agent)
+        .execute(&su)
+        .await
+        .unwrap();
+    send(&su, &t, t.teammate_id, &format!("@{TEAM} 둘째 부탁"), true).await;
+    let stats = drain(&worker).await;
+    assert!(stats.delegated >= 1, "the control is delegated: {stats:?}");
+}
+
+/// #3938 (결재: claim 시점 재확인): a job a teammate queued while the team agent
+/// was unmarked is closed unrun once the owner marks it as running their apps;
+/// the owner's own job on the same agent still runs (the zero is not vacuous).
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn a_job_queued_before_the_mark_is_closed_unrun_by_the_worker() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let t = seed_with(&su, false).await;
+    let provider = Arc::new(MockChatProvider::echo());
+    let worker = AgentWorker::new(
+        momo_worker_pool().await,
+        provider.clone() as Arc<dyn ChatProvider>,
+        worker_config(Some(TEAM_ENV_BEARER)),
+    );
+    send(&su, &t, t.teammate_id, &format!("@{TEAM} 먼저 부탁"), true).await;
+    sqlx::query("UPDATE agent SET connector_owner_human_id = owner_human_id WHERE member_id = $1")
+        .bind(t.team_agent_id)
+        .execute(&su)
+        .await
+        .unwrap();
+    let stats = drain(&worker).await;
+    assert_eq!(stats.answered, 0, "{stats:?}");
+    assert!(
+        provider.calls().is_empty(),
+        "no model call for a stranger's queued job"
+    );
+    let cancelled: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM agent_run WHERE workspace_id=$1 AND agent_member_id=$2 \
+            AND status='cancelled' AND error->>'code'='connector_owner_only'",
+    )
+    .bind(t.workspace_id)
+    .bind(t.team_agent_id)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(cancelled, 1);
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND action='agent.connector_owner.job_closed'",
+    )
+    .bind(t.workspace_id)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+
+    send(&su, &t, t.owner_id, &format!("@{TEAM} 제 부탁"), true).await;
+    let stats = drain(&worker).await;
+    assert_eq!(stats.answered, 1, "the owner's job runs: {stats:?}");
+}
+
+/// #3948 (ADR-0203 증보 K2-3): a 「커넥터 시험」 agent (marked and pinned to the
+/// operator's env link) is not run by the worker while the workspace has more than
+/// one active person — even for the owner's own job, even one queued before the
+/// second person joined. People are counted at the moment the job is taken, so a
+/// path that adds a member without a join route cannot slip past. Control: the
+/// same job runs once the workspace is back to one person, and an unpinned marked
+/// agent is not judged by the count (the zero is not vacuous in either direction).
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn a_trial_agent_is_not_run_while_the_workspace_has_more_than_one_person() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let t = seed_with(&su, false).await;
+    let provider = Arc::new(MockChatProvider::echo());
+    let worker = AgentWorker::new(
+        momo_worker_pool().await,
+        provider.clone() as Arc<dyn ChatProvider>,
+        worker_config(Some(TEAM_ENV_BEARER)),
+    );
+    // Marked only (not pinned): the people count is not this agent's rule.
+    sqlx::query("UPDATE agent SET connector_owner_human_id = owner_human_id WHERE member_id = $1")
+        .bind(t.team_agent_id)
+        .execute(&su)
+        .await
+        .unwrap();
+    send(&su, &t, t.owner_id, &format!("@{TEAM} 핀 없는 부탁"), true).await;
+    let stats = drain(&worker).await;
+    assert_eq!(stats.answered, 1, "marked but unpinned runs: {stats:?}");
+
+    // Pinned to the operator's env link: now it is a trial agent.
+    sqlx::query(
+        "INSERT INTO agent_provider_pin(agent_member_id, workspace_id, kind, pinned_by) \
+         VALUES($1,$2,'operator_env',$3)",
+    )
+    .bind(t.team_agent_id)
+    .bind(t.workspace_id)
+    .bind(t.owner_id)
+    .execute(&su)
+    .await
+    .unwrap();
+    let calls_before = provider.calls().len();
+    send(&su, &t, t.owner_id, &format!("@{TEAM} 시험 부탁"), true).await;
+    let stats = drain(&worker).await;
+    assert_eq!(stats.answered, 0, "two active people: {stats:?}");
+    assert_eq!(
+        provider.calls().len(),
+        calls_before,
+        "no model call for a trial in a grown workspace"
+    );
+    let cancelled: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM agent_run WHERE workspace_id=$1 AND agent_member_id=$2 \
+            AND status='cancelled' AND error->>'code'='connector_trial_members'",
+    )
+    .bind(t.workspace_id)
+    .bind(t.team_agent_id)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(cancelled, 1);
+    let audited: Vec<String> = sqlx::query_scalar(
+        "SELECT detail->>'reason' FROM audit_log WHERE workspace_id=$1 \
+            AND action='agent.connector_owner.job_closed' ORDER BY id",
+    )
+    .bind(t.workspace_id)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(audited, vec!["connector_trial_members".to_string()]);
+
+    // Control: the other person leaves; the owner's next job runs.
+    sqlx::query("UPDATE member SET status='suspended' WHERE workspace_id=$1 AND id=$2")
+        .bind(t.workspace_id)
+        .bind(t.teammate_id)
+        .execute(&su)
+        .await
+        .unwrap();
+    send(&su, &t, t.owner_id, &format!("@{TEAM} 다시 부탁"), true).await;
+    let stats = drain(&worker).await;
+    assert_eq!(stats.answered, 1, "one person again: {stats:?}");
+}
