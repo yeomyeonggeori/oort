@@ -1,6 +1,6 @@
 // 앱을 쓰다 막혔을 때의 문장 (plugins-v2-plan 2.5절, #3950 U-S2): 한 문장과 행동 하나.
 import { describe, expect, it } from "vitest";
-import { APPS_SCREEN_PATH, appNoticeFor, minutesSince, parseAppNotice, type AppNoticeEnv } from "./appNotice";
+import { APPS_SCREEN_PATH, appNoticeFor, hasAppNotice, minutesSince, parseAppNotice, type AppNoticeEnv } from "./appNotice";
 
 const PLUGINS = new Map([
   ["gmail", { name: "Gmail", egressDomains: ["gmailmcp.googleapis.com"] }],
@@ -39,6 +39,12 @@ describe("막힘 문장 표", () => {
       sentence: "Gmail 로그인이 끊겼어요. 운영자가 다시 로그인해야 해요.",
       action: null,
     });
+    // 실행 장소가 없는 문(Agent Port)은 누가 할 일인지 모른다: 문장만, 행동 없음.
+    expect(notice({ kind: "login_lost", plugin_id: "gmail" })).toMatchObject({
+      sentence: "Gmail 로그인이 끊겼어요.",
+      action: null,
+    });
+    expect(notice({ kind: "login_lost", plugin_id: "gmail" }, phone)?.action).toBeNull();
     // 폰에는 로그인 창이 없다: 웹으로 보낸다.
     expect(notice({ kind: "login_lost", plugin_id: "gmail", site: "mac" }, phone)?.action).toEqual({
       kind: "web",
@@ -118,5 +124,14 @@ describe("막힘 문장 표", () => {
     expect(
       appNoticeFor({ props: { app_notice: { kind: "grant_revoked" } }, state: "deleted" } as never, web)
     ).toBeNull();
+  });
+
+  it("system 행(정지·건너뜀 줄)에는 붙이지 않는다: 본문이 이미 말한다", () => {
+    const props = { app_notice: { kind: "site_off", site: "mac" } };
+    expect(appNoticeFor({ props, state: "sent", type: "system" } as never, web)).toBeNull();
+    expect(hasAppNotice({ props, state: "sent", type: "system" } as never)).toBe(false);
+    // 같은 칸이 에이전트 답(text)에는 선다.
+    expect(appNoticeFor({ props, state: "sent", type: "text" } as never, web)).not.toBeNull();
+    expect(hasAppNotice({ props, state: "sent", type: "text" } as never)).toBe(true);
   });
 });

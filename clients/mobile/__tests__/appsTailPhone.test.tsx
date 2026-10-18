@@ -269,6 +269,22 @@ describe('막힘 문장 (폰)', () => {
     expect(screen.queryByTestId('app-notice-action')).toBeNull();
   });
 
+  it('system 행(정지·건너뜀 줄)에는 앱 문장을 붙이지 않는다', () => {
+    renderRow({
+      ...blocked({kind: 'site_off', site: 'mac'}),
+      type: 'system',
+      body: '내 맥이 꺼져 있어서 못 했어요.',
+    } as Message);
+    expect(screen.queryByTestId('app-notice')).toBeNull();
+    expect(mockListPlugins).not.toHaveBeenCalled();
+  });
+
+  it('로그인 끊김(실행 장소 없음, Agent Port 문): 문장만, 행동은 없다', () => {
+    renderRow(blocked({kind: 'login_lost', plugin_id: 'gmail'}));
+    expect(screen.getByTestId('app-notice-sentence')).toHaveTextContent(/로그인이 끊겼어요\.$/);
+    expect(screen.queryByTestId('app-notice-action')).toBeNull();
+  });
+
   it('칸이 없는 행(옛 서버)은 변화 0이고 앱 목록도 부르지 않는다', () => {
     renderRow(reply({source: 'hermes_gateway', status: 'failed', run_id: RUN}));
     expect(screen.queryByTestId('app-notice')).toBeNull();
