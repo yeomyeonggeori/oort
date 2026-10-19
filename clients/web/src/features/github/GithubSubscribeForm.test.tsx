@@ -23,6 +23,7 @@ const SAVED = {
   features: ["pulls", "issues"],
   active: true,
   privateConfirmed: false,
+  needsReconfirm: false,
 };
 
 beforeEach(() => {

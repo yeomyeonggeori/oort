@@ -21,6 +21,7 @@ const api = vi.hoisted(() => ({
   linkInstallationToWorkspace: vi.fn(),
   pasteGithubApp: vi.fn(),
   unsubscribeGithub: vi.fn(),
+  subscribeGithub: vi.fn(),
 }));
 vi.mock("@momo/core/features/github/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/features/github/api")>();
@@ -275,6 +276,7 @@ describe("워크스페이스 구역", () => {
             features: ["pulls"],
             active: true,
             privateConfirmed: false,
+            needsReconfirm: false,
           },
         ],
       })
@@ -287,6 +289,37 @@ describe("워크스페이스 구역", () => {
     await render();
     await waitUntil(() => q("github-no-subscription") !== null, "빈 상태");
     expect(q("github-no-subscription")?.textContent).toContain("⋮ 메뉴");
+  });
+
+  it("다시 확인 필요 구독은 허브에서도 확인한 뒤에만 confirmPrivate 로 다시 구독한다", async () => {
+    const stale = {
+      id: "s1",
+      channelId: GH_PUBLIC_CH,
+      installationId: 4001,
+      repository: "yeomyeonggeori/oort",
+      repoId: 11,
+      features: ["pulls", "releases"],
+      active: true,
+      privateConfirmed: false,
+      needsReconfirm: true,
+    };
+    api.fetchGithubOverview.mockResolvedValue(overview({ subscriptions: [stale] }));
+    api.subscribeGithub.mockResolvedValue({ ...stale, needsReconfirm: false });
+    await render();
+    await waitUntil(() => q("github-subscription-reconfirm") !== null, "다시 확인 버튼");
+    expect(q("github-subscription-row")?.textContent).toContain("다시 확인 필요");
+    click(q("github-subscription-reconfirm"));
+    expect(api.subscribeGithub).toHaveBeenCalledTimes(0);
+    expect(q("github-subscription-row")?.textContent).toContain("마케팅 채널이 공개 채널이 됐어요");
+    click(q("github-subscription-reconfirm-confirm"));
+    await flush();
+    expect(api.subscribeGithub).toHaveBeenCalledWith(GH_WS, {
+      channelId: GH_PUBLIC_CH,
+      installationId: 4001,
+      repository: "yeomyeonggeori/oort",
+      features: ["pulls", "releases"],
+      confirmPrivate: true,
+    });
   });
 
   it("옛 서버(404)와 키 없는 서버(503)는 화면 전체가 한 문장으로 접힌다", async () => {

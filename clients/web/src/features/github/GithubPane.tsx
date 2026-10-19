@@ -3,17 +3,19 @@ import { useLocation } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
-import { startGithubLink, unsubscribeGithub } from "@momo/core/features/github/api";
+import { startGithubLink, subscribeGithub, unsubscribeGithub } from "@momo/core/features/github/api";
 import {
   GITHUB_PERMISSIONS_SENTENCE,
   GITHUB_SELECTED_ONLY_ADVICE,
   githubFailureMessage,
+  reconfirmInput,
   githubReturnSentence,
   installationSelectionSentence,
   isGithubUnavailable,
   GITHUB_UNAVAILABLE_SENTENCE,
   type GithubLinkStart,
   type GithubReturnKind,
+  type GithubSubscription,
   type GithubWorkspaceOverview,
 } from "@momo/core/features/github/model";
 import { channelLabel, useChannels, useDirectory } from "@/features/workspace/useWorkspace";
@@ -293,6 +295,16 @@ function SubscriptionsBlock({
     onError: (error) => setMessage(githubFailureMessage("unsubscribe", error)),
   });
 
+  const reconfirm = useMutation({
+    mutationFn: (subscription: GithubSubscription) =>
+      subscribeGithub(workspaceId, reconfirmInput(subscription)),
+    onSuccess: () => {
+      setMessage(null);
+      void client.invalidateQueries({ queryKey: githubOverviewPrefix(workspaceId) });
+    },
+    onError: (error) => setMessage(githubFailureMessage("subscribe", error)),
+  });
+
   return (
     <Subsection
       title="구독"
@@ -310,6 +322,8 @@ function SubscriptionsBlock({
           subscriptions={data.subscriptions}
           channelName={(subscription) => nameById.get(subscription.channelId.toLowerCase()) ?? "알 수 없는 채널"}
           onRemove={(subscription) => remove.mutate(subscription.id)}
+          onReconfirm={(subscription) => reconfirm.mutate(subscription)}
+          reconfirmingId={reconfirm.isPending ? (reconfirm.variables?.id ?? null) : null}
           removingId={remove.isPending ? (remove.variables ?? null) : null}
           offline={offline}
         />

@@ -9,12 +9,14 @@ import { GH_PUBLIC_CH, GH_WS, overview, q } from "./githubTestKit";
 
 const fetchGithubOverview = vi.hoisted(() => vi.fn());
 const unsubscribeGithub = vi.hoisted(() => vi.fn());
+const subscribeGithub = vi.hoisted(() => vi.fn());
 vi.mock("@momo/core/features/github/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/features/github/api")>();
   return {
     ...actual,
     fetchGithubOverview: (...a: unknown[]) => fetchGithubOverview(...a) as unknown,
     unsubscribeGithub: (...a: unknown[]) => unsubscribeGithub(...a) as unknown,
+    subscribeGithub: (...a: unknown[]) => subscribeGithub(...a) as unknown,
   };
 });
 
@@ -28,11 +30,13 @@ const mine = {
   features: ["pulls", "issues", "releases"],
   active: true,
   privateConfirmed: true,
+  needsReconfirm: false,
 };
 
 beforeEach(() => {
   fetchGithubOverview.mockReset();
   unsubscribeGithub.mockReset();
+  subscribeGithub.mockReset();
   unsubscribeGithub.mockResolvedValue(undefined);
 });
 afterEach(() => {
@@ -96,6 +100,41 @@ describe("채널 ⋮ › GitHub 알림 (네 상태와 막힘)", () => {
     click(confirm ?? null);
     await flush();
     expect(unsubscribeGithub).toHaveBeenCalledWith(GH_WS, "s-mine");
+  });
+
+  it("다시 확인 필요 구독은 칩과 문장으로 보이고, 확인하면 confirmPrivate 로 다시 구독한다", async () => {
+    const stale = { ...mine, needsReconfirm: true };
+    fetchGithubOverview.mockResolvedValue(overview({ subscriptions: [stale] }));
+    subscribeGithub.mockResolvedValue({ ...stale, needsReconfirm: false });
+    await render();
+    await waitUntil(() => q("github-subscription-reconfirm") !== null, "다시 확인 버튼");
+    const row = q("github-subscription-row");
+    expect(row?.textContent).toContain("다시 확인 필요");
+    expect(row?.textContent).toContain("다시 확인하기 전까지 알림이 오지 않아요");
+    // 한 번 눌러서는 요청이 나가지 않는다: 공개 채널에 비공개일 수 있는 저장소를 연결하는 일이다.
+    click(q("github-subscription-reconfirm"));
+    expect(subscribeGithub).toHaveBeenCalledTimes(0);
+    expect(document.body.textContent).toContain("공개 채널이 됐어요");
+    const confirm = [...document.querySelectorAll("button")].find((button) =>
+      button.textContent?.includes("확인했어요, 다시 구독")
+    );
+    click(confirm ?? null);
+    await flush();
+    expect(subscribeGithub).toHaveBeenCalledWith(GH_WS, {
+      channelId: mine.channelId,
+      installationId: mine.installationId,
+      repository: mine.repository,
+      features: mine.features,
+      confirmPrivate: true,
+    });
+  });
+
+  it("다시 확인이 필요 없는 구독에는 버튼이 없다", async () => {
+    fetchGithubOverview.mockResolvedValue(overview({ subscriptions: [mine] }));
+    await render();
+    await waitUntil(() => q("github-subscription-remove") !== null, "해제 버튼");
+    expect(q("github-subscription-reconfirm")).toBeNull();
+    expect(document.body.textContent).not.toContain("다시 확인 필요");
   });
 
   it("소유자·관리자가 아니면(403) 누가 하는지 말하고 폼은 세우지 않는다", async () => {

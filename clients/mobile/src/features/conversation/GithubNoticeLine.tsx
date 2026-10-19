@@ -11,7 +11,7 @@ import {openLink} from './MessageBody';
 
 // =============================================================================
 // GitHub 알림 메시지의 아랫줄 — 폰 (ADR-0205 D4·D10, #3955). 웹의 `GithubNoticeStrip` 과 같은
-// 코어 판정(`githubNoticeFor`)이다: 작성자가 에이전트 멤버 「GitHub」가 아니면 줄이 서지 않는다.
+// 코어 판정(`githubNoticeFor`)이다: 작성자 id가 서버가 적은 `github_author_member_id` 와 다르면 줄이 서지 않는다.
 //
 // 본문은 서버가 쓴 문장 그대로다. 이 줄은 「GitHub 알림」 칩과 소식, 열 곳만 덧붙인다.
 // 행은 접근성 원소 하나라(`MessageRow` 의 `accessible` 뿌리) 줄의 글은 행의 낭독 라벨로

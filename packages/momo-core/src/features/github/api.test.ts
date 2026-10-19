@@ -61,6 +61,7 @@ const SUBSCRIPTION = {
   features: ["pulls"],
   active: true,
   privateConfirmed: false,
+  needsReconfirm: false,
 };
 
 describe("GitHub 알림 REST", () => {

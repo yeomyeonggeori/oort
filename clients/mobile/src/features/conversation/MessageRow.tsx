@@ -2322,14 +2322,8 @@ function MessageRowInner({
   // 폰의 행동은 「웹에서 열기」 하나다. 열 곳(서버 주소)을 모르면 세우지 않는다.
   const appNoticeWebUrl = appNotice?.action ? appsOnWebUrl() : null;
   // 서버가 GitHub 앱으로 보낸 알림이면 아랫줄이 「GitHub 알림」이라고 말한다(ADR-0205, #3955).
-  // 작성자가 에이전트 「GitHub」가 아니면 null 이다(사람이 props 를 흉내 내도 서지 않는다).
-  const githubNotice = useMemo(() => {
-    const author = memberFor(directory, message.authorMemberId);
-    return githubNoticeFor(
-      message,
-      author ? {kind: author.kind, displayName: author.displayName} : null,
-    );
-  }, [message, directory]);
+  // 작성자 id가 서버가 적은 `github_author_member_id` 와 같지 않으면 null 이다(이름은 증거가 아니다).
+  const githubNotice = useMemo(() => githubNoticeFor(message), [message]);
   const githubNoticeUrl = githubNotice?.url ?? null;
   // 손가락(띠의 버튼)과 로터(아래 `accessibilityActions`)가 같은 보내기와 상태를 쓴다
   // (#3844 design-review H-1). 행이 접근성 원소 하나라 띠의 버튼에 VoiceOver 가 닿지 않는다.

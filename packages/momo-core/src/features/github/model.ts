@@ -11,8 +11,8 @@
 //      필요하다. 확인 없이는 구독 요청 자체를 보내지 않는다(`confirmPrivate` 를 몰래 켜지 않는다).
 //   2. 서버가 하지 않은 말을 화면이 지어내는 것. 상태 단어(`?githubInstall=`)와 오류 코드는
 //      닫힌 세계다. 모르는 값은 문장을 만들지 않고 null/일반 문장으로 돌아간다.
-//   3. 사람인 척하는 알림. 알림 줄은 「GitHub가 보낸 알림」이라고 말하고, 작성자가 에이전트
-//      멤버 「GitHub」가 아니면 줄을 그리지 않는다(사람이 props 를 흉내 내도 줄이 서지 않는다).
+//   3. 사람인 척하는 알림. 알림 줄은 「GitHub가 보낸 알림」이라고 말하고, 메시지의 작성자 id가
+//      서버가 props 에 적은 `github_author_member_id` 와 같지 않으면 줄을 그리지 않는다(이름이 아니라 id다).
 //
 // 순수 모듈이다. 웹과 폰이 같은 함수를 부른다.
 // =============================================================================
@@ -137,6 +137,11 @@ export interface GithubSubscription {
   features: string[];
   active: boolean;
   privateConfirmed: boolean;
+  /**
+   * 채널이 공개가 됐고 저장소가 비공개일 수 있어서, 소유자·관리자가 다시 `confirmPrivate` 로 구독할
+   * 때까지 서버가 알림을 보내지 않는다(#4084, ADR-0205 H-1). 옛 서버에는 칸이 없어 false 다.
+   */
+  needsReconfirm: boolean;
 }
 
 export interface GithubWorkspaceOverview {
@@ -277,6 +282,7 @@ export function parseSubscription(raw: unknown): GithubSubscription {
     features: strings(raw, "features"),
     active: bool(raw, "active") ?? true,
     privateConfirmed: bool(raw, "privateConfirmed") ?? false,
+    needsReconfirm: bool(raw, "needsReconfirm") ?? false,
   };
 }
 
@@ -469,6 +475,11 @@ const INSTALL_WORDS: Readonly<Record<string, GithubReturnSentence>> = {
     tone: "wait",
     sentence: "조직 소유자에게 설치를 요청했어요.",
     next: "소유자가 설치하면 서버를 관리하는 분이 이 워크스페이스에 붙여요. GitHub 화면의 「연결 안 된 설치」에서 해요.",
+  },
+  linked_elsewhere: {
+    tone: "stop",
+    sentence: "이 GitHub 계정의 설치는 이미 다른 워크스페이스에 연결돼 있어요.",
+    next: "한 계정은 한 워크스페이스에만 연결돼요. 그 워크스페이스에서 연결을 끊거나, 다른 GitHub 계정으로 설치해 주세요.",
   },
   state_missing: {
     tone: "wait",
@@ -738,26 +749,27 @@ const ACTION_LABEL: Readonly<Record<string, string>> = {
   published: "게시",
 };
 
-/** 알림 줄이 서는 작성자: 에이전트 멤버 「GitHub」 하나뿐이다. */
-export const GITHUB_AUTHOR_NAME = "GitHub";
-
 const REPOSITORY_SHAPE = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/;
 
 /**
  * 메시지가 서버가 보낸 GitHub 알림이면 그 줄의 재료, 아니면 null.
  *
- * `props` 는 사람이 보낸 메시지에도 실을 수 있어서, 작성자가 에이전트 멤버 「GitHub」가 아니면
- * 줄을 세우지 않는다. 서버가 내려 주지 않은 칸(옛 서버)에서는 늘 null이라 화면 변화 0이다.
+ * `props` 는 사람이 보낸 메시지에도 실을 수 있어서 `source` 만으로는 알림이 아니다. 서버가 줄과 함께
+ * 내려 주는 `github_author_member_id`(워크스페이스의 시스템 작성자 「GitHub」)가 메시지의 작성자 id와
+ * 같을 때만 줄이 선다(#4084). 표시 이름은 증거가 아니다: 누구나 「GitHub」라는 이름을 쓸 수 있다.
+ * 서버가 내려 주지 않은 칸(옛 서버)에서는 늘 null이라 화면 변화 0이다.
  */
-export function githubNoticeFor(
-  message: { props?: Record<string, unknown> | undefined },
-  author: { kind: string; displayName: string } | null | undefined
-): GithubNotice | null {
+export function githubNoticeFor(message: {
+  authorMemberId?: string | null | undefined;
+  props?: Record<string, unknown> | undefined;
+}): GithubNotice | null {
   const props = message.props;
   if (props === undefined || props === null) return null;
   if (props.source !== "github") return null;
-  if (author === null || author === undefined) return null;
-  if (author.kind !== "agent" || author.displayName !== GITHUB_AUTHOR_NAME) return null;
+  const authorId = message.authorMemberId;
+  const claimed = str(props, "github_author_member_id");
+  if (typeof authorId !== "string" || authorId === "") return null;
+  if (claimed === undefined || claimed.toLowerCase() !== authorId.toLowerCase()) return null;
   const repository = str(props, "github_repository");
   if (repository === undefined || !REPOSITORY_SHAPE.test(repository)) return null;
   const event = str(props, "github_event");
@@ -776,4 +788,37 @@ export function githubNoticeFor(
 export function githubNoticeLabel(notice: GithubNotice): string {
   const what = notice.actionLabel === null ? notice.eventLabel : `${notice.eventLabel} ${notice.actionLabel}`;
   return `GitHub 알림, ${notice.repository}, ${what}`;
+}
+
+/**
+ * 다시 확인이 필요한 구독의 확인 문장. 채널이 공개가 됐고 저장소가 비공개일 수 있다는 사실과,
+ * 확인하기 전까지 알림이 가지 않는다는 사실을 함께 말한다.
+ */
+export function reconfirmSentence(
+  channelName: string,
+  repository: string,
+  features: readonly string[]
+): string {
+  const kinds = knownFeatures(features).map((id) => GITHUB_FEATURES[id].label).join(", ");
+  return (
+    `${channelName} 채널이 공개 채널이 됐어요. 비공개일 수 있는 저장소: ${repository}. ` +
+    `다시 확인하면 이 채널의 모든 사람이 ${kinds === "" ? "알림" : kinds} 소식을 보게 돼요.`
+  );
+}
+
+/** 다시 확인을 받은 구독을 `confirmPrivate` 로 다시 구독하는 요청. 고른 것을 그대로 옮긴다. */
+export function reconfirmInput(subscription: GithubSubscription): {
+  channelId: string;
+  installationId: number;
+  repository: string;
+  features: string[];
+  confirmPrivate: true;
+} {
+  return {
+    channelId: subscription.channelId,
+    installationId: subscription.installationId,
+    repository: subscription.repository,
+    features: [...subscription.features],
+    confirmPrivate: true,
+  };
 }

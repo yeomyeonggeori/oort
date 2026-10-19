@@ -99,6 +99,7 @@ function member(over: Partial<RosterMember> = {}): RosterMember {
 
 const PROPS = {
   source: "github",
+  github_author_member_id: GITHUB,
   github_event: "pull_request",
   github_action: "opened",
   github_repository: "yeomyeonggeori/oort",
