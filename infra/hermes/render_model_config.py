@@ -12,6 +12,11 @@ Three authentication methods (four choices, because "API key" is per vendor):
   api-key-openai     provider openai-api     secret: OPENAI_API_KEY    (a service variable / .env, never this file)
   api-key-anthropic  provider anthropic      secret: ANTHROPIC_API_KEY (a service variable / .env, never this file)
 
+claude-oauth and api-key-anthropic share the provider id `anthropic`: the config cannot say which credential
+is used, so set only the one you mean (an ANTHROPIC_API_KEY / ANTHROPIC_TOKEN / CLAUDE_CODE_OAUTH_TOKEN variable
+may win over the volume login). `--model` accepts only the names listed in METHODS (a curated subset of the
+catalog: no -900k / -pro variants).
+
 Nothing here is a secret: only provider ids and model names. Both come from the Hermes v0.22.2 catalog
 (image nousresearch/hermes-agent@sha256:36099926..., hermes_cli/models_catalog_static.py `_PROVIDER_MODELS`);
 note `claude-sonnet-5` is the catalog name (`claude-sonnet-5-5` is not in it).
@@ -51,7 +56,7 @@ def _pick(method, model, role):
         raise RenderError("unknown %s auth method %r (choose: %s)" % (role, method, ", ".join(sorted(METHODS))))
     provider, catalog, default, note = METHODS[method]
     model = default if model is None else model
-    if not MODEL_RE.match(model) or model not in catalog:
+    if not MODEL_RE.fullmatch(model) or model not in catalog:
         raise RenderError("%s model %r is not in the Hermes v0.22.2 catalog for provider %s" % (role, model, provider))
     return provider, model, note
 
