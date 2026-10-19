@@ -382,6 +382,23 @@ pub async fn per_ip_github_callback(
     .await
 }
 
+/// Per-IP gate for GitHub's setup-URL redirect (ADR-0205 D3). Same claim budget, own key.
+pub async fn per_ip_github_setup(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    gate_per_ip(
+        state,
+        request,
+        next,
+        "ip:github-setup",
+        |config| config.claim_per_ip_limit,
+        "/v1/integrations/github/setup",
+    )
+    .await
+}
+
 /// Per-IP budget for **refused** upload capabilities (#2628; #2631 review R12).
 ///
 /// Mounted with `route_layer` on `/__momo_stub/drive/uploads/{token}`, but it

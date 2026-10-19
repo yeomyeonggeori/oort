@@ -658,6 +658,15 @@ async fn a_connector_agents_job_carries_the_authors_live_grants_and_no_credentia
         );
     }
 
+    // #4054 — a GitHub-only consent asks for no 「요약만」 (the instruction is for the
+    // personal apps; the positive case is `momo_agent::app_tool_grants`'s unit test,
+    // because no personal app is seeded in the registry yet).
+    let payload: Value = serde_json::from_str(&second).expect("payload json");
+    assert!(
+        payload.get("app_result_policy").is_none(),
+        "no personal app, no instruction: {payload}"
+    );
+
     // An agent without the connector mark carries no key at all.
     mark_on(&client, &base, &f, false).await;
     let (_, plain) = mention(&su, &client, &base, &f).await;

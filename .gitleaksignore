@@ -299,3 +299,6 @@ d2e7f6626fa75c026e983cf6fe1e97e54005d46f:clients/mobile/__tests__/deviceKeyEnrol
 a8378190d76fb74ed6c5df312788691cd5c06521:server-rust/bins/momo-workd/src/projection.rs:curl-auth-header:803
 #   server-rust/bins/momo-workd/src/projection.rs:811  [aws-access-token]  가림 시험 픽스처
 a8378190d76fb74ed6c5df312788691cd5c06521:server-rust/bins/momo-workd/src/projection.rs:aws-access-token:811
+# 측정 스크립트 오프라인 시험(#3944)의 가짜 토큰·client 문자열 — 유출 파일 검사가 잡는지 보려고 일부러 비밀 모양으로 쓴 픽스처다. 직후 커밋에서 실행마다 무작위 값으로 교체했다. 실제 자격 아님.
+#   scripts/plugins/measure_tools_list.test.mjs:18  [generic-api-key]  가짜 토큰 픽스처
+5d4206448b8e9be843bbbad8145643a2d9a2ec68:scripts/plugins/measure_tools_list.test.mjs:generic-api-key:18

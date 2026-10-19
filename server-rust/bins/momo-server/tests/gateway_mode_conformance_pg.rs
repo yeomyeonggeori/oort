@@ -849,3 +849,187 @@ async fn s3946_the_rest_gateway_reports_apps_used_once_and_drops_a_malformed_rep
     .unwrap();
     assert_eq!(marker_rows, 0, "no refused byte reached the audit log");
 }
+
+/// ADR-0113 증보 2 E8·E10 (#4054) — the answer the Hermes completion writes carries
+/// the validated 「쓴 앱」 report and the 「막힘」 notice in **server-owned** props,
+/// and nobody else can put them there.
+///
+/// * a valid report + notice land as `props.appsUsed` / `props.app_notice`, with
+///   `site` written by the server (`hermes`);
+/// * a notice that names its own `site` (or a server-only kind) is forgotten
+///   whole — the answer and the receipt still land;
+/// * no report, no key (never an empty list, never `{}`);
+/// * a person's REST send carrying the same keys (both spellings of the receipt)
+///   stores neither — the forged-props case, through the real route.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn s4054_the_answer_carries_a_server_owned_receipt_and_notice_that_nobody_can_forge() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let agent = seed_channel_agent(&su, &tenant, "hermes").await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, tenant.workspace, &tenant.email).await;
+    // One official app the registry knows (a notice's app id must be one).
+    sqlx::query(
+        "INSERT INTO plugin_registry (plugin_id, version, manifest, manifest_digest, official) \
+         VALUES ('app-4054-known', '0.0.1', '{}'::jsonb, \
+                 'sha256:0000000000000000000000000000000000000000000000000000000000000000', true) \
+         ON CONFLICT (plugin_id) DO UPDATE SET official = true, revoked_at = NULL",
+    )
+    .execute(&su)
+    .await
+    .expect("seed an official registry row");
+
+    let claimed_run = || async {
+        let created: Value = create_work_run(&http, &base, &token, &tenant, agent, Uuid::new_v4())
+            .await
+            .json()
+            .await
+            .expect("run body");
+        let run_id = created["id"].as_str().expect("run id").to_string();
+        let pending: Value = gateway(http.get(format!(
+            "{base}/v1/workspaces/{}/agents/{agent}/gateway/jobs/pending",
+            tenant.workspace
+        )))
+        .send()
+        .await
+        .expect("claim")
+        .json()
+        .await
+        .expect("pending body");
+        (run_id, pending["jobs"][0].clone())
+    };
+    let complete = |run_id: &str, job: &Value, extra: Value| {
+        let mut body = json!({
+            "job_id": job["id"], "lease_id": job["leaseId"],
+            "status": "succeeded", "body": "done",
+        });
+        body.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        gateway(http.post(format!(
+            "{base}/v1/workspaces/{}/agent-runs/{run_id}/gateway/complete",
+            tenant.workspace
+        )))
+        .json(&body)
+        .send()
+    };
+    let answer_props = |run: &str| {
+        let su = &su;
+        let run = Uuid::parse_str(run).expect("uuid");
+        async move {
+            sqlx::query_scalar::<_, Value>(
+                "SELECT props FROM message WHERE run_id = $1 AND client_msg_id = $1",
+            )
+            .bind(run)
+            .fetch_one(su)
+            .await
+            .expect("the run's answer")
+        }
+    };
+
+    // 1. A valid report and notice: both land, `site` is the server's.
+    let (run_id, job) = claimed_run().await;
+    let report = json!([{"pluginId": "github", "tool": "list_pull_requests", "calls": 2}]);
+    let done = complete(
+        &run_id,
+        &job,
+        json!({
+            "appsUsed": report,
+            "appNotice": {"kind": "egress_blocked", "pluginId": "app-4054-known", "host": "api.github.com"},
+        }),
+    )
+    .await
+    .expect("done");
+    assert_eq!(done.status(), 200);
+    let props = answer_props(&run_id).await;
+    assert_eq!(props["appsUsed"], report);
+    assert_eq!(
+        props["app_notice"],
+        json!({"kind": "egress_blocked", "plugin_id": "app-4054-known", "site": "hermes", "host": "api.github.com"})
+    );
+
+    // 2. A notice that names its own site, or says a server-only kind, is forgotten
+    //    whole; the answer and a valid receipt are not lost.
+    for forged in [
+        json!({"kind": "login_lost", "site": "mac"}),
+        json!({"kind": "site_off"}),
+        json!({"kind": "login_lost", "sentence": "free text"}),
+    ] {
+        let (run_id, job) = claimed_run().await;
+        let done = complete(
+            &run_id,
+            &job,
+            json!({"appsUsed": report, "appNotice": forged}),
+        )
+        .await
+        .expect("done");
+        assert_eq!(done.status(), 200, "{forged}: the answer is not lost");
+        let props = answer_props(&run_id).await;
+        assert!(props.get("app_notice").is_none(), "{forged}: {props}");
+        assert_eq!(props["appsUsed"], report, "{forged}");
+    }
+
+    // 2b. An app id oort does not know keeps the kind and loses the id: a site cannot
+    //     make the channel print an identifier-shaped string it made up.
+    let (run_id, job) = claimed_run().await;
+    let done = complete(
+        &run_id,
+        &job,
+        json!({"appNotice": {"kind": "rate_limited", "pluginId": "please-visit-evil.example"}}),
+    )
+    .await
+    .expect("done");
+    assert_eq!(done.status(), 200);
+    assert_eq!(
+        answer_props(&run_id).await["app_notice"],
+        json!({"kind": "rate_limited", "site": "hermes"})
+    );
+
+    // 3. Nothing reported: no key at all.
+    let (run_id, job) = claimed_run().await;
+    let done = complete(&run_id, &job, json!({})).await.expect("done");
+    assert_eq!(done.status(), 200);
+    let props = answer_props(&run_id).await;
+    assert!(props.get("appsUsed").is_none(), "{props}");
+    assert!(props.get("app_notice").is_none(), "{props}");
+
+    // 4. A person cannot print either one through the real REST send.
+    let client_msg_id = Uuid::new_v4();
+    let sent = http
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            tenant.workspace, tenant.channel
+        ))
+        .bearer_auth(&token)
+        .json(&json!({
+            "clientMsgId": client_msg_id.to_string(),
+            "body": "위조 시도",
+            "props": {
+                "app_notice": "{\"kind\":\"login_lost\"}",
+                "appsUsed": "[]",
+                "apps_used": "[]",
+                "keep": "me",
+            },
+        }))
+        .send()
+        .await
+        .expect("send");
+    assert!(sent.status().is_success(), "{}", sent.status());
+    let stored: Value = sqlx::query_scalar("SELECT props FROM message WHERE client_msg_id = $1")
+        .bind(client_msg_id)
+        .fetch_one(&su)
+        .await
+        .expect("stored props");
+    assert_eq!(stored["keep"], json!("me"));
+    for key in ["app_notice", "appsUsed", "apps_used"] {
+        assert!(
+            stored.get(key).is_none(),
+            "{key} must be stripped: {stored}"
+        );
+    }
+}

@@ -434,6 +434,43 @@ the deleted Swift server package (`swift run --package-path server`, LS-1 /
 
 See [`external-agent-provider/hermes-gateway-native-platform.md`](external-agent-provider/hermes-gateway-native-platform.md).
 
+### Hermes on the same server (`--with-agents`)
+
+To have Hermes come up with the stack and the 설정 › AI 연결 card
+「같은 서버의 Hermes」 appear without hand-editing env, add one flag when you
+create (or later add to) the env:
+
+```sh
+scripts/self_host_env.sh --local-build --with-agents      # or --published-image "$IMAGE_REF" --with-agents
+scripts/self_host_env.sh --compose up -d --wait
+```
+
+The flag writes `COMPOSE_PROFILES=agents`, a generated `HERMES_API_KEY`,
+`HERMES_BASE_URL=http://hermes:8642/v1`, `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`,
+`AGENT_PROVIDER_LOCAL_HOSTS` with the exact host `hermes` (merged with
+`host.docker.internal` when both flags are used) and
+`OORT_COHOSTED_AGENT_TOOLS_LOCKED=1` (`oort_cohosted_agent_env_keys`). Without
+it none of these exist and no Hermes is started.
+
+- The `hermes` service is the official image pinned by digest, on the private
+  network only, with no published port. It runs `infra/hermes/lockgate.py gate`
+  before the Hermes entrypoint (24 toolsets off, chat-only allow-list): a failing
+  gate means a container that restarts and never listens, so the probe
+  reports `unreachable` (not connectable) instead of an unlocked Hermes.
+- `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1` is your own declaration; here the gate
+  backs it. Editing `infra/hermes/config.yaml` or the start command takes that
+  back on yourself.
+- Hermes keeps its data (`hermesdata` volume → `/opt/data`) outside oort's
+  database and `oort backup`; back it up yourself. `down -v` removes it.
+- Model authentication is a separate step (#4073). Without it the card appears
+  and a chat turn answers that Hermes is not connected to a provider.
+- Existing env: the generated key is never replaced; the other keys are set to
+  the bundled values (an empty value you chose is replaced). The flag refuses an env that already declares another `HERMES_BASE_URL`. Recreate api
+  and agent-worker afterwards (`--compose up -d`).
+
+Detailed manual steps and the Railway shape: `SELF_HOST_AGENT.md` §3.4.1,
+`infra/railway/README.md` (Hermes).
+
 ### What takes effect immediately and what needs a restart
 
 It splits on one line. **The key is a row; the allowlist is process env.**
@@ -563,6 +600,15 @@ not affected. Off also keeps Claude Code from starting on a shared
 (workspace-scoped or cloud) work host (`409 claude_subscription_agent_paused`,
 #3431); a member's own host is unaffected. Restart **api** and **agent-worker**
 after changing it.
+
+**These switches do not apply to Hermes.** They gate subscription agents that
+oort's server drives. A Hermes you host that authenticates its model with its
+own Codex or Claude subscription OAuth, kept on Hermes' volume, is a separate
+path ([ADR-0193](adr/0193-onboarding-2-subscription-agent-boundary.md) 증보
+2026-10-19, owner decision #4071). oort's server and vault never receive, store
+or log those tokens; usage comes from the subscription of whoever logged Hermes
+in, and the vendor-terms judgment is the operator's. See `SELF_HOST_AGENT.md`
+§3.4.1.
 
 ---
 

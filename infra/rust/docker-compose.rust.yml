@@ -221,9 +221,10 @@ services:
 
   # prod :142. Env names are the prod names; the values differ only in that the
   # keys this server does not read are not injected at all:
-  #   * HERMES_*/AGENT_*/S3/webhook master keys — no route consumes them yet,
-  #     and an unread secret in the environment is pure exposure.
-  # They come back with the batch that implements the feature.
+  #   * S3/webhook master keys — no route consumes them yet, and an unread
+  #     secret in the environment is pure exposure.
+  # They come back with the batch that implements the feature. (HERMES_*/AGENT_*
+  # came back with #3883 / #4072: see the `hermes` service and the block below.)
   #
   # #1534 removed `provider` from that list: `routes/provider_link.rs` does
   # consume PROVIDER_LINK_MASTER_KEY, so withholding it was not minimalism but a
@@ -366,6 +367,23 @@ services:
       # `host.docker.internal` is the host, not this container's loopback.
       AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK: ${AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK:-}
       AGENT_PROVIDER_LOCAL_HOSTS: ${AGENT_PROVIDER_LOCAL_HOSTS:-}
+      # #4072 / ADR-0203 (+ 증보 2026-10-19): the same-server Hermes of the `agents`
+      # profile. All `:-` — unset keeps a stack without Hermes exactly as it was
+      # (`declared == false`: zero probes, no card). `scripts/self_host_env.sh
+      # --with-agents` writes the three together with `COMPOSE_PROFILES=agents`
+      # (`oort_cohosted_agent_env_keys`). TOOLS_LOCKED is read by api ONLY (K-S2):
+      # it is the operator's own declaration that the tool lock holds; in this stack
+      # the `hermes` service cannot listen unless `lockgate.py gate` exited 0 first.
+      HERMES_BASE_URL: ${HERMES_BASE_URL:-}
+      HERMES_API_KEY: ${HERMES_API_KEY:-}
+      OORT_COHOSTED_AGENT_TOOLS_LOCKED: ${OORT_COHOSTED_AGENT_TOOLS_LOCKED:-}
+      # #4079 / ADR-0203 증보 2026-10-19 L4 (Q3): the login relay sidecar inside the `hermes` service. Both `:-`:
+      # either empty = the relay routes answer `409 login_relay_off` and the screen shows the shell command.
+      # api ONLY (the worker never logs Hermes in); the key is its own secret, never HERMES_API_KEY. The
+      # relay host is the Hermes host, which AGENT_PROVIDER_LOCAL_HOSTS already lists exactly (egress opt-in).
+      HERMES_LOGIN_RELAY_URL: ${HERMES_LOGIN_RELAY_URL:-}
+      HERMES_LOGIN_RELAY_KEY: ${HERMES_LOGIN_RELAY_KEY:-}
+      HERMES_APP_LOGIN_GOOGLE_PUBLISHING: ${HERMES_APP_LOGIN_GOOGLE_PUBLISHING:-}
       # MOMO-605 / DESK-1. Empty (the default) means the CORS layer is not
       # mounted at all, which is exactly the web deployment's same-origin case.
       # A value is required only for non-browser origins — the Tauri desktop
@@ -539,6 +557,10 @@ services:
       # host.docker.internal resolve on Linux.
       AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK: ${AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK:-}
       AGENT_PROVIDER_LOCAL_HOSTS: ${AGENT_PROVIDER_LOCAL_HOSTS:-}
+      # #4072: the worker dials the same-server Hermes (the `operator_env` pin).
+      # `OORT_COHOSTED_AGENT_*` is not given here — api only (ADR-0203 증보 K-S2).
+      HERMES_BASE_URL: ${HERMES_BASE_URL:-}
+      HERMES_API_KEY: ${HERMES_API_KEY:-}
       # #3431 (ADR-0193 D18): same key and rule as api — the spawn tool keeps Claude
       # Code off shared hosts unless an exact `true`.
       MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED: ${MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED:-}
@@ -552,6 +574,66 @@ services:
       - private
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+  # #4072 / ADR-0203 D6·D8 — the same-server Hermes, profile `agents` (off by default,
+  # like `huddle`). Not started unless COMPOSE_PROFILES=agents (the generator's
+  # `--with-agents` writes it) or `docker compose --profile agents up`.
+  #
+  # Same shape as the Railway service (infra/railway/railway.json `hermes`): the
+  # official image pinned by index digest (v0.22.2), the start command REPLACES the
+  # image ENTRYPOINT, and `lockgate.py gate` runs BEFORE the Hermes dispatcher. The
+  # image's own boot starts the gateway before any CMD, so this is the only place a
+  # refusal to start can live. `set -e` + a non-zero gate exit = the container exits
+  # before a listener exists. The config is copied from the read-only mount on every
+  # start, so editing the volume's config.yaml does nothing.
+  #
+  # No `ports:` and the `private` network only: reachable as http://hermes:8642 from
+  # api and agent-worker, never published on the host. Model auth is not here (#4073):
+  # without a model Hermes still starts and answers /health + /v1/models.
+  # Every value is `:-` so an inactive profile never makes ordinary compose commands
+  # require them (the huddle-notifier rule); lockgate itself refuses a key under 32
+  # characters, so an empty HERMES_API_KEY cannot start the service.
+  hermes:
+    image: nousresearch/hermes-agent@sha256:36099926da316742423544e055d4734777105ffe6341873af5459b957d0c2919
+    profiles: ["agents"]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - set -eu; umask 022; mkdir -p /opt/data; cp /oort/config.yaml /opt/data/config.yaml; /opt/hermes/.venv/bin/python /oort/lockgate.py gate /opt/data/config.yaml; [ -z "$${HERMES_LOGIN_RELAY_KEY:-}" ] || OORT_LOGIN_RELAY_PROBE=/oort/mcp_login_probe.py /opt/hermes/.venv/bin/python -B /oort/login_relay.py launch & unset HERMES_LOGIN_RELAY_KEY; /opt/hermes/.venv/bin/python /oort/lockgate.py report & exec /opt/hermes/docker/entrypoint-dispatch.sh gateway run
+    mem_limit: ${MOMO_HERMES_MEM_LIMIT:-2g}
+    cpus: 1
+    labels: *momo-janitor-labels
+    restart: unless-stopped
+    environment:
+      API_SERVER_ENABLED: "true"
+      # The compose bridge network is IPv4; `::` is not needed here (ADR-0203 D9).
+      API_SERVER_HOST: 0.0.0.0
+      API_SERVER_PORT: "8642"
+      API_SERVER_KEY: ${HERMES_API_KEY:-}
+      # #4078 / ADR-0203 증보 L2: the login relay sidecar's key. Empty = no sidecar process (oort answers
+      # 409 login_relay_off). The start command hands it to `login_relay.py launch` (a 0400 file owned by a
+      # dedicated uid) and UNSETS it before the Hermes dispatcher, so the gateway and every `hermes` child
+      # have no copy. Not the chat key: a leaked HERMES_API_KEY must not carry login authority.
+      HERMES_LOGIN_RELAY_KEY: ${HERMES_LOGIN_RELAY_KEY:-}
+      # Deliberately NOT passed: DATABASE_URL, WORKER_DATABASE_URL, PROVIDER_LINK_MASTER_KEY,
+      # JWT_HMAC, any other oort secret (ADR-0203 D6-2), HERMES_YOLO_MODE, API_SERVER_CORS_ORIGINS.
+    volumes:
+      - hermesdata:/opt/data
+      - ../hermes/config.yaml:/oort/config.yaml:ro
+      - ../hermes/lockgate.py:/oort/lockgate.py:ro
+      - ../hermes/login_relay.py:/oort/login_relay.py:ro
+      - ../hermes/mcp_login_probe.py:/oort/mcp_login_probe.py:ro
+    healthcheck:
+      test:
+        - CMD
+        - /opt/hermes/.venv/bin/python
+        - -c
+        - import urllib.request; urllib.request.urlopen("http://127.0.0.1:8642/health", timeout=5)
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+    networks:
+      - private
 
   # #2758 / ADR-0122 증보 D-H4 — the huddle ghost sweep, with the huddle
   # profile. A crashed client leaves its huddle_participant row open; this
@@ -597,6 +679,11 @@ networks:
     labels: *momo-janitor-labels
 
 volumes:
+  hermesdata:
+    # #4072: Hermes' /opt/data (sessions, memories, state.db, .env). Outside oort's
+    # database and outside `oort backup` — the operator backs it up (ADR-0203 D7).
+    # Project-scoped like pgdata (#1238): a bare literal name would be host-global.
+    name: ${HERMES_VOLUME_NAME:-${COMPOSE_PROJECT_NAME:-momo-rust}-hermesdata}
   pgdata:
     # A distinct default from prod's `momo-pgdata`: this stack must never adopt
     # or overwrite a Swift-stack volume on the same host.

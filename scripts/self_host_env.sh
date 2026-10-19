@@ -125,6 +125,7 @@ PUBLIC_ORIGINS=()
 # Count is the only length we read without expanding the array.
 PUBLIC_ORIGIN_COUNT=0
 ALLOW_LOCAL_PROVIDER=0
+WITH_AGENTS=0
 REQUESTED_CLAIM=0
 REQUESTED_PLATFORM=""
 PLATFORM_TIER=""
@@ -170,6 +171,22 @@ oort_public_edge_env_keys() {
 oort_local_provider_env_keys() {
   printf '%s\n' 'AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK' 'AGENT_PROVIDER_LOCAL_HOSTS'
 }
+
+# Same-server Hermes (#4072, ADR-0203 D8 + 증보 2026-10-19). Written only when
+# --with-agents is set; absent from the generator heredoc so the default stack
+# (no Hermes, `declared == false`) and the --railway key set stay unchanged.
+# The compose `hermes` service (profile `agents`) and the api/agent-worker
+# interpolations name these keys. AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK and
+# AGENT_PROVIDER_LOCAL_HOSTS (`hermes` added, exact host) are written through
+# oort_local_provider_env_keys' names.
+oort_cohosted_agent_env_keys() {
+  printf '%s\n' 'COMPOSE_PROFILES' 'HERMES_API_KEY' 'HERMES_BASE_URL' \
+    'OORT_COHOSTED_AGENT_TOOLS_LOCKED' 'HERMES_LOGIN_RELAY_KEY' 'HERMES_LOGIN_RELAY_URL'
+}
+SELF_HOST_HERMES_BASE_URL="http://hermes:8642/v1"
+# #4078 / ADR-0203 증보 2026-10-19 Q3: the login relay sidecar of the same Hermes container.
+SELF_HOST_HERMES_LOGIN_RELAY_URL="http://hermes:8643"
+SELF_HOST_HERMES_HOST="hermes"
 
 # ---------------------------------------------------------------------------
 # Platform profiles (ADR-0184 D3, #2296). ONE table: every platform this
@@ -257,6 +274,8 @@ validate_platform_request() {
         fail "--platform $REQUESTED_PLATFORM 은 ${origin_source#env:} 을 쓴다. --public-origin과 함께 지정하지 마라."
       [ "$ALLOW_LOCAL_PROVIDER" -eq 0 ] ||
         fail "--platform $REQUESTED_PLATFORM 은 로컬 provider opt-in과 함께 지정하지 마라."
+      [ "$WITH_AGENTS" -eq 0 ] ||
+        fail "--platform $REQUESTED_PLATFORM 은 --with-agents와 함께 지정하지 마라. Railway는 infra/railway/railway.json 의 hermes 서비스를 쓴다."
       REQUESTED_ACTION="platform-env"
       ;;
     T1)
@@ -530,6 +549,25 @@ host-network (T1). An unknown name is refused. --railway is an alias for
   public URL exists). database=loopback writes postgres URLs as
   127.0.0.1:5432 and renders infra/rust/docker-compose.host-network.yml
   (network_mode: host). --compose appends that overlay from the stamp.
+--with-agents turns on the compose `agents` profile (#4072, ADR-0203 D8): the
+official Hermes image, started behind the tool-lock gate (infra/hermes/
+lockgate.py, exit 0 or the container never listens), no published port, only
+reachable as http://hermes:8642 from api and agent-worker. It writes
+COMPOSE_PROFILES=agents, HERMES_API_KEY (generated once, never rewritten),
+HERMES_LOGIN_RELAY_KEY (generated once, never rewritten; the login relay sidecar's
+own key, ADR-0203 증보 2026-10-19 Q3: without it the sidecar does not start and
+oort answers login_relay_off), HERMES_LOGIN_RELAY_URL=http://hermes:8643,
+HERMES_BASE_URL=http://hermes:8642/v1, the local-provider opt-in with the
+exact host `hermes` (merged with any host already listed) and
+OORT_COHOSTED_AGENT_TOOLS_LOCKED=1 (canonical names:
+oort_cohosted_agent_env_keys). The last line is the operator's own
+declaration that the lock holds; here it is backed by the gate, and it stops
+being true if you edit infra/hermes/config.yaml or the start command. An env
+that already declares a different HERMES_BASE_URL is refused. Model
+authentication is a separate step. Local-install only — not for a T2 platform.
+On an existing env it writes the missing keys and sets the declaration keys
+to the bundled values (an empty value you chose is replaced); the generated
+HERMES_API_KEY and a valid HERMES_LOGIN_RELAY_KEY are never replaced.
 --allow-local-provider writes AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1 and
 AGENT_PROVIDER_LOCAL_HOSTS=host.docker.internal (canonical names:
 oort_local_provider_env_keys). Without it those two keys are absent
@@ -583,6 +621,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --allow-local-provider)
       ALLOW_LOCAL_PROVIDER=1
+      shift
+      ;;
+    --with-agents)
+      WITH_AGENTS=1
       shift
       ;;
     --claim)
@@ -1198,8 +1240,10 @@ rewrite_env_assignment() {
   local key="$1" value="$2" tmp
   validate_env_scalar "$key" "$value"
   tmp="$(mktemp "${TMPDIR:-/tmp}/oort-self-host-env.XXXXXX")"
-  awk -v key="$key" -v value="$value" '
-    BEGIN { done = 0 }
+  # ENVIRON, not `awk -v`: -v interprets backslash escapes, so a value with `\n`
+  # became two lines (#4072 review L3). rewrite_env_assignment_quoted already does this.
+  OORT_REWRITE_VALUE="$value" awk -v key="$key" '
+    BEGIN { done = 0; value = ENVIRON["OORT_REWRITE_VALUE"] }
     index($0, key "=") == 1 && done == 0 {
       print key "=" value
       done = 1
@@ -1318,7 +1362,7 @@ ensure_public_edge_env() {
 
 ensure_local_provider_optin() {
   [ "$ALLOW_LOCAL_PROVIDER" -eq 1 ] || return 0
-  local key
+  local key hosts
   while IFS= read -r key; do
     [ -n "$key" ] || continue
     case "$key" in
@@ -1326,7 +1370,15 @@ ensure_local_provider_optin() {
         rewrite_env_assignment "$key" "1"
         ;;
       AGENT_PROVIDER_LOCAL_HOSTS)
-        rewrite_env_assignment "$key" "host.docker.internal"
+        # #4072: a re-run of this flag alone must not drop the exact host the
+        # same-server Hermes (--with-agents) was given.
+        hosts="host.docker.internal"
+        if [ "$(env_key_count AGENT_PROVIDER_LOCAL_HOSTS)" -eq 1 ]; then
+          case ",$(env_value_once AGENT_PROVIDER_LOCAL_HOSTS)," in
+            *,"$SELF_HOST_HERMES_HOST",*) hosts="$hosts,$SELF_HOST_HERMES_HOST" ;;
+          esac
+        fi
+        rewrite_env_assignment "$key" "$hosts"
         ;;
       *)
         fail "oort_local_provider_env_keys 가 알 수 없는 키를 냈다: $key"
@@ -1337,6 +1389,97 @@ $(oort_local_provider_env_keys)
 EOF
   printf '[self-host] %s 에 로컬 provider opt-in 키를 썼다 (oort_local_provider_env_keys).\n' \
     "$ENV_FILE" >&2
+}
+
+# #4072 — same-server Hermes opt-in (--with-agents). Add-only on an existing
+# env: HERMES_API_KEY is a secret, so a value already there is never replaced;
+# a HERMES_BASE_URL that points anywhere else is the operator's own external
+# Hermes and is refused rather than overwritten (the attestation below would
+# otherwise be written over somebody else's host).
+csv_with_item() (
+  # Subshell with globbing off: an unquoted `for entry in $list` would otherwise
+  # expand `*` against the current directory (#4072 review L2).
+  set -f
+  list="$1"
+  item="$2"
+  found=0
+  out=""
+  IFS=','
+  for entry in $list; do
+    entry="$(printf '%s' "$entry" | tr -d '[:space:]')"
+    [ -n "$entry" ] || continue
+    [ "$entry" != "$item" ] || found=1
+    out="${out:+$out,}$entry"
+  done
+  [ "$found" -eq 1 ] || out="${out:+$out,}$item"
+  printf '%s' "$out"
+)
+
+ensure_cohosted_agent_env() {
+  [ "$WITH_AGENTS" -eq 1 ] || return 0
+  local count current key
+  count="$(env_key_count HERMES_BASE_URL)"
+  [ "$count" -le 1 ] ||
+    fail "${ENV_FILE}의 HERMES_BASE_URL 항목은 최대 한 번만 있어야 한다."
+  if [ "$count" -eq 1 ]; then
+    current="$(env_value_once HERMES_BASE_URL)"
+    if [ -n "$current" ] && [ "$current" != "$SELF_HOST_HERMES_BASE_URL" ]; then
+      fail "${ENV_FILE}에 다른 HERMES_BASE_URL 이 이미 있다. --with-agents 는 같은 서버 Hermes(${SELF_HOST_HERMES_BASE_URL})만 쓴다. 외부 Hermes 선언을 덮어쓰지 않는다."
+    fi
+  fi
+  count="$(env_key_count HERMES_API_KEY)"
+  [ "$count" -le 1 ] ||
+    fail "${ENV_FILE}의 HERMES_API_KEY 항목은 최대 한 번만 있어야 한다."
+  current=""
+  if [ "$count" -eq 1 ]; then
+    current="$(env_value_once HERMES_API_KEY)"
+  fi
+  # lockgate refuses a key under 32 characters: a short operator-typed one would
+  # leave a Hermes that can never start, so it is replaced only when empty.
+  if [ -z "$current" ]; then
+    rewrite_env_assignment HERMES_API_KEY "$(gen)"
+  fi
+  rewrite_env_assignment HERMES_BASE_URL "$SELF_HOST_HERMES_BASE_URL"
+  # #4078 (ADR-0203 증보 Q3): the login relay key. Its OWN secret: a leaked chat key must not carry login
+  # authority, so it is never derived from HERMES_API_KEY. Generated once and never rewritten; an empty
+  # or too-short value (the sidecar refuses under 32 characters) is replaced.
+  count="$(env_key_count HERMES_LOGIN_RELAY_KEY)"
+  [ "$count" -le 1 ] ||
+    fail "${ENV_FILE}의 HERMES_LOGIN_RELAY_KEY 항목은 최대 한 번만 있어야 한다."
+  current=""
+  if [ "$count" -eq 1 ]; then
+    current="$(env_value_once HERMES_LOGIN_RELAY_KEY)"
+  fi
+  # The sidecar takes only 32-256 characters of [A-Za-z0-9._~+/=-]; anything else would leave it silently off.
+  if ! [[ "$current" =~ ^[A-Za-z0-9._~+/=-]{32,256}$ ]]; then
+    rewrite_env_assignment HERMES_LOGIN_RELAY_KEY "$(gen)"
+  fi
+  rewrite_env_assignment HERMES_LOGIN_RELAY_URL "$SELF_HOST_HERMES_LOGIN_RELAY_URL"
+  rewrite_env_assignment AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK "1"
+  count="$(env_key_count AGENT_PROVIDER_LOCAL_HOSTS)"
+  current=""
+  if [ "$count" -eq 1 ]; then
+    current="$(env_value_once AGENT_PROVIDER_LOCAL_HOSTS)"
+  fi
+  rewrite_env_assignment AGENT_PROVIDER_LOCAL_HOSTS "$(csv_with_item "$current" "$SELF_HOST_HERMES_HOST")"
+  rewrite_env_assignment OORT_COHOSTED_AGENT_TOOLS_LOCKED "1"
+  count="$(env_key_count COMPOSE_PROFILES)"
+  current=""
+  if [ "$count" -eq 1 ]; then
+    current="$(env_value_once COMPOSE_PROFILES)"
+  fi
+  rewrite_env_assignment COMPOSE_PROFILES "$(csv_with_item "$current" "agents")"
+  while IFS= read -r key; do
+    [ -n "$key" ] || continue
+    validate_env_scalar "$key" "$(env_value_once "$key")"
+  done <<EOF
+$(oort_cohosted_agent_env_keys)
+EOF
+  printf '[self-host] %s 에 같은 서버 Hermes 키를 썼다 (oort_cohosted_agent_env_keys, 프로파일 agents).\n' \
+    "$ENV_FILE" >&2
+  printf '[self-host] OORT_COHOSTED_AGENT_TOOLS_LOCKED=1 은 운영자의 자기 선언이다. 여기서는 hermes 서비스가 잠금 게이트(exit 0) 없이는 뜨지 않는 것이 근거다.\n' >&2
+  printf '[self-host] 이미 떠 있는 스택이라면 api · agent-worker 를 다시 만들어야 반영된다: %s\n' \
+    "$(stack_restart_hint)" >&2
 }
 
 # Managed-platform PG URL (profile column 5, `env:<VAR>`). Parsed once into
@@ -2096,6 +2239,7 @@ if [ -e "$ENV_FILE" ]; then
     write_host_network_overlay
   fi
   ensure_local_provider_optin
+  ensure_cohosted_agent_env
   warn_if_legacy_localhost_realtime_ws
   warn_if_legacy_localhost_drive_base
 
@@ -2366,6 +2510,7 @@ if platform_uses_loopback; then
 fi
 ensure_public_edge_env
 ensure_local_provider_optin
+ensure_cohosted_agent_env
 reject_duplicate_env_keys
 if [ "$MODE" = "published-digest" ]; then
   verify_published_compose_image "$IMAGE"

@@ -1078,7 +1078,7 @@ Update/Reset 뒤 재합류: 위저드 **연결 값 다시 발급**
 
 ADR-0186 증보 G1(GC-6 #2947, GC-8 #2949). 사람이 AI 연결·AI 구독 로그인(Claude,
 Codex)·팀 API 키 연결을 부탁하면 **런타임이 직접 하지 않는다.** 할 수도 없다. 구독
-로그인은 그 사람 기기에서, 팀 키는 운영자 세션에서 한다. 런타임은 연결 카드를
+로그인은 그 사람 기기에서, 팀 키는 운영자 세션에서 한다(Hermes 자신의 모델 인증 구독은 별개다: §3.4.1). 런타임은 연결 카드를
 그 사람 앞에 놓는다.
 
 ```text
@@ -1509,6 +1509,12 @@ dots도 같은 패턴이고 곧 지원한다. 이 문서는 dots에 대한 개�
 | 2. 진행 | `oort_run_event` (scope `agent:runs:callback`) | `leaseHandle`(512), `stage`(1~80자, 최대 320바이트, `/`·`\`·제어·bidi 문자 불가), `status`(`running` `thinking` `streaming` `cancelled`), `detail`(2048, 감사 전용), `textDelta`(8192), `eventId`(UUID, 재시도가 한 번만 세어짐) | `{status:"accepted"}` |
 | 3. 끝남 | `oort_run_complete` (scope `agent:runs:callback`) | `leaseHandle`, `status`(`succeeded` / `failed`), `body`(8000), `error`(4000), `usage`, `artifacts` | `{status, messageId, seq}` |
 | 갱신 | `oort_job_renew` | `leaseHandle` | `{status:"renewed", leaseExpiresAtMs}` |
+
+성공인데 `body`가 비었거나 공백뿐인 완료(`status:"succeeded"`)는 타임라인에 메시지를 만들지
+않아요. run 종결·청구·rail 종료 프레임은 그대로이고, `oort_run_complete`는
+`messageId: null`, `seq: null`로 답해요. 같은 완료를 다시 보내면 `409`가 아니라
+같은 모양의 `200`이에요. `messageId`·`seq`는 null일 수 있는 값으로 읽으세요
+(#4017, PR #4023).
 
 `artifacts`는 닫힌 객체(`additionalProperties:false`)이고 키는 모두 선택이다.
 `prUrl`(300; `https`, 호스트는 `github.com` 또는 운영자가 올린 GitHub
@@ -1967,8 +1973,61 @@ agent:
 삭제하세요. 워크스페이스 하나만 Hermes 하나에 연결하세요(여러 워크스페이스의
 대화가 한 볼륨에 섞여요).
 
-compose `agents` 프로파일은 아직 없어요(Railway 경로가 검증된 뒤로 미뤘어요).
-실제 Railway에서 `0.0.0.0`과 `::`를 재 보는 일도 남아 있어요.
+**제로 베이스 지름길 (#4072).** 1~7번은 이제 템플릿과 생성기가 대신 해요. 잠금을
+읽는 일과 모델 키는 여전히 운영자 몫이에요.
+
+- **Railway:** `infra/railway/railway.json`에 `hermes` 서비스(비공개, digest 고정
+  공식 이미지, `/opt/data` 볼륨)와 6~7번의 api·agent-worker 변수가 들어 있어요.
+  shared variable `HERMES_API_KEY`(`openssl rand -hex 32`)를 만들고,
+  `infra/hermes/config.yaml`과 `infra/hermes/lockgate.py`를 base64 변수 두 개로
+  붙여 배포한 뒤, hermes 배포 로그에서 `LOCKGATE {"ok": true, …}` 한 줄을 읽어요.
+  시작 명령이 Hermes 엔트리포인트 앞에서 게이트를 돌리므로, 설정이 거절되면 서비스는
+  아예 listen하지 않아요. `infra/railway/README.md`(Hermes)를 보세요.
+- **docker compose:** `scripts/self_host_env.sh --local-build --with-agents`(또는
+  `--published-image …`)가 `COMPOSE_PROFILES=agents`, 생성된 `HERMES_API_KEY`,
+  `HERMES_BASE_URL=http://hermes:8642/v1`, 정확한 호스트 `hermes`의 로컬 허용,
+  `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`을 써요. 이어서
+  `scripts/self_host_env.sh --compose up -d --wait`로 나머지와 함께 Hermes가 떠요.
+  `hermes` 서비스에는 `ports:`가 없고(호스트에서 닿지 않음), 설정과 게이트를
+  읽기 전용으로 마운트하며, 엔트리포인트 앞에서 `lockgate.py gate`를 돌려요. 기존
+  env에서는 생성된 키를 다시 만들지 않고 나머지 키를 번들 값으로 맞추며, 이미 다른
+  `HERMES_BASE_URL`을 선언한 env는 거절해요.
+- `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`은 여전히 **운영자 본인의 선언**이에요. 두
+  배포 모양 모두 게이트가 뒷받침하지만, 설정·게이트·시작 명령을 고치면 그 뒷받침은
+  운영자가 직접 책임져요.
+- **모델 인증은 이 작업 밖이에요**(#4073). 모델 없이도 Hermes는 뜨고 카드도 보여요.
+  모델을 정하기 전까지 대화 한 번은 「Hermes가 아직 모델 provider에 연결되지 않았다」
+  고 답해요.
+- **로그인 중계 사이드카(#4078, ADR-0203 증보 2026-10-19).** `HERMES_LOGIN_RELAY_KEY`가
+  있으면(`--with-agents`가 채팅 키와 따로 만들어요) `hermes` 컨테이너가
+  `infra/hermes/login_relay.py`도 사설망(`hermes:8643`, `ports:` 없음)에서 돌려요.
+  Codex·Claude·설정된 OAuth 앱의 고정 `hermes` 로그인 명령만, `hermes` uid의 별도
+  프로세스 그룹으로 실행해요. 키는 사이드카 전용 uid의 `0400` 파일에 있고 게이트웨이가
+  뜨기 전에 환경에서 지워져요. 키가 없으면 사이드카 프로세스도 없고 화면은 셸 명령
+  (`railway ssh`)을 보여 줘요. 실측: `scripts/tests/test_login_relay_docker.sh`.
+  oort api는 `HERMES_LOGIN_RELAY_URL` / `HERMES_LOGIN_RELAY_KEY`(`--with-agents`가 함께 써요,
+  api 전용)로 사이드카에 닿고, 인스턴스 운영자 전용 라우트 `…/agents/{agent}/model-login`·
+  `…/app-login`(#4079, `docs/api/openapi.operator.yaml`)으로 노출돼요. 붙여넣는 일회용 code와
+  Codex 기기 코드는 oort를 한 번 지나갈 뿐 저장·로그·감사·푸시에 남지 않고, 토큰은 oort에
+  아예 오지 않아요. 둘 중 하나라도 비어 있으면 라우트는 `409 login_relay_off`로 답하고 화면은
+  셸 명령을 보여 줘요.
+
+compose 실측(arm64, 2026-10-19, 고정 이미지): listener는 `0.0.0.0:8642`(uid 10000),
+`docker port`는 공개된 포트가 없다고 나오고, 게이트는 `LOCKGATE ok=true
+disabled_count=24`, 리포트는 6개 검사가 모두 true였어요. 레거시 Railway environment의
+`::`는 여전히 runtime-unverified예요.
+
+**Codex·Claude 구독으로 모델 인증하기 (ADR-0004 증보 6, ADR-0203 증보
+2026-10-19).** Hermes는 운영자 본인의 Codex(ChatGPT) 또는 Claude 구독 OAuth로
+모델 인증을 할 수 있어요. 토큰은 **Hermes 자기 볼륨에만** 있어요. oort 서버와
+금고는 그 토큰을 받지도 저장하지도 중개하지도 기록하지도 않고(oort가 가진 것은
+불투명 bearer `HERMES_API_KEY`뿐), 그래서 `docs/SELF_HOST.ko.md`의 킬 스위치
+(`MOMO_SUBSCRIPTION_AGENTS_ENABLED`, `MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED`)는
+**이 경로에는 적용되지 않아요.** 사용량은 Hermes에 로그인한 사람의 구독에서
+나가요(팀원이 Hermes를 불러도 같아요). 벤더 약관에 맞는지는 운영자가 판단해요.
+oort는 판단하거나 보증하지 않아요. 구독 토큰을 oort·채널·oort 서비스의 `.env`에
+붙여 넣지 마세요. 로그인 절차는 #4073(Hermes 모델 인증 온보딩)이 들어오기 전까지
+자리표시예요: [#4073](https://github.com/yeomyeonggeori/oort/issues/4073).
 
 ### 3.4.2 Railway: Hermes 「커넥터 시험」 (ADR-0203 증보, #3948)
 

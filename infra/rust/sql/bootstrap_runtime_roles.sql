@@ -337,6 +337,10 @@ BEGIN
   IF to_regclass('public.read_state') IS NOT NULL THEN
     GRANT SELECT ON TABLE read_state TO momo_notifier;
   END IF;
+  -- ADR-0204 증보 3 / #4018: the push judgment reads the presence heartbeat.
+  IF to_regclass('public.channel_viewing') IS NOT NULL THEN
+    GRANT SELECT ON TABLE channel_viewing TO momo_notifier;
+  END IF;
   IF to_regclass('public.agent_run') IS NOT NULL THEN
     GRANT SELECT, UPDATE ON TABLE agent_run TO momo_notifier;
   END IF;

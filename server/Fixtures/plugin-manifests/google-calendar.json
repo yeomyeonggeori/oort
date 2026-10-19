@@ -1,0 +1,544 @@
+{
+  "schemaVersion": "momo.plugin.v1",
+  "plugin": {
+    "id": "com.momo.plugins.google-calendar",
+    "name": "Google Calendar",
+    "version": "1.0.0",
+    "description": "Official Google Calendar remote MCP (Developer Preview)",
+    "publisher": {
+      "id": "google",
+      "name": "Google",
+      "verified": true
+    },
+    "license": {
+      "spdx": "LicenseRef-Google-Hosted-Service",
+      "kind": "hosted_only"
+    },
+    "provenance": {
+      "sourceURL": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+      "releaseRef": "hosted",
+      "verified": true
+    }
+  },
+  "mcp": {
+    "protocolVersion": "2025-06-18",
+    "transport": "streamable_http",
+    "url": "https://calendarmcp.googleapis.com/mcp/v1",
+    "server": {
+      "name": "google/calendar-mcp",
+      "version": "preview"
+    },
+    "tools": [
+      {
+        "name": "google-calendar.list_events",
+        "description": "캘린더의 일정 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "calendarId": {
+              "type": "string",
+              "description": "Optional. ID of the calendar containing the events. Email address - can be resolved using `list_calendars`. Default: primary calendar."
+            },
+            "endTime": {
+              "type": "string",
+              "description": "Optional. The upper bound of a time range. Must only be set when a specific timeframe or a time in the past is requested by the user. Must be an ISO 8601 timestamp greater than `start_time`. Default: `start_time` + 7 days. Follows the same rules as `start_time`, including when passing `start_time` +"
+            },
+            "eventType": {
+              "type": "array",
+              "description": "Optional. The event types to return. If empty, only the following event types are returned: `DEFAULT`, `OUT_OF_OFFICE`, `FOCUS_TIME`, `FROM_GMAIL`",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "EVENT_TYPE_UNSPECIFIED",
+                  "DEFAULT",
+                  "OUT_OF_OFFICE",
+                  "FOCUS_TIME",
+                  "WORKING_LOCATION",
+                  "BIRTHDAY",
+                  "FROM_GMAIL"
+                ]
+              }
+            },
+            "eventTypeFilter": {
+              "type": "array",
+              "description": "Optional. Deprecated: use `event_type` instead.",
+              "items": {
+                "type": "string"
+              }
+            },
+            "fullText": {
+              "type": "string",
+              "description": "Optional. Free-form case-insensitive search matching title, description, location, or attendees. Matches events containing all query terms verbatim (AND search)."
+            },
+            "orderBy": {
+              "type": "string",
+              "description": "Optional. The order in which events should be returned. Possible values are: - `default` - Unspecified, but deterministic ordering (default). - `startTime` - Order by start time ascending. - `startTimeDesc` - Order by start time descending. - `lastModified` - Order by last modification time ascendin"
+            },
+            "pageSize": {
+              "type": "integer",
+              "description": "Optional. Max events per page (default `100`, max `250`). Recommended: `10`."
+            },
+            "pageToken": {
+              "type": "string",
+              "description": "Optional. Next page token. Use the value from the previous page's `nextPageToken`."
+            },
+            "startTime": {
+              "type": "string",
+              "description": "Optional. The lower bound of a time range. Must only be set when a specific timeframe is requested by the user. Must be an ISO 8601 timestamp less than `end_time`. Default: now. Pass the local time with no UTC offset and no trailing `Z` (for example `2026-04-30T10:00:00`), including when passing now"
+            },
+            "timeZone": {
+              "type": "string",
+              "description": "Optional. The time zone (IANA ID, for example `Europe/Zurich`) used to resolve timezone-less dates. Only use this parameter if the user explicitly states a time zone, but always set it when they do, even if that time zone looks like the user's own. Otherwise leave it unset: the server resolves the u"
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:b276ca3f483c9d8ab41a831461b64dad1d6336b50cc51c27663f76ca830b8929",
+        "scopes": [
+          "google-calendar:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "google-calendar.get_event",
+        "description": "일정 하나를 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "calendarId": {
+              "type": "string",
+              "description": "Optional. ID of the calendar containing the event. Email address - can be resolved using `list_calendars`. Default: primary calendar."
+            },
+            "eventId": {
+              "type": "string",
+              "description": "Required. Event ID. Can be resolved using `list_events` or `search_events`."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "eventId"
+          ]
+        },
+        "schemaDigest": "sha256:86881e99fc987c3e8b3884d0216c30795d17ae7e7892599e0dfe1f3345794e4e",
+        "scopes": [
+          "google-calendar:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "google-calendar.list_calendars",
+        "description": "내 캘린더 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "pageSize": {
+              "type": "integer",
+              "description": "Optional. Max results per page. Default `100`, max `250`."
+            },
+            "pageToken": {
+              "type": "string",
+              "description": "Optional. Token specifying which result page to return."
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:4b7adc0c2f5a23de8a591ad584f3a669db0f5de7e4d315cee4447a6ebf925ba2",
+        "scopes": [
+          "google-calendar:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "google-calendar.suggest_time",
+        "description": "참석자들이 모두 비는 시간을 제안합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "attendeeEmails": {
+              "type": "array",
+              "description": "Required. Attendee emails to find free time for.",
+              "items": {
+                "type": "string"
+              }
+            },
+            "durationMinutes": {
+              "type": "integer",
+              "description": "Optional. Min duration of free slot in minutes. Default: `30`."
+            },
+            "endTime": {
+              "type": "string",
+              "description": "Required. Query interval end (ISO 8601). Follows the same rules as `start_time`."
+            },
+            "startTime": {
+              "type": "string",
+              "description": "Required. Query interval start (ISO 8601). Pass the local time with no UTC offset and no trailing `Z` (for example `2026-04-30T10:00:00`); only include an offset if the user themselves stated one. If the user named a time zone, leave this without offset and put its IANA name in this request's top-le"
+            },
+            "timeZone": {
+              "type": "string",
+              "description": "Optional. The time zone the search times should be interpreted in (IANA ID, for example `Europe/Zurich`). Only use this parameter if the user explicitly states a time zone, but always set it when they do, even if that time zone looks like the user's own. Otherwise leave it unset: the server resolves"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "attendeeEmails",
+            "startTime",
+            "endTime"
+          ]
+        },
+        "schemaDigest": "sha256:0f4fa93debceb3b545d342a4adcece15c0504dd75f62e887ab3af8b3d5b684e1",
+        "scopes": [
+          "google-calendar:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "google-calendar.search_events",
+        "description": "일정을 검색합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "pageSize": {
+              "type": "integer",
+              "description": "Optional. Maximum number of entries returned on one result page."
+            },
+            "pageToken": {
+              "type": "string",
+              "description": "Optional. Token specifying which result page to return."
+            },
+            "query": {
+              "type": "string",
+              "description": "Required. Query string to search for events (case-insensitive)."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "query"
+          ]
+        },
+        "schemaDigest": "sha256:2e7594f0963d00764fd9244878b36f1fcc73d6c18e866f34133aaa526334f025",
+        "scopes": [
+          "google-calendar:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "google-calendar.create_event",
+        "description": "일정을 만듭니다. 참석자가 있으면 초대가 나가요.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "addGoogleMeetUrl": {
+              "type": "boolean",
+              "description": "Optional. Create and add a Google Meet URL. Default: `false`."
+            },
+            "allDay": {
+              "type": "boolean",
+              "description": "Optional. Whether the event spans the entire day. If true, start/end times are treated as midnight."
+            },
+            "attendeeEmails": {
+              "type": "array",
+              "description": "Optional. Deprecated: use `attendees` instead.",
+              "items": {
+                "type": "string"
+              }
+            },
+            "availability": {
+              "type": "string",
+              "description": "Optional. Availability setting.",
+              "enum": [
+                "AVAILABILITY_UNSPECIFIED",
+                "AVAILABILITY_BUSY",
+                "AVAILABILITY_FREE"
+              ]
+            },
+            "calendarId": {
+              "type": "string",
+              "description": "Optional. ID of the calendar to create the event on. Email address - can be resolved using `list_calendars`. Default: primary calendar."
+            },
+            "colorId": {
+              "type": "string",
+              "description": "Optional. The color of the event. For a list of color IDs, refer to the documentation of the Event resource."
+            },
+            "description": {
+              "type": "string",
+              "description": "Optional. Description. Can contain HTML."
+            },
+            "endTime": {
+              "type": "string",
+              "description": "Required. End time (ISO 8601, for example `2026-04-30T11:00:00`). Follows the same rules as `start_time`."
+            },
+            "eventType": {
+              "type": "string",
+              "description": "Optional. Type of the event.",
+              "enum": [
+                "EVENT_TYPE_UNSPECIFIED",
+                "DEFAULT",
+                "OUT_OF_OFFICE",
+                "FOCUS_TIME",
+                "WORKING_LOCATION",
+                "BIRTHDAY",
+                "FROM_GMAIL"
+              ]
+            },
+            "googleMeetUrl": {
+              "type": "string",
+              "description": "Optional. Specific Google Meet URL or meeting ID. Overrides `add_google_meet_url`."
+            },
+            "location": {
+              "type": "string",
+              "description": "Optional. Location."
+            },
+            "notificationLevel": {
+              "type": "string",
+              "description": "Optional. Which email notification should be sent for this event update.",
+              "enum": [
+                "NOTIFICATION_LEVEL_UNSPECIFIED",
+                "NONE",
+                "EXTERNAL_ONLY",
+                "ALL"
+              ]
+            },
+            "recurrenceData": {
+              "type": "array",
+              "description": "Optional. Recurrence rules as `RRULE`, `RDATE`, or `EXDATE` strings (per RFC 5545).",
+              "items": {
+                "type": "string"
+              }
+            },
+            "startTime": {
+              "type": "string",
+              "description": "Required. Start time (ISO 8601, for example `2026-04-30T10:00:00`). Pass the local time with no UTC offset and no trailing `Z`; only include an offset if the user themselves stated one. If the user named a time zone, leave this without offset and put its IANA name in this request's top-level `timeZo"
+            },
+            "summary": {
+              "type": "string",
+              "description": "Required. Title."
+            },
+            "timeZone": {
+              "type": "string",
+              "description": "Optional. The time zone the event should be created in, as an IANA Time Zone Database name (for example, `America/Los_Angeles`). Only use this parameter if the user explicitly states a time zone, but always set it when they do, even if that time zone looks like the user's own. Otherwise leave it uns"
+            },
+            "useDefaultReminders": {
+              "type": "boolean",
+              "description": "Optional. Whether to use the default reminders for the event. If true, the event will use default reminders. Cannot be set to true if `override_reminders` are specified. If set to false and `override_reminders` is empty or unset, the event will have no reminders. Defaults to false if override_remind"
+            },
+            "visibility": {
+              "type": "string",
+              "description": "Optional. Visibility of the event. Possible values are: - `default` - Uses the default visibility for events on the calendar. Default value. - `public` - The event is public and event details are visible to all readers of the calendar. - `private` - Only event attendees may view event details. "
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "summary",
+            "startTime",
+            "endTime"
+          ]
+        },
+        "schemaDigest": "sha256:d0d919ee9e2297cf06ebb6727c1b02e54b4c20fbd09822b0dab93c940e6b9ef1",
+        "scopes": [
+          "google-calendar:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
+      },
+      {
+        "name": "google-calendar.update_event",
+        "description": "일정을 고칩니다. 참석자에게 알림이 갈 수 있어요.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "addGoogleMeetUrl": {
+              "type": "boolean",
+              "description": "Optional. If true, creates or updates a Google Meet URL for the event. Ignored if Meet is disabled."
+            },
+            "addedAttendeeEmails": {
+              "type": "array",
+              "description": "Optional. Deprecated: use `added_attendees` instead.",
+              "items": {
+                "type": "string"
+              }
+            },
+            "allDay": {
+              "type": "boolean",
+              "description": "Optional. Changes the event to all-day. If set, `start_time`/`end_time` must also be provided."
+            },
+            "availability": {
+              "type": "string",
+              "description": "Optional. Whether the event blocks time on the calendar.",
+              "enum": [
+                "AVAILABILITY_UNSPECIFIED",
+                "AVAILABILITY_BUSY",
+                "AVAILABILITY_FREE"
+              ]
+            },
+            "calendarId": {
+              "type": "string",
+              "description": "Optional. ID of the calendar containing the event. Email address - can be resolved using `list_calendars`. Default: primary calendar."
+            },
+            "colorId": {
+              "type": "string",
+              "description": "Optional. New color of the event. For a list of color IDs, refer to the documentation of the Event resource."
+            },
+            "description": {
+              "type": "string",
+              "description": "Optional. New description. Can contain HTML."
+            },
+            "endTime": {
+              "type": "string",
+              "description": "Optional. New end time (ISO 8601). Follows the same rules as `start_time`."
+            },
+            "eventId": {
+              "type": "string",
+              "description": "Required. Event ID. Can be resolved using `list_events` or `search_events`."
+            },
+            "googleMeetUrl": {
+              "type": "string",
+              "description": "Optional. Allows attaching an existing Google Meet URL or meeting ID to the event. Overrides the value of `addGoogleMeetUrl`."
+            },
+            "location": {
+              "type": "string",
+              "description": "Optional. New location."
+            },
+            "notificationLevel": {
+              "type": "string",
+              "description": "Optional. Email notification to send for this event update. Default: `ALL`.",
+              "enum": [
+                "NOTIFICATION_LEVEL_UNSPECIFIED",
+                "NONE",
+                "EXTERNAL_ONLY",
+                "ALL"
+              ]
+            },
+            "removedAttachmentFileUrls": {
+              "type": "array",
+              "description": "Optional. File attachments to remove from the event.",
+              "items": {
+                "type": "string"
+              }
+            },
+            "removedAttendeeEmails": {
+              "type": "array",
+              "description": "Optional. The attendees of the event to remove, as email addresses.",
+              "items": {
+                "type": "string"
+              }
+            },
+            "startTime": {
+              "type": "string",
+              "description": "Optional. New start time (ISO 8601). Preserves duration if updating only start. Pass the local time with no UTC offset and no trailing `Z` (for example `2026-04-30T10:00:00`); only include an offset if the user themselves stated one. If the user named a time zone, leave this without offset and put i"
+            },
+            "summary": {
+              "type": "string",
+              "description": "Optional. New title."
+            },
+            "timeZone": {
+              "type": "string",
+              "description": "Optional. The time zone the event should be updated to, as an IANA Time Zone Database name (for example, `America/Los_Angeles`). Only use this parameter if the user explicitly states a time zone, but always set it when they do, even if that time zone looks like the user's own. Otherwise leave it uns"
+            },
+            "useDefaultReminders": {
+              "type": "boolean",
+              "description": "Optional. Whether to use the default reminders for the event. If true, the event will use default reminders (and clear override reminders). Cannot be set to true if `override_reminders` are specified. If set to false and `override_reminders` is empty or unset, all reminders are removed."
+            },
+            "visibility": {
+              "type": "string",
+              "description": "Optional. New visibility of the event. Possible values are: - `default` - Uses the default visibility for events on the calendar. Default value. - `public` - Event details are visible to all readers of the calendar. - `private` - The event is private and only event attendees may view event details. "
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "eventId"
+          ]
+        },
+        "schemaDigest": "sha256:27a0e31418b2d72296b1b1424af08dca79a68b5911da4d92665fefd5f7098187",
+        "scopes": [
+          "google-calendar:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
+      },
+      {
+        "name": "google-calendar.respond_to_event",
+        "description": "초대받은 일정에 참석 여부를 답합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "calendarId": {
+              "type": "string",
+              "description": "Optional. ID of the calendar containing the event. Email address - can be resolved using `list_calendars`. Default: primary calendar."
+            },
+            "eventId": {
+              "type": "string",
+              "description": "Required. The ID of the event to respond to."
+            },
+            "notificationLevel": {
+              "type": "string",
+              "description": "Optional. Which email notification should be sent for this event update.",
+              "enum": [
+                "NOTIFICATION_LEVEL_UNSPECIFIED",
+                "NONE",
+                "EXTERNAL_ONLY",
+                "ALL"
+              ]
+            },
+            "responseComment": {
+              "type": "string",
+              "description": "Optional. The user's comment attached to the response."
+            },
+            "responseStatus": {
+              "type": "string",
+              "description": "Required. The new user's response status of the event. Possible values are: - `declined` - The attendee has declined the invitation. - `tentative` - The attendee has tentatively accepted the invitation. - `accepted` - The attendee has accepted the invitation. "
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "eventId",
+            "responseStatus"
+          ]
+        },
+        "schemaDigest": "sha256:56537beb3ddc83de18e717b14388809938dd07492da17e3a9042bbd453c363e1",
+        "scopes": [
+          "google-calendar:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
+      }
+    ]
+  },
+  "skill": {
+    "reference": null,
+    "optional": true
+  },
+  "momo": {
+    "approvalTier": {
+      "google-calendar.list_events": "read_only",
+      "google-calendar.get_event": "read_only",
+      "google-calendar.list_calendars": "read_only",
+      "google-calendar.suggest_time": "read_only",
+      "google-calendar.search_events": "read_only",
+      "google-calendar.create_event": "network_write",
+      "google-calendar.update_event": "network_write",
+      "google-calendar.respond_to_event": "network_write"
+    },
+    "risk": "medium",
+    "egressDomains": [
+      "calendarmcp.googleapis.com"
+    ],
+    "recommendedFor": [
+      "scheduling",
+      "productivity"
+    ],
+    "serverPolicy": {
+      "installAllowed": true,
+      "enabledByDefault": false,
+      "allowedRoles": [
+        "owner",
+        "admin"
+      ]
+    },
+    "preview": true
+  }
+}
