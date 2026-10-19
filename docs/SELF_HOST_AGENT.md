@@ -2350,6 +2350,15 @@ generator now do for you; you still read the lock, and the model key stays yours
 - **Model authentication is not part of this** (#4073): Hermes starts and the
   card appears without it; a chat turn answers that Hermes is not connected to a
   provider until a model is set.
+- **Login relay sidecar (#4078, ADR-0203 증보 2026-10-19).** With
+  `HERMES_LOGIN_RELAY_KEY` set (`--with-agents` generates it, separate from the
+  chat key) the `hermes` container also runs `infra/hermes/login_relay.py` on the
+  private network (`hermes:8643`, no `ports:`). It runs only the fixed `hermes`
+  login commands for Codex, Claude and the configured OAuth apps, as the `hermes`
+  uid in their own process group; the key sits in a `0400` file of its own uid and
+  is gone from the environment before the gateway starts. Without the key there is
+  no sidecar process and the screen falls back to the shell command (`railway ssh`).
+  `docker compose` measurement: `scripts/tests/test_login_relay_docker.sh`.
 
 Measured on compose (arm64, 2026-10-19, the pinned image): the listener is
 `0.0.0.0:8642` (uid 10000), `docker port` shows nothing published, the gate
