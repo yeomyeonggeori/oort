@@ -15,6 +15,8 @@ import {
   pasteLooksSendable,
   safeLoginUrl,
   secondsLeft,
+  appLoginTarget,
+  appShellCommand,
   loginTtlSeconds,
   MODEL_LOGIN_HOSTS,
   startFromWire,
@@ -134,6 +136,13 @@ describe("helpers", () => {
     expect(loginTtlSeconds(1000 + 290, 1_000_000)).toBe(290);
     expect(loginTtlSeconds(1, 1_000_000)).toBe(300);
     expect(loginTtlSeconds(9_999_999_999, 1_000_000)).toBe(300);
+  });
+
+  it("maps the three Google apps to the probe command and leaves other apps to hermes mcp login", () => {
+    expect(appLoginTarget("com.momo.plugins.gmail")).toBe("gmail");
+    expect(appLoginTarget("com.momo.plugins.github")).toBeNull();
+    expect(appShellCommand("google_calendar")).toContain("mcp_login_probe.py google_calendar");
+    expect(appShellCommand("notion")).toBe("railway ssh -- hermes mcp login -- notion");
   });
 
   it("checks the paste shape like the server", () => {

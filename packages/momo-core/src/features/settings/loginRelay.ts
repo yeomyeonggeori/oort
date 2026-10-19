@@ -265,8 +265,21 @@ export const MODEL_SHELL_COMMANDS: Readonly<Record<ModelProvider, string>> = {
   anthropic: "railway ssh -- hermes auth add anthropic --type oauth --no-browser",
 };
 
+/** 앱 상세(플러그인 id)에서 Hermes의 MCP 서버 이름으로. 이 셋은 `mcp_login_probe.py` 경로가 필요하다(#4067). */
+export const GOOGLE_APP_TARGETS: Readonly<Record<string, string>> = {
+  "com.momo.plugins.gmail": "gmail",
+  "com.momo.plugins.google-calendar": "google_calendar",
+  "com.momo.plugins.google-drive": "google_drive",
+};
+
+export function appLoginTarget(pluginId: string): string | null {
+  return GOOGLE_APP_TARGETS[pluginId] ?? null;
+}
+
 export function appShellCommand(app: string): string {
-  return `railway ssh -- hermes mcp login -- ${app}`;
+  return Object.values(GOOGLE_APP_TARGETS).includes(app)
+    ? `railway ssh -- runuser -u hermes -- /opt/hermes/.venv/bin/python /opt/data/mcp_login_probe.py ${app}`
+    : `railway ssh -- hermes mcp login -- ${app}`;
 }
 
 // ---- 문장 -------------------------------------------------------------------
@@ -320,21 +333,21 @@ export const MODEL_LOGIN_COPY = {
 
 export const APP_LOGIN_COPY = {
   title: "로그인",
+  lead: "이 앱이 쓰는 계정으로 로그인해요. 로그인 정보는 Hermes에만 남고 oort에는 저장되지 않아요.",
   start: "로그인",
-  starting: "시작하는 중이에요",
-  openUrl: "주소 열기",
-  pasteSteps: "주소를 열어 로그인하면 브라우저 주소창이 바뀌어요. 그 주소 전체를 여기에 붙여넣어 주세요.",
+  relogin: "다시 로그인",
+  pasteSteps: "주소를 열어 로그인하면 브라우저 주소창이 바뀌어요. 그 주소 전체를 복사해 여기에 붙여넣어 주세요.",
   pasteLabel: "돌아온 주소",
-  pasteHelp: "붙여넣은 주소는 한 번 전달되고 바로 지워져요. 로그인 정보는 Hermes에만 남아요.",
+  pasteHelp: "붙여넣은 주소는 한 번 전달되고 바로 지워져요.",
   pasteSend: "붙여넣은 주소 보내기",
   connected: "연결됨",
   notConnected: "연결 안 됨",
-  done: "연결됐어요.",
-  relogin: "다시 로그인",
+  loadError: "로그인 상태를 불러오지 못했어요.",
   externalTestingNote:
-    "이 앱이 Google의 테스트 모드(외부 사용자)라면 로그인이 7일쯤 지나 만료될 수 있어요. 만료되면 이 화면에서 다시 로그인하면 돼요.",
+    "이 앱의 구글 OAuth가 테스트 모드(외부 사용자)라면 로그인이 7일쯤 뒤에 만료될 수 있어요. 만료되면 이 화면에서 다시 로그인하면 돼요.",
   expiryUnknown: "만료 시점은 알 수 없어요. 연결이 끊긴 것처럼 보이면 다시 로그인해 주세요.",
-  shellLead: "이 서버는 로그인 중계가 꺼져 있어요. 터미널에서 이 명령으로 로그인해 주세요.",
+  shellLead: "이 서버에서는 화면 로그인이 꺼져 있어요. Railway 터미널에서 이 명령으로 로그인해 주세요.",
+  shellCopy: "명령 복사",
 } as const;
 
 /** 고정 문장. 서버·값에서 온 낱말을 되풀이하지 않는다. */
