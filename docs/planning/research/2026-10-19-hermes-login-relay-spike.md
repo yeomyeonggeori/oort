@@ -55,7 +55,7 @@
 - `poll/{session_id}` → `{"status":"pending", "expires_at":…, "account_email":null, …}`. 로그인하지 않았으니 `pending`이 끝이에요. 승인 뒤 상태(`approved` 등)는 소스상 확인했고 실행하지 않았어요: `runtime-unverified`.
 - `DELETE …/sessions/{id}` → `{"ok":true}`. 취소로 폴링 스레드가 멈추도록 소스에 주석이 있어요.
 - CLI도 같아요: `hermes auth add openai-codex --type oauth --no-browser`가 `Open this URL: https://auth.openai.com/codex/device` + `Enter this code: XXXX-XXXX`를 출력하고 「Waiting for sign-in」으로 기다려요. 기본이 기기 코드 흐름이고 `--browser`를 줘야 `localhost:1455` 콜백 흐름이에요.
-- **함의**: 사용자는 URL을 열고 **화면에 보이는 코드를 벤더 페이지에 입력**해요. 돌아온 주소를 붙여넣을 일이 없고, oort가 받는 비밀이 없어요(`user_code`는 화면에 표시하는 값이지 교환에 쓰는 비밀이 아니고, 교환용 `device_auth_id`는 Hermes 안에만 있어요). 이번 묶음에서 ADR-0004와 부딪히지 않는 유일한 흐름이에요.
+- **함의**: 사용자는 URL을 열고 **화면에 보이는 코드를 벤더 페이지에 입력**해요. 돌아온 주소를 붙여넣을 일이 없고, oort가 받는 비밀이 없어요(`user_code`는 화면에 표시하는 값이고 토큰 교환에는 쓰이지 않지만, **본 사람이 자기 계정으로 승인하면 Hermes가 그 계정에 묶이는 값**이라 민감하게 다뤄야 해요. 교환용 `device_auth_id`는 Hermes 안에만 있어요). 이번 묶음에서 ADR-0004와 부딪히지 않는 유일한 흐름이에요.
 - 로그인 뒤 토큰 위치는 `auth.json`(Hermes 인증 저장소, `/opt/data/auth.json`)과 풀(pool)이에요 [소스 `hermes_cli/auth.py` 머리말]. 로그인 상태의 비밀 아닌 확인은 `hermes auth status openai-codex` → `openai-codex: logged out (No Codex credentials stored. …)` [V].
 - 못 잰 것: 승인 뒤 **돌고 있는 게이트웨이가 재시작 없이 새 자격을 쓰는지**, `model.provider: openai-codex`를 누가 설정에 쓰는지(§8 3번).
 
@@ -88,8 +88,8 @@
 
 ## 6. 대시보드를 직접 부르면 안 되는 이유 [V + 소스]
 
-1. **인증이 네트워크 경계가 아니에요.** 루프백 모드의 세션 토큰은 인증 없는 `GET /` 응답 HTML(`__HERMES_SESSION_TOKEN__="…"`)에 들어 있어요 [V]. 루프백이 아닌 바인드는 「반드시 인증 provider(비밀번호 또는 OAuth)가 있어야」 하고 `HERMES_DASHBOARD_INSECURE`는 무시돼요 [소스 s6 `dashboard/run`]. 둘 다 oort 서버가 키 하나로 부르는 모양이 아니에요(쿠키 세션 로그인).
-2. **표면이 커요.** 같은 프로세스가 설정·`.env`·파일·세션·cron·채팅과 `POST /api/mcp/servers`(stdio `command` 포함 = 임의 프로세스 실행)를 열어요. s6 스크립트 주석이 「unauthenticated public dashboards were the entry point for the MCP-config persistence campaign」이라고 적어요. ADR-0203 D6(도구 잠금)·lockgate와 정면으로 충돌해요.
+1. **인증이 네트워크 경계가 아니에요.** 루프백 모드의 세션 토큰은 인증 없는 `GET /` 응답 HTML(`__HERMES_SESSION_TOKEN__="…"`)에 들어 있어요 [V]. 루프백이 아닌 바인드는 「반드시 인증 provider(비밀번호 또는 OAuth)가 있어야」 하고 [소스, 비루프백 실행은 하지 않았어요] `HERMES_DASHBOARD_INSECURE`는 무시돼요 [소스 s6 `dashboard/run`]. 둘 다 oort 서버가 키 하나로 부르는 모양이 아니에요(쿠키 세션 로그인).
+2. **표면이 커요.** 같은 프로세스가 설정·`.env`·파일·세션·cron·채팅과 `POST /api/mcp/servers`를 열어요. http 서버 추가는 [V]로 실행했고, stdio `command` 포함 = 임의 프로세스 실행은 모델 정의(`MCPServerCreate.command`)를 읽은 [소스]예요(실행하지 않았어요). s6 스크립트 주석이 「unauthenticated public dashboards were the entry point for the MCP-config persistence campaign」이라고 적어요. ADR-0203 D6(도구 잠금)·lockgate와 정면으로 충돌해요.
 3. **상태가 메모리에 있어요.** 로그인 흐름이 모듈 전역 dict에 있어(`_oauth_sessions`, `_mcp_oauth_flows`) 프로세스가 재시작되면 사라져요. 흐름 TTL: Codex 900초, MCP 콜백 대기 300초.
 4. **무게.** 대시보드 프로세스 RSS 약 320 MB(게이트웨이 약 276 MB와 별개) [V]. 2 GB급 Railway Hermes에서 상시 켜 둘 이유가 없어요.
 5. 읽기 라우트 `poll/{session_id}`는 인증이 없고 `account_email`을 돌려줘요. 대시보드를 외부에 열면 세션 id만 알면 이메일이 보여요.
@@ -104,8 +104,9 @@
 | 틀린 state | `State parameter mismatch`, 토큰 파일 없음(`mock.client.json`만) |
 | **중계 채널의 토큰 표식** | 캡처한 자식 출력 전체에 `MOCK-ACCESS-TOKEN`·`MOCK-REFRESH-TOKEN`·`FAKECODE` 포함 여부 **모두 False**(0바이트). 토큰은 `/opt/data/mcp-tokens/`에만 있어요 |
 
-- 같은 방식이 Codex(출력에서 URL+코드 파싱, 종료를 기다림)와 Claude(출력에서 URL 파싱 → 나중에 stdin에 `code#state`)에 그대로 맞아요. 세 로그인이 모두 「URL 출력 → (선택) stdin 한 줄 → 종료 코드」라서 사이드카가 한 모양으로 다룰 수 있어요. `skip` 입력으로 포기할 수 있고, 프로세스를 죽이면 취소돼요.
+- **완주한 것은 모의 MCP의 `hermes mcp login` 하나뿐이에요.** Codex는 CLI가 URL+코드를 출력하고 기다리는 데까지, Claude는 URL 출력과 EOF 종료까지만 봤어요. 세 로그인이 모두 「URL 출력 → (선택) stdin 한 줄 → 종료 코드」 모양이라 같은 방식으로 다룰 수 있을 것으로 보지만 이것은 **추정**이고, `mcp_login_probe.py`의 출력도 재지 않았어요(`runtime-unverified`). `skip` 입력으로 포기할 수 있고, 프로세스를 죽이면 취소돼요.
 - 완료 확인은 비밀 아닌 신호로 해요: 종료 코드 0, `hermes auth status <provider>`(문장), `/opt/data/mcp-tokens/<server>.json` 존재(`mcp_config._oauth_tokens_present`). 토큰 파일 내용은 읽지 않아요.
+- 불일치 오류 문구는 진짜 `state` 값을 출력해요(`State parameter mismatch: <붙인 값> != <진짜 state>`). `state`는 비밀이 아니지만 자식 출력은 영구 보관하지 않고 로그에 쓰지 않아야 하는 이유예요. Claude 불일치 때 출력에 `code`가 섞이는지는 재지 않았어요.
 - 못 잰 것: Claude CLI의 승인 뒤 동작, 자식 프로세스가 TTY 없이 돌 때의 Codex 대기 시간 상한(출력은 「press Ctrl+C to cancel」까지 확인), 동시에 둘이 시작할 때의 파일 잠금.
 
 ## 8. 못 잰 것 (`runtime-unverified`)
@@ -115,6 +116,7 @@
 3. 승인 뒤 **돌고 있는 게이트웨이가 모델 provider 자격을 재시작 없이 집는지**와 `model.provider`/`model.default` 설정의 소유자. `hermes config set model.provider openai-codex`가 있어서 CLI로 쓸 수는 있으나, Railway 부팅이 `config.yaml`을 `HERMES_CONFIG_B64`로 덮어쓰므로 **설정 템플릿이 provider를 정해야** 해요(구현 이슈에서 정해요). MCP는 K-S1a에서 약 300초 자동 재탐색을 봤어요.
 4. Railway 환경(내부 DNS, 시작 명령에서 사이드카 동시 기동, 로그), amd64.
 5. `/api/model/options` 응답 모양.
+6. `hermes auth status`의 로그인된 상태 문구(logged out만 봤어요), 로그인 중계 시 CLI가 `config.yaml`을 쓰는지, Hermes 자체 로그(`/opt/data/logs/`)에 인가 URL·code가 남는지(진단 번들·로그 뷰어가 읽는 범위 포함), `mcp_login_probe.py`의 출력.
 
 ## 9. 재현과 정리
 
