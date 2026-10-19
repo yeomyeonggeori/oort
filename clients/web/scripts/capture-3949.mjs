@@ -195,6 +195,7 @@ function check(name, ok, detail = "") {
 const overflowX = (page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 const textOf = async (page, testId) => ((await page.getByTestId(testId).first().textContent()) ?? "").replace(/\s+/g, " ").trim();
 const count = (page, testId) => page.getByTestId(testId).count();
+const buttonCount = (page, name) => page.getByRole("button", { name, exact: true }).count();
 
 async function open(browser, origin, scheme, viewport, world, waitFor) {
   const context = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: "reduce", serviceWorkers: "block" });
@@ -250,6 +251,7 @@ async function run(browser, origin, scheme, width) {
       await selectPlugin(page, ID.drive);
       check(`${tag} 팀 드라이브 상세: 실행하는 곳 줄 없음(hosted)`, (await count(page, "plugin-run-places")) === 0);
       check(`${tag} 팀 드라이브 상세: 관리자 설정 칩`, (await textOf(page, "plugin-detail-route")) === "관리자 설정이 필요해요");
+      check(`${tag} 팀 드라이브 상세: 설치 단추 대신 안내 한 줄`, (await buttonCount(page, "워크스페이스에 설치")) === 0 && (await textOf(page, "plugin-setup-note")) === "관리자가 서버 설정을 끝내면 설치할 수 있어요.");
       await shotIn(page, "detail-drive-team");
 
       await selectPlugin(page, ID.gmail);
@@ -265,6 +267,11 @@ async function run(browser, origin, scheme, width) {
       await page.getByTestId("plugin-tools").evaluate((el) => el.scrollIntoView({ block: "start" }));
       await page.waitForTimeout(200);
       await shotIn(page, "detail-gmail-tools");
+      // 쓰기 등급(A·B) 칩이 서는 구간: 마지막 도구 줄이 보이게 내린다.
+      await page.getByTestId("plugin-tools").locator("li").last().evaluate((el) => el.scrollIntoView({ block: "end" }));
+      await page.waitForTimeout(200);
+      await shotIn(page, "detail-gmail-tools-write");
+      check(`${tag} 가로 넘침 0 (Gmail 쓰기 등급 구간)`, (await overflowX(page)) === 0);
 
       await selectPlugin(page, ID.myDrive);
       check(`${tag} 내 드라이브 상세: 칩 둘(미리보기 + 내 드라이브)`, (await textOf(page, "plugin-detail-preview")) === "미리보기" && (await textOf(page, "plugin-detail-route")) === "내 드라이브 · 내 에이전트가 읽어요");
@@ -278,6 +285,9 @@ async function run(browser, origin, scheme, width) {
       const ghGrades = await page.locator('[data-testid="plugin-tool-grade"]').evaluateAll((els) => els.map((el) => el.getAttribute("data-grade")));
       check(`${tag} GitHub 상세: R 26 · B 10 (A 없음)`, ["R", "A", "B"].map((g) => ghGrades.filter((x) => x === g).length).join() === "26,0,10", JSON.stringify(ghGrades.length));
       await shotIn(page, "detail-github");
+      await page.getByTestId("plugin-tools").locator("li").last().evaluate((el) => el.scrollIntoView({ block: "end" }));
+      await page.waitForTimeout(200);
+      await shotIn(page, "detail-github-tools-write");
       check(`${tag} 가로 넘침 0 (GitHub 상세)`, (await overflowX(page)) === 0);
     } finally {
       await context.close();
@@ -298,7 +308,7 @@ async function run(browser, origin, scheme, width) {
 
 async function offline(browser, origin, scheme, width) {
   const tag = `${scheme}-${width}`;
-  const { context, page } = await open(browser, origin, scheme, { width, height: 900 }, WORLDS.main, "plugin-list");
+  const { context, page } = await open(browser, origin, scheme, { width, height: width >= 1000 ? 900 : 844 }, WORLDS.main, "plugin-list");
   try {
     await context.setOffline(true);
     await page.evaluate(() => window.dispatchEvent(new Event("offline")));
@@ -318,7 +328,7 @@ async function main() {
   try {
     for (const scheme of ["light", "dark"]) {
       for (const width of [1440, 390]) await run(browser, preview.origin, scheme, width);
-      await offline(browser, preview.origin, scheme, 1440);
+      for (const width of [1440, 390]) await offline(browser, preview.origin, scheme, width);
     }
   } finally {
     await browser.close();

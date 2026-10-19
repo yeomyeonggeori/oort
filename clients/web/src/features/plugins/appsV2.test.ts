@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { pluginIconText, pluginRouteChip, pluginRunPlaces, pluginSubtitle } from "./model";
+import { pluginIconText, pluginNeedsAdminSetup, pluginRouteChip, pluginRunPlaces, pluginSubtitle } from "./model";
 
 // 앱 화면 v2 (#3949)의 순수한 문장·판정. 화면에 올린 모양은 PluginSection.test.tsx가 잰다.
 
@@ -69,6 +69,14 @@ describe("두 Drive를 가르는 연결 칩", () => {
     const chip = pluginRouteChip("com.momo.plugins.drive");
     expect(chip).toEqual({ label: "관리자 설정이 필요해요", tone: "warn" });
     expect(chip?.label).not.toContain("팀 전체");
+  });
+
+  it("관리자 설정이 먼저인 앱은 팀 공유 드라이브뿐이고, 경로가 서면 아니다", () => {
+    expect(pluginNeedsAdminSetup("com.momo.plugins.drive")).toBe(true);
+    expect(pluginNeedsAdminSetup("com.momo.plugins.google-drive")).toBe(false);
+    expect(pluginNeedsAdminSetup("com.momo.plugins.github")).toBe(false);
+    surface.driveTeamProvided = true;
+    expect(pluginNeedsAdminSetup("com.momo.plugins.drive")).toBe(false);
   });
 
   it("팀 공유 드라이브: 경로가 서면 「팀 전체 · oort가 읽어요」다", () => {

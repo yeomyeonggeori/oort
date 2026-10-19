@@ -504,8 +504,8 @@ export function pluginSubtitle(plugin: { pluginId: string; description: string }
  * 컨트롤이 있으면 오히려 이 목록이 더 큰 마켓인 것처럼 말한다. v1 공식 카탈로그는 아홉 앱
  * (ADR-0113 증보 2 E2: Google 셋, 팀 공유 드라이브, GitHub, Atlassian, Slack, Notion, Linear)이라
  * 아홉까지는 컨트롤 없이 둔다. 아홉을 넘으면(커뮤니티 앱이 들어오는 날) 컨트롤이 돌아온다.
- * 값은 여섯이었다가 시드가 일곱이 된 #3949에서 올렸다: 일곱 줄도 한 번에 훑히고, 「설치됨」·「내 권한」
- * 보기는 상세 머리의 연결 상태 칩이 이미 말한다.
+ * 값은 여섯이었다가 시드가 일곱이 된 #3949에서 올렸다: 목록 칼럼 안에서 스크롤 한두 번이면 읽히고,
+ * 「설치됨」·「내 권한」 보기는 줄마다 달린 연결 상태 칩이 이미 말한다.
  */
 export const PLUGIN_CONTROLS_MAX_GLANCEABLE = 9;
 
@@ -629,6 +629,17 @@ export function pluginRouteChip(pluginId: string): PluginRouteChip | null {
   }
   return null;
 }
+
+/**
+ * 이 앱은 관리자의 설정이 먼저다(팀 공유 드라이브가 서버 경로를 못 가졌을 때). 칩이 「관리자 설정이
+ * 필요해요」라고 말하는 앱 곁에 **설치** 단추가 서 있으면 한 화면이 두 말을 한다. 이 판정은 설치 단추만
+ * 접는 데 쓴다(이미 설치된 앱의 허용·회수·해제는 접지 않는다).
+ */
+export function pluginNeedsAdminSetup(pluginId: string): boolean {
+  return pluginId.toLowerCase() === DRIVE_TEAM_PLUGIN_ID && !isSurfaceProvided("pluginDriveTeam");
+}
+
+export const PLUGIN_ADMIN_SETUP_NOTE = "관리자가 서버 설정을 끝내면 설치할 수 있어요.";
 
 /**
  * 내 맥에서 앱을 쓰는 길(M-S1, #3957)이 서 있는가. 서지 않은 동안 「기기가 막아요」는 아직 아무것도

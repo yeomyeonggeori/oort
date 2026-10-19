@@ -33,7 +33,7 @@ describe("도구 등급 R · A · B (ADR-0113 증보 2 E4)", () => {
   });
 
   it("칩 문장은 글자가 먼저이고, 뜻 설명은 C 등급을 만들지 않는다", () => {
-    expect(APP_GRADE_LABEL).toEqual({ R: "R · 읽기", A: "A · 승인 후 쓰기", B: "B · 항상 묻고 쓰기" });
+    expect(APP_GRADE_LABEL).toEqual({ R: "R · 읽기", A: "A · 나만 영향받는 쓰기", B: "B · 남에게 보일 수 있는 쓰기" });
   });
 
   it("설명 줄은 이 앱에 있는 등급만 말한다: 읽기만 있는 앱에 쓰기 설명을 붙이지 않는다", () => {
@@ -42,10 +42,10 @@ describe("도구 등급 R · A · B (ADR-0113 증보 2 E4)", () => {
     const B = { risk: "write", approvalPolicy: "always" };
     expect(appGradeLegend([R, R])).toBe("R은 읽기만 해요.");
     expect(appGradeLegend([R, B])).toBe(
-      "R은 읽기만 해요. B는 다른 사람에게 보이거나 알림이 가는 쓰기예요. 쓰기는 부를 때마다 승인받도록 선언돼 있어요."
+      "R은 읽기만 해요. B로 선언된 쓰기는 다른 사람에게 보이거나 알림이 갈 수 있어요. 쓰기는 부를 때마다 승인을 받는 것으로 등록돼 있어요."
     );
     expect(appGradeLegend([A])).toBe(
-      "A는 내게만 영향이 있는 쓰기예요. 쓰기는 부를 때마다 승인받도록 선언돼 있어요."
+      "A로 선언된 쓰기는 나만 영향받고 되돌릴 수 있어요. 쓰기는 부를 때마다 승인을 받는 것으로 등록돼 있어요."
     );
     // 등급을 아는 도구가 없으면 줄도 없다. C는 어떤 입력으로도 설명에 나오지 않는다.
     expect(appGradeLegend([])).toBeNull();

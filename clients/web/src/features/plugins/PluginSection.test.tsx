@@ -43,6 +43,8 @@ const h = vi.hoisted(() => ({
   /** 나 말고 디렉터리에 있는 사람들(관리자 안내 시험이 쓴다). */
   others: [] as Array<Record<string, unknown>>,
   grant: vi.fn(),
+  /** 화면이 상세를 읽은 앱들. 목록 줄의 칩은 이 읽기가 끝난 뒤에야 판단할 수 있다. */
+  detailReads: [] as string[],
 }));
 
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
@@ -55,6 +57,7 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
       return actual.pluginCatalogFromWire(h.catalog);
     },
     getPlugin: async (_workspace: string, pluginId: string) => {
+      h.detailReads.push(pluginId);
       const wire = h.details.get(pluginId);
       if (!wire) throw new actual.ApiError(404, "plugin not found");
       return actual.pluginDetailFromWire(wire);
@@ -115,6 +118,7 @@ beforeEach(() => {
   h.role = "owner";
   h.others = [];
   h.grant.mockReset();
+  h.detailReads.length = 0;
   h.probe.mockReset();
   // 기본은 오늘의 서버: 설치·권한 경로가 라우터에 없다.
   h.probe.mockResolvedValue([404, 404]);
@@ -346,7 +350,7 @@ describe("읽기 전용: 설치·권한 경로가 없는 서버 (오늘의 Rust 
     expect(rows[0].textContent).toContain("notion.search");
     expect(rows[0].textContent).not.toMatch(/위험도|승인/);
     // 등급을 아는 도구(approvalPolicy가 있다)는 위험도·승인 칩 둘 대신 등급 칩 하나다(#3949).
-    expect(rows[1].textContent).toContain("A · 승인 후 쓰기");
+    expect(rows[1].textContent).toContain("A · 나만 영향받는 쓰기");
     expect(rows[1].textContent).not.toMatch(/위험도|승인:/);
     expect(text(el, "plugin-tools")).toContain("이 앱의 도구는 2개예요: 읽기 1개, 쓰기 1개.");
   });
@@ -706,6 +710,22 @@ describe("허용 동의: 동의 없이는 grant POST가 나가지 않는다 (U-2
     expect(h.grant.mock.calls[0]).toEqual([WS, NOTION, "notion:read"]);
   });
 
+  it("권한을 바꾼 뒤에는 목록과 그 앱의 상세만 다시 읽는다: 다른 줄의 상세(미리보기 칩의 출처)는 다시 나가지 않는다", async () => {
+    const el = await openGrantDialog();
+    h.grant.mockResolvedValue({ pluginId: NOTION, status: "granted", enabled: true, capabilities: [] });
+    await untilEveryRowDetailRead(el);
+    const before = [...h.detailReads];
+    await clickDoc("plugin-scope-notion:read");
+    await clickDoc("plugin-scope-confirm");
+    await until(() => h.grant.mock.calls.length > 0);
+    await until(() => h.detailReads.filter((id) => id === NOTION).length > before.filter((id) => id === NOTION).length);
+    await flush();
+    await flush();
+    const added = h.detailReads.slice(before.length);
+    expect(added.length).toBeGreaterThan(0);
+    expect(new Set(added)).toEqual(new Set([NOTION]));
+  });
+
   it("여러 권한 중 일부가 실패해도 화면은 서버가 지금 말하는 상태와 같다", async () => {
     const el = await openGrantDialog();
     h.grant.mockImplementation(async (_ws: string, _plugin: string, scope: string) => {
@@ -855,6 +875,15 @@ function mountWorld(apps: ReturnType<typeof seededApp>[]) {
   for (const app of apps) h.details.set(app.item.pluginId, app.detail);
 }
 
+/** 목록의 모든 줄이 자기 상세를 읽어 마칠 때까지 기다린다: 칩이 「없다」는 단정은 읽은 뒤에만 뜻이 있다. */
+async function untilEveryRowDetailRead(el: HTMLElement) {
+  await until(() => q(el, "plugin-list"));
+  const rows = el.querySelectorAll('[data-testid^="plugin-catalog-"]').length;
+  await until(() => new Set(h.detailReads).size >= rows);
+  await flush();
+  await flush();
+}
+
 describe("앱 화면 v2: 「미리보기」 칩 (E2, 수용 8)", () => {
   it("매니페스트 momo.preview가 참인 앱은 목록 줄과 상세 머리에 칩이 서고, 아닌 앱은 없다", async () => {
     mountWorld([
@@ -862,7 +891,7 @@ describe("앱 화면 v2: 「미리보기」 칩 (E2, 수용 8)", () => {
       seededApp({ id: CALENDAR, name: "Google Calendar", preview: true, tools: [GMAIL_TOOLS[0]] }),
     ]);
     const el = await mount();
-    await until(() => q(el, `plugin-row-${GMAIL}-preview`));
+    await untilEveryRowDetailRead(el);
     expect(text(el, `plugin-row-${GMAIL}-preview`)).toBe("미리보기");
     expect(text(el, `plugin-row-${CALENDAR}-preview`)).toBe("미리보기");
     // 공식 네 앱에는 칩이 없다: 필드가 없는 매니페스트(옛 시드)는 미리보기가 아니다.
@@ -883,8 +912,9 @@ describe("앱 화면 v2: 「미리보기」 칩 (E2, 수용 8)", () => {
       seededApp({ id: CALENDAR, name: "Google Calendar", preview: false, tools: [GMAIL_TOOLS[0]] }),
     ]);
     const el = await mount();
+    await untilEveryRowDetailRead(el);
     await openDetail(el, GMAIL);
-    // 상세가 읽힌 뒤에도(위 openDetail) 목록 줄에 칩이 없다.
+    // 모든 줄의 상세를 읽은 뒤에도 목록 줄에 칩이 없다.
     expect(q(el, `plugin-row-${GMAIL}-preview`)).toBeNull();
     expect(q(el, "plugin-detail-preview")).toBeNull();
     expect(q(el, `plugin-row-${CALENDAR}-preview`)).toBeNull();
@@ -895,6 +925,7 @@ describe("앱 화면 v2: 두 Drive 칩 (E2)", () => {
   it("내 드라이브는 「내 에이전트가 읽어요」, 팀 공유 드라이브는 경로가 없는 서버에서 칩을 숨기고 「관리자 설정이 필요해요」다", async () => {
     mountWorld([seededApp({ id: MY_DRIVE, name: "Google 내 드라이브", preview: true, tools: [GMAIL_TOOLS[0]] })]);
     const el = await mount();
+    await untilEveryRowDetailRead(el);
     await until(() => q(el, `plugin-row-${MY_DRIVE}-route`));
     expect(text(el, `plugin-row-${MY_DRIVE}-route`)).toBe("내 드라이브 · 내 에이전트가 읽어요");
     expect(text(el, `plugin-row-${DRIVE}-route`)).toBe("관리자 설정이 필요해요");
@@ -940,15 +971,28 @@ describe("앱 화면 v2: 도구 등급 R · A · B (E4)", () => {
     expect(rows).toHaveLength(3);
     const gradeOf = (row: Element) => row.querySelector('[data-testid="plugin-tool-grade"]')?.textContent;
     expect(gradeOf(rows[0])).toBe("R · 읽기");
-    expect(gradeOf(rows[1])).toBe("A · 승인 후 쓰기");
-    expect(gradeOf(rows[2])).toBe("B · 항상 묻고 쓰기");
+    expect(gradeOf(rows[1])).toBe("A · 나만 영향받는 쓰기");
+    expect(gradeOf(rows[2])).toBe("B · 남에게 보일 수 있는 쓰기");
     // 등급 칩이 위험도·승인 단계 칩을 대신한다.
     expect(q(el, "plugin-tools")?.textContent).not.toMatch(/위험도|승인:/);
     expect(el.querySelectorAll('[data-testid="plugin-grade-legend"]')).toHaveLength(1);
-    expect(text(el, "plugin-grade-legend")).toContain("B는 다른 사람에게 보이거나 알림이 가는 쓰기");
-    expect(text(el, "plugin-grade-legend")).toContain("A는 내게만 영향이 있는 쓰기");
+    expect(text(el, "plugin-grade-legend")).toContain("B로 선언된 쓰기는 다른 사람에게 보이거나 알림이 갈 수 있어요");
+    expect(text(el, "plugin-grade-legend")).toContain("A로 선언된 쓰기는 나만 영향받고 되돌릴 수 있어요");
     // C 등급은 매니페스트에 없어서 화면에도 없다.
     expect(q(el, "plugin-tools")?.textContent).not.toMatch(/\bC ·/);
+  });
+
+  it("팀 공유 드라이브: 경로가 없는 동안 설치 단추를 접고 관리자 설정이 먼저라고 말한다", async () => {
+    h.probe.mockResolvedValue([405, 405]);
+    const el = await mount();
+    await openDetail(el, DRIVE);
+    await until(() => q(el, "plugin-setup-note"));
+    expect(text(el, "plugin-setup-note")).toBe("관리자가 서버 설정을 끝내면 설치할 수 있어요.");
+    expect(writeControls(el)).toEqual([]);
+    // 같은 서버에서 다른 앱의 설치 단추는 그대로다: 접는 것은 이 앱뿐이다.
+    await openDetail(el, NOTION);
+    await until(() => writeControls(el).length > 0);
+    expect(q(el, "plugin-setup-note")).toBeNull();
   });
 
   it("읽기 도구만 있는 앱(팀 공유 드라이브)의 설명은 R만 말한다", async () => {

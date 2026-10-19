@@ -77,7 +77,8 @@ export function PluginAppChips({
     <>
       {preview === true && (
         <span data-testid={`${testIdPrefix}-preview`}>
-          <StatusChip tone="warn">{PLUGIN_PREVIEW_CHIP}</StatusChip>
+          {/* 위험이 아니라 사실 라벨이라 경고색이 아니다: warn은 「관리자 설정」과 쓰기 등급이 쓴다. */}
+          <StatusChip tone="accent">{PLUGIN_PREVIEW_CHIP}</StatusChip>
         </span>
       )}
       {route && (
@@ -109,7 +110,7 @@ export function PluginRunPlaces({ hosted }: { hosted: boolean | undefined }) {
   if (places.length === 0) return null;
   return (
     <section
-      className="flex flex-col gap-2"
+      className="flex flex-col gap-3"
       aria-labelledby={headingId}
       data-testid="plugin-run-places"
     >

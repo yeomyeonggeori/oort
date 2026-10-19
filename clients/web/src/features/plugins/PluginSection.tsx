@@ -50,6 +50,8 @@ import {
   pluginIconText,
   pluginLicenseLabel,
   pluginMarketplaceNeedsDetailFocus,
+  pluginNeedsAdminSetup,
+  PLUGIN_ADMIN_SETUP_NOTE,
   pluginRoleState,
   pluginScopeChangeFallbackKind,
   pluginScopeConsentCompletion,
@@ -221,7 +223,13 @@ export function PluginSection({ offline }: { offline: boolean }) {
           setConsentError({ error: completion.error, causes: completion.causes });
         }
       }
-      await client.invalidateQueries({ queryKey: ["plugins", workspaceId.toLowerCase()] });
+      // 목록(정책 포함)과 바꾼 앱의 상세만 다시 받는다. 접두 일치로 부르면 목록 줄마다 읽어 둔 모든
+      // 상세(미리보기 칩의 출처)까지 다시 나간다: 한 앱의 설치·권한은 다른 앱의 매니페스트를 바꾸지 않는다.
+      const workspaceKey = workspaceId.toLowerCase();
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ["plugins", workspaceKey], exact: true }),
+        client.invalidateQueries({ queryKey: ["plugins", workspaceKey, action.pluginId], exact: true }),
+      ]);
     },
     // A failed destructive action must return to the inline banner in the
     // panel. Keeping its confirmation dialog open would hide the error behind
@@ -627,6 +635,8 @@ function PluginDetailPanel({
 
   const scopes = declaredPluginScopes(detail.tools);
   const activeScopes = activePluginScopes(detail.tools, policyTools);
+  // 설치할 수 없는 앱의 설치 단추만 접는다. 이미 설치돼 켜진 앱의 허용·회수·해제는 그대로 선다.
+  const setupFirst = pluginNeedsAdminSetup(plugin.pluginId) && !(plugin.installed && plugin.enabled);
   const allowedToolNames = new Set(policyTools.map((tool) => tool.name));
   const hasPublisherInfo = Boolean(
     detail.publisherName || detail.license || detail.provenanceURL
@@ -658,7 +668,12 @@ function PluginDetailPanel({
               이 화면의 가장 나쁜 모양이어서, 확인이 끝나기 전에는 버튼도 안내도 그리지 않고
               (checking), 없거나 모르면 버튼 대신 차분한 안내 한 줄이 같은 자리에 선다(closed).
               이 아래의 정보 블록은 어느 쪽에서도 같은 말을 한다. */}
-          {installAvailability === "open" && (
+          {setupFirst && (
+            <p className="max-w-pane text-meta text-ink-muted" data-testid="plugin-setup-note">
+              {PLUGIN_ADMIN_SETUP_NOTE}
+            </p>
+          )}
+          {installAvailability === "open" && !setupFirst && (
             <PluginActions
               plugin={plugin}
               detail={detail}

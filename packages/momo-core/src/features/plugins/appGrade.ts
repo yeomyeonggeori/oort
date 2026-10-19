@@ -30,17 +30,21 @@ export function appToolGrade(
   return null;
 }
 
-/** 칩에 쓰는 짧은 말. 글자(R·A·B)가 먼저이고 뜻이 따라온다: 색에만 기대지 않는다. */
+/**
+ * 칩에 쓰는 짧은 말. 글자(R·A·B)가 먼저이고 뜻이 따라온다: 색에만 기대지 않는다. 뜻은 **영향 범위**로 말한다
+ * (E4 표). 「승인」은 A와 B가 모두 받는다(호출마다)고 선언돼 있어서 이름으로 둘을 가르지 못한다.
+ * 호출 인자에 따라 등급이 갈리는 도구는 높은 쪽(B)으로 선언하므로 B는 「보일 수 있는」이라고 말한다.
+ */
 export const APP_GRADE_LABEL: Readonly<Record<AppGrade, string>> = {
   R: "R · 읽기",
-  A: "A · 승인 후 쓰기",
-  B: "B · 항상 묻고 쓰기",
+  A: "A · 나만 영향받는 쓰기",
+  B: "B · 남에게 보일 수 있는 쓰기",
 };
 
 const GRADE_MEANING: Readonly<Record<AppGrade, string>> = {
   R: "R은 읽기만 해요.",
-  A: "A는 내게만 영향이 있는 쓰기예요.",
-  B: "B는 다른 사람에게 보이거나 알림이 가는 쓰기예요.",
+  A: "A로 선언된 쓰기는 나만 영향받고 되돌릴 수 있어요.",
+  B: "B로 선언된 쓰기는 다른 사람에게 보이거나 알림이 갈 수 있어요.",
 };
 
 /**
@@ -49,7 +53,8 @@ const GRADE_MEANING: Readonly<Record<AppGrade, string>> = {
  * 등급을 아는 도구가 하나도 없으면 `null`이다.
  *
  * 쓰기가 「호출마다 승인」인 것은 **매니페스트가 선언한 것**이다. 실제로 막는 힘은 실행하는 곳마다
- * 다르고(E1) 그록봇에서는 oort가 막지 못하므로, 이 줄은 「물어요」가 아니라 「선언돼 있어요」라고 말한다.
+ * 다르고(E1) 그록봇에서는 oort가 막지 못하므로, 이 줄은 「물어요」가 아니라 「등록돼 있어요」라고 말한다. A·B의 뜻도
+ * 매니페스트가 **선언한** 등급의 뜻이다.
  */
 export function appGradeLegend(
   tools: readonly Pick<PluginManifestTool, "risk" | "approvalPolicy">[]
@@ -57,6 +62,6 @@ export function appGradeLegend(
   const present = new Set(tools.map(appToolGrade).filter((grade): grade is AppGrade => grade !== null));
   if (present.size === 0) return null;
   const sentences = (["R", "A", "B"] as const).filter((grade) => present.has(grade)).map((grade) => GRADE_MEANING[grade]);
-  if (present.has("A") || present.has("B")) sentences.push("쓰기는 부를 때마다 승인받도록 선언돼 있어요.");
+  if (present.has("A") || present.has("B")) sentences.push("쓰기는 부를 때마다 승인을 받는 것으로 등록돼 있어요.");
   return sentences.join(" ");
 }
