@@ -1450,7 +1450,8 @@ ensure_cohosted_agent_env() {
   if [ "$count" -eq 1 ]; then
     current="$(env_value_once HERMES_LOGIN_RELAY_KEY)"
   fi
-  if [ "${#current}" -lt 32 ]; then
+  # The sidecar takes only 32-256 characters of [A-Za-z0-9._~+/=-]; anything else would leave it silently off.
+  if ! [[ "$current" =~ ^[A-Za-z0-9._~+/=-]{32,256}$ ]]; then
     rewrite_env_assignment HERMES_LOGIN_RELAY_KEY "$(gen)"
   fi
   rewrite_env_assignment HERMES_LOGIN_RELAY_URL "$SELF_HOST_HERMES_LOGIN_RELAY_URL"

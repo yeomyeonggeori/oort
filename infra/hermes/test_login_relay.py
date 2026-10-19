@@ -649,14 +649,181 @@ class Behaviour(unittest.TestCase):
         self.assertEqual(got, {"gmail": {"host": "gmailmcp.googleapis.com", "probe": True}, "notes": {"host": "mock.example", "probe": False}})
         self.assertEqual(lr._load_oauth_servers(os.path.join(d, "missing.yaml")), {})
 
-    def test_key_file_is_the_only_key_input_of_serve(self):
+    def test_serve_reads_the_key_from_the_file_and_checks_it(self):
+        import socket
+        import subprocess
+
         d = tempfile.mkdtemp()
         kf = os.path.join(d, "key")
         fd = os.open(kf, os.O_WRONLY | os.O_CREAT, 0o400)
         os.write(fd, KEY.encode())
         os.close(fd)
         self.assertEqual(stat.S_IMODE(os.stat(kf).st_mode), 0o400)
-        self.assertEqual(open(kf).read(), KEY)
+        sf = os.path.join(d, "servers.json")
+        with open(sf, "w") as f:
+            json.dump({}, f)
+        with socket.socket() as sk:
+            sk.bind(("127.0.0.1", 0))
+            port = sk.getsockname()[1]
+        env = {k: v for k, v in os.environ.items() if k != lr.KEY_ENV}
+        proc = subprocess.Popen(
+            [sys.executable, "-B", lr.__file__, "serve", "--key-file", kf, "--servers-file", sf, "--no-drop", "--host", "127.0.0.1", "--port", str(port), "--data-dir", d],
+            env=env, stderr=subprocess.PIPE,
+        )  # fmt: skip
+        self.addCleanup(proc.wait)
+        self.addCleanup(proc.kill)
+        self.assertNotIn(KEY, " ".join(proc.args))  # the key is never on a command line
+        deadline = time.time() + 10
+        status = {}
+        while time.time() < deadline:
+            for key, label in ((None, "nokey"), ("x" * 40, "wrong"), (KEY, "right")):
+                req = urllib.request.Request("http://127.0.0.1:%d/v1/status" % port)
+                if key:
+                    req.add_header("Authorization", "Bearer " + key)
+                try:
+                    with urllib.request.urlopen(req, timeout=5) as r:
+                        status[label] = r.status
+                except urllib.error.HTTPError as e:
+                    status[label] = e.code
+                except OSError:
+                    status = {}
+                    time.sleep(0.2)
+                    break
+            if len(status) == 3:
+                break
+        self.assertEqual(status, {"nokey": 401, "wrong": 401, "right": 200})
+
+    def test_launch_with_a_bad_uid_setting_or_an_unresolved_reference_key_is_relay_off(self):
+        os.environ[lr.KEY_ENV] = "${{shared.HERMES_LOGIN_RELAY_KEY}}-padding-padding"
+        self.addCleanup(os.environ.pop, lr.KEY_ENV, None)
+        self.assertEqual(lr.launch(), 0)  # not root here: relay off before anything is written
+
+
+class Hardening(unittest.TestCase):
+    """Findings of the independent security review of #4078."""
+
+    def test_a_newline_inside_a_decoded_redirect_or_state_is_never_a_second_stdin_line(self):
+        for query in ("redirect_uri=http%3A%2F%2F127.0.0.1%3A27890%2Fcb%0A&state=ABC", "redirect_uri=http%3A%2F%2F127.0.0.1%3A27890%2Fcb&state=ABC%0A"):
+            h = Harness(self)
+            h.scenario({"url": "https://mock.example/authorize?response_type=code&" + query})
+            st, body, _ = h.start("mcp", "notes")
+            self.assertEqual((st, body), (502, {"error": "url_rejected"}), query)
+        with self.assertRaises(lr.RelayError):
+            lr.canonicalize_paste("mcp", "notes", "http://127.0.0.1:27890/cb?code=c&state=ABC%0A", "ABC\n", "http://127.0.0.1:27890/cb")
+        for pattern in (lr.TARGET_RE, lr.OPERATOR_RE, lr.LOGIN_ID_RE, lr.KEY_RE, lr.URL_LINE_RE, lr.DEVICE_CODE_RE, lr.CODE_CLAUDE_RE, lr.CODE_MCP_RE, lr.STATE_RE, lr.ASCII_PRINTABLE_RE):
+            self.assertIsNone(pattern.match("a" * 40 + "\n"), pattern.pattern)
+
+    def test_a_paste_mode_login_that_exits_without_a_paste_is_not_done(self):
+        h = Harness(self)
+        h.scenario({"exit_early": True})
+        lid = h.start("provider", "anthropic")[1]["login_id"]
+        os.kill(h.pids()[0], 15)  # the child ends by itself, nobody pasted
+        self.assertEqual(h.wait_status(lid, "failed")["status"], "failed")
+
+    def test_the_deadline_is_extended_once_the_paste_is_written(self):
+        h = Harness(self, ttl_paste=2)
+        lid = h.start("provider", "anthropic")[1]["login_id"]
+        self.assertEqual(h.call("POST", "/v1/login/%s/complete" % lid, {"pasted": paste_claude(h, "c")}, op=OP)[0], 200)
+        sess = h.srv.relay.sessions[lid]
+        self.assertGreater(sess.deadline - time.monotonic(), 60)
+
+    def test_start_rate_limit_is_global_and_operator_names_cannot_dodge_it(self):
+        h = Harness(self, rate_per_min=100, global_starts_per_min=3)
+        for i in range(3):
+            lid = h.start("provider", "anthropic", op="op%d@example.com" % i)[1]["login_id"]
+            h.call("DELETE", "/v1/login/" + lid, op="op%d@example.com" % i)
+        self.assertEqual(h.start("provider", "anthropic", op="fresh@example.com")[1], {"error": "rate_limited"})
+
+    def test_the_operator_table_does_not_grow_without_bound(self):
+        h = Harness(self, rate_per_min=100, global_starts_per_min=10000)
+        rel = h.srv.relay
+        with rel.lock:
+            for i in range(lr.MAX_OPERATOR_KEYS + 50):
+                rel.starts["x%d@example.com" % i] = lr.collections.deque([time.monotonic() - 3600])
+        h.start("provider", "anthropic")  # prunes stale names first
+        self.assertLessEqual(len(rel.starts), 2)
+
+    def test_connections_are_capped_and_slow_requests_are_cut(self):
+        import socket
+
+        h = Harness(self, max_connections=2, request_deadline=1)
+        socks = []
+        for _ in range(2):  # two connections that send nothing hold both slots
+            c = socket.create_connection(("127.0.0.1", h.port))
+            socks.append(c)
+        time.sleep(0.2)
+        third = socket.create_connection(("127.0.0.1", h.port))
+        third.settimeout(3)
+        third.sendall(b"GET /healthz HTTP/1.1\r\nHost: x\r\n\r\n")
+        try:
+            data = third.recv(100)
+        except OSError:
+            data = b""
+        self.assertEqual(data, b"")  # shed: closed without an answer while the slots are held
+        # the deadline cuts the two silent connections, which frees the slots
+        def healthy():
+            try:
+                return h.call("GET", "/healthz", key=None)[0] == 200
+            except OSError:  # a shed connection is reset
+                return False
+
+        self.assertTrue(h.wait_until(healthy, 6))
+        for c in socks + [third]:
+            c.close()
+
+    def test_status_is_single_flight(self):
+        h = Harness(self)
+        stub = os.path.join(h.tmp.name, "slow_py.sh")
+        count = os.path.join(h.tmp.name, "count")
+        open(stub, "w").write('#!/bin/sh\necho x >> %s\nsleep 0.5\necho LOGGED_IN=0\n' % count)
+        os.chmod(stub, 0o755)
+        h.cfg.python_bin = stub
+        threads = [threading.Thread(target=h.call, args=("GET", "/v1/status")) for _ in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(open(count).read().count("x"), 2)  # two providers, ONE run for five callers
+
+    def test_a_status_check_that_hangs_is_killed_as_a_group(self):
+        h = Harness(self, check_timeout=1)
+        stub = os.path.join(h.tmp.name, "hang_py.sh")
+        pidf = os.path.join(h.tmp.name, "hangpids")
+        open(stub, "w").write('#!/bin/sh\nsleep 300 &\necho $! >> %s\necho $$ >> %s\nwait\n' % (pidf, pidf))
+        os.chmod(stub, 0o755)
+        h.cfg.python_bin = stub
+        h.call("GET", "/v1/status")
+        pids = [int(x) for x in open(pidf).read().split()]
+        self.assertTrue(h.wait_until(lambda: not any(h.alive(p) for p in pids)), "a hung check left a process behind")
+
+    def test_no_signal_after_the_leader_was_reaped(self):
+        h = Harness(self)
+        lid = h.start("provider", "anthropic")[1]["login_id"]
+        sess = h.srv.relay.sessions[lid]
+        h.call("DELETE", "/v1/login/" + lid, op=OP)
+        self.assertTrue(h.wait_until(lambda: sess.reaped))
+        sent = []
+        real = lr.os.killpg
+        lr.os.killpg = lambda *a: sent.append(a)
+        try:
+            h.srv.relay._sweep(sess)
+        finally:
+            lr.os.killpg = real
+        self.assertEqual(sent, [])  # the pid may be somebody else's now
+
+    @unittest.skipUnless(__import__("socket").has_ipv6, "no IPv6 here")
+    def test_double_colon_binds_dual_stack(self):
+        import socket
+
+        cfg = lr.Config(key=KEY, servers={})
+        try:
+            srv = lr.build_server(cfg, "::", 0)
+        except OSError:
+            self.skipTest("cannot bind ::")
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.relay.close)
+        self.assertEqual(srv.socket.family, socket.AF_INET6)
+        self.assertEqual(srv.socket.getsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY), 0)
 
 
 class Parser(unittest.TestCase):

@@ -40,6 +40,7 @@ import os
 import re
 import secrets
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -57,9 +58,11 @@ PYTHON_BIN = "/opt/hermes/.venv/bin/python"
 SETPRIV_BIN = "/usr/bin/setpriv"
 TEST_BIN = "/usr/bin/test"
 PROBE_DEFAULT = "/oort/mcp_login_probe.py"
+# NOTE every pattern below ends in \Z, not $: `$` also matches before a trailing newline, and a newline smuggled into a
+# decoded redirect_uri / state would become a SECOND stdin line (security review of #4078, finding 1).
 # A key is 32+ characters of this set. `$`, `{`, spaces are out on purpose: a Railway reference that did not
 # resolve stays the literal text `${{shared.X}}` (34 characters) and must never become the bearer secret.
-KEY_RE = re.compile(r"^[A-Za-z0-9._~+/=-]{32,256}$")
+KEY_RE = re.compile(r"^[A-Za-z0-9._~+/=-]{32,256}\Z")
 
 PROVIDERS = ("openai-codex", "anthropic")
 PROVIDER_MODE = {"openai-codex": "device", "anthropic": "paste"}
@@ -67,9 +70,9 @@ PROVIDER_HOSTS = {"openai-codex": ("auth.openai.com",), "anthropic": ("claude.ai
 GOOGLE_PROBE_SERVERS = ("gmail", "google_calendar", "google_drive")  # keep equal to mcp_login_probe.PROBE
 GOOGLE_AS_HOSTS = ("accounts.google.com",)
 LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
-TARGET_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
-OPERATOR_RE = re.compile(r"^[A-Za-z0-9._@+-]{1,128}$")
-LOGIN_ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
+TARGET_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}\Z")
+OPERATOR_RE = re.compile(r"^[A-Za-z0-9._@+-]{1,128}\Z")
+LOGIN_ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}\Z")
 
 TTL_DEVICE = 900  # Codex: the vendor's expires_in
 TTL_PASTE = 300  # same as Hermes' MCP callback wait
@@ -81,20 +84,26 @@ MAX_ATTEMPTS = 3
 MAX_SESSIONS = 8
 RATE_PER_MIN = 6
 STATUS_CACHE = 15
+CHECK_TIMEOUT = 20  # one status check child
+MAX_CONNECTIONS = 32
+REQUEST_DEADLINE = 90  # whole request, start wait (30 s) included; closes slow-loris sockets
+GLOBAL_STARTS_PER_MIN = 20
+MAX_OPERATOR_KEYS = 256
+EXCHANGE_GRACE = 120  # seconds the vendor exchange may take after a paste was written
 OUTPUT_CAP = 65536  # parse window; bytes past it are drained and dropped
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07|\x1b[()][A-Za-z0-9]")
 BOX_CHARS = frozenset("╭╮╰╯│─┌┐└┘┃━ ")
 ANCHOR_URL_RE = re.compile(r"Open this (?:URL|link) in your browser:")
 ANCHOR_CODE_RE = re.compile(r"Enter this code:")
-URL_LINE_RE = re.compile(r"^https?://[^\s]+$")
-DEVICE_CODE_RE = re.compile(r"^[A-Z0-9]{4}-[A-Z0-9]{4,8}$")
-CODE_CLAUDE_RE = re.compile(r"^[A-Za-z0-9._~-]{1,1024}$")
+URL_LINE_RE = re.compile(r"^https?://[^\s]+\Z")
+DEVICE_CODE_RE = re.compile(r"^[A-Z0-9]{4}-[A-Z0-9]{4,8}\Z")
+CODE_CLAUDE_RE = re.compile(r"^[A-Za-z0-9._~-]{1,1024}\Z")
 # Google authorization codes look like `4/0A...`; a percent-encoded `/` must survive, so the MCP shape allows it
 # (the ADR charset is `[A-Za-z0-9._~-]`; widened by ONE character, re-encoded when rebuilt, still one line).
-CODE_MCP_RE = re.compile(r"^[A-Za-z0-9._~/-]{1,1024}$")
-STATE_RE = re.compile(r"^[A-Za-z0-9._~-]{1,512}$")
-ASCII_PRINTABLE_RE = re.compile(r"^[\x20-\x7e]+$")
+CODE_MCP_RE = re.compile(r"^[A-Za-z0-9._~/-]{1,1024}\Z")
+STATE_RE = re.compile(r"^[A-Za-z0-9._~-]{1,512}\Z")
+ASCII_PRINTABLE_RE = re.compile(r"^[\x20-\x7e]+\Z")
 
 
 def log(msg):
@@ -137,6 +146,10 @@ class Config:
         self.rate_per_min = kw.pop("rate_per_min", RATE_PER_MIN)
         self.max_sessions = kw.pop("max_sessions", MAX_SESSIONS)
         self.status_cache = kw.pop("status_cache", STATUS_CACHE)
+        self.global_starts_per_min = kw.pop("global_starts_per_min", GLOBAL_STARTS_PER_MIN)
+        self.max_connections = kw.pop("max_connections", MAX_CONNECTIONS)
+        self.request_deadline = kw.pop("request_deadline", REQUEST_DEADLINE)
+        self.check_timeout = kw.pop("check_timeout", CHECK_TIMEOUT)
         self.allow_http_loopback = kw.pop("allow_http_loopback", False)  # test harness only (mock AS on 127.0.0.1)
         self.extra_mcp_hosts = tuple(kw.pop("extra_mcp_hosts", ()))
         self.provider_hosts = kw.pop("provider_hosts", PROVIDER_HOSTS)
@@ -322,6 +335,7 @@ class Session:
         self.submitted = False
         self.attempts = 0
         self.reader = None
+        self.reaped = False  # after the leader is reaped its pid (= the pgid) may be reused: never signal again
 
     @property
     def tag(self):
@@ -333,7 +347,9 @@ class Relay:
         self.cfg = cfg
         self.lock = threading.RLock()
         self.sessions = {}
-        self.starts = collections.defaultdict(collections.deque)
+        self.starts = {}
+        self.global_starts = collections.deque()
+        self._status_lock = threading.Lock()  # single-flight: parallel /v1/status calls share one run
         self._status_cache = (0.0, None)
         self._stop = threading.Event()
         t = threading.Thread(target=self._reaper, daemon=True)
@@ -398,10 +414,16 @@ class Relay:
         mode = PROVIDER_MODE[target] if kind == "provider" else "paste"
         with self.lock:
             now = time.monotonic()
-            dq = self.starts[operator]
+            # Prune: an operator name is caller-chosen, so neither the per-operator nor the global bound may be
+            # dodged by rotating names, and the table itself must not grow without bound.
+            for name in [n for n, q in self.starts.items() if not q or now - q[-1] > 60]:
+                del self.starts[name]
+            while self.global_starts and now - self.global_starts[0] > 60:
+                self.global_starts.popleft()
+            dq = self.starts.setdefault(operator, collections.deque())
             while dq and now - dq[0] > 60:
                 dq.popleft()
-            if len(dq) >= c.rate_per_min:
+            if len(dq) >= c.rate_per_min or len(self.global_starts) >= c.global_starts_per_min or len(self.starts) > MAX_OPERATOR_KEYS:
                 raise RelayError(429, "rate_limited")
             for s in self.sessions.values():
                 if s.status == "pending" and s.kind == kind and s.target == target:
@@ -409,6 +431,7 @@ class Relay:
             if sum(1 for s in self.sessions.values() if s.status == "pending") >= c.max_sessions:
                 raise RelayError(429, "rate_limited")
             dq.append(now)
+            self.global_starts.append(now)
             login_id = secrets.token_urlsafe(24)  # 192 bits
             s = Session(login_id, operator, kind, target, mode, c.ttl_device if mode == "device" else c.ttl_paste)
             try:
@@ -493,21 +516,42 @@ class Relay:
         s.ready.set()
 
     def _watch(self, s):
-        rc = s.proc.wait()
-        self._sweep(s)
+        # Sweep the group BEFORE reaping the leader: while the zombie leader holds the pid, the pgid cannot be
+        # reused, so killpg can never hit an unrelated process. waitid(WNOWAIT) is the Linux way to wait without
+        # reaping; anywhere else (the macOS dev box) the order is wait-then-sweep, a microseconds-wide window.
+        waited = False
+        if sys.platform.startswith("linux") and hasattr(os, "waitid") and hasattr(os, "WNOWAIT"):
+            try:
+                os.waitid(os.P_PID, s.proc.pid, os.WEXITED | os.WNOWAIT)
+                waited = True
+            except OSError:
+                pass
+        if waited:
+            self._sweep(s)
+            rc = s.proc.wait()
+        else:
+            rc = s.proc.wait()
+            self._sweep(s)
+        with self.lock:
+            s.reaped = True
         s.ready.set()
         if s.reader is not None:
             s.reader.join(2)
         with self.lock:
             if s.status == "pending":
-                if rc == 0:
+                if rc == 0 and (s.mode == "device" or s.submitted):
                     self._finish(s, "done", None)
+                elif rc == 0:
+                    self._finish(s, "failed", "exit_unsubmitted")  # a paste-mode login cannot succeed on its own
                 else:
                     self._finish(s, "failed", "exit_nonzero")
         log("exit login=%s rc=%s elapsed=%ds" % (s.tag, rc, int(time.monotonic() - s.created)))
 
     def _sweep(self, s):
-        """Kill the whole process group (grandchildren included). pgid == pid (start_new_session)."""
+        """Kill the whole process group (grandchildren included). pgid == pid (start_new_session).
+        Never after the leader was reaped (`reaped`): the pid could belong to someone else by then."""
+        if s.reaped:
+            return
         try:
             os.killpg(s.proc.pid, signal.SIGKILL)
         except ProcessLookupError:
@@ -537,7 +581,6 @@ class Relay:
                     if s.status == "pending" and now > s.deadline:
                         self._finish(s, "expired", "timeout")
                     elif s.status != "pending" and now - (s.finished_at or now) > self.cfg.keep_after_finish:
-                        self._sweep(s)
                         del self.sessions[lid]
 
     def close(self):
@@ -576,6 +619,8 @@ class Relay:
                     self._finish(s, "cancelled", "too_many_attempts")
                 raise
             s.submitted = True
+            # the vendor exchange comes after the paste: do not let the TTL cut it off half way
+            s.deadline = max(s.deadline, time.monotonic() + EXCHANGE_GRACE)
             try:
                 s.proc.stdin.write((line + "\n").encode("ascii"))
                 s.proc.stdin.flush()
@@ -602,11 +647,15 @@ class Relay:
 
     # ---- status of the targets (non-secret signals only) ----
     def status(self):
-        now = time.monotonic()
-        with self.lock:
-            at, cached = self._status_cache
-            if cached is not None and now - at < self.cfg.status_cache:
-                return cached
+        with self._status_lock:
+            now = time.monotonic()
+            with self.lock:
+                at, cached = self._status_cache
+                if cached is not None and now - at < self.cfg.status_cache:
+                    return cached
+            return self._compute_status()
+
+    def _compute_status(self):
         c = self.cfg
         targets = []
         snippet = (
@@ -627,12 +676,27 @@ class Relay:
 
     def _run_check(self, cmd, want_line=None, rc_only=False):
         try:
-            r = subprocess.run(
-                self._wrap(cmd), shell=False, stdin=subprocess.DEVNULL, capture_output=True, timeout=30,
+            proc = subprocess.Popen(
+                self._wrap(cmd), shell=False, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                 env=self._child_env(), cwd="/", close_fds=True, start_new_session=True,
             )  # fmt: skip
-        except (OSError, subprocess.TimeoutExpired):
+        except OSError:
             return False
+        try:
+            out, _ = proc.communicate(timeout=self.cfg.check_timeout)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)  # the whole group, not just the direct child
+            except (ProcessLookupError, PermissionError):
+                pass
+            proc.communicate()
+            return False
+
+        class _R:
+            returncode = proc.returncode
+            stdout = out
+
+        r = _R
         if rc_only:
             return r.returncode == 0
         if r.returncode != 0:
@@ -652,7 +716,25 @@ def make_handler(relay):
         protocol_version = "HTTP/1.1"
         server_version = "oort-login-relay"
         sys_version = ""
-        timeout = 20
+        timeout = 20  # per socket read; the whole request is bounded by `handle` below
+
+        def handle(self):
+            # A client dripping a byte every few seconds would hold a thread forever: cut the socket at the deadline.
+            conn = self.connection
+
+            def cut():
+                try:
+                    conn.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+
+            timer = threading.Timer(cfg.request_deadline, cut)
+            timer.daemon = True
+            timer.start()
+            try:
+                super().handle()
+            finally:
+                timer.cancel()
 
         def log_message(self, *a):  # request lines carry login ids: never logged
             pass
@@ -740,10 +822,42 @@ def make_handler(relay):
     return Handler
 
 
+class BoundedServer(ThreadingHTTPServer):
+    """One thread per connection, at most `max_connections` at a time (checked before any read, so an
+    unauthenticated flood cannot exhaust threads); the rest are closed at once."""
+
+    daemon_threads = True
+    request_queue_size = 32
+
+    def __init__(self, addr, handler, max_connections):
+        self._slots = threading.BoundedSemaphore(max_connections)
+        if ":" in addr[0]:
+            self.address_family = socket.AF_INET6
+        super().__init__(addr, handler)
+
+    def server_bind(self):
+        if self.address_family == socket.AF_INET6:  # `::` = dual stack (Railway private networking can be IPv6 only)
+            self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        super().server_bind()
+
+    def process_request(self, request, client_address):
+        if not self._slots.acquire(blocking=False):
+            try:
+                request.close()
+            finally:
+                return  # noqa: B012 — shed load, never block the accept loop
+        super().process_request(request, client_address)
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
+
+
 def build_server(cfg, host="127.0.0.1", port=0):
     relay = Relay(cfg)
-    ThreadingHTTPServer.daemon_threads = True
-    srv = ThreadingHTTPServer((host, port), make_handler(relay))
+    srv = BoundedServer((host, port), make_handler(relay), cfg.max_connections)
     srv.relay = relay
     return srv
 
@@ -775,7 +889,7 @@ def _load_oauth_servers(config_path):
 
 
 def _write_private(path, data, uid):
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o400)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o400)
     try:
         os.write(fd, data)
     finally:
@@ -795,9 +909,13 @@ def launch():
     if not KEY_RE.match(key):
         log("relay off: key rejected (length/charset)")
         return 0
-    uid = int(os.environ.get("OORT_LOGIN_RELAY_UID", str(DEFAULT_RELAY_UID)))
-    hermes_uid = int(os.environ.get("OORT_LOGIN_RELAY_CHILD_UID", "10000"))
-    if uid == hermes_uid or uid == 0:
+    try:
+        uid = int(os.environ.get("OORT_LOGIN_RELAY_UID", str(DEFAULT_RELAY_UID)))
+        hermes_uid = int(os.environ.get("OORT_LOGIN_RELAY_CHILD_UID", "10000"))
+    except ValueError:
+        log("relay off: uid settings are not numbers")
+        return 0
+    if uid == hermes_uid or uid == 0 or uid < 0:
         log("relay off: relay uid must differ from root and the hermes uid")
         return 0
     os.umask(0o077)
@@ -819,7 +937,7 @@ def launch():
         "--bounding-set=-all,+setuid,+setgid,+kill", "--no-new-privs",
         PYTHON_BIN, "-I", "-B", os.path.abspath(__file__), "serve",
         "--key-file", key_file, "--servers-file", servers_file, "--probe", probe,
-        "--child-uid", str(hermes_uid), "--host", os.environ.get("OORT_LOGIN_RELAY_HOST", "0.0.0.0"),
+        "--child-uid", str(hermes_uid), "--host", os.environ.get("OORT_LOGIN_RELAY_HOST") or os.environ.get("API_SERVER_HOST") or "0.0.0.0",
         "--port", os.environ.get("OORT_LOGIN_RELAY_PORT", str(DEFAULT_PORT)),
     ]  # fmt: skip
     extra = os.environ.get("OORT_LOGIN_RELAY_EXTRA_MCP_HOSTS", "")

@@ -65,7 +65,9 @@ for d in os.listdir("/proc"):
         print(d); break')"
 [ -n "$RELAY_PID" ] || fail "no relay process"
 if docker exec -u hermes "$HC" cat "/proc/$RELAY_PID/environ" >/dev/null 2>&1; then fail "the hermes uid can read the relay's /proc/<pid>/environ"; fi
-say "ok: the hermes uid can read neither the key file nor the relay's environ"
+if docker exec -u hermes "$HC" kill -0 "$RELAY_PID" >/dev/null 2>&1; then fail "the hermes uid can signal the relay process"; fi
+if docker exec -u hermes "$HC" sh -c "cat /proc/$RELAY_PID/mem >/dev/null 2>&1 || cat /proc/$RELAY_PID/maps >/dev/null 2>&1"; then fail "the hermes uid can read the relay's memory map"; fi
+say "ok: the hermes uid can read neither the key file, nor the relay's environ/maps, nor signal it"
 
 # --privileged only for this measuring process: root without CAP_SYS_PTRACE cannot read another uid's /proc/<pid>/environ
 docker exec -i --privileged -u root -e RELAY_KEY="$RELAY_KEY" "$HC" /opt/hermes/.venv/bin/python /tmp/flow.py A | tee "$TMP/phase-a.out" || fail "phase A had failures"
