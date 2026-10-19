@@ -1,0 +1,354 @@
+{
+  "schemaVersion": "momo.plugin.v1",
+  "plugin": {
+    "id": "com.momo.plugins.google-drive",
+    "name": "Google 내 드라이브",
+    "version": "1.0.0",
+    "description": "Official Google Drive remote MCP (Developer Preview), the signed-in person's own Drive",
+    "publisher": {
+      "id": "google",
+      "name": "Google",
+      "verified": true
+    },
+    "license": {
+      "spdx": "LicenseRef-Google-Hosted-Service",
+      "kind": "hosted_only"
+    },
+    "provenance": {
+      "sourceURL": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+      "releaseRef": "hosted",
+      "verified": true
+    }
+  },
+  "mcp": {
+    "protocolVersion": "2025-06-18",
+    "transport": "streamable_http",
+    "url": "https://drivemcp.googleapis.com/mcp/v1",
+    "server": {
+      "name": "google/drive-mcp",
+      "version": "preview"
+    },
+    "tools": [
+      {
+        "name": "google-drive.search_files",
+        "description": "내 드라이브에서 파일을 검색합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "excludeContentSnippets": {
+              "type": "boolean",
+              "description": "If true, the content snippet will be excluded from the response."
+            },
+            "pageSize": {
+              "type": "integer",
+              "description": "The maximum number of files to return in each page."
+            },
+            "pageToken": {
+              "type": "string",
+              "description": "The page token to use for pagination."
+            },
+            "query": {
+              "type": "string",
+              "description": "The search query."
+            },
+            "snippetVerbosity": {
+              "type": "string",
+              "description": "Optional. Set to specify how verbose the snippets should be. Defaults to DETAILED if not set.",
+              "enum": [
+                "UNSPECIFIED",
+                "BRIEF",
+                "MEDIUM",
+                "DETAILED",
+                "MAX_ALLOWED"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:601474b26b4a5708f0e85b5360db67c99297a4cc9ae27368bd7caa44c5f19f66",
+        "scopes": [
+          "google-drive:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "google-drive.list_recent_files",
+        "description": "최근 파일 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "excludeContentSnippets": {
+              "type": "boolean",
+              "description": "If true, the content snippet will be excluded from the response."
+            },
+            "orderBy": {
+              "type": "string",
+              "description": "The sort order for the files."
+            },
+            "pageSize": {
+              "type": "integer",
+              "description": "The maximum number of files to return."
+            },
+            "pageToken": {
+              "type": "string",
+              "description": "The page token to use for pagination."
+            },
+            "snippetVerbosity": {
+              "type": "string",
+              "description": "Optional. Set to specify how verbose the snippets should be. Defaults to DETAILED if not set.",
+              "enum": [
+                "UNSPECIFIED",
+                "BRIEF",
+                "MEDIUM",
+                "DETAILED",
+                "MAX_ALLOWED"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:94b9a1d889646ff89f35479713b9c1f8bf2377df9f5501d5a630ecfc8e47f40b",
+        "scopes": [
+          "google-drive:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "google-drive.get_file_metadata",
+        "description": "파일의 메타데이터를 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "excludeContentSnippets": {
+              "type": "boolean",
+              "description": "If true, the content snippet will be excluded from the response."
+            },
+            "fileId": {
+              "type": "string",
+              "description": "Required. The ID of the file to retrieve."
+            },
+            "snippetVerbosity": {
+              "type": "string",
+              "description": "Optional. Set to specify how verbose the snippets should be. Defaults to DETAILED if not set.",
+              "enum": [
+                "UNSPECIFIED",
+                "BRIEF",
+                "MEDIUM",
+                "DETAILED",
+                "MAX_ALLOWED"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "fileId"
+          ]
+        },
+        "schemaDigest": "sha256:287fa1f9e033d3f0957c99794de934c761a9f6345a5aef282725c9234e44f5f2",
+        "scopes": [
+          "google-drive:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "google-drive.get_file_permissions",
+        "description": "파일의 공유 설정을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "fileId": {
+              "type": "string",
+              "description": "Required. The ID of the file to get permissions for."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "fileId"
+          ]
+        },
+        "schemaDigest": "sha256:4f25d15703d00177736d7f5c784244c93644fd7c6048fd3f38d484cca13f745e",
+        "scopes": [
+          "google-drive:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "google-drive.read_file_content",
+        "description": "파일 내용을 텍스트로 읽습니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "fileId": {
+              "type": "string",
+              "description": "Required. The ID of the file to retrieve."
+            },
+            "includeComments": {
+              "type": "boolean",
+              "description": "Whether to include comments in the response. Comments will be inlined in the text content of the file with a mapping to the comment threads. Note: Comments are only supported for Google Docs, Slides, and Sheets."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "fileId"
+          ]
+        },
+        "schemaDigest": "sha256:eb629283350964d6f316a37eec0812f39ef25fbdcd5cc52360306fb20fb17469",
+        "scopes": [
+          "google-drive:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "google-drive.download_file_content",
+        "description": "파일 내용을 내려받습니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "exportMimeType": {
+              "type": "string",
+              "description": "Optional. For Google native files, the MIME type to export the file to, ignored otherwise. Defaults to text if not specified."
+            },
+            "fileId": {
+              "type": "string",
+              "description": "Required. The ID of the file to retrieve."
+            },
+            "revisionId": {
+              "type": "string",
+              "description": "Optional. The revision id for the version of the file to download. If not specified, the latest revision will be downloaded."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "fileId"
+          ]
+        },
+        "schemaDigest": "sha256:9b0193f2f2c53d7df33358fc507277a9cdec1f3a40873c61d5ba11167acc7696",
+        "scopes": [
+          "google-drive:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "google-drive.create_file",
+        "description": "내 드라이브에 파일을 만듭니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "base64Content": {
+              "type": "string",
+              "description": "Optional. The base64 encoded content to upload. It's an error to set this and `textContent`."
+            },
+            "content": {
+              "type": "string",
+              "description": "Deprecated: Use `base64Content` or `textContent` instead. The content of the file encoded as base64. The content field should always be base64 encoded regardless of the mime type of the file."
+            },
+            "contentMimeType": {
+              "type": "string",
+              "description": "The mime type of the content being uploaded. Required when any type of content is provided."
+            },
+            "disableConversionToGoogleType": {
+              "type": "boolean",
+              "description": "Set to true to retain the passed in content mime type and not convert to a Google type. For example, without this a `text/plain` content mime type will be converted to to `application/vnd.google-apps.document`. Has no effect for types that do not have a Google equivalent."
+            },
+            "mimeType": {
+              "type": "string",
+              "description": "Deprecated: DO NOT USE!! Set `contentMimeType` instead."
+            },
+            "parentId": {
+              "type": "string",
+              "description": "The parent id of the file."
+            },
+            "textContent": {
+              "type": "string",
+              "description": "Optional. The (UTF-8) text content to upload. It's an error to set this and `base64Content`."
+            },
+            "title": {
+              "type": "string",
+              "description": "Required. The title of the file."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "title"
+          ]
+        },
+        "schemaDigest": "sha256:4ad2af5128283de1d80851010cc82c358501cdb2f72359c44beef6051f826701",
+        "scopes": [
+          "google-drive:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "require_approval"
+      },
+      {
+        "name": "google-drive.copy_file",
+        "description": "파일을 복사합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "fileId": {
+              "type": "string",
+              "description": "Required. The ID of the file to copy."
+            },
+            "parentId": {
+              "type": "string",
+              "description": "The parent id of the newly created file. If empty, the file will be created with the same parent as the original file."
+            },
+            "title": {
+              "type": "string",
+              "description": "The title of the newly created file. If empty, the title will be 'Copy of {original file title}'."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "fileId"
+          ]
+        },
+        "schemaDigest": "sha256:1d13a3b45eddb6d150eb2dd6c05c72b4e033e82e5020f79fecc0b97a5786741c",
+        "scopes": [
+          "google-drive:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "require_approval"
+      }
+    ]
+  },
+  "skill": {
+    "reference": null,
+    "optional": true
+  },
+  "momo": {
+    "approvalTier": {
+      "google-drive.search_files": "read_only",
+      "google-drive.list_recent_files": "read_only",
+      "google-drive.get_file_metadata": "read_only",
+      "google-drive.get_file_permissions": "read_only",
+      "google-drive.read_file_content": "read_only",
+      "google-drive.download_file_content": "read_only",
+      "google-drive.create_file": "network_write",
+      "google-drive.copy_file": "network_write"
+    },
+    "risk": "medium",
+    "egressDomains": [
+      "drivemcp.googleapis.com"
+    ],
+    "recommendedFor": [
+      "knowledge-management",
+      "productivity"
+    ],
+    "serverPolicy": {
+      "installAllowed": true,
+      "enabledByDefault": false,
+      "allowedRoles": [
+        "owner",
+        "admin"
+      ]
+    },
+    "preview": true
+  }
+}

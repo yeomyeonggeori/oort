@@ -471,6 +471,10 @@ const OFFICIAL_APP_SUBTITLE: Readonly<Record<string, string>> = {
   "com.momo.plugins.notion": "문서와 페이지",
   "com.momo.plugins.linear": "이슈와 작업 추적",
   "com.momo.plugins.drive": "공유 드라이브의 파일",
+  // migration 142 (#3944): the three Google apps (the full app screen is U-S1, #3949).
+  "com.momo.plugins.gmail": "메일 읽기와 초안",
+  "com.momo.plugins.google-calendar": "일정과 초대",
+  "com.momo.plugins.google-drive": "내 드라이브의 파일",
 };
 
 export function pluginSubtitle(plugin: { pluginId: string; description: string }): string {

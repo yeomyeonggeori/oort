@@ -189,7 +189,7 @@ function writeControls(el: HTMLElement): string[] {
 }
 
 describe("읽기 전용: 설치·권한 경로가 없는 서버 (오늘의 Rust 서버)", () => {
-  it("공식 네 앱을 서버가 준 순서로 보여 주고, 영어 매니페스트 문구 대신 한국어 한 줄 소개를 쓴다", async () => {
+  it("공식 일곱 앱을 서버가 준 순서로 보여 주고, 영어 매니페스트 문구 대신 한국어 한 줄 소개를 쓴다", async () => {
     const el = await mount();
     await until(() => q(el, "plugin-list"));
     const rows = [...el.querySelectorAll('[data-testid^="plugin-catalog-"]')];
@@ -199,13 +199,17 @@ describe("읽기 전용: 설치·권한 경로가 없는 서버 (오늘의 Rust 
     expect(rows.map(nameOf)).toEqual([
       "Google Drive",
       "GitHub",
+      "Gmail",
+      "Google Calendar",
+      "Google 내 드라이브",
       "Linear",
       "Notion",
     ]);
-    // 공식 표시는 네 앱 모두에 있고, 타일 글자는 서로 다르다(G가 둘이면 목록에서 구별되지 않는다).
+    // 공식 표시는 일곱 앱 모두에 있다. 타일 글자는 이름에서 나오고, GitHub과 Gmail이 둘 다 「G」다:
+    // 이름이 줄에 같이 있어 구별은 되지만 타일만으로는 안 된다 - 앱 아이콘은 U-S1(#3949)의 몫이다.
     expect(rows.every((row) => (row.textContent ?? "").includes("공식"))).toBe(true);
     const tiles = rows.map((row) => row.querySelector('span[aria-hidden="true"]')?.textContent);
-    expect(tiles).toEqual(["GD", "G", "L", "N"]);
+    expect(tiles).toEqual(["GD", "G", "G", "GC", "G내", "L", "N"]);
     const list = text(el, "plugin-list");
     expect(list).toContain("공유 드라이브의 파일");
     expect(list).toContain("코드 저장소와 이슈");
@@ -217,8 +221,8 @@ describe("읽기 전용: 설치·권한 경로가 없는 서버 (오늘의 Rust 
     const el = await mount();
     await until(() => q(el, "plugin-list"));
     const row = (id: string) => (q(el, `plugin-catalog-${id}`)?.textContent ?? "").replace(/\s+/g, " ");
-    // 서버의 정책 투영(toolPolicy)에 GitHub 도구 둘이 실려 있다.
-    expect(row(GITHUB)).toContain("허용한 도구 2개");
+    // 서버의 정책 투영(toolPolicy)에 GitHub 읽기 도구 26개가 실려 있다(migration 142).
+    expect(row(GITHUB)).toContain("허용한 도구 26개");
     expect(row(GITHUB)).toContain("설치됨 · 내가 허용함");
     expect(row(LINEAR)).toContain("설치했지만 비활성");
     expect(row(NOTION)).toContain("미설치");
@@ -234,16 +238,16 @@ describe("읽기 전용: 설치·권한 경로가 없는 서버 (오늘의 Rust 
 
     // 설치 상태와 내 권한: 정책이 싣는 것만 말한다.
     expect(text(el, "plugin-status-workspace")).toContain("설치돼 있어요");
-    expect(text(el, "plugin-status-mine")).toContain("github 읽기 권한 (허용한 도구 2개)");
+    expect(text(el, "plugin-status-mine")).toContain("github 읽기 권한 (허용한 도구 26개)");
 
     // 할 수 있는 일: 매니페스트의 한국어 설명이 제목이고, 도구 이름은 식별자로 아래에 선다.
     const tools = [...(q(el, "plugin-tools")?.querySelectorAll("li") ?? [])];
-    expect(tools).toHaveLength(2);
-    expect(tools[0].textContent).toContain("권한을 위임한 사용자가 접근할 수 있는 저장소 목록을 조회합니다.");
-    expect(tools[0].textContent).toContain("github.list_repositories");
-    expect(text(el, "plugin-tools")).toContain("이 앱의 도구는 2개이고, 모두 읽기 도구예요.");
-    // 내가 허용한 도구에만 「내가 허용함」이 붙는다.
-    expect((text(el, "plugin-tools").match(/내가 허용함/g) ?? []).length).toBe(2);
+    expect(tools).toHaveLength(36);
+    expect(tools[0].textContent).toContain("커밋 하나의 내용과 변경 파일을 조회합니다.");
+    expect(tools[0].textContent).toContain("github.get_commit");
+    expect(text(el, "plugin-tools")).toContain("이 앱의 도구는 36개예요: 읽기 26개, 쓰기 10개.");
+    // 내가 허용한 도구(읽기 26개)에만 「내가 허용함」이 붙는다. 쓰기 열 개는 아직 허용하지 않았다.
+    expect((text(el, "plugin-tools").match(/내가 허용함/g) ?? []).length).toBe(26);
     expect(text(el, "plugin-tools")).not.toContain("내게 허용됨");
     // 읽기 도구와 읽기 전용 승인은 위 요약이 이미 말한다: 도구마다 같은 칩 둘을 달지 않는다.
     expect(text(el, "plugin-tools")).not.toMatch(/위험도: 읽기|승인: 읽기 전용/);
@@ -308,12 +312,12 @@ describe("읽기 전용: 설치·권한 경로가 없는 서버 (오늘의 Rust 
     expect(text(unknown, "plugin-install-closed")).toBe(notice);
   });
 
-  it("공식 네 앱은 모두 공식이라 「공식」 칩은 신호색이 아니라 중립 톤이다 (M5)", async () => {
+  it("공식 일곱 앱은 모두 공식이라 「공식」 칩은 신호색이 아니라 중립 톤이다 (M5)", async () => {
     const el = await mount();
     await openDetail(el, GITHUB);
     const chips = [...el.querySelectorAll("span")].filter((span) => span.textContent === "공식");
-    // 목록 네 줄 + 상세 머리 하나.
-    expect(chips.length).toBe(5);
+    // 목록 일곱 줄 + 상세 머리 하나.
+    expect(chips.length).toBe(8);
     for (const chip of chips) expect(chip.className, chip.className).not.toMatch(/accent|signal/);
   });
 
@@ -329,10 +333,14 @@ describe("읽기 전용: 설치·권한 경로가 없는 서버 (오늘의 Rust 
     };
     const manifest = {
       ...notionManifest,
-      mcp: { ...notionManifest.mcp, tools: [...notionManifest.mcp.tools, writeTool] },
+      // 칩 규칙만 재므로 도구 둘짜리 합성 매니페스트다(읽기 하나 + 쓰기 하나).
+      mcp: { ...notionManifest.mcp, tools: [notionManifest.mcp.tools[0], writeTool] },
       momo: {
         ...notionManifest.momo,
-        approvalTier: { ...notionManifest.momo.approvalTier, "notion.update_page": "workspace_write" },
+        approvalTier: {
+          [notionManifest.mcp.tools[0].name]: "read_only",
+          "notion.update_page": "workspace_write",
+        },
       },
     };
     h.details.set(NOTION, detailWire(manifest));
@@ -340,7 +348,7 @@ describe("읽기 전용: 설치·권한 경로가 없는 서버 (오늘의 Rust 
     await openDetail(el, NOTION);
     const rows = [...(q(el, "plugin-tools")?.querySelectorAll("li") ?? [])];
     expect(rows).toHaveLength(2);
-    expect(rows[0].textContent).toContain("notion.search");
+    expect(rows[0].textContent).toContain("notion.notion-search");
     expect(rows[0].textContent).not.toMatch(/위험도|승인/);
     expect(rows[1].textContent).toContain("위험도: 쓰기");
     expect(rows[1].textContent).toContain("승인: 워크스페이스 쓰기");
@@ -366,12 +374,12 @@ describe("읽기 전용: 설치·권한 경로가 없는 서버 (오늘의 Rust 
     expect(text(el, "plugin-tools")).toContain("이 앱의 도구는 3개이고, 모두 읽기 도구예요.");
   });
 
-  it("공식 네 앱은 한눈에 읽히므로 검색·보기 컨트롤이 서지 않는다", async () => {
+  it("공식 앱이 여섯을 넘으면(일곱) 검색·보기 컨트롤이 선다", async () => {
     const el = await mount();
     await until(() => q(el, "plugin-list"));
-    expect(el.querySelectorAll('[data-testid^="plugin-catalog-"]')).toHaveLength(4);
-    expect(el.querySelector("#plugin-search")).toBeNull();
-    expect(el.querySelector("#plugin-filter")).toBeNull();
+    expect(el.querySelectorAll('[data-testid^="plugin-catalog-"]')).toHaveLength(7);
+    expect(el.querySelector("#plugin-search")).not.toBeNull();
+    expect(el.querySelector("#plugin-filter")).not.toBeNull();
   });
 
   it("검색이 다 걸러 낸 빈 상태는 「아직」 없이 맞는 앱이 없다고 말하고 필터 지우기가 목록을 되돌린다", async () => {
@@ -400,11 +408,11 @@ describe("읽기 전용: 설치·권한 경로가 없는 서버 (오늘의 Rust 
       [...el.querySelectorAll("button")].find((button) => button.textContent === "필터 지우기")?.click();
     });
     await until(() => q(el, "plugin-list"));
-    expect(el.querySelectorAll('[data-testid^="plugin-catalog-"]')).toHaveLength(7);
+    expect(el.querySelectorAll('[data-testid^="plugin-catalog-"]')).toHaveLength(10);
   });
 
   it("목록이 한눈에 읽히는 길이를 넘으면 컨트롤이 돌아온다", async () => {
-    // 길이만 재는 합성 항목이다: 공식 네 앱 뒤에 가짜 셋을 더해 일곱으로 만든다.
+    // 길이만 재는 합성 항목이다: 공식 일곱 앱 뒤에 가짜 셋을 더해 열로 만든다.
     const real = (catalogWire.plugins as Array<Record<string, unknown>>);
     const extra = ["alpha", "beta", "gamma"].map((name) => ({
       ...real[0],
@@ -415,7 +423,7 @@ describe("읽기 전용: 설치·권한 경로가 없는 서버 (오늘의 Rust 
     h.catalog = { ...catalogWire, plugins: [...real, ...extra] };
     const el = await mount();
     await until(() => q(el, "plugin-list"));
-    expect(el.querySelectorAll('[data-testid^="plugin-catalog-"]')).toHaveLength(7);
+    expect(el.querySelectorAll('[data-testid^="plugin-catalog-"]')).toHaveLength(10);
     expect(el.querySelector("#plugin-search")).not.toBeNull();
     expect(el.querySelector("#plugin-filter")).not.toBeNull();
   });
@@ -439,8 +447,9 @@ describe("열림: 설치·권한 경로가 서 있는 서버 (405, 405)", () => 
     const el = await mount();
     await openDetail(el, GITHUB);
     await until(() => writeControls(el).length > 0);
-    expect(writeControls(el).sort()).toEqual(["내 권한 회수", "설치 해제"].sort());
-    expect(text(el, "plugin-status-mine")).toContain("github 읽기 권한 (허용한 도구 2개)");
+    // github:write를 아직 허용하지 않았으니 「권한 추가」도 선다(migration 142가 쓰기 권한을 더했다).
+    expect(writeControls(el).sort()).toEqual(["권한 추가", "내 권한 회수", "설치 해제"].sort());
+    expect(text(el, "plugin-status-mine")).toContain("github 읽기 권한 (허용한 도구 26개)");
   });
 
   it("관리자가 아닌 멤버는 설치 대신 누구에게 부탁할지 안내를 받는다", async () => {
@@ -485,7 +494,7 @@ describe("모를 때는 닫는다", () => {
     await openDetail(el, GITHUB);
     await until(() => q(el, "plugin-install-closed"));
     expect(writeControls(el)).toEqual([]);
-    expect(text(el, "plugin-tools")).toContain("github.list_repositories");
+    expect(text(el, "plugin-tools")).toContain("github.get_commit");
   });
 
   it("프로브는 카탈로그가 준 실제 앱 하나를 경로에 싣고 워크스페이스 단위로 한 번만 보낸다", async () => {
@@ -568,7 +577,7 @@ function installNotion(allowed: string[]) {
   const item = catalog.plugins.find((plugin) => plugin.pluginId === NOTION);
   if (item) Object.assign(item, { installed: true, enabled: true });
   const tools = [
-    { name: "notion.search", risk: "read", approvalTier: "read_only" },
+    { name: "notion.notion-search", risk: "read", approvalTier: "read_only" },
     { name: "notion.update_page", risk: "write", approvalTier: "workspace_write" },
   ].filter((tool) => allowed.includes(tool.name));
   catalog.toolPolicy.plugins = catalog.toolPolicy.plugins.filter((entry) => entry.pluginId !== NOTION);
@@ -706,7 +715,7 @@ describe("허용 동의: 동의 없이는 grant POST가 나가지 않는다 (U-2
     h.grant.mockImplementation(async (_ws: string, _plugin: string, scope: string) => {
       if (scope === "notion:write") throw new ApiError(403, "forbidden");
       // 서버는 읽기 한 권한만 받아들였다: 다음 카탈로그 읽기가 그 사실을 싣는다.
-      installNotion(["notion.search"]);
+      installNotion(["notion.notion-search"]);
       return { pluginId: NOTION, scope, status: "granted", enabled: true, capabilities: [] };
     });
     await clickDoc("plugin-scope-notion:read");
