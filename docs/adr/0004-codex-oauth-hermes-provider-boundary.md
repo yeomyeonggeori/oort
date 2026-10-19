@@ -23,7 +23,7 @@ message ordering, and realtime delivery.
 
 | Item | Owner | Storage | oort visibility |
 |---|---|---|---|
-| Codex OAuth authorization code | Hermes/Kim Intern provider | Provider-only transient exchange | Never sent to oort |
+| Codex OAuth authorization code | Hermes/Kim Intern provider | Provider-only transient exchange | Not stored or logged by oort; one-time relay only in the login relay (증보 7) |
 | Codex OAuth access token | Hermes/Kim Intern provider | Provider secret store or memory, according to provider policy | Never sent to oort |
 | Codex OAuth refresh token | Hermes/Kim Intern provider | Provider secret store, encrypted by provider | Never sent to oort |
 | GPT/OpenAI API key | Hermes/Kim Intern provider | Provider secret store, encrypted file, local shell, or memory according to provider policy | Never sent to oort |
@@ -346,3 +346,16 @@ ADR-0147 OAuth 링크의 `oauth.tokenEndpoint`는 URL 게이트 없이 저장되
 - (−) 셀프호스트에서 사설 대역 `https` LLM을 쓰던 설치는 플래그와 호스트 등록이 필요해진다(배포 노트에 싣는다).
 - (−) 프록시 전용 egress 배포는 provider 호출이 끊긴다(D3).
 - 실제 외부 DNS·실제 provider 호출은 runtime-unverified다(PR #2875·#2888 기준).
+
+## 증보 7 (2026-10-19) — 로그인 중계: 일회용 code·기기 코드의 1회 통과 (ADR-0203 증보 「Hermes 로그인 중계」)
+
+- Status: **Accepted** (2026-10-19, owner 결정 인용). 인용(이슈 #4073, 성재 2026-10-19 — 코디네이터 전달): 일회용 인가 code가 oort를 지나가는 것 **허용**, Claude 구독 로그인 **중계함**(Hermes CLI 경유), 사이드카는 **설치 스크립트로 켬**.
+- 기안: Sonnet 5.5 worker (#4073)
+- **개정하는 곳**: 본문 Boundary 표의 「Codex OAuth authorization code — Never sent to oort」 행, Rules 2(요청 본문 금지), Audit의 payload 금지 항목. 증보 6(#4071)의 「토큰(access·refresh·코드)을 받지도·중개하지도 않는다」의 **「코드」**도 같은 취지로 아래와 같이 읽는다.
+- **새 규칙**:
+  1. **일회용 인가 code(MCP 앱·Claude 붙여넣기)와 기기 코드(Codex)는 로그인 중계에서만, 운영자 요청 본문 → Hermes 로그인 사이드카로 1회 중계**할 수 있다. oort는 이를 **저장·로그·감사·메트릭·에러 리포트·응답 에러·푸시·Centrifugo에 쓰지 않는다**(마스킹 타입으로 담고, 이 라우트의 본문 로깅을 끈다). 기기 코드는 시작 요청의 응답으로만 나가고 `Cache-Control: no-store`다.
+  2. **토큰(access·refresh)은 여전히 Hermes 소유**다. oort는 받지도 저장하지도 중개하지도 기록하지도 않는다. code는 Hermes 프로세스 안의 PKCE `code_verifier` 없이는 교환할 수 없으므로 oort가 code를 보아도 토큰을 얻을 수 없다.
+  3. 이 중계는 **인스턴스 운영자 전용**이고 사이드카 키(`HERMES_LOGIN_RELAY_KEY`, `HERMES_API_KEY`와 다른 값)가 있을 때만 켜진다. 키가 없으면 꺼진 상태이고 `409 login_relay_off`다.
+  4. `scripts/verify_external_agent_provider.sh`의 fail-fast(oort smoke에 OAuth·키 env를 넘기지 않는다)는 **그대로**다. 로그인 중계 시험은 모의 인가 서버와 표식 값으로 하고 이 검증과 별개 하네스에서 돈다.
+  5. 검증: 표식 토큰·표식 code가 oort `api` 로그·DB 덤프·HTTP 응답·감사 행·사이드카 로그에 0건이어야 하고 `/opt/data`에는 있어야 한다(ADR-0203 증보 red proof 1~2).
+- 본문 표의 해당 행은 위 규칙 1·2로 대체해 읽는다(이 증보가 본문보다 늦다).
