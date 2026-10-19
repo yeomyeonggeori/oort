@@ -113,6 +113,7 @@ import {usePersonalAgentCall} from '../features/conversation/usePersonalAgentCal
 import {useTimeline} from '../features/conversation/useTimeline';
 import {useMarkRead} from '../features/inbox/useInbox';
 import {visitFlushReason} from '../features/readState/advertise';
+import {useViewingBeat} from '../features/readState/useViewingBeat';
 import {
   foldVisitBoundary,
   type VisitBoundary,
@@ -134,6 +135,7 @@ import {
 } from '../push/tapArrival';
 import {useRealtime} from '../realtime/RealtimeProvider';
 import {useAgentLiveness} from '../features/agents/useAgentLiveness';
+import {ChannelAudienceContext} from '../features/conversation/appsTail';
 import {useSession} from '../session/useSession';
 import {useDmDeliveryHint} from '../features/conversation/useDmDeliveryHint';
 import type {MemoryEvidenceLink} from '@momo/core/features/memory/model';
@@ -751,6 +753,9 @@ export default function ConversationScreen({
     return () => subscription.remove();
   }, [flushReadCursor]);
 
+  // 「보고 있음」 존재 신호 (ADR-0204 증보 3, #4063): 앞에 있는 동안만 15초 주기.
+  useViewingBeat(workspaceId, channelId);
+
   // ---- 「작성 중」 (ADR-0149) ------------------------------------------------
   //
   // 수신: 기존 레일에 채널 하나를 더 건다. **보이는 채널만** — 사이드바의 모든
@@ -887,6 +892,18 @@ export default function ConversationScreen({
     },
     [channelId, member.id, workspaceId],
   );
+  // 앱 결과가 이 채널에서 읽히는 사람 수(ADR-0113 증보 2 E10, #3950). 에이전트는 읽는 사람이
+  // 아니라서 센 사람만 센다. DM 이거나 멤버 목록을 모르면 null — 수를 짐작해 말하지 않는다.
+  const channelAudience = useMemo(() => {
+    if (channel === null || channel.kind === 'dm') {
+      return null;
+    }
+    const humans = (channel.memberIds ?? []).filter(id => {
+      const found = memberFor(directory, id);
+      return found?.kind === 'human' && found.status === 'active';
+    }).length;
+    return humans > 0 ? humans : null;
+  }, [channel, directory]);
   const closePins = useCallback(() => setPinsOpen(false), []);
   const openPins = useCallback(() => setPinsOpen(true), []);
   // 헤더의 낱말이 개수를 말한다. 0이면 「고정한 메시지」이고 숫자를 말하지
@@ -1659,6 +1676,7 @@ export default function ConversationScreen({
   }, [awaitingJump, awaitingArrived]);
 
   return (
+    <ChannelAudienceContext.Provider value={channelAudience}>
     <Screen style={styles.screen}>
       {/* 사용자 배경(ADR-0189 증보 2) — 꺼져 있으면 아무것도 그리지 않는다. */}
       <AppBackground />
@@ -1987,6 +2005,7 @@ export default function ConversationScreen({
         />
       ) : null}
     </Screen>
+    </ChannelAudienceContext.Provider>
   );
 }
 

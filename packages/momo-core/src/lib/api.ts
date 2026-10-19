@@ -2043,6 +2043,12 @@ export interface PluginManifestTool {
   scopes: string[];
   risk?: string;
   approvalTier?: string;
+  /**
+   * 매니페스트 도구의 `approvalPolicy`(`none` · `require_approval` · `always`). 등급 R·A·B(ADR-0113
+   * 증보 2 E4)는 `risk`와 이 값으로 정해진다: 승인 단계(`approvalTier`)는 A와 B가 둘 다
+   * `network_write`라서 둘을 가르지 못한다. 서버의 정책 목록(`PluginPolicyTool`)에는 이 값이 없다.
+   */
+  approvalPolicy?: string;
 }
 
 export interface PluginDetail {
@@ -2068,6 +2074,11 @@ export interface PluginDetail {
    * 필드가 없는 옛 서버는 `undefined`이고, 그때는 D1-A 앱으로 읽는다.
    */
   hosted?: boolean;
+  /**
+   * 매니페스트 `momo.preview`(ADR-0113 증보 2 E2): 공급자가 아직 미리보기로 내놓은 앱(Google 세 앱).
+   * 목록 응답에는 없고 상세 매니페스트에만 있다. 필드가 없는 옛 서버·앱은 `undefined`.
+   */
+  preview?: boolean;
   tools: PluginManifestTool[];
 }
 
@@ -2160,6 +2171,7 @@ function manifestTool(value: unknown, approvalTiers: Record<string, unknown> | n
     scopes,
     risk: str(value, "risk"),
     approvalTier: typeof approvalTier === "string" ? approvalTier : undefined,
+    approvalPolicy: str(value, "approvalPolicy"),
   };
 }
 
@@ -2190,6 +2202,7 @@ export function pluginDetailFromWire(value: unknown): PluginDetail {
     license: str(license, "spdx"),
     provenanceURL: httpsURL(str(provenance, "sourceURL")),
     hosted: bool(momo, "hosted"),
+    preview: bool(momo, "preview"),
     tools: parsedTools as PluginManifestTool[],
   };
 }
@@ -2374,6 +2387,24 @@ export async function updateReadState(
     { method: "PUT", body: JSON.stringify(body) }
   );
   return toReadState(res);
+}
+
+/**
+ * 「이 채널을 화면에 띄워 두고 있어요」 존재 신호 (ADR-0204 증보 3, #4018/#4063).
+ * `PUT /v1/workspaces/{ws}/channels/{ch}/viewing` - 본문 없음, 204. 주기·멈춤은
+ * `features/readState/viewingBeat.ts`가 정하고 이 함수는 한 번 보내기만 한다.
+ * 옛 서버는 404·405를 준다 - 호출자가 `ApiError.status`로 가려 읽는다.
+ */
+export async function touchChannelViewing(
+  workspaceId: string,
+  channelId: string
+): Promise<void> {
+  await authedRequest(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/channels/${encodeURIComponent(channelId)}/viewing`,
+    { method: "PUT" }
+  );
 }
 
 export interface MessageQuery {
@@ -5120,10 +5151,62 @@ export interface AgentRun {
    * 모양을 믿지 않는다: `agentRunReport`가 읽는다.
    */
   output?: unknown;
+  /**
+   * 「쓴 앱」(ADR-0113 증보 2 E8, #3946): 실행 장소가 **스스로 알린** 앱 사용. 서버가
+   * 검증하지 않은 자기 보고다. 보고가 없으면(옛 서버·벤더 경로) 키 자체가 없다.
+   */
+  appsUsed?: AppsUsedEntry[];
   startedAtMs?: number;
   finishedAtMs?: number;
   createdAtMs: number;
   updatedAtMs: number;
+}
+
+/** 「쓴 앱」 한 줄. 와이어 키는 이 셋뿐이다(본문·인자·결과·URL·토큰이 실릴 키가 없다). */
+export interface AppsUsedEntry {
+  pluginId: string;
+  tool: string;
+  calls: number;
+}
+
+const APPS_USED_MAX_ENTRIES = 16;
+const APPS_USED_KEYS = new Set(["pluginId", "tool", "calls"]);
+// 서버 `is_plugin_id`와 같다: `^[a-z0-9][a-z0-9._-]{2,127}$`.
+const APPS_USED_PLUGIN_ID = /^[a-z0-9][a-z0-9._-]{2,127}$/;
+const APPS_USED_TOOL = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const APPS_USED_MAX_CALLS = 100000;
+
+/**
+ * 서버(`routes::apps_used`)와 **같은 닫힌 규칙**으로 「쓴 앱」을 읽는다: 모양이 하나라도
+ * 어긋나면(미지 키·중복 쌍·범위 밖 calls·17개) 보고 전체를 버린다. 빈 배열·없음도 null이라
+ * 빈 꼬리를 만들지 않는다. 던지지 않는다.
+ */
+export function appsUsedFromWire(value: unknown): AppsUsedEntry[] | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  if (value.length > APPS_USED_MAX_ENTRIES) return null;
+  const entries: AppsUsedEntry[] = [];
+  const pairs = new Set<string>();
+  for (const raw of value as unknown[]) {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+    const item = raw as Record<string, unknown>;
+    if (Object.keys(item).some((key) => !APPS_USED_KEYS.has(key))) return null;
+    const { pluginId, tool, calls } = item;
+    if (typeof pluginId !== "string" || !APPS_USED_PLUGIN_ID.test(pluginId)) return null;
+    if (typeof tool !== "string" || !APPS_USED_TOOL.test(tool)) return null;
+    if (
+      typeof calls !== "number" ||
+      !Number.isInteger(calls) ||
+      calls < 1 ||
+      calls > APPS_USED_MAX_CALLS
+    ) {
+      return null;
+    }
+    const pair = `${pluginId}\u0000${tool}`;
+    if (pairs.has(pair)) return null;
+    pairs.add(pair);
+    entries.push({ pluginId, tool, calls });
+  }
+  return entries;
 }
 
 export interface AgentRunSummary {
@@ -5736,6 +5819,10 @@ function agentRunDetailFromWire(value: unknown): AgentRun {
   }
   const input = record(source.input);
   const output = source.output;
+  // 최상위 `appsUsed`가 정본이고, 없을 때만 저장 원문(`output.appsUsed`)을 본다.
+  const appsUsed = appsUsedFromWire(
+    source.appsUsed ?? record(output)?.["appsUsed"]
+  );
   return {
     ...summary,
     workspaceId: workspaceId.toLowerCase(),
@@ -5744,6 +5831,7 @@ function agentRunDetailFromWire(value: unknown): AgentRun {
     maxSteps,
     ...(input === null ? {} : { input }),
     ...(output === undefined || output === null ? {} : { output }),
+    ...(appsUsed === null ? {} : { appsUsed }),
   };
 }
 

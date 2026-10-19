@@ -13,7 +13,10 @@ import { AgentCard } from "./AgentCard";
 import { TeamAiDelegateStrip } from "./TeamAiDelegateStrip";
 import { teamAiDelegateFor } from "@momo/core/features/timeline/teamAi";
 import { teamAiReplyMetaFor } from "@momo/core/features/timeline/teamAiReply";
-import { TeamAiReplyMeta } from "./TeamAiReplyMeta";
+import { AppNoticeLine, TeamAiReplyMeta } from "./TeamAiReplyMeta";
+import { githubNoticeFor } from "@momo/core/features/github/model";
+import { GithubNoticeStrip } from "@/features/github/GithubNoticeStrip";
+import { useAppNotice, useAppsTailContext } from "./appsTail";
 import { ArtifactCard } from "./ArtifactCard";
 import { AttachmentList } from "./AttachmentList";
 import { MessageBody } from "./MessageBody";
@@ -513,7 +516,17 @@ export function MessageRow({
   // 도우미가 넘기는 줄(ADR-0201 D5). 이 키를 보내지 않는 서버에서는 늘 null 이다.
   const teamAiDelegate = useMemo(() => teamAiDelegateFor(message), [message]);
   // 도우미 답의 꼬리(ADR-0201 v2): 찾아본 것 · 출처 · 모델 라벨. 칸이 없으면 null.
-  const teamAiReply = useMemo(() => teamAiReplyMetaFor(message), [message]);
+  // 같은 꼬리에 「쓴 앱」 줄(E8·E10, #3950)이 붙는다: 보고가 있는 에이전트 답에만.
+  const appsTail = useAppsTailContext(message, directory);
+  const teamAiReply = useMemo(
+    () => teamAiReplyMetaFor(message, appsTail),
+    [message, appsTail]
+  );
+  // 앱을 쓰다 막혔을 때의 한 문장(+ 행동 하나). 칸이 없으면 null.
+  const appNotice = useAppNotice(message);
+  // 서버가 GitHub 앱으로 보낸 알림이면 아랫줄이 「GitHub 알림」이라고 말한다(ADR-0205, #3955).
+  // 작성자 id가 서버가 적은 `github_author_member_id` 와 같지 않으면 null이다(이름은 증거가 아니다).
+  const githubNotice = useMemo(() => githubNoticeFor(message), [message]);
   // 맡길 원래 요청의 본문: 화면에 든 행이 먼저, 없으면 페이지에 동봉된 인용.
   const delegateSourceId = teamAiDelegate?.sourceMessageId ?? null;
   const delegateSourceBody =
@@ -886,6 +899,14 @@ export function MessageRow({
               >
                 {isAgent ? `@${author?.handle ?? name}` : name}
               </span>
+              {/* 「에이전트」 배지는 눈에서 뺐다(#4065): 눈에는 이름 색(--agent)과 둥근
+                  사각 아바타가 에이전트임을 나르고, 귀에는 이 낱말이 나른다. 색은
+                  보조기술에 닿지 않으므로 글자 없이 두면 정보가 사라진다. */}
+              {isAgent && (
+                <span className="sr-only" data-testid="row-agent-sr">
+                  , 에이전트
+                </span>
+              )}
               {owner && (
                 <span className="truncate text-meta text-ink-muted">
                   · {owner.displayName} 님이 관리
@@ -974,6 +995,8 @@ export function MessageRow({
           ))}
         {/* 서버 안내 줄의 문 (#2871): 본문 문장이 말한 곳으로 바로 간다. */}
         {!deleted && <NoticeActionLink message={message} />}
+        {appNotice && <AppNoticeLine notice={appNotice} />}
+        {!deleted && githubNotice && <GithubNoticeStrip notice={githubNotice} />}
         {teamAiReply && <TeamAiReplyMeta meta={teamAiReply} />}
         {teamAiDelegate && (
           <TeamAiDelegateStrip
