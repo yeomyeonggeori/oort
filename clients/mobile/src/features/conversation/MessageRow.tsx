@@ -123,6 +123,13 @@ import {
   teamAiReplySpoken,
 } from './TeamAiReplyMeta';
 import {appsOnWebUrl, useAppNotice, useAppsTailContext} from './appsTail';
+import {
+  GITHUB_NOTICE_ACTION_NAME,
+  GITHUB_NOTICE_OPEN_LABEL,
+  GithubNoticeLine,
+  githubNoticeFor,
+  githubNoticeLabel,
+} from './GithubNoticeLine';
 import {teamAiReplyMetaFor} from '@momo/core/features/timeline/teamAiReply';
 import {
   delegateButtonLabel,
@@ -2314,6 +2321,16 @@ function MessageRowInner({
   const appNotice = useAppNotice(message, actions?.workspaceId, nowMs);
   // 폰의 행동은 「웹에서 열기」 하나다. 열 곳(서버 주소)을 모르면 세우지 않는다.
   const appNoticeWebUrl = appNotice?.action ? appsOnWebUrl() : null;
+  // 서버가 GitHub 앱으로 보낸 알림이면 아랫줄이 「GitHub 알림」이라고 말한다(ADR-0205, #3955).
+  // 작성자가 에이전트 「GitHub」가 아니면 null 이다(사람이 props 를 흉내 내도 서지 않는다).
+  const githubNotice = useMemo(() => {
+    const author = memberFor(directory, message.authorMemberId);
+    return githubNoticeFor(
+      message,
+      author ? {kind: author.kind, displayName: author.displayName} : null,
+    );
+  }, [message, directory]);
+  const githubNoticeUrl = githubNotice?.url ?? null;
   // 손가락(띠의 버튼)과 로터(아래 `accessibilityActions`)가 같은 보내기와 상태를 쓴다
   // (#3844 design-review H-1). 행이 접근성 원소 하나라 띠의 버튼에 VoiceOver 가 닿지 않는다.
   const teamAiSend = useTeamAiDelegateSend({
@@ -2603,6 +2620,9 @@ function MessageRowInner({
         case APP_NOTICE_ACTION_NAME:
           if (appNoticeWebUrl !== null) openLink(appNoticeWebUrl);
           return;
+        case GITHUB_NOTICE_ACTION_NAME:
+          if (githubNoticeUrl !== null) openLink(githubNoticeUrl);
+          return;
         default:
           if (event.nativeEvent.actionName.startsWith(TEAM_AI_CITATION_ACTION_PREFIX)) {
             const index = Number(
@@ -2634,6 +2654,7 @@ function MessageRowInner({
       teamAiSend,
       teamAiReply,
       appNoticeWebUrl,
+      githubNoticeUrl,
     ],
   );
 
@@ -2661,6 +2682,10 @@ function MessageRowInner({
     // 막힘 문장의 행동(웹에서 열기). 손가락은 문장 옆 링크를 누른다.
     if (!deleted && appNotice?.action && appNoticeWebUrl !== null) {
       list.push({name: APP_NOTICE_ACTION_NAME, label: appNotice.action.label});
+    }
+    // GitHub 알림의 열기. 손가락은 아랫줄 링크를 누르고, VoiceOver 는 로터로 닿는다.
+    if (!deleted && githubNoticeUrl !== null) {
+      list.push({name: GITHUB_NOTICE_ACTION_NAME, label: GITHUB_NOTICE_OPEN_LABEL});
     }
     if (actionable) list.push({name: 'momoActions', label: '메시지 액션'});
     if (actions?.onOpenProfile && memberFor(directory, message.authorMemberId)) {
@@ -2717,6 +2742,7 @@ function MessageRowInner({
     teamAiReply,
     appNotice,
     appNoticeWebUrl,
+    githubNoticeUrl,
   ]);
 
   const authorLabel = memberNameParts(
@@ -2806,6 +2832,7 @@ function MessageRowInner({
         ),
         // 앱을 쓰다 막힌 문장, 그리고 도우미 답의 꼬리(쓴 앱 · 찾아본 것 · 모델 라벨 · 출처 수).
         ...appNoticeSpoken(appNotice),
+        ...(githubNotice !== null && !deleted ? [githubNoticeLabel(githubNotice)] : []),
         ...teamAiReplySpoken(teamAiReply),
       ].join(', ')}
       accessibilityActions={accessibilityActions}
@@ -3025,6 +3052,10 @@ function MessageRowInner({
                     : () => openLink(appNoticeWebUrl)
                 }
               />
+            ) : null}
+
+            {githubNotice !== null && !deleted ? (
+              <GithubNoticeLine notice={githubNotice} />
             ) : null}
 
             {teamAiReply ? <TeamAiReplyMeta meta={teamAiReply} /> : null}

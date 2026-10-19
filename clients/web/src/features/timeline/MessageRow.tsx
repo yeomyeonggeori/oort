@@ -14,6 +14,8 @@ import { TeamAiDelegateStrip } from "./TeamAiDelegateStrip";
 import { teamAiDelegateFor } from "@momo/core/features/timeline/teamAi";
 import { teamAiReplyMetaFor } from "@momo/core/features/timeline/teamAiReply";
 import { AppNoticeLine, TeamAiReplyMeta } from "./TeamAiReplyMeta";
+import { githubNoticeFor } from "@momo/core/features/github/model";
+import { GithubNoticeStrip } from "@/features/github/GithubNoticeStrip";
 import { useAppNotice, useAppsTailContext } from "./appsTail";
 import { ArtifactCard } from "./ArtifactCard";
 import { AttachmentList } from "./AttachmentList";
@@ -522,6 +524,12 @@ export function MessageRow({
   );
   // 앱을 쓰다 막혔을 때의 한 문장(+ 행동 하나). 칸이 없으면 null.
   const appNotice = useAppNotice(message);
+  // 서버가 GitHub 앱으로 보낸 알림이면 아랫줄이 「GitHub 알림」이라고 말한다(ADR-0205, #3955).
+  // 작성자가 에이전트 「GitHub」가 아니면 null이다(사람이 props 를 흉내 내도 서지 않는다).
+  const githubNotice = useMemo(
+    () => githubNoticeFor(message, author ? { kind: author.kind, displayName: author.displayName } : null),
+    [message, author]
+  );
   // 맡길 원래 요청의 본문: 화면에 든 행이 먼저, 없으면 페이지에 동봉된 인용.
   const delegateSourceId = teamAiDelegate?.sourceMessageId ?? null;
   const delegateSourceBody =
@@ -991,6 +999,7 @@ export function MessageRow({
         {/* 서버 안내 줄의 문 (#2871): 본문 문장이 말한 곳으로 바로 간다. */}
         {!deleted && <NoticeActionLink message={message} />}
         {appNotice && <AppNoticeLine notice={appNotice} />}
+        {!deleted && githubNotice && <GithubNoticeStrip notice={githubNotice} />}
         {teamAiReply && <TeamAiReplyMeta meta={teamAiReply} />}
         {teamAiDelegate && (
           <TeamAiDelegateStrip
