@@ -2043,6 +2043,12 @@ export interface PluginManifestTool {
   scopes: string[];
   risk?: string;
   approvalTier?: string;
+  /**
+   * 매니페스트 도구의 `approvalPolicy`(`none` · `require_approval` · `always`). 등급 R·A·B(ADR-0113
+   * 증보 2 E4)는 `risk`와 이 값으로 정해진다: 승인 단계(`approvalTier`)는 A와 B가 둘 다
+   * `network_write`라서 둘을 가르지 못한다. 서버의 정책 목록(`PluginPolicyTool`)에는 이 값이 없다.
+   */
+  approvalPolicy?: string;
 }
 
 export interface PluginDetail {
@@ -2068,6 +2074,11 @@ export interface PluginDetail {
    * 필드가 없는 옛 서버는 `undefined`이고, 그때는 D1-A 앱으로 읽는다.
    */
   hosted?: boolean;
+  /**
+   * 매니페스트 `momo.preview`(ADR-0113 증보 2 E2): 공급자가 아직 미리보기로 내놓은 앱(Google 세 앱).
+   * 목록 응답에는 없고 상세 매니페스트에만 있다. 필드가 없는 옛 서버·앱은 `undefined`.
+   */
+  preview?: boolean;
   tools: PluginManifestTool[];
 }
 
@@ -2160,6 +2171,7 @@ function manifestTool(value: unknown, approvalTiers: Record<string, unknown> | n
     scopes,
     risk: str(value, "risk"),
     approvalTier: typeof approvalTier === "string" ? approvalTier : undefined,
+    approvalPolicy: str(value, "approvalPolicy"),
   };
 }
 
@@ -2190,6 +2202,7 @@ export function pluginDetailFromWire(value: unknown): PluginDetail {
     license: str(license, "spdx"),
     provenanceURL: httpsURL(str(provenance, "sourceURL")),
     hosted: bool(momo, "hosted"),
+    preview: bool(momo, "preview"),
     tools: parsedTools as PluginManifestTool[],
   };
 }

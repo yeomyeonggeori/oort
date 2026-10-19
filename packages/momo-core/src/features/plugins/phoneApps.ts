@@ -102,9 +102,17 @@ export function identifiableScopeSentence(scope: string): string {
   return sentence === "사용 권한" ? `${sentence} (${scope})` : sentence;
 }
 
-export function pluginIconText(plugin: { name: string; iconText?: string }): string {
+// 웹 `model.ts`의 같은 표(#3949): 「GitHub」와 「Gmail」이 둘 다 「G」가 되지 않게 고정한 글자.
+const OFFICIAL_APP_ICON_TEXT: Readonly<Record<string, string>> = {
+  "com.momo.plugins.github": "GH",
+  "com.momo.plugins.gmail": "Gm",
+};
+
+export function pluginIconText(plugin: { name: string; iconText?: string; pluginId?: string }): string {
   const given = plugin.iconText?.trim();
   if (given) return given;
+  const official = plugin.pluginId ? OFFICIAL_APP_ICON_TEXT[plugin.pluginId.toLowerCase()] : undefined;
+  if (official) return official;
   const initials = plugin.name
     .trim()
     .split(/\s+/)
@@ -120,6 +128,10 @@ const OFFICIAL_APP_SUBTITLE: Readonly<Record<string, string>> = {
   "com.momo.plugins.notion": "문서와 페이지",
   "com.momo.plugins.linear": "이슈와 작업 추적",
   "com.momo.plugins.drive": "공유 드라이브의 파일",
+  // migration 142 (#3944): the three Google apps (the full app screen is U-S1, #3949).
+  "com.momo.plugins.gmail": "메일 읽기와 초안",
+  "com.momo.plugins.google-calendar": "일정과 초대",
+  "com.momo.plugins.google-drive": "내 드라이브의 파일",
 };
 
 export function pluginSubtitle(plugin: { pluginId: string; description: string }): string {
