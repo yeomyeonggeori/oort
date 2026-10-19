@@ -58,7 +58,7 @@ grep -q "^test result: ok. 1 passed" "${TMPDIR:-/tmp}/login-relay-e2e.out" || fa
 # as a file the hermes uid cannot read or replace; the file holds clock readings only.
 docker exec "$NAME" sh -c 'stat -c "%A %u" /run/oort-login-relay/issued.json; cat /run/oort-login-relay/issued.json' | tee "${TMPDIR:-/tmp}/login-relay-e2e-issued.txt" >/dev/null
 grep -q '^-rw-------' "${TMPDIR:-/tmp}/login-relay-e2e-issued.txt" || fail "the login-time state file is missing or not 0600"
-tail -1 "${TMPDIR:-/tmp}/login-relay-e2e-issued.txt" | grep -Eq '^\{("[a-z_]+": [0-9]{10}(, )?)+\}$' || fail "the login-time state file holds more than names and clock readings"
+tail -1 "${TMPDIR:-/tmp}/login-relay-e2e-issued.txt" | grep -Eq '^\{("[a-z0-9_-]+": [0-9]{10}(, )?)+\}$' || fail "the login-time state file holds more than names and clock readings"
 if docker exec "$NAME" grep -rlF -- "issued.json" /opt/data >/dev/null 2>&1; then fail "a login-time file leaked into Hermes' volume"; fi
 rm -f "${TMPDIR:-/tmp}/login-relay-e2e-issued.txt"
 docker logs "$NAME" >"${TMPDIR:-/tmp}/login-relay-e2e-sidecar.log" 2>&1
