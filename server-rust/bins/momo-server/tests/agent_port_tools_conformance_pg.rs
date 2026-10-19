@@ -19156,7 +19156,7 @@ async fn the_plugin_install_card_installs_as_the_approver_and_equals_the_rest_ro
     assert_eq!(role, json!("admin"));
     let shown = rows.to_string();
     for must_show in [
-        "GitHub 1.0.0",
+        "GitHub 1.1.0",
         "api.githubcopilot.com",
         "설치 안 됨 → 설치됨(켜짐)",
     ] {

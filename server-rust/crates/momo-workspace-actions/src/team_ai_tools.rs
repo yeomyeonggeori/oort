@@ -80,11 +80,14 @@ pub const HELPER_READ_ROLE: &str = "momo_helper_read";
 
 /// ADR-0113 증보 P2: the only plugin ids the registry reads ever show. The REST
 /// catalogue (`routes::plugins`) uses this same constant.
-pub const OFFICIAL_PLUGIN_IDS: [&str; 4] = [
+pub const OFFICIAL_PLUGIN_IDS: [&str; 7] = [
     "com.momo.plugins.github",
     "com.momo.plugins.notion",
     "com.momo.plugins.linear",
     "com.momo.plugins.drive",
+    "com.momo.plugins.gmail",
+    "com.momo.plugins.google-calendar",
+    "com.momo.plugins.google-drive",
 ];
 
 /// The `workspace.settings` keys `read_workspace_settings` may show (H9-I5). Every
