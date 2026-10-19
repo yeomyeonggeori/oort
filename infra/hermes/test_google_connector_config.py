@@ -55,6 +55,10 @@ class GoogleConnectorConfig(unittest.TestCase):
     def test_model_auth_is_subscription_oauth_not_a_key(self):
         self.assertEqual(self.cfg["model"]["provider"], "openai-codex")
         self.assertEqual(self.cfg["fallback_model"]["provider"], "anthropic")
+        # Names must exist in the pinned Hermes v0.22.2 catalogs (hermes_cli/models_catalog_static.py):
+        # anthropic has claude-sonnet-5 but NOT claude-sonnet-5-5 (#4082).
+        self.assertEqual(self.cfg["fallback_model"]["model"], "claude-sonnet-5")
+        self.assertEqual(self.cfg["model"]["default"], "gpt-5.6-sol")
         for key in ("api_key", "base_url"):
             self.assertNotIn(key, self.cfg["model"])
             self.assertNotIn(key, self.cfg["fallback_model"])
