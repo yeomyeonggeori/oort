@@ -1308,7 +1308,7 @@ ADR-0186 증보 G1 (GC-6 #2947, GC-8 #2949). When a person asks the runtime to
 connect an AI, sign in to an AI subscription (Claude, Codex) or connect a team
 API key, **the runtime does not do it**. It cannot: the subscription login runs
 on that person's own device, and the team key is written by an operator's own
-session. What it can do is put the connect card in front of them:
+session. (Hermes' own model-auth subscription is a different thing: §3.4.1.) What it can do is put the connect card in front of them:
 
 ```text
 oort_card_suggest {handle, clientMsgId, commandId: "ai.connect", args, body}
