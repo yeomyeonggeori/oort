@@ -141,6 +141,8 @@ describe("helpers", () => {
   it("maps the three Google apps to the probe command and leaves other apps to hermes mcp login", () => {
     expect(appLoginTarget("com.momo.plugins.gmail")).toBe("gmail");
     expect(appLoginTarget("com.momo.plugins.github")).toBeNull();
+    expect(appLoginTarget("constructor")).toBeNull();
+    expect(appLoginTarget("__proto__")).toBeNull();
     expect(appShellCommand("google_calendar")).toContain("mcp_login_probe.py google_calendar");
     expect(appShellCommand("notion")).toBe("railway ssh -- hermes mcp login -- notion");
   });

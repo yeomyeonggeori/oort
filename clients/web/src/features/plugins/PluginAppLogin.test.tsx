@@ -229,6 +229,47 @@ describe("PluginAppLogin", () => {
     expect(bodies.find((body) => body.includes("MARKER-APPCODE"))).toBe(JSON.stringify({ pasted: PASTE }));
   });
 
+  it("refuses a hostile start address through the app flow too (https only, no credentials)", async () => {
+    for (const url of ["javascript:alert(1)", "http://accounts.google.com/x", "https://u:p@accounts.google.com/x"]) {
+      api.request.mockReset();
+      api.request.mockImplementation((path: string, init?: RequestInit) => {
+        if (path.endsWith("/cohosted-agent")) return Promise.resolve(COHOSTED);
+        if (init?.method === "POST") return Promise.resolve({ ...start, url });
+        if (init?.method === "DELETE") return Promise.resolve(status("cancelled"));
+        return Promise.resolve(targets(false));
+      });
+      const el = mount();
+      click(await until("app-login-start"));
+      await until("login-url-refused");
+      expect(q("login-open")).toBeNull();
+      act(() => root?.unmount());
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      el.remove();
+      root = null;
+    }
+  });
+
+  it("the expiry note waits until the app is connected, and a login does not follow the user to another app", async () => {
+    route({ targets: targets(false) });
+    mount();
+    await until("app-login-row");
+    expect(q("app-login-expiry")).toBeNull();
+    click(q("app-login-start") as HTMLElement);
+    await until("login-session");
+    // 다른 앱 상세로 바뀌면(같은 자리에서 pluginId만 바뀜) 진행 중이던 로그인은 끝나고 취소된다.
+    act(() => {
+      root?.render(
+        createElement(
+          QueryClientProvider,
+          { client },
+          createElement(SessionProvider, { value: sessionValue() }, createElement(PluginAppLogin, { key: "com.momo.plugins.google-calendar", pluginId: "com.momo.plugins.google-calendar", offline: false }))
+        )
+      );
+    });
+    expect(q("login-session")).toBeNull();
+    await waitFor(() => expect(calls().some((call) => call.startsWith("DELETE") && call.endsWith("/login_gmail_0123456789ab"))).toBe(true));
+  });
+
   it("a refused start says why in a fixed sentence", async () => {
     api.request.mockImplementation((path: string, init?: RequestInit) => {
       if (path.endsWith("/cohosted-agent")) return Promise.resolve(COHOSTED);

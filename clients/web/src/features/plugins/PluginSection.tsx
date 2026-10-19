@@ -730,7 +730,7 @@ function PluginDetailPanel({
       <PluginRunPlaces hosted={detail.hosted} />
 
       {/* #4074: 운영자·같은 서버 Hermes·Hermes가 아는 앱일 때만 선다(아니면 null). */}
-      <PluginAppLogin pluginId={detail.pluginId} offline={offline} />
+      <PluginAppLogin key={detail.pluginId} pluginId={detail.pluginId} offline={offline} />
 
       <PluginToolList tools={detail.tools} allowedToolNames={allowedToolNames} />
 

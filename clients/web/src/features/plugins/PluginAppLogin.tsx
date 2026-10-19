@@ -160,6 +160,7 @@ export function PluginAppLogin({ pluginId, offline }: { pluginId: string; offlin
       {offline && <InlineBanner tone="neutral" message="연결이 끊긴 동안에는 로그인할 수 없어요." testId="app-login-offline" />}
       {active !== null && (
         <LoginRelaySession
+          key={`${agentId}:${active.loginId}`}
           workspaceId={workspaceId}
           agentId={agentId}
           flow="app"
@@ -191,9 +192,11 @@ export function PluginAppLogin({ pluginId, offline }: { pluginId: string; offlin
           <span className="font-semibold text-ink">{ended.status === "done" ? "연결됐어요." : loginReasonLine(ended)}</span>
         </div>
       )}
-      <p className="text-meta text-ink-muted" data-testid="app-login-expiry">
-        {COPY.externalTestingNote} {COPY.expiryUnknown}
-      </p>
+      {(entry.connected || ended?.status === "failed" || ended?.status === "expired") && (
+        <p className="text-meta text-ink-muted" data-testid="app-login-expiry">
+          {COPY.externalTestingNote} {COPY.expiryUnknown}
+        </p>
+      )}
     </Shell>
   );
 }
@@ -213,12 +216,16 @@ function Shell({ children }: { children: React.ReactNode }) {
 /** 중계가 꺼진 서버: 셸 명령을 보인다(oort를 지나가는 값이 없다). */
 function ShellFallback({ target }: { target: string }) {
   const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (timer.current !== null) clearTimeout(timer.current);
+  }, []);
   const command = appShellCommand(target);
   return (
     <div className="flex min-w-0 flex-col gap-2" data-testid="app-login-shell">
       <p className="text-body text-ink">{COPY.shellLead}</p>
       <code className="w-max max-w-full rounded-sm bg-muted-soft px-1 font-mono text-meta text-ink [overflow-wrap:anywhere]">{command}</code>
-      <div>
+      <div aria-live="polite">
         <Button
           type="button"
           size="sm"
@@ -230,7 +237,7 @@ function ShellFallback({ target }: { target: string }) {
               .writeText(command)
               .then(() => {
                 setCopied(true);
-                setTimeout(() => setCopied(false), 2000);
+                timer.current = setTimeout(() => setCopied(false), 2000);
               })
               .catch(() => undefined);
           }}

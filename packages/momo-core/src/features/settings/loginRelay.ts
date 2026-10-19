@@ -273,7 +273,7 @@ export const GOOGLE_APP_TARGETS: Readonly<Record<string, string>> = {
 };
 
 export function appLoginTarget(pluginId: string): string | null {
-  return GOOGLE_APP_TARGETS[pluginId] ?? null;
+  return Object.hasOwn(GOOGLE_APP_TARGETS, pluginId) ? (GOOGLE_APP_TARGETS[pluginId] ?? null) : null;
 }
 
 export function appShellCommand(app: string): string {
