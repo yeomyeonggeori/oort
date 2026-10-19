@@ -87,6 +87,7 @@ STATUS_CACHE = 15
 CHECK_TIMEOUT = 20  # one status check child
 MAX_CONNECTIONS = 32
 REQUEST_DEADLINE = 90  # whole request, start wait (30 s) included; closes slow-loris sockets
+PREAUTH_DEADLINE = 10  # until the request line, headers and the key have been read and checked
 GLOBAL_STARTS_PER_MIN = 20
 MAX_OPERATOR_KEYS = 256
 EXCHANGE_GRACE = 120  # seconds the vendor exchange may take after a paste was written
@@ -149,6 +150,7 @@ class Config:
         self.global_starts_per_min = kw.pop("global_starts_per_min", GLOBAL_STARTS_PER_MIN)
         self.max_connections = kw.pop("max_connections", MAX_CONNECTIONS)
         self.request_deadline = kw.pop("request_deadline", REQUEST_DEADLINE)
+        self.preauth_deadline = kw.pop("preauth_deadline", PREAUTH_DEADLINE)
         self.check_timeout = kw.pop("check_timeout", CHECK_TIMEOUT)
         self.allow_http_loopback = kw.pop("allow_http_loopback", False)  # test harness only (mock AS on 127.0.0.1)
         self.extra_mcp_hosts = tuple(kw.pop("extra_mcp_hosts", ()))
@@ -528,6 +530,8 @@ class Relay:
                 pass
         if waited:
             self._sweep(s)
+            with self.lock:
+                s.reaped = True  # BEFORE the reap: the zombie still holds the pid, so no later signal can misfire
             rc = s.proc.wait()
         else:
             rc = s.proc.wait()
@@ -639,6 +643,13 @@ class Relay:
                 out["reason"] = s.reason
             return out
 
+    def abandon(self, login_id):
+        """The start response could not be delivered, so nobody holds the id: end the login now."""
+        with self.lock:
+            s = self.sessions.get(login_id)
+            if s is not None:
+                self._finish(s, "cancelled", "client_gone")
+
     def cancel(self, login_id, operator):
         with self.lock:
             s = self._owned(login_id, operator)
@@ -647,13 +658,23 @@ class Relay:
 
     # ---- status of the targets (non-secret signals only) ----
     def status(self):
-        with self._status_lock:
+        if not self._status_lock.acquire(blocking=False):
+            # A run is in flight: never queue behind it (each waiter would pin a connection slot). Serve the last
+            # answer, or wait only when there is none yet.
+            with self.lock:
+                cached = self._status_cache[1]
+            if cached is not None:
+                return cached
+            self._status_lock.acquire()
+        try:
             now = time.monotonic()
             with self.lock:
                 at, cached = self._status_cache
                 if cached is not None and now - at < self.cfg.status_cache:
                     return cached
             return self._compute_status()
+        finally:
+            self._status_lock.release()
 
     def _compute_status(self):
         c = self.cfg
@@ -728,13 +749,24 @@ def make_handler(relay):
                 except OSError:
                     pass
 
-            timer = threading.Timer(cfg.request_deadline, cut)
-            timer.daemon = True
-            timer.start()
+            self._cut = cut
+            self._timer = None
+            self._arm(min(cfg.preauth_deadline, cfg.request_deadline))
             try:
                 super().handle()
             finally:
-                timer.cancel()
+                self._arm(None)
+
+        def _arm(self, seconds):
+            """Re-arm the cut. Short until the caller has proved it holds the key (an unauthenticated socket must
+            not pin one of the few slots for the full deadline), long afterwards."""
+            if self._timer is not None:
+                self._timer.cancel()
+            self._timer = None
+            if seconds is not None:
+                self._timer = threading.Timer(seconds, self._cut)
+                self._timer.daemon = True
+                self._timer.start()
 
         def log_message(self, *a):  # request lines carry login ids: never logged
             pass
@@ -779,10 +811,16 @@ def make_handler(relay):
                     return self._send(200, {"ok": True})
                 if not self._authed():
                     return self._send(401, {"error": "unauthorized"})
+                self._arm(cfg.request_deadline)
                 op = self.headers.get("X-Operator", "")
                 if method == "POST" and path == "/v1/login":
                     b = self._body()
-                    return self._send(200, relay.start(b.get("kind"), b.get("target"), b.get("operator")))
+                    out = relay.start(b.get("kind"), b.get("target"), b.get("operator"))
+                    try:
+                        return self._send(200, out)
+                    except OSError:
+                        relay.abandon(out["login_id"])  # the caller never got the id: nobody could cancel it
+                        raise
                 if method == "GET" and path == "/v1/status":
                     return self._send(200, relay.status())
                 m = LOGIN_PATH_RE.match(path)
@@ -846,7 +884,11 @@ class BoundedServer(ThreadingHTTPServer):
                 request.close()
             finally:
                 return  # noqa: B012 — shed load, never block the accept loop
-        super().process_request(request, client_address)
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._slots.release()  # the worker thread never started: give the slot back
+            raise
 
     def process_request_thread(self, request, client_address):
         try:
