@@ -15,6 +15,8 @@ import {
   pasteLooksSendable,
   safeLoginUrl,
   secondsLeft,
+  loginTtlSeconds,
+  MODEL_LOGIN_HOSTS,
   startFromWire,
   startLogin,
   statusFromLoginWire,
@@ -124,6 +126,14 @@ describe("helpers", () => {
     expect(safeLoginUrl("javascript:alert(1)")).toBeNull();
     expect(safeLoginUrl("https://claude.ai@evil.example/")).toBeNull();
     expect(safeLoginUrl("not a url")).toBeNull();
+  });
+
+  it("limits model logins to the vendor hosts and turns the server clock into a length once", () => {
+    expect(safeLoginUrl("https://claude.ai/x", MODEL_LOGIN_HOSTS)?.host).toBe("claude.ai");
+    expect(safeLoginUrl("https://claude.ai.evil.example/x", MODEL_LOGIN_HOSTS)).toBeNull();
+    expect(loginTtlSeconds(1000 + 290, 1_000_000)).toBe(290);
+    expect(loginTtlSeconds(1, 1_000_000)).toBe(300);
+    expect(loginTtlSeconds(9_999_999_999, 1_000_000)).toBe(300);
   });
 
   it("checks the paste shape like the server", () => {

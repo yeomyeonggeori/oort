@@ -115,7 +115,7 @@ function everywhere(): string {
     .getAll()
     .map((mutation) => JSON.stringify({ v: mutation.state.variables, d: mutation.state.data }))
     .join("|");
-  const logs = spies.flatMap((spy) => spy.mock.calls.map((call) => call.map(String).join(" "))).join("|");
+  const logs = spies.flatMap((spy) => spy.mock.calls.map((call) => call.map((arg) => (typeof arg === "string" ? arg : JSON.stringify(arg))).join(" "))).join("|");
   const inputs = Array.from(host?.querySelectorAll("input") ?? [])
     .map((input) => input.value)
     .join("|");
@@ -295,7 +295,7 @@ describe("ModelLoginPanel", () => {
     act(() => root?.unmount());
     root = null;
     await vi.advanceTimersByTimeAsync(10);
-    expect(calls().some((call) => call.startsWith("DELETE"))).toBe(true);
+    expect(calls().some((call) => call.startsWith("DELETE") && call.endsWith("/login_codex_0123456789"))).toBe(true);
   });
 
   it("a start refusal (429) says why in a fixed sentence and keeps the choices", async () => {
@@ -316,6 +316,125 @@ describe("ModelLoginPanel", () => {
     await until("model-login-codex");
     expect(q("model-login-start-openai-codex")?.getAttribute("aria-disabled")).toBe("true");
     expect(q("model-login-offline")).not.toBeNull();
+  });
+
+  it("refuses an address on a lookalike host even over https", async () => {
+    api.request.mockImplementation((_path: string, init?: RequestInit) =>
+      Promise.resolve(init?.method === "POST" ? { ...claudeStart, url: "https://claude.ai.evil.example/x" } : TARGETS)
+    );
+    mount();
+    await until("model-login-claude");
+    click(q("model-login-start-anthropic") as HTMLElement);
+    click(await until("model-login-claude-confirm"));
+    await until("login-url-refused");
+    expect(q("login-open")).toBeNull();
+  });
+
+  it("moves focus to the new block's first action, and back to the start button when it closes", async () => {
+    api.request.mockImplementation((_path: string, init?: RequestInit) =>
+      Promise.resolve(init?.method === "POST" ? claudeStart : init?.method === "DELETE" ? status("cancelled") : TARGETS)
+    );
+    mount();
+    await until("model-login-claude");
+    click(q("model-login-start-anthropic") as HTMLElement);
+    const confirm = await until("model-login-claude-confirm");
+    await waitFor(() => expect(document.activeElement).toBe(confirm));
+    click(confirm);
+    const paste = await until("login-paste");
+    await waitFor(() => expect(document.activeElement).toBe(paste));
+    click(q("login-cancel") as HTMLElement);
+    await waitFor(() => expect(document.activeElement).toBe(q("model-login-start-anthropic")));
+  });
+
+  it("a poll that finds the login erased (404) ends it and drops the address", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout", "Date"] });
+    api.request.mockImplementation((path: string, init?: RequestInit) => {
+      if (init?.method === "POST") return Promise.resolve(codexStart);
+      if (path.endsWith("/login_codex_0123456789")) return Promise.reject(new ApiError(404, "gone", "login_not_found"));
+      return Promise.resolve(TARGETS);
+    });
+    mount();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    click(q("model-login-start-openai-codex") as HTMLElement);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4100);
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    expect(q("model-login-result")?.getAttribute("data-status")).toBe("expired");
+    expect(everywhere()).not.toContain(CODE);
+  });
+
+  it("an expired countdown cancels the login and drops the code, even when the server clock is far off", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout", "Date"] });
+    api.request.mockImplementation((_path: string, init?: RequestInit) =>
+      Promise.resolve(init?.method === "POST" ? { ...codexStart, expiresAt: 1 } : TARGETS)
+    );
+    mount();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    click(q("model-login-start-openai-codex") as HTMLElement);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    // 서버 시각이 이 기기보다 한참 과거여도 시작 즉시 만료되지 않는다.
+    expect(q("login-device-code")).not.toBeNull();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(301_000);
+    });
+    expect(q("model-login-result")?.getAttribute("data-status")).toBe("expired");
+    expect(q("login-device-code")).toBeNull();
+    expect(calls().some((call) => call.startsWith("DELETE"))).toBe(true);
+    expect(everywhere()).not.toContain(CODE);
+  });
+
+  it("when the target read starts failing mid-login, the session ends and the start response is not kept for a later retry", async () => {
+    let readOk = true;
+    api.request.mockImplementation((_path: string, init?: RequestInit) => {
+      if (init?.method === "POST") return Promise.resolve(codexStart);
+      if (init?.method === "DELETE") return Promise.resolve(status("cancelled"));
+      return readOk ? Promise.resolve(TARGETS) : Promise.reject(new ApiError(502, "bad"));
+    });
+    mount();
+    await until("model-login-codex");
+    click(q("model-login-start-openai-codex") as HTMLElement);
+    await until("login-device-code");
+    readOk = false;
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: ["login-relay"] });
+    });
+    await until("model-login-error");
+    expect(q("login-device-code")).toBeNull();
+    readOk = true;
+    click(q("model-login-error")?.querySelector("button") as HTMLElement);
+    await until("model-login-codex");
+    // 다시 읽어 와도 지난 로그인의 주소·코드는 되살아나지 않는다.
+    expect(q("login-session")).toBeNull();
+    expect(q("login-device-code")).toBeNull();
+  });
+
+  it("cancels a login whose start finished after the panel was gone", async () => {
+    let release: (value: unknown) => void = () => undefined;
+    api.request.mockImplementation((_path: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        return new Promise((resolve) => {
+          release = resolve;
+        });
+      }
+      return Promise.resolve(TARGETS);
+    });
+    mount();
+    await until("model-login-codex");
+    click(q("model-login-start-openai-codex") as HTMLElement);
+    act(() => root?.unmount());
+    root = null;
+    await act(async () => release(codexStart));
+    await waitFor(() => expect(calls().some((call) => call.startsWith("DELETE") && call.endsWith("/login_codex_0123456789"))).toBe(true));
   });
 
   it("refuses to open an address that is not https", async () => {

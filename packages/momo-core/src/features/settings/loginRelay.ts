@@ -229,14 +229,27 @@ export interface SafeLoginUrl {
 }
 
 /** https 이고 계정 정보가 없는 주소만 연다. 서버가 한 번 걸러도 화면이 한 번 더 본다. */
-export function safeLoginUrl(raw: string): SafeLoginUrl | null {
+export function safeLoginUrl(raw: string, allowedHosts?: readonly string[]): SafeLoginUrl | null {
   try {
     const parsed = new URL(raw);
     if (parsed.protocol !== "https:" || parsed.username !== "" || parsed.password !== "") return null;
+    if (allowedHosts !== undefined && !allowedHosts.includes(parsed.hostname)) return null;
     return { href: parsed.href, host: parsed.host };
   } catch {
     return null;
   }
+}
+
+/** 모델 로그인이 여는 벤더 주소의 호스트(ADR-0203 증보 L2 ②, 서버 허용목록과 같다). 벤더가 바꾸면 함께 갱신한다. */
+export const MODEL_LOGIN_HOSTS: readonly string[] = ["auth.openai.com", "claude.ai"];
+
+/**
+ * 화면이 셀 수 있는 수명(초). 서버 시각 `expiresAt`는 이 기기의 시계와 어긋날 수 있어서 시작 순간에 한 번만 길이로
+ * 바꾼다(0 이하이거나 15분보다 길면 시계가 어긋난 것으로 보고 5분). 이후는 이 기기의 경과 시간만 쓴다.
+ */
+export function loginTtlSeconds(expiresAt: number, nowMs: number): number {
+  const raw = expiresAt - nowMs / 1000;
+  return raw > 0 && raw <= 900 ? Math.ceil(raw) : 300;
 }
 
 /** 남은 초. 지났으면 0. */
@@ -267,7 +280,8 @@ export const MODEL_LOGIN_COPY = {
   claudeTitle: "Claude 로그인",
   claudeDetail: "주소를 열고 돌아온 코드를 붙여넣어요.",
   keyTitle: "API 키",
-  keyDetail: "위 팀 키 목록의 「API 키 추가」로 키를 넣어요. 키는 이 서버에 저장되고 여기에는 나타나지 않아요.",
+  keyDetail: "API 키는 설정의 AI 화면에서 팀 키로 넣어요. 키는 이 서버에 저장되고 여기에는 나타나지 않아요.",
+  relogin: "다시 로그인",
   connectedPill: "로그인됨",
   notConnectedPill: "로그인 안 됨",
   start: "로그인 시작",
@@ -298,7 +312,7 @@ export const MODEL_LOGIN_COPY = {
   retry: "다시 불러오기",
   offline: "연결이 끊긴 동안에는 로그인할 수 없어요.",
   notCohosted: "같은 서버에 연결한 Hermes 에이전트에서만 로그인할 수 있어요.",
-  shellLead: "이 서버는 로그인 중계가 꺼져 있어요. 터미널에서 이 명령으로 로그인해 주세요.",
+  shellLead: "이 서버에서는 화면 로그인이 꺼져 있어요. Railway 터미널에서 이 명령으로 로그인해 주세요.",
   shellCopy: "명령 복사",
   shellAfter: "명령이 안내하는 주소를 열고 코드를 입력하면 끝나요. 로그인 값은 oort를 지나지 않아요.",
 } as const;

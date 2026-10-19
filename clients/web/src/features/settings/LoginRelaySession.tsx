@@ -4,12 +4,14 @@ import {
   cancelLogin,
   completeLogin,
   isLoginEnded,
+  loginTtlSeconds,
   loginErrorMessage,
   MODEL_LOGIN_COPY as COPY,
   pasteLooksSendable,
   pollLogin,
   safeLoginUrl,
   secondsLeft,
+  MODEL_LOGIN_HOSTS,
   type LoginFlow,
   type LoginStart,
   type LoginStatus,
@@ -52,6 +54,7 @@ export function LoginRelaySession({
   copy,
   onEnded,
   onClose,
+  allowedHosts = MODEL_LOGIN_HOSTS,
 }: {
   workspaceId: string;
   agentId: string;
@@ -62,9 +65,13 @@ export function LoginRelaySession({
   onEnded: (status: LoginStatus) => void;
   /** 사용자가 닫았다. 부모는 `start`를 비운다. */
   onClose: () => void;
+  /** 열어도 되는 벤더 호스트. 앱 로그인(주소가 앱마다 다르다)은 서버의 검사에 맡기고 `undefined`를 넘긴다. */
+  allowedHosts?: readonly string[] | undefined;
 }) {
   const [status, setStatus] = useState<LoginStatus>({ status: "pending", reason: null });
   const [now, setNow] = useState(() => Date.now());
+  // 서버 시각과 이 기기 시계가 어긋나도 즉시 만료되지 않게, 시작 순간에 길이로 바꿔 이 기기의 경과만 센다.
+  const [deadlineSec] = useState(() => Date.now() / 1000 + loginTtlSeconds(start.expiresAt, Date.now()));
   const [sending, setSending] = useState(false);
   const [hasText, setHasText] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -73,7 +80,8 @@ export function LoginRelaySession({
   const endedRef = useRef(false);
   const mountedRef = useRef(false);
   const loginId = start.loginId;
-  const safe = safeLoginUrl(start.url);
+  const safe = safeLoginUrl(start.url, allowedHosts);
+  const openRef = useRef<HTMLAnchorElement>(null);
 
   const finish = (next: LoginStatus) => {
     if (endedRef.current) return;
@@ -95,6 +103,12 @@ export function LoginRelaySession({
       }, 0);
     };
   }, [workspaceId, agentId, flow, loginId]);
+
+  // 새로 선 블록의 첫 행동으로 초점을 옮긴다(누른 단추가 사라지므로 body 로 떨어지지 않게).
+  useEffect(() => {
+    if (start.mode === "paste") pasteRef.current?.focus();
+    else openRef.current?.focus();
+  }, [start.mode]);
 
   // 폴링: 상태 낱말만 온다(주소·코드는 오지 않는다).
   useEffect(() => {
@@ -122,7 +136,7 @@ export function LoginRelaySession({
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
-  const left = secondsLeft(start.expiresAt, now);
+  const left = secondsLeft(deadlineSec, now);
   useEffect(() => {
     if (left === 0 && !endedRef.current) {
       void cancelLogin(workspaceId, agentId, flow, loginId).catch(() => undefined);
@@ -134,7 +148,7 @@ export function LoginRelaySession({
   const send = async () => {
     const input = pasteRef.current;
     if (!input || sending) return;
-    const value = input.value;
+    const value = input.value.trim();
     if (!pasteLooksSendable(value)) return;
     // 읽자마자 비운다. 요청이 오래 걸리거나 실패해도 값은 화면에 남지 않는다.
     input.value = "";
@@ -155,10 +169,13 @@ export function LoginRelaySession({
   const copyCode = () => {
     const code = start.userCode;
     if (code === null || typeof navigator.clipboard?.writeText !== "function") return;
-    void navigator.clipboard.writeText(code).then(() => {
-      setCopied("code");
-      setTimeout(() => setCopied(null), 2000);
-    });
+    void navigator.clipboard
+      .writeText(code)
+      .then(() => {
+        setCopied("code");
+        setTimeout(() => setCopied(null), 2000);
+      })
+      .catch(() => undefined);
   };
 
   const openUrl = (event: React.MouseEvent<HTMLAnchorElement>) => {
@@ -173,12 +190,13 @@ export function LoginRelaySession({
   const seconds = String(left % 60).padStart(2, "0");
 
   return (
-    <div className="mt-2 flex min-w-0 flex-col gap-3 border-t border-line px-2 py-4" data-testid="login-session">
+    <div className="mt-2 flex min-w-0 flex-col gap-3 break-keep border-t border-line py-4" data-testid="login-session">
       {safe === null ? (
         <InlineBanner message="서버가 준 주소를 열 수 없어요. 처음부터 다시 시작해 주세요." testId="login-url-refused" />
       ) : (
         <div className="flex min-w-0 flex-wrap items-center gap-3">
           <a
+            ref={openRef}
             href={safe.href}
             target="_blank"
             rel="noopener noreferrer"
@@ -212,25 +230,27 @@ export function LoginRelaySession({
       {start.mode === "device" ? (
         <p className="break-keep text-body text-ink-muted">{COPY.deviceSteps}</p>
       ) : (
-        <form
-          className="flex min-w-0 flex-col gap-2"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void send();
-          }}
-        >
+        // <form> 이 아니다: 비밀번호 칸이 든 폼의 제출은 브라우저의 「비밀번호 저장」 제안을 부른다.
+        <div className="flex min-w-0 flex-col gap-2">
           <p className="break-keep text-body text-ink-muted">{copy.pasteSteps}</p>
           <label className="flex min-w-0 flex-col gap-1">
             <span className="text-meta text-ink-muted">{copy.pasteLabel}</span>
             <Input
               ref={pasteRef}
               type="password"
-              autoComplete="off"
+              autoComplete="one-time-code"
               autoCorrect="off"
               autoCapitalize="off"
               spellCheck={false}
               disabled={sending || submitted}
+              className="max-w-pane-md"
               onChange={(event) => setHasText(event.currentTarget.value !== "")}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void send();
+                }
+              }}
               data-1p-ignore
               data-testid="login-paste"
             />
@@ -238,9 +258,10 @@ export function LoginRelaySession({
           <span className="text-meta text-ink-muted">{copy.pasteHelp}</span>
           <div>
             <Button
-              type="submit"
+              type="button"
               size="sm"
               className="tap-target"
+              onClick={() => void send()}
               disabled={!hasText || sending || submitted}
               aria-disabled={!hasText || sending || submitted}
               data-testid="login-paste-send"
@@ -249,15 +270,17 @@ export function LoginRelaySession({
               {sending ? COPY.pasteSending : copy.pasteSend}
             </Button>
           </div>
-        </form>
+        </div>
       )}
 
       {sendError !== null && <InlineBanner message={sendError} testId="login-send-error" />}
 
       <div className="flex min-w-0 flex-wrap items-center gap-3">
-        <span role="status" aria-live="polite" className="text-meta text-ink-muted" data-testid="login-status">
-          {submitted ? COPY.submitted : COPY.waiting}
-          {" "}
+        <span className="text-meta text-ink-muted">
+          {/* 읽어 주는 영역은 상태 낱말뿐이다. 1초마다 바뀌는 시간은 밖에 둔다. */}
+          <span role="status" aria-live="polite" data-testid="login-status">
+            {submitted ? COPY.submitted : COPY.waiting}
+          </span>{" "}
           <span data-numeric className="font-mono">
             {minutes}:{seconds}
           </span>
