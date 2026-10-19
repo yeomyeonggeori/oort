@@ -1,0 +1,6 @@
+model:                    # #4082: login: hermes auth add anthropic --type oauth --no-browser (paste code#state; credentials stay in the Hermes volume)
+  provider: anthropic
+  default: claude-sonnet-5
+fallback_model:           # tried when the primary fails (rate limit / overload / connection); login: hermes auth add openai-codex --type oauth --no-browser (device code; credentials stay in the Hermes volume)
+  provider: openai-codex
+  model: gpt-5.6-sol

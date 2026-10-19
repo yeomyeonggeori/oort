@@ -23,7 +23,7 @@ message ordering, and realtime delivery.
 
 | Item | Owner | Storage | oort visibility |
 |---|---|---|---|
-| Codex OAuth authorization code | Hermes/Kim Intern provider | Provider-only transient exchange | Never sent to oort |
+| Codex OAuth authorization code | Hermes/Kim Intern provider | Provider-only transient exchange | Not stored or logged by oort; one-time relay only in the login relay (증보 7) |
 | Codex OAuth access token | Hermes/Kim Intern provider | Provider secret store or memory, according to provider policy | Never sent to oort |
 | Codex OAuth refresh token | Hermes/Kim Intern provider | Provider secret store, encrypted by provider | Never sent to oort |
 | GPT/OpenAI API key | Hermes/Kim Intern provider | Provider secret store, encrypted file, local shell, or memory according to provider policy | Never sent to oort |
@@ -346,3 +346,26 @@ ADR-0147 OAuth 링크의 `oauth.tokenEndpoint`는 URL 게이트 없이 저장되
 - (−) 셀프호스트에서 사설 대역 `https` LLM을 쓰던 설치는 플래그와 호스트 등록이 필요해진다(배포 노트에 싣는다).
 - (−) 프록시 전용 egress 배포는 provider 호출이 끊긴다(D3).
 - 실제 외부 DNS·실제 provider 호출은 runtime-unverified다(PR #2875·#2888 기준).
+
+## 증보 6 (2026-10-19) — Hermes가 보관하는 구독 OAuth(Codex·Claude)
+
+- Status: **Accepted** (2026-10-19, owner 결정 인용). 인용(이슈 #4071, 성재 2026-10-19): 「우리 메신저 대신 hermes oauth로 할때 왜 그게 ADR이 금지한 길이야. 이건 업계에서도 허용된 부분인데. 그냥 해당 ADR금지 부분을 제거해. 당장에 필요하다면 codex oauth로 하고, claude oauth까지 처리할거야. 제로 베이스 온보딩 개선 묶음도 진행 ㄱㄱ 하자.」
+- 기안: Sonnet 5.5 worker(#4071)
+
+- **허용한다.** 운영자가 호스팅하는 Hermes(셀프호스트·클라우드 포함)가 **자기 볼륨에** 보관하는 Codex(ChatGPT 구독)·Claude(구독) OAuth 토큰으로 모델 인증을 하는 경로. 로그인과 갱신은 Hermes 자체 흐름이 하고, 절차는 #4073(Hermes 모델 인증 온보딩)이 정한다.
+- **oort 쪽 경계는 그대로다(ADR-0004).** oort 서버·api·agent-worker·provider_link 금고·DB·로그·감사·매니페스트는 구독 OAuth 토큰(access·refresh)을 받지도, 저장하지도, 중개하지도, 기록하지도 않는다. 일회용 인가 code·기기 코드는 로그인 중계(ADR-0203 증보 「Hermes 로그인 중계」, ADR-0004 증보 7)에서 저장·로그 없이 1회 중계만 한다. 금고에 구독 OAuth kind를 더하지 않는다. oort가 Hermes 접속에 쓰는 자격은 불투명 bearer(`HERMES_API_KEY`) 하나뿐이고 모델 인증 자격이 아니다(대화 내용은 Hermes로 가지만 구독 토큰은 oort를 지나가지 않는다).
+- **사용량과 약관.** 구독 사용량은 그 Hermes **소유자의 구독**에서 나간다(팀원이 Hermes를 불러도 같다). 벤더 약관의 적합성 판단과 책임은 **운영자 몫**이고, oort는 판단하거나 보증하지 않는다. 이 증보 이전의 약관 판단(제3자가 claude.ai 로그인을 제공하거나 토큰을 수집·저장·중개할 수 없다)은 **oort가 하는 일**에 대한 것으로 그대로 남고, Hermes가 자기 볼륨의 구독으로 인증하는 경로의 적합성은 운영자가 판단한다.
+- **적용되지 않는 것(별개 경로).** oort 서버가 구독 CLI를 대신 구동하는 경로를 막는 ADR-0193 D6·D17·D18과 공용(워크스페이스·클라우드) work host 차단(`MOMO_SUBSCRIPTION_AGENTS_ENABLED`, `MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED`, `claude_subscription_agent_paused`)은 **Hermes 경로에는 적용되지 않는다.** 이 증보는 그 코드 동작을 바꾸지 않는다. 서버 내장 구독 에이전트 차단을 풀지는 별도 확인이 필요하다(owner 미결정).
+- **이 ADR의 불변식은 그대로다.** 본문이 금지하는 것은 **oort가** 토큰을 소유·저장·중개·기록하는 일이다. 증보 6은 그 경계를 Claude 구독까지 같은 문장으로 확인하고, provider(Hermes)가 자기 볼륨에서 구독 OAuth를 소유하는 것을 정상 경로로 명시한다(본문 「The provider owns any Codex/OpenAI OAuth flow …」와 같은 구조). `scripts/verify_external_agent_provider.sh`의 fail-fast(oort smoke에 OAuth·키 env를 넘기지 않는다)도 그대로다.
+## 증보 7 (2026-10-19) — 로그인 중계: 일회용 code·기기 코드의 1회 통과 (ADR-0203 증보 「Hermes 로그인 중계」)
+
+- Status: **Accepted** (2026-10-19, owner 결정 인용). 인용(이슈 #4073, 성재 2026-10-19 — 코디네이터 전달): 일회용 인가 code가 oort를 지나가는 것 **허용**, Claude 구독 로그인 **중계함**(Hermes CLI 경유), 사이드카는 **설치 스크립트로 켬**.
+- 기안: Sonnet 5.5 worker (#4073)
+- **개정하는 곳**: 본문 Boundary 표의 「Codex OAuth authorization code — Never sent to oort」 행, Rules 2(요청 본문 금지), Audit의 payload 금지 항목. 증보 6(#4071)의 「토큰(access·refresh·코드)을 받지도·중개하지도 않는다」는 같은 취지로 **「토큰(access·refresh)을 …, 일회용 code·기기 코드는 저장·로그 없이 1회 중계만」으로 고쳤다**(0147·0193·0198·0203의 같은 문장도 동일).
+- **새 규칙**:
+  1. **일회용 인가 code(MCP 앱·Claude 붙여넣기)와 기기 코드(Codex)는 로그인 중계에서만, 운영자 요청 본문 → Hermes 로그인 사이드카로 1회 중계**할 수 있다. oort는 이를 **저장·로그·감사·메트릭·에러 리포트·응답 에러·푸시·Centrifugo에 쓰지 않는다**(마스킹 타입으로 담고, 이 라우트의 본문 로깅을 끈다). 기기 코드는 시작 요청의 응답으로만 나가고 `Cache-Control: no-store`다.
+  2. **토큰(access·refresh)은 여전히 Hermes 소유**다. oort는 받지도 저장하지도 중개하지도 기록하지도 않는다. code는 Hermes 프로세스 안의 PKCE `code_verifier` 없이는 교환할 수 없으므로 oort가 code를 보아도 토큰을 얻을 수 없다.
+  3. 이 중계는 **인스턴스 운영자 전용**이고 사이드카 키(`HERMES_LOGIN_RELAY_KEY`, `HERMES_API_KEY`와 다른 값)가 있을 때만 켜진다. 키가 없으면 꺼진 상태이고 `409 login_relay_off`다.
+  4. `scripts/verify_external_agent_provider.sh`의 fail-fast(oort smoke에 OAuth·키 env를 넘기지 않는다)는 **그대로**다. 로그인 중계 시험은 모의 인가 서버와 표식 값으로 하고 이 검증과 별개 하네스에서 돈다.
+  5. 검증: 표식 토큰·표식 code가 oort `api` 로그·DB 덤프·HTTP 응답·감사 행·사이드카 로그에 0건이어야 하고 `/opt/data`에는 있어야 한다(ADR-0203 증보 red proof 1~2).
+- 본문 표의 해당 행은 위 규칙 1·2로 대체해 읽는다(이 증보가 본문보다 늦다).

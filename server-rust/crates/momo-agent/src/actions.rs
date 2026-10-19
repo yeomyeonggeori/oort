@@ -813,11 +813,14 @@ fn workspace_work_tier_update_args_schema() -> Value {
 /// The official apps `plugin.install` may name, with the name a sentence uses
 /// (ADR-0201 증보 v2 H7; the ids are ADR-0113 증보 P2's official four, held equal to
 /// the server's `routes::plugins::OFFICIAL_PLUGIN_IDS` by a drift test).
-pub const PLUGIN_INSTALL_PLUGINS: [(&str, &str); 4] = [
+pub const PLUGIN_INSTALL_PLUGINS: [(&str, &str); 7] = [
     ("com.momo.plugins.github", "GitHub"),
     ("com.momo.plugins.notion", "Notion"),
     ("com.momo.plugins.linear", "Linear"),
     ("com.momo.plugins.drive", "Google Drive"),
+    ("com.momo.plugins.gmail", "Gmail"),
+    ("com.momo.plugins.google-calendar", "Google Calendar"),
+    ("com.momo.plugins.google-drive", "Google 내 드라이브"),
 ];
 
 /// `plugin.install`'s contract (ADR-0201 증보 v2 H7; the row is in [`ACTIONS`] since
@@ -2190,7 +2193,10 @@ mod tests {
                 "com.momo.plugins.github",
                 "com.momo.plugins.notion",
                 "com.momo.plugins.linear",
-                "com.momo.plugins.drive"
+                "com.momo.plugins.drive",
+                "com.momo.plugins.gmail",
+                "com.momo.plugins.google-calendar",
+                "com.momo.plugins.google-drive"
             ])
         );
         assert_eq!(action.args_schema(), schema);

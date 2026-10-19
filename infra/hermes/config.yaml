@@ -1,0 +1,45 @@
+# oort default Hermes config (ADR-0203 D6 tool lock; #4072). The compose `agents` profile mounts this read-only
+# and the Railway `hermes` service receives it base64 in HERMES_CONFIG_B64. It is copied to /opt/data/config.yaml on
+# EVERY start and checked by lockgate.py BEFORE the Hermes entrypoint (so before any listener) runs.
+# Deny-list is Hermes' only switch (agent.disabled_toolsets); lockgate.py adds the allow-list.
+# Remaining chat-only surface after this list: memory, todo, session_search.
+#
+# No `model:` section and no `mcp_servers` on purpose. Model auth (API key / OAuth) is a separate step
+# (#4073): without it Hermes still starts and answers /health and /v1/models, and the first chat turn fails
+# until a model is set. `mcp_servers` empty = no connector mode (see google-connectors.config.yaml for that).
+agent:
+  max_turns: 12           # chat-only agent: bound tool-loop cost (Hermes default is 500)
+  disabled_toolsets:
+    - terminal        # OWNER-MANDATED. Shell: terminal + process_manage (a tool inside this toolset, not a toolset). Verified: ran an echo with no approval
+    - code_execution  # OWNER-MANDATED. execute_code (arbitrary Python)
+    - browser         # OWNER-MANDATED. browser_* incl. browser_exec (drives Chromium)
+    - file            # read_file/write_file/patch/search_files: verified to read /opt/data/.env and write anywhere under /opt/data (sessions and memories live in the same tree); Hermes itself guards config.yaml
+    - connections     # manage_connections: links hosted connectors and installs local MCP servers from a catalog (a way around the terminal lock)
+    - delegation      # delegate_task: sub-agents (children inherit this list; off for cost and blast radius)
+    - cronjob         # cronjob_manage: unattended scheduled runs that outlive the chat
+    - computer_use    # desktop control (Hermes already drops it for api_server; explicit on purpose)
+    - web             # web_search/web_extract: model-directed outbound fetches = exfil path for chat content (private ranges are blocked by Hermes)
+    - vision          # vision_analyze: model-chosen image URLs or paths
+    - image_gen       # image_generate (outbound provider call)
+    - video           # video_analyze
+    - video_gen       # video generation and editing
+    - x_search        # X (Twitter) search
+    - skills          # skill_manage writes persistent instructions that outlive the chat (verified: creates a skill on the volume)
+    - tts             # text_to_speech
+    - stt             # speech-to-text
+    - kanban          # kanban_* task board
+    - context_engine  # context engine plugin
+    - clarify         # interactive clarify (no human in API mode; Hermes drops it anyway)
+    - discord         # discord messaging tool
+    - discord_admin   # discord admin tool
+    - yuanbao         # yuanbao messaging tools
+    - a2a             # agent-to-agent calls to other endpoints
+approvals:
+  mode: manual            # never "off"; no HERMES_YOLO_MODE
+  unattended_mode: deny   # API sessions cannot approve anything
+telemetry:
+  shared_metrics:
+    enabled: false        # explicit: nothing is collected or sent to Nous
+    send: false
+updates:
+  check: false            # no passive version checks (image is pinned by digest)

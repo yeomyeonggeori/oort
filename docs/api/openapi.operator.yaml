@@ -286,7 +286,324 @@ paths:
         "403":
           description: Not an active member of the caller's workspace.
 
+  /v1/workspaces/{ws}/agents/{agent}/model-login:
+    get:
+      operationId: getModelLoginTargets
+      summary: Which provider logins (Codex, Claude) are connected (the relay's non-secret signal)
+      description: >-
+        Instance operator only; the agent must be the caller's own co-hosted Hermes (pinned `operator_env`).
+        `providers` only. `409 login_relay_off` when `HERMES_LOGIN_RELAY_URL` / `HERMES_LOGIN_RELAY_KEY` are not
+        both set (the screen then shows the shell command). `Cache-Control: no-store`.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentId"
+      responses:
+        "200":
+          description: Targets and whether each holds a login. No token, no code.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginRelayTargets"
+        "403":
+          description: Not a listed instance operator, or not the operator who connected this agent.
+        "409":
+          description: >-
+            `login_relay_off`, or `login_not_cohosted` (the agent is not pinned to the operator's own Hermes).
+        "502":
+          description: The relay did not answer (`login_relay_unreachable`) or answered out of shape.
+    post:
+      operationId: startModelLogin
+      summary: "Start a login (provider subscription login: openai-codex or anthropic)"
+      description: >-
+        Starts one vendor login inside Hermes through the relay sidecar (a fixed command list; the request never
+        chooses a command). The response carries the authorization URL and, for Codex, the device code **once**:
+        they are not stored, logged or audited, and the response is `Cache-Control: no-store`. At most one login
+        per target; six starts per operator per minute. One audit line (actor, kind/target, a closed result word).
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [provider]
+              properties:
+                provider:
+                  type: string
+      responses:
+        "200":
+          description: Login started.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginRelayStart"
+        "400":
+          description: Unknown field or an unusable name.
+        "403":
+          description: Not a listed instance operator, or not the operator who connected this agent.
+        "409":
+          description: >-
+            `login_relay_off`, `login_not_cohosted`, `login_in_progress`; for an app login also
+            `connector_trial_members` (not exactly one active person) and `connector_trial_shared` (another agent
+            is pinned to the same Hermes).
+        "429":
+          description: Too many starts.
+        "502":
+          description: The relay did not answer, refused to start, or the vendor URL/code was not parseable.
+  /v1/workspaces/{ws}/agents/{agent}/model-login/{login_id}:
+    get:
+      operationId: pollModelLogin
+      summary: Poll a login
+      description: >-
+        The state only (`pending | submitted | done | failed | expired | cancelled`, plus a reason from a closed
+        set). Never the URL or the code. The first poll that sees an end writes the one result audit line.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentId"
+        - $ref: "#/components/parameters/LoginId"
+      responses:
+        "200":
+          description: Current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginRelayStatus"
+        "403":
+          description: Not the operator who started this login (`login_forbidden`).
+        "404":
+          description: Unknown or already-erased login (`login_not_found`).
+    delete:
+      operationId: cancelModelLogin
+      summary: Cancel a login
+      description: Ends the login and its whole process group inside Hermes.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentId"
+        - $ref: "#/components/parameters/LoginId"
+      responses:
+        "200":
+          description: Cancelled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginRelayStatus"
+        "403":
+          description: Not the operator who started this login.
+        "404":
+          description: Unknown or already-erased login.
+  /v1/workspaces/{ws}/agents/{agent}/model-login/{login_id}/complete:
+    post:
+      operationId: completeModelLogin
+      summary: Hand the pasted value to the login (paste mode, once)
+      description: >-
+        The Claude `code#state` or the MCP app's address-bar URL. It is the **one** secret that crosses oort
+        (ADR-0004 증보 7, Q1): read as a masked value, shape-checked here (non-empty, at most 2048 printable ASCII
+        characters, no line break), forwarded to the sidecar unchanged within the request, and never stored, logged,
+        audited, echoed in an error, pushed or published. The sidecar checks `state` and the redirect, rebuilds the
+        line and accepts it once. Twelve per operator per minute.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentId"
+        - $ref: "#/components/parameters/LoginId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [pasted]
+              properties:
+                pasted:
+                  type: string
+                  maxLength: 2048
+      responses:
+        "200":
+          description: Accepted (`submitted`); poll for the end.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginRelayStatus"
+        "400":
+          description: >-
+            `bad_paste` | `state_mismatch` | `redirect_mismatch` | `extra_params` (fixed text; the value is never echoed).
+        "403":
+          description: Not the operator who started this login.
+        "404":
+          description: Unknown or already-erased login.
+        "409":
+          description: '`already_submitted`, `not_paste_mode` (Codex), `login_not_pending`.'
+  /v1/workspaces/{ws}/agents/{agent}/app-login:
+    get:
+      operationId: getAppLoginTargets
+      summary: Which MCP app logins are connected (the relay's non-secret signal)
+      description: >-
+        Instance operator only; the agent must be the caller's own co-hosted Hermes (pinned `operator_env`).
+        `apps` only. `409 login_relay_off` when `HERMES_LOGIN_RELAY_URL` / `HERMES_LOGIN_RELAY_KEY` are not
+        both set (the screen then shows the shell command). `Cache-Control: no-store`.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentId"
+      responses:
+        "200":
+          description: Targets and whether each holds a login. No token, no code.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginRelayTargets"
+        "403":
+          description: Not a listed instance operator, or not the operator who connected this agent.
+        "409":
+          description: >-
+            `login_relay_off`, or `login_not_cohosted` (the agent is not pinned to the operator's own Hermes).
+        "502":
+          description: The relay did not answer (`login_relay_unreachable`) or answered out of shape.
+    post:
+      operationId: startAppLogin
+      summary: "Start a login (an MCP app configured in Hermes with auth: oauth)"
+      description: >-
+        Starts one vendor login inside Hermes through the relay sidecar (a fixed command list; the request never
+        chooses a command). The response carries the authorization URL and, for Codex, the device code **once**:
+        they are not stored, logged or audited, and the response is `Cache-Control: no-store`. At most one login
+        per target; six starts per operator per minute. One audit line (actor, kind/target, a closed result word).
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [app]
+              properties:
+                app:
+                  type: string
+      responses:
+        "200":
+          description: Login started.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginRelayStart"
+        "400":
+          description: Unknown field or an unusable name.
+        "403":
+          description: Not a listed instance operator, or not the operator who connected this agent.
+        "409":
+          description: >-
+            `login_relay_off`, `login_not_cohosted`, `login_in_progress`; for an app login also
+            `connector_trial_members` (not exactly one active person) and `connector_trial_shared` (another agent
+            is pinned to the same Hermes).
+        "429":
+          description: Too many starts.
+        "502":
+          description: The relay did not answer, refused to start, or the vendor URL/code was not parseable.
+  /v1/workspaces/{ws}/agents/{agent}/app-login/{login_id}:
+    get:
+      operationId: pollAppLogin
+      summary: Poll a login
+      description: >-
+        The state only (`pending | submitted | done | failed | expired | cancelled`, plus a reason from a closed
+        set). Never the URL or the code. The first poll that sees an end writes the one result audit line.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentId"
+        - $ref: "#/components/parameters/LoginId"
+      responses:
+        "200":
+          description: Current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginRelayStatus"
+        "403":
+          description: Not the operator who started this login (`login_forbidden`).
+        "404":
+          description: Unknown or already-erased login (`login_not_found`).
+    delete:
+      operationId: cancelAppLogin
+      summary: Cancel a login
+      description: Ends the login and its whole process group inside Hermes.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentId"
+        - $ref: "#/components/parameters/LoginId"
+      responses:
+        "200":
+          description: Cancelled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginRelayStatus"
+        "403":
+          description: Not the operator who started this login.
+        "404":
+          description: Unknown or already-erased login.
+  /v1/workspaces/{ws}/agents/{agent}/app-login/{login_id}/complete:
+    post:
+      operationId: completeAppLogin
+      summary: Hand the pasted value to the login (paste mode, once)
+      description: >-
+        The Claude `code#state` or the MCP app's address-bar URL. It is the **one** secret that crosses oort
+        (ADR-0004 증보 7, Q1): read as a masked value, shape-checked here (non-empty, at most 2048 printable ASCII
+        characters, no line break), forwarded to the sidecar unchanged within the request, and never stored, logged,
+        audited, echoed in an error, pushed or published. The sidecar checks `state` and the redirect, rebuilds the
+        line and accepts it once. Twelve per operator per minute.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentId"
+        - $ref: "#/components/parameters/LoginId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [pasted]
+              properties:
+                pasted:
+                  type: string
+                  maxLength: 2048
+      responses:
+        "200":
+          description: Accepted (`submitted`); poll for the end.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginRelayStatus"
+        "400":
+          description: >-
+            `bad_paste` | `state_mismatch` | `redirect_mismatch` | `extra_params` (fixed text; the value is never echoed).
+        "403":
+          description: Not the operator who started this login.
+        "404":
+          description: Unknown or already-erased login.
+        "409":
+          description: '`already_submitted`, `not_paste_mode` (Codex), `login_not_pending`.'
 components:
+  parameters:
+    WorkspaceId:
+      name: ws
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    AgentId:
+      name: agent
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    LoginId:
+      name: login_id
+      in: path
+      required: true
+      description: The sidecar's opaque id (16-64 of `A-Za-z0-9_-`). Relayed, never stored by oort.
+      schema: { type: string, pattern: '^[A-Za-z0-9_-]{16,64}$' }
   securitySchemes:
     agentBearerAuth:
       type: http
@@ -746,3 +1063,84 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ProviderQuotaSnapshot"
+    LoginRelayStart:
+      type: object
+      additionalProperties: false
+      required: [schema, loginId, mode, url, expiresAt]
+      properties:
+        schema: { type: string, enum: ["momo.login_relay.start.v0"] }
+        loginId: { type: string }
+        mode:
+          type: string
+          enum: [device, paste]
+          description: "`device` (Codex: show URL + code, poll) | `paste` (open the URL, paste back what the vendor shows)."
+        url:
+          type: string
+          description: Validated by the sidecar (https, host allow-list, one guidance line). For the screen once.
+        userCode:
+          type: string
+          description: Codex device code. In this response only.
+        expiresAt: { type: integer, format: int64 }
+    LoginRelayStatus:
+      type: object
+      additionalProperties: false
+      required: [schema, status]
+      properties:
+        schema: { type: string, enum: ["momo.login_relay.status.v0"] }
+        status: { type: string, enum: [pending, submitted, done, failed, expired, cancelled] }
+        reason:
+          type: string
+          enum: [state_mismatch, timeout, vendor_denied, exit_nonzero, exit_unsubmitted, cancelled, too_many_attempts, start_timeout, parse_failed, url_rejected, other]
+    LoginRelayTargets:
+      type: object
+      additionalProperties: false
+      required: [schema, targets]
+      properties:
+        schema: { type: string, enum: ["momo.login_relay.targets.v0"] }
+        targets:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [target, connected]
+            properties:
+              target: { type: string }
+              connected: { type: boolean }
+              estimated:
+                $ref: "#/components/schemas/LoginRelayEstimate"
+    LoginRelayEstimate:
+      type: object
+      additionalProperties: false
+      required: [basis]
+      description: >-
+        An ESTIMATE, never a fact: Hermes writes no structured refresh-failure signal, so oort cannot tell that a
+        login has expired, only guess when it may. Present only on app (`app-login`) targets that are `connected`;
+        absent when the relay predates it. Non-secret: a clock reading and a closed vocabulary, never a token, a
+        code or a log line. The screen words it as "about / may" and keeps `connected` as the only fact.
+      properties:
+        basis:
+          type: string
+          enum: [relay_observed_login, token_file_mtime, none]
+          description: >-
+            `relay_observed_login`: the relay watched this app's login finish (`issuedAt` is that moment; it
+            kept in the relay's own private directory: it survives a relay process restart, not a container restart, after which the basis falls back to `token_file_mtime`). `token_file_mtime`: the relay did not see
+            the login; `issuedAt` is the token file's last write, which a routine access-token refresh also moves,
+            so it is a lower bound on age only. `none`: no reading.
+        issuedAt: { type: integer, format: int64, description: "Unix seconds. Omitted when `basis` is `none`." }
+        testMode:
+          type: boolean
+          description: >-
+            The operator declared (`HERMES_APP_LOGIN_GOOGLE_PUBLISHING=testing` on the oort server) that the Google
+            OAuth project is External and in Testing: Google then expires a refresh token about 7 days after consent.
+            Only the three Google apps (gmail, google_calendar, google_drive) carry it. Omitted = not declared;
+            oort does not read the project's real status.
+        expiresAt:
+          type: integer
+          format: int64
+          description: "Estimate: `issuedAt` + 7 days. Only when `testMode` is true and `basis` is `relay_observed_login`."
+        note:
+          type: string
+          enum: [google_testing_refresh_7d, token_age_unknown_start]
+          description: >-
+            Fixed words for the screen to map to its own copy: `google_testing_refresh_7d` (testMode, the 7-day
+            rule applies), `token_age_unknown_start` (login time not observed; the age is a lower bound).

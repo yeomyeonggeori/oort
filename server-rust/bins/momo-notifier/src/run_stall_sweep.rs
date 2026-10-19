@@ -29,7 +29,8 @@
 //! and one audit row says why. The actor is the clock, not a member.
 
 use momo_agent::{
-    end_stalled_run_in_tx, run_trigger_message_in_tx, RunStatus, PROP_ANSWERS_MESSAGE_ID,
+    end_stalled_run_in_tx, run_trigger_message_in_tx, stall_app_notice, RunStatus,
+    PROP_ANSWERS_MESSAGE_ID, PROP_APP_NOTICE,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_tenant_tx, DbError, PgConnection, PgPool};
@@ -147,6 +148,24 @@ async fn sweep_workspace_in_tx(
 /// not light up with weeks-old "the agent did not respond" notices.
 const QUIET_AFTER_DAYS: i64 = 7;
 
+/// Does this agent have apps attached (`agent.connector_owner_human_id`)? A plain read
+/// inside the sweep's tenant transaction.
+async fn agent_has_apps_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<bool, DbError> {
+    let has: Option<bool> = momo_db::sqlx::query_scalar(
+        "SELECT connector_owner_human_id IS NOT NULL \
+           FROM agent WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(has.unwrap_or(false))
+}
+
 /// End one stalled run. `Ok(false)` = the run turned out not to be stalled after all.
 async fn settle_stalled_run_in_tx(
     conn: &mut PgConnection,
@@ -217,6 +236,19 @@ async fn settle_stalled_run_in_tx(
         ) {
             object.insert(PROP_ANSWERS_MESSAGE_ID.into(), json!(trigger.to_string()));
         }
+        // ADR-0113 증보 2 E8 (#4054): a silent site is a fact the SERVER observed (the
+        // lease nobody renewed → `site_silent`; a job nobody took → `site_off`), so it says so itself — and only for an agent
+        // that has apps attached, where the apps surface is the one reading this key.
+        // `site` stays off: a hosted connection is not known to be a Mac or Hermes.
+        if let (Some(notice), Some(object)) = (
+            stall_app_notice(
+                run.kind.code(),
+                agent_has_apps_in_tx(&mut *conn, workspace_id, run.agent_member_id).await?,
+            ),
+            props.as_object_mut(),
+        ) {
+            object.insert(PROP_APP_NOTICE.into(), notice.to_json());
+        }
         send_message_in_tx(
             &mut *conn,
             workspace_id,
@@ -254,4 +286,31 @@ async fn settle_stalled_run_in_tx(
     )
     .await?;
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use momo_agent::AppNoticeKind;
+
+    /// #4054 — `momo_agent::stall_app_notice` matches the stall's closed code by
+    /// string (the agent crate cannot see `StallKind`); this pins the two spellings to
+    /// the real codes, so renaming one without the other fails here, not in production.
+    #[test]
+    fn the_stall_codes_map_to_the_two_site_facts() {
+        let kind_of =
+            |kind: StallKind| stall_app_notice(kind.code(), true).map(|notice| notice.kind);
+        assert_eq!(
+            kind_of(StallKind::LeaseAbandoned),
+            Some(AppNoticeKind::SiteSilent)
+        );
+        assert_eq!(
+            kind_of(StallKind::UnclaimedExpired),
+            Some(AppNoticeKind::SiteOff)
+        );
+        assert_eq!(
+            stall_app_notice(StallKind::LeaseAbandoned.code(), false),
+            None
+        );
+    }
 }

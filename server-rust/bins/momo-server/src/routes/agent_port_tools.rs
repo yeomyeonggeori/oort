@@ -78,6 +78,7 @@ use crate::routes::agent_gateway::{
     ReportStanding,
 };
 use crate::routes::agent_mentions::{route_agent_mentions_in_tx, MentionSend};
+use crate::routes::app_notice::validated_app_notice;
 use crate::routes::apps_used::validated_apps_used;
 use crate::AppState;
 
@@ -1106,6 +1107,11 @@ fn projected_job_payload(payload: &Value) -> Value {
         // (`"thread_reply"`); a mention's job has no such key, so its projection
         // is byte-for-byte what it was.
         ("wake_reason", "wakeReason"),
+        // ADR-0113 증보 2 E10 (#4054): the 「요약만」 instruction for a job whose granted
+        // apps include a personal one. A fixed server sentence plus app ids; absent
+        // when the job asks nothing, so an ordinary job's projection is unchanged.
+        // (`tool_grants`, the grant evidence, is deliberately NOT projected.)
+        (momo_agent::APP_RESULT_POLICY_KEY, "appResultPolicy"),
     ] {
         if let Some(value) = payload.get(source) {
             projected.insert(target.to_string(), value.clone());
@@ -1746,6 +1752,11 @@ async fn run_complete(
     // without (or with a corrected) `appsUsed`.
     let apps_used =
         validated_apps_used(args.get("appsUsed")).map_err(|_| ToolFailure::InvalidArguments)?;
+    // #4054 — the site's 「막힘」 report, refused whole when malformed (the agent
+    // can fix its call). A hosted connection cannot be told to be a Mac or Hermes
+    // from here, so the notice carries no `site`.
+    let app_notice = validated_app_notice(args.get("appNotice"), None)
+        .map_err(|_| ToolFailure::InvalidArguments)?;
     let secret = state.agent_port.envelope_secret().to_string();
     let subscription_agents_enabled = state.agent_port.config.subscription_agents_enabled;
     let claude_subscription_agents_enabled =
@@ -1824,6 +1835,7 @@ async fn run_complete(
                     usage_detail,
                     artifacts,
                     apps_used,
+                    app_notice,
                     actor_member_id: Some(caller.agent_member_id),
                     via_token_id: Some(caller.token_id),
                     subscription_agents_enabled,
@@ -2917,6 +2929,26 @@ mod tests {
     #[test]
     fn a_digest_is_spelled_as_lowercase_hex() {
         assert_eq!(hex_lower(&[0x00, 0x0f, 0xa5, 0xff]), "000fa5ff");
+    }
+
+    /// #4054 — the 「요약만」 instruction reaches the hosted adapter (the projection is
+    /// an allow-list, so an unlisted key would be written and never delivered), and
+    /// the grant evidence it follows from still does not.
+    #[test]
+    fn the_summary_only_instruction_is_projected_and_the_grant_evidence_is_not() {
+        let policy = momo_agent::app_result_policy(["gmail"]).expect("a personal app");
+        let payload = json!({
+            "channel_id": "5B1F4A2E-0000-4000-8000-000000000004",
+            "prompt": "hello",
+            "tool_grants": [{"grantId": "G", "pluginId": "gmail", "scope": "s", "tools": ["t"]}],
+            momo_agent::APP_RESULT_POLICY_KEY: policy.clone(),
+        });
+        let projected = projected_job_payload(&payload);
+        assert_eq!(projected["appResultPolicy"], policy);
+        assert!(projected.get("tool_grants").is_none());
+        assert!(projected.get("toolGrants").is_none());
+        let plain = projected_job_payload(&json!({"prompt": "hello"}));
+        assert!(plain.get("appResultPolicy").is_none());
     }
 
     #[test]

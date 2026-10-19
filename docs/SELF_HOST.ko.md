@@ -397,6 +397,42 @@ copy 모드는 `plugin.yaml` 옆에 대문자 `PLUGIN.yaml` 도 쓴다(대소문
 [`external-agent-provider/hermes-gateway-native-platform.md`](external-agent-provider/hermes-gateway-native-platform.md)
 를 본다.
 
+### 같은 서버의 Hermes (`--with-agents`)
+
+스택과 함께 Hermes가 뜨고 설정 › AI 연결에 「같은 서버의 Hermes」 카드가 env 손질
+없이 나타나게 하려면, env를 만들 때(또는 나중에 덧붙일 때) 플래그 하나를 더해요:
+
+```sh
+scripts/self_host_env.sh --local-build --with-agents      # 또는 --published-image "$IMAGE_REF" --with-agents
+scripts/self_host_env.sh --compose up -d --wait
+```
+
+이 플래그는 `COMPOSE_PROFILES=agents`, 생성된 `HERMES_API_KEY`,
+`HERMES_BASE_URL=http://hermes:8642/v1`, `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`,
+정확한 호스트 `hermes`의 `AGENT_PROVIDER_LOCAL_HOSTS`(두 플래그를 같이 쓰면
+`host.docker.internal`과 합쳐요), `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`을 써요
+(`oort_cohosted_agent_env_keys`). 플래그가 없으면 이 중 아무것도 없고 Hermes도 뜨지
+않아요.
+
+- `hermes` 서비스는 digest로 고정한 공식 이미지이고, 사설 네트워크에만 있으며 공개
+  포트가 없어요. Hermes 엔트리포인트 앞에서 `infra/hermes/lockgate.py gate`(toolset
+  24개 끔, 대화 전용 허용목록)를 돌려요. 게이트가 실패하면 컨테이너는 재시작만
+  반복하고 listen하지 않아서, 프로브는 잠기지 않은 Hermes 대신 `unreachable`(연결 불가)을
+  보고해요.
+- `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`은 운영자 본인의 선언이고 여기서는 게이트가
+  뒷받침해요. `infra/hermes/config.yaml`이나 시작 명령을 고치면 그 뒷받침은 운영자가
+  직접 책임져요.
+- Hermes의 데이터(`hermesdata` 볼륨 → `/opt/data`)는 oort DB와 `oort backup` 밖에
+  있어요. 백업은 직접 하세요. `down -v`는 이 볼륨도 지워요.
+- 모델 인증은 별도 단계예요(#4073). 없어도 카드는 보이고, 대화 한 번은 「Hermes가
+  아직 모델 provider에 연결되지 않았다」고 답해요.
+- 기존 env에서 생성된 키는 다시 만들지 않고, 나머지 키는 번들 값으로 맞춰요(직접 비워 둔
+  값도 바뀌어요). 이미 다른 `HERMES_BASE_URL`을 선언한 env는 거절해요. 적용 뒤 api·agent-worker를 다시
+  만드세요(`--compose up -d`).
+
+수동 절차와 Railway 모양은 `SELF_HOST_AGENT.md` §3.4.1,
+`infra/railway/README.md`(Hermes)를 보세요.
+
 ### 무엇이 즉시 반영되고 무엇이 재시작을 요구하나
 
 한 줄로 갈린다. **키는 행이고 허용목록은 프로세스 env다.**
@@ -513,6 +549,13 @@ D17). 정확히 `true`일 때만 로그인 직후 대행 등록이 Claude Code �
 `brainUnavailableReason`을 싣는다. Codex 에이전트는 영향이 없다. 꺼져 있으면 워크스페이스 범위·클라우드 work host(공용
 컴퓨터)에서 Claude Code 작업도 시작되지 않고(`409 claude_subscription_agent_paused`,
 #3431) 본인 소유 host는 영향이 없다. 바꾼 뒤 **api**와 **agent-worker**를 재시작한다.
+
+**이 스위치들은 Hermes에는 적용되지 않는다.** oort 서버가 구동하는 구독 에이전트를
+거르는 것이다. 직접 호스팅한 Hermes가 자기 볼륨에 보관한 Codex·Claude 구독
+OAuth로 모델 인증을 하는 경로는 별개이고 허용된다([ADR-0193](adr/0193-onboarding-2-subscription-agent-boundary.md)
+증보 2026-10-19, owner 결정 #4071). oort 서버와 금고는 그 토큰을 받지도 저장하지도
+기록하지도 않는다. 사용량은 Hermes에 로그인한 사람의 구독에서 나가고, 벤더 약관
+판단은 운영자 몫이다. `SELF_HOST_AGENT.ko.md` §3.4.1을 본다.
 
 ---
 

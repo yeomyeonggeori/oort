@@ -82,6 +82,8 @@ pub struct Config {
     pub github: GithubAppSettings,
     /// ADR-0203 — the operator's declaration about a co-hosted agent.
     pub cohosted: CohostedAgentConfig,
+    /// #4079: the Hermes login relay (`HERMES_LOGIN_RELAY_URL` + `HERMES_LOGIN_RELAY_KEY`).
+    pub login_relay: LoginRelayConfig,
     /// MOMO-300 rate-limit knobs (B4.3) — consumed by the public join and
     /// claim writes. **On by default**, because those routes are unauthenticated
     /// writes on the instance.
@@ -1715,6 +1717,125 @@ impl CohostedAgentConfig {
     }
 }
 
+/// #4079 (ADR-0203 증보 2026-10-19 L2·L4, Q3): where the Hermes login relay sidecar listens and the key it
+/// wants. **Both or neither**: with either missing (or a key that is not 32-256 characters of
+/// `[A-Za-z0-9._~+/=-]`, which also refuses an unresolved `${{shared.X}}` reference left in the variable) the
+/// relay is off, every route answers `409 login_relay_off` and the screen shows the shell command instead.
+/// The key is its own secret, never the chat key (`HERMES_API_KEY`). `Debug` never prints it.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct LoginRelayConfig {
+    url: Option<String>,
+    key: Option<String>,
+    /// #4081: the operator declared (`HERMES_APP_LOGIN_GOOGLE_PUBLISHING=testing`) that the Google OAuth project is
+    /// External and in Testing, where Google expires a refresh token about 7 days after consent. oort cannot read
+    /// the project's real status, so this is a declaration and the screen words it as one.
+    google_testing: bool,
+}
+
+impl std::fmt::Debug for LoginRelayConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LoginRelayConfig")
+            .field(
+                "url",
+                &self
+                    .url
+                    .as_deref()
+                    .map(momo_settings::redacted_endpoint_label),
+            )
+            .field("key", &self.key.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
+}
+
+impl LoginRelayConfig {
+    pub fn new(url: impl Into<String>, key: impl Into<String>) -> Self {
+        let (url, key) = (url.into(), key.into());
+        LoginRelayConfig::from_lookup(|name| match name {
+            "HERMES_LOGIN_RELAY_URL" => Some(url.clone()),
+            "HERMES_LOGIN_RELAY_KEY" => Some(key.clone()),
+            _ => None,
+        })
+    }
+
+    pub fn from_env() -> Self {
+        Self::from_lookup(env)
+    }
+
+    pub fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> Self {
+        let url = lookup("HERMES_LOGIN_RELAY_URL")
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+        let key = lookup("HERMES_LOGIN_RELAY_KEY")
+            .map(|v| v.trim().to_string())
+            .filter(|k| {
+                (32..=256).contains(&k.len())
+                    && k.bytes().all(|b| {
+                        b.is_ascii_alphanumeric()
+                            || matches!(b, b'.' | b'_' | b'~' | b'+' | b'/' | b'=' | b'-')
+                    })
+            });
+        match (url, key) {
+            (Some(url), Some(key)) => LoginRelayConfig {
+                url: Some(url),
+                key: Some(key),
+                google_testing: lookup("HERMES_APP_LOGIN_GOOGLE_PUBLISHING")
+                    .is_some_and(|v| v.trim().eq_ignore_ascii_case("testing")),
+            },
+            _ => LoginRelayConfig::default(),
+        }
+    }
+
+    /// Declare (or not) the Google OAuth project as External + Testing, as `HERMES_APP_LOGIN_GOOGLE_PUBLISHING=testing` does.
+    pub fn with_google_testing(mut self, on: bool) -> Self {
+        self.google_testing = on;
+        self
+    }
+
+    /// Whether the operator declared the Google OAuth project as External + Testing (7-day refresh expiry).
+    pub fn google_testing(&self) -> bool {
+        self.google_testing
+    }
+
+    pub fn configured(&self) -> bool {
+        self.url.is_some() && self.key.is_some()
+    }
+
+    /// The address passes the same write gate as `HERMES_BASE_URL` (plaintext `http://` for a non-public host
+    /// needs the operator's own `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK` + exact `AGENT_PROVIDER_LOCAL_HOSTS`),
+    /// and `None` means off.
+    pub fn target(&self, settings: &SettingsConfig) -> Option<momo_provider_probe::RelayTarget> {
+        let (url, key) = (self.url.as_ref()?, self.key.as_ref()?);
+        let approved = momo_settings::validated_base_url(
+            url,
+            &settings.environment,
+            settings.env_provider.allow_local_loopback,
+        )
+        .ok()?;
+        // The relay is dialled at its origin only; a path would pass the write gate and then fail every call,
+        // which reads as a broken request. Off is the honest answer for such a value.
+        let has_path = approved
+            .split_once("://")
+            .and_then(|(_, rest)| rest.split_once('/'))
+            .is_some_and(|(_, path)| !path.is_empty());
+        if has_path {
+            return None;
+        }
+        Some(momo_provider_probe::RelayTarget {
+            base_url: approved,
+            key: key.clone(),
+        })
+    }
+
+    /// The egress policy for the relay hop: the operator's policy plus the relay host as an **exact-match**
+    /// opt-in (the sidecar lives on an internal host the public-address rule would otherwise refuse).
+    pub fn egress_policy(&self, base: momo_settings::EgressPolicy) -> momo_settings::EgressPolicy {
+        match &self.url {
+            Some(url) if self.configured() => base.with_operator_base_url(url),
+            _ => base,
+        }
+    }
+}
+
 /// #2960: the egress policy the 「연결 확인」 probe dials under — the same inputs
 /// the agent-worker's provider client reads (`bins/momo-agent-worker/src/config.rs`
 /// `egress_policy`), so the probe reaches exactly what a real turn would. There
@@ -2218,6 +2339,7 @@ impl Config {
         // discovered after a leak.
         let settings = SettingsConfig::from_env();
         let cohosted = CohostedAgentConfig::from_env();
+        let login_relay = LoginRelayConfig::from_env();
         if let Some(message) = settings.boot_error(&jwt_secret, &webhook) {
             return Err(ConfigError::InvalidSecurity(message));
         }
@@ -2260,6 +2382,7 @@ impl Config {
             settings,
             github,
             cohosted,
+            login_relay,
             rate_limit: RateLimitConfig::from_env(),
             agent_port: AgentPortConfig::from_env()?,
             mentions: MentionSettings::from_env(),

@@ -103,6 +103,15 @@ const SERVER_OWNED_PROPS_KEYS: [&str; 5] = [
     PROP_ANSWERS_MESSAGE_ID,
 ];
 
+/// ADR-0113 증보 2 E8·E10 (#4054) — `app_notice`, `appsUsed` (and its `apps_used`
+/// alias) are server-owned too: the clients print a sentence and a 「쓴 앱」 receipt
+/// off them under the agent's name, so a props map any member can write is not
+/// somewhere those can be sourced from. Only the completion transaction and the
+/// sweeps write them ([`momo_agent::SERVER_OWNED_APP_PROPS_KEYS`]).
+pub(crate) fn is_server_owned_props_key(key: &str) -> bool {
+    SERVER_OWNED_PROPS_KEYS.contains(&key) || momo_agent::SERVER_OWNED_APP_PROPS_KEYS.contains(&key)
+}
+
 /// `momo.instruction` — see [`crate::routes::work_instructions`].
 const INSTRUCTION_PROPS_KEY: &str = crate::routes::work_instructions::PROPS_KEY;
 
@@ -138,7 +147,7 @@ fn props_value(props: Option<&std::collections::BTreeMap<String, String>>) -> Va
     let mut object = Map::new();
     if let Some(props) = props {
         for (key, value) in props {
-            if SERVER_OWNED_PROPS_KEYS.contains(&key.as_str()) {
+            if is_server_owned_props_key(key) || momo_webhook::is_github_owned_prop(key, value) {
                 continue;
             }
             object.insert(key.clone(), Value::String(value.clone()));
@@ -1760,6 +1769,24 @@ mod tests {
     }
 
     #[test]
+    fn client_props_cannot_forge_a_github_notification() {
+        let mut props = std::collections::BTreeMap::new();
+        props.insert("source".to_string(), "github".to_string());
+        props.insert("github_event".to_string(), "pull_request".to_string());
+        props.insert(
+            "github_url".to_string(),
+            "https://github.com/a/b".to_string(),
+        );
+        props.insert("github_author_member_id".to_string(), "x".to_string());
+        props.insert("other".to_string(), "kept".to_string());
+        let value = props_value(Some(&props));
+        assert_eq!(value, serde_json::json!({"other": "kept"}));
+        props.clear();
+        props.insert("source".to_string(), "prime".to_string());
+        assert_eq!(props_value(Some(&props))["source"], "prime");
+    }
+
+    #[test]
     fn client_props_cannot_forge_the_server_owned_key() {
         let mut props = BTreeMap::new();
         props.insert("k".to_string(), "v".to_string());
@@ -1779,7 +1806,18 @@ mod tests {
             PROP_ANSWERS_MESSAGE_ID.to_string(),
             "11111111-1111-4111-8111-111111111111".to_string(),
         );
+        // #4054 — a person or an agent cannot print a 「쓴 앱」 receipt or a blocked
+        // sentence under an agent's name, under either spelling of the receipt.
+        for key in momo_agent::SERVER_OWNED_APP_PROPS_KEYS {
+            props.insert(key.to_string(), r#"{"kind":"login_lost"}"#.to_string());
+        }
         let value = props_value(Some(&props));
+        for key in momo_agent::SERVER_OWNED_APP_PROPS_KEYS {
+            assert!(
+                value.get(key).is_none(),
+                "{key} is server-owned and must be stripped"
+            );
+        }
         assert!(
             value.get(PROP_ANSWERS_MESSAGE_ID).is_none(),
             "answers_message_id is server-owned and must be stripped"

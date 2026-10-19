@@ -58,6 +58,9 @@ const TEST_JWT_SECRET: &str = "plugin-registry-read-conformance-secret";
 const TEST_PASSWORD: &str = "plugin-registry-test-password";
 
 const GITHUB: &str = "com.momo.plugins.github";
+const GMAIL: &str = "com.momo.plugins.gmail";
+const GCAL: &str = "com.momo.plugins.google-calendar";
+const GDRIVE: &str = "com.momo.plugins.google-drive";
 const NOTION: &str = "com.momo.plugins.notion";
 const LINEAR: &str = "com.momo.plugins.linear";
 const DRIVE: &str = "com.momo.plugins.drive";
@@ -441,7 +444,10 @@ async fn the_wire_equals_the_fixture_the_core_parser_reads() {
 
     let (status, catalog) = get(&env, &token, &catalog_path(workspace)).await;
     assert_eq!(status, 200, "{catalog}");
-    assert_eq!(catalog_ids(&catalog), [DRIVE, GITHUB, LINEAR, NOTION]);
+    assert_eq!(
+        catalog_ids(&catalog),
+        [DRIVE, GITHUB, GMAIL, GCAL, GDRIVE, LINEAR, NOTION]
+    );
     let (status, detail) = get(&env, &token, &detail_path(workspace, GITHUB)).await;
     assert_eq!(status, 200, "{detail}");
 
@@ -451,6 +457,9 @@ async fn the_wire_equals_the_fixture_the_core_parser_reads() {
         (NOTION, "notion"),
         (LINEAR, "linear"),
         (DRIVE, "drive"),
+        (GMAIL, "gmail"),
+        (GCAL, "google-calendar"),
+        (GDRIVE, "google-drive"),
     ] {
         let (status, body) = get(&env, &token, &detail_path(workspace, plugin)).await;
         assert_eq!(status, 200, "{plugin}: {body}");
@@ -487,12 +496,42 @@ async fn the_wire_equals_the_fixture_the_core_parser_reads() {
     let github = &catalog["plugins"][1];
     assert_eq!(github["installed"], true);
     assert_eq!(github["enabled"], true);
-    assert_eq!(catalog["plugins"][2]["installed"], true, "linear installed");
-    assert_eq!(catalog["plugins"][2]["enabled"], false, "linear disabled");
+    assert_eq!(catalog["plugins"][5]["installed"], true, "linear installed");
+    assert_eq!(catalog["plugins"][5]["enabled"], false, "linear disabled");
     let policy = catalog["toolPolicy"]["plugins"].as_array().expect("policy");
     assert_eq!(policy.len(), 1);
     assert_eq!(policy[0]["pluginId"], GITHUB);
-    assert_eq!(policy[0]["tools"].as_array().expect("tools").len(), 2);
+    assert_eq!(policy[0]["tools"].as_array().expect("tools").len(), 26);
+}
+
+/// ADR-0113 증보 2 수용 7 (the registry half, #3944): the active official ids the migrations
+/// seeded are exactly the ids `plugin.install` may name and the catalogue shows - a seed
+/// without an enum entry (or the reverse) fails here.
+#[tokio::test]
+#[ignore]
+async fn the_registry_seed_and_the_install_enum_name_the_same_plugins() {
+    let _guard = test_lock().await;
+    let env = env().await;
+    let seeded: Vec<String> = sqlx::query_scalar(
+        "SELECT plugin_id FROM plugin_registry \
+          WHERE official AND revoked_at IS NULL AND plugin_id LIKE 'com.momo.plugins.%' AND plugin_id <> $1 ORDER BY plugin_id",
+    )
+    .bind(EXTRA)
+    .fetch_all(&env.su)
+    .await
+    .expect("registry ids");
+    let mut enum_ids: Vec<String> = momo_agent::actions::PLUGIN_INSTALL_PLUGINS
+        .iter()
+        .map(|(id, _)| id.to_string())
+        .collect();
+    enum_ids.sort();
+    assert_eq!(seeded, enum_ids, "registry seeds vs plugin.install enum");
+    let mut allowlist: Vec<String> = momo_server::routes::plugins::OFFICIAL_PLUGIN_IDS
+        .iter()
+        .map(|id| id.to_string())
+        .collect();
+    allowlist.sort();
+    assert_eq!(seeded, allowlist, "registry seeds vs catalogue allowlist");
 }
 
 // ---- ① three guards ------------------------------------------------------------
@@ -553,7 +592,7 @@ async fn non_official_revoked_and_unlisted_rows_are_each_hidden() {
     assert_eq!(catalog_status, 200, "{catalog}");
     assert_eq!(
         catalog_ids(&catalog),
-        [DRIVE, GITHUB],
+        [DRIVE, GITHUB, GMAIL, GCAL, GDRIVE],
         "unofficial linear, revoked notion and unlisted extra are all hidden"
     );
     for (plugin, (status, body)) in details {
@@ -611,7 +650,10 @@ async fn a_manifest_that_fails_admission_is_omitted_and_409_on_detail() {
     // The restore really restored.
     let (status, catalog) = get(&env, &token, &catalog_path(workspace)).await;
     assert_eq!(status, 200);
-    assert_eq!(catalog_ids(&catalog), [DRIVE, GITHUB, LINEAR, NOTION]);
+    assert_eq!(
+        catalog_ids(&catalog),
+        [DRIVE, GITHUB, GMAIL, GCAL, GDRIVE, LINEAR, NOTION]
+    );
 
     for (label, (catalog_status, catalog), (detail_status, detail), reason) in [
         (
@@ -636,7 +678,7 @@ async fn a_manifest_that_fails_admission_is_omitted_and_409_on_detail() {
         assert_eq!(catalog_status, 200, "{label}: {catalog}");
         assert_eq!(
             catalog_ids(&catalog),
-            [DRIVE, LINEAR, NOTION],
+            [DRIVE, GMAIL, GCAL, GDRIVE, LINEAR, NOTION],
             "{label}: github is omitted, the rest stay"
         );
         assert_eq!(detail_status, 409, "{label}: {detail}");

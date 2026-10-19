@@ -126,6 +126,14 @@ pub fn attach_tool_grants(payload: &mut Value, grants: &[AppToolGrant]) {
             Value::Array(grants.iter().map(AppToolGrant::to_json).collect()),
         );
     }
+    // ADR-0113 증보 2 E10 (#4054): a job whose granted apps include a personal one
+    // (Gmail, Calendar, Drive) is told to answer the channel with a summary only.
+    // It rides the same snapshot as the grants it follows from, so the two cannot
+    // disagree — and it is an instruction to a self-reporting site, not enforcement.
+    crate::app_notice::attach_app_result_policy(
+        payload,
+        crate::app_notice::app_result_policy(grants.iter().map(|grant| grant.plugin_id.as_str())),
+    );
 }
 
 /// Decode a job's E5 list. Absent, `null`, a non-array, and entries missing a
@@ -209,6 +217,43 @@ mod tests {
         keys.sort_unstable();
         assert_eq!(keys, ["grantId", "pluginId", "scope", "tools"]);
         assert_eq!(value["grantId"], "00000000-0000-0000-0000-000000000ABC");
+    }
+
+    /// #4054 — the 「요약만」 instruction follows the grants: a personal app grant
+    /// carries it, a GitHub-only job does not, and the instruction is the fixed
+    /// server sentence.
+    #[test]
+    fn a_personal_app_grant_adds_the_summary_only_instruction_to_the_job() {
+        let mut personal = json!({"run": "x"});
+        attach_tool_grants(
+            &mut personal,
+            &[
+                grant("github", "github:read", &["search_issues"]),
+                grant("gmail", "gmail:read", &["search"]),
+            ],
+        );
+        assert_eq!(
+            personal[crate::APP_RESULT_POLICY_KEY]["channel_reply"],
+            json!("summary_only")
+        );
+        assert_eq!(
+            personal[crate::APP_RESULT_POLICY_KEY]["plugin_ids"],
+            json!(["gmail"])
+        );
+        assert_eq!(
+            personal[crate::APP_RESULT_POLICY_KEY]["instruction"],
+            json!(crate::SUMMARY_ONLY_INSTRUCTION)
+        );
+
+        let mut plain = json!({"run": "x"});
+        attach_tool_grants(
+            &mut plain,
+            &[grant("github", "github:read", &["search_issues"])],
+        );
+        assert!(plain.get(crate::APP_RESULT_POLICY_KEY).is_none());
+        let mut none = json!({"run": "x"});
+        attach_tool_grants(&mut none, &[]);
+        assert!(none.get(crate::APP_RESULT_POLICY_KEY).is_none());
     }
 
     #[test]
