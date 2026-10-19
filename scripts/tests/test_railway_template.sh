@@ -276,6 +276,16 @@ grep -Fq 'committed catalog still passes' "$TMP_ROOT/catalog.out" || \
   fail "catalog checker missing restore proof"
 pass "catalog: start commands = canonical command lists (operators, order, values), pre-deploy sh -c + root→momo drop, Centrifugo v6 names + infra/centrifugo.json parity and settings set, api volume/UID/chown -R/setpriv/env -u, PG18+pgvector image+volume, push tmpfs guard/umask order/unset, variables ⊆ compose twin, shared refs ⊆ --claim keys, README hand-mapped table, hermes private + digest + gate-first/sha-pinned + no oort secret; 61 mutations RED"
 
+# ①b #4072 — the Hermes default config and the tool-lock gate's own rules. The
+# catalog above pins the start command to these files' sha256, so a gate that
+# is wrong here is wrong in both shapes. Stdlib only (no PyYAML skip).
+(cd "$ROOT" && python3 -m unittest infra/hermes/test_default_config.py infra/hermes/test_lockgate_connectors.py) \
+  >"$TMP_ROOT/hermes-unit.out" 2>&1 || {
+  cat "$TMP_ROOT/hermes-unit.out" >&2
+  fail "infra/hermes offline tests failed"
+}
+pass "hermes: default config (24 toolsets off, no model, no connector), gate rules + volume .env, offline"
+
 # ---------------------------------------------------------------------------
 # ②b #2066 R2 — T2 has no env file, so the `--ensure-managed-keys` backfill
 # never runs here (`oort_upgrade_t2` prints digest instructions and returns).

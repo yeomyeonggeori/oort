@@ -974,7 +974,6 @@ case "$PROFILE" in
     add_cmd_once "pgBackRest/PITR fail-closed contract (#2157)" 'scripts/tests/test_pgbackrest_pitr_contract.sh'
     add_cmd_once "public edge contract (#2124)" 'scripts/tests/test_public_edge.sh'
     add_cmd_once "platform template contract — Railway (#2297 · ADR-0184 D5)" 'scripts/tests/test_railway_template.sh'
-    add_cmd_once "Hermes default config + tool-lock gate offline tests (#4072 · ADR-0203 D6)" 'python3 -m unittest infra/hermes/test_default_config.py infra/hermes/test_lockgate_connectors.py'
     add_cmd_once "platform template contract — Fly T1 (SH-11b · ADR-0184 D1/D5)" 'scripts/tests/test_fly_recipe.sh'
     add_cmd_once "platform template contract — AWS Lightsail/EC2 T1 (SH-11c · #2377 · ADR-0184 D1)" 'scripts/tests/test_aws_recipe.sh'
     add_cmd_once "platform template contract — Cloudflare T3 (SH-11d · #2386 · ADR-0184 D1)" 'scripts/tests/test_cloudflare_recipe.sh'
