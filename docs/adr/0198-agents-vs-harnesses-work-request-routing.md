@@ -3,6 +3,7 @@
 - Status: **Accepted** (2026-10-07 성재 결재. 근거는 아래 「결재 기록」의 인용)
 - Date: 2026-10-07
 - 증보 1 (2026-10-07, **Accepted** 2026-10-07 성재 결재): 구독을 소유자 전용 **개인 에이전트**로 노출(D7). D1 「멘션 없음」·D2 ①·D4의 일부를 바꾼다. 파일 끝 「증보 1」 절. 충돌하는 곳은 증보 1이 우선한다.
+- 증보 2 (2026-10-19, **Accepted** 2026-10-19 owner 결정, #4071): Hermes가 자기 볼륨에 보관하는 구독 OAuth는 이 ADR의 「구독을 팀원과 공유하지 않는다」「팀원이 내 구독을 쓰는 모든 경로」 차단과 별개로 허용된다. 파일 끝 「증보 2 — Hermes가 보관하는 구독 OAuth」 절
 - Deciders: 성재
 - 기안: Sonnet 5.5 (#3564 조사 후속)
 - 근거 자료: #3564 조사 보고(세션 스크래치 `sub3564-report.md`, 로컬 전용·미커밋) — 실행 레인 지도, D18 차단 지점, oort-team 라이브 진단(2026-10-06 읽기 전용). 이 ADR이 결정에 필요한 사실을 아래 「맥락」에 옮겼다.
@@ -438,3 +439,14 @@ D1(하네스 = 내 도구)과 D4(작업은 내 맥 우선, 호스트 소유자 =
 - **소비자**: 이 설정을 읽는 서버·workd 코드는 없었다(`server-rust` 전체에서 `work_host_engine`·`WorkEngine`·`MOMO_WORKD_ENGINE` 참조는 제거 대상 파일뿐이다. `momo-workd`·시험의 `opencode`는 `work_tool_profile`(migration 029)의 도구 어휘이고, `momo-t3`의 `HARNESSES`도 별개라서 유지).
 - **DB**: forward-only. `work_host_engine` 테이블(migration 040)은 삭제하지 않고 **미사용**으로 둔다. 쓰는 코드가 없으며 RLS FORCE 정책은 그대로다. 테이블 삭제는 필요해질 때 신규 migration으로 한다.
 - 이 증보는 D1·D4의 귀결이며 새 방향을 정하지 않는다.
+
+## 증보 2 — Hermes가 보관하는 구독 OAuth (2026-10-19)
+
+- Status: **Accepted** (2026-10-19, owner 결정 인용). 인용(이슈 #4071, 성재 2026-10-19): 「우리 메신저 대신 hermes oauth로 할때 왜 그게 ADR이 금지한 길이야. 이건 업계에서도 허용된 부분인데. 그냥 해당 ADR금지 부분을 제거해. 당장에 필요하다면 codex oauth로 하고, claude oauth까지 처리할거야. 제로 베이스 온보딩 개선 묶음도 진행 ㄱㄱ 하자.」
+- 기안: Sonnet 5.5 worker(#4071)
+
+- **허용한다.** 운영자가 호스팅하는 Hermes(셀프호스트·클라우드 포함)가 **자기 볼륨에** 보관하는 Codex(ChatGPT 구독)·Claude(구독) OAuth 토큰으로 모델 인증을 하는 경로. 로그인과 갱신은 Hermes 자체 흐름이 하고, 절차는 #4073(Hermes 모델 인증 온보딩)이 정한다.
+- **oort 쪽 경계는 그대로다(ADR-0004).** oort 서버·api·agent-worker·provider_link 금고·DB·로그·감사·매니페스트는 구독 OAuth 토큰(access·refresh·코드)을 받지도, 저장하지도, 중개하지도, 기록하지도 않는다. 금고에 구독 OAuth kind를 더하지 않는다. oort가 Hermes에 건네는 것은 불투명 bearer(`HERMES_API_KEY`)뿐이다.
+- **사용량과 약관.** 구독 사용량은 그 Hermes **소유자의 구독**에서 나간다(팀원이 Hermes를 불러도 같다). 벤더 약관의 적합성 판단과 책임은 **운영자 몫**이고, oort는 판단하거나 보증하지 않는다.
+- **적용되지 않는 것(별개 경로).** oort 서버가 구독 CLI를 대신 구동하는 경로를 막는 ADR-0193 D6·D17·D18과 공용(워크스페이스·클라우드) work host 차단(`MOMO_SUBSCRIPTION_AGENTS_ENABLED`, `MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED`, `claude_subscription_agent_paused`)은 **Hermes 경로에는 적용되지 않는다.** 이 증보는 그 코드 동작을 바꾸지 않는다. 서버 내장 구독 에이전트 차단을 풀지는 별도 확인이 필요하다(owner 미결정).
+- **정정되는 곳.** D2의 「계속 막는 것 (a) 팀원이 내 구독을 쓰는 모든 경로」와 「구독을 팀원과 공유 — 하지 않는다」는 oort가 구동하는 하네스 레인 기준이며 **[정정됨 2026-10-19]** Hermes 경로에는 적용되지 않는다. 팀원이 Hermes를 부르면 그 사용량은 Hermes 소유자의 구독에서 나가고, 이는 소유자·운영자의 선택이다. 「oort 소유 claude.ai OAuth — 기각」은 **유지**한다(oort가 토큰을 받는 경로는 여전히 없다).

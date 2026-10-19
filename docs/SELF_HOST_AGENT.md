@@ -2323,6 +2323,20 @@ erase it, delete the Hermes service and its volume in Railway. Connect only
 one workspace to one Hermes (conversations of several workspaces would share
 one volume).
 
+**Model auth with a Codex or Claude subscription (ADR-0004 증보 6, ADR-0203
+증보 2026-10-19).** Hermes may authenticate its model with the operator's own
+Codex (ChatGPT) or Claude subscription OAuth, kept **on Hermes' own volume**.
+oort's server and vault never receive, store, proxy or log those tokens (the
+only thing oort holds is the opaque `HERMES_API_KEY` bearer), so the kill
+switches in `docs/SELF_HOST.md` (`MOMO_SUBSCRIPTION_AGENTS_ENABLED`,
+`MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED`) **do not apply to this path**. Usage
+is drawn from the subscription of the person who logged Hermes in — including
+when teammates call Hermes — and whether the vendor's terms allow that is the
+operator's call; oort does not judge or guarantee it. Never paste a subscription
+token into oort, a channel or `.env` of the oort services. The login procedure
+is a placeholder until #4073 (Hermes model-auth onboarding) lands: see
+[#4073](https://github.com/yeomyeonggeori/oort/issues/4073).
+
 The compose `agents` profile is not shipped yet (it follows a verified Railway
 path). Measured `0.0.0.0` vs `::` on a real Railway environment is still open.
 
