@@ -52,6 +52,13 @@ class GoogleConnectorConfig(unittest.TestCase):
             for part in scope.split():
                 self.assertRegex(part, r"readonly$|freebusy$", f"{name}: {part}")
 
+    def test_model_auth_is_subscription_oauth_not_a_key(self):
+        self.assertEqual(self.cfg["model"]["provider"], "openai-codex")
+        self.assertEqual(self.cfg["fallback_model"]["provider"], "anthropic")
+        for key in ("api_key", "base_url"):
+            self.assertNotIn(key, self.cfg["model"])
+            self.assertNotIn(key, self.cfg["fallback_model"])
+
     def test_client_values_come_from_variables_and_ports_are_fixed(self):
         ports = set()
         for server in self.cfg["mcp_servers"].values():

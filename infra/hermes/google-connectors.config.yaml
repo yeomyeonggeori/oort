@@ -42,9 +42,12 @@ telemetry:
     send: false
 updates:
   check: false            # no passive version checks (image is pinned by digest)
-model:
-  provider: anthropic
-  default: claude-sonnet-5-5
+model:                    # K-S1b: subscription OAuth held in the Hermes volume (auth.json), never in oort
+  provider: openai-codex  # primary: ChatGPT/Codex subscription (login: hermes auth add openai-codex --type oauth)
+  default: gpt-5.6-sol
+fallback_model:           # tried when the primary fails (rate limit / overload / connection)
+  provider: anthropic     # Claude Pro/Max subscription (login: hermes auth add anthropic --type oauth)
+  model: claude-sonnet-5-5
 # K-S1b (#3952): Google official remote MCP, READ tools only. Client id/secret come from service
 # variables (never in this file). Names in tools.include are from the vendor docs; confirm with tools/list.
 mcp_servers:
