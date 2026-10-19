@@ -49,6 +49,7 @@ pub mod huddles;
 pub mod inbox;
 pub mod invites;
 pub mod join;
+pub mod login_relay;
 /// ADR-0161 증보 (#3277) — the member avatar media surface (self-only write,
 /// workspace-wide read).
 pub mod member_avatar;

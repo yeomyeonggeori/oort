@@ -143,6 +143,8 @@ compose's default (`${CENTRIFUGO_LOG_LEVEL:-info}`). Paste them decoded, e.g.
 | api | `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK` | `1` — a plain `http://` internal host is refused without this opt-in |
 | api | `AGENT_PROVIDER_LOCAL_HOSTS` | `hermes.railway.internal` — the exact host, never a wildcard |
 | api | `OORT_COHOSTED_AGENT_TOOLS_LOCKED` | `1` — your own declaration that the tool lock holds; the hermes service cannot listen unless the gate exits 0 (see Hermes). api only |
+| api | `HERMES_LOGIN_RELAY_URL` | `http://hermes.railway.internal:8643` — the login relay sidecar inside hermes (api only; empty/absent = `409 login_relay_off`) |
+| api | `HERMES_LOGIN_RELAY_KEY` | `${{shared.HERMES_LOGIN_RELAY_KEY}}` — the same shared secret hermes holds (api only) |
 | agent-worker | `HERMES_BASE_URL` | `http://hermes.railway.internal:8642/v1` |
 | agent-worker | `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK` | `1` |
 | agent-worker | `AGENT_PROVIDER_LOCAL_HOSTS` | `hermes.railway.internal` |

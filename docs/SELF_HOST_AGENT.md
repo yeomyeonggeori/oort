@@ -2359,6 +2359,12 @@ generator now do for you; you still read the lock, and the model key stays yours
   is gone from the environment before the gateway starts. Without the key there is
   no sidecar process and the screen falls back to the shell command (`railway ssh`).
   `docker compose` measurement: `scripts/tests/test_login_relay_docker.sh`.
+  oort's api reaches the sidecar with `HERMES_LOGIN_RELAY_URL` / `HERMES_LOGIN_RELAY_KEY` (written
+  together by `--with-agents`; api only) through the instance-operator-only routes
+  `…/agents/{agent}/model-login` and `…/app-login` (#4079, `docs/api/openapi.operator.yaml`). The
+  one-time code you paste and the Codex device code pass through oort once and are never stored,
+  logged, audited or pushed; tokens never reach oort at all. Either variable empty = the routes
+  answer `409 login_relay_off` and the screen shows the shell command.
 
 Measured on compose (arm64, 2026-10-19, the pinned image): the listener is
 `0.0.0.0:8642` (uid 10000), `docker port` shows nothing published, the gate

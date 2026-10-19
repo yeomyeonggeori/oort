@@ -284,6 +284,9 @@ pub struct AppState {
     /// (`HERMES_BASE_URL` set, tool-lock attested). Default: nothing declared,
     /// which keeps the whole feature silent and offline.
     pub cohosted: Arc<routes::cohosted_agent::CohostedAgentState>,
+    /// #4079 (ADR-0203 증보 2026-10-19) — the Hermes login relay: where the sidecar listens and the key it
+    /// wants. Default: off, so every `…/model-login` and `…/app-login` route answers `409 login_relay_off`.
+    pub login_relay: Arc<routes::login_relay::LoginRelayState>,
     /// ADR-0205 (#3947) — the GitHub App surface: the dedicated sealing key and the one
     /// outbound hop (the manifest code → credentials conversion). Default: no key, so every
     /// `/v1/integrations/github/*` route answers 503 and the rest of the server is untouched.
@@ -328,6 +331,13 @@ impl AppState {
                 ),
             ))),
             github: Arc::new(routes::github_app::GithubAppState::default()),
+            login_relay: Arc::new(routes::login_relay::LoginRelayState::new(
+                config::LoginRelayConfig::default(),
+                Arc::new(momo_provider_probe::GuardedLoginRelay::new(
+                    momo_settings::EgressPolicy::default(),
+                    momo_provider_probe::RELAY_TIMEOUT,
+                )),
+            )),
             cohosted: Arc::new(routes::cohosted_agent::CohostedAgentState::new(
                 config::CohostedAgentConfig::default(),
                 Arc::new(momo_provider_probe::GuardedProviderProbe::new(
@@ -371,6 +381,17 @@ impl AppState {
         self.cohosted = Arc::new(routes::cohosted_agent::CohostedAgentState::new(
             config, probe,
         ));
+        self
+    }
+
+    /// #4079 — attach the login relay's address/key and the client that dials it (`main.rs` with the
+    /// operator's egress policy; conformance tests with a loopback-permitting one).
+    pub fn with_login_relay(
+        mut self,
+        config: config::LoginRelayConfig,
+        client: Arc<dyn momo_provider_probe::LoginRelayClient>,
+    ) -> Self {
+        self.login_relay = Arc::new(routes::login_relay::LoginRelayState::new(config, client));
         self
     }
 
@@ -1606,6 +1627,31 @@ pub fn build_app(state: AppState) -> Router {
         )
         // #3948 (ADR-0203 증보 K2·K4) — the 「커넥터 시험」: instance operator
         // only, both verbs; absent from the agent-route allow-list.
+        // #4079 — Hermes login relay (operator only; ADR-0203 증보 2026-10-19 L4)
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/model-login",
+            get(routes::login_relay::model_targets).post(routes::login_relay::model_start),
+        )
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/model-login/{login_id}",
+            get(routes::login_relay::model_poll).delete(routes::login_relay::model_cancel),
+        )
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/model-login/{login_id}/complete",
+            post(routes::login_relay::model_complete),
+        )
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/app-login",
+            get(routes::login_relay::app_targets).post(routes::login_relay::app_start),
+        )
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/app-login/{login_id}",
+            get(routes::login_relay::app_poll).delete(routes::login_relay::app_cancel),
+        )
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/app-login/{login_id}/complete",
+            post(routes::login_relay::app_complete),
+        )
         .route(
             "/v1/workspaces/{ws}/agents/{agent}/connector-trial",
             get(routes::cohosted_agent::get_connector_trial)

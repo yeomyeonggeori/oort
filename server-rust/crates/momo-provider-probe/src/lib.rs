@@ -785,6 +785,12 @@ impl ProbeCache {
     }
 }
 
+mod login_relay;
+pub use login_relay::{
+    is_login_id, is_target_name, GuardedLoginRelay, LoginRelayClient, Pasted, RelayFailure,
+    RelayKind, RelayMode, RelayTarget, StartReply, StatusReply, TargetStatus, RELAY_TIMEOUT,
+};
+
 mod cohosted;
 pub use cohosted::{
     CohostedAgentProbe, CohostedReport, CohostedTarget, ToolsetsSignal,
@@ -795,3 +801,5 @@ pub use cohosted::{
 mod tests;
 #[cfg(test)]
 mod tests_cohosted;
+#[cfg(test)]
+mod tests_login_relay;
