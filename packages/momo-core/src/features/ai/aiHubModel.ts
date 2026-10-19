@@ -139,6 +139,7 @@ export function glossaryEntry(id: AiGlossaryId): AiGlossaryEntry {
 /** 외부 연결 하위 이름 (플랜 §2). */
 export const AI_EXTERNAL_SUBSECTIONS = {
   apps: "앱",
+  github: "GitHub 알림",
   incoming: "채널로 들어오는 주소",
   outgoing: "밖으로 보내는 알림",
   externalAgents: "외부 에이전트 연결",
@@ -187,6 +188,22 @@ export const AI_EXTERNAL_ROWS: readonly AiExternalRow[] = [
     path: `${AI_EXTERNAL_BASE_PATH}/apps`,
     fromSettings: "plugins",
     settingsLine: "앱은 AI › 외부 연결의 「앱」으로 옮겼어요.",
+  },
+  {
+    id: "github",
+    title: AI_EXTERNAL_SUBSECTIONS.github,
+    legacy: null,
+    detailLegacy: null,
+    // 서버가 GitHub 알림을 싣지 않으면 이 줄은 접힌다(`githubNotifications`, #3955).
+    summary: "저장소의 PR, 이슈, 체크 소식을 채널로 받아요. 연결과 구독을 여기서 확인해요.",
+    detail: [
+      "저장소의 PR, 이슈, 체크 소식이 「GitHub」 이름으로 채널에 와요. 서버에 앱을 한 번 만들고, 워크스페이스마다 연결해요.",
+      "구독은 채널 헤더의 ⋮ 메뉴에서 더해요. 서버가 내려가 있는 동안의 알림은 다시 오지 않아요.",
+    ],
+    countNoun: null,
+    path: `${AI_EXTERNAL_BASE_PATH}/github`,
+    fromSettings: null,
+    settingsLine: null,
   },
   {
     id: "incoming",

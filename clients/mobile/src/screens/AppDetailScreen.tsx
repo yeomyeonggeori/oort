@@ -7,6 +7,7 @@ import {
   type PhoneAppToolRow,
 } from '@momo/core/features/plugins/phoneApps';
 import {serverSaysAbsent, serverSurface} from '@momo/core/features/capabilities/serverSurfaces';
+import {GITHUB_PHONE_NOTE, githubFacesFor} from '@momo/core/features/github/model';
 import React, {useMemo} from 'react';
 import {ScrollView, StyleSheet, Text, View} from 'react-native';
 import {
@@ -78,6 +79,7 @@ export default function AppDetailScreen({
   return (
     <AppDetailView
       title={name}
+      pluginId={pluginId}
       state={state}
       view={view}
       policyKnown={policyKnown}
@@ -98,6 +100,7 @@ export type AppDetailState = 'loading' | 'absent' | 'error' | 'ready';
 
 export function AppDetailView({
   title,
+  pluginId,
   state,
   view,
   policyKnown,
@@ -110,6 +113,8 @@ export function AppDetailView({
   onOpenWeb,
 }: {
   title: string;
+  /** GitHub 카드만 얼굴이 둘이다(알림 · 도구). 없으면 얼굴을 말하지 않는다. */
+  pluginId?: string;
   state: AppDetailState;
   view?: PhoneAppDetail;
   policyKnown: boolean;
@@ -165,6 +170,7 @@ export function AppDetailView({
         ) : (
           <Ready
             view={view}
+            pluginId={pluginId}
             policyKnown={policyKnown}
             policyFailed={policyFailed}
             webUrl={webUrl}
@@ -178,12 +184,14 @@ export function AppDetailView({
 
 function Ready({
   view,
+  pluginId,
   policyKnown,
   policyFailed,
   webUrl,
   onOpenWeb,
 }: {
   view: PhoneAppDetail;
+  pluginId?: string;
   policyKnown: boolean;
   policyFailed: boolean;
   webUrl: string | null;
@@ -193,6 +201,7 @@ function Ready({
   const {header} = view;
   // 막힘은 허용 여부를 아는 뒤에만 말한다.
   const blocked = policyKnown && view.blocked;
+  const faces = pluginId === undefined ? [] : githubFacesFor(pluginId);
   return (
     <View>
       {/* ---- 머리: 타일 · 한 줄 소개 · 연결 칩 -------------------------------- */}
@@ -222,6 +231,25 @@ function Ready({
           <Field label={COPY.statusMine} value={view.statusMine} testID="app-detail-status-mine" />
         ) : null}
       </View>
+
+      {/* ---- GitHub 카드의 얼굴 둘 (ADR-0205 D10, #3955) ----------------------- */}
+      {faces.length > 0 ? (
+        <View style={styles.faces} testID="app-detail-github-faces">
+          {faces.map(face => (
+            <View key={face.id} style={styles.face} testID={`app-detail-github-face-${face.id}`}>
+              <View style={[styles.chipLine, styles.faceChips]}>
+                <StatusChip tone="muted" label={face.chip} />
+              </View>
+              <Sentence style={styles.summary}>{face.detail}</Sentence>
+            </View>
+          ))}
+          {faces.some(face => face.id === 'notify') ? (
+            <Sentence style={styles.summary} testID="app-detail-github-phone-note">
+              {GITHUB_PHONE_NOTE}
+            </Sentence>
+          ) : null}
+        </View>
+      ) : null}
 
       {policyFailed ? (
         <Sentence style={styles.plain} testID="app-detail-policy-unknown">
@@ -390,6 +418,9 @@ const buildStyles = (color: Palette) =>
       gap: space.sm,
     },
     field: {gap: space.xs},
+    faces: {marginTop: space.md, gap: space.sm},
+    face: {gap: space.xs},
+    faceChips: {marginHorizontal: SAFE_GUTTER},
     fieldLabel: {fontSize: font.meta, color: color.textFaint},
     fieldValue: {fontSize: font.label, color: color.text, lineHeight: line.label},
     blocked: {

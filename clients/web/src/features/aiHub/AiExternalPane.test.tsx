@@ -18,6 +18,7 @@ vi.mock("./useAiHubOverview", () => ({
 }));
 const body = (id: string) => () => createElement("div", { "data-testid": `body-${id}` });
 vi.mock("@/features/plugins/PluginSection", () => ({ PluginSection: body("apps") }));
+vi.mock("@/features/github/GithubPane", () => ({ GithubPane: body("github") }));
 vi.mock("@/features/settings/WebhookSection", () => ({ WebhookSection: body("incoming") }));
 vi.mock("@/features/settings/EventSubscriptionSection", () => ({ EventSubscriptionSection: body("outgoing") }));
 vi.mock("@/features/hostedAgents/PersonalAssistantsList", () => ({
@@ -65,7 +66,7 @@ async function mountAt(path: string): Promise<HTMLElement> {
 const OK = (value: number) => ({ state: "ok" as const, value });
 
 describe("외부 연결 목차 (AIH-8)", () => {
-  it("다섯 줄: 용어집 이름, 옛 이름 괄호(영어 약자 없음), 열기 링크", async () => {
+  it("여섯 줄: 용어집 이름, 옛 이름 괄호(영어 약자 없음), 열기 링크", async () => {
     reads.input = { apps: OK(2), incoming: OK(1), outgoing: OK(2), externalAgents: OK(1) };
     const el = await mountAt("/");
     // #3773: 목차 위에 「개인 비서」 목록이 선다(상세 본문이 아니라 목차 머리).
@@ -73,6 +74,7 @@ describe("외부 연결 목차 (AIH-8)", () => {
     const rows = [...el.querySelectorAll('[data-testid^="ai-external-row-"]')];
     expect(rows.map((r) => r.querySelector("h3")?.firstChild?.textContent)).toEqual([
       "앱",
+      "GitHub 알림",
       "채널로 들어오는 주소",
       "밖으로 보내는 알림",
       "외부 에이전트 연결",
@@ -81,6 +83,7 @@ describe("외부 연결 목차 (AIH-8)", () => {
     const hrefs = AI_EXTERNAL_ROWS.map((row) => el.querySelector(`[data-testid="ai-external-open-${row.id}"]`)?.getAttribute("href"));
     expect(hrefs).toEqual([
       "/ai/external/apps",
+      "/ai/external/github",
       "/ai/external/incoming",
       "/ai/external/outgoing",
       "/ai/external/agents",
@@ -114,11 +117,12 @@ describe("외부 연결 목차 (AIH-8)", () => {
     reads.bots = { state: "ok", value: 1 };
   });
 
-  it("서버가 앱 목록을 싣지 않으면 「앱」 줄이 접힌다: 네 줄만 서고 칩도 없다 (#3860)", async () => {
+  it("서버가 앱 목록을 싣지 않으면 「앱」 줄이 접힌다: 다섯 줄만 서고 칩도 없다 (#3860)", async () => {
     reads.input = { apps: { state: "absent" }, incoming: OK(1), outgoing: OK(2), externalAgents: OK(1) };
     const el = await mountAt("/");
     const rows = [...el.querySelectorAll('[data-testid^="ai-external-row-"]')];
     expect(rows.map((r) => r.querySelector("h3")?.firstChild?.textContent)).toEqual([
+      "GitHub 알림",
       "채널로 들어오는 주소",
       "밖으로 보내는 알림",
       "외부 에이전트 연결",
@@ -166,6 +170,7 @@ describe("외부 연결 상세 (AIH-8)", () => {
     ["/incoming", "incoming", "채널로 들어오는 주소"],
     ["/outgoing", "outgoing", "밖으로 보내는 알림"],
     ["/agents", "agents", "외부 에이전트 연결"],
+    ["/github", "github", "GitHub 알림"],
   ])("%s 는 본문을 그대로 세우고 머리는 용어집 이름이다", async (path, id, title) => {
     reads.input = { apps: OK(0), incoming: OK(0), outgoing: OK(0), externalAgents: OK(0) };
     const el = await mountAt(path);

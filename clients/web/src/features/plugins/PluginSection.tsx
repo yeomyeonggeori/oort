@@ -28,6 +28,7 @@ import {
 } from "@momo/core/lib/api";
 import { SectionShell, StatusChip } from "@/features/settings/SettingsFields";
 import { serverSaysAbsent } from "@momo/core/features/capabilities/serverSurfaces";
+import { GithubFacesBlock, GithubFacesChips } from "@/features/github/GithubFaces";
 import { SurfaceUnavailableSection } from "@/features/capabilities/SurfaceUnavailable";
 import {
   PLUGIN_READONLY_COPY as COPY,
@@ -410,6 +411,8 @@ export function PluginSection({ offline }: { offline: boolean }) {
                     </span>
                     {/* 서버의 `description`은 영어 매니페스트 문구라서 공식 앱은 한 줄 소개로 바꿔 말한다. */}
                     <span className="text-meta text-ink-muted">{pluginSubtitle(plugin)}</span>
+                    {/* GitHub 카드만 얼굴이 둘이다: 알림(서버가 받아요)과 도구(각자 에이전트). ADR-0205 D10. */}
+                    <GithubFacesChips pluginId={plugin.pluginId} />
                     <span className="text-meta text-ink-muted">
                       {callerPolicySummary(policy)}
                       {plugin.egressDomains.length > 0 && (
@@ -668,6 +671,8 @@ function PluginDetailPanel({
           )}
         </div>
       </div>
+
+      <GithubFacesBlock pluginId={detail.pluginId} />
 
       <div className="flex flex-col gap-2">
         <PluginStatusRows plugin={detail} activeScopes={activeScopes} toolCount={policyTools.length} />
