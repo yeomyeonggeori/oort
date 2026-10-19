@@ -109,7 +109,9 @@
         "HERMES_API_KEY": "${{shared.HERMES_API_KEY}}",
         "AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK": "1",
         "AGENT_PROVIDER_LOCAL_HOSTS": "hermes.railway.internal",
-        "OORT_COHOSTED_AGENT_TOOLS_LOCKED": "1"
+        "OORT_COHOSTED_AGENT_TOOLS_LOCKED": "1",
+        "HERMES_LOGIN_RELAY_URL": "http://hermes.railway.internal:8643",
+        "HERMES_LOGIN_RELAY_KEY": "${{shared.HERMES_LOGIN_RELAY_KEY}}"
       }
     },
     "relay": {

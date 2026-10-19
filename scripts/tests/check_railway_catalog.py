@@ -80,6 +80,7 @@ HAND_LITERALS = {
     # #4072: the same-server Hermes wiring is typed by hand, so the README lists it.
     "HERMES_BASE_URL", "AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK", "AGENT_PROVIDER_LOCAL_HOSTS",
     "OORT_COHOSTED_AGENT_TOOLS_LOCKED", "API_SERVER_ENABLED", "API_SERVER_HOST", "API_SERVER_PORT",
+    "HERMES_LOGIN_RELAY_URL",  # #4079: the login relay sidecar, hermes.railway.internal:8643
 }
 # Shared variables the operator creates by hand (the generator does not print them).
 # HERMES_API_KEY: `openssl rand -hex 32`, one value for hermes' API_SERVER_KEY and the
@@ -722,9 +723,15 @@ def hermes_errors(services: dict, compose: str, repo_root: Path) -> list[str]:
         }
         if role == "api":
             want["OORT_COHOSTED_AGENT_TOOLS_LOCKED"] = "1"
+            # #4079: the login relay (api only): the sidecar's private address and its own shared key.
+            want["HERMES_LOGIN_RELAY_URL"] = "http://%s:8643" % hermes.get("privateHostname")
+            want["HERMES_LOGIN_RELAY_KEY"] = HERMES_RELAY_SHARED_KEY
         for var, value in want.items():
             if got.get(var) != value:
                 errors.append("%s %s %r must be %r (same-server Hermes wiring)" % (role, var, got.get(var), value))
+    for var in ("HERMES_LOGIN_RELAY_URL", "HERMES_LOGIN_RELAY_KEY"):
+        if var in (services["agent-worker"].get("variables") or {}):
+            errors.append("agent-worker must not carry %s (the login relay is api only, #4079)" % var)
     if "OORT_COHOSTED_AGENT_TOOLS_LOCKED" in (services["agent-worker"].get("variables") or {}):
         errors.append("agent-worker must not carry OORT_COHOSTED_AGENT_* (api only, ADR-0203 증보 K-S2)")
     return errors
@@ -1169,6 +1176,12 @@ def mutate_catalog(kind: str, data: dict) -> None:
         services["hermes"]["variables"]["API_SERVER_CORS_ORIGINS"] = "*"
     elif kind == "hermes-key-literal":
         services["hermes"]["variables"]["API_SERVER_KEY"] = "dev-insecure-hermes-bearer"
+    elif kind == "api-relay-key-chat-key":  # #4079: api reads the relay key from the chat key
+        api["variables"]["HERMES_LOGIN_RELAY_KEY"] = "${{shared.HERMES_API_KEY}}"
+    elif kind == "api-relay-url-wrong":
+        api["variables"]["HERMES_LOGIN_RELAY_URL"] = "http://hermes.railway.internal:8642"
+    elif kind == "worker-relay-key":
+        services["agent-worker"]["variables"]["HERMES_LOGIN_RELAY_KEY"] = "${{shared.HERMES_LOGIN_RELAY_KEY}}"
     elif kind == "hermes-relay-key-chat-key":  # #4078: the relay key reuses the chat key
         services["hermes"]["variables"]["HERMES_LOGIN_RELAY_KEY"] = "${{shared.HERMES_API_KEY}}"
     elif kind == "hermes-relay-stale-sha":  # a stale sidecar would be a stale security boundary
@@ -1252,6 +1265,9 @@ CATALOG_MUTATIONS: tuple[tuple[str, str], ...] = (
     ("hermes-oort-secret", "hermes variables outside its compose twin"),
     ("hermes-cors-open", "hermes variables outside its compose twin"),
     ("hermes-key-literal", "hermes API_SERVER_KEY"),
+    ("api-relay-key-chat-key", "api HERMES_LOGIN_RELAY_KEY"),
+    ("api-relay-url-wrong", "api HERMES_LOGIN_RELAY_URL"),
+    ("worker-relay-key", "agent-worker"),
     ("hermes-relay-key-chat-key", "hermes HERMES_LOGIN_RELAY_KEY"),
     ("hermes-relay-stale-sha", "hermes start command is not the canonical command list"),
     ("hermes-relay-key-not-unset", "hermes start command is not the canonical command list"),

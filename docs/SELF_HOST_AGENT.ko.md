@@ -2005,6 +2005,12 @@ agent:
   프로세스 그룹으로 실행해요. 키는 사이드카 전용 uid의 `0400` 파일에 있고 게이트웨이가
   뜨기 전에 환경에서 지워져요. 키가 없으면 사이드카 프로세스도 없고 화면은 셸 명령
   (`railway ssh`)을 보여 줘요. 실측: `scripts/tests/test_login_relay_docker.sh`.
+  oort api는 `HERMES_LOGIN_RELAY_URL` / `HERMES_LOGIN_RELAY_KEY`(`--with-agents`가 함께 써요,
+  api 전용)로 사이드카에 닿고, 인스턴스 운영자 전용 라우트 `…/agents/{agent}/model-login`·
+  `…/app-login`(#4079, `docs/api/openapi.operator.yaml`)으로 노출돼요. 붙여넣는 일회용 code와
+  Codex 기기 코드는 oort를 한 번 지나갈 뿐 저장·로그·감사·푸시에 남지 않고, 토큰은 oort에
+  아예 오지 않아요. 둘 중 하나라도 비어 있으면 라우트는 `409 login_relay_off`로 답하고 화면은
+  셸 명령을 보여 줘요.
 
 compose 실측(arm64, 2026-10-19, 고정 이미지): listener는 `0.0.0.0:8642`(uid 10000),
 `docker port`는 공개된 포트가 없다고 나오고, 게이트는 `LOCKGATE ok=true

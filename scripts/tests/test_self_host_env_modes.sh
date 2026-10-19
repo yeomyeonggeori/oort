@@ -1907,8 +1907,12 @@ else:
     worker = svc["agent-worker"]["environment"]
     if api.get("HERMES_BASE_URL") != "http://hermes:8642/v1" or worker.get("HERMES_BASE_URL") != "http://hermes:8642/v1":
         bad.append("api/agent-worker HERMES_BASE_URL is not the same-server Hermes")
-    if "HERMES_LOGIN_RELAY_KEY" in worker:
-        bad.append("agent-worker holds the login relay key")
+    if "HERMES_LOGIN_RELAY_KEY" in worker or "HERMES_LOGIN_RELAY_URL" in worker:
+        bad.append("agent-worker holds the login relay key or address")
+    if api.get("HERMES_LOGIN_RELAY_KEY") != env.get("HERMES_LOGIN_RELAY_KEY"):
+        bad.append("api HERMES_LOGIN_RELAY_KEY differs from the hermes service's")
+    if api.get("HERMES_LOGIN_RELAY_URL") != "http://hermes:8643":
+        bad.append("api HERMES_LOGIN_RELAY_URL is not the sidecar of the same-server Hermes")
     if api.get("HERMES_API_KEY") != env.get("API_SERVER_KEY") or worker.get("HERMES_API_KEY") != env.get("API_SERVER_KEY"):
         bad.append("api/agent-worker HERMES_API_KEY differs from API_SERVER_KEY")
     for name in ("api", "agent-worker"):
@@ -2005,6 +2009,10 @@ elif edit == "relay-before-gate":
     c = h["command"][0]
     relay = c[c.index("[ -z "):c.index("unset HERMES_LOGIN_RELAY_KEY; ")]
     h["command"] = [c.replace(relay, "").replace("set -eu; ", "set -eu; " + relay, 1)]
+elif edit == "relay-url-elsewhere":
+    api["HERMES_LOGIN_RELAY_URL"] = "http://relay.example:8643"
+elif edit == "relay-key-differs-on-api":
+    api["HERMES_LOGIN_RELAY_KEY"] = "x" * 40
 elif edit == "relay-on-worker":
     cfg["services"]["agent-worker"]["environment"]["HERMES_LOGIN_RELAY_KEY"] = h["environment"]["HERMES_LOGIN_RELAY_KEY"]
 else:
@@ -2017,10 +2025,10 @@ PY
   fi
 }
 for sab in no-gate gate-swallowed published-port oort-secret writable-config floating-image wildcard-host no-attest \
-  relay-key-kept relay-before-gate relay-on-worker; do
+  relay-key-kept relay-before-gate relay-on-worker relay-url-elsewhere relay-key-differs-on-api; do
   agents_sabotage "$sab" "$sab"
 done
-echo "with-agents: rendered Hermes private + gate-first + wired + relay key separate and unset before exec; 11 sabotages RED"
+echo "with-agents: rendered Hermes private + gate-first + wired + relay key separate and unset before exec; 13 sabotages RED"
 
 # Add-only on the existing env: the generated key is never replaced, a re-run of
 # --allow-local-provider alone keeps the Hermes host, and a second --with-agents

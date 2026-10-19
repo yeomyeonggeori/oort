@@ -202,87 +202,99 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let pool = momo_db::connect(&config.db).await?;
-    let state = AppState::new(
-        pool,
-        config.jwt_secret.clone(),
-        config.realtime_ws_url.clone(),
-    )
-    // B2.2: T3 stays off unless the operator configured it (MOMO_T3_ENABLED=1).
-    .with_t3(config.t3.clone())
-    // B2.6: the gateway callback surface stays 403 unless the operator selected
-    // AGENT_GATEWAY_MODE=gateway.
-    .with_agent_gateway(config.agent_gateway.clone())
-    // B4: connection-token issuance and the subscribe proxy stay shut unless the
-    // operator supplied CENT_TOKEN_HMAC / CENT_PROXY_SECRET.
-    .with_realtime(config.realtime.clone())
-    // B4.2: the AI-연결 family stays 503 unless the operator supplied
-    // PROVIDER_LINK_MASTER_KEY, and the instance-global surfaces admit only a
-    // `platform:read` token unless PLATFORM_ADMIN_EMAILS lists someone.
-    .with_settings(config.settings.clone())
-    // ADR-0205 D1: the GitHub surface stays 503 unless the operator supplied
-    // GITHUB_APP_MASTER_KEY (an independent root; reuse of another master key refused the boot).
-    .with_github(config.github.clone())
-    // #2960: 「연결 확인」 dials the provider under the operator's egress policy
-    // (the worker's inputs). The default state already holds a guarded probe
-    // limited to public addresses; this adds the operator's own opt-ins.
-    .with_provider_probe(std::sync::Arc::new(
-        momo_provider_probe::GuardedProviderProbe::new(
-            momo_server::config::provider_probe_policy_from_env(&config.settings),
-            momo_server::routes::provider_link::PROBE_TIMEOUT,
-        ),
-    ))
-    // ADR-0203: the co-hosted agent probe dials only the host the operator wrote
-    // in HERMES_BASE_URL, under the same egress policy as a real turn.
-    .with_cohosted(
-        config.cohosted,
-        std::sync::Arc::new(momo_provider_probe::GuardedProviderProbe::new(
-            momo_server::config::provider_probe_policy_from_env(&config.settings),
-            momo_server::routes::provider_link::PROBE_TIMEOUT,
-        )),
-    )
-    // B4.3: the per-IP limiter in front of `POST /v1/join`. On by default —
-    // `RATE_LIMIT_PER_IP=0` is the only way to turn it off, and the boot warns
-    // when someone does.
-    .with_rate_limit(config.rate_limit)
-    // ADR-0162: the Agent Port has its own token/agent/IP bounds and an optional
-    // trusted Origin comparison. It never borrows the public join knobs.
-    .with_agent_port(config.agent_port)
-    // ADR-0197 M1 (#3500): the personal cloud box API stays closed unless the
-    // operator sets MOMO_CLOUD_BOX_ENABLED=true.
-    .with_cloud_box(config.cloud_box.clone())
-    // B5.2: mention→run routing is always on (routing an `@mention` to its agent
-    // is the product); the only knob is how much history rides the job.
-    .with_mentions(config.mentions.clone())
-    // ADR-0146 개정 (#3022): member-scoped host registration signatures are
-    // verified when sent and required only when the operator turned on
-    // MOMO_HOST_REGISTER_SIGNATURE_REQUIRED (off until the R1 re-review PASS).
-    .with_device_keys(config.device_keys.clone())
-    // MOMO-605: no cross-origin surface at all unless the operator named an
-    // origin in MOMO_CORS_ALLOWED_ORIGINS.
-    .with_cors(config.cors.clone())
-    // ADR-0149 (SRV-T2): 휘발 신호 stays 503 unless the operator handed this
-    // process the Centrifugo publish credential (CENT_API_URL + CENT_API_KEY).
-    // No deployment did before this batch, so an un-updated env block keeps the
-    // surface closed rather than half-open.
-    .with_ephemeral(config.ephemeral.clone())
-    // #1222 / ADR-0004 증보 4: the webhook families. Unlike the builders above
-    // this one cannot be unset — both master keys are required and `Config`
-    // already refused the boot if either was missing. The reason is the same
-    // one that used to justify the fallback: a webhook secret is *derived*, so
-    // the key must be a value the operator chose and keeps, never one this
-    // process picked up from somewhere else that rotates on its own schedule.
-    .with_webhook(config.webhook.clone())
-    // ADR-0151: the attachment surface answers 503 unless the operator named a
-    // service-account key and a shared drive. The routes are mounted either way,
-    // so "no archive here" is distinguishable from "no such route".
-    // ADR-0169 증보 1: local capability URLs follow the 0167 Host/XFP pair
-    // when the operator named `same-origin`; google/stub stay Fixed-empty.
-    .with_drive(drive)
-    .with_drive_local_base(
-        config
-            .drive
-            .local_base(config.port, &format!("http://127.0.0.1:{}", config.port)),
-    );
+    let state =
+        AppState::new(
+            pool,
+            config.jwt_secret.clone(),
+            config.realtime_ws_url.clone(),
+        )
+        // B2.2: T3 stays off unless the operator configured it (MOMO_T3_ENABLED=1).
+        .with_t3(config.t3.clone())
+        // B2.6: the gateway callback surface stays 403 unless the operator selected
+        // AGENT_GATEWAY_MODE=gateway.
+        .with_agent_gateway(config.agent_gateway.clone())
+        // B4: connection-token issuance and the subscribe proxy stay shut unless the
+        // operator supplied CENT_TOKEN_HMAC / CENT_PROXY_SECRET.
+        .with_realtime(config.realtime.clone())
+        // B4.2: the AI-연결 family stays 503 unless the operator supplied
+        // PROVIDER_LINK_MASTER_KEY, and the instance-global surfaces admit only a
+        // `platform:read` token unless PLATFORM_ADMIN_EMAILS lists someone.
+        .with_settings(config.settings.clone())
+        // ADR-0205 D1: the GitHub surface stays 503 unless the operator supplied
+        // GITHUB_APP_MASTER_KEY (an independent root; reuse of another master key refused the boot).
+        .with_github(config.github.clone())
+        // #2960: 「연결 확인」 dials the provider under the operator's egress policy
+        // (the worker's inputs). The default state already holds a guarded probe
+        // limited to public addresses; this adds the operator's own opt-ins.
+        .with_provider_probe(std::sync::Arc::new(
+            momo_provider_probe::GuardedProviderProbe::new(
+                momo_server::config::provider_probe_policy_from_env(&config.settings),
+                momo_server::routes::provider_link::PROBE_TIMEOUT,
+            ),
+        ))
+        // ADR-0203: the co-hosted agent probe dials only the host the operator wrote
+        // in HERMES_BASE_URL, under the same egress policy as a real turn.
+        .with_cohosted(
+            config.cohosted,
+            std::sync::Arc::new(momo_provider_probe::GuardedProviderProbe::new(
+                momo_server::config::provider_probe_policy_from_env(&config.settings),
+                momo_server::routes::provider_link::PROBE_TIMEOUT,
+            )),
+        )
+        // #4079: the Hermes login relay hop. Same egress policy as a real turn, plus the relay's own host as an
+        // exact-match opt-in. Off (409 login_relay_off) unless both HERMES_LOGIN_RELAY_URL and _KEY are set.
+        .with_login_relay(
+            config.login_relay.clone(),
+            std::sync::Arc::new(momo_provider_probe::GuardedLoginRelay::new(
+                config.login_relay.egress_policy(
+                    momo_server::config::provider_probe_policy_from_env(&config.settings),
+                ),
+                momo_provider_probe::RELAY_TIMEOUT,
+            )),
+        )
+        // B4.3: the per-IP limiter in front of `POST /v1/join`. On by default —
+        // `RATE_LIMIT_PER_IP=0` is the only way to turn it off, and the boot warns
+        // when someone does.
+        .with_rate_limit(config.rate_limit)
+        // ADR-0162: the Agent Port has its own token/agent/IP bounds and an optional
+        // trusted Origin comparison. It never borrows the public join knobs.
+        .with_agent_port(config.agent_port)
+        // ADR-0197 M1 (#3500): the personal cloud box API stays closed unless the
+        // operator sets MOMO_CLOUD_BOX_ENABLED=true.
+        .with_cloud_box(config.cloud_box.clone())
+        // B5.2: mention→run routing is always on (routing an `@mention` to its agent
+        // is the product); the only knob is how much history rides the job.
+        .with_mentions(config.mentions.clone())
+        // ADR-0146 개정 (#3022): member-scoped host registration signatures are
+        // verified when sent and required only when the operator turned on
+        // MOMO_HOST_REGISTER_SIGNATURE_REQUIRED (off until the R1 re-review PASS).
+        .with_device_keys(config.device_keys.clone())
+        // MOMO-605: no cross-origin surface at all unless the operator named an
+        // origin in MOMO_CORS_ALLOWED_ORIGINS.
+        .with_cors(config.cors.clone())
+        // ADR-0149 (SRV-T2): 휘발 신호 stays 503 unless the operator handed this
+        // process the Centrifugo publish credential (CENT_API_URL + CENT_API_KEY).
+        // No deployment did before this batch, so an un-updated env block keeps the
+        // surface closed rather than half-open.
+        .with_ephemeral(config.ephemeral.clone())
+        // #1222 / ADR-0004 증보 4: the webhook families. Unlike the builders above
+        // this one cannot be unset — both master keys are required and `Config`
+        // already refused the boot if either was missing. The reason is the same
+        // one that used to justify the fallback: a webhook secret is *derived*, so
+        // the key must be a value the operator chose and keeps, never one this
+        // process picked up from somewhere else that rotates on its own schedule.
+        .with_webhook(config.webhook.clone())
+        // ADR-0151: the attachment surface answers 503 unless the operator named a
+        // service-account key and a shared drive. The routes are mounted either way,
+        // so "no archive here" is distinguishable from "no such route".
+        // ADR-0169 증보 1: local capability URLs follow the 0167 Host/XFP pair
+        // when the operator named `same-origin`; google/stub stay Fixed-empty.
+        .with_drive(drive)
+        .with_drive_local_base(
+            config
+                .drive
+                .local_base(config.port, &format!("http://127.0.0.1:{}", config.port)),
+        );
     let state = match config.livekit.clone() {
         Some(livekit) => state.with_livekit(livekit),
         None => state,
