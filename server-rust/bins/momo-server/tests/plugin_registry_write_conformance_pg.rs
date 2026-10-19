@@ -654,6 +654,28 @@ async fn manifest_value(su: &PgPool, plugin: &str) -> Value {
     serde_json::from_str(&text).expect("manifest json")
 }
 
+/// The `github:read` tools of the github fixture (migration 142 seeds exactly this file), in
+/// manifest order. Counting from the fixture keeps these tests honest when the catalogue grows.
+fn github_read_tools() -> Vec<String> {
+    fixture_scope_tools("github", "github:read")
+}
+
+/// The tools of `server/Fixtures/plugin-manifests/<file>.json` declaring exactly `scope`.
+fn fixture_scope_tools(file: &str, scope: &str) -> Vec<String> {
+    let text = std::fs::read_to_string(
+        repo_root().join(format!("server/Fixtures/plugin-manifests/{file}.json")),
+    )
+    .expect("fixture");
+    let manifest: Value = serde_json::from_str(&text).expect("fixture json");
+    manifest["mcp"]["tools"]
+        .as_array()
+        .expect("tools")
+        .iter()
+        .filter(|tool| tool["scopes"] == json!([scope]))
+        .map(|tool| tool["name"].as_str().expect("name").to_string())
+        .collect()
+}
+
 fn repo_root() -> PathBuf {
     PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../.."))
 }
@@ -901,24 +923,21 @@ async fn a_grant_is_personal_and_needs_an_enabled_install() {
     install(&env, &t.admin.1, ws, GITHUB, true).await;
 
     // A scope the app does not declare, or that is not a scope at all: 400.
-    for bad in ["github:write", "notion:read", "not a scope", ""] {
+    for bad in ["github:admin", "notion:read", "not a scope", ""] {
         let (status, body) = grant(&env, &t.alice.1, ws, GITHUB, bad).await;
         assert_eq!(status, 400, "{bad:?}: {body}");
     }
     assert_eq!(active_grants(&env.su, ws, GITHUB).await, 0);
 
     // A member grants herself github:read: 201, one capability per tool that
-    // declares the scope (two since migration 031), the receipt of the egress.
+    // declares the scope (the measured read tools since migration 142), the receipt of the egress.
     let (status, body) = grant(&env, &t.alice.1, ws, GITHUB, "GitHub:Read").await;
     assert_eq!(status, 201, "alice grants: {body}");
     assert_eq!(body["memberId"], alice.to_string());
     assert_eq!(body["scope"], "github:read", "the scope is normalised");
     assert_eq!(body["status"], "active");
     assert_eq!(body["enabled"], true);
-    assert_eq!(
-        body["capabilities"],
-        json!(["github.list_repositories", "github.search_issues"])
-    );
+    assert_eq!(body["capabilities"], json!(github_read_tools()));
     assert_eq!(body["egressDomains"], json!(["api.githubcopilot.com"]));
     let (granted_by, audit_id): (Uuid, Uuid) = sqlx::query_as(
         "SELECT granted_by, granted_audit_id FROM plugin_grant \
@@ -932,15 +951,20 @@ async fn a_grant_is_personal_and_needs_an_enabled_install() {
     .expect("grant row");
     assert_eq!(granted_by, alice, "D2: a grant is the member's own consent");
     assert_eq!(body["auditRef"], audit_id.to_string());
-    assert_eq!(member_projection_rows(&env.su, ws, alice, GITHUB).await, 2);
+    assert_eq!(
+        member_projection_rows(&env.su, ws, alice, GITHUB).await,
+        github_read_tools().len() as i64
+    );
     let first_audit = body["auditRef"].clone();
 
     // Her policy now lists the tools; bob's does not (a grant is not shared).
     let mine = catalog(&env, &t.alice.1, ws).await;
-    assert_eq!(
-        policy_tools(&mine, GITHUB),
-        ["github.list_repositories", "github.search_issues"]
-    );
+    // (the database orders by its collation, so compare as sets of names)
+    let mut listed = policy_tools(&mine, GITHUB);
+    listed.sort();
+    let mut expected = github_read_tools();
+    expected.sort();
+    assert_eq!(listed, expected);
     let bobs = catalog(&env, &t.bob.1, ws).await;
     assert!(policy_tools(&bobs, GITHUB).is_empty());
 
@@ -955,7 +979,10 @@ async fn a_grant_is_personal_and_needs_an_enabled_install() {
         granted_audits,
         "a repeat writes no audit row"
     );
-    assert_eq!(member_projection_rows(&env.su, ws, alice, GITHUB).await, 2);
+    assert_eq!(
+        member_projection_rows(&env.su, ws, alice, GITHUB).await,
+        github_read_tools().len() as i64
+    );
     // A projection that has drifted from the manifest (a tool re-tiered since the
     // grant) is rebuilt by the same call — with a record of the refresh.
     sqlx::query(
@@ -988,7 +1015,7 @@ async fn a_grant_is_personal_and_needs_an_enabled_install() {
     .expect("tiers");
     assert_eq!(
         tiers,
-        ["read_only", "read_only"],
+        vec!["read_only"; github_read_tools().len()],
         "the manifest's tiers again"
     );
 
@@ -1076,7 +1103,10 @@ async fn revoking_a_grant_removes_its_projection_and_only_mine() {
     install(&env, &t.admin.1, ws, GITHUB, true).await;
     grant(&env, &t.alice.1, ws, GITHUB, "github:read").await;
     grant(&env, &t.bob.1, ws, GITHUB, "github:read").await;
-    assert_eq!(projection_rows(&env.su, ws, GITHUB).await, 4);
+    assert_eq!(
+        projection_rows(&env.su, ws, GITHUB).await,
+        2 * github_read_tools().len() as i64
+    );
 
     // Alice revokes: her grant and her two projection rows go; bob's stay.
     let (status, body) = revoke(&env, &t.alice.1, ws, GITHUB, "github:read").await;
@@ -1091,7 +1121,10 @@ async fn revoking_a_grant_removes_its_projection_and_only_mine() {
         "removal carries no egress receipt"
     );
     assert_eq!(member_projection_rows(&env.su, ws, alice, GITHUB).await, 0);
-    assert_eq!(member_projection_rows(&env.su, ws, bob, GITHUB).await, 2);
+    assert_eq!(
+        member_projection_rows(&env.su, ws, bob, GITHUB).await,
+        github_read_tools().len() as i64
+    );
     assert_eq!(
         grant_status(&env.su, ws, alice, GITHUB, "github:read")
             .await
@@ -1118,7 +1151,7 @@ async fn revoking_a_grant_removes_its_projection_and_only_mine() {
     assert!(policy_tools(&catalog(&env, &t.alice.1, ws).await, GITHUB).is_empty());
     assert_eq!(
         policy_tools(&catalog(&env, &t.bob.1, ws).await, GITHUB).len(),
-        2
+        github_read_tools().len()
     );
 
     // Repeating it is idempotent: 200, the first revoke's audit id, no new row.
@@ -1142,7 +1175,10 @@ async fn revoking_a_grant_removes_its_projection_and_only_mine() {
             .as_deref(),
         Some("active")
     );
-    assert_eq!(member_projection_rows(&env.su, ws, bob, GITHUB).await, 2);
+    assert_eq!(
+        member_projection_rows(&env.su, ws, bob, GITHUB).await,
+        github_read_tools().len() as i64
+    );
     let (status, _) = revoke(&env, &t.alice.1, ws, GITHUB, "bad scope").await;
     assert_eq!(status, 400);
     // The incoming-webhook plugin has a grant row of its own lifecycle; a revoke
@@ -1198,7 +1234,10 @@ async fn revoking_a_grant_removes_its_projection_and_only_mine() {
     // Re-granting after a revoke restores the row (200), with a fresh projection.
     let (status, body) = grant(&env, &t.alice.1, ws, GITHUB, "github:read").await;
     assert_eq!(status, 200, "restore: {body}");
-    assert_eq!(member_projection_rows(&env.su, ws, alice, GITHUB).await, 2);
+    assert_eq!(
+        member_projection_rows(&env.su, ws, alice, GITHUB).await,
+        github_read_tools().len() as i64
+    );
     assert_eq!(
         grant_status(&env.su, ws, alice, GITHUB, "github:read")
             .await
@@ -1302,7 +1341,10 @@ async fn uninstall_cascades_to_every_grant_and_projection() {
         1,
         "another app is untouched"
     );
-    assert_eq!(member_projection_rows(&env.su, ws, alice, NOTION).await, 1);
+    assert_eq!(
+        member_projection_rows(&env.su, ws, alice, NOTION).await,
+        fixture_scope_tools("notion", "notion:read").len() as i64
+    );
     let after = catalog(&env, &t.alice.1, ws).await;
     assert_eq!(catalog_item(&after, GITHUB)["installed"], false);
     assert!(policy_tools(&after, GITHUB).is_empty());
@@ -1330,7 +1372,7 @@ async fn uninstall_cascades_to_every_grant_and_projection() {
         "INSERT INTO plugin_capability_projection \
            (workspace_id, member_id, plugin_id, scope, tool_name, capability_version, \
             schema_digest, risk, approval_tier, grant_id) \
-         SELECT workspace_id, member_id, plugin_id, scope, 'github.list_repositories', '1.0.0', \
+         SELECT workspace_id, member_id, plugin_id, scope, 'github.search_repositories', '1.0.0', \
                 'sha256:' || repeat('1', 64), 'read', 'read_only', id \
            FROM plugin_grant WHERE workspace_id = $1 AND member_id = $2 AND plugin_id = $3",
     )
@@ -1376,7 +1418,7 @@ async fn uninstall_cascades_to_every_grant_and_projection() {
     assert_eq!(status, 200, "consent is given anew: the row is restored");
     assert_eq!(
         policy_tools(&catalog(&env, &t.alice.1, ws).await, GITHUB).len(),
-        2
+        github_read_tools().len()
     );
 
     // An app the registry has since revoked can still be removed.
@@ -1413,7 +1455,7 @@ async fn a_disabled_install_hides_the_tools_but_keeps_the_consent() {
     grant(&env, &t.alice.1, ws, GITHUB, "github:read").await;
     assert_eq!(
         policy_tools(&catalog(&env, &t.alice.1, ws).await, GITHUB).len(),
-        2
+        github_read_tools().len()
     );
 
     // Disabling is a pause: the tools leave the policy at once (fail-closed),
@@ -1434,14 +1476,17 @@ async fn a_disabled_install_hides_the_tools_but_keeps_the_consent() {
             .as_deref(),
         Some("active")
     );
-    assert_eq!(member_projection_rows(&env.su, ws, alice, GITHUB).await, 2);
+    assert_eq!(
+        member_projection_rows(&env.su, ws, alice, GITHUB).await,
+        github_read_tools().len() as i64
+    );
 
     // Enabling again is the same row, the same consent.
     let (status, _) = install(&env, &t.admin.1, ws, GITHUB, true).await;
     assert_eq!(status, 200);
     assert_eq!(
         policy_tools(&catalog(&env, &t.alice.1, ws).await, GITHUB).len(),
-        2
+        github_read_tools().len()
     );
 }
 
@@ -1964,7 +2009,7 @@ async fn an_uninstall_waits_for_a_grant_in_flight_and_then_sweeps_it() {
         "INSERT INTO plugin_capability_projection \
            (workspace_id, member_id, plugin_id, scope, tool_name, capability_version, \
             schema_digest, risk, approval_tier, grant_id) \
-         VALUES ($1, $2, $3, 'github:read', 'github.list_repositories', '1.0.0', \
+         VALUES ($1, $2, $3, 'github:read', 'github.search_repositories', '1.0.0', \
                  'sha256:' || repeat('1', 64), 'read', 'read_only', $4)",
     )
     .bind(ws)
@@ -2091,10 +2136,7 @@ async fn every_write_leaves_exactly_one_audit_row() {
     assert_eq!(g.target_id, Some(grant_id));
     assert_eq!(g.detail["schema"], "momo.plugin.grant.v1");
     assert_eq!(g.detail["scope"], "github:read");
-    assert_eq!(
-        g.detail["tools"],
-        json!(["github.list_repositories", "github.search_issues"])
-    );
+    assert_eq!(g.detail["tools"], json!(github_read_tools()));
 
     let r = row(&env.su, &revoked["auditRef"]).await;
     assert_eq!(r.actor, Some(alice));
@@ -2239,5 +2281,78 @@ async fn the_domain_function_refuses_a_member_that_is_not_a_human() {
 
     let granted = try_grant(t.alice.0.id).await.expect("a human member can");
     assert_eq!(granted.status, "active");
-    assert_eq!(granted.capabilities.len(), 2);
+    assert_eq!(granted.capabilities.len(), github_read_tools().len());
+}
+
+/// Migration 142 (#3944) re-run: idempotent, and it rebuilds the capability projection of an
+/// existing active grant from the new manifest (a stale renamed tool and a missing new tool
+/// are both healed), without touching a grant of another app.
+#[tokio::test]
+#[ignore]
+async fn migration_142_is_idempotent_and_rebuilds_existing_projections() {
+    let _guard = test_lock().await;
+    let env = env().await;
+    let t = team(&env, "m142").await;
+    let ws = t.workspace;
+    let (status, body) = install(&env, &t.admin.1, ws, GITHUB, true).await;
+    assert!(status == 200 || status == 201, "{body}");
+    let (status, body) = grant(&env, &t.alice.1, ws, GITHUB, "github:read").await;
+    assert_eq!(status, 201, "{body}");
+    let alice = t.alice.0.id;
+    // Age the projection the way a pre-142 grant looks: a tool that no longer exists, and
+    // one that was never projected.
+    sqlx::query(
+        "UPDATE plugin_capability_projection SET tool_name = 'github.list_repositories' \
+          WHERE workspace_id = $1 AND member_id = $2 AND tool_name = 'github.search_issues'",
+    )
+    .bind(ws)
+    .bind(alice)
+    .execute(&env.su)
+    .await
+    .expect("age one row");
+    sqlx::query(
+        "DELETE FROM plugin_capability_projection \
+          WHERE workspace_id = $1 AND member_id = $2 AND tool_name = 'github.get_commit'",
+    )
+    .bind(ws)
+    .bind(alice)
+    .execute(&env.su)
+    .await
+    .expect("drop one row");
+
+    let sql = std::fs::read_to_string(
+        repo_root().join("server/Migrations/142_official_catalog_c_s1b.sql"),
+    )
+    .expect("migration 142");
+    let before = manifest_value(&env.su, GITHUB).await;
+    for _ in 0..2 {
+        sqlx::raw_sql(&sql)
+            .execute(&env.su)
+            .await
+            .expect("142 re-runs cleanly");
+    }
+    assert_eq!(manifest_value(&env.su, GITHUB).await, before, "idempotent");
+    let digest_ok: bool = sqlx::query_scalar(
+        "SELECT manifest_digest = 'sha256:' || encode(sha256(convert_to(manifest::text, 'UTF8')), 'hex') \
+           FROM plugin_registry WHERE plugin_id = $1",
+    )
+    .bind(GITHUB)
+    .fetch_one(&env.su)
+    .await
+    .expect("digest");
+    assert!(digest_ok, "the rotated digest is the runtime expression");
+    let mut tools: Vec<String> = sqlx::query_scalar(
+        "SELECT tool_name FROM plugin_capability_projection \
+          WHERE workspace_id = $1 AND member_id = $2 AND plugin_id = $3 ORDER BY tool_name",
+    )
+    .bind(ws)
+    .bind(alice)
+    .bind(GITHUB)
+    .fetch_all(&env.su)
+    .await
+    .expect("projection");
+    let mut want = github_read_tools();
+    want.sort();
+    tools.sort();
+    assert_eq!(tools, want);
 }

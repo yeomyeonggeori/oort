@@ -747,10 +747,7 @@ mod tests {
             "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_string();
         let response = catalog_response(
             &[tampered, row("com.momo.plugins.drive", DRIVE, false, false)],
-            &[policy(
-                "com.momo.plugins.github",
-                "github.list_repositories",
-            )],
+            &[policy("com.momo.plugins.github", "github.get_commit")],
             Some("https://oort.example"),
         );
         let ids: Vec<&str> = response
@@ -796,7 +793,7 @@ mod tests {
             status: "active",
             enabled: true,
             audit_ref: Some(Uuid::from_u128(9)),
-            capabilities: vec!["github.list_repositories".to_string()],
+            capabilities: vec!["github.get_commit".to_string()],
             egress_domains: Some(vec!["api.githubcopilot.com".to_string()]),
             created,
         }
@@ -977,8 +974,8 @@ mod tests {
     }
 
     #[test]
-    fn the_allowlist_is_the_four_official_plugins() {
-        assert_eq!(OFFICIAL_PLUGIN_IDS.len(), 4);
+    fn the_allowlist_is_the_seven_official_plugins() {
+        assert_eq!(OFFICIAL_PLUGIN_IDS.len(), 7);
         assert!(OFFICIAL_PLUGIN_IDS.iter().all(|id| is_plugin_id(id)));
     }
 }

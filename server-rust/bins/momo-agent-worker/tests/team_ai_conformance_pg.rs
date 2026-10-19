@@ -1047,7 +1047,7 @@ async fn an_install_request_becomes_a_card_that_installs_nothing_until_decided()
     assert_eq!(card.2["action"]["required_role"], "admin");
     let shown = card.2["action"]["rows"].to_string();
     for must_show in [
-        "GitHub 1.0.0",
+        "GitHub 1.1.0",
         "api.githubcopilot.com",
         "설치 안 됨 → 설치됨(켜짐)",
     ] {

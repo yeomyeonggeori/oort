@@ -643,12 +643,16 @@ mod tests {
     ///
     /// 141 is #4018's `channel_viewing` (ADR-0204 증보 3): the presence heartbeat's last-seen stamp
     /// per (channel, member), tenant ENABLE + FORCE + `ws_isolation`, SELECT for `momo_notifier`.
+    ///
+    /// 142 is #3944's official catalogue (ADR-0113 증보 2): the measured manifests of GitHub,
+    /// Notion and Linear replace the 013 placeholders and Gmail, Google Calendar and Google
+    /// Drive are seeded. Data only - `plugin_registry` has no RLS and no table is added.
     #[test]
-    fn discovers_contiguous_migrations_001_to_141() {
+    fn discovers_contiguous_migrations_001_to_142() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=141).collect();
+        let expected: Vec<i64> = (1..=142).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -656,7 +660,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=141 under {}",
+            "expected contiguous 001..=142 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -664,7 +668,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("141_channel_viewing"));
+            .starts_with("142_official_catalog_c_s1b"));
     }
 
     #[test]

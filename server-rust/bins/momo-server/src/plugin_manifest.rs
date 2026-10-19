@@ -821,7 +821,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    const FIXTURES: [(&str, &str); 4] = [
+    const FIXTURES: [(&str, &str); 7] = [
         (
             "com.momo.plugins.github",
             include_str!("../../../../server/Fixtures/plugin-manifests/github.json"),
@@ -838,7 +838,23 @@ mod tests {
             "com.momo.plugins.drive",
             include_str!("../../../../server/Fixtures/plugin-manifests/drive.json"),
         ),
+        (
+            "com.momo.plugins.gmail",
+            include_str!("../../../../server/Fixtures/plugin-manifests/gmail.json"),
+        ),
+        (
+            "com.momo.plugins.google-calendar",
+            include_str!("../../../../server/Fixtures/plugin-manifests/google-calendar.json"),
+        ),
+        (
+            "com.momo.plugins.google-drive",
+            include_str!("../../../../server/Fixtures/plugin-manifests/google-drive.json"),
+        ),
     ];
+
+    /// Migration 142 (#3944): the seeded manifests, one `$manifest$ … $manifest$` block each.
+    const MIGRATION_142: &str =
+        include_str!("../../../../server/Migrations/142_official_catalog_c_s1b.sql");
 
     fn github() -> Value {
         serde_json::from_str(FIXTURES[0].1).expect("github fixture parses")
@@ -942,7 +958,7 @@ mod tests {
         let mut manifest = github();
         manifest["mcp"]["tools"][0]["risk"] = json!("write");
         manifest["mcp"]["tools"][0]["approvalPolicy"] = json!("always");
-        manifest["momo"]["approvalTier"]["github.list_repositories"] = json!("network_write");
+        manifest["momo"]["approvalTier"]["github.get_commit"] = json!("network_write");
         let admitted = validate_manifest(&manifest.to_string()).expect("write admitted");
         assert_eq!(admitted.tools[0].risk, "write");
         assert_eq!(admitted.tools[0].approval_tier, "network_write");
@@ -1082,7 +1098,7 @@ mod tests {
         widened["mcp"]["tools"][0]["approvalPolicy"] = json!("require_approval");
         assert_eq!(reason(&widened), "read tools must use none/read_only");
         let mut tier = github();
-        tier["momo"]["approvalTier"]["github.list_repositories"] = json!("network_write");
+        tier["momo"]["approvalTier"]["github.get_commit"] = json!("network_write");
         assert_eq!(reason(&tier), "read tools must use none/read_only");
     }
 
@@ -1236,7 +1252,13 @@ mod tests {
         array["mcp"]["tools"][1]["inputSchema"]["properties"]["labels"] = json!({"type": "array"});
         assert!(reason(&array).starts_with("array schema requires items"));
         let mut scalar = github();
-        scalar["mcp"]["tools"][1]["inputSchema"]["properties"]["query"]["items"] =
+        let search = scalar["mcp"]["tools"]
+            .as_array()
+            .expect("tools")
+            .iter()
+            .position(|tool| tool["name"] == "github.search_issues")
+            .expect("search_issues is in the github fixture");
+        scalar["mcp"]["tools"][search]["inputSchema"]["properties"]["query"]["items"] =
             json!({"type": "string"});
         assert!(reason(&scalar).starts_with("scalar schema has container fields"));
         let mut duplicate = github();
@@ -1354,6 +1376,121 @@ mod tests {
             "scopes",
         ] {
             assert!(!is_secret_like_key(key), "{key}");
+        }
+    }
+
+    fn migration_142_manifests() -> Vec<Value> {
+        MIGRATION_142
+            .split("$manifest$")
+            .enumerate()
+            .filter(|(index, _)| index % 2 == 1)
+            .map(|(_, block)| serde_json::from_str(block).expect("seeded manifest parses"))
+            .collect()
+    }
+
+    /// #3944: the migration seeds exactly the fixtures it claims to (the fixture is canon,
+    /// `Fixtures/plugin-manifests/` is also what the read conformance test compares to).
+    #[test]
+    fn migration_142_seeds_equal_the_fixtures() {
+        let seeded = migration_142_manifests();
+        assert_eq!(seeded.len(), 6, "3 replaced + 3 new apps");
+        for manifest in seeded {
+            let id = manifest["plugin"]["id"].as_str().expect("id");
+            let (_, text) = FIXTURES
+                .iter()
+                .find(|(fixture_id, _)| *fixture_id == id)
+                .unwrap_or_else(|| panic!("no fixture for {id}"));
+            let fixture: Value = serde_json::from_str(text).expect("fixture");
+            assert_eq!(
+                manifest, fixture,
+                "{id}: migration 142 drifted from its fixture"
+            );
+        }
+    }
+
+    /// ADR-0113 증보 2 수용 7 (the file half): the ids the registry seeds are exactly the
+    /// ids `plugin.install` / the catalogue allowlist name. (The registry half is the PG test.)
+    #[test]
+    fn the_fixture_ids_are_the_official_plugin_ids() {
+        let mut fixtures: Vec<&str> = FIXTURES.iter().map(|(id, _)| *id).collect();
+        let mut official: Vec<&str> = crate::routes::plugins::OFFICIAL_PLUGIN_IDS.to_vec();
+        fixtures.sort_unstable();
+        official.sort_unstable();
+        assert_eq!(fixtures, official);
+    }
+
+    /// 수용 1/2 + #3944: every official manifest names tools `<prefix>.<vendor name>`, has no
+    /// grade C name, a real (non-placeholder, unique) digest per tool, no send tool, and
+    /// `momo.preview` on exactly the three Google apps.
+    #[test]
+    fn official_manifests_follow_the_catalogue_rules() {
+        for (id, text) in FIXTURES {
+            let manifest: Value = serde_json::from_str(text).expect("fixture");
+            let validated = validate_manifest(text).unwrap_or_else(|error| panic!("{id}: {error}"));
+            let preview = manifest["momo"]["preview"] == json!(true);
+            assert_eq!(
+                preview,
+                id.contains("google-") || id.ends_with(".gmail"),
+                "{id} preview"
+            );
+            for tool in &validated.tools {
+                assert!(!is_grade_c_tool_name(&tool.name), "{id}: {}", tool.name);
+                assert!(
+                    !tool.name.to_lowercase().contains("send"),
+                    "{id}: {} is a send tool",
+                    tool.name
+                );
+                // The momo-hosted drive (015) keeps its placeholder digests; every vendor
+                // app carries the digest of its measured tools/list entry.
+                let hex = tool.schema_digest.trim_start_matches("sha256:");
+                if id != "com.momo.plugins.drive" {
+                    assert!(
+                        hex.chars().collect::<BTreeSet<_>>().len() > 1,
+                        "{id}: {} has a placeholder digest",
+                        tool.name
+                    );
+                }
+            }
+            if id != "com.momo.plugins.drive" {
+                let prefix = id.trim_start_matches("com.momo.plugins.");
+                assert!(
+                    validated
+                        .tools
+                        .iter()
+                        .all(|tool| tool.name.starts_with(&format!("{prefix}."))),
+                    "{id}: tool names must be <app>.<vendor name>"
+                );
+            }
+            // Tools whose arguments can delete / trash / overwrite stay out even though their
+            // names are harmless (review of #3944).
+            for banned in [
+                "notion-update-page",
+                "notion-update-data-source",
+                "notion-update-folder",
+                "send",
+                "trash",
+                "spam",
+            ] {
+                assert!(
+                    validated
+                        .tools
+                        .iter()
+                        .all(|tool| !tool.name.contains(banned)),
+                    "{id}: {banned} must not be seeded"
+                );
+            }
+            // The manifest text never carries a client / token shaped value.
+            assert!(!is_secret_like_key_anywhere(&manifest), "{id}");
+        }
+    }
+
+    fn is_secret_like_key_anywhere(value: &Value) -> bool {
+        match value {
+            Value::Object(object) => object
+                .iter()
+                .any(|(key, child)| is_secret_like_key(key) || is_secret_like_key_anywhere(child)),
+            Value::Array(items) => items.iter().any(is_secret_like_key_anywhere),
+            _ => false,
         }
     }
 }
