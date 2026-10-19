@@ -185,6 +185,7 @@ export function ModelLoginPanel({
   const sessionFor = (provider: ModelProvider) =>
     active !== null && active.provider === provider ? (
       <LoginRelaySession
+        key={`${agentId}:${active.start.loginId}`}
         workspaceId={workspaceId}
         agentId={agentId}
         flow="model"
