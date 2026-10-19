@@ -312,10 +312,17 @@ D6의 다섯 조건은 그대로이고, 커넥터 시험이면 아래를 **모�
 - 같은 env가 나중에 외부 Hermes로 향함 → 생성기는 이미 **다른 `HERMES_BASE_URL`이 선언된 env를 거절**하고, 그때 선언을 쓰지 않는다. 사람이 손으로 URL을 바꾸는 것은 막지 못한다(남는 위험).
 - 자동 연결은 하지 않는다: 연결은 계속 인스턴스 운영자의 한 번 클릭이다(D3·D4 불변).
 
+**독립 보안 검수(fresh)에서 나와 이 증보에 반영한 것과 남긴 것.**
+- 반영: Railway 시작 명령이 `config.yaml`·`lockgate.py`를 디코드한 뒤 **레포 파일의 sha256과 대조**한다(빈·낡은·바꿔치기한 base64 변수가 게이트를 통째로 우회하는 길을 막는다. 검증기가 해시를 다시 계산하므로 두 파일을 고치면 카탈로그도 같은 변경에서 고쳐야 한다). 게이트가 재사용 볼륨의 `/opt/data/.env`도 읽어 `HERMES_YOLO_MODE`·`HERMES_DASHBOARD`·`API_SERVER_CORS_ORIGINS`·짧은 `API_SERVER_KEY`를 거절한다(게이트는 원래 임시 HERMES_HOME만 보았다). 카탈로그 검증기는 hermes의 `public`을 정확한 `false`로, 키 집합을 허용목록으로 고정한다.
+- **남김 1 (M1, 서버 변경 필요):** `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`은 정확한 호스트 목록의 전제 스위치이면서 물리 loopback(`localhost`·`127.0.0.1`·`::1`)도 함께 연다(`EgressPolicy::host_exempt`). 이는 ADR-0004 증보 2026-09-08의 기존 의미이고 §3.4.1 수동 경로도 같은 값을 쓰지만, 번들이 자동으로 켜게 되므로 사실을 적어 둔다. 면제는 운영자가 설정하는 URL에만 걸린다. `hermes`만 허용하는 별도 opt-in은 Rust 변경이라 이 증보 밖의 후속이다.
+- **남김 2 (M2):** 게이트는 설정과 볼륨 `.env`를 본다. 재사용 볼륨의 `profiles/`·`plugins/`·`skills/`·`mcp-tokens/`와 게이트웨이가 api_server 밖에 올릴 수 있는 플랫폼의 toolset은 판정하지 않는다(미검증). 이 번들이 만든 새 볼륨에서만 잠금을 약속한다. `report`는 live 도구 위반에만 종료하고 인증·CORS·대시보드 검사 실패는 기록만 한다.
+- **남김 3 (L5):** hermes는 postgres·centrifugo와 같은 `private` 네트워크에 있다(DB 자격 증명은 주지 않으므로 접속은 안 되지만 격리는 약하다). 전용 네트워크는 host-network 오버레이와의 상호작용 때문에 이 증보에서 하지 않았다. 컨테이너 하드닝(`cap_drop`·`no-new-privileges`)도 측정하지 않았다.
+- 문서 정정: 「설정은 매 시작마다 마운트에서 다시 복사된다」는 재시작 사이에만 맞다. 시작 직후 `/opt/data/config.yaml`은 hermes uid 소유가 된다(`-rw-r----- hermes`) — 파일 도구가 꺼져 있고 Hermes가 자기 설정 쓰기를 거부한다는 실측(Phase 1)에 기대는 보장이다.
+
 기각한 대안: (a) oort가 Hermes의 `lockgate report` 결과나 `/v1/toolsets`를 읽어 attest를 대신함 — 새 요청 경로이고 D2(정확히 두 요청)를 바꾼다. (b) attest를 계속 수동으로 — 제로 베이스 목표와 정면충돌. (c) 감지되면 자동 연결 — 기각(D 본문과 같음).
 
 ### A4. Railway 카탈로그
-`infra/railway/railway.json`에 `hermes` 서비스(비공개, 같은 digest, `/opt/data` 볼륨, 시작 명령 = 같은 모양: 설정·게이트를 base64 변수에서 디코드 → gate → report → exec)를 더하고, api/agent-worker에 같은 배선 변수(api만 attest `1`)를 더한다. `HERMES_API_KEY`는 생성기 정본 키 집합(45)에 넣지 않고(T2 stdout 불변) **프로젝트 shared variable로 운영자가 한 번 만든다**. 카탈로그 검증기(`check_railway_catalog.py`)가 다음을 고정한다: 이미지 digest가 compose와 같다·공개 아님·시작 명령이 게이트-먼저의 정본 명령 목록·oort 비밀 0(compose 쌍둥이 변수 집합)·정확한 호스트·worker에는 attest 없음. 규칙마다 사보타주 10건이 RED다.
+`infra/railway/railway.json`에 `hermes` 서비스(비공개, 같은 digest, `/opt/data` 볼륨, 시작 명령 = 같은 모양: 설정·게이트를 base64 변수에서 디코드 → gate → report → exec)를 더하고, api/agent-worker에 같은 배선 변수(api만 attest `1`)를 더한다. `HERMES_API_KEY`는 생성기 정본 키 집합(45)에 넣지 않고(T2 stdout 불변) **프로젝트 shared variable로 운영자가 한 번 만든다**. 카탈로그 검증기(`check_railway_catalog.py`)가 다음을 고정한다: 이미지 digest가 compose와 같다·공개 아님·시작 명령이 게이트-먼저의 정본 명령 목록·oort 비밀 0(compose 쌍둥이 변수 집합)·정확한 호스트·worker에는 attest 없음. 규칙마다 사보타주 14건이 RED다(게이트 제거·`|| true`·sha 대조 제거·낡은 해시·공개·다른 키·oort 비밀·열린 CORS·고정 키·와일드카드 호스트·attest 제거).
 
 ### A5. 실측과 남은 것
 - compose(arm64, 2026-10-19, 격리 프로젝트): 빈 상태에서 `up -d --wait` → hermes healthy, `LOCKGATE ok=true disabled_count=24`, `LOCKREPORT` 6검사 true, 리스너 `0.0.0.0:8642`(uid 10000), `docker port` 공개 0. 운영자 로그인 후 `GET cohosted-agent` = `declaration: ready, toolsLockAttested: true, connectable: true`, `POST …/probe` = `state: ok, requestsSent: 2, modelCount: 1`, `POST …/connect` = 201(`pinKind: operator_env`). 사보타주: 설정에서 `terminal` 제거 → 게이트 exit 3, 컨테이너 재시작 반복, 프로브 `unreachable`; attest 제거 → `connectable: false`; 호스트 opt-in 제거 → `url_refused`, 요청 0건.

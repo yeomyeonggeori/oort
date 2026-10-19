@@ -265,7 +265,8 @@ for mutation in start-bare-api start-bare-relay start-no-exec predeploy-raw \
   push-set-x push-key-path-escape push-unset-conditional notifier-umask-skipped \
   api-chown-skipped push-key-reassigned predeploy-run-redefined relay-as-root \
   relay-superuser-dsn sender-cent-api-key hermes-no-gate hermes-gate-nonfatal \
-  hermes-public hermes-image-floating hermes-oort-secret hermes-cors-open \
+  hermes-public hermes-public-string hermes-extra-key hermes-gate-sha-stale \
+  hermes-no-sha-check hermes-image-floating hermes-oort-secret hermes-cors-open \
   hermes-key-literal api-hermes-wildcard-host api-hermes-attest-dropped \
   worker-hermes-attest readme-row-missing centrifugo-json-new-key; do
   grep -Fq "mutation ${mutation} RED" "$TMP_ROOT/catalog.out" || \
@@ -273,7 +274,7 @@ for mutation in start-bare-api start-bare-relay start-no-exec predeploy-raw \
 done
 grep -Fq 'committed catalog still passes' "$TMP_ROOT/catalog.out" || \
   fail "catalog checker missing restore proof"
-pass "catalog: start commands = canonical command lists (operators, order, values), pre-deploy sh -c + root→momo drop, Centrifugo v6 names + infra/centrifugo.json parity and settings set, api volume/UID/chown -R/setpriv/env -u, PG18+pgvector image+volume, push tmpfs guard/umask order/unset, variables ⊆ compose twin, shared refs ⊆ --claim keys, README hand-mapped table, hermes private + digest + gate-first + no oort secret; 57 mutations RED"
+pass "catalog: start commands = canonical command lists (operators, order, values), pre-deploy sh -c + root→momo drop, Centrifugo v6 names + infra/centrifugo.json parity and settings set, api volume/UID/chown -R/setpriv/env -u, PG18+pgvector image+volume, push tmpfs guard/umask order/unset, variables ⊆ compose twin, shared refs ⊆ --claim keys, README hand-mapped table, hermes private + digest + gate-first/sha-pinned + no oort secret; 61 mutations RED"
 
 # ---------------------------------------------------------------------------
 # ②b #2066 R2 — T2 has no env file, so the `--ensure-managed-keys` backfill

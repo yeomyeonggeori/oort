@@ -426,8 +426,8 @@ scripts/self_host_env.sh --compose up -d --wait
   있어요. 백업은 직접 하세요. `down -v`는 이 볼륨도 지워요.
 - 모델 인증은 별도 단계예요(#4073). 없어도 카드는 보이고, 대화 한 번은 「Hermes가
   아직 모델 provider에 연결되지 않았다」고 답해요.
-- 기존 env에는 덧붙이기만 해요(생성된 키는 다시 만들지 않아요). 이미 다른
-  `HERMES_BASE_URL`을 선언한 env는 거절해요. 적용 뒤 api·agent-worker를 다시
+- 기존 env에서 생성된 키는 다시 만들지 않고, 나머지 키는 번들 값으로 맞춰요(직접 비워 둔
+  값도 바뀌어요). 이미 다른 `HERMES_BASE_URL`을 선언한 env는 거절해요. 적용 뒤 api·agent-worker를 다시
   만드세요(`--compose up -d`).
 
 수동 절차와 Railway 모양은 `SELF_HOST_AGENT.md` §3.4.1,

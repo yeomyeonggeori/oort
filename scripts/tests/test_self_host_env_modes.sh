@@ -2038,6 +2038,25 @@ grep -Fxq 'HERMES_BASE_URL=https://hermes.example.test/v1' "$foreign_fixture/inf
   exit 1
 }
 
+# Review L2/L3: a host list that holds a glob character must not expand against the
+# working directory, and a value with a backslash must stay one line.
+glob_fixture="$(make_fixture with-agents-glob)"
+run_generator "$glob_fixture" "$glob_fixture/output" 49810 --local-build
+: >"$glob_fixture/fileA"; : >"$glob_fixture/fileB"
+printf 'AGENT_PROVIDER_LOCAL_HOSTS=*,host.docker.internal\n' >>"$glob_fixture/infra/rust/local.secrets.env"
+run_generator "$glob_fixture" "$glob_fixture/glob-output" 49810 --local-build --with-agents
+grep -Fxq 'AGENT_PROVIDER_LOCAL_HOSTS=*,host.docker.internal,hermes' "$glob_fixture/infra/rust/local.secrets.env" || {
+  echo "glob in AGENT_PROVIDER_LOCAL_HOSTS was expanded or dropped: $(grep '^AGENT_PROVIDER_LOCAL_HOSTS=' "$glob_fixture/infra/rust/local.secrets.env")" >&2
+  exit 1
+}
+[ "$(grep -c '^AGENT_PROVIDER_LOCAL_HOSTS=' "$glob_fixture/infra/rust/local.secrets.env")" = "1" ]
+bs_fixture="$(make_fixture with-agents-backslash)"
+run_generator "$bs_fixture" "$bs_fixture/output" 49814 --local-build
+printf 'AGENT_PROVIDER_LOCAL_HOSTS=a\\nb\n' >>"$bs_fixture/infra/rust/local.secrets.env"
+run_generator "$bs_fixture" "$bs_fixture/bs-output" 49814 --local-build --with-agents
+[ "$(grep -c '^AGENT_PROVIDER_LOCAL_HOSTS=' "$bs_fixture/infra/rust/local.secrets.env")" = "1" ]
+! grep -qx 'b,hermes' "$bs_fixture/infra/rust/local.secrets.env" || { echo "backslash value was split into two lines" >&2; exit 1; }
+
 echo "with-agents: add-only re-run, host merge both orders, foreign HERMES_BASE_URL refused, default stack has no hermes"
 # Railway renders the catalog (infra/railway/railway.json), not a file.
 if run_generator "$(make_fixture with-agents-railway)" "$TMP_ROOT/agents-railway-output" 49806 \

@@ -560,7 +560,9 @@ declaration that the lock holds; here it is backed by the gate, and it stops
 being true if you edit infra/hermes/config.yaml or the start command. An env
 that already declares a different HERMES_BASE_URL is refused. Model
 authentication is a separate step. Local-install only — not for a T2 platform.
-Works on a new env and, add-only, on an existing one.
+On an existing env it writes the missing keys and sets the declaration keys
+to the bundled values (an empty value you chose is replaced); the generated
+HERMES_API_KEY is never replaced.
 --allow-local-provider writes AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1 and
 AGENT_PROVIDER_LOCAL_HOSTS=host.docker.internal (canonical names:
 oort_local_provider_env_keys). Without it those two keys are absent
@@ -1233,8 +1235,10 @@ rewrite_env_assignment() {
   local key="$1" value="$2" tmp
   validate_env_scalar "$key" "$value"
   tmp="$(mktemp "${TMPDIR:-/tmp}/oort-self-host-env.XXXXXX")"
-  awk -v key="$key" -v value="$value" '
-    BEGIN { done = 0 }
+  # ENVIRON, not `awk -v`: -v interprets backslash escapes, so a value with `\n`
+  # became two lines (#4072 review L3). rewrite_env_assignment_quoted already does this.
+  OORT_REWRITE_VALUE="$value" awk -v key="$key" '
+    BEGIN { done = 0; value = ENVIRON["OORT_REWRITE_VALUE"] }
     index($0, key "=") == 1 && done == 0 {
       print key "=" value
       done = 1
@@ -1387,9 +1391,15 @@ EOF
 # a HERMES_BASE_URL that points anywhere else is the operator's own external
 # Hermes and is refused rather than overwritten (the attestation below would
 # otherwise be written over somebody else's host).
-csv_with_item() {
-  local list="$1" item="$2" entry found=0 out=""
-  local IFS=','
+csv_with_item() (
+  # Subshell with globbing off: an unquoted `for entry in $list` would otherwise
+  # expand `*` against the current directory (#4072 review L2).
+  set -f
+  list="$1"
+  item="$2"
+  found=0
+  out=""
+  IFS=','
   for entry in $list; do
     entry="$(printf '%s' "$entry" | tr -d '[:space:]')"
     [ -n "$entry" ] || continue
@@ -1398,7 +1408,7 @@ csv_with_item() {
   done
   [ "$found" -eq 1 ] || out="${out:+$out,}$item"
   printf '%s' "$out"
-}
+)
 
 ensure_cohosted_agent_env() {
   [ "$WITH_AGENTS" -eq 1 ] || return 0

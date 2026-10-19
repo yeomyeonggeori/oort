@@ -2341,8 +2341,9 @@ generator now do for you; you still read the lock, and the model key stays yours
   `scripts/self_host_env.sh --compose up -d --wait` starts Hermes with the rest.
   The `hermes` service has no `ports:` (not reachable from the host), mounts the
   config and the gate read-only, and runs `lockgate.py gate` before the
-  entrypoint. The flag is add-only on an existing env and refuses an env that
-  already declares another `HERMES_BASE_URL`.
+  entrypoint. On an existing env the generated key is never replaced and the other keys
+  are set to the bundled values; the flag refuses an env that already declares
+  another `HERMES_BASE_URL`.
 - `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1` stays **your own declaration**. In both
   shipped shapes it is backed by the gate; if you edit the config, the gate or
   the start command, you take that backing back on yourself.

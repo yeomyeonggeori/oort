@@ -1989,9 +1989,9 @@ agent:
   `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`을 써요. 이어서
   `scripts/self_host_env.sh --compose up -d --wait`로 나머지와 함께 Hermes가 떠요.
   `hermes` 서비스에는 `ports:`가 없고(호스트에서 닿지 않음), 설정과 게이트를
-  읽기 전용으로 마운트하며, 엔트리포인트 앞에서 `lockgate.py gate`를 돌려요. 이
-  플래그는 기존 env에는 덧붙이기만 하고, 이미 다른 `HERMES_BASE_URL`을 선언한 env는
-  거절해요.
+  읽기 전용으로 마운트하며, 엔트리포인트 앞에서 `lockgate.py gate`를 돌려요. 기존
+  env에서는 생성된 키를 다시 만들지 않고 나머지 키를 번들 값으로 맞추며, 이미 다른
+  `HERMES_BASE_URL`을 선언한 env는 거절해요.
 - `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`은 여전히 **운영자 본인의 선언**이에요. 두
   배포 모양 모두 게이트가 뒷받침하지만, 설정·게이트·시작 명령을 고치면 그 뒷받침은
   운영자가 직접 책임져요.

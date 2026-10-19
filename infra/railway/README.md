@@ -193,9 +193,12 @@ variable**: not `DATABASE_URL`, not `PROVIDER_LINK_MASTER_KEY`, not a JWT key.
    from `infra/hermes/config.yaml` (24 toolsets off, approvals manual/deny, no
    model, no connector) and `HERMES_LOCKGATE_B64` from
    `infra/hermes/lockgate.py`.
-3. **Start order.** The start command writes the config, runs
-   `lockgate.py gate` and only then `exec`s the Hermes dispatcher. A non-zero
-   gate (`set -e`) means the service never listens. The deploy log shows one
+3. **Start order.** The start command writes the config and the gate, checks
+   both against the sha256 of the repo files (an empty, stale or swapped
+   variable stops the service; `check_railway_catalog.py` recomputes the hashes,
+   so changing `config.yaml` or `lockgate.py` means updating the command in the
+   same change), runs `lockgate.py gate` and only then `exec`s the Hermes
+   dispatcher. A non-zero gate (`set -e`) means the service never listens. The deploy log shows one
    `LOCKGATE {"ok": true, …}` line and, after start, one `LOCKREPORT` line with
    six checks. Read them before you trust the card.
 4. api and agent-worker get the wiring from the hand-mapped table (host,
@@ -212,6 +215,12 @@ Bind address (ADR-0203 D9): `API_SERVER_HOST=0.0.0.0`. The Railway environment
 creation date decides whether that is enough; the production environment of the
 team instance was created 2026-09-23 (after 2025-10-16), and the `hermes-kwak`
 service (#3952) ran this way. `::` is not used and stays runtime-unverified.
+
+Local opt-in, read this once: `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1` is the
+switch the exact-host list hangs on, and it also admits physical loopback
+(`localhost`, `127.0.0.1`, `::1`) for provider URLs the instance operator sets.
+That is the existing ADR-0004 증보 behavior of the manual §3.4.1 path, not new
+here; narrowing it to the listed host alone needs a server change (follow-up).
 
 Data: Hermes keeps sessions, memories and `state.db` on its own volume
 (`/opt/data`), outside oort's database and `oort backup`. Enable volume backups

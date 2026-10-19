@@ -88,6 +88,7 @@ OPERATOR_SHARED = {"HERMES_API_KEY"}
 HERMES_SHARED_KEY = "${{shared.HERMES_API_KEY}}"
 HERMES_PORT = 8642
 HERMES_DATA = "/opt/data"
+HERMES_KEYS = {"public", "image", "startCommand", "port", "privateHostname", "volume", "variables"}
 HERMES_PY = "/opt/hermes/.venv/bin/python"
 REF_RE = re.compile(r"\$\{\{([^}]*)\}\}")
 SHARED_RE = re.compile(r"^shared\.([A-Za-z_][A-Za-z0-9_]*)$")
@@ -163,22 +164,6 @@ CANONICAL_SHELL: dict[str, list[tuple[object, list[object]]]] = {
             + ["HOME=/home/momo", "momo-rust-entrypoint", "api"],
         ),
     ],
-    # #4072: config and gate arrive as base64 variables, the gate runs BEFORE the image's
-    # own entrypoint (which starts the gateway ahead of any CMD), `set -e` stops the service
-    # on a non-zero gate, and `exec` hands PID 1 to the dispatcher.
-    "hermes": [
-        ("", ["set", "-eu"]),
-        (";", ["umask", "022"]),
-        (";", [":", "${HERMES_CONFIG_B64:?}", "${HERMES_LOCKGATE_B64:?}", "${API_SERVER_KEY:?}"]),
-        (";", ["mkdir", "-p", HERMES_DATA]),
-        (";", ["printf", "%s", "$HERMES_CONFIG_B64"]),
-        ("|", ["base64", "-d", ">", HERMES_DATA + "/config.yaml"]),
-        (";", ["printf", "%s", "$HERMES_LOCKGATE_B64"]),
-        ("|", ["base64", "-d", ">", "/tmp/lockgate.py"]),
-        (";", [HERMES_PY, "/tmp/lockgate.py", "gate", HERMES_DATA + "/config.yaml"]),
-        (";", [HERMES_PY, "/tmp/lockgate.py", "report", "&", "exec",
-               "/opt/hermes/docker/entrypoint-dispatch.sh", "gateway", "run"]),
-    ],
     "push-relay": push_canonical("push-relay", "APNS_KEY_P8_B64", "apns-key.p8", "MOMO_APNS_KEY_PATH"),
     "notifier": push_canonical(
         "notifier", "RELAY_SIGNING_KEY_B64", "relay-signing-key.pem", "MOMO_PUSH_RELAY_PRIVATE_KEY_PATH"
@@ -249,6 +234,32 @@ KNOWN_CENTRIFUGO_SETTINGS = {
     "client.subscription_token.enabled",
 }
 
+
+
+def hermes_canonical(config_sha: str, gate_sha: str) -> list[tuple[object, list[object]]]:
+    """#4072: config and gate arrive as base64 variables and are PINNED to the repo bytes.
+
+    The sha256 check is what makes the start command fail-closed against an empty, stale or swapped
+    variable: `printf " " | base64 -d` is an empty gate script that would exit 0 and start Hermes unchecked
+    (review M3). The gate runs BEFORE the image's own entrypoint (which starts the gateway ahead of any CMD),
+    `set -e` stops the service on a non-zero gate, and `exec` hands PID 1 to the dispatcher."""
+    return [
+        ("", ["set", "-eu"]),
+        (";", ["umask", "022"]),
+        (";", [":", "${HERMES_CONFIG_B64:?}", "${HERMES_LOCKGATE_B64:?}", "${API_SERVER_KEY:?}"]),
+        (";", ["mkdir", "-p", HERMES_DATA]),
+        (";", ["printf", "%s", "$HERMES_CONFIG_B64"]),
+        ("|", ["base64", "-d", ">", HERMES_DATA + "/config.yaml"]),
+        (";", ["printf", "%s", "$HERMES_LOCKGATE_B64"]),
+        ("|", ["base64", "-d", ">", "/tmp/lockgate.py"]),
+        (";", ["echo", "%s  %s" % (config_sha, HERMES_DATA + "/config.yaml")]),
+        ("|", ["sha256sum", "-c", "-"]),
+        (";", ["echo", "%s  %s" % (gate_sha, "/tmp/lockgate.py")]),
+        ("|", ["sha256sum", "-c", "-"]),
+        (";", [HERMES_PY, "/tmp/lockgate.py", "gate", HERMES_DATA + "/config.yaml"]),
+        (";", [HERMES_PY, "/tmp/lockgate.py", "report", "&", "exec",
+               "/opt/hermes/docker/entrypoint-dispatch.sh", "gateway", "run"]),
+    ]
 
 def canonical_diff(
     commands: list[tuple[str, list[str]]], canonical: list[tuple[object, list[object]]]
@@ -620,7 +631,7 @@ def centrifugo_errors(services: dict, centrifugo_json: dict, compose: str) -> li
     return errors
 
 
-def hermes_errors(services: dict, compose: str) -> list[str]:
+def hermes_errors(services: dict, compose: str, repo_root: Path) -> list[str]:
     """The same-server Hermes (ADR-0203 D6/D8/D9): private, digest-pinned, gate-first, no oort secret."""
     errors: list[str] = []
     hermes = services["hermes"]
@@ -631,6 +642,24 @@ def hermes_errors(services: dict, compose: str) -> list[str]:
         errors.append("hermes image %r must be pinned by an index digest (@sha256:…)" % (image,))
     elif image != twin_image:
         errors.append("hermes image %r != the compose hermes image %r" % (image, twin_image))
+    if hermes.get("public") is not False:
+        errors.append("hermes public must be exactly false (a string or a missing key is not)")
+    extra_keys = sorted(set(hermes) - HERMES_KEYS)
+    if extra_keys:
+        errors.append("hermes has keys the catalog does not review (domain? replicas? restart?): %s" % ",".join(extra_keys))
+    shas = []
+    for name in ("config.yaml", "lockgate.py"):
+        try:
+            shas.append(hashlib.sha256((repo_root / "infra" / "hermes" / name).read_bytes()).hexdigest())
+        except OSError as exc:
+            errors.append("infra/hermes/%s unreadable: %s" % (name, exc.__class__.__name__))
+    if len(shas) == 2:
+        diff = canonical_diff(shell_commands(shell_script(hermes.get("startCommand"))), hermes_canonical(*shas))
+        if diff:
+            errors.append(
+                "hermes start command is not the canonical command list (gate-first, fail-closed, config and gate "
+                "pinned to the sha256 of infra/hermes/config.yaml and lockgate.py): %s" % diff
+            )
     if (hermes.get("volume") or {}).get("mountPath") != HERMES_DATA:
         errors.append("hermes volume mountPath %r != %s" % ((hermes.get("volume") or {}).get("mountPath"), HERMES_DATA))
     if hermes.get("port") != HERMES_PORT or variables.get("API_SERVER_PORT") != str(HERMES_PORT):
@@ -807,7 +836,7 @@ def collect_errors(
     errors.extend(centrifugo_errors(services, centrifugo_json, compose))
 
     # -- same-server Hermes ---------------------------------------------------
-    errors.extend(hermes_errors(services, compose))
+    errors.extend(hermes_errors(services, compose, compose_path.parents[2]))
 
     # -- Postgres image service ----------------------------------------------
     pg = services["postgres"]
@@ -1063,6 +1092,48 @@ def mutate_catalog(kind: str, data: dict) -> None:
         )
     elif kind == "hermes-public":
         services["hermes"]["public"] = True
+    elif kind == "hermes-public-string":
+        services["hermes"]["public"] = "true"
+    elif kind == "hermes-extra-key":
+        services["hermes"]["domain"] = "hermes.example.test"
+    elif kind == "hermes-gate-sha-stale":  # the pinned gate bytes no longer match infra/hermes/lockgate.py
+        command = services["hermes"]["startCommand"]
+        stale = re.search(r"echo \"([0-9a-f]{64})  /tmp/lockgate\.py", command)
+        if stale is None:
+            raise SystemExit("mutation %s: no gate sha in the hermes start command" % kind)
+        services["hermes"]["startCommand"] = command.replace(stale.group(1), "0" * 64, 1)
+    elif kind == "hermes-no-sha-check":  # the sha256sum -c steps removed: an empty decoded gate would pass
+        services["hermes"]["startCommand"] = re.sub(
+            r'echo "[0-9a-f]{64}  [^"]+" \| sha256sum -c -; ', "", services["hermes"]["startCommand"]
+        )
+    elif kind == "hermes-no-gate":  # #4072: the lock gate line removed
+        services["hermes"]["startCommand"] = replace_once(
+            services["hermes"]["startCommand"],
+            "/opt/hermes/.venv/bin/python /tmp/lockgate.py gate /opt/data/config.yaml; ",
+            "",
+            kind,
+        )
+    elif kind == "hermes-gate-nonfatal":
+        services["hermes"]["startCommand"] = replace_once(
+            services["hermes"]["startCommand"],
+            "gate /opt/data/config.yaml;",
+            "gate /opt/data/config.yaml || true;",
+            kind,
+        )
+    elif kind == "hermes-public":
+        services["hermes"]["public"] = True
+    elif kind == "hermes-public-string":
+        services["hermes"]["public"] = "true"
+    elif kind == "hermes-extra-key":
+        services["hermes"]["domain"] = "hermes.example.test"
+    elif kind == "hermes-gate-sha-stale":
+        services["hermes"]["startCommand"] = replace_once(
+            services["hermes"]["startCommand"], "/tmp/lockgate.py\"", "/tmp/lockgate.py\"", kind
+        ).replace(re.search(r"echo \"([0-9a-f]{64})  /tmp/lockgate.py", services["hermes"]["startCommand"]).group(1), "0" * 64, 1)
+    elif kind == "hermes-no-sha-check":
+        services["hermes"]["startCommand"] = replace_once(
+            services["hermes"]["startCommand"], "; sha256sum -c -", "", kind
+        ) if False else re.sub(r" \| sha256sum -c -;", ";", services["hermes"]["startCommand"])
     elif kind == "hermes-image-floating":
         services["hermes"]["image"] = "nousresearch/hermes-agent:latest"
     elif kind == "hermes-oort-secret":
@@ -1130,6 +1201,10 @@ CATALOG_MUTATIONS: tuple[tuple[str, str], ...] = (
     ("hermes-no-gate", "hermes start command is not the canonical command list"),
     ("hermes-gate-nonfatal", "hermes start command is not the canonical command list"),
     ("hermes-public", "hermes must not be public"),
+    ("hermes-public-string", "hermes public must be exactly false"),
+    ("hermes-extra-key", "hermes has keys the catalog does not review"),
+    ("hermes-gate-sha-stale", "hermes start command is not the canonical command list"),
+    ("hermes-no-sha-check", "hermes start command is not the canonical command list"),
     ("hermes-image-floating", "hermes image"),
     ("hermes-oort-secret", "hermes variables outside its compose twin"),
     ("hermes-cors-open", "hermes variables outside its compose twin"),

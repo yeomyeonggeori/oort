@@ -464,8 +464,8 @@ it none of these exist and no Hermes is started.
   database and `oort backup`; back it up yourself. `down -v` removes it.
 - Model authentication is a separate step (#4073). Without it the card appears
   and a chat turn answers that Hermes is not connected to a provider.
-- Existing env: the flag is add-only (the generated key is never replaced). It
-  refuses an env that already declares another `HERMES_BASE_URL`. Recreate api
+- Existing env: the generated key is never replaced; the other keys are set to
+  the bundled values (an empty value you chose is replaced). The flag refuses an env that already declares another `HERMES_BASE_URL`. Recreate api
   and agent-worker afterwards (`--compose up -d`).
 
 Detailed manual steps and the Railway shape: `SELF_HOST_AGENT.md` §3.4.1,

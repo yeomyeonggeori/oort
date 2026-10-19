@@ -7,6 +7,7 @@ rules are exercised in test_lockgate_connectors.py."""
 import importlib.util
 import os
 import re
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -79,6 +80,40 @@ class DefaultConfig(unittest.TestCase):
         broken = re.sub(r"(?m)^    - terminal\b.*\n", "", self.text)
         self.assertNotIn("terminal", disabled_toolsets(broken))
         self.assertFalse(MANDATED <= set(disabled_toolsets(broken)))
+
+
+class VolumeEnv(unittest.TestCase):
+    """A reused volume's own `.env` is loaded after the gate judged a scratch home (#4072 review M2)."""
+
+    def problems(self, text):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, ".env")
+            if text is not None:
+                with open(path, "w") as handle:
+                    handle.write(text)
+            return lockgate.volume_env_problems(path)
+
+    def test_fresh_volume_and_a_template_of_comments_are_fine(self):
+        self.assertEqual(self.problems(None), [])
+        self.assertEqual(self.problems("# HERMES_YOLO_MODE=1\n# API_SERVER_CORS_ORIGINS=*\nOPENROUTER_API_KEY=x\n"), [])
+
+    def test_each_undoing_line_is_named_without_its_value(self):
+        for line, name in (
+            ("HERMES_YOLO_MODE=1", "HERMES_YOLO_MODE"),
+            ("export HERMES_DASHBOARD=true", "HERMES_DASHBOARD"),
+            ('API_SERVER_CORS_ORIGINS="https://evil.example"', "API_SERVER_CORS_ORIGINS"),
+            ("API_SERVER_KEY=short", "API_SERVER_KEY"),
+        ):
+            with self.subTest(line=line):
+                found = self.problems("OPENROUTER_API_KEY=keep\n" + line + "\n")
+                self.assertEqual(len(found), 1)
+                self.assertIn(name, found[0])
+                self.assertNotIn("evil.example", found[0])
+                self.assertNotIn("short", found[0].replace("shorter", ""))
+
+    def test_an_unreadable_env_is_a_problem_not_a_pass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(len(lockgate.volume_env_problems(tmp)), 1)  # a directory cannot be read as a file
 
 
 if __name__ == "__main__":
