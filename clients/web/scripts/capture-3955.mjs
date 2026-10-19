@@ -356,7 +356,7 @@ async function channelScenes(browser, origin, scheme, viewport) {
     await page.getByTestId("github-private-confirm").waitFor({ timeout: 10_000 });
     check(`${tag} 비공개 확인 장면에서 구독 POST 는 0번 (수용 11)`, writes.filter((w) => w.includes("/github/subscriptions")).length === 0, writes.join("|"));
     await page.waitForTimeout(150);
-    check(`${tag} 확인 포커스가 장면의 확인 단추로 간다`, await page.getByTestId("github-private-accept").evaluate((el) => el === document.activeElement).catch(() => false));
+    check(`${tag} 확인 장면의 초점은 안전한 쪽(취소)에서 시작한다`, await page.getByTestId("github-private-cancel").evaluate((el) => el === document.activeElement).catch(() => false));
     await page.getByTestId("github-private-confirm").scrollIntoViewIfNeeded();
     await shot(page, "8-subscribe-private-confirm", tag);
     // 취소 → 0번, 다시 → 확인 → 1번

@@ -98,7 +98,7 @@ export function ChannelGithubDialog({
           <EmptyInvite
             className="px-0"
             headline="이 서버에는 아직 GitHub 앱이 없어요"
-            detail="인스턴스 운영자가 먼저 앱을 만들어야 해요."
+            detail="서버를 관리하는 분이 먼저 앱을 만들어야 해요."
             actions={
               <Button asChild variant="secondary" size="sm">
                 <Link to={GITHUB_PANE_PATH} onClick={() => onOpenChange(false)}>

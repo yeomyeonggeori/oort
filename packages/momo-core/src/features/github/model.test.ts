@@ -25,6 +25,7 @@ import {
   parseManifestStart,
   parseSubscription,
   parseWorkspaceOverview,
+  privateConfirmationSentence,
   permissionLabels,
   repositoryInputMode,
   safeHttpsUrl,
@@ -59,6 +60,17 @@ describe("비공개 저장소 확인 (ADR-0205 수용 11)", () => {
     expect(isPrivateConfirmationRequired(new ApiError(409, "x", "github_app_already_registered"))).toBe(false);
     expect(isPrivateConfirmationRequired(new ApiError(409, "x"))).toBe(false);
     expect(isPrivateConfirmationRequired(new ApiError(400, "x", "private_repository_requires_confirmation"))).toBe(false);
+  });
+});
+
+describe("비공개 확인 문장", () => {
+  it("알려진 비공개와 공개 여부 모름을 가르고 고른 알림 종류를 말한다", () => {
+    const known = privateConfirmationSentence("마케팅", "acme/billing", true, ["pulls", "commits"]);
+    expect(known).toContain("비공개 저장소예요");
+    expect(known).toContain("PR, 커밋 소식");
+    const unknown = privateConfirmationSentence("마케팅", "acme/new", false, ["issues"]);
+    expect(unknown).toContain("공개인지 확인되지 않은 저장소");
+    expect(unknown).toContain("공개 채널");
   });
 });
 
@@ -283,7 +295,7 @@ describe("오류 문장", () => {
   });
 
   it("503 은 운영자가 서버 설정을 마쳐야 한다는 말이다", () => {
-    expect(githubFailureMessage("load", new ApiError(503, "x"))).toContain("GITHUB_APP_MASTER_KEY");
+    expect(githubFailureMessage("load", new ApiError(503, "x"))).toContain("서버를 관리하는 분께 알려 주세요");
   });
 
   it("코드 없는 상태 오류와 전송 오류와 모양 오류를 가른다", () => {

@@ -298,7 +298,7 @@ describe("워크스페이스 구역", () => {
     api.fetchGithubOverview.mockRejectedValue(new ApiError(503, "x"));
     await render();
     await waitUntil(() => q("github-pane-unavailable") !== null, "503");
-    expect(document.body.textContent).toContain("GITHUB_APP_MASTER_KEY");
+    expect(document.body.textContent).toContain("서버를 관리하는 분께 알려 주세요");
   });
 
   it("읽기 실패는 다시 시도를 준다", async () => {

@@ -165,7 +165,7 @@ function ConnectBlock({
       <EmptyInvite
         className="px-0"
         headline="이 서버에는 아직 GitHub 앱이 없어요"
-        detail="인스턴스 운영자가 먼저 GitHub 앱을 만들어야 해요. 그다음에 이 워크스페이스에 GitHub 계정을 연결할 수 있어요."
+        detail="서버를 관리하는 분이 먼저 GitHub 앱을 만들어야 해요. 그다음에 이 워크스페이스에 GitHub 계정을 연결할 수 있어요."
         testId="github-no-app"
       />
     );

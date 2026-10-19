@@ -117,7 +117,7 @@ describe("채널 ⋮ › GitHub 알림 (네 상태와 막힘)", () => {
   it("키가 없는 서버(503)는 운영자가 설정을 마쳐야 한다고 말한다", async () => {
     fetchGithubOverview.mockRejectedValue(new ApiError(503, "unavailable"));
     await render();
-    await waitUntil(() => document.body.textContent?.includes("GITHUB_APP_MASTER_KEY") === true, "503 문장");
+    await waitUntil(() => document.body.textContent?.includes("서버를 관리하는 분께 알려 주세요") === true, "503 문장");
     expect(q("github-subscribe-form")).toBeNull();
   });
 
@@ -136,7 +136,7 @@ describe("채널 ⋮ › GitHub 알림 (네 상태와 막힘)", () => {
     await render();
     await waitUntil(() => q("channel-github-no-app") !== null, "앱 없음");
     expect(q("github-subscribe-form")).toBeNull();
-    expect(document.body.textContent).toContain("인스턴스 운영자가 먼저 앱을 만들어야 해요");
+    expect(document.body.textContent).toContain("서버를 관리하는 분이 먼저 앱을 만들어야 해요");
   });
 
   it("연결된 계정이 없거나 모두 멈춰 있으면 연결하러 가는 길만 선다", async () => {

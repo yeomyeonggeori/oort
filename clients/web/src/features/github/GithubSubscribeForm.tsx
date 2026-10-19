@@ -276,10 +276,11 @@ export function GithubSubscribeForm({
             공개 채널에 비공개일 수 있는 저장소를 연결해요
           </p>
           <p id={`${formId}-confirm-body`} className="break-keep text-body text-ink">
-            {privateConfirmationSentence(channelTitle, repositoryName)}
+            {privateConfirmationSentence(channelTitle, repositoryName, known?.private === true, [...features])}
           </p>
           <div className="flex flex-wrap items-center justify-end gap-2">
             <Button
+              ref={confirmRef}
               type="button"
               variant="secondary"
               size="sm"
@@ -293,7 +294,6 @@ export function GithubSubscribeForm({
               취소
             </Button>
             <Button
-              ref={confirmRef}
               type="button"
               size="sm"
               aria-busy={busy || undefined}

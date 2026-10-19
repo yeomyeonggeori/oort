@@ -340,11 +340,23 @@ export function needsPrivateConfirmation(
   return channelKind === "public" && (repo === null || repo.private);
 }
 
-/** 확인 단계에서 읽어 주는 경고 문장. 채널 이름을 넣어 누가 보게 되는지 말한다. */
-export function privateConfirmationSentence(channelName: string, repository: string): string {
+/**
+ * 확인 단계에서 읽어 주는 경고 문장. 알려진 비공개와 「공개인지 알 수 없음」을 가르고, 고른 알림 종류를
+ * 그대로 말한다(PR·이슈만이 아니라 커밋·댓글·릴리스도 채널의 모든 사람에게 간다).
+ */
+export function privateConfirmationSentence(
+  channelName: string,
+  repository: string,
+  knownPrivate: boolean,
+  features: readonly string[]
+): string {
+  const kinds = knownFeatures(features).map((id) => GITHUB_FEATURES[id].label).join(", ");
+  const status = knownPrivate
+    ? "비공개 저장소예요."
+    : "공개인지 확인되지 않은 저장소라서 비공개로 봐요.";
   return (
-    `${repository}는 비공개이거나 공개인지 알 수 없는 저장소예요. ` +
-    `${channelName} 채널은 공개 채널이라, 이 채널의 모든 사람이 이 저장소의 PR과 이슈 소식을 보게 돼요.`
+    `${repository}는 ${status} ` +
+    `${channelName} 채널은 공개 채널이라, 이 채널의 모든 사람이 ${kinds} 소식을 보게 돼요.`
   );
 }
 
@@ -442,12 +454,12 @@ const INSTALL_WORDS: Readonly<Record<string, GithubReturnSentence>> = {
   requested: {
     tone: "wait",
     sentence: "조직 소유자에게 설치를 요청했어요.",
-    next: "소유자가 설치하면 인스턴스 운영자가 「연결 안 된 설치」에서 이 워크스페이스에 붙여요.",
+    next: "소유자가 설치하면 서버를 관리하는 분이 이 워크스페이스에 붙여요. GitHub 화면의 「연결 안 된 설치」에서 해요.",
   },
   state_missing: {
     tone: "wait",
     sentence: "GitHub가 연결 정보를 돌려주지 않았어요.",
-    next: "인스턴스 운영자가 「연결 안 된 설치」에서 이 워크스페이스에 붙여 줘야 해요.",
+    next: "서버를 관리하는 분이 「연결 안 된 설치」에서 이 워크스페이스에 붙여 줘야 해요.",
   },
   state_invalid: {
     tone: "stop",
@@ -575,7 +587,7 @@ const ACTION_PREFIX: Readonly<Record<GithubAction, string>> = {
 const CODE_SENTENCE: Readonly<Record<string, string>> = {
   public_address_required: `${GITHUB_RECEIVE_FAILED_SENTENCE}. ${GITHUB_RECEIVE_FAILED_NEXT}`,
   github_app_not_registered:
-    "이 서버에는 아직 GitHub 앱이 없어요. 인스턴스 운영자가 먼저 앱을 만들어야 해요.",
+    "이 서버에는 아직 GitHub 앱이 없어요. 서버를 관리하는 분이 먼저 앱을 만들어야 해요.",
   github_app_already_registered: "이 서버에는 이미 GitHub 앱이 있어요.",
   github_installation_linked_elsewhere:
     "이 GitHub 계정의 설치는 이미 다른 워크스페이스에 연결돼 있어요. 한 계정은 한 워크스페이스에만 연결돼요.",
@@ -603,7 +615,11 @@ export function isGithubUnavailable(error: unknown): boolean {
 }
 
 export const GITHUB_UNAVAILABLE_SENTENCE =
-  "이 서버에서는 GitHub 연결을 쓸 수 없어요. 인스턴스 운영자가 서버 설정(GITHUB_APP_MASTER_KEY)을 마쳐야 해요.";
+  "이 서버는 GitHub 연결 설정이 아직 끝나지 않았어요. 서버를 관리하는 분께 알려 주세요.";
+
+/** 운영자 구역에서만 쓰는 같은 말: 무엇을 해야 하는지까지 적는다. */
+export const GITHUB_UNAVAILABLE_OPERATOR_SENTENCE =
+  "이 서버에는 GITHUB_APP_MASTER_KEY가 없어서 GitHub 연결을 쓸 수 없어요. 서버 설정에 키를 넣어 주세요.";
 
 /**
  * 오류를 한 문장으로. 서버가 준 문장은 옮기지 않는다: 코드는 우리 문장으로, 상태는 일반 문장으로.

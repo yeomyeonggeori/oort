@@ -236,6 +236,7 @@ function RegisterApp({ status, offline }: { status: GithubAppStatus; offline: bo
           <Button
             type="submit"
             size="sm"
+            variant={handoff === null ? "default" : "secondary"}
             aria-disabled={offline || noAddress || undefined}
             aria-busy={start.isPending || undefined}
             className={offline || noAddress ? "opacity-50" : undefined}
