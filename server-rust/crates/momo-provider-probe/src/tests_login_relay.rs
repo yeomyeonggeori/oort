@@ -258,12 +258,14 @@ async fn poll_cancel_and_status_use_their_fixed_routes_and_the_operator_header()
             TargetStatus {
                 kind: RelayKind::Provider,
                 target: "openai-codex".into(),
-                connected: true
+                connected: true,
+                estimate: None,
             },
             TargetStatus {
                 kind: RelayKind::Mcp,
                 target: "gmail".into(),
-                connected: false
+                connected: false,
+                estimate: None,
             },
         ]
     );
@@ -591,4 +593,66 @@ fn the_key_never_prints() {
         key: KEY.into(),
     };
     assert!(!format!("{t:?}").contains(KEY));
+}
+
+#[test]
+fn an_estimate_is_read_defensively_and_never_fails_the_answer() {
+    use crate::{parse_estimate, EstimateBasis, LoginEstimate};
+    use serde_json::json;
+    let ok = json!({"basis": "relay_observed_login", "issuedAt": 1_760_000_000});
+    assert_eq!(
+        parse_estimate(Some(&ok)),
+        Some(LoginEstimate {
+            basis: EstimateBasis::RelayObservedLogin,
+            issued_at: Some(1_760_000_000)
+        })
+    );
+    assert_eq!(
+        parse_estimate(Some(&json!({"basis": "none"}))),
+        Some(LoginEstimate {
+            basis: EstimateBasis::None,
+            issued_at: None
+        })
+    );
+    // absent, wrong type, unknown basis, missing/negative/future/float/string reading: all degrade to None
+    for bad in [
+        json!("x"),
+        json!(null),
+        json!([1]),
+        json!({"basis": "token_leak", "issuedAt": 1_760_000_000}),
+        json!({"basis": "token_file_mtime"}),
+        json!({"basis": "token_file_mtime", "issuedAt": -5}),
+        json!({"basis": "token_file_mtime", "issuedAt": 9_999_999_999_999_i64}),
+        json!({"basis": "token_file_mtime", "issuedAt": "1760000000"}),
+        json!({"basis": "token_file_mtime", "issuedAt": 1.5}),
+        json!({"basis": 7, "issuedAt": 1_760_000_000}),
+    ] {
+        assert_eq!(parse_estimate(Some(&bad)), None, "{bad}");
+    }
+    assert_eq!(parse_estimate(None), None);
+}
+
+#[tokio::test]
+async fn a_garbled_estimate_on_a_connected_app_leaves_the_connected_fact_alone() {
+    let (port, _seen) = stub(|_, _| {
+        (
+            200,
+            r#"{"targets":[
+                {"kind":"mcp","target":"gmail","connected":true,"estimated":{"basis":"relay_observed_login","issuedAt":1760000000}},
+                {"kind":"mcp","target":"google_drive","connected":true,"estimated":{"basis":"<script>","issuedAt":1}},
+                {"kind":"mcp","target":"google_calendar","connected":false,"estimated":{"basis":"none"}},
+                {"kind":"provider","target":"anthropic","connected":true,"estimated":{"basis":"none"}}
+            ]}"#
+            .to_string(),
+        )
+    })
+    .await;
+    let client = loopback_client();
+    let t = target(port);
+    let list = client.status(&t).await.unwrap();
+    let by = |name: &str| list.iter().find(|s| s.target == name).unwrap();
+    assert!(by("gmail").connected && by("gmail").estimate.is_some());
+    assert!(by("google_drive").connected && by("google_drive").estimate.is_none());
+    assert!(!by("google_calendar").connected && by("google_calendar").estimate.is_none());
+    assert!(by("anthropic").connected && by("anthropic").estimate.is_none());
 }

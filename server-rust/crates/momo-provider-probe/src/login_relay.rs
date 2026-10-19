@@ -162,6 +162,58 @@ pub struct TargetStatus {
     pub kind: RelayKind,
     pub target: String,
     pub connected: bool,
+    /// The relay's clock reading for a connected app (#4081). Absent for providers, for a relay that predates
+    /// it, and for anything it sent out of shape (never a reason to fail the whole answer).
+    pub estimate: Option<LoginEstimate>,
+}
+
+/// Where a connected app's `issued_at` came from. An estimate input, not a fact about Google's side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EstimateBasis {
+    /// The relay watched this app's login finish.
+    RelayObservedLogin,
+    /// The token file's last write (an access-token refresh also moves it: a lower bound on age only).
+    TokenFileMtime,
+    /// No reading.
+    None,
+}
+
+impl EstimateBasis {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            EstimateBasis::RelayObservedLogin => "relay_observed_login",
+            EstimateBasis::TokenFileMtime => "token_file_mtime",
+            EstimateBasis::None => "none",
+        }
+    }
+}
+
+/// `basis` plus a unix-seconds reading. Never a token, a code or a line of the relay's log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LoginEstimate {
+    pub basis: EstimateBasis,
+    pub issued_at: Option<i64>,
+}
+
+/// Parse the relay's optional `estimated` object. Anything unexpected is `None`: an estimate that cannot be
+/// read is simply not shown, and the `connected` fact next to it is untouched.
+pub fn parse_estimate(value: Option<&serde_json::Value>) -> Option<LoginEstimate> {
+    /// 2020-09 .. 2100: a reading outside this is not a login time.
+    const MIN_AT: i64 = 1_600_000_000;
+    const MAX_AT: i64 = 4_102_444_800;
+    let object = value?.as_object()?;
+    let basis = match object.get("basis")?.as_str()? {
+        "relay_observed_login" => EstimateBasis::RelayObservedLogin,
+        "token_file_mtime" => EstimateBasis::TokenFileMtime,
+        "none" => EstimateBasis::None,
+        _ => return None,
+    };
+    let issued_at = match (basis, object.get("issuedAt")) {
+        (EstimateBasis::None, _) => None,
+        (_, Some(at)) => Some(at.as_i64().filter(|at| (MIN_AT..=MAX_AT).contains(at))?),
+        (_, None) => return None,
+    };
+    Some(LoginEstimate { basis, issued_at })
 }
 
 /// Why a relay call produced nothing usable. Fixed words only.
@@ -648,10 +700,15 @@ impl LoginRelayClient for GuardedLoginRelay {
                 .get("connected")
                 .and_then(serde_json::Value::as_bool)
                 .ok_or(RelayFailure::BadResponse)?;
+            // Only a connected app can carry a reading; a stray one on anything else is dropped.
+            let estimate = (kind == RelayKind::Mcp && connected)
+                .then(|| parse_estimate(item.get("estimated")))
+                .flatten();
             out.push(TargetStatus {
                 kind,
                 target: name.to_string(),
                 connected,
+                estimate,
             });
         }
         Ok(out)

@@ -11,3 +11,4 @@ mcp_servers:
     auth: oauth
     oauth:
       scope: https://www.googleapis.com/auth/gmail.readonly
+      redirect_port: 41821  # K-S1b pins 41821..41823 for the Google servers; #4081 measures it survives the relay

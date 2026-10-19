@@ -178,6 +178,63 @@ struct StatusResponse {
 struct TargetDto {
     target: String,
     connected: bool,
+    /// An ESTIMATE of when this app's login may lapse (#4081). Only on a connected app; never a fact.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    estimated: Option<EstimateDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EstimateDto {
+    basis: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    issued_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    test_mode: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expires_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    note: Option<&'static str>,
+}
+
+/// Google refresh tokens of an External app in Testing lapse about this long after consent.
+const GOOGLE_TESTING_REFRESH_SECS: i64 = 7 * 24 * 60 * 60;
+/// The three Google apps behind the probe path (keep equal to the sidecar's `GOOGLE_PROBE_SERVERS`).
+const GOOGLE_APPS: [&str; 3] = ["gmail", "google_calendar", "google_drive"];
+
+/// Policy over the relay's clock reading. The relay supplies facts (`basis`, `issuedAt`); the operator's
+/// declaration supplies the rule. The 7-day expiry is computed only from an OBSERVED login: a file time can be
+/// moved by a routine access-token refresh, and a deadline built on it would be a made-up number.
+fn estimate_dto(
+    target: &str,
+    reading: Option<momo_provider_probe::LoginEstimate>,
+    google_testing: bool,
+) -> Option<EstimateDto> {
+    use momo_provider_probe::EstimateBasis;
+    let reading = reading?;
+    let testing = google_testing && GOOGLE_APPS.contains(&target);
+    let observed = reading.basis == EstimateBasis::RelayObservedLogin;
+    let expires_at = (testing && observed)
+        .then(|| {
+            reading
+                .issued_at
+                .and_then(|at| at.checked_add(GOOGLE_TESTING_REFRESH_SECS))
+        })
+        .flatten();
+    let note = if testing && observed {
+        Some("google_testing_refresh_7d")
+    } else if reading.basis == EstimateBasis::TokenFileMtime {
+        Some("token_age_unknown_start")
+    } else {
+        None
+    };
+    Some(EstimateDto {
+        basis: reading.basis.as_str(),
+        issued_at: reading.issued_at,
+        test_mode: testing.then_some(true),
+        expires_at,
+        note,
+    })
 }
 
 #[derive(Debug, Serialize)]
@@ -542,6 +599,15 @@ async fn targets_of(
         .into_iter()
         .filter(|t| t.kind == flow.kind())
         .map(|t| TargetDto {
+            estimated: if flow == Flow::App && t.connected {
+                estimate_dto(
+                    &t.target,
+                    t.estimate,
+                    state.login_relay.config.google_testing(),
+                )
+            } else {
+                None
+            },
             target: t.target,
             connected: t.connected,
         })
@@ -868,6 +934,45 @@ mod tests {
             let _ = failure(f);
             assert!(!result_word(&f).is_empty());
         }
+    }
+
+    #[test]
+    fn the_seven_day_rule_needs_the_declaration_a_google_app_and_an_observed_login() {
+        use momo_provider_probe::{EstimateBasis, LoginEstimate};
+        let at = 1_760_000_000;
+        let seen = Some(LoginEstimate {
+            basis: EstimateBasis::RelayObservedLogin,
+            issued_at: Some(at),
+        });
+        let on = estimate_dto("gmail", seen, true).unwrap();
+        assert_eq!(
+            (on.test_mode, on.expires_at, on.note),
+            (
+                Some(true),
+                Some(at + 604_800),
+                Some("google_testing_refresh_7d")
+            )
+        );
+        // not declared: the reading stays, no deadline and no test-mode claim
+        let off = estimate_dto("gmail", seen, false).unwrap();
+        assert_eq!(
+            (off.test_mode, off.expires_at, off.note),
+            (None, None, None)
+        );
+        // declared, but not a Google app
+        let other = estimate_dto("notes", seen, true).unwrap();
+        assert_eq!((other.test_mode, other.expires_at), (None, None));
+        // declared, but the login time is only a file time: no invented deadline
+        let mtime = Some(LoginEstimate {
+            basis: EstimateBasis::TokenFileMtime,
+            issued_at: Some(at),
+        });
+        let guess = estimate_dto("gmail", mtime, true).unwrap();
+        assert_eq!(
+            (guess.test_mode, guess.expires_at, guess.note),
+            (Some(true), None, Some("token_age_unknown_start"))
+        );
+        assert!(estimate_dto("gmail", None, true).is_none());
     }
 
     #[test]

@@ -84,6 +84,7 @@ MAX_ATTEMPTS = 3
 MAX_SESSIONS = 8
 RATE_PER_MIN = 6
 STATUS_CACHE = 15
+ISSUED_MIN = 1_600_000_000  # 2020-09: any clock reading below this is not a login time
 CHECK_TIMEOUT = 20  # one status check child
 MAX_CONNECTIONS = 32
 REQUEST_DEADLINE = 90  # whole request, start wait (30 s) included; closes slow-loris sockets
@@ -353,6 +354,7 @@ class Relay:
         self.global_starts = collections.deque()
         self._status_lock = threading.Lock()  # single-flight: parallel /v1/status calls share one run
         self._status_cache = (0.0, None)
+        self.issued = self._load_issued()  # mcp target -> unix seconds the relay saw its login finish (non-secret)
         self._stop = threading.Event()
         t = threading.Thread(target=self._reaper, daemon=True)
         t.start()
@@ -575,6 +577,8 @@ class Relay:
             s.parser.url = s.parser.code = None
             if status != "done":
                 self._sweep(s)
+            elif s.kind == "mcp":
+                self._record_issued(s.target)
         log("state login=%s status=%s reason=%s" % (s.tag, status, reason or "-"))
 
     def _reaper(self):
@@ -688,21 +692,83 @@ class Relay:
             ok = self._run_check([c.python_bin, "-c", snippet, p], want_line="LOGGED_IN=1")
             targets.append({"kind": "provider", "target": p, "connected": ok})
         for name in sorted(c.servers):
-            ok = self._run_check([c.test_bin, "-e", "%s/mcp-tokens/%s.json" % (c.data_dir.rstrip("/"), name)], rc_only=True)
-            targets.append({"kind": "mcp", "target": name, "connected": ok})
+            path = "%s/mcp-tokens/%s.json" % (c.data_dir.rstrip("/"), name)
+            ok = self._run_check([c.test_bin, "-e", path], rc_only=True)
+            item = {"kind": "mcp", "target": name, "connected": ok}
+            if ok:
+                item["estimated"] = self._estimate(name, path)
+            else:
+                self._forget_issued(name)  # logged out or never in: an old login time says nothing
+            targets.append(item)
         out = {"targets": targets}
         with self.lock:
             self._status_cache = (time.monotonic(), out)
         return out
 
-    def _run_check(self, cmd, want_line=None, rc_only=False):
+    # ---- login time (an ESTIMATE input, never a token): the relay writes only a clock reading ----
+    def _issued_path(self):
+        return "%s/.oort-login-relay-issued.json" % self.cfg.data_dir.rstrip("/")
+
+    def _load_issued(self):
+        """Read the state file defensively: whatever is in it, only `server name -> plausible epoch seconds` survives."""
+        try:
+            with open(self._issued_path(), "r", encoding="utf-8") as f:
+                raw = json.loads(f.read(65536))
+        except (OSError, ValueError):
+            return {}
+        out = {}
+        if isinstance(raw, dict):
+            for name, at in raw.items():
+                if name in self.cfg.servers and type(at) is int and ISSUED_MIN <= at <= int(time.time()) + 86400:
+                    out[name] = at
+        return out
+
+    def _persist_issued(self):
+        path = self._issued_path()
+        tmp = path + ".tmp"
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(json.dumps(self.issued, sort_keys=True))
+            os.replace(tmp, path)
+        except OSError:
+            pass  # memory-only until the next restart: the estimate falls back to the file time
+
+    def _record_issued(self, name):
+        with self.lock:
+            self.issued[name] = int(time.time())
+            self._status_cache = (0.0, None)
+            self._persist_issued()
+
+    def _forget_issued(self, name):
+        with self.lock:
+            if self.issued.pop(name, None) is not None:
+                self._persist_issued()
+
+    def _estimate(self, name, path):
+        """`{basis, issuedAt}`. The relay saw the login finish -> that moment. Otherwise the token file's last write
+        (a routine access-token refresh also moves it, so it only bounds the age from below). Contents never read."""
+        with self.lock:
+            at = self.issued.get(name)
+        if at is not None:
+            return {"basis": "relay_observed_login", "issuedAt": at}
+        snippet = "import os,sys;print('MTIME=%d' % int(os.stat(sys.argv[1]).st_mtime))"
+        got = self._run_lines([self.cfg.python_bin, "-c", snippet, path])
+        if got and got[0] == 0 and got[1]:
+            m = re.fullmatch(r"MTIME=(\d{1,12})", got[1][-1].strip())
+            if m and int(m.group(1)) >= ISSUED_MIN:
+                return {"basis": "token_file_mtime", "issuedAt": int(m.group(1))}
+        return {"basis": "none"}
+
+    def _run_lines(self, cmd):
+        """Run one fixed argv as the dropped uid; `(returncode, stdout lines)`, or None on a start failure/timeout."""
         try:
             proc = subprocess.Popen(
                 self._wrap(cmd), shell=False, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                 env=self._child_env(), cwd="/", close_fds=True, start_new_session=True,
             )  # fmt: skip
         except OSError:
-            return False
+            return None
         try:
             out, _ = proc.communicate(timeout=self.cfg.check_timeout)
         except subprocess.TimeoutExpired:
@@ -711,18 +777,18 @@ class Relay:
             except (ProcessLookupError, PermissionError):
                 pass
             proc.communicate()
+            return None
+        return proc.returncode, out.decode("utf-8", "replace").strip().splitlines()
+
+    def _run_check(self, cmd, want_line=None, rc_only=False):
+        got = self._run_lines(cmd)
+        if got is None:
             return False
-
-        class _R:
-            returncode = proc.returncode
-            stdout = out
-
-        r = _R
+        rc, lines = got
         if rc_only:
-            return r.returncode == 0
-        if r.returncode != 0:
+            return rc == 0
+        if rc != 0:
             return False
-        lines = r.stdout.decode("utf-8", "replace").strip().splitlines()
         return bool(lines) and lines[-1].strip() == want_line
 
 
