@@ -1,5 +1,5 @@
 -- =============================================================================
--- 142_official_catalog_c_s1b.sql - #3944 (C-S1b), ADR-0113 add. 2 E2 / E4 / E7
+-- 143_official_catalog_c_s1b.sql - #3944 (C-S1b), ADR-0113 add. 2 E2 / E4 / E7
 --
 -- Official catalogue from MEASURED vendor tools/list (scripts/plugins/measure_tools_list.sh;
 -- GitHub 46, Notion 65, Linear 68, Gmail 23, Calendar 9, Drive 8 tools, 2026-10-19). Generated
@@ -8021,6 +8021,6 @@ BEGIN
        AND g.plugin_id IN ('com.momo.plugins.github', 'com.momo.plugins.notion', 'com.momo.plugins.linear')
        AND t.value->'scopes' ? g.scope;
   ELSE
-    RAISE NOTICE '142: role cannot bypass RLS; capability projections of existing grants keep their old rows until re-granted';
+    RAISE NOTICE '143: role cannot bypass RLS; capability projections of existing grants keep their old rows until re-granted';
   END IF;
 END $$;

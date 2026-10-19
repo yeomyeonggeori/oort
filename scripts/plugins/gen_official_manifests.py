@@ -2,7 +2,7 @@
 """Official plugin manifests from measured vendor `tools/list` (#3944, ADR-0113 add. 2 E2/E4).
 
 Input : ~/.cache/momo-scratch/3944-measure/<app>.tools-list.json  (scripts/plugins/measure_tools_list.sh)
-Output: server/Fixtures/plugin-manifests/<app>.json  +  server/Migrations/142_official_catalog_c_s1b.sql
+Output: server/Fixtures/plugin-manifests/<app>.json  +  server/Migrations/143_official_catalog_c_s1b.sql
 
 Every tool name, schemaDigest and (projected) inputSchema comes from those measured files and
 nowhere else. The grade table below is the only hand-written part: R / A / B per ADR-0113
@@ -416,10 +416,10 @@ def build(key, app):
 
 
 EXISTING = ['github', 'notion', 'linear']   # rows seeded by 013 (031/059 touched them)
-MIGRATION = 'server/Migrations/142_official_catalog_c_s1b.sql'
+MIGRATION = 'server/Migrations/143_official_catalog_c_s1b.sql'
 
 HEADER = """-- =============================================================================
--- 142_official_catalog_c_s1b.sql - #3944 (C-S1b), ADR-0113 add. 2 E2 / E4 / E7
+-- 143_official_catalog_c_s1b.sql - #3944 (C-S1b), ADR-0113 add. 2 E2 / E4 / E7
 --
 -- Official catalogue from MEASURED vendor tools/list (scripts/plugins/measure_tools_list.sh;
 -- GitHub 46, Notion 65, Linear 68, Gmail 23, Calendar 9, Drive 8 tools, 2026-10-19). Generated
@@ -515,7 +515,7 @@ BEGIN
        AND g.plugin_id IN ('com.momo.plugins.github', 'com.momo.plugins.notion', 'com.momo.plugins.linear')
        AND t.value->'scopes' ? g.scope;
   ELSE
-    RAISE NOTICE '142: role cannot bypass RLS; capability projections of existing grants keep their old rows until re-granted';
+    RAISE NOTICE '143: role cannot bypass RLS; capability projections of existing grants keep their old rows until re-granted';
   END IF;
 END $$;
 """)

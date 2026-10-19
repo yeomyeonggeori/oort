@@ -1006,7 +1006,7 @@ mod tests {
         let manifest = github();
         let tools = tools_for_scope(&manifest, "github:read");
         let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_str()).collect();
-        // Migration 142 (#3944): github:read projects the 26 measured read tools, none
+        // Migration 143 (#3944): github:read projects the 26 measured read tools, none
         // of them a write; github:write projects only the grade B tools.
         assert_eq!(names.len(), 26);
         assert!(names.contains(&"github.search_issues"));

@@ -654,7 +654,7 @@ async fn manifest_value(su: &PgPool, plugin: &str) -> Value {
     serde_json::from_str(&text).expect("manifest json")
 }
 
-/// The `github:read` tools of the github fixture (migration 142 seeds exactly this file), in
+/// The `github:read` tools of the github fixture (migration 143 seeds exactly this file), in
 /// manifest order. Counting from the fixture keeps these tests honest when the catalogue grows.
 fn github_read_tools() -> Vec<String> {
     fixture_scope_tools("github", "github:read")
@@ -930,7 +930,7 @@ async fn a_grant_is_personal_and_needs_an_enabled_install() {
     assert_eq!(active_grants(&env.su, ws, GITHUB).await, 0);
 
     // A member grants herself github:read: 201, one capability per tool that
-    // declares the scope (the measured read tools since migration 142), the receipt of the egress.
+    // declares the scope (the measured read tools since migration 143), the receipt of the egress.
     let (status, body) = grant(&env, &t.alice.1, ws, GITHUB, "GitHub:Read").await;
     assert_eq!(status, 201, "alice grants: {body}");
     assert_eq!(body["memberId"], alice.to_string());
@@ -2284,22 +2284,22 @@ async fn the_domain_function_refuses_a_member_that_is_not_a_human() {
     assert_eq!(granted.capabilities.len(), github_read_tools().len());
 }
 
-/// Migration 142 (#3944) re-run: idempotent, and it rebuilds the capability projection of an
+/// Migration 143 (#3944) re-run: idempotent, and it rebuilds the capability projection of an
 /// existing active grant from the new manifest (a stale renamed tool and a missing new tool
 /// are both healed), without touching a grant of another app.
 #[tokio::test]
 #[ignore]
-async fn migration_142_is_idempotent_and_rebuilds_existing_projections() {
+async fn migration_143_is_idempotent_and_rebuilds_existing_projections() {
     let _guard = test_lock().await;
     let env = env().await;
-    let t = team(&env, "m142").await;
+    let t = team(&env, "m143").await;
     let ws = t.workspace;
     let (status, body) = install(&env, &t.admin.1, ws, GITHUB, true).await;
     assert!(status == 200 || status == 201, "{body}");
     let (status, body) = grant(&env, &t.alice.1, ws, GITHUB, "github:read").await;
     assert_eq!(status, 201, "{body}");
     let alice = t.alice.0.id;
-    // Age the projection the way a pre-142 grant looks: a tool that no longer exists, and
+    // Age the projection the way a pre-143 grant looks: a tool that no longer exists, and
     // one that was never projected.
     sqlx::query(
         "UPDATE plugin_capability_projection SET tool_name = 'github.list_repositories' \
@@ -2321,15 +2321,15 @@ async fn migration_142_is_idempotent_and_rebuilds_existing_projections() {
     .expect("drop one row");
 
     let sql = std::fs::read_to_string(
-        repo_root().join("server/Migrations/142_official_catalog_c_s1b.sql"),
+        repo_root().join("server/Migrations/143_official_catalog_c_s1b.sql"),
     )
-    .expect("migration 142");
+    .expect("migration 143");
     let before = manifest_value(&env.su, GITHUB).await;
     for _ in 0..2 {
         sqlx::raw_sql(&sql)
             .execute(&env.su)
             .await
-            .expect("142 re-runs cleanly");
+            .expect("143 re-runs cleanly");
     }
     assert_eq!(manifest_value(&env.su, GITHUB).await, before, "idempotent");
     let digest_ok: bool = sqlx::query_scalar(

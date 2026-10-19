@@ -63,6 +63,7 @@ pub mod crypto;
 pub mod default_ai;
 pub mod egress;
 pub mod github_app;
+pub mod github_ingress;
 pub mod invite;
 pub mod join;
 pub mod key_budget;

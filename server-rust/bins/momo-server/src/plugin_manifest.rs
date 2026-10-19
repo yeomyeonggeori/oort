@@ -852,9 +852,9 @@ mod tests {
         ),
     ];
 
-    /// Migration 142 (#3944): the seeded manifests, one `$manifest$ … $manifest$` block each.
-    const MIGRATION_142: &str =
-        include_str!("../../../../server/Migrations/142_official_catalog_c_s1b.sql");
+    /// Migration 143 (#3944): the seeded manifests, one `$manifest$ … $manifest$` block each.
+    const MIGRATION_143: &str =
+        include_str!("../../../../server/Migrations/143_official_catalog_c_s1b.sql");
 
     fn github() -> Value {
         serde_json::from_str(FIXTURES[0].1).expect("github fixture parses")
@@ -1379,8 +1379,8 @@ mod tests {
         }
     }
 
-    fn migration_142_manifests() -> Vec<Value> {
-        MIGRATION_142
+    fn migration_143_manifests() -> Vec<Value> {
+        MIGRATION_143
             .split("$manifest$")
             .enumerate()
             .filter(|(index, _)| index % 2 == 1)
@@ -1391,8 +1391,8 @@ mod tests {
     /// #3944: the migration seeds exactly the fixtures it claims to (the fixture is canon,
     /// `Fixtures/plugin-manifests/` is also what the read conformance test compares to).
     #[test]
-    fn migration_142_seeds_equal_the_fixtures() {
-        let seeded = migration_142_manifests();
+    fn migration_143_seeds_equal_the_fixtures() {
+        let seeded = migration_143_manifests();
         assert_eq!(seeded.len(), 6, "3 replaced + 3 new apps");
         for manifest in seeded {
             let id = manifest["plugin"]["id"].as_str().expect("id");
@@ -1403,7 +1403,7 @@ mod tests {
             let fixture: Value = serde_json::from_str(text).expect("fixture");
             assert_eq!(
                 manifest, fixture,
-                "{id}: migration 142 drifted from its fixture"
+                "{id}: migration 143 drifted from its fixture"
             );
         }
     }
