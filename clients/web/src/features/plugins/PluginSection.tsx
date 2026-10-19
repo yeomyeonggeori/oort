@@ -69,6 +69,7 @@ import {
   type PluginScopeChangeOutcome,
   type PluginScopeConsentFailure,
 } from "./model";
+import { PluginAppLogin } from "./PluginAppLogin";
 import {
   PluginAppChips,
   PluginEgressDisclosure,
@@ -727,6 +728,9 @@ function PluginDetailPanel({
       </div>
 
       <PluginRunPlaces hosted={detail.hosted} />
+
+      {/* #4074: 운영자·같은 서버 Hermes·Hermes가 아는 앱일 때만 선다(아니면 null). */}
+      <PluginAppLogin key={detail.pluginId} pluginId={detail.pluginId} offline={offline} />
 
       <PluginToolList tools={detail.tools} allowedToolNames={allowedToolNames} />
 
