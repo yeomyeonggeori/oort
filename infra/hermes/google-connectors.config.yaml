@@ -1,0 +1,112 @@
+# Hermes config for the Google read-only connector trial (K-S1b, #3952). Reference copy of what runs on the
+# Railway service hermes-kwak (written to /opt/data/config.yaml from HERMES_CONFIG_B64 on every start).
+# Client id/secret are NOT here: they are service variables, read through ${VAR} interpolation.
+# oort-team Hermes Agent config (ADR-0203 D6 tool lock).
+# Re-written to /opt/data/config.yaml from $HERMES_CONFIG_B64 on EVERY start, then checked by
+# lockgate.py BEFORE the Hermes entrypoint (and so before any listener) runs.
+# Deny-list is Hermes' only switch (agent.disabled_toolsets); lockgate.py adds the allow-list.
+# Remaining chat-only surface after this list: memory, todo, session_search.
+agent:
+  max_turns: 12           # chat-only agent: bound tool-loop cost (Hermes default is 500)
+  disabled_toolsets:
+    - terminal        # OWNER-MANDATED. Shell: terminal + process_manage (a tool inside this toolset, not a toolset). Verified: ran an echo with no approval
+    - code_execution  # OWNER-MANDATED. execute_code (arbitrary Python)
+    - browser         # OWNER-MANDATED. browser_* incl. browser_exec (drives Chromium)
+    - file            # read_file/write_file/patch/search_files: verified to read /opt/data/.env and write anywhere under /opt/data (sessions and memories live in the same tree); Hermes itself guards config.yaml
+    - connections     # manage_connections: links hosted connectors and installs local MCP servers from a catalog (a way around the terminal lock)
+    - delegation      # delegate_task: sub-agents (children inherit this list; off for cost and blast radius)
+    - cronjob         # cronjob_manage: unattended scheduled runs that outlive the chat
+    - computer_use    # desktop control (Hermes already drops it for api_server; explicit on purpose)
+    - web             # web_search/web_extract: model-directed outbound fetches = exfil path for chat content (private ranges are blocked by Hermes)
+    - vision          # vision_analyze: model-chosen image URLs or paths
+    - image_gen       # image_generate (outbound provider call)
+    - video           # video_analyze
+    - video_gen       # video generation and editing
+    - x_search        # X (Twitter) search
+    - skills          # skill_manage writes persistent instructions that outlive the chat (verified: creates a skill on the volume)
+    - tts             # text_to_speech
+    - stt             # speech-to-text
+    - kanban          # kanban_* task board
+    - context_engine  # context engine plugin
+    - clarify         # interactive clarify (no human in API mode; Hermes drops it anyway)
+    - discord         # discord messaging tool
+    - discord_admin   # discord admin tool
+    - yuanbao         # yuanbao messaging tools
+    - a2a             # agent-to-agent calls to other endpoints
+approvals:
+  mode: manual            # never "off"; no HERMES_YOLO_MODE
+  unattended_mode: deny   # API sessions cannot approve anything
+telemetry:
+  shared_metrics:
+    enabled: false        # explicit: nothing is collected or sent to Nous
+    send: false
+updates:
+  check: false            # no passive version checks (image is pinned by digest)
+model:
+  provider: anthropic
+  default: claude-sonnet-5-5
+# K-S1b (#3952): Google official remote MCP, READ tools only. Client id/secret come from service
+# variables (never in this file). Names in tools.include are from the vendor docs; confirm with tools/list.
+mcp_servers:
+  gmail:
+    url: https://gmailmcp.googleapis.com/mcp/v1
+    auth: oauth
+    trust: untrusted
+    sampling:
+      enabled: false
+    oauth:
+      client_id: ${GOOGLE_OAUTH_CLIENT_ID}
+      client_secret: ${GOOGLE_OAUTH_CLIENT_SECRET}
+      redirect_port: 41821
+      scope: "https://www.googleapis.com/auth/gmail.readonly"
+    tools:
+      resources: false
+      prompts: false
+      include:
+        - search_threads
+        - get_thread
+        - get_message
+        - list_drafts
+        - get_draft
+        - list_labels
+  google_calendar:
+    url: https://calendarmcp.googleapis.com/mcp/v1
+    auth: oauth
+    trust: untrusted
+    sampling:
+      enabled: false
+    oauth:
+      client_id: ${GOOGLE_OAUTH_CLIENT_ID}
+      client_secret: ${GOOGLE_OAUTH_CLIENT_SECRET}
+      redirect_port: 41822
+      scope: "https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/calendar.events.freebusy https://www.googleapis.com/auth/calendar.events.readonly"
+    tools:
+      resources: false
+      prompts: false
+      include:
+        - list_events
+        - get_event
+        - list_calendars
+        - suggest_time
+        - search_events
+  google_drive:
+    url: https://drivemcp.googleapis.com/mcp/v1
+    auth: oauth
+    trust: untrusted
+    sampling:
+      enabled: false
+    oauth:
+      client_id: ${GOOGLE_OAUTH_CLIENT_ID}
+      client_secret: ${GOOGLE_OAUTH_CLIENT_SECRET}
+      redirect_port: 41823
+      scope: "https://www.googleapis.com/auth/drive.readonly"
+    tools:
+      resources: false
+      prompts: false
+      include:
+        - download_file_content
+        - get_file_metadata
+        - get_file_permissions
+        - list_recent_files
+        - read_file_content
+        - search_files
