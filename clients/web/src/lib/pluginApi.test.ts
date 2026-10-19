@@ -101,6 +101,21 @@ describe("plugin API wire boundary", () => {
     }).hosted).toBe(true);
   });
 
+  it("reads momo.preview and tool approvalPolicy for the app screen v2 (#3949)", () => {
+    // 필드가 없는 매니페스트(공식 네 앱의 옛 시드)는 preview가 undefined, 도구 approvalPolicy도 있는 그대로다.
+    const plain = pluginDetailFromWire(detailFixture);
+    expect(plain.preview).toBeUndefined();
+    expect(plain.tools[0].approvalPolicy).toBe(githubManifest.mcp.tools[0].approvalPolicy);
+    const previewManifest = { ...githubManifest, momo: { ...githubManifest.momo, preview: true } };
+    expect(pluginDetailFromWire({
+      plugin: { ...detailFixture.plugin, manifest: previewManifest },
+    }).preview).toBe(true);
+    // 불리언이 아닌 값은 읽지 않는다(서버 검증기가 이미 거절하지만 화면이 문자열 「yes」를 칩으로 읽지 않게).
+    expect(pluginDetailFromWire({
+      plugin: { ...detailFixture.plugin, manifest: { ...githubManifest, momo: { ...githubManifest.momo, preview: "yes" } } },
+    }).preview).toBeUndefined();
+  });
+
   it("keeps optional display metadata absent until the server sends it", () => {
     expect(pluginDetailFromWire(detailFixture).termsURL).toBeUndefined();
     const display = pluginDetailFromWire({

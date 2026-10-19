@@ -24,6 +24,9 @@ const IDS = [
   "com.momo.plugins.notion",
   "com.momo.plugins.linear",
   "com.momo.plugins.drive",
+  "com.momo.plugins.gmail",
+  "com.momo.plugins.google-calendar",
+  "com.momo.plugins.google-drive",
   "COM.MOMO.PLUGINS.GITHUB",
   "other.app",
 ];
@@ -45,6 +48,12 @@ describe("폰 앱 모델 = 웹 앱 모델", () => {
     for (const name of ["GitHub", "Google Drive", "  ", "한글 앱", "x"]) {
       for (const iconText of [undefined, " ", "GH"]) {
         expect(phone.pluginIconText({ name, iconText })).toBe(web.pluginIconText({ name, iconText }));
+      }
+    }
+    // 타일 글자 표(#3949): 같은 id는 폰과 웹이 같은 글자를 그린다.
+    for (const pluginId of IDS) {
+      for (const name of ["GitHub", "Gmail", "Google 내 드라이브"]) {
+        expect(phone.pluginIconText({ pluginId, name })).toBe(web.pluginIconText({ pluginId, name }));
       }
     }
     for (const spdx of ["MIT", "LicenseRef-Linear-Hosted-Service"]) {

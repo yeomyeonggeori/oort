@@ -148,6 +148,7 @@ export type SurfaceId =
   | "agentRunHistory"
   | "plugins"
   | "pluginInstall"
+  | "pluginDriveTeam"
   | "teamMemory"
   | "messageSearch"
   | "hostedAgentPairing"
@@ -442,6 +443,28 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
       "판정은 pluginInstallVerdict가 하고, 네 경로가 정말 post·delete로만 서 있는지는 " +
       "clients/web의 pluginRoutes.test.ts가 라우터 소스를 읽어 못으로 박는다. " +
       "원문과 사보타주는 docs/planning/ENGINE_HANDOFF.md의 X-P3.",
+  },
+  pluginDriveTeam: {
+    id: "pluginDriveTeam",
+    label: "팀 공유 드라이브",
+    // #3949(ADR-0113 증보 2 E2·E4, 경로 C): 팀 공유 드라이브 앱(`com.momo.plugins.drive`)의 연결은
+    // oort 서버가 서비스 계정으로 들고 있고, 앱이 부르는 주소는 이 서버의 `/v1/mcp/drive`다.
+    // 그 경로가 서 있고 서비스 계정이 설정돼야 「팀 전체 · oort가 읽어요」가 참이다. 둘 중 하나라도
+    // 없으면 칩은 숨고 「관리자 설정이 필요해요」가 선다 — 있는 것처럼 보이는 칩이 이 줄이 막는 거짓말이다.
+    //
+    // 이 값은 `pluginInstall`처럼 **런타임에 재지 못한다**. 경로가 있어도 서비스 계정이 비어 있는지는
+    // 클라이언트가 볼 수 있는 신호가 없다(E-5가 올라오면 서버가 그 사실을 실어야 한다). 그래서 지금은
+    // 이 코드베이스의 서버가 경로를 싣는가만 말하고, 칸이 참이 되는 날도 `runtime-unverified`다.
+    provided: false,
+    absentReason: "팀 공유 드라이브는 관리자 설정이 필요해요.",
+    fallback: "관리자 설정이 필요해요",
+    measured:
+      "2026-10-19 실측(#3949): server-rust/bins/momo-server/src/lib.rs 라우터에 /v1/mcp/drive 등록이 " +
+      "없다(origin/track/engine도 같다). 그 문자열은 server-rust/crates/momo-auth/src/agent_scope.rs:17의 " +
+      "문서 주석(「아직 마운트되지 않은 표면」)과 338행의 「scope 없음」 시험에만 있다(ADR-0113 증보 2 E2 표: " +
+      "「Rust에 아직 없다」). 매니페스트 시드의 mcp.url은 " +
+      "/v1/mcp/drive로 이미 들어가 있다(#3944). E-5가 경로를 올리고 서비스 계정 설정 여부를 응답에 " +
+      "싣는 날 이 줄을 뒤집는다. 그때까지 runtime-unverified.",
   },
   teamMemory: {
     id: "teamMemory",

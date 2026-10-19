@@ -1,5 +1,5 @@
 import { type MutableRefObject, type RefObject, useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, Loader2 } from "lucide-react";
 import { useSession } from "@/app/session";
 import { cn } from "@/design/lib/cn";
@@ -67,9 +67,12 @@ import {
   type PluginScopeConsentFailure,
 } from "./model";
 import {
+  PluginAppChips,
   PluginEgressDisclosure,
   PluginIcon,
   PluginInstallClosedNotice,
+  PluginPreviewNote,
+  PluginRunPlaces,
   PluginStatusRows,
   PluginToolList,
   scopeRiskAndApprovalBadges,
@@ -161,6 +164,23 @@ export function PluginSection({ offline }: { offline: boolean }) {
     enabled: selectedId !== null,
     retry: false,
   });
+
+  // 목록 줄의 「미리보기」 칩은 목록 응답이 아니라 상세 매니페스트(`momo.preview`)에 있다. 줄마다 따로
+  // 요청하지 않고 선택된 상세와 **같은 질의 키**로 읽어서 한 앱의 상세는 한 번만 받는다. 아직 못 읽은
+  // 줄에는 칩이 없고, 읽는 데 실패한 줄은 그 앱을 골랐을 때 상세 오류 배너가 말한다.
+  const detailQueries = useQueries({
+    queries: (catalogQuery.data?.plugins ?? []).map((plugin) => ({
+      queryKey: ["plugins", workspaceId.toLowerCase(), plugin.pluginId],
+      queryFn: () => getPlugin(workspaceId, plugin.pluginId),
+      retry: false,
+    })),
+  });
+  const previewById = new Map<string, boolean | undefined>(
+    (catalogQuery.data?.plugins ?? []).map((plugin, index) => [
+      plugin.pluginId,
+      detailQueries[index]?.data?.preview,
+    ])
+  );
 
   // 「앱 설치」: 설치·권한 버튼은 서버가 그 경로를 싣고 있을 때만 선다(useInstallAvailability).
   // 이 훅은 아래의 「서버에 앱 표면이 없다」 조기 반환보다 앞에 있어야 한다(훅 순서).
@@ -326,7 +346,7 @@ export function PluginSection({ offline }: { offline: boolean }) {
 
   return (
     <SectionShell title="앱" lines={lines} wide>
-      {/* 공식 네 앱은 한눈에 읽힌다. 걸러 볼 목록이 아닌데 검색 상자가 서면 이 화면이 더 큰
+      {/* 공식 앱은 한눈에 읽힌다. 걸러 볼 목록이 아닌데 검색 상자가 서면 이 화면이 더 큰
           마켓인 척한다. 목록이 길어지는 날(커뮤니티 앱) 컨트롤이 돌아온다(`pluginControlsVisible`). */}
       {catalogQuery.data && pluginControlsVisible(catalogQuery.data.plugins.length) && (
         <PluginCatalogControls
@@ -393,7 +413,7 @@ export function PluginSection({ offline }: { offline: boolean }) {
                     <span className="flex min-w-0 flex-wrap items-center gap-2">
                       <PluginIcon plugin={plugin} />
                       <span className="text-body font-semibold text-ink">{plugin.name}</span>
-                      {/* 공식 네 앱에서 이 칩은 상수다. 신호색(선택 채움)을 상수에 쓰지 않고, 선택된 줄에서 칩이
+                      {/* 공식 앱에서 이 칩은 상수다. 신호색(선택 채움)을 상수에 쓰지 않고, 선택된 줄에서 칩이
                           채움에 묻히지도 않게 옆의 설치 상태 칩과 같은 중립 톤으로 둔다(독립 design-review M5). */}
                       {plugin.official && <StatusChip tone="muted">공식</StatusChip>}
                       {/* 다이얼로그와 같은 중립 톤이다(MOMO-676 M-1). MOMO-642 7이
@@ -407,6 +427,11 @@ export function PluginSection({ offline }: { offline: boolean }) {
                           이미 구분하고 있고(StatusChip은 색에만 의미를 싣지 않는다),
                           이 표면에서 색은 위험 신호의 것이다. */}
                       <StatusChip tone="muted">{pluginConnectionChipLabel(plugin, policy?.length ?? 0)}</StatusChip>
+                      <PluginAppChips
+                        pluginId={plugin.pluginId}
+                        preview={previewById.get(plugin.pluginId)}
+                        testIdPrefix={`plugin-row-${plugin.pluginId}`}
+                      />
                     </span>
                     {/* 서버의 `description`은 영어 매니페스트 문구라서 공식 앱은 한 줄 소개로 바꿔 말한다. */}
                     <span className="text-meta text-ink-muted">{pluginSubtitle(plugin)}</span>
@@ -619,6 +644,11 @@ function PluginDetailPanel({
               {detail.official && <StatusChip tone="muted">공식</StatusChip>}
               {/* 목록 줄과 같은 읽기다(`pluginConnectionChipLabel`): 두 곳이 따로 계산하지 않는다. */}
               <StatusChip tone="muted">{pluginConnectionChipLabel(plugin, policyTools.length)}</StatusChip>
+              <PluginAppChips
+                pluginId={detail.pluginId}
+                preview={detail.preview}
+                testIdPrefix="plugin-detail"
+              />
             </div>
             <p className="text-meta text-ink-muted">{pluginSubtitle(detail)} · 버전 {detail.version}</p>
           </div>
@@ -672,7 +702,10 @@ function PluginDetailPanel({
       <div className="flex flex-col gap-2">
         <PluginStatusRows plugin={detail} activeScopes={activeScopes} toolCount={policyTools.length} />
         {installAvailability === "closed" && <PluginInstallClosedNotice />}
+        {detail.preview === true && <PluginPreviewNote />}
       </div>
+
+      <PluginRunPlaces hosted={detail.hosted} />
 
       <PluginToolList tools={detail.tools} allowedToolNames={allowedToolNames} />
 

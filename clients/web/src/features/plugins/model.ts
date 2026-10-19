@@ -6,6 +6,7 @@ import {
 } from "@momo/core/lib/api";
 import { NetworkError } from "@momo/core/lib/http";
 import { pluginConnectionLabel } from "@momo/core/features/plugins/connectionState";
+import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
 
 export type PluginAction =
   | { kind: "install"; pluginId: string; pluginName: string }
@@ -445,10 +446,27 @@ export function pluginActionConfirmation(action: Extract<PluginAction, {
 // 설치 화면이 열리면 같은 문장이 그대로 맞아야 한다. 토큰이 어디에 있는지는 이 카탈로그가 아니라
 // 허용 동의 창이 ADR-0113 D1-A를 근거로 말한다(`PLUGIN_CONSENT_CUSTODY_LINES`).
 
-/** 서버가 주는 `iconText`가 없을 때 쓰는 타일 글자: 이름의 머리글자 둘까지("Google Drive"는 "GD"). */
-export function pluginIconText(plugin: { name: string; iconText?: string }): string {
+/**
+ * 이름의 머리글자로는 서로 같아지는 공식 앱의 타일 글자(#3949). 「GitHub」와 「Gmail」은 둘 다 「G」였다.
+ * 두 글자를 서로 다르게 고정한다. 서버가 `iconText`를 주면 그것이 이긴다(아래 `given`). 이 표를 바꾸면
+ * 폰의 같은 표(`phoneApps.ts`)도 바꾼다: 시험이 둘을 맞춘다.
+ */
+const OFFICIAL_APP_ICON_TEXT: Readonly<Record<string, string>> = {
+  "com.momo.plugins.github": "GH",
+  "com.momo.plugins.gmail": "Gm",
+};
+
+/**
+ * 서버가 주는 `iconText`가 없을 때 쓰는 타일 글자: 공식 앱 표, 없으면 이름의 머리글자 둘까지
+ * ("Google Drive"는 "GD"). `pluginId`를 넘기는 쪽만 표를 쓴다.
+ */
+export function pluginIconText(
+  plugin: { name: string; iconText?: string; pluginId?: string }
+): string {
   const given = plugin.iconText?.trim();
   if (given) return given;
+  const official = plugin.pluginId ? OFFICIAL_APP_ICON_TEXT[plugin.pluginId.toLowerCase()] : undefined;
+  if (official) return official;
   const initials = plugin.name
     .trim()
     .split(/\s+/)
@@ -460,7 +478,7 @@ export function pluginIconText(plugin: { name: string; iconText?: string }): str
 }
 
 /**
- * 공식 네 앱의 한 줄 소개. 서버가 주는 `description`은 영어 매니페스트 문구
+ * 공식 앱의 한 줄 소개. 서버가 주는 `description`은 영어 매니페스트 문구
  * ("Official GitHub hosted MCP integration")라서 한국어 목록에 그대로 서면 읽는 사람이
  * 영어와 내부 약어를 먼저 만난다. 이 표는 **서비스가 무엇인지**만 말하고 oort가 그것으로
  * 무엇을 하는지는 말하지 않는다(그건 아래 「할 수 있는 일」이 매니페스트에서 읽는다).
@@ -471,6 +489,10 @@ const OFFICIAL_APP_SUBTITLE: Readonly<Record<string, string>> = {
   "com.momo.plugins.notion": "문서와 페이지",
   "com.momo.plugins.linear": "이슈와 작업 추적",
   "com.momo.plugins.drive": "공유 드라이브의 파일",
+  // migration 142 (#3944): the three Google apps (the full app screen is U-S1, #3949).
+  "com.momo.plugins.gmail": "메일 읽기와 초안",
+  "com.momo.plugins.google-calendar": "일정과 초대",
+  "com.momo.plugins.google-drive": "내 드라이브의 파일",
 };
 
 export function pluginSubtitle(plugin: { pluginId: string; description: string }): string {
@@ -478,11 +500,14 @@ export function pluginSubtitle(plugin: { pluginId: string; description: string }
 }
 
 /**
- * 목록을 걸러 보는 컨트롤(검색, 보기)이 서는 최소 개수. 공식 네 앱은 한눈에 읽혀서 걸러 볼
- * 것이 없고, 컨트롤이 있으면 오히려 이 목록이 더 큰 마켓인 것처럼 말한다. 한 화면에 선 채
- * 읽히는 개수(여섯 줄)를 넘으면 컨트롤이 돌아온다(커뮤니티 앱이 들어오는 날).
+ * 목록을 걸러 보는 컨트롤(검색, 보기)이 서는 최소 개수. 공식 앱은 한눈에 읽혀서 걸러 볼 것이 없고,
+ * 컨트롤이 있으면 오히려 이 목록이 더 큰 마켓인 것처럼 말한다. v1 공식 카탈로그는 아홉 앱
+ * (ADR-0113 증보 2 E2: Google 셋, 팀 공유 드라이브, GitHub, Atlassian, Slack, Notion, Linear)이라
+ * 아홉까지는 컨트롤 없이 둔다. 아홉을 넘으면(커뮤니티 앱이 들어오는 날) 컨트롤이 돌아온다.
+ * 값은 여섯이었다가 시드가 일곱이 된 #3949에서 올렸다: 일곱 줄도 한 번에 훑히고, 「설치됨」·「내 권한」
+ * 보기는 상세 머리의 연결 상태 칩이 이미 말한다.
  */
-export const PLUGIN_CONTROLS_MAX_GLANCEABLE = 6;
+export const PLUGIN_CONTROLS_MAX_GLANCEABLE = 9;
 
 export function pluginControlsVisible(catalogSize: number): boolean {
   return catalogSize > PLUGIN_CONTROLS_MAX_GLANCEABLE;
@@ -566,6 +591,79 @@ export function pluginConsentCustodyLines(plugin: { hosted?: boolean }): readonl
   return plugin.hosted === true ? [] : PLUGIN_CONSENT_CUSTODY_LINES;
 }
 
+// ---- 앱 화면 v2 (#3949, ADR-0113 증보 2 E1·E2·E4) -----------------------------------------
+
+/** 매니페스트 `momo.preview`가 참인 앱의 칩. 공급자가 아직 미리보기로 내놓은 앱이라는 사실이다. */
+export const PLUGIN_PREVIEW_CHIP = "미리보기";
+
+/**
+ * 미리보기 앱이 선택됐을 때 상세에 서는 한 줄. 약관의 구체(누가 쓸 수 있나)는 이 화면이 모르는 사실이라
+ * 말하지 않고, 아는 것만 말한다: 공급자가 정식으로 내놓기 전이고, 그래서 제한이 있을 수 있다.
+ */
+export const PLUGIN_PREVIEW_NOTE =
+  "공급자가 아직 정식으로 내놓지 않은 앱이에요. 정식 공지 전에는 쓸 수 있는 사람이 제한될 수 있어요.";
+
+export const DRIVE_TEAM_PLUGIN_ID = "com.momo.plugins.drive";
+export const DRIVE_MINE_PLUGIN_ID = "com.momo.plugins.google-drive";
+
+export type PluginRouteChip = { label: string; tone: "muted" | "warn" };
+
+/**
+ * 두 Drive 앱을 가르는 칩 (E2). 이름이 비슷한 두 앱은 **누가 읽는가**가 다르다: 팀 공유 드라이브는 oort
+ * 서버가 서비스 계정으로 읽고(경로 C), 내 드라이브는 내 에이전트가 내 로그인으로 읽는다(경로 A). 둘은
+ * 서로를 대신하지 못해서 칩이 이름보다 먼저 구별을 말한다. 그 밖의 앱은 칩이 없다(`null`).
+ *
+ * **팀 공유 드라이브의 칩은 서버가 그 경로를 싣고 있을 때만 선다**(`pluginDriveTeam`). 경로가 없거나
+ * 서비스 계정이 비어 있으면 「팀 전체 · oort가 읽어요」는 거짓이므로 칩을 숨기고, 그 자리에 무엇을
+ * 해야 하는지 말한다.
+ */
+export function pluginRouteChip(pluginId: string): PluginRouteChip | null {
+  const id = pluginId.toLowerCase();
+  if (id === DRIVE_MINE_PLUGIN_ID) {
+    return { label: "내 드라이브 · 내 에이전트가 읽어요", tone: "muted" };
+  }
+  if (id === DRIVE_TEAM_PLUGIN_ID) {
+    return isSurfaceProvided("pluginDriveTeam")
+      ? { label: "팀 전체 · oort가 읽어요", tone: "muted" }
+      : { label: "관리자 설정이 필요해요", tone: "warn" };
+  }
+  return null;
+}
+
+/**
+ * 내 맥에서 앱을 쓰는 길(M-S1, #3957)이 서 있는가. 서지 않은 동안 「기기가 막아요」는 아직 아무것도
+ * 막지 않는 기기를 두고 하는 말이라 하지 않는다. #3957이 머지되면 이 값만 뒤집는다.
+ */
+export const PLUGIN_MAC_APP_USE_READY = false;
+
+export type PluginRunPlace = { place: string; enforcement: string };
+
+/**
+ * 실행 장소 줄 (E1·E3): 앱은 요청한 사람 본인의 에이전트가 쓰고, **oort가 얼마나 막을 수 있는지가
+ * 곳마다 다르다.** 강제 수준을 숨기면 그록봇에서도 oort가 막아 주는 것처럼 읽히므로 세 줄을 다 말한다.
+ * 연결을 oort 서버가 들고 있는 앱(`hosted`, 팀 공유 드라이브)은 실행 장소가 하나(oort 서버)라서 이
+ * 세 줄이 맞지 않는다 — 그 앱의 연결은 칩이 말한다.
+ */
+export function pluginRunPlaces(
+  plugin: { hosted?: boolean },
+  macReady: boolean = PLUGIN_MAC_APP_USE_READY
+): readonly PluginRunPlace[] {
+  if (plugin.hosted === true) return [];
+  return [
+    {
+      place: "내 맥",
+      enforcement: macReady
+        ? "기기가 막아요"
+        : "내 맥에서 앱 쓰기는 준비 중이에요",
+    },
+    { place: "Hermes 시험", enforcement: "나만 써요" },
+    {
+      place: "그록봇",
+      enforcement: "앱 권한은 그록봇이 관리해요. oort는 허용 기록만 남겨요",
+    },
+  ];
+}
+
 export const PLUGIN_READONLY_COPY = {
   tools: {
     heading: "할 수 있는 일",
@@ -589,11 +687,16 @@ export const PLUGIN_READONLY_COPY = {
     workspace: "이 워크스페이스",
     mine: "내 권한",
   },
+  runPlaces: {
+    heading: "실행하는 곳",
+    // 「요청한 사람 본인」은 E1의 규칙이다(남의 grant, 남의 실행 장소, 팀 공용 실행기는 쓰지 않는다).
+    lead: "앱은 요청한 사람 본인의 에이전트가 써요. 어디서 쓰느냐에 따라 oort가 막을 수 있는 정도가 달라요.",
+  },
   empty: {
     // 서버에 앱이 하나도 없을 때. 「아직」은 시간의 말이라 걸러서 빈 경우에는 쓰지 않는다.
     headline: "보여 줄 앱이 아직 없어요.",
     noneRegistered: "서버에 등록된 공식 앱이 생기면 여기에 나타나요.",
-    // 앱은 있는데 검색·보기가 다 걸러 낸 경우(목록이 일곱을 넘어 컨트롤이 설 때만 생긴다).
+    // 앱은 있는데 검색·보기가 다 걸러 낸 경우(목록이 아홉을 넘어 컨트롤이 설 때만 생긴다).
     filteredHeadline: "맞는 앱이 없어요.",
     filtered: "검색어나 보기를 바꿔 다른 앱을 확인하세요.",
   },

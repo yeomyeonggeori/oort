@@ -357,9 +357,10 @@ describe("읽기 전용 카탈로그의 문장", () => {
     expect(pluginLicenseLabel(driveManifest.plugin.license.spdx)).toBe("Apache-2.0");
   });
 
-  it("검색·보기 컨트롤은 목록이 한눈에 읽히는 길이(여섯 줄)를 넘을 때만 선다", () => {
-    expect([0, 1, 4, 6].map(pluginControlsVisible)).toEqual([false, false, false, false]);
-    expect([7, 12, 40].map(pluginControlsVisible)).toEqual([true, true, true]);
+  it("검색·보기 컨트롤은 목록이 한눈에 읽히는 길이(아홉 줄, v1 공식 카탈로그)를 넘을 때만 선다", () => {
+    // 시드 일곱(#3944)과 v1 아홉(Atlassian·Slack까지)은 컨트롤 없이 한눈에 읽힌다.
+    expect([0, 1, 4, 6, 7, 9].map(pluginControlsVisible)).toEqual([false, false, false, false, false, false]);
+    expect([10, 12, 40].map(pluginControlsVisible)).toEqual([true, true, true]);
   });
 
   it("설치 상태는 설치·활성 두 사실을 세 문장으로 가른다", () => {

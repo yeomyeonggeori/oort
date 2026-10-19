@@ -59,7 +59,7 @@ describe("목록 줄", () => {
     expect(row.blocked).toBe(false);
     expect(row.chipLabel).toBe("설치됨 · 내가 허용함");
     expect(row.subtitle).toBe("코드 저장소와 이슈");
-    expect(row.iconText).toBe("G");
+    expect(row.iconText).toBe("GH");
   });
 
   it("미설치·내 허용 없음·비활성은 모두 막힘이고, 칩 글자가 서로 다르다", () => {
