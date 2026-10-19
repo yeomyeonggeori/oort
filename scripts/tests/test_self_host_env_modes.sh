@@ -1882,21 +1882,33 @@ else:
     if "@sha256:" not in h.get("image", ""):
         bad.append("hermes image is not digest-pinned")
     mounts = {v["target"]: v for v in h.get("volumes", []) if v.get("type") == "bind"}
-    for target in ("/oort/config.yaml", "/oort/lockgate.py"):
+    for target in ("/oort/config.yaml", "/oort/lockgate.py", "/oort/login_relay.py", "/oort/mcp_login_probe.py"):
         if not mounts.get(target, {}).get("read_only"):
             bad.append("%s is not a read-only mount" % target)
     env = h.get("environment", {})
-    leaked = sorted(k for k in env if k not in ("API_SERVER_ENABLED", "API_SERVER_HOST", "API_SERVER_KEY", "API_SERVER_PORT"))
+    leaked = sorted(k for k in env if k not in ("API_SERVER_ENABLED", "API_SERVER_HOST", "API_SERVER_KEY", "API_SERVER_PORT", "HERMES_LOGIN_RELAY_KEY"))
     if leaked:
         bad.append("hermes carries variables beyond its own: %s" % ",".join(leaked))
     if env.get("API_SERVER_HOST") != "0.0.0.0":
         bad.append("API_SERVER_HOST is not 0.0.0.0")
     if len(env.get("API_SERVER_KEY", "")) < 32:
         bad.append("API_SERVER_KEY is shorter than 32 characters")
+    # #4078: the login relay key is its own secret, present for the sidecar, and gone before the dispatcher.
+    relay_key = env.get("HERMES_LOGIN_RELAY_KEY", "")
+    if len(relay_key) < 32:
+        bad.append("HERMES_LOGIN_RELAY_KEY is shorter than 32 characters")
+    launch = command.find("login_relay.py launch")
+    unset_at = command.find("unset HERMES_LOGIN_RELAY_KEY")
+    if launch < 0 or unset_at < 0 or not (gate < launch < unset_at < exec_at):
+        bad.append("the relay is not launched after the gate and unset before the dispatcher")
+    if '[ -z "$${HERMES_LOGIN_RELAY_KEY:-}" ] ||' not in command:  # `config` keeps compose's `$$` escape
+        bad.append("the relay starts without a key")
     api = svc["api"]["environment"]
     worker = svc["agent-worker"]["environment"]
     if api.get("HERMES_BASE_URL") != "http://hermes:8642/v1" or worker.get("HERMES_BASE_URL") != "http://hermes:8642/v1":
         bad.append("api/agent-worker HERMES_BASE_URL is not the same-server Hermes")
+    if "HERMES_LOGIN_RELAY_KEY" in worker:
+        bad.append("agent-worker holds the login relay key")
     if api.get("HERMES_API_KEY") != env.get("API_SERVER_KEY") or worker.get("HERMES_API_KEY") != env.get("API_SERVER_KEY"):
         bad.append("api/agent-worker HERMES_API_KEY differs from API_SERVER_KEY")
     for name in ("api", "agent-worker"):
@@ -1923,13 +1935,29 @@ run_generator "$agents_fixture" "$agents_fixture/output" 49790 --local-build --w
 agents_env="$agents_fixture/infra/rust/local.secrets.env"
 for expected in 'COMPOSE_PROFILES=agents' 'HERMES_BASE_URL=http://hermes:8642/v1' \
   'AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1' 'AGENT_PROVIDER_LOCAL_HOSTS=hermes' \
-  'OORT_COHOSTED_AGENT_TOOLS_LOCKED=1'; do
+  'OORT_COHOSTED_AGENT_TOOLS_LOCKED=1' 'HERMES_LOGIN_RELAY_URL=http://hermes:8643'; do
   grep -Fxq "$expected" "$agents_env" || { echo "--with-agents: missing $expected" >&2; exit 1; }
 done
 agents_key="$(sed -n 's/^HERMES_API_KEY=//p' "$agents_env")"
 [ "${#agents_key}" -ge 32 ] || { echo "--with-agents: HERMES_API_KEY shorter than the gate's 32" >&2; exit 1; }
 if grep -Fq "$agents_key" "$agents_fixture/output"; then
   echo "--with-agents: HERMES_API_KEY leaked to stdout/stderr" >&2
+  exit 1
+fi
+relay_key="$(sed -n 's/^HERMES_LOGIN_RELAY_KEY=//p' "$agents_env")"
+[ "${#relay_key}" -ge 32 ] || { echo "--with-agents: HERMES_LOGIN_RELAY_KEY shorter than the sidecar's 32" >&2; exit 1; }
+# fake openssl returns one string for every secret, so independence is a static contract (as for the webhook keys):
+# the relay key is drawn by its own gen call, never copied from HERMES_API_KEY.
+grep -Fq 'rewrite_env_assignment HERMES_LOGIN_RELAY_KEY "$(gen)"' "$ROOT/scripts/self_host_env.sh" || {
+  echo "generator no longer draws HERMES_LOGIN_RELAY_KEY from its own gen call" >&2
+  exit 1
+}
+if grep -E 'HERMES_LOGIN_RELAY_KEY[^|]*(HERMES_API_KEY|API_SERVER_KEY)' "$ROOT/scripts/self_host_env.sh" | grep -v '^[[:space:]]*#' | grep -q .; then
+  echo "generator derives HERMES_LOGIN_RELAY_KEY from the chat key" >&2
+  exit 1
+fi
+if grep -Fq "$relay_key" "$agents_fixture/output"; then
+  echo "--with-agents: HERMES_LOGIN_RELAY_KEY leaked to stdout/stderr" >&2
   exit 1
 fi
 agents_json="$agents_fixture/agents-compose.json"
@@ -1971,6 +1999,14 @@ elif edit == "wildcard-host":
     api["AGENT_PROVIDER_LOCAL_HOSTS"] = "*"
 elif edit == "no-attest":
     api["OORT_COHOSTED_AGENT_TOOLS_LOCKED"] = ""
+elif edit == "relay-key-kept":
+    h["command"] = [h["command"][0].replace("unset HERMES_LOGIN_RELAY_KEY; ", "")]
+elif edit == "relay-before-gate":
+    c = h["command"][0]
+    relay = c[c.index("[ -z "):c.index("unset HERMES_LOGIN_RELAY_KEY; ")]
+    h["command"] = [c.replace(relay, "").replace("set -eu; ", "set -eu; " + relay, 1)]
+elif edit == "relay-on-worker":
+    cfg["services"]["agent-worker"]["environment"]["HERMES_LOGIN_RELAY_KEY"] = h["environment"]["HERMES_LOGIN_RELAY_KEY"]
 else:
     raise SystemExit("unknown sabotage " + edit)
 json.dump(cfg, open(sys.argv[2], "w"))
@@ -1980,10 +2016,11 @@ PY
     exit 1
   fi
 }
-for sab in no-gate gate-swallowed published-port oort-secret writable-config floating-image wildcard-host no-attest; do
+for sab in no-gate gate-swallowed published-port oort-secret writable-config floating-image wildcard-host no-attest \
+  relay-key-kept relay-before-gate relay-on-worker; do
   agents_sabotage "$sab" "$sab"
 done
-echo "with-agents: rendered Hermes private + gate-first + wired; 8 sabotages RED"
+echo "with-agents: rendered Hermes private + gate-first + wired + relay key separate and unset before exec; 11 sabotages RED"
 
 # Add-only on the existing env: the generated key is never replaced, a re-run of
 # --allow-local-provider alone keeps the Hermes host, and a second --with-agents

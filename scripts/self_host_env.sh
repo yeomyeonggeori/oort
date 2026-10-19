@@ -181,9 +181,11 @@ oort_local_provider_env_keys() {
 # oort_local_provider_env_keys' names.
 oort_cohosted_agent_env_keys() {
   printf '%s\n' 'COMPOSE_PROFILES' 'HERMES_API_KEY' 'HERMES_BASE_URL' \
-    'OORT_COHOSTED_AGENT_TOOLS_LOCKED'
+    'OORT_COHOSTED_AGENT_TOOLS_LOCKED' 'HERMES_LOGIN_RELAY_KEY' 'HERMES_LOGIN_RELAY_URL'
 }
 SELF_HOST_HERMES_BASE_URL="http://hermes:8642/v1"
+# #4078 / ADR-0203 증보 2026-10-19 Q3: the login relay sidecar of the same Hermes container.
+SELF_HOST_HERMES_LOGIN_RELAY_URL="http://hermes:8643"
 SELF_HOST_HERMES_HOST="hermes"
 
 # ---------------------------------------------------------------------------
@@ -552,6 +554,9 @@ official Hermes image, started behind the tool-lock gate (infra/hermes/
 lockgate.py, exit 0 or the container never listens), no published port, only
 reachable as http://hermes:8642 from api and agent-worker. It writes
 COMPOSE_PROFILES=agents, HERMES_API_KEY (generated once, never rewritten),
+HERMES_LOGIN_RELAY_KEY (generated once, never rewritten; the login relay sidecar's
+own key, ADR-0203 증보 2026-10-19 Q3: without it the sidecar does not start and
+oort answers login_relay_off), HERMES_LOGIN_RELAY_URL=http://hermes:8643,
 HERMES_BASE_URL=http://hermes:8642/v1, the local-provider opt-in with the
 exact host `hermes` (merged with any host already listed) and
 OORT_COHOSTED_AGENT_TOOLS_LOCKED=1 (canonical names:
@@ -562,7 +567,7 @@ that already declares a different HERMES_BASE_URL is refused. Model
 authentication is a separate step. Local-install only — not for a T2 platform.
 On an existing env it writes the missing keys and sets the declaration keys
 to the bundled values (an empty value you chose is replaced); the generated
-HERMES_API_KEY is never replaced.
+HERMES_API_KEY and a valid HERMES_LOGIN_RELAY_KEY are never replaced.
 --allow-local-provider writes AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1 and
 AGENT_PROVIDER_LOCAL_HOSTS=host.docker.internal (canonical names:
 oort_local_provider_env_keys). Without it those two keys are absent
@@ -1435,6 +1440,21 @@ ensure_cohosted_agent_env() {
     rewrite_env_assignment HERMES_API_KEY "$(gen)"
   fi
   rewrite_env_assignment HERMES_BASE_URL "$SELF_HOST_HERMES_BASE_URL"
+  # #4078 (ADR-0203 증보 Q3): the login relay key. Its OWN secret: a leaked chat key must not carry login
+  # authority, so it is never derived from HERMES_API_KEY. Generated once and never rewritten; an empty
+  # or too-short value (the sidecar refuses under 32 characters) is replaced.
+  count="$(env_key_count HERMES_LOGIN_RELAY_KEY)"
+  [ "$count" -le 1 ] ||
+    fail "${ENV_FILE}의 HERMES_LOGIN_RELAY_KEY 항목은 최대 한 번만 있어야 한다."
+  current=""
+  if [ "$count" -eq 1 ]; then
+    current="$(env_value_once HERMES_LOGIN_RELAY_KEY)"
+  fi
+  # The sidecar takes only 32-256 characters of [A-Za-z0-9._~+/=-]; anything else would leave it silently off.
+  if ! [[ "$current" =~ ^[A-Za-z0-9._~+/=-]{32,256}$ ]]; then
+    rewrite_env_assignment HERMES_LOGIN_RELAY_KEY "$(gen)"
+  fi
+  rewrite_env_assignment HERMES_LOGIN_RELAY_URL "$SELF_HOST_HERMES_LOGIN_RELAY_URL"
   rewrite_env_assignment AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK "1"
   count="$(env_key_count AGENT_PROVIDER_LOCAL_HOSTS)"
   current=""

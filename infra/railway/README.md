@@ -152,6 +152,9 @@ compose's default (`${CENTRIFUGO_LOG_LEVEL:-info}`). Paste them decoded, e.g.
 | hermes | `API_SERVER_KEY` | `${{shared.HERMES_API_KEY}}` — the shared variable you create by hand, see Hermes |
 | hermes | `HERMES_CONFIG_B64` | `base64 < infra/hermes/config.yaml \| tr -d '\n'` (one line) |
 | hermes | `HERMES_LOCKGATE_B64` | `base64 < infra/hermes/lockgate.py \| tr -d '\n'` (one line) |
+| hermes | `HERMES_LOGIN_RELAY_KEY` | `${{shared.HERMES_LOGIN_RELAY_KEY}}` — the login relay sidecar's own shared secret (`openssl rand -hex 32`, never the chat key); leave the shared variable out and the sidecar does not start (oort answers `login_relay_off`) |
+| hermes | `HERMES_LOGIN_RELAY_B64` | `base64 < infra/hermes/login_relay.py \| tr -d '\n'` (one line; needed only with the relay key) |
+| hermes | `HERMES_LOGIN_PROBE_B64` | `base64 < infra/hermes/mcp_login_probe.py \| tr -d '\n'` (one line; needed only with the relay key) |
 | centrifugo | `CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY` | `${{shared.CENT_TOKEN_HMAC}}` |
 | centrifugo | `CENTRIFUGO_HTTP_API_KEY` | `${{shared.CENT_API_KEY}}` |
 | centrifugo | `CENTRIFUGO_CLIENT_ALLOWED_ORIGINS` | `${{shared.CENTRIFUGO_ALLOWED_ORIGINS}}` (space separated: tauri origins + the public https/wss) |
@@ -198,7 +201,14 @@ variable**: not `DATABASE_URL`, not `PROVIDER_LINK_MASTER_KEY`, not a JWT key.
    variable stops the service; `check_railway_catalog.py` recomputes the hashes,
    so changing `config.yaml` or `lockgate.py` means updating the command in the
    same change), runs `lockgate.py gate` and only then `exec`s the Hermes
-   dispatcher. A non-zero gate (`set -e`) means the service never listens. The deploy log shows one
+   dispatcher. A non-zero gate (`set -e`) means the service never listens.
+   **Login relay (#4078, ADR-0203 증보 2026-10-19):** with `HERMES_LOGIN_RELAY_KEY` set, the start
+   command also decodes `login_relay.py` and `mcp_login_probe.py` (pinned by sha256 the same way) and,
+   after the gate, starts the sidecar in the background on `:8643` (private, no domain). The sidecar
+   moves the key into a `0400` file of its own uid, runs the fixed `hermes` login commands as the
+   `hermes` uid in a new process group, and the key variables are unset before the dispatcher, so the
+   gateway and the agent hold no copy. Whether Railway lets the start command do that uid separation
+   is `runtime-unverified`; if it cannot, the sidecar logs `relay off` and Hermes starts unchanged. The deploy log shows one
    `LOCKGATE {"ok": true, …}` line and, after start, one `LOCKREPORT` line with
    six checks. Read them before you trust the card.
 4. api and agent-worker get the wiring from the hand-mapped table (host,

@@ -1998,6 +1998,13 @@ agent:
 - **모델 인증은 이 작업 밖이에요**(#4073). 모델 없이도 Hermes는 뜨고 카드도 보여요.
   모델을 정하기 전까지 대화 한 번은 「Hermes가 아직 모델 provider에 연결되지 않았다」
   고 답해요.
+- **로그인 중계 사이드카(#4078, ADR-0203 증보 2026-10-19).** `HERMES_LOGIN_RELAY_KEY`가
+  있으면(`--with-agents`가 채팅 키와 따로 만들어요) `hermes` 컨테이너가
+  `infra/hermes/login_relay.py`도 사설망(`hermes:8643`, `ports:` 없음)에서 돌려요.
+  Codex·Claude·설정된 OAuth 앱의 고정 `hermes` 로그인 명령만, `hermes` uid의 별도
+  프로세스 그룹으로 실행해요. 키는 사이드카 전용 uid의 `0400` 파일에 있고 게이트웨이가
+  뜨기 전에 환경에서 지워져요. 키가 없으면 사이드카 프로세스도 없고 화면은 셸 명령
+  (`railway ssh`)을 보여 줘요. 실측: `scripts/tests/test_login_relay_docker.sh`.
 
 compose 실측(arm64, 2026-10-19, 고정 이미지): listener는 `0.0.0.0:8642`(uid 10000),
 `docker port`는 공개된 포트가 없다고 나오고, 게이트는 `LOCKGATE ok=true

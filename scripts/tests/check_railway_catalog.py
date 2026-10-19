@@ -84,8 +84,9 @@ HAND_LITERALS = {
 # Shared variables the operator creates by hand (the generator does not print them).
 # HERMES_API_KEY: `openssl rand -hex 32`, one value for hermes' API_SERVER_KEY and the
 # HERMES_API_KEY of api and agent-worker.
-OPERATOR_SHARED = {"HERMES_API_KEY"}
+OPERATOR_SHARED = {"HERMES_API_KEY", "HERMES_LOGIN_RELAY_KEY"}  # the relay key: its own secret, never derived from the chat key (#4078)
 HERMES_SHARED_KEY = "${{shared.HERMES_API_KEY}}"
+HERMES_RELAY_SHARED_KEY = "${{shared.HERMES_LOGIN_RELAY_KEY}}"
 HERMES_PORT = 8642
 HERMES_DATA = "/opt/data"
 HERMES_KEYS = {"public", "image", "startCommand", "port", "privateHostname", "volume", "variables"}
@@ -213,7 +214,7 @@ COMPOSE_TWINS: dict[str, tuple[list[tuple[str, str]], set[str]]] = {
     "agent-worker": ([("docker-compose.rust.yml", "agent-worker")], set()),
     # compose mounts config.yaml and lockgate.py read-only; Railway has no bind mount, so
     # both arrive as base64 variables the start command decodes.
-    "hermes": ([("docker-compose.rust.yml", "hermes")], {"HERMES_CONFIG_B64", "HERMES_LOCKGATE_B64"}),
+    "hermes": ([("docker-compose.rust.yml", "hermes")], {"HERMES_CONFIG_B64", "HERMES_LOCKGATE_B64", "HERMES_LOGIN_RELAY_B64", "HERMES_LOGIN_PROBE_B64"}),
     "postgres": ([("docker-compose.rust.yml", "postgres")], set()),
     # compose mounts infra/centrifugo.json; these four env literals replace it.
     "centrifugo": ([("docker-compose.rust.yml", "centrifugo")], set(CENTRIFUGO_DERIVED)),
@@ -236,13 +237,21 @@ KNOWN_CENTRIFUGO_SETTINGS = {
 
 
 
-def hermes_canonical(config_sha: str, gate_sha: str) -> list[tuple[object, list[object]]]:
+def hermes_canonical(
+    config_sha: str, gate_sha: str, relay_sha: str, probe_sha: str
+) -> list[tuple[object, list[object]]]:
     """#4072: config and gate arrive as base64 variables and are PINNED to the repo bytes.
 
     The sha256 check is what makes the start command fail-closed against an empty, stale or swapped
     variable: `printf " " | base64 -d` is an empty gate script that would exit 0 and start Hermes unchecked
     (review M3). The gate runs BEFORE the image's own entrypoint (which starts the gateway ahead of any CMD),
-    `set -e` stops the service on a non-zero gate, and `exec` hands PID 1 to the dispatcher."""
+    `set -e` stops the service on a non-zero gate, and `exec` hands PID 1 to the dispatcher.
+
+    #4078: the login relay block comes AFTER the gate and only when HERMES_LOGIN_RELAY_KEY is set (no key = no
+    process, the Q3 off switch). With a key, the sidecar and probe are decoded, PINNED to the repo bytes (a stale
+    sidecar would be a stale security boundary) and launched in the background (`launch` moves the key into a 0400
+    file of a dedicated uid and starts `serve` as that uid). The key variables are UNSET before `exec`, so the
+    gateway and every `hermes` child inherit no copy."""
     return [
         ("", ["set", "-eu"]),
         (";", ["umask", "022"]),
@@ -257,6 +266,18 @@ def hermes_canonical(config_sha: str, gate_sha: str) -> list[tuple[object, list[
         (";", ["echo", "%s  %s" % (gate_sha, "/tmp/lockgate.py")]),
         ("|", ["sha256sum", "-c", "-"]),
         (";", [HERMES_PY, "/tmp/lockgate.py", "gate", HERMES_DATA + "/config.yaml"]),
+        (";", ["[", "-z", "${HERMES_LOGIN_RELAY_KEY:-}", "]"]),
+        ("||", ["{", ":", "${HERMES_LOGIN_RELAY_B64:?}", "${HERMES_LOGIN_PROBE_B64:?}"]),
+        (";", ["printf", "%s", "$HERMES_LOGIN_RELAY_B64"]),
+        ("|", ["base64", "-d", ">", "/tmp/login_relay.py"]),
+        (";", ["printf", "%s", "$HERMES_LOGIN_PROBE_B64"]),
+        ("|", ["base64", "-d", ">", "/tmp/mcp_login_probe.py"]),
+        (";", ["echo", "%s  %s" % (relay_sha, "/tmp/login_relay.py")]),
+        ("|", ["sha256sum", "-c", "-"]),
+        (";", ["echo", "%s  %s" % (probe_sha, "/tmp/mcp_login_probe.py")]),
+        ("|", ["sha256sum", "-c", "-"]),
+        (";", ["OORT_LOGIN_RELAY_PROBE=/tmp/mcp_login_probe.py", HERMES_PY, "-B", "/tmp/login_relay.py", "launch", "&", "}"]),
+        (";", ["unset", "HERMES_LOGIN_RELAY_KEY", "HERMES_LOGIN_RELAY_B64", "HERMES_LOGIN_PROBE_B64"]),
         (";", [HERMES_PY, "/tmp/lockgate.py", "report", "&", "exec",
                "/opt/hermes/docker/entrypoint-dispatch.sh", "gateway", "run"]),
     ]
@@ -648,17 +669,18 @@ def hermes_errors(services: dict, compose: str, repo_root: Path) -> list[str]:
     if extra_keys:
         errors.append("hermes has keys the catalog does not review (domain? replicas? restart?): %s" % ",".join(extra_keys))
     shas = []
-    for name in ("config.yaml", "lockgate.py"):
+    for name in ("config.yaml", "lockgate.py", "login_relay.py", "mcp_login_probe.py"):
         try:
             shas.append(hashlib.sha256((repo_root / "infra" / "hermes" / name).read_bytes()).hexdigest())
         except OSError as exc:
             errors.append("infra/hermes/%s unreadable: %s" % (name, exc.__class__.__name__))
-    if len(shas) == 2:
+    if len(shas) == 4:
         diff = canonical_diff(shell_commands(shell_script(hermes.get("startCommand"))), hermes_canonical(*shas))
         if diff:
             errors.append(
                 "hermes start command is not the canonical command list (gate-first, fail-closed, config and gate "
-                "pinned to the sha256 of infra/hermes/config.yaml and lockgate.py): %s" % diff
+                "pinned to the sha256 of infra/hermes/config.yaml and lockgate.py; the login relay block only with a key, "
+                "its two files pinned the same way, key variables unset before exec): %s" % diff
             )
     if (hermes.get("volume") or {}).get("mountPath") != HERMES_DATA:
         errors.append("hermes volume mountPath %r != %s" % ((hermes.get("volume") or {}).get("mountPath"), HERMES_DATA))
@@ -676,7 +698,12 @@ def hermes_errors(services: dict, compose: str, repo_root: Path) -> list[str]:
     for forbidden in ("API_SERVER_CORS_ORIGINS", "HERMES_YOLO_MODE", "HERMES_DASHBOARD"):
         if forbidden in variables:
             errors.append("hermes must not set %s (lock gate invariant)" % forbidden)
-    for name in ("HERMES_CONFIG_B64", "HERMES_LOCKGATE_B64"):
+    if variables.get("HERMES_LOGIN_RELAY_KEY") != HERMES_RELAY_SHARED_KEY:
+        errors.append(
+            "hermes HERMES_LOGIN_RELAY_KEY %r must be %s (its own shared secret, not the chat key)"
+            % (variables.get("HERMES_LOGIN_RELAY_KEY"), HERMES_RELAY_SHARED_KEY)
+        )
+    for name in ("HERMES_CONFIG_B64", "HERMES_LOCKGATE_B64", "HERMES_LOGIN_RELAY_B64", "HERMES_LOGIN_PROBE_B64"):
         if not str(variables.get(name, "")).startswith("<operator:"):
             errors.append("hermes %s must be an <operator: …> placeholder (base64 of the repo file)" % name)
     if hermes.get("healthcheckPath") is not None:
@@ -1142,6 +1169,22 @@ def mutate_catalog(kind: str, data: dict) -> None:
         services["hermes"]["variables"]["API_SERVER_CORS_ORIGINS"] = "*"
     elif kind == "hermes-key-literal":
         services["hermes"]["variables"]["API_SERVER_KEY"] = "dev-insecure-hermes-bearer"
+    elif kind == "hermes-relay-key-chat-key":  # #4078: the relay key reuses the chat key
+        services["hermes"]["variables"]["HERMES_LOGIN_RELAY_KEY"] = "${{shared.HERMES_API_KEY}}"
+    elif kind == "hermes-relay-stale-sha":  # a stale sidecar would be a stale security boundary
+        command = services["hermes"]["startCommand"]
+        stale = re.search(r"echo \"([0-9a-f]{64})  /tmp/login_relay\.py", command)
+        if stale is None:
+            raise SystemExit("mutation %s: no relay sha in the hermes start command" % kind)
+        services["hermes"]["startCommand"] = command.replace(stale.group(1), "0" * 64, 1)
+    elif kind == "hermes-relay-key-not-unset":  # the gateway would inherit the relay key
+        services["hermes"]["startCommand"] = replace_once(
+            services["hermes"]["startCommand"], "unset HERMES_LOGIN_RELAY_KEY HERMES_LOGIN_RELAY_B64 HERMES_LOGIN_PROBE_B64; ", "", kind
+        )
+    elif kind == "hermes-relay-unconditional":  # the sidecar would start without a key
+        services["hermes"]["startCommand"] = replace_once(
+            services["hermes"]["startCommand"], '[ -z "${HERMES_LOGIN_RELAY_KEY:-}" ] || { ', "{ ", kind
+        )
     elif kind == "api-hermes-wildcard-host":
         api["variables"]["AGENT_PROVIDER_LOCAL_HOSTS"] = "*.railway.internal"
     elif kind == "api-hermes-attest-dropped":
@@ -1209,6 +1252,10 @@ CATALOG_MUTATIONS: tuple[tuple[str, str], ...] = (
     ("hermes-oort-secret", "hermes variables outside its compose twin"),
     ("hermes-cors-open", "hermes variables outside its compose twin"),
     ("hermes-key-literal", "hermes API_SERVER_KEY"),
+    ("hermes-relay-key-chat-key", "hermes HERMES_LOGIN_RELAY_KEY"),
+    ("hermes-relay-stale-sha", "hermes start command is not the canonical command list"),
+    ("hermes-relay-key-not-unset", "hermes start command is not the canonical command list"),
+    ("hermes-relay-unconditional", "hermes start command is not the canonical command list"),
     ("api-hermes-wildcard-host", "api AGENT_PROVIDER_LOCAL_HOSTS"),
     ("api-hermes-attest-dropped", "api OORT_COHOSTED_AGENT_TOOLS_LOCKED"),
     ("worker-hermes-attest", "agent-worker variables outside its compose twin"),

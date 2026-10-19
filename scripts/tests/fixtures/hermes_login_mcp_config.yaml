@@ -1,0 +1,13 @@
+# Test config for scripts/test_login_relay_docker.sh phase B (NOT the oort default; no lockgate runs on it).
+agent:
+  max_turns: 12
+approvals: {mode: manual, unattended_mode: deny}
+mcp_servers:
+  mock:
+    url: http://127.0.0.1:9300/mcp
+    auth: oauth
+  gmail:
+    url: http://127.0.0.1:9301/mcp
+    auth: oauth
+    oauth:
+      scope: https://www.googleapis.com/auth/gmail.readonly
