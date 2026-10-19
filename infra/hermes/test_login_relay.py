@@ -771,6 +771,37 @@ class Hardening(unittest.TestCase):
         for c in socks + [third]:
             c.close()
 
+    def test_an_unauthenticated_socket_is_cut_early_and_an_undeliverable_start_is_abandoned(self):
+        import socket
+
+        h = Harness(self, preauth_deadline=1, request_deadline=60)
+        idle = socket.create_connection(("127.0.0.1", h.port))
+        idle.settimeout(5)
+        t0 = time.time()
+        self.assertEqual(idle.recv(10), b"")  # cut at the PRE-auth deadline, long before the 60 s one
+        self.assertLess(time.time() - t0, 4)
+        idle.close()
+        lid = h.start("provider", "anthropic")[1]["login_id"]
+        h.srv.relay.abandon(lid)  # what the handler does when the start response cannot be written
+        self.assertEqual(h.call("GET", "/v1/login/" + lid, op=OP)[1], {"status": "cancelled", "reason": "client_gone"})
+        self.assertTrue(h.wait_until(lambda: not any(h.alive(p) for p in h.pids())))
+
+    def test_a_status_run_in_flight_serves_the_last_answer_instead_of_queueing(self):
+        h = Harness(self, status_cache=0)
+        stub = os.path.join(h.tmp.name, "slow2_py.sh")
+        open(stub, "w").write('#!/bin/sh\nsleep 1\necho LOGGED_IN=0\n')
+        os.chmod(stub, 0o755)
+        h.cfg.python_bin = stub
+        first = h.call("GET", "/v1/status")  # fills the cache (slow, 2 providers)
+        self.assertEqual(first[0], 200)
+        runner = threading.Thread(target=h.call, args=("GET", "/v1/status"))
+        runner.start()
+        time.sleep(0.3)  # the second run is in flight now
+        t0 = time.time()
+        self.assertEqual(h.call("GET", "/v1/status")[1], first[1])
+        self.assertLess(time.time() - t0, 0.8, "a status call queued behind a running check")
+        runner.join()
+
     def test_status_is_single_flight(self):
         h = Harness(self)
         stub = os.path.join(h.tmp.name, "slow_py.sh")
