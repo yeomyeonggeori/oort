@@ -18705,8 +18705,13 @@ components:
             `apps_used` spelling (the blocked-app sentence and the 「쓴 앱」
             receipt printed under an agent's name — written only by the
             completion and the sweeps, so a caller-sent value is dropped, not
-            refused). Webhook-ingress `props` lose the same three. Because the map
-            is flat, a structured block cannot be sent through it at all.
+            refused). Webhook-ingress `props` lose the same three. ADR-0205 H-1
+            (#4084): GitHub notification props are server-owned as well - `source`
+            when its value is `github` (any case), and every key starting with
+            `github_` - and are dropped, not refused, from this map and from
+            webhook-ingress `props`; only the signed GitHub receiver writes them.
+            Because the map is flat, a structured block cannot be sent through
+            it at all.
         runId:
           type: string
           format: uuid
@@ -19435,7 +19440,15 @@ components:
             nobody renewed; a job no site took for a day says `site_off`) are
             the server's observations and only for an agent with apps attached;
             the other five are the execution site's own report, shape-checked
-            only. `working` is not emitted. Omitted when empty. On a `type: tool_result` row the props are
+            only. `working` is not emitted. Omitted when empty. ADR-0205 H-1
+            (#4084): a GitHub notification line carries `source: github` and
+            `github_*` keys (`github_event`, `github_action`, `github_repository`,
+            `github_url`, `github_installation_id`) that are **server-owned** -
+            no send door can write them - plus `github_author_member_id`, the
+            workspace's system author (`kind: agent`, display name 「GitHub」) that
+            wrote the line. A client draws the notification line only when
+            `source` is `github` and the message's `authorMemberId` equals
+            `github_author_member_id`; a display name alone is not proof. On a `type: tool_result` row the props are
             `{call_id, output, is_error}` and `body` repeats `output`. A tool
             call the server refuses is answered with `is_error: true`, and an
             `output` that names the refusal's stable word in parentheses — the

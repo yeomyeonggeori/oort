@@ -147,7 +147,7 @@ fn props_value(props: Option<&std::collections::BTreeMap<String, String>>) -> Va
     let mut object = Map::new();
     if let Some(props) = props {
         for (key, value) in props {
-            if is_server_owned_props_key(key) {
+            if is_server_owned_props_key(key) || momo_webhook::is_github_owned_prop(key, value) {
                 continue;
             }
             object.insert(key.clone(), Value::String(value.clone()));
@@ -1766,6 +1766,24 @@ mod tests {
                 .status,
             StatusCode::BAD_REQUEST
         );
+    }
+
+    #[test]
+    fn client_props_cannot_forge_a_github_notification() {
+        let mut props = std::collections::BTreeMap::new();
+        props.insert("source".to_string(), "github".to_string());
+        props.insert("github_event".to_string(), "pull_request".to_string());
+        props.insert(
+            "github_url".to_string(),
+            "https://github.com/a/b".to_string(),
+        );
+        props.insert("github_author_member_id".to_string(), "x".to_string());
+        props.insert("other".to_string(), "kept".to_string());
+        let value = props_value(Some(&props));
+        assert_eq!(value, serde_json::json!({"other": "kept"}));
+        props.clear();
+        props.insert("source".to_string(), "prime".to_string());
+        assert_eq!(props_value(Some(&props))["source"], "prime");
     }
 
     #[test]

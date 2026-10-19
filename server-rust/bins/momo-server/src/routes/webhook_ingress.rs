@@ -177,6 +177,11 @@ fn webhook_props(
         if momo_agent::SERVER_OWNED_APP_PROPS_KEYS.contains(&key.as_str()) {
             continue;
         }
+        // #4084 (ADR-0205 H-1) — nor can it draw a GitHub notification line (`source: "github"`
+        // over the `source` this function just set, or any `github_*` key).
+        if momo_webhook::is_github_owned_prop(key, value) {
+            continue;
+        }
         props.insert(key.clone(), json!(value));
     }
     Value::Object(props)
@@ -633,6 +638,23 @@ mod tests {
     /// #4054 — an external sender cannot print a blocked-app sentence or a 「쓴 앱」
     /// receipt: the three server-owned app keys are dropped from the sender's
     /// props, and its ordinary keys survive.
+    #[test]
+    fn a_webhook_cannot_forge_a_github_notification_line() {
+        let mut client = BTreeMap::new();
+        client.insert("keep".to_string(), "me".to_string());
+        client.insert("source".to_string(), "github".to_string());
+        client.insert("github_event".to_string(), "pull_request".to_string());
+        client.insert(
+            "github_url".to_string(),
+            "https://github.com/a/b".to_string(),
+        );
+        let props = webhook_props(Uuid::nil(), WebhookMode::Native, "label", &client);
+        assert_eq!(props["keep"], json!("me"));
+        assert_eq!(props["source"], json!("external_webhook"));
+        assert!(props.get("github_event").is_none(), "{props}");
+        assert!(props.get("github_url").is_none(), "{props}");
+    }
+
     #[test]
     fn a_webhook_cannot_forge_the_app_notice_or_the_apps_used_receipt() {
         let mut client = BTreeMap::new();

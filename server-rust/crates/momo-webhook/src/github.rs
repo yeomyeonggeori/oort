@@ -78,6 +78,27 @@ pub fn is_known_feature(value: &str) -> bool {
     GITHUB_FEATURES.contains(&value)
 }
 
+/// The `props` key whose value `"github"` marks a message as a GitHub notification line.
+pub const GITHUB_SOURCE_PROP: &str = "source";
+/// The value of [`GITHUB_SOURCE_PROP`] on a notification.
+pub const GITHUB_SOURCE_VALUE: &str = "github";
+/// Every GitHub-notification props key starts with this (`github_event`, `github_url`, ...).
+pub const GITHUB_PROP_PREFIX: &str = "github_";
+/// The workspace's 「GitHub」 author member id, written next to the notification so a client can
+/// check that the line was authored by the system member and not by a namesake.
+pub const GITHUB_AUTHOR_PROP: &str = "github_author_member_id";
+
+/// ADR-0205 H-1 (#4084): GitHub notification props are **server-owned**. A person, an agent or an
+/// external webhook sender that could write `source: "github"` or a `github_*` key could draw a
+/// notification line (a link, a headline) under any author, so every door that copies
+/// caller-supplied props drops the pair this returns `true` for. Only the signed receiver
+/// ([`render_notification`]) writes them, through `send_message_in_tx`, never through those doors.
+pub fn is_github_owned_prop(key: &str, value: &str) -> bool {
+    let key = key.trim().to_ascii_lowercase();
+    key.starts_with(GITHUB_PROP_PREFIX)
+        || (key == GITHUB_SOURCE_PROP && value.trim().eq_ignore_ascii_case(GITHUB_SOURCE_VALUE))
+}
+
 /// One rendered notification, before it is addressed to any channel.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Notification {
@@ -591,6 +612,32 @@ fn render_release(action: &str, payload: &Value) -> Option<Notification> {
 
 #[cfg(test)]
 mod tests {
+    /// #4084 (ADR-0205 H-1): the pair every caller-props door drops.
+    #[test]
+    fn github_notification_props_are_server_owned() {
+        use super::is_github_owned_prop;
+        for (key, value) in [
+            ("source", "github"),
+            ("source", " GitHub "),
+            ("Source", "GITHUB"),
+            ("github_event", "x"),
+            ("github_url", "https://github.com/a/b"),
+            ("GitHub_Author_Member_Id", "x"),
+            ("github_", ""),
+        ] {
+            assert!(is_github_owned_prop(key, value), "{key}={value}");
+        }
+        for (key, value) in [
+            ("source", "prime"),
+            ("source", "external_webhook"),
+            ("source", "githubx"),
+            ("note", "github"),
+            ("githubby", "x"),
+        ] {
+            assert!(!is_github_owned_prop(key, value), "{key}={value}");
+        }
+    }
+
     use super::*;
 
     const SECRET: &str = "whsec-test-secret";
