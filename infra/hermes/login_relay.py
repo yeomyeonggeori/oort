@@ -41,6 +41,7 @@ import re
 import secrets
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import threading
@@ -140,6 +141,7 @@ class Config:
         self.test_bin = kw.pop("test_bin", TEST_BIN)
         self.setpriv_bin = kw.pop("setpriv_bin", SETPRIV_BIN)
         self.data_dir = kw.pop("data_dir", DATA_DIR)
+        self.state_dir = kw.pop("state_dir", None)  # the relay's OWN private dir (not Hermes' volume); None = memory only
         self.drop = kw.pop("drop", None)  # None | (uid, gid): lower every child to this uid/gid
         self.ttl_device = kw.pop("ttl_device", TTL_DEVICE)
         self.ttl_paste = kw.pop("ttl_paste", TTL_PASTE)
@@ -693,12 +695,14 @@ class Relay:
             targets.append({"kind": "provider", "target": p, "connected": ok})
         for name in sorted(c.servers):
             path = "%s/mcp-tokens/%s.json" % (c.data_dir.rstrip("/"), name)
-            ok = self._run_check([c.test_bin, "-e", path], rc_only=True)
+            got = self._run_lines([c.test_bin, "-e", path])
+            ok = got is not None and got[0] == 0
             item = {"kind": "mcp", "target": name, "connected": ok}
             if ok:
                 item["estimated"] = self._estimate(name, path)
-            else:
-                self._forget_issued(name)  # logged out or never in: an old login time says nothing
+            elif got is not None and got[0] == 1:
+                self._forget_issued(name)  # `test -e` said the file is absent: an old login time says nothing now
+            # (a start failure or a timeout is "unknown", not "absent": the login time is kept)
             targets.append(item)
         out = {"targets": targets}
         with self.lock:
@@ -706,15 +710,28 @@ class Relay:
         return out
 
     # ---- login time (an ESTIMATE input, never a token): the relay writes only a clock reading ----
+    # The login time lives in the relay's OWN private directory (`/run/oort-login-relay`: 0700, the relay uid),
+    # never in Hermes' volume: /opt/data is 0700 hermes, so the relay uid cannot write there, and the hermes uid
+    # must not be able to plant, swap or block this file. It survives a relay process restart, not a container
+    # restart (tmpfs); after one, the estimate falls back to the token file time and says so.
     def _issued_path(self):
-        return "%s/.oort-login-relay-issued.json" % self.cfg.data_dir.rstrip("/")
+        d = self.cfg.state_dir
+        return "%s/issued.json" % d.rstrip("/") if d else None
 
     def _load_issued(self):
         """Read the state file defensively: whatever is in it, only `server name -> plausible epoch seconds` survives."""
+        path = self._issued_path()
+        if not path:
+            return {}
         try:
-            with open(self._issued_path(), "r", encoding="utf-8") as f:
-                raw = json.loads(f.read(65536))
-        except (OSError, ValueError):
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            try:
+                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                    return {}
+                raw = json.loads(os.read(fd, 65536).decode("utf-8"))
+            finally:
+                os.close(fd)
+        except (OSError, ValueError, RecursionError):
             return {}
         out = {}
         if isinstance(raw, dict):
@@ -725,9 +742,15 @@ class Relay:
 
     def _persist_issued(self):
         path = self._issued_path()
+        if not path:
+            return
         tmp = path + ".tmp"
         try:
-            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+            try:
+                os.unlink(tmp)
+            except FileNotFoundError:
+                pass
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(json.dumps(self.issued, sort_keys=True))
             os.replace(tmp, path)
@@ -1068,6 +1091,7 @@ def serve(args):
     drop = None if args.no_drop else (args.child_uid, args.child_uid)
     cfg = Config(
         key=key, servers=servers, probe_path=args.probe, drop=drop, data_dir=args.data_dir,
+        state_dir=os.path.dirname(os.path.abspath(args.key_file)),
         hermes_bin=args.hermes_bin, python_bin=args.python_bin,
         allow_http_loopback=args.allow_http_loopback,
         extra_mcp_hosts=[h for h in args.extra_mcp_hosts.split(",") if h],

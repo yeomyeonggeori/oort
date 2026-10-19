@@ -131,6 +131,7 @@ class Harness:
         tc.addCleanup(self.tmp.cleanup)
         self.data = os.path.join(self.tmp.name, "data")
         os.makedirs(self.data)
+        os.makedirs(os.path.join(self.tmp.name, "state"), mode=0o700)
         self.fake = os.path.join(self.tmp.name, "fake_hermes.py")
         with open(self.fake, "w") as f:
             f.write(FAKE_HERMES.format(py=sys.executable))
@@ -145,6 +146,7 @@ class Harness:
         self.bodies = []
         kw = dict(
             key=KEY, hermes_bin=self.fake, python_bin=sys.executable, probe_path=self.fake, data_dir=self.data,
+            state_dir=os.path.join(self.tmp.name, "state"),
             servers=servers if servers is not None else {"notes": {"host": "mock.example", "probe": False}},
             start_wait=5, rate_per_min=50,
         )  # fmt: skip
@@ -917,13 +919,40 @@ class AppEstimate(unittest.TestCase):
     def test_the_state_file_is_untrusted_input(self):
         h = Harness(self, servers=self.GOOGLE)
         path = h.srv.relay._issued_path()
-        for junk in ('{"gmail": "x"}', '{"gmail": true}', '{"gmail": 5}', '{"other": 1700000000}', "[1]", "not json", '{"gmail": 99999999999}'):
+        for junk in ("[" * 70000, '{"gmail": "x"}', '{"gmail": true}', '{"gmail": 5}', '{"other": 1700000000}', "[1]", "not json", '{"gmail": 99999999999}'):
             open(path, "w").write(junk)
             self.assertEqual(lr.Relay(h.cfg).issued, {}, junk)
         open(path, "w").write('{"gmail": 1700000000, "evil": 1700000000}')
         r = lr.Relay(h.cfg)
         self.addCleanup(r.close)
         self.assertEqual(r.issued, {"gmail": 1700000000})
+
+    def test_a_fifo_or_symlink_in_the_state_path_is_not_read_and_never_blocks(self):
+        h = Harness(self, servers=self.GOOGLE)
+        path = h.srv.relay._issued_path()
+        os.mkfifo(path)  # open() for reading would block forever without O_NONBLOCK + the regular-file check
+        self.assertEqual(lr.Relay(h.cfg).issued, {})
+        os.remove(path)
+        target = os.path.join(h.tmp.name, "elsewhere.json")
+        open(target, "w").write('{"gmail": 1700000000}')
+        os.symlink(target, path)
+        self.assertEqual(lr.Relay(h.cfg).issued, {})
+
+    def test_an_unwritable_state_dir_keeps_the_login_time_in_memory_only(self):
+        h = Harness(self, servers=self.GOOGLE, state_dir=os.path.join("/nonexistent", "state"))
+        self._login(h, "gmail")
+        self.assertEqual(self._status_mcp(h)["gmail"]["estimated"]["basis"], "relay_observed_login")
+        self.assertEqual(lr.Relay(h.cfg).issued, {})  # a restart forgets; the file time takes over
+
+    def test_a_check_that_could_not_run_is_unknown_not_absent_and_keeps_the_login_time(self):
+        h = Harness(self, servers=self.GOOGLE)
+        self._login(h, "gmail")
+        kept = dict(h.srv.relay.issued)
+        h.cfg.test_bin = "/nonexistent/test"  # the check cannot start: not the same as "the file is gone"
+        h.srv.relay._status_cache = (0.0, None)
+        got = {t["target"]: t for t in h.call("GET", "/v1/status")[1]["targets"] if t["kind"] == "mcp"}["gmail"]
+        self.assertFalse(got["connected"])
+        self.assertEqual(h.srv.relay.issued, kept)
 
     def test_google_loopback_redirect_is_kept_end_to_end_on_the_probe_path(self):
         # K-S1b pins redirect_port 41821..41823 per Google server; the relay must carry exactly that address.

@@ -54,6 +54,13 @@ LOGIN_RELAY_E2E_URL="http://127.0.0.1:${PORT}" LOGIN_RELAY_E2E_KEY="$KEY" LOGIN_
   -- --ignored --nocapture --test-threads=1 2>&1 | tee "${TMPDIR:-/tmp}/login-relay-e2e.out" | grep -E "^(test |E2E_MARKER|test result)|panicked|FAILED" || true
 grep -q "^test result: ok. 1 passed" "${TMPDIR:-/tmp}/login-relay-e2e.out" || fail "the e2e test did not pass"
 [ -s "$OUT" ] || fail "the test recorded no markers"
+# #4081: the relay uid wrote its login times into ITS OWN 0700 directory (Hermes' volume is 0700 hermes: it could not),
+# as a file the hermes uid cannot read or replace; the file holds clock readings only.
+docker exec "$NAME" sh -c 'stat -c "%A %u" /run/oort-login-relay/issued.json; cat /run/oort-login-relay/issued.json' | tee "${TMPDIR:-/tmp}/login-relay-e2e-issued.txt" >/dev/null
+grep -q '^-rw-------' "${TMPDIR:-/tmp}/login-relay-e2e-issued.txt" || fail "the login-time state file is missing or not 0600"
+tail -1 "${TMPDIR:-/tmp}/login-relay-e2e-issued.txt" | grep -Eq '^\{("[a-z_]+": [0-9]{10}(, )?)+\}$' || fail "the login-time state file holds more than names and clock readings"
+if docker exec "$NAME" grep -rlF -- "issued.json" /opt/data >/dev/null 2>&1; then fail "a login-time file leaked into Hermes' volume"; fi
+rm -f "${TMPDIR:-/tmp}/login-relay-e2e-issued.txt"
 docker logs "$NAME" >"${TMPDIR:-/tmp}/login-relay-e2e-sidecar.log" 2>&1
 # The marker code, the Codex device code and the vendor URLs: none of them in the sidecar's stderr (its log).
 while IFS= read -r secret; do
