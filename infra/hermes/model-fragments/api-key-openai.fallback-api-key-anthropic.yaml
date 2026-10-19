@@ -1,0 +1,6 @@
+model:                    # #4082: secret: OPENAI_API_KEY as a service variable or in the volume .env, never in this file
+  provider: openai-api
+  default: gpt-5.6-sol
+fallback_model:           # tried when the primary fails (rate limit / overload / connection); secret: ANTHROPIC_API_KEY as a service variable or in the volume .env, never in this file
+  provider: anthropic
+  model: claude-sonnet-5
