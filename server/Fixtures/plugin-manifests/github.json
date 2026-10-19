@@ -3,7 +3,7 @@
   "plugin": {
     "id": "com.momo.plugins.github",
     "name": "GitHub",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "Official GitHub hosted MCP integration",
     "publisher": {
       "id": "github",
@@ -30,14 +30,1064 @@
     },
     "tools": [
       {
-        "name": "github.list_repositories",
-        "description": "권한을 위임한 사용자가 접근할 수 있는 저장소 목록을 조회합니다.",
+        "name": "github.get_commit",
+        "description": "커밋 하나의 내용과 변경 파일을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "detail": {
+              "type": "string",
+              "description": "Level of detail to include for changed files. \"none\" omits stats and files entirely. \"stats\" (default) includes per-file metadata: filename, status, and lines-of-code counts (additions, deletions, changes), with no patch content. \"full_patch\" additionally includes the unified diff content for each f",
+              "enum": [
+                "none",
+                "stats",
+                "full_patch"
+              ]
+            },
+            "owner": {
+              "type": "string",
+              "description": "Repository owner"
+            },
+            "page": {
+              "type": "number",
+              "description": "Page number for pagination (min 1)",
+              "minimum": 1
+            },
+            "perPage": {
+              "type": "number",
+              "description": "Results per page for pagination (min 1, max 100)",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "repo": {
+              "type": "string",
+              "description": "Repository name"
+            },
+            "sha": {
+              "type": "string",
+              "description": "Commit SHA, branch name, or tag name"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "owner",
+            "repo",
+            "sha"
+          ]
+        },
+        "schemaDigest": "sha256:ca98cc7a2fc4e157aa357ccf6b032cd0fce638e3ecd8179de2e4751649010125",
+        "scopes": [
+          "github:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "github.get_file_contents",
+        "description": "저장소의 파일 또는 디렉터리 내용을 읽습니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "fields": {
+              "type": "array",
+              "description": "Subset of fields to return for each entry when the path is a directory. If omitted, all fields are returned. Ignored when the path is a single file. Use this to reduce response size when listing directories and you only need specific fields, e.g. just 'name' and 'type'.",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "type",
+                  "name",
+                  "path",
+                  "size",
+                  "sha",
+                  "url",
+                  "git_url",
+                  "html_url",
+                  "download_url"
+                ]
+              }
+            },
+            "owner": {
+              "type": "string",
+              "description": "Repository owner (username or organization)"
+            },
+            "path": {
+              "type": "string",
+              "description": "Path to file/directory"
+            },
+            "ref": {
+              "type": "string",
+              "description": "Accepts optional git refs such as `refs/tags/{tag}`, `refs/heads/{branch}` or `refs/pull/{pr_number}/head`"
+            },
+            "repo": {
+              "type": "string",
+              "description": "Repository name"
+            },
+            "sha": {
+              "type": "string",
+              "description": "Accepts optional commit SHA. If specified, it will be used instead of ref"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "owner",
+            "repo"
+          ]
+        },
+        "schemaDigest": "sha256:e89afab97ec7c4083b7084e3b1e3fec7b593587b9744c4a2c083bd1c049854b3",
+        "scopes": [
+          "github:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "github.get_label",
+        "description": "저장소 라벨 하나를 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Label name."
+            },
+            "owner": {
+              "type": "string",
+              "description": "Repository owner (username or organization name)"
+            },
+            "repo": {
+              "type": "string",
+              "description": "Repository name"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "owner",
+            "repo",
+            "name"
+          ]
+        },
+        "schemaDigest": "sha256:29a8c8c2c8f863f0f5ff33b870b76faff556bee23df32f013e683d6790acbcee",
+        "scopes": [
+          "github:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "github.get_latest_release",
+        "description": "저장소의 최신 릴리스를 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string",
+              "description": "Repository owner"
+            },
+            "repo": {
+              "type": "string",
+              "description": "Repository name"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "owner",
+            "repo"
+          ]
+        },
+        "schemaDigest": "sha256:6bf57b1d12245e24ed7ec64d8e04d25002e357b14698b9e7e83ac9718ed4e7ed",
+        "scopes": [
+          "github:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "github.get_me",
+        "description": "인증된 GitHub 사용자 정보를 조회합니다.",
         "inputSchema": {
           "type": "object",
           "properties": {},
           "additionalProperties": false
         },
-        "schemaDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "schemaDigest": "sha256:1f2facd698addc9a5892480ea4adc64929020f106a525ba23d0a83cbbc8992f4",
+        "scopes": [
+          "github:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "github.get_release_by_tag",
+        "description": "태그 이름으로 릴리스를 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string",
+              "description": "Repository owner"
+            },
+            "repo": {
+              "type": "string",
+              "description": "Repository name"
+            },
+            "tag": {
+              "type": "string",
+              "description": "Tag name (e.g., 'v1.0.0')"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "owner",
+            "repo",
+            "tag"
+          ]
+        },
+        "schemaDigest": "sha256:755d661a3d8307d99c827933979ee3f63c63952128f8f21ecad54be42949d386",
+        "scopes": [
+          "github:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "github.get_tag",
+        "description": "태그 하나의 정보를 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string",
+              "description": "Repository owner"
+            },
+            "repo": {
+              "type": "string",
+              "description": "Repository name"
+            },
+            "tag": {
+              "type": "string",
+              "description": "Tag name"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "owner",
+            "repo",
+            "tag"
+          ]
+        },
+        "schemaDigest": "sha256:9b6c04fcd63703a96352dbec19242dbc6c6762218fe9fdc1a50ac0ee2b1c8fd5",
+        "scopes": [
+          "github:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "github.get_team_members",
+        "description": "팀 구성원 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "org": {
+              "type": "string",
+              "description": "Organization login (owner) that contains the team."
+            },
+            "team_slug": {
+              "type": "string",
+              "description": "Team slug"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "org",
+            "team_slug"
+          ]
+        },
+        "schemaDigest": "sha256:636e440d768fee1ddf88d5eab17990158dbdea8d5e0cf71a5b713186eab3d977",
+        "scopes": [
+          "github:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "github.get_teams",
+        "description": "사용자가 속한 팀 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "user": {
+              "type": "string",
+              "description": "Username to get teams for. If not provided, uses the authenticated user."
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:9e7d6200cbfd8036c42b2107acfa84fef2b25dd53658af49e1e5c1cb6be30bb9",
+        "scopes": [
+          "github:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "github.issue_read",
+        "description": "이슈의 본문, 댓글, 하위 이슈, 라벨을 읽습니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "issue_number": {
+              "type": "number",
+              "description": "The number of the issue"
+            },
+            "method": {
+              "type": "string",
+              "description": "The read operation to perform on a single issue.\nOptions are:\n1. get - Get issue details. Also returns best-effort hierarchy flags (`has_parent`, `has_children`); `parent` and `sub_issues_summary` are optional relationship summaries, and `closed_by_pull_requests` summarizes the pull requests configu",
+              "enum": [
+                "get",
+                "get_comments",
+                "get_sub_issues",
+                "get_parent",
+                "get_labels"
+              ]
+            },
+            "owner": {
+              "type": "string",
+              "description": "The owner of the repository"
+            },
+            "page": {
+              "type": "number",
+              "description": "Page number for pagination (min 1)",
+              "minimum": 1
+            },
+            "perPage": {
+              "type": "number",
+              "description": "Results per page for pagination (min 1, max 100)",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "repo": {
+              "type": "string",
+              "description": "The name of the repository"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "method",
+            "owner",
+            "repo",
+            "issue_number"
+          ]
+        },
+        "schemaDigest": "sha256:bb45d3b1967cb45c2e1c8b6d8d7d6b7019b012f8ef695e045ced77970e1ac1ef",
+        "scopes": [
+          "github:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "github.list_branches",
+        "description": "저장소의 브랜치 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string",
+              "description": "Repository owner"
+            },
+            "page": {
+              "type": "number",
+              "description": "Page number for pagination (min 1)",
+              "minimum": 1
+            },
+            "perPage": {
+              "type": "number",
+              "description": "Results per page for pagination (min 1, max 100)",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "repo": {
+              "type": "string",
+              "description": "Repository name"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "owner",
+            "repo"
+          ]
+        },
+        "schemaDigest": "sha256:6e344f10a92f17353653e5f75dc58cedd27c806848d0d4a7ea1d10fcc759f934",
+        "scopes": [
+          "github:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "github.list_commits",
+        "description": "브랜치의 커밋 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "author": {
+              "type": "string",
+              "description": "Author username or email address to filter commits by"
+            },
+            "fields": {
+              "type": "array",
+              "description": "Subset of fields to return for each commit. If omitted, all fields are returned. Use this to reduce response size when you only need specific fields, e.g. just 'sha' and 'html_url'.",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "sha",
+                  "html_url",
+                  "commit",
+                  "author",
+                  "committer"
+                ]
+              }
+            },
+            "owner": {
+              "type": "string",
+              "description": "Repository owner"
+            },
+            "page": {
+              "type": "number",
+              "description": "Page number for pagination (min 1)",
+              "minimum": 1
+            },
+            "path": {
+              "type": "string",
+              "description": "Only commits containing this file path will be returned"
+            },
+            "perPage": {
+              "type": "number",
+              "description": "Results per page for pagination (min 1, max 100)",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "repo": {
+              "type": "string",
+              "description": "Repository name"
+            },
+            "sha": {
+              "type": "string",
+              "description": "Commit SHA, branch or tag name to list commits of. If not provided, uses the default branch of the repository. If a commit SHA is provided, will list commits up to that SHA."
+            },
+            "since": {
+              "type": "string",
+              "description": "Only commits after this date will be returned (ISO 8601 format: YYYY-MM-DDTHH:MM:SSZ or YYYY-MM-DD)"
+            },
+            "until": {
+              "type": "string",
+              "description": "Only commits before this date will be returned (ISO 8601 format: YYYY-MM-DDTHH:MM:SSZ or YYYY-MM-DD)"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "owner",
+            "repo"
+          ]
+        },
+        "schemaDigest": "sha256:cef2ce2b00b456bd3e735e536a7fae9804ee60f06165a5f52dbdd026030867b9",
+        "scopes": [
+          "github:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "github.list_issue_fields",
+        "description": "이슈에 쓸 수 있는 사용자 지정 필드를 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string",
+              "description": "The account owner of the repository or organization. The name is not case sensitive."
+            },
+            "repo": {
+              "type": "string",
+              "description": "The name of the repository. When provided, returns fields for this specific repository (inherited from its organization). When omitted, returns org-level fields directly."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "owner"
+          ]
+        },
+        "schemaDigest": "sha256:1c1c0c1869451c0e9a743adc17e4c414c012279f5871c2f0ac75ac0ac821aef7",
+        "scopes": [
+          "github:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "github.list_issue_types",
+        "description": "조직의 이슈 유형 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string",
+              "description": "The account owner of the repository or organization."
+            },
+            "repo": {
+              "type": "string",
+              "description": "The name of the repository. When provided, returns issue types for this specific repository. When omitted, returns org-level issue types directly."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "owner"
+          ]
+        },
+        "schemaDigest": "sha256:e2559c2dd7845c4b6b7768ca46fab6e7749024c427743f4645a28ad1b640b324",
+        "scopes": [
+          "github:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "github.list_issues",
+        "description": "저장소의 이슈 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "after": {
+              "type": "string",
+              "description": "Cursor for pagination. Use the cursor from the previous response."
+            },
+            "direction": {
+              "type": "string",
+              "description": "Order direction. If provided, the 'orderBy' also needs to be provided.",
+              "enum": [
+                "ASC",
+                "DESC"
+              ]
+            },
+            "field_filters": {
+              "type": "array",
+              "description": "Filter by custom issue field values. Each entry takes a field_name and a value; the server looks up the field and coerces the value to its type (single-select option name, text, number, or YYYY-MM-DD date).",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "field_name": {
+                    "type": "string",
+                    "description": "Name of the custom field (e.g. \"Priority\"). Case-insensitive."
+                  },
+                  "value": {
+                    "type": "string",
+                    "description": "Value to filter on. For single-select fields, the option name (e.g. \"P1\"). For dates, YYYY-MM-DD. For numbers, the numeric value as a string. For text, the text value."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "field_name",
+                  "value"
+                ]
+              }
+            },
+            "fields": {
+              "type": "array",
+              "description": "Subset of fields to return for each issue. If omitted, all fields are returned. Use this to reduce response size when you only need specific fields; omitting 'body' and 'field_values' in particular drops the largest per-result data.",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "number",
+                  "title",
+                  "body",
+                  "state",
+                  "user",
+                  "labels",
+                  "assignees",
+                  "comments",
+                  "created_at",
+                  "updated_at",
+                  "field_values"
+                ]
+              }
+            },
+            "labels": {
+              "type": "array",
+              "description": "Filter by labels",
+              "items": {
+                "type": "string"
+              }
+            },
+            "orderBy": {
+              "type": "string",
+              "description": "Order issues by field. If provided, the 'direction' also needs to be provided.",
+              "enum": [
+                "CREATED_AT",
+                "UPDATED_AT",
+                "COMMENTS"
+              ]
+            },
+            "owner": {
+              "type": "string",
+              "description": "Repository owner"
+            },
+            "perPage": {
+              "type": "number",
+              "description": "Results per page for pagination (min 1, max 100)",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "repo": {
+              "type": "string",
+              "description": "Repository name"
+            },
+            "since": {
+              "type": "string",
+              "description": "Filter by date (ISO 8601 timestamp)"
+            },
+            "state": {
+              "type": "string",
+              "description": "Filter by state, by default both open and closed issues are returned when not provided",
+              "enum": [
+                "OPEN",
+                "CLOSED"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "owner",
+            "repo"
+          ]
+        },
+        "schemaDigest": "sha256:ca3273f487d55de1dbbccaffe7adb0c40b8fdb032777850c7fc081f497c4a7c2",
+        "scopes": [
+          "github:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "github.list_pull_requests",
+        "description": "저장소의 풀 리퀘스트 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "base": {
+              "type": "string",
+              "description": "Filter by base branch"
+            },
+            "direction": {
+              "type": "string",
+              "description": "Sort direction",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            },
+            "fields": {
+              "type": "array",
+              "description": "Subset of fields to return for each pull request. If omitted, all fields are returned. Use this to reduce response size when you only need specific fields; omitting 'body' in particular drops the largest per-result data.",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "number",
+                  "title",
+                  "body",
+                  "state",
+                  "draft",
+                  "merged",
+                  "mergeable_state",
+                  "html_url",
+                  "user",
+                  "labels",
+                  "assignees",
+                  "requested_reviewers",
+                  "merged_by",
+                  "head",
+                  "base",
+                  "additions",
+                  "deletions",
+                  "changed_files",
+                  "commits",
+                  "comments",
+                  "created_at",
+                  "updated_at",
+                  "closed_at",
+                  "merged_at",
+                  "milestone"
+                ]
+              }
+            },
+            "head": {
+              "type": "string",
+              "description": "Filter by head user/org and branch"
+            },
+            "owner": {
+              "type": "string",
+              "description": "Repository owner"
+            },
+            "page": {
+              "type": "number",
+              "description": "Page number for pagination (min 1)",
+              "minimum": 1
+            },
+            "perPage": {
+              "type": "number",
+              "description": "Results per page for pagination (min 1, max 100)",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "repo": {
+              "type": "string",
+              "description": "Repository name"
+            },
+            "sort": {
+              "type": "string",
+              "description": "Sort by",
+              "enum": [
+                "created",
+                "updated",
+                "popularity",
+                "long-running"
+              ]
+            },
+            "state": {
+              "type": "string",
+              "description": "Filter by state",
+              "enum": [
+                "open",
+                "closed",
+                "all"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "owner",
+            "repo"
+          ]
+        },
+        "schemaDigest": "sha256:1e4a27031225cf7f5847cc825132c6a1df76aaf2861651692731a9adfbf15969",
+        "scopes": [
+          "github:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "github.list_releases",
+        "description": "저장소의 릴리스 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "fields": {
+              "type": "array",
+              "description": "Subset of fields to return for each release. If omitted, all fields are returned. Use this to reduce response size when you only need specific fields; omitting 'body' in particular drops the largest per-release data.",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "id",
+                  "tag_name",
+                  "name",
+                  "body",
+                  "html_url",
+                  "published_at",
+                  "prerelease",
+                  "draft",
+                  "author"
+                ]
+              }
+            },
+            "owner": {
+              "type": "string",
+              "description": "Repository owner"
+            },
+            "page": {
+              "type": "number",
+              "description": "Page number for pagination (min 1)",
+              "minimum": 1
+            },
+            "perPage": {
+              "type": "number",
+              "description": "Results per page for pagination (min 1, max 100)",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "repo": {
+              "type": "string",
+              "description": "Repository name"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "owner",
+            "repo"
+          ]
+        },
+        "schemaDigest": "sha256:3959aa5544341ab62535466b81424cc02920a185968aad97f7849937641f6a2c",
+        "scopes": [
+          "github:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "github.list_repository_collaborators",
+        "description": "저장소 협업자 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "affiliation": {
+              "type": "string",
+              "description": "Filter by affiliation. Can be one of: 'outside' (outside collaborators), 'direct' (all with permissions regardless of org membership), 'all' (all collaborators). Default: 'all'",
+              "enum": [
+                "outside",
+                "direct",
+                "all"
+              ]
+            },
+            "owner": {
+              "type": "string",
+              "description": "Repository owner"
+            },
+            "page": {
+              "type": "number",
+              "description": "Page number for pagination (default 1, min 1)",
+              "minimum": 1
+            },
+            "perPage": {
+              "type": "number",
+              "description": "Results per page for pagination (default 30, min 1, max 100)",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "repo": {
+              "type": "string",
+              "description": "Repository name"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "owner",
+            "repo"
+          ]
+        },
+        "schemaDigest": "sha256:66f4f98a58926eec16279fffaf712ac5dde4a9d3f83c13a25d8c247483c02296",
+        "scopes": [
+          "github:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "github.list_tags",
+        "description": "저장소의 태그 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string",
+              "description": "Repository owner"
+            },
+            "page": {
+              "type": "number",
+              "description": "Page number for pagination (min 1)",
+              "minimum": 1
+            },
+            "perPage": {
+              "type": "number",
+              "description": "Results per page for pagination (min 1, max 100)",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "repo": {
+              "type": "string",
+              "description": "Repository name"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "owner",
+            "repo"
+          ]
+        },
+        "schemaDigest": "sha256:5e529875cdc6612c50e4b78059ad99f4f47e9832fbd38802fc09b8fd437feba4",
+        "scopes": [
+          "github:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "github.pull_request_read",
+        "description": "풀 리퀘스트의 본문, 변경 파일, 리뷰, 상태 점검을 읽습니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "after": {
+              "type": "string",
+              "description": "Cursor for pagination, used only by the get_review_comments method. Pass the endCursor from the previous page's PageInfo to fetch the next page."
+            },
+            "method": {
+              "type": "string",
+              "description": "Action to specify what pull request data needs to be retrieved from GitHub. \nPossible options: \n 1. get - Get details of a specific pull request.\n 2. get_diff - Get the diff of a pull request.\n 3. get_status - Get combined commit status of a head commit in a pull request.\n 4. get_files - Get the lis",
+              "enum": [
+                "get",
+                "get_diff",
+                "get_status",
+                "get_files",
+                "get_commits",
+                "get_review_comments",
+                "get_reviews",
+                "get_comments",
+                "get_check_runs"
+              ]
+            },
+            "owner": {
+              "type": "string",
+              "description": "Repository owner"
+            },
+            "page": {
+              "type": "number",
+              "description": "Page number for pagination (min 1)",
+              "minimum": 1
+            },
+            "perPage": {
+              "type": "number",
+              "description": "Results per page for pagination (min 1, max 100)",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "pullNumber": {
+              "type": "number",
+              "description": "Pull request number"
+            },
+            "repo": {
+              "type": "string",
+              "description": "Repository name"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "method",
+            "owner",
+            "repo",
+            "pullNumber"
+          ]
+        },
+        "schemaDigest": "sha256:7d8f2b5cc8d1623ad13c73c5faf02aacdd274eb36706a932c30b3b1ca3fa449a",
+        "scopes": [
+          "github:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "github.search_code",
+        "description": "GitHub 전체에서 코드를 검색합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "fields": {
+              "type": "array",
+              "description": "Subset of fields to return for each code search result. If omitted, all fields are returned. Use this to reduce response size when you only need specific fields; omitting 'repository' and 'text_matches' in particular drops the largest per-result data.",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "name",
+                  "path",
+                  "sha",
+                  "repository",
+                  "text_matches"
+                ]
+              }
+            },
+            "order": {
+              "type": "string",
+              "description": "Sort order for results",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            },
+            "page": {
+              "type": "number",
+              "description": "Page number for pagination (min 1)",
+              "minimum": 1
+            },
+            "perPage": {
+              "type": "number",
+              "description": "Results per page for pagination (min 1, max 100)",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "query": {
+              "type": "string",
+              "description": "Search query (GitHub code search REST). Implicit AND between terms; supports `OR`, `NOT`, and `\"quoted phrase\"` for exact match. Qualifiers: `repo:owner/repo`, `org:`, `user:`, `language:`, `path:dir` (prefix match), `filename:exact.ext`, `extension:`, `in:file`, `in:path`, `size:`, `is:archived`, `"
+            },
+            "sort": {
+              "type": "string",
+              "description": "Sort field ('indexed' only)"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "query"
+          ]
+        },
+        "schemaDigest": "sha256:53d40d8e4945257c6e83e97ae6507e773bfd67879793a321581c0c6f3d6379c8",
+        "scopes": [
+          "github:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "github.search_commits",
+        "description": "커밋을 검색합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "order": {
+              "type": "string",
+              "description": "Sort order",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            },
+            "page": {
+              "type": "number",
+              "description": "Page number for pagination (min 1)",
+              "minimum": 1
+            },
+            "perPage": {
+              "type": "number",
+              "description": "Results per page for pagination (min 1, max 100)",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "query": {
+              "type": "string",
+              "description": "Commit search query (GitHub commit search REST). Searches commit messages on the default branch only. Scope the search with `repo:owner/repo`, `org:`, or `user:` (queries without a scope qualifier match across all of GitHub and are usually not what you want). Other qualifiers: `author:`, `committer:"
+            },
+            "sort": {
+              "type": "string",
+              "description": "Sort by author or committer date (defaults to best match)",
+              "enum": [
+                "author-date",
+                "committer-date"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "query"
+          ]
+        },
+        "schemaDigest": "sha256:8549387d500997f67df6f3e7dcd0533550d3741a102c759ce2598b6399321a61",
         "scopes": [
           "github:read"
         ],
@@ -50,21 +1100,956 @@
         "inputSchema": {
           "type": "object",
           "properties": {
-            "query": {
-              "type": "string"
+            "fields": {
+              "type": "array",
+              "description": "Subset of fields to return for each issue result. If omitted, all fields are returned. Use this to reduce response size when you only need specific fields; omitting 'body', 'reactions', and 'labels' in particular drops the largest per-result data.",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "number",
+                  "title",
+                  "body",
+                  "state",
+                  "state_reason",
+                  "draft",
+                  "locked",
+                  "html_url",
+                  "user",
+                  "author_association",
+                  "labels",
+                  "assignee",
+                  "assignees",
+                  "milestone",
+                  "comments",
+                  "reactions",
+                  "created_at",
+                  "updated_at",
+                  "closed_at",
+                  "closed_by",
+                  "type",
+                  "repository_url",
+                  "pull_request",
+                  "field_values"
+                ]
+              }
             },
-            "limit": {
-              "type": "integer"
+            "order": {
+              "type": "string",
+              "description": "Sort order",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            },
+            "owner": {
+              "type": "string",
+              "description": "Optional repository owner. If provided with repo, only issues for this repository are listed."
+            },
+            "page": {
+              "type": "number",
+              "description": "Page number for pagination (min 1)",
+              "minimum": 1
+            },
+            "perPage": {
+              "type": "number",
+              "description": "Results per page for pagination (min 1, max 100)",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "query": {
+              "type": "string",
+              "description": "The search query, as natural language. When the user gives alternative wordings, include them as plain words rather than joining them with OR."
+            },
+            "repo": {
+              "type": "string",
+              "description": "Optional repository name. If provided with owner, only issues for this repository are listed."
+            },
+            "sort": {
+              "type": "string",
+              "description": "Sort field by number of matches of categories, defaults to best match",
+              "enum": [
+                "comments",
+                "reactions",
+                "reactions-+1",
+                "reactions--1",
+                "reactions-smile",
+                "reactions-thinking_face",
+                "reactions-heart",
+                "reactions-tada",
+                "interactions",
+                "created",
+                "updated"
+              ]
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "required": [
+            "query"
+          ]
         },
-        "schemaDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "schemaDigest": "sha256:c537a403feaf1a3a4b8c0ec15c663888b9b02c93244638a5299286c001eda7b7",
         "scopes": [
           "github:read"
         ],
         "risk": "read",
         "approvalPolicy": "none"
+      },
+      {
+        "name": "github.search_pull_requests",
+        "description": "풀 리퀘스트를 검색합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "fields": {
+              "type": "array",
+              "description": "Subset of fields to return for each pull request result. If omitted, all fields are returned. Use this to reduce response size when you only need specific fields; omitting 'body', 'reactions', and 'labels' in particular drops the largest per-result data.",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "number",
+                  "title",
+                  "body",
+                  "state",
+                  "state_reason",
+                  "draft",
+                  "locked",
+                  "html_url",
+                  "user",
+                  "author_association",
+                  "labels",
+                  "assignee",
+                  "assignees",
+                  "milestone",
+                  "comments",
+                  "reactions",
+                  "created_at",
+                  "updated_at",
+                  "closed_at",
+                  "closed_by",
+                  "pull_request",
+                  "repository_url"
+                ]
+              }
+            },
+            "order": {
+              "type": "string",
+              "description": "Sort order",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            },
+            "owner": {
+              "type": "string",
+              "description": "Optional repository owner. If provided with repo, only pull requests for this repository are listed."
+            },
+            "page": {
+              "type": "number",
+              "description": "Page number for pagination (min 1)",
+              "minimum": 1
+            },
+            "perPage": {
+              "type": "number",
+              "description": "Results per page for pagination (min 1, max 100)",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "query": {
+              "type": "string",
+              "description": "Search query using GitHub pull request search syntax"
+            },
+            "repo": {
+              "type": "string",
+              "description": "Optional repository name. If provided with owner, only pull requests for this repository are listed."
+            },
+            "sort": {
+              "type": "string",
+              "description": "Sort field by number of matches of categories, defaults to best match",
+              "enum": [
+                "comments",
+                "reactions",
+                "reactions-+1",
+                "reactions--1",
+                "reactions-smile",
+                "reactions-thinking_face",
+                "reactions-heart",
+                "reactions-tada",
+                "interactions",
+                "created",
+                "updated"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "query"
+          ]
+        },
+        "schemaDigest": "sha256:cdf7370cae2e5302761bea4a957a93c7e6fde6e90569f144fd646b2dd06d7334",
+        "scopes": [
+          "github:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "github.search_repositories",
+        "description": "저장소를 검색합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "minimal_output": {
+              "type": "boolean",
+              "description": "Return minimal repository information (default: true). When false, modern clients receive additional curated repository details, not the complete GitHub API object. Legacy clients retain full GitHub API repository objects."
+            },
+            "order": {
+              "type": "string",
+              "description": "Sort order",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            },
+            "page": {
+              "type": "number",
+              "description": "Page number for pagination (min 1)",
+              "minimum": 1
+            },
+            "perPage": {
+              "type": "number",
+              "description": "Results per page for pagination (min 1, max 100)",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "query": {
+              "type": "string",
+              "description": "Repository search query. Examples: 'machine learning in:name stars:>1000 language:python', 'topic:react', 'user:facebook'. Supports advanced search syntax for precise filtering."
+            },
+            "sort": {
+              "type": "string",
+              "description": "Sort repositories by field, defaults to best match",
+              "enum": [
+                "stars",
+                "forks",
+                "help-wanted-issues",
+                "updated"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "query"
+          ]
+        },
+        "schemaDigest": "sha256:29b70ef802d4ad8615909c567c76d3f8ef3147e4a0b91299caa16c62c9f5d8e6",
+        "scopes": [
+          "github:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "github.search_users",
+        "description": "GitHub 사용자를 검색합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "order": {
+              "type": "string",
+              "description": "Sort order",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            },
+            "page": {
+              "type": "number",
+              "description": "Page number for pagination (min 1)",
+              "minimum": 1
+            },
+            "perPage": {
+              "type": "number",
+              "description": "Results per page for pagination (min 1, max 100)",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "query": {
+              "type": "string",
+              "description": "User search query. Examples: 'john smith', 'location:seattle', 'followers:>100'. Search is automatically scoped to type:user."
+            },
+            "sort": {
+              "type": "string",
+              "description": "Sort users by number of followers or repositories, or when the person joined GitHub.",
+              "enum": [
+                "followers",
+                "repositories",
+                "joined"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "query"
+          ]
+        },
+        "schemaDigest": "sha256:7c73811b6d3fddd204ea936cbdb6d1175b68675693873e382f4bcbb19a0d1cc1",
+        "scopes": [
+          "github:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "github.add_comment_to_pending_review",
+        "description": "내 대기 중인 리뷰에 코멘트를 추가합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "body": {
+              "type": "string",
+              "description": "The text of the review comment"
+            },
+            "line": {
+              "type": "number",
+              "description": "The line of the blob in the pull request diff that the comment applies to. For multi-line comments, the last line of the range"
+            },
+            "owner": {
+              "type": "string",
+              "description": "Repository owner"
+            },
+            "path": {
+              "type": "string",
+              "description": "The relative path to the file that necessitates a comment"
+            },
+            "pullNumber": {
+              "type": "number",
+              "description": "Pull request number"
+            },
+            "repo": {
+              "type": "string",
+              "description": "Repository name"
+            },
+            "side": {
+              "type": "string",
+              "description": "The side of the diff to comment on. LEFT indicates the previous state, RIGHT indicates the new state",
+              "enum": [
+                "LEFT",
+                "RIGHT"
+              ]
+            },
+            "startLine": {
+              "type": "number",
+              "description": "For multi-line comments, the first line of the range that the comment applies to"
+            },
+            "startSide": {
+              "type": "string",
+              "description": "For multi-line comments, the starting side of the diff that the comment applies to. LEFT indicates the previous state, RIGHT indicates the new state",
+              "enum": [
+                "LEFT",
+                "RIGHT"
+              ]
+            },
+            "subjectType": {
+              "type": "string",
+              "description": "The level at which the comment is targeted",
+              "enum": [
+                "FILE",
+                "LINE"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "owner",
+            "repo",
+            "pullNumber",
+            "path",
+            "body",
+            "subjectType"
+          ]
+        },
+        "schemaDigest": "sha256:aed03ec6a0bf54dbe7d4cd7e93b3271e57bad8ed944f48ce1df8736249f382ad",
+        "scopes": [
+          "github:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
+      },
+      {
+        "name": "github.add_issue_comment",
+        "description": "이슈 또는 풀 리퀘스트에 댓글을 남깁니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "body": {
+              "type": "string",
+              "description": "Comment content. Required unless reaction is provided.",
+              "minLength": 1
+            },
+            "comment_id": {
+              "type": "integer",
+              "description": "The numeric ID of the issue or pull request comment to react to. Use this for reactions to comments; omit it to react to the issue or pull request itself. Cannot be combined with body.",
+              "minimum": 1
+            },
+            "issue_number": {
+              "type": "number",
+              "description": "Issue or pull request number to comment on or react to."
+            },
+            "owner": {
+              "type": "string",
+              "description": "Repository owner"
+            },
+            "reaction": {
+              "type": "string",
+              "description": "Emoji reaction to add. Required unless body is provided.",
+              "enum": [
+                "+1",
+                "-1",
+                "laugh",
+                "confused",
+                "heart",
+                "hooray",
+                "rocket",
+                "eyes"
+              ]
+            },
+            "repo": {
+              "type": "string",
+              "description": "Repository name"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "owner",
+            "repo",
+            "issue_number"
+          ]
+        },
+        "schemaDigest": "sha256:5126668e1a1cb697e7e203f9ebaff1bb361fa1aeb423c5858b065aa32ba09c2f",
+        "scopes": [
+          "github:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
+      },
+      {
+        "name": "github.add_reply_to_pull_request_comment",
+        "description": "풀 리퀘스트 리뷰 코멘트에 답글을 남깁니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "body": {
+              "type": "string",
+              "description": "The text of the reply. Required unless reaction is provided."
+            },
+            "commentId": {
+              "type": "number",
+              "description": "The numeric ID of the pull request review comment to reply or react to. Use the number from a #discussion_r... anchor, not the GraphQL thread node ID (PRRT_...).",
+              "minimum": 1
+            },
+            "owner": {
+              "type": "string",
+              "description": "Repository owner"
+            },
+            "pullNumber": {
+              "type": "number",
+              "description": "Pull request number. Required when body is provided."
+            },
+            "reaction": {
+              "type": "string",
+              "description": "Emoji reaction to add. Required unless body is provided.",
+              "enum": [
+                "+1",
+                "-1",
+                "laugh",
+                "confused",
+                "heart",
+                "hooray",
+                "rocket",
+                "eyes"
+              ]
+            },
+            "repo": {
+              "type": "string",
+              "description": "Repository name"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "owner",
+            "repo",
+            "commentId"
+          ]
+        },
+        "schemaDigest": "sha256:a9fc2d2a8288044f62fcc71247b19c34982aaaccc70ec471047d8bd407fd6de8",
+        "scopes": [
+          "github:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
+      },
+      {
+        "name": "github.create_branch",
+        "description": "저장소에 새 브랜치를 만듭니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "branch": {
+              "type": "string",
+              "description": "Name for new branch"
+            },
+            "from_branch": {
+              "type": "string",
+              "description": "Source branch (defaults to repo default)"
+            },
+            "owner": {
+              "type": "string",
+              "description": "Repository owner"
+            },
+            "repo": {
+              "type": "string",
+              "description": "Repository name"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "owner",
+            "repo",
+            "branch"
+          ]
+        },
+        "schemaDigest": "sha256:dac961e4b33c5224185ebb156bd4c5ab8922d7736533ad1d08caa6419e785497",
+        "scopes": [
+          "github:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
+      },
+      {
+        "name": "github.create_pull_request",
+        "description": "풀 리퀘스트를 엽니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "base": {
+              "type": "string",
+              "description": "Branch to merge into"
+            },
+            "body": {
+              "type": "string",
+              "description": "PR description"
+            },
+            "draft": {
+              "type": "boolean",
+              "description": "Create as draft PR"
+            },
+            "head": {
+              "type": "string",
+              "description": "Branch containing changes"
+            },
+            "maintainer_can_modify": {
+              "type": "boolean",
+              "description": "Allow maintainer edits"
+            },
+            "owner": {
+              "type": "string",
+              "description": "Repository owner"
+            },
+            "repo": {
+              "type": "string",
+              "description": "Repository name"
+            },
+            "reviewers": {
+              "type": "array",
+              "description": "GitHub usernames or ORG/team-slug team reviewers to request reviews from",
+              "items": {
+                "type": "string"
+              }
+            },
+            "title": {
+              "type": "string",
+              "description": "PR title"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "owner",
+            "repo",
+            "title",
+            "head",
+            "base"
+          ]
+        },
+        "schemaDigest": "sha256:17dbb4a6d18ce613943ce54ac938c1d477032e45cc95c32ee34c7a90fac96a4e",
+        "scopes": [
+          "github:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
+      },
+      {
+        "name": "github.issue_write",
+        "description": "이슈를 만들거나 고칩니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "assignees": {
+              "type": "array",
+              "description": "Usernames to assign to this issue",
+              "items": {
+                "type": "string"
+              }
+            },
+            "body": {
+              "type": "string",
+              "description": "Issue body content"
+            },
+            "duplicate_of": {
+              "type": "number",
+              "description": "Issue number that this issue is a duplicate of. Required when state_reason is 'duplicate'."
+            },
+            "issue_fields": {
+              "type": "array",
+              "description": "Issue field values to set or clear. Each item requires 'field_name' and exactly one of 'value', 'field_option_name', or 'delete: true'.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "delete": {
+                    "type": "boolean",
+                    "description": "Set to true to clear this field's current value on the issue. When false or omitted, this property is ignored. Cannot be true when 'value' or 'field_option_name' is provided."
+                  },
+                  "field_name": {
+                    "type": "string",
+                    "description": "Issue field name (case-insensitive). Must match a field returned by list_issue_fields for this repository or its organization."
+                  },
+                  "field_option_name": {
+                    "type": "string",
+                    "description": "Option name for single-select fields. Validated against the field's options before the API call. Cannot be combined with 'value' or 'delete: true'."
+                  },
+                  "value": {
+                    "type": "string",
+                    "description": "Value to set. Use for text, number, and date fields (date as YYYY-MM-DD). For single-select fields, prefer 'field_option_name' so the option is validated before the API call. Cannot be combined with 'field_option_name' or 'delete: true'."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "field_name"
+                ]
+              }
+            },
+            "issue_number": {
+              "type": "number",
+              "description": "Issue number to update"
+            },
+            "labels": {
+              "type": "array",
+              "description": "Labels to apply to this issue",
+              "items": {
+                "type": "string"
+              }
+            },
+            "method": {
+              "type": "string",
+              "description": "Write operation to perform on a single issue.\nOptions are:\n- 'create' - creates a new issue.\n- 'update' - updates an existing issue.\n",
+              "enum": [
+                "create",
+                "update"
+              ]
+            },
+            "milestone": {
+              "type": "number",
+              "description": "Milestone number"
+            },
+            "owner": {
+              "type": "string",
+              "description": "Repository owner"
+            },
+            "parent_issue_number": {
+              "type": "number",
+              "description": "Issue number of the parent issue. Only used when method is 'create' and cannot be combined with issue_fields. The new issue is created and attached to this parent in the same operation.",
+              "minimum": 1
+            },
+            "parent_owner": {
+              "type": "string",
+              "description": "Repository owner of the parent issue. Must be provided with parent_repo. Omit both to use owner and repo. Only used when method is 'create' and parent_issue_number is provided."
+            },
+            "parent_repo": {
+              "type": "string",
+              "description": "Repository name of the parent issue. Must be provided with parent_owner. Omit both to use owner and repo. Only used when method is 'create' and parent_issue_number is provided."
+            },
+            "repo": {
+              "type": "string",
+              "description": "Repository name"
+            },
+            "state": {
+              "type": "string",
+              "description": "New state",
+              "enum": [
+                "open",
+                "closed"
+              ]
+            },
+            "state_reason": {
+              "type": "string",
+              "description": "Reason for the state change. Ignored unless state is changed.",
+              "enum": [
+                "completed",
+                "not_planned",
+                "duplicate"
+              ]
+            },
+            "title": {
+              "type": "string",
+              "description": "Issue title"
+            },
+            "type": {
+              "type": "string",
+              "description": "Type of this issue. For updates, pass null to remove the current type. Only use if issue types are enabled for this repository. Use list_issue_types to get valid type values for this repository or its owner organization. If the repository doesn't support issue types, omit this parameter.",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "method",
+            "owner",
+            "repo"
+          ]
+        },
+        "schemaDigest": "sha256:c8e80945ca4fcfd000896020117515fd7c9914bcc671f4c744ee0afbfcf6a769",
+        "scopes": [
+          "github:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
+      },
+      {
+        "name": "github.pull_request_review_write",
+        "description": "풀 리퀘스트 리뷰를 만들고 제출합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "body": {
+              "type": "string",
+              "description": "Review comment text"
+            },
+            "commitID": {
+              "type": "string",
+              "description": "SHA of commit to review"
+            },
+            "event": {
+              "type": "string",
+              "description": "Review action to perform.",
+              "enum": [
+                "APPROVE",
+                "REQUEST_CHANGES",
+                "COMMENT"
+              ]
+            },
+            "method": {
+              "type": "string",
+              "description": "The write operation to perform on pull request review.",
+              "enum": [
+                "create",
+                "submit_pending",
+                "delete_pending",
+                "resolve_thread",
+                "unresolve_thread"
+              ]
+            },
+            "owner": {
+              "type": "string",
+              "description": "Repository owner"
+            },
+            "pullNumber": {
+              "type": "number",
+              "description": "Pull request number"
+            },
+            "repo": {
+              "type": "string",
+              "description": "Repository name"
+            },
+            "threadId": {
+              "type": "string",
+              "description": "The node ID of the review thread (e.g., PRRT_kwDOxxx). Required for resolve_thread and unresolve_thread methods. Get thread IDs from pull_request_read with method get_review_comments."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "method",
+            "owner",
+            "repo",
+            "pullNumber"
+          ]
+        },
+        "schemaDigest": "sha256:a240efa89d83d302653e7b98f3dfab4fce6ad0c5bb9154208987927647f4b4ad",
+        "scopes": [
+          "github:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
+      },
+      {
+        "name": "github.sub_issue_write",
+        "description": "하위 이슈를 추가하거나 순서를 바꿉니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "after_id": {
+              "type": "number",
+              "description": "The ID of the sub-issue to be prioritized after (either after_id OR before_id should be specified)"
+            },
+            "before_id": {
+              "type": "number",
+              "description": "The ID of the sub-issue to be prioritized before (either after_id OR before_id should be specified)"
+            },
+            "issue_number": {
+              "type": "number",
+              "description": "The number of the parent issue"
+            },
+            "method": {
+              "type": "string",
+              "description": "The action to perform on a single sub-issue\nOptions are:\n- 'add' - add a sub-issue to a parent issue in a GitHub repository.\n- 'remove' - remove a sub-issue from a parent issue in a GitHub repository.\n- 'reprioritize' - change the order of sub-issues within a parent issue in a GitHub repository. Use"
+            },
+            "owner": {
+              "type": "string",
+              "description": "Repository owner"
+            },
+            "replace_parent": {
+              "type": "boolean",
+              "description": "When true, replaces the sub-issue's current parent issue. Use with 'add' method only."
+            },
+            "repo": {
+              "type": "string",
+              "description": "Repository name"
+            },
+            "sub_issue_id": {
+              "type": "number",
+              "description": "The ID of the sub-issue to add. ID is not the same as issue number"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "method",
+            "owner",
+            "repo",
+            "issue_number",
+            "sub_issue_id"
+          ]
+        },
+        "schemaDigest": "sha256:2ae08e269bc6997f7457b0e06bbb2a40a1fc08ceb5bf2cc59cbf7b37eab13462",
+        "scopes": [
+          "github:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
+      },
+      {
+        "name": "github.update_issue_comment",
+        "description": "내가 쓴 이슈 댓글을 고칩니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "body": {
+              "type": "string",
+              "description": "New comment content",
+              "minLength": 1
+            },
+            "comment_id": {
+              "type": "integer",
+              "description": "The numeric ID of the issue or pull request conversation comment to update. Do not use a pull request review comment ID.",
+              "minimum": 1
+            },
+            "owner": {
+              "type": "string",
+              "description": "Repository owner"
+            },
+            "repo": {
+              "type": "string",
+              "description": "Repository name"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "owner",
+            "repo",
+            "comment_id",
+            "body"
+          ]
+        },
+        "schemaDigest": "sha256:7f1fbcab6b07b76e5d527306cbfacb960b5b768aa4b80ead87f01fbbb6372c2f",
+        "scopes": [
+          "github:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
+      },
+      {
+        "name": "github.update_pull_request",
+        "description": "풀 리퀘스트의 제목, 본문, 상태를 고칩니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "base": {
+              "type": "string",
+              "description": "New base branch name"
+            },
+            "body": {
+              "type": "string",
+              "description": "New description"
+            },
+            "draft": {
+              "type": "boolean",
+              "description": "Mark pull request as draft (true) or ready for review (false)"
+            },
+            "maintainer_can_modify": {
+              "type": "boolean",
+              "description": "Allow maintainer edits"
+            },
+            "owner": {
+              "type": "string",
+              "description": "Repository owner"
+            },
+            "pullNumber": {
+              "type": "number",
+              "description": "Pull request number to update"
+            },
+            "repo": {
+              "type": "string",
+              "description": "Repository name"
+            },
+            "reviewers": {
+              "type": "array",
+              "description": "GitHub usernames or ORG/team-slug team reviewers to request reviews from",
+              "items": {
+                "type": "string"
+              }
+            },
+            "state": {
+              "type": "string",
+              "description": "New state",
+              "enum": [
+                "open",
+                "closed"
+              ]
+            },
+            "title": {
+              "type": "string",
+              "description": "New title"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "owner",
+            "repo",
+            "pullNumber"
+          ]
+        },
+        "schemaDigest": "sha256:32db36cde729cda3d778050e1c27f370f11c5b1995493eb7c6774127d9504716",
+        "scopes": [
+          "github:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
       }
     ]
   },
@@ -74,10 +2059,44 @@
   },
   "momo": {
     "approvalTier": {
-      "github.list_repositories": "read_only",
-      "github.search_issues": "read_only"
+      "github.get_commit": "read_only",
+      "github.get_file_contents": "read_only",
+      "github.get_label": "read_only",
+      "github.get_latest_release": "read_only",
+      "github.get_me": "read_only",
+      "github.get_release_by_tag": "read_only",
+      "github.get_tag": "read_only",
+      "github.get_team_members": "read_only",
+      "github.get_teams": "read_only",
+      "github.issue_read": "read_only",
+      "github.list_branches": "read_only",
+      "github.list_commits": "read_only",
+      "github.list_issue_fields": "read_only",
+      "github.list_issue_types": "read_only",
+      "github.list_issues": "read_only",
+      "github.list_pull_requests": "read_only",
+      "github.list_releases": "read_only",
+      "github.list_repository_collaborators": "read_only",
+      "github.list_tags": "read_only",
+      "github.pull_request_read": "read_only",
+      "github.search_code": "read_only",
+      "github.search_commits": "read_only",
+      "github.search_issues": "read_only",
+      "github.search_pull_requests": "read_only",
+      "github.search_repositories": "read_only",
+      "github.search_users": "read_only",
+      "github.add_comment_to_pending_review": "network_write",
+      "github.add_issue_comment": "network_write",
+      "github.add_reply_to_pull_request_comment": "network_write",
+      "github.create_branch": "network_write",
+      "github.create_pull_request": "network_write",
+      "github.issue_write": "network_write",
+      "github.pull_request_review_write": "network_write",
+      "github.sub_issue_write": "network_write",
+      "github.update_issue_comment": "network_write",
+      "github.update_pull_request": "network_write"
     },
-    "risk": "low",
+    "risk": "medium",
     "egressDomains": [
       "api.githubcopilot.com"
     ],
