@@ -995,6 +995,19 @@ describe("앱 화면 v2: 도구 등급 R · A · B (E4)", () => {
     expect(q(el, "plugin-setup-note")).toBeNull();
   });
 
+  it("한 번 설치된 팀 공유 드라이브(꺼진 상태 포함)는 단추를 접지 않는다: 서버 설정은 이미 끝난 앱이다", async () => {
+    h.probe.mockResolvedValue([405, 405]);
+    h.role = "owner";
+    const catalog = JSON.parse(JSON.stringify(catalogWire)) as { plugins: Array<Record<string, unknown>> };
+    Object.assign(catalog.plugins.find((plugin) => plugin.pluginId === DRIVE) ?? {}, { installed: true, enabled: false });
+    h.catalog = catalog;
+    const el = await mount();
+    await openDetail(el, DRIVE);
+    await until(() => writeControls(el).length > 0);
+    expect(writeControls(el)).toEqual(["다시 활성화"]);
+    expect(q(el, "plugin-setup-note")).toBeNull();
+  });
+
   it("읽기 도구만 있는 앱(팀 공유 드라이브)의 설명은 R만 말한다", async () => {
     const el = await mount();
     await openDetail(el, DRIVE);

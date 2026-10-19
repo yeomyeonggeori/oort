@@ -635,8 +635,9 @@ function PluginDetailPanel({
 
   const scopes = declaredPluginScopes(detail.tools);
   const activeScopes = activePluginScopes(detail.tools, policyTools);
-  // 설치할 수 없는 앱의 설치 단추만 접는다. 이미 설치돼 켜진 앱의 허용·회수·해제는 그대로 선다.
-  const setupFirst = pluginNeedsAdminSetup(plugin.pluginId) && !(plugin.installed && plugin.enabled);
+  // 설치할 수 없는 앱의 설치 단추만 접는다. 한 번이라도 설치된 앱(꺼진 앱 포함)은 서버 설정이 이미 끝난
+  // 앱이라 「다시 활성화」·허용·회수·해제를 그대로 둔다.
+  const setupFirst = pluginNeedsAdminSetup(plugin.pluginId) && !plugin.installed;
   const allowedToolNames = new Set(policyTools.map((tool) => tool.name));
   const hasPublisherInfo = Boolean(
     detail.publisherName || detail.license || detail.provenanceURL
