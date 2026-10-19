@@ -18,6 +18,7 @@ import { IS_TAURI } from "@/lib/env";
 import { openExternalUrl } from "@/lib/tauri";
 import { rosterQueryKey } from "@/features/workspace/useWorkspace";
 import { AiLineRow, AiSection, AiSectionHead } from "./aiAccountsParts";
+import { ModelLoginPanel } from "./ModelLoginPanel";
 
 // Reading this as: settings › AI 연결 card (instance operator only) for internal team users on
 // web+Tauri, density 6/10, motion 1/10.
@@ -127,6 +128,7 @@ function CardBody({
     <AiSection labelledBy={HEADING_ID} testId="ai-cohosted">
       <AiSectionHead id={HEADING_ID} title={COPY.title} scope="이 서버" locked />
       {connected !== null ? (
+        <>
         <div ref={doneRef} tabIndex={-1} className="focus-visible:focus-ring" data-testid="ai-cohosted-connected">
           <AiLineRow
             last
@@ -144,6 +146,9 @@ function CardBody({
             <span className="text-meta text-ink-muted">{COPY.volumeNote}</span>
           </AiLineRow>
         </div>
+        {/* #4080: 연결된 Hermes의 모델 인증(운영자만, 서버 답이 보임을 정한다). */}
+        <ModelLoginPanel workspaceId={workspaceId} agentId={connected} offline={offline} />
+        </>
       ) : !status.toolsLockAttested ? (
         <AiLineRow last testId="ai-cohosted-checklist-row">
           <span>{COPY.checklistLead}</span>

@@ -1470,7 +1470,7 @@ describe('모든 화면이 scrollProps 를 펼친다 (소스 스캔, src 전수)
   const callers = users.filter(u => /\busePullRefresh\((?!\))/.test(u.text));
   const RENDERS_NOTICE = /\{notice\}|:\s*\(?\s*notice\s*\)?\s*\}|notice=\{notice\}/;
 
-  it('스캔이 훅을 부르는 일곱 화면을 모두 찾는다', () => {
+  it('스캔이 훅을 부르는 여덟 화면을 모두 찾는다', () => {
     expect(callers.map(u => u.rel).sort()).toEqual(
       [
         'src/screens/InboxScreen.tsx',
@@ -1480,6 +1480,7 @@ describe('모든 화면이 scrollProps 를 펼친다 (소스 스캔, src 전수)
         'src/screens/TeamBoardScreen.tsx',
         'src/screens/HostedConnectionsScreen.tsx',
         'src/screens/WorkSessionDetailScreen.tsx',
+        'src/screens/AppsScreen.tsx', // U-4 #3951
       ].sort(),
     );
   });

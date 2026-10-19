@@ -21,6 +21,7 @@ import { AgentCredentialsSection } from "@/features/settings/AgentCredentialsSec
 import { EventSubscriptionSection } from "@/features/settings/EventSubscriptionSection";
 import { SectionHeadingContext } from "@/features/settings/SettingsFields";
 import { WebhookSection } from "@/features/settings/WebhookSection";
+import { GithubPane } from "@/features/github/GithubPane";
 import { PersonalAssistantsList } from "@/features/hostedAgents/PersonalAssistantsList";
 import { HUB_CHIP_TONE } from "./AiHubOverview";
 import type { AppsRead, ChipTone, ExternalInput, Read } from "./aiHubOverviewModel";
@@ -64,7 +65,9 @@ function countChip(row: AiExternalRow, read: AppsRead | null): { text: string; t
   return null;
 }
 
-function readFor(id: AiExternalRowId, input: ExternalInput, hostedBots: Read<number>): AppsRead {
+function readFor(id: AiExternalRowId, input: ExternalInput, hostedBots: Read<number>): AppsRead | null {
+  // 「GitHub 알림」 줄은 세는 것이 없다(`countNoun: null`): 칩도 읽기도 없다.
+  if (id === "github") return null;
   return id === "hostedBotInvite" ? hostedBots : input[id];
 }
 
@@ -126,7 +129,12 @@ function Index() {
       <ul className="flex min-w-0 flex-col" aria-label={glossaryEntry("externalConnection").term}>
         {/* 서버가 앱 목록을 싣지 않으면 「앱」 줄은 접힌다(#3860). 열면 접힌 화면만 만나는 진입점은
             세우지 않는다. 같은 서버가 「읽지 못했어요」를 말하는 것도 거짓이라 칩도 함께 빠진다. */}
-        {AI_EXTERNAL_ROWS.filter((row) => row.id !== "apps" || input.apps.state !== "absent").map((row) => (
+        {AI_EXTERNAL_ROWS.filter(
+          (row) =>
+            (row.id !== "apps" || input.apps.state !== "absent") &&
+            // 서버가 GitHub 알림을 싣지 않으면 막다른 진입점을 세우지 않는다(#3955).
+            (row.id !== "github" || isSurfaceProvided("githubNotifications"))
+        ).map((row) => (
           <RowItem key={row.id} row={row} input={input} hostedBots={hostedBots} restoreFocus={from === row.id} />
         ))}
       </ul>
@@ -211,6 +219,14 @@ export function AiExternalPane({ offline, workspaceId, memberId }: PaneProps) {
     <Routes>
       <Route index element={<Index />} />
       <Route path="apps" element={<AppsDetail offline={offline} />} />
+      <Route
+        path="github"
+        element={
+          <Detail id="github" quiet={!isSurfaceProvided("githubNotifications")}>
+            <GithubPane workspaceId={workspaceId} memberId={memberId} offline={offline} />
+          </Detail>
+        }
+      />
       <Route
         path="incoming"
         element={

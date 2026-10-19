@@ -17,13 +17,21 @@ import {
   containsSecretKey,
   SECRET_KEY_BLOCK_COPY,
 } from '@momo/core/features/chat/secretKey';
-import type {Command, LocalCardArgs} from '@momo/core/features/commands/registry';
+import {
+  slashCommands,
+  type Command,
+  type LocalCardArgs,
+} from '@momo/core/features/commands/registry';
 import {
   parseSlashCommand,
   slashCandidates,
   slashCommandById,
   type SlashCandidate,
 } from '@momo/core/features/commands/slash';
+
+// 폰의 슬래시 목록. `/앱`처럼 폰에 갈 화면이 아직 없는 명령은 서지 않는다(#3950).
+// 서버 표면 판정은 부르는 때 읽는다(앱 기동 중 호스트가 설치되기 전에 굳지 않게).
+const phoneSlashCommands = () => slashCommands({platform: 'phone'});
 import type {Directory} from '@momo/core/features/workspace/directory';
 import {composerAgentNotice, mentionAnnotation} from '@momo/core/features/ai/aiMention';
 import {calledAgents, mentionRoutingTarget} from '@momo/core/features/routing/mentionTargets';
@@ -1180,7 +1188,7 @@ export function Composer({
     () =>
       slashQuery === null
         ? []
-        : slashCandidates(slashQuery, undefined, undefined, {
+        : slashCandidates(slashQuery, phoneSlashCommands(), undefined, {
             cardAvailable: true,
           }).filter(isPhoneSlashRow),
     [slashQuery],
@@ -1341,7 +1349,7 @@ export function Composer({
 
   const acceptSlash = useCallback(
     (row: SlashCandidate) => {
-      const command = slashCommandById(row.commandId);
+      const command = slashCommandById(row.commandId, phoneSlashCommands());
       if (command === null) return;
       runCommand(command, row.args);
     },
@@ -1355,7 +1363,7 @@ export function Composer({
     () =>
       onSlashCommand === undefined || hasAttachmentDrafts
         ? null
-        : parseSlashCommand(text),
+        : parseSlashCommand(text, phoneSlashCommands()),
     [onSlashCommand, hasAttachmentDrafts, text],
   );
 

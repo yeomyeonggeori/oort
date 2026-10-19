@@ -148,10 +148,13 @@ export type SurfaceId =
   | "agentRunHistory"
   | "plugins"
   | "pluginInstall"
+  | "pluginDriveTeam"
   | "teamMemory"
   | "messageSearch"
   | "hostedAgentPairing"
-  | "settingsOpenCard";
+  | "settingsOpenCard"
+  | "appsUsedTail"
+  | "githubNotifications";
 
 /** Workd/T3 데몬을 전제하는 표면. 셀프호스트 기본은 모두 숨긴다 (ADR-0183 D4-② · #2166). */
 export const WORK_SURFACE_IDS: readonly SurfaceId[] = [
@@ -442,6 +445,28 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
       "clients/web의 pluginRoutes.test.ts가 라우터 소스를 읽어 못으로 박는다. " +
       "원문과 사보타주는 docs/planning/ENGINE_HANDOFF.md의 X-P3.",
   },
+  pluginDriveTeam: {
+    id: "pluginDriveTeam",
+    label: "팀 공유 드라이브",
+    // #3949(ADR-0113 증보 2 E2·E4, 경로 C): 팀 공유 드라이브 앱(`com.momo.plugins.drive`)의 연결은
+    // oort 서버가 서비스 계정으로 들고 있고, 앱이 부르는 주소는 이 서버의 `/v1/mcp/drive`다.
+    // 그 경로가 서 있고 서비스 계정이 설정돼야 「팀 전체 · oort가 읽어요」가 참이다. 둘 중 하나라도
+    // 없으면 칩은 숨고 「관리자 설정이 필요해요」가 선다 — 있는 것처럼 보이는 칩이 이 줄이 막는 거짓말이다.
+    //
+    // 이 값은 `pluginInstall`처럼 **런타임에 재지 못한다**. 경로가 있어도 서비스 계정이 비어 있는지는
+    // 클라이언트가 볼 수 있는 신호가 없다(E-5가 올라오면 서버가 그 사실을 실어야 한다). 그래서 지금은
+    // 이 코드베이스의 서버가 경로를 싣는가만 말하고, 칸이 참이 되는 날도 `runtime-unverified`다.
+    provided: false,
+    absentReason: "팀 공유 드라이브는 관리자 설정이 필요해요.",
+    fallback: "관리자 설정이 필요해요",
+    measured:
+      "2026-10-19 실측(#3949): server-rust/bins/momo-server/src/lib.rs 라우터에 /v1/mcp/drive 등록이 " +
+      "없다(origin/track/engine도 같다). 그 문자열은 server-rust/crates/momo-auth/src/agent_scope.rs:17의 " +
+      "문서 주석(「아직 마운트되지 않은 표면」)과 338행의 「scope 없음」 시험에만 있다(ADR-0113 증보 2 E2 표: " +
+      "「Rust에 아직 없다」). 매니페스트 시드의 mcp.url은 " +
+      "/v1/mcp/drive로 이미 들어가 있다(#3944). E-5가 경로를 올리고 서비스 계정 설정 여부를 응답에 " +
+      "싣는 날 이 줄을 뒤집는다. 그때까지 runtime-unverified.",
+  },
   teamMemory: {
     id: "teamMemory",
     label: "팀 기억",
@@ -500,6 +525,20 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
       "같은 자리에 등록돼 있고, HAP-UX2(#1362)가 에이전트 화면의 연결 탭에서 그 셋을 연다. " +
       "일곱 경로가 한 배포로 함께 오르므로 이 칸 하나가 둘 다를 판정한다.",
   },
+  appsUsedTail: {
+    id: "appsUsedTail",
+    label: "쓴 앱 꼬리",
+    // #3950(ADR-0113 증보 2 E8): 에이전트 답의 「쓴 앱」 꼬리는 run 상세의 `appsUsed`를 읽는다.
+    // 이 칸이 거짓이 되는 날은 서버가 그 키를 거두는 날뿐이고, 그날 꼬리는 숨고 답 본문만 남는다.
+    // 필드가 없는 옛 서버는 run 상세에 키가 없어서 같은 모양으로 꼬리가 없다(조회만 한 번 헛든다).
+    provided: true,
+    absentReason: "이 서버는 아직 에이전트가 쓴 앱을 알려 주지 않아요.",
+    fallback: "에이전트의 답 본문은 그대로 볼 수 있어요.",
+    measured:
+      "2026-10-18 실측(#3946 PR #4035): GET …/agent-runs/{run} 응답에 최상위 appsUsed " +
+      "([{pluginId, tool, calls}], 보고가 없으면 키 없음)가 더해짐. 서버 규칙은 " +
+      "server-rust/bins/momo-server/src/routes/apps_used.rs, 클라이언트는 appsUsedFromWire가 같은 규칙으로 읽는다.",
+  },
   settingsOpenCard: {
     id: "settingsOpenCard",
     label: "설정 열기 카드",
@@ -514,6 +553,26 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
       "2026-10-18 실측(#3939 PR #4028): server-rust/crates/momo-agent/src/card_suggest.rs " +
       "SUGGESTABLE_COMMANDS에 settings.open이 있고, 허용목록 네 곳(레지스트리·hosted enum·" +
       "worker enum·OpenAPI SuggestableCommandId)이 한 시험으로 같다.",
+  },
+  githubNotifications: {
+    id: "githubNotifications",
+    label: "GitHub 알림",
+    // #3955(U-GH1, ADR-0205 D10): 채널 ⋮ › GitHub 알림, AI › 외부 연결 › GitHub 알림, 「앱」 카드의 알림 얼굴.
+    // 이 칸은 **이 코드베이스의 서버가 경로를 싣는가**를 말한다. 아직 배포되지 않은 서버에 붙으면
+    // `GET …/github`가 404/405/501로 오고 `serverSaysAbsent` 폴딩이 이 문구를 쓴다(진입점이
+    // 먼저 서 있다가 첫 읽기에서 접힌다). 키가 없는 서버는 503이고, 그건 「없다」가 아니라
+    // 「운영자가 설정을 마쳐야 한다」라 별도 문장을 쓴다(`isGithubUnavailable`).
+    provided: true,
+    absentReason: "이 서버는 아직 GitHub 알림을 받지 않아요.",
+    fallback: "저장소 소식은 GitHub에서 직접 보거나, 채널로 들어오는 주소(웹훅)로 받을 수 있어요.",
+    measured:
+      "2026-10-19 PR #4070(#3954) 소스 대조(runtime-unverified, 이 트리에는 엔진이 없다): " +
+      "server-rust/bins/momo-server/src/lib.rs에 GET/PUT …/integrations/github/app, " +
+      "POST …/github/app/manifest, GET …/github/installations, " +
+      "POST …/github/installations/{installation}/link, GET …/workspaces/{ws}/github, " +
+      "POST …/github/link, POST …/github/subscriptions, DELETE …/github/subscriptions/{subscription}가 " +
+      "등록됨. 공개 경로는 GET …/github/app/callback, GET …/github/setup, POST …/github/webhook. " +
+      "엔진이 이 트리에 들어오면 라우트 소스 시험으로 박는다.",
   },
 };
 

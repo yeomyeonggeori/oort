@@ -317,6 +317,7 @@ export function useChannelActions({
         sectionCount: onMoveToSection ? sections?.length ?? 0 : 0,
         canStar: Boolean(onToggleStar),
         hasMemorySettings: isSurfaceProvided("teamMemory"),
+        hasGithubNotifications: isSurfaceProvided("githubNotifications"),
         // 투영이 있고, 다 읽었고, 메시지가 하나라도 있을 때만(빈 채널에는 표시할 메시지가 없다).
         canMarkUnread:
           readState != null &&
@@ -408,6 +409,7 @@ export function useChannelActions({
         return;
       case "topic":
       case "memory":
+      case "github":
       case "leave":
       case "move-to-section":
         // 다이얼로그로 넘어가는 항목과 무리 항목은 표면이 자기 복귀를 챙긴다.

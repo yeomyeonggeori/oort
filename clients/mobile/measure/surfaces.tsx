@@ -52,6 +52,7 @@ import {
   RecoveryDivider,
   rowPressedBackground,
   UnreadDivider,
+  WorkingRow,
 } from '../src/features/conversation/MessageRow';
 import {MissedDigestCardView} from '../src/features/memory/MissedDigestCard';
 import {MemoryDigestSheet} from '../src/features/memory/MemoryDigestSheet';
@@ -178,6 +179,8 @@ import {PullProbe} from './pullProbe';
 import {PullHold} from './pullHold';
 import {PullRefreshSurface} from './pullRefresh';
 import {DmConversationSurface} from './dmConversation';
+import {AppsSurface} from './apps';
+import {AppsTailSurface} from './appsTail';
 import {OortLoaderSurface} from './oortLoader';
 import TeamBoardScreen from '../src/screens/TeamBoardScreen';
 import WorkJobsScreen from '../src/screens/WorkJobsScreen';
@@ -2115,6 +2118,14 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   if (name.startsWith('device-key-')) {
     return <DeviceKeySurface which={name.slice('device-key-'.length)} />;
   }
+  // #3951: 폰 「앱」 읽기 화면(목록·상세·네 상태).
+  if (name.startsWith('apps-') && !name.startsWith('apps-tail')) {
+    return <AppsSurface which={name.slice('apps-'.length)} />;
+  }
+  // #3950: 「쓴 앱」 꼬리·막힘 문장(실제 MessageRow).
+  if (name.startsWith('apps-tail')) {
+    return <AppsTailSurface which={name.slice('apps-tail'.length).replace(/^-/, '')} />;
+  }
   // #4016: DM 대화 화면(실제 머리·레이아웃·타임라인·컴포저).
   if (name.startsWith('dm-conversation')) {
     return <DmConversationSurface which={name.slice('dm-conversation'.length).replace(/^-/, '')} />;
@@ -2529,6 +2540,43 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     // `buzz-channel`: 같은 저자의 짧은 연속 발화 셋(머리 하나, 시각 칸 없음).
     // `buzz-dm`: 두 사람의 DM — 반응이 달린 연속 발화·긴 문단·저자 교대.
     // `buzz-sheet`: 연속 행을 길게 눌렀을 때 시트 머리에 그 메시지의 시각이 선다.
+    // ---- #4065: 이름 옆 「에이전트」 배지 제거 ----------------------------------
+    //
+    // 에이전트의 머리 행·이어지는 행·「작업 중」 자리를 한 장에 세운다. 이름 줄은
+    // 한 줄(이름 · 핸들 · 책임자 · 시각)이고 둘째 낱말 「에이전트」가 없다. 낭독 쪽은
+    // jest(`timelineRender`)가 라벨로 잰다.
+    case 'agent-name-line': {
+      const at = (min: number) => NOW - (14 - min) * 60_000;
+      const rows: Array<{who: string; body: string; min: number; head: boolean}> = [
+        {who: SELF, head: true, min: 0, body: '이번 주 일정 정리해 줘'},
+        {who: AGENT, head: true, min: 1, body: '이번 주는 화요일 오전 10시 팀 회의, 목요일 오후 3시 고객 통화가 있어요.'},
+        {who: AGENT, head: false, min: 2, body: '금요일은 비어 있어요. 필요하면 회고 시간을 잡아 둘까요?'},
+        {who: SELF, head: true, min: 3, body: '응, 금요일 오후로 잡아 줘'},
+      ];
+      return (
+        <Frame label="에이전트 이름 줄 — 「에이전트」 배지 없음 (#4065)">
+          {rows.map((r, i) => (
+            <MessageRow
+              key={i}
+              message={{
+                ...MESSAGE,
+                id: `agent-name-${i}`,
+                seq: 80 + i,
+                authorMemberId: r.who,
+                body: r.body,
+                createdAtMs: at(r.min),
+                thread: undefined,
+              } as unknown as Message}
+              startsGroup={r.head}
+              directory={DIRECTORY}
+              chips={[]}
+              nowMs={NOW}
+            />
+          ))}
+          <WorkingRow memberId={AGENT} directory={DIRECTORY} />
+        </Frame>
+      );
+    }
     case 'buzz-channel': {
       const at = (min: number) => NOW - (14 - min) * 60_000;
       const lines = ['ㅎㅇ', '@claude-code ㅎㅇ', 'ㅎㅇㅎㅇ'];
@@ -4511,6 +4559,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             onDelegate={() => {}}
             onOpenAgentList={() => {}}
             onAskMac={() => {}}
+            onOpenApps={() => {}}
             gateOpen={name !== 'shell-ai-off'}
           />
         </View>
@@ -4526,6 +4575,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             onDelegate={() => {}}
             onOpenAgentList={() => {}}
             onAskMac={() => {}}
+            onOpenApps={() => {}}
           />
         </View>
       );

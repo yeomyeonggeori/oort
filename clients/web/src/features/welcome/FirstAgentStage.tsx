@@ -121,6 +121,7 @@ import {
   OnboardingFrame,
 } from "@/features/onboarding/guide/OnboardingFrame";
 import { isDefaultWelcomeChannel } from "./welcomeKickoff";
+import { CohostedModelLogin } from "@/features/settings/ModelLoginPanel";
 import { AiConnectList } from "./AiConnectList";
 import { HarnessLoginDialog, type HarnessLoginFixture } from "./harnessLogin/HarnessLoginDialog";
 import { SubscriptionConnectBlock } from "./SubscriptionConnectBlock";
@@ -1224,6 +1225,7 @@ export function FirstAgentStage({
                 <span>{AI_CONNECT_BOUNDARY_NOTE}</span>
               </p>
             )}
+            <CohostedModelLogin workspaceId={workspaceId} offline={showOffline} />
             <div className="ai-connect-actions">
               <Button
                 type="button"

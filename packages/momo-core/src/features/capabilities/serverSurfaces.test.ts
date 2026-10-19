@@ -79,6 +79,8 @@ describe("표면 판정표", () => {
       "ade",
       "huddles",
       "pluginInstall",
+      // #3949: 팀 공유 드라이브의 /v1/mcp/drive는 Rust에 없다(E-5). 칩이 숨고 「관리자 설정이 필요해요」가 선다.
+      "pluginDriveTeam",
     ] as const) {
       expect(isSurfaceProvided(id)).toBe(false);
     }
@@ -224,5 +226,15 @@ describe("앱 설치 탐지 (#3860, ADR-0113 증보 P3)", () => {
   it("앱 보기 줄의 라벨은 사용자가 부르는 이름 「앱」이다", () => {
     // 「앱 보기」는 설치와 갈라 읽기만 말하려는 표면 이름이고 화면에 나가지 않는다.
     expect(serverSurface("plugins").label).toBe("앱");
+  });
+});
+
+describe("팀 공유 드라이브 표면 (#3949, ADR-0113 증보 2 E2·E4)", () => {
+  it("경로가 서 있지 않은 동안 꺼져 있고, 화면이 쓰는 말은 관리자 설정이다", () => {
+    const row = serverSurface("pluginDriveTeam");
+    expect(row.provided).toBe(false);
+    expect(row.fallback).toBe("관리자 설정이 필요해요");
+    // 서비스 계정이 비었는지는 클라이언트가 볼 수 없다: 실측 칸이 그 사실을 숨기지 않는다.
+    expect(row.measured).toContain("runtime-unverified");
   });
 });

@@ -169,6 +169,19 @@ export type HostedNav =
   | {kind: 'list'}
   | {kind: 'detail'; connection: OpenHostedConnection};
 
+/**
+ * 「앱」 읽기 층 — AI 시트의 「앱」 줄이 여는 목록, 그 목록이 여는 상세 (U-4 #3951).
+ *
+ * 호스티드 연결과 같은 한 필드 두 겹이다: 목록과 상세는 push 관계라 뒤로가기가 상세→목록→
+ * 닫힘으로 한 겹씩 벗겨진다. 이 층에는 설치·허용이 없다(폰은 읽기와 승인만, plans 2.6).
+ * `name` 을 상세가 들고 오는 이유는 `OpenHostedConnection.title` 과 같다: 머리가 목록을
+ * 다시 읽을 때마다 깜빡이지 않게.
+ */
+export type AppsNav =
+  | null
+  | {kind: 'list'}
+  | {kind: 'detail'; pluginId: string; name: string};
+
 export interface NavState {
   tab: Tab;
   /** Pushed over the whole shell, or null when the tabs are visible. */
@@ -207,6 +220,11 @@ export interface NavState {
    * 보기)가 서로를 덮지 않게 하는 규칙이다.
    */
   hosted: HostedNav;
+  /**
+   * 「앱」 읽기 — AI 시트가 여는 목록/상세 (U-4 #3951). agent·workSession·hosted 와 **배타적**이다.
+   * 에이전트 쪽 층이 열리면 이 층은 닫히고, 이 층이 열리면 그쪽이 닫힌다.
+   */
+  apps: AppsNav;
 }
 
 /** 탭 위에 아무 층도 없는 상태. 탭 전환과 알림 입구가 이것으로 시작한다. */
@@ -217,6 +235,7 @@ const NO_LAYERS = {
   workList: false,
   workSession: null,
   hosted: null,
+  apps: null,
 } as const;
 
 export const INITIAL_NAV: NavState = {
@@ -237,6 +256,8 @@ export type NavAction =
   | {type: 'openWorkSession'; workSession: OpenWorkSession}
   | {type: 'openHostedList'}
   | {type: 'openHostedConnection'; connection: OpenHostedConnection}
+  | {type: 'openAppsList'}
+  | {type: 'openApp'; pluginId: string; name: string}
   | {type: 'back'}
   | {type: 'reset'};
 
@@ -247,7 +268,8 @@ function hasLayers(state: NavState): boolean {
     state.agent !== null ||
     state.workList ||
     state.workSession !== null ||
-    state.hosted !== null
+    state.hosted !== null ||
+    state.apps !== null
   );
 }
 
@@ -313,6 +335,7 @@ export function navReducer(state: NavState, action: NavAction): NavState {
         workList: false,
         workSession: null,
         hosted: null,
+        apps: null,
       };
     case 'openAgent':
       return {
@@ -324,6 +347,7 @@ export function navReducer(state: NavState, action: NavAction): NavState {
         agent: action.agent,
         workSession: null,
         hosted: null,
+        apps: null,
       };
     case 'openWorkList':
       // 열려 있던 대화도 걷는다: 「작업 맡기기」가 DM 머리에서 접수되면(#3588) 보드가 그 대화
@@ -336,6 +360,7 @@ export function navReducer(state: NavState, action: NavAction): NavState {
         workList: true,
         workSession: null,
         hosted: null,
+        apps: null,
       };
     case 'openWorkSession':
       return {
@@ -343,6 +368,7 @@ export function navReducer(state: NavState, action: NavAction): NavState {
         agent: null,
         workSession: action.workSession,
         hosted: null,
+        apps: null,
       };
     case 'openHostedList':
       // The list is a sibling of 「one agent」 reached from the same list, so it
@@ -352,11 +378,21 @@ export function navReducer(state: NavState, action: NavAction): NavState {
         agent: null,
         workSession: null,
         hosted: {kind: 'list'},
+        apps: null,
       };
     case 'openHostedConnection':
       // Opened FROM the list: the list stays the layer beneath, so 뒤로 from the
       // detail returns to it rather than out to the tab.
       return {...state, hosted: {kind: 'detail', connection: action.connection}};
+    case 'openAppsList':
+      // AI 시트에서 연다. 시트는 층이 없는 탭 위에서만 열리지만, 그래도 에이전트 쪽 층은 새로 시작한다.
+      return {...state, ...NO_LAYERS, apps: {kind: 'list'}};
+    case 'openApp':
+      // 목록에서 연다: 목록이 밑에 남아 뒤로가 상세만 벗긴다.
+      return {
+        ...state,
+        apps: {kind: 'detail', pluginId: action.pluginId, name: action.name},
+      };
     case 'back':
       // One step at a time, innermost first: a conversation opened FROM a search
       // result (or from an agent's own screen) goes back to where it was opened
@@ -366,6 +402,9 @@ export function navReducer(state: NavState, action: NavAction): NavState {
       // the same one-step-at-a-time the 작업 detail gets over its list.
       if (state.hosted?.kind === 'detail') return {...state, hosted: {kind: 'list'}};
       if (state.hosted?.kind === 'list') return {...state, hosted: null};
+      // 앱 상세도 같다: 목록으로 한 걸음, 그다음에 목록이 닫힌다.
+      if (state.apps?.kind === 'detail') return {...state, apps: {kind: 'list'}};
+      if (state.apps?.kind === 'list') return {...state, apps: null};
       if (state.agent !== null) return {...state, agent: null};
       if (state.workSession !== null) return {...state, workSession: null};
       if (state.agentList) return {...state, agentList: false};
