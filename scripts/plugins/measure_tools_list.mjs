@@ -40,7 +40,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
 const OUT_DIR = process.env.MEASURE_OUT_DIR || path.join(os.homedir(), '.cache', 'momo-scratch', '3944-measure');
-const GOOGLE_CLIENT_FILE = path.join(os.homedir(), '.momo-secrets', 'google-oauth-hermes-k-s1b.json');
+const GOOGLE_CLIENT_FILE = process.env.MEASURE_GOOGLE_CLIENT_FILE || path.join(os.homedir(), '.momo-secrets', 'google-oauth-hermes-k-s1b.json');
 const PROTOCOL = '2025-06-18';
 const TIMEOUT_MS = 20_000;
 const LOGIN_WAIT_MS = 5 * 60_000;
