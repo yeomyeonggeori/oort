@@ -141,6 +141,42 @@ def connector_problems(cfg, env):
     return problems
 
 
+DATA_DIR = "/opt/data"  # the Hermes volume; the gate judges a scratch HERMES_HOME, so the volume's .env is read here
+VOLUME_ENV_TRUTHY_KEYS = ("HERMES_YOLO_MODE", "HERMES_DASHBOARD")
+
+
+def volume_env_problems(env_path):
+    """Invariants a reused volume's own `.env` could undo after the gate passed (#4072 review M2).
+
+    Hermes loads `<volume>/.env` after this gate has judged a scratch home, so a volume that was used by a
+    less strict Hermes can carry YOLO / dashboard / CORS / a short API key. A fresh volume has no such lines.
+    Only names are returned, never values. A missing file is fine (nothing there); an unreadable one is not."""
+    try:
+        with open(env_path, "r", encoding="utf-8", errors="replace") as handle:
+            raw = handle.read()
+    except FileNotFoundError:
+        return []
+    except OSError as exc:
+        return [f"cannot read {env_path}: {type(exc).__name__}"]
+    problems = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        if key.startswith("export "):
+            key = key[len("export "):].strip()
+        value = value.strip().strip("\"'").strip()
+        if key in VOLUME_ENV_TRUTHY_KEYS and value.lower() in TRUTHY:
+            problems.append(f"the volume's .env enables {key}")
+        elif key == "API_SERVER_CORS_ORIGINS" and value:
+            problems.append("the volume's .env sets API_SERVER_CORS_ORIGINS")
+        elif key == "API_SERVER_KEY" and len(value) < 32:
+            problems.append("the volume's .env sets an API_SERVER_KEY shorter than 32 characters")
+    return problems
+
+
 def emit(tag, **fields):
     print(tag + " " + json.dumps(fields, sort_keys=True), flush=True)
 
@@ -163,6 +199,8 @@ def gate(cfg_path):
         problems.append("API_SERVER_KEY is shorter than 32 characters")
     if env.get("HERMES_DASHBOARD", "").strip().lower() in TRUTHY:
         problems.append("HERMES_DASHBOARD is enabled")
+
+    problems.extend(volume_env_problems(os.path.join(os.environ.get("HERMES_DATA_DIR", DATA_DIR), ".env")))
 
     scratch = tempfile.mkdtemp(prefix="lockgate-")
     try:

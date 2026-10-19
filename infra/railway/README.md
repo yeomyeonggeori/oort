@@ -29,6 +29,7 @@ moves, update all of them in the same change
 | **relay** | same image | `momo-rust-entrypoint relay` | — | no |
 | **webhook-sender** | same image | `momo-rust-entrypoint webhook-sender` | — | no |
 | **agent-worker** | same image | `momo-rust-entrypoint agent-worker` | — | no |
+| **hermes** | `nousresearch/hermes-agent@sha256:36099926…` (official image, v0.22.2, same pin as compose) | `/bin/sh -c '… lockgate.py gate …; lockgate.py report & exec …entrypoint-dispatch.sh gateway run'` | `/opt/data` | no — `hermes.railway.internal:8642` only |
 | **notifier** | same image | `/bin/sh -c '… exec momo-rust-entrypoint notifier'` | — | no |
 | **push-relay** | same image | `/bin/sh -c '… exec momo-rust-entrypoint push-relay'` | — | no |
 | **caddy** | `infra/railway/Dockerfile.caddy` (Caddy 2 + SPA from the oort image), build context = repo root | `caddy run --config /etc/caddy/Caddyfile --adapter caddyfile` | — | **yes** (Railway TLS) |
@@ -138,6 +139,19 @@ compose's default (`${CENTRIFUGO_LOG_LEVEL:-info}`). Paste them decoded, e.g.
 | api | `CENT_API_URL` | `http://centrifugo.railway.internal:8000/api` |
 | relay | `CENT_API_URL` | `http://centrifugo.railway.internal:8000/api` |
 | agent-worker | `WORKER_DATABASE_URL` | `postgres://momo_worker:${{shared.WORKER_POSTGRES_PASSWORD}}@postgres.railway.internal:5432/${{shared.POSTGRES_DB}}` |
+| api | `HERMES_BASE_URL` | `http://hermes.railway.internal:8642/v1` |
+| api | `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK` | `1` — a plain `http://` internal host is refused without this opt-in |
+| api | `AGENT_PROVIDER_LOCAL_HOSTS` | `hermes.railway.internal` — the exact host, never a wildcard |
+| api | `OORT_COHOSTED_AGENT_TOOLS_LOCKED` | `1` — your own declaration that the tool lock holds; the hermes service cannot listen unless the gate exits 0 (see Hermes). api only |
+| agent-worker | `HERMES_BASE_URL` | `http://hermes.railway.internal:8642/v1` |
+| agent-worker | `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK` | `1` |
+| agent-worker | `AGENT_PROVIDER_LOCAL_HOSTS` | `hermes.railway.internal` |
+| hermes | `API_SERVER_ENABLED` | `true` |
+| hermes | `API_SERVER_HOST` | `0.0.0.0` (environments created after 2025-10-16; a legacy IPv6-only environment would need `::`, which is runtime-unverified) |
+| hermes | `API_SERVER_PORT` | `8642` |
+| hermes | `API_SERVER_KEY` | `${{shared.HERMES_API_KEY}}` — the shared variable you create by hand, see Hermes |
+| hermes | `HERMES_CONFIG_B64` | `base64 < infra/hermes/config.yaml \| tr -d '\n'` (one line) |
+| hermes | `HERMES_LOCKGATE_B64` | `base64 < infra/hermes/lockgate.py \| tr -d '\n'` (one line) |
 | centrifugo | `CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY` | `${{shared.CENT_TOKEN_HMAC}}` |
 | centrifugo | `CENTRIFUGO_HTTP_API_KEY` | `${{shared.CENT_API_KEY}}` |
 | centrifugo | `CENTRIFUGO_CLIENT_ALLOWED_ORIGINS` | `${{shared.CENTRIFUGO_ALLOWED_ORIGINS}}` (space separated: tauri origins + the public https/wss) |
@@ -161,6 +175,56 @@ app — gets 403 ("empty allowed_origins"). `CENTRIFUGO_PORT` is not a v6 key;
 the default port is 8000. `scripts/tests/check_railway_catalog.py` holds the
 literals to `infra/centrifugo.json` (namespaces, subscribe endpoint path on the
 api private host, connection meta, subscription tokens, proxy header name).
+
+## Hermes: the same-server agent (#4072, ADR-0203)
+
+The template carries a **hermes** service so the install ends with 설정 › AI 연결
+showing 「같은 서버의 Hermes」 without hand-editing env. It is private (no
+domain, `hermes.railway.internal:8642`), the image is the official
+`nousresearch/hermes-agent` pinned by index digest (the same value as compose
+`hermes`; `check_railway_catalog.py` compares them), and it holds **no oort
+variable**: not `DATABASE_URL`, not `PROVIDER_LINK_MASTER_KEY`, not a JWT key.
+
+1. **One shared variable by hand.** The generator does not print it:
+   `HERMES_API_KEY=$(openssl rand -hex 32)` as a project shared variable. hermes
+   reads it as `API_SERVER_KEY`; api and agent-worker as `HERMES_API_KEY`
+   (the gate refuses a key under 32 characters).
+2. **Two base64 variables on hermes** (hand-mapped table): `HERMES_CONFIG_B64`
+   from `infra/hermes/config.yaml` (24 toolsets off, approvals manual/deny, no
+   model, no connector) and `HERMES_LOCKGATE_B64` from
+   `infra/hermes/lockgate.py`.
+3. **Start order.** The start command writes the config and the gate, checks
+   both against the sha256 of the repo files (an empty, stale or swapped
+   variable stops the service; `check_railway_catalog.py` recomputes the hashes,
+   so changing `config.yaml` or `lockgate.py` means updating the command in the
+   same change), runs `lockgate.py gate` and only then `exec`s the Hermes
+   dispatcher. A non-zero gate (`set -e`) means the service never listens. The deploy log shows one
+   `LOCKGATE {"ok": true, …}` line and, after start, one `LOCKREPORT` line with
+   six checks. Read them before you trust the card.
+4. api and agent-worker get the wiring from the hand-mapped table (host,
+   loopback opt-in with the exact host, and on api the lock declaration).
+   `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1` is **your own declaration**; here it is
+   backed by the gate above. If you edit the config, the gate, or the start
+   command, you are taking that backing back on yourself.
+5. As the instance operator (`PLATFORM_ADMIN_EMAILS`) open 설정 › AI 연결: the
+   card appears, one click connects. Model authentication (API key or OAuth
+   login) is a separate step: until it is done the card still appears and a
+   chat turn answers that Hermes is not connected to a provider.
+
+Bind address (ADR-0203 D9): `API_SERVER_HOST=0.0.0.0`. The Railway environment
+creation date decides whether that is enough; the production environment of the
+team instance was created 2026-09-23 (after 2025-10-16), and the `hermes-kwak`
+service (#3952) ran this way. `::` is not used and stays runtime-unverified.
+
+Local opt-in, read this once: `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1` is the
+switch the exact-host list hangs on, and it also admits physical loopback
+(`localhost`, `127.0.0.1`, `::1`) for provider URLs the instance operator sets.
+That is the existing ADR-0004 증보 behavior of the manual §3.4.1 path, not new
+here; narrowing it to the listed host alone needs a server change (follow-up).
+
+Data: Hermes keeps sessions, memories and `state.db` on its own volume
+(`/opt/data`), outside oort's database and `oort backup`. Enable volume backups
+on **hermes** yourself; removing the agent in oort does not delete the volume.
 
 ## Public edge: `X-Forwarded-Proto` and client IP
 
@@ -413,7 +477,8 @@ generator's output, so the domain comes first:
 5. **centrifugo**.
 6. **api** — pre-deploy runs roles then migrations; the deploy fails if either
    does. Wait for api `/healthz`.
-7. **relay**, **webhook-sender**, **agent-worker**.
+7. **relay**, **webhook-sender**, **agent-worker**, and **hermes** (create the
+   `HERMES_API_KEY` shared variable first; read `LOCKGATE ok` in its deploy log).
    - **Upgrading an install that already ran** (#2066): `export
      JWT_HMAC='<the value in use>'` before generating. The generator then emits
      `WEBHOOK_INGRESS_MASTER_KEY` / `OUTBOUND_WEBHOOK_MASTER_KEY` as an explicit
@@ -475,8 +540,8 @@ client-IP gate passes; nobody else gets the link until it does.
 
 ## Backups and upgrades
 
-- Volumes: enable Railway volume backups on **postgres** and **api** (plan
-  permitting).
+- Volumes: enable Railway volume backups on **postgres**, **api** and **hermes**
+  (plan permitting). Hermes' volume is not in `oort backup`.
 - Logical dump: `scripts/oort backup --tier t2 --env <env>` as a one-off from
   the image (dump uses `MIGRATE_DATABASE_URL` only); restore one into an
   isolated local PG and compare row counts.
@@ -490,6 +555,9 @@ client-IP gate passes; nobody else gets the link until it does.
 - How Railway splits a start command into argv (the commands assume shell-word
   splitting with single quotes kept).
 - Whether the Raw Editor strips dotenv quotes (see Shared variables).
+- The hermes start command on a fresh Railway service (the `hermes-kwak`
+  service of #3952 ran the same shape; this template's `hermes` was checked only
+  against the catalog rules and the local compose twin), and `::` binding.
 - That `/dev/shm` is present and writable on Railway (the start commands refuse
   without it).
 - What Railway's edge puts in `X-Real-IP` (on the CDN path it is reported to

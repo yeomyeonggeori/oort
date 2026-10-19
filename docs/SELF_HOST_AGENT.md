@@ -2323,6 +2323,39 @@ erase it, delete the Hermes service and its volume in Railway. Connect only
 one workspace to one Hermes (conversations of several workspaces would share
 one volume).
 
+**Zero-base shortcut (#4072).** Steps 1-7 are what the template and the
+generator now do for you; you still read the lock, and the model key stays yours.
+
+- **Railway:** `infra/railway/railway.json` has the `hermes` service (private,
+  digest-pinned official image, `/opt/data` volume) and the api/agent-worker
+  variables of step 6-7. Create the shared variable `HERMES_API_KEY`
+  (`openssl rand -hex 32`), paste `infra/hermes/config.yaml` and
+  `infra/hermes/lockgate.py` as the two base64 variables, deploy, and read one
+  `LOCKGATE {"ok": true, …}` line in the hermes deploy log. The start command runs
+  the gate before the Hermes entrypoint, so a refused config means a service that
+  never listens. See `infra/railway/README.md` (Hermes).
+- **docker compose:** `scripts/self_host_env.sh --local-build --with-agents` (or
+  `--published-image …`) writes `COMPOSE_PROFILES=agents`, a generated
+  `HERMES_API_KEY`, `HERMES_BASE_URL=http://hermes:8642/v1`, the loopback opt-in
+  with the exact host `hermes`, and `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`; then
+  `scripts/self_host_env.sh --compose up -d --wait` starts Hermes with the rest.
+  The `hermes` service has no `ports:` (not reachable from the host), mounts the
+  config and the gate read-only, and runs `lockgate.py gate` before the
+  entrypoint. On an existing env the generated key is never replaced and the other keys
+  are set to the bundled values; the flag refuses an env that already declares
+  another `HERMES_BASE_URL`.
+- `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1` stays **your own declaration**. In both
+  shipped shapes it is backed by the gate; if you edit the config, the gate or
+  the start command, you take that backing back on yourself.
+- **Model authentication is not part of this** (#4073): Hermes starts and the
+  card appears without it; a chat turn answers that Hermes is not connected to a
+  provider until a model is set.
+
+Measured on compose (arm64, 2026-10-19, the pinned image): the listener is
+`0.0.0.0:8642` (uid 10000), `docker port` shows nothing published, the gate
+printed `LOCKGATE ok=true disabled_count=24`, the report six checks true. `::`
+on a legacy Railway environment is still runtime-unverified.
+
 **Model auth with a Codex or Claude subscription (ADR-0004 증보 6, ADR-0203
 증보 2026-10-19).** Hermes may authenticate its model with the operator's own
 Codex (ChatGPT) or Claude subscription OAuth, kept **on Hermes' own volume**.
@@ -2336,9 +2369,6 @@ operator's call; oort does not judge or guarantee it. Never paste a subscription
 token into oort, a channel or `.env` of the oort services. The login procedure
 is a placeholder until #4073 (Hermes model-auth onboarding) lands: see
 [#4073](https://github.com/yeomyeonggeori/oort/issues/4073).
-
-The compose `agents` profile is not shipped yet (it follows a verified Railway
-path). Measured `0.0.0.0` vs `::` on a real Railway environment is still open.
 
 ### 3.4.2 Railway: Hermes connector trial (ADR-0203 증보, #3948)
 

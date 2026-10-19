@@ -1845,6 +1845,226 @@ assert_claim_key "$claim_optin/infra/rust/local.secrets.env" "--claim --allow-lo
 assert_no_password_key "$claim_optin/infra/rust/local.secrets.env" "--claim --allow-local-provider"
 grep -Fxq 'AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1' "$claim_optin/infra/rust/local.secrets.env"
 
+# ---------------------------------------------------------------------------
+# #4072 — --with-agents: the same-server Hermes (compose profile `agents`).
+# Everything below is read off `docker compose config` (real docker), because
+# the failure it guards is "the value is in the env file and never reaches the
+# container" (#1534 F1a), and because the lock gate must be IN the rendered
+# start command, not merely in a file next to it.
+# ---------------------------------------------------------------------------
+agents_check() {
+  # $1 = compose config --format json file. Exit 0 only when the rendered stack
+  # has a Hermes that is private, gate-first, and wired to api + agent-worker.
+  python3 - "$1" <<'PY'
+import json, sys
+cfg = json.load(open(sys.argv[1]))
+svc = cfg["services"]
+h = svc.get("hermes")
+bad = []
+if h is None:
+    bad.append("no hermes service rendered")
+else:
+    if "ports" in h:
+        bad.append("hermes publishes a host port")
+    if set(h.get("networks", {})) != {"private"}:
+        bad.append("hermes is not on the private network only")
+    if h.get("profiles") != ["agents"]:
+        bad.append("hermes profile is not exactly [agents]")
+    command = " ".join(h.get("command", []))
+    gate = command.find("lockgate.py gate")
+    exec_at = command.find("exec /opt/hermes/docker/entrypoint-dispatch.sh")
+    if gate < 0 or exec_at < 0 or gate > exec_at:
+        bad.append("the lock gate does not run before the Hermes dispatcher")
+    if not command.startswith("set -eu"):
+        bad.append("start command is not fail-closed (set -eu first)")
+    if "|| true" in command:
+        bad.append("the gate result is swallowed")
+    if "@sha256:" not in h.get("image", ""):
+        bad.append("hermes image is not digest-pinned")
+    mounts = {v["target"]: v for v in h.get("volumes", []) if v.get("type") == "bind"}
+    for target in ("/oort/config.yaml", "/oort/lockgate.py"):
+        if not mounts.get(target, {}).get("read_only"):
+            bad.append("%s is not a read-only mount" % target)
+    env = h.get("environment", {})
+    leaked = sorted(k for k in env if k not in ("API_SERVER_ENABLED", "API_SERVER_HOST", "API_SERVER_KEY", "API_SERVER_PORT"))
+    if leaked:
+        bad.append("hermes carries variables beyond its own: %s" % ",".join(leaked))
+    if env.get("API_SERVER_HOST") != "0.0.0.0":
+        bad.append("API_SERVER_HOST is not 0.0.0.0")
+    if len(env.get("API_SERVER_KEY", "")) < 32:
+        bad.append("API_SERVER_KEY is shorter than 32 characters")
+    api = svc["api"]["environment"]
+    worker = svc["agent-worker"]["environment"]
+    if api.get("HERMES_BASE_URL") != "http://hermes:8642/v1" or worker.get("HERMES_BASE_URL") != "http://hermes:8642/v1":
+        bad.append("api/agent-worker HERMES_BASE_URL is not the same-server Hermes")
+    if api.get("HERMES_API_KEY") != env.get("API_SERVER_KEY") or worker.get("HERMES_API_KEY") != env.get("API_SERVER_KEY"):
+        bad.append("api/agent-worker HERMES_API_KEY differs from API_SERVER_KEY")
+    for name in ("api", "agent-worker"):
+        e = svc[name]["environment"]
+        if e.get("AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK") != "1" or "hermes" not in e.get("AGENT_PROVIDER_LOCAL_HOSTS", "").split(","):
+            bad.append("%s lacks the exact-host local opt-in for hermes" % name)
+        if "*" in e.get("AGENT_PROVIDER_LOCAL_HOSTS", ""):
+            bad.append("%s opts in a wildcard host" % name)
+    if api.get("OORT_COHOSTED_AGENT_TOOLS_LOCKED") != "1":
+        bad.append("api lacks OORT_COHOSTED_AGENT_TOOLS_LOCKED=1")
+    if "OORT_COHOSTED_AGENT_TOOLS_LOCKED" in worker:
+        bad.append("agent-worker carries the api-only lock declaration")
+    for secret in ("DATABASE_URL", "WORKER_DATABASE_URL", "PROVIDER_LINK_MASTER_KEY", "JWT_HMAC"):
+        if secret in env:
+            bad.append("hermes holds oort secret %s" % secret)
+if bad:
+    sys.stderr.write("; ".join(bad) + "\n")
+    sys.exit(1)
+PY
+}
+
+agents_fixture="$(make_fixture with-agents)"
+run_generator "$agents_fixture" "$agents_fixture/output" 49790 --local-build --with-agents
+agents_env="$agents_fixture/infra/rust/local.secrets.env"
+for expected in 'COMPOSE_PROFILES=agents' 'HERMES_BASE_URL=http://hermes:8642/v1' \
+  'AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1' 'AGENT_PROVIDER_LOCAL_HOSTS=hermes' \
+  'OORT_COHOSTED_AGENT_TOOLS_LOCKED=1'; do
+  grep -Fxq "$expected" "$agents_env" || { echo "--with-agents: missing $expected" >&2; exit 1; }
+done
+agents_key="$(sed -n 's/^HERMES_API_KEY=//p' "$agents_env")"
+[ "${#agents_key}" -ge 32 ] || { echo "--with-agents: HERMES_API_KEY shorter than the gate's 32" >&2; exit 1; }
+if grep -Fq "$agents_key" "$agents_fixture/output"; then
+  echo "--with-agents: HERMES_API_KEY leaked to stdout/stderr" >&2
+  exit 1
+fi
+agents_json="$agents_fixture/agents-compose.json"
+(
+  cd "$agents_fixture"
+  PATH="$real_docker_dir:/usr/bin:/bin" COMPOSE_PROFILES=ambient-profile \
+    bash scripts/self_host_env.sh --compose config --format json
+) >"$agents_json" 2>"$agents_fixture/agents-compose.stderr" || {
+  cat "$agents_fixture/agents-compose.stderr" >&2
+  echo "--with-agents: real compose config failed" >&2
+  exit 1
+}
+agents_check "$agents_json" || { echo "--with-agents: rendered stack is not a locked Hermes" >&2; exit 1; }
+
+# Sabotage: each load-bearing property, broken in the rendered config, must fail agents_check.
+agents_sabotage() {
+  local name="$1" edit="$2" broken="$agents_fixture/sabotage-$1.json"
+  python3 - "$agents_json" "$broken" "$edit" <<'PY'
+import json, sys
+cfg = json.load(open(sys.argv[1]))
+edit = sys.argv[3]
+h = cfg["services"]["hermes"]
+api = cfg["services"]["api"]["environment"]
+if edit == "no-gate":
+    h["command"] = [h["command"][0].replace("/opt/hermes/.venv/bin/python /oort/lockgate.py gate /opt/data/config.yaml; ", "")]
+elif edit == "gate-swallowed":
+    h["command"] = [h["command"][0].replace("gate /opt/data/config.yaml;", "gate /opt/data/config.yaml || true;")]
+elif edit == "published-port":
+    h["ports"] = [{"mode": "ingress", "target": 8642, "published": "8642", "protocol": "tcp"}]
+elif edit == "oort-secret":
+    h["environment"]["PROVIDER_LINK_MASTER_KEY"] = "x"
+elif edit == "writable-config":
+    for v in h["volumes"]:
+        if v.get("target") == "/oort/config.yaml":
+            v["read_only"] = False
+elif edit == "floating-image":
+    h["image"] = "nousresearch/hermes-agent:latest"
+elif edit == "wildcard-host":
+    api["AGENT_PROVIDER_LOCAL_HOSTS"] = "*"
+elif edit == "no-attest":
+    api["OORT_COHOSTED_AGENT_TOOLS_LOCKED"] = ""
+else:
+    raise SystemExit("unknown sabotage " + edit)
+json.dump(cfg, open(sys.argv[2], "w"))
+PY
+  if agents_check "$broken" 2>/dev/null; then
+    echo "--with-agents sabotage '$name' still passed — the check is not load-bearing" >&2
+    exit 1
+  fi
+}
+for sab in no-gate gate-swallowed published-port oort-secret writable-config floating-image wildcard-host no-attest; do
+  agents_sabotage "$sab" "$sab"
+done
+echo "with-agents: rendered Hermes private + gate-first + wired; 8 sabotages RED"
+
+# Add-only on the existing env: the generated key is never replaced, a re-run of
+# --allow-local-provider alone keeps the Hermes host, and a second --with-agents
+# run changes nothing.
+cp "$agents_env" "$agents_fixture/env.before"
+run_generator "$agents_fixture" "$agents_fixture/rerun-output" 49790 --local-build --with-agents
+cmp -s "$agents_env" "$agents_fixture/env.before" || { echo "--with-agents re-run changed the env" >&2; exit 1; }
+run_generator "$agents_fixture" "$agents_fixture/rerun2-output" 49790 --local-build --allow-local-provider
+grep -Fxq 'AGENT_PROVIDER_LOCAL_HOSTS=host.docker.internal,hermes' "$agents_env" || {
+  echo "--allow-local-provider re-run dropped the hermes host: $(grep '^AGENT_PROVIDER_LOCAL_HOSTS=' "$agents_env")" >&2
+  exit 1
+}
+[ "$(sed -n 's/^HERMES_API_KEY=//p' "$agents_env")" = "$agents_key" ] || { echo "HERMES_API_KEY was rewritten" >&2; exit 1; }
+[ "$(grep -c '^HERMES_API_KEY=' "$agents_env")" = "1" ] || { echo "duplicate HERMES_API_KEY" >&2; exit 1; }
+
+# --allow-local-provider first, then --with-agents: both hosts, one line.
+merge_fixture="$(make_fixture with-agents-merge)"
+run_generator "$merge_fixture" "$merge_fixture/output" 49794 --local-build --allow-local-provider --with-agents
+grep -Fxq 'AGENT_PROVIDER_LOCAL_HOSTS=host.docker.internal,hermes' "$merge_fixture/infra/rust/local.secrets.env" || {
+  echo "--allow-local-provider --with-agents did not merge hosts" >&2
+  exit 1
+}
+
+# Without the flag nothing about Hermes exists: no keys, no service, an empty api declaration.
+plain_fixture="$(make_fixture without-agents)"
+run_generator "$plain_fixture" "$plain_fixture/output" 49798 --local-build
+if grep -E '^(HERMES_|COMPOSE_PROFILES=|OORT_COHOSTED_)' "$plain_fixture/infra/rust/local.secrets.env"; then
+  echo "default env carries Hermes keys" >&2
+  exit 1
+fi
+(
+  cd "$plain_fixture"
+  PATH="$real_docker_dir:/usr/bin:/bin" bash scripts/self_host_env.sh --compose config --services
+) >"$plain_fixture/services.txt"
+if grep -Fxq hermes "$plain_fixture/services.txt"; then
+  echo "default stack renders the hermes service" >&2
+  exit 1
+fi
+
+# An env that already declares another Hermes is refused, not overwritten.
+foreign_fixture="$(make_fixture with-agents-foreign)"
+run_generator "$foreign_fixture" "$foreign_fixture/output" 49802 --local-build
+printf 'HERMES_BASE_URL=https://hermes.example.test/v1\n' >>"$foreign_fixture/infra/rust/local.secrets.env"
+if run_generator "$foreign_fixture" "$foreign_fixture/refuse-output" 49802 --local-build --with-agents; then
+  echo "--with-agents overwrote a foreign HERMES_BASE_URL" >&2
+  exit 1
+fi
+grep -Fq 'HERMES_BASE_URL' "$foreign_fixture/refuse-output"
+grep -Fxq 'HERMES_BASE_URL=https://hermes.example.test/v1' "$foreign_fixture/infra/rust/local.secrets.env"
+! grep -q '^OORT_COHOSTED_AGENT_TOOLS_LOCKED=' "$foreign_fixture/infra/rust/local.secrets.env" || {
+  echo "attestation written next to a foreign Hermes" >&2
+  exit 1
+}
+
+# Review L2/L3: a host list that holds a glob character must not expand against the
+# working directory, and a value with a backslash must stay one line.
+glob_fixture="$(make_fixture with-agents-glob)"
+run_generator "$glob_fixture" "$glob_fixture/output" 49810 --local-build
+: >"$glob_fixture/fileA"; : >"$glob_fixture/fileB"
+printf 'AGENT_PROVIDER_LOCAL_HOSTS=*,host.docker.internal\n' >>"$glob_fixture/infra/rust/local.secrets.env"
+run_generator "$glob_fixture" "$glob_fixture/glob-output" 49810 --local-build --with-agents
+grep -Fxq 'AGENT_PROVIDER_LOCAL_HOSTS=*,host.docker.internal,hermes' "$glob_fixture/infra/rust/local.secrets.env" || {
+  echo "glob in AGENT_PROVIDER_LOCAL_HOSTS was expanded or dropped: $(grep '^AGENT_PROVIDER_LOCAL_HOSTS=' "$glob_fixture/infra/rust/local.secrets.env")" >&2
+  exit 1
+}
+[ "$(grep -c '^AGENT_PROVIDER_LOCAL_HOSTS=' "$glob_fixture/infra/rust/local.secrets.env")" = "1" ]
+bs_fixture="$(make_fixture with-agents-backslash)"
+run_generator "$bs_fixture" "$bs_fixture/output" 49814 --local-build
+printf 'AGENT_PROVIDER_LOCAL_HOSTS=a\\nb\n' >>"$bs_fixture/infra/rust/local.secrets.env"
+run_generator "$bs_fixture" "$bs_fixture/bs-output" 49814 --local-build --with-agents
+[ "$(grep -c '^AGENT_PROVIDER_LOCAL_HOSTS=' "$bs_fixture/infra/rust/local.secrets.env")" = "1" ]
+! grep -qx 'b,hermes' "$bs_fixture/infra/rust/local.secrets.env" || { echo "backslash value was split into two lines" >&2; exit 1; }
+
+echo "with-agents: add-only re-run, host merge both orders, foreign HERMES_BASE_URL refused, default stack has no hermes"
+# Railway renders the catalog (infra/railway/railway.json), not a file.
+if run_generator "$(make_fixture with-agents-railway)" "$TMP_ROOT/agents-railway-output" 49806 \
+  --platform railway --with-agents; then
+  echo "--platform railway --with-agents unexpectedly succeeded" >&2
+  exit 1
+fi
+
 echo "self-host image mode contract: PASS"
 
 # Real docker proof is a separate script so local_gate profiles do not each
