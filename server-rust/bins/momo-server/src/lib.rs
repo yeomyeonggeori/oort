@@ -1708,6 +1708,34 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/integrations/github/app/manifest",
             post(routes::github_app::start_manifest),
         )
+        // ADR-0205 D3/D5 (#3954) — the instance operator sees installations nobody linked yet
+        // (a workspace admin never does) and attaches one to a workspace.
+        .route(
+            "/v1/integrations/github/installations",
+            get(routes::github_ingress::unlinked_installations),
+        )
+        .route(
+            "/v1/integrations/github/installations/{installation}/link",
+            post(routes::github_ingress::operator_link),
+        )
+        // ADR-0205 D3/D5 (#3954) — a workspace owner/admin links an installation and subscribes
+        // channels. All 503 without GITHUB_APP_MASTER_KEY.
+        .route(
+            "/v1/workspaces/{ws}/github",
+            get(routes::github_ingress::workspace_overview),
+        )
+        .route(
+            "/v1/workspaces/{ws}/github/link",
+            post(routes::github_ingress::link_start),
+        )
+        .route(
+            "/v1/workspaces/{ws}/github/subscriptions",
+            post(routes::github_ingress::subscribe),
+        )
+        .route(
+            "/v1/workspaces/{ws}/github/subscriptions/{subscription}",
+            delete(routes::github_ingress::unsubscribe),
+        )
         // ADR-0162 증보 1 / HAP-E7 — the resource owner's half of an OAuth
         // authorization request. Inside the bearer middleware because the only
         // caller is a logged-in human owner/admin: the browser redirect that
@@ -1892,6 +1920,22 @@ pub fn build_app(state: AppState) -> Router {
                 state.clone(),
                 rate_limit::per_ip_github_callback,
             )),
+        )
+        // ADR-0205 D3 (#3954) — GitHub sends the installing browser here. The installation_id it
+        // carries can be forged, so it is only the pending half of a link; own per-IP budget.
+        .route(
+            "/v1/integrations/github/setup",
+            get(routes::github_ingress::setup).route_layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                rate_limit::per_ip_github_setup,
+            )),
+        )
+        // ADR-0205 D4 (#3954) — the GitHub App webhook receiver. Authenticated by
+        // X-Hub-Signature-256 against the sealed instance secret, never by a bearer; own
+        // 5 MiB body ceiling. Distinct from ADR-0115's per-installation modes below.
+        .route(
+            "/v1/integrations/github/webhook",
+            post(routes::github_ingress::receive),
         )
         // #1265 / ADR-0115 — public ingress. Authenticated by HMAC headers or
         // the URL token, never by a bearer. Mounted outside require_principal

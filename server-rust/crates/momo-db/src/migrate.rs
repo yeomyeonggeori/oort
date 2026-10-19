@@ -643,12 +643,17 @@ mod tests {
     ///
     /// 141 is #4018's `channel_viewing` (ADR-0204 증보 3): the presence heartbeat's last-seen stamp
     /// per (channel, member), tenant ENABLE + FORCE + `ws_isolation`, SELECT for `momo_notifier`.
+    ///
+    /// 142 is #3954's GitHub receive/link slice (ADR-0205 D3·D4·D5): the non-secret
+    /// `github_app_public` identity, the installation repository list, the workspace's dedicated
+    /// 「GitHub」 author, the narrow `app.github_link` GUC branches, and
+    /// `github_channel_subscription.private_confirmed_at`.
     #[test]
-    fn discovers_contiguous_migrations_001_to_141() {
+    fn discovers_contiguous_migrations_001_to_142() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=141).collect();
+        let expected: Vec<i64> = (1..=142).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -656,7 +661,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=141 under {}",
+            "expected contiguous 001..=142 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -664,7 +669,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("141_channel_viewing"));
+            .starts_with("142_github_ingress"));
     }
 
     #[test]
