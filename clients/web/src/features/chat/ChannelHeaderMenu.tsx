@@ -9,6 +9,7 @@ import {
 } from "@/design/ui/dropdown-menu";
 import { ChannelTopicDialog } from "@/features/channels/ChannelContextControls";
 import { ChannelMemoryDialog } from "@/features/memory/ChannelMemoryDialog";
+import { ChannelGithubDialog } from "@/features/github/ChannelGithubDialog";
 import { canChangeWorkspaceMemory } from "@momo/core/features/memory/presentation";
 import { channelHeaderControlClass } from "@/features/chat/channelHeaderControl";
 import {
@@ -94,6 +95,7 @@ export function ChannelHeaderMenu({
   const [open, setOpen] = useState(false);
   const [topicOpen, setTopicOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
+  const [githubOpen, setGithubOpen] = useState(false);
   const topic = normalizeChannelTopic(channel.topic ?? "");
   const menuLabel = channelActionMenuLabel(title, channel);
 
@@ -144,6 +146,7 @@ export function ChannelHeaderMenu({
             event.preventDefault();
             if (pending === "topic") setTopicOpen(true);
             if (pending === "memory") setMemoryOpen(true);
+            if (pending === "github") setGithubOpen(true);
             if (pending === "leave") actions.leave.open();
           }}
         >
@@ -175,6 +178,22 @@ export function ChannelHeaderMenu({
           canChange={canChangeWorkspaceMemory(selfRole)}
           open={memoryOpen}
           onOpenChange={setMemoryOpen}
+          opener={triggerRef}
+        />
+      )}
+
+      {/* 열릴 때만 세운다: 닫힌 다이얼로그가 질의 훅을 끌고 다닐 이유가 없다. 그러면 닫는 순간
+          다이얼로그가 사라져 Radix 의 포커스 복귀가 없으므로, 닫힌 뒤 ⋮ 로 돌려놓는 것은 여기서 한다. */}
+      {githubOpen && (
+        <ChannelGithubDialog
+          workspaceId={workspaceId}
+          channel={channel}
+          channelTitle={title}
+          open={githubOpen}
+          onOpenChange={(next) => {
+            setGithubOpen(next);
+            if (!next) window.requestAnimationFrame(() => triggerRef.current?.focus());
+          }}
           opener={triggerRef}
         />
       )}

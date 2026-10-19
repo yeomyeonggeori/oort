@@ -153,7 +153,8 @@ export type SurfaceId =
   | "messageSearch"
   | "hostedAgentPairing"
   | "settingsOpenCard"
-  | "appsUsedTail";
+  | "appsUsedTail"
+  | "githubNotifications";
 
 /** Workd/T3 데몬을 전제하는 표면. 셀프호스트 기본은 모두 숨긴다 (ADR-0183 D4-② · #2166). */
 export const WORK_SURFACE_IDS: readonly SurfaceId[] = [
@@ -552,6 +553,26 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
       "2026-10-18 실측(#3939 PR #4028): server-rust/crates/momo-agent/src/card_suggest.rs " +
       "SUGGESTABLE_COMMANDS에 settings.open이 있고, 허용목록 네 곳(레지스트리·hosted enum·" +
       "worker enum·OpenAPI SuggestableCommandId)이 한 시험으로 같다.",
+  },
+  githubNotifications: {
+    id: "githubNotifications",
+    label: "GitHub 알림",
+    // #3955(U-GH1, ADR-0205 D10): 채널 ⋮ › GitHub 알림, AI › 외부 연결 › GitHub 알림, 「앱」 카드의 알림 얼굴.
+    // 이 칸은 **이 코드베이스의 서버가 경로를 싣는가**를 말한다. 아직 배포되지 않은 서버에 붙으면
+    // `GET …/github`가 404/405/501로 오고 `serverSaysAbsent` 폴딩이 이 문구를 쓴다(진입점이
+    // 먼저 서 있다가 첫 읽기에서 접힌다). 키가 없는 서버는 503이고, 그건 「없다」가 아니라
+    // 「운영자가 설정을 마쳐야 한다」라 별도 문장을 쓴다(`isGithubUnavailable`).
+    provided: true,
+    absentReason: "이 서버는 아직 GitHub 알림을 받지 않아요.",
+    fallback: "저장소 소식은 GitHub에서 직접 보거나, 채널로 들어오는 주소(웹훅)로 받을 수 있어요.",
+    measured:
+      "2026-10-19 PR #4070(#3954) 소스 대조(runtime-unverified, 이 트리에는 엔진이 없다): " +
+      "server-rust/bins/momo-server/src/lib.rs에 GET/PUT …/integrations/github/app, " +
+      "POST …/github/app/manifest, GET …/github/installations, " +
+      "POST …/github/installations/{installation}/link, GET …/workspaces/{ws}/github, " +
+      "POST …/github/link, POST …/github/subscriptions, DELETE …/github/subscriptions/{subscription}가 " +
+      "등록됨. 공개 경로는 GET …/github/app/callback, GET …/github/setup, POST …/github/webhook. " +
+      "엔진이 이 트리에 들어오면 라우트 소스 시험으로 박는다.",
   },
 };
 

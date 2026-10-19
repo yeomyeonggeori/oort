@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
+import { GithubReturnLanding } from "@/features/github/GithubReturnLanding";
 import { queryClient } from "@/app/queryClient";
 import { SessionProvider, useRestoredSession } from "@/app/session";
 import {
@@ -274,6 +275,8 @@ export function App() {
 
   return (
     <HashRouter>
+      {/* GitHub 에서 돌아오는 문(#3955): 주소의 단어 하나를 꺼내 GitHub 알림 화면으로 보낸다. */}
+      <GithubReturnLanding />
       <Routes>
         {/* 라우트 실패는 AppShell 안쪽 경계가 받는다. 여기까지 올라온 것은 셸
          * 자체가 서지 못한 경우뿐이라 사이드바도 설정도 남지 않는다. 그래서 이
