@@ -39,7 +39,7 @@ pub const AGENT_NAME_MAX_EMOJI: usize = 2;
 /// (`Oort Support`, `AdminBot`, `🔒Security`); the short, ordinary words
 /// ([`RESERVED_WHOLE_WORDS`]) only when they are a whole word, so `Allie` and
 /// `Archery` are not collateral.
-pub const RESERVED_NAMES: [&str; 17] = [
+pub const RESERVED_NAMES: [&str; 18] = [
     "oort",
     "오르트",
     "admin",
@@ -57,6 +57,8 @@ pub const RESERVED_NAMES: [&str; 17] = [
     "all",
     "모두",
     "전체",
+    // ADR-0205 H-1 (#4084): the workspace's system author is named 「GitHub」.
+    "github",
 ];
 
 /// Why a proposed name was refused. The proposal path folds every variant into
@@ -78,7 +80,7 @@ pub enum NameRejected {
 
 /// The reserved words that are also everyday words: refused only as a whole
 /// word of the name (by skeleton), not as a substring.
-const RESERVED_WHOLE_WORDS: [&str; 5] = ["here", "all", "모두", "전체", "channel"];
+const RESERVED_WHOLE_WORDS: [&str; 6] = ["here", "all", "모두", "전체", "channel", "github"];
 
 /// Further words an agent may not wear (substring, by skeleton).
 const RESERVED_EXTRA: [&str; 4] = ["owner", "moderator", "staff", "official"];
@@ -1055,6 +1057,9 @@ mod tests {
             "모두",
             "전체",
             "o o r t",
+            "GitHub",
+            "ＧｉｔＨｕｂ",
+            "git-hub",
         ] {
             assert_eq!(
                 validated_agent_proposed_display_name(reserved),

@@ -235,6 +235,33 @@ pub async fn add_repositories(
     Ok(())
 }
 
+/// ADR-0205 H-1 (#4084): a signed delivery carries the repository's **current** privacy and name.
+/// The stored list is only written by installation events, so a repository that turned private (or
+/// was renamed) after the install would keep the old facts and the reconfirm check would trust a
+/// stale `private = false`. Refreshes a row that exists; a repository outside the list stays unknown
+/// (and unknown counts as private).
+pub async fn refresh_repository_facts(
+    conn: &mut PgConnection,
+    installation_id: i64,
+    repo_id: i64,
+    full_name: &str,
+    private: bool,
+) -> Result<(), DbError> {
+    sqlx::query(
+        "UPDATE github_installation_repository \
+            SET private = $3, full_name = $4, updated_at = now() \
+          WHERE installation_id = $1 AND repo_id = $2 \
+            AND (private IS DISTINCT FROM $3 OR full_name IS DISTINCT FROM $4)",
+    )
+    .bind(installation_id)
+    .bind(repo_id)
+    .bind(private)
+    .bind(full_name)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
 pub async fn remove_repositories(
     conn: &mut PgConnection,
     installation_id: i64,
@@ -799,10 +826,45 @@ pub struct SubscriptionRecord {
     pub features: Vec<String>,
     pub active: bool,
     pub private_confirmed: bool,
+    /// ADR-0205 H-1 (#4084): the channel is public now, the repository is (or may be) private and
+    /// nobody confirmed that on a public channel. The receiver sends nothing until an owner/admin
+    /// subscribes again with `confirmPrivate`.
+    pub needs_reconfirm: bool,
 }
 
-const SUBSCRIPTION_PROJECTION: &str = "id, channel_id, installation_id, repo_id, repo_full_name, \
-     features, active, private_confirmed_at IS NOT NULL AS private_confirmed";
+/// Evaluated **now**, from the channel's current kind and the repository's current privacy, not
+/// from what was true when the subscription was made: a subscription written on a private channel
+/// carries no confirmation, and the channel can later become public. Unknown privacy counts as
+/// private (the same stance as the subscribe route).
+macro_rules! needs_reconfirm_sql {
+    () => {
+        "(github_channel_subscription.private_confirmed_at IS NULL \
+          AND EXISTS (SELECT 1 FROM channel c \
+                       WHERE c.id = github_channel_subscription.channel_id \
+                         AND c.workspace_id = github_channel_subscription.workspace_id \
+                         AND c.kind = 'public') \
+          AND NOT EXISTS (SELECT 1 FROM github_installation_repository r \
+                           WHERE r.installation_id = github_channel_subscription.installation_id \
+                             AND NOT r.private \
+                             AND (CASE WHEN github_channel_subscription.repo_id IS NOT NULL \
+                                       THEN r.repo_id = github_channel_subscription.repo_id \
+                                       ELSE lower(r.full_name) \
+                                            = lower(github_channel_subscription.repo_full_name) \
+                                  END)))"
+    };
+}
+
+const SUBSCRIPTION_PROJECTION: &str = concat!(
+    "github_channel_subscription.id, github_channel_subscription.channel_id, \
+     github_channel_subscription.installation_id, github_channel_subscription.repo_id, \
+     github_channel_subscription.repo_full_name, github_channel_subscription.features, \
+     github_channel_subscription.active, \
+     github_channel_subscription.private_confirmed_at IS NOT NULL AS private_confirmed, ",
+    needs_reconfirm_sql!(),
+    " AS needs_reconfirm"
+);
+
+const NEEDS_RECONFIRM_SQL: &str = needs_reconfirm_sql!();
 
 fn decode_subscription(row: &sqlx::postgres::PgRow) -> Result<SubscriptionRecord, sqlx::Error> {
     Ok(SubscriptionRecord {
@@ -814,6 +876,7 @@ fn decode_subscription(row: &sqlx::postgres::PgRow) -> Result<SubscriptionRecord
         features: row.try_get("features")?,
         active: row.try_get("active")?,
         private_confirmed: row.try_get("private_confirmed")?,
+        needs_reconfirm: row.try_get("needs_reconfirm")?,
     })
 }
 
@@ -930,6 +993,7 @@ pub async fn matching_subscriptions(
             AND EXISTS (SELECT 1 FROM channel c \
                          WHERE c.id = github_channel_subscription.channel_id \
                            AND c.workspace_id = $1 AND c.archived_at IS NULL) \
+            AND NOT {NEEDS_RECONFIRM_SQL} \
           ORDER BY created_at, id"
     ))
     .bind(workspace_id)

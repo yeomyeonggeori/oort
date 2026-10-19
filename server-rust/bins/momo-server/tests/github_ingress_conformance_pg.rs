@@ -12,6 +12,8 @@
 //! * 10 `the_previous_webhook_secret_verifies_only_inside_the_overlap_window`
 //! * 11 `a_private_repository_needs_an_explicit_confirmation_for_a_public_channel`
 //! * 13 `commits_and_releases_reach_only_the_channels_that_turned_them_on`
+//! * H-1 (#4084) `no_door_can_forge_a_github_notification_line`,
+//!   `a_channel_that_turns_public_stops_a_private_repository_until_it_is_confirmed_again`
 //!
 //! and the supporting rows: the operator-only unlinked list, the per-installation rate budget with
 //! its one audit row, the 503 without the master key, and RLS on the migration-142 tables as
@@ -883,7 +885,10 @@ async fn a_link_needs_both_signals_in_either_order_and_never_from_a_forgery() {
         ),
     ] {
         let (status, _) = env.setup(1003, &forged).await;
-        assert!(status == 303 || status == 409, "{label}: {status}");
+        assert_eq!(
+            status, 303,
+            "{label}: every setup outcome is a redirect word"
+        );
         assert_eq!(
             env.installation_workspace(1003).await,
             Some(None),
@@ -991,10 +996,16 @@ async fn an_installation_belongs_to_one_workspace_and_events_never_cross_tenants
         .await;
     assert_eq!(status, 200);
 
-    // B tries to claim A's installation by setup URL: 409, and the row stays A's.
+    // B tries to claim A's installation by setup URL: #4084 answers a 303 back to the screen
+    // with the verdict word `linked_elsewhere` (it used to be a 409 JSON body), and the row
+    // stays A's.
     let state_b = env.link_state(&env.token_b, env.b.workspace).await;
-    let (status, _) = env.setup(1101, &state_b).await;
-    assert_eq!(status, 409, "claiming an installation linked elsewhere");
+    let (status, location) = env.setup(1101, &state_b).await;
+    assert_eq!(status, 303, "claiming an installation linked elsewhere");
+    assert_eq!(
+        location.as_deref(),
+        Some("https://oort.example.test/?githubInstall=linked_elsewhere")
+    );
     assert_eq!(
         env.installation_workspace(1101).await,
         Some(Some(env.a.workspace))
@@ -2133,4 +2144,372 @@ async fn a_renamed_repository_does_not_inherit_the_old_names_subscription_and_ar
     assert_eq!(body["delivered"].as_u64(), Some(1));
     assert_eq!(env.messages(archived).await, 1, "no post after archiving");
     assert_eq!(env.messages(channel).await, 2);
+}
+
+// ---------------------------------------------------------------------------
+// #4084 (ADR-0205 H-1) — server-owned notification props, and the public-flip re-evaluation
+// ---------------------------------------------------------------------------
+
+impl Env {
+    async fn join_channel(&self, workspace: Uuid, channel: Uuid, member: Uuid) {
+        sqlx::query(
+            "INSERT INTO membership (workspace_id, channel_id, member_id, role) \
+             VALUES ($1, $2, $3, 'member') ON CONFLICT DO NOTHING",
+        )
+        .bind(workspace)
+        .bind(channel)
+        .bind(member)
+        .execute(&self.su)
+        .await
+        .expect("seed membership");
+    }
+
+    async fn rest_send(
+        &self,
+        token: &str,
+        workspace: Uuid,
+        channel: Uuid,
+        props: Value,
+    ) -> (u16, Value) {
+        let response = self
+            .http
+            .post(format!(
+                "{}/v1/workspaces/{workspace}/channels/{channel}/messages",
+                self.base
+            ))
+            .bearer_auth(token)
+            .json(&json!({
+                "clientMsgId": Uuid::new_v4().to_string(),
+                "body": "looks like a notification",
+                "props": props,
+            }))
+            .send()
+            .await
+            .unwrap();
+        let status = response.status().as_u16();
+        (status, response.json().await.unwrap_or(Value::Null))
+    }
+
+    async fn stored_props(&self, channel: Uuid) -> Vec<Value> {
+        sqlx::query_scalar("SELECT props FROM message WHERE channel_id = $1 ORDER BY seq")
+            .bind(channel)
+            .fetch_all(&self.su)
+            .await
+            .unwrap()
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn no_door_can_forge_a_github_notification_line() {
+    let env = env().await;
+    env.link_a(1801, &[(81, "acme/open", false)]).await;
+    let channel = env.channel(env.a.workspace, "public", "gh-forge").await;
+    env.join_channel(env.a.workspace, channel, env.a.member)
+        .await;
+    let (status, _) = env
+        .subscribe(
+            &env.token_a,
+            env.a.workspace,
+            channel,
+            1801,
+            "acme/open",
+            None,
+            false,
+        )
+        .await;
+    assert_eq!(status, 200);
+
+    // REST send (a person, or an agent through the same route): `source=github` and every
+    // `github_*` key are dropped; unrelated keys survive.
+    let (status, _) = env
+        .rest_send(
+            &env.token_a,
+            env.a.workspace,
+            channel,
+            json!({
+                "source": "github",
+                "Source": "GitHub",
+                "github_event": "pull_request",
+                "github_url": "https://github.com/acme/open/pull/1",
+                "github_author_member_id": Uuid::new_v4().to_string(),
+                "note": "kept",
+            }),
+        )
+        .await;
+    assert_eq!(status, 201);
+    // A different `source` value is not ours to reserve.
+    let (status, _) = env
+        .rest_send(
+            &env.token_a,
+            env.a.workspace,
+            channel,
+            json!({"source": "prime"}),
+        )
+        .await;
+    assert_eq!(status, 201);
+    let stored = env.stored_props(channel).await;
+    assert_eq!(stored.len(), 2);
+    for key in [
+        "source",
+        "Source",
+        "github_event",
+        "github_url",
+        "github_author_member_id",
+    ] {
+        assert!(
+            stored[0].get(key).is_none(),
+            "{key} must be dropped from a REST send: {}",
+            stored[0]
+        );
+    }
+    assert_eq!(stored[0]["note"], json!("kept"));
+    assert_eq!(stored[1]["source"], json!("prime"));
+
+    // The real thing: the signed receiver writes the pair and names its author.
+    let (status, body) = env
+        .deliver(
+            "pull_request",
+            "forge-real",
+            &pull_request_opened(1801, (81, "acme/open"), 7),
+            Some(SECRET_1),
+        )
+        .await;
+    assert_eq!((status, body["delivered"].as_u64()), (200, Some(1)));
+    let stored = env.stored_props(channel).await;
+    let real = stored.last().unwrap();
+    assert_eq!(real["source"], json!("github"));
+    let author: Uuid = sqlx::query_scalar(
+        "SELECT author_member_id FROM github_workspace_author WHERE workspace_id = $1",
+    )
+    .bind(env.a.workspace)
+    .fetch_one(&env.su)
+    .await
+    .unwrap();
+    assert_eq!(
+        real["github_author_member_id"],
+        json!(author.to_string()),
+        "the line names the system member that wrote it"
+    );
+    let row_author: Uuid = sqlx::query_scalar(
+        "SELECT author_member_id FROM message WHERE channel_id = $1 ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(channel)
+    .fetch_one(&env.su)
+    .await
+    .unwrap();
+    assert_eq!(row_author, author);
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_channel_that_turns_public_stops_a_private_repository_until_it_is_confirmed_again() {
+    let env = env().await;
+    env.link_a(
+        1901,
+        &[(91, "acme/secret-sauce", true), (92, "acme/open", false)],
+    )
+    .await;
+    let channel = env.channel(env.a.workspace, "private", "gh-flip").await;
+    for (repo, id) in [("acme/secret-sauce", 91), ("acme/open", 92)] {
+        // Subscribed on a PRIVATE channel: no confirmation was needed, none is stored.
+        let (status, body) = env
+            .subscribe(
+                &env.token_a,
+                env.a.workspace,
+                channel,
+                1901,
+                repo,
+                None,
+                false,
+            )
+            .await;
+        assert_eq!(
+            (status, body["needsReconfirm"].as_bool()),
+            (200, Some(false)),
+            "{repo} #{id}"
+        );
+    }
+    let deliver = |n: i64, repo: (i64, &'static str)| {
+        let env = &env;
+        async move {
+            env.deliver(
+                "pull_request",
+                &format!("flip-{n}-{}", repo.0),
+                &pull_request_opened(1901, repo, n),
+                Some(SECRET_1),
+            )
+            .await
+        }
+    };
+    let (_, body) = deliver(1, (91, "acme/secret-sauce")).await;
+    assert_eq!(
+        body["delivered"].as_u64(),
+        Some(1),
+        "private channel: delivered"
+    );
+
+    // The channel becomes public.
+    sqlx::query("UPDATE channel SET kind = 'public' WHERE id = $1")
+        .bind(channel)
+        .execute(&env.su)
+        .await
+        .unwrap();
+    let (_, body) = deliver(2, (91, "acme/secret-sauce")).await;
+    assert_eq!(
+        body["delivered"].as_u64().unwrap_or(0),
+        0,
+        "private repository on a now-public channel: stopped: {body}"
+    );
+    // A public repository is unaffected by the flip.
+    let (_, body) = deliver(2, (92, "acme/open")).await;
+    assert_eq!(
+        body["delivered"].as_u64(),
+        Some(1),
+        "public repo still delivered"
+    );
+
+    let overview: Value = env
+        .http
+        .get(format!(
+            "{}/v1/workspaces/{}/github",
+            env.base, env.a.workspace
+        ))
+        .bearer_auth(&env.token_a)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let flag = |repo: &str| {
+        overview["subscriptions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|sub| sub["repository"] == repo)
+            .map(|sub| sub["needsReconfirm"].as_bool())
+    };
+    assert_eq!(flag("acme/secret-sauce"), Some(Some(true)));
+    assert_eq!(flag("acme/open"), Some(Some(false)));
+
+    // Re-confirming (the same subscribe call with confirmPrivate) restarts delivery.
+    let (status, body) = env
+        .subscribe(
+            &env.token_a,
+            env.a.workspace,
+            channel,
+            1901,
+            "acme/secret-sauce",
+            None,
+            true,
+        )
+        .await;
+    assert_eq!(
+        (
+            status,
+            body["needsReconfirm"].as_bool(),
+            body["privateConfirmed"].as_bool()
+        ),
+        (200, Some(false), Some(true))
+    );
+    let (_, body) = deliver(3, (91, "acme/secret-sauce")).await;
+    assert_eq!(
+        body["delivered"].as_u64(),
+        Some(1),
+        "confirmed again: delivered"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_repository_that_turns_private_after_the_install_stops_on_a_public_channel() {
+    let env = env().await;
+    // Installed as PUBLIC.
+    env.link_a(2001, &[(101, "acme/was-open", false)]).await;
+    let channel = env
+        .channel(env.a.workspace, "public", "gh-turned-private")
+        .await;
+    let (status, body) = env
+        .subscribe(
+            &env.token_a,
+            env.a.workspace,
+            channel,
+            2001,
+            "acme/was-open",
+            None,
+            false,
+        )
+        .await;
+    assert_eq!(
+        (status, body["needsReconfirm"].as_bool()),
+        (200, Some(false))
+    );
+    let (_, body) = env
+        .deliver(
+            "pull_request",
+            "turn-1",
+            &pull_request_opened(2001, (101, "acme/was-open"), 1),
+            Some(SECRET_1),
+        )
+        .await;
+    assert_eq!(body["delivered"].as_u64(), Some(1), "public: delivered");
+
+    // GitHub now says the repository is private (the signed payload is the evidence).
+    let mut turned = pull_request_opened(2001, (101, "acme/was-open"), 2);
+    turned["repository"]["private"] = json!(true);
+    let (status, body) = env
+        .deliver("pull_request", "turn-2", &turned, Some(SECRET_1))
+        .await;
+    assert_eq!(status, 200);
+    // The refresh happens before the match, so even this very delivery is held back.
+    assert_eq!(
+        body["delivered"].as_u64().unwrap_or(0),
+        0,
+        "private on a public channel, never confirmed: {body}"
+    );
+    let (_, body) = env
+        .deliver(
+            "pull_request",
+            "turn-3",
+            &pull_request_opened(2001, (101, "acme/was-open"), 3),
+            Some(SECRET_1),
+        )
+        .await;
+    assert_eq!(
+        body["delivered"].as_u64().unwrap_or(0),
+        0,
+        "stays stopped: {body}"
+    );
+    let private: bool = sqlx::query_scalar(
+        "SELECT private FROM github_installation_repository \
+          WHERE installation_id = 2001 AND repo_id = 101",
+    )
+    .fetch_one(&env.su)
+    .await
+    .unwrap();
+    assert!(private, "the stored privacy followed the signed payload");
+
+    // Re-confirming restarts it.
+    let (status, _) = env
+        .subscribe(
+            &env.token_a,
+            env.a.workspace,
+            channel,
+            2001,
+            "acme/was-open",
+            None,
+            true,
+        )
+        .await;
+    assert_eq!(status, 200);
+    let (_, body) = env
+        .deliver(
+            "pull_request",
+            "turn-4",
+            &pull_request_opened(2001, (101, "acme/was-open"), 4),
+            Some(SECRET_1),
+        )
+        .await;
+    assert_eq!(body["delivered"].as_u64(), Some(1), "confirmed again");
 }
