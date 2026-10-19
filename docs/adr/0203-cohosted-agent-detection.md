@@ -6,6 +6,7 @@
 - 기안: Opus 5.5 worker (#3874)
 - 관계: ADR-0004(+증보 5: egress 가드 — Hermes provider 경계), ADR-0147(+증보 2026-10-16 「에이전트별 키 고정」 = #3873, **아직 머지 전**), ADR-0101(에이전트 = 1급 멤버), ADR-0162(Agent Port), ADR-0198(구독 정책), ADR-0201(팀 AI 빠른 길), ADR-0100
 - 증보: **2026-10-16 1인 워크스페이스의 커넥터 호스트로서의 Hermes** (성재 결재 「각자 + 1인 워크스페이스에서 Hermes 시험 (추천)」) — 파일 끝. D6 도구 잠금 목록을 커넥터 시험에 한해 넓히고, D7 볼륨 목록에 `mcp-tokens/`를 더하고, 「단일 워크스페이스」를 안내에서 서버 강제로 올린다. D1~D5·D8·D9는 바뀌지 않는다. 구현은 본문과 같이 #3873 뒤다(로컬 실측 K-S1a 제외). 같은 날 저녁 결재 「개인 Gmail 외부 앱」은 2026-10-17 결재 「뭐 계정만 필요한거면 dawn.kim으로 우선하자. 나중에 바꿀 수도 있는거지 ?」가 대체했고, K3·K5·K7에 반영했다. Google 시험은 dawn.kim의 Developer Preview 가입·OAuth client 준비(ADR-0113 증보 2 G-S0) 뒤에 시작한다. 2단계(쓰기 중계)는 Proposed다.
+- 증보(**Proposed**, 통합자 Accept 대기): **2026-10-19 설치 한 번에 Hermes까지** (#4072, 성재 2026-10-19 「제로 베이스 온보딩 개선 묶음도 진행」) — 파일 끝. D8을 구현 이름으로 확정하고, 생성기의 `HERMES_*`·로컬 opt-in·`OORT_COHOSTED_AGENT_TOOLS_LOCKED` 자동 주입과 Railway 카탈로그의 `hermes` 서비스를 더한다. D6-5 attest의 의미가 번들 배포 모양에 한해 바뀐다. D1~D5·D7·K1~K7은 바뀌지 않는다.
 - 표기: [V] 직접 확인(저장소 코드·문서 또는 이 세션에서 받은 공식 문서 원문) · **[추정]** 해석·계산 · [확인 필요] 구현 전 확인 · `runtime-unverified` 실행 안 함. 이 문서는 설계이고 코드·인프라를 바꾸지 않았다.
 
 ## 맥락
@@ -279,3 +280,55 @@ D6의 다섯 조건은 그대로이고, 커넥터 시험이면 아래를 **모�
 5. `agent.disabled_toolsets`에 `cronjob`·`delegation`·`web`(K4-1).
 
 게이트는 **설정**을 본다. K-S1a 실측대로 MCP 도구는 `/v1/toolsets`에 나오지 않고 `disabled_toolsets`가 막지도 않으므로, 허용목록 검사도 기동 뒤 리포트도 벤더 서버가 실제로 내놓는 도구를 증명하지 못한다 — 그것은 K4의 운영자 attest다. 스크립트는 레포 `infra/hermes/lockgate.py`에 있고 규칙은 Docker 없이 `infra/hermes/test_lockgate_connectors.py`로, 실제 Hermes 이미지(v0.22.2 digest 고정)로는 게이트 매트릭스 행으로 확인했다(#3948 PR 본문).
+
+
+## 증보 2026-10-19 — 설치 한 번에 Hermes까지 (#4072) — Proposed
+
+상태: **Proposed**. 공개 API는 바뀌지 않지만 보안 경계 하나가 바뀐다(아래 A3: 잠금 선언의 자동 기록). 통합자가 Accept한다. 모델 인증(키·OAuth)은 #4073의 몫이고 여기서 하지 않는다.
+
+### 배경 [V]
+제로 베이스 사용자는 §3.4.1의 수동 8단계를 따라야 카드가 보였고, compose에는 `agents` 프로파일이 없었다(D8은 「제안」이었다). 성재 목표는 「설치 한 번으로 Hermes까지 뜨고 설정 › AI 연결에 같은 서버의 Hermes 카드가 바로 보이는 것」이다.
+
+### A1. D8을 구현 이름으로 확정 (compose)
+- 프로파일 `agents`, 서비스 `hermes`(`infra/rust/docker-compose.rust.yml`). 이미지는 공식 `nousresearch/hermes-agent` v0.22.2의 **index digest 고정**(`sha256:36099926…c2919`, #3952 `hermes-kwak`와 같은 값). `ports:` 없음, `private` 네트워크만, 볼륨 `hermesdata:/opt/data`(이름은 pgdata와 같은 프로젝트 스코프 규칙), `mem_limit 2g`·`cpus 1`.
+- 시작 명령이 이미지 ENTRYPOINT를 **대체**한다(`/bin/sh -c`, `set -eu`): `infra/hermes/config.yaml`을 읽기 전용 마운트에서 `/opt/data/config.yaml`로 복사 → `lockgate.py gate`(exit 0이 아니면 여기서 종료, 리스너가 생기기 전) → `lockgate.py report &` → `exec` Hermes dispatcher. 이미지 자체의 부팅이 CMD보다 먼저 게이트웨이를 띄우므로 거절을 걸 수 있는 자리는 엔트리포인트 앞뿐이다(Phase 1 실측, K-S1b와 같음). 설정은 매 시작마다 마운트에서 다시 복사되므로 볼륨의 `config.yaml`을 고쳐도 효과가 없다.
+- 설정 `infra/hermes/config.yaml`: D6의 24개 toolset 끔, `approvals.mode: manual`·`unattended_mode: deny`, 텔레메트리·업데이트 확인 끔, **`model:`과 `mcp_servers` 없음**(모델은 #4073, 커넥터는 K 증보의 별도 옵트인).
+- 환경: Hermes는 `API_SERVER_*` 4개만 받는다. oort 비밀(DB·마스터 키·JWT)은 전달하지 않는다(D6-2). 모든 값은 `:-`(프로파일이 꺼져도 일반 compose 명령이 요구하지 않는다). `API_SERVER_KEY`가 비면 게이트가 32자 미만으로 거절하므로 시작되지 않는다.
+- 헬스체크: 이미지에 없으므로 이미지의 python으로 `127.0.0.1:8642/health`(무인증)를 본다. `start_period 120s`.
+
+### A2. 프로파일 활성화 — 생성기가 env에 쓴다
+`--compose`는 `--profile`을 막고 ambient `COMPOSE_PROFILES`를 지운다(정본 env만 권위). 따라서 활성화는 **env 파일의 `COMPOSE_PROFILES=agents`** 한 줄이다(compose가 `--env-file`의 이 키를 읽는 것을 실측). 기본 스택(플래그 없음)은 달라지지 않는다: 키도 서비스도 없다.
+
+### A3. 자동 주입과 D6-5 attest의 의미 변화 (보안 경계)
+`scripts/self_host_env.sh --with-agents`가 아래를 한 단위로 쓴다(`oort_cohosted_agent_env_keys` + 기존 `oort_local_provider_env_keys` 이름):
+- `COMPOSE_PROFILES=agents`
+- `HERMES_API_KEY`: 생성(hex 48자), **이미 있으면 다시 만들지 않는다**. 응답·로그·출력에 값을 내지 않는다.
+- `HERMES_BASE_URL=http://hermes:8642/v1`
+- `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`, `AGENT_PROVIDER_LOCAL_HOSTS`에 **정확한 호스트 `hermes`**(와일드카드 없음, 이미 있는 목록에 합친다)
+- `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`
+
+**D6-5의 변화.** 지금까지 attest는 「운영자가 체크리스트를 따랐다」는 자기 선언이었다. 번들 배포 모양(compose `agents` 프로파일, Railway 카탈로그)에서는 같은 선언을 생성기·카탈로그가 기록한다. 근거는 **그 서비스가 `lockgate.py gate` exit 0 없이는 listen하지 않는다**는 것이다: api의 프로브가 `ok`이면 게이트를 통과한 Hermes가 응답한 것이다(번들을 고치지 않은 한). 그래도 이것은 oort의 검증이 아니다. oort는 Hermes의 도구를 보지 못하고(D2), 응답·화면은 계속 「운영자의 자기 선언」으로 표기한다(`toolsLockAttested`는 선언을 비출 뿐 증명이 아니다). 선언이 거짓이 되는 길과 막는 방법:
+- 운영자가 설정·게이트·시작 명령을 고침 → 문서가 「그 뒷받침을 운영자가 되가져간다」고 명시한다.
+- 같은 env가 나중에 외부 Hermes로 향함 → 생성기는 이미 **다른 `HERMES_BASE_URL`이 선언된 env를 거절**하고, 그때 선언을 쓰지 않는다. 사람이 손으로 URL을 바꾸는 것은 막지 못한다(남는 위험).
+- 자동 연결은 하지 않는다: 연결은 계속 인스턴스 운영자의 한 번 클릭이다(D3·D4 불변).
+
+기각한 대안: (a) oort가 Hermes의 `lockgate report` 결과나 `/v1/toolsets`를 읽어 attest를 대신함 — 새 요청 경로이고 D2(정확히 두 요청)를 바꾼다. (b) attest를 계속 수동으로 — 제로 베이스 목표와 정면충돌. (c) 감지되면 자동 연결 — 기각(D 본문과 같음).
+
+### A4. Railway 카탈로그
+`infra/railway/railway.json`에 `hermes` 서비스(비공개, 같은 digest, `/opt/data` 볼륨, 시작 명령 = 같은 모양: 설정·게이트를 base64 변수에서 디코드 → gate → report → exec)를 더하고, api/agent-worker에 같은 배선 변수(api만 attest `1`)를 더한다. `HERMES_API_KEY`는 생성기 정본 키 집합(45)에 넣지 않고(T2 stdout 불변) **프로젝트 shared variable로 운영자가 한 번 만든다**. 카탈로그 검증기(`check_railway_catalog.py`)가 다음을 고정한다: 이미지 digest가 compose와 같다·공개 아님·시작 명령이 게이트-먼저의 정본 명령 목록·oort 비밀 0(compose 쌍둥이 변수 집합)·정확한 호스트·worker에는 attest 없음. 규칙마다 사보타주 10건이 RED다.
+
+### A5. 실측과 남은 것
+- compose(arm64, 2026-10-19, 격리 프로젝트): 빈 상태에서 `up -d --wait` → hermes healthy, `LOCKGATE ok=true disabled_count=24`, `LOCKREPORT` 6검사 true, 리스너 `0.0.0.0:8642`(uid 10000), `docker port` 공개 0. 운영자 로그인 후 `GET cohosted-agent` = `declaration: ready, toolsLockAttested: true, connectable: true`, `POST …/probe` = `state: ok, requestsSent: 2, modelCount: 1`, `POST …/connect` = 201(`pinKind: operator_env`). 사보타주: 설정에서 `terminal` 제거 → 게이트 exit 3, 컨테이너 재시작 반복, 프로브 `unreachable`; attest 제거 → `connectable: false`; 호스트 opt-in 제거 → `url_refused`, 요청 0건.
+- **D9**: compose는 `0.0.0.0` 실측. Railway는 production environment 생성일 2026-09-23(신규)이고 `hermes-kwak`(#3952)가 `0.0.0.0`으로 동작한 기록을 인용한다. `::`는 여전히 `runtime-unverified`(레거시 environment 미약속).
+- **모델 미인증 상태**: Hermes는 모델 없이 뜨고 `/v1/models`는 `hermes-agent` 1개를 200으로 돌려주며, `/v1/chat/completions`는 200 + 본문에 「Provider authentication failed: Hermes is not connected to any AI provider yet」 문구를 낸다. D2의 두 요청으로는 「모델 인증 필요」를 구분할 수 없다(`modelCount`가 1이어도 마찬가지). 카드의 그 상태를 어떻게 낼지는 #4073이 정한다 — 세 번째 요청이나 응답 분류는 D2 변경이므로 이 증보가 하지 않는다.
+- 미실측: amd64 런타임(Railway 인용만), 실제 Railway에 이 템플릿의 `hermes` 새 배포, 레거시 environment, 모델 키를 넣은 대화 왕복.
+
+### 바뀌지 않는 것
+D1~D5, D7(볼륨 내용·삭제), K1~K7, 프로브의 두 요청, 연결 클릭의 효과(채널·grant 0), 서버 코드(Rust 변경 없음).
+
+### red proof (해당 분기를 지우면 실패해야 한다)
+- 렌더된 compose의 시작 명령에서 게이트 호출·`set -eu`를 지우거나 `|| true`를 붙이면 `scripts/tests/test_self_host_env_modes.sh`의 `agents_check`가 실패한다.
+- `ports:` 추가·oort 비밀 변수 추가·설정 마운트 쓰기 가능·이미지 digest 제거·와일드카드 호스트·attest 제거 각각이 같은 검사를 실패시킨다.
+- Railway 카탈로그에서 같은 항목을 깨면 `check_railway_catalog.py --prove-mutations`가 해당 규칙 이름으로 RED다.
+- `infra/hermes/config.yaml`에서 `terminal`을 지우면 `test_default_config.py`가 실패하고, 실제 게이트는 exit 3이다(위 실측).
+- `--with-agents` 없이 만든 env에는 `HERMES_*`·`COMPOSE_PROFILES`·attest가 없고 `hermes` 서비스가 렌더되지 않는다.

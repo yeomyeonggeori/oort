@@ -24,6 +24,9 @@ list is also compared with a canonical list — operators, order and values
 fixed, only echo text free — so an added `set -x`, a second `k=`, a `||` in
 place of `;` or a redefined `run()` is RED even where no named rule looks.
 
+The Hermes service (#4072, ADR-0203 D6) is private, pinned by the same image
+digest as compose, starts only through the lock gate, and holds no oort secret.
+
 Each service's variable names must be ones its compose twin sets (plus the
 Railway-only extras named below), and infra/centrifugo.json may only hold the
 settings the catalog's Centrifugo literals stand in for.
@@ -53,7 +56,7 @@ OORT_ROLES = (
     "notifier",
     "push-relay",
 )
-REQUIRED_SERVICES = OORT_ROLES + ("centrifugo", "caddy", "postgres")
+REQUIRED_SERVICES = OORT_ROLES + ("centrifugo", "caddy", "postgres", "hermes")
 CENTRIFUGO_MAP = {
     "CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY": "${{shared.CENT_TOKEN_HMAC}}",
     "CENTRIFUGO_HTTP_API_KEY": "${{shared.CENT_API_KEY}}",
@@ -72,7 +75,20 @@ CENTRIFUGO_DERIVED = (
 )
 CENTRIFUGO_ALLOWED = set(CENTRIFUGO_MAP) | set(CENTRIFUGO_DERIVED) | {"CENTRIFUGO_LOG_LEVEL"}
 # Literal values an operator types by hand that the audit table (§A.2) names.
-HAND_LITERALS = {"HOST", "PORT", "CENT_API_URL", "RAILWAY_RUN_UID"}
+HAND_LITERALS = {
+    "HOST", "PORT", "CENT_API_URL", "RAILWAY_RUN_UID",
+    # #4072: the same-server Hermes wiring is typed by hand, so the README lists it.
+    "HERMES_BASE_URL", "AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK", "AGENT_PROVIDER_LOCAL_HOSTS",
+    "OORT_COHOSTED_AGENT_TOOLS_LOCKED", "API_SERVER_ENABLED", "API_SERVER_HOST", "API_SERVER_PORT",
+}
+# Shared variables the operator creates by hand (the generator does not print them).
+# HERMES_API_KEY: `openssl rand -hex 32`, one value for hermes' API_SERVER_KEY and the
+# HERMES_API_KEY of api and agent-worker.
+OPERATOR_SHARED = {"HERMES_API_KEY"}
+HERMES_SHARED_KEY = "${{shared.HERMES_API_KEY}}"
+HERMES_PORT = 8642
+HERMES_DATA = "/opt/data"
+HERMES_PY = "/opt/hermes/.venv/bin/python"
 REF_RE = re.compile(r"\$\{\{([^}]*)\}\}")
 SHARED_RE = re.compile(r"^shared\.([A-Za-z_][A-Za-z0-9_]*)$")
 PLACEHOLDER_PREFIXES = ("<sealed:", "<operator:")
@@ -147,6 +163,22 @@ CANONICAL_SHELL: dict[str, list[tuple[object, list[object]]]] = {
             + ["HOME=/home/momo", "momo-rust-entrypoint", "api"],
         ),
     ],
+    # #4072: config and gate arrive as base64 variables, the gate runs BEFORE the image's
+    # own entrypoint (which starts the gateway ahead of any CMD), `set -e` stops the service
+    # on a non-zero gate, and `exec` hands PID 1 to the dispatcher.
+    "hermes": [
+        ("", ["set", "-eu"]),
+        (";", ["umask", "022"]),
+        (";", [":", "${HERMES_CONFIG_B64:?}", "${HERMES_LOCKGATE_B64:?}", "${API_SERVER_KEY:?}"]),
+        (";", ["mkdir", "-p", HERMES_DATA]),
+        (";", ["printf", "%s", "$HERMES_CONFIG_B64"]),
+        ("|", ["base64", "-d", ">", HERMES_DATA + "/config.yaml"]),
+        (";", ["printf", "%s", "$HERMES_LOCKGATE_B64"]),
+        ("|", ["base64", "-d", ">", "/tmp/lockgate.py"]),
+        (";", [HERMES_PY, "/tmp/lockgate.py", "gate", HERMES_DATA + "/config.yaml"]),
+        (";", [HERMES_PY, "/tmp/lockgate.py", "report", "&", "exec",
+               "/opt/hermes/docker/entrypoint-dispatch.sh", "gateway", "run"]),
+    ],
     "push-relay": push_canonical("push-relay", "APNS_KEY_P8_B64", "apns-key.p8", "MOMO_APNS_KEY_PATH"),
     "notifier": push_canonical(
         "notifier", "RELAY_SIGNING_KEY_B64", "relay-signing-key.pem", "MOMO_PUSH_RELAY_PRIVATE_KEY_PATH"
@@ -194,6 +226,9 @@ COMPOSE_TWINS: dict[str, tuple[list[tuple[str, str]], set[str]]] = {
     "relay": ([("docker-compose.rust.yml", "relay")], set()),
     "webhook-sender": ([("docker-compose.rust.yml", "webhook-sender")], set()),
     "agent-worker": ([("docker-compose.rust.yml", "agent-worker")], set()),
+    # compose mounts config.yaml and lockgate.py read-only; Railway has no bind mount, so
+    # both arrive as base64 variables the start command decodes.
+    "hermes": ([("docker-compose.rust.yml", "hermes")], {"HERMES_CONFIG_B64", "HERMES_LOCKGATE_B64"}),
     "postgres": ([("docker-compose.rust.yml", "postgres")], set()),
     # compose mounts infra/centrifugo.json; these four env literals replace it.
     "centrifugo": ([("docker-compose.rust.yml", "centrifugo")], set(CENTRIFUGO_DERIVED)),
@@ -585,6 +620,60 @@ def centrifugo_errors(services: dict, centrifugo_json: dict, compose: str) -> li
     return errors
 
 
+def hermes_errors(services: dict, compose: str) -> list[str]:
+    """The same-server Hermes (ADR-0203 D6/D8/D9): private, digest-pinned, gate-first, no oort secret."""
+    errors: list[str] = []
+    hermes = services["hermes"]
+    variables = hermes.get("variables") or {}
+    image = hermes.get("image")
+    twin_image = compose_image(compose, "hermes")
+    if not isinstance(image, str) or not re.search(r"@sha256:[0-9a-f]{64}$", image):
+        errors.append("hermes image %r must be pinned by an index digest (@sha256:…)" % (image,))
+    elif image != twin_image:
+        errors.append("hermes image %r != the compose hermes image %r" % (image, twin_image))
+    if (hermes.get("volume") or {}).get("mountPath") != HERMES_DATA:
+        errors.append("hermes volume mountPath %r != %s" % ((hermes.get("volume") or {}).get("mountPath"), HERMES_DATA))
+    if hermes.get("port") != HERMES_PORT or variables.get("API_SERVER_PORT") != str(HERMES_PORT):
+        errors.append("hermes port and API_SERVER_PORT must be %d" % HERMES_PORT)
+    if variables.get("API_SERVER_ENABLED") != "true":
+        errors.append("hermes API_SERVER_ENABLED must be true")
+    if variables.get("API_SERVER_HOST") != "0.0.0.0":
+        errors.append(
+            "hermes API_SERVER_HOST must be 0.0.0.0 (an environment created after 2025-10-16 resolves "
+            "internal names to IPv4 and IPv6; `::` is runtime-unverified, ADR-0203 D9)"
+        )
+    if variables.get("API_SERVER_KEY") != HERMES_SHARED_KEY:
+        errors.append("hermes API_SERVER_KEY %r must be %s" % (variables.get("API_SERVER_KEY"), HERMES_SHARED_KEY))
+    for forbidden in ("API_SERVER_CORS_ORIGINS", "HERMES_YOLO_MODE", "HERMES_DASHBOARD"):
+        if forbidden in variables:
+            errors.append("hermes must not set %s (lock gate invariant)" % forbidden)
+    for name in ("HERMES_CONFIG_B64", "HERMES_LOCKGATE_B64"):
+        if not str(variables.get(name, "")).startswith("<operator:"):
+            errors.append("hermes %s must be an <operator: …> placeholder (base64 of the repo file)" % name)
+    if hermes.get("healthcheckPath") is not None:
+        errors.append("hermes healthcheckPath is runtime-unverified on Railway; leave it unset")
+    base = "http://%s:%d/v1" % (hermes.get("privateHostname"), HERMES_PORT)
+    if hermes.get("privateHostname") != "hermes.railway.internal":
+        errors.append("hermes privateHostname must be hermes.railway.internal")
+    for role in ("api", "agent-worker"):
+        got = (services[role].get("variables") or {})
+        want = {
+            "HERMES_BASE_URL": base,
+            "HERMES_API_KEY": HERMES_SHARED_KEY,
+            "AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK": "1",
+            # exact host, never a wildcard (ADR-0004 증보 2026-09-08)
+            "AGENT_PROVIDER_LOCAL_HOSTS": hermes.get("privateHostname"),
+        }
+        if role == "api":
+            want["OORT_COHOSTED_AGENT_TOOLS_LOCKED"] = "1"
+        for var, value in want.items():
+            if got.get(var) != value:
+                errors.append("%s %s %r must be %r (same-server Hermes wiring)" % (role, var, got.get(var), value))
+    if "OORT_COHOSTED_AGENT_TOOLS_LOCKED" in (services["agent-worker"].get("variables") or {}):
+        errors.append("agent-worker must not carry OORT_COHOSTED_AGENT_* (api only, ADR-0203 증보 K-S2)")
+    return errors
+
+
 def collect_errors(
     catalog_path: Path,
     compose_path: Path,
@@ -717,6 +806,9 @@ def collect_errors(
     # -- Centrifugo native names + infra/centrifugo.json parity --------------
     errors.extend(centrifugo_errors(services, centrifugo_json, compose))
 
+    # -- same-server Hermes ---------------------------------------------------
+    errors.extend(hermes_errors(services, compose))
+
     # -- Postgres image service ----------------------------------------------
     pg = services["postgres"]
     want_pg_image = compose_image(compose, "postgres")
@@ -790,7 +882,7 @@ def collect_errors(
                 shared = SHARED_RE.match(ref)
                 if not shared:
                     errors.append("%s %s: reference ${{%s}} is not ${{shared.KEY}}" % (name, var, ref))
-                elif shared.group(1) not in generator_keys:
+                elif shared.group(1) not in generator_keys and shared.group(1) not in OPERATOR_SHARED:
                     errors.append(
                         "%s %s: ${{shared.%s}} is not a key the generator writes"
                         % (name, var, shared.group(1))
@@ -955,6 +1047,36 @@ def mutate_catalog(kind: str, data: dict) -> None:
         services["relay"]["variables"]["MIGRATE_DATABASE_URL"] = "${{shared.MIGRATE_DATABASE_URL}}"
     elif kind == "sender-cent-api-key":  # G10
         services["webhook-sender"]["variables"]["CENT_API_KEY"] = "${{shared.CENT_API_KEY}}"
+    elif kind == "hermes-no-gate":  # #4072: the lock gate line removed
+        services["hermes"]["startCommand"] = replace_once(
+            services["hermes"]["startCommand"],
+            "/opt/hermes/.venv/bin/python /tmp/lockgate.py gate /opt/data/config.yaml; ",
+            "",
+            kind,
+        )
+    elif kind == "hermes-gate-nonfatal":
+        services["hermes"]["startCommand"] = replace_once(
+            services["hermes"]["startCommand"],
+            "gate /opt/data/config.yaml;",
+            "gate /opt/data/config.yaml || true;",
+            kind,
+        )
+    elif kind == "hermes-public":
+        services["hermes"]["public"] = True
+    elif kind == "hermes-image-floating":
+        services["hermes"]["image"] = "nousresearch/hermes-agent:latest"
+    elif kind == "hermes-oort-secret":
+        services["hermes"]["variables"]["PROVIDER_LINK_MASTER_KEY"] = "${{shared.PROVIDER_LINK_MASTER_KEY}}"
+    elif kind == "hermes-cors-open":
+        services["hermes"]["variables"]["API_SERVER_CORS_ORIGINS"] = "*"
+    elif kind == "hermes-key-literal":
+        services["hermes"]["variables"]["API_SERVER_KEY"] = "dev-insecure-hermes-bearer"
+    elif kind == "api-hermes-wildcard-host":
+        api["variables"]["AGENT_PROVIDER_LOCAL_HOSTS"] = "*.railway.internal"
+    elif kind == "api-hermes-attest-dropped":
+        del api["variables"]["OORT_COHOSTED_AGENT_TOOLS_LOCKED"]
+    elif kind == "worker-hermes-attest":
+        services["agent-worker"]["variables"]["OORT_COHOSTED_AGENT_TOOLS_LOCKED"] = "1"
     else:
         raise SystemExit("unknown catalog mutation %s" % kind)
 
@@ -1005,6 +1127,16 @@ CATALOG_MUTATIONS: tuple[tuple[str, str], ...] = (
     ("relay-as-root", "relay variables outside its compose twin"),
     ("relay-superuser-dsn", "relay variables outside its compose twin"),
     ("sender-cent-api-key", "webhook-sender variables outside its compose twin"),
+    ("hermes-no-gate", "hermes start command is not the canonical command list"),
+    ("hermes-gate-nonfatal", "hermes start command is not the canonical command list"),
+    ("hermes-public", "hermes must not be public"),
+    ("hermes-image-floating", "hermes image"),
+    ("hermes-oort-secret", "hermes variables outside its compose twin"),
+    ("hermes-cors-open", "hermes variables outside its compose twin"),
+    ("hermes-key-literal", "hermes API_SERVER_KEY"),
+    ("api-hermes-wildcard-host", "api AGENT_PROVIDER_LOCAL_HOSTS"),
+    ("api-hermes-attest-dropped", "api OORT_COHOSTED_AGENT_TOOLS_LOCKED"),
+    ("worker-hermes-attest", "agent-worker variables outside its compose twin"),
 )
 
 

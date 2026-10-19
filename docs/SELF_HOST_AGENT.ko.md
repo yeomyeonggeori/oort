@@ -1973,8 +1973,36 @@ agent:
 삭제하세요. 워크스페이스 하나만 Hermes 하나에 연결하세요(여러 워크스페이스의
 대화가 한 볼륨에 섞여요).
 
-compose `agents` 프로파일은 아직 없어요(Railway 경로가 검증된 뒤로 미뤘어요).
-실제 Railway에서 `0.0.0.0`과 `::`를 재 보는 일도 남아 있어요.
+**제로 베이스 지름길 (#4072).** 1~7번은 이제 템플릿과 생성기가 대신 해요. 잠금을
+읽는 일과 모델 키는 여전히 운영자 몫이에요.
+
+- **Railway:** `infra/railway/railway.json`에 `hermes` 서비스(비공개, digest 고정
+  공식 이미지, `/opt/data` 볼륨)와 6~7번의 api·agent-worker 변수가 들어 있어요.
+  shared variable `HERMES_API_KEY`(`openssl rand -hex 32`)를 만들고,
+  `infra/hermes/config.yaml`과 `infra/hermes/lockgate.py`를 base64 변수 두 개로
+  붙여 배포한 뒤, hermes 배포 로그에서 `LOCKGATE {"ok": true, …}` 한 줄을 읽어요.
+  시작 명령이 Hermes 엔트리포인트 앞에서 게이트를 돌리므로, 설정이 거절되면 서비스는
+  아예 listen하지 않아요. `infra/railway/README.md`(Hermes)를 보세요.
+- **docker compose:** `scripts/self_host_env.sh --local-build --with-agents`(또는
+  `--published-image …`)가 `COMPOSE_PROFILES=agents`, 생성된 `HERMES_API_KEY`,
+  `HERMES_BASE_URL=http://hermes:8642/v1`, 정확한 호스트 `hermes`의 로컬 허용,
+  `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`을 써요. 이어서
+  `scripts/self_host_env.sh --compose up -d --wait`로 나머지와 함께 Hermes가 떠요.
+  `hermes` 서비스에는 `ports:`가 없고(호스트에서 닿지 않음), 설정과 게이트를
+  읽기 전용으로 마운트하며, 엔트리포인트 앞에서 `lockgate.py gate`를 돌려요. 이
+  플래그는 기존 env에는 덧붙이기만 하고, 이미 다른 `HERMES_BASE_URL`을 선언한 env는
+  거절해요.
+- `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`은 여전히 **운영자 본인의 선언**이에요. 두
+  배포 모양 모두 게이트가 뒷받침하지만, 설정·게이트·시작 명령을 고치면 그 뒷받침은
+  운영자가 직접 책임져요.
+- **모델 인증은 이 작업 밖이에요**(#4073). 모델 없이도 Hermes는 뜨고 카드도 보여요.
+  모델을 정하기 전까지 대화 한 번은 「Hermes가 아직 모델 provider에 연결되지 않았다」
+  고 답해요.
+
+compose 실측(arm64, 2026-10-19, 고정 이미지): listener는 `0.0.0.0:8642`(uid 10000),
+`docker port`는 공개된 포트가 없다고 나오고, 게이트는 `LOCKGATE ok=true
+disabled_count=24`, 리포트는 6개 검사가 모두 true였어요. 레거시 Railway environment의
+`::`는 여전히 runtime-unverified예요.
 
 ### 3.4.2 Railway: Hermes 「커넥터 시험」 (ADR-0203 증보, #3948)
 

@@ -434,6 +434,43 @@ the deleted Swift server package (`swift run --package-path server`, LS-1 /
 
 See [`external-agent-provider/hermes-gateway-native-platform.md`](external-agent-provider/hermes-gateway-native-platform.md).
 
+### Hermes on the same server (`--with-agents`)
+
+To have Hermes come up with the stack and the 설정 › AI 연결 card
+「같은 서버의 Hermes」 appear without hand-editing env, add one flag when you
+create (or later add to) the env:
+
+```sh
+scripts/self_host_env.sh --local-build --with-agents      # or --published-image "$IMAGE_REF" --with-agents
+scripts/self_host_env.sh --compose up -d --wait
+```
+
+The flag writes `COMPOSE_PROFILES=agents`, a generated `HERMES_API_KEY`,
+`HERMES_BASE_URL=http://hermes:8642/v1`, `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`,
+`AGENT_PROVIDER_LOCAL_HOSTS` with the exact host `hermes` (merged with
+`host.docker.internal` when both flags are used) and
+`OORT_COHOSTED_AGENT_TOOLS_LOCKED=1` (`oort_cohosted_agent_env_keys`). Without
+it none of these exist and no Hermes is started.
+
+- The `hermes` service is the official image pinned by digest, on the private
+  network only, with no published port. It runs `infra/hermes/lockgate.py gate`
+  before the Hermes entrypoint (24 toolsets off, chat-only allow-list): a failing
+  gate means a container that restarts and never listens, so the probe
+  reports `unreachable` (not connectable) instead of an unlocked Hermes.
+- `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1` is your own declaration; here the gate
+  backs it. Editing `infra/hermes/config.yaml` or the start command takes that
+  back on yourself.
+- Hermes keeps its data (`hermesdata` volume → `/opt/data`) outside oort's
+  database and `oort backup`; back it up yourself. `down -v` removes it.
+- Model authentication is a separate step (#4073). Without it the card appears
+  and a chat turn answers that Hermes is not connected to a provider.
+- Existing env: the flag is add-only (the generated key is never replaced). It
+  refuses an env that already declares another `HERMES_BASE_URL`. Recreate api
+  and agent-worker afterwards (`--compose up -d`).
+
+Detailed manual steps and the Railway shape: `SELF_HOST_AGENT.md` §3.4.1,
+`infra/railway/README.md` (Hermes).
+
 ### What takes effect immediately and what needs a restart
 
 It splits on one line. **The key is a row; the allowlist is process env.**
