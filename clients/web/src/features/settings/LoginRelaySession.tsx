@@ -65,8 +65,8 @@ export function LoginRelaySession({
   onEnded: (status: LoginStatus) => void;
   /** 사용자가 닫았다. 부모는 `start`를 비운다. */
   onClose: () => void;
-  /** 열어도 되는 벤더 호스트. 앱 로그인(주소가 앱마다 다르다)은 서버의 검사에 맡기고 `undefined`를 넘긴다. */
-  allowedHosts?: readonly string[] | undefined;
+  /** 열어도 되는 벤더 호스트. 앱 로그인(주소가 앱마다 다르다)은 서버의 검사에 맡기고 `null`을 넘긴다. */
+  allowedHosts?: readonly string[] | null;
 }) {
   const [status, setStatus] = useState<LoginStatus>({ status: "pending", reason: null });
   const [now, setNow] = useState(() => Date.now());
@@ -80,7 +80,7 @@ export function LoginRelaySession({
   const endedRef = useRef(false);
   const mountedRef = useRef(false);
   const loginId = start.loginId;
-  const safe = safeLoginUrl(start.url, allowedHosts);
+  const safe = safeLoginUrl(start.url, allowedHosts ?? undefined);
   const openRef = useRef<HTMLAnchorElement>(null);
 
   const finish = (next: LoginStatus) => {
@@ -106,9 +106,10 @@ export function LoginRelaySession({
 
   // 새로 선 블록의 첫 행동으로 초점을 옮긴다(누른 단추가 사라지므로 body 로 떨어지지 않게).
   useEffect(() => {
-    if (start.mode === "paste") pasteRef.current?.focus();
-    else openRef.current?.focus();
-  }, [start.mode]);
+    // 첫 행동은 두 방식 모두 「주소 열기」다(붙여넣기는 그 다음 단계).
+    if (openRef.current) openRef.current.focus();
+    else pasteRef.current?.focus();
+  }, []);
 
   // 폴링: 상태 낱말만 온다(주소·코드는 오지 않는다).
   useEffect(() => {
@@ -279,7 +280,7 @@ export function LoginRelaySession({
         <span className="text-meta text-ink-muted">
           {/* 읽어 주는 영역은 상태 낱말뿐이다. 1초마다 바뀌는 시간은 밖에 둔다. */}
           <span role="status" aria-live="polite" data-testid="login-status">
-            {submitted ? COPY.submitted : COPY.waiting}
+            {submitted ? COPY.submitted : start.mode === "paste" ? COPY.waitingPaste : COPY.waiting}
           </span>{" "}
           <span data-numeric className="font-mono">
             {minutes}:{seconds}

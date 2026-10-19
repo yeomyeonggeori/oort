@@ -302,6 +302,7 @@ export const MODEL_LOGIN_COPY = {
   pasteSend: "붙여넣은 코드 보내기",
   pasteSending: "보내는 중이에요",
   waiting: "승인을 기다리고 있어요.",
+  waitingPaste: "붙여넣을 코드를 기다리고 있어요.",
   submitted: "확인하고 있어요.",
   cancel: "취소",
   done: "로그인됐어요.",

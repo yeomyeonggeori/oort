@@ -62,7 +62,7 @@ export function ModelLoginPanel({
   const [active, setActive] = useState<Active | null>(null);
   const [ended, setEnded] = useState<LoginStatus | null>(null);
   const [startingFor, setStartingFor] = useState<ModelProvider | null>(null);
-  const [startError, setStartError] = useState<string | null>(null);
+  const [startError, setStartError] = useState<{ provider: ModelProvider; message: string } | null>(null);
   const [confirmClaude, setConfirmClaude] = useState(false);
   // 단추가 사라지거나 블록이 닫힐 때 초점이 body 로 떨어지지 않게 옮길 자리.
   const startRefs = useRef<Partial<Record<ModelProvider, HTMLButtonElement | null>>>({});
@@ -92,7 +92,7 @@ export function ModelLoginPanel({
     focusAfter.current = null;
     if (target === "result") resultRef.current?.focus();
     else if (lastProvider.current) startRefs.current[lastProvider.current]?.focus();
-  }, [active]);
+  }, [active, confirmClaude]);
 
   if (targets.isPending) {
     return (
@@ -152,7 +152,7 @@ export function ModelLoginPanel({
       setActive({ provider, start });
       setConfirmClaude(false);
     } catch (error) {
-      setStartError(loginErrorMessage(error));
+      setStartError({ provider, message: loginErrorMessage(error) });
       // 중계가 그 사이 꺼졌으면 읽기를 다시 해서 셸 안내로 바꾼다.
       void client.invalidateQueries({ queryKey: targetsKey });
     } finally {
@@ -209,7 +209,7 @@ export function ModelLoginPanel({
       <div
         ref={resultRef}
         tabIndex={-1}
-        className="mt-2 flex min-w-0 flex-col gap-1 break-keep border-t border-line py-3 focus-visible:focus-ring"
+        className="mt-2 flex min-w-0 flex-col gap-1 break-keep border-t border-line px-2 py-3 focus-visible:focus-ring"
         role="status"
         data-testid="model-login-result"
         data-status={ended.status}
@@ -230,20 +230,25 @@ export function ModelLoginPanel({
       <p className="break-keep px-2 pb-2 pt-3 text-meta text-ink-muted">{COPY.lead}</p>
       <AiLineRow
         testId="model-login-codex"
-        action={startButton("openai-codex", COPY.start, () => void begin("openai-codex"))}
+        action={
+          active?.provider === "openai-codex" ? undefined : startButton("openai-codex", COPY.start, () => void begin("openai-codex"))
+        }
       >
         <span className="flex flex-wrap items-center gap-2">
           <span className="font-semibold">{COPY.codexTitle}</span>
           {pill("openai-codex")}
         </span>
         <span className="text-meta text-ink-muted">{COPY.codexDetail}</span>
+        {startError?.provider === "openai-codex" && <InlineBanner message={startError.message} testId="model-login-start-error" />}
         {sessionFor("openai-codex")}
         {resultFor("openai-codex")}
       </AiLineRow>
       <AiLineRow
         testId="model-login-claude"
         action={
-          confirmClaude ? undefined : startButton("anthropic", COPY.start, () => setConfirmClaude(true))
+          confirmClaude || active?.provider === "anthropic"
+            ? undefined
+            : startButton("anthropic", COPY.start, () => setConfirmClaude(true))
         }
       >
         <span className="flex flex-wrap items-center gap-2">
@@ -251,6 +256,7 @@ export function ModelLoginPanel({
           {pill("anthropic")}
         </span>
         <span className="text-meta text-ink-muted">{COPY.claudeDetail}</span>
+        {startError?.provider === "anthropic" && <InlineBanner message={startError.message} testId="model-login-start-error" />}
         {sessionFor("anthropic")}
         {resultFor("anthropic")}
         {confirmClaude && active === null && (
@@ -270,7 +276,17 @@ export function ModelLoginPanel({
                 {startingFor === "anthropic" && <Loader2 aria-hidden="true" className="spinner-busy" />}
                 {startingFor === "anthropic" ? COPY.starting : COPY.claudeTermsAction}
               </Button>
-              <Button type="button" size="sm" variant="ghost" className="tap-target" onClick={() => setConfirmClaude(false)}>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="tap-target"
+                onClick={() => {
+                  lastProvider.current = "anthropic";
+                  focusAfter.current = "start";
+                  setConfirmClaude(false);
+                }}
+              >
                 {COPY.cancel}
               </Button>
             </span>
@@ -284,7 +300,6 @@ export function ModelLoginPanel({
 
       <div className="flex flex-col gap-2 px-2">
         {offline && <InlineBanner tone="neutral" message={COPY.offline} testId="model-login-offline" />}
-        {startError !== null && <InlineBanner message={startError} testId="model-login-start-error" />}
       </div>
       <p className="break-keep px-2 pt-2 text-meta text-ink-muted">{COPY.teamNote}</p>
     </PanelShell>

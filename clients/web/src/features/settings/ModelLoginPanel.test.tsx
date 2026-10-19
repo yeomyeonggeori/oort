@@ -340,10 +340,26 @@ describe("ModelLoginPanel", () => {
     const confirm = await until("model-login-claude-confirm");
     await waitFor(() => expect(document.activeElement).toBe(confirm));
     click(confirm);
-    const paste = await until("login-paste");
-    await waitFor(() => expect(document.activeElement).toBe(paste));
+    const open = await until("login-open");
+    await waitFor(() => expect(document.activeElement).toBe(open));
     click(q("login-cancel") as HTMLElement);
     await waitFor(() => expect(document.activeElement).toBe(q("model-login-start-anthropic")));
+  });
+
+  it("cancelling the terms step returns focus to the start button, and a start error sits in the row that was clicked", async () => {
+    api.request.mockImplementation((_path: string, init?: RequestInit) =>
+      init?.method === "POST" ? Promise.reject(new ApiError(429, "slow")) : Promise.resolve(TARGETS)
+    );
+    mount();
+    await until("model-login-claude");
+    click(q("model-login-start-anthropic") as HTMLElement);
+    const terms = await until("model-login-claude-terms");
+    const cancel = Array.from(terms.querySelectorAll("button")).find((b) => b.textContent === "취소") as HTMLElement;
+    click(cancel);
+    await waitFor(() => expect(document.activeElement).toBe(q("model-login-start-anthropic")));
+    click(q("model-login-start-openai-codex") as HTMLElement);
+    const banner = await until("model-login-start-error");
+    expect(q("model-login-codex")?.contains(banner)).toBe(true);
   });
 
   it("a poll that finds the login erased (404) ends it and drops the address", async () => {
