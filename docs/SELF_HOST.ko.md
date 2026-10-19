@@ -550,6 +550,13 @@ D17). 정확히 `true`일 때만 로그인 직후 대행 등록이 Claude Code �
 컴퓨터)에서 Claude Code 작업도 시작되지 않고(`409 claude_subscription_agent_paused`,
 #3431) 본인 소유 host는 영향이 없다. 바꾼 뒤 **api**와 **agent-worker**를 재시작한다.
 
+**이 스위치들은 Hermes에는 적용되지 않는다.** oort 서버가 구동하는 구독 에이전트를
+거르는 것이다. 직접 호스팅한 Hermes가 자기 볼륨에 보관한 Codex·Claude 구독
+OAuth로 모델 인증을 하는 경로는 별개이고 허용된다([ADR-0193](adr/0193-onboarding-2-subscription-agent-boundary.md)
+증보 2026-10-19, owner 결정 #4071). oort 서버와 금고는 그 토큰을 받지도 저장하지도
+기록하지도 않는다. 사용량은 Hermes에 로그인한 사람의 구독에서 나가고, 벤더 약관
+판단은 운영자 몫이다. `SELF_HOST_AGENT.ko.md` §3.4.1을 본다.
+
 ---
 
 ## 방금 무엇이 떴나

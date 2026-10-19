@@ -33,6 +33,57 @@
         "software-development",
         "work-tracking"
       ],
+      "version": "1.1.0"
+    },
+    {
+      "description": "Official Google Gmail remote MCP (Developer Preview): read mail, create drafts, label. No send.",
+      "egressDomains": [
+        "gmailmcp.googleapis.com"
+      ],
+      "enabled": false,
+      "installed": false,
+      "name": "Gmail",
+      "official": true,
+      "pluginId": "com.momo.plugins.gmail",
+      "recommended": false,
+      "recommendedFor": [
+        "communication",
+        "productivity"
+      ],
+      "version": "1.0.0"
+    },
+    {
+      "description": "Official Google Calendar remote MCP (Developer Preview)",
+      "egressDomains": [
+        "calendarmcp.googleapis.com"
+      ],
+      "enabled": false,
+      "installed": false,
+      "name": "Google Calendar",
+      "official": true,
+      "pluginId": "com.momo.plugins.google-calendar",
+      "recommended": false,
+      "recommendedFor": [
+        "scheduling",
+        "productivity"
+      ],
+      "version": "1.0.0"
+    },
+    {
+      "description": "Official Google Drive remote MCP (Developer Preview), the signed-in person's own Drive",
+      "egressDomains": [
+        "drivemcp.googleapis.com"
+      ],
+      "enabled": false,
+      "installed": false,
+      "name": "Google 내 드라이브",
+      "official": true,
+      "pluginId": "com.momo.plugins.google-drive",
+      "recommended": false,
+      "recommendedFor": [
+        "knowledge-management",
+        "productivity"
+      ],
       "version": "1.0.0"
     },
     {
@@ -50,7 +101,7 @@
         "work-tracking",
         "product-development"
       ],
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "description": "Official Notion hosted MCP integration",
@@ -67,7 +118,7 @@
         "knowledge-management",
         "documentation"
       ],
-      "version": "1.0.0"
+      "version": "1.1.0"
     }
   ],
   "toolPolicy": {
@@ -84,12 +135,132 @@
         "tools": [
           {
             "approvalTier": "read_only",
-            "name": "github.list_repositories",
+            "name": "github.get_commit",
+            "risk": "read"
+          },
+          {
+            "approvalTier": "read_only",
+            "name": "github.get_file_contents",
+            "risk": "read"
+          },
+          {
+            "approvalTier": "read_only",
+            "name": "github.get_label",
+            "risk": "read"
+          },
+          {
+            "approvalTier": "read_only",
+            "name": "github.get_latest_release",
+            "risk": "read"
+          },
+          {
+            "approvalTier": "read_only",
+            "name": "github.get_me",
+            "risk": "read"
+          },
+          {
+            "approvalTier": "read_only",
+            "name": "github.get_release_by_tag",
+            "risk": "read"
+          },
+          {
+            "approvalTier": "read_only",
+            "name": "github.get_tag",
+            "risk": "read"
+          },
+          {
+            "approvalTier": "read_only",
+            "name": "github.get_team_members",
+            "risk": "read"
+          },
+          {
+            "approvalTier": "read_only",
+            "name": "github.get_teams",
+            "risk": "read"
+          },
+          {
+            "approvalTier": "read_only",
+            "name": "github.issue_read",
+            "risk": "read"
+          },
+          {
+            "approvalTier": "read_only",
+            "name": "github.list_branches",
+            "risk": "read"
+          },
+          {
+            "approvalTier": "read_only",
+            "name": "github.list_commits",
+            "risk": "read"
+          },
+          {
+            "approvalTier": "read_only",
+            "name": "github.list_issue_fields",
+            "risk": "read"
+          },
+          {
+            "approvalTier": "read_only",
+            "name": "github.list_issues",
+            "risk": "read"
+          },
+          {
+            "approvalTier": "read_only",
+            "name": "github.list_issue_types",
+            "risk": "read"
+          },
+          {
+            "approvalTier": "read_only",
+            "name": "github.list_pull_requests",
+            "risk": "read"
+          },
+          {
+            "approvalTier": "read_only",
+            "name": "github.list_releases",
+            "risk": "read"
+          },
+          {
+            "approvalTier": "read_only",
+            "name": "github.list_repository_collaborators",
+            "risk": "read"
+          },
+          {
+            "approvalTier": "read_only",
+            "name": "github.list_tags",
+            "risk": "read"
+          },
+          {
+            "approvalTier": "read_only",
+            "name": "github.pull_request_read",
+            "risk": "read"
+          },
+          {
+            "approvalTier": "read_only",
+            "name": "github.search_code",
+            "risk": "read"
+          },
+          {
+            "approvalTier": "read_only",
+            "name": "github.search_commits",
             "risk": "read"
           },
           {
             "approvalTier": "read_only",
             "name": "github.search_issues",
+            "risk": "read"
+          },
+          {
+            "approvalTier": "read_only",
+            "name": "github.search_pull_requests",
+            "risk": "read"
+          },
+          {
+            "approvalTier": "read_only",
+            "name": "github.search_repositories",
+            "risk": "read"
+          },
+          {
+            "approvalTier": "read_only",
+            "name": "github.search_users",
             "risk": "read"
           }
         ]

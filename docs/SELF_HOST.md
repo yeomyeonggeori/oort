@@ -601,6 +601,15 @@ not affected. Off also keeps Claude Code from starting on a shared
 #3431); a member's own host is unaffected. Restart **api** and **agent-worker**
 after changing it.
 
+**These switches do not apply to Hermes.** They gate subscription agents that
+oort's server drives. A Hermes you host that authenticates its model with its
+own Codex or Claude subscription OAuth, kept on Hermes' volume, is a separate
+path ([ADR-0193](adr/0193-onboarding-2-subscription-agent-boundary.md) 증보
+2026-10-19, owner decision #4071). oort's server and vault never receive, store
+or log those tokens; usage comes from the subscription of whoever logged Hermes
+in, and the vendor-terms judgment is the operator's. See `SELF_HOST_AGENT.md`
+§3.4.1.
+
 ---
 
 ## What just came up
