@@ -3,6 +3,7 @@
 - Status: **Accepted** (2026-08-02 성재 — "앤트로픽 키 안 쓰고 gpt oauth 사용" 지시 + 제안 승인 "ㄱㄱ". 기안 Fable)
 - 관련: ADR-0004(+증보 1 — provider_link 봉인 계약이 이 결정의 그릇), ADR-0144(코딩 에이전트=sandbox-internal login — **무변경 유지**), ADR-0113(커넥터 경계 — 참조), ADR-0146(provenance), B5.1(agent-worker)·B4.2(provider link REST)
 - 증보: 2026-09-26 온보딩 2.0(ADR-0193 Q2) — 구독 OAuth 서버 금고를 확장하지 않는다. 팀 에이전트는 API 키가 기본이다. 파일 끝 「증보 2026-09-26 — 온보딩 2.0」 절
+- 증보: 2026-10-19 Hermes가 보관하는 구독 OAuth 허용(#4071, owner 결정) — 2026-09-26 증보의 「구독 OAuth 서버 금고를 넓히지 않는다」는 **oort 금고 한정**으로 좁혀진다. 파일 끝 「증보 2026-10-19 — Hermes가 보관하는 구독 OAuth」 절
 - 증보: 2026-09-27 Anthropic Messages wire(#2872) — 세 번째 wire와 봉인 박스 `anthropic-key` kind, `format` 필드, 오류의 키 제거 규칙. 파일 끝 「증보 2026-09-27 — Anthropic Messages wire」 절
 - 증보: 2026-09-27 AI 계정(#2876) — 설정 화면에서도 `auth.json` 붙여넣기로 새 링크를 만들 수 없다. 「증보 2026-09-26」 절 끝 한 줄
 - 증보: 2026-09-27 연결 확인(#2960) — `POST /v1/provider/link/test`가 봉인 크레이트를 거쳐 provider에 읽기 전용 GET 한 번을 보낸다. 결정 4의 「momo-server HTTP 0」을 좁힌다. 파일 끝 「증보 2026-09-27 — 연결 확인」 절
@@ -38,9 +39,10 @@
 - Status: **Accepted** (2026-09-26 성재 결재). 온보딩 2.0 제안서 Q2의 권장안이다. 결재 인용과 전체 결정은 ADR-0193에 있다.
 - 기안: Opus 5.5 worker(#2805)
 
-- **확장하지 않는다.** provider_link 금고에 구독 OAuth kind를 새로 더하지 않는다. Claude(Pro·Max) 구독 토큰은 어떤 경로로도 금고에 넣지 않는다. Anthropic 법무 문서가 제3자의 claude.ai 자격·세션 토큰 수집·저장·중개를 금지한다(https://code.claude.com/docs/en/legal-and-compliance). ChatGPT 구독도 셀프호스트 서버가 여러 사람 대신 호출하면 OpenAI의 계정 공유 금지와 부딪힌다. ADR-0191 옵션 B 기각과 같은 이유다.
+- **확장하지 않는다.** provider_link 금고에 구독 OAuth kind를 새로 더하지 않는다. Claude(Pro·Max) 구독 토큰은 어떤 경로로도 금고에 넣지 않는다. **[정정됨 2026-10-19: 이 금지는 oort 금고 한정이다. Hermes가 자기 볼륨에 보관하는 경로는 막지 않는다 — 파일 끝 증보]** Anthropic 법무 문서가 제3자의 claude.ai 자격·세션 토큰 수집·저장·중개를 금지한다(https://code.claude.com/docs/en/legal-and-compliance). ChatGPT 구독도 셀프호스트 서버가 여러 사람 대신 호출하면 OpenAI의 계정 공유 금지와 부딪힌다. ADR-0191 옵션 B 기각과 같은 이유다.
 - **기존 `oauth-openai` 경로는 그대로 「내부 도그푸딩 한정」이다.** 라벨을 유지하고, 온보딩 「AI 연결」 화면에 노출하지 않는다. 새 워크스페이스에 권하지 않는다.
 - **팀이 함께 부르는 에이전트는 API 키(BYOK)가 기본이다.** 이 ADR 본문의 「제품 기본은 API 키」를 온보딩까지 넓힌다. 온보딩 「AI 연결」 목록의 「API 키로 팀 에이전트」 줄은 설정 › AI 연결 폼(provider_link, API 키 kind)으로 간다.
+- **[정정됨 2026-10-19: 아래 「개인 경로로만」은 oort 서버가 구동·중개하는 경로에 대한 말이다. Hermes가 자기 구독으로 인증하는 경로는 파일 끝 증보가 허용한다.]**
 - **구독은 개인 경로로만 쓴다.** 소유자 한 사람이 자기 맥의 공식 CLI에 로그인하고, 그 에이전트는 소유자만 부른다(ADR-0193 D2·D4). 서버는 구독 토큰을 보지 않는다.
 - **(2026-09-27 증보, #2876, 성재 「전부 권장대로」 AI 계정 Q3)** 온보딩뿐 아니라 **설정 › AI 연결에서도 `auth.json` 붙여넣기(`oauth-openai`)로 새 링크를 만들 수 없다.** 기존 링크는 읽기 전용 줄 「내부용 연결 · 새로 만들 수 없음」으로 남고 끊기만 할 수 있다.
 
@@ -67,7 +69,7 @@
 ### D2. `anthropic-key` 봉투 — migration 없음
 - 키는 기존 AES-GCM 봉인 박스(`PROVIDER_LINK_MASTER_KEY`) 안에 `{"kind":"anthropic-key","api_key":…}` 봉투로 저장한다. 테이블·컬럼 변경은 없다. 레거시 bearer 행은 바이트 그대로 둔다.
 - 봉인 계약은 본문 결정 1 그대로다: api는 봉인만, worker가 job 시점에 복호화, 평문은 로그·audit·응답에 없다. 조회 응답은 `credentialKind: "anthropic-key"`만 드러낸다.
-- 이 kind는 API 키다. 이 ADR 증보 2026-09-26의 「구독 OAuth kind를 새로 더하지 않는다」와 충돌하지 않는다. Claude 구독 토큰은 여전히 어떤 kind로도 넣지 않는다.
+- 이 kind는 API 키다. 이 ADR 증보 2026-09-26의 「구독 OAuth kind를 새로 더하지 않는다」와 충돌하지 않는다. Claude 구독 토큰은 여전히 어떤 kind로도 넣지 않는다(oort 금고 기준, 2026-10-19 증보로 Hermes 볼륨 보관은 별개).
 
 ### D3. `format` 필드
 - `PUT /v1/provider/link` 본문의 `format`은 `"openai" | "anthropic"`이다. 생략하면 `openai`이고 기존 요청과 바이트가 같다. 모르는 값은 400, `anthropic`과 `oauth`를 함께 보내면 400이다.
@@ -247,3 +249,16 @@
 - **D6. Admin 키 저장은 이번에 하지 않는다.** 성재의 요청은 키 확인과 한도·크레딧 표시이고, Anthropic Admin 키(`sk-ant-admin…`)는 조직 구성원·키 관리까지 닿는 상위 자격이다. 그 키로도 읽을 수 있는 것은 **지출**이지 남은 크레딧이 아니다(위 D3). 얻는 것이 작고 새 신뢰 경계가 크므로, 성재의 별도 결재 없이는 저장·사용하지 않는다(질문으로 보고).
 - **D7. 보안.** 모든 새 경로가 키를 읽거나 되돌리지 않는다: 응답은 공급사가 밝힌 숫자와 oort의 계산 숫자뿐이다. `provider_key_budget`은 자격 물질이 없다. 신규 egress는 `/credits` 한 호출뿐이고 기존 `EgressGuard` 위에 있다(리다이렉트 없음·프록시 없음·주소 검사).
 - **정직한 한계.** ① 회사 분류가 모델 id 모양이라 같은 회사의 두 키(체인)는 같은 지출 숫자를 공유한다. ② 지출은 이 워크스페이스의 원장이다 — 같은 키를 다른 워크스페이스·Claude Code 직접 사용이 쓴 몫은 보이지 않는다(그래서 「Console 값이 정본」이라고 화면이 말한다). ③ 캐시 쓰기 토큰은 원장에 따로 없어 입력 단가로 센다(약간 낮게 추정). ④ Max 월간 크레딧은 조직 단위로 공유되고 이월되지 않는다 — 월 경계는 UTC 달력월이고 구독 결제 주기와 어긋날 수 있다. ⑤ 월 크레딧은 인스턴스 전역 한 숫자인데 지출은 운영자가 속한 워크스페이스의 원장이라, 워크스페이스가 여럿인 인스턴스에서는 견주는 값이 일부만 센 것이다(화면이 「이 워크스페이스에서」라고 말한다). ⑥ 예산 쓰기는 `require_instance_operator_write`(읽기 스코프로는 불가), 읽기는 `require_instance_operator`다. ⑦ migration 번호 137은 병렬 PR과 겹치면 병합 때 재번호가 필요하다.
+
+---
+
+## 증보 2026-10-19 — Hermes가 보관하는 구독 OAuth
+
+- Status: **Accepted** (2026-10-19, owner 결정 인용). 인용(이슈 #4071, 성재 2026-10-19): 「우리 메신저 대신 hermes oauth로 할때 왜 그게 ADR이 금지한 길이야. 이건 업계에서도 허용된 부분인데. 그냥 해당 ADR금지 부분을 제거해. 당장에 필요하다면 codex oauth로 하고, claude oauth까지 처리할거야. 제로 베이스 온보딩 개선 묶음도 진행 ㄱㄱ 하자.」
+- 기안: Sonnet 5.5 worker(#4071)
+
+- **허용한다.** 운영자가 호스팅하는 Hermes(셀프호스트·클라우드 포함)가 **자기 볼륨에** 보관하는 Codex(ChatGPT 구독)·Claude(구독) OAuth 토큰으로 모델 인증을 하는 경로. 로그인과 갱신은 Hermes 자체 흐름이 하고, 절차는 #4073(Hermes 모델 인증 온보딩)이 정한다.
+- **oort 쪽 경계는 그대로다(ADR-0004).** oort 서버·api·agent-worker·provider_link 금고·DB·로그·감사·매니페스트는 구독 OAuth 토큰(access·refresh)을 받지도, 저장하지도, 중개하지도, 기록하지도 않는다. 일회용 인가 code·기기 코드는 로그인 중계(ADR-0203 증보 「Hermes 로그인 중계」, ADR-0004 증보 7)에서 저장·로그 없이 1회 중계만 한다. 금고에 구독 OAuth kind를 더하지 않는다. oort가 Hermes 접속에 쓰는 자격은 불투명 bearer(`HERMES_API_KEY`) 하나뿐이고 모델 인증 자격이 아니다(대화 내용은 Hermes로 가지만 구독 토큰은 oort를 지나가지 않는다).
+- **사용량과 약관.** 구독 사용량은 그 Hermes **소유자의 구독**에서 나간다(팀원이 Hermes를 불러도 같다). 벤더 약관의 적합성 판단과 책임은 **운영자 몫**이고, oort는 판단하거나 보증하지 않는다. 이 증보 이전의 약관 판단(제3자가 claude.ai 로그인을 제공하거나 토큰을 수집·저장·중개할 수 없다)은 **oort가 하는 일**에 대한 것으로 그대로 남고, Hermes가 자기 볼륨의 구독으로 인증하는 경로의 적합성은 운영자가 판단한다.
+- **적용되지 않는 것(별개 경로).** oort 서버가 구독 CLI를 대신 구동하는 경로를 막는 ADR-0193 D6·D17·D18과 공용(워크스페이스·클라우드) work host 차단(`MOMO_SUBSCRIPTION_AGENTS_ENABLED`, `MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED`, `claude_subscription_agent_paused`)은 **Hermes 경로에는 적용되지 않는다.** 이 증보는 그 코드 동작을 바꾸지 않는다. 서버 내장 구독 에이전트 차단을 풀지는 별도 확인이 필요하다(owner 미결정).
+- **정정되는 곳.** 증보 2026-09-26의 「Claude(Pro·Max) 구독 토큰은 어떤 경로로도 금고에 넣지 않는다」와 「구독은 개인 경로로만 쓴다」는 원문 그대로 두고, 적용 범위를 oort 금고·oort 서버가 구동하는 경로로 좁힌다. 「금고에 구독 OAuth kind를 새로 더하지 않는다」「`oauth-openai` 새 링크 생성 불가」는 **유지**한다.
