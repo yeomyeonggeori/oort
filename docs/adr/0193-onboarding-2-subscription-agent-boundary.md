@@ -329,7 +329,7 @@
 - 기안: Sonnet 5.5 worker(#4071)
 
 - **허용한다.** 운영자가 호스팅하는 Hermes(셀프호스트·클라우드 포함)가 **자기 볼륨에** 보관하는 Codex(ChatGPT 구독)·Claude(구독) OAuth 토큰으로 모델 인증을 하는 경로. 로그인과 갱신은 Hermes 자체 흐름이 하고, 절차는 #4073(Hermes 모델 인증 온보딩)이 정한다.
-- **oort 쪽 경계는 그대로다(ADR-0004).** oort 서버·api·agent-worker·provider_link 금고·DB·로그·감사·매니페스트는 구독 OAuth 토큰(access·refresh·코드)을 받지도, 저장하지도, 중개하지도, 기록하지도 않는다. 금고에 구독 OAuth kind를 더하지 않는다. oort가 Hermes 접속에 쓰는 자격은 불투명 bearer(`HERMES_API_KEY`) 하나뿐이고 모델 인증 자격이 아니다(대화 내용은 Hermes로 가지만 구독 토큰은 oort를 지나가지 않는다).
+- **oort 쪽 경계는 그대로다(ADR-0004).** oort 서버·api·agent-worker·provider_link 금고·DB·로그·감사·매니페스트는 구독 OAuth 토큰(access·refresh)을 받지도, 저장하지도, 중개하지도, 기록하지도 않는다. 일회용 인가 code·기기 코드는 로그인 중계(ADR-0203 증보 「Hermes 로그인 중계」, ADR-0004 증보 7)에서 저장·로그 없이 1회 중계만 한다. 금고에 구독 OAuth kind를 더하지 않는다. oort가 Hermes 접속에 쓰는 자격은 불투명 bearer(`HERMES_API_KEY`) 하나뿐이고 모델 인증 자격이 아니다(대화 내용은 Hermes로 가지만 구독 토큰은 oort를 지나가지 않는다).
 - **사용량과 약관.** 구독 사용량은 그 Hermes **소유자의 구독**에서 나간다(팀원이 Hermes를 불러도 같다). 벤더 약관의 적합성 판단과 책임은 **운영자 몫**이고, oort는 판단하거나 보증하지 않는다. 이 증보 이전의 약관 판단(제3자가 claude.ai 로그인을 제공하거나 토큰을 수집·저장·중개할 수 없다)은 **oort가 하는 일**에 대한 것으로 그대로 남고, Hermes가 자기 볼륨의 구독으로 인증하는 경로의 적합성은 운영자가 판단한다.
 - **적용되지 않는 것(별개 경로).** oort 서버가 구독 CLI를 대신 구동하는 경로를 막는 ADR-0193 D6·D17·D18과 공용(워크스페이스·클라우드) work host 차단(`MOMO_SUBSCRIPTION_AGENTS_ENABLED`, `MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED`, `claude_subscription_agent_paused`)은 **Hermes 경로에는 적용되지 않는다.** 이 증보는 그 코드 동작을 바꾸지 않는다. 서버 내장 구독 에이전트 차단을 풀지는 별도 확인이 필요하다(owner 미결정).
 - **정정되는 곳.** D6(킬 스위치)·D17(Claude 등록 기본 꺼짐)·D18(런타임 차단, 공용 host 갈래 #3431 포함)의 본문과 코드, 2026-09-27 증보의 약관 판단(oort가 구독을 구동하는 경로에 대한 판단)은 바뀌지 않는다. 바뀐 것은 이 금지들이 **Hermes가 자기 구독으로 인증하는 경로까지 막는다고 읽히지 않게** 한 것뿐이다.
