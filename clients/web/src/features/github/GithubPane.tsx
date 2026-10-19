@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
@@ -159,6 +159,13 @@ function ConnectBlock({
     },
     onError: (error) => setMessage(githubFailureMessage("link", error)),
   });
+
+  // 설치 연결의 state 토큰은 만료 시각에 끝난다: 지나면 링크를 치운다.
+  useEffect(() => {
+    if (link === null) return;
+    const timer = window.setTimeout(() => setLink(null), link.expiresInSeconds * 1000);
+    return () => window.clearTimeout(timer);
+  }, [link]);
 
   if (!data.appRegistered) {
     return (

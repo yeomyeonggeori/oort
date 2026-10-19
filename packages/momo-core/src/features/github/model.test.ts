@@ -28,6 +28,7 @@ import {
   privateConfirmationSentence,
   permissionLabels,
   repositoryInputMode,
+  safeGithubUrl,
   safeHttpsUrl,
   searchWithoutGithubReturn,
 } from "./model";
@@ -373,6 +374,17 @@ describe("알림 메시지 줄", () => {
     expect(githubNoticeFor({ props: { ...props, github_event: "deployment" } }, GITHUB_AUTHOR)).toBeNull();
     expect(githubNoticeFor({ props: { ...props, github_repository: "no-slash" } }, GITHUB_AUTHOR)).toBeNull();
     expect(githubNoticeFor({ props: { ...props, github_repository: "a/b c" } }, GITHUB_AUTHOR)).toBeNull();
+  });
+
+  it("낯선 호스트나 프로토타입 키로 줄을 흉내 낼 수 없다", () => {
+    for (const github_url of ["https://evil.example/x", "https://github.com.evil.example/x", "https://notgithub.com/x"]) {
+      expect(githubNoticeFor({ props: { ...props, github_url } }, GITHUB_AUTHOR)?.url).toBeNull();
+    }
+    expect(safeGithubUrl("https://gist.github.com/a")).toBe("https://gist.github.com/a");
+    expect(githubNoticeFor({ props: { ...props, github_event: "constructor" } }, GITHUB_AUTHOR)).toBeNull();
+    expect(githubNoticeFor({ props: { ...props, github_action: "toString" } }, GITHUB_AUTHOR)?.actionLabel).toBeNull();
+    expect(githubFailureMessage("load", new ApiError(409, "x", "constructor"))).toContain("GitHub 정보를 읽지 못했어요");
+    expect(permissionLabels([{ name: "constructor", access: "read" }])).toEqual([]);
   });
 
   it("모르는 action 은 낱말 없이 서고, https 가 아닌 주소는 링크가 없다", () => {

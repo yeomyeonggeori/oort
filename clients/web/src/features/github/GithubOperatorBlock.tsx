@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
@@ -159,6 +159,12 @@ function RegisterApp({ status, offline }: { status: GithubAppStatus; offline: bo
   const [handoff, setHandoff] = useState<GithubManifestStart | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const noAddress = !status.publicAddressConfigured;
+  // 등록 상태 토큰은 한 시간이면 끝난다: 지나면 넘김 폼을 치운다.
+  useEffect(() => {
+    if (handoff === null) return;
+    const timer = window.setTimeout(() => setHandoff(null), handoff.expiresInSeconds * 1000);
+    return () => window.clearTimeout(timer);
+  }, [handoff]);
 
   const start = useMutation({
     mutationFn: (owner: GithubOwnerChoice) => startGithubManifest(owner),
@@ -343,7 +349,8 @@ function PasteApp({ offline }: { offline: boolean }) {
     }
     setFieldError(null);
     setMessage(null);
-    paste.mutate({ appId: id, ownerType, ...values });
+    // 개인키·웹훅 비밀이 든 변수를 mutation 캐시에 남기지 않는다: 끝나면 바로 비운다.
+    paste.mutate({ appId: id, ownerType, ...values }, { onSettled: () => paste.reset() });
   }
 
   return (
@@ -400,7 +407,7 @@ function PasteApp({ offline }: { offline: boolean }) {
           />
         </Field>
         <Field label="웹훅 비밀" htmlFor={`${formId}-secret`}>
-          <Input id={`${formId}-secret`} ref={webhookSecret} type="password" autoComplete="off" data-testid="github-paste-secret" />
+          <Input id={`${formId}-secret`} ref={webhookSecret} type="password" autoComplete="new-password" data-testid="github-paste-secret" />
         </Field>
         {fieldError !== null && (
           <p className="text-meta text-danger" role="alert">

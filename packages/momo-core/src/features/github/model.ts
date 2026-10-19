@@ -190,6 +190,18 @@ function strings(source: unknown, key: string): string[] {
   return values.filter((value): value is string => typeof value === "string");
 }
 
+function own<T>(table: Readonly<Record<string, T>>, key: string | undefined): T | undefined {
+  return key !== undefined && Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined;
+}
+
+/** 알림 링크가 열 수 있는 곳: github.com 과 그 하위 호스트의 https 뿐이다(서버 props 를 흉내 내도 낯선 호스트로 가지 않게). */
+export function safeGithubUrl(value: string | undefined | null): string | null {
+  const url = safeHttpsUrl(value);
+  if (url === null) return null;
+  const host = new URL(url).hostname;
+  return host === "github.com" || host.endsWith(".github.com") ? url : null;
+}
+
 /** https 로 시작하고 계정 정보가 없는 주소만 사람 눈앞의 링크가 된다. */
 export function safeHttpsUrl(value: string | undefined | null): string | null {
   if (typeof value !== "string" || value.length === 0 || value.length > 2000) return null;
@@ -428,8 +440,10 @@ export function permissionLabels(
   permissions: ReadonlyArray<{ name: string; access: string }>
 ): string[] {
   return permissions
-    .filter((permission) => PERMISSION_LABEL[permission.name] !== undefined)
-    .map((permission) => PERMISSION_LABEL[permission.name]);
+    .flatMap((permission) => {
+      const label = own(PERMISSION_LABEL, permission.name);
+      return label === undefined ? [] : [label];
+    });
 }
 
 // ---- 돌아오는 길의 상태 단어 ----------------------------------------------------
@@ -629,7 +643,7 @@ export function githubFailureMessage(action: GithubAction, error: unknown): stri
   const prefix = ACTION_PREFIX[action];
   if (error instanceof NetworkError) return `${prefix} ${error.message}`;
   if (error instanceof ApiError) {
-    const named = error.code !== undefined ? CODE_SENTENCE[error.code] : undefined;
+    const named = own(CODE_SENTENCE, error.code);
     if (named !== undefined) return named;
     if (error.status === 403) return `${prefix} 소유자나 관리자만 할 수 있어요.`;
     if (error.status === 503) return GITHUB_UNAVAILABLE_SENTENCE;
@@ -747,14 +761,14 @@ export function githubNoticeFor(
   const repository = str(props, "github_repository");
   if (repository === undefined || !REPOSITORY_SHAPE.test(repository)) return null;
   const event = str(props, "github_event");
-  const eventLabel = event !== undefined ? EVENT_LABEL[event] : undefined;
+  const eventLabel = own(EVENT_LABEL, event);
   if (eventLabel === undefined) return null;
   const action = str(props, "github_action");
   return {
     repository,
     eventLabel,
-    actionLabel: action !== undefined ? (ACTION_LABEL[action] ?? null) : null,
-    url: safeHttpsUrl(str(props, "github_url")),
+    actionLabel: own(ACTION_LABEL, action) ?? null,
+    url: safeGithubUrl(str(props, "github_url")),
   };
 }
 

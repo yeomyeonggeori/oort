@@ -65,6 +65,15 @@ export function GithubSubscribeForm({
     () => new Set(overview.defaultFeatures)
   );
   const [step, setStep] = useState<Step>("form");
+  // 확인 장면에 들어가는 순간의 요청을 고정한다: 그 뒤 재조회로 설치가 바뀌어도, 사람이 읽고 확인한
+  // 것과 다른 계정·저장소로 confirmPrivate 가 나가지 않는다.
+  const [frozen, setFrozen] = useState<{
+    installationId: number;
+    account: string;
+    repository: string;
+    features: GithubFeatureId[];
+    knownPrivate: boolean;
+  } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
@@ -81,16 +90,27 @@ export function GithubSubscribeForm({
 
   const subscribe = useMutation({
     mutationFn: (confirmPrivate: boolean) =>
-      subscribeGithub(workspaceId, {
-        channelId: channel.id,
-        installationId: installation?.installationId ?? 0,
-        repository: repositoryName ?? "",
-        features: [...features],
-        ...(confirmPrivate ? { confirmPrivate: true } : {}),
-      }),
+      subscribeGithub(
+        workspaceId,
+        confirmPrivate && frozen !== null
+          ? {
+              channelId: channel.id,
+              installationId: frozen.installationId,
+              repository: frozen.repository,
+              features: frozen.features,
+              confirmPrivate: true,
+            }
+          : {
+              channelId: channel.id,
+              installationId: installation?.installationId ?? 0,
+              repository: repositoryName ?? "",
+              features: [...features],
+            }
+      ),
     onSuccess: (subscription) => {
       void client.invalidateQueries({ queryKey: githubOverviewPrefix(workspaceId) });
       setStep("form");
+      setFrozen(null);
       setMessage(null);
       setPicked("");
       setTyped("");
@@ -100,6 +120,7 @@ export function GithubSubscribeForm({
     onError: (error) => {
       if (isPrivateConfirmationRequired(error)) {
         // 서버가 먼저 막았다: 같은 확인 장면으로 간다. 오류 문장을 따로 세우지 않는다.
+        freeze();
         setStep("confirm");
         setMessage(null);
         return;
@@ -109,6 +130,17 @@ export function GithubSubscribeForm({
   });
 
   const busy = subscribe.isPending;
+
+  function freeze() {
+    if (installation === undefined || repositoryName === null) return;
+    setFrozen({
+      installationId: installation.installationId,
+      account: installation.accountLogin,
+      repository: repositoryName,
+      features: [...features],
+      knownPrivate: known?.private === true,
+    });
+  }
 
   function toggle(id: GithubFeatureId, on: boolean) {
     setDone(null);
@@ -135,6 +167,7 @@ export function GithubSubscribeForm({
     }
     if (needsPrivateConfirmation(channel.kind, known)) {
       // 요청을 보내지 않는다. 확인 장면으로만 간다 (수용 11).
+      freeze();
       setStep("confirm");
       requestAnimationFrame(() => confirmRef.current?.focus({ preventScroll: false }));
       return;
@@ -264,7 +297,7 @@ export function GithubSubscribeForm({
         </ul>
       </fieldset>
 
-      {step === "confirm" && repositoryName !== null && (
+      {step === "confirm" && frozen !== null && (
         <div
           className="flex min-w-0 flex-col gap-3 rounded-md border border-warn p-3"
           role="alertdialog"
@@ -276,7 +309,7 @@ export function GithubSubscribeForm({
             공개 채널에 비공개일 수 있는 저장소를 연결해요
           </p>
           <p id={`${formId}-confirm-body`} className="break-keep text-body text-ink">
-            {privateConfirmationSentence(channelTitle, repositoryName, known?.private === true, [...features])}
+            {frozen.account} 계정의 저장소예요. {privateConfirmationSentence(channelTitle, frozen.repository, frozen.knownPrivate, frozen.features)}
           </p>
           <div className="flex flex-wrap items-center justify-end gap-2">
             <Button
@@ -286,6 +319,7 @@ export function GithubSubscribeForm({
               size="sm"
               onClick={() => {
                 setStep("form");
+                setFrozen(null);
                 setMessage(null);
               }}
               disabled={busy}

@@ -60,6 +60,10 @@ describe("비공개 저장소 확인 (ADR-0205 수용 11)", () => {
     await flush();
     expect(q("github-private-confirm")).not.toBeNull();
     expect(q("github-private-confirm")?.textContent).toContain("마케팅 채널은 공개 채널");
+    // 확인 장면은 어느 계정의 저장소인지, 알려진 비공개인지 말한다.
+    expect(q("github-private-confirm")?.textContent).toContain("yeomyeonggeori 계정의 저장소예요");
+    expect(q("github-private-confirm")?.textContent).toContain("비공개 저장소예요");
+    expect(q("github-private-confirm")?.textContent).toContain("PR, 이슈 소식");
     expect(subscribeGithub).toHaveBeenCalledTimes(0);
   });
 
