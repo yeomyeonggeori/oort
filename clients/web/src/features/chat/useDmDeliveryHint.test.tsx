@@ -84,15 +84,20 @@ describe("useDmDeliveryHint", () => {
     expect(seen.some((hint) => hint?.includes("바로 말하면"))).toBe(false);
   });
 
-  it("says the old sentence where the DM is open", async () => {
-    vi.mocked(getAgentDmDelivery).mockResolvedValue({
-      agentMemberId: AGENT,
-      ownerMemberId: OWNER,
-      state: "open",
-    });
-    await settle();
-    expect(seen.at(-1)).toBe("멘션 없이 바로 말하면 Claude Code가 답해요");
-  });
+  it.each(["open", "not_hosted"] as const)(
+    "says nothing where the agent answers (%s) (#4044)",
+    async (state) => {
+      vi.mocked(getAgentDmDelivery).mockResolvedValue({
+        agentMemberId: AGENT,
+        ownerMemberId: OWNER,
+        state,
+      });
+      await settle();
+      expect(getAgentDmDelivery).toHaveBeenCalled();
+      expect(seen.at(-1)).toBeNull();
+      expect(seen.some((hint) => hint !== null)).toBe(false);
+    }
+  );
 
   it("promises nothing when the lookup fails for any other reason", async () => {
     const { ApiError } = await import("@momo/core/lib/api");
@@ -101,10 +106,10 @@ describe("useDmDeliveryHint", () => {
     expect(seen.at(-1)).toBeNull();
   });
 
-  it("keeps the old sentence on a server without the route", async () => {
+  it("says nothing on a server without the route (#4044)", async () => {
     const { ApiError } = await import("@momo/core/lib/api");
     vi.mocked(getAgentDmDelivery).mockRejectedValue(new ApiError(404, "not found"));
     await settle();
-    expect(seen.at(-1)).toBe("멘션 없이 바로 말하면 Claude Code가 답해요");
+    expect(seen.at(-1)).toBeNull();
   });
 });

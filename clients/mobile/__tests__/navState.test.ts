@@ -37,6 +37,7 @@ describe('the three tabs (ADR-0189 D1)', () => {
       workList: false,
       workSession: null,
       hosted: null,
+      apps: null,
     });
   });
 

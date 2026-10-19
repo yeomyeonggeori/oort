@@ -21,6 +21,7 @@ import {
   SECTION_MOVE_GROUP_LABEL,
 } from "@momo/core/features/sidebar/sidebarSections";
 import { CHANNEL_MEMORY_SETTINGS_LABEL } from "@momo/core/features/memory/presentation";
+import { CHANNEL_GITHUB_LABEL } from "@momo/core/features/github/model";
 import type { Channel, MembershipRole } from "@momo/core/lib/api";
 
 // =============================================================================
@@ -96,6 +97,7 @@ export type ChannelActionKey =
   | "mark-unread"
   | "mute"
   | "memory"
+  | "github"
   | "star"
   | "move-to-section"
   | "copy-link"
@@ -133,6 +135,7 @@ const CLUSTER_OF: Record<ChannelActionKey, ChannelActionCluster> = {
   "mark-unread": "state",
   mute: "state",
   memory: "state",
+  github: "state",
   star: "state",
   "close-dm": "close",
   leave: "danger",
@@ -212,6 +215,12 @@ export interface ChannelActionAvailability {
    * 않으면(`teamMemory` 표면) 항목이 없고, 채워 넣지 않은 호출부는 그대로 없다.
    */
   memory?: boolean;
+  /**
+   * 「GitHub 알림」(ADR-0205 D10, #3955). 선택 칸이다: 이 서버가 GitHub 알림을 싣지 않으면
+   * (`githubNotifications` 표면) 항목이 없고, 채워 넣지 않은 호출부는 그대로 없다. 구독은
+   * 소유자·관리자만 하므로 역할도 본다(서버가 마지막 말을 한다).
+   */
+  github?: boolean;
   star: boolean;
   moveToSection: boolean;
   copyLink: boolean;
@@ -270,6 +279,8 @@ export function channelActionAvailability(input: {
   canStar?: boolean;
   /** 이 서버가 팀 기억을 싣는가. DM 은 요약 제외가 기본이라 여기서도 뺀다. */
   hasMemorySettings?: boolean;
+  /** 이 서버가 GitHub 알림을 싣는가(#3955). DM 에는 알림을 보낼 수 없어 여기서도 뺀다. */
+  hasGithubNotifications?: boolean;
   /**
    * 「읽지 않음으로 표시」를 받을 수 있는 채널인가 (#3963): 서버 투영이 있고 다 읽었고
    * 메시지가 하나라도 있다. 판정은 투영을 든 호출부가 한다(`composedUnreadCount`). 여기서는
@@ -292,6 +303,11 @@ export function channelActionAvailability(input: {
     star: !isDm && (input.canStar ?? false),
     mute: true,
     memory: !isDm && (input.hasMemorySettings ?? false),
+    // 구독은 소유자·관리자의 일이다(서버 403). 역할을 아직 모르면(undefined) 내놓고 서버가 답하게 둔다.
+    github:
+      !isDm &&
+      (input.hasGithubNotifications ?? false) &&
+      (input.selfRole === undefined || input.selfRole === "owner" || input.selfRole === "admin"),
     // **DM 은 옮기지 않는다** (ADR-0177 D4). 기본 섹션 두 종은 「채널」과 「DM」
     // 이고 DM 은 그 중 하나에 고정이다 - 커스텀 섹션에 DM 을 넣는 문을 열면
     // 코어의 파생이 그것을 무시하므로(`deriveSidebarSections`), 눌러도 아무 일도
@@ -402,6 +418,9 @@ export function channelActionItems(
       label: CHANNEL_MEMORY_SETTINGS_LABEL,
     });
   }
+  if (available.github === true) {
+    push({ key: "github", testKey: "github-notifications", label: CHANNEL_GITHUB_LABEL });
+  }
   if (available.star) {
     push({
       key: "star",
@@ -430,7 +449,7 @@ export function channelActionItems(
 const SURFACE_KEYS: Record<ChannelActionSurface, ReadonlySet<ChannelActionKey>> = {
   // 헤더 ⋮ 는 BZ-2 가 세운 그대로다. 이 티켓은 헤더의 항목을 늘리지 않는다:
   // 채널을 열어 둔 사람에게 「읽음 처리」와 「이름 복사」는 다른 물음이다.
-  header: new Set<ChannelActionKey>(["topic", "mute", "memory", "leave"]),
+  header: new Set<ChannelActionKey>(["topic", "mute", "memory", "github", "leave"]),
   // 행 우클릭은 「열지 않고 조작한다」가 전부다. BT-4 의 섹션 배치가 여기 사는
   // 이유도 그것이다 - 채널을 어디에 둘지는 그 채널을 **보지 않고** 정하는 일이고,
   // 헤더 ⋮ 는 정의상 이미 그 안에 들어와 있는 사람의 것이다. 복사 셋과 DM 닫기(#3963)도
@@ -487,6 +506,7 @@ export function channelActionKeepsMenuOpen(key: ChannelActionKey): boolean {
     key !== "leave" &&
     key !== "topic" &&
     key !== "memory" &&
+    key !== "github" &&
     key !== "star" &&
     key !== "move-to-section" &&
     key !== "close-dm"

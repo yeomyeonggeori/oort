@@ -29,6 +29,7 @@ import {
   type OpenedReadSnapshot,
 } from "@/features/chat/openedReadState";
 import { useSession } from "@/app/session";
+import { useChannelViewingBeat } from "@/features/chat/useChannelViewingBeat";
 import {
   indexFallbackChannelId,
   readProjectionPhase,
@@ -65,6 +66,7 @@ import {
   type QuoteDraft,
 } from "@momo/core/features/timeline/quote";
 import { Timeline, type TimelineJump } from "@/features/timeline/Timeline";
+import { ChannelAudienceContext } from "@/features/timeline/appsTail";
 import { PinListMenu } from "@/features/timeline/PinListMenu";
 import { ChannelHeaderMenu } from "@/features/chat/ChannelHeaderMenu";
 import { CascadeProvider } from "@/features/timeline/cascadeRail";
@@ -312,6 +314,9 @@ export function ChatShell() {
     workspaceId,
     stressCount > 0 ? null : channelId
   );
+
+  // 「보고 있음」 존재 신호 (ADR-0204 증보 3, #4063): 이 채널이 앞에 있는 동안만.
+  useChannelViewingBeat(workspaceId, channelId, stressCount === 0);
 
   // Unread boundary is the row as it stood when the channel was OPENED
   // (cursor AND mark). Advancing the cursor, or the open's own
@@ -1030,6 +1035,15 @@ export function ChatShell() {
       member.channelIds.some((id) => uuidEq(id, channel.id))
     );
   }, [channel, directory]);
+  // 앱 결과가 이 채널에서 읽히는 사람 수(ADR-0113 증보 2 E10, #3950). 에이전트는 읽는 사람이
+  // 아니라서 센 사람만 센다. DM 이거나 명단을 아직 모르면 null — 수를 짐작해 말하지 않는다.
+  const channelAudience = useMemo(() => {
+    if (!channel || channel.kind === "dm" || directoryQuery.isPending) return null;
+    const humans = channelMembers.filter(
+      (member) => member.kind === "human" && member.status === "active"
+    ).length;
+    return humans > 0 ? humans : null;
+  }, [channel, channelMembers, directoryQuery.isPending]);
   const channelMemberListStatus: ChannelMemberListStatus = directoryQuery.isFetching
     ? "loading"
     : directoryQuery.error !== null
@@ -1369,6 +1383,7 @@ export function ChatShell() {
           data-testid="chat-timeline"
         >
           {hasChannel ? (
+            <ChannelAudienceContext.Provider value={channelAudience}>
             <Timeline
               tail={
                 openCard ? (
@@ -1450,6 +1465,7 @@ export function ChatShell() {
               welcomePhase={welcome.phase}
               welcomeHoldWriteAction={welcome.holdWriteAction}
             />
+            </ChannelAudienceContext.Provider>
           ) : (
             <Skeleton ready={!channelsQuery.isLoading} rows={6} className="p-4">
               {channelsQuery.isLoading ? null : channelsQuery.error ? (
@@ -1532,6 +1548,7 @@ export function ChatShell() {
       </div>
 
       {channelId !== null && !workPanelOpen && (
+        <ChannelAudienceContext.Provider value={channelAudience}>
         <ThreadPanel
           workspaceId={workspaceId}
           channelId={channelId}
@@ -1562,6 +1579,7 @@ export function ChatShell() {
             setThread(null);
           }}
         />
+        </ChannelAudienceContext.Provider>
       )}
 
       {workOpen && !thread && stressCount === 0 && !workPanelOpen && !dockOpen && (

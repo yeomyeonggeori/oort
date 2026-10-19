@@ -114,11 +114,22 @@ import {
   useTeamAiDelegateSend,
 } from './TeamAiDelegateStrip';
 import {
+  APP_NOTICE_ACTION_NAME,
+  AppNoticeLine,
   TEAM_AI_CITATION_ACTION_PREFIX,
   TeamAiReplyMeta,
+  appNoticeSpoken,
   teamAiCitationActions,
   teamAiReplySpoken,
 } from './TeamAiReplyMeta';
+import {appsOnWebUrl, useAppNotice, useAppsTailContext} from './appsTail';
+import {
+  GITHUB_NOTICE_ACTION_NAME,
+  GITHUB_NOTICE_OPEN_LABEL,
+  GithubNoticeLine,
+  githubNoticeFor,
+  githubNoticeLabel,
+} from './GithubNoticeLine';
 import {teamAiReplyMetaFor} from '@momo/core/features/timeline/teamAiReply';
 import {
   delegateButtonLabel,
@@ -612,11 +623,6 @@ function Author({
         <Text style={styles.authorHandle} numberOfLines={1}>
           {parts.handle}
         </Text>
-      ) : null}
-      {isAgent ? (
-        <View style={styles.agentTag}>
-          <Text style={styles.agentTagText}>에이전트</Text>
-        </View>
       ) : null}
       {owner ? (
         <Text style={styles.authorMeta} numberOfLines={1}>
@@ -2305,7 +2311,20 @@ function MessageRowInner({
   // 도우미가 넘기는 줄(ADR-0201 D5). 이 키를 보내지 않는 서버에서는 늘 null 이다.
   const teamAiDelegate = useMemo(() => teamAiDelegateFor(message), [message]);
   // 도우미 답의 꼬리(ADR-0201 v2): 찾아본 것 · 출처 · 모델 라벨. 칸이 없으면 null.
-  const teamAiReply = useMemo(() => teamAiReplyMetaFor(message), [message]);
+  // 같은 꼬리에 「쓴 앱」 줄(E8·E10, #3950)이 붙는다: 보고가 있는 에이전트 답에만.
+  const appsTail = useAppsTailContext(message, directory, actions?.workspaceId);
+  const teamAiReply = useMemo(
+    () => teamAiReplyMetaFor(message, appsTail),
+    [message, appsTail],
+  );
+  // 앱을 쓰다 막혔을 때의 한 문장(+ 행동 하나). 칸이 없으면 null.
+  const appNotice = useAppNotice(message, actions?.workspaceId, nowMs);
+  // 폰의 행동은 「웹에서 열기」 하나다. 열 곳(서버 주소)을 모르면 세우지 않는다.
+  const appNoticeWebUrl = appNotice?.action ? appsOnWebUrl() : null;
+  // 서버가 GitHub 앱으로 보낸 알림이면 아랫줄이 「GitHub 알림」이라고 말한다(ADR-0205, #3955).
+  // 작성자 id가 서버가 적은 `github_author_member_id` 와 같지 않으면 null 이다(이름은 증거가 아니다).
+  const githubNotice = useMemo(() => githubNoticeFor(message), [message]);
+  const githubNoticeUrl = githubNotice?.url ?? null;
   // 손가락(띠의 버튼)과 로터(아래 `accessibilityActions`)가 같은 보내기와 상태를 쓴다
   // (#3844 design-review H-1). 행이 접근성 원소 하나라 띠의 버튼에 VoiceOver 가 닿지 않는다.
   const teamAiSend = useTeamAiDelegateSend({
@@ -2592,6 +2611,12 @@ function MessageRowInner({
         case 'momoProfile':
           actions?.onOpenProfile?.(message.authorMemberId);
           return;
+        case APP_NOTICE_ACTION_NAME:
+          if (appNoticeWebUrl !== null) openLink(appNoticeWebUrl);
+          return;
+        case GITHUB_NOTICE_ACTION_NAME:
+          if (githubNoticeUrl !== null) openLink(githubNoticeUrl);
+          return;
         default:
           if (event.nativeEvent.actionName.startsWith(TEAM_AI_CITATION_ACTION_PREFIX)) {
             const index = Number(
@@ -2622,6 +2647,8 @@ function MessageRowInner({
       linkOnce,
       teamAiSend,
       teamAiReply,
+      appNoticeWebUrl,
+      githubNoticeUrl,
     ],
   );
 
@@ -2646,6 +2673,14 @@ function MessageRowInner({
     });
     // 도우미 답의 웹 출처(ADR-0201 v2 H5). 꼬리의 링크와 같은 `openLink` 로 연다.
     if (!deleted) list.push(...teamAiCitationActions(teamAiReply));
+    // 막힘 문장의 행동(웹에서 열기). 손가락은 문장 옆 링크를 누른다.
+    if (!deleted && appNotice?.action && appNoticeWebUrl !== null) {
+      list.push({name: APP_NOTICE_ACTION_NAME, label: appNotice.action.label});
+    }
+    // GitHub 알림의 열기. 손가락은 아랫줄 링크를 누르고, VoiceOver 는 로터로 닿는다.
+    if (!deleted && githubNoticeUrl !== null) {
+      list.push({name: GITHUB_NOTICE_ACTION_NAME, label: GITHUB_NOTICE_OPEN_LABEL});
+    }
     if (actionable) list.push({name: 'momoActions', label: '메시지 액션'});
     if (actions?.onOpenProfile && memberFor(directory, message.authorMemberId)) {
       list.push({name: 'momoProfile', label: '작성자 프로필 보기'});
@@ -2699,6 +2734,9 @@ function MessageRowInner({
     decisionRotor,
     teamAiSend.pressable,
     teamAiReply,
+    appNotice,
+    appNoticeWebUrl,
+    githubNoticeUrl,
   ]);
 
   const authorLabel = memberNameParts(
@@ -2758,6 +2796,7 @@ function MessageRowInner({
         rowAccessibilityLabel({
         message,
         authorLabel,
+        authorIsAgent: memberFor(directory, message.authorMemberId)?.kind === 'agent',
         chips,
         tail,
         deleted,
@@ -2785,7 +2824,9 @@ function MessageRowInner({
           teamAiSend,
           approvalOffline === true,
         ),
-        // 도우미 답의 꼬리(찾아본 것 · 모델 라벨 · 출처 수).
+        // 앱을 쓰다 막힌 문장, 그리고 도우미 답의 꼬리(쓴 앱 · 찾아본 것 · 모델 라벨 · 출처 수).
+        ...appNoticeSpoken(appNotice),
+        ...(githubNotice !== null && !deleted ? [githubNoticeLabel(githubNotice)] : []),
         ...teamAiReplySpoken(teamAiReply),
       ].join(', ')}
       accessibilityActions={accessibilityActions}
@@ -2994,6 +3035,21 @@ function MessageRowInner({
                 viewerMemberId={actions?.myMemberId}
                 offline={approvalOffline === true}
               />
+            ) : null}
+
+            {appNotice ? (
+              <AppNoticeLine
+                notice={appNotice}
+                onAction={
+                  appNoticeWebUrl === null
+                    ? null
+                    : () => openLink(appNoticeWebUrl)
+                }
+              />
+            ) : null}
+
+            {githubNotice !== null && !deleted ? (
+              <GithubNoticeLine notice={githubNotice} />
             ) : null}
 
             {teamAiReply ? <TeamAiReplyMeta meta={teamAiReply} /> : null}
@@ -3495,6 +3551,7 @@ export function rowPressedBackground(color: Palette): string {
 export function rowAccessibilityLabel({
   message,
   authorLabel,
+  authorIsAgent = false,
   chips,
   tail,
   deleted,
@@ -3504,6 +3561,13 @@ export function rowAccessibilityLabel({
 }: {
   message: Message;
   authorLabel: string;
+  /**
+   * 작성자가 에이전트인가. 이름 옆 「에이전트」 배지는 눈에서 뺐다(#4065) —
+   * 에이전트임은 눈에는 이름 색·아바타가 나르고, 귀에는 이 낱말이 나른다.
+   * 행이 한 접근성 원소라 배지 글자는 어차피 읽히지 않았으므로, 낭독의 정본은
+   * 이 라벨 한 곳이다.
+   */
+  authorIsAgent?: boolean;
   chips: ReactionChip[];
   tail: string[];
   deleted: boolean;
@@ -3531,7 +3595,7 @@ export function rowAccessibilityLabel({
   quoted?: string | null;
 }): string {
   const parts = [
-    authorLabel,
+    authorIsAgent ? `${authorLabel}, 에이전트` : authorLabel,
     timeLabel(message.createdAtMs),
     replyTo ?? '',
     quoted ?? '',
@@ -3560,7 +3624,7 @@ export function rowAccessibilityLabel({
 //
 // ## 메시지처럼 생겼지만 메시지가 아니다
 //
-// 이름줄은 진짜 행과 같은 모양이다(에이전트 색, 에이전트 태그, 책임자) — 그것이
+// 이름줄은 진짜 행과 같은 모양이다(에이전트 색, 책임자) — 그것이
 // 이 칸이 **누구의 답을 기다리는 자리**인지 말하는 방법이기 때문이다. 대신 본문
 // 자리는 비어 있고, 그 비어 있음을 한 낱말로 적는다. 시각도, 반응도, 길게 누르기도
 // 없다: 아직 아무것도 일어나지 않았으므로 할 수 있는 일도 없다.
@@ -3590,7 +3654,7 @@ export function WorkingRow({
     <View
       // 한 행 = 한 접근성 원소, 메시지 행과 같은 규칙. 문장 하나로 읽힌다.
       accessible
-      accessibilityLabel={`${parts.name} 작업 중, 답을 기다리는 중입니다`}
+      accessibilityLabel={`${parts.name}, 에이전트, 작업 중, 답을 기다리는 중입니다`}
       style={[styles.row, styles.rowStartsGroup]}
       testID={`working-row-${memberId}`}>
       <View style={[styles.rowInner, styles.rowAvatarReserve]}>
@@ -3608,9 +3672,6 @@ export function WorkingRow({
               {parts.handle}
             </Text>
           ) : null}
-          <View style={styles.agentTag}>
-            <Text style={styles.agentTagText}>에이전트</Text>
-          </View>
           {owner ? (
             <Text style={styles.authorMeta} numberOfLines={1}>
               {`${owner.displayName}님이 관리`}
@@ -3935,13 +3996,6 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   authorNameAgent: {color: color.agent},
   authorHandle: {fontSize: font.meta, color: color.textFaint},
   authorMeta: {fontSize: font.meta, color: color.textFaint},
-  agentTag: {
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-    borderRadius: radius.sm,
-    backgroundColor: color.agentSurface,
-  },
-  agentTagText: {fontSize: font.caption, color: color.agent, fontWeight: '600'},
   // 그룹 머리의 시각. 연속 행의 것과 **같은 밝기**여야 한다 — 위 주석 참조.
   time: {fontSize: font.meta, color: color.textMuted},
   // 앱이 말하는 문장이다 — 구분축은 `appVoice.ts` 의 `※` 가 든다. 인용 안의

@@ -1,10 +1,12 @@
-import React from 'react';
+import React, {useState} from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
+import type {AppNotice} from '@momo/core/features/timeline/appNotice';
 import {
+  APPS_DETAIL_TOGGLE,
   TEAM_AI_SOURCES_LABEL,
   type TeamAiReplyMeta as Meta,
 } from '@momo/core/features/timeline/teamAiReply';
-import {font, line, radius, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {font, line, radius, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {Sentence} from '../../design/atoms';
 import {useStyles} from '../../design/theme';
 import {openLink} from './MessageBody';
@@ -20,13 +22,45 @@ import {openLink} from './MessageBody';
 // 꼬리의 링크를 직접 누른다. 여는 문은 본문 링크와 같은 `openLink`(코어 `safeHref` 재확인).
 // =============================================================================
 
+// 「자세히」 줄의 누를 영역: 보이는 한 줄(line.meta)에서 44pt 를 도출한다(손으로 적지 않는다).
+const DETAIL_SLOP = slopTo(line.meta);
+const DETAIL_HIT_SLOP = {top: DETAIL_SLOP, bottom: DETAIL_SLOP, left: space.sm, right: space.sm};
+
 /** 로터 행동 이름의 앞머리. 순서로 짓는다(주소를 행동 이름에 싣지 않는다). */
 export const TEAM_AI_CITATION_ACTION_PREFIX = 'momoCitation:';
 
 export function TeamAiReplyMeta({meta}: {meta: Meta}): React.JSX.Element {
   const styles = useStyles(build);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   return (
     <View style={styles.wrap} testID="team-ai-reply-meta">
+      {meta.appsLine !== null ? (
+        <View style={styles.apps} testID="apps-used-tail">
+          {/* 접힌 줄은 행의 낭독 라벨이 이미 읽는다: 「자세히」는 손가락용 손잡이이고 줄 끝에 붙는다. */}
+          {/* 줄 전체가 손잡이다: 보이는 높이는 그대로 두고 누를 영역만 44pt 로 채운다(hitSlop). */}
+          <Pressable
+            onPress={() => setDetailsOpen(open => !open)}
+            hitSlop={DETAIL_HIT_SLOP}
+            accessibilityRole="button"
+            accessibilityState={{expanded: detailsOpen}}
+            testID="apps-details-toggle">
+            <Sentence style={styles.meta}>
+              <Text testID="apps-used-line">{meta.appsLine}</Text>
+              {' '}
+              <Text style={styles.detailToggle}>
+                {detailsOpen ? APPS_DETAIL_TOGGLE.close : APPS_DETAIL_TOGGLE.open}
+              </Text>
+            </Sentence>
+          </Pressable>
+          {detailsOpen
+            ? meta.appsDetails.map(detail => (
+                <Sentence key={detail} style={styles.meta} testID="apps-detail-line">
+                  {detail}
+                </Sentence>
+              ))
+            : null}
+        </View>
+      ) : null}
       {meta.toolsLine !== null || meta.modelChip !== null ? (
         <View style={styles.topLine}>
           {meta.toolsLine !== null ? (
@@ -74,6 +108,7 @@ export function TeamAiReplyMeta({meta}: {meta: Meta}): React.JSX.Element {
 export function teamAiReplySpoken(meta: Meta | null): string[] {
   if (meta === null) return [];
   const parts: string[] = [];
+  if (meta.appsSpoken !== null) parts.push(meta.appsSpoken);
   if (meta.toolsSpoken !== null) parts.push(meta.toolsSpoken);
   if (meta.modelChip !== null) parts.push(meta.modelChip);
   if (meta.citations.length > 0) {
@@ -93,9 +128,57 @@ export function teamAiCitationActions(
   }));
 }
 
+// ---- 막힘 문장 (plugins-v2-plan 2.5절, #3950) ----------------------------------------
+//
+// 한 문장과 행동 하나. 행이 접근성 원소 하나라 행동은 로터(`momoAppNotice`)로도 닿는다.
+// 진행 중 안내는 흐린 글씨, 막힘은 본문색이다. 경고색·아이콘으로 소리치지 않는다.
+
+/** 로터 행동 이름. */
+export const APP_NOTICE_ACTION_NAME = 'momoAppNotice';
+
+/** 폰의 행동은 모두 「웹에서 열기」 하나다. 열 곳을 모르면(`canAct` 거짓) 행동을 세우지 않는다. */
+export function AppNoticeLine({
+  notice,
+  onAction,
+}: {
+  notice: AppNotice;
+  onAction: (() => void) | null;
+}): React.JSX.Element {
+  const styles = useStyles(build);
+  return (
+    <View style={styles.notice} testID="app-notice">
+      <Sentence
+        style={notice.progress ? styles.meta : styles.noticeText}
+        testID="app-notice-sentence">
+        {notice.sentence}
+      </Sentence>
+      {notice.action !== null && onAction !== null ? (
+        <Pressable
+          onPress={onAction}
+          hitSlop={space.sm}
+          accessibilityRole="link"
+          testID="app-notice-action"
+          style={({pressed}) => [styles.noticeAction, pressed && styles.pressed]}>
+          <Text style={styles.sourceTitle}>{notice.action.label}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+/** 행의 낭독에 붙일 막힘 문장. */
+export function appNoticeSpoken(notice: AppNotice | null): string[] {
+  return notice === null ? [] : [notice.sentence];
+}
+
 function build(color: Palette) {
   return StyleSheet.create({
     wrap: {marginTop: space.xs, gap: space.xs},
+    apps: {gap: 0},
+    detailToggle: {textDecorationLine: 'underline'},
+    notice: {marginTop: space.xs, gap: space.xs},
+    noticeText: {fontSize: font.meta, lineHeight: line.meta, color: color.text},
+    noticeAction: {minHeight: TOUCH_TARGET, justifyContent: 'center'},
     topLine: {
       flexDirection: 'row',
       flexWrap: 'wrap',

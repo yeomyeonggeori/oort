@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { serverSurface } from "@momo/core/features/capabilities/serverSurfaces";
 import { ApiError, type MembershipRole } from "@momo/core/lib/api";
-import { NO_INSTALLER_SENTENCE } from "./model";
+import { NO_INSTALLER_SENTENCE, PLUGIN_CONTROLS_MAX_GLANCEABLE } from "./model";
 // 서버가 실제로 준 바이트다(server-rust 시험이 못박는다, #3859). 지어낸 응답이 아니다.
 import catalogWire from "../../../../../server/Fixtures/plugin-wire/catalog.json";
 import githubDetailWire from "../../../../../server/Fixtures/plugin-wire/detail-github.json";
@@ -31,6 +31,9 @@ const LINEAR = "com.momo.plugins.linear";
 const NOTION = "com.momo.plugins.notion";
 const DRIVE = "com.momo.plugins.drive";
 
+/** 컨트롤이 서는 길이를 재는 합성 앱 이름. 서버 시드가 늘어도 아홉을 넘기도록 여섯 개다. */
+const EXTRA_APP_NAMES = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta"];
+
 const h = vi.hoisted(() => ({
   catalog: null as unknown,
   details: new Map<string, unknown>(),
@@ -40,6 +43,8 @@ const h = vi.hoisted(() => ({
   /** 나 말고 디렉터리에 있는 사람들(관리자 안내 시험이 쓴다). */
   others: [] as Array<Record<string, unknown>>,
   grant: vi.fn(),
+  /** 화면이 상세를 읽은 앱들. 목록 줄의 칩은 이 읽기가 끝난 뒤에야 판단할 수 있다. */
+  detailReads: [] as string[],
 }));
 
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
@@ -52,6 +57,7 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
       return actual.pluginCatalogFromWire(h.catalog);
     },
     getPlugin: async (_workspace: string, pluginId: string) => {
+      h.detailReads.push(pluginId);
       const wire = h.details.get(pluginId);
       if (!wire) throw new actual.ApiError(404, "plugin not found");
       return actual.pluginDetailFromWire(wire);
@@ -112,6 +118,7 @@ beforeEach(() => {
   h.role = "owner";
   h.others = [];
   h.grant.mockReset();
+  h.detailReads.length = 0;
   h.probe.mockReset();
   // 기본은 오늘의 서버: 설치·권한 경로가 라우터에 없다.
   h.probe.mockResolvedValue([404, 404]);
@@ -205,11 +212,10 @@ describe("읽기 전용: 설치·권한 경로가 없는 서버 (오늘의 Rust 
       "Linear",
       "Notion",
     ]);
-    // 공식 표시는 일곱 앱 모두에 있다. 타일 글자는 이름에서 나오고, GitHub과 Gmail이 둘 다 「G」다:
-    // 이름이 줄에 같이 있어 구별은 되지만 타일만으로는 안 된다 - 앱 아이콘은 U-S1(#3949)의 몫이다.
+    // 공식 표시는 일곱 앱 모두에 있고, 타일 글자는 서로 다르다(GitHub은 GH, Gmail은 Gm — #3949).
     expect(rows.every((row) => (row.textContent ?? "").includes("공식"))).toBe(true);
     const tiles = rows.map((row) => row.querySelector('span[aria-hidden="true"]')?.textContent);
-    expect(tiles).toEqual(["GD", "G", "G", "GC", "G내", "L", "N"]);
+    expect(tiles).toEqual(["GD", "GH", "Gm", "GC", "G내", "L", "N"]);
     const list = text(el, "plugin-list");
     expect(list).toContain("공유 드라이브의 파일");
     expect(list).toContain("코드 저장소와 이슈");
@@ -350,8 +356,9 @@ describe("읽기 전용: 설치·권한 경로가 없는 서버 (오늘의 Rust 
     expect(rows).toHaveLength(2);
     expect(rows[0].textContent).toContain("notion.notion-search");
     expect(rows[0].textContent).not.toMatch(/위험도|승인/);
-    expect(rows[1].textContent).toContain("위험도: 쓰기");
-    expect(rows[1].textContent).toContain("승인: 워크스페이스 쓰기");
+    // 등급을 아는 도구(approvalPolicy가 있다)는 위험도·승인 칩 둘 대신 등급 칩 하나다(#3949).
+    expect(rows[1].textContent).toContain("A · 나만 영향받는 쓰기");
+    expect(rows[1].textContent).not.toMatch(/위험도|승인:/);
     expect(text(el, "plugin-tools")).toContain("이 앱의 도구는 2개예요: 읽기 1개, 쓰기 1개.");
   });
 
@@ -374,17 +381,17 @@ describe("읽기 전용: 설치·권한 경로가 없는 서버 (오늘의 Rust 
     expect(text(el, "plugin-tools")).toContain("이 앱의 도구는 3개이고, 모두 읽기 도구예요.");
   });
 
-  it("공식 앱이 여섯을 넘으면(일곱) 검색·보기 컨트롤이 선다", async () => {
+  it("공식 앱은 한눈에 읽히므로 검색·보기 컨트롤이 서지 않는다", async () => {
     const el = await mount();
     await until(() => q(el, "plugin-list"));
     expect(el.querySelectorAll('[data-testid^="plugin-catalog-"]')).toHaveLength(7);
-    expect(el.querySelector("#plugin-search")).not.toBeNull();
-    expect(el.querySelector("#plugin-filter")).not.toBeNull();
+    expect(el.querySelector("#plugin-search")).toBeNull();
+    expect(el.querySelector("#plugin-filter")).toBeNull();
   });
 
   it("검색이 다 걸러 낸 빈 상태는 「아직」 없이 맞는 앱이 없다고 말하고 필터 지우기가 목록을 되돌린다", async () => {
     const real = (catalogWire.plugins as Array<Record<string, unknown>>);
-    const extra = ["alpha", "beta", "gamma"].map((name) => ({
+    const extra = EXTRA_APP_NAMES.map((name) => ({
       ...real[0],
       pluginId: `com.example.${name}`,
       name: `예시 ${name}`,
@@ -408,13 +415,13 @@ describe("읽기 전용: 설치·권한 경로가 없는 서버 (오늘의 Rust 
       [...el.querySelectorAll("button")].find((button) => button.textContent === "필터 지우기")?.click();
     });
     await until(() => q(el, "plugin-list"));
-    expect(el.querySelectorAll('[data-testid^="plugin-catalog-"]')).toHaveLength(10);
+    expect(el.querySelectorAll('[data-testid^="plugin-catalog-"]')).toHaveLength(real.length + extra.length);
   });
 
   it("목록이 한눈에 읽히는 길이를 넘으면 컨트롤이 돌아온다", async () => {
-    // 길이만 재는 합성 항목이다: 공식 일곱 앱 뒤에 가짜 셋을 더해 열로 만든다.
+    // 길이만 재는 합성 항목이다: 공식 앱 뒤에 가짜를 더해 아홉을 넘긴다.
     const real = (catalogWire.plugins as Array<Record<string, unknown>>);
-    const extra = ["alpha", "beta", "gamma"].map((name) => ({
+    const extra = EXTRA_APP_NAMES.map((name) => ({
       ...real[0],
       pluginId: `com.example.${name}`,
       name: `예시 ${name}`,
@@ -423,7 +430,8 @@ describe("읽기 전용: 설치·권한 경로가 없는 서버 (오늘의 Rust 
     h.catalog = { ...catalogWire, plugins: [...real, ...extra] };
     const el = await mount();
     await until(() => q(el, "plugin-list"));
-    expect(el.querySelectorAll('[data-testid^="plugin-catalog-"]')).toHaveLength(10);
+    expect(el.querySelectorAll('[data-testid^="plugin-catalog-"]')).toHaveLength(real.length + extra.length);
+    expect(real.length + extra.length).toBeGreaterThan(PLUGIN_CONTROLS_MAX_GLANCEABLE);
     expect(el.querySelector("#plugin-search")).not.toBeNull();
     expect(el.querySelector("#plugin-filter")).not.toBeNull();
   });
@@ -710,6 +718,22 @@ describe("허용 동의: 동의 없이는 grant POST가 나가지 않는다 (U-2
     expect(h.grant.mock.calls[0]).toEqual([WS, NOTION, "notion:read"]);
   });
 
+  it("권한을 바꾼 뒤에는 목록과 그 앱의 상세만 다시 읽는다: 다른 줄의 상세(미리보기 칩의 출처)는 다시 나가지 않는다", async () => {
+    const el = await openGrantDialog();
+    h.grant.mockResolvedValue({ pluginId: NOTION, status: "granted", enabled: true, capabilities: [] });
+    await untilEveryRowDetailRead(el);
+    const before = [...h.detailReads];
+    await clickDoc("plugin-scope-notion:read");
+    await clickDoc("plugin-scope-confirm");
+    await until(() => h.grant.mock.calls.length > 0);
+    await until(() => h.detailReads.filter((id) => id === NOTION).length > before.filter((id) => id === NOTION).length);
+    await flush();
+    await flush();
+    const added = h.detailReads.slice(before.length);
+    expect(added.length).toBeGreaterThan(0);
+    expect(new Set(added)).toEqual(new Set([NOTION]));
+  });
+
   it("여러 권한 중 일부가 실패해도 화면은 서버가 지금 말하는 상태와 같다", async () => {
     const el = await openGrantDialog();
     h.grant.mockImplementation(async (_ws: string, _plugin: string, scope: string) => {
@@ -770,5 +794,256 @@ describe("옛 서버에서는 설치 표면이 없다 (U-2 serverSurfaces 숨김
     expect(q(el, "plugin-scope-grant")).toBeNull();
     expect(q(el, "plugin-scope-consent")).toBeNull();
     expect(h.grant).toHaveBeenCalledTimes(0);
+  });
+});
+
+// =============================================================================
+// 앱 화면 v2 (#3949, ADR-0113 증보 2 E1·E2·E4): 「미리보기」 칩, 두 Drive 칩, 실행하는 곳, 등급.
+//
+// 서버 시드(#3944, PR #4068)의 Google 매니페스트는 이 트리에 아직 없다. 아래는 그 매니페스트와 같은
+// 와이어 모양(`momo.preview`, `mcp.tools[].approvalPolicy`, `momo.approvalTier`)을 최소로 지은 합성
+// 항목이다. 서버 시드가 이 트리에 들어온 뒤에는 시드 파일을 직접 읽는 시험으로 바꿀 수 있다.
+// =============================================================================
+
+const GMAIL = "com.momo.plugins.gmail";
+const CALENDAR = "com.momo.plugins.google-calendar";
+const MY_DRIVE = "com.momo.plugins.google-drive";
+
+type SeedTool = { name: string; risk: "read" | "write"; approvalPolicy?: string; tier: string; scope: string };
+
+function seededApp(opts: {
+  id: string;
+  name: string;
+  preview?: boolean;
+  hosted?: boolean;
+  tools: SeedTool[];
+}) {
+  const host = `${opts.id.split(".").pop()}.googleapis.com`;
+  const manifest = {
+    schemaVersion: "momo.plugin.v1",
+    plugin: {
+      id: opts.id,
+      name: opts.name,
+      version: "1.0.0",
+      description: "Official remote MCP (Developer Preview)",
+      publisher: { id: "google", name: "Google", verified: true },
+      license: { spdx: "LicenseRef-Google-Hosted-Service", kind: "hosted_only" },
+      provenance: { sourceURL: "https://developers.google.com/workspace", releaseRef: "hosted", verified: true },
+    },
+    mcp: {
+      protocolVersion: "2025-06-18",
+      transport: "streamable_http",
+      url: `https://${host}/mcp/v1`,
+      tools: opts.tools.map((tool) => ({
+        name: tool.name,
+        description: `${tool.name} 설명`,
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+        schemaDigest: `sha256:${"a".repeat(64)}`,
+        scopes: [tool.scope],
+        risk: tool.risk,
+        ...(tool.approvalPolicy ? { approvalPolicy: tool.approvalPolicy } : {}),
+      })),
+    },
+    momo: {
+      approvalTier: Object.fromEntries(opts.tools.map((tool) => [tool.name, tool.tier])),
+      risk: "medium",
+      egressDomains: [host],
+      recommendedFor: ["productivity"],
+      ...(opts.hosted === undefined ? {} : { hosted: opts.hosted }),
+      ...(opts.preview === undefined ? {} : { preview: opts.preview }),
+    },
+  };
+  const item = {
+    pluginId: opts.id,
+    name: opts.name,
+    version: "1.0.0",
+    description: manifest.plugin.description,
+    official: true,
+    recommended: false,
+    egressDomains: [host],
+    recommendedFor: ["productivity"],
+    installed: false,
+    enabled: false,
+  };
+  const { recommended: _recommended, ...detailItem } = item;
+  return { item, detail: { plugin: { ...detailItem, manifest } } };
+}
+
+const GMAIL_TOOLS: SeedTool[] = [
+  { name: "gmail.search_threads", risk: "read", approvalPolicy: "none", tier: "read_only", scope: "gmail:read" },
+  { name: "gmail.create_draft", risk: "write", approvalPolicy: "require_approval", tier: "network_write", scope: "gmail:draft" },
+  { name: "gmail.label_thread", risk: "write", approvalPolicy: "always", tier: "network_write", scope: "gmail:draft" },
+];
+
+function mountWorld(apps: ReturnType<typeof seededApp>[]) {
+  h.catalog = {
+    ...catalogWire,
+    // 엔진 시드(#4068)가 같은 id의 Google 앱을 이미 싣는다: 같은 id는 시드 항목으로 바꿔 끼워 줄이 겹치지 않게 한다.
+    plugins: [
+      ...(catalogWire.plugins as Array<{ pluginId: string }>).filter(
+        (plugin) => !apps.some((app) => app.item.pluginId === plugin.pluginId),
+      ),
+      ...apps.map((app) => app.item),
+    ],
+  };
+  for (const app of apps) h.details.set(app.item.pluginId, app.detail);
+}
+
+/** 목록의 모든 줄이 자기 상세를 읽어 마칠 때까지 기다린다: 칩이 「없다」는 단정은 읽은 뒤에만 뜻이 있다. */
+async function untilEveryRowDetailRead(el: HTMLElement) {
+  await until(() => q(el, "plugin-list"));
+  const rows = el.querySelectorAll('[data-testid^="plugin-catalog-"]').length;
+  await until(() => new Set(h.detailReads).size >= rows);
+  await flush();
+  await flush();
+}
+
+describe("앱 화면 v2: 「미리보기」 칩 (E2, 수용 8)", () => {
+  it("매니페스트 momo.preview가 참인 앱은 목록 줄과 상세 머리에 칩이 서고, 아닌 앱은 없다", async () => {
+    mountWorld([
+      seededApp({ id: GMAIL, name: "Gmail", preview: true, tools: GMAIL_TOOLS }),
+      seededApp({ id: CALENDAR, name: "Google Calendar", preview: true, tools: [GMAIL_TOOLS[0]] }),
+    ]);
+    const el = await mount();
+    await untilEveryRowDetailRead(el);
+    expect(text(el, `plugin-row-${GMAIL}-preview`)).toBe("미리보기");
+    expect(text(el, `plugin-row-${CALENDAR}-preview`)).toBe("미리보기");
+    // 공식 네 앱에는 칩이 없다: 필드가 없는 매니페스트(옛 시드)는 미리보기가 아니다.
+    for (const id of [GITHUB, NOTION, LINEAR, DRIVE]) {
+      expect(q(el, `plugin-row-${id}-preview`), id).toBeNull();
+    }
+    await openDetail(el, GMAIL);
+    expect(text(el, "plugin-detail-preview")).toBe("미리보기");
+    expect(text(el, "plugin-preview-note")).toContain("정식으로 내놓지 않은 앱");
+    await openDetail(el, GITHUB);
+    expect(q(el, "plugin-detail-preview")).toBeNull();
+    expect(q(el, "plugin-preview-note")).toBeNull();
+  });
+
+  it("momo.preview를 지우면(또는 false) 칩이 없다 — 칩은 필드가 말한다", async () => {
+    mountWorld([
+      seededApp({ id: GMAIL, name: "Gmail", tools: GMAIL_TOOLS }),
+      seededApp({ id: CALENDAR, name: "Google Calendar", preview: false, tools: [GMAIL_TOOLS[0]] }),
+    ]);
+    const el = await mount();
+    await untilEveryRowDetailRead(el);
+    await openDetail(el, GMAIL);
+    // 모든 줄의 상세를 읽은 뒤에도 목록 줄에 칩이 없다.
+    expect(q(el, `plugin-row-${GMAIL}-preview`)).toBeNull();
+    expect(q(el, "plugin-detail-preview")).toBeNull();
+    expect(q(el, `plugin-row-${CALENDAR}-preview`)).toBeNull();
+  });
+});
+
+describe("앱 화면 v2: 두 Drive 칩 (E2)", () => {
+  it("내 드라이브는 「내 에이전트가 읽어요」, 팀 공유 드라이브는 경로가 없는 서버에서 칩을 숨기고 「관리자 설정이 필요해요」다", async () => {
+    mountWorld([seededApp({ id: MY_DRIVE, name: "Google 내 드라이브", preview: true, tools: [GMAIL_TOOLS[0]] })]);
+    const el = await mount();
+    await untilEveryRowDetailRead(el);
+    await until(() => q(el, `plugin-row-${MY_DRIVE}-route`));
+    expect(text(el, `plugin-row-${MY_DRIVE}-route`)).toBe("내 드라이브 · 내 에이전트가 읽어요");
+    expect(text(el, `plugin-row-${DRIVE}-route`)).toBe("관리자 설정이 필요해요");
+    expect(text(el, "plugin-list")).not.toContain("팀 전체 · oort가 읽어요");
+    // 칩이 없는 앱은 칩 자리도 없다.
+    expect(q(el, `plugin-row-${GITHUB}-route`)).toBeNull();
+    await openDetail(el, DRIVE);
+    expect(text(el, "plugin-detail-route")).toBe("관리자 설정이 필요해요");
+    await openDetail(el, MY_DRIVE);
+    expect(text(el, "plugin-detail-route")).toBe("내 드라이브 · 내 에이전트가 읽어요");
+  });
+});
+
+describe("앱 화면 v2: 실행하는 곳 (E1·E3)", () => {
+  it("연결을 앱 사용자가 들고 가는 앱은 세 곳과 강제 수준을 모두 말한다", async () => {
+    const el = await mount();
+    await openDetail(el, GITHUB);
+    const places = [...el.querySelectorAll('[data-testid="plugin-run-place"]')].map((row) =>
+      (row.textContent ?? "").replace(/\s+/g, " ").trim()
+    );
+    expect(places).toEqual([
+      "내 맥내 맥에서 앱 쓰기는 준비 중이에요",
+      "Hermes 시험나만 써요",
+      "그록봇앱 권한은 그록봇이 관리해요. oort는 허용 기록만 남겨요",
+    ]);
+    expect(text(el, "plugin-run-places")).toContain("앱은 요청한 사람 본인의 에이전트가 써요");
+  });
+
+  it("oort 서버가 연결을 들고 있는 팀 공유 드라이브(hosted)에는 이 줄이 없다", async () => {
+    const el = await mount();
+    await openDetail(el, DRIVE);
+    expect(q(el, "plugin-run-places")).toBeNull();
+  });
+});
+
+describe("앱 화면 v2: 도구 등급 R · A · B (E4)", () => {
+  it("읽기=R, 승인 후 쓰기=A, 항상 묻는 쓰기=B 칩이 도구마다 서고 뜻은 한 번만 말한다", async () => {
+    mountWorld([seededApp({ id: GMAIL, name: "Gmail", preview: true, tools: GMAIL_TOOLS })]);
+    const el = await mount();
+    await openDetail(el, GMAIL);
+    await until(() => q(el, "plugin-tools"));
+    const rows = [...(q(el, "plugin-tools")?.querySelectorAll("li") ?? [])];
+    expect(rows).toHaveLength(3);
+    const gradeOf = (row: Element) => row.querySelector('[data-testid="plugin-tool-grade"]')?.textContent;
+    expect(gradeOf(rows[0])).toBe("R · 읽기");
+    expect(gradeOf(rows[1])).toBe("A · 나만 영향받는 쓰기");
+    expect(gradeOf(rows[2])).toBe("B · 남에게 보일 수 있는 쓰기");
+    // 등급 칩이 위험도·승인 단계 칩을 대신한다.
+    expect(q(el, "plugin-tools")?.textContent).not.toMatch(/위험도|승인:/);
+    expect(el.querySelectorAll('[data-testid="plugin-grade-legend"]')).toHaveLength(1);
+    expect(text(el, "plugin-grade-legend")).toContain("B로 선언된 쓰기는 다른 사람에게 보이거나 알림이 갈 수 있어요");
+    expect(text(el, "plugin-grade-legend")).toContain("A로 선언된 쓰기는 나만 영향받고 되돌릴 수 있어요");
+    // C 등급은 매니페스트에 없어서 화면에도 없다.
+    expect(q(el, "plugin-tools")?.textContent).not.toMatch(/\bC ·/);
+  });
+
+  it("팀 공유 드라이브: 경로가 없는 동안 설치 단추를 접고 관리자 설정이 먼저라고 말한다", async () => {
+    h.probe.mockResolvedValue([405, 405]);
+    const el = await mount();
+    await openDetail(el, DRIVE);
+    await until(() => q(el, "plugin-setup-note"));
+    expect(text(el, "plugin-setup-note")).toBe("관리자가 서버 설정을 끝내면 설치할 수 있어요.");
+    expect(writeControls(el)).toEqual([]);
+    // 같은 서버에서 다른 앱의 설치 단추는 그대로다: 접는 것은 이 앱뿐이다.
+    await openDetail(el, NOTION);
+    await until(() => writeControls(el).length > 0);
+    expect(q(el, "plugin-setup-note")).toBeNull();
+  });
+
+  it("한 번 설치된 팀 공유 드라이브(꺼진 상태 포함)는 단추를 접지 않는다: 서버 설정은 이미 끝난 앱이다", async () => {
+    h.probe.mockResolvedValue([405, 405]);
+    h.role = "owner";
+    const catalog = JSON.parse(JSON.stringify(catalogWire)) as { plugins: Array<Record<string, unknown>> };
+    Object.assign(catalog.plugins.find((plugin) => plugin.pluginId === DRIVE) ?? {}, { installed: true, enabled: false });
+    h.catalog = catalog;
+    const el = await mount();
+    await openDetail(el, DRIVE);
+    await until(() => writeControls(el).length > 0);
+    expect(writeControls(el)).toEqual(["다시 활성화"]);
+    expect(q(el, "plugin-setup-note")).toBeNull();
+  });
+
+  it("읽기 도구만 있는 앱(팀 공유 드라이브)의 설명은 R만 말한다", async () => {
+    const el = await mount();
+    await openDetail(el, DRIVE);
+    expect(text(el, "plugin-grade-legend")).toBe("R은 읽기만 해요.");
+    const grades = [...el.querySelectorAll('[data-testid="plugin-tool-grade"]')].map((node) => node.getAttribute("data-grade"));
+    expect(grades).toEqual(["R", "R", "R"]);
+  });
+
+  it("approvalPolicy를 모르는 도구(옛 서버)는 등급을 어림하지 않고 기존 위험도·승인 칩으로 물러선다", async () => {
+    mountWorld([
+      seededApp({
+        id: GMAIL,
+        name: "Gmail",
+        tools: [{ name: "gmail.create_draft", risk: "write", tier: "network_write", scope: "gmail:draft" }],
+      }),
+    ]);
+    const el = await mount();
+    await openDetail(el, GMAIL);
+    await until(() => q(el, "plugin-tools"));
+    expect(q(el, "plugin-tool-grade")).toBeNull();
+    expect(q(el, "plugin-grade-legend")).toBeNull();
+    expect(text(el, "plugin-tools")).toContain("위험도: 쓰기");
+    expect(text(el, "plugin-tools")).toContain("승인: 네트워크 쓰기");
   });
 });

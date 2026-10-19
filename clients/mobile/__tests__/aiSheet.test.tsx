@@ -381,17 +381,21 @@ describe('개인 에이전트 거르기', () => {
 
   it('모델: 구획 판정과 칩 값', () => {
     const one = personalAgentRows([personalAgent(MINE)], SELF_ID);
-    expect(aiSheetSections({gateOpen: false, personal: one})).toEqual({
+    expect(aiSheetSections({gateOpen: false, personal: one, appsProvided: false})).toEqual({
       agents: true,
       myTools: false,
       personal: false,
+      apps: false,
     });
-    expect(aiSheetSections({gateOpen: true, personal: []})).toEqual({
+    expect(aiSheetSections({gateOpen: true, personal: [], appsProvided: false})).toEqual({
       agents: true,
       myTools: true,
       personal: false,
+      apps: false,
     });
-    expect(aiSheetSections({gateOpen: true, personal: one}).personal).toBe(true);
+    expect(
+      aiSheetSections({gateOpen: true, personal: one, appsProvided: true}),
+    ).toMatchObject({personal: true, apps: true});
     expect(macChip(null)).toBeNull();
     expect(macChip(macState([]))).toBeNull();
     expect(macChip(macState(ownMacs([host(true)] as never, SELF_ID)))).toMatchObject({on: true});

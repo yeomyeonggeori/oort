@@ -4,11 +4,21 @@ import { StatusChip } from "@/features/settings/SettingsFields";
 import { serverSurface } from "@momo/core/features/capabilities/serverSurfaces";
 import type { PluginManifestTool } from "@momo/core/lib/api";
 import {
+  APP_GRADE_LABEL,
+  appGradeLegend,
+  appToolGrade,
+  type AppGrade,
+} from "@momo/core/features/plugins/appGrade";
+import {
+  PLUGIN_PREVIEW_CHIP,
+  PLUGIN_PREVIEW_NOTE,
   PLUGIN_READONLY_COPY as COPY,
   approvalLabel,
   identifiableScopeSentence,
   myGrantSentence,
   pluginIconText,
+  pluginRouteChip,
+  pluginRunPlaces,
   pluginToolsSummary,
   riskLabel,
   workspaceInstallSentence,
@@ -31,7 +41,7 @@ export function PluginIcon({
   plugin,
   className,
 }: {
-  plugin: { name: string; iconText?: string };
+  plugin: { name: string; iconText?: string; pluginId?: string };
   className?: string;
 }) {
   return (
@@ -44,6 +54,79 @@ export function PluginIcon({
     >
       {pluginIconText(plugin)}
     </span>
+  );
+}
+
+/**
+ * 앱 이름 곁의 칩들 (#3949): 「미리보기」(매니페스트 `momo.preview`)와 두 Drive를 가르는 연결 칩.
+ * 목록 줄과 상세 머리가 같은 함수로 그려서 두 곳이 따로 말하지 않는다. 칩이 하나도 없으면 아무것도
+ * 그리지 않는다.
+ */
+export function PluginAppChips({
+  pluginId,
+  preview,
+  testIdPrefix,
+}: {
+  pluginId: string;
+  /** 상세 매니페스트의 `momo.preview`. 아직 읽지 못했거나 없으면 칩도 없다. */
+  preview: boolean | undefined;
+  testIdPrefix: string;
+}) {
+  const route = pluginRouteChip(pluginId);
+  return (
+    <>
+      {preview === true && (
+        <span data-testid={`${testIdPrefix}-preview`}>
+          {/* 위험이 아니라 사실 라벨이라 경고색이 아니다: warn은 「관리자 설정」과 쓰기 등급이 쓴다. */}
+          <StatusChip tone="accent">{PLUGIN_PREVIEW_CHIP}</StatusChip>
+        </span>
+      )}
+      {route && (
+        <span data-testid={`${testIdPrefix}-route`}>
+          <StatusChip tone={route.tone}>{route.label}</StatusChip>
+        </span>
+      )}
+    </>
+  );
+}
+
+/** 미리보기 앱의 상세에만 서는 한 줄(`PLUGIN_PREVIEW_NOTE`). */
+export function PluginPreviewNote() {
+  return (
+    <p className="text-meta text-ink-muted" data-testid="plugin-preview-note">
+      {PLUGIN_PREVIEW_NOTE}
+    </p>
+  );
+}
+
+/**
+ * 실행하는 곳 (E1): 같은 앱이 어디서 도느냐에 따라 oort가 막을 수 있는 정도가 다르다. 세 곳을 모두 말해서
+ * 강제 수준을 숨기지 않는다. 오류가 아니므로 위험 색을 쓰지 않는다. oort 서버가 연결을 들고 있는 앱은
+ * 줄이 없다(`pluginRunPlaces`가 빈 목록을 준다).
+ */
+export function PluginRunPlaces({ hosted }: { hosted: boolean | undefined }) {
+  const headingId = useId();
+  const places = pluginRunPlaces({ hosted });
+  if (places.length === 0) return null;
+  return (
+    <section
+      className="flex flex-col gap-3"
+      aria-labelledby={headingId}
+      data-testid="plugin-run-places"
+    >
+      <h4 id={headingId} className="text-body font-semibold text-ink">
+        {COPY.runPlaces.heading}
+      </h4>
+      <p className="text-meta text-ink-muted">{COPY.runPlaces.lead}</p>
+      <dl className="flex flex-col gap-3">
+        {places.map((place) => (
+          <div key={place.place} className="flex min-w-0 flex-col gap-px" data-testid="plugin-run-place">
+            <dt className="text-meta text-ink-muted">{place.place}</dt>
+            <dd className="min-w-0 text-body text-ink">{place.enforcement}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
   );
 }
 
@@ -183,13 +266,29 @@ function notableBadges(tool: PluginManifestTool): ScopeBadge[] {
   ]);
 }
 
+const GRADE_TONE: Record<AppGrade, ScopeBadge["tone"]> = {
+  R: "muted",
+  A: "warn",
+  B: "danger",
+};
+
 function ToolRow({ tool, allowed }: { tool: PluginManifestTool; allowed: boolean }) {
-  const badges = notableBadges(tool);
+  // 등급을 아는 도구는 등급 칩 하나가 위험도·승인 단계 칩 둘을 대신한다(A와 B는 승인 단계로는
+  // 갈리지 않는다). 등급을 모르는 도구(옛 서버, 새 값)만 기존 칩으로 물러선다.
+  const grade = appToolGrade(tool);
+  const badges = grade ? [] : notableBadges(tool);
   return (
     <li className="flex flex-col gap-1 py-3">
-      {/* 사람이 읽는 문장이 먼저다. 도구 이름(`github.list_repositories`)은 정책과 감사가 부르는
-          식별자라서 아래에 조용히 선다. 설명이 없는 도구만 이름이 제목이 된다. */}
-      <span className="text-body font-medium text-ink">{tool.description ?? tool.name}</span>
+      <span className="flex min-w-0 items-start justify-between gap-3">
+        {/* 사람이 읽는 문장이 먼저다. 도구 이름(`github.list_repositories`)은 정책과 감사가 부르는
+            식별자라서 아래에 조용히 선다. 설명이 없는 도구만 이름이 제목이 된다. */}
+        <span className="min-w-0 text-body font-medium text-ink">{tool.description ?? tool.name}</span>
+        {grade && (
+          <span className="whitespace-nowrap" data-testid="plugin-tool-grade" data-grade={grade}>
+            <StatusChip tone={GRADE_TONE[grade]}>{APP_GRADE_LABEL[grade]}</StatusChip>
+          </span>
+        )}
+      </span>
       <span className="text-meta text-ink-muted">
         {tool.description && (
           <>
@@ -224,6 +323,7 @@ export function PluginToolList({
 }) {
   const headingId = useId();
   const summary = pluginToolsSummary(tools);
+  const legend = appGradeLegend(tools);
   return (
     <section
       className="flex flex-col gap-2"
@@ -238,6 +338,12 @@ export function PluginToolList({
       ) : (
         <>
           {summary && <p className="text-meta text-ink-muted">{summary}</p>}
+          {/* 등급 글자의 뜻은 도구 줄마다 달지 않고 한 번만 말한다. */}
+          {legend && (
+            <p className="text-meta text-ink-muted" data-testid="plugin-grade-legend">
+              {legend}
+            </p>
+          )}
           {/* 칸막이 상자 안에 또 상자를 두지 않는다: 줄은 선으로 나뉜다. */}
           <ul className="flex flex-col divide-y divide-line border-y border-line">
             {tools.map((tool) => (
