@@ -172,6 +172,17 @@ CREATE POLICY github_app_installation_update ON github_app_installation
               OR current_setting('app.github_app_admin', true) = 'on'
               OR current_setting('app.github_link', true) = 'on');
 
+-- 140's ws_isolation cast `current_setting('app.workspace_id', true)::uuid` raises on an empty
+-- string (a pooled connection that once ran a tenant tx keeps the placeholder as ''), and the
+-- link transaction runs WITHOUT a workspace GUC while PostgreSQL still evaluates every permissive
+-- policy. NULLIF turns "no workspace" into "no rows" instead of an error; the isolation it gives
+-- is unchanged. (Only this table: it is the only 140 tenant table the link path reads without a
+-- workspace scope.)
+DROP POLICY IF EXISTS ws_isolation ON github_link_claim;
+CREATE POLICY ws_isolation ON github_link_claim
+  USING (workspace_id = NULLIF(current_setting('app.workspace_id', true), '')::uuid)
+  WITH CHECK (workspace_id = NULLIF(current_setting('app.workspace_id', true), '')::uuid);
+
 -- github_link_claim: a cross-workspace read/update of the *install* claims, link GUC only.
 -- The manifest claim (purpose 'app_manifest') is never reachable through this branch.
 DROP POLICY IF EXISTS github_link_claim_link_select ON github_link_claim;
