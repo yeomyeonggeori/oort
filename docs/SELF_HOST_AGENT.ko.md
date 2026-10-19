@@ -1078,7 +1078,7 @@ Update/Reset 뒤 재합류: 위저드 **연결 값 다시 발급**
 
 ADR-0186 증보 G1(GC-6 #2947, GC-8 #2949). 사람이 AI 연결·AI 구독 로그인(Claude,
 Codex)·팀 API 키 연결을 부탁하면 **런타임이 직접 하지 않는다.** 할 수도 없다. 구독
-로그인은 그 사람 기기에서, 팀 키는 운영자 세션에서 한다. 런타임은 연결 카드를
+로그인은 그 사람 기기에서, 팀 키는 운영자 세션에서 한다(Hermes 자신의 모델 인증 구독은 별개다: §3.4.1). 런타임은 연결 카드를
 그 사람 앞에 놓는다.
 
 ```text
@@ -1972,6 +1972,18 @@ agent:
 제거해도 볼륨은 지워지지 않아요. 지우려면 Railway에서 Hermes 서비스와 볼륨을
 삭제하세요. 워크스페이스 하나만 Hermes 하나에 연결하세요(여러 워크스페이스의
 대화가 한 볼륨에 섞여요).
+
+**Codex·Claude 구독으로 모델 인증하기 (ADR-0004 증보 6, ADR-0203 증보
+2026-10-19).** Hermes는 운영자 본인의 Codex(ChatGPT) 또는 Claude 구독 OAuth로
+모델 인증을 할 수 있어요. 토큰은 **Hermes 자기 볼륨에만** 있어요. oort 서버와
+금고는 그 토큰을 받지도 저장하지도 중개하지도 기록하지도 않고(oort가 가진 것은
+불투명 bearer `HERMES_API_KEY`뿐), 그래서 `docs/SELF_HOST.ko.md`의 킬 스위치
+(`MOMO_SUBSCRIPTION_AGENTS_ENABLED`, `MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED`)는
+**이 경로에는 적용되지 않아요.** 사용량은 Hermes에 로그인한 사람의 구독에서
+나가요(팀원이 Hermes를 불러도 같아요). 벤더 약관에 맞는지는 운영자가 판단해요.
+oort는 판단하거나 보증하지 않아요. 구독 토큰을 oort·채널·oort 서비스의 `.env`에
+붙여 넣지 마세요. 로그인 절차는 #4073(Hermes 모델 인증 온보딩)이 들어오기 전까지
+자리표시예요: [#4073](https://github.com/yeomyeonggeori/oort/issues/4073).
 
 compose `agents` 프로파일은 아직 없어요(Railway 경로가 검증된 뒤로 미뤘어요).
 실제 Railway에서 `0.0.0.0`과 `::`를 재 보는 일도 남아 있어요.
