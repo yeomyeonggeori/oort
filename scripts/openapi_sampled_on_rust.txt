@@ -208,6 +208,7 @@ GET /v1/workspaces/{workspaceId}/channels/{channelId}/pins
 GET /v1/workspaces/{workspaceId}/search/messages
 GET /v1/workspaces/{workspaceId}/read-state
 PUT /v1/workspaces/{workspaceId}/channels/{channelId}/read-state
+PUT /v1/workspaces/{workspaceId}/channels/{channelId}/viewing
 GET /v1/workspaces/{workspaceId}/dms
 POST /v1/workspaces/{workspaceId}/dms
 

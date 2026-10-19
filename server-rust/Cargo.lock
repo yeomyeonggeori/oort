@@ -1994,6 +1994,7 @@ dependencies = [
  "momo-egress",
  "momo-settings",
  "reqwest",
+ "serde",
  "serde_json",
  "sha2 0.10.9",
  "tokio",

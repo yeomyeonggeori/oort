@@ -1308,7 +1308,7 @@ ADR-0186 증보 G1 (GC-6 #2947, GC-8 #2949). When a person asks the runtime to
 connect an AI, sign in to an AI subscription (Claude, Codex) or connect a team
 API key, **the runtime does not do it**. It cannot: the subscription login runs
 on that person's own device, and the team key is written by an operator's own
-session. What it can do is put the connect card in front of them:
+session. (Hermes' own model-auth subscription is a different thing: §3.4.1.) What it can do is put the connect card in front of them:
 
 ```text
 oort_card_suggest {handle, clientMsgId, commandId: "ai.connect", args, body}
@@ -1803,6 +1803,12 @@ to D16 and 부록 A):
 | 3. Finish | `oort_run_complete` (scope `agent:runs:callback`) | `leaseHandle`, `status` (`succeeded` / `failed`), `body` (8000), `error` (4000), `usage`, `artifacts` | `{status, messageId, seq}` |
 | renew | `oort_job_renew` | `leaseHandle` | `{status:"renewed", leaseExpiresAtMs}` |
 | alive | `oort_ping` (scope `agent:inbox:read`, no new scope) | `state` (`idle` or `working`, optional) | `{status:"ok", recorded, serverTimeMs, minIntervalSeconds:30}`; a call inside the 30-second window is not an error, it answers `recorded:false` and changes nothing |
+
+An empty successful answer (`status:"succeeded"` with an empty or whitespace-only `body`) writes no
+message to the timeline. The run still settles, billing and the rail close
+frame are unchanged, and `oort_run_complete` answers `messageId: null` and
+`seq: null`. Send the same completion again and you get `200` with the same
+shape, not `409`. Read `messageId` and `seq` as nullable (#4017, PR #4023).
 
 A job can also come from a thread reply (ADR-0162 증보 5 W1 to W3). When a
 person replies in a thread your agent opened (its message is the thread's
@@ -2317,8 +2323,67 @@ erase it, delete the Hermes service and its volume in Railway. Connect only
 one workspace to one Hermes (conversations of several workspaces would share
 one volume).
 
-The compose `agents` profile is not shipped yet (it follows a verified Railway
-path). Measured `0.0.0.0` vs `::` on a real Railway environment is still open.
+**Zero-base shortcut (#4072).** Steps 1-7 are what the template and the
+generator now do for you; you still read the lock, and the model key stays yours.
+
+- **Railway:** `infra/railway/railway.json` has the `hermes` service (private,
+  digest-pinned official image, `/opt/data` volume) and the api/agent-worker
+  variables of step 6-7. Create the shared variable `HERMES_API_KEY`
+  (`openssl rand -hex 32`), paste `infra/hermes/config.yaml` and
+  `infra/hermes/lockgate.py` as the two base64 variables, deploy, and read one
+  `LOCKGATE {"ok": true, …}` line in the hermes deploy log. The start command runs
+  the gate before the Hermes entrypoint, so a refused config means a service that
+  never listens. See `infra/railway/README.md` (Hermes).
+- **docker compose:** `scripts/self_host_env.sh --local-build --with-agents` (or
+  `--published-image …`) writes `COMPOSE_PROFILES=agents`, a generated
+  `HERMES_API_KEY`, `HERMES_BASE_URL=http://hermes:8642/v1`, the loopback opt-in
+  with the exact host `hermes`, and `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`; then
+  `scripts/self_host_env.sh --compose up -d --wait` starts Hermes with the rest.
+  The `hermes` service has no `ports:` (not reachable from the host), mounts the
+  config and the gate read-only, and runs `lockgate.py gate` before the
+  entrypoint. On an existing env the generated key is never replaced and the other keys
+  are set to the bundled values; the flag refuses an env that already declares
+  another `HERMES_BASE_URL`.
+- `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1` stays **your own declaration**. In both
+  shipped shapes it is backed by the gate; if you edit the config, the gate or
+  the start command, you take that backing back on yourself.
+- **Model authentication is not part of this** (#4073): Hermes starts and the
+  card appears without it; a chat turn answers that Hermes is not connected to a
+  provider until a model is set.
+- **Login relay sidecar (#4078, ADR-0203 증보 2026-10-19).** With
+  `HERMES_LOGIN_RELAY_KEY` set (`--with-agents` generates it, separate from the
+  chat key) the `hermes` container also runs `infra/hermes/login_relay.py` on the
+  private network (`hermes:8643`, no `ports:`). It runs only the fixed `hermes`
+  login commands for Codex, Claude and the configured OAuth apps, as the `hermes`
+  uid in their own process group; the key sits in a `0400` file of its own uid and
+  is gone from the environment before the gateway starts. Without the key there is
+  no sidecar process and the screen falls back to the shell command (`railway ssh`).
+  `docker compose` measurement: `scripts/tests/test_login_relay_docker.sh`.
+  oort's api reaches the sidecar with `HERMES_LOGIN_RELAY_URL` / `HERMES_LOGIN_RELAY_KEY` (written
+  together by `--with-agents`; api only) through the instance-operator-only routes
+  `…/agents/{agent}/model-login` and `…/app-login` (#4079, `docs/api/openapi.operator.yaml`). The
+  one-time code you paste and the Codex device code pass through oort once and are never stored,
+  logged, audited or pushed; tokens never reach oort at all. Either variable empty = the routes
+  answer `409 login_relay_off` and the screen shows the shell command.
+
+Measured on compose (arm64, 2026-10-19, the pinned image): the listener is
+`0.0.0.0:8642` (uid 10000), `docker port` shows nothing published, the gate
+printed `LOCKGATE ok=true disabled_count=24`, the report six checks true. `::`
+on a legacy Railway environment is still runtime-unverified.
+
+**Model auth with a Codex or Claude subscription (ADR-0004 증보 6, ADR-0203
+증보 2026-10-19).** Hermes may authenticate its model with the operator's own
+Codex (ChatGPT) or Claude subscription OAuth, kept **on Hermes' own volume**.
+oort's server and vault never receive, store, proxy or log those tokens (the
+only thing oort holds is the opaque `HERMES_API_KEY` bearer), so the kill
+switches in `docs/SELF_HOST.md` (`MOMO_SUBSCRIPTION_AGENTS_ENABLED`,
+`MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED`) **do not apply to this path**. Usage
+is drawn from the subscription of the person who logged Hermes in — including
+when teammates call Hermes — and whether the vendor's terms allow that is the
+operator's call; oort does not judge or guarantee it. Never paste a subscription
+token into oort, a channel or `.env` of the oort services. The login procedure
+is a placeholder until #4073 (Hermes model-auth onboarding) lands: see
+[#4073](https://github.com/yeomyeonggeori/oort/issues/4073).
 
 ### 3.4.2 Railway: Hermes connector trial (ADR-0203 증보, #3948)
 

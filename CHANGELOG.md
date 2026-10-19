@@ -11,6 +11,28 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+## [0.1.31] - 2026-10-18
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.31>. Tag target: `main=38695c43`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. Two database migrations (the schema goes from 138 to 140): 139 `agent_connector_owner` (one nullable `agent` column plus a CHECK) and 140 `github_app` (five tables, all with row-level security enabled and forced). `bootstrap_runtime_roles` is unchanged. New environment variables, all optional: `GITHUB_APP_MASTER_KEY` (without it only the GitHub surface answers 503), `MOMO_PUBLIC_BASE_URL`, and `OORT_COHOSTED_AGENT_CONNECTOR_APPS` (unset means the connector trial is off). Deploy order: the push relay, the API (the pre-deploy step applies 139 and 140), the agent worker, the relay and the webhook sender, then the notifier.
+
+### Added
+- Server: an agent that has connected apps is called only by its owner (ADR-0113 addendum 2 E3, #3938, #4031). The agent gets a `connector_owner_human_id` mark that must equal its owner (a database CHECK), and delivery drops a trigger written by anyone else, so an owner's Gmail or Drive access is never used for someone else's request. Turning it off is immediate.
+- Server: the GitHub App is stored and sealed (ADR-0205, #3947, #4033). Five tables, a manifest flow and the `GITHUB_APP_MASTER_KEY` sealing root. Until the key is set, the GitHub surface answers 503 by design.
+- Server: the "connector trial" switch (#3948, #4037). It is operator-only, limited to one person, needs two attestations, and re-checks right before delivery. It is off unless `OORT_COHOSTED_AGENT_CONNECTOR_APPS` is set.
+- Server: plugin groundwork (ADR-0113 addendum 2, #3937, #3945, #3946, #4027, #4034, #4035). The manifest validator accepts `LicenseRef`, several protocols and `momo.preview` and allows no class C; tool grants are recorded with their basis and audited (not enforced); a `connector.tool_used` audit row and a "used app" meta field are written.
+- Server: an agent can suggest `settings.open {section}` from a four-place allow list (ADR-0201 v2 H6-4, #3939, #4028).
+- Web and phone: the "Install app" switch with a two-line consent window, a one- and two-cell connection state and the admin or no-admin notice (ADR-0113 P3, #3943, #4036). The settings-open suggestion is drawn as a card (#3940, #4032).
+- Web and phone: "Replying" replaces the receipt line while an agent works (#4020, #4024).
+
+### Changed
+- Server: consecutive messages in a 1:1 DM are merged, and the placeholder for an empty successful reply is gone (#4017, #4023).
+- Phone: the DM screen's keyboard gap, header face and status dot, normal-state notice and recovery marker were tidied (#4016, #4038).
+
+### Fixed
+- Phone: a 401 while registering the push device no longer ends registration for good; it can retry when the refresh could not reach the server (#4008, #4021).
+- Desktop: the update gauge that stuck at "0 B" now shows "Downloading" with an indeterminate bar (#4019, #4022).
+- Core: particles after a Latin-script name follow how the name is read (#4025, #4026).
+
 ## [0.1.30] - 2026-10-17
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.30>. Tag target: `main=73deda08`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. No database migration (the schema stays at 138). `bootstrap_runtime_roles` is unchanged. No new environment variable. Deploy order: the push relay, the API, then the agent worker (the new producer), the relay and the webhook sender, and the notifier last, so that no new push candidate reaches a notifier that cannot judge it.

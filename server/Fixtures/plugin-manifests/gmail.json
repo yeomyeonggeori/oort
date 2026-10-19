@@ -1,0 +1,562 @@
+{
+  "schemaVersion": "momo.plugin.v1",
+  "plugin": {
+    "id": "com.momo.plugins.gmail",
+    "name": "Gmail",
+    "version": "1.0.0",
+    "description": "Official Google Gmail remote MCP (Developer Preview): read mail, create drafts, label. No send.",
+    "publisher": {
+      "id": "google",
+      "name": "Google",
+      "verified": true
+    },
+    "license": {
+      "spdx": "LicenseRef-Google-Hosted-Service",
+      "kind": "hosted_only"
+    },
+    "provenance": {
+      "sourceURL": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+      "releaseRef": "hosted",
+      "verified": true
+    }
+  },
+  "mcp": {
+    "protocolVersion": "2025-06-18",
+    "transport": "streamable_http",
+    "url": "https://gmailmcp.googleapis.com/mcp/v1",
+    "server": {
+      "name": "google/gmail-mcp",
+      "version": "preview"
+    },
+    "tools": [
+      {
+        "name": "gmail.list_drafts",
+        "description": "내 초안 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "pageSize": {
+              "type": "integer",
+              "description": "Optional. The maximum number of drafts to return. If unspecified, defaults to 20. The maximum allowed value is 50."
+            },
+            "pageToken": {
+              "type": "string",
+              "description": "Optional. A token received from a previous `list_drafts` call to retrieve the next page of results. Leave empty to fetch the first page. This is primarily used for pagination to continue fetching results from where the previous `ListDraft` call left off, especially when the number of drafts matching"
+            },
+            "query": {
+              "type": "string",
+              "description": "Examples: - `subject:OneMCP Update` - `from:gduser1@workspacesamples.dev` - `to:gduser2@workspacesamples.dev AND newer_than:7d` - `project proposal has:attachment` - `is:unread` A space or a dash (`-`) will separate a number while a dot (`.`) will be a decimal. For example, `01.2047-100` is consider"
+            },
+            "view": {
+              "type": "string",
+              "description": "Optional. Controls the fields populated for drafts in the draft list. Defaults to returning metadata only (`id`, `thread_id`, `to_recipients`, `cc_recipients`, `bcc_recipients`, `date`). Set to `DRAFT_VIEW_FULL` to include `subject` and `plaintext_body` content.",
+              "enum": [
+                "DRAFT_VIEW_UNSPECIFIED",
+                "DRAFT_VIEW_METADATA_ONLY",
+                "DRAFT_VIEW_FULL"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:1a1b4a778594eada70f43575544a565476a26b62c7a19d9dbb8a1cd747c96b58",
+        "scopes": [
+          "gmail:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "gmail.get_draft",
+        "description": "초안 하나를 읽습니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "draftId": {
+              "type": "string",
+              "description": "Required. The unique identifier of the draft to fetch."
+            },
+            "messageFormat": {
+              "type": "string",
+              "description": "Optional. Specifies the format of the draft returned. Defaults to `FULL_CONTENT`.",
+              "enum": [
+                "MESSAGE_FORMAT_UNSPECIFIED",
+                "MINIMAL",
+                "FULL_CONTENT",
+                "METADATA_ONLY",
+                "PLAIN_TEXT",
+                "RAW"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "draftId"
+          ]
+        },
+        "schemaDigest": "sha256:fab5c543a22ef2288b5406b43a095a49008017db42a801aa77566942cbf98686",
+        "scopes": [
+          "gmail:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "gmail.get_thread",
+        "description": "메일 스레드를 읽습니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "messageFormat": {
+              "type": "string",
+              "description": "Optional. Specifies the format of the messages returned within the thread. Defaults to `FULL_CONTENT`. We recommend using `PLAIN_TEXT` to prevent context exhaustion. Note: `MINIMAL` format returns `id`, `snippet`, `subject`, `sender`, `to_recipients`, `cc_recipients`, `bcc_recipients`, `date`, `labe",
+              "enum": [
+                "MESSAGE_FORMAT_UNSPECIFIED",
+                "MINIMAL",
+                "FULL_CONTENT",
+                "METADATA_ONLY",
+                "PLAIN_TEXT",
+                "RAW"
+              ]
+            },
+            "threadId": {
+              "type": "string",
+              "description": "Required. The unique identifier of the thread to fetch."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "threadId"
+          ]
+        },
+        "schemaDigest": "sha256:244e314077197af8c6e24776943bb0810a8a37c5da3c126136f17e7d134ed74a",
+        "scopes": [
+          "gmail:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "gmail.get_message",
+        "description": "메일 한 통을 읽습니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "messageFormat": {
+              "type": "string",
+              "description": "Optional. Specifies the format of the message returned. Defaults to `FULL_CONTENT`. We recommend using `PLAIN_TEXT` to prevent context exhaustion.",
+              "enum": [
+                "MESSAGE_FORMAT_UNSPECIFIED",
+                "MINIMAL",
+                "FULL_CONTENT",
+                "METADATA_ONLY",
+                "PLAIN_TEXT",
+                "RAW"
+              ]
+            },
+            "messageId": {
+              "type": "string",
+              "description": "Required. The unique identifier of the message to fetch."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "messageId"
+          ]
+        },
+        "schemaDigest": "sha256:ec1d85234c54244b2a7c0956361af476b652771f5f6486be37f37a6d7d14c7e3",
+        "scopes": [
+          "gmail:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "gmail.search_threads",
+        "description": "메일 스레드를 검색합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "includeTrash": {
+              "type": "boolean",
+              "description": "Optional. Include threads from TRASH in the results. Defaults to false."
+            },
+            "pageSize": {
+              "type": "integer",
+              "description": "Optional. The maximum number of threads to return. If unspecified, defaults to 20. The maximum allowed value is 50."
+            },
+            "pageToken": {
+              "type": "string",
+              "description": "Optional. Page token to retrieve a specific page of results in the list. Leave empty to fetch the first page. This is primarily used for pagination to continue fetching results from where the previous `SearchThreads` call left off, especially when the number of threads matching the query exceeds the"
+            },
+            "query": {
+              "type": "string",
+              "description": "Optional. A query string to filter the threads. Natural language queries must be pre-converted into Gmail syntax queries to use this tool. If omitted, all threads (excluding spam and trash by default) are listed. Supported Operators by Category: Sender & Recipient: - `from:` — Sent from a specific p"
+            },
+            "view": {
+              "type": "string",
+              "description": "Optional. Controls the fields populated for threads in the thread list. Defaults to `THREAD_VIEW_MINIMAL`. `THREAD_VIEW_MINIMAL` returns `id`, `snippet`, `subject`, `sender`, `to_recipients`, `cc_recipients`, `bcc_recipients`, `date`, `label_ids`. `THREAD_VIEW_METADATA_ONLY` returns `id`, `sender`, ",
+              "enum": [
+                "THREAD_VIEW_UNSPECIFIED",
+                "THREAD_VIEW_METADATA_ONLY",
+                "THREAD_VIEW_MINIMAL"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:a25d49480b344911da958ba58de729be9400edf46c830e8a839a443b6c7a3050",
+        "scopes": [
+          "gmail:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "gmail.list_labels",
+        "description": "내 라벨 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:83c4f4f311c68fcb05cc48b91db6bacef708c282caada779014517dbce13eae3",
+        "scopes": [
+          "gmail:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "gmail.create_draft",
+        "description": "메일 초안을 만듭니다. 보내지는 않아요. 보내기는 Gmail에서 직접 해요.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "bcc": {
+              "type": "array",
+              "description": "Optional. The blind carbon copy recipients of the email draft. Each string MUST be a valid plain email address (e.g., \"user@example.com\").",
+              "items": {
+                "type": "string"
+              }
+            },
+            "body": {
+              "type": "string",
+              "description": "Optional. The plain text body content of the email draft. Do NOT format this field with Markdown (such as headers `#`, bold `**`, bullet points `*`, or tables `|`). If formatted rich text is desired, use `html_body` instead. If `html_body` is also provided, this field is treated as the plain-text al"
+            },
+            "cc": {
+              "type": "array",
+              "description": "Optional. The carbon copy recipients of the email draft. Each string MUST be a valid plain email address (e.g., \"user@example.com\").",
+              "items": {
+                "type": "string"
+              }
+            },
+            "htmlBody": {
+              "type": "string",
+              "description": "Optional. The HTML content of the email draft. If provided, this will be used as the rich-text version of the email. Use this field (with valid HTML tags such as ` `, ` "
+            },
+            "includeSignature": {
+              "type": "boolean",
+              "description": "Optional. Whether to append the user's configured Gmail web signature to the draft. Defaults to false."
+            },
+            "replyToMessageId": {
+              "type": "string",
+              "description": "Optional. The ID of the message to reply to. If provided, this will be used as the reply-to message ID for the email draft, and the `body` and `html_body` will be appended to the original message body."
+            },
+            "subject": {
+              "type": "string",
+              "description": "Optional. The subject line of the email. Defaults to empty if not provided."
+            },
+            "to": {
+              "type": "array",
+              "description": "Optional. The primary recipients of the email draft. Each string MUST be a valid plain email address (e.g., \"user@example.com\").",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:cb1cb3d52d70fc34e9bf4c4dea7e30ce826f90f66c7953b2d5eb35f27b2e2ac6",
+        "scopes": [
+          "gmail:draft"
+        ],
+        "risk": "write",
+        "approvalPolicy": "require_approval"
+      },
+      {
+        "name": "gmail.create_label",
+        "description": "라벨을 새로 만듭니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "autoCreateParentLabels": {
+              "type": "boolean",
+              "description": "Optional. Whether to automatically create parent labels for nested labels (separated by `/`). Defaults to `true`. When set to `true`, missing parent labels in the hierarchy (e.g., `Projects` and `Projects/Alpha` for `Projects/Alpha/Sprint-1`) are created automatically. When set to `false`, parent la"
+            },
+            "colorPreset": {
+              "type": "string",
+              "description": "Optional. The color preset tile to assign to the new label. Select from predefined contrast-safe color options (e.g., LABEL_COLOR_PRESET_RED, LABEL_COLOR_PRESET_BLUE, LABEL_COLOR_PRESET_BLACK, LABEL_COLOR_PRESET_GREEN). If omitted, default label styling is applied.",
+              "enum": [
+                "LABEL_COLOR_PRESET_UNSPECIFIED",
+                "LABEL_COLOR_PRESET_BLACK",
+                "LABEL_COLOR_PRESET_DARK_GRAY",
+                "LABEL_COLOR_PRESET_GRAY",
+                "LABEL_COLOR_PRESET_LIGHT_GRAY",
+                "LABEL_COLOR_PRESET_WHITE",
+                "LABEL_COLOR_PRESET_RED",
+                "LABEL_COLOR_PRESET_ORANGE",
+                "LABEL_COLOR_PRESET_YELLOW",
+                "LABEL_COLOR_PRESET_GREEN",
+                "LABEL_COLOR_PRESET_MINT",
+                "LABEL_COLOR_PRESET_TEAL",
+                "LABEL_COLOR_PRESET_BLUE",
+                "LABEL_COLOR_PRESET_PURPLE",
+                "LABEL_COLOR_PRESET_PINK",
+                "LABEL_COLOR_PRESET_DARK_RED",
+                "LABEL_COLOR_PRESET_DARK_ORANGE",
+                "LABEL_COLOR_PRESET_DARK_GREEN",
+                "LABEL_COLOR_PRESET_DARK_BLUE",
+                "LABEL_COLOR_PRESET_DARK_PURPLE",
+                "LABEL_COLOR_PRESET_DARK_PINK",
+                "LABEL_COLOR_PRESET_BROWN"
+              ]
+            },
+            "displayName": {
+              "type": "string",
+              "description": "Required. The display name of the label to create. Supports nested label hierarchy using `/` (e.g., `Projects/Alpha/Sprint-1`)."
+            },
+            "labelListVisibility": {
+              "type": "string",
+              "description": "Optional. The visibility of the label in the label list in the Gmail web interface. Defaults to `LABEL_SHOW`.",
+              "enum": [
+                "LABEL_LIST_VISIBILITY_UNSPECIFIED",
+                "LABEL_SHOW",
+                "LABEL_SHOW_IF_UNREAD",
+                "LABEL_HIDE"
+              ]
+            },
+            "messageListVisibility": {
+              "type": "string",
+              "description": "Optional. The visibility of messages with this label in the message list in the Gmail web interface. Defaults to `SHOW`.",
+              "enum": [
+                "MESSAGE_LIST_VISIBILITY_UNSPECIFIED",
+                "SHOW",
+                "HIDE"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "displayName"
+          ]
+        },
+        "schemaDigest": "sha256:25ed2211c13f8050216f511bac515138226958aa7372fe76eb9959719b4aca2b",
+        "scopes": [
+          "gmail:draft"
+        ],
+        "risk": "write",
+        "approvalPolicy": "require_approval"
+      },
+      {
+        "name": "gmail.label_thread",
+        "description": "스레드에 라벨을 붙입니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "labelIds": {
+              "type": "array",
+              "description": "Required. The unique identifiers of the labels to add. Can be a system label ID (e.g., `INBOX`, `STARRED`, `UNREAD`, `IMPORTANT`) or a user-defined label ID. The tool accepts `label_ids` and not label names. Use the `list_labels` tool to get the corresponding label id to a display name for user-defi",
+              "items": {
+                "type": "string"
+              }
+            },
+            "threadId": {
+              "type": "string",
+              "description": "Required. The unique identifier of the thread to add labels to."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "threadId",
+            "labelIds"
+          ]
+        },
+        "schemaDigest": "sha256:a74f81bdd4cdca993f3599375b4fc342078029d43ffd870f4ce805f4be0a8cef",
+        "scopes": [
+          "gmail:draft"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
+      },
+      {
+        "name": "gmail.unlabel_thread",
+        "description": "스레드에서 라벨을 뗍니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "labelIds": {
+              "type": "array",
+              "description": "Required. The unique identifiers of the labels to remove. Can be a system label ID (e.g., `INBOX`, `TRASH`, `SPAM`, `STARRED`, `UNREAD`, `IMPORTANT`) or a user-defined label ID. The tool accepts `label_ids` and not label names. Use the `list_labels` tool to get the corresponding label id to a displa",
+              "items": {
+                "type": "string"
+              }
+            },
+            "threadId": {
+              "type": "string",
+              "description": "Required. The unique identifier of the thread to remove labels from."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "threadId",
+            "labelIds"
+          ]
+        },
+        "schemaDigest": "sha256:cc4fbbbddefcdf656a61c458c09109e1103444e1c58d4bcfef60a110e067c12e",
+        "scopes": [
+          "gmail:draft"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
+      },
+      {
+        "name": "gmail.label_message",
+        "description": "메일 한 통에 라벨을 붙입니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "labelIds": {
+              "type": "array",
+              "description": "Required. The IDs of the labels to add. Can be a system label ID (e.g., `INBOX`, `STARRED`, `UNREAD`, `IMPORTANT`) or a user-defined label ID. The tool accepts `label_ids` and not label names. Use the `list_labels` tool to get the corresponding label id to a display name for user-defined labels.",
+              "items": {
+                "type": "string"
+              }
+            },
+            "messageId": {
+              "type": "string",
+              "description": "Required. The ID of the message to add the labels to."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "messageId",
+            "labelIds"
+          ]
+        },
+        "schemaDigest": "sha256:2b660dc100f16a62005ef0432fcce3bf18b9194cb6834fe568e1574ce74cbb5f",
+        "scopes": [
+          "gmail:draft"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
+      },
+      {
+        "name": "gmail.unlabel_message",
+        "description": "메일 한 통에서 라벨을 뗍니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "labelIds": {
+              "type": "array",
+              "description": "Required. The IDs of the labels to remove. Can be a system label ID (e.g., `INBOX`, `TRASH`, `SPAM`, `STARRED`, `UNREAD`, `IMPORTANT`) or a user-defined label ID. The tool accepts `label_ids` and not label names. Use the `list_labels` tool to get the corresponding label id to a display name for user",
+              "items": {
+                "type": "string"
+              }
+            },
+            "messageId": {
+              "type": "string",
+              "description": "Required. The ID of the message to remove the labels from."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "messageId",
+            "labelIds"
+          ]
+        },
+        "schemaDigest": "sha256:5103db3e2435d9246032bb32c03beab57bc3d02d1bf0630f97be0e8d693d56c5",
+        "scopes": [
+          "gmail:draft"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
+      },
+      {
+        "name": "gmail.update_message_labels",
+        "description": "메일 한 통의 라벨을 한 번에 바꿉니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "addLabelIds": {
+              "type": "array",
+              "description": "Optional. The IDs of the labels to add. Can be a system label ID (e.g., `INBOX`, `STARRED`, `UNREAD`, `IMPORTANT`) or a user-defined label ID.",
+              "items": {
+                "type": "string"
+              }
+            },
+            "messageId": {
+              "type": "string",
+              "description": "Required. The ID of the message to modify labels for."
+            },
+            "removeLabelIds": {
+              "type": "array",
+              "description": "Optional. The IDs of the labels to remove. Can be a system label ID or a user-defined label ID.",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "messageId"
+          ]
+        },
+        "schemaDigest": "sha256:afddc76e38afe1c3390156c6efd12c10429926de03bc93c79d83a69575f3a1c4",
+        "scopes": [
+          "gmail:draft"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
+      }
+    ]
+  },
+  "skill": {
+    "reference": null,
+    "optional": true
+  },
+  "momo": {
+    "approvalTier": {
+      "gmail.list_drafts": "read_only",
+      "gmail.get_draft": "read_only",
+      "gmail.get_thread": "read_only",
+      "gmail.get_message": "read_only",
+      "gmail.search_threads": "read_only",
+      "gmail.list_labels": "read_only",
+      "gmail.create_draft": "network_write",
+      "gmail.create_label": "network_write",
+      "gmail.label_thread": "network_write",
+      "gmail.unlabel_thread": "network_write",
+      "gmail.label_message": "network_write",
+      "gmail.unlabel_message": "network_write",
+      "gmail.update_message_labels": "network_write"
+    },
+    "risk": "medium",
+    "egressDomains": [
+      "gmailmcp.googleapis.com"
+    ],
+    "recommendedFor": [
+      "communication",
+      "productivity"
+    ],
+    "serverPolicy": {
+      "installAllowed": true,
+      "enabledByDefault": false,
+      "allowedRoles": [
+        "owner",
+        "admin"
+      ]
+    },
+    "preview": true
+  }
+}

@@ -36,6 +36,7 @@
 
 pub mod crypto;
 pub mod doorbell;
+pub mod github;
 pub mod ingress;
 pub mod installations;
 pub mod outbound;
@@ -60,6 +61,12 @@ pub use doorbell::{
     CoalesceAction, DoorbellClaim, DoorbellProjection, DoorbellRegisterError, RingOutcome,
     DOORBELL_BODY, DOORBELL_KIND, DOORBELL_RUNG_PER_RUN_CAP, DOORBELL_RUNG_RUNS_PER_RING,
     RING_COOLDOWN_SECONDS, RING_HOURLY_LIMIT,
+};
+pub use github::{
+    github_signature, github_signature_matches, installation_id, installation_info,
+    is_github_owned_prop, is_known_feature, render_notification, repositories,
+    valid_github_delivery_id, InstallationInfo, Notification, RepositoryRef, GITHUB_AUTHOR_PROP,
+    GITHUB_DEFAULT_FEATURES, GITHUB_FEATURES, GITHUB_MAXIMUM_BODY_BYTES,
 };
 pub use ingress::{
     attach_receipt_message, insert_receipt, load_native_ingress, load_native_receipt,

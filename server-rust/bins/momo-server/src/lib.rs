@@ -284,6 +284,9 @@ pub struct AppState {
     /// (`HERMES_BASE_URL` set, tool-lock attested). Default: nothing declared,
     /// which keeps the whole feature silent and offline.
     pub cohosted: Arc<routes::cohosted_agent::CohostedAgentState>,
+    /// #4079 (ADR-0203 증보 2026-10-19) — the Hermes login relay: where the sidecar listens and the key it
+    /// wants. Default: off, so every `…/model-login` and `…/app-login` route answers `409 login_relay_off`.
+    pub login_relay: Arc<routes::login_relay::LoginRelayState>,
     /// ADR-0205 (#3947) — the GitHub App surface: the dedicated sealing key and the one
     /// outbound hop (the manifest code → credentials conversion). Default: no key, so every
     /// `/v1/integrations/github/*` route answers 503 and the rest of the server is untouched.
@@ -328,6 +331,13 @@ impl AppState {
                 ),
             ))),
             github: Arc::new(routes::github_app::GithubAppState::default()),
+            login_relay: Arc::new(routes::login_relay::LoginRelayState::new(
+                config::LoginRelayConfig::default(),
+                Arc::new(momo_provider_probe::GuardedLoginRelay::new(
+                    momo_settings::EgressPolicy::default(),
+                    momo_provider_probe::RELAY_TIMEOUT,
+                )),
+            )),
             cohosted: Arc::new(routes::cohosted_agent::CohostedAgentState::new(
                 config::CohostedAgentConfig::default(),
                 Arc::new(momo_provider_probe::GuardedProviderProbe::new(
@@ -371,6 +381,17 @@ impl AppState {
         self.cohosted = Arc::new(routes::cohosted_agent::CohostedAgentState::new(
             config, probe,
         ));
+        self
+    }
+
+    /// #4079 — attach the login relay's address/key and the client that dials it (`main.rs` with the
+    /// operator's egress policy; conformance tests with a loopback-permitting one).
+    pub fn with_login_relay(
+        mut self,
+        config: config::LoginRelayConfig,
+        client: Arc<dyn momo_provider_probe::LoginRelayClient>,
+    ) -> Self {
+        self.login_relay = Arc::new(routes::login_relay::LoginRelayState::new(config, client));
         self
     }
 
@@ -1138,6 +1159,11 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels/{ch}/read-state",
             put(routes::read_state::update),
         )
+        // presence heartbeat (ADR-0204 증보 3, #4018): "I have this channel on screen".
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/viewing",
+            put(routes::viewing::touch),
+        )
         // inbox (ADR-0199, #3681): the member's own "to me" list. Humans only;
         // the member is the bearer, never a request field.
         .route("/v1/workspaces/{ws}/inbox", get(routes::inbox::list))
@@ -1601,6 +1627,31 @@ pub fn build_app(state: AppState) -> Router {
         )
         // #3948 (ADR-0203 증보 K2·K4) — the 「커넥터 시험」: instance operator
         // only, both verbs; absent from the agent-route allow-list.
+        // #4079 — Hermes login relay (operator only; ADR-0203 증보 2026-10-19 L4)
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/model-login",
+            get(routes::login_relay::model_targets).post(routes::login_relay::model_start),
+        )
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/model-login/{login_id}",
+            get(routes::login_relay::model_poll).delete(routes::login_relay::model_cancel),
+        )
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/model-login/{login_id}/complete",
+            post(routes::login_relay::model_complete),
+        )
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/app-login",
+            get(routes::login_relay::app_targets).post(routes::login_relay::app_start),
+        )
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/app-login/{login_id}",
+            get(routes::login_relay::app_poll).delete(routes::login_relay::app_cancel),
+        )
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/app-login/{login_id}/complete",
+            post(routes::login_relay::app_complete),
+        )
         .route(
             "/v1/workspaces/{ws}/agents/{agent}/connector-trial",
             get(routes::cohosted_agent::get_connector_trial)
@@ -1702,6 +1753,34 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/integrations/github/app/manifest",
             post(routes::github_app::start_manifest),
+        )
+        // ADR-0205 D3/D5 (#3954) — the instance operator sees installations nobody linked yet
+        // (a workspace admin never does) and attaches one to a workspace.
+        .route(
+            "/v1/integrations/github/installations",
+            get(routes::github_ingress::unlinked_installations),
+        )
+        .route(
+            "/v1/integrations/github/installations/{installation}/link",
+            post(routes::github_ingress::operator_link),
+        )
+        // ADR-0205 D3/D5 (#3954) — a workspace owner/admin links an installation and subscribes
+        // channels. All 503 without GITHUB_APP_MASTER_KEY.
+        .route(
+            "/v1/workspaces/{ws}/github",
+            get(routes::github_ingress::workspace_overview),
+        )
+        .route(
+            "/v1/workspaces/{ws}/github/link",
+            post(routes::github_ingress::link_start),
+        )
+        .route(
+            "/v1/workspaces/{ws}/github/subscriptions",
+            post(routes::github_ingress::subscribe),
+        )
+        .route(
+            "/v1/workspaces/{ws}/github/subscriptions/{subscription}",
+            delete(routes::github_ingress::unsubscribe),
         )
         // ADR-0162 증보 1 / HAP-E7 — the resource owner's half of an OAuth
         // authorization request. Inside the bearer middleware because the only
@@ -1887,6 +1966,22 @@ pub fn build_app(state: AppState) -> Router {
                 state.clone(),
                 rate_limit::per_ip_github_callback,
             )),
+        )
+        // ADR-0205 D3 (#3954) — GitHub sends the installing browser here. The installation_id it
+        // carries can be forged, so it is only the pending half of a link; own per-IP budget.
+        .route(
+            "/v1/integrations/github/setup",
+            get(routes::github_ingress::setup).route_layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                rate_limit::per_ip_github_setup,
+            )),
+        )
+        // ADR-0205 D4 (#3954) — the GitHub App webhook receiver. Authenticated by
+        // X-Hub-Signature-256 against the sealed instance secret, never by a bearer; own
+        // 5 MiB body ceiling. Distinct from ADR-0115's per-installation modes below.
+        .route(
+            "/v1/integrations/github/webhook",
+            post(routes::github_ingress::receive),
         )
         // #1265 / ADR-0115 — public ingress. Authenticated by HMAC headers or
         // the URL token, never by a bearer. Mounted outside require_principal

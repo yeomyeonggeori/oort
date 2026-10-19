@@ -93,7 +93,7 @@ impl Default for GithubAppState {
 
 /// Without the dedicated master key nothing can be sealed or opened, so the only
 /// honest answer is 503 (the same posture `PROVIDER_LINK_MASTER_KEY` has).
-fn master_key(state: &AppState) -> Result<&str, ApiError> {
+pub(crate) fn master_key(state: &AppState) -> Result<&str, ApiError> {
     state.github.settings.master_key.as_deref().ok_or_else(|| {
         ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,

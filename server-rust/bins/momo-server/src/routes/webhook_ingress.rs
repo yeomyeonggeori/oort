@@ -172,6 +172,16 @@ fn webhook_props(
     props.insert("webhook_mode".into(), json!(mode.as_db_label()));
     props.insert("webhook_label".into(), json!(label));
     for (key, value) in client_props {
+        // #4054 — an external sender cannot print a blocked sentence or a 「쓴 앱」
+        // receipt: those keys are the server's (`messages::is_server_owned_props_key`).
+        if momo_agent::SERVER_OWNED_APP_PROPS_KEYS.contains(&key.as_str()) {
+            continue;
+        }
+        // #4084 (ADR-0205 H-1) — nor can it draw a GitHub notification line (`source: "github"`
+        // over the `source` this function just set, or any `github_*` key).
+        if momo_webhook::is_github_owned_prop(key, value) {
+            continue;
+        }
         props.insert(key.clone(), json!(value));
     }
     Value::Object(props)
@@ -618,4 +628,44 @@ pub async fn receive_slack(
 
     release_rate_reservation_on_failure(&state, &reserved_rate_log, &outcome);
     Ok(settle_db("webhooks.receive_slack", outcome)?.into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    /// #4054 — an external sender cannot print a blocked-app sentence or a 「쓴 앱」
+    /// receipt: the three server-owned app keys are dropped from the sender's
+    /// props, and its ordinary keys survive.
+    #[test]
+    fn a_webhook_cannot_forge_a_github_notification_line() {
+        let mut client = BTreeMap::new();
+        client.insert("keep".to_string(), "me".to_string());
+        client.insert("source".to_string(), "github".to_string());
+        client.insert("github_event".to_string(), "pull_request".to_string());
+        client.insert(
+            "github_url".to_string(),
+            "https://github.com/a/b".to_string(),
+        );
+        let props = webhook_props(Uuid::nil(), WebhookMode::Native, "label", &client);
+        assert_eq!(props["keep"], json!("me"));
+        assert_eq!(props["source"], json!("external_webhook"));
+        assert!(props.get("github_event").is_none(), "{props}");
+        assert!(props.get("github_url").is_none(), "{props}");
+    }
+
+    #[test]
+    fn a_webhook_cannot_forge_the_app_notice_or_the_apps_used_receipt() {
+        let mut client = BTreeMap::new();
+        client.insert("keep".to_string(), "me".to_string());
+        for key in momo_agent::SERVER_OWNED_APP_PROPS_KEYS {
+            client.insert(key.to_string(), "forged".to_string());
+        }
+        let props = webhook_props(Uuid::nil(), WebhookMode::Native, "label", &client);
+        assert_eq!(props["keep"], json!("me"));
+        for key in momo_agent::SERVER_OWNED_APP_PROPS_KEYS {
+            assert!(props.get(key).is_none(), "{key} must be dropped: {props}");
+        }
+    }
 }

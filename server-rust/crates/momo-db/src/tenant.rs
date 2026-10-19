@@ -214,6 +214,104 @@ where
     }
 }
 
+/// Which GitHub GUC(s) a [`with_github_tx`] transaction turns on (#3954 / ADR-0205 D3·D4).
+///
+/// * [`GithubGuc::Ingress`] (`app.github_ingress`) — read the sealed webhook secret, read and
+///   write the instance-global installation routing table. Held ONLY by the receiver, and only
+///   so it can verify the `X-Hub-Signature-256`: the receiver writes nothing until the signature
+///   has passed.
+/// * [`GithubGuc::Link`] (`app.github_link`) — the narrow "two signals meet" privilege: read and
+///   update the pending `install` claims and the installation's link columns. It unlocks neither
+///   `github_app` nor any other tenant table. The unauthenticated setup-URL route binds this one
+///   alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GithubGuc {
+    Ingress,
+    Link,
+}
+
+impl GithubGuc {
+    fn name(self) -> &'static str {
+        match self {
+            GithubGuc::Ingress => "app.github_ingress",
+            GithubGuc::Link => "app.github_link",
+        }
+    }
+}
+
+/// What the resolve step of [`with_github_tx`] decided.
+pub enum GithubScope<T> {
+    /// The request is finished (a refusal, a `ping`): commit nothing more and return `T`.
+    Done(T),
+    /// Run the body with only the GitHub GUC(s): the installation is not linked to a workspace.
+    Global,
+    /// Run the body with the GitHub GUC(s) **and** this workspace's RLS scope.
+    Tenant(Uuid),
+}
+
+/// A GitHub transaction whose workspace is only known after a global lookup.
+///
+/// The receiver cannot open a tenant transaction first: which workspace an event belongs to is
+/// what the installation routing table says. So the transaction opens with the GitHub GUC(s)
+/// only, `resolve` reads the routing table (and verifies the signature) and names the
+/// workspace, and `body` then runs with that workspace's `app.workspace_id` also set — the
+/// receipt, the subscription fan-out and the messages all pass the same tenant policies as any
+/// other write. `set_config(.., true)` is `SET LOCAL`, so both bindings unwind with the
+/// transaction.
+///
+/// `app.workspace_id` is still set only in this module (invariant #6).
+pub async fn with_github_tx<T, E, R, F>(
+    pool: &PgPool,
+    gucs: &[GithubGuc],
+    resolve: R,
+    body: F,
+) -> Result<T, E>
+where
+    T: Send,
+    E: From<DbError> + Send,
+    R: for<'c> FnOnce(&'c mut PgConnection) -> BoxFuture<'c, Result<GithubScope<T>, E>> + Send,
+    F: for<'c> FnOnce(&'c mut PgConnection, Option<Uuid>) -> BoxFuture<'c, Result<T, E>> + Send,
+{
+    let mut tx = pool.begin().await.map_err(DbError::from)?;
+    for guc in gucs {
+        if let Err(err) = bind_admin_guc(&mut tx, guc.name()).await {
+            let _ = tx.rollback().await;
+            return Err(E::from(err));
+        }
+    }
+    let scope = match resolve(&mut tx).await {
+        Ok(scope) => scope,
+        Err(err) => {
+            let _ = tx.rollback().await;
+            return Err(err);
+        }
+    };
+    let workspace = match scope {
+        GithubScope::Done(value) => {
+            tx.commit().await.map_err(DbError::from)?;
+            return Ok(value);
+        }
+        GithubScope::Global => None,
+        GithubScope::Tenant(workspace_id) => {
+            if let Err(err) = bind_workspace_guc(&mut tx, workspace_id).await {
+                let _ = tx.rollback().await;
+                return Err(E::from(err));
+            }
+            Some(workspace_id)
+        }
+    };
+    match body(&mut tx, workspace).await {
+        Ok(value) => {
+            tx.commit().await.map_err(DbError::from)?;
+            Ok(value)
+        }
+        Err(err) => {
+            let _ = tx.rollback().await;
+            Err(err)
+        }
+    }
+}
+
 /// Provider quota-snapshot ingest transaction (MOMO-623 / ADR-0135 D2). Binds
 /// `app.workspace_id` (ingesting agent's workspace) and `app.provider_quota_admin`
 /// to unlock the write policy on the instance-global `quota_snapshot` table.
