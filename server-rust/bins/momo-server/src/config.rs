@@ -1726,6 +1726,10 @@ impl CohostedAgentConfig {
 pub struct LoginRelayConfig {
     url: Option<String>,
     key: Option<String>,
+    /// #4081: the operator declared (`HERMES_APP_LOGIN_GOOGLE_PUBLISHING=testing`) that the Google OAuth project is
+    /// External and in Testing, where Google expires a refresh token about 7 days after consent. oort cannot read
+    /// the project's real status, so this is a declaration and the screen words it as one.
+    google_testing: bool,
 }
 
 impl std::fmt::Debug for LoginRelayConfig {
@@ -1774,9 +1778,22 @@ impl LoginRelayConfig {
             (Some(url), Some(key)) => LoginRelayConfig {
                 url: Some(url),
                 key: Some(key),
+                google_testing: lookup("HERMES_APP_LOGIN_GOOGLE_PUBLISHING")
+                    .is_some_and(|v| v.trim().eq_ignore_ascii_case("testing")),
             },
             _ => LoginRelayConfig::default(),
         }
+    }
+
+    /// Declare (or not) the Google OAuth project as External + Testing, as `HERMES_APP_LOGIN_GOOGLE_PUBLISHING=testing` does.
+    pub fn with_google_testing(mut self, on: bool) -> Self {
+        self.google_testing = on;
+        self
+    }
+
+    /// Whether the operator declared the Google OAuth project as External + Testing (7-day refresh expiry).
+    pub fn google_testing(&self) -> bool {
+        self.google_testing
     }
 
     pub fn configured(&self) -> bool {

@@ -787,8 +787,9 @@ impl ProbeCache {
 
 mod login_relay;
 pub use login_relay::{
-    is_login_id, is_target_name, GuardedLoginRelay, LoginRelayClient, Pasted, RelayFailure,
-    RelayKind, RelayMode, RelayTarget, StartReply, StatusReply, TargetStatus, RELAY_TIMEOUT,
+    is_login_id, is_target_name, parse_estimate, EstimateBasis, GuardedLoginRelay, LoginEstimate,
+    LoginRelayClient, Pasted, RelayFailure, RelayKind, RelayMode, RelayTarget, StartReply,
+    StatusReply, TargetStatus, RELAY_TIMEOUT,
 };
 
 mod cohosted;

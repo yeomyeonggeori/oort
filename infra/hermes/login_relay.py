@@ -41,6 +41,7 @@ import re
 import secrets
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import threading
@@ -84,6 +85,7 @@ MAX_ATTEMPTS = 3
 MAX_SESSIONS = 8
 RATE_PER_MIN = 6
 STATUS_CACHE = 15
+ISSUED_MIN = 1_600_000_000  # 2020-09: any clock reading below this is not a login time
 CHECK_TIMEOUT = 20  # one status check child
 MAX_CONNECTIONS = 32
 REQUEST_DEADLINE = 90  # whole request, start wait (30 s) included; closes slow-loris sockets
@@ -139,6 +141,7 @@ class Config:
         self.test_bin = kw.pop("test_bin", TEST_BIN)
         self.setpriv_bin = kw.pop("setpriv_bin", SETPRIV_BIN)
         self.data_dir = kw.pop("data_dir", DATA_DIR)
+        self.state_dir = kw.pop("state_dir", None)  # the relay's OWN private dir (not Hermes' volume); None = memory only
         self.drop = kw.pop("drop", None)  # None | (uid, gid): lower every child to this uid/gid
         self.ttl_device = kw.pop("ttl_device", TTL_DEVICE)
         self.ttl_paste = kw.pop("ttl_paste", TTL_PASTE)
@@ -353,6 +356,7 @@ class Relay:
         self.global_starts = collections.deque()
         self._status_lock = threading.Lock()  # single-flight: parallel /v1/status calls share one run
         self._status_cache = (0.0, None)
+        self.issued = self._load_issued()  # mcp target -> unix seconds the relay saw its login finish (non-secret)
         self._stop = threading.Event()
         t = threading.Thread(target=self._reaper, daemon=True)
         t.start()
@@ -575,6 +579,8 @@ class Relay:
             s.parser.url = s.parser.code = None
             if status != "done":
                 self._sweep(s)
+            elif s.kind == "mcp":
+                self._record_issued(s.target)
         log("state login=%s status=%s reason=%s" % (s.tag, status, reason or "-"))
 
     def _reaper(self):
@@ -688,21 +694,104 @@ class Relay:
             ok = self._run_check([c.python_bin, "-c", snippet, p], want_line="LOGGED_IN=1")
             targets.append({"kind": "provider", "target": p, "connected": ok})
         for name in sorted(c.servers):
-            ok = self._run_check([c.test_bin, "-e", "%s/mcp-tokens/%s.json" % (c.data_dir.rstrip("/"), name)], rc_only=True)
-            targets.append({"kind": "mcp", "target": name, "connected": ok})
+            path = "%s/mcp-tokens/%s.json" % (c.data_dir.rstrip("/"), name)
+            got = self._run_lines([c.test_bin, "-e", path])
+            ok = got is not None and got[0] == 0
+            item = {"kind": "mcp", "target": name, "connected": ok}
+            if ok:
+                item["estimated"] = self._estimate(name, path)
+            elif got is not None and got[0] == 1:
+                self._forget_issued(name)  # `test -e` said the file is absent: an old login time says nothing now
+            # (a start failure or a timeout is "unknown", not "absent": the login time is kept)
+            targets.append(item)
         out = {"targets": targets}
         with self.lock:
             self._status_cache = (time.monotonic(), out)
         return out
 
-    def _run_check(self, cmd, want_line=None, rc_only=False):
+    # ---- login time (an ESTIMATE input, never a token): the relay writes only a clock reading ----
+    # The login time lives in the relay's OWN private directory (`/run/oort-login-relay`: 0700, the relay uid),
+    # never in Hermes' volume: /opt/data is 0700 hermes, so the relay uid cannot write there, and the hermes uid
+    # must not be able to plant, swap or block this file. It survives a relay process restart, not a container
+    # restart (tmpfs); after one, the estimate falls back to the token file time and says so.
+    def _issued_path(self):
+        d = self.cfg.state_dir
+        return "%s/issued.json" % d.rstrip("/") if d else None
+
+    def _load_issued(self):
+        """Read the state file defensively: whatever is in it, only `server name -> plausible epoch seconds` survives."""
+        path = self._issued_path()
+        if not path:
+            return {}
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            try:
+                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                    return {}
+                raw = json.loads(os.read(fd, 65536).decode("utf-8"))
+            finally:
+                os.close(fd)
+        except (OSError, ValueError, RecursionError):
+            return {}
+        out = {}
+        if isinstance(raw, dict):
+            for name, at in raw.items():
+                if name in self.cfg.servers and type(at) is int and ISSUED_MIN <= at <= int(time.time()) + 86400:
+                    out[name] = at
+        return out
+
+    def _persist_issued(self):
+        path = self._issued_path()
+        if not path:
+            return
+        tmp = path + ".tmp"
+        try:
+            try:
+                os.unlink(tmp)
+            except FileNotFoundError:
+                pass
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(json.dumps(self.issued, sort_keys=True))
+            os.replace(tmp, path)
+        except OSError:
+            pass  # memory-only until the next restart: the estimate falls back to the file time
+
+    def _record_issued(self, name):
+        with self.lock:
+            self.issued[name] = int(time.time())
+            self._status_cache = (0.0, None)
+            self._persist_issued()
+
+    def _forget_issued(self, name):
+        with self.lock:
+            if self.issued.pop(name, None) is not None:
+                self._persist_issued()
+
+    def _estimate(self, name, path):
+        """`{basis, issuedAt}`. The relay saw the login finish -> that moment. Otherwise the token file's last write
+        (a routine access-token refresh also moves it, so it only bounds the age from below). Contents never read."""
+        with self.lock:
+            at = self.issued.get(name)
+        if at is not None:
+            return {"basis": "relay_observed_login", "issuedAt": at}
+        snippet = "import os,sys;print('MTIME=%d' % int(os.stat(sys.argv[1]).st_mtime))"
+        got = self._run_lines([self.cfg.python_bin, "-c", snippet, path])
+        if got and got[0] == 0 and got[1]:
+            m = re.fullmatch(r"MTIME=(\d{1,12})", got[1][-1].strip())
+            if m and int(m.group(1)) >= ISSUED_MIN:
+                return {"basis": "token_file_mtime", "issuedAt": int(m.group(1))}
+        return {"basis": "none"}
+
+    def _run_lines(self, cmd):
+        """Run one fixed argv as the dropped uid; `(returncode, stdout lines)`, or None on a start failure/timeout."""
         try:
             proc = subprocess.Popen(
                 self._wrap(cmd), shell=False, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                 env=self._child_env(), cwd="/", close_fds=True, start_new_session=True,
             )  # fmt: skip
         except OSError:
-            return False
+            return None
         try:
             out, _ = proc.communicate(timeout=self.cfg.check_timeout)
         except subprocess.TimeoutExpired:
@@ -711,18 +800,18 @@ class Relay:
             except (ProcessLookupError, PermissionError):
                 pass
             proc.communicate()
+            return None
+        return proc.returncode, out.decode("utf-8", "replace").strip().splitlines()
+
+    def _run_check(self, cmd, want_line=None, rc_only=False):
+        got = self._run_lines(cmd)
+        if got is None:
             return False
-
-        class _R:
-            returncode = proc.returncode
-            stdout = out
-
-        r = _R
+        rc, lines = got
         if rc_only:
-            return r.returncode == 0
-        if r.returncode != 0:
+            return rc == 0
+        if rc != 0:
             return False
-        lines = r.stdout.decode("utf-8", "replace").strip().splitlines()
         return bool(lines) and lines[-1].strip() == want_line
 
 
@@ -1002,6 +1091,7 @@ def serve(args):
     drop = None if args.no_drop else (args.child_uid, args.child_uid)
     cfg = Config(
         key=key, servers=servers, probe_path=args.probe, drop=drop, data_dir=args.data_dir,
+        state_dir=os.path.dirname(os.path.abspath(args.key_file)),
         hermes_bin=args.hermes_bin, python_bin=args.python_bin,
         allow_http_loopback=args.allow_http_loopback,
         extra_mcp_hosts=[h for h in args.extra_mcp_hosts.split(",") if h],

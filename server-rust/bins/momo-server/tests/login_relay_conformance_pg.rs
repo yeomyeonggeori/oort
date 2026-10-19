@@ -59,6 +59,8 @@ const MOCK_REFRESH: &str = "MOCK-REFRESH-TOKEN-4079";
 /// The Codex device code: in the start response only.
 const DEVICE_CODE: &str = "DEV4-9X7K";
 /// Inside every authorization URL the mock hands out: in the start response only.
+/// What the mock sidecar says the login time was (a fixed clock reading, 2025-10).
+const MOCK_ISSUED_AT: i64 = 1_760_000_000;
 const URL_MARKER: &str = "MOCKURL4079";
 const MOCK_STATE: &str = "MOCKSTATE4079";
 
@@ -219,6 +221,13 @@ async fn login(http: &reqwest::Client, base: &str, workspace: Uuid, email: &str)
 // ---------------------------------------------------------------------------
 // the mock co-hosted Hermes (for `connect`) and the mock login relay sidecar
 // ---------------------------------------------------------------------------
+
+fn chrono_now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
 
 async fn mock_hermes() -> u16 {
     let app = Router::new()
@@ -451,7 +460,13 @@ async fn mock_status(State(m): State<Shared>, headers: HeaderMap) -> axum::respo
     Json(json!({"targets": [
         {"kind": "provider", "target": "openai-codex", "connected": connected},
         {"kind": "provider", "target": "anthropic", "connected": connected},
-        {"kind": "mcp", "target": "gmail", "connected": connected},
+        {"kind": "mcp", "target": "gmail", "connected": connected, "estimated": {
+            "basis": "relay_observed_login",
+            "issuedAt": MOCK_ISSUED_AT,
+            // A sidecar that put anything else here (a token, a code, a log line) must not get it past oort.
+            "note": MARKER_CODE,
+            "token": MOCK_ACCESS,
+        }},
     ]}))
     .into_response()
 }
@@ -487,6 +502,8 @@ struct Declared<'a> {
     /// `None` = the relay is not configured (off).
     relay_url: Option<String>,
     relay_key: &'a str,
+    /// `HERMES_APP_LOGIN_GOOGLE_PUBLISHING=testing`: the operator declares the Google OAuth project External + Testing.
+    google_testing: bool,
 }
 
 async fn start_server(pool: PgPool, d: Declared<'_>) -> String {
@@ -496,7 +513,7 @@ async fn start_server(pool: PgPool, d: Declared<'_>) -> String {
         operator_hosts: Vec::new(),
     };
     let relay_config = match d.relay_url {
-        Some(url) => LoginRelayConfig::new(url, d.relay_key),
+        Some(url) => LoginRelayConfig::new(url, d.relay_key).with_google_testing(d.google_testing),
         None => LoginRelayConfig::default(),
     };
     let state = AppState::new(
@@ -724,6 +741,7 @@ async fn world_with(slug: &str, relay_on: bool, second_operator: bool) -> World 
             hermes_port,
             relay_url: relay_on.then(|| format!("http://127.0.0.1:{relay_port}")),
             relay_key: RELAY_KEY,
+            google_testing: true,
         },
     )
     .await;
@@ -884,6 +902,32 @@ async fn markers_never_cross_oort_in_any_channel() {
         "model-login lists the providers only"
     );
     assert!(targets.no_store);
+    // The app list carries the estimate: allow-listed words and clock readings, never what the sidecar tacked on.
+    let apps = api.get(&w.op, w.agent, "app-login").await;
+    assert_eq!(apps.code, 200, "{}", apps.text);
+    assert_eq!(
+        apps.body["targets"],
+        json!([{
+            "target": "gmail",
+            "connected": true,
+            "estimated": {
+                "basis": "relay_observed_login",
+                "issuedAt": MOCK_ISSUED_AT,
+                "testMode": true,
+                "expiresAt": MOCK_ISSUED_AT + 604_800,
+                "note": "google_testing_refresh_7d"
+            }
+        }]),
+        "{}",
+        apps.text
+    );
+    assert!(apps.no_store);
+    // A provider list never carries one.
+    assert!(targets.body["targets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|t| t.get("estimated").is_none()));
 
     // --- positive controls: the flows really ran ---
     assert_eq!(
@@ -1013,6 +1057,7 @@ async fn the_real_sidecar_logs_an_app_in_and_no_secret_crosses_oort() {
             hermes_port,
             relay_url: Some(url),
             relay_key: &key,
+            google_testing: true,
         },
     )
     .await;
@@ -1039,6 +1084,34 @@ async fn the_real_sidecar_logs_an_app_in_and_no_secret_crosses_oort() {
             query["redirect_uri"], query["state"]
         );
         let id = start.body["loginId"].as_str().unwrap().to_string();
+        if app == "gmail" {
+            // #4081 redirect_uri: the pinned Google loopback address survives Hermes -> sidecar -> oort unchanged,
+            // and a paste that names any other port / host is refused (fixed text, nothing reaches the child).
+            assert_eq!(
+                query["redirect_uri"], "http://127.0.0.1:41821/callback",
+                "the authorization URL's redirect_uri"
+            );
+            for other in [
+                "http://127.0.0.1:41822/callback",
+                "http://localhost:41821/callback",
+            ] {
+                let wrong = format!("{other}?code={marker}&state={}", query["state"]);
+                let refused = api
+                    .post(
+                        &op,
+                        agent,
+                        &format!("app-login/{id}/complete"),
+                        json!({"pasted": wrong}),
+                    )
+                    .await;
+                assert_eq!(
+                    (refused.code, refused.body["error"]["code"].as_str()),
+                    (400, Some("redirect_mismatch")),
+                    "{other}: {}",
+                    refused.text
+                );
+            }
+        }
         let done = api
             .post(
                 &op,
@@ -1161,6 +1234,28 @@ async fn the_real_sidecar_logs_an_app_in_and_no_secret_crosses_oort() {
     let mut finished_sorted = finished.clone();
     finished_sorted.sort_unstable();
     assert_eq!(connected, finished_sorted, "{}", targets.text);
+    // #4081: every app this run logged in was WATCHED by the real sidecar, so each carries its login time; the
+    // 7-day rule appears for the Google apps only (declared Testing above), and nothing else rides along.
+    for t in targets.body["targets"].as_array().unwrap() {
+        if t["connected"] != true {
+            assert!(t.get("estimated").is_none(), "{}", targets.text);
+            continue;
+        }
+        let est = &t["estimated"];
+        assert_eq!(est["basis"], "relay_observed_login", "{}", targets.text);
+        let at = est["issuedAt"].as_i64().expect("issuedAt");
+        assert!((at - chrono_now_secs()).abs() < 3_600, "{at}");
+        if ["gmail", "google_calendar", "google_drive"].contains(&t["target"].as_str().unwrap()) {
+            assert_eq!(
+                est["expiresAt"].as_i64(),
+                Some(at + 604_800),
+                "{}",
+                targets.text
+            );
+        } else {
+            assert!(est.get("expiresAt").is_none() && est.get("testMode").is_none());
+        }
+    }
 
     let log_text = String::from_utf8_lossy(&logs.lock().unwrap()).to_string();
     let responses = seen.0.lock().unwrap().join("\n");

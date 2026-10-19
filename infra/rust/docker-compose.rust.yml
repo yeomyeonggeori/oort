@@ -383,6 +383,7 @@ services:
       # relay host is the Hermes host, which AGENT_PROVIDER_LOCAL_HOSTS already lists exactly (egress opt-in).
       HERMES_LOGIN_RELAY_URL: ${HERMES_LOGIN_RELAY_URL:-}
       HERMES_LOGIN_RELAY_KEY: ${HERMES_LOGIN_RELAY_KEY:-}
+      HERMES_APP_LOGIN_GOOGLE_PUBLISHING: ${HERMES_APP_LOGIN_GOOGLE_PUBLISHING:-}
       # MOMO-605 / DESK-1. Empty (the default) means the CORS layer is not
       # mounted at all, which is exactly the web deployment's same-origin case.
       # A value is required only for non-browser origins — the Tauri desktop

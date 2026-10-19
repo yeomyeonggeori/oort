@@ -1106,3 +1106,41 @@ components:
             properties:
               target: { type: string }
               connected: { type: boolean }
+              estimated:
+                $ref: "#/components/schemas/LoginRelayEstimate"
+    LoginRelayEstimate:
+      type: object
+      additionalProperties: false
+      required: [basis]
+      description: >-
+        An ESTIMATE, never a fact: Hermes writes no structured refresh-failure signal, so oort cannot tell that a
+        login has expired, only guess when it may. Present only on app (`app-login`) targets that are `connected`;
+        absent when the relay predates it. Non-secret: a clock reading and a closed vocabulary, never a token, a
+        code or a log line. The screen words it as "about / may" and keeps `connected` as the only fact.
+      properties:
+        basis:
+          type: string
+          enum: [relay_observed_login, token_file_mtime, none]
+          description: >-
+            `relay_observed_login`: the relay watched this app's login finish (`issuedAt` is that moment; it
+            kept in the relay's own private directory: it survives a relay process restart, not a container restart, after which the basis falls back to `token_file_mtime`). `token_file_mtime`: the relay did not see
+            the login; `issuedAt` is the token file's last write, which a routine access-token refresh also moves,
+            so it is a lower bound on age only. `none`: no reading.
+        issuedAt: { type: integer, format: int64, description: "Unix seconds. Omitted when `basis` is `none`." }
+        testMode:
+          type: boolean
+          description: >-
+            The operator declared (`HERMES_APP_LOGIN_GOOGLE_PUBLISHING=testing` on the oort server) that the Google
+            OAuth project is External and in Testing: Google then expires a refresh token about 7 days after consent.
+            Only the three Google apps (gmail, google_calendar, google_drive) carry it. Omitted = not declared;
+            oort does not read the project's real status.
+        expiresAt:
+          type: integer
+          format: int64
+          description: "Estimate: `issuedAt` + 7 days. Only when `testMode` is true and `basis` is `relay_observed_login`."
+        note:
+          type: string
+          enum: [google_testing_refresh_7d, token_age_unknown_start]
+          description: >-
+            Fixed words for the screen to map to its own copy: `google_testing_refresh_7d` (testMode, the 7-day
+            rule applies), `token_age_unknown_start` (login time not observed; the age is a lower bound).

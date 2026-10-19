@@ -131,6 +131,7 @@ class Harness:
         tc.addCleanup(self.tmp.cleanup)
         self.data = os.path.join(self.tmp.name, "data")
         os.makedirs(self.data)
+        os.makedirs(os.path.join(self.tmp.name, "state"), mode=0o700)
         self.fake = os.path.join(self.tmp.name, "fake_hermes.py")
         with open(self.fake, "w") as f:
             f.write(FAKE_HERMES.format(py=sys.executable))
@@ -145,6 +146,7 @@ class Harness:
         self.bodies = []
         kw = dict(
             key=KEY, hermes_bin=self.fake, python_bin=sys.executable, probe_path=self.fake, data_dir=self.data,
+            state_dir=os.path.join(self.tmp.name, "state"),
             servers=servers if servers is not None else {"notes": {"host": "mock.example", "probe": False}},
             start_wait=5, rate_per_min=50,
         )  # fmt: skip
@@ -855,6 +857,125 @@ class Hardening(unittest.TestCase):
         self.addCleanup(srv.relay.close)
         self.assertEqual(srv.socket.family, socket.AF_INET6)
         self.assertEqual(srv.socket.getsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY), 0)
+
+
+class AppEstimate(unittest.TestCase):
+    """#4081: the `estimated` reading on a connected app, and the Google loopback redirect on the probe path."""
+
+    GOOGLE = {"gmail": {"host": "gmailmcp.googleapis.com", "probe": True}}
+
+    @staticmethod
+    def google_url(redirect_enc):
+        return ("https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=c&redirect_uri=%s"
+                "&state=GS1&code_challenge=CHAL&code_challenge_method=S256" % redirect_enc)
+
+    def _status_mcp(self, h):
+        h.cfg.test_bin = "/usr/bin/test" if os.path.exists("/usr/bin/test") else "/bin/test"
+        h.srv.relay._status_cache = (0.0, None)  # the 15 s cache is not under test
+        items = [t for t in h.call("GET", "/v1/status")[1]["targets"] if t["kind"] == "mcp"]
+        return {t["target"]: t for t in items}
+
+    def _login(self, h, name, redirect_port="41821"):
+        h.scenario({"host": "accounts.google.com", "redirect": "http%%3A%%2F%%2F127.0.0.1%%3A%s%%2Fcallback" % redirect_port})
+        r = h.start("mcp", name)[1]
+        paste = paste_mcp(h, MARK_CODE, redirect="http://127.0.0.1:%s/callback" % redirect_port)
+        self.assertEqual(h.call("POST", "/v1/login/%s/complete" % r["login_id"], {"pasted": paste}, op=OP)[0], 200)
+        h.wait_status(r["login_id"], "done")
+        return r
+
+    def test_a_login_the_relay_watched_reports_that_moment_and_survives_a_restart(self):
+        h = Harness(self, servers=self.GOOGLE)
+        before = int(time.time())
+        self._login(h, "gmail")
+        got = self._status_mcp(h)["gmail"]
+        self.assertTrue(got["connected"])
+        self.assertEqual(got["estimated"]["basis"], "relay_observed_login")
+        self.assertTrue(before <= got["estimated"]["issuedAt"] <= int(time.time()))
+        self.assertEqual(set(got["estimated"]), {"basis", "issuedAt"})  # clock reading only: no token, no word from the child
+        again = lr.Relay(h.cfg)  # a relay restart rereads the state file
+        self.addCleanup(again.close)
+        self.assertEqual(again.issued, {"gmail": got["estimated"]["issuedAt"]})
+
+    def test_a_token_the_relay_did_not_see_falls_back_to_the_file_time_and_never_reads_it(self):
+        h = Harness(self, servers=self.GOOGLE)
+        tokens = os.path.join(h.data, "mcp-tokens")
+        os.makedirs(tokens)
+        f = os.path.join(tokens, "gmail.json")
+        open(f, "w").write(MARK_ACCESS + MARK_REFRESH)
+        os.utime(f, (1_700_000_000, 1_700_000_000))
+        got = self._status_mcp(h)["gmail"]
+        self.assertEqual(got["estimated"], {"basis": "token_file_mtime", "issuedAt": 1_700_000_000})
+        self.assertNotIn(MARK_ACCESS, json.dumps(got))
+        self.assertNotIn(MARK_REFRESH, json.dumps(got))
+
+    def test_not_connected_carries_no_estimate_and_forgets_an_old_login_time(self):
+        h = Harness(self, servers=self.GOOGLE)
+        self._login(h, "gmail")
+        os.remove(os.path.join(h.data, "mcp-tokens", "gmail.json"))  # logged out inside Hermes
+        got = self._status_mcp(h)["gmail"]
+        self.assertEqual(got, {"kind": "mcp", "target": "gmail", "connected": False})
+        self.assertEqual(h.srv.relay.issued, {})
+
+    def test_the_state_file_is_untrusted_input(self):
+        h = Harness(self, servers=self.GOOGLE)
+        path = h.srv.relay._issued_path()
+        for junk in ("[" * 70000, '{"gmail": "x"}', '{"gmail": true}', '{"gmail": 5}', '{"other": 1700000000}', "[1]", "not json", '{"gmail": 99999999999}'):
+            open(path, "w").write(junk)
+            self.assertEqual(lr.Relay(h.cfg).issued, {}, junk)
+        open(path, "w").write('{"gmail": 1700000000, "evil": 1700000000}')
+        r = lr.Relay(h.cfg)
+        self.addCleanup(r.close)
+        self.assertEqual(r.issued, {"gmail": 1700000000})
+
+    def test_a_fifo_or_symlink_in_the_state_path_is_not_read_and_never_blocks(self):
+        h = Harness(self, servers=self.GOOGLE)
+        path = h.srv.relay._issued_path()
+        os.mkfifo(path)  # open() for reading would block forever without O_NONBLOCK + the regular-file check
+        self.assertEqual(lr.Relay(h.cfg).issued, {})
+        os.remove(path)
+        target = os.path.join(h.tmp.name, "elsewhere.json")
+        open(target, "w").write('{"gmail": 1700000000}')
+        os.symlink(target, path)
+        self.assertEqual(lr.Relay(h.cfg).issued, {})
+
+    def test_an_unwritable_state_dir_keeps_the_login_time_in_memory_only(self):
+        h = Harness(self, servers=self.GOOGLE, state_dir=os.path.join("/nonexistent", "state"))
+        self._login(h, "gmail")
+        self.assertEqual(self._status_mcp(h)["gmail"]["estimated"]["basis"], "relay_observed_login")
+        self.assertEqual(lr.Relay(h.cfg).issued, {})  # a restart forgets; the file time takes over
+
+    def test_a_check_that_could_not_run_is_unknown_not_absent_and_keeps_the_login_time(self):
+        h = Harness(self, servers=self.GOOGLE)
+        self._login(h, "gmail")
+        kept = dict(h.srv.relay.issued)
+        h.cfg.test_bin = "/nonexistent/test"  # the check cannot start: not the same as "the file is gone"
+        h.srv.relay._status_cache = (0.0, None)
+        got = {t["target"]: t for t in h.call("GET", "/v1/status")[1]["targets"] if t["kind"] == "mcp"}["gmail"]
+        self.assertFalse(got["connected"])
+        self.assertEqual(h.srv.relay.issued, kept)
+
+    def test_google_loopback_redirect_is_kept_end_to_end_on_the_probe_path(self):
+        # K-S1b pins redirect_port 41821..41823 per Google server; the relay must carry exactly that address.
+        for port in ("41821", "41822", "41823"):
+            h = Harness(self, servers=self.GOOGLE)
+            self._login(h, "gmail", redirect_port=port)
+            self.assertEqual(h.stdin_log().strip().split("?")[0], "http://127.0.0.1:%s/callback" % port)
+
+    def test_a_paste_for_another_port_host_or_path_is_not_the_login_redirect(self):
+        h = Harness(self, servers=self.GOOGLE)
+        h.scenario({"host": "accounts.google.com", "redirect": "http%3A%2F%2F127.0.0.1%3A41821%2Fcallback"})
+        for bad in ("http://127.0.0.1:41822/callback", "http://localhost:41821/callback", "http://127.0.0.1:41821/other", "https://127.0.0.1:41821/callback"):
+            lid = h.start("mcp", "gmail")[1]["login_id"]
+            st, body, _ = h.call("POST", "/v1/login/%s/complete" % lid, {"pasted": paste_mcp(h, MARK_CODE, redirect=bad)}, op=OP)
+            self.assertEqual((st, body), (400, {"error": "redirect_mismatch"}), bad)
+            h.call("DELETE", "/v1/login/" + lid, op=OP)
+        self.assertIsNone(h.stdin_log())  # nothing reached the child
+
+    def test_a_non_loopback_google_redirect_is_not_accepted_at_start(self):
+        h = Harness(self, servers=self.GOOGLE)
+        for redirect in ("https%3A%2F%2Fevil.example%2Fcallback", "http%3A%2F%2Fevil.example%3A41821%2Fcallback", "http%3A%2F%2F127.0.0.1%2Fcallback"):
+            h.scenario({"url": self.google_url(redirect)})
+            self.assertEqual(h.start("mcp", "gmail")[1], {"error": "url_rejected"}, redirect)
 
 
 class Parser(unittest.TestCase):
