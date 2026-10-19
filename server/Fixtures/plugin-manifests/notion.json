@@ -3,10 +3,17 @@
   "plugin": {
     "id": "com.momo.plugins.notion",
     "name": "Notion",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "Official Notion hosted MCP integration",
-    "publisher": { "id": "makenotion", "name": "Notion", "verified": true },
-    "license": { "spdx": "MIT", "kind": "open_source" },
+    "publisher": {
+      "id": "makenotion",
+      "name": "Notion",
+      "verified": true
+    },
+    "license": {
+      "spdx": "MIT",
+      "kind": "open_source"
+    },
     "provenance": {
       "sourceURL": "https://github.com/makenotion/notion-mcp-server",
       "releaseRef": "hosted",
@@ -17,31 +24,1941 @@
     "protocolVersion": "2025-06-18",
     "transport": "streamable_http",
     "url": "https://mcp.notion.com/mcp",
-    "server": { "name": "makenotion/notion-mcp-server", "version": "hosted" },
-    "tools": [{
-      "name": "notion.search",
-      "description": "권한을 위임한 사용자가 접근할 수 있는 페이지를 검색합니다.",
-      "inputSchema": {
-        "type": "object",
-        "properties": { "query": { "type": "string" } },
-        "additionalProperties": false
+    "server": {
+      "name": "makenotion/notion-mcp-server",
+      "version": "hosted"
+    },
+    "tools": [
+      {
+        "name": "notion.notion-search",
+        "description": "권한을 위임한 사용자가 접근할 수 있는 페이지와 데이터베이스를 검색합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Short, specific keywords for Notion content search. For user search, enter a name or email address. Provide a non-empty query unless intentionally browsing with filters or a non-relevance sort."
+            },
+            "query_type": {
+              "type": "string",
+              "description": "Specify type of the query as either \"internal\" or \"user\". Always include this input if performing \"user\" search.",
+              "enum": [
+                "internal",
+                "user"
+              ]
+            },
+            "data_source_url": {
+              "type": "string",
+              "description": "Optionally restrict keyword search to a data source URL returned in a <data-source> tag."
+            },
+            "page_url": {
+              "type": "string",
+              "description": "Optionally restrict keyword search to a page and its descendants. Accepts a Notion page URL or ID."
+            },
+            "teamspace_id": {
+              "type": "string",
+              "description": "Optionally, provide the ID of a teamspace to restrict search results to. This will perform a search over content within the specified teamspace only. Accepts the teamspace ID (UUIDv4) with or without dashes."
+            },
+            "filters": {
+              "type": "object",
+              "properties": {
+                "created_date_range": {
+                  "type": "object",
+                  "properties": {
+                    "start_date": {
+                      "type": "string",
+                      "description": "The start date of the date range as an ISO 8601 date string, if any."
+                    },
+                    "end_date": {
+                      "type": "string",
+                      "description": "The end date of the date range as an ISO 8601 date string, if any."
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "created_by_user_ids": {
+                  "type": "array",
+                  "description": "Optional filter to only produce search results created by the Notion users that have the specified user IDs. Use \"me\" for the connected user.",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "edited_by_user_ids": {
+                  "type": "array",
+                  "description": "Optional filter to only produce search results edited by the Notion users that have the specified user IDs. Use \"me\" for the connected user. Available on the Business plan.",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "last_edited_date_range": {
+                  "type": "object",
+                  "properties": {
+                    "start_date": {
+                      "type": "string",
+                      "description": "The start date of the date range as an ISO 8601 date string, if any."
+                    },
+                    "end_date": {
+                      "type": "string",
+                      "description": "The end date of the date range as an ISO 8601 date string, if any."
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "teamspace_ids": {
+                  "type": "array",
+                  "description": "Optional filter to only produce search results inside one of the specified teamspaces. Selecting more than one teamspace is available on the Business plan; use teamspace_id for one teamspace on other plans.",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "title_only": {
+                  "type": "boolean",
+                  "description": "When true, match the query only against page and database titles instead of page content. Available on the Business plan."
+                },
+                "content_status": {
+                  "type": "string",
+                  "description": "Which pages to include by status. Omit for the default live pages. Supplying this field, even with the default value, requires Business access.",
+                  "enum": [
+                    "all_with_archived",
+                    "all_without_archived",
+                    "verified_only",
+                    "archived_only"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "sort": {
+              "type": "string",
+              "description": "Result ordering for Notion workspace search. Omit for the default \"relevance\" ordering. \"last_edited\" and \"created\" require Business access.",
+              "enum": [
+                "relevance",
+                "last_edited",
+                "created"
+              ]
+            },
+            "page_size": {
+              "type": "integer",
+              "description": "Maximum number of results to return (default 10). Lower values reduce response size.",
+              "minimum": 1,
+              "maximum": 50
+            },
+            "max_highlight_length": {
+              "type": "integer",
+              "description": "Maximum character length for result highlights (default 200). Set to 0 to omit highlights entirely.",
+              "minimum": 0,
+              "maximum": 500
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "query"
+          ]
+        },
+        "schemaDigest": "sha256:32ede9db3020fb1004986e8de6161de53810d8841507d86a03925e02ad6ff007",
+        "scopes": [
+          "notion:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
       },
-      "schemaDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
-      "scopes": ["notion:read"],
-      "risk": "read",
-      "approvalPolicy": "none"
-    }]
+      {
+        "name": "notion.notion-memory-search",
+        "description": "내 Notion 메모리를 검색합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Words or a short phrase to find in personal memories.",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "limit": {
+              "type": "integer",
+              "description": "Maximum number of memories to return. Defaults to 10 and cannot exceed 50.",
+              "minimum": 1,
+              "maximum": 50
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "query"
+          ]
+        },
+        "schemaDigest": "sha256:aaf0ece0c56bda8951257511c8f118132604ffdf0080777a0aa185f8f73526eb",
+        "scopes": [
+          "notion:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "notion.notion-fetch",
+        "description": "페이지나 데이터베이스의 내용을 가져옵니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The ID or URL of the Notion page, database, or data source to fetch. Supports notion.so URLs, Notion Sites URLs (*.notion.site), raw UUIDs, and data source URLs (collection://...). Pass \"memory\" to fetch the connected user's About page and memory database in this workspace without creating them. Pas"
+            },
+            "include_transcript": {
+              "type": "boolean",
+              "description": "Whether to include meeting note transcripts. Defaults to false. When true, full transcripts are included; when false, a placeholder with the meeting note URL is shown instead."
+            },
+            "include_discussions": {
+              "type": "boolean",
+              "description": "Whether to include discussion/comment indicators in the page output. When true, adds a <page-discussions> summary with discussion count, preview snippets, and discussion:// URLs. Use with the get_comments tool to retrieve full discussion content. Defaults to false."
+            },
+            "include_file_urls": {
+              "type": "boolean",
+              "description": "Whether to return signed download URLs for uploaded files. Defaults to false. When false, page Markdown cites uploaded files by stable notion-file-block:// references and the response has no references map; call get_file_download_urls with the references when you need those files' contents. When tru"
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id"
+          ]
+        },
+        "schemaDigest": "sha256:c0e02c4915f3494d815e4126357a90f8fe83aa7e9e50fb60e867fc85e82e9ab2",
+        "scopes": [
+          "notion:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "notion.notion-get-comments",
+        "description": "페이지의 댓글과 토론을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "page_id": {
+              "type": "string",
+              "description": "Identifier for a Notion page."
+            },
+            "include_resolved": {
+              "type": "boolean",
+              "description": "Include resolved discussions in the response. Defaults to false."
+            },
+            "include_all_blocks": {
+              "type": "boolean",
+              "description": "Include discussions on child blocks, not just page-level discussions. Defaults to false."
+            },
+            "discussion_id": {
+              "type": "string",
+              "description": "Fetch a specific discussion by ID or discussion URL (e.g., discussion://pageId/blockId/discussionId)."
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "page_id"
+          ]
+        },
+        "schemaDigest": "sha256:311143b065c3e0ce67ff1b3887404811206eef3b1b1e45953c76d4068f8c064e",
+        "scopes": [
+          "notion:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "notion.notion-get-teams",
+        "description": "워크스페이스의 팀스페이스 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Optional search query to filter teams by name (case-insensitive).",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:56f871684cc8c832ce5831867301a736ecbae7a54c73331f7bef804e96b0d8fd",
+        "scopes": [
+          "notion:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "notion.notion-get-groups",
+        "description": "워크스페이스의 사용자 그룹을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Optional group name to search for (case-insensitive), or a group ID from a People property value (`space_permission_group-<id>` or the bare ID) to look up that group.",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:16776e9d2e47f30e56ba458d01521f4e1aba3635168f526e489eb292d22141ce",
+        "scopes": [
+          "notion:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "notion.notion-get-users",
+        "description": "워크스페이스 사용자 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Optional search query to filter users by name or email (case-insensitive).",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "start_cursor": {
+              "type": "string",
+              "description": "Cursor for pagination. Use the next_cursor value from the previous response to get the next page.",
+              "minLength": 1
+            },
+            "page_size": {
+              "type": "integer",
+              "description": "Number of users to return per page (1–100; default 100).",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "user_id": {
+              "type": "string",
+              "description": "Return only the user matching this ID. Pass \"self\" to fetch the current user.",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:f3289f785a61120cdcbe3e72108b61ddd5d6d882d05ca60a12a114638a0dfcc1",
+        "scopes": [
+          "notion:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "notion.notion-get-self",
+        "description": "연결된 내 Notion 계정 정보를 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:d2a9cfd71fb969b4edef232f6acf12bbe7cae94b815068e0ab2520d3d30ac1d7",
+        "scopes": [
+          "notion:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "notion.notion-get-async-task",
+        "description": "비동기 작업의 진행 상태를 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "description": "The ID of the async task to retrieve, as returned in the async_task response of the tool that started it.",
+              "minLength": 1
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "task_id"
+          ]
+        },
+        "schemaDigest": "sha256:cc3394f5f65987dac12cfb7d8c351814d10f33b229fe0f379b2b224ee790dc0b",
+        "scopes": [
+          "notion:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "notion.notion-get-file-download-urls",
+        "description": "첨부 파일의 내려받기 주소를 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "references": {
+              "type": "array",
+              "description": "Stable notion-file-block:// file references, copied exactly from the Markdown returned by fetch. Up to 25 per call.",
+              "items": {
+                "type": "string"
+              }
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "references"
+          ]
+        },
+        "schemaDigest": "sha256:7456013fcc00c26f44858a65938cd4f5498ecab6502e48d611b6becd29c10c2f",
+        "scopes": [
+          "notion:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "notion.notion-download-attachment",
+        "description": "첨부 파일을 내려받습니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file_upload_id": {
+              "type": "string",
+              "description": "The FileUpload ID returned by the create-attachment tool."
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "file_upload_id"
+          ]
+        },
+        "schemaDigest": "sha256:6a5183d29c9e6e25a3e70dfd4f382e8c8da38b0f607547a038ae99491d518981",
+        "scopes": [
+          "notion:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "notion.notion-query-data-sources",
+        "description": "데이터 소스를 조건으로 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "data": {
+              "type": "object",
+              "properties": {
+                "data_source_urls": {
+                  "type": "array",
+                  "description": "Notion data source URLs whose SQLite tables are available to the query; each data source is exposed as a table named by its URL. Obtain them from the fetch tool, in the format: collection://f336d0bc-b841-465b-8045-024475c079dd",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "query": {
+                  "type": "string",
+                  "description": "Read-only SQLite query to execute against the data sources. Use a data source URL as the table name, e.g. SELECT * FROM \"collection://...\" WHERE .... Use only table and column names shown in the fetched `<sqlite-table>` definition; date properties use the expanded column names listed there, not the "
+                },
+                "mode": {
+                  "type": "string",
+                  "description": "Optional mode parameter. Defaults to 'sql' if not specified. SQL mode does not accept is_archived; that parameter belongs only to view mode.",
+                  "enum": [
+                    "sql"
+                  ]
+                },
+                "params": {
+                  "type": "array",
+                  "description": "Positional parameters bound to `?` placeholders in the query. Prefer parameterized queries over string interpolation. Use \"__YES__\" for checked checkboxes and \"__NO__\" for unchecked checkboxes.",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "data_source_urls",
+                "query"
+              ]
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "data"
+          ]
+        },
+        "schemaDigest": "sha256:059191306422dbfdd017c25fd646b7b07ed82c295e2323f377af16d501529077",
+        "scopes": [
+          "notion:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "notion.notion-query-multiple-data-sources",
+        "description": "여러 데이터 소스를 한 번에 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Read-only SQLite query to execute against the data sources. Use a data source URL as the table name, e.g. SELECT * FROM \"collection://...\" WHERE .... Use only table and column names shown in the fetched `<sqlite-table>` definition; date properties use the expanded column names listed there, not the "
+            },
+            "data_source_urls": {
+              "type": "array",
+              "description": "Notion data source URLs whose SQLite tables are available to the query; each data source is exposed as a table named by its URL. Obtain them from the fetch tool, in the format: collection://f336d0bc-b841-465b-8045-024475c079dd",
+              "items": {
+                "type": "string"
+              }
+            },
+            "params": {
+              "type": "array",
+              "description": "Positional parameters bound to `?` placeholders in the query. Prefer parameterized queries over string interpolation. Use \"__YES__\" for checked checkboxes and \"__NO__\" for unchecked checkboxes.",
+              "items": {
+                "type": "string"
+              }
+            },
+            "mode": {
+              "type": "string",
+              "description": "Optional SQL mode marker. This tool only supports SQL queries.",
+              "enum": [
+                "sql"
+              ]
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "query",
+            "data_source_urls"
+          ]
+        },
+        "schemaDigest": "sha256:9e7d3d47abb41d30b5fabb4c8399a6dde055e3afae1e7a45549ef67141b3796b",
+        "scopes": [
+          "notion:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "notion.notion-query-meeting-notes",
+        "description": "회의록을 조건으로 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "filter": {
+              "type": "object",
+              "properties": {
+                "operator": {
+                  "type": "string",
+                  "description": "Operator for combinator filters.",
+                  "enum": [
+                    "and",
+                    "or"
+                  ]
+                },
+                "filters": {
+                  "type": "array",
+                  "description": "Nested filters; each may be a combinator (and/or) or property filter.",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "property": {
+                        "type": "string",
+                        "description": "Which meeting-note property to filter on. Prefer the short names; the schema URI form is accepted for compatibility.",
+                        "enum": [
+                          "title",
+                          "attendees",
+                          "created_time",
+                          "created_by",
+                          "last_edited_time",
+                          "last_edited_by",
+                          "notion://meeting_notes/attendees"
+                        ]
+                      },
+                      "filter": {
+                        "type": "object",
+                        "properties": {
+                          "operator": {
+                            "type": "string",
+                            "description": "How to compare the text.",
+                            "enum": [
+                              "string_is",
+                              "string_is_not",
+                              "string_contains",
+                              "string_does_not_contain",
+                              "string_starts_with",
+                              "string_ends_with"
+                            ]
+                          },
+                          "value": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "description": "Always `exact`",
+                                "enum": [
+                                  "exact"
+                                ]
+                              },
+                              "value": {
+                                "type": "string",
+                                "description": "The literal text the operator compares against."
+                              }
+                            },
+                            "additionalProperties": false,
+                            "required": [
+                              "type",
+                              "value"
+                            ]
+                          }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                          "operator",
+                          "value"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                      "property",
+                      "filter"
+                    ]
+                  }
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "operator"
+              ]
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:a18da0cf2c5ee430bd6a7559b9ae5a41ae20c598e6e636e6fae0afd526843000",
+        "scopes": [
+          "notion:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "notion.notion-list-private-pages",
+        "description": "내 비공개 페이지 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "number",
+              "description": "Maximum results to return (1-200)."
+            },
+            "cursor": {
+              "type": "string",
+              "description": "Opaque pagination cursor from the previous response."
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:4cbc16b5722b5c63a565beb5e1486c268c12f90f696da298ce4c77a077e23e98",
+        "scopes": [
+          "notion:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "notion.notion-list-shared-pages",
+        "description": "나와 공유된 페이지 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "number",
+              "description": "Maximum results to return (1-200)."
+            },
+            "cursor": {
+              "type": "string",
+              "description": "Opaque pagination cursor from the previous response."
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:bfd4af5b4196aaf03e6b5dca9300d07db87e7f6944ac6aeb702ff7cf36126655",
+        "scopes": [
+          "notion:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "notion.notion-list-favorite-pages",
+        "description": "즐겨찾기 페이지 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "number",
+              "description": "Maximum results to return (1-200)."
+            },
+            "cursor": {
+              "type": "string",
+              "description": "Opaque pagination cursor from the previous response."
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:f31514f4c7e4cc691bb039a6fa3778a18f1f14f05474311d47943882c5b03939",
+        "scopes": [
+          "notion:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "notion.notion-list-recent-pages",
+        "description": "최근 페이지 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "number",
+              "description": "Maximum results to return (1-200)."
+            },
+            "cursor": {
+              "type": "string",
+              "description": "Opaque pagination cursor from the previous response."
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:12122b35e08b860078ad0dce0f4c444aa90b86b6d2af653fb7aba2229b7b10d3",
+        "scopes": [
+          "notion:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "notion.notion-list-page-backlinks",
+        "description": "페이지를 가리키는 링크 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "page_id": {
+              "type": "string",
+              "description": "ID or URL of the page or database to find backlinks for."
+            },
+            "types": {
+              "type": "array",
+              "description": "Only return these kinds of backlinks. page_mention is an inline @-mention in text, a title, or a caption; link_to_page is a link-to-page block; property_mention is a mention in a database property; comment_mention is a mention in a comment. Omit for all kinds.",
+              "items": {
+                "type": "string",
+                "description": "One of: `page_mention`, `link_to_page`, `property_mention`, `comment_mention`",
+                "enum": [
+                  "page_mention",
+                  "link_to_page",
+                  "property_mention",
+                  "comment_mention"
+                ]
+              }
+            },
+            "page_size": {
+              "type": "integer",
+              "description": "Maximum backlinks to return (1-100; default 25).",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "cursor": {
+              "type": "string",
+              "description": "next_cursor from the previous call."
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "page_id"
+          ]
+        },
+        "schemaDigest": "sha256:63fd72626902e3c1b640f8002317bd00b2c99ce9cbaa95471c569282ed8b2caa",
+        "scopes": [
+          "notion:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "notion.notion-calendar-list-calendars",
+        "description": "Notion 캘린더 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "onlyAccountEmails": {
+              "type": "array",
+              "description": "Return only accounts linked to these email addresses. Useful to get calendars from a work account only for example. Do not specify if you are interested in getting the whole picture of someone's agenda across work and personal accounts.",
+              "items": {
+                "type": "string"
+              }
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:59d68f465e951db0aba3a7e59613524f7080e6e3bbc65fdc74c1e54a01b06f37",
+        "scopes": [
+          "notion:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "notion.notion-calendar-list-events",
+        "description": "Notion 캘린더의 일정을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "timeMin": {
+              "type": "string",
+              "description": "Start of the time range, as an ISO 8601 date-time."
+            },
+            "timeMax": {
+              "type": "string",
+              "description": "End of the time range, as an ISO 8601 date-time."
+            },
+            "timeZone": {
+              "type": "string",
+              "description": "Date-times of returned events will be expressed in this time-zone"
+            },
+            "includeDeclinedInvites": {
+              "type": "boolean",
+              "description": "Whether to include event invites the user has declined"
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "timeMin",
+            "timeMax",
+            "timeZone"
+          ]
+        },
+        "schemaDigest": "sha256:e20da016076a073dab470314886731c51ab90a16cd0eb2bc853ff101a420c834",
+        "scopes": [
+          "notion:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "notion.notion-calendar-list-coworkers-events",
+        "description": "동료의 일정을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "coworkerEmails": {
+              "type": "array",
+              "description": "Emails of relevant coworkers",
+              "items": {
+                "type": "string"
+              }
+            },
+            "timeMin": {
+              "type": "string",
+              "description": "Start of the time range, as an ISO 8601 date-time."
+            },
+            "timeMax": {
+              "type": "string",
+              "description": "End of the time range, as an ISO 8601 date-time."
+            },
+            "timeZone": {
+              "type": "string",
+              "description": "Date-times of returned events will be expressed in this time-zone"
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "coworkerEmails",
+            "timeMin",
+            "timeMax",
+            "timeZone"
+          ]
+        },
+        "schemaDigest": "sha256:46e15d141921460b66846ad23f90f8e3be17b6e15f6126ebbc90b4be7898328c",
+        "scopes": [
+          "notion:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "notion.notion-calendar-list-calendar-resources",
+        "description": "캘린더 자원(회의실 등)을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "timeSlots": {
+              "type": "array",
+              "description": "Specific time slots to check. Returns available resources for each time slot independently.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "startAt": {
+                    "type": "string",
+                    "description": "Start of the time slot to check, as an ISO 8601 date-time."
+                  },
+                  "endAt": {
+                    "type": "string",
+                    "description": "End of the time slot to check, as an ISO 8601 date-time."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "startAt",
+                  "endAt"
+                ]
+              }
+            },
+            "minCapacity": {
+              "type": "integer",
+              "description": "Minimum room capacity (number of people). MUST include the meeting organizer/user themselves in the count. For a 1-on-1, pass 2. For a meeting with N invitees besides the user, pass N+1.",
+              "maximum": 9007199254740991
+            },
+            "maxCount": {
+              "type": "integer",
+              "description": "Maximum number of resources to return per time slot (default: 20, max: 40)",
+              "maximum": 40
+            },
+            "ignoreWorkingLocation": {
+              "type": "boolean",
+              "description": "If true, do not narrow rooms to the user's working-location building for this day. Set this when the user is explicitly asking about rooms in a different office (e.g. for a visiting team)."
+            },
+            "timeZone": {
+              "type": "string",
+              "description": "Date-times of returned events will be expressed in this time-zone"
+            },
+            "calendar": {
+              "type": "object",
+              "properties": {
+                "accountId": {
+                  "type": "string",
+                  "description": "Account that owns the target calendar."
+                },
+                "calendarId": {
+                  "type": "string",
+                  "description": "Target calendar identifier within the account."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "accountId",
+                "calendarId"
+              ]
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "timeSlots",
+            "minCapacity",
+            "timeZone"
+          ]
+        },
+        "schemaDigest": "sha256:f2fd1a39528143b391c83d1641722059485765894457bde9b9a39f9be090df8b",
+        "scopes": [
+          "notion:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "notion.notion-calendar-list-contacts",
+        "description": "캘린더 연락처를 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "queries": {
+              "type": "array",
+              "description": "Optional search queries to filter contacts by name or email. Results matching any query are included.",
+              "items": {
+                "type": "string"
+              }
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:7b179ad9f6df82bbb22a5da9c9956cf0f38201f7254596cc63b61ed35247d2dc",
+        "scopes": [
+          "notion:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "notion.notion-create-pages",
+        "description": "페이지를 새로 만듭니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "pages": {
+              "type": "array",
+              "description": "The pages to create.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "properties": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": false
+                  },
+                  "content": {
+                    "type": "string",
+                    "description": "The content of the new page, using Notion Markdown. For people and dates, use user and date mentions rather than plain text; notion://docs/enhanced-markdown-spec gives the syntax."
+                  },
+                  "template_id": {
+                    "type": "string",
+                    "description": "The ID of a template to apply to this page. When specified, do not provide 'content' as the template will provide it. Properties can still be set alongside the template. Get template IDs from the <templates> section in the fetch tool results. Template application is asynchronous: the page starts bla"
+                  },
+                  "icon": {
+                    "type": "string",
+                    "description": "An emoji character (e.g. \"🚀\"), a custom emoji by name (e.g. \":rocket_ship:\"), a Notion icon identifier as returned by fetch (e.g. \"icons/pizza_blue\"), or an external image URL. Use \"none\" to explicitly set no icon. Omit to leave unchanged. Keep the title free of a duplicate leading emoji because the"
+                  },
+                  "cover": {
+                    "type": "string",
+                    "description": "An external image URL for the page cover. Use \"none\" to explicitly set no cover. Omit to leave unchanged."
+                  },
+                  "is_skill": {
+                    "type": "boolean",
+                    "description": "Set to true only when the user asks for reusable instructions or a repeatable workflow. Do not mark ordinary reference pages, one-time documents, or drafts as skills. Before creating a skill, read the MCP resource `notion://docs/skills` through your MCP client's resource-reading interface. If your c"
+                  },
+                  "preserve_internal_links": {
+                    "type": "boolean",
+                    "description": "Preserve internal Markdown links instead of converting them to native mentions."
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "creation_mode": {
+              "type": "string",
+              "description": "If the user explicitly names a private or shared destination, omit \"creation_mode\" and use that parent. Otherwise, use \"draft\" when the user clearly wants a durable page but has not named a destination. Prefer this explicit draft mode over omitting the parent. Draft mode is server-enforced: it creat",
+              "enum": [
+                "draft"
+              ]
+            },
+            "parent": {
+              "type": "string",
+              "description": "Always `memory`",
+              "enum": [
+                "memory"
+              ]
+            },
+            "allow_async": {
+              "type": "boolean",
+              "description": "Default to true for page creation. Set to false only when the next step needs the created pages immediately, or when async execution rejects the request as too large. When this create operation is accepted for background execution, it returns an async_task result. Use get_async_task to wait for a su"
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "pages"
+          ]
+        },
+        "schemaDigest": "sha256:1ba4321fb87453f86c510d52cd7d3dcab60acaff9beb4900046ec79ff29e9f8c",
+        "scopes": [
+          "notion:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "require_approval"
+      },
+      {
+        "name": "notion.notion-create-database",
+        "description": "데이터베이스를 새로 만듭니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "parent": {
+              "type": "object",
+              "properties": {
+                "page_id": {
+                  "type": "string",
+                  "description": "The ID of the parent page, with or without dashes."
+                },
+                "type": {
+                  "type": "string",
+                  "description": "Always `page_id`",
+                  "enum": [
+                    "page_id"
+                  ]
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "page_id"
+              ]
+            },
+            "title": {
+              "type": "string",
+              "description": "The title of the new database."
+            },
+            "description": {
+              "type": "string",
+              "description": "The description of the new database."
+            },
+            "schema": {
+              "type": "string",
+              "description": "SQL DDL CREATE TABLE statement defining the database schema. Cannot be combined with database_type. Column names must be double-quoted and type options use single quotes.\n\nProperty type syntax:\n- Simple: TITLE, RICH_TEXT, DATE, PEOPLE, CHECKBOX, URL, EMAIL, PHONE_NUMBER, FILES\n- SELECT('opt':color, "
+            },
+            "database_type": {
+              "type": "string",
+              "description": "Create a canonical typed database with Notion's required properties and metadata. Supported types: tasks, projects, skills. Example: <example>tasks</example>. Use title \"Tasks\" when needed.",
+              "enum": [
+                "tasks",
+                "projects",
+                "skills"
+              ]
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:511b781e23ca747bfa1b6ceeb17bb225d6c769f1fa8353f8269e5c4c05e9d48f",
+        "scopes": [
+          "notion:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "require_approval"
+      },
+      {
+        "name": "notion.notion-duplicate-page",
+        "description": "페이지를 복제합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "page_id": {
+              "type": "string",
+              "description": "The ID of the page to duplicate. This is a v4 UUID, with or without dashes, and can be parsed from a Notion page URL."
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "page_id"
+          ]
+        },
+        "schemaDigest": "sha256:fa25c291df042f27d2a5fb6bb77719f730e67ca679a9e59e3c871256b1e19c0f",
+        "scopes": [
+          "notion:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "require_approval"
+      },
+      {
+        "name": "notion.notion-create-view",
+        "description": "데이터베이스 보기를 만듭니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "data_source_id": {
+              "type": "string",
+              "description": "The data source (collection) ID. Accepts a collection:// URI from <data-source> tags or a bare UUID."
+            },
+            "name": {
+              "type": "string",
+              "description": "The name of the view."
+            },
+            "type": {
+              "type": "string",
+              "description": "The type of view to create.",
+              "enum": [
+                "table",
+                "board",
+                "list",
+                "calendar",
+                "timeline",
+                "gallery",
+                "form",
+                "chart",
+                "map",
+                "dashboard"
+              ]
+            },
+            "database_id": {
+              "type": "string",
+              "description": "The database to add a view tab to. Accepts a Notion URL or a bare UUID. Mutually exclusive with `parent_page_id`; exactly one must be provided."
+            },
+            "parent_page_id": {
+              "type": "string",
+              "description": "A page to create an inline linked database view on, like the UI /linked command. Accepts a Notion URL or a bare UUID. The new linked view block is appended at the end of the page and references `data_source_id`. Mutually exclusive with `database_id`; exactly one must be provided."
+            },
+            "configure": {
+              "type": "string",
+              "description": "View configuration DSL directives and examples:\n- FILTER \"Property\" = \"value\" — filter rows. Relation values must be a page URL or UUID; person values must be a user URI (user://<user_id>), user UUID, or \"me\". Names are not supported for either.\n- QUICK FILTER \"Property\" — add a quick filter to the "
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "data_source_id",
+            "name",
+            "type"
+          ]
+        },
+        "schemaDigest": "sha256:80cfeabd3619151b45b639181a82e1c056ab4bdc3f429b0e426f83feb89d8634",
+        "scopes": [
+          "notion:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "require_approval"
+      },
+      {
+        "name": "notion.notion-update-view",
+        "description": "데이터베이스 보기를 고칩니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "view_id": {
+              "type": "string",
+              "description": "The view to update. Accepts a view:// URI, a Notion URL with ?v= parameter, or a bare UUID."
+            },
+            "name": {
+              "type": "string",
+              "description": "New name for the view."
+            },
+            "configure": {
+              "type": "string",
+              "description": "View configuration DSL string. Supports FILTER, QUICK FILTER, SORT BY, GROUP BY, SUB GROUP BY, CARD LAYOUT, CALENDAR BY, TIMELINE BY, MAP BY, CHART, FORM, SHOW, HIDE, COVER, WRAP CELLS, FREEZE COLUMNS, and CLEAR directives."
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "view_id"
+          ]
+        },
+        "schemaDigest": "sha256:7e3e68962d2bbce0bb6da60a980aa76f97850f08f3cd495f599e257edf2b915d",
+        "scopes": [
+          "notion:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "require_approval"
+      },
+      {
+        "name": "notion.notion-create-folder",
+        "description": "폴더를 만듭니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "parent": {
+              "type": "object",
+              "properties": {
+                "page_id": {
+                  "type": "string",
+                  "description": "The ID of the page that will own the Folder."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "page_id"
+              ]
+            },
+            "title": {
+              "type": "string",
+              "description": "The title of the new Folder."
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "parent",
+            "title"
+          ]
+        },
+        "schemaDigest": "sha256:21e98db72b2ebd549f1a3ebba3cbc20593f25ef6679ce7b3da721c49b4665c0e",
+        "scopes": [
+          "notion:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "require_approval"
+      },
+      {
+        "name": "notion.notion-create-file-upload",
+        "description": "파일 올리기를 시작합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "filename": {
+              "type": "string",
+              "description": "The filename to create in Notion, including a supported extension such as .pdf, .png, or .zip.",
+              "minLength": 1
+            },
+            "content_type": {
+              "type": "string",
+              "description": "Optional MIME type, such as application/pdf or image/png. Prefer omitting it so the type is inferred from the filename: a type that disagrees with the extension is stored as given, and the file then renders as the wrong kind.",
+              "minLength": 1,
+              "maxLength": 255
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "filename"
+          ]
+        },
+        "schemaDigest": "sha256:d79e8f323bce3e6eeea41418cd9d1b0cc00bca34b27618f56341529b0fb02e79",
+        "scopes": [
+          "notion:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "require_approval"
+      },
+      {
+        "name": "notion.notion-create-attachment",
+        "description": "올린 파일을 페이지에 첨부합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "filename": {
+              "type": "string",
+              "description": "The filename to create in Notion, including a supported extension such as .html, .md, .pdf, or .png. Required with content and source_url. Omit it with source_file_id; the stored upload already carries a filename.",
+              "minLength": 1
+            },
+            "content_type": {
+              "type": "string",
+              "description": "Optional MIME type, such as text/html or application/pdf. It must match the filename extension; omit it to infer the type from the filename. Omit it with source_file_id; the stored upload already carries a content type.",
+              "minLength": 1,
+              "maxLength": 255
+            },
+            "content": {
+              "type": "string",
+              "description": "The complete UTF-8 text content of the file. Maximum 200 KiB after UTF-8 encoding. Requires filename. Examples: <example><!doctype html><html><body><h1>Report</h1></body></html></example> or <example># Notes\n\nHello</example>.",
+              "maxLength": 204800
+            },
+            "source_url": {
+              "type": "string",
+              "description": "A direct, publicly reachable HTTPS URL from which Notion can download the file within one minute. Notion makes a metadata-only HEAD request when supported, then a GET. Redirects, private network addresses, custom request headers, and cookies are not supported. Downloads are limited to 5 MiB for free",
+              "minLength": 1,
+              "maxLength": 8192
+            },
+            "source_file_id": {
+              "type": "string",
+              "description": "The ID of a file upload this exact integration already created. Use create_file_upload when available; otherwise run `ntn files create` or use the Notion File Upload API with this integration's token. Its status must be uploaded. An upload created with a different token is not visible. Example: <exa",
+              "minLength": 1,
+              "maxLength": 36
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:2746d5d9a931b55b9e192b3fe96ad667127b0649b62cb5bfdb9243c75ae25354",
+        "scopes": [
+          "notion:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "require_approval"
+      },
+      {
+        "name": "notion.notion-create-comment",
+        "description": "페이지에 댓글을 남깁니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "page_id": {
+              "type": "string",
+              "description": "The ID of the page to comment on (with or without dashes)."
+            },
+            "reply_to_comment_id": {
+              "type": "string",
+              "description": "The ID of the comment to reply to."
+            },
+            "discussion_id": {
+              "type": "string",
+              "description": "The ID or URL of an existing discussion to reply to (e.g., discussion://pageId/blockId/discussionId)."
+            },
+            "selection_with_ellipsis": {
+              "type": "string",
+              "description": "Unique content snippet: ~10 characters from each end, joined by \"...\". A match within one block's text gets an inline comment on that text; otherwise, comment on the block where the match starts. No match returns an error."
+            },
+            "markdown": {
+              "type": "string",
+              "description": "The content of the comment as a Markdown string. Provide exactly one of markdown or rich_text. For exact syntax, read the MCP resource `notion://docs/enhanced-markdown-spec` through your MCP client's resource-reading interface, or call the Notion \"fetch\" tool with this URI if your client does not su"
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "page_id"
+          ]
+        },
+        "schemaDigest": "sha256:a5539b36b52bd38ea426fd5b28dd83467ae6a71ddbfc38ae6d2a7e1011af9960",
+        "scopes": [
+          "notion:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
+      },
+      {
+        "name": "notion.notion-update-comment",
+        "description": "내가 쓴 댓글을 고칩니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "comment_id": {
+              "type": "string",
+              "description": "The comment ID, with or without dashes. Use the id of a <comment> from get_comments, or the id returned by create_comment."
+            },
+            "markdown": {
+              "type": "string",
+              "description": "The full replacement text for the comment, as inline Markdown. It replaces the whole comment, so include any text you want to keep. Use the same inline syntax as create_comment. Lists, headings, and other block-level Markdown are not supported in comments."
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "comment_id",
+            "markdown"
+          ]
+        },
+        "schemaDigest": "sha256:9a19a7aabe5c7783a57eaea84c5322d1558d2046f3357a1d3e09ae8025eb3bee",
+        "scopes": [
+          "notion:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
+      },
+      {
+        "name": "notion.notion-set-discussion-resolved",
+        "description": "토론을 해결됨으로 표시하거나 되돌립니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "discussion_id": {
+              "type": "string",
+              "description": "The discussion ID or URL, such as the id of a <discussion> from get_comments (discussion://pageId/blockId/discussionId) or the discussion_id returned by create_comment."
+            },
+            "resolved": {
+              "type": "boolean",
+              "description": "True to resolve the discussion, false to reopen it."
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "discussion_id",
+            "resolved"
+          ]
+        },
+        "schemaDigest": "sha256:b1afb87c0ed9f40cbe410719d5f94cecdd59b8c85e7d3d710537478112598f03",
+        "scopes": [
+          "notion:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
+      },
+      {
+        "name": "notion.notion-set-comment-reaction",
+        "description": "댓글에 반응을 남기거나 지웁니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "comment_id": {
+              "type": "string",
+              "description": "The comment ID, with or without dashes. Use the id of a <comment> from get_comments, or the id returned by create_comment."
+            },
+            "emoji": {
+              "type": "string",
+              "description": "One standard Unicode emoji."
+            },
+            "reacted": {
+              "type": "boolean",
+              "description": "True to add the reaction, false to remove it."
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "comment_id",
+            "emoji",
+            "reacted"
+          ]
+        },
+        "schemaDigest": "sha256:d68f843bcdb0a0015888f8a2cb48957e594308c71518087a8e7977b8e706dc9d",
+        "scopes": [
+          "notion:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
+      },
+      {
+        "name": "notion.notion-calendar-create-events",
+        "description": "Notion 캘린더에 일정을 만듭니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "timeZone": {
+              "type": "string",
+              "description": "Date-times of returned events will be expressed in this time-zone"
+            },
+            "events": {
+              "type": "array",
+              "description": "Events to create.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "summary": {
+                    "type": "string",
+                    "description": "Title of the event.",
+                    "minLength": 1
+                  },
+                  "description": {
+                    "type": "string",
+                    "description": "Description of the event."
+                  },
+                  "location": {
+                    "type": "string",
+                    "description": "Physical location where the event takes place, or remote conference link/info."
+                  },
+                  "recurrenceRules": {
+                    "type": "array",
+                    "description": "Recurrence rules in RRULE format (e.g., ['RRULE:FREQ=WEEKLY;COUNT=10']). Can also include EXDATE for exception dates (e.g., ['RRULE:FREQ=WEEKLY;COUNT=10', 'EXDATE:2026-03-24T13:00:00']).",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "period": {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "description": "Whether the event period uses all-day dates or date-times.",
+                        "enum": [
+                          "DATE"
+                        ]
+                      },
+                      "start": {
+                        "type": "object",
+                        "properties": {
+                          "date": {
+                            "type": "string",
+                            "description": "Date in ISO 8601 format (no time)"
+                          }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                          "date"
+                        ]
+                      },
+                      "end": {
+                        "type": "object",
+                        "properties": {
+                          "date": {
+                            "type": "string",
+                            "description": "Date in ISO 8601 format (no time)"
+                          }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                          "date"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                      "type",
+                      "start",
+                      "end"
+                    ]
+                  },
+                  "attendees": {
+                    "type": "array",
+                    "description": "Attendees to invite to the event",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "email": {
+                          "type": "string",
+                          "description": "Email address of the attendee."
+                        },
+                        "displayName": {
+                          "type": "string",
+                          "description": "Totally optional, provide only if you are sure of the attendee's name"
+                        },
+                        "isOptional": {
+                          "type": "boolean",
+                          "description": "Set only if the user was explicit about an attendee not being required"
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "email"
+                      ]
+                    }
+                  },
+                  "resources": {
+                    "type": "array",
+                    "description": "Resources (such as rooms) to invite to the event. Must be from the same account as `event.calendar`.",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "email": {
+                          "type": "string",
+                          "description": "Email address of the resource."
+                        },
+                        "displayName": {
+                          "type": "string",
+                          "description": "Display name of the resource."
+                        },
+                        "isOptional": {
+                          "type": "boolean",
+                          "description": "Set only if the user was explicit about a resource not being required"
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "isOptional"
+                      ]
+                    }
+                  },
+                  "calendar": {
+                    "type": "object",
+                    "properties": {
+                      "accountId": {
+                        "type": "string",
+                        "description": "Account that owns the target calendar."
+                      },
+                      "calendarId": {
+                        "type": "string",
+                        "description": "Target calendar identifier within the account."
+                      }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                      "accountId",
+                      "calendarId"
+                    ]
+                  },
+                  "disableConferencing": {
+                    "type": "boolean",
+                    "description": "Whether to disable conferencing for this event."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "summary",
+                  "period"
+                ]
+              }
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "timeZone",
+            "events"
+          ]
+        },
+        "schemaDigest": "sha256:1800f8223fc8fe46f443d2c48afa6e518b513bfb2f3bc5fd138faefda8b1bb0a",
+        "scopes": [
+          "notion:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
+      },
+      {
+        "name": "notion.notion-calendar-update-events",
+        "description": "Notion 캘린더의 일정을 고칩니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "timeZone": {
+              "type": "string",
+              "description": "Date-times of returned events will be expressed in this time-zone"
+            },
+            "updates": {
+              "type": "array",
+              "description": "Event updates to apply.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "updateType": {
+                    "type": "string",
+                    "description": "Must be set to the exact string \"RSVP\" in upper case.",
+                    "enum": [
+                      "RSVP"
+                    ]
+                  },
+                  "event": {
+                    "type": "object",
+                    "properties": {
+                      "calendar": {
+                        "type": "object",
+                        "properties": {
+                          "accountId": {
+                            "type": "string",
+                            "description": "Account that owns the event calendar."
+                          },
+                          "calendarId": {
+                            "type": "string",
+                            "description": "Event calendar identifier within the account."
+                          }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                          "accountId",
+                          "calendarId"
+                        ]
+                      },
+                      "eventId": {
+                        "type": "string",
+                        "description": "Identifier of the event to update."
+                      },
+                      "eventSummary": {
+                        "type": "string",
+                        "description": "Optional summary of the event, used by agent UI."
+                      }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                      "calendar",
+                      "eventId"
+                    ]
+                  },
+                  "rsvp": {
+                    "type": "object",
+                    "properties": {
+                      "responseStatus": {
+                        "type": "string",
+                        "description": "The calendar user's RSVP status",
+                        "enum": [
+                          "needsAction",
+                          "accepted",
+                          "declined",
+                          "tentative"
+                        ]
+                      },
+                      "comment": {
+                        "type": "string",
+                        "description": "Optional comment accompanying the RSVP."
+                      }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                      "responseStatus"
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "updateType",
+                  "event",
+                  "rsvp"
+                ]
+              }
+            },
+            "instructions_version": {
+              "type": "string",
+              "description": "Notion setup instructions version, such as 0.0.2. Omit if unknown."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "timeZone",
+            "updates"
+          ]
+        },
+        "schemaDigest": "sha256:4c98b2bdb20efb7b4927396c314a9d7a6a048047f48804c95e78bd58cfd6bd09",
+        "scopes": [
+          "notion:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
+      }
+    ]
   },
-  "skill": { "reference": null, "optional": true },
+  "skill": {
+    "reference": null,
+    "optional": true
+  },
   "momo": {
-    "approvalTier": { "notion.search": "read_only" },
-    "risk": "low",
-    "egressDomains": ["mcp.notion.com"],
-    "recommendedFor": ["knowledge-management", "documentation"],
+    "approvalTier": {
+      "notion.notion-search": "read_only",
+      "notion.notion-memory-search": "read_only",
+      "notion.notion-fetch": "read_only",
+      "notion.notion-get-comments": "read_only",
+      "notion.notion-get-teams": "read_only",
+      "notion.notion-get-groups": "read_only",
+      "notion.notion-get-users": "read_only",
+      "notion.notion-get-self": "read_only",
+      "notion.notion-get-async-task": "read_only",
+      "notion.notion-get-file-download-urls": "read_only",
+      "notion.notion-download-attachment": "read_only",
+      "notion.notion-query-data-sources": "read_only",
+      "notion.notion-query-multiple-data-sources": "read_only",
+      "notion.notion-query-meeting-notes": "read_only",
+      "notion.notion-list-private-pages": "read_only",
+      "notion.notion-list-shared-pages": "read_only",
+      "notion.notion-list-favorite-pages": "read_only",
+      "notion.notion-list-recent-pages": "read_only",
+      "notion.notion-list-page-backlinks": "read_only",
+      "notion.notion-calendar-list-calendars": "read_only",
+      "notion.notion-calendar-list-events": "read_only",
+      "notion.notion-calendar-list-coworkers-events": "read_only",
+      "notion.notion-calendar-list-calendar-resources": "read_only",
+      "notion.notion-calendar-list-contacts": "read_only",
+      "notion.notion-create-pages": "network_write",
+      "notion.notion-create-database": "network_write",
+      "notion.notion-duplicate-page": "network_write",
+      "notion.notion-create-view": "network_write",
+      "notion.notion-update-view": "network_write",
+      "notion.notion-create-folder": "network_write",
+      "notion.notion-create-file-upload": "network_write",
+      "notion.notion-create-attachment": "network_write",
+      "notion.notion-create-comment": "network_write",
+      "notion.notion-update-comment": "network_write",
+      "notion.notion-set-discussion-resolved": "network_write",
+      "notion.notion-set-comment-reaction": "network_write",
+      "notion.notion-calendar-create-events": "network_write",
+      "notion.notion-calendar-update-events": "network_write"
+    },
+    "risk": "medium",
+    "egressDomains": [
+      "mcp.notion.com"
+    ],
+    "recommendedFor": [
+      "knowledge-management",
+      "documentation"
+    ],
     "serverPolicy": {
       "installAllowed": true,
       "enabledByDefault": false,
-      "allowedRoles": ["owner", "admin"]
+      "allowedRoles": [
+        "owner",
+        "admin"
+      ]
     }
   }
 }

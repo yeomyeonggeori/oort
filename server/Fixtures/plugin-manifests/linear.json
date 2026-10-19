@@ -3,10 +3,17 @@
   "plugin": {
     "id": "com.momo.plugins.linear",
     "name": "Linear",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "Official Linear hosted MCP integration",
-    "publisher": { "id": "linear", "name": "Linear", "verified": true },
-    "license": { "spdx": "LicenseRef-Linear-Hosted-Service", "kind": "hosted_only" },
+    "publisher": {
+      "id": "linear",
+      "name": "Linear",
+      "verified": true
+    },
+    "license": {
+      "spdx": "LicenseRef-Linear-Hosted-Service",
+      "kind": "hosted_only"
+    },
     "provenance": {
       "sourceURL": "https://linear.app/docs/mcp",
       "releaseRef": "hosted",
@@ -17,27 +24,2346 @@
     "protocolVersion": "2025-06-18",
     "transport": "streamable_http",
     "url": "https://mcp.linear.app/mcp",
-    "server": { "name": "linear-hosted-mcp", "version": "hosted" },
-    "tools": [{
-      "name": "linear.list_issues",
-      "description": "권한을 위임한 사용자가 접근할 수 있는 이슈 목록을 조회합니다.",
-      "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
-      "schemaDigest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
-      "scopes": ["linear:read"],
-      "risk": "read",
-      "approvalPolicy": "none"
-    }]
+    "server": {
+      "name": "linear-hosted-mcp",
+      "version": "hosted"
+    },
+    "tools": [
+      {
+        "name": "linear.get_attachment",
+        "description": "이슈 첨부 하나를 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Issue attachment ID from get_issue's attachments array (attachments[].id)"
+            },
+            "format": {
+              "type": "string",
+              "description": "Omit or use content to fetch a Linear-hosted file. Use url for attachment metadata without fetching the file; also supports external links",
+              "enum": [
+                "content",
+                "url"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id"
+          ]
+        },
+        "schemaDigest": "sha256:51d2aa1a6c0f89d29e26876584b62da3d7eb3e0cbe1118ebbac3fa42ff5eb342",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.list_comments",
+        "description": "이슈의 댓글 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "number",
+              "description": "Maximum number of results to return per page",
+              "maximum": 250
+            },
+            "cursor": {
+              "type": "string",
+              "description": "Omit for the first page. To continue, pass the previous response's cursor when hasNextPage is true"
+            },
+            "orderBy": {
+              "type": "string",
+              "description": "Timestamp to sort results by: creation time or last update time",
+              "enum": [
+                "createdAt",
+                "updatedAt"
+              ]
+            },
+            "issueId": {
+              "type": "string",
+              "description": "Issue ID or identifier (e.g., LIN-123). P-prefixed identifiers (e.g., P-ENG-123) are projects, not issues (provide exactly one parent)"
+            },
+            "projectId": {
+              "type": "string",
+              "description": "Project name, ID, identifier (e.g., P-ENG-123), or slug (provide exactly one parent)"
+            },
+            "initiativeId": {
+              "type": "string",
+              "description": "Initiative name, ID, identifier (e.g., I-123), or slug (provide exactly one parent)"
+            },
+            "documentId": {
+              "type": "string",
+              "description": "Document ID or slug (provide exactly one parent)"
+            },
+            "milestoneId": {
+              "type": "string",
+              "description": "Milestone UUID (provide exactly one parent). Resolve milestone names via `list_milestones` first."
+            },
+            "statusUpdateId": {
+              "type": "string",
+              "description": "Status update UUID (provide exactly one parent). Resolve status updates via `get_status_updates` first."
+            },
+            "statusUpdateType": {
+              "type": "string",
+              "description": "Type of status update named by `statusUpdateId`, as returned by `get_status_updates`. Only valid together with `statusUpdateId`; omit to check both project and initiative status updates.",
+              "enum": [
+                "project",
+                "initiative"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:ca979b38500a2bedb69cce00af0c88636fbb71e59a58403853a57a0a2d6e5d3e",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.list_cycles",
+        "description": "팀의 사이클 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "teamId": {
+              "type": "string",
+              "description": "Team UUID from list_teams or get_team; names and keys are not accepted"
+            },
+            "type": {
+              "type": "string",
+              "description": "Filter relative to the team's current cycle. Omit to return cycles without this filter",
+              "enum": [
+                "current",
+                "previous",
+                "next"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "teamId"
+          ]
+        },
+        "schemaDigest": "sha256:af3b1d1db662cca1620a428a53e99939fcc9a61ca37dfffa061c195cba26d1a1",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.list_custom_views",
+        "description": "사용자 지정 보기 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "number",
+              "description": "Maximum number of results to return per page",
+              "maximum": 250
+            },
+            "cursor": {
+              "type": "string",
+              "description": "Omit for the first page. To continue, pass the previous response's cursor when hasNextPage is true"
+            },
+            "orderBy": {
+              "type": "string",
+              "description": "Timestamp to sort results by: creation time or last update time",
+              "enum": [
+                "createdAt",
+                "updatedAt"
+              ]
+            },
+            "query": {
+              "type": "string",
+              "description": "Search custom view names"
+            },
+            "type": {
+              "type": "string",
+              "description": "Entity type displayed by the view",
+              "enum": [
+                "Issue",
+                "Project",
+                "Initiative"
+              ]
+            },
+            "team": {
+              "type": "string",
+              "description": "Team name or ID"
+            },
+            "shared": {
+              "type": "boolean",
+              "description": "True for shared views, false for personal views"
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:9badae3b339c84b9c2f1a03d4b84c6dd8ab0a5f6f0d988683e71b3229c4ecc77",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.get_document",
+        "description": "문서 하나를 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Document ID or slug"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id"
+          ]
+        },
+        "schemaDigest": "sha256:4f9020a06a7e96e84301dd37a0b4915a9aa878cf499d28433c6926aedbb38c05",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.list_documents",
+        "description": "문서 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "number",
+              "description": "Maximum number of results to return per page",
+              "maximum": 250
+            },
+            "cursor": {
+              "type": "string",
+              "description": "Omit for the first page. To continue, pass the previous response's cursor when hasNextPage is true"
+            },
+            "orderBy": {
+              "type": "string",
+              "description": "Timestamp to sort results by: creation time or last update time",
+              "enum": [
+                "createdAt",
+                "updatedAt"
+              ]
+            },
+            "query": {
+              "type": "string",
+              "description": "Search query"
+            },
+            "projectId": {
+              "type": "string",
+              "description": "Filter by project ID, identifier (e.g., 'P-ENG-123'), or slug"
+            },
+            "initiativeId": {
+              "type": "string",
+              "description": "Filter by initiative ID, identifier (e.g., 'I-123'), or slug"
+            },
+            "teamId": {
+              "type": "string",
+              "description": "Filter by team ID"
+            },
+            "creatorId": {
+              "type": "string",
+              "description": "Filter by creator ID"
+            },
+            "createdAt": {
+              "type": "string",
+              "description": "Created after: ISO-8601 date/duration (e.g., -P1D)"
+            },
+            "updatedAt": {
+              "type": "string",
+              "description": "Updated after: ISO-8601 date/duration (e.g., -P1D)"
+            },
+            "includeArchived": {
+              "type": "boolean",
+              "description": "Include archived items"
+            },
+            "fields": {
+              "type": "array",
+              "description": "Fields to include in each result. Explicitly requested fields with no value return null. `id` is always included. Omit or pass an empty array for the default response.",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "id",
+                  "title",
+                  "content",
+                  "url",
+                  "createdAt",
+                  "updatedAt",
+                  "archivedAt",
+                  "creator",
+                  "updatedBy",
+                  "project",
+                  "initiative",
+                  "team",
+                  "issue"
+                ]
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:76a753185aac37e5b0a39c1a2d5441ec8cf2d2174ea7dc752a1200de22eb8f44",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.extract_images",
+        "description": "마크다운에서 이미지를 추출해 보여줍니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "markdown": {
+              "type": "string",
+              "description": "Markdown content containing image references (e.g., issue description, comment body)"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "markdown"
+          ]
+        },
+        "schemaDigest": "sha256:2f78fc50c1b294e9cdcb5c3978a57554cfd33272a4dbe298bc7917cfff7a8c8a",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.get_issue",
+        "description": "이슈 하나를 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Issue ID or identifier (e.g., LIN-123). P-prefixed identifiers (e.g., P-ENG-123) are projects, not issues"
+            },
+            "fields": {
+              "type": "array",
+              "description": "Fields to include in each result. Explicitly requested fields with no value return null. `id` is always included. Omit or pass an empty array for the default response.",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "id",
+                  "uuid",
+                  "title",
+                  "description",
+                  "projectMilestone",
+                  "priority",
+                  "estimate",
+                  "url",
+                  "gitBranchName",
+                  "createdAt",
+                  "updatedAt",
+                  "archivedAt",
+                  "completedAt",
+                  "startedAt",
+                  "canceledAt",
+                  "startedTriageAt",
+                  "triagedAt",
+                  "dueDate",
+                  "slaStartedAt",
+                  "slaMediumRiskAt",
+                  "slaHighRiskAt",
+                  "slaBreachesAt",
+                  "slaType",
+                  "status",
+                  "statusType",
+                  "labels",
+                  "triageIntel",
+                  "createdBy",
+                  "createdById",
+                  "assignee",
+                  "assigneeId",
+                  "delegate",
+                  "delegateId",
+                  "project",
+                  "projectId",
+                  "parentId",
+                  "team",
+                  "teamId",
+                  "cycleId",
+                  "attachments",
+                  "documents",
+                  "stateHistory",
+                  "relations",
+                  "customerNeeds",
+                  "releases"
+                ]
+              }
+            },
+            "includeRelations": {
+              "type": "boolean",
+              "description": "Include blocking/related/duplicate relations"
+            },
+            "includeCustomerNeeds": {
+              "type": "boolean",
+              "description": "Include associated customer needs"
+            },
+            "includeReleases": {
+              "type": "boolean",
+              "description": "Include associated releases"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id"
+          ]
+        },
+        "schemaDigest": "sha256:204618cb73e84c71a76dead2483fb88cef440f35fd14a4af1656d05d0208a064",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.list_issues",
+        "description": "권한을 위임한 사용자가 접근할 수 있는 이슈 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "number",
+              "description": "Maximum number of results to return per page",
+              "maximum": 250
+            },
+            "cursor": {
+              "type": "string",
+              "description": "Omit for the first page. To continue, pass the previous response's cursor when hasNextPage is true"
+            },
+            "orderBy": {
+              "type": "string",
+              "description": "Timestamp to sort results by: creation time or last update time",
+              "enum": [
+                "createdAt",
+                "updatedAt"
+              ]
+            },
+            "query": {
+              "type": "string",
+              "description": "Search issue title or description. Cannot be combined with customView"
+            },
+            "customView": {
+              "type": "string",
+              "description": "Saved view ID, URL, slug, or exact name. Use list_custom_views to discover views. Applies saved filters and scope; other filters narrow the results. Uses list ordering, not saved display settings",
+              "minLength": 1
+            },
+            "team": {
+              "type": "string",
+              "description": "Team name or ID"
+            },
+            "includeSubTeams": {
+              "type": "boolean",
+              "description": "Include results from the selected team and all descendants when team is set. Team ID filters already include descendants; this also expands name and key filters"
+            },
+            "state": {
+              "type": "string",
+              "description": "State type, name, or ID"
+            },
+            "cycle": {
+              "type": "string",
+              "description": "Cycle name, number, or ID"
+            },
+            "label": {
+              "type": "string",
+              "description": "Label name or ID"
+            },
+            "assignee": {
+              "type": "string",
+              "description": "User ID, name, email, or \"me\""
+            },
+            "creator": {
+              "type": "string",
+              "description": "User ID, name, email, or \"me\""
+            },
+            "delegate": {
+              "type": "string",
+              "description": "Agent name or ID. When the user asks to delegate to \"Linear\" or \"the Linear agent\", this refers to the \"Linear\" app user specifically"
+            },
+            "project": {
+              "type": "string",
+              "description": "Project name, ID, identifier (e.g., P-ENG-123), or slug"
+            },
+            "release": {
+              "type": "string",
+              "description": "Release ID or slug"
+            },
+            "priority": {
+              "type": "number",
+              "description": "0=None, 1=Urgent, 2=High, 3=Medium, 4=Low"
+            },
+            "parentId": {
+              "type": "string",
+              "description": "Parent issue ID or identifier (e.g., LIN-123)"
+            },
+            "fields": {
+              "type": "array",
+              "description": "Fields to include in each result. Explicitly requested fields with no value return null. `id` is always included. Omit or pass an empty array for the default response.",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "id",
+                  "uuid",
+                  "title",
+                  "description",
+                  "projectMilestone",
+                  "priority",
+                  "estimate",
+                  "url",
+                  "gitBranchName",
+                  "createdAt",
+                  "updatedAt",
+                  "archivedAt",
+                  "completedAt",
+                  "startedAt",
+                  "canceledAt",
+                  "startedTriageAt",
+                  "triagedAt",
+                  "dueDate",
+                  "slaStartedAt",
+                  "slaMediumRiskAt",
+                  "slaHighRiskAt",
+                  "slaBreachesAt",
+                  "slaType",
+                  "status",
+                  "statusType",
+                  "labels",
+                  "triageIntel",
+                  "createdBy",
+                  "createdById",
+                  "assignee",
+                  "assigneeId",
+                  "delegate",
+                  "delegateId",
+                  "project",
+                  "projectId",
+                  "parentId",
+                  "team",
+                  "teamId",
+                  "cycleId"
+                ]
+              }
+            },
+            "createdAt": {
+              "type": "string",
+              "description": "Created after: ISO-8601 date/duration (e.g., -P1D)"
+            },
+            "updatedAt": {
+              "type": "string",
+              "description": "Updated after: ISO-8601 date/duration (e.g., -P1D)"
+            },
+            "triagedAt": {
+              "type": "string",
+              "description": "Left triage after: ISO-8601 date/duration (e.g., -P1D). Issues still in triage have no triagedAt; list them with state \"triage\""
+            },
+            "includeArchived": {
+              "type": "boolean",
+              "description": "Include archived items"
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:0a0b5943af7bf179341ab9c985aca28e553e2a141706770f79985c5b41f8c896",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.list_issue_statuses",
+        "description": "팀의 이슈 상태 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "team": {
+              "type": "string",
+              "description": "Team name or ID"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "team"
+          ]
+        },
+        "schemaDigest": "sha256:0fe2e50f3badde0a16df5426f3c9b6341614b1a694ffd09e073b2ef2d2df4aa3",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.get_issue_status",
+        "description": "이슈 상태 하나를 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Status ID"
+            },
+            "name": {
+              "type": "string",
+              "description": "Status name"
+            },
+            "team": {
+              "type": "string",
+              "description": "Team name or ID"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "name",
+            "team"
+          ]
+        },
+        "schemaDigest": "sha256:a004fa0c309cb3f9b26f393236d787dbb6a11c85afc335ca6edb429ebe017231",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.list_issue_labels",
+        "description": "이슈 라벨 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "number",
+              "description": "Maximum number of results to return per page",
+              "maximum": 250
+            },
+            "cursor": {
+              "type": "string",
+              "description": "Omit for the first page. To continue, pass the previous response's cursor when hasNextPage is true"
+            },
+            "orderBy": {
+              "type": "string",
+              "description": "Timestamp to sort results by: creation time or last update time",
+              "enum": [
+                "createdAt",
+                "updatedAt"
+              ]
+            },
+            "name": {
+              "type": "string",
+              "description": "Filter by name"
+            },
+            "team": {
+              "type": "string",
+              "description": "Team name or ID"
+            },
+            "includeArchived": {
+              "type": "boolean",
+              "description": "Include archived items"
+            },
+            "includeGroups": {
+              "type": "boolean",
+              "description": "Include label groups in the results, marked with `isGroup`. A group cannot be applied directly; retiring or restoring one cascades to its child labels"
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:be73df1187e371b957d964ef80b1e2f8a34d7742dbec3c60b2571f461ec68045",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.list_projects",
+        "description": "프로젝트 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "number",
+              "description": "Max results (default 50, max 50)",
+              "maximum": 50
+            },
+            "cursor": {
+              "type": "string",
+              "description": "Omit for the first page. To continue, pass the previous response's cursor when hasNextPage is true"
+            },
+            "orderBy": {
+              "type": "string",
+              "description": "Timestamp to sort results by: creation time or last update time",
+              "enum": [
+                "createdAt",
+                "updatedAt"
+              ]
+            },
+            "customView": {
+              "type": "string",
+              "description": "Saved view ID, URL, slug, or exact name. Use list_custom_views to discover views. Applies saved filters and scope; other filters narrow the results. Uses list ordering, not saved display settings",
+              "minLength": 1
+            },
+            "query": {
+              "type": "string",
+              "description": "Search project name"
+            },
+            "state": {
+              "type": "string",
+              "description": "State type, name, or ID"
+            },
+            "initiative": {
+              "type": "string",
+              "description": "Initiative name, ID, identifier (e.g., I-123), or slug"
+            },
+            "team": {
+              "type": "string",
+              "description": "Team name or ID"
+            },
+            "includeSubTeams": {
+              "type": "boolean",
+              "description": "Include results from the selected team and all descendants when team is set. Team ID filters already include descendants; this also expands name and key filters"
+            },
+            "member": {
+              "type": "string",
+              "description": "User ID, name, email, or \"me\""
+            },
+            "label": {
+              "type": "string",
+              "description": "Label name or ID"
+            },
+            "createdAt": {
+              "type": "string",
+              "description": "Created after: ISO-8601 date/duration (e.g., -P1D)"
+            },
+            "updatedAt": {
+              "type": "string",
+              "description": "Updated after: ISO-8601 date/duration (e.g., -P1D)"
+            },
+            "includeMilestones": {
+              "type": "boolean",
+              "description": "Include milestones"
+            },
+            "includeMembers": {
+              "type": "boolean",
+              "description": "Include project members"
+            },
+            "includeArchived": {
+              "type": "boolean",
+              "description": "Include archived items"
+            },
+            "fields": {
+              "type": "array",
+              "description": "Fields to include in each result. Explicitly requested fields with no value return null. `id` is always included. Omit or pass an empty array for the default response.",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "id",
+                  "uuid",
+                  "name",
+                  "summary",
+                  "description",
+                  "url",
+                  "trashed",
+                  "createdAt",
+                  "updatedAt",
+                  "startedAt",
+                  "completedAt",
+                  "canceledAt",
+                  "startDate",
+                  "startDateResolution",
+                  "targetDate",
+                  "targetDateResolution",
+                  "priority",
+                  "sortOrder",
+                  "labels",
+                  "initiatives",
+                  "lead",
+                  "leadTeam",
+                  "status",
+                  "teams",
+                  "members",
+                  "milestones"
+                ]
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:30ffd3a21db3b8ba83edf263f1e0457d9046f2628651283a905c26f039321be2",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.get_project",
+        "description": "프로젝트 하나를 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Project name, ID, identifier (e.g., P-ENG-123), or slug"
+            },
+            "includeCustomerNeeds": {
+              "type": "boolean",
+              "description": "Include one page of customer needs attached directly to the project"
+            },
+            "customerNeedsLimit": {
+              "type": "integer",
+              "description": "Customer needs per page when includeCustomerNeeds is true (default 10, max 50)",
+              "minimum": 1,
+              "maximum": 50
+            },
+            "customerNeedsCursor": {
+              "type": "string",
+              "description": "Next customer-needs page: pass customerNeedsPageInfo.endCursor with includeCustomerNeeds true"
+            },
+            "includeMilestones": {
+              "type": "boolean",
+              "description": "Include milestones"
+            },
+            "includeMembers": {
+              "type": "boolean",
+              "description": "Include project members"
+            },
+            "includeResources": {
+              "type": "boolean",
+              "description": "Include resources (documents, links, attachments)"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "query"
+          ]
+        },
+        "schemaDigest": "sha256:93d26ac5d3d713140cba47183703052b62106be1bf42703709b9e3ba116f0c4b",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.list_project_labels",
+        "description": "프로젝트 라벨 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "number",
+              "description": "Maximum number of results to return per page",
+              "maximum": 250
+            },
+            "cursor": {
+              "type": "string",
+              "description": "Omit for the first page. To continue, pass the previous response's cursor when hasNextPage is true"
+            },
+            "orderBy": {
+              "type": "string",
+              "description": "Timestamp to sort results by: creation time or last update time",
+              "enum": [
+                "createdAt",
+                "updatedAt"
+              ]
+            },
+            "name": {
+              "type": "string",
+              "description": "Filter by name"
+            },
+            "team": {
+              "type": "string",
+              "description": "Team name or ID"
+            },
+            "includeArchived": {
+              "type": "boolean",
+              "description": "Include archived items"
+            },
+            "includeGroups": {
+              "type": "boolean",
+              "description": "Include label groups in the results, marked with `isGroup`. A group cannot be applied directly; retiring or restoring one cascades to its child labels"
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:5cc644e1e1239bda0c7d1a0437b14f3442cf88e7f859aa26271acca64f040907",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.list_releases",
+        "description": "릴리스 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "number",
+              "description": "Maximum number of results to return per page",
+              "maximum": 250
+            },
+            "cursor": {
+              "type": "string",
+              "description": "Omit for the first page. To continue, pass the previous response's cursor when hasNextPage is true"
+            },
+            "orderBy": {
+              "type": "string",
+              "description": "Timestamp to sort results by: creation time or last update time",
+              "enum": [
+                "createdAt",
+                "updatedAt"
+              ]
+            },
+            "query": {
+              "type": "string",
+              "description": "Search release name or version"
+            },
+            "pipeline": {
+              "type": "string",
+              "description": "Release pipeline ID, slug, or exact name"
+            },
+            "stage": {
+              "type": "string",
+              "description": "Release stage ID or exact name"
+            },
+            "stageType": {
+              "type": "string",
+              "description": "Filter by stage lifecycle type",
+              "enum": [
+                "planned",
+                "started",
+                "completed",
+                "canceled"
+              ]
+            },
+            "version": {
+              "type": "string",
+              "description": "Exact version match"
+            },
+            "hasReleaseNotes": {
+              "type": "boolean",
+              "description": "Filter to releases that do (true) or do not (false) have release notes"
+            },
+            "includeReleaseNotes": {
+              "type": "boolean",
+              "description": "Include associated release notes"
+            },
+            "createdAt": {
+              "type": "string",
+              "description": "Created after: ISO-8601 date/duration (e.g., -P1D)"
+            },
+            "updatedAt": {
+              "type": "string",
+              "description": "Updated after: ISO-8601 date/duration (e.g., -P1D)"
+            },
+            "includeArchived": {
+              "type": "boolean",
+              "description": "Include archived items"
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:ba2aa7a20b80db2a01f8586bd3f12decce2c3c34a48347c9ccb0fdab0481dc25",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.get_release",
+        "description": "릴리스 하나를 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Release ID or slug"
+            },
+            "includeReleaseNotes": {
+              "type": "boolean",
+              "description": "Include associated release notes"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id"
+          ]
+        },
+        "schemaDigest": "sha256:f071839872d426c279903e116555a81f582a6a9107fe1e49ece538b534c09762",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.list_release_notes",
+        "description": "릴리스 노트 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "number",
+              "description": "Maximum number of results to return per page",
+              "maximum": 250
+            },
+            "cursor": {
+              "type": "string",
+              "description": "Omit for the first page. To continue, pass the previous response's cursor when hasNextPage is true"
+            },
+            "orderBy": {
+              "type": "string",
+              "description": "Timestamp to sort results by: creation time or last update time",
+              "enum": [
+                "createdAt",
+                "updatedAt"
+              ]
+            },
+            "query": {
+              "type": "string",
+              "description": "Search release notes title"
+            },
+            "pipeline": {
+              "type": "string",
+              "description": "Release pipeline ID, slug, or exact name"
+            },
+            "release": {
+              "type": "string",
+              "description": "Release ID or slug"
+            },
+            "includeContent": {
+              "type": "boolean",
+              "description": "Include markdown release notes content"
+            },
+            "includeReleases": {
+              "type": "boolean",
+              "description": "Include associated releases"
+            },
+            "createdAt": {
+              "type": "string",
+              "description": "Created after: ISO-8601 date/duration (e.g., -P1D)"
+            },
+            "updatedAt": {
+              "type": "string",
+              "description": "Updated after: ISO-8601 date/duration (e.g., -P1D)"
+            },
+            "includeArchived": {
+              "type": "boolean",
+              "description": "Include archived items"
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:79553d531cc32a3a13d3ab59266738cbe55727302063f9449f966a987492f851",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.get_release_note",
+        "description": "릴리스 노트 하나를 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Release notes ID or slug"
+            },
+            "includeReleases": {
+              "type": "boolean",
+              "description": "Include associated releases"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id"
+          ]
+        },
+        "schemaDigest": "sha256:a94961df82cca6731d24284a0b2a6576ffa5370a652425ac261fe33e3be3ebd5",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.list_release_pipelines",
+        "description": "릴리스 파이프라인 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "number",
+              "description": "Maximum number of results to return per page",
+              "maximum": 250
+            },
+            "cursor": {
+              "type": "string",
+              "description": "Omit for the first page. To continue, pass the previous response's cursor when hasNextPage is true"
+            },
+            "orderBy": {
+              "type": "string",
+              "description": "Timestamp to sort results by: creation time or last update time",
+              "enum": [
+                "createdAt",
+                "updatedAt"
+              ]
+            },
+            "query": {
+              "type": "string",
+              "description": "Search pipeline name"
+            },
+            "team": {
+              "type": "string",
+              "description": "Team name or ID"
+            },
+            "type": {
+              "type": "string",
+              "description": "Pipeline type: continuous | scheduled",
+              "enum": [
+                "continuous",
+                "scheduled"
+              ]
+            },
+            "isProduction": {
+              "type": "boolean",
+              "description": "Filter by production pipeline flag"
+            },
+            "includeStages": {
+              "type": "boolean",
+              "description": "Include each pipeline's stages"
+            },
+            "includeTeams": {
+              "type": "boolean",
+              "description": "Include each pipeline's teams"
+            },
+            "createdAt": {
+              "type": "string",
+              "description": "Created after: ISO-8601 date/duration (e.g., -P1D)"
+            },
+            "updatedAt": {
+              "type": "string",
+              "description": "Updated after: ISO-8601 date/duration (e.g., -P1D)"
+            },
+            "includeArchived": {
+              "type": "boolean",
+              "description": "Include archived items"
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:12de7a99d820446c54192192dadaba956f95091135aded557d7c4a172d4f4d05",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.list_milestones",
+        "description": "프로젝트 마일스톤 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "project": {
+              "type": "string",
+              "description": "Project name, ID, identifier (e.g., P-ENG-123), or slug"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "project"
+          ]
+        },
+        "schemaDigest": "sha256:96d340a7330d9a5b98aaa7956f1f385215b63e841c39834d3144bbc7ed1b8914",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.get_milestone",
+        "description": "마일스톤 하나를 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "project": {
+              "type": "string",
+              "description": "Project name, ID, identifier (e.g., P-ENG-123), or slug"
+            },
+            "query": {
+              "type": "string",
+              "description": "Milestone name or ID"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "project",
+            "query"
+          ]
+        },
+        "schemaDigest": "sha256:0e361b29840b930a2b00f507a511fbe6e923859f18177c14c36a72b29b1031e7",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.get_notifications",
+        "description": "내 알림 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "number",
+              "description": "Maximum number of results to return per page",
+              "maximum": 250
+            },
+            "cursor": {
+              "type": "string",
+              "description": "Omit for the first page. To continue, pass the previous response's cursor when hasNextPage is true"
+            },
+            "unreadOnly": {
+              "type": "boolean",
+              "description": "Only return unread notifications"
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:8425c8bba671e3dff04167cdd9fe85d096ec120a030a89dc85f565cd40e39f05",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.list_teams",
+        "description": "워크스페이스의 팀 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "number",
+              "description": "Maximum number of results to return per page",
+              "maximum": 250
+            },
+            "cursor": {
+              "type": "string",
+              "description": "Omit for the first page. To continue, pass the previous response's cursor when hasNextPage is true"
+            },
+            "orderBy": {
+              "type": "string",
+              "description": "Timestamp to sort results by: creation time or last update time",
+              "enum": [
+                "createdAt",
+                "updatedAt"
+              ]
+            },
+            "query": {
+              "type": "string",
+              "description": "Search query"
+            },
+            "parentTeam": {
+              "type": "string",
+              "description": "Only direct sub-teams of this team (name, key, or ID)"
+            },
+            "ancestorTeam": {
+              "type": "string",
+              "description": "All descendant teams of this team, at any depth, excluding itself (name, key, or ID)"
+            },
+            "includeArchived": {
+              "type": "boolean",
+              "description": "Include archived items"
+            },
+            "createdAt": {
+              "type": "string",
+              "description": "Created after: ISO-8601 date/duration (e.g., -P1D)"
+            },
+            "updatedAt": {
+              "type": "string",
+              "description": "Updated after: ISO-8601 date/duration (e.g., -P1D)"
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:db8672bb5ad0e5c1cd55986df6f9a70ea5cc35e611b05ba8a733d119aea4f0c7",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.get_team",
+        "description": "팀 하나를 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Team UUID, key, or name"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "query"
+          ]
+        },
+        "schemaDigest": "sha256:960225f4ee2a0ed499b67c7b37b31ba8555e64440655533cd668fd66953d169a",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.get_triage_responsibility",
+        "description": "팀의 분류 담당 설정을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "team": {
+              "type": "string",
+              "description": "Team name or ID"
+            },
+            "user": {
+              "type": "string",
+              "description": "Only return shifts of this user: User ID, name, email, or \"me\""
+            },
+            "limit": {
+              "type": "integer",
+              "description": "Max upcoming shifts to return (default 10, max 50)",
+              "minimum": 1,
+              "maximum": 50
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "team"
+          ]
+        },
+        "schemaDigest": "sha256:1ee360a242cc4c5621f4452210db1346fc4b08f993badfb5440de0c84ab7dce7",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.list_templates",
+        "description": "템플릿 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "description": "Filter by template type. Omit to return every type",
+              "enum": [
+                "issue",
+                "project",
+                "document"
+              ]
+            },
+            "team": {
+              "type": "string",
+              "description": "Team name or ID. Returns that team's templates plus workspace-level ones"
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:f6679dec102f4be78b3cf1664ef299f9e52a776e7c984c4dea427e9deb91f9bc",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.get_template",
+        "description": "템플릿 하나를 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Template ID or name"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id"
+          ]
+        },
+        "schemaDigest": "sha256:ccabd6a03774ae21c34452d3d401f9aba20c18b40b60721de68a38194d2843cf",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.list_users",
+        "description": "워크스페이스 사용자 목록을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "number",
+              "description": "Maximum number of results to return per page",
+              "maximum": 250
+            },
+            "cursor": {
+              "type": "string",
+              "description": "Omit for the first page. To continue, pass the previous response's cursor when hasNextPage is true"
+            },
+            "orderBy": {
+              "type": "string",
+              "description": "Timestamp to sort results by: creation time or last update time",
+              "enum": [
+                "createdAt",
+                "updatedAt"
+              ]
+            },
+            "query": {
+              "type": "string",
+              "description": "Match part of a name or email. Omit to list users without a name or email filter"
+            },
+            "team": {
+              "type": "string",
+              "description": "Team name or ID. Only return members of this team; omit to search the workspace"
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:3ce371fa20439789f90e398182f9bfcbbe0ec1f3b5ce05b4e04ac4ffbf82dcc4",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.get_user",
+        "description": "사용자 한 명을 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "User ID, name, email, or \"me\""
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "query"
+          ]
+        },
+        "schemaDigest": "sha256:9b54eb2190d9fdf22293603947728ddf1a5472db6a3c8f13a94366add428f042",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.get_workspace",
+        "description": "워크스페이스 정보를 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:cbf36726b236741099543a5afab98359c207bdc8192325564d38a60d61f67d00",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.search_documentation",
+        "description": "Linear 도움말 문서를 검색합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Feature name, topic, or question to search for in Linear's product documentation"
+            },
+            "page": {
+              "type": "number",
+              "description": "Zero-based page number. Increment by one to fetch the next page for the same query"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "query"
+          ]
+        },
+        "schemaDigest": "sha256:034a5fd74ac92e0d1e582bccb5a7b387f06d77ffd42f9e29ffdea54e01ee8f1c",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.get_status_updates",
+        "description": "프로젝트·이니셔티브 상태 업데이트를 조회합니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "number",
+              "description": "Maximum number of results to return per page",
+              "maximum": 250
+            },
+            "cursor": {
+              "type": "string",
+              "description": "Omit for the first page. To continue, pass the previous response's cursor when hasNextPage is true"
+            },
+            "orderBy": {
+              "type": "string",
+              "description": "Timestamp to sort results by: creation time or last update time",
+              "enum": [
+                "createdAt",
+                "updatedAt"
+              ]
+            },
+            "type": {
+              "type": "string",
+              "description": "Type of status update",
+              "enum": [
+                "project",
+                "initiative"
+              ]
+            },
+            "id": {
+              "type": "string",
+              "description": "Update ID from get_status_updates results (statusUpdates[].id) or save_status_update's id"
+            },
+            "project": {
+              "type": "string",
+              "description": "Project name, ID, identifier (e.g., P-ENG-123), or slug. Filters project updates only; omit to include all accessible projects"
+            },
+            "initiative": {
+              "type": "string",
+              "description": "Initiative name, ID, identifier (e.g., I-123), or slug. Filters initiative updates only; omit to include all accessible initiatives"
+            },
+            "user": {
+              "type": "string",
+              "description": "Filter by update author: User ID, name, email, or \"me\". Omit to include all authors"
+            },
+            "createdAt": {
+              "type": "string",
+              "description": "Created after: ISO-8601 date/duration (e.g., -P1D)"
+            },
+            "updatedAt": {
+              "type": "string",
+              "description": "Updated after: ISO-8601 date/duration (e.g., -P1D)"
+            },
+            "includeArchived": {
+              "type": "boolean",
+              "description": "Include archived items"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        "schemaDigest": "sha256:89504860804575fee0cc4f886aa6cca58e11c0b811fdf1f3211b4a2029a9b34a",
+        "scopes": [
+          "linear:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "linear.mark_notification",
+        "description": "내 알림을 읽음 처리하거나 되돌립니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Notification ID"
+            },
+            "read": {
+              "type": "boolean",
+              "description": "Whether the notification should be marked as read"
+            },
+            "snoozedUntilAt": {
+              "type": "string",
+              "description": "ISO-8601 time to snooze until, or null to unsnooze"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id"
+          ]
+        },
+        "schemaDigest": "sha256:6d6f9646b655d65023859db7afd59cac19acaf6a76e69bff7df5b5e70b65b76a",
+        "scopes": [
+          "linear:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "require_approval"
+      },
+      {
+        "name": "linear.save_comment",
+        "description": "이슈에 댓글을 만들거나 고칩니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Comment ID. If provided, updates the existing comment"
+            },
+            "issueId": {
+              "type": "string",
+              "description": "Issue ID or identifier (e.g., LIN-123). P-prefixed identifiers (e.g., P-ENG-123) are projects, not issues (provide exactly one parent)"
+            },
+            "projectId": {
+              "type": "string",
+              "description": "Project name, ID, identifier (e.g., P-ENG-123), or slug (provide exactly one parent)"
+            },
+            "initiativeId": {
+              "type": "string",
+              "description": "Initiative name, ID, identifier (e.g., I-123), or slug (provide exactly one parent)"
+            },
+            "documentId": {
+              "type": "string",
+              "description": "Document ID or slug (provide exactly one parent)"
+            },
+            "milestoneId": {
+              "type": "string",
+              "description": "Milestone UUID (provide exactly one parent). Resolve milestone names via `list_milestones` first."
+            },
+            "statusUpdateId": {
+              "type": "string",
+              "description": "Status update UUID (provide exactly one parent). Resolve status updates via `get_status_updates` first."
+            },
+            "statusUpdateType": {
+              "type": "string",
+              "description": "Type of status update named by `statusUpdateId`, as returned by `get_status_updates`. Only valid together with `statusUpdateId`; omit to check both project and initiative status updates.",
+              "enum": [
+                "project",
+                "initiative"
+              ]
+            },
+            "parentId": {
+              "type": "string",
+              "description": "Parent comment ID (for replies, only when creating)"
+            },
+            "body": {
+              "type": "string",
+              "description": "Content as Markdown. Do not escape the string — use literal newlines and special characters, not escape sequences. To mention a user, use @displayName (e.g., @johndoe)"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "body"
+          ]
+        },
+        "schemaDigest": "sha256:3746e07755fccacaa22c05e893e28be7688da58f67f4f3fe7e86069ae2a72b30",
+        "scopes": [
+          "linear:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
+      },
+      {
+        "name": "linear.save_issue",
+        "description": "이슈를 만들거나 고칩니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Only for updating an existing issue. Pass the issue ID or identifier (e.g., LIN-123). Do NOT pass this parameter when creating a new issue."
+            },
+            "title": {
+              "type": "string",
+              "description": "Issue title (required when creating, unless template is set)"
+            },
+            "description": {
+              "type": "string",
+              "description": "Content as Markdown. Do not escape the string — use literal newlines and special characters, not escape sequences. To mention a user, use @displayName (e.g., @johndoe)"
+            },
+            "patch": {
+              "type": "array",
+              "description": "Partial edits applied to the current content, in order and atomically (one failing operation aborts the whole save). Every anchor string must match the current content exactly once. Only valid on update, in place of the full content/description field",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "op": {
+                    "type": "string"
+                  },
+                  "old_string": {
+                    "type": "string",
+                    "description": "Exact text to replace. Must match the current content exactly once",
+                    "minLength": 1
+                  },
+                  "new_string": {
+                    "type": "string",
+                    "description": "Replacement text. Empty string deletes the match"
+                  },
+                  "replace_all": {
+                    "type": "boolean",
+                    "description": "Replace every occurrence instead of requiring a unique match"
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "op",
+                  "old_string",
+                  "new_string"
+                ]
+              }
+            },
+            "team": {
+              "type": "string",
+              "description": "Team name or ID (required when creating)"
+            },
+            "template": {
+              "type": "string",
+              "description": "Template name or ID. Applied on create only. The template fills in the content, fields, and sub-issues server-side. A `description` replaces the template body rather than merging with it, but an empty `description` keeps the template body. Labels merge with the template's own"
+            },
+            "cycle": {
+              "type": "string",
+              "description": "Cycle name, number, or ID. Null to remove"
+            },
+            "milestone": {
+              "type": "string",
+              "description": "Milestone name or ID"
+            },
+            "priority": {
+              "type": "number",
+              "description": "0=None, 1=Urgent, 2=High, 3=Medium, 4=Low"
+            },
+            "project": {
+              "type": "string",
+              "description": "Project name, ID, identifier (e.g., P-ENG-123), or slug. Null to remove"
+            },
+            "state": {
+              "type": "string",
+              "description": "State type, name, or ID"
+            },
+            "assignee": {
+              "type": "string",
+              "description": "User ID, name, email, or \"me\". Null to remove"
+            },
+            "delegate": {
+              "type": "string",
+              "description": "Agent name or ID. When the user asks to delegate to \"Linear\" or \"the Linear agent\", this refers to the \"Linear\" app user specifically. Null to remove"
+            },
+            "labels": {
+              "type": "array",
+              "description": "Label names or IDs as a JSON array of strings (e.g. [\"Bug\", \"Urgent\"]). Replaces the full label set; existing labels not included are removed. Omit to leave labels unchanged. Cannot be combined with addLabels/removeLabels; prefer those for incremental changes",
+              "items": {
+                "type": "string"
+              }
+            },
+            "addLabels": {
+              "type": "array",
+              "description": "Label names or IDs as a JSON array of strings (e.g. [\"Bug\", \"Urgent\"]) to add. Append-only; existing labels are never removed. Cannot be combined with a team change",
+              "items": {
+                "type": "string"
+              }
+            },
+            "removeLabels": {
+              "type": "array",
+              "description": "Label names or IDs as a JSON array of strings (e.g. [\"Bug\", \"Urgent\"]) to remove. Only valid when updating an existing issue. Cannot be combined with a team change",
+              "items": {
+                "type": "string"
+              }
+            },
+            "dueDate": {
+              "type": "string",
+              "description": "Due date (ISO format). On update, pass null to remove the due date"
+            },
+            "slaBreachesAt": {
+              "type": "string",
+              "description": "ISO-8601 timestamp when the SLA will breach. On update, pass null to remove the SLA"
+            },
+            "slaType": {
+              "type": "string",
+              "description": "SLA day counting type: \"all\" or \"onlyBusinessDays\". Only use with slaBreachesAt; null means unset",
+              "enum": [
+                "all",
+                "onlyBusinessDays"
+              ]
+            },
+            "parentId": {
+              "type": "string",
+              "description": "Parent issue ID or identifier (e.g., LIN-123). Null to remove"
+            },
+            "estimate": {
+              "type": "number",
+              "description": "Issue estimate value. On create, pass null or omit for no estimate. On update, pass null to clear the estimate; omitting leaves it unchanged. 0 is a real estimate only on teams that allow zero estimates."
+            },
+            "links": {
+              "type": "array",
+              "description": "Link attachments to add [{url, title}]. Append-only; existing links are never removed",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "url",
+                  "title"
+                ]
+              }
+            },
+            "setReleases": {
+              "type": "array",
+              "description": "Replace all releases on the issue with these. Cannot be combined with addReleases/removeReleases",
+              "items": {
+                "type": "string"
+              }
+            },
+            "addReleases": {
+              "type": "array",
+              "description": "Release IDs or slugs to add. Append-only; existing releases are never removed",
+              "items": {
+                "type": "string"
+              }
+            },
+            "removeReleases": {
+              "type": "array",
+              "description": "Release IDs or slugs to remove. Only valid when updating an existing issue",
+              "items": {
+                "type": "string"
+              }
+            },
+            "blocks": {
+              "type": "array",
+              "description": "Issue IDs/identifiers this blocks. Append-only; existing relations are never removed",
+              "items": {
+                "type": "string"
+              }
+            },
+            "blockedBy": {
+              "type": "array",
+              "description": "Issue IDs/identifiers blocking this. Append-only; existing relations are never removed",
+              "items": {
+                "type": "string"
+              }
+            },
+            "relatedTo": {
+              "type": "array",
+              "description": "Related issue IDs/identifiers. Append-only; existing relations are never removed",
+              "items": {
+                "type": "string"
+              }
+            },
+            "duplicateOf": {
+              "type": "string",
+              "description": "Duplicate of issue ID/identifier. Null to remove"
+            },
+            "removeBlocks": {
+              "type": "array",
+              "description": "Issue IDs/identifiers to stop blocking",
+              "items": {
+                "type": "string"
+              }
+            },
+            "removeBlockedBy": {
+              "type": "array",
+              "description": "Issue IDs/identifiers to remove as blockers of this issue",
+              "items": {
+                "type": "string"
+              }
+            },
+            "removeRelatedTo": {
+              "type": "array",
+              "description": "Related issue IDs/identifiers to remove",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:a64f5db99b5946929adf422dedc7f5e11b81efba3a24a2f27256f17e57a14851",
+        "scopes": [
+          "linear:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
+      },
+      {
+        "name": "linear.save_project",
+        "description": "프로젝트를 만들거나 고칩니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Project name, ID, identifier (e.g., P-ENG-123), or slug. If provided, updates the existing project"
+            },
+            "name": {
+              "type": "string",
+              "description": "Project name (required when creating)"
+            },
+            "template": {
+              "type": "string",
+              "description": "Template name or ID. Applied on create only. The template fills in the content, fields, and sub-issues server-side. A `description` replaces the template body rather than merging with it, but an empty `description` keeps the template body. Labels merge with the template's own"
+            },
+            "icon": {
+              "type": "string",
+              "description": "Icon name or emoji code (e.g. \"Rocket\" or \":eagle:\"), not a raw Unicode emoji"
+            },
+            "color": {
+              "type": "string",
+              "description": "Hex color"
+            },
+            "summary": {
+              "type": "string",
+              "description": "Short summary (max 255 chars)"
+            },
+            "description": {
+              "type": "string",
+              "description": "Content as Markdown. Do not escape the string — use literal newlines and special characters, not escape sequences. To mention a user, use @displayName (e.g., @johndoe)"
+            },
+            "patch": {
+              "type": "array",
+              "description": "Partial edits applied to the current content, in order and atomically (one failing operation aborts the whole save). Every anchor string must match the current content exactly once. Only valid on update, in place of the full content/description field",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "op": {
+                    "type": "string"
+                  },
+                  "old_string": {
+                    "type": "string",
+                    "description": "Exact text to replace. Must match the current content exactly once",
+                    "minLength": 1
+                  },
+                  "new_string": {
+                    "type": "string",
+                    "description": "Replacement text. Empty string deletes the match"
+                  },
+                  "replace_all": {
+                    "type": "boolean",
+                    "description": "Replace every occurrence instead of requiring a unique match"
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "op",
+                  "old_string",
+                  "new_string"
+                ]
+              }
+            },
+            "state": {
+              "type": "string",
+              "description": "Project status name, type, or ID. Names resolve within the lead team's project statuses. If the lead team is unknown, standard labels resolve as status types; custom names require a status ID or leadTeam"
+            },
+            "startDate": {
+              "type": "string",
+              "description": "Start date (ISO format). Pair with startDateResolution to indicate precision (e.g. month, quarter). Null to remove"
+            },
+            "startDateResolution": {
+              "type": "string",
+              "description": "Start date resolution. Null for an exact day. When omitted, the current resolution stays and the date snaps to it",
+              "enum": [
+                "halfYear",
+                "month",
+                "quarter",
+                "year"
+              ]
+            },
+            "targetDate": {
+              "type": "string",
+              "description": "Target date (ISO format). Pair with targetDateResolution to indicate precision (e.g. month, quarter). Null to remove"
+            },
+            "targetDateResolution": {
+              "type": "string",
+              "description": "Target date resolution. Null for an exact day. When omitted, the current resolution stays and the date snaps to it",
+              "enum": [
+                "halfYear",
+                "month",
+                "quarter",
+                "year"
+              ]
+            },
+            "priority": {
+              "type": "integer",
+              "description": "0=None, 1=Urgent, 2=High, 3=Medium, 4=Low",
+              "minimum": 0,
+              "maximum": 4
+            },
+            "addTeams": {
+              "type": "array",
+              "description": "Team name or ID to add",
+              "items": {
+                "type": "string"
+              }
+            },
+            "removeTeams": {
+              "type": "array",
+              "description": "Team name or ID to remove",
+              "items": {
+                "type": "string"
+              }
+            },
+            "setTeams": {
+              "type": "array",
+              "description": "Replace all teams with these. Cannot combine with addTeams/removeTeams",
+              "items": {
+                "type": "string"
+              }
+            },
+            "leadTeam": {
+              "type": "string",
+              "description": "Team that leads the project. Team name or ID. Overrides the default lead team; added to the project's teams when not among them"
+            },
+            "labels": {
+              "type": "array",
+              "description": "Label names or IDs as a JSON array of strings (e.g. [\"Bug\", \"Urgent\"]). Replaces the full label set; existing labels not included are removed. Omit to leave labels unchanged",
+              "items": {
+                "type": "string"
+              }
+            },
+            "lead": {
+              "type": "string",
+              "description": "User ID, name, email, or \"me\". Null to remove, except on create with a template that names a lead"
+            },
+            "addInitiatives": {
+              "type": "array",
+              "description": "Initiatives to add. Initiative name, ID, identifier (e.g., I-123), or slug",
+              "items": {
+                "type": "string"
+              }
+            },
+            "removeInitiatives": {
+              "type": "array",
+              "description": "Initiatives to remove. Initiative name, ID, identifier (e.g., I-123), or slug",
+              "items": {
+                "type": "string"
+              }
+            },
+            "setInitiatives": {
+              "type": "array",
+              "description": "Replace all initiatives with these. Initiative name, ID, identifier (e.g., I-123), or slug. Cannot combine with addInitiatives/removeInitiatives",
+              "items": {
+                "type": "string"
+              }
+            },
+            "links": {
+              "type": "array",
+              "description": "External resource links to add [{url, title}]. Append-only; existing links are never removed",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "url",
+                  "title"
+                ]
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:367cad16dfb43ebab9ec1249c58de08b0e812b54dd390016b30ea06d3a858a6e",
+        "scopes": [
+          "linear:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
+      },
+      {
+        "name": "linear.save_document",
+        "description": "문서를 만들거나 고칩니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Document ID or slug to update. Omit to create a new document."
+            },
+            "title": {
+              "type": "string",
+              "description": "Document title (required when creating)"
+            },
+            "content": {
+              "type": "string",
+              "description": "Content as Markdown. Do not escape the string — use literal newlines and special characters, not escape sequences. To mention a user, use @displayName (e.g., @johndoe)"
+            },
+            "patch": {
+              "type": "array",
+              "description": "Partial edits applied to the current content, in order and atomically (one failing operation aborts the whole save). Every anchor string must match the current content exactly once. Only valid on update, in place of the full content/description field",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "op": {
+                    "type": "string"
+                  },
+                  "old_string": {
+                    "type": "string",
+                    "description": "Exact text to replace. Must match the current content exactly once",
+                    "minLength": 1
+                  },
+                  "new_string": {
+                    "type": "string",
+                    "description": "Replacement text. Empty string deletes the match"
+                  },
+                  "replace_all": {
+                    "type": "boolean",
+                    "description": "Replace every occurrence instead of requiring a unique match"
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "op",
+                  "old_string",
+                  "new_string"
+                ]
+              }
+            },
+            "project": {
+              "type": "string",
+              "description": "Project name, ID, identifier (e.g., P-ENG-123), or slug"
+            },
+            "issue": {
+              "type": "string",
+              "description": "Issue ID or identifier (e.g., LIN-123). P-prefixed identifiers (e.g., P-ENG-123) are projects, not issues"
+            },
+            "initiative": {
+              "type": "string",
+              "description": "Initiative name, ID, identifier (e.g., I-123), or slug"
+            },
+            "cycle": {
+              "type": "string",
+              "description": "Cycle name, number, or ID. When passing a name or number, also pass `team` to disambiguate."
+            },
+            "team": {
+              "type": "string",
+              "description": "Team name or ID. Attaches the document to the team, unless `cycle` is also passed, in which case it disambiguates the cycle."
+            },
+            "icon": {
+              "type": "string",
+              "description": "Icon name or emoji code (e.g. \"Rocket\" or \":eagle:\"), not a raw Unicode emoji"
+            },
+            "color": {
+              "type": "string",
+              "description": "Hex color"
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:f7153b2843c6b8de99e32c7199cc5873ac2824e55cc7497f15f0846f6e00dbf3",
+        "scopes": [
+          "linear:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
+      },
+      {
+        "name": "linear.save_milestone",
+        "description": "마일스톤을 만들거나 고칩니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "project": {
+              "type": "string",
+              "description": "Project name, ID, identifier (e.g., P-ENG-123), or slug"
+            },
+            "id": {
+              "type": "string",
+              "description": "Milestone name or ID"
+            },
+            "name": {
+              "type": "string",
+              "description": "Milestone name (required when creating)"
+            },
+            "description": {
+              "type": "string",
+              "description": "Milestone description"
+            },
+            "targetDate": {
+              "type": "string",
+              "description": "Target completion date (ISO format, null to remove)"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "project"
+          ]
+        },
+        "schemaDigest": "sha256:54263253f92f628487cd6d7b7ae44033213c95789b72cd9f2a178fad3ef263ce",
+        "scopes": [
+          "linear:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
+      },
+      {
+        "name": "linear.save_status_update",
+        "description": "프로젝트 상태 업데이트를 남기거나 고칩니다.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "description": "Type of status update",
+              "enum": [
+                "project",
+                "initiative"
+              ]
+            },
+            "id": {
+              "type": "string",
+              "description": "Update ID from get_status_updates results (statusUpdates[].id) or save_status_update's id. Omit to create"
+            },
+            "project": {
+              "type": "string",
+              "description": "Project name, ID, identifier (e.g., P-ENG-123), or slug"
+            },
+            "initiative": {
+              "type": "string",
+              "description": "Initiative name, ID, identifier (e.g., I-123), or slug"
+            },
+            "body": {
+              "type": "string",
+              "description": "Content as Markdown. Do not escape the string — use literal newlines and special characters, not escape sequences. To mention a user, use @displayName (e.g., @johndoe). Required on create; replaces the body on update. Omit on update to leave the body unchanged"
+            },
+            "health": {
+              "type": "string",
+              "description": "onTrack | atRisk | offTrack",
+              "enum": [
+                "onTrack",
+                "atRisk",
+                "offTrack"
+              ]
+            },
+            "isDiffHidden": {
+              "type": "boolean",
+              "description": "Deprecated. Hide diff with previous update (create only)"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        "schemaDigest": "sha256:21021b4c98fc00760b3d6487fd5bafd526f9e73cf9f941db803243ee143242bf",
+        "scopes": [
+          "linear:write"
+        ],
+        "risk": "write",
+        "approvalPolicy": "always"
+      }
+    ]
   },
-  "skill": { "reference": null, "optional": true },
+  "skill": {
+    "reference": null,
+    "optional": true
+  },
   "momo": {
-    "approvalTier": { "linear.list_issues": "read_only" },
-    "risk": "low",
-    "egressDomains": ["mcp.linear.app"],
-    "recommendedFor": ["work-tracking", "product-development"],
+    "approvalTier": {
+      "linear.get_attachment": "read_only",
+      "linear.list_comments": "read_only",
+      "linear.list_cycles": "read_only",
+      "linear.list_custom_views": "read_only",
+      "linear.get_document": "read_only",
+      "linear.list_documents": "read_only",
+      "linear.extract_images": "read_only",
+      "linear.get_issue": "read_only",
+      "linear.list_issues": "read_only",
+      "linear.list_issue_statuses": "read_only",
+      "linear.get_issue_status": "read_only",
+      "linear.list_issue_labels": "read_only",
+      "linear.list_projects": "read_only",
+      "linear.get_project": "read_only",
+      "linear.list_project_labels": "read_only",
+      "linear.list_releases": "read_only",
+      "linear.get_release": "read_only",
+      "linear.list_release_notes": "read_only",
+      "linear.get_release_note": "read_only",
+      "linear.list_release_pipelines": "read_only",
+      "linear.list_milestones": "read_only",
+      "linear.get_milestone": "read_only",
+      "linear.get_notifications": "read_only",
+      "linear.list_teams": "read_only",
+      "linear.get_team": "read_only",
+      "linear.get_triage_responsibility": "read_only",
+      "linear.list_templates": "read_only",
+      "linear.get_template": "read_only",
+      "linear.list_users": "read_only",
+      "linear.get_user": "read_only",
+      "linear.get_workspace": "read_only",
+      "linear.search_documentation": "read_only",
+      "linear.get_status_updates": "read_only",
+      "linear.mark_notification": "network_write",
+      "linear.save_comment": "network_write",
+      "linear.save_issue": "network_write",
+      "linear.save_project": "network_write",
+      "linear.save_document": "network_write",
+      "linear.save_milestone": "network_write",
+      "linear.save_status_update": "network_write"
+    },
+    "risk": "medium",
+    "egressDomains": [
+      "mcp.linear.app"
+    ],
+    "recommendedFor": [
+      "work-tracking",
+      "product-development"
+    ],
     "serverPolicy": {
       "installAllowed": true,
       "enabledByDefault": false,
-      "allowedRoles": ["owner", "admin"]
+      "allowedRoles": [
+        "owner",
+        "admin"
+      ]
     }
   }
 }

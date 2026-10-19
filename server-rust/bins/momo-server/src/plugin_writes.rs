@@ -905,11 +905,13 @@ async fn projection_matches(
     manifest: &ValidatedPluginManifest,
     tools: &[&ValidatedPluginTool],
 ) -> Result<bool, DbError> {
-    let stored: Vec<(String, String, String, String, String)> = sqlx::query_as(
+    // Compared as Rust-sorted tuples on both sides: the database's own `ORDER BY` follows the
+    // cluster collation (which can rank `a_b` and `ab` differently from byte order), and with
+    // the measured catalogue's snake_case names that made every repeat grant look drifted.
+    let mut stored: Vec<(String, String, String, String, String)> = sqlx::query_as(
         "SELECT tool_name, capability_version, schema_digest, risk, approval_tier \
            FROM plugin_capability_projection \
-          WHERE workspace_id = $1 AND member_id = $2 AND plugin_id = $3 AND scope = $4 \
-          ORDER BY tool_name",
+          WHERE workspace_id = $1 AND member_id = $2 AND plugin_id = $3 AND scope = $4",
     )
     .bind(workspace_id)
     .bind(member_id)
@@ -930,6 +932,7 @@ async fn projection_matches(
         })
         .collect();
     wanted.sort();
+    stored.sort();
     Ok(stored == wanted)
 }
 
@@ -1003,10 +1006,21 @@ mod tests {
         let manifest = github();
         let tools = tools_for_scope(&manifest, "github:read");
         let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_str()).collect();
-        // Migration 031 added search_issues under the same scope: a grant
-        // projects two rows now, which is what #925's stale "expected 1" missed.
-        assert_eq!(names, ["github.list_repositories", "github.search_issues"]);
-        assert!(tools_for_scope(&manifest, "github:write").is_empty());
+        // Migration 143 (#3944): github:read projects the 26 measured read tools, none
+        // of them a write; github:write projects only the grade B tools.
+        assert_eq!(names.len(), 26);
+        assert!(names.contains(&"github.search_issues"));
+        assert!(names.contains(&"github.search_repositories"));
+        assert!(
+            !names.contains(&"github.list_repositories"),
+            "never a GitHub tool"
+        );
+        assert!(tools.iter().all(|tool| tool.risk == "read"));
+        let writes = tools_for_scope(&manifest, "github:write");
+        assert_eq!(writes.len(), 10);
+        assert!(writes
+            .iter()
+            .all(|tool| tool.risk == "write" && tool.approval_policy == "always"));
         assert!(tools_for_scope(&manifest, "").is_empty());
         assert!(
             tools_for_scope(&validate_manifest(DRIVE).expect("drive"), "github:read").is_empty()
@@ -1071,7 +1085,7 @@ mod tests {
             installed["egress_domains"],
             json!(["api.githubcopilot.com"])
         );
-        assert_eq!(installed["version"], json!("1.0.0"));
+        assert_eq!(installed["version"], json!("1.1.0"));
     }
 
     /// The card path can add exactly two ids — which agent's proposal, which

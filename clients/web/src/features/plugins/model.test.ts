@@ -385,9 +385,9 @@ describe("읽기 전용 카탈로그의 문장", () => {
     expect(myGrantSentence([], 0, { installed: true, enabled: true })).toBe("허용한 권한이 없어요");
   });
 
-  it("도구 한 줄 요약: 공식 네 앱은 모두 읽기 도구라고 말하고, 섞이면 종류별로 센다", () => {
+  it("도구 한 줄 요약: 읽기만 있으면 그렇게 말하고, 섞이면 종류별로 센다", () => {
     // 「이 앱의 도구」(선언된 수)는 내 권한 줄의 「허용한 도구」(허용된 수)와 다른 수다. 낱말로 갈라 둔다.
-    expect(pluginToolsSummary(githubManifest.mcp.tools)).toBe("이 앱의 도구는 2개이고, 모두 읽기 도구예요.");
+    expect(pluginToolsSummary(githubManifest.mcp.tools)).toBe("이 앱의 도구는 36개예요: 읽기 26개, 쓰기 10개.");
     expect(pluginToolsSummary(driveManifest.mcp.tools)).toBe("이 앱의 도구는 3개이고, 모두 읽기 도구예요.");
     expect(pluginToolsSummary([{ risk: "read" }, { risk: "write" }, { risk: "write" }]))
       .toBe("이 앱의 도구는 3개예요: 읽기 1개, 쓰기 2개.");

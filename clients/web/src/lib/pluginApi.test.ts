@@ -75,8 +75,9 @@ describe("plugin API wire boundary", () => {
   it("reads catalog policy from the server manifest-derived fixture", () => {
     const catalog = pluginCatalogFromWire(catalogFixture);
     expect(catalog.plugins[0]?.pluginId).toBe("com.momo.plugins.github");
+    // Migration 142 (#3944): the measured catalogue has read tools and grade B writes.
     expect(catalog.toolsByPlugin.get("com.momo.plugins.github")?.map((tool) => tool.risk))
-      .toEqual(["read", "read"]);
+      .toEqual(githubManifest.mcp.tools.map((tool) => tool.risk));
   });
 
   it("reads publisher, provenance, tools and scopes from the original manifest", () => {
@@ -85,8 +86,8 @@ describe("plugin API wire boundary", () => {
     expect(detail.publisherVerified).toBe(true);
     expect(detail.license).toBe("MIT");
     expect(detail.tools[0]).toMatchObject({
-      name: "github.list_repositories",
-      scopes: ["github:read"],
+      name: githubManifest.mcp.tools[0].name,
+      scopes: [githubManifest.mcp.tools[0].scopes[0]],
       risk: "read",
       approvalTier: "read_only",
     });
@@ -136,15 +137,21 @@ describe("plugin API wire boundary", () => {
     expect(catalog.plugins.map((plugin) => plugin.pluginId)).toEqual([
       "com.momo.plugins.drive",
       "com.momo.plugins.github",
+      "com.momo.plugins.gmail",
+      "com.momo.plugins.google-calendar",
+      "com.momo.plugins.google-drive",
       "com.momo.plugins.linear",
       "com.momo.plugins.notion",
     ]);
     const github = catalog.plugins.find((plugin) => plugin.pluginId === "com.momo.plugins.github");
     expect(github).toMatchObject({ installed: true, enabled: true, official: true, recommended: true });
-    expect(catalog.toolsByPlugin.get("com.momo.plugins.github")).toEqual([
-      { name: "github.list_repositories", risk: "read", approvalTier: "read_only" },
-      { name: "github.search_issues", risk: "read", approvalTier: "read_only" },
-    ]);
+    // The policy lists what I granted (github:read): every read tool of the manifest, no write.
+    const policy = catalog.toolsByPlugin.get("com.momo.plugins.github") ?? [];
+    const readTools = githubManifest.mcp.tools.filter((tool) => tool.scopes.includes("github:read"));
+    expect(policy.map((tool) => tool.name).sort()).toEqual(readTools.map((tool) => tool.name).sort());
+    expect(policy.every((tool) => tool.risk === "read" && tool.approvalTier === "read_only")).toBe(true);
+    expect(policy.map((tool) => tool.name)).toContain("github.search_repositories");
+    expect(policy.map((tool) => tool.name)).not.toContain("github.list_repositories");
   });
 
   it("accepts the Rust server's manifest detail response", () => {
@@ -156,10 +163,13 @@ describe("plugin API wire boundary", () => {
       license: "MIT",
       provenanceURL: "https://github.com/github/github-mcp-server",
     });
-    expect(detail.tools.map((tool) => [tool.name, tool.scopes, tool.approvalTier])).toEqual([
-      ["github.list_repositories", ["github:read"], "read_only"],
-      ["github.search_issues", ["github:read"], "read_only"],
-    ]);
+    expect(detail.tools.map((tool) => [tool.name, tool.scopes, tool.approvalTier])).toEqual(
+      githubManifest.mcp.tools.map((tool) => [
+        tool.name,
+        tool.scopes,
+        approvalTiers[tool.name],
+      ])
+    );
   });
 });
 
@@ -226,8 +236,9 @@ describe("plugin write calls against the Rust server's answers (ADR-0113 P3)", (
       scope: "github:read",
       status: "active",
       enabled: true,
-      capabilities: ["github.list_repositories", "github.search_issues"],
+      capabilities: rustGrant.capabilities,
     });
+    expect(rustGrant.capabilities).toContain("github.search_issues");
     expect(fetchMock).toHaveBeenCalledWith(
       `https://oort.test/v1/workspaces/ws-1/plugins/${GITHUB}/grants`,
       expect.objectContaining({ method: "POST", body: '{"scope":"github:read"}' })
