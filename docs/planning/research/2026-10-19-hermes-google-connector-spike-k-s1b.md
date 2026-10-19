@@ -68,11 +68,11 @@ oort `api` 서비스 env에 선언 세 개가 필요해요(현재 `api`·`agent-
 
 결정: `hermes-kwak`의 모델 인증은 API 키가 아니라 Hermes가 볼륨(`/opt/data`)에 든 provider OAuth예요. 토큰은 oort에 넣지 않아요(`ANTHROPIC_API_KEY` 변수는 두지 않아요).
 
-- 기본 provider: `openai-codex`(ChatGPT/Codex 구독), 모델 `gpt-5.6-sol`(이미지 v0.22.2의 기본 Codex 카탈로그 첫 줄들 중 하나. 로그인 후 `hermes model`이 라이브 목록을 보여줘요). 두 번째: `anthropic`(Claude Pro/Max 구독) `claude-sonnet-5-5`를 `fallback_model`로 둬요(기본이 한도·과부하·연결 오류로 실패하면 자동 전환). 설정은 `infra/hermes/google-connectors.config.yaml`의 `model:`/`fallback_model:`.
+- 기본 provider: `openai-codex`(ChatGPT/Codex 구독), 모델 `gpt-5.6-sol`(이미지 v0.22.2의 기본 Codex 카탈로그 첫 줄들 중 하나. 로그인 후 `hermes model`이 라이브 목록을 보여줘요). 두 번째: `anthropic`(Claude Pro/Max 구독) `claude-sonnet-5`를 `fallback_model`로 둬요(기본이 한도·과부하·연결 오류로 실패하면 자동 전환). 설정은 `infra/hermes/google-connectors.config.yaml`의 `model:`/`fallback_model:`.
 - 기본을 Claude로 바꾸려면 `config.claude.yaml`(위 둘을 맞바꾼 사본)을 `HERMES_CONFIG_B64`에 넣고 이 서비스만 재배포해요(부팅마다 config가 변수에서 다시 쓰이므로 `hermes model`로 고친 값은 재부팅에 사라져요).
 - 로그인 흐름 [V, 로컬 이미지 + 실제 벤더 엔드포인트, 승인은 하지 않음]
   - `hermes auth add openai-codex --type oauth --no-browser`: **기기 코드(device code) 흐름**이 기본이에요. `https://auth.openai.com/codex/device`와 일회용 코드를 출력하고 승인을 폴링해요. 브라우저·붙여넣기 불필요(`--browser`는 localhost:1455 PKCE라 헤드리스에 안 맞아요). ChatGPT 설정에서 코드 로그인(기기 코드 인증)이 켜져 있어야 할 수 있어요 [확인 필요].
   - `hermes auth add anthropic --type oauth`: `https://claude.ai/oauth/authorize?...` URL을 출력하고 `Authorization code:` 프롬프트에서 **화면에 뜨는 코드를 붙여넣어요**(`코드#state` 형식). 헤드리스 가능.
   - 확인: `hermes auth status <provider>`(로그인 전 「logged out」), `hermes auth list`.
   - 저장: Hermes 홈 `/opt/data`(Codex는 `auth.json`, Claude는 `.anthropic_oauth.json`/풀). 볼륨에만 있어요.
-- `runtime-unverified`: 실제 로그인 승인 뒤 토큰 저장, 모델 왕복(`gpt-5.6-sol`·`claude-sonnet-5-5`가 구독 토큰으로 응답하는지), 폴백 전환, 구독 토큰 갱신 수명. 구독 OAuth를 서버 프로세스에서 쓰는 것의 약관 적합성은 벤더 약관 문제라 이 기록이 판단하지 않아요(성재 결정).
+- `runtime-unverified`: 실제 로그인 승인 뒤 토큰 저장, 모델 왕복(`gpt-5.6-sol`·`claude-sonnet-5`가 구독 토큰으로 응답하는지), 폴백 전환, 구독 토큰 갱신 수명. 구독 OAuth를 서버 프로세스에서 쓰는 것의 약관 적합성은 벤더 약관 문제라 이 기록이 판단하지 않아요(성재 결정).
