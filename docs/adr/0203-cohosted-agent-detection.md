@@ -279,3 +279,111 @@ D6의 다섯 조건은 그대로이고, 커넥터 시험이면 아래를 **모�
 5. `agent.disabled_toolsets`에 `cronjob`·`delegation`·`web`(K4-1).
 
 게이트는 **설정**을 본다. K-S1a 실측대로 MCP 도구는 `/v1/toolsets`에 나오지 않고 `disabled_toolsets`가 막지도 않으므로, 허용목록 검사도 기동 뒤 리포트도 벤더 서버가 실제로 내놓는 도구를 증명하지 못한다 — 그것은 K4의 운영자 attest다. 스크립트는 레포 `infra/hermes/lockgate.py`에 있고 규칙은 Docker 없이 `infra/hermes/test_lockgate_connectors.py`로, 실제 Hermes 이미지(v0.22.2 digest 고정)로는 게이트 매트릭스 행으로 확인했다(#3948 PR 본문).
+
+## 증보 2026-10-19 — Hermes 로그인 중계: oort 화면에서 모델 인증(Codex·Claude)과 앱 로그인
+
+- Status: **Proposed** (이슈 #4073 설계·스파이크 산출물. 구현은 통합자가 Accept한 뒤 이슈로 나눈다. 이 증보는 코드를 바꾸지 않았다.)
+- 기안: Sonnet 5.5 worker (#4073)
+- 계기: 성재 2026-10-19(#4073·#4074 원문): 「우리 메신저 대신 hermes oauth로 할때 왜 그게 ADR이 금지한 길이야 … 당장에 필요하다면 codex oauth로 하고, claude oauth까지 처리할거야」. 허용 자체는 #4071(ADR-0004 증보 6, 위 「증보 2026-10-19 — … 구독 OAuth 허용」, **머지 전일 수 있다**)이 정했고, 이 증보는 그 허용을 **화면에서 어떻게 실행하는가**를 정한다.
+- 근거 실측: `docs/planning/research/2026-10-19-hermes-login-relay-spike.md`(Hermes v0.22.2 공식 이미지 digest `36099926…c2919`, 로컬 Docker, 실제 벤더 로그인 0건). 표기: [V] 직접 확인 · [소스] 이미지 소스 · `runtime-unverified`.
+- 이 증보는 D1~D9·K1~K7을 바꾸지 않는다. ADR-0004 증보 6의 oort 쪽 경계를 **한 곳만** 좁게 열자고 제안한다(Q1).
+
+### L0. 실측이 정한 사실
+
+1. oort가 부르는 게이트웨이 API(8642)에는 로그인 라우트가 **없다** [V]. 로그인 관리 API는 별도 프로세스 `hermes dashboard`(9119)에만 있다.
+2. 대시보드의 Codex API는 **기기 코드 흐름**(`verification_url` + `user_code` + 폴링)이다 [V]. 사용자가 붙여넣을 것이 없다.
+3. 대시보드의 Claude API는 Hermes가 **일부러 막았다**(`400 anthropic uses an external CLI`, 「scriptable HTTP endpoint mint Claude Pro/Max subscription tokens … against its OAuth usage policies」) [V][소스]. CLI `hermes auth add anthropic --type oauth --no-browser`만 되고 인가 URL 출력 → stdin에서 `code#state` 한 줄이다.
+4. MCP 앱 로그인은 CLI(`hermes mcp login`)와 대시보드 둘 다 인가 URL 출력 후 `code`+`state`를 받는다 [V]. 둘 다 `initialize`·`tools/list`만 보므로 **Google 세 서버는 시작되지 않는다**(K-S1b, #4067) — `infra/hermes/mcp_login_probe.py` 방식이 필요하다 [소스, 대시보드 경로의 Google 시도는 `runtime-unverified`].
+5. 대시보드를 oort가 부르는 것은 **안 된다** [V]: 루프백 인증 토큰이 인증 없는 `GET /` HTML에 들어 있고, 비루프백은 쿠키 로그인(비밀번호/OAuth)을 요구하며, 같은 프로세스가 MCP 서버 추가(stdio 명령 = 임의 실행)·설정 쓰기를 연다. D6 도구 잠금과 충돌한다.
+6. 세 로그인 모두 「URL(또는 기기 코드) 출력 → (선택) stdin 한 줄 → 종료 코드」 모양이고, CLI를 자식 프로세스로 구동하는 중계가 끝까지 동작했다. 중계 채널 출력에 토큰·code 값이 0바이트였다 [V].
+7. Railway 볼륨은 서비스별이다(D7). 「같은 볼륨의 사이드카」는 Railway에서는 **Hermes 컨테이너 안의 프로세스**여야 한다. docker compose에서는 같은 볼륨을 공유하는 별도 컨테이너도 된다.
+
+### L1. 후보 비교와 결정
+
+| | (a) Hermes 기존 API | (b) 사이드카 | (c) 운영자 셸 명령 표시 |
+|---|---|---|---|
+| Codex | 대시보드 API로 됨, 그러나 oort가 인증하며 부를 길이 없음(L0-5) | 됨(CLI 또는 대시보드를 루프백으로 내부 사용) | 됨 |
+| Claude | 불가(Hermes가 막음) | 됨(CLI 중계) | 됨 |
+| MCP 앱 | Google 시작 안 됨(L0-4) | 됨(`mcp_login_probe.py` 포함) | 됨(지금 방식, `railway ssh`) |
+| 붙여넣은 code가 oort를 지나가나 | 예 | 예(Claude·MCP). Codex는 아니오 | 아니오 |
+| 새 공격 표면 | 대시보드 전체 | 좁은 중계 하나(키 1개) | 없음 |
+| 운영 부담 | 대시보드 인증 설정 | 시작 명령에 프로세스 하나 | 운영자가 셸 필요(제로 베이스 온보딩의 목표와 반대) |
+
+**결정(제안)**: **(b)를 기본**으로 하고 **(c)를 항상 있는 대체 경로**로 둔다. (a)는 쓰지 않는다. 사이드카가 켜져 있지 않으면(env 없음) 화면은 (c)의 명령을 보여 준다 — 사이드카는 선택이고 없어도 Hermes 연결은 그대로 동작한다.
+
+### L2. 사이드카 규격 (`oort-login-relay`, 이름 후보)
+
+- **위치**: Hermes 컨테이너 안의 별도 프로세스(Python, Hermes venv의 stdlib만 — 신규 의존 없음). 시작 명령이 `lockgate.py` 통과 뒤 게이트웨이 앞에서 백그라운드로 띄운다(Railway 시작 명령은 이미 이미지 ENTRYPOINT를 대체한다, K-S1a §1). compose에서는 같은 이미지·같은 볼륨의 별도 서비스도 허용한다. `hermes` 사용자로 실행한다(root면 토큰이 root 소유가 된다, K-S1a §5.1). 대시보드는 **띄우지 않는다**(`HERMES_DASHBOARD` 미설정, 320 MB 절약).
+- **바인딩**: 내부 네트워크 인터페이스만(Railway `::`/`0.0.0.0` 선택은 D9와 같은 규칙), compose `ports:` 없음. 공개 도메인을 붙이지 않는다.
+- **키**: 별도 비밀 `HERMES_LOGIN_RELAY_KEY`(이름 후보)를 Hermes 서비스 env에 둔다. **`API_SERVER_KEY`/`HERMES_API_KEY`와 다른 값**이다(채팅 키가 샜을 때 로그인 권한이 같이 넘어가지 않게). oort는 같은 값을 `api` 서비스 env `HERMES_LOGIN_RELAY_KEY`/`HERMES_LOGIN_RELAY_URL`로 받는다. 요청마다 `Authorization: Bearer`를 상수 시간 비교한다. 키가 없으면 프로세스를 띄우지 않는다. oort→사이드카 주소는 내부 호스트라 egress 가드의 정확 일치 opt-in이 필요하다(D9, ADR-0004 증보 5와 같은 방식).
+- **구동하는 명령은 고정 목록이다.** 요청이 명령·인자를 정하지 못한다. 요청의 `kind`·`target`은 열거형 검증을 통과해야 한다:
+  - `provider/openai-codex` → `hermes auth add openai-codex --type oauth --no-browser`
+  - `provider/anthropic` → `hermes auth add anthropic --type oauth --no-browser`
+  - `mcp/<server>` → 서버 키는 `config.yaml`의 `mcp_servers`에 있고 `auth: oauth`인 이름만. 읽기 호출이 필요한 Google 세 서버는 `mcp_login_probe.py <server>`, 그 밖은 `hermes mcp login <server>`.
+- **API** (JSON, 응답에 토큰·code 값 없음):
+  - `POST /v1/login` `{kind, target, operator}` → `{login_id, mode, url, user_code?, expires_at}`. `mode`는 `device`(Codex: URL+코드를 보여 주고 폴링) 또는 `paste`(Claude·MCP: URL을 열고 돌아온 값을 붙여넣음). 자식 프로세스를 띄우고 출력에서 URL(과 기기 코드)을 찾을 때까지 기다린다(상한 30초). `login_id`는 예측 불가능한 값(≥128비트).
+  - `POST /v1/login/{login_id}/complete` `{operator, pasted}` → `{status}`. `paste` 모드만. 아래 L3의 파싱·검증을 거쳐 자식 stdin에 한 줄을 쓴다.
+  - `GET /v1/login/{login_id}?operator=…` → `{status: pending|done|failed|expired|cancelled, reason?}`. `reason`은 고정 열거형(`state_mismatch`·`timeout`·`vendor_denied`·`exit_nonzero`·…)이고 자식 출력 원문을 담지 않는다.
+  - `DELETE /v1/login/{login_id}` → 자식 프로세스를 끝낸다(취소).
+  - `GET /v1/login/status` → 대상별 `{connected, kind}`. 비밀 아닌 신호만: `hermes auth status <provider>`의 「logged in/out」 판정, `mcp-tokens/<server>.json` 존재(내용은 읽지 않는다). 만료 임박 판정은 K-S1a §5.2처럼 **추정**이고 단정하지 않는다.
+- **상태기계와 TTL**: 동시에 하나의 로그인만 `(kind, target)`당 허용(`409 login_in_progress`). 자식 프로세스는 TTL이 끝나면 죽인다 — Codex 900초(벤더 `expires_in`), `paste` 모드 300초(Hermes MCP 콜백 대기와 같다). 완료·실패·만료 뒤 세션 객체는 60초 안에 지운다. 상태는 메모리에만 둔다(재시작하면 사라져도 괜찮다 — 처음부터 다시 누르면 된다).
+- **로그 규칙**: 자식 stdout/stderr는 **메모리 버퍼에서 URL과 기기 코드를 찾는 데만 쓰고** 사이드카 로그에 쓰지 않는다. 사이드카 로그에는 `login_id` 앞 8자, kind/target, 상태 전이, 종료 코드, 경과 시간만 남긴다. 붙여넣은 값·인가 URL·기기 코드는 로그·오류 응답·예외 메시지·`/proc` 인자에 넣지 않는다(stdin 파이프로만 전달하고 argv에 두지 않는다).
+
+### L3. 붙여넣기 처리와 state 확인
+
+- 입력은 두 모양을 받는다: 브라우저 주소창 URL(`…?code=…&state=…`, MCP), `code#state`(Claude, [소스 `agent/anthropic_credentials.py:792-800`]). **붙여넣은 URL을 어디에도 요청하지 않는다**(fetch 금지 — SSRF 방지). 문자열 파싱만 한다.
+- 사이드카가 검증하는 것(oort도 같은 검증을 앞에서 한 번 더 한다, 아래 L4):
+  1. 길이 상한(2 KiB), 줄바꿈·NUL 없음(stdin에 한 줄만 쓴다).
+  2. URL 모양이면 **호스트·경로가 이 로그인에서 기대한 `redirect_uri`와 같을 때만** 받는다(`http://127.0.0.1:<고정 포트>/callback` 등). 다르면 `400 redirect_mismatch` — 사용자가 엉뚱한 주소를 붙여 code가 다른 곳으로 가는 일이 없게 한다.
+  3. `state`가 **인가 URL에서 사이드카가 파싱해 둔 값과 상수 시간으로 같을 때만** 자식 stdin에 쓴다. 틀리면 stdin에 쓰지 않고 `400 state_mismatch`(로그인은 계속 `pending`, 같은 `login_id`로 다시 붙일 수 있다 — 단 시도 3회 후 취소).
+  4. **한 번만**: 한 로그인에 `complete` 성공 처리는 1회. 두 번째는 `409 already_submitted`.
+- 이 검증은 Hermes/SDK 안의 비교를 대체하지 않고 앞에 더한 것이다: MCP는 SDK가 `State parameter mismatch`로 거부 [V], Claude는 `received_state != oauth_state` [소스, 비상수 시간], Codex는 붙여넣기 자체가 없다.
+
+### L4. oort API와 보안 경계
+
+- **라우트(후보)**: `POST/GET/DELETE /v1/workspaces/{ws}/agents/{agent}/model-login[/{login_id}]`(provider)와 `…/app-login`(MCP 앱, #4074). K-S2의 `connector-trial` 라우트와 같은 계열이다 — **인스턴스 운영자 전용**(D3, `PLATFORM_ADMIN_EMAILS`), 에이전트는 운영자 본인이 연결한 Hermes(`agent_provider_pin.kind='operator_env'`), 사이드카 env가 없으면 `409 login_relay_off`(화면은 (c)를 보인다).
+- **oort가 저장하는 것**: 새 테이블 **없음**. 감사 한 줄(기존 감사 경로): 행위자, `kind/target`, 시작·완료·실패 여부, 사이드카 `reason` 열거형. `login_id`는 응답 중계에만 쓰고 저장하지 않는다. **저장·로그·감사·메트릭·에러 리포트에 쓰지 않는 것**: 인가 URL 전체, 기기 코드, 붙여넣은 값, 그 값에서 파싱한 `code`/`state`.
+- **oort가 통과시키는 것**: 응답 `{url, user_code}`(화면 표시용), 요청 `{pasted}`(사이드카로 그대로). `pasted`는 요청 본문 구조체의 필드로만 존재하고 **`Debug`/`Serialize`로 찍히지 않는 타입**(마스킹 래퍼)에 담긴다. 요청 본문 로깅·트레이싱 계층은 이 라우트에서 본문을 기록하지 않는다. `url`에는 `state`·`code_challenge`가 있어 비밀은 아니지만 로그에는 쓰지 않는다.
+- **CSRF**: oort API는 `Authorization` 헤더 토큰이라 브라우저가 자동으로 붙이는 쿠키 CSRF 표면이 없다(ADR-0119). 이 흐름에 실제로 필요한 방어는 **로그인 고정(login CSRF)** — 공격자가 자기 계정의 code를 운영자가 붙이게 만들어 Hermes를 공격자 계정에 묶는 것 — 이다. 층이 셋이다: ① 벤더/SDK의 `state`·PKCE(Hermes 안, 비밀이 아닌 `state`와 `code_verifier`는 Hermes 프로세스에만), ② 사이드카의 `login_id`·`operator`·`state` 상수 시간 비교와 일회성(L3), ③ oort의 운영자 인증 + 「이 운영자가 시작한 `login_id`」만 `complete` 가능(사이드카가 `operator`를 대조). 각 흐름의 실제 방어선: Codex는 벤더 페이지에서 사용자가 코드를 입력하는 기기 흐름이라 login CSRF 표면이 작고(코드는 사용자 화면에서만), Claude·MCP는 ①②가 방어선이다.
+- **운영자 전용 + 에이전트 소유**: 비운영자 `403`, 워크스페이스에 사람 멤버가 2명 이상이면 K2·K-S2와 같은 이유로 앱 로그인은 `409 connector_trial_*` 계열을 따른다(토큰이 사람별이 아니므로). 모델 로그인(provider)은 팀 전체가 쓰는 Hermes의 구독이라는 점을 화면 문구에 쓴다(#4071: 사용량은 소유자 구독에서 나간다).
+- **데이터 흐름의 비밀 목록**: ① `user_code`(기기 코드, 화면 표시용, 900초) ② 인가 URL의 `state`(비밀 아님, 300초) ③ **붙여넣은 `code`(일회용, PKCE 없이는 교환 불가, 최대 300초)** ④ 토큰(access·refresh)은 oort를 **지나가지도 않는다** — Hermes 프로세스가 벤더와 직접 교환하고 `/opt/data`(`auth.json`, `mcp-tokens/`)에만 쓴다.
+- **표시 방식**: 인가 URL·기기 코드는 화면에 표시하되 클립보드 복사 버튼과 「열기」 버튼만 둔다. 화면을 닫으면(또는 TTL 뒤) 즉시 지운다(상태 객체 폐기, 입력란 비움). 폰에서는 외부 브라우저를 연다(앱 내 웹뷰로 열지 않는다 — 벤더 로그인을 앱이 들여다보지 않는다).
+
+### L5. 모델 provider 설정
+
+로그인만 되고 `model.provider`/`model.default`가 그 provider를 가리키지 않으면 쓰이지 않는다. Railway 부팅은 `config.yaml`을 `HERMES_CONFIG_B64`로 덮어쓰므로 **운영자 설정 템플릿이 provider를 정하고**, 중계는 자격만 만든다. 화면은 로그인 직후 「모델 설정이 이 provider인지」를 `GET /api/model/options`(`runtime-unverified`) 또는 능동 채팅 1회 시험으로 확인하는 별도 단계를 둔다. 승인 뒤 **돌고 있는 게이트웨이가 재시작 없이 새 자격을 집는지는 `runtime-unverified`** — 구현 첫 단계에서 모의 provider로 확인하고, 안 되면 완료 후 게이트웨이 재시작 안내를 화면에 낸다. 사이드카는 설정 파일을 쓰지 않는다.
+
+### L6. 기각한 대안
+
+- **대시보드를 oort 내부 서비스로 노출(a)**: L0-5. 인증 모양이 안 맞고 MCP 설정 쓰기가 D6을 무력화한다. 공식 이미지의 s6 주석 자체가 「unauthenticated public dashboards were the entry point for the MCP-config persistence campaign」이라고 적는다.
+- **별도 Railway 서비스 사이드카**: 볼륨이 서비스별이라 토큰을 쓸 곳을 공유하지 못한다.
+- **붙여넣기 없이 브라우저가 Hermes 콜백으로 직접 돌아오게**: Hermes를 공개 도메인에 열어야 하고(D1·D9의 「공개 노출 없음」 위반), 로그인 콜백만 열어도 같은 프로세스·같은 경계에 공개 입구가 생긴다.
+- **oort가 PKCE를 직접 하고 토큰을 Hermes 파일에 주입**: oort가 토큰을 받는다. ADR-0004 위반.
+- **Claude를 위한 앱 내 웹뷰/Claude Code 설치 토큰**: 범위 밖.
+
+### Q (owner 결정 요청 — 이 증보는 결정하지 않았다)
+
+**Q1. 일회용 인가 code의 통과를 허용할까요?** #4071의 문장은 oort가 「구독 OAuth 토큰(access·refresh·**코드**)」을 중개하지 않는다고 하고, ADR-0004 표는 「Codex OAuth authorization code — Never sent to oort」다. Claude와 MCP 앱의 붙여넣기 방식은 일회용 code가 요청 본문으로 oort를 지나간다. 제안하는 좁은 예외: *「인가 code는 PKCE `code_verifier` 없이는 교환할 수 없고(verifier는 Hermes 프로세스에만 있다) 일회용·≤300초이므로, (1) 운영자 요청 본문 필드로만 받아 (2) 한 요청 안에서 사이드카로 그대로 넘기고 (3) 저장·로그·감사·메트릭·응답에 쓰지 않는 조건에서 통과를 허용한다. 토큰(access·refresh)은 어떤 경우에도 oort를 지나가지 않는다.」* 허용하지 않으면 Codex(기기 코드, 통과 없음)만 화면으로 하고 Claude·앱 로그인은 (c)(운영자 셸 명령 표시)로 남는다.
+**Q2. Claude 구독 로그인을 oort 화면에서 시작해 주는 것을 허용할까요?** Hermes 자신이 이 흐름의 HTTP 노출을 약관상의 이유로 거부했다(L0-3). #4071은 「벤더 약관 적합성은 운영자 몫」으로 보지만, 사이드카는 oort가 제공하는 「스크립트 가능한 HTTP 시작점」이라는 점에서 Hermes가 피한 모양과 같다. 옵션: (A) 허용하고 운영자 확인 한 줄(「이 로그인은 운영자 본인 구독이며 약관 책임은 운영자에게 있어요」) 후 시작, (B) Claude는 (c)만, Codex만 중계. 이 증보는 (B)를 안전한 기본으로 두고 (A)는 Q1 허용과 별개의 결정으로 본다. 약관 문구 자체는 이 문서에서 검증하지 않았다(`runtime-unverified`).
+**Q3. 사이드카를 기본 켬으로 할까요?** 제안: 기본 끔(키 env가 있을 때만 기동). 제로 베이스 온보딩 문서가 키를 한 번 생성하는 단계를 안내한다.
+
+### 구현 슬라이스 (Accept 후, 별도 이슈)
+
+1. **L-S1 사이드카**: 프로세스(고정 명령 목록·자식 구동·URL/기기 코드 파싱·상태기계·TTL·로그 규칙), 시작 명령 통합(Railway)·compose `agents` 프로파일 서비스, 키 env. 모의 AS/MCP로 시험(실제 벤더 없이), 승인 뒤 게이트웨이가 자격을 집는지와 `redirect_uri` 설정 효과 확인 포함.
+2. **L-S2 oort API**: 운영자 전용 라우트·`login_relay_off` 분기·마스킹 래퍼·감사, 토큰 0바이트 경계 시험(아래 red proof), `lockgate`의 영향 확인.
+3. **L-S3 웹·폰 화면(#4073)**: 설정 › AI 연결과 웰컴의 API 키/Codex/Claude 선택, URL·기기 코드 표시, 붙여넣기 입력, (c) 대체 문구, 캡처·design-review.
+4. **L-S4 앱 로그인 화면(#4074)**: 앱별 연결 상태·만료 추정, Google `mcp_login_probe.py` 경로, 만료(External Testing 7일, #4069) 표시.
+5. **L-S5 설정 템플릿**: `model.provider` 기본값, 로그인 후 확인 단계(L5).
+
+### red proof (구현이 인용할 것 — 해당 분기를 지우면 실패해야 한다)
+
+1. **토큰·code 0바이트**: 모의 AS가 `MOCK-ACCESS-TOKEN-…`·`MOCK-REFRESH-TOKEN-…`을 발급하고 시험이 붙여넣는 code에 표식(`MARKER-CODE-…`)을 넣는다. 끝난 뒤 oort `api` 로그 전체, DB 덤프, 모든 HTTP 응답 본문, 감사 행, 사이드카 로그에서 표식 3종이 **0건**이어야 한다. 표식이 `/opt/data`에는 있어야 한다(시험이 실제로 완주했음을 증명하는 양성 대조).
+2. 요청 본문 로깅을 켠 채로도 위가 0건(마스킹 래퍼를 일부러 `String`으로 바꾸면 실패).
+3. state 불일치는 stdin에 아무것도 쓰지 않는다(자식 stdin 스파이로 확인), redirect 호스트 불일치 `400`, 같은 `login_id` 두 번째 `complete` `409`.
+4. 비운영자 `403`, 키 없음 `409 login_relay_off`, 다른 운영자의 `login_id`로 `complete` 거부.
+5. TTL 뒤 자식 프로세스가 남아 있지 않다(PID 생존 확인).
+6. 고정 명령 목록 밖의 `target`(`../`, 셸 메타문자, 설정에 없는 서버)은 프로세스를 띄우기 전에 거부된다.
+
+### 바뀌지 않는 것
+
+D1~D9, K1~K7, 게이트웨이 `/v1/chat/completions` SSE 경로(D5), `HERMES_API_KEY` 의미, oort가 토큰을 소유·저장하지 않는다는 불변식, `lockgate.py` 규칙(사이드카 기동은 시작 명령의 추가 한 줄이고 게이트 통과 뒤에 온다).
