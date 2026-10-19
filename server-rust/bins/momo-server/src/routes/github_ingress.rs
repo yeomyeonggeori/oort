@@ -54,18 +54,18 @@ use momo_settings::github_ingress::{
     learn_subscription_repo_id, list_repositories, list_subscriptions, list_unlinked_installations,
     list_workspace_installations, lock_installation_link, mark_installation,
     matching_subscriptions, operator_link_installation, peek_install_claim, read_app_slug,
-    read_webhook_secrets, record_claim_installation, remove_repositories, replace_repositories,
-    set_installation_subscriptions_active, set_repository_subscriptions_active,
-    try_link_installation, upsert_installation, upsert_subscription, InstallationFacts,
-    InstallationMark, InstallationRecord, LinkCandidate, LinkOutcome, NewSubscription,
-    RepositoryFacts, SubscriptionRecord, INSTALL_STATE_TTL_SECONDS,
+    read_webhook_secrets, record_claim_installation, refresh_repository_facts, remove_repositories,
+    replace_repositories, set_installation_subscriptions_active,
+    set_repository_subscriptions_active, try_link_installation, upsert_installation,
+    upsert_subscription, InstallationFacts, InstallationMark, InstallationRecord, LinkCandidate,
+    LinkOutcome, NewSubscription, RepositoryFacts, SubscriptionRecord, INSTALL_STATE_TTL_SECONDS,
 };
 use momo_settings::{new_state_token, state_hash, state_workspace_hint};
 use momo_webhook::{
     deterministic_client_message_id, github_signature_matches,
     installation_id as payload_installation_id, installation_info, is_known_feature,
     render_notification, repositories as payload_repositories, valid_github_delivery_id,
-    GITHUB_DEFAULT_FEATURES, GITHUB_MAXIMUM_BODY_BYTES,
+    GITHUB_AUTHOR_PROP, GITHUB_DEFAULT_FEATURES, GITHUB_MAXIMUM_BODY_BYTES,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -621,6 +621,26 @@ pub async fn receive(
                     }
                 }
 
+                if !is_installation_event(&delivery.event) {
+                    // The signed payload's current privacy / name beats the install-time list
+                    // (a repository can turn private after the install; ADR-0205 H-1).
+                    if let Some(repository) = delivery.payload.get("repository") {
+                        let id = repository.get("id").and_then(Value::as_i64);
+                        let name = repository.get("full_name").and_then(Value::as_str);
+                        let private = repository.get("private").and_then(Value::as_bool);
+                        if let (Some(id), Some(name), Some(private)) = (id, name, private) {
+                            refresh_repository_facts(
+                                conn,
+                                delivery.installation_id,
+                                id,
+                                name.trim(),
+                                private,
+                            )
+                            .await?;
+                        }
+                    }
+                }
+
                 if is_installation_event(&delivery.event) {
                     let effect = if applied {
                         SubscriptionEffect::None
@@ -686,6 +706,9 @@ pub async fn receive(
                     ]);
                     let mut props = notification.props.clone();
                     props["github_installation_id"] = json!(delivery.installation_id);
+                    // ADR-0205 H-1: the system member that wrote the line, so a client can check
+                    // the author against it instead of trusting a display name.
+                    props[GITHUB_AUTHOR_PROP] = json!(author.to_string());
                     let sent = momo_messaging::send_message_in_tx(
                         conn,
                         workspace_id,
@@ -765,16 +788,15 @@ fn back_to_client(base: &str, outcome: &str) -> Response {
 
 enum SetupOutcome {
     Word(&'static str),
-    Conflict,
 }
 
 /// GitHub redirects the installing browser here. The `installation_id` is **not trusted**
 /// (anyone can open this URL with any id): it is recorded as the pending half of a link and only
 /// becomes a link when the signed `installation.created` for the same id exists.
 ///
-/// Answers: 303 back to the client with a verdict word for every outcome except one — an
-/// installation already linked to **another** workspace answers `409`
-/// (`github_installation_linked_elsewhere`, ADR-0205 acceptance 4).
+/// Answers: 303 back to the client with a verdict word for **every** outcome. An installation
+/// already linked to **another** workspace answers `linked_elsewhere` (#4084: it used to be a 409
+/// JSON body, which left the browser on a raw error page; the screen reads the word).
 pub async fn setup(State(state): State<AppState>, Query(query): Query<SetupQuery>) -> Response {
     if let Err(error) = master_key(&state) {
         return error.into_response();
@@ -844,7 +866,7 @@ pub async fn setup(State(state): State<AppState>, Query(query): Query<SetupQuery
                             SetupOutcome::Word("linked")
                         }
                         LinkOutcome::AlreadyLinked { .. } => SetupOutcome::Word("linked"),
-                        LinkOutcome::LinkedElsewhere => SetupOutcome::Conflict,
+                        LinkOutcome::LinkedElsewhere => SetupOutcome::Word("linked_elsewhere"),
                         LinkOutcome::NoInstallation
                         | LinkOutcome::NoClaim
                         | LinkOutcome::Ambiguous => SetupOutcome::Word("pending"),
@@ -856,12 +878,6 @@ pub async fn setup(State(state): State<AppState>, Query(query): Query<SetupQuery
     .await;
     match settle_db("github.setup", outcome) {
         Ok(SetupOutcome::Word(word)) => back_to_client(&base, word),
-        Ok(SetupOutcome::Conflict) => ApiError::coded(
-            StatusCode::CONFLICT,
-            "github_installation_linked_elsewhere",
-            "이 GitHub 계정의 설치는 이미 다른 워크스페이스에 연결되어 있어요.",
-        )
-        .into_response(),
         Err(error) => error.into_response(),
     }
 }
@@ -969,6 +985,9 @@ pub struct SubscriptionDto {
     features: Vec<String>,
     active: bool,
     private_confirmed: bool,
+    /// The channel is public now and the repository may be private: no event is sent until an
+    /// owner/admin subscribes again with `confirmPrivate` (ADR-0205 H-1).
+    needs_reconfirm: bool,
 }
 
 fn subscription_dto(record: SubscriptionRecord) -> SubscriptionDto {
@@ -981,6 +1000,7 @@ fn subscription_dto(record: SubscriptionRecord) -> SubscriptionDto {
         features: record.features,
         active: record.active,
         private_confirmed: record.private_confirmed,
+        needs_reconfirm: record.needs_reconfirm,
     }
 }
 
