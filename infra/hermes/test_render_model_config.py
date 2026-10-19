@@ -71,7 +71,7 @@ class Templates(unittest.TestCase):
 
     def test_model_override_must_be_in_the_catalog(self):
         self.assertEqual(section(R.fragment("codex-oauth", model="gpt-5.6-terra"), "model")["default"], "gpt-5.6-terra")
-        for bad in ("claude-sonnet-5-5", "gpt-9", "gpt-5.6-sol\nx: 1", "", " gpt-5.6-sol"):
+        for bad in ("claude-sonnet-5-5", "gpt-9", "gpt-5.6-sol\nx: 1", "gpt-5.6-sol\n", "", " gpt-5.6-sol"):
             with self.subTest(model=bad), self.assertRaises(R.RenderError):
                 R.fragment("codex-oauth", model=bad)
 
