@@ -1,0 +1,3 @@
+model:                    # #4082: secret: ANTHROPIC_API_KEY as a service variable or in the volume .env, never in this file
+  provider: anthropic
+  default: claude-sonnet-5
