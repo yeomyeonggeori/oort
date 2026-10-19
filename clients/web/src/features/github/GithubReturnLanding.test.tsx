@@ -98,6 +98,16 @@ describe("GitHub 에서 돌아오는 문", () => {
     expect(q("github-return")).toBeNull();
   });
 
+  it("linked_elsewhere 는 막힌 단어로 돌아와 다른 워크스페이스에 연결됐다고 말한다", async () => {
+    await mountAtSearch("?githubInstall=linked_elsewhere");
+    const banner = q("github-return");
+    expect(banner?.getAttribute("data-return-word")).toBe("linked_elsewhere");
+    expect(banner?.getAttribute("role")).toBe("alert");
+    expect(banner?.textContent).toContain("이미 다른 워크스페이스에 연결돼 있어요");
+    expect(banner?.textContent).toContain("한 계정은 한 워크스페이스에만");
+    expect(window.location.search).toBe("");
+  });
+
   it("앱 등록의 단어도 같은 문으로 들어온다", async () => {
     await mountAtSearch("?githubApp=convert_code_rejected");
     expect(q("github-return")?.textContent).toContain("등록 코드를 받아 주지 않았어요");

@@ -27,13 +27,16 @@ import {
   parseWorkspaceOverview,
   privateConfirmationSentence,
   permissionLabels,
+  reconfirmInput,
+  reconfirmSentence,
   repositoryInputMode,
   safeGithubUrl,
   safeHttpsUrl,
   searchWithoutGithubReturn,
 } from "./model";
 
-const GITHUB_AUTHOR = { kind: "agent", displayName: "GitHub" };
+const GITHUB_ID = "00000000-0000-7000-8000-000000000a01";
+const HUMAN_ID = "00000000-0000-7000-8000-000000000b02";
 
 describe("비공개 저장소 확인 (ADR-0205 수용 11)", () => {
   it("공개 채널에 비공개 저장소는 확인이 필요하다", () => {
@@ -182,6 +185,7 @@ describe("와이어 읽기", () => {
           features: ["pulls"],
           active: true,
           privateConfirmed: false,
+          needsReconfirm: false,
         },
       ],
       features: ["pulls", "issues", "mystery"],
@@ -236,10 +240,17 @@ describe("와이어 읽기", () => {
 });
 
 describe("돌아온 상태 단어 (닫힌 세계)", () => {
-  it("설치 쪽 단어 일곱 모두에 문장이 있고 state_missing 은 운영자 목록을 가리킨다", () => {
-    for (const word of ["linked", "pending", "requested", "state_missing", "state_invalid", "not_admin", "invalid_request"]) {
+  it("설치 쪽 단어 여덟 모두에 문장이 있고 state_missing 은 운영자 목록을 가리킨다", () => {
+    for (const word of ["linked", "linked_elsewhere", "pending", "requested", "state_missing", "state_invalid", "not_admin", "invalid_request"]) {
       expect(githubReturnSentence("install", word)?.sentence).toBeTruthy();
     }
+    const elsewhere = githubReturnSentence("install", "linked_elsewhere");
+    expect(elsewhere?.tone).toBe("stop");
+    expect(elsewhere?.sentence).toContain("다른 워크스페이스");
+    expect(githubReturnFromSearch("?githubInstall=linked_elsewhere")).toEqual({
+      kind: "install",
+      word: "linked_elsewhere",
+    });
     expect(githubReturnSentence("install", "state_missing")?.next).toContain("연결 안 된 설치");
     expect(githubReturnSentence("install", "requested")?.next).toContain("연결 안 된 설치");
   });
@@ -342,6 +353,7 @@ describe("serverSurfaces: githubNotifications", () => {
 describe("알림 메시지 줄", () => {
   const props = {
     source: "github",
+    github_author_member_id: GITHUB_ID,
     github_event: "pull_request",
     github_action: "opened",
     github_repository: "yeomyeonggeori/oort",
@@ -349,7 +361,7 @@ describe("알림 메시지 줄", () => {
   };
 
   it("서버가 보낸 GitHub 알림이면 줄의 재료를 만든다", () => {
-    const notice = githubNoticeFor({ props }, GITHUB_AUTHOR);
+    const notice = githubNoticeFor({ authorMemberId: GITHUB_ID, props });
     expect(notice).toEqual({
       repository: "yeomyeonggeori/oort",
       eventLabel: "PR",
@@ -359,41 +371,83 @@ describe("알림 메시지 줄", () => {
     expect(githubNoticeLabel(notice!)).toBe("GitHub 알림, yeomyeonggeori/oort, PR 열림");
   });
 
-  it("사람이 props 를 흉내 내도 줄이 서지 않는다 (작성자가 에이전트 GitHub 가 아님)", () => {
-    expect(githubNoticeFor({ props }, { kind: "human", displayName: "GitHub" })).toBeNull();
-    expect(githubNoticeFor({ props }, { kind: "agent", displayName: "Hermes" })).toBeNull();
-    expect(githubNoticeFor({ props }, null)).toBeNull();
+  it("사람이 props 를 흉내 내도 줄이 서지 않는다 (작성자 id가 서버가 적은 id와 다름)", () => {
+    expect(githubNoticeFor({ authorMemberId: HUMAN_ID, props })).toBeNull();
+    expect(githubNoticeFor({ authorMemberId: undefined, props })).toBeNull();
+    expect(githubNoticeFor({ authorMemberId: "", props: { ...props, github_author_member_id: "" } })).toBeNull();
+  });
+
+  it("판정은 이름이 아니라 id다: 서버가 적은 id 와 작성자 id가 같을 때만 선다", () => {
+    // 같은 id면 이름이 무엇이든 선다(이름은 인자로 받지도 않는다). 대소문자만 다른 uuid 도 같은 id다.
+    expect(githubNoticeFor({ authorMemberId: GITHUB_ID.toUpperCase(), props })).not.toBeNull();
+    // props 에 id가 없으면(서버가 적지 않은 옛 알림) 줄이 없다.
+    const { github_author_member_id: _omit, ...withoutId } = props;
+    expect(githubNoticeFor({ authorMemberId: GITHUB_ID, props: withoutId })).toBeNull();
   });
 
   it("옛 서버에는 칸이 없어서 줄이 없다", () => {
-    expect(githubNoticeFor({}, GITHUB_AUTHOR)).toBeNull();
-    expect(githubNoticeFor({ props: { source: "hermes_gateway" } }, GITHUB_AUTHOR)).toBeNull();
+    expect(githubNoticeFor({ authorMemberId: GITHUB_ID })).toBeNull();
+    expect(githubNoticeFor({ authorMemberId: GITHUB_ID, props: { source: "hermes_gateway" } })).toBeNull();
   });
 
   it("모르는 이벤트와 모양이 틀린 저장소는 줄을 세우지 않는다", () => {
-    expect(githubNoticeFor({ props: { ...props, github_event: "deployment" } }, GITHUB_AUTHOR)).toBeNull();
-    expect(githubNoticeFor({ props: { ...props, github_repository: "no-slash" } }, GITHUB_AUTHOR)).toBeNull();
-    expect(githubNoticeFor({ props: { ...props, github_repository: "a/b c" } }, GITHUB_AUTHOR)).toBeNull();
+    expect(githubNoticeFor({ authorMemberId: GITHUB_ID, props: { ...props, github_event: "deployment" } })).toBeNull();
+    expect(githubNoticeFor({ authorMemberId: GITHUB_ID, props: { ...props, github_repository: "no-slash" } })).toBeNull();
+    expect(githubNoticeFor({ authorMemberId: GITHUB_ID, props: { ...props, github_repository: "a/b c" } })).toBeNull();
   });
 
   it("낯선 호스트나 프로토타입 키로 줄을 흉내 낼 수 없다", () => {
     for (const github_url of ["https://evil.example/x", "https://github.com.evil.example/x", "https://notgithub.com/x"]) {
-      expect(githubNoticeFor({ props: { ...props, github_url } }, GITHUB_AUTHOR)?.url).toBeNull();
+      expect(githubNoticeFor({ authorMemberId: GITHUB_ID, props: { ...props, github_url } })?.url).toBeNull();
     }
     expect(safeGithubUrl("https://gist.github.com/a")).toBe("https://gist.github.com/a");
-    expect(githubNoticeFor({ props: { ...props, github_event: "constructor" } }, GITHUB_AUTHOR)).toBeNull();
-    expect(githubNoticeFor({ props: { ...props, github_action: "toString" } }, GITHUB_AUTHOR)?.actionLabel).toBeNull();
+    expect(githubNoticeFor({ authorMemberId: GITHUB_ID, props: { ...props, github_event: "constructor" } })).toBeNull();
+    expect(githubNoticeFor({ authorMemberId: GITHUB_ID, props: { ...props, github_action: "toString" } })?.actionLabel).toBeNull();
     expect(githubFailureMessage("load", new ApiError(409, "x", "constructor"))).toContain("GitHub 정보를 읽지 못했어요");
     expect(permissionLabels([{ name: "constructor", access: "read" }])).toEqual([]);
   });
 
   it("모르는 action 은 낱말 없이 서고, https 가 아닌 주소는 링크가 없다", () => {
-    const notice = githubNoticeFor(
-      { props: { ...props, github_action: "synchronize", github_url: "javascript:alert(1)" } },
-      GITHUB_AUTHOR
-    );
+    const notice = githubNoticeFor({
+      authorMemberId: GITHUB_ID,
+      props: { ...props, github_action: "synchronize", github_url: "javascript:alert(1)" },
+    });
     expect(notice?.actionLabel).toBeNull();
     expect(notice?.url).toBeNull();
     expect(githubNoticeLabel(notice!)).toBe("GitHub 알림, yeomyeonggeori/oort, PR");
+  });
+});
+
+describe("다시 확인 필요 구독 (#4084)", () => {
+  const wire = {
+    id: "s1",
+    channelId: "c1",
+    installationId: 5,
+    repository: "acme/web",
+    repoId: 1,
+    features: ["pulls", "checks"],
+    active: true,
+    privateConfirmed: false,
+  };
+
+  it("needsReconfirm 을 읽고, 칸이 없는 옛 서버는 false 다", () => {
+    expect(parseSubscription({ ...wire, needsReconfirm: true }).needsReconfirm).toBe(true);
+    expect(parseSubscription(wire).needsReconfirm).toBe(false);
+  });
+
+  it("다시 구독 요청은 고른 것 그대로에 confirmPrivate 만 켠다", () => {
+    expect(reconfirmInput(parseSubscription({ ...wire, needsReconfirm: true }))).toEqual({
+      channelId: "c1",
+      installationId: 5,
+      repository: "acme/web",
+      features: ["pulls", "checks"],
+      confirmPrivate: true,
+    });
+  });
+
+  it("확인 문장은 공개 채널이 됐다는 사실과 알림 종류를 말한다", () => {
+    const sentence = reconfirmSentence("마케팅", "acme/web", ["pulls", "checks"]);
+    expect(sentence).toContain("마케팅 채널이 공개 채널이 됐어요");
+    expect(sentence).toContain("PR, 체크");
   });
 });

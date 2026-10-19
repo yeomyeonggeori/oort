@@ -1,4 +1,4 @@
-import { featuresSummary, type GithubSubscription } from "@momo/core/features/github/model";
+import { featuresSummary, reconfirmSentence, type GithubSubscription } from "@momo/core/features/github/model";
 import { ConfirmButton, StatusChip } from "@/features/settings/SettingsFields";
 
 // =============================================================================
@@ -11,6 +11,8 @@ export function GithubSubscriptionList({
   subscriptions,
   channelName,
   onRemove,
+  onReconfirm,
+  reconfirmingId = null,
   removingId,
   offline,
   testId = "github-subscriptions",
@@ -18,6 +20,9 @@ export function GithubSubscriptionList({
   subscriptions: GithubSubscription[];
   channelName?: (subscription: GithubSubscription) => string;
   onRemove: (subscription: GithubSubscription) => void;
+  /** 「다시 확인 필요」 구독을 `confirmPrivate` 로 다시 구독한다. 없으면 확인 버튼을 세우지 않는다. */
+  onReconfirm?: (subscription: GithubSubscription) => void;
+  reconfirmingId?: string | null;
   removingId: string | null;
   offline: boolean;
   testId?: string;
@@ -37,14 +42,39 @@ export function GithubSubscriptionList({
                 {subscription.repository}
               </span>
               {subscription.privateConfirmed && <StatusChip tone="muted">비공개 확인함</StatusChip>}
-              {!subscription.active && <StatusChip tone="warn">멈춤</StatusChip>}
+              {subscription.needsReconfirm && <StatusChip tone="warn">다시 확인 필요</StatusChip>}
+              {!subscription.active && !subscription.needsReconfirm && (
+                <StatusChip tone="warn">멈춤</StatusChip>
+              )}
             </div>
             <p className="break-keep text-meta text-ink-muted">
               {channelName !== undefined ? `${channelName(subscription)} · ` : ""}
               {featuresSummary(subscription.features)}
-              {!subscription.active ? " · 설치가 멈춰 있어서 알림이 오지 않아요" : ""}
+              {subscription.needsReconfirm
+                ? " · 다시 확인하기 전까지 알림이 오지 않아요"
+                : !subscription.active
+                  ? " · 설치가 멈춰 있어서 알림이 오지 않아요"
+                  : ""}
             </p>
           </div>
+          {subscription.needsReconfirm && onReconfirm !== undefined && (
+            <ConfirmButton
+              label="다시 확인"
+              subject={subscription.repository}
+              question={reconfirmSentence(
+                channelName !== undefined ? channelName(subscription) : "이",
+                subscription.repository,
+                subscription.features
+              )}
+              confirmLabel="확인했어요, 다시 구독"
+              confirmDestructive={false}
+              busy={reconfirmingId === subscription.id}
+              busyLabel="저장 중"
+              disabled={offline}
+              onConfirm={() => onReconfirm(subscription)}
+              testId="github-subscription-reconfirm"
+            />
+          )}
           <ConfirmButton
             label="해제"
             subject={subscription.repository}

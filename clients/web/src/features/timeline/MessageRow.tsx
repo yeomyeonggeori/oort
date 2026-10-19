@@ -525,11 +525,8 @@ export function MessageRow({
   // 앱을 쓰다 막혔을 때의 한 문장(+ 행동 하나). 칸이 없으면 null.
   const appNotice = useAppNotice(message);
   // 서버가 GitHub 앱으로 보낸 알림이면 아랫줄이 「GitHub 알림」이라고 말한다(ADR-0205, #3955).
-  // 작성자가 에이전트 「GitHub」가 아니면 null이다(사람이 props 를 흉내 내도 서지 않는다).
-  const githubNotice = useMemo(
-    () => githubNoticeFor(message, author ? { kind: author.kind, displayName: author.displayName } : null),
-    [message, author]
-  );
+  // 작성자 id가 서버가 적은 `github_author_member_id` 와 같지 않으면 null이다(이름은 증거가 아니다).
+  const githubNotice = useMemo(() => githubNoticeFor(message), [message]);
   // 맡길 원래 요청의 본문: 화면에 든 행이 먼저, 없으면 페이지에 동봉된 인용.
   const delegateSourceId = teamAiDelegate?.sourceMessageId ?? null;
   const delegateSourceBody =

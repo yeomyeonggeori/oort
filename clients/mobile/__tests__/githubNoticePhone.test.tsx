@@ -53,6 +53,7 @@ const ME: Member = {id: SELF_ID, workspaceId: WS, kind: 'human', displayName: 'ê
 
 const PROPS = {
   source: 'github',
+  github_author_member_id: GITHUB_ID,
   github_event: 'pull_request',
   github_action: 'opened',
   github_repository: 'yeomyeonggeori/oort',

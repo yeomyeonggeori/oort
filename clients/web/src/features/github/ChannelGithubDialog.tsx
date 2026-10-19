@@ -12,11 +12,13 @@ import {
 } from "@/design/ui/dialog";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
-import { unsubscribeGithub } from "@momo/core/features/github/api";
+import { subscribeGithub, unsubscribeGithub } from "@momo/core/features/github/api";
 import {
   CHANNEL_GITHUB_LABEL,
   GITHUB_PANE_PATH,
   githubFailureMessage,
+  reconfirmInput,
+  type GithubSubscription,
 } from "@momo/core/features/github/model";
 import type { Channel } from "@momo/core/lib/api";
 import { GithubLoadFailure } from "./GithubStates";
@@ -59,6 +61,16 @@ export function ChannelGithubDialog({
       void client.invalidateQueries({ queryKey: githubOverviewPrefix(workspaceId) });
     },
     onError: (error) => setRemoveError(githubFailureMessage("unsubscribe", error)),
+  });
+
+  const reconfirm = useMutation({
+    mutationFn: (subscription: GithubSubscription) =>
+      subscribeGithub(workspaceId, reconfirmInput(subscription)),
+    onSuccess: () => {
+      setRemoveError(null);
+      void client.invalidateQueries({ queryKey: githubOverviewPrefix(workspaceId) });
+    },
+    onError: (error) => setRemoveError(githubFailureMessage("subscribe", error)),
   });
 
   const data = overview.data;
@@ -134,6 +146,8 @@ export function ChannelGithubDialog({
                 <GithubSubscriptionList
                   subscriptions={mine}
                   onRemove={(subscription) => remove.mutate(subscription.id)}
+                  onReconfirm={(subscription) => reconfirm.mutate(subscription)}
+                  reconfirmingId={reconfirm.isPending ? (reconfirm.variables?.id ?? null) : null}
                   removingId={remove.isPending ? (remove.variables ?? null) : null}
                   offline={offline}
                 />
