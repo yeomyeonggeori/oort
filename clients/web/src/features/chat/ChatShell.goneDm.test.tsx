@@ -20,6 +20,12 @@ const WS = "00000000-0000-7000-8000-000000000001";
 const ME = "00000000-0000-7000-8000-000000000101";
 
 // #3653: 개인 에이전트 부르기는 QueryClient가 필요하다. 이 시험이 보는 것이 아니다.
+// #4142: 닫은 DM 의 되살림 판정은 메시지 쪽을 읽는 쿼리라 QueryClient 가 필요하다. 이 시험이 보는 것이 아니다
+// (판정은 dmRevival.test.ts · Sidebar.dm.test.tsx).
+vi.mock("@/features/sidebar/dmRevival", () => ({
+  useDmRevival: () => () => undefined,
+}));
+
 vi.mock("@/features/chat/usePersonalCall", () => ({
   usePersonalCall: () => ({
     planFor: () => null,

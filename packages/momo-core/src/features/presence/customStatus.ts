@@ -10,13 +10,23 @@ import type { PresenceStatus } from "../../lib/api";
 export const CUSTOM_STATUS_TEXT_MAX = 80;
 export const CUSTOM_STATUS_EMOJI_MAX = 32;
 
+/**
+ * 추천 상태. `expiry` 는 고르면 만료 칸에 함께 채워지는 기본 기한이다(웹 「상태 설정」).
+ * 「시각 고르기」는 날짜를 요구하므로 프리셋 기본값이 될 수 없다.
+ * 폰은 이 값을 읽지 않는다 — 폰 StatusPage 는 이모지·글만 채운다.
+ */
 export const CUSTOM_STATUS_PRESETS = [
-  { id: "meeting", label: "회의 중", emoji: "📅" },
-  { id: "commute", label: "이동 중", emoji: "🚶" },
-  { id: "sick", label: "병가", emoji: "🤒" },
-  { id: "vacation", label: "휴가", emoji: "🌴" },
-  { id: "wfh", label: "재택", emoji: "🏠" },
-] as const;
+  { id: "meeting", label: "회의 중", emoji: "📅", expiry: "1h" },
+  { id: "commute", label: "이동 중", emoji: "🚶", expiry: "30m" },
+  { id: "sick", label: "병가", emoji: "🤒", expiry: "today" },
+  { id: "vacation", label: "휴가", emoji: "🌴", expiry: "none" },
+  { id: "wfh", label: "재택", emoji: "🏠", expiry: "today" },
+] as const satisfies readonly {
+  id: string;
+  label: string;
+  emoji: string;
+  expiry: Exclude<StatusExpiryChoice, "custom">;
+}[];
 
 export type CustomStatusPresetId = (typeof CUSTOM_STATUS_PRESETS)[number]["id"];
 

@@ -21,6 +21,13 @@ import { ChatShell } from "./ChatShell";
 const WS = "00000000-0000-7000-8000-000000000001";
 const ME = "00000000-0000-7000-8000-000000000101";
 
+// #4142: 닫은 DM 의 「사람이 읽을 새 메시지」 판정은 메시지 쪽을 읽는 쿼리다. 이 시험이 보는 것은 폴백이 투영의
+// latestSeq 로 후보를 고르는 규칙이므로 투영 값을 그대로 돌려주는 대역을 둔다(판정 자체는 dmRevival.test.ts·Sidebar.dm.test.tsx).
+vi.mock("@/features/sidebar/dmRevival", () => ({
+  useDmRevival: ({ byChannel }: { byChannel: Map<string, { latestSeq: number }> }) =>
+    (id: string) => byChannel.get(id.toLowerCase())?.latestSeq,
+}));
+
 // #3653: 개인 에이전트 부르기는 QueryClient가 필요하다. 이 시험이 보는 것이 아니다.
 vi.mock("@/features/chat/usePersonalCall", () => ({
   usePersonalCall: () => ({
