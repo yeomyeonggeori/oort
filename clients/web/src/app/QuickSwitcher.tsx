@@ -77,7 +77,7 @@ import {
 import { Keycaps } from "@/app/ShortcutHelpDialog";
 import { useShortcutBindingsVersion } from "@/app/shortcutBindings";
 import {
-  commandSearchValue,
+  commandSearchTerms,
   visibleCommands,
   type Command as PaletteCommand,
   type CommandContext,
@@ -105,6 +105,7 @@ import { Dialog, DialogOverlay, DialogPortal } from "@/design/ui/dialog";
 import { MODAL_CONTENT_MOTION } from "@/design/motion";
 import { cn } from "@/design/lib/cn";
 import { isDesktop } from "@/lib/tauri";
+import { paletteFilter } from "./paletteFilter";
 
 // =============================================================================
 // ⌘K quick switcher (R-1 §공통계약, ADR-0133 stack: cmdk). Channels, DMs, people
@@ -317,7 +318,10 @@ function CommandRow({
     <Command.Item
       role="option"
       className={itemClass}
-      value={commandSearchValue(command)}
+      // 줄의 정체는 id다. 검색 재료는 `keywords`(이름·작은 글씨·별칭)뿐이다 —
+      // id까지 재료로 실으면 「ai」가 `nav.inbox`의 a…i에도 걸린다(#4111).
+      value={command.id}
+      keywords={commandSearchTerms(command)}
       data-testid={command.testId}
       data-command-id={command.id}
       data-member-id={command.memberId}
@@ -817,7 +821,7 @@ export function QuickSwitcher({
     <AnimatePresence>
       {open ? (
     <PaletteLayer onOpenChange={onOpenChange}>
-      <Command label="검색과 이동">
+      <Command label="검색과 이동" filter={paletteFilter}>
       {/* 입력은 팔레트 안에 또 하나의 진한 상자를 그리지 않는다 (#1753 H-1).
           팔레트는 모달이고 입력이 유일한 포커스 대상이라, 열려 있는 동안 링은
           상시 점등이 되어 정보가 0이다 — 링 없이 hairline 구분선만 남긴다.

@@ -623,9 +623,13 @@ describe("영속 결과 카드 (ADR-0186 부록 B)", () => {
     expect(reachable).not.toContain("updates");
     expect(reachable).not.toContain("code");
     expect(reachable).toContain("members");
-    for (const id of reachable) {
+    // 링크 행(`aiHub`)은 목차의 행이지만 `?section=` 값이 아니다(#4111).
+    const linkIds = reachableSettingsSections().filter((item) => item.link).map((item) => item.id);
+    expect(linkIds).toEqual(["aiHub"]);
+    for (const id of reachable.filter((item) => !linkIds.includes(item))) {
       expect(isReachableHref(`/settings?section=${id}`)).toBe(true);
     }
+    expect(isReachableHref("/settings?section=aiHub")).toBe(false);
     // 합친 옛 구획(별칭)과 AI 허브로 옮겨 간 옛 구획은 목록에는 없지만 문이 닿는다 (#3578 S1).
     for (const id of ["account", "link-previews", "terminal", "webhooks", "agents", "ai"]) {
       expect(isReachableHref(`/settings?section=${id}`)).toBe(true);

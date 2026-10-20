@@ -1317,8 +1317,20 @@ export function Sidebar({
           {/* #3574: 목록 끝에 이어지는 한 줄. 띠도 구분선도 없이 목록 행과 같은 안쪽 여백으로
               서고, 도움말은 같은 줄 끝의 조용한 아이콘이다. 접힘(⌘B)에서는 이 줄 대신 레일의
               아바타가 같은 메뉴를 연다(위 footer). */}
-          {/* 홈 인디케이터 위로 물러나는 안전 영역은 프로필 줄과 그 아래 멈춤 줄이 **함께** 진다. */}
+          {/* 홈 인디케이터 위로 물러나는 안전 영역은 프로필 줄과 그 위 멈춤 줄이 **함께** 진다. */}
           <div className="safe-area-bottom">
+            {/* 알림이 멈춰 있으면 그 사실이 프로필 줄 **위** 한 줄로 선다(ADR-0204 D3, #3923). 카드가 뜨고
+                지는 것이 프로필 줄을 움직이면 안 된다(#4107, 성재 0.1.32 실기): 프로필 줄은 사이드바 맨
+                아래에 붙어 있고 줄이 그 위로 쌓이므로, 목록이 그만큼 줄 뿐 프로필 줄의 자리는 같다.
+                프로필 카드는 전체가 버튼이라 그 안에 단추를 둘 수 없어 형제로 둔다. 접힘(⌘B)에서는 이 줄
+                대신 레일의 아바타만 있어 서지 않는다. */}
+            {!railCollapsed && (
+              <PauseBanner
+                workspaceId={workspaceId}
+                selfMemberId={session.member.id}
+                selfMember={selfMember}
+              />
+            )}
             <div
               className="flex items-center gap-1 pt-2"
               data-testid="sidebar-profile-foot"
@@ -1329,16 +1341,6 @@ export function Sidebar({
               {!railCollapsed && <UpdateButton />}
               <ShortcutHelpDialog />
             </div>
-            {/* 알림이 멈춰 있으면 그 사실이 내 이름 아래 한 줄로 선다(ADR-0204 D3, #3923). 프로필
-                카드는 전체가 버튼이라 그 안에 단추를 둘 수 없어 형제로 둔다. 접힘(⌘B)에서는 이 줄
-                대신 레일의 아바타만 있어 서지 않는다. */}
-            {!railCollapsed && (
-              <PauseBanner
-                workspaceId={workspaceId}
-                selfMemberId={session.member.id}
-                selfMember={selfMember}
-              />
-            )}
           </div>
         </div>
 

@@ -306,7 +306,7 @@ async function sceneA(browser, origin, scheme, report) {
   const foot = page.getByTestId("sidebar-profile-foot");
   const fb = await foot.boundingBox();
   const bb = await banner(page).boundingBox();
-  check(`a ${tag} 줄이 프로필 줄 아래에 선다`, fb !== null && bb !== null && bb.y >= fb.y + fb.height - 1, JSON.stringify({ fb, bb }));
+  check(`a ${tag} 줄이 프로필 줄 위에 선다(#4107)`, fb !== null && bb !== null && bb.y + bb.height <= fb.y + 1, JSON.stringify({ fb, bb }));
   check(`a ${tag} 줄이 사이드바 폭 안에 있다`, bb !== null && bb.x >= 0 && bb.x + bb.width <= 320, JSON.stringify(bb));
   const overflow = await noOverflow(page);
   check(`a ${tag} 가로 스크롤 없음`, overflow <= 0, String(overflow));
