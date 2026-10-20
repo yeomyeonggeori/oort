@@ -22,6 +22,7 @@ import {
 import { escapeIsClaimed } from "@/design/ui/escapeLayer";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { AiLinkSection } from "./AiLinkSection";
+import { chooseListbox, listboxValue } from "@/design/ui/listboxTestKit";
 
 // =============================================================================
 // AI 틀 (#2877). 시안 §1·§6: 두 절(내 계정 · 이 맥 / 팀 AI 키 · 이
@@ -378,18 +379,15 @@ describe("기본 AI 팀 줄 저장 = default-ai 서버 답 (#3042)", () => {
       expect(q("ai-default-teamAgent-model")?.textContent).toBe("연결 확인을 하면 고를 수 있는 모델이 보여요.")
     );
     await checkNow();
-    const select = (await until("ai-default-teamAgent-select")) as HTMLSelectElement;
-    act(() => {
-      select.value = "link:0:gpt-4o";
-      select.dispatchEvent(new Event("change", { bubbles: true }));
-    });
+    const select = await until("ai-default-teamAgent-select");
+    chooseListbox(select, "link:0:gpt-4o");
     await rtlWaitFor(() => expect(putProviderDefaultAi).toHaveBeenCalledTimes(1));
     expect(vi.mocked(putProviderDefaultAi).mock.calls[0]).toEqual([
       "teamAgent",
       { linkPosition: 0, modelId: "gpt-4o" },
     ]);
     await rtlWaitFor(() =>
-      expect((q("ai-default-teamAgent-select") as HTMLSelectElement).value).toBe("link:0:gpt-4o")
+      expect(listboxValue(q("ai-default-teamAgent-select"))).toBe("link:0:gpt-4o")
     );
     expect(q("ai-defaults-team-foot")?.textContent).toContain("모델을 직접 고른 에이전트는 자기 모델을 써요.");
   });
@@ -417,14 +415,11 @@ describe("기본 AI 팀 줄 저장 = default-ai 서버 답 (#3042)", () => {
     vi.mocked(putProviderDefaultAi).mockRejectedValue(new ApiError(403, "operator required"));
     mount();
     await checkNow();
-    const select = (await until("ai-default-summary-select")) as HTMLSelectElement;
-    act(() => {
-      select.value = "link:0:";
-      select.dispatchEvent(new Event("change", { bubbles: true }));
-    });
+    const select = await until("ai-default-summary-select");
+    chooseListbox(select, "link:0:");
     const error = await until("ai-default-summary-error");
     expect(error.textContent).toBe("팀 줄은 이 서버의 운영자만 바꿀 수 있어요.");
-    expect((q("ai-default-summary-select") as HTMLSelectElement | null)?.value ?? "").toBe("");
+    expect(listboxValue(q("ai-default-summary-select"))).toBe("");
   });
 });
 

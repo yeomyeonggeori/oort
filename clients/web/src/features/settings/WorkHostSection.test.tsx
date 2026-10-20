@@ -7,6 +7,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@momo/core/lib/api";
+import { chooseListbox, listboxChoices, listboxValue } from "@/design/ui/listboxTestKit";
 import type { WorkHost, WorkTierPolicy } from "@momo/core/features/settings/api";
 
 // =============================================================================
@@ -215,5 +216,29 @@ describe("재개 정책: 이 화면은 워크스페이스 기본만 쥔다", () 
     });
     expect(api.putWorkTierPolicy).toHaveBeenCalledTimes(1);
     expect(api.putWorkTierPolicy.mock.calls[0]?.[1]).toBe("workspace");
+  });
+  it("재개 대상은 앱이 그린 listbox이고, 라벨이 칸과 목록의 이름이며, 고르면 그 호스트가 저장 본문에 실린다 (#4126)", async () => {
+    const HOST_ID = "019a0000-0000-7000-8000-00000000aa01";
+    api.listWorkHosts.mockResolvedValue([host({ id: HOST_ID, displayName: "빌드 서버", scope: "workspace" })]);
+    api.fetchWorkTierPolicy.mockResolvedValue(policy({ mode: "auto", autoTarget: "cloud" }));
+    api.putWorkTierPolicy.mockResolvedValue(policy({ mode: "auto", autoTarget: HOST_ID }));
+    await render();
+    const field = byTestId("work-tier-target-workspace");
+    expect(field?.tagName).toBe("BUTTON");
+    expect(field?.getAttribute("role")).toBe("combobox");
+    // 같은 라벨이 두 범위에 서면 이름이 겹친다: 범위가 들어간 이름이 칸의 이름이다.
+    expect(field?.getAttribute("aria-label")).toContain("재개 대상");
+    expect(listboxValue(field)).toBe("cloud");
+    expect(listboxChoices(field).map((c) => c.label)).toEqual(["oort Cloud", "빌드 서버"]);
+    chooseListbox(field, HOST_ID);
+    expect(listboxValue(byTestId("work-tier-target-workspace"))).toBe(HOST_ID);
+    await act(async () => {
+      byTestId("work-tier-save-workspace")!.click();
+    });
+    expect(api.putWorkTierPolicy).toHaveBeenCalledTimes(1);
+    expect(api.putWorkTierPolicy.mock.calls[0]?.slice(1)).toEqual([
+      "workspace",
+      { mode: "auto", autoTarget: HOST_ID },
+    ]);
   });
 });
