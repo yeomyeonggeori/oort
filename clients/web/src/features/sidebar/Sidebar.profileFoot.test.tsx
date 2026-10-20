@@ -344,7 +344,7 @@ describe("사이드바 하단 프로필 (#3574)", () => {
     resetUpdateStoreForTest();
   });
 
-  it("멈춤 줄(#3923): 프로필 줄 **아래**에 같은 안전 영역 묶음으로 서고, 프로필 줄 안에는 들어가지 않는다", async () => {
+  it("멈춤 줄(#4107): 프로필 줄 **위**에 같은 안전 영역 묶음으로 서고, 프로필 줄 안에는 들어가지 않는다", async () => {
     notificationRules.current = { dnd: true, mentionOverridesMute: false, dndUntilMs: 1_800_000_900_000 };
     const host = await mount();
     const banner = await vi.waitFor(() => {
@@ -353,9 +353,11 @@ describe("사이드바 하단 프로필 (#3574)", () => {
       return node as HTMLElement;
     });
     const foot = host.querySelector('[data-testid="sidebar-profile-foot"]') as HTMLElement;
-    // 프로필 카드는 전체가 버튼이라 그 안에 단추를 둘 수 없다: 줄은 카드의 형제이고 프로필 줄의 **다음** 형제다.
+    // 프로필 카드는 전체가 버튼이라 그 안에 단추를 둘 수 없다: 줄은 카드의 형제이고 프로필 줄의 **앞** 형제다.
+    // 프로필 줄이 묶음의 맨 아래(마지막 자식)라서, 줄이 뜨고 져도 프로필 줄의 자리는 움직이지 않는다(#4107).
     expect(foot.contains(banner)).toBe(false);
-    expect(foot.nextElementSibling).toBe(banner);
+    expect(foot.previousElementSibling).toBe(banner);
+    expect(foot.parentElement?.lastElementChild).toBe(foot);
     // 안전 영역(홈 인디케이터)은 둘이 함께 진다.
     expect(foot.parentElement?.className).toMatch(/\bsafe-area-bottom\b/);
     expect(foot.parentElement?.contains(banner)).toBe(true);

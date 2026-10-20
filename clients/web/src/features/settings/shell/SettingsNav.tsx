@@ -12,6 +12,7 @@ import {
   MonitorSmartphone,
   Palette,
   Server,
+  Sparkles,
   UserRound,
   UsersRound,
   type LucideIcon,
@@ -43,6 +44,7 @@ const ICONS: Record<SettingsSectionId, LucideIcon> = {
   code: Server,
   updates: Download,
   ai: Bot,
+  aiHub: Sparkles,
 };
 
 const ROW_CLASS =

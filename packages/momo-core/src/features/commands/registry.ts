@@ -419,7 +419,7 @@ const STATIC_COMMANDS: readonly StaticCommand[] = [
     title: "AI",
     group: "navigate",
     kind: "navigate",
-    keywords: ["ai", "허브", "구독", "에이전트 비용", "연결"],
+    keywords: ["ai 허브", "허브", "구독", "에이전트 비용"],
     icon: "ai-hub",
     testId: "switcher-ai",
     available: always,
@@ -439,6 +439,19 @@ const STATIC_COMMANDS: readonly StaticCommand[] = [
       run: navigateTo(section.path, title),
     };
   }),
+  {
+    // 같은 서버 Hermes 카드가 있는 옛 AI 연결 화면(`?section=ai`, #4111). 설정 목차의
+    // 「AI 연결」 행과 같은 이름·같은 주소다. 허브(`nav.ai`, 「AI」)와 따로 찾힌다.
+    id: "nav.settings.ai",
+    title: "AI 연결", // design-preflight-allow: 성재가 팔레트·목차에서 이 이름으로 찾는다(#4111, 0.1.32 실기)
+    group: "settings",
+    kind: "navigate",
+    keywords: ["ai", "hermes", "헤르메스", "구독", "api 키", "claude", "codex", "서버"],
+    icon: "ai-connect",
+    testId: "switcher-settings-ai",
+    available: always,
+    run: navigateTo("/settings?section=ai", "AI 연결"), // design-preflight-allow: 위 제목과 같은 이름(#4111)
+  },
   {
     id: "nav.settings.agents",
     title: "외부 에이전트 연결",
@@ -722,4 +735,15 @@ export function commandSearchValue(command: Command): string {
   return [command.title, command.meta ?? "", ...command.keywords, command.id]
     .filter((part) => part !== "")
     .join(" ");
+}
+
+/**
+ * 팔레트가 **걸러낼 때** 보는 말: 이름, 작은 글씨, 별칭 — 사람이 읽는 것뿐이다(#4111).
+ * id는 없다. `commandSearchValue`가 id까지 싣는 것은 줄의 값이 겹치지 않게 하려는
+ * 것이지 검색 재료가 아니다.
+ */
+export function commandSearchTerms(command: Command): string[] {
+  return [command.title, command.meta ?? "", ...command.keywords].filter(
+    (part) => part !== ""
+  );
 }

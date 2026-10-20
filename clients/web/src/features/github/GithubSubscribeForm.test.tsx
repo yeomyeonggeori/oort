@@ -50,8 +50,8 @@ function render(options: { kind?: string; data?: GithubWorkspaceOverview; offlin
 }
 
 const submit = () => click(q("github-subscribe-submit"));
-const pickRepo = (name: string) => choose(q<HTMLSelectElement>("github-subscribe-repo"), name);
-// SelectField 의 testId 는 <select> 자신에게 달린다.
+const pickRepo = (name: string) => choose(q<HTMLElement>("github-subscribe-repo"), name);
+// SelectField 의 testId 는 combobox 단추 자신에게 달린다(#4126).
 
 describe("비공개 저장소 확인 (ADR-0205 수용 11)", () => {
   it("공개 채널에 비공개 저장소: 확인 장면만 서고 구독 요청은 0번이다", async () => {

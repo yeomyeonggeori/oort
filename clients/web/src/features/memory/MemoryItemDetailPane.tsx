@@ -9,7 +9,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/design/ui/dialog";
-import { Select } from "@/design/ui/select";
+import { ListboxSelect } from "@/design/ui/listbox-select";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
 import type { MemoryItemKind } from "@momo/core/features/memory/model";
@@ -360,21 +360,17 @@ export function MemoryItemDetailPane({
             data-testid="memory-edit-field"
           />
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <Select
+            <ListboxSelect
               aria-label="종류"
               value={draftKind}
-              onChange={(event) => {
-                if (isMemoryKind(event.target.value)) setDraftKind(event.target.value);
+              options={MEMORY_KIND_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+              onValueChange={(next) => {
+                if (isMemoryKind(next)) setDraftKind(next);
               }}
-              className="w-auto"
+              placeholder="종류 고르기"
+              className="w-auto min-w-32"
               data-testid="memory-edit-kind"
-            >
-              {MEMORY_KIND_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </Select>
+            />
             <span className="text-meta text-ink-muted" data-numeric="">
               {editCharCount(draft)}
             </span>

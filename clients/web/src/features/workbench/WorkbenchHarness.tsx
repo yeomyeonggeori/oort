@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Select } from "@/design/ui/select";
+import { ListboxSelect } from "@/design/ui/listbox-select";
 import {
   defaultWorkbenchLayout,
   splitPane,
@@ -111,21 +111,18 @@ export function WorkbenchHarness() {
     >
       <header className="flex flex-wrap items-center gap-4">
         <h1 className="text-title font-medium">작업 공간 격자</h1>
-        <label className="flex min-w-0 items-center gap-2 text-meta text-ink-muted">
-          세션
-          <Select
-            aria-label="세션 고르기"
+        <div className="flex min-w-0 items-center gap-2 text-meta text-ink-muted">
+          <span id="workbench-session-label">세션</span>
+          <ListboxSelect
+            aria-labelledby="workbench-session-label"
+            data-testid="workbench-session-select"
             value={session}
-            onChange={(event) => setSession(event.target.value)}
-            className="w-auto"
-          >
-            {SESSIONS.map((s) => (
-              <option key={s.key} value={s.key}>
-                {s.label}
-              </option>
-            ))}
-          </Select>
-        </label>
+            options={SESSIONS.map((s) => ({ value: s.key, label: s.label }))}
+            onValueChange={setSession}
+            placeholder="세션 고르기"
+            className="w-pane max-w-full"
+          />
+        </div>
         <p className="text-meta text-ink-muted">배치는 세션마다 이 기기에 저장됩니다.</p>
       </header>
       <WorkbenchGrid

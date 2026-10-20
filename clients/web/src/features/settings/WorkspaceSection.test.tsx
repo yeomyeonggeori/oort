@@ -17,6 +17,7 @@ import {
   hasOwnerOnboardingSettingsDoor,
   markOwnerOnboardingPending,
 } from "@/features/onboarding/ownerOnboardingStore";
+import { chooseListbox } from "@/design/ui/listboxTestKit";
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const MEMBER_ID = "00000000-0000-7000-8000-000000000101";
@@ -333,15 +334,15 @@ describe("WelcomeKickoffEditor (#1800 패턴)", () => {
     const host = mountSection({ role: "owner" });
     const select = host.querySelector(
       '[data-testid="welcome-agent"]'
-    ) as HTMLSelectElement | null;
+    ) as HTMLElement | null;
     const prompt = host.querySelector(
       '[data-testid="welcome-prompt"]'
     ) as HTMLTextAreaElement | null;
     expect(select).not.toBeNull();
     expect(prompt).not.toBeNull();
+    expect(select!.getAttribute("role")).toBe("combobox");
+    chooseListbox(select, AGENT_ID);
     act(() => {
-      select!.value = AGENT_ID;
-      select!.dispatchEvent(new Event("change", { bubbles: true }));
       setTextareaValue(prompt!, "직접 편집한 프롬프트");
     });
     const save = host.querySelector(

@@ -79,7 +79,7 @@ describe("UX-HT 계약 (소스)", () => {
     expect(sectionSource).toContain(
       // DS2-6 (#2718): 머리의 좌우 여백은 라벨(`sidebar-section-label`, 시안
       // `.a-slabel` 좌우 10)이 진다. 바닥선(min-h-control-sm)은 그대로다.
-      '"sidebar-section-head flex min-h-control-sm items-center gap-1"'
+      '"sidebar-section-head flex min-h-control-sm items-center gap-1 rounded-md pe-1 hover:bg-surface-hover"'
     );
     expect(sectionSource).not.toMatch(
       /"flex h-control-sm items-center gap-1 px-2"/

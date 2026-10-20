@@ -40,7 +40,7 @@ import {
 } from "@momo/core/features/ai/aiHubModel";
 import { cn } from "@/design/lib/cn";
 import { HarnessLoginDialog } from "@/features/welcome/harnessLogin/HarnessLoginDialog";
-import { Select } from "@/design/ui/select";
+import { ListboxSelect } from "@/design/ui/listbox-select";
 import { AiFoot } from "./aiAccountsParts";
 import { readAiDefaults as readAiDefaultsNow, useAiDefaults, useMyAccounts, writeAiDefaults } from "./aiDefaultsStore";
 import {
@@ -250,16 +250,24 @@ function DefaultRow({
       const current = [...options, ...(orphan ? [orphan] : [])].find((option) => option.key === value);
       const fullText = current ? optionText(current) : id === "appCommand" ? undefined : AI_DEFAULT_UNSET_LABEL[id];
       choice = (
-        <Select
+        <ListboxSelect
           aria-labelledby={titleId}
           aria-describedby={describedBy}
           value={value}
           title={fullText}
+          placeholder={id === "appCommand" ? "선택하세요" : AI_DEFAULT_UNSET_LABEL[id]}
+          options={[
+            ...(id !== "appCommand" ? [{ value: "", label: AI_DEFAULT_UNSET_LABEL[id] }] : []),
+            ...options.map((option) => ({ value: option.key, label: optionText(option) })),
+            ...(orphan ? [{ value: orphan.key, label: optionText(orphan) }] : []),
+            ...(id === "appCommand"
+              ? [{ value: "profile-pending", label: "내 구독 · 준비 중", disabled: true }]
+              : []),
+          ]}
           className="h-control rounded-md text-meta"
           // 이 맥에 넘기는 동안(로그인 창 포함)은 두 번째 고름이 끼지 않게 잠근다.
           disabled={id === "remoteWork" && remote.applying}
-          onChange={(event) => {
-            const next = event.target.value;
+          onValueChange={(next) => {
             const picked = options.find((option) => option.key === next)?.ref ?? null;
             if (id === "remoteWork") {
               // 이 맥의 workd가 받은 뒤에만 저장한다(거부되면 칸은 이전 값 그대로).
@@ -271,20 +279,7 @@ function DefaultRow({
             writeAiDefaults(withChoice(prefs, id, store));
           }}
           data-testid={`ai-default-${row.id}-select`}
-        >
-          {id !== "appCommand" && <option value="">{AI_DEFAULT_UNSET_LABEL[id]}</option>}
-          {options.map((option) => (
-            <option key={option.key} value={option.key}>
-              {optionText(option)}
-            </option>
-          ))}
-          {orphan && <option value={orphan.key}>{optionText(orphan)}</option>}
-          {id === "appCommand" && (
-            <option value="profile-pending" disabled>
-              내 구독 · 준비 중
-            </option>
-          )}
-        </Select>
+        />
       );
       if (id !== "appCommand" && saved && resolved.state === "ok") {
         lines.push({ key: "model", text: modelLine(saved, input.teamKey), tone: "muted" });
@@ -329,29 +324,25 @@ function DefaultRow({
       const value = teamOptionKey(selected);
       const current = options.find((option) => option.key === value);
       choice = (
-        <Select
+        <ListboxSelect
           aria-labelledby={titleId}
           aria-describedby={describedBy}
           value={value}
           title={current?.text}
-          className="h-control rounded-md text-meta"
+          placeholder="선택하세요"
+          options={options.map((option) => ({ value: option.key, label: option.text }))}
+          className="h-control rounded-md text-meta aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
           // 오프라인이면 잠근다(팀 AI 키 절의 확인·끊기와 같다). 저장이 날고 있는 동안은
           // 초점을 뺏지 않게 aria-disabled 로만 막는다: 두 번째 고름이 첫 저장과 경합하지 않게.
           disabled={team.offline}
           aria-disabled={busy || undefined}
-          onChange={(event) => {
+          onValueChange={(next) => {
             if (busy) return;
-            const picked = options.find((option) => option.key === event.target.value);
+            const picked = options.find((option) => option.key === next);
             if (picked) team.onChoose(id, picked.input);
           }}
           data-testid={`ai-default-${row.id}-select`}
-        >
-          {options.map((option) => (
-            <option key={option.key} value={option.key}>
-              {option.text}
-            </option>
-          ))}
-        </Select>
+        />
       );
       const note = teamModelNote(selected, team.links);
       if (note) lines.push({ key: "model", text: note, tone: "muted" });

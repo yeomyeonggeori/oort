@@ -1,4 +1,4 @@
-import { act } from "react";
+import { chooseListbox } from "@/design/ui/listboxTestKit";
 import type { GithubWorkspaceOverview } from "@momo/core/features/github/model";
 
 // GitHub 알림 화면 시험의 공용 재료. 실제 같은 한국어 팀 내용을 쓴다.
@@ -45,14 +45,9 @@ export function allReposOverview(): GithubWorkspaceOverview {
   });
 }
 
-/** `<select>` 의 값을 바꾸고 change 를 보낸다. */
-export function choose(select: HTMLSelectElement | null, value: string): void {
-  if (!select) throw new Error("select to change is missing");
-  const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
-  act(() => {
-    setter?.call(select, value);
-    select.dispatchEvent(new Event("change", { bubbles: true }));
-  });
+/** 앱이 그린 선택 칸(`ListboxSelect`)을 열어 `value` 항목을 고른다(#4126). */
+export function choose(trigger: HTMLElement | null, value: string): void {
+  chooseListbox(trigger, value);
 }
 
 export function q<T extends HTMLElement = HTMLElement>(id: string, scope: ParentNode = document.body): T | null {

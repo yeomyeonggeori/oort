@@ -8,6 +8,7 @@ import { HarnessUnlinkDialog } from "@/features/welcome/harnessLogin/HarnessUnli
 import { AiDefaultsTable, type TeamDefaultsState } from "./AiDefaultsTable";
 import { probeModelLists } from "@momo/core/features/settings/defaultAi";
 import { publishMyAccounts, writeAiDefaults } from "./aiDefaultsStore";
+import { chooseListbox, listboxChoices, listboxShown, listboxValue } from "@/design/ui/listboxTestKit";
 
 // =============================================================================
 // 기본 AI 표 (#2881). 코어 판정(`aiDefaults.test.ts`)이 화면에 그대로 닿는지:
@@ -57,21 +58,22 @@ describe("기본 AI 표 화면", () => {
     for (const id of ["teamAgent", "summary", "guardrail"]) {
       const row = q(`ai-default-${id}`);
       expect(row?.dataset.audience).toBe("team");
-      expect(row?.querySelector("select")).toBeNull();
+      expect(row?.querySelector('[role="combobox"]')).toBeNull();
       expect(row?.textContent).not.toMatch(/Claude|ChatGPT|구독/);
       expect(row?.textContent).toContain("운영자");
     }
     // 같은 화면의 개인 줄은 구독을 선택지로 받는다.
-    const local = q("ai-default-localTerminal-select") as HTMLSelectElement;
-    expect(Array.from(local.options).map((o) => o.textContent)).toEqual([
+    const local = q("ai-default-localTerminal-select") as HTMLElement;
+    expect(local.getAttribute("role")).toBe("combobox");
+    expect(listboxChoices(local).map((o) => o.label)).toEqual([
       "이 맥 기본 로그인",
       "Claude · 이 맥 기본 로그인 · 구독",
       "Claude · 개인 · 구독",
       "Claude · 회사 · 구독 (로그인 필요)",
     ]);
     // 앱 명령은 팀 키 하나 + 준비 중인 내 구독(고를 수 없음).
-    const app = q("ai-default-appCommand-select") as HTMLSelectElement;
-    expect(Array.from(app.options).map((o) => [o.textContent, o.disabled])).toEqual([
+    const app = q("ai-default-appCommand-select") as HTMLElement;
+    expect(listboxChoices(app).map((o) => [o.label, o.disabled])).toEqual([
       ["팀 AI 키 · api.openai.com", false],
       ["내 구독 · 준비 중", true],
     ]);
@@ -82,11 +84,8 @@ describe("기본 AI 표 화면", () => {
 
   it("고르면 이 기기에 저장되고, 저장 값에는 하네스 id와 라벨뿐이다", () => {
     render(AiDefaultsTable, { teamKey: TEAM, operator: true, browserTab: false });
-    const local = q("ai-default-localTerminal-select") as HTMLSelectElement;
-    act(() => {
-      local.value = "profile:claude:개인";
-      local.dispatchEvent(new Event("change", { bubbles: true }));
-    });
+    const local = q("ai-default-localTerminal-select") as HTMLElement;
+    chooseListbox(local, "profile:claude:개인");
     const raw = window.localStorage.getItem(AI_DEFAULTS_LOCAL_SLOT);
     expect(JSON.parse(raw ?? "null")).toEqual({
       localTerminal: { kind: "profile", harness: "claude", label: "개인" },
@@ -101,19 +100,19 @@ describe("기본 AI 표 화면", () => {
     expect(q("ai-default-localTerminal")?.dataset.state).toBe("fallback");
     expect(q("ai-default-localTerminal-fallback")?.textContent).toContain("이 칸은 「셸」로 넘어가요");
     // 낭독기: 선택 칸이 경고 줄을 설명으로 가리킨다.
-    const select = q("ai-default-localTerminal-select") as HTMLSelectElement;
+    const select = q("ai-default-localTerminal-select") as HTMLElement;
     expect(select.getAttribute("aria-describedby")?.split(" ")).toContain("ai-default-localTerminal-fallback");
     expect(document.getElementById("ai-default-localTerminal-fallback")).not.toBeNull();
     // 선택 칸은 저장한 값을 그대로 가리킨다.
-    expect((q("ai-default-localTerminal-select") as HTMLSelectElement).value).toBe("profile:claude:회사");
+    expect(listboxValue(q("ai-default-localTerminal-select"))).toBe("profile:claude:회사");
   });
 
   it("목록에서 사라진 계정은 「목록에 없음」 선택지로 남는다", () => {
     act(() => writeAiDefaults({ remoteWork: { kind: "profile", harness: "codex", label: "옛 계정" } }));
     render(AiDefaultsTable, { teamKey: TEAM, operator: true, browserTab: false });
-    const select = q("ai-default-remoteWork-select") as HTMLSelectElement;
-    expect(select.value).toBe("profile:codex:옛 계정");
-    expect(select.selectedOptions[0]?.textContent).toBe("ChatGPT · 옛 계정 · 구독 (목록에 없음)");
+    const select = q("ai-default-remoteWork-select") as HTMLElement;
+    expect(listboxValue(select)).toBe("profile:codex:옛 계정");
+    expect(listboxShown(select)).toContain("ChatGPT · 옛 계정 · 구독 (목록에 없음)");
     expect(q("ai-default-remoteWork-fallback")?.textContent).toContain("「매번 묻기」로 넘어가요");
   });
 
@@ -185,9 +184,10 @@ describe("기본 AI 표 팀 줄 저장 (#3042)", () => {
     // 이 맥에 로그인된 구독 계정이 있어도(beforeEach) 팀 줄에는 오지 않는다.
     render(AiDefaultsTable, { teamKey: TEAM, operator: true, browserTab: false, team: teamState({ onChoose }) });
     for (const id of ["teamAgent", "summary"]) {
-      const select = q(`ai-default-${id}-select`) as HTMLSelectElement;
+      const select = q(`ai-default-${id}-select`) as HTMLElement;
       expect(select).not.toBeNull();
-      const texts = Array.from(select.options).map((o) => o.textContent ?? "");
+      const choices = listboxChoices(select);
+      const texts = choices.map((o) => o.label);
       expect(texts.slice(1)).toEqual([
         "api.openai.com · 기본 모델",
         "api.openai.com · gpt-4o",
@@ -195,24 +195,18 @@ describe("기본 AI 표 팀 줄 저장 (#3042)", () => {
         "openrouter.ai · 기본 모델",
       ]);
       expect(texts.join("|")).not.toMatch(/구독|Claude|ChatGPT|이 맥/);
-      expect(Array.from(select.options).map((o) => o.value).join("|")).not.toMatch(/profile/);
+      expect(choices.map((o) => o.value).join("|")).not.toMatch(/profile/);
     }
     // 같은 화면의 개인 줄은 구독을 받는다(양성 대조).
-    const local = q("ai-default-localTerminal-select") as HTMLSelectElement;
-    expect(Array.from(local.options).some((o) => o.textContent?.includes("구독"))).toBe(true);
+    const local = q("ai-default-localTerminal-select") as HTMLElement;
+    expect(listboxChoices(local).some((o) => o.label.includes("구독"))).toBe(true);
     // 가드레일은 여전히 읽기 전용.
-    expect(q("ai-default-guardrail")?.querySelector("select")).toBeNull();
+    expect(q("ai-default-guardrail")?.querySelector('[role="combobox"]')).toBeNull();
 
-    const select = q("ai-default-teamAgent-select") as HTMLSelectElement;
-    act(() => {
-      select.value = "link:0:gpt-4o-mini";
-      select.dispatchEvent(new Event("change", { bubbles: true }));
-    });
+    const select = q("ai-default-teamAgent-select") as HTMLElement;
+    chooseListbox(select, "link:0:gpt-4o-mini");
     expect(onChoose).toHaveBeenCalledWith("teamAgent", { linkPosition: 0, modelId: "gpt-4o-mini" });
-    act(() => {
-      select.value = "";
-      select.dispatchEvent(new Event("change", { bubbles: true }));
-    });
+    chooseListbox(select, "");
     expect(onChoose).toHaveBeenLastCalledWith("teamAgent", null);
     // #3147: 서버가 이 선택을 읽는다. 「준비 중」이라 말하지 않고 적용 규칙을 적는다.
     // 채널 요약은 워커 경로가 없어 따른다고 말하지 않는다.
@@ -236,7 +230,7 @@ describe("기본 AI 표 팀 줄 저장 (#3042)", () => {
         },
       }),
     });
-    expect((q("ai-default-teamAgent-select") as HTMLSelectElement).value).toBe("link:1:");
+    expect(listboxValue(q("ai-default-teamAgent-select"))).toBe("link:1:");
     expect(q("ai-default-teamAgent-model")?.textContent).toBe(
       "이 연결은 모델 목록을 알려 주지 않아요. 기본 모델만 고를 수 있어요."
     );
@@ -273,9 +267,9 @@ describe("기본 AI 표 팀 줄 저장 (#3042)", () => {
         },
       }),
     });
-    const select = q("ai-default-summary-select") as HTMLSelectElement;
-    expect(select.value).toBe("link:3:m-1");
-    expect(select.selectedOptions[0]?.textContent).toBe("old.example · m-1 (연결이 바뀜)");
+    const select = q("ai-default-summary-select") as HTMLElement;
+    expect(listboxValue(select)).toBe("link:3:m-1");
+    expect(listboxShown(select)).toBe("old.example · m-1 (연결이 바뀜)");
     expect(q("ai-default-summary-saved")?.textContent).toBe(
       "고른 연결(old.example)이 연결 순서에서 바뀌었거나 빠졌어요. 다시 골라 주세요."
     );
@@ -329,7 +323,7 @@ describe("팀 줄 상태 (design-review #3042)", () => {
       browserTab: false,
       team: teamState({ onChoose, pending: { rowId: "teamAgent", input: { linkPosition: 0, modelId: "gpt-4o" } } }),
     });
-    const select = q("ai-default-teamAgent-select") as HTMLSelectElement;
+    const select = q("ai-default-teamAgent-select") as HTMLElement;
     expect(select.getAttribute("aria-disabled")).toBe("true");
     // #3064: 잠금 문법은 흐림까지다. aria-disabled 만 달고 칸이 멀쩡해 보이면
     // 고를 수 있는 칸처럼 읽힌다(#3042 design-review L1).
@@ -338,10 +332,7 @@ describe("팀 줄 상태 (design-review #3042)", () => {
     expect(classes).toContain("aria-disabled:cursor-not-allowed");
     expect(q("ai-default-teamAgent-saved")?.textContent).toBe("저장하고 있어요");
     expect(select.getAttribute("aria-describedby")).toContain("ai-default-teamAgent-saved");
-    act(() => {
-      select.value = "link:0:gpt-4o-mini";
-      select.dispatchEvent(new Event("change", { bubbles: true }));
-    });
+    chooseListbox(select, "link:0:gpt-4o-mini");
     expect(onChoose).not.toHaveBeenCalled();
     // 다른 줄은 막지 않는다.
     expect(q("ai-default-summary-select")?.getAttribute("aria-disabled")).toBeNull();
@@ -369,8 +360,11 @@ describe("팀 줄 상태 (design-review #3042)", () => {
 
   it("열린 팀 줄의 운영자 표지에는 자물쇠가 없고, 읽기 전용 줄에는 있다", () => {
     render(AiDefaultsTable, { teamKey: TEAM, operator: true, browserTab: false, team: teamState() });
-    expect(q("ai-default-teamAgent")?.querySelector("svg")).toBeNull();
-    expect(q("ai-default-guardrail")?.querySelector("svg")).not.toBeNull();
+    // 선택 칸의 화살표(ChevronDown)는 표지가 아니다: 칸 밖의 아이콘만 센다.
+    const marks = (id: string) =>
+      Array.from(q(id)?.querySelectorAll("svg") ?? []).filter((svg) => !svg.closest('[role="combobox"]'));
+    expect(marks("ai-default-teamAgent")).toHaveLength(0);
+    expect(marks("ai-default-guardrail").length).toBeGreaterThan(0);
   });
 });
 

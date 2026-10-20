@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { AI_DEFAULTS_LOCAL_SLOT } from "@momo/core/features/settings/aiDefaults";
 import type { AiDefaultsTeamKey } from "@momo/core/features/settings/aiDefaults";
 
@@ -43,12 +43,13 @@ vi.mock("@/features/welcome/harnessLogin/HarnessLoginDialog", () => ({
 import { AiDefaultsTable } from "./AiDefaultsTable";
 import { publishMyAccounts, writeAiDefaults } from "./aiDefaultsStore";
 import { resetRemoteWorkForTest } from "./remoteWorkStore";
+import { chooseListbox, listboxChoices, listboxValue } from "@/design/ui/listboxTestKit";
 
 let host: HTMLDivElement | null = null;
 let root: Root | null = null;
 const TEAM: AiDefaultsTeamKey = { status: "present", name: "https://api.openai.com/v1", failed: false, modelCount: 12 };
 const q = (id: string) => document.querySelector<HTMLElement>(`[data-testid="${id}"]`);
-const select = () => q("ai-default-remoteWork-select") as HTMLSelectElement;
+const select = () => q("ai-default-remoteWork-select") as HTMLElement;
 const stored = () => JSON.parse(window.localStorage.getItem(AI_DEFAULTS_LOCAL_SLOT) ?? "{}");
 const flush = async () => {
   await act(async () => {
@@ -64,12 +65,15 @@ function render() {
 }
 
 async function pick(value: string) {
-  await act(async () => {
-    select().value = value;
-    select().dispatchEvent(new Event("change", { bubbles: true }));
-  });
+  // chooseListbox 가 열기·고르기를 각각 act 로 감싼다(바깥 async act 안에 겹치면 열림이 반영되지 않는다).
+  chooseListbox(select(), value);
   await flush();
 }
+
+// Radix 팝오버(앱이 그린 선택 칸)는 열릴 때 상태를 갱신한다: act 환경을 켜 두어야 즉시 반영된다.
+beforeAll(() => {
+  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+});
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -98,7 +102,7 @@ afterEach(() => {
 describe("원격 작업 행", () => {
   it("이 맥 기본 로그인은 선택지가 아니다(원격은 계정 폴더로만 뜬다)", () => {
     render();
-    expect(Array.from(select().options).map((o) => o.textContent)).toEqual([
+    expect(listboxChoices(select()).map((o) => o.label)).toEqual([
       "매번 묻기",
       "Claude · 개인 · 구독",
       "ChatGPT · 회사 · 구독 (로그인 필요)",
@@ -113,7 +117,7 @@ describe("원격 작업 행", () => {
     expect(shell.prepare).toHaveBeenCalledWith("claude", "개인");
     expect(shell.set.mock.calls).toEqual([["claude", "개인"], ["codex", null]]);
     expect(stored()).toEqual({ remoteWork: { kind: "profile", harness: "claude", label: "개인" } });
-    expect(select().value).toBe("profile:claude:개인");
+    expect(listboxValue(select())).toBe("profile:claude:개인");
     expect(q("ai-default-remoteWork-note")?.textContent).toContain("원격 작업용으로 따로 로그인한 이 계정");
     expect(q("ai-default-remoteWork")?.textContent).not.toContain("준비 중");
     expect(q("ai-defaults-not-applied")).toBeNull();
@@ -137,7 +141,7 @@ describe("원격 작업 행", () => {
       // 거부를 말하는 동안 「이 계정으로 떠요」 안내는 서지 않는다.
       expect(q("ai-default-remoteWork-note"), code).toBeNull();
       expect(window.localStorage.getItem(AI_DEFAULTS_LOCAL_SLOT) ?? "{}", code).not.toContain("개인");
-      expect(select().value, code).toBe("");
+      expect(listboxValue(select()), code).toBe("");
       // 실패 뒤에 「고르지 않음」으로 지우는 호출(=다른 계정/기본으로의 조용한 이동)이 없다.
       expect(shell.set.mock.calls.filter(([, label]) => label === null), code).toEqual([]);
     }

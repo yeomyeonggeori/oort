@@ -127,6 +127,18 @@ function mount(node: "operator" | "mine", as = ME) {
   });
 }
 const byId = (id: string) => document.querySelector<HTMLElement>(`[data-testid="${id}"]`);
+
+// 받는 사람 칸은 앱이 그린 listbox 다(#4127): 단추를 눌러 열고 항목을 눌러 고른다.
+const holderOptions = () => [...document.querySelectorAll<HTMLElement>('[role="option"]')];
+function openHolder() {
+  if (document.querySelector('[role="listbox"]')) return;
+  act(() => void byId("ai-personal-issue-holder")!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+}
+function pickHolder(value: string) {
+  openHolder();
+  const option = holderOptions().find((o) => o.dataset.value === value)!;
+  act(() => void option.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+}
 async function until(id: string): Promise<HTMLElement> {
   await waitFor(() => {
     if (!byId(id)) throw new Error(id);
@@ -176,15 +188,16 @@ describe("운영자: 발급", () => {
     await until("ai-personal-issue-form");
   }
   const fill = () => {
-    const holder = byId("ai-personal-issue-holder") as HTMLSelectElement;
-    act(() => void fireEvent.change(holder, { target: { value: SEOYEON } }));
+    pickHolder(SEOYEON);
     click("ai-personal-issue-preset-anthropic");
     (byId("ai-personal-issue-key") as HTMLInputElement).value = SECRET;
   };
 
   it("받는 사람 목록에서 활성 사람 멤버이고 회사 칩은 서버 프리셋이다", async () => {
     await openIssue();
-    const options = [...(byId("ai-personal-issue-holder") as HTMLSelectElement).options].map((o) => o.textContent);
+    expect(byId("ai-personal-issue-holder")!.getAttribute("role")).toBe("combobox");
+    openHolder();
+    const options = holderOptions().map((o) => o.textContent);
     expect(options).toEqual(["사람 고르기", "곽성재", "서연", "미나"]);
     expect(byId("ai-personal-issue-preset-openai")).not.toBeNull();
     expect(byId("ai-personal-issue-preset-anthropic")).not.toBeNull();
@@ -252,7 +265,7 @@ describe("운영자: 발급", () => {
     click("ai-personal-issue-submit");
     expect(issuePersonalKey).not.toHaveBeenCalled();
     expect(document.querySelector("[role='alert']")?.textContent).toContain("받는 사람");
-    act(() => void fireEvent.change(byId("ai-personal-issue-holder") as HTMLSelectElement, { target: { value: SEOYEON } }));
+    pickHolder(SEOYEON);
     click("ai-personal-issue-submit");
     expect(issuePersonalKey).not.toHaveBeenCalled();
     expect(document.querySelector("[role='alert']")?.textContent).toContain("키를 붙여 넣으세요");
@@ -264,7 +277,9 @@ describe("운영자: 발급", () => {
     await until("ai-personal-keys-list");
     click("ai-personal-issue");
     await until("ai-personal-issue-form");
-    const options = [...(byId("ai-personal-issue-holder") as HTMLSelectElement).options].map((o) => o.textContent);
+    expect(byId("ai-personal-issue-holder")!.getAttribute("role")).toBe("combobox");
+    openHolder();
+    const options = holderOptions().map((o) => o.textContent);
     expect(options).toEqual(["사람 고르기", "곽성재", "미나"]);
   });
 
@@ -345,7 +360,7 @@ describe("권한 어긋남(403)과 응답 없음", () => {
     await until("ai-personal-keys-empty");
     click("ai-personal-issue");
     await until("ai-personal-issue-form");
-    act(() => void fireEvent.change(byId("ai-personal-issue-holder") as HTMLSelectElement, { target: { value: SEOYEON } }));
+    pickHolder(SEOYEON);
     (byId("ai-personal-issue-key") as HTMLInputElement).value = SECRET;
     const before = vi.mocked(listPersonalKeys).mock.calls.length;
     click("ai-personal-issue-submit");

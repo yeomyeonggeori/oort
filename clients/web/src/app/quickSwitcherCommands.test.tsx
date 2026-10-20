@@ -382,7 +382,7 @@ describe("「명령」 그룹은 레지스트리를 그린다", () => {
     // 두 환경의 숫자가 실제로 다르다 — 그래야 이 시험이 무언가를 잰다.
     // (허브 이동 명령 다섯은 환경과 무관하게 서므로 바닥이 그만큼 올랐다, AIH-3. 「작업」 이동 명령
     // 하나도 언제나 선다, ADR-0202 D6. 「앱」 이동 `ai.apps`(#3950)도 앱 표면이 정적으로 제공되어 선다.)
-    expect(rendered.length).toBeLessThan(14);
+    expect(rendered.length).toBeLessThan(15);
   });
 
   it("옛 머리글 셋 대신 「명령」 하나다", async () => {
@@ -947,3 +947,72 @@ vi.mock("@/features/directory/useNewDm", () => ({
   useOpenNewDm: () => () => undefined,
   useNewDmOpen: () => false,
 }));
+
+// #4111: 「ai」를 치면 걸러져야 한다. 앞 판은 줄의 값에 id·별칭을 통째로 싣고 cmdk의
+// 부분수열 점수를 써서 `nav.inbox`·`nav.activity`·`nav.settings`까지 남았다
+// (성재 0.1.32: 「필터가 아니라 아래로 이동만 했다」).
+describe("⌘K 걸러내기 (#4111)", () => {
+  async function typeQuery(query: string): Promise<void> {
+    const input = document.querySelector<HTMLInputElement>("[cmdk-input]")!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => {
+      setter.call(input, query);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await settle();
+  }
+  const itemKeys = () =>
+    [...document.querySelectorAll<HTMLElement>("[cmdk-item]")].map(
+      (node) => node.dataset.commandId ?? node.dataset.testid ?? ""
+    );
+
+  it("「ai」는 AI와 관계없는 명령을 숨긴다", async () => {
+    world.agents = [agent()];
+    await mount({ path: `/c/${CH}` });
+    await typeQuery("ai");
+    const shown = itemKeys();
+    for (const hidden of ["nav.inbox", "nav.activity", "nav.directory", "nav.settings"]) {
+      expect(shown, hidden).not.toContain(hidden);
+    }
+    expect(shown.some((key) => key.startsWith("agent.routing"))).toBe(false);
+    for (const wanted of ["nav.ai", "nav.settings.ai", "ai.connect"]) {
+      expect(shown, wanted).toContain(wanted);
+    }
+  });
+
+  it("「ai 연결」은 「AI 연결」을 맨 위 명령으로 세우고 설정 AI 연결로 간다", async () => {
+    await mount({ path: `/c/${CH}` });
+    await typeQuery("ai 연결");
+    const rows = commandRows();
+    expect(rows[0]?.dataset.commandId).toBe("nav.settings.ai");
+    expect(rows[0]?.textContent).toContain("AI 연결");
+    await act(async () => {
+      rows[0].click();
+    });
+    await settle();
+    expect(currentPath).toBe("/settings?section=ai");
+  });
+
+  it("「ai 허브」로 AI 허브(/ai)를 찾는다", async () => {
+    await mount({ path: "/inbox" });
+    await typeQuery("ai 허브");
+    expect(commandRows()[0]?.dataset.commandId).toBe("nav.ai");
+  });
+
+  it("아무것도 맞지 않으면 「메시지 검색」만 남는다", async () => {
+    world.agents = [agent()];
+    await mount({ path: `/c/${CH}` });
+    await typeQuery("zzqx");
+    expect(itemKeys()).toEqual([
+      "switcher-message-search",
+      "switcher-message-search-channel",
+    ]);
+  });
+
+  it("id 조각(nav·agent.routing)을 쳐도 줄이 걸리지 않는다", async () => {
+    world.agents = [agent()];
+    await mount({ path: `/c/${CH}` });
+    await typeQuery("nav");
+    expect(commandRows()).toEqual([]);
+  });
+});
