@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Check, Loader2 } from "lucide-react";
 import { Button } from "@/design/ui/button";
-import { Select } from "@/design/ui/select";
+import { ListboxSelect } from "@/design/ui/listbox-select";
 import { cn } from "@/design/lib/cn";
 import { fetchProviderLink } from "@momo/core/features/settings/api";
 import { fetchProviderDefaultAi } from "@momo/core/features/settings/defaultAi";
@@ -196,21 +196,21 @@ export function TeamAiNextStepCard({
         ) : (
           <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-end">
             <div className="flex min-w-0 flex-col gap-1 sm:max-w-xs sm:flex-1">
-              <label htmlFor={channelSelectId} className="text-meta font-semibold text-ink-muted">
+              <label id={`${channelSelectId}-label`} htmlFor={channelSelectId} className="text-meta font-semibold text-ink-muted">
                 {COPY.channelLabel}
               </label>
-              <Select
+              <ListboxSelect
                 id={channelSelectId}
+                aria-labelledby={`${channelSelectId}-label`}
                 value={channel?.id ?? ""}
-                onChange={(event) => setPickedChannel(event.target.value)}
+                onValueChange={(next) => setPickedChannel(next)}
+                placeholder={COPY.channelLabel}
+                options={roomChannels.map((row) => ({
+                  value: row.id,
+                  label: row.kind === "private" ? `${row.name} (비공개)` : `#${row.name}`,
+                }))}
                 data-testid="team-ai-next-step-channel"
-              >
-                {roomChannels.map((row) => (
-                  <option key={row.id} value={row.id}>
-                    {row.kind === "private" ? `${row.name} (비공개)` : `#${row.name}`}
-                  </option>
-                ))}
-              </Select>
+              />
             </div>
             <Button
               type="button"
