@@ -320,9 +320,10 @@ async function scene(browser, origin, scheme) {
       ((await expiry.textContent()) ?? "").trim() === "1시간");
     check(`3 ${tag} 글이 생기면 추천 목록이 접힌다`, (await page.getByTestId("set-status-presets").count()) === 0);
     await shoot(page, "set-status-filled", tag, dialog);
+    // 글 칸에서 Tab 한 번 = 칸 안 X 단추. 그릇 링 하나 + 단추 배경만 보여야 한다.
     await page.keyboard.press("Tab");
-    await page.keyboard.press("Tab");
-    await shoot(page, "set-status-filled-focus", tag, dialog);
+    check(`3 ${tag} Tab 한 번에 X 단추로 간다`, await page.getByTestId("set-status-text-clear").evaluate((el) => el === document.activeElement));
+    await shoot(page, "set-status-filled-focus-x", tag, dialog);
     await page.getByTestId("set-status-text").focus();
     await page.getByTestId("set-status-text-clear").click();
     check(`3 ${tag} 지우기로 비우면 목록이 다시 펼쳐진다`, (await page.getByTestId("set-status-presets").count()) === 1 && (await page.getByTestId("set-status-text").inputValue()) === "");
