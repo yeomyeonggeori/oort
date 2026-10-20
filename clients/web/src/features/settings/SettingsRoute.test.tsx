@@ -236,13 +236,15 @@ describe("SettingsRoute 전면 레이아웃", () => {
     expect(nav.querySelector('hr, [role="separator"]')).toBeNull();
   });
 
-  it("페이지 머리는 보이는 h1 하나이고 범위 칩을 단다", () => {
+  it("페이지 머리는 보이는 h1 하나이고, 프로필 외에는 범위 칩을 단다", () => {
     const host = mountRoute();
     expect(host.querySelectorAll("h1")).toHaveLength(1);
     expect(host.querySelector("h1")?.textContent).toBe("프로필");
-    expect(host.querySelector('[data-testid="settings-scope-chip"]')?.textContent).toContain(
-      "이 워크스페이스에서 보여요"
-    );
+    // 프로필의 「이 워크스페이스에서 보여요」 칩은 눈에서 뺐다(#4109). 낭독(sr-only)으로만 남는다.
+    expect(host.querySelector('[data-testid="settings-scope-chip"]')).toBeNull();
+    const sr = host.querySelector('[data-testid="settings-scope-sr"]') as HTMLElement;
+    expect(sr.textContent).toBe("이 워크스페이스에서 보여요");
+    expect(sr.className).toContain("sr-only");
     act(() => {
       (host.querySelector('[data-testid="settings-nav-appearance"]') as HTMLButtonElement).click();
     });

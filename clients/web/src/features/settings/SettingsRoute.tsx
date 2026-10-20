@@ -265,6 +265,7 @@ export function SettingsRoute() {
           ref={headingRef}
           title={current.label}
           scope={current.scope}
+          scopeVisible={current.scopeVisible}
         />
         <RenderErrorBoundary
           key={section}

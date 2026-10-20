@@ -58,6 +58,12 @@ export interface SettingsSectionMeta {
   /** 페이지 머리 칩. 링크 행(`link`)은 칩이 없다. */
   scope?: SettingsScope;
   /**
+   * `false` 면 칩을 눈에는 그리지 않고 낭독(sr-only)으로만 말한다. 프로필의 「이 워크스페이스에서
+   * 보여요」는 화면에서 군더더기라(성재 0.1.32 실기, #4109) 눈에서 뺐고, 보조기술 사용자에게는
+   * 범위가 계속 읽힌다. 값(`scope`)은 그대로 있어 「모든 행은 범위를 가진다」 계약이 유지된다.
+   */
+  scopeVisible?: boolean;
+  /**
    * 설정 안의 화면이 아니라 다른 화면으로 가는 행. 목차에서는 행으로 서되 눌러도
    * 설정 페이지가 바뀌지 않는다(끝 아이콘이 그 사실을 말한다). 옛 주소(`?section=ai`)
    * 로 들어오면 옛 화면이 열리고 이 행이 현재 위치로 표시된다.
@@ -78,7 +84,7 @@ export interface SettingsSectionMeta {
 }
 
 export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
-  { id: "profile", label: "프로필", group: "개인", scope: "workspace-member" },
+  { id: "profile", label: "프로필", group: "개인", scope: "workspace-member", scopeVisible: false },
   { id: "appearance", label: "모양", group: "개인", scope: "device" },
   { id: "notifications", label: "알림", group: "개인", scope: "account-device" },
   { id: "shortcuts", label: "단축키", group: "개인", scope: "device" },

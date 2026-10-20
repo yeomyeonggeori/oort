@@ -54,6 +54,11 @@ describe("settingsNav (#3578 S1: 12행, 세 그룹)", () => {
     expect(SETTINGS_SECTIONS.filter((item) => item.link).map((item) => item.id)).toEqual(["ai"]);
   });
 
+  it("눈에서 뺀 범위는 프로필 하나뿐이고, 그 값(범위)은 그대로 있다(#4109)", () => {
+    expect(SETTINGS_SECTIONS.filter((item) => item.scopeVisible === false).map((item) => item.id)).toEqual(["profile"]);
+    expect(SETTINGS_SECTIONS.find((item) => item.id === "profile")?.scope).toBe("workspace-member");
+  });
+
   it("범위 문장에 em-dash가 없다", () => {
     for (const label of Object.values(SCOPE_LABELS)) {
       expect(label).not.toMatch(/[—–]/);
