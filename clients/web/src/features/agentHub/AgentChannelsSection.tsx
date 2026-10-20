@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Hash, Loader2, Lock } from "lucide-react";
 import { Button } from "@/design/ui/button";
-import { Select } from "@/design/ui/select";
+import { ListboxSelect } from "@/design/ui/listbox-select";
 import { useSession } from "@/app/session";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { useChannels } from "@/features/workspace/useWorkspace";
@@ -266,36 +266,36 @@ export function AgentChannelsSection({
         >
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <label
+              id="agent-hub-channel-add-label"
               htmlFor="agent-hub-channel-add"
               className="text-meta text-ink-muted"
             >
               채널에 추가
             </label>
-            <Select
+            <ListboxSelect
               id="agent-hub-channel-add"
+              aria-labelledby="agent-hub-channel-add-label"
               value={addTarget}
               disabled={offline || busy || placement.available.length === 0}
-              onChange={(event) => {
-                setAddTarget(event.target.value);
+              onValueChange={(next) => {
+                setAddTarget(next);
                 setError(null);
               }}
-              data-testid="agent-hub-channel-add"
-            >
-              <option value="">
-                {placement.available.length === 0
+              placeholder={
+                placement.available.length === 0
                   ? "추가할 수 있는 채널이 없어요"
-                  : "채널 고르기"}
-              </option>
-              {/* The popup is OS-drawn and takes no markup, so the private
-                  marker is a word rather than the lock icon the rows use. */}
-              {placement.available.map((channel) => (
-                <option key={normalizedId(channel.id)} value={channel.id}>
-                  {`#${channel.name ?? "이름 없는 채널"}${
-                    channel.kind === "private" ? " (비공개)" : ""
-                  }`}
-                </option>
-              ))}
-            </Select>
+                  : "채널 고르기"
+              }
+              options={placement.available.map((channel) => ({
+                value: channel.id,
+                // The private marker stays a word so the button text and the
+                // option read the same.
+                label: `#${channel.name ?? "이름 없는 채널"}${
+                  channel.kind === "private" ? " (비공개)" : ""
+                }`,
+              }))}
+              data-testid="agent-hub-channel-add"
+            />
           </div>
           <Button
             type="submit"

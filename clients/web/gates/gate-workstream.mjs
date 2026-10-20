@@ -782,6 +782,33 @@ async function assertGoalFold(page) {
 }
 
 /**
+ * 앱이 그린 listbox(#4128)의 선택지는 열려야 DOM에 있다. 열어서 읽고, 지금 고른
+ * 선택지를 다시 눌러 값을 바꾸지 않고 닫는다(Esc 는 pane 의 접힘 핸들러에도 닿는다).
+ * 네이티브 `select.options` 를 대신한다.
+ */
+async function readHostOptions(page, testId) {
+  await page.getByTestId(testId).click();
+  const list = page.getByRole("listbox");
+  await list.waitFor({ timeout: 5_000 });
+  const options = await page.getByRole("option").evaluateAll((nodes) =>
+    nodes.map((node) => ({
+      value: node.getAttribute("data-value") ?? "",
+      label: node.textContent ?? "",
+    }))
+  );
+  await page.locator('[role="option"][aria-selected="true"]').click();
+  await list.waitFor({ state: "detached", timeout: 5_000 });
+  return options;
+}
+
+/** 칸을 열어 `data-value` 가 값인 선택지를 누른다(`selectOption` 의 대신). */
+async function chooseHost(page, testId, value) {
+  await page.getByTestId(testId).click();
+  await page.locator(`[role="option"][data-value="${value}"]`).click();
+  await page.getByRole("listbox").waitFor({ state: "detached", timeout: 5_000 });
+}
+
+/**
  * 열린 피커의 DOM 모양을 한 번에 읽어온다. 세 곳(형태 단정·진행 중 단정·좁은 판
  * 단정)이 같은 것을 재므로 읽는 코드도 하나여야 한다.
  *
@@ -830,17 +857,11 @@ const readPicker = () => {
     toggleClass: toggle?.className ?? null,
     toggleLabel: toggle?.textContent?.trim() ?? null,
     selectId: select?.getAttribute("id") ?? null,
-    selectValue: select === null ? null : select.value,
+    selectValue: select === null ? null : select.getAttribute("data-value"),
     selectDisabled: select === null ? null : select.disabled,
     selectFill: select ? getComputedStyle(select).backgroundColor : null,
     selectRects: select === null ? 0 : select.getClientRects().length,
-    options:
-      select === null
-        ? []
-        : Array.from(select.options).map((option) => ({
-            value: option.value,
-            label: option.textContent ?? "",
-          })),
+    options: [],
     confirmLabel: confirm?.textContent?.trim() ?? null,
     confirmName: confirm?.getAttribute("aria-label") ?? null,
     confirmBusy: confirm?.getAttribute("aria-busy") ?? null,
@@ -880,6 +901,7 @@ async function assertPickerShape(page, closedToggleFill, expectedTargets, where)
   await page.mouse.move(0, 0);
   await settle(page);
   const shape = await page.evaluate(readPicker);
+  shape.options = await readHostOptions(page, "workstream-continue-host-select");
 
   if (shape.role !== "group" || shape.labelId === null || shape.labelText === null) {
     throw new Error(
@@ -1567,7 +1589,7 @@ async function assertListAndHistory(browser) {
   // 기본값이 아니라 이름으로 고른다. 이 단정이 확인하려는 것은 **고른 그
   // 호스트**가 요청에 실린다는 것이고, 기본값을 그대로 확정하면 폼이 선택을
   // 나르는지 아니면 언제나 첫 번째를 보내는지 구별되지 않는다.
-  await hostSelect.selectOption(liveHostId);
+  await chooseHost(page, "workstream-continue-host-select", liveHostId);
   const confirm = page.getByTestId("workstream-continue-confirm");
   if ((await confirm.getAttribute("data-host-id")) !== liveHostId) {
     throw new Error(

@@ -7,7 +7,7 @@ import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
-import { Select } from "@/design/ui/select";
+import { ListboxSelect } from "@/design/ui/listbox-select";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import { memberFor, useChannels, useDirectory } from "@/features/workspace/useWorkspace";
@@ -248,51 +248,44 @@ export function MemoryBrowserRoute() {
               />
               )}
               <div className="grid grid-cols-2 gap-2">
-                <Select
+                <ListboxSelect
                   aria-label="채널"
                   className="col-span-2"
                   value={channelId}
-                  onChange={(event) => setParam("channel", event.target.value)}
+                  onValueChange={(next) => setParam("channel", next)}
+                  placeholder={BROWSER_ALL_CHANNELS}
+                  options={[
+                    { value: "", label: BROWSER_ALL_CHANNELS },
+                    ...channels.groups.channels.map((channel) => ({
+                      value: channel.id,
+                      label: `# ${channel.name}`,
+                    })),
+                  ]}
                   data-testid="memory-browser-filter-channel"
-                >
-                  <option value="">{BROWSER_ALL_CHANNELS}</option>
-                  {channels.groups.channels.map((channel) => (
-                    <option key={channel.id} value={channel.id}>
-                      # {channel.name}
-                    </option>
-                  ))}
-                </Select>
+                />
                 {!timelineView && (
-                <Select
+                <ListboxSelect
                   aria-label="종류"
                   value={kind ?? ""}
-                  onChange={(event) => setParam("kind", event.target.value)}
+                  onValueChange={(next) => setParam("kind", next)}
+                  placeholder={BROWSER_ALL_KINDS}
+                  options={[
+                    { value: "", label: BROWSER_ALL_KINDS },
+                    ...MEMORY_KIND_OPTIONS.map((option) => ({ value: option.value, label: option.label })),
+                  ]}
                   data-testid="memory-browser-filter-kind"
-                >
-                  <option value="">{BROWSER_ALL_KINDS}</option>
-                  {MEMORY_KIND_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </Select>
+                />
                 )}
                 {!timelineView && (
-                <Select
+                <ListboxSelect
                   aria-label="상태"
                   value={status}
-                  onChange={(event) =>
-                    setParam("status", event.target.value === "active" ? null : event.target.value)
-                  }
+                  onValueChange={(next) => setParam("status", next === "active" ? null : next)}
+                  placeholder="상태 고르기"
+                  options={MEMORY_STATUS_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
                   disabled={searching}
                   data-testid="memory-browser-filter-status"
-                >
-                  {MEMORY_STATUS_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </Select>
+                />
                 )}
               </div>
               {searching && !timelineView && (

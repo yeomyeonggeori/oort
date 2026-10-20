@@ -11,7 +11,7 @@ import {
   DialogTitle,
 } from "@/design/ui/dialog";
 import { Input } from "@/design/ui/input";
-import { Select } from "@/design/ui/select";
+import { ListboxSelect } from "@/design/ui/listbox-select";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
 import {
@@ -579,16 +579,17 @@ function PluginCatalogControls({
           placeholder="이름 또는 용도 검색"
         />
       </label>
-      <label className="flex min-w-0 flex-col gap-1" htmlFor="plugin-filter">
-        <span className="text-meta text-ink-muted">보기</span>
-        <Select
+      <div className="flex min-w-0 flex-col gap-1">
+        <label id="plugin-filter-label" htmlFor="plugin-filter" className="text-meta text-ink-muted">보기</label>
+        <ListboxSelect
           id="plugin-filter"
+          aria-labelledby="plugin-filter-label"
           value={filter}
-          onChange={(event) => onFilter(event.target.value as Filter)}
-        >
-          {FILTERS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-        </Select>
-      </label>
+          onValueChange={(next) => onFilter(next)}
+          placeholder="보기 고르기"
+          options={FILTERS.map((item) => ({ value: item.id, label: item.label }))}
+        />
+      </div>
     </div>
   );
 }
