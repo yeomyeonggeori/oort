@@ -221,11 +221,14 @@ async function waitForDialog(): Promise<HTMLElement> {
   });
 }
 
-function roleSelect(): HTMLSelectElement | null {
+function roleSelect(): HTMLButtonElement | null {
   return document.querySelector(
     '[data-testid="member-profile-role"]'
-  ) as HTMLSelectElement | null;
+  ) as HTMLButtonElement | null;
 }
+
+const optionEls = () =>
+  [...document.querySelectorAll<HTMLElement>('[role="option"]')];
 
 function applyButton(): HTMLButtonElement | null {
   return document.querySelector(
@@ -236,9 +239,19 @@ function applyButton(): HTMLButtonElement | null {
 async function selectRole(role: MembershipRole) {
   const select = roleSelect();
   expect(select).not.toBeNull();
+  if (!document.querySelector('[role="listbox"]')) {
+    await act(async () => {
+      select!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+  }
+  const option = optionEls().find((o) => o.dataset.value === role)!;
   await act(async () => {
-    select!.value = role;
-    select!.dispatchEvent(new Event("change", { bubbles: true }));
+    option.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+  // 목록이 닫히고 초점이 단추로 돌아온 뒤에야 다음 조작을 한다(Radix 가 비동기로 돌려 놓는다).
+  await vi.waitFor(() => {
+    expect(document.querySelector('[role="listbox"]')).toBeNull();
+    expect(document.activeElement).toBe(roleSelect());
   });
 }
 
@@ -486,8 +499,14 @@ describe("멤버 프로필 역할 변경", () => {
     await waitForDialog();
     const select = roleSelect();
     expect(select).not.toBeNull();
-    const labels = [...select!.options].map((option) => option.textContent);
+    expect(select!.getAttribute("role")).toBe("combobox");
+    expect(select!.getAttribute("aria-label")).toBe("역할");
+    await act(async () => {
+      select!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const labels = optionEls().map((option) => option.textContent);
     expect(labels).toEqual(["마스터", "리드", "동료", "방문"]);
+    expect(document.querySelector('[role="listbox"]')?.getAttribute("aria-label")).toBe("역할");
     expect(labels).not.toEqual([
       DEFAULT_ROLE_LABELS.owner,
       DEFAULT_ROLE_LABELS.admin,

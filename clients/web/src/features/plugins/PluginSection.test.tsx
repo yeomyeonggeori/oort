@@ -418,6 +418,43 @@ describe("읽기 전용: 설치·권한 경로가 없는 서버 (오늘의 Rust 
     expect(el.querySelectorAll('[data-testid^="plugin-catalog-"]')).toHaveLength(real.length + extra.length);
   });
 
+  it("보기 칸은 라벨이 이름인 combobox 이고, 고르면 목록이 걸러진다", async () => {
+    const real = (catalogWire.plugins as Array<Record<string, unknown>>);
+    const extra = EXTRA_APP_NAMES.map((name) => ({
+      ...real[0],
+      pluginId: `com.example.${name}`,
+      name: `예시 ${name}`,
+      official: false,
+      installed: false,
+    }));
+    h.catalog = { ...catalogWire, plugins: [...real, ...extra] };
+    const el = await mount();
+    await until(() => q(el, "plugin-list"));
+    const trigger = el.querySelector<HTMLButtonElement>("#plugin-filter")!;
+    expect(trigger.tagName).toBe("BUTTON");
+    expect(trigger.getAttribute("role")).toBe("combobox");
+    const labelId = trigger.getAttribute("aria-labelledby")!;
+    expect(document.getElementById(labelId)?.textContent).toBe("보기");
+    const before = el.querySelectorAll('[data-testid^="plugin-catalog-"]').length;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(document.querySelector('[role="listbox"]')?.getAttribute("aria-labelledby")).toBe(labelId);
+    expect([...document.querySelectorAll('[role="option"]')].map((o) => o.textContent)).toEqual([
+      "모든 앱",
+      "설치됨",
+      "내 권한",
+    ]);
+    await act(async () => {
+      document
+        .querySelector<HTMLElement>('[role="option"][data-value="installed"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(trigger.dataset.value).toBe("installed");
+    expect(trigger.textContent).toContain("설치됨");
+    expect(el.querySelectorAll('[data-testid^="plugin-catalog-"]').length).toBeLessThan(before);
+  });
+
   it("목록이 한눈에 읽히는 길이를 넘으면 컨트롤이 돌아온다", async () => {
     // 길이만 재는 합성 항목이다: 공식 앱 뒤에 가짜를 더해 아홉을 넘긴다.
     const real = (catalogWire.plugins as Array<Record<string, unknown>>);
