@@ -11,6 +11,28 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+## [0.1.32] - 2026-10-20
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.32>. Tag target: `main=ddd4dd45`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres lists. Migrations 141-143 (schema 140 to 143); `bootstrap_runtime_roles.sql` gains one grant (`momo_notifier` SELECT on `channel_viewing`). New environment variables are all optional (`HERMES_LOGIN_RELAY_URL`, `HERMES_LOGIN_RELAY_KEY`, `HERMES_APP_LOGIN_GOOGLE_PUBLISHING`, `HERMES_BASE_URL`, `HERMES_API_KEY`).
+
+### Added
+- Server: the "watching" presence signal (ADR-0204 addendum 3, #4018, #4059, #4063, #4064, migration 141). Channel screens on phone, web and desktop send a heartbeat, and the server decides the 30-second "watching" window from the new `channel_viewing` table (RLS enabled and forced; the notifier role reads it).
+- Server: the official app catalogue is seeded from measured vendor tool lists (ADR-0113 addendum 2, #3944, #4068, migration 143). GitHub, Notion and Linear manifests are replaced (tool names are now the vendor names), and Gmail, Google Calendar and "My Drive" are added. Capability projections of existing grants of the three replaced apps are rebuilt.
+- Server and web: GitHub intake (ADR-0205 D3-D6, #3954, #3955, #4070, #4083, #4084, #4087, #4088, #4090, migration 142). Installation, repository and channel-subscription tables with row-level security, an unsigned-webhook 401, spoof-proof notification props, a `linked_elsewhere` setup redirect, and the notifications screen (operator registration, workspace link, channel subscription, rendering). The GitHub surface stays off until `GITHUB_APP_MASTER_KEY` is set.
+- Hermes in one step (ADR-0203, #3952, #4071, #4072, #4076, #4082, #4091, #4092): a compose `agents` profile, a Railway `hermes` service definition with a fail-closed tool-lock gate, a model-provider renderer, and hermes-kwak model auth through a subscription OAuth (Codex first, Claude fallback). It is not switched on for the team instance yet.
+- Hermes login relay (ADR-0203 addendum, #4073, #4074, #4078, #4079, #4080, #4081, #4093, #4094, #4095, #4096, #4097): a fixed-command sidecar, an operator-only relay API with a zero-byte token boundary test, the model-auth screen and per-app login. Without the relay key the API answers 409 `login_relay_off`.
+- Server and web: the `app_notice` wire and a "used app" mark in `message.props` (ADR-0113 addendum 2 E8-E10, #3950, #3951, #3949, #4052, #4054, #4057, #4061, #4085): the phone "Apps" read screen, app screen v2 with preview chips, two Drive chips, where it runs and tool grades R/A/B.
+
+### Changed
+- Phone and web: the iPhone SE keyboard gap is 4 pt and the web DM normal-state notice is gone (#4044, #4050); the "agent" badge next to message names is removed and kept for read-aloud only (#4065, #4066).
+- CI: the PR cargo lane also runs for `openapi.yaml`, `docs/api` golden and vector changes, and for the paths Rust tests read outside `server-rust` (#4042, #4053, #4055, #4060).
+
+### Fixed
+- Web: the `useAppNotice` system row no longer duplicates, and the Port `login_lost` message is neutral (#4058, #4062).
+
+### Docs
+- ADR-0204 addendum 2 (wording of "declined", `momo.stream.provisional`, cancelled-stream push; #4045, #4051), the Agent Port `complete` null `messageId`/`seq` note (#4046, #4049), the subscription-OAuth ADR addenda (#4071, #4075), the login-relay design (#4077) and the Hermes K-S1b trial preparation (#4067).
+
 ## [0.1.31] - 2026-10-18
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.31>. Tag target: `main=38695c43`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. Two database migrations (the schema goes from 138 to 140): 139 `agent_connector_owner` (one nullable `agent` column plus a CHECK) and 140 `github_app` (five tables, all with row-level security enabled and forced). `bootstrap_runtime_roles` is unchanged. New environment variables, all optional: `GITHUB_APP_MASTER_KEY` (without it only the GitHub surface answers 503), `MOMO_PUBLIC_BASE_URL`, and `OORT_COHOSTED_AGENT_CONNECTOR_APPS` (unset means the connector trial is off). Deploy order: the push relay, the API (the pre-deploy step applies 139 and 140), the agent worker, the relay and the webhook sender, then the notifier.
