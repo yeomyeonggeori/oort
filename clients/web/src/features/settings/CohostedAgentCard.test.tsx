@@ -92,6 +92,7 @@ const calls = () => api.request.mock.calls.map((call) => `${(call[1] as RequestI
 
 beforeEach(() => {
   flags.IS_REACT_ACT_ENVIRONMENT = true;
+  window.localStorage.clear();
   api.request.mockReset();
 });
 afterEach(() => {
@@ -143,7 +144,7 @@ describe("CohostedAgentCard", () => {
     });
     mount();
     const found = await until("ai-cohosted-found");
-    expect(found.textContent).toContain("같은 서버의 Hermes를 찾았어요, 연결할까요?");
+    expect(found.textContent).toContain("같은 서버의 Hermes를 찾았어요.");
     expect(q("ai-cohosted-attest-note")?.textContent).toContain("운영자님이 서버에 직접 선언한 값");
     expect(q("ai-cohosted-attest-note")?.textContent).toContain("확인한 것이 아니에요");
     const probeBody = api.request.mock.calls.find((call) => String(call[0]).endsWith("/probe"))?.[1] as RequestInit;
@@ -205,5 +206,102 @@ describe("CohostedAgentCard", () => {
     mount(true);
     await until("ai-cohosted-offline");
     expect(calls().some((call) => call.endsWith("/probe"))).toBe(false);
+  });
+
+  describe("first-time prompt (#4113)", () => {
+    const attested = (path: string, probe: object = PROBE) =>
+      path.endsWith("/probe") ? Promise.resolve(probe) : Promise.resolve({ ...STATUS, toolsLockAttested: true, connectable: true });
+    const promptEl = () => document.querySelector<HTMLElement>("[data-testid='ai-cohosted-prompt']");
+    const press = async (id: string) => act(async () => document.querySelector<HTMLElement>(`[data-testid='${id}']`)?.click());
+
+    it("asks once, then stays quiet after 'later' on a fresh mount; the card stays", async () => {
+      api.request.mockImplementation((path: string) => attested(path));
+      mount();
+      await waitFor(() => expect(promptEl()).not.toBeNull());
+      expect(promptEl()?.textContent).toContain("같은 서버에서 Hermes를 찾았어요. 연결할까요?");
+      await press("ai-cohosted-prompt-later");
+      await waitFor(() => expect(promptEl()).toBeNull());
+      expect(calls().some((c) => c.startsWith("POST") && c.endsWith("/connect"))).toBe(false);
+      act(() => root?.unmount());
+      host?.remove();
+      mount();
+      await until("ai-cohosted-found");
+      await act(async () => undefined);
+      expect(promptEl()).toBeNull();
+    });
+
+    it("does not ask again after Esc, and asks again for another Hermes address", async () => {
+      api.request.mockImplementation((path: string) => attested(path));
+      mount();
+      await waitFor(() => expect(promptEl()).not.toBeNull());
+      await act(async () => {
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      });
+      await waitFor(() => expect(promptEl()).toBeNull());
+      act(() => root?.unmount());
+      host?.remove();
+      mount();
+      await until("ai-cohosted-found");
+      expect(promptEl()).toBeNull();
+      // 다른 Hermes 주소는 새 후보다.
+      act(() => root?.unmount());
+      host?.remove();
+      api.request.mockImplementation((path: string) =>
+        path.endsWith("/probe")
+          ? Promise.resolve(PROBE)
+          : Promise.resolve({ ...STATUS, toolsLockAttested: true, connectable: true, endpointLabel: "http://other:8642/v1" })
+      );
+      mount();
+      await waitFor(() => expect(promptEl()).not.toBeNull());
+    });
+
+    it("connects from the prompt with one POST", async () => {
+      api.request.mockImplementation((path: string) =>
+        path.endsWith("/connect")
+          ? Promise.resolve({ schema: "momo.cohosted_agent.connect.v0", agentId: "a1", displayName: "Hermes", handle: "hermes" })
+          : attested(path)
+      );
+      mount();
+      await waitFor(() => expect(promptEl()).not.toBeNull());
+      await press("ai-cohosted-prompt-connect");
+      await waitFor(() => expect(calls().filter((c) => c.startsWith("POST") && c.endsWith("/connect"))).toHaveLength(1));
+      expect(promptEl()).toBeNull();
+    });
+
+    it("never asks when already connected, not connectable, unreachable, offline or before attestation", async () => {
+      const cases: Array<[string, (path: string) => Promise<unknown>, boolean]> = [
+        ["connected", (p) => (p.endsWith("/probe") ? Promise.resolve(PROBE) : Promise.resolve({ ...STATUS, toolsLockAttested: true, connectedAgentId: "a1" })), false],
+        ["not connectable", (p) => attested(p, { ...PROBE, connectable: false }), false],
+        ["unreachable", (p) => attested(p, { ...PROBE, state: "unreachable", connectable: false }), false],
+        ["not attested", () => Promise.resolve(STATUS), false],
+        ["offline", (p) => attested(p), true],
+      ];
+      for (const [name, impl, offline] of cases) {
+        window.localStorage.clear();
+        api.request.mockReset();
+        api.request.mockImplementation(impl);
+        mount(offline);
+        await waitFor(() => expect(api.request).toHaveBeenCalled());
+        await new Promise((r) => setTimeout(r, 30));
+        await act(async () => undefined);
+        expect(promptEl(), name).toBeNull();
+        act(() => root?.unmount());
+        host?.remove();
+        root = null;
+      }
+    });
+
+    it("keeps the caution line to a real dangerous signal and folds the explanatory sentences under 자세히", async () => {
+      api.request.mockImplementation((path: string) => attested(path));
+      mount();
+      await until("ai-cohosted-found");
+      expect(q("ai-cohosted-toolsets-warn")).toBeNull();
+      const more = q("ai-cohosted-more") as HTMLDetailsElement;
+      expect(more.open).toBe(false);
+      expect(more.textContent).toContain("자세히");
+      expect(more.textContent).toContain("Hermes의 대화 기록");
+      expect((q("ai-cohosted-found")?.textContent ?? "").replace(more.textContent ?? "", "")).not.toContain("평소처럼 채널에 초대해");
+      expect(more.querySelector("summary")?.textContent).toBe("자세히");
+    });
   });
 });

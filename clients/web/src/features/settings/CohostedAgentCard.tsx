@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
@@ -13,12 +13,15 @@ import {
   type CohostedStatus,
 } from "@momo/core/features/settings/cohostedAgent";
 import { Button } from "@/design/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/design/ui/dialog";
+import { useSession } from "@/app/session";
 import { InlineBanner } from "@/features/common/States";
 import { IS_TAURI } from "@/lib/env";
 import { openExternalUrl } from "@/lib/tauri";
 import { rosterQueryKey } from "@/features/workspace/useWorkspace";
 import { AiLineRow, AiSection, AiSectionHead } from "./aiAccountsParts";
 import { ModelLoginPanel } from "./ModelLoginPanel";
+import { cohostedPromptKey, markCohostedPromptShown, wasCohostedPromptShown } from "./cohostedPrompt";
 
 // Reading this as: settings › AI 연결 card (instance operator only) for internal team users on
 // web+Tauri, density 6/10, motion 1/10.
@@ -116,6 +119,18 @@ function CardBody({
     },
   });
 
+  // 처음 한 번만 묻는 창(#4113). 운영자에게(카드가 이미 운영자만 그린다) 찾았고 연결할 수 있고 아직 연결 전일 때만,
+  // 이 운영자·서버·Hermes 주소로 처음일 때만 뜬다. 뜨는 순간 기억해서, 나중에·닫기·새로고침 모두 다시 묻지 않는다.
+  const { session } = useSession();
+  const promptKey = cohostedPromptKey({ memberId: session.member.id, workspaceId, endpointLabel: status.endpointLabel });
+  const promptable = !offline && connected === null && probe.data?.state === "ok" && probe.data.connectable;
+  const [promptOpen, setPromptOpen] = useState(false);
+  useEffect(() => {
+    if (!promptable || wasCohostedPromptShown(promptKey)) return;
+    markCohostedPromptShown(promptKey);
+    setPromptOpen(true);
+  }, [promptable, promptKey]);
+
   // 연결이 끝나면 초점이 사라진 단추에서 <body> 로 떨어지지 않게 새 줄로 옮긴다.
   const doneRef = useRef<HTMLDivElement>(null);
   const wasConnected = useRef(connected !== null);
@@ -187,6 +202,38 @@ function CardBody({
       {connect.isError && (
         <InlineBanner message={connectErrorMessage(connect.error)} testId="ai-cohosted-connect-error" />
       )}
+      <Dialog open={promptOpen} onOpenChange={setPromptOpen}>
+        {promptOpen && (
+          <DialogContent className="gap-3 p-4" data-testid="ai-cohosted-prompt">
+            <DialogTitle className="text-title font-bold break-keep">{COPY.promptTitle}</DialogTitle>
+            <DialogDescription className="break-keep text-body text-ink-muted">
+              {COPY.foundDetail} {COPY.promptLaterNote}
+            </DialogDescription>
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                className="tap-target"
+                onClick={() => setPromptOpen(false)}
+                data-testid="ai-cohosted-prompt-later"
+              >
+                {COPY.promptLater}
+              </Button>
+              <Button
+                type="button"
+                className="tap-target"
+                onClick={() => {
+                  setPromptOpen(false);
+                  connect.mutate();
+                }}
+                data-testid="ai-cohosted-prompt-connect"
+              >
+                {COPY.promptConnect}
+              </Button>
+            </div>
+          </DialogContent>
+        )}
+      </Dialog>
     </AiSection>
   );
 }
@@ -248,13 +295,17 @@ function ProbeResult({
           {probe.toolsetsListed.length > 0 && ` (${probe.toolsetsListed.join(", ")})`}
         </span>
       )}
-      {probe.toolsets === "none_listed" && (
-        <span className="text-meta text-ink-muted">{COPY.toolsetsNone}</span>
-      )}
-      <span className="text-meta text-ink-muted" data-testid="ai-cohosted-attest-note">
-        {COPY.attestNote}
-      </span>
-      <span className="text-meta text-ink-muted">{COPY.volumeNote}</span>
+      <details className="text-meta text-ink-muted" data-testid="ai-cohosted-more">
+        <summary className="block w-full cursor-pointer rounded-sm px-1 py-1 text-meta text-ink-muted hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring">
+          {COPY.moreSummary}
+        </summary>
+        <div className="mt-1 flex flex-col gap-1">
+          <span>{COPY.foundMore}</span>
+          {probe.toolsets === "none_listed" && <span>{COPY.toolsetsNone}</span>}
+          <span data-testid="ai-cohosted-attest-note">{COPY.attestNote}</span>
+          <span>{COPY.volumeNote}</span>
+        </div>
+      </details>
     </AiLineRow>
   );
 }
