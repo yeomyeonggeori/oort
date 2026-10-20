@@ -35,6 +35,7 @@ import {
   readProjectionPhase,
   useClosedDms,
 } from "@/features/sidebar/sidebarDmClosure";
+import { useDmRevival } from "@/features/sidebar/dmRevival";
 import { applyFirstAgentFocus } from "@/features/welcome/firstAgentStore";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import {
@@ -208,13 +209,20 @@ export function ChatShell() {
   // 닫은 DM(#3963, `sidebarDmClosure.ts`)은 이 폴백의 후보가 아니다. 사이드바가 같은 함수로 열린 대화를
   // 정하므로, 채널이 없는 멤버의 첫 DM 을 닫으면 본문도 다음 DM(없으면 빈 상태)으로 간다.
   const closedDms = useClosedDms(workspaceId);
+  const latestSeqForClosure = useDmRevival({
+    workspaceId,
+    dms: channelsQuery.groups.dms,
+    closed: closedDms,
+    byChannel: readStates.byChannel,
+    phase: readProjectionPhase(readStates),
+  });
   const channelId =
     params.channelId ??
     indexFallbackChannelId({
       channels: channelsQuery.groups.channels,
       dms: channelsQuery.groups.dms,
       closed: closedDms,
-      latestSeqOf: (id) => unreadFor(readStates.byChannel, id)?.latestSeq,
+      latestSeqOf: latestSeqForClosure,
       phase: readProjectionPhase(readStates),
     }) ??
     null;

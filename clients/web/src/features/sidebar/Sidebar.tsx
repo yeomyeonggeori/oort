@@ -108,6 +108,7 @@ import {
   reopenDmOnDevice,
   useClosedDms,
 } from "./sidebarDmClosure";
+import { useDmRevival } from "./dmRevival";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
 import {
   setSidebarSectionCollapsed,
@@ -341,13 +342,21 @@ export function Sidebar({
   const closedDms = useClosedDms(workspaceId);
   const readPhase = readProjectionPhase(readStates);
   const routePath = useLocation().pathname;
+  // 닫은 DM 의 되살아남은 「사람이 읽을 새 메시지」로만 정한다(#4142, `dmRevival.ts`).
+  const latestSeqForClosure = useDmRevival({
+    workspaceId,
+    dms,
+    closed: closedDms,
+    byChannel: readStates.byChannel,
+    phase: readPhase,
+  });
   const openId = openChannelId(
     routePath,
     indexFallbackChannelId({
       channels,
       dms,
       closed: closedDms,
-      latestSeqOf: (id) => unreadFor(readStates.byChannel, id)?.latestSeq,
+      latestSeqOf: latestSeqForClosure,
       phase: readPhase,
     })
   );
@@ -361,21 +370,26 @@ export function Sidebar({
         (channel) =>
           !dmHiddenByClosure({
             closedAtSeq: closedAtSeqOf(closedDms, channel.id),
-            latestSeq: unreadFor(readStates.byChannel, channel.id)?.latestSeq,
+            latestSeq: latestSeqForClosure(channel.id),
             isOpen: openId !== null && uuidEq(channel.id, openId),
             phase: readPhase,
           })
       ),
-    [dms, closedDms, readStates.byChannel, openId, readPhase]
+    [dms, closedDms, latestSeqForClosure, openId, readPhase]
   );
   const closedDmCount = dms.length - visibleDms.length;
   // 닫아 둔 DM 이 **열리는** 순간(주소 · ⌘K · 새 DM)이 곧 다시 연다는 뜻이다. 원장에서 지우지
   // 않으면 사람이 일부러 연 대화가 다른 곳으로 옮겨 가는 순간 도로 사라진다. 효과는 `openId` 가
   // **바뀔 때만** 돈다(deps): 열린 DM 을 X 로 닫으면 `closeDmRow` 가 원장을 쓴 뒤 `/` 로 착지시키고,
   // 그 DM 은 이미 열린 것이 아니므로 이 효과가 닫기를 되돌릴 틈이 없다.
+  //
+  // **주소가 정한 열림만** 다시 연다(#4142): `/` 의 폴백이 고른 대화는 사람이 연 것이 아니다. 투영을 못 읽은
+  // 동안(`error`)에는 닫은 DM 이 폴백 후보가 되는데, 그걸 「열림」으로 세면 일시 오류 한 번에 원장 항목이
+  // 영구히 지워져 닫은 DM 이 오류가 풀린 뒤에도 돌아온다.
+  const explicitOpenId = openChannelId(routePath, null);
   useEffect(() => {
-    if (openId !== null) reopenDmOnDevice(workspaceId, openId);
-  }, [openId, workspaceId]);
+    if (explicitOpenId !== null) reopenDmOnDevice(workspaceId, explicitOpenId);
+  }, [explicitOpenId, workspaceId]);
 
   // 사이드바 조직화 (ADR-0177 / BT-4 #1932). 부트스트랩 GET 이 도착하기 전에는
   // 배치가 비어 있고, 그때 파생은 오늘까지의 두 섹션과 정확히 같은 것을 돌려준다

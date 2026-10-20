@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { Smile } from "lucide-react";
+import { Smile, X } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   setPresenceStatus,
@@ -52,6 +52,13 @@ import { EmojiPickerDialog } from "@/features/emoji/EmojiPickerDialog";
 
 // 값은 늘 목록 안(열릴 때 시드)이라 보이지 않는다. 칸이 이름 없는 빈 단추가 되지 않게만 둔다.
 const EXPIRY_PLACEHOLDER = "만료를 고르세요";
+// 입력 칸 오른쪽 X: 글과 이모지를 함께 비워 추천 목록이 다시 펼쳐진다. 저장된 상태를
+// 지우는 하단 「상태 지우기」와 다르다(이쪽은 아직 저장 전인 초안만 비운다).
+const CUSTOM_STATUS_FIELD_CLEAR_LABEL = "입력한 내용 지우기";
+
+function expiryLabel(id: StatusExpiryChoice): string {
+  return STATUS_EXPIRY_OPTIONS.find((option) => option.id === id)?.label ?? "";
+}
 
 function applyCustomToRoster(
   rows: RosterMember[] | undefined,
@@ -125,6 +132,8 @@ export function SetStatusDialog({
   const dateId = useId();
   const timeId = useId();
   const emojiButtonRef = useRef<HTMLButtonElement>(null);
+  const textRef = useRef<HTMLInputElement>(null);
+  const fieldRef = useRef<HTMLDivElement>(null);
   const seededOpenRef = useRef(false);
   const [emoji, setEmoji] = useState("");
   const [text, setText] = useState("");
@@ -279,80 +288,110 @@ export function SetStatusDialog({
             <InlineBanner message={failed} testId="set-status-error" />
           )}
 
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              ref={emojiButtonRef}
-              type="button"
-              variant="outline"
-              size="sm"
-              className="tap-target"
-              disabled={busy}
-              aria-label={CUSTOM_STATUS_EMOJI_LABEL}
-              data-testid="set-status-emoji"
-              onClick={() => setPickerOpen(true)}
-            >
-              {emoji ? (
-                <span aria-hidden="true">{emoji}</span>
-              ) : (
-                <Smile aria-hidden="true" />
-              )}
-            </Button>
-            {emoji ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="tap-target"
-                disabled={busy}
-                data-testid="set-status-emoji-clear"
-                onClick={() => setEmoji("")}
-              >
-                {CUSTOM_STATUS_EMOJI_CLEAR_LABEL}
-              </Button>
-            ) : null}
-          </div>
-
-          <div
-            className="flex flex-wrap gap-2"
-            role="group"
-            aria-label="상태 프리셋"
-          >
-            {CUSTOM_STATUS_PRESETS.map((preset) => (
-              <Button
-                key={preset.id}
-                type="button"
-                size="sm"
-                variant="secondary"
-                className="tap-target"
-                disabled={busy}
-                data-testid={`set-status-preset-${preset.id}`}
-                onClick={() => {
-                  setEmoji(preset.emoji);
-                  setText(preset.label);
-                }}
-              >
-                <span aria-hidden="true">{preset.emoji}</span>
-                {preset.label}
-              </Button>
-            ))}
-          </div>
-
           <div className="flex min-w-0 flex-col gap-1">
-            <label htmlFor={textId} className="text-meta text-ink-muted">
-              {CUSTOM_STATUS_TEXT_LABEL} (선택, {CUSTOM_STATUS_TEXT_MAX}자)
-            </label>
-            <textarea
-              id={textId}
-              value={text}
-              maxLength={CUSTOM_STATUS_TEXT_MAX}
-              rows={2}
-              disabled={busy}
-              placeholder={CUSTOM_STATUS_TEXT_PLACEHOLDER}
-              onChange={(event) => setText(event.target.value)}
-              className="tap-target w-full resize-y rounded-sm border border-line-strong bg-transparent px-3 py-2 text-body text-ink placeholder:text-ink-muted focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50"
-              data-testid="set-status-text"
-            />
+            <div className="flex items-baseline justify-between gap-2">
+              <label htmlFor={textId} className="text-meta text-ink-muted">
+                {CUSTOM_STATUS_TEXT_LABEL} (선택, {CUSTOM_STATUS_TEXT_MAX}자)
+              </label>
+              {emoji ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="rounded-sm text-meta text-ink-muted press hover:text-ink focus-visible:focus-ring disabled:opacity-50"
+                  data-testid="set-status-emoji-clear"
+                  onClick={() => {
+                    setEmoji("");
+                    textRef.current?.focus();
+                  }}
+                >
+                  {CUSTOM_STATUS_EMOJI_CLEAR_LABEL}
+                </button>
+              ) : null}
+            </div>
+            <div
+              ref={fieldRef}
+              className="tap-target flex h-field items-center gap-1 rounded-lg border border-line-strong pl-1 pr-1 has-[:focus-visible]:focus-ring"
+            >
+              <button
+                ref={emojiButtonRef}
+                type="button"
+                disabled={busy}
+                aria-label={CUSTOM_STATUS_EMOJI_LABEL}
+                aria-haspopup="dialog"
+                aria-expanded={pickerOpen}
+                data-testid="set-status-emoji"
+                className="flex size-7 shrink-0 items-center justify-center rounded-md text-body press-instant-fill hover:bg-surface-hover active:bg-surface-pressed focus-visible:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={() => setPickerOpen(true)}
+              >
+                {emoji ? (
+                  <span aria-hidden="true">{emoji}</span>
+                ) : (
+                  <Smile aria-hidden="true" className="size-4 text-ink-muted" />
+                )}
+              </button>
+              <input
+                ref={textRef}
+                id={textId}
+                type="text"
+                value={text}
+                maxLength={CUSTOM_STATUS_TEXT_MAX}
+                disabled={busy}
+                placeholder={CUSTOM_STATUS_TEXT_PLACEHOLDER}
+                onChange={(event) => setText(event.target.value)}
+                className="h-full min-w-0 flex-1 bg-transparent px-1 text-label text-ink focus-visible:outline-none placeholder:text-ink-muted disabled:cursor-not-allowed disabled:opacity-50"
+                data-testid="set-status-text"
+              />
+              {text !== "" || emoji !== "" ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  aria-label={CUSTOM_STATUS_FIELD_CLEAR_LABEL}
+                  data-testid="set-status-text-clear"
+                  className="flex size-7 shrink-0 items-center justify-center rounded-full text-ink-muted press-instant-fill hover:bg-surface-hover hover:text-ink active:bg-surface-pressed focus-visible:bg-surface-hover disabled:opacity-50"
+                  onClick={() => {
+                    setText("");
+                    setEmoji("");
+                    textRef.current?.focus();
+                  }}
+                >
+                  <X aria-hidden="true" className="size-4" />
+                </button>
+              ) : null}
+            </div>
           </div>
+
+          {text === "" ? (
+            <div
+              className="flex flex-col"
+              role="group"
+              aria-label="추천 상태"
+              data-testid="set-status-presets"
+            >
+              {CUSTOM_STATUS_PRESETS.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  disabled={busy}
+                  data-testid={`set-status-preset-${preset.id}`}
+                  className="tap-target flex min-h-control items-center gap-3 rounded-md px-2 text-left text-label text-ink press-instant-fill hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  onClick={() => {
+                    setEmoji(preset.emoji);
+                    setText(preset.label);
+                    setExpiry(preset.expiry);
+                    textRef.current?.focus();
+                  }}
+                >
+                  <span aria-hidden="true" className="w-5 shrink-0 text-center">
+                    {preset.emoji}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">{preset.label}</span>
+                  <span className="shrink-0 text-meta text-ink-muted">
+                    {expiryLabel(preset.expiry)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : null}
 
           <div className="flex min-w-0 flex-col gap-1">
             <label
@@ -367,6 +406,7 @@ export function SetStatusDialog({
               aria-labelledby={expiryLabelId}
               value={expiry}
               disabled={busy}
+              side="top"
               data-testid="set-status-expiry"
               placeholder={EXPIRY_PLACEHOLDER}
               options={STATUS_EXPIRY_OPTIONS.map((option) => ({
@@ -454,7 +494,9 @@ export function SetStatusDialog({
         open={pickerOpen}
         onOpenChange={setPickerOpen}
         onPick={(picked) => setEmoji(picked)}
-        opener={emojiButtonRef.current}
+        opener={textRef.current}
+        anchor={fieldRef.current}
+        side="bottom"
         purpose="status"
         testId="set-status-emoji-picker"
       />

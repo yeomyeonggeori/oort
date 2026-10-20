@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -16,6 +16,13 @@ const api = vi.hoisted(() => ({ request: vi.fn() }));
 vi.mock("@momo/core/features/settings/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@momo/core/features/settings/api")>()),
   settingsRequest: api.request,
+}));
+
+// DM 열기(POST /dms)는 코어 lib/api의 `request`를 탄다. 설정 요청과 따로 가로챈다.
+const dm = vi.hoisted(() => ({ open: vi.fn() }));
+vi.mock("@momo/core/lib/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@momo/core/lib/api")>()),
+  openDirectMessage: dm.open,
 }));
 
 const WS = "00000000-0000-7000-8000-000000000001";
@@ -56,6 +63,10 @@ const flags = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boo
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 
+function LocationProbe() {
+  return createElement("output", { "data-testid": "probe-path" }, useLocation().pathname);
+}
+
 function mount(offline = false): HTMLElement {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   host = document.createElement("div");
@@ -72,7 +83,8 @@ function mount(offline = false): HTMLElement {
           createElement(
             SessionProvider,
             { value: sessionValue() },
-            createElement(CohostedAgentCard, { offline, workspaceId: WS })
+            createElement(CohostedAgentCard, { offline, workspaceId: WS }),
+            createElement(LocationProbe)
           )
         )
       )
@@ -94,6 +106,8 @@ beforeEach(() => {
   flags.IS_REACT_ACT_ENVIRONMENT = true;
   window.localStorage.clear();
   api.request.mockReset();
+  dm.open.mockReset();
+  dm.open.mockResolvedValue({ channel: { id: "dm-1", kind: "dm", name: "Hermes" } });
 });
 afterEach(() => {
   act(() => root?.unmount());
@@ -158,7 +172,7 @@ describe("CohostedAgentCard", () => {
     });
     await act(async () => q("ai-cohosted-connect")?.click());
     const done = await until("ai-cohosted-connected");
-    expect(done.textContent).toContain("Hermes가 연결돼 있어요.");
+    expect(done.textContent).toContain("Hermes 연결됨");
     expect(q("ai-cohosted-open-agent")?.getAttribute("href")).toBe("/agents?agent=a1");
     expect(calls().filter((call) => call.startsWith("POST") && call.endsWith("/connect"))).toHaveLength(1);
   });
@@ -206,6 +220,181 @@ describe("CohostedAgentCard", () => {
     mount(true);
     await until("ai-cohosted-offline");
     expect(calls().some((call) => call.endsWith("/probe"))).toBe(false);
+  });
+
+  describe("연결 성공 알림과 대화 (#4141)", () => {
+    const attested = (connected: boolean) => (path: string) => {
+      if (path.endsWith("/probe")) return Promise.resolve(PROBE);
+      if (path.endsWith("/connect")) {
+        return Promise.resolve({ schema: "momo.cohosted_agent.connect.v0", agentId: "a1", displayName: "Hermes", handle: "hermes" });
+      }
+      return Promise.resolve({ ...STATUS, toolsLockAttested: true, connectable: !connected, ...(connected ? { connectedAgentId: "a1" } : {}) });
+    };
+    const flipToConnected = () => {
+      api.request.mockImplementation(attested(true));
+    };
+    const noticeText = () => q("ai-cohosted-connected-notice")?.textContent ?? "";
+    const path = () => q("probe-path")?.textContent;
+
+    it("카드 단추로 연결하면 「Hermes를 연결했어요」가 뜨고 카드가 연결됨으로 바뀌고 DM이 만들어진다", async () => {
+      api.request.mockImplementation(attested(false));
+      mount();
+      await until("ai-cohosted-found");
+      expect(q("ai-cohosted-connected-notice")).toBeNull();
+      flipToConnected();
+      await act(async () => q("ai-cohosted-connect")?.click());
+      await until("ai-cohosted-connected");
+      expect(noticeText()).toContain("Hermes를 연결했어요");
+      expect(q("ai-cohosted-connected")?.textContent).toContain("Hermes 연결됨");
+      expect(q("ai-cohosted-found")).toBeNull();
+      await waitFor(() => expect(dm.open).toHaveBeenCalledWith(WS, "a1"));
+      // 만들기만 하고 가지는 않는다: 사이드바에 보이면 충분하다.
+      expect(path()).toBe("/");
+    });
+
+    it("알림의 「대화 열기」는 그 DM으로 간다", async () => {
+      api.request.mockImplementation(attested(false));
+      mount();
+      await until("ai-cohosted-found");
+      flipToConnected();
+      await act(async () => q("ai-cohosted-connect")?.click());
+      await until("ai-cohosted-connected-notice");
+      await act(async () => q("ai-cohosted-notice-open-dm")?.click());
+      await waitFor(() => expect(path()).toBe("/c/dm-1"));
+    });
+
+    it("처음 한 번 창에서 연결해도 같은 알림이 뜬다", async () => {
+      api.request.mockImplementation(attested(false));
+      mount();
+      await waitFor(() => expect(document.querySelector("[data-testid='ai-cohosted-prompt']")).not.toBeNull());
+      flipToConnected();
+      await act(async () => document.querySelector<HTMLElement>("[data-testid='ai-cohosted-prompt-connect']")?.click());
+      await until("ai-cohosted-connected-notice");
+      expect(noticeText()).toContain("Hermes를 연결했어요");
+      await waitFor(() => expect(dm.open).toHaveBeenCalledWith(WS, "a1"));
+    });
+
+    it("연결에 실패하면 알림도 DM도 없다", async () => {
+      api.request.mockImplementation((p: string) => {
+        if (p.endsWith("/connect")) return Promise.reject(new ApiError(409, "x", "cohosted_agent_not_reachable"));
+        return attested(false)(p);
+      });
+      mount();
+      await until("ai-cohosted-found");
+      await act(async () => q("ai-cohosted-connect")?.click());
+      await until("ai-cohosted-connect-error");
+      expect(q("ai-cohosted-connected-notice")).toBeNull();
+      expect(dm.open).not.toHaveBeenCalled();
+    });
+
+    it("이미 연결된 상태면 연결됨 줄의 「대화 열기」가 DM을 열어 간다 (알림은 없다)", async () => {
+      api.request.mockImplementation(attested(true));
+      mount();
+      await until("ai-cohosted-connected");
+      expect(q("ai-cohosted-connected-notice")).toBeNull();
+      expect(dm.open).not.toHaveBeenCalled();
+      await act(async () => q("ai-cohosted-open-dm")?.click());
+      await waitFor(() => expect(path()).toBe("/c/dm-1"));
+      expect(dm.open).toHaveBeenCalledWith(WS, "a1");
+    });
+
+    it("DM을 못 열면 그 자리에 문장으로 말하고 이동하지 않는다", async () => {
+      dm.open.mockRejectedValue(new ApiError(403, "no"));
+      api.request.mockImplementation(attested(true));
+      mount();
+      await until("ai-cohosted-connected");
+      await act(async () => q("ai-cohosted-open-dm")?.click());
+      const banner = await until("ai-cohosted-dm-error");
+      expect(banner.textContent).toContain("다이렉트 메시지를 열 권한");
+      expect(path()).toBe("/");
+    });
+  });
+
+  describe("모델 구획 (#4145)", () => {
+    const MODELS = {
+      schema: "momo.cohosted_agent.models.v0",
+      agentId: "a1",
+      pinned: true,
+      current: { provider: "anthropic", model: "claude-sonnet-5-5" },
+      providers: [{ provider: "anthropic", models: [{ id: "claude-sonnet-5-5", featured: true, current: true }] }],
+    };
+    const serve = (connected: boolean, models: unknown = MODELS) => (path: string, init?: RequestInit) => {
+      if (path.endsWith("/models")) return typeof models === "function" ? (models as () => Promise<unknown>)() : Promise.resolve(models);
+      if (path.endsWith("/probe")) return Promise.resolve(PROBE);
+      if (path.endsWith("/connect")) {
+        return Promise.resolve({ schema: "momo.cohosted_agent.connect.v0", agentId: "a1", displayName: "Hermes", handle: "hermes" });
+      }
+      void init;
+      return Promise.resolve({ ...STATUS, toolsLockAttested: true, connectable: !connected, ...(connected ? { connectedAgentId: "a1" } : {}) });
+    };
+
+    // 처음 한 번 창(#4113)이 초점을 잡고 있으면 초점 시험이 흐려진다: 먼저 닫는다.
+    const closePrompt = async () => {
+      await waitFor(() => expect(document.querySelector("[data-testid='ai-cohosted-prompt']")).not.toBeNull());
+      await act(async () => document.querySelector<HTMLElement>("[data-testid='ai-cohosted-prompt-later']")?.click());
+      await waitFor(() => expect(document.querySelector("[data-testid='ai-cohosted-prompt']")).toBeNull());
+    };
+
+    it("연결된 카드는 지금 답하는 모델을 말하고, 연결 전에는 모델을 읽지도 않는다", async () => {
+      api.request.mockImplementation(serve(false));
+      mount();
+      await until("ai-cohosted-found");
+      expect(calls().some((c) => c.endsWith("/models"))).toBe(false);
+      act(() => root?.unmount());
+      host?.remove();
+      api.request.mockImplementation(serve(true));
+      mount();
+      const now = await until("ai-cohosted-model-now");
+      expect(now.textContent).toBe("Claude Sonnet 5.5 · Anthropic");
+    });
+
+    it("연결 직후에는 「Hermes를 연결했어요」 다음에 「어떤 모델로 쓸까요?」를 묻고 초점이 그 구획으로 간다", async () => {
+      api.request.mockImplementation(serve(false));
+      mount();
+      await until("ai-cohosted-found");
+      await closePrompt();
+      api.request.mockImplementation(serve(true));
+      await act(async () => q("ai-cohosted-connect")?.click());
+      await until("ai-cohosted-connected-notice");
+      await until("ai-cohosted-model-now");
+      expect(q("ai-cohosted-model")?.querySelector("h4")?.textContent).toBe("어떤 모델로 쓸까요?");
+      expect(document.activeElement).toBe(q("ai-cohosted-model-anchor"));
+    });
+
+    it("이미 연결된 채 열면 묻지 않고 제목은 「모델」이다", async () => {
+      api.request.mockImplementation(serve(true));
+      mount();
+      await until("ai-cohosted-model-now");
+      expect(q("ai-cohosted-model")?.querySelector("h4")?.textContent).toBe("모델");
+    });
+
+    it("모델 구획이 보이지 않는 서버(403)에서는 연결 직후 초점이 연결됨 줄로 간다", async () => {
+      const gone = () => Promise.reject(new ApiError(403, "no"));
+      api.request.mockImplementation(serve(false, gone));
+      mount();
+      await until("ai-cohosted-found");
+      await closePrompt();
+      api.request.mockImplementation(serve(true, gone));
+      await act(async () => q("ai-cohosted-connect")?.click());
+      await until("ai-cohosted-connected");
+      await waitFor(() => expect(document.activeElement).toBe(q("ai-cohosted-connected")));
+      expect(q("ai-cohosted-model")).toBeNull();
+    });
+
+    it("모델 목록이 말한 로그인된 제공자는 모델 인증 블록에서 명령 없이 접힌다", async () => {
+      api.request.mockImplementation((path: string, init?: RequestInit) =>
+        path.includes("/model-login")
+          ? Promise.reject(new ApiError(409, "off", "login_relay_off"))
+          : serve(true)(path, init)
+      );
+      mount();
+      await until("model-login-shell");
+      await until("ai-cohosted-model-now");
+      await waitFor(() => expect(q("model-login-in-anthropic")).not.toBeNull());
+      const shell = q("model-login-shell");
+      expect(shell?.textContent).not.toContain("hermes auth add anthropic");
+      expect(shell?.textContent).toContain("hermes auth add openai-codex");
+    });
   });
 
   describe("first-time prompt (#4113)", () => {

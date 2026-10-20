@@ -57,6 +57,7 @@ export function ListboxSelect<V extends string = string>({
   "data-testid": testId,
   "aria-label": ariaLabel,
   "aria-labelledby": ariaLabelledBy,
+  side = "bottom",
   ...rest
 }: Omit<
   React.ButtonHTMLAttributes<HTMLButtonElement>,
@@ -74,6 +75,8 @@ export function ListboxSelect<V extends string = string>({
   "aria-label"?: string;
   /** 칸의 이름이 되는 글의 id(`<label>`). 목록(listbox)도 같은 이름을 갖는다. */
   "aria-labelledby"?: string;
+  /** 목록이 칸의 어느 쪽에 뜨는지. 칸 아래에 눌러야 할 단추가 있는 폼은 위로 둔다. 자리가 모자라면 Radix 가 뒤집는다. */
+  side?: "top" | "bottom";
 }) {
   const reactId = React.useId();
   const listId = `${reactId}-list`;
@@ -196,6 +199,7 @@ export function ListboxSelect<V extends string = string>({
         </button>
       </PopoverTrigger>
       <PopoverContent
+        side={side}
         align="start"
         sideOffset={4}
         className="max-h-[var(--radix-popover-content-available-height)] w-[var(--radix-popover-trigger-width)] overflow-y-auto rounded-lg p-1"

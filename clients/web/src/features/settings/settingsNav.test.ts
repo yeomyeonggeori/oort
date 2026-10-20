@@ -18,14 +18,14 @@ const WEB_SRC = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const idsIn = (group: (typeof SETTINGS_SECTIONS)[number]["group"]) =>
   SETTINGS_SECTIONS.filter((item) => item.group === group).map((item) => item.id);
 
-describe("settingsNav (#3578 S1 · #4111: 13행, 세 그룹)", () => {
-  it("개인 / 워크스페이스 / 앱·연결 세 그룹에 13행이다", () => {
+describe("settingsNav (#3578 S1 · #4141: 12행, 세 그룹)", () => {
+  it("개인 / 워크스페이스 / 앱·연결 세 그룹에 12행이다", () => {
     expect(DEFAULT_SETTINGS_SECTION).toBe("profile");
     expect(SETTINGS_GROUPS).toEqual(["개인", "워크스페이스", "앱·연결"]);
-    expect(SETTINGS_SECTIONS).toHaveLength(13);
+    expect(SETTINGS_SECTIONS).toHaveLength(12);
     expect(idsIn("개인")).toEqual(["profile", "appearance", "notifications", "shortcuts", "devices"]);
     expect(idsIn("워크스페이스")).toEqual(["workspace", "members", "memory", "usage", "code"]);
-    expect(idsIn("앱·연결")).toEqual(["updates", "ai", "aiHub"]);
+    expect(idsIn("앱·연결")).toEqual(["updates", "aiHub"]);
     expect(SETTINGS_SECTIONS.map((item) => item.label)).toEqual([
       "프로필",
       "모양",
@@ -38,8 +38,7 @@ describe("settingsNav (#3578 S1 · #4111: 13행, 세 그룹)", () => {
       "사용량",
       "실행 호스트",
       "업데이트",
-      "AI 연결",
-      "AI 허브",
+      "AI",
     ]);
   });
 
@@ -83,8 +82,8 @@ describe("settingsNav (#3578 S1 · #4111: 13행, 세 그룹)", () => {
     expect(resolveSettingsSection("plugins")).toEqual({ kind: "ai-hub", path: "/ai/external/apps" });
     expect(resolveSettingsSection("webhooks")).toEqual({ kind: "ai-hub", path: "/ai/external/incoming" });
     expect(resolveSettingsSection("events")).toEqual({ kind: "ai-hub", path: "/ai/external/outgoing" });
-    // `ai`는 목차의 「AI 연결」 화면이다(리다이렉트하지 않는다, #4111).
-    expect(resolveSettingsSection("ai")).toEqual({ kind: "section", id: "ai", alias: null });
+    // 옛 「AI 연결」(`ai`)은 허브 AI 계정 구획으로 간다(#4141).
+    expect(resolveSettingsSection("ai")).toEqual({ kind: "ai-hub", path: "/ai/accounts" });
     // 허브로 가는 링크 행은 가는 곳이지 `?section=` 값이 아니다.
     expect(resolveSettingsSection("aiHub")).toEqual({ kind: "unknown" });
   });
