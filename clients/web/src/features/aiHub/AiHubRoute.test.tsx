@@ -41,6 +41,10 @@ vi.mock("./AiAccountsPane", () => ({ AiAccountsPane: stub("accounts") }));
 vi.mock("./AiAgentsPane", () => ({ AiAgentsPane: stub("agents") }));
 vi.mock("./AiExternalPane", () => ({ AiExternalPane: stub("external") }));
 
+vi.mock("@/features/settings/CohostedAgentCard", () => ({
+  CohostedAgentCard: () => createElement("div", { "data-testid": "ai-cohosted" }, "cohosted"),
+}));
+
 vi.mock("./AiTeamKeysPane", () => ({
   AiTeamKeysPane: () => createElement("div", { "data-testid": "ai-hub-pane-teamKeys" }, "teamKeys"),
 }));
@@ -77,6 +81,21 @@ async function mountAt(path: string): Promise<HTMLElement> {
 }
 
 describe("AI 허브 라우트 (AIH-3)", () => {
+  // #4141: 같은 서버 Hermes 카드는 허브의 어느 구획에서든 본문(팀 AI 키 목록 등)보다 위에 선다.
+  it.each(["/ai", "/ai/accounts", "/ai/team-keys", "/ai/agents", "/ai/external"])(
+    "%s 에서 같은 서버 Hermes 카드는 구획 본문보다 위다",
+    async (path) => {
+      const el = await mountAt(path);
+      const card = el.querySelector('[data-testid="ai-cohosted"]');
+      expect(card).not.toBeNull();
+      const body = card?.nextElementSibling;
+      expect(body).not.toBeNull();
+      expect((card as Element).compareDocumentPosition(body as Element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(card?.parentElement?.firstElementChild).toBe(card);
+    }
+  );
+
+
   it.each([
     ["/ai/accounts", "accounts"],
     ["/ai/team-keys", "teamKeys"],

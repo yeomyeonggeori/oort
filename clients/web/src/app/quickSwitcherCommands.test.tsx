@@ -975,22 +975,22 @@ describe("⌘K 걸러내기 (#4111)", () => {
       expect(shown, hidden).not.toContain(hidden);
     }
     expect(shown.some((key) => key.startsWith("agent.routing"))).toBe(false);
-    for (const wanted of ["nav.ai", "nav.settings.ai", "ai.connect"]) {
+    for (const wanted of ["nav.ai", "ai.connect"]) {
       expect(shown, wanted).toContain(wanted);
     }
   });
 
-  it("「ai 연결」은 「AI 연결」을 맨 위 명령으로 세우고 설정 AI 연결로 간다", async () => {
+  it("「ai 연결」은 「AI」(허브)를 맨 위 명령으로 세우고 허브로 간다 (#4141)", async () => {
     await mount({ path: `/c/${CH}` });
     await typeQuery("ai 연결");
     const rows = commandRows();
-    expect(rows[0]?.dataset.commandId).toBe("nav.settings.ai");
-    expect(rows[0]?.textContent).toContain("AI 연결");
+    expect(rows[0]?.dataset.commandId).toBe("nav.ai");
+    expect(itemKeys()).not.toContain("nav.settings.ai");
     await act(async () => {
       rows[0].click();
     });
     await settle();
-    expect(currentPath).toBe("/settings?section=ai");
+    expect(currentPath).toBe("/ai");
   });
 
   it("「ai 허브」로 AI 허브(/ai)를 찾는다", async () => {
