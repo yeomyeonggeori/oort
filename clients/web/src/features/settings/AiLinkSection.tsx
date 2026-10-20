@@ -936,7 +936,7 @@ export function ProbeAnswer({
   link: ProviderLink;
   chainPending: boolean;
   justSaved: boolean;
-  /** 숫자(모델 수·한도·크레딧)를 다른 칸(한도·남은 크레딧 블록)이 보이는 표면: 결과 상자는 판정만 둔다(#3887). */
+  /** 숫자(모델 수·한도·크레딧)를 보이지 않는 표면: 결과 상자는 판정만 둔다. 공급사 숫자 칸은 걷었고(#4110) 잔액은 콘솔 링크로 보낸다. */
   numbersElsewhere?: boolean;
 }) {
   // Parsed rather than trusted: `entries` is an ADR-0135 D1 addition, so an
