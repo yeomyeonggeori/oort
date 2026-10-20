@@ -454,3 +454,171 @@ fn the_declared_url_is_read_the_same_way_by_the_gate_and_the_socket() {
         assert_eq!(origin_of(bad), None, "{bad}");
     }
 }
+
+// ---------------------------------------------------------------------------
+// #4143 — GET /api/model/options (ADR-0203 증보 2026-10-20 M2)
+// ---------------------------------------------------------------------------
+
+fn options_fixture() -> serde_json::Value {
+    serde_json::json!({
+        "model": "claude-sonnet-5-5",
+        "provider": "anthropic",
+        "providers": [
+            {"slug": "anthropic", "authenticated": true, "name": "BODY-MARKER",
+             "models": ["claude-sonnet-5-5", "claude-opus-5-5", KEY, {"id": "claude-haiku-5"},
+                        "has space", "claude-sonnet-5-5"]},
+            {"slug": "openai-codex", "authenticated": true, "models": ["gpt-6-sol"]},
+            {"slug": "nous", "authenticated": false, "models": []},
+            {"slug": "openrouter", "authenticated": false, "models": ["x/y"]},
+            {"slug": "string-true", "authenticated": "true", "models": ["m1"]},
+            {"slug": "Bad Slug", "authenticated": true, "models": ["m2"]},
+            {"slug": "empty", "authenticated": true, "models": []},
+        ],
+    })
+}
+
+#[test]
+fn the_options_parser_keeps_only_logged_in_providers_with_clean_slugs_and_ids() {
+    let report = parse_model_options(&options_fixture(), KEY);
+    assert_eq!(report.outcome, ProbeOutcome::Ok);
+    let shaped: Vec<(&str, Vec<&str>)> = report
+        .providers
+        .iter()
+        .map(|p| {
+            (
+                p.provider.as_str(),
+                p.models.iter().map(String::as_str).collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        shaped,
+        vec![
+            (
+                "anthropic",
+                vec!["claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5"]
+            ),
+            ("openai-codex", vec!["gpt-6-sol"]),
+        ],
+        "an unauthenticated provider (even one listing models), a string `\"true\"`, a bad \
+         slug, an empty provider, a duplicate, a spaced id and the key itself must all be dropped"
+    );
+    assert_eq!(
+        report.current,
+        Some(ModelChoice {
+            provider: "anthropic".into(),
+            model: "claude-sonnet-5-5".into()
+        })
+    );
+    assert!(report.lists("openai-codex", "gpt-6-sol"));
+    assert!(!report.lists("anthropic", "gpt-6-sol"));
+    assert!(!report.lists("nous", "x"));
+    assert!(!report.lists("openrouter", "x/y"));
+    let debug = format!("{report:?}");
+    assert!(
+        !debug.contains("BODY-MARKER") && !debug.contains(KEY),
+        "{debug}"
+    );
+}
+
+#[test]
+fn an_options_body_without_a_providers_list_is_not_an_answer() {
+    for body in [
+        serde_json::json!({}),
+        serde_json::json!({"providers": "x"}),
+        serde_json::json!([1, 2]),
+    ] {
+        let report = parse_model_options(&body, KEY);
+        assert_eq!(report.outcome, ProbeOutcome::Unknown, "{body}");
+        assert!(report.providers.is_empty());
+    }
+    // Half a current model is no current model.
+    let report = parse_model_options(
+        &serde_json::json!({"providers": [], "model": "m", "provider": "Bad Slug"}),
+        KEY,
+    );
+    assert_eq!(report.current, None);
+}
+
+async fn hermes_with_options(status: u16, body: serde_json::Value) -> (u16, Seen) {
+    let seen = Seen::default();
+    let s1 = seen.clone();
+    let s2 = seen.clone();
+    let app = Router::new()
+        .route(
+            "/api/model/options",
+            get(move |headers: HeaderMap| async move {
+                s1.record("/api/model/options", &headers);
+                (StatusCode::from_u16(status).unwrap(), axum::Json(body)).into_response()
+            }),
+        )
+        .fallback(move |uri: axum::http::Uri, headers: HeaderMap| async move {
+            s2.record(uri.path(), &headers);
+            StatusCode::NOT_FOUND
+        });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    (port, seen)
+}
+
+#[tokio::test]
+async fn the_options_read_is_one_get_at_the_origin_with_the_bearer() {
+    // The declared base ends in /v1; the options path is at the origin.
+    for base in ["", "/v1", "/v1/"] {
+        let (port, seen) = hermes_with_options(200, options_fixture()).await;
+        let report = opted_in()
+            .read_model_options(&target(format!("http://127.0.0.1:{port}{base}")))
+            .await;
+        assert_eq!(report.outcome, ProbeOutcome::Ok, "{base}: {report:?}");
+        assert_eq!(report.requests_sent, 1);
+        assert_eq!(seen.paths(), vec!["/api/model/options"], "{base}");
+        assert_eq!(
+            seen.bearers.lock().unwrap().clone(),
+            vec![format!("Bearer {KEY}")]
+        );
+        assert_eq!(report.providers.len(), 2);
+    }
+}
+
+#[tokio::test]
+async fn the_options_read_classifies_failures_without_carrying_a_body() {
+    for (status, outcome) in [
+        (401u16, ProbeOutcome::Rejected),
+        (429, ProbeOutcome::RateLimited),
+        (500, ProbeOutcome::Unknown),
+    ] {
+        let (port, _seen) = hermes_with_options(status, serde_json::json!({"echo": KEY})).await;
+        let report = opted_in()
+            .read_model_options(&target(format!("http://127.0.0.1:{port}/v1")))
+            .await;
+        assert_eq!(report.outcome, outcome, "{status}");
+        assert!(report.providers.is_empty());
+        assert!(!format!("{report:?}").contains(KEY));
+    }
+    // A path the probe will not dial dials nothing.
+    let (port, seen) = hermes_with_options(200, options_fixture()).await;
+    let report = opted_in()
+        .read_model_options(&target(format!("http://127.0.0.1:{port}/admin")))
+        .await;
+    assert_eq!(report.requests_sent, 0);
+    assert!(seen.paths().is_empty());
+}
+
+#[tokio::test]
+async fn the_options_read_is_refused_at_a_private_address_without_the_opt_in() {
+    let (port, seen) = hermes_with_options(200, options_fixture()).await;
+    let closed = GuardedProviderProbe::with_lookup(
+        EgressPolicy::default(),
+        Arc::new(FixedLookup(vec!["127.0.0.1".parse().unwrap()])),
+        Duration::from_secs(5),
+    );
+    let report = closed
+        .read_model_options(&target(format!("http://127.0.0.1:{port}/v1")))
+        .await;
+    assert_ne!(report.outcome, ProbeOutcome::Ok);
+    assert_eq!(report.requests_sent, 0);
+    assert!(seen.paths().is_empty(), "dialled {:?}", seen.paths());
+}

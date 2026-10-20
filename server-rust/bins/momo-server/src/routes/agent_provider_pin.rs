@@ -520,6 +520,7 @@ mod tests {
             link_endpoint_label: None,
             pinned_by_member_id: None,
             updated_at_ms: 1,
+            model_route: None,
         };
         assert!(pin_dto(&pin, "http://hermes.railway.internal:8642/v1", None, &[]).link_resolved);
         assert!(!pin_dto(&pin, "", None, &[]).link_resolved);

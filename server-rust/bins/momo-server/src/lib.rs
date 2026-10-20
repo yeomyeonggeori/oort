@@ -1611,6 +1611,16 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/cohosted-agent/connect",
             post(routes::cohosted_agent::connect),
         )
+        // #4143 (ADR-0203 증보 2026-10-20) — which provider + model the co-hosted
+        // Hermes answers on. Instance operator only, both verbs.
+        .route(
+            "/v1/workspaces/{ws}/cohosted-agent/models",
+            get(routes::cohosted_agent::models),
+        )
+        .route(
+            "/v1/workspaces/{ws}/cohosted-agent/model",
+            put(routes::cohosted_agent::put_model),
+        )
         // #3873 (ADR-0147 증보 2026-10-16) — which AI link an agent is pinned to.
         // Instance operator only (both verbs); absent from the agent-route
         // allow-list, so an agent bearer cannot reach it.

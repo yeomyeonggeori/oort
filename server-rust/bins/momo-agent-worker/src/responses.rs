@@ -797,6 +797,7 @@ mod tests {
         // …and the name momo actually sends satisfies the pattern the refusal
         // quotes, so this body is a museum piece rather than today's behaviour.
         let sent = build_request_body(&ChatRequest {
+            provider: None,
             model: "gpt-5.6-sol".to_string(),
             messages: vec![ChatMessage::user("q")],
             max_tokens: None,
@@ -844,6 +845,7 @@ mod tests {
     #[test]
     fn momo_tools_render_flat_on_the_responses_wire() {
         let body = build_request_body(&ChatRequest {
+            provider: None,
             model: "gpt-5.6-sol".to_string(),
             messages: vec![ChatMessage::user("세션 정리해줘")],
             max_tokens: None,
@@ -881,6 +883,7 @@ mod tests {
         // assertion at the end of this test for why, and what it costs.
         let declared = json!({"type": "function", "name": "operator_thing"});
         let body = build_request_body(&ChatRequest {
+            provider: None,
             model: "m".to_string(),
             messages: vec![ChatMessage::user("q")],
             max_tokens: None,
@@ -919,6 +922,7 @@ mod tests {
     #[test]
     fn no_tools_at_all_omits_the_key() {
         let body = build_request_body(&ChatRequest {
+            provider: None,
             model: "m".to_string(),
             messages: vec![ChatMessage::user("q")],
             max_tokens: None,
@@ -929,8 +933,20 @@ mod tests {
     }
     use crate::provider::ChatMessage;
 
+    /// #4143: `provider` is a Hermes chat/completions routing slug. The Responses
+    /// wire has no such field, and sending one would be an unknown key to OpenAI.
+    #[test]
+    fn the_responses_wire_never_carries_the_hermes_provider_slug() {
+        let mut chosen = request();
+        chosen.provider = Some("openai-codex".to_string());
+        let body = build_request_body(&chosen);
+        assert!(body.get("provider").is_none(), "{body}");
+        assert!(!body.to_string().contains("openai-codex"), "{body}");
+    }
+
     fn request() -> ChatRequest {
         ChatRequest {
+            provider: None,
             tools: Vec::new(),
             momo_tools: Vec::new(),
             model: "gpt-5.4-codex".to_string(),
@@ -994,6 +1010,7 @@ mod tests {
     #[test]
     fn an_absent_system_prompt_and_budget_are_absent_keys_not_nulls() {
         let bare = ChatRequest {
+            provider: None,
             tools: Vec::new(),
             momo_tools: Vec::new(),
             model: "m".to_string(),
@@ -1011,6 +1028,7 @@ mod tests {
     #[test]
     fn multiple_system_turns_are_joined_rather_than_dropped() {
         let request = ChatRequest {
+            provider: None,
             tools: Vec::new(),
             momo_tools: Vec::new(),
             model: "m".to_string(),
@@ -1611,6 +1629,7 @@ mod tests {
             .complete(
                 &endpoint(&base_url),
                 &ChatRequest {
+                    provider: None,
                     tools: Vec::new(),
                     momo_tools: Vec::new(),
                     model: "gpt-5.6-sol".to_string(),
@@ -1658,6 +1677,7 @@ mod tests {
             .complete(
                 &endpoint(&base_url),
                 &ChatRequest {
+                    provider: None,
                     tools: Vec::new(),
                     momo_tools: Vec::new(),
                     model: "m".to_string(),
@@ -1687,6 +1707,7 @@ mod tests {
             .complete(
                 &endpoint(&base_url),
                 &ChatRequest {
+                    provider: None,
                     tools: Vec::new(),
                     momo_tools: Vec::new(),
                     model: "m".to_string(),

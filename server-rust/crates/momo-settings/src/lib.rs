@@ -79,7 +79,8 @@ pub mod workspace;
 pub mod workspace_settings;
 
 pub use agent_pin::{
-    delete_agent_pin, read_agent_pin, upsert_agent_pin, PinKind, PinReadError, StoredAgentPin,
+    delete_agent_pin, read_agent_pin, set_agent_pin_model, upsert_agent_pin, PinKind,
+    PinModelRoute, PinReadError, StoredAgentPin,
 };
 pub use chain::{
     attemptable_hops, cascade_plan, classify_probe_reason, decrypt_chain_entry,

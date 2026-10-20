@@ -1659,6 +1659,7 @@ impl AgentWorker {
             }
         }
         let request = ChatRequest {
+            provider: None,
             model: model.clone(),
             messages,
             max_tokens: Some(max_tokens),

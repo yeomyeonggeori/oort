@@ -138,8 +138,8 @@ use momo_outbox::{
 use momo_settings::{
     decrypt_chain_entry, decrypt_link, is_unsafe_secret, read_agent_pin, read_chain,
     read_default_ai, read_link, redacted_endpoint_label, reseal_link_credential, resolve_link,
-    seal_bearer, DefaultAiRole, LinkCredential, OpenAiOAuthCredential, PinKind, PinReadError,
-    ProviderSource, StoredAgentPin,
+    seal_bearer, DefaultAiRole, LinkCredential, OpenAiOAuthCredential, PinKind, PinModelRoute,
+    PinReadError, ProviderSource, StoredAgentPin,
 };
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
@@ -694,7 +694,15 @@ impl AgentWorker {
         // meet: an owner-key turn resolves its owner's key here and does not
         // compute the team transport, the 「기본 AI」 row or any chain hop at
         // all; a team turn never reaches `resolve_owner_key_transport`.
-        let mut transport = if let PinOutcome::Applied(pinned_transport) = pin {
+        // #4143 (ADR-0203 증보 2026-10-20): the co-hosted pin's (provider, model)
+        // pair. Hermes ignores a bare `model` on /v1/chat/completions, so the pair
+        // is the turn's model and is sent together or not at all.
+        let mut pinned_route: Option<PinModelRoute> = None;
+        let mut transport = if let PinOutcome::Applied(pinned_transport, route) = pin {
+            if let Some(route) = route {
+                payload.model = route.model.clone();
+                pinned_route = Some(route);
+            }
             *pinned_transport
         } else if let PinOutcome::Unresolved(detail) = pin {
             return self
@@ -963,6 +971,7 @@ impl AgentWorker {
         }
 
         let request = ChatRequest {
+            provider: pinned_route.map(|route| route.provider),
             model: payload.model_or(&self.config.default_model).to_string(),
             messages,
             max_tokens: Some(
@@ -3502,7 +3511,7 @@ impl AgentWorker {
                 {
                     return unresolved("operator_env_not_configured", None);
                 }
-                PinOutcome::Applied(Box::new(env))
+                PinOutcome::Applied(Box::new(env), pin.model_route.clone())
             }
             PinKind::TeamLink => {
                 let (Some(position), Some(stored_label)) =
@@ -3524,7 +3533,7 @@ impl AgentWorker {
                     if !self.provider_is_configured(&head) {
                         return unresolved("team_link_unusable", Some(now));
                     }
-                    return PinOutcome::Applied(Box::new(head));
+                    return PinOutcome::Applied(Box::new(head), None);
                 }
                 let chain = {
                     let mut conn = match self.pool.acquire().await {
@@ -3562,19 +3571,22 @@ impl AgentWorker {
                     return unresolved("team_link_unusable", Some(now));
                 };
                 tracing::debug!(position, "agent pin: chain hop");
-                PinOutcome::Applied(Box::new(ResolvedTransport {
-                    endpoint: ProviderEndpoint {
-                        base_url: hop.base_url,
-                        bearer: hop.bearer.clone(),
-                        source: ProviderSource::Database.as_str(),
-                        // Chain hops are bearer keys; the wire is the legacy one.
-                        wire: ProviderWire::ChatCompletions,
-                        account_id: None,
-                    },
-                    credential: LinkCredential::Bearer(hop.bearer),
-                    // A hop is never re-sealed by a turn.
-                    link_updated_at_ms: None,
-                }))
+                PinOutcome::Applied(
+                    Box::new(ResolvedTransport {
+                        endpoint: ProviderEndpoint {
+                            base_url: hop.base_url,
+                            bearer: hop.bearer.clone(),
+                            source: ProviderSource::Database.as_str(),
+                            // Chain hops are bearer keys; the wire is the legacy one.
+                            wire: ProviderWire::ChatCompletions,
+                            account_id: None,
+                        },
+                        credential: LinkCredential::Bearer(hop.bearer),
+                        // A hop is never re-sealed by a turn.
+                        link_updated_at_ms: None,
+                    }),
+                    None,
+                )
             }
         }
     }
@@ -4111,8 +4123,10 @@ const DEFAULT_AI_UNRESOLVED_AUDIT_SCHEMA: &str = "momo.provider_default_ai.unres
 enum PinOutcome {
     /// No pin: the team resolution (head link, then the 「기본 AI」 row) applies.
     NotPinned,
-    /// Run on this transport. The team's row is not applied.
-    Applied(Box<ResolvedTransport>),
+    /// Run on this transport. The team's row is not applied. The second field is
+    /// the co-hosted pin's `(provider, model)` pair (#4143); `None` for every
+    /// other pin and for an `operator_env` pin that never chose a model.
+    Applied(Box<ResolvedTransport>, Option<PinModelRoute>),
     /// The pin names a link that cannot be called. The turn is refused.
     Unresolved(PinUnresolved),
     /// The pin could not be read (DB trouble): retry, do not guess.
