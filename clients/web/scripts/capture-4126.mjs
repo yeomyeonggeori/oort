@@ -8,7 +8,7 @@
 // 기본 장면 틀은 capture-settings-s5b.mjs 와 같다(진짜 번들 + 고정 응답). 라이트/다크 × 1440.
 // =============================================================================
 
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
