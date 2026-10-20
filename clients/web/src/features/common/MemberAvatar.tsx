@@ -1,6 +1,7 @@
 import { avatarIdentity } from "@momo/core/features/workspace/avatar";
 import type { RosterMember } from "@momo/core/lib/api";
 import { cn } from "@/design/lib/cn";
+import { avatarSurfaceClass } from "@/features/common/avatarTone";
 import { useMemberAvatar } from "@/features/sidebar/useMemberAvatar";
 
 // 사람과 에이전트를 같은 문법으로 그리는 크기 가변 아바타 (#3821).
@@ -46,9 +47,7 @@ export function MemberAvatar({
         "flex shrink-0 items-center justify-center overflow-hidden font-semibold",
         SIZE_CLASS[size],
         identity.kind === "agent" ? "rounded-sm" : "rounded-full",
-        identity.kind === "agent" && "bg-agent-soft text-agent",
-        identity.kind === "human" && "bg-surface-hover text-ink",
-        identity.kind === "unknown" && "bg-surface-hover text-ink-muted",
+        avatarSurfaceClass(identity.kind, member?.id),
         className
       )}
     >

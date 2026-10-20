@@ -28,7 +28,7 @@ const css = readFileSync(new URL("./tokens.css", import.meta.url), "utf8");
 export function parseLightDarkTokens(source: string): Record<string, [string, string]> {
   const out: Record<string, [string, string]> = {};
   const re =
-    /--([a-z-]+):\s*light-dark\(\s*(#[0-9a-f]{6})\s*,\s*(#[0-9a-f]{6})\s*\)/gi;
+    /--([a-z0-9-]+):\s*light-dark\(\s*(#[0-9a-f]{6})\s*,\s*(#[0-9a-f]{6})\s*\)/gi;
   for (const m of source.matchAll(re)) out[m[1]] = [m[2], m[3]];
   const aliases = [...source.matchAll(/--([a-z-]+):\s*var\(--([a-z-]+)\);/g)];
   for (let pass = 0; pass < 3; pass += 1) {
@@ -1300,5 +1300,31 @@ describe("selected row edge (#3280)", () => {
 
   it("라이트는 고리가 투명이라 선택 행 모양이 그대로다", () => {
     expect(css).toMatch(/--selected-edge:\s*light-dark\(transparent, var\(--line-strong\)\);/);
+  });
+});
+
+// =============================================================================
+// 사람 기본 아바타 여섯 색조 (#4148). 글자는 자기 채움 위에서 AA 이고, 채움은 사이드바 바탕(--sheet)과
+// 구분되며, 에이전트 남색 채움과도 다른 색이다.
+// =============================================================================
+describe("avatar tones (#4148)", () => {
+  const TONES = [1, 2, 3, 4, 5, 6];
+  for (const [scheme, label] of [[0, "라이트"], [1, "다크"]] as const) {
+    it(`${label}: 글자가 자기 채움 위에서 4.5:1 이상이다`, () => {
+      for (const n of TONES) {
+        expect(contrast(pick(`avatar-${n}`, scheme), pick(`avatar-${n}-soft`, scheme)), `avatar-${n}`).toBeGreaterThanOrEqual(4.5);
+      }
+    });
+    it(`${label}: 채움이 --sheet 와 --agent-soft 에서 구분된다`, () => {
+      for (const n of TONES) {
+        expect(contrast(pick(`avatar-${n}-soft`, scheme), pick("sheet", scheme)), `avatar-${n} vs sheet`).toBeGreaterThanOrEqual(1.1);
+        expect(deltaE(pick(`avatar-${n}-soft`, scheme), pick("agent-soft", scheme)), `avatar-${n} vs agent`).toBeGreaterThan(0.02);
+      }
+    });
+  }
+  it("여섯 채움이 서로 다른 색이다", () => {
+    for (const scheme of [0, 1] as const) {
+      expect(new Set(TONES.map((n) => pick(`avatar-${n}-soft`, scheme))).size).toBe(6);
+    }
   });
 });
