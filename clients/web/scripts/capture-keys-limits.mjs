@@ -296,6 +296,9 @@ async function scenes(browser, origin, scheme, viewport) {
     // 키보드로 닿아야 focus-visible 링이 그려진다.
     await page.getByTestId("ai-link-check").focus();
     await page.keyboard.press("Tab");
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Tab");
+    check(`${tag} 확인 전: 키보드 Tab 3번이 콘솔 링크에 닿는다`, await page.evaluate(() => document.activeElement?.getAttribute("data-testid") === "ai-link-limits"));
     await page.screenshot({ path: resolve(OUT_DIR, `keys-1b-link-focus-${tag}.png`) });
   });
   await run("checked", { test: "ok" }, async (page, shot) => {
