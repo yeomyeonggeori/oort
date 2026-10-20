@@ -1147,12 +1147,20 @@ mod tests {
             .filter_map(|(index, part)| (index % 2 == 1).then_some(part))
             .collect();
         assert!(nav_ids.len() >= 12, "parsed {nav_ids:?}");
-        // The only nav id left out is the AI hub link row.
-        let left_out: Vec<&&str> = nav_ids
+        // The only nav ids left out are the AI hub link row and the old AI
+        // link screen: `ai` until #4111 split it, then `ai` (AI 연결, not an
+        // agent-openable section yet) and `aiHub` (the link row). A new nav row
+        // still turns this red until it is either openable or listed here.
+        let left_out: Vec<&str> = nav_ids
             .iter()
+            .copied()
             .filter(|id| !SETTINGS_OPEN_SECTIONS.contains(id))
             .collect();
-        assert_eq!(left_out, vec![&"ai"]);
+        assert!(!left_out.is_empty(), "the AI hub link row is a nav id");
+        assert!(
+            left_out.iter().all(|id| ["ai", "aiHub"].contains(id)),
+            "unexpected nav ids outside settings.open: {left_out:?}"
+        );
         // Everything else is a nav id, except the apps alias, which core owns.
         let hub = read("packages/momo-core/src/features/ai/aiHubModel.ts");
         for section in SETTINGS_OPEN_SECTIONS {
