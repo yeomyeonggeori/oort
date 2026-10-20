@@ -143,6 +143,7 @@ pub(crate) mod tests {
 
     fn request() -> ChatRequest {
         ChatRequest {
+            provider: None,
             model: "m".into(),
             messages: vec![ChatMessage::user("hi")],
             max_tokens: None,
@@ -248,6 +249,130 @@ pub(crate) mod tests {
             .expect("listed host is allowed");
         assert_eq!(completion.text, "internal secret");
         assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    /// A loopback Hermes that keeps every request body it receives.
+    async fn body_capturing_service() -> (u16, Arc<std::sync::Mutex<Vec<String>>>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let bodies = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let kept = bodies.clone();
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                let kept = kept.clone();
+                tokio::spawn(async move {
+                    let mut seen = Vec::new();
+                    let mut buffer = [0u8; 4096];
+                    loop {
+                        if let Some(end) = seen.windows(4).position(|w| w == b"\r\n\r\n") {
+                            let head = String::from_utf8_lossy(&seen[..end]).to_lowercase();
+                            let length = head
+                                .lines()
+                                .find_map(|line| line.strip_prefix("content-length:"))
+                                .and_then(|v| v.trim().parse::<usize>().ok())
+                                .unwrap_or(0);
+                            if seen.len() >= end + 4 + length {
+                                let body = String::from_utf8_lossy(&seen[end + 4..]).to_string();
+                                kept.lock().unwrap().push(body);
+                                break;
+                            }
+                        }
+                        match socket.read(&mut buffer).await {
+                            Ok(0) | Err(_) => break,
+                            Ok(n) => seen.extend_from_slice(&buffer[..n]),
+                        }
+                    }
+                    let body = r#"{"choices":[{"message":{"content":"pong"}}]}"#;
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = socket.write_all(response.as_bytes()).await;
+                    let _ = socket.shutdown().await;
+                });
+            }
+        });
+        (port, bodies)
+    }
+
+    fn operator_env_policy() -> EgressPolicy {
+        EgressPolicy {
+            allow_local: true,
+            local_hosts: vec!["hermes.internal".into()],
+            operator_hosts: Vec::new(),
+        }
+    }
+
+    /// #4143 (ADR-0004 증보 5 × ADR-0203 증보 2026-10-20): the guard judges the
+    /// destination, and the provider slug is only a field in the body. A chosen
+    /// `(provider, model)` reaches the operator's listed Hermes with both in the
+    /// body, and the request is not refused by the egress guard.
+    #[tokio::test]
+    async fn the_provider_slug_rides_the_chat_body_through_the_egress_guard() {
+        let (port, bodies) = body_capturing_service().await;
+        let mut chosen = request();
+        chosen.provider = Some("openai-codex".into());
+        chosen.model = "gpt-5.6-sol".into();
+        let completion = provider(
+            operator_env_policy(),
+            ScriptedLookup::new(&[&["127.0.0.1"]]),
+        )
+        .complete(
+            &endpoint(format!("http://hermes.internal:{port}/v1")),
+            &chosen,
+        )
+        .await
+        .expect("a listed Hermes with a provider slug is not an egress violation");
+        assert_eq!(completion.text, "pong");
+        let sent: serde_json::Value =
+            serde_json::from_str(&bodies.lock().unwrap()[0]).expect("a JSON body");
+        assert_eq!(sent["provider"], "openai-codex", "{sent}");
+        assert_eq!(sent["model"], "gpt-5.6-sol", "{sent}");
+    }
+
+    /// No provider on the request, no `provider` key: byte-compatible with every
+    /// request that shipped before #4143. A blank slug is not sent either (Hermes
+    /// reads a blank provider as none and would ignore the model).
+    #[tokio::test]
+    async fn without_a_chosen_provider_the_body_has_no_provider_key() {
+        for provider_slug in [None, Some(String::new()), Some("   ".to_string())] {
+            let (port, bodies) = body_capturing_service().await;
+            let mut plain = request();
+            plain.provider = provider_slug.clone();
+            provider(
+                operator_env_policy(),
+                ScriptedLookup::new(&[&["127.0.0.1"]]),
+            )
+            .complete(
+                &endpoint(format!("http://hermes.internal:{port}/v1")),
+                &plain,
+            )
+            .await
+            .expect("completes");
+            let sent: serde_json::Value =
+                serde_json::from_str(&bodies.lock().unwrap()[0]).expect("a JSON body");
+            assert!(sent.get("provider").is_none(), "{provider_slug:?}: {sent}");
+        }
+    }
+
+    /// The slug cannot launder a destination: a request that names a provider is
+    /// refused at a private address exactly like one that does not.
+    #[tokio::test]
+    async fn a_provider_slug_does_not_open_a_private_destination() {
+        let (port, bodies) = body_capturing_service().await;
+        let mut chosen = request();
+        chosen.provider = Some("openai-codex".into());
+        let result = provider(EgressPolicy::default(), ScriptedLookup::new(&[&[]]))
+            .complete(&endpoint(format!("http://127.0.0.1:{port}/v1")), &chosen)
+            .await;
+        assert!(
+            matches!(result, Err(ProviderError::EgressDenied(_))),
+            "{result:?}"
+        );
+        assert!(bodies.lock().unwrap().is_empty(), "the body was delivered");
     }
 
     /// A redirect to a private literal is not followed.
