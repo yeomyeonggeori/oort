@@ -197,9 +197,9 @@ async function scenes(browser, scheme, viewport) {
   }
   {
     const { context, page } = await go({ danger: true });
-    await page.getByTestId("ai-cohosted-prompt").waitFor();
-    await page.getByTestId("ai-cohosted-prompt-later").click();
     await page.getByTestId("ai-cohosted-toolsets-warn").waitFor();
+    await page.waitForTimeout(400);
+    check(`${tag} 위험 신호: 창 없이 카드에서 고르게 함`, (await page.getByTestId("ai-cohosted-prompt").count()) === 0);
     await cardShot(page, "card-danger");
     await context.close();
   }
