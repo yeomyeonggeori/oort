@@ -21,7 +21,6 @@ const PORT = Number(process.env.CAPTURE_PORT || 5199);
 
 const FIXED_NOW = Date.parse("2026-10-16T21:07:00+09:00");
 const kst = (iso) => Date.parse(`${iso}+09:00`);
-const UNTIL_2230 = kst("2026-10-16T22:30:00");
 
 const workspaceId = "00000000-0000-7000-8000-000000000001";
 const memberId = "00000000-0000-7000-8000-000000000101";
@@ -241,15 +240,6 @@ async function openScene(browser, origin, scheme, server) {
   return { context, page };
 }
 
-async function gotoNotifications(page, tag) {
-  await page.evaluate(() => { window.location.hash = "#/settings?section=notifications"; });
-  await page.getByTestId("notification-rules").waitFor({ timeout: 8000 }).catch(async (error) => {
-    await page.screenshot({ path: resolve(OUT_DIR, `debug-${tag}.png`) });
-    throw error;
-  });
-  await page.waitForTimeout(400);
-}
-
 async function shoot(page, name, tag, locator) {
   await page.waitForTimeout(250);
   await page.screenshot({ path: resolve(OUT_DIR, `${name}-1440-${tag}.png`) });
@@ -292,7 +282,7 @@ async function sceneBefore(browser, origin, scheme) {
   await context.close();
 }
 
-async function sceneClosed(browser, origin, scheme, report) {
+async function sceneClosed(browser, origin, scheme) {
   const tag = scheme;
   const server = newServer();
   const { context, page } = await openScene(browser, origin, scheme, server);
@@ -416,7 +406,7 @@ async function main() {
   try {
     for (const scheme of ["light", "dark"]) {
       if (BEFORE) { await sceneBefore(browser, preview.origin, scheme); continue; }
-      await sceneClosed(browser, preview.origin, scheme, report);
+      await sceneClosed(browser, preview.origin, scheme);
       await sceneOpen(browser, preview.origin, scheme, report);
       await sceneKeyboard(browser, preview.origin, scheme);
       await sceneCustom(browser, preview.origin, scheme, report);
