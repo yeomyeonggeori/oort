@@ -47,7 +47,7 @@ const READ = Object.fromEntries([...channels.map((c) => [c.id, [3, 3]]), ...dms.
 const results = [];
 function check(scheme, name, ok, detail) { results.push({ scheme, name, ok: Boolean(ok), detail }); console.log(JSON.stringify({ scheme, check: name, ok: Boolean(ok), detail })); }
 
-async function installMocks(context, state = {}) {
+async function installMocks(context) {
   const auth = {
     accessToken: "capture-only-not-a-credential", refreshToken: "capture-only-not-a-credential",
     member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
@@ -102,7 +102,7 @@ async function installMocks(context, state = {}) {
 async function open(browserType, origin, scheme, viewport = { width: 1440, height: 900 }) {
   const browser = await browserType.launch();
   const context = await browser.newContext({ viewport, colorScheme: scheme, serviceWorkers: "block", reducedMotion: "reduce", deviceScaleFactor: 2 });
-  await installMocks(context, {});
+  await installMocks(context);
   await context.addInitScript((server) => { try { if (!localStorage.getItem("momo.web.server.v1")) localStorage.setItem("momo.web.server.v1", server); } catch { /* 저장소 없는 캡처 */ } }, origin);
   const page = await context.newPage();
   await page.goto(origin, { waitUntil: "domcontentloaded" });
@@ -121,7 +121,6 @@ const readAvatar = (page, n) => rowOf(page, dmId(n)).evaluate((a) => {
   const el = a.querySelector('[data-testid="dm-avatar"]');
   const box = el.firstElementChild;
   const cs = getComputedStyle(box);
-  const side = getComputedStyle(a.closest('[data-testid="sidebar-list-root"]') ?? document.body);
   return { kind: el.getAttribute("data-avatar-kind"), bg: cs.backgroundColor, color: cs.color, bw: cs.borderTopWidth, bs: cs.borderTopStyle, bc: cs.borderTopColor, radius: cs.borderTopLeftRadius, w: box.getBoundingClientRect().width, hasImg: box.querySelector("img") !== null, text: box.textContent };
 });
 
