@@ -22,6 +22,7 @@ import { IS_TAURI } from "@/lib/env";
 import { openExternalUrl } from "@/lib/tauri";
 import { rosterQueryKey } from "@/features/workspace/useWorkspace";
 import { AiLineRow, AiSection, AiSectionHead } from "./aiAccountsParts";
+import { CohostedModelSection, loggedInFrom, useCohostedModels } from "./CohostedModelSection";
 import { ModelLoginPanel } from "./ModelLoginPanel";
 import { cohostedPromptKey, markCohostedPromptShown, wasCohostedPromptShown } from "./cohostedPrompt";
 
@@ -169,13 +170,33 @@ function CardBody({
     setPromptOpen(true);
   }, [promptable, promptKey]);
 
-  // 연결이 끝나면 초점이 사라진 단추에서 <body> 로 떨어지지 않게 새 줄로 옮긴다.
+  // 연결이 끝나면 초점이 사라진 단추에서 <body> 로 떨어지지 않게 옮긴다. 다음 일은 모델을 고르는 것이라
+  // 「모델」 구획으로 초점과 스크롤을 옮기고(#4145), 그 구획이 보이지 않는 서버(운영자 아님 등)에서는 연결됨 줄로 옮긴다.
   const doneRef = useRef<HTMLDivElement>(null);
+  const modelRef = useRef<HTMLDivElement>(null);
+  const focusedModel = useRef(false);
   const wasConnected = useRef(connected !== null);
   useEffect(() => {
-    if (connected !== null && !wasConnected.current) doneRef.current?.focus();
+    if (connected !== null && !wasConnected.current) {
+      const target = modelRef.current && modelRef.current.childElementCount > 0 ? modelRef.current : doneRef.current;
+      target?.focus();
+      target?.scrollIntoView?.({ block: "nearest" });
+      focusedModel.current = target === modelRef.current;
+    }
     wasConnected.current = connected !== null;
   }, [connected]);
+
+  // 로그인된 제공자는 모델 목록 답에서 읽는다(Hermes가 `authenticated` 로 표시한 제공자만 온다). 모델 인증 블록이 접는 근거다.
+  const models = useCohostedModels(workspaceId, connected !== null);
+  const loggedIn = loggedInFrom(models.data);
+  // 모델 구획으로 초점을 보냈는데 읽어 보니 이 서버에서 보이지 않는 구획이면(403) 초점이 갈 곳을 잃는다: 연결됨 줄로 되돌린다.
+  const modelKind = models.data?.kind;
+  useEffect(() => {
+    if (modelKind === "hidden" && focusedModel.current) {
+      focusedModel.current = false;
+      if (document.activeElement === document.body || document.activeElement === null) doneRef.current?.focus();
+    }
+  }, [modelKind]);
 
   return (
     <AiSection labelledBy={HEADING_ID} testId="ai-cohosted">
@@ -233,8 +254,10 @@ function CardBody({
             <span className="text-meta text-ink-muted">{COPY.volumeNote}</span>
           </AiLineRow>
         </div>
-        {/* #4080: 연결된 Hermes의 모델 인증(운영자만, 서버 답이 보임을 정한다). */}
-        <ModelLoginPanel workspaceId={workspaceId} agentId={connected} offline={offline} />
+        {/* #4145: 지금 답하는 모델과 바꾸기. 연결 직후에는 「어떤 모델로 쓸까요?」 로 묻는다. */}
+        <CohostedModelSection ref={modelRef} workspaceId={workspaceId} offline={offline} invite={connect.isSuccess} />
+        {/* #4080: 연결된 Hermes의 모델 인증(운영자만, 서버 답이 보임을 정한다). 로그인된 제공자는 접는다. */}
+        <ModelLoginPanel workspaceId={workspaceId} agentId={connected} offline={offline} loggedIn={loggedIn} />
         </>
       ) : !status.toolsLockAttested ? (
         <AiLineRow last testId="ai-cohosted-checklist-row">

@@ -54,7 +54,7 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 let client: QueryClient;
 
-function mount(offline = false): HTMLElement {
+function mount(offline = false, loggedIn: ReadonlySet<string> | null = null): HTMLElement {
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   host = document.createElement("div");
   document.body.append(host);
@@ -64,7 +64,7 @@ function mount(offline = false): HTMLElement {
       createElement(
         QueryClientProvider,
         { client },
-        createElement(ModelLoginPanel, { workspaceId: WS, agentId: AGENT, offline })
+        createElement(ModelLoginPanel, { workspaceId: WS, agentId: AGENT, offline, loggedIn })
       )
     );
   });
@@ -159,6 +159,48 @@ describe("ModelLoginPanel", () => {
     expect(shell.textContent).toContain("hermes auth add anthropic --type oauth --no-browser");
     expect(q("model-login-start-openai-codex")).toBeNull();
     expect(calls().every((call) => call.startsWith("GET"))).toBe(true);
+  });
+
+  describe("로그인된 제공자는 접는다 (#4145)", () => {
+    const off = () => api.request.mockRejectedValue(new ApiError(409, "off", "login_relay_off"));
+
+    it("셸 안내에서 로그인된 제공자는 명령 없이 「로그인됨」 줄이고, 안 된 제공자만 명령을 보인다", async () => {
+      off();
+      mount(false, new Set(["anthropic"]));
+      const shell = await until("model-login-shell");
+      expect(q("model-login-in-anthropic")?.textContent).toContain("로그인됨");
+      expect(shell.textContent).not.toContain("hermes auth add anthropic");
+      expect(q("model-login-todo-anthropic")).toBeNull();
+      expect(shell.textContent).toContain("hermes auth add openai-codex --type oauth --no-browser");
+      expect(shell.textContent).toContain("로그인해 주세요");
+    });
+
+    it("로그인 정보를 못 읽었으면(null) 아무것도 접지 않는다", async () => {
+      off();
+      mount(false, null);
+      const shell = await until("model-login-shell");
+      expect(shell.textContent).toContain("hermes auth add anthropic");
+      expect(shell.textContent).toContain("hermes auth add openai-codex");
+      expect(q("model-login")?.hasAttribute("data-folded")).toBe(false);
+    });
+
+    it("둘 다 로그인됐으면 블록 전체가 한 줄로 접히고 명령도 안내도 없다", async () => {
+      off();
+      mount(false, new Set(["anthropic", "openai-codex"]));
+      const shell = await until("model-login-shell");
+      expect(q("model-login")?.hasAttribute("data-folded")).toBe(true);
+      expect(q("model-login-fold")?.textContent).toContain("모두 로그인됨");
+      expect(shell.textContent).not.toContain("hermes auth add");
+      expect(shell.textContent).not.toContain("로그인해 주세요");
+    });
+
+    it("화면 로그인이 켜진 서버에서도 모델 목록이 말한 로그인은 알약으로 읽힌다", async () => {
+      api.request.mockResolvedValue(TARGETS);
+      mount(false, new Set(["anthropic"]));
+      const claude = await until("model-login-claude");
+      expect(claude.textContent).toContain("로그인됨");
+      expect(q("model-login-codex")?.textContent).toContain("로그인 안 됨");
+    });
   });
 
   it("reports a load failure with a retry", async () => {

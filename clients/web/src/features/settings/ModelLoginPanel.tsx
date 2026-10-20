@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
+import { ChevronRight, Loader2 } from "lucide-react";
 import { fetchCohostedStatus } from "@momo/core/features/settings/cohostedAgent";
+import { providerLoginName } from "@momo/core/features/settings/cohostedModels";
 import {
   cancelLogin,
   fetchLoginTargets,
@@ -44,10 +45,13 @@ export function ModelLoginPanel({
   workspaceId,
   agentId,
   offline,
+  loggedIn = null,
 }: {
   workspaceId: string;
   agentId: string;
   offline: boolean;
+  /** 모델 목록 답이 말한 로그인된 제공자(#4145). 못 읽었으면 null: 아는 것이 없으니 아무것도 접지 않는다. */
+  loggedIn?: ReadonlySet<string> | null;
 }) {
   const client = useQueryClient();
   const targetsKey = ["login-relay", "model", workspaceId, agentId] as const;
@@ -126,16 +130,18 @@ export function ModelLoginPanel({
       </PanelShell>
     );
   }
+  const knownIn = (provider: ModelProvider): boolean => loggedIn?.has(provider) === true;
+  const allIn = MODEL_PROVIDERS.every(knownIn);
   if (read.kind === "off") {
     return (
-      <PanelShell>
-        <ShellFallback />
+      <PanelShell fold={allIn}>
+        <ShellFallback loggedIn={knownIn} />
       </PanelShell>
     );
   }
 
   const connectedOf = (provider: ModelProvider): boolean =>
-    read.targets.some((entry) => entry.target === provider && entry.connected);
+    knownIn(provider) || read.targets.some((entry) => entry.target === provider && entry.connected);
 
   const begin = async (provider: ModelProvider) => {
     setStartingFor(provider);
@@ -226,8 +232,10 @@ export function ModelLoginPanel({
     </AiPill>
   );
 
+  // 둘 다 로그인돼 있고 지금 진행 중인 로그인이 없으면 블록을 접는다. 다시 로그인은 펼쳐서 한다.
+  const idle = !busy && !confirmClaude && ended === null;
   return (
-    <PanelShell>
+    <PanelShell fold={allIn && idle}>
       <p className="break-keep px-2 pb-2 pt-3 text-meta text-ink-muted">{COPY.lead}</p>
       <AiLineRow
         testId="model-login-codex"
@@ -307,7 +315,25 @@ export function ModelLoginPanel({
   );
 }
 
-function PanelShell({ children }: { children: React.ReactNode }) {
+const MODEL_PROVIDERS: readonly ModelProvider[] = ["openai-codex", "anthropic"];
+
+/** `fold`: 모든 제공자가 로그인됐으면 한 줄로 접는다(#4145). 로그인할 일이 없는 화면이 맨 위를 차지하지 않게. */
+function PanelShell({ children, fold = false }: { children: React.ReactNode; fold?: boolean }) {
+  if (fold) {
+    return (
+      <details className="group flex min-w-0 flex-col pt-4" data-testid="model-login" data-folded="">
+        <summary
+          className="-mx-1 flex w-full cursor-pointer list-none items-center gap-2 rounded-sm border-b border-line px-1 pb-2 text-body font-bold text-ink hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring [&::-webkit-details-marker]:hidden"
+          data-testid="model-login-fold"
+        >
+          <ChevronRight aria-hidden="true" className="size-4 shrink-0 text-ink-muted transition-transform group-open:rotate-90" />
+          <span id={HEADING_ID}>{COPY.title}</span>
+          <AiPill tone="ok">{COPY.allLoggedIn}</AiPill>
+        </summary>
+        {children}
+      </details>
+    );
+  }
   return (
     <section className="flex min-w-0 flex-col pt-4" aria-labelledby={HEADING_ID} data-testid="model-login">
       <h4 id={HEADING_ID} className="border-b border-line pb-2 text-body font-bold text-ink">
@@ -319,7 +345,7 @@ function PanelShell({ children }: { children: React.ReactNode }) {
 }
 
 /** 중계가 꺼진 서버: 셸 명령을 보인다. 값이 아니라 명령이고 oort를 지나가는 것이 없다. */
-function ShellFallback() {
+function ShellFallback({ loggedIn }: { loggedIn: (provider: ModelProvider) => boolean }) {
   const [copied, setCopied] = useState<string | null>(null);
   const copy = (command: string) => {
     if (typeof navigator.clipboard?.writeText !== "function") return;
@@ -328,16 +354,29 @@ function ShellFallback() {
       setTimeout(() => setCopied(null), 2000);
     });
   };
-  const rows: ReadonlyArray<{ title: string; command: string }> = [
-    { title: COPY.codexTitle, command: MODEL_SHELL_COMMANDS["openai-codex"] },
-    { title: COPY.claudeTitle, command: MODEL_SHELL_COMMANDS.anthropic },
+  const rows: ReadonlyArray<{ provider: ModelProvider; title: string; command: string }> = [
+    { provider: "openai-codex", title: COPY.codexTitle, command: MODEL_SHELL_COMMANDS["openai-codex"] },
+    { provider: "anthropic", title: COPY.claudeTitle, command: MODEL_SHELL_COMMANDS.anthropic },
   ];
+  // 로그인된 제공자는 명령 없이 「로그인됨」 한 줄로 접고, 로그인 안 된 제공자만 명령을 보인다(#4145).
+  const todo = rows.filter((row) => !loggedIn(row.provider));
   return (
     <div data-testid="model-login-shell">
-      <p className="break-keep px-2 pb-2 pt-3 text-body text-ink">{COPY.shellLead}</p>
-      {rows.map((row) => (
+      {todo.length > 0 && <p className="break-keep px-2 pb-2 pt-3 text-body text-ink">{COPY.shellLead}</p>}
+      {rows
+        .filter((row) => loggedIn(row.provider))
+        .map((row) => (
+          <AiLineRow key={row.command} testId={`model-login-in-${row.provider}`} last={todo.length === 0 && row === rows[rows.length - 1]}>
+            <span className="flex flex-wrap items-center gap-2">
+              <span className="font-semibold">{providerLoginName(row.provider)}</span>
+              <AiPill tone="ok">{COPY.connectedPill}</AiPill>
+            </span>
+          </AiLineRow>
+        ))}
+      {todo.map((row) => (
         <AiLineRow
           key={row.command}
+          testId={`model-login-todo-${row.provider}`}
           action={
             <Button type="button" size="sm" variant="ghost" className="tap-target bg-surface shadow-sm" onClick={() => copy(row.command)}>
               {copied === row.command ? COPY.copied : COPY.shellCopy}
@@ -350,9 +389,11 @@ function ShellFallback() {
           </code>
         </AiLineRow>
       ))}
-      <AiLineRow last>
-        <span className="text-meta text-ink-muted">{COPY.shellAfter}</span>
-      </AiLineRow>
+      {todo.length > 0 && (
+        <AiLineRow last>
+          <span className="text-meta text-ink-muted">{COPY.shellAfter}</span>
+        </AiLineRow>
+      )}
     </div>
   );
 }
