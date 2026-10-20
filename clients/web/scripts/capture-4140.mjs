@@ -243,8 +243,6 @@ async function shoot(page, name, tag, locator) {
   if (locator) await locator.screenshot({ path: resolve(OUT_DIR, `${name}-crop-1440-${tag}.png`) });
 }
 
-const noOverflow = (page) =>
-  page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
 
 async function openProfileMenu(page) {
@@ -321,6 +319,11 @@ async function scene(browser, origin, scheme) {
       (await page.getByTestId("set-status-text").inputValue()) === "회의 중" &&
       ((await expiry.textContent()) ?? "").trim() === "1시간");
     check(`3 ${tag} 글이 생기면 추천 목록이 접힌다`, (await page.getByTestId("set-status-presets").count()) === 0);
+    await shoot(page, "set-status-filled", tag, dialog);
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Tab");
+    await shoot(page, "set-status-filled-focus", tag, dialog);
+    await page.getByTestId("set-status-text").focus();
     await page.getByTestId("set-status-text-clear").click();
     check(`3 ${tag} 지우기로 비우면 목록이 다시 펼쳐진다`, (await page.getByTestId("set-status-presets").count()) === 1 && (await page.getByTestId("set-status-text").inputValue()) === "");
     // 저장 payload

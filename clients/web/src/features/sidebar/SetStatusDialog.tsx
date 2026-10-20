@@ -54,7 +54,7 @@ import { EmojiPickerDialog } from "@/features/emoji/EmojiPickerDialog";
 const EXPIRY_PLACEHOLDER = "만료를 고르세요";
 // 입력 칸 오른쪽 X: 글과 이모지를 함께 비워 추천 목록이 다시 펼쳐진다. 저장된 상태를
 // 지우는 하단 「상태 지우기」와 다르다(이쪽은 아직 저장 전인 초안만 비운다).
-const CUSTOM_STATUS_FIELD_CLEAR_LABEL = "입력 지우기";
+const CUSTOM_STATUS_FIELD_CLEAR_LABEL = "입력한 내용 지우기";
 
 function expiryLabel(id: StatusExpiryChoice): string {
   return STATUS_EXPIRY_OPTIONS.find((option) => option.id === id)?.label ?? "";
@@ -320,7 +320,7 @@ export function SetStatusDialog({
                 aria-haspopup="dialog"
                 aria-expanded={pickerOpen}
                 data-testid="set-status-emoji"
-                className="flex size-7 shrink-0 items-center justify-center rounded-md text-body press-instant-fill hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex size-7 shrink-0 items-center justify-center rounded-md text-body press-instant-fill hover:bg-surface-hover active:bg-surface-pressed focus-visible:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
                 onClick={() => setPickerOpen(true)}
               >
                 {emoji ? (
@@ -347,7 +347,7 @@ export function SetStatusDialog({
                   disabled={busy}
                   aria-label={CUSTOM_STATUS_FIELD_CLEAR_LABEL}
                   data-testid="set-status-text-clear"
-                  className="flex size-7 shrink-0 items-center justify-center rounded-full text-ink-muted press-instant-fill hover:bg-surface-hover hover:text-ink active:bg-surface-pressed focus-visible:focus-ring disabled:opacity-50"
+                  className="flex size-7 shrink-0 items-center justify-center rounded-full text-ink-muted press-instant-fill hover:bg-surface-hover hover:text-ink active:bg-surface-pressed focus-visible:bg-surface-hover disabled:opacity-50"
                   onClick={() => {
                     setText("");
                     setEmoji("");
