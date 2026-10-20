@@ -242,6 +242,11 @@ fn classify(status: u16) -> (ProbeOutcome, Option<String>) {
     }
 }
 
+/// An object whose `enabled` is exactly boolean `false`.
+fn is_switched_off(value: &serde_json::Value) -> bool {
+    value.get("enabled") == Some(&serde_json::Value::Bool(false))
+}
+
 /// Which of the three dangerous names the body mentions — as an object key or a
 /// string value anywhere in the JSON. The shape of `/v1/toolsets` is not
 /// documented to this crate, so it reads leniently and reports only fixed names.
@@ -262,8 +267,17 @@ fn dangerous_names(value: &serde_json::Value, found: &mut Vec<&'static str>) {
             serde_json::Value::String(text) => note(text),
             serde_json::Value::Array(items) => items.iter().for_each(|v| walk(v, note, depth + 1)),
             serde_json::Value::Object(map) => {
+                // Hermes lists every toolset with `enabled`; a JSON `false`
+                // (exactly) means off. `true`, a missing field or any other
+                // type stays conservative and is still reported.
+                let off = is_switched_off(value);
                 for (key, inner) in map {
-                    note(key);
+                    if off && key == "name" && inner.is_string() {
+                        continue;
+                    }
+                    if !is_switched_off(inner) {
+                        note(key);
+                    }
                     walk(inner, note, depth + 1);
                 }
             }

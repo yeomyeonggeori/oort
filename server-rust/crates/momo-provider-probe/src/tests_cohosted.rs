@@ -342,6 +342,83 @@ async fn toolsets_is_a_third_request_only_when_asked_and_only_a_caution() {
     assert!(!seen.paths().contains(&"/v1/toolsets".to_string()));
 }
 
+#[tokio::test]
+async fn toolsets_enabled_false_is_off_and_anything_else_stays_conservative() {
+    // Hermes v0.22.2 shape: a bare array, every toolset with `enabled`.
+    let locked = |t: bool, b: bool, c: bool| {
+        serde_json::json!([
+            {"name": "browser", "enabled": b},
+            {"name": "terminal", "enabled": t},
+            {"name": "code_execution", "enabled": c},
+            {"name": "web", "enabled": true},
+            {"name": "file", "enabled": true}
+        ])
+    };
+    let wrapped = |v: serde_json::Value| serde_json::json!({ "data": v });
+    let cases = [
+        (locked(false, false, false), ToolsetsSignal::NoneListed),
+        (
+            locked(true, false, false),
+            ToolsetsSignal::Listed(vec!["terminal"]),
+        ),
+        (
+            locked(false, true, true),
+            ToolsetsSignal::Listed(vec!["browser", "code_execution"]),
+        ),
+        (
+            wrapped(locked(false, false, false)),
+            ToolsetsSignal::NoneListed,
+        ),
+        (
+            wrapped(locked(false, true, false)),
+            ToolsetsSignal::Listed(vec!["browser"]),
+        ),
+        // Missing field, string "false", null: not exactly `false` -> reported.
+        (
+            serde_json::json!([{"name": "terminal"}]),
+            ToolsetsSignal::Listed(vec!["terminal"]),
+        ),
+        (
+            serde_json::json!([{"name": "terminal", "enabled": "false"}]),
+            ToolsetsSignal::Listed(vec!["terminal"]),
+        ),
+        (
+            serde_json::json!([{"name": "terminal", "enabled": null}]),
+            ToolsetsSignal::Listed(vec!["terminal"]),
+        ),
+        // Bare names (no object) stay reported.
+        (
+            serde_json::json!(["terminal"]),
+            ToolsetsSignal::Listed(vec!["terminal"]),
+        ),
+        // A non-string `name` under an off object is still walked.
+        (
+            serde_json::json!([{"enabled": false, "name": {"terminal": {"enabled": true}}}]),
+            ToolsetsSignal::Listed(vec!["terminal"]),
+        ),
+        (
+            serde_json::json!([{"enabled": false, "name": ["terminal"]}]),
+            ToolsetsSignal::Listed(vec!["terminal"]),
+        ),
+        // Keyed-by-name map with an explicit off.
+        (
+            serde_json::json!({"toolsets": {"terminal": {"enabled": false}}}),
+            ToolsetsSignal::NoneListed,
+        ),
+    ];
+    for (body, want) in cases {
+        let (port, _) = agent(Some(body.clone()), true).await;
+        let report = opted_in()
+            .probe_cohosted(&target(format!("http://127.0.0.1:{port}/v1")), true)
+            .await;
+        let mut got = report.toolsets.clone();
+        if let ToolsetsSignal::Listed(v) = &mut got {
+            v.sort();
+        }
+        assert_eq!(got, want, "{body}");
+    }
+}
+
 #[test]
 fn the_declared_url_is_read_the_same_way_by_the_gate_and_the_socket() {
     use super::cohosted::origin_of;
