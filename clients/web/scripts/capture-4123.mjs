@@ -6,7 +6,7 @@
 //   npm run build && node scripts/capture-4123.mjs                     # 후(listbox)
 //   BEFORE=1 OUT_DIR=captures/4123/before node scripts/capture-4123.mjs   # 전(네이티브 select, 닫힌 모양만)
 // =============================================================================
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -18,7 +18,6 @@ const OUT_DIR = process.env.OUT_DIR ? resolve(process.env.OUT_DIR) : resolve(WEB
 const PORT = Number(process.env.CAPTURE_PORT || 5199);
 
 const FIXED_NOW = Date.parse("2026-10-16T21:07:00+09:00");
-const kst = (iso) => Date.parse(`${iso}+09:00`);
 
 const workspaceId = "00000000-0000-7000-8000-000000000001";
 const memberId = "00000000-0000-7000-8000-000000000101";
@@ -247,7 +246,6 @@ async function shoot(page, name, tag, locator) {
 const noOverflow = (page) =>
   page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
-const writes = (server, kind) => server.log.filter((entry) => entry.kind === kind && entry.method !== "GET");
 
 async function openProfileMenu(page) {
   await page.getByTestId("profile-card").click();
