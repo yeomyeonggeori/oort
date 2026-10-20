@@ -419,7 +419,8 @@ const STATIC_COMMANDS: readonly StaticCommand[] = [
     title: "AI",
     group: "navigate",
     kind: "navigate",
-    keywords: ["ai 허브", "허브", "구독", "에이전트 비용"],
+    // 「AI 연결」(옛 설정 화면 이름, #4141)은 이 줄의 별칭이다: 같은 서버 Hermes 카드도 허브에 있다.
+    keywords: ["ai 허브", "허브", "ai 연결", "hermes", "헤르메스", "구독", "api 키", "claude", "codex", "에이전트 비용"],
     icon: "ai-hub",
     testId: "switcher-ai",
     available: always,
@@ -439,19 +440,6 @@ const STATIC_COMMANDS: readonly StaticCommand[] = [
       run: navigateTo(section.path, title),
     };
   }),
-  {
-    // 같은 서버 Hermes 카드가 있는 옛 AI 연결 화면(`?section=ai`, #4111). 설정 목차의
-    // 「AI 연결」 행과 같은 이름·같은 주소다. 허브(`nav.ai`, 「AI」)와 따로 찾힌다.
-    id: "nav.settings.ai",
-    title: "AI 연결", // design-preflight-allow: 성재가 팔레트·목차에서 이 이름으로 찾는다(#4111, 0.1.32 실기)
-    group: "settings",
-    kind: "navigate",
-    keywords: ["ai", "hermes", "헤르메스", "구독", "api 키", "claude", "codex", "서버"],
-    icon: "ai-connect",
-    testId: "switcher-settings-ai",
-    available: always,
-    run: navigateTo("/settings?section=ai", "AI 연결"), // design-preflight-allow: 위 제목과 같은 이름(#4111)
-  },
   {
     id: "nav.settings.agents",
     title: "외부 에이전트 연결",

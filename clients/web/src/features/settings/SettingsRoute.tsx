@@ -30,8 +30,6 @@ import { WorkspaceSection } from "./WorkspaceSection";
 import { MemorySettingsSection } from "@/features/memory/MemorySettingsSection";
 import { leaveSettings } from "./settingsReturn";
 import { aiHubSection } from "@momo/core/features/ai/aiHubModel";
-import { AiHubMovedLink } from "@/features/aiHub/AiHubMovedLink";
-import { AiLinkSection } from "./AiLinkSection";
 import {
   DEFAULT_SETTINGS_SECTION,
   reachableSettingsSections,
@@ -209,8 +207,7 @@ export function SettingsRoute() {
 
   // AIH-8: 앱·웹훅·이벤트 구독·에이전트 자격은 AI 허브 › 외부 연결로 옮겼다. 옛 딥링크
   // (?section=…, 서버 안내·팔레트가 아직 이 주소를 건넨다)는 그 줄 상세로 바꿔 보낸다.
-  // `ai`는 목차에서 허브로 가는 링크 행이지만 `?section=ai`는 옛 AI 연결 화면이 그대로
-  // 열린다(그 주소를 부르는 게이트·캡처·되돌아옴이 많다. T3가 끝나면 걷는다).
+  // 옛 `?section=ai`(AI 연결)도 같다: AI 설정은 허브 한 곳이라 허브 AI 계정 구획으로 간다(#4141).
   if (requestedResolution.kind === "ai-hub") {
     return <Navigate to={requestedResolution.path} replace />;
   }
@@ -249,7 +246,6 @@ export function SettingsRoute() {
           본문을 밀어내므로, 그 폭에서는 목록이 본문 **위의 한 줄**로 눕고(#3064),
           본문이 남은 높이를 전부 받는다 (tokens.css settings-layout / settings-nav). */}
       <SettingsShell
-        wide={section === "ai"}
         nav={
           <SettingsNav
             sections={sections}
@@ -359,13 +355,6 @@ function SectionPage({
       );
     case "updates":
       return <UpdateSection />;
-    case "ai":
-      return (
-        <>
-          <AiHubMovedLink section="ai" />
-          <AiLinkSection offline={offline} workspaceId={workspaceId} />
-        </>
-      );
     default:
       return null;
   }

@@ -8,6 +8,7 @@ import {
   customStatusDraftWrite,
   statusExpiryShortLabel,
   customStatusAccessibleText,
+  STATUS_EXPIRY_OPTIONS,
   presenceWriteBody,
   statusExpiryAtMs,
   visibleCustomStatus,
@@ -163,6 +164,21 @@ describe("A-42 preset chips", () => {
       "재택",
     ]);
     expect(CUSTOM_STATUS_PRESETS).toHaveLength(5);
+  });
+
+  it("gives every preset a default expiry the expiry menu can show", () => {
+    expect(CUSTOM_STATUS_PRESETS.map((preset) => preset.expiry)).toEqual([
+      "1h",
+      "30m",
+      "today",
+      "none",
+      "today",
+    ]);
+    const menu = STATUS_EXPIRY_OPTIONS.map((option) => option.id as string);
+    for (const preset of CUSTOM_STATUS_PRESETS) {
+      expect(menu).toContain(preset.expiry);
+      expect(preset.expiry).not.toBe("custom");
+    }
   });
 });
 

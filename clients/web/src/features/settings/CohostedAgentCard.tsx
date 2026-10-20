@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Loader2 } from "lucide-react";
+import { Check, ChevronRight, Loader2 } from "lucide-react";
 import {
   COHOSTED_COPY as COPY,
   connectCohosted,
@@ -12,6 +12,8 @@ import {
   type CohostedProbe,
   type CohostedStatus,
 } from "@momo/core/features/settings/cohostedAgent";
+import { openDirectMessage, type Channel } from "@momo/core/lib/api";
+import { openDmErrorMessage, upsertChannel } from "@momo/core/features/directory/model";
 import { Button } from "@/design/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/design/ui/dialog";
 import { useSession } from "@/app/session";
@@ -20,10 +22,11 @@ import { IS_TAURI } from "@/lib/env";
 import { openExternalUrl } from "@/lib/tauri";
 import { rosterQueryKey } from "@/features/workspace/useWorkspace";
 import { AiLineRow, AiSection, AiSectionHead } from "./aiAccountsParts";
+import { CohostedModelSection, loggedInFrom, useCohostedModels } from "./CohostedModelSection";
 import { ModelLoginPanel } from "./ModelLoginPanel";
 import { cohostedPromptKey, markCohostedPromptShown, wasCohostedPromptShown } from "./cohostedPrompt";
 
-// Reading this as: settings › AI 연결 card (instance operator only) for internal team users on
+// Reading this as: AI hub (top of every pane) card (instance operator only) for internal team users on
 // web+Tauri, density 6/10, motion 1/10.
 
 /** 배포 체크리스트(D6). 앱 안에 문서가 없어 저장소 문서로 간다(WelcomeStep 의 셀프호스트 링크와 같은 방식). */
@@ -31,6 +34,9 @@ const COHOSTED_CHECKLIST_URL =
   "https://github.com/yeomyeonggeori/oort/blob/main/docs/SELF_HOST_AGENT.ko.md";
 
 const HEADING_ID = "ai-cohosted-title";
+
+/** 연결 알림이 머무는 시간. */
+const CONNECTED_NOTICE_MS = 6000;
 
 /**
  * 「같은 서버의 Hermes」 (#3883 서버 / ADR-0203 D3·Q2). 인스턴스 운영자에게만, 서버가 선언을 알 때만 보인다.
@@ -111,9 +117,41 @@ function CardBody({
     refetchOnWindowFocus: false,
   });
 
+  // 연결에 성공한 순간 한 번 뜨는 알림. 토스트 더미가 아니라 카드 안 제자리 한 줄이고, 잠시 뒤 스스로 걷힌다.
+  const [noticeOn, setNoticeOn] = useState(false);
+  useEffect(() => {
+    if (!noticeOn) return;
+    const timer = window.setTimeout(() => setNoticeOn(false), CONNECTED_NOTICE_MS);
+    return () => window.clearTimeout(timer);
+  }, [noticeOn]);
+
+  // 운영자와 Hermes의 DM(#4141). 연결 멤버는 만들어졌는데 DM 채널이 없으면 사이드바에 안 보인다. POST /dms는
+  // 멱등이라(`useOpenDm`과 같은 계약) 연결 직후엔 만들어 두고(이동 없이), 「대화 열기」는 같은 호출로 그 채널로 간다.
+  const navigate = useNavigate();
+  const [dmError, setDmError] = useState<string | null>(null);
+  const openAgentDm = useCallback(
+    async (agentId: string, andGo: boolean) => {
+      setDmError(null);
+      try {
+        const opened = await openDirectMessage(workspaceId, agentId);
+        client.setQueryData<Channel[]>(["channels", workspaceId], (current) =>
+          current ? upsertChannel(current, opened.channel) : [opened.channel]
+        );
+        void client.invalidateQueries({ queryKey: ["channels", workspaceId] });
+        if (andGo) navigate(`/c/${opened.channel.id}`);
+      } catch (failure) {
+        setDmError(openDmErrorMessage(failure, "Hermes"));
+      }
+    },
+    [workspaceId, client, navigate]
+  );
+
   const connect = useMutation({
     mutationFn: () => connectCohosted(workspaceId),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      // 카드 단추와 처음 한 번 창이 같은 mutation이라 알림도 DM도 한 곳에서 켠다(#4141).
+      setNoticeOn(true);
+      void openAgentDm(result.agentId, false);
       void client.invalidateQueries({ queryKey: ["cohosted-agent", workspaceId] });
       void client.invalidateQueries({ queryKey: rosterQueryKey(workspaceId) });
     },
@@ -132,38 +170,94 @@ function CardBody({
     setPromptOpen(true);
   }, [promptable, promptKey]);
 
-  // 연결이 끝나면 초점이 사라진 단추에서 <body> 로 떨어지지 않게 새 줄로 옮긴다.
+  // 연결이 끝나면 초점이 사라진 단추에서 <body> 로 떨어지지 않게 옮긴다. 다음 일은 모델을 고르는 것이라
+  // 「모델」 구획으로 초점과 스크롤을 옮기고(#4145), 그 구획이 보이지 않는 서버(운영자 아님 등)에서는 연결됨 줄로 옮긴다.
   const doneRef = useRef<HTMLDivElement>(null);
+  const modelRef = useRef<HTMLDivElement>(null);
+  const focusedModel = useRef(false);
   const wasConnected = useRef(connected !== null);
   useEffect(() => {
-    if (connected !== null && !wasConnected.current) doneRef.current?.focus();
+    if (connected !== null && !wasConnected.current) {
+      const target = modelRef.current && modelRef.current.childElementCount > 0 ? modelRef.current : doneRef.current;
+      target?.focus();
+      target?.scrollIntoView?.({ block: "nearest" });
+      focusedModel.current = target === modelRef.current;
+    }
     wasConnected.current = connected !== null;
   }, [connected]);
+
+  // 로그인된 제공자는 모델 목록 답에서 읽는다(Hermes가 `authenticated` 로 표시한 제공자만 온다). 모델 인증 블록이 접는 근거다.
+  const models = useCohostedModels(workspaceId, connected !== null);
+  const loggedIn = loggedInFrom(models.data);
+  // 모델 구획으로 초점을 보냈는데 읽어 보니 이 서버에서 보이지 않는 구획이면(403) 초점이 갈 곳을 잃는다: 연결됨 줄로 되돌린다.
+  const modelKind = models.data?.kind;
+  useEffect(() => {
+    if (modelKind === "hidden" && focusedModel.current) {
+      focusedModel.current = false;
+      if (document.activeElement === document.body || document.activeElement === null) doneRef.current?.focus();
+    }
+  }, [modelKind]);
 
   return (
     <AiSection labelledBy={HEADING_ID} testId="ai-cohosted">
       <AiSectionHead id={HEADING_ID} title={COPY.title} scope="이 서버" locked />
+      {noticeOn && connected !== null && (
+        <div
+          role="status"
+          className="mb-2 flex items-center gap-2 rounded-md bg-ok-soft px-3 py-2 text-body font-semibold text-ok"
+          data-testid="ai-cohosted-connected-notice"
+        >
+          <Check aria-hidden="true" className="size-4 shrink-0" />
+          <span className="min-w-0 flex-1">{COPY.connectedNotice}</span>
+          {connect.data && (
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="tap-target"
+              onClick={() => void openAgentDm(connect.data.agentId, true)}
+              data-testid="ai-cohosted-notice-open-dm"
+            >
+              {COPY.openDm}
+            </Button>
+          )}
+        </div>
+      )}
       {connected !== null ? (
         <>
         <div ref={doneRef} tabIndex={-1} className="focus-visible:focus-ring" data-testid="ai-cohosted-connected">
           <AiLineRow
             last
             action={
-              <Link
-                to={`/agents?agent=${encodeURIComponent(connected)}`}
-                className="press rounded-sm text-body text-ink underline underline-offset-4 focus-visible:focus-ring"
-                data-testid="ai-cohosted-open-agent"
-              >
-                {COPY.openAgent}
-              </Link>
+              <span className="flex items-center gap-3">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  className="tap-target"
+                  onClick={() => void openAgentDm(connected, true)}
+                  data-testid="ai-cohosted-open-dm"
+                >
+                  {COPY.openDm}
+                </Button>
+                <Link
+                  to={`/agents?agent=${encodeURIComponent(connected)}`}
+                  className="press rounded-sm text-body text-ink underline underline-offset-4 focus-visible:focus-ring"
+                  data-testid="ai-cohosted-open-agent"
+                >
+                  {COPY.openAgent}
+                </Link>
+              </span>
             }
           >
             <span className="font-semibold">{COPY.connected}</span>
             <span className="text-meta text-ink-muted">{COPY.volumeNote}</span>
           </AiLineRow>
         </div>
-        {/* #4080: 연결된 Hermes의 모델 인증(운영자만, 서버 답이 보임을 정한다). */}
-        <ModelLoginPanel workspaceId={workspaceId} agentId={connected} offline={offline} />
+        {/* #4145: 지금 답하는 모델과 바꾸기. 연결 직후에는 「어떤 모델로 쓸까요?」 로 묻는다. */}
+        <CohostedModelSection ref={modelRef} workspaceId={workspaceId} offline={offline} invite={connect.isSuccess} />
+        {/* #4080: 연결된 Hermes의 모델 인증(운영자만, 서버 답이 보임을 정한다). 로그인된 제공자는 접는다. */}
+        <ModelLoginPanel workspaceId={workspaceId} agentId={connected} offline={offline} loggedIn={loggedIn} />
         </>
       ) : !status.toolsLockAttested ? (
         <AiLineRow last testId="ai-cohosted-checklist-row">
@@ -200,6 +294,7 @@ function CardBody({
           onConnect={() => connect.mutate()}
         />
       )}
+      {dmError !== null && <InlineBanner message={dmError} testId="ai-cohosted-dm-error" />}
       {connect.isError && (
         <InlineBanner message={connectErrorMessage(connect.error)} testId="ai-cohosted-connect-error" />
       )}
