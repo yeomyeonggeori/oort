@@ -217,12 +217,18 @@ describe("팀 AI 다음 단계 카드", () => {
       "@claude는 이미 클로드 코드가 쓰고 있어서 연결하지 않았어요."
     );
 
-    const select = view.querySelector<HTMLSelectElement>('[data-testid="team-ai-next-step-channel"]');
+    const select = view.querySelector<HTMLButtonElement>('[data-testid="team-ai-next-step-channel"]');
+    expect(select?.getAttribute("role")).toBe("combobox");
+    // 라벨이 칸과 목록의 이름이 된다.
+    expect(select?.getAttribute("aria-labelledby")).toBe(`${select?.id}-label`);
     await act(async () => {
-      if (select) {
-        select.value = "c-mkt";
-        select.dispatchEvent(new Event("change", { bubbles: true }));
-      }
+      select?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(document.querySelector('[role="listbox"]')?.getAttribute("aria-labelledby")).toBe(`${select?.id}-label`);
+    await act(async () => {
+      document
+        .querySelector<HTMLElement>('[role="option"][data-value="c-mkt"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     const tryButton = q(view, "team-ai-next-step-try");
     expect(tryButton?.textContent).toBe("#마케팅에서 @oort 불러 보기");
