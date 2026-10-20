@@ -58,12 +58,44 @@ pub struct StoredAgentPin {
     pub link_endpoint_label: Option<String>,
     pub pinned_by_member_id: Option<Uuid>,
     pub updated_at_ms: i64,
+    /// #4143 (ADR-0203 증보 2026-10-20): the Hermes provider slug and model id the
+    /// co-hosted agent answers on. **Both or neither** (migration 144's CHECK), and
+    /// only on an [`PinKind::OperatorEnv`] pin. `None` is today's behaviour: the
+    /// worker sends `agent.model` and no provider.
+    pub model_route: Option<PinModelRoute>,
 }
 
-type PinRow = (Uuid, String, Option<i32>, Option<String>, Option<Uuid>, i64);
+/// The `(provider, model)` pair a co-hosted pin carries. Hermes ignores a bare
+/// `model` on `/v1/chat/completions` and answers on its default, so the two only
+/// ever travel together.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PinModelRoute {
+    pub provider: String,
+    pub model: String,
+}
+
+type PinRow = (
+    Uuid,
+    String,
+    Option<i32>,
+    Option<String>,
+    Option<Uuid>,
+    i64,
+    Option<String>,
+    Option<String>,
+);
 
 fn stored(row: PinRow) -> Option<StoredAgentPin> {
-    let (agent_member_id, kind, link_position, link_endpoint_label, pinned_by, updated_at_ms) = row;
+    let (
+        agent_member_id,
+        kind,
+        link_position,
+        link_endpoint_label,
+        pinned_by,
+        updated_at_ms,
+        model_provider,
+        model_id,
+    ) = row;
     Some(StoredAgentPin {
         agent_member_id,
         // A kind this build does not know is a pin it cannot honour; the callers
@@ -73,6 +105,12 @@ fn stored(row: PinRow) -> Option<StoredAgentPin> {
         link_endpoint_label,
         pinned_by_member_id: pinned_by,
         updated_at_ms,
+        // Half a pair cannot be stored (CHECK); if one ever reads back, it is not
+        // a route: the worker then sends today's request instead of half of one.
+        model_route: match (model_provider, model_id) {
+            (Some(provider), Some(model)) => Some(PinModelRoute { provider, model }),
+            _ => None,
+        },
     })
 }
 
@@ -99,7 +137,8 @@ impl From<sqlx::Error> for PinReadError {
 }
 
 const SELECT: &str = "SELECT agent_member_id, kind, link_position, link_endpoint_label, \
-                             pinned_by, floor(extract(epoch from updated_at) * 1000)::bigint \
+                             pinned_by, floor(extract(epoch from updated_at) * 1000)::bigint, \
+                             model_provider, model_id \
                         FROM agent_provider_pin";
 
 /// The pin of one agent, or `None` when it follows the team default. A tenant
@@ -144,10 +183,12 @@ pub async fn upsert_agent_pin(
            link_position = EXCLUDED.link_position, \
            link_endpoint_label = EXCLUDED.link_endpoint_label, \
            pinned_by = EXCLUDED.pinned_by, \
+           model_provider = NULL, \
+           model_id = NULL, \
            updated_at = greatest(clock_timestamp(), \
                                  agent_provider_pin.updated_at + interval '1 millisecond') \
          RETURNING agent_member_id, kind, link_position, link_endpoint_label, pinned_by, \
-                   floor(extract(epoch from updated_at) * 1000)::bigint",
+                   floor(extract(epoch from updated_at) * 1000)::bigint, model_provider, model_id",
     )
     .bind(agent_member_id)
     .bind(workspace_id)
@@ -159,6 +200,33 @@ pub async fn upsert_agent_pin(
     .await?;
     // The kind we just wrote is one we know.
     Ok(stored(row).expect("a kind written by this build parses"))
+}
+
+/// Write the `(provider, model)` pair on an existing `operator_env` pin (#4143).
+/// Only inside `with_provider_link_admin_tx`. Returns whether an `operator_env`
+/// pin existed; a `team_link` pin is left alone (the CHECK would refuse it anyway).
+/// [`upsert_agent_pin`] clears the pair, so re-pinning never leaves a stale route.
+pub async fn set_agent_pin_model(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+    provider: &str,
+    model: &str,
+) -> Result<bool, DbError> {
+    let updated = sqlx::query(
+        "UPDATE agent_provider_pin \
+            SET model_provider = $3, model_id = $4, \
+                updated_at = greatest(clock_timestamp(), updated_at + interval '1 millisecond') \
+          WHERE workspace_id = $1 AND agent_member_id = $2 AND kind = 'operator_env'",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .bind(provider)
+    .bind(model)
+    .execute(&mut *conn)
+    .await?
+    .rows_affected();
+    Ok(updated > 0)
 }
 
 /// Remove one pin (the agent follows the team default again). Returns whether a
@@ -195,7 +263,16 @@ mod tests {
 
     #[test]
     fn an_unknown_stored_kind_is_unreadable_not_absent() {
-        let row: PinRow = (Uuid::nil(), "future_kind".into(), None, None, None, 1);
+        let row: PinRow = (
+            Uuid::nil(),
+            "future_kind".into(),
+            None,
+            None,
+            None,
+            1,
+            None,
+            None,
+        );
         assert!(stored(row).is_none());
     }
 }

@@ -331,6 +331,7 @@ impl AgentWorker {
                 ));
             }
             let request = ChatRequest {
+                provider: None,
                 model: model.clone(),
                 messages: messages.clone(),
                 max_tokens: Some(team_ai::MAX_OUTPUT_TOKENS),

@@ -20,6 +20,9 @@
 //! | `a_position_pin_calls_that_link_and_no_other` | ignore the pin's position; send position 0 to the chain hop |
 //! | `a_pin_that_cannot_resolve_refuses_and_calls_nothing` | fall back to the head link, the env link or the 기본 AI row when the pin does not resolve; drop the label comparison; let position 0 mean "env when no link is stored" |
 //! | `a_pinned_agent_has_no_team_welcome` | let the team's welcome opener run on the team link for a pinned agent |
+//! | `an_env_pin_with_a_chosen_route_sends_provider_and_model_together` (#4143) | drop `provider` from the request, or send the pin's model without it; let the agent row's `hermes-agent` win over the pin |
+//! | `an_env_pin_without_a_route_sends_exactly_what_it_sent_before` (#4143) | send a `provider` for a pin that chose none; send half a pair |
+//! | `a_team_link_pin_never_carries_a_provider_and_the_store_refuses_a_half_pair` (#4143) | let a team_link pin or a one-sided pair into the table |
 //! | `the_pin_resolver_names_no_personal_runtime_fact` | let the pin resolver read a personal profile or subscription table |
 
 use std::path::PathBuf;
@@ -34,8 +37,8 @@ use momo_db::{with_provider_link_admin_tx, with_tenant_tx, PgPool};
 use momo_messaging::{send_message_in_tx, NewMessage};
 use momo_outbox::{emit_outbox, OutboxKind};
 use momo_settings::{
-    redacted_endpoint_label, replace_chain, seal_bearer, upsert_agent_pin, upsert_default_ai,
-    upsert_link, DefaultAiRole, PinKind, ProviderConfig, ProviderMode,
+    redacted_endpoint_label, replace_chain, seal_bearer, set_agent_pin_model, upsert_agent_pin,
+    upsert_default_ai, upsert_link, DefaultAiRole, PinKind, ProviderConfig, ProviderMode,
 };
 use serde_json::{json, Value};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
@@ -488,6 +491,20 @@ async fn pin_env(su: &PgPool, t: &Tenant, agent: Uuid) {
     .expect("pin env");
 }
 
+/// `pin_env` plus the co-hosted model route, the way the operator route writes it.
+async fn pin_env_with_route(su: &PgPool, t: &Tenant, agent: Uuid, provider: &str, model: &str) {
+    pin_env(su, t, agent).await;
+    let (ws, provider, model) = (t.workspace_id, provider.to_string(), model.to_string());
+    with_provider_link_admin_tx(su, ws, move |conn| {
+        Box::pin(async move {
+            assert!(set_agent_pin_model(conn, ws, agent, &provider, &model).await?);
+            Ok(())
+        })
+    })
+    .await
+    .expect("set route");
+}
+
 async fn pin_link(su: &PgPool, t: &Tenant, agent: Uuid, position: i32, url_when_pinned: &str) {
     let (ws, by) = (t.workspace_id, t.human_id);
     let label = redacted_endpoint_label(url_when_pinned);
@@ -593,6 +610,120 @@ async fn an_env_pinned_agent_calls_hermes_while_the_team_key_is_stored() {
     enqueue_mention(&su, &hermes, INSTANCE_DEFAULT, Some("instance_default")).await;
     assert_eq!(drain(&w).await.answered, 1);
     assert_eq!(provider.calls()[0].base_url, HEAD_URL);
+    leave_instance_empty(&su).await;
+}
+
+/// #4143: Hermes ignores a bare `model` on /v1/chat/completions, so the pin's
+/// `(provider, model)` pair must reach the request together, and the model must be
+/// the pin's, not the agent row's older `hermes-agent` alias.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn an_env_pin_with_a_chosen_route_sends_provider_and_model_together() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let team = seed(&su, INSTANCE_DEFAULT).await;
+    let hermes = add_agent(&su, &team, INSTANCE_DEFAULT).await;
+    seed_links(&su, team.human_id, false).await;
+    // Queued with the alias model, pinned afterwards: the route is read per turn.
+    let provider = Arc::new(MockChatProvider::echo());
+    let w = worker(&provider).await;
+    enqueue_mention(&su, &hermes, INSTANCE_DEFAULT, Some("agent")).await;
+    pin_env_with_route(&su, &team, hermes.agent_id, "openai-codex", "gpt-5.6-sol").await;
+    assert_eq!(drain(&w).await.answered, 1);
+    let calls = provider.calls();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].base_url, ENV_URL);
+    assert_eq!(calls[0].bearer, ENV_BEARER);
+    assert_eq!(
+        (calls[0].provider.as_deref(), calls[0].model.as_str()),
+        (Some("openai-codex"), "gpt-5.6-sol"),
+        "the pair travels together"
+    );
+    leave_instance_empty(&su).await;
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn an_env_pin_without_a_route_sends_exactly_what_it_sent_before() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let team = seed(&su, INSTANCE_DEFAULT).await;
+    let hermes = add_agent(&su, &team, INSTANCE_DEFAULT).await;
+    seed_links(&su, team.human_id, false).await;
+    pin_env(&su, &team, hermes.agent_id).await;
+    let provider = Arc::new(MockChatProvider::echo());
+    let w = worker(&provider).await;
+    enqueue_mention(&su, &hermes, INSTANCE_DEFAULT, Some("agent")).await;
+    assert_eq!(drain(&w).await.answered, 1);
+    let calls = provider.calls();
+    assert_eq!(
+        (calls[0].provider.as_deref(), calls[0].model.as_str()),
+        (None, INSTANCE_DEFAULT),
+        "a pin that chose nothing sends today's model and no provider"
+    );
+    // The team's mentions are untouched by someone else's route.
+    leave_instance_empty(&su).await;
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn a_team_link_pin_never_carries_a_provider_and_the_store_refuses_a_half_pair() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let team = seed(&su, INSTANCE_DEFAULT).await;
+    let hermes = add_agent(&su, &team, INSTANCE_DEFAULT).await;
+    pin_env_with_route(
+        &su,
+        &team,
+        hermes.agent_id,
+        "anthropic",
+        "claude-sonnet-5-5",
+    )
+    .await;
+    // Re-pinning clears the route: a stale provider can never follow a new pin.
+    pin_env(&su, &team, hermes.agent_id).await;
+    let cleared: (Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT model_provider, model_id FROM agent_provider_pin WHERE agent_member_id = $1",
+    )
+    .bind(hermes.agent_id)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(cleared, (None, None));
+    // Half a pair, a team_link with a pair, and a malformed slug are table errors.
+    for (what, sql) in [
+        (
+            "provider without model",
+            "UPDATE agent_provider_pin SET model_provider = 'anthropic' WHERE agent_member_id = $1",
+        ),
+        (
+            "model without provider",
+            "UPDATE agent_provider_pin SET model_id = 'm' WHERE agent_member_id = $1",
+        ),
+        (
+            "malformed slug",
+            "UPDATE agent_provider_pin SET model_provider = 'A b', model_id = 'm' WHERE agent_member_id = $1",
+        ),
+        (
+            "malformed model id",
+            "UPDATE agent_provider_pin SET model_provider = 'a', model_id = 'm m' WHERE agent_member_id = $1",
+        ),
+        (
+            "team_link carrying a pair",
+            "UPDATE agent_provider_pin SET kind = 'team_link', link_position = 0, \
+               link_endpoint_label = 'x', model_provider = 'a', model_id = 'm' WHERE agent_member_id = $1",
+        ),
+    ] {
+        let refused = sqlx::query(sql)
+            .bind(hermes.agent_id)
+            .execute(&su)
+            .await
+            .is_err();
+        assert!(refused, "{what} was stored");
+    }
     leave_instance_empty(&su).await;
 }
 

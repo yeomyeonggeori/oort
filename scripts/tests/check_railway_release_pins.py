@@ -37,11 +37,11 @@ WEB_STAGE_FROM = "${OORT_IMAGE}"
 WEB_STAGE_NAME = "web"
 WEB_SRC = "/opt/momo/web"
 WEB_DEST = "/srv/web"
-# Last published pin before v0.1.32 (= v0.1.31).
+# Last published pin before v0.1.33 (= v0.1.32).
 # Mutations must use this exact previous digest so the proof is a real drift,
 # not a no-op rewrite of the current pin. Move it forward with every release bump.
 PREVIOUS_APP_DIGEST = (
-    "sha256:f5094d9dd2bc09de6bb28579a58187553f0ab3a3f4b958d3fd356a058ef51278"
+    "sha256:1f012d3791f1a8a11e978b499fa9282e95b76c5c40193767e4d813f212200076"
 )
 
 

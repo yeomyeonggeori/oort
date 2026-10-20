@@ -11,6 +11,21 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+## [0.1.33] - 2026-10-20
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.33>. Tag target: `main=81eb800a`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres lists. No database migration (the schema stays at 143) and no change to `bootstrap_runtime_roles.sql`. No new environment variables. This release is the 0.1.32 on-device feedback pass: one server fix and UI polish.
+
+### Changed
+- Web and desktop: the native selects are replaced by the app-drawn `ListboxSelect` listbox: the do-not-disturb and pause "until" list (#4106, #4119), the status-setting expiry field (#4123, #4124), settings and routing (#4126, #4132), jobs and workbench (#4128, #4130), and memory, hub, plugins, directory and AI hub (#4127, #4129).
+- Web: the "notifications paused" card sits above the profile row so the profile row no longer shifts up (#4107, #4120).
+- Desktop: the sidebar section-head hover highlight covers the whole head box, the "..." menu sits inside that box, and the empty-section copy is reworded (#4108, #4118).
+- Web: the "visible in this workspace" chip is removed from the profile head and kept for read-aloud only (#4109, #4122); the team AI key "limit and remaining credit" block is removed and only the console link line remains (#4110, #4115).
+- Web: the same-server Hermes connect prompt appears once, on first discovery, as a "connect?" dialog; with a risky-tool signal the choice is made in the card instead, and the details fold has an arrow and alignment (#4113, #4121).
+
+### Fixed
+- Web: the command palette (Cmd+K) filter no longer matches on id and alias subsequences, so it filters again; an "AI connection" entry and the settings table-of-contents row are added (#4111, #4114, #4125).
+- Server: `/v1/toolsets` entries with `enabled:false` are judged as off, which fixes the same-server Hermes tool misjudgement (#4112, #4116).
+
 ## [0.1.32] - 2026-10-20
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.32>. Tag target: `main=ddd4dd45`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres lists. Migrations 141-143 (schema 140 to 143); `bootstrap_runtime_roles.sql` gains one grant (`momo_notifier` SELECT on `channel_viewing`). New environment variables are all optional (`HERMES_LOGIN_RELAY_URL`, `HERMES_LOGIN_RELAY_KEY`, `HERMES_APP_LOGIN_GOOGLE_PUBLISHING`, `HERMES_BASE_URL`, `HERMES_API_KEY`).

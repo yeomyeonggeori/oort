@@ -123,6 +123,12 @@ impl ChatMessage {
 /// One turn's request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChatRequest {
+    /// The Hermes provider slug the co-hosted pin chose (#4143, ADR-0203 증보
+    /// 2026-10-20). Hermes ignores a bare `model` on `/v1/chat/completions` and
+    /// answers on its default, so a chosen model travels **with** its provider.
+    /// Only the chat/completions wire writes it (the Responses and Anthropic
+    /// wires have no such field); `None` is the request that shipped before.
+    pub provider: Option<String>,
     pub model: String,
     pub messages: Vec<ChatMessage>,
     pub max_tokens: Option<i32>,
@@ -503,6 +509,17 @@ impl ChatProvider for OpenAiCompatProvider {
             "stream": false,
             "max_tokens": request.max_tokens,
         });
+        // #4143: the provider slug beside the model, only when the pin chose one.
+        // A blank slug is not a provider (Hermes reads it as "none" and ignores
+        // the model), so it is dropped here rather than sent.
+        if let Some(provider) = request
+            .provider
+            .as_deref()
+            .map(str::trim)
+            .filter(|slug| !slug.is_empty())
+        {
+            body["provider"] = Value::String(provider.to_string());
+        }
         // Omitted entirely when the agent declares none: several
         // OpenAI-compatible gateways 400 on `"tools": []`, and an agent with no
         // tool schema is the common case.
@@ -943,6 +960,8 @@ enum MockOutcome {
 /// which bearer the worker resolved for the turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObservedCall {
+    /// The Hermes provider slug the request carried (#4143), if any.
+    pub provider: Option<String>,
     pub model: String,
     pub messages: Vec<ChatMessage>,
     pub bearer: String,
@@ -1116,6 +1135,7 @@ impl ChatProvider for MockChatProvider {
             .lock()
             .expect("mock provider lock")
             .push(ObservedCall {
+                provider: request.provider.clone(),
                 model: request.model.clone(),
                 messages: request.messages.clone(),
                 bearer: endpoint.bearer.clone(),
@@ -1383,6 +1403,7 @@ mod tests {
             account_id: None,
         };
         let request = ChatRequest {
+            provider: None,
             tools: Vec::new(),
             momo_tools: Vec::new(),
             model: "m".to_string(),
@@ -1459,6 +1480,7 @@ mod tests {
         let anthropic = Arc::new(MockChatProvider::echo());
         let router = WireRoutedProvider::new(chat.clone(), responses.clone(), anthropic.clone());
         let request = ChatRequest {
+            provider: None,
             tools: Vec::new(),
             momo_tools: Vec::new(),
             model: "m".to_string(),
@@ -1521,6 +1543,7 @@ mod tests {
         }
         let router = WireRoutedProvider::new(Arc::new(Echo), Arc::new(Echo), Arc::new(Echo));
         let request = ChatRequest {
+            provider: None,
             tools: Vec::new(),
             momo_tools: Vec::new(),
             model: "m".to_string(),

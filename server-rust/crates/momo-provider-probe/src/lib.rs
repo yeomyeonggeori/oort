@@ -659,6 +659,22 @@ fn read_body(
 ///   the list says it is paginated (`has_more: true`, Anthropic).
 const SECRET_WINDOW: usize = 8;
 
+/// Whether `id` repeats `secret` whole or any 8-byte piece of it (see [`model_ids`]).
+pub(crate) fn id_repeats_secret(id: &str, secret: &str) -> bool {
+    let secret = secret.trim().as_bytes();
+    let windows: Vec<&[u8]> = if secret.is_empty() {
+        Vec::new()
+    } else if secret.len() < SECRET_WINDOW {
+        vec![secret]
+    } else {
+        secret.windows(SECRET_WINDOW).collect()
+    };
+    let id = id.as_bytes();
+    windows
+        .iter()
+        .any(|window| id.windows(window.len()).any(|piece| piece == *window))
+}
+
 pub fn model_ids(value: &serde_json::Value, secret: &str) -> (Vec<String>, bool) {
     let paginated = value
         .get("has_more")
@@ -670,20 +686,7 @@ pub fn model_ids(value: &serde_json::Value, secret: &str) -> (Vec<String>, bool)
     // Every 8-byte window of the key: an id holding any of them repeats part of
     // the key, whether it holds the whole key, a slice of it, or a slice padded
     // with other text. A key shorter than a window is matched whole.
-    let secret = secret.trim().as_bytes();
-    let windows: Vec<&[u8]> = if secret.is_empty() {
-        Vec::new()
-    } else if secret.len() < SECRET_WINDOW {
-        vec![secret]
-    } else {
-        secret.windows(SECRET_WINDOW).collect()
-    };
-    let leaks = |id: &str| {
-        let id = id.as_bytes();
-        windows
-            .iter()
-            .any(|window| id.windows(window.len()).any(|piece| piece == *window))
-    };
+    let leaks = |id: &str| id_repeats_secret(id, secret);
     let mut ids: Vec<String> = Vec::new();
     let mut truncated = paginated;
     for item in items {
@@ -794,7 +797,8 @@ pub use login_relay::{
 
 mod cohosted;
 pub use cohosted::{
-    CohostedAgentProbe, CohostedReport, CohostedTarget, ToolsetsSignal,
+    parse_model_options, provider_slug, CohostedAgentProbe, CohostedReport, CohostedTarget,
+    ModelChoice, ModelOptionsReport, ProviderModels, ToolsetsSignal,
     COHOSTED_BASE_PATH_UNSUPPORTED,
 };
 
