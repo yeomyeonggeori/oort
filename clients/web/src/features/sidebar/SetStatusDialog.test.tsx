@@ -29,7 +29,8 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
   };
 });
 
-vi.mock("@/features/common/useOffline", () => ({
+vi.mock("@/features/common/useOffline", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/features/common/useOffline")>()),
   useOffline: () => false,
 }));
 
@@ -44,6 +45,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  HTMLElement.prototype.scrollIntoView = () => undefined;
   setPresenceStatus.mockReset();
   setPresenceStatus.mockResolvedValue({ status: "auto" });
   vi.stubGlobal("matchMedia", (query: string) => ({
@@ -172,7 +174,7 @@ describe("SetStatusDialog (#1889)", () => {
     mountDialog();
     const field = document.querySelector(
       '[data-testid="set-status-text"]'
-    ) as HTMLTextAreaElement | null;
+    ) as HTMLInputElement | null;
     expect(field).not.toBeNull();
     expect(field?.maxLength).toBe(80);
   });
@@ -196,7 +198,7 @@ describe("SetStatusDialog (#1889)", () => {
       status: "dnd",
       statusEmoji: "📅",
       statusText: "회의 중",
-      statusExpiresAtMs: null,
+      statusExpiresAtMs: NOW + 60 * 60_000,
     });
     const roster = client.getQueryData<RosterMember[]>(["roster", WS]);
     expect(roster?.[0]?.presenceStatus).toBe("dnd");
@@ -243,11 +245,11 @@ describe("SetStatusDialog (#1889)", () => {
     );
     const field = document.querySelector(
       '[data-testid="set-status-text"]'
-    ) as HTMLTextAreaElement | null;
+    ) as HTMLInputElement | null;
     expect(field).not.toBeNull();
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(
-        HTMLTextAreaElement.prototype,
+        HTMLInputElement.prototype,
         "value"
       )?.set;
       setter?.call(field, "초안");
@@ -267,7 +269,7 @@ describe("SetStatusDialog (#1889)", () => {
       document.querySelector('[data-testid="set-status-error"]')?.textContent
     ).toContain(customStatusFailureMessage());
     expect(
-      (document.querySelector('[data-testid="set-status-text"]') as HTMLTextAreaElement)
+      (document.querySelector('[data-testid="set-status-text"]') as HTMLInputElement)
         .value
     ).toBe("초안");
     expect(document.querySelector('[data-testid="set-status-dialog"]')).not.toBeNull();
@@ -283,7 +285,7 @@ describe("SetStatusDialog (#1889)", () => {
     );
     const field = document.querySelector(
       '[data-testid="set-status-text"]'
-    ) as HTMLTextAreaElement | null;
+    ) as HTMLInputElement | null;
     expect(field?.value).toBe("");
     const emoji = document.querySelector('[data-testid="set-status-emoji"]');
     expect(emoji?.textContent).not.toContain("📅");
@@ -307,7 +309,7 @@ describe("SetStatusDialog (#1889)", () => {
     const label = document.querySelector(`label[for]`);
     const field = document.querySelector(
       '[data-testid="set-status-text"]'
-    ) as HTMLTextAreaElement | null;
+    ) as HTMLInputElement | null;
     expect(document.body.textContent).toContain("선택");
     expect(field?.placeholder).toBe(CUSTOM_STATUS_TEXT_PLACEHOLDER);
     expect(label).not.toBeNull();
@@ -402,10 +404,10 @@ describe("SetStatusDialog 만료 칸은 앱이 그린 listbox (#4123)", () => {
 
   it("30분을 고르면 저장이 지금+30분 만료로 나간다", async () => {
     mountDialog();
+    await clickTestId("set-status-preset-meeting");
     chooseExpiry("30m");
     expect(listbox()).toBeNull();
     expect(expiryTrigger().textContent).toBe("30분");
-    await clickTestId("set-status-preset-meeting");
     await clickTestId("set-status-save");
     await vi.waitFor(() => expect(setPresenceStatus).toHaveBeenCalledTimes(1));
     expect(setPresenceStatus).toHaveBeenCalledWith(WS, {
@@ -451,5 +453,134 @@ describe("SetStatusDialog 만료 칸은 앱이 그린 listbox (#4123)", () => {
     await vi.waitFor(() => expect(expiryTrigger().disabled).toBe(true));
     openExpiry();
     expect(listbox()).toBeNull();
+  });
+});
+
+function typeText(value: string) {
+  const field = document.querySelector<HTMLInputElement>('[data-testid="set-status-text"]')!;
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  act(() => {
+    setter?.call(field, value);
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+const presetRows = () => document.querySelector('[data-testid="set-status-presets"]');
+
+describe("SetStatusDialog 추천 상태는 이모지·글·만료를 함께 채운다 (#4140)", () => {
+  it.each(CUSTOM_STATUS_PRESETS.map((preset) => [preset.id, preset] as const))(
+    "%s 를 고르면 emoji·text·expires 세 값이 저장 payload 에 실린다",
+    async (_id, preset) => {
+      mountDialog();
+      await clickTestId(`set-status-preset-${preset.id}`);
+      await clickTestId("set-status-save");
+      await vi.waitFor(() => expect(setPresenceStatus).toHaveBeenCalledTimes(1));
+      const expected =
+        preset.expiry === "none"
+          ? null
+          : preset.expiry === "30m"
+            ? NOW + 30 * 60_000
+            : preset.expiry === "1h"
+              ? NOW + 60 * 60_000
+              : (() => {
+                  const end = new Date(NOW);
+                  end.setHours(23, 59, 59, 999);
+                  return end.getTime();
+                })();
+      expect(setPresenceStatus).toHaveBeenCalledWith(WS, {
+        status: "auto",
+        statusEmoji: preset.emoji,
+        statusText: preset.label,
+        statusExpiresAtMs: expected,
+      });
+    }
+  );
+
+  it("행에 이모지·이름·기본 기한이 보이고 만료 칸이 같이 바뀐다", async () => {
+    mountDialog();
+    const row = document.querySelector('[data-testid="set-status-preset-meeting"]')!;
+    expect(row.textContent).toContain("📅");
+    expect(row.textContent).toContain("회의 중");
+    expect(row.textContent).toContain("1시간");
+    await clickTestId("set-status-preset-meeting");
+    expect(expiryTrigger().dataset.value).toBe("1h");
+  });
+
+  it("고르면 포커스가 글 칸으로 간다", async () => {
+    mountDialog();
+    await clickTestId("set-status-preset-commute");
+    expect(document.activeElement).toBe(
+      document.querySelector('[data-testid="set-status-text"]')
+    );
+  });
+
+  it("글을 쓰기 시작하면 추천 목록이 접히고, 비우면 다시 펼쳐진다", () => {
+    mountDialog();
+    expect(presetRows()).not.toBeNull();
+    typeText("집중");
+    expect(presetRows()).toBeNull();
+    typeText("");
+    expect(presetRows()).not.toBeNull();
+  });
+
+  it("지우기 단추는 글·이모지를 비우고 목록을 펼치며 글 칸에 포커스를 둔다", async () => {
+    mountDialog();
+    expect(document.querySelector('[data-testid="set-status-text-clear"]')).toBeNull();
+    await clickTestId("set-status-preset-sick");
+    expect(presetRows()).toBeNull();
+    await clickTestId("set-status-text-clear");
+    const field = document.querySelector<HTMLInputElement>('[data-testid="set-status-text"]')!;
+    expect(field.value).toBe("");
+    expect(document.querySelector('[data-testid="set-status-emoji"]')?.textContent).toBe("");
+    expect(presetRows()).not.toBeNull();
+    expect(document.activeElement).toBe(field);
+  });
+});
+
+describe("SetStatusDialog 이모지 칸은 글 칸 안 왼쪽의 팝오버다 (#4140)", () => {
+  it("단추가 글 칸과 같은 그릇 안에 있다", () => {
+    mountDialog();
+    const button = document.querySelector('[data-testid="set-status-emoji"]')!;
+    const field = document.querySelector('[data-testid="set-status-text"]')!;
+    expect(button.parentElement).toBe(field.parentElement);
+    expect(button.nextElementSibling).toBe(field);
+  });
+
+  it("다이얼로그 위에 다이얼로그를 겹치지 않고 팝오버로 열린다", async () => {
+    mountDialog();
+    await clickTestId("set-status-emoji");
+    const picker = document.querySelector<HTMLElement>(
+      '[data-testid="set-status-emoji-picker"]'
+    );
+    expect(picker).not.toBeNull();
+    // 팝오버는 Radix popper 가 data-side 를 단다. 겹친 Dialog 라면 data-side 가 없고 스크림이 하나 더 생긴다.
+    expect(picker!.dataset.side).toBe("bottom");
+    expect(document.querySelectorAll('[data-overlay-layer="scrim"]')).toHaveLength(1);
+    expect(picker!.closest('[data-testid="set-status-dialog"]')).toBeNull();
+  });
+
+  it("고른 이모지가 단추에 보이고 포커스는 글 칸으로 돌아간다", async () => {
+    mountDialog();
+    await clickTestId("set-status-emoji");
+    await vi.waitFor(() =>
+      expect(
+        document.querySelector('[data-testid^="picker-status-"]')
+      ).not.toBeNull(),
+      { timeout: 5000 }
+    );
+    const item = document.querySelector<HTMLElement>('[data-testid^="picker-status-"]')!;
+    const glyph = item.dataset.testid!.replace("picker-status-", "");
+    await act(async () => {
+      item.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(
+      document.querySelector('[data-testid="set-status-emoji"]')?.textContent
+    ).toBe(glyph);
+    expect(document.querySelector('[data-testid="set-status-emoji-picker"]')).toBeNull();
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(
+        document.querySelector('[data-testid="set-status-text"]')
+      )
+    );
   });
 });
