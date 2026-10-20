@@ -268,11 +268,12 @@ describe("CohostedAgentCard", () => {
       expect(promptEl()).toBeNull();
     });
 
-    it("never asks when already connected, not connectable, unreachable, offline or before attestation", async () => {
+    it("never asks when already connected, not connectable, unreachable, dangerous signal, offline or before attestation", async () => {
       const cases: Array<[string, (path: string) => Promise<unknown>, boolean]> = [
         ["connected", (p) => (p.endsWith("/probe") ? Promise.resolve(PROBE) : Promise.resolve({ ...STATUS, toolsLockAttested: true, connectedAgentId: "a1" })), false],
         ["not connectable", (p) => attested(p, { ...PROBE, connectable: false }), false],
         ["unreachable", (p) => attested(p, { ...PROBE, state: "unreachable", connectable: false }), false],
+        ["dangerous signal", (p) => attested(p, { ...PROBE, toolsets: { signal: "dangerous_listed", listed: ["terminal"], proof: false } }), false],
         ["not attested", () => Promise.resolve(STATUS), false],
         ["offline", (p) => attested(p), true],
       ];

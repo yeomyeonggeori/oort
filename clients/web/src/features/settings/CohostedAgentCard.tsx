@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
+import { ChevronRight, Loader2 } from "lucide-react";
 import {
   COHOSTED_COPY as COPY,
   connectCohosted,
@@ -119,11 +119,12 @@ function CardBody({
     },
   });
 
-  // 처음 한 번만 묻는 창(#4113). 운영자에게(카드가 이미 운영자만 그린다) 찾았고 연결할 수 있고 아직 연결 전일 때만,
+  // 처음 한 번만 묻는 창(#4113). 서버가 켜진 위험 도구를 알렸으면(dangerous_listed) 창으로 한 번에 연결시키지 않고,
+  // 경고가 단추 옆에 있는 카드에서 고르게 한다. 운영자에게(카드가 이미 운영자만 그린다) 찾았고 연결할 수 있고 아직 연결 전일 때만,
   // 이 운영자·서버·Hermes 주소로 처음일 때만 뜬다. 뜨는 순간 기억해서, 나중에·닫기·새로고침 모두 다시 묻지 않는다.
   const { session } = useSession();
   const promptKey = cohostedPromptKey({ memberId: session.member.id, workspaceId, endpointLabel: status.endpointLabel });
-  const promptable = !offline && connected === null && probe.data?.state === "ok" && probe.data.connectable;
+  const promptable = !offline && connected === null && probe.data?.state === "ok" && probe.data.connectable && probe.data.toolsets !== "dangerous_listed";
   const [promptOpen, setPromptOpen] = useState(false);
   useEffect(() => {
     if (!promptable || wasCohostedPromptShown(promptKey)) return;
@@ -295,8 +296,9 @@ function ProbeResult({
           {probe.toolsetsListed.length > 0 && ` (${probe.toolsetsListed.join(", ")})`}
         </span>
       )}
-      <details className="text-meta text-ink-muted" data-testid="ai-cohosted-more">
-        <summary className="block w-full cursor-pointer rounded-sm px-1 py-1 text-meta text-ink-muted hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring">
+      <details className="group text-meta text-ink-muted" data-testid="ai-cohosted-more">
+        <summary className="-mx-1 flex w-full cursor-pointer list-none items-center gap-1 rounded-sm px-1 py-1 text-meta text-ink-muted hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring [&::-webkit-details-marker]:hidden">
+          <ChevronRight aria-hidden="true" className="size-4 shrink-0 transition-transform group-open:rotate-90" />
           {COPY.moreSummary}
         </summary>
         <div className="mt-1 flex flex-col gap-1">
