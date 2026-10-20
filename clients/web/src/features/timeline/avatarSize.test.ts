@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { avatarSurfaceClass } from "@/features/common/avatarTone";
 import {
   AVATAR_SHAPE,
   AVATAR_SIZE,
@@ -70,8 +71,10 @@ describe("정체는 색 말고 모양으로도 선다", () => {
 
   it("모르는 작성자는 정체 색을 쓰지 않는다", () => {
     // `--agent` 도 `--accent` 도 아닌 중립 배경. 모양은 빌려도 색은 빌리지 않는다.
-    expect(messageRow).toContain(
-      'identity.kind === "unknown" && "bg-surface-hover text-ink-muted"'
-    );
+    // 채움·테두리는 공용 `avatarSurfaceClass`(#4148)가 정하고, unknown 갈래에는 어느 정체 색도 없다.
+    expect(messageRow).toContain("avatarSurfaceClass(identity.kind, member?.id)");
+    const unknown = avatarSurfaceClass("unknown", "x");
+    expect(unknown).not.toMatch(/agent|accent|signal|avatar-/);
+    expect(unknown).toContain("text-ink-muted");
   });
 });

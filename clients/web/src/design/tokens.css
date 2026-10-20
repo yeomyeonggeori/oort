@@ -105,6 +105,24 @@
   --agent: light-dark(#2f5b8a, #8db3e2);
   --agent-soft: light-dark(#e3ecf6, #1b2a3c);
 
+  /* --- 사람 기본 아바타 여섯 색조 (#4148) ---------------------------------
+   * 사진이 없는 사람은 멤버 id 가 고르는 여섯 색조 중 하나의 채움 + 글자를 쓴다(`avatarTone.ts`).
+   * 에이전트 남색·상태색(초록·주황·빨강)과 겹치지 않게 청록·자주·이끼·모래·코코아·돌로 골랐다.
+   * 글자는 자기 채움 위에서 4.5:1 이상이고(`tokens.contrast.test.ts`), 채움은 사이드바 바탕(--sheet)보다 한 단 진하다.
+   * core 역할이 아니라 웹 값이다. */
+  --avatar-1: light-dark(#0f5f58, #86d6cb); /* teal */
+  --avatar-1-soft: light-dark(#d3e9e5, #1a3a36);
+  --avatar-2: light-dark(#7a2f69, #e6a9d8); /* plum */
+  --avatar-2-soft: light-dark(#ecd8e7, #3c2335);
+  --avatar-3: light-dark(#4c5a12, #c2d474); /* moss */
+  --avatar-3-soft: light-dark(#dfe6c8, #2c3318);
+  --avatar-4: light-dark(#6b5010, #e0c274); /* sand */
+  --avatar-4-soft: light-dark(#efe2c2, #3a3018);
+  --avatar-5: light-dark(#5e4033, #d8b9a7); /* cocoa */
+  --avatar-5-soft: light-dark(#e7d9d0, #35281f);
+  --avatar-6: light-dark(#44464c, #c3c6cf); /* stone */
+  --avatar-6-soft: light-dark(#dcdde0, #2b2e35);
+
   /* --- 상태와 톤 그릇 --------------------------------------------------
    * 위험 순서(danger > warn > ink-muted)는 채도(OKLab C)로 잰다(MOMO-641).
    * --danger-fill은 파괴 채움이고 새벽하늘에서는 --danger와 같은 값이다
@@ -833,6 +851,18 @@
   --color-on-accent: var(--on-accent);
   --color-agent: var(--agent);
   --color-agent-soft: var(--agent-soft);
+  --color-avatar-1: var(--avatar-1);
+  --color-avatar-1-soft: var(--avatar-1-soft);
+  --color-avatar-2: var(--avatar-2);
+  --color-avatar-2-soft: var(--avatar-2-soft);
+  --color-avatar-3: var(--avatar-3);
+  --color-avatar-3-soft: var(--avatar-3-soft);
+  --color-avatar-4: var(--avatar-4);
+  --color-avatar-4-soft: var(--avatar-4-soft);
+  --color-avatar-5: var(--avatar-5);
+  --color-avatar-5-soft: var(--avatar-5-soft);
+  --color-avatar-6: var(--avatar-6);
+  --color-avatar-6-soft: var(--avatar-6-soft);
   --color-muted-soft: var(--muted-soft);
   --color-ok-soft: var(--ok-soft);
   --color-warn-soft: var(--warn-soft);
