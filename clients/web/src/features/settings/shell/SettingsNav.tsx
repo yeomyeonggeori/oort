@@ -3,7 +3,6 @@ import {
   ArrowLeft,
   ArrowUpRight,
   Bell,
-  Bot,
   Brain,
   Building2,
   ChartColumn,
@@ -43,7 +42,6 @@ const ICONS: Record<SettingsSectionId, LucideIcon> = {
   usage: ChartColumn,
   code: Server,
   updates: Download,
-  ai: Bot,
   aiHub: Sparkles,
 };
 

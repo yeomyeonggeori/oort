@@ -12,7 +12,7 @@
 // =============================================================================
 
 import { isSurfaceProvided, type SurfaceId } from "@momo/core/features/capabilities/serverSurfaces";
-import { aiExternalRowFromSettings } from "@momo/core/features/ai/aiHubModel";
+import { aiExternalRowFromSettings, aiHubSection } from "@momo/core/features/ai/aiHubModel";
 import { isDesktop } from "@/lib/tauri";
 
 export type SettingsSectionId =
@@ -27,7 +27,6 @@ export type SettingsSectionId =
   | "usage"
   | "code"
   | "updates"
-  | "ai"
   | "aiHub";
 
 export type SettingsGroupId = "개인" | "워크스페이스" | "앱·연결";
@@ -66,8 +65,7 @@ export interface SettingsSectionMeta {
   scopeVisible?: boolean;
   /**
    * 설정 안의 화면이 아니라 다른 화면으로 가는 행. 목차에서는 행으로 서되 눌러도
-   * 설정 페이지가 바뀌지 않는다(끝 아이콘이 그 사실을 말한다). 옛 주소(`?section=ai`)
-   * 로 들어오면 옛 화면이 열리고 이 행이 현재 위치로 표시된다.
+   * 설정 페이지가 바뀌지 않는다(끝 아이콘이 그 사실을 말한다).
    */
   link?: "ai-hub";
   /** Only in the desktop shell: a browser tab has no app bundle to update. */
@@ -111,12 +109,9 @@ export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     desktopAlways: true,
   },
   { id: "updates", label: "업데이트", group: "앱·연결", scope: "device", desktopOnly: true },
-  // 「AI 연결」은 옛 AI 연결 화면(`?section=ai`, 같은 서버 Hermes 카드 포함)이다 — 목차의
-  // 한 화면으로 선다(#4111). 허브는 그 아래 링크 행이다. 앞 판은 `ai` 행이 허브로 가는
-  // 링크뿐이라 이 화면으로 가는 길이 목차에 없었다.
-  // 성재가 목차에서 이 이름으로 찾는다(#4111, 0.1.32 실기). 용어집의 「AI」 정본과 갈리는 점은 PR 본문에 적는다.
-  { id: "ai", label: "AI 연결", group: "앱·연결", scope: "workspace-mixed" }, // design-preflight-allow: #4111 PR 근거
-  { id: "aiHub", label: "AI 허브", group: "앱·연결", link: "ai-hub" },
+  // AI 설정은 AI 허브 한 곳이다(#4141). 목차의 「AI」 행은 화면이 아니라 허브로 가는 문이다.
+  // 옛 「AI 연결」 화면(`?section=ai`)과 그 묘비 줄(「AI 화면으로 옮겼어요」)은 걷었다.
+  { id: "aiHub", label: "AI", group: "앱·연결", link: "ai-hub" },
 ];
 
 export const SETTINGS_GROUPS: SettingsGroupId[] = ["개인", "워크스페이스", "앱·연결"];
@@ -140,13 +135,15 @@ export type SettingsSectionResolution =
 
 /**
  * `?section=` 값이 무엇을 뜻하는지 푼다. 별칭은 합쳐진 페이지로, AI 허브로 옮겨 간
- * 옛 구획(`agents`·`plugins`·`webhooks`·`events`)은 그 허브 경로로 간다. `ai`는 목차의 「AI 연결」 화면이고(AiLinkSection, 그것을 부르는 게이트·캡처·되돌아오는 길이 많고 AI 허브 T3(ADR-0198)가 끝나면 걷는다), 허브로 가는 링크 행은 `aiHub`다. 목차에
+ * 옛 구획(`agents`·`plugins`·`webhooks`·`events`)은 그 허브 경로로 간다. 옛 `ai`(AI 연결)도 허브 AI 계정 구획으로 간다(#4141). 목차에는 허브로 가는 링크 행 `aiHub` 하나뿐이다. 목차에
  * 서는지(서버 표면·셸 종류)는 이 함수가 묻지 않는다 — `reachableSettingsSections`가 안다.
  */
 export function resolveSettingsSection(raw: string | null | undefined): SettingsSectionResolution {
   if (raw === null || raw === undefined) return { kind: "unknown" };
   const moved = aiExternalRowFromSettings(raw)?.path;
   if (moved) return { kind: "ai-hub", path: moved };
+  // 옛 「AI 연결」 화면: 같은 서버 Hermes 카드까지 허브가 품는다. 옛 주소는 허브로 보낸다(#4141).
+  if (raw === "ai") return { kind: "ai-hub", path: aiHubSection("accounts").path };
   const alias = LEGACY_SECTION_ALIAS[raw];
   if (alias !== undefined) return { kind: "section", id: alias, alias: raw };
   // 링크 행(`aiHub`)은 가는 곳이지 `?section=` 값이 아니다.
