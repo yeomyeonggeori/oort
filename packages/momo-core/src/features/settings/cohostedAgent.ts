@@ -201,7 +201,7 @@ export const COHOSTED_COPY = {
   promptTitle: "같은 서버에서 Hermes를 찾았어요. 연결할까요?",
   promptConnect: "연결하기",
   promptLater: "나중에",
-  promptLaterNote: "나중에 하려면 설정 › AI에서 연결할 수 있어요.",
+  promptLaterNote: "나중에 하려면 AI 화면 맨 위에서 연결할 수 있어요.",
   connect: "Hermes 연결하기",
   connecting: "연결 중",
   attestNote:
@@ -209,8 +209,12 @@ export const COHOSTED_COPY = {
   volumeNote: "Hermes의 대화 기록은 Hermes 쪽 볼륨에 남아요. 지우려면 Railway에서 Hermes 서비스를 삭제해 주세요.",
   finding: "같은 서버의 Hermes를 찾는 중이에요.",
   retry: "다시 찾기",
-  connected: "Hermes가 연결돼 있어요.",
+  connected: "Hermes 연결됨",
+  /** 연결에 성공한 순간 한 번 뜨는 알림(카드 버튼·처음 한 번 창 모두). */
+  connectedNotice: "Hermes를 연결했어요",
   openAgent: "에이전트 보기",
+  /** 운영자와 Hermes의 DM을 열거나(없으면 만들어) 그리로 간다(#4141). */
+  openDm: "대화 열기",
   toolsetsWarn:
     "Hermes가 터미널·코드 실행·브라우저 중 켜진 도구가 있다고 답했어요. 참고용 신호예요. 체크리스트대로 꺼졌는지 다시 확인해 주세요.",
   toolsetsNone: "Hermes가 위 세 도구를 목록에 올리지 않았어요. 참고용이에요. 꺼졌다는 증명은 아니에요.",

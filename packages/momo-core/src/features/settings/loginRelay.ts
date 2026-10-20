@@ -296,6 +296,8 @@ export const MODEL_LOGIN_COPY = {
   keyDetail: "API 키는 설정의 AI 화면에서 팀 키로 넣어요. 키는 이 서버에 저장되고 여기에는 나타나지 않아요.",
   relogin: "다시 로그인",
   connectedPill: "로그인됨",
+  /** 모든 제공자가 로그인돼 블록이 접힌 한 줄(#4145). */
+  allLoggedIn: "모두 로그인됨",
   notConnectedPill: "로그인 안 됨",
   start: "로그인 시작",
   starting: "시작하는 중이에요",

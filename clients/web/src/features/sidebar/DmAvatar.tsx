@@ -4,6 +4,7 @@ import { statusDotTooltip } from "@momo/core/features/presence/statusDot";
 import type { RosterMember } from "@momo/core/lib/api";
 import { cn } from "@/design/lib/cn";
 import { STATUS_DOT_BADGE_CLASS } from "@/design/statusDot";
+import { avatarSurfaceClass } from "@/features/common/avatarTone";
 import { useDmStatusDot } from "./useDmStatusDot";
 import { useMemberAvatar } from "./useMemberAvatar";
 
@@ -48,9 +49,7 @@ export function DmAvatar({
         className={cn(
           "flex size-6 items-center justify-center overflow-hidden text-meta font-semibold",
           identity.kind === "agent" ? "rounded-sm" : "rounded-full",
-          identity.kind === "agent" && "bg-agent-soft text-agent",
-          identity.kind === "human" && "bg-surface-hover text-ink",
-          identity.kind === "unknown" && "bg-surface-hover text-ink-muted"
+          avatarSurfaceClass(identity.kind, member?.id)
         )}
       >
         {imageSrc !== null ? (

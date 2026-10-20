@@ -69,6 +69,7 @@ export function EmojiPickerDialog({
   anchor,
   purpose,
   testId,
+  side = "top",
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -78,6 +79,8 @@ export function EmojiPickerDialog({
   anchor?: HTMLElement | null;
   purpose: keyof typeof COPY;
   testId: string;
+  /** 포인터 팝오버가 앵커의 어느 쪽에 뜨는지. 아래에 다른 칸이 없는 자리(컴포저)는 위, 폼 안은 아래. */
+  side?: "top" | "bottom";
 }) {
   const copy = COPY[purpose];
   const isTouch = useHoverNone();
@@ -189,7 +192,7 @@ export function EmojiPickerDialog({
       <PopoverContent
         opener={opener}
         data-testid={testId}
-        side="top"
+        side={side}
         align="start"
         aria-label={copy.title}
         onEscapeKeyDown={onEscapeKeyDown}

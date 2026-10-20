@@ -32,9 +32,6 @@ vi.mock("react-router-dom", async (importOriginal) => {
   };
 });
 
-vi.mock("./AiLinkSection", () => ({
-  AiLinkSection: () => createElement("div", { "data-testid": "section-ai" }),
-}));
 vi.mock("./WorkHostSection", () => ({
   WorkHostSection: () => createElement("div", { "data-testid": "section-code" }),
 }));
@@ -193,7 +190,7 @@ describe("SettingsRoute 전면 레이아웃", () => {
     ).toBe(false);
   });
 
-  it("개인 그룹 최상단이 프로필이고 13행이 세 그룹에 선다", () => {
+  it("개인 그룹 최상단이 프로필이고 12행이 세 그룹에 선다", () => {
     const host = mountRoute();
     const nav = host.querySelector('[data-testid="settings-nav"]');
     expect(nav?.textContent).toContain("개인");
@@ -213,7 +210,6 @@ describe("SettingsRoute 전면 레이아웃", () => {
       "settings-nav-members",
       "settings-nav-memory",
       "settings-nav-usage",
-      "settings-nav-ai",
       "settings-nav-aiHub",
     ]);
     // 닫힌 네 행(앱·외부 에이전트 연결·채널로 들어오는 주소·밖으로 보내는 알림)은 목차에 없다.
@@ -313,36 +309,17 @@ describe("SettingsRoute 전면 레이아웃", () => {
   it("AI 허브 행은 설정 페이지를 바꾸지 않고 허브로 간다", () => {
     const host = mountRoute("/settings?section=profile");
     const row = host.querySelector('[data-testid="settings-nav-aiHub"]') as HTMLButtonElement;
-    expect(row.textContent).toBe("AI 허브");
+    expect(row.textContent).toBe("AI");
     expect(row.querySelector("svg")).not.toBeNull();
     act(() => row.click());
     expect(navigate).toHaveBeenCalledWith("/ai/accounts");
     expect(host.querySelector("h1")?.textContent).toBe("프로필");
     expect(row.getAttribute("aria-current")).toBeNull();
     expect(host.querySelector('[data-testid="ai-hub-moved-link"]')).toBeNull();
-  });
-
-  it("목차에 「AI 연결」 행이 따로 있고 누르면 허브가 아니라 그 화면이 열린다 (#4111)", () => {
-    const host = mountRoute("/settings?section=profile");
-    const row = host.querySelector('[data-testid="settings-nav-ai"]') as HTMLButtonElement;
-    expect(row.textContent).toBe("AI 연결");
-    expect(row.getAttribute("data-link")).toBeNull();
-    act(() => row.click());
-    expect(navigate).not.toHaveBeenCalled();
-    expect(host.querySelector("h1")?.textContent).toBe("AI 연결");
-    expect(host.querySelector('[data-testid="section-ai"]')).not.toBeNull();
-  });
-
-  it("옛 ?section=ai 는 리다이렉트하지 않고 옛 AI 연결 화면과 「AI 화면으로 옮겼어요」 줄을 연다", () => {
-    const host = mountRoute("/settings?section=ai");
-    expect(host.querySelector('[data-testid="settings-route"]')).not.toBeNull();
-    expect(host.querySelector('[data-testid="section-ai"]')).not.toBeNull();
-    const line = host.querySelector('[data-testid="ai-hub-moved-link"]');
-    expect(line?.textContent).toContain("AI 화면으로 옮겼어요");
-    expect(line?.querySelector("a")?.getAttribute("href")).toContain("/ai/accounts");
-    expect(host.querySelector('[data-testid="settings-nav-ai"]')?.getAttribute("aria-current")).toBe("page");
-    // 곁판이 있는 화면이라 읽는 폭 제한을 쓰지 않는다.
-    expect(host.querySelector(".settings-page")?.hasAttribute("data-wide")).toBe(true);
+    // 목차에 AI 관련 행은 이 하나뿐이다(#4141): 「AI 연결」 행은 걷었다.
+    expect(host.querySelector('[data-testid="settings-nav-ai"]')).toBeNull();
+    const aiRows = [...host.querySelectorAll('[data-testid^="settings-nav-"]')].filter((el) => /^AI/.test(el.textContent ?? ""));
+    expect(aiRows).toHaveLength(1);
   });
 
   it("사이드바에서 기존 섹션에 모두 도달한다 (합친 페이지는 옛 본문을 이어 붙인다)", () => {
@@ -370,6 +347,7 @@ describe("SettingsRoute 전면 레이아웃", () => {
   });
 
   it.each([
+    ["ai", "/ai/accounts"],
     ["agents", "/ai/external/agents"],
     ["plugins", "/ai/external/apps"],
     ["webhooks", "/ai/external/incoming"],
