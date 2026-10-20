@@ -193,7 +193,7 @@ describe("SettingsRoute 전면 레이아웃", () => {
     ).toBe(false);
   });
 
-  it("개인 그룹 최상단이 프로필이고 12행이 세 그룹에 선다", () => {
+  it("개인 그룹 최상단이 프로필이고 13행이 세 그룹에 선다", () => {
     const host = mountRoute();
     const nav = host.querySelector('[data-testid="settings-nav"]');
     expect(nav?.textContent).toContain("개인");
@@ -214,6 +214,7 @@ describe("SettingsRoute 전면 레이아웃", () => {
       "settings-nav-memory",
       "settings-nav-usage",
       "settings-nav-ai",
+      "settings-nav-aiHub",
     ]);
     // 닫힌 네 행(앱·외부 에이전트 연결·채널로 들어오는 주소·밖으로 보내는 알림)은 목차에 없다.
     for (const gone of ["agents", "plugins", "webhooks", "events", "account", "terminal", "link-previews"]) {
@@ -236,13 +237,15 @@ describe("SettingsRoute 전면 레이아웃", () => {
     expect(nav.querySelector('hr, [role="separator"]')).toBeNull();
   });
 
-  it("페이지 머리는 보이는 h1 하나이고 범위 칩을 단다", () => {
+  it("페이지 머리는 보이는 h1 하나이고, 프로필 외에는 범위 칩을 단다", () => {
     const host = mountRoute();
     expect(host.querySelectorAll("h1")).toHaveLength(1);
     expect(host.querySelector("h1")?.textContent).toBe("프로필");
-    expect(host.querySelector('[data-testid="settings-scope-chip"]')?.textContent).toContain(
-      "이 워크스페이스에서 보여요"
-    );
+    // 프로필의 「이 워크스페이스에서 보여요」 칩은 눈에서 뺐다(#4109). 낭독(sr-only)으로만 남는다.
+    expect(host.querySelector('[data-testid="settings-scope-chip"]')).toBeNull();
+    const sr = host.querySelector('[data-testid="settings-scope-sr"]') as HTMLElement;
+    expect(sr.textContent).toBe("이 워크스페이스에서 보여요");
+    expect(sr.className).toContain("sr-only");
     act(() => {
       (host.querySelector('[data-testid="settings-nav-appearance"]') as HTMLButtonElement).click();
     });
@@ -309,13 +312,25 @@ describe("SettingsRoute 전면 레이아웃", () => {
 
   it("AI 허브 행은 설정 페이지를 바꾸지 않고 허브로 간다", () => {
     const host = mountRoute("/settings?section=profile");
-    const row = host.querySelector('[data-testid="settings-nav-ai"]') as HTMLButtonElement;
+    const row = host.querySelector('[data-testid="settings-nav-aiHub"]') as HTMLButtonElement;
+    expect(row.textContent).toBe("AI 허브");
     expect(row.querySelector("svg")).not.toBeNull();
     act(() => row.click());
     expect(navigate).toHaveBeenCalledWith("/ai/accounts");
     expect(host.querySelector("h1")?.textContent).toBe("프로필");
     expect(row.getAttribute("aria-current")).toBeNull();
     expect(host.querySelector('[data-testid="ai-hub-moved-link"]')).toBeNull();
+  });
+
+  it("목차에 「AI 연결」 행이 따로 있고 누르면 허브가 아니라 그 화면이 열린다 (#4111)", () => {
+    const host = mountRoute("/settings?section=profile");
+    const row = host.querySelector('[data-testid="settings-nav-ai"]') as HTMLButtonElement;
+    expect(row.textContent).toBe("AI 연결");
+    expect(row.getAttribute("data-link")).toBeNull();
+    act(() => row.click());
+    expect(navigate).not.toHaveBeenCalled();
+    expect(host.querySelector("h1")?.textContent).toBe("AI 연결");
+    expect(host.querySelector('[data-testid="section-ai"]')).not.toBeNull();
   });
 
   it("옛 ?section=ai 는 리다이렉트하지 않고 옛 AI 연결 화면과 「AI 화면으로 옮겼어요」 줄을 연다", () => {
@@ -421,7 +436,7 @@ describe("SettingsRoute 전면 레이아웃", () => {
     act(() => {
       profile.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
     });
-    expect(document.activeElement).toBe(host.querySelector('[data-testid="settings-nav-ai"]'));
+    expect(document.activeElement).toBe(host.querySelector('[data-testid="settings-nav-aiHub"]'));
     // 가로 한 줄(폰)에서는 ←→, 양 끝은 Home/End.
     act(() => {
       (document.activeElement as HTMLElement).dispatchEvent(
@@ -438,7 +453,7 @@ describe("SettingsRoute 전면 레이아웃", () => {
         new KeyboardEvent("keydown", { key: "End", bubbles: true })
       );
     });
-    expect(document.activeElement).toBe(host.querySelector('[data-testid="settings-nav-ai"]'));
+    expect(document.activeElement).toBe(host.querySelector('[data-testid="settings-nav-aiHub"]'));
     expect(nav).not.toBeNull();
   });
 });

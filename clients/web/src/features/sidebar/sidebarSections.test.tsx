@@ -564,7 +564,7 @@ describe("H-1 — 빈 섹션 문장은 그 표면이 실제로 가진 것을 말
     // 터치에는 우클릭이 없다(BT-1 이 행 컨텍스트 메뉴를 hover:none 에서 닫아
     // 두었다). 없는 동작을 지시하지 않는다.
     expect(sidebarEmptySectionHint(false)).not.toContain("우클릭");
-    expect(sidebarEmptySectionHint(false)).toContain("비어 있습니다");
+    expect(sidebarEmptySectionHint(false)).toContain("비어 있어요");
   });
 });
 

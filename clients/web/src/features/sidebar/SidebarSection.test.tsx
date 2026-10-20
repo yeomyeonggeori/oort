@@ -136,3 +136,24 @@ describe("overlayHeld 닫힘 전이 (R2-1)", () => {
     expect(countSectionActionTabStops(host)).toBe(0);
   });
 });
+
+describe("머리 호버 강조 면 (#4108)", () => {
+  it("호버 강조는 머리 상자 전체이고, 「…」·+ 액션은 그 상자 안에 선다", () => {
+    const host = mountSections(false);
+    const header = host.querySelector<HTMLElement>('[data-testid="sidebar-section-channels-header"]')!;
+    const collapse = host.querySelector<HTMLElement>('[data-testid="section-collapse-channels"]')!;
+    // 앞 판: 강조(`hover:bg-surface-hover`)가 라벨 버튼에만 있어 오른쪽 액션이 면 밖에 떴다.
+    expect(header.className).toContain("hover:bg-surface-hover");
+    expect(collapse.className).not.toContain("hover:bg-surface-hover");
+    act(() => {
+      header.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+    const action = host.querySelector<HTMLElement>('[data-testid="new-channel"]')!;
+    expect(action).not.toBeNull();
+    expect(header.contains(action)).toBe(true);
+    // 액션은 라벨 뒤, 곧 오른쪽에 선다.
+    expect(
+      collapse.compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+  });
+});
