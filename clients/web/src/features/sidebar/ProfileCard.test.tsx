@@ -615,13 +615,13 @@ describe("ProfileCard 방해 금지 기한 (#2899)", () => {
   }
 
   function chooseUntil(value: string) {
-    const select = q<HTMLSelectElement>("pause-until-select")!;
+    const select = q<HTMLButtonElement>("pause-until-select")!;
     act(() => {
-      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set?.call(
-        select,
-        value
-      );
-      select.dispatchEvent(new Event("change", { bubbles: true }));
+      select.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const option = document.querySelector<HTMLElement>(`[role="option"][data-value="${value}"]`)!;
+    act(() => {
+      option.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
   }
 

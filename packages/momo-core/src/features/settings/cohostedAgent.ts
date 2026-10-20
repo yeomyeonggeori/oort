@@ -192,8 +192,16 @@ export const COHOSTED_COPY = {
   checklistAfterHead: "체크리스트를 따랐다면 서버에 ",
   checklistEnv: "OORT_COHOSTED_AGENT_TOOLS_LOCKED=1",
   checklistAfterTail: "을 넣어 선언해 주세요.",
-  found: "같은 서버의 Hermes를 찾았어요, 연결할까요?",
-  foundDetail: "연결하면 Hermes 에이전트가 생겨요. 채널에는 넣지 않고 도구 권한도 주지 않아요. 평소처럼 채널에 초대해 쓰세요.",
+  found: "같은 서버의 Hermes를 찾았어요.",
+  /** 카드의 한 줄. 나머지 안내는 「자세히」 안에 접는다. */
+  foundDetail: "연결하면 Hermes 에이전트가 생겨요.",
+  foundMore: "채널에는 넣지 않고 도구 권한도 주지 않아요. 평소처럼 채널에 초대해 쓰세요.",
+  moreSummary: "자세히",
+  /** 처음 한 번만 묻는 창(#4113). */
+  promptTitle: "같은 서버에서 Hermes를 찾았어요. 연결할까요?",
+  promptConnect: "연결하기",
+  promptLater: "나중에",
+  promptLaterNote: "나중에 하려면 설정 › AI에서 연결할 수 있어요.",
   connect: "Hermes 연결하기",
   connecting: "연결 중",
   attestNote:
