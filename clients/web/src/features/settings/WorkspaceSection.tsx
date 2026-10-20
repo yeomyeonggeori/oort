@@ -3,7 +3,7 @@ import { Loader2 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
-import { Select } from "@/design/ui/select";
+import { ListboxSelect } from "@/design/ui/listbox-select";
 import { cn } from "@/design/lib/cn";
 import { InlineBanner, Skeleton } from "@/features/common/States";
 import { putAttachmentBytes } from "@/features/attachments/uploadTransport";
@@ -753,24 +753,23 @@ function WelcomeKickoffEditor({
                 locked ? undefined : "비우면 첫 활성 에이전트가 웰컴을 보내요."
               }
             >
-              <Select
+              <ListboxSelect
                 id="welcome-agent"
                 name="welcome-agent"
+                aria-labelledby="welcome-agent-label"
                 value={draftAgent}
                 disabled={locked}
-                onChange={(event) => {
+                placeholder={WELCOME_AGENT_DEFAULT_LABEL}
+                options={[
+                  { value: "", label: WELCOME_AGENT_DEFAULT_LABEL },
+                  ...agents.map((member) => ({ value: member.id, label: member.displayName })),
+                ]}
+                onValueChange={(next) => {
                   if (locked) return;
-                  setDraftAgent(event.target.value);
+                  setDraftAgent(next);
                 }}
                 data-testid="welcome-agent"
-              >
-                <option value="">{WELCOME_AGENT_DEFAULT_LABEL}</option>
-                {agents.map((member) => (
-                  <option key={member.id} value={member.id}>
-                    {member.displayName}
-                  </option>
-                ))}
-              </Select>
+              />
             </Field>
           </div>
           <div className="px-4 py-3">

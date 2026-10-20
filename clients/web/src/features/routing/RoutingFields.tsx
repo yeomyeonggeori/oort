@@ -1,5 +1,5 @@
 import { cn } from "@/design/lib/cn";
-import { Select } from "@/design/ui/select";
+import { ListboxSelect } from "@/design/ui/listbox-select";
 import {
   applyModelChange,
   clearUnsupportedEffort,
@@ -212,14 +212,21 @@ export function RoutingFields({
         )}
       >
         <div className={fieldClass}>
-          <label htmlFor={modelId} className="text-meta text-ink-muted">
+          <label id={`${modelId}-label`} htmlFor={modelId} className="text-meta text-ink-muted">
             모델
           </label>
-          <Select
+          <ListboxSelect
             id={modelId}
+            aria-labelledby={`${modelId}-label`}
             value={draft.model ?? ""}
             disabled={modelLocked}
-            onChange={(event) => changeModel(event.target.value)}
+            placeholder={modelInheritLabel}
+            options={[
+              { value: "", label: modelInheritLabel },
+              ...models.map((option) => ({ value: option, label: option })),
+              ...(orphanModel ? [{ value: orphanModel, label: orphanModel }] : []),
+            ]}
+            onValueChange={changeModel}
             aria-invalid={modelError ? true : undefined}
             aria-describedby={describe(
               modelError ? modelErrorId : null,
@@ -228,27 +235,33 @@ export function RoutingFields({
             )}
             data-testid={modelId}
             data-override={draft.model !== null ? "" : undefined}
-          >
-            <option value="">{modelInheritLabel}</option>
-            {models.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-            {orphanModel && <option value={orphanModel}>{orphanModel}</option>}
-          </Select>
+          />
           {!row && modelErrorLine}
         </div>
 
         <div className={fieldClass}>
-          <label htmlFor={effortId} className="text-meta text-ink-muted">
+          <label id={`${effortId}-label`} htmlFor={effortId} className="text-meta text-ink-muted">
             추론 강도
           </label>
-          <Select
+          <ListboxSelect
             id={effortId}
+            aria-labelledby={`${effortId}-label`}
             value={draft.effort ?? ""}
             disabled={effortLocked}
-            onChange={(event) => changeEffort(event.target.value)}
+            placeholder={effortInheritLabel}
+            options={[
+              { value: "", label: effortInheritLabel },
+              ...efforts.map((option) => ({ value: option, label: effortLabel(option) })),
+              ...(orphanEffort
+                ? [
+                    {
+                      value: orphanEffort,
+                      label: `${effortLabel(orphanEffort)}${orphanEffortUnusable ? " (이 모델에서는 쓸 수 없음)" : ""}`,
+                    },
+                  ]
+                : []),
+            ]}
+            onValueChange={changeEffort}
             aria-describedby={describe(
               clearedNotice ? clearedId : null,
               ignoredNotice ? ignoredId : null,
@@ -256,20 +269,7 @@ export function RoutingFields({
             )}
             data-testid={effortId}
             data-override={draft.effort !== null ? "" : undefined}
-          >
-            <option value="">{effortInheritLabel}</option>
-            {efforts.map((option) => (
-              <option key={option} value={option}>
-                {effortLabel(option)}
-              </option>
-            ))}
-            {orphanEffort && (
-              <option value={orphanEffort}>
-                {effortLabel(orphanEffort)}
-                {orphanEffortUnusable ? " (이 모델에서는 쓸 수 없음)" : ""}
-              </option>
-            )}
-          </Select>
+          />
         </div>
       </div>
 

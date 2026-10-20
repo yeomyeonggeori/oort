@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { Button } from "@/design/ui/button";
+import { ListboxSelect } from "@/design/ui/listbox-select";
 import { useEscapeLayer } from "@/design/ui/escapeLayer";
 import { cn } from "@/design/lib/cn";
 import { useClipboardCopy } from "@/design/hooks/useClipboardCopy";
@@ -225,7 +226,7 @@ export function Field({
       : children;
   return (
     <div className="flex min-w-0 flex-col gap-1">
-      <label htmlFor={htmlFor} className="text-meta text-ink-muted">
+      <label id={`${htmlFor}-label`} htmlFor={htmlFor} className="text-meta text-ink-muted">
         {label}
       </label>
       {control}
@@ -469,18 +470,21 @@ export interface SelectChoice {
   disabled?: boolean;
 }
 
+// 값은 늘 선택지 안이라 보이지 않는다. 칸이 이름 없는 빈 단추가 되지 않게만 둔다.
+const SELECT_FIELD_PLACEHOLDER = "선택하세요";
+
 /**
- * Label above a full-width native select.
+ * Label above a full-width select.
  *
  * Full width is the point, not a shrug: a select sized to its content lets the
  * LONGEST OPTION decide the column, so two of these in one panel line up at two
  * different left edges depending on which hosts happen to be registered that
  * day. Width belongs to the panel, the value does not.
  *
- * Native `<select>`: this bundle carries no Radix Select, and the platform
- * control already gives type-ahead, arrow keys, the collapsed value as its own
- * label, and a popup that a screen reader announces as a listbox. The only
- * thing added here is the token skin.
+ * App-drawn `ListboxSelect` (#4126): the native popup is painted by the OS and
+ * reads as a different product next to the app's own menus (성재 0.1.32 실기).
+ * The visible label names both the field and its list (`aria-labelledby`); an
+ * explicit `ariaLabel` replaces it when the visible label repeats across scopes.
  */
 export function SelectField({
   id,
@@ -520,26 +524,27 @@ export function SelectField({
 }) {
   return (
     <div className="flex min-w-0 flex-col gap-1">
-      <label htmlFor={id} className="text-meta text-ink-muted">
+      <label id={`${id}-label`} htmlFor={id} className="text-meta text-ink-muted">
         {label}
       </label>
-      <select
+      <ListboxSelect
         id={id}
         value={value}
         disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
+        onValueChange={onChange}
         aria-label={ariaLabel}
+        aria-labelledby={ariaLabel ? undefined : `${id}-label`}
         aria-describedby={hint ? `${id}-hint` : undefined}
         aria-busy={busy || undefined}
         data-testid={testId}
-        className="h-control-sm w-full min-w-0 rounded-sm border border-line-strong bg-surface-raised px-2 text-body text-ink focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {choices.map((choice) => (
-          <option key={choice.id} value={choice.id} disabled={choice.disabled}>
-            {choice.label}
-          </option>
-        ))}
-      </select>
+        placeholder={SELECT_FIELD_PLACEHOLDER}
+        options={choices.map((choice) => ({
+          value: choice.id,
+          label: choice.label,
+          disabled: choice.disabled,
+        }))}
+        className="h-control-sm rounded-sm bg-surface-raised text-body"
+      />
       {hint && (
         <p
           id={`${id}-hint`}
