@@ -14,6 +14,7 @@ import { canCreateAgentNow } from "@/features/agentHub/createModel";
 import { useDirectory } from "@/features/workspace/useWorkspace";
 import { memberFor } from "@momo/core/features/workspace/directory";
 import { useOffline } from "@/features/common/useOffline";
+import { CohostedAgentCard } from "@/features/settings/CohostedAgentCard";
 import { AiHubOverview } from "./AiHubOverview";
 import { AiAccountsPane } from "./AiAccountsPane";
 import { AiAgentsPane } from "./AiAgentsPane";
@@ -79,7 +80,10 @@ export function AiHubRoute() {
           </nav>
         )}
       </header>
-      <div className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-6">
+      <div className="flex min-w-0 flex-1 flex-col gap-6 overflow-y-auto p-4 sm:p-6">
+        {/* 같은 서버의 Hermes(ADR-0203, #4141): 팀 AI 키 목록보다 위, 허브의 어느 구획에서든 맨 위다.
+            운영자가 아니거나 서버에 선언이 없으면 아무것도 그리지 않는다. 처음 한 번 창도 여기서 뜬다. */}
+        <CohostedAgentCard offline={offline} workspaceId={workspaceId} />
         <Routes>
           <Route index element={<AiHubOverview mayCreateAgent={mayCreate} />} />
           <Route path="accounts" element={<AiAccountsPane />} />

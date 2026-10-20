@@ -11,6 +11,7 @@ import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { ShellNavProvider } from "@/app/shellNav";
 import { Sidebar } from "./Sidebar";
+import { REVIVAL_RETRY_DELAY_MS } from "./dmRevival";
 import {
   closeDmOnDevice,
   closedAtSeqOf,
@@ -159,10 +160,33 @@ function setReadStates(states: ReadState[]) {
  * `"pending"` 은 응답이 오지 않는다(아직 모름).
  */
 const liveness = vi.hoisted(() => ({ byAgent: new Map<string, string>() }));
+
+/**
+ * 닫은 뒤의 메시지 쪽의 대역(#4142). 적지 않은 DM 은 사람이 쓴 글 한 건이 있다(= 되살아난다).
+ * `"fail"` 은 읽기가 실패한다. 호출 기록으로 「한 번만 읽는다」를 잡는다.
+ */
+const revival = vi.hoisted(() => ({
+  pages: new Map<string, "fail" | Array<{ type: string; props?: Record<string, unknown> }>>(),
+  calls: [] as Array<{ channelId: string; after?: number }>,
+}));
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
   return {
     ...actual,
+    fetchMessages: async (_ws: string, channelId: string, query: { after?: number } = {}) => {
+      revival.calls.push({ channelId: channelId.toLowerCase(), after: query.after });
+      const page = revival.pages.get(channelId.toLowerCase()) ?? [{ type: "text" }];
+      if (page === "fail") throw new actual.ApiError(500, "boom");
+      return {
+        messages: page.map((m, i) => ({
+          id: `m${i}`,
+          channelId,
+          seq: (query.after ?? 0) + 1 + i,
+          authorMemberId: "x",
+          ...m,
+        })),
+      };
+    },
     fetchAgentLiveness: async (_ws: string, agentId: string) => {
       const state = liveness.byAgent.get(agentId.toLowerCase());
       if (state === undefined) throw new actual.ApiError(404, "not found");
@@ -306,6 +330,8 @@ beforeAll(() => {
 
 beforeEach(() => {
   liveness.byAgent.clear();
+  revival.pages.clear();
+  revival.calls.length = 0;
   touch.hoverNone = false;
   localStorage.clear();
   reloadClosedDmsForTest(null);
@@ -706,6 +732,7 @@ describe("DM 닫기: 사라지고, 돌아온다 (#3963)", () => {
     // 새 메시지 한 건.
     setReadStates([readState(DM_ID(2), 10, 9)]);
     await rerender();
+    await flush();
     expect(rowIds(host)).toContain(DM_ID(2));
     // 다시 나타날 때는 안 읽음 알약과 함께다.
     expect(
@@ -849,6 +876,7 @@ describe("채널이 없는 멤버의 첫 DM (design-review R1 H1)", () => {
     expect(rowIds(host)).not.toContain(DM_ID(1));
     setReadStates([readState(DM_ID(1), 13, 12)]);
     await rerender();
+    await flush();
     expect(rowIds(host)).toContain(DM_ID(1));
   });
 
@@ -864,6 +892,133 @@ describe("채널이 없는 멤버의 첫 DM (design-review R1 H1)", () => {
     expect(host.querySelector('[data-testid="dm-section-empty"]')?.textContent).toContain(
       "닫은 대화는 새 메시지가 오면 다시 나타납니다"
     );
+  });
+});
+
+// =============================================================================
+// 닫은 DM 은 「사람이 읽을 새 메시지」가 올 때만 돌아온다 (#4142)
+// =============================================================================
+
+async function flush(): Promise<void> {
+  for (let i = 0; i < 5; i += 1) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+}
+
+describe("닫은 DM 은 사람이 읽을 새 메시지가 올 때만 돌아온다 (#4142)", () => {
+  const WORK_CARD = { type: "text", props: { kind: "work_session" } };
+
+  async function closeDm2(): Promise<HTMLElement> {
+    setReadStates([readState(DM_ID(2), 9)]);
+    const host = await mount();
+    enterRow(host, DM_ID(2));
+    act(() => closeButton(host)!.click());
+    expect(rowIds(host)).not.toContain(DM_ID(2));
+    return host;
+  }
+
+  it("seq 가 올랐어도 새 메시지가 기계 메시지(system·work_session·tool_*)뿐이면 숨은 채다", async () => {
+    revival.pages.set(DM_ID(2), [{ type: "system" }, WORK_CARD, { type: "tool_result" }]);
+    const host = await closeDm2();
+    setReadStates([readState(DM_ID(2), 12, 9)]);
+    await rerender();
+    await flush();
+    expect(rowIds(host)).not.toContain(DM_ID(2));
+    // 닫은 뒤(9)부터를 읽었다.
+    expect(revival.calls).toContainEqual({ channelId: DM_ID(2), after: 9 });
+  });
+
+  it("읽는 동안에는 깜빡이며 나타나지 않는다(숨은 채 기다린다)", async () => {
+    const host = await closeDm2();
+    setReadStates([readState(DM_ID(2), 10, 9)]);
+    await rerender();
+    // 첫 프레임: 읽기가 아직 끝나지 않았다.
+    expect(rowIds(host)).not.toContain(DM_ID(2));
+    await flush();
+    // 기본 대역은 사람이 쓴 글 한 건: 이제 돌아온다.
+    expect(rowIds(host)).toContain(DM_ID(2));
+  });
+
+  it("기계 메시지 뒤에 사람이 쓴 글이 오면 돌아온다", async () => {
+    revival.pages.set(DM_ID(2), [WORK_CARD]);
+    const host = await closeDm2();
+    setReadStates([readState(DM_ID(2), 10, 9)]);
+    await rerender();
+    await flush();
+    expect(rowIds(host)).not.toContain(DM_ID(2));
+    revival.pages.set(DM_ID(2), [WORK_CARD, { type: "text" }]);
+    setReadStates([readState(DM_ID(2), 11, 9)]);
+    await rerender();
+    await flush();
+    expect(rowIds(host)).toContain(DM_ID(2));
+  });
+
+  it("같은 seq 를 다시 받아도(30초 재조회) 다시 읽지 않는다", async () => {
+    revival.pages.set(DM_ID(2), [WORK_CARD]);
+    const host = await closeDm2();
+    setReadStates([readState(DM_ID(2), 10, 9)]);
+    await rerender();
+    await flush();
+    const first = revival.calls.length;
+    setReadStates([readState(DM_ID(2), 10, 9)]);
+    await rerender();
+    await flush();
+    expect(revival.calls.length).toBe(first);
+    expect(rowIds(host)).not.toContain(DM_ID(2));
+  });
+
+  it("읽기가 실패하면 돌아온다 — 새 메시지가 왔는지 모를 때 숨기는 쪽이 최악이다", async () => {
+    revival.pages.set(DM_ID(2), "fail");
+    const host = await closeDm2();
+    setReadStates([readState(DM_ID(2), 10, 9)]);
+    await rerender();
+    await flush();
+    // 한 번 더 읽어 보는 동안은 숨은 채다.
+    expect(rowIds(host)).not.toContain(DM_ID(2));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, REVIVAL_RETRY_DELAY_MS + 100));
+    });
+    await flush();
+    expect(rowIds(host)).toContain(DM_ID(2));
+  });
+
+  it("투영에 행이 없는 DM(나간 멤버 등)은 닫으면 닫힌 채다", async () => {
+    // 가설 1 의 기각: 투영에 항목이 없으면 latestSeq 는 undefined -> 0 이고 닫을 때도 0 이라 `0 <= 0` 이다.
+    setReadStates([readState(DM_ID(1), 4)]);
+    const host = await mount();
+    expect(rowIds(host)).toContain(DM_ID(6));
+    enterRow(host, DM_ID(6));
+    act(() => closeButton(host)!.click());
+    expect(rowIds(host)).not.toContain(DM_ID(6));
+    await rerender();
+    await flush();
+    expect(rowIds(host)).not.toContain(DM_ID(6));
+    expect(revival.calls).toEqual([]);
+  });
+});
+
+describe("투영을 못 읽은 동안 `/` 폴백이 닫은 DM 의 원장을 지우지 않는다 (#4142)", () => {
+  beforeEach(() => {
+    channelsQuery.groups = { channels: [], dms };
+    channelsQuery.data = [...dms];
+  });
+
+  it("일시 오류로 닫은 DM 이 폴백이 열어도 원장 항목은 남고, 오류가 풀리면 다시 숨는다", async () => {
+    closeDmOnDevice(WS, DM_ID(1), 12);
+    readStatesQuery.isError = true;
+    readStatesQuery.data = undefined;
+    readStatesQuery.byChannel = new Map();
+    const host = await mount("/");
+    // 못 읽었으니 보인다(원장 규칙).
+    expect(rowIds(host)).toContain(DM_ID(1));
+    // 사람이 연 것이 아니므로 원장은 그대로다. 예전에는 여기서 지워졌다.
+    expect(closedAtSeqOf(closedDmsFor(WS), DM_ID(1))).toBe(12);
+    readStatesQuery.isError = false;
+    setReadStates([readState(DM_ID(1), 12)]);
+    await rerender();
+    expect(rowIds(host)).not.toContain(DM_ID(1));
   });
 });
 
