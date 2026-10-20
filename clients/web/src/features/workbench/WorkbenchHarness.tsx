@@ -120,7 +120,7 @@ export function WorkbenchHarness() {
             options={SESSIONS.map((s) => ({ value: s.key, label: s.label }))}
             onValueChange={setSession}
             placeholder="세션 고르기"
-            className="w-auto min-w-40"
+            className="w-pane max-w-full"
           />
         </div>
         <p className="text-meta text-ink-muted">배치는 세션마다 이 기기에 저장됩니다.</p>
