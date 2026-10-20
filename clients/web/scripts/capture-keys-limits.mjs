@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // =============================================================================
-// 팀 AI 키 › 「한도·남은 크레딧」 캡처 (#3887). 확인 전 · 확인 뒤(한도 헤더) · 헤더 없음 ·
-// 크레딧/결제 문제 · OpenRouter · 추정 못 불러옴 · 키 추가 폼의 월 크레딧 · 비운영자.
+// 팀 AI 키 › 콘솔 링크 한 줄 캡처 (#4110, 앞선 #3887 「한도·남은 크레딧」 블록을 걷었다).
+// 확인 전 · 확인 뒤(숫자 칸 없음) · 크레딧/결제 문제 · OpenAI · OpenRouter · 키 추가 폼(월 크레딧 칸
+// 없음) · 비운영자.
 //
 //   npm run build && OUT_DIR=<dir> node scripts/capture-keys-limits.mjs
 //
@@ -71,6 +72,7 @@ const plugins = {
 // AIH-6: 팀 AI 키 장면이 서버 답을 바꾼다. operator=false 면 팀 키 읽기는 403, empty 면 저장된 키가 없다.
 const scenario = { operator: true, empty: false, company: "anthropic", test: "none", limitsFail: false };
 const openrouterLink = { ...providerLink, baseUrl: "https://openrouter.ai/api/v1", endpointLabel: "https://openrouter.ai/api/v1", bearerLast4: "a91f", format: "openai" };
+const openaiLink = { ...providerLink, baseUrl: "https://api.openai.com/v1", endpointLabel: "https://api.openai.com/v1", bearerLast4: "d04b", format: "openai" };
 const spend = (microUsd, runs, over = {}) => ({ microUsd, runs, promptTokens: runs * 1200, completionTokens: runs * 300, unpricedRuns: 0, unpricedModels: [], ...over });
 const limitsBody = () => ({
   schema: "momo.provider_limits.v0", monthStartMs: Date.UTC(2026, 9, 1), computedAtMs: Date.now(),
@@ -125,7 +127,7 @@ async function installRoutes(context, connectionsFor = connections) {
     if (path.endsWith("/hosted-agent-connections")) return json(route, { connections: connectionsFor });
     if (path.endsWith("/provider/link")) {
       if (!scenario.operator) return json(route, { error: { code: "forbidden", message: "operators only" } }, 403);
-      return json(route, scenario.empty ? emptyLink : scenario.company === "openrouter" ? openrouterLink : providerLink);
+      return json(route, scenario.empty ? emptyLink : scenario.company === "openrouter" ? openrouterLink : scenario.company === "openai" ? openaiLink : providerLink);
     }
     if (path.endsWith("/provider/link/test")) return json(route, probeBody());
     if (path.endsWith("/provider/limits")) {
@@ -277,44 +279,47 @@ async function scenes(browser, origin, scheme, viewport) {
       await context.close();
     }
   };
+  const GONE = ["한도·남은 크레딧", "공급사가 알려 준 숫자", "oort 추정", "월 크레딧", "남은 양(추정)"];
+  const noBlock = async (page, label) => {
+    const text = await page.getByTestId("ai-team-keys").textContent();
+    check(`${tag} ${label}: 한도·추정·월 크레딧 문구 없음`, GONE.every((g) => !text.includes(g)), GONE.filter((g) => text.includes(g)).join(","));
+  };
+  const linkIs = async (page, label, name, href) => {
+    const a = page.getByTestId("ai-link-limits");
+    check(`${tag} ${label}: 콘솔 링크 「${name}」`, (await a.textContent()).includes(name) && (await a.getAttribute("href")) === href);
+  };
   await run("before-check", {}, async (page, shot) => {
-    await page.getByTestId("ai-link-limits-estimate").waitFor();
+    await page.getByTestId("ai-link-limits").waitFor();
     await shot("keys-1-before-check");
-    const block = await page.getByTestId("ai-link-limits").textContent();
-    check(`${tag} 확인 전: 두 출처 이름이 보인다`, block.includes("공급사가 알려 준 숫자") && block.includes("oort 추정") && block.includes("Anthropic 전체") && block.includes("공급사 잔액이 아니에요"));
-    check(`${tag} 확인 전: 월 크레딧 100 중 약 $32.48, 남은 양(추정) 약 $67.52`, block.includes("$100.00") && block.includes("약 $32.48") && block.includes("약 $67.52"), block);
-    check(`${tag} 확인 전: 단가 모르는 모델을 이름으로 말한다`, block.includes("claude-sonnet-5-6"));
-    check(`${tag} 확인 전: 콘솔 링크`, (await page.getByTestId("ai-link-limits-console").getAttribute("href")) === "https://platform.claude.com/settings/billing");
+    await noBlock(page, "확인 전");
+    await linkIs(page, "확인 전", "Anthropic 콘솔에서 크레딧 보기", "https://platform.claude.com/settings/billing");
+    // 키보드로 닿아야 focus-visible 링이 그려진다.
+    await page.getByTestId("ai-link-check").focus();
+    await page.keyboard.press("Tab");
+    await page.screenshot({ path: resolve(OUT_DIR, `keys-1b-link-focus-${tag}.png`) });
   });
   await run("checked", { test: "ok" }, async (page, shot) => {
-    await page.getByTestId("ai-link-limits-estimate").waitFor();
+    await page.getByTestId("ai-link-limits").waitFor();
     await page.getByTestId("ai-link-check").click();
     await page.getByTestId("ai-link-probe").waitFor();
     await page.waitForTimeout(400);
     await shot("keys-2-checked");
-    const block = await page.getByTestId("ai-link-limits-provider").textContent();
-    check(`${tag} 확인 뒤: 공급사 한도 숫자`, block.includes("50 중 49 남음") && block.includes("40,000 중 39,000 남음"), block);
-    check(`${tag} 확인 뒤: 잔액을 읽을 수 없다고 말한다`, block.includes("일반 API 키로 알려 주지 않아요"));
-    // 키보드로 닿아야 focus-visible 링이 그려진다(스크립트 focus()는 링을 안 그린다).
-    await page.getByTestId("ai-link-limits-refresh").focus();
-    await page.keyboard.press("Shift+Tab");
-    await page.keyboard.press("Tab");
-    await page.screenshot({ path: resolve(OUT_DIR, `keys-2b-refresh-focus-${tag}.png`) });
-  });
-  await run("no-headers", { test: "ok-no-headers" }, async (page, shot) => {
-    await page.getByTestId("ai-link-limits-estimate").waitFor();
-    await page.getByTestId("ai-link-check").click();
-    await page.getByTestId("ai-link-probe").waitFor();
-    await shot("keys-3-no-headers");
-    check(`${tag} 헤더 없음: 지어내지 않고 말한다`, (await page.getByTestId("ai-link-limits-provider-note").textContent()).includes("한도 숫자를 주지 않았어요"));
+    await noBlock(page, "확인 뒤");
+    check(`${tag} 확인 뒤: 한도 숫자 칸 없음`, !(await page.getByTestId("ai-team-keys").textContent()).includes("50 중 49 남음"));
   });
   await run("no-credit", { test: "no-credit" }, async (page, shot) => {
-    await page.getByTestId("ai-link-limits-estimate").waitFor();
+    await page.getByTestId("ai-link-limits").waitFor();
     await page.getByTestId("ai-link-check").click();
     await page.getByTestId("ai-link-probe").waitFor();
     await page.waitForTimeout(400);
-    await shot("keys-4-no-credit");
+    await shot("keys-3-no-credit");
     check(`${tag} 크레딧 문제: 키 탓이 아니라고 말한다`, (await page.getByTestId("ai-link-probe-text").textContent()).includes("키는 맞지만 크레딧이나 결제에 문제가 있어요"));
+  });
+  await run("openai", { company: "openai" }, async (page, shot) => {
+    await page.getByTestId("ai-link-limits").waitFor();
+    await shot("keys-4-openai");
+    await noBlock(page, "OpenAI");
+    await linkIs(page, "OpenAI", "OpenAI 결제 화면 열기", "https://platform.openai.com/settings/organization/billing/overview");
   });
   await run("openrouter", { test: "openrouter", company: "openrouter" }, async (page, shot) => {
     await page.getByTestId("ai-link-limits").waitFor();
@@ -322,25 +327,19 @@ async function scenes(browser, origin, scheme, viewport) {
     await page.getByTestId("ai-link-probe").waitFor();
     await page.waitForTimeout(400);
     await shot("keys-5-openrouter");
-    const block = await page.getByTestId("ai-link-limits-provider").textContent();
-    check(`${tag} OpenRouter: 키의 숫자와 관리 키 안내`, block.includes("$12.50 / $20.00") && block.includes("$2.25") && block.includes("관리 키로만 읽혀요"), block);
-  });
-  await run("limits-error", { limitsFail: true }, async (page, shot) => {
-    await page.getByTestId("ai-link-limits-estimate-pending").waitFor();
-    await shot("keys-6-limits-error");
+    await noBlock(page, "OpenRouter");
+    await linkIs(page, "OpenRouter", "OpenRouter 크레딧 보기", "https://openrouter.ai/settings/credits");
   });
   await run("add-form", { empty: true }, async (page, shot) => {
     await page.getByTestId("ai-team-add").click();
     await page.getByTestId("ai-team-keys-form").waitFor();
     await page.waitForTimeout(300);
-    await shot("keys-7-add-form-anthropic");
-    check(`${tag} 추가 폼: 월 크레딧 칸(선택)`, (await page.getByTestId("ai-link-budget-input").count()) === 1);
-    await page.getByTestId("ai-link-preset-custom").locator("..").click();
-    check(`${tag} 추가 폼: 모르는 주소에는 월 크레딧 칸이 없다`, (await page.getByTestId("ai-link-budget-input").count()) === 0);
+    await shot("keys-6-add-form-anthropic");
+    check(`${tag} 추가 폼: 월 크레딧 칸 없음`, (await page.getByTestId("ai-link-budget-input").count()) === 0);
   });
   await run("non-operator", { operator: false }, async (page) => {
     await page.getByTestId("operator-notice").waitFor();
-    check(`${tag} 비운영자: 한도 블록 없음`, (await page.getByTestId("ai-link-limits").count()) === 0);
+    check(`${tag} 비운영자: 링크 없음`, (await page.getByTestId("ai-link-limits").count()) === 0);
   });
 }
 main().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });
