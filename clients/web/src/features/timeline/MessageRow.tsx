@@ -53,6 +53,7 @@ import { deletedFoldSegments } from "@momo/core/features/timeline/deletedFold";
 // 아바타의 계약도 코어가 갖는다 (진단 H-11): 어떤 주소를 이미지로 믿는가,
 // 무엇을 이니셜로 삼는가, 사람과 에이전트를 무엇으로 가르는가.
 import { avatarIdentity } from "@momo/core/features/workspace/avatar";
+import { avatarSurfaceClass } from "@/features/common/avatarTone";
 import { useMemberAvatar } from "@/features/sidebar/useMemberAvatar";
 // 코어의 간격 숫자를 클래스로 옮긴 다리. CSP가 인라인 스타일을 막아서 생긴 두 벌이고,
 // 갈라지지 않게 `spacing.test.ts`가 둘을 묶는다.
@@ -239,10 +240,8 @@ export function Avatar({ member }: { member: RosterMember | null }) {
         // size-8 = AVATAR_SIZE(32). 두 값이 갈라지면 `avatarSize.test.ts`가 붉다.
         "flex size-8 items-center justify-center overflow-hidden text-meta font-semibold",
         identity.kind === "agent" ? "rounded-sm" : "rounded-full",
-        identity.kind === "agent" && "bg-agent-soft text-agent",
-        identity.kind === "human" && "bg-surface-hover text-ink",
-        // 모르는 작성자: 정체 색 없이 배경만. 이름도 이니셜도 주장하지 않는다.
-        identity.kind === "unknown" && "bg-surface-hover text-ink-muted"
+        // 모르는 작성자(unknown)는 점선 테두리 + 흐린 글자: 이름도 이니셜도 주장하지 않는다 (#4148).
+        avatarSurfaceClass(identity.kind, member?.id)
       )}
     >
       {imageSrc !== null ? (
