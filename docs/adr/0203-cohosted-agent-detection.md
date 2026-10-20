@@ -8,6 +8,7 @@
 - 증보: **2026-10-16 1인 워크스페이스의 커넥터 호스트로서의 Hermes** (성재 결재 「각자 + 1인 워크스페이스에서 Hermes 시험 (추천)」) — 파일 끝. D6 도구 잠금 목록을 커넥터 시험에 한해 넓히고, D7 볼륨 목록에 `mcp-tokens/`를 더하고, 「단일 워크스페이스」를 안내에서 서버 강제로 올린다. D1~D5·D8·D9는 바뀌지 않는다. 구현은 본문과 같이 #3873 뒤다(로컬 실측 K-S1a 제외). 같은 날 저녁 결재 「개인 Gmail 외부 앱」은 2026-10-17 결재 「뭐 계정만 필요한거면 dawn.kim으로 우선하자. 나중에 바꿀 수도 있는거지 ?」가 대체했고, K3·K5·K7에 반영했다. Google 시험은 dawn.kim의 Developer Preview 가입·OAuth client 준비(ADR-0113 증보 2 G-S0) 뒤에 시작한다. 2단계(쓰기 중계)는 Proposed다.
 - 증보(**Accepted** 2026-10-19, 통합자): **2026-10-19 설치 한 번에 Hermes까지** (#4072, 성재 2026-10-19 「제로 베이스 온보딩 개선 묶음도 진행」) — 파일 끝. D8을 구현 이름으로 확정하고, 생성기의 `HERMES_*`·로컬 opt-in·`OORT_COHOSTED_AGENT_TOOLS_LOCKED` 자동 주입과 Railway 카탈로그의 `hermes` 서비스를 더한다. D6-5 attest의 의미가 번들 배포 모양에 한해 바뀐다. D1~D5·D7·K1~K7은 바뀌지 않는다.
 - 증보: **2026-10-19 Hermes의 모델 인증에 구독 OAuth 허용**(#4071, owner 결정) — Hermes가 자기 볼륨에 Codex·Claude 구독 OAuth를 보관해 모델 인증에 쓴다. 파일 끝. D1~D9는 바뀌지 않는다.
+- 증보(**Accepted** 2026-10-20, owner 승인 인용): **2026-10-20 같은 서버 Hermes의 모델 고르기** (#4143) — 파일 끝. 핀에 Hermes 제공자(`provider`)와 모델을 한 쌍으로 저장하고, 서버가 Hermes `/api/model/options`의 「로그인된 제공자」 목록 안으로 선택을 제한하며, 워커가 `/v1/chat/completions`에 둘을 함께 보낸다. D2의 고정 요청 목록에 읽기 GET 하나가 늘고, migration 144가 핀 표에 열 두 개를 더한다. D1·D3~D9·K1~K7은 바뀌지 않는다.
 - 표기: [V] 직접 확인(저장소 코드·문서 또는 이 세션에서 받은 공식 문서 원문) · **[추정]** 해석·계산 · [확인 필요] 구현 전 확인 · `runtime-unverified` 실행 안 함. 이 문서는 설계이고 코드·인프라를 바꾸지 않았다.
 
 ## 맥락
@@ -469,3 +470,81 @@ D1~D5, D7(볼륨 내용·삭제), K1~K7, 프로브의 두 요청, 연결 클릭�
 ### 바뀌지 않는 것
 
 D1~D9, K1~K7, 게이트웨이 `/v1/chat/completions` SSE 경로(D5), `HERMES_API_KEY` 의미, oort가 토큰을 소유·저장하지 않는다는 불변식, `lockgate.py` 규칙(사이드카 기동은 시작 명령의 추가 한 줄이고 게이트 통과 뒤에 온다).
+
+## 증보 2026-10-20 — 같은 서버 Hermes의 모델 고르기
+
+- Status: **Accepted** (2026-10-20, owner 승인). 인용(코디네이터 전달, 성재 2026-10-20 AskUserQuestion): 「승인 (Recommended)」 — 이 설계로 구현하는 것을 승인, 「추린 목록 (Recommended)」 — 서버는 제공자별 전체 목록을 주되 모델마다 `featured`를 붙이고, UI는 featured만 기본으로 보여 주며 「전체 보기」로 나머지를 연다.
+- 기안: Sonnet 5.5 worker (#4143). 구현은 같은 PR(서버·워커). 화면은 별도 이슈(UXUI)다.
+- 계기: 연결한 Hermes가 어느 제공자의 어느 모델로 답하는지 oort에서 보이지도 고를 수도 없었다. connect가 핀의 모델에 적던 값은 Hermes의 **가상 별칭** `hermes-agent` 하나뿐이라 실제 모델 정보가 아니었다.
+- 표기: [V] 직접 확인(이슈 #4143 1단계 실측 코멘트, 이 PR의 시험) · [소스] Hermes 소스 읽기 · `runtime-unverified`.
+
+### 확인한 사실
+
+- [V] `GET {origin}/api/model/options`(게이트웨이 8642, `HERMES_API_KEY` bearer)가 200으로 `{"model": "...", "provider": "...", "providers": [{"slug", "is_current", "authenticated", "models": [...]}, ...]}`를 준다. `authenticated: false`인 제공자(로그인 안 된 것)는 `models`가 비어 있거나 빈 골격 행이다. 형태는 Hermes 소스 `hermes_cli/inventory.py`의 `build_models_payload`와 `web_server.py`의 라우트에서 확인했다 [소스].
+- [V] `POST /v1/chat/completions`에서 `model`만 바꾸면 Hermes는 **조용히 무시하고 기본 모델로 답한다**(토큰 수 4799 그대로). 응답의 `model` 필드는 요청 값을 그대로 되돌려 주므로(존재하지 않는 `claude-opus-4-1`도 200) 그 필드로 실제 모델을 판단할 수 없다. 요청 본문에 `provider`를 **함께** 보내면 적용된다(토큰 수 3513, 다른 제공자가 처리). 소스상 bare `model`은 `direct_model_requests`(기본 false)일 때만, 명시 `provider`가 있으면 항상 적용된다 [소스].
+- [V] Hermes 쪽 전역 기본값을 바꾸는 API는 없다(`admin_config_rw: false`). 그래서 이 증보는 Hermes 설정을 바꾸지 않고 **요청별 지정**만 쓴다.
+
+### M1. 핀에 `provider`와 `model`을 한 쌍으로 저장한다 (migration 144)
+
+- `agent_provider_pin`에 `model_provider text NULL`, `model_id text NULL`을 더한다(ADR-0147 증보 2026-10-16의 표 확장). 핀은 JSON 칸이 없는 평평한 표라 **마이그레이션이 필요**하다. 모든 문장이 가드되어 재적용해도 무해하고, 기존 행은 둘 다 NULL이다.
+- CHECK 세 개: (a) 한 쌍이어야 한다(둘 다 NULL이거나 둘 다 값), (b) 값은 `kind = 'operator_env'` 핀에만, (c) 형식(`provider` = `[a-z0-9][a-z0-9._-]{0,63}`, `model` = 영숫자로 시작하고 `._:/@+-`만 쓰는 최대 128자). `upsert_agent_pin`은 충돌 갱신 때 둘을 NULL로 되돌린다 — 다른 핀으로 바꾸면 이전 제공자가 따라붙을 수 없다. 쌍은 `set_agent_pin_model`만 쓴다.
+- **하위 호환(핵심 불변식).** 둘 다 NULL = 오늘과 같다. 워커는 `agent.model`을 그대로 보내고 `provider`를 싣지 않는다. 실제 모델 id를 `agent.model`에 적으면서 핀에 제공자가 없으면 Hermes가 그 모델을 무시하고 기본 모델로 답하므로 **그 조합은 만들지 않는다**: 한 트랜잭션에서 핀의 쌍과 `agent.model`(카드·사용량 표시용 거울)을 함께 쓴다. 반쪽 쌍이 읽혀도 워커는 쌍으로 취급하지 않는다.
+
+### M2. 서버가 Hermes `/api/model/options`를 읽어 「로그인된 제공자의 모델」만 선택지로 노출한다
+
+- **D2의 고정 요청 목록이 하나 늘어난다.** 호출은 같은 `momo-provider-probe` 경로(같은 `EgressPolicy`, 연결 시점 resolver, redirect 없음, 프록시 없음, 같은 선언 호스트, 같은 bearer)이고 `GET {origin}/api/model/options` **읽기 하나**다. 경로는 상수이며 `/v1` 아래가 아니라 origin 아래다. 선언 URL의 경로는 계속 비거나 `/v1`만 허용한다. `/health`·`/v1/models`·`/v1/toolsets`는 그대로다.
+- 응답 본문은 크레이트 밖으로 나가지 않는다. 나가는 것은 **정제된 제공자 슬러그**(위 형식)와 **정제된 모델 id**(`sanitized_model_id`, 64바이트, 목록당 최대 100개, 중복 제거, bearer의 8바이트 조각을 담은 id 제외)뿐이다. Hermes가 준 표시 이름·설명·가격은 쓰지 않는다. 표시명은 oort 쪽 표(UXUI)가 슬러그로 매핑한다.
+- **`authenticated`가 불리언 `true`인 제공자만** 남긴다(문자열 `"true"`·누락·`false`는 탈락). 로그인되지 않은 제공자가 모델 목록을 들고 있어도 노출하지 않는다.
+- 새 읽기 요청은 `probe`가 아니라 모델 라우트(M3)와 connect만 보낸다. `probe`는 여전히 두 요청(+ 요청 시 toolsets)이다.
+
+### M3. API (운영자 전용, D3의 게이트 그대로)
+
+| 라우트 | 하는 일 |
+|---|---|
+| `GET /v1/workspaces/{ws}/cohosted-agent/models` | 지금 모델(`current`)·핀 여부(`pinned`)·Hermes의 현재 모델(`hermesCurrent`)과, 로그인된 제공자별 전체 모델 목록(모델마다 `featured`·`current`). |
+| `PUT /v1/workspaces/{ws}/cohosted-agent/model` | `{provider, model}`. 목록 밖이면 `422 cohosted_model_not_offered`, 성공하면 핀과 `agent.model`을 갱신하고 감사를 남긴다. |
+| `POST …/cohosted-agent/connect` (변경) | 핀에 별칭 대신 **Hermes의 현재 provider와 model**을 적는다. |
+
+- 두 새 라우트도 `require_instance_operator_write`가 **첫 줄**이다(비운영자 `403`, 아무것도 보내지 않고 쓰지 않는다). 선언이 준비되지 않았으면 `409 cohosted_agent_not_ready`, 연결된 에이전트가 없으면 `409 cohosted_agent_not_connected`, Hermes 목록을 못 읽으면 `502 cohosted_models_unavailable`(본문·원인 문자열 없음). 호출량은 운영자별 별도 버킷(분당 20회)이다.
+- **선택 제한은 서버가 한다.** PUT은 **매번 Hermes를 새로 읽는다.** 클라이언트가 준 목록·이전 응답을 믿지 않는다. `(provider, model)`이 로그인된 제공자의 목록에 정확히 있어야 하고, 아니면 `422`이며 아무것도 쓰지 않는다(철자가 이상한 슬러그·id는 소켓 없이 같은 `422`). 본문은 닫혀 있다(`deny_unknown_fields`; URL·키·경로를 받지 않는다). 읽기와 쓰기 사이에 연결이 사라지면 쓰기 트랜잭션 안에서 다시 확인해 `409`.
+- **connect는 읽기 실패로 거부하지 않는다.** 옵션 읽기가 실패하거나 모양이 다르면 쌍 없이(오늘과 같은 별칭 `hermes-agent`) 연결된다. 이 경우 `GET …/models`는 `502`로 사실대로 말하고 목록을 지어내지 않는다.
+- 감사: `agent.cohosted.model_changed`(스키마 `momo.cohosted_agent.model.audit.v0`)에 새·이전 `provider`·`model` 슬러그. 키·URL·본문은 없다. connect의 `agent.provider_pin.updated` 감사에도 쌍이 들어간다.
+
+### M4. 워커는 `provider`와 `model`을 함께 보낸다
+
+- `operator_env` 핀이 쌍을 가지면, 워커는 그 턴의 모델을 핀의 `model`로 하고 `/v1/chat/completions` 본문에 `"provider": "<slug>"`를 함께 싣는다. 쌍은 턴마다 에이전트 행에서 읽으므로(#3873) 잡을 큐에 넣은 뒤 고른 모델도 그 턴에 적용된다. 한 턴은 요청 하나이므로 한 실행 안에서 모델이 바뀌지 않는다.
+- `provider`는 **chat/completions 선만** 쓴다. Responses·Anthropic Messages 선은 이 필드를 만들지 않는다(시험으로 고정). 공백 슬러그는 보내지 않는다(Hermes가 빈 provider를 「없음」으로 읽어 model을 무시하므로).
+- `team_link` 핀·핀 없는 에이전트·소유자 키 턴은 영향이 없다.
+
+### M5. 기본값과 `featured` 규칙
+
+- **기본값은 Hermes의 현재 모델이다.** connect가 그 값을 핀에 적고, 핀에 쌍이 없으면 `current`는 Hermes의 현재 값이다. oort가 기본 모델을 따로 정하거나 하드코딩하지 않는다.
+- `featured`(성재 「추린 목록」): 제공자마다 **Hermes가 준 순서의 앞 3개** + **지금 쓰는 모델은 항상**. 모델 이름을 코드에 넣지 않는다 — Hermes는 제공자별로 최신 세대의 대표 등급부터 나열하므로 「앞 몇 개」가 곧 대표 모델이고, 새 모델이 나와도 배포 없이 따라온다. 개수(`FEATURED_PER_PROVIDER = 3`)는 코드 상수다. UI는 featured를 기본으로 보이고 「전체 보기」로 나머지를 연다. 서버 응답은 항상 전체 목록이다(선택 제한은 전체 목록 기준).
+- `claude-fable-5.1`처럼 oort 쪽에서 쓰지 않을 모델이 Hermes 목록에 있을 수 있다. 서버는 **차단 목록을 지어내지 않는다.** Hermes가 로그인된 계정으로 줄 수 있다고 한 것을 그대로 노출한다(owner 미결정으로 남긴다: 필요하면 운영자 허용 목록을 별도 결정으로).
+
+### 보안 경계와 egress 가드(ADR-0004 증보 5) 영향
+
+- **가드는 목적지를 본다.** 증보 5의 두 지점(저장 시 `validated_base_url`, 연결 시 `GuardedResolver`)은 호스트·주소만 판정한다. 요청 본문의 `provider`는 목적지를 바꾸지 못한다: 같은 `HERMES_BASE_URL`의 같은 호스트로 간다. `provider`는 비밀이 아닌 **라우팅 슬러그**이며 자격이 아니다. 새 URL·호스트·키를 받는 입력이 없다.
+- 시험으로 고정한다: (a) 운영자 opt-in으로 허용된 Hermes에 `provider`가 든 본문이 통과해 도달하고, (b) 같은 본문이 사설 주소에서는 증보 5대로 `EgressDenied`이며 본문이 도달하지 않고(슬러그가 목적지를 열어 주지 않는다), (c) 새 옵션 읽기 GET도 같은 가드 클라이언트를 쓰며 opt-in 없는 사설 주소에서는 요청 0건.
+- **선택 우회 없음.** 운영자라도 목록 밖 `(provider, model)`을 쓸 수 없다(`422`). 임의 문자열이 Hermes로 가는 길은 철자 검사 → 새 목록 → 정확 일치 → DB CHECK의 네 겹이다.
+- **비밀 경계 불변.** 구독 OAuth 토큰·bearer는 oort를 지나가지 않는다(ADR-0004 증보 6·7). 새 응답·감사·로그에는 정제된 슬러그와 모델 id뿐이고 `HERMES_API_KEY`·Hermes 본문·표시 이름은 없다.
+- **과금·약관.** 제공자를 바꾸면 다른 구독·키에서 사용량이 나간다(토큰 수 차이로 다른 제공자 처리까지는 확인했고 어느 계정이 과금되는지는 보지 않았다 — `runtime-unverified`). 약관 적합성은 이전 증보대로 운영자 몫이다.
+
+### 구현 슬라이스
+
+1. **이 PR(서버·워커):** migration 144, `momo-settings`(핀 쌍), `momo-provider-probe`(옵션 읽기·정제), 서버 라우트 둘과 connect 변경, 워커 어댑터(`ChatRequest.provider`), OpenAPI(operator 명세), 시험.
+2. **별도 이슈(UXUI):** 설정 › AI 연결의 모델 고르기 화면(featured 기본·전체 보기·표시명 표). 이 PR은 화면을 만들지 않는다.
+
+### red proof (해당 분기를 지우면 실패해야 한다)
+
+1. 목록 밖 `(provider, model)`은 `422`이고 핀·`agent.model`·감사가 그대로다 — 멤버십 검사를 지우면 실패. 로그인 안 된 제공자(모델을 든 것 포함)는 노출·선택 모두 불가.
+2. 비운영자(워크스페이스 admin·타 테넌트) `403`이고 Hermes에 요청이 0건 — 게이트 줄을 지우면 실패.
+3. 핀의 쌍이 있으면 요청 본문에 `provider`와 `model`이 함께 실린다 — 본문 삽입을 지우면 실패. 쌍이 없으면 `provider` 키가 없고 모델은 오늘과 같다. Responses·Anthropic 선에는 `provider`가 없다.
+4. PUT은 매번 새로 읽는다 — 읽은 뒤 Hermes가 로그아웃되면 같은 PUT이 `422`, 읽을 수 없으면 `502`. 캐시를 쓰면 실패.
+5. 옵션 읽기 실패(500·잘못된 모양)에도 connect는 `201`이고 핀의 쌍은 NULL, `agent.model`은 `hermes-agent`.
+6. 표 CHECK: 반쪽 쌍·`team_link`의 쌍·잘못된 슬러그/id는 저장되지 않고, 재핀은 쌍을 지운다.
+7. 가드: 위 「보안 경계」 (a)(b)(c).
+
+### 바뀌지 않는 것
+
+D1·D3~D9, K1~K7, `HERMES_API_KEY` 의미, 게이트웨이 SSE 경로(D5), oort가 토큰을 소유·저장하지 않는다는 불변식, `lockgate`(도구 잠금) 규칙, `probe`가 보내는 요청(두 개 + 요청 시 toolsets), Hermes 설정(`hermes-kwak` 포함)과 `garam-api`.

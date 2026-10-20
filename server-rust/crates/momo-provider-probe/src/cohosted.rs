@@ -35,6 +35,12 @@ pub const COHOSTED_BASE_PATH_UNSUPPORTED: &str = "cohosted_base_path_unsupported
 const HEALTH_PATH: &str = "/health";
 const MODELS_PATH: &str = "/v1/models";
 const TOOLSETS_PATH: &str = "/v1/toolsets";
+/// #4143 (ADR-0203 증보 2026-10-20 M2): the fourth fixed read-only GET, issued
+/// only by [`CohostedAgentProbe::read_model_options`] and only on the same host.
+/// It lives at the origin, **not** under `/v1`.
+const MODEL_OPTIONS_PATH: &str = "/api/model/options";
+/// Providers / models kept from one options answer; the rest is dropped.
+const MAX_OPTION_PROVIDERS: usize = 32;
 
 /// The toolsets ADR-0203 D6 requires off. Only these names are ever reported.
 const DANGEROUS_TOOLSETS: [&str; 3] = ["terminal", "code_execution", "browser"];
@@ -115,10 +121,156 @@ impl CohostedReport {
     }
 }
 
+/// One `(provider, model)` pair, both sanitized (see [`provider_slug`] and
+/// `momo_settings::sanitized_model_id`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelChoice {
+    pub provider: String,
+    pub model: String,
+}
+
+/// One **logged-in** provider and the models Hermes lists for it, in Hermes's
+/// own order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderModels {
+    pub provider: String,
+    pub models: Vec<String>,
+}
+
+/// `GET /api/model/options`, reduced to slugs. Carries no text from the agent
+/// beyond sanitized provider slugs and model ids, and **only providers Hermes
+/// marks `authenticated: true`**.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelOptionsReport {
+    /// `Ok` only when the answer had the documented shape.
+    pub outcome: ProbeOutcome,
+    pub reason: Option<String>,
+    /// Requests that left this process (0 when nothing was dialled).
+    pub requests_sent: u8,
+    /// Hermes's current provider and model (its top-level `provider` / `model`),
+    /// when both are usable slugs.
+    pub current: Option<ModelChoice>,
+    pub providers: Vec<ProviderModels>,
+}
+
+impl ModelOptionsReport {
+    pub fn unavailable(outcome: ProbeOutcome, reason: &str) -> ModelOptionsReport {
+        ModelOptionsReport {
+            outcome,
+            reason: Some(reason.to_string()),
+            requests_sent: 0,
+            current: None,
+            providers: Vec::new(),
+        }
+    }
+
+    /// Whether `provider` is logged in and lists `model`. The one membership
+    /// question the model-choice route asks.
+    pub fn lists(&self, provider: &str, model: &str) -> bool {
+        self.providers
+            .iter()
+            .any(|p| p.provider == provider && p.models.iter().any(|m| m == model))
+    }
+}
+
+/// A Hermes provider slug (`anthropic`, `openai-codex`, `openrouter`): lowercase
+/// alphanumerics with `.`, `_`, `-`, at most 64 bytes. Matches migration 144's
+/// CHECK, so a slug that passes here can always be stored.
+pub fn provider_slug(raw: &str) -> Option<String> {
+    let slug = raw.trim();
+    let first = slug.chars().next()?;
+    if slug.len() > 64 || !(first.is_ascii_lowercase() || first.is_ascii_digit()) {
+        return None;
+    }
+    slug.chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-'))
+        .then(|| slug.to_string())
+}
+
+/// Parse an options body. Pure, so the shape is tested without a socket.
+///
+/// `{"model": "...", "provider": "...", "providers": [{"slug": "...",
+/// "authenticated": true, "models": ["..."] }]}` — a model entry may also be an
+/// object with an `id`. A provider whose `authenticated` is anything but the
+/// boolean `true` is dropped, as is one with no usable model. `secret` is the
+/// bearer: an id repeating any 8-byte piece of it is dropped like in
+/// [`crate::model_ids`].
+pub fn parse_model_options(value: &serde_json::Value, secret: &str) -> ModelOptionsReport {
+    let mut report = ModelOptionsReport::unavailable(ProbeOutcome::Ok, "");
+    report.reason = None;
+    let Some(rows) = value.get("providers").and_then(serde_json::Value::as_array) else {
+        return ModelOptionsReport::unavailable(ProbeOutcome::Unknown, INVALID_RESPONSE_REASON);
+    };
+    let leaks = |id: &str| crate::id_repeats_secret(id, secret);
+    for row in rows {
+        if report.providers.len() == MAX_OPTION_PROVIDERS {
+            break;
+        }
+        if row.get("authenticated") != Some(&serde_json::Value::Bool(true)) {
+            continue;
+        }
+        let Some(provider) = row
+            .get("slug")
+            .and_then(serde_json::Value::as_str)
+            .and_then(provider_slug)
+        else {
+            continue;
+        };
+        if report.providers.iter().any(|p| p.provider == provider) {
+            continue;
+        }
+        let mut models: Vec<String> = Vec::new();
+        for item in row
+            .get("models")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let raw = item
+                .as_str()
+                .or_else(|| item.get("id").and_then(serde_json::Value::as_str));
+            let Some(id) = raw.and_then(momo_settings::sanitized_model_id) else {
+                continue;
+            };
+            if leaks(&id) || models.contains(&id) {
+                continue;
+            }
+            if models.len() == momo_settings::MAX_PROBE_MODEL_IDS {
+                break;
+            }
+            models.push(id);
+        }
+        if !models.is_empty() {
+            report.providers.push(ProviderModels { provider, models });
+        }
+    }
+    report.current = match (
+        value
+            .get("provider")
+            .and_then(serde_json::Value::as_str)
+            .and_then(provider_slug),
+        value
+            .get("model")
+            .and_then(serde_json::Value::as_str)
+            .and_then(momo_settings::sanitized_model_id),
+    ) {
+        (Some(provider), Some(model)) => Some(ModelChoice { provider, model }),
+        _ => None,
+    };
+    report
+}
+
 /// The sealed surface momo-server calls for the co-hosted agent.
 #[async_trait]
 pub trait CohostedAgentProbe: Send + Sync {
     async fn probe_cohosted(&self, target: &CohostedTarget, with_toolsets: bool) -> CohostedReport;
+
+    /// `GET {origin}/api/model/options` on the declared host (#4143). The default
+    /// dials nothing, so a probe that predates this method keeps compiling and
+    /// reports "no options" (callers then behave exactly as before #4143).
+    async fn read_model_options(&self, _target: &CohostedTarget) -> ModelOptionsReport {
+        ModelOptionsReport::unavailable(ProbeOutcome::Unknown, INVALID_RESPONSE_REASON)
+    }
 }
 
 /// `(origin, host)` for the declared URL, or `None` when the base path is not
@@ -408,6 +560,53 @@ impl CohostedAgentProbe for GuardedProviderProbe {
         }
         report.latency_ms = elapsed_ms(started);
         report
+    }
+
+    async fn read_model_options(&self, target: &CohostedTarget) -> ModelOptionsReport {
+        let Some((origin, host)) = origin_of(&target.base_url) else {
+            return ModelOptionsReport::unavailable(
+                ProbeOutcome::Unknown,
+                COHOSTED_BASE_PATH_UNSUPPORTED,
+            );
+        };
+        match self
+            .cohosted_get(
+                &format!("{origin}{MODEL_OPTIONS_PATH}"),
+                &host,
+                &target.bearer,
+            )
+            .await
+        {
+            Step::NoAnswer { reason, sent } => {
+                let mut report = ModelOptionsReport::unavailable(ProbeOutcome::Unreachable, reason);
+                report.requests_sent = u8::from(sent);
+                report
+            }
+            Step::Answered { status, body } => {
+                let (outcome, reason) = classify(status);
+                let mut report = if outcome == ProbeOutcome::Ok {
+                    match body {
+                        BodyRead::Complete(bytes) => {
+                            match serde_json::from_slice::<serde_json::Value>(&bytes) {
+                                Ok(value) => parse_model_options(&value, &target.bearer),
+                                Err(_) => ModelOptionsReport::unavailable(
+                                    ProbeOutcome::Unknown,
+                                    INVALID_RESPONSE_REASON,
+                                ),
+                            }
+                        }
+                        _ => ModelOptionsReport::unavailable(
+                            ProbeOutcome::Unknown,
+                            INVALID_RESPONSE_REASON,
+                        ),
+                    }
+                } else {
+                    ModelOptionsReport::unavailable(outcome, reason.as_deref().unwrap_or(""))
+                };
+                report.requests_sent = 1;
+                report
+            }
+        }
     }
 }
 
