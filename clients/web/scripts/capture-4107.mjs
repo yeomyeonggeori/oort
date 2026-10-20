@@ -251,9 +251,6 @@ const shoot = async (page, name, tag, locator) => {
   if (locator) await locator.screenshot({ path: resolve(OUT_DIR, `${name}-crop-1440-${tag}.png`) });
 };
 
-const noOverflow = (page) =>
-  page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-
 const writes = (server, kind) => server.log.filter((entry) => entry.kind === kind && entry.method !== "GET");
 
 /** 사이드바의 프로필 줄과 그 아래 멈춤 줄을 함께 감싼 묶음(안전 영역 묶음). */
