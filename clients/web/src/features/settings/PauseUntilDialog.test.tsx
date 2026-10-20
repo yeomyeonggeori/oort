@@ -92,11 +92,29 @@ function unmount() {
 const q = <T extends HTMLElement>(testId: string) =>
   document.querySelector(`[data-testid="${testId}"]`) as T | null;
 
-function choose(value: string) {
-  const select = q<HTMLSelectElement>("pause-until-select")!;
+const trigger = () => q<HTMLButtonElement>("pause-until-select")!;
+const listbox = () => document.querySelector<HTMLElement>('[role="listbox"]');
+const optionEls = () => [...document.querySelectorAll<HTMLElement>('[role="option"]')];
+
+function openList() {
+  if (listbox()) return;
   act(() => {
-    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set?.call(select, value);
-    select.dispatchEvent(new Event("change", { bubbles: true }));
+    trigger().dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+}
+
+function choose(value: string) {
+  openList();
+  const option = optionEls().find((o) => o.dataset.value === value)!;
+  act(() => {
+    option.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+}
+
+function pressKey(key: string) {
+  const target = listbox() ?? trigger();
+  act(() => {
+    target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
   });
 }
 
@@ -114,24 +132,88 @@ async function click(testId: string) {
   });
 }
 
-const optionTexts = () =>
-  [...(q<HTMLSelectElement>("pause-until-select")?.options ?? [])].map((o) => o.textContent);
+const optionTexts = () => {
+  openList();
+  return optionEls().map((o) => o.textContent);
+};
 
 describe("PauseUntilDialog 목록 (ADR-0204 D2)", () => {
-  it("자리표시자 다음에 여섯 선택이 순서대로 서고, 끝 시각이 곁들여진다", () => {
+  it("자리표시자가 단추에 서고 여섯 선택이 순서대로 목록에 서며, 끝 시각은 라벨 아래 줄이다", () => {
     mount();
+    expect(trigger().textContent).toBe("기한을 고르세요");
+    expect(trigger().dataset.value).toBe("");
     expect(optionTexts()).toEqual([
-      "기한을 고르세요",
-      "30분 · 오후 9:37까지",
-      "1시간 · 오후 10:07까지",
-      "2시간 · 오후 11:07까지",
-      "내일 오전 9시까지 · 10월 17일(토)",
-      "다음 주 월요일 오전 9시까지 · 10월 19일(월)",
+      "30분오후 9:37까지",
+      "1시간오후 10:07까지",
+      "2시간오후 11:07까지",
+      "내일 오전 9시까지10월 17일(토)",
+      "다음 주 월요일 오전 9시까지10월 19일(월)",
       "직접 고르기",
     ]);
-    const first = q<HTMLSelectElement>("pause-until-select")!.options[0];
-    expect(first.disabled).toBe(true);
-    expect(q<HTMLSelectElement>("pause-until-select")!.value).toBe("");
+  });
+
+  it("앱이 그린 listbox 다: 네이티브 select 가 아니고, combobox·listbox·option 의미를 갖는다", () => {
+    mount();
+    expect(trigger().tagName).toBe("BUTTON");
+    expect(document.querySelector("select")).toBeNull();
+    expect(trigger().getAttribute("role")).toBe("combobox");
+    expect(trigger().getAttribute("aria-haspopup")).toBe("listbox");
+    expect(trigger().getAttribute("aria-expanded")).toBe("false");
+    openList();
+    expect(trigger().getAttribute("aria-expanded")).toBe("true");
+    expect(trigger().getAttribute("aria-controls")).toBe(listbox()!.id);
+    expect(optionEls().every((o) => o.getAttribute("aria-selected") === "false")).toBe(true);
+  });
+
+  it("고른 항목은 aria-selected 이고 단추에 「라벨 · 끝 시각」으로 읽힌다", () => {
+    mount();
+    choose("1h");
+    expect(trigger().textContent).toBe("1시간 · 오후 10:07까지");
+    expect(trigger().dataset.value).toBe("1h");
+    expect(listbox()).toBeNull();
+    openList();
+    expect(optionEls().filter((o) => o.getAttribute("aria-selected") === "true").map((o) => o.dataset.value)).toEqual(["1h"]);
+  });
+
+  it("키보드: ↓ 로 열고, ↑↓ 로 움직이고, Enter 로 고른다", async () => {
+    mount();
+    pressKey("ArrowDown");
+    expect(listbox()).not.toBeNull();
+    const activeValue = () =>
+      optionEls().find((o) => o.id === listbox()!.getAttribute("aria-activedescendant"))?.dataset.value;
+    expect(activeValue()).toBe("30m");
+    pressKey("ArrowDown");
+    pressKey("ArrowDown");
+    expect(activeValue()).toBe("2h");
+    pressKey("ArrowUp");
+    expect(activeValue()).toBe("1h");
+    pressKey("End");
+    expect(activeValue()).toBe("custom");
+    pressKey("ArrowDown");
+    expect(activeValue()).toBe("custom");
+    pressKey("Home");
+    expect(activeValue()).toBe("30m");
+    pressKey("ArrowDown");
+    pressKey("Enter");
+    expect(listbox()).toBeNull();
+    expect(trigger().dataset.value).toBe("1h");
+  });
+
+  it("키보드: Esc 는 목록만 닫고 다이얼로그는 열어 두며, 포커스는 단추로 돌아온다", async () => {
+    const onOpenChange = vi.fn();
+    mount({ onOpenChange });
+    openList();
+    expect(document.activeElement).toBe(listbox());
+    await act(async () => {
+      listbox()!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    });
+    expect(listbox()).toBeNull();
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(q("pause-until-dialog")).not.toBeNull();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(document.activeElement).toBe(trigger());
   });
 
   it("「직접 끌 때까지」도 「기한 없음」도 고를 수 없다", () => {
@@ -144,9 +226,8 @@ describe("PauseUntilDialog 목록 (ADR-0204 D2)", () => {
 
   it("일요일에는 「내일」과 같은 시각인 「다음 주 월요일」을 뺀다", () => {
     mount({ nowMs: SUN_1000 });
-    const select = q<HTMLSelectElement>("pause-until-select")!;
-    expect([...select.options].map((o) => o.value)).toEqual([
-      "",
+    openList();
+    expect(optionEls().map((o) => o.dataset.value)).toEqual([
       "30m",
       "1h",
       "2h",
@@ -157,8 +238,7 @@ describe("PauseUntilDialog 목록 (ADR-0204 D2)", () => {
 
   it("라벨이 선택 칸에 걸려 있고 제목과 설명이 다이얼로그를 설명한다", () => {
     mount({ kind: "dnd" });
-    const select = q<HTMLSelectElement>("pause-until-select")!;
-    const label = document.querySelector(`label[for="${select.id}"]`);
+    const label = document.querySelector(`label[for="${trigger().id}"]`);
     expect(label?.textContent).toBe("기한");
     const dialog = q("pause-until-dialog")!;
     expect(dialog.getAttribute("aria-labelledby")).toBeTruthy();
@@ -228,10 +308,10 @@ describe("PauseUntilDialog 확인", () => {
   it("닫혔다 다시 열면 지난번 선택이 눌려 있지 않다", () => {
     const view = mount();
     choose("2h");
-    expect(q<HTMLSelectElement>("pause-until-select")!.value).toBe("2h");
+    expect(trigger().dataset.value).toBe("2h");
     view.rerender({ open: false });
     view.rerender({ open: true });
-    expect(q<HTMLSelectElement>("pause-until-select")!.value).toBe("");
+    expect(trigger().dataset.value).toBe("");
     expect(q<HTMLButtonElement>("pause-until-confirm")!.disabled).toBe(true);
   });
 });
@@ -371,7 +451,9 @@ describe("PauseUntilDialog 네 상태", () => {
     const onConfirm = vi.fn();
     mount({ offline: true, onConfirm });
     expect(q("pause-until-offline")!.textContent).toContain("연결이 끊겨");
-    expect(q<HTMLSelectElement>("pause-until-select")!.disabled).toBe(true);
+    expect(trigger().disabled).toBe(true);
+    openList();
+    expect(listbox()).toBeNull();
     expect(q<HTMLButtonElement>("pause-until-confirm")!.disabled).toBe(true);
     await click("pause-until-confirm");
     expect(onConfirm).not.toHaveBeenCalled();
