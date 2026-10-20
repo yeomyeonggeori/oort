@@ -310,6 +310,93 @@ describe("CohostedAgentCard", () => {
     });
   });
 
+  describe("모델 구획 (#4145)", () => {
+    const MODELS = {
+      schema: "momo.cohosted_agent.models.v0",
+      agentId: "a1",
+      pinned: true,
+      current: { provider: "anthropic", model: "claude-sonnet-5-5" },
+      providers: [{ provider: "anthropic", models: [{ id: "claude-sonnet-5-5", featured: true, current: true }] }],
+    };
+    const serve = (connected: boolean, models: unknown = MODELS) => (path: string, init?: RequestInit) => {
+      if (path.endsWith("/models")) return typeof models === "function" ? (models as () => Promise<unknown>)() : Promise.resolve(models);
+      if (path.endsWith("/probe")) return Promise.resolve(PROBE);
+      if (path.endsWith("/connect")) {
+        return Promise.resolve({ schema: "momo.cohosted_agent.connect.v0", agentId: "a1", displayName: "Hermes", handle: "hermes" });
+      }
+      void init;
+      return Promise.resolve({ ...STATUS, toolsLockAttested: true, connectable: !connected, ...(connected ? { connectedAgentId: "a1" } : {}) });
+    };
+
+    // 처음 한 번 창(#4113)이 초점을 잡고 있으면 초점 시험이 흐려진다: 먼저 닫는다.
+    const closePrompt = async () => {
+      await waitFor(() => expect(document.querySelector("[data-testid='ai-cohosted-prompt']")).not.toBeNull());
+      await act(async () => document.querySelector<HTMLElement>("[data-testid='ai-cohosted-prompt-later']")?.click());
+      await waitFor(() => expect(document.querySelector("[data-testid='ai-cohosted-prompt']")).toBeNull());
+    };
+
+    it("연결된 카드는 지금 답하는 모델을 말하고, 연결 전에는 모델을 읽지도 않는다", async () => {
+      api.request.mockImplementation(serve(false));
+      mount();
+      await until("ai-cohosted-found");
+      expect(calls().some((c) => c.endsWith("/models"))).toBe(false);
+      act(() => root?.unmount());
+      host?.remove();
+      api.request.mockImplementation(serve(true));
+      mount();
+      const now = await until("ai-cohosted-model-now");
+      expect(now.textContent).toBe("Claude Sonnet 5.5 · Anthropic");
+    });
+
+    it("연결 직후에는 「Hermes를 연결했어요」 다음에 「어떤 모델로 쓸까요?」를 묻고 초점이 그 구획으로 간다", async () => {
+      api.request.mockImplementation(serve(false));
+      mount();
+      await until("ai-cohosted-found");
+      await closePrompt();
+      api.request.mockImplementation(serve(true));
+      await act(async () => q("ai-cohosted-connect")?.click());
+      await until("ai-cohosted-connected-notice");
+      await until("ai-cohosted-model-now");
+      expect(q("ai-cohosted-model")?.querySelector("h4")?.textContent).toBe("어떤 모델로 쓸까요?");
+      expect(document.activeElement).toBe(q("ai-cohosted-model-anchor"));
+    });
+
+    it("이미 연결된 채 열면 묻지 않고 제목은 「모델」이다", async () => {
+      api.request.mockImplementation(serve(true));
+      mount();
+      await until("ai-cohosted-model-now");
+      expect(q("ai-cohosted-model")?.querySelector("h4")?.textContent).toBe("모델");
+    });
+
+    it("모델 구획이 보이지 않는 서버(403)에서는 연결 직후 초점이 연결됨 줄로 간다", async () => {
+      const gone = () => Promise.reject(new ApiError(403, "no"));
+      api.request.mockImplementation(serve(false, gone));
+      mount();
+      await until("ai-cohosted-found");
+      await closePrompt();
+      api.request.mockImplementation(serve(true, gone));
+      await act(async () => q("ai-cohosted-connect")?.click());
+      await until("ai-cohosted-connected");
+      await waitFor(() => expect(document.activeElement).toBe(q("ai-cohosted-connected")));
+      expect(q("ai-cohosted-model")).toBeNull();
+    });
+
+    it("모델 목록이 말한 로그인된 제공자는 모델 인증 블록에서 명령 없이 접힌다", async () => {
+      api.request.mockImplementation((path: string, init?: RequestInit) =>
+        path.includes("/model-login")
+          ? Promise.reject(new ApiError(409, "off", "login_relay_off"))
+          : serve(true)(path, init)
+      );
+      mount();
+      await until("model-login-shell");
+      await until("ai-cohosted-model-now");
+      await waitFor(() => expect(q("model-login-in-anthropic")).not.toBeNull());
+      const shell = q("model-login-shell");
+      expect(shell?.textContent).not.toContain("hermes auth add anthropic");
+      expect(shell?.textContent).toContain("hermes auth add openai-codex");
+    });
+  });
+
   describe("first-time prompt (#4113)", () => {
     const attested = (path: string, probe: object = PROBE) =>
       path.endsWith("/probe") ? Promise.resolve(probe) : Promise.resolve({ ...STATUS, toolsLockAttested: true, connectable: true });
