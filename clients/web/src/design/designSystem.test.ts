@@ -341,6 +341,7 @@ describe("반경 축", () => {
 const CONTROL_PRIMITIVES = [
   "button.tsx",
   "input.tsx",
+  "listbox-select.tsx",
   "segmented-control.tsx",
   "select.tsx",
   "switch.tsx",

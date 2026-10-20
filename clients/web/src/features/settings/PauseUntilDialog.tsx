@@ -26,7 +26,7 @@ import {
   type DialogFocusTarget,
 } from "@/design/ui/dialog";
 import { Input } from "@/design/ui/input";
-import { Select } from "@/design/ui/select";
+import { ListboxSelect } from "@/design/ui/listbox-select";
 import { InlineBanner } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 
@@ -44,14 +44,16 @@ import { useOffline } from "@/features/common/useOffline";
 // 부르는 쪽이 갖는다. 길이 다르기 때문이다: 서버는 방해 금지를 고를 때 일시 중지를
 // 같은 트랜잭션에서 묶어 켜므로, 방해 금지 쪽이 규칙을 따로 쓰면 묶음이 끊긴다.
 //
-// ## 왜 `Select` 인가 (시각 결정의 근거)
+// ## 왜 `ListboxSelect` 인가 (시각 결정의 근거)
 //
 // 상태 글의 만료(`SetStatusDialog`)가 이미 이 문법이다: 「만료」 `Select` 에
 // 30분·1시간·오늘까지가 있고, 「시각 고르기」를 고를 때만 날짜·시간 칸이 선다. 같은
 // 제품에서 「언제까지」를 고르는 두 자리가 다른 모양이면 사람이 한쪽을 배운 것이 다른
-// 쪽에 안 통한다. 그래서 라디오 목록을 새로 만들지 않고 같은 `Select` + 날짜·시간
-// `Input` 을 쓴다. 대신 옵션 글에 끝 시각을 붙여(「30분 · 오후 9:37까지」) 누르기 전에
-// 틀린 선택이 읽히게 한다.
+// 쪽에 안 통한다. 그래서 라디오 목록을 새로 만들지 않고 같은 닫힌 칸 + 날짜·시간
+// `Input` 을 쓴다. 다만 열리는 목록은 OS 팝업(회색 반투명 메뉴)이 아니라 앱의 메뉴·팝오버
+// 토큰으로 그리는 `ListboxSelect` 다(#4106, 성재 0.1.32 실기). 옵션 글에 끝 시각을 붙여(「30분 ·
+// 오후 9:37까지」) 누르기 전에 틀린 선택이 읽히게 하는 것은 그대로다 — 목록에서는 끝 시각이
+// 라벨 아래 흐린 줄을 갖는다.
 //
 // ## 시계
 //
@@ -98,6 +100,7 @@ export function PauseUntilDialog({
   const hookOffline = useOffline();
   const offline = offlineProp ?? hookOffline;
   const selectId = useId();
+  const selectLabelId = useId();
   const dateId = useId();
   const timeId = useId();
   const seededRef = useRef(false);
@@ -179,30 +182,26 @@ export function PauseUntilDialog({
         {failure && <InlineBanner message={failure} testId="pause-until-error" />}
 
         <div className="flex min-w-0 flex-col gap-1">
-          <label htmlFor={selectId} className="text-meta text-ink-muted">
+          <label id={selectLabelId} htmlFor={selectId} className="text-meta text-ink-muted">
             기한
           </label>
-          <Select
+          <ListboxSelect
             id={selectId}
+            aria-labelledby={selectLabelId}
             value={choice}
             disabled={busy}
             data-testid="pause-until-select"
-            onChange={(event) => {
-              setChoice(event.currentTarget.value as PauseUntilChoice);
+            placeholder={SELECT_PLACEHOLDER}
+            options={options.map((option) => ({
+              value: option.id,
+              label: option.label,
+              hint: option.id === "custom" ? undefined : pauseUntilHint(option.id, now),
+            }))}
+            onValueChange={(next) => {
+              setChoice(next);
               setCustomError(null);
             }}
-          >
-            <option value="" disabled>
-              {SELECT_PLACEHOLDER}
-            </option>
-            {options.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.id === "custom"
-                  ? option.label
-                  : `${option.label} · ${pauseUntilHint(option.id, now)}`}
-              </option>
-            ))}
-          </Select>
+          />
         </div>
 
         {choice === "custom" ? (

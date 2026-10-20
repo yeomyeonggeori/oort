@@ -1,0 +1,34 @@
+{
+  "open-light": {
+    "tx": 481,
+    "tw": 478,
+    "ty": 199,
+    "lx": 481,
+    "lw": 478,
+    "ly": 203,
+    "lb": 480,
+    "vh": 900,
+    "bg": "rgb(255, 254, 252)",
+    "radius": "14px",
+    "shadow": true
+  },
+  "custom-light": {
+    "overflow": 0
+  },
+  "open-dark": {
+    "tx": 481,
+    "tw": 478,
+    "ty": 199,
+    "lx": 481,
+    "lw": 478,
+    "ly": 203,
+    "lb": 480,
+    "vh": 900,
+    "bg": "rgb(27, 30, 37)",
+    "radius": "14px",
+    "shadow": true
+  },
+  "custom-dark": {
+    "overflow": 0
+  }
+}

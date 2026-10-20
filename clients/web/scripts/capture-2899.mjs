@@ -235,6 +235,12 @@ async function signIn(page, origin) {
   });
 }
 
+/** 기한 목록(#4106 이후 앱이 그리는 listbox)에서 한 항목을 마우스로 고른다. */
+async function pickUntil(page, value) {
+  await page.getByTestId("pause-until-select").click();
+  await page.locator(`[role="option"][data-value="${value}"]`).click();
+}
+
 const failures = [];
 function check(name, ok, detail = "") {
   console.log(`${ok ? "ok  " : "FAIL"} ${name}${ok ? "" : ` ${detail}`}`);
@@ -331,18 +337,22 @@ async function sceneC(browser, origin, scheme, report) {
   await dialog.waitFor({ timeout: 5000 });
   check(`c ${tag} 스위치를 눌러도 쓰지 않고 다이얼로그가 열린다`, writes(server, "notification-rules").length === 0);
   check(`c ${tag} 스위치는 꺼진 채다`, (await page.getByTestId("notification-rules-dnd").getAttribute("aria-checked")) === "false");
-  const labels = await page.getByTestId("pause-until-select").evaluate((select) => [...select.options].map((option) => option.textContent));
-  check(`c ${tag} 선택이 순서대로 여섯 + 자리표시자`, JSON.stringify(labels) === JSON.stringify([
-    "기한을 고르세요",
-    "30분 · 오후 9:37까지",
-    "1시간 · 오후 10:07까지",
-    "2시간 · 오후 11:07까지",
-    "내일 오전 9시까지 · 10월 17일(토)",
-    "다음 주 월요일 오전 9시까지 · 10월 19일(월)",
+  // #4106: 목록은 앱이 그리는 listbox 다. 열어서 옵션 글(라벨 + 끝 시각 줄)을 읽고 닫는다.
+  await page.getByTestId("pause-until-select").click();
+  await page.getByRole("listbox").waitFor();
+  const labels = (await page.getByRole("option").allTextContents()).map((t) => t.trim());
+  await page.keyboard.press("Escape");
+  await page.getByRole("listbox").waitFor({ state: "detached" });
+  check(`c ${tag} 선택이 순서대로 여섯`, JSON.stringify(labels) === JSON.stringify([
+    "30분오후 9:37까지",
+    "1시간오후 10:07까지",
+    "2시간오후 11:07까지",
+    "내일 오전 9시까지10월 17일(토)",
+    "다음 주 월요일 오전 9시까지10월 19일(월)",
     "직접 고르기",
   ]), JSON.stringify(labels));
   check(`c ${tag} 고르기 전에는 확인이 잠겨 있다`, await page.getByTestId("pause-until-confirm").isDisabled());
-  await page.getByTestId("pause-until-select").selectOption("custom");
+  await pickUntil(page, "custom");
   const date = page.getByTestId("pause-until-custom-date");
   const time = page.getByTestId("pause-until-custom-time");
   check(`c ${tag} 직접 고르기: 한 시간 뒤가 채워져 있다`, (await date.inputValue()) === "2026-10-16" && (await time.inputValue()) === "22:07");
@@ -420,7 +430,7 @@ async function sceneE(browser, origin, scheme, report) {
   const description = (await dialog.textContent()) ?? "";
   check(`e ${tag} 설명이 「알림도 함께 멈춰요」를 말한다`, description.includes("알림도 함께 멈춰요") && description.includes("방해 금지를 언제까지 켤까요?"), description);
   check(`e ${tag} 확인 단추의 이름`, ((await page.getByTestId("pause-until-confirm").textContent()) ?? "").trim() === "방해 금지 켜기");
-  await page.getByTestId("pause-until-select").selectOption("1h");
+  await pickUntil(page, "1h");
   const overflow = await noOverflow(page);
   check(`e ${tag} 가로 스크롤 없음`, overflow <= 0, String(overflow));
   await shoot(page, "dnd-dialog", tag, dialog);
@@ -478,7 +488,7 @@ async function sceneG(browser, origin, scheme) {
   await page.getByTestId("presence-option-dnd").click();
   const dialog = page.getByTestId("pause-until-dialog");
   await dialog.waitFor({ timeout: 5000 });
-  await page.getByTestId("pause-until-select").selectOption("1h");
+  await pickUntil(page, "1h");
   await page.getByTestId("pause-until-confirm").click();
   await page.waitForFunction(() => document.querySelector('[data-testid="pause-until-confirm"]')?.textContent?.includes("저장 중"), null, { timeout: 5000 });
   check(`g ${tag} 저장 중에는 취소가 잠겨 있다`, await page.getByTestId("pause-until-cancel").isDisabled());
