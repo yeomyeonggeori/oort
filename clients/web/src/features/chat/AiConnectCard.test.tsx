@@ -449,7 +449,7 @@ describe("같은 폼 · 같은 결과 문장: 설정 × 카드 (#2880)", () => {
     return Array.from(form.querySelectorAll<HTMLElement>("[data-testid]"))
       .map((el) => el.getAttribute("data-testid") ?? "")
       .map((id) => id.slice(prefix.length + 1))
-      .filter((tail) => tail !== "preset-custom" && tail !== "custom-url" && tail !== "budget-input")
+      .filter((tail) => tail !== "preset-custom" && tail !== "custom-url")
       .sort();
   }
 
@@ -459,7 +459,7 @@ describe("같은 폼 · 같은 결과 문장: 설정 × 카드 (#2880)", () => {
     );
   }
 
-  it("키 폼은 한 컴포넌트다: 칩·password 칸 속성·버튼이 같다(설정만 「직접 주소」와 「월 크레딧」 칸을 더 세운다, #3887)", async () => {
+  it("키 폼은 한 컴포넌트다: 칩·password 칸 속성·버튼이 같다(설정만 「직접 주소」 칩을 더 세운다)", async () => {
     vi.mocked(fetchProviderLink).mockResolvedValue(EMPTY_LINK);
     const settings = mountEl(createElement(AiLinkSection, { offline: false, workspaceId: WS }));
     const card = mountCard({ line: "team" });
