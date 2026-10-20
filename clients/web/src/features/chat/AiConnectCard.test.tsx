@@ -449,7 +449,7 @@ describe("같은 폼 · 같은 결과 문장: 설정 × 카드 (#2880)", () => {
     return Array.from(form.querySelectorAll<HTMLElement>("[data-testid]"))
       .map((el) => el.getAttribute("data-testid") ?? "")
       .map((id) => id.slice(prefix.length + 1))
-      .filter((tail) => tail !== "preset-custom" && tail !== "custom-url" && tail !== "budget-input")
+      .filter((tail) => tail !== "preset-custom" && tail !== "custom-url")
       .sort();
   }
 
