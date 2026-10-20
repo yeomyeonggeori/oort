@@ -8,6 +8,7 @@ import {
   TOGGLE_SIDEBAR_COMMAND_ID,
   agentRoutingCommandId,
   slashCommands,
+  commandSearchTerms,
   commandSearchValue,
   visibleCommands,
   type CommandContext,
@@ -376,10 +377,18 @@ describe("ai.connect (#2943 GC-2)", () => {
     expect(aiConnect({ canOpenLocalCard: () => false }).meta).toBe("AI 화면에서 열려요");
   });
 
-  it("옛 「AI」 이동 줄은 허브 줄로 흡수됐다", () => {
-    const ids = visibleCommands(env()).map((command) => command.id);
-    expect(ids).not.toContain("nav.settings.ai");
-    expect(ids).toContain("nav.ai.accounts");
+  it("「AI 연결」(옛 설정 화면)은 허브 줄과 별개로 팔레트에 서고 설정 AI 연결로 간다 (#4111)", () => {
+    const commands = visibleCommands(env());
+    expect(commands.map((command) => command.id)).toContain("nav.ai.accounts");
+    const line = commands.find((command) => command.id === "nav.settings.ai")!;
+    expect(line.title).toBe("AI 연결");
+    const ctx = context();
+    const result = line.run(ctx);
+    expect(ctx.navigate.mock.calls).toEqual([["/settings?section=ai"]]);
+    expect(result).toEqual({ status: "AI 연결로 이동", closesSurface: true });
+    // 검색 재료는 사람이 읽는 말뿐이다: id는 없다.
+    expect(commandSearchTerms(line)).toContain("AI 연결");
+    expect(commandSearchTerms(line).join(" ")).not.toContain("nav.");
   });
 
   it("슬래시 이름은 client 명령만 갖는다", () => {

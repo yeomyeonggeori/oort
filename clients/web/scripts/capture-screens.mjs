@@ -6870,7 +6870,8 @@ async function captureMobile(browser, scheme) {
   await assertTapTargets(page, `set-status ${scheme}`);
   await shoot(page, "set-status-dialog");
   // #1889 R2-N2: 「시각 고르기」는 390에서 다이얼로그를 키우는 유일한 분기.
-  await page.getByTestId("set-status-expiry").selectOption("custom");
+  await sceneClick(page, page.getByTestId("set-status-expiry"));
+  await sceneClick(page, page.locator('[role="option"][data-value="custom"]'));
   await page.getByTestId("set-status-custom-date").waitFor({ state: "visible" });
   await page.getByTestId("set-status-custom-time").waitFor({ state: "visible" });
   await assertTapTargets(page, `set-status custom ${scheme}`);
@@ -9993,7 +9994,8 @@ async function captureSetStatusScenes(browser, scheme) {
       await context.setOffline(true);
       await page.getByTestId("set-status-offline").waitFor({ state: "visible" });
     } else if (customExpiry) {
-      await page.getByTestId("set-status-expiry").selectOption("custom");
+      await sceneClick(page, page.getByTestId("set-status-expiry"));
+      await sceneClick(page, page.locator('[role="option"][data-value="custom"]'));
       await page.getByTestId("set-status-custom-date").waitFor({ state: "visible" });
       await page.getByTestId("set-status-custom-time").waitFor({ state: "visible" });
     } else {

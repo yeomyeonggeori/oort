@@ -47,6 +47,14 @@ describe("SettingsPageHeader", () => {
     );
   });
 
+  it("scopeVisible=false 면 칩 대신 낭독 글만 서고, 보이는 칩은 없다(#4109)", () => {
+    const h = mount(<SettingsPageHeader title="프로필" scope="workspace-member" scopeVisible={false} />);
+    expect(h.querySelector('[data-testid="settings-scope-chip"]')).toBeNull();
+    const sr = h.querySelector('[data-testid="settings-scope-sr"]') as HTMLElement;
+    expect(sr.textContent).toBe(SCOPE_LABELS["workspace-member"]);
+    expect(sr.className).toContain("sr-only");
+  });
+
   it("바뀐 제목을 보조기술이 읽도록 머리가 polite live 영역이다", () => {
     const h = mount(<SettingsPageHeader title="모양" />);
     expect(h.querySelector("header")?.getAttribute("aria-live")).toBe("polite");

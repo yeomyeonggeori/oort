@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Loader2, Monitor } from "lucide-react";
 import { Button } from "@/design/ui/button";
-import { Select } from "@/design/ui/select";
+import { ListboxSelect } from "@/design/ui/listbox-select";
 import { uuidEq, type WorkHost } from "@momo/core/lib/api";
 
 // =============================================================================
@@ -19,12 +19,12 @@ import { uuidEq, type WorkHost } from "@momo/core/lib/api";
 // 지금은 이 픽커의 유일한 호출자가 `TakeoverBlock` 이고, 문장은 거기 있다
 // (ADR-0154 D3, #1137).
 //
-// **커스텀 컨트롤이 아니다 (design-taste-web §1).** N중 택1은 플랫폼이 이미
-// 가진 형태이고, 그 프리미티브가 `design/ui/select.tsx`(= OS의 `<select>`)다.
-// 여기서 손으로 그릴 이유가 없다는 것이 이 파일의 §1 한 줄이다: 고를 것이
-// 호스트 목록이므로 타입어헤드·키보드 순회·OS가 어떤 창 폭에서도 유지하는
-// 히트 타깃이 전부 필요하고, listbox를 다시 만들면 그 셋을 JS로 다시 만들게
-// 된다. 이 파일이 소유하는 것은 그 프리미티브를 감싼 **어휘와 진행 상태**뿐이다.
+// **커스텀 컨트롤이 아니다 (design-taste-web §1).** N중 택1은 이 앱이 이미 가진
+// 프리미티브 `design/ui/listbox-select.tsx`(앱이 그리는 listbox, #4106·#4123·#4128)다.
+// 예전에는 OS의 `<select>`(`design/ui/select.tsx`)를 썼는데, 네이티브 팝업은 OS가
+// 그려서 이 앱의 메뉴·팝오버와 한 제품으로 읽히지 않았다(성재 0.1.32 실기,
+// 2026-10-20). 호스트는 열 대 안쪽이라 타입어헤드 없이도 충분하다. 이 파일이
+// 소유하는 것은 그 프리미티브를 감싼 **어휘와 진행 상태**뿐이다.
 //
 // v1(PR 918)은 자격 호스트마다 `variant="default"` 버튼 하나를 세웠다. 640px
 // 한 줄에서는 읽혔지만 두 번째 호출자인 320px 작업 세션 pane에서 무너진다
@@ -39,7 +39,7 @@ import { uuidEq, type WorkHost } from "@momo/core/lib/api";
 //   - 자격 호스트 수에 상한이 없다. 열 대짜리 워크스페이스에서 이 형태는 열 줄
 //     짜리 채움 벽이다.
 //
-// 그래서 **고르기와 실행을 분리한다**: 선택은 `<select>` 한 줄이 지고(선택지가
+// 그래서 **고르기와 실행을 분리한다**: 선택은 listbox 칸 한 줄이 지고(선택지가
 // 몇 개든 높이가 같다), 결정은 그 아래 채움 버튼 하나가 진다. 열린 상태에서
 // 강조를 지는 것은 그룹이 아니라 그 한 버튼이고, 토글은 ghost로 물러난다.
 //
@@ -50,7 +50,7 @@ import { uuidEq, type WorkHost } from "@momo/core/lib/api";
 //    있는 자리에서 버튼이 움직인다(MOMO-676 M-3). 그래서 글자는 바꾸지 않고
 //    **아이콘 자리**를 상설로 둔다 — 평소에는 기기 아이콘, 진행 중에는 같은
 //    16px 상자의 스피너. 확정 버튼의 라벨이 호스트 이름을 담지 않는 것도 같은
-//    이유다: 이름은 `<select>`가 말하고, 버튼은 폭이 고정된 동사만 말한다.
+//    이유다: 이름은 listbox 칸이 말하고, 버튼은 폭이 고정된 동사만 말한다.
 //    상태와 대상은 aria-busy와 접근성 이름이 나른다.
 // 2. 그룹 라벨이 눈에 보인다. v1 이전의 `role="group" aria-label`은
 //    스크린리더에만 있었고, 시각 사용자는 맨 기기명 두세 개만 봤다. 라벨은
@@ -140,20 +140,17 @@ export function HostPicker({
         {/* 요청이 나가 있는 동안 대상은 진짜로 바꿀 수 없다. 이쪽은 disabled가
             맞고(tokens §5b의 "genuinely cannot act"), 흐려져도 진행 신호를
             잃지 않는다 — 진행은 아래 버튼의 스피너와 접근성 이름이 나른다. */}
-        <Select
+        <ListboxSelect
           id={selectId}
+          aria-labelledby={labelId}
           value={chosen.id}
+          options={targets.map((host) => ({ value: host.id, label: host.displayName }))}
+          placeholder={copy.group}
           disabled={busy}
-          onChange={(event) => setPickedId(event.target.value)}
+          onValueChange={setPickedId}
           data-testid={selectTestId}
           data-host-id={chosen.id}
-        >
-          {targets.map((host) => (
-            <option key={host.id} value={host.id}>
-              {host.displayName}
-            </option>
-          ))}
-        </Select>
+        />
       </div>
       <div className="flex justify-end">
         <Button

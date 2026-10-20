@@ -27,7 +27,8 @@ export type SettingsSectionId =
   | "usage"
   | "code"
   | "updates"
-  | "ai";
+  | "ai"
+  | "aiHub";
 
 export type SettingsGroupId = "개인" | "워크스페이스" | "앱·연결";
 
@@ -58,6 +59,12 @@ export interface SettingsSectionMeta {
   /** 페이지 머리 칩. 링크 행(`link`)은 칩이 없다. */
   scope?: SettingsScope;
   /**
+   * `false` 면 칩을 눈에는 그리지 않고 낭독(sr-only)으로만 말한다. 프로필의 「이 워크스페이스에서
+   * 보여요」는 화면에서 군더더기라(성재 0.1.32 실기, #4109) 눈에서 뺐고, 보조기술 사용자에게는
+   * 범위가 계속 읽힌다. 값(`scope`)은 그대로 있어 「모든 행은 범위를 가진다」 계약이 유지된다.
+   */
+  scopeVisible?: boolean;
+  /**
    * 설정 안의 화면이 아니라 다른 화면으로 가는 행. 목차에서는 행으로 서되 눌러도
    * 설정 페이지가 바뀌지 않는다(끝 아이콘이 그 사실을 말한다). 옛 주소(`?section=ai`)
    * 로 들어오면 옛 화면이 열리고 이 행이 현재 위치로 표시된다.
@@ -78,7 +85,7 @@ export interface SettingsSectionMeta {
 }
 
 export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
-  { id: "profile", label: "프로필", group: "개인", scope: "workspace-member" },
+  { id: "profile", label: "프로필", group: "개인", scope: "workspace-member", scopeVisible: false },
   { id: "appearance", label: "모양", group: "개인", scope: "device" },
   { id: "notifications", label: "알림", group: "개인", scope: "account-device" },
   { id: "shortcuts", label: "단축키", group: "개인", scope: "device" },
@@ -104,7 +111,12 @@ export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     desktopAlways: true,
   },
   { id: "updates", label: "업데이트", group: "앱·연결", scope: "device", desktopOnly: true },
-  { id: "ai", label: "AI 허브", group: "앱·연결", link: "ai-hub" },
+  // 「AI 연결」은 옛 AI 연결 화면(`?section=ai`, 같은 서버 Hermes 카드 포함)이다 — 목차의
+  // 한 화면으로 선다(#4111). 허브는 그 아래 링크 행이다. 앞 판은 `ai` 행이 허브로 가는
+  // 링크뿐이라 이 화면으로 가는 길이 목차에 없었다.
+  // 성재가 목차에서 이 이름으로 찾는다(#4111, 0.1.32 실기). 용어집의 「AI」 정본과 갈리는 점은 PR 본문에 적는다.
+  { id: "ai", label: "AI 연결", group: "앱·연결", scope: "workspace-mixed" }, // design-preflight-allow: #4111 PR 근거
+  { id: "aiHub", label: "AI 허브", group: "앱·연결", link: "ai-hub" },
 ];
 
 export const SETTINGS_GROUPS: SettingsGroupId[] = ["개인", "워크스페이스", "앱·연결"];
@@ -128,7 +140,7 @@ export type SettingsSectionResolution =
 
 /**
  * `?section=` 값이 무엇을 뜻하는지 푼다. 별칭은 합쳐진 페이지로, AI 허브로 옮겨 간
- * 옛 구획(`agents`·`plugins`·`webhooks`·`events`)은 그 허브 경로로 간다. `ai`는 목차에서는 허브로 가는 링크 행이지만 `?section=ai`는 옛 AI 연결 화면이 그대로 열린다(AiLinkSection, 그것을 부르는 게이트·캡처·되돌아오는 길이 많고 AI 허브 T3(ADR-0198)가 끝나면 걷는다). 목차에
+ * 옛 구획(`agents`·`plugins`·`webhooks`·`events`)은 그 허브 경로로 간다. `ai`는 목차의 「AI 연결」 화면이고(AiLinkSection, 그것을 부르는 게이트·캡처·되돌아오는 길이 많고 AI 허브 T3(ADR-0198)가 끝나면 걷는다), 허브로 가는 링크 행은 `aiHub`다. 목차에
  * 서는지(서버 표면·셸 종류)는 이 함수가 묻지 않는다 — `reachableSettingsSections`가 안다.
  */
 export function resolveSettingsSection(raw: string | null | undefined): SettingsSectionResolution {
@@ -137,7 +149,8 @@ export function resolveSettingsSection(raw: string | null | undefined): Settings
   if (moved) return { kind: "ai-hub", path: moved };
   const alias = LEGACY_SECTION_ALIAS[raw];
   if (alias !== undefined) return { kind: "section", id: alias, alias: raw };
-  if (SETTINGS_SECTIONS.some((item) => item.id === raw)) {
+  // 링크 행(`aiHub`)은 가는 곳이지 `?section=` 값이 아니다.
+  if (SETTINGS_SECTIONS.some((item) => item.id === raw && item.link === undefined)) {
     return { kind: "section", id: raw as SettingsSectionId, alias: null };
   }
   return { kind: "unknown" };
