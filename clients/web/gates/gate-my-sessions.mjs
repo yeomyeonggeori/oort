@@ -512,6 +512,33 @@ async function assertWorkConsoleList(page, expectedCount) {
 }
 
 /**
+ * 앱이 그린 listbox(#4128)의 선택지는 열려야 DOM에 있다. 열어서 읽고, 지금 고른
+ * 선택지를 다시 눌러 값을 바꾸지 않고 닫는다(Esc 는 pane 의 접힘 핸들러에도 닿는다).
+ * 네이티브 `select.options` 를 대신한다.
+ */
+async function readHostOptions(page, testId) {
+  await page.getByTestId(testId).click();
+  const list = page.getByRole("listbox");
+  await list.waitFor({ timeout: 5_000 });
+  const options = await page.getByRole("option").evaluateAll((nodes) =>
+    nodes.map((node) => ({
+      value: node.getAttribute("data-value") ?? "",
+      label: node.textContent ?? "",
+    }))
+  );
+  await page.locator('[role="option"][aria-selected="true"]').click();
+  await list.waitFor({ state: "detached", timeout: 5_000 });
+  return options;
+}
+
+/** 칸을 열어 `data-value` 가 값인 선택지를 누른다(`selectOption` 의 대신). */
+async function chooseHost(page, testId, value) {
+  await page.getByTestId(testId).click();
+  await page.locator(`[role="option"][data-value="${value}"]`).click();
+  await page.getByRole("listbox").waitFor({ state: "detached", timeout: 5_000 });
+}
+
+/**
  * 진짜 pane 측정 폭에서의 호스트 피커 (MOMO-679 2R H2).
  *
  * 320px 판 안, px-4 와 재개 블록의 px-3 을 빼고 남는 ~262px이 공용 HostPicker의
@@ -553,10 +580,7 @@ async function assertNarrowPanePicker(page, row) {
         labelFor: label?.getAttribute("for") ?? null,
         selectId: select?.getAttribute("id") ?? null,
         selectRects: select === null ? 0 : select.getClientRects().length,
-        options:
-          select === null
-            ? []
-            : Array.from(select.options).map((option) => option.textContent ?? ""),
+        options: [],
         filled:
           picker === null
             ? []
@@ -570,6 +594,9 @@ async function assertNarrowPanePicker(page, row) {
         confirmBox: box(confirm),
       };
     });
+  shape.options = (
+    await readHostOptions(page, "work-session-resume-host-select")
+  ).map((option) => option.label);
 
   // 이 단정이 실제로 좁은 pane을 재고 있는가.
   if (shape.blockWidth > 300) {
@@ -1004,9 +1031,7 @@ async function assertContinuity(context, state) {
         .toLowerCase()
         .endsWith(`/work-sessions/${orphanedSessionId}/resume`)
   );
-  await targets
-    .getByTestId("work-session-resume-host-select")
-    .selectOption(onlineHostId);
+  await chooseHost(page, "work-session-resume-host-select", onlineHostId);
   await targets.getByTestId("work-session-resume-confirm").click();
   await resumeResponse;
   if (state.resumeTargetId !== onlineHostId) {
