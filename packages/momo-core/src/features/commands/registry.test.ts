@@ -377,17 +377,19 @@ describe("ai.connect (#2943 GC-2)", () => {
     expect(aiConnect({ canOpenLocalCard: () => false }).meta).toBe("AI 화면에서 열려요");
   });
 
-  it("「AI 연결」(옛 설정 화면)은 허브 줄과 별개로 팔레트에 서고 설정 AI 연결로 간다 (#4111)", () => {
+  it("「AI 연결」은 별도 줄이 아니라 허브 「AI」 줄의 별칭이고 허브로 간다 (#4141)", () => {
     const commands = visibleCommands(env());
     expect(commands.map((command) => command.id)).toContain("nav.ai.accounts");
-    const line = commands.find((command) => command.id === "nav.settings.ai")!;
-    expect(line.title).toBe("AI 연결");
+    // 옛 설정 화면(`?section=ai`)은 걷혔다: 따로 선 줄이 없다.
+    expect(commands.map((command) => command.id)).not.toContain("nav.settings.ai");
+    const line = commands.find((command) => command.id === "nav.ai")!;
+    expect(line.title).toBe("AI");
     const ctx = context();
     const result = line.run(ctx);
-    expect(ctx.navigate.mock.calls).toEqual([["/settings?section=ai"]]);
-    expect(result).toEqual({ status: "AI 연결로 이동", closesSurface: true });
-    // 검색 재료는 사람이 읽는 말뿐이다: id는 없다.
-    expect(commandSearchTerms(line)).toContain("AI 연결");
+    expect(ctx.navigate.mock.calls).toEqual([["/ai"]]);
+    expect(result).toEqual({ status: "AI로 이동", closesSurface: true });
+    // 별칭이 검색 재료에 있어 「AI 연결」로도 찾힌다. id는 없다.
+    expect(commandSearchTerms(line)).toContain("ai 연결");
     expect(commandSearchTerms(line).join(" ")).not.toContain("nav.");
   });
 
