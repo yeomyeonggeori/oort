@@ -144,7 +144,7 @@ async function interactions(browser, origin) {
     await page.locator('[data-pane-id="p2"]').click({ position: { x: 40, y: 80 } });
     const active = await ringOf();
     check("칸을 누른 뒤(격자에 포커스) 링이 보인다", active === "solid", { active });
-    await page.getByLabel("세션 고르기").focus();
+    await page.getByRole("combobox", { name: "세션" }).focus();
     const away = await ringOf();
     check("포커스가 세션 선택으로 가면 링이 사라진다", away === "none", { away });
     await context.close();
@@ -182,7 +182,8 @@ async function interactions(browser, origin) {
   check("새로고침 뒤 비율도 남는다", kept === after, { kept, after });
 
   // 다른 세션은 따로.
-  await page.getByLabel("세션 고르기").selectOption({ index: 1 });
+  await page.getByRole("combobox", { name: "세션" }).click();
+  await page.getByRole("option").nth(1).click();
   m = await measure(page);
   check("다른 세션은 자기 배치(칸 1개)", m.panes.length === 1, { got: m.panes.length });
   await context.close();
