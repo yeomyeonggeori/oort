@@ -56,6 +56,7 @@ export function ListboxSelect<V extends string = string>({
   className,
   "data-testid": testId,
   "aria-label": ariaLabel,
+  "aria-labelledby": ariaLabelledBy,
   ...rest
 }: Omit<
   React.ButtonHTMLAttributes<HTMLButtonElement>,
@@ -71,6 +72,8 @@ export function ListboxSelect<V extends string = string>({
   className?: string;
   "data-testid"?: string;
   "aria-label"?: string;
+  /** 칸의 이름이 되는 글의 id(`<label>`). 목록(listbox)도 같은 이름을 갖는다. */
+  "aria-labelledby"?: string;
 }) {
   const reactId = React.useId();
   const listId = `${reactId}-list`;
@@ -103,6 +106,11 @@ export function ListboxSelect<V extends string = string>({
     setActive(selectedIndex >= 0 && enabled(selectedIndex) ? selectedIndex : edge(1));
     setOpen(true);
   };
+
+  // 열린 채 잠기면(저장 중·오프라인) 목록도 접는다. 잠긴 칸의 목록이 계속 눌리면 안 된다.
+  React.useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
 
   React.useEffect(() => {
     if (!open || active < 0) return;
@@ -160,6 +168,7 @@ export function ListboxSelect<V extends string = string>({
           aria-expanded={open}
           aria-controls={open ? listId : undefined}
           aria-label={ariaLabel}
+          aria-labelledby={ariaLabelledBy}
           disabled={disabled}
           data-testid={testId}
           data-value={value}
@@ -201,6 +210,7 @@ export function ListboxSelect<V extends string = string>({
           role="listbox"
           tabIndex={-1}
           aria-label={ariaLabel}
+          aria-labelledby={ariaLabelledBy}
           aria-activedescendant={active >= 0 ? optionId(active) : undefined}
           onKeyDown={onListKeyDown}
           className="flex flex-col gap-px rounded-md outline-none focus-visible:focus-ring"

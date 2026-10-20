@@ -163,6 +163,10 @@ describe("PauseUntilDialog 목록 (ADR-0204 D2)", () => {
     expect(trigger().getAttribute("aria-expanded")).toBe("true");
     expect(trigger().getAttribute("aria-controls")).toBe(listbox()!.id);
     expect(optionEls().every((o) => o.getAttribute("aria-selected") === "false")).toBe(true);
+    // 목록도 「기한」 라벨로 이름을 갖는다(이름 없는 listbox 로 읽히지 않는다).
+    const labelId = document.querySelector(`label[for="${trigger().id}"]`)!.id;
+    expect(labelId).toBeTruthy();
+    expect(listbox()!.getAttribute("aria-labelledby")).toBe(labelId);
   });
 
   it("고른 항목은 aria-selected 이고 단추에 「라벨 · 끝 시각」으로 읽힌다", () => {
@@ -457,6 +461,14 @@ describe("PauseUntilDialog 네 상태", () => {
     expect(q<HTMLButtonElement>("pause-until-confirm")!.disabled).toBe(true);
     await click("pause-until-confirm");
     expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("목록이 열린 채 잠기면(저장·오프라인) 목록이 접힌다", () => {
+    const view = mount();
+    openList();
+    expect(listbox()).not.toBeNull();
+    view.rerender({ offline: true });
+    expect(listbox()).toBeNull();
   });
 
   it("문구에 줄표가 없다", () => {

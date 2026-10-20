@@ -100,6 +100,7 @@ export function PauseUntilDialog({
   const hookOffline = useOffline();
   const offline = offlineProp ?? hookOffline;
   const selectId = useId();
+  const selectLabelId = useId();
   const dateId = useId();
   const timeId = useId();
   const seededRef = useRef(false);
@@ -181,11 +182,12 @@ export function PauseUntilDialog({
         {failure && <InlineBanner message={failure} testId="pause-until-error" />}
 
         <div className="flex min-w-0 flex-col gap-1">
-          <label htmlFor={selectId} className="text-meta text-ink-muted">
+          <label id={selectLabelId} htmlFor={selectId} className="text-meta text-ink-muted">
             기한
           </label>
           <ListboxSelect
             id={selectId}
+            aria-labelledby={selectLabelId}
             value={choice}
             disabled={busy}
             data-testid="pause-until-select"
