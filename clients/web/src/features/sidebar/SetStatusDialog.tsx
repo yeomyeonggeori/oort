@@ -42,13 +42,16 @@ import {
   type DialogFocusTarget,
 } from "@/design/ui/dialog";
 import { Input } from "@/design/ui/input";
-import { Select } from "@/design/ui/select";
+import { ListboxSelect } from "@/design/ui/listbox-select";
 import { InlineBanner } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import { EmojiPickerDialog } from "@/features/emoji/EmojiPickerDialog";
 
 // Reading this as: settings dialog (sidebar profile card) for internal team
 // users on web+Tauri, density 7/10, motion 2/10.
+
+// 값은 늘 목록 안(열릴 때 시드)이라 보이지 않는다. 칸이 이름 없는 빈 단추가 되지 않게만 둔다.
+const EXPIRY_PLACEHOLDER = "만료를 고르세요";
 
 function applyCustomToRoster(
   rows: RosterMember[] | undefined,
@@ -118,6 +121,7 @@ export function SetStatusDialog({
   const offline = useOffline();
   const textId = useId();
   const expiryId = useId();
+  const expiryLabelId = useId();
   const dateId = useId();
   const timeId = useId();
   const emojiButtonRef = useRef<HTMLButtonElement>(null);
@@ -351,24 +355,26 @@ export function SetStatusDialog({
           </div>
 
           <div className="flex min-w-0 flex-col gap-1">
-            <label htmlFor={expiryId} className="text-meta text-ink-muted">
+            <label
+              id={expiryLabelId}
+              htmlFor={expiryId}
+              className="text-meta text-ink-muted"
+            >
               {CUSTOM_STATUS_EXPIRY_LABEL}
             </label>
-            <Select
+            <ListboxSelect
               id={expiryId}
+              aria-labelledby={expiryLabelId}
               value={expiry}
               disabled={busy}
               data-testid="set-status-expiry"
-              onChange={(event) =>
-                setExpiry(event.currentTarget.value as StatusExpiryChoice)
-              }
-            >
-              {STATUS_EXPIRY_OPTIONS.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </Select>
+              placeholder={EXPIRY_PLACEHOLDER}
+              options={STATUS_EXPIRY_OPTIONS.map((option) => ({
+                value: option.id,
+                label: option.label,
+              }))}
+              onValueChange={setExpiry}
+            />
           </div>
 
           {expiry === "custom" ? (

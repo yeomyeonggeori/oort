@@ -466,7 +466,10 @@ export function SidebarSection({
     >
       <div
         className={cn(
-          "sidebar-section-head flex min-h-control-sm items-center gap-1",
+          // 호버 강조는 **머리 상자 전체**다(#4108): 라벨 버튼만 칠하면 오른쪽의 +·「…」가
+          // 강조 면 밖에 따로 떴다. 액션은 이 면 안 오른쪽(`pe-1`)에 선다. 면은 호버에만
+          // 켜진다 — 터치(`hover: none`)에서는 호버가 없어 칠해지지 않는다.
+          "sidebar-section-head flex min-h-control-sm items-center gap-1 rounded-md pe-1 hover:bg-surface-hover",
           // 손잡이가 있으면 커서가 그렇게 말한다. 없는 섹션(기본·별표·DM)의
           // 머리글은 예전 그대로다.
           headerDragProps && "cursor-grab"
@@ -486,7 +489,7 @@ export function SidebarSection({
             aria-controls={collapsed ? undefined : listId}
             title={`${title} 섹션 ${collapsed ? "펼치기" : "접기"}`}
             data-testid={`section-collapse-${sectionId}`}
-            className="sidebar-section-label w-full min-w-0 rounded-md text-left hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring"
+            className="sidebar-section-label w-full min-w-0 rounded-md text-left active:bg-surface-pressed focus-visible:focus-ring"
           >
             <Chevron className="size-4 shrink-0" aria-hidden="true" />
             <span className="min-w-0 truncate">{title}</span>

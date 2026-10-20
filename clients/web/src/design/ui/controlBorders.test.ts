@@ -56,6 +56,8 @@ const ROLE: Record<string, "control" | "filled" | "container"> = {
   "input.tsx": "control",
   // 같음. 닫힌 상태의 `<select>` 는 경계와 글자뿐이다.
   "select.tsx": "control",
+  // 같음. 앱이 목록을 그리는 닫힌 칸(#4106)도 경계와 글자뿐이라 `--line-strong` 을 진다.
+  "listbox-select.tsx": "control",
   // 담는 것. 카드 경계가 3:1 이면 목록이 격자로 읽히고, 그 안의 버튼이 카드보다
   // 조용해진다 — 위계가 뒤집힌다.
   "card.tsx": "container",
@@ -105,9 +107,9 @@ describe("#1210 D1 — 프리미티브의 테두리 토큰", () => {
   it("경계를 가진 컨트롤은 실제로 --line-strong 을 든다", () => {
     // 위 단정은 「없음」을 잰다. 이것은 「있음」을 잰다 — 누가 테두리를 통째로
     // 지워서 초록을 얻는 길을 닫는다. ADR-0189 D6 이후 경계를 진 컨트롤은 텍스트
-    // 입력 그릇 둘뿐이다.
+    // 입력 그릇(input·select)과 앱이 목록을 그리는 닫힌 칸(listbox-select, #4106)이다.
     const bordered = primitives().filter((file) => ROLE[file] === "control");
-    expect(bordered).toEqual(["input.tsx", "select.tsx"]);
+    expect(bordered).toEqual(["input.tsx", "listbox-select.tsx", "select.tsx"]);
     for (const file of bordered) {
       const source = readFileSync(`${UI_DIR}/${file}`, "utf8");
       expect(source, `${file}`).toContain("border-line-strong");

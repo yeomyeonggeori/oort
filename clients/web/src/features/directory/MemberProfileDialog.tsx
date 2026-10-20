@@ -13,7 +13,7 @@ import { otherMemberDeclaredPresenceLabel } from "@momo/core/features/presence/m
 import { useSession } from "@/app/session";
 import { useRoleLabels } from "@/features/workspace/useWorkspace";
 import { Button } from "@/design/ui/button";
-import { Select } from "@/design/ui/select";
+import { ListboxSelect } from "@/design/ui/listbox-select";
 import {
   Dialog,
   DialogContent,
@@ -109,23 +109,17 @@ function RoleChangeField({
   return (
     <div className="flex flex-wrap items-center gap-2">
       <div className="min-w-0 flex-1">
-        <Select
+        <ListboxSelect
           aria-label="역할"
           aria-busy={busy || undefined}
           aria-describedby={describedBy}
           disabled={offline}
           value={selected}
           data-testid="member-profile-role"
-          onChange={(event) =>
-            setSelected(event.currentTarget.value as MembershipRole)
-          }
-        >
-          {ROLE_KEYS.map((role) => (
-            <option key={role} value={role}>
-              {roleKeyLabel(role, labels)}
-            </option>
-          ))}
-        </Select>
+          onValueChange={(next) => setSelected(next)}
+          placeholder="역할 고르기"
+          options={ROLE_KEYS.map((role) => ({ value: role, label: roleKeyLabel(role, labels) }))}
+        />
       </div>
       <Button
         type="button"

@@ -5,7 +5,7 @@ import { ApiError } from "@momo/core/lib/api";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import { SecretInput } from "@/features/settings/SecretInput";
-import { Select } from "@/design/ui/select";
+import { ListboxSelect } from "@/design/ui/listbox-select";
 import { cn } from "@/design/lib/cn";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/design/ui/dialog";
 import { InlineBanner, Skeleton } from "@/features/common/States";
@@ -266,7 +266,6 @@ function IssueForm({ onOpenChange, workspaceId, offline, holders, presets }: Iss
   const [fieldError, setFieldError] = useState<string | null>(null);
   const keyRef = useRef<HTMLInputElement>(null);
   const labelRef = useRef<HTMLInputElement>(null);
-  const holderRef = useRef<HTMLSelectElement>(null);
   const secretRef = useRef("");
   const mutationKey = useMemo(() => ["personal-key-issue", workspaceId], [workspaceId]);
 
@@ -312,7 +311,7 @@ function IssueForm({ onOpenChange, workspaceId, offline, holders, presets }: Iss
     if (offline || issue.isPending || preset === null) return;
     if (holder === "") {
       setHolderError(COPY.form.holderRequired);
-      holderRef.current?.focus();
+      document.getElementById("ai-personal-issue-holder")?.focus();
       return;
     }
     setHolderError(null);
@@ -351,7 +350,7 @@ function IssueForm({ onOpenChange, workspaceId, offline, holders, presets }: Iss
         data-testid="ai-personal-issue-form"
       >
         <div className="flex min-w-0 flex-col gap-1">
-          <label htmlFor="ai-personal-issue-holder" className="text-meta font-semibold text-ink">
+          <label id="ai-personal-issue-holder-label" htmlFor="ai-personal-issue-holder" className="text-meta font-semibold text-ink">
             {COPY.form.holder}
           </label>
           {holders.length === 0 ? (
@@ -359,24 +358,22 @@ function IssueForm({ onOpenChange, workspaceId, offline, holders, presets }: Iss
               {COPY.form.noHolder}
             </p>
           ) : (
-            <Select
+            <ListboxSelect
               id="ai-personal-issue-holder"
-              ref={holderRef}
+              aria-labelledby="ai-personal-issue-holder-label"
               value={holder}
-              onChange={(event) => {
-                setHolder(event.target.value);
+              onValueChange={(next) => {
+                setHolder(next);
                 setHolderError(null);
               }}
               aria-invalid={holderError ? true : undefined}
+              placeholder={COPY.form.holderPlaceholder}
+              options={[
+                { value: "", label: COPY.form.holderPlaceholder },
+                ...holders.map((row) => ({ value: row.id, label: row.name })),
+              ]}
               data-testid="ai-personal-issue-holder"
-            >
-              <option value="">{COPY.form.holderPlaceholder}</option>
-              {holders.map((row) => (
-                <option key={row.id} value={row.id}>
-                  {row.name}
-                </option>
-              ))}
-            </Select>
+            />
           )}
           {holderError && (
             <p className="break-keep text-meta text-danger" role="alert">

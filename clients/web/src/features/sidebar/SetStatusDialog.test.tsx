@@ -289,8 +289,9 @@ describe("SetStatusDialog (#1889)", () => {
     expect(emoji?.textContent).not.toContain("📅");
     const expiry = document.querySelector(
       '[data-testid="set-status-expiry"]'
-    ) as HTMLSelectElement | null;
-    expect(expiry?.value).toBe("none");
+    ) as HTMLButtonElement | null;
+    expect(expiry?.dataset.value).toBe("none");
+    expect(expiry?.textContent).toBe("지우지 않음");
   });
 
   it("disables clear when there is nothing stored to clear", () => {
@@ -339,5 +340,116 @@ describe("SetStatusDialog (#1889)", () => {
     await act(async () => {
       release?.({ status: "auto" });
     });
+  });
+});
+
+const expiryTrigger = () =>
+  document.querySelector<HTMLButtonElement>('[data-testid="set-status-expiry"]')!;
+const listbox = () => document.querySelector<HTMLElement>('[role="listbox"]');
+const optionEls = () => [...document.querySelectorAll<HTMLElement>('[role="option"]')];
+
+function openExpiry() {
+  if (listbox()) return;
+  act(() => {
+    expiryTrigger().dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+}
+
+function chooseExpiry(value: string) {
+  openExpiry();
+  const option = optionEls().find((o) => o.dataset.value === value)!;
+  act(() => {
+    option.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+}
+
+function pressKey(key: string) {
+  const target = listbox() ?? expiryTrigger();
+  act(() => {
+    target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+  });
+}
+
+async function clickTestId(testId: string) {
+  await act(async () => {
+    document
+      .querySelector(`[data-testid="${testId}"]`)
+      ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+}
+
+describe("SetStatusDialog 만료 칸은 앱이 그린 listbox (#4123)", () => {
+  it("네이티브 select 가 아니고 combobox·listbox·option 의미를 갖는다", () => {
+    mountDialog();
+    expect(expiryTrigger().tagName).toBe("BUTTON");
+    expect(expiryTrigger().getAttribute("role")).toBe("combobox");
+    expect(expiryTrigger().getAttribute("aria-haspopup")).toBe("listbox");
+    // 「만료」 라벨이 칸과 목록의 이름이다.
+    const labelId = expiryTrigger().getAttribute("aria-labelledby")!;
+    expect(document.getElementById(labelId)?.textContent).toBe("만료");
+    openExpiry();
+    expect(expiryTrigger().getAttribute("aria-expanded")).toBe("true");
+    expect(listbox()!.getAttribute("aria-labelledby")).toBe(labelId);
+    expect(optionEls().map((o) => o.dataset.value)).toEqual([
+      "none",
+      "30m",
+      "1h",
+      "today",
+      "custom",
+    ]);
+    expect(optionEls().filter((o) => o.getAttribute("aria-selected") === "true").map((o) => o.dataset.value)).toEqual(["none"]);
+  });
+
+  it("30분을 고르면 저장이 지금+30분 만료로 나간다", async () => {
+    mountDialog();
+    chooseExpiry("30m");
+    expect(listbox()).toBeNull();
+    expect(expiryTrigger().textContent).toBe("30분");
+    await clickTestId("set-status-preset-meeting");
+    await clickTestId("set-status-save");
+    await vi.waitFor(() => expect(setPresenceStatus).toHaveBeenCalledTimes(1));
+    expect(setPresenceStatus).toHaveBeenCalledWith(WS, {
+      status: "auto",
+      statusEmoji: "📅",
+      statusText: "회의 중",
+      statusExpiresAtMs: NOW + 30 * 60_000,
+    });
+  });
+
+  it("키보드: ↓ 로 열고 ↓ Enter 로 고르면 1시간이 된다", () => {
+    mountDialog();
+    pressKey("ArrowDown");
+    expect(listbox()).not.toBeNull();
+    pressKey("ArrowDown");
+    pressKey("ArrowDown");
+    pressKey("Enter");
+    expect(listbox()).toBeNull();
+    expect(expiryTrigger().dataset.value).toBe("1h");
+  });
+
+  it("Esc 는 목록만 닫고 선택은 그대로다", () => {
+    mountDialog();
+    openExpiry();
+    pressKey("Escape");
+    expect(listbox()).toBeNull();
+    expect(expiryTrigger().dataset.value).toBe("none");
+  });
+
+  it("「시각 고르기」를 고르면 날짜·시간 칸이 나타난다", () => {
+    mountDialog();
+    expect(document.querySelector('[data-testid="set-status-custom-date"]')).toBeNull();
+    chooseExpiry("custom");
+    expect(document.querySelector('[data-testid="set-status-custom-date"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="set-status-custom-time"]')).not.toBeNull();
+  });
+
+  it("저장 중에는 칸이 잠기고 열리지 않는다", async () => {
+    setPresenceStatus.mockImplementation(() => new Promise(() => undefined));
+    mountDialog();
+    await clickTestId("set-status-preset-meeting");
+    await clickTestId("set-status-save");
+    await vi.waitFor(() => expect(expiryTrigger().disabled).toBe(true));
+    openExpiry();
+    expect(listbox()).toBeNull();
   });
 });

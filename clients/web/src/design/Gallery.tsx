@@ -58,6 +58,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/design/ui/popover";
+import { ListboxSelect } from "@/design/ui/listbox-select";
 import { Select } from "@/design/ui/select";
 import { SegmentedControl } from "@/design/ui/segmented-control";
 import { Switch } from "@/design/ui/switch";
@@ -882,6 +883,28 @@ function GalleryBody() {
               <option value="hermes">hermes-agent</option>
               <option value="mini">hermes-agent-mini</option>
             </Select>
+          </Export>
+        )}
+      </StateRow>
+
+      <StateRow
+        title="ListboxSelect"
+        states={FIELD_STATES}
+        note="앱이 목록을 그리는 선택 칸. 열린 목록은 Popover 판이다."
+      >
+        {(state) => (
+          <Export name="ListboxSelect">
+            <ListboxSelect
+              aria-label="갤러리 목록 선택"
+              {...controlProps(state)}
+              value="hermes"
+              placeholder="고르세요"
+              onValueChange={() => undefined}
+              options={[
+                { value: "hermes", label: "hermes-agent" },
+                { value: "mini", label: "hermes-agent-mini", hint: "더 가벼워요" },
+              ]}
+            />
           </Export>
         )}
       </StateRow>

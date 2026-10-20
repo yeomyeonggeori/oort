@@ -308,6 +308,60 @@ describe("기억 브라우저: 게스트·지난 버전", () => {
   });
 });
 
+// 필터·종류 칸은 앱이 그린 listbox 다(#4127): 단추를 눌러 열고 항목을 눌러 고른다.
+const optionEls = () => [...document.querySelectorAll<HTMLElement>('[role="option"]')];
+function pickFrom(host: HTMLElement, testId: string, value: string): void {
+  const trigger = byTestId(host, testId);
+  if (!trigger) throw new Error(`combobox missing: ${testId}`);
+  if (!document.querySelector('[role="listbox"]')) {
+    act(() => {
+      trigger.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+  }
+  const option = optionEls().find((o) => o.dataset.value === value);
+  if (!option) throw new Error(`option missing: ${value}`);
+  act(() => {
+    option.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+}
+
+describe("기억 브라우저: 필터 칸(ListboxSelect)", () => {
+  it("채널·종류·상태 칸이 라벨 이름의 combobox 이고, 고르면 서버 질의가 바뀐다", async () => {
+    const { host } = await render();
+    for (const [id, label] of [
+      ["memory-browser-filter-channel", "채널"],
+      ["memory-browser-filter-kind", "종류"],
+      ["memory-browser-filter-status", "상태"],
+    ] as const) {
+      const trigger = byTestId(host, id);
+      expect(trigger?.getAttribute("role")).toBe("combobox");
+      expect(trigger?.getAttribute("aria-label")).toBe(label);
+      expect(trigger?.tagName).toBe("BUTTON");
+    }
+    pickFrom(host, "memory-browser-filter-kind", "fact");
+    await waitUntil(
+      () => (listMemoryItems.mock.lastCall?.[1] as { kind?: string } | undefined)?.kind === "fact",
+      "kind filter sent to the server"
+    );
+    pickFrom(host, "memory-browser-filter-channel", CH);
+    await waitUntil(
+      () => (listMemoryItems.mock.lastCall?.[1] as { channelId?: string } | undefined)?.channelId === CH,
+      "channel filter sent to the server"
+    );
+    pickFrom(host, "memory-browser-filter-status", "history");
+    await waitUntil(
+      () => (listMemoryItems.mock.lastCall?.[1] as { status?: string } | undefined)?.status === "history",
+      "status filter sent to the server"
+    );
+    // 「모두」 항목을 고르면 필터가 풀린다.
+    pickFrom(host, "memory-browser-filter-kind", "");
+    await waitUntil(
+      () => (listMemoryItems.mock.lastCall?.[1] as { kind?: string } | undefined)?.kind === undefined,
+      "kind filter cleared"
+    );
+  });
+});
+
 describe("기억 브라우저: 고치기", () => {
   async function openEditor() {
     const view = await render({ route: `/memory?item=${ITEM}` });
@@ -337,6 +391,18 @@ describe("기억 브라우저: 고치기", () => {
     );
     expect(byTestId(host, "memory-edit-problem")?.textContent).toBe("내용을 적어 주세요.");
     expect(editMemoryItem).not.toHaveBeenCalled();
+  });
+
+  it("종류 칸은 combobox 이고, 종류를 바꿔 저장하면 kind 가 요청에 실린다", async () => {
+    const { host } = await openEditor();
+    const trigger = byTestId(host, "memory-edit-kind");
+    expect(trigger?.getAttribute("role")).toBe("combobox");
+    expect(trigger?.getAttribute("aria-label")).toBe("종류");
+    pickFrom(host, "memory-edit-kind", "fact");
+    typeInto(byTestId<HTMLTextAreaElement>(host, "memory-edit-field"), "큐 크기를 두 배로 늘려요.");
+    click(byTestId(host, "memory-edit-save"));
+    await waitUntil(() => editMemoryItem.mock.calls.length > 0, "edit sent");
+    expect(editMemoryItem).toHaveBeenCalledWith(WS, ITEM, { body: "큐 크기를 두 배로 늘려요.", kind: "fact" });
   });
 
   it("저장하면 새 버전으로 옮겨 가고 이력이 남았다고 알린다", async () => {

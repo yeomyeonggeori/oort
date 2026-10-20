@@ -245,8 +245,8 @@ export function sidebarEmptySectionHint(pointerCanHover: boolean): string {
   // 옮기는지는 자리가 이미 말하고 있었다. BT-4 의 문장보다 짧으면서 문은 여전히
   // 둘이다.
   return pointerCanHover
-    ? "채널 행을 끌어다 놓거나 우클릭해 옮깁니다."
-    : "이 섹션은 비어 있습니다. 채널은 넓은 화면에서 옮길 수 있습니다.";
+    ? "채널 행을 끌어다 놓거나 우클릭해서 옮겨요."
+    : "비어 있어요. 채널은 넓은 화면에서 옮길 수 있어요.";
 }
 
 /**
