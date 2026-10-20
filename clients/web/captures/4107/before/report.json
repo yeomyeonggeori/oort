@@ -1,0 +1,106 @@
+{
+  "geometry-light": {
+    "footNone": {
+      "x": 70,
+      "y": 826,
+      "width": 242,
+      "height": 62
+    },
+    "footOn": {
+      "x": 70,
+      "y": 762,
+      "width": 242,
+      "height": 62
+    },
+    "cardNone": {
+      "x": 70,
+      "y": 834,
+      "width": 210,
+      "height": 54
+    },
+    "cardOn": {
+      "x": 70,
+      "y": 770,
+      "width": 210,
+      "height": 54
+    },
+    "bannerBox": {
+      "x": 70,
+      "y": 824,
+      "width": 242,
+      "height": 64
+    }
+  },
+  "flow-light": [
+    {
+      "x": 70,
+      "y": 762,
+      "width": 242,
+      "height": 62
+    },
+    {
+      "x": 70,
+      "y": 772,
+      "width": 242,
+      "height": 62
+    },
+    {
+      "x": 70,
+      "y": 826,
+      "width": 242,
+      "height": 62
+    }
+  ],
+  "geometry-dark": {
+    "footNone": {
+      "x": 70,
+      "y": 826,
+      "width": 242,
+      "height": 62
+    },
+    "footOn": {
+      "x": 70,
+      "y": 762,
+      "width": 242,
+      "height": 62
+    },
+    "cardNone": {
+      "x": 70,
+      "y": 834,
+      "width": 210,
+      "height": 54
+    },
+    "cardOn": {
+      "x": 70,
+      "y": 770,
+      "width": 210,
+      "height": 54
+    },
+    "bannerBox": {
+      "x": 70,
+      "y": 824,
+      "width": 242,
+      "height": 64
+    }
+  },
+  "flow-dark": [
+    {
+      "x": 70,
+      "y": 762,
+      "width": 242,
+      "height": 62
+    },
+    {
+      "x": 70,
+      "y": 772,
+      "width": 242,
+      "height": 62
+    },
+    {
+      "x": 70,
+      "y": 826,
+      "width": 242,
+      "height": 62
+    }
+  ]
+}
