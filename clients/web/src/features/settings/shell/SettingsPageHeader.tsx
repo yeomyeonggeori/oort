@@ -1,5 +1,5 @@
 import { forwardRef, type ReactNode } from "react";
-import type { SettingsScope } from "../settingsNav";
+import { SCOPE_LABELS, type SettingsScope } from "../settingsNav";
 import { ScopeChip } from "./ScopeChip";
 
 // 페이지 머리 (#3578). 보이는 `h1` 하나가 그 페이지의 제목이다(옛 sr-only 「설정」 h1과
@@ -15,8 +15,10 @@ export const SettingsPageHeader = forwardRef<
     title: string;
     description?: ReactNode;
     scope?: SettingsScope;
+    /** `false` 면 범위를 눈에는 그리지 않고 낭독으로만 말한다(프로필, #4109). 생략하면 칩이 보인다. */
+    scopeVisible?: boolean;
   }
->(function SettingsPageHeader({ title, description, scope }, ref) {
+>(function SettingsPageHeader({ title, description, scope, scopeVisible = true }, ref) {
   // aria-live: 목록에서 다른 페이지를 고르면 포커스는 목록에 남으므로, 바뀐 제목을
   // 보조기술이 읽게 한다(처음 그릴 때는 읽지 않는다).
   return (
@@ -35,10 +37,15 @@ export const SettingsPageHeader = forwardRef<
       {description ? (
         <p className="break-keep text-body text-ink-muted">{description}</p>
       ) : null}
-      {scope ? (
+      {scope && scopeVisible ? (
         <div className="flex flex-wrap gap-2 pt-2">
           <ScopeChip scope={scope} />
         </div>
+      ) : null}
+      {scope && !scopeVisible ? (
+        <span className="sr-only" data-testid="settings-scope-sr" data-scope={scope}>
+          {SCOPE_LABELS[scope]}
+        </span>
       ) : null}
     </header>
   );
