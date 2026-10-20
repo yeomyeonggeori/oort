@@ -11,6 +11,22 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+## [0.1.34] - 2026-10-20
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.34>. Tag target: `main=b90a77b3`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres lists. One database migration (144, the schema goes to 144) and no change to `bootstrap_runtime_roles.sql`. No new environment variables. This release lets the operator pick the model the same-server Hermes answers with, and folds the AI settings into one place.
+
+### Added
+- Server: choosing the model the same-server Hermes answers with (ADR-0203 addendum, #4143, #4149, migration 144). `agent_provider_pin` gets a `model_provider` and `model_id` pair (both NULL means unchanged; only an `operator_env` pin may carry it; three CHECK constraints; the existing row-level security is untouched). Two operator-only routes are new: `GET /v1/workspaces/{ws}/cohosted-agent/models` lists the logged-in providers with their models (the first three per provider and the current one are `featured`), and `PUT /v1/workspaces/{ws}/cohosted-agent/model` sets the pair and answers `422 cohosted_model_not_offered` for a model outside the list. The agent worker sends the provider and model together in the `/v1/chat/completions` body; without a pair the request is byte-identical to before. Connecting now records Hermes's current provider and model in the pin, and still connects if the options cannot be read.
+- Web and desktop: the AI hub Hermes card gets a "model" section ("the model answering now" with a listbox to change it, "show all" for the rest of a provider), and the "model sign-in" block folds the providers that are already logged in (#4145, #4151).
+
+### Changed
+- Web and desktop: the settings table of contents joins "AI connection" and "AI hub" into a single "AI" row, `?section=ai` opens `/ai/accounts`, and the same-server Hermes card moves to the top of every AI hub section. Connecting shows a "Hermes connected" notice and creates the operator-Hermes DM in the sidebar with an "open conversation" link (#4141, #4144).
+- Web and desktop: the "set status" emoji picker is a popover attached inside the text field, and picking a suggested status fills the emoji, the text and the expiry at once (#4140, #4147).
+- Web and desktop: the default sidebar DM avatar has a border, and people get a per-member hue so the circle is visible (#4148, #4150).
+
+### Fixed
+- Web: a closed DM comes back only when a new message a person would read arrives; the system messages that pile up in an agent DM no longer revive it (#4142, #4146).
+
 ## [0.1.33] - 2026-10-20
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.33>. Tag target: `main=81eb800a`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres lists. No database migration (the schema stays at 143) and no change to `bootstrap_runtime_roles.sql`. No new environment variables. This release is the 0.1.32 on-device feedback pass: one server fix and UI polish.
