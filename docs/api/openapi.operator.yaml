@@ -586,6 +586,81 @@ paths:
           description: Unknown or already-erased login.
         "409":
           description: '`already_submitted`, `not_paste_mode` (Codex), `login_not_pending`.'
+  /v1/workspaces/{ws}/cohosted-agent/models:
+    get:
+      operationId: getCohostedAgentModels
+      summary: Models the co-hosted Hermes can answer on (logged-in providers only)
+      description: >-
+        ADR-0203 증보 2026-10-20 (#4143). Instance operator only (a listed `PLATFORM_ADMIN_EMAILS`
+        owner/admin; `platform:read` alone is not enough). Reads Hermes's `GET /api/model/options` afresh on every
+        call and returns only providers Hermes marks `authenticated: true`, with each provider's full model list in
+        Hermes's own order. `featured` is the first three per provider plus the model in use; the screen shows
+        featured by default and opens the rest behind 「전체 보기」. `current` is the pin's choice, else Hermes's own
+        current model (`pinned: false`). Nothing from Hermes beyond sanitized provider slugs and model ids is
+        returned. Twenty calls per operator per minute.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: The models.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CohostedAgentModels"
+        "403":
+          description: Not a listed instance operator.
+        "409":
+          description: '`cohosted_agent_not_ready` (HERMES_BASE_URL / key not declared) or `cohosted_agent_not_connected`.'
+        "429":
+          description: Too many calls.
+        "502":
+          description: '`cohosted_models_unavailable`: Hermes did not answer in the documented shape (no body, no cause).'
+  /v1/workspaces/{ws}/cohosted-agent/model:
+    put:
+      operationId: putCohostedAgentModel
+      summary: Choose the provider and model the co-hosted Hermes answers on
+      description: >-
+        ADR-0203 증보 2026-10-20 (#4143). Instance operator only. The pair must be listed under a logged-in provider
+        in a **fresh** read of Hermes's options (never a client-supplied or earlier list), else `422
+        cohosted_model_not_offered` and nothing is written. On success the pin's `(provider, model)` and the agent's
+        `model` are written in one transaction and one audit row (`agent.cohosted.model_changed`) records the old and
+        new slugs. From the next turn the agent-worker sends `provider` and `model` together on
+        `/v1/chat/completions` (Hermes ignores a bare `model`). The body is closed: no URL, key or path.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [provider, model]
+              properties:
+                provider:
+                  type: string
+                  maxLength: 64
+                  description: A Hermes provider slug (`anthropic`, `openai-codex`).
+                model:
+                  type: string
+                  maxLength: 64
+      responses:
+        "200":
+          description: The pin after the change.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CohostedAgentModelChoice"
+        "403":
+          description: Not a listed instance operator.
+        "409":
+          description: '`cohosted_agent_not_ready`, or `cohosted_agent_not_connected` (also when disconnected between the read and the write).'
+        "422":
+          description: '`cohosted_model_not_offered`: not listed under a logged-in provider (or a malformed slug / id).'
+        "429":
+          description: Too many calls.
+        "502":
+          description: '`cohosted_models_unavailable`: Hermes could not be read, so nothing was guessed.'
 components:
   parameters:
     WorkspaceId:
@@ -621,6 +696,55 @@ components:
         App access token for a human principal that carries the platform:read
         operator scope OR is a workspace owner/admin (ADR-0004 증보1 D3).
   schemas:
+    CohostedModelRef:
+      type: object
+      additionalProperties: false
+      required: [provider, model]
+      properties:
+        provider: { type: string }
+        model: { type: string }
+    CohostedAgentModels:
+      type: object
+      additionalProperties: false
+      required: [schema, agentId, pinned, providers]
+      properties:
+        schema: { type: string, enum: ["momo.cohosted_agent.models.v0"] }
+        agentId: { type: string, format: uuid }
+        current:
+          $ref: "#/components/schemas/CohostedModelRef"
+        pinned:
+          type: boolean
+          description: True when connect or an operator wrote the pair; false means the agent follows Hermes's current model.
+        hermesCurrent:
+          $ref: "#/components/schemas/CohostedModelRef"
+        providers:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [provider, models]
+            properties:
+              provider: { type: string }
+              models:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [id, featured, current]
+                  properties:
+                    id: { type: string }
+                    featured: { type: boolean }
+                    current: { type: boolean }
+    CohostedAgentModelChoice:
+      type: object
+      additionalProperties: false
+      required: [schema, agentId, current, pinned]
+      properties:
+        schema: { type: string, enum: ["momo.cohosted_agent.model.v0"] }
+        agentId: { type: string, format: uuid }
+        current:
+          $ref: "#/components/schemas/CohostedModelRef"
+        pinned: { type: boolean, enum: [true] }
     ProviderLinkResponse:
       type: object
       additionalProperties: false

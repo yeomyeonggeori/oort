@@ -4,6 +4,8 @@
 //! GET  /v1/workspaces/{ws}/cohosted-agent           status — never touches the network
 //! POST /v1/workspaces/{ws}/cohosted-agent/probe     two fixed GETs at the declared host
 //! POST /v1/workspaces/{ws}/cohosted-agent/connect   create the agent member + pin it
+//! GET  /v1/workspaces/{ws}/cohosted-agent/models    logged-in providers' models (#4143)
+//! PUT  /v1/workspaces/{ws}/cohosted-agent/model     choose provider + model (#4143)
 //! ```
 //!
 //! ## Rules this module holds
@@ -52,11 +54,13 @@ use momo_messaging::name_guard::{
 };
 use momo_messaging::{load_roster_names_in_tx, lock_display_name_namespace_in_tx};
 use momo_provider_probe::{
-    CohostedAgentProbe, CohostedReport, CohostedTarget, ProbeOutcome, ToolsetsSignal,
+    provider_slug, CohostedAgentProbe, CohostedReport, CohostedTarget, ModelChoice,
+    ModelOptionsReport, ProbeOutcome, ToolsetsSignal,
 };
 use momo_settings::{
     is_handle_banned_in_tx, normalized_join_display_name, normalized_requested_handle,
-    redacted_endpoint_label, upsert_agent_pin, validated_base_url, PinKind,
+    read_agent_pin, redacted_endpoint_label, sanitized_model_id, set_agent_pin_model,
+    upsert_agent_pin, validated_base_url, PinKind,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -78,6 +82,16 @@ const PROBE_SCHEMA: &str = "momo.cohosted_agent.probe.v0";
 const CONNECT_SCHEMA: &str = "momo.cohosted_agent.connect.v0";
 const AUDIT_SCHEMA: &str = "momo.cohosted_agent.audit.v0";
 const PIN_AUDIT_SCHEMA: &str = "momo.agent_provider_pin.audit.v0";
+const MODELS_SCHEMA: &str = "momo.cohosted_agent.models.v0";
+const MODEL_SCHEMA: &str = "momo.cohosted_agent.model.v0";
+const MODEL_AUDIT_SCHEMA: &str = "momo.cohosted_agent.model.audit.v0";
+const MODEL_AUDIT_ACTION: &str = "agent.cohosted.model_changed";
+
+/// How many of a provider's models are `featured` by default (ADR-0203 증보
+/// 2026-10-20 M5): the first N **in Hermes's own order**, plus the model in use.
+/// No model name is hard-coded here, so a new Hermes release's own ordering
+/// decides what a generation's flagship tier is, and nothing needs a deploy.
+pub const FEATURED_PER_PROVIDER: usize = 3;
 
 const DEFAULT_DISPLAY_NAME: &str = "Hermes";
 const DEFAULT_HANDLE: &str = "hermes";
@@ -92,6 +106,11 @@ const PLACEHOLDER_BASE_URL: &str = "https://cohosted-agent.invalid/v1";
 /// three requests at the operator's own host, so the budget is small.
 pub const OPERATOR_CALLS_PER_WINDOW: u32 = 6;
 pub const OPERATOR_CALL_WINDOW: Duration = Duration::from_secs(60);
+
+/// Model-list reads and choices one operator may make per window. A separate,
+/// larger bucket than probe/connect: it is one read-only GET at the operator's own
+/// host per call, and a picker may be reopened a few times.
+pub const OPERATOR_MODEL_CALLS_PER_WINDOW: u32 = 20;
 
 /// What the operator declared, the probe that can act on it, and its throttle.
 pub struct CohostedAgentState {
@@ -313,6 +332,15 @@ fn throttle(state: &AppState, principal: &Principal) -> Option<Response> {
     (!verdict.allowed).then(|| too_many_requests(verdict.retry_after_seconds))
 }
 
+fn throttle_models(state: &AppState, principal: &Principal) -> Option<Response> {
+    let verdict = state.cohosted.limiter.check(
+        &format!("cohosted_agent:models:{}", principal.member_id),
+        OPERATOR_MODEL_CALLS_PER_WINDOW,
+        OPERATOR_CALL_WINDOW,
+    );
+    (!verdict.allowed).then(|| too_many_requests(verdict.retry_after_seconds))
+}
+
 /// `POST /v1/workspaces/{ws}/cohosted-agent/probe`.
 pub async fn probe(
     State(state): State<AppState>,
@@ -481,12 +509,26 @@ pub async fn connect(
             "같은 서버의 에이전트가 지금 답하지 않아요. 주소와 키를 확인한 뒤 다시 찾아 주세요.",
         ));
     }
-    // The agent's own first model id; a name it did not list is never invented.
-    let model = report
-        .model_ids
-        .first()
-        .cloned()
-        .unwrap_or_else(|| FALLBACK_MODEL.to_string());
+    // #4143 (ADR-0203 증보 2026-10-20 M3): the model the agent answers on **now**,
+    // read from Hermes's own options, so the pin names a real provider + model
+    // instead of the virtual alias `hermes-agent` (which Hermes answers with its
+    // default whatever is asked). A failed or odd read is not a refusal: the pin
+    // then carries no route and the agent behaves exactly as before #4143.
+    let route: Option<ModelChoice> = state
+        .cohosted
+        .probe
+        .read_model_options(&target(&state))
+        .await
+        .current;
+    // Otherwise the agent's own first model id; a name it did not list is never invented.
+    let model = match &route {
+        Some(route) => route.model.clone(),
+        None => report
+            .model_ids
+            .first()
+            .cloned()
+            .unwrap_or_else(|| FALLBACK_MODEL.to_string()),
+    };
 
     let profile = validate_agent_profile("", None, None, &[], None)
         .map_err(|invalid| ApiError::bad_request(invalid.to_string()))?;
@@ -509,6 +551,7 @@ pub async fn connect(
         with_provider_link_admin_tx(&state.pool, workspace_id, {
             let label = label.clone();
             let model = model.clone();
+            let route = route.clone();
             move |conn| {
                 Box::pin(async move {
                     // Two operators clicking at once must not make two agents:
@@ -579,6 +622,16 @@ pub async fn connect(
                         actor,
                     )
                     .await?;
+                    if let Some(route) = &route {
+                        set_agent_pin_model(
+                            conn,
+                            workspace_id,
+                            agent.id,
+                            &route.provider,
+                            &route.model,
+                        )
+                        .await?;
+                    }
                     write_audit(
                         conn,
                         &AuditEntry::new(workspace_id, "agent.created")
@@ -611,6 +664,8 @@ pub async fn connect(
                                 json!({
                                     "kind": "operator_env",
                                     "link_position": null,
+                                    "model_provider": route.as_ref().map(|r| r.provider.as_str()),
+                                    "model_id": route.as_ref().map(|r| r.model.as_str()),
                                     "endpoint_label": label,
                                     "previous_kind": null,
                                     "previous_link_position": null,
@@ -657,6 +712,328 @@ pub async fn connect(
         }),
     )
         .into_response())
+}
+
+// ---------------------------------------------------------------------------
+// model choice (#4143, ADR-0203 증보 2026-10-20)
+// ---------------------------------------------------------------------------
+//
+// ```text
+// GET /v1/workspaces/{ws}/cohosted-agent/models   {current, hermesCurrent, providers[]}
+// PUT /v1/workspaces/{ws}/cohosted-agent/model    {"provider": "...", "model": "..."}
+// ```
+//
+// * **Instance operator only, both verbs**, gate first (a stranger spends nothing).
+// * **The list is Hermes's, filtered to logged-in providers.** Every request reads
+//   `GET {origin}/api/model/options` afresh; nothing a client sends is trusted as
+//   a list, and a provider Hermes does not mark `authenticated` never appears.
+// * **PUT is a membership check, not a parse.** `(provider, model)` must be listed
+//   under a logged-in provider in that fresh read, else `422`. Nothing is written
+//   on a refusal.
+// * The pin keeps the pair, the worker sends the pair (a bare `model` is ignored
+//   by Hermes), and `agent.model` mirrors the model for cards and usage rows.
+
+#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelChoiceDto {
+    provider: String,
+    model: String,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelEntryDto {
+    id: String,
+    /// The short list a picker shows first; the rest sit behind 「전체 보기」.
+    featured: bool,
+    /// The model the agent answers on now.
+    current: bool,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderModelsDto {
+    provider: String,
+    models: Vec<ModelEntryDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelsResponse {
+    schema: &'static str,
+    agent_id: String,
+    /// What the agent answers on: the pin's choice, else Hermes's current model.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    current: Option<ModelChoiceDto>,
+    /// True when an operator (or connect) wrote the pair on the pin; false means
+    /// the agent follows what Hermes has as its current model.
+    pinned: bool,
+    /// Hermes's own current provider and model, whatever the pin says.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hermes_current: Option<ModelChoiceDto>,
+    providers: Vec<ProviderModelsDto>,
+}
+
+/// The `featured` rule (ADR-0203 증보 2026-10-20 M5): per provider, the first
+/// [`FEATURED_PER_PROVIDER`] models in Hermes's own order, and **always** the model
+/// in use. Hermes lists a provider's newest flagship tiers first, so "the first few"
+/// is "the current generation's representatives" without this crate naming a model.
+pub fn provider_models_dto(
+    options: &ModelOptionsReport,
+    current: Option<&ModelChoice>,
+) -> Vec<ProviderModelsDto> {
+    options
+        .providers
+        .iter()
+        .map(|entry| ProviderModelsDto {
+            provider: entry.provider.clone(),
+            models: entry
+                .models
+                .iter()
+                .enumerate()
+                .map(|(index, id)| {
+                    let in_use =
+                        current.is_some_and(|c| c.provider == entry.provider && &c.model == id);
+                    ModelEntryDto {
+                        id: id.clone(),
+                        featured: in_use || index < FEATURED_PER_PROVIDER,
+                        current: in_use,
+                    }
+                })
+                .collect(),
+        })
+        .collect()
+}
+
+fn choice_dto(choice: &ModelChoice) -> ModelChoiceDto {
+    ModelChoiceDto {
+        provider: choice.provider.clone(),
+        model: choice.model.clone(),
+    }
+}
+
+/// The operator-declared target, or the same 409 `connect` gives.
+fn ready_target(state: &AppState) -> Result<CohostedTarget, ApiError> {
+    if declaration(state).0 != Declaration::Ready {
+        return Err(refusal(
+            StatusCode::CONFLICT,
+            "cohosted_agent_not_ready",
+            "HERMES_BASE_URL과 HERMES_API_KEY를 서버에 설정해야 연결할 수 있어요.",
+        ));
+    }
+    Ok(target(state))
+}
+
+async fn require_connected(state: &AppState, workspace_id: Uuid) -> Result<Uuid, ApiError> {
+    connected_agent(state, workspace_id).await?.ok_or_else(|| {
+        refusal(
+            StatusCode::CONFLICT,
+            "cohosted_agent_not_connected",
+            "이 워크스페이스에 연결된 같은 서버의 에이전트가 없어요. 먼저 연결해 주세요.",
+        )
+    })
+}
+
+/// A fresh read of Hermes's options, or a 502 that says nothing about why.
+async fn fresh_model_options(
+    state: &AppState,
+    target: &CohostedTarget,
+) -> Result<ModelOptionsReport, ApiError> {
+    let options = state.cohosted.probe.read_model_options(target).await;
+    tracing::info!(
+        outcome = options.outcome.as_str(),
+        requests_sent = options.requests_sent,
+        providers = options.providers.len(),
+        "cohosted agent model options"
+    );
+    if options.outcome != ProbeOutcome::Ok {
+        return Err(refusal(
+            StatusCode::BAD_GATEWAY,
+            "cohosted_models_unavailable",
+            "같은 서버의 에이전트에서 모델 목록을 읽지 못했어요. 잠시 뒤 다시 시도해 주세요.",
+        ));
+    }
+    Ok(options)
+}
+
+/// The pin's stored route, if the pin is the operator-env one.
+async fn pinned_route(
+    state: &AppState,
+    workspace_id: Uuid,
+    agent_id: Uuid,
+) -> Result<Option<ModelChoice>, ApiError> {
+    let pin = settle_db(
+        "cohosted_agent.pinned_route",
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                match read_agent_pin(conn, workspace_id, agent_id).await {
+                    Ok(pin) => Ok(Ok(pin)),
+                    Err(momo_settings::PinReadError::Db(db)) => Err(db),
+                    // A kind this build cannot read has no route it can show.
+                    Err(momo_settings::PinReadError::UnknownKind) => Ok(Ok(None)),
+                }
+            })
+        })
+        .await,
+    )?;
+    Ok(pin
+        .filter(|pin| pin.kind == PinKind::OperatorEnv)
+        .and_then(|pin| pin.model_route)
+        .map(|route| ModelChoice {
+            provider: route.provider,
+            model: route.model,
+        }))
+}
+
+/// `GET /v1/workspaces/{ws}/cohosted-agent/models`.
+pub async fn models(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(workspace): Path<String>,
+) -> Result<Response, ApiError> {
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    require_instance_operator_write(&state, &principal).await?;
+    let target = ready_target(&state)?;
+    let agent_id = require_connected(&state, workspace_id).await?;
+    if let Some(limited) = throttle_models(&state, &principal) {
+        return Ok(limited);
+    }
+    let options = fresh_model_options(&state, &target).await?;
+    let pinned = pinned_route(&state, workspace_id, agent_id).await?;
+    let current = pinned.clone().or_else(|| options.current.clone());
+    Ok(Json(ModelsResponse {
+        schema: MODELS_SCHEMA,
+        agent_id: agent_id.to_string(),
+        current: current.as_ref().map(choice_dto),
+        pinned: pinned.is_some(),
+        hermes_current: options.current.as_ref().map(choice_dto),
+        providers: provider_models_dto(&options, current.as_ref()),
+    })
+    .into_response())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PutModelRequest {
+    pub provider: String,
+    pub model: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PutModelResponse {
+    schema: &'static str,
+    agent_id: String,
+    current: ModelChoiceDto,
+    pinned: bool,
+}
+
+fn not_offered() -> ApiError {
+    refusal(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "cohosted_model_not_offered",
+        "그 제공자와 모델은 지금 선택할 수 없어요. 로그인된 제공자의 목록에서 골라 주세요.",
+    )
+}
+
+/// `PUT /v1/workspaces/{ws}/cohosted-agent/model`.
+pub async fn put_model(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(workspace): Path<String>,
+    Json(request): Json<PutModelRequest>,
+) -> Result<Response, ApiError> {
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    require_instance_operator_write(&state, &principal).await?;
+    // Spelling first, without a socket: only a plausible slug and id can be listed.
+    let (Some(provider), Some(model)) = (
+        provider_slug(&request.provider),
+        sanitized_model_id(&request.model),
+    ) else {
+        return Err(not_offered());
+    };
+    let target = ready_target(&state)?;
+    let agent_id = require_connected(&state, workspace_id).await?;
+    if let Some(limited) = throttle_models(&state, &principal) {
+        return Ok(limited);
+    }
+    // A fresh list, every time: the answer to "is this offered" is Hermes's now.
+    let options = fresh_model_options(&state, &target).await?;
+    if !options.lists(&provider, &model) {
+        return Err(not_offered());
+    }
+
+    let actor = principal.member_id;
+    let via_token = audit_via_token_id(&principal);
+    let outcome: Result<(), ApiError> = with_provider_link_admin_tx(&state.pool, workspace_id, {
+        let (provider, model) = (provider.clone(), model.clone());
+        move |conn| {
+            Box::pin(async move {
+                // Still the connected agent, and the pin still the env link:
+                // another operator may have disconnected between the read and now.
+                if connected_agent_in_tx(conn, workspace_id).await? != Some(agent_id) {
+                    return Ok(Err(refusal(
+                        StatusCode::CONFLICT,
+                        "cohosted_agent_not_connected",
+                        "이 워크스페이스에 연결된 같은 서버의 에이전트가 없어요. 먼저 연결해 주세요.",
+                    )));
+                }
+                let previous = read_agent_pin(conn, workspace_id, agent_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .and_then(|pin| pin.model_route);
+                if !set_agent_pin_model(conn, workspace_id, agent_id, &provider, &model).await? {
+                    return Ok(Err(refusal(
+                        StatusCode::CONFLICT,
+                        "cohosted_agent_not_connected",
+                        "이 워크스페이스에 연결된 같은 서버의 에이전트가 없어요. 먼저 연결해 주세요.",
+                    )));
+                }
+                // Cards and usage rows read `agent.model`; the pin is what the
+                // worker sends. They are written together or not at all.
+                momo_db::sqlx::query(
+                    "UPDATE agent SET model = $3, updated_at = now() \
+                      WHERE workspace_id = $1 AND member_id = $2",
+                )
+                .bind(workspace_id)
+                .bind(agent_id)
+                .bind(&model)
+                .execute(&mut *conn)
+                .await?;
+                write_audit(
+                    conn,
+                    &AuditEntry::new(workspace_id, MODEL_AUDIT_ACTION)
+                        .by(actor)
+                        .about(agent_id)
+                        .target("agent", agent_id)
+                        .via_token(via_token)
+                        .with_schema(
+                            MODEL_AUDIT_SCHEMA,
+                            json!({
+                                "provider": provider,
+                                "model": model,
+                                "previous_provider": previous.as_ref().map(|r| r.provider.as_str()),
+                                "previous_model": previous.as_ref().map(|r| r.model.as_str()),
+                            }),
+                        ),
+                )
+                .await?;
+                Ok(Ok(()))
+            })
+        }
+    })
+    .await
+    .map_err(|error| ApiError::internal("cohosted_agent.put_model", error))?;
+    outcome?;
+
+    Ok(Json(PutModelResponse {
+        schema: MODEL_SCHEMA,
+        agent_id: agent_id.to_string(),
+        current: ModelChoiceDto { provider, model },
+        pinned: true,
+    })
+    .into_response())
 }
 
 // ---------------------------------------------------------------------------
@@ -948,4 +1325,63 @@ pub async fn get_connector_trial(
         attested: attest_dto(&attest),
         note: SELF_DECLARED_NOTE,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use momo_provider_probe::ProviderModels;
+
+    fn options(models: &[&str]) -> ModelOptionsReport {
+        ModelOptionsReport {
+            outcome: ProbeOutcome::Ok,
+            reason: None,
+            requests_sent: 1,
+            current: None,
+            providers: vec![ProviderModels {
+                provider: "anthropic".into(),
+                models: models.iter().map(|m| m.to_string()).collect(),
+            }],
+        }
+    }
+
+    fn featured(entries: &[ProviderModelsDto]) -> Vec<&str> {
+        entries[0]
+            .models
+            .iter()
+            .filter(|m| m.featured)
+            .map(|m| m.id.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn featured_is_the_first_few_in_hermes_order() {
+        let report = options(&["a", "b", "c", "d", "e"]);
+        let dto = provider_models_dto(&report, None);
+        assert_eq!(featured(&dto), vec!["a", "b", "c"]);
+        assert!(dto[0].models.iter().all(|m| !m.current));
+    }
+
+    #[test]
+    fn the_model_in_use_is_featured_wherever_it_sits() {
+        let report = options(&["a", "b", "c", "d", "e"]);
+        let in_use = ModelChoice {
+            provider: "anthropic".into(),
+            model: "e".into(),
+        };
+        let dto = provider_models_dto(&report, Some(&in_use));
+        assert_eq!(featured(&dto), vec!["a", "b", "c", "e"]);
+        assert_eq!(
+            dto[0].models.iter().filter(|m| m.current).count(),
+            1,
+            "exactly the one in use"
+        );
+        // The same model id under another provider is not "in use".
+        let other = ModelChoice {
+            provider: "openai-codex".into(),
+            model: "e".into(),
+        };
+        let dto = provider_models_dto(&report, Some(&other));
+        assert_eq!(featured(&dto), vec!["a", "b", "c"]);
+    }
 }

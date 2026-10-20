@@ -738,9 +738,25 @@ mod tests {
         stream.finish()
     }
 
+    /// #4143: the Hermes provider slug is a chat/completions field only.
+    #[test]
+    fn the_messages_wire_never_carries_the_hermes_provider_slug() {
+        let request = ChatRequest {
+            provider: Some("anthropic".into()),
+            model: "claude-sonnet-5-5".into(),
+            messages: vec![ChatMessage::user("hi")],
+            max_tokens: Some(16),
+            tools: Vec::new(),
+            momo_tools: Vec::new(),
+        };
+        let body = build_request_body(&request);
+        assert!(body.get("provider").is_none(), "{body}");
+    }
+
     #[test]
     fn the_request_body_is_the_messages_shape() {
         let request = ChatRequest {
+            provider: None,
             model: "claude-sonnet-4-5".into(),
             messages: vec![
                 ChatMessage::system("너는 hermes다"),
@@ -778,6 +794,7 @@ mod tests {
         assert!(body.get("temperature").is_none());
 
         let bare = ChatRequest {
+            provider: None,
             model: "m".into(),
             messages: vec![ChatMessage::user("q")],
             max_tokens: None,
@@ -971,6 +988,7 @@ mod tests {
     fn a_server_web_search_tool_passes_through_unchanged() {
         let search = web_search_tool("claude-sonnet-5-5", "https://api.anthropic.com/v1", 3);
         let request = ChatRequest {
+            provider: None,
             model: "claude-sonnet-5-5".into(),
             messages: vec![ChatMessage::user("q")],
             max_tokens: Some(100),
@@ -1000,6 +1018,7 @@ mod tests {
             json!({"type":"code_execution_20250825","name":"code_execution"}),
         ] {
             let request = ChatRequest {
+                provider: None,
                 model: "claude-sonnet-5-5".into(),
                 messages: vec![ChatMessage::user("q")],
                 max_tokens: Some(100),

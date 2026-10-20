@@ -652,12 +652,15 @@ mod tests {
     /// 143 is #3944's official catalogue (ADR-0113 증보 2): the measured manifests of GitHub,
     /// Notion and Linear replace the 013 placeholders and Gmail, Google Calendar and Google
     /// Drive are seeded. Data only - `plugin_registry` has no RLS and no table is added.
+    ///
+    /// 144 is #4143's co-hosted model pin (ADR-0203 증보 2026-10-20): `agent_provider_pin` gains
+    /// the `model_provider` + `model_id` pair (both NULL = today's behaviour, operator_env only).
     #[test]
-    fn discovers_contiguous_migrations_001_to_143() {
+    fn discovers_contiguous_migrations_001_to_144() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=143).collect();
+        let expected: Vec<i64> = (1..=144).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -665,7 +668,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=143 under {}",
+            "expected contiguous 001..=144 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -673,7 +676,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("143_official_catalog_c_s1b"));
+            .starts_with("144_agent_pin_model"));
     }
 
     #[test]

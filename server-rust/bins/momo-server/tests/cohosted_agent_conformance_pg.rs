@@ -847,8 +847,13 @@ async fn connect_creates_the_member_and_the_pin_and_grants_nothing_and_leaks_no_
     assert_eq!(body["pinKind"], "operator_env");
     let agent: Uuid = body["agentId"].as_str().unwrap().parse().unwrap();
 
-    // The connect probe is the same two fixed requests.
-    assert_eq!(hits.paths(), vec!["/health", "/v1/models"]);
+    // The connect probe is the same two fixed requests, plus the one read-only
+    // options GET (#4143, ADR-0203 증보 2026-10-20 M2). This mock has no options
+    // route (404), so connect fell back to today's alias and an empty route.
+    assert_eq!(
+        hits.paths(),
+        vec!["/health", "/v1/models", "/api/model/options"]
+    );
 
     // A first-class agent member, on its own model, pinned to the env link.
     let kind: String = sqlx::query_scalar("SELECT kind::text FROM member WHERE id = $1")
@@ -1027,4 +1032,555 @@ async fn connect_keeps_the_name_hygiene_of_the_agent_create_and_rename_routes() 
         .await;
     assert_eq!(code, 201, "{body}");
     assert_eq!(agent_count(&su, f.workspace).await, 1);
+}
+
+// ---------------------------------------------------------------------------
+// #4143 — choosing the provider + model (ADR-0203 증보 2026-10-20)
+// ---------------------------------------------------------------------------
+
+/// What Hermes's `/api/model/options` looks like (shape from hermes_cli/inventory.py):
+/// Anthropic and OpenAI Codex logged in, Nous and a "stale" row not.
+fn options_body() -> Value {
+    json!({
+        "model": "claude-sonnet-5-5",
+        "provider": "anthropic",
+        "providers": [
+            {"slug": "anthropic", "name": BODY_MARKER, "is_current": true, "authenticated": true,
+             "models": ["claude-sonnet-5-5", "claude-fable-5.1", "claude-opus-5-5",
+                        "claude-haiku-5", "claude-opus-4-1"]},
+            {"slug": "openai-codex", "is_current": false, "authenticated": true,
+             "models": ["gpt-6-sol", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"]},
+            {"slug": "nous", "is_current": false, "authenticated": false, "models": []},
+            // A provider that lists models but is NOT logged in must never be offered.
+            {"slug": "openrouter", "is_current": false, "authenticated": false,
+             "models": ["some/model"]},
+        ],
+    })
+}
+
+/// A Hermes that serves the three connect paths plus a mutable options body.
+async fn mock_hermes(options: Value) -> (u16, Hits, Arc<Mutex<(u16, Value)>>) {
+    let hits = Hits::default();
+    let options = Arc::new(Mutex::new((200u16, options)));
+    let (h1, h2, h3) = (hits.clone(), hits.clone(), hits.clone());
+    let served = options.clone();
+    let app = Router::new()
+        .route(
+            "/health",
+            get(move || async move {
+                h1.paths.lock().unwrap().push("/health".into());
+                axum::Json(json!({"status": "ok"}))
+            }),
+        )
+        .route(
+            "/v1/models",
+            get(move || async move {
+                h2.paths.lock().unwrap().push("/v1/models".into());
+                axum::Json(json!({"object": "list", "data": [{"id": "hermes-agent"}]}))
+            }),
+        )
+        .route(
+            "/api/model/options",
+            get(move |headers: HeaderMap| {
+                let served = served.clone();
+                async move {
+                    h3.paths.lock().unwrap().push("/api/model/options".into());
+                    h3.bearers.lock().unwrap().push(
+                        headers
+                            .get("authorization")
+                            .and_then(|v| v.to_str().ok())
+                            .unwrap_or("")
+                            .to_string(),
+                    );
+                    let (status, body) = served.lock().unwrap().clone();
+                    (StatusCode::from_u16(status).unwrap(), axum::Json(body)).into_response()
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    (port, hits, options)
+}
+
+impl Api<'_> {
+    async fn get_models(&self, token: &str) -> (u16, Value, String) {
+        let r = self
+            .http
+            .get(self.url("/models"))
+            .bearer_auth(token)
+            .send()
+            .await
+            .unwrap();
+        let code = r.status().as_u16();
+        let text = r.text().await.unwrap();
+        (
+            code,
+            serde_json::from_str(&text).unwrap_or(Value::Null),
+            text,
+        )
+    }
+
+    async fn put_model(&self, token: &str, body: Value) -> (u16, Value, String) {
+        let r = self
+            .http
+            .put(self.url("/model"))
+            .bearer_auth(token)
+            .json(&body)
+            .send()
+            .await
+            .unwrap();
+        let code = r.status().as_u16();
+        let text = r.text().await.unwrap();
+        (
+            code,
+            serde_json::from_str(&text).unwrap_or(Value::Null),
+            text,
+        )
+    }
+}
+
+struct Connected {
+    su: PgPool,
+    f: Fixture,
+    base: String,
+    http: reqwest::Client,
+    op: String,
+    hits: Hits,
+    options: Arc<Mutex<(u16, Value)>>,
+    agent: Uuid,
+}
+
+impl Connected {
+    fn api(&self) -> Api<'_> {
+        Api {
+            http: &self.http,
+            base: &self.base,
+            workspace: self.f.workspace,
+        }
+    }
+
+    async fn pin_row(&self) -> (Option<String>, Option<String>, String) {
+        sqlx::query_as(
+            "SELECT p.model_provider, p.model_id, a.model FROM agent_provider_pin p \
+               JOIN agent a ON a.member_id = p.agent_member_id WHERE p.agent_member_id = $1",
+        )
+        .bind(self.agent)
+        .fetch_one(&self.su)
+        .await
+        .unwrap()
+    }
+
+    async fn model_audits(&self) -> i64 {
+        sqlx::query_scalar(
+            "SELECT count(*) FROM audit_log WHERE workspace_id = $1 \
+               AND action = 'agent.cohosted.model_changed'",
+        )
+        .bind(self.f.workspace)
+        .fetch_one(&self.su)
+        .await
+        .unwrap()
+    }
+}
+
+async fn connected(hint: &str, options: Value) -> Connected {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let f = seed(&su, hint).await;
+    let (port, hits, options) = mock_hermes(options).await;
+    let base = start_server(
+        momo_app_pool().await,
+        Declared {
+            operator_email: &f.email,
+            env_url: format!("http://127.0.0.1:{port}/v1"),
+            bearer: ENV_KEY,
+            declared: true,
+            tools_locked: true,
+        },
+    )
+    .await;
+    let http = reqwest::Client::new();
+    let op = login(&http, &base, f.workspace, &f.email).await;
+    let api = Api {
+        http: &http,
+        base: &base,
+        workspace: f.workspace,
+    };
+    let (code, body, _) = api
+        .post(
+            &op,
+            "/connect",
+            Some(json!({"displayName": "Hermes Bot", "handle": "hermesbot"})),
+        )
+        .await;
+    assert_eq!(code, 201, "{body}");
+    let agent: Uuid = body["agentId"].as_str().unwrap().parse().unwrap();
+    Connected {
+        su,
+        f,
+        base,
+        http,
+        op,
+        hits,
+        options,
+        agent,
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn connect_pins_the_current_provider_and_model_instead_of_the_alias() {
+    let c = connected("model-connect", options_body()).await;
+    let (provider, model, agent_model) = c.pin_row().await;
+    assert_eq!(
+        (provider.as_deref(), model.as_deref(), agent_model.as_str()),
+        (
+            Some("anthropic"),
+            Some("claude-sonnet-5-5"),
+            "claude-sonnet-5-5"
+        ),
+        "connect must name Hermes's current provider and model, not hermes-agent"
+    );
+    assert!(c
+        .hits
+        .bearers
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|b| b == &format!("Bearer {ENV_KEY}")));
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn connect_still_succeeds_when_the_options_read_fails_and_keeps_todays_pin() {
+    for (status, body) in [
+        (500u16, json!({"detail": "boom"})),
+        (200, json!({"unexpected": BODY_MARKER})),
+        (200, json!({"providers": "not-a-list"})),
+    ] {
+        ensure_schema_and_roles();
+        let su = superuser_pool().await;
+        let f = seed(&su, "model-fallback").await;
+        let (port, _hits, options) = mock_hermes(options_body()).await;
+        *options.lock().unwrap() = (status, body.clone());
+        let base = start_server(
+            momo_app_pool().await,
+            Declared {
+                operator_email: &f.email,
+                env_url: format!("http://127.0.0.1:{port}/v1"),
+                bearer: ENV_KEY,
+                declared: true,
+                tools_locked: true,
+            },
+        )
+        .await;
+        let http = reqwest::Client::new();
+        let op = login(&http, &base, f.workspace, &f.email).await;
+        let api = Api {
+            http: &http,
+            base: &base,
+            workspace: f.workspace,
+        };
+        let (code, resp, _) = api
+            .post(
+                &op,
+                "/connect",
+                Some(json!({"displayName": "Hermes Bot", "handle": "hermesbot"})),
+            )
+            .await;
+        assert_eq!(code, 201, "{status} {body}: {resp}");
+        let agent: Uuid = resp["agentId"].as_str().unwrap().parse().unwrap();
+        let row: (Option<String>, Option<String>, String) = sqlx::query_as(
+            "SELECT p.model_provider, p.model_id, a.model FROM agent_provider_pin p \
+               JOIN agent a ON a.member_id = p.agent_member_id WHERE p.agent_member_id = $1",
+        )
+        .bind(agent)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+        assert_eq!(
+            row,
+            (None, None, "hermes-agent".to_string()),
+            "{status} {body}"
+        );
+        // And the models route says so honestly rather than inventing a list.
+        let (code, _, _) = api.get_models(&op).await;
+        assert_eq!(code, 502);
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn models_offers_only_logged_in_providers_and_marks_featured() {
+    let c = connected("model-list", options_body()).await;
+    let api = c.api();
+    let (code, body, text) = api.get_models(&c.op).await;
+    assert_eq!(code, 200, "{body}");
+    assert_eq!(body["schema"], "momo.cohosted_agent.models.v0");
+    assert_eq!(body["agentId"], c.agent.to_string());
+    assert_eq!(body["pinned"], true, "connect wrote the pair");
+    assert_eq!(
+        body["current"],
+        json!({"provider": "anthropic", "model": "claude-sonnet-5-5"})
+    );
+    assert_eq!(body["hermesCurrent"], body["current"]);
+    let providers: Vec<&str> = body["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["provider"].as_str().unwrap())
+        .collect();
+    assert_eq!(providers, vec!["anthropic", "openai-codex"], "{text}");
+    assert!(!text.contains("openrouter") && !text.contains("some/model"));
+    assert!(!text.contains(BODY_MARKER), "an agent-supplied name leaked");
+    // Featured: the first three in Hermes's order; the rest are behind 전체 보기.
+    let anthropic = &body["providers"][0]["models"];
+    let featured: Vec<(&str, bool)> = anthropic
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| (m["id"].as_str().unwrap(), m["featured"].as_bool().unwrap()))
+        .collect();
+    assert_eq!(
+        featured,
+        vec![
+            ("claude-sonnet-5-5", true),
+            ("claude-fable-5.1", true),
+            ("claude-opus-5-5", true),
+            ("claude-haiku-5", false),
+            ("claude-opus-4-1", false),
+        ]
+    );
+    assert_eq!(anthropic[0]["current"], true);
+    assert_eq!(anthropic[1]["current"], false);
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn put_model_writes_the_pair_to_the_pin_the_agent_row_and_the_audit_and_current_is_always_featured(
+) {
+    let c = connected("model-put", options_body()).await;
+    let api = c.api();
+    // A model deep in the list (not in the first three) is still featured once chosen.
+    let (code, body, _) = api
+        .put_model(
+            &c.op,
+            json!({"provider": "openai-codex", "model": "gpt-5.5"}),
+        )
+        .await;
+    assert_eq!(code, 200, "{body}");
+    assert_eq!(
+        body["current"],
+        json!({"provider": "openai-codex", "model": "gpt-5.5"})
+    );
+    assert_eq!(
+        c.pin_row().await,
+        (
+            Some("openai-codex".into()),
+            Some("gpt-5.5".into()),
+            "gpt-5.5".into()
+        )
+    );
+    assert_eq!(c.model_audits().await, 1);
+    let audit: Value = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE workspace_id = $1 \
+           AND action = 'agent.cohosted.model_changed'",
+    )
+    .bind(c.f.workspace)
+    .fetch_one(&c.su)
+    .await
+    .unwrap();
+    let audit_text = audit.to_string();
+    assert!(audit_text.contains("openai-codex") && audit_text.contains("claude-sonnet-5-5"));
+    assert!(!audit_text.contains(ENV_KEY));
+
+    let (_, listed, _) = api.get_models(&c.op).await;
+    assert_eq!(listed["pinned"], true);
+    assert_eq!(listed["current"]["model"], "gpt-5.5");
+    // Hermes's own current model is unchanged and reported as such.
+    assert_eq!(listed["hermesCurrent"]["provider"], "anthropic");
+    let codex = listed["providers"][1]["models"].as_array().unwrap();
+    let chosen = codex.iter().find(|m| m["id"] == "gpt-5.5").unwrap();
+    assert_eq!(
+        (chosen["featured"].clone(), chosen["current"].clone()),
+        (json!(true), json!(true))
+    );
+    let unchosen = codex.iter().find(|m| m["id"] == "gpt-5.6-luna").unwrap();
+    assert_eq!(unchosen["featured"], false);
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn put_model_outside_the_logged_in_list_is_422_and_writes_nothing() {
+    let c = connected("model-422", options_body()).await;
+    let api = c.api();
+    let before = c.pin_row().await;
+    for (what, body) in [
+        (
+            "model not listed under a logged-in provider",
+            json!({"provider": "anthropic", "model": "claude-opus-4-1-nonexistent"}),
+        ),
+        (
+            "a real model, but of the other provider",
+            json!({"provider": "anthropic", "model": "gpt-6-sol"}),
+        ),
+        (
+            "provider not logged in (skeleton row)",
+            json!({"provider": "nous", "model": "anything"}),
+        ),
+        (
+            "provider not logged in but listing models",
+            json!({"provider": "openrouter", "model": "some/model"}),
+        ),
+        (
+            "unknown provider",
+            json!({"provider": "made-up", "model": "claude-sonnet-5-5"}),
+        ),
+        (
+            "malformed provider slug",
+            json!({"provider": "../anthropic", "model": "claude-sonnet-5-5"}),
+        ),
+        (
+            "malformed model id",
+            json!({"provider": "anthropic", "model": "claude sonnet; drop"}),
+        ),
+        (
+            "alias that Hermes ignores",
+            json!({"provider": "", "model": "hermes-agent"}),
+        ),
+    ] {
+        let (code, resp, _) = api.put_model(&c.op, body).await;
+        assert_eq!(
+            (code, resp["error"]["code"].as_str()),
+            (422, Some("cohosted_model_not_offered")),
+            "{what}: {resp}"
+        );
+    }
+    // An unknown field is refused too (closed body), as a client error.
+    let (code, _, _) = api
+        .put_model(
+            &c.op,
+            json!({"provider": "anthropic", "model": "claude-opus-5-5", "baseUrl": "http://evil"}),
+        )
+        .await;
+    assert!(code == 422 || code == 400, "{code}");
+    assert_eq!(c.pin_row().await, before, "a refused PUT wrote something");
+    assert_eq!(c.model_audits().await, 0);
+    // Positive control: the same route accepts a listed pair.
+    let (code, _, _) = api
+        .put_model(
+            &c.op,
+            json!({"provider": "anthropic", "model": "claude-opus-5-5"}),
+        )
+        .await;
+    assert_eq!(code, 200);
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn put_model_reads_hermes_afresh_and_never_trusts_an_earlier_list() {
+    let c = connected("model-fresh", options_body()).await;
+    let api = c.api();
+    let (code, _, _) = api.get_models(&c.op).await;
+    assert_eq!(code, 200);
+    // Hermes logs out of Codex after the operator saw the list.
+    let mut now = options_body();
+    now["providers"][1]["authenticated"] = json!(false);
+    *c.options.lock().unwrap() = (200, now);
+    let (code, resp, _) = api
+        .put_model(
+            &c.op,
+            json!({"provider": "openai-codex", "model": "gpt-6-sol"}),
+        )
+        .await;
+    assert_eq!(
+        (code, resp["error"]["code"].as_str()),
+        (422, Some("cohosted_model_not_offered")),
+        "{resp}"
+    );
+    // And when Hermes cannot be read at all, nothing is guessed from the pin.
+    *c.options.lock().unwrap() = (500, json!({}));
+    let (code, resp, _) = api
+        .put_model(
+            &c.op,
+            json!({"provider": "anthropic", "model": "claude-opus-5-5"}),
+        )
+        .await;
+    assert_eq!(
+        (code, resp["error"]["code"].as_str()),
+        (502, Some("cohosted_models_unavailable")),
+        "{resp}"
+    );
+    assert_eq!(c.model_audits().await, 0);
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_model_routes_are_operator_only_and_need_a_connected_agent() {
+    let c = connected("model-op", options_body()).await;
+    let api = c.api();
+    let (_, admin_email) = seed_human(&c.su, c.f.workspace, "admin", "model-admin").await;
+    let stranger = seed(&c.su, "model-stranger").await;
+    let admin = login(&c.http, &c.base, c.f.workspace, &admin_email).await;
+    let other = login(&c.http, &c.base, stranger.workspace, &stranger.email).await;
+    let seen = c.hits.count();
+    let before = c.pin_row().await;
+    for token in [&admin, &other] {
+        assert_eq!(api.get_models(token).await.0, 403);
+        assert_eq!(
+            api.put_model(
+                token,
+                json!({"provider": "openai-codex", "model": "gpt-6-sol"})
+            )
+            .await
+            .0,
+            403
+        );
+    }
+    assert_eq!(
+        c.hits.count(),
+        seen,
+        "a stranger made Hermes answer a request"
+    );
+    assert_eq!(c.pin_row().await, before);
+    assert_eq!(c.model_audits().await, 0);
+
+    // A workspace with no connected agent: 409, and Hermes is not asked.
+    let lone = seed(&c.su, "model-lone").await;
+    let (port, hits, _) = mock_hermes(options_body()).await;
+    let base = start_server(
+        momo_app_pool().await,
+        Declared {
+            operator_email: &lone.email,
+            env_url: format!("http://127.0.0.1:{port}/v1"),
+            bearer: ENV_KEY,
+            declared: true,
+            tools_locked: true,
+        },
+    )
+    .await;
+    let op = login(&c.http, &base, lone.workspace, &lone.email).await;
+    let lone_api = Api {
+        http: &c.http,
+        base: &base,
+        workspace: lone.workspace,
+    };
+    let (code, resp, _) = lone_api.get_models(&op).await;
+    assert_eq!(
+        (code, resp["error"]["code"].as_str()),
+        (409, Some("cohosted_agent_not_connected"))
+    );
+    let (code, resp, _) = lone_api
+        .put_model(
+            &op,
+            json!({"provider": "anthropic", "model": "claude-opus-5-5"}),
+        )
+        .await;
+    assert_eq!(
+        (code, resp["error"]["code"].as_str()),
+        (409, Some("cohosted_agent_not_connected"))
+    );
+    assert_eq!(hits.count(), 0);
 }
