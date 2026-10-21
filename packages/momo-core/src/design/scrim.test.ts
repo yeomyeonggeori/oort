@@ -135,14 +135,17 @@ describe("scrimFloor — ADR-0189 증보 2 표를 재현한다 (AC 1)", () => {
 });
 
 describe("scrim 불투명도 토큰은 산수의 결과다 (AC 2)", () => {
-  it.each(MODES)("%s — 여섯 조합 중 가장 큰 「잉크 7:1 최소 불투명도」 이상이고 0.02 넘게 두껍지 않다", (mode) => {
+  it.each(MODES)("%s — 여섯 조합 중 가장 큰 「잉크 7:1 최소 불투명도」 이상이고 0.02 미만으로만 두껍다", (mode) => {
     const needed = THEME_IDS.map((theme) =>
       scrimFloor(THEMES[theme][mode], inkOf(theme, mode), INK_MIN_ON_BACKDROP)
     );
     const worst = Math.max(...needed);
     expect(BACKDROP_SCRIM_ALPHA[mode]).toBeGreaterThanOrEqual(worst);
     // 필요 이상으로 두꺼우면 그림이 괜히 더 흐려진다 — 성재가 받아들인 「조금 흐리게」의 한도.
-    expect(BACKDROP_SCRIM_ALPHA[mode]).toBeLessThanOrEqual(worst + 0.02);
+    // ADR 은 「0.02 를 넘게」, 이슈 AC 는 「0.02 두꺼워도」 빨개진다고 적었다. 둘을 모두 지키도록
+    // 정확히 0.02 두꺼운 값도 빨갛게 잰다(0.01 격자 위의 정수 비교라 부동소수 오차가 없다).
+    const excessSteps = Math.round((BACKDROP_SCRIM_ALPHA[mode] - worst) * 100);
+    expect(excessSteps).toBeLessThan(2);
   });
 
   it("토큰의 값: 라이트 0.70, 다크 0.78 (증보 2 D3)", () => {
