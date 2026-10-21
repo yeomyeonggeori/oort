@@ -1,5 +1,7 @@
 import {
+  composerFieldLabel,
   composerPlaceholder,
+  composerPlaceholderClauses,
   MENTION_AFFORDANCE,
 } from '@momo/core/features/chat/composerCopy';
 import type {RosterMember} from '@momo/core/lib/api';
@@ -21,8 +23,14 @@ import {
   INPUT_CHROME,
   mentionRowHeight,
   mentionSheetMaxHeight,
+  PLACEHOLDER_MAX_LINES,
+  placeholderRoom,
   withLatinWordBreaks,
 } from '../src/features/conversation/Composer';
+import {
+  composerFloat,
+  composerTextColumn,
+} from '../src/features/conversation/convDesign';
 import {line} from '../src/design/tokens';
 import {matchMembers} from '../src/features/conversation/mentionQuery';
 import {
@@ -90,10 +98,11 @@ let store = memoryStore();
  * 흉내 내는 것은 테스트용 뒷문이 아니라 **기기에서 실제로 일어나는 갱신**이다.
  */
 const BASE_WINDOW = Dimensions.get('window');
-function setWindow(next: {fontScale?: number; height?: number}) {
+function setWindow(next: {fontScale?: number; height?: number; width?: number}) {
   const window = {
     ...BASE_WINDOW,
     ...(next.height === undefined ? {} : {height: next.height}),
+    ...(next.width === undefined ? {} : {width: next.width}),
     ...(next.fontScale === undefined ? {} : {fontScale: next.fontScale}),
   };
   Dimensions.set({window, screen: window});
@@ -1047,9 +1056,13 @@ describe('#1480 멘션 시트 상한 — 동적 타입 비례 + 도크가 열을
 //
 // 규칙은 코어의 것이고(`fitComposerPlaceholder`) 자는 이 클라의 것이다: 입력창과
 // 같은 토큰·같은 폭·같은 줄바꿈 전략으로 숨은 프로브를 세워 `onTextLayout` 으로
-// 재고, 그 세로를 `composerMaxHeight` 가 든 자리와 대조한다. 기본 글자 크기에서는
-// 상자가 문장보다 크므로 자가 언제나 「든다」고 답한다 — 화면이 하나도 안 변한다.
-describe('#1479 절 예산 — 빈 상자에 못 서는 문장은 절 경계에서 접힌다', () => {
+// 재고, 그 세로를 문턱과 대조한다.
+//
+// **문턱은 #4179 가 바꿨다** — 옛 판은 `composerMaxHeight` 가 든 상자의 글자리(기본 크기에서
+// 문장이 언제나 「든다」)였고, 지금은 **알약의 한 줄**(`placeholderRoom`, 성재 결정 2026-10-21
+// 「40 + 문장 한 줄」)이다: 한 줄에 안 드는 문장은 기본 크기에서도 뒷절이 절 경계에서 빠지고,
+// 재기 전에는 머리 절로 시작한다(높이가 처음부터 한 줄이게).
+describe('#1479 절 예산 · #4179 한 줄 문턱 — 한 줄에 못 서는 문장은 절 경계에서 접힌다', () => {
   const AX_XXL = 3.143;
   const H = 874;
   /**
@@ -1060,6 +1073,12 @@ describe('#1479 절 예산 — 빈 상자에 못 서는 문장은 절 경계에�
   it('크롬 사본이 배송되는 값과 같다', () => {
     expect(CHROME).toBe(INPUT_CHROME);
   });
+
+  /** iOS 동적 타입 배수 사다리 전부(`RCTAccessibilityManager` 기본표) — 몇 개만 고르면 고른 사람이 안 고른 칸에 대해 말하지 않은 것이다. */
+  const LADDER = [
+    0.823, 0.882, 0.941, 1, 1.118, 1.235, 1.353, 1.786, 2.143, 2.643, 3.143,
+    3.571,
+  ];
 
   const input = () => screen.getByTestId('composer-input');
 
@@ -1085,22 +1104,34 @@ describe('#1479 절 예산 — 빈 상자에 못 서는 문장은 절 경계에�
       nativeEvent: {lines: lineHeights.map(height => ({height}))},
     });
 
-  it('재기 전에는 문장 전체다 — 짧게 시작하면 드는 폭에서도 광고가 사라진다', () => {
-    // 웹 `placeholderFit.ts` 와 같은 안전 방향. 자가 답하기 전의 한 프레임에
-    // 짧은 문장을 내면, 드는 상자에서도 광고가 사라졌다 돌아온다.
-    setWindow({fontScale: AX_XXL, height: H});
-    composer();
-    expect(input().props.placeholder).toBe(
-      withLatinWordBreaks(composerPlaceholder('배포', 'place')),
-    );
+  const FULL = () => withLatinWordBreaks(composerPlaceholder('배포', 'place'));
+  const HEAD = () =>
+    withLatinWordBreaks(composerPlaceholderClauses('배포', 'place')[0].text);
+
+  it('재기 전에는 머리 절이다 (#4179) — 알약 높이가 처음부터 한 줄이고 재고 나서 붙는다', () => {
+    // 옛 판은 문장 전체로 시작했다(「일단 짧게」는 드는 상자에서 광고를 한 프레임 지운다).
+    // 한 줄 예산에서는 안 드는 문장이 흔한 쪽이라 그 한 프레임이 알약이 두 줄로 섰다가
+    // 줄어드는 **높이 점프**가 된다 — 머리 절로 시작하면 어느 쪽 답이 와도 높이가 안 움직인다.
+    for (const fontScale of [1, AX_XXL]) {
+      setWindow({fontScale, height: H});
+      const view = composer();
+      expect(input().props.placeholder).toBe(HEAD());
+      // 입력창이 폭을 알려도(프로브가 서도) 프로브가 답하기 전까지는 머리 절이다.
+      layoutInput();
+      expect(input().props.placeholder).toBe(HEAD());
+      // 한 줄로 든다는 답이 오면 그제야 뒷절이 붙는다 — 글자만, 높이는 그대로.
+      measureProbe([line.body * fontScale]);
+      expect(input().props.placeholder).toBe(FULL());
+      view.unmount();
+    }
   });
 
-  it('큰 글자에서 문장이 상자를 넘으면 뒷절이 통째로 사라진다', () => {
+  it('큰 글자에서 문장이 한 줄을 넘으면 뒷절이 통째로 사라진다', () => {
     setWindow({fontScale: AX_XXL, height: H});
     composer();
     layoutInput();
     const row = line.body * AX_XXL; // 화면의 줄 상자 — 72.3pt
-    // 문장 4줄 = 276.6pt. 상한이 든 글자리는 170.4 − 18 = 152.4pt — 못 선다.
+    // 문장 4줄 = 289.2pt. 문턱은 한 줄 반(108.4pt) — 못 선다.
     measureProbe([row, row, row, row]);
     expect(input().props.placeholder).toBe('배포에 메시지 보내기');
     expect(input().props.placeholder).not.toContain(MENTION_AFFORDANCE);
@@ -1108,42 +1139,127 @@ describe('#1479 절 예산 — 빈 상자에 못 서는 문장은 절 경계에�
     expect(input().props.placeholder.endsWith(',')).toBe(false);
   });
 
-  it('상자가 다시 커지면 광고가 돌아온다 — 접힘은 상태가 아니라 답이다', () => {
+  it('칸이 다시 넓어져 한 줄에 들면 광고가 돌아온다 — 접힘은 상태가 아니라 답이다', () => {
     setWindow({fontScale: AX_XXL, height: H});
     composer();
     layoutInput();
     const row = line.body * AX_XXL;
     measureProbe([row, row, row, row]);
     expect(input().props.placeholder).not.toContain(MENTION_AFFORDANCE);
-    // 같은 표면을 더 넓은 폭에서 다시 재면(회전·iPad) 두 줄이 되고, 152.4pt 에
-    // 138.3pt 는 든다.
+    // 같은 표면을 두 줄로 다시 재도(옛 판은 여기서 돌아왔다 — 상자 글자리 152.4pt 에 두 줄은
+    // 들었다) 한 줄 예산에서는 여전히 안 든다.
     measureProbe([row, row]);
-    expect(input().props.placeholder).toBe(
-      withLatinWordBreaks(composerPlaceholder('배포', 'place')),
-    );
+    expect(input().props.placeholder).toBe(HEAD());
+    // 회전·iPad 로 한 줄에 서면 그제야 돌아온다.
+    measureProbe([row]);
+    expect(input().props.placeholder).toBe(FULL());
   });
 
-  it('기본 글자 크기에서는 아무것도 안 변한다 — 자가 언제나 「든다」고 답한다', () => {
+  it('기본 글자 크기에서도 한 줄 예산이다 (#4179) — 두 줄이면 뒷절이 빠지고 한 줄이면 문장 전체다', () => {
+    // 옛 판은 여기서 두 줄(`[22, 22]`)도 「든다」였다 — 상자 글자리 110pt 에 44pt 는 넉넉했다. 그것이
+    // 402pt 에서 빈 알약을 72.7pt 로 키웠고(Buzz 53.3pt), 성재 결정이 문턱을 한 줄로 내렸다.
     setWindow({fontScale: 1, height: H});
     composer();
     layoutInput();
-    // 기본 크기의 최장 실측은 2줄(#1422 폰 계측). 상한 128 − 18 = 110pt 에
-    // 44pt 는 넉넉히 든다.
-    measureProbe([22, 22]);
-    expect(input().props.placeholder).toBe(
-      withLatinWordBreaks(composerPlaceholder('배포', 'place')),
-    );
+    measureProbe([line.body, line.body]);
+    expect(input().props.placeholder).toBe(HEAD());
+    expect(input().props.placeholder).not.toContain(MENTION_AFFORDANCE);
+    measureProbe([line.body]);
+    expect(input().props.placeholder).toBe(FULL());
     expect(input().props.placeholder).toContain(MENTION_AFFORDANCE);
   });
 
-  it('경계값: 정확히 드는 문장은 접지 않는다', () => {
+  it('경계값: 한 줄은 반올림 잡음이 있어도 접지 않고, 두 줄은 접는다', () => {
     setWindow({fontScale: AX_XXL, height: H});
     composer();
     layoutInput();
-    const room = composerMaxHeight(AX_XXL, H) - CHROME;
-    // 합이 정확히 글자리인 판 — 부동소수 잡음으로 접으면 안 된다.
-    measureProbe([room / 2, room / 2]);
-    expect(input().props.placeholder).toContain(MENTION_AFFORDANCE);
+    const row = line.body * AX_XXL;
+    // 네이티브가 줄 상자를 픽셀 격자에 반올림해 한 줄이 0.4pt 더 커도 한 줄이다 — 이 오답은
+    // **들어가는 문장의 뒷절을 지운다.**
+    measureProbe([row + 0.4]);
+    expect(input().props.placeholder).toBe(FULL());
+    // 합이 정확히 문턱인 판 — 부동소수 잡음으로 접으면 안 된다.
+    measureProbe([placeholderRoom(AX_XXL)]);
+    expect(input().props.placeholder).toBe(FULL());
+    // 문턱을 조금만 넘어도 접힌다. 두 줄은 문턱(한 줄 반)을 한 줄의 절반이나 넘는다.
+    measureProbe([placeholderRoom(AX_XXL) + 0.01]);
+    expect(input().props.placeholder).toBe(HEAD());
+    measureProbe([row, row]);
+    expect(input().props.placeholder).toBe(HEAD());
+  });
+
+  it('문턱은 한 줄과 두 줄 사이다 — 배수 사다리 전부에서 (#4179)', () => {
+    expect(PLACEHOLDER_MAX_LINES).toBe(1);
+    for (const fontScale of LADDER) {
+      const row = line.body * fontScale;
+      expect(placeholderRoom(fontScale)).toBeGreaterThan(row);
+      expect(placeholderRoom(fontScale)).toBeLessThan(2 * row);
+    }
+  });
+
+  it.each(LADDER)(
+    '배수 %s: 한 줄이면 문장 전체, 두 줄 이상이면 머리 절만 — 반쪽 절은 없다 (#4179)',
+    fontScale => {
+      setWindow({fontScale, height: H});
+      composer();
+      layoutInput();
+      const row = line.body * fontScale;
+      // 어느 답이 와도 보이는 글은 **절 경계가 만든 둘 중 하나**다 — 머리 절 아니면 문장 전체.
+      const allowed = [HEAD(), FULL()];
+      for (const lines of [[row], [row, row], [row, row, row], [row, row, row, row]]) {
+        measureProbe(lines);
+        expect(allowed).toContain(input().props.placeholder);
+        expect(input().props.placeholder).toBe(lines.length === 1 ? FULL() : HEAD());
+      }
+      // 머리 절이 한 줄을 넘는 크기(접근성 쪽)에서도 머리 절은 안 버린다 — 버릴 절이 없다.
+      expect(input().props.placeholder.startsWith(HEAD())).toBe(true);
+    },
+  );
+
+  it('낭독 라벨은 줄 예산과 무관하다 — 뒷절이 빠져도 필드 이름 전체가 그대로다 (#4179)', () => {
+    for (const fontScale of [1, AX_XXL]) {
+      setWindow({fontScale, height: H});
+      const view = composer();
+      layoutInput();
+      const label = composerFieldLabel('배포', 'place');
+      expect(input().props.accessibilityLabel).toBe(label);
+      measureProbe([line.body * fontScale]);
+      expect(input().props.accessibilityLabel).toBe(label);
+      measureProbe([line.body * fontScale, line.body * fontScale]);
+      // 보이는 글은 머리 절로 줄었어도 라벨은 안 줄었다 — 같은 문자열이 아니다.
+      expect(input().props.placeholder).toBe(HEAD());
+      expect(input().props.accessibilityLabel).toBe(label);
+      expect(input().props.accessibilityLabel).not.toBe(input().props.placeholder);
+      view.unmount();
+    }
+  });
+
+  it('프로브가 서는 폭은 알약의 글 칸이다 — 하네스의 자와 같은 수 (#4179)', () => {
+    // 입력창은 알약에서 양쪽 (원 + 원↔가장자리)를 뺀 칸이고, 프로브는 그 칸에서 입력창 자신의
+    // 안쪽 여백·테두리를 뺀 글 칸에 선다. 계측 하네스(`PlaceholderProbe`)가 이 수를 읽는다 —
+    // 옛 하네스는 알약 이전 바(좌우 16·「보내기」 글자 버튼)를 복제해서 다른 칸을 쟀다.
+    for (const [width, fontScale] of [
+      [402, 1],
+      [393, 1],
+      [375, 1],
+      [440, 1],
+      [393, AX_XXL],
+    ] as const) {
+      setWindow({width, fontScale, height: H});
+      const view = composer();
+      const inputWidth =
+        width - 2 * composerFloat(width, fontScale) - 2 * (9 + 36);
+      layoutInput(inputWidth);
+      const probeStyle = StyleSheet.flatten(probes()[0].props.style) as {
+        width?: number;
+      };
+      expect([width, fontScale, probeStyle.width]).toEqual([
+        width,
+        fontScale,
+        composerTextColumn(width, fontScale),
+      ]);
+      view.unmount();
+    }
   });
 
   it('문장을 넘겨받은 자리(스레드)는 절 계약 밖이다 — 프로브도 안 선다', () => {
@@ -1183,6 +1299,9 @@ describe('#1479 절 예산 — 빈 상자에 못 서는 문장은 절 경계에�
   it('joiner 가 이 화면까지 온다 — 광고 절은 「@로」가 한 낱말이다 (#1479 ①)', () => {
     setWindow({fontScale: 1, height: H});
     composer();
+    layoutInput();
+    // 한 줄에 든다는 답이 와야 광고 절이 붙는다(#4179: 재기 전에는 머리 절이다).
+    measureProbe([line.body]);
     expect(input().props.placeholder).toContain('@\u2060로 부르기');
     // withLatinWordBreaks 는 라틴/숫자 사이만 만지므로 joiner 를 안 건드린다.
     expect(withLatinWordBreaks('@\u2060로 부르기')).toBe('@\u2060로 부르기');
