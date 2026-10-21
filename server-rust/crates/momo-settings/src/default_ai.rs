@@ -230,6 +230,31 @@ mod tests {
         );
     }
 
+    /// #4159 L3: the code bound (64) is the effective one; migration 144's CHECK
+    /// (128) is only a backstop. Every id this sanitizer lets through must fit the
+    /// stored column's pattern, so a pair that passes here can always be written.
+    #[test]
+    fn a_sanitized_model_id_always_fits_the_agent_pin_check() {
+        let migration = include_str!("../../../../server/Migrations/144_agent_pin_model.sql");
+        let tail = migration
+            .split("model_id ~ '^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,")
+            .nth(1)
+            .expect("migration 144 keeps the model_id pattern");
+        let upper: usize = tail
+            .split('}')
+            .next()
+            .and_then(|n| n.parse().ok())
+            .expect("the pattern has a numeric upper bound");
+        let db_max_bytes = upper + 1;
+        assert_eq!(db_max_bytes, 128, "the CHECK the ADR text names");
+        assert!(
+            MAX_MODEL_ID_BYTES <= db_max_bytes,
+            "the code bound {MAX_MODEL_ID_BYTES} must not exceed the DB bound {db_max_bytes}"
+        );
+        let longest = "m".repeat(MAX_MODEL_ID_BYTES);
+        assert_eq!(sanitized_model_id(&longest).as_deref(), Some(&*longest));
+    }
+
     #[test]
     fn role_labels_round_trip() {
         for role in DefaultAiRole::ALL {
