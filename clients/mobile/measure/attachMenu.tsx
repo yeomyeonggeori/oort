@@ -19,8 +19,9 @@ import {Timeline} from '../src/features/conversation/Timeline';
 //   (라이트: LIGHT-ATTACH-MENU-<WHICH>)
 //
 //   idle    메뉴가 닫힌 대화. 여는 것은 Maestro 의 실제 탭이다(`maestro/100-attach-menu-capture.yaml`).
-//   denied  카메라(또는 사진) 권한 거부 뒤의 트레이. 거부는 시스템 알림을 거쳐야 하는 일이라 같은
-//           상태를 `setPickerIssue` 로 심는다 — 컴포저가 실제 길에서 부르는 그 함수다.
+//   denied  카메라 권한 거부 뒤의 트레이. 거부는 시스템 알림을 거쳐야 하는 일이라 같은 상태를
+//           `setPickerIssue` 로 심는다 — 컴포저가 실제 길에서 부르는 그 함수다. 실제 길은
+//           `maestro/100-attach-menu-capture.yaml` 가 아니라 카메라 행을 눌러 시스템 알림에서 「허용 안 함」.
 //
 // 뒤에 말풍선이 넉넉해야 카드의 흐림이 보인다: 위쪽에 긴 글, 아래쪽에 짧은 글 여러 개.
 // =============================================================================
@@ -88,7 +89,7 @@ const TARGET = {workspaceId: WS, channelId: CHANNEL};
 export function AttachMenuSurface({which}: {which: string}): React.JSX.Element {
   useEffect(() => {
     if (which !== 'denied') return;
-    setPickerIssue(attachmentSurfaceKey(TARGET), 'permission-denied');
+    setPickerIssue(attachmentSurfaceKey(TARGET), 'camera-permission-denied');
   }, [which]);
   return (
     <Screen style={NO_TOP}>

@@ -31,7 +31,6 @@ import {
 import {FixedScheme} from '../src/design/theme';
 import {
   darkPalette,
-  ds2Radius,
   font,
   lightPalette,
   TOUCH_TARGET,
@@ -425,6 +424,33 @@ describe('항목과 닫는 길', () => {
     expect(view.onPickFile).toHaveBeenCalledTimes(1);
   });
 
+  it('+ 재탭: 카드에 가려진 + 원 자리에 닫기 표면이 서고, 누르면 닫는다(열린 직후에도)', () => {
+    const view = renderMenu();
+    const close = screen.getByTestId('attach-menu-anchor-close', {
+      includeHiddenElements: true,
+    });
+    // + 원을 잰 그 자리(창 좌표) 그대로다 — 카드 위, 마지막 행 위에 얹힌다.
+    expect(StyleSheet.flatten(close.props.style)).toMatchObject({
+      left: BUZZ_ANCHOR.x,
+      top: BUZZ_ANCHOR.y,
+      width: BUZZ_ANCHOR.width,
+      height: BUZZ_ANCHOR.height,
+    });
+    expect(close).toHaveProp('accessibilityElementsHidden', true);
+    fireEvent.press(close);
+    expect(view.onClose).toHaveBeenCalledTimes(1);
+    expect(view.onPickFile).not.toHaveBeenCalled();
+  });
+
+  it('+ 원을 못 쟀으면(안전한 자리로 열릴 때) 닫기 표면을 허공에 세우지 않는다', () => {
+    renderMenu({anchorRef: fakeAnchor(null)});
+    expect(
+      screen.queryByTestId('attach-menu-anchor-close', {
+        includeHiddenElements: true,
+      }),
+    ).toBeNull();
+  });
+
   it('닫는 길은 방어 시간에도 열려 있다: 바깥 탭은 열린 직후에도 닫는다', () => {
     const view = renderMenu();
     fireEvent.press(
@@ -624,11 +650,18 @@ describe('접근성 — 초점·라벨·해요체', () => {
 });
 
 describe('치수·재질 — Buzz 캡처 기준', () => {
-  it('카드 폭 216 · 행 높이 60(터치 44 이상) · 모서리는 디자인 시스템 반경 + 연속 곡선', () => {
+  it('카드 폭 216 · 행 높이 60(터치 44 이상) · 모서리는 이름 있는 연속 곡선 반경 34, 행은 동심', () => {
+    // 곡선이 **화면에서** 연속인지는 이 시험이 못 잰다(style prop 만 읽는다) — 시뮬레이터 캡처의 모서리
+    // 프로필(`corner.py`)이 재고, 반경 34 는 그 프로필을 Buzz 와 최소제곱으로 맞춘 값이다(머리 주석).
     renderMenu();
     const card = flat('attach-menu');
     expect(card.width).toBe(216);
-    expect(card.borderRadius).toBe(ds2Radius.composer);
+    expect(card.borderRadius).toBe(ATTACH_MENU.radius);
+    expect(card.borderCurve).toBe('continuous');
+    // 동심: 행 반경 = 카드 반경 − 카드 안 여백(12).
+    expect(flat('attachment-pick-camera').borderRadius).toBe(
+      ATTACH_MENU.radius - 12,
+    );
     expect(flat('attachment-pick-camera').height).toBe(60);
     expect(flat('attachment-pick-camera').height as number).toBeGreaterThanOrEqual(
       TOUCH_TARGET,

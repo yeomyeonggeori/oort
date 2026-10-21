@@ -37,7 +37,7 @@ import {
   MENU_OPEN_SPRING,
 } from '../../design/motion';
 import {usePalette, useStyles, useTheme} from '../../design/theme';
-import {ds2Radius, font, line, space, type Palette} from '../../design/tokens';
+import {font, line, space, type Palette} from '../../design/tokens';
 import {useReduceMotionRef} from '../../lib/useReduceMotion';
 
 // =============================================================================
@@ -54,12 +54,21 @@ import {useReduceMotionRef} from '../../lib/useReduceMotion';
 //   | 카드 폭       | x 10→226pt = 216                     | 216                                       |
 //   | 행 간격       | 60                                   | 행 높이 60                                |
 //   | 카드 안 여백  | 위·아래 12 (5행 = 5×60 + 24 = 324)   | 12(`space.md`), 3행 = 3×60 + 24 = 204     |
-//   | 모서리        | 27pt, 연속 곡선(iOS squircle)        | `ds2Radius.composer`(26, #4179 뒤 27) + `continuous` |
+//   | 모서리        | 연속 곡선, 반경 34(아래 「모서리」)    | `ATTACH_MENU.radius` 34 + `continuous`    |
 //   | 위치          | 카드 왼쪽 10 · 아래 = + 원 중심 + 11 | 같은 두 수를 + 원에서 잰다(`attachMenuFrame`) |
 //   | 아이콘        | 글리프 ≈ 15pt, 선 1.7pt              | 22pt 래스터(선 1.65pt), `MENU_ICON_SIZE`  |
 //   | 글자          | 캡 높이 14.6pt → ≈ 20.7pt, 보통 굵기  | `font.title` 22 · 400                     |
 //   | 글자 위치     | 아이콘 왼쪽 ≈ 39, 글자 왼쪽 ≈ 73     | 카드 12 + 행 16 = 28, 아이콘 22, 사이 16  |
 //   | 재질          | 어두운 반투명(뒤 말풍선이 흐리게 비침)| 잉크(`primary`) 86% + 흐림, 아래 「재질」   |
+//
+// ## 모서리 — 이슈의 「~27pt」가 아니라 연속 곡선 34
+//
+// 이슈는 Buzz 모서리를 「~27pt」로 적었다. 캡처의 아래 왼쪽 모서리 프로필(아래 끝에서 dy 만큼 위 행의 가장
+// 왼쪽 카드 픽셀이 카드 왼쪽에서 떨어진 거리)을 iOS 연속 곡선(`borderCurve: 'continuous'`) 반경 26·27·30·32·
+// 34·36 의 시뮬레이터 프로필과 최소제곱으로 맞추면 **34 가 가장 가깝다**(dy 8~100 의 제곱오차 8, 26 은 1390,
+// 30 은 346, 32 는 67). 같은 방법으로 잰 원호(circular) 반경은 ≈ 34pt 라 눈대중 27 은 이 곡선의 꼬리를 못 본
+// 값이다. 디자인 시스템 사다리(`ds2Radius`)에 34 가 없어 **이름을 지어** 이 파일에 둔다(README §6 1·2단계:
+// 이름과 근거). 카드 안 행의 반경은 동심이다 — 카드 반경 − 안 여백 = 22.
 //
 // 항목은 Buzz 의 다섯(카메라·사진·동영상·음성 메모·파일) 중 **셋**이다 — 동영상·음성 메모는 지원하지
 // 않아 넣지 않는다(이슈 Goal). 그래서 높이는 5행이 아니라 3행이다.
@@ -99,9 +108,11 @@ import {useReduceMotionRef} from '../../lib/useReduceMotion';
 //
 // ## 닫힘과 순서 계약
 //
-// 바깥 탭·VoiceOver 탈출(두 손가락 Z)·Modal 의 `onRequestClose` 가 닫는다. **+ 재탭은 같은 길이다**: Buzz
-// 배치에서 카드 아래 끝이 + 원 중심 아래 11pt 라 + 원은 카드 밑으로 들어가고 아래 6.5pt 만 드러나는데,
-// 그 자리는 카드 밖이라 바깥 탭이 된다.
+// 바깥 탭·+ 재탭·VoiceOver 탈출(두 손가락 Z)·Modal 의 `onRequestClose` 가 닫는다. Buzz 배치에서는 카드가
+// + 원을 덮는다(카드 아래 끝이 + 원 중심 아래 11pt): + 원의 위쪽 16pt 는 마지막 행(「파일」) 아래 빈 자리,
+// 가운데 12pt 는 카드의 아래 안 여백, 아래 6pt 만 카드 밖이다. 그대로 두면 + 를 다시 누를 때 가운데는
+// 무반응이고 위쪽은 파일 앱이 열린다 — 그래서 + 원 자리에 **보이지 않는 닫기 표면**(`attach-menu-anchor-close`)을
+// 카드 위에 얹는다. 가져가는 것은 행의 빈 모서리(아이콘·글자와 겹치지 않는 16×35pt)뿐이다.
 //
 // 시스템 picker·카메라는 이 Modal 이 **완전히 사라진 뒤**에 제시한다 — iOS 가 내려가는 VC 위의 제시를
 // 거절하고, 그 거절이 「업로드 실패」 오탐으로 접힌다(design-review High-1). `onDismissed` 가 그 신호이고
@@ -112,6 +123,8 @@ import {useReduceMotionRef} from '../../lib/useReduceMotion';
 export const ATTACH_MENU = {
   /** 카드 폭 — Buzz x 10→226pt. */
   width: 216,
+  /** 카드 모서리 반경(연속 곡선) — 위 「모서리」. 코너 프로필 최소제곱으로 맞춘 Buzz 값. */
+  radius: 34,
   /** 행 높이 — Buzz 행 간격 60. 고정이라 카드 높이를 글자 크기와 무관하게 산수로 안다. */
   rowHeight: 60,
   /** 화면 가장자리에서 카드까지 — Buzz 왼쪽 10. */
@@ -530,6 +543,24 @@ export function AttachMenu({
             </Animated.View>
           </View>
         </Animated.View>
+        {anchor === null ? null : (
+          // + 원 자리의 닫기 표면(위 「닫힘」). 글자도 그림도 없다 — + 는 카드 밑에 있고, 사람이 누르는 것은
+          // 그 기억이다. 보조기술에서는 숨는다(VoiceOver 는 탈출 제스처가 닫는다). 열린 직후에도 닫는 길은 막지 않는다.
+          <Pressable
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            onPress={onClose}
+            style={{
+              position: 'absolute',
+              left: anchor.x,
+              top: anchor.y,
+              width: anchor.width,
+              height: anchor.height,
+              borderRadius: anchor.height / 2,
+            }}
+            testID="attach-menu-anchor-close"
+          />
+        )}
       </View>
     </Modal>
   );
@@ -630,13 +661,14 @@ const buildStyles = (color: Palette) =>
     card: {
       position: 'absolute',
       width: ATTACH_MENU.width,
-      borderRadius: ds2Radius.composer,
+      borderRadius: ATTACH_MENU.radius,
+      borderCurve: 'continuous',
       boxShadow: color.elevationFloat,
     },
     // 흐림과 틴트는 모양 안에서 잘린다. 그림자는 바깥 `card` 가 그린다(`GlassSurface` 와 같은 분업).
     clip: {
       flex: 1,
-      borderRadius: ds2Radius.composer,
+      borderRadius: ATTACH_MENU.radius,
       borderCurve: 'continuous',
       overflow: 'hidden',
     },
@@ -651,7 +683,8 @@ const buildStyles = (color: Palette) =>
       alignItems: 'center',
       gap: ATTACH_MENU.iconGap,
       paddingHorizontal: space.lg,
-      borderRadius: ds2Radius.row,
+      // 동심: 카드 반경 − 카드 안 여백(위 「모서리」).
+      borderRadius: ATTACH_MENU.radius - space.md,
     },
     rowPressed: {backgroundColor: `${color.onPrimary}${PRESSED_ALPHA_HEX}`},
     label: {

@@ -346,7 +346,7 @@ describe('picker·native upload 단위 배선', () => {
       });
     });
 
-    it('권한 거부는 촬영을 열지 않고 기존 permission-denied 길로 접는다', async () => {
+    it('권한 거부는 촬영을 열지 않고 카메라 권한 이슈로 접는다(사진 이슈가 아니다)', async () => {
       imagePicker.__state.cameraPermission = {
         status: 'denied',
         granted: false,
@@ -354,7 +354,7 @@ describe('picker·native upload 단위 배선', () => {
       };
       await expect(pickCamera()).resolves.toEqual({
         kind: 'issue',
-        issue: 'permission-denied',
+        issue: 'camera-permission-denied',
       });
       expect(imagePicker.launchCameraAsync).not.toHaveBeenCalled();
     });
@@ -618,7 +618,7 @@ describe('Composer 첨부 렌더·발송', () => {
     });
   });
 
-  it('카메라 권한 거부를 같은 코어 문장과 설정 이동 행동으로 잇는다 (#4180)', async () => {
+  it('카메라 권한 거부를 카메라라고 말하는 코어 문장과 설정 이동 행동으로 잇는다 (#4180)', async () => {
     imagePicker.__state.cameraPermission = {
       status: 'denied',
       granted: false,
@@ -632,9 +632,14 @@ describe('Composer 첨부 렌더·발송', () => {
 
     await waitFor(() =>
       expect(
-        screen.getByText(uploadIssueCopy('permission-denied')),
+        screen.getByText(uploadIssueCopy('camera-permission-denied')),
       ).toBeTruthy(),
     );
+    // 사진 이슈의 문장이 아니다 — 설정의 「카메라」와 「사진」은 다른 행이다.
+    expect(screen.queryByText(uploadIssueCopy('permission-denied'))).toBeNull();
+    expect(
+      screen.getByTestId('attachment-picker-issue-camera-permission-denied'),
+    ).toBeTruthy();
     expect(imagePicker.launchCameraAsync).not.toHaveBeenCalled();
     expect(createUpload).not.toHaveBeenCalled();
     fireEvent.press(screen.getByTestId('attachment-open-settings'));

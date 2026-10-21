@@ -241,6 +241,8 @@ describe("failure vocabulary", () => {
     }
     expect(isRetryableIssue("permission-denied")).toBe(false);
     expect(uploadIssueNext("permission-denied")).not.toBeNull();
+    expect(isRetryableIssue("camera-permission-denied")).toBe(false);
+    expect(uploadIssueNext("camera-permission-denied")).not.toBeNull();
     // 고르기를 무른 것은 실패가 아니므로 다음 행동을 명령하지 않는다.
     expect(isRetryableIssue("selection-cancelled")).toBe(false);
     expect(uploadIssueNext("selection-cancelled")).toBeNull();
@@ -252,10 +254,22 @@ describe("failure vocabulary", () => {
     expect(uploadIssueCopy("mismatch")).not.toContain(ATTACH_COPY.retry);
   });
 
+  it("names the permission that was refused (camera ≠ photo library, #4180)", () => {
+    // 설정의 oort 페이지에는 「사진」과 「카메라」가 별도 행이다. 카메라를 거부한 사람에게 사진을
+    // 켜라고 하면 같은 실패가 반복된다 — 문장이 거부된 권한을 이름 대야 한다.
+    expect(uploadIssueCopy("camera-permission-denied")).toContain("카메라");
+    expect(uploadIssueCopy("camera-permission-denied")).not.toContain("사진");
+    expect(uploadIssueNext("camera-permission-denied")).toContain("카메라");
+    expect(uploadIssueNext("camera-permission-denied")).toContain("기기 설정");
+    expect(uploadIssueCopy("permission-denied")).toContain("사진");
+    expect(uploadIssueCopy("permission-denied")).not.toContain("카메라");
+  });
+
   it("gives every reason a sentence", () => {
     for (const issue of [
       "selection-cancelled",
       "permission-denied",
+      "camera-permission-denied",
       "too-large",
       "forbidden",
       "no-archive",

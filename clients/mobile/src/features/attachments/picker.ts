@@ -102,8 +102,11 @@ export async function pickPhoto(): Promise<AttachmentPickerOutcome> {
 /**
  * 카메라로 사진 한 장 (#4180, ADR-0168 범위). 사진 보관함과 달리 카메라는 **먼저 권한을 받아야** 한다:
  * `launchCameraAsync` 는 권한이 없으면 묻지 않고 거절한다(`MissingCameraPermissionException`). 그래서
- * 여기서 묻고, 거부면 시스템 picker 를 띄우지 않고 곧장 `permission-denied`(기존 이슈 문구 길)로 접는다.
- * 첫 요청은 시스템 알림이 서고, 거부한 뒤에는 묻지 않고 거부로 답한다.
+ * 여기서 묻고, 거부면 시스템 카메라를 띄우지 않고 곧장 `camera-permission-denied` 로 접는다. 기존
+ * `permission-denied` 와 같은 트레이 길(문장 + 기기 설정 링크)이지만 **문장은 카메라라고 말한다** —
+ * 설정의 oort 페이지에 「카메라」와 「사진」은 다른 행이라, 카메라를 거부한 사람에게 「사진 접근을 허용」
+ * 하라고 하면 같은 실패가 반복된다(design-review High-1). 첫 요청은 시스템 알림이 서고, 거부한 뒤에는
+ * 묻지 않고 거부로 답한다.
  *
  * 사진만 찍는다(`mediaTypes: ['images']`) — 동영상 모드는 마이크를 쓰고, 앱은 마이크를 요청하지 않는다
  * (`Info.plist` · `projectShape.test.ts`). 시뮬레이터에는 카메라가 없어 허용 뒤의 촬영은 `unavailable`
@@ -113,7 +116,7 @@ export async function pickCamera(): Promise<AttachmentPickerOutcome> {
   try {
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (!permission.granted) {
-      return {kind: 'issue', issue: 'permission-denied'};
+      return {kind: 'issue', issue: 'camera-permission-denied'};
     }
     return photoOutcome(
       await ImagePicker.launchCameraAsync({
