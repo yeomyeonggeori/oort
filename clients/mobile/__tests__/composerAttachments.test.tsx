@@ -25,16 +25,15 @@ import {
   waitFor,
 } from '@testing-library/react-native';
 import React from 'react';
-import {AccessibilityInfo, Linking} from 'react-native';
+import {AccessibilityInfo, Linking, StyleSheet, View} from 'react-native';
 
 import {
-  ATTACHMENT_SHEET_GRABBER_WIDTH,
   ATTACHMENT_TRAY_MAX_HEIGHT,
   lightPalette,
   space,
 } from '../src/design/tokens';
 import {FixedScheme} from '../src/design/theme';
-import {AttachmentPickerSheet} from '../src/features/attachments/AttachmentPickerSheet';
+import {ATTACH_MENU} from '../src/features/attachments/AttachMenu';
 import {AttachmentTray} from '../src/features/attachments/AttachmentTray';
 import {Composer} from '../src/features/conversation/Composer';
 import {
@@ -42,7 +41,11 @@ import {
   attachmentSurfaceKey,
   resetAttachmentDraftsForTest,
 } from '../src/features/attachments/draftStore';
-import {pickDocument, pickPhoto} from '../src/features/attachments/picker';
+import {
+  pickCamera,
+  pickDocument,
+  pickPhoto,
+} from '../src/features/attachments/picker';
 import {putAttachmentBytes} from '../src/features/attachments/uploadTransport';
 import * as uploadTransport from '../src/features/attachments/uploadTransport';
 import {SessionProvider, useSession} from '../src/session/useSession';
@@ -56,8 +59,14 @@ interface ImagePickerMock {
     result: unknown;
     failure: Error | null;
     permission: {status: string; accessPrivileges?: string};
+    cameraPermission: {status: string; granted: boolean; canAskAgain: boolean};
+    cameraResult: unknown;
+    cameraFailure: Error | null;
   };
   __reset: () => void;
+  requestCameraPermissionsAsync: jest.Mock;
+  launchCameraAsync: jest.Mock;
+  launchImageLibraryAsync: jest.Mock;
 }
 
 interface DocumentPickerMock {
@@ -79,6 +88,8 @@ interface FileSystemMock {
   __reset: () => void;
 }
 
+const hapticCalls = (jest.requireMock('expo-haptics') as {__calls: string[]})
+  .__calls;
 const imagePicker = jest.requireMock('expo-image-picker') as ImagePickerMock;
 const documentPicker = jest.requireMock(
   'expo-document-picker',
@@ -110,13 +121,13 @@ function successfulUploads(id: string): void {
   completeUpload.mockResolvedValue(completedRow(id));
 }
 
-function openPicker(kind: 'photo' | 'file'): void {
+function openPicker(kind: 'camera' | 'photo' | 'file'): void {
   fireEvent.press(screen.getByTestId('composer-attach'));
-  fireEvent.press(
-    screen.getByTestId(
-      kind === 'photo' ? 'attachment-pick-photo' : 'attachment-pick-file',
-    ),
-  );
+  // 열린 직후의 누름은 무시한다(연타 방어) — 사람이 메뉴를 본 뒤의 선택이 되도록 그 시간을 보낸다.
+  act(() => {
+    jest.advanceTimersByTime(ATTACH_MENU.touchGuardMs);
+  });
+  fireEvent.press(screen.getByTestId(`attachment-pick-${kind}`));
 }
 
 function renderComposer(onSend = jest.fn()) {
@@ -221,16 +232,17 @@ function renderSignedInComposer(): {
 }
 
 beforeEach(() => {
-  // 사진·파일 고르기는 시트가 닫힌 뒤(~400ms 타이머)에 뜬다. 실제 시계의 `waitFor` 1000ms 에서
-  // 그 타이머가 41% 를 먹었다(한 시험 10건 모두 407~414ms 측정) — 가짜 시계에서는 타이머가 가짜
-  // 시간으로 돌아 대기가 횟수 예산이 된다(fixtures/fakeClock.ts).
+  // 카메라·사진·파일 고르기는 메뉴가 닫힌 뒤(폴백 타이머 `MENU_CLOSE_WATCHDOG_MS + 100` = 600ms)에
+  // 뜬다. 실제 시계의 `waitFor` 1000ms 에서 그 타이머가 60% 를 먹는다(옛 시트의 400ms 는 41% 였다) —
+  // 가짜 시계에서는 타이머가 가짜 시간으로 돌아 대기가 횟수 예산이 된다(fixtures/fakeClock.ts).
   installAppClock();
   (
     AccessibilityInfo.announceForAccessibility as unknown as jest.Mock
   ).mockClear();
-  (
-    imagePicker as unknown as {launchImageLibraryAsync: jest.Mock}
-  ).launchImageLibraryAsync.mockClear();
+  hapticCalls.length = 0;
+  imagePicker.launchImageLibraryAsync.mockClear();
+  imagePicker.launchCameraAsync.mockClear();
+  imagePicker.requestCameraPermissionsAsync.mockClear();
   imagePicker.__reset();
   documentPicker.__reset();
   fileSystem.__reset();
@@ -293,6 +305,97 @@ describe('picker·native upload 단위 배선', () => {
           sizeKnown: true,
         },
       ],
+    });
+  });
+
+  describe('pickCamera (#4180)', () => {
+    const photo = {
+      canceled: false,
+      assets: [
+        {
+          uri: 'file:///cache/ImagePicker/shot.jpg',
+          fileName: null,
+          fileSize: 12,
+          mimeType: 'image/jpeg',
+        },
+      ],
+    };
+
+    it('권한을 먼저 받고 사진만 찍는다 — 동영상 모드는 마이크를 쓰므로 요청하지 않는다', async () => {
+      imagePicker.__state.cameraResult = photo;
+      await expect(pickCamera()).resolves.toEqual({
+        kind: 'picked',
+        files: [
+          {
+            uri: 'file:///cache/ImagePicker/shot.jpg',
+            name: 'shot.jpg',
+            mime: 'image/jpeg',
+            sizeBytes: 12,
+            sizeKnown: true,
+          },
+        ],
+      });
+      // 순서: `launchCameraAsync` 는 묻지 않고 거절하므로 요청이 반드시 먼저다.
+      expect(imagePicker.requestCameraPermissionsAsync).toHaveBeenCalledTimes(1);
+      expect(imagePicker.launchCameraAsync).toHaveBeenCalledTimes(1);
+      expect(
+        imagePicker.requestCameraPermissionsAsync.mock.invocationCallOrder[0],
+      ).toBeLessThan(imagePicker.launchCameraAsync.mock.invocationCallOrder[0]);
+      expect(imagePicker.launchCameraAsync.mock.calls[0][0]).toMatchObject({
+        mediaTypes: ['images'],
+      });
+    });
+
+    it('권한 거부는 촬영을 열지 않고 카메라 권한 이슈로 접는다(사진 이슈가 아니다)', async () => {
+      imagePicker.__state.cameraPermission = {
+        status: 'denied',
+        granted: false,
+        canAskAgain: false,
+      };
+      await expect(pickCamera()).resolves.toEqual({
+        kind: 'issue',
+        issue: 'camera-permission-denied',
+      });
+      expect(imagePicker.launchCameraAsync).not.toHaveBeenCalled();
+    });
+
+    it('카메라가 없는 곳(시뮬레이터)에서는 권한만 묻고 촬영은 열지 않는다 — 열면 네이티브 예외로 앱이 죽는다', async () => {
+      const device = jest.requireMock('expo-device') as {
+        __state: {isDevice: boolean};
+      };
+      device.__state.isDevice = false;
+      try {
+        await expect(pickCamera()).resolves.toEqual({
+          kind: 'issue',
+          issue: 'camera-unavailable',
+        });
+        expect(imagePicker.requestCameraPermissionsAsync).toHaveBeenCalledTimes(1);
+        expect(imagePicker.launchCameraAsync).not.toHaveBeenCalled();
+        // 권한을 거부했다면 그 문장이 먼저다(거부 길은 시뮬레이터에서도 같다).
+        imagePicker.__state.cameraPermission = {
+          status: 'denied',
+          granted: false,
+          canAskAgain: false,
+        };
+        await expect(pickCamera()).resolves.toEqual({
+          kind: 'issue',
+          issue: 'camera-permission-denied',
+        });
+      } finally {
+        device.__state.isDevice = true;
+      }
+    });
+
+    it('촬영 취소와 촬영 실패는 서로 다른 이슈다', async () => {
+      await expect(pickCamera()).resolves.toEqual({
+        kind: 'issue',
+        issue: 'selection-cancelled',
+      });
+      imagePicker.__state.cameraFailure = new Error('camera unavailable');
+      await expect(pickCamera()).resolves.toEqual({
+        kind: 'issue',
+        issue: 'camera-unavailable',
+      });
     });
   });
 
@@ -441,6 +544,155 @@ describe('Composer 첨부 렌더·발송', () => {
     });
   });
 
+  it('+ 를 누르면 같은 프레임에 햅틱 light 한 번 — 메뉴는 + 원을 잰 자리에서 열린다 (#4180)', () => {
+    // 목 `View` 의 `measureInWindow` 는 콜백을 부르지 않는다. Buzz 에서 잰 + 원(중심 67.5, 819)을 건네
+    // 컴포저가 **자기 + 단추의 참조**를 메뉴에 넘기는지(측정이 그 단추에서 오는지)를 잰다.
+    const measure = jest
+      .spyOn(
+        View.prototype as unknown as {
+          measureInWindow: (cb: (...n: number[]) => void) => void;
+        },
+        'measureInWindow',
+      )
+      .mockImplementation(cb => cb(50, 801.5, 35, 35));
+    renderComposer();
+    expect(hapticCalls).toEqual([]);
+    fireEvent.press(screen.getByTestId('composer-attach'));
+    // 누르는 핸들러 안에서 동기로 한 번(await·타이머 없음).
+    expect(hapticCalls).toEqual(['impact:light']);
+    expect(measure).toHaveBeenCalled();
+    const card = StyleSheet.flatten(
+      screen.getByTestId('attach-menu').props.style,
+    ) as {left: number; top: number; height: number};
+    expect(card.left).toBe(10);
+    expect(card.top + card.height).toBe(830);
+    measure.mockRestore();
+  });
+
+  it('첨부 상한에 닿으면 + 가 막히고 이유는 해요체로 말한다 — 메뉴도 햅틱도 없다 (#4180)', () => {
+    createUpload.mockReturnValue(new Promise(() => {}));
+    addPickedFiles(
+      attachmentSurfaceKey(TARGET),
+      TARGET,
+      Array.from({length: MAX_ATTACHMENTS_PER_MESSAGE}, (_, index) => ({
+        uri: `file:///docs/${index}.txt`,
+        name: `${index}.txt`,
+        mime: 'text/plain',
+        sizeBytes: 1,
+        sizeKnown: true,
+      })),
+    );
+    renderComposer();
+    const attach = screen.getByTestId('composer-attach');
+    expect(attach.props.accessibilityState).toEqual({disabled: true});
+    expect(attach.props.accessibilityHint).toBe(
+      `첨부는 ${MAX_ATTACHMENTS_PER_MESSAGE}개까지 고를 수 있어요`,
+    );
+    fireEvent.press(attach);
+    expect(hapticCalls).toEqual([]);
+    expect(screen.queryByTestId('attach-menu')).toBeNull();
+  });
+
+  it('비활성(+ 가 막힌 오프라인·상한)이면 햅틱도 메뉴도 없다 (#4180)', () => {
+    render(
+      <Composer
+        recipient="place"
+        channelLabel="general"
+        directory={EMPTY}
+        attachmentTarget={TARGET}
+        onSend={jest.fn()}
+        offline
+      />,
+    );
+    fireEvent.press(screen.getByTestId('composer-attach'));
+    expect(hapticCalls).toEqual([]);
+    expect(screen.queryByTestId('attach-menu')).toBeNull();
+  });
+
+  it('카메라로 찍은 사진 1장을 트레이→업로드→파일만 발송한다 (#4180)', async () => {
+    successfulUploads('attachment-camera');
+    imagePicker.__state.cameraResult = {
+      canceled: false,
+      assets: [
+        {
+          uri: 'file:///cache/ImagePicker/shot.jpg',
+          fileName: 'shot.jpg',
+          fileSize: 6,
+          mimeType: 'image/jpeg',
+        },
+      ],
+    };
+    const {onSend} = renderComposer();
+
+    openPicker('camera');
+
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('attachment-draft').props.accessibilityLabel,
+      ).toMatch(new RegExp(ATTACH_COPY.uploaded)),
+    );
+    expect(imagePicker.launchImageLibraryAsync).not.toHaveBeenCalled();
+    fireEvent.press(screen.getByTestId('composer-send'));
+    expect(onSend).toHaveBeenCalledWith('', {
+      attachments: [
+        {
+          id: 'attachment-camera',
+          name: 'shot.jpg',
+          mime: 'image/jpeg',
+          sizeBytes: 6,
+        },
+      ],
+    });
+  });
+
+  it('카메라 권한 거부를 카메라라고 말하는 코어 문장과 설정 이동 행동으로 잇는다 (#4180)', async () => {
+    imagePicker.__state.cameraPermission = {
+      status: 'denied',
+      granted: false,
+      canAskAgain: false,
+    };
+    const openSettings = jest
+      .spyOn(Linking, 'openSettings')
+      .mockResolvedValue(undefined);
+    renderComposer();
+    openPicker('camera');
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(uploadIssueCopy('camera-permission-denied')),
+      ).toBeTruthy(),
+    );
+    // 사진 이슈의 문장이 아니다 — 설정의 「카메라」와 「사진」은 다른 행이다.
+    expect(screen.queryByText(uploadIssueCopy('permission-denied'))).toBeNull();
+    expect(
+      screen.getByTestId('attachment-picker-issue-camera-permission-denied'),
+    ).toBeTruthy();
+    expect(imagePicker.launchCameraAsync).not.toHaveBeenCalled();
+    expect(createUpload).not.toHaveBeenCalled();
+    fireEvent.press(screen.getByTestId('attachment-open-settings'));
+    expect(openSettings).toHaveBeenCalledTimes(1);
+    openSettings.mockRestore();
+  });
+
+  it('카메라가 열리지 못하면 「업로드 실패」가 아니라 카메라가 안 열렸다고 말한다 (#4180)', async () => {
+    // 올린 것이 없는데 「업로드 실패」라고 하면 화면이 사실과 다른 말을 한다(design-review 2차 M2).
+    // 시뮬레이터는 허용 뒤에도 카메라가 없어 늘 이 길이다.
+    imagePicker.__state.cameraFailure = new Error('camera unavailable');
+    renderComposer();
+    openPicker('camera');
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(uploadIssueCopy('camera-unavailable')),
+      ).toBeTruthy(),
+    );
+    expect(screen.queryByText(uploadIssueCopy('unavailable'))).toBeNull();
+    expect(
+      screen.getByTestId('attachment-picker-issue-camera-unavailable'),
+    ).toBeTruthy();
+    expect(createUpload).not.toHaveBeenCalled();
+  });
+
   it('선택 취소를 코어의 인라인 문장으로 남긴다', async () => {
     renderComposer();
     openPicker('file');
@@ -583,18 +835,48 @@ describe('Composer 첨부 렌더·발송', () => {
 });
 
 describe('검수 수리 회귀 (design-review High-1·High-2)', () => {
-  it('picker 제시는 시트가 사라진 뒤다 — 닫는 같은 틱에 제시하지 않는다', async () => {
+  it('picker 제시는 메뉴가 사라진 뒤다 — 닫는 같은 틱에 제시하지 않는다', async () => {
     // High-1: 닫히는 Modal과 같은 틱의 제시는 iOS가 거절할 수 있고, 그 거절은
     // 「업로드 실패」 오탐으로 접힌다. 제시는 onDismiss 또는 폴백 타이머 뒤다.
     renderComposer();
-    fireEvent.press(screen.getByTestId('composer-attach'));
-    fireEvent.press(screen.getByTestId('attachment-pick-photo'));
-    const launch = (
-      imagePicker as unknown as {launchImageLibraryAsync: jest.Mock}
-    ).launchImageLibraryAsync;
+    openPicker('photo');
+    const launch = imagePicker.launchImageLibraryAsync;
     expect(launch).not.toHaveBeenCalled();
     await waitFor(() => expect(launch).toHaveBeenCalledTimes(1));
   });
+
+  it.each(['camera', 'photo', 'file'] as const)(
+    '%s: 접히는 동안(Modal 이 아직 서 있는 동안)에는 제시하지 않고 onDismiss 가 와야 한 번 제시한다',
+    async kind => {
+      // 폴백 타이머(600ms)보다 먼저 온 iOS `onDismiss` 가 1차 신호다. 그 전에는 어떤 picker 도 뜨지
+      // 않고, 신호가 오면 한 번만 뜨며, 뒤늦게 도착하는 폴백 타이머가 두 번째를 만들지 않는다.
+      const launcher = {
+        camera: imagePicker.launchCameraAsync,
+        photo: imagePicker.launchImageLibraryAsync,
+        file: documentPicker as unknown as {getDocumentAsync: jest.Mock},
+      };
+      const calls = () =>
+        kind === 'file'
+          ? launcher.file.getDocumentAsync.mock.calls.length
+          : launcher[kind].mock.calls.length;
+      if (kind === 'file') launcher.file.getDocumentAsync.mockClear();
+      renderComposer();
+      openPicker(kind);
+      // 닫는 요청은 갔지만 Modal 은 아직 서 있다.
+      const modal = screen.getByTestId('attach-menu-modal');
+      expect(modal).toBeTruthy();
+      expect(calls()).toBe(0);
+      await act(async () => {
+        modal.props.onDismiss();
+      });
+      await waitFor(() => expect(calls()).toBe(1));
+      // 폴백 타이머가 지나도 두 번째 제시는 없다.
+      await act(async () => {
+        jest.advanceTimersByTime(2000);
+      });
+      expect(calls()).toBe(1);
+    },
+  );
 
   it('첨부 상태 전이를 announceForAccessibility로 말한다 (iOS 낭독)', async () => {
     // High-2: accessibilityLiveRegion은 Android 전용이다. 폰의 전달 관례대로
@@ -726,7 +1008,7 @@ describe('#1703 M-2 후속 폴리시', () => {
     expect(status).not.toContain('0 B');
   });
 
-  it('grabber와 트레이 상한은 TOUCH_TARGET 대신 명명 측정을 소비한다', () => {
+  it('트레이 상한은 TOUCH_TARGET 대신 명명 측정을 소비한다', () => {
     render(
       <FixedScheme scheme="light">
         <AttachmentTray
@@ -736,21 +1018,11 @@ describe('#1703 M-2 후속 폴리시', () => {
           onRetry={jest.fn()}
           onClear={jest.fn()}
         />
-        <AttachmentPickerSheet
-          visible
-          onClose={jest.fn()}
-          onPickPhoto={jest.fn()}
-          onPickFile={jest.fn()}
-        />
       </FixedScheme>,
     );
     expect(
       flatten(screen.getByTestId('attachment-tray-list').props.style).maxHeight,
     ).toBe(ATTACHMENT_TRAY_MAX_HEIGHT);
-    expect(
-      flatten(screen.getByTestId('attachment-picker-grabber').props.style)
-        .width,
-    ).toBe(ATTACHMENT_SHEET_GRABBER_WIDTH);
   });
 
   it('현재 단건 picker 불변식에서 rejected를 일부 수락 뒤 무음 폐기하지 않는다', () => {
