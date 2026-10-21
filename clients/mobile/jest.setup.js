@@ -295,6 +295,11 @@ jest.mock('expo-image-picker', () => {
     result: {canceled: true, assets: null},
     failure: null,
     permission: {status: 'granted', accessPrivileges: 'all'},
+    // 카메라 (#4180). 사진 보관함과 달리 권한을 **먼저 받아야** 촬영이 열린다 —
+    // `launchCameraAsync` 는 묻지 않고 거절한다. 그래서 권한·결과·실패가 따로 선다.
+    cameraPermission: {status: 'granted', granted: true, canAskAgain: true},
+    cameraResult: {canceled: true, assets: null},
+    cameraFailure: null,
   };
   return {
     __state: state,
@@ -302,12 +307,21 @@ jest.mock('expo-image-picker', () => {
       state.result = {canceled: true, assets: null};
       state.failure = null;
       state.permission = {status: 'granted', accessPrivileges: 'all'};
+      state.cameraPermission = {status: 'granted', granted: true, canAskAgain: true};
+      state.cameraResult = {canceled: true, assets: null};
+      state.cameraFailure = null;
     },
     launchImageLibraryAsync: jest.fn(async () => {
       if (state.failure) throw state.failure;
       return state.result;
     }),
     getMediaLibraryPermissionsAsync: jest.fn(async () => state.permission),
+    requestCameraPermissionsAsync: jest.fn(async () => state.cameraPermission),
+    getCameraPermissionsAsync: jest.fn(async () => state.cameraPermission),
+    launchCameraAsync: jest.fn(async () => {
+      if (state.cameraFailure) throw state.cameraFailure;
+      return state.cameraResult;
+    }),
   };
 });
 

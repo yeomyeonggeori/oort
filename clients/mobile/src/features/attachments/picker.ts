@@ -46,6 +46,28 @@ function fileSize(
   return {sizeBytes: 0, sizeKnown: false};
 }
 
+/** 사진 한 장을 고른(또는 찍은) 결과를 첨부 입력으로. picker 둘이 같은 모양으로 답한다. */
+function photoOutcome(
+  result: ImagePicker.ImagePickerResult,
+): AttachmentPickerOutcome {
+  if (result.canceled || result.assets.length === 0) {
+    return {kind: 'issue', issue: 'selection-cancelled'};
+  }
+  const asset = result.assets[0];
+  const size = fileSize(asset.uri, asset.fileSize);
+  return {
+    kind: 'picked',
+    files: [
+      {
+        uri: asset.uri,
+        name: asset.fileName ?? fileNameFromUri(asset.uri, 'photo.jpg'),
+        mime: asset.mimeType ?? 'image/jpeg',
+        ...size,
+      },
+    ],
+  };
+}
+
 /**
  * PHPicker 사진 선택. iOS 14+에서는 읽기 권한을 선제 요청하지 않는다.
  *
@@ -54,27 +76,13 @@ function fileSize(
  */
 export async function pickPhoto(): Promise<AttachmentPickerOutcome> {
   try {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsMultipleSelection: false,
-      quality: 1,
-    });
-    if (result.canceled || result.assets.length === 0) {
-      return {kind: 'issue', issue: 'selection-cancelled'};
-    }
-    const asset = result.assets[0];
-    const size = fileSize(asset.uri, asset.fileSize);
-    return {
-      kind: 'picked',
-      files: [
-        {
-          uri: asset.uri,
-          name: asset.fileName ?? fileNameFromUri(asset.uri, 'photo.jpg'),
-          mime: asset.mimeType ?? 'image/jpeg',
-          ...size,
-        },
-      ],
-    };
+    return photoOutcome(
+      await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsMultipleSelection: false,
+        quality: 1,
+      }),
+    );
   } catch {
     try {
       const permission = await ImagePicker.getMediaLibraryPermissionsAsync();
@@ -87,6 +95,34 @@ export async function pickPhoto(): Promise<AttachmentPickerOutcome> {
     } catch {
       // 권한 상태조차 읽지 못하면 아래의 일반 실패로 접는다.
     }
+    return {kind: 'issue', issue: 'unavailable'};
+  }
+}
+
+/**
+ * 카메라로 사진 한 장 (#4180, ADR-0168 범위). 사진 보관함과 달리 카메라는 **먼저 권한을 받아야** 한다:
+ * `launchCameraAsync` 는 권한이 없으면 묻지 않고 거절한다(`MissingCameraPermissionException`). 그래서
+ * 여기서 묻고, 거부면 시스템 picker 를 띄우지 않고 곧장 `permission-denied`(기존 이슈 문구 길)로 접는다.
+ * 첫 요청은 시스템 알림이 서고, 거부한 뒤에는 묻지 않고 거부로 답한다.
+ *
+ * 사진만 찍는다(`mediaTypes: ['images']`) — 동영상 모드는 마이크를 쓰고, 앱은 마이크를 요청하지 않는다
+ * (`Info.plist` · `projectShape.test.ts`). 시뮬레이터에는 카메라가 없어 허용 뒤의 촬영은 `unavailable`
+ * 로 접힌다(실기기에서만 열린다).
+ */
+export async function pickCamera(): Promise<AttachmentPickerOutcome> {
+  try {
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      return {kind: 'issue', issue: 'permission-denied'};
+    }
+    return photoOutcome(
+      await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'],
+        allowsEditing: false,
+        quality: 1,
+      }),
+    );
+  } catch {
     return {kind: 'issue', issue: 'unavailable'};
   }
 }

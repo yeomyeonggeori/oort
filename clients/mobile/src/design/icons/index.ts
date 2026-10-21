@@ -124,3 +124,16 @@ export const AI_CONNECT_ICONS = {
 } as const;
 
 export const AI_CONNECT_ICON_SIZE = 14;
+
+// ---- 첨부 메뉴 아이콘 셋 (#4180) ----------------------------------------------
+// Lucide `camera`·`image`·`file`(ISC, 웹이 `lucide-react`로 쓰는 같은 집합 — 웹 0.454.0의
+// 경로 그대로), 같은 레시피(선 1.8, viewBox 24, 1·2·3배). Buzz 첨부 메뉴 아이콘 실측
+// ≈15pt 글리프라 + 메뉴와 같은 22pt(`MENU_ICON_SIZE`)로 굽는다.
+// 다시 만드는 법: `rsvg-convert -w <22|44|66> -h <22|44|66>` 로 위 레시피의 SVG를 래스터.
+export const ATTACH_MENU_ICONS = {
+  camera: require('./camera22.png') as ImageSourcePropType,
+  photo: require('./image22.png') as ImageSourcePropType,
+  file: require('./file22.png') as ImageSourcePropType,
+} as const;
+
+export type AttachMenuIconName = keyof typeof ATTACH_MENU_ICONS;
