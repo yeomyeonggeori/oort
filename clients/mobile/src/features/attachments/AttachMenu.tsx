@@ -618,9 +618,15 @@ export function AttachMenu({
             testID="attach-menu-anchor-close"
           />
         )}
-        {morphing ? (
+        {photos === undefined ? null : (
+          // 변신 틀은 메뉴가 열릴 때 **미리 서 있다**(투명, 눌리지도 낭독되지도 않는다). 「사진」을 누르는 순간에
+          // 새로 마운트하면 틀 안 메뉴 사본의 아이콘 `Image` 가 한두 프레임 비어 있다가 나타났다(영상 프레임에서
+          // 확인) — 미리 마운트해 두면 아이콘이 이미 그려진 사본이 그대로 켜진다. 사진 권한 API 는 카드가
+          // `active` 가 되기 전에는 한 번도 불리지 않는다(`cardIsLive`).
           <Animated.View
-            pointerEvents="box-none"
+            accessibilityElementsHidden={!morphing}
+            importantForAccessibility={morphing ? 'auto' : 'no-hide-descendants'}
+            pointerEvents={morphing ? 'box-none' : 'none'}
             style={[
               styles.morphHost,
               {
@@ -630,11 +636,11 @@ export function AttachMenu({
                 height: cardBox.height,
                 opacity: hostOpacity,
               },
+              morphing ? null : styles.morphStandby,
             ]}
             testID="attach-photo-host">
             <PhotoMorphFrame
               target={morph.target}
-              initialTarget="menu"
               menuSize={{width: frame.width, height: frame.height}}
               menuRadius={ATTACH_MENU.radius}
               cardSize={cardBox}
@@ -669,7 +675,7 @@ export function AttachMenu({
               }
             />
           </Animated.View>
-        ) : null}
+        )}
       </View>
     </Modal>
   );
@@ -825,6 +831,9 @@ const buildStyles = (color: Palette) =>
     cardHidden: {display: 'none'},
     // 변신 틀이 서는 자리: 메뉴와 바닥·왼쪽이 같고 카드 크기다. 틀은 그 안 왼쪽 아래에 닻을 내린다.
     morphHost: {position: 'absolute', justifyContent: 'flex-end', alignItems: 'flex-start'},
+    // 변신 전(대기): 그려진 채 보이지 않는다. `display: none` 이 아닌 이유 — 레이아웃에 서 있어야 아이콘
+    // 이미지가 미리 불러와진다.
+    morphStandby: {opacity: 0},
     morphShadow: {boxShadow: color.elevationFloat},
     morphMenu: {flex: 1},
     // 위치(`left`·`top`·`height`)는 + 원을 잰 값이라 렌더에서 붙는다.

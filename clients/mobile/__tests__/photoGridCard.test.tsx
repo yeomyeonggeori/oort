@@ -1,13 +1,14 @@
 import {MAX_ATTACHMENTS_PER_MESSAGE} from '@momo/core/features/attachments/model';
 import {act, cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react-native';
 import React from 'react';
-import {AccessibilityInfo, AppState} from 'react-native';
+import {AccessibilityInfo, ActivityIndicator, AppState} from 'react-native';
 
+import {AVATAR_INITIAL_MAX_SCALE, BAR_CONTROL_MAX_SCALE} from '../src/design/atoms';
 import {FixedScheme} from '../src/design/theme';
 import {lightPalette} from '../src/design/tokens';
 import {PhotoGridCard, type PhotoGridCardProps} from '../src/features/attachments/PhotoGridCard';
 import {PHOTO_COPY} from '../src/features/attachments/photoCardCopy';
-import {PHOTO_CARD} from '../src/features/attachments/photoCardDesign';
+import {PHOTO_CARD, photoCellSize} from '../src/features/attachments/photoCardDesign';
 import {
   PhotoResolveError,
   type PhotoAsset,
@@ -23,6 +24,8 @@ import {installAppClock} from './fixtures/fakeClock';
 //
 // 포트를 바꿔 끼우므로 expo 목이 필요 없다. 포트 호출 횟수가 곧 「선제 요청 없음」의 증거다.
 // =============================================================================
+
+type TestNode = ReturnType<typeof screen.getByTestId>;
 
 afterEach(() => {
   cleanup();
@@ -620,7 +623,129 @@ describe('페이지 로딩 — 커서로 이어 받는다', () => {
   });
 });
 
+describe('불러오는 동안 — 문구·스피너가 번쩍이지 않는다 (design-review M5)', () => {
+  it('권한을 읽는 동안은 비어 있다 — 보이는 문구도 스피너도 없고, 낭독만 확인 중이라고 말한다', async () => {
+    const lib = makeLibrary();
+    lib.ports.getPermission.mockImplementation(() => new Promise<PhotoPermission>(() => undefined));
+    await renderCard(lib.ports);
+    const checking = screen.getByTestId('photo-checking');
+    expect(checking.props.accessibilityLabel).toBe(PHOTO_COPY.checking);
+    expect(checking.props.accessibilityState).toEqual({busy: true});
+    expect(screen.queryByText(PHOTO_COPY.checking)).toBeNull();
+    expect(screen.UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(0);
+    expect(screen.queryByTestId('photo-pane-undetermined')).toBeNull();
+    expect(screen.queryByTestId('photo-pane-denied')).toBeNull();
+  });
+
+  it('첫 쪽을 읽는 동안은 사진 칸과 같은 크기의 중성 면이다 — 문구도 스피너도 없고 카드 높이를 채운다', async () => {
+    const lib = makeLibrary();
+    lib.ports.listPhotos.mockImplementation(() => new Promise(() => undefined));
+    await renderCard(lib.ports);
+    const skeleton = await screen.findByTestId('photo-loading');
+    expect(skeleton.props.accessibilityLabel).toBe(PHOTO_COPY.loading);
+    expect(skeleton.props.accessibilityState).toEqual({busy: true});
+    expect(screen.queryByText(PHOTO_COPY.loading)).toBeNull();
+    expect(screen.UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(0);
+    const size = {width: 382, height: 372};
+    const cell = photoCellSize(size.width);
+    const rows = Math.ceil(size.height / (cell + PHOTO_CARD.cellGap));
+    // 칸은 사진 칸과 같은 한 변이고 썸네일 바탕과 같은 색이다 — 사진이 들어와도 면이 바뀌지 않는다.
+    const flatOf = (node: {props: {style?: unknown}}) =>
+      Object.assign({}, ...([] as object[]).concat((node.props.style ?? {}) as object)) as Record<string, unknown>;
+    const cells = skeleton.findAll(
+      (node: TestNode) =>
+        typeof node.type === 'string' && flatOf(node).backgroundColor === lightPalette.surfaceMuted,
+    );
+    expect(cells).toHaveLength(rows * PHOTO_CARD.columns);
+    for (const node of cells) {
+      expect(flatOf(node)).toMatchObject({width: cell, height: cell});
+      // 시머가 없다 — 면은 움직이지 않는다(애니메이션 값이 스타일에 없다).
+      expect(JSON.stringify(node.props.style)).not.toMatch(/Animated|interpolat/);
+    }
+  });
+
+  it('다음 쪽을 읽는 동안은 바닥에 한 줄의 중성 면이 서고 낭독하지 않는다', async () => {
+    const lib = makeLibrary({assets: makeAssets(130)});
+    await renderCard(lib.ports);
+    await screen.findByTestId('photo-grid');
+    lib.ports.listPhotos.mockImplementation(() => new Promise(() => undefined));
+    await act(async () => {
+      screen.getByTestId('photo-grid').props.onEndReached?.({distanceFromEnd: 0});
+      await Promise.resolve();
+    });
+    const footer = await screen.findByTestId('photo-loading-more', {includeHiddenElements: true});
+    expect(footer.props.accessibilityElementsHidden).toBe(true);
+    expect(footer.children).toHaveLength(1);
+    expect(screen.UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(0);
+  });
+});
+
+describe('낭독 — iOS 에서 소리로만 전해지는 사실', () => {
+  it('카드가 열리면 면의 이름을 한 번 알린다(메뉴 행에서 초점이 떨어진다)', async () => {
+    const announce = jest
+      .spyOn(AccessibilityInfo, 'announceForAccessibility')
+      .mockImplementation(() => undefined);
+    // RN 의 jest 설정이 이미 목이라 호출 기록이 시험 사이에 이어진다 — 이 시험의 몫만 센다.
+    announce.mockClear();
+    const lib = makeLibrary();
+    const view = await renderCard(lib.ports, {active: false});
+    expect(announce).not.toHaveBeenCalled();
+    view.update({active: true});
+    await settle();
+    expect(announce.mock.calls.filter(call => call[0] === PHOTO_COPY.card)).toHaveLength(1);
+  });
+
+  it('두 손가락 Z(낭독 탈출)는 뒤로 원과 같은 길이다', async () => {
+    const lib = makeLibrary();
+    const {props} = await renderCard(lib.ports);
+    await screen.findByTestId('photo-grid');
+    await act(async () => {
+      screen.getByTestId('photo-card').props.onAccessibilityEscape();
+    });
+    expect(props.onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('준비를 시작할 때와 iCloud 에서 내려받기 시작할 때 알린다(진행 숫자는 장마다 읽지 않는다)', async () => {
+    const announce = jest
+      .spyOn(AccessibilityInfo, 'announceForAccessibility')
+      .mockImplementation(() => undefined);
+    announce.mockClear();
+    let release: (() => void) | null = null;
+    const lib = makeLibrary({
+      resolve: (asset, hooks) =>
+        new Promise<PickedAttachmentFile>(resolve => {
+          hooks.onDownloading();
+          release = () => resolve(fileFor(asset));
+        }),
+    });
+    await renderCard(lib.ports);
+    await screen.findByTestId('photo-grid');
+    await press('photo-cell-a1');
+    await press('photo-pill');
+    const said = announce.mock.calls.map(call => call[0]);
+    expect(said).toContain(PHOTO_COPY.preparingStart);
+    expect(said).toContain(PHOTO_COPY.downloading);
+    expect(said.some(text => /\(\d+\/\d+\)/.test(String(text)))).toBe(false);
+    await act(async () => {
+      release?.();
+    });
+  });
+});
+
 describe('겉모습', () => {
+  it('글자를 키워도 고정 크기 안에서 넘치지 않는다 — 순번 원·안내 칩의 글자 배율에 상한이 있다', async () => {
+    const lib = makeLibrary();
+    await renderCard(lib.ports, {room: 1});
+    await screen.findByTestId('photo-grid');
+    await press('photo-cell-a1');
+    expect(screen.getByTestId('photo-order-a1').props.maxFontSizeMultiplier).toBe(
+      AVATAR_INITIAL_MAX_SCALE,
+    );
+    await press('photo-cell-a2');
+    const chip = await screen.findByText(PHOTO_COPY.capped(1));
+    expect(chip.props.maxFontSizeMultiplier).toBe(BAR_CONTROL_MAX_SCALE);
+  });
+
   it('뒤로 원은 메뉴로 돌아간다', async () => {
     const lib = makeLibrary();
     const {props} = await renderCard(lib.ports);
@@ -716,6 +841,17 @@ describe('문장 — 전부 해요체다', () => {
   it('합쇼체 어미(~습니다·~ㅂ니다)가 하나도 없다', () => {
     const offenders = sentences().filter(text => /(습니다|입니다|됩니다|합니다|십시오)[.!?]?\s*$/.test(text));
     expect(offenders).toEqual([]);
+  });
+
+  it('마침표 규칙: 두 문장 이상이면 마지막에도 마침표가 있다(한 문자열 안에서 섞이지 않는다)', () => {
+    const mixed = sentences().filter(text => /[.]\s+\S/.test(text) && !text.trimEnd().endsWith('.'));
+    expect(mixed).toEqual([]);
+  });
+
+  it('알약의 「전체 사진」과 일부 허용 링크가 소리로 구별된다 — 링크는 앱에 보여 주는 범위를 바꾼다', () => {
+    expect(PHOTO_COPY.limitedMore).not.toBe(PHOTO_COPY.allPhotos);
+    expect(PHOTO_COPY.limitedMore).not.toContain('전체');
+    expect(PHOTO_COPY.limitedMore).not.toContain('고르기');
   });
 
   it('권한을 설명하는 문장은 사진이 기기 밖으로 나가지 않는다는 말을 한다', () => {

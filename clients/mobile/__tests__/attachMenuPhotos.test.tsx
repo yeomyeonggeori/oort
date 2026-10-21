@@ -147,6 +147,26 @@ async function open() {
   return harness;
 }
 
+const HIDDEN = {includeHiddenElements: true} as const;
+
+/** 변신 틀의 자리(호스트). 대기 중에는 그려져 있되 보이지도 눌리지도 낭독되지도 않는다. */
+function photoHost() {
+  return screen.getByTestId('attach-photo-host', HIDDEN);
+}
+
+function flatStyle(node: {props: {style?: unknown}}): Record<string, unknown> {
+  return Object.assign({}, ...([] as object[]).concat(node.props.style as object)) as Record<
+    string,
+    unknown
+  >;
+}
+
+function expectStandby() {
+  expect(photoHost().props.pointerEvents).toBe('none');
+  expect(photoHost().props.accessibilityElementsHidden).toBe(true);
+  expect(flatStyle(photoHost()).opacity).toBe(0);
+}
+
 async function pressPhotoRow() {
   await act(async () => {
     fireEvent.press(screen.getByTestId('attachment-pick-photo'));
@@ -166,10 +186,26 @@ describe('변신 — 「사진」 행이 메뉴를 카드로 바꾼다', () => {
   it('메뉴만 열려 있는 동안에는 사진 권한 API 가 한 번도 불리지 않는다', async () => {
     const h = await open();
     expect(screen.getByTestId('attach-menu')).toBeTruthy();
-    expect(screen.queryByTestId('attach-photo-host')).toBeNull();
+    // 틀은 미리 서 있어도(아래) 카드는 닫혀 있다 — 포트를 부르지 않는다.
     expect(h.ports.getPermission).not.toHaveBeenCalled();
     expect(h.ports.requestPermission).not.toHaveBeenCalled();
     expect(h.ports.listPhotos).not.toHaveBeenCalled();
+    expect(h.ports.subscribe).not.toHaveBeenCalled();
+  });
+
+  it('변신 틀은 메뉴가 열릴 때 미리 서 있다 — 투명하고 눌리지도 낭독되지도 않으며, 메뉴 사본의 아이콘이 이미 그려져 있다', async () => {
+    await open();
+    expectStandby();
+    // 「사진」을 누르는 순간 새로 마운트하면 사본의 아이콘이 한두 프레임 비었다 — 미리 서 있어야 한다.
+    expect(screen.getAllByTestId('attachment-pick-photo', HIDDEN)).toHaveLength(2);
+    expect(screen.getAllByTestId('attachment-pick-photo')).toHaveLength(1);
+    // 대기 중의 사본은 누를 수 없다 — 눌러도 아무 일도 없다.
+    expect(screen.getByTestId('photo-morph-menu', HIDDEN)).toBeTruthy();
+    // 눌린 뒤에야 보이고 눌린다.
+    await pressPhotoRow();
+    expect(photoHost().props.pointerEvents).toBe('box-none');
+    expect(photoHost().props.accessibilityElementsHidden).toBe(false);
+    expect(flatStyle(photoHost()).opacity).not.toBe(0);
   });
 
   it('「사진」을 누르면 시스템 picker 대신 변신하고, 상태만 읽는다(요청은 「허용」)', async () => {
@@ -226,7 +262,8 @@ describe('변신 — 「사진」 행이 메뉴를 카드로 바꾼다', () => {
       await Promise.resolve();
     });
     await settleMorph();
-    expect(screen.queryByTestId('attach-photo-host')).toBeNull();
+    // 접힘이 끝나면 틀은 다시 대기하고(투명), 진짜 메뉴 카드가 돌아와 눌린다.
+    expectStandby();
     expect(screen.getByTestId('attach-menu')).toBeTruthy();
     await act(async () => {
       fireEvent.press(screen.getByTestId('attachment-pick-file'));
@@ -263,8 +300,14 @@ describe('변신 — 「사진」 행이 메뉴를 카드로 바꾼다', () => {
       jest.advanceTimersByTime(ATTACH_MENU.anchorWaitMs + ATTACH_MENU.touchGuardMs + 100);
       await Promise.resolve();
     });
-    expect(screen.queryByTestId('attach-photo-host')).toBeNull();
+    expectStandby();
     expect(screen.getByTestId('attach-menu')).toBeTruthy();
+    // 틀은 메뉴의 크기에서 다시 시작한다.
+    const menu = attachMenuFrame(BUZZ_ANCHOR, BUZZ_WINDOW, {top: 0, left: 0, right: 0});
+    expect(flatStyle(screen.getByTestId('photo-morph', HIDDEN))).toMatchObject({
+      width: menu.width,
+      height: menu.height,
+    });
   });
 });
 
@@ -368,6 +411,7 @@ describe('카드 안의 길', () => {
       fireEvent.press(screen.getByTestId('attachment-pick-photo'));
     });
     expect(h.onPickPhoto).toHaveBeenCalledTimes(1);
-    expect(screen.queryByTestId('attach-photo-host')).toBeNull();
+    // 카드가 없으면 틀도 서지 않는다(숨은 요소까지 물어도 없다).
+    expect(screen.queryByTestId('attach-photo-host', HIDDEN)).toBeNull();
   });
 });

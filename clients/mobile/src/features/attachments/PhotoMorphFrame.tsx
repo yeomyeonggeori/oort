@@ -10,10 +10,11 @@ import type {MorphTarget} from './photoMorph';
 //
 // Buzz IMG_4320 → IMG_4321: 메뉴(폭 ≈215 · 높이 ≈322 · 모서리 ≈27)가 카드(폭 ≈382 · 높이
 // ≈372 · 모서리 ≈32)로 **변신**한다. 틀의 바닥·왼쪽은 고정이고 폭·높이·모서리가 하나의
-// 진행 값(0=메뉴, 1=카드)을 따라 간다. 안쪽은 두 층이 겹쳐 있다:
+// 진행 값(0=메뉴, 1=카드)을 따라 간다. 틀 안은 몸통 위에 두 층이 있다(구간은 `PHOTO_MORPH`):
 //
-//   메뉴 층  진행 0→0.5 에 사라지며 왼쪽 위로 접혀 든다(배율 → `menuEndScale`)
-//   카드 층  진행 0.35→0.9 에 나타나며 자란다(배율 `cardStartScale` → 1)
+//   몸통     카드 면 색. 가장 먼저(`bodyFade`) 올라와 틀 안을 막는다 — 비치는 곳이 없다
+//   메뉴 층  `menuFade` 에 사라지며 왼쪽 위로 접혀 든다(배율 → `menuEndScale`)
+//   카드 층  `cardFade` 에 나타나며 자란다(배율 `cardStartScale` → 1). 메뉴가 걷히는 끝에 이어 선다
 //
 // 폭·높이·모서리는 네이티브 드라이버로 움직일 수 없다(레이아웃 속성). 그래서 이 진행은
 // **JS 구동** `Animated.spring` 이다 — 새 애니메이션 의존성 없이 RN 내장만(이슈 Goal 3).
@@ -21,17 +22,12 @@ import type {MorphTarget} from './photoMorph';
 // 사진 층은 `opacity` 가 0 일 때도 마운트돼 있으므로 썸네일 디코드는 변신 중에 시작되지만,
 // 그리드는 `FlatList` 의 첫 12칸만 그린다.
 //
-// 「동작 줄이기」: 크기는 즉시 목표로 가고 두 층만 `fadeMs` 동안 서로 바뀐다 — 모션을 끄는
-// 것이 아니라 0 으로 만든다(모션 사다리 D9, 상태는 착지한다).
+// 「동작 줄이기」: 크기는 즉시 목표로 가고, 메뉴·사진 층은 제자리에서(이동·배율 없이) `fadeMs` 동안
+// 투명도만 서로 바뀐다 — 모션을 끄는 것이 아니라 0 으로 만든다(모션 사다리 D9, 상태는 착지한다).
 // =============================================================================
 
 export interface PhotoMorphFrameProps {
   target: MorphTarget;
-  /**
-   * 마운트될 때 틀이 서 있는 자세. 기본은 `target` 그대로(이미 도착해 있다)이고, 호스트가 「메뉴 자세로 서서
-   * 카드로 간다」를 원하면 `'menu'` 를 준다 — 변신이 시작되는 그 렌더에 틀이 새로 마운트되기 때문이다.
-   */
-  initialTarget?: MorphTarget;
   menuSize: PhotoCardSize;
   menuRadius: number;
   cardSize: PhotoCardSize;
@@ -58,7 +54,6 @@ const CLAMP = 'clamp' as const;
 
 export function PhotoMorphFrame({
   target,
-  initialTarget,
   menuSize,
   menuRadius,
   cardSize,
@@ -72,9 +67,8 @@ export function PhotoMorphFrame({
   testID = 'photo-morph',
 }: PhotoMorphFrameProps): React.JSX.Element {
   const reduceMotion = useReduceMotionRef();
-  const startTarget = initialTarget ?? target;
   const progress = useRef(
-    new Animated.Value(pinnedProgress ?? (startTarget === 'card' ? 1 : 0)),
+    new Animated.Value(pinnedProgress ?? (target === 'card' ? 1 : 0)),
   ).current;
   const onSettledRef = useRef(onSettled);
   onSettledRef.current = onSettled;
@@ -90,7 +84,7 @@ export function PhotoMorphFrame({
     }
     if (!arrived.current) {
       arrived.current = true;
-      if (startTarget === target) return undefined;
+      return undefined;
     }
     const to = target === 'card' ? 1 : 0;
     const instant = reduceMotion.current;
@@ -111,11 +105,13 @@ export function PhotoMorphFrame({
       if (finished) onSettledRef.current?.(target);
     });
     return () => animation.stop();
-  }, [target, startTarget, pinnedProgress, progress, reduceMotion]);
+  }, [target, pinnedProgress, progress, reduceMotion]);
 
   const toCard = target === 'card';
+  // 「동작 줄이기」: 크기도 위치도 배율도 움직이지 않는다 — 두 층이 제자리에서 투명도만 서로 바뀐다.
+  const still = reduced && pinnedProgress === undefined;
   const width =
-    reduced && pinnedProgress === undefined
+    still
       ? toCard
         ? cardSize.width
         : menuSize.width
@@ -125,7 +121,7 @@ export function PhotoMorphFrame({
           extrapolate: CLAMP,
         });
   const height =
-    reduced && pinnedProgress === undefined
+    still
       ? toCard
         ? cardSize.height
         : menuSize.height
@@ -135,7 +131,7 @@ export function PhotoMorphFrame({
           extrapolate: CLAMP,
         });
   const borderRadius =
-    reduced && pinnedProgress === undefined
+    still
       ? toCard
         ? cardRadius
         : menuRadius
@@ -152,19 +148,23 @@ export function PhotoMorphFrame({
     outputRange: [1, 0],
     extrapolate: CLAMP,
   });
-  const menuScale = progress.interpolate({
-    inputRange: [menuFrom, menuTo],
-    outputRange: [1, PHOTO_MORPH.menuEndScale],
-    extrapolate: CLAMP,
-  });
+  const menuScale = still
+    ? 1
+    : progress.interpolate({
+        inputRange: [menuFrom, menuTo],
+        outputRange: [1, PHOTO_MORPH.menuEndScale],
+        extrapolate: CLAMP,
+      });
   // 틀은 위로 자라고 메뉴 층은 바닥에 닻이 있다. 메뉴의 윗변이 틀의 윗변에 붙어 올라가도록
   // 틀이 자란 만큼(`진행 × (카드 높이 − 메뉴 높이)`) 끌어올린다 — 줄어드는 메뉴가 카드의
   // 왼쪽 위 모서리에 매달려 접혀 든다(Buzz 중간 프레임).
-  const menuLift = progress.interpolate({
-    inputRange: [0, menuTo],
-    outputRange: [0, menuTo * (menuSize.height - cardSize.height)],
-    extrapolate: CLAMP,
-  });
+  const menuLift = still
+    ? 0
+    : progress.interpolate({
+        inputRange: [0, menuTo],
+        outputRange: [0, menuTo * (menuSize.height - cardSize.height)],
+        extrapolate: CLAMP,
+      });
   const [bodyFrom, bodyTo] = PHOTO_MORPH.bodyFade;
   const bodyOpacity = progress.interpolate({
     inputRange: [bodyFrom, bodyTo],
@@ -176,11 +176,13 @@ export function PhotoMorphFrame({
     outputRange: [0, 1],
     extrapolate: CLAMP,
   });
-  const cardScale = progress.interpolate({
-    inputRange: [cardFrom, 1],
-    outputRange: [PHOTO_MORPH.cardStartScale, 1],
-    extrapolate: CLAMP,
-  });
+  const cardScale = still
+    ? 1
+    : progress.interpolate({
+        inputRange: [cardFrom, 1],
+        outputRange: [PHOTO_MORPH.cardStartScale, 1],
+        extrapolate: CLAMP,
+      });
 
   return (
     <Animated.View

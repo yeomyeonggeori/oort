@@ -66,6 +66,14 @@ export interface PhotoLibraryActions {
 const CAP_NOTICE_MS = 2500;
 const CHANGE_DEBOUNCE_MS = 250;
 
+/**
+ * 낭독 알림. iOS 는 `accessibilityLiveRegion` 이 없어서(안드로이드 전용) 상태 문구가 바뀌어도 읽히지
+ * 않는다 — 소리로만 전달되는 사실은 이 길로 알린다.
+ */
+function announce(sentence: string): void {
+  if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(sentence);
+}
+
 export function noticeText(notice: PhotoNotice): string {
   switch (notice.kind) {
     case 'capped':
@@ -133,9 +141,7 @@ export function usePhotoLibrary({
 
   const say = useCallback((next: PhotoNotice | null) => {
     setNotice(next);
-    if (next !== null && Platform.OS === 'ios') {
-      AccessibilityInfo.announceForAccessibility(noticeText(next));
-    }
+    if (next !== null) announce(noticeText(next));
   }, []);
 
   // ---- 목록 ----------------------------------------------------------------
@@ -332,6 +338,7 @@ export function usePhotoLibrary({
     const failedIds: string[] = [];
     let cloud = false;
     setAttaching({done: 0, total: ids.length, downloading: false});
+    announce(PHOTO_COPY.preparingStart);
     for (const id of ids) {
       const asset = catalog.current.get(id);
       if (asset === undefined) {
@@ -341,10 +348,12 @@ export function usePhotoLibrary({
       try {
         files.push(
           await portsRef.current.resolvePhoto(asset, {
-            onDownloading: () =>
+            onDownloading: () => {
+              announce(PHOTO_COPY.downloading);
               setAttaching(current =>
                 current === null ? current : {...current, downloading: true},
-              ),
+              );
+            },
           }),
         );
         doneIds.push(id);

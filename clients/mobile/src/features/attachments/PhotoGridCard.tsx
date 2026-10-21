@@ -1,8 +1,10 @@
-import React, {memo, useCallback} from 'react';
+import React, {memo, useCallback, useEffect} from 'react';
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   FlatList,
   Image,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,7 +13,7 @@ import {
   type ListRenderItemInfo,
 } from 'react-native';
 
-import {BAR_CONTROL_MAX_SCALE, Sentence} from '../../design/atoms';
+import {AVATAR_INITIAL_MAX_SCALE, BAR_CONTROL_MAX_SCALE, Sentence} from '../../design/atoms';
 import {CONV_ICONS, CONV_ICON_SIZE} from '../../design/icons';
 import {usePalette, useStyles} from '../../design/theme';
 import {ds2Radius, font, line, space, type Palette} from '../../design/tokens';
@@ -36,7 +38,7 @@ import {noticeText, usePhotoLibrary} from './usePhotoLibrary';
 // 권한 4상태가 카드 안에서 사람 말로 갈린다 (이슈 Goal 7):
 //   미결정  설명 + 「허용」(시스템 프롬프트가 뜬다) + 「전체 사진에서 고르기」
 //   거부    설명 + 「설정 열기」 + 「전체 사진에서 고르기」   ← iOS 는 다시 묻지 않는다
-//   일부    허용된 사진 그리드 + 「사진 더 고르기」(시스템 창)  ← 정상 경로
+//   일부    허용된 사진 그리드 + 「보여 줄 사진 바꾸기」(시스템 창)  ← 정상 경로
 //   전체    그리드
 // =============================================================================
 
@@ -85,6 +87,16 @@ export function PhotoGridCard({
   const reading = permission === 'granted' || permission === 'limited';
   const cell = photoCellSize(size.width);
   const bottomClear = PHOTO_CARD.control + 2 * PHOTO_CARD.controlInset;
+  // 자리표시자 줄 수 — 카드 높이를 채울 만큼(높이를 보존하는 스켈레톤, 디자인 시스템 §4 로딩).
+  const skeletonRows = Math.ceil(size.height / (cell + PHOTO_CARD.cellGap));
+
+  // 메뉴가 카드로 바뀌면 낭독 초점이 사라진 메뉴 행에서 떨어진다. 새 면의 이름을 한 번 알린다.
+  // (카드 루트 View 의 라벨은 `accessible` 이 아니라서 iOS 가 읽지 않는다.)
+  useEffect(() => {
+    if (active && Platform.OS === 'ios') {
+      AccessibilityInfo.announceForAccessibility(PHOTO_COPY.card);
+    }
+  }, [active]);
 
   const renderItem = useCallback(
     ({item}: ListRenderItemInfo<PhotoAsset>) => (
@@ -111,11 +123,19 @@ export function PhotoGridCard({
 
   return (
     <View
-      accessibilityLabel={PHOTO_COPY.card}
+      onAccessibilityEscape={onBack}
       style={[styles.card, {width: size.width, height: size.height}]}
       testID={testID}>
       {permission === 'checking' ? (
-        <CenterNote text={PHOTO_COPY.checking} busy testID="photo-checking" />
+        // 권한을 읽는 동안은 **비어 있다**. 한두 프레임이면 끝나는 일에 문구·스피너를 세우면 변신 도중
+        // 번쩍인다(design-review M5). 낭독만 「확인하는 중」을 안다.
+        <View
+          accessible
+          accessibilityLabel={PHOTO_COPY.checking}
+          accessibilityState={{busy: true}}
+          style={styles.center}
+          testID="photo-checking"
+        />
       ) : null}
 
       {permission === 'undetermined' ? (
@@ -173,7 +193,12 @@ export function PhotoGridCard({
               testID="photo-load-failed"
             />
           ) : library.loading && library.assets.length === 0 ? (
-            <CenterNote text={PHOTO_COPY.loading} busy testID="photo-loading" />
+            <PhotoSkeleton
+              cell={cell}
+              label={PHOTO_COPY.loading}
+              rows={skeletonRows}
+              testID="photo-loading"
+            />
           ) : library.assets.length === 0 ? (
             <CenterNote
               text={PHOTO_COPY.emptyTitle}
@@ -202,7 +227,9 @@ export function PhotoGridCard({
               contentContainerStyle={{paddingBottom: bottomClear}}
               ListFooterComponent={
                 library.loadingMore ? (
-                  <ActivityIndicator color={palette.textMuted} style={styles.footer} />
+                  <View style={styles.footer}>
+                    <PhotoSkeleton cell={cell} rows={1} testID="photo-loading-more" />
+                  </View>
                 ) : null
               }
               showsVerticalScrollIndicator={false}
@@ -218,7 +245,11 @@ export function PhotoGridCard({
           pointerEvents="none"
           style={[styles.status, {bottom: bottomClear}]}
           testID="photo-notice">
-          <Sentence style={styles.statusText}>{statusText}</Sentence>
+          <Sentence
+            maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+            style={styles.statusText}>
+            {statusText}
+          </Sentence>
         </View>
       ) : null}
 
@@ -310,7 +341,12 @@ const PhotoCell = memo(function PhotoCellView({
         <>
           <View pointerEvents="none" style={styles.ring} testID={`photo-ring-${asset.id}`} />
           <View pointerEvents="none" style={styles.badge}>
-            <Text style={styles.badgeLabel} testID={`photo-order-${asset.id}`}>
+            {/* 순번 원은 글자와 함께 자라지 않는 고정 지름이다 — 고정 상자 안의 한두 글자 표식이라 아바타
+                이니셜과 같은 상한을 쓴다(atoms.tsx 가 `maxFontSizeMultiplier` 의 유일한 출처). */}
+            <Text
+              maxFontSizeMultiplier={AVATAR_INITIAL_MAX_SCALE}
+              style={styles.badgeLabel}
+              testID={`photo-order-${asset.id}`}>
               {order}
             </Text>
           </View>
@@ -319,6 +355,47 @@ const PhotoCell = memo(function PhotoCellView({
     </Pressable>
   );
 });
+
+// ---- 불러오는 동안: 높이를 보존하는 중성 스켈레톤 ---------------------------------------
+
+/**
+ * 사진 칸과 같은 크기의 중성 면(`surfaceMuted`) — **시머 없음**(디자인 시스템 §4 로딩: 높이를 보존하는
+ * 중성 스켈레톤 바, 시머 금지). 실제 칸의 썸네일 바탕과 같은 색이라, 사진이 들어와도 면이 바뀌지 않고
+ * 그 위에 사진이 얹힌다. 문구·스피너는 없다 — 열 때마다 번쩍이지 않게(design-review M5).
+ * `label` 이 없으면 장식이라 낭독하지 않는다(다음 쪽을 부르는 바닥 줄).
+ */
+function PhotoSkeleton({
+  cell,
+  rows,
+  label,
+  testID,
+}: {
+  cell: number;
+  rows: number;
+  label?: string;
+  testID: string;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const cells = Array.from({length: PHOTO_CARD.columns}, (_, column) => column);
+  return (
+    <View
+      accessibilityElementsHidden={label === undefined}
+      accessibilityLabel={label}
+      accessibilityState={label === undefined ? undefined : {busy: true}}
+      accessible={label !== undefined}
+      importantForAccessibility={label === undefined ? 'no-hide-descendants' : 'yes'}
+      style={styles.skeleton}
+      testID={testID}>
+      {Array.from({length: rows}, (_, row) => (
+        <View key={row} style={styles.row}>
+          {cells.map(column => (
+            <View key={column} style={[styles.skeletonCell, {width: cell, height: cell}]} />
+          ))}
+        </View>
+      ))}
+    </View>
+  );
+}
 
 // ---- 권한 설명과 빈 상태 ----------------------------------------------------------
 
@@ -387,23 +464,19 @@ function PermissionPane({
 function CenterNote({
   text,
   detail,
-  busy = false,
   actionLabel,
   onAction,
   testID,
 }: {
   text: string;
   detail?: string;
-  busy?: boolean;
   actionLabel?: string;
   onAction?: () => void;
   testID: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const palette = usePalette();
   return (
     <View style={styles.center} testID={testID}>
-      {busy ? <ActivityIndicator color={palette.textMuted} /> : null}
       <Sentence style={styles.paneTitle}>{text}</Sentence>
       {detail !== undefined ? <Sentence style={styles.paneDetail}>{detail}</Sentence> : null}
       {actionLabel !== undefined && onAction !== undefined ? (
@@ -433,9 +506,11 @@ const buildStyles = (color: Palette) =>
       boxShadow: color.elevationFloat,
     },
     gridArea: {flex: 1},
-    row: {gap: PHOTO_CARD.cellGap},
+    row: {flexDirection: 'row', gap: PHOTO_CARD.cellGap},
+    skeleton: {gap: PHOTO_CARD.cellGap},
+    skeletonCell: {backgroundColor: color.surfaceMuted},
     thumb: {width: '100%', height: '100%', backgroundColor: color.surfaceMuted},
-    footer: {paddingVertical: space.lg},
+    footer: {paddingTop: PHOTO_CARD.cellGap},
     ring: {
       ...StyleSheet.absoluteFill,
       borderWidth: PHOTO_CARD.ringWidth,

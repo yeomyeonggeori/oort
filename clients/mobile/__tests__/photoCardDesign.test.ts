@@ -84,17 +84,20 @@ describe('변신 스프링 — 「겉보기 250~350ms, 넘침 거의 없음」',
     expect(settle).toBeLessThanOrEqual(0.35);
   });
 
-  it('변신의 몸통에 구멍이 없다 — 어느 진행에서도 두 층이 덮는 면적이 90% 이상이다', () => {
+  it('변신의 어느 진행에서도 틀 안이 막혀 있다 — 몸통 + 메뉴 + 사진 층의 합성 불투명도가 1 이다', () => {
     const [menuFrom, menuTo] = PHOTO_MORPH.menuFade;
     const [cardFrom, cardTo] = PHOTO_MORPH.cardFade;
+    const [bodyFrom, bodyTo] = PHOTO_MORPH.bodyFade;
     const ramp = (p: number, from: number, to: number) => Math.min(1, Math.max(0, (p - from) / (to - from)));
-    for (let step = 0; step <= 100; step += 1) {
-      const p = step / 100;
+    for (let step = 0; step <= 200; step += 1) {
+      const p = step / 200;
+      const body = ramp(p, bodyFrom, bodyTo);
       const menu = 1 - ramp(p, menuFrom, menuTo);
       const card = ramp(p, cardFrom, cardTo);
-      // 알파 합성: 두 층이 겹쳐 바닥을 가리는 비율.
-      const coverage = 1 - (1 - menu) * (1 - card);
-      expect(coverage).toBeGreaterThanOrEqual(0.9);
+      // 알파 합성: 몸통이 아직 다 안 섰으면 메뉴가 발자국을 덮고(메뉴는 아직 불투명), 메뉴가 줄기 시작하면
+      // 몸통이 이미 다 서 있다. 그 사이에 비치는 구멍이 없다.
+      const coverage = 1 - (1 - body) * (1 - menu) * (1 - card);
+      expect(coverage).toBeGreaterThanOrEqual(0.999);
     }
   });
 
@@ -108,13 +111,16 @@ describe('변신 스프링 — 「겉보기 250~350ms, 넘침 거의 없음」',
     expect(bodyTo).toBeGreaterThan(bodyFrom);
   });
 
-  it('사진 층이 먼저 서고 메뉴가 그 위에서 사라진다', () => {
+  it('메뉴가 먼저 걷히고 사진이 이어 선다 — 두 층이 겹치는 구간이 짧다(글자가 글자 위에 겹쳐 뭉개지지 않는다)', () => {
     const [menuFrom, menuTo] = PHOTO_MORPH.menuFade;
     const [cardFrom, cardTo] = PHOTO_MORPH.cardFade;
-    expect(cardFrom).toBeGreaterThanOrEqual(0);
-    expect(menuFrom).toBeGreaterThanOrEqual(cardFrom);
-    expect(cardTo).toBeLessThanOrEqual(menuTo);
-    expect(menuTo).toBeLessThanOrEqual(1);
+    // 메뉴가 먼저 시작하고 먼저 끝난다.
+    expect(menuFrom).toBeLessThan(cardFrom);
+    expect(menuTo).toBeLessThan(cardTo);
+    // 사진 층은 메뉴 층이 걷히기 전에 시작할 수 있되, 겹침은 진행의 20% 안이다.
+    const overlap = Math.max(0, Math.min(menuTo, cardTo) - Math.max(menuFrom, cardFrom));
+    expect(overlap).toBeLessThanOrEqual(0.2);
+    expect(cardTo).toBeLessThanOrEqual(1);
     expect(PHOTO_MORPH.menuEndScale).toBeGreaterThan(0);
     expect(PHOTO_MORPH.menuEndScale).toBeLessThan(1);
     expect(PHOTO_MORPH.cardStartScale).toBeGreaterThan(0.8);
