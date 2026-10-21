@@ -757,7 +757,7 @@
 
   /* --- radius: the web platform ladder (ADR-0189 D6) ---------------------
    * 6 · 10 · 14 · 18 · 20 · pill. 이름만 폰과 공유하고 값은 대조하지 않는다
-   * (폰은 10·14·20·26·30·pill). pill은 Tailwind 정적 유틸 `rounded-full`이다.
+   * (폰은 10·14·20·27·30·pill). pill은 Tailwind 정적 유틸 `rounded-full`이다.
    * sm/md/lg 세 값은 옛 3단과 같은 값이라 기존 소비처의 기하는 움직이지 않는다.
    * 프리미티브가 새 자리로 옮겼다: 버튼은 pill, 입력은 lg, 카드는 2xl. */
   --radius-*: initial;

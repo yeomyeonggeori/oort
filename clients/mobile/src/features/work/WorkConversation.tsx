@@ -851,7 +851,7 @@ const buildStyles = (color: Palette) =>
       fontWeight: '600',
     },
     dock: {
-      paddingHorizontal: CONV.composerFloatMin,
+      paddingHorizontal: CONV.workDockInset,
       paddingTop: space.sm,
       gap: space.xs,
     },

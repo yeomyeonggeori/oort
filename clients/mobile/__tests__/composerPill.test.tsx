@@ -304,7 +304,7 @@ describe('작업 대화 입력 알약 — 같은 자', () => {
     );
     expect(pill.marginHorizontal).toBeUndefined();
     const dock = flat(screen.getByTestId('work-chat-dock').props.style);
-    expect(dock.paddingHorizontal).toBe(CONV.composerFloatMin);
+    expect(dock.paddingHorizontal).toBe(CONV.workDockInset);
   });
 
   it('글은 입력창 안쪽 여백만큼 안에서 시작한다 — 대화 컴포저의 글 자리와 같다', () => {
@@ -318,7 +318,7 @@ describe('알약이 화면 가장자리에서 뜬 거리 — Buzz 만큼, 글 �
   const AX_XXL = 3.143;
 
   it('글 칸이 남는 폭에서는 Buzz 값이다', () => {
-    // 글 칸 바닥(258) + 108 + 2 × 40 = 446 이상이면 Buzz 값 그대로다.
+    // 글 칸 바닥(214) + 108 + 2 × 40 = 402(= Buzz 기준 폭) 이상이면 Buzz 값 그대로다.
     const enough = CONV.composerTextMin + COMPOSER_CHROME_X + 2 * CONV.composerFloatMax;
     expect(composerFloat(enough, 1)).toBe(CONV.composerFloatMax);
     expect(composerFloat(enough + 100, 1)).toBe(CONV.composerFloatMax);
@@ -388,20 +388,27 @@ describe('알약이 화면 가장자리에서 뜬 거리 — Buzz 만큼, 글 �
       composerTextColumn(width, 1),
     ]);
     expect(table).toEqual([
-      [402, 18, 258],
-      [393, 13, 259],
-      [390, 12, 258],
-      [375, 12, 243],
-      [440, 37, 258],
+      [402, 40, 214],
+      [393, 35, 215],
+      [390, 34, 214],
+      [375, 26, 215],
+      [440, 40, 252],
     ]);
   });
 
-  it('글 칸 바닥은 가장 긴 기본 에이전트 안내 문장이 한 줄에 드는 폭이다', () => {
-    // 코어 `composerCopy.ts` 폭표(폰 16pt): hermes 256.0 이 가장 길다. 그보다 좁아지면 빈 알약이
-    // 두 줄로 자란다. 이 단정은 바닥을 낮추는 사람이 그 거래를 알고 낮추게 한다.
-    const LONGEST_DEFAULT_AGENT_SENTENCE = 256.0;
-    expect(CONV.composerTextMin).toBeGreaterThanOrEqual(LONGEST_DEFAULT_AGENT_SENTENCE);
-    expect(CONV.composerTextMin).toBeLessThan(LONGEST_DEFAULT_AGENT_SENTENCE + 4);
+  it('글 칸 바닥은 Buzz 가 기준 폭에서 가진 글 칸이다 — 기준 폭에서는 Buzz 값(40)이 그대로 선다', () => {
+    // Buzz 캡처는 402pt 이고 알약이 40 떠 있다(픽셀 실측 40.3~40.7). 그때 글 칸이 402 − 80 − 108 =
+    // 214 다. 규칙은 그 칸 아래로 안 내려가게 좁은 창에서만 거리를 줄인다 — 기준 폭에서 이 규칙이
+    // 걸리면(옛 판이 258 로 그랬다) 오너가 고른 레퍼런스를 규칙이 다시 해석하는 것이다.
+    const BUZZ_REFERENCE_WIDTH = 402;
+    expect(BUZZ_REFERENCE_WIDTH - 2 * CONV.composerFloatMax - COMPOSER_CHROME_X).toBe(
+      CONV.composerTextMin,
+    );
+    expect(composerFloat(BUZZ_REFERENCE_WIDTH, 1)).toBe(CONV.composerFloatMax);
+    expect(composerTextColumn(BUZZ_REFERENCE_WIDTH, 1)).toBe(CONV.composerTextMin);
+    // 기준 폭보다 넓은 창은 Buzz 값 그대로, 좁은 창은 줄어든다(글 칸은 바닥을 지킨다).
+    expect(composerFloat(BUZZ_REFERENCE_WIDTH + 38, 1)).toBe(CONV.composerFloatMax);
+    expect(composerFloat(BUZZ_REFERENCE_WIDTH - 2, 1)).toBeLessThan(CONV.composerFloatMax);
   });
 });
 
