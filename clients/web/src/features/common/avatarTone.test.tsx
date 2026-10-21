@@ -87,6 +87,15 @@ describe("avatarSurfaceClass: kind 별 채움·테두리", () => {
   });
 });
 
+describe("avatarSurfaceClass: 사진 테두리 (#4162)", () => {
+  it("사진이 있으면 모든 종류가 --avatar-edge 이고, 없으면 --line 이다", () => {
+    for (const kind of ["human", "agent", "unknown"] as const) {
+      expect(avatarSurfaceClass(kind, "u1", true), kind).toContain("border-avatar-edge");
+      expect(avatarSurfaceClass(kind, "u1", false), kind).not.toContain("border-avatar-edge");
+    }
+  });
+});
+
 describe("DmAvatar 렌더", () => {
   it("사람 이니셜: 원 + 테두리 + 색조 채움, 크기 24 고정", () => {
     const h = mount(dm(member("u1")));
@@ -130,12 +139,13 @@ describe("DmAvatar 렌더", () => {
     expect(el.textContent).toBe("");
   });
 
-  it("사진이 있으면 같은 원에 같은 테두리를 두른다", () => {
+  it("사진이 있으면 같은 원에 한 단 짙은 --avatar-edge 테두리를 두른다 (#4162)", () => {
     const h = mount(dm(member("u2", { avatarUrl: "/media/a.png" })));
     const el = box(h);
     expect(h.querySelector('[data-testid="dm-avatar-image"]')?.getAttribute("src")).toBe("/media/a.png");
     expect(el.className).toContain("rounded-full");
-    expect(el.className).toContain("border border-line");
+    expect(el.className).toContain("border border-avatar-edge");
+    expect(el.className).not.toContain("border-line");
   });
 });
 

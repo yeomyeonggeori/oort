@@ -173,6 +173,8 @@ describe("ModelLoginPanel", () => {
       expect(q("model-login-todo-anthropic")).toBeNull();
       expect(shell.textContent).toContain("hermes auth add openai-codex --type oauth --no-browser");
       expect(shell.textContent).toContain("로그인해 주세요");
+      // #4161: 일부만 로그인된 상태는 제목이 그렇게 말한다(모두면 「모두 로그인됨」).
+      expect(q("model-login")?.querySelector("h4")?.textContent).toContain("일부 로그인됨");
     });
 
     it("로그인 정보를 못 읽었으면(null) 아무것도 접지 않는다", async () => {
@@ -190,6 +192,9 @@ describe("ModelLoginPanel", () => {
       const shell = await until("model-login-shell");
       expect(q("model-login")?.hasAttribute("data-folded")).toBe(true);
       expect(q("model-login-fold")?.textContent).toContain("모두 로그인됨");
+      // #4161: 접힌 블록도 이름이 있다.
+      const labelled = q("model-login")?.getAttribute("aria-labelledby") ?? "";
+      expect(document.getElementById(labelled)?.textContent).toBe("모델 인증");
       expect(shell.textContent).not.toContain("hermes auth add");
       expect(shell.textContent).not.toContain("로그인해 주세요");
     });

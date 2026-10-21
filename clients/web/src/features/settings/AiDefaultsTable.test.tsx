@@ -8,7 +8,7 @@ import { HarnessUnlinkDialog } from "@/features/welcome/harnessLogin/HarnessUnli
 import { AiDefaultsTable, type TeamDefaultsState } from "./AiDefaultsTable";
 import { probeModelLists } from "@momo/core/features/settings/defaultAi";
 import { publishMyAccounts, writeAiDefaults } from "./aiDefaultsStore";
-import { chooseListbox, listboxChoices, listboxShown, listboxValue } from "@/design/ui/listboxTestKit";
+import { chooseListbox, listboxChoices, listboxOptions, listboxShown, listboxValue, openListbox } from "@/design/ui/listboxTestKit";
 
 // =============================================================================
 // 기본 AI 표 (#2881). 코어 판정(`aiDefaults.test.ts`)이 화면에 그대로 닿는지:
@@ -332,7 +332,10 @@ describe("팀 줄 상태 (design-review #3042)", () => {
     expect(classes).toContain("aria-disabled:cursor-not-allowed");
     expect(q("ai-default-teamAgent-saved")?.textContent).toBe("저장하고 있어요");
     expect(select.getAttribute("aria-describedby")).toContain("ai-default-teamAgent-saved");
-    chooseListbox(select, "link:0:gpt-4o-mini");
+    // #4131: aria-disabled 칸은 목록이 열리지도 않는다(예전엔 열려서 고르기만 막혔다).
+    openListbox(select);
+    expect(listboxOptions()).toEqual([]);
+    expect(select.getAttribute("aria-expanded")).toBe("false");
     expect(onChoose).not.toHaveBeenCalled();
     // 다른 줄은 막지 않는다.
     expect(q("ai-default-summary-select")?.getAttribute("aria-disabled")).toBeNull();
