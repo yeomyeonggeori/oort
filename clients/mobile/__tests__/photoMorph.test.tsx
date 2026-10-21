@@ -134,6 +134,14 @@ describe('상태 전이', () => {
     expect(morphPhase(reopened)).toBe('opening');
   });
 
+  it('메뉴가 통째로 내려가면(reset) 어느 단계에서든 메뉴에서 다시 시작한다', () => {
+    const card = step(MORPH_START, {type: 'open'}, {type: 'settled', target: 'card'});
+    expect(step(card, {type: 'reset'})).toEqual(MORPH_START);
+    expect(step(step(MORPH_START, {type: 'open'}), {type: 'reset'})).toEqual(MORPH_START);
+    // 이미 처음이면 같은 상태 객체다(불필요한 다시 그리기가 없다).
+    expect(step(MORPH_START, {type: 'reset'})).toBe(MORPH_START);
+  });
+
   it('같은 방향을 두 번 눌러도 상태가 그대로다', () => {
     const opening = step(MORPH_START, {type: 'open'});
     expect(step(opening, {type: 'open'})).toBe(opening);

@@ -20,7 +20,9 @@ export interface MorphState {
 export type MorphEvent =
   | {type: 'open'}
   | {type: 'back'}
-  | {type: 'settled'; target: MorphTarget};
+  | {type: 'settled'; target: MorphTarget}
+  /** 메뉴가 통째로 내려갔다 — 다음에 열 때는 메뉴에서 시작한다. */
+  | {type: 'reset'};
 
 export const MORPH_START: MorphState = {target: 'menu', settled: true};
 
@@ -34,6 +36,8 @@ export function morphReduce(state: MorphState, event: MorphEvent): MorphState {
       return event.target === state.target && !state.settled
         ? {target: state.target, settled: true}
         : state;
+    case 'reset':
+      return state.target === 'menu' && state.settled ? state : MORPH_START;
   }
 }
 
