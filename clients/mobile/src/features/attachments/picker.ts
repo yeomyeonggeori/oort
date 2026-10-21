@@ -1,3 +1,4 @@
+import * as Device from 'expo-device';
 import * as DocumentPicker from 'expo-document-picker';
 import {File} from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
@@ -109,15 +110,26 @@ export async function pickPhoto(): Promise<AttachmentPickerOutcome> {
  * 묻지 않고 거부로 답한다.
  *
  * 사진만 찍는다(`mediaTypes: ['images']`) — 동영상 모드는 마이크를 쓰고, 앱은 마이크를 요청하지 않는다
- * (`Info.plist` · `projectShape.test.ts`). 카메라가 열리지 못하면(시뮬레이터에는 카메라가 없다, 실기기에서는
- * 다른 앱이 쓰는 중이거나 화면 시간 제한) `camera-unavailable` — 올린 적이 없으니 「업로드 실패」(`unavailable`)
- * 가 아니라 카메라가 안 열렸다고 말한다.
+ * (`Info.plist` · `projectShape.test.ts`). 카메라가 열리지 못하면 `camera-unavailable` — 올린 적이 없으니
+ * 「업로드 실패」(`unavailable`)가 아니라 카메라가 안 열렸다고 말한다.
+ *
+ * **카메라가 없는 곳(시뮬레이터)에서는 열지 않는다 — 앱이 죽는다.** expo-image-picker 의 iOS 구현은 카메라가
+ * 있는지 묻지 않고 `UIImagePickerController.sourceType = .camera` 를 설정하고, 카메라가 없으면 그 setter 가
+ * NSInvalidArgumentException 을 던져 SIGABRT 로 끝난다(시뮬레이터에서 「허용」을 누른 직후 실측, 크래시 리포트
+ * `ImagePickerModule.launchLegacyImagePicker` → `-[UIImagePickerController setSourceType:]`). 네이티브 예외라
+ * 아래 `try/catch` 가 못 잡는다. 그래서 권한을 받은 **뒤** 실기기(`Device.isDevice`)가 아니면 그대로 접는다.
+ * 권한 알림은 시뮬레이터에서도 서므로 거부 길은 같다. (카메라가 꺼진 실기기 — 화면 시간·MDM 제한 — 는 iOS 가
+ * 권한 상태를 거부로 답해 위 거부 길로 간다. 실기기가 아닌데 `isDevice` 가 참인 환경, 예컨대 카메라 없는 Mac 의
+ * iPad 앱은 이 확인이 못 거르는 미검증 위험이다.)
  */
 export async function pickCamera(): Promise<AttachmentPickerOutcome> {
   try {
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (!permission.granted) {
       return {kind: 'issue', issue: 'camera-permission-denied'};
+    }
+    if (!Device.isDevice) {
+      return {kind: 'issue', issue: 'camera-unavailable'};
     }
     return photoOutcome(
       await ImagePicker.launchCameraAsync({

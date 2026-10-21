@@ -429,11 +429,15 @@ jest.mock('expo-camera', () => {
 });
 
 jest.mock('expo-device', () => {
-  const state = {modelName: 'iPhone 17 Pro'};
+  // `isDevice` (#4180): 시뮬레이터는 false. 카메라 촬영은 실기기에서만 연다 — 기본은 실기기다.
+  const state = {modelName: 'iPhone 17 Pro', isDevice: true};
   return {
     __state: state,
     get modelName() {
       return state.modelName;
+    },
+    get isDevice() {
+      return state.isDevice;
     },
   };
 });

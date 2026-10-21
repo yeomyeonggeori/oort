@@ -359,6 +359,33 @@ describe('picker·native upload 단위 배선', () => {
       expect(imagePicker.launchCameraAsync).not.toHaveBeenCalled();
     });
 
+    it('카메라가 없는 곳(시뮬레이터)에서는 권한만 묻고 촬영은 열지 않는다 — 열면 네이티브 예외로 앱이 죽는다', async () => {
+      const device = jest.requireMock('expo-device') as {
+        __state: {isDevice: boolean};
+      };
+      device.__state.isDevice = false;
+      try {
+        await expect(pickCamera()).resolves.toEqual({
+          kind: 'issue',
+          issue: 'camera-unavailable',
+        });
+        expect(imagePicker.requestCameraPermissionsAsync).toHaveBeenCalledTimes(1);
+        expect(imagePicker.launchCameraAsync).not.toHaveBeenCalled();
+        // 권한을 거부했다면 그 문장이 먼저다(거부 길은 시뮬레이터에서도 같다).
+        imagePicker.__state.cameraPermission = {
+          status: 'denied',
+          granted: false,
+          canAskAgain: false,
+        };
+        await expect(pickCamera()).resolves.toEqual({
+          kind: 'issue',
+          issue: 'camera-permission-denied',
+        });
+      } finally {
+        device.__state.isDevice = true;
+      }
+    });
+
     it('촬영 취소와 촬영 실패는 서로 다른 이슈다', async () => {
       await expect(pickCamera()).resolves.toEqual({
         kind: 'issue',
