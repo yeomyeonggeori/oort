@@ -597,7 +597,8 @@ paths:
         Hermes's own order. `featured` is the first three per provider plus the model in use; the screen shows
         featured by default and opens the rest behind 「전체 보기」. `current` is the pin's choice, else Hermes's own
         current model (`pinned: false`). Nothing from Hermes beyond sanitized provider slugs and model ids is
-        returned. Twenty calls per operator per minute.
+        returned. Twenty calls per operator per minute, charged before any database read (so an unconnected workspace spends it too). A
+        Hermes current model whose provider is not logged in is not reported as `hermesCurrent`/`current`.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
       responses:
@@ -654,7 +655,7 @@ paths:
         "403":
           description: Not a listed instance operator.
         "409":
-          description: '`cohosted_agent_not_ready`, or `cohosted_agent_not_connected` (also when disconnected between the read and the write).'
+          description: '`cohosted_agent_not_ready`, or `cohosted_agent_not_connected` (also when disconnected between the read and the write) or `cohosted_agent_pin_replaced` (the agent was re-pinned to a team link between the read and the write).'
         "422":
           description: '`cohosted_model_not_offered`: not listed under a logged-in provider (or a malformed slug / id).'
         "429":

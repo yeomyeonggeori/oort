@@ -540,6 +540,38 @@ fn an_options_body_without_a_providers_list_is_not_an_answer() {
     assert_eq!(report.current, None);
 }
 
+#[test]
+fn a_current_provider_that_is_not_logged_in_is_no_current_route() {
+    // #4159 L1: Hermes's current provider is `nous`, which is not authenticated.
+    let body = serde_json::json!({
+        "model": "nous-hermes-4",
+        "provider": "nous",
+        "providers": [
+            {"slug": "anthropic", "authenticated": true, "models": ["claude-sonnet-5-5"]},
+            {"slug": "nous", "authenticated": false, "models": ["nous-hermes-4"]},
+        ],
+    });
+    let report = parse_model_options(&body, KEY);
+    assert_eq!(report.outcome, ProbeOutcome::Ok);
+    assert_eq!(
+        report.current, None,
+        "an unauthenticated provider cannot be pinned"
+    );
+    // The same provider, once logged in, is the current route.
+    let logged_in = serde_json::json!({
+        "model": "nous-hermes-4",
+        "provider": "nous",
+        "providers": [{"slug": "nous", "authenticated": true, "models": ["nous-hermes-4"]}],
+    });
+    assert_eq!(
+        parse_model_options(&logged_in, KEY).current,
+        Some(ModelChoice {
+            provider: "nous".into(),
+            model: "nous-hermes-4".into()
+        })
+    );
+}
+
 async fn hermes_with_options(status: u16, body: serde_json::Value) -> (u16, Seen) {
     let seen = Seen::default();
     let s1 = seen.clone();

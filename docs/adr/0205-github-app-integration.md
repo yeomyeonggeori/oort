@@ -72,7 +72,7 @@
 
 ### D4. 수신 — 인스턴스 전역 경로 하나, ADR-0115와 다른 모드
 - `POST /v1/integrations/github/webhook`. 순서는 ADR-0115와 같은 뼈대다:
-  1. `X-Hub-Signature-256`을 현재 secret으로, 회전 겹침 창이면 이전 secret으로도 상수 시간 비교. 실패 → 401, 아무것도 쓰지 않는다. SHA1 `X-Hub-Signature`는 보지 않는다.
+  1. `X-Hub-Signature-256`을 현재 secret으로, 회전 겹침 창이면 이전 secret으로도 상수 시간 비교. 실패 → 401, 아무것도 쓰지 않는다. SHA1 `X-Hub-Signature`는 보지 않는다. 헤더가 없거나 `sha256=`+64자리 hex 모양이 아니면 비밀이 필요 없으므로 `GITHUB_APP_MASTER_KEY` 확인보다 먼저 401(#4160). 모양이 맞는 서명을 키 없이 검증할 수 없을 때만 503이다.
   2. 본문 크기: GitHub 모드 상한은 별도 값(초안 5 MiB) [추정 — 실제 이벤트 크기 분포는 E-GH2에서 기록]. 넘으면 413.
   3. 설치 단위 rate 예산(기존 리미터, `webhook.rate_limited` 감사 재사용).
   4. replay: `X-GitHub-Delivery` 멱등. 같은 GUID는 `duplicate: true`, 메시지 0.

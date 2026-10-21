@@ -894,10 +894,12 @@ pub async fn models(
     let workspace_id = workspace_scope(&workspace, &principal)?;
     require_instance_operator_write(&state, &principal).await?;
     let target = ready_target(&state)?;
-    let agent_id = require_connected(&state, workspace_id).await?;
+    // Before any database read: a caller hammering this route spends the budget
+    // even when no agent is connected (#4159 L5).
     if let Some(limited) = throttle_models(&state, &principal) {
         return Ok(limited);
     }
+    let agent_id = require_connected(&state, workspace_id).await?;
     let options = fresh_model_options(&state, &target).await?;
     let pinned = pinned_route(&state, workspace_id, agent_id).await?;
     let current = pinned.clone().or_else(|| options.current.clone());
@@ -936,6 +938,33 @@ fn not_offered() -> ApiError {
     )
 }
 
+/// Why the write found no `operator_env` pin on the agent it just read: the
+/// agent was re-pinned to a team link in the meantime (#4159 L2, the operator
+/// should look at the profile's AI connection) or it is simply gone/disconnected.
+async fn not_connected_or_replaced(
+    conn: &mut momo_db::PgConnection,
+    workspace_id: Uuid,
+    agent_id: Uuid,
+) -> ApiError {
+    let replaced = matches!(
+        read_agent_pin(conn, workspace_id, agent_id).await,
+        Ok(Some(pin)) if pin.kind != PinKind::OperatorEnv
+    );
+    if replaced {
+        refusal(
+            StatusCode::CONFLICT,
+            "cohosted_agent_pin_replaced",
+            "이 에이전트의 AI 연결이 다른 방식으로 바뀌어 같은 서버 모델을 고를 수 없어요.",
+        )
+    } else {
+        refusal(
+            StatusCode::CONFLICT,
+            "cohosted_agent_not_connected",
+            "이 워크스페이스에 연결된 같은 서버의 에이전트가 없어요. 먼저 연결해 주세요.",
+        )
+    }
+}
+
 /// `PUT /v1/workspaces/{ws}/cohosted-agent/model`.
 pub async fn put_model(
     State(state): State<AppState>,
@@ -953,10 +982,10 @@ pub async fn put_model(
         return Err(not_offered());
     };
     let target = ready_target(&state)?;
-    let agent_id = require_connected(&state, workspace_id).await?;
     if let Some(limited) = throttle_models(&state, &principal) {
         return Ok(limited);
     }
+    let agent_id = require_connected(&state, workspace_id).await?;
     // A fresh list, every time: the answer to "is this offered" is Hermes's now.
     let options = fresh_model_options(&state, &target).await?;
     if !options.lists(&provider, &model) {
@@ -972,11 +1001,9 @@ pub async fn put_model(
                 // Still the connected agent, and the pin still the env link:
                 // another operator may have disconnected between the read and now.
                 if connected_agent_in_tx(conn, workspace_id).await? != Some(agent_id) {
-                    return Ok(Err(refusal(
-                        StatusCode::CONFLICT,
-                        "cohosted_agent_not_connected",
-                        "이 워크스페이스에 연결된 같은 서버의 에이전트가 없어요. 먼저 연결해 주세요.",
-                    )));
+                    return Ok(Err(
+                        not_connected_or_replaced(conn, workspace_id, agent_id).await
+                    ));
                 }
                 let previous = read_agent_pin(conn, workspace_id, agent_id)
                     .await
@@ -984,11 +1011,9 @@ pub async fn put_model(
                     .flatten()
                     .and_then(|pin| pin.model_route);
                 if !set_agent_pin_model(conn, workspace_id, agent_id, &provider, &model).await? {
-                    return Ok(Err(refusal(
-                        StatusCode::CONFLICT,
-                        "cohosted_agent_not_connected",
-                        "이 워크스페이스에 연결된 같은 서버의 에이전트가 없어요. 먼저 연결해 주세요.",
-                    )));
+                    return Ok(Err(
+                        not_connected_or_replaced(conn, workspace_id, agent_id).await
+                    ));
                 }
                 // Cards and usage rows read `agent.model`; the pin is what the
                 // worker sends. They are written together or not at all.
