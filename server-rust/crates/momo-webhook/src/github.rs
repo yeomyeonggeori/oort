@@ -42,6 +42,15 @@ pub fn github_signature(secret: &str, body: &[u8]) -> String {
     hex::encode(mac.finalize().into_bytes())
 }
 
+/// Is the `X-Hub-Signature-256` header value shaped like a signature at all: `sha256=` followed by
+/// a 64-digit hex digest? Needs no secret, so the receive path can refuse an unsigned or garbled
+/// request with 401 before it looks at (and so before it can reveal) the instance's key setup.
+pub fn github_signature_is_wellformed(header: &str) -> bool {
+    header
+        .strip_prefix("sha256=")
+        .is_some_and(|digest| digest.len() == 64 && digest.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
 /// Does the `X-Hub-Signature-256` header value authenticate `body` under `secret`?
 ///
 /// The header must be `sha256=` followed by the digest; any other shape (including the SHA-1
@@ -612,6 +621,28 @@ fn render_release(action: &str, payload: &Value) -> Option<Notification> {
 
 #[cfg(test)]
 mod tests {
+    /// #4160: the shape check the receive path runs before it consults the master key.
+    #[test]
+    fn a_signature_header_must_be_sha256_and_64_hex_digits() {
+        use super::github_signature_is_wellformed as ok;
+        let digest = "a".repeat(64);
+        assert!(ok(&format!("sha256={digest}")));
+        assert!(ok(&format!("sha256={}", "AbCdEf0123456789".repeat(4))));
+        for bad in [
+            String::new(),
+            "sha256=".to_string(),
+            "sha256=00".to_string(),
+            format!("sha1={digest}"),
+            format!("SHA256={digest}"),
+            digest.clone(),
+            format!("sha256={}", "a".repeat(63)),
+            format!("sha256={}", "a".repeat(65)),
+            format!("sha256={}", "g".repeat(64)),
+        ] {
+            assert!(!ok(&bad), "{bad}");
+        }
+    }
+
     /// #4084 (ADR-0205 H-1): the pair every caller-props door drops.
     #[test]
     fn github_notification_props_are_server_owned() {
