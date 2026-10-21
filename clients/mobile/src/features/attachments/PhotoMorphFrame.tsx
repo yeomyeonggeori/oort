@@ -145,11 +145,8 @@ export function PhotoMorphFrame({
   // 틀이 자란 만큼(`진행 × (카드 높이 − 메뉴 높이)`) 끌어올린다 — 줄어드는 메뉴가 카드의
   // 왼쪽 위 모서리에 매달려 접혀 든다(Buzz 중간 프레임).
   const menuLift = progress.interpolate({
-    inputRange: [menuFrom, menuTo],
-    outputRange: [
-      menuFrom * (menuSize.height - cardSize.height),
-      menuTo * (menuSize.height - cardSize.height),
-    ],
+    inputRange: [0, menuTo],
+    outputRange: [0, menuTo * (menuSize.height - cardSize.height)],
     extrapolate: CLAMP,
   });
   const cardOpacity = progress.interpolate({
@@ -168,22 +165,6 @@ export function PhotoMorphFrame({
       style={[FRAME_STYLE, {width, height, borderRadius}]}
       testID={testID}>
       <Animated.View
-        accessibilityElementsHidden={toCard}
-        importantForAccessibility={toCard ? 'no-hide-descendants' : 'auto'}
-        pointerEvents={toCard ? 'none' : 'auto'}
-        style={[
-          MENU_LAYER_STYLE,
-          {
-            width: menuSize.width,
-            height: menuSize.height,
-            opacity: menuOpacity,
-            transform: [{translateY: menuLift}, {scale: menuScale}],
-          },
-        ]}
-        testID={`${testID}-menu`}>
-        {menu}
-      </Animated.View>
-      <Animated.View
         accessibilityElementsHidden={!toCard}
         importantForAccessibility={toCard ? 'auto' : 'no-hide-descendants'}
         pointerEvents={toCard ? 'auto' : 'none'}
@@ -198,6 +179,22 @@ export function PhotoMorphFrame({
         ]}
         testID={`${testID}-card`}>
         {card}
+      </Animated.View>
+      <Animated.View
+        accessibilityElementsHidden={toCard}
+        importantForAccessibility={toCard ? 'no-hide-descendants' : 'auto'}
+        pointerEvents={toCard ? 'none' : 'auto'}
+        style={[
+          MENU_LAYER_STYLE,
+          {
+            width: menuSize.width,
+            height: menuSize.height,
+            opacity: menuOpacity,
+            transform: [{translateY: menuLift}, {scale: menuScale}],
+          },
+        ]}
+        testID={`${testID}-menu`}>
+        {menu}
       </Animated.View>
     </Animated.View>
   );

@@ -87,14 +87,27 @@ describe('변신 스프링 — 「겉보기 250~350ms, 넘침 거의 없음」',
     expect(settle).toBeLessThanOrEqual(0.35);
   });
 
-  it('두 층의 구간이 짧게 겹친다 — 메뉴가 사라지기 전에 사진이 서기 시작하되 오래 겹치지 않는다', () => {
+  it('변신의 몸통에 구멍이 없다 — 어느 진행에서도 두 층이 덮는 면적이 90% 이상이다', () => {
     const [menuFrom, menuTo] = PHOTO_MORPH.menuFade;
     const [cardFrom, cardTo] = PHOTO_MORPH.cardFade;
-    expect(menuFrom).toBeGreaterThanOrEqual(0);
-    expect(cardTo).toBeLessThanOrEqual(1);
-    expect(cardFrom).toBeLessThan(menuTo);
-    expect(menuTo - cardFrom).toBeLessThanOrEqual(0.2);
-    expect(cardTo).toBeGreaterThan(menuTo);
+    const ramp = (p: number, from: number, to: number) => Math.min(1, Math.max(0, (p - from) / (to - from)));
+    for (let step = 0; step <= 100; step += 1) {
+      const p = step / 100;
+      const menu = 1 - ramp(p, menuFrom, menuTo);
+      const card = ramp(p, cardFrom, cardTo);
+      // 알파 합성: 두 층이 겹쳐 바닥을 가리는 비율.
+      const coverage = 1 - (1 - menu) * (1 - card);
+      expect(coverage).toBeGreaterThanOrEqual(0.9);
+    }
+  });
+
+  it('사진 층이 먼저 서고 메뉴가 그 위에서 사라진다', () => {
+    const [menuFrom, menuTo] = PHOTO_MORPH.menuFade;
+    const [cardFrom, cardTo] = PHOTO_MORPH.cardFade;
+    expect(cardFrom).toBeGreaterThanOrEqual(0);
+    expect(menuFrom).toBeGreaterThanOrEqual(cardFrom);
+    expect(cardTo).toBeLessThanOrEqual(menuTo);
+    expect(menuTo).toBeLessThanOrEqual(1);
     expect(PHOTO_MORPH.menuEndScale).toBeGreaterThan(0);
     expect(PHOTO_MORPH.menuEndScale).toBeLessThan(1);
     expect(PHOTO_MORPH.cardStartScale).toBeGreaterThan(0.8);
