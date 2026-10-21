@@ -11,6 +11,20 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+## [0.1.35] - 2026-10-21
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.35>. Tag target: `main=a1f811246`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres lists. No database migration (the schema stays at 144) and no change to `bootstrap_runtime_roles.sql`. No new environment variables. This release closes the security-review follow-ups of the same-server Hermes model picker and makes the GitHub webhook answer 401 before anything about its configuration.
+
+### Changed
+- Server: the same-server Hermes model picker follow-ups from the independent security review (#4159, #4167). Hermes's current `(provider, model)` counts as `current` only when the provider is one of the logged-in providers, and connecting no longer pins a provider that is not logged in. Saving a model answers `409 cohosted_agent_pin_replaced` when the pin became a team link at that moment (and `cohosted_agent_not_connected` when there is none or it is disconnected). The model id is capped at 64 bytes in code with a 128 backstop in the CHECK, and the throttle of `GET models` / `PUT model` runs before any database read. There is no model block list (ADR-0203).
+- Server: a GitHub webhook with a missing or malformed signature answers 401 before the master key is looked at, so an unsigned caller no longer sees whether the instance has a GitHub surface (#4160, #4164). Only a well-formed signature that cannot be checked because the key is missing answers 503.
+- Web and desktop: the Hermes "model" section shows the current model once, keeps the saved notice in a fixed place, and "show all" / "recommended only" carry an underline cue that they can be pressed (#4161, #4165).
+- Web and desktop: the avatar grammar reaches the remaining surfaces, and the per-member hues keep a minimum distance from the status colours (#4162, #4171).
+
+### Fixed
+- Server: the 503 body that anonymous callers get from the GitHub webhook receiver and the setup redirect when the key is missing no longer names an environment variable; the cause is logged on the server only (#4168, #4172).
+- Web and desktop: the list selector no longer hides its label in a narrow pane, scrolls the page under a modal, or misses type-ahead, and a disabled item is announced with `aria-disabled` (#4131, #4169).
+
 ## [0.1.34] - 2026-10-20
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.34>. Tag target: `main=b90a77b3`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres lists. One database migration (144, the schema goes to 144) and no change to `bootstrap_runtime_roles.sql`. No new environment variables. This release lets the operator pick the model the same-server Hermes answers with, and folds the AI settings into one place.
