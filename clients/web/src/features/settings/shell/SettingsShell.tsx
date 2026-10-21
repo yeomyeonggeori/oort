@@ -11,13 +11,10 @@ export function SettingsShell({
   nav,
   children,
   className,
-  wide = false,
 }: {
   nav: ReactNode;
   children: ReactNode;
   className?: string;
-  /** 읽는 폭 제한을 푼다. 지금은 쓰는 쪽이 없다(옛 AI 연결 화면은 허브로 옮겼다, #4141). */
-  wide?: boolean;
 }) {
   return (
     <div className={cn("settings-layout", className)}>
@@ -27,7 +24,7 @@ export function SettingsShell({
           className="min-w-0 flex-1 overflow-y-auto px-6 py-8"
           data-settings-scroll-viewport
         >
-          <div className="settings-page" data-wide={wide ? "" : undefined}>
+          <div className="settings-page">
             {children}
           </div>
         </div>

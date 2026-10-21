@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // =============================================================================
-// GATE — 설정 › AI 연결 · 팀 연결 (#2974; 전판 U3 #1047 · ADR-0147 → #2909 개편).
+// GATE — AI 허브 › 팀 AI 키 (#2974; 전판 U3 #1047 · ADR-0147 → #2909 개편 → #4141 허브 이전 → #4163).
 //
 //   npm run gate:ailink        (= npm run build && node gates/gate-ailink.mjs)
 //
@@ -16,7 +16,7 @@
 //   ③ 레거시 oauth-openai 연결은 읽기 전용이다: 「확인」·「키 바꾸기」가 없고,
 //      auth.json을 붙일 칸(textarea)이 화면 어디에도 없다.
 //   ④ 「연결 확인」 결과 칸(#2975): #2960 사유가 기본 갈래(「서버 사유」)로 떨어지지
-//      않고, provider 숫자 줄은 숫자가 있을 때만 선다.
+//      않고, 허브 표는 provider 숫자 줄을 그리지 않는다(#4110; 잔액은 콘솔 링크).
 //
 // 서버는 라우트 층에서 대역한다. 라이브 인스턴스·로컬 스택을 쓰지 않는다.
 // =============================================================================
@@ -190,9 +190,9 @@ async function openAiPage(browser, state) {
   await page.getByTestId("login-submit").click();
   await page.waitForFunction(() => !location.hash.includes("login"), undefined, { timeout: 15_000 });
   await page.evaluate(() => {
-    window.location.hash = "/settings?section=ai&aiEntry=rows";
+    window.location.hash = "/ai/team-keys";
   });
-  await page.getByTestId("ai-page").waitFor({ timeout: 15_000 });
+  await page.getByTestId("ai-team-keys-table").waitFor({ timeout: 15_000 });
   return { context, page };
 }
 
@@ -258,9 +258,6 @@ async function legacyReadOnly(browser) {
   const row = page.getByTestId("ai-link-row");
   await row.waitFor();
   if (!((await row.textContent()) ?? "").includes("읽기 전용")) fail("the legacy row does not say 읽기 전용");
-  await page.getByTestId("ai-link-row-more").click();
-  await page.getByTestId("ai-team-aside").waitFor();
-  await page.getByTestId("ai-link-legacy-note").waitFor();
   for (const id of ["ai-link-check", "ai-link-edit", "ai-link-oauth-paste"]) {
     if ((await page.getByTestId(id).count()) > 0) fail(`the legacy link offers ${id}`);
   }
@@ -285,7 +282,9 @@ const CHECKS = [
     }),
     tone: "ok",
     mustSay: "응답을 확인했어요",
-    detail: "쓸 수 있는 모델 6개 · 요청 한도 50 중 49 남음 · 남은 크레딧 12.5 / 20 · 쓴 크레딧 7.5",
+    // 허브 표는 공급사 숫자 줄을 두지 않는다(#4110): 판정만 말하고 잔액은 콘솔 링크로 보낸다.
+    detail: null,
+    mustNotSay: ["쓸 수 있는 모델", "요청 한도", "크레딧"],
   },
 ];
 
@@ -293,7 +292,6 @@ async function checkResults(browser) {
   for (const check of CHECKS) {
     const state = { link: KEY_LINK, puts: [], test: check.test };
     const { context, page } = await openAiPage(browser, state);
-    await page.getByTestId("ai-link-row-more").click();
     await page.getByTestId("ai-link-check").click();
     const box = page.getByTestId("ai-link-probe");
     await box.waitFor({ timeout: 10_000 });
@@ -302,6 +300,11 @@ async function checkResults(browser) {
     if (tone !== check.tone) fail(`[${check.name}] tone ${tone}, expected ${check.tone}`);
     if (/서버 사유|서버가 보고한 사유/.test(text)) fail(`[${check.name}] fell to the default branch: ${text}`);
     if (!text.includes(check.mustSay)) fail(`[${check.name}] result does not say ${JSON.stringify(check.mustSay)}: ${text}`);
+    for (const banned of check.mustNotSay ?? []) {
+      if (text.includes(banned) || ((await box.textContent()) ?? "").includes(banned)) {
+        fail(`[${check.name}] the hub result box draws provider numbers (${JSON.stringify(banned)})`);
+      }
+    }
     const detail = page.getByTestId("ai-link-probe-detail");
     const detailCount = await detail.count();
     if (check.detail === null && detailCount > 0) {
@@ -333,7 +336,7 @@ async function main() {
   console.log("GATE PASS: the team key PUT carries only declared keys (no oauth); the key never");
   console.log("           reaches the DOM or AX tree after save; a legacy oauth link is read-only");
   console.log("           with no paste box; check results say the #2960 reasons in words and draw");
-  console.log("           the numbers line only when the provider stated numbers.");
+  console.log("           no provider numbers line (balances live behind the console link, #4110).");
 }
 
 main().catch((error) => {
