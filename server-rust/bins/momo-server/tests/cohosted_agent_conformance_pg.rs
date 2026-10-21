@@ -204,6 +204,9 @@ async fn login(http: &reqwest::Client, base: &str, workspace: Uuid, email: &str)
 struct Hits {
     paths: Arc<Mutex<Vec<String>>>,
     bearers: Arc<Mutex<Vec<String>>>,
+    /// Armed by a test: while answering the next `/api/model/options`, re-pin this
+    /// agent to a team link, i.e. change the world between the read and the write.
+    repin_on_options: Arc<Mutex<Option<(PgPool, Uuid)>>>,
 }
 
 impl Hits {
@@ -1092,6 +1095,18 @@ async fn mock_hermes(options: Value) -> (u16, Hits, Arc<Mutex<(u16, Value)>>) {
                             .unwrap_or("")
                             .to_string(),
                     );
+                    let armed = h3.repin_on_options.lock().unwrap().take();
+                    if let Some((su, agent)) = armed {
+                        sqlx::query(
+                            "UPDATE agent_provider_pin SET kind = 'team_link', link_position = 0, \
+                                    link_endpoint_label = 'team', model_provider = NULL, model_id = NULL \
+                              WHERE agent_member_id = $1",
+                        )
+                        .bind(agent)
+                        .execute(&su)
+                        .await
+                        .unwrap();
+                    }
                     let (status, body) = served.lock().unwrap().clone();
                     (StatusCode::from_u16(status).unwrap(), axum::Json(body)).into_response()
                 }
@@ -1582,5 +1597,97 @@ async fn the_model_routes_are_operator_only_and_need_a_connected_agent() {
         (code, resp["error"]["code"].as_str()),
         (409, Some("cohosted_agent_not_connected"))
     );
+    assert_eq!(hits.count(), 0);
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn put_model_says_the_pin_was_replaced_when_the_agent_is_re_pinned_to_a_team_link() {
+    // #4159 L2: the agent is connected at the first read, and re-pinned to a team
+    // link while Hermes is being asked. Not "not connected": a different cause.
+    let c = connected("model-replaced", options_body()).await;
+    *c.hits.repin_on_options.lock().unwrap() = Some((c.su.clone(), c.agent));
+    let (code, resp, _) = c
+        .api()
+        .put_model(
+            &c.op,
+            json!({"provider": "openai-codex", "model": "gpt-6-sol"}),
+        )
+        .await;
+    assert_eq!(
+        (code, resp["error"]["code"].as_str()),
+        (409, Some("cohosted_agent_pin_replaced")),
+        "{resp}"
+    );
+    assert_eq!(c.model_audits().await, 0);
+    let (kind, provider): (String, Option<String>) = sqlx::query_as(
+        "SELECT kind, model_provider FROM agent_provider_pin WHERE agent_member_id = $1",
+    )
+    .bind(c.agent)
+    .fetch_one(&c.su)
+    .await
+    .unwrap();
+    assert_eq!((kind.as_str(), provider), ("team_link", None));
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn connect_does_not_pin_a_current_provider_hermes_has_not_logged_in() {
+    // #4159 L1: Hermes's current provider is not authenticated. The pin carries no
+    // route (today's behaviour), not a pair nobody can answer on.
+    let mut body = options_body();
+    body["provider"] = json!("nous");
+    body["model"] = json!("nous-hermes-4");
+    body["providers"][2]["models"] = json!(["nous-hermes-4"]);
+    let c = connected("model-unauth-current", body).await;
+    assert_eq!(
+        c.pin_row().await,
+        (None, None, "hermes-agent".to_string()),
+        "an unauthenticated current provider must not be pinned"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_models_throttle_is_checked_before_any_database_read() {
+    // #4159 L5: a workspace with no connected agent still spends the budget, so the
+    // 21st call is a 429, not a 21st DB read ending in 409.
+    let c = connected("model-throttle", options_body()).await;
+    let lone = seed(&c.su, "model-throttle-lone").await;
+    let (port, hits, _) = mock_hermes(options_body()).await;
+    let base = start_server(
+        momo_app_pool().await,
+        Declared {
+            operator_email: &lone.email,
+            env_url: format!("http://127.0.0.1:{port}/v1"),
+            bearer: ENV_KEY,
+            declared: true,
+            tools_locked: true,
+        },
+    )
+    .await;
+    let op = login(&c.http, &base, lone.workspace, &lone.email).await;
+    let api = Api {
+        http: &c.http,
+        base: &base,
+        workspace: lone.workspace,
+    };
+    let limit = momo_server::routes::cohosted_agent::OPERATOR_MODEL_CALLS_PER_WINDOW;
+    for call in 1..=limit {
+        let (code, resp, _) = api.get_models(&op).await;
+        assert_eq!(
+            (code, resp["error"]["code"].as_str()),
+            (409, Some("cohosted_agent_not_connected")),
+            "call {call}"
+        );
+    }
+    assert_eq!(api.get_models(&op).await.0, 429);
+    let (code, _, _) = api
+        .put_model(
+            &op,
+            json!({"provider": "anthropic", "model": "claude-opus-5-5"}),
+        )
+        .await;
+    assert_eq!(code, 429, "PUT shares the budget");
     assert_eq!(hits.count(), 0);
 }

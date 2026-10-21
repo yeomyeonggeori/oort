@@ -148,7 +148,8 @@ pub struct ModelOptionsReport {
     /// Requests that left this process (0 when nothing was dialled).
     pub requests_sent: u8,
     /// Hermes's current provider and model (its top-level `provider` / `model`),
-    /// when both are usable slugs.
+    /// when both are usable slugs **and** the provider is one of `providers`
+    /// (logged in).
     pub current: Option<ModelChoice>,
     pub providers: Vec<ProviderModels>,
 }
@@ -254,7 +255,14 @@ pub fn parse_model_options(value: &serde_json::Value, secret: &str) -> ModelOpti
             .and_then(serde_json::Value::as_str)
             .and_then(momo_settings::sanitized_model_id),
     ) {
-        (Some(provider), Some(model)) => Some(ModelChoice { provider, model }),
+        // A current provider Hermes does not mark logged in (or that lists no
+        // usable model) is not a route anyone can answer on: connect must not pin
+        // it (#4159 L1).
+        (Some(provider), Some(model))
+            if report.providers.iter().any(|p| p.provider == provider) =>
+        {
+            Some(ModelChoice { provider, model })
+        }
         _ => None,
     };
     report
