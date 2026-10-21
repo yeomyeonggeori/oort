@@ -123,13 +123,25 @@ export interface AttentionNotifyContext {
   windowFocused: boolean;
   /** 이 칸이 지금 화면에 보이고 격자의 활성 칸이다. */
   paneInView: boolean;
+  /**
+   * 이 멤버의 **알림 일시 중지**(서버 규칙)가 켜져 있다 (#4197). 메시지 배너와 같은 말이다
+   * (`notifications/model.ts` 의 `NotifyContext.paused`): 서버가 마지막으로 답한 값 그대로이고,
+   * 비어 있으면 일시 중지가 아니다. 칸은 서버에 올라가지 않지만(ADR-0190 D2) 「알림 일시 중지」는
+   * 이 워크스페이스의 **모든** 알림을 멈춘다는 약속이라 로컬 칸 배너도 그 아래에 선다.
+   */
+  paused?: boolean;
 }
 
 /**
  * OS 알림을 띄울까. 보고 있는 칸이 바뀐 것은 알리지 않는다: 사람이 이미 그
  * 화면을 보고 있다. 권한이 없으면 띄우는 쪽(`showNotification`)이 조용히 넘긴다.
+ *
+ * 알림 일시 중지가 켜져 있으면 어느 칸도 알리지 않는다. 이것은 **OS 배너만**의 판정이다 —
+ * 인박스의 「이 기기의 칸」 줄과 배지는 이 함수를 거치지 않고, 일시 중지에도 그대로 쌓인다
+ * (별개 원장, ADR-0124 D2).
  */
 export function shouldNotifyAttention(ctx: AttentionNotifyContext): boolean {
+  if (ctx.paused) return false;
   return !(ctx.windowFocused && ctx.paneInView);
 }
 

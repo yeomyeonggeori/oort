@@ -3,18 +3,23 @@
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import type { MessageNewEvent } from "@momo/core/lib/realtimeEvents";
+import type { NotificationRules } from "@momo/core/features/settings/notificationRules";
 import type { RealtimeHandle } from "@/lib/realtime";
 import { DesktopNotifications } from "./DesktopNotifications";
 import { messageAnchorPath } from "@/features/inbox/anchor";
 import { armOpen, openTarget } from "@momo/core/features/notifications/model";
+import { paneAttention, type PaneObservation } from "@/features/workbench/local/paneAttention";
 import { osNotifier } from "./osNotifier";
 import {
   reloadDesktopNotificationKindsForTest,
   setDesktopNotificationKind,
 } from "./preference";
+import { serverPauseActive } from "./serverPause";
+import { SERVER_PAUSE_POLL_MS } from "./useServerPause";
 
 const IDS = vi.hoisted(() => ({
   ws: "00000000-0000-7000-8000-000000000001",
@@ -22,14 +27,27 @@ const IDS = vi.hoisted(() => ({
   other: "00000000-0000-7000-8000-0000000005d1",
   agent: "00000000-0000-7000-8000-000000000103",
   channel: "00000000-0000-7000-8000-00000000020a",
+  dm: "00000000-0000-7000-8000-00000000020b",
 }));
 
 const showNotification = vi.hoisted(() => vi.fn());
+const fetchNotificationRules = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/tauri", () => ({
   isDesktop: () => true,
   showNotification: (...args: unknown[]) => showNotification(...args),
 }));
+
+// 서버 규칙 읽기만 모듈 경계에서 가짜다(`PauseBanner.test.tsx` 와 같은 방식). 훅·판정·알림 묶음은 진짜다.
+vi.mock("@momo/core/features/settings/notificationRules", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@momo/core/features/settings/notificationRules")>();
+  return {
+    ...actual,
+    fetchNotificationRules: (workspaceId: string) =>
+      fetchNotificationRules(workspaceId) as Promise<NotificationRules>,
+  };
+});
 
 vi.mock("@/features/workspace/useWorkspace", async (importOriginal) => {
   const actual =
@@ -47,7 +65,15 @@ vi.mock("@/features/workspace/useWorkspace", async (importOriginal) => {
             muted: false,
           },
         ],
-        dms: [],
+        dms: [
+          {
+            id: IDS.dm,
+            workspaceId: IDS.ws,
+            kind: "dm" as const,
+            name: "dm",
+            muted: false,
+          },
+        ],
       },
     }),
     useDirectory: () => ({
@@ -84,6 +110,8 @@ beforeAll(() => {
 beforeEach(() => {
   showNotification.mockReset();
   showNotification.mockResolvedValue(true);
+  fetchNotificationRules.mockReset();
+  fetchNotificationRules.mockResolvedValue(rules());
   onMessage = null;
   localStorage.clear();
   reloadDesktopNotificationKindsForTest(localStorage);
@@ -98,10 +126,17 @@ afterEach(() => {
   mountedHost?.remove();
   mountedHost = null;
   reloadDesktopNotificationKindsForTest(null);
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
-function mentionEvent(): MessageNewEvent {
+const rules = (over: Partial<NotificationRules> = {}): NotificationRules => ({
+  dnd: false,
+  mentionOverridesMute: false,
+  ...over,
+});
+
+function mentionEvent(id = "019F96A4-E717-7F82-9750-58B2D7D28225"): MessageNewEvent {
   const now = Date.now();
   return {
     type: "message.new",
@@ -109,7 +144,7 @@ function mentionEvent(): MessageNewEvent {
     ts: now,
     seq: 42,
     payload: {
-      id: "019F96A4-E717-7F82-9750-58B2D7D28225",
+      id,
       channel_id: IDS.channel,
       seq: 42,
       type: "text",
@@ -186,12 +221,40 @@ function mountRail(path = "/"): HTMLElement {
     MemoryRouter,
     { initialEntries: [path] },
     createElement(
-      SessionProvider,
-      { value: sessionValue() },
-      createElement(DesktopNotifications)
+      QueryClientProvider,
+      { client: new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }) },
+      createElement(
+        SessionProvider,
+        { value: sessionValue() },
+        createElement(DesktopNotifications)
+      )
     )
   );
   act(() => mountedRoot?.render(tree));
+  return host;
+}
+
+/**
+ * 조건이 설 때까지 기다린다. 질의의 상태 알림(`notifyManager`)은 약속이 풀린 **뒤** 매크로태스크에 나가므로
+ * 고정된 한 틱으로는 부하에서 어긋난다(전체 시험에서만 붉던 시험이 그 증거다). 타이머는 진짜다 — 아래
+ * 시험이 가짜로 두는 것은 시계와 간격 타이머뿐이다.
+ */
+async function until(condition: () => boolean, what: string): Promise<void> {
+  for (let attempt = 0; attempt < 100 && !condition(); attempt += 1) {
+    await act(async () => {
+      await new Promise((resolve) => globalThis.setTimeout(resolve, 2));
+    });
+  }
+  expect(condition(), what).toBe(true);
+}
+
+/** 이 마운트의 규칙 읽기가 한 번 끝나 다음 판정에 닿을 때까지(첫 답은 항상 빈 값이 아니다). */
+const rulesRead = (calls: number) => () => fetchNotificationRules.mock.calls.length >= calls;
+
+/** 마운트하고 서버 규칙의 첫 읽기를 시작시킨다. 값이 훅에 닿는 것은 시험이 `until` 로 기다린다. */
+async function mountSettled(path = "/"): Promise<HTMLElement> {
+  const host = mountRail(path);
+  await until(rulesRead(1), "규칙 읽기가 시작됐다");
   return host;
 }
 
@@ -311,5 +374,204 @@ describe("DesktopNotifications", () => {
     const card = "019F96A4-E717-7F82-9750-58B2D7D28226";
     const armed = armOpen(null, IDS.channel, 1_000, undefined, card);
     expect(openTarget(armed, 1_001)).toBe(messageAnchorPath(IDS.channel, card));
+  });
+});
+
+// =============================================================================
+// #4197 — 알림 일시 중지(서버 규칙)가 OS 배너를 멈춘다.
+//
+// 폰 푸시는 서버가 `notification_rule.dnd` 로 멈춘다. 데스크탑·웹 배너는 서버를 거치지 않고 이 기기가
+// 판정해 왔고 그 입력에 일시 중지가 없었다(성재 0.1.32 실기). 규칙 읽기만 가짜이고(위 vi.mock) 판정·
+// 훅·칸 저장소·알림 묶음·셸 다리까지는 진짜다 — `showNotification` 이 불리는 횟수가 증거다.
+// =============================================================================
+
+describe("알림 일시 중지(서버 규칙)를 따른다 (#4197)", () => {
+  const PANE = "pane-4197";
+  const pane = (status: PaneObservation["status"]): PaneObservation => ({
+    paneId: PANE,
+    index: 2,
+    name: "claude",
+    status,
+    signal: status === "waiting" ? "waiting-permission" : null,
+  });
+  const dmEvent = (): MessageNewEvent => {
+    const base = mentionEvent("019F96A4-E717-7F82-9750-58B2D7D28301");
+    return {
+      ...base,
+      payload: { ...base.payload, channel_id: IDS.dm, props: {}, body: "점심 먹었어요?" },
+    } as MessageNewEvent;
+  };
+
+  /** 멘션·승인·DM·칸 알림을 한 번씩 낸다. DM 은 기본 끔이라 켜 둔다(꺼서 안 뜬 것과 구분되게). */
+  async function fireEveryKind(): Promise<void> {
+    setDesktopNotificationKind("dm", true, localStorage);
+    await act(async () => {
+      onMessage?.(mentionEvent());
+      onMessage?.(approvalEvent());
+      onMessage?.(dmEvent());
+      paneAttention().observe([pane("running")], null);
+      paneAttention().observe([pane("waiting")], null);
+      osNotifier().flush();
+      await Promise.resolve();
+    });
+  }
+
+  async function deliver(event: MessageNewEvent): Promise<void> {
+    await act(async () => {
+      onMessage?.(event);
+      osNotifier().flush();
+      await Promise.resolve();
+    });
+  }
+
+  /** 질의 간격을 한 번 넘긴다. 시계만 가짜이고 약속은 진짜다(`PauseBanner.test.tsx` 와 같다). */
+  async function pollOnce(): Promise<void> {
+    const before = fetchNotificationRules.mock.calls.length;
+    await act(async () => {
+      vi.advanceTimersByTime(SERVER_PAUSE_POLL_MS);
+    });
+    await until(rulesRead(before + 1), "간격 재조회가 나갔다");
+  }
+
+  const fakeClock = () =>
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+
+  afterEach(() => {
+    // 칸 저장소는 앱에 하나다: 다음 시험이 이 칸을 이어 받지 않게 비운다.
+    act(() => paneAttention().observe([], null));
+  });
+
+  it("① 일시 중지 중에는 멘션·승인·DM·칸 알림 어느 것도 OS 배너가 되지 않는다", async () => {
+    fetchNotificationRules.mockResolvedValue(
+      rules({ dnd: true, dndUntilMs: Date.now() + 3_600_000 })
+    );
+    await mountSettled();
+    await until(serverPauseActive, "서버의 일시 중지가 이 기기에 닿았다");
+    await fireEveryKind();
+    expect(showNotification).not.toHaveBeenCalled();
+    // ④ 배지·인박스의 원장은 별개다: 칸 줄은 일시 중지에도 그대로 선다(배지는 이 줄을 센다).
+    expect(paneAttention().entries().map((entry) => entry.paneId)).toEqual([PANE]);
+  });
+
+  it("대조: 같은 입력에서 일시 중지가 꺼져 있으면 네 종류가 모두 뜬다 — 위 단정이 헛돌지 않는다", async () => {
+    await mountSettled();
+    await fireEveryKind();
+    expect(serverPauseActive()).toBe(false);
+    expect(showNotification).toHaveBeenCalledTimes(4);
+    expect(paneAttention().entries().map((entry) => entry.paneId)).toEqual([PANE]);
+  });
+
+  it("기한 없는 일시 중지(옛 판이 만든 행)도 막는다", async () => {
+    fetchNotificationRules.mockResolvedValue(rules({ dnd: true }));
+    await mountSettled();
+    await until(serverPauseActive, "서버의 일시 중지가 이 기기에 닿았다");
+    await fireEveryKind();
+    expect(showNotification).not.toHaveBeenCalled();
+  });
+
+  it("② 기한이 지나도 서버가 풀었다고 답하기 전에는 풀지 않고, 풀었다고 답하면 다시 뜬다", async () => {
+    // 이 기기 시계로는 기한이 이미 지났다. 서버의 두 번째 답은 약속이 풀릴 때까지 오지 않는다.
+    fetchNotificationRules.mockResolvedValueOnce(
+      rules({ dnd: true, dndUntilMs: Date.now() - 60_000 })
+    );
+    let release: (value: NotificationRules) => void = () => undefined;
+    fetchNotificationRules.mockImplementationOnce(
+      () => new Promise<NotificationRules>((resolve) => (release = resolve))
+    );
+    await mountSettled();
+    // 지난 것을 알면 서버에 다시 묻는다(스스로 풀지 않는다).
+    await until(rulesRead(2), "기한이 지난 것을 알고 서버에 다시 물었다");
+    expect(fetchNotificationRules).toHaveBeenCalledTimes(2);
+    expect(serverPauseActive()).toBe(true);
+    await deliver(mentionEvent());
+    expect(showNotification).not.toHaveBeenCalled();
+
+    await act(async () => release(rules()));
+    await until(() => !serverPauseActive(), "서버가 풀었다는 답이 이 기기에 닿았다");
+    await deliver(mentionEvent("019F96A4-E717-7F82-9750-58B2D7D28310"));
+    expect(showNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it("서버가 아직 켜져 있다고 답하면(시계 차이) 기한이 지났어도 계속 막는다", async () => {
+    fetchNotificationRules.mockResolvedValue(
+      rules({ dnd: true, dndUntilMs: Date.now() - 60_000 })
+    );
+    await mountSettled();
+    await until(rulesRead(2), "기한이 지난 것을 알고 서버에 다시 물었다");
+    // 서버가 두 번 다 켜져 있다고 답했다: 이 기기 시계로 지났다는 이유만으로는 풀지 않는다.
+    await until(serverPauseActive, "서버의 일시 중지가 이 기기에 닿았다");
+    await deliver(mentionEvent());
+    expect(showNotification).not.toHaveBeenCalled();
+  });
+
+  it("다른 기기에서 건 일시 중지도 다음 재조회부터 따른다", async () => {
+    fakeClock();
+    await mountSettled();
+    await deliver(mentionEvent());
+    expect(showNotification).toHaveBeenCalledTimes(1);
+
+    // 폰에서 일시 중지를 걸었다. 창은 뒤에 있고 이 기기에는 이벤트가 없다 — 간격 재조회만이 닿는 길이다.
+    fetchNotificationRules.mockResolvedValue(
+      rules({ dnd: true, dndUntilMs: Date.now() + 3_600_000 })
+    );
+    await pollOnce();
+    await until(serverPauseActive, "폰에서 건 일시 중지가 이 기기에 닿았다");
+    await deliver(mentionEvent("019F96A4-E717-7F82-9750-58B2D7D28311"));
+    expect(showNotification).toHaveBeenCalledTimes(1);
+
+    // 폰에서 풀었다: 다음 재조회부터 다시 뜬다.
+    fetchNotificationRules.mockResolvedValue(rules());
+    await pollOnce();
+    await until(() => !serverPauseActive(), "폰에서 푼 일시 중지가 이 기기에 닿았다");
+    await deliver(mentionEvent("019F96A4-E717-7F82-9750-58B2D7D28312"));
+    expect(showNotification).toHaveBeenCalledTimes(2);
+  });
+
+  it("③ 규칙 조회가 실패하면 마지막 값을 유지하고 로그를 남긴다", async () => {
+    fakeClock();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    fetchNotificationRules.mockResolvedValueOnce(rules({ dnd: true }));
+    fetchNotificationRules.mockRejectedValue(new Error("down"));
+    await mountSettled();
+    await until(serverPauseActive, "서버의 일시 중지가 이 기기에 닿았다");
+
+    await pollOnce();
+    const logged = () =>
+      warn.mock.calls.filter(([message]) =>
+        String(message).startsWith("[momo] notification rules unavailable")
+      );
+    await until(() => logged().length >= 1, "실패가 로그로 남았다");
+    expect(fetchNotificationRules).toHaveBeenCalledTimes(2);
+    // 마지막으로 읽은 값(켜짐)이 그대로다: 서버가 대답하지 못한다고 일시 중지가 풀리지 않는다.
+    expect(serverPauseActive()).toBe(true);
+    await deliver(mentionEvent());
+    expect(showNotification).not.toHaveBeenCalled();
+    expect(logged()).toHaveLength(1);
+    expect(logged()[0]?.[1]).toBeInstanceOf(Error);
+  });
+
+  it("③ 한 번도 읽지 못했으면 막지 않고(읽지 못한 규칙으로 배너를 죽이지 않는다) 로그는 남긴다", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    fetchNotificationRules.mockRejectedValue(new Error("down"));
+    await mountSettled();
+    await until(
+      () =>
+        warn.mock.calls.some(([message]) =>
+          String(message).startsWith("[momo] notification rules unavailable")
+        ),
+      "실패가 로그로 남았다"
+    );
+    expect(serverPauseActive()).toBe(false);
+    await deliver(mentionEvent());
+    expect(showNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it("마운트를 떠나면 일시 중지 값을 남기지 않는다(로그아웃 뒤 다른 사람에게 새지 않는다)", async () => {
+    fetchNotificationRules.mockResolvedValue(rules({ dnd: true }));
+    await mountSettled();
+    await until(serverPauseActive, "서버의 일시 중지가 이 기기에 닿았다");
+    act(() => mountedRoot?.unmount());
+    mountedRoot = null;
+    expect(serverPauseActive()).toBe(false);
   });
 });

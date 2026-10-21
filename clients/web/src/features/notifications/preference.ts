@@ -36,7 +36,8 @@ export type DesktopPrefKey = DesktopNotifyKind | DockPrefKey;
 // mention, and an edit never become a banner. Reminder dues are a third kind
 // and ride the 30s poll, not message.new.
 //
-// Workspace DND and the mention-exception live on the server. These switches
+// Workspace DND and the mention-exception live on the server (DND is read by
+// `serverPause.ts` since #4197 and outranks every switch here). These switches
 // are localStorage, key shape `momo.web.*`, this origin only.
 // =============================================================================
 
