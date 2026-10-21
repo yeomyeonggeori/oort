@@ -226,7 +226,7 @@ export function PhotoMorphFrame({
 // 의 규칙(즉시 부르는 `StyleSheet.create` 는 import 시점에 굳는다)을 문자 그대로 지키기 위해서다.
 //
 // 틀은 안을 자른다. 그림자는 호스트가 바깥에서 둘러 준다.
-const FRAME_STYLE = {overflow: 'hidden'} as const;
+const FRAME_STYLE = {overflow: 'hidden', borderCurve: 'continuous'} as const;
 // 몸통은 틀 전체를 채운다. 두 층 아래(첫 자식)에 서므로 메뉴·사진 층이 그 위에 얹힌다.
 const BODY_STYLE = {position: 'absolute', top: 0, right: 0, bottom: 0, left: 0} as const;
 // 두 층 모두 틀의 왼쪽 아래에 닻을 내린다 — 틀이 위·오른쪽으로 자란다. 메뉴는 왼쪽 위

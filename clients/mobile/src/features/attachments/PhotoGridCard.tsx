@@ -428,6 +428,7 @@ const buildStyles = (color: Palette) =>
     card: {
       backgroundColor: color.surface,
       borderRadius: PHOTO_CARD.radius,
+      borderCurve: 'continuous',
       overflow: 'hidden',
       boxShadow: color.elevationFloat,
     },

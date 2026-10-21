@@ -642,6 +642,36 @@ describe('겉모습', () => {
     expect(fill('photo-back')).not.toBe(fill('photo-pill'));
   });
 
+  it('설명은 어절 단위로 줄바꿈한다 — 「있어/요.」·「올라/가고」로 끊기지 않는다(hangul-word)', async () => {
+    const lib = makeLibrary({permission: 'undetermined'});
+    await renderCard(lib.ports);
+    await screen.findByTestId('photo-pane-undetermined');
+    for (const text of [PHOTO_COPY.askTitle, PHOTO_COPY.askDetail]) {
+      expect(screen.getByText(text).props.lineBreakStrategyIOS).toBe('hangul-word');
+    }
+  });
+
+  it('카드는 연속 곡선이고 모서리는 메뉴 카드와 같다', async () => {
+    const lib = makeLibrary();
+    await renderCard(lib.ports);
+    const card = await screen.findByTestId('photo-card');
+    const style = Object.assign({}, ...([] as object[]).concat(card.props.style)) as Record<string, unknown>;
+    expect(style.borderCurve).toBe('continuous');
+    expect(style.borderRadius).toBe(PHOTO_CARD.radius);
+  });
+
+  it('안내 칩은 눌리는 버튼처럼 보이지 않는다 — 잉크가 아니라 면 위의 글자다', async () => {
+    const lib = makeLibrary();
+    await renderCard(lib.ports, {room: 1});
+    await screen.findByTestId('photo-grid');
+    await press('photo-cell-a1');
+    await press('photo-cell-a2');
+    const chip = await screen.findByText(PHOTO_COPY.capped(1));
+    const style = Object.assign({}, ...([] as object[]).concat(chip.props.style)) as Record<string, unknown>;
+    expect(style.backgroundColor).toBe(lightPalette.surface);
+    expect(style.backgroundColor).not.toBe(lightPalette.primary);
+  });
+
   it('권한 면에서도 뒤로 원이 선다(막다른 길이 없다)', async () => {
     const lib = makeLibrary({permission: 'denied'});
     const {props} = await renderCard(lib.ports);

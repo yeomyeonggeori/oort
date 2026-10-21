@@ -1,4 +1,5 @@
-import {ds2Radius, TOUCH_TARGET} from '../src/design/tokens';
+import {TOUCH_TARGET} from '../src/design/tokens';
+import {ATTACH_MENU} from '../src/features/attachments/AttachMenu';
 import {
   PHOTO_CARD,
   PHOTO_MORPH,
@@ -36,13 +37,9 @@ describe('Buzz 실측 대비 — 402×874(iPhone 17 Pro)에서', () => {
 });
 
 describe('관계 — 값이 아니라 값이 지키는 것', () => {
-  it('모서리는 폰 반경 사다리의 한 칸이다(사다리 밖 값을 들이지 않았다)', () => {
-    expect(Object.values(ds2Radius)).toContain(PHOTO_CARD.radius);
-    // Buzz ≈32 에서 가장 가까운 칸이고, 그 차이는 카드 폭의 1% 아래다.
-    const nearest = Object.values(ds2Radius)
-      .filter(value => value < ds2Radius.pill)
-      .reduce((best, value) => (Math.abs(value - 32) < Math.abs(best - 32) ? value : best));
-    expect(PHOTO_CARD.radius).toBe(nearest);
+  it('모서리는 메뉴 카드와 같은 값이다 — 변신 동안 모서리가 두 값 사이를 오가지 않는다', () => {
+    expect(PHOTO_CARD.radius).toBe(ATTACH_MENU.radius);
+    // Buzz 카드 눈대중 ≈32 와의 차이는 카드 폭의 1% 안이다.
     expect(Math.abs(32 - PHOTO_CARD.radius) / 382).toBeLessThan(0.01);
   });
 

@@ -206,6 +206,19 @@ describe('틀의 보간 — 폭·높이·모서리 하나의 진행 값', () => 
     expect(() => layer('photo-morph-body')).toThrow();
   });
 
+  it('층 순서: 몸통 → 사진 층 → 메뉴 층(줄어드는 메뉴가 자라는 카드 위에 얹힌다 — Buzz 중간 프레임)', () => {
+    render(frame({target: 'card', pinnedProgress: 0.4, bodyColor: '#FFFEFC'}));
+    const order = (layer('photo-morph').children as unknown as Array<{props: {testID?: string}}>).map(
+      child => child.props.testID,
+    );
+    expect(order).toEqual(['photo-morph-body', 'photo-morph-card', 'photo-morph-menu']);
+  });
+
+  it('틀은 메뉴 카드와 같은 연속 곡선으로 자른다(진행 0 에서 모서리가 어긋나지 않는다)', () => {
+    render(frame({pinnedProgress: 0}));
+    expect(flat('photo-morph').borderCurve).toBe('continuous');
+  });
+
   it('보이지 않는 층은 눌리지도 낭독되지도 않는다', () => {
     const view = render(frame({pinnedProgress: 0}));
     expect(layer('photo-morph-card').props.pointerEvents).toBe('none');

@@ -1,4 +1,11 @@
-import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from 'react';
 import {
   AccessibilityInfo,
   Animated,
@@ -39,6 +46,12 @@ import {
 import {usePalette, useStyles, useTheme} from '../../design/theme';
 import {font, line, space, type Palette} from '../../design/tokens';
 import {useReduceMotionRef} from '../../lib/useReduceMotion';
+import {PhotoGridCard} from './PhotoGridCard';
+import {PhotoMorphFrame} from './PhotoMorphFrame';
+import {PHOTO_CARD, photoCardSize} from './photoCardDesign';
+import type {PhotoLibraryPorts} from './photoLibrary';
+import {cardIsLive, menuIsInteractive, MORPH_START, morphReduce} from './photoMorph';
+import type {PickedAttachmentFile} from './picker';
 
 // =============================================================================
 // 첨부 메뉴 — + 원에서 펼쳐지는 둥근 카드 (#4180). 바닥 시트(`AttachmentPickerSheet`)를 대체한다.
@@ -261,6 +274,19 @@ function withAlpha(hex: string, alpha: number): string {
     .padStart(2, '0')}`;
 }
 
+/**
+ * 「사진」 행이 메뉴를 **사진 카드로 변신**시키는 데 필요한 것 (#4181). 없으면 옛 길(`onPickPhoto` →
+ * 시스템 picker)이 그대로다.
+ */
+export interface AttachMenuPhotos {
+  /** 사진 보관함 포트. 카드가 열려 있을 때만 불린다. */
+  ports: PhotoLibraryPorts;
+  /** 더 붙일 수 있는 수(`photoRoom(트레이 개수)`). */
+  room: number;
+  /** 고른 사진을 파일로 바꿨다 — 한 번의 호출로 넘긴다. */
+  onAttach: (files: PickedAttachmentFile[]) => void;
+}
+
 export function AttachMenu({
   visible,
   anchorRef,
@@ -269,7 +295,10 @@ export function AttachMenu({
   onPickPhoto,
   onPickFile,
   onDismissed,
+  photos,
 }: {
+  /** 있으면 「사진」 행이 메뉴를 사진 카드로 바꾼다(#4181). */
+  photos?: AttachMenuPhotos;
   visible: boolean;
   /** + 원. 열 때 한 번 재고, 닫히면 VoiceOver 초점이 돌아간다. */
   anchorRef: React.RefObject<View | null>;
@@ -281,6 +310,7 @@ export function AttachMenu({
   onDismissed?: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const palette = usePalette();
   const insets = useSafeAreaInsets();
   const win = useWindowDimensions();
   const reduceMotion = useReduceMotionRef();
@@ -302,6 +332,9 @@ export function AttachMenu({
   /** 이 시각 전의 행 누름은 무시한다(`touchGuardMs`). */
   const acceptTouchAfterRef = useRef(0);
   const firstRowRef = useRef<View | null>(null);
+  // 메뉴 → 사진 카드 변신(#4181). 목표와 도착 여부 두 값이 전부다(`photoMorph.ts`).
+  const [morph, dispatchMorph] = useReducer(morphReduce, MORPH_START);
+  const hostOpacity = useRef(new Animated.Value(1)).current;
 
   const clearTimers = useCallback(() => {
     if (watchdogRef.current !== null) clearTimeout(watchdogRef.current);
@@ -439,6 +472,43 @@ export function AttachMenu({
     [anchor, win, insets],
   );
 
+  // ---- 사진 카드(#4181) ------------------------------------------------------
+  // 「사진」 행: 카드가 있으면 메뉴를 닫지 않고 **변신**한다. 연타 방어는 다른 행과 같다.
+  const openPhotos = useCallback(() => {
+    if (Date.now() < acceptTouchAfterRef.current) return;
+    dispatchMorph({type: 'open'});
+  }, []);
+  // 메뉴가 통째로 내려가면 다음에 열 때 메뉴에서 시작한다.
+  useEffect(() => {
+    if (!mounted) dispatchMorph({type: 'reset'});
+  }, [mounted]);
+  // 카드가 선 채로 메뉴가 닫히면(바깥 탭·탈출) + 원으로 접히는 건 옛 카드의 일이라 카드는 서서히 걷힌다.
+  useEffect(() => {
+    if (photos === undefined) return undefined;
+    if (visible) {
+      hostOpacity.setValue(1);
+      return undefined;
+    }
+    const fadeOut = Animated.timing(hostOpacity, {
+      toValue: 0,
+      duration: MENU_FADE_MS,
+      easing: EASE_OUT,
+      useNativeDriver: true,
+    });
+    fadeOut.start();
+    return () => fadeOut.stop();
+  }, [photos, visible, hostOpacity]);
+  const morphing = photos !== undefined && (morph.target === 'card' || !morph.settled);
+  // 카드 크기: 화면 비율대로이되 안전 영역 위로는 올라가지 않는다. 바닥·왼쪽은 메뉴와 같은 자리다.
+  const menuBottom = frame.top + frame.height;
+  const cardBox = useMemo(() => {
+    const size = photoCardSize(win);
+    return {
+      width: Math.min(size.width, win.width - insets.right - PHOTO_CARD.inset - frame.left),
+      height: Math.min(size.height, menuBottom - insets.top - ATTACH_MENU.edge),
+    };
+  }, [win, insets, frame.left, menuBottom]);
+
   const fade = motionRef.current === 'fade';
   // 보간 노드는 렌더마다 새로 만들면 네이티브 구동이 매번 다시 붙는다 — 자리·방식이 바뀔 때만 만든다.
   const motion = useMemo(
@@ -508,6 +578,7 @@ export function AttachMenu({
           accessibilityRole="menu"
           style={[
             styles.card,
+            morphing && styles.cardHidden,
             {
               left: frame.left,
               top: frame.top,
@@ -517,36 +588,20 @@ export function AttachMenu({
             },
           ]}
           testID="attach-menu">
-          <View style={styles.clip}>
-            <MenuMaterial />
-            <Animated.View style={[styles.rows, {opacity: motion.rowsOpacity}]}>
-              <MenuRow
-                icon="camera"
-                label="카메라"
-                hint="사진을 찍어 바로 첨부해요"
-                onPress={choose(onPickCamera)}
-                rowRef={firstRowRef}
-                testID="attachment-pick-camera"
-              />
-              <MenuRow
-                icon="photo"
-                label="사진"
-                hint="사진 보관함에서 한 장을 골라요"
-                onPress={choose(onPickPhoto)}
-                testID="attachment-pick-photo"
-              />
-              <MenuRow
-                icon="file"
-                label="파일"
-                hint="파일 앱에서 한 개를 골라요"
-                onPress={choose(onPickFile)}
-                testID="attachment-pick-file"
-              />
-            </Animated.View>
-          </View>
+          {menuClip(styles, {
+            rowsOpacity: motion.rowsOpacity,
+            firstRowRef,
+            photoHint:
+              photos === undefined
+                ? '사진 보관함에서 한 장을 골라요'
+                : '최근 사진을 펼쳐서 골라요',
+            onCamera: choose(onPickCamera),
+            onPhoto: photos === undefined ? choose(onPickPhoto) : openPhotos,
+            onFile: choose(onPickFile),
+          })}
         </Animated.View>
-        {anchor === null ? null : (
-          // + 원 자리의 닫기 표면(위 「닫힘」). 글자도 그림도 없다 — + 는 카드 밑에 있고, 사람이 누르는 것은
+        {anchor === null || morphing ? null : (
+          // + 원 자리의 닫기 표면(위 「닫힘」). 카드로 변신하는 동안에는 세우지 않는다 — 그 자리에 카드의 뒤로 원이 있다(#4181). 글자도 그림도 없다 — + 는 카드 밑에 있고, 사람이 누르는 것은
           // 그 기억이다. 보조기술에서는 숨는다(VoiceOver 는 탈출 제스처가 닫는다). 열린 직후에도 닫는 길은 막지 않는다.
           <Pressable
             accessibilityElementsHidden
@@ -563,8 +618,107 @@ export function AttachMenu({
             testID="attach-menu-anchor-close"
           />
         )}
+        {morphing ? (
+          <Animated.View
+            pointerEvents="box-none"
+            style={[
+              styles.morphHost,
+              {
+                left: frame.left,
+                top: menuBottom - cardBox.height,
+                width: cardBox.width,
+                height: cardBox.height,
+                opacity: hostOpacity,
+              },
+            ]}
+            testID="attach-photo-host">
+            <PhotoMorphFrame
+              target={morph.target}
+              menuSize={{width: frame.width, height: frame.height}}
+              menuRadius={ATTACH_MENU.radius}
+              cardSize={cardBox}
+              cardRadius={PHOTO_CARD.radius}
+              frameStyle={styles.morphShadow}
+              bodyColor={palette.surface}
+              onSettled={target => dispatchMorph({type: 'settled', target})}
+              menu={
+                <View
+                  pointerEvents={menuIsInteractive(morph) ? 'auto' : 'none'}
+                  style={styles.morphMenu}>
+                  {menuClip(styles, {
+                    rowsOpacity: 1,
+                    photoHint: '최근 사진을 펼쳐서 골라요',
+                    onCamera: choose(onPickCamera),
+                    onPhoto: openPhotos,
+                    onFile: choose(onPickFile),
+                  })}
+                </View>
+              }
+              card={
+                <PhotoGridCard
+                  ports={photos.ports}
+                  active={cardIsLive(morph)}
+                  size={cardBox}
+                  room={photos.room}
+                  onBack={() => dispatchMorph({type: 'back'})}
+                  onAttach={photos.onAttach}
+                  onDone={onClose}
+                  onOpenSystemPicker={choose(onPickPhoto)}
+                />
+              }
+            />
+          </Animated.View>
+        ) : null}
       </View>
     </Modal>
+  );
+}
+
+/**
+ * 메뉴 카드의 안쪽 — 재질과 세 행. 진짜 카드와 변신 틀의 메뉴 층이 같은 것을 그린다.
+ *
+ * 컴포넌트가 아니라 **그리는 함수**다: 진짜 카드의 첫 자식이 지금도 `clip` 뷰 자신이어야 한다
+ * (옛 시험이 그 구조를 읽는다). 스타일은 호출한 곳의 것을 받는다(훅을 두 번째 자리에서 부르지 않는다).
+ */
+function menuClip(
+  styles: ReturnType<typeof buildStyles>,
+  props: {
+    rowsOpacity: Animated.AnimatedInterpolation<number> | number;
+    firstRowRef?: React.RefObject<View | null>;
+    photoHint: string;
+    onCamera: () => void;
+    onPhoto: () => void;
+    onFile: () => void;
+  },
+): React.JSX.Element {
+  return (
+    <View style={styles.clip}>
+      <MenuMaterial />
+      <Animated.View style={[styles.rows, {opacity: props.rowsOpacity}]}>
+        <MenuRow
+          icon="camera"
+          label="카메라"
+          hint="사진을 찍어 바로 첨부해요"
+          onPress={props.onCamera}
+          rowRef={props.firstRowRef}
+          testID="attachment-pick-camera"
+        />
+        <MenuRow
+          icon="photo"
+          label="사진"
+          hint={props.photoHint}
+          onPress={props.onPhoto}
+          testID="attachment-pick-photo"
+        />
+        <MenuRow
+          icon="file"
+          label="파일"
+          hint="파일 앱에서 한 개를 골라요"
+          onPress={props.onFile}
+          testID="attachment-pick-file"
+        />
+      </Animated.View>
+    </View>
   );
 }
 
@@ -659,6 +813,12 @@ function MenuRow({
 
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
+    // 변신(#4181) 동안은 같은 자리에 변신 틀이 서고 이 카드는 자리만 지킨다(`display: none`).
+    cardHidden: {display: 'none'},
+    // 변신 틀이 서는 자리: 메뉴와 바닥·왼쪽이 같고 카드 크기다. 틀은 그 안 왼쪽 아래에 닻을 내린다.
+    morphHost: {position: 'absolute', justifyContent: 'flex-end', alignItems: 'flex-start'},
+    morphShadow: {boxShadow: color.elevationFloat},
+    morphMenu: {flex: 1},
     // 위치(`left`·`top`·`height`)는 + 원을 잰 값이라 렌더에서 붙는다.
     card: {
       position: 'absolute',
