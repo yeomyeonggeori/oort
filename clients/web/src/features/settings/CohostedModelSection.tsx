@@ -27,6 +27,7 @@ import { AiLineRow } from "./aiAccountsParts";
 
 const HEADING_ID = "ai-cohosted-model-title";
 const SAVED_NOTICE_MS = 4000;
+const LEAD_ID = "ai-cohosted-model-lead";
 
 export const cohostedModelsKey = (workspaceId: string) => ["cohosted-models", workspaceId] as const;
 
@@ -61,7 +62,14 @@ export const CohostedModelSection = forwardRef<HTMLDivElement, { workspaceId: st
     // 이 서버에서 보이지 않는 구획(운영자 아님·길 없음)은 초점을 받을 빈 상자도 남기지 않는다.
     if (read?.kind === "hidden") return null;
     return (
-      <div ref={ref} tabIndex={-1} className="focus-visible:focus-ring" data-testid="ai-cohosted-model-anchor">
+      <div
+        ref={ref}
+        tabIndex={-1}
+        role="group"
+        aria-labelledby={HEADING_ID}
+        className="focus-visible:focus-ring"
+        data-testid="ai-cohosted-model-anchor"
+      >
         {models.isPending ? (
           <Shell invite={invite}>
             <div role="status" aria-live="polite" className="px-2 py-3 text-body text-ink-muted" data-testid="ai-cohosted-model-loading">
@@ -94,10 +102,6 @@ function Shell({ invite, children }: { invite: boolean; children: React.ReactNod
       {children}
     </section>
   );
-}
-
-function optionLabel(provider: string, model: string): string {
-  return `${modelLabel(model)} · ${providerLabel(provider)}`;
 }
 
 function ModelBody({
@@ -176,32 +180,55 @@ function ModelBody({
   return (
     <Shell invite={invite}>
       <AiLineRow last testId="ai-cohosted-model-current">
-        <span className="text-meta text-ink-muted">{COPY.currentLead}</span>
-        <span className="font-semibold" data-testid="ai-cohosted-model-now">
-          {shown ? optionLabel(shown.provider, shown.model) : COPY.followingHermes}
+        <span id={LEAD_ID} className="text-meta text-ink-muted">
+          {COPY.currentLead}
         </span>
-        <span className="flex min-w-0 flex-col items-start gap-2 pt-2 sm:max-w-sm">
-          <ListboxSelect
-            aria-label={COPY.fieldLabel}
-            data-testid="ai-cohosted-model-select"
-            value={shown ? modelValue(shown) : ""}
-            placeholder={COPY.placeholder}
-            options={options}
-            disabled={locked}
-            onValueChange={(next) => {
-              const choice = splitModelValue(next);
-              if (choice === null || locked) return;
-              if (current && current.provider === choice.provider && current.model === choice.model) return;
-              setSavedOn(false);
-              save.mutate(choice);
-            }}
-          />
+        {/* 고른 모델은 선택 칸이 한 번만 말한다(#4161). 정한 모델이 없을 때만 문장이 선다. */}
+        {!shown && (
+          <span className="font-semibold" data-testid="ai-cohosted-model-now">
+            {COPY.followingHermes}
+          </span>
+        )}
+        <span className="flex min-w-0 flex-col items-start gap-2 pt-1">
+          {/* 저장 알림 자리는 늘 있다: 나타나도 아래 줄이 밀리지 않고, 읽는 영역이 처음부터 마운트돼 있어야 스크린리더가 말한다. */}
+          <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 self-stretch">
+            <span className="min-w-0 flex-1 sm:max-w-sm sm:flex-none">
+              <ListboxSelect
+                aria-labelledby={LEAD_ID}
+                data-testid="ai-cohosted-model-select"
+                value={shown ? modelValue(shown) : ""}
+                placeholder={COPY.placeholder}
+                options={options}
+                disabled={locked}
+                onValueChange={(next) => {
+                  const choice = splitModelValue(next);
+                  if (choice === null || locked) return;
+                  if (current && current.provider === choice.provider && current.model === choice.model) return;
+                  setSavedOn(false);
+                  save.mutate(choice);
+                }}
+              />
+            </span>
+            <span role="status" className="flex min-h-6 min-w-0 items-center text-meta" data-testid="ai-cohosted-model-status">
+              {save.isPending ? (
+                <span className="flex items-center gap-2 text-ink-muted" data-testid="ai-cohosted-model-saving">
+                  <Loader2 aria-hidden="true" className="spinner-busy size-4" />
+                  {COPY.saving}
+                </span>
+              ) : savedOn ? (
+                <span className="flex items-center gap-2 font-semibold text-ok" data-testid="ai-cohosted-model-saved">
+                  <Check aria-hidden="true" className="size-4 shrink-0" />
+                  {COPY.saved}
+                </span>
+              ) : null}
+            </span>
+          </span>
           {(hidden || showAll) && (
             <Button
               type="button"
               size="sm"
               variant="ghost"
-              className="tap-target"
+              className="tap-target -ml-3 underline underline-offset-4"
               aria-pressed={showAll}
               onClick={() => setShowAll((on) => !on)}
               data-testid="ai-cohosted-model-toggle"
@@ -210,18 +237,6 @@ function ModelBody({
             </Button>
           )}
         </span>
-        {save.isPending && (
-          <span role="status" className="flex items-center gap-2 text-meta text-ink-muted" data-testid="ai-cohosted-model-saving">
-            <Loader2 aria-hidden="true" className="spinner-busy size-4" />
-            {COPY.saving}
-          </span>
-        )}
-        {savedOn && !save.isPending && (
-          <span role="status" className="flex items-center gap-2 text-meta font-semibold text-ok" data-testid="ai-cohosted-model-saved">
-            <Check aria-hidden="true" className="size-4 shrink-0" />
-            {COPY.saved}
-          </span>
-        )}
         {save.isError && <InlineBanner message={modelSaveErrorMessage(save.error)} testId="ai-cohosted-model-save-error" />}
         {offline && <InlineBanner tone="neutral" message={COPY.offline} testId="ai-cohosted-model-offline" />}
         <span className="text-meta text-ink-muted">{COPY.teamNote}</span>
