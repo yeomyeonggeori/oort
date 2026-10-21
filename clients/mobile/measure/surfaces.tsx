@@ -826,13 +826,17 @@ const PLACEHOLDER_BUDGET_PT = composerTextColumn(390, 1);
  */
 function PlaceholderProbe(): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const {fontScale} = useWindowDimensions();
+  const {fontScale, height: windowHeight} = useWindowDimensions();
   const [boxes, setBoxes] = React.useState<
     Record<string, {width: number; height: number}>
   >({});
   const [lines, setLines] = React.useState<Record<string, number>>({});
   const rowPt = lineBox.body * fontScale;
   const room = placeholderRoom(fontScale);
+  // 상자는 자라다가 상한(`composerMaxHeight`, #1443)에서 멈춘다 — 큰 글자에서 머리 절이 그보다 길면
+  // 상자 높이는 줄 수가 아니라 상한을 말한다. 그 띠는 이 규칙의 일이 아니라 기존 한계라 따로 적는다.
+  const cap = composerMaxHeight(fontScale, windowHeight);
+  const capRows = (cap - INPUT_CHROME) / rowPt;
 
   // 실제 입력창의 상자를 읽는다. 레이아웃·프로브 왕복이 끝난 뒤(1.5초)에 한 번 — 찍는 쪽은 그보다
   // 오래 기다린다(`scripts/measure.sh` 의 sleep).
@@ -909,21 +913,31 @@ function PlaceholderProbe(): React.JSX.Element {
             ? undefined
             : Math.max(1, Math.round((box.height - INPUT_CHROME) / rowPt));
         let verdict = '…';
-        if (shown !== undefined && full !== undefined && head !== undefined) {
+        if (
+          box !== undefined &&
+          shown !== undefined &&
+          full !== undefined &&
+          head !== undefined
+        ) {
           const expected =
             full <= PLACEHOLDER_MAX_LINES
               ? 1
               : head <= PLACEHOLDER_MAX_LINES
                 ? 1
                 : head;
-          verdict =
-            shown === expected
-              ? full <= PLACEHOLDER_MAX_LINES
-                ? '✓ 문장 전체 한 줄'
-                : head <= PLACEHOLDER_MAX_LINES
-                  ? '✓ 뒷절 빠짐 · 한 줄'
-                  : `✓ 머리 절이 ${head}줄 — 버릴 절 없음`
-              : `✗ 예산 위반 (기대 ${expected}줄)`;
+          const clipped = box.height >= cap - 0.5;
+          if (clipped && expected > capRows) {
+            verdict = `△ 머리 절 ${head}줄이 상자 상한 ${capRows.toFixed(1)}줄을 넘어 잘림 — 버릴 절은 이미 없음(#1443 기존 한계)`;
+          } else {
+            verdict =
+              shown === expected
+                ? full <= PLACEHOLDER_MAX_LINES
+                  ? '✓ 문장 전체 한 줄'
+                  : head <= PLACEHOLDER_MAX_LINES
+                    ? '✓ 뒷절 빠짐 · 한 줄'
+                    : `✓ 머리 절이 ${head}줄 — 버릴 절 없음`
+                : `✗ 예산 위반 (기대 ${expected}줄)`;
+          }
         }
         return (
           <Text key={label} allowFontScaling={false} style={styles.probeRead}>
