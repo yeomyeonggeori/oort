@@ -5067,6 +5067,15 @@ function WorkChatSurface({which}: {which: string}): React.JSX.Element {
   const keyboard = which === 'keyboard';
   const asking = which === 'permission';
   const off = which === 'off';
+  // #4179: 알약 상태 — 한 줄(typed) · 여러 줄(multi). 키보드는 올리지 않고 글만 심는다.
+  const draft =
+    which === 'typed'
+      ? '마지막에 린트도 돌려 줘'
+      : which === 'multi'
+        ? '1) 린트 먼저 돌려 주고\n2) 그다음 테스트를 돌려 줘\n3) 끝나면 여기에 알려 줘'
+        : keyboard
+          ? '마지막에 린트도 돌려 줘'
+          : undefined;
   const events: WorkSessionEvent[] = [
     wcEvent('e1', 1, 'agent.status', {terminal_event: 'created'}),
     wcEvent('p1', 3, 'agent.partial', {
@@ -5149,7 +5158,7 @@ function WorkChatSurface({which}: {which: string}): React.JSX.Element {
               onUndelivered={() => {}}
             />
           )}
-          initialText={keyboard ? '마지막에 린트도 돌려 줘' : undefined}
+          initialText={draft}
           autoFocus={keyboard}
         />
       </Screen>
