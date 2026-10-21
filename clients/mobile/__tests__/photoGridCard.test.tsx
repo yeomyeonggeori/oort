@@ -4,6 +4,7 @@ import React from 'react';
 import {AccessibilityInfo, AppState} from 'react-native';
 
 import {FixedScheme} from '../src/design/theme';
+import {lightPalette} from '../src/design/tokens';
 import {PhotoGridCard, type PhotoGridCardProps} from '../src/features/attachments/PhotoGridCard';
 import {PHOTO_COPY} from '../src/features/attachments/photoCardCopy';
 import {PHOTO_CARD} from '../src/features/attachments/photoCardDesign';
@@ -626,6 +627,19 @@ describe('겉모습', () => {
     await screen.findByTestId('photo-grid');
     await press('photo-back');
     expect(props.onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('뒤로 원은 보조 조작이라 주 조작(알약)과 채움이 다르다 — 보조는 면, 주는 잉크', async () => {
+    const lib = makeLibrary();
+    await renderCard(lib.ports);
+    await screen.findByTestId('photo-grid');
+    const fill = (testID: string) =>
+      (Object.assign({}, ...([] as object[]).concat(screen.getByTestId(testID).props.style)) as {
+        backgroundColor?: string;
+      }).backgroundColor;
+    expect(fill('photo-back')).toBe(lightPalette.surface);
+    expect(fill('photo-pill')).toBe(lightPalette.primary);
+    expect(fill('photo-back')).not.toBe(fill('photo-pill'));
   });
 
   it('권한 면에서도 뒤로 원이 선다(막다른 길이 없다)', async () => {

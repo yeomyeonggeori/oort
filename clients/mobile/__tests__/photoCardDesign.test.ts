@@ -101,6 +101,16 @@ describe('변신 스프링 — 「겉보기 250~350ms, 넘침 거의 없음」',
     }
   });
 
+  it('몸통은 틀이 메뉴 발자국을 벗어나 자라기 전에 이미 막혀 있다(발자국 밖 띠로 뒤 대화가 비치지 않는다)', () => {
+    const [bodyFrom, bodyTo] = PHOTO_MORPH.bodyFade;
+    const [menuFrom] = PHOTO_MORPH.menuFade;
+    // 진행 0 의 틀은 메뉴와 같다 — 몸통이 메뉴의 유리를 덮지 않는다.
+    expect(bodyFrom).toBe(0);
+    // 메뉴가 줄기 시작하기 전에 몸통이 다 올라온다.
+    expect(bodyTo).toBeLessThanOrEqual(menuFrom);
+    expect(bodyTo).toBeGreaterThan(bodyFrom);
+  });
+
   it('사진 층이 먼저 서고 메뉴가 그 위에서 사라진다', () => {
     const [menuFrom, menuTo] = PHOTO_MORPH.menuFade;
     const [cardFrom, cardTo] = PHOTO_MORPH.cardFade;

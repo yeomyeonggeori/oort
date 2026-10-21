@@ -1,5 +1,5 @@
 import React, {useEffect, useRef, useState} from 'react';
-import {Animated, Easing} from 'react-native';
+import {Animated, Easing, type StyleProp, type ViewStyle} from 'react-native';
 
 import {useReduceMotionRef} from '../../lib/useReduceMotion';
 import {PHOTO_MORPH, type PhotoCardSize} from './photoCardDesign';
@@ -39,6 +39,13 @@ export interface PhotoMorphFrameProps {
   onSettled?: (target: MorphTarget) => void;
   /** 캡처 하네스: 진행을 이 값(0..1)에 못 박는다. 중간 프레임을 결정적으로 찍는 길이다. */
   pinnedProgress?: number;
+  /** 틀 바깥 꾸밈(그림자). 틀은 안을 자르지만 `boxShadow` 는 자기 `overflow` 에 잘리지 않는다. */
+  frameStyle?: StyleProp<ViewStyle>;
+  /**
+   * 몸통 색(카드 면 색). 진행 `bodyFade` 동안 올라와 틀 전체를 막는다. 두 층은 서로 다른 구간에서
+   * 불투명해지므로 몸통 없이는 메뉴가 덮지 않는 띠로 뒤 대화가 비친다(design-review H1). 없으면 투명.
+   */
+  bodyColor?: string;
   testID?: string;
 }
 
@@ -54,6 +61,8 @@ export function PhotoMorphFrame({
   card,
   onSettled,
   pinnedProgress,
+  frameStyle,
+  bodyColor,
   testID = 'photo-morph',
 }: PhotoMorphFrameProps): React.JSX.Element {
   const reduceMotion = useReduceMotionRef();
@@ -149,6 +158,12 @@ export function PhotoMorphFrame({
     outputRange: [0, menuTo * (menuSize.height - cardSize.height)],
     extrapolate: CLAMP,
   });
+  const [bodyFrom, bodyTo] = PHOTO_MORPH.bodyFade;
+  const bodyOpacity = progress.interpolate({
+    inputRange: [bodyFrom, bodyTo],
+    outputRange: [0, 1],
+    extrapolate: CLAMP,
+  });
   const cardOpacity = progress.interpolate({
     inputRange: [cardFrom, cardTo],
     outputRange: [0, 1],
@@ -162,8 +177,15 @@ export function PhotoMorphFrame({
 
   return (
     <Animated.View
-      style={[FRAME_STYLE, {width, height, borderRadius}]}
+      style={[FRAME_STYLE, frameStyle, {width, height, borderRadius}]}
       testID={testID}>
+      {bodyColor === undefined ? null : (
+        <Animated.View
+          pointerEvents="none"
+          style={[BODY_STYLE, {backgroundColor: bodyColor, opacity: bodyOpacity}]}
+          testID={`${testID}-body`}
+        />
+      )}
       <Animated.View
         accessibilityElementsHidden={!toCard}
         importantForAccessibility={toCard ? 'auto' : 'no-hide-descendants'}
@@ -205,6 +227,8 @@ export function PhotoMorphFrame({
 //
 // 틀은 안을 자른다. 그림자는 호스트가 바깥에서 둘러 준다.
 const FRAME_STYLE = {overflow: 'hidden'} as const;
+// 몸통은 틀 전체를 채운다. 두 층 아래(첫 자식)에 서므로 메뉴·사진 층이 그 위에 얹힌다.
+const BODY_STYLE = {position: 'absolute', top: 0, right: 0, bottom: 0, left: 0} as const;
 // 두 층 모두 틀의 왼쪽 아래에 닻을 내린다 — 틀이 위·오른쪽으로 자란다. 메뉴는 왼쪽 위
 // 모서리를 축으로 줄어들고(카드의 왼쪽 위 칸으로 접혀 든다), 카드는 아래 가운데를 축으로 자란다.
 const MENU_LAYER_STYLE = {

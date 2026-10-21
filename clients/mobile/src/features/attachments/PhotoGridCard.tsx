@@ -11,7 +11,7 @@ import {
   type ListRenderItemInfo,
 } from 'react-native';
 
-import {BAR_CONTROL_MAX_SCALE} from '../../design/atoms';
+import {BAR_CONTROL_MAX_SCALE, Sentence} from '../../design/atoms';
 import {CONV_ICONS, CONV_ICON_SIZE} from '../../design/icons';
 import {usePalette, useStyles} from '../../design/theme';
 import {ds2Radius, font, line, space, type Palette} from '../../design/tokens';
@@ -152,7 +152,7 @@ export function PhotoGridCard({
         <View style={styles.gridArea}>
           {permission === 'limited' ? (
             <View style={styles.limited} testID="photo-limited">
-              <Text style={styles.limitedNote}>{PHOTO_COPY.limitedNote}</Text>
+              <Sentence style={styles.limitedNote}>{PHOTO_COPY.limitedNote}</Sentence>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={PHOTO_COPY.limitedMore}
@@ -218,7 +218,7 @@ export function PhotoGridCard({
           pointerEvents="none"
           style={[styles.status, {bottom: bottomClear}]}
           testID="photo-notice">
-          <Text style={styles.statusText}>{statusText}</Text>
+          <Sentence style={styles.statusText}>{statusText}</Sentence>
         </View>
       ) : null}
 
@@ -232,7 +232,7 @@ export function PhotoGridCard({
           testID="photo-back">
           <Image
             source={CONV_ICONS.left}
-            style={[styles.backGlyph, {tintColor: palette.onPrimary}]}
+            style={[styles.backGlyph, {tintColor: palette.text}]}
           />
         </Pressable>
 
@@ -355,8 +355,8 @@ function PermissionPane({
       contentContainerStyle={[styles.pane, {paddingBottom: bottomClear}]}
       showsVerticalScrollIndicator={false}
       testID={testID}>
-      <Text style={styles.paneTitle}>{title}</Text>
-      <Text style={styles.paneDetail}>{detail}</Text>
+      <Sentence style={styles.paneTitle}>{title}</Sentence>
+      <Sentence style={styles.paneDetail}>{detail}</Sentence>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={primaryLabel}
@@ -404,8 +404,8 @@ function CenterNote({
   return (
     <View style={styles.center} testID={testID}>
       {busy ? <ActivityIndicator color={palette.textMuted} /> : null}
-      <Text style={styles.paneTitle}>{text}</Text>
-      {detail !== undefined ? <Text style={styles.paneDetail}>{detail}</Text> : null}
+      <Sentence style={styles.paneTitle}>{text}</Sentence>
+      {detail !== undefined ? <Sentence style={styles.paneDetail}>{detail}</Sentence> : null}
       {actionLabel !== undefined && onAction !== undefined ? (
         <Pressable
           accessibilityRole="button"
@@ -541,13 +541,15 @@ const buildStyles = (color: Palette) =>
       right: PHOTO_CARD.controlInset,
       alignItems: 'center',
     },
+    // 안내는 눌리는 것이 아니다 — 잉크 알약이 아니라 조용한 면 위의 글자다(design-review M4).
     statusText: {
       overflow: 'hidden',
       paddingHorizontal: space.md,
       paddingVertical: space.sm,
       borderRadius: ds2Radius.pill,
-      backgroundColor: color.primary,
-      color: color.onPrimary,
+      backgroundColor: color.surface,
+      boxShadow: color.elevationRest,
+      color: color.text,
       fontSize: font.label,
       lineHeight: line.label,
       fontWeight: '600',
@@ -562,14 +564,15 @@ const buildStyles = (color: Palette) =>
       alignItems: 'center',
       justifyContent: 'space-between',
     },
-    // 뒤로 원은 알약과 같은 잉크 채움이다. 앞 판은 유리 위에 `text` 색 글리프였고, 시뮬레이터 캡처(라이트,
-    // 어두운 사진 위)에서 글리프가 사라졌다 — 사진은 어떤 색이든 올 수 있으므로 떠 있는 조작은 사진과 상관없이
-    // 대비가 서는 채움 위에 선다(Buzz 는 어두운 올리브 유리 + 흰 글리프).
+    // 뒤로 원은 **보조** 조작이라 주 조작(잉크 알약)과 채움이 달라야 한다(위계 §3.1) — 헤더의 뒤로 원과
+    // 같은 불투명 `surface` 채움이다. 유리 + 글리프는 어두운 사진 위에서 사라졌고(캡처 selected-light),
+    // 잉크 채움은 보조가 주와 같은 무게가 됐다(design-review M3). 불투명 면은 사진과 상관없이 선다.
     back: {
       width: PHOTO_CARD.control,
       height: PHOTO_CARD.control,
       borderRadius: ds2Radius.pill,
-      backgroundColor: color.primary,
+      backgroundColor: color.surface,
+      boxShadow: color.elevationRest,
       alignItems: 'center',
       justifyContent: 'center',
     },

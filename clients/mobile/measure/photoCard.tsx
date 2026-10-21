@@ -124,6 +124,7 @@ function StandInMenu(): React.JSX.Element {
 }
 
 export function PhotoCardSurface({which}: {which: string}): React.JSX.Element {
+  const palette = usePalette();
   const insets = useSafeAreaInsets();
   const win = useWindowDimensions();
   const size = photoCardSize(win);
@@ -220,6 +221,7 @@ export function PhotoCardSurface({which}: {which: string}): React.JSX.Element {
               menuRadius={MENU_RADIUS}
               cardSize={size}
               cardRadius={PHOTO_CARD.radius}
+              bodyColor={palette.surface}
               menu={<StandInMenu />}
               card={card}
             />

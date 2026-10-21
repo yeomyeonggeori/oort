@@ -186,6 +186,18 @@ describe('틀의 보간 — 폭·높이·모서리 하나의 진행 값', () => 
     expect(scale).toBeGreaterThan(PHOTO_MORPH.menuEndScale);
   });
 
+  it('몸통: 진행 0 에는 없고(메뉴와 같다), 발자국을 벗어나기 전에 불투명하다', () => {
+    const color = '#FFFEFC';
+    const view = render(frame({pinnedProgress: 0, bodyColor: color}));
+    expect(flat('photo-morph-body').backgroundColor).toBe(color);
+    expect(flat('photo-morph-body').opacity).toBe(0);
+    view.rerender(frame({target: 'card', pinnedProgress: PHOTO_MORPH.bodyFade[1], bodyColor: color}));
+    expect(flat('photo-morph-body').opacity).toBe(1);
+    // 몸통을 안 주면 틀은 투명하다(기존 동작).
+    view.rerender(frame({target: 'card', pinnedProgress: 0.4}));
+    expect(() => layer('photo-morph-body')).toThrow();
+  });
+
   it('보이지 않는 층은 눌리지도 낭독되지도 않는다', () => {
     const view = render(frame({pinnedProgress: 0}));
     expect(layer('photo-morph-card').props.pointerEvents).toBe('none');
