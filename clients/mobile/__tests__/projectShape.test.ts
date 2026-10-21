@@ -910,6 +910,25 @@ describe('what the photo library declaration says stays true of the code (#4181,
     expect(code).not.toMatch(/from ['"]expo-media-library['"]/);
   });
 
+  it('registers the ph:// image loader — expo modules are not in codegen\'s autolinked list', () => {
+    // Without this the photo card's thumbnails die with the RedBox "No suitable image URL loader
+    // found for ph://…" under Bridgeless (seen on the simulator, #4181): codegen reads
+    // `modulesConformingToProtocol` only for libraries the community CLI autolinks, and
+    // expo-media-library is autolinked by Expo, so the generated `imageURLLoaderClassNames` is empty.
+    const delegate = readFileSync(
+      join(APP_ROOT, 'ios/MomoMobile/AppDelegate.swift'),
+      'utf8',
+    );
+    expect(delegate).toMatch(/imageURLLoaderClassNames\(\)[^{]*\{[\s\S]*?"MediaLibraryImageLoader"/);
+    expect(delegate).toMatch(/dependencyProvider\s*=\s*MomoDependencyProvider\(\)/);
+    // And the class really is the one the pod ships.
+    const loader = readFileSync(
+      join(APP_ROOT, 'node_modules/expo-media-library/ios/MediaLibraryImageLoader.m'),
+      'utf8',
+    );
+    expect(loader).toMatch(/@implementation MediaLibraryImageLoader/);
+  });
+
   it('asks in the person\'s language: the read sentence is 해요체 and names the purpose', () => {
     const read = plistString('NSPhotoLibraryUsageDescription') ?? '';
     expect(read).toMatch(/최근 사진/);

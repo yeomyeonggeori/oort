@@ -82,6 +82,11 @@
 ### D8. 상한
 - 고르는 순간 `MAX_ATTACHMENTS_PER_MESSAGE − 트레이 개수`로 건다. 기존 `addPickedFiles`가 일부라도 거절되면 던지므로(「rejected는 도달 불가 불변식」), 변환된 파일은 한 번의 호출로 넘기고 상한은 선택 단계에서 지킨다.
 
+### D9. `ph://` 썸네일은 앱이 이미지 로더를 등록해야 그려진다
+- 그리드의 썸네일은 `<Image source={{uri: 'ph://…'}} />`다. 이 주소를 읽는 것은 `expo-media-library` 포드가 싣는 `MediaLibraryImageLoader`(RN `RCTImageURLLoader`)다.
+- **시뮬레이터에서 실측한 결함(2026-10-21).** 이 앱(RN 0.86 New Architecture, Bridgeless)에서 사진 권한을 허용하면 그리드 대신 RedBox 「No suitable image URL loader found for ph://…」가 떴다. 포드는 클래스를 바이너리에 싣고 `+load` 로 등록도 하지만, Bridgeless 의 `RCTImageLoader` 는 등록된 로더를 모듈 레지스트리가 아니라 앱의 `RCTAppDependencyProvider.imageURLLoaderClassNames`(codegen 산출물)에서 읽는다. codegen 은 `codegenConfig.ios.modulesConformingToProtocol`(expo-media-library 가 `MediaLibraryImageLoader` 를 적어 둔 자리)을 **커뮤니티 CLI 가 autolink 하는 라이브러리에서만** 읽고, Expo 모듈은 Expo 의 autolinking 으로 링크되므로 그 목록에 없다. 그래서 산출물의 목록이 비어 있었다(`pod install` 을 다시 해도 같다).
+- 처방: `AppDelegate.swift` 가 `RCTAppDependencyProvider` 를 상속한 `MomoDependencyProvider` 로 `imageURLLoaderClassNames` 에 `MediaLibraryImageLoader` 를 더한다. 새 네이티브 코드는 이 한 클래스뿐이고(로더 자체는 포드의 것) `projectShape.test.ts` 가 그 줄을 지킨다. 이 처방이 없으면 「사진」 카드는 권한 허용 직후 RedBox(릴리스 빌드에서는 빈 칸)다.
+
 ### 영향
 - Info.plist diff가 앱 심사 표면에 노출된다(읽기 문구 교체 + 저장 키 신설). TestFlight 재빌드 1회.
 - 사진 접근 프롬프트가 첨부 경로에 **처음** 생긴다(「허용」을 누를 때만). 기존 `pickPhoto`는 권한 없이 그대로 돈다.
