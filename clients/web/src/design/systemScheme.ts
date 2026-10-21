@@ -1,0 +1,101 @@
+// =============================================================================
+// 지금 이 기기의 시스템은 어느 쪽인가 (AP-1a #4186, 청사진 §5.2-i).
+//
+// 「시스템 설정 따르기」를 고른 사람에게 그 문장이 지금 무엇을 뜻하는지 말해 주기 위한
+// 값이다. 구독하는 이유는 그 답이 앱이 떠 있는 동안 바뀔 수 있기 때문이다(macOS의 일몰
+// 자동 전환).
+//
+// 신호원은 둘이다.
+//   · 브라우저 미디어 질의의 `change` — 모든 곳에서.
+//   · 네이티브 창이 알리는 OS 외양 변경 — 데스크탑에서만. WKWebView는 미디어 질의 값을
+//     바꾸고도 `change`를 쏘지 않거나 늦게 쏠 수 있어서(Buzz `ThemeProvider.tsx:600-619`
+//     주석), 데스크탑은 네이티브 신호를 믿을 신호로 함께 듣는다. 어느 쪽이든 **마지막으로
+//     말한 쪽**이 이긴다.
+//
+// 브라우저 탭에서는 네이티브 신호원이 아예 불리지 않는다(없거나, 불려도 즉시 no-op이다).
+//
+// 이 파일은 `window`·Tauri를 직접 모른다. 두 신호원을 인자로 받는 공장이라 진짜 브라우저·
+// 진짜 셸 없이도 규칙을 잰다. 실제 연결은 `theme.ts`가 한다(미디어 질의 문자열이 그
+// 파일에만 있어야 하는 이유는 theme.test.ts의 「스킴을 듣는 표면은 테마 저장소도 듣는다」).
+// =============================================================================
+
+export type SystemScheme = "light" | "dark";
+
+/** `MediaQueryList`의 우리가 쓰는 부분. */
+export interface MediaLike {
+  matches: boolean;
+  addEventListener(type: "change", listener: (event: { matches: boolean }) => void): void;
+  removeEventListener(type: "change", listener: (event: { matches: boolean }) => void): void;
+}
+
+export interface SystemSchemeSources {
+  /** 브라우저 미디어 질의. 없으면 `null`. */
+  media(): MediaLike | null;
+  /**
+   * 네이티브 신호원(데스크탑 전용). 구독을 열고 해제 함수로 풀린다. 주지 않으면 미디어
+   * 질의만 듣는다. 실패해도 던지지 않아야 하고, 던져도 여기서 삼킨다.
+   */
+  native?: (handler: (scheme: SystemScheme) => void) => Promise<() => void>;
+}
+
+export interface SystemSchemeStore {
+  /** 지금 값. 말한 적 있는 마지막 신호, 없으면 미디어 질의를 지금 읽는다. */
+  get(): SystemScheme;
+  subscribe(listener: () => void): () => void;
+}
+
+export function createSystemScheme(sources: SystemSchemeSources): SystemSchemeStore {
+  // 신호원이 마지막으로 말한 값. 아직 아무도 말하지 않았으면 `null`이고, 그때는 미디어
+  // 질의를 매번 새로 읽는다(시험이 질의 값을 바꿔 가며 같은 모듈에 묻는다).
+  let spoken: SystemScheme | null = null;
+
+  const get = (): SystemScheme => {
+    if (spoken !== null) return spoken;
+    return sources.media()?.matches ? "dark" : "light";
+  };
+
+  const subscribe = (listener: () => void): (() => void) => {
+    const media = sources.media();
+    const onMedia = (event: { matches: boolean }) => {
+      spoken = event.matches ? "dark" : "light";
+      listener();
+    };
+    media?.addEventListener("change", onMedia);
+
+    // 구독이 풀린 뒤에 네이티브 약속이 늦게 풀리는 경쟁: 풀린 구독이 새 해제 함수를
+    // 쥐고 있지 않도록 도착하자마자 되돌린다.
+    let disposed = false;
+    let unlistenNative: (() => void) | null = null;
+    const native = sources.native;
+    if (native) {
+      let pending: Promise<() => void>;
+      try {
+        pending = native((scheme) => {
+          if (disposed) return;
+          spoken = scheme;
+          listener();
+        });
+      } catch (error) {
+        pending = Promise.reject(error);
+      }
+      pending.then(
+        (unlisten) => {
+          if (disposed) unlisten();
+          else unlistenNative = unlisten;
+        },
+        () => {
+          // 네이티브 신호가 없는 셸(권한·구버전)은 미디어 질의만으로 간다.
+        }
+      );
+    }
+
+    return () => {
+      disposed = true;
+      media?.removeEventListener("change", onMedia);
+      unlistenNative?.();
+      unlistenNative = null;
+    };
+  };
+
+  return { get, subscribe };
+}
