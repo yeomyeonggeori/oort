@@ -75,7 +75,7 @@ import {
 } from './mentionQuery';
 import type {QuoteDraft} from '@momo/core/features/timeline/quote';
 import {QuoteDraftBar} from './Quote';
-import {AttachmentPickerSheet} from '../attachments/AttachmentPickerSheet';
+import {AttachMenu} from '../attachments/AttachMenu';
 import {AttachmentTray} from '../attachments/AttachmentTray';
 import {
   addPickedFiles,
@@ -88,7 +88,9 @@ import {
   useAttachmentSurface,
   type AttachmentTarget,
 } from '../attachments/draftStore';
-import {pickDocument, pickPhoto} from '../attachments/picker';
+import {pickCamera, pickDocument, pickPhoto} from '../attachments/picker';
+import {MENU_CLOSE_WATCHDOG_MS} from '../../design/motion';
+import {haptics} from '../../lib/haptics';
 
 // =============================================================================
 // The composer.
@@ -1143,20 +1145,28 @@ export function Composer({
   const attachmentBlock = sendBlockReason(attachmentSurface.drafts);
   const attachmentBlockCopy = sendBlockCopy(attachmentSurface.drafts);
 
-  // 시트가 **실제로 사라진 뒤에만** 네이티브 picker를 제시한다 (design-review
+  // 메뉴가 **실제로 사라진 뒤에만** 네이티브 picker·카메라를 제시한다 (design-review
   // High-1). 닫히는 Modal과 같은 틱에 picker를 띄우면 iOS가 dismiss 중인 VC 위
   // 제시를 거절할 수 있고, 그 실패는 catch에서 'unavailable'로 접혀 **picker가
   // 열린 적도 없는데 「업로드 실패」가 선다** — 화면이 거짓을 말하는 부류다.
   // 1차 신호 = Modal onDismiss(iOS가 dismiss 완료를 아는 유일한 곳), 폴백 =
-  // fade 아웃(≈300ms)보다 긴 타이머(Android는 onDismiss가 없다). ref를 비우고
-  // 시작하므로 두 신호가 겹쳐도 제시는 한 번이다.
-  const pendingPickRef = useRef<'photo' | 'file' | null>(null);
+  // 접힘의 상한(`MENU_CLOSE_WATCHDOG_MS`, 이 시간이 지나면 메뉴가 Modal 을 내린다)보다
+  // 긴 타이머(Android는 onDismiss가 없다). ref를 비우고 시작하므로 두 신호가 겹쳐도
+  // 제시는 한 번이다.
+  const pendingPickRef = useRef<'camera' | 'photo' | 'file' | null>(null);
+  // 메뉴가 열릴 때 + 원을 재고, 닫히면 VoiceOver 초점이 돌아가는 자리.
+  const attachRef = useRef<View | null>(null);
   const runPendingPick = useCallback(async () => {
     const kind = pendingPickRef.current;
     if (kind === null) return;
     pendingPickRef.current = null;
     if (stableAttachmentTarget === null || attachmentKey === null) return;
-    const outcome = kind === 'photo' ? await pickPhoto() : await pickDocument();
+    const outcome =
+      kind === 'camera'
+        ? await pickCamera()
+        : kind === 'photo'
+          ? await pickPhoto()
+          : await pickDocument();
     if (outcome.kind === 'issue') {
       setPickerIssue(attachmentKey, outcome.issue);
       return;
@@ -1165,17 +1175,23 @@ export function Composer({
   }, [attachmentKey, stableAttachmentTarget]);
 
   const chooseAttachment = useCallback(
-    (kind: 'photo' | 'file') => {
+    (kind: 'camera' | 'photo' | 'file') => {
       if (stableAttachmentTarget === null || attachmentKey === null) return;
       pendingPickRef.current = kind;
       setAttachmentPickerOpen(false);
       setPickerIssue(attachmentKey, null);
       setTimeout(() => {
         void runPendingPick();
-      }, 400);
+      }, MENU_CLOSE_WATCHDOG_MS + 100);
     },
     [attachmentKey, stableAttachmentTarget, runPendingPick],
   );
+
+  // 누르는 순간 같은 프레임에 햅틱(`haptics.ts` 계약 1) — 메뉴가 열린다는 사실이 손에도 닿는다.
+  const openAttachMenu = useCallback(() => {
+    haptics.light();
+    setAttachmentPickerOpen(true);
+  }, []);
 
   // 초안 자리도 거울로 든다. 위와 같은 이유다 — `draftKey` 를 `onChangeText` 의
   // 의존성으로 들면 채널을 옮길 때마다 핸들러가 새로 만들어진다.
@@ -1865,6 +1881,7 @@ export function Composer({
       <View style={styles.bar}>
         {stableAttachmentTarget === null ? null : (
           <Pressable
+            ref={attachRef}
             accessibilityRole="button"
             accessibilityLabel={ATTACH_COPY.attach}
             accessibilityHint={
@@ -1872,13 +1889,13 @@ export function Composer({
                 ? COMPOSER_OFFLINE_COPY
                 : attachmentSurface.drafts.length >=
                     MAX_ATTACHMENTS_PER_MESSAGE
-                  ? `첨부는 ${MAX_ATTACHMENTS_PER_MESSAGE}개까지 고를 수 있습니다`
+                  ? `첨부는 ${MAX_ATTACHMENTS_PER_MESSAGE}개까지 고를 수 있어요`
                   : undefined
             }
             accessibilityState={{disabled: !canAttach}}
             disabled={!canAttach}
             hitSlop={ATTACH_SLOP}
-            onPress={() => setAttachmentPickerOpen(true)}
+            onPress={openAttachMenu}
             style={({pressed}) => [
               styles.attach,
               !canAttach && styles.attachDisabled,
@@ -2001,9 +2018,11 @@ export function Composer({
         </Pressable>
       </View>
       </GlassSurface>
-      <AttachmentPickerSheet
+      <AttachMenu
         visible={attachmentPickerOpen}
+        anchorRef={attachRef}
         onClose={() => setAttachmentPickerOpen(false)}
+        onPickCamera={() => chooseAttachment('camera')}
         onPickPhoto={() => chooseAttachment('photo')}
         onPickFile={() => chooseAttachment('file')}
         onDismissed={() => void runPendingPick()}

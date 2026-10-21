@@ -182,6 +182,7 @@ import {DmConversationSurface} from './dmConversation';
 import {AppsSurface} from './apps';
 import {AppsTailSurface} from './appsTail';
 import {OortLoaderSurface} from './oortLoader';
+import {AttachMenuSurface} from './attachMenu';
 import TeamBoardScreen from '../src/screens/TeamBoardScreen';
 import WorkJobsScreen from '../src/screens/WorkJobsScreen';
 import {TeamBoardDetailSheet} from '../src/features/work/teamBoard/TeamBoardDetailSheet';
@@ -2146,6 +2147,11 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     return (
       <NotifyPrimerSurface which={name.slice('notify-primer'.length).replace(/^-/, '')} />
     );
+  }
+
+  // #4180: 첨부 메뉴(+ 원에서 펼쳐지는 카드). 실제 머리·타임라인·컴포저, 여는 것은 Maestro 의 실제 탭.
+  if (name.startsWith('attach-menu')) {
+    return <AttachMenuSurface which={name.slice('attach-menu'.length).replace(/^-/, '')} />;
   }
 
   switch (name) {
