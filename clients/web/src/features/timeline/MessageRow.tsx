@@ -241,7 +241,7 @@ export function Avatar({ member }: { member: RosterMember | null }) {
         "flex size-8 items-center justify-center overflow-hidden text-meta font-semibold",
         identity.kind === "agent" ? "rounded-sm" : "rounded-full",
         // 모르는 작성자(unknown)는 점선 테두리 + 흐린 글자: 이름도 이니셜도 주장하지 않는다 (#4148).
-        avatarSurfaceClass(identity.kind, member?.id)
+        avatarSurfaceClass(identity.kind, member?.id, imageSrc !== null)
       )}
     >
       {imageSrc !== null ? (

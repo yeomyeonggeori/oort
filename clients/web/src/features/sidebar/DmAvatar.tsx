@@ -49,7 +49,7 @@ export function DmAvatar({
         className={cn(
           "flex size-6 items-center justify-center overflow-hidden text-meta font-semibold",
           identity.kind === "agent" ? "rounded-sm" : "rounded-full",
-          avatarSurfaceClass(identity.kind, member?.id)
+          avatarSurfaceClass(identity.kind, member?.id, imageSrc !== null)
         )}
       >
         {imageSrc !== null ? (

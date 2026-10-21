@@ -132,6 +132,7 @@ export function ProfileCard({
               selfName={selfName}
               effective={effective}
               avatarUrl={selfMember?.avatarUrl}
+              memberId={selfMember?.id}
               size={compact ? "sm" : "md"}
             />
             <span className={compact ? "hidden" : "flex min-w-0 flex-1 flex-col"}>

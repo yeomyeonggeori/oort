@@ -1,13 +1,14 @@
 import { avatarIdentity } from "@momo/core/features/workspace/avatar";
 import type { RosterMember } from "@momo/core/lib/api";
 import { cn } from "@/design/lib/cn";
+import { avatarFillClass, avatarSurfaceClass } from "@/features/common/avatarTone";
 import { useMemberAvatar } from "@/features/sidebar/useMemberAvatar";
 
 // 크기 변형이 있는 아바타 (#3578 S2). 타임라인 행의 `Avatar`(size-8 고정,
 // `avatarSize.test.ts`가 32를 못 박는다)는 건드리지 않고, 같은 `avatarIdentity`와
 // `useMemberAvatar`를 써서 같은 사람을 같은 얼굴로 그린다.
 //   row   32. 행 아바타와 같다(여기서는 설정의 작은 자리용).
-//   hero  112. 프로필 히어로. 사람의 사진 없는 얼굴은 바닥 그라데이션 위 잉크 이니셜이고,
+//   hero  112. 프로필 히어로. 사람의 사진 없는 얼굴은 멤버 id 가 고르는 색조 채움 위 이니셜이고(#4162),
 //         에이전트는 둥근 사각 + `agent-soft` 규칙을 그대로 지킨다.
 // 장식이다(`aria-hidden`): 이름은 바로 옆 글자가 말한다.
 
@@ -35,9 +36,11 @@ export function ProfileAvatar({
         "flex shrink-0 items-center justify-center overflow-hidden font-semibold",
         hero ? "avatar-hero" : "size-8 text-meta",
         identity.kind === "agent" ? (hero ? "rounded-2xl" : "rounded-sm") : "rounded-full",
-        identity.kind === "agent" && "bg-agent-soft text-agent",
-        identity.kind === "human" && (hero ? "canvas-gradient text-ink" : "bg-surface-hover text-ink"),
-        identity.kind === "unknown" && "bg-surface-hover text-ink-muted"
+        // 작은 얼굴은 목록·타임라인 아바타와 같은 문법이고(#4162), 히어로는 `avatar-hero` 가 자기 선·그림자를 두르므로
+        // 사람은 같은 색조 채움만 쓴다(에이전트·모르는 사람은 문법 그대로).
+        hero && identity.kind === "human"
+          ? avatarFillClass(member?.id)
+          : avatarSurfaceClass(identity.kind, member?.id, imageSrc !== null)
       )}
     >
       {imageSrc !== null ? (
