@@ -47,6 +47,7 @@ import { startGuardedPreview } from "./preview-guard.mjs";
 import { advanceToAccount, ONBOARDING_SURFACE } from "../e2e/advanceOnboarding.mjs";
 import {
   openTerminalDock,
+  openWorkConsole,
   openWorkPanelViaConsole,
 } from "./work-openers.mjs";
 
@@ -500,8 +501,7 @@ async function assertChannelDock(page, expectedIds) {
 
 /** 전역 세션 목록은 작업 콘솔에 산다. */
 async function assertWorkConsoleList(page, expectedCount) {
-  await page.getByTestId("nav-work-console").click();
-  await page.getByTestId("work-console-route").waitFor();
+  await openWorkConsole(page);
   const rows = page.getByTestId("work-console-row");
   await rows.first().waitFor();
   if ((await rows.count()) !== expectedCount) {
