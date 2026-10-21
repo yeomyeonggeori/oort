@@ -1,9 +1,13 @@
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {contrast} from '@momo/core/design/color';
-import {cleanup, fireEvent, render, screen} from '@testing-library/react-native';
+import {cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react-native';
 import React from 'react';
-import {Dimensions, Image, StyleSheet} from 'react-native';
+import {AccessibilityInfo, Dimensions, Image, StyleSheet} from 'react-native';
 
+import {
+  resetBlurSupportForTests,
+  resetLiquidGlassSupportForTests,
+} from '../src/design/glass';
 import {darkPalette, ds2Radius, lightPalette, slopTo, space, TOUCH_TARGET} from '../src/design/tokens';
 import {
   Composer,
@@ -48,8 +52,17 @@ function setWindow(next: {width?: number; fontScale?: number; height?: number}) 
   const window = {...BASE_WINDOW, ...next};
   Dimensions.set({window, screen: window});
 }
+/** 프리셋의 `AccessibilityInfo` 는 이미 `jest.fn` 이다(`shellChrome.test.tsx` 와 같은 길). */
+const a11y = AccessibilityInfo as unknown as {isReduceTransparencyEnabled: jest.Mock};
+
+beforeEach(() => {
+  a11y.isReduceTransparencyEnabled.mockImplementation(() => Promise.resolve(false));
+});
+
 afterEach(() => {
   cleanup();
+  resetLiquidGlassSupportForTests();
+  resetBlurSupportForTests();
   Dimensions.set({window: BASE_WINDOW, screen: BASE_WINDOW});
 });
 
@@ -77,6 +90,16 @@ function ancestorStyle(
     cursor = cursor.parent as typeof node | null;
   }
   throw new Error('조건을 만족하는 조상 스타일이 없다');
+}
+
+/** 알약(선)과 그 안쪽 줄(여백) — 둘을 합쳐야 원이 **바깥 가장자리**에서 떨어진 거리가 나온다. */
+function pillAndBar() {
+  const pill = flat(screen.getByTestId('composer-pill').props.style);
+  const bar = ancestorStyle(
+    screen.getByTestId('composer-attach'),
+    style => style.flexDirection === 'row',
+  );
+  return {pill, bar, edge: (pill.borderWidth ?? 0) as number};
 }
 
 describe('동심 — 토큰 수준의 관계', () => {
@@ -148,56 +171,71 @@ describe('동심 — 배송되는 렌더가 그 값을 읽는다', () => {
 
   it('좌우 여백 = 위아래 여백 = 원 ↔ 알약 가장자리 — 두 원 모두', () => {
     composer();
-    const bar = ancestorStyle(
-      screen.getByTestId('composer-attach'),
-      style => style.flexDirection === 'row',
-    );
-    // 좌우: 안쪽 줄의 가로 여백이 곧 원 ↔ 가장자리.
-    expect(bar.paddingHorizontal).toBe(CONV.composerGap);
-    // 위아래: 안쪽 줄의 세로 여백 + 원이 입력창 한 줄(44) 안에서 받는 여유 = 같은 값.
+    const {bar, edge} = pillAndBar();
+    // 좌우: 알약의 선 + 안쪽 줄의 가로 여백이 곧 바깥 가장자리에서 원까지.
+    expect(edge + (bar.paddingHorizontal as number)).toBeCloseTo(CONV.composerGap, 10);
+    // 위아래: 선 + 안쪽 줄의 세로 여백 + 원이 입력창 한 줄(44) 안에서 받는 여유 = 같은 값.
     for (const id of ['composer-attach', 'composer-send']) {
       const circle = flat(screen.getByTestId(id).props.style);
-      expect([id, (bar.paddingVertical as number) + (circle.marginBottom as number)]).toEqual([
+      expect([
         id,
-        CONV.composerGap,
-      ]);
+        edge + (bar.paddingVertical as number) + (circle.marginBottom as number),
+      ]).toEqual([id, CONV.composerGap]);
     }
   });
 
-  it('한 줄 알약의 높이가 2 × 반경이다 — 입력창 44 + 위아래 안쪽 여백', () => {
+  it('한 줄 알약의 높이가 2 × 반경이다 — 입력창 44 + 선 + 위아래 안쪽 여백', () => {
     composer();
-    const bar = ancestorStyle(
-      screen.getByTestId('composer-attach'),
-      style => style.flexDirection === 'row',
-    );
+    const {bar, edge} = pillAndBar();
     const input = flat(screen.getByTestId('composer-input').props.style);
     expect(input.minHeight).toBe(TOUCH_TARGET);
-    expect(TOUCH_TARGET + 2 * (bar.paddingVertical as number)).toBe(2 * CONV.composerRadius);
+    expect(
+      TOUCH_TARGET + 2 * (edge + (bar.paddingVertical as number)),
+    ).toBeCloseTo(2 * CONV.composerRadius, 10);
   });
 
   it('원은 글이 여러 줄로 자라도 아래에 남는다 — 아래·옆 여백이 한 줄 때와 같다', () => {
     composer();
-    const bar = ancestorStyle(
-      screen.getByTestId('composer-attach'),
-      style => style.flexDirection === 'row',
-    );
-    // `flex-end` 이면 원의 아래 여백(안쪽 줄 아래 여백 + 원의 marginBottom)은 줄 수와 무관하다.
-    expect(bar.alignItems).toBe('flex-end');
+    // `flex-end` 이면 원의 아래 여백(선 + 안쪽 줄 아래 여백 + 원의 marginBottom)은 줄 수와 무관하다.
+    const before = pillAndBar();
+    expect(before.bar.alignItems).toBe('flex-end');
     fireEvent.changeText(screen.getByTestId('composer-input'), '가\n나\n다\n라');
-    const grown = ancestorStyle(
-      screen.getByTestId('composer-attach'),
-      style => style.flexDirection === 'row',
-    );
-    expect(grown.alignItems).toBe('flex-end');
-    expect(grown.paddingHorizontal).toBe(CONV.composerGap);
+    const grown = pillAndBar();
+    expect(grown.bar.alignItems).toBe('flex-end');
+    expect(grown.bar.paddingHorizontal).toBe(before.bar.paddingHorizontal);
+    expect(grown.bar.paddingVertical).toBe(before.bar.paddingVertical);
   });
 
-  it('알약에 테두리가 없다 — 선 대신 부드러운 그림자', () => {
+  it('재료마다 선이 다르다 — 리퀴드는 투명(두께는 남김), 블러·불투명은 경계로 보인다', async () => {
+    // 이 환경 기본(블러 모듈 없음 → 94% 대체)은 선이 보인다.
+    const first = composer();
+    const fallback = pillAndBar();
+    expect(fallback.pill.borderWidth).toBe(StyleSheet.hairlineWidth);
+    expect(fallback.pill.borderColor).toBe(darkPalette.glassLine);
+    first.unmount();
+
+    // iOS 26: 네이티브 가장자리가 따로 있어 선은 투명이고 **두께는 같다**(산수가 안 움직인다).
+    resetLiquidGlassSupportForTests(true);
+    const second = composer();
+    const liquid = pillAndBar();
+    expect(screen.getByTestId('composer-pill-liquid')).toBeTruthy();
+    expect(liquid.pill.borderColor).toBe('transparent');
+    expect(liquid.pill.borderWidth).toBe(fallback.pill.borderWidth);
+    second.unmount();
+
+    // 투명도 줄이기: 리퀴드여도 불투명 surface — 알약은 다크에서 바닥과 1.1:1 이라 선이 경계다.
+    a11y.isReduceTransparencyEnabled.mockImplementation(() => Promise.resolve(true));
     composer();
-    const pill = flat(screen.getByTestId('composer-pill').props.style);
-    expect(pill.borderWidth).toBeUndefined();
-    expect(pill.borderColor).toBeUndefined();
+    await waitFor(() => expect(screen.getByTestId('composer-pill-opaque')).toBeTruthy());
+    const opaque = pillAndBar();
+    expect(opaque.pill.borderColor).toBe(darkPalette.glassLine);
+  });
+
+  it('그림자는 rest 다 — Buzz 의 부드러운 그림자(float 은 세 배 짙었다)', () => {
+    composer();
+    const {pill} = pillAndBar();
     expect(pill.boxShadow).toBe(darkPalette.elevationRest);
+    expect(pill.boxShadow).not.toBe(darkPalette.elevationFloat);
   });
 });
 
@@ -410,7 +448,14 @@ describe('흐린 보내기 원 — 알약 위에서 또렷하고, 두 스킴이 
 describe('도크 산수는 실제 알약을 읽는다', () => {
   it('안쪽 줄 위아래 여백 × 2 + 도크 위 여백 = 입력창·시트 말고 도크가 지는 세로', () => {
     // `composerColumnBudget` 이 내는 dockChrome 은 상수가 아니라 이 식이다.
-    const padY = CONV.composerGap - (TOUCH_TARGET - CONV.composerCircle) / 2;
-    expect(composerColumnBudget(1, 874).dockChrome).toBe(padY * 2 + space.sm);
+    composer();
+    const {bar, edge} = pillAndBar();
+    const budget = composerColumnBudget(1, 874);
+    expect(budget.dockChrome).toBeCloseTo(
+      2 * (edge + (bar.paddingVertical as number)) + space.sm,
+      10,
+    );
+    // 선 + 안쪽 줄 위아래 여백 = 5 라 도크 크롬은 18 이다 — 옛 알약은 16 이었다(#4179).
+    expect(budget.dockChrome).toBe(18);
   });
 });

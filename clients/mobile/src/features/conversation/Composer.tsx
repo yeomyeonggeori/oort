@@ -60,7 +60,7 @@ import {
 } from 'react-native';
 import {font, line, radius, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {usePalette, useStyles} from '../../design/theme';
-import {GlassSurface} from '../../design/glass';
+import {GlassSurface, useGlassMaterial} from '../../design/glass';
 import {CONV_ICONS, CONV_ICON_SIZE, HOME_ICONS} from '../../design/icons';
 import {CARD_ICONS} from '../../design/icons/cardIcons';
 import {isPhoneSlashRow} from '../aiConnect/AiConnectCard';
@@ -570,13 +570,23 @@ export function composerColumnBudget(
 // =============================================================================
 
 /**
- * 알약 위·아래 안쪽 여백(`styles.bar`). 원의 위·아래 여백(`composerGap` 9)에서 입력창 한 줄
- * (엄지 바닥 44)이 원 둘레에 이미 더하는 몫 `(44 − 36) / 2 = 4` 를 뺀 것이다 — 그래서 한
- * 줄일 때 원의 위·아래 여백이 좌·우와 같은 9 가 된다(#4179, 동심). 입력창을 44 로 두는
- * 이유는 글 칸의 엄지 바닥이고, 글 세로 중심이 원 중심에 앉는 정렬(실측 +0.17pt)도 그 높이에서
- * 나온다 — 알약을 키우려고 입력창을 키우면 그 정렬이 깨진다.
+ * 알약의 선. 리퀴드 글래스에서는 투명이지만(네이티브 가장자리가 따로 있다 — 아래 `pillLiquid`)
+ * **두께는 남아** 안쪽 산수를 먹는다. 그래서 안쪽 줄 여백이 그만큼 덜어 낸다 — 선 + 여백 =
+ * `composerGap` 이라야 원이 **바깥 가장자리**에서 사방 9 만큼 떨어진다(#4179, 동심).
  */
-const BAR_PAD_Y = CONV.composerGap - (TOUCH_TARGET - CONV.composerCircle) / 2;
+const PILL_EDGE = StyleSheet.hairlineWidth;
+
+/** 알약 좌우 안쪽 여백(`styles.bar`) — 선 + 이 값 = 원 ↔ 알약 가장자리. */
+const BAR_PAD_X = CONV.composerGap - PILL_EDGE;
+
+/**
+ * 알약 위·아래 안쪽 여백(`styles.bar`). 위 여백에서 입력창 한 줄(엄지 바닥 44)이 원 둘레에
+ * 이미 더하는 몫 `(44 − 36) / 2 = 4` 를 한 번 더 뺀 것이다 — 그래서 한 줄일 때 원의 위·아래
+ * 여백이 좌·우와 같은 9 가 된다. 입력창을 44 로 두는 이유는 글 칸의 엄지 바닥이고, 글 세로
+ * 중심이 원 중심에 앉는 정렬(실측: 전·후 모두 0.2~0.3pt 아래)도 그 높이에서 나온다 — 알약을
+ * 키우려고 입력창을 키우면 그 정렬이 깨진다.
+ */
+const BAR_PAD_Y = BAR_PAD_X - (TOUCH_TARGET - CONV.composerCircle) / 2;
 
 /**
  * 도크가 시트·입력창 **말고** 지는 세로 — `styles.bar` 의 위아래 여백 (#1480).
@@ -584,7 +594,7 @@ const BAR_PAD_Y = CONV.composerGap - (TOUCH_TARGET - CONV.composerCircle) / 2;
  * 상수로 이름을 갖는 이유는 `INPUT_CHROME` 과 같다: 산수와 실제 스타일이 같은 값을
  * 읽어야 하고, 사본을 두면 사본이 거짓말한다(디자인 시스템 §5.5).
  */
-const DOCK_CHROME = BAR_PAD_Y * 2 + space.sm;
+const DOCK_CHROME = (PILL_EDGE + BAR_PAD_Y) * 2 + space.sm;
 
 /** 알약 안 두 원(36)을 엄지 44 로 만드는 여유 — 도출한다(감사 M-14). */
 const ATTACH_SLOP = slopTo(CONV.composerCircle);
@@ -1054,6 +1064,10 @@ export function Composer({
   const maxHeight = composerMaxHeight(fontScale, windowHeight);
   // 알약이 화면 가장자리에서 뜬 거리 (#4179). 폭과 글자 배수가 정하므로 스타일시트가 아니라 여기서.
   const floatInset = composerFloat(windowWidth, fontScale);
+  // 유리 재료. 리퀴드 글래스는 가장자리를 네이티브가 그리므로 우리 선은 투명이고(이중선 방지),
+  // 블러·투명도 줄이기(불투명 surface)에서는 그 선이 알약의 경계다 — 다크에서 알약과 바닥은
+  // 1.1:1 이라 선이 없으면 알약이 사라진다. 탭바(`ShellChrome` 의 `barLiquid`)와 같은 길이다.
+  const glassMaterial = useGlassMaterial();
   // 시트의 상한도 같은 두 값이 정한다 (#1480). 위 상한과 나란히 여기서 계산하는
   // 이유가 그것이다 — 둘은 같은 열을 나눠 갖고, 스타일시트는 그 열을 모른다.
   // 절 예산의 자 (#1479). 상한이 든 높이에서 세로 크롬을 빼면 **글이 서는 자리**다.
@@ -1842,7 +1856,11 @@ export function Composer({
           「보내기」가 따로 놀았다. 알약 밖 도크는 투명이라 바닥이 비친다. */}
       <GlassSurface
         radius={CONV.composerRadius}
-        style={[styles.pill, {marginHorizontal: floatInset}]}
+        style={[
+          styles.pill,
+          glassMaterial === 'liquid' && styles.pillLiquid,
+          {marginHorizontal: floatInset},
+        ]}
         testID="composer-pill">
       <View style={styles.bar}>
         {stableAttachmentTarget === null ? null : (
@@ -2003,22 +2021,27 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   /**
    * 반경은 원 반경 + 사방 여백(`CONV.composerRadius`)이라 두 원과 동심이다 (#4179). 좌우로
    * 뜬 거리는 폭과 글자 배수가 정하므로 **여기 없다** — 컴포넌트가 `composerFloat` 로 계산해
-   * 붙인다. 테두리가 없다: Buzz 의 알약은 선 대신 부드러운 그림자로 바닥에서 뜬다(`rest` —
-   * `float` 은 Buzz 실측 그림자보다 세 배 짙었다). 유리와 틴트는 `GlassSurface` 가 진다.
+   * 붙인다. Buzz 의 알약은 선 대신 부드러운 그림자로 바닥에서 뜬다(`rest` — `float` 은 Buzz
+   * 실측 그림자보다 세 배 짙었다): 리퀴드 글래스(iOS 26)에서는 선이 투명이다(`pillLiquid`).
+   * 유리와 틴트는 `GlassSurface` 가 진다.
    */
   pill: {
     borderRadius: CONV.composerRadius,
+    borderWidth: PILL_EDGE,
+    borderColor: color.glassLine,
     boxShadow: color.elevationRest,
   },
+  /** 네이티브 유리 가장자리가 이미 있다 — 두께는 남기고 색만 뺀다(이중선 방지). */
+  pillLiquid: {borderColor: 'transparent'},
   /**
-   * 좌우는 원 ↔ 알약 가장자리(`composerGap`) 그대로, 위아래는 거기서 입력창이 원 둘레에
-   * 더하는 몫을 뺀 `BAR_PAD_Y` — 합치면 사방 같다. 글이 여러 줄로 자라도 원은 `flex-end`
-   * 라 아래·옆 여백이 한 줄 때와 같고, 알약의 아래 두 모서리와 동심이다.
+   * 좌우는 원 ↔ 알약 가장자리(`composerGap`)에서 알약의 선을 던 `BAR_PAD_X`, 위아래는 거기서
+   * 입력창이 원 둘레에 더하는 몫을 또 던 `BAR_PAD_Y` — 선과 합치면 사방 같다. 글이 여러 줄로
+   * 자라도 원은 `flex-end` 라 아래·옆 여백이 한 줄 때와 같고, 알약의 아래 두 모서리와 동심이다.
    */
   bar: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    paddingHorizontal: CONV.composerGap,
+    paddingHorizontal: BAR_PAD_X,
     paddingVertical: BAR_PAD_Y,
   },
   /**
