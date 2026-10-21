@@ -1322,6 +1322,31 @@ describe("avatar tones (#4148)", () => {
       }
     });
   }
+  // #4150 design-review Medium: 이끼·모래가 성공·경고색과 가까웠다. 글자색은 상태 글자색(ok·warn·danger)과,
+  // 채움은 성공·경고 채움과 OKLab 거리 하한을 둔다. 옛 값(moss #4c5a12 / sand #6b5010 …)은 이 하한 밑이다.
+  for (const [scheme, label] of [[0, "라이트"], [1, "다크"]] as const) {
+    it(`${label}: 아바타 글자색이 성공·경고·위험 글자색과 deltaE 0.09 이상 떨어진다`, () => {
+      for (const n of TONES) {
+        for (const state of ["ok", "warn", "danger"]) {
+          expect(deltaE(pick(`avatar-${n}`, scheme), pick(state, scheme)), `avatar-${n} vs ${state}`).toBeGreaterThanOrEqual(0.09);
+        }
+      }
+    });
+    it(`${label}: 아바타 채움이 성공·경고 채움과 deltaE 0.03 이상 떨어진다`, () => {
+      for (const n of TONES) {
+        for (const state of ["ok-soft", "warn-soft"]) {
+          expect(deltaE(pick(`avatar-${n}-soft`, scheme), pick(state, scheme)), `avatar-${n} vs ${state}`).toBeGreaterThanOrEqual(0.03);
+        }
+      }
+    });
+    it(`${label}: 사진 테두리 --avatar-edge 가 --surface·--sheet 위에서 1.8:1 이상이고 --line 보다 짙다`, () => {
+      for (const ground of ["surface", "sheet", "pane"]) {
+        const edge = contrast(pick("avatar-edge", scheme), pick(ground, scheme));
+        expect(edge, `avatar-edge vs ${ground}`).toBeGreaterThanOrEqual(1.8);
+        expect(edge, `avatar-edge vs line on ${ground}`).toBeGreaterThan(contrast(pick("line", scheme), pick(ground, scheme)));
+      }
+    });
+  }
   it("여섯 채움이 서로 다른 색이다", () => {
     for (const scheme of [0, 1] as const) {
       expect(new Set(TONES.map((n) => pick(`avatar-${n}-soft`, scheme))).size).toBe(6);

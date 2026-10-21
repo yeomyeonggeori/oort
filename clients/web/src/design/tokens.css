@@ -107,19 +107,23 @@
 
   /* --- 사람 기본 아바타 여섯 색조 (#4148) ---------------------------------
    * 사진이 없는 사람은 멤버 id 가 고르는 여섯 색조 중 하나의 채움 + 글자를 쓴다(`avatarTone.ts`).
-   * 에이전트 남색·상태색(초록·주황·빨강)과 겹치지 않게 청록·자주·이끼·모래·코코아·돌로 골랐다.
+   * 에이전트 남색·상태색(초록·주황·빨강)과 겹치지 않게 청록·자주·보라·데님·코코아·돌로 골랐다. 이끼·모래는 성공·경고색과
+   * 가까워(#4150 Medium) 보라·데님으로 바꿨다: 글자색은 상태색과, 채움은 성공·경고 채움과 OKLab 하한을 둔다(`tokens.contrast.test.ts`).
    * 글자는 자기 채움 위에서 4.5:1 이상이고(`tokens.contrast.test.ts`), 채움은 사이드바 바탕(--sheet)보다 한 단 진하다.
    * core 역할이 아니라 웹 값이다. */
   --avatar-1: light-dark(#0f5f58, #86d6cb); /* teal */
   --avatar-1-soft: light-dark(#d3e9e5, #1a3a36);
   --avatar-2: light-dark(#7a2f69, #e6a9d8); /* plum */
   --avatar-2-soft: light-dark(#ecd8e7, #3c2335);
-  --avatar-3: light-dark(#4c5a12, #c2d474); /* moss */
-  --avatar-3-soft: light-dark(#dfe6c8, #2c3318);
-  --avatar-4: light-dark(#6b5010, #e0c274); /* sand */
-  --avatar-4-soft: light-dark(#efe2c2, #3a3018);
+  --avatar-3: light-dark(#4f3a85, #c3b3ee); /* violet */
+  --avatar-3-soft: light-dark(#e4dcf0, #2b2340);
+  --avatar-4: light-dark(#2f5a6b, #9cc9dc); /* denim */
+  --avatar-4-soft: light-dark(#d5e5ec, #1a2f38);
   --avatar-5: light-dark(#5e4033, #d8b9a7); /* cocoa */
-  --avatar-5-soft: light-dark(#e7d9d0, #35281f);
+  --avatar-5-soft: light-dark(#e7d9d0, #382523);
+  /* 사진 아바타의 테두리 (#4162). 거의 흰 사진은 `--line` 만으로는 라이트 바탕에서 윤곽이 사라졌다.
+   * 이 선은 --surface·--sheet 위에서 2:1 이상이고(`tokens.contrast.test.ts`), 사진이 없는 아바타는 계속 `--line` 이다. */
+  --avatar-edge: light-dark(#b4b0a8, #4d525e);
   --avatar-6: light-dark(#44464c, #c3c6cf); /* stone */
   --avatar-6-soft: light-dark(#dcdde0, #2b2e35);
 
@@ -851,6 +855,7 @@
   --color-on-accent: var(--on-accent);
   --color-agent: var(--agent);
   --color-agent-soft: var(--agent-soft);
+  --color-avatar-edge: var(--avatar-edge);
   --color-avatar-1: var(--avatar-1);
   --color-avatar-1-soft: var(--avatar-1-soft);
   --color-avatar-2: var(--avatar-2);

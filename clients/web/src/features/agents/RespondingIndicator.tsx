@@ -1,5 +1,6 @@
 import { avatarIdentity } from "@momo/core/features/workspace/avatar";
 import { cn } from "@/design/lib/cn";
+import { avatarSurfaceClass } from "@/features/common/avatarTone";
 import { usePrefersReducedMotion } from "@/design/hooks/usePrefersReducedMotion";
 import { useMemberAvatar } from "@/features/sidebar/useMemberAvatar";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
@@ -36,9 +37,7 @@ export function RespondingAvatar({
       className={cn(
         "flex size-4 shrink-0 items-center justify-center self-center overflow-hidden text-timestamp font-semibold leading-none",
         identity.kind === "agent" ? "rounded-sm" : "rounded-full",
-        identity.kind === "agent" && "bg-agent-soft text-agent",
-        identity.kind === "human" && "bg-surface-hover text-ink",
-        identity.kind === "unknown" && "bg-surface-hover text-ink-muted"
+        avatarSurfaceClass(identity.kind, member?.id, imageSrc !== null)
       )}
     >
       {imageSrc !== null ? (

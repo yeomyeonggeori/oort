@@ -21,6 +21,7 @@ import {
 } from "@/design/ui/dropdown-menu";
 import { InlineBanner } from "@/features/common/States";
 import { cn } from "@/design/lib/cn";
+import { avatarSurfaceClass } from "@/features/common/avatarTone";
 import {
   memberAvatarContentPath,
   renderableAvatarUrl,
@@ -90,12 +91,15 @@ export function PresenceBadge({
   selfName,
   effective,
   avatarUrl,
+  memberId,
   size = "sm",
 }: {
   selfName: string;
   effective: EffectivePresence;
   /** roster 가 준 내 `avatarUrl`. 없거나 못 받으면 이니셜이다. */
   avatarUrl?: string;
+  /** 내 멤버 id. 사진이 없을 때 목록·타임라인과 같은 색조 채움을 고른다(#4162). */
+  memberId?: string;
   /** `sm` 24px(접힘 레일), `md` 32px(목록 끝 프로필 줄, #3574). 점은 아바타와 함께 자란다. */
   size?: "sm" | "md";
 }) {
@@ -109,11 +113,11 @@ export function PresenceBadge({
     <span
       data-testid="presence-control"
       data-effective={effective}
-      // DS2-6: 사이드바가 바닥(그라데이션) 위에 녹은 뒤로 옅은 채움은 밝은 두
-      // 테마에서 바닥과 같은 색이 됐다. 흰 면 + rest로 어느 바닥 위에서도 선다.
-      // 띠(노을띠) 위에서도 흰 면이라 원래 글자 역할을 쓴다.
+      // #4162: 목록·타임라인 아바타와 같은 문법이다 - 얇은 테두리 + 멤버 id 가 고르는 색조 채움. 사이드바 바닥에
+      // 녹던 DS2-6 의 옅은 채움 대신 테두리가 윤곽을 지키고, 채움·글자가 한 쌍(4.5:1)이라 띠 위에서도 읽힌다.
       className={cn(
-        "band-surface relative flex shrink-0 items-center justify-center rounded-full bg-surface font-semibold text-ink shadow-sm",
+        "relative flex shrink-0 items-center justify-center rounded-full font-semibold",
+        avatarSurfaceClass("human", memberId, imageSrc !== null),
         size === "md" ? "size-8 text-body" : "size-6 text-meta",
         // 이 배지는 늘 나(사람)다: 원(AVATAR_SHAPE.human). 사진을 지워 이니셜로
         // 돌아가도 모양이 바뀌지 않는다.
