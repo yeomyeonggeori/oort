@@ -331,7 +331,7 @@ ADR-0185는 그 게이트를 풀지 않는다. 새 테넌트는 온보딩 3스�
 화면에서 「다른 워크스페이스로 로그인」을 열고, 워크스페이스 ID 칸에 이 ID를
 붙여 넣어요.」 (`NEW_WORKSPACE_ENTRY_GUIDE`,
 `features/auth/loginWorkspaceEntry.ts`). 다이얼로그의 성공 패널은 같은 문장과
-같은 두 줄, 같은 **복사** 단추를 보여 준다 (`AddWorkspaceDialog.tsx:228-292`).
+같은 두 줄, 같은 **복사** 단추를 보여 준다 (`AddWorkspaceDialog.tsx:228-289`).
 
 **세션 전환은 없다.** 새 테넌트에 들어가려면 **로그아웃**
 (프로필 카드 메뉴 `ProfileCard.tsx:243`, 또는 **설정 › 프로필**의 「로그인」 카드

@@ -348,7 +348,7 @@ then **슬러그** · **워크스페이스 ID** with a **복사** button beside 
 칸에 이 ID를 붙여 넣어요。」 (`NEW_WORKSPACE_ENTRY_GUIDE`,
 `features/auth/loginWorkspaceEntry.ts`). The dialog's success panel shows
 the same sentence, the same two rows and the same **복사** button
-(`AddWorkspaceDialog.tsx:228-292`).
+(`AddWorkspaceDialog.tsx:228-289`).
 
 **There is no session switch.** To enter the new tenant, **로그아웃**
 (profile-card menu, `ProfileCard.tsx:243`, or the 「로그인」 card of
