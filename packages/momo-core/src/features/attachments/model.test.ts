@@ -243,6 +243,9 @@ describe("failure vocabulary", () => {
     expect(uploadIssueNext("permission-denied")).not.toBeNull();
     expect(isRetryableIssue("camera-permission-denied")).toBe(false);
     expect(uploadIssueNext("camera-permission-denied")).not.toBeNull();
+    // 카메라가 안 열린 것은 되돌릴 값이 있는 실패가 아니고(+ 를 다시 누르면 된다) 시킬 일도 없다.
+    expect(isRetryableIssue("camera-unavailable")).toBe(false);
+    expect(uploadIssueNext("camera-unavailable")).toBeNull();
     // 고르기를 무른 것은 실패가 아니므로 다음 행동을 명령하지 않는다.
     expect(isRetryableIssue("selection-cancelled")).toBe(false);
     expect(uploadIssueNext("selection-cancelled")).toBeNull();
@@ -265,11 +268,19 @@ describe("failure vocabulary", () => {
     expect(uploadIssueCopy("permission-denied")).not.toContain("카메라");
   });
 
+  it("does not call a camera that would not open an upload failure (#4180)", () => {
+    // 올린 것이 없는데 「업로드 실패」라고 하면 화면이 사실과 다른 말을 한다.
+    expect(uploadIssueCopy("camera-unavailable")).toContain("카메라");
+    expect(uploadIssueCopy("camera-unavailable")).not.toContain("업로드");
+    expect(uploadIssueCopy("unavailable")).toBe("업로드 실패");
+  });
+
   it("gives every reason a sentence", () => {
     for (const issue of [
       "selection-cancelled",
       "permission-denied",
       "camera-permission-denied",
+      "camera-unavailable",
       "too-large",
       "forbidden",
       "no-archive",

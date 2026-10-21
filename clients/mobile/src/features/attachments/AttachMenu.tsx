@@ -66,8 +66,8 @@ import {useReduceMotionRef} from '../../lib/useReduceMotion';
 // 이슈는 Buzz 모서리를 「~27pt」로 적었다. 캡처의 아래 왼쪽 모서리 프로필(아래 끝에서 dy 만큼 위 행의 가장
 // 왼쪽 카드 픽셀이 카드 왼쪽에서 떨어진 거리)을 iOS 연속 곡선(`borderCurve: 'continuous'`) 반경 26·27·30·32·
 // 34·36 의 시뮬레이터 프로필과 최소제곱으로 맞추면 **34 가 가장 가깝다**(dy 8~100 의 제곱오차 8, 26 은 1390,
-// 30 은 346, 32 는 67). 같은 방법으로 잰 원호(circular) 반경은 ≈ 34pt 라 눈대중 27 은 이 곡선의 꼬리를 못 본
-// 값이다. 디자인 시스템 사다리(`ds2Radius`)에 34 가 없어 **이름을 지어** 이 파일에 둔다(README §6 1·2단계:
+// 30 은 346, 32 는 67). 연속 곡선은 모서리 점 가까이에서는 원호와 거의 같고 **꼬리(dy ≥ 48px)에서 갈리므로**
+// 눈대중 27 로는 그 꼬리가 맞지 않았다. 디자인 시스템 사다리(`ds2Radius`)에 34 가 없어 **이름을 지어** 이 파일에 둔다(README §6 1·2단계:
 // 이름과 근거). 카드 안 행의 반경은 동심이다 — 카드 반경 − 안 여백 = 22.
 //
 // 항목은 Buzz 의 다섯(카메라·사진·동영상·음성 메모·파일) 중 **셋**이다 — 동영상·음성 메모는 지원하지
@@ -112,7 +112,9 @@ import {useReduceMotionRef} from '../../lib/useReduceMotion';
 // + 원을 덮는다(카드 아래 끝이 + 원 중심 아래 11pt): + 원의 위쪽 16pt 는 마지막 행(「파일」) 아래 빈 자리,
 // 가운데 12pt 는 카드의 아래 안 여백, 아래 6pt 만 카드 밖이다. 그대로 두면 + 를 다시 누를 때 가운데는
 // 무반응이고 위쪽은 파일 앱이 열린다 — 그래서 + 원 자리에 **보이지 않는 닫기 표면**(`attach-menu-anchor-close`)을
-// 카드 위에 얹는다. 가져가는 것은 행의 빈 모서리(아이콘·글자와 겹치지 않는 16×35pt)뿐이다.
+// 카드 위에 얹는다. 가져가는 것은 행의 빈 모서리(34×34 표면과 「파일」 행의 겹침 28×16pt, 아이콘·글자와는 세로·
+// 가로로 떨어져 있다)뿐이다. `anchorFromLeft` 는 지금 컴포저(+ 원 중심 x 33)에서는 클램프(`edge`)가 이겨 안 쓰이고,
+// + 원이 Buzz 자리(중심 67.5)에 서는 날(#4179) 10 을 낸다.
 //
 // 시스템 picker·카메라는 이 Modal 이 **완전히 사라진 뒤**에 제시한다 — iOS 가 내려가는 VC 위의 제시를
 // 거절하고, 그 거절이 「업로드 실패」 오탐으로 접힌다(design-review High-1). `onDismissed` 가 그 신호이고
@@ -683,8 +685,9 @@ const buildStyles = (color: Palette) =>
       alignItems: 'center',
       gap: ATTACH_MENU.iconGap,
       paddingHorizontal: space.lg,
-      // 동심: 카드 반경 − 카드 안 여백(위 「모서리」).
+      // 동심: 카드 반경 − 카드 안 여백(위 「모서리」). 카드와 같은 연속 곡선.
       borderRadius: ATTACH_MENU.radius - space.md,
+      borderCurve: 'continuous',
     },
     rowPressed: {backgroundColor: `${color.onPrimary}${PRESSED_ALPHA_HEX}`},
     label: {

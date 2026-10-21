@@ -109,8 +109,9 @@ export async function pickPhoto(): Promise<AttachmentPickerOutcome> {
  * 묻지 않고 거부로 답한다.
  *
  * 사진만 찍는다(`mediaTypes: ['images']`) — 동영상 모드는 마이크를 쓰고, 앱은 마이크를 요청하지 않는다
- * (`Info.plist` · `projectShape.test.ts`). 시뮬레이터에는 카메라가 없어 허용 뒤의 촬영은 `unavailable`
- * 로 접힌다(실기기에서만 열린다).
+ * (`Info.plist` · `projectShape.test.ts`). 카메라가 열리지 못하면(시뮬레이터에는 카메라가 없다, 실기기에서는
+ * 다른 앱이 쓰는 중이거나 화면 시간 제한) `camera-unavailable` — 올린 적이 없으니 「업로드 실패」(`unavailable`)
+ * 가 아니라 카메라가 안 열렸다고 말한다.
  */
 export async function pickCamera(): Promise<AttachmentPickerOutcome> {
   try {
@@ -126,7 +127,7 @@ export async function pickCamera(): Promise<AttachmentPickerOutcome> {
       }),
     );
   } catch {
-    return {kind: 'issue', issue: 'unavailable'};
+    return {kind: 'issue', issue: 'camera-unavailable'};
   }
 }
 

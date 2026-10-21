@@ -367,7 +367,7 @@ describe('picker·native upload 단위 배선', () => {
       imagePicker.__state.cameraFailure = new Error('camera unavailable');
       await expect(pickCamera()).resolves.toEqual({
         kind: 'issue',
-        issue: 'unavailable',
+        issue: 'camera-unavailable',
       });
     });
   });
@@ -645,6 +645,25 @@ describe('Composer 첨부 렌더·발송', () => {
     fireEvent.press(screen.getByTestId('attachment-open-settings'));
     expect(openSettings).toHaveBeenCalledTimes(1);
     openSettings.mockRestore();
+  });
+
+  it('카메라가 열리지 못하면 「업로드 실패」가 아니라 카메라가 안 열렸다고 말한다 (#4180)', async () => {
+    // 올린 것이 없는데 「업로드 실패」라고 하면 화면이 사실과 다른 말을 한다(design-review 2차 M2).
+    // 시뮬레이터는 허용 뒤에도 카메라가 없어 늘 이 길이다.
+    imagePicker.__state.cameraFailure = new Error('camera unavailable');
+    renderComposer();
+    openPicker('camera');
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(uploadIssueCopy('camera-unavailable')),
+      ).toBeTruthy(),
+    );
+    expect(screen.queryByText(uploadIssueCopy('unavailable'))).toBeNull();
+    expect(
+      screen.getByTestId('attachment-picker-issue-camera-unavailable'),
+    ).toBeTruthy();
+    expect(createUpload).not.toHaveBeenCalled();
   });
 
   it('선택 취소를 코어의 인라인 문장으로 남긴다', async () => {
