@@ -356,18 +356,34 @@ async fn write_link_audit(
     Ok(())
 }
 
+/// The 503 an anonymous caller (webhook delivery, installing browser) gets when this instance has
+/// no `GITHUB_APP_MASTER_KEY`: the same status the admin routes answer, but a body that names no
+/// variable and gives no operator hint (#4168). The cause goes to the log only.
+fn anonymous_unavailable(what: &str) -> ApiError {
+    tracing::warn!("{what}: GITHUB_APP_MASTER_KEY is not configured");
+    ApiError::new(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "이 서버는 지금 GitHub 요청을 처리할 수 없어요.",
+    )
+}
+
 pub async fn receive(
     State(state): State<AppState>,
     request: Request<Body>,
 ) -> Result<Response, ApiError> {
     // 1. Signature header first. An unsigned or malformed request is a 401 whether or not this
-    //    instance has GITHUB_APP_MASTER_KEY, so an anonymous caller learns nothing about the
-    //    configuration. Only a well-formed signature that cannot be checked (no key) is a 503.
+    //    instance has GITHUB_APP_MASTER_KEY, so the signature-less anonymous caller learns nothing
+    //    about the configuration. A well-formed (forgeable) signature that cannot be checked (no
+    //    key) is a 503, so that one status still reveals "this instance has no GitHub surface";
+    //    its body is generic and names no variable (#4168). The operator-facing routes in
+    //    github_app.rs keep the specific message.
     let signature = header_str(&request, "x-hub-signature-256")
         .filter(|value| github_signature_is_wellformed(value))
         .ok_or_else(|| ApiError::unauthorized(INVALID_SIGNATURE))?
         .to_string();
-    let key = master_key(&state)?.to_string();
+    let key = master_key(&state)
+        .map_err(|_| anonymous_unavailable("github webhook refused"))?
+        .to_string();
 
     let event = header_str(&request, "x-github-event")
         .filter(|event| (1..=64).contains(&event.len()))
@@ -804,8 +820,8 @@ enum SetupOutcome {
 /// already linked to **another** workspace answers `linked_elsewhere` (#4084: it used to be a 409
 /// JSON body, which left the browser on a raw error page; the screen reads the word).
 pub async fn setup(State(state): State<AppState>, Query(query): Query<SetupQuery>) -> Response {
-    if let Err(error) = master_key(&state) {
-        return error.into_response();
+    if master_key(&state).is_err() {
+        return anonymous_unavailable("github setup redirect refused").into_response();
     }
     let Some(base) = state.t3.ready_public_base_url() else {
         return ApiError::coded(

@@ -1958,6 +1958,11 @@ async fn without_the_master_key_the_receive_and_subscribe_surfaces_are_503() {
         .unwrap();
     // A well-formed signature that cannot be checked without the key is the only 503.
     assert_eq!(post.status(), 503);
+    // #4168: the anonymous 503 body is generic: no variable name, no operator hint.
+    let text = post.text().await.unwrap();
+    assert!(!text.contains("MASTER_KEY"), "{text}");
+    assert!(!text.contains("GITHUB_APP"), "{text}");
+    assert!(!text.contains("운영자"), "{text}");
     // #4160: unsigned and malformed signatures are 401 with or without the key, and the body
     // does not mention the key or any configuration.
     for (label, signature) in [
@@ -1990,6 +1995,9 @@ async fn without_the_master_key_the_receive_and_subscribe_surfaces_are_503() {
             .await
             .unwrap();
         assert_eq!(response.status(), 503, "{path}");
+        // The admin routes keep the specific message so the operator knows what to set.
+        let text = response.text().await.unwrap();
+        assert!(text.contains("GITHUB_APP_MASTER_KEY"), "{path}: {text}");
     }
     let response = http
         .post(format!("{base}/v1/workspaces/{}/github/link", a.workspace))
@@ -2006,6 +2014,9 @@ async fn without_the_master_key_the_receive_and_subscribe_surfaces_are_503() {
         .await
         .unwrap();
     assert_eq!(setup.status(), 503);
+    let text = setup.text().await.unwrap();
+    assert!(!text.contains("MASTER_KEY"), "setup: {text}");
+    assert!(!text.contains("운영자"), "setup: {text}");
     // Another route is unaffected.
     let health = http.get(format!("{base}/healthz")).send().await.unwrap();
     assert!(health.status().as_u16() < 500, "{}", health.status());
