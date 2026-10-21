@@ -100,10 +100,20 @@
 	     __tests__/projectShape.test.ts 가 마이크 API 호출을 발견하면 실패해 그 시점을 알린다. -->
 	<key>NSMicrophoneUsageDescription</key>
 	<string>oort는 소리를 녹음하지 않습니다. 허용하지 않아도 모든 기능을 쓸 수 있습니다.</string>
-	<!-- 사진 첨부는 PHPicker 라 선택만으로는 권한을 묻지 않는다(ADR-0168). expo-image-picker 가
-	     사진 보관함 권한 API 를 링크하므로 키 자체는 필요하다(ITMS-90683, #2568). -->
+	<!-- 이 문구는 첨부 메뉴의 사진 카드가 「허용」을 눌렀을 때 뜨는 사진 접근 프롬프트에 그대로
+	     실린다(ADR-0168 증보 1, #4181). 카드를 처음 열 때 상태만 읽고, 사람이 「허용」을 누를 때만
+	     묻는다 — 앱 시작·메뉴 열기에서는 묻지 않는다. PHPhotoLibrary 에는 읽기 전용 수준이 없어
+	     `readWrite` 로 묻지만 쓰는 일은 하지 않는다(아래 Add 키 주석). 시스템 사진 창(PHPicker)은
+	     이 권한 없이도 돈다. -->
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>대화에 첨부할 사진을 고를 때 사진 보관함을 씁니다.</string>
+	<string>대화에 첨부할 최근 사진을 보여 주고 고르게 하려고 사진 보관함을 읽어요. 고른 사진만 올라가요.</string>
+	<!-- 앱은 사진 보관함에 아무것도 저장하지 않는다. 그래도 이 키가 필요한 것은 expo-media-library 가
+	     저장 API(UIImageWriteToSavedPhotosAlbum·PHAssetCreationRequest)를 바이너리에 링크하기 때문이고,
+	     키가 없으면 업로드가 ITMS-90683 으로 반려될 수 있다(마이크 키와 같은 사정, #2568). 저장하는
+	     기능이 생기면 이 문구부터 바꾼다 — __tests__/projectShape.test.ts 가 앱 소스에서 쓰기 API 를
+	     발견하면 실패해 그 시점을 알린다. -->
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>oort는 사진을 보관함에 저장하지 않아요. 허용하지 않아도 모든 기능을 쓸 수 있어요.</string>
 	<key>RCTNewArchEnabled</key>
 	<true/>
 	<!-- ADR-0120 D2-A sends `content-available: 1` alongside `mutable-content: 1`

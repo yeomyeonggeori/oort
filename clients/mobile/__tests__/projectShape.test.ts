@@ -660,11 +660,14 @@ describe('what the upload declares stays true of the code (#2568)', () => {
     // Apple checks the binary, not the call sites: expo-image-picker links the
     // photo-library permission API and expo-camera links the microphone one, so
     // an upload without these strings is rejected even though PHPicker never
-    // prompts and nothing here records sound.
+    // prompts and nothing here records sound. expo-media-library (#4181) also
+    // links the photo-library SAVE APIs, so the Add key is required although
+    // nothing here saves a photo.
     for (const key of [
       'NSCameraUsageDescription',
       'NSMicrophoneUsageDescription',
       'NSPhotoLibraryUsageDescription',
+      'NSPhotoLibraryAddUsageDescription',
     ]) {
       expect(plistString(key)?.trim()).toBeTruthy();
     }
@@ -858,6 +861,83 @@ describe('what the upload declares stays true of the code (#2568)', () => {
         /audio|voice|webrtc|record|speech|^expo-av$/i.test(name),
       ),
     ).toEqual([]);
+  });
+});
+
+describe('what the photo library declaration says stays true of the code (#4181, ADR-0168 증보 1)', () => {
+  const plist = readFileSync(
+    join(APP_ROOT, 'ios/MomoMobile/Info.plist'),
+    'utf8',
+  );
+  const plistString = (key: string) =>
+    plist.match(
+      new RegExp(`<key>${key}</key>\\s*<string>([^<]*)</string>`),
+    )?.[1];
+  const shipped = () =>
+    sourceFiles(join(APP_ROOT, 'src'))
+      .concat([join(APP_ROOT, 'App.tsx'), join(APP_ROOT, 'index.js')])
+      .map(file => ({ file, code: codeOf(file) }));
+  const PHOTOS_NATIVE = join(
+    APP_ROOT,
+    'src/features/attachments/photosNative.ts',
+  );
+
+  it('keeps the Add sentence true: nothing writes to the photo library', () => {
+    // The Add purpose string tells the person oort does not save photos. Those
+    // are the expo-media-library write/album/delete functions plus the two
+    // PhotoKit save entry points a native bridge would call.
+    const banned =
+      /\b(?:saveToLibraryAsync|createAssetAsync|addAssetsToAlbumAsync|removeAssetsFromAlbumAsync|deleteAssetsAsync|createAlbumAsync|deleteAlbumsAsync|setAssetFavoriteAsync|UIImageWriteToSavedPhotosAlbum|PHAssetChangeRequest|PHAssetCreationRequest)\b/;
+    const offenders = shipped()
+      .filter(({ code }) => banned.test(code))
+      .map(({ file }) => file);
+    expect(offenders).toEqual([]);
+    expect(plistString('NSPhotoLibraryAddUsageDescription')).toMatch(
+      /저장하지 않아요/,
+    );
+  });
+
+  it('reads the photo library through exactly one file, and only the legacy entry', () => {
+    // SDK 57's package root throws for the old function names (see the header of
+    // photosNative.ts), and a second importer would put native calls behind a
+    // seam the card tests cannot swap.
+    const importers = shipped()
+      .filter(({ code }) => /['"]expo-media-library(?:\/[a-z]+)?['"]/.test(code))
+      .map(({ file }) => file);
+    expect(importers).toEqual([PHOTOS_NATIVE]);
+    const code = codeOf(PHOTOS_NATIVE);
+    expect(code).toMatch(/from ['"]expo-media-library\/legacy['"]/);
+    expect(code).not.toMatch(/from ['"]expo-media-library['"]/);
+  });
+
+  it('asks in the person\'s language: the read sentence is 해요체 and names the purpose', () => {
+    const read = plistString('NSPhotoLibraryUsageDescription') ?? '';
+    expect(read).toMatch(/최근 사진/);
+    expect(read).toMatch(/요\.?$/);
+    expect(read).not.toMatch(/(?:습니다|ㅂ니다)\.?$/);
+  });
+
+  it('never requests photo access before a person taps 「허용」', () => {
+    // The permission calls live in photosNative.ts and are reached only from the
+    // card hook's `request` (미결정 + 「허용」) and `getPermission` (a read). Nothing
+    // else in the shipped code may call them — a call from app start, the
+    // composer or the menu would be the preflight the ADR forbids.
+    const callers = shipped()
+      .filter(
+        ({ file, code }) =>
+          file !== PHOTOS_NATIVE &&
+          /\b(?:requestPermissionsAsync|getPermissionsAsync)\b/.test(code) &&
+          // expo-notifications and expo-camera have their own, unrelated, permission calls.
+          /expo-media-library/.test(code),
+      )
+      .map(({ file }) => file);
+    expect(callers).toEqual([]);
+    const hook = codeOf(
+      join(APP_ROOT, 'src/features/attachments/usePhotoLibrary.ts'),
+    );
+    // `requestPermission` is reached from exactly one place: the 미결정-only `request` action.
+    expect(hook.match(/requestPermission\(/g)?.length).toBe(1);
+    expect(hook).toMatch(/permissionRef\.current !== ['"]undetermined['"]/);
   });
 });
 
