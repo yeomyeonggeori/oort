@@ -1,5 +1,5 @@
 import React, {useEffect, useRef, useState} from 'react';
-import {Animated, Easing, StyleSheet} from 'react-native';
+import {Animated, Easing} from 'react-native';
 
 import {useReduceMotionRef} from '../../lib/useReduceMotion';
 import {PHOTO_MORPH, type PhotoCardSize} from './photoCardDesign';
@@ -165,14 +165,14 @@ export function PhotoMorphFrame({
 
   return (
     <Animated.View
-      style={[styles.frame, {width, height, borderRadius}]}
+      style={[FRAME_STYLE, {width, height, borderRadius}]}
       testID={testID}>
       <Animated.View
         accessibilityElementsHidden={toCard}
         importantForAccessibility={toCard ? 'no-hide-descendants' : 'auto'}
         pointerEvents={toCard ? 'none' : 'auto'}
         style={[
-          styles.menuLayer,
+          MENU_LAYER_STYLE,
           {
             width: menuSize.width,
             height: menuSize.height,
@@ -188,7 +188,7 @@ export function PhotoMorphFrame({
         importantForAccessibility={toCard ? 'auto' : 'no-hide-descendants'}
         pointerEvents={toCard ? 'auto' : 'none'}
         style={[
-          styles.cardLayer,
+          CARD_LAYER_STYLE,
           {
             width: cardSize.width,
             height: cardSize.height,
@@ -203,11 +203,22 @@ export function PhotoMorphFrame({
   );
 }
 
-const styles = StyleSheet.create({
-  // 틀은 안을 자른다. 그림자는 호스트가 바깥에서 둘러 준다.
-  frame: {overflow: 'hidden'},
-  // 두 층 모두 틀의 왼쪽 아래에 닻을 내린다 — 틀이 위·오른쪽으로 자란다. 메뉴는 왼쪽 위
-  // 모서리를 축으로 줄어들고(카드의 왼쪽 위 칸으로 접혀 든다), 카드는 아래 가운데를 축으로 자란다.
-  menuLayer: {position: 'absolute', left: 0, bottom: 0, transformOrigin: 'left top'},
-  cardLayer: {position: 'absolute', left: 0, bottom: 0, transformOrigin: 'center bottom'},
-});
+// 레이아웃만 있고 색이 없다. `StyleSheet.create` 상수가 아니라 평범한 객체인 이유는 `themeSwitch.test.tsx`
+// 의 규칙(즉시 부르는 `StyleSheet.create` 는 import 시점에 굳는다)을 문자 그대로 지키기 위해서다.
+//
+// 틀은 안을 자른다. 그림자는 호스트가 바깥에서 둘러 준다.
+const FRAME_STYLE = {overflow: 'hidden'} as const;
+// 두 층 모두 틀의 왼쪽 아래에 닻을 내린다 — 틀이 위·오른쪽으로 자란다. 메뉴는 왼쪽 위
+// 모서리를 축으로 줄어들고(카드의 왼쪽 위 칸으로 접혀 든다), 카드는 아래 가운데를 축으로 자란다.
+const MENU_LAYER_STYLE = {
+  position: 'absolute',
+  left: 0,
+  bottom: 0,
+  transformOrigin: 'left top',
+} as const;
+const CARD_LAYER_STYLE = {
+  position: 'absolute',
+  left: 0,
+  bottom: 0,
+  transformOrigin: 'center bottom',
+} as const;

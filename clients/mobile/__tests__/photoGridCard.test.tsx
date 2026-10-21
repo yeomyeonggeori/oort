@@ -502,6 +502,49 @@ describe('첨부 — 고른 순서대로, 한 번의 호출로', () => {
     expect(screen.getByTestId('photo-pill')).toHaveTextContent(PHOTO_COPY.attach(1));
   });
 
+  it('변환하는 동안 트레이가 다른 길로 차서 상한이 줄면 상한만큼만 넘기고 나머지는 선택에 남긴다', async () => {
+    const releases: Array<() => void> = [];
+    const lib = makeLibrary({
+      resolve: asset =>
+        new Promise<PickedAttachmentFile>(resolve => {
+          releases.push(() => resolve(fileFor(asset)));
+        }),
+    });
+    const view = await renderCard(lib.ports, {room: 3});
+    await screen.findByTestId('photo-grid');
+    for (const id of ['a1', 'a2', 'a3']) await press(`photo-cell-${id}`);
+    await press('photo-pill');
+    await settle();
+    // 변환이 도는 사이 다른 길(예: 카메라)로 트레이가 두 개 늘었다 — 상한이 1 로 줄었다.
+    view.update({room: 1});
+    for (let index = 0; index < 3; index += 1) {
+      await act(async () => {
+        releases[index]?.();
+        await Promise.resolve();
+      });
+      await settle();
+    }
+    // `addPickedFiles` 는 일부라도 거절되면 던진다 — 상한을 넘겨 부르지 않는다.
+    expect(view.props.onAttach).toHaveBeenCalledTimes(1);
+    expect((view.props.onAttach as jest.Mock).mock.calls[0][0]).toHaveLength(1);
+    expect(view.props.onDone).not.toHaveBeenCalled();
+    expect(await screen.findByText(PHOTO_COPY.capped(1))).toBeTruthy();
+  });
+
+  it('호스트가 첨부를 거절해 던져도(불변식) 카드가 죽지 않고 선택을 남긴다', async () => {
+    const lib = makeLibrary();
+    const onAttach = jest.fn(() => {
+      throw new Error('attachment picker invariant');
+    });
+    const view = await renderCard(lib.ports, {onAttach});
+    await screen.findByTestId('photo-grid');
+    await press('photo-cell-a1');
+    await press('photo-pill');
+    expect(await screen.findByText(PHOTO_COPY.resolveFailed)).toBeTruthy();
+    expect(view.props.onDone).not.toHaveBeenCalled();
+    expect(screen.getByTestId('photo-pill')).toHaveTextContent(PHOTO_COPY.attach(1));
+  });
+
   it('변환 도중 카드가 닫히면 만든 파일을 넘기지 않는다(사람이 취소한 것이다)', async () => {
     let release: (() => void) | null = null;
     const lib = makeLibrary({

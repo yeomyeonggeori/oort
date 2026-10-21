@@ -87,6 +87,7 @@ export function usePhotoLibrary({
   room,
   onAttach,
   onDone,
+  initialSelected,
 }: {
   ports: PhotoLibraryPorts;
   /** 카드가 열려 있는가. 거짓이면 포트를 전혀 부르지 않는다. */
@@ -97,6 +98,8 @@ export function usePhotoLibrary({
   onAttach: (files: PickedAttachmentFile[]) => void;
   /** 고른 것을 전부 넘겼다 — 카드를 닫아도 된다. */
   onDone: () => void;
+  /** 처음 선택(캡처 하네스용). 열려 있는 동안만 산다 — 닫히면 비워진다. */
+  initialSelected?: readonly string[];
 }): PhotoLibraryView & PhotoLibraryActions {
   const [permission, setPermission] = useState<PhotoCardPermission>('checking');
   const [requesting, setRequesting] = useState(false);
@@ -105,7 +108,7 @@ export function usePhotoLibrary({
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
-  const [selected, setSelected] = useState<string[]>([]);
+  const [selected, setSelected] = useState<string[]>(() => [...(initialSelected ?? [])]);
   const [attaching, setAttaching] = useState<PhotoAttaching | null>(null);
   const [notice, setNotice] = useState<PhotoNotice | null>(null);
 
@@ -290,6 +293,8 @@ export function usePhotoLibrary({
   }, []);
 
   const retry = useCallback(() => {
+    // 사진을 읽을 수 있는 상태에서만 다시 읽는다(닫힘·거부에서의 호출은 헛일이다).
+    if (!canReadPhotos(permissionRef.current as PhotoPermission)) return;
     setNotice(null);
     void loadFirst();
   }, [loadFirst]);
@@ -319,6 +324,7 @@ export function usePhotoLibrary({
     setNotice(null);
     const generationAtStart = generation.current;
     const files: PickedAttachmentFile[] = [];
+    const doneIds: string[] = [];
     const failedIds: string[] = [];
     let cloud = false;
     setAttaching({done: 0, total: ids.length, downloading: false});
@@ -337,6 +343,7 @@ export function usePhotoLibrary({
               ),
           }),
         );
+        doneIds.push(id);
       } catch (error: unknown) {
         failedIds.push(id);
         if (error instanceof PhotoResolveError && error.reason === 'cloud') {
@@ -353,16 +360,29 @@ export function usePhotoLibrary({
     }
     busy.current = false;
     setAttaching(null);
-    if (files.length > 0) {
-      callbacks.current.onAttach(files);
+    // 변환하는 동안 트레이가 다른 길로 차 상한이 줄었을 수 있다. 상한을 넘는 만큼은 넘기지 않고
+    // 선택에 남긴다 — `addPickedFiles` 는 일부라도 거절되면 던지므로 넘긴 뒤에 알면 늦다.
+    const accepted = Math.min(files.length, roomRef.current);
+    const leftIds = [...failedIds, ...doneIds.slice(accepted)];
+    if (accepted > 0) {
+      try {
+        callbacks.current.onAttach(files.slice(0, accepted));
+      } catch {
+        // 호스트가 거절했다(예: 불변식). 변환 결과는 버리고 선택을 그대로 둔다.
+        setSelected(ids);
+        say({kind: 'resolveFailed'});
+        return;
+      }
     }
-    setSelected(failedIds);
-    if (failedIds.length === 0) {
+    setSelected(clampSelection(leftIds, roomRef.current));
+    if (leftIds.length === 0) {
       callbacks.current.onDone();
-    } else if (files.length === 0) {
+    } else if (accepted === 0 && failedIds.length > 0 && files.length === 0) {
       say({kind: cloud ? 'cloudFailed' : 'resolveFailed'});
-    } else {
+    } else if (failedIds.length > 0) {
       say({kind: 'partialFailed', failed: failedIds.length});
+    } else {
+      say({kind: 'capped', room: roomRef.current});
     }
   }, [say]);
 

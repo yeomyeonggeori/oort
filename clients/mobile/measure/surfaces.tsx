@@ -182,6 +182,7 @@ import {DmConversationSurface} from './dmConversation';
 import {AppsSurface} from './apps';
 import {AppsTailSurface} from './appsTail';
 import {OortLoaderSurface} from './oortLoader';
+import {PhotoCardSurface} from './photoCard';
 import TeamBoardScreen from '../src/screens/TeamBoardScreen';
 import WorkJobsScreen from '../src/screens/WorkJobsScreen';
 import {TeamBoardDetailSheet} from '../src/features/work/teamBoard/TeamBoardDetailSheet';
@@ -2129,6 +2130,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   // #4016: DM 대화 화면(실제 머리·레이아웃·타임라인·컴포저).
   if (name.startsWith('dm-conversation')) {
     return <DmConversationSurface which={name.slice('dm-conversation'.length).replace(/^-/, '')} />;
+  }
+  // #4181: 사진 카드(첨부 메뉴가 변신해 도착하는 최근 사진 그리드). 실제 카드·진짜 PhotoKit 포트.
+  if (name.startsWith('photo-card')) {
+    return <PhotoCardSurface which={name.slice('photo-card'.length).replace(/^-/, '')} />;
   }
   // #3961: 오르트 로더. 연결 띠·첫 로딩은 실제 컴포넌트(`measure/oortLoader.tsx`).
   if (name.startsWith('oort-loader')) {

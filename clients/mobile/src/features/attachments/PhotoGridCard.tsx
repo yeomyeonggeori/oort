@@ -54,6 +54,8 @@ export interface PhotoGridCardProps {
   onDone: () => void;
   /** 「전체 사진」 — 기존 시스템 picker(`pickPhoto`). 호스트가 메뉴를 닫은 뒤 부른다. */
   onOpenSystemPicker: () => void;
+  /** 처음 선택된 사진 id(캡처 하네스용). */
+  initialSelected?: readonly string[];
   testID?: string;
 }
 
@@ -66,11 +68,19 @@ export function PhotoGridCard({
   onAttach,
   onDone,
   onOpenSystemPicker,
+  initialSelected,
   testID = 'photo-card',
 }: PhotoGridCardProps): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
-  const library = usePhotoLibrary({ports, active, room, onAttach, onDone});
+  const library = usePhotoLibrary({
+    ports,
+    active,
+    room,
+    onAttach,
+    onDone,
+    initialSelected,
+  });
   const {permission} = library;
   const reading = permission === 'granted' || permission === 'limited';
   const cell = photoCellSize(size.width);
@@ -416,10 +426,14 @@ function CenterNote({
 
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
+    // 카드는 떠 있는 **올린 면**이다(`surface`: 바닥보다 한 단 위). `sheet` 는 페이지 시트의 바탕이라
+    // 다크에서 대화 바닥과 거의 같은 색이어서 카드의 가장자리가 사라졌다(시뮬레이터 캡처). 그림자는
+    // `elevationFloat`(떠 있는 층) — `boxShadow` 는 자기 `overflow: hidden` 에 잘리지 않는다.
     card: {
-      backgroundColor: color.sheet,
+      backgroundColor: color.surface,
       borderRadius: PHOTO_CARD.radius,
       overflow: 'hidden',
+      boxShadow: color.elevationFloat,
     },
     gridArea: {flex: 1},
     row: {gap: PHOTO_CARD.cellGap},
