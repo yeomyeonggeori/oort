@@ -298,6 +298,7 @@ export const MODEL_LOGIN_COPY = {
   connectedPill: "로그인됨",
   /** 모든 제공자가 로그인돼 블록이 접힌 한 줄(#4145). */
   allLoggedIn: "모두 로그인됨",
+  someLoggedIn: "일부 로그인됨",
   notConnectedPill: "로그인 안 됨",
   start: "로그인 시작",
   starting: "시작하는 중이에요",

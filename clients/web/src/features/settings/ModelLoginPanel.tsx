@@ -132,9 +132,10 @@ export function ModelLoginPanel({
   }
   const knownIn = (provider: ModelProvider): boolean => loggedIn?.has(provider) === true;
   const allIn = MODEL_PROVIDERS.every(knownIn);
+  const someIn = !allIn && MODEL_PROVIDERS.some(knownIn);
   if (read.kind === "off") {
     return (
-      <PanelShell fold={allIn}>
+      <PanelShell fold={allIn} partial={someIn}>
         <ShellFallback loggedIn={knownIn} />
       </PanelShell>
     );
@@ -235,7 +236,7 @@ export function ModelLoginPanel({
   // 둘 다 로그인돼 있고 지금 진행 중인 로그인이 없으면 블록을 접는다. 다시 로그인은 펼쳐서 한다.
   const idle = !busy && !confirmClaude && ended === null;
   return (
-    <PanelShell fold={allIn && idle}>
+    <PanelShell fold={allIn && idle} partial={someIn}>
       <p className="break-keep px-2 pb-2 pt-3 text-meta text-ink-muted">{COPY.lead}</p>
       <AiLineRow
         testId="model-login-codex"
@@ -318,10 +319,10 @@ export function ModelLoginPanel({
 const MODEL_PROVIDERS: readonly ModelProvider[] = ["openai-codex", "anthropic"];
 
 /** `fold`: 모든 제공자가 로그인됐으면 한 줄로 접는다(#4145). 로그인할 일이 없는 화면이 맨 위를 차지하지 않게. */
-function PanelShell({ children, fold = false }: { children: React.ReactNode; fold?: boolean }) {
+function PanelShell({ children, fold = false, partial = false }: { children: React.ReactNode; fold?: boolean; partial?: boolean }) {
   if (fold) {
     return (
-      <details className="group flex min-w-0 flex-col pt-4" data-testid="model-login" data-folded="">
+      <details className="group flex min-w-0 flex-col pt-4" aria-labelledby={HEADING_ID} data-testid="model-login" data-folded="">
         <summary
           className="-mx-1 flex w-full cursor-pointer list-none items-center gap-2 rounded-sm border-b border-line px-1 pb-2 text-body font-bold text-ink hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring [&::-webkit-details-marker]:hidden"
           data-testid="model-login-fold"
@@ -336,8 +337,9 @@ function PanelShell({ children, fold = false }: { children: React.ReactNode; fol
   }
   return (
     <section className="flex min-w-0 flex-col pt-4" aria-labelledby={HEADING_ID} data-testid="model-login">
-      <h4 id={HEADING_ID} className="border-b border-line pb-2 text-body font-bold text-ink">
+      <h4 id={HEADING_ID} className="flex items-center gap-2 border-b border-line pb-2 text-body font-bold text-ink">
         {COPY.title}
+        {partial && <AiPill tone="mute">{COPY.someLoggedIn}</AiPill>}
       </h4>
       {children}
     </section>
