@@ -3954,7 +3954,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     // ---- #1422 (폰 계측): 빈 컴포저의 문장이 이 화면에서 몇 줄인가 -----------
     case 'composer-placeholder': {
       // 웹은 이 질문에 이미 답이 있다(`gate-work-panel.mjs` 가 실렌더로 잰다).
-      // 폰에는 대응물이 없었고, 예산은 웹보다 빡빡하다 — 상자는 260pt 로 더 넓은데
+      // 폰에는 대응물이 없었고, 예산은 웹보다 빡빡하다 — 상자는 260pt(알약 이전 바의 값) 로 더 넓은데
       // 글자가 16pt 라 두 단 크다(`composerCopy.ts` 의 산술).
       //
       // 그래서 **배송되는 `Composer` 를 그대로** 세 번 세운다. 이름은 코어 스위트가

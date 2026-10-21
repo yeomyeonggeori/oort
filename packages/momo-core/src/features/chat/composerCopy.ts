@@ -89,6 +89,12 @@ export const COMPOSER_OFFLINE_COPY =
 //       13pt 33.8 + space.md 12·2 = 57.8 이라 minWidth 가 이긴다)
 //       - 입력 space.md 12·2 - 테두리 1·2
 //
+//   (**2026-10-21 #4179: 이 파일 아래의 폰 수치 260·272·206 은 알약 이전 바의 것이다.**
+//   폰 컴포저는 알약이 됐다 — + 원·보내기 원 36, 원 ↔ 가장자리 9, 알약이 화면에서 Buzz 값
+//   40 떠서 글 칸이 402pt 에서 **214pt**, 375pt 에서 215pt 다. 그 산수와 값은
+//   `clients/mobile/src/features/conversation/convDesign.ts` 의 `composerTextColumn` 이 정본이고,
+//   이 서술들은 그 바 시절의 실측이라 역사로 그대로 둔다. 코드는 안 바뀌었다.)
+//
 // 후보들의 실측(Chromium, `--font-sans` — macOS 에서 이 스택은 폰과 같은 SF /
 // Apple SD Gothic Neo 로 풀린다. 웹 `--text-body` 14px · 폰 `font.body` 16pt):
 //
@@ -247,7 +253,7 @@ export const MENTION_AFFORDANCE = "@⁠로 부르기";
 //
 // 폰 계측 레인에 같은 문장을 세워 실측했다(`clients/mobile/measure/surfaces.tsx`
 // 의 `composer-placeholder`, iPhone 17 Pro / iOS 26.5). 문서된 예산 상자(390pt
-// 화면의 글폭 260pt)에서:
+// 화면의 글폭 260pt — 알약 이전 바의 값, 지금은 214pt)에서:
 //
 //   일반에 메시지 보내기, @로 부르기                   1줄
 //   release-2026-08에 메시지 보내기, @로 부르기         2줄
@@ -278,6 +284,8 @@ export const MENTION_AFFORDANCE = "@⁠로 부르기";
 //   · 같은 문장이 4~5줄이 된다(예산 260pt 상자에서도 3~4줄).
 //   · 그리고 상자는 그만큼 못 자란다 — 화면에 서는 것은 **한 줄뿐**이고
 //     (「일반에」·「release-2」) 나머지는 잘린다.
+//
+//   (272·206·260 은 알약 이전 바의 수치다 — 위 「2026-10-21 #4179」 주석.)
 //
 // 원인은 절 계약이 아니라 **성장 상한**이다: `MAX_HEIGHT = MAX_ROWS · line.body
 // + …` 인데 `line.body` 는 고정 22pt 토큰이고 글자만 커진다. 그러니 여기서 절을

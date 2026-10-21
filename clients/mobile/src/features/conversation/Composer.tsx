@@ -2005,7 +2005,7 @@ export function Composer({
           // #1422 는 거기서 「절 단위로 버린다」를 계약으로 만들었다. 이 상자는
           // 다르다 — RN 의 `multiline` 은 콘텐츠 높이로 자라므로 넘쳐도 잃는 것이
           // 없고, 잃는 것이 없으면 버릴 이유도 없다. 폰 계측이 그것을 실측했다
-          // (`measure/surfaces.tsx` 의 `composer-placeholder`: 예산 260pt 상자에서
+          // (`measure/surfaces.tsx` 의 `composer-placeholder`: 예산 260pt(알약 이전 바의 글 칸) 상자에서
           // 긴 방 이름은 두 줄, 그리고 **두 줄 다 보인다**).
           //
           // 그 「잃는 것이 없다」는 **기본 글자 크기까지**였다. 같은 표면을
