@@ -63,8 +63,8 @@ pub use doorbell::{
     RING_COOLDOWN_SECONDS, RING_HOURLY_LIMIT,
 };
 pub use github::{
-    github_signature, github_signature_matches, installation_id, installation_info,
-    is_github_owned_prop, is_known_feature, render_notification, repositories,
+    github_signature, github_signature_is_wellformed, github_signature_matches, installation_id,
+    installation_info, is_github_owned_prop, is_known_feature, render_notification, repositories,
     valid_github_delivery_id, InstallationInfo, Notification, RepositoryRef, GITHUB_AUTHOR_PROP,
     GITHUB_DEFAULT_FEATURES, GITHUB_FEATURES, GITHUB_MAXIMUM_BODY_BYTES,
 };

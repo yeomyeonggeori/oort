@@ -1387,7 +1387,7 @@ async fn an_oversize_body_is_413_a_ping_is_200_and_an_unknown_event_is_200_with_
     let receipts = env.count("github_receipt").await;
     for length in [5 * 1024 * 1024 + 1, 25 * 1024 * 1024] {
         assert_eq!(
-            oversize_status(&env.base, length, "sha256=00").await,
+            oversize_status(&env.base, length, &format!("sha256={}", "0".repeat(64))).await,
             413,
             "{length}"
         );
@@ -1951,12 +1951,34 @@ async fn without_the_master_key_the_receive_and_subscribe_surfaces_are_503() {
         .post(format!("{base}/v1/integrations/github/webhook"))
         .header("x-github-event", "ping")
         .header("x-github-delivery", "nokey-1")
-        .header("x-hub-signature-256", "sha256=00")
+        .header("x-hub-signature-256", format!("sha256={}", "0".repeat(64)))
         .body("{}")
         .send()
         .await
         .unwrap();
+    // A well-formed signature that cannot be checked without the key is the only 503.
     assert_eq!(post.status(), 503);
+    // #4160: unsigned and malformed signatures are 401 with or without the key, and the body
+    // does not mention the key or any configuration.
+    for (label, signature) in [
+        ("unsigned", None),
+        ("malformed", Some("sha256=00".to_string())),
+        ("wrong algorithm", Some(format!("sha1={}", "0".repeat(40)))),
+    ] {
+        let mut request = http
+            .post(format!("{base}/v1/integrations/github/webhook"))
+            .header("x-github-event", "ping")
+            .header("x-github-delivery", "nokey-2")
+            .body("{}");
+        if let Some(signature) = signature {
+            request = request.header("x-hub-signature-256", signature);
+        }
+        let response = request.send().await.unwrap();
+        assert_eq!(response.status(), 401, "{label}");
+        let text = response.text().await.unwrap();
+        assert!(!text.contains("MASTER_KEY"), "{label}: {text}");
+        assert!(!text.contains("등록"), "{label}: {text}");
+    }
     for path in [
         format!("/v1/workspaces/{}/github", a.workspace),
         "/v1/integrations/github/installations".to_string(),

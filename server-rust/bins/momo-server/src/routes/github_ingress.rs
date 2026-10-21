@@ -15,6 +15,9 @@
 //!
 //! **signature → body size → (parse) → rate budget → replay → render → write.**
 //!
+//! * The signature header's presence and shape (`sha256=` + 64 hex) are checked first, before
+//!   `GITHUB_APP_MASTER_KEY` is consulted (#4160): an unsigned request is 401 on every instance and
+//!   only a well-formed signature that cannot be verified without the key is 503.
 //! * The body is read under the 5 MiB GitHub-mode ceiling (413) before it is authenticated,
 //!   exactly as ADR-0115's native mode does: the HMAC needs the bytes.
 //! * To verify, the receiver must read the sealed secret, and `github_app` is readable only under
@@ -62,7 +65,7 @@ use momo_settings::github_ingress::{
 };
 use momo_settings::{new_state_token, state_hash, state_workspace_hint};
 use momo_webhook::{
-    deterministic_client_message_id, github_signature_matches,
+    deterministic_client_message_id, github_signature_is_wellformed, github_signature_matches,
     installation_id as payload_installation_id, installation_info, is_known_feature,
     render_notification, repositories as payload_repositories, valid_github_delivery_id,
     GITHUB_AUTHOR_PROP, GITHUB_DEFAULT_FEATURES, GITHUB_MAXIMUM_BODY_BYTES,
@@ -357,12 +360,15 @@ pub async fn receive(
     State(state): State<AppState>,
     request: Request<Body>,
 ) -> Result<Response, ApiError> {
-    let key = master_key(&state)?.to_string();
-
-    // 1. Headers. A missing signature is a 401 before anything is read.
+    // 1. Signature header first. An unsigned or malformed request is a 401 whether or not this
+    //    instance has GITHUB_APP_MASTER_KEY, so an anonymous caller learns nothing about the
+    //    configuration. Only a well-formed signature that cannot be checked (no key) is a 503.
     let signature = header_str(&request, "x-hub-signature-256")
+        .filter(|value| github_signature_is_wellformed(value))
         .ok_or_else(|| ApiError::unauthorized(INVALID_SIGNATURE))?
         .to_string();
+    let key = master_key(&state)?.to_string();
+
     let event = header_str(&request, "x-github-event")
         .filter(|event| (1..=64).contains(&event.len()))
         .ok_or_else(|| ApiError::bad_request("missing X-GitHub-Event"))?
