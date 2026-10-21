@@ -12,7 +12,6 @@ import {
 } from 'react-native';
 
 import {BAR_CONTROL_MAX_SCALE} from '../../design/atoms';
-import {GlassSurface} from '../../design/glass';
 import {CONV_ICONS, CONV_ICON_SIZE} from '../../design/icons';
 import {usePalette, useStyles} from '../../design/theme';
 import {ds2Radius, font, line, space, type Palette} from '../../design/tokens';
@@ -224,26 +223,18 @@ export function PhotoGridCard({
       ) : null}
 
       <View pointerEvents="box-none" style={styles.controls}>
-        <GlassSurface
-          radius={PHOTO_CARD.control / 2}
-          style={styles.back}
-          testID="photo-back-glass">
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={PHOTO_COPY.back}
-            accessibilityHint={PHOTO_COPY.backHint}
-            onPress={onBack}
-            style={styles.backHit}
-            testID="photo-back">
-            <Image
-              source={CONV_ICONS.left}
-              style={[
-                styles.backGlyph,
-                {tintColor: palette.text},
-              ]}
-            />
-          </Pressable>
-        </GlassSurface>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={PHOTO_COPY.back}
+          accessibilityHint={PHOTO_COPY.backHint}
+          onPress={onBack}
+          style={({pressed}) => [styles.back, pressed && styles.pillPressed]}
+          testID="photo-back">
+          <Image
+            source={CONV_ICONS.left}
+            style={[styles.backGlyph, {tintColor: palette.onPrimary}]}
+          />
+        </Pressable>
 
         {reading ? (
           <Pressable
@@ -571,13 +562,14 @@ const buildStyles = (color: Palette) =>
       alignItems: 'center',
       justifyContent: 'space-between',
     },
+    // 뒤로 원은 알약과 같은 잉크 채움이다. 앞 판은 유리 위에 `text` 색 글리프였고, 시뮬레이터 캡처(라이트,
+    // 어두운 사진 위)에서 글리프가 사라졌다 — 사진은 어떤 색이든 올 수 있으므로 떠 있는 조작은 사진과 상관없이
+    // 대비가 서는 채움 위에 선다(Buzz 는 어두운 올리브 유리 + 흰 글리프).
     back: {
       width: PHOTO_CARD.control,
       height: PHOTO_CARD.control,
-    },
-    backHit: {
-      width: PHOTO_CARD.control,
-      height: PHOTO_CARD.control,
+      borderRadius: ds2Radius.pill,
+      backgroundColor: color.primary,
       alignItems: 'center',
       justifyContent: 'center',
     },

@@ -93,6 +93,7 @@
 - 새 직접 의존 1개(`expo-media-library`). 새 애니메이션 의존성은 없다(변신은 RN 내장 `Animated`).
 
 ### 한계와 미검증
+- 시뮬레이터(iPhone 17 Pro, iOS 26.5)에서 확인한 것: 미결정 → 실제 시스템 프롬프트(「전체 접근 허용」을 Maestro 로 눌러) → 그리드, 거부(`simctl privacy revoke`) 면, D9 처방 뒤 `ph://` 썸네일 렌더, 고르기·순번·「N장 첨부」. 캡처는 `clients/mobile/measure/captures/4181/`. `simctl privacy grant photos` 는 이 시뮬레이터에서 앱의 읽기 상태를 바꾸지 못했다(TCC 행은 허용으로 바뀌는데 앱은 미결정을 읽는다) — 허용 상태는 실제 프롬프트를 눌러 만들었다.
 - 일부 허용 상태는 시뮬레이터에서 만들 수 없다(`xcrun simctl privacy`는 허용·거부·초기화뿐). 그 상태의 화면은 포트 주입으로 그렸고, 실제 OS 흐름은 `runtime-unverified`다.
 - 실기기 미확인(`runtime-unverified`): iCloud 내려받기, Live Photo(`getAssetInfoAsync`가 짝 영상 임시 파일을 함께 쓴다), 큰 HEIC의 JPEG 변환 시간·메모리, `getAssetInfoAsync`가 돌려준 보관함 안 파일을 앱이 읽을 수 있는 시간(그래서 곧바로 복사한다), PHPicker `automatic` 모드의 HEIC 처리와 이 경로의 형식 일치.
 - 변환된 복사본은 앱 캐시에 남는다. 업로드가 끝나도 지우지 않는다(기존 picker 결과도 같다). OS가 비운다.
