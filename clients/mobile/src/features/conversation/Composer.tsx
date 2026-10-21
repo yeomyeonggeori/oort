@@ -820,7 +820,10 @@ export function withLatinWordBreaks(text: string): string {
 //     처음부터 한 줄이고, 드는 창에서는 **글자만** 한두 프레임 뒤에 붙는다.
 //   · 큰 글자 — 같은 규칙이다: 문턱이 배수를 따라 커진 줄 상자(`line.body × 배수`) 한 줄이고, 머리
 //     절이 한 줄에 안 드는 크기(접근성 크기)에서도 **머리 절은 안 버린다** — 버릴 절이 없다.
-//   · 낭독 라벨(`accessibilityLabel`)은 보이는 문장이 아니라 필드 이름이라 줄 예산과 무관하다.
+//   · 낭독 — 라벨(`accessibilityLabel`)은 보이는 문장이 아니라 필드 이름이라 줄 예산과 무관하다. 다만
+//     RN iOS 의 멀티라인 입력창은 빈 칸일 때 「JS 라벨 + 보이는 플레이스홀더」를 읽으므로
+//     (`RCTUITextView.mm` 의 `accessibilityLabel`) 뒷절이 화면에서 빠지면 귀에서도 빠진다 — 그래서
+//     빠진 절을 코어가 지은 글자 그대로 `accessibilityHint` 로 잇는다(`droppedHint`, 새 문장이 아니다).
 //
 // ## 왜 이 파일의 판정이 뒤집히나
 //
@@ -1589,7 +1592,7 @@ export function Composer({
     [],
   );
 
-  const shownPlaceholder = withLatinWordBreaks(
+  const keptPlaceholder =
     clauses === null
       ? (placeholder as string)
       : fitComposerPlaceholder(clauses, candidate => {
@@ -1598,8 +1601,21 @@ export function Composer({
           // 흔해서, 「든다」로 시작하면 알약이 두 줄로 섰다가 줄어든다. 머리 절로 시작하면 높이는
           // 처음부터 한 줄이고 드는 창에서는 글자만 뒤에 붙는다(머리말 「재기 전」 절).
           return height !== undefined && height <= fitRoom;
-        }),
-  );
+        });
+  const shownPlaceholder = withLatinWordBreaks(keptPlaceholder);
+  // **눈에서 빠진 절이 귀에서도 빠지지 않게 한다 (#4179).** RN iOS 의 멀티라인 입력창
+  // (`RCTUITextView.accessibilityLabel`)은 빈 칸일 때 「JS 라벨 + 보이는 플레이스홀더」를 읽는다 —
+  // 그래서 한 줄 예산이 뒷절(「@로 부르기」)을 화면에서 빼면 VoiceOver 도 그 절을 못 읽는다. 라벨은
+  // 그대로 두고(필드 이름 — 줄 예산과 무관), 빠진 절을 **코어가 지은 그 글자 그대로** 힌트로 잇는다:
+  // 새 문장은 아니고, 귀는 「라벨 + 보이는 절 + 힌트」로 문장 전체를 듣는다. 글이 있으면 플레이스홀더가
+  // 안 보이므로 힌트도 없다.
+  const droppedHint =
+    clauses === null || text !== ''
+      ? undefined
+      : clauses
+          .filter(clause => !keptPlaceholder.includes(clause.text))
+          .map(clause => clause.text)
+          .join(' ') || undefined;
 
   return (
     <View style={styles.root}>
@@ -1981,6 +1997,7 @@ export function Composer({
           // 버튼을 뺐으므로(DS2-4 검수 M-4). `textFaint` 는 알약 위 3.6~3.8:1 이었다.
           placeholderTextColor={palette.textMuted}
           accessibilityLabel={placeholder ?? composerFieldLabel(channelLabel, recipient)}
+          accessibilityHint={droppedHint}
           multiline
           // 이 상자에서 한국어가 **낱말 가운데서** 끊기지 않는다 (#1422 폰 몫).
           //

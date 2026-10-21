@@ -1234,6 +1234,50 @@ describe('#1479 절 예산 · #4179 한 줄 문턱 — 한 줄에 못 서는 문
     }
   });
 
+  it('빠진 절은 낭독 힌트로 이어진다 — 눈에서 빠진 뒷절이 귀에서도 빠지지 않는다 (#4179)', () => {
+    // RN iOS 의 멀티라인 입력창은 빈 칸일 때 「JS 라벨 + 보이는 플레이스홀더」를 읽는다
+    // (`RCTUITextView.mm` 의 `accessibilityLabel`). 그래서 보이는 글이 줄면 귀도 줄고, 힌트가 그 몫을 받는다.
+    const clauses = composerPlaceholderClauses('배포', 'place');
+    const heard = () =>
+      [input().props.placeholder, input().props.accessibilityHint]
+        .filter(Boolean)
+        .join(' ')
+        .replace(/\u200b/g, '');
+    for (const fontScale of LADDER) {
+      setWindow({fontScale, height: H});
+      const view = composer();
+      layoutInput();
+      const row = line.body * fontScale;
+      // 재기 전(머리 절만 보임)에도 귀는 문장 전체를 듣는다.
+      expect(input().props.accessibilityHint).toBe(MENTION_AFFORDANCE);
+      for (const clause of clauses) expect(heard()).toContain(clause.text);
+      // 두 줄 → 뒷절이 빠지고 힌트가 정확히 그 절이다.
+      measureProbe([row, row]);
+      expect(input().props.placeholder).toBe(HEAD());
+      expect(input().props.accessibilityHint).toBe(MENTION_AFFORDANCE);
+      for (const clause of clauses) expect(heard()).toContain(clause.text);
+      // 한 줄 → 문장 전체가 보이고 힌트는 없다 — 같은 절을 두 번 읽지 않는다.
+      measureProbe([row]);
+      expect(input().props.placeholder).toBe(FULL());
+      expect(input().props.accessibilityHint).toBeUndefined();
+      for (const clause of clauses) expect(heard()).toContain(clause.text);
+      view.unmount();
+    }
+  });
+
+  it('글이 있으면 힌트도 없다 — 플레이스홀더가 안 보이는데 힌트만 남지 않는다 (#4179)', () => {
+    setWindow({fontScale: 1, height: H});
+    composer({draftKey: CH});
+    layoutInput();
+    measureProbe([line.body, line.body]);
+    expect(input().props.accessibilityHint).toBe(MENTION_AFFORDANCE);
+    fireEvent.changeText(input(), '안녕하세요');
+    expect(input().props.accessibilityHint).toBeUndefined();
+    // 지우면 플레이스홀더와 함께 돌아온다.
+    fireEvent.changeText(input(), '');
+    expect(input().props.accessibilityHint).toBe(MENTION_AFFORDANCE);
+  });
+
   it('프로브가 서는 폭은 알약의 글 칸이다 — 하네스의 자와 같은 수 (#4179)', () => {
     // 입력창은 알약에서 양쪽 (원 + 원↔가장자리)를 뺀 칸이고, 프로브는 그 칸에서 입력창 자신의
     // 안쪽 여백·테두리를 뺀 글 칸에 선다. 계측 하네스(`PlaceholderProbe`)가 이 수를 읽는다 —
@@ -1268,6 +1312,8 @@ describe('#1479 절 예산 · #4179 한 줄 문턱 — 한 줄에 못 서는 문
     layoutInput();
     expect(probes()).toHaveLength(0);
     expect(input().props.placeholder).toBe('답글 쓰기');
+    // 빠진 절이 없으니 힌트도 없다(#4179).
+    expect(input().props.accessibilityHint).toBeUndefined();
   });
 
   it('자는 소리를 안 낸다 — 접근성 트리에 같은 문장이 두 번 서지 않는다', () => {
