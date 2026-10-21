@@ -71,7 +71,8 @@ import {useReduceMotionRef} from '../../lib/useReduceMotion';
 // 골랐다. 같은 문법을 따르므로 새 색 토큰이 없다(`docs/design-system/README.md` §6 을 밟지 않는다).
 // `PlusMenu` 와 다른 한 가지가 Buzz 의 **반투명**이다: 잉크 86% 를 흐림(`expo-blur`) 위에 얹어 뒤의
 // 말풍선이 흐리게 비친다. `GlassSurface` 와 같은 세 갈래다 — 투명도 줄이기가 켜져 있으면 불투명 잉크,
-// 흐림 모듈이 없으면 94%(`GLASS_FALLBACK_OPACITY`와 같은 값), 그 밖에는 흐림 + 86%.
+// 흐림 모듈이 없으면 94%(`GLASS_FALLBACK_OPACITY`와 같은 값), 그 밖에는 흐림 + 86%. 흐림의 틴트는 앱
+// 스킴을 따른다(`GlassSurface` 와 같다).
 //
 // 86% 는 Buzz 에서 잰 값이다: 흰 바닥 위 카드가 (54,54,55)이고 잉크가 (28,26,23)이면
 // α = (255 − 54) / (255 − 28) ≈ 0.885, 가장 어두운 자리가 (47,48,48)이라 상한은 ≈ 0.92 — 가운데로 0.86~0.9.
@@ -86,9 +87,15 @@ import {useReduceMotionRef} from '../../lib/useReduceMotion';
 // 구동(`useNativeDriver`)이고, `transformOrigin` 은 쓰지 않는다 — 시작·끝 자세를 직접 적는 쪽이
 // 네이티브 애니메이션과 스타일 원점의 상호작용을 믿지 않아도 된다.
 //
-// 불투명도는 두 단이다: 카드(재질)가 진행 0~0.3 에 먼저 서고, 행이 0.4~0.85 에 뒤따른다. 크기가 아직
-// 작은 동안 글자가 일그러져 보이지 않게 하는 순서다. 「동작 줄이기」면 크기·이동 없이 카드째로 페이드만
-// 한다(`MENU_FADE_MS`).
+// 불투명도는 두 단이다: 카드(재질)가 진행 0~0.35 에 먼저 서고, 행이 0.12~0.6 에 뒤따른다. 글자 없는
+// 밝은 네모가 또렷이 서 있는 시간을 줄이는 순서다(Buzz 의 중간 프레임 `IMG_4321` 도 작아진 카드 안에
+// 글자가 남아 있다). 「동작 줄이기」면 크기·이동 없이 카드째로 페이드만 한다(`MENU_FADE_MS`).
+//
+// ## 연타 방어
+//
+// 카드의 마지막 행(「파일」)이 + 원 위쪽 반을 덮는다(Buzz 배치). + 를 두 번 누르는 손의 두 번째 탭이 그
+// 행에 떨어지면 메뉴를 본 적도 없는 사람이 파일 앱을 연다. 그래서 열린 뒤 200ms(`touchGuardMs`) 동안은 행의
+// 누름을 무시한다. 닫는 길(바깥 탭 등)은 막지 않는다.
 //
 // ## 닫힘과 순서 계약
 //
@@ -120,15 +127,25 @@ export const ATTACH_MENU = {
   iconGap: 16,
   /** 재질의 잉크 불투명도 — 위 「재질」. */
   materialAlpha: 0.86,
-  /** 진행값에서 카드(재질)가 다 서는 지점. */
-  cardFadeEnd: 0.3,
+  /**
+   * 진행값에서 카드(재질)가 다 서는 지점. 임계감쇠 스프링은 앞이 빨라(50ms 에 0.26, 100ms 에 0.58)
+   * 0.3 으로 두면 글자 없는 밝은 네모가 35ms 동안 또렷이 섰다(첫 캡처 `t=50ms`) — 0.35 로 늦춰
+   * 카드가 크기와 함께 차오르고, 행은 그 안에서 일찍(0.12) 따라 선다.
+   */
+  cardFadeEnd: 0.35,
   /** 진행값에서 행이 서기 시작하고 다 서는 지점. */
-  rowsFadeStart: 0.4,
-  rowsFadeEnd: 0.85,
+  rowsFadeStart: 0.12,
+  rowsFadeEnd: 0.6,
   /** 열린 뒤 VoiceOver 초점을 첫 행으로 옮기기까지 — 네이티브 뷰가 서는 한 틱. */
   focusDelayMs: 60,
   /** + 원 측정을 기다리는 상한. 기기에서는 한 프레임 안에 오므로 시험·측정 실패의 안전망이다. */
   anchorWaitMs: 120,
+  /**
+   * 열린 뒤 행의 누름을 무시하는 시간(열기 시작부터). 카드가 + 원 **위에** 서므로(마지막 행이 + 원 위쪽
+   * 반을 덮는다) + 를 두 번 누르는 손은 두 번째 탭을 「파일」 행에 놓는다. 사람이 메뉴를 보기도 전의
+   * 누름은 선택이 아니다 — 열림 스프링이 98% 에 닿는 ≈ 300ms 안에서 앞 200ms. 바깥 탭(닫기)은 막지 않는다.
+   */
+  touchGuardMs: 200,
 } as const;
 
 /** 항목 수. 높이 산수가 읽는다. */
@@ -267,6 +284,8 @@ export function AttachMenu({
   const focusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** 항목을 골라 닫혔는가 — 그러면 초점은 곧 뜰 picker 몫이라 + 원으로 돌려보내지 않는다. */
   const pickedRef = useRef(false);
+  /** 이 시각 전의 행 누름은 무시한다(`touchGuardMs`). */
+  const acceptTouchAfterRef = useRef(0);
   const firstRowRef = useRef<View | null>(null);
 
   const clearTimers = useCallback(() => {
@@ -285,6 +304,7 @@ export function AttachMenu({
     if (watchdogRef.current !== null) clearTimeout(watchdogRef.current);
     watchdogRef.current = null;
     pickedRef.current = false;
+    acceptTouchAfterRef.current = Date.now() + ATTACH_MENU.touchGuardMs;
     motionRef.current = reduceMotion.current ? 'fade' : 'spring';
     mountedRef.current = true;
     setMounted(true);
@@ -391,6 +411,7 @@ export function AttachMenu({
 
   const choose = useCallback(
     (run: () => void) => () => {
+      if (Date.now() < acceptTouchAfterRef.current) return;
       pickedRef.current = true;
       run();
     },
@@ -522,14 +543,16 @@ function MenuMaterial(): React.JSX.Element {
   const material = glassMaterial(reduceTransparency, blurSupported());
   const fill = StyleSheet.absoluteFill;
   if (material === 'blur') {
-    // 모듈이 있을 때만 불러온다(`GlassSurface` 와 같은 이유). 잉크가 어두운 라이트에서는 어두운 흐림,
-    // 잉크가 밝은 다크에서는 밝은 흐림 — `GlassSurface` 의 반대 방향이다.
+    // 모듈이 있을 때만 불러온다(`GlassSurface` 와 같은 이유). 흐림의 틴트는 앱 스킴을 따른다 —
+    // 잉크의 반대가 아니다. 라이트에서 어두운 흐림을 깔면 카드가 (38,39,42) 로 Buzz 의
+    // (54,54,55) 보다 한 단 더 어두웠다(첫 시뮬레이터 캡처 실측): 밝은 흐림이 뒤 페이지를 밝게
+    // 비쳐 주고 그 위에 잉크 86% 가 얹혀야 Buzz 의 「짙지만 투명한」 값에 닿는다.
     const {BlurView} = require('expo-blur') as typeof import('expo-blur');
     return (
       <>
         <BlurView
           intensity={GLASS_BLUR_INTENSITY}
-          tint={scheme === 'light' ? 'dark' : 'light'}
+          tint={scheme === 'light' ? 'light' : 'dark'}
           style={fill}
         />
         <View

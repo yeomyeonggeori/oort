@@ -135,6 +135,12 @@ function renderMenu(
   };
 }
 
+/** 연타 방어(`touchGuardMs`)가 지나게 한다 — 사람이 메뉴를 본 뒤의 누름이 되도록. */
+const pastGuard = () =>
+  act(() => {
+    jest.advanceTimersByTime(ATTACH_MENU.touchGuardMs);
+  });
+
 const flat = (testID: string) =>
   StyleSheet.flatten(screen.getByTestId(testID).props.style) as Record<
     string,
@@ -390,6 +396,7 @@ describe('항목과 닫는 길', () => {
     ['attachment-pick-file', 'onPickFile'],
   ] as const)('%s 는 %s 하나만 부르고 닫기는 부모의 몫이다', (testID, callback) => {
     const view = renderMenu();
+    pastGuard();
     fireEvent.press(screen.getByTestId(testID));
     for (const name of [
       'onPickCamera',
@@ -399,6 +406,31 @@ describe('항목과 닫는 길', () => {
     ] as const) {
       expect(view[name]).toHaveBeenCalledTimes(name === callback ? 1 : 0);
     }
+  });
+
+  it('열린 직후(200ms 안)의 행 누름은 무시한다 — + 를 두 번 누르는 손이 파일 행을 고르지 않게', () => {
+    const view = renderMenu();
+    // 열리자마자 — + 원 위쪽 반을 덮은 마지막 행에 두 번째 탭이 떨어진 순간.
+    fireEvent.press(screen.getByTestId('attachment-pick-file'));
+    expect(view.onPickFile).not.toHaveBeenCalled();
+    act(() => {
+      jest.advanceTimersByTime(ATTACH_MENU.touchGuardMs - 1);
+    });
+    fireEvent.press(screen.getByTestId('attachment-pick-file'));
+    expect(view.onPickFile).not.toHaveBeenCalled();
+    act(() => {
+      jest.advanceTimersByTime(1);
+    });
+    fireEvent.press(screen.getByTestId('attachment-pick-file'));
+    expect(view.onPickFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('닫는 길은 방어 시간에도 열려 있다: 바깥 탭은 열린 직후에도 닫는다', () => {
+    const view = renderMenu();
+    fireEvent.press(
+      screen.getByTestId('attach-menu-backdrop', {includeHiddenElements: true}),
+    );
+    expect(view.onClose).toHaveBeenCalledTimes(1);
   });
 
   it('바깥 탭 · VoiceOver 탈출(두 손가락 Z) · Modal 뒤로가기가 모두 닫는다', () => {
@@ -570,6 +602,7 @@ describe('접근성 — 초점·라벨·해요체', () => {
       jest.advanceTimersByTime(ATTACH_MENU.focusDelayMs);
     });
     a11y.setAccessibilityFocus.mockClear();
+    pastGuard();
     fireEvent.press(screen.getByTestId('attachment-pick-photo'));
     view.rerenderVisible(false);
     screen.getByTestId('attach-menu-modal').props.onDismiss();
@@ -579,6 +612,7 @@ describe('접근성 — 초점·라벨·해요체', () => {
 
   it('다시 열면 「골랐다」 기억이 지워져 초점이 정상으로 돌아간다', () => {
     const view = renderMenu();
+    pastGuard();
     fireEvent.press(screen.getByTestId('attachment-pick-photo'));
     view.rerenderVisible(false);
     view.rerenderVisible(true);
@@ -644,11 +678,11 @@ describe('치수·재질 — Buzz 캡처 기준', () => {
     ).toBe(darkPalette.onPrimary);
   });
 
-  it('흐림이 있으면 흐림 위에 잉크 86%: 라이트는 어두운 흐림, 다크는 밝은 흐림', () => {
+  it('흐림이 있으면 흐림 위에 잉크 86%: 흐림의 틴트는 앱 스킴을 따른다(GlassSurface 와 같다)', () => {
     resetBlurSupportForTests(true);
     expect(blurSupported()).toBe(true);
     const light = renderMenu({scheme: 'light'});
-    expect(screen.getByTestId('blur-view')).toHaveProp('tint', 'dark');
+    expect(screen.getByTestId('blur-view')).toHaveProp('tint', 'light');
     const tint = flat('attach-menu-material-blur').backgroundColor as string;
     expect(tint.slice(0, 7)).toBe(lightPalette.primary);
     expect(parseInt(tint.slice(7, 9), 16)).toBe(
@@ -656,7 +690,7 @@ describe('치수·재질 — Buzz 캡처 기준', () => {
     );
     light.unmount();
     renderMenu({scheme: 'dark'});
-    expect(screen.getByTestId('blur-view')).toHaveProp('tint', 'light');
+    expect(screen.getByTestId('blur-view')).toHaveProp('tint', 'dark');
   });
 
   it('흐림 모듈이 없으면 잉크 94%(GlassSurface 의 폴백과 같은 값)', () => {

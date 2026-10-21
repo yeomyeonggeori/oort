@@ -25,7 +25,7 @@ import {
   waitFor,
 } from '@testing-library/react-native';
 import React from 'react';
-import {AccessibilityInfo, Linking} from 'react-native';
+import {AccessibilityInfo, Linking, StyleSheet, View} from 'react-native';
 
 import {
   ATTACHMENT_TRAY_MAX_HEIGHT,
@@ -33,6 +33,7 @@ import {
   space,
 } from '../src/design/tokens';
 import {FixedScheme} from '../src/design/theme';
+import {ATTACH_MENU} from '../src/features/attachments/AttachMenu';
 import {AttachmentTray} from '../src/features/attachments/AttachmentTray';
 import {Composer} from '../src/features/conversation/Composer';
 import {
@@ -87,6 +88,8 @@ interface FileSystemMock {
   __reset: () => void;
 }
 
+const hapticCalls = (jest.requireMock('expo-haptics') as {__calls: string[]})
+  .__calls;
 const imagePicker = jest.requireMock('expo-image-picker') as ImagePickerMock;
 const documentPicker = jest.requireMock(
   'expo-document-picker',
@@ -120,6 +123,10 @@ function successfulUploads(id: string): void {
 
 function openPicker(kind: 'camera' | 'photo' | 'file'): void {
   fireEvent.press(screen.getByTestId('composer-attach'));
+  // 열린 직후의 누름은 무시한다(연타 방어) — 사람이 메뉴를 본 뒤의 선택이 되도록 그 시간을 보낸다.
+  act(() => {
+    jest.advanceTimersByTime(ATTACH_MENU.touchGuardMs);
+  });
   fireEvent.press(screen.getByTestId(`attachment-pick-${kind}`));
 }
 
@@ -232,6 +239,7 @@ beforeEach(() => {
   (
     AccessibilityInfo.announceForAccessibility as unknown as jest.Mock
   ).mockClear();
+  hapticCalls.length = 0;
   imagePicker.launchImageLibraryAsync.mockClear();
   imagePicker.launchCameraAsync.mockClear();
   imagePicker.requestCameraPermissionsAsync.mockClear();
@@ -509,6 +517,47 @@ describe('Composer 첨부 렌더·발송', () => {
     });
   });
 
+  it('+ 를 누르면 같은 프레임에 햅틱 light 한 번 — 메뉴는 + 원을 잰 자리에서 열린다 (#4180)', () => {
+    // 목 `View` 의 `measureInWindow` 는 콜백을 부르지 않는다. Buzz 에서 잰 + 원(중심 67.5, 819)을 건네
+    // 컴포저가 **자기 + 단추의 참조**를 메뉴에 넘기는지(측정이 그 단추에서 오는지)를 잰다.
+    const measure = jest
+      .spyOn(
+        View.prototype as unknown as {
+          measureInWindow: (cb: (...n: number[]) => void) => void;
+        },
+        'measureInWindow',
+      )
+      .mockImplementation(cb => cb(50, 801.5, 35, 35));
+    renderComposer();
+    expect(hapticCalls).toEqual([]);
+    fireEvent.press(screen.getByTestId('composer-attach'));
+    // 누르는 핸들러 안에서 동기로 한 번(await·타이머 없음).
+    expect(hapticCalls).toEqual(['impact:light']);
+    expect(measure).toHaveBeenCalled();
+    const card = StyleSheet.flatten(
+      screen.getByTestId('attach-menu').props.style,
+    ) as {left: number; top: number; height: number};
+    expect(card.left).toBe(10);
+    expect(card.top + card.height).toBe(830);
+    measure.mockRestore();
+  });
+
+  it('비활성(+ 가 막힌 오프라인·상한)이면 햅틱도 메뉴도 없다 (#4180)', () => {
+    render(
+      <Composer
+        recipient="place"
+        channelLabel="general"
+        directory={EMPTY}
+        attachmentTarget={TARGET}
+        onSend={jest.fn()}
+        offline
+      />,
+    );
+    fireEvent.press(screen.getByTestId('composer-attach'));
+    expect(hapticCalls).toEqual([]);
+    expect(screen.queryByTestId('attach-menu')).toBeNull();
+  });
+
   it('카메라로 찍은 사진 1장을 트레이→업로드→파일만 발송한다 (#4180)', async () => {
     successfulUploads('attachment-camera');
     imagePicker.__state.cameraResult = {
@@ -715,8 +764,7 @@ describe('검수 수리 회귀 (design-review High-1·High-2)', () => {
     // High-1: 닫히는 Modal과 같은 틱의 제시는 iOS가 거절할 수 있고, 그 거절은
     // 「업로드 실패」 오탐으로 접힌다. 제시는 onDismiss 또는 폴백 타이머 뒤다.
     renderComposer();
-    fireEvent.press(screen.getByTestId('composer-attach'));
-    fireEvent.press(screen.getByTestId('attachment-pick-photo'));
+    openPicker('photo');
     const launch = imagePicker.launchImageLibraryAsync;
     expect(launch).not.toHaveBeenCalled();
     await waitFor(() => expect(launch).toHaveBeenCalledTimes(1));
