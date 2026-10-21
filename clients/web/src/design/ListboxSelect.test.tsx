@@ -1,13 +1,16 @@
 // @vitest-environment jsdom
 import { useRef, useState } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ListboxSelect, type ListboxOption } from "@/design/ui/listbox-select";
 
 // #4131 — 공용 ListboxSelect 의 계약 고정: 라벨 클릭, aria-disabled, 타이프어헤드, 긴 영문 ID,
 // 모달 안 휠 스크롤, 라벨을 가리지 않는 목록 앵커.
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 const MODELS: ListboxOption[] = [
   { value: "opus", label: "claude-opus-4-1-20250805-with-an-unbroken-very-long-identifier" },
@@ -52,7 +55,10 @@ let clock = 1_000_000;
 const tick = (ms: number) => {
   clock += ms;
 };
-vi.spyOn(Date, "now").mockImplementation(() => clock);
+beforeEach(() => {
+  clock = 1_000_000;
+  vi.spyOn(Date, "now").mockImplementation(() => clock);
+});
 
 const box = () => screen.getByTestId("box");
 const activeValue = () =>
