@@ -412,12 +412,18 @@ describe('카드 안의 길', () => {
     const h = await open();
     await pressPhotoRow();
     await settleMorph();
-    const timing = jest.spyOn(Animated, 'timing');
+    // 애니메이션을 만들기만 하고 시작하지 않아도 「만들었다」는 센다 — 시작까지 재야 한다(사보타주가 잡은 구멍).
+    const start = jest.fn();
+    const timing = jest.spyOn(Animated, 'timing').mockImplementation(
+      () =>
+        ({start, stop: jest.fn(), reset: jest.fn()}) as unknown as Animated.CompositeAnimation,
+    );
     h.rerender(false);
     const fades = timing.mock.calls.filter(
       call => (call[1] as {toValue: number}).toValue === 0,
     );
     expect(fades.length).toBeGreaterThanOrEqual(1);
+    expect(start).toHaveBeenCalled();
   });
 
   it('카드가 없는 메뉴(photos 없음)는 「사진」이 옛 길 그대로다', async () => {
