@@ -329,6 +329,28 @@ describe('합성 — 실제 메뉴(#4180)와의 접점', () => {
     expect(h.onClose).not.toHaveBeenCalled();
   });
 
+  it('열린 직후(연타 방어 200ms)의 「사진」 누름은 변신하지 않는다 — + 를 두 번 누르는 손', async () => {
+    installAppClock();
+    jest.spyOn(Dimensions, 'get').mockReturnValue({...BUZZ_WINDOW, scale: 3, fontScale: 1});
+    const h = setup();
+    await act(async () => {
+      jest.advanceTimersByTime(ATTACH_MENU.anchorWaitMs + 20);
+      await Promise.resolve();
+    });
+    await pressPhotoRow();
+    // 변신하지 않았다: 진짜 메뉴 카드가 서 있고 틀은 대기 중이며 포트는 불리지 않았다.
+    expect(screen.getByTestId('attach-menu')).toBeTruthy();
+    expectStandby();
+    expect(h.ports.getPermission).not.toHaveBeenCalled();
+    // 연타 방어가 지난 뒤의 누름은 변신한다.
+    await act(async () => {
+      jest.advanceTimersByTime(ATTACH_MENU.touchGuardMs);
+    });
+    await pressPhotoRow();
+    expect(photoHost().props.pointerEvents).toBe('box-none');
+    expect(screen.queryByTestId('attach-menu')).toBeNull();
+  });
+
   it('변신 틀은 몸통 색으로 카드 면(surface)을 받는다 — 중간 프레임에서 뒤 대화가 비치지 않는다', async () => {
     await open();
     await pressPhotoRow();
