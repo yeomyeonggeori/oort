@@ -181,7 +181,7 @@ async function scene(browser, origin, scheme) {
     if (wbox) await page.screenshot({ path: shot(scheme, "responding"), clip: { x: Math.max(0, wbox.x - 8), y: wbox.y - 4, width: Math.min(wbox.width + 16, 420), height: wbox.height + 8 }, scale: "device" });
     // 타임라인 클립
     const main = await page.locator("main").first().boundingBox();
-    if (main) await page.screenshot({ path: shot(scheme, "timeline"), clip: { x: main.x, y: main.y, width: Math.min(main.width, 760), height: Math.min(main.height, 640) } });
+    if (main) await page.screenshot({ path: shot(scheme, "timeline"), clip: { x: main.x, y: main.y, width: Math.min(main.width, 760), height: Math.min(main.height, 900) } });
     // 4. 설정 프로필 히어로
     await page.evaluate(() => { location.hash = "/settings"; });
     await page.getByTestId("profile-hero").waitFor({ timeout: 10_000 });
