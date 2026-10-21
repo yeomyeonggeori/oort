@@ -172,7 +172,11 @@ export function PhotoGridCard({
         <View style={styles.gridArea}>
           {permission === 'limited' ? (
             <View style={styles.limited} testID="photo-limited">
-              <Sentence style={styles.limitedNote}>{PHOTO_COPY.limitedNote}</Sentence>
+              <Sentence
+                maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+                style={styles.limitedNote}>
+                {PHOTO_COPY.limitedNote}
+              </Sentence>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={PHOTO_COPY.limitedMore}
@@ -194,6 +198,7 @@ export function PhotoGridCard({
               text={PHOTO_COPY.loadFailed}
               actionLabel={PHOTO_COPY.retry}
               onAction={library.retry}
+              bottomClear={bottomClear}
               testID="photo-load-failed"
             />
           ) : library.loading && library.assets.length === 0 ? (
@@ -211,6 +216,7 @@ export function PhotoGridCard({
                   ? PHOTO_COPY.emptyLimitedDetail
                   : PHOTO_COPY.emptyDetail
               }
+              bottomClear={bottomClear}
               testID="photo-empty"
             />
           ) : (
@@ -450,7 +456,12 @@ function PermissionPane({
         {primaryBusy ? (
           <ActivityIndicator color={palette.onPrimary} />
         ) : (
-          <Text style={styles.pillLabel}>{primaryLabel}</Text>
+          <Text
+            maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+            numberOfLines={1}
+            style={styles.pillLabel}>
+            {primaryLabel}
+          </Text>
         )}
       </Pressable>
       <Pressable
@@ -459,28 +470,40 @@ function PermissionPane({
         onPress={onSecondary}
         style={({pressed}) => [styles.secondary, pressed && styles.pressed]}
         testID="photo-pick-from-all">
-        <Text style={styles.secondaryLabel}>{secondaryLabel}</Text>
+        <Text maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE} style={styles.secondaryLabel}>
+          {secondaryLabel}
+        </Text>
       </Pressable>
     </ScrollView>
   );
 }
 
+/**
+ * 비어 있음·불러오기 실패의 면. **스크롤한다** — 글자를 키우면(AX5) 제목·설명·다시 불러오기가 카드(고정 높이)
+ * 보다 길어지는데, 고정 상자에 두면 아래가 떠 있는 알약 밑으로 겹쳐 「다시 불러오기」가 눌리지 않았다
+ * (AX5 캡처 ax5-error-dark). 기본 글꼴에서는 내용이 짧아 스크롤이 나타나지 않는다.
+ */
 function CenterNote({
   text,
   detail,
   actionLabel,
   onAction,
+  bottomClear,
   testID,
 }: {
   text: string;
   detail?: string;
   actionLabel?: string;
   onAction?: () => void;
+  bottomClear: number;
   testID: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   return (
-    <View style={styles.center} testID={testID}>
+    <ScrollView
+      contentContainerStyle={[styles.pane, {paddingBottom: bottomClear}]}
+      showsVerticalScrollIndicator={false}
+      testID={testID}>
       <Sentence style={styles.paneTitle}>{text}</Sentence>
       {detail !== undefined ? <Sentence style={styles.paneDetail}>{detail}</Sentence> : null}
       {actionLabel !== undefined && onAction !== undefined ? (
@@ -490,10 +513,12 @@ function CenterNote({
           onPress={onAction}
           style={({pressed}) => [styles.secondary, pressed && styles.pressed]}
           testID="photo-retry">
-          <Text style={styles.secondaryLabel}>{actionLabel}</Text>
+          <Text maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE} style={styles.secondaryLabel}>
+            {actionLabel}
+          </Text>
         </Pressable>
       ) : null}
-    </View>
+    </ScrollView>
   );
 }
 

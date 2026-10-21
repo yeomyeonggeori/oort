@@ -755,7 +755,44 @@ describe('겉모습', () => {
     // 링크 라벨은 컨트롤이라 글자 배율에 상한이 있고(AX5 에서 한 줄 폭을 넘지 않게), 안내는 어절 단위로 끊는다.
     const label = screen.getByText(PHOTO_COPY.limitedMore);
     expect(label.props.maxFontSizeMultiplier).toBe(BAR_CONTROL_MAX_SCALE);
-    expect(screen.getByText(PHOTO_COPY.limitedNote).props.lineBreakStrategyIOS).toBe('hangul-word');
+    // 안내는 한 줄 고정 막대의 상태 라벨이라 같은 상한이다 — AX5 에서 막대가 카드의 절반을 먹지 않는다.
+    const note = screen.getByText(PHOTO_COPY.limitedNote);
+    expect(note.props.maxFontSizeMultiplier).toBe(BAR_CONTROL_MAX_SCALE);
+    expect(note.props.lineBreakStrategyIOS).toBe('hangul-word');
+  });
+
+  it('비어 있음·불러오기 실패의 면은 스크롤하고 아래가 알약을 비킨다 — 글자가 커져도 「다시 불러오기」가 알약 밑에 겹치지 않는다', async () => {
+    const clear = PHOTO_CARD.control + 2 * PHOTO_CARD.controlInset;
+    const contentStyle = (testID: string) =>
+      Object.assign(
+        {},
+        ...([] as object[]).concat(screen.getByTestId(testID).props.contentContainerStyle as object),
+      ) as Record<string, unknown>;
+    const empty = makeLibrary({assets: []});
+    const emptyView = await renderCard(empty.ports);
+    await screen.findByTestId('photo-empty');
+    expect(contentStyle('photo-empty').paddingBottom).toBe(clear);
+    emptyView.unmount();
+    const failing = makeLibrary();
+    failing.ports.listPhotos.mockRejectedValue(new Error('boom'));
+    await renderCard(failing.ports);
+    await screen.findByTestId('photo-load-failed');
+    expect(contentStyle('photo-load-failed').paddingBottom).toBe(clear);
+    // 다시 불러오기 라벨은 컨트롤이라 글자 배율에 상한이 있다.
+    expect(screen.getByText(PHOTO_COPY.retry).props.maxFontSizeMultiplier).toBe(BAR_CONTROL_MAX_SCALE);
+  });
+
+  it('권한 면의 「허용」·「설정 열기」와 「전체 사진에서 고르기」 라벨도 컨트롤이라 글자 배율에 상한이 있다', async () => {
+    const asking = makeLibrary({permission: 'undetermined'});
+    const view = await renderCard(asking.ports);
+    await screen.findByTestId('photo-pane-undetermined');
+    expect(screen.getByText(PHOTO_COPY.allow).props.maxFontSizeMultiplier).toBe(BAR_CONTROL_MAX_SCALE);
+    expect(screen.getByText(PHOTO_COPY.pickFromAll).props.maxFontSizeMultiplier).toBe(BAR_CONTROL_MAX_SCALE);
+    view.unmount();
+    const denied = makeLibrary({permission: 'denied'});
+    await renderCard(denied.ports);
+    await screen.findByTestId('photo-pane-denied');
+    expect(screen.getByText(PHOTO_COPY.openSettings).props.maxFontSizeMultiplier).toBe(BAR_CONTROL_MAX_SCALE);
   });
 
   it('뒤로 원은 메뉴로 돌아간다', async () => {
