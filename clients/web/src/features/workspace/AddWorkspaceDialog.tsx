@@ -13,7 +13,12 @@ import {
 import { Input } from "@/design/ui/input";
 import { InlineBanner } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
-import { OperatorNotice } from "@/features/settings/SettingsFields";
+import {
+  CopyButton,
+  KeyValueRows,
+  OperatorNotice,
+} from "@/features/settings/SettingsFields";
+import { NEW_WORKSPACE_ENTRY_GUIDE } from "@/features/auth/loginWorkspaceEntry";
 import { PRIMARY_ACTION_SHORTCUT } from "@/app/keyboardShortcuts";
 import {
   createWorkspace,
@@ -50,8 +55,11 @@ import {
 //
 // What this dialog does NOT do is switch to the workspace it just made:
 // multi-workspace session switching is ADR-0161 4b-3, so a new workspace is
-// entered by signing in to it, and the success panel says exactly that instead
-// of promising a jump the rail cannot make yet.
+// entered by signing in to it. The sign-in form takes a workspace ID, never the
+// slug (the server answers a slug with 400), so the success panel shows that ID
+// with a 복사 button and names the path in the login screen's own words
+// (`loginWorkspaceEntry.ts`) instead of promising a jump the rail cannot make
+// yet or a slug login the server does not have (#4198, 멀티 조직 P0-A).
 // =============================================================================
 
 const FORM_ID = "add-workspace-form";
@@ -220,16 +228,52 @@ function AddWorkspacePanel({
       {created ? (
         <div className="flex flex-col gap-3 p-4">
           <div
-            className="flex flex-col gap-2 rounded-md border border-ok bg-surface-raised p-4"
+            className="flex flex-col gap-3 rounded-md border border-ok bg-surface-raised p-4"
             role="status"
             data-testid="add-workspace-created"
           >
-            <p className="text-body text-ink">
+            <p className="break-keep text-body text-ink">
               {created.name} 워크스페이스를 만들었어요.
             </p>
-            <p className="text-meta text-ink-muted">
-              슬러그 {created.slug}. 새 워크스페이스로는 그 슬러그로 다시
-              로그인해서 들어가요.
+            {/* 로그인 화면이 받는 것은 슬러그가 아니라 이 ID다. 서버가 돌려준 값을
+                그대로(대문자 UUID여도) 보여 주고 그대로 복사한다. `select-all`은 클립보드를
+                못 쓸 때의 한 번 클릭 선택이다(ApprovalActions.LinkOnce와 같은 문법).
+                단추가 옆에 서느냐 아래로 내려가느냐는 내용 폭이 아니라 칸 폭이 정한다
+                (`@container` + `@sm`): flex-wrap이면 폰 폭(390)에서 「복사」는 옆에 서다가
+                누르는 순간 「복사됨」으로 길어져 아랫줄로 떨어진다(누른 손가락 아래에서
+                단추가 달아나고 대화상자가 44px 늘어난다, 실측). */}
+            <KeyValueRows
+              rows={[
+                { key: "슬러그", value: created.slug, numeric: true },
+                {
+                  key: "워크스페이스 ID",
+                  value: (
+                    <span className="@container block min-w-0">
+                      <span className="flex min-w-0 flex-col items-start gap-2 @sm:flex-row @sm:items-center">
+                        <span
+                          className="min-w-0 select-all break-all font-mono text-meta text-ink"
+                          data-numeric=""
+                          data-testid="add-workspace-created-id"
+                        >
+                          {created.workspaceId}
+                        </span>
+                        <CopyButton
+                          value={created.workspaceId}
+                          subject="워크스페이스 ID"
+                          testId="add-workspace-created-copy"
+                          className="tap-target"
+                        />
+                      </span>
+                    </span>
+                  ),
+                },
+              ]}
+            />
+            <p
+              className="break-keep text-meta text-ink-muted"
+              data-testid="add-workspace-created-guide"
+            >
+              {NEW_WORKSPACE_ENTRY_GUIDE}
             </p>
           </div>
           <div className="flex items-center justify-end gap-2">

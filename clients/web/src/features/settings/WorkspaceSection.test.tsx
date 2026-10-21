@@ -11,6 +11,7 @@ import { roleLabelsSaveMessage } from "@momo/core/features/settings/model";
 import type { WorkspaceIdentity } from "@momo/core/features/settings/api";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { workspaceIdentityKey } from "@/features/workspace/useWorkspace";
+import { NEW_WORKSPACE_ENTRY_GUIDE } from "@/features/auth/loginWorkspaceEntry";
 import { WorkspaceSection } from "./WorkspaceSection";
 import {
   clearOwnerOnboardingPending,
@@ -720,5 +721,76 @@ describe("워크스페이스 페이지 상태 (S5b)", () => {
       ).toContain("서버의 운영자만");
     });
     expect(host.querySelector('[data-testid="workspace-create-form"]')).toBeNull();
+  });
+});
+
+// 새 워크스페이스 완료 카드의 막다른 길 (#4198, 멀티 조직 P0-A). 레일 「+」 완료 패널
+// (`AddWorkspaceDialog.test.tsx`)과 같은 사실을 같은 문장으로 말한다.
+describe("새 워크스페이스 완료 카드 (#4198)", () => {
+  /** 서버는 새 워크스페이스 ID를 대문자 UUID로 돌려준다(`CreatedWorkspace.workspaceId` 주석). */
+  const NEW_WS_ID = "019FA000-1111-7222-8333-444455556666";
+  const writeText = vi.fn();
+
+  beforeEach(() => {
+    writeText.mockReset();
+    writeText.mockResolvedValue(undefined);
+    Object.defineProperty(window.navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+  });
+
+  afterEach(() => {
+    Reflect.deleteProperty(window.navigator, "clipboard");
+  });
+
+  async function createNewTeam(host: HTMLElement) {
+    createWorkspaceMock.mockResolvedValue({
+      schema: "momo.workspace.created.v1",
+      workspaceId: NEW_WS_ID,
+      slug: "new-team",
+      name: "새 팀",
+    });
+    act(() => setInputValue(host.querySelector("#workspace-name") as HTMLInputElement, "새 팀"));
+    act(() => setInputValue(host.querySelector("#workspace-slug") as HTMLInputElement, "new-team"));
+    await act(async () => {
+      (host.querySelector('[data-testid="workspace-create"]') as HTMLButtonElement).click();
+    });
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="workspace-created"]')).not.toBeNull();
+    });
+  }
+
+  it("카드에 응답의 ID와 복사 단추가 있고 복사는 그 ID를 쓴다", async () => {
+    const host = mountSection({ role: "owner" });
+    await createNewTeam(host);
+
+    const card = host.querySelector('[data-testid="workspace-created"]');
+    expect(card?.textContent).toContain(NEW_WS_ID);
+    expect(host.querySelector('[data-testid="workspace-created-id"]')?.textContent).toBe(NEW_WS_ID);
+
+    const copy = host.querySelector('[data-testid="workspace-created-copy"]') as HTMLButtonElement | null;
+    expect(copy).not.toBeNull();
+    expect(copy?.getAttribute("aria-label")).toBe("워크스페이스 ID 복사");
+    await act(async () => {
+      copy?.click();
+    });
+    expect(writeText).toHaveBeenCalledWith(NEW_WS_ID);
+    await vi.waitFor(() => {
+      expect(copy?.textContent).toBe("복사됨");
+    });
+  });
+
+  it("안내는 로그인 화면이 받는 길을 말하고, 슬러그로 다시 로그인한다고 하지 않는다", async () => {
+    const host = mountSection({ role: "owner" });
+    await createNewTeam(host);
+
+    const text = host.querySelector('[data-testid="workspace-created"]')?.textContent ?? "";
+    expect(text).toContain(NEW_WORKSPACE_ENTRY_GUIDE);
+    expect(text).toContain("「다른 워크스페이스로 로그인」");
+    expect(text).toContain("워크스페이스 ID 칸");
+    expect(text).not.toContain("그 슬러그로 다시 로그인");
+    expect(text).not.toMatch(/슬러그로/);
+    expect(text).not.toMatch(/습니다/);
   });
 });

@@ -275,7 +275,7 @@ Settings after you are in: profile-card row **설정**, tooltip 「설정
 (⌘,)」 (`ProfileCard.tsx:175-189`). Shell title **설정**
 (`SettingsRoute.tsx:172`). Left nav groups **개인** / **워크스페이스** /
 **연결** (`settingsNav.ts`). This session's UUID is the 「워크스페이스
-ID」 line of **설정 › 계정** (`AccountSection.tsx:22-26`).
+ID」 line of **설정 › 워크스페이스** (`WorkspaceSection.tsx:1170`).
 
 ### What remains in v0.1.5
 
@@ -341,19 +341,25 @@ Rules (same as the server): empty → 「슬러그를 입력하세요。」 / �
 Button: **워크스페이스 만들기** (in progress **만드는 중**)
 (`WorkspaceSection.tsx:1016` · `AddWorkspaceDialog.tsx:373`).
 
-Success card: 「{이름} 워크스페이스를 만들었습니다。」 then **슬러그** ·
-**워크스페이스 ID**. Then 「새 워크스페이스로는 그 슬러그로 다시
-로그인해서 들어갑니다。」 (`WorkspaceSection.tsx:1028-1038`). The dialog
-uses the same success sentence plus 「슬러그 {slug}. 새 워크스페이스로는
-그 슬러그로 다시 로그인해서 들어갑니다。」 (`AddWorkspaceDialog.tsx:227-232`).
+Success card: 「{이름} 워크스페이스를 만들었어요。」, one guide sentence,
+then **슬러그** · **워크스페이스 ID** with a **복사** button beside the ID
+(`WorkspaceSection.tsx:1301-1338`). The guide reads 「들어가려면 로그아웃한
+뒤 로그인 화면에서 「다른 워크스페이스로 로그인」을 열고, 워크스페이스 ID
+칸에 이 ID를 붙여 넣어요。」 (`NEW_WORKSPACE_ENTRY_GUIDE`,
+`features/auth/loginWorkspaceEntry.ts`). The dialog's success panel shows
+the same sentence, the same two rows and the same **복사** button
+(`AddWorkspaceDialog.tsx:228-292`).
 
 **There is no session switch.** To enter the new tenant, **로그아웃**
-(`AccountSection.tsx:31-32`) then on the sign-in screen expand 「다른
-워크스페이스로 로그인」 and put the success card's **워크스페이스 ID**
-(UUID). The sign-in form accepts a UUID, not a slug
-(`ConnectPage.tsx`). An invite is issued to the workspace you are **in
-now**. First-day invites stay on the workspace S1 named — do not make this
-switch.
+(profile-card menu, `ProfileCard.tsx:243`, or the 「로그인」 card of
+**설정 › 프로필**, `ProfileSection.tsx:288`) then on the sign-in screen
+expand 「다른 워크스페이스로 로그인」 and paste the success card's
+**워크스페이스 ID** (UUID; **복사** copies it) into the 「워크스페이스 ID」
+field. The sign-in form accepts a UUID, not a slug: the server answers a
+slug with 400 (`ConnectPage.tsx`; `resolve_login_workspace`,
+`server-rust/bins/momo-server/src/routes/auth_routes.rs:313-318`). An
+invite is issued to the workspace you are **in now**. First-day invites
+stay on the workspace S1 named — do not make this switch.
 
 On 403 the screen replaces the form with: 「새 워크스페이스는 이 서버의
 운영자만 만들 수 있습니다。」 (`WorkspaceSection.tsx:947-949`). Look at

@@ -56,7 +56,8 @@ import {
   WELCOME_PROMPT_LIMIT_SENTENCE,
   welcomePromptTooLong,
 } from "@/features/welcome/welcomeKickoff";
-import { Field, OperatorNotice, SaveButton } from "./SettingsFields";
+import { CopyButton, Field, OperatorNotice, SaveButton } from "./SettingsFields";
+import { NEW_WORKSPACE_ENTRY_GUIDE } from "@/features/auth/loginWorkspaceEntry";
 import { Switch } from "@/design/ui/switch";
 import { SettingsRow } from "./shell/SettingsRow";
 import { SettingsSection } from "./shell/SettingsSection";
@@ -1301,7 +1302,7 @@ export function WorkspaceSection({
         <div role="status" data-testid="workspace-created">
           <SettingsSection
             title={`${created.name} 워크스페이스를 만들었어요.`}
-            description="새 워크스페이스에는 그 슬러그로 다시 로그인해서 들어가요."
+            description={NEW_WORKSPACE_ENTRY_GUIDE}
           >
             <SettingsRow label="슬러그" keep>
               <span
@@ -1311,13 +1312,26 @@ export function WorkspaceSection({
                 {created.slug}
               </span>
             </SettingsRow>
+            {/* 레일 「+」 완료 패널과 같은 줄: 값 옆에 복사 단추, 칸이 좁으면 아래(칸 폭이
+                정한다. 「복사」가 「복사됨」으로 길어져도 자리가 바뀌지 않는다). */}
             <SettingsRow label="워크스페이스 ID" stack>
-              <p
-                className="min-w-0 break-all font-mono text-meta text-ink-muted"
-                data-numeric=""
-              >
-                {created.workspaceId}
-              </p>
+              <div className="@container min-w-0 flex-1">
+                <div className="flex min-w-0 flex-col items-start gap-2 @sm:flex-row @sm:items-center">
+                  <p
+                    className="min-w-0 select-all break-all font-mono text-meta text-ink-muted"
+                    data-numeric=""
+                    data-testid="workspace-created-id"
+                  >
+                    {created.workspaceId}
+                  </p>
+                  <CopyButton
+                    value={created.workspaceId}
+                    subject="워크스페이스 ID"
+                    testId="workspace-created-copy"
+                    className="tap-target"
+                  />
+                </div>
+              </div>
             </SettingsRow>
           </SettingsSection>
         </div>
