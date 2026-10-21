@@ -186,6 +186,22 @@ describe('변신 — 「사진」 행이 메뉴를 카드로 바꾼다', () => {
     expect(h.ports.requestPermission).not.toHaveBeenCalled();
   });
 
+  it('변신은 메뉴 크기에서 시작해 카드 크기로 자란다 — 처음부터 카드로 서지 않는다', async () => {
+    await open();
+    await pressPhotoRow();
+    const menu = attachMenuFrame(BUZZ_ANCHOR, BUZZ_WINDOW, {top: 0, left: 0, right: 0});
+    const at = (testID: string) =>
+      Object.assign({}, ...([] as object[]).concat(screen.getByTestId(testID).props.style)) as Record<string, number>;
+    // 누른 직후(타이머 전진 없음): 틀은 메뉴의 크기·모서리다.
+    expect(at('photo-morph')).toMatchObject({
+      width: menu.width,
+      height: menu.height,
+      borderRadius: ATTACH_MENU.radius,
+    });
+    await settleMorph();
+    expect(at('photo-morph').width).toBe(photoCardSize(BUZZ_WINDOW).width);
+  });
+
   it('카드는 메뉴와 바닥·왼쪽이 같은 자리에서 자란다', async () => {
     await open();
     await pressPhotoRow();

@@ -279,6 +279,31 @@ describe('스프링 — 도착을 알린다', () => {
     expect(flat('photo-morph')).toMatchObject({width: MENU.width, height: MENU.height});
   });
 
+  it('호스트가 initialTarget=menu 로 마운트하면 메뉴 자세에서 시작해 카드로 간다(마운트 렌더가 곧 변신의 시작이다)', async () => {
+    installAppClock();
+    const onSettled = jest.fn();
+    render(frame({target: 'card', initialTarget: 'menu', onSettled}));
+    // 마운트 직후: 아직 메뉴의 크기다 — 카드로 마운트되면 변신이 한 프레임도 안 보인다.
+    expect(flat('photo-morph')).toMatchObject({width: MENU.width, height: MENU.height});
+    expect(onSettled).not.toHaveBeenCalled();
+    await act(async () => {
+      jest.advanceTimersByTime(1500);
+    });
+    expect(flat('photo-morph')).toMatchObject({width: CARD.width, height: CARD.height});
+    expect(onSettled.mock.calls.map(call => call[0])).toEqual(['card']);
+  });
+
+  it('initialTarget 이 없으면 마운트 자세가 곧 목표다(도착을 헛되이 알리지 않는다)', async () => {
+    installAppClock();
+    const onSettled = jest.fn();
+    render(frame({target: 'card', onSettled}));
+    expect(flat('photo-morph')).toMatchObject({width: CARD.width, height: CARD.height});
+    await act(async () => {
+      jest.advanceTimersByTime(1500);
+    });
+    expect(onSettled).not.toHaveBeenCalled();
+  });
+
   it('스프링은 JS 구동이다 — 폭·높이는 네이티브 드라이버로 움직일 수 없다', () => {
     // 이 한 줄을 `true` 로 바꾸면 기기에서 「Style property 'width' is not supported by native
     // animated module」 로 죽는다. jest 는 네이티브 드라이버를 흉내 내지 않으므로 소스로 못 박는다.

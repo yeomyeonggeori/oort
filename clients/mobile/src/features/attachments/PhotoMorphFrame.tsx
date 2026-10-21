@@ -27,6 +27,11 @@ import type {MorphTarget} from './photoMorph';
 
 export interface PhotoMorphFrameProps {
   target: MorphTarget;
+  /**
+   * 마운트될 때 틀이 서 있는 자세. 기본은 `target` 그대로(이미 도착해 있다)이고, 호스트가 「메뉴 자세로 서서
+   * 카드로 간다」를 원하면 `'menu'` 를 준다 — 변신이 시작되는 그 렌더에 틀이 새로 마운트되기 때문이다.
+   */
+  initialTarget?: MorphTarget;
   menuSize: PhotoCardSize;
   menuRadius: number;
   cardSize: PhotoCardSize;
@@ -53,6 +58,7 @@ const CLAMP = 'clamp' as const;
 
 export function PhotoMorphFrame({
   target,
+  initialTarget,
   menuSize,
   menuRadius,
   cardSize,
@@ -66,8 +72,9 @@ export function PhotoMorphFrame({
   testID = 'photo-morph',
 }: PhotoMorphFrameProps): React.JSX.Element {
   const reduceMotion = useReduceMotionRef();
+  const startTarget = initialTarget ?? target;
   const progress = useRef(
-    new Animated.Value(pinnedProgress ?? (target === 'card' ? 1 : 0)),
+    new Animated.Value(pinnedProgress ?? (startTarget === 'card' ? 1 : 0)),
   ).current;
   const onSettledRef = useRef(onSettled);
   onSettledRef.current = onSettled;
@@ -83,7 +90,7 @@ export function PhotoMorphFrame({
     }
     if (!arrived.current) {
       arrived.current = true;
-      return undefined;
+      if (startTarget === target) return undefined;
     }
     const to = target === 'card' ? 1 : 0;
     const instant = reduceMotion.current;
@@ -104,7 +111,7 @@ export function PhotoMorphFrame({
       if (finished) onSettledRef.current?.(target);
     });
     return () => animation.stop();
-  }, [target, pinnedProgress, progress, reduceMotion]);
+  }, [target, startTarget, pinnedProgress, progress, reduceMotion]);
 
   const toCard = target === 'card';
   const width =

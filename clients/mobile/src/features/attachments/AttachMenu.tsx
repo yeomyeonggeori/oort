@@ -634,6 +634,7 @@ export function AttachMenu({
             testID="attach-photo-host">
             <PhotoMorphFrame
               target={morph.target}
+              initialTarget="menu"
               menuSize={{width: frame.width, height: frame.height}}
               menuRadius={ATTACH_MENU.radius}
               cardSize={cardBox}
