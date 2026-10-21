@@ -1,3 +1,4 @@
+import * as Device from 'expo-device';
 import * as DocumentPicker from 'expo-document-picker';
 import {File} from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
@@ -46,6 +47,28 @@ function fileSize(
   return {sizeBytes: 0, sizeKnown: false};
 }
 
+/** 사진 한 장을 고른(또는 찍은) 결과를 첨부 입력으로. picker 둘이 같은 모양으로 답한다. */
+function photoOutcome(
+  result: ImagePicker.ImagePickerResult,
+): AttachmentPickerOutcome {
+  if (result.canceled || result.assets.length === 0) {
+    return {kind: 'issue', issue: 'selection-cancelled'};
+  }
+  const asset = result.assets[0];
+  const size = fileSize(asset.uri, asset.fileSize);
+  return {
+    kind: 'picked',
+    files: [
+      {
+        uri: asset.uri,
+        name: asset.fileName ?? fileNameFromUri(asset.uri, 'photo.jpg'),
+        mime: asset.mimeType ?? 'image/jpeg',
+        ...size,
+      },
+    ],
+  };
+}
+
 /**
  * PHPicker 사진 선택. iOS 14+에서는 읽기 권한을 선제 요청하지 않는다.
  *
@@ -54,27 +77,13 @@ function fileSize(
  */
 export async function pickPhoto(): Promise<AttachmentPickerOutcome> {
   try {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsMultipleSelection: false,
-      quality: 1,
-    });
-    if (result.canceled || result.assets.length === 0) {
-      return {kind: 'issue', issue: 'selection-cancelled'};
-    }
-    const asset = result.assets[0];
-    const size = fileSize(asset.uri, asset.fileSize);
-    return {
-      kind: 'picked',
-      files: [
-        {
-          uri: asset.uri,
-          name: asset.fileName ?? fileNameFromUri(asset.uri, 'photo.jpg'),
-          mime: asset.mimeType ?? 'image/jpeg',
-          ...size,
-        },
-      ],
-    };
+    return photoOutcome(
+      await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsMultipleSelection: false,
+        quality: 1,
+      }),
+    );
   } catch {
     try {
       const permission = await ImagePicker.getMediaLibraryPermissionsAsync();
@@ -88,6 +97,49 @@ export async function pickPhoto(): Promise<AttachmentPickerOutcome> {
       // 권한 상태조차 읽지 못하면 아래의 일반 실패로 접는다.
     }
     return {kind: 'issue', issue: 'unavailable'};
+  }
+}
+
+/**
+ * 카메라로 사진 한 장 (#4180, ADR-0168 범위). 사진 보관함과 달리 카메라는 **먼저 권한을 받아야** 한다:
+ * `launchCameraAsync` 는 권한이 없으면 묻지 않고 거절한다(`MissingCameraPermissionException`). 그래서
+ * 여기서 묻고, 거부면 시스템 카메라를 띄우지 않고 곧장 `camera-permission-denied` 로 접는다. 기존
+ * `permission-denied` 와 같은 트레이 길(문장 + 기기 설정 링크)이지만 **문장은 카메라라고 말한다** —
+ * 설정의 oort 페이지에 「카메라」와 「사진」은 다른 행이라, 카메라를 거부한 사람에게 「사진 접근을 허용」
+ * 하라고 하면 같은 실패가 반복된다(design-review High-1). 첫 요청은 시스템 알림이 서고, 거부한 뒤에는
+ * 묻지 않고 거부로 답한다.
+ *
+ * 사진만 찍는다(`mediaTypes: ['images']`) — 동영상 모드는 마이크를 쓰고, 앱은 마이크를 요청하지 않는다
+ * (`Info.plist` · `projectShape.test.ts`). 카메라가 열리지 못하면 `camera-unavailable` — 올린 적이 없으니
+ * 「업로드 실패」(`unavailable`)가 아니라 카메라가 안 열렸다고 말한다.
+ *
+ * **카메라가 없는 곳(시뮬레이터)에서는 열지 않는다 — 앱이 죽는다.** expo-image-picker 의 iOS 구현은 카메라가
+ * 있는지 묻지 않고 `UIImagePickerController.sourceType = .camera` 를 설정하고, 카메라가 없으면 그 setter 가
+ * NSInvalidArgumentException 을 던져 SIGABRT 로 끝난다(시뮬레이터에서 「허용」을 누른 직후 실측, 크래시 리포트
+ * `ImagePickerModule.launchLegacyImagePicker` → `-[UIImagePickerController setSourceType:]`). 네이티브 예외라
+ * 아래 `try/catch` 가 못 잡는다. 그래서 권한을 받은 **뒤** 실기기(`Device.isDevice`)가 아니면 그대로 접는다.
+ * 권한 알림은 시뮬레이터에서도 서므로 거부 길은 같다. (카메라가 꺼진 실기기 — 화면 시간·MDM 제한 — 는 iOS 가
+ * 권한 상태를 거부로 답해 위 거부 길로 간다. 실기기가 아닌데 `isDevice` 가 참인 환경, 예컨대 카메라 없는 Mac 의
+ * iPad 앱은 이 확인이 못 거르는 미검증 위험이다.)
+ */
+export async function pickCamera(): Promise<AttachmentPickerOutcome> {
+  try {
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      return {kind: 'issue', issue: 'camera-permission-denied'};
+    }
+    if (!Device.isDevice) {
+      return {kind: 'issue', issue: 'camera-unavailable'};
+    }
+    return photoOutcome(
+      await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'],
+        allowsEditing: false,
+        quality: 1,
+      }),
+    );
+  } catch {
+    return {kind: 'issue', issue: 'camera-unavailable'};
   }
 }
 
