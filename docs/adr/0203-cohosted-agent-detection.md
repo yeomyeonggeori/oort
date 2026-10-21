@@ -487,7 +487,7 @@ D1~D9, K1~K7, 게이트웨이 `/v1/chat/completions` SSE 경로(D5), `HERMES_API
 ### M1. 핀에 `provider`와 `model`을 한 쌍으로 저장한다 (migration 144)
 
 - `agent_provider_pin`에 `model_provider text NULL`, `model_id text NULL`을 더한다(ADR-0147 증보 2026-10-16의 표 확장). 핀은 JSON 칸이 없는 평평한 표라 **마이그레이션이 필요**하다. 모든 문장이 가드되어 재적용해도 무해하고, 기존 행은 둘 다 NULL이다.
-- CHECK 세 개: (a) 한 쌍이어야 한다(둘 다 NULL이거나 둘 다 값), (b) 값은 `kind = 'operator_env'` 핀에만, (c) 형식(`provider` = `[a-z0-9][a-z0-9._-]{0,63}`, `model` = 영숫자로 시작하고 `._:/@+-`만 쓰는 최대 128자). `upsert_agent_pin`은 충돌 갱신 때 둘을 NULL로 되돌린다 — 다른 핀으로 바꾸면 이전 제공자가 따라붙을 수 없다. 쌍은 `set_agent_pin_model`만 쓴다.
+- CHECK 세 개: (a) 한 쌍이어야 한다(둘 다 NULL이거나 둘 다 값), (b) 값은 `kind = 'operator_env'` 핀에만, (c) 형식(`provider` = `[a-z0-9][a-z0-9._-]{0,63}`, `model` = 영숫자로 시작하고 `._:/@+-`만 쓰는 최대 128자 — DB CHECK는 백스톱이고, 서버가 실제로 받는 상한은 `sanitized_model_id`의 **64바이트**다. 64 ≤ 128이라 코드를 통과한 쌍은 항상 저장되며, 시험이 마이그레이션의 128과 코드 상한의 관계를 고정한다 — #4159 L3). `upsert_agent_pin`은 충돌 갱신 때 둘을 NULL로 되돌린다 — 다른 핀으로 바꾸면 이전 제공자가 따라붙을 수 없다. 쌍은 `set_agent_pin_model`만 쓴다.
 - **하위 호환(핵심 불변식).** 둘 다 NULL = 오늘과 같다. 워커는 `agent.model`을 그대로 보내고 `provider`를 싣지 않는다. 실제 모델 id를 `agent.model`에 적으면서 핀에 제공자가 없으면 Hermes가 그 모델을 무시하고 기본 모델로 답하므로 **그 조합은 만들지 않는다**: 한 트랜잭션에서 핀의 쌍과 `agent.model`(카드·사용량 표시용 거울)을 함께 쓴다. 반쪽 쌍이 읽혀도 워커는 쌍으로 취급하지 않는다.
 
 ### M2. 서버가 Hermes `/api/model/options`를 읽어 「로그인된 제공자의 모델」만 선택지로 노출한다
@@ -512,7 +512,7 @@ D1~D9, K1~K7, 게이트웨이 `/v1/chat/completions` SSE 경로(D5), `HERMES_API
 
 ### M4. 워커는 `provider`와 `model`을 함께 보낸다
 
-- `operator_env` 핀이 쌍을 가지면, 워커는 그 턴의 모델을 핀의 `model`로 하고 `/v1/chat/completions` 본문에 `"provider": "<slug>"`를 함께 싣는다. 쌍은 턴마다 에이전트 행에서 읽으므로(#3873) 잡을 큐에 넣은 뒤 고른 모델도 그 턴에 적용된다. 한 턴은 요청 하나이므로 한 실행 안에서 모델이 바뀌지 않는다.
+- `operator_env` 핀이 쌍을 가지면, 워커는 그 턴의 모델을 핀의 `model`로 하고 `/v1/chat/completions` 본문에 `"provider": "<slug>"`를 함께 싣는다. 쌍은 턴마다 **핀 행(`agent_provider_pin`)에서** 읽으므로(#3873) 잡을 큐에 넣은 뒤 고른 모델도 그 턴에 적용된다. 한 턴은 요청 하나이므로 한 실행 안에서 모델이 바뀌지 않는다.
 - `provider`는 **chat/completions 선만** 쓴다. Responses·Anthropic Messages 선은 이 필드를 만들지 않는다(시험으로 고정). 공백 슬러그는 보내지 않는다(Hermes가 빈 provider를 「없음」으로 읽어 model을 무시하므로).
 - `team_link` 핀·핀 없는 에이전트·소유자 키 턴은 영향이 없다.
 
@@ -520,7 +520,10 @@ D1~D9, K1~K7, 게이트웨이 `/v1/chat/completions` SSE 경로(D5), `HERMES_API
 
 - **기본값은 Hermes의 현재 모델이다.** connect가 그 값을 핀에 적고, 핀에 쌍이 없으면 `current`는 Hermes의 현재 값이다. oort가 기본 모델을 따로 정하거나 하드코딩하지 않는다.
 - `featured`(성재 「추린 목록」): 제공자마다 **Hermes가 준 순서의 앞 3개** + **지금 쓰는 모델은 항상**. 모델 이름을 코드에 넣지 않는다 — Hermes는 제공자별로 최신 세대의 대표 등급부터 나열하므로 「앞 몇 개」가 곧 대표 모델이고, 새 모델이 나와도 배포 없이 따라온다. 개수(`FEATURED_PER_PROVIDER = 3`)는 코드 상수다. UI는 featured를 기본으로 보이고 「전체 보기」로 나머지를 연다. 서버 응답은 항상 전체 목록이다(선택 제한은 전체 목록 기준).
-- `claude-fable-5.1`처럼 oort 쪽에서 쓰지 않을 모델이 Hermes 목록에 있을 수 있다. 서버는 **차단 목록을 지어내지 않는다.** Hermes가 로그인된 계정으로 줄 수 있다고 한 것을 그대로 노출한다(owner 미결정으로 남긴다: 필요하면 운영자 허용 목록을 별도 결정으로).
+- **결정(owner, 2026-10-21): 모델 차단 목록을 두지 않는다.** 성재 원문 「fable은 당연히 보여야지. 우리만 쓰는것도 아니고 모두가 쓸 것을 가정하는데」. `claude-fable-5.1`처럼 어느 모델이든 Hermes가 로그인된 제공자에 대해 주는 것은 모두 노출한다(`featured` 규칙은 그대로). 서버는 차단 목록·모델 이름 하드코딩을 만들지 않는다(#4159).
+- **연결 시 현재 모델 거르기(#4159 L1).** connect가 핀에 적는 Hermes의 현재 `(provider, model)`은 `providers[]`의 로그인된(`authenticated: true`) 제공자 안에 있을 때만 쓴다. 로그인되지 않은 제공자가 현재값이면 핀의 쌍은 비워 두고 오늘과 같은 `agent.model` 동작을 한다(`GET …/models`의 `hermesCurrent`도 같은 규칙).
+- **PUT 409 원인 구분(#4159 L2).** 쓰는 순간 에이전트의 핀이 `team_link`로 바뀌어 있으면 `cohosted_agent_pin_replaced`, 에이전트가 없거나 연결이 끊겼으면 `cohosted_agent_not_connected`다.
+- **throttle은 DB 조회 앞(#4159 L5).** `GET …/models`·`PUT …/model`은 연결 여부를 DB에서 읽기 전에 분당 호출 예산(운영자당 20회)을 쓴다.
 
 ### 보안 경계와 egress 가드(ADR-0004 증보 5) 영향
 
