@@ -180,7 +180,11 @@ export function PhotoGridCard({
                 onPress={library.presentLimited}
                 style={({pressed}) => [styles.limitedMore, pressed && styles.pressed]}
                 testID="photo-limited-more">
-                <Text style={styles.limitedMoreLabel}>{PHOTO_COPY.limitedMore}</Text>
+                <Text
+                  maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+                  style={styles.limitedMoreLabel}>
+                  {PHOTO_COPY.limitedMore}
+                </Text>
               </Pressable>
             </View>
           ) : null}
@@ -583,11 +587,14 @@ const buildStyles = (color: Palette) =>
       fontWeight: '600',
       color: color.accentText,
     },
+    // 글자가 크면 링크가 안내 아래 줄로 내려간다(`flexWrap`). 한 줄에 억지로 두면 링크가 폭을 다 먹어 안내가
+    // 사라졌고 링크 라벨이 낱말 중간에서 끊겼다(AX5 캡처 ax5-limited).
     limited: {
       minHeight: PHOTO_CARD.control,
       paddingLeft: space.lg,
       paddingRight: space.xs,
       flexDirection: 'row',
+      flexWrap: 'wrap',
       alignItems: 'center',
       justifyContent: 'space-between',
       borderBottomWidth: StyleSheet.hairlineWidth,

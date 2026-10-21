@@ -746,6 +746,18 @@ describe('겉모습', () => {
     expect(chip.props.maxFontSizeMultiplier).toBe(BAR_CONTROL_MAX_SCALE);
   });
 
+  it('일부 허용 줄은 글자가 커지면 링크가 아래 줄로 내려간다 — 안내가 사라지거나 라벨이 낱말 중간에서 끊기지 않는다', async () => {
+    const lib = makeLibrary({permission: 'limited'});
+    await renderCard(lib.ports);
+    const bar = await screen.findByTestId('photo-limited');
+    const style = Object.assign({}, ...([] as object[]).concat(bar.props.style)) as Record<string, unknown>;
+    expect(style.flexWrap).toBe('wrap');
+    // 링크 라벨은 컨트롤이라 글자 배율에 상한이 있고(AX5 에서 한 줄 폭을 넘지 않게), 안내는 어절 단위로 끊는다.
+    const label = screen.getByText(PHOTO_COPY.limitedMore);
+    expect(label.props.maxFontSizeMultiplier).toBe(BAR_CONTROL_MAX_SCALE);
+    expect(screen.getByText(PHOTO_COPY.limitedNote).props.lineBreakStrategyIOS).toBe('hangul-word');
+  });
+
   it('뒤로 원은 메뉴로 돌아간다', async () => {
     const lib = makeLibrary();
     const {props} = await renderCard(lib.ports);
