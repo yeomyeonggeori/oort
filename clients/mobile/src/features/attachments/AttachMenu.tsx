@@ -54,7 +54,7 @@ import {useReduceMotionRef} from '../../lib/useReduceMotion';
 //   | 카드 폭       | x 10→226pt = 216                     | 216                                       |
 //   | 행 간격       | 60                                   | 행 높이 60                                |
 //   | 카드 안 여백  | 위·아래 12 (5행 = 5×60 + 24 = 324)   | 12(`space.md`), 3행 = 3×60 + 24 = 204     |
-//   | 모서리        | 27pt, 연속 곡선(iOS squircle)        | `ds2Radius.composer` 26 + `continuous`    |
+//   | 모서리        | 27pt, 연속 곡선(iOS squircle)        | `ds2Radius.composer`(26, #4179 뒤 27) + `continuous` |
 //   | 위치          | 카드 왼쪽 10 · 아래 = + 원 중심 + 11 | 같은 두 수를 + 원에서 잰다(`attachMenuFrame`) |
 //   | 아이콘        | 글리프 ≈ 15pt, 선 1.7pt              | 22pt 래스터(선 1.65pt), `MENU_ICON_SIZE`  |
 //   | 글자          | 캡 높이 14.6pt → ≈ 20.7pt, 보통 굵기  | `font.title` 22 · 400                     |

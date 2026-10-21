@@ -542,6 +542,30 @@ describe('Composer 첨부 렌더·발송', () => {
     measure.mockRestore();
   });
 
+  it('첨부 상한에 닿으면 + 가 막히고 이유는 해요체로 말한다 — 메뉴도 햅틱도 없다 (#4180)', () => {
+    createUpload.mockReturnValue(new Promise(() => {}));
+    addPickedFiles(
+      attachmentSurfaceKey(TARGET),
+      TARGET,
+      Array.from({length: MAX_ATTACHMENTS_PER_MESSAGE}, (_, index) => ({
+        uri: `file:///docs/${index}.txt`,
+        name: `${index}.txt`,
+        mime: 'text/plain',
+        sizeBytes: 1,
+        sizeKnown: true,
+      })),
+    );
+    renderComposer();
+    const attach = screen.getByTestId('composer-attach');
+    expect(attach.props.accessibilityState).toEqual({disabled: true});
+    expect(attach.props.accessibilityHint).toBe(
+      `첨부는 ${MAX_ATTACHMENTS_PER_MESSAGE}개까지 고를 수 있어요`,
+    );
+    fireEvent.press(attach);
+    expect(hapticCalls).toEqual([]);
+    expect(screen.queryByTestId('attach-menu')).toBeNull();
+  });
+
   it('비활성(+ 가 막힌 오프라인·상한)이면 햅틱도 메뉴도 없다 (#4180)', () => {
     render(
       <Composer
