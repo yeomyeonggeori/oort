@@ -682,7 +682,14 @@ export function AttachMenu({
  */
 function menuClip(
   styles: ReturnType<typeof buildStyles>,
-  props: {
+  {
+    rowsOpacity,
+    firstRowRef,
+    photoHint,
+    onCamera,
+    onPhoto,
+    onFile,
+  }: {
     rowsOpacity: Animated.AnimatedInterpolation<number> | number;
     firstRowRef?: React.RefObject<View | null>;
     photoHint: string;
@@ -694,27 +701,27 @@ function menuClip(
   return (
     <View style={styles.clip}>
       <MenuMaterial />
-      <Animated.View style={[styles.rows, {opacity: props.rowsOpacity}]}>
+      <Animated.View style={[styles.rows, {opacity: rowsOpacity}]}>
         <MenuRow
           icon="camera"
           label="카메라"
           hint="사진을 찍어 바로 첨부해요"
-          onPress={props.onCamera}
-          rowRef={props.firstRowRef}
+          onPress={onCamera}
+          rowRef={firstRowRef}
           testID="attachment-pick-camera"
         />
         <MenuRow
           icon="photo"
           label="사진"
-          hint={props.photoHint}
-          onPress={props.onPhoto}
+          hint={photoHint}
+          onPress={onPhoto}
           testID="attachment-pick-photo"
         />
         <MenuRow
           icon="file"
           label="파일"
           hint="파일 앱에서 한 개를 골라요"
-          onPress={props.onFile}
+          onPress={onFile}
           testID="attachment-pick-file"
         />
       </Animated.View>
