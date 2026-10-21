@@ -228,7 +228,7 @@ function ModelBody({
               type="button"
               size="sm"
               variant="ghost"
-              className="tap-target -ml-3"
+              className="tap-target -ml-3 underline underline-offset-4"
               aria-pressed={showAll}
               onClick={() => setShowAll((on) => !on)}
               data-testid="ai-cohosted-model-toggle"
