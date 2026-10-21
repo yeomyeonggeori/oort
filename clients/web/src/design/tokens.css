@@ -2620,10 +2620,6 @@
   margin-inline: auto;
   flex-direction: column;
   gap: var(--spacing-8);
-
-  &[data-wide] {
-    max-inline-size: none;
-  }
 }
 
 /* 프로필 히어로 아바타 상자 (#3603). 한 변과 이니셜 크기가 한 이름에서 나온다. */

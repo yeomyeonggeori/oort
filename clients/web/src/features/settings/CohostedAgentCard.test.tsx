@@ -344,7 +344,7 @@ describe("CohostedAgentCard", () => {
       host?.remove();
       api.request.mockImplementation(serve(true));
       mount();
-      const now = await until("ai-cohosted-model-now");
+      const now = await until("ai-cohosted-model-select");
       expect(now.textContent).toBe("Claude Sonnet 5.5 · Anthropic");
     });
 
@@ -356,7 +356,7 @@ describe("CohostedAgentCard", () => {
       api.request.mockImplementation(serve(true));
       await act(async () => q("ai-cohosted-connect")?.click());
       await until("ai-cohosted-connected-notice");
-      await until("ai-cohosted-model-now");
+      await until("ai-cohosted-model-select");
       expect(q("ai-cohosted-model")?.querySelector("h4")?.textContent).toBe("어떤 모델로 쓸까요?");
       expect(document.activeElement).toBe(q("ai-cohosted-model-anchor"));
     });
@@ -364,7 +364,7 @@ describe("CohostedAgentCard", () => {
     it("이미 연결된 채 열면 묻지 않고 제목은 「모델」이다", async () => {
       api.request.mockImplementation(serve(true));
       mount();
-      await until("ai-cohosted-model-now");
+      await until("ai-cohosted-model-select");
       expect(q("ai-cohosted-model")?.querySelector("h4")?.textContent).toBe("모델");
     });
 
@@ -389,7 +389,7 @@ describe("CohostedAgentCard", () => {
       );
       mount();
       await until("model-login-shell");
-      await until("ai-cohosted-model-now");
+      await until("ai-cohosted-model-select");
       await waitFor(() => expect(q("model-login-in-anthropic")).not.toBeNull());
       const shell = q("model-login-shell");
       expect(shell?.textContent).not.toContain("hermes auth add anthropic");

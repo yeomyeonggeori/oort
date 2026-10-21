@@ -647,7 +647,9 @@ async function installRoutes(context, state) {
 async function login(page) {
   await page.goto(origin, { waitUntil: "domcontentloaded" });
   const connect = page.locator(ONBOARDING_SURFACE);
-  const nav = page.getByTestId("nav-workstreams");
+  // 로그인된 셸의 표지는 사이드바 「작업」 줄이다. 작업 흐름 입구는 ADR-0202 D6(#3842)이
+  // 걷었고(#4163), 목록은 주소(`#/workstreams`)로 열린다.
+  const nav = page.getByTestId("nav-work");
   await Promise.race([
     connect.first().waitFor({ timeout: 30_000 }).catch(() => {}),
     nav.waitFor({ timeout: 30_000 }).catch(() => {}),
@@ -662,7 +664,9 @@ async function login(page) {
 }
 
 async function openList(page) {
-  await page.getByTestId("nav-workstreams").click();
+  await page.evaluate(() => {
+    window.location.hash = "#/workstreams";
+  });
   await page.getByTestId("workstream-route").waitFor();
 }
 

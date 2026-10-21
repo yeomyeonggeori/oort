@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Loader2, Monitor } from "lucide-react";
 import { Button } from "@/design/ui/button";
 import { ListboxSelect } from "@/design/ui/listbox-select";
@@ -104,6 +104,7 @@ export function HostPicker({
   confirmTestId: string;
 }) {
   const [pickedId, setPickedId] = useState<string | null>(null);
+  const fieldRef = useRef<HTMLDivElement>(null);
 
   // 고아 세션의 자격 호스트는 살아 있는 투영이라 이 폼이 열려 있는 동안에도
   // 줄어들 수 있다. 고른 것이 사라지면 첫 번째로 되돌아간다 — effect로
@@ -129,7 +130,8 @@ export function HostPicker({
       aria-labelledby={labelId}
       data-testid={groupTestId}
     >
-      <div className="flex min-w-0 flex-col gap-1">
+      {/* 좁은 칸에서 목록이 위로 뒤집혀도 라벨을 가리지 않게, 목록은 라벨+칸 상자에 붙는다(#4131). */}
+      <div ref={fieldRef} className="flex min-w-0 flex-col gap-1">
         <label
           id={labelId}
           htmlFor={selectId}
@@ -143,6 +145,7 @@ export function HostPicker({
         <ListboxSelect
           id={selectId}
           aria-labelledby={labelId}
+          anchorRef={fieldRef}
           value={chosen.id}
           options={targets.map((host) => ({ value: host.id, label: host.displayName }))}
           placeholder={copy.group}
