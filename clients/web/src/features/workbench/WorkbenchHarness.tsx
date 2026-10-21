@@ -112,8 +112,11 @@ export function WorkbenchHarness() {
       <header className="flex flex-wrap items-center gap-4">
         <h1 className="text-title font-medium">작업 공간 격자</h1>
         <div className="flex min-w-0 items-center gap-2 text-meta text-ink-muted">
-          <span id="workbench-session-label">세션</span>
+          <label id="workbench-session-label" htmlFor="workbench-session-select-field">
+            세션
+          </label>
           <ListboxSelect
+            id="workbench-session-select-field"
             aria-labelledby="workbench-session-label"
             data-testid="workbench-session-select"
             value={session}

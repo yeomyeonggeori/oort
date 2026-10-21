@@ -47,7 +47,7 @@ export function MemberAvatar({
         "flex shrink-0 items-center justify-center overflow-hidden font-semibold",
         SIZE_CLASS[size],
         identity.kind === "agent" ? "rounded-sm" : "rounded-full",
-        avatarSurfaceClass(identity.kind, member?.id),
+        avatarSurfaceClass(identity.kind, member?.id, imageSrc !== null),
         className
       )}
     >

@@ -75,4 +75,33 @@ describe("HostPicker 호스트 칸은 앱이 그린 listbox (#4128)", () => {
     fireEvent.click(box);
     expect(screen.queryByRole("listbox")).toBeNull();
   });
+
+  it("라벨을 누르면 칸이 열린다 (#4131)", () => {
+    mount();
+    fireEvent.click(screen.getByText("인수할 호스트", { selector: "label" }));
+    expect(screen.getByTestId("picker-select").getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("listbox", { name: "인수할 호스트" })).toBeTruthy();
+  });
+
+  it("목록은 라벨+칸 상자에 붙는다 — 위로 뒤집혀도 라벨을 가리지 않는다 (#4131)", async () => {
+    // 상자(라벨+칸)는 100~220, 칸은 150~200. jsdom 에서 목록은 위로 뒤집힌다: 단추에 붙으면 y=146(라벨을 덮음), 상자에 붙으면 y=96(라벨 위).
+    const spy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        const box = this.getAttribute("role") === "combobox" ? [150, 200] : [100, 220];
+        return { top: box[0], bottom: box[1], left: 0, right: 200, width: 200, height: box[1] - box[0], x: 0, y: box[0], toJSON() {} } as DOMRect;
+      });
+    try {
+      mount();
+      fireEvent.click(screen.getByTestId("picker-select"));
+      const wrapper = await vi.waitFor(() => {
+        const el = document.querySelector<HTMLElement>("[data-radix-popper-content-wrapper]");
+        if (!el || !/px, [-\d.]+px/.test(el.style.transform)) throw new Error("not placed");
+        return el;
+      });
+      expect(wrapper.style.transform).toMatch(/translate\([-\d.]+px, 96px\)/);
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });

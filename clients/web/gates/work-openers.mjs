@@ -1,9 +1,10 @@
 // TC-1 (#1758) opener helpers.
 //
 // 헤더 SquareTerminal = 하단 도크 (`open-terminal-dock`).
-// 우측 WorkPanel = 사이드바 「작업 콘솔」 (`nav-work-console` →
-// `open-work-panel` → `?work-panel=1`). 헤더 testid 를 `open-work-panel` 로
-// 남기면 게이트가 도크를 패널로 착각한다.
+// 우측 WorkPanel = 작업 콘솔(`/work?view=console`) → `open-work-panel` →
+// `?work-panel=1`. 사이드바 「작업 콘솔」 줄(`nav-work-console`)은 ADR-0202 D6(#3842)이
+// 「작업」 한 줄로 합치며 걷었다. 콘솔은 주소로 열린다(#4163). 헤더 testid 를
+// `open-work-panel` 로 남기면 게이트가 도크를 패널로 착각한다.
 // #2753: 도크는 isSurfaceProvided("work") 뒤에 있다. 이 헬퍼는 그 표면을
 // 선언한 빌드 모드(serverSurfaces GATE_FIXTURE_SURFACES)에서만 부른다.
 
@@ -13,10 +14,17 @@ export async function openTerminalDock(page) {
   await page.getByTestId("terminal-dock").waitFor();
 }
 
+/** 작업 콘솔을 주소(`#/work?view=console`)로 연다. 사이드바 입구는 없다(#3842). */
+export async function openWorkConsole(page) {
+  await page.evaluate(() => {
+    window.location.hash = "#/work?view=console";
+  });
+  await page.getByTestId("work-console-route").waitFor();
+}
+
 /** 우측 WorkPanel. 작업 콘솔 경유 — 헤더를 누르지 않는다. */
 export async function openWorkPanelViaConsole(page, { allowHashFallback = false } = {}) {
-  await page.getByTestId("nav-work-console").click();
-  await page.getByTestId("work-console-route").waitFor();
+  await openWorkConsole(page);
   // 문은 고른 세션의 채널만 가리킨다 (#1758 H-4). 세션이 있으면 첫 행을 고르고
   // 그 버튼을 누른다. 빈/오류 콘솔의 해시 우회는 호출자가 명시해야 한다
   // (#1766 R2-N2: 기본이 우회면 버튼이 깨져도 두 레인이 초록으로 남는다).

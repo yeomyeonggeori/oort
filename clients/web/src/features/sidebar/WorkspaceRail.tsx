@@ -130,7 +130,8 @@ export function WorkspaceRail({
           <img
             src={avatarDataUrl}
             alt=""
-            className="size-full rounded-md object-cover"
+            // #4162: 거의 흰 사진이 흰 현재 타일에 녹지 않게 사진 아바타와 같은 윤곽(--avatar-edge)을 두른다.
+            className="size-full rounded-md border border-avatar-edge object-cover"
             data-testid="workspace-avatar-image"
           />
         ) : (

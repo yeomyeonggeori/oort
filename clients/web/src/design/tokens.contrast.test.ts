@@ -1322,6 +1322,48 @@ describe("avatar tones (#4148)", () => {
       }
     });
   }
+  // #4150 design-review Medium: 이끼·모래가 성공·경고색과 가까웠다. 글자색은 상태 글자색(ok·warn·danger)과,
+  // 채움은 성공·경고·에이전트·위험 채움과 OKLab 거리 하한을 둔다(데님은 에이전트 남색에 붙어 뺐다). 옛 이끼·모래 값은 이 하한 밑이다.
+  for (const [scheme, label] of [[0, "라이트"], [1, "다크"]] as const) {
+    it(`${label}: 아바타 글자색이 성공·경고·위험·에이전트 글자색과 deltaE 0.09 이상 떨어진다`, () => {
+      for (const n of TONES) {
+        for (const state of ["ok", "warn", "danger", "agent"]) {
+          expect(deltaE(pick(`avatar-${n}`, scheme), pick(state, scheme)), `avatar-${n} vs ${state}`).toBeGreaterThanOrEqual(0.09);
+        }
+      }
+    });
+    it(`${label}: 아바타 채움이 성공·경고·에이전트 채움과 deltaE 0.03, 위험 채움과 0.02 이상 떨어진다`, () => {
+      for (const n of TONES) {
+        for (const state of ["ok-soft", "warn-soft", "agent-soft"]) {
+          expect(deltaE(pick(`avatar-${n}-soft`, scheme), pick(state, scheme)), `avatar-${n} vs ${state}`).toBeGreaterThanOrEqual(0.03);
+        }
+        expect(deltaE(pick(`avatar-${n}-soft`, scheme), pick("danger-soft", scheme)), `avatar-${n} vs danger-soft`).toBeGreaterThanOrEqual(0.02);
+      }
+    });
+    it(`${label}: 사진 테두리 --avatar-edge 가 --surface·--sheet 위에서 2:1 이상이고 --line 보다 짙다`, () => {
+      for (const ground of ["surface", "sheet", "pane"]) {
+        const edge = contrast(pick("avatar-edge", scheme), pick(ground, scheme));
+        expect(edge, `avatar-edge vs ${ground}`).toBeGreaterThanOrEqual(2);
+        expect(edge, `avatar-edge vs line on ${ground}`).toBeGreaterThan(contrast(pick("line", scheme), pick(ground, scheme)));
+      }
+    });
+  }
+  // design-review M3(#4162): 같은 hex 만 아니면 통과하던 「서로 다른 색」을 거리로 잰다. 채움은 옅은 면이라 한 쌍의
+  // 채움 거리만으로는 0.02 대까지 가까워지므로, 채움 거리 + 글자색 거리의 합이 하한(0.06) 이상이어야 두 색조가 갈린다.
+  for (const [scheme, label] of [[0, "라이트"], [1, "다크"]] as const) {
+    it(`${label}: 색조 쌍마다 채움 거리 + 글자색 거리가 0.06 이상이다`, () => {
+      for (let i = 0; i < TONES.length; i += 1) {
+        for (let j = i + 1; j < TONES.length; j += 1) {
+          const a = TONES[i];
+          const b = TONES[j];
+          const sum =
+            deltaE(pick(`avatar-${a}-soft`, scheme), pick(`avatar-${b}-soft`, scheme)) +
+            deltaE(pick(`avatar-${a}`, scheme), pick(`avatar-${b}`, scheme));
+          expect(sum, `avatar-${a} vs avatar-${b}`).toBeGreaterThanOrEqual(0.06);
+        }
+      }
+    });
+  }
   it("여섯 채움이 서로 다른 색이다", () => {
     for (const scheme of [0, 1] as const) {
       expect(new Set(TONES.map((n) => pick(`avatar-${n}-soft`, scheme))).size).toBe(6);

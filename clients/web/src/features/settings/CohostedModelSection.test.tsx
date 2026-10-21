@@ -31,6 +31,7 @@ const MODELS = {
         { id: "claude-opus-5", featured: true, current: false },
         { id: "claude-haiku-4-5", featured: true, current: false },
         { id: "claude-3-opus", featured: false, current: false },
+        { id: "claude-fable-5", featured: false, current: false },
       ],
     },
     { provider: "openai-codex", models: [{ id: "gpt-5.5", featured: true, current: false }] },
@@ -100,36 +101,39 @@ afterEach(() => {
 describe("CohostedModelSection", () => {
   it("says which model answers now, with the provider", async () => {
     mount();
-    const now = await until("ai-cohosted-model-now");
+    const now = await until("ai-cohosted-model-select");
     expect(now.textContent).toBe("Claude Sonnet 5.5 · Anthropic");
     expect(calls()).toEqual([`GET ${MODELS_PATH}`]);
   });
 
   it("choosing a model PUTs provider and model together, then says so in place", async () => {
     mount();
-    await until("ai-cohosted-model-now");
+    await until("ai-cohosted-model-select");
     chooseListbox(q("ai-cohosted-model-select"), `openai-codex\u0000gpt-5.5`);
     await until("ai-cohosted-model-saved");
     expect(putBodies()).toEqual([{ provider: "openai-codex", model: "gpt-5.5" }]);
     expect(calls().filter((c) => c.startsWith("PUT"))).toEqual([`PUT /v1/workspaces/${WS}/cohosted-agent/model`]);
-    expect(q("ai-cohosted-model-now")?.textContent).toBe("gpt-5.5 · OpenAI Codex");
+    expect(q("ai-cohosted-model-select")?.textContent).toBe("gpt-5.5 · OpenAI Codex");
     expect(q("ai-cohosted-model-saved")?.textContent).toContain("모델을 바꿨어요");
   });
 
   it("shows featured models only by default and opens the rest behind 전체 보기", async () => {
     mount();
-    await until("ai-cohosted-model-now");
+    await until("ai-cohosted-model-select");
     const featured = listboxChoices(q("ai-cohosted-model-select")).map((c) => c.value.split("\u0000")[1]);
     expect(featured).toEqual(["claude-sonnet-5-5", "claude-opus-5", "claude-haiku-4-5", "gpt-5.5"]);
     await act(async () => q("ai-cohosted-model-toggle")?.click());
     const all = listboxChoices(q("ai-cohosted-model-select")).map((c) => c.value.split("\u0000")[1]);
     expect(all).toContain("claude-3-opus");
+    // 성재 결정(2026-10-21, #4161): 모델 차단 목록이 없다. 로그인된 제공자의 모델은 Fable 까지 전부 「전체 보기」에 든다.
+    expect(all).toContain("claude-fable-5");
+    expect(all).toEqual(MODELS.providers.flatMap((p) => p.models.map((m) => m.id)));
     expect(q("ai-cohosted-model-toggle")?.textContent).toBe("추천만 보기");
   });
 
   it("choosing the model already in use sends nothing", async () => {
     mount();
-    await until("ai-cohosted-model-now");
+    await until("ai-cohosted-model-select");
     chooseListbox(q("ai-cohosted-model-select"), `anthropic\u0000claude-sonnet-5-5`);
     await act(async () => undefined);
     expect(putBodies()).toEqual([]);
@@ -140,11 +144,11 @@ describe("CohostedModelSection", () => {
       init?.method === "PUT" ? Promise.reject(new ApiError(422, "x", "cohosted_model_not_offered")) : Promise.resolve(MODELS)
     );
     mount();
-    await until("ai-cohosted-model-now");
+    await until("ai-cohosted-model-select");
     chooseListbox(q("ai-cohosted-model-select"), `anthropic\u0000claude-opus-5`);
     const banner = await until("ai-cohosted-model-save-error");
     expect(banner.textContent).toContain("다시 골라");
-    expect(q("ai-cohosted-model-now")?.textContent).toBe("Claude Sonnet 5.5 · Anthropic");
+    expect(q("ai-cohosted-model-select")?.textContent).toBe("Claude Sonnet 5.5 · Anthropic");
     expect(q("ai-cohosted-model-saved")).toBeNull();
     await waitFor(() => expect(calls().filter((c) => c === `GET ${MODELS_PATH}`).length).toBe(2));
   });
@@ -172,19 +176,48 @@ describe("CohostedModelSection", () => {
     const banner = await until("ai-cohosted-model-error");
     expect(banner.textContent).toContain("모델 목록을 주지 않았어요");
     await act(async () => banner.querySelector("button")?.click());
-    await until("ai-cohosted-model-now");
+    await until("ai-cohosted-model-select");
   });
 
   it("right after connecting it asks 「어떤 모델로 쓸까요?」 instead of the plain title", async () => {
     mount({ invite: true });
-    await until("ai-cohosted-model-now");
+    await until("ai-cohosted-model-select");
     expect(q("ai-cohosted-model")?.querySelector("h4")?.textContent).toBe("어떤 모델로 쓸까요?");
   });
 
   it("offline locks the choice and says why", async () => {
     mount({ offline: true });
-    await until("ai-cohosted-model-now");
+    await until("ai-cohosted-model-select");
     expect(q("ai-cohosted-model-select")?.hasAttribute("disabled")).toBe(true);
     expect(q("ai-cohosted-model-offline")).not.toBeNull();
+  });
+
+  it("says the current model once: the select carries it, no second bold sentence (#4161)", async () => {
+    mount();
+    await until("ai-cohosted-model-select");
+    const text = q("ai-cohosted-model")?.textContent ?? "";
+    expect(text.split("Claude Sonnet 5.5 · Anthropic").length - 1).toBe(1);
+    expect(q("ai-cohosted-model-now")).toBeNull();
+  });
+
+  it("the save notice has its slot from the start: same live region before, during and after (#4161)", async () => {
+    mount();
+    await until("ai-cohosted-model-select");
+    const slot = q("ai-cohosted-model-status");
+    expect(slot?.getAttribute("role")).toBe("status");
+    expect(slot?.textContent).toBe("");
+    chooseListbox(q("ai-cohosted-model-select"), `openai-codex\u0000gpt-5.5`);
+    await until("ai-cohosted-model-saved");
+    expect(q("ai-cohosted-model-status")).toBe(slot);
+    expect(slot?.contains(q("ai-cohosted-model-saved"))).toBe(true);
+  });
+
+  it("the focus target is a named group (#4161)", async () => {
+    mount();
+    await until("ai-cohosted-model-select");
+    const anchor = q("ai-cohosted-model-anchor");
+    expect(anchor?.getAttribute("role")).toBe("group");
+    const id = anchor?.getAttribute("aria-labelledby") ?? "";
+    expect(document.getElementById(id)?.textContent).toBe("모델");
   });
 });
