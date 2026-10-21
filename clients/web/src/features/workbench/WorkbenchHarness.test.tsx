@@ -39,4 +39,15 @@ describe("WorkbenchHarness 세션 칸 (#4128)", () => {
     expect(box.getAttribute("data-value")).not.toBe(before);
     expect(screen.queryByRole("listbox")).toBeNull();
   });
+
+  it("「세션」 라벨을 누르면 칸이 열리고 포커스가 목록으로 간다 (#4131)", () => {
+    mount();
+    const label = screen.getByText("세션", { selector: "label" });
+    expect(label.getAttribute("for")).toBe(
+      screen.getByTestId("workbench-session-select").getAttribute("id")
+    );
+    fireEvent.click(label);
+    expect(screen.getByTestId("workbench-session-select").getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("listbox", { name: "세션" })).toBeTruthy();
+  });
 });
