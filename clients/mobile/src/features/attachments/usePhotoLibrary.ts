@@ -117,6 +117,8 @@ export function usePhotoLibrary({
   const catalog = useRef(new Map<string, PhotoAsset>());
   const cursor = useRef<string | null>(null);
   const generation = useRef(0);
+  // 다음 쪽을 부르는 중인 세대. 같은 커서로 두 번 나가지 않게 한다(`onEndReached` 는 연달아 온다).
+  const moreInFlight = useRef<number | null>(null);
   const busy = useRef(false);
   const portsRef = useRef(ports);
   portsRef.current = ports;
@@ -164,7 +166,8 @@ export function usePhotoLibrary({
     if (!canReadPhotos(permissionRef.current as PhotoPermission)) return;
     const mine = generation.current;
     const after = cursor.current;
-    if (after === null) return;
+    if (after === null || moreInFlight.current === mine) return;
+    moreInFlight.current = mine;
     setLoadingMore(true);
     try {
       const page = await portsRef.current.listPhotos(after, PHOTO_CARD.pageSize);
@@ -180,6 +183,7 @@ export function usePhotoLibrary({
       // 커서가 가리키던 자산이 사라졌다(보관함이 바뀌었다). 첫 쪽부터 다시 한다.
       if (mine === generation.current) void loadFirst();
     } finally {
+      if (moreInFlight.current === mine) moreInFlight.current = null;
       if (mine === generation.current) setLoadingMore(false);
     }
   }, [loadFirst]);

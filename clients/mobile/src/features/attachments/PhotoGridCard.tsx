@@ -4,6 +4,7 @@ import {
   FlatList,
   Image,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -357,8 +358,12 @@ function PermissionPane({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  // 글자를 키우면 설명이 카드(고정 높이)보다 길어질 수 있다 — 잘리지 않고 스크롤된다.
   return (
-    <View style={[styles.pane, {paddingBottom: bottomClear}]} testID={testID}>
+    <ScrollView
+      contentContainerStyle={[styles.pane, {paddingBottom: bottomClear}]}
+      showsVerticalScrollIndicator={false}
+      testID={testID}>
       <Text style={styles.paneTitle}>{title}</Text>
       <Text style={styles.paneDetail}>{detail}</Text>
       <Pressable
@@ -384,7 +389,7 @@ function PermissionPane({
         testID="photo-pick-from-all">
         <Text style={styles.secondaryLabel}>{secondaryLabel}</Text>
       </Pressable>
-    </View>
+    </ScrollView>
   );
 }
 
@@ -462,7 +467,7 @@ const buildStyles = (color: Palette) =>
       color: color.onAccent,
     },
     pane: {
-      flex: 1,
+      flexGrow: 1,
       paddingHorizontal: space.xl,
       paddingTop: space.xl,
       alignItems: 'center',

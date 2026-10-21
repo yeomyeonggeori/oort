@@ -581,6 +581,19 @@ describe('페이지 로딩 — 커서로 이어 받는다', () => {
     expect(lib.ports.listPhotos).toHaveBeenLastCalledWith('a60', PHOTO_CARD.pageSize);
   });
 
+  it('끝에 연달아 닿아도 같은 커서로 두 번 나가지 않는다', async () => {
+    const lib = makeLibrary({assets: makeAssets(100)});
+    await renderCard(lib.ports);
+    await screen.findByTestId('photo-grid');
+    await act(async () => {
+      fireEvent(screen.getByTestId('photo-grid'), 'endReached');
+      fireEvent(screen.getByTestId('photo-grid'), 'endReached');
+      fireEvent(screen.getByTestId('photo-grid'), 'endReached');
+    });
+    await waitFor(() => expect(lib.ports.listPhotos).toHaveBeenCalledTimes(2));
+    expect(lib.ports.listPhotos.mock.calls.filter(call => call[0] === 'a60')).toHaveLength(1);
+  });
+
   it('더 없으면 끝에 닿아도 부르지 않는다', async () => {
     const lib = makeLibrary({assets: makeAssets(9)});
     await renderCard(lib.ports);
