@@ -615,8 +615,11 @@ describe('#1480 멘션 시트 상한 — 동적 타입 비례 + 도크가 열을
   const AX_XXL = 3.143;
   const H = 874;
   const TOUCH_TARGET = 44;
-  /** `styles.bar` 의 위아래 여백. 도크가 시트·입력창 말고 지는 것. */
-  const BAR_CHROME = 8 * 2;
+  /**
+   * `styles.bar` 의 위아래 여백(5 × 2)과 도크 위 여백(`space.sm` 8). 도크가 시트·입력창 말고 지는 것.
+   * 알약이 Buzz 동심(원 36 · 여백 9, #4179)이 되면서 안쪽 줄 여백이 4 → 5 라 16 → **18** 이다.
+   */
+  const BAR_CHROME = 5 * 2 + 8;
 
   /**
    * iOS 동적 타입 배수 **사다리 전부** (`RCTAccessibilityManager` 기본표).
@@ -710,7 +713,7 @@ describe('#1480 멘션 시트 상한 — 동적 타입 비례 + 도크가 열을
     // 기기)에서 열이 허락하는 정수 행이 정확히 넷이고, 다섯은 안 든다.
     const budget = composerColumnBudget(1, H);
     const room = budget.column - budget.composer - BAR_CHROME;
-    expect(room).toBeCloseTo(191.9, 1);
+    expect(room).toBeCloseTo(189.9, 1); // #4179 전 191.9 — 도크 크롬 16 → 18
     expect(Math.floor(room / TOUCH_TARGET)).toBe(4);
     expect(5 * TOUCH_TARGET).toBeGreaterThan(room);
     expect(mentionSheetMaxHeight(1, H)).toBe(4 * TOUCH_TARGET);
@@ -727,10 +730,10 @@ describe('#1480 멘션 시트 상한 — 동적 타입 비례 + 도크가 열을
         return Math.floor(room / mentionRowHeight(fontScale)) > 4;
       });
     expect(capBindsAt(1)).toEqual([956, 1024, 1032, 1080, 1180, 1366]);
-    // 그 문턱 자체도 값이다(창 × 0.39 − 입력창 133 − 도크 크롬 16 ≥ 5 × 44):
-    // 926 은 안 물고 956 은 문다.
-    expect((926 * 0.39 - 133 - 16) / TOUCH_TARGET).toBeLessThan(5);
-    expect((956 * 0.39 - 133 - 16) / TOUCH_TARGET).toBeGreaterThanOrEqual(5);
+    // 그 문턱 자체도 값이다(창 × 0.39 − 입력창 133 − 도크 크롬 18 ≥ 5 × 44):
+    // 926 은 안 물고 956 은 문다. (#4179 전 크롬 16 → 문턱 946, 지금 951)
+    expect((926 * 0.39 - 133 - BAR_CHROME) / TOUCH_TARGET).toBeLessThan(5);
+    expect((956 * 0.39 - 133 - BAR_CHROME) / TOUCH_TARGET).toBeGreaterThanOrEqual(5);
 
     // **946 은 배수 1 한정이다** (회전 2 nitpick). 사다리 아래쪽에서는 입력창이
     // 작아져 문턱이 내려가고 — 0.823 에서는 883.5pt 라 926 도 문다 — 위쪽에서는
@@ -793,12 +796,14 @@ describe('#1480 멘션 시트 상한 — 동적 타입 비례 + 도크가 열을
    * 넘었다. 이 띠는 새로 생긴 결함이 아니라 좁아진 옛 결함이다.
    */
   const FLOOR_WINS: ReadonlyArray<readonly [number, number, number, number]> = [
-    [667, 3.143, 12.7, 98.4],
-    [667, 3.571, 45.3, 118.1],
+    // 초과분은 #4179 로 안쪽 줄 여백이 4 → 5 가 되며 각각 +2 다(도크 크롬 16 → 18).
+    // 자리 자체는 그대로 네 곳이다 — 새로 거짓이 되는 자리는 없다.
+    [667, 3.143, 14.7, 100.4],
+    [667, 3.571, 47.3, 120.1],
     // 736(iPhone 8 Plus)은 지원 하한이 iOS 16.4 라서 목록에 있다 — 격자를 「iOS
     // 26 이 도는 기기」로 세웠던 첫 판은 이 줄을 통째로 못 봤다(회전 2 M2).
-    [736, 3.571, 18.4, 91.2],
-    [744, 3.571, 15.2, 88.1],
+    [736, 3.571, 20.4, 93.2],
+    [744, 3.571, 17.2, 90.1],
   ];
 
   const dockOf = (fontScale: number, height: number) =>
@@ -859,10 +864,10 @@ describe('#1480 멘션 시트 상한 — 동적 타입 비례 + 도크가 열을
   });
 
   it('옛 값이었다면 그 자리에서 거짓이다 — 회귀 표식', () => {
-    // 티켓이 인용한 산수 그대로: 도크 366.4 vs 열 340.9.
+    // 티켓이 인용한 산수: 도크 366.4 vs 열 340.9 — #4179 로 바 여백이 16 → 18 이라 도크 368.4.
     const budget = composerColumnBudget(AX_XXL, H);
     expect(180 + budget.composer + BAR_CHROME).toBeGreaterThan(budget.column);
-    expect(180 + budget.composer + BAR_CHROME).toBeCloseTo(366.4, 1);
+    expect(180 + budget.composer + BAR_CHROME).toBeCloseTo(368.4, 1);
     expect(budget.column).toBeCloseTo(340.9, 1);
   });
 

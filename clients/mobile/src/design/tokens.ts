@@ -607,8 +607,12 @@ export const ds2Radius = {
   row: 14,
   /** 카드·묶음. */
   card: 20,
-  /** 컴포저. */
-  composer: 26,
+  /**
+   * 컴포저 — 원 반경 18 + 원 ↔ 알약 가장자리 9 (#4179). 시안 A 의 26 이던 것을 Buzz 실측
+   * (한 줄 높이 53.3pt)에 맞춰 올렸다: 두 원이 끝 반원과 동심이려면 반경이 원 반경 + 사방
+   * 여백이어야 한다(`CONV.composerRadius`, 관계는 `composerPill.test.tsx`).
+   */
+  composer: 27,
   /** 페이지 시트 위 모서리. */
   sheet: 30,
   pill: 999,
