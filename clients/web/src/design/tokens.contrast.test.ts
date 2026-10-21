@@ -1348,6 +1348,22 @@ describe("avatar tones (#4148)", () => {
       }
     });
   }
+  // design-review M3(#4162): 같은 hex 만 아니면 통과하던 「서로 다른 색」을 거리로 잰다. 채움은 옅은 면이라 한 쌍의
+  // 채움 거리만으로는 0.02 대까지 가까워지므로, 채움 거리 + 글자색 거리의 합이 하한(0.06) 이상이어야 두 색조가 갈린다.
+  for (const [scheme, label] of [[0, "라이트"], [1, "다크"]] as const) {
+    it(`${label}: 색조 쌍마다 채움 거리 + 글자색 거리가 0.06 이상이다`, () => {
+      for (let i = 0; i < TONES.length; i += 1) {
+        for (let j = i + 1; j < TONES.length; j += 1) {
+          const a = TONES[i];
+          const b = TONES[j];
+          const sum =
+            deltaE(pick(`avatar-${a}-soft`, scheme), pick(`avatar-${b}-soft`, scheme)) +
+            deltaE(pick(`avatar-${a}`, scheme), pick(`avatar-${b}`, scheme));
+          expect(sum, `avatar-${a} vs avatar-${b}`).toBeGreaterThanOrEqual(0.06);
+        }
+      }
+    });
+  }
   it("여섯 채움이 서로 다른 색이다", () => {
     for (const scheme of [0, 1] as const) {
       expect(new Set(TONES.map((n) => pick(`avatar-${n}-soft`, scheme))).size).toBe(6);
