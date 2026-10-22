@@ -35,7 +35,7 @@ use momo_auth::device_key::{
     revoke_member_device_keys_in_tx, revoke_session_device_keys_in_tx, DeviceKeyRevocationReason,
 };
 use momo_db::{DbError, PgConnection};
-use momo_messaging::{hold_lineage_schedules_in_tx, hold_member_schedules_in_tx};
+use momo_messaging::{hold_lineage_schedules_in_tx, hold_member_schedules_in_tx, RevocationCause};
 use momo_push::{invalidate_member_push_tokens_in_tx, invalidate_session_push_tokens_in_tx};
 use uuid::Uuid;
 
@@ -52,13 +52,15 @@ pub(crate) enum LineageEnd {
 }
 
 impl LineageEnd {
-    /// Whether this end holds the scheduled messages its lineage armed (ADR-0208 D14 point 2).
-    /// A logout does not: the author chose to leave, and scheduling a message to go out while
-    /// they are away is what the feature is for.
-    fn holds_schedules(self) -> bool {
+    /// Whether this end holds the scheduled messages its lineage armed (ADR-0208 D14 point 2),
+    /// and the cause the audit rows of the held ones carry. A logout does not hold: the author
+    /// chose to leave, and scheduling a message to go out while they are away is what the feature
+    /// is for.
+    pub(crate) fn schedule_hold_cause(self) -> Option<RevocationCause> {
         match self {
-            LineageEnd::Logout => false,
-            LineageEnd::DeviceUnlinked | LineageEnd::RefreshReuse => true,
+            LineageEnd::Logout => None,
+            LineageEnd::DeviceUnlinked => Some(RevocationCause::DeviceUnlinked),
+            LineageEnd::RefreshReuse => Some(RevocationCause::RefreshReuse),
         }
     }
 
@@ -86,18 +88,21 @@ pub(crate) async fn end_session_lineage_in_tx(
             .await
             .map_err(DbError::from)?;
     }
-    if end.holds_schedules() {
-        hold_lineage_schedules_in_tx(conn, workspace_id, member_id, session_id).await?;
+    if let Some(cause) = end.schedule_hold_cause() {
+        hold_lineage_schedules_in_tx(conn, workspace_id, member_id, session_id, cause).await?;
     }
     Ok(())
 }
 
 /// Every session of the member ended (password change or reset, suspension,
-/// removal, leaving the workspace, an admin ending the member's sessions).
+/// removal, leaving the workspace, an admin ending the member's sessions). `cause` is the path
+/// that ended them; it is recorded, as an enumerated value, on the audit rows of the scheduled
+/// messages this holds.
 pub(crate) async fn end_member_sessions_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     member_id: Uuid,
+    cause: RevocationCause,
 ) -> Result<(), DbError> {
     invalidate_member_push_tokens_in_tx(conn, workspace_id, member_id).await?;
     revoke_member_device_keys_in_tx(conn, workspace_id, member_id)
@@ -105,7 +110,7 @@ pub(crate) async fn end_member_sessions_in_tx(
         .map_err(DbError::from)?;
     // ADR-0208 D14: nothing this person armed may go out on its own now that every sign-in of
     // theirs is gone (the password changed, they were suspended, removed, or left).
-    hold_member_schedules_in_tx(conn, workspace_id, member_id).await?;
+    hold_member_schedules_in_tx(conn, workspace_id, member_id, cause).await?;
     Ok(())
 }
 
@@ -131,8 +136,14 @@ mod tests {
     /// token do.
     #[test]
     fn only_a_logout_leaves_the_lineages_schedules_alone() {
-        assert!(!LineageEnd::Logout.holds_schedules());
-        assert!(LineageEnd::DeviceUnlinked.holds_schedules());
-        assert!(LineageEnd::RefreshReuse.holds_schedules());
+        assert_eq!(LineageEnd::Logout.schedule_hold_cause(), None);
+        assert_eq!(
+            LineageEnd::DeviceUnlinked.schedule_hold_cause(),
+            Some(RevocationCause::DeviceUnlinked)
+        );
+        assert_eq!(
+            LineageEnd::RefreshReuse.schedule_hold_cause(),
+            Some(RevocationCause::RefreshReuse)
+        );
     }
 }

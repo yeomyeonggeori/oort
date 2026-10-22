@@ -439,6 +439,7 @@ pub async fn revoke_device(
                         workspace_id,
                         member_id,
                         session_id,
+                        momo_messaging::RevocationCause::DeviceUnlinked,
                     )
                     .await?;
                 }

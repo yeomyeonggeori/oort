@@ -31,7 +31,9 @@ use axum::extract::rejection::JsonRejection;
 use axum::extract::{FromRequest, Path, Query, Request, State};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
-use momo_auth::{active_workspace_role, session_id_of, Principal};
+use momo_auth::{
+    active_workspace_role, lock_session_for_registration, Principal, RegistrationSession,
+};
 use momo_db::{DbError, PgConnection};
 use momo_messaging::{
     cancel_schedule_in_tx, clamp_schedule_list_limit, count_pending_in_tx, db_now_in_tx,
@@ -262,10 +264,13 @@ async fn bound_lock_wait(conn: &mut PgConnection) -> Result<(), DbError> {
     Ok(())
 }
 
-fn is_lock_timeout(error: &DbError) -> bool {
+/// `55P03` (the 3-second lock budget ran out) and `40P01` (the deadlock detector chose this
+/// transaction): both mean "a lock race, nothing was written, ask again" — `scheduled_busy`.
+fn is_lock_contention(error: &DbError) -> bool {
     matches!(
         error,
-        DbError::Sqlx(momo_db::sqlx::Error::Database(db)) if db.code().as_deref() == Some("55P03")
+        DbError::Sqlx(momo_db::sqlx::Error::Database(db))
+            if matches!(db.code().as_deref(), Some("55P03" | "40P01"))
     )
 }
 
@@ -273,7 +278,7 @@ fn settle<T>(context: &str, outcome: Result<T, Refuse>) -> Result<T, ApiError> {
     match outcome {
         Ok(value) => Ok(value),
         Err(Refuse::Api(error)) => Err(error),
-        Err(Refuse::Db(error)) if is_lock_timeout(&error) => Err(scheduled_busy()),
+        Err(Refuse::Db(error)) if is_lock_contention(&error) => Err(scheduled_busy()),
         Err(Refuse::Db(error)) => Err(ApiError::internal(context, error)),
     }
 }
@@ -379,15 +384,45 @@ async fn require_live_human(
     Ok(())
 }
 
-/// The sign-in lineage that is writing this content (D14 `armed_session_id`). `None` for a
-/// credential minted before migration 088 and for one the request has no token id for.
-async fn requester_session(
+/// Share-lock the token row of the credential making this request and read its sign-in lineage
+/// (D14 `armed_session_id`) — **the first thing in the transaction, before any schedule row or
+/// counter is locked**. Two things depend on that order (independent review of 97286b101, #1):
+///
+/// * **The race.** A member-wide session end or a lineage end locks the session's token rows
+///   `FOR UPDATE`, revokes them, and *then* holds the schedules those sign-ins armed. A request the
+///   auth middleware accepted a moment earlier, and which wrote its schedule after that hold had
+///   run, would leave a `pending` row armed by a sign-in that no longer exists — and after a password
+///   change, a reset or an unlinked device nothing later stops it from going out. With this lock the
+///   two serialize: the request first → the sweep waits for it and its hold sees the row; the sweep
+///   first → this read waits, finds the row revoked, and the request is a 401.
+/// * **The deadlock.** Every one of these requests writes an audit row that references its token
+///   (`audit_log.via_token_id`), which takes a `FOR KEY SHARE` on the same token row. A request that
+///   had already locked its schedule row would wait there for the token row while the sweep — which
+///   holds the token row — waits for the schedule row: 40P01. Token row first, schedule row second is
+///   the order the sweep uses as well, so there is no cycle for the detector to break (and a detector
+///   that picks the sweep would fail somebody's password change).
+///
+/// The lineage is `None` for a credential with no session row or no lineage (minted before migration
+/// 088); a request like that leaves the lineage that is already on a row where it is.
+async fn lock_requester_session(
     conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
     token_id: Option<Uuid>,
 ) -> Result<Option<Uuid>, Refuse> {
-    match token_id {
-        Some(token_id) => Ok(session_id_of(conn, token_id).await.map_err(DbError::from)?),
-        None => Ok(None),
+    let Some(token_id) = token_id else {
+        return Ok(None);
+    };
+    match lock_session_for_registration(conn, workspace_id, member_id, token_id)
+        .await
+        .map_err(DbError::from)?
+    {
+        RegistrationSession::Live(lineage) => Ok(lineage),
+        RegistrationSession::NotASession => Ok(None),
+        // The session ended after the middleware accepted it: the middleware's own answer.
+        RegistrationSession::Ended => Err(Refuse::Api(ApiError::unauthorized(
+            "token has been revoked",
+        ))),
     }
 }
 
@@ -426,6 +461,10 @@ pub async fn create(
 
     let outcome = request_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
+            // The session first (see `lock_requester_session`), before the advisory lock below and
+            // before any row this request will write.
+            let armed_session_id =
+                lock_requester_session(conn, workspace_id, member_id, token_id).await?;
             require_live_human(conn, workspace_id, member_id).await?;
             // Before the lookup, not only before the count: two concurrent retries of one create
             // must both reach the lookup *after* the first has committed (D10).
@@ -463,7 +502,6 @@ pub async fn create(
                 return Err(Refuse::Api(pending_limit_reached()));
             }
 
-            let armed_session_id = requester_session(conn, token_id).await?;
             let row = insert_schedule_in_tx(
                 conn,
                 &NewSchedule {
@@ -629,6 +667,8 @@ pub async fn update(
     let outcome = request_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
             bound_lock_wait(conn).await?;
+            // The session first (see `lock_requester_session`), then the schedule row.
+            let requester = lock_requester_session(conn, workspace_id, member_id, token_id).await?;
             require_live_human(conn, workspace_id, member_id).await?;
             let Some(row) =
                 lock_own_schedule_in_tx(conn, workspace_id, member_id, schedule_id).await?
@@ -665,11 +705,7 @@ pub async fn update(
                         .transpose()
                         .map_err(|invalid| Refuse::Api(send_at_error(invalid)))?;
                     // Moving the time does not move who last wrote the text (D14).
-                    let armed = if new_body.is_some() {
-                        requester_session(conn, token_id).await?
-                    } else {
-                        None
-                    };
+                    let armed = if new_body.is_some() { requester } else { None };
                     edit_pending_in_tx(
                         conn,
                         member_id,
@@ -692,26 +728,24 @@ pub async fn update(
                         {
                             return Err(Refuse::Api(pending_limit_reached()));
                         }
-                        let armed = requester_session(conn, token_id).await?;
                         rearm_failed_in_tx(
                             conn,
                             member_id,
                             row.id,
                             new_body.as_deref(),
                             send_at,
-                            armed,
+                            requester,
                             actor,
                         )
                         .await?
                     }
                     None => {
-                        let armed = requester_session(conn, token_id).await?;
                         edit_failed_body_in_tx(
                             conn,
                             member_id,
                             row.id,
                             new_body.as_deref().unwrap_or_default(),
-                            armed,
+                            requester,
                             actor,
                         )
                         .await?
@@ -755,6 +789,7 @@ pub async fn delete(
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let schedule_id = path_uuid(&id, BAD_ID)?;
     let member_id = principal.member_id;
+    let token_id = principal.token_id;
     let actor = ScheduleActor::Member {
         member_id,
         via_token_id: audit_via_token_id(&principal),
@@ -763,6 +798,8 @@ pub async fn delete(
     let outcome = request_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
             bound_lock_wait(conn).await?;
+            // The session first (see `lock_requester_session`), then the schedule row.
+            lock_requester_session(conn, workspace_id, member_id, token_id).await?;
             require_live_human(conn, workspace_id, member_id).await?;
             let Some(row) =
                 lock_own_schedule_in_tx(conn, workspace_id, member_id, schedule_id).await?
@@ -814,6 +851,7 @@ pub async fn send_now(
     let schedule_id = path_uuid(&id, BAD_ID)?;
     require_enabled(&state)?;
     let member_id = principal.member_id;
+    let token_id = principal.token_id;
     let via_token_id = audit_via_token_id(&principal);
     let actor = ScheduleActor::Member {
         member_id,
@@ -824,6 +862,9 @@ pub async fn send_now(
     let outcome = request_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
             bound_lock_wait(conn).await?;
+            // The session first (see `lock_requester_session`), then the schedule row: a request
+            // whose sign-in was just ended must not send what that sign-in armed.
+            lock_requester_session(conn, workspace_id, member_id, token_id).await?;
             require_live_human(conn, workspace_id, member_id).await?;
             let Some(row) =
                 lock_own_schedule_in_tx(conn, workspace_id, member_id, schedule_id).await?
@@ -963,6 +1004,67 @@ mod tests {
             .await
             .expect_err("content type");
         assert_eq!(wrong_type.status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    }
+
+    /// A database error that reports one SQLSTATE and nothing else.
+    #[derive(Debug)]
+    struct Sqlstate(&'static str);
+
+    impl std::fmt::Display for Sqlstate {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "sqlstate {}", self.0)
+        }
+    }
+
+    impl std::error::Error for Sqlstate {}
+
+    impl momo_db::sqlx::error::DatabaseError for Sqlstate {
+        fn message(&self) -> &str {
+            "test"
+        }
+        fn code(&self) -> Option<std::borrow::Cow<'_, str>> {
+            Some(self.0.into())
+        }
+        fn as_error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+        fn as_error_mut(&mut self) -> &mut (dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+        fn into_error(self: Box<Self>) -> Box<dyn std::error::Error + Send + Sync + 'static> {
+            self
+        }
+        fn kind(&self) -> momo_db::sqlx::error::ErrorKind {
+            momo_db::sqlx::error::ErrorKind::Other
+        }
+    }
+
+    fn database_error(sqlstate: &'static str) -> Refuse {
+        Refuse::Db(DbError::from(momo_db::sqlx::Error::Database(Box::new(
+            Sqlstate(sqlstate),
+        ))))
+    }
+
+    /// A lock race a request lost — the 3-second budget (`55P03`) or the deadlock detector
+    /// (`40P01`) — is "ask again", never a 500; any other database failure still is.
+    #[test]
+    fn a_lost_lock_race_is_busy_and_any_other_database_error_is_a_500() {
+        for sqlstate in ["55P03", "40P01"] {
+            let busy = settle::<()>("test", Err(database_error(sqlstate))).expect_err(sqlstate);
+            assert_eq!(
+                (busy.status, busy.code),
+                (StatusCode::CONFLICT, Some("scheduled_busy")),
+                "{sqlstate}"
+            );
+        }
+        for sqlstate in ["23505", "57014", "XX000"] {
+            let failed = settle::<()>("test", Err(database_error(sqlstate))).expect_err(sqlstate);
+            assert_eq!(
+                failed.status,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "{sqlstate} is not a lock race"
+            );
+        }
     }
 
     #[test]

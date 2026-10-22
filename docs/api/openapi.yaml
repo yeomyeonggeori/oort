@@ -12717,9 +12717,11 @@ components:
                 `pending_limit_reached` (50 waiting), `attachment_reserved`
                 (another schedule holds the file), `scheduled_too_late` (an edit
                 inside the last 30 seconds), `scheduled_already_sent`,
-                `scheduled_busy` (the row was locked for more than 3 seconds,
-                retry); 503 `scheduler_disabled` (the operator turned the
-                scheduler off); and, as the code of a refused send-now (409),
+                `scheduled_busy` (the row was locked for more than 3 seconds, or
+                the request lost a lock race with a sign-in ending; retry); 503
+                `scheduler_disabled` (the operator turned the scheduler off, or
+                the server refused its database role at boot); and, as the code
+                of a refused send-now (409),
                 the failure reason that the row now carries: `author_inactive`,
                 `not_member`, `root_unavailable`, `attachment_unavailable`,
                 `send_error`, `not_allowed`.

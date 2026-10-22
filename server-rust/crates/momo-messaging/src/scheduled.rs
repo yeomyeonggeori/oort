@@ -819,7 +819,9 @@ pub async fn record_created_in_tx(
 
 /// `PATCH` on a `pending` row: the text and/or the time. The session lineage moves only
 /// when the **text** changed (D14: it records who last wrote the content; a time-only
-/// edit is not that).
+/// edit is not that). A requester with no lineage (`armed_session_id` is `None`: a credential
+/// minted before migration 088) leaves the earlier one in place — holding too much is the safe
+/// side of "nobody can say who wrote this".
 pub async fn edit_pending_in_tx(
     conn: &mut PgConnection,
     member_id: Uuid,
@@ -834,7 +836,9 @@ pub async fn edit_pending_in_tx(
         "UPDATE scheduled_message \
             SET body = COALESCE($2, body), \
                 send_at = COALESCE($3, send_at), \
-                armed_session_id = CASE WHEN $2::text IS NOT NULL THEN $4 ELSE armed_session_id END, \
+                armed_session_id = CASE WHEN $2::text IS NOT NULL \
+                                        THEN COALESCE($4, armed_session_id) \
+                                        ELSE armed_session_id END, \
                 rev = rev + 1, updated_at = now() \
           WHERE id = $1 AND author_member_id = $5 AND status = 'pending' \
           RETURNING {SCHEDULE_COLS}"
@@ -864,7 +868,8 @@ pub async fn edit_failed_body_in_tx(
     bind_owner_guc(conn, member_id).await?;
     let row = sqlx::query(&format!(
         "UPDATE scheduled_message \
-            SET body = $2, armed_session_id = $3, rev = rev + 1, updated_at = now() \
+            SET body = $2, armed_session_id = COALESCE($3, armed_session_id), \
+                rev = rev + 1, updated_at = now() \
           WHERE id = $1 AND author_member_id = $4 AND status = 'failed' \
           RETURNING {SCHEDULE_COLS}"
     ))
@@ -896,7 +901,8 @@ pub async fn rearm_failed_in_tx(
     let row = sqlx::query(&format!(
         "UPDATE scheduled_message \
             SET status = 'pending', failure_reason = NULL, attempts = 0, next_attempt_at = NULL, \
-                body = COALESCE($2, body), send_at = $3, armed_session_id = $4, \
+                body = COALESCE($2, body), send_at = $3, \
+                armed_session_id = COALESCE($4, armed_session_id), \
                 rev = rev + 1, updated_at = now() \
           WHERE id = $1 AND author_member_id = $5 AND status = 'failed' \
           RETURNING {SCHEDULE_COLS}"
@@ -1210,6 +1216,35 @@ pub async fn purge_expired_schedule_in_tx(
 // the three lifecycle hooks (D14) — the only functions that bind another's owner scope
 // ---------------------------------------------------------------------------
 
+/// Why a lifecycle hook ran — an enumerated value that goes into the audit row's `detail`
+/// (`cause`), never text. The hooks write `System` audit rows (a clock or a lifecycle path is not
+/// the actor), so this is what tells an investigator whether a row was held by a password change,
+/// a suspension, a disconnected device or a removal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RevocationCause {
+    PasswordChanged,
+    PasswordReset,
+    Suspended,
+    Removed,
+    Left,
+    DeviceUnlinked,
+    RefreshReuse,
+}
+
+impl RevocationCause {
+    pub fn as_code(self) -> &'static str {
+        match self {
+            RevocationCause::PasswordChanged => "password_changed",
+            RevocationCause::PasswordReset => "password_reset",
+            RevocationCause::Suspended => "suspended",
+            RevocationCause::Removed => "removed",
+            RevocationCause::Left => "left",
+            RevocationCause::DeviceUnlinked => "device_unlinked",
+            RevocationCause::RefreshReuse => "refresh_reuse",
+        }
+    }
+}
+
 /// What a lifecycle hook changed, row by row.
 pub type HeldSchedules = Vec<ScheduledMessage>;
 
@@ -1228,6 +1263,7 @@ pub async fn hold_member_schedules_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     member_id: Uuid,
+    cause: RevocationCause,
 ) -> Result<HeldSchedules, DbError> {
     let restore = bind_foreign_owner_guc(conn, member_id).await?;
     let rows = sqlx::query(&format!(
@@ -1250,7 +1286,7 @@ pub async fn hold_member_schedules_in_tx(
             row,
             ScheduleAudit::Failed,
             ScheduleActor::System,
-            json!({}),
+            json!({ "cause": cause.as_code() }),
         )
         .await?;
     }
@@ -1267,6 +1303,7 @@ pub async fn hold_lineage_schedules_in_tx(
     workspace_id: Uuid,
     member_id: Uuid,
     session_id: Uuid,
+    cause: RevocationCause,
 ) -> Result<HeldSchedules, DbError> {
     let restore = bind_foreign_owner_guc(conn, member_id).await?;
     let rows = sqlx::query(&format!(
@@ -1290,7 +1327,7 @@ pub async fn hold_lineage_schedules_in_tx(
             row,
             ScheduleAudit::Failed,
             ScheduleActor::System,
-            json!({}),
+            json!({ "cause": cause.as_code() }),
         )
         .await?;
     }
@@ -1306,6 +1343,7 @@ pub async fn cancel_member_schedules_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     member_id: Uuid,
+    cause: RevocationCause,
 ) -> Result<HeldSchedules, DbError> {
     let restore = bind_foreign_owner_guc(conn, member_id).await?;
     let rows = sqlx::query(&format!(
@@ -1326,7 +1364,7 @@ pub async fn cancel_member_schedules_in_tx(
             row,
             ScheduleAudit::Cancelled,
             ScheduleActor::System,
-            json!({}),
+            json!({ "cause": cause.as_code() }),
         )
         .await?;
     }

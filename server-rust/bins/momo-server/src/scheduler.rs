@@ -148,6 +148,13 @@ pub(crate) async fn deliver_schedule_in_tx(
         _ => return Ok(Delivery::Refused(ScheduleFailure::AuthorInactive)),
     };
     let attachment_ids = reserved_attachment_ids_in_tx(conn, author.id, row.id).await?;
+    // A schedule always carries text or an attachment (create and edit both refuse an empty one).
+    // If it carries neither now, its attachments are gone — a hard-deleted file takes its
+    // reservation with it — and an empty message is not something its author wrote. Say what
+    // happened (`attachment_unavailable`) rather than send nothing.
+    if row.body.as_deref().is_none_or(str::is_empty) && attachment_ids.is_empty() {
+        return Ok(Delivery::Refused(ScheduleFailure::AttachmentUnavailable));
+    }
     clear_owner_guc(conn).await?;
 
     momo_db::sqlx::query("SAVEPOINT scheduled_send")
@@ -708,6 +715,54 @@ pub fn log_report(report: &TickReport) {
     );
 }
 
+/// What asking the pool which role it connects as finally came to.
+#[derive(Debug, PartialEq, Eq)]
+enum RoleVerdict {
+    /// The role is subject to row-level security: the tick may run.
+    Bound,
+    /// The role skips it (superuser or `BYPASSRLS`): a configuration answer that no retry changes.
+    Bypasses,
+    /// The process is stopping.
+    Stopped,
+}
+
+/// Ask `check` until the answer is **definite** — a database that could not be asked (down for a
+/// moment at boot) is "not yet", not "no" — pausing `retry_every` between asks and giving up when
+/// `stop` turns true. A closure rather than the pool, so the retry is testable without one.
+async fn settle_role<F, Fut>(
+    check: F,
+    retry_every: Duration,
+    stop: &mut watch::Receiver<bool>,
+) -> RoleVerdict
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = Result<(), SchedulerError>>,
+{
+    loop {
+        match check().await {
+            Ok(()) => return RoleVerdict::Bound,
+            Err(SchedulerError::PoolBypassesRls) => return RoleVerdict::Bypasses,
+            Err(SchedulerError::Db(error)) => {
+                tracing::warn!(
+                    sqlstate = %sqlstate(&error),
+                    "scheduler could not ask its database role; asking again"
+                );
+            }
+        }
+        tokio::select! {
+            changed = stop.changed() => {
+                if changed.is_err() || stopped(stop) {
+                    return RoleVerdict::Stopped;
+                }
+            }
+            _ = tokio::time::sleep(retry_every) => {}
+        }
+        if stopped(stop) {
+            return RoleVerdict::Stopped;
+        }
+    }
+}
+
 /// Start the tick in this process (ADR-0208 D5), or say why it did not start.
 ///
 /// The one entry `main` uses. It first asks the tick's pool which role it connects as and
@@ -715,27 +770,65 @@ pub fn log_report(report: &TickReport) {
 /// is not silent: it sets [`AppState::scheduler_blocked`], so creating, editing or sending-now a
 /// schedule answers 503 `scheduler_disabled` exactly as if the operator had switched the scheduler
 /// off — a server that will not send a schedule must not accept one (D15). Listing and deleting
-/// keep working. Any failure of the check itself is treated the same way (the database is
-/// unreachable at boot: loud and fail-closed beats a tick that runs on an unchecked role).
+/// keep working.
 ///
-/// Returns the task to await at shutdown, or `None` when the tick was refused.
+/// A question the database could not answer (down for a moment at boot) is not a refusal: the
+/// routes answer 503 meanwhile, the question is asked again every tick interval, and the tick
+/// starts when it is answered — a server that booted a second before its database does not stay
+/// switched off until somebody restarts it.
+///
+/// Returns the task to await at shutdown, or `None` when the tick was refused for good.
 pub async fn start(
     state: AppState,
     pool: PgPool,
     settings: SchedulerSettings,
     stop: watch::Receiver<bool>,
 ) -> Option<tokio::task::JoinHandle<()>> {
-    if let Err(error) = ensure_write_pool_rls_bound(&pool).await {
-        state.scheduler_blocked.store(true, Ordering::SeqCst);
-        tracing::error!(
-            %error,
-            "scheduled messages are NOT being sent: the scheduler refused its database role; \
-             creating, editing or sending one now answers 503 scheduler_disabled"
-        );
-        return None;
+    match ensure_write_pool_rls_bound(&pool).await {
+        Ok(()) => {
+            state.scheduler_blocked.store(false, Ordering::SeqCst);
+            Some(tokio::spawn(run_loop(state, pool, settings, stop)))
+        }
+        Err(SchedulerError::PoolBypassesRls) => {
+            state.scheduler_blocked.store(true, Ordering::SeqCst);
+            tracing::error!(
+                error = %SchedulerError::PoolBypassesRls,
+                "scheduled messages are NOT being sent: the scheduler refused its database role; \
+                 creating, editing or sending one now answers 503 scheduler_disabled"
+            );
+            None
+        }
+        Err(SchedulerError::Db(error)) => {
+            state.scheduler_blocked.store(true, Ordering::SeqCst);
+            tracing::warn!(
+                sqlstate = %sqlstate(&error),
+                "scheduled messages are NOT being sent yet: the scheduler could not ask its \
+                 database role; asking again, and creating, editing or sending one answers 503 \
+                 scheduler_disabled until it is answered"
+            );
+            Some(tokio::spawn(async move {
+                let mut stop = stop;
+                let retry_every = Duration::from_millis(settings.tick_ms);
+                let verdict = settle_role(
+                    || ensure_write_pool_rls_bound(&pool),
+                    retry_every,
+                    &mut stop,
+                )
+                .await;
+                match verdict {
+                    RoleVerdict::Bound => {
+                        state.scheduler_blocked.store(false, Ordering::SeqCst);
+                        run_loop(state, pool, settings, stop).await;
+                    }
+                    RoleVerdict::Bypasses => tracing::error!(
+                        "scheduled messages are NOT being sent: the scheduler refused its \
+                         database role; creating, editing or sending one answers 503 scheduler_disabled"
+                    ),
+                    RoleVerdict::Stopped => {}
+                }
+            }))
+        }
     }
-    state.scheduler_blocked.store(false, Ordering::SeqCst);
-    Some(tokio::spawn(run_loop(state, pool, settings, stop)))
 }
 
 /// Look every `tick_ms`; stop when `stop` turns true **or its sender is gone** (a loop that kept
@@ -842,6 +935,102 @@ mod tests {
         );
         assert!(!report.is_quiet());
         assert_eq!(report.late_ms, vec![12]);
+    }
+
+    fn unreachable() -> SchedulerError {
+        SchedulerError::Db(DbError::from(momo_db::sqlx::Error::PoolTimedOut))
+    }
+
+    /// A role question the database could not answer is asked again until it can — and a
+    /// definite answer ends the asking either way.
+    #[tokio::test]
+    async fn a_role_check_the_database_could_not_answer_is_asked_again() {
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::Arc;
+        let (_keep, mut stop) = watch::channel(false);
+
+        let asked = Arc::new(AtomicUsize::new(0));
+        let counter = asked.clone();
+        let verdict = settle_role(
+            move || {
+                let counter = counter.clone();
+                async move {
+                    if counter.fetch_add(1, Ordering::SeqCst) < 2 {
+                        Err(unreachable())
+                    } else {
+                        Ok(())
+                    }
+                }
+            },
+            Duration::from_millis(1),
+            &mut stop,
+        )
+        .await;
+        assert_eq!(verdict, RoleVerdict::Bound);
+        assert_eq!(
+            asked.load(Ordering::SeqCst),
+            3,
+            "two unanswered asks, then the answer"
+        );
+
+        let asked = Arc::new(AtomicUsize::new(0));
+        let counter = asked.clone();
+        let verdict = settle_role(
+            move || {
+                let counter = counter.clone();
+                async move {
+                    if counter.fetch_add(1, Ordering::SeqCst) == 0 {
+                        Err(unreachable())
+                    } else {
+                        Err(SchedulerError::PoolBypassesRls)
+                    }
+                }
+            },
+            Duration::from_millis(1),
+            &mut stop,
+        )
+        .await;
+        assert_eq!(
+            verdict,
+            RoleVerdict::Bypasses,
+            "a role that skips RLS is an answer, not a retry"
+        );
+        assert_eq!(asked.load(Ordering::SeqCst), 2);
+    }
+
+    /// Shutting down ends the asking, and so does the sender going away (nobody left to stop it).
+    #[tokio::test]
+    async fn asking_for_the_role_ends_when_the_process_is_stopping() {
+        let (stop_tx, mut stop) = watch::channel(false);
+        let waiting = tokio::spawn(async move {
+            settle_role(
+                || async { Err(unreachable()) },
+                Duration::from_millis(5),
+                &mut stop,
+            )
+            .await
+        });
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        stop_tx.send(true).expect("stop");
+        let verdict = tokio::time::timeout(Duration::from_secs(5), waiting)
+            .await
+            .expect("the asking stops")
+            .expect("task");
+        assert_eq!(verdict, RoleVerdict::Stopped);
+
+        let (gone, mut stop) = watch::channel(false);
+        drop(gone);
+        let verdict = settle_role(
+            || async { Err(unreachable()) },
+            Duration::from_millis(5),
+            &mut stop,
+        )
+        .await;
+        assert_eq!(
+            verdict,
+            RoleVerdict::Stopped,
+            "a stop channel with no sender stops the asking"
+        );
     }
 
     #[test]

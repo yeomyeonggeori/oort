@@ -834,9 +834,11 @@ What an operator should know:
   cancelled. Sent and cancelled rows are kept as body-less records for 7 days,
   failed ones (with their text, so the author can re-send) for 30.
 - **A sign-in that ends holds what it armed.** After a password change or reset,
-  a suspension, a device unlink or a refresh-token reuse, the schedules that
-  sign-in wrote are held as failed (`sessions_ended`) instead of going out; their
-  author reads them and re-arms or sends them. A plain logout holds nothing.
+  a suspension, a device unlink or a refresh-token reuse that ends the sign-in
+  (a linked phone's always; a password sign-in's only when
+  `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS=true`), the schedules that sign-in wrote
+  are held as failed (`sessions_ended`) instead of going out; their author reads
+  them and re-arms or sends them. A plain logout holds nothing.
   Removing a member or a member leaving cancels their schedules.
 - **`oort doctor` checks it.** `stack.scheduler` fails (major) when a schedule is
   more than 5 minutes past its time and still pending — the tick is not running

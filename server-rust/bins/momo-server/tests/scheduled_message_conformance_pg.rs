@@ -25,6 +25,11 @@
 //! | `removal_and_leave_cancel_schedules_and_a_foreign_member_guc_is_bound_only_in_the_three_named_functions` | cancel on removal; the foreign GUC exception | hook removed, a binding outside the three |
 //! | `the_tick_purges_expired_rows_without_the_author_writing` / `a_deleted_workspace_row_is_cancelled_not_retried` | retention; soft-deleted workspaces | the sweep or the workspace judgment removed |
 //! | `the_event_rides_the_personal_channel_with_ids_only` | no body in the frame | `body` added to the event |
+//! | `a_write_racing_the_end_of_its_session_is_refused_and_arms_nothing` | a request accepted just before its sign-in ended cannot arm a schedule after the hold ran (review of 97286b101, #1) | the session lock removed from `create` or `update`, or an ended session treated as no session |
+//! | `a_request_takes_its_session_lock_before_any_schedule_lock` | the sweep and a request never wait on each other's rows (no 40P01) | the session lock removed from `update`, `delete` or `send-now` |
+//! | `a_credential_with_no_lineage_leaves_the_lineage_on_the_row_where_it_is` | an edit by a credential minted before migration 088 cannot erase who armed the text | the three edits write `NULL` instead of keeping the lineage |
+//! | `a_schedule_whose_attachments_vanished_is_not_sent_empty` | no empty message goes out | the guard in `deliver_schedule_in_tx` removed |
+//! | `a_scheduler_that_could_not_ask_its_role_at_boot_asks_again_and_then_ticks` | a database that was not answering at boot does not leave the scheduler off for good | `start()` stops asking after the first failure |
 //!
 //! `#[ignore]` — needs a real PG18 superuser DB plus the runtime roles:
 //!
@@ -466,6 +471,21 @@ async fn audit_actions_for(su: &PgPool, schedule: Uuid) -> Vec<String> {
     .fetch_all(su)
     .await
     .expect("audit actions")
+}
+
+/// The `cause` the audit rows of one action carry (`detail ->> 'cause'`), oldest first. Only the
+/// lifecycle hooks write one: it says which path ended the sign-in (D13).
+async fn audit_causes_for(su: &PgPool, schedule: Uuid, action: &str) -> Vec<Option<String>> {
+    sqlx::query_scalar(
+        "SELECT detail ->> 'cause' FROM audit_log \
+          WHERE target_type = 'scheduled_message' AND target_id = $1 AND action = $2 \
+          ORDER BY created_at, id",
+    )
+    .bind(schedule)
+    .bind(action)
+    .fetch_all(su)
+    .await
+    .expect("audit causes")
 }
 
 /// The `scheduled_message.updated` frames queued for one schedule, oldest first.
@@ -2804,7 +2824,13 @@ async fn each_failure_reason_is_named_and_the_grace_boundary_holds() {
     );
     let changed = momo_db::with_tenant_tx(&rig.app, workspace, move |conn| {
         Box::pin(async move {
-            momo_messaging::hold_member_schedules_in_tx(conn, workspace, member).await
+            momo_messaging::hold_member_schedules_in_tx(
+                conn,
+                workspace,
+                member,
+                momo_messaging::RevocationCause::PasswordChanged,
+            )
+            .await
         })
     })
     .await
@@ -3852,6 +3878,11 @@ async fn a_member_wide_session_end_holds_pending_and_failed_schedules_and_logout
             audit_actions_for(&rig.su, id).await,
             vec!["scheduled_message.failed"]
         );
+        assert_eq!(
+            audit_causes_for(&rig.su, id, "scheduled_message.failed").await,
+            vec![Some("password_changed".to_string())],
+            "{id}: the audit row says which path ended the sign-in (the clock is not the actor)"
+        );
     }
     let after_held = row(&rig.su, held_already).await;
     assert_eq!(
@@ -3933,6 +3964,10 @@ async fn a_member_wide_session_end_holds_pending_and_failed_schedules_and_logout
     assert_eq!(
         (held.status.as_str(), held.reason.as_deref()),
         ("failed", Some("sessions_ended"))
+    );
+    assert_eq!(
+        audit_causes_for(&rig.su, carol_pending, "scheduled_message.failed").await,
+        vec![Some("suspended".to_string())]
     );
     let (status, value) = rig
         .call(
@@ -4068,6 +4103,10 @@ async fn a_device_unlink_or_refresh_reuse_holds_only_that_lineages_schedules() {
         vec!["pending", "failed:sessions_ended"],
         "the create left a frame and the hold left one, so the phone's other devices see it stop"
     );
+    assert_eq!(
+        audit_causes_for(&rig.su, from_phone, "scheduled_message.failed").await,
+        vec![Some("device_unlinked".to_string())]
+    );
 
     // ── a phone that signed out and was then unlinked is held too (the link row outlives its tokens) ──
     let (phone2, phone2_device) = rig.linked_phone(&desktop, "Phone 2").await;
@@ -4095,6 +4134,11 @@ async fn a_device_unlink_or_refresh_reuse_holds_only_that_lineages_schedules() {
         (held.status.as_str(), held.reason.as_deref()),
         ("failed", Some("sessions_ended")),
         "…but the lineage that armed it is held anyway"
+    );
+    assert_eq!(
+        audit_causes_for(&rig.su, from_phone2, "scheduled_message.failed").await,
+        vec![Some("device_unlinked".to_string())],
+        "the route answered 404 and the audit row still says why the row stopped"
     );
     // an unknown or foreign id holds nothing and leaks nothing
     assert_eq!(
@@ -4129,6 +4173,10 @@ async fn a_device_unlink_or_refresh_reuse_holds_only_that_lineages_schedules() {
     assert_eq!(
         (held.status.as_str(), held.reason.as_deref()),
         ("failed", Some("sessions_ended"))
+    );
+    assert_eq!(
+        audit_causes_for(&rig.su, from_phone3, "scheduled_message.failed").await,
+        vec![Some("refresh_reuse".to_string())]
     );
     assert_eq!(
         row(&rig.su, from_desktop).await.status,
@@ -4258,6 +4306,13 @@ async fn removal_and_leave_cancel_schedules_and_a_foreign_member_guc_is_bound_on
         audit_actions_for(&rig.su, p).await,
         vec!["scheduled_message.failed", "scheduled_message.cancelled"]
     );
+    for action in ["scheduled_message.failed", "scheduled_message.cancelled"] {
+        assert_eq!(
+            audit_causes_for(&rig.su, p, action).await,
+            vec![Some("removed".to_string())],
+            "{action}"
+        );
+    }
     assert_eq!(
         frame_statuses(&rig.su, fx.workspace, h).await,
         vec!["cancelled"],
@@ -4288,6 +4343,13 @@ async fn removal_and_leave_cancel_schedules_and_a_foreign_member_guc_is_bound_on
             "{id}"
         );
     }
+    for action in ["scheduled_message.failed", "scheduled_message.cancelled"] {
+        assert_eq!(
+            audit_causes_for(&rig.su, p, action).await,
+            vec![Some("left".to_string())],
+            "{action}: leaving is its own cause, not removal"
+        );
+    }
     assert_eq!(row(&rig.su, bystander).await.status, "pending");
 
     // ── the exception to "a request speaks for itself": the three functions restore what they displaced ──
@@ -4301,8 +4363,13 @@ async fn removal_and_leave_cancel_schedules_and_a_foreign_member_guc_is_bound_on
                     let before = momo_messaging::current_owner_guc(conn).await?;
                     match run {
                         0 => {
-                            momo_messaging::hold_member_schedules_in_tx(conn, workspace, other)
-                                .await?;
+                            momo_messaging::hold_member_schedules_in_tx(
+                                conn,
+                                workspace,
+                                other,
+                                momo_messaging::RevocationCause::Suspended,
+                            )
+                            .await?;
                         }
                         1 => {
                             momo_messaging::hold_lineage_schedules_in_tx(
@@ -4310,6 +4377,7 @@ async fn removal_and_leave_cancel_schedules_and_a_foreign_member_guc_is_bound_on
                                 workspace,
                                 other,
                                 Uuid::new_v4(),
+                                momo_messaging::RevocationCause::DeviceUnlinked,
                             )
                             .await?;
                         }
@@ -4318,6 +4386,7 @@ async fn removal_and_leave_cancel_schedules_and_a_foreign_member_guc_is_bound_on
                                 conn,
                                 workspace,
                                 Uuid::new_v4(),
+                                momo_messaging::RevocationCause::Removed,
                             )
                             .await?;
                         }
@@ -4349,7 +4418,13 @@ async fn removal_and_leave_cancel_schedules_and_a_foreign_member_guc_is_bound_on
     let restored = momo_db::with_tenant_tx(&rig.app, workspace, move |conn| {
         Box::pin(async move {
             momo_messaging::bind_owner_guc(conn, fx.b.id).await?;
-            momo_messaging::hold_member_schedules_in_tx(conn, workspace, other).await?;
+            momo_messaging::hold_member_schedules_in_tx(
+                conn,
+                workspace,
+                other,
+                momo_messaging::RevocationCause::Suspended,
+            )
+            .await?;
             momo_messaging::current_owner_guc(conn).await
         })
     })
@@ -4377,4 +4452,610 @@ async fn removal_and_leave_cancel_schedules_and_a_foreign_member_guc_is_bound_on
         !owner_scope_scan::violations(&polluted).is_empty(),
         "a binding outside the three named functions is caught"
     );
+}
+
+// ---------------------------------------------------------------------------
+// the end of a sign-in, a request, and the order of their locks (D14; review of 97286b101)
+// ---------------------------------------------------------------------------
+
+/// A transaction standing where the end of a member's sign-ins stands **between** "locked their
+/// token rows" and "held what they armed": the member-wide sweep queue taken and the live session
+/// rows locked `FOR UPDATE`, through production's own functions, nothing revoked yet. A request of
+/// that member that reaches its token row now has to wait for this transaction.
+async fn sweep_paused_at_the_token_rows(
+    app: &PgPool,
+    workspace: Uuid,
+    member: Uuid,
+) -> sqlx::Transaction<'static, sqlx::Postgres> {
+    let mut sweep = app.begin().await.expect("begin the sweep");
+    sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+        .bind(workspace.to_string())
+        .execute(&mut *sweep)
+        .await
+        .expect("bind the workspace");
+    momo_auth::lock_member_wide_sweep_in_tx(&mut sweep, workspace, member)
+        .await
+        .expect("take the sweep queue");
+    let locked =
+        momo_auth::lock_member_live_session_rows_in_tx(&mut sweep, workspace, member, false)
+            .await
+            .expect("lock the token rows");
+    assert!(!locked.is_empty(), "the member has live sessions to end");
+    sweep
+}
+
+/// The rest of that sweep, as `end_member_sessions_in_tx` does it: revoke the tokens, hold what
+/// they armed, commit. Returns what the hold changed.
+async fn finish_the_sweep(
+    mut sweep: sqlx::Transaction<'static, sqlx::Postgres>,
+    workspace: Uuid,
+    member: Uuid,
+) -> usize {
+    momo_auth::revoke_member_session_tokens(&mut sweep, workspace, member)
+        .await
+        .expect("revoke the tokens");
+    let held = momo_messaging::hold_member_schedules_in_tx(
+        &mut sweep,
+        workspace,
+        member,
+        momo_messaging::RevocationCause::PasswordChanged,
+    )
+    .await
+    .expect("hold the schedules — a sweep that waits for a request's row lock, while the request waits for its token row, is the deadlock");
+    sweep.commit().await.expect("commit the sweep");
+    held.len()
+}
+
+/// Wait until `expected` backends are blocked on a lock (the requests, stopped at the session
+/// row or at a row of the schedule table, whichever the code reaches first).
+async fn wait_for_lock_waiters(su: &PgPool, expected: i64) {
+    let mut seen = 0;
+    for _ in 0..300 {
+        seen = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_stat_activity \
+              WHERE datname = current_database() AND wait_event_type = 'Lock' \
+                AND pid <> pg_backend_pid()",
+        )
+        .fetch_one(su)
+        .await
+        .expect("waiters");
+        if seen >= expected {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("expected {expected} requests blocked on a lock, saw {seen}");
+}
+
+/// Whether nobody holds the row: a `NOWAIT` lock taken and given straight back.
+async fn row_is_free(su: &PgPool, id: Uuid) -> bool {
+    let mut probe = su.begin().await.expect("begin the probe");
+    let free = sqlx::query("SELECT 1 FROM scheduled_message WHERE id = $1 FOR UPDATE NOWAIT")
+        .bind(id)
+        .fetch_optional(&mut *probe)
+        .await
+        .is_ok();
+    probe.rollback().await.expect("give the probe back");
+    free
+}
+
+/// A request sent from a task, so the test can look at the database while it is in flight.
+fn in_flight(
+    rig: &Rig,
+    method: reqwest::Method,
+    url: String,
+    token: &str,
+    body: Option<Value>,
+) -> tokio::task::JoinHandle<(u16, Value)> {
+    let (http, token) = (rig.http.clone(), token.to_string());
+    tokio::spawn(async move {
+        let mut request = http.request(method, url).bearer_auth(token);
+        if let Some(body) = body {
+            request = request.json(&body);
+        }
+        let response = request.send().await.expect("request");
+        let status = response.status().as_u16();
+        let text = response.text().await.unwrap_or_default();
+        (status, serde_json::from_str(&text).unwrap_or(Value::Null))
+    })
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_write_racing_the_end_of_its_session_is_refused_and_arms_nothing() {
+    let _lock = test_lock().await;
+    let mut rig = Rig::new().await;
+    let fx = fixture(&rig.su, "sm-race").await;
+    let stolen = rig.login(fx.workspace, &fx.a).await;
+    let stolen_lineage = lineage_of(&rig.su, &stolen.access).await;
+
+    // a schedule the sign-in armed earlier, and a create it is about to make
+    let (status, created) = rig
+        .create(
+            &stolen.access,
+            fx.workspace,
+            fx.channel,
+            create_body("what it armed before", 3600),
+        )
+        .await;
+    assert_eq!(status, 201, "{created}");
+    let earlier = scheduled_id(&created);
+    let new_request = create_body("what it tries to arm during the sweep", 3600);
+    let new_request_id = new_request["clientRequestId"].as_str().unwrap().to_string();
+
+    // the end of the member's sign-ins has locked their token rows and is about to revoke them…
+    let sweep = sweep_paused_at_the_token_rows(&rig.app, fx.workspace, fx.a.id).await;
+    // …when two requests the auth middleware accepted a moment ago reach their writes
+    let create = in_flight(
+        &rig,
+        reqwest::Method::POST,
+        rig.workspace_url(
+            fx.workspace,
+            &format!("/channels/{}/scheduled-messages", fx.channel),
+        ),
+        &stolen.access,
+        Some(new_request),
+    );
+    let edit = in_flight(
+        &rig,
+        reqwest::Method::PATCH,
+        rig.workspace_url(fx.workspace, &format!("/scheduled-messages/{earlier}")),
+        &stolen.access,
+        Some(json!({"body": "rewritten by the sign-in that is ending"})),
+    );
+    wait_for_lock_waiters(&rig.su, 2).await;
+    assert!(
+        !create.is_finished() && !edit.is_finished(),
+        "both wait for the session row, they do not race past it"
+    );
+
+    let held = finish_the_sweep(sweep, fx.workspace, fx.a.id).await;
+    assert_eq!(held, 1, "the hold saw the one schedule that existed");
+    let (create_status, create_value) = create.await.unwrap();
+    let (edit_status, edit_value) = edit.await.unwrap();
+    assert_eq!(
+        (create_status, edit_status),
+        (401, 401),
+        "the session ended first, so the writes are refused: {create_value} {edit_value}"
+    );
+    let armed_after_the_end: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM scheduled_message WHERE client_request_id = $1::uuid",
+    )
+    .bind(&new_request_id)
+    .fetch_one(&rig.su)
+    .await
+    .unwrap();
+    assert_eq!(
+        armed_after_the_end, 0,
+        "nothing was armed by a sign-in that no longer exists"
+    );
+    let earlier_row = row(&rig.su, earlier).await;
+    assert_eq!(
+        (
+            earlier_row.status.as_str(),
+            earlier_row.reason.as_deref(),
+            earlier_row.body.as_deref(),
+            earlier_row.armed_session_id,
+        ),
+        (
+            "failed",
+            Some("sessions_ended"),
+            Some("what it armed before"),
+            Some(stolen_lineage)
+        ),
+        "held with the text it had; the rewrite did not land"
+    );
+    assert!(rig.tick().await.is_quiet(), "nothing is left to send");
+    let still_pending: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM scheduled_message WHERE author_member_id = $1 AND status = 'pending'",
+    )
+    .bind(fx.a.id)
+    .fetch_one(&rig.su)
+    .await
+    .unwrap();
+    assert_eq!(
+        still_pending, 0,
+        "no pending row survives the end of the sign-ins"
+    );
+
+    // ── the other order: a request that reached the session row FIRST is waited for, and the hold
+    //    then sees what it wrote. The create is stopped, deterministically, on a file it needs (after
+    //    its session lock and its insert, before its commit); the sweep starts meanwhile.
+    let author = &fx.b;
+    let author_session = rig.login(fx.workspace, author).await;
+    let file = insert_attachment(&rig.su, fx.workspace, fx.channel, author.id, "complete").await;
+    let mut file_holder = rig.su.begin().await.unwrap();
+    sqlx::query("SELECT 1 FROM attachment WHERE id = $1 FOR UPDATE")
+        .bind(file)
+        .fetch_one(&mut *file_holder)
+        .await
+        .expect("hold the file");
+    let create = in_flight(
+        &rig,
+        reqwest::Method::POST,
+        rig.workspace_url(
+            fx.workspace,
+            &format!("/channels/{}/scheduled-messages", fx.channel),
+        ),
+        &author_session.access,
+        Some(json!({
+            "body": "armed just before the end",
+            "sendAtMs": chrono::Utc::now().timestamp_millis() + 3_600_000,
+            "attachmentIds": [file],
+            "clientRequestId": Uuid::new_v4(),
+        })),
+    );
+    wait_for_lock_waiters(&rig.su, 1).await;
+    let (app, workspace, member) = (rig.app.clone(), fx.workspace, author.id);
+    let sweeper = tokio::spawn(async move {
+        let sweep = sweep_paused_at_the_token_rows(&app, workspace, member).await;
+        finish_the_sweep(sweep, workspace, member).await
+    });
+    wait_for_lock_waiters(&rig.su, 2).await;
+    assert!(
+        !sweeper.is_finished() && !create.is_finished(),
+        "the sweep queues behind the create's session lock instead of running past it"
+    );
+    file_holder.rollback().await.unwrap();
+    let (status, created) = create.await.unwrap();
+    assert_eq!(status, 201, "the create got there first: {created}");
+    assert_eq!(
+        sweeper.await.unwrap(),
+        1,
+        "…so the hold sees the row it committed"
+    );
+    assert_eq!(
+        row(&rig.su, scheduled_id(&created)).await.status,
+        "failed",
+        "a write that committed before the sweep is held by it, not left pending"
+    );
+    let _ = &mut rig;
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_request_takes_its_session_lock_before_any_schedule_lock() {
+    let _lock = test_lock().await;
+    let rig = Rig::new().await;
+    let fx = fixture(&rig.su, "sm-order").await;
+    let session = rig.login(fx.workspace, &fx.a).await;
+
+    let mut ids = Vec::new();
+    for text in ["to edit", "to cancel", "to send now"] {
+        let (status, created) = rig
+            .create(
+                &session.access,
+                fx.workspace,
+                fx.channel,
+                create_body(text, 3600),
+            )
+            .await;
+        assert_eq!(status, 201, "{created}");
+        ids.push(scheduled_id(&created));
+    }
+    let (to_edit, to_cancel, to_send) = (ids[0], ids[1], ids[2]);
+
+    let sweep = sweep_paused_at_the_token_rows(&rig.app, fx.workspace, fx.a.id).await;
+    let edit = in_flight(
+        &rig,
+        reqwest::Method::PATCH,
+        rig.workspace_url(fx.workspace, &format!("/scheduled-messages/{to_edit}")),
+        &session.access,
+        Some(json!({"body": "edited"})),
+    );
+    let cancel = in_flight(
+        &rig,
+        reqwest::Method::DELETE,
+        rig.workspace_url(fx.workspace, &format!("/scheduled-messages/{to_cancel}")),
+        &session.access,
+        None,
+    );
+    let send_now = in_flight(
+        &rig,
+        reqwest::Method::POST,
+        rig.workspace_url(
+            fx.workspace,
+            &format!("/scheduled-messages/{to_send}/send-now"),
+        ),
+        &session.access,
+        None,
+    );
+    wait_for_lock_waiters(&rig.su, 3).await;
+
+    // while they wait for their session, they hold no schedule row: the sweep's hold will need all
+    // three, and a request that held one and waited for the token row would close the cycle
+    for (id, what) in [
+        (to_edit, "edit"),
+        (to_cancel, "cancel"),
+        (to_send, "send now"),
+    ] {
+        assert!(
+            row_is_free(&rig.su, id).await,
+            "the {what} request waits for its session before it locks the schedule row"
+        );
+    }
+
+    // the sweep finishes without waiting for anybody: no deadlock, and the three are held
+    assert_eq!(finish_the_sweep(sweep, fx.workspace, fx.a.id).await, 3);
+    for (task, what) in [(edit, "edit"), (cancel, "cancel"), (send_now, "send now")] {
+        let (status, value) = task.await.unwrap();
+        assert_eq!(status, 401, "{what}: the session had ended: {value}");
+    }
+    for id in [to_edit, to_cancel, to_send] {
+        let held = row(&rig.su, id).await;
+        assert_eq!(
+            (held.status.as_str(), held.reason.as_deref()),
+            ("failed", Some("sessions_ended")),
+            "{id}"
+        );
+    }
+    assert_eq!(
+        row(&rig.su, to_edit).await.body.as_deref(),
+        Some("to edit"),
+        "the refused edit did not land"
+    );
+    assert_eq!(
+        messages_of(&rig.su, to_send).await,
+        0,
+        "a send-now of an ended sign-in sends nothing"
+    );
+
+    // a session of the same member that is NOT being ended is not made to wait for anybody else's
+    let alive = rig.login(fx.workspace, &fx.a).await;
+    let (status, created) = rig
+        .create(
+            &alive.access,
+            fx.workspace,
+            fx.channel,
+            create_body("a new sign-in arms a new schedule", 3600),
+        )
+        .await;
+    assert_eq!(status, 201, "{created}");
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_credential_with_no_lineage_leaves_the_lineage_on_the_row_where_it_is() {
+    let _lock = test_lock().await;
+    let rig = Rig::new().await;
+    let fx = fixture(&rig.su, "sm-nolineage").await;
+    let first = rig.login(fx.workspace, &fx.a).await;
+    let first_lineage = lineage_of(&rig.su, &first.access).await;
+    let (status, created) = rig
+        .create(
+            &first.access,
+            fx.workspace,
+            fx.channel,
+            create_body("armed by the first sign-in", 3600),
+        )
+        .await;
+    assert_eq!(status, 201, "{created}");
+    let pending = scheduled_id(&created);
+    let (status, created) = rig
+        .create(
+            &first.access,
+            fx.workspace,
+            fx.channel,
+            create_body("a second one", 3600),
+        )
+        .await;
+    assert_eq!(status, 201, "{created}");
+    let to_fail = scheduled_id(&created);
+    fail_row(&rig.su, to_fail, "missed").await;
+
+    // a credential minted before migration 088 has no lineage
+    let legacy = rig.login(fx.workspace, &fx.a).await;
+    sqlx::query("UPDATE token SET session_id = NULL WHERE token_hash = digest($1::text, 'sha256')")
+        .bind(&legacy.access)
+        .execute(&rig.su)
+        .await
+        .unwrap();
+
+    // it can create (a row that nobody armed earlier has no lineage to keep)…
+    let (status, created) = rig
+        .create(
+            &legacy.access,
+            fx.workspace,
+            fx.channel,
+            create_body("armed by a legacy credential", 3600),
+        )
+        .await;
+    assert_eq!(status, 201, "{created}");
+    assert_eq!(
+        row(&rig.su, scheduled_id(&created)).await.armed_session_id,
+        None
+    );
+    // …and when it rewrites a text that someone else armed, who armed it is not erased
+    let (status, _) = rig
+        .patch(
+            &legacy.access,
+            fx.workspace,
+            &pending.to_string(),
+            json!({"body": "rewritten by a credential with no lineage"}),
+        )
+        .await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        row(&rig.su, pending).await.armed_session_id,
+        Some(first_lineage),
+        "a pending text keeps its lineage"
+    );
+    let (status, _) = rig
+        .patch(
+            &legacy.access,
+            fx.workspace,
+            &to_fail.to_string(),
+            json!({"body": "a failed text, rewritten"}),
+        )
+        .await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        row(&rig.su, to_fail).await.armed_session_id,
+        Some(first_lineage),
+        "a failed text keeps its lineage"
+    );
+    let later = chrono::Utc::now().timestamp_millis() + 7_200_000;
+    let (status, _) = rig
+        .patch(
+            &legacy.access,
+            fx.workspace,
+            &to_fail.to_string(),
+            json!({"sendAtMs": later}),
+        )
+        .await;
+    assert_eq!(status, 200);
+    let rearmed = row(&rig.su, to_fail).await;
+    assert_eq!(
+        (rearmed.status.as_str(), rearmed.armed_session_id),
+        ("pending", Some(first_lineage)),
+        "a re-arm keeps it too"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_schedule_whose_attachments_vanished_is_not_sent_empty() {
+    let _lock = test_lock().await;
+    let mut rig = Rig::new().await;
+    let fx = fixture(&rig.su, "sm-vanish").await;
+    let ta = rig.token(fx.workspace, &fx.a).await;
+    let file = insert_attachment(&rig.su, fx.workspace, fx.channel, fx.a.id, "complete").await;
+    let (status, created) = rig
+        .create(
+            &ta,
+            fx.workspace,
+            fx.channel,
+            json!({
+                "sendAtMs": chrono::Utc::now().timestamp_millis() + 3_600_000,
+                "attachmentIds": [file],
+                "clientRequestId": Uuid::new_v4(),
+            }),
+        )
+        .await;
+    assert_eq!(status, 201, "{created}");
+    let id = scheduled_id(&created);
+    assert_eq!(row(&rig.su, id).await.body.as_deref(), Some(""));
+
+    // the file is deleted: its reservation goes with it (ON DELETE CASCADE), and nothing is left to say
+    sqlx::query("DELETE FROM attachment WHERE id = $1")
+        .bind(file)
+        .execute(&rig.su)
+        .await
+        .expect("delete the file");
+    move_send_at(&rig.su, id, -2).await;
+    let report = rig.tick().await;
+    assert_eq!(
+        report.failed,
+        vec![(id, momo_messaging::ScheduleFailure::AttachmentUnavailable)],
+        "{report:?}"
+    );
+    assert_eq!(
+        messages_of(&rig.su, id).await,
+        0,
+        "no empty message went out"
+    );
+    assert_eq!(
+        row(&rig.su, id).await.reason.as_deref(),
+        Some("attachment_unavailable")
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_scheduler_that_could_not_ask_its_role_at_boot_asks_again_and_then_ticks() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    let _lock = test_lock().await;
+    let rig = Rig::new().await;
+    let fx = fixture(&rig.su, "sm-boot-retry").await;
+    let ta = rig.token(fx.workspace, &fx.a).await;
+
+    // The tick's pool, on a database that is "not up yet": every connection it opens is thrown away
+    // until `up` flips, so the question "which role am I?" cannot be answered at boot.
+    let up = Arc::new(AtomicBool::new(false));
+    let gate = up.clone();
+    let password =
+        std::env::var("MOMO_APP_PASSWORD").unwrap_or_else(|_| "momo_app_dev_pw".to_string());
+    let pool = PgPoolOptions::new()
+        .max_connections(2)
+        .acquire_timeout(Duration::from_millis(300))
+        .after_connect(move |_connection, _meta| {
+            let gate = gate.clone();
+            Box::pin(async move {
+                if gate.load(Ordering::SeqCst) {
+                    Ok(())
+                } else {
+                    Err(sqlx::Error::Protocol("the database is not up yet".into()))
+                }
+            })
+        })
+        .connect_lazy_with(role_options("momo_app", &password));
+    let settings = SchedulerSettings {
+        tick_ms: 100,
+        ..SchedulerSettings::default()
+    };
+    // a request pool that is fine: only the scheduler's own question went unanswered
+    let state = rig.state.clone();
+    let (stop_tx, stop) = watch::channel(false);
+    let task = momo_server::scheduler::start(state.clone(), pool, settings, stop)
+        .await
+        .expect("an unanswered question is not a refusal: the scheduler keeps asking");
+
+    // meanwhile it is switched off for the people who would rely on it: 503, not a silent accept
+    assert!(
+        state.scheduler_blocked.load(Ordering::SeqCst),
+        "a scheduler that cannot say it is safe to run is blocked"
+    );
+    let (status, refused) = rig
+        .create(&ta, fx.workspace, fx.channel, create_body("not yet", 3600))
+        .await;
+    assert_eq!(
+        (status, error_code(&refused)),
+        (503, Some("scheduler_disabled")),
+        "{refused}"
+    );
+    let due = insert_schedule(
+        &rig.su,
+        fx.workspace,
+        fx.channel,
+        fx.a.id,
+        "goes out once the role is known",
+        -2,
+        None,
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(700)).await;
+    assert_eq!(
+        row(&rig.su, due).await.status,
+        "pending",
+        "nothing is sent while the scheduler has not been cleared to run"
+    );
+
+    // the database comes up: the next question is answered, the block lifts and the tick starts
+    up.store(true, Ordering::SeqCst);
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while row(&rig.su, due).await.status != "sent" {
+        assert!(
+            Instant::now() < deadline,
+            "the scheduler asked again and ticked: it did not"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(
+        !state.scheduler_blocked.load(Ordering::SeqCst),
+        "the block lifted"
+    );
+    assert_eq!(messages_of(&rig.su, due).await, 1);
+    let (status, accepted) = rig
+        .create(&ta, fx.workspace, fx.channel, create_body("now", 3600))
+        .await;
+    assert_eq!(status, 201, "and a schedule is accepted again: {accepted}");
+
+    stop_tx.send(true).expect("stop the tick");
+    tokio::time::timeout(Duration::from_secs(10), task)
+        .await
+        .expect("the tick stops when it is told to")
+        .expect("the tick task ends cleanly");
 }
