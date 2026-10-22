@@ -40,15 +40,14 @@ use momo_db::{with_tenant_tx, DbError};
 use momo_messaging::{
     channel_pins, channel_reaction_snapshot, clamp_history_limit, clamp_replies_limit,
     delete_message_in_tx, edit_message_in_tx, is_channel_member, list_channel_page,
-    list_thread_replies, open_stream_run_id, parse_replies_cursor, resolve_member_signing_key,
-    send_message_with_mentions_in_tx, set_pin_in_tx, set_reaction_in_tx, stream_message_body_in_tx,
-    validate_harness_refine, validate_quote_target_in_tx, validate_reaction_emoji,
-    validate_replies_root_in_tx, validate_thread_root_in_tx, AttachmentLinkRejected, HarnessRefine,
+    list_thread_replies, open_stream_run_id, parse_replies_cursor, set_pin_in_tx,
+    set_reaction_in_tx, stream_message_body_in_tx, validate_harness_refine,
+    validate_reaction_emoji, validate_replies_root_in_tx, AttachmentLinkRejected, HarnessRefine,
     HarnessRefineInvalid, HistoryCursor, InteractionMessage, InteractionRefused, MessageAttachment,
-    MessageSignature, MessageType, NewMessage, PagedMessage, PinAction, PinnedMessage,
-    ProvenanceRejected, QuoteTargetInvalid, QuotedMessage, ReactionAction, ReactionSnapshot,
-    SendExtras, SendRejected, StoredMessage, StreamCloseOutcome, StreamEdit, ThreadRollup,
-    ThreadRootInvalid, HARNESS_REFINE_PROPS_KEY, OPENING_STREAM_REV, STREAM_PROPS_KEY,
+    MessageType, NewMessage, PagedMessage, PinAction, PinnedMessage, ProvenanceRejected,
+    QuoteTargetInvalid, QuotedMessage, ReactionAction, ReactionSnapshot, SendRejected,
+    StoredMessage, StreamCloseOutcome, StreamEdit, ThreadRollup, ThreadRootInvalid,
+    HARNESS_REFINE_PROPS_KEY, OPENING_STREAM_REV, STREAM_PROPS_KEY,
 };
 use serde_json::{Map, Value};
 use std::collections::HashSet;
@@ -60,7 +59,7 @@ use crate::dto::{
     StreamEditRequest, ThreadRepliesPage, ThreadRollupDto,
 };
 use crate::error::{db_error, ApiError};
-use crate::routes::agent_mentions::{route_agent_mentions_in_tx, MentionSend};
+use crate::routes::deliver::{deliver_message_in_tx, DeliverGates, DeliverRefusal, DeliverRequest};
 use crate::routes::shared::audit_via_token_id;
 use crate::AppState;
 
@@ -114,16 +113,6 @@ pub(crate) fn is_server_owned_props_key(key: &str) -> bool {
 
 /// `momo.instruction` — see [`crate::routes::work_instructions`].
 const INSTRUCTION_PROPS_KEY: &str = crate::routes::work_instructions::PROPS_KEY;
-
-/// The props key that carries an agent run's id for readers (#1166).
-///
-/// Not in [`SERVER_OWNED_PROPS_KEYS`], and the asymmetry is deliberate. A
-/// producer that names its run in props without sending `runId` is the
-/// pre-ADR-0158 shape and still works unchanged — stripping it would break every
-/// adapter written against the wire as it stood. What ADR-0158 adds is that when
-/// a **validated** `runId` *is* sent, the server writes this key from it, so the
-/// column and the readable copy cannot disagree. See [`bind_run_props`].
-const RUN_ID_PROPS_KEY: &str = "run_id";
 
 /// Resolve `{ws}`/`{ch}` and enforce that the path workspace matches the token's
 /// (Swift `MessageRoutes.scopeIDs`, :2824-2839).
@@ -347,33 +336,6 @@ fn harness_refine(
     Ok(Some(refine))
 }
 
-/// Stamp a validated run binding onto the message about to be written.
-///
-/// Both halves, always together, which is the whole point of doing it in one
-/// function: the **column** is what `open_stream_message_for_run_in_tx` looks a
-/// half-written answer up by (so a server-side close can reach an adapter's
-/// message at all), and the **props copy** is what `open_stream_run_id` reads
-/// when a page decides whether to draw #1166's "run ended" tail. The in-process
-/// producer writes both (`momo-agent-worker`'s `opening_props`); a REST producer
-/// that wrote only one would be findable by exactly one of the two readers.
-///
-/// The props value is the server's, not the caller's — a `run_id` prop sent
-/// alongside a validated `runId` is overwritten rather than merged with, for the
-/// same reason `opening_props` overwrites it in-process: "the run id is not the
-/// caller's to omit or to override".
-fn bind_run_props(message: &mut NewMessage, run_id: Uuid) {
-    message.run_id = Some(run_id);
-    let mut object = match std::mem::take(&mut message.props) {
-        Value::Object(object) => object,
-        _ => Map::new(),
-    };
-    object.insert(
-        RUN_ID_PROPS_KEY.to_string(),
-        Value::String(run_id.to_string()),
-    );
-    message.props = Value::Object(object);
-}
-
 /// A refused attachment binding → its status (Swift `linkAttachments`' throws,
 /// `MessageRoutes.swift:1326-1364`).
 ///
@@ -407,6 +369,21 @@ fn send_rejection(rejected: SendRejected) -> ApiError {
     match rejected {
         SendRejected::Provenance(provenance) => rejected_signature(provenance),
         SendRejected::Attachment(attachment) => attachment_link_rejection(attachment),
+    }
+}
+
+/// A refused delivery → its response (ADR-0208 D4). Each variant maps to the exact
+/// status and sentence the inline branch it replaced produced, so extracting the
+/// composition into [`deliver_message_in_tx`] moved no byte of what REST answers.
+fn delivery_refusal(refusal: DeliverRefusal) -> ApiError {
+    match refusal {
+        DeliverRefusal::NotMember => ApiError::forbidden("not a member of this channel"),
+        DeliverRefusal::ThreadRoot(invalid) => thread_root_rejection(invalid),
+        DeliverRefusal::QuoteTarget(invalid) => quote_target_rejection(invalid),
+        DeliverRefusal::RunBinding(rejected) => run_binding_rejection(rejected),
+        DeliverRefusal::NoSigningKey => no_signing_key(),
+        DeliverRefusal::Send(rejected) => send_rejection(rejected),
+        DeliverRefusal::Routing(message) => ApiError::bad_request(message),
     }
 }
 
@@ -631,25 +608,17 @@ pub async fn send(
     // transaction, because only there is it known which agent is being routed.
     let requested_routing = momo_agent::validate_request_routing(request.routing.as_ref())
         .map_err(|invalid| ApiError::bad_request(invalid.to_string()))?;
-    // B5.2 — the mention routing's inputs, resolved before the closure takes
-    // ownership of the request. `body` is cloned rather than borrowed because
-    // `new_message` consumes the original and the routing needs the same text.
-    let mention_body = request.body.clone().unwrap_or_default();
+    // B5.2 — the mention routing's inputs. `deliver_message_in_tx` reads the text
+    // off the message it is given (`NewMessage::body`), which is `request.body`.
     let author_is_agent = principal.kind == momo_auth::PrincipalKind::Agent;
     let author_is_human = principal.kind == momo_auth::PrincipalKind::Human;
     let via_token_id = audit_via_token_id(&principal);
-    let gateway_enabled = state.agent_gateway.enabled();
-    // ADR-0162 HAP-E5: the per-agent hosted selector's production gate, read
-    // beside the instance-global provider mode precisely so the two stay
-    // visibly independent knobs rather than one.
-    let hosted_delivery_enabled = state.agent_port.config.hosted_delivery_enabled;
-    let subscription_agents_enabled = state.agent_port.config.subscription_agents_enabled;
-    let claude_subscription_agents_enabled =
-        state.agent_port.config.claude_subscription_agents_enabled;
-    // #3948: the operator's attestation, read once per send (an env value, not a row).
-    let connector_trial = state.cohosted.config.attest();
-    let context_max_messages = state.mentions.context_max_messages;
-    let inplace_grant_enabled = state.mentions.hosted_inplace_grant_enabled;
+    // The gates the mention pass reads: the instance-global provider mode, the
+    // hosted selector's production gate, the subscription switches, #3948's
+    // operator attestation (an env value, read once per send), the history window
+    // and the in-place grant card — all `AppState`, the same values the scheduler
+    // reads for the same pass (ADR-0208 D4).
+    let gates = DeliverGates::from_state(&state);
     // ADR-0158 D2 — the refinement block becomes props here, *before* the
     // transaction, because it is a pure rewrite of an already-validated value.
     // The key it writes into is server-owned (`SERVER_OWNED_PROPS_KEYS`), so
@@ -662,7 +631,7 @@ pub async fn send(
         }
     };
     let requested_run_id = request.run_id;
-    let mut new_message = NewMessage {
+    let new_message = NewMessage {
         channel_id,
         author_member_id: principal.member_id,
         message_type,
@@ -685,136 +654,35 @@ pub async fn send(
     // does.
     let attachment_ids = request.attachment_ids.clone().unwrap_or_default();
 
+    let delivery = DeliverRequest {
+        workspace_id,
+        message: new_message,
+        requested_run_id,
+        signature_b64: provenance_signature,
+        attachment_ids,
+        via_token_id,
+        opens_stream,
+        author_is_agent,
+        author_is_human,
+        requested_routing,
+        gates,
+    };
+
     // Membership check + write in ONE tenant transaction (Swift parity): a
     // caller who leaves the channel mid-flight cannot slip a message in. A
-    // provenance rejection leaves through the transaction's ERROR channel
-    // ([`SendFailure`]) precisely so the message rolls back with it — returned as
-    // a value it would commit, and a signed send would silently degrade into an
-    // unsigned one.
+    // refusal leaves through the transaction's ERROR channel ([`SendFailure`])
+    // precisely so the message rolls back with it — returned as a value it would
+    // commit, and a signed send would silently degrade into an unsigned one.
+    //
+    // The composition itself is [`deliver_message_in_tx`], shared with the
+    // scheduler (ADR-0208 D4); only the refine audit below is REST's alone.
     let sent = tenant_tx_or_reject(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
-            if !is_channel_member(conn, channel_id, principal.member_id).await? {
-                return Ok(None);
-            }
-            // The reply target has to exist before the message can be written
-            // against it. The refusal leaves through the ERROR channel so the
-            // read-only transaction rolls back with it.
-            if let Some(root_id) = root_id {
-                if let Err(invalid) = validate_thread_root_in_tx(conn, channel_id, root_id).await? {
-                    return Err(SendFailure::Rejected(thread_root_rejection(invalid)));
-                }
-            }
-            // ADR-0148 규칙 2 — the quote target must live in THIS channel, and
-            // the check runs inside the tenant transaction because that is what
-            // makes it a tenant check too: a target in another workspace is
-            // invisible under RLS here, so it resolves as missing rather than as
-            // a message someone can confirm the existence of. Checked
-            // independently of `root_id` — 규칙 1 lets a message carry both, so
-            // an `else` here would silently skip the check for every threaded
-            // quote.
-            if let Some(reply_to_id) = reply_to_id {
-                if let Err(invalid) =
-                    validate_quote_target_in_tx(conn, channel_id, reply_to_id).await?
-                {
-                    return Err(SendFailure::Rejected(quote_target_rejection(invalid)));
-                }
-            }
-            // ADR-0158 D5 — fail-closed, inside this transaction and not before
-            // it. The check is a tenant read (`agent_run` under RLS), so hoisting
-            // it out of the transaction that writes the message would both lose
-            // the GUC and open a window in which a run could be created,
-            // cancelled or moved between the check and the insert.
-            if let Some(run_id) = requested_run_id {
-                if let Err(rejected) = momo_agent::authorize_run_binding_in_tx(
-                    conn,
-                    workspace_id,
-                    run_id,
-                    principal.member_id,
-                )
-                .await?
-                {
-                    return Err(SendFailure::Rejected(run_binding_rejection(rejected)));
-                }
-                bind_run_props(&mut new_message, run_id);
-            }
-            let signature = match provenance_signature {
-                None => None,
-                Some(signature_b64) => {
-                    // The key is the server's to resolve, never the request's to
-                    // assert.
-                    let Some(signer_pubkey_b64) =
-                        resolve_member_signing_key(conn, principal.member_id).await?
-                    else {
-                        return Err(SendFailure::Rejected(no_signing_key()));
-                    };
-                    Some(MessageSignature {
-                        signer_member_id: principal.member_id,
-                        signer_pubkey_b64,
-                        signature_b64,
-                    })
-                }
-            };
-            let sent = match send_message_with_mentions_in_tx(
-                conn,
-                workspace_id,
-                new_message,
-                SendExtras {
-                    signature: signature.as_ref(),
-                    attachment_ids: &attachment_ids,
-                    via_token_id,
-                    opens_stream,
-                    subscription_agents_disabled: !subscription_agents_enabled,
-                    claude_subscription_agents_disabled: !claude_subscription_agents_enabled,
-                },
-            )
-            .await?
-            {
+            let sent = match deliver_message_in_tx(conn, delivery).await? {
                 Ok(sent) => sent,
-                Err(rejected) => return Err(SendFailure::Rejected(send_rejection(rejected))),
+                Err(DeliverRefusal::NotMember) => return Ok(None),
+                Err(refusal) => return Err(SendFailure::Rejected(delivery_refusal(refusal))),
             };
-
-            // B5.2 — mention → agent run, in THIS transaction and only on a real
-            // insert. Swift's guard is the same three conditions
-            // (`MessageRoutes.swift:284`, `if didInsert, type == "text", let body`)
-            // and each one earns its place: a deduped retry must not queue a
-            // second turn, a non-text message has no `@handle` to parse, and an
-            // empty body cannot mention anyone. The run is enqueued after the
-            // broadcast so `props.mention_member_ids` — the human-facing half of
-            // the same decision — is already on the row it describes.
-            if !sent.deduped && message_type == MessageType::Text && !mention_body.is_empty() {
-                // A refused `routing` block rolls the send back with it (Swift
-                // :1976-1981): the caller chose a model this workspace does not
-                // permit, and delivering the message under a different one would
-                // substitute the single decision they made explicitly.
-                if let Err(rejection) = route_agent_mentions_in_tx(
-                    conn,
-                    MentionSend {
-                        workspace_id,
-                        channel_id,
-                        message_id: sent.message.id,
-                        message_seq: sent.message.seq,
-                        root_id: sent.message.root_id,
-                        author_member_id: principal.member_id,
-                        author_is_agent,
-                        author_is_human,
-                        body: &mention_body,
-                        hlc_ts: sent.message.hlc_ts,
-                        via_token_id,
-                        gateway_enabled,
-                        hosted_delivery_enabled,
-                        subscription_agents_enabled,
-                        claude_subscription_agents_enabled,
-                        connector_trial: &connector_trial,
-                        context_max_messages,
-                        inplace_grant_enabled,
-                        routing: requested_routing.as_ref(),
-                    },
-                )
-                .await?
-                {
-                    return Err(SendFailure::Rejected(rejection));
-                }
-            }
             // ADR-0158 D3 — the ledger half. `!deduped` for the same reason the
             // mention pass carries it: a retried announcement is the same
             // refinement, and a second audit row would claim a second
@@ -2050,6 +1918,79 @@ mod tests {
         request
     }
 
+    /// ADR-0208 D4 — extracting the send composition into `deliver_message_in_tx`
+    /// moved no byte of what REST answers: every refusal keeps the status and the
+    /// sentence its inline branch produced.
+    #[test]
+    fn every_delivery_refusal_keeps_the_status_and_sentence_rest_always_answered() {
+        let cases = [
+            (
+                DeliverRefusal::NotMember,
+                StatusCode::FORBIDDEN,
+                "not a member of this channel".to_string(),
+            ),
+            (
+                DeliverRefusal::ThreadRoot(ThreadRootInvalid::NotFound),
+                StatusCode::NOT_FOUND,
+                ThreadRootInvalid::NotFound.to_string(),
+            ),
+            (
+                DeliverRefusal::ThreadRoot(ThreadRootInvalid::Deleted),
+                StatusCode::BAD_REQUEST,
+                ThreadRootInvalid::Deleted.to_string(),
+            ),
+            (
+                DeliverRefusal::QuoteTarget(QuoteTargetInvalid::NotFound),
+                StatusCode::NOT_FOUND,
+                QuoteTargetInvalid::NotFound.to_string(),
+            ),
+            (
+                DeliverRefusal::QuoteTarget(QuoteTargetInvalid::Deleted),
+                StatusCode::BAD_REQUEST,
+                QuoteTargetInvalid::Deleted.to_string(),
+            ),
+            (
+                DeliverRefusal::RunBinding(RunBindingRejected::Unknown),
+                StatusCode::NOT_FOUND,
+                RunBindingRejected::Unknown.to_string(),
+            ),
+            (
+                DeliverRefusal::RunBinding(RunBindingRejected::NotRunAgent),
+                StatusCode::FORBIDDEN,
+                RunBindingRejected::NotRunAgent.to_string(),
+            ),
+            (
+                DeliverRefusal::NoSigningKey,
+                StatusCode::NOT_IMPLEMENTED,
+                no_signing_key().message,
+            ),
+            (
+                DeliverRefusal::Send(SendRejected::Attachment(AttachmentLinkRejected::NotFound)),
+                StatusCode::NOT_FOUND,
+                AttachmentLinkRejected::NotFound.to_string(),
+            ),
+            (
+                DeliverRefusal::Send(SendRejected::Attachment(
+                    AttachmentLinkRejected::AlreadyLinked,
+                )),
+                StatusCode::CONFLICT,
+                AttachmentLinkRejected::AlreadyLinked.to_string(),
+            ),
+            (
+                DeliverRefusal::Routing("effort is not supported by this model".to_string()),
+                StatusCode::BAD_REQUEST,
+                "effort is not supported by this model".to_string(),
+            ),
+        ];
+        for (refusal, status, message) in cases {
+            let label = format!("{refusal:?}");
+            let error = delivery_refusal(refusal);
+            assert_eq!(error.status, status, "{label}");
+            assert_eq!(error.message, message, "{label}");
+            assert_eq!(error.code, None, "{label}: REST never coded these");
+        }
+    }
+
     /// **The list of decoded-but-unserved keys is empty, and `runId` is why.**
     ///
     /// This test used to assert the opposite for `runId` — a 400 saying "not
@@ -2067,35 +2008,6 @@ mod tests {
                 .is_none(),
             "runId is not a pre-transaction concern; `authorize_run_binding_in_tx` owns it"
         );
-    }
-
-    /// Both halves of the binding land, because two different readers need
-    /// different ones (see [`bind_run_props`]).
-    #[test]
-    fn a_bound_run_is_written_to_the_column_and_the_readable_copy() {
-        let run = Uuid::from_u128(0x5150);
-        let mut message = NewMessage::text(Uuid::from_u128(1), Uuid::from_u128(2), "답이 자");
-        message.props = serde_json::json!({ "harness": "prime-agent" });
-        bind_run_props(&mut message, run);
-
-        assert_eq!(message.run_id, Some(run), "the close path reads the column");
-        assert_eq!(
-            message.props["run_id"],
-            serde_json::json!(run.to_string()),
-            "#1166's page annotation reads props"
-        );
-        assert_eq!(
-            message.props["harness"],
-            serde_json::json!("prime-agent"),
-            "the producer's own props survive the stamp"
-        );
-
-        // The run id is not the caller's to override — the same rule
-        // `opening_props` holds in-process.
-        let mut hijacked = NewMessage::text(Uuid::from_u128(1), Uuid::from_u128(2), "답");
-        hijacked.props = serde_json::json!({ "run_id": Uuid::from_u128(99).to_string() });
-        bind_run_props(&mut hijacked, run);
-        assert_eq!(hijacked.props["run_id"], serde_json::json!(run.to_string()));
     }
 
     /// ADR-0158 D2 — a refinement is a `system` line or it is nothing.

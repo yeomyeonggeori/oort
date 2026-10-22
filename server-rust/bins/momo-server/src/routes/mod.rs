@@ -28,6 +28,8 @@ pub mod cloud_boxes;
 pub mod cloud_hosts;
 pub mod cohosted_agent;
 pub mod credits;
+/// ADR-0208 D4 — the send composition `POST …/messages` and the scheduler share.
+pub(crate) mod deliver;
 pub mod device_keys;
 pub mod device_link;
 pub mod devices;
