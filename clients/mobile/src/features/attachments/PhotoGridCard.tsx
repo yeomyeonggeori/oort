@@ -16,7 +16,7 @@ import {
 
 import {AVATAR_INITIAL_MAX_SCALE, BAR_CONTROL_MAX_SCALE, Sentence} from '../../design/atoms';
 import {CONV_ICONS, CONV_ICON_SIZE} from '../../design/icons';
-import {usePalette, useStyles} from '../../design/theme';
+import {usePalette, useStyles, useTheme} from '../../design/theme';
 import {ds2Radius, font, line, space, type Palette} from '../../design/tokens';
 import {useMorphEdgeShift} from './morphEdge';
 import {PHOTO_COPY} from './photoCardCopy';
@@ -480,19 +480,31 @@ function Face({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const {scheme} = useTheme();
   const scroll = useRef<ScrollView>(null);
   const layoutHeight = useRef(0);
+  const contentHeight = useRef(0);
+  // 넘치는지는 두 크기를 모두 알아야 답할 수 있고, 두 이벤트가 오는 순서는 약속이 아니다 —
+  // 어느 쪽이 나중에 와도 같은 답을 낸다(한 쪽만 믿으면 순서가 바뀐 기기에서 표시가 영영 안 선다).
+  const hintIfOverflowing = () => {
+    if (scrollNeedsHint(contentHeight.current, layoutHeight.current)) {
+      scroll.current?.flashScrollIndicators?.();
+    }
+  };
   return (
     <View style={styles.face} testID={testID}>
       <ScrollView
         contentContainerStyle={styles.faceText}
+        // 스크롤 표시의 색은 UIKit 이 **시스템** 모양으로 정한다. 사람이 앱에서 다크를 고르고 시스템이 라이트면
+        // 어두운 카드에 어두운 표시가 서서 「더 있다」 단서가 안 보인다(시뮬레이터 영상으로 확인) — 앱의 모양을 따른다.
+        indicatorStyle={scheme === 'light' ? 'black' : 'white'}
         onContentSizeChange={(_width, height) => {
-          if (scrollNeedsHint(height, layoutHeight.current)) {
-            scroll.current?.flashScrollIndicators?.();
-          }
+          contentHeight.current = height;
+          hintIfOverflowing();
         }}
         onLayout={event => {
           layoutHeight.current = event.nativeEvent.layout.height;
+          hintIfOverflowing();
         }}
         ref={scroll}
         style={styles.faceScroll}

@@ -1,7 +1,7 @@
 import {MAX_ATTACHMENTS_PER_MESSAGE} from '@momo/core/features/attachments/model';
 import {act, cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react-native';
 import React from 'react';
-import {AccessibilityInfo, ActivityIndicator, AppState} from 'react-native';
+import {AccessibilityInfo, ActivityIndicator, AppState, ScrollView} from 'react-native';
 
 import {AVATAR_INITIAL_MAX_SCALE, BAR_CONTROL_MAX_SCALE} from '../src/design/atoms';
 import {FixedScheme} from '../src/design/theme';
@@ -783,6 +783,58 @@ describe('겉모습', () => {
     expect(insideScroll(screen.getByTestId('photo-pick-from-all'))).toBe(false);
     // 글 영역은 스크롤 표시를 끄지 않는다(넘치면 사람에게 「더 있다」가 보여야 한다).
     expect(screen.getByTestId('photo-pane-undetermined-text').props.showsVerticalScrollIndicator).not.toBe(false);
+  });
+
+  describe('넘치는 글의 단서(AX5): 스크롤 표시', () => {
+    // RN jest 목은 `ScrollView.prototype.flashScrollIndicators` 를 jest.fn 으로 둔다(인스턴스가 같은 함수를 쓴다).
+    const flash = () => ScrollView.prototype.flashScrollIndicators as unknown as jest.Mock;
+    const layout = (host: ReturnType<typeof screen.getByTestId>, height: number) =>
+      fireEvent(host, 'layout', {nativeEvent: {layout: {x: 0, y: 0, width: 300, height}}});
+
+    beforeEach(() => flash().mockClear());
+
+    it('글이 영역보다 길면 표시를 한 번 보인다 — 크기를 알리는 두 이벤트가 어떤 순서로 와도', async () => {
+      for (const order of ['layout-first', 'content-first'] as const) {
+        const lib = makeLibrary({permission: 'undetermined'});
+        const view = await renderCard(lib.ports);
+        const host = await screen.findByTestId('photo-pane-undetermined-text');
+        flash().mockClear();
+        if (order === 'layout-first') {
+          layout(host, 200);
+          expect(flash()).not.toHaveBeenCalled(); // 글이 얼마나 긴지 아직 모른다
+          fireEvent(host, 'contentSizeChange', 300, 500);
+        } else {
+          fireEvent(host, 'contentSizeChange', 300, 500);
+          expect(flash()).not.toHaveBeenCalled(); // 영역이 얼마나 큰지 아직 모른다
+          layout(host, 200);
+        }
+        expect(flash()).toHaveBeenCalledTimes(1);
+        view.unmount();
+      }
+    });
+
+    it('글이 영역에 들어가면 표시를 보이지 않는다(기본 글꼴의 짧은 면)', async () => {
+      const lib = makeLibrary({permission: 'undetermined'});
+      await renderCard(lib.ports);
+      const host = await screen.findByTestId('photo-pane-undetermined-text');
+      flash().mockClear();
+      layout(host, 400);
+      fireEvent(host, 'contentSizeChange', 300, 400);
+      expect(flash()).not.toHaveBeenCalled();
+    });
+
+    it('표시의 색은 앱의 모양을 따른다 — 사람이 고른 다크가 시스템 라이트와 달라도 어두운 카드 위에 보인다', async () => {
+      for (const [scheme, style] of [
+        ['dark', 'white'],
+        ['light', 'black'],
+      ] as const) {
+        const lib = makeLibrary({permission: 'undetermined'});
+        const view = await renderCard(lib.ports, {}, scheme);
+        const host = await screen.findByTestId('photo-pane-undetermined-text');
+        expect(host.props.indicatorStyle).toBe(style);
+        view.unmount();
+      }
+    });
   });
 
   it('거부 면과 오류 면도 같다: 행동은 스크롤 밖이고, 비어 있음은 행동 없이 글만 스크롤한다', async () => {
