@@ -52,6 +52,9 @@ const ROLE: Record<string, "control" | "filled" | "container"> = {
   // `line-strong` 채움 3:1)도 어포던스가 경계가 아니라 채움이다(#3578 S1).
   "segmented-control.tsx": "filled",
   "switch.tsx": "filled",
+  // 슬라이더도 같다(AP-3 #4190): 채움이 값을 말한다(트랙의 잉크 채움, 빈 트랙은 `line-strong`
+  // 3:1)이고 알은 잉크 채움에 면 색 고리다. 경계 클래스는 없다(규칙은 `slider.css`).
+  "slider.tsx": "filled",
   // 값을 받는 상자. 비어 있을 때 경계 말고는 자기가 있다고 말할 것이 없다.
   "input.tsx": "control",
   // 같음. 닫힌 상태의 `<select>` 는 경계와 글자뿐이다.
