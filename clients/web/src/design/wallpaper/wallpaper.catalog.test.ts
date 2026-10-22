@@ -153,8 +153,10 @@ describe.runIf(catalog !== undefined)("카탈로그 57 테마-모드 위의 배�
       expect([id, mode, t.verdict]).toEqual([id, mode, expected]);
       seen[t.verdict] += 1;
     }
-    // 분포는 PR 본문에 적는다(ADR의 표는 프로토타입 값이고 구현의 이 시험이 정본이다). 세 판정이 모두 나오는지만 단정한다.
+    // 분포 자체는 위 교정점 시험이 못 박는다(ADR의 표는 프로토타입 값이고, 파생 엔진의 규칙이 바뀌면 그 시험이 먼저 빨개진다). 여기서는
+    // 이 시험이 빈 반복의 초록이 아니도록 「쓸 수 있는 모드」와 「하한이 높은 모드(힌트나 불가)」가 둘 다 있는지만 단정한다. 불가가
+    // 몇 개인지는 파생 엔진의 몫이다(규칙이 잉크를 더 끌어올려 0이 될 수 있다): 임계 자체는 core 시험이 의사난수 테마로 잰다.
     expect(seen.ok).toBeGreaterThan(0);
-    expect(seen.unavailable).toBeGreaterThan(0);
+    expect(seen.blurry + seen.unavailable).toBeGreaterThan(0);
   });
 });
