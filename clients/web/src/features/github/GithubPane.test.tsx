@@ -428,11 +428,42 @@ describe("운영자 구역: 데스크탑 셸은 기본 브라우저로 GitHub �
     }
   });
 
+  it("알림 영역은 글줄만 감싼다: 단추는 영역 밖이라 결과가 바뀌어도 단추 글자가 다시 읽히지 않는다", async () => {
+    await startOnDesktop();
+    const card = q("github-manifest-browser") as HTMLElement;
+    const live = card.querySelector('[role="status"]') as HTMLElement;
+    // 이 단정이 「단추를 알림 영역 안에 두면 빨개지는」 사보타주 대상이다(design-review L6).
+    expect(live).not.toBeNull();
+    expect(card.getAttribute("role")).toBeNull();
+    expect(live.contains(q("github-manifest-browser-open"))).toBe(false);
+    expect(live.textContent).toContain("기본 브라우저에서 GitHub를 열었어요.");
+  });
+
+  it("「」 단추 이름과 조사는 한 덩어리라 좁은 폭에서 조사가 줄머리에 서지 않는다", async () => {
+    await startOnDesktop();
+    // 이 단정이 「묶음을 풀면 빨개지는」 사보타주 대상이다(design-review M2).
+    const nowrap = [...(q("github-manifest-browser") as HTMLElement).querySelectorAll("span.whitespace-nowrap")].map((el) => el.textContent);
+    expect(nowrap).toContain("「Create GitHub App」을");
+    expect(nowrap).toContain("마쳐야 해요.");
+  });
+
+  it("단추 이름은 두 상태에서 같다(막힌 화면의 안내가 그 이름으로 가리킨다)", async () => {
+    desktop.open.mockResolvedValueOnce(false);
+    await startOnDesktop();
+    await waitUntil(() => q("github-manifest-browser")?.getAttribute("data-outcome") === "failed", "열기 실패");
+    expect(q("github-manifest-browser-open")?.textContent).toBe("브라우저에서 다시 열기");
+    click(q("github-manifest-browser-open"));
+    await waitUntil(() => q("github-manifest-browser")?.getAttribute("data-outcome") === "opened", "다시 열림");
+    expect(q("github-manifest-browser-open")?.textContent).toBe("브라우저에서 다시 열기");
+  });
+
   it("브라우저를 열지 못하면 그렇게 말하고 같은 주소로 다시 열 수 있다", async () => {
     desktop.open.mockResolvedValueOnce(false);
     await startOnDesktop();
     await waitUntil(() => q("github-manifest-browser")?.getAttribute("data-outcome") === "failed", "열기 실패");
     expect(q("github-manifest-browser")?.textContent).toContain("기본 브라우저를 열지 못했어요.");
+    // 일시적인 실패만 가정하지 않는다(design-review Nitpick).
+    expect(q("github-manifest-browser")?.textContent).not.toContain("잠시 뒤");
     expect(api.startGithubManifest).toHaveBeenCalledTimes(1);
     const firstUrl = String(desktop.open.mock.calls[0][0]);
     click(q("github-manifest-browser-open"));
@@ -549,6 +580,22 @@ describe("워크스페이스 구역: 데스크탑의 설치는 기본 브라우�
     expect(event.defaultPrevented).toBe(true);
     expect(desktop.open).toHaveBeenCalledTimes(1);
     expect(desktop.open).toHaveBeenCalledWith("https://github.com/apps/oort/installations/new?state=tok");
+  });
+
+  it("데스크탑의 설치 안내는 앱으로 돌아오라고 말하고, 웹의 안내는 그대로다", async () => {
+    desktop.on = true;
+    await openInstallLink();
+    // 이 단정들이 「데스크탑에서도 이 화면으로 돌아온다고 거짓말하면 빨개지는」 사보타주 대상이다(design-review M1).
+    const text = q("github-link-ready-text")?.textContent ?? "";
+    expect(text).toContain("이 앱으로 돌아와 주세요");
+    expect(text).toContain("돌아오면 이 화면이 알아서 바뀌어요");
+    expect(text).toContain("10분 안에 마쳐야 해요");
+    expect(text).not.toContain("이 화면으로 돌아와요");
+    unmount();
+    desktop.on = false;
+    await openInstallLink();
+    const web = q("github-link-ready-text")?.textContent ?? "";
+    expect(web).toBe("GitHub에서 설치를 마쳐 주세요. 10분 안에 마치면 이 화면으로 돌아와요.");
   });
 
   it("웹에서는 평범한 앵커라 열기 호출이 없다", async () => {

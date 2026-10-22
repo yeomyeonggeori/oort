@@ -347,7 +347,7 @@ async function sceneCard(browser, origin, scheme, viewport) {
   const entry = await has(page, "github-faces-operator");
   check(`${tag} 카드: 운영자이고 앱이 없으면 「GitHub 앱 만들기」가 선다`, entry);
   if (entry) {
-    check(`${tag} 카드: 그 문장`, (await textOf(page, "github-faces-operator")).includes("이 서버에는 아직 GitHub 앱이 없어요."));
+    check(`${tag} 카드: 알림을 위한 앱이라고 말한다(도구 얼굴의 「설치됨」 칩과 헷갈리지 않게)`, (await textOf(page, "github-faces-operator")).includes("알림을 받으려면 이 서버에 GitHub 앱을 먼저 만들어야 해요."));
     check(`${tag} 카드: 「GitHub 알림 열기」 길은 그대로`, (await textOf(page, "github-faces-open")) === "GitHub 알림 열기");
   }
   await page.getByTestId("github-faces").scrollIntoViewIfNeeded();
@@ -402,6 +402,8 @@ async function sceneFlow(browser, origin, scheme, viewport) {
   check(`${tag} 열린 주소: 조각 밖에는 state 가 없다`, !url.split("#")[0].includes(STATE) && !url.split("#")[0].includes("state="));
   check(`${tag} 열린 주소: opener 한도(2048) 안`, url.length > 0 && url.length <= 2048, `길이 ${url.length}`);
   check(`${tag} 카드가 열었다고 말한다`, (await textOf(dp, "github-manifest-browser")).includes("기본 브라우저에서 GitHub를 열었어요."));
+  check(`${tag} 카드: 「Create GitHub App」과 조사는 한 덩어리(줄머리 조사 없음)`, (await dp.getByTestId("github-manifest-browser").locator("span.whitespace-nowrap").allTextContents()).includes("「Create GitHub App」을"));
+  check(`${tag} 카드: 알림 영역은 글줄만 감싼다(단추는 밖)`, await dp.evaluate(() => { const card = document.querySelector('[data-testid="github-manifest-browser"]'); const live = card?.querySelector('[role="status"]'); const button = card?.querySelector('[data-testid="github-manifest-browser-open"]'); return Boolean(live) && !live.contains(button); }));
   check(`${tag} 화면 글자에 state 가 없다`, !(await dp.textContent("body")).includes(STATE));
   // 카드가 통째로 보이게, 그 아래 「이미 만든 앱이 있어요」까지 화면에 들인다.
   await dp.getByTestId("github-paste").scrollIntoViewIfNeeded();
@@ -412,7 +414,7 @@ async function sceneFlow(browser, origin, scheme, viewport) {
   await dp.evaluate(() => { window.__openFails = true; });
   await dp.getByTestId("github-manifest-browser-open").click();
   await dp.waitForFunction(() => document.querySelector('[data-testid="github-manifest-browser"]')?.getAttribute("data-outcome") === "failed", null, { timeout: 5000 });
-  check(`${tag} 열지 못하면 그렇게 말하고 「다시 열기」가 선다`, (await textOf(dp, "github-manifest-browser")).includes("기본 브라우저를 열지 못했어요.") && (await textOf(dp, "github-manifest-browser-open")) === "다시 열기");
+  check(`${tag} 열지 못하면 그렇게 말하고 「브라우저에서 다시 열기」가 선다`, (await textOf(dp, "github-manifest-browser")).includes("기본 브라우저를 열지 못했어요.") && (await textOf(dp, "github-manifest-browser-open")) === "브라우저에서 다시 열기");
   await dp.getByTestId("github-paste").scrollIntoViewIfNeeded();
   await shot(dp, "2b-open-failed", tag);
   await dp.evaluate(() => { window.__openFails = false; });
@@ -441,6 +443,9 @@ async function sceneFlow(browser, origin, scheme, viewport) {
   // 폼의 action 은 state 를 담아야 GitHub 에 닿는다(DOM 에만 있고 어디에도 쓰이지 않는다). 사람 눈에 보이는 글자에는 없다.
   check(`${tag} 핸드오프: 화면 글자에 state 가 없다`, !(await sp.evaluate(() => document.body.innerText)).includes(STATE));
   check(`${tag} 핸드오프: 행선지·받는 서버·시한을 보여 준다`, (await textOf(sp, "github-handoff-form")).includes("yeomyeonggeori 조직") && (await textOf(sp, "github-handoff-form")).includes("oort.yeomyeonggeori.test") && (await textOf(sp, "github-handoff-form")).includes("60분 안에"));
+  check(`${tag} 핸드오프: 「Create GitHub App」과 조사는 한 덩어리`, (await sp.locator("span.whitespace-nowrap").allTextContents()).includes("「Create GitHub App」을"));
+  check(`${tag} 핸드오프: 단추는 제품의 채움 알약이다(온보딩 단추 예외를 빌리지 않는다)`, !(await sp.getByTestId("github-handoff-submit").getAttribute("class"))?.includes("onboarding-action"));
+  check(`${tag} 핸드오프: 탭 제목이 이 화면을 말한다`, (await sp.title()) === "GitHub 앱 만들기 · oort", await sp.title());
   await shot(sp, "3-handoff", tag);
   check(`${tag} 가로 넘침 0 (핸드오프)`, (await overflowX(sp)) === 0);
   await sp.keyboard.press("Tab");
@@ -467,6 +472,7 @@ async function sceneFlow(browser, origin, scheme, viewport) {
   check(`${tag} 착지: 「oort 앱으로 돌아가세요」`, (await textOf(sp, "github-public-return-back")) === "oort 앱으로 돌아가세요.");
   check(`${tag} 착지: 로그인 화면이 아니다`, !(await has(sp, "login-email")) && !(await has(sp, "onboarding-welcome")));
   check(`${tag} 착지: 주소에서 단어가 지워졌다`, (await sp.evaluate(() => location.search)) === "");
+  check(`${tag} 착지: 탭 제목이 이 화면을 말한다`, (await sp.title()) === "GitHub · oort", await sp.title());
   check(`${tag} 착지: 화면에 state·code 가 없다`, !(await sp.content()).includes(STATE) && !(await sp.content()).includes("code="));
   await shot(sp, "4-landing", tag);
   check(`${tag} 가로 넘침 0 (착지)`, (await overflowX(sp)) === 0);
@@ -476,6 +482,21 @@ async function sceneFlow(browser, origin, scheme, viewport) {
   await sp.getByTestId("github-public-return").waitFor({ timeout: 25_000 });
   check(`${tag} 막힌 단어: 이유와 다음 걸음과 돌아가라는 말`, (await textOf(sp, "github-public-return")).includes("등록 시간이 지났거나 이미 쓴 등록이에요.") && (await textOf(sp, "github-public-return")).includes("다시 눌러 주세요") && (await textOf(sp, "github-public-return-back")) === "oort 앱으로 돌아가세요.");
   await shot(sp, "4b-landing-stop", tag);
+  // 대기 단어 셋: 로그인된 앱 화면을 가리키는 말(새로고침·이 화면) 없이 oort 앱을 가리킨다(design-review H1).
+  for (const word of ["pending", "requested", "state_missing"]) {
+    await sp.goto(`${FAKE_ORIGIN}/?githubInstall=${word}`, { waitUntil: "domcontentloaded" });
+    await sp.getByTestId("github-public-return").waitFor({ timeout: 25_000 });
+    const text = await textOf(sp, "github-public-return");
+    check(`${tag} 대기 단어 ${word}: 새로고침·이 화면을 말하지 않고 oort 앱을 가리킨다`, !text.includes("새로고침") && !/(^|\s)이 화면/.test(text) && text.includes("oort 앱") && text.includes("이 창은 닫아도 돼요."), text);
+    await shot(sp, `4c-landing-${word}`, tag);
+  }
+  // 거절 화면의 출구(design-review M3).
+  await sp.goto(`${FAKE_ORIGIN}/github/handoff`, { waitUntil: "domcontentloaded" });
+  await must(sp, "github-handoff-title");
+  check(`${tag} 거절 화면(조각 없음): 한 번만 열 수 있다고 말하고 갈 길을 둘 말한다`, (await textOf(sp, "github-handoff-page")).includes("이 주소는 한 번만 열 수 있어요.") && (await textOf(sp, "github-handoff-page")).includes("「브라우저에서 다시 열기」나 「GitHub 앱 만들기」를 눌러 주세요."));
+  check(`${tag} 거절 화면: 닫아도 된다는 말과 로그인 길이 있다`, (await textOf(sp, "github-public-exit")).includes("이 창은 닫아도 돼요.") && (await has(sp, "github-public-return-login")));
+  check(`${tag} 거절 화면: GitHub 로 아무것도 나가지 않았다`, github.hits.length === 1, `${github.hits.length}번`);
+  await shot(sp, "3b-refused-empty", tag);
   await browserCtx.close();
 
   // 5 데스크탑 창이 앞으로 돌아온다
@@ -495,6 +516,8 @@ async function sceneFlow(browser, origin, scheme, viewport) {
   await dp.getByTestId("github-link-open").click();
   const after = await dp.evaluate(() => window.__opened.slice());
   check(`${tag} 설치: 「GitHub에서 설치하기」도 기본 브라우저로 연다`, after.length === before + 1 && after.at(-1)?.startsWith(`https://github.com/apps/${APP.slug}/installations/new`), after.at(-1));
+  const readyText = await textOf(dp, "github-link-ready-text");
+  check(`${tag} 설치: 데스크탑 안내는 앱으로 돌아오라고 말한다(이 화면으로 돌아온다고 하지 않는다)`, readyText.includes("이 앱으로 돌아와 주세요") && !readyText.includes("이 화면으로 돌아와요"), readyText);
   await dp.getByTestId("github-link-ready").scrollIntoViewIfNeeded();
   await shot(dp, "6-install-link", tag);
   await desktop.context.close();
@@ -550,10 +573,17 @@ async function main() {
         await shot(page, "3-handoff", tag);
         check(`${tag} 가로 넘침 0 (핸드오프)`, (await overflowX(page)) === 0);
         check(`${tag} 핸드오프(폰 폭): 막아 둔 동안 네트워크에 나가지 않았다`, github.hits.length === 0);
-        await page.goto(`${FAKE_ORIGIN}/?githubInstall=requested`, { waitUntil: "domcontentloaded" });
-        await must(page, "github-public-return");
-        await shot(page, "4-landing", tag);
-        check(`${tag} 가로 넘침 0 (착지)`, (await overflowX(page)) === 0);
+        for (const word of ["requested", "pending"]) {
+          await page.goto(`${FAKE_ORIGIN}/?githubInstall=${word}`, { waitUntil: "domcontentloaded" });
+          await must(page, "github-public-return");
+          await shot(page, word === "requested" ? "4-landing" : "4c-landing-pending", tag);
+          check(`${tag} 가로 넘침 0 (착지 ${word})`, (await overflowX(page)) === 0);
+        }
+        await page.goto(`${FAKE_ORIGIN}/github/handoff`, { waitUntil: "domcontentloaded" });
+        await must(page, "github-handoff-title");
+        await shot(page, "3b-refused-empty", tag);
+        check(`${tag} 가로 넘침 0 (거절)`, (await overflowX(page)) === 0);
+        check(`${tag} 거절(폰 폭): 출구가 있다`, await has(page, "github-public-return-login"));
         await ctx.close();
       }
     }

@@ -196,27 +196,79 @@ describe("GitHub 앱 만들기 핸드오프 페이지: GitHub 로 POST", () => {
 });
 
 describe("GitHub 앱 만들기 핸드오프 페이지: 믿을 수 없는 조각은 폼을 만들지 않는다", () => {
+  const AGAIN = "oort 앱에서 「GitHub 앱 만들기」를 다시 눌러 주세요.";
   it.each([
-    ["조각 없음", "", "이 주소는 한 번만 열 수 있어요."],
-    ["깨진 조각", "#%%%", "이 주소를 읽지 못했어요."],
-    ["JSON 아님", `#${Buffer.from("not json").toString("base64url")}`, "이 주소를 읽지 못했어요."],
-    ["GitHub 가 아닌 등록 주소", goodHash({ u: `https://evil.example/settings/apps/new?state=${STATE}` }), "이 주소를 읽지 못했어요."],
-    ["남의 서버 매니페스트", goodHash({ m: manifest("https://collector.evil.example") }), "이 서버에서 만든 주소가 아니에요."],
+    ["조각 없음", "", "이 주소는 한 번만 열 수 있어요.", "oort 앱에서 「브라우저에서 다시 열기」나 「GitHub 앱 만들기」를 눌러 주세요."],
+    ["깨진 조각", "#%%%", "이 주소를 읽지 못했어요.", AGAIN],
+    ["JSON 아님", `#${Buffer.from("not json").toString("base64url")}`, "이 주소를 읽지 못했어요.", AGAIN],
+    ["GitHub 가 아닌 등록 주소", goodHash({ u: `https://evil.example/settings/apps/new?state=${STATE}` }), "이 주소를 읽지 못했어요.", AGAIN],
+    ["남의 서버 매니페스트", goodHash({ m: manifest("https://collector.evil.example") }), "이 서버에서 만든 주소가 아니에요.", AGAIN],
     [
       "콜백이 다른 곳으로 가는 매니페스트",
       goodHash({ m: { ...manifest(), redirect_url: "https://collector.evil.example/cb" } }),
       "이 서버에서 만든 주소가 아니에요.",
+      AGAIN,
     ],
-  ])("%s", (_name, hash, line) => {
+  ])("%s", (_name, hash, line, next) => {
     const el = mountAt(hash);
     // 이 단정들이 「오리진 검사를 지우면 빨개지는」 사보타주 대상이다.
     expect(q("github-handoff-form")).toBeNull();
     expect(submitted).toHaveLength(0);
     expect(q("github-handoff-title")?.textContent).toBe(line);
-    expect(el.textContent).toContain("oort 앱에서 「GitHub 앱 만들기」를 다시 눌러 주세요.");
+    expect(q("github-handoff-detail")?.textContent).toContain(next);
     // 거절하는 쪽도 조각의 어떤 값도 되풀이하지 않는다.
     expect(el.textContent).not.toContain("evil");
     expect(el.textContent).not.toContain(STATE);
+  });
+
+  it("막힌 화면에도 출구가 있다: 닫아도 된다는 말과 이 브라우저에서 로그인하는 길(앱 밖에서 연 사람도 갈 곳이 있다)", () => {
+    for (const hash of ["", "#%%%", goodHash({ m: manifest("https://collector.evil.example") })]) {
+      const el = mountAt(hash);
+      // 이 단정들이 「거절 화면의 출구를 지우면 빨개지는」 사보타주 대상이다(design-review M3).
+      expect(q("github-public-exit")?.textContent).toContain("이 창은 닫아도 돼요.");
+      const link = q("github-public-return-login") as HTMLAnchorElement;
+      expect(link.getAttribute("href")).toBe("/");
+      expect(link.textContent).toBe("이 브라우저에서 로그인");
+      expect(el.textContent).not.toContain(STATE);
+      act(() => root?.unmount());
+      host?.remove();
+      root = null;
+      host = null;
+    }
+  });
+
+  it("이동하는 화면에는 로그인 출구가 없다(GitHub 로 넘어가는 중이다)", () => {
+    mountAt(goodHash());
+    expect(q("github-public-exit")).toBeNull();
+  });
+
+  it("「」 단추 이름과 조사는 한 덩어리로 묶여 390폭에서 조사가 줄머리에 서지 않는다", () => {
+    // 이 단정이 「묶음을 풀면 빨개지는」 사보타주 대상이다(design-review M2).
+    mountAt(goodHash());
+    const nowrap = [...document.body.querySelectorAll<HTMLElement>("span.whitespace-nowrap")].map((el) => el.textContent);
+    expect(nowrap).toContain("「Create GitHub App」을");
+    expect(nowrap).toContain("마쳐야 해요.");
+    act(() => root?.unmount());
+    host?.remove();
+    root = null;
+    host = null;
+    mountAt("");
+    const refused = [...document.body.querySelectorAll<HTMLElement>("span.whitespace-nowrap")].map((el) => el.textContent);
+    expect(refused).toContain("「GitHub 앱 만들기」를");
+  });
+
+  it("탭 제목이 이 화면을 말하고 떠나면 되돌린다", () => {
+    document.title = "oort";
+    mountAt(goodHash());
+    expect(document.title).toBe("GitHub 앱 만들기 · oort");
+    act(() => root?.unmount());
+    root = null;
+    expect(document.title).toBe("oort");
+  });
+
+  it("버튼은 제품의 채움 알약이다: 온보딩 틀의 버튼 예외(.onboarding-action)를 빌려 쓰지 않는다", () => {
+    mountAt(goodHash());
+    expect((q("github-handoff-submit") as HTMLElement).className).not.toContain("onboarding-action");
   });
 
   it("거절 때 GitHub 로는 아무것도 보내지 않았다고 말한다", () => {

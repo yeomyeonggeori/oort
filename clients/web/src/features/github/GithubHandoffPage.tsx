@@ -1,19 +1,18 @@
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { expressionForState, type GuideState } from "@momo/core/features/onboarding/guide";
 import { Button } from "@/design/ui/button";
 import { KeyValueRows } from "@/features/settings/SettingsFields";
 import { KomettoGuide } from "@/features/onboarding/guide/KomettoGuide";
-import {
-  ONBOARDING_ACTION_CLASS,
-  OnboardingColumn,
-  OnboardingFrame,
-} from "@/features/onboarding/guide/OnboardingFrame";
+import { OnboardingColumn, OnboardingFrame } from "@/features/onboarding/guide/OnboardingFrame";
+import { PublicExit } from "./GithubPublicExit";
 import {
   readGithubHandoff,
   type GithubHandoff,
   type GithubHandoffRead,
   type GithubHandoffRefusal,
 } from "./handoff";
+import { NoBreak } from "./NoBreak";
+import { usePublicTitle } from "./usePublicTitle";
 
 // Reading this as: a one-purpose public page (no sign-in) for the instance operator, opened by the
 // desktop app in the system browser, density 4/10, motion 2/10.
@@ -37,27 +36,31 @@ import {
 // 않는다). 다만 App 이 세션 복원과 업데이트 감시를 이 페이지와 별개로 돌린다.
 // =============================================================================
 
-const REFUSAL_COPY: Readonly<Record<GithubHandoffRefusal, { line: string; detail: string }>> = {
+const AGAIN = (
+  <>
+    oort 앱에서 <NoBreak>「GitHub 앱 만들기」를</NoBreak> 다시 눌러 주세요.
+  </>
+);
+
+const REFUSAL_COPY: Readonly<Record<GithubHandoffRefusal, { line: string; detail: ReactNode }>> = {
+  // 조각이 없다: 새로고침·뒤로 가기로 다시 왔거나 주소만 열었다. 앱 카드의 「브라우저에서 다시 열기」는
+  // 들고 있던 같은 주소를 다시 열어 주므로 가장 가볍다(design-review M3).
   empty: {
     line: "이 주소는 한 번만 열 수 있어요.",
-    detail: "oort 앱에서 「GitHub 앱 만들기」를 다시 눌러 주세요.",
+    detail: (
+      <>
+        oort 앱에서 <NoBreak>「브라우저에서 다시 열기」나</NoBreak> <NoBreak>「GitHub 앱 만들기」를</NoBreak> 눌러
+        주세요.
+      </>
+    ),
   },
   foreign: {
     line: "이 서버에서 만든 주소가 아니에요.",
-    detail: "GitHub로는 아무것도 보내지 않았어요. oort 앱에서 「GitHub 앱 만들기」를 다시 눌러 주세요.",
+    detail: <>GitHub로는 아무것도 보내지 않았어요. {AGAIN}</>,
   },
-  unreadable: {
-    line: "이 주소를 읽지 못했어요.",
-    detail: "oort 앱에서 「GitHub 앱 만들기」를 다시 눌러 주세요.",
-  },
-  registration: {
-    line: "이 주소를 읽지 못했어요.",
-    detail: "oort 앱에서 「GitHub 앱 만들기」를 다시 눌러 주세요.",
-  },
-  manifest: {
-    line: "이 주소를 읽지 못했어요.",
-    detail: "oort 앱에서 「GitHub 앱 만들기」를 다시 눌러 주세요.",
-  },
+  unreadable: { line: "이 주소를 읽지 못했어요.", detail: AGAIN },
+  registration: { line: "이 주소를 읽지 못했어요.", detail: AGAIN },
+  manifest: { line: "이 주소를 읽지 못했어요.", detail: AGAIN },
 };
 
 /** 조각을 주소창에서 지운다. 경로와 쿼리는 그대로 두고, 기록 항목 하나를 덮어쓴다(새 항목을 만들지 않는다). */
@@ -101,23 +104,29 @@ export function GithubHandoffPage() {
     formRef.current?.submit();
   }, [read]);
 
+  usePublicTitle(read.ok ? "GitHub 앱 만들기 · oort" : "GitHub · oort");
+
   const state: GuideState = read.ok ? "checking" : "trouble";
   const line = read.ok ? "GitHub 앱 만들기 화면으로 이동해요." : REFUSAL_COPY[read.refusal].line;
-  const detail = read.ok
-    ? "GitHub에서 「Create GitHub App」을 누르면 이 서버로 돌아와요."
-    : REFUSAL_COPY[read.refusal].detail;
+  // 풍선의 둘째 줄은 문장이 아니라 노드다: 「」 단추 이름과 조사를 한 덩어리로 묶어야 390폭에서 조사가
+  // 줄머리에 서지 않는다(design-review M2).
+  const detail: ReactNode = read.ok ? (
+    <>
+      GitHub에서 <NoBreak>「Create GitHub App」을</NoBreak> 누르면 이 서버로 돌아와요.
+    </>
+  ) : (
+    REFUSAL_COPY[read.refusal].detail
+  );
 
   return (
     <OnboardingFrame>
       <OnboardingColumn testId="github-handoff-page">
-        <KomettoGuide
-          as="h1"
-          expression={expressionForState(state)}
-          line={line}
-          detail={detail}
-          lineTestId="github-handoff-title"
-        />
-        {read.ok && <HandoffForm handoff={read.handoff} formRef={formRef} />}
+        <KomettoGuide as="h1" expression={expressionForState(state)} line={line} lineTestId="github-handoff-title">
+          <p className="break-keep text-body text-ink-muted" data-testid="github-handoff-detail">
+            {detail}
+          </p>
+        </KomettoGuide>
+        {read.ok ? <HandoffForm handoff={read.handoff} formRef={formRef} /> : <PublicExit />}
       </OnboardingColumn>
     </OnboardingFrame>
   );
@@ -149,9 +158,11 @@ function HandoffForm({
         ]}
       />
       <p className="break-keep text-meta text-ink-muted">
-        {minutes}분 안에 마쳐야 해요. 화면이 넘어가지 않으면 아래 버튼을 눌러 주세요.
+        {minutes}분 안에 <NoBreak>마쳐야 해요.</NoBreak> 화면이 넘어가지 않으면 아래 버튼을 눌러 주세요.
       </p>
-      <Button type="submit" className={ONBOARDING_ACTION_CLASS} data-testid="github-handoff-submit">
+      {/* 온보딩 틀의 버튼 예외(`.onboarding-action`)는 온보딩 안에서만 유효하다(design-system §2.4). 이 페이지는
+          온보딩 단계가 아니라서 제품의 채움 알약 그대로다. */}
+      <Button type="submit" className="self-start" data-testid="github-handoff-submit">
         GitHub에서 앱 만들기
       </Button>
     </form>

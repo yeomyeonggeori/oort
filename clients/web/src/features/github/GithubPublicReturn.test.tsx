@@ -46,7 +46,8 @@ describe("로그인 안 된 브라우저의 GitHub 착지", () => {
 
   it("설치가 끝난 단어도 같은 문으로 말한다", () => {
     mountAt("?githubInstall=linked", { kind: "install", word: "linked" });
-    expect(q("github-public-return-title")?.textContent).toBe("GitHub 계정이 이 워크스페이스에 연결됐어요.");
+    // 공개 문장은 앱 화면을 가리키는 「이 워크스페이스」를 쓰지 않는다(design-review H1 과 같은 부류).
+    expect(q("github-public-return-title")?.textContent).toBe("GitHub 계정이 워크스페이스에 연결됐어요.");
     expect(q("github-public-return-back")?.textContent).toBe("oort 앱으로 돌아가세요.");
   });
 
@@ -58,9 +59,34 @@ describe("로그인 안 된 브라우저의 GitHub 착지", () => {
     expect(q("github-public-return-back")?.textContent).toBe("oort 앱으로 돌아가세요.");
   });
 
-  it("아직 한 걸음 남은 단어는 wait 이다", () => {
+  it("아직 한 걸음 남은 단어는 wait 이고 확인 중 얼굴이다", () => {
     mountAt("?githubInstall=requested", { kind: "install", word: "requested" });
     expect(q("github-public-return-body")?.getAttribute("data-return-tone")).toBe("wait");
+    expect(document.body.querySelector('[data-testid="kometto-guide"]')?.getAttribute("data-expression")).toBe("thinking");
+  });
+
+  it.each([
+    ["pending", "잠시 뒤 oort 앱의 GitHub 화면에서 연결됐는지 확인해 보세요."],
+    ["requested", "oort 앱 GitHub 화면의 「연결 안 된 설치」에서 워크스페이스에 붙여요."],
+    ["state_missing", "oort 앱 GitHub 화면의 「연결 안 된 설치」에서 워크스페이스에 붙여 줘야 해요."],
+  ])("대기 단어 %s 는 로그인된 앱 화면이 아니라 oort 앱을 가리키고 새로고침을 말하지 않는다", (word, next) => {
+    // 이 단정들이 「공개 착지가 앱 화면용 다음 걸음을 그대로 읽으면 빨개지는」 사보타주 대상이다(design-review H1).
+    const el = mountAt(`?githubInstall=${word}`, { kind: "install", word });
+    expect(el.textContent).toContain(next);
+    expect(el.textContent).not.toContain("새로고침");
+    expect(el.textContent).not.toMatch(/(^|\s)이 화면/);
+    // 「이 창은 닫아도 돼요」와 한 화면에서 모순되지 않는다.
+    expect(el.textContent).toContain("이 창은 닫아도 돼요.");
+    expect(q("github-public-return-back")?.textContent).toBe("oort 앱으로 돌아가세요.");
+  });
+
+  it("탭 제목이 이 화면을 말하고 떠나면 되돌린다", () => {
+    document.title = "oort";
+    mountAt("?githubApp=created", { kind: "app", word: "created" });
+    expect(document.title).toBe("GitHub · oort");
+    act(() => root?.unmount());
+    root = null;
+    expect(document.title).toBe("oort");
   });
 
   it("단어는 읽는 즉시 주소창에서 지우고 나머지 쿼리는 둔다", () => {
@@ -86,5 +112,13 @@ describe("로그인 안 된 브라우저의 GitHub 착지", () => {
     const link = q("github-public-return-login") as HTMLAnchorElement;
     expect(link.getAttribute("href")).toBe("/");
     expect(link.textContent).toBe("이 브라우저에서 로그인");
+  });
+
+  it("로그인 링크는 초점 링이 글자를 덮지 않게 링이 앉을 가로 패딩을 갖는다(design-review L3)", () => {
+    mountAt("?githubApp=created", { kind: "app", word: "created" });
+    const link = q("github-public-return-login") as HTMLAnchorElement;
+    expect(link.className).toContain("px-1");
+    expect(link.className).toContain("-mx-1");
+    expect(link.className).toContain("focus-visible:focus-ring");
   });
 });

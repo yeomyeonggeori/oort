@@ -77,7 +77,9 @@ describe("「앱」 GitHub 카드: 운영자 진입", () => {
     api.fetchGithubAppStatus.mockResolvedValue(UNREGISTERED);
     await renderCard();
     await waitUntil(() => q("github-faces-operator") !== null, "운영자 진입");
-    expect(q("github-faces-operator")?.textContent).toContain("이 서버에는 아직 GitHub 앱이 없어요.");
+    // 「설치됨」 칩은 도구 얼굴의 말이다: 이 줄은 알림을 위한 앱이라는 것을 함께 말한다(design-review L5).
+    expect(q("github-faces-operator")?.textContent).toContain("알림을 받으려면 이 서버에 GitHub 앱을 먼저 만들어야 해요.");
+    expect(q("github-faces-operator")?.textContent).not.toContain("이 서버에는 아직 GitHub 앱이 없어요.");
     const create = q("github-faces-create") as HTMLAnchorElement;
     expect(create.textContent).toBe("GitHub 앱 만들기");
     expect(q("path")?.textContent).toBe("/");

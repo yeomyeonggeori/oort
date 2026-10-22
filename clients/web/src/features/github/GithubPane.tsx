@@ -252,8 +252,12 @@ function ConnectBlock({
           className="flex min-w-0 flex-col gap-2 rounded-md border border-line p-3"
           data-testid="github-link-ready"
         >
-          <p className="break-keep text-body text-ink">
-            GitHub에서 설치를 마쳐 주세요. {minutes}분 안에 마치면 이 화면으로 돌아와요.
+          {/* 데스크탑에서는 설치도 기본 브라우저에서 끝나고 GitHub 가 돌려보내는 곳도 그 브라우저다. 「이 화면으로
+              돌아와요」는 거짓이라, 앱으로 돌아오라고 말하고 돌아오면 알아서 바뀐다고 말한다(design-review M1). */}
+          <p className="break-keep text-body text-ink" data-testid="github-link-ready-text">
+            {isDesktop()
+              ? `기본 브라우저에서 GitHub 설치를 마친 뒤 이 앱으로 돌아와 주세요. 돌아오면 이 화면이 알아서 바뀌어요. ${minutes}분 안에 마쳐야 해요.`
+              : `GitHub에서 설치를 마쳐 주세요. ${minutes}분 안에 마치면 이 화면으로 돌아와요.`}
           </p>
           <div className="flex flex-wrap items-center justify-end gap-2">
             <Button type="button" variant="secondary" size="sm" onClick={() => setLink(null)}>

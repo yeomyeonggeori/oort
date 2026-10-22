@@ -44,8 +44,10 @@ function GithubOperatorEntry() {
       className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 pt-1"
       data-testid="github-faces-operator"
     >
+      {/* 이 카드의 「설치됨」 칩은 도구(각자 에이전트) 얼굴의 말이다. 이 줄은 알림 얼굴의 말이라 무엇을 위한
+          앱인지 함께 말한다(design-review L5). */}
       <p className="min-w-0 flex-1 basis-pane-sm break-keep text-meta text-ink-muted">
-        이 서버에는 아직 GitHub 앱이 없어요.
+        알림을 받으려면 이 서버에 GitHub 앱을 먼저 만들어야 해요.
       </p>
       <Button asChild size="sm">
         <Link to={GITHUB_PANE_PATH} data-testid="github-faces-create">

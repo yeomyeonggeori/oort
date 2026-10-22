@@ -4,6 +4,7 @@ import { Button } from "@/design/ui/button";
 import { InlineBanner } from "@/features/common/States";
 import type { GithubManifestStart } from "@momo/core/features/github/model";
 import { openExternalUrl } from "@/lib/tauri";
+import { NoBreak } from "./NoBreak";
 import { buildGithubHandoffUrl, type GithubHandoffBuildFailure } from "./handoff";
 import { githubAppStatusKey, githubOverviewAll } from "./githubQueries";
 import { useReturnRefresh } from "./useReturnRefresh";
@@ -65,18 +66,25 @@ export function BrowserHandoff({ handoff }: { handoff: GithubManifestStart }) {
   return (
     <div
       className="flex min-w-0 flex-col gap-2 rounded-md border border-line p-3"
-      role="status"
       data-testid="github-manifest-browser"
       data-outcome={outcome}
     >
-      <p className="break-keep text-body text-ink">
-        {failed ? "기본 브라우저를 열지 못했어요." : "기본 브라우저에서 GitHub를 열었어요."}
-      </p>
-      <p className="break-keep text-meta text-ink-muted">
-        {failed
-          ? "잠시 뒤 다시 열어 보세요. 계속 안 되면 웹 브라우저로 이 서버에 로그인해 같은 화면에서 만들어 주세요."
-          : `GitHub에서 「Create GitHub App」을 눌러 마친 뒤 이 앱으로 돌아와 주세요. 돌아오면 이 화면이 알아서 바뀌어요. ${minutes}분 안에 마쳐야 해요.`}
-      </p>
+      {/* 알림 영역은 글줄만 감싼다: 단추까지 안에 두면 결과가 바뀔 때 단추 글자가 같이 다시 읽힌다(design-review L6). */}
+      <div className="flex min-w-0 flex-col gap-2" role="status">
+        <p className="break-keep text-body text-ink">
+          {failed ? "기본 브라우저를 열지 못했어요." : "기본 브라우저에서 GitHub를 열었어요."}
+        </p>
+        <p className="break-keep text-meta text-ink-muted">
+          {failed ? (
+            "다시 열어 보세요. 계속 안 되면 웹 브라우저로 이 서버에 로그인해 같은 화면에서 만들어 주세요."
+          ) : (
+            <>
+              GitHub에서 <NoBreak>「Create GitHub App」을</NoBreak> 눌러 마친 뒤 이 앱으로 돌아와 주세요. 돌아오면
+              이 화면이 알아서 바뀌어요. {minutes}분 안에 <NoBreak>마쳐야 해요.</NoBreak>
+            </>
+          )}
+        </p>
+      </div>
       <div className="flex justify-end">
         <Button
           type="button"
@@ -85,7 +93,7 @@ export function BrowserHandoff({ handoff }: { handoff: GithubManifestStart }) {
           onClick={() => void launch()}
           data-testid="github-manifest-browser-open"
         >
-          {failed ? "다시 열기" : "브라우저에서 다시 열기"}
+          브라우저에서 다시 열기
         </Button>
       </div>
     </div>
