@@ -434,6 +434,23 @@ describe("신호: 씨앗 → 기본 → 네 프리셋 → 중립, 에이전트�
     expect(violations(chosen)).toEqual([]);
   });
 
+  it("사람이 고른 프리셋도 가리킨 행 위에서 읽힌다: signal-text 4.5, signal 3 (57행 × 받아들여지는 프리셋 전부)", () => {
+    let checked = 0;
+    const bad: string[] = [];
+    for (const row of ROWS) {
+      for (const preset of SIGNAL_PRESET_IDS) {
+        const derived = deriveThemeMode(row.seed, { signal: { preset } });
+        if (derived.signal.source !== "choice") continue;
+        checked += 1;
+        const { color: c, derived: d } = derived.tokens;
+        if (contrast(c["signal-text"], d["surface-hover"]) < 4.5 - 1e-9) bad.push(`${row.id} ${row.mode} ${preset} signal-text`);
+        if (contrast(c.signal, d["surface-hover"]) < 3 - 1e-9) bad.push(`${row.id} ${row.mode} ${preset} signal`);
+      }
+    }
+    expect(checked).toBeGreaterThan(150); // 228조합 가운데 거절 43을 뺀 185
+    expect(bad).toEqual([]);
+  });
+
   it("직접 입력한 색도 같은 길이다: 도달할 수 있으면 받고 형식이 틀리면 거절 이유를 단다", () => {
     const seed = THEME_CATALOG.find((e) => e.id === "github")!.light!;
     const ok = deriveThemeMode(seed, { signal: { custom: "#7a3fd0" } });
