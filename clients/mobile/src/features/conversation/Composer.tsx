@@ -60,11 +60,11 @@ import {
 } from 'react-native';
 import {font, line, radius, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {usePalette, useStyles} from '../../design/theme';
-import {GlassSurface} from '../../design/glass';
+import {GlassSurface, useGlassMaterial} from '../../design/glass';
 import {CONV_ICONS, CONV_ICON_SIZE, HOME_ICONS} from '../../design/icons';
 import {CARD_ICONS} from '../../design/icons/cardIcons';
 import {isPhoneSlashRow} from '../aiConnect/AiConnectCard';
-import {CONV} from './convDesign';
+import {CONV, composerFloat} from './convDesign';
 import {clearDraft, readDraft, saveDraft} from './drafts';
 import {Avatar} from './Avatar';
 import {
@@ -298,7 +298,7 @@ const INPUT_PAD_Y = space.sm;
 //
 // 알약 컴포저(DS2-4)에서 12 → 8. 입력창이 이제 따로 선 상자가 아니라 알약 안의
 // 글자 자리라, 글이 + 원 바로 옆에서 시작한다(Buzz 실측: 알약 가장자리에서
-// ≈49pt, 이 값으로 4 + 34 + 8 + 1 = 47).
+// 53.7~54.3pt, 이 값으로 9 + 36 + 8 + 1 = 54 — #4179 가 원과 여백을 Buzz 값으로 옮겼다).
 const INPUT_PAD_X = space.sm;
 
 /**
@@ -465,7 +465,7 @@ export function composerColumnBudget(
 // **② 열려 있는 동안 대화를 먹는다.** 도크(시트 + 입력창 + `styles.bar` 여백)가
 // 키보드 위 가시 열을 넘었다. AX-XXL / 874pt 창 실측 산수:
 //
-//   시트 180 + 입력창 170.4 + 바 여백 16 = **366.4pt**
+//   시트 180 + 입력창 170.4 + 바 여백 16 = **366.4pt**   (#4179 이후 바 여백이 18 → 368.4)
 //   대화 열 874 × (1 − 0.38 − 0.23)      = **340.9pt**
 //
 // 25.5pt 가 초과이고, 초과분은 타임라인에서 나온다 — 「키보드가 올라와도 대화가
@@ -490,19 +490,19 @@ export function composerColumnBudget(
 //   ② 기준 창(874pt · 기본 크기 — 캡처를 찍는 그 기기)에서 **열이 허락하는 최대
 //      정수 행**이 정확히 넷이다:
 //
-//        목록 몫 340.9 − 입력창 133.0 − 도크 크롬 16.0 = 191.9pt
-//        ⌊191.9 ÷ 44⌋ = 4          (다섯 행은 220pt 라 안 든다)
+//        목록 몫 340.9 − 입력창 133.0 − 도크 크롬 18.0 = 189.9pt   (#4179 전 16.0 → 191.9)
+//        ⌊189.9 ÷ 44⌋ = 4          (다섯 행은 220pt 라 안 든다)
 //
 // 둘이 같은 수를 가리키므로 이 배치는 「몇 개를 보여 주는가」를 **안 바꾼다** —
 // 바꾸는 것은 다섯째 행의 이마 4pt 와, 큰 글자에서 열을 넘던 초과분이다.
 //
 // 그리고 상한이 **실제로 무는 창은 큰 것들뿐이다**: **배수 1 에서** 열이 다섯
-// 행을 허락하려면 창이 946pt 를 넘어야 하고(⌊(h × 0.39 − 133 − 16) ÷ 44⌋ ≥ 5),
+// 행을 허락하려면 창이 951pt 를 넘어야 하고(⌊(h × 0.39 − 133 − 18) ÷ 44⌋ ≥ 5 — #4179 전 946),
 // 그 조건을 만족하는 배송 높이는 956 · 1024 · 1032 · 1180 · 1366 이다(가장 큰
 // 아이폰과 아이패드들 — 테스트가 그 목록을 값으로 든다). **문턱은 배수를 따라
 // 움직인다**: 사다리 아래쪽에서는 입력창이 작아져 열이 더 일찍 다섯 행을 허락하고
-// (0.823 에서 883.5pt — 926 도 문다), 위쪽에서는 늦어져 3.571 에서는 어느 배송
-// 높이도 안 문다. 946 을 한정 없이 적으면 그 움직임이 안 보인다(회전 2). 상한이
+// (0.823 에서 899pt — 926 도 문다), 위쪽에서는 늦어져 3.571 에서는 어느 배송
+// 높이도 안 문다. 951 을 한정 없이 적으면 그 움직임이 안 보인다(회전 2). 상한이
 // 무는 자리에서 넷이 하는 일은 도크가 창 크기를 따라 메뉴로 자라지 않게 잡는
 // 것이다. 그 아래에서는 열이 먼저 물고, 그 위는 스크롤이 받는다(시트는
 // `ScrollView` 다).
@@ -567,9 +567,28 @@ export function composerColumnBudget(
 // (`measure/surfaces.tsx` 의 `MentionSheetProbe`): 판정만 찍고 여유를 안 찍으면
 // 다음 사람은 이 문단을 다시 손으로 계산해야 한다.
 //
-// 기본 크기에서는 몫이 한 번도 안 걸린다: 874pt 창에서 목록 몫 207.9 − 16 = 191.9
+// 기본 크기에서는 몫이 한 번도 안 걸린다: 874pt 창에서 목록 몫 207.9 − 18 = 189.9
 // 이고 4행은 176 이다. **화면이 4행 그대로다** — 사라지는 것은 이마 4pt 뿐이다.
 // =============================================================================
+
+/**
+ * 알약의 선. 리퀴드 글래스에서는 투명이지만(네이티브 가장자리가 따로 있다 — 아래 `pillLiquid`)
+ * **두께는 남아** 안쪽 산수를 먹는다. 그래서 안쪽 줄 여백이 그만큼 덜어 낸다 — 선 + 여백 =
+ * `composerGap` 이라야 원이 **바깥 가장자리**에서 사방 9 만큼 떨어진다(#4179, 동심).
+ */
+const PILL_EDGE = StyleSheet.hairlineWidth;
+
+/** 알약 좌우 안쪽 여백(`styles.bar`) — 선 + 이 값 = 원 ↔ 알약 가장자리. */
+const BAR_PAD_X = CONV.composerGap - PILL_EDGE;
+
+/**
+ * 알약 위·아래 안쪽 여백(`styles.bar`). 위 여백에서 입력창 한 줄(엄지 바닥 44)이 원 둘레에
+ * 이미 더하는 몫 `(44 − 36) / 2 = 4` 를 한 번 더 뺀 것이다 — 그래서 한 줄일 때 원의 위·아래
+ * 여백이 좌·우와 같은 9 가 된다. 입력창을 44 로 두는 이유는 글 칸의 엄지 바닥이고, 글 세로
+ * 중심이 원 중심에 앉는 정렬(실측: 전·후 모두 0.2~0.3pt 아래)도 그 높이에서 나온다 — 알약을
+ * 키우려고 입력창을 키우면 그 정렬이 깨진다.
+ */
+const BAR_PAD_Y = BAR_PAD_X - (TOUCH_TARGET - CONV.composerCircle) / 2;
 
 /**
  * 도크가 시트·입력창 **말고** 지는 세로 — `styles.bar` 의 위아래 여백 (#1480).
@@ -577,11 +596,11 @@ export function composerColumnBudget(
  * 상수로 이름을 갖는 이유는 `INPUT_CHROME` 과 같다: 산수와 실제 스타일이 같은 값을
  * 읽어야 하고, 사본을 두면 사본이 거짓말한다(디자인 시스템 §5.5).
  */
-const DOCK_CHROME = CONV.composerPad * 2 + space.sm;
+const DOCK_CHROME = (PILL_EDGE + BAR_PAD_Y) * 2 + space.sm;
 
-/** 알약 안 두 원(34·38)을 엄지 44 로 만드는 여유 — 도출한다(감사 M-14). */
-const ATTACH_SLOP = slopTo(CONV.composerTool);
-const SEND_SLOP = slopTo(CONV.composerSend);
+/** 알약 안 두 원(36)을 엄지 44 로 만드는 여유 — 도출한다(감사 M-14). */
+const ATTACH_SLOP = slopTo(CONV.composerCircle);
+const SEND_SLOP = slopTo(CONV.composerCircle);
 
 /** 시트가 담는 후보 수. 위 절이 이 넷을 고른 이유를 든다. */
 const MENTION_MAX_ROWS = 4;
@@ -785,6 +804,27 @@ export function withLatinWordBreaks(text: string): string {
 // =============================================================================
 // 빈 상자에 못 서는 문장은 **절 경계에서** 접힌다 — 폰이 절 예산을 부른다 (#1479 ②)
 //
+// ## #4179 가 이 절의 **문턱**을 바꿨다 — 상자의 글자리에서 알약의 한 줄로
+//
+// 아래 서술 중 상자 글자리(`composerMaxHeight − INPUT_CHROME`)와 줄 수 실측은 **옛 판**이다.
+// 알약이 Buzz 와 같은 40pt 로 떠 글 칸이 214pt 가 되자(402pt 기준) 어떤 안내 문장도 한 줄에 안
+// 들고(일반 215.5 · grok 232.3 · 김인턴 243.2 · hermes 256.0), 옛 문턱에서는 그 접힘이 「든다」였으므로
+// **빈 알약이 두 줄로 자랐다**(72.7pt, Buzz 53.3pt). 성재 결정(2026-10-21, 「40 + 문장 한 줄」):
+// 여백은 Buzz 와 같게 두고 문장을 한 줄로 맞춘다 — 한 줄에 안 들면 뒷절(「@로 부르기」)이 이 절의
+// 규칙대로 절 경계에서 빠지고 머리 절만 남는다.
+//
+//   · 문턱 — `placeholderRoom(fontScale)`: **한 줄**(`PLACEHOLDER_MAX_LINES`). 규칙(`fitComposerPlaceholder`)과
+//     프로브 경로는 그대로이고 문장도 새로 짓지 않는다. 바뀐 것은 「든다」의 기준 하나다.
+//   · 재기 전 — **머리 절만**. 한 줄 예산에서는 긴 문장이 안 드는 쪽이 흔해서, 문장 전체로 시작하면
+//     알약이 두 줄로 섰다가 한 줄로 줄어드는 높이 점프가 흔한 화면이 된다. 머리 절로 시작하면 높이는
+//     처음부터 한 줄이고, 드는 창에서는 **글자만** 한두 프레임 뒤에 붙는다.
+//   · 큰 글자 — 같은 규칙이다: 문턱이 배수를 따라 커진 줄 상자(`line.body × 배수`) 한 줄이고, 머리
+//     절이 한 줄에 안 드는 크기(접근성 크기)에서도 **머리 절은 안 버린다** — 버릴 절이 없다.
+//   · 낭독 — 라벨(`accessibilityLabel`)은 보이는 문장이 아니라 필드 이름이라 줄 예산과 무관하다. 다만
+//     RN iOS 의 멀티라인 입력창은 빈 칸일 때 「JS 라벨 + 보이는 플레이스홀더」를 읽으므로
+//     (`RCTUITextView.mm` 의 `accessibilityLabel`) 뒷절이 화면에서 빠지면 귀에서도 빠진다 — 그래서
+//     빠진 절을 코어가 지은 글자 그대로 `accessibilityHint` 로 잇는다(`droppedHint`, 새 문장이 아니다).
+//
 // ## 왜 이 파일의 판정이 뒤집히나
 //
 // 아래 입력창의 주석이 「폰은 코어의 절 예산을 안 부른다」를 실측으로 정했고, 그
@@ -832,12 +872,14 @@ export function withLatinWordBreaks(text: string): string {
 // 답한다 — 웹 `placeholderFit.ts` 와 같은 분업이고, 다른 것은 **자의 축**이다:
 // 웹의 상자는 한 줄(`rows=1`)이라 가로를 재고, 이 상자는 여러 줄이라 **세로**를
 // 잰다. 프로브는 입력창과 같은 글자·같은 줄 상자·같은 줄바꿈 전략으로 서고,
-// `onTextLayout` 이 돌려주는 줄들의 높이를 더해 `composerMaxHeight` 이 든 글자리와
-// 대조한다.
+// `onTextLayout` 이 돌려주는 줄들의 높이를 더해 `placeholderRoom`(한 줄, #4179)과
+// 대조한다. 옛 판은 `composerMaxHeight` 이 든 글자리와 대조했다.
 //
-// **재기 전에는 문장 전체다.** 웹이 같은 방향을 고른 이유와 같다: 「일단 짧게」로
-// 시작하면 드는 상자에서도 광고가 한 프레임 사라졌다 돌아온다. 반대 방향의 대가는
-// 안 드는 문장이 한 프레임 서는 것이고, 그것은 이미 오늘의 화면이다.
+// **재기 전에는 머리 절이다 (#4179).** 옛 판은 문장 전체로 시작했다: 웹이 같은 방향을 고른
+// 이유는 「일단 짧게」로 시작하면 드는 상자에서도 광고가 한 프레임 사라졌다 돌아오기
+// 때문이었고, 반대 방향의 대가인 「안 드는 문장이 한 프레임 서는 것」은 이미 오늘의 화면이었다.
+// 한 줄 예산에서는 그 두 말이 뒤집힌다 — 안 드는 문장이 흔한 쪽이 돼서 그 한 프레임이 알약의
+// 높이 점프가 된다.
 //
 // ## 이 프로브가 **안** 하는 것
 //
@@ -871,6 +913,32 @@ function placeholderCandidates(
     return true;
   });
   return asked;
+}
+
+/**
+ * 안내 문장이 설 수 있는 **줄 수** — 한 줄 (#4179, 성재 결정 2026-10-21 「40 + 문장 한 줄」).
+ *
+ * 옛 예산은 상자가 담는 글자리였고(기본 크기 115pt = 5줄) 그래서 문장은 두세 줄로 접혀도 「든다」였다.
+ * 알약이 Buzz 와 같은 40pt 로 뜨면서 글 칸이 214pt 가 되자 그 접힘은 빈 알약이 두 줄로 자라는
+ * 일이 됐다. 예산을 상자가 아니라 **알약의 한 줄**로 줄인다: 한 줄에 안 들면 뒷절이 절 경계에서
+ * 빠지고 머리 절은 언제나 남는다. 상수로 이름을 갖는 이유는 시험이 「2 로 되돌리면 빨갛다」를
+ * 값으로 들기 위해서다.
+ */
+export const PLACEHOLDER_MAX_LINES = 1;
+
+/**
+ * 프로브가 잰 세로(줄 상자 합)와 대조하는 **문턱** — `PLACEHOLDER_MAX_LINES` 줄과 그다음 줄 사이의
+ * 한가운데(한 줄 반).
+ *
+ * 줄 상자는 `line.body` 에 동적 타입 배수가 곱해진 값이고(`composerMaxHeight` 머리말의
+ * `RCTAttributedTextUtils` 인용) 프로브는 줄마다 그 높이를 돌려준다. 문턱을 **정확히 한 줄**에
+ * 두면 네이티브가 줄 상자를 픽셀 격자에 반올림한 몇 분의 일 pt 때문에 한 줄 문장이 「안 든다」로
+ * 뒤집힐 수 있고, 그 오답은 **들어가는 문장의 뒷절을 지운다.** 한 줄과 두 줄은 한 줄 높이만큼
+ * 떨어져 있어서 한가운데는 어느 쪽 잡음에도 안 뒤집힌다. export 되는 이유는 계측 하네스와
+ * 시험이 같은 문턱을 읽기 위해서다(디자인 시스템 §5.5).
+ */
+export function placeholderRoom(fontScale: number): number {
+  return (PLACEHOLDER_MAX_LINES + 0.5) * line.body * fontScale;
 }
 
 /**
@@ -1043,12 +1111,19 @@ export function Composer({
   // 정하고, 둘 다 사람이 설정에서 바꾸는 값이라 렌더마다 다시 읽는다 —
   // `useWindowDimensions` 는 동적 타입이 바뀌는 순간에도 다시 그린다(RN 은
   // `RCTAccessibilityManager` 의 배수 변경을 Dimensions 변경으로 내보낸다).
-  const {fontScale, height: windowHeight} = useWindowDimensions();
+  const {fontScale, width: windowWidth, height: windowHeight} = useWindowDimensions();
   const maxHeight = composerMaxHeight(fontScale, windowHeight);
+  // 알약이 화면 가장자리에서 뜬 거리 (#4179). 폭과 글자 배수가 정하므로 스타일시트가 아니라 여기서.
+  const floatInset = composerFloat(windowWidth, fontScale);
+  // 유리 재료. 리퀴드 글래스는 가장자리를 네이티브가 그리므로 우리 선은 투명이고(이중선 방지),
+  // 블러·투명도 줄이기(불투명 surface)에서는 그 선이 알약의 경계다 — 다크에서 알약과 바닥은
+  // 1.1:1 이라 선이 없으면 알약이 사라진다. 탭바(`ShellChrome` 의 `barLiquid`)와 같은 길이다.
+  const glassMaterial = useGlassMaterial();
   // 시트의 상한도 같은 두 값이 정한다 (#1480). 위 상한과 나란히 여기서 계산하는
   // 이유가 그것이다 — 둘은 같은 열을 나눠 갖고, 스타일시트는 그 열을 모른다.
-  // 절 예산의 자 (#1479). 상한이 든 높이에서 세로 크롬을 빼면 **글이 서는 자리**다.
-  const placeholderRoom = maxHeight - INPUT_CHROME;
+  // 절 예산의 자 (#1479 → #4179). 옛 판은 상한이 든 높이에서 세로 크롬을 뺀 **글이 서는 자리**였고,
+  // 지금은 **알약의 한 줄**이다(`placeholderRoom` — 큰 글자에서는 배수를 따라 큰 한 줄).
+  const fitRoom = placeholderRoom(fontScale);
   // 첫 렌더가 이미 초안을 들고 있다 (`drafts.ts`). 효과로 채우면 빈 상자가 한
   // 프레임 그려졌다가 글이 나타나고, 그것은 「글이 잠깐 사라졌다 돌아오는」
   // 화면이다 — MMKV 가 동기로 읽히는 것이 여기서 값을 한다.
@@ -1517,15 +1592,30 @@ export function Composer({
     [],
   );
 
-  const shownPlaceholder = withLatinWordBreaks(
+  const keptPlaceholder =
     clauses === null
       ? (placeholder as string)
       : fitComposerPlaceholder(clauses, candidate => {
           const height = probed[candidate];
-          // 아직 안 잰 후보는 「든다」다 — 머리말의 안전 방향.
-          return height === undefined || height <= placeholderRoom;
-        }),
-  );
+          // 아직 안 잰 후보는 「안 든다」다 (#4179) — 한 줄 예산에서는 긴 문장이 안 드는 쪽이
+          // 흔해서, 「든다」로 시작하면 알약이 두 줄로 섰다가 줄어든다. 머리 절로 시작하면 높이는
+          // 처음부터 한 줄이고 드는 창에서는 글자만 뒤에 붙는다(머리말 「재기 전」 절).
+          return height !== undefined && height <= fitRoom;
+        });
+  const shownPlaceholder = withLatinWordBreaks(keptPlaceholder);
+  // **눈에서 빠진 절이 귀에서도 빠지지 않게 한다 (#4179).** RN iOS 의 멀티라인 입력창
+  // (`RCTUITextView.accessibilityLabel`)은 빈 칸일 때 「JS 라벨 + 보이는 플레이스홀더」를 읽는다 —
+  // 그래서 한 줄 예산이 뒷절(「@로 부르기」)을 화면에서 빼면 VoiceOver 도 그 절을 못 읽는다. 라벨은
+  // 그대로 두고(필드 이름 — 줄 예산과 무관), 빠진 절을 **코어가 지은 그 글자 그대로** 힌트로 잇는다:
+  // 새 문장은 아니고, 귀는 「라벨 + 보이는 절 + 힌트」로 문장 전체를 듣는다. 글이 있으면 플레이스홀더가
+  // 안 보이므로 힌트도 없다.
+  const droppedHint =
+    clauses === null || text !== ''
+      ? undefined
+      : clauses
+          .filter(clause => !keptPlaceholder.includes(clause.text))
+          .map(clause => clause.text)
+          .join(' ') || undefined;
 
   return (
     <View style={styles.root}>
@@ -1847,7 +1937,11 @@ export function Composer({
           「보내기」가 따로 놀았다. 알약 밖 도크는 투명이라 바닥이 비친다. */}
       <GlassSurface
         radius={CONV.composerRadius}
-        style={styles.pill}
+        style={[
+          styles.pill,
+          glassMaterial === 'liquid' && styles.pillLiquid,
+          {marginHorizontal: floatInset},
+        ]}
         testID="composer-pill">
       <View style={styles.bar}>
         {stableAttachmentTarget === null ? null : (
@@ -1903,6 +1997,7 @@ export function Composer({
           // 버튼을 뺐으므로(DS2-4 검수 M-4). `textFaint` 는 알약 위 3.6~3.8:1 이었다.
           placeholderTextColor={palette.textMuted}
           accessibilityLabel={placeholder ?? composerFieldLabel(channelLabel, recipient)}
+          accessibilityHint={droppedHint}
           multiline
           // 이 상자에서 한국어가 **낱말 가운데서** 끊기지 않는다 (#1422 폰 몫).
           //
@@ -1910,7 +2005,7 @@ export function Composer({
           // #1422 는 거기서 「절 단위로 버린다」를 계약으로 만들었다. 이 상자는
           // 다르다 — RN 의 `multiline` 은 콘텐츠 높이로 자라므로 넘쳐도 잃는 것이
           // 없고, 잃는 것이 없으면 버릴 이유도 없다. 폰 계측이 그것을 실측했다
-          // (`measure/surfaces.tsx` 의 `composer-placeholder`: 예산 260pt 상자에서
+          // (`measure/surfaces.tsx` 의 `composer-placeholder`: 예산 260pt(알약 이전 바의 글 칸) 상자에서
           // 긴 방 이름은 두 줄, 그리고 **두 줄 다 보인다**).
           //
           // 그 「잃는 것이 없다」는 **기본 글자 크기까지**였다. 같은 표면을
@@ -1936,9 +2031,9 @@ export function Composer({
           // **#1479 가 그 열린 질문에 답했다: 부른다.** 위 「절 예산」 머리말이
           // 결정과 그 산수를 들고, 이 상자의 `placeholder` 는 이제 프로브가 든
           // 세로로 고른 문장이다. 그래서 위 문단의 「안 부른다」는 **#1443 까지의
-          // 기록**이지 오늘의 계약이 아니다 — 오늘의 계약은 배수 ~2.2 아래에서
-          // 화면이 하나도 안 변하고(그 아래는 문장 전체가 든다), 그 위에서는 못 설
-          // 절이 절 경계에서 통째로 사라진다는 것이다.
+          // 기록**이지 오늘의 계약이 아니다 — 오늘의 계약은 **한 줄에 안 드는 문장은
+          // 뒷절이 절 경계에서 통째로 사라진다**는 것이다(#4179: 옛 「배수 ~2.2 아래에서는
+          // 화면이 하나도 안 변한다」는 상자 글자리 문턱의 것이었다 — 머리말 #4179 절).
           //
           // **같은 사진의 다른 결함도 #1479 가 받았다**: 그 크기에서 뒷절이
           // 「보내기, @」 / 「로 부르기」로 끊기던 것. `hangul-word` 에게 `@` 는
@@ -1984,10 +2079,7 @@ export function Composer({
               보이는 글자에서 낭독 라벨로만 옮겼다 — owner 표 「오른쪽 원형 ↑」. */}
           <Image
             source={CONV_ICONS.up}
-            style={[
-              styles.sendGlyph,
-              {tintColor: canSend ? palette.onPrimary : palette.textFaint},
-            ]}
+            style={[styles.sendGlyph, {tintColor: palette.onPrimary}]}
           />
         </Pressable>
       </View>
@@ -2012,30 +2104,40 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    */
   root: {paddingTop: space.sm},
   /**
-   * 시안 `.a-comp{left:12px;right:12px;border-radius:26px;border:1px solid
-   * var(--glassLine);box-shadow:var(--sh2)}`. 유리와 틴트는 `GlassSurface` 가 진다.
+   * 반경은 원 반경 + 사방 여백(`CONV.composerRadius`)이라 두 원과 동심이다 (#4179). 좌우로
+   * 뜬 거리는 폭과 글자 배수가 정하므로 **여기 없다** — 컴포넌트가 `composerFloat` 로 계산해
+   * 붙인다. Buzz 의 알약은 선 대신 부드러운 그림자로 바닥에서 뜬다(`rest` — `float` 은 Buzz
+   * 실측 그림자보다 세 배 짙었다): 리퀴드 글래스(iOS 26)에서는 선이 투명이다(`pillLiquid`).
+   * 유리와 틴트는 `GlassSurface` 가 진다.
    */
   pill: {
-    marginHorizontal: CONV.composerInset,
     borderRadius: CONV.composerRadius,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: PILL_EDGE,
     borderColor: color.glassLine,
-    boxShadow: color.elevationFloat,
+    boxShadow: color.elevationRest,
   },
+  /** 네이티브 유리 가장자리가 이미 있다 — 두께는 남기고 색만 뺀다(이중선 방지). */
+  pillLiquid: {borderColor: 'transparent'},
+  /**
+   * 좌우는 원 ↔ 알약 가장자리(`composerGap`)에서 알약의 선을 던 `BAR_PAD_X`, 위아래는 거기서
+   * 입력창이 원 둘레에 더하는 몫을 또 던 `BAR_PAD_Y` — 선과 합치면 사방 같다. 글이 여러 줄로
+   * 자라도 원은 `flex-end` 라 아래·옆 여백이 한 줄 때와 같고, 알약의 아래 두 모서리와 동심이다.
+   */
   bar: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    padding: CONV.composerPad,
+    paddingHorizontal: BAR_PAD_X,
+    paddingVertical: BAR_PAD_Y,
   },
   /**
-   * 시안 `.tools button{width:34px;height:34px;border-radius:50%}` — 안쪽 왼쪽 +
-   * 원. 44 는 `hitSlop` 이 진다. 한 줄 입력창(44) 가운데에 앉는다.
+   * 안쪽 왼쪽 + 원(Buzz: 흰 원 + 가는 테두리). 44 는 `hitSlop` 이 진다. 한 줄 입력창(44)
+   * 가운데에 앉는다.
    */
   attach: {
-    width: CONV.composerTool,
-    height: CONV.composerTool,
-    marginBottom: (TOUCH_TARGET - CONV.composerTool) / 2,
-    borderRadius: CONV.composerTool / 2,
+    width: CONV.composerCircle,
+    height: CONV.composerCircle,
+    marginBottom: (TOUCH_TARGET - CONV.composerCircle) / 2,
+    borderRadius: CONV.composerCircle / 2,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: color.surface,
@@ -2075,14 +2177,14 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     lineHeight: line.body,
   },
   /**
-   * 시안 `.a-send{width:38px;height:38px;background:var(--primary)}` — 잉크 ↑ 원.
-   * 한 줄 입력창(44) 가운데에 앉고, 글이 자라면 마지막 줄 옆에 남는다.
+   * 잉크 ↑ 원 — + 와 같은 지름이다. 한 줄 입력창(44) 가운데에 앉고, 글이 자라면 마지막
+   * 줄 옆에 남는다.
    */
   send: {
-    width: CONV.composerSend,
-    height: CONV.composerSend,
-    marginBottom: (TOUCH_TARGET - CONV.composerSend) / 2,
-    borderRadius: CONV.composerSend / 2,
+    width: CONV.composerCircle,
+    height: CONV.composerCircle,
+    marginBottom: (TOUCH_TARGET - CONV.composerCircle) / 2,
+    borderRadius: CONV.composerCircle / 2,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: color.primary,
@@ -2101,8 +2203,14 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    * 여기 없다.
    */
   probe: {fontSize: font.body, lineHeight: line.body},
-  /** 비었을 때. Buzz 의 흐린 원 — 잉크를 벗는다. */
-  sendDisabled: {backgroundColor: color.surfaceMuted},
+  /**
+   * 보낼 수 없을 때(비었다·오프라인·첨부 대기). Buzz 의 흐린 원 — 잉크를 벗고 중간 회색을
+   * 입는다. 글리프는 잉크 때와 같은 색(`onPrimary`)이라 「같은 버튼의 흐린 판」으로 읽힌다.
+   * 옛 값 `surfaceMuted` 는 알약 위 1.08:1(다크 1.12)이라 원이 거의 안 보였다. `textFaint`
+   * 는 알약 위 두 스킴 모두 3.6:1, 글리프는 3.8(라이트)·4.0(다크):1 — 값은
+   * `composerPill.test.tsx` 가 팔레트에서 잰다.
+   */
+  sendDisabled: {backgroundColor: color.textFaint},
   sendPressed: {opacity: 0.8},
   /**
    * 후보 시트 (#1480). **`maxHeight` 는 여기 없다** — 글자 배수와 창 높이가
