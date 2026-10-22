@@ -735,6 +735,8 @@ async function nameScenes(browser, origin) {
               // 고른 타일의 이름(고른 순간에 굵기·색이 바뀌는 자리): 잘리지 않고 두 줄 안이다.
               const tileName = document.querySelector(".theme-tile[data-selected] .theme-tile-name");
               const region = document.querySelector('[data-testid="theme-style-options"]');
+              // 격자는 안쪽에서 스크롤하는 상자라 바깥 높이(`regionHeight`)는 안쪽 줄이 늘어도 안 변한다: 안쪽 전체 높이(`gridHeight`)를 잰다.
+              const scroller = document.querySelector(".theme-gallery-scroll");
               return {
                 lines: Math.round(rect.height / lineHeight),
                 truncated: name.scrollWidth > name.clientWidth + 1,
@@ -749,6 +751,7 @@ async function nameScenes(browser, origin) {
                 tileNameClipped: tileName.scrollWidth > tileName.clientWidth + 1,
                 tileNameLines: Math.round(tileName.getBoundingClientRect().height / parseFloat(getComputedStyle(tileName).lineHeight)),
                 regionHeight: Math.round(region.getBoundingClientRect().height),
+                gridHeight: scroller.scrollHeight,
               };
             });
             const row = { ...where, ref, label, ...m };
@@ -760,11 +763,12 @@ async function nameScenes(browser, origin) {
           const layouts = [...new Set(rows.map((r) => r.layout))];
           const heights = rows.map((r) => r.triggerHeight);
           const regionHeights = rows.map((r) => r.regionHeight);
+          const gridHeights = rows.map((r) => r.gridHeight);
           if (layouts.length > 1 || Math.max(...heights) - Math.min(...heights) > 1) {
             bad.push({ ...where, ref: "*", label: `(배치가 이름마다 갈린다: ${layouts.join("/")}, 높이 ${Math.min(...heights)}~${Math.max(...heights)})`, lines: 1, truncated: false, triggerOverflow: false, layout: layouts.join("/"), chevronBeside: true });
           }
-          if (Math.max(...regionHeights) - Math.min(...regionHeights) > 1) {
-            bad.push({ ...where, ref: "*", label: `(열린 갤러리의 높이가 선택에 따라 움직인다: ${Math.min(...regionHeights)}~${Math.max(...regionHeights)})`, lines: 1, truncated: false, triggerOverflow: false, layout: "region", chevronBeside: true });
+          if (Math.max(...regionHeights) - Math.min(...regionHeights) > 1 || Math.max(...gridHeights) - Math.min(...gridHeights) > 1) {
+            bad.push({ ...where, ref: "*", label: `(열린 갤러리의 높이가 선택에 따라 움직인다: 바깥 ${Math.min(...regionHeights)}~${Math.max(...regionHeights)}, 격자 안쪽 ${Math.min(...gridHeights)}~${Math.max(...gridHeights)})`, lines: 1, truncated: false, triggerOverflow: false, layout: "region", chevronBeside: true });
           }
           // 가장 긴 이름 하나를 사진으로 남긴다: 접힌 행(이름·썸네일)과, 폰 폭에서는 열린 갤러리에서 그 타일이 고른 모양.
           const longest = rows.slice().sort((a, b) => b.label.length - a.label.length)[0];
