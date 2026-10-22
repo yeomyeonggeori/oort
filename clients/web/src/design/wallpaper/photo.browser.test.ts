@@ -339,6 +339,23 @@ describe.skipIf(ENGINES.length === 0)("내 사진 처리: 진짜 브라우저에
       });
     }, 60_000);
 
+    it("인코더가 JPEG 구조가 아닌 바이트를 내면 저장하지 않는다 (걸러지지 않은 출력을 「아마 괜찮다」고 쓰지 않는다: fail-closed)", async () => {
+      await withPage(async (page) => {
+        const base = await makeImage(page, { kind: "flat", width: 320, height: 200, type: "image/jpeg" });
+        // 전제: 같은 사진이 평소에는 저장된다(그래서 아래의 거절은 입력 탓이 아니라 인코더 출력 탓이다).
+        const normal = await runPipeline(page, base, "image/jpeg");
+        expect(normal.ok).toBe(true);
+        // 캔버스 인코더가 JPEG가 아닌 바이트를 내도록 바꾼다.
+        await page.evaluate(() => {
+          HTMLCanvasElement.prototype.toBlob = function (callback: BlobCallback) {
+            callback(new Blob([new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8])], { type: "image/jpeg" }));
+          };
+        });
+        const out = await runPipeline(page, base, "image/jpeg");
+        expect(out).toEqual({ ok: false, reason: "unreadable" });
+      });
+    }, 60_000);
+
     it("JPEG도 이미지도 아닌 바이트는 읽지 못한 사진이다 (던지지 않는다)", async () => {
       await withPage(async (page) => {
         const out = await runPipeline(page, Uint8Array.from([1, 2, 3, 4, 5, 6, 7, 8]), "image/jpeg");
