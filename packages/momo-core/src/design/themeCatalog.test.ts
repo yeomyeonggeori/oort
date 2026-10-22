@@ -44,12 +44,12 @@ describe("구성: 57 테마-모드 · 41항목", () => {
     expect(new Set(THEME_CATALOG.map((e) => e.label)).size).toBe(41);
   });
 
-  it("색인(themeCatalogIndex)은 카탈로그의 id·모드·라벨 투영이다 (메인 번들이 읽는 쪽이 어긋나지 않는다)", () => {
-    expect(THEME_CATALOG_INDEX).toHaveLength(THEME_CATALOG.length);
+  it("색인(themeCatalogIndex)은 카탈로그의 id·모드 투영이다 (메인 번들이 읽는 쪽이 어긋나지 않는다)", () => {
+    const rows = THEME_CATALOG_INDEX.split(" ");
+    expect(rows).toHaveLength(THEME_CATALOG.length);
     THEME_CATALOG.forEach((entry, i) => {
-      const [id, modes, label] = THEME_CATALOG_INDEX[i];
-      expect([id, label]).toEqual([entry.id, entry.label]);
-      expect(modes).toBe(entry.light && entry.dark ? "both" : entry.light ? "light" : "dark");
+      const expectedMode = entry.light && entry.dark ? "b" : entry.light ? "l" : "d";
+      expect(rows[i]).toBe(`${entry.id}:${expectedMode}`);
     });
   });
 });

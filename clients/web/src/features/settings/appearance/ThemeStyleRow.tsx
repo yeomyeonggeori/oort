@@ -1,17 +1,48 @@
-// 자리표시 (AP-1a #4186): 테마 스타일 행: 선택한 테마의 썸네일과 갤러리 격자.
-// 자리: 카드 「색상」, 색 모드 바로 아래. 소유: AP-1b(#4188).
+import { Suspense, lazy } from "react";
+import { SettingsRow } from "../shell/SettingsRow";
+
+// 테마 스타일 행: 선택한 테마의 썸네일과 갤러리 격자 (AP-1a #4186 자리표시, AP-1b #4188이 채운다).
+// 자리: 카드 「색상」, 색 모드 바로 아래. 합성하는 쪽(이 행을 부르는 카드)은 건드리지 않는다.
 //
-// 지금은 아무것도 그리지 않는다. 컨트롤은 앱이 그 값을 **실제로 따를 때**, 곧 소비자 규칙이 같은
-// PR에 들어올 때만 연다(ADR-0189 증보 1 「눌러도 안 바뀌는 컨트롤은 먼저 내보내지 않는다」).
-// 소유 이슈는 이 파일만 채우고, 값은 `@/design/theme`의 `updateAppearance`·`useAppearance`로
-// 저장·구독한다. 합성하는 쪽(이 행을 부르는 카드)은 건드리지 않는다.
+// 갤러리는 **지연 청크**다. 카탈로그 씨앗 표와 파생 엔진이 함께 실려서(gzip 약 20KB) 메인 번들에 넣지 않는다
+// (번들 예산: `gate:theme-bundle`, 설정 모양 청크 ≤ 25KB · 메인 청크 증가 ≤ 2KB). 청크를 받는 동안은 같은 라벨의
+// 행과 중립 막대 자리가 서서 행 높이가 변하지 않는다. 청크를 받지 못하면(오프라인) 한 줄로 말한다.
 
-/**
- * 소유 이슈가 이 행을 열 때 `true`로 바꾼다(컴포넌트를 채우는 같은 PR에서). 열린 행은 슬롯 시험의
- * 「아무것도 안 그린다」 단정에서 빠지고, 이 행을 부르는 합성 쪽 파일은 고치지 않는다.
- */
-export const THEME_STYLE_ROW_OPEN: boolean = false;
+/** 이 행을 열었다(AP-1b). 슬롯 시험(`appearanceSlots.test.tsx`)의 「아무것도 안 그린다」 단정에서 빠진다. */
+export const THEME_STYLE_ROW_OPEN: boolean = true;
 
-export function ThemeStyleRow(): null {
-  return null;
+const ROW_LABEL = "테마 스타일";
+const ROW_DESCRIPTION =
+  "앱 전체에 쓰는 색 조합이에요. 라이트와 다크가 짝인 테마는 색 모드를 따라 같이 바뀌어요.";
+
+function Pending() {
+  return (
+    <SettingsRow label={ROW_LABEL} description={ROW_DESCRIPTION} testId="theme-style-row-pending">
+      <span aria-hidden="true" className="theme-style-skeleton" />
+    </SettingsRow>
+  );
+}
+
+function Unavailable() {
+  return (
+    <SettingsRow
+      label={ROW_LABEL}
+      description="테마 목록을 불러오지 못했어요. 앱을 새로 고치면 다시 불러와요."
+      role="alert"
+      testId="theme-style-row-failed"
+    />
+  );
+}
+
+// 받지 못한 import는 던지는 대신 안내 행을 낸다(설정 화면 전체가 무너지지 않는다).
+const ThemeGallery = lazy(() =>
+  import("./ThemeGallery").catch(() => ({ default: Unavailable }))
+);
+
+export function ThemeStyleRow() {
+  return (
+    <Suspense fallback={<Pending />}>
+      <ThemeGallery />
+    </Suspense>
+  );
 }

@@ -1,9 +1,123 @@
-/* 자리표시 (AP-1a #4186): 이 조각은 AP-1b(#4188)가 채운다. 지금은 비어 있다.
+/* 테마 갤러리의 격자·스크롤 상한·위아래 페이드와 타일 (AP-1b #4188, 청사진 §5.3-c).
  *
- * 대상: 테마 갤러리의 격자·스크롤 상한·위아래 페이드.
- * 건드릴 것: 갤러리 전용 유틸리티(예: `.theme-gallery-scroll { ... }`)
+ * 다른 여섯 조각과 달리 이 조각은 루트 속성(`:root[data-...]`)에 기대지 않는다. 갤러리가 자기 이름의 클래스를
+ * 새로 정의할 뿐이라 기존 규칙과 겹치지 않고 특이도 다툼이 없다. 값은 `tokens.css`의 토큰만 읽는다(색 리터럴·인라인
+ * style 금지). 타일 안의 색은 요소에 꽂히는 변수(CSSOM, `paintElement`)가 입히고 이 파일은 색을 하나도 모른다.
  *
- * 다른 여섯 조각과 달리 이 조각은 루트 속성(`:root[data-...]`)에 기대지 않는다. 갤러리가 자기 이름의
- * 클래스를 새로 정의할 뿐이라 기존 규칙과 겹치지 않고 특이도 다툼이 없다. 값은 `tokens.css`의 토큰만
- * 읽는다(색 리터럴·인라인 style 금지). 컨트롤은 이 규칙이 실제로 화면을 바꾸는 PR에서만 공개한다.
+ * 격자 높이는 Tailwind `max-h`를 쓰지 못한다(닫힌 척도). 위아래 페이드는 `mask-image`로 그린다: 마스크는
+ * 알파만 읽으므로 불투명 정지점에 `currentcolor`를 쓰고 색을 적지 않는다(`ai_gradient`·`raw_color`에 안 걸린다).
  */
+
+/* 열린 갤러리 한 덩이: 안내 줄 + 격자. 설정 카드의 직계 자식이라 위에 선 하나가 그어진다. */
+.theme-gallery-region {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  padding: var(--spacing-3) var(--spacing-4) var(--spacing-4);
+}
+
+/* 격자는 세 줄 남짓 보이고 안에서 스크롤한다(Buzz `max-h-[430px]`). 높이는 타일 최소 폭의 세 배(480)라 넷째 줄이
+ * 위로 비쳐 더 있음을 알린다. 안쪽 위아래 12는 페이드 구간이라 멈춘 자리의 첫·끝 줄이 가려지지 않는다. */
+.theme-gallery-scroll {
+  max-block-size: calc(var(--spacing-theme-tile-min) * 3);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-block: var(--spacing-3);
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    currentcolor var(--spacing-3),
+    currentcolor calc(100% - var(--spacing-3)),
+    transparent
+  );
+}
+
+/* 열 최소 폭은 타일 최소 폭의 0.85배(136)다: 설정 본문 폭(720)에서 네 열, 폰 폭(390)에서 두 열이 선다(Buzz의
+ * 168×112 타일과 같은 밀도). 1배(160)이면 폰에서 한 열이 되어 타일 한 장이 화면 폭을 다 쓴다. */
+.theme-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--spacing-theme-tile-min) * 0.85), 1fr));
+  gap: var(--spacing-4) var(--spacing-4);
+  /* 선택 링(바깥 4)이 격자 가장자리에서 잘리지 않게 한 칸 안쪽으로 둔다. */
+  padding-inline: var(--spacing-1);
+}
+
+/* 타일: 사라지는 라디오 + 미리보기 한 장 + 이름. 고른 것은 잉크 링과 굵은 이름이다. */
+.theme-tile {
+  display: flex;
+  min-inline-size: 0;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--spacing-1);
+  cursor: pointer;
+}
+
+.theme-tile-frame {
+  inline-size: 100%;
+}
+
+/* 타일 한 층의 변수를 입는 감싸개. 상자를 만들지 않아 층이 격자 칸(`grid-area: 1 / 1`)에 그대로 선다. */
+.theme-tile-paint {
+  display: contents;
+}
+
+.theme-tile:hover .theme-tile-frame {
+  box-shadow: 0 0 0 2px var(--line-strong);
+}
+
+.theme-tile[data-selected] .theme-tile-frame {
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 4px var(--ink);
+}
+
+.theme-tile:has(:focus-visible) .theme-tile-frame {
+  outline: 2px solid var(--focus-ring-ink, var(--accent));
+  outline-offset: 4px;
+}
+
+.theme-tile-name {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+  font-size: var(--text-meta);
+  line-height: var(--text-meta--line-height);
+  color: var(--ink-muted);
+}
+
+.theme-tile[data-selected] .theme-tile-name {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* 접힌 행의 썸네일 한 장. 타일과 같은 미리보기라 크기만 고정이다(타일 최소 폭의 1.25배, 200). 제목 「오늘 배포」와
+ * 알약이 한 줄에 들어가는 최소 폭이다. */
+.theme-style-thumb {
+  inline-size: calc(var(--spacing-theme-tile-min) * 1.25);
+  flex: none;
+}
+
+/* 본문 판: 실제 앱의 `app-pane`처럼 1px 선 고리를 두른다. 다크에서 판이 바닥과 거의 같은 색이어도 가장자리가 선다. */
+.theme-preview-pane {
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+/* 불러오는 동안·불러오지 못했을 때 썸네일 자리. 글자 없는 중립 막대라 행 높이가 변하지 않는다. */
+.theme-style-skeleton {
+  inline-size: calc(var(--spacing-theme-tile-min) * 1.25);
+  aspect-ratio: 3 / 2;
+  flex: none;
+  border-radius: var(--radius-lg);
+  background-color: var(--surface-muted);
+}
+
+/* 강조색 칩: 이 테마·모드에서 쓸 수 없는 프리셋(`near-danger` 등)은 흐리게 하고 누를 수 없다. 이유는 칩 아래 한 줄이다. */
+.accent-swatch[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
+.accent-swatch[aria-disabled="true"] .accent-swatch-chip {
+  opacity: 0.4;
+}

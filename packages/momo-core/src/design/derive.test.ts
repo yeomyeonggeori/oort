@@ -426,10 +426,10 @@ describe("CSS 변수: 루트에 꽂는 한 벌", () => {
 describe("미리보기 타일 변수", () => {
   const derived = deriveThemeMode(THEME_CATALOG.find((e) => e.id === "github")!.dark!);
 
-  it("열둘이고 이름이 TILE_VAR_NAMES와 같다", () => {
+  it("열셋이고 이름이 TILE_VAR_NAMES와 같다", () => {
     const vars = tileVars(derived.tokens, derived.mode, derived.pane);
     expect(Object.keys(vars).sort()).toEqual([...TILE_VAR_NAMES].sort());
-    expect(TILE_VAR_NAMES).toHaveLength(12);
+    expect(TILE_VAR_NAMES).toHaveLength(13);
   });
 
   it("파생 테마는 pane을 그대로, 첫 파티는 웹 셸 규칙(라이트 surface, 다크 canvas-mid)을 쓴다", () => {

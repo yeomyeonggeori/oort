@@ -51,9 +51,11 @@ export const SIGNAL_ROLES = ["signal", "on-signal", "signal-text", "signal-soft"
 export type SignalRole = (typeof SIGNAL_ROLES)[number];
 export type SignalValues = Readonly<Record<SignalRole, string>>;
 
-/** ADR-0174 액센트에서 옮긴 네 프리셋(표 §4). `dawn`은 옮기지 않는다. */
-export const SIGNAL_PRESET_IDS = ["seongun", "hongyeom", "hyeseong", "gamram"] as const;
-export type SignalPresetId = (typeof SIGNAL_PRESET_IDS)[number];
+// 프리셋 id 목록(`SIGNAL_PRESET_IDS`·`SignalPresetId`·`isSignalPresetId`)은 `signalIds.ts`에 있다. 외양 레코드와
+// 루트 스탬프(웹 메인 번들)가 id만 알면 되는데 이 파일은 보정 엔진까지 들고 있어서, 이 파일을 가져오면 엔진이
+// 메인 번들로 끌려온다(AP-1b 번들 예산). 아래 재내보내기는 기존 가져오기(폰·시험)가 그대로 서게 하려는 것이다.
+export { SIGNAL_PRESET_IDS, isSignalPresetId, type SignalPresetId } from "./signalIds";
+import { SIGNAL_PRESET_IDS, type SignalPresetId } from "./signalIds";
 
 export const SIGNAL_PRESETS: Readonly<
   Record<SignalPresetId, { label: string; light: string; dark: string }>
@@ -63,10 +65,6 @@ export const SIGNAL_PRESETS: Readonly<
   hyeseong: { label: "혜성", light: "#8B005A", dark: "#FF4BCC" },
   gamram: { label: "감람", light: "#005400", dark: "#8CB858" },
 };
-
-export function isSignalPresetId(value: unknown): value is SignalPresetId {
-  return typeof value === "string" && (SIGNAL_PRESET_IDS as readonly string[]).includes(value);
-}
 
 export type SignalRejection = "invalid-hex" | "unreachable" | "near-agent" | "near-danger";
 

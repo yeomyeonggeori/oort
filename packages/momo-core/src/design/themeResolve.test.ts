@@ -10,17 +10,14 @@ import {
   moveNotice,
   normalizeThemeRef,
   paletteOf,
-  pickNotice,
-  schemeForThemePick,
   splitThemeRef,
-  themeLabel,
   themeMoveForScheme,
   THEME_REF_ID_MAX,
   type ModesLookup,
   type ThemeRef,
 } from "./themeResolve";
 import { THEME_CATALOG_INDEX } from "./themeCatalogIndex.generated";
-import { DEFAULT_THEME_ID, MODES, THEME_IDS, THEME_ID_RE, THEME_LABELS } from "./themes";
+import { DEFAULT_THEME_ID, MODES, THEME_IDS, THEME_ID_RE } from "./themes";
 
 // AP-1a(#4186) 골격: 첫 파티 3종의 모드와 단일 모드 규칙을 **가짜 단일 모드 참조**로 잰다.
 // AP-1b(#4188): 같은 규칙을 진짜 카탈로그 색인 위에서 다시 잰다(아래 「카탈로그 색인」 이하).
@@ -145,13 +142,20 @@ describe("effectiveScheme: 단일 모드 테마는 그 모드로 못 박는다",
 // AP-1b #4188: 카탈로그 색인 위의 판정과 단일 모드 규칙 셋 (청사진 §5.2-a, 테마 토큰 표 §8.6).
 // =============================================================================
 
+/** 색인 한 줄을 `[id, 모드 글자]` 목록으로 푼다(l 라이트 단독 · d 다크 단독 · b 쌍). */
+const INDEX_ROWS: readonly (readonly [string, string])[] = THEME_CATALOG_INDEX.split(" ").map((item) => [
+  item.slice(0, -2),
+  item.slice(-1),
+]);
+
 describe("카탈로그 색인", () => {
   it("항목 41개, id 순이고 겹치지 않는다. 쌍 16 · 라이트 단독 1 · 다크 단독 24", () => {
     expect(CATALOG_IDS).toHaveLength(41);
     expect([...CATALOG_IDS]).toEqual([...CATALOG_IDS].sort());
     expect(new Set(CATALOG_IDS).size).toBe(41);
-    const count = (modes: string) => THEME_CATALOG_INDEX.filter(([, m]) => m === modes).length;
-    expect([count("both"), count("light"), count("dark")]).toEqual([16, 1, 24]);
+    const count = (modes: string) => INDEX_ROWS.filter(([, m]) => m === modes).length;
+    expect([count("b"), count("l"), count("d")]).toEqual([16, 1, 24]);
+    expect(THEME_CATALOG_INDEX).not.toMatch(/\s{2,}|^\s|\s$/);
   });
 
   it("색인의 모든 id는 `catalog:` 문법을 지킨다 (첫 파티 핀 `[a-z]`를 지나지 않는다)", () => {
@@ -167,8 +171,8 @@ describe("카탈로그 색인", () => {
   it("갤러리 타일 수: 시스템 19 · 라이트 20 · 다크 43 (첫 파티 3종 포함)", () => {
     const tiles = (mode: "system" | "light" | "dark") =>
       THEME_IDS.length +
-      THEME_CATALOG_INDEX.filter(([, modes]) =>
-        mode === "system" ? modes === "both" : modes === "both" || modes === mode
+      INDEX_ROWS.filter(([, modes]) =>
+        mode === "system" ? modes === "b" : modes === "b" || modes === mode[0]
       ).length;
     expect([tiles("system"), tiles("light"), tiles("dark")]).toEqual([19, 20, 43]);
   });
@@ -187,8 +191,8 @@ describe("카탈로그 색인", () => {
     expect(modesOf("catalog:nord")).toEqual(["dark"]);
     expect(modesOf("catalog:snazzy-light")).toEqual(["light"]);
     expect(modesOf("catalog:github")).toEqual(["light", "dark"]);
-    for (const [id, modes] of THEME_CATALOG_INDEX) {
-      expect(modesOf(`catalog:${id}`)).toEqual(modes === "both" ? ["light", "dark"] : [modes]);
+    for (const [id, modes] of INDEX_ROWS) {
+      expect(modesOf(`catalog:${id}`)).toEqual(modes === "b" ? ["light", "dark"] : modes === "l" ? ["light"] : ["dark"]);
     }
     // 색인이 모르는 참조와 사용자 참조는 둘 다다(깨진 데이터가 한 모드에 가두지 않는다).
     expect(modesOf("catalog:unknown-theme")).toEqual(["light", "dark"]);
@@ -198,53 +202,11 @@ describe("카탈로그 색인", () => {
     expect(modesOf("catalog:nord", () => null)).toEqual(["light", "dark"]);
   });
 
-  it("themeLabel: 첫 파티는 한국어 이름, 카탈로그는 색인의 라벨", () => {
-    for (const id of THEME_IDS) expect(themeLabel(id)).toBe(THEME_LABELS[id]);
-    expect(themeLabel("catalog:nord")).toBe("Nord");
-    expect(themeLabel("catalog:github-default")).toBe("GitHub Default");
-    expect(themeLabel("catalog:rose-pine")).toBe("Rosé Pine");
-    expect(themeLabel("user:abc")).toBe("abc");
-  });
-
   it("단일 모드 테마의 유효 스킴은 그 모드다 (실제 카탈로그 위에서)", () => {
     expect(effectiveScheme("system", modesOf("catalog:nord"))).toBe("dark");
     expect(effectiveScheme("light", modesOf("catalog:nord"))).toBe("dark");
     expect(effectiveScheme("system", modesOf("catalog:snazzy-light"))).toBe("light");
     expect(effectiveScheme("system", modesOf("catalog:github"))).toBeNull();
-  });
-});
-
-describe("단일 모드 규칙 1: 단일 모드 테마를 고르면 색 모드를 그 모드로 맞춘다", () => {
-  it("다크 단독을 시스템·라이트에서 고르면 다크로 맞추고 알린다", () => {
-    expect(schemeForThemePick("system", "catalog:nord")).toEqual({ scheme: "dark", adjusted: "dark" });
-    expect(schemeForThemePick("light", "catalog:nord")).toEqual({ scheme: "dark", adjusted: "dark" });
-  });
-
-  it("이미 그 모드면 아무것도 바꾸지 않고 알리지도 않는다", () => {
-    expect(schemeForThemePick("dark", "catalog:nord")).toEqual({ scheme: "dark", adjusted: null });
-    expect(schemeForThemePick("light", "catalog:snazzy-light")).toEqual({ scheme: "light", adjusted: null });
-  });
-
-  it("라이트 단독은 라이트로 맞춘다", () => {
-    expect(schemeForThemePick("system", "catalog:snazzy-light")).toEqual({ scheme: "light", adjusted: "light" });
-    expect(schemeForThemePick("dark", "catalog:snazzy-light")).toEqual({ scheme: "light", adjusted: "light" });
-  });
-
-  it("두 모드를 다 가진 테마는 고른 색 모드를 건드리지 않는다", () => {
-    for (const scheme of ["system", "light", "dark"] as const) {
-      expect(schemeForThemePick(scheme, "catalog:github")).toEqual({ scheme, adjusted: null });
-      expect(schemeForThemePick(scheme, "noeul")).toEqual({ scheme, adjusted: null });
-    }
-  });
-
-  it("가짜 조회로도 같은 규칙이다", () => {
-    expect(schemeForThemePick("system", SOLO_DARK, fake)).toEqual({ scheme: "dark", adjusted: "dark" });
-    expect(schemeForThemePick("system", PAIR, fake)).toEqual({ scheme: "system", adjusted: null });
-  });
-
-  it("문구: 이 테마는 {모드}만 있어서 색 모드를 {모드}로 맞췄어요", () => {
-    expect(pickNotice("dark")).toBe("이 테마는 다크만 있어서 색 모드를 다크로 맞췄어요.");
-    expect(pickNotice("light")).toBe("이 테마는 라이트만 있어서 색 모드를 라이트로 맞췄어요.");
   });
 });
 
@@ -264,9 +226,9 @@ describe("단일 모드 규칙 2: 시스템으로 바꿀 때 짝이 없으면 �
     for (const id of THEME_IDS) expect(themeMoveForScheme(id, "system")).toBeNull();
   });
 
-  it("문구: {현재 테마}에는 라이트와 다크 짝이 없어서 {새벽하늘}로 바꿨어요", () => {
+  it("문구: 이 테마에는 라이트와 다크 짝이 없어서 {새벽하늘}로 바꿨어요 (떠나는 테마의 이름은 지연 청크의 라벨이라 메인 번들이 모른다)", () => {
     expect(moveNotice(themeMoveForScheme("catalog:nord", "system")!)).toBe(
-      "Nord에는 라이트와 다크 짝이 없어서 새벽하늘로 바꿨어요."
+      "이 테마에는 라이트와 다크 짝이 없어서 새벽하늘로 바꿨어요."
     );
   });
 });
@@ -298,18 +260,18 @@ describe("단일 모드 규칙 3: 라이트·다크로 바꿀 때 그 모드가 
   });
 
   it("카탈로그 41항목 전부에서 규칙 2·3의 결과가 모드 수와 맞는다", () => {
-    for (const [id, modes] of THEME_CATALOG_INDEX) {
+    for (const [id, modes] of INDEX_ROWS) {
       const ref = `catalog:${id}` as const;
-      expect([id, themeMoveForScheme(ref, "system") !== null]).toEqual([id, modes !== "both"]);
-      expect([id, themeMoveForScheme(ref, "light") !== null]).toEqual([id, modes === "dark"]);
-      expect([id, themeMoveForScheme(ref, "dark") !== null]).toEqual([id, modes === "light"]);
+      expect([id, themeMoveForScheme(ref, "system") !== null]).toEqual([id, modes !== "b"]);
+      expect([id, themeMoveForScheme(ref, "light") !== null]).toEqual([id, modes === "d"]);
+      expect([id, themeMoveForScheme(ref, "dark") !== null]).toEqual([id, modes === "l"]);
     }
   });
 
-  it("문구: {현재 테마}에는 {라이트/다크}가 없어서 {새벽하늘}로 바꿨어요", () => {
-    expect(moveNotice(themeMoveForScheme("catalog:nord", "light")!)).toBe("Nord에는 라이트가 없어서 새벽하늘로 바꿨어요.");
+  it("문구: 이 테마에는 {라이트/다크}가 없어서 {새벽하늘}로 바꿨어요", () => {
+    expect(moveNotice(themeMoveForScheme("catalog:nord", "light")!)).toBe("이 테마에는 라이트가 없어서 새벽하늘로 바꿨어요.");
     expect(moveNotice(themeMoveForScheme("catalog:snazzy-light", "dark")!)).toBe(
-      "Snazzy Light에는 다크가 없어서 새벽하늘로 바꿨어요."
+      "이 테마에는 다크가 없어서 새벽하늘로 바꿨어요."
     );
   });
 

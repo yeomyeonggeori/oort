@@ -597,7 +597,7 @@ export function deriveCssVars(parts: { light?: DerivedMode; dark?: DerivedMode }
 
 // ---- 미리보기 타일 ----------------------------------------------------------------
 
-/** 미리보기 타일이 읽는 변수. 타일은 이 열둘만 꽂는다(요소마다 `ref.style.setProperty`). */
+/** 미리보기 타일이 읽는 변수. 타일은 이 열셋만 꽂는다(요소마다 `ref.style.setProperty`). */
 export const TILE_VAR_NAMES = [
   "--canvas-top",
   "--canvas-mid",
@@ -607,6 +607,7 @@ export const TILE_VAR_NAMES = [
   "--ink",
   "--ink-muted",
   "--icon",
+  "--line",
   "--line-strong",
   "--signal",
   "--on-signal",
@@ -614,7 +615,7 @@ export const TILE_VAR_NAMES = [
 ] as const;
 
 /**
- * 한 테마·모드의 토큰에서 타일 변수 열둘을 낸다. 본문 판 색은 파생 테마는 `pane`, 첫 파티는 웹 셸의 규칙
+ * 한 테마·모드의 토큰에서 타일 변수 열셋을 낸다. 본문 판 색은 파생 테마는 `pane`, 첫 파티는 웹 셸의 규칙
  * (라이트는 `surface`, 다크는 `canvas-mid`)이다.
  */
 export function tileVars(tokens: ThemeModeTokens, mode: Mode, pane?: string): Record<(typeof TILE_VAR_NAMES)[number], string> {
@@ -628,6 +629,7 @@ export function tileVars(tokens: ThemeModeTokens, mode: Mode, pane?: string): Re
     "--ink": c.ink,
     "--ink-muted": c["ink-muted"],
     "--icon": c.icon,
+    "--line": c.line,
     "--line-strong": c["line-strong"],
     "--signal": c.signal,
     "--on-signal": c["on-signal"],
