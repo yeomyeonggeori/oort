@@ -24,6 +24,9 @@
  * 대비 높이기)도 CSS 미디어 질의가 아니라 그 속성이 이긴다: `prefers-reduced-transparency`를 모르는 엔진에서 질의가
  * 조용히 거짓이 되어 규칙이 안 걸리는 일이 없고, 판단이 한 곳(JS)에 있다.
  *
+ * 띠가 있는 테마(노을띠)에서는 사이드바 열이 불투명한 띠 위에 서므로 그 열의 보정은 하지 않는다. 런타임이 켜져 있는 동안
+ * 루트에 `data-wallpaper-band`를 찍고, 보정 규칙은 그 속성이 없을 때만 그 열에 선다(아래 「호스트가 무엇인가」).
+ *
  * 규칙은 루트 속성 선택자로 쓴다. `@utility`(레이어 안)·단일 클래스 규칙보다 특이도가 높고 이 조각은 레이어 밖이라
  * 소스 순서와 무관하게 이긴다. 600px 미만(폰 폭)은 판이 창 자체라 바닥이 보이지 않으므로 아무것도 하지 않는다.
  */
@@ -79,26 +82,21 @@
     --wallpaper-on-signal: light-dark(var(--wallpaper-on-signal-light), var(--wallpaper-on-signal-dark));
   }
 
-  /* 사이드바와 펼친 상단 줄: 띠가 있는 테마(노을띠)에서는 띠 역할(`on-band`)이 먼저다. 띠는 불투명하게
-   * 위에 서서 그 글자는 띠 위에 있기 때문이다. 띠가 없으면 `--on-band`가 비어 보정색이 선다. */
-  :root[data-wallpaper-live] .app-shell > .sidebar-drawer,
-  :root[data-wallpaper-live] .app-shell:not([data-sidebar-collapsed]) > .app-titlebar {
-    --ink-muted: var(--on-band-muted, var(--wallpaper-ink-muted));
-    --icon: var(--on-band-muted, var(--wallpaper-icon));
-    --agent: var(--on-band, var(--wallpaper-agent));
-    --warn: var(--on-band-muted, var(--wallpaper-warn));
-    --danger: var(--on-band, var(--wallpaper-danger));
-    --ok: var(--wallpaper-ok);
-    --signal: var(--wallpaper-signal);
-    --signal-text: var(--wallpaper-signal-text);
-    --on-signal: var(--wallpaper-on-signal);
-    --accent: var(--signal);
-    --on-accent: var(--on-signal);
-  }
-
-  /* 띠가 없는 바닥: 접힌 상단 줄, 설정의 목록 열, 「내 작업」 격자의 바닥. 이 글자들은 띠 규칙을 받지 않는다. */
+  /* **호스트가 무엇인가가 규칙을 가른다.**
+   *
+   * 띠가 없는 테마에서는 사이드바·펼친 상단 줄·설정 목록 열이 scrim 위에 서므로 보정색이 맞다.
+   * 띠가 있는 테마(노을띠)에서는 그 열들이 **불투명한 띠** 위에 선다(띠는 scrim 위에 칠한다). 보정색은 scrim
+   * 최악 합성에 맞춘 값이라 라이트에서는 늘 어두운 쪽으로 옮겨 있어서, 남색 띠 위에서는 곧바로 대비를 깎는다
+   * (design-review H-1: 설정 목록 열의 섹션 라벨 2.34 → 1.29, 아이콘 3.85 → 1.88, 접속 점과 신호색이 거의 검은색,
+   * 포커스 링 3:1 미달). 그래서 띠가 있으면(루트의 `data-wallpaper-band`, 런타임이 찍는다) 이 세 자리는 건드리지
+   * 않는다: AP-1a의 on-band 묶음(`tokens.css` 「띠 위의 글자」)이 띠 위 규칙대로 읽는다.
+   *
+   * 띠가 있어도 scrim 위에 서는 자리는 늘 보정한다: 접힌 사이드바의 상단 줄(토글이 레일 오른쪽, 띠 밖에 있다)과
+   * 「내 작업」 격자의 바닥(본문이 투명이라 사진이 뒤에 깔린다). */
+  :root[data-wallpaper-live]:not([data-wallpaper-band]) .app-shell > .sidebar-drawer,
+  :root[data-wallpaper-live]:not([data-wallpaper-band]) .app-shell:not([data-sidebar-collapsed]) > .app-titlebar,
+  :root[data-wallpaper-live]:not([data-wallpaper-band]) .app-shell .settings-nav,
   :root[data-wallpaper-live] .app-shell[data-sidebar-collapsed] > .app-titlebar,
-  :root[data-wallpaper-live] .app-shell .settings-nav,
   :root[data-wallpaper-live] .app-shell[data-work-rail] > main {
     --ink-muted: var(--wallpaper-ink-muted);
     --icon: var(--wallpaper-icon);
@@ -157,8 +155,13 @@
   border-radius: var(--radius-lg);
 }
 
-/* 체크는 고른 칩에서만 보인다. 칩 색이 무엇이든 읽히도록 작은 잉크 원 위에 선다. */
+/* 체크는 고른 칩에서만 보인다. 칩 색이 무엇이든 읽히도록 작은 잉크 원 위에 선다. 흐름 밖에 두고(절대 위치) 칩 한가운데에
+ * 놓는다: 안 보일 때도(opacity 0) 자리를 차지하면 「기본」 칩의 아이콘이 가운데가 아니라 왼쪽 테두리에 붙는다
+ * (design-review M-1). */
 .wallpaper-chip-check {
+  position: absolute;
+  inset: 0;
+  margin: auto;
   display: flex;
   align-items: center;
   justify-content: center;

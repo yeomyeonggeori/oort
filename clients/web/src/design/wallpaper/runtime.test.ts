@@ -3,7 +3,7 @@ import type { WallpaperRef } from "@momo/core/design/appearance";
 import { THEMES, type Mode } from "@momo/core/design/themes";
 import { WALLPAPER_SOLIDS, WALLPAPER_VARS, wallpaperTokensOf, wallpaperTreatment } from "@momo/core/design/wallpaper";
 import type { PhotoView } from "./store";
-import { LIVE_ATTRIBUTE, createWallpaperRuntime, type WallpaperRuntimeDeps } from "./runtime";
+import { BAND_ATTRIBUTE, LIVE_ATTRIBUTE, createWallpaperRuntime, type WallpaperRuntimeDeps } from "./runtime";
 
 // 문서에 올리는 일의 규칙을 가짜 문서·가짜 신호원으로 잰다 (AP-4 #4191). 진짜 브라우저에서 같은 규칙이 화면에
 // 서는지는 캡처 스크립트의 단정이 잰다.
@@ -318,5 +318,59 @@ describe("사진", () => {
     w.fire.photo();
     expect(w.attrs.has(LIVE_ATTRIBUTE)).toBe(false);
     expect(w.layer.style.backgroundImage).toBe("");
+  });
+});
+
+describe("띠가 있는 테마: 켜져 있는 동안 루트에 띠 표지를 함께 찍는다 (design-review H-1)", () => {
+  it("표지 이름은 CSS가 읽는 이름이다", () => {
+    expect(BAND_ATTRIBUTE).toBe("data-wallpaper-band");
+  });
+
+  it("노을띠에서 켜지면 그림 → 켜짐 → 띠 표지 순서로 서고, 띠 없는 테마에서는 표지가 서지 않는다", () => {
+    const band = world("noeul", { kind: "solid", id: "slate" });
+    attach(band);
+    expect(band.attrs.get(LIVE_ATTRIBUTE)).toBe("");
+    expect(band.attrs.get(BAND_ATTRIBUTE)).toBe("");
+    const live = band.log.indexOf(`set ${LIVE_ATTRIBUTE}`);
+    expect(band.log.indexOf(`set ${BAND_ATTRIBUTE}`)).toBeGreaterThan(live);
+    for (const theme of ["dawnsky", "graphite"] as const) {
+      const flat = world(theme, { kind: "solid", id: "slate" });
+      attach(flat);
+      expect(flat.attrs.get(LIVE_ATTRIBUTE), theme).toBe("");
+      expect(flat.attrs.has(BAND_ATTRIBUTE), theme).toBe(false);
+    }
+  });
+
+  it("꺼지면 띠 표지가 켜짐보다 먼저 걷힌다 (켜짐 없이 표지만 남지 않는다)", () => {
+    const w = world("noeul", { kind: "solid", id: "slate" });
+    attach(w);
+    w.flags.reduceTransparency = true;
+    w.fire.reduce();
+    expect(w.attrs.has(LIVE_ATTRIBUTE)).toBe(false);
+    expect(w.attrs.has(BAND_ATTRIBUTE)).toBe(false);
+    expect(w.log.lastIndexOf(`remove ${BAND_ATTRIBUTE}`)).toBeLessThan(w.log.lastIndexOf(`remove ${LIVE_ATTRIBUTE}`));
+  });
+
+  it("테마가 띠 없음에서 띠 있음으로 바뀌면 켜진 채로 표지만 따라온다 (그림은 다시 칠하지 않는다)", () => {
+    const w = world("dawnsky", { kind: "solid", id: "slate" });
+    attach(w);
+    expect(w.attrs.has(BAND_ATTRIBUTE)).toBe(false);
+    const paints = w.log.filter((line) => line.startsWith("layer color")).length;
+    w.cssVars = varsOf("noeul");
+    w.fire.root();
+    expect(w.attrs.get(LIVE_ATTRIBUTE)).toBe("");
+    expect(w.attrs.get(BAND_ATTRIBUTE)).toBe("");
+    expect(w.log.filter((line) => line.startsWith("layer color")).length).toBe(paints);
+    w.cssVars = varsOf("graphite");
+    w.fire.root();
+    expect(w.attrs.has(BAND_ATTRIBUTE)).toBe(false);
+    expect(w.attrs.get(LIVE_ATTRIBUTE)).toBe("");
+  });
+
+  it("detach는 띠 표지도 걷는다", () => {
+    const w = world("noeul", { kind: "solid", id: "slate" });
+    attach(w);
+    w.runtime.detach();
+    expect(w.attrs.size).toBe(0);
   });
 });

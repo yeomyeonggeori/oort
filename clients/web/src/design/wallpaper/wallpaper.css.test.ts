@@ -66,7 +66,8 @@ const CHIPS = ALL.filter((rule) => rule.selectors.some((s) => /wallpaper-(choice
 
 describe("1. 모든 규칙은 data-wallpaper-live에만 걸린다", () => {
   it("규칙이 읽혔다 (빈 파서의 초록이 아니다)", () => {
-    expect(FLOOR.length).toBeGreaterThanOrEqual(6);
+    // 숨기는 기본 규칙, 켜진 층 요소, 셸, 별칭 변수, 바닥 위 글자 보정: 다섯 규칙이다.
+    expect(FLOOR.length).toBe(5);
     expect(CHIPS.length).toBeGreaterThanOrEqual(6);
   });
 
@@ -157,45 +158,65 @@ describe("3. JS가 싣는 변수와 CSS가 읽는 변수가 한 칸씩 같다", 
   });
 });
 
-describe("4. 바닥 위 글자의 보정은 바닥 위에서만 선다", () => {
-  const bandAware = FLOOR.find((rule) => rule.selectors.includes(":root[data-wallpaper-live] .app-shell > .sidebar-drawer"));
-  const plain = FLOOR.find((rule) => rule.selectors.includes(":root[data-wallpaper-live] .app-shell .settings-nav"));
+describe("4. 바닥 위 글자의 보정은 scrim이 호스트일 때만 선다 (design-review H-1)", () => {
+  const BAND_FREE = ":root[data-wallpaper-live]:not([data-wallpaper-band])";
+  const SCRIM_ALWAYS = [
+    ":root[data-wallpaper-live] .app-shell[data-sidebar-collapsed] > .app-titlebar",
+    ":root[data-wallpaper-live] .app-shell[data-work-rail] > main",
+  ];
+  const BAND_HOSTED = [
+    `${BAND_FREE} .app-shell > .sidebar-drawer`,
+    `${BAND_FREE} .app-shell:not([data-sidebar-collapsed]) > .app-titlebar`,
+    `${BAND_FREE} .app-shell .settings-nav`,
+  ];
+  const fit = FLOOR.find((rule) => rule.selectors.includes(BAND_HOSTED[0]));
 
-  it("사이드바와 펼친 상단 줄: 띠 역할(on-band)이 먼저고 없으면 보정색이다 (띠 위 글자를 보정색이 덮지 않는다)", () => {
-    expect(bandAware?.selectors).toEqual([
-      ":root[data-wallpaper-live] .app-shell > .sidebar-drawer",
-      ":root[data-wallpaper-live] .app-shell:not([data-sidebar-collapsed]) > .app-titlebar",
-    ]);
-    expect(bandAware?.body).toMatch(/--ink-muted:\s*var\(--on-band-muted,\s*var\(--wallpaper-ink-muted\)\)/);
-    expect(bandAware?.body).toMatch(/--agent:\s*var\(--on-band,\s*var\(--wallpaper-agent\)\)/);
-    expect(bandAware?.body).toMatch(/--danger:\s*var\(--on-band,\s*var\(--wallpaper-danger\)\)/);
+  it("띠 위에 서는 세 자리(사이드바·펼친 상단 줄·설정 목록 열)는 띠가 없을 때만 보정한다: 띠가 호스트면 보정색이 대비를 깎는다", () => {
+    expect(fit?.selectors.filter((selector) => selector.includes("data-wallpaper-band"))).toEqual(BAND_HOSTED);
   });
 
-  it("띠가 없는 바닥(접힌 상단 줄·설정 목록 열·내 작업 격자)은 보정색만 쓴다", () => {
-    expect(plain?.selectors).toEqual([
-      ":root[data-wallpaper-live] .app-shell[data-sidebar-collapsed] > .app-titlebar",
-      ":root[data-wallpaper-live] .app-shell .settings-nav",
-      ":root[data-wallpaper-live] .app-shell[data-work-rail] > main",
-    ]);
-    expect(plain?.body).not.toContain("on-band");
-    expect(plain?.body).toMatch(/--ink-muted:\s*var\(--wallpaper-ink-muted\)/);
-  });
-
-  it("두 규칙 모두 별칭(--accent·--on-accent)을 장면 안에서 다시 묶는다: 별칭은 루트에서 이미 풀려 있어 포커스 링이 보정 전 신호를 읽는다", () => {
-    for (const rule of [bandAware, plain]) {
-      expect(rule?.body).toMatch(/--accent:\s*var\(--signal\)/);
-      expect(rule?.body).toMatch(/--on-accent:\s*var\(--on-signal\)/);
+  it("띠가 있어도 scrim 위에 서는 자리(접힌 상단 줄·내 작업 격자 바닥)는 늘 보정한다", () => {
+    for (const selector of SCRIM_ALWAYS) {
+      expect(fit?.selectors, selector).toContain(selector);
+      expect(selector).not.toContain("data-wallpaper-band");
     }
+    expect(fit?.selectors.length).toBe(BAND_HOSTED.length + SCRIM_ALWAYS.length);
   });
 
-  it("본문 판·카드·시트는 건드리지 않는다: 보정 규칙의 대상은 네 자리뿐이다", () => {
-    const targets = [bandAware, plain].flatMap((rule) => rule?.selectors ?? []);
-    for (const selector of targets) expect(selector).not.toMatch(/app-pane|settings-pane|\.card|sheet/);
+  it("보정은 바닥에 맞춘 색 그대로다: 띠 역할(on-band)을 섞지 않는다 (띠 위는 이 규칙의 대상이 아니다)", () => {
+    expect(fit?.body).not.toContain("on-band");
+    expect(fit?.body).toMatch(/--ink-muted:\s*var\(--wallpaper-ink-muted\)/);
+    expect(fit?.body).toMatch(/--ok:\s*var\(--wallpaper-ok\)/);
+    expect(fit?.body).toMatch(/--signal:\s*var\(--wallpaper-signal\)/);
+  });
+
+  it("띠 표지는 이 규칙 하나에서만 읽고, 선택 속성이나 다른 규칙으로 새지 않는다", () => {
+    const readers = FLOOR.filter((rule) => rule.selectors.some((selector) => selector.includes("data-wallpaper-band")));
+    expect(readers).toEqual([fit]);
+  });
+
+  it("별칭(--accent·--on-accent)을 장면 안에서 다시 묶는다: 별칭은 루트에서 이미 풀려 있어 포커스 링이 보정 전 신호를 읽는다", () => {
+    expect(fit?.body).toMatch(/--accent:\s*var\(--signal\)/);
+    expect(fit?.body).toMatch(/--on-accent:\s*var\(--on-signal\)/);
+  });
+
+  it("본문 판·카드·시트는 건드리지 않는다: 보정 규칙의 대상은 정해진 다섯 자리뿐이다", () => {
+    for (const selector of fit?.selectors ?? []) expect(selector).not.toMatch(/app-pane|settings-pane|\.card|sheet/);
+    expect(fit?.selectors.length).toBe(5);
   });
 
   it("보정 대상 역할은 JS가 싣는 역할 전체다 (하나도 빠지지 않는다)", () => {
-    for (const rule of [bandAware, plain]) {
-      for (const role of WALLPAPER_VAR_ROLES) expect(rule?.body, role).toContain(`--${role}:`);
-    }
+    for (const role of WALLPAPER_VAR_ROLES) expect(fit?.body, role).toContain(`--${role}:`);
+  });
+});
+
+describe("5. 선택 칩의 체크는 흐름 밖에서 칩 한가운데에 선다 (design-review M-1)", () => {
+  it("체크가 안 보일 때도 자리를 차지하지 않는다 (절대 위치, 한가운데)", () => {
+    const check = CHIPS.find((rule) => rule.selectors.includes(".wallpaper-chip-check"));
+    expect(check?.body).toMatch(/position:\s*absolute/);
+    expect(check?.body).toMatch(/inset:\s*0/);
+    expect(check?.body).toMatch(/margin:\s*auto/);
+    const chip = CHIPS.find((rule) => rule.selectors.includes(".wallpaper-chip"));
+    expect(chip?.body, "체크의 기준 상자").toMatch(/position:\s*relative/);
   });
 });

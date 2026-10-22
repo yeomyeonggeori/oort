@@ -24,6 +24,12 @@ import { wallpaperStore, type PhotoView } from "./store";
 // =============================================================================
 
 export const LIVE_ATTRIBUTE = "data-wallpaper-live";
+/**
+ * 켜져 있는 동안 이 테마의 사이드바에 띠(`--band`)가 있는가. 띠는 scrim 위에 불투명하게 서므로, 띠 위에 서는 열(사이드바·펼친
+ * 상단 줄·설정 목록 열)의 호스트는 scrim 위의 사진이 아니라 띠다. 보정색은 scrim 최악 합성에 맞춘 값이라 그 열에서는 맞지 않아서,
+ * CSS는 이 속성이 있으면 그 세 자리의 보정을 하지 않는다(`wallpaper.css`). 켜지지 않았으면 찍지 않는다.
+ */
+export const BAND_ATTRIBUTE = "data-wallpaper-band";
 
 interface MediaFlag {
   matches(): boolean;
@@ -87,6 +93,13 @@ export function createWallpaperRuntime(deps: WallpaperRuntimeDeps): WallpaperRun
     return JSON.stringify([input.ref ?? null, input.mode, input.dom, input.reduceTransparency, input.increaseContrast, photo]);
   }
 
+  function setBand(on: boolean): void {
+    const root = deps.root;
+    const has = root.getAttribute(BAND_ATTRIBUTE) !== null;
+    if (on && !has) root.setAttribute(BAND_ATTRIBUTE, "");
+    else if (!on && has) root.removeAttribute(BAND_ATTRIBUTE);
+  }
+
   function apply(next: WallpaperPlan): void {
     const root = deps.root;
     const live = next.decision.live && next.paint !== null;
@@ -110,8 +123,10 @@ export function createWallpaperRuntime(deps: WallpaperRuntimeDeps): WallpaperRun
         paintedKey = next.paint.key;
       }
       if (root.getAttribute(LIVE_ATTRIBUTE) === null) root.setAttribute(LIVE_ATTRIBUTE, "");
+      setBand(next.hasBand);
     } else {
-      // 속성을 먼저 끄고 그림을 걷는다.
+      // 속성을 먼저 끄고 그림을 걷는다. 띠 표지는 켜짐보다 먼저 걷는다(켜짐 없이 표지만 남지 않는다).
+      setBand(false);
       if (root.getAttribute(LIVE_ATTRIBUTE) !== null) root.removeAttribute(LIVE_ATTRIBUTE);
       if (layer !== null && paintedKey !== "") {
         layer.style.backgroundColor = "";
@@ -160,6 +175,7 @@ export function createWallpaperRuntime(deps: WallpaperRuntimeDeps): WallpaperRun
       unsubscribe = [];
       // 앱 셸이 사라지면(로그아웃) 루트에 아무것도 남기지 않는다.
       const root = deps.root;
+      setBand(false);
       if (root.getAttribute(LIVE_ATTRIBUTE) !== null) root.removeAttribute(LIVE_ATTRIBUTE);
       for (const name of appliedVars.keys()) root.style.removeProperty(name);
       appliedVars.clear();
