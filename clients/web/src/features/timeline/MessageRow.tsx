@@ -62,6 +62,8 @@ import {
   DIVIDER_GAP_CLASS,
   DIVIDER_RULE_CLASS,
   MARKER_DIVIDER_PAD_CLASS,
+  MESSAGE_AVATAR_GUTTER_CLASS,
+  MESSAGE_AVATAR_SIZE_CLASS,
   ROW_BANNER_STRADDLE_PAD_CLASS,
   ROW_CONTINUATION_PAD_CLASS,
   ROW_GROUP_START_PAD_CLASS,
@@ -222,7 +224,17 @@ function rollupLabel(rollup: ThreadRollup): string {
  * `aria-hidden`은 그대로다. 이름은 바로 옆 작성자 줄이 글자로 말하고, 아바타가
  * 그것을 한 번 더 읽으면 보조기술은 모든 행에서 이름을 두 번 듣는다.
  */
-export function Avatar({ member }: { member: RosterMember | null }) {
+export function Avatar({
+  member,
+  className,
+}: {
+  member: RosterMember | null;
+  /**
+   * 크기를 바꾸는 호출처용(타임라인 행이 대화 밀도의 아바타 크기를 넘긴다, AP-2a #4189).
+   * 기본은 `size-8`(32)이고 같은 `size` 그룹의 클래스가 오면 `cn`이 나중 것을 남긴다.
+   */
+  className?: string;
+}) {
   const identity = avatarIdentity(
     member,
     typeof location === "undefined" ? null : location.origin
@@ -239,6 +251,7 @@ export function Avatar({ member }: { member: RosterMember | null }) {
       className={cn(
         // size-8 = AVATAR_SIZE(32). 두 값이 갈라지면 `avatarSize.test.ts`가 붉다.
         "flex size-8 items-center justify-center overflow-hidden text-meta font-semibold",
+        className,
         identity.kind === "agent" ? "rounded-sm" : "rounded-full",
         // 모르는 작성자(unknown)는 점선 테두리 + 흐린 글자: 이름도 이니셜도 주장하지 않는다 (#4148).
         avatarSurfaceClass(identity.kind, member?.id, imageSrc !== null)
@@ -821,7 +834,7 @@ export function MessageRow({
           `relative`인 이유는 그 시각이 24px 상자보다 넓기 때문이다 — 절대 배치로
           거터 오른끝에 붙이면 남는 글자는 행의 `px-4` 여백 쪽으로 흘러나가고, 그래서
           레이아웃을 한 픽셀도 밀지 않는다(H-2에서 배운 것과 같은 규칙). */}
-      <div className="relative w-8 shrink-0">
+      <div className={cn("relative shrink-0", MESSAGE_AVATAR_GUTTER_CLASS)}>
         {startsGroup ? (
           author ? (
             <button
@@ -838,10 +851,10 @@ export function MessageRow({
                 isAgent ? "rounded-sm" : "rounded-full"
               )}
             >
-              <Avatar member={author} />
+              <Avatar member={author} className={MESSAGE_AVATAR_SIZE_CLASS} />
             </button>
           ) : (
-            <Avatar member={author} />
+            <Avatar member={author} className={MESSAGE_AVATAR_SIZE_CLASS} />
           )
         ) : (
           <time

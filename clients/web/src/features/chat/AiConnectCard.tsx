@@ -30,6 +30,7 @@ import { teamCheckClock, teamCheckResult, teamCheckSince } from "@momo/core/feat
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { Skeleton } from "@/features/common/States";
+import { MESSAGE_AVATAR_GUTTER_CLASS } from "@/features/timeline/spacing";
 import { IS_TAURI } from "@/lib/env";
 import { openExternalUrl } from "@/lib/tauri";
 import { AiLogo, AiPill, AiSource, CheckNumbers, CheckSentence } from "@/features/settings/aiAccountsParts";
@@ -352,8 +353,9 @@ export function AiConnectCard({
       data-line={line ?? "all"}
       onKeyDown={onKeyDown}
     >
-      {/* 메시지 행의 아바타 거터(w-8)와 같은 자리를 비워 카드가 본문 줄에 선다. */}
-      <div className="w-8 shrink-0" aria-hidden="true" />
+      {/* 메시지 행의 아바타 거터와 같은 자리를 비워 카드가 본문 줄에 선다. 거터 폭은 대화 밀도가 28/32/36으로 바꾸므로
+          손으로 쓴 w-8이 아니라 메시지 행이 읽는 같은 상수다(#4189): 아니면 밀도를 바꿀 때 카드만 본문에서 4px 어긋난다. */}
+      <div className={cn("shrink-0", MESSAGE_AVATAR_GUTTER_CLASS)} aria-hidden="true" />
       <div className="ai-card min-w-0 flex-1 overflow-hidden rounded-2xl border border-dashed border-line-strong bg-surface shadow-sm">
         <div className="flex min-w-0 items-center gap-2 border-b border-line px-3 py-2">
           <Plug className="size-4 shrink-0 text-icon" aria-hidden="true" />

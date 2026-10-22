@@ -77,11 +77,16 @@ function webRadius(): Record<string, number> {
   return steps;
 }
 
-/** `--text-<role>: <n>rem;` 을 px 로. 웹의 루트 글자는 브라우저 기본 16px 이다. */
+/**
+ * `--text-<role>: calc(var(--type-rem) * <n>);` 을 「기본」 글자 크기 단계의 px 로. 웹의 루트
+ * 글자는 브라우저 기본 16px 이고, 곱수 × 16 이 그 역할의 크기다. 웹 역할은 글자 크기 설정이
+ * 곱하는 가상 rem 의 배수다(웹 AP-2a #4189) — `rem` 리터럴이던 때의 읽는 식을 그 모양으로
+ * 옮겼다. 읽은 역할 수는 아래 「세 축이 전부 읽혔다」가 잡는다(식이 바뀌면 빈손이 되지 않게).
+ */
 function webText(): Record<string, number> {
   const roles: Record<string, number> = {};
   for (const found of WEB_TOKENS_CSS.matchAll(
-    /^\s*--text-([a-z][a-z0-9-]*?):\s*([\d.]+)rem;/gm,
+    /^\s*--text-([a-z][a-z0-9-]*?):\s*calc\(var\(--type-rem\)\s*\*\s*([\d.]+)\);/gm,
   )) {
     if (found[1].endsWith('--line-height')) continue;
     roles[found[1]] = Number(found[2]) * 16;
@@ -111,7 +116,17 @@ describe('읽기 경로가 조용히 실패하지 않는다', () => {
   it('세 축이 전부 읽혔다', () => {
     expect(Object.keys(WEB_RHYTHM).length).toBeGreaterThan(0);
     expect(Object.keys(WEB_RADIUS).length).toBeGreaterThan(0);
-    expect(Object.keys(WEB_TEXT).length).toBeGreaterThan(0);
+    // 웹 글자 역할은 여덟이다. 식이 바뀌어 하나도 안 읽히면 아래 타이포 단정이 빈 표 위에서 초록이 된다.
+    expect(Object.keys(WEB_TEXT).sort()).toEqual([
+      'body',
+      'code',
+      'display',
+      'heading',
+      'label',
+      'meta',
+      'timestamp',
+      'title',
+    ]);
   });
 });
 
