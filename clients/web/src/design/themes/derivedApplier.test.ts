@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DERIVED_VAR_NAMES } from "@momo/core/design/derive";
 import { WEB_THEME_CACHE_ENTRY, parseThemeCache, themeCacheKey } from "@momo/core/design/themeCache";
+import type { ThemeRef } from "@momo/core/design/themeResolve";
 import {
   getAppearance,
   reloadAppearanceForTest,
@@ -11,7 +12,8 @@ import {
 } from "@/design/theme";
 import { startDerivedTheme } from "./applyDerived";
 import { createDerivedApplier } from "./derivedApplier";
-import { DERIVE_ENGINE_VERSION, derivedVarsFor } from "./derived";
+import { desktopEffects, registerGlassSourcesResolver, setDesktopEffectsForTest } from "@/features/settings/appearance/desktopEffects";
+import { DERIVE_ENGINE_VERSION, derivedVarsFor, glassSourcesFor } from "./derived";
 
 // =============================================================================
 // 파생 테마를 루트에 꽂는 적용기 (ADR-0189 증보 3 D2, AP-1b #4188, AC 3·4). 진짜 저장소(`theme.ts`)와 진짜 문서(jsdom)와
@@ -329,5 +331,60 @@ describe("메인 번들의 얇은 문 (applyDerived)", () => {
     await vi.waitFor(() => expect(inlineVars()).toHaveLength(33));
     expect(cacheEntry()?.mode).toBe("dark");
     door.stop();
+  });
+});
+
+describe("데스크탑 유리가 카탈로그 테마의 색을 읽는다 (AP-3 `registerGlassSourcesResolver`)", () => {
+  afterEach(() => {
+    registerGlassSourcesResolver(null);
+    setDesktopEffectsForTest(null);
+  });
+
+  it("`glassSourcesFor`: 쌍 테마는 두 모드, 단일 모드 테마는 있는 모드만 든다. 첫 파티·`user:`·모르는 항목은 null이다", () => {
+    const pair = glassSourcesFor("catalog:github", null)!;
+    expect(Object.keys(pair).sort()).toEqual(["dark", "light"]);
+    expect(pair.light!.canvas).toHaveLength(3);
+    expect(pair.light!.band).toBeNull();
+    const nord = glassSourcesFor("catalog:nord", null)!;
+    expect(Object.keys(nord)).toEqual(["dark"]);
+    for (const ref of ["dawnsky", "user:mine", "catalog:no-such-theme", "catalog:"] as ThemeRef[]) expect([ref, glassSourcesFor(ref, null)]).toEqual([ref, null]);
+  });
+
+  it("고른 강조색이 유리가 읽는 신호에 들어간다(사이드바의 신호색이 유리 위에서 사라지지 않게)", () => {
+    const base = glassSourcesFor("catalog:github", null)!.light!.color.signal;
+    const chosen = glassSourcesFor("catalog:github", { preset: "gamram" })!.light!.color.signal;
+    expect(chosen).not.toBe(base);
+    // 같은 입력은 같은 객체다: 유리 쪽 범위 기억(`WeakMap`)이 일한다.
+    expect(glassSourcesFor("catalog:github", null)!.light).toBe(glassSourcesFor("catalog:github", null)!.light);
+  });
+
+  it("적용기가 서기 전의 카탈로그 테마는 유리가 「색을 아직 못 읽음」이고, 선 뒤에는 그 테마의 하한이 읽힌다", () => {
+    registerGlassSourcesResolver(null);
+    setDesktopEffectsForTest(null);
+    updateAppearance({ theme: "catalog:nord", scheme: "dark" });
+    const effects = desktopEffects();
+    effects.refresh();
+    expect(effects.getSnapshot().view.range).toBeNull();
+    createDerivedApplier(); // 엔진이 선 자리에서 조회를 한 번 꽂는다(그 자리에서 유리가 다시 맞춘다)
+    const range = effects.getSnapshot().view.range;
+    expect(range).not.toBeNull();
+    expect(range!.usable).toBe(true);
+    expect(range!.min).toBeGreaterThan(0);
+    expect(range!.min).toBeLessThanOrEqual(range!.max);
+  });
+
+  it("테마를 바꾸면 같은 조회가 새 테마를 읽는다: 첫 파티로 돌아가면 조회와 상관없이 첫 파티의 값이다", () => {
+    const effects = desktopEffects();
+    createDerivedApplier();
+    updateAppearance({ theme: "catalog:github", scheme: "light" });
+    effects.refresh();
+    const github = effects.getSnapshot().view.range!.min;
+    updateAppearance({ theme: "catalog:nord", scheme: "dark" });
+    effects.refresh();
+    const nord = effects.getSnapshot().view.range!.min;
+    expect(github).not.toBe(nord);
+    updateAppearance({ theme: "dawnsky", scheme: "dark" });
+    effects.refresh();
+    expect(effects.getSnapshot().view.range).not.toBeNull();
   });
 });

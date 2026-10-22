@@ -2,7 +2,8 @@ import { DERIVED_PALETTE, effectiveScheme, modesOf, paletteOf } from "@momo/core
 import { themeCacheKey } from "@momo/core/design/themeCache";
 import { getAppearance } from "@/design/theme";
 import { writeThemeCache, type CacheStorage } from "@/design/themeCache";
-import { DERIVE_ENGINE_VERSION, derivedVarsFor } from "./derived";
+import { registerGlassSourcesResolver } from "@/features/settings/appearance/desktopEffects";
+import { DERIVE_ENGINE_VERSION, derivedVarsFor, glassSourcesFor } from "./derived";
 
 // =============================================================================
 // 파생 테마를 루트에 꽂는 일 (ADR-0189 증보 3 D2, AP-1b #4188, 청사진 §5.2-i). **지연 청크**다.
@@ -19,6 +20,8 @@ import { DERIVE_ENGINE_VERSION, derivedVarsFor } from "./derived";
 //   3. 부트 캐시(`momo.web.theme.cache.v1`)를 쓴다. 다음 부팅의 첫 페인트가 `theme-boot.js`로 이 변수를 먼저 꽂는다.
 //      단일 모드 테마는 `mode`를 같이 쓴다(안 쓰면 부트와 런타임의 첫 프레임 `data-theme`가 어긋날 수 있다).
 //   4. `meta theme-color`를 파생 바닥색으로 맞춘다(`applyTheme`가 첫 파티 색으로 되돌리는 쪽의 짝).
+//   5. 엔진이 선 이 자리에서 데스크탑 유리(AP-3)에 카탈로그 테마의 색을 읽는 조회를 한 번 꽂는다(`registerGlassSourcesResolver`).
+//      꽂기 전의 카탈로그 테마는 유리에게 「색을 아직 못 읽음」이라 그리지도 네이티브를 켜지도 않고 설정 행도 걷혀 있다.
 //
 // 메인 번들이 아는 것은 `applyDerived.ts`의 얇은 구독뿐이다: 저장된 테마가 파생 테마일 때만 이 청크를 싣는다.
 // =============================================================================
@@ -42,6 +45,7 @@ export interface DerivedApplierOptions {
 const THEME_COLOR_SELECTOR = "meta[name='theme-color'][media]";
 
 export function createDerivedApplier(options: DerivedApplierOptions = {}): { sync(): void } {
+  registerGlassSourcesResolver(glassSourcesFor);
   /** 이 문서에 꽂아 둔 변수(이름 → 값). */
   const applied = new Map<string, string>();
   const documentOf = () => options.doc ?? (typeof document === "undefined" ? null : document);

@@ -1,4 +1,5 @@
 import type { SignalChoice } from "@momo/core/design/appearance";
+import type { GlassSources } from "@momo/core/design/glass";
 import { DERIVE_ENGINE_VERSION, DeriveError, TILE_VAR_NAMES, tileVars, type PresetOutcome } from "@momo/core/design/derive";
 import {
   catalogPresetOutcomes,
@@ -27,6 +28,7 @@ import { THEMES, isThemeId, type Mode, type ThemeId, type ThemeModeTokens } from
 //   · `derivedVarsFor`: 파생 테마를 루트에 꽂을 변수 한 벌로(`applyDerived.ts`가 쓴다).
 //   · `paintFor`: 미리보기 타일 한 장이 읽을 변수(요소마다 CSSOM으로 꽂는다). 첫 파티도 같은 길이다.
 //   · `presetsFor`·`defaultSignalFor`: 강조색 칩이 이 테마·모드에서 어떤 색이고 쓸 수 있는지.
+//   · `glassSourcesFor`: 데스크탑 유리(AP-3 `desktopEffects`)가 카탈로그 테마의 색을 읽는 조회(적용기가 한 번 꽂는다).
 //
 // 첫 파티의 신호 판정(`resolvePreset`·`resolveSignal`)도 여기 있다. 그 산수가 메인 번들에 들어가면 gzip이 1.3KB
 // 가까이 늘어서(번들 예산 메인 +2KB), 칩과 타일을 칠하는 일은 전부 이 지연 청크 안에서 한다.
@@ -102,4 +104,20 @@ export function defaultSignalFor(ref: ThemeRef, mode: Mode): { signal: string; o
   const parts = splitThemeRef(ref);
   const derived = parts?.namespace === "catalog" ? safely(() => deriveCatalogMode(parts.id, mode, null)) : null;
   return derived ? { signal: derived.tokens.color.signal, onSignal: derived.tokens.color["on-signal"] } : null;
+}
+
+/**
+ * 카탈로그 테마의 두 모드(없는 모드는 빼고)를 데스크탑 유리가 읽는 모양으로 낸다. 파생 토큰(`canvas`·`band`·`color`)이
+ * `GlassSource`를 그대로 만족한다. 고른 강조색(`signal`)이 들어간 값이다(사이드바의 신호색이 유리 위에서 사라지지 않게). 첫 파티는
+ * 유리 쪽이 스스로 알고(`firstPartyGlassSources`), `user:`는 AP-5가 연다. 모르는 항목이나 파생이 던지는 테마는 `null`이다(유리가
+ * 「색을 아직 못 읽음」으로 그 테마만 걷는다).
+ */
+export function glassSourcesFor(ref: ThemeRef, signal: SignalChoice): GlassSources | null {
+  const parts = splitThemeRef(ref);
+  if (parts?.namespace !== "catalog") return null;
+  return safely(() => {
+    const light = deriveCatalogMode(parts.id, "light", signal)?.tokens;
+    const dark = deriveCatalogMode(parts.id, "dark", signal)?.tokens;
+    return light || dark ? { ...(light && { light }), ...(dark && { dark }) } : null;
+  });
 }
