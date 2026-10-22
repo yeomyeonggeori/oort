@@ -329,7 +329,7 @@ export function WallpaperRow() {
         >
           {status !== null ? (
             <>
-              <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+              <Info className="mt-px size-4 shrink-0" aria-hidden="true" />
               <span>{status.text}</span>
             </>
           ) : null}
