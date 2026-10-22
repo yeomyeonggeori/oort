@@ -115,6 +115,15 @@ function withinLightness(hex: string): boolean {
   return L >= L_MIN - 1e-9 && L <= L_MAX + 1e-9;
 }
 
+export interface ResolveSignalOptions {
+  /**
+   * 에이전트가 신호에 비킨다(ADR-0189 증보 3 D2). 켜면 신호와 에이전트 색의 거리 검사(`near-agent`)를 하지
+   * 않는다: 파생 테마(카탈로그·가져온 테마)에서는 신호가 먼저 정해지고 에이전트 색이 색상각을 돌려
+   * 신호와 위험에서 0.07 이상 떨어진다(`derive.ts`). 기본 거짓은 첫 파티의 의미(에이전트 고정)다.
+   */
+  readonly agentYields?: boolean;
+}
+
 /**
  * 입력 hex를 한 테마 × 모드의 신호 네 값으로 보정하거나 거절한다.
  * `tokens`를 받는 것은 시험이 원천 밖 값으로 엔진을 잴 수 있게 하려는 것이다.
@@ -123,7 +132,8 @@ export function resolveSignal(
   input: string,
   theme: ThemeId,
   mode: Mode,
-  tokens: ThemeModeTokens = THEMES[theme][mode]
+  tokens: ThemeModeTokens = THEMES[theme][mode],
+  options: ResolveSignalOptions = {}
 ): SignalResult {
   if (!parseHex(input)) return reject("invalid-hex");
   const c = tokens.color;
@@ -148,7 +158,7 @@ export function resolveSignal(
   if (!signal) return reject("unreachable");
 
   if (oklabDistance(signal, c.danger) < SIGNAL_MIN_DISTANCE) return reject("near-danger");
-  if (oklabDistance(signal, c.agent) < SIGNAL_MIN_DISTANCE) return reject("near-agent");
+  if (!options.agentYields && oklabDistance(signal, c.agent) < SIGNAL_MIN_DISTANCE) return reject("near-agent");
 
   let soft = mixOklab(c.surface, signal, SOFT_MIX[mode]);
   for (let t = SOFT_MIX[mode]; t < 0.6; t += 0.01) {
@@ -164,7 +174,7 @@ export function resolveSignal(
   // `signal-text`도 같은 구분 제한을 받는다(DS2-7 planner 결정, #2735 M2). 글자로 서는 신호가
   // 에이전트·오류 표시 색과 가까우면 `signal`이 멀어도 화면에서 두 뜻이 섞인다.
   if (oklabDistance(text, c.danger) < SIGNAL_MIN_DISTANCE) return reject("near-danger");
-  if (oklabDistance(text, c.agent) < SIGNAL_MIN_DISTANCE) return reject("near-agent");
+  if (!options.agentYields && oklabDistance(text, c.agent) < SIGNAL_MIN_DISTANCE) return reject("near-agent");
 
   return {
     ok: true,

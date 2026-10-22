@@ -12,6 +12,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "gen:palettes": "vite-node scripts/gen-palettes.ts",
+    "gen:theme-catalog": "vite-node scripts/gen-theme-catalog.ts",
     "smoke": "node e2e/smoke.mjs",
     "smoke:connect": "node e2e/connect.mjs",
     "gate:inject": "node gates/inject.mjs",

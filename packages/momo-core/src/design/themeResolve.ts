@@ -1,9 +1,10 @@
 // =============================================================================
-// 테마 참조(ThemeRef)와 모드 판정 — 골격 (AP-1a #4186, 청사진 §5.2-a·f).
+// 테마 참조(ThemeRef)와 모드 판정 (AP-1a #4186 골격, AP-1b #4188이 카탈로그를 채웠다. 청사진 §5.2-a·f).
 //
-// 이 파일은 **문법과 판정 규칙**만 든다. 카탈로그(`catalog:<id>`가 실제로 어떤 모드를
-// 갖는지)는 AP-1b(#4188)가 `modesOf`의 기본 조회에 채운다. 그래서 규칙을 가짜 단일
-// 모드 참조로도 잴 수 있도록 조회 함수를 인자로 받는다(`ModesLookup`).
+// 이 파일은 **문법과 판정 규칙**을 든다. `catalog:<id>`가 실제로 있는지·어떤 모드를 갖는지는 카탈로그 **색인**
+// (`themeCatalogIndex.generated.ts`: id·모드·라벨만, 약 1KB)이 답한다. 씨앗 표(`themeCatalog.generated.ts`)는 읽지
+// 않는다: 이 파일은 메인 번들에 들어가고 씨앗 표는 갤러리와 함께 지연 로드된다. 규칙을 가짜 단일 모드 참조로도
+// 잴 수 있도록 조회 함수는 여전히 인자로 받는다(`ModesLookup`, 기본은 카탈로그 색인).
 //
 // | 저장 문자열 | 뜻 | 루트 `data-palette` |
 // |---|---|---|
@@ -24,7 +25,8 @@
 // =============================================================================
 
 import type { SchemeChoice } from "./appearance";
-import { DEFAULT_THEME_ID, MODES, isThemeId, type Mode, type ThemeId } from "./themes";
+import { THEME_CATALOG_INDEX, type CatalogModes } from "./themeCatalogIndex.generated";
+import { DEFAULT_THEME_ID, MODES, THEME_LABELS, isThemeId, type Mode, type ThemeId } from "./themes";
 
 export type ThemeRef = ThemeId | `catalog:${string}` | `user:${string}`;
 
@@ -53,38 +55,74 @@ export function splitThemeRef(
   return { namespace, id };
 }
 
+/** 문법만 본다(카탈로그에 있는지는 `normalizeThemeRef`가 본다). */
 export function isThemeRef(value: unknown): value is ThemeRef {
   return isThemeId(value) || splitThemeRef(value) !== null;
 }
 
+export type ModeSet = readonly Mode[];
+
+const MODE_SETS: Readonly<Record<CatalogModes, ModeSet>> = {
+  light: ["light"],
+  dark: ["dark"],
+  both: MODES,
+};
+
+const CATALOG_INDEX: ReadonlyMap<string, { readonly modes: ModeSet; readonly label: string }> = new Map(
+  THEME_CATALOG_INDEX.map(([id, modes, label]) => [id, { modes: MODE_SETS[modes], label }])
+);
+
+/** 카탈로그 항목 id 전부, 갤러리 순서(id 순)다. */
+export const CATALOG_IDS: readonly string[] = THEME_CATALOG_INDEX.map(([id]) => id);
+
+export function isCatalogId(id: string): boolean {
+  return CATALOG_INDEX.has(id);
+}
+
 /**
- * 저장된 값을 참조로 읽는다. 문법이 틀리면 기본 테마다(청사진 §5.3-d 「모르는 값은
- * dawnsky」). AP-1b가 카탈로그 멤버십 검사를 여기에 더한다.
+ * 저장된 값을 참조로 읽는다. 문법이 틀리거나 카탈로그에 없는 `catalog:` id면 기본 테마다(청사진 §5.3-d
+ * 「모르는 값은 dawnsky」). `user:` 참조는 문법만 본다: 사용자 테마의 목록은 웹 저장소(AP-5)가 알고 core는 모른다.
  */
 export function normalizeThemeRef(raw: unknown): ThemeRef {
-  return isThemeRef(raw) ? raw : DEFAULT_THEME_ID;
+  if (isThemeId(raw)) return raw;
+  const parts = splitThemeRef(raw);
+  if (parts === null) return DEFAULT_THEME_ID;
+  if (parts.namespace === "catalog" && !CATALOG_INDEX.has(parts.id)) return DEFAULT_THEME_ID;
+  return raw as ThemeRef;
 }
 
 export function paletteOf(ref: ThemeRef): PaletteId {
   return isThemeId(ref) ? ref : DERIVED_PALETTE;
 }
 
-export type ModeSet = readonly Mode[];
-
 /** 참조가 가진 모드를 돌려주는 조회. 모르는 참조는 `null`(양쪽으로 본다). */
 export type ModesLookup = (ref: ThemeRef) => ModeSet | null | undefined;
 
+/** 기본 조회: 카탈로그 색인. `user:` 참조와 카탈로그에 없는 id는 모른다(`undefined`). */
+export const catalogModesLookup: ModesLookup = (ref) => {
+  const parts = splitThemeRef(ref);
+  return parts?.namespace === "catalog" ? CATALOG_INDEX.get(parts.id)?.modes : undefined;
+};
+
 /**
- * 테마가 가진 모드. 첫 파티 3종은 언제나 둘 다다. 그 밖의 참조는 조회가 말하는 대로
- * 이고, 조회가 없거나 모르면 둘 다로 본다(깨진 데이터가 화면을 한 모드에 가두지 않게).
- * 결과는 `MODES` 순서(라이트, 다크)·중복 없음이다.
+ * 테마가 가진 모드. 첫 파티 3종은 언제나 둘 다다. 그 밖의 참조는 조회가 말하는 대로이고(기본은 카탈로그
+ * 색인), 모르면 둘 다로 본다(깨진 데이터가 화면을 한 모드에 가두지 않게). 결과는 `MODES` 순서(라이트, 다크)·중복
+ * 없음이다.
  */
-export function modesOf(ref: ThemeRef, lookup?: ModesLookup): ModeSet {
+export function modesOf(ref: ThemeRef, lookup: ModesLookup | undefined = catalogModesLookup): ModeSet {
   if (isThemeId(ref)) return MODES;
   const found = lookup?.(ref);
   if (!found) return MODES;
   const present = MODES.filter((mode) => found.includes(mode));
   return present.length === 0 ? MODES : present;
+}
+
+/** 화면에 쓰는 테마 이름. 첫 파티와 카탈로그는 이름이 있고, 사용자 테마는 이름을 저장소가 안다(여기서는 id). */
+export function themeLabel(ref: ThemeRef): string {
+  if (isThemeId(ref)) return THEME_LABELS[ref];
+  const parts = splitThemeRef(ref);
+  if (parts === null) return THEME_LABELS[DEFAULT_THEME_ID];
+  return parts.namespace === "catalog" ? (CATALOG_INDEX.get(parts.id)?.label ?? parts.id) : parts.id;
 }
 
 /**
@@ -95,4 +133,66 @@ export function effectiveScheme(choice: SchemeChoice, modes: ModeSet): Mode | nu
   if (modes.length === 1) return modes[0];
   if (choice === "light" || choice === "dark") return choice;
   return null;
+}
+
+// ---- 단일 모드 규칙 셋 (청사진 §5.2-a, Buzz `handleModeSelect`·`handleSelectTheme`) ------------------------
+//
+// 카탈로그는 라이트·다크 짝을 **한 항목**으로 묶으므로(`themeCatalogIndex`) 「짝」은 항목 안의 두 모드다.
+// 모드가 하나뿐인 항목은 짝이 없고, 그 모드를 가진 첫 테마는 첫 파티 새벽하늘이다(첫 파티가 갤러리 맨 앞이고
+// 셋 다 두 모드를 가진다).
+
+/** 색 모드를 바꿨는데 지금 테마가 그 모드로 설 수 없어 다른 테마로 옮기는 일. */
+export interface ThemeMove {
+  readonly from: ThemeRef;
+  readonly to: ThemeRef;
+  /** `needs-pair`: 시스템으로 바꿨는데 짝이 없다. `needs-mode`: 라이트·다크로 바꿨는데 그 모드가 없다. */
+  readonly why: "needs-pair" | "needs-mode";
+  /** `needs-mode`일 때 필요했던 모드. */
+  readonly mode: Mode | null;
+}
+
+/**
+ * 규칙 2·3. 색 모드를 `next`로 바꿀 때 지금 테마를 어디로 옮겨야 하는가(옮길 필요가 없으면 `null`).
+ * 두 모드를 다 가진 테마는 어느 모드로 바꿔도 그대로다.
+ */
+export function themeMoveForScheme(
+  theme: ThemeRef,
+  next: SchemeChoice,
+  lookup?: ModesLookup
+): ThemeMove | null {
+  const modes = modesOf(theme, lookup);
+  if (modes.length > 1) return null;
+  if (next === "system") return { from: theme, to: DEFAULT_THEME_ID, why: "needs-pair", mode: null };
+  if (modes.includes(next)) return null;
+  return { from: theme, to: DEFAULT_THEME_ID, why: "needs-mode", mode: next };
+}
+
+/**
+ * 규칙 1. 단일 모드 테마를 고르면 색 모드를 그 모드로 맞춘다(`adjusted`가 그 모드, 안 맞출 때 `null`).
+ * 두 모드를 다 가진 테마는 고른 색 모드를 건드리지 않는다.
+ */
+export function schemeForThemePick(
+  scheme: SchemeChoice,
+  picked: ThemeRef,
+  lookup?: ModesLookup
+): { scheme: SchemeChoice; adjusted: Mode | null } {
+  const modes = modesOf(picked, lookup);
+  if (modes.length === 1 && scheme !== modes[0]) return { scheme: modes[0], adjusted: modes[0] };
+  return { scheme, adjusted: null };
+}
+
+const MODE_NAMES: Readonly<Record<Mode, string>> = { light: "라이트", dark: "다크" };
+
+/** 규칙 1이 색 모드를 맞췄을 때의 한 줄. */
+export function pickNotice(mode: Mode): string {
+  return `이 테마는 ${MODE_NAMES[mode]}만 있어서 색 모드를 ${MODE_NAMES[mode]}로 맞췄어요.`;
+}
+
+/** 규칙 2·3이 테마를 옮겼을 때의 한 줄. */
+export function moveNotice(move: ThemeMove): string {
+  const from = themeLabel(move.from);
+  const to = themeLabel(move.to);
+  return move.why === "needs-pair"
+    ? `${from}에는 라이트와 다크 짝이 없어서 ${to}로 바꿨어요.`
+    : `${from}에는 ${MODE_NAMES[move.mode ?? "light"]}가 없어서 ${to}로 바꿨어요.`;
 }
