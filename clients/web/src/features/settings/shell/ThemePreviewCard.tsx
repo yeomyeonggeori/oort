@@ -61,7 +61,7 @@ export function PreviewLayer({
         <div className="flex items-center gap-1">
           <span className="size-2 shrink-0 rounded-full bg-agent" />
           <span
-            className="truncate text-timestamp text-ink-muted"
+            className="theme-preview-reply truncate text-timestamp text-ink-muted"
             data-testid={testIds ? "theme-preview-muted" : undefined}
           >
             김인턴 답장

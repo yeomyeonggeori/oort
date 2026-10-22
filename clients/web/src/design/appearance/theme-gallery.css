@@ -146,6 +146,14 @@
   }
 }
 
+/* 폰 폭의 두 열 타일(약 120~135)에서는 답장 글자(「김인턴 답장」)도 말줄임 대신 뺀다: 에이전트 점과 막대만 남는다. 기준은 글자가 온전히
+ * 드는 최소 폭(8.75rem = 140)이다. 390 폭의 타일(약 143)과 데스크탑 타일(약 160), 접힌 행의 썸네일(200)은 위라 글자가 남는다. */
+@container (width < 8.75rem) {
+  .theme-preview-reply {
+    display: none;
+  }
+}
+
 /* 접힌 행의 썸네일 한 장. 타일과 같은 미리보기라 크기만 고정이다(`--theme-thumb-width`). */
 .theme-style-thumb {
   inline-size: var(--theme-thumb-width);

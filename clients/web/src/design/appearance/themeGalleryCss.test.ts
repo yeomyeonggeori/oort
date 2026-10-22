@@ -37,6 +37,18 @@ describe("미니 앱 제목: 말줄임이 아니라 뺀다", () => {
     expect(preview).toMatch(/className="theme-preview-title [^"]*"/);
   });
 
+  it("폰 폭의 두 열 타일(약 120~135)에서는 답장 글자도 말줄임 대신 뺀다 (설계 리뷰 3차 M-2가 만든 새 좁은 타일)", () => {
+    const at = css.indexOf("@container (width < 8.75rem) {");
+    expect(at).toBeGreaterThanOrEqual(0);
+    const block = css.slice(at, css.indexOf("\n}\n", at));
+    expect(block).toContain(".theme-preview-reply");
+    expect(block).toContain("display: none");
+    expect(preview).toMatch(/className="theme-preview-reply [^"]*"/);
+    // 기준(140)은 두 열 타일의 폭(360 → 약 120, 375 → 약 135)보다 위이고 390의 타일(약 143)보다 아래다: 글자가 온전히 드는 최소 폭이다.
+    expect(8.75 * 16).toBeGreaterThan(135);
+    expect(8.75 * 16).toBeLessThan(143);
+  });
+
   it("기준 폭: 갤러리 타일(약 140~160)은 아래, 접힌 행 썸네일(200)은 위에 놓인다", () => {
     const tileMin = Number(/--spacing-theme-tile-min:\s*(\d+)px/.exec(tokens)![1]);
     // 세 크기는 이름 있는 지역 변수다(`--theme-grid-column-min`·`--theme-thumb-width`·`--theme-grid-max-height`).
