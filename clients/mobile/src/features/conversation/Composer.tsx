@@ -88,7 +88,14 @@ import {
   useAttachmentSurface,
   type AttachmentTarget,
 } from '../attachments/draftStore';
-import {pickCamera, pickDocument, pickPhoto} from '../attachments/picker';
+import {
+  pickCamera,
+  pickDocument,
+  pickPhoto,
+  type PickedAttachmentFile,
+} from '../attachments/picker';
+import {photoRoom} from '../attachments/photoLibrary';
+import {nativePhotoPorts} from '../attachments/photosNative';
 import {MENU_CLOSE_WATCHDOG_MS} from '../../design/motion';
 import {haptics} from '../../lib/haptics';
 
@@ -1237,6 +1244,20 @@ export function Composer({
     [attachmentKey, stableAttachmentTarget, runPendingPick],
   );
 
+  // 첨부 메뉴의 「사진」 카드(#4181): 고른 사진은 한 번의 호출로 트레이에 들어간다(`addPickedFiles` 는
+  // 일부 거절에 던지므로 카드가 상한을 선택 단계에서 건다 — `photoRoom`).
+  const photoCard = useMemo(
+    () => ({
+      ports: nativePhotoPorts,
+      room: photoRoom(attachmentSurface.drafts.length),
+      onAttach: (files: PickedAttachmentFile[]) => {
+        if (stableAttachmentTarget === null || attachmentKey === null) return;
+        addPickedFiles(attachmentKey, stableAttachmentTarget, files);
+      },
+    }),
+    [attachmentSurface.drafts.length, attachmentKey, stableAttachmentTarget],
+  );
+
   // 누르는 순간 같은 프레임에 햅틱(`haptics.ts` 계약 1) — 메뉴가 열린다는 사실이 손에도 닿는다.
   const openAttachMenu = useCallback(() => {
     haptics.light();
@@ -2092,6 +2113,7 @@ export function Composer({
         onPickPhoto={() => chooseAttachment('photo')}
         onPickFile={() => chooseAttachment('file')}
         onDismissed={() => void runPendingPick()}
+        photos={photoCard}
       />
     </View>
   );
