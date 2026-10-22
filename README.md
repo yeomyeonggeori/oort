@@ -26,9 +26,10 @@ as a person.
 
 When an agent works, its run streams into the channel. When it needs
 permission, a human grants or refuses it **in the conversation** — or straight
-from a phone's lock screen, and a locked phone fails closed. What the run cost,
-what it touched, and how it ended are messages in the same sequence you scroll.
-The conversation is the ledger; there is no second place to look.
+from a phone's lock screen, where the Approve and Deny buttons first ask for
+Face ID or the passcode. What the run cost, what it touched, and how it ended
+are messages in the same sequence you scroll. The conversation is the ledger;
+there is no second place to look.
 
 The name is the [Oort cloud](https://en.wikipedia.org/wiki/Oort_cloud): a
 quiet shell of small bodies at the far edge of a star's reach — distant,
@@ -43,9 +44,9 @@ Enforced by the database and the gates, not by convention:
 | 1 | **PostgreSQL is the source of truth** | Every fact lives in your database; realtime is a projection of it |
 | 2 | **Single write path** | REST → Postgres commit → transactional outbox → relay publish. No side doors |
 | 3 | **Gapless ordering** | `message.seq` defines channel order — not timestamps, not transport offsets |
-| 4 | **RLS FORCE everywhere** | Tenant isolation is Postgres row-level security, forced — not app code remembering to filter |
+| 4 | **RLS FORCE everywhere** | Tenant isolation is Postgres row-level security, forced on tenant tables — not app code remembering to filter. The services log in as non-superuser roles, and only the background relay, worker and notifier bypass RLS, by design (the superuser owner runs just the one-shot role and migration jobs) |
 | 5 | **Transport carries, never authors** | Centrifugo delivers events; it cannot create them |
-| 6 | **Provider credential non-ingress** | Model-provider secrets stay in the provider runtime and never enter oort's server, database, or ledger ([ADR-0004](docs/adr/0004-codex-oauth-hermes-provider-boundary.md)) |
+| 6 | **Provider credential non-ingress** | Subscription logins (ChatGPT/Codex, Claude) belong in your Hermes volume: oort refuses to create new subscription-token links, and older ones stay sealed until deleted. An API key or Hermes bearer you give oort is stored in the database as AES-256-GCM ciphertext under its own master key, never as plaintext, and shown back as at most its last four characters ([ADR-0004](docs/adr/0004-codex-oauth-hermes-provider-boundary.md) · [evidence](docs/security/README.ko.md#자격증명과-provider)) |
 
 ## Works today · Being wired up · Strong opinions, pending code
 
@@ -53,9 +54,9 @@ Enforced by the database and the gates, not by convention:
 
 - Channels, threads, quotes, typing, pins, search — on web, desktop (Tauri), and mobile (React Native)
 - Agents as members: mention an agent, watch its run stream into the channel, stop it mid-flight
-- Human approvals in-channel and from the lock screen — fail-closed when locked
-- Run outcomes, usage/cost ledger, and audit events inside the conversation
-- Attachments v0: browser uploads go directly to your Drive backend — bytes never transit the oort server
+- Human approvals in-channel and from the lock screen — the lock-screen buttons require Face ID or the passcode
+- Run outcomes, usage/cost ledger, and approval decisions (who decided, and when) inside the conversation
+- Attachments v0: files live on your server's own volume (the self-host default) or in a Google shared drive you own; downloads pass the server's channel-membership check, and with the Google backend uploads go straight to Drive
 - Work observation: watch an agent's terminal session live from the desktop app
 - A measured self-host path: clone → env script → compose up → logged in. Three shell commands, zero branches — see below
 - A design system (「Oort cloud」) whose contrast and spacing rules are enforced by tests and gates, in light and dark
@@ -77,20 +78,25 @@ Enforced by the database and the gates, not by convention:
 
 PostgreSQL is oort's source of truth. Workspace membership, channel messages,
 approvals, run state, the usage and cost ledger, and the audit log stay in the
-infrastructure you operate. No vendor sits in the request path for your API,
-database, realtime transport, agent runs, or files.
+infrastructure you operate. Nothing we operate sits in the request path for your
+API, database, realtime transport, agent runs, or files. Third parties appear
+only where you choose them: your model provider or Hermes, a Google shared drive
+if you pick that file archive (the self-host default is a volume on your own
+server), and the optional push relay.
 
-The optional push relay receives an id-only delivery envelope — device routing
-data, badge state, identifiers — never message bodies, prompts, approvals, or
-attachments; the client wakes and fetches content from your server. oort works
-without push registration. See
+By default the only service we operate for your server is the optional push
+relay. It receives an id-only delivery envelope — device routing data, badge
+state, identifiers, a closed reason/category tag — never message bodies,
+prompts, approval details, or attachments; the client wakes and fetches content
+from your server. oort works without push registration. See
 [ADR-0120](docs/adr/0120-push-notification-boundary.md).
 
 An operator-selected agent backend is a separate trust boundary: oort sends it
-bounded work context directly, and provider OAuth tokens and API keys stay
-inside that provider runtime. A local backend keeps the traffic on
-infrastructure you control. See
-[ADR-0004](docs/adr/0004-codex-oauth-hermes-provider-boundary.md).
+bounded work context directly. Subscription logins stay in your Hermes volume,
+and the API keys and Hermes bearer you give oort are stored sealed (invariant 6
+above). A local backend keeps the traffic on infrastructure you control. See
+[ADR-0004](docs/adr/0004-codex-oauth-hermes-provider-boundary.md) and the
+[evidence](docs/security/README.ko.md#자격증명과-provider).
 
 ## Bring an agent
 
@@ -98,20 +104,25 @@ Three onboarding paths:
 
 1. **Create a native oort agent** — a member with an optional `agent_profile`:
    instructions, model preference, allowed-tool narrowing, mention triggers.
-   Profiles cannot contain credentials; server policy, grants, approvals,
-   budget, and audit stay authoritative
+   A profile has no credential field, and config or trigger keys named like a
+   credential are refused; server policy, grants, approvals, budget, and audit
+   stay authoritative
    ([ADR-0131](docs/adr/0131-agent-profile-native-creation.md)).
 2. **Add an agent by address** — import an HTTPS A2A Agent Card, review its
-   capabilities, confirm it as a workspace member. Card fetching applies SSRF,
-   redirect, timeout, and size guards.
+   capabilities, confirm it as a workspace member. *Not available in the Rust
+   server today: [ADR-0183](docs/adr/0183-codebase-docs-lightening.md) retired
+   the `from-card` routes.*
 3. **Use a local OpenAI-compatible backend** — point the engine at an
    operator-run `/v1/chat/completions` SSE endpoint (Ollama and friends).
    oort does not install or operate them
    ([provider guide](docs/external-agent-provider/README.md)).
 
 An optional **work host** lets agents run governed CLI code sessions on
-infrastructure you control; engine keys and Codex OAuth tokens stay with the
-host and never enter oort's server, database, or ledger. See
+infrastructure you control. By design the host's engine keys and Codex login
+stay on that machine ([ADR-0004](docs/adr/0004-codex-oauth-hermes-provider-boundary.md)
+amendment 1 D6, [ADR-0114](docs/adr/0114-interactive-work-console.md)); the host
+registers the public half of its signing key, and oort's registration request
+has no credential field and refuses unknown ones. See
 [`docs/runbooks/cubesandbox-host-install.md`](docs/runbooks/cubesandbox-host-install.md).
 
 ## Architecture
