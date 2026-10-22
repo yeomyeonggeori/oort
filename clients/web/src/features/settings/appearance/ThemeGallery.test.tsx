@@ -161,6 +161,17 @@ describe("행: 접힌 모습", () => {
     expect(q(host, "theme-style-selected-name")?.textContent).toBe("Nord");
   });
 
+  it("이름은 한 줄이고 트리거는 줄바꿈이 되는 flex다: 좁은 폭에서 이름이 윗줄로 올라가고 낱말 한가운데서 끊기지 않는다 (설계 리뷰 2차 H-A)", async () => {
+    const host = await mountSection();
+    const name = q(host, "theme-style-selected-name")!;
+    // jsdom에는 레이아웃이 없다: 클래스가 약속한 것을 고정하고, 실제 폭 위의 한 줄은 캡처 스크립트의 `names` 장면(44개 이름 × 390·360)이 잰다.
+    expect(name.className).toContain("truncate");
+    expect(name.className).not.toContain("break-");
+    const trigger = q(host, "theme-style-trigger")!;
+    expect(trigger.className).toContain("flex-wrap");
+    expect(trigger.className).toContain("max-w-full");
+  });
+
   it("썸네일은 그 테마의 색으로 칠해진다 (루트가 아니라 요소의 변수): 새벽하늘 라이트의 바닥", async () => {
     const host = await mountSection();
     const [light, dark] = paintOf(host, "theme-style-selected-preview");

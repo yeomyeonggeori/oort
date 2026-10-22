@@ -20,7 +20,8 @@ import { ThemeTile, TileFace, type TileFaceKind } from "./ThemeTile";
 // 고른 타일이 보이는 자리로 스크롤한다(43장 가운데 어디에 있든 찾을 수 있게).
 // **탭이 색 모드를 따른다**(별도 탭 위젯이 없다): 시스템은 라이트·다크를 모두 가진 테마만(한 장이 대각 분할),
 // 라이트·다크는 그 모드를 가진 테마 전부다. 안 보이는 테마가 어디 있는지는 탭마다 안내 한 줄이 말한다.
-// 트리거 버튼은 `p-1`이다: 집 규칙의 인셋 초점 링(안쪽 2)이 이름 글자와 썸네일 가장자리를 덮지 않게 한다. 고르면 전 화면이 바로 바뀌고(외양 저장소 `commit`) 새로고침 뒤에도
+// 트리거 버튼은 `px-2 py-1`이다: 집 규칙의 인셋 초점 링(안쪽 2)이 이름 글자와 썸네일 가장자리를 덮지 않게 한다. 줄바꿈이
+// 되는 flex라서 좁은 폭에서는 이름이 윗줄, 썸네일과 chevron이 아랫줄이다. 고르면 전 화면이 바로 바뀌고(외양 저장소 `commit`) 새로고침 뒤에도
 // 남는다(저장 + 부트 캐시). 단일 모드 테마를 고르면 색 모드를 그 모드로 맞추고 한 줄로 알린다(규칙 1).
 //
 // 이 파일은 지연 청크다(`ThemeStyleRow.tsx`가 `React.lazy`로 싣는다). 카탈로그 씨앗 표와 파생 엔진이 함께 실린다.
@@ -71,7 +72,11 @@ export default function ThemeGallery() {
 
   return (
     <>
-      <SettingsRow label={ROW_LABEL} description={ROW_DESCRIPTION} testId="theme-style-row">
+      <SettingsRow
+        label={ROW_LABEL}
+        description={<span className="block text-balance">{ROW_DESCRIPTION}</span>}
+        testId="theme-style-row"
+      >
         <button
           ref={trigger}
           type="button"
@@ -80,9 +85,11 @@ export default function ThemeGallery() {
           aria-label={`테마 스타일, 지금은 ${label}`}
           data-testid="theme-style-trigger"
           onClick={() => setOpen((value) => !value)}
-          className="press flex min-w-0 items-center gap-3 rounded-lg bg-transparent p-1 text-ink focus-visible:focus-ring"
+          className="press flex min-w-0 max-w-full flex-wrap items-center gap-x-3 gap-y-2 rounded-lg bg-transparent px-2 py-1 text-ink focus-visible:focus-ring"
         >
-          <span data-testid="theme-style-selected-name" className="min-w-0 break-keep text-right text-meta font-semibold text-ink">
+          {/* 이름은 한 줄이다(낱말 한가운데서 끊지 않는다). 썸네일(200)과 한 줄에 못 들면 이름이 윗줄로 올라가고, 그래도
+              모자라면(지원 폭 밖) 말줄임이다. 폰 폭에서 카탈로그 이름의 24%가 끊기던 자리다(설계 리뷰 2차 H-A). */}
+          <span data-testid="theme-style-selected-name" className="min-w-0 max-w-full truncate text-meta font-semibold text-ink">
             {label}
           </span>
           <span data-testid="theme-style-selected-preview" className="flex shrink-0">

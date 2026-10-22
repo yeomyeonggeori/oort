@@ -67,20 +67,16 @@ describe("격자·스크롤·페이드", () => {
     expect(body).toContain("max-block-size: var(--theme-grid-max-height)");
     expect(tileMin * Number(/--theme-grid-max-height:\s*calc\(var\(--spacing-theme-tile-min\) \* ([0-9.]+)\)/.exec(css)![1])).toBe(480);
     expect(body).toContain("overflow-y: auto");
-    expect(body).toContain("overscroll-behavior: contain");
     // 키보드로 옮긴 초점 타일이 위아래 페이드 구간(12)에 놓이지 않는다.
     expect(body).toContain("scroll-padding-block: var(--spacing-3)");
   });
 
-  it("폰 폭(40rem 미만)에서는 격자 안쪽 스크롤을 두지 않는다 (스크롤 트랩 방지, 설계 리뷰 M4)", () => {
-    const at = css.indexOf("@media (width < 40rem) {");
-    expect(at).toBeGreaterThanOrEqual(0);
-    const block = css.slice(at, css.indexOf("\n}\n", at));
-    expect(block).toContain(".theme-gallery-scroll");
-    expect(block).toContain("max-block-size: none");
-    expect(block).toContain("overflow-y: visible");
-    expect(block).toContain("overscroll-behavior: auto");
-    expect(block).toContain("mask-image: none");
+  it("격자 안쪽 스크롤은 체이닝을 막지 않는다: `contain`이 아니다 (폰 폭의 스크롤 트랩 방지, 설계 리뷰 M4·2차 Medium 1)", () => {
+    const body = ruleBody(css, ".theme-gallery-scroll");
+    expect(body).toContain("overscroll-behavior: auto");
+    expect(body).not.toContain("overscroll-behavior: contain");
+    // 폰 폭에서 안쪽 스크롤을 없애면 열린 갤러리가 1,390~2,999px가 되어(칩·미리보기가 1.5~2.9화면 아래로 밀린다) 대신 상한을 둔다.
+    expect(css).not.toContain("@media (width < 40rem)");
   });
 
   it("위아래 페이드는 mask-image다: 색 리터럴 없이 알파만 쓴다(currentcolor와 transparent)", () => {

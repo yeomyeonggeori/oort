@@ -40,7 +40,8 @@
 .theme-gallery-scroll {
   max-block-size: var(--theme-grid-max-height);
   overflow-y: auto;
-  overscroll-behavior: contain;
+  /* 격자 끝에서 한 번 더 밀면 페이지가 이어서 스크롤한다. `contain`은 폰 폭에서 격자가 스크롤 트랩이 된다(설계 리뷰 M4). */
+  overscroll-behavior: auto;
   padding-block: var(--spacing-3);
   /* 키보드로 옮긴 초점 타일이 위아래 페이드 구간(12)에 놓이지 않게 한다. */
   scroll-padding-block: var(--spacing-3);
@@ -51,18 +52,6 @@
     currentcolor calc(100% - var(--spacing-3)),
     transparent
   );
-}
-
-/* 폰 폭에서는 격자 안쪽 스크롤을 두지 않는다: 격자에서 시작한 터치가 페이지로 이어지지 않는 스크롤 트랩이 되고(빠져나갈
- * 여백이 양옆 24뿐이다), 43장이면 22줄을 화면의 반 남짓한 창으로 넘기게 된다. 좁은 폭에서는 페이지가 늘어나서 페이지
- * 스크롤이 그대로 일한다. 한 칸이 40rem(640)이 되는 설정 본문부터 격자 안쪽 스크롤이 선다. */
-@media (width < 40rem) {
-  .theme-gallery-scroll {
-    max-block-size: none;
-    overflow-y: visible;
-    overscroll-behavior: auto;
-    mask-image: none;
-  }
 }
 
 .theme-gallery-grid {

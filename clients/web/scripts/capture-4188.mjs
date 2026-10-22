@@ -18,6 +18,8 @@
 //   design   디자인 갤러리 `#/design`(칩 그릇·상태 행이 한 쪽에 있다) × 같은 테마들. `VITE_DESIGN_GALLERY=1`로 빌드한
 //            dist를 `DIST_DESIGN`으로 준다.
 //   widths   설정 > 모양 900·1280(접힘·펼침).
+//   names    접힌 행의 테마 이름이 한 줄이고 잘리거나 넘치지 않는가를 **모든** 타일(시스템·라이트·다크 탭)에서 390·360 폭으로 잰다
+//            (설계 리뷰 2차 H-A). 어기는 이름이 하나라도 있으면 캡처가 실패한다(종료 코드 1). 사진은 한 장씩 남긴다.
 //
 // 백엔드 없이 `/v1/**` 고정 응답 + 가짜 소켓. 벽시계·로케일·시간대를 고정한다.
 // =============================================================================
@@ -74,7 +76,7 @@ const auth = {
 const json = (route, body, status = 200) =>
   route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 
-function messageRows() {
+function messageRows(unread = false) {
   const m = (n, author, body, ago) => ({
     id: `00000000-0000-7000-8000-0000000a00${String(n).padStart(2, "0")}`,
     channelId: CH, seq: 10 + n, hlcTs: FIXTURE_NOW - ago, hlcCount: 0, authorMemberId: author,
@@ -87,6 +89,8 @@ function messageRows() {
     m(4, P("15"), "디자인 시안은 내일 오전에 공유해요. Figma 링크는 그때 붙일게요.", 24 * MIN),
     m(5, agentId, "요약해 둘게요. 필요한 일이 있으면 말씀해 주세요.", 12 * MIN),
     m(6, memberId, "이번 주 일정 정리해 줘", 4 * MIN),
+    // 신호색이 앱에서 보이는 자리(`unread` 장면만): 나를 부른 멘션은 신호 채움, 다른 멤버 멘션은 신호 옅은 채움이다.
+    ...(unread ? [m(7, P("11"), "@seongjae 배포 전에 @grok 한테 점검 요청해 주세요", 1 * MIN)] : []),
   ];
 }
 
@@ -121,7 +125,7 @@ async function installRoutes(context, { unread = false } = {}) {
     if (path.endsWith("/work-sessions")) return json(route, { workSessions: [] });
     if (path.endsWith("/reminders")) return json(route, { reminders: [] });
     if (path.endsWith(`/workspaces/${workspaceId}`)) return json(route, { workspace: { id: workspaceId, name: "여명거리" } });
-    if (path.includes(`/channels/${CH}/messages`)) return json(route, { messages: messageRows() });
+    if (path.includes(`/channels/${CH}/messages`)) return json(route, { messages: messageRows(unread) });
     if (path.includes("/messages")) return json(route, { messages: [] });
     return json(route, {});
   });
@@ -468,6 +472,13 @@ const REVIEW_REPS = [
   { ref: "catalog:min", name: "min", modes: ["light", "dark"] },
   { ref: "catalog:synthwave-84", name: "synthwave-84", modes: ["dark"] },
   { ref: "catalog:kanagawa", name: "kanagawa", modes: ["light", "dark"] },
+  // 2차 리뷰의 위계(ink↔ink-muted) 지적 행: 타임스탬프·구역 이름이 본문과 갈리는지.
+  { ref: "catalog:houston", name: "houston", modes: ["dark"] },
+  { ref: "catalog:one", name: "one", modes: ["dark"] },
+  { ref: "catalog:material", name: "material", modes: ["light"] },
+  { ref: "catalog:solarized", name: "solarized", modes: ["light", "dark"] },
+  { ref: "catalog:vesper", name: "vesper", modes: ["dark"] },
+  { ref: "catalog:poimandres", name: "poimandres", modes: ["dark"] },
 ];
 
 async function reviewScenes(browser, origin) {
@@ -544,6 +555,68 @@ async function designScenes(browser, origin) {
   }
 }
 
+// 접힌 행의 이름: 모든 타일을 차례로 골라 가며 이름이 한 줄인지, 잘리지 않는지, 넘치지 않는지 잰다.
+async function nameScenes(browser, origin) {
+  const bad = [];
+  const report = [];
+  for (const width of [390, 360]) {
+    const viewport = { name: String(width), width, height: 844 };
+    for (const mode of ["system", "light", "dark"]) {
+      const osScheme = mode === "dark" ? "dark" : "light";
+      const { context, page } = await openWith(browser, origin, { osScheme, viewport, record: seedRecord({ theme: "dawnsky", scheme: mode }) });
+      try {
+        await goAppearance(page);
+        await page.getByTestId("theme-style-trigger").click();
+        await page.getByTestId("theme-style-options").waitFor();
+        const refs = await page.locator(".theme-tile input").evaluateAll((nodes) => nodes.map((n) => n.value));
+        for (const ref of refs) {
+          const label = await page.evaluate((value) => document.querySelector(`.theme-tile input[value="${value}"]`)?.closest("label")?.querySelector(".theme-tile-name")?.textContent ?? "", ref);
+          await page.locator(`.theme-tile input[value="${ref}"]`).evaluate((node) => node.closest("label").click());
+          await page.waitForFunction(
+            (text) => document.querySelector('[data-testid="theme-style-selected-name"]')?.textContent === text,
+            label,
+            { timeout: 5000 }
+          );
+          const m = await page.evaluate(() => {
+            const name = document.querySelector('[data-testid="theme-style-selected-name"]');
+            const trigger = document.querySelector('[data-testid="theme-style-trigger"]');
+            const style = getComputedStyle(name);
+            const lineHeight = parseFloat(style.lineHeight);
+            const rect = name.getBoundingClientRect();
+            return {
+              lines: Math.round(rect.height / lineHeight),
+              truncated: name.scrollWidth > name.clientWidth + 1,
+              triggerOverflow: trigger.scrollWidth > trigger.clientWidth + 1,
+              pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+              nameWidth: Math.round(rect.width),
+              triggerWidth: Math.round(trigger.getBoundingClientRect().width),
+            };
+          });
+          const row = { width, mode, ref, label, ...m };
+          report.push(row);
+          if (m.lines !== 1 || m.truncated || m.triggerOverflow || m.pageOverflow) bad.push(row);
+        }
+        // 가장 긴 이름 하나를 사진으로 남긴다.
+        const longest = report.filter((r) => r.width === width && r.mode === mode).sort((a, b) => b.label.length - a.label.length)[0];
+        if (longest) {
+          await page.locator(`.theme-tile input[value="${longest.ref}"]`).evaluate((node) => node.closest("label").click());
+          await page.getByTestId("theme-style-trigger").scrollIntoViewIfNeeded();
+          await page.getByTestId("theme-style-row").scrollIntoViewIfNeeded();
+          await shoot(page, `names-${mode}-${width}`, { width, mode, longest: longest.label });
+        }
+      } finally {
+        await context.close();
+      }
+    }
+  }
+  writeFileSync(resolve(outDir(), "names.json"), JSON.stringify({ checked: report.length, bad, report }, null, 1));
+  console.log(`NAMES: ${report.length} measured, ${bad.length} violations`);
+  if (bad.length > 0) {
+    console.error(bad.slice(0, 12).map((r) => `${r.width}px ${r.mode} ${r.label}: lines=${r.lines} truncated=${r.truncated} triggerOverflow=${r.triggerOverflow}`).join("\n"));
+    process.exitCode = 1;
+  }
+}
+
 // 설정 > 모양 900·1280(접힘·펼침).
 async function widthScenes(browser, origin) {
   for (const width of [900, 1280]) {
@@ -594,6 +667,7 @@ async function capture() {
     if (SCENES.includes("states")) await stateScenes(browser, preview.origin);
     if (SCENES.includes("review")) await reviewScenes(browser, preview.origin);
     if (SCENES.includes("widths")) await widthScenes(browser, preview.origin);
+    if (SCENES.includes("names")) await nameScenes(browser, preview.origin);
     if (SCENES.includes("design")) {
       // 디자인 갤러리는 `VITE_DESIGN_GALLERY=1`로 빌드한 dist가 따로 필요하다.
       const designDist = process.env.DIST_DESIGN ? resolve(WEB_ROOT, process.env.DIST_DESIGN) : null;
