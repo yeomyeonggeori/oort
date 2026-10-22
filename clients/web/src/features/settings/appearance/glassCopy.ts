@@ -8,7 +8,7 @@ export const GLASS_COPY = {
   unsupported: "macOS 데스크탑 앱에서 쓸 수 있어요.",
   unusable: "이 테마에서는 글자가 읽히도록 유리 배경을 쓸 수 없어요.",
   wallpaper: "배경화면이 켜져 있어서 유리 배경을 쓸 수 없어요. 배경화면을 끄면 다시 켤 수 있어요.",
-  failed: "이 기기에서는 유리 배경을 켜지 못했어요.",
+  failed: "이 기기에서는 유리 배경을 켜지 못했어요. 스위치를 다시 눌러 볼 수 있어요.",
   reducedTransparency: "시스템 설정이 투명 효과를 끄고 있어요.",
   opacityLabel: "유리 불투명도",
   opacityHint: (min: number): string =>

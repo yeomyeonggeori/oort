@@ -398,7 +398,7 @@ describe("폴백 3: 켜기 실패 (AC 5)", () => {
     expect(toggle().getAttribute("aria-checked")).toBe("false");
     expect(toggle().disabled).toBe(false);
     const failed = q("glass-background-failed");
-    expect(failed?.textContent).toBe("이 기기에서는 유리 배경을 켜지 못했어요.");
+    expect(failed?.textContent).toBe("이 기기에서는 유리 배경을 켜지 못했어요. 스위치를 다시 눌러 볼 수 있어요.");
     expect(failed?.getAttribute("role")).toBe("status");
     expect(slider()).toBeNull();
     expect(document.documentElement.hasAttribute("data-glass")).toBe(false);
