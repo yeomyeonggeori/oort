@@ -269,13 +269,17 @@ for mutation in start-bare-api start-bare-relay start-no-exec predeploy-raw \
   hermes-no-sha-check hermes-image-floating hermes-oort-secret hermes-cors-open \
   hermes-key-literal api-hermes-wildcard-host api-hermes-attest-dropped \
   worker-hermes-attest api-relay-key-chat-key api-relay-url-wrong worker-relay-key hermes-relay-key-chat-key hermes-relay-stale-sha \
-  hermes-relay-key-not-unset hermes-relay-unconditional readme-row-missing centrifugo-json-new-key; do
+  hermes-relay-key-not-unset hermes-relay-unconditional \
+  api-github-key-dropped worker-github-key hermes-github-key worker-github-key-renamed \
+  extra-service-github-key api-public-base-dropped api-public-base-http \
+  api-public-base-wrong-host worker-public-base \
+  readme-row-missing centrifugo-json-new-key; do
   grep -Fq "mutation ${mutation} RED" "$TMP_ROOT/catalog.out" || \
     fail "catalog checker missing mutation proof: ${mutation}"
 done
 grep -Fq 'committed catalog still passes' "$TMP_ROOT/catalog.out" || \
   fail "catalog checker missing restore proof"
-pass "catalog: start commands = canonical command lists (operators, order, values), pre-deploy sh -c + root→momo drop, Centrifugo v6 names + infra/centrifugo.json parity and settings set, api volume/UID/chown -R/setpriv/env -u, PG18+pgvector image+volume, push tmpfs guard/umask order/unset, variables ⊆ compose twin, shared refs ⊆ --claim keys, README hand-mapped table, hermes private + digest + gate-first/sha-pinned + no oort secret; 68 mutations RED"
+pass "catalog: start commands = canonical command lists (operators, order, values), pre-deploy sh -c + root→momo drop, Centrifugo v6 names + infra/centrifugo.json parity and settings set, api volume/UID/chown -R/setpriv/env -u, PG18+pgvector image+volume, push tmpfs guard/umask order/unset, variables ⊆ compose twin, shared refs ⊆ --claim keys, README hand-mapped table, hermes private + digest + gate-first/sha-pinned + no oort secret, GitHub App key + public address on api only (#4221); 77 mutations RED"
 
 # ①b #4072 — the Hermes default config and the tool-lock gate's own rules. The
 # catalog above pins the start command to these files' sha256, so a gate that

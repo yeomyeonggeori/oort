@@ -27,6 +27,13 @@ place of `;` or a redefined `run()` is RED even where no named rule looks.
 The Hermes service (#4072, ADR-0203 D6) is private, pinned by the same image
 digest as compose, starts only through the lock gate, and holds no oort secret.
 
+The GitHub App surface (#4221, ADR-0205): GITHUB_APP_MASTER_KEY and
+MOMO_PUBLIC_BASE_URL are on api and on no other service (by name or by
+`${{shared.GITHUB_APP_MASTER_KEY}}` reference, services outside the compose-twin
+table included), and the address is exactly `https://${{shared.OORT_SITE_ADDRESS}}`
+— the api accepts only an absolute https origin, so a wrong host that still
+starts with `https://` would be accepted silently.
+
 Each service's variable names must be ones its compose twin sets (plus the
 Railway-only extras named below), and infra/centrifugo.json may only hold the
 settings the catalog's Centrifugo literals stand in for.
@@ -86,6 +93,15 @@ HAND_LITERALS = {
 # HERMES_API_KEY: `openssl rand -hex 32`, one value for hermes' API_SERVER_KEY and the
 # HERMES_API_KEY of api and agent-worker.
 OPERATOR_SHARED = {"HERMES_API_KEY", "HERMES_LOGIN_RELAY_KEY"}  # the relay key: its own secret, never derived from the chat key (#4078)
+# ADR-0205 / #4221: the GitHub App surface of api. The key seals the App's private key and webhook secret, so it
+# reaches api and nothing else (ADR-0205 D1; ADR-0203 D6-2 keeps oort secrets out of the Hermes service). The public
+# address is what GitHub is told to call; the api reads it only as an absolute https origin
+# (T3Settings::ready_public_base_url) and ignores anything else, so the catalog pins the one shape: the scheme typed,
+# the host the operator's single declared edge host (OORT_SITE_ADDRESS, which the generator writes).
+GITHUB_KEY_VAR = "GITHUB_APP_MASTER_KEY"
+GITHUB_KEY_VALUE = "${{shared.GITHUB_APP_MASTER_KEY}}"
+PUBLIC_BASE_VAR = "MOMO_PUBLIC_BASE_URL"
+PUBLIC_BASE_VALUE = "https://${{shared.OORT_SITE_ADDRESS}}"
 HERMES_SHARED_KEY = "${{shared.HERMES_API_KEY}}"
 HERMES_RELAY_SHARED_KEY = "${{shared.HERMES_LOGIN_RELAY_KEY}}"
 HERMES_PORT = 8642
@@ -737,6 +753,45 @@ def hermes_errors(services: dict, compose: str, repo_root: Path) -> list[str]:
     return errors
 
 
+def github_errors(services: dict) -> list[str]:
+    """ADR-0205 / #4221: the GitHub App key and public address reach api only, in the one shape the api accepts.
+
+    The compose-twin rule already refuses a name a service's compose twin does not set, but it cannot see a service
+    that is not in COMPOSE_TWINS, and it never asks api for the two variables at all (an api that lost them turns the
+    whole GitHub surface into a silent 503/409). Every service of the catalog is walked here, by name and by
+    `${{shared.GITHUB_APP_MASTER_KEY}}` reference."""
+    errors: list[str] = []
+    api_vars = services["api"].get("variables") or {}
+    if api_vars.get(GITHUB_KEY_VAR) != GITHUB_KEY_VALUE:
+        errors.append(
+            "api %s %r must be %s (without it every /v1/integrations/github/* route answers 503)"
+            % (GITHUB_KEY_VAR, api_vars.get(GITHUB_KEY_VAR), GITHUB_KEY_VALUE)
+        )
+    if api_vars.get(PUBLIC_BASE_VAR) != PUBLIC_BASE_VALUE:
+        errors.append(
+            "api %s %r must be %s (an absolute https origin on the one host the operator declared for this edge; "
+            "the api ignores anything else and the GitHub App registration answers 409 public_address_required)"
+            % (PUBLIC_BASE_VAR, api_vars.get(PUBLIC_BASE_VAR), PUBLIC_BASE_VALUE)
+        )
+    for name, svc in services.items():
+        if name == "api":
+            continue
+        for var, value in (svc.get("variables") or {}).items():
+            refs = [ref.strip() for ref in REF_RE.findall(str(value))]
+            if var == GITHUB_KEY_VAR or "shared.%s" % GITHUB_KEY_VAR in refs:
+                errors.append(
+                    "%s %s: %s reaches api only (ADR-0205 D1: it opens the App's stored private key; "
+                    "ADR-0203 D6-2: the Hermes service and the workers hold no oort secret)"
+                    % (name, var, GITHUB_KEY_VAR)
+                )
+            if var == PUBLIC_BASE_VAR:
+                errors.append(
+                    "%s %s: %s belongs to api only (the address GitHub is told to call; no other service reads it)"
+                    % (name, var, PUBLIC_BASE_VAR)
+                )
+    return errors
+
+
 def collect_errors(
     catalog_path: Path,
     compose_path: Path,
@@ -871,6 +926,9 @@ def collect_errors(
 
     # -- same-server Hermes ---------------------------------------------------
     errors.extend(hermes_errors(services, compose, compose_path.parents[2]))
+
+    # -- GitHub App key + public address: api only (ADR-0205, #4221) ----------
+    errors.extend(github_errors(services))
 
     # -- Postgres image service ----------------------------------------------
     pg = services["postgres"]
@@ -1204,6 +1262,29 @@ def mutate_catalog(kind: str, data: dict) -> None:
         del api["variables"]["OORT_COHOSTED_AGENT_TOOLS_LOCKED"]
     elif kind == "worker-hermes-attest":
         services["agent-worker"]["variables"]["OORT_COHOSTED_AGENT_TOOLS_LOCKED"] = "1"
+    elif kind == "api-github-key-dropped":  # #4221: api without the key answers 503 on every GitHub route
+        del api["variables"][GITHUB_KEY_VAR]
+    elif kind == "worker-github-key":  # ADR-0203 D6-2: a worker must not open the App's stored key
+        services["agent-worker"]["variables"][GITHUB_KEY_VAR] = GITHUB_KEY_VALUE
+    elif kind == "hermes-github-key":  # by name only: the value is not a reference, so only the name can give it away
+        services["hermes"]["variables"][GITHUB_KEY_VAR] = "<operator: the api's GITHUB_APP_MASTER_KEY>"
+    elif kind == "worker-github-key-renamed":  # the same shared secret under a name no compose twin lists
+        services["agent-worker"]["variables"]["GH_APP_SEAL"] = GITHUB_KEY_VALUE
+    elif kind == "extra-service-github-key":  # a service COMPOSE_TWINS does not know: only the named rule can see it
+        services["github-worker"] = {
+            "public": False,
+            "image": services["relay"]["image"],
+            "startCommand": "momo-rust-entrypoint relay",
+            "variables": {GITHUB_KEY_VAR: GITHUB_KEY_VALUE},
+        }
+    elif kind == "api-public-base-dropped":  # #4221: api without the address answers 409 public_address_required
+        del api["variables"][PUBLIC_BASE_VAR]
+    elif kind == "api-public-base-http":  # the api ignores anything but an absolute https origin
+        api["variables"][PUBLIC_BASE_VAR] = "http://${{shared.OORT_SITE_ADDRESS}}"
+    elif kind == "api-public-base-wrong-host":  # starts with https:// and has a host, so the api would accept it
+        api["variables"][PUBLIC_BASE_VAR] = "https://${{shared.MOMO_CENTRIFUGO_WS_URL}}"
+    elif kind == "worker-public-base":
+        services["agent-worker"]["variables"][PUBLIC_BASE_VAR] = PUBLIC_BASE_VALUE
     else:
         raise SystemExit("unknown catalog mutation %s" % kind)
 
@@ -1275,6 +1356,15 @@ CATALOG_MUTATIONS: tuple[tuple[str, str], ...] = (
     ("api-hermes-wildcard-host", "api AGENT_PROVIDER_LOCAL_HOSTS"),
     ("api-hermes-attest-dropped", "api OORT_COHOSTED_AGENT_TOOLS_LOCKED"),
     ("worker-hermes-attest", "agent-worker variables outside its compose twin"),
+    ("api-github-key-dropped", "api GITHUB_APP_MASTER_KEY"),
+    ("worker-github-key", "GITHUB_APP_MASTER_KEY reaches api only"),
+    ("hermes-github-key", "GITHUB_APP_MASTER_KEY reaches api only"),
+    ("worker-github-key-renamed", "GITHUB_APP_MASTER_KEY reaches api only"),
+    ("extra-service-github-key", "GITHUB_APP_MASTER_KEY reaches api only"),
+    ("api-public-base-dropped", "api MOMO_PUBLIC_BASE_URL"),
+    ("api-public-base-http", "api MOMO_PUBLIC_BASE_URL"),
+    ("api-public-base-wrong-host", "api MOMO_PUBLIC_BASE_URL"),
+    ("worker-public-base", "MOMO_PUBLIC_BASE_URL belongs to api only"),
 )
 
 
