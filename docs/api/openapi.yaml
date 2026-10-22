@@ -4937,7 +4937,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ScheduledMessageResponse"
         "400":
-          description: Invalid body or unknown field, no field given, `send_at_too_soon`, `send_at_too_far`, or `empty_message`.
+          description: Invalid body or unknown field, no field given, `send_at_too_soon`, `send_at_too_far`, `empty_message`, or a malformed scheduled message id.
           content:
             application/json:
               schema:
@@ -15980,7 +15980,9 @@ components:
         ADR-0208 D3. `pending` waits for `sendAtMs`. `sent` went out as an
         ordinary message (`sentMessageId`). `failed` could not be sent
         (`failureReason`) and keeps its body so it can be re-armed, sent now or
-        copied. `cancelled` was removed by its author. There is no `sending`
+        copied. `cancelled` was removed by its author, or by the system when the
+        author was removed from or left the workspace or the workspace was
+        deleted (the body is discarded either way). There is no `sending`
         state: claim, send and status change are one transaction.
 
     ScheduledMessageFailureReason:
@@ -15989,13 +15991,14 @@ components:
       description: >
         ADR-0208 D8, a closed set owned by the engine (TRACKS section 1).
         `sessions_ended`: the author's sign-in ended (password change or reset,
-        suspension, removal, leaving the workspace, a device unlinked or a
-        refresh-token reuse caught), so the schedule was held, not sent; the
-        author re-arms it after reading it. `author_inactive`: the author is
+        suspension, a device unlinked or a refresh-token reuse caught), so the
+        schedule was held, not sent; the author re-arms it or sends it now
+        after reading it (clients show the whole text first). Removal and
+        leaving the workspace cancel the schedules instead. `author_inactive`: the author is
         suspended or removed at send time (a safety net behind the hold).
         `missed`: the grace window (default 60 minutes) passed without a single
-        attempt. `send_error`: the grace window passed while transient errors
-        continued. `not_member`: the author left the channel or conversation.
+        attempt. `send_error`: at least one attempt was made and the grace
+        window passed while transient errors continued. `not_member`: the author left the channel or conversation.
         `root_unavailable`: the thread root is deleted or gone.
         `attachment_unavailable`: an attachment is missing or was used
         elsewhere. `not_allowed`: a policy the send path adds later.
