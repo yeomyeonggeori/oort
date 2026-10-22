@@ -533,8 +533,9 @@ async function reviewScenes(browser, origin) {
 // 구역마다 따로 찍는다(요소 사진): 쪽 전체 사진은 `content-visibility: auto` 구역이 화면에 들어오기 전에는 그려지지 않아서 첫 약
 // 900px만 찍히고 칩 그릇·상태 구역은 빈 종이였다(설계 리뷰 3차 M-6). 요소 사진은 그 구역을 화면으로 가져온 뒤 찍는다.
 const DESIGN_SECTIONS = [
-  ["칩 그릇", "chips"],
-  ["States", "states"],
+  // [제목, 파일 꼬리, 구역 안에 실제로 그려졌다는 증거가 되는 글자]. 「칩 그릇」은 제목과 알약 한 줄뿐이라 작다(약 104px).
+  ["칩 그릇", "chips", "원장"],
+  ["States", "states", "seq 4082"],
 ];
 async function designScenes(browser, origin) {
   const reps = [
@@ -559,12 +560,14 @@ async function designScenes(browser, origin) {
         await page.goto(`${origin}/#/design`, { waitUntil: "domcontentloaded" });
         await page.getByText("칩 그릇").first().waitFor({ timeout: 20_000 });
         await settle(page);
-        for (const [title, slug] of DESIGN_SECTIONS) {
+        for (const [title, slug, probe] of DESIGN_SECTIONS) {
           const section = page.getByRole("heading", { name: title, exact: true }).first().locator("xpath=ancestor::section[1]");
           await section.scrollIntoViewIfNeeded();
+          // 늦게 그려지는 구역(`content-visibility: auto`)이 실제로 그려졌는지는 그 안의 글자로 본다(높이만으로는 대기 자리와 구분이 안 된다).
+          await section.getByText(probe).first().waitFor({ timeout: 10_000 });
           await settle(page);
           const box = await section.boundingBox();
-          if (!box || box.height < 120) throw new Error(`design ${rep.name} ${mode} ${title}: 구역이 그려지지 않았다(높이 ${box?.height ?? 0})`);
+          if (!box || box.height < 60) throw new Error(`design ${rep.name} ${mode} ${title}: 구역이 그려지지 않았다(높이 ${box?.height ?? 0})`);
           const name = `design-${rep.name}-${mode}-${slug}`;
           await section.screenshot({ path: resolve(outDir(), `${name}.png`), animations: "disabled", caret: "hide" });
           meta.push({ name, theme: rep.ref, mode, section: title, height: Math.round(box.height), root: await facts(page) });
@@ -662,7 +665,7 @@ async function extraScenes(browser, origin) {
 
 // 접힌 행의 이름: 모든 타일을 차례로 골라 가며 이름이 한 줄인지, 잘리지 않는지, 넘치지 않는지, 배치가 이름마다 갈리지 않는지 잰다.
 // 배치는 `row`(이름 · 썸네일 · chevron이 한 줄) 아니면 `stacked`(이름이 윗줄, 썸네일과 chevron이 아랫줄)이고, chevron은 늘 썸네일 옆이다.
-const NAME_WIDTHS = [390, 375, 360, 320, 640, 700, 760];
+const NAME_WIDTHS = (process.env.NAME_WIDTHS ?? "390,375,360,320,640,700,760").split(",").map(Number);
 const NAME_SHOT_WIDTHS = new Set([390, 375, 360, 640]);
 async function nameScenes(browser, origin) {
   const bad = [];
