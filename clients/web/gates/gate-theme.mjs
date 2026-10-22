@@ -80,6 +80,8 @@ const proveRedBoot = process.env.THEME_GATE_PROVE_RED_BOOT === "1";
 const proveRedPersist = process.env.THEME_GATE_PROVE_RED_PERSIST === "1";
 const proveRedCache = process.env.THEME_GATE_PROVE_RED_CACHE === "1";
 const proveRedAppearanceCss = process.env.THEME_GATE_PROVE_RED_APPEARANCE_CSS === "1";
+/** red proof가 고쳐 쓴 스타일시트 본문(주소별). 장면마다 컨텍스트가 새로 서도 한 번만 가져온다. */
+const redCssCache = new Map();
 
 // 저장 항목 이름: core appearance.ts · themeCache.ts의 상수와 같다(게이트는 번들 밖이라 문자열로 적는다).
 const V2_ENTRY = "momo.web.appearance.v2";
@@ -139,11 +141,21 @@ async function installRoutes(context) {
     // 부트 스크립트는 속성을 그대로 찍으니 「속성은 찍혔는데 화면이 안 따른다」가 정확히 이 모양이다(CSS 조각이 번들에
     // 안 실리거나 선택자가 틀어진 경우와 같다). 첫 페인트의 본문 글자·행 간격 변수 단언이 무너져야 한다.
     await context.route("**/assets/*.css", async (route) => {
-      const response = await route.fetch();
-      const body = (await response.text())
-        .replaceAll("[data-font-size", "[data-font-sizes")
-        .replaceAll("[data-density", "[data-densitys");
-      await route.fulfill({ response, body });
+      const url = route.request().url();
+      // 고친 본문은 첫 요청 뒤에 즉시 돌려준다: 가져와 고쳐 쓰는 왕복이 매번 끼면 스타일시트가 첫 프레임 측정보다
+      // 늦게 도착해서 ③이 엉뚱한 이유로 먼저 빨개진다(앞선 장면이 캐시를 데운다).
+      if (!redCssCache.has(url)) {
+        const response = await route.fetch();
+        const body = (await response.text())
+          .replaceAll("[data-font-size", "[data-font-sizes")
+          .replaceAll("[data-density", "[data-densitys");
+        // 압축·길이 헤더를 그대로 두면 바뀐 본문과 어긋나 스타일시트 전체가 깨진다.
+        const headers = { ...response.headers() };
+        delete headers["content-encoding"];
+        delete headers["content-length"];
+        redCssCache.set(url, { status: response.status(), headers, body });
+      }
+      await route.fulfill(redCssCache.get(url));
     });
   }
 
