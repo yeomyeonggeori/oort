@@ -1,0 +1,68 @@
+[
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "B0 수리 전: 나간 멤버 셋이 모두 목록에 있다",
+  "ok": true,
+  "detail": [
+   "이\n이도현\n2",
+   "박\n박서연",
+   "K\nkwak의 Claude\n, 연결이 꺼져 있어요",
+   "G\ngrok\n, 방금 응답함",
+   "나간 멤버",
+   "나간 멤버\n1",
+   "나간 멤버"
+  ]
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "B1 수리 전: 접힌 줄이 없다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "B0 수리 전: 나간 멤버 셋이 모두 목록에 있다",
+  "ok": true,
+  "detail": [
+   "이\n이도현\n2",
+   "박\n박서연",
+   "K\nkwak의 Claude\n, 연결이 꺼져 있어요",
+   "G\ngrok\n, 방금 응답함",
+   "나간 멤버",
+   "나간 멤버\n1",
+   "나간 멤버"
+  ]
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "B1 수리 전: 접힌 줄이 없다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "B0 수리 전: 나간 멤버 셋이 모두 목록에 있다",
+  "ok": true,
+  "detail": [
+   "이\n이도현\n2",
+   "박\n박서연",
+   "K\nkwak의 Claude\n, 연결이 꺼져 있어요",
+   "G\ngrok\n, 방금 응답함",
+   "나간 멤버",
+   "나간 멤버\n1",
+   "나간 멤버"
+  ]
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "B1 수리 전: 접힌 줄이 없다",
+  "ok": true,
+  "detail": null
+ }
+]
