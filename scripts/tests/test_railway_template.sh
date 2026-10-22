@@ -9,7 +9,9 @@
 #     commands name momo-rust-entrypoint, pre-deploy is `/bin/sh -c`, Centrifugo
 #     v6 names, api drive volume + RAILWAY_RUN_UID + privilege drop, PG18 +
 #     pgvector image service with a volume, push services on tmpfs keys,
-#     `${{shared.KEY}}` ⊆ generator keys, README hand-mapped table;
+#     `${{shared.KEY}}` ⊆ generator keys, README hand-mapped table, and (#4221,
+#     ADR-0205) GITHUB_APP_MASTER_KEY + MOMO_PUBLIC_BASE_URL on api only, the
+#     address exactly `https://${{shared.OORT_SITE_ADDRESS}}`;
 #   * X-Forwarded-Proto: adapt JSON (static) and a live echo upstream behind the
 #     committed Caddyfile.railway (https) vs a copy without header_up (http);
 #   * local-archive upload route: a PUT to /__momo_stub/drive/uploads/… reaches

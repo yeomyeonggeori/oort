@@ -576,15 +576,16 @@ of the catalog, by name and by `${{shared.GITHUB_APP_MASTER_KEY}}` reference.
   detected by the api at all, which is why the catalog pins the exact
   reference. `OORT_SITE_ADDRESS` is the host the generator derived from
   `RAILWAY_PUBLIC_DOMAIN` (scheme stripped), the one host Caddy serves, so the
-  two cannot drift. `MOMO_T3_ENABLED` is not set here, so the address is never
-  handed to a workd (`ready_t3` answers 503 before it reads the URL).
+  two cannot drift. `MOMO_T3_ENABLED` is not part of this catalog, so the address
+  is not handed to a workd (`ready_t3` answers 503 before it reads the URL);
+  setting that flag by hand changes this.
 
 **An install that predates #3947** has no `GITHUB_APP_MASTER_KEY` among its
 shared variables. Add that one variable by hand. Do not re-render the generator
 over live variables: every secret key that is not exported is minted fresh
-(`JWT_HMAC`, the Centrifugo secrets, `PROVIDER_LINK_MASTER_KEY`, the database
-role passwords), which rotates them under a running instance once pasted. The
-generator is for a new project.
+(`JWT_HMAC`, the Centrifugo secrets, `PROVIDER_LINK_MASTER_KEY`, the two
+webhook master keys, the database role passwords), which rotates them under a
+running instance once pasted. The generator is for a new project.
 
 1. **Key**, in the generator's own shape (`gen()` in
    `scripts/self_host_env.sh`). Nothing can re-derive it and a lost key means
@@ -597,11 +598,12 @@ generator is for a new project.
    `GITHUB_APP_MASTER_KEY` with the file's content. `railway variable set` is
    service-scoped (CLI 4.27 has no shared flag), so this step is the dashboard.
    `pbcopy < ~/.momo-secrets/railway-github-app-master-key` fills the clipboard
-   without printing the value.
+   without printing the value; `pbcopy < /dev/null` clears it afterwards.
 3. **api references**, single-quoted so the shell leaves `${{ }}` alone, with
    `--skip-deploys` so setting them does not redeploy the running image. Run it
    from a directory linked to the team project; `railway status` names the
-   project and environment it will change:
+   project and environment it will change (`-s api` assumes the service is
+   named `api`):
    ```sh
    railway variable set 'GITHUB_APP_MASTER_KEY=${{shared.GITHUB_APP_MASTER_KEY}}' \
      'MOMO_PUBLIC_BASE_URL=https://${{shared.OORT_SITE_ADDRESS}}' -s api --skip-deploys
