@@ -860,6 +860,37 @@ describe("새 워크스페이스 완료 카드 (#4198)", () => {
     expect(document.activeElement).toBe(host.querySelector("#workspace-name"));
   });
 
+  it("요청이 날아가는 동안에도 Esc는 삼켜진다(설정이 닫히면 만들어진 워크스페이스의 ID를 영영 못 본다)", async () => {
+    createWorkspaceMock.mockReturnValue(new Promise(() => undefined));
+    const host = mountSection({ role: "owner" });
+    expect(escapeIsClaimed()).toBe(false);
+    act(() => setInputValue(host.querySelector("#workspace-name") as HTMLInputElement, "새 팀"));
+    act(() => setInputValue(host.querySelector("#workspace-slug") as HTMLInputElement, "new-team"));
+    await act(async () => {
+      (host.querySelector('[data-testid="workspace-create"]') as HTMLButtonElement).click();
+    });
+    expect(
+      host.querySelector('[data-testid="workspace-create"]')?.getAttribute("aria-busy")
+    ).toBe("true");
+    expect(host.querySelector('[data-testid="workspace-created"]')).toBeNull();
+
+    // 아직 카드가 없어도 층은 열려 있다: 요청 중에 라우트가 닫히면 POST는 이미 서버에 갔는데
+    // 카드는 한 번도 그려지지 않는다.
+    expect(escapeIsClaimed()).toBe(true);
+    const reachedShell = vi.fn();
+    window.addEventListener("keydown", reachedShell);
+    try {
+      act(() => {
+        window.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })
+        );
+      });
+    } finally {
+      window.removeEventListener("keydown", reachedShell);
+    }
+    expect(reachedShell).not.toHaveBeenCalled();
+  });
+
   it("지금 열려 있는 워크스페이스의 ID 줄에도 같은 복사 단추가 있다(같은 낱말이 두 가지로 동작하지 않는다)", async () => {
     const host = mountSection({ role: "owner" });
     expect(host.querySelector('[data-testid="workspace-id"]')?.textContent).toBe(WS);

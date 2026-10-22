@@ -1147,11 +1147,6 @@ export function WorkspaceSection({
     }
   }, [created]);
 
-  // 카드가 떠 있는 동안 Esc는 아무 일도 하지 않는다. 삼키지 않으면 설정 셸이 그 Esc로 라우트를
-  // 닫고, 다시 볼 수 없는 ID가 확인 한 번 없이 사라진다(웹훅 발급 카드 R2 신규 H와 같은 실패).
-  // 나가는 길은 이 카드가 이름으로 갖고 있다: 「닫기」.
-  useEscapeGuard(created !== null);
-
   function dismissCreated() {
     setCreated(null);
     nameInputRef.current?.focus();
@@ -1173,6 +1168,12 @@ export function WorkspaceSection({
   });
 
   const creating = create.isPending;
+
+  // 카드가 떠 있는 동안, 그리고 요청이 날아가는 동안에도 Esc는 아무 일도 하지 않는다. 삼키지 않으면
+  // 설정 셸이 그 Esc로 라우트를 닫고, 다시 볼 수 없는 ID가 확인 한 번 없이 사라진다(웹훅 발급 카드
+  // R2 신규 H와 같은 실패). 요청 중에 닫으면 워크스페이스는 만들어졌는데 카드는 한 번도 그려지지
+  // 않는다(design-review 2차 M-A, 실측). 나가는 길은 이 카드가 이름으로 갖고 있다: 「닫기」.
+  useEscapeGuard(created !== null || creating);
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -1370,7 +1371,7 @@ export function WorkspaceSection({
           tabIndex={-1}
           role="group"
           aria-label={`${created.name} 워크스페이스를 만들었어요.`}
-          className="rounded-lg focus-visible:focus-ring"
+          className="-my-1 rounded-lg py-1 focus-visible:focus-ring"
           data-testid="workspace-created"
         >
           <SettingsSection
@@ -1379,7 +1380,7 @@ export function WorkspaceSection({
           >
             <SettingsRow label="슬러그" keep>
               <span
-                className="min-w-0 break-all font-mono text-body text-ink-muted"
+                className="min-w-0 break-all font-mono text-meta text-ink-muted"
                 data-numeric=""
               >
                 {created.slug}
@@ -1395,6 +1396,7 @@ export function WorkspaceSection({
               <Button
                 type="button"
                 size="sm"
+                className="tap-target"
                 onClick={dismissCreated}
                 data-testid="workspace-created-done"
               >

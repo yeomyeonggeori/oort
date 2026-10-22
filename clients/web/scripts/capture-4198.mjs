@@ -17,8 +17,12 @@
 //   login-labels      로그인 화면 「다른 워크스페이스로 로그인」을 열었을 때 그 글자와 칸 이름. 안내 문장이
 //                     가리키는 낱말이 실제 화면에 그대로 있는지 같은 번들에서 잰다.
 //
-// MODE=before 는 같은 단정을 **기록만** 한다(변경 전 번들은 빨간 것이 정상이다). MODE=after 는 하나라도
-// 빨가면 exit 1.
+//   dialog-short      낮은 창(가로 폰 667x375, 브라우저 200% 상당 720x395, 576x316, 320x480)에서 만든 직후 「닫기」가
+//                     화면 안에 있고 누를 수 있는가. Esc·바깥 클릭을 막은 분기의 유일한 출구다(design-review 2차 B1).
+//   settings-pending  요청이 날아가는 동안(느린 응답) Esc가 설정을 닫지 않는가(design-review 2차 M-A).
+//
+// MODE=before / MODE=r2(1차 검수 때의 번들) 는 같은 단정을 **기록만** 한다(변경 전 번들은 빨간 것이 정상이다).
+// MODE=after 는 하나라도 빨가면 exit 1.
 // =============================================================================
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -31,6 +35,9 @@ const WEB_ROOT = process.env.WEB_ROOT ? resolve(process.env.WEB_ROOT) : resolve(
 const OUT_DIR = process.env.OUT_DIR ? resolve(process.env.OUT_DIR) : resolve(WEB_ROOT, "artifacts/p0a-4198");
 const MODE = process.env.MODE || "after";
 const DIST = process.env.DIST || "";
+/** `ONLY=short,pending` 처럼 주면 그 장면만 돈다(1차 검수 번들에서 새 단정이 빨개지는지만 볼 때). */
+const ONLY = (process.env.ONLY || "").split(",").map((v) => v.trim()).filter(Boolean);
+const wants = (name) => ONLY.length === 0 || ONLY.includes(name);
 const PORT = Number(process.env.CAPTURE_PORT || 5398);
 
 const workspaceId = "00000000-0000-7000-8000-000000000001";
@@ -72,7 +79,7 @@ function check(tag, name, ok, detail) {
   console.log(JSON.stringify({ tag, check: name, ok: Boolean(ok), detail }));
 }
 
-async function installRoutes(context) {
+async function installRoutes(context, cfg = {}) {
   await context.route("**/v1/**", async (route) => {
     const req = route.request();
     const path = new URL(req.url()).pathname;
@@ -85,6 +92,7 @@ async function installRoutes(context) {
     if (path === "/v1/workspaces" && method === "POST") {
       let body = {};
       try { body = JSON.parse(req.postData() || "{}"); } catch { /* 빈 본문 */ }
+      if (cfg.createDelayMs) await new Promise((done) => setTimeout(done, cfg.createDelayMs));
       return json(route, { schema: "momo.workspace.created.v1", workspaceId: NEW_WS_ID, slug: body.slug ?? "design-team", name: body.name ?? "디자인팀" }, 201);
     }
     if (path.endsWith("/channels")) return json(route, { channels });
@@ -122,7 +130,7 @@ async function installRealtime(page) {
   });
 }
 
-async function newContext(browser, origin, scheme, vp) {
+async function newContext(browser, origin, scheme, vp, cfg = {}) {
   const context = await browser.newContext({
     viewport: { width: vp.w, height: vp.h },
     colorScheme: scheme,
@@ -132,7 +140,7 @@ async function newContext(browser, origin, scheme, vp) {
   });
   // 복사 단추가 실제로 클립보드에 쓰는지 읽어서 확인하려면 두 권한이 필요하다.
   await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin }).catch(() => {});
-  await installRoutes(context);
+  await installRoutes(context, cfg);
   const page = await context.newPage();
   await installRealtime(page);
   await page.addInitScript((server) => { try { localStorage.setItem("momo.web.server.v1", server); } catch { /* 저장소 없음 */ } }, origin);
@@ -255,6 +263,10 @@ const SCENES = [
         await shotBox(page, dialog, tag, "dialog-created-copied");
       }
 
+      // 터치에서 그 순간 반드시 눌러야 하는 하나는 「닫기」다: 폰 폭에서는 복사처럼 44px로 자란다.
+      const doneBox = await page.getByTestId("add-workspace-done").boundingBox();
+      if (doneBox) check(tag, "「닫기」 높이가 폭에 맞다(1440=28 · 390=44)", Math.round(doneBox.height) === (vp.w >= 600 ? 28 : 44), { height: doneBox.height });
+
       // 그 ID는 다른 어디에도 없다. 반사적인 Esc·바깥 클릭이 지우지 못하고 나가는 길은 「닫기」 하나다.
       await page.keyboard.press("Escape");
       await page.waitForTimeout(400);
@@ -330,6 +342,9 @@ const SCENES = [
         await page.waitForTimeout(200);
         check(tag, "일반 카드의 복사는 지금 워크스페이스의 ID를 쓴다", (await readClipboard(page)) === workspaceId, { clip: await readClipboard(page) });
       }
+
+      const settingsDoneBox = await page.getByTestId("workspace-created-done").boundingBox();
+      if (settingsDoneBox) check(tag, "설정 카드의 「닫기」 높이가 폭에 맞다(1440=28 · 390=44)", Math.round(settingsDoneBox.height) === (page.viewportSize().width >= 600 ? 28 : 44), { height: settingsDoneBox.height });
 
       // 카드가 떠 있는 동안 Esc는 설정을 닫지 않고, 「닫기」가 카드를 지우고 초점을 이름 칸으로 돌려준다.
       await page.keyboard.press("Escape");
@@ -430,6 +445,89 @@ async function sweep(browser, origin) {
   }
 }
 
+/**
+ * 낮은 창에서 만든 직후 「닫기」가 화면 안에 있고 실제로 눌리는가(가운데 점의 `elementFromPoint`가 그 단추).
+ * Esc·바깥 클릭을 막은 분기라 이 단추가 유일한 출구다. 이 축은 기계가 아무것도 재지 않는다
+ * (디자인 시스템 §5.3): 높이 700 아래는 이 장면만 잰다.
+ */
+const SHORT_VIEWPORTS = [
+  { w: 667, h: 375 }, // 가로 폰
+  { w: 844, h: 390 }, // 가로 폰(큰 것)
+  { w: 720, h: 395 }, // 1440x790 창에서 브라우저 200%와 같은 CSS 뷰포트
+  { w: 576, h: 316 }, // 250% 상당
+  { w: 320, h: 480 }, // 작은 폰
+];
+async function shortViewports(browser, origin) {
+  for (const vp of SHORT_VIEWPORTS) {
+    const tag = `short-${vp.w}x${vp.h}-light`;
+    const { context, page } = await newContext(browser, origin, "light", vp);
+    try {
+      await signIn(page, origin);
+      const opener = page.getByTestId("add-workspace");
+      await opener.waitFor({ state: "attached", timeout: 10_000 });
+      await opener.evaluate((el) => el.click());
+      await page.getByTestId("add-workspace-dialog").waitFor({ timeout: 10_000 });
+      await page.getByTestId("add-workspace-name").fill("디자인팀");
+      await page.getByTestId("add-workspace-slug").fill("design-team");
+      await page.getByTestId("add-workspace-submit").click();
+      await page.getByTestId("add-workspace-created").waitFor({ timeout: 10_000 });
+      await page.waitForTimeout(350);
+      const done = page.getByTestId("add-workspace-done");
+      const box = await done.boundingBox();
+      const size = page.viewportSize();
+      const inside = box !== null && box.x >= 0 && box.y >= 0 && box.x + box.width <= size.width + 0.5 && box.y + box.height <= size.height + 0.5;
+      const hit = await done.evaluate((button) => {
+        const r = button.getBoundingClientRect();
+        const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return top === button || button.contains(top);
+      });
+      const scroller = await page.evaluate(() => {
+        const group = document.querySelector("[data-testid=add-workspace-created]");
+        const box = group?.closest(".overflow-y-auto");
+        return box ? { scrollHeight: box.scrollHeight, clientHeight: box.clientHeight } : null;
+      });
+      report.notes.push({ tag, scene: "dialog-short", doneBox: box, viewport: size, scroller });
+      check(tag, `낮은 창 ${vp.w}x${vp.h}: 「닫기」가 화면 안에 있고 실제로 눌린다`, inside && hit, { inside, hit, box, viewport: size, scroller });
+      await shot(page, tag, "dialog-short");
+    } catch (error) {
+      await page.screenshot({ path: resolve(OUT_DIR, `FAIL-${MODE}-${tag}.png`) }).catch(() => {});
+      check(tag, `낮은 창 ${vp.w}x${vp.h} 장면이 끝까지 간다`, false, String(error).slice(0, 300));
+    } finally {
+      await context.close();
+    }
+  }
+}
+
+/** 요청이 날아가는 동안(느린 응답) Esc가 설정 라우트를 닫지 않는다: 닫히면 POST는 갔는데 카드는 안 그려진다. */
+async function settingsPending(browser, origin) {
+  const tag = "pending-1440-light";
+  const { context, page } = await newContext(browser, origin, "light", { w: 1440, h: 900 }, { createDelayMs: 1800 });
+  try {
+    await signIn(page, origin);
+    await page.evaluate(() => { location.hash = "/settings?section=workspace"; });
+    await page.getByTestId("workspace-create-form").waitFor({ timeout: 15_000 });
+    await page.locator("#workspace-name").fill("디자인팀");
+    await page.locator("#workspace-slug").fill("design-team");
+    await page.getByTestId("workspace-create").scrollIntoViewIfNeeded();
+    await page.getByTestId("workspace-create").click();
+    await page.waitForTimeout(250);
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(350);
+    const hash = await page.evaluate(() => location.hash);
+    const stayed = hash.includes("section=workspace");
+    check(tag, "요청이 날아가는 동안 Esc는 설정을 닫지 않는다", stayed, { hash });
+    if (stayed) {
+      const arrived = await page.getByTestId("workspace-created").waitFor({ timeout: 8000 }).then(() => true, () => false);
+      check(tag, "응답이 오면 ID 카드가 그려진다(요청 중에 닫히지 않았으므로)", arrived, { arrived });
+    }
+  } catch (error) {
+    await page.screenshot({ path: resolve(OUT_DIR, `FAIL-${MODE}-${tag}.png`) }).catch(() => {});
+    check(tag, "요청 중 Esc 장면이 끝까지 간다", false, String(error).slice(0, 300));
+  } finally {
+    await context.close();
+  }
+}
+
 async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
   const preview = await startGuardedPreview({
@@ -440,7 +538,7 @@ async function main() {
   });
   const browser = await chromium.launch();
   try {
-    for (const scheme of ["light", "dark"]) {
+    for (const scheme of wants("main") ? ["light", "dark"] : []) {
       for (const vp of [{ w: 1440, h: 900 }, { w: 390, h: 844 }, { w: 900, h: 700 }]) {
         for (const def of SCENES) {
           // 접힌 아래 장면은 900×700 한 가지 크기에서만 잰다(라이트).
@@ -462,7 +560,9 @@ async function main() {
         }
       }
     }
-    if (MODE === "after") await sweep(browser, preview.origin);
+    if (MODE === "after" && wants("sweep")) await sweep(browser, preview.origin);
+    if (wants("short")) await shortViewports(browser, preview.origin);
+    if (wants("pending")) await settingsPending(browser, preview.origin);
   } finally {
     await browser.close();
     await preview.stop?.();
@@ -472,8 +572,8 @@ async function main() {
   console.log(
     bad.length === 0
       ? `P0A-4198 ${MODE} PASS (${results.length})`
-      : `P0A-4198 ${MODE} ${MODE === "before" ? "RED(예상)" : "FAIL"} (${bad.length}/${results.length}): ${bad.map((r) => `${r.tag}/${r.name}`).join(" | ")}`
+      : `P0A-4198 ${MODE} ${MODE === "after" ? "FAIL" : "RED(예상)"} (${bad.length}/${results.length}): ${bad.map((r) => `${r.tag}/${r.name}`).join(" | ")}`
   );
-  process.exit(MODE === "before" ? 0 : bad.length === 0 ? 0 : 1);
+  process.exit(MODE !== "after" ? 0 : bad.length === 0 ? 0 : 1);
 }
 main().catch((error) => { console.error(error); process.exit(1); });

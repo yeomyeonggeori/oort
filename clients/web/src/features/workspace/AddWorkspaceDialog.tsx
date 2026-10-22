@@ -244,83 +244,92 @@ function AddWorkspacePanel({
       </div>
 
       {created ? (
-        <div className="flex flex-col gap-3 p-4">
-          {/* `role="status"`가 아니라 이름 붙은 `group`이다: status는 암묵적 live region이라
-              36자 ID와 안내가 뜨는 순간 통째로 낭독된다. 도착했다는 사실은 초점이 이 묶음에
-              들어올 때 이름(헤드라인)으로 말한다(OneTimeSecretCard·웹훅 발급 카드와 같은 규칙). */}
-          <div
-            ref={createdRef}
-            tabIndex={-1}
-            role="group"
-            aria-labelledby={createdHeadlineId}
-            className="flex flex-col gap-3 rounded-md border border-ok bg-surface-raised p-4 focus-visible:focus-ring"
-            data-testid="add-workspace-created"
-          >
-            <p id={createdHeadlineId} className="break-keep text-body text-ink">
-              {created.name} 워크스페이스를 만들었어요.
-            </p>
-            {/* 로그인 화면이 받는 것은 슬러그가 아니라 이 ID다. 서버가 돌려준 값을
-                대소문자도 건드리지 않고 그대로 보여 주고 그대로 복사한다. `select-all`은
-                클립보드를 못 쓸 때의 한 번 클릭 선택이다(ApprovalActions.LinkOnce와 같은 문법).
-                단추가 옆에 서느냐 아래로 내려가느냐는 내용 폭이 아니라 칸 폭이 정한다
-                (`@container` + `@sm`): flex-wrap이면 폰 폭(390)에서 「복사」는 옆에 서다가
-                누르는 순간 「복사됨」으로 길어져 아랫줄로 떨어진다(누른 손가락 아래에서
-                단추가 달아나고 대화상자가 44px 늘어난다, 실측). */}
-            <KeyValueRows
-              rows={[
-                {
-                  key: "슬러그",
-                  value: (
-                    <span
-                      className="font-mono text-meta text-ink-muted"
-                      data-numeric=""
-                    >
-                      {created.slug}
-                    </span>
-                  ),
-                },
-                {
-                  key: "워크스페이스 ID",
-                  value: (
-                    <span className="@container block min-w-0">
-                      <span className="flex min-w-0 flex-col items-start gap-2 @sm:flex-row @sm:items-center">
-                        <span
-                          className="min-w-0 select-all break-all font-mono text-meta text-ink"
-                          data-numeric=""
-                          data-testid="add-workspace-created-id"
-                        >
-                          {created.workspaceId}
-                        </span>
-                        <CopyButton
-                          value={created.workspaceId}
-                          subject="워크스페이스 ID"
-                          testId="add-workspace-created-copy"
-                          className="tap-target"
-                        />
-                      </span>
-                    </span>
-                  ),
-                },
-              ]}
-            />
-            <p
-              className="break-keep text-meta text-ink-muted"
-              data-testid="add-workspace-created-guide"
+        <>
+          {/* 폼 분기와 같은 구조다: 내용은 스크롤 상자 안에, 나가는 길은 상자 밖 바닥에 늘 보인다.
+              이 분기는 Esc·바깥 클릭을 막으므로 「닫기」가 유일한 출구인데, 스크롤 상자가 없으면
+              패널 높이 상한(`dialog-panel`, 창 높이 - 64px) 아래로 내용이 흘러내려 낮은 창(가로
+              폰 667x375, 브라우저 200%)에서 출구가 화면 밖에 걸린다(design-review 2차 B1, 실측). */}
+          <div className="flex min-h-0 flex-col gap-3 overflow-y-auto p-4">
+            {/* `role="status"`가 아니라 이름 붙은 `group`이다: status는 암묵적 live region이라
+                36자 ID와 안내가 뜨는 순간 통째로 낭독된다. 도착했다는 사실은 초점이 이 묶음에
+                들어올 때 이름(헤드라인)으로 말한다(OneTimeSecretCard·웹훅 발급 카드와 같은 규칙). */}
+            <div
+              ref={createdRef}
+              tabIndex={-1}
+              role="group"
+              aria-labelledby={createdHeadlineId}
+              className="flex flex-col gap-3 rounded-md border border-ok bg-surface-raised p-4 focus-visible:focus-ring"
+              data-testid="add-workspace-created"
             >
-              {NEW_WORKSPACE_ENTRY_TEXT}
-            </p>
+              <p id={createdHeadlineId} className="break-keep text-body text-ink">
+                {created.name} 워크스페이스를 만들었어요.
+              </p>
+              {/* 로그인 화면이 받는 것은 슬러그가 아니라 이 ID다. 서버가 돌려준 값을
+                  대소문자도 건드리지 않고 그대로 보여 주고 그대로 복사한다. `select-all`은
+                  클립보드를 못 쓸 때의 한 번 클릭 선택이다(ApprovalActions.LinkOnce와 같은 문법).
+                  단추가 옆에 서느냐 아래로 내려가느냐는 내용 폭이 아니라 칸 폭이 정한다
+                  (`@container` + `@sm`): flex-wrap이면 폰 폭(390)에서 「복사」는 옆에 서다가
+                  누르는 순간 「복사됨」으로 길어져 아랫줄로 떨어진다(누른 손가락 아래에서
+                  단추가 달아나고 대화상자가 44px 늘어난다, 실측). */}
+              <KeyValueRows
+                rows={[
+                  {
+                    key: "슬러그",
+                    value: (
+                      <span
+                        className="font-mono text-meta text-ink-muted"
+                        data-numeric=""
+                      >
+                        {created.slug}
+                      </span>
+                    ),
+                  },
+                  {
+                    key: "워크스페이스 ID",
+                    value: (
+                      <span className="@container block min-w-0">
+                        <span className="flex min-w-0 flex-col items-start gap-2 @sm:flex-row @sm:items-center">
+                          <span
+                            className="min-w-0 select-all break-all font-mono text-meta text-ink"
+                            data-numeric=""
+                            data-testid="add-workspace-created-id"
+                          >
+                            {created.workspaceId}
+                          </span>
+                          <CopyButton
+                            value={created.workspaceId}
+                            subject="워크스페이스 ID"
+                            testId="add-workspace-created-copy"
+                            className="tap-target"
+                          />
+                        </span>
+                      </span>
+                    ),
+                  },
+                ]}
+              />
+              <p
+                className="break-keep text-meta text-ink-muted"
+                data-testid="add-workspace-created-guide"
+              >
+                {NEW_WORKSPACE_ENTRY_TEXT}
+              </p>
+            </div>
           </div>
-          <div className="flex items-center justify-end gap-2">
+          {/* 터치에서 그 순간 반드시 눌러야 하는 하나는 이제 「닫기」다(`CopyButton`의 `tap-target`
+              주석, design-review #2540 R1 M6): 폰 폭에서 44px로 자란다. */}
+          <div className="flex items-center justify-end gap-2 border-t border-line p-4">
             <Button
               type="button"
               size="sm"
+              className="tap-target"
               onClick={() => onOpenChange(false)}
               data-testid="add-workspace-done"
             >
               닫기
             </Button>
           </div>
-        </div>
+        </>
       ) : operatorDenied ? (
         <div className="flex flex-col gap-3 p-4">
           <OperatorNotice

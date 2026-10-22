@@ -279,7 +279,7 @@ there is no reason to expand it on a self-host first run (expanding it and
 leaving it empty is the same result). The label when expanded is
 `워크스페이스 ID`, and the only value it accepts is **one UUID**. That
 field is for after a server has several workspaces; the UUID to put in then
-is on **설정 › 계정** after you sign in.
+is on **설정 › 워크스페이스** after you sign in.
 
 Press `로그인` and a screen with the channel list (`agent-lab` · `general`
 — the list shows the name without `#`) appears. Pick any channel, send a
@@ -507,7 +507,7 @@ passwords and tokens in shell variables, not on the screen.
 
 ```sh
 OORT=http://localhost:<port>
-WS='<설정 › 계정에 있는 워크스페이스 UUID>'
+WS='<설정 › 워크스페이스에 있는 워크스페이스 UUID>'
 AGENT='<에이전트 멤버 UUID>'
 CHANNEL='<글을 올릴 채널 UUID>'
 

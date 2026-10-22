@@ -37,5 +37,8 @@ export const NEW_WORKSPACE_ENTRY_GUIDE = `들어가려면 로그아웃한 뒤 �
 export const NEW_WORKSPACE_ID_ONCE_NOTICE =
   "이 화면을 벗어나면 ID를 다시 볼 수 없으니 지금 복사해 두세요.";
 
-/** 두 완료 표면이 한 문단으로 말하는 전체: 어떻게 들어가는지, 그리고 지금 복사해야 하는 이유. */
-export const NEW_WORKSPACE_ENTRY_TEXT = `${NEW_WORKSPACE_ENTRY_GUIDE} ${NEW_WORKSPACE_ID_ONCE_NOTICE}`;
+/**
+ * 두 완료 표면이 한 문단으로 말하는 전체. 급한 것이 먼저다: 지금 복사해야 하는 이유, 그다음
+ * 어떻게 들어가는지(한 번만 보이는 값의 집 모양은 경고가 값보다 앞에 선다).
+ */
+export const NEW_WORKSPACE_ENTRY_TEXT = `${NEW_WORKSPACE_ID_ONCE_NOTICE} ${NEW_WORKSPACE_ENTRY_GUIDE}`;

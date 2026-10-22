@@ -252,6 +252,61 @@ describe("워크스페이스 추가 완료 패널 (#4198)", () => {
     expect(document.getElementById(labelledBy)?.textContent).toBe("디자인팀 워크스페이스를 만들었어요.");
   });
 
+  it("나가는 길 「닫기」는 스크롤 상자 밖 바닥에 있다(낮은 창에서 내용만 스크롤된다)", async () => {
+    await createThroughTheDialog();
+    // Esc·바깥 클릭을 막은 분기의 유일한 출구다. 스크롤 상자 안에 있거나 상자가 없으면 패널 높이
+    // 상한 아래로 흘러내려 낮은 창(가로 폰 667x375, 브라우저 200%)에서 화면 밖에 걸린다
+    // (design-review 2차 B1, 실측). jsdom은 레이아웃을 재지 못하므로 구조로 못 박고, 높이 축의
+    // 실측은 capture-4198.mjs의 낮은 창 장면이 진다.
+    const group = q("add-workspace-created");
+    const done = q("add-workspace-done");
+    const scroller = group?.closest(".overflow-y-auto") ?? null;
+    expect(scroller).not.toBeNull();
+    expect(scroller?.contains(done ?? null)).toBe(false);
+    // 폼 분기와 같은 모양: 출구는 위에 선 한 줄 선(border-t) 바닥 줄에 있다.
+    expect(done?.parentElement?.className).toContain("border-t");
+  });
+
+  it("만드는 중에도 Esc와 바깥 클릭으로는 닫히지 않는다", async () => {
+    let resolveCreate: (value: unknown) => void = () => undefined;
+    createWorkspaceMock.mockReturnValue(
+      new Promise((resolve) => {
+        resolveCreate = resolve;
+      })
+    );
+    mount();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    act(() => setInputValue(q("add-workspace-name") as HTMLInputElement, "디자인팀"));
+    act(() => setInputValue(q("add-workspace-slug") as HTMLInputElement, "design-team"));
+    await act(async () => {
+      q("add-workspace-submit")?.click();
+    });
+    expect(q("add-workspace-submit")?.getAttribute("aria-busy")).toBe("true");
+
+    act(() => {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })
+      );
+    });
+    clickScrim();
+    expect(onOpenChange).not.toHaveBeenCalled();
+
+    // 응답이 오면 완료 묶음이 선다(요청이 날아가는 동안 닫히지 않았으므로 ID를 받는다).
+    await act(async () => {
+      resolveCreate({
+        schema: "momo.workspace.created.v1",
+        workspaceId: NEW_WS_ID,
+        slug: "design-team",
+        name: "디자인팀",
+      });
+    });
+    await vi.waitFor(() => {
+      expect(q("add-workspace-created")?.textContent).toContain(NEW_WS_ID);
+    });
+  });
+
   it("완료 패널이 떠 있는 동안 Esc와 바깥 클릭으로는 닫히지 않고 「닫기」만 닫는다", async () => {
     mount();
     // 라이브러리가 바깥 누름 리스너를 다음 틱에 단다.
