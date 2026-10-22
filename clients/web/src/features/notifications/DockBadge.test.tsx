@@ -8,6 +8,7 @@ import {
   reloadDesktopNotificationKindsForTest,
   setDesktopNotificationKind,
 } from "./preference";
+import { setServerPause } from "./serverPause";
 
 const hoisted = vi.hoisted(() => ({
   needsMe: 4,
@@ -51,6 +52,7 @@ afterEach(() => {
   host?.remove();
   root = null;
   reloadDesktopNotificationKindsForTest(null);
+  setServerPause(false);
 });
 
 function mount() {
@@ -81,5 +83,14 @@ describe("DockBadge (#3339)", () => {
     expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(9);
     act(() => setDesktopNotificationKind("dockBadge", false, localStorage));
     expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(0);
+  });
+
+  it("알림 일시 중지는 독 배지를 건드리지 않는다 — 배지는 별개 원장이다 (#4197, ADR-0124 D2)", () => {
+    setServerPause(true);
+    mount();
+    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(4);
+    act(() => setServerPause(false));
+    act(() => root?.render(createElement(DockBadge)));
+    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(4);
   });
 });

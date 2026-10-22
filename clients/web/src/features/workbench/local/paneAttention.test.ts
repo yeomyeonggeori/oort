@@ -9,10 +9,20 @@ import { createPaneAttention, focusStoredPane, type PaneObservation } from "./pa
 // #2776: 「응답 필요」·「끝남」이 인박스 줄과 OS 알림으로 합류한다. 알림은 상태가
 // 새로 될 때 한 번이고, 사람이 보고 있는 칸은 알리지 않는다.
 
-function setup(focused = false, kindEnabled?: (kind: DesktopNotifyKind) => boolean) {
+function setup(
+  focused = false,
+  kindEnabled?: (kind: DesktopNotifyKind) => boolean,
+  paused?: () => boolean
+) {
   const notify = vi.fn();
   let t = 1_000;
-  const store = createPaneAttention({ notify, windowFocused: () => focused, now: () => t++, ...(kindEnabled ? { kindEnabled } : {}) });
+  const store = createPaneAttention({
+    notify,
+    windowFocused: () => focused,
+    now: () => t++,
+    ...(kindEnabled ? { kindEnabled } : {}),
+    ...(paused ? { paused } : {}),
+  });
   const pane = (paneId: string, status: SessionStatus, index = 1): PaneObservation => ({
     paneId,
     index,
@@ -70,6 +80,27 @@ describe("paneAttention", () => {
     expect(notify).toHaveBeenCalledTimes(1);
     expect(notify.mock.calls[0]?.[0]).toMatchObject({ kind: "waiting" });
     expect(store.entries().map((e) => e.status).sort()).toEqual(["done", "waiting"]);
+  });
+
+  it("알림 일시 중지 중에는 OS 알림만 건너뛰고 인박스 줄은 그대로 오른다 (#4197)", () => {
+    let paused = true;
+    const { store, notify, pane } = setup(false, undefined, () => paused);
+    store.observe([pane("p1", "running"), pane("p2", "running")], null);
+    store.observe([pane("p1", "waiting"), pane("p2", "done")], null);
+    // 배너는 0건이다. 인박스 줄(배지가 세는 원장)은 별개라 두 칸 다 선다 — 일시 중지는 알림을 멈출 뿐 일을 숨기지 않는다.
+    expect(notify).not.toHaveBeenCalled();
+    expect(store.entries().map((e) => [e.paneId, e.status]).sort()).toEqual([
+      ["p1", "waiting"],
+      ["p2", "done"],
+    ]);
+    // 풀리면 그다음 새 전이부터 다시 알린다. 일시 중지 중에 지나간 전이는 풀린 뒤에 되살리지 않는다.
+    paused = false;
+    store.observe([pane("p1", "waiting"), pane("p2", "done")], null);
+    expect(notify).not.toHaveBeenCalled();
+    store.observe([pane("p1", "running"), pane("p2", "done")], null);
+    store.observe([pane("p1", "done"), pane("p2", "done")], null);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls[0]?.[0]).toMatchObject({ kind: "done" });
   });
 
   it("창이 뒤에 있으면 활성 칸도 알린다", () => {
