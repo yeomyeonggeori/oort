@@ -248,6 +248,16 @@ describe("부트 캐시 정리", () => {
     expect(localStorage.getItem(THEME_CACHE_STORAGE_KEY)).toBeNull();
   });
 
+  it("캐시 변수 이름이 글꼴 변수와 겹쳐도 사람이 고른 글꼴이 이긴다 (걷는 일이 먼저, 글꼴이 나중)", () => {
+    localStorage.setItem(APPEARANCE_STORAGE_KEY, record({ fontSans: "Pretendard" }));
+    reloadAppearanceForTest();
+    localStorage.setItem(THEME_CACHE_STORAGE_KEY, cacheRaw("dawnsky", { "--font-user-sans": hex("112233") }));
+    root().style.setProperty("--font-user-sans", hex("112233"));
+    initTheme();
+    expect(root().style.getPropertyValue("--font-user-sans")).toBe('"Pretendard", var(--font-sans)');
+    expect(localStorage.getItem(THEME_CACHE_STORAGE_KEY)).toBeNull();
+  });
+
   it("파생 팔레트에서는 캐시와 인라인 변수를 건드리지 않는다 (엔진의 몫)", () => {
     localStorage.setItem(APPEARANCE_STORAGE_KEY, record({ theme: "catalog:nord" }));
     reloadAppearanceForTest();

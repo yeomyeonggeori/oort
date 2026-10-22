@@ -228,10 +228,12 @@ export function applyAppearance(state: AppearanceState, options: ApplyAppearance
     else root.setAttribute(name, value);
   }
   applyTheme(stamp[THEME_ATTRIBUTE] ?? "system", target);
-  applyUserFonts(state, target);
+  // 걷는 일이 먼저, 글꼴이 나중이다: 캐시 이름이 글꼴 변수와 겹치는 일은 없어야 하지만, 겹치더라도
+  // 사람이 고른 글꼴이 이긴다.
   if (paletteOf(state.theme) !== DERIVED_PALETTE) {
     retireThemeCache(root, options.storage);
   }
+  applyUserFonts(state, target);
 }
 
 // ---- 저장된 선택 -------------------------------------------------------------
