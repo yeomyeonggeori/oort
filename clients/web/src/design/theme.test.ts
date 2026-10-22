@@ -785,7 +785,7 @@ describe("신호 프리셋: 두 CSS 바인딩이 같은 값이라 data-signal과
     return css.slice(css.indexOf("{", at), css.indexOf("}", at));
   };
 
-  it.each(SIGNAL_PRESET_IDS)("%s: themes/%s.css(data-accent)와 palettes/dawnsky.css(data-signal)의 신호 네 값이 같다", (id) => {
+  it.each(SIGNAL_PRESET_IDS)("%s: themes/<id>.css(data-accent)와 palettes/dawnsky.css(data-signal)의 신호 네 값이 같다", (id) => {
     const accent = declarations(blockOf(read(`./themes/${id}.css`), `:root[data-palette="dawnsky"][data-accent="${id}"]`));
     const signal = declarations(blockOf(read("./themes/palettes/dawnsky.css"), `:root[data-palette="dawnsky"][data-signal="${id}"]`));
     for (const role of ROLES) expect(accent[role], `${id} ${role}`).toBeTruthy();
