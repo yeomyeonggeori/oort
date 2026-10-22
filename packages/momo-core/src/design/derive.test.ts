@@ -137,6 +137,8 @@ function bandViolations(tokens: ThemeModeTokens): string[] {
  *  V3 나란히 서는 톤 그릇과 중립 그릇은 다른 재료다(OKLab ≥ 0.02): 그릇이 중립 그릇으로 접히면 「같은 모양 알약 둘」이 된다.
  *  V4 그릇은 상호작용 상태(가리킴·눌림·선택)와 값을 나누지 않는다. 상태는 켜졌다 꺼지고 그릇은 늘 있어야 한다.
  *  V5 눌린 행은 다른 모든 옅은 채움과 다른 재료다(OKLab ≥ 0.02).
+ *  V6 선택 행 채움은 가리킨 행과도 다른 재료다(OKLab ≥ 0.02): 키보드 강조와 가리킴은 다른 단계다(`ComposerAutocompleteList.tsx`, 설계 리뷰
+ *     M-1·4차 M-2). 마우스가 다른 줄에 있으면 「고른 줄」이 둘로 보이는 자리다.
  * `agent-soft`는 첫 파티 표에 없지만 에이전트 칩도 같은 행 위에 서므로 같은 표에 넣는다.
  */
 const VESSEL_HOSTS: readonly (readonly [string, readonly string[]])[] = [
@@ -199,6 +201,8 @@ function vesselViolations(tokens: ThemeModeTokens): string[] {
     const distance = Number(oklabDistance(S["surface-pressed"], S[other]).toFixed(4));
     if (distance < VESSEL_MIN_DISTANCE) out.push(`V5 surface-pressed vs ${other} distance ${distance} < ${VESSEL_MIN_DISTANCE}`);
   }
+  const hoverGap = Number(oklabDistance(S["accent-soft"], S["surface-hover"]).toFixed(4));
+  if (hoverGap < VESSEL_MIN_DISTANCE) out.push(`V6 accent-soft vs surface-hover distance ${hoverGap} < ${VESSEL_MIN_DISTANCE}`);
   return out;
 }
 

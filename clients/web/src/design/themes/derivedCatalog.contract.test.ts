@@ -159,6 +159,9 @@ function vesselMisses(row: Row): string[] {
     const distance = Number(deltaE(S["surface-pressed"], S[other]).toFixed(4));
     if (distance < 0.02) out.push(`surface-pressed vs ${other} distance ${distance} < 0.02`);
   }
+  // 선택 행(`accent-soft`)은 가리킨 행과도 다른 재료다: 키보드 강조와 가리킴은 다른 단계다(`ComposerAutocompleteList.tsx`, design-review M-1).
+  const hoverGap = Number(deltaE(S["accent-soft"], S["surface-hover"]).toFixed(4));
+  if (hoverGap < CHIP_VESSEL_MIN_DISTANCE) out.push(`accent-soft vs surface-hover distance ${hoverGap} < ${CHIP_VESSEL_MIN_DISTANCE}`);
   return out;
 }
 
