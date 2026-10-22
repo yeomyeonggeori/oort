@@ -716,6 +716,18 @@ macOS appearance Dark. Numbers are from `performance.now()` in the page (1 ms re
   error, one outside the prefix must come back from Rust as `Command not found`. The item's
   modification time (`security find-generic-password -s app.momo.desktop -a refresh-token`, metadata only)
   was read again after the capture runs and predates the whole session, so nothing wrote to it.
+- **Backdrop range of the materials (macOS 27, 11 solid stand-in desktops).** `Sidebar` and
+  `UnderWindowBackground` gave the same colours: light 198 to 222 (pure black and pure white behind),
+  dark 34 to 78. `HudWindow` passes far more of the desktop: light 113 to 233, dark 22 to 162 (a pure
+  yellow desktop reads (162,162,21)). The glass floor arithmetic assumes pure black and pure white
+  behind the tint, so it does not depend on the material; the product uses `Sidebar` like Buzz.
+- **System "Reduce transparency" is invisible to the page.** WKWebView (macOS 27) does not
+  implement `prefers-reduced-transparency` (a `no-preference` query is false), so only
+  `prefers-contrast: more` reaches the web layer. With the OS toggle on, AppKit flattens the
+  material and the tint (never below the floor) keeps text legible, but the row still reads "on" and
+  does not say why the blur went flat. Closing this needs a native read of
+  `NSWorkspace.accessibilityDisplayShouldReduceTransparency`, i.e. a third command (ACL, ADR), so it
+  is left as a follow-up.
 - **Not covered.** Release build (LTO, `opt-level = s`), macOS 14 to 26, Windows/Linux (the
   commands are no-ops there), the Mac App Store (this build carries the private `drawsBackground`
   key and cannot go there).
