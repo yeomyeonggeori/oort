@@ -84,19 +84,24 @@
 
   /* **호스트가 무엇인가가 규칙을 가른다.**
    *
-   * 띠가 없는 테마에서는 사이드바·펼친 상단 줄·설정 목록 열이 scrim 위에 서므로 보정색이 맞다.
-   * 띠가 있는 테마(노을띠)에서는 그 열들이 **불투명한 띠** 위에 선다(띠는 scrim 위에 칠한다). 보정색은 scrim
-   * 최악 합성에 맞춘 값이라 라이트에서는 늘 어두운 쪽으로 옮겨 있어서, 남색 띠 위에서는 곧바로 대비를 깎는다
-   * (design-review H-1: 설정 목록 열의 섹션 라벨 2.34 → 1.29, 아이콘 3.85 → 1.88, 접속 점과 신호색이 거의 검은색,
-   * 포커스 링 3:1 미달). 그래서 띠가 있으면(루트의 `data-wallpaper-band`, 런타임이 찍는다) 이 세 자리는 건드리지
-   * 않는다: AP-1a의 on-band 묶음(`tokens.css` 「띠 위의 글자」)이 띠 위 규칙대로 읽는다.
+   * 띠가 없는 테마에서는 사이드바·상단 줄·설정 목록 열이 scrim 위에 서므로 보정색이 맞다. 띠가 있는 테마(노을띠)에서는 그 열들이
+   * **불투명한 띠** 위에 선다(띠는 scrim 위에 칠한다). 보정색은 scrim 최악 합성에 맞춘 값이라 라이트에서는 늘 어두운 쪽으로
+   * 옮겨 있어서, 남색 띠 위에서는 곧바로 대비를 깎는다(design-review H-1: 설정 목록 열의 섹션 라벨 2.34 → 1.29, 아이콘
+   * 3.85 → 1.88, 접속 점과 신호색이 거의 검은색, 포커스 링 3:1 미달). 그래서 띠가 있으면(루트의 `data-wallpaper-band`, 런타임이
+   * 찍는다) 띠 위의 자리는 건드리지 않는다: AP-1a의 on-band 묶음(`tokens.css` 「띠 위의 글자」)이 띠 위 규칙대로 읽는다.
    *
-   * 띠가 있어도 scrim 위에 서는 자리는 늘 보정한다: 접힌 사이드바의 상단 줄(토글이 레일 오른쪽, 띠 밖에 있다)과
-   * 「내 작업」 격자의 바닥(본문이 투명이라 사진이 뒤에 깔린다). */
+   * 띠 위의 자리 (띠가 있으면 보정하지 않는다):
+   *   · 사이드바, 펼친 상단 줄, 설정 목록 열: 띠가 열 폭을 덮는다.
+   *   · **웹의 접힌 상단 줄**: 토글이 줄 안쪽 여백 8px에 서서 레일(56px, 띠가 덮는다) 안에 있다.
+   * scrim 위의 자리 (늘 보정한다):
+   *   · **데스크탑의 접힌 상단 줄**: 신호등 자리를 비우려고 토글이 80px 뒤에 서서(`data-tauri-drag-region`이 인셋을 연다,
+   *     `tokens.css` `app-titlebar`) 레일 오른쪽, 띠 밖이다(design-review H-2: 이 자리를 웹과 같다고 보고 늘 보정하면 웹의
+   *     토글이 띠 위에서 깎인다).
+   *   · 「내 작업」 격자의 바닥: 본문이 투명이라 사진이 뒤에 깔리고 띠는 사이드바 열까지만 칠한다. */
   :root[data-wallpaper-live]:not([data-wallpaper-band]) .app-shell > .sidebar-drawer,
-  :root[data-wallpaper-live]:not([data-wallpaper-band]) .app-shell:not([data-sidebar-collapsed]) > .app-titlebar,
+  :root[data-wallpaper-live]:not([data-wallpaper-band]) .app-shell > .app-titlebar,
   :root[data-wallpaper-live]:not([data-wallpaper-band]) .app-shell .settings-nav,
-  :root[data-wallpaper-live] .app-shell[data-sidebar-collapsed] > .app-titlebar,
+  :root[data-wallpaper-live] .app-shell[data-sidebar-collapsed] > .app-titlebar[data-tauri-drag-region],
   :root[data-wallpaper-live] .app-shell[data-work-rail] > main {
     --ink-muted: var(--wallpaper-ink-muted);
     --icon: var(--wallpaper-icon);

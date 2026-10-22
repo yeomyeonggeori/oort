@@ -158,29 +158,46 @@ describe("3. JS가 싣는 변수와 CSS가 읽는 변수가 한 칸씩 같다", 
   });
 });
 
-describe("4. 바닥 위 글자의 보정은 scrim이 호스트일 때만 선다 (design-review H-1)", () => {
+describe("4. 바닥 위 글자의 보정은 scrim이 호스트일 때만 선다 (design-review H-1·H-2)", () => {
   const BAND_FREE = ":root[data-wallpaper-live]:not([data-wallpaper-band])";
-  const SCRIM_ALWAYS = [
-    ":root[data-wallpaper-live] .app-shell[data-sidebar-collapsed] > .app-titlebar",
-    ":root[data-wallpaper-live] .app-shell[data-work-rail] > main",
-  ];
+  /** 띠가 호스트일 수 있는 자리: 띠가 없을 때만 보정한다. 웹의 접힌 상단 줄(토글이 안쪽 여백 8px, 레일 안)도 여기다. */
   const BAND_HOSTED = [
     `${BAND_FREE} .app-shell > .sidebar-drawer`,
-    `${BAND_FREE} .app-shell:not([data-sidebar-collapsed]) > .app-titlebar`,
+    `${BAND_FREE} .app-shell > .app-titlebar`,
     `${BAND_FREE} .app-shell .settings-nav`,
+  ];
+  /** 띠가 있어도 scrim이 호스트인 자리: 데스크탑의 접힌 상단 줄(토글이 신호등 인셋 80px 뒤, 레일 밖)과 내 작업 격자 바닥. */
+  const SCRIM_ALWAYS = [
+    ":root[data-wallpaper-live] .app-shell[data-sidebar-collapsed] > .app-titlebar[data-tauri-drag-region]",
+    ":root[data-wallpaper-live] .app-shell[data-work-rail] > main",
   ];
   const fit = FLOOR.find((rule) => rule.selectors.includes(BAND_HOSTED[0]));
 
-  it("띠 위에 서는 세 자리(사이드바·펼친 상단 줄·설정 목록 열)는 띠가 없을 때만 보정한다: 띠가 호스트면 보정색이 대비를 깎는다", () => {
+  it("띠 위에 설 수 있는 자리(사이드바·상단 줄·설정 목록 열)는 띠가 없을 때만 보정한다: 띠가 호스트면 보정색이 대비를 깎는다", () => {
     expect(fit?.selectors.filter((selector) => selector.includes("data-wallpaper-band"))).toEqual(BAND_HOSTED);
   });
 
-  it("띠가 있어도 scrim 위에 서는 자리(접힌 상단 줄·내 작업 격자 바닥)는 늘 보정한다", () => {
+  it("띠가 있어도 scrim 위에 서는 자리(데스크탑의 접힌 상단 줄·내 작업 격자 바닥)는 늘 보정한다", () => {
     for (const selector of SCRIM_ALWAYS) {
       expect(fit?.selectors, selector).toContain(selector);
       expect(selector).not.toContain("data-wallpaper-band");
     }
     expect(fit?.selectors.length).toBe(BAND_HOSTED.length + SCRIM_ALWAYS.length);
+  });
+
+  it("웹의 접힌 상단 줄은 띠 쪽이다: 데스크탑 표지(data-tauri-drag-region) 없이 늘 보정하는 선택자가 없다 (토글은 웹에서 레일 안에 선다)", () => {
+    for (const selector of fit?.selectors ?? []) {
+      if (!selector.includes("app-titlebar") || selector.includes("data-wallpaper-band")) continue;
+      expect(selector, "띠 조건이 없는 상단 줄 선택자는 데스크탑 표지를 요구한다").toContain("[data-tauri-drag-region]");
+    }
+  });
+
+  it("데스크탑 표지가 토글을 레일 밖으로 미는 사실에 이 규칙이 기대고 있다 (tokens.css가 그 인셋을 데스크탑에서만 연다)", () => {
+    expect(TOKENS).toMatch(/&\[data-tauri-drag-region\]\s*\{\s*padding-inline-start:\s*var\(--titlebar-inset\)/);
+    // 인셋은 레일 폭(56px)보다 크다: 그래야 토글이 띠(레일 폭만큼 칠한다) 밖에 선다.
+    const inset = Number(/--titlebar-inset:\s*(\d+)px/.exec(TOKENS)?.[1]);
+    const rail = Number(/--spacing-rail:\s*(\d+)px/.exec(TOKENS)?.[1]);
+    expect(inset).toBeGreaterThan(rail);
   });
 
   it("보정은 바닥에 맞춘 색 그대로다: 띠 역할(on-band)을 섞지 않는다 (띠 위는 이 규칙의 대상이 아니다)", () => {
