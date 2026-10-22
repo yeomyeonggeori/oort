@@ -30,6 +30,8 @@
 //! | `a_credential_with_no_lineage_leaves_the_lineage_on_the_row_where_it_is` | an edit by a credential minted before migration 088 cannot erase who armed the text | the three edits write `NULL` instead of keeping the lineage |
 //! | `a_schedule_whose_attachments_vanished_is_not_sent_empty` | no empty message goes out | the guard in `deliver_schedule_in_tx` removed |
 //! | `a_scheduler_that_could_not_ask_its_role_at_boot_asks_again_and_then_ticks` | a database that was not answering at boot does not leave the scheduler off for good | `start()` stops asking after the first failure |
+//! | `a_request_that_waits_over_three_seconds_for_its_session_row_is_busy` | no write route hangs on a sweep: all four answer `scheduled_busy` after the 3-second budget (`create` included) | `bound_lock_wait` removed from a route |
+//! | `a_credential_that_is_not_a_session_row_is_refused_not_let_through` | a credential the sweep can neither lock nor hold cannot write a schedule | `NotASession` treated as no session |
 //!
 //! `#[ignore]` — needs a real PG18 superuser DB plus the runtime roles:
 //!
@@ -5058,4 +5060,213 @@ async fn a_scheduler_that_could_not_ask_its_role_at_boot_asks_again_and_then_tic
         .await
         .expect("the tick stops when it is told to")
         .expect("the tick task ends cleanly");
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_request_that_waits_over_three_seconds_for_its_session_row_is_busy() {
+    use std::time::{Duration, Instant};
+
+    let _lock = test_lock().await;
+    let rig = Rig::new().await;
+    let fx = fixture(&rig.su, "sm-busy").await;
+    let session = rig.login(fx.workspace, &fx.a).await;
+    let mut ids = Vec::new();
+    for text in ["to edit", "to cancel", "to send now"] {
+        let (status, created) = rig
+            .create(
+                &session.access,
+                fx.workspace,
+                fx.channel,
+                create_body(text, 3600),
+            )
+            .await;
+        assert_eq!(status, 201, "{created}");
+        ids.push(scheduled_id(&created));
+    }
+    let (to_edit, to_cancel, to_send) = (ids[0], ids[1], ids[2]);
+    let fourth = create_body("a fourth", 3600);
+    let fourth_request_id = fourth["clientRequestId"].as_str().unwrap().to_string();
+
+    // something — a sweep — holds the session's token row for update and lets go after six seconds
+    let mut holder = rig.su.begin().await.unwrap();
+    sqlx::query("SELECT 1 FROM token WHERE token_hash = digest($1::text, 'sha256') FOR UPDATE")
+        .bind(&session.access)
+        .fetch_one(&mut *holder)
+        .await
+        .expect("hold the session row");
+    let release = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(6)).await;
+        holder.rollback().await.expect("let go of the session row");
+    });
+    let started = Instant::now();
+    let create = in_flight(
+        &rig,
+        reqwest::Method::POST,
+        rig.workspace_url(
+            fx.workspace,
+            &format!("/channels/{}/scheduled-messages", fx.channel),
+        ),
+        &session.access,
+        Some(fourth),
+    );
+    let edit = in_flight(
+        &rig,
+        reqwest::Method::PATCH,
+        rig.workspace_url(fx.workspace, &format!("/scheduled-messages/{to_edit}")),
+        &session.access,
+        Some(json!({"body": "edited"})),
+    );
+    let cancel = in_flight(
+        &rig,
+        reqwest::Method::DELETE,
+        rig.workspace_url(fx.workspace, &format!("/scheduled-messages/{to_cancel}")),
+        &session.access,
+        None,
+    );
+    let send_now = in_flight(
+        &rig,
+        reqwest::Method::POST,
+        rig.workspace_url(
+            fx.workspace,
+            &format!("/scheduled-messages/{to_send}/send-now"),
+        ),
+        &session.access,
+        None,
+    );
+    let mut answers = Vec::new();
+    for (task, what) in [
+        (create, "create"),
+        (edit, "edit"),
+        (cancel, "cancel"),
+        (send_now, "send now"),
+    ] {
+        let (status, value) = task.await.unwrap();
+        answers.push((
+            what,
+            status,
+            error_code(&value).map(str::to_owned),
+            started.elapsed(),
+        ));
+    }
+    release.await.unwrap();
+    for (what, status, code, waited) in &answers {
+        assert_eq!(
+            (*status, code.as_deref()),
+            (409, Some("scheduled_busy")),
+            "{what} must answer busy, not hang: {answers:?}"
+        );
+        assert!(
+            *waited >= Duration::from_millis(2500) && *waited < Duration::from_secs(5),
+            "{what} waited the 3-second budget and no more ({waited:?})"
+        );
+    }
+    // a busy answer changed nothing
+    for id in [to_edit, to_cancel, to_send] {
+        assert_eq!(row(&rig.su, id).await.status, "pending", "{id}");
+    }
+    assert_eq!(row(&rig.su, to_edit).await.body.as_deref(), Some("to edit"));
+    assert_eq!(messages_of(&rig.su, to_send).await, 0);
+    let created_anyway: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM scheduled_message WHERE client_request_id = $1::uuid",
+    )
+    .bind(&fourth_request_id)
+    .fetch_one(&rig.su)
+    .await
+    .unwrap();
+    assert_eq!(created_anyway, 0);
+    // and once the row is free again the same requests go through
+    let (status, created) = rig
+        .create(
+            &session.access,
+            fx.workspace,
+            fx.channel,
+            create_body("now it works", 3600),
+        )
+        .await;
+    assert_eq!(status, 201, "{created}");
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_credential_that_is_not_a_session_row_is_refused_not_let_through() {
+    let _lock = test_lock().await;
+    let rig = Rig::new().await;
+    let fx = fixture(&rig.su, "sm-notsession").await;
+    let session = rig.login(fx.workspace, &fx.a).await;
+    let (status, created) = rig
+        .create(
+            &session.access,
+            fx.workspace,
+            fx.channel,
+            create_body("armed while it was a session", 3600),
+        )
+        .await;
+    assert_eq!(status, 201, "{created}");
+    let id = scheduled_id(&created);
+
+    // The same credential, now a token row of another kind — what a future credential kind would
+    // be. The auth middleware looks the token up by its hash and does not read the kind, so the
+    // request reaches the route; the sweep that ends sessions only knows `session` rows, so it could
+    // neither lock this credential nor hold what it writes.
+    sqlx::query("UPDATE token SET kind = 'invite' WHERE token_hash = digest($1::text, 'sha256')")
+        .bind(&session.access)
+        .execute(&rig.su)
+        .await
+        .unwrap();
+    let (status, listed) = rig.list(&session.access, fx.workspace, "").await;
+    assert_eq!(
+        status, 200,
+        "the credential still authenticates, so the refusals below are the route's own: {listed}"
+    );
+    let new_request = create_body("armed by a credential that is no session", 3600);
+    let new_request_id = new_request["clientRequestId"].as_str().unwrap().to_string();
+    let answers = [
+        (
+            "create",
+            rig.create(&session.access, fx.workspace, fx.channel, new_request)
+                .await
+                .0,
+        ),
+        (
+            "edit",
+            rig.patch(
+                &session.access,
+                fx.workspace,
+                &id.to_string(),
+                json!({"body": "rewritten"}),
+            )
+            .await
+            .0,
+        ),
+        (
+            "cancel",
+            rig.delete(&session.access, fx.workspace, &id.to_string())
+                .await
+                .0,
+        ),
+        (
+            "send now",
+            rig.send_now(&session.access, fx.workspace, &id.to_string())
+                .await
+                .0,
+        ),
+    ];
+    for (what, status) in answers {
+        assert_eq!(status, 401, "{what}");
+    }
+    let untouched = row(&rig.su, id).await;
+    assert_eq!(
+        (untouched.status.as_str(), untouched.body.as_deref()),
+        ("pending", Some("armed while it was a session"))
+    );
+    assert_eq!(messages_of(&rig.su, id).await, 0);
+    let armed: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM scheduled_message WHERE client_request_id = $1::uuid",
+    )
+    .bind(&new_request_id)
+    .fetch_one(&rig.su)
+    .await
+    .unwrap();
+    assert_eq!(armed, 0, "nothing was armed");
 }

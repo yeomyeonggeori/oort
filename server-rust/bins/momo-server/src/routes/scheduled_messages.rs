@@ -62,6 +62,7 @@ const HUMAN_ONLY: &str = "scheduled messages require a human bearer";
 const NOT_FOUND: &str = "scheduled message not found";
 const NOT_CHANNEL_MEMBER: &str = "not a member of this channel";
 const BAD_ID: &str = "invalid scheduled message id";
+const SESSION_REQUIRED: &str = "a signed-in session is required";
 
 // ---------------------------------------------------------------------------
 // the request/response shapes (openapi `ScheduledMessage*`)
@@ -266,20 +267,33 @@ async fn bound_lock_wait(conn: &mut PgConnection) -> Result<(), DbError> {
 
 /// `55P03` (the 3-second lock budget ran out) and `40P01` (the deadlock detector chose this
 /// transaction): both mean "a lock race, nothing was written, ask again" — `scheduled_busy`.
-fn is_lock_contention(error: &DbError) -> bool {
-    matches!(
-        error,
-        DbError::Sqlx(momo_db::sqlx::Error::Database(db))
-            if matches!(db.code().as_deref(), Some("55P03" | "40P01"))
-    )
+/// Returns the SQLSTATE so the answer can leave a log line: a deadlock used to be a 500 with an
+/// error log, and it is the signal that the lock order of D14 has regressed.
+fn lock_contention(error: &DbError) -> Option<String> {
+    match error {
+        DbError::Sqlx(momo_db::sqlx::Error::Database(db)) => db
+            .code()
+            .filter(|code| matches!(code.as_ref(), "55P03" | "40P01"))
+            .map(|code| code.into_owned()),
+        _ => None,
+    }
 }
 
 fn settle<T>(context: &str, outcome: Result<T, Refuse>) -> Result<T, ApiError> {
     match outcome {
         Ok(value) => Ok(value),
         Err(Refuse::Api(error)) => Err(error),
-        Err(Refuse::Db(error)) if is_lock_contention(&error) => Err(scheduled_busy()),
-        Err(Refuse::Db(error)) => Err(ApiError::internal(context, error)),
+        Err(Refuse::Db(error)) => match lock_contention(&error) {
+            Some(sqlstate) => {
+                tracing::warn!(
+                    context,
+                    %sqlstate,
+                    "a scheduled message request lost a lock race; answering scheduled_busy"
+                );
+                Err(scheduled_busy())
+            }
+            None => Err(ApiError::internal(context, error)),
+        },
     }
 }
 
@@ -294,7 +308,7 @@ fn conflict(code: &'static str, message: &'static str) -> ApiError {
 fn scheduled_busy() -> ApiError {
     conflict(
         "scheduled_busy",
-        "the scheduled message is being sent right now; try again in a moment",
+        "the scheduled message is busy (being sent or changed right now); try again in a moment",
     )
 }
 
@@ -402,28 +416,39 @@ async fn require_live_human(
 ///   the order the sweep uses as well, so there is no cycle for the detector to break (and a detector
 ///   that picks the sweep would fail somebody's password change).
 ///
-/// The lineage is `None` for a credential with no session row or no lineage (minted before migration
-/// 088); a request like that leaves the lineage that is already on a row where it is.
+/// What is not a person's session row is refused, not let through unlocked: a request with no
+/// token id, or one whose token row is not a `session` row of this member, can neither be locked
+/// against the sweep nor held by it, so it would reopen the race above (the push routes close the
+/// same two cases the same way). The auth middleware always resolves a token row for a person, so
+/// this is a guard against a future credential kind, not something a client reaches today.
+///
+/// The lineage is `None` only for a session row minted before migration 088; such a request leaves
+/// the lineage that is already on a row where it is.
 async fn lock_requester_session(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     member_id: Uuid,
     token_id: Option<Uuid>,
 ) -> Result<Option<Uuid>, Refuse> {
-    let Some(token_id) = token_id else {
-        return Ok(None);
-    };
+    let token_id = require_token_id(token_id)?;
     match lock_session_for_registration(conn, workspace_id, member_id, token_id)
         .await
         .map_err(DbError::from)?
     {
         RegistrationSession::Live(lineage) => Ok(lineage),
-        RegistrationSession::NotASession => Ok(None),
+        RegistrationSession::NotASession => {
+            Err(Refuse::Api(ApiError::unauthorized(SESSION_REQUIRED)))
+        }
         // The session ended after the middleware accepted it: the middleware's own answer.
         RegistrationSession::Ended => Err(Refuse::Api(ApiError::unauthorized(
             "token has been revoked",
         ))),
     }
+}
+
+/// A request with no token id is refused (the middleware always resolves one for a person).
+fn require_token_id(token_id: Option<Uuid>) -> Result<Uuid, Refuse> {
+    token_id.ok_or_else(|| Refuse::Api(ApiError::unauthorized(SESSION_REQUIRED)))
 }
 
 async fn attachments_of(
@@ -461,6 +486,10 @@ pub async fn create(
 
     let outcome = request_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
+            // The same 3-second lock budget the other three have: a create that waits for its
+            // session row (a sweep holds it) or for the member's counter lock answers
+            // `scheduled_busy` instead of hanging.
+            bound_lock_wait(conn).await?;
             // The session first (see `lock_requester_session`), before the advisory lock below and
             // before any row this request will write.
             let armed_session_id =
@@ -1065,6 +1094,23 @@ mod tests {
                 "{sqlstate} is not a lock race"
             );
         }
+    }
+
+    /// A request that carries no token id cannot be locked against the sweep or held by it: it is
+    /// a 401, never an unlocked write.
+    #[test]
+    fn a_request_with_no_token_id_is_a_401_not_an_unlocked_write() {
+        match require_token_id(None) {
+            Err(Refuse::Api(error)) => assert_eq!(
+                (error.status, error.message.as_str()),
+                (StatusCode::UNAUTHORIZED, SESSION_REQUIRED)
+            ),
+            other => panic!("expected a 401 refusal, got {other:?}"),
+        }
+        assert!(matches!(
+            require_token_id(Some(Uuid::from_u128(1))),
+            Ok(id) if id == Uuid::from_u128(1)
+        ));
     }
 
     #[test]

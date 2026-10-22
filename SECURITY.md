@@ -96,8 +96,9 @@ result in the pull request; only some suites are also wired into
   blocker when the API's database URL does not use `momo_app`. The API's request
   pool does not check which role it connected as. One part of the API process
   does: the scheduled-message tick (ADR-0208) asks its own pool which role it is
-  at boot, and on a role that skips row-level security it neither ticks nor
-  accepts schedules (the routes answer 503 `scheduler_disabled`).
+  at boot (and again every tick interval while the database could not answer),
+  and on a role that skips row-level security it neither ticks nor accepts
+  schedules (the routes answer 503 `scheduler_disabled`).
 - **Fail-closed configuration.** `momo-server` refuses to start when, in
   `staging`, `prod`, `production` or `internal-host`, the realtime proxy secret
   is missing or a placeholder; when `PROVIDER_LINK_MASTER_KEY` or

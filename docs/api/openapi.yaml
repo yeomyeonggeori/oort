@@ -4766,7 +4766,9 @@ paths:
         different body or time under a known id still returns the first row (use a
         new id when the request changes). At most 50 `pending` rows per member per
         workspace (409 `pending_limit_reached`). 503 `scheduler_disabled` when
-        the operator turned the scheduler off.
+        the operator turned the scheduler off or the server could not check its
+        database role at boot (see the api log). 409 `scheduled_busy` when the
+        request waited more than 3 seconds for a lock or lost a lock race.
       security:
         - bearerAuth: []
       parameters:
@@ -4821,7 +4823,7 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
         "503":
-          description: "`scheduler_disabled`: the operator turned the scheduler off, so nothing can be scheduled."
+          description: "`scheduler_disabled`: the operator turned the scheduler off, or the server refused or could not yet check its database role at boot (see the api log); nothing can be scheduled until then."
           content:
             application/json:
               schema:
@@ -4957,9 +4959,9 @@ paths:
         "409":
           description: >
             `scheduled_too_late` (last 30 seconds), `scheduled_already_sent`,
-            `scheduled_busy` (the row was locked by a send in progress for more
-            than 3 seconds; retry), or `pending_limit_reached` when re-arming a
-            failed row.
+            `scheduled_busy` (the row was locked by a send or a sign-in ending for
+            more than 3 seconds, or the request lost a lock race; retry), or
+            `pending_limit_reached` when re-arming a failed row.
           content:
             application/json:
               schema:
@@ -4967,7 +4969,7 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
         "503":
-          description: "`scheduler_disabled`: the operator turned the scheduler off, so a time cannot be set."
+          description: "`scheduler_disabled`: the operator turned the scheduler off, or the server refused or could not yet check its database role at boot (see the api log); a time cannot be set until then."
           content:
             application/json:
               schema:
@@ -5017,7 +5019,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: "`scheduled_already_sent` (it went out first) or `scheduled_busy` (a send held the row for more than 3 seconds; retry)."
+          description: "`scheduled_already_sent` (it went out first) or `scheduled_busy` (a send or a sign-in ending held the row for more than 3 seconds, or this request lost a lock race; retry)."
           content:
             application/json:
               schema:
@@ -5036,7 +5038,8 @@ paths:
         function as the scheduler and as `sendMessage`, so the caller gets the
         result at once (`status: sent`, `sentMessageId`). The row lock keeps the
         scheduler out: a row already sent is 409 `scheduled_already_sent`, one
-        locked for more than 3 seconds is 409 `scheduled_busy`. When the send is
+        locked for more than 3 seconds (or a lock race this request lost) is 409
+        `scheduled_busy`. When the send is
         refused (the author left the channel, the thread root is gone, an
         attachment cannot be used) the answer is 409 whose `error.code` is the
         failure reason (`not_member`, `root_unavailable`, `attachment_unavailable`,
@@ -5090,7 +5093,7 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
         "503":
-          description: "`scheduler_disabled`: the operator turned the scheduler off."
+          description: "`scheduler_disabled`: the operator turned the scheduler off, or the server refused or could not yet check its database role at boot (see the api log)."
           content:
             application/json:
               schema:
