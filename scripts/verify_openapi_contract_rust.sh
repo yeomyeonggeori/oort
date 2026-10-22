@@ -3821,6 +3821,51 @@ sample channel-viewing-put put \
   "/v1/workspaces/{workspaceId}/channels/{channelId}/viewing" \
   "/v1/workspaces/$WS/channels/$GENERAL_CHANNEL_ID/viewing" 204 "" "$ACCESS"
 
+# 예약 메시지(ADR-0208 / #4214). 서버가 `sendAtMs`에 직접 보낸다. 사람 bearer 전용, 작성자 범위 RLS.
+# 마감은 한 시간 뒤라 표본 사이에 틱이 보내지 않는다. 지금 보내기는 요청 안에서 정본 전송을 부른다.
+SCHEDULED_SEND_AT_MS="$(( $(now_ms) + 3600000 ))"
+SCHEDULED_REQUEST_ID="$(lower_uuid)"
+sample scheduled-message-create post \
+  "/v1/workspaces/{workspaceId}/channels/{channelId}/scheduled-messages" \
+  "/v1/workspaces/$WS/channels/$GENERAL_CHANNEL_ID/scheduled-messages" 201 \
+  "$(jq -cn --arg c "$SCHEDULED_REQUEST_ID" --argjson t "$SCHEDULED_SEND_AT_MS" \
+      '{body:"openapi rust sample scheduled",sendAtMs:$t,clientRequestId:$c}')" "$ACCESS"
+SCHEDULED_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.scheduledMessage.id')"
+guard_jq --argjson t "$SCHEDULED_SEND_AT_MS" \
+  '.scheduledMessage.status == "pending" and .scheduledMessage.sendAtMs == $t
+   and .scheduledMessage.editableUntilMs == ($t - 30000) and .scheduledMessage.rev == 0' \
+  "a new schedule is pending, with the 30-second edit lock named"
+
+sample scheduled-message-list get "/v1/workspaces/{workspaceId}/scheduled-messages" \
+  "/v1/workspaces/$WS/scheduled-messages?channelId=$GENERAL_CHANNEL_ID&status=pending" 200 "" "$ACCESS"
+guard_jq --arg id "$SCHEDULED_ID" \
+  'any(.scheduledMessages[]; (.id | ascii_downcase) == $id)' \
+  "the caller lists the schedule they just made"
+
+sample scheduled-message-update patch \
+  "/v1/workspaces/{workspaceId}/scheduled-messages/{scheduledMessageId}" \
+  "/v1/workspaces/$WS/scheduled-messages/$SCHEDULED_ID" 200 \
+  '{"body":"openapi rust sample scheduled (edited)"}' "$ACCESS"
+guard_jq '.scheduledMessage.body == "openapi rust sample scheduled (edited)" and .scheduledMessage.rev == 1' \
+  "an edit changes the text and raises the revision"
+
+sample scheduled-message-send-now post \
+  "/v1/workspaces/{workspaceId}/scheduled-messages/{scheduledMessageId}/send-now" \
+  "/v1/workspaces/$WS/scheduled-messages/$SCHEDULED_ID/send-now" 200 "" "$ACCESS"
+guard_jq '.scheduledMessage.status == "sent" and (.scheduledMessage.sentMessageId | type) == "string"
+          and (.scheduledMessage | has("body") | not)' \
+  "send now sends it as an ordinary message and the body is gone"
+
+# 취소 표본은 보내기 전의 두 번째 예약이다(보낸 행은 409 `scheduled_already_sent`).
+expect scheduled-message-second post \
+  "/v1/workspaces/$WS/channels/$GENERAL_CHANNEL_ID/scheduled-messages" 201 \
+  "$(jq -cn --arg c "$(lower_uuid)" --argjson t "$SCHEDULED_SEND_AT_MS" \
+      '{body:"openapi rust sample to cancel",sendAtMs:$t,clientRequestId:$c}')" "$ACCESS"
+SCHEDULED_CANCEL_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.scheduledMessage.id')"
+sample scheduled-message-delete delete \
+  "/v1/workspaces/{workspaceId}/scheduled-messages/{scheduledMessageId}" \
+  "/v1/workspaces/$WS/scheduled-messages/$SCHEDULED_CANCEL_ID" 204 "" "$ACCESS"
+
 sample read-state-list get "/v1/workspaces/{workspaceId}/read-state" \
   "/v1/workspaces/$WS/read-state" 200 "" "$ACCESS"
 guard_jq --arg id "$GENERAL_CHANNEL_ID" \
