@@ -302,3 +302,7 @@ a8378190d76fb74ed6c5df312788691cd5c06521:server-rust/bins/momo-workd/src/project
 # 측정 스크립트 오프라인 시험(#3944)의 가짜 토큰·client 문자열 — 유출 파일 검사가 잡는지 보려고 일부러 비밀 모양으로 쓴 픽스처다. 직후 커밋에서 실행마다 무작위 값으로 교체했다. 실제 자격 아님.
 #   scripts/plugins/measure_tools_list.test.mjs:18  [generic-api-key]  가짜 토큰 픽스처
 5d4206448b8e9be843bbbad8145643a2d9a2ec68:scripts/plugins/measure_tools_list.test.mjs:generic-api-key:18
+
+# 2026-10-22 #4186(AP-1a) — gate-theme.mjs 저장 red proof 의 localStorage 항목 이름 비교 `if (key === "momo.web.appearance.v2")`. 항목 이름이지 자격이 아니다(위 c0f0b2a 의 v1 줄과 같은 오탐). generic-api-key.
+#   clients/web/gates/gate-theme.mjs:300  [generic-api-key]
+1472ca6cbdc036ca4e4a7cd529a9e16fbded533d:clients/web/gates/gate-theme.mjs:generic-api-key:300
