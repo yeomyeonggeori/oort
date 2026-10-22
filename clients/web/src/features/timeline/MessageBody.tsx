@@ -14,6 +14,7 @@ import {
 } from "@momo/core/features/workspace/directory";
 import { foldBlocks, foldText, foldWasOpened, rememberFoldOpen } from "./fold";
 import { FoldToggle } from "./FoldToggle";
+import { MESSAGE_LIST_ITEM_GAP_CLASS, MESSAGE_PROSE_GAP_CLASS } from "./spacing";
 
 // =============================================================================
 // The body of one message (goal B8 H6).
@@ -36,7 +37,12 @@ import { FoldToggle } from "./FoldToggle";
 // timeline does not change shape for the messages that are most of it.
 // =============================================================================
 
-const BODY_CLASS = "break-words text-body leading-relaxed";
+/**
+ * 본문 글자의 클래스. 설정의 대화 미리보기가 같은 상수를 받아 타임라인과 같은 글자·줄 높이로 그린다
+ * (AP-2a #4189): 미리보기의 평문이 본문 줄 높이(`leading-relaxed`)를 따로 적으면 상자 안과 실제 대화의
+ * 줄 간격이 갈라진다.
+ */
+export const MESSAGE_BODY_CLASS = "break-words text-body leading-relaxed";
 
 /**
  * Inline code and code blocks share one look: quoted text, not a card.
@@ -206,7 +212,11 @@ function BlockNode({
 
   if (block.kind === "list") {
     const items = block.items.map((item, index) => (
-      <li key={index} className="break-words">
+      // 항목 사이 간격은 대화 밀도가 정한다(AP-2a #4189). 첫 항목은 위에 아무것도 없으니 물지 않는다.
+      <li
+        key={index}
+        className={cn("break-words", index > 0 && MESSAGE_LIST_ITEM_GAP_CLASS)}
+      >
         <InlineNodes nodes={item} mentions={mentions} />
       </li>
     ));
@@ -219,14 +229,14 @@ function BlockNode({
       // saying something nobody wrote.
       <ol
         start={block.start}
-        className={cn(BODY_CLASS, "list-outside list-decimal ps-4")}
+        className={cn(MESSAGE_BODY_CLASS, "list-outside list-decimal ps-4")}
         data-testid="message-list"
       >
         {items}
       </ol>
     ) : (
       <ul
-        className={cn(BODY_CLASS, "list-outside list-disc ps-4")}
+        className={cn(MESSAGE_BODY_CLASS, "list-outside list-disc ps-4")}
         data-testid="message-list"
       >
         {items}
@@ -239,7 +249,7 @@ function BlockNode({
     // path preserves runs of spaces (an aligned list typed by hand, an indented
     // second line) and this one collapsed them, so the same body rendered two
     // ways depending on whether it happened to contain a markdown character.
-    <p className={cn("whitespace-pre-wrap", BODY_CLASS)}>
+    <p className={cn("whitespace-pre-wrap", MESSAGE_BODY_CLASS)}>
       {block.lines.map((line, index) => (
         <Fragment key={index}>
           {index > 0 && "\n"}
@@ -318,7 +328,7 @@ export function MessageBody({
       <p
         className={cn(
           "whitespace-pre-wrap",
-          BODY_CLASS,
+          MESSAGE_BODY_CLASS,
           muted && "text-ink-muted"
         )}
       >
@@ -341,7 +351,12 @@ export function MessageBody({
   const shown = expanded && blocks !== null ? blocks : fold.blocks;
   return (
     <div
-      className={cn("flex flex-col gap-2", muted && "text-ink-muted")}
+      // 블록 사이 간격은 대화 밀도가 정한다(AP-2a #4189): 이전의 `gap-2`(8)가 기본 단계 값이다.
+      className={cn(
+        "flex flex-col",
+        MESSAGE_PROSE_GAP_CLASS,
+        muted && "text-ink-muted"
+      )}
       data-testid="message-markdown"
     >
       {shown.map((block, index) => (
