@@ -150,6 +150,7 @@ full transitive graph is still only license-gated, not bundled.
 | expo-haptics | 57.0.3 | MIT | `clients/mobile` (npm + CocoaPods `ExpoHaptics`) | #3580 (tab·profile·filter haptics; 1st-party Expo SDK 57 module) |
 | expo-glass-effect | 57.0.4 | MIT | `clients/mobile` (npm + CocoaPods `ExpoGlassEffect`) | #3580 (iOS 26 Liquid Glass tab bar; falls back to expo-blur below iOS 26) |
 | expo-image-manipulator | 57.0.21 | MIT | `clients/mobile` (npm + CocoaPods `ExpoImageManipulator`) | ADR-0189 증보 2, #3907 (내 사진 배경: 긴 변 1600px 축소·JPEG 재인코딩). CocoaPods 전이 의존: SDWebImage·SDWebImageWebPCoder(MIT), libwebp(BSD-3-Clause) |
+| expo-media-library | 57.0.5 | MIT | `clients/mobile` (npm + CocoaPods `ExpoMediaLibrary`; 시스템 프레임워크 Photos·PhotosUI) | ADR-0168 증보 1, #4181 (첨부 메뉴의 최근 사진 그리드: 사진 보관함을 읽어 썸네일·목록·자산별 로컬 파일을 얻는다. 쓰기·앨범·삭제 API는 부르지 않는다). 전이 의존 없음(peer `expo`·`react-native`) |
 | Lucide icon paths `home`·`inbox`·`search`·`plus` | via design mockup A | ISC | `clients/mobile/src/design/icons/*.png` (rasterized) | #2714 (shell icons; same set the web uses as `lucide-react`) |
 
 ### Desktop client direct additions
