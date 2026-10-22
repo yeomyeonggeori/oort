@@ -410,9 +410,12 @@ function darkMedia(): MediaLike | null {
 }
 
 // 네이티브 신호원은 데스크탑 셸에서만 건다. 브라우저 탭은 미디어 질의만 듣는다(AP-1a AC 7).
+// 셸 판정과 신호원은 구독하는 순간에 읽는다(불러오는 순간이 아니라): 이 파일은 앱 거의 모든 곳이
+// 가져가므로 모듈 로드 중에 `@/lib/tauri`를 건드리면 그것을 부분 모의한 시험이 로드 중에 터진다.
 const system = createSystemScheme({
   media: darkMedia,
-  native: isDesktop() ? onSystemThemeChanged : undefined,
+  native: (handler) => onSystemThemeChanged(handler),
+  nativeEnabled: () => isDesktop(),
 });
 
 export function systemScheme(): "light" | "dark" {

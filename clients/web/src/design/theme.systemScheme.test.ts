@@ -48,6 +48,23 @@ describe("theme.ts의 시스템 스킴 연결", () => {
     expect(media.listeners.size).toBe(0);
   });
 
+  it("`@/lib/tauri`를 통째로 비운 모의에서도 모듈 로드와 구독이 터지지 않는다 (로드 중에 셸 판정을 읽지 않는다)", async () => {
+    // 이 스토어는 앱 거의 모든 곳이 가져간다. 로드 중에 `isDesktop()`을 부르면 그것을 부분 모의한
+    // 시험(workSurfaceEntryPoints.test.tsx 등)의 모의 초기화 순서에 걸려 스위트가 로드조차 못 한다.
+    vi.resetModules();
+    vi.doMock("@/lib/tauri", () => ({}));
+    const media = new FakeMedia(false);
+    vi.stubGlobal("window", { matchMedia: () => media });
+    const theme = await import("./theme");
+    const listener = vi.fn();
+    expect(() => theme.subscribeSystemScheme(listener)()).not.toThrow();
+    const off = theme.subscribeSystemScheme(listener);
+    media.fire(true);
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(theme.systemScheme()).toBe("dark");
+    off();
+  });
+
   it("데스크탑 셸: 네이티브 신호원도 열고, 그 신호가 값을 바꾼다", async () => {
     const { theme, native, media } = await loadTheme(true);
     const listener = vi.fn();

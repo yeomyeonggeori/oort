@@ -75,6 +75,47 @@ describe("브라우저: 미디어 질의만 듣는다", () => {
   });
 });
 
+describe("네이티브 신호원은 구독하는 순간의 셸 판정을 따른다", () => {
+  it("판정이 거짓이면 신호원이 있어도 열지 않는다 (브라우저 탭)", () => {
+    const { native } = fakeNative();
+    const store = createSystemScheme({ media: () => new FakeMedia(false), native, nativeEnabled: () => false });
+    store.subscribe(() => {})();
+    expect(native).not.toHaveBeenCalled();
+  });
+
+  it("판정은 모듈을 만들 때가 아니라 구독마다 다시 묻는다", () => {
+    const { native } = fakeNative();
+    let desktop = false;
+    const enabled = vi.fn(() => desktop);
+    const store = createSystemScheme({ media: () => new FakeMedia(false), native, nativeEnabled: enabled });
+    expect(enabled).not.toHaveBeenCalled();
+    store.subscribe(() => {})();
+    expect(native).not.toHaveBeenCalled();
+    desktop = true;
+    store.subscribe(() => {})();
+    expect(enabled).toHaveBeenCalledTimes(2);
+    expect(native).toHaveBeenCalledTimes(1);
+  });
+
+  it("판정이 던지면 닫힌 것으로 보고 미디어 질의로 계속 간다", () => {
+    const { native } = fakeNative();
+    const media = new FakeMedia(false);
+    const store = createSystemScheme({
+      media: () => media,
+      native,
+      nativeEnabled: () => {
+        throw new Error("[vitest] No isDesktop export is defined on the mock");
+      },
+    });
+    const listener = vi.fn();
+    const off = store.subscribe(listener);
+    media.fire(true);
+    expect(native).not.toHaveBeenCalled();
+    expect(listener).toHaveBeenCalledTimes(1);
+    off();
+  });
+});
+
 describe("데스크탑: 네이티브 창 신호도 듣는다", () => {
   it("구독할 때 네이티브 신호원을 한 번 연다", () => {
     const { native } = fakeNative();

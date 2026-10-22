@@ -36,6 +36,13 @@ export interface SystemSchemeSources {
    * 질의만 듣는다. 실패해도 던지지 않아야 하고, 던져도 여기서 삼킨다.
    */
   native?: (handler: (scheme: SystemScheme) => void) => Promise<() => void>;
+  /**
+   * 네이티브 신호원을 **지금** 열어도 되는가(데스크탑 셸인가). 구독할 때마다 부른다. 모듈을
+   * 불러오는 순간이 아니라 구독하는 순간에 묻는 까닭: 이 모듈을 쓰는 스토어는 앱 거의 모든
+   * 곳에서 가져가므로, 불러오는 순간에 셸 판정을 읽으면 그 판정을 가짜로 갈아 끼운 시험(부분
+   * 모의)이 모듈 로드 중에 터진다. 주지 않으면 `native`가 있는 한 연다. 던지면 닫힌 것으로 본다.
+   */
+  nativeEnabled?: () => boolean;
 }
 
 export interface SystemSchemeStore {
@@ -54,6 +61,14 @@ export function createSystemScheme(sources: SystemSchemeSources): SystemSchemeSt
     return sources.media()?.matches ? "dark" : "light";
   };
 
+  const nativeAllowed = (): boolean => {
+    try {
+      return sources.nativeEnabled ? sources.nativeEnabled() : true;
+    } catch {
+      return false;
+    }
+  };
+
   const subscribe = (listener: () => void): (() => void) => {
     const media = sources.media();
     const onMedia = (event: { matches: boolean }) => {
@@ -66,7 +81,7 @@ export function createSystemScheme(sources: SystemSchemeSources): SystemSchemeSt
     // 쥐고 있지 않도록 도착하자마자 되돌린다.
     let disposed = false;
     let unlistenNative: (() => void) | null = null;
-    const native = sources.native;
+    const native = nativeAllowed() ? sources.native : undefined;
     if (native) {
       let pending: Promise<() => void>;
       try {
