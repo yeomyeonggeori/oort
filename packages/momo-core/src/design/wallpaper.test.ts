@@ -204,11 +204,11 @@ describe("고를 수 있는 것의 표", () => {
   });
 
   it("행이 말하는 이름", () => {
-    expect(wallpaperLabel(undefined)).toBe("없음");
+    expect(wallpaperLabel(undefined)).toBe("기본");
     expect(wallpaperLabel({ kind: "solid", id: "slate" })).toBe("석판");
     expect(wallpaperLabel({ kind: "preset", id: "bam" })).toBe("밤");
     expect(wallpaperLabel({ kind: "image" })).toBe("내 사진");
-    expect(wallpaperLabel({ kind: "solid", id: "future-color" })).toBe("없음");
+    expect(wallpaperLabel({ kind: "solid", id: "future-color" })).toBe("기본");
   });
 });
 

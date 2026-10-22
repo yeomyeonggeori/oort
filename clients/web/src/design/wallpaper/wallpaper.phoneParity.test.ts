@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { PRESET_IDS, QUALITY_STEPS, SIDE_FACTORS, SOLID_IDS, WALLPAPER_OFF_COPY, WALLPAPER_PRESETS, WALLPAPER_SOLIDS } from "@momo/core/design/wallpaper";
+import { PRESET_IDS, QUALITY_STEPS, SIDE_FACTORS, SOLID_IDS, WALLPAPER_COPY, WALLPAPER_OFF_COPY, WALLPAPER_PRESETS, WALLPAPER_SOLIDS } from "@momo/core/design/wallpaper";
 
 // =============================================================================
 // 폰 사본과 같은 표 (AP-4 #4191, 이슈 AC 7). 단색 여덟·기본 제공 여섯·사진 계단의 품질·해상도 단과 시스템 접근성 문장은 폰
@@ -76,6 +76,16 @@ describe("폰 사본과 core 표가 같다", () => {
     const preset = /PRESET_IDS = \[([^\]]*)\]/.exec(model)?.[1].match(/'(\w+)'/g)?.map((value) => value.slice(1, -1));
     expect(solid).toEqual([...SOLID_IDS]);
     expect(preset).toEqual([...PRESET_IDS]);
+  });
+
+  it("고르지 않은 상태의 이름과 설명이 같다: 폰은 「기본」(테마의 바닥 그대로예요)이고 웹도 같은 이름·같은 설명이다 (design-review M-2)", () => {
+    const label = /case 'none':\s*return '([^']+)'/.exec(model)?.[1];
+    expect(label, "폰 모델의 none 라벨").toBe("기본");
+    expect(WALLPAPER_COPY.none).toBe(label);
+    const control = read("ThemeControl.tsx");
+    expect(control, "폰 설정 행의 설명").toContain(`detail="${WALLPAPER_COPY.noneDetail}"`);
+    // 「기본으로」(되돌리기)도 같은 이름이다.
+    expect(control).toContain(`label="${WALLPAPER_COPY.reset}"`);
   });
 
   it("사진 계단의 품질·해상도 단과 시스템 접근성 문장", () => {

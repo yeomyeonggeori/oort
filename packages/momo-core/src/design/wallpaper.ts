@@ -428,7 +428,8 @@ export const WALLPAPER_COPY = {
   label: "배경화면",
   description:
     "사이드바 뒤와 창 가장자리에 깔려요. 글자가 읽히도록 반투명 면이 한 겹 얹혀서 사진이 조금 흐리게 보여요.",
-  none: "없음",
+  none: "기본",
+  noneDetail: "테마의 바닥 그대로예요.",
   solid: "단색",
   preset: "기본 제공",
   photo: "내 사진",
@@ -457,7 +458,7 @@ export const WALLPAPER_BLURRY_COPY = "이 테마에서는 글자 대비 때문�
  * 그래서 CSS는 이 폭 미만에서 아무것도 하지 않고(`wallpaper.css`의 `@media (width >= 600px)`), 설정 행은 그 사실을 말한다.
  */
 export const WALLPAPER_MIN_WINDOW_PX = 600;
-export const WALLPAPER_NARROW_COPY = "창이 좁아서 지금은 배경화면이 보이지 않아요. 창을 넓히면 보여요.";
+export const WALLPAPER_NARROW_COPY = "창이 좁아서 지금은 배경화면이 보이지 않아요. 넓은 창에서는 보여요.";
 
 /** 사이드바에 띠가 있는 테마(노을띠): 띠가 위에 서서 사진은 가장자리에만 보인다. */
 export const WALLPAPER_BAND_COPY = "이 테마는 사이드바에 띠가 있어서 배경화면이 창 가장자리에만 보여요.";

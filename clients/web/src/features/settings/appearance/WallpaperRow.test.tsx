@@ -159,6 +159,8 @@ const q = (host: HTMLElement, testId: string) => host.querySelector<HTMLElement>
 const radio = (host: HTMLElement, testId: string) => q(host, testId) as HTMLInputElement;
 /** 알림 영역의 문장. 영역은 늘 DOM에 있고(보조기기가 읽도록) 말할 것이 없으면 빈 문자열이다. */
 const statusText = (host: HTMLElement) => q(host, "wallpaper-status")?.textContent ?? null;
+/** 「기본으로」는 늘 그려지고(처음 고르는 순간 칩이 밀리지 않게), 고른 것이 없으면 잠긴다. */
+const resetButton = (host: HTMLElement) => q(host, "wallpaper-reset") as HTMLButtonElement;
 const stored = () => JSON.parse(localStorage.getItem(APPEARANCE_STORAGE_KEY) ?? "null") as { wallpaper?: WallpaperRef } | null;
 
 function pick(host: HTMLElement, testId: string) {
@@ -201,7 +203,22 @@ describe("열린 상태의 구성 (슬롯 시험이 면제하는 자리를 이 �
     expect(radios.filter((r) => r.checked).map((r) => r.dataset.testid)).toEqual(["wallpaper-none"]);
     expect(q(host, "wallpaper-pick-photo")?.textContent).toContain(WALLPAPER_COPY.pickPhoto);
     expect(host.textContent).toContain(WALLPAPER_COPY.privacy);
-    expect(q(host, "wallpaper-reset")).toBeNull();
+    expect(resetButton(host).disabled).toBe(true);
+  });
+
+  it("「기본」은 단색이 아니다: 단색 묶음 머리글 아래가 아니라 자기 줄에 서고, 폰처럼 설명 한 줄이 곁에 있다 (패리티)", () => {
+    const host = mount(createElement(WallpaperRow));
+    const none = q(host, "wallpaper-none") as HTMLElement;
+    const solidGroup = [...host.querySelectorAll("p")].find((p) => p.textContent === WALLPAPER_COPY.solid)?.parentElement;
+    expect(solidGroup, "단색 묶음").toBeTruthy();
+    expect(solidGroup?.contains(none), "「기본」이 단색 묶음 안에 있지 않다").toBe(false);
+    expect(none.closest("label")?.textContent).toContain(WALLPAPER_COPY.none);
+    expect(WALLPAPER_COPY.none).toBe("기본");
+    expect(host.textContent).toContain(WALLPAPER_COPY.noneDetail);
+    // 선택 순서: 기본 → 단색 → 기본 제공.
+    const order = [...host.querySelectorAll<HTMLInputElement>('input[type="radio"]')].map((r) => r.dataset.testid?.replace(/-.*$/, "") + ":" + (r.dataset.testid ?? "").split("-")[1]);
+    expect(order[0]).toBe("wallpaper:none");
+    expect(order[1]).toBe("wallpaper:solid");
   });
 
   it("모든 선택은 이름이 있고 보조기술이 읽는다", () => {
@@ -241,7 +258,7 @@ describe("단색·기본 제공을 고른다", () => {
     expect(document.documentElement.getAttribute("data-wallpaper")).toBe("preset");
   });
 
-  it("「기본으로」는 선택을 지우고 없음으로 돌아가며 단추도 사라진다", () => {
+  it("「기본으로」는 선택을 지우고 기본으로 돌아가며 단추는 잠긴다", () => {
     const host = mount(createElement(WallpaperRow));
     pick(host, "wallpaper-preset-bam");
     act(() => {
@@ -250,7 +267,7 @@ describe("단색·기본 제공을 고른다", () => {
     expect(stored()?.wallpaper).toBeUndefined();
     expect(radio(host, "wallpaper-none").checked).toBe(true);
     expect(document.documentElement.hasAttribute("data-wallpaper")).toBe(false);
-    expect(q(host, "wallpaper-reset")).toBeNull();
+    expect(resetButton(host).disabled, "돌아오면 단추는 잠긴다(사라지지 않는다)").toBe(true);
   });
 
   it("「없음」을 누르면 선택이 풀린다", () => {
@@ -265,7 +282,7 @@ describe("단색·기본 제공을 고른다", () => {
     reloadAppearanceForTest();
     const host = mount(createElement(WallpaperRow));
     expect(radio(host, "wallpaper-none").checked).toBe(true);
-    expect(q(host, "wallpaper-reset")).toBeNull();
+    expect(resetButton(host).disabled).toBe(true);
   });
 });
 
@@ -400,14 +417,16 @@ describe("지금 배경이 왜 안 보이는지 한 줄로 말한다", () => {
     expect(statusText(off)).toBe("");
   });
 
-  it("창이 좁으면(폰 폭) 바닥이 보이지 않는다고 말한다: 선택지는 열려 있고 선택은 저장된다", () => {
+  it("창이 좁으면(폰 폭) 고른 배경이 보이지 않는다고 말한다: 아무것도 고르지 않았으면 말하지 않고, 선택지는 열려 있고 선택은 저장된다", () => {
     state.narrow = true;
     const host = mount(createElement(WallpaperRow));
-    expect(q(host, "wallpaper-status")?.textContent).toBe(WALLPAPER_NARROW_COPY);
+    // 고른 것이 없으면 안 보이는 것이 정상이다(design-review L-2: 「지금은 배경화면이 보이지 않아요」가 뜨던 자리).
+    expect(statusText(host)).toBe("");
     expect((q(host, "wallpaper-choice") as HTMLFieldSetElement).disabled).toBe(false);
     pick(host, "wallpaper-solid-slate");
     expect(stored()?.wallpaper).toEqual({ kind: "solid", id: "slate" });
     expect(q(host, "wallpaper-status")?.textContent).toBe(WALLPAPER_NARROW_COPY);
+    expect(WALLPAPER_NARROW_COPY).not.toContain("넓히");
   });
 
   it("말할 것이 없으면 문장이 없다", () => {

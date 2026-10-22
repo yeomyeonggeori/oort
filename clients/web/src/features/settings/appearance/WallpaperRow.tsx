@@ -1,5 +1,5 @@
 import { useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { Check, ImageOff, ImagePlus, Image as ImageIcon } from "lucide-react";
+import { Check, ImageOff, ImagePlus, Image as ImageIcon, Info } from "lucide-react";
 import {
   IMPORT_FAILURE_COPY,
   PRESET_IDS,
@@ -148,7 +148,8 @@ export function WallpaperRow() {
   const status = (() => {
     if (notice !== null) return { text: notice, tone: "danger" as const };
     if (photo.status === "missing") return { text: WALLPAPER_OFF_COPY["no-photo"], tone: "muted" as const };
-    if (narrow) return { text: WALLPAPER_NARROW_COPY, tone: "muted" as const };
+    // 아무것도 고르지 않았으면 안 보이는 것이 정상이다: 좁은 창을 말할 일이 없다.
+    if (narrow && chosen !== undefined) return { text: WALLPAPER_NARROW_COPY, tone: "muted" as const };
     const reason = plan.decision.reason;
     if (reason !== null) return { text: WALLPAPER_OFF_COPY[reason], tone: "muted" as const };
     if (unavailable) return { text: WALLPAPER_OFF_COPY.unavailable, tone: "muted" as const };
@@ -185,17 +186,17 @@ export function WallpaperRow() {
         descriptionId={descriptionId}
         testId="wallpaper-row"
       >
-        {chosen !== undefined ? (
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={() => pick(() => store.reset())}
-            data-testid="wallpaper-reset"
-          >
-            {WALLPAPER_COPY.reset}
-          </Button>
-        ) : null}
+        {/* 늘 그려 둔다(고른 것이 없으면 잠긴다): 처음 고르는 순간 단추가 생겨 좁은 폭에서 칩이 아래로 밀리지 않게. */}
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          disabled={chosen === undefined}
+          onClick={() => pick(() => store.reset())}
+          data-testid="wallpaper-reset"
+        >
+          {WALLPAPER_COPY.reset}
+        </Button>
       </SettingsRow>
       <div className="settings-row" data-stack="" data-align="start" data-testid="wallpaper-choices">
         <fieldset
@@ -207,19 +208,25 @@ export function WallpaperRow() {
           className="m-0 flex min-w-0 flex-col gap-4 border-0 p-0"
         >
           <legend className="sr-only">{WALLPAPER_COPY.label}</legend>
+          {/* 「기본」은 단색이 아니다: 폰처럼 자기 줄로 맨 위에 둔다(패리티). */}
+          <div className="flex min-w-0 flex-wrap items-start gap-4">
+            <Choice
+              label={`${WALLPAPER_COPY.label} ${WALLPAPER_COPY.none}`}
+              name={GROUP_NAME}
+              selected={chosen === undefined}
+              onSelect={() => pick(() => store.reset())}
+              testId="wallpaper-none"
+              shape="circle"
+              icon={<ImageOff className="size-4 text-ink-muted" aria-hidden="true" />}
+              caption={WALLPAPER_COPY.none}
+            />
+            <div className="flex min-h-control-lg items-center">
+              <p className="break-keep text-meta text-ink-muted">{WALLPAPER_COPY.noneDetail}</p>
+            </div>
+          </div>
           <div className="flex min-w-0 flex-col gap-2">
             <p className="text-meta font-semibold text-ink-muted">{WALLPAPER_COPY.solid}</p>
             <div className="flex flex-wrap gap-4">
-              <Choice
-                label={`${WALLPAPER_COPY.label} ${WALLPAPER_COPY.none}`}
-                name={GROUP_NAME}
-                selected={chosen === undefined}
-                onSelect={() => pick(() => store.reset())}
-                testId="wallpaper-none"
-                shape="circle"
-                icon={<ImageOff className="size-4 text-ink-muted" aria-hidden="true" />}
-                caption={WALLPAPER_COPY.none}
-              />
               {SOLID_IDS.map((id: SolidId) => (
                 <Choice
                   key={id}
@@ -316,11 +323,16 @@ export function WallpaperRow() {
           role="status"
           data-testid="wallpaper-status"
           className={cn(
-            "break-keep text-meta empty:hidden",
-            status !== null && status.tone === "danger" ? "text-danger" : "text-ink-muted"
+            "flex items-start gap-2 break-keep text-meta empty:hidden",
+            status !== null && status.tone === "danger" ? "text-danger" : "text-ink"
           )}
         >
-          {status !== null ? status.text : null}
+          {status !== null ? (
+            <>
+              <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+              <span>{status.text}</span>
+            </>
+          ) : null}
         </p>
       </div>
     </>
