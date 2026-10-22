@@ -315,6 +315,16 @@ pub async fn remove(
                         // Removal revokes every token of the member, and with
                         // them every push registration (#2677) and device key (#3022).
                         end_member_sessions_in_tx(conn, workspace_id, target_id).await?;
+                        // ADR-0208 D14 point 3: someone who is no longer here has nobody to
+                        // re-read a held schedule, so what they armed is cancelled (the body
+                        // erased), not held. `momo-settings` cannot depend on `momo-messaging`,
+                        // so this sits in the route layer beside the session end.
+                        momo_messaging::cancel_member_schedules_in_tx(
+                            conn,
+                            workspace_id,
+                            target_id,
+                        )
+                        .await?;
                         write_audit(
                             conn,
                             &AuditEntry::new(workspace_id, "member.removed")

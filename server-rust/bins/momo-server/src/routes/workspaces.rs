@@ -349,6 +349,10 @@ pub async fn leave(
                 // Every session just ended; so does every push registration
                 // (#2677) and device key (#3022) made under them.
                 end_member_sessions_in_tx(conn, workspace_id, member_id).await?;
+                // ADR-0208 D14 point 3: a member who left has nobody to re-read a held
+                // schedule; what they armed is cancelled, its body erased.
+                momo_messaging::cancel_member_schedules_in_tx(conn, workspace_id, member_id)
+                    .await?;
                 terminate_workspace_membership_in_tx(conn, workspace_id, member_id).await?;
                 write_audit(
                     conn,
