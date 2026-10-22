@@ -61,6 +61,20 @@ export function createSystemScheme(sources: SystemSchemeSources): SystemSchemeSt
   // 거짓이 된다. 그래서 마지막 구독이 풀리는 순간 버려 다음 읽기가 질의를 새로 읽게 한다.
   let spoken: SystemScheme | null = null;
   let subscribers = 0;
+  // 지금 열려 있는 구독의 듣는 이들. 한 신호원이 말하면 모두 깨운다(아래 `say`).
+  const heard = new Set<{ listener: () => void }>();
+
+  /**
+   * 신호원이 말하면 기억을 바꾸고 열려 있는 **모든** 구독의 듣는 이를 깨운다. 구독마다 자기 미디어 질의를 갖고, 질의는
+   * 만들어진 뒤의 변화만 쏜다. 변화 직후에 열린 구독의 질의는 그 변화를 듣지 못하는데, 먼저 열려 있던 구독(예: 배경화면
+   * 런타임, AP-4)의 질의가 말해 기억이 바뀌고 나면 나중 구독의 듣는 이는 아무도 깨우지 않아 낡은 값에 머물렀다(설정 화면을
+   * 막 열 때 「시스템은 다크예요」가 라이트로 돌아오지 않았다). 같은 값을 여러 구독이 되풀이해 말하면 알림은 한 번이다.
+   */
+  const say = (scheme: SystemScheme): void => {
+    if (spoken === scheme) return;
+    spoken = scheme;
+    for (const entry of [...heard]) entry.listener();
+  };
 
   const get = (): SystemScheme => {
     if (spoken !== null) return spoken;
@@ -77,11 +91,10 @@ export function createSystemScheme(sources: SystemSchemeSources): SystemSchemeSt
 
   const subscribe = (listener: () => void): (() => void) => {
     subscribers += 1;
+    const entry = { listener };
+    heard.add(entry);
     const media = sources.media();
-    const onMedia = (event: { matches: boolean }) => {
-      spoken = event.matches ? "dark" : "light";
-      listener();
-    };
+    const onMedia = (event: { matches: boolean }) => say(event.matches ? "dark" : "light");
     media?.addEventListener("change", onMedia);
 
     // 구독이 풀린 뒤에 네이티브 약속이 늦게 풀리는 경쟁: 풀린 구독이 새 해제 함수를
@@ -94,8 +107,7 @@ export function createSystemScheme(sources: SystemSchemeSources): SystemSchemeSt
       try {
         pending = native((scheme) => {
           if (disposed) return;
-          spoken = scheme;
-          listener();
+          say(scheme);
         });
       } catch (error) {
         pending = Promise.reject(error);
@@ -115,6 +127,7 @@ export function createSystemScheme(sources: SystemSchemeSources): SystemSchemeSt
       // 해제는 한 번만 센다: 두 번 부르는 호출자가 구독 수를 음수로 몰지 못하게.
       if (disposed) return;
       disposed = true;
+      heard.delete(entry);
       media?.removeEventListener("change", onMedia);
       unlistenNative?.();
       unlistenNative = null;
