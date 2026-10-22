@@ -204,7 +204,8 @@ describe("보정은 필요하고 실제로 일한다 (실패할 수 있는 가�
       const raw = derivedOrRaw(row.seed, false);
       return raw === null || violations(raw).length > 0;
     });
-    // 측정: 54/57 (같은 위반 함수, 보정만 끈 값). 청사진 초안의 프로토타입 값은 56/57이다.
+    // 측정: 55/57 (같은 위반 함수, 보정만 끈 값: 쌍 54 · 판 43 · H1 53 · 톤/가리킨 행 39 · 신호 거리 7 · H2 6 · H3 5).
+    // 청사진 초안의 프로토타입 값은 56/57이었다(규칙이 지금보다 적었다).
     expect(rawBad.length).toBeGreaterThanOrEqual(50);
   });
 
