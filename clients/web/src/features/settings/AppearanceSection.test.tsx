@@ -242,10 +242,11 @@ describe("AppearanceSection: 링크 미리보기와 대화 미리보기", () => 
 });
 
 describe("AppearanceSection: S3b 컨트롤은 아직 열리지 않는다 (R4)", () => {
-  it("offers exactly the three live groups and no switch, slider, or text field", () => {
+  it("offers exactly the live groups and no switch, slider, or text field", () => {
     const host = mount(createElement(AppearanceSection));
     const groups = [...host.querySelectorAll("fieldset")].map((f) => f.getAttribute("data-testid"));
-    expect(groups).toEqual(["theme-choice", "accent-choice", "link-preview-choice"]);
+    // 배경화면(AP-4 #4191)이 카드 「배경」의 라디오 묶음 하나를 더했다.
+    expect(groups).toEqual(["theme-choice", "accent-choice", "wallpaper-choice", "link-preview-choice"]);
     expect(host.querySelector('[role="switch"], input[type="range"], input[type="text"]:not([data-testid^="font-"]), select')).toBeNull();
     // 글꼴(#3774)은 이름 입력 두 칸까지만 연다.
     expect([...host.querySelectorAll('input[type="text"]')].map((i) => i.getAttribute("data-testid"))).toEqual([

@@ -445,7 +445,7 @@ describe("컴포넌트는 스타일을 짓지 않는다 — 런타임 몫", () =
   /**
    * `element.style.x = …` 로 스타일을 쓰는 파일. **0 이 아니라 잔량이다.**
    *
-   * 셋 다 「스타일시트가 미리 알 수 없는 값」을 쓴다:
+   * 모두 「스타일시트가 미리 알 수 없는 값」을 쓴다:
    *
    *   `useAutoGrow`      내용에서 잰 높이. 값이 사람이 친 글에서 나온다.
    *   `placeholderFit`   계산된 글자꼴의 사본. 값이 `getComputedStyle` 에서 나온다.
@@ -454,6 +454,11 @@ describe("컴포넌트는 스타일을 짓지 않는다 — 런타임 몫", () =
    *                      옮긴다. 기간·이징은 `.skel.is-sizing`의
    *                      `--motion-standard` 사다리다. JSX `style=` 은 프리플라이트가
    *                      막으므로 `host.style.height` 만 쓴다.
+   *
+   *   `wallpaper/runtime`  사람이 고른 사진 한 장의 `data:` URL(약 2MB)과 단색·기본 제공의 바탕. 상속되는
+   *                      커스텀 프로퍼티에 큰 문자열을 싣지 않으려고 **전용 요소(`[data-wallpaper-layer]`) 한 개**의
+   *                      `backgroundColor`·`backgroundImage`에만 그림이 바뀔 때 한 번 쓴다(AP-4 #4191, 청사진 §5.5-d).
+   *                      JSX `style=`이 아니고, 어떤 컴포넌트도 지나지 않는다.
    *
    * 지어낸 값(자리·가시성·줄바꿈)은 스타일시트에 있다 — `placeholderFit`
    * 의 것은 `tokens.css` 의 `text-probe` 다. 그래서 이 목록은 「인라인 스타일이
@@ -470,6 +475,7 @@ describe("컴포넌트는 스타일을 짓지 않는다 — 런타임 몫", () =
     "features/timeline/useAutoGrow.ts",
     "features/chat/placeholderFit.ts",
     "features/common/States.tsx",
+    "design/wallpaper/runtime.ts",
   ];
 
   it("런타임 스타일 작성자가 잔량 목록보다 늘지 않는다", () => {
