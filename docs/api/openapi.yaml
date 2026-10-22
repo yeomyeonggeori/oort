@@ -5042,7 +5042,7 @@ paths:
         refused (the author left the channel, the thread root is gone, an
         attachment cannot be used) the answer is 409 whose `error.code` is the
         failure reason (`not_member`, `root_unavailable`, `attachment_unavailable`,
-        `not_allowed`) and the row becomes `failed`. A row held as
+        `send_error`, `not_allowed`) and the row becomes `failed`. A row held as
         `sessions_ended` can be sent now by its author: that is the re-confirmation.
       security:
         - bearerAuth: []
@@ -15983,7 +15983,8 @@ components:
         copied. `cancelled` was removed by its author, or by the system when the
         author was removed from or left the workspace or the workspace was
         deleted (the body is discarded either way). There is no `sending`
-        state: claim, send and status change are one transaction.
+        state: the send and the status change are one transaction, and the claim
+        before it is a separate short transaction that leaves the row `pending`.
 
     ScheduledMessageFailureReason:
       type: string
@@ -15998,7 +15999,8 @@ components:
         suspended or removed at send time (a safety net behind the hold).
         `missed`: the grace window (default 60 minutes) passed without a single
         attempt. `send_error`: at least one attempt was made and the grace
-        window passed while transient errors continued. `not_member`: the author left the channel or conversation.
+        window passed while transient errors continued, or the schedule id
+        collided with another message's `clientMsgId`. `not_member`: the author left the channel or conversation.
         `root_unavailable`: the thread root is deleted or gone.
         `attachment_unavailable`: an attachment is missing or was used
         elsewhere. `not_allowed`: a policy the send path adds later.
