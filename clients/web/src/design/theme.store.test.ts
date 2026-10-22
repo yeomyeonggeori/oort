@@ -213,6 +213,17 @@ describe("단일 모드 테마: 스토어가 유효 스킴으로 data-theme를 �
     setThemeRef("neon" as never);
     expect(getThemeRef()).toBe("dawnsky");
   });
+
+  it("updateAppearance로 들어온 문법이 틀린 참조도 저장·적용되지 않는다 (design-review N-5)", () => {
+    updateAppearance({ theme: "catalog:Nord" as never });
+    expect(getThemeRef()).toBe("dawnsky");
+    expect(root().getAttribute("data-theme-ref")).toBe("dawnsky");
+    expect(root().getAttribute("data-palette")).toBe("dawnsky");
+    expect(JSON.parse(localStorage.getItem(APPEARANCE_STORAGE_KEY) ?? "{}").theme ?? "dawnsky").toBe("dawnsky");
+    updateAppearance({ theme: "catalog:nord" });
+    expect(getThemeRef()).toBe("catalog:nord");
+    expect(root().getAttribute("data-palette")).toBe("derived");
+  });
 });
 
 describe("부트 캐시 정리", () => {

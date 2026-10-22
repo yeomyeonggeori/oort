@@ -282,16 +282,6 @@ describe("applyAccent", () => {
   });
 });
 
-describe("applyAccent", () => {
-  it("stamps data-accent including Dawn", () => {
-    const doc = fakeDocument(false);
-    applyAccent("dawn", doc);
-    expect(doc.documentElement.getAttribute(ACCENT_ATTRIBUTE)).toBe("dawn");
-    applyAccent("seongun", doc);
-    expect(doc.documentElement.getAttribute(ACCENT_ATTRIBUTE)).toBe("seongun");
-  });
-});
-
 // ---- 부트 스크립트를 실제로 실행해 런타임과 비교한다 (AP-1a AC 2·3) ---------------------
 //
 // 문자열 대조는 「같은 낱말이 있다」만 말한다. 이 절은 public/theme-boot.js를 가짜 문서·저장소와
@@ -448,6 +438,8 @@ const FIXTURES: Array<[string, Items]> = [
   ],
   ["v2: 배경 단색 id가 틀림", { [V2_ENTRY]: record({ wallpaper: { kind: "solid", id: "Slate!" } }) }],
   ["v2: 배경 단색 id 없음", { [V2_ENTRY]: record({ wallpaper: { kind: "solid" } }) }],
+  ["v2: 배경 단색 id 32자(상한 경계)", { [V2_ENTRY]: record({ wallpaper: { kind: "solid", id: "a".repeat(32) } }) }],
+  ["v2: 배경 단색 id 33자(상한 초과)", { [V2_ENTRY]: record({ wallpaper: { kind: "solid", id: "a".repeat(33) } }) }],
   ["v2: 사진 배경(덤 필드가 틀려도 종류는 지킴)", { [V2_ENTRY]: record({ wallpaper: { kind: "image", width: -1 } }) }],
   ["v2: 유리 필드는 부트가 읽지 않음", { [V2_ENTRY]: record({ glass: { on: true, opacity: 80 } }) }],
 ];
@@ -634,14 +626,31 @@ describe("부트 캐시: 있으면 첫 렌더 전에 꽂고, 없으면 아무것
     expect(attrs["data-palette"]).toBe("derived");
   });
 
-  it("첫 파티 레코드도 키만 맞으면 꽂는다 (정리는 앱이 올라온 뒤 retireThemeCache가 한다)", () => {
+  it("첫 파티 레코드는 키가 맞는 캐시가 있어도 꽂지 않는다: 캐시는 파생 테마의 것이다 (design-review M-1)", () => {
+    // 정적 CSS가 색을 주는 첫 파티는 캐시 색이 첫 프레임에 섰다가 걷히는 번쩍임이 없어야 한다.
+    for (const theme of THEME_IDS) {
+      const first = { [V2_ENTRY]: record({ theme }) };
+      const raw = entry({ key: themeCacheKey("1", { theme, signal: null }) });
+      expect(snapshot(runBoot({ ...first, [CACHE_ENTRY]: raw })).vars, theme).toEqual({});
+    }
+  });
+
+  it("첫 파티 레코드의 캐시 mode는 읽지 않는다: 부트와 런타임이 같은 data-theme를 찍는다 (design-review M-1)", () => {
+    const first = { [V2_ENTRY]: record({ theme: "dawnsky", scheme: "system" }) };
+    const raw = entry({ key: themeCacheKey("1", { theme: "dawnsky", signal: null }), mode: "dark" });
+    const booted = snapshot(runBoot({ ...first, [CACHE_ENTRY]: raw }));
+    const runtime = snapshot(runRuntime({ ...first, [CACHE_ENTRY]: raw }));
+    expect(booted.attrs).toEqual(runtime.attrs);
+    expect(booted.metas).toEqual(runtime.metas);
+    expect(booted.attrs).not.toHaveProperty("data-theme");
+  });
+
+  it("앱이 올라오면 런타임이 첫 파티 레코드의 낡은 캐시 항목과 인라인 변수를 걷는다", () => {
     const first = { [V2_ENTRY]: record({ theme: "dawnsky" }) };
     const raw = entry({ key: themeCacheKey("1", { theme: "dawnsky", signal: null }) });
-    expect(snapshot(runBoot({ ...first, [CACHE_ENTRY]: raw })).vars).toHaveProperty("--ink", INK);
-    // 런타임은 같은 입력에서 그 변수를 걷고 항목도 지운다.
     const store = new FakeStore({ ...first, [CACHE_ENTRY]: raw });
     const doc2 = makeDoc();
-    doc2.documentElement.style.setProperty("--ink", INK);
+    doc2.documentElement.style.setProperty("--ink", INK); // 파생 테마였을 때 엔진이 꽂은 변수
     applyAppearance(readWebAppearance({ v2: first[V2_ENTRY] }), { doc: doc2, storage: store });
     expect(doc2.documentElement.style.vars.has("--ink")).toBe(false);
     expect(store.getItem(CACHE_ENTRY)).toBeNull();
@@ -762,6 +771,25 @@ describe("부트 캐시: 있으면 첫 렌더 전에 꽂고, 없으면 아무것
     // 말뭉치가 한쪽으로만 쏠려 시험이 헛돌지 않는다.
     expect(accepted).toBeGreaterThan(50);
     expect(rejected).toBeGreaterThan(500);
+  });
+});
+
+describe("신호 프리셋: 두 CSS 바인딩이 같은 값이라 data-signal과 옛 data-accent를 함께 찍어도 화면이 같다 (design-review N-6)", () => {
+  const read = (file: string) => readFileSync(new URL(file, import.meta.url), "utf8");
+  const ROLES = ["--signal", "--on-signal", "--signal-text", "--signal-soft"] as const;
+  const declarations = (block: string) =>
+    Object.fromEntries(ROLES.map((role) => [role, new RegExp(`${role}:\\s*([^;]+);`).exec(block)?.[1]?.trim()]));
+  const blockOf = (css: string, selectorStart: string) => {
+    const at = css.indexOf(selectorStart);
+    if (at < 0) throw new Error(`${selectorStart} not found`);
+    return css.slice(css.indexOf("{", at), css.indexOf("}", at));
+  };
+
+  it.each(SIGNAL_PRESET_IDS)("%s: themes/%s.css(data-accent)와 palettes/dawnsky.css(data-signal)의 신호 네 값이 같다", (id) => {
+    const accent = declarations(blockOf(read(`./themes/${id}.css`), `:root[data-palette="dawnsky"][data-accent="${id}"]`));
+    const signal = declarations(blockOf(read("./themes/palettes/dawnsky.css"), `:root[data-palette="dawnsky"][data-signal="${id}"]`));
+    for (const role of ROLES) expect(accent[role], `${id} ${role}`).toBeTruthy();
+    expect(accent).toEqual(signal);
   });
 });
 

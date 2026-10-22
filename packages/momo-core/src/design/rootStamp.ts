@@ -27,6 +27,9 @@
 //
 // 아직 CSS가 읽지 않는 속성(`data-density`·`data-font-size` 등)을 먼저 찍는 것은 **보이는
 // 변화 0**이다. 읽는 규칙은 각 소비자 이슈가 `design/appearance/*.css` 조각에 더한다.
+// 예외는 `data-signal` 하나다: 생성 팔레트 CSS(`themes/palettes/*.css`)의 `[data-signal="<프리셋>"]`
+// 규칙이 이미 읽는다. 그 값은 옛 `data-accent` 바인딩(`themes/<id>.css`)과 같은 값이라 두 속성이 함께
+// 켜져도 화면은 같다(웹 `theme.test.ts`가 값 단위로 대조한다).
 // =============================================================================
 
 import {

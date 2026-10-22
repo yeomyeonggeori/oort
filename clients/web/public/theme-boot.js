@@ -21,8 +21,10 @@
 //   data-theme · data-palette · data-theme-ref · data-signal · data-accent(옛) · data-density ·
 //   data-font-size · data-thread-layout · data-prominent-active · data-wallpaper
 //
-// 부트 캐시(momo.web.theme.cache.v1)가 있고 키가 지금 레코드의 테마·신호와 맞으면 파생 변수를
-// 첫 렌더 전에 setProperty로 되꽂는다. 없거나 계약을 어기면 아무것도 하지 않는다(기본 테마).
+// 부트 캐시(momo.web.theme.cache.v1)는 **파생 테마**(catalog:·user:)의 것이다. 저장된 테마가 파생
+// 참조이고, 캐시가 있고, 키가 지금 레코드의 테마·신호와 맞고, 계약을 전부 지키면 파생 변수를 첫 렌더
+// 전에 setProperty로 되꽂는다. 아니면 아무것도 하지 않는다(기본 테마). 첫 파티 팔레트는 정적 CSS가
+// 색을 주므로 캐시가 있어도 무시한다(앱이 올라오면 낡은 항목을 걷는다).
 // =============================================================================
 (function () {
   var V2_ENTRY = "momo.web.appearance.v2";
@@ -128,7 +130,7 @@
     return DEFAULT_THEME;
   }
 
-  // {kind: "none"} | {kind: "preset", id} | {kind: "custom", id: "#RRGGBB"} — 부트는 스탬프와 캐시 키에 필요한 것만 든다.
+  // 신호 선택에서 부트에 필요한 것만 뽑는다: 속성 값(`stamp`), 옛 액센트 이름(`accent`), 캐시 키 조각(`key`).
   function signalOf(value) {
     if (value !== null && typeof value === "object") {
       if (typeof value.preset === "string" && SIGNAL_PRESETS.indexOf(value.preset) >= 0) {
@@ -218,8 +220,9 @@
   }
 
   var root = document.documentElement;
+  var themeIsFirstParty = THEME_IDS.indexOf(state.theme) >= 0;
 
-  // ---- 부트 캐시: 키가 지금 레코드와 맞고 계약을 전부 지킬 때만 ----------------------
+  // ---- 부트 캐시: 파생 테마이고, 키가 지금 레코드와 맞고, 계약을 전부 지킬 때만 ------------
   function cacheMatches(key) {
     var first = key.indexOf("|");
     if (first <= 0) return false;
@@ -251,7 +254,7 @@
         sound = CACHE_NAME_RE.test(names[n]) && typeof value === "string" && CACHE_VALUE_RE.test(value);
       }
       // 하나라도 계약을 어기면 일부만 꽂지 않고 통째로 버린다.
-      if (sound && cacheMatches(cache.key)) {
+      if (sound && !themeIsFirstParty && cacheMatches(cache.key)) {
         for (var m = 0; m < names.length; m++) {
           // 값은 위 문법(색 또는 light-dark 쌍)을 통과한 것뿐이고, 인라인 style 속성이 아니라 CSSOM 변수다.
           root.style.setProperty(names[m], cache.vars[names[m]]);
@@ -269,7 +272,6 @@
     else root.setAttribute(name, value);
   }
 
-  var themeIsFirstParty = THEME_IDS.indexOf(state.theme) >= 0;
   stamp(PALETTE_ATTR, themeIsFirstParty ? state.theme : DERIVED_PALETTE);
   stamp(REF_ATTR, state.theme);
   stamp(SIGNAL_ATTR, state.signal.stamp);

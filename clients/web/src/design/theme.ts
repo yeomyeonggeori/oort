@@ -214,7 +214,7 @@ export interface ApplyAppearanceOptions {
 /**
  * 외양 한 벌을 문서에 적용한다. 무엇을 찍는지는 core `rootStamp`의 표가 정하고 여기는 옮기기만
  * 한다. `data-glass`는 표에 없으므로 **건드리지 않는다**(켜는 것은 AP-3, 네이티브 효과가 선
- * 뒤에). 첫 파티 팔레트에서는 부트가 되꽂았던 캐시 변수가 정적 CSS를 가리지 않게 걷는다.
+ * 뒤에). 첫 파티 팔레트에서는 파생 테마였을 때 꽂힌 캐시 변수가 정적 CSS를 가리지 않게 걷는다.
  */
 export function applyAppearance(state: AppearanceState, options: ApplyAppearanceOptions = {}): void {
   const target = options.doc ?? (typeof document === "undefined" ? null : document);
@@ -276,7 +276,9 @@ function notify(): void {
  */
 function commit(next: AppearanceState): void {
   const prev = appearance;
-  const normalized = normalizeAppearance(next);
+  // 테마 참조의 문법은 core 의 일반 정규화가 모르는 웹의 몫이다: `updateAppearance`로 들어온 틀린 참조가
+  // 저장돼 다음 로드까지 `data-theme-ref`에 찍히지 않게 여기서 새벽하늘로 읽는다.
+  const normalized = normalizeAppearance({ ...next, theme: normalizeThemeRef(next.theme) });
   if (serializeAppearance(normalized) === serializeAppearance(prev)) return;
   appearance = normalized;
   writeStorage(normalized);

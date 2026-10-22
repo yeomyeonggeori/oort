@@ -24,8 +24,10 @@
 //      한쪽으로만 가는 스위치는 스위치가 아니다.
 //   ⑥ 외양 v2 (AP-1a #4186). ③과 같은 방법(번들을 붙잡고 첫 문서를 읽는다)으로 셋을 잰다.
 //      · v2 레코드의 아홉 속성(+ 옛 data-accent)이 번들보다 먼저 찍힌다(data-glass는 일부러 없다).
-//      · 부트 캐시(momo.web.theme.cache.v1)가 있으면 변수가 첫 페인트에 이미 꽂혀 있고,
-//        앱이 올라온 뒤 첫 파티 팔레트에서는 그 변수와 항목이 걷힌다(잔존 0).
+//      · 부트 캐시(momo.web.theme.cache.v1)는 파생 테마(catalog:·user:)의 것이다. 파생 테마의
+//        캐시가 있으면 변수가 첫 페인트에 이미 꽂혀 있고(앱이 올라온 뒤에도 그대로: 걷는 것은
+//        엔진의 몫), 첫 파티 팔레트는 캐시가 있어도 첫 페인트에 꽂지 않고 앱이 올라오면 낡은
+//        항목을 걷는다(잔존 0).
 //      · 캐시가 없으면 아무 변수도 없이 기본 테마로 서고 앱은 깨지지 않는다.
 //
 // 서버는 라우트 층에서 스텁된다(gate-ailink 전례). 이 게이트가 재는 것은 번들이
@@ -534,48 +536,66 @@ async function main() {
       }
 
       const INK = "light-dark(#16171b, #f1f1f3)";
-      const cacheKey = "1|dawnsky|-";
-      const cacheSeed = JSON.stringify({ key: cacheKey, vars: { "--ink": INK } });
-      // 캐시가 있다. red proof(THEME_GATE_PROVE_RED_CACHE)는 이 항목만 비운다.
+      const DERIVED = "catalog:nord";
+      const cacheOf = (theme) => JSON.stringify({ key: `1|${theme}|-`, vars: { "--ink": INK } });
+
+      // ① 파생 테마 + 캐시가 있다. red proof(THEME_GATE_PROVE_RED_CACHE)는 이 항목만 비운다.
       const withCache = await firstPaintFacts(browser, {
-        [V2_ENTRY]: v2Record(),
-        ...(proveRedCache ? {} : { [CACHE_ENTRY]: cacheSeed }),
+        [V2_ENTRY]: v2Record({ theme: DERIVED }),
+        ...(proveRedCache ? {} : { [CACHE_ENTRY]: cacheOf(DERIVED) }),
       });
       if (withCache.early.rendered) {
         fail("캐시 첫 페인트 창에서 앱이 이미 그려졌다. 이 창에서는 FOUC를 볼 수 없다.");
       }
+      if (withCache.early.attrs["data-palette"] !== "derived") {
+        fail(`파생 테마(${DERIVED}) 레코드의 첫 문서에 data-palette=${JSON.stringify(withCache.early.attrs["data-palette"])}다(derived여야 한다)`);
+      }
       if (withCache.early.vars["--ink"] !== INK) {
         fail(
           `번들이 도착하기 전의 문서에 캐시 변수가 없다(--ink=${JSON.stringify(withCache.early.vars["--ink"])}). ` +
-            `캐시가 있으면 /theme-boot.js가 첫 렌더 전에 setProperty로 되꽂아야 한다.`
+            `파생 테마의 캐시가 있으면 /theme-boot.js가 첫 렌더 전에 setProperty로 되꽂아야 한다.`
         );
       }
-      if (withCache.late.vars["--ink"] !== undefined || withCache.late.cache !== null) {
+      if (withCache.late.vars["--ink"] !== INK || withCache.late.cache === null) {
         fail(
-          `첫 파티 팔레트(dawnsky)인데 앱이 올라온 뒤에도 캐시 변수(${JSON.stringify(withCache.late.vars["--ink"])})나 ` +
-            `항목이 남았다. 정적 CSS가 색을 주므로 부트가 되꽂은 변수는 걷혀야 한다(잔존 0).`
+          `파생 팔레트인데 앱이 올라온 뒤 캐시 변수(${JSON.stringify(withCache.late.vars["--ink"])})나 항목이 걷혔다. ` +
+            `파생 엔진(AP-1b)이 인수하기 전까지 저장소는 파생 팔레트의 캐시를 건드리지 않는다.`
         );
       }
 
-      // 캐시가 없다: 변수 없이 기본 테마로 서고 앱은 깨지지 않는다.
-      const noCache = await firstPaintFacts(browser, { [V2_ENTRY]: v2Record() });
-      if (Object.keys(noCache.early.vars).length !== 0 || noCache.early.attrs["data-palette"] !== "dawnsky") {
-        fail(
-          `캐시가 없는데 첫 문서가 기본 테마가 아니다(vars=${JSON.stringify(noCache.early.vars)}, ` +
-            `data-palette=${JSON.stringify(noCache.early.attrs["data-palette"])})`
-        );
-      }
-      if (!noCache.late.rendered || noCache.late.attrs["data-palette"] !== "dawnsky") {
-        fail("캐시가 없을 때 앱이 기본 테마로 올라오지 못했다");
-      }
-
-      // 다른 테마의 캐시는 첫 페인트에 얹지 않는다(키가 맞지 않는다).
-      const stale = await firstPaintFacts(browser, {
+      // ② 첫 파티 레코드: 키가 맞는 캐시가 있어도 첫 페인트에 꽂지 않고, 앱이 올라오면 낡은 항목을 걷는다.
+      const firstParty = await firstPaintFacts(browser, {
         [V2_ENTRY]: v2Record(),
-        [CACHE_ENTRY]: JSON.stringify({ key: "1|catalog:nord|-", vars: { "--ink": INK } }),
+        [CACHE_ENTRY]: cacheOf("dawnsky"),
+      });
+      if (firstParty.early.vars["--ink"] !== undefined) {
+        fail(
+          "첫 파티 팔레트(dawnsky) 문서의 첫 페인트에 캐시 변수가 꽂혔다. 정적 CSS가 색을 주는 첫 파티는 " +
+            "캐시를 쓰지 않는다(첫 프레임에 캐시 색이 섰다가 걷히는 번쩍임이 생긴다)."
+        );
+      }
+      if (firstParty.late.cache !== null || firstParty.late.vars["--ink"] !== undefined) {
+        fail("첫 파티 팔레트인데 앱이 올라온 뒤에도 낡은 캐시 항목이나 인라인 변수가 남았다(잔존 0).");
+      }
+
+      // ③ 캐시가 없다(파생·첫 파티 둘 다): 변수 없이 기본 테마로 서고 앱은 깨지지 않는다.
+      for (const theme of ["dawnsky", DERIVED]) {
+        const noCache = await firstPaintFacts(browser, { [V2_ENTRY]: v2Record({ theme }) });
+        if (Object.keys(noCache.early.vars).length !== 0) {
+          fail(`캐시가 없는데(${theme}) 첫 문서에 인라인 변수가 있다(${JSON.stringify(noCache.early.vars)})`);
+        }
+        if (!noCache.late.rendered || noCache.late.attrs["data-theme-ref"] !== theme) {
+          fail(`캐시가 없을 때(${theme}) 앱이 올라오지 못했거나 테마 참조가 유지되지 않았다`);
+        }
+      }
+
+      // ④ 다른 테마의 캐시는 파생 테마 문서의 첫 페인트에도 얹지 않는다(키가 맞지 않는다).
+      const stale = await firstPaintFacts(browser, {
+        [V2_ENTRY]: v2Record({ theme: DERIVED }),
+        [CACHE_ENTRY]: cacheOf("catalog:dracula"),
       });
       if (stale.early.vars["--ink"] !== undefined) {
-        fail("키가 맞지 않는 캐시(catalog:nord)가 dawnsky 문서의 첫 페인트에 꽂혔다");
+        fail("키가 맞지 않는 캐시(catalog:dracula)가 catalog:nord 문서의 첫 페인트에 꽂혔다");
       }
 
       // v1만 있는 사람: 속성도 글꼴도 v2와 같은 규칙으로 선다(이행).
@@ -668,7 +688,7 @@ async function main() {
           `  첫 페인트 스탬프       ${early.stamp} (React 미렌더 상태에서 측정)`,
           `  첫 페인트 액센트       ${earlyAccent.accent} (시드 ${accentId}, 미렌더)`,
           `  첫 페인트 v2 속성      ${Object.keys(expectedAttrs).length}개 (아홉 + 옛 data-accent, data-glass 없음, 미렌더)`,
-          `  부트 캐시              있으면 첫 페인트에 --ink 꽂힘 · 앱 뒤 잔존 0 · 없으면 기본 테마`,
+          `  부트 캐시              파생 테마: 첫 페인트에 --ink 꽂힘 · 첫 파티: 안 꽂고 앱 뒤 항목 걷힘 · 없으면 기본 테마`,
           `  캡처                   ${systemShot}`,
           `                         ${lightShot}`,
           `                         ${darkShot}`,
