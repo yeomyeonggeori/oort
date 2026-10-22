@@ -33,7 +33,8 @@ import {
 //   · 자동 제출은 번들 코드가 한다(CSP 가 인라인 스크립트를 막는다). 막히면 같은 폼의 버튼이 폴백이다.
 //   · GitHub 에 이 페이지 주소를 알리지 않는다: 폼 `rel="noreferrer"` + 문서 `referrer` 정책(no-referrer).
 //
-// 인라인 스타일도 `location` 쓰기도 없다. 이 페이지는 네트워크 요청을 하지 않는다.
+// 인라인 스타일도 `location` 쓰기도 없다. 이 페이지 자신은 요청을 내지 않는다(조각은 어떤 요청에도 실려 가지
+// 않는다). 다만 App 이 세션 복원과 업데이트 감시를 이 페이지와 별개로 돌린다.
 // =============================================================================
 
 const REFUSAL_COPY: Readonly<Record<GithubHandoffRefusal, { line: string; detail: string }>> = {
