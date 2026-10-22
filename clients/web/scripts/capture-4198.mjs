@@ -18,7 +18,8 @@
 //                     가리키는 낱말이 실제 화면에 그대로 있는지 같은 번들에서 잰다.
 //
 //   dialog-short      낮은 창(가로 폰 667x375, 브라우저 200% 상당 720x395, 576x316, 320x480)에서 만든 직후 「닫기」가
-//                     화면 안에 있고 누를 수 있는가. Esc·바깥 클릭을 막은 분기의 유일한 출구다(design-review 2차 B1).
+//                     화면 안에 있고 누를 수 있는가(design-review 2차 B1), 그리고 Esc가 안 닫히는 이유를 말하는
+//                     경고가 첫 화면에 보이는가(3차 H1). 둘 다 Esc·바깥 클릭을 막은 분기의 몫이다.
 //   settings-pending  요청이 날아가는 동안(느린 응답) Esc가 설정을 닫지 않는가(design-review 2차 M-A).
 //
 // MODE=before / MODE=r2(1차 검수 때의 번들) 는 같은 단정을 **기록만** 한다(변경 전 번들은 빨간 것이 정상이다).
@@ -230,6 +231,22 @@ const SCENES = [
       check(tag, "완료 직후 초점이 대화상자 안에 있다(<body>로 떨어지지 않았다)", active.inDialog, active);
       check(tag, "완료 직후 초점이 이름 붙은 완료 묶음(role=group)에 있다(대화상자 껍데기가 아니다)",
         active.testid === "add-workspace-created" && active.role === "group", active);
+      const slots = await page.evaluate(() => {
+        const notice = document.querySelector("[data-testid=add-workspace-created-notice]");
+        const idNode = document.querySelector("[data-testid=add-workspace-created-id]");
+        const guide = document.querySelector("[data-testid=add-workspace-created-guide]");
+        const group = document.querySelector("[data-testid=add-workspace-created]");
+        const scroller = group?.closest(".overflow-y-auto");
+        const follows = (a, b) => Boolean(a && b && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING));
+        return {
+          noticeBeforeId: follows(notice, idNode),
+          guideAfterId: follows(idNode, guide),
+          noticeOutsideScroller: Boolean(notice && scroller && !scroller.contains(notice)),
+          describedByNotice: Boolean(notice && group?.getAttribute("aria-describedby") === notice.id),
+        };
+      });
+      check(tag, "경고는 값보다 앞이고 스크롤 상자 밖 고정 머리에 있으며 방법은 값 뒤다(집의 한 번만 보이는 값 모양)",
+        slots.noticeBeforeId && slots.guideAfterId && slots.noticeOutsideScroller && slots.describedByNotice, slots);
 
       if (hasCopy) {
         const dBox = await dialog.boundingBox();
@@ -298,6 +315,15 @@ const SCENES = [
       await page.waitForTimeout(300);
 
       const card = page.getByTestId("workspace-created");
+      const settingsSlots = await page.evaluate(() => {
+        const card = document.querySelector("[data-testid=workspace-created]");
+        const notice = [...(card?.querySelectorAll("p") ?? [])].find((node) => node.textContent?.includes("다시 볼 수 없"));
+        const idNode = document.querySelector("[data-testid=workspace-created-id]");
+        const guide = document.querySelector("[data-testid=workspace-created-guide]");
+        const follows = (a, b) => Boolean(a && b && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING));
+        return { noticeBeforeId: follows(notice, idNode), guideAfterId: follows(idNode, guide) };
+      });
+      check(tag, "설정 카드도 경고는 값보다 앞이고 방법은 값 뒤다(레일 패널과 같은 자리)", settingsSlots.noticeBeforeId && settingsSlots.guideAfterId, settingsSlots);
       const activeSettings = await describeActive(page);
       report.notes.push({ tag, scene: "settings-created", activeElementAfterCreate: activeSettings });
       check(tag, "설정 완료 직후 초점이 이름 붙은 완료 묶음(role=group)에 있다",
@@ -486,8 +512,37 @@ async function shortViewports(browser, origin) {
         const box = group?.closest(".overflow-y-auto");
         return box ? { scrollHeight: box.scrollHeight, clientHeight: box.clientHeight } : null;
       });
-      report.notes.push({ tag, scene: "dialog-short", doneBox: box, viewport: size, scroller });
+      // 경고(고정 머리의 설명)가 첫 화면에 보이는가: Esc·바깥 클릭을 막은 이유를 말하는 문장이라
+      // 접힌 아래로 사라지면 눈에 보이는 컨트롤이 되돌릴 수 없는 「닫기」 하나가 된다.
+      const noticeProbe = await page.evaluate(() => {
+        const el = document.querySelector("[data-testid=add-workspace-created-notice]");
+        if (!el) return null;
+        const rects = [...el.getClientRects()];
+        const first = rects[0];
+        const last = rects[rects.length - 1];
+        const probe = document.elementFromPoint(first.left + Math.min(first.width / 2, 40), first.top + first.height / 2);
+        return {
+          firstTop: Math.round(first.top),
+          lastBottom: Math.round(last.bottom),
+          innerHeight: window.innerHeight,
+          hit: probe === el || Boolean(el.contains(probe)),
+        };
+      });
+      const noticeVisible = noticeProbe !== null && noticeProbe.firstTop >= 0 && noticeProbe.lastBottom <= noticeProbe.innerHeight && noticeProbe.hit;
+      // 「복사」가 스크롤 상자의 보이는 영역 안에 있는가(뷰포트가 아니라 상자 기준: 상자 밖으로 잘린 단추도
+      // 뷰포트 좌표로는 안에 있을 수 있다). 판정에 쓰지 않고 기록만 한다.
+      const copyProbe = await page.evaluate(() => {
+        const copy = document.querySelector("[data-testid=add-workspace-created-copy]");
+        const scrollBox = document.querySelector("[data-testid=add-workspace-created]")?.closest(".overflow-y-auto");
+        if (!copy || !scrollBox) return null;
+        const c = copy.getBoundingClientRect();
+        const b = scrollBox.getBoundingClientRect();
+        return { top: Math.round(c.top), bottom: Math.round(c.bottom), boxTop: Math.round(b.top), boxBottom: Math.round(b.bottom), inside: c.top >= b.top && c.bottom <= b.bottom };
+      });
+      const copyInFirstScreen = copyProbe?.inside ?? false;
+      report.notes.push({ tag, scene: "dialog-short", doneBox: box, viewport: size, scroller, noticeProbe, copyInFirstScreen, copyProbe });
       check(tag, `낮은 창 ${vp.w}x${vp.h}: 「닫기」가 화면 안에 있고 실제로 눌린다`, inside && hit, { inside, hit, box, viewport: size, scroller });
+      check(tag, `낮은 창 ${vp.w}x${vp.h}: 경고(Esc가 안 닫히는 이유)가 첫 화면에 온전히 보인다`, noticeVisible, { noticeProbe, copyInFirstScreen, copyProbe });
       await shot(page, tag, "dialog-short");
     } catch (error) {
       await page.screenshot({ path: resolve(OUT_DIR, `FAIL-${MODE}-${tag}.png`) }).catch(() => {});

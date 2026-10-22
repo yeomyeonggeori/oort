@@ -57,7 +57,10 @@ import {
   welcomePromptTooLong,
 } from "@/features/welcome/welcomeKickoff";
 import { CopyButton, Field, OperatorNotice, SaveButton } from "./SettingsFields";
-import { NEW_WORKSPACE_ENTRY_TEXT } from "@/features/auth/loginWorkspaceEntry";
+import {
+  NEW_WORKSPACE_ENTRY_GUIDE,
+  NEW_WORKSPACE_ID_ONCE_NOTICE,
+} from "@/features/auth/loginWorkspaceEntry";
 import { useEscapeGuard } from "@/design/ui/escapeLayer";
 import { Switch } from "@/design/ui/switch";
 import { SettingsRow } from "./shell/SettingsRow";
@@ -1376,8 +1379,14 @@ export function WorkspaceSection({
         >
           <SettingsSection
             title={`${created.name} 워크스페이스를 만들었어요.`}
-            description={NEW_WORKSPACE_ENTRY_TEXT}
+            description={NEW_WORKSPACE_ID_ONCE_NOTICE}
           >
+            <WorkspaceIdRow
+              id={created.workspaceId}
+              valueTestId="workspace-created-id"
+              copyTestId="workspace-created-copy"
+              strong
+            />
             <SettingsRow label="슬러그" keep>
               <span
                 className="min-w-0 break-all font-mono text-meta text-ink-muted"
@@ -1386,12 +1395,13 @@ export function WorkspaceSection({
                 {created.slug}
               </span>
             </SettingsRow>
-            <WorkspaceIdRow
-              id={created.workspaceId}
-              valueTestId="workspace-created-id"
-              copyTestId="workspace-created-copy"
-              strong
-            />
+            {/* 방법은 값 뒤, 경고(카드 위 설명)는 값 앞: 레일 패널과 같은 자리다. */}
+            <div
+              className="break-keep px-4 py-3 text-meta text-ink-muted"
+              data-testid="workspace-created-guide"
+            >
+              {NEW_WORKSPACE_ENTRY_GUIDE}
+            </div>
             <div className="flex flex-wrap items-center justify-end gap-2 px-4 py-3">
               <Button
                 type="button"

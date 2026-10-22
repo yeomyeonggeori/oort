@@ -18,7 +18,10 @@ import {
   KeyValueRows,
   OperatorNotice,
 } from "@/features/settings/SettingsFields";
-import { NEW_WORKSPACE_ENTRY_TEXT } from "@/features/auth/loginWorkspaceEntry";
+import {
+  NEW_WORKSPACE_ENTRY_GUIDE,
+  NEW_WORKSPACE_ID_ONCE_NOTICE,
+} from "@/features/auth/loginWorkspaceEntry";
 import { PRIMARY_ACTION_SHORTCUT } from "@/app/keyboardShortcuts";
 import {
   createWorkspace,
@@ -145,6 +148,7 @@ function AddWorkspacePanel({
   const formRef = useRef<HTMLFormElement>(null);
   const createdRef = useRef<HTMLDivElement>(null);
   const createdHeadlineId = useId();
+  const createdNoticeId = useId();
 
   // 만든 직후 초점이 완료 묶음으로 간다. 눌렀던 「워크스페이스 만들기」는 사라졌고, 이 묶음이
   // 값을 볼 수 있는 유일한 순간이다. 이름이 낭독되고 그다음 Tab이 「복사」다.
@@ -238,8 +242,22 @@ function AddWorkspacePanel({
     >
       <div className="flex flex-col gap-1 border-b border-line p-4">
         <DialogTitle>워크스페이스 추가</DialogTitle>
+        {/* 만든 뒤에는 폼 설명이 쓸모없어서 그 자리를 경고가 쓴다. 고정 머리라 스크롤 상자 밖이고,
+            값보다 앞이며, 어떤 창 높이에서도 보인다: Esc·바깥 클릭을 막은 이유(이 ID는 다시 볼 수
+            없다)를 말하는 문장이 접힌 아래로 사라지면 눈에 보이는 컨트롤이 되돌릴 수 없는 「닫기」
+            하나가 된다(design-review 3차 H1, 실측). */}
         <DialogDescription>
-          새 워크스페이스를 만들거나, 초대를 받았다면 초대 링크로 참여해요.
+          {created ? (
+            <span
+              id={createdNoticeId}
+              className="break-keep"
+              data-testid="add-workspace-created-notice"
+            >
+              {NEW_WORKSPACE_ID_ONCE_NOTICE}
+            </span>
+          ) : (
+            "새 워크스페이스를 만들거나, 초대를 받았다면 초대 링크로 참여해요."
+          )}
         </DialogDescription>
       </div>
 
@@ -249,7 +267,9 @@ function AddWorkspacePanel({
               이 분기는 Esc·바깥 클릭을 막으므로 「닫기」가 유일한 출구인데, 스크롤 상자가 없으면
               패널 높이 상한(`dialog-panel`, 창 높이 - 64px) 아래로 내용이 흘러내려 낮은 창(가로
               폰 667x375, 브라우저 200%)에서 출구가 화면 밖에 걸린다(design-review 2차 B1, 실측). */}
-          <div className="flex min-h-0 flex-col gap-3 overflow-y-auto p-4">
+          {/* `scrollbar-visible`: 오버레이 스크롤바는 스크롤을 시작해야 보여서, 상자가 넘친다는 신호가
+              없으면 패널이 끝난 것처럼 읽힌다(집의 이름 붙은 처방, MOMO-620 R2). */}
+          <div className="scrollbar-visible flex min-h-0 flex-col gap-3 overflow-y-auto p-4">
             {/* `role="status"`가 아니라 이름 붙은 `group`이다: status는 암묵적 live region이라
                 36자 ID와 안내가 뜨는 순간 통째로 낭독된다. 도착했다는 사실은 초점이 이 묶음에
                 들어올 때 이름(헤드라인)으로 말한다(OneTimeSecretCard·웹훅 발급 카드와 같은 규칙). */}
@@ -258,6 +278,7 @@ function AddWorkspacePanel({
               tabIndex={-1}
               role="group"
               aria-labelledby={createdHeadlineId}
+              aria-describedby={createdNoticeId}
               className="flex flex-col gap-3 rounded-md border border-ok bg-surface-raised p-4 focus-visible:focus-ring"
               data-testid="add-workspace-created"
             >
@@ -273,17 +294,6 @@ function AddWorkspacePanel({
                   단추가 달아나고 대화상자가 44px 늘어난다, 실측). */}
               <KeyValueRows
                 rows={[
-                  {
-                    key: "슬러그",
-                    value: (
-                      <span
-                        className="font-mono text-meta text-ink-muted"
-                        data-numeric=""
-                      >
-                        {created.slug}
-                      </span>
-                    ),
-                  },
                   {
                     key: "워크스페이스 ID",
                     value: (
@@ -306,13 +316,24 @@ function AddWorkspacePanel({
                       </span>
                     ),
                   },
+                  {
+                    key: "슬러그",
+                    value: (
+                      <span
+                        className="font-mono text-meta text-ink-muted"
+                        data-numeric=""
+                      >
+                        {created.slug}
+                      </span>
+                    ),
+                  },
                 ]}
               />
               <p
                 className="break-keep text-meta text-ink-muted"
                 data-testid="add-workspace-created-guide"
               >
-                {NEW_WORKSPACE_ENTRY_TEXT}
+                {NEW_WORKSPACE_ENTRY_GUIDE}
               </p>
             </div>
           </div>

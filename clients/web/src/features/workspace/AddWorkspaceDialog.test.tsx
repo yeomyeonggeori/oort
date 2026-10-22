@@ -7,7 +7,6 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import {
   NEW_WORKSPACE_ENTRY_GUIDE,
-  NEW_WORKSPACE_ENTRY_TEXT,
   NEW_WORKSPACE_ID_ONCE_NOTICE,
 } from "@/features/auth/loginWorkspaceEntry";
 import { AddWorkspaceDialog, type WorkspaceDraft } from "./AddWorkspaceDialog";
@@ -217,10 +216,10 @@ describe("워크스페이스 추가 완료 패널 (#4198)", () => {
 
   it("안내는 로그인 화면이 실제로 받는 길을 이름으로 말하고, 슬러그로 들어간다고 하지 않는다", async () => {
     await createThroughTheDialog();
-    const text = q("add-workspace-created")?.textContent ?? "";
+    // 대화상자 전체: 경고는 머리의 설명이고 방법은 완료 묶음 안이다.
+    const text = q("add-workspace-dialog")?.textContent ?? "";
 
-    expect(q("add-workspace-created-guide")?.textContent).toBe(NEW_WORKSPACE_ENTRY_TEXT);
-    expect(text).toContain(NEW_WORKSPACE_ENTRY_GUIDE);
+    expect(q("add-workspace-created-guide")?.textContent).toBe(NEW_WORKSPACE_ENTRY_GUIDE);
     // 두 낱말은 로그인 화면(ConnectPage)의 접힘 단추·칸 이름이다. ConnectPage.test.tsx가 그쪽 글자를
     // 따로 고정하므로 어느 한쪽만 바뀌면 둘 중 하나가 빨개진다.
     expect(text).toContain("로그아웃한 뒤");
@@ -235,11 +234,33 @@ describe("워크스페이스 추가 완료 패널 (#4198)", () => {
 
   it("한 번만 보인다는 사실을 말한다: 이 화면을 벗어나면 ID를 다시 볼 수 없다", async () => {
     await createThroughTheDialog();
-    const text = q("add-workspace-created")?.textContent ?? "";
-    expect(text).toContain(NEW_WORKSPACE_ID_ONCE_NOTICE);
+    const notice = q("add-workspace-created-notice");
+    expect(notice?.textContent).toBe(NEW_WORKSPACE_ID_ONCE_NOTICE);
     // 문장이 바뀌어도 사실과 행동(벗어나기 전에 복사)은 남아야 한다.
-    expect(text).toContain("다시 볼 수 없");
-    expect(text).toContain("복사해 두세요");
+    expect(notice?.textContent).toContain("다시 볼 수 없");
+    expect(notice?.textContent).toContain("복사해 두세요");
+    // 폼 설명(「새 워크스페이스를 만들거나 …」)은 만든 뒤에 쓸모가 없어서 그 자리를 경고가 쓴다.
+    expect(q("add-workspace-dialog")?.textContent).not.toContain("초대 링크로 참여해요");
+  });
+
+  it("경고는 값보다 앞에 서고 스크롤 상자 밖 고정 머리에 있다(낮은 창에서도 보인다), 방법은 값 뒤다", async () => {
+    await createThroughTheDialog();
+    const group = q("add-workspace-created");
+    const notice = q("add-workspace-created-notice");
+    const id = q("add-workspace-created-id");
+    const guide = q("add-workspace-created-guide");
+    expect(notice && id && guide).toBeTruthy();
+    // 한 번만 보이는 값의 집 모양: 경고가 값보다 앞이다(OneTimeSecretCard·웹훅 발급 카드). 경고가 값
+    // 뒤에 서면 낮은 창에서 접힌 아래로 사라져 Esc가 왜 안 닫히는지의 이유가 보이지 않는다
+    // (design-review 3차 H1, 실측).
+    expect(notice!.compareDocumentPosition(id!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(id!.compareDocumentPosition(guide!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // 경고는 스크롤 상자 밖이다: 내용이 스크롤돼도 늘 화면에 있다.
+    const scroller = group?.closest(".overflow-y-auto") ?? null;
+    expect(scroller).not.toBeNull();
+    expect(scroller?.contains(notice ?? null)).toBe(false);
+    // 초점이 묶음에 도착할 때 경고가 이름 다음에 낭독된다.
+    expect(group?.getAttribute("aria-describedby")).toBe(notice?.id);
   });
 
   it("완료 직후 초점이 이름 붙은 완료 묶음으로 간다(눌렀던 만들기 단추는 사라졌다)", async () => {

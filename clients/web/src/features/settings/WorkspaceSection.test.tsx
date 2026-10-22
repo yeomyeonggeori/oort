@@ -13,7 +13,6 @@ import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { workspaceIdentityKey } from "@/features/workspace/useWorkspace";
 import {
   NEW_WORKSPACE_ENTRY_GUIDE,
-  NEW_WORKSPACE_ENTRY_TEXT,
   NEW_WORKSPACE_ID_ONCE_NOTICE,
 } from "@/features/auth/loginWorkspaceEntry";
 import { escapeIsClaimed } from "@/design/ui/escapeLayer";
@@ -804,7 +803,9 @@ describe("새 워크스페이스 완료 카드 (#4198)", () => {
     await createNewTeam(host);
 
     const text = host.querySelector('[data-testid="workspace-created"]')?.textContent ?? "";
-    expect(text).toContain(NEW_WORKSPACE_ENTRY_TEXT);
+    expect(host.querySelector('[data-testid="workspace-created-guide"]')?.textContent).toBe(
+      NEW_WORKSPACE_ENTRY_GUIDE
+    );
     expect(text).toContain(NEW_WORKSPACE_ENTRY_GUIDE);
     expect(text).toContain("「다른 워크스페이스로 로그인」");
     expect(text).toContain("워크스페이스 ID 칸");
@@ -820,6 +821,22 @@ describe("새 워크스페이스 완료 카드 (#4198)", () => {
     expect(text).toContain(NEW_WORKSPACE_ID_ONCE_NOTICE);
     expect(text).toContain("다시 볼 수 없");
     expect(text).toContain("복사해 두세요");
+  });
+
+  it("경고는 값보다 앞(카드 위 설명), 방법은 값 뒤다(레일 패널과 같은 자리)", async () => {
+    const host = mountSection({ role: "owner" });
+    await createNewTeam(host);
+    const card = host.querySelector('[data-testid="workspace-created"]') as HTMLElement;
+    const notice = [...card.querySelectorAll("p")].find(
+      (node) => node.textContent === NEW_WORKSPACE_ID_ONCE_NOTICE
+    );
+    const id = host.querySelector('[data-testid="workspace-created-id"]');
+    const guide = host.querySelector('[data-testid="workspace-created-guide"]');
+    expect(notice && id && guide).toBeTruthy();
+    // 한 번만 보이는 값의 집 모양은 경고가 값보다 앞이다. 레일 패널(`AddWorkspaceDialog.test.tsx`)과
+    // 같은 자리여야 같은 문장이 두 표면에서 다른 자리에 서는 어긋남이 없다(design-review 3차 H1).
+    expect(notice!.compareDocumentPosition(id!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(id!.compareDocumentPosition(guide!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("나타나는 즉시 이름 붙은 묶음으로 초점이 가고 화면 안으로 들어온다(접힌 아래에 뜨기 때문)", async () => {

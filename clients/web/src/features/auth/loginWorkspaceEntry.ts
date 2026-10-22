@@ -37,8 +37,7 @@ export const NEW_WORKSPACE_ENTRY_GUIDE = `들어가려면 로그아웃한 뒤 �
 export const NEW_WORKSPACE_ID_ONCE_NOTICE =
   "이 화면을 벗어나면 ID를 다시 볼 수 없으니 지금 복사해 두세요.";
 
-/**
- * 두 완료 표면이 한 문단으로 말하는 전체. 급한 것이 먼저다: 지금 복사해야 하는 이유, 그다음
- * 어떻게 들어가는지(한 번만 보이는 값의 집 모양은 경고가 값보다 앞에 선다).
- */
-export const NEW_WORKSPACE_ENTRY_TEXT = `${NEW_WORKSPACE_ID_ONCE_NOTICE} ${NEW_WORKSPACE_ENTRY_GUIDE}`;
+// 두 완료 표면의 자리: 경고(`NEW_WORKSPACE_ID_ONCE_NOTICE`)는 값보다 **앞**, 늘 보이는 자리에 선다
+// (레일 패널은 고정 머리의 설명, 설정 카드는 카드 위 설명). 방법(`NEW_WORKSPACE_ENTRY_GUIDE`)은
+// 값 **뒤**다. 한 번만 보이는 값의 집 모양이 경고가 값보다 앞이기 때문이고, 경고가 값 뒤에 서면
+// 낮은 창에서 접힌 아래로 사라져 「왜 Esc가 안 닫히나」의 이유가 보이지 않는다(design-review 3차 H1).
