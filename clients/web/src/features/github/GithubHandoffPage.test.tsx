@@ -159,6 +159,15 @@ describe("GitHub 앱 만들기 핸드오프 페이지: GitHub 로 POST", () => {
     expect(submitted).toHaveLength(1);
   });
 
+  it("GitHub 로 가는 이동에 이 페이지 주소를 싣지 않게 문서 referrer 정책을 건다(떠나면 걷는다)", () => {
+    expect(document.head.querySelector('meta[name="referrer"]')).toBeNull();
+    mountAt(goodHash());
+    expect(document.head.querySelector('meta[name="referrer"]')?.getAttribute("content")).toBe("no-referrer");
+    act(() => root?.unmount());
+    root = null;
+    expect(document.head.querySelector('meta[name="referrer"]')).toBeNull();
+  });
+
   it("자동 제출이 막히는 환경을 위한 수동 버튼이 같은 폼에 있다", () => {
     mountAt(goodHash());
     const form = q("github-handoff-form") as HTMLFormElement;

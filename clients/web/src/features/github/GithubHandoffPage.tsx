@@ -31,7 +31,7 @@ import {
 //     「한 번만 열 수 있어요」가 서는 것이 의도다.
 //   · 이 서버의 것이 아닌 매니페스트는 폼을 만들기 전에 거절한다(`readGithubHandoff`).
 //   · 자동 제출은 번들 코드가 한다(CSP 가 인라인 스크립트를 막는다). 막히면 같은 폼의 버튼이 폴백이다.
-//   · 폼에 `rel="noreferrer"`: GitHub 에 이 페이지 주소를 알리지 않는다.
+//   · GitHub 에 이 페이지 주소를 알리지 않는다: 폼 `rel="noreferrer"` + 문서 `referrer` 정책(no-referrer).
 //
 // 인라인 스타일도 `location` 쓰기도 없다. 이 페이지는 네트워크 요청을 하지 않는다.
 // =============================================================================
@@ -81,6 +81,16 @@ export function GithubHandoffPage() {
   // 첫 페인트 전에 조각을 지운다. 두 번 불려도 같은 결과다.
   useLayoutEffect(() => {
     scrubFragment();
+  }, []);
+
+  // GitHub 로 가는 이동에 이 페이지의 주소를 실어 보내지 않는다. 폼의 `rel="noreferrer"` 를 모르는
+  // 엔진이 있어(실측: 캡처의 Chromium 은 오리진만 보냈다) 문서 정책으로도 한 번 더 건다.
+  useEffect(() => {
+    const meta = document.createElement("meta");
+    meta.name = "referrer";
+    meta.content = "no-referrer";
+    document.head.append(meta);
+    return () => meta.remove();
   }, []);
 
   // 자동 제출은 한 번뿐이다(뒤로 가기로 돌아와도 다시 쏘지 않는다: 그때는 버튼이 폴백이다).

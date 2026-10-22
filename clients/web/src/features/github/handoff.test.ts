@@ -132,6 +132,24 @@ describe("핸드오프 주소: opener 한도 안에 든다", () => {
     const url = builtUrl();
     expect(url).toMatch(/^https:\/\/[A-Za-z0-9.:-]+\/github\/handoff#[A-Za-z0-9_-]+$/);
   });
+
+  it("셸의 거름 목록(opener.rs)이 이 주소의 어떤 글자도 거르지 않고, 조각 글자 #도 거르지 않는다", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const rust = readFileSync(resolve(__dirname, "../../../../desktop/src-tauri/src/opener.rs"), "utf8");
+    const list = /const SHELL_METACHARACTERS: \[char; \d+\] = \[([^\]]*)\];/.exec(rust)?.[1] ?? "";
+    // 목록을 못 읽으면 시험이 아무것도 재지 못한다: 읽었다는 것부터 단정한다.
+    const blocked = [...list.matchAll(/'(\\.|[^'\\])'/g)].map((m) => (m[1].startsWith("\\") ? m[1].slice(1) : m[1]));
+    expect(blocked.length).toBeGreaterThanOrEqual(7);
+    const url = builtUrl();
+    for (const char of new Set(url)) {
+      expect(blocked, `opener 가 거르는 글자 ${JSON.stringify(char)}`).not.toContain(char);
+    }
+    expect(blocked).not.toContain("#");
+    // https 만 연다.
+    expect(rust).toContain('url.starts_with("https://")');
+    expect(url.startsWith("https://")).toBe(true);
+  });
 });
 
 describe("핸드오프 주소: 보낼 수 없는 매니페스트는 만들지 않는다", () => {

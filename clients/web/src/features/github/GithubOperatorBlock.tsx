@@ -112,7 +112,16 @@ function RegisteredApp({ status }: { status: GithubAppStatus }) {
     <div className="flex min-w-0 flex-col gap-3" data-testid="github-app-registered">
       <KeyValueRows
         rows={[
-          { key: "앱", value: app.slug },
+          {
+            key: "앱",
+            // 브라우저에서 돌아온 데스크탑 창이 다시 읽으면 이 줄이 「등록됨」으로 선다(#4220).
+            value: (
+              <span className="inline-flex min-w-0 flex-wrap items-center gap-2">
+                <span className="min-w-0 break-all">{app.slug}</span>
+                <StatusChip tone="ok">등록됨</StatusChip>
+              </span>
+            ),
+          },
           { key: "만든 계정", value: `${app.ownerLogin} (${app.ownerType === "Organization" ? "조직" : "개인"})` },
           ...(app.createdAtMs > 0 ? [{ key: "만든 날", value: formatDay(app.createdAtMs) }] : []),
           { key: "받는 권한", value: permissionLabels(status.permissions).join(", "), prose: true },

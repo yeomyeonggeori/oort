@@ -5,7 +5,6 @@ import {
   type GithubReturnKind,
 } from "@momo/core/features/github/model";
 import { expressionForState, type GuideState } from "@momo/core/features/onboarding/guide";
-import { Button } from "@/design/ui/button";
 import { KomettoGuide } from "@/features/onboarding/guide/KomettoGuide";
 import { OnboardingColumn, OnboardingFrame } from "@/features/onboarding/guide/OnboardingFrame";
 
@@ -65,13 +64,13 @@ export function GithubPublicReturn({ returned }: { returned: { kind: GithubRetur
           </p>
           <p className="break-keep text-meta text-ink-muted">이 창은 닫아도 돼요.</p>
         </div>
-        <div className="flex">
-          <Button asChild variant="ghost" size="sm">
-            <a href="/" data-testid="github-public-return-login">
-              이 브라우저에서 로그인
-            </a>
-          </Button>
-        </div>
+        <a
+          href="/"
+          className="tap-target press inline-flex w-fit items-center rounded-sm text-meta font-semibold text-signal-text underline underline-offset-4 focus-visible:focus-ring"
+          data-testid="github-public-return-login"
+        >
+          이 브라우저에서 로그인
+        </a>
       </OnboardingColumn>
     </OnboardingFrame>
   );

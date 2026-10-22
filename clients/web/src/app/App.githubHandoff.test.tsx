@@ -26,11 +26,17 @@ vi.mock("@/features/chat/ChatShell", () => ({
   ChatShell: () => createElement("div", { "data-testid": "channel-list" }, "shell"),
 }));
 
+// 셸이 받은 로그아웃을 시험이 부른다(로그인된 채 돌아온 사람이 나중에 로그아웃하는 길).
+const shell = vi.hoisted(() => ({ logout: null as null | (() => void) }));
+
 vi.mock("@/app/AppShell", async () => {
   const { createElement: h } = await import("react");
   const { Outlet } = await import("react-router-dom");
   return {
-    AppShell: () => h("div", { "data-testid": "app-shell" }, h(Outlet)),
+    AppShell: ({ onLogout }: { onLogout: () => void }) => {
+      shell.logout = onLogout;
+      return h("div", { "data-testid": "app-shell" }, h(Outlet));
+    },
   };
 });
 
@@ -105,6 +111,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   submitted.length = 0;
+  shell.logout = null;
   sessionStorage.clear();
   clearPhoneLinkCardForTests(session.member.workspaceId);
   clearSession();
@@ -227,6 +234,22 @@ describe("App: 로그인 안 된 브라우저의 GitHub 착지 (#4220)", { timeo
 
   it("단어 없는 첫 화면은 그대로 로그인 화면이다", async () => {
     const host = await mountApp();
+    expect(at(host, "github-public-return")).toBeNull();
+    expect(at(host, "onboarding-welcome")).not.toBeNull();
+  });
+
+  it("로그인된 채 돌아온 사람이 나중에 로그아웃해도 그 착지가 다시 서지 않는다(로그인 화면)", async () => {
+    applyLogin(session);
+    window.history.replaceState(null, "", "/?githubApp=created");
+    const host = await mountApp();
+    await vi.waitFor(() => {
+      expect(at(host, "ai-hub-route-stub")).not.toBeNull();
+    });
+    expect(shell.logout).not.toBeNull();
+    await act(async () => {
+      shell.logout?.();
+    });
+    // 이 단정이 「세션이 선 뒤 붙든 단어를 버리지 않으면 빨개지는」 사보타주 대상이다.
     expect(at(host, "github-public-return")).toBeNull();
     expect(at(host, "onboarding-welcome")).not.toBeNull();
   });

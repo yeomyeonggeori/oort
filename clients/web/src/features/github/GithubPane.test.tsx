@@ -162,6 +162,7 @@ describe("운영자 구역", () => {
     expect(q("github-receive-ok")?.textContent).toContain("사라지고");
     expect(q("github-app-registered")?.textContent).toContain("코드(contents)");
     expect(q("github-app-registered")?.textContent).toContain("쓰기 권한은 없어요");
+    expect(q("github-app-registered")?.textContent).toContain("등록됨");
   });
 
   it("운영자가 아니면(403) 이 구역은 비어 있고 워크스페이스 구역만 선다", async () => {
@@ -481,6 +482,7 @@ describe("운영자 구역: 데스크탑 셸은 기본 브라우저로 GitHub �
     expect(q("github-app-register")).toBeNull();
     expect(q("github-manifest-browser")).toBeNull();
     expect(q("github-app-registered")?.textContent).toContain("oort-yeomyeonggeori");
+    expect(q("github-app-registered")?.textContent).toContain("등록됨");
   });
 
   it("보임으로 돌아온 신호도 같은 손잡이이고, 연달아 와도 한 번만 읽는다", async () => {

@@ -165,8 +165,10 @@ export function App() {
   const [firstRunTick, setFirstRunTick] = useState(0);
   // GitHub 에서 돌아온 주소의 단어(`?githubApp=`·`?githubInstall=`)는 첫 렌더에 한 번만 읽어 붙든다.
   // 로그인 안 된 브라우저의 착지가 읽은 뒤 주소에서 지우기 때문이다(#4220). 로그인된 브라우저는 이
-  // 값을 쓰지 않고 `GithubReturnLanding` 이 주소를 직접 읽는다: 웹 동작은 그대로다.
-  const [publicGithubReturn] = useState(() => githubReturnFromSearch(window.location.search));
+  // 값을 쓰지 않고 `GithubReturnLanding` 이 주소를 직접 읽는다: 웹 동작은 그대로다. 세션이 한 번이라도
+  // 서면 붙든 단어를 버린다: 그 단어는 이미 GitHub 알림 화면의 것이고, 나중에 로그아웃해도 이 착지가
+  // 다시 서면 안 된다.
+  const [publicGithubReturn, setPublicGithubReturn] = useState(() => githubReturnFromSearch(window.location.search));
   useSyncExternalStore(subscribeFirstRun, snapshotFirstRun, snapshotFirstRun);
   useSyncExternalStore(
     subscribeOwnerOnboarding,
@@ -203,6 +205,10 @@ export function App() {
     if (session && isClaimPath(window.location.pathname)) {
       window.history.replaceState(null, "", "/");
     }
+  }, [session]);
+
+  useEffect(() => {
+    if (session) setPublicGithubReturn(null);
   }, [session]);
 
   useEffect(() => {
