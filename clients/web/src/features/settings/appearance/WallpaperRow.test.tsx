@@ -157,6 +157,8 @@ function mount(tree: ReactElement): HTMLElement {
 
 const q = (host: HTMLElement, testId: string) => host.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
 const radio = (host: HTMLElement, testId: string) => q(host, testId) as HTMLInputElement;
+/** 알림 영역의 문장. 영역은 늘 DOM에 있고(보조기기가 읽도록) 말할 것이 없으면 빈 문자열이다. */
+const statusText = (host: HTMLElement) => q(host, "wallpaper-status")?.textContent ?? null;
 const stored = () => JSON.parse(localStorage.getItem(APPEARANCE_STORAGE_KEY) ?? "null") as { wallpaper?: WallpaperRef } | null;
 
 function pick(host: HTMLElement, testId: string) {
@@ -276,7 +278,7 @@ describe("내 사진", () => {
     expect(radio(host, "wallpaper-photo").checked).toBe(true);
     expect(q(host, "wallpaper-pick-photo")?.textContent).toContain(WALLPAPER_COPY.pickAnotherPhoto);
     expect(host.textContent).toContain(WALLPAPER_COPY.replaceNote);
-    expect(q(host, "wallpaper-status")).toBeNull();
+    expect(statusText(host)).toBe("");
   });
 
   it("같은 사진을 다시 골라도 변경 이벤트가 오도록 입력을 비운다", async () => {
@@ -320,9 +322,9 @@ describe("내 사진", () => {
     fake.decode = "null";
     const host = mount(createElement(WallpaperRow));
     await chooseFile(host, jpeg());
-    expect(q(host, "wallpaper-status")).not.toBeNull();
+    expect(statusText(host)).not.toBe("");
     pick(host, "wallpaper-preset-bam");
-    expect(q(host, "wallpaper-status")).toBeNull();
+    expect(statusText(host)).toBe("");
   });
 
   it("파일 선택을 취소하면(파일 없음) 아무 일도 없다", async () => {
@@ -333,7 +335,7 @@ describe("내 사진", () => {
       input.dispatchEvent(new Event("change", { bubbles: true }));
     });
     expect(stored()?.wallpaper).toBeUndefined();
-    expect(q(host, "wallpaper-status")).toBeNull();
+    expect(statusText(host)).toBe("");
   });
 
   it("사진 선택에서 단색으로 바꾸면 사진 칩과 안내가 사라지고 저장된 사진이 지워진다", async () => {
@@ -395,7 +397,7 @@ describe("지금 배경이 왜 안 보이는지 한 줄로 말한다", () => {
     mountedHost?.remove();
     state.plan = planOf({ ref: solid, live: false, hasBand: true });
     const off = mount(createElement(WallpaperRow));
-    expect(q(off, "wallpaper-status")).toBeNull();
+    expect(statusText(off)).toBe("");
   });
 
   it("창이 좁으면(폰 폭) 바닥이 보이지 않는다고 말한다: 선택지는 열려 있고 선택은 저장된다", () => {
@@ -408,9 +410,18 @@ describe("지금 배경이 왜 안 보이는지 한 줄로 말한다", () => {
     expect(q(host, "wallpaper-status")?.textContent).toBe(WALLPAPER_NARROW_COPY);
   });
 
-  it("말할 것이 없으면 문장 행이 없다", () => {
+  it("말할 것이 없으면 문장이 없다", () => {
     const host = mount(createElement(WallpaperRow));
-    expect(q(host, "wallpaper-status")).toBeNull();
+    expect(statusText(host)).toBe("");
+  });
+
+  it("알림 영역은 말할 것이 없을 때도 DOM에 있고 자리를 차지하지 않는다 (없던 영역이 내용과 함께 생기면 보조기기가 읽지 않는 일이 잦다)", () => {
+    const host = mount(createElement(WallpaperRow));
+    const region = q(host, "wallpaper-status");
+    expect(region).not.toBeNull();
+    expect(region?.getAttribute("role")).toBe("status");
+    expect(region?.childNodes.length).toBe(0);
+    expect(region?.className).toContain("empty:hidden");
   });
 
   it("저장한 사진을 찾지 못했다는 사실은 선택이 거둬진 뒤에도 한 번 말한다", async () => {

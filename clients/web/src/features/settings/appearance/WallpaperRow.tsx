@@ -309,16 +309,19 @@ export function WallpaperRow() {
             </p>
           </div>
         </fieldset>
-        {/* 지금 배경이 왜 안 보이는지·어떤 모습인지 한 줄. 같은 행의 맨 아래에 서서 위의 안내 문장들과 한 덩어리로 읽힌다. */}
-        {status !== null ? (
-          <p
-            role="status"
-            data-testid="wallpaper-status"
-            className={cn("break-keep text-meta", status.tone === "danger" ? "text-danger" : "text-ink-muted")}
-          >
-            {status.text}
-          </p>
-        ) : null}
+        {/* 지금 배경이 왜 안 보이는지·어떤 모습인지 한 줄. 같은 행의 맨 아래에 서서 위의 안내 문장들과 한 덩어리로 읽힌다.
+            알림 영역은 내용이 없을 때도 DOM에 있어야 한다(없던 영역이 내용과 함께 생기면 보조기기가 읽지 않는 일이 잦다).
+            비었을 때는 `empty:hidden`이라 자리를 차지하지 않는다. */}
+        <p
+          role="status"
+          data-testid="wallpaper-status"
+          className={cn(
+            "break-keep text-meta empty:hidden",
+            status !== null && status.tone === "danger" ? "text-danger" : "text-ink-muted"
+          )}
+        >
+          {status !== null ? status.text : null}
+        </p>
       </div>
     </>
   );
