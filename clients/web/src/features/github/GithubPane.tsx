@@ -20,11 +20,13 @@ import {
 } from "@momo/core/features/github/model";
 import { channelLabel, useChannels, useDirectory } from "@/features/workspace/useWorkspace";
 import { StatusChip, Subsection } from "@/features/settings/SettingsFields";
+import { isDesktop } from "@/lib/tauri";
 import { GithubExternalLink } from "./GithubExternalLink";
 import { GithubOperatorBlock } from "./GithubOperatorBlock";
 import { GithubLoadFailure } from "./GithubStates";
 import { GithubSubscriptionList } from "./GithubSubscriptionList";
-import { githubOverviewPrefix, useGithubOverview } from "./githubQueries";
+import { githubOverviewPrefix, githubUnlinkedKey, useGithubOverview } from "./githubQueries";
+import { useReturnRefresh } from "./useReturnRefresh";
 
 // =============================================================================
 // AI › 외부 연결 › GitHub 알림 (ADR-0205 D10, #3955). 한 화면에 세 구역:
@@ -151,6 +153,7 @@ function ConnectBlock({
   offline: boolean;
   data: GithubWorkspaceOverview;
 }) {
+  const client = useQueryClient();
   const [link, setLink] = useState<GithubLinkStart | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const mint = useMutation({
@@ -168,6 +171,13 @@ function ConnectBlock({
     const timer = window.setTimeout(() => setLink(null), link.expiresInSeconds * 1000);
     return () => window.clearTimeout(timer);
   }, [link]);
+
+  // 데스크탑: 설치는 기본 브라우저에서 한다. 링크를 열어 둔 채 창이 다시 앞으로 오면 연결된 계정을
+  // 다시 읽는다(#4220). 웹 브라우저 탭은 켜지 않는다.
+  useReturnRefresh(isDesktop() && link !== null, () => {
+    void client.invalidateQueries({ queryKey: githubOverviewPrefix(workspaceId) });
+    void client.invalidateQueries({ queryKey: githubUnlinkedKey });
+  });
 
   if (!data.appRegistered) {
     return (
