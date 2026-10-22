@@ -25,8 +25,8 @@ import { agentCardModel } from "../timeline/agentCardModel";
 //     reconnect long after the fact;
 //   - never while the member's own 알림 일시 중지 is on (#4197). The phone push
 //     stops for it on the server (ADR-0124 증보 2, `judge_targets`), so a banner
-//     that kept coming would make 「알림도 함께 멈춰요」 untrue on the one surface
-//     that decides for itself. The pause is the SERVER's value, handed in as
+//     that kept coming would make 「알림도 함께 멈춰요」 untrue on a surface that
+//     decides for itself. The pause is the SERVER's value, handed in as
 //     `paused`; this module never compares its expiry with a clock (see there).
 //
 // The copy is deliberately thin: sender as the title, one truncated line as the
@@ -209,7 +209,7 @@ export interface NotifyContext {
   /**
    * 이 멤버의 **알림 일시 중지**(서버 `notification_rule.dnd`)가 켜져 있다 (#4197). 켜져 있으면
    * 멘션·승인·DM 어느 것도 OS 배너가 되지 않는다: 폰 푸시는 같은 규칙으로 서버에서 멈추는데(ADR-0124
-   * 증보 2, ADR-0204 D2) 배너만 계속 오면 「알림도 함께 멈춰요」가 이 화면에서만 거짓이 된다.
+   * 증보 2, ADR-0204 D2) 배너만 계속 오면 「알림도 함께 멈춰요」가 이 기기에서만 거짓이 된다.
    * 채널 음소거·종류 스위치보다 위다(ADR-0124 D5: 일시 중지 > 채널 mute > 사유).
    *
    * **기한(`dndUntilMs`)을 여기서 시계와 비교하지 않는다.** 만료는 서버가 판정하고(증보 2 D7, 읽기도

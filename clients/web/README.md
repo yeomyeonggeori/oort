@@ -253,7 +253,9 @@ how to show a banner, and this decides when one is worth showing.
   settings and the sidebar line use, `notifyDecision` receives it as `paused`, and
   the local pane notices read the same value. Expiry is the server's call: once a
   deadline passes the hook asks again and never releases the pause by this
-  device's clock. Badges and the inbox are a separate ledger and do not change.
+  device's clock. A pause set on another device reaches this one within a minute
+  (`SERVER_PAUSE_POLL_MS`): the rule has no event, and a window in the background
+  gets no focus re-read. Badges and the inbox are a separate ledger and do not change.
   Two other banner paths do **not** read the pause yet and still show during one:
   the due-reminder banner (`reminders/dueNotify.ts`) and the work-host
   registration notice (`WorkHostNotices.tsx`, a security notice, ADR-0188 D2).
