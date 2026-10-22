@@ -383,8 +383,29 @@ async function sceneFacts(page) {
 const outDir = () => resolve(OUT_ROOT, ENGINE === "webkit" ? `${LABEL}-webkit` : LABEL);
 const meta = [];
 
+/**
+ * 설정의 「색 모드」 행은 「지금 이 기기의 시스템은 라이트예요」처럼 OS 모드를 말한다. 그 문장은 미디어 질의 알림을 받은 뒤에야
+ * 바뀌어서, 부하가 큰 실행에서는 장면의 모드를 바꾼 직후 한 장을 찍으면 앞 모드의 문장이 찍힌다(실측: 두 실행을 겹쳤을 때
+ * `settings-photo-light-900`이 「다크예요」로 찍혔다). 장면의 모드와 그 문장이 같아질 때까지 기다리고, 끝내 안 맞으면 던진다
+ * (문장이 없는 장면은 기다릴 것이 없다).
+ */
+async function waitSystemSchemeText(page, scheme) {
+  const word = scheme === "dark" ? "다크" : "라이트";
+  await page.waitForFunction(
+    (expected) => {
+      const holder = [...document.querySelectorAll("p, span, div")].find(
+        (node) => node.children.length === 0 && /시스템은 (라이트|다크)예요/.test(node.textContent || "")
+      );
+      return holder === undefined || (holder.textContent || "").includes(`시스템은 ${expected}예요`);
+    },
+    word,
+    { timeout: 10_000 }
+  );
+}
+
 async function shoot(page, name, extra = {}) {
   await settle(page);
+  if (extra.scheme) await waitSystemSchemeText(page, extra.scheme);
   const path = resolve(outDir(), `${name}.png`);
   await page.screenshot({ path, animations: "disabled", caret: "hide" });
   meta.push({ name, ...(await sceneFacts(page)), ...extra });
