@@ -31,6 +31,8 @@ const ENGINES = (process.env.ENGINES || "chromium,webkit").split(",");
 const MODE = process.env.MODE === "before" ? "before" : "after";
 const DIST_DIR = process.env.DIST_DIR ? resolve(process.env.DIST_DIR) : null;
 const SHOTS = process.env.SHOTS !== "0";
+// SCENE=only-gone: 명부에 있는 DM 이 하나도 없고 나간 멤버 DM 둘뿐인 구역(빈 안내 + 접힌 줄).
+const SCENE = process.env.SCENE === "only-gone" ? "only-gone" : "main";
 
 const workspaceId = "00000000-0000-7000-8000-000000000001";
 const memberId = "00000000-0000-7000-8000-000000000101";
@@ -58,7 +60,10 @@ const dm = (n, other) => ({ id: dmId(n), workspaceId, kind: "dm", muted: false, 
 const GONE_READ_A = dmId(8);
 const GONE_READ_B = dmId(9);
 const GONE_UNREAD = dmId(7);
-const dms = [dm(1, P("11")), dm(2, P("12")), dm(4, P("14")), dm(5, P("15")), dm(8, P("98")), dm(7, P("97")), dm(9, P("99"))];
+const dms =
+  SCENE === "only-gone"
+    ? [dm(8, P("98")), dm(9, P("99"))]
+    : [dm(1, P("11")), dm(2, P("12")), dm(4, P("14")), dm(5, P("15")), dm(8, P("98")), dm(7, P("97")), dm(9, P("99"))];
 
 // 서버 read-state 투영. [마지막으로 읽은 seq, 최신 seq]
 const READ = {
@@ -141,7 +146,9 @@ async function login(page) {
   await page.getByTestId("login-password").fill("not-a-secret");
   await page.getByTestId("login-submit").click();
   await page.getByTestId("channel-item").first().waitFor({ timeout: 20_000 });
-  await page.getByTestId("dm-avatar").first().waitFor({ timeout: 20_000 });
+  // 나간 멤버 DM 뿐인 구역은 수리 후 기본으로 접혀 DM 아바타가 하나도 없다: 그때는 접힌 줄을 기다린다.
+  if (SCENE === "only-gone" && MODE === "after") await page.getByTestId("gone-dm-toggle").waitFor({ timeout: 20_000 });
+  else await page.getByTestId("dm-avatar").first().waitFor({ timeout: 20_000 });
 }
 
 async function open(browserType, origin, scheme, viewport = { width: 1440, height: 900 }) {
@@ -167,7 +174,47 @@ const scrollDmsIntoView = (page) =>
     if (el) el.scrollTop = el.scrollHeight;
   });
 
+/** 나간 멤버 DM 뿐인 구역: 빈 안내(아직 대화가 없습니다)는 그대로 서고, 접힌 줄이 그 뒤에 선다. */
+async function runOnlyGone(browserType, engine, origin) {
+  for (const scheme of engine === "chromium" ? ["light", "dark"] : ["light"]) {
+    const { browser, context, page } = await open(browserType, origin, scheme);
+    const shot = async (name) => {
+      if (!SHOTS) return;
+      await scrollDmsIntoView(page);
+      await page.waitForTimeout(200);
+      await page.screenshot({ path: resolve(OUT_DIR, `${PREFIX}-${MODE}-${engine}-${name}-${scheme}.png`), clip: { x: 0, y: 0, width: 420, height: 900 } });
+    };
+    const settle = () => page.waitForTimeout(1200);
+    const shown = (id) => rowOf(page, id).count().then((n) => n > 0);
+    try {
+      await attempt(engine, scheme, "O.only-gone", async () => {
+        await page.mouse.move(900, 450);
+        await settle();
+        if (MODE === "before") {
+          check(engine, scheme, "OB0 수리 전: 나간 멤버 둘이 목록에 그대로 있다", (await shown(GONE_READ_A)) && (await shown(GONE_READ_B)), null);
+          await shot("sidebar-only-gone");
+          return;
+        }
+        const toggle = page.getByTestId("gone-dm-toggle");
+        const empty = page.getByTestId("dm-section-empty");
+        check(engine, scheme, "O0 나간 멤버 DM 뿐이면 목록에는 아무 행도 없다", !(await shown(GONE_READ_A)) && !(await shown(GONE_READ_B)), null);
+        check(engine, scheme, "O1 빈 안내는 그대로 서고 접힌 줄이 그 뒤에 선다", (await empty.count()) === 1 && (await empty.innerText()).includes("아직 대화가 없습니다") && (await toggle.innerText()).trim() === "나간 멤버와의 대화 2개", null);
+        await shot("sidebar-only-gone");
+        await toggle.click();
+        await page.mouse.move(900, 450);
+        await settle();
+        check(engine, scheme, "O2 펼치면 접힌 둘이 줄 아래에 선다", (await shown(GONE_READ_A)) && (await shown(GONE_READ_B)), null);
+        await shot("sidebar-only-gone-expanded");
+      });
+    } finally {
+      await context.close();
+      await browser.close();
+    }
+  }
+}
+
 async function runEngine(browserType, engine, origin) {
+  if (SCENE === "only-gone") return runOnlyGone(browserType, engine, origin);
   for (const scheme of engine === "chromium" ? ["light", "dark"] : ["light"]) {
     const { browser, context, page } = await open(browserType, origin, scheme);
     const shot = async (name, clip = { x: 0, y: 0, width: 420, height: 900 }) => {

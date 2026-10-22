@@ -853,6 +853,9 @@ function DefaultFace(): React.JSX.Element {
  * DM 섹션 끝의 조용한 줄 「나간 멤버와의 대화 N개」 (#4252). 규칙(무엇이 접히는가)은 코어 `dmHiddenAsGone` 이 갖고,
  * 이 줄은 접힌 수를 말하고 펼침을 여는 문이다. 얼굴 자리(28)에 셰브론이 서서 글자가 DM 이름과 같은 자리에서 시작한다.
  * 펼치면 접힌 대화가 이 줄 아래에 선다.
+ *
+ * 글자는 행의 이름과 **같은 규칙**으로 사용자의 글자 크기를 따른다(배율 상한 없음). 가장 큰 크기(AX5)에서는 한 줄에 안
+ * 들어가므로 자르지 않고 줄을 바꾼다: 이 줄에서 중요한 것은 끝의 「N개」라서 말줄임이 그것을 먼저 지운다.
  */
 function GoneToggleRow({
   item,
@@ -885,7 +888,9 @@ function GoneToggleRow({
           ]}
         />
       </View>
-      <Text style={styles.goneToggleLabel} numberOfLines={1} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
+      {/* 줄이 바뀔 때 한글 낱말 가운데서 끊지 않는다(`atoms.tsx` `NoticeBlock` 의 같은 실측): 기본 줄바꿈은 글자 단위라
+          AX5 에서 「대 / 화 2개」로 끊겼다. 한 줄이면 아무 일도 하지 않는 값이다. */}
+      <Text style={styles.goneToggleLabel} lineBreakStrategyIOS="hangul-word">
         {label}
       </Text>
     </Pressable>

@@ -1013,6 +1013,19 @@ describe('홈 — 나간 멤버와의 대화 (#4252)', () => {
     await waitFor(() => expect(screen.queryByTestId(GONE_ROW)).toBeNull());
   });
 
+  it('접힌 줄의 글자는 행의 이름처럼 사용자의 글자 크기를 따르고, 가장 큰 크기에서도 자르지 않고 줄을 바꾼다', async () => {
+    // AX5 에서 「나간 멤버와의 대화 2개」가 한 줄에 안 들어갈 때 말줄임이 지우는 것은 끝의 「N개」다. 배율 상한도 두지
+    // 않는다(행의 이름과 같은 규칙): 상한이 있으면 이 줄만 혼자 작게 남는다.
+    await mountHome({channels: withGone});
+    const label = within(await screen.findByTestId('sidebar-gone-toggle')).getByText(
+      '나간 멤버와의 대화 1개',
+    );
+    expect(label.props.numberOfLines).toBeUndefined();
+    expect(label.props.maxFontSizeMultiplier).toBeUndefined();
+    // 줄이 바뀌어도 한글 낱말 가운데서 끊지 않는다(AX5 실측: 「대 / 화 2개」).
+    expect(label.props.lineBreakStrategyIOS).toBe('hangul-word');
+  });
+
   it('기본 아바타는 나간 멤버에만 선다: 상대가 명부에 있는 DM 은 그 사람의 얼굴이다', async () => {
     await mountHome({channels: withGone});
     await screen.findByTestId('sidebar-gone-toggle');

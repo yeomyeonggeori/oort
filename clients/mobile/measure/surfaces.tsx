@@ -4839,6 +4839,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     case 'dm-status-dots-member':
     case 'dm-status-dots-states':
     case 'dm-status-dots-states-member':
+    // #4252: 「나간 멤버와의 대화」. 사이드바를 **그대로** 세운다. 나간 멤버 DM 셋(안 읽음 없음 둘 · 안 읽은 사람 메시지 하나)과
+    // 명부에 있는 DM(꺼진 에이전트 「kwak의 Claude」 포함)이 한 목록에 선다. 접힌 줄은 `maestro/102-gone-dm-capture.yaml` 이 눌러
+    // 펼친다. 수리 전 코드로 띄우면 나간 멤버 셋이 모두 목록에 선다.
+    case 'gone-dm-home':
       return (
         <View style={styles.fill}>
           <SidebarScreen
@@ -4895,7 +4899,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             search-searching · search-empty · search-error · search-results ·
             mark-unread-sidebar · mark-unread-divider ·
             landed3921-arrival · landed3921-decided ·
-            dm-status-dots[-member|-states|-states-member]
+            dm-status-dots[-member|-states|-states-member] · gone-dm-home
           </Text>
         </Frame>
       );
@@ -5999,6 +6003,97 @@ function seedDmStatusDots(surface: string): void {
   ]);
   // 다 읽은 줄들: 안 읽음 배지가 점 옆에 서면 점이 읽히는지를 흐린다.
   harnessClient.setQueryData(['read-state', ADE_WS], []);
+}
+
+/**
+ * #4252 사이드바 「나간 멤버와의 대화」 장의 씨앗. 서버가 없는 하네스라 화면이 읽는 질의 키(`roster`·`channels`·
+ * `read-state`·`agent-liveness`)에 답을 **미리 꽂는다** - 화면은 배송되는 `SidebarScreen` 그대로다.
+ *
+ *   이도현   안 읽음 2                    박서연   다 읽음
+ *   kwak의 Claude  꺼진 에이전트(명부에 **있다** - 접지 않는 쪽)       grok   응답함
+ *   나간 멤버 ×3  명부에 없는 상대. 둘은 다 읽음(접힌다), 하나는 안 읽은 사람 메시지 1(접히지 않는다)
+ */
+function seedGoneDmHome(): void {
+  // 서버가 없는 하네스: 질의가 다시 나가도 끝나지 않는 약속으로 둔다(실패하면 세션 만료로 읽혀 캐시가 지워진다).
+  void globalThis.fetch;
+  void globalThis.Headers;
+  globalThis.fetch = (() => new Promise<Response>(() => {})) as typeof fetch;
+  resetAgentWorking();
+  harnessClient.setQueryDefaults(['agent-liveness', ADE_WS], {gcTime: Infinity});
+  harnessClient.setQueryData(['settings', 'workspace', ADE_WS], {
+    id: ADE_WS,
+    slug: 'yeomyeong',
+    name: '여명거리',
+    updatedAtMs: 0,
+  });
+  const humanTemplate = ROSTER.find(m => m.kind === 'human') ?? ROSTER[0];
+  const agentTemplate = ROSTER.find(m => m.kind === 'agent') ?? ROSTER[0];
+  const id = (n: string) => `00000000-0000-7000-8000-00000000e0${n}`;
+  const person = (n: string, displayName: string, handle: string) => ({
+    ...humanTemplate,
+    id: id(n),
+    workspaceId: ADE_WS,
+    displayName,
+    handle,
+  });
+  const agent = (n: string, displayName: string, handle: string, extra: Record<string, unknown> = {}) => ({
+    ...agentTemplate,
+    id: id(n),
+    workspaceId: ADE_WS,
+    displayName,
+    handle,
+    ...extra,
+  });
+  const viewer = {...humanTemplate, workspaceId: ADE_WS, role: 'owner'};
+  const dohyun = person('11', '이도현', 'dohyun');
+  const seoyeon = person('12', '박서연', 'seoyeon');
+  const claude = agent('14', 'kwak의 Claude', 'kwak-claude', {hostOnline: false});
+  const grok = agent('15', 'grok', 'grok', {hostOnline: true});
+  harnessClient.setQueryData(['roster', ADE_WS], [viewer, dohyun, seoyeon, claude, grok]);
+  harnessClient.setQueryData(['agent-liveness', ADE_WS, claude.id.toLowerCase()], {
+    agentMemberId: claude.id,
+    state: 'inactive',
+  });
+  harnessClient.setQueryData(['agent-liveness', ADE_WS, grok.id.toLowerCase()], {
+    agentMemberId: grok.id,
+    state: 'responsive',
+  });
+  const dm = (key: string, peerId: string) => ({
+    id: `dm-${key}`,
+    workspaceId: ADE_WS,
+    kind: 'dm' as const,
+    muted: false,
+    memberIds: [viewer.id, peerId],
+  });
+  harnessClient.setQueryData(['channels', ADE_WS], [
+    {id: 'ch-general', workspaceId: ADE_WS, kind: 'public' as const, name: '일반', muted: false},
+    dm('dohyun', dohyun.id),
+    dm('seoyeon', seoyeon.id),
+    dm('claude', claude.id),
+    dm('grok', grok.id),
+    // 명부에 없는 상대(나감·정지·꺼 둔 개인 에이전트).
+    dm('gone-a', id('98')),
+    dm('gone-unread', id('97')),
+    dm('gone-b', id('99')),
+  ]);
+  const read = (channelId: string, lastReadSeq: number, latestSeq: number) => ({
+    channelId,
+    lastReadSeq,
+    latestSeq,
+    unreadCount: latestSeq - lastReadSeq,
+    mentionCount: 0,
+    markedUnreadBeforeSeq: null,
+  });
+  harnessClient.setQueryData(['read-state', ADE_WS], [
+    read('ch-general', 20, 20),
+    read('dm-dohyun', 10, 12),
+    read('dm-seoyeon', 5, 5),
+    read('dm-claude', 9, 9),
+    read('dm-grok', 4, 4),
+    read('dm-gone-a', 6, 6),
+    read('dm-gone-unread', 3, 4),
+    read('dm-gone-b', 3, 3),
+  ]);
 }
 
 /**
@@ -7236,6 +7331,13 @@ if (
   LAUNCHED.name.startsWith('dm-status-dots')
 ) {
   seedDmStatusDots(LAUNCHED.name);
+}
+if (
+  LAUNCHED !== null &&
+  LAUNCHED.kind === 'surface' &&
+  LAUNCHED.name === 'gone-dm-home'
+) {
+  seedGoneDmHome();
 }
 if (
   LAUNCHED !== null &&
