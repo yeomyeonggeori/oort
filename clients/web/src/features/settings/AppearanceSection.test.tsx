@@ -299,7 +299,7 @@ describe("AppearanceSection: 글자 크기와 대화 밀도 (AP-2a #4189)", () =
     expect(inputs.map((r) => r.checked)).toEqual([false, true, false]);
     expect(labelsOf(host, "density-choice")).toEqual(["촘촘하게", "편하게", "여유롭게"]);
     expect(host.querySelector('[data-testid="density-row"]')?.textContent).toContain(
-      "대화와 마크다운 글 사이의 간격이에요."
+      "메시지 사이와 메시지 안 문단·목록 사이의 간격이에요."
     );
   });
 
@@ -340,8 +340,9 @@ describe("AppearanceSection: 글자 크기와 대화 밀도 (AP-2a #4189)", () =
     const host = mount(createElement(AppearanceSection));
     const preview = host.querySelector('[data-testid="conversation-preview"]');
     expect(preview).not.toBeNull();
+    // 세 묶음 머리(성재 · 김 에이전트 · 성재)의 아바타는 타임라인과 같은 밀도 이름 크기를 읽는다.
     const avatars = [...(preview?.querySelectorAll('[data-testid="preview-avatar"]') ?? [])];
-    expect(avatars).toHaveLength(2);
+    expect(avatars).toHaveLength(3);
     for (const avatar of avatars) {
       expect(avatar.className).toContain("size-message-avatar");
       expect(avatar.className).not.toMatch(/\bsize-8\b/);
@@ -352,6 +353,50 @@ describe("AppearanceSection: 글자 크기와 대화 밀도 (AP-2a #4189)", () =
     expect(items.length).toBeGreaterThanOrEqual(2);
     expect(items[0]?.className).not.toContain("mt-list-item");
     expect(items[1]?.className).toContain("mt-list-item");
+  });
+
+  it("lays the preview rows out exactly like timeline rows: group heads open upward, continuations are symmetric", () => {
+    const host = mount(createElement(AppearanceSection));
+    const rows = [...host.querySelectorAll<HTMLElement>('[data-testid="conversation-preview"] [data-testid="preview-row"]')];
+    // 성재(머리) · 성재(이어지는 행) · 에이전트(머리) · 성재(머리, 링크 카드는 맨 아래).
+    expect(rows.map((row) => row.hasAttribute("data-starts-group"))).toEqual([true, false, true, true]);
+    for (const row of rows) {
+      const startsGroup = row.hasAttribute("data-starts-group");
+      const classes = row.className.split(/\s+/);
+      // 묶음 머리는 위가 열린 패딩(`pt-row-head pb-row`), 이어지는 행은 위아래 대칭(`py-row`) — 타임라인과 같은 상수다.
+      if (startsGroup) {
+        expect(classes, row.className).toEqual(expect.arrayContaining(["pt-row-head", "pb-row"]));
+        expect(classes, row.className).not.toContain("py-row");
+      } else {
+        expect(classes, row.className).toContain("py-row");
+        expect(classes, row.className).not.toContain("pt-row-head");
+      }
+      // 거터는 아바타와 같은 한 변을 밀도 이름으로 읽는다(손으로 쓴 w-6·w-8이 아니다).
+      const gutter = row.firstElementChild as HTMLElement;
+      expect(gutter.className.split(/\s+/), gutter.className).toContain("w-message-avatar");
+      expect(gutter.className).not.toMatch(/(?<![\w-])w-\d+(?![\w-])/);
+    }
+  });
+
+  it("draws the preview text with the timeline's body type, author line and 24-hour clock", () => {
+    const host = mount(createElement(AppearanceSection));
+    const preview = host.querySelector('[data-testid="conversation-preview"]')!;
+    // 본문 문단은 전부 타임라인 본문 클래스(`leading-relaxed`)를 단다(따로 적은 `<p>`가 아니다).
+    const paragraphs = [...preview.querySelectorAll("p")].filter((p) => !p.closest('[data-testid="preview-link-card"]'));
+    expect(paragraphs.length).toBeGreaterThanOrEqual(4);
+    for (const p of paragraphs) expect(p.className, p.textContent ?? "").toContain("leading-relaxed");
+    // 시각은 타임라인 행의 `HH:MM`(24시간제)이다.
+    const clocks = [...preview.querySelectorAll("[data-numeric]")].map((el) => el.textContent);
+    expect(clocks).toEqual(["14:14", "14:15", "14:16"]);
+    // 에이전트 행은 실제 행처럼 `@핸들`(에이전트 색) + 「님이 관리」다.
+    const agentName = [...preview.querySelectorAll("span")].find((el) => el.textContent === "@kim");
+    expect(agentName?.className).toContain("text-agent");
+    expect(preview.textContent).toContain("· 성재 님이 관리");
+    // 링크 카드는 맨 아래 행에 있고(밀도에 민감한 행이 컨트롤 가까이 오게), 미리보기 상자는 카드 전폭이다.
+    const rows = [...preview.querySelectorAll('[data-testid="preview-row"]')];
+    expect(rows.at(-1)?.querySelector('[data-testid="preview-link-card"]')).not.toBeNull();
+    expect(rows.slice(0, -1).some((row) => row.querySelector('[data-testid="preview-link-card"]'))).toBe(false);
+    expect(preview.className).toMatch(/\bw-full\b/);
   });
 });
 

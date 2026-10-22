@@ -27,7 +27,7 @@ const TEXT_ROLES = ["timestamp", "meta", "code", "label", "body", "heading", "ti
 /**
  * The named measures from tokens.css `@theme { --spacing-* }` that are words,
  * not numbers: marker(2) · row(6) · row-fixed(6, 밀도를 안 따르는 쌍둥이) · 대화 밀도 4종
- * rowhead/message-avatar/prose/list-item (AP-2a #4189) · control-sm/control/control-lg(28/32/40) ·
+ * row-head/message-avatar/prose/list-item (AP-2a #4189) · control-sm/control/control-lg(28/32/40) ·
  * action-sm/action/action-band(96/144/240) · chat-min · rail 3종 · pane 5종 ·
  * diff-body · terminal-body · terminal-dock 3종 · terminal-floor · theme-tile-min ·
  * timeline-strip · preview-frame · unfurl-hero · tray-max · tray-thumb · inline-image-* · onboarding-mark ·
@@ -50,7 +50,7 @@ export const NAMED_MEASURES = [
   "marker",
   "row",
   "row-fixed",
-  "rowhead",
+  "row-head",
   "message-avatar",
   "prose",
   "list-item",

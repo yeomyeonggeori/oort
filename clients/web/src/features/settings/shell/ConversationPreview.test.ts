@@ -55,15 +55,26 @@ describe("대화 미리보기가 타임라인과 같은 값을 읽는다", () =>
 
   it("손으로 적은 행 패딩·아바타 한 변·거터 폭이 없다", () => {
     // 상자 자신의 패딩(`px-4 pb-3 pt-3`)은 행 패딩이 아니다. 행은 `py-<숫자>`나 이름 패딩을 직접 적지 못한다.
-    expect(preview.match(/\bp[tby]-(?:row|rowhead)\b/g)).toBeNull();
+    expect(preview.match(/\bp[tby]-row(?:-head)?(?![\w-])/g)).toBeNull();
     expect(preview.match(/\bpy-\d\b/g)).toBeNull();
     expect(preview.match(/\b(?:size|w)-8\b/g)).toBeNull();
     expect(preview.match(/\bsize-message-avatar\b|\bw-message-avatar\b/g)).toBeNull();
   });
 
-  it("아바타와 본문 사이는 타임라인 행과 같은 gap-2다", () => {
+  it("아바타와 본문 사이는 타임라인 행과 같은 gap-2이고, 머리/이어지는 행 분기가 타임라인과 같은 방향이다", () => {
     expect(messageRow).toContain("flex gap-2 px-4");
-    expect(preview).toMatch(/cn\("flex gap-2", startsGroup/);
+    // 묶음 머리 행은 위가 열린 상수, 이어지는 행은 대칭 상수다. 두 상수를 맞바꾸면 미리보기가 묶음 사이를 12로 그린다.
+    expect(preview).toMatch(
+      /cn\(\s*"flex gap-2",\s*startsGroup\s*\?\s*ROW_GROUP_START_PAD_CLASS\s*:\s*ROW_CONTINUATION_PAD_CLASS\s*\)/
+    );
+    expect(messageRow).toMatch(/startsGroup\s*\?\s*ROW_GROUP_START_PAD_CLASS\s*:\s*ROW_CONTINUATION_PAD_CLASS/);
+    // 거터는 손으로 쓴 `w-<숫자>`가 아니라 상수 하나다.
+    expect(preview).toContain('cn("shrink-0", MESSAGE_AVATAR_GUTTER_CLASS)');
+    expect(preview.match(/(?<![\w-])w-\d+(?![\w-])/g)).toBeNull(); // `min-w-0`은 폭을 정하지 않으니 걸리지 않는다.
+  });
+
+  it("상자는 카드 전폭이다 — 글자 크기를 바꿔도 오른쪽 가장자리가 움직이지 않는다", () => {
+    expect(preview).toMatch(/className="[^"]*\bw-full\b[^"]*"\s*\n\s*data-testid="conversation-preview"/);
   });
 
   it("모양 규칙도 타임라인과 같다: 사람은 원, 에이전트는 둥근 사각", () => {

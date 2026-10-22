@@ -8,7 +8,7 @@
  * | 변수 (`tokens.css` `@theme`) | 쓰는 클래스 | core 필드 | 촘촘 | 기본 | 여유 |
  * |---|---|---|---|---|---|
  * | `--spacing-row` | `py-row`·`pb-row` | `messageGap` ÷ 2 | 4 | 6 | 8 |
- * | `--spacing-rowhead` | `pt-rowhead` | `messageGroupGap` − `messageGap` ÷ 2 | 8 | 12 | 16 |
+ * | `--spacing-row-head` | `pt-row-head` | `messageGroupGap` − `messageGap` ÷ 2 | 8 | 12 | 16 |
  * | `--spacing-message-avatar` | `size-message-avatar`·`w-message-avatar` | `messageAvatar` | 28 | 32 | 36 |
  * | `--spacing-prose` | `gap-prose` | `proseGap` | 6 | 8 | 10 |
  * | `--spacing-list-item` | `mt-list-item` | `listItemGap` | 0 | 0 | 4 |
@@ -16,7 +16,7 @@
  * 「기본」 열은 `tokens.css`의 `@theme`이 가진다(그래서 이 파일에 `comfortable` 규칙은 없다).
  * 기본 단계의 화면은 이 기능이 생기기 전과 픽셀이 같다. 행 사이 거리는 위 행의 아래 패딩 +
  * 아래 행의 위 패딩이라 `--spacing-row`를 두 번 더해 만들고, 묶음이 바뀌는 자리는 위 행의
- * `--spacing-row` + 머리 행의 `--spacing-rowhead`다.
+ * `--spacing-row` + 머리 행의 `--spacing-row-head`다.
  *
  * 밀도가 바꾸지 않는 것: 터치 타깃 하한 44(`tap-target`), 컨트롤 높이, 타입 스케일(글자 크기는
  * `typography-scale.css`가 따로 고른다). 그리고 대화 표면 밖의 값: 사이드바 행 높이·카드 안 여백·반경은
@@ -32,7 +32,7 @@
  * 않았다. */
 :root[data-density="compact"] {
   --spacing-row: 4px;
-  --spacing-rowhead: 8px;
+  --spacing-row-head: 8px;
   --spacing-message-avatar: 28px;
   --spacing-prose: 6px;
   --spacing-list-item: 0px;
@@ -40,7 +40,7 @@
 
 :root[data-density="spacious"] {
   --spacing-row: 8px;
-  --spacing-rowhead: 16px;
+  --spacing-row-head: 16px;
   --spacing-message-avatar: 36px;
   --spacing-prose: 10px;
   --spacing-list-item: 4px;

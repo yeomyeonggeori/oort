@@ -25,7 +25,7 @@ const DENSITY_CSS = readFileSync(fileURLToPath(new URL("./density.css", import.m
 const code = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, "");
 
 /** 대화 밀도가 읽는 변수 다섯과, 코어 필드로부터 그 값을 만드는 식. */
-const VARIABLES = ["spacing-row", "spacing-rowhead", "spacing-message-avatar", "spacing-prose", "spacing-list-item"] as const;
+const VARIABLES = ["spacing-row", "spacing-row-head", "spacing-message-avatar", "spacing-prose", "spacing-list-item"] as const;
 type VariableName = (typeof VARIABLES)[number];
 
 /** 코어의 한 단계가 말하는 CSS 값. 행 사이 거리는 위 행·아래 행이 반씩 문다. */
@@ -34,7 +34,7 @@ function expectedFromCore(id: DensityId): Record<VariableName, number> {
   return {
     "spacing-row": v.messageGap / 2,
     // 묶음 머리 행의 위 여백 = 묶음이 바뀌는 거리 − 위 행이 이미 무는 `--spacing-row`.
-    "spacing-rowhead": v.messageGroupGap - v.messageGap / 2,
+    "spacing-row-head": v.messageGroupGap - v.messageGap / 2,
     "spacing-message-avatar": v.messageAvatar,
     "spacing-prose": v.proseGap,
     "spacing-list-item": v.listItemGap,
@@ -94,7 +94,7 @@ describe("대화 밀도 CSS가 코어 DENSITY를 따른다", () => {
   });
 
   it("세 단계가 서로 다른 모습을 만든다 — 같은 값으로 접힌 단계가 없다", () => {
-    for (const name of ["spacing-row", "spacing-rowhead", "spacing-message-avatar", "spacing-prose"] as const) {
+    for (const name of ["spacing-row", "spacing-row-head", "spacing-message-avatar", "spacing-prose"] as const) {
       const values = DENSITY_IDS.map((id) => expectedFromCore(id)[name]);
       expect([name, new Set(values).size]).toEqual([name, 3]);
     }
@@ -162,7 +162,7 @@ describe("테마 토큰 표 §5의 밀도 표가 코어 DENSITY와 같다", () =
 //
 // `--spacing-row`는 원래 타임라인 행의 값이었고, 같은 6px이 필요한 다른 자리(폰 폭 채널 머리의 45px 맞춤, 컴포저
 // 슬래시 명령 목록의 행·머리글·발치)가 이름을 빌려 썼다. 값이 늘 6일 때는 문제가 없었고, 밀도가 그 값을 4/6/8로
-// 움직이자 명령 목록 행이 48/52/56px로, 폰 폭 채널 머리가 53/57/61px로 변했다. 밀도는 「대화와 마크다운 글 사이의
+// 움직이자 명령 목록 행이 48/52/56px로, 폰 폭 채널 머리가 53/57/61px로 변했다. 밀도는 「메시지 사이와 메시지 안 문단·목록 사이의
 // 간격」이라서 그 둘에 닿으면 안 된다. 그래서 그 자리들은 밀도를 따르지 않는 쌍둥이 `--spacing-row-fixed`를 읽고,
 // 이 시험이 **밀도 변수를 읽는 파일 전부를 열거**해서 다음 빌려 쓰기를 빌드에서 잡는다.
 // -----------------------------------------------------------------------------
@@ -182,7 +182,7 @@ describe("밀도 변수를 읽는 곳은 닫힌 목록이다", () => {
     return out;
   }
 
-  const FAMILY = "row|rowhead|message-avatar|prose|list-item";
+  const FAMILY = "row|row-head|message-avatar|prose|list-item";
   /** 간격·크기 유틸리티가 밀도 이름을 읽는 모양(`py-row`). `py-row-fixed`는 뒤따르는 `-`가 걸러 낸다. */
   const UTILITY = new RegExp(
     `(?<![\\w-])(?:p[xytblrse]?|m[xytblrse]?|gap(?:-[xy])?|space-[xy]|size|w|h|min-[wh]|max-[wh]|top|bottom|inset(?:-[xy])?|translate-[xy])-(?:${FAMILY})(?![\\w-])`,
@@ -217,7 +217,7 @@ describe("밀도 변수를 읽는 곳은 닫힌 목록이다", () => {
         "gap-prose",
         "mt-list-item",
         "pb-row",
-        "pt-rowhead",
+        "pt-row-head",
         "py-row",
         "size-message-avatar",
         "w-message-avatar",
@@ -243,5 +243,33 @@ describe("밀도 변수를 읽는 곳은 닫힌 목록이다", () => {
       .map((file) => relative(SRC_DIR, file))
       .sort();
     expect(users).toEqual(["design/tokens.css", "features/chat/ChatShell.tsx", "features/chat/ComposerAutocompleteList.tsx"]);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// 조각이 번들에 실린다 (design-review H-1). 위 시험들은 `density.css`를 **파일로 읽어서** 값을 대조한다. 그 파일을
+// `tokens.css`가 `@import`하지 않으면 값은 코어와 한 칸씩 맞는데 번들에는 한 글자도 실리지 않고 모든 시험이 초록이다
+// (병렬 워커 넷이 인접해 만지는 import 블록의 충돌 해소 한 줄이 밀도를 통째로 죽일 수 있다). 계산된 값을 재는
+// `densityTokens.browser.test.ts`가 같은 구멍을 엔진에서 막지만, 엔진이 없는 레인에서는 그 시험이 비므로 이 정적 핀이
+// 그때 도는 유일한 장치다(`motion.test.ts`의 `@import "./motion.css"` 핀과 같은 전례).
+// -----------------------------------------------------------------------------
+describe("밀도 조각이 tokens.css에 실린다", () => {
+  const css = code(TOKENS_CSS);
+
+  it("tokens.css가 density.css를 @import한다", () => {
+    expect(css).toMatch(/^@import\s+"\.\/appearance\/density\.css";\s*$/m);
+  });
+
+  it("그 @import가 tailwindcss 뒤, 모든 규칙보다 앞에 선다 — @import는 다른 규칙 뒤에서는 무시된다", () => {
+    const lines = css.split("\n");
+    const at = lines.findIndex((line) => /^@import\s+"\.\/appearance\/density\.css";/.test(line));
+    expect(at).toBeGreaterThan(-1);
+    const firstRule = lines.findIndex((line) => line.trim() !== "" && !/^@import\b/.test(line));
+    expect(at).toBeLessThan(firstRule);
+  });
+
+  it("density.css가 비어 있지 않다 — import만 있고 규칙이 없는 조각은 값을 못 싣는다", () => {
+    expect(code(DENSITY_CSS)).toMatch(/:root\[data-density="compact"\]\s*\{/);
+    expect(code(DENSITY_CSS)).toMatch(/:root\[data-density="spacious"\]\s*\{/);
   });
 });

@@ -15,7 +15,7 @@ import { compileTokensCss, ENGINES } from "./compileTokensTestKit";
 const CLASSES = [
   "py-row",
   "pb-row",
-  "pt-rowhead",
+  "pt-row-head",
   "size-message-avatar",
   "w-message-avatar",
   "gap-prose",
@@ -36,7 +36,7 @@ function pageHtml(css: string, tier: DensityId): string {
 interface Measure {
   rowPaddingTop: number;
   rowPaddingBottom: number;
-  rowheadPaddingTop: number;
+  rowHeadPaddingTop: number;
   avatarSize: [number, number];
   gutterWidth: number;
   proseGap: number;
@@ -55,7 +55,7 @@ async function measure(page: import("playwright").Page): Promise<Measure> {
     return {
       rowPaddingTop: px(style("py-row").paddingTop),
       rowPaddingBottom: px(style("pb-row").paddingBottom),
-      rowheadPaddingTop: px(style("pt-rowhead").paddingTop),
+      rowHeadPaddingTop: px(style("pt-row-head").paddingTop),
       avatarSize: [avatar.width, avatar.height],
       gutterWidth: el("w-message-avatar").getBoundingClientRect().width,
       proseGap: px(getComputedStyle(document.getElementById("gap-box")!).rowGap),
@@ -91,8 +91,8 @@ describe("대화 밀도의 계산된 값 (AC 2)", () => {
               // 행 사이 거리는 위 행의 아래 패딩 + 아래 행의 위 패딩(둘 다 --spacing-row)이다.
               check("py-row 위", m.rowPaddingTop, v.messageGap / 2);
               check("pb-row 아래", m.rowPaddingBottom, v.messageGap / 2);
-              // 묶음 사이 = 위 행 아래 패딩(row) + 머리 행 위 패딩(rowhead).
-              check("pb-row + pt-rowhead", m.rowPaddingBottom + m.rowheadPaddingTop, v.messageGroupGap);
+              // 묶음 사이 = 위 행 아래 패딩(row) + 머리 행 위 패딩(row-head).
+              check("pb-row + pt-row-head", m.rowPaddingBottom + m.rowHeadPaddingTop, v.messageGroupGap);
               check("size-message-avatar 너비", m.avatarSize[0], v.messageAvatar);
               check("size-message-avatar 높이", m.avatarSize[1], v.messageAvatar);
               check("w-message-avatar", m.gutterWidth, v.messageAvatar);

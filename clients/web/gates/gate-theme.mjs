@@ -45,8 +45,10 @@
 //   THEME_GATE_PROVE_RED_PERSIST=1 npm run gate:theme
 //     테마 키(v2 레코드)에 대한 localStorage.setItem만 무력화한다. 화면은 즉시 바뀌지만 저장이
 //     없으므로 ②가 무너져야 한다.
-//   (⑥ 글자 크기·밀도 첫 페인트의 red proof는 환경 변수가 아니라 번들을 망가뜨려 쟀다: 루트 속성 규칙
-//    `:root[data-font-size="larger"]`의 속성 이름을 바꿔 다시 빌드하면 본문 글자 단언이 FAIL이 정답이다.)
+//   THEME_GATE_PROVE_RED_APPEARANCE_CSS=1 npm run gate:theme
+//     글자 크기·밀도 규칙(`:root[data-font-size=…]`·`:root[data-density=…]`)의 속성 이름만 CSS 응답에서 바꾼다.
+//     속성은 부트 스크립트가 그대로 찍지만 어느 규칙도 맞지 않으므로 ⑥의 「번들이 오기 전 문서의 본문 글자 16px ·
+//     --spacing-row 4px」 단언이 무너져야 한다. 통과한다면 그 단언은 화면이 아니라 속성만 재고 있었던 것이다.
 //   THEME_GATE_PROVE_RED_CACHE=1 npm run gate:theme
 //     ⑥의 「캐시가 있으면」 장면에서 캐시 항목만 비운다. 첫 페인트에 꽂힐 변수가 사라지므로 그
 //     단언이 무너져야 한다. 통과한다면 그 단언은 캐시가 아니라 아무거나 재고 있었던 것이다.
@@ -77,6 +79,7 @@ const outDir = process.env.OUT_DIR
 const proveRedBoot = process.env.THEME_GATE_PROVE_RED_BOOT === "1";
 const proveRedPersist = process.env.THEME_GATE_PROVE_RED_PERSIST === "1";
 const proveRedCache = process.env.THEME_GATE_PROVE_RED_CACHE === "1";
+const proveRedAppearanceCss = process.env.THEME_GATE_PROVE_RED_APPEARANCE_CSS === "1";
 
 // 저장 항목 이름: core appearance.ts · themeCache.ts의 상수와 같다(게이트는 번들 밖이라 문자열로 적는다).
 const V2_ENTRY = "momo.web.appearance.v2";
@@ -130,6 +133,19 @@ async function installRoutes(context) {
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
     return json(route, {});
   });
+
+  if (proveRedAppearanceCss) {
+    // Red proof ⑥(AP-2a #4189): 글자 크기·대화 밀도 규칙의 **속성 선택자 이름만** 바꿔서 어느 규칙도 맞지 않게 한다.
+    // 부트 스크립트는 속성을 그대로 찍으니 「속성은 찍혔는데 화면이 안 따른다」가 정확히 이 모양이다(CSS 조각이 번들에
+    // 안 실리거나 선택자가 틀어진 경우와 같다). 첫 페인트의 본문 글자·행 간격 변수 단언이 무너져야 한다.
+    await context.route("**/assets/*.css", async (route) => {
+      const response = await route.fetch();
+      const body = (await response.text())
+        .replaceAll("[data-font-size", "[data-font-sizes")
+        .replaceAll("[data-density", "[data-densitys");
+      await route.fulfill({ response, body });
+    });
+  }
 
   if (proveRedBoot) {
     // Red proof ①: 첫 페인트를 맡은 스크립트만 지운다. 번들도 CSS도 그대로이므로

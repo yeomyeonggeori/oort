@@ -280,7 +280,7 @@ describe("행을 그리는 파일이 전부 이 다리를 건넌다 (M-1)", () =
     // 여기서 빨강이다 — 산수가 맞는 값을 적어 넣어도 마찬가지다: 정본은 코어이고
     // 두 번째 사본은 갈라질 자리이지 다른 무엇도 아니다.
     const code = sourceOf(file);
-    const handWritten = code.match(/\bp[tby]-(?:row\b|\d)/g);
+    const handWritten = code.match(/\bp[tby]-(?:row(?:-head)?(?![-\w])|\d)/g);
     expect(handWritten, `${file}: ${handWritten?.join(" · ")}`).toBeNull();
   });
 });

@@ -165,3 +165,19 @@ describe("테마 토큰 표 §5의 글자 크기 표가 코드와 같다", () =>
     }
   });
 });
+
+describe("글자 크기 조각이 tokens.css에 실린다 (design-review H-1)", () => {
+  const css = code(TOKENS_CSS);
+
+  it("tokens.css가 typography-scale.css를 @import한다 — 지우면 배율 변수가 없어 모든 글자 역할이 깨진다", () => {
+    expect(css).toMatch(/^@import\s+"\.\/appearance\/typography-scale\.css";\s*$/m);
+  });
+
+  it("그 @import가 모든 규칙보다 앞에 선다 — @import는 다른 규칙 뒤에서는 무시된다", () => {
+    const lines = css.split("\n");
+    const at = lines.findIndex((line) => /^@import\s+"\.\/appearance\/typography-scale\.css";/.test(line));
+    expect(at).toBeGreaterThan(-1);
+    const firstRule = lines.findIndex((line) => line.trim() !== "" && !/^@import\b/.test(line));
+    expect(at).toBeLessThan(firstRule);
+  });
+});

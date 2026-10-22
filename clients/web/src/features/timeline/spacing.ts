@@ -70,7 +70,7 @@ export const SPACING_SCALE_PX: Record<string, number> = {
    */
   row: 6,
   /** 묶음 머리 행의 위 여백. 위 행의 `row`(6)와 합쳐 `ROW_SPACE.betweenGroups`(18)가 된다. */
-  rowhead: 12,
+  "row-head": 12,
   /** 타임라인 메시지 아바타·거터의 한 변 = 코어 `AVATAR_SIZE`. */
   "message-avatar": 32,
   /** 마크다운 블록 사이 간격. */
@@ -92,12 +92,10 @@ export const DIVIDER_RULE_CLASS = "h-px";
  * 저자 묶음의 **머리** 행. 위로 크게 열고 아래는 묶음 안 간격의 절반만 남긴다.
  * 앞 행의 `pb-row`와 합쳐 `ROW_SPACE.betweenGroups`(6+12=18)가 된다.
  *
- * 위 여백이 `pt-3`이 아니라 `pt-rowhead`인 이유: 12가 밀도(AP-2a #4189)를 따라 8·16으로
- * 움직여야 하는데, 리듬 단계 `--spacing-3`은 모든 곳에서 12여야 해서 덮어쓸 수 없다.
- * 이름이 `row-head`가 아닌 것은 아래 `spacing.test.ts`의 「손으로 적은 행 패딩」 검사
- * (`p[tby]-row\b`)가 이 클래스까지 잡지 않게 하려는 것이다.
+ * 위 여백이 `pt-3`이 아니라 `pt-row-head`인 이유: 12가 밀도(AP-2a #4189)를 따라 8·16으로 움직여야 하는데, 리듬 단계
+ * `--spacing-3`은 모든 곳에서 12여야 해서 덮어쓸 수 없다. 그래서 밀도가 바꾸는 이름 단계를 쓴다.
  */
-export const ROW_GROUP_START_PAD_CLASS = "pt-rowhead pb-row";
+export const ROW_GROUP_START_PAD_CLASS = "pt-row-head pb-row";
 /**
  * 이어지는 행. 위아래가 대칭이라 두 연속 행 사이가 `ROW_SPACE.withinGroup`(6+6=12)이다.
  *
