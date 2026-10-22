@@ -4,7 +4,7 @@ import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {act, cleanup, fireEvent, render, screen} from '@testing-library/react-native';
 import React from 'react';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
-import {AccessibilityInfo, ActionSheetIOS, StyleSheet} from 'react-native';
+import {AccessibilityInfo, ActionSheetIOS, Dimensions, StyleSheet} from 'react-native';
 
 import {darkPalette, lightPalette, slopTo, TOUCH_TARGET} from '../src/design/tokens';
 import {FixedScheme} from '../src/design/theme';
@@ -13,7 +13,7 @@ import {
   connectionBannerText,
   ConversationHeader,
 } from '../src/features/conversation/ConversationHeader';
-import {CONV} from '../src/features/conversation/convDesign';
+import {CONV, composerFloat} from '../src/features/conversation/convDesign';
 import {
   LONG_PRESS_HINT_MS,
   LongPressHint,
@@ -218,12 +218,14 @@ describe('떠 있는 알약 컴포저 — 안쪽 + · 입력 · 잉크 ↑ 하�
     );
   }
 
-  it('세 조각이 한 알약 안에 있다 — r26, 좌우 12', () => {
+  it('세 조각이 한 알약 안에 있다 — 반경은 원 반경 + 사방 여백(27), 좌우는 뜬 거리', () => {
     composer();
     const pill = screen.getByTestId('composer-pill');
     const style = flatten(pill.props.style);
-    expect(style.borderRadius).toBe(26);
-    expect(style.marginHorizontal).toBe(12);
+    expect(style.borderRadius).toBe(27);
+    // 좌우 거리는 폭·글자 배수가 정한다(#4179 `composerFloat`) — 이 환경의 창에서 나온 값 그대로.
+    const {width, fontScale} = Dimensions.get('window');
+    expect(style.marginHorizontal).toBe(composerFloat(width, fontScale));
     // + · 입력 · 보내기 가 전부 알약의 자손이다.
     for (const id of ['composer-attach', 'composer-input', 'composer-send']) {
       const node = screen.getByTestId(id);
@@ -237,18 +239,18 @@ describe('떠 있는 알약 컴포저 — 안쪽 + · 입력 · 잉크 ↑ 하�
     }
   });
 
-  it('+ 는 34 원, 보내기는 38 잉크 원 — 둘 다 엄지에는 44', () => {
+  it('+ 와 보내기는 같은 36 원 — 둘 다 엄지에는 44 (#4179, 옛 34·38)', () => {
     composer();
     const attach = screen.getByTestId('composer-attach');
     const a = flatten(attach.props.style);
-    expect([a.width, a.height, a.borderRadius]).toEqual([34, 34, 17]);
-    expect(34 + attach.props.hitSlop * 2).toBe(TOUCH_TARGET);
+    expect([a.width, a.height, a.borderRadius]).toEqual([36, 36, 18]);
+    expect(36 + attach.props.hitSlop * 2).toBe(TOUCH_TARGET);
     fireEvent.changeText(screen.getByTestId('composer-input'), '좋아');
     const send = screen.getByTestId('composer-send');
     const s = flatten(send.props.style);
-    expect([s.width, s.height, s.borderRadius]).toEqual([38, 38, 19]);
-    expect(38 + send.props.hitSlop * 2).toBe(TOUCH_TARGET);
-    expect(send.props.hitSlop).toBe(slopTo(38));
+    expect([s.width, s.height, s.borderRadius]).toEqual([36, 36, 18]);
+    expect(36 + send.props.hitSlop * 2).toBe(TOUCH_TARGET);
+    expect(send.props.hitSlop).toBe(slopTo(36));
   });
 
   it('보내기에는 보이는 글자가 없고 이름은 낭독 라벨이 든다', () => {
