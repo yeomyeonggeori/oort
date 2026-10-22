@@ -9,9 +9,17 @@ import { wallpaperBlocksGlass } from "@momo/core/design/wallpaper";
 // 않도록, 유리의 판정 함수(`resolveGlass`)가 트리에 있으면 이 시험이 저절로 켜져 **두 술어가 같은 말을 하는지**를 잰다:
 //   · 이 쪽: `wallpaperBlocksGlass(ref)` — 배경화면을 「고른 상태」인가(선택이지, 지금 깔렸는가가 아니다)
 //   · 저 쪽: `resolveGlass({ wallpaper })`가 `reason: "wallpaper"`로 유리를 잠그는가
+//   · 둘을 잇는 곳: 유리의 판정 입구 `computeView`(`desktopEffects.ts`)가 이 술어 **하나**로 `wallpaper` 칸을 채우는가
 // 유리가 아직 합류하지 않은 트리에서는 이 시험이 할 말이 없어 todo로 남는다(빈 초록으로 두지 않는다). 뒤에 합류하는 쪽이
 // 이 시험을 켜고, 어긋나면 그 PR에서 빨개진다.
 // =============================================================================
+
+interface EffectsModule {
+  computeView(
+    appearance: { glass?: { on?: boolean; opacity?: number }; wallpaper?: WallpaperRef },
+    env: { supported: boolean; failed: boolean; reducedTransparency: boolean; mode: "light" | "dark"; sources: null }
+  ): { decision: { reason: string | null; toggleDisabled: boolean; checked: boolean; nativeWanted: boolean; paintWanted: boolean } };
+}
 
 interface GlassModule {
   resolveGlass(input: {
@@ -26,6 +34,9 @@ interface GlassModule {
 
 const glassModules = import.meta.glob("../../../../../packages/momo-core/src/design/glass.ts");
 const ACTIVE = Object.keys(glassModules).length > 0;
+const effectsModules = import.meta.glob("../../features/settings/appearance/desktopEffects.ts");
+const effectsSources = import.meta.glob("../../features/settings/appearance/desktopEffects.ts", { query: "?raw", import: "default" });
+const EFFECTS_ACTIVE = Object.keys(effectsModules).length > 0;
 
 const REFS: ReadonlyArray<readonly [string, WallpaperRef | undefined]> = [
   ["없음", undefined],
@@ -64,6 +75,41 @@ describe.skipIf(!ACTIVE)("유리 판정(AP-3)과 같은 말을 한다", () => {
       expect(decision.nativeWanted).toBe(false);
       expect(decision.paintWanted).toBe(false);
     }
+  });
+});
+
+/** 주석을 걷은 코드(낱말 검사에 주석이 걸리지 않게). */
+function stripComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+}
+
+describe.skipIf(!EFFECTS_ACTIVE)("유리의 판정 입구(computeView)는 이 술어 하나를 쓴다", () => {
+  const env = { supported: true, failed: false, reducedTransparency: false, mode: "light" as const, sources: null };
+
+  it.each(REFS)("%s", async (_label, ref) => {
+    const load = Object.values(effectsModules)[0];
+    const { computeView } = (await load()) as EffectsModule;
+    const { decision } = computeView({ glass: { on: true }, wallpaper: ref }, env);
+    if (ref === undefined) {
+      // 배경이 없으면 켜 둔 유리가 자기 일을 한다(테마 색을 아직 못 읽은 동안은 켠 채로 두고 그리지 않는다).
+      expect(decision.reason).toBeNull();
+      expect(decision.toggleDisabled).toBe(false);
+      expect(decision.checked).toBe(true);
+    } else {
+      expect(decision.reason).toBe("wallpaper");
+      expect(decision.toggleDisabled).toBe(true);
+      expect(decision.checked).toBe(false);
+      expect(decision.nativeWanted).toBe(false);
+    }
+  });
+
+  it("`wallpaper` 칸은 배경화면 쪽의 함수 `wallpaperBlocksGlass`로 채운다 (같은 말을 두 곳에서 따로 하지 않는다)", async () => {
+    const load = Object.values(effectsSources)[0];
+    const code = stripComments((await load()) as string);
+    expect(code).toContain('import { wallpaperBlocksGlass } from "@momo/core/design/wallpaper";');
+    expect(code).toMatch(/wallpaper:\s*wallpaperBlocksGlass\(appearance\.wallpaper\)/);
+    // 그 칸을 다른 식으로 채운 곳이 없다.
+    expect(code).not.toMatch(/wallpaper:\s*appearance\.wallpaper\s*!==\s*undefined/);
   });
 });
 

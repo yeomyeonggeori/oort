@@ -13,6 +13,7 @@ import {
 } from "@momo/core/design/glass";
 import type { ThemeRef } from "@momo/core/design/themeResolve";
 import { isThemeId, type Mode } from "@momo/core/design/themes";
+import { wallpaperBlocksGlass } from "@momo/core/design/wallpaper";
 import {
   getAppearance,
   subscribeSystemScheme,
@@ -163,7 +164,8 @@ export function computeView(appearance: Pick<AppearanceState, "glass" | "wallpap
     on: appearance.glass?.on === true,
     supported: env.supported,
     floorPercent: range ? range.min : null,
-    wallpaper: appearance.wallpaper !== undefined,
+    // 배경화면(AP-4)과 유리는 같은 창 바닥 층을 쓴다. 「고른 상태」의 판정은 배경화면 쪽의 함수 하나다(결정 9).
+    wallpaper: wallpaperBlocksGlass(appearance.wallpaper),
     failed: env.failed,
     reducedTransparency: env.reducedTransparency,
   });
