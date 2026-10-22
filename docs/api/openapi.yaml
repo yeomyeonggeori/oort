@@ -4764,7 +4764,9 @@ paths:
         not top level). `replyToId`, `routing`, `props`, `type` and `signature`
         are not accepted (400: the request is closed). The same
         `clientRequestId` from the same member answers 201 with the same row and
-        creates no second one. At most 50 `pending` rows per member per
+        creates no second one; that lookup comes before every other check, so a
+        different body or time under a known id still returns the first row (use a
+        new id when the request changes). At most 50 `pending` rows per member per
         workspace (409 `pending_limit_reached`). 503 `scheduler_disabled` when
         the operator turned the scheduler off.
       security:
@@ -4798,13 +4800,13 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          description: Agent bearer, inactive membership, not a channel member, or an attachment that belongs to another uploader or channel.
+          description: Agent bearer, inactive membership, not a member of the channel or no such channel (the same judgment as `sendMessage`), or an attachment that belongs to another uploader or channel.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
-          description: Channel, thread root or attachment not found (also for ones the caller cannot see).
+          description: Thread root or attachment not found (also for ones the caller cannot see).
           content:
             application/json:
               schema:
@@ -4996,6 +4998,12 @@ paths:
       responses:
         "204":
           description: Cancelled and audited (or already cancelled).
+        "400":
+          description: Invalid scheduled message id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -5033,8 +5041,9 @@ paths:
         locked for more than 3 seconds is 409 `scheduled_busy`. When the send is
         refused (the author left the channel, the thread root is gone, an
         attachment cannot be used) the answer is 409 whose `error.code` is the
-        failure reason (`not_member`, `author_inactive`, `root_unavailable`,
-        `attachment_unavailable`, `not_allowed`) and the row becomes `failed`.
+        failure reason (`not_member`, `root_unavailable`, `attachment_unavailable`,
+        `not_allowed`) and the row becomes `failed`. A row held as
+        `sessions_ended` can be sent now by its author: that is the re-confirmation.
       security:
         - bearerAuth: []
       parameters:
@@ -5052,6 +5061,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ScheduledMessageResponse"
+        "400":
+          description: Invalid scheduled message id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -15970,15 +15985,20 @@ components:
 
     ScheduledMessageFailureReason:
       type: string
-      enum: [missed, send_error, not_member, author_inactive, root_unavailable, attachment_unavailable, not_allowed]
+      enum: [sessions_ended, author_inactive, missed, send_error, not_member, root_unavailable, attachment_unavailable, not_allowed]
       description: >
         ADR-0208 D8, a closed set owned by the engine (TRACKS section 1).
-        `missed`: the send time passed by more than the grace window (default 60
-        minutes) while the server could not send. `send_error`: transient errors
-        five times. `not_member`: the author left the channel. `author_inactive`:
-        the author is suspended or removed. `root_unavailable`: the thread root
-        is deleted or gone. `attachment_unavailable`: an attachment is missing or
-        was used elsewhere. `not_allowed`: a policy the send path adds later.
+        `sessions_ended`: the author's sign-in ended (password change or reset,
+        suspension, removal, leaving the workspace, a device unlinked or a
+        refresh-token reuse caught), so the schedule was held, not sent; the
+        author re-arms it after reading it. `author_inactive`: the author is
+        suspended or removed at send time (a safety net behind the hold).
+        `missed`: the grace window (default 60 minutes) passed without a single
+        attempt. `send_error`: the grace window passed while transient errors
+        continued. `not_member`: the author left the channel or conversation.
+        `root_unavailable`: the thread root is deleted or gone.
+        `attachment_unavailable`: an attachment is missing or was used
+        elsewhere. `not_allowed`: a policy the send path adds later.
 
     CreateScheduledMessageRequest:
       type: object
