@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { ROOT_ATTRIBUTES } from "@momo/core/design/appearance";
+import { DENSITY, DENSITY_IDS, type DensityId } from "@momo/core/design/density";
 import {
   DAY_DIVIDER_PAD_CLASS,
   DIVIDER_GAP_CLASS,
@@ -136,6 +138,83 @@ describe("행 간격이 코어 판정을 따른다 (H-7)", () => {
   it("이어지는 행의 위아래가 대칭이다 — hover 띠가 글자 밑으로 처지지 않게", () => {
     const cont = padOf(ROW_CONTINUATION_PAD_CLASS);
     expect(cont.top).toBe(cont.bottom);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// 대화 밀도 세 단계 (AP-2a #4189). 위의 두 단정은 「편하게」(기본) 단계가 코어의 `ROW_SPACE`와 맞다고
+// 말한다. 같은 클래스가 「촘촘하게」·「여유롭게」에서도 코어 `DENSITY`의 그 단계 값을 만드는지가
+// 여기서 잰다. 값의 출처는 단계마다 `density.css`의 루트 속성 규칙이 `tokens.css`의 같은 변수를
+// 덮는 것이라, 이 시험은 그 두 파일을 **직접 읽어** 클래스를 푼다 — 밀도 변수를 끊으면(규칙을 지우거나
+// 변수 이름을 바꾸면) 그 단계의 합이 기본 값으로 돌아가 빨개진다.
+// -----------------------------------------------------------------------------
+describe("행 간격이 대화 밀도 세 단계에서도 코어 판정을 따른다 (AP-2a)", () => {
+  const DENSITY_CSS = readFileSync(
+    fileURLToPath(new URL("../../design/appearance/density.css", import.meta.url)),
+    "utf8"
+  ).replace(/\/\*[\s\S]*?\*\//g, "");
+
+  /** 그 단계의 `:root[data-density="<id>"]` 블록이 덮는 `--spacing-*` 값. 기본 단계는 블록이 없다. */
+  function overridesOf(tier: DensityId): Record<string, number> {
+    const block = new RegExp(`:root\\[${ROOT_ATTRIBUTES.density}="${tier}"\\]\\s*\\{([^}]*)\\}`).exec(DENSITY_CSS);
+    const out: Record<string, number> = {};
+    if (!block) return out;
+    for (const decl of block[1]!.matchAll(/--spacing-([a-z0-9-]+):\s*(-?[\d.]+)px;/g)) {
+      out[decl[1]!] = Number(decl[2]);
+    }
+    return out;
+  }
+
+  /** 단계 안에서 클래스를 푼다: 그 단계의 덮어쓰기가 먼저, 없으면 `@theme` 기본. */
+  function padAt(tier: DensityId, classes: string): { top: number; bottom: number } {
+    const overrides = overridesOf(tier);
+    const px = (part: string) => {
+      const name = part.slice(part.indexOf("-") + 1);
+      const value = overrides[name] ?? CSS_STEPS[name];
+      if (value === undefined) throw new Error(`"${part}"를 풀 수 없다: --spacing-${name}가 없다`);
+      return value;
+    };
+    const parts = classes.split(" ");
+    const find = (prefixes: string[]) => {
+      for (const part of parts) {
+        if (prefixes.includes(part.slice(0, part.indexOf("-")))) return px(part);
+      }
+      throw new Error(`${prefixes.join("/")}에 해당하는 클래스가 없다: "${classes}"`);
+    };
+    return { top: find(["pt", "py"]), bottom: find(["pb", "py"]) };
+  }
+
+  it.each(DENSITY_IDS)("%s: 두 연속 행 사이가 그 단계의 messageGap이다", (tier) => {
+    const cont = padAt(tier, ROW_CONTINUATION_PAD_CLASS);
+    expect(cont.bottom + cont.top).toBe(DENSITY[tier].messageGap);
+  });
+
+  it.each(DENSITY_IDS)("%s: 묶음이 바뀌는 자리가 그 단계의 messageGroupGap이다", (tier) => {
+    const previous = padAt(tier, ROW_CONTINUATION_PAD_CLASS);
+    const head = padAt(tier, ROW_GROUP_START_PAD_CLASS);
+    expect(previous.bottom + head.top).toBe(DENSITY[tier].messageGroupGap);
+  });
+
+  it.each(DENSITY_IDS)("%s: 묶음 머리 행이 이어지는 행보다 위로 더 열리고, 이어지는 행은 위아래가 대칭이다", (tier) => {
+    const head = padAt(tier, ROW_GROUP_START_PAD_CLASS);
+    const cont = padAt(tier, ROW_CONTINUATION_PAD_CLASS);
+    expect(head.top).toBeGreaterThan(cont.top);
+    expect(cont.top).toBe(cont.bottom);
+  });
+
+  it("기본 단계의 합이 위쪽 「코어 ROW_SPACE」 단정과 같은 숫자다 — 두 갈래가 한 표를 본다", () => {
+    expect(DENSITY.comfortable.messageGap).toBe(SPACING_BRIDGE.withinGroup);
+    expect(DENSITY.comfortable.messageGroupGap).toBe(SPACING_BRIDGE.betweenGroups);
+  });
+
+  it("모든 단계에서 행 사이 거리가 늘수록 묶음 사이 거리도 늘어난다 — 단계가 거꾸로 서지 않는다", () => {
+    const order: DensityId[] = ["compact", "comfortable", "spacious"];
+    const within = order.map((tier) => padAt(tier, ROW_CONTINUATION_PAD_CLASS).top * 2);
+    const between = order.map((tier) => padAt(tier, ROW_CONTINUATION_PAD_CLASS).bottom + padAt(tier, ROW_GROUP_START_PAD_CLASS).top);
+    expect([...within].sort((a, b) => a - b)).toEqual(within);
+    expect([...between].sort((a, b) => a - b)).toEqual(between);
+    expect(new Set(within).size).toBe(3);
+    expect(new Set(between).size).toBe(3);
   });
 });
 

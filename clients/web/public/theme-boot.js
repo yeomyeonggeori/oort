@@ -52,7 +52,7 @@
   var DEFAULT_THEME = "dawnsky";
   var DERIVED_PALETTE = "derived";
   var SIGNAL_PRESETS = ["seongun", "hongyeom", "hyeseong", "gamram"];
-  var DENSITIES = ["comfortable", "compact"];
+  var DENSITIES = ["comfortable", "compact", "spacious"];
   var FONT_SIZES = ["smaller", "default", "larger"];
   var THREAD_LAYOUTS = ["split", "focus"];
   var WALLPAPER_KINDS = ["solid", "preset", "image"];

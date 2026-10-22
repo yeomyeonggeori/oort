@@ -63,8 +63,20 @@ export const SPACING_SCALE_PX: Record<string, number> = {
   "6": 24,
   "8": 32,
   marker: 2,
-  /** 행 하나가 무는 세로 여백 = `ROW_SPACE.withinGroup`의 절반 (tokens.css). */
+  /**
+   * 행 하나가 무는 세로 여백 = `ROW_SPACE.withinGroup`의 절반 (tokens.css). 이 줄과 아래 네 줄은
+   * 「편하게」(기본) 단계 값이다. 대화 밀도가 `appearance/density.css`에서 같은 변수를 4·8로
+   * 바꾸는 것은 `densityTokens.test.ts`가 코어 `DENSITY`와 대조한다.
+   */
   row: 6,
+  /** 묶음 머리 행의 위 여백. 위 행의 `row`(6)와 합쳐 `ROW_SPACE.betweenGroups`(18)가 된다. */
+  rowhead: 12,
+  /** 타임라인 메시지 아바타·거터의 한 변 = 코어 `AVATAR_SIZE`. */
+  "message-avatar": 32,
+  /** 마크다운 블록 사이 간격. */
+  prose: 8,
+  /** 목록 항목 사이 간격. 현행 0이고 여유롭게만 연다. */
+  "list-item": 0,
 };
 
 /** 날짜 구분선 — 하루가 바뀌는 자리라 가장 크게 연다. */
@@ -79,8 +91,13 @@ export const DIVIDER_RULE_CLASS = "h-px";
 /**
  * 저자 묶음의 **머리** 행. 위로 크게 열고 아래는 묶음 안 간격의 절반만 남긴다.
  * 앞 행의 `pb-row`와 합쳐 `ROW_SPACE.betweenGroups`(6+12=18)가 된다.
+ *
+ * 위 여백이 `pt-3`이 아니라 `pt-rowhead`인 이유: 12가 밀도(AP-2a #4189)를 따라 8·16으로
+ * 움직여야 하는데, 리듬 단계 `--spacing-3`은 모든 곳에서 12여야 해서 덮어쓸 수 없다.
+ * 이름이 `row-head`가 아닌 것은 아래 `spacing.test.ts`의 「손으로 적은 행 패딩」 검사
+ * (`p[tby]-row\b`)가 이 클래스까지 잡지 않게 하려는 것이다.
  */
-export const ROW_GROUP_START_PAD_CLASS = "pt-3 pb-row";
+export const ROW_GROUP_START_PAD_CLASS = "pt-rowhead pb-row";
 /**
  * 이어지는 행. 위아래가 대칭이라 두 연속 행 사이가 `ROW_SPACE.withinGroup`(6+6=12)이다.
  *
@@ -89,6 +106,22 @@ export const ROW_GROUP_START_PAD_CLASS = "pt-3 pb-row";
  * 처져 앉는다.
  */
 export const ROW_CONTINUATION_PAD_CLASS = "py-row";
+
+/**
+ * 타임라인 메시지 아바타와 그 거터의 한 변 (AP-2a #4189). 코어 `AVATAR_SIZE`(32)가 기본이고 대화
+ * 밀도가 28·36으로 바꾼다. 공용 `Avatar`의 기본 `size-8`을 이 클래스가 이긴다(`cn`이 둘을
+ * 같은 `size` 그룹으로 안다, `NAMED_MEASURES`) — 디렉터리·받은편지함의 아바타는 밀도를 따르지 않는다.
+ * 거터는 아바타와 같은 한 변이어야 이니셜이 잘리지도, 본문이 이유 없이 밀리지도 않는다.
+ */
+export const MESSAGE_AVATAR_SIZE_CLASS = "size-message-avatar";
+export const MESSAGE_AVATAR_GUTTER_CLASS = "w-message-avatar";
+
+/**
+ * 마크다운 블록(문단·목록·코드) 사이 간격과 목록 항목 사이 간격 (AP-2a #4189). 설정 미리보기가
+ * 같은 상수를 읽는다 — 미리보기가 타임라인과 다른 간격을 그리면 눌러 보는 사람에게 거짓말이 된다.
+ */
+export const MESSAGE_PROSE_GAP_CLASS = "gap-prose";
+export const MESSAGE_LIST_ITEM_GAP_CLASS = "mt-list-item";
 
 /**
  * 행 배너 「닫기」가 다음 행 호버 툴바 straddle 띠에 덮이지 않게 비우는 아래 여백.

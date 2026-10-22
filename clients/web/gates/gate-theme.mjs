@@ -45,6 +45,8 @@
 //   THEME_GATE_PROVE_RED_PERSIST=1 npm run gate:theme
 //     테마 키(v2 레코드)에 대한 localStorage.setItem만 무력화한다. 화면은 즉시 바뀌지만 저장이
 //     없으므로 ②가 무너져야 한다.
+//   (⑥ 글자 크기·밀도 첫 페인트의 red proof는 환경 변수가 아니라 번들을 망가뜨려 쟀다: 루트 속성 규칙
+//    `:root[data-font-size="larger"]`의 속성 이름을 바꿔 다시 빌드하면 본문 글자 단언이 FAIL이 정답이다.)
 //   THEME_GATE_PROVE_RED_CACHE=1 npm run gate:theme
 //     ⑥의 「캐시가 있으면」 장면에서 캐시 항목만 비운다. 첫 페인트에 꽂힐 변수가 사라지므로 그
 //     단언이 무너져야 한다. 통과한다면 그 단언은 캐시가 아니라 아무거나 재고 있었던 것이다.
@@ -202,6 +204,9 @@ function readDocument() {
     attrs: Object.fromEntries([...root.attributes].map((a) => [a.name, a.value])),
     vars,
     cache: localStorage.getItem("momo.web.theme.cache.v1"),
+    // 계산된 값(AP-2a #4189): 글자 크기·밀도가 속성으로만이 아니라 화면에 이미 서 있는지.
+    bodyFontPx: Number.parseFloat(getComputedStyle(document.body).fontSize),
+    spacingRowPx: Number.parseFloat(getComputedStyle(root).getPropertyValue("--spacing-row")),
   };
 }
 
@@ -532,6 +537,20 @@ async function main() {
       for (const [name, value] of Object.entries(expectedAttrs)) {
         if (full.late.attrs[name] !== value) {
           fail(`앱이 올라온 뒤 ${name}=${JSON.stringify(full.late.attrs[name])}다(부트가 찍은 ${JSON.stringify(value)}와 어긋남)`);
+        }
+      }
+      // 글자 크기·밀도는 속성만 찍히는 것이 아니라 화면에 이미 서 있다(AP-2a #4189): 번들이 오기 전의
+      // 문서에서 본문 글자가 「크게」(16px)이고 행 간격 변수가 「촘촘하게」(4px)다. 새로고침에 기본 크기가
+      // 한 프레임 보이지 않는다.
+      for (const [when, facts] of [
+        ["번들이 도착하기 전의 문서", full.early],
+        ["앱이 올라온 뒤의 문서", full.late],
+      ]) {
+        if (!(Math.abs(facts.bodyFontPx - 16) <= 0.1)) {
+          fail(`${when}의 본문 글자가 ${facts.bodyFontPx}px다(글자 크기 「크게」 시드는 16px). 속성은 찍혔는데 화면이 안 따른다.`);
+        }
+        if (facts.spacingRowPx !== 4) {
+          fail(`${when}의 --spacing-row가 ${facts.spacingRowPx}px다(대화 밀도 「촘촘하게」 시드는 4px). 속성은 찍혔는데 화면이 안 따른다.`);
         }
       }
 
