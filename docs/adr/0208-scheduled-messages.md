@@ -72,7 +72,7 @@
 | D11 | 첨부는 예약 때 선검증 + 점유, 보낼 때 정본 규칙으로 재검증 | 확정(점유 표 추가) |
 | D12 | 개인 채널 이벤트 `scheduled_message.updated` | 이름 `scheduled.updated` → 규약대로 |
 | D13 | 감사 행 5종, 본문 불포함 | 확정 |
-| D14 | 수명·자격 회수: 보낸·취소한 행은 본문을 지운다, 틱이 정리, 세션 종료·기기 해제·재사용은 대기 예약을 멈추고 추방·탈퇴는 취소 | 신설 |
+| D14 | 수명·자격 회수: 보낸·취소한 행은 본문을 지운다, 틱이 정리, 세션 종료·기기 해제·재사용은 대기 예약과 실패 행을 멈추고 추방·탈퇴는 취소 | 신설 |
 | D15 | 운영: 선택 환경 변수 4개, 꺼짐이면 생성 503, doctor 점검 | 신설 |
 | D16 | 클라이언트 계약: 코어 모듈 하나, 보내기 전 판정 공유, 201 뒤 스냅샷이 같을 때만 비움, 내용이 바뀌면 새 `clientRequestId` | 신설(UI 명세 연결) |
 
@@ -91,7 +91,7 @@
 
 ### D3. 저장
 - **`scheduled_message`** (새 테넌트 표, 마이그레이션은 구현 시점의 다음 번호다. 작성 시점 `origin/track/engine`의 최대는 144이고 열린 PR 중 마이그레이션을 더하는 것은 없다 [V])
-  - `id` uuidv7 · `workspace_id` · `channel_id` · `author_member_id` · `root_id` NULL · `body` NULL · `send_at` · `status` · `failure_reason` NULL · `attempts` · `next_attempt_at` NULL · `sent_message_id` NULL · `sent_at` NULL · `client_request_id` · `armed_session_id` NULL(내용 또는 시각을 마지막으로 쓴 세션 계열, `token.session_id`. 생성·수정·다시 걸기 때마다 요청의 `principal.token_id`로 조회해 갱신한다) · `rev` · `created_at` · `updated_at`
+  - `id` uuidv7 · `workspace_id` · `channel_id` · `author_member_id` · `root_id` NULL · `body` NULL · `send_at` · `status` · `failure_reason` NULL · `attempts` · `next_attempt_at` NULL · `sent_message_id` NULL · `sent_at` NULL · `client_request_id` · `armed_session_id` NULL(내용을 마지막으로 쓴 세션 계열, `token.session_id`. 생성·본문 변경·다시 걸기 때마다 요청의 `principal.token_id`로 조회해 갱신한다. 시각만 바꾸는 수정은 옮기지 않는다) · `rev` · `created_at` · `updated_at`
   - `status`는 `pending | sent | failed | cancelled`. `cancelled` 철자는 레포 관례를 따른다(`agent_run`·`cloud_box_control` 모두 `cancelled`).
   - CHECK: `status IN ('pending','failed')`이면 `body IS NOT NULL`이다(첨부만 있는 예약은 빈 문자열이다. 「글 또는 첨부 하나 이상」은 CHECK가 자식 표를 볼 수 없어서 앱이 생성·수정 때 판정한다). 끝난 행(`sent`·`cancelled`)은 **본문을 지운다**(D14).
   - UNIQUE `(workspace_id, author_member_id, client_request_id)`: 생성 재시도 멱등.
@@ -167,7 +167,7 @@ api 역할은 NOBYPASSRLS라 「지금 기한 된 예약이 어느 워크스페�
 - **푸시는 이 ADR이 하지 않는다. 비용을 이름으로 적는다**: 와이어가 닫힌 어휘이고 메시지 id가 필수인데 보내지 못한 예약에는 메시지가 없다. 새 푸시는 ① reason 1종 추가(relay `ALLOWED_REASONS`, 서버 `PushReason`, 앱 상수) ② `message_id` 자리에 올 값(예약 id) 또는 새 선택 키: **키 집합 변경은 ADR-0120 변경이다**(`momo-push/src/dispatch.rs` 머리) ③ NSE가 무엇을 가져와 그릴지 ④ `push_candidate`의 새 생산자(ADR-0204 D8-a가 「Accepted ADR 없이 더하지 않는다」고 못 박았다) ⑤ relay 먼저 → 서버 → 앱 배포 순서(ADR-0204 D7)를 요구한다. 그래서 별도 증보로 정한다. **그 전까지 실패는 앱을 열어야 보인다**(수용, 위험 2).
 
 ### D9. 편집 · 지금 보내기 · 취소
-- **편집**(`PATCH {body?, sendAtMs?}`, 하나 이상; 수정과 다시 걸기는 `armed_session_id`를 요청 세션으로 갱신한다, D14): `pending`이고 마감까지 **30초 넘게 남았을 때만**. 30초 안이면 409 `scheduled_too_late`. 근거: 마감 직전의 편집은 쓴 글이 아니라 곧 나갈 글을 바꾸는 일이라 서버가 「곧 보내요」를 `scheduled_too_late`로 말한다(그 뒤 열어 둔 편집기가 마감을 넘기면 `scheduled_already_sent`). 행 잠금 덕에 경쟁 자체는 안전하다.
+- **편집**(`PATCH {body?, sendAtMs?}`, 하나 이상; 본문 변경과 다시 걸기는 `armed_session_id`를 요청 세션으로 갱신하고 시각만 바꾸는 수정은 갱신하지 않는다, D14): `pending`이고 마감까지 **30초 넘게 남았을 때만**. 30초 안이면 409 `scheduled_too_late`. 근거: 마감 직전의 편집은 쓴 글이 아니라 곧 나갈 글을 바꾸는 일이라 서버가 「곧 보내요」를 `scheduled_too_late`로 말한다(그 뒤 열어 둔 편집기가 마감을 넘기면 `scheduled_already_sent`). 행 잠금 덕에 경쟁 자체는 안전하다.
 - **`failed` 행**: `sendAtMs`를 주면 `pending`으로 되살아난다(`attempts`·사유·`next_attempt_at` 초기화, 대기 50개 상한에 다시 센다). `body`만 주면 글만 고친다(이때 클라이언트는 `sendAtMs`를 보내지 않는다. 지난 시각은 400이다). 자격 회수로 멈춘 행(`sessions_ended`)은 이렇게 작성자가 다시 걸어야 나간다.
 - **지금 보내기**(`POST …/send-now`): `pending`·`failed`에서 허용. **요청 tx 안에서 D4의 같은 함수를 부른다**(마감을 지금으로 당겨 한 틱 기다리는 방식 대신). 행 잠금이 스케줄러를 배제하고, 요청자는 즉시 결과를 받는다. 이때 `via_token_id`는 요청의 것이다(스케줄러는 `None`). 거절이면 409 + `error.code` = 실패 사유, 행은 `failed`가 된다.
 - **취소**(`DELETE`): `pending`·`failed`에서 허용, **마감 30초 안에서도 된다.** 취소는 가장 중요한 안전 동작이고 행 잠금이 경쟁을 닫는다(스케줄러가 먼저 잠그면 취소가 기다렸다가 409 `scheduled_already_sent`, 취소가 먼저면 스케줄러의 재확인이 0행). **마감이 지난 `pending` 행도 지우기·지금 보내기가 된다**: 스케줄러가 꺼져 있거나 유예 중일 때 사람이 멈출 수 있어야 한다(꺼짐에서도 삭제는 된다, D15). 이슈 본문은 셋 다 30초 잠금이었으나 근거가 없었다.
@@ -210,9 +210,9 @@ idempotency_key: "<channel>:scheduled:<ID_UPPER>:<rev>"
 - `sent`·`cancelled`가 되면 **같은 tx에서 본문을 지우고 점유 행을 삭제한다**(보낸 글의 정본은 message 행, 취소한 글은 DB에 남기지 않는다). 행 자체는 보낸·취소한 것 7일, 실패한 것 30일 뒤 정리한다.
 - **정리는 틱이 한다**: `expired_scheduled_messages`(D6)가 돌려주는 행을 틱이 자기 tx에서 삭제한다(`momo_app` tx, 교차 테넌트 쓰기 없음). 작성자가 다시 쓰지 않아도 보존 기간이 지켜진다.
 - **자격 회수: 예약은 「세션에 매달린 것」이다**(`session_end.rs:1-20`: 그런 것은 그 한 곳에 더한다). 작성자의 로그인이 사라진 뒤에 그 로그인이 걸어 둔 예약이 나가면 안 되고, 정지가 풀려도 되살아나면 안 된다(#2677).
-  1. **멤버 전체의 세션 종료**(`end_member_sessions_in_tx`: 비밀번호 변경·재설정, 정지, 추방, 탈퇴)는 같은 tx에서 그 멤버의 **대기 예약과 되살릴 수 있는 실패 행(`missed`·`send_error`)을 `failed` + `sessions_ended`로 멈춘다**(탈취된 세션이 심은 예약이 이미 `missed`로 닫혀 있어도 내용 확인 없이 한 번 눌러 나가지 못하게 한다). 취소가 아니라 멈춤이다: 정당한 예약을 말없이 잃지 않게 하고, 작성자가 내용을 보고 다시 걸어야 나간다(D9). 탈취된 세션이 심은 예약은 계정을 되찾은 뒤에도 말없이 나가지 않는다. **클라이언트는 이 사유의 행에서 본문 전체·첨부 이름·채널을 보여 주는 확인을 거친 뒤에만 지금 보내기와 다시 예약을 허용한다**(UI 명세 1.8: 두 줄 미리보기만 보고 한 번 눌러 나가면 멈춘 의미가 약하다). 만든 기기·세션은 응답에 싣지 않는다(v1).
-  2. **계열 하나의 종료 중 기기 연결 해제와 refresh 재사용**(`LineageEnd::DeviceUnlinked`·`RefreshReuse`)은 `armed_session_id`가 그 계열인 대기 예약과 되살릴 수 있는 실패 행을 같은 사유로 멈춘다(내용을 마지막으로 쓴 계열이라서, 작성자가 훔친 연결의 글을 고쳐 쓰면 그 예약은 더 이상 훔친 계열에 매이지 않는다). 이 경로의 tx는 워크스페이스 GUC만 건 `with_tenant_tx`이고(`device_link.rs:382`) 함수는 `member_id`를 인자로 받으므로 그 값으로 `app.member_id`를 묶는다. **로그아웃은 건드리지 않는다**: 부재 중에 나가게 하려고 예약하는 것이 이 기능의 쓰임이다.
-  3. **추방·탈퇴**는 같은 tx에서 그 멤버의 대기·실패 예약을 모두 `cancelled`(본문 폐기)로 정리한다. 호출 자리는 route 층의 두 곳이다: 추방 `member_lifecycle.rs:296-320`(안에서 `terminate_workspace_membership_in_tx`가 먼저 돌고 `membership_lifecycle.rs:502`, 그다음 `end_member_sessions_in_tx`), 탈퇴 `workspaces.rs:313-352`(`end_member_sessions_in_tx`가 먼저, 그다음 `terminate_…`). `momo-settings`는 `momo-messaging`에 의존하지 않으므로(`momo-settings/Cargo.toml`) `terminate_…` 안이 아니라 route 층에서 `end_member_sessions_in_tx` 옆에 부른다. 1과 3은 순서와 무관하게 결과가 취소다(보류는 대기만, 취소는 대기·실패 모두를 만진다).
+  1. **멤버 전체의 세션 종료**(`end_member_sessions_in_tx`: 비밀번호 변경·재설정, 정지, 추방, 탈퇴)는 같은 tx에서 그 멤버의 **대기 예약과 모든 실패 행을 `failed` + `sessions_ended`로 멈춘다**(탈취된 세션이 심은 예약이 이미 `missed`나 `not_member`로 닫혀 있어도 내용 확인 없이 한 번 눌러 나가지 못하게 한다. 서버는 모든 실패 행에 지금 보내기와 다시 걸기를 허용하므로 사유를 가리지 않는다. 원래 사유는 확인 뒤 지금 보내기가 다시 판정한다). 취소가 아니라 멈춤이다: 정당한 예약을 말없이 잃지 않게 하고, 작성자가 내용을 보고 다시 걸어야 나간다(D9). 탈취된 세션이 심은 예약은 계정을 되찾은 뒤에도 말없이 나가지 않는다. **클라이언트는 이 사유의 행에서 본문 전체·첨부 이름·채널을 보여 주는 확인을 거친 뒤에만 지금 보내기와 다시 예약을 허용한다**(UI 명세 1.8: 두 줄 미리보기만 보고 한 번 눌러 나가면 멈춘 의미가 약하다). 쓴 기기·세션은 응답에 싣지 않는다(v1).
+  2. **계열 하나의 종료 중 기기 연결 해제와 refresh 재사용**(`LineageEnd::DeviceUnlinked`·`RefreshReuse`)은 `armed_session_id`가 그 계열인 대기 예약과 실패 행을 같은 사유로 멈춘다(내용을 마지막으로 쓴 계열이라서, 작성자가 훔친 연결의 글을 고쳐 쓰면 그 예약은 더 이상 훔친 계열에 매이지 않는다. 시각만 바꾼 경우는 글을 고친 것이 아니라서 매인 채로 남는다). 이 경로의 tx는 워크스페이스 GUC만 건 `with_tenant_tx`이고(`device_link.rs:382`) 함수는 `member_id`를 인자로 받으므로 그 값으로 `app.member_id`를 묶는다. **로그아웃은 건드리지 않는다**: 부재 중에 나가게 하려고 예약하는 것이 이 기능의 쓰임이다. **기기 연결 해제는 로그아웃으로 토큰이 이미 취소된 연결에서도 보류해야 한다.** 지금 해제 라우트는 토큰이 하나도 살아 있지 않으면 결과가 `NotFound`이고(`momo-auth/src/device_link.rs:727-736`) 결과가 `Revoked`일 때만 `end_session_lineage_in_tx`를 부른다(`routes/device_link.rs:393-411`). 훔친 연결이 예약을 고친 뒤 로그아웃하면 이 경로가 보류를 건너뛴다. 그래서 해제 라우트는 결과와 무관하게 연결 행이 있으면 `linked_device_session_id_in_tx`가 돌려주는 계열(해제 뒤에도 읽힌다, `momo-auth/src/device_link.rs:740-742`)을 보류한다.
+  3. **추방·탈퇴**는 같은 tx에서 그 멤버의 대기·실패 예약을 모두 `cancelled`(본문 폐기)로 정리한다. 호출 자리는 route 층의 두 곳이다: 추방 `member_lifecycle.rs:296-320`(안에서 `terminate_workspace_membership_in_tx`가 먼저 돌고 `membership_lifecycle.rs:502`, 그다음 `end_member_sessions_in_tx`), 탈퇴 `workspaces.rs:313-352`(`end_member_sessions_in_tx`가 먼저, 그다음 `terminate_…`). `momo-settings`는 `momo-messaging`에 의존하지 않으므로(`momo-settings/Cargo.toml`) `terminate_…` 안이 아니라 route 층에서 `end_member_sessions_in_tx` 옆에 부른다. 1과 3은 순서와 무관하게 결과가 취소다(보류와 취소 모두 대기와 실패 행을 만진다. 취소는 `sessions_ended`로 멈춘 행도 지운다).
   4. 1·2·3은 **워크스페이스 GUC만 건 tx가 소유자 범위 행을 만지는 유일한 자리**다(관리자의 추방·정지는 `shared.rs:262-273`, 계열 종료는 위 2). 이름 있는 함수 셋(`hold_member_schedules_in_tx`·`hold_lineage_schedules_in_tx`·`cancel_member_schedules_in_tx`)만이 **남의** `app.member_id`를 묶었다가 원래 값으로 되돌린다(되돌릴 값은 호출 전 `current_setting('app.member_id', true)`이고, 없었거나 빈 문자열이면 빈 문자열로 둔다. 정책이 `NULLIF`로 읽으므로 안전하다, D3). 틱과 정리가 자기 행의 작성자 id를 묶는 것은 이 규칙 밖이다. 시험이 남의 id를 묶는 곳이 이 함수들뿐이라는 것을 고정한다.
 - **워크스페이스는 소프트 삭제라 FK 연쇄가 없다.** 삭제된 워크스페이스의 행은 틱이 `cancelled`로 마감한다(D7).
 - **가시성**: 보내기 전 **본문**은 작성자만 읽는다. 워크스페이스 owner·admin도 못 읽는다(소유자 범위 RLS, 감사 행은 id만). 검색·팀 기억(ADR-0196)은 message 행에서 읽으므로 보내기 전 본문에 닿지 않는다. **첨부 파일은 다르다**: 업로드 때부터 채널 멤버가 내용 경로로 읽을 수 있고(「지금 있는 것」) id·이름은 감사 detail에 있다. 이것은 초안 첨부와 같은 기존 노출이고, 예약은 그 기간을 마감 시각까지(최대 120일) 늘린다. 후속(보안): 내용 경로를 「메시지에 묶인 첨부 또는 업로더 본인」으로 좁힌다(남는 위험 8).
@@ -221,7 +221,7 @@ idempotency_key: "<channel>:scheduled:<ID_UPPER>:<rev>"
 ### D15. 운영
 - 선택 환경 변수(모두 기본값이 있고 필수 변수는 없다. compose·Railway 카탈로그의 이름 대조에 영향이 없다): `MOMO_SCHEDULER_ENABLED`(기본 1), `MOMO_SCHEDULER_TICK_MS`(5000), `MOMO_SCHEDULER_BATCH`(100, 1..=200), `MOMO_SCHEDULER_GRACE_SECONDS`(3600, 300..=86400). 운영 문서(SELF_HOST)에 한 표로 적는다.
 - **`MOMO_SCHEDULER_ENABLED=0`이면 틱이 돌지 않고 생성·수정·지금 보내기가 503 `scheduler_disabled`다**(목록·삭제는 된다). 조용히 쌓이는 예약이 없도록 꺼짐이 곧 거절이다(드라이브·GitHub 표면의 「설정 없으면 503」 선례).
-- **doctor 점검 `stack.scheduler`**: 삭제되지 않은 워크스페이스에서 마감이 5분 넘게 지난 `pending`이 있으면 major, 최근 24시간 `failed` + `missed`·`send_error`가 있으면 info. 소유자 연결로 교차 테넌트 개수만 센다(`stack.outbox`와 같은 방식, `oort_doctor.sh:942`). **이 연결이 RLS를 건너뛴다는 전제**가 있다: outbox에는 RLS가 없지만(`001_init.sql`의 FORCE 목록에 없음) 이 표들은 FORCE라서, 연결 역할이 슈퍼유저도 BYPASSRLS도 아니면 개수가 조용히 0으로 나온다. 그래서 점검은 먼저 `rolsuper OR rolbypassrls`를 확인하고 아니면 「알 수 없음」으로 보고한다.
+- **doctor 점검 `stack.scheduler`**: 삭제되지 않은 워크스페이스에서 마감이 5분 넘게 지난 `pending`이 있으면 major, 최근 24시간 `failed` + `missed`·`send_error`가 있으면 info. 소유자 연결로 교차 테넌트 개수만 센다(`stack.outbox`와 같은 방식, `oort_doctor.sh:942`). **이 연결이 RLS를 건너뛴다는 전제**가 있다: `stack.outbox`도 FORCE RLS 표를 읽고(`001_init.sql:554-559`) 그래서 슈퍼유저 URL(`MIGRATE_DATABASE_URL`)을 요구한다(`oort_doctor.sh:1252`). 이 점검도 같은 연결을 쓰므로 전제가 이미 성립하지만, 연결 역할이 슈퍼유저도 BYPASSRLS도 아니면 개수가 조용히 0으로 나온다. 그래서 점검은 먼저 `rolsuper OR rolbypassrls`를 확인하고 아니면 「알 수 없음」으로 보고한다. 보고는 둘로 나눈다: 마감이 5분 넘게 지난 `pending`(정상 백오프 중인 행도 걸린다)과 **유예를 넘긴 `pending`**(틱이 닫지 못하는 행이다. 판정 tx가 계속 실패하는 행의 신호다).
 - 로그는 개수·id뿐이다(본문 불포함). 틱 지연(마감 대비 실제 전송까지)은 로그에 분포로 남긴다.
 
 ### D16. 클라이언트 계약 (요약, 상세는 부록 B)
@@ -269,7 +269,7 @@ idempotency_key: "<channel>:scheduled:<ID_UPPER>:<rev>"
 - 운영: 마이그레이션 1개(표 2개 + 역할 1개 + 함수 2개 + 인덱스), 부트스트랩 SQL 두 파일의 재부여·봉인 블록, 선택 환경 변수 4개, doctor 점검 1개, 이벤트 type 1개, 세션 종료·추방·탈퇴 경로의 연동 4곳(`end_member_sessions_in_tx`·`end_session_lineage_in_tx`·추방 호출부·탈퇴 호출부).
 
 ## 설계 실측 (격리 PG 18.6, 2026-10-22)
-설계가 기대는 DB 동작을 구현 전에 확인하려고 저장소 밖에서 같은 모양의 SQL(표 2개·정책·함수·역할 권한)을 격리 컨테이너(전용 포트, 끝나고 삭제)에서 돌렸다. 처음은 슈퍼유저 소유 함수, 두 번째는 이 ADR의 최소 권한 소유자였고, 두 실행은 매번 새 연결을 썼다. 세 번째는 독립 검수의 지적을 받아 **테넌트 tx를 한 번 돌린 같은 연결**과 워크스페이스 공정 선택을 확인했다(마지막 두 행). 스크립트는 저장소에 넣지 않았다(구현 이슈의 PG 적합성 시험이 정본이다). 실제 코드·실제 마이그레이션이 아니므로 이 절은 「동작 모양」의 실측이다.
+설계가 기대는 DB 동작을 구현 전에 확인하려고 저장소 밖에서 같은 모양의 SQL(표 2개·정책·함수·역할 권한)을 격리 컨테이너(전용 포트, 끝나고 삭제)에서 돌렸다. 처음은 슈퍼유저 소유 함수, 두 번째는 이 ADR의 최소 권한 소유자였고, 두 실행은 매번 새 연결을 썼다. 세 번째는 독립 검수의 지적을 받아 **테넌트 tx를 한 번 돌린 같은 연결**과 워크스페이스 공정 선택을 확인했다(「풀 연결의 빈 GUC」「워크스페이스 공정성」 행). 네 번째는 공정 선택 쿼리의 계획과 비용을 쟀다(「공정 선택의 비용」 행. 이 행은 RLS와 정의자 역할이 없는 단순 표에서 잰 값이다). 스크립트는 저장소에 넣지 않았다(구현 이슈의 PG 적합성 시험이 정본이다). 실제 코드·실제 마이그레이션이 아니므로 이 절은 「동작 모양」의 실측이다.
 
 | 확인한 것 | 결과 |
 |---|---|
@@ -317,8 +317,8 @@ idempotency_key: "<channel>:scheduled:<ID_UPPER>:<rev>"
 | `the_due_functions_work_on_a_connection_that_already_ran_a_tenant_tx` | 빈 GUC에서 22P02가 나지 않음 | 정책 워크스페이스 항의 `NULLIF` 제거 |
 | `post_answers_a_known_client_request_id_before_any_validation` / `the_cap_holds_under_concurrency` | 멱등 순서·상한 | 조회 순서 바꾸기·UNIQUE 또는 advisory lock 제거 |
 | `an_edit_in_the_last_30_seconds_is_refused_but_a_cancel_races_safely` | D9 | 30초 판정·행 잠금 제거 |
-| `a_member_wide_session_end_holds_pending_schedules_and_logout_does_not` | D14 자격 회수 | 연동 제거·로그아웃에도 연동 |
-| `a_device_unlink_or_refresh_reuse_holds_only_that_lineages_schedules` | 계열별 보류(수정한 세션이 바뀌면 보류 대상도 바뀌는 것, 계열 종료 tx가 대상의 `app.member_id`를 묶는 것까지) | `armed_session_id` 조건 제거·수정 때 갱신 제거·GUC 바인딩 제거 |
+| `a_member_wide_session_end_holds_pending_and_failed_schedules_and_logout_does_not` | D14 자격 회수(대기와 실패 행 모두) | 연동 제거·실패 행 제외·로그아웃에도 연동 |
+| `a_device_unlink_or_refresh_reuse_holds_only_that_lineages_schedules` | 계열별 보류(본문을 고친 세션이 바뀌면 보류 대상도 바뀌는 것, 시각만 바꾸면 안 바뀌는 것, 로그아웃으로 토큰이 이미 취소된 연결의 해제까지, 계열 종료 tx가 대상의 `app.member_id`를 묶는 것까지) | `armed_session_id` 조건 제거·본문 변경 때 갱신 제거·해제 라우트의 `Revoked` 조건 복원·GUC 바인딩 제거 |
 | `removal_and_leave_cancel_schedules_and_a_foreign_member_guc_is_bound_only_in_the_three_named_functions` | 추방·탈퇴 정리와 남의 `app.member_id` 바인딩 예외 | 연동 제거·함수 밖에서 남의 id 바인딩 |
 | `the_tick_purges_expired_rows_without_the_author_writing` / `a_deleted_workspace_row_is_cancelled_not_retried` | 보존·소프트 삭제 | 정리·삭제 판정 제거 |
 | `the_event_rides_the_personal_channel_with_ids_only` | 본문 비유출 | 이벤트에 `body` 추가 |
