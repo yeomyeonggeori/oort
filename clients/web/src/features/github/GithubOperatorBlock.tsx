@@ -41,6 +41,7 @@ import {
   useGithubAppStatus,
   useUnlinkedInstallations,
 } from "./githubQueries";
+import { BrowserHandoff } from "./GithubBrowserHandoff";
 
 // =============================================================================
 // 운영자 구역 (ADR-0205 D2·D3·D7, #3955): 이 인스턴스의 GitHub 앱 하나와 「연결 안 된 설치」.
@@ -111,7 +112,16 @@ function RegisteredApp({ status }: { status: GithubAppStatus }) {
     <div className="flex min-w-0 flex-col gap-3" data-testid="github-app-registered">
       <KeyValueRows
         rows={[
-          { key: "앱", value: app.slug },
+          {
+            key: "앱",
+            // 브라우저에서 돌아온 데스크탑 창이 다시 읽으면 이 줄이 「등록됨」으로 선다(#4220).
+            value: (
+              <span className="inline-flex min-w-0 flex-wrap items-center gap-2">
+                <span className="min-w-0 break-all">{app.slug}</span>
+                <StatusChip tone="ok">등록됨</StatusChip>
+              </span>
+            ),
+          },
           { key: "만든 계정", value: `${app.ownerLogin} (${app.ownerType === "Organization" ? "조직" : "개인"})` },
           ...(app.createdAtMs > 0 ? [{ key: "만든 날", value: formatDay(app.createdAtMs) }] : []),
           { key: "받는 권한", value: permissionLabels(status.permissions).join(", "), prose: true },
@@ -263,21 +273,13 @@ function RegisterApp({ status, offline }: { status: GithubAppStatus; offline: bo
  * GitHub 로 넘어가는 일회용 폼. 매니페스트는 비밀이 아니다. 서버가 준 주소(github.com 의 https)
  * 로만 POST 하고(코어가 검증한다), 새 탭에서 열어 이 화면을 지키지 않는다: GitHub 가 끝나면
  * 서버가 이 앱으로 돌려보낸다.
+ *
+ * 데스크탑 셸은 새 창으로 POST 폼을 열 수 없다(`target="_blank"` 가 죽은 컨트롤). 그래서 기본
+ * 브라우저가 이 서버의 핸드오프 경로를 열고 거기서 POST 한다(`BrowserHandoff`, #4220).
  */
 function ManifestHandoff({ handoff }: { handoff: GithubManifestStart }) {
   const minutes = Math.max(1, Math.round(handoff.expiresInSeconds / 60));
-  // 데스크탑 셸은 새 창으로 POST 폼을 열 수 없다(`target="_blank"` 가 죽은 컨트롤). 브라우저에서 한다.
-  if (isDesktop()) {
-    return (
-      <p
-        className="break-keep rounded-md border border-line p-3 text-body text-ink"
-        data-testid="github-manifest-desktop"
-        role="status"
-      >
-        데스크탑 앱에서는 GitHub 앱 만들기를 열 수 없어요. 웹 브라우저로 이 서버에 들어와 같은 화면에서 만들어 주세요.
-      </p>
-    );
-  }
+  if (isDesktop()) return <BrowserHandoff handoff={handoff} />;
   return (
     <form
       method="post"

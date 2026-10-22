@@ -1,0 +1,85 @@
+{
+  "mode": "before",
+  "results": [
+    {
+      "name": "1440-light 카드: 운영자이고 앱이 없으면 「GitHub 앱 만들기」가 선다",
+      "ok": false
+    },
+    {
+      "name": "1440-light 가로 넘침 0 (카드)",
+      "ok": true
+    },
+    {
+      "name": "1440-light 카드: 운영자가 아니면 진입 줄이 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 데스크탑: 막다른 문장이 선다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 데스크탑: 그 문장",
+      "ok": true
+    },
+    {
+      "name": "1440-light 데스크탑: 기본 브라우저는 열리지 않았다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 전: 핸드오프 주소는 로그인(연결) 화면이다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 전: 핸드오프 폼이 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 전: 착지 주소도 로그인(연결) 화면이다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 전: 결과 문장이 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 카드: 운영자이고 앱이 없으면 「GitHub 앱 만들기」가 선다",
+      "ok": false
+    },
+    {
+      "name": "1440-dark 가로 넘침 0 (카드)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 카드: 운영자가 아니면 진입 줄이 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 데스크탑: 막다른 문장이 선다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 데스크탑: 그 문장",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 데스크탑: 기본 브라우저는 열리지 않았다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 전: 핸드오프 주소는 로그인(연결) 화면이다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 전: 핸드오프 폼이 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 전: 착지 주소도 로그인(연결) 화면이다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 전: 결과 문장이 없다",
+      "ok": true
+    }
+  ]
+}

@@ -15,6 +15,7 @@ import {
   githubFailureMessage,
   githubNoticeFor,
   githubNoticeLabel,
+  githubPublicReturnSentence,
   githubReturnFromSearch,
   githubReturnSentence,
   isPrivateConfirmationRequired,
@@ -288,6 +289,79 @@ describe("돌아온 상태 단어 (닫힌 세계)", () => {
     expect(githubReturnFromSearch("?x=1")).toBeNull();
     expect(searchWithoutGithubReturn("?githubInstall=linked&keep=1")).toBe("?keep=1");
     expect(searchWithoutGithubReturn("?githubApp=created")).toBe("");
+  });
+});
+
+describe("로그인 안 된 브라우저의 착지 문장 (#4220)", () => {
+  const INSTALL = ["linked", "linked_elsewhere", "pending", "requested", "state_missing", "state_invalid", "not_admin", "invalid_request"];
+  const APP = [
+    "created",
+    "already_registered",
+    "not_operator",
+    "state_invalid",
+    "invalid_request",
+    "owner_mismatch",
+    "convert_code_rejected",
+    "convert_unreachable",
+    "convert_invalid_response",
+    "seal_failed",
+    "store_failed",
+  ];
+  const all = [
+    ...INSTALL.map((word) => ["install", word] as const),
+    ...APP.map((word) => ["app", word] as const),
+  ];
+
+  it("모든 단어에 문장이 있고 판정(톤)은 로그인된 화면과 늘 같다", () => {
+    for (const [kind, word] of all) {
+      const base = githubReturnSentence(kind, word);
+      const publicOne = githubPublicReturnSentence(kind, word);
+      expect(publicOne, `${kind}/${word}`).not.toBeNull();
+      expect(publicOne?.tone, `${kind}/${word}`).toBe(base?.tone);
+    }
+  });
+
+  it("로그인된 화면을 가리키는 말(이 화면·새로고침·이 워크스페이스)이 한 문장에도 없다", () => {
+    // 이 단정이 「대기 단어의 다음 걸음이 앱 화면을 가리키면 빨개지는」 사보타주 대상이다(design-review H1).
+    for (const [kind, word] of all) {
+      const publicOne = githubPublicReturnSentence(kind, word);
+      const text = `${publicOne?.sentence ?? ""} ${publicOne?.next ?? ""}`;
+      // 지시어 「이」는 낱말 앞에 서야 한다(「계정이 워크스페이스에」의 주격 조사는 지시어가 아니다).
+      expect(text, `${kind}/${word}`).not.toMatch(/(^|\s)이 (화면|워크스페이스)|새로고침/);
+    }
+    // 로그인된 화면의 문장은 그대로다: 거기서는 그 말들이 맞다.
+    expect(githubReturnSentence("install", "pending")?.next).toContain("새로고침");
+    expect(githubReturnSentence("install", "requested")?.next).toContain("이 워크스페이스");
+  });
+
+  it("바꾼 단어는 정확히 넷이고 나머지는 로그인된 화면의 문장과 같다", () => {
+    const changed = all
+      .filter(([kind, word]) => {
+        const base = githubReturnSentence(kind, word);
+        const publicOne = githubPublicReturnSentence(kind, word);
+        return base?.sentence !== publicOne?.sentence || base?.next !== publicOne?.next;
+      })
+      .map(([kind, word]) => `${kind}/${word}`);
+    expect(changed).toEqual(["install/linked", "install/pending", "install/requested", "install/state_missing"]);
+  });
+
+  it("대기 단어는 oort 앱으로 돌아가 할 일을 말한다", () => {
+    expect(githubPublicReturnSentence("install", "pending")?.next).toContain("oort 앱");
+    expect(githubPublicReturnSentence("install", "requested")?.next).toContain("연결 안 된 설치");
+    expect(githubPublicReturnSentence("install", "state_missing")?.next).toContain("연결 안 된 설치");
+    expect(githubPublicReturnSentence("install", "linked")?.sentence).toBe("GitHub 계정이 워크스페이스에 연결됐어요.");
+  });
+
+  it("seal_failed 는 일부러 그대로다: 운영자가 이유를 알 곳이 이 착지뿐이다", () => {
+    expect(githubPublicReturnSentence("app", "seal_failed")).toEqual(githubReturnSentence("app", "seal_failed"));
+    expect(githubPublicReturnSentence("app", "seal_failed")?.next).toContain("GITHUB_APP_MASTER_KEY");
+  });
+
+  it("모르는 단어와 프로토타입 키는 문장이 없다", () => {
+    expect(githubPublicReturnSentence("install", "hacked")).toBeNull();
+    expect(githubPublicReturnSentence("install", "constructor")).toBeNull();
+    expect(githubPublicReturnSentence("app", "__proto__")).toBeNull();
+    expect(githubPublicReturnSentence("app", "linked")).toBeNull();
   });
 });
 
