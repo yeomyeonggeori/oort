@@ -1,0 +1,533 @@
+{
+  "mode": "after",
+  "results": [
+    {
+      "name": "1440-light 카드: 운영자이고 앱이 없으면 「GitHub 앱 만들기」가 선다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 카드: 알림을 위한 앱이라고 말한다(도구 얼굴의 「설치됨」 칩과 헷갈리지 않게)",
+      "ok": true
+    },
+    {
+      "name": "1440-light 카드: 「GitHub 알림 열기」 길은 그대로",
+      "ok": true
+    },
+    {
+      "name": "1440-light 가로 넘침 0 (카드)",
+      "ok": true
+    },
+    {
+      "name": "1440-light 카드의 진입은 GitHub 구역으로 간다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 카드: 운영자가 아니면 진입 줄이 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 데스크탑: 막다른 문장이 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 데스크탑: 기본 브라우저를 한 번 열었다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 열린 주소: 서버의 공개 오리진 + /github/handoff",
+      "ok": true
+    },
+    {
+      "name": "1440-light 열린 주소: 쿼리스트링이 비어 있다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 열린 주소: 조각 밖에는 state 가 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 열린 주소: opener 한도(2048) 안",
+      "ok": true
+    },
+    {
+      "name": "1440-light 카드가 열었다고 말한다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 카드: 「Create GitHub App」과 조사는 한 덩어리(줄머리 조사 없음)",
+      "ok": true
+    },
+    {
+      "name": "1440-light 카드: 알림 영역은 글줄만 감싼다(단추는 밖)",
+      "ok": true
+    },
+    {
+      "name": "1440-light 화면 글자에 state 가 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 가로 넘침 0 (운영자 구역)",
+      "ok": true
+    },
+    {
+      "name": "1440-light 열지 못하면 그렇게 말하고 「브라우저에서 다시 열기」가 선다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 다시 열면 같은 주소를 연다(새 state 를 만들지 않는다)",
+      "ok": true
+    },
+    {
+      "name": "1440-light 핸드오프: 로그인 화면이 아니다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 핸드오프: 읽은 즉시 폼을 자동 제출한다(한 번)",
+      "ok": true
+    },
+    {
+      "name": "1440-light 핸드오프: 자동 제출은 등록 주소로 POST, 칸은 manifest 하나",
+      "ok": true
+    },
+    {
+      "name": "1440-light 핸드오프: 보내는 매니페스트는 서버가 만든 그대로",
+      "ok": true
+    },
+    {
+      "name": "1440-light 핸드오프: 폼이 noreferrer 다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 핸드오프: 주소창에서 조각이 지워졌다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 핸드오프: 저장소·쿠키에 아무것도 쓰지 않았다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 핸드오프: 저장소 어디에도 state 가 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 핸드오프: 화면 글자에 state 가 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 핸드오프: 행선지·받는 서버·시한을 보여 준다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 핸드오프: 「Create GitHub App」과 조사는 한 덩어리",
+      "ok": true
+    },
+    {
+      "name": "1440-light 핸드오프: 단추는 제품의 채움 알약이다(온보딩 단추 예외를 빌리지 않는다)",
+      "ok": true
+    },
+    {
+      "name": "1440-light 핸드오프: 탭 제목이 이 화면을 말한다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 가로 넘침 0 (핸드오프)",
+      "ok": true
+    },
+    {
+      "name": "1440-light 핸드오프: 키보드로 수동 버튼에 닿는다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 핸드오프: 자동 제출은 막혀 있는 동안 네트워크에 나가지 않았다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 수동 버튼: GitHub 로 POST 한 번",
+      "ok": true
+    },
+    {
+      "name": "1440-light 수동 버튼: 등록 주소가 그대로다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 수동 버튼: 본문은 manifest 한 칸이고 서버가 만든 매니페스트다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 수동 버튼: GitHub 에 Referer 를 보내지 않았다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 착지: 로그인 안 된 브라우저가 결과 문장을 말한다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 착지: 「oort 앱으로 돌아가세요」",
+      "ok": true
+    },
+    {
+      "name": "1440-light 착지: 로그인 화면이 아니다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 착지: 주소에서 단어가 지워졌다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 착지: 탭 제목이 이 화면을 말한다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 착지: 화면에 state·code 가 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 가로 넘침 0 (착지)",
+      "ok": true
+    },
+    {
+      "name": "1440-light 착지: 키보드로 로그인 길에 닿는다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 막힌 단어: 이유와 다음 걸음과 돌아가라는 말",
+      "ok": true
+    },
+    {
+      "name": "1440-light 대기 단어 pending: 새로고침·이 화면을 말하지 않고 oort 앱을 가리킨다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 대기 단어 requested: 새로고침·이 화면을 말하지 않고 oort 앱을 가리킨다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 대기 단어 state_missing: 새로고침·이 화면을 말하지 않고 oort 앱을 가리킨다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 거절 화면(조각 없음): 한 번만 열 수 있다고 말하고 갈 길을 둘 말한다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 거절 화면: 닫아도 된다는 말과 로그인 길이 있다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 거절 화면: GitHub 로 아무것도 나가지 않았다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 돌아온 창: 포커스만으로 「등록됨」으로 바뀐다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 돌아온 창: 등록 폼이 사라졌다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 가로 넘침 0 (등록됨)",
+      "ok": true
+    },
+    {
+      "name": "1440-light 설치: 「GitHub에서 설치하기」도 기본 브라우저로 연다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 설치: 데스크탑 안내는 앱으로 돌아오라고 말한다(이 화면으로 돌아온다고 하지 않는다)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 카드: 운영자이고 앱이 없으면 「GitHub 앱 만들기」가 선다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 카드: 알림을 위한 앱이라고 말한다(도구 얼굴의 「설치됨」 칩과 헷갈리지 않게)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 카드: 「GitHub 알림 열기」 길은 그대로",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 가로 넘침 0 (카드)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 카드의 진입은 GitHub 구역으로 간다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 카드: 운영자가 아니면 진입 줄이 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 데스크탑: 막다른 문장이 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 데스크탑: 기본 브라우저를 한 번 열었다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 열린 주소: 서버의 공개 오리진 + /github/handoff",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 열린 주소: 쿼리스트링이 비어 있다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 열린 주소: 조각 밖에는 state 가 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 열린 주소: opener 한도(2048) 안",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 카드가 열었다고 말한다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 카드: 「Create GitHub App」과 조사는 한 덩어리(줄머리 조사 없음)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 카드: 알림 영역은 글줄만 감싼다(단추는 밖)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 화면 글자에 state 가 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 가로 넘침 0 (운영자 구역)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 열지 못하면 그렇게 말하고 「브라우저에서 다시 열기」가 선다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 다시 열면 같은 주소를 연다(새 state 를 만들지 않는다)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 핸드오프: 로그인 화면이 아니다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 핸드오프: 읽은 즉시 폼을 자동 제출한다(한 번)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 핸드오프: 자동 제출은 등록 주소로 POST, 칸은 manifest 하나",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 핸드오프: 보내는 매니페스트는 서버가 만든 그대로",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 핸드오프: 폼이 noreferrer 다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 핸드오프: 주소창에서 조각이 지워졌다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 핸드오프: 저장소·쿠키에 아무것도 쓰지 않았다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 핸드오프: 저장소 어디에도 state 가 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 핸드오프: 화면 글자에 state 가 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 핸드오프: 행선지·받는 서버·시한을 보여 준다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 핸드오프: 「Create GitHub App」과 조사는 한 덩어리",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 핸드오프: 단추는 제품의 채움 알약이다(온보딩 단추 예외를 빌리지 않는다)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 핸드오프: 탭 제목이 이 화면을 말한다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 가로 넘침 0 (핸드오프)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 핸드오프: 키보드로 수동 버튼에 닿는다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 핸드오프: 자동 제출은 막혀 있는 동안 네트워크에 나가지 않았다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 수동 버튼: GitHub 로 POST 한 번",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 수동 버튼: 등록 주소가 그대로다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 수동 버튼: 본문은 manifest 한 칸이고 서버가 만든 매니페스트다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 수동 버튼: GitHub 에 Referer 를 보내지 않았다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 착지: 로그인 안 된 브라우저가 결과 문장을 말한다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 착지: 「oort 앱으로 돌아가세요」",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 착지: 로그인 화면이 아니다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 착지: 주소에서 단어가 지워졌다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 착지: 탭 제목이 이 화면을 말한다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 착지: 화면에 state·code 가 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 가로 넘침 0 (착지)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 착지: 키보드로 로그인 길에 닿는다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 막힌 단어: 이유와 다음 걸음과 돌아가라는 말",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 대기 단어 pending: 새로고침·이 화면을 말하지 않고 oort 앱을 가리킨다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 대기 단어 requested: 새로고침·이 화면을 말하지 않고 oort 앱을 가리킨다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 대기 단어 state_missing: 새로고침·이 화면을 말하지 않고 oort 앱을 가리킨다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 거절 화면(조각 없음): 한 번만 열 수 있다고 말하고 갈 길을 둘 말한다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 거절 화면: 닫아도 된다는 말과 로그인 길이 있다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 거절 화면: GitHub 로 아무것도 나가지 않았다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 돌아온 창: 포커스만으로 「등록됨」으로 바뀐다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 돌아온 창: 등록 폼이 사라졌다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 가로 넘침 0 (등록됨)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 설치: 「GitHub에서 설치하기」도 기본 브라우저로 연다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 설치: 데스크탑 안내는 앱으로 돌아오라고 말한다(이 화면으로 돌아온다고 하지 않는다)",
+      "ok": true
+    },
+    {
+      "name": "390-light 핸드오프(폰 폭): 자동 제출 한 번",
+      "ok": true
+    },
+    {
+      "name": "390-light 가로 넘침 0 (핸드오프)",
+      "ok": true
+    },
+    {
+      "name": "390-light 핸드오프(폰 폭): 막아 둔 동안 네트워크에 나가지 않았다",
+      "ok": true
+    },
+    {
+      "name": "390-light 가로 넘침 0 (착지 requested)",
+      "ok": true
+    },
+    {
+      "name": "390-light 가로 넘침 0 (착지 pending)",
+      "ok": true
+    },
+    {
+      "name": "390-light 가로 넘침 0 (거절)",
+      "ok": true
+    },
+    {
+      "name": "390-light 거절(폰 폭): 출구가 있다",
+      "ok": true
+    },
+    {
+      "name": "390-dark 핸드오프(폰 폭): 자동 제출 한 번",
+      "ok": true
+    },
+    {
+      "name": "390-dark 가로 넘침 0 (핸드오프)",
+      "ok": true
+    },
+    {
+      "name": "390-dark 핸드오프(폰 폭): 막아 둔 동안 네트워크에 나가지 않았다",
+      "ok": true
+    },
+    {
+      "name": "390-dark 가로 넘침 0 (착지 requested)",
+      "ok": true
+    },
+    {
+      "name": "390-dark 가로 넘침 0 (착지 pending)",
+      "ok": true
+    },
+    {
+      "name": "390-dark 가로 넘침 0 (거절)",
+      "ok": true
+    },
+    {
+      "name": "390-dark 거절(폰 폭): 출구가 있다",
+      "ok": true
+    }
+  ]
+}

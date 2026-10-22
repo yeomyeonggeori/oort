@@ -24,7 +24,11 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# `macos-private-api` is the pair of `app.macOSPrivateApi` in tauri.conf.json (tauri-build
+# refuses a mismatch). It switches on wry's `transparent` feature, which is what lets the
+# window glass (#4190, ADR-0189 증보 3 D6) make the WKWebView canvas transparent at runtime
+# through the private `drawsBackground` key. A Mac App Store build must not enable it.
+tauri = { version = "2", features = ["macos-private-api"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
@@ -67,6 +71,10 @@ uuid = { version = "1", features = ["serde", "v4"] }
 # not have to grow the D-Bus/secret-service stack unless it is built there.
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", features = ["apple-native"] }
+# Window glass (#4190, ADR-0189 증보 3 D6): `NSVisualEffectView` behind the webview. Already
+# in the graph as tauri's own dependency, so no crate is added, only this edge (and the
+# NOTICE row). MIT OR Apache-2.0.
+window-vibrancy = "0.6"
 # Human device key, R2 (ADR-0146 개정 2026-09-28 D-1·D-3·D-5, #3025): a Secure
 # Enclave P-256 key behind userPresence, the three signed statements built in
 # Rust (never by the webview), and a native confirmation before every

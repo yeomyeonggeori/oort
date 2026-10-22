@@ -368,6 +368,7 @@ const CONTROL_PRIMITIVES = [
   "listbox-select.tsx",
   "segmented-control.tsx",
   "select.tsx",
+  "slider.tsx",
   "switch.tsx",
 ] as const;
 

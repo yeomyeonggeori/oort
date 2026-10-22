@@ -16,6 +16,8 @@
     "allow-notification-request-permission",
     "allow-notification-show",
     "allow-dock-badge-set",
+    "allow-window-vibrancy-set",
+    "allow-app-theme-set",
     "allow-keychain-available",
     "allow-keychain-refresh-token-handle",
     "allow-keychain-store-refresh-token",
