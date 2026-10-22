@@ -404,6 +404,29 @@ describe("운영자 구역: 데스크탑 셸은 기본 브라우저로 GitHub �
     expect(document.body.textContent).not.toContain(HANDOFF_STATE);
   });
 
+  it("열기 전후에 콘솔·저장소·쿠키에 state 를 쓰지 않는다", async () => {
+    const spies = (["log", "info", "warn", "error", "debug"] as const).map((name) =>
+      vi.spyOn(console, name).mockImplementation(() => undefined)
+    );
+    try {
+      await startOnDesktop();
+      const hash = new URL(String(desktop.open.mock.calls[0][0])).hash.slice(1);
+      const written = JSON.stringify({
+        logs: spies.flatMap((spy) => spy.mock.calls),
+        local: { ...localStorage },
+        session: { ...sessionStorage },
+        cookie: document.cookie,
+      });
+      // 이 단정이 「주소를 로그로 찍으면 빨개지는」 사보타주 대상이다.
+      expect(written).not.toContain(HANDOFF_STATE);
+      expect(written).not.toContain(hash);
+      expect(localStorage.length).toBe(0);
+      expect(sessionStorage.length).toBe(0);
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+  });
+
   it("브라우저를 열지 못하면 그렇게 말하고 같은 주소로 다시 열 수 있다", async () => {
     desktop.open.mockResolvedValueOnce(false);
     await startOnDesktop();
