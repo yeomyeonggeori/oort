@@ -171,12 +171,10 @@ function composite(over: Rgba, backdrop: string): [number, number, number] {
 const within = (actual: readonly number[], expected: readonly number[], tolerance = 3): boolean =>
   expected.every((value, index) => Math.abs(actual[index] - value) <= tolerance);
 
-const colorOf = (page: Page, selector: string): Promise<string> =>
-  page.evaluate((s) => getComputedStyle(document.querySelector(s) as Element).color, selector);
-
-const rgbString = (hex: string): string => {
-  const [r, g, b] = channels(hex);
-  return `rgb(${r}, ${g}, ${b})`;
+/** 계산된 글자색의 세 채널. 문자열이 아니라 채널로 비교한다(엔진마다 표기가 다르고, 색 리터럴을 시험에 쓰지 않는다). */
+const colorOf = async (page: Page, selector: string): Promise<number[]> => {
+  const computed = await page.evaluate((s) => getComputedStyle(document.querySelector(s) as Element).color, selector);
+  return (computed.match(/\d+(?:\.\d+)?/g) ?? []).slice(0, 3).map(Number);
 };
 
 const VIEWPORT = { width: 1000, height: 700 };
@@ -325,10 +323,10 @@ describe.skipIf(ENGINES.length === 0)("유리 CSS의 실제 렌더 (AP-3 #4190)"
             const percent = Math.round(glassFloor(source) * 100);
             const fitted = glassChrome(source, mode, percent);
             const on = await ctx.open({ theme: "dawnsky", mode, glass: true, backdrop: "red", opacity: percent });
-            expect(await colorOf(on, "#side-label"), `${engine} ${mode} 사이드바 보조 글자`).toBe(rgbString(fitted.band["ink-muted"]));
-            expect(await colorOf(on, "#titlebar-label"), `${engine} ${mode} 타이틀바 보조 글자`).toBe(rgbString(fitted.band["ink-muted"]));
+            expect(await colorOf(on, "#side-label"), `${engine} ${mode} 사이드바 보조 글자`).toEqual(channels(fitted.band["ink-muted"]));
+            expect(await colorOf(on, "#titlebar-label"), `${engine} ${mode} 타이틀바 보조 글자`).toEqual(channels(fitted.band["ink-muted"]));
             const off = await ctx.open({ theme: "dawnsky", mode, glass: false, backdrop: "red" });
-            expect(await colorOf(off, "#side-label"), `${engine} ${mode} 끔`).toBe(rgbString(THEMES.dawnsky[mode].color["ink-muted"]));
+            expect(await colorOf(off, "#side-label"), `${engine} ${mode} 끔`).toEqual(channels(THEMES.dawnsky[mode].color["ink-muted"]));
             // 하한에서는 보정이 실제로 색을 옮긴다(안 옮겼으면 이 단정은 아무것도 재지 않는다).
             expect(fitted.band["ink-muted"]).not.toBe(THEMES.dawnsky[mode].color["ink-muted"].toLowerCase());
           }
@@ -346,12 +344,12 @@ describe.skipIf(ENGINES.length === 0)("유리 CSS의 실제 렌더 (AP-3 #4190)"
           const fitted = glassChrome(source, mode, percent);
           expect(fitted.band["ink-muted"]).not.toBe(fitted.canvas["ink-muted"]);
           const open = await ctx.open({ theme: "noeul", mode, glass: true, backdrop: "red", opacity: percent });
-          expect(await colorOf(open, "#side-label")).toBe(rgbString(fitted.band["ink-muted"]));
-          expect(await colorOf(open, "#titlebar-label")).toBe(rgbString(fitted.band["ink-muted"]));
+          expect(await colorOf(open, "#side-label")).toEqual(channels(fitted.band["ink-muted"]));
+          expect(await colorOf(open, "#titlebar-label")).toEqual(channels(fitted.band["ink-muted"]));
           const collapsed = await ctx.open({ theme: "noeul", mode, glass: true, backdrop: "red", opacity: percent, shell: "collapsed" });
-          expect(await colorOf(collapsed, "#titlebar-label")).toBe(rgbString(fitted.canvas["ink-muted"]));
+          expect(await colorOf(collapsed, "#titlebar-label")).toEqual(channels(fitted.canvas["ink-muted"]));
           const settings = await ctx.open({ theme: "noeul", mode, glass: true, backdrop: "red", opacity: percent, shell: "settings" });
-          expect(await colorOf(settings, "#nav-label")).toBe(rgbString(fitted.band["ink-muted"]));
+          expect(await colorOf(settings, "#nav-label")).toEqual(channels(fitted.band["ink-muted"]));
         } finally {
           await ctx.close();
         }

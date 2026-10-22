@@ -38,7 +38,7 @@ describe("glass.css 문자열 계약", () => {
   });
 
   it("tokens.css를 고치지 않고 AP-1a가 쪼갠 층 변수만 바꾼다: 층 변수 둘과 바닥 색만 선언한다", () => {
-    const shell = GLASS_CODE.match(/:root\[data-glass\] \.app-shell \{([\s\S]*?)\n  \}/);
+    const shell = GLASS_CODE.match(/:root\[data-glass\] \.app-shell \{([\s\S]*?)\n {2}\}/);
     expect(shell).not.toBeNull();
     const props = [...(shell?.[1] ?? "").matchAll(/^\s*(--[\w-]+|[a-z-]+):/gm)].map((m) => m[1]);
     expect(props.filter((p) => !p.startsWith("--glass-"))).toEqual([

@@ -42,7 +42,6 @@ const VIEWPORTS = [
   { name: "390", width: 390, height: 844 },
 ];
 
-const MIN = 60_000;
 const workspaceId = "00000000-0000-7000-8000-000000000001";
 const memberId = "00000000-0000-7000-8000-000000000101";
 const CH = "00000000-0000-7000-8000-000000000201";
