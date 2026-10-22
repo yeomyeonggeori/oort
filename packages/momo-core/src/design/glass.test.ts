@@ -21,10 +21,12 @@ import {
   type GlassSource,
 } from "./glass";
 import {
+  FIT_MARGIN,
   INK_MIN_ON_BACKDROP,
   NON_TEXT_MIN_ON_BACKDROP,
   TEXT_MIN_ON_BACKDROP,
   blend,
+  fitForeground,
   minimumScrimAlpha,
   scrimFloor,
   worstCaseBackdrops,
@@ -416,15 +418,70 @@ describe("범위·판정 — 쓸 수 있는가 (AC 4, 증보 3 D6 불가 기준 
       expect(atDefault, `${theme} ${mode} 기본값`).toBeGreaterThan(atFloor);
       expect(atDefault, `${theme} ${mode} 기본값`).toBeGreaterThanOrEqual(0.45);
     }
-    // 다크는 기본값에서 끔의 위계가 통째로 돌아오고, 위험 > 경고 채도 순서(README §2.2)도 돌아온다.
+    // 다크는 기본값에서 끔의 위계(잉크 대 보조 글자)가 통째로 돌아온다.
     for (const theme of ["dawnsky", "graphite"] as ThemeId[]) {
       const source = sourceOf(theme, "dark");
-      const range = glassRange(source);
-      const atFloor = glassChrome(source, "dark", range.min).canvas;
-      const atDefault = glassChrome(source, "dark", range.defaultPercent).canvas;
-      expect(toOklch(atFloor.danger).C, `${theme} 하한`).toBeLessThan(toOklch(atFloor.warn).C);
-      expect(toOklch(atDefault.danger).C, `${theme} 기본값`).toBeGreaterThanOrEqual(toOklch(atDefault.warn).C);
+      expect(retained(theme, "dark", glassRange(source).defaultPercent), `${theme} 기본값`).toBeGreaterThanOrEqual(0.9);
     }
+  });
+
+  // design-review 2차 High: 다크에서 위험(붉은색)을 밝히면 sRGB 경계에서 채도가 먼저 깎여 경고(호박색)보다 덜 진해지는 구간이
+  // 있었고(새벽하늘 다크 78~86%, 흑연 다크 73~79%, 노을띠 다크 78~84%) 시험이 그 역전을 기대값으로 못박았다. 순서는
+  // README §2.2·§3.1 규칙 1의 자다: danger > warn > ink-muted, 대비가 아니라 OKLab 채도로 잰다. 슬라이더의 모든 칸에서 지킨다.
+  describe("채도 순서 danger > warn > ink-muted (README §2.2, 모든 불투명도)", () => {
+    it.each(COMBOS)("%s %s: 하한부터 95까지 모든 칸에서 바닥 위 순서가 선다", (theme, mode) => {
+      const source = sourceOf(theme, mode);
+      const floor = Math.round(glassFloor(source) * 100);
+      for (let percent = floor; percent <= GLASS_OPACITY_MAX; percent += 1) {
+        const palette = glassChrome(source, mode, percent).canvas;
+        const danger = toOklch(palette.danger).C;
+        const warn = toOklch(palette.warn).C;
+        const muted = toOklch(palette["ink-muted"]).C;
+        expect(danger, `${theme} ${mode} ${percent}% danger > warn`).toBeGreaterThan(warn);
+        expect(warn, `${theme} ${mode} ${percent}% warn > ink-muted`).toBeGreaterThan(muted);
+      }
+    });
+
+    it.each(COMBOS)("%s %s: 순서를 지키려고 경고를 덜어 내도 대비·색상각 보장은 그대로다", (theme, mode) => {
+      const source = sourceOf(theme, mode);
+      const floor = Math.round(glassFloor(source) * 100);
+      for (let percent = floor; percent <= GLASS_OPACITY_MAX; percent += 1) {
+        const warn = glassChrome(source, mode, percent).canvas.warn;
+        const hosts = source.canvas.flatMap((stop) => worstCaseBackdrops(stop, percent / 100));
+        for (const host of hosts) {
+          expect(contrast(warn, host), `${theme} ${mode} ${percent}% warn on ${host}`).toBeGreaterThanOrEqual(TEXT_MIN_ON_BACKDROP);
+        }
+        expect(hueGap(warn, source.color.warn), `${theme} ${mode} ${percent}% warn 색상각`).toBeLessThanOrEqual(12);
+      }
+    });
+
+    it("역전이 있던 칸에서만 경고를 덜어 낸다: 순서가 이미 서 있으면 경고는 명도만 옮긴 값 그대로다", () => {
+      const lightnessOnly = (source: GlassSource, mode: Mode, percent: number): string => {
+        const hosts = source.canvas.flatMap((stop) => worstCaseBackdrops(stop, percent / 100));
+        return fitForeground(source.color.warn, hosts, TEXT_MIN_ON_BACKDROP + FIT_MARGIN, mode);
+      };
+      // 라이트 전 구간과 다크 기본값(88): 명도만 옮긴 값과 같다(채도를 만지지 않았다).
+      for (const [theme, mode, percent] of [
+        ["dawnsky", "light", 70],
+        ["dawnsky", "light", 80],
+        ["dawnsky", "light", 95],
+        ["dawnsky", "dark", 88],
+        ["graphite", "dark", 83],
+      ] as [ThemeId, Mode, number][]) {
+        const source = sourceOf(theme, mode);
+        expect(glassChrome(source, mode, percent).canvas.warn, `${theme} ${mode} ${percent}%`).toBe(
+          normalizeHex(lightnessOnly(source, mode, percent))
+        );
+      }
+      // 역전이 있던 칸(새벽하늘 다크 78%): 명도만 옮기면 경고가 위험보다 진했고, 덜어 낸 뒤에는 위험 밑이다.
+      const dark = sourceOf("dawnsky", "dark");
+      const floor = glassRange(dark).min;
+      const palette = glassChrome(dark, "dark", floor).canvas;
+      const plain = lightnessOnly(dark, "dark", floor);
+      expect(toOklch(plain).C).toBeGreaterThan(toOklch(palette.danger).C);
+      expect(toOklch(palette.warn).C).toBeLessThan(toOklch(palette.danger).C);
+      expect(hueGap(palette.warn, plain)).toBeLessThanOrEqual(6);
+    });
   });
 
   it("경계 95: 하한이 정확히 95%면 쓸 수 있고(범위 [95, 95]), 96%면 쓸 수 없다", () => {

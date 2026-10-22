@@ -92,10 +92,20 @@ describe("glass.css 문자열 계약", () => {
     expect(flat).toContain(
       ":root[data-glass] .app-shell[data-work-rail][data-sidebar-collapsed] > main { margin-inline-start: var(--spacing-2); }"
     );
-    // `app-pane` 유틸리티(tokens.css)가 쓰는 값과 같은 토큰이다: 여기서 다른 값을 만들지 않는다. 판 문법이 바뀌면 빨개진다.
-    expect(squash(TOKENS)).toContain(
-      "border-radius: var(--radius-xl); box-shadow: var(--elevation-rest), 0 0 0 1px var(--line); overflow: clip;"
-    );
+    // `@utility app-pane`(tokens.css) 한 블록이 쓰는 값과 같은 토큰이다: 여기서 다른 값을 만들지 않는다. 같은 문자열이
+    // `settings-pane`에도 있으므로 그 블록만 도려내어 대조한다(한쪽만 바뀌면 빨개진다).
+    const utility = squash(TOKENS).match(/@utility app-pane \{(.*?)\} \/\*/);
+    expect(utility, "tokens.css `@utility app-pane` 블록을 못 찾았다").not.toBeNull();
+    const pane = utility?.[1] ?? "";
+    for (const declaration of [
+      "background-color: var(--pane);",
+      "border-radius: var(--radius-xl);",
+      "box-shadow: var(--elevation-rest), 0 0 0 1px var(--line);",
+      "overflow: clip;",
+    ]) {
+      expect(pane, `app-pane 블록에 ${declaration}`).toContain(declaration);
+      expect(flat, `내 작업 판에 ${declaration}`).toContain(declaration);
+    }
   });
 
   it("접근성 갈래: 투명도 줄이기·대비 높이기에서 revert-layer로 불투명 바닥으로 돌아간다(식을 복사하지 않는다)", () => {
@@ -135,6 +145,16 @@ describe("glass.css 문자열 계약", () => {
     expect(GLASS_CODE).not.toMatch(/\b(rgb|rgba|hsl|hsla)\(/);
     expect(GLASS_CODE).not.toMatch(/url\(/);
     expect(GLASS_CODE).not.toMatch(/@import/);
+  });
+
+  it("core glass.ts의 명도 격자는 scrim.ts의 사본과 같다(scrim이 상수를 export하지 않아 사본을 두었다: 한쪽만 바뀌면 빨개진다)", () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const core = join(here, "..", "..", "..", "..", "..", "packages", "momo-core", "src", "design");
+    const grid = (file: string): string[] =>
+      [...readFileSync(join(core, file), "utf8").matchAll(/^const (L_FLOOR|L_CEIL|L_STEP) = ([0-9.]+);$/gm)].map((m) => `${m[1]}=${m[2]}`);
+    const scrim = grid("scrim.ts");
+    expect(scrim).toEqual(["L_FLOOR=0.12", "L_CEIL=0.97", "L_STEP=0.0025"]);
+    expect(grid("glass.ts")).toEqual(scrim);
   });
 
   it("tokens.css가 이 조각을 가져온다(AP-1a가 깔아 둔 import 한 줄, 이 이슈는 tokens.css를 고치지 않는다)", () => {
