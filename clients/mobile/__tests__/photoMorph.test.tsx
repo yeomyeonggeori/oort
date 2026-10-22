@@ -2,9 +2,10 @@ import {act, cleanup, fireEvent, render, screen} from '@testing-library/react-na
 import {readFileSync} from 'fs';
 import {join} from 'path';
 import React, {useReducer} from 'react';
-import {AccessibilityInfo, Pressable, Text} from 'react-native';
+import {AccessibilityInfo, Animated, Pressable, Text} from 'react-native';
 
 import {FixedScheme} from '../src/design/theme';
+import {useMorphEdgeShift} from '../src/features/attachments/morphEdge';
 import {PhotoGridCard} from '../src/features/attachments/PhotoGridCard';
 import {PhotoMorphFrame} from '../src/features/attachments/PhotoMorphFrame';
 import {PHOTO_CARD, PHOTO_MORPH, photoCardSize} from '../src/features/attachments/photoCardDesign';
@@ -62,6 +63,12 @@ function flat(testID: string): Record<string, unknown> {
   };
   walk(style);
   return out;
+}
+
+/** 틀이 카드 안에 건네는 오른쪽 가장자리 이동을 그대로 드러내는 탐침. */
+function EdgeProbe(): React.JSX.Element {
+  const shift = useMorphEdgeShift();
+  return <Animated.View style={{transform: [{translateX: shift}]}} testID="edge-probe" />;
 }
 
 function frame(props: Partial<React.ComponentProps<typeof PhotoMorphFrame>> = {}) {
@@ -217,6 +224,35 @@ describe('틀의 보간 — 폭·높이·모서리 하나의 진행 값', () => 
   it('틀은 메뉴 카드와 같은 연속 곡선으로 자른다(진행 0 에서 모서리가 어긋나지 않는다)', () => {
     render(frame({pinnedProgress: 0}));
     expect(flat('photo-morph').borderCurve).toBe('continuous');
+  });
+
+  it('연타 방어: cardGuarded 면 카드 층 위에 아무것도 안 하는 덮개가 서고, 아니면 없다', () => {
+    const view = render(frame({target: 'card', pinnedProgress: 1}));
+    expect(() => layer('photo-morph-guard')).toThrow();
+    view.rerender(frame({target: 'card', pinnedProgress: 1, cardGuarded: true}));
+    const guard = layer('photo-morph-guard');
+    // 덮개는 카드 층 안, 카드 내용 뒤에(= 위에) 서서 층 전체를 덮는다.
+    expect(flat('photo-morph-guard')).toMatchObject({position: 'absolute', top: 0, right: 0, bottom: 0, left: 0});
+    const cardLayer = layer('photo-morph-card').children as unknown as Array<{props: {testID?: string}}>;
+    expect(cardLayer[cardLayer.length - 1].props.testID).toBe('photo-morph-guard');
+    expect(guard.props.onPress).toBeUndefined();
+    view.rerender(frame({target: 'card', pinnedProgress: 1, cardGuarded: false}));
+    expect(() => layer('photo-morph-guard')).toThrow();
+  });
+
+  it('오른쪽 닻 컨트롤은 틀의 오른쪽 가장자리에서 같은 거리를 유지한다 — 어느 진행에서도 틀 밖으로 잘리지 않는다', () => {
+    const inset = PHOTO_CARD.controlInset;
+    for (const p of [0, 0.15, 0.3, 0.5, 0.75, 0.9, 1]) {
+      const view = render(frame({target: 'card', pinnedProgress: p, card: <EdgeProbe />}));
+      const transform = flat('edge-probe').transform as Array<Record<string, number>>;
+      const shift = transform.find(entry => 'translateX' in entry)?.translateX as number;
+      // 이동 = (메뉴 폭 − 카드 폭) × (1 − 진행): 열린 만큼만 열려 있다.
+      expect(shift).toBeCloseTo((MENU.width - CARD.width) * (1 - p), 5);
+      // 알약 오른쪽 끝(카드 오른쪽 − 안쪽 여백 + 이동)이 틀의 오른쪽 끝에서 안쪽 여백만큼 안이다.
+      const frameWidth = flat('photo-morph').width as number;
+      expect(CARD.width - inset + shift).toBeCloseTo(frameWidth - inset, 5);
+      view.unmount();
+    }
   });
 
   it('보이지 않는 층은 눌리지도 낭독되지도 않는다', () => {

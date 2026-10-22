@@ -7,6 +7,7 @@ import {AVATAR_INITIAL_MAX_SCALE, BAR_CONTROL_MAX_SCALE} from '../src/design/ato
 import {FixedScheme} from '../src/design/theme';
 import {lightPalette} from '../src/design/tokens';
 import {PhotoGridCard, type PhotoGridCardProps} from '../src/features/attachments/PhotoGridCard';
+import {MorphEdgeContext} from '../src/features/attachments/morphEdge';
 import {PHOTO_COPY} from '../src/features/attachments/photoCardCopy';
 import {PHOTO_CARD, photoCellSize} from '../src/features/attachments/photoCardDesign';
 import {
@@ -405,12 +406,13 @@ describe('고르기 — 토글·순번·상한', () => {
     await renderCard(lib.ports);
     const cell = await screen.findByTestId('photo-cell-a1');
     expect(cell.props.accessibilityLabel).toMatch(/^\d+월 \d+일 사진$/);
-    expect(cell.props.accessibilityValue).toEqual({text: PHOTO_COPY.notSelected});
+    // 안 고른 칸은 값이 없다(칸마다 「선택 안 됨」이 반복되지 않는다). 「선택됨」은 state 가 읽는다.
+    expect(cell.props.accessibilityValue?.text).toBeUndefined();
     await act(async () => {
       fireEvent.press(cell);
     });
     const again = screen.getByTestId('photo-cell-a1');
-    expect(again.props.accessibilityValue).toEqual({text: PHOTO_COPY.selected(1)});
+    expect(again.props.accessibilityValue).toEqual({text: PHOTO_COPY.order(1)});
     expect(again.props.accessibilityState).toEqual({selected: true});
   });
 });
@@ -761,25 +763,78 @@ describe('겉모습', () => {
     expect(note.props.lineBreakStrategyIOS).toBe('hangul-word');
   });
 
-  it('비어 있음·불러오기 실패의 면은 스크롤하고 아래가 알약을 비킨다 — 글자가 커져도 「다시 불러오기」가 알약 밑에 겹치지 않는다', async () => {
-    const clear = PHOTO_CARD.control + 2 * PHOTO_CARD.controlInset;
-    const contentStyle = (testID: string) =>
-      Object.assign(
-        {},
-        ...([] as object[]).concat(screen.getByTestId(testID).props.contentContainerStyle as object),
-      ) as Record<string, unknown>;
-    const empty = makeLibrary({assets: []});
-    const emptyView = await renderCard(empty.ports);
-    await screen.findByTestId('photo-empty');
-    expect(contentStyle('photo-empty').paddingBottom).toBe(clear);
-    emptyView.unmount();
+  /** 이 요소의 조상 중에 스크롤 뷰가 있는가(= 스크롤 안에 있는가). */
+  function insideScroll(node: TestNode): boolean {
+    for (let cur: TestNode | null = node.parent; cur !== null; cur = cur.parent) {
+      if (typeof cur.type === 'string' && /ScrollView/.test(cur.type)) return true;
+    }
+    return false;
+  }
+
+  it('권한 면: 글은 스크롤 안에, 행동(「허용」·「전체 사진에서 고르기」)은 스크롤 밖 바닥 띠에 있다 — 큰 글자에서도 행동이 첫 화면에 보인다', async () => {
+    const lib = makeLibrary({permission: 'undetermined'});
+    await renderCard(lib.ports);
+    await screen.findByTestId('photo-pane-undetermined');
+    expect(insideScroll(screen.getByText(PHOTO_COPY.askTitle))).toBe(true);
+    expect(insideScroll(screen.getByText(PHOTO_COPY.askDetail))).toBe(true);
+    expect(insideScroll(screen.getByTestId('photo-allow'))).toBe(false);
+    expect(insideScroll(screen.getByTestId('photo-pick-from-all'))).toBe(false);
+    // 글 영역은 스크롤 표시를 끄지 않는다(넘치면 사람에게 「더 있다」가 보여야 한다).
+    expect(screen.getByTestId('photo-pane-undetermined-text').props.showsVerticalScrollIndicator).not.toBe(false);
+  });
+
+  it('거부 면과 오류 면도 같다: 행동은 스크롤 밖이고, 비어 있음은 행동 없이 글만 스크롤한다', async () => {
+    const denied = makeLibrary({permission: 'denied'});
+    const deniedView = await renderCard(denied.ports);
+    await screen.findByTestId('photo-pane-denied');
+    expect(insideScroll(screen.getByTestId('photo-open-settings'))).toBe(false);
+    expect(insideScroll(screen.getByTestId('photo-pick-from-all'))).toBe(false);
+    deniedView.unmount();
     const failing = makeLibrary();
     failing.ports.listPhotos.mockRejectedValue(new Error('boom'));
-    await renderCard(failing.ports);
+    const failView = await renderCard(failing.ports);
     await screen.findByTestId('photo-load-failed');
-    expect(contentStyle('photo-load-failed').paddingBottom).toBe(clear);
+    expect(insideScroll(screen.getByText(PHOTO_COPY.loadFailed))).toBe(true);
+    expect(insideScroll(screen.getByTestId('photo-retry'))).toBe(false);
     // 다시 불러오기 라벨은 컨트롤이라 글자 배율에 상한이 있다.
     expect(screen.getByText(PHOTO_COPY.retry).props.maxFontSizeMultiplier).toBe(BAR_CONTROL_MAX_SCALE);
+    failView.unmount();
+    const empty = makeLibrary({assets: []});
+    await renderCard(empty.ports);
+    await screen.findByTestId('photo-empty');
+    expect(insideScroll(screen.getByText(PHOTO_COPY.emptyTitle))).toBe(true);
+    expect(screen.queryByTestId('photo-retry')).toBeNull();
+  });
+
+  it('행동 띠는 떠 있는 뒤로 원·알약 줄을 비킨다(아래 여백 = 컨트롤 + 안쪽 여백 둘)', async () => {
+    const clear = PHOTO_CARD.control + 2 * PHOTO_CARD.controlInset;
+    const lib = makeLibrary({permission: 'undetermined'});
+    await renderCard(lib.ports);
+    const allow = await screen.findByTestId('photo-allow');
+    // 행동 띠 = 「허용」 알약의 조상 중 아래 여백을 가진 View(복합 컴포넌트 층을 건너 올라간다).
+    const paddings: unknown[] = [];
+    for (let cur: TestNode | null = allow.parent; cur !== null; cur = cur.parent) {
+      const flat = Object.assign({}, ...([] as object[]).concat((cur.props.style ?? {}) as object)) as Record<string, unknown>;
+      if (flat.paddingBottom !== undefined) paddings.push(flat.paddingBottom);
+    }
+    expect(paddings[0]).toBe(clear);
+  });
+
+  it('상한 안내는 시간으로 사라지지 않고 선택이 바뀔 때 걷힌다 — 느린 독자와 확대 사용자가 읽기 전에 사라지지 않는다', async () => {
+    installAppClock();
+    const lib = makeLibrary();
+    await renderCard(lib.ports, {room: 1});
+    await screen.findByTestId('photo-grid');
+    await press('photo-cell-a1');
+    await press('photo-cell-a2');
+    expect(await screen.findByText(PHOTO_COPY.capped(1))).toBeTruthy();
+    await act(async () => {
+      jest.advanceTimersByTime(60_000);
+    });
+    expect(screen.getByText(PHOTO_COPY.capped(1))).toBeTruthy();
+    // 고른 사진을 뺄 때(선택이 바뀔 때) 걷힌다.
+    await press('photo-cell-a1');
+    expect(screen.queryByText(PHOTO_COPY.capped(1))).toBeNull();
   });
 
   it('권한 면의 「허용」·「설정 열기」와 「전체 사진에서 고르기」 라벨도 컨트롤이라 글자 배율에 상한이 있다', async () => {
@@ -814,6 +869,51 @@ describe('겉모습', () => {
     expect(fill('photo-back')).toBe(lightPalette.surface);
     expect(fill('photo-pill')).toBe(lightPalette.primary);
     expect(fill('photo-back')).not.toBe(fill('photo-pill'));
+  });
+
+  it('변신 틀 안에서는 알약과 일부 허용 링크가 틀의 오른쪽 가장자리를 따라간다 — 틀이 알려 주는 이동을 그대로 건다', async () => {
+    const lib = makeLibrary({permission: 'limited'});
+    render(
+      <FixedScheme scheme="light">
+        <MorphEdgeContext.Provider value={-100}>
+          <PhotoGridCard
+            active
+            onAttach={jest.fn()}
+            onBack={jest.fn()}
+            onDone={jest.fn()}
+            onOpenSystemPicker={jest.fn()}
+            ports={lib.ports}
+            room={MAX_ATTACHMENTS_PER_MESSAGE}
+            size={{width: 382, height: 372}}
+          />
+        </MorphEdgeContext.Provider>
+      </FixedScheme>,
+    );
+    await settle();
+    const shiftOf = (testID: string): unknown => {
+      for (let cur: TestNode | null = screen.getByTestId(testID).parent; cur !== null; cur = cur.parent) {
+        const flat = Object.assign({}, ...([] as object[]).concat((cur.props.style ?? {}) as object)) as {
+          transform?: Array<Record<string, unknown>>;
+        };
+        const found = flat.transform?.find(entry => 'translateX' in entry);
+        if (found !== undefined) return found.translateX;
+      }
+      return undefined;
+    };
+    await screen.findByTestId('photo-grid');
+    expect(shiftOf('photo-pill')).toBe(-100);
+    expect(shiftOf('photo-limited-more')).toBe(-100);
+    // 뒤로 원은 왼쪽 닻이라 따라가지 않는다(틀 모서리에 붙어 있다).
+    expect(shiftOf('photo-back')).toBeUndefined();
+  });
+
+  it('뒤로 원은 카드 몸통과 같은 면 위에서도 경계가 있다 — 가는 테두리(헤더의 뒤로 원과 같은 말)', async () => {
+    const lib = makeLibrary({permission: 'undetermined'});
+    await renderCard(lib.ports);
+    await screen.findByTestId('photo-pane-undetermined');
+    const style = Object.assign({}, ...([] as object[]).concat(screen.getByTestId('photo-back').props.style)) as Record<string, unknown>;
+    expect(style.borderWidth).toBeGreaterThan(0);
+    expect(style.borderColor).toBe(lightPalette.border);
   });
 
   it('설명은 어절 단위로 줄바꿈한다 — 「있어/요.」·「올라/가고」로 끊기지 않는다(hangul-word)', async () => {
@@ -890,6 +990,12 @@ describe('문장 — 전부 해요체다', () => {
   it('합쇼체 어미(~습니다·~ㅂ니다)가 하나도 없다', () => {
     const offenders = sentences().filter(text => /(습니다|입니다|됩니다|합니다|십시오)[.!?]?\s*$/.test(text));
     expect(offenders).toEqual([]);
+  });
+
+  it('실패 안내는 모두 다음 행동을 말한다 — 부분 실패도 「다시 시도해 주세요」', () => {
+    for (const text of [PHOTO_COPY.resolveFailed, PHOTO_COPY.cloudFailed, PHOTO_COPY.partialFailed(2)]) {
+      expect(text).toMatch(/다시 시도해 주세요\.$/);
+    }
   });
 
   it('마침표 규칙: 두 문장 이상이면 마지막에도 마침표가 있다(한 문자열 안에서 섞이지 않는다)', () => {

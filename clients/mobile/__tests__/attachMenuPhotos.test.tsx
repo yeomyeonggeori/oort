@@ -351,6 +351,37 @@ describe('합성 — 실제 메뉴(#4180)와의 접점', () => {
     expect(screen.queryByTestId('attach-menu')).toBeNull();
   });
 
+  it('「사진」 행을 두 번 누르는 손: 카드가 서는 첫 200ms 는 카드 안 누름을 삼키는 덮개가 서고, 그 뒤에 걷힌다', async () => {
+    await open();
+    // 변신 전에는 덮개가 없다.
+    expect(screen.queryByTestId('photo-morph-guard', HIDDEN)).toBeNull();
+    await pressPhotoRow();
+    expect(screen.getByTestId('photo-morph-guard', HIDDEN)).toBeTruthy();
+    // 연타 방어 시간이 지나기 전에는 그대로 서 있고
+    await act(async () => {
+      jest.advanceTimersByTime(ATTACH_MENU.touchGuardMs - 50);
+    });
+    expect(screen.getByTestId('photo-morph-guard', HIDDEN)).toBeTruthy();
+    // 지나면 걷힌다(카드가 눌린다).
+    await act(async () => {
+      jest.advanceTimersByTime(80);
+    });
+    expect(screen.queryByTestId('photo-morph-guard', HIDDEN)).toBeNull();
+  });
+
+  it('접고 다시 열면 덮개가 다시 선다(열 때마다 연타 방어)', async () => {
+    await open();
+    await pressPhotoRow();
+    await settleMorph();
+    expect(screen.queryByTestId('photo-morph-guard', HIDDEN)).toBeNull();
+    await act(async () => {
+      fireEvent.press(await screen.findByTestId('photo-back'));
+    });
+    await settleMorph();
+    await pressPhotoRow();
+    expect(screen.getByTestId('photo-morph-guard', HIDDEN)).toBeTruthy();
+  });
+
   it('변신 틀은 몸통 색으로 카드 면(surface)을 받는다 — 중간 프레임에서 뒤 대화가 비치지 않는다', async () => {
     await open();
     await pressPhotoRow();

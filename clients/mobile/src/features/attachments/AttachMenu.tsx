@@ -335,12 +335,17 @@ export function AttachMenu({
   // 메뉴 → 사진 카드 변신(#4181). 목표와 도착 여부 두 값이 전부다(`photoMorph.ts`).
   const [morph, dispatchMorph] = useReducer(morphReduce, MORPH_START);
   const hostOpacity = useRef(new Animated.Value(1)).current;
+  // 카드가 서는 첫 `touchGuardMs` 동안은 카드 안의 누름을 삼킨다(「사진」 행을 두 번 누르는 손).
+  const [cardGuard, setCardGuard] = useState(false);
+  const cardGuardTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearTimers = useCallback(() => {
     if (watchdogRef.current !== null) clearTimeout(watchdogRef.current);
     if (focusTimerRef.current !== null) clearTimeout(focusTimerRef.current);
+    if (cardGuardTimer.current !== null) clearTimeout(cardGuardTimer.current);
     watchdogRef.current = null;
     focusTimerRef.current = null;
+    cardGuardTimer.current = null;
   }, []);
 
   // 열기: + 원을 재고 Modal 을 세운다. Modal 은 바로 서고(보이지 않는 채로) 움직임은 측정이 끝난 뒤에
@@ -476,6 +481,12 @@ export function AttachMenu({
   // 「사진」 행: 카드가 있으면 메뉴를 닫지 않고 **변신**한다. 연타 방어는 다른 행과 같다.
   const openPhotos = useCallback(() => {
     if (Date.now() < acceptTouchAfterRef.current) return;
+    setCardGuard(true);
+    if (cardGuardTimer.current !== null) clearTimeout(cardGuardTimer.current);
+    cardGuardTimer.current = setTimeout(() => {
+      cardGuardTimer.current = null;
+      setCardGuard(false);
+    }, ATTACH_MENU.touchGuardMs);
     dispatchMorph({type: 'open'});
   }, []);
   // 메뉴가 통째로 내려가면 다음에 열 때 메뉴에서 시작한다.
@@ -647,6 +658,7 @@ export function AttachMenu({
               cardRadius={PHOTO_CARD.radius}
               frameStyle={styles.morphShadow}
               bodyColor={palette.surface}
+              cardGuarded={cardGuard}
               onSettled={target => dispatchMorph({type: 'settled', target})}
               menu={
                 <View

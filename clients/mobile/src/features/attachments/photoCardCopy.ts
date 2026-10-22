@@ -67,7 +67,7 @@ export const PHOTO_COPY = {
   cloudFailed:
     'iCloud에서 사진을 받지 못했어요. 연결을 확인하고 다시 시도해 주세요.',
   /** 일부만 가져왔다. */
-  partialFailed: (failed: number) => `${failed}장은 가져오지 못했어요`,
+  partialFailed: (failed: number) => `${failed}장은 가져오지 못했어요. 다시 시도해 주세요.`,
   /** 상한에서 더 고르려 했다. */
   capped: (room: number) => `한 번에 ${room}장까지 고를 수 있어요`,
   /** 상한이 이미 찼다(트레이에 20개). */
@@ -77,6 +77,7 @@ export const PHOTO_COPY = {
   /** 사진 한 장의 이름. 날짜가 있으면 날짜를 앞에. */
   photo: (dateLabel: string | null) =>
     dateLabel === null ? '사진' : `${dateLabel} 사진`,
-  selected: (order: number) => `선택됨, ${order}번째`,
-  notSelected: '선택 안 됨',
+  // 「선택됨」은 `accessibilityState.selected` 가 읽는다. 값에 또 적으면 두 번 읽히고, 안 고른 칸마다
+  // 「선택 안 됨」이 반복된다 — 값은 고른 칸의 순번만 말한다.
+  order: (order: number) => `${order}번째`,
 } as const;

@@ -5,6 +5,7 @@ import {
   PHOTO_MORPH,
   photoCardSize,
   photoCellSize,
+  scrollNeedsHint,
 } from '../src/features/attachments/photoCardDesign';
 
 // =============================================================================
@@ -58,6 +59,41 @@ describe('관계 — 값이 아니라 값이 지키는 것', () => {
     const cell = photoCellSize(small.width);
     expect(small.height).toBe(PHOTO_CARD.minHeight);
     expect(small.height / (cell + PHOTO_CARD.cellGap)).toBeGreaterThanOrEqual(2.5);
+  });
+
+  it('아주 넓은 창(iPad 가로)에서는 카드 폭이 maxWidth 에서 멈춘다 — 폰 폭은 그대로다', () => {
+    expect(photoCardSize({width: 1024, height: 768}).width).toBe(PHOTO_CARD.maxWidth);
+    expect(photoCardSize({width: 402, height: 874}).width).toBe(402 - 2 * PHOTO_CARD.inset);
+    expect(photoCardSize({width: 440, height: 956}).width).toBe(440 - 2 * PHOTO_CARD.inset);
+    // 셀은 정사각형이라 폭 상한이 곧 셀 상한이다 — 한 줄만 보이는 거대 카드가 되지 않는다.
+    const wide = photoCardSize({width: 1024, height: 768});
+    expect(wide.height / photoCellSize(wide.width)).toBeGreaterThan(1.5);
+  });
+
+  it('글자 배율이 커지면 카드가 그만큼 자란다(상한 안에서) — 줄이지는 않는다', () => {
+    const se = {width: 375, height: 667};
+    const base = photoCardSize(se).height;
+    // 배율 1 이하는 그대로다.
+    expect(photoCardSize({...se, fontScale: 1}).height).toBe(base);
+    expect(photoCardSize({...se, fontScale: 0.8}).height).toBe(base);
+    // 1.3 배면 1.3 배(상한 460 안).
+    expect(photoCardSize({...se, fontScale: 1.3}).height).toBe(Math.round(667 * PHOTO_CARD.heightRatio * 1.3));
+    // AX5(3.12)는 `textGrowthMax` 에서 멈추고, 그 값은 maxHeight 안이다.
+    const ax5 = photoCardSize({...se, fontScale: 3.12}).height;
+    expect(ax5).toBe(Math.min(PHOTO_CARD.maxHeight, Math.round(667 * PHOTO_CARD.heightRatio * PHOTO_CARD.textGrowthMax)));
+    expect(ax5).toBeGreaterThan(base);
+    expect(ax5).toBeLessThanOrEqual(PHOTO_CARD.maxHeight);
+  });
+
+  it('큰 화면에서는 글자가 커져도 카드가 maxHeight 에서 멈춘다', () => {
+    expect(photoCardSize({width: 402, height: 874, fontScale: 3.12}).height).toBe(PHOTO_CARD.maxHeight);
+  });
+
+  it('스크롤 힌트: 내용이 면보다 길 때만 알린다(면 높이를 알기 전에는 알리지 않는다)', () => {
+    expect(scrollNeedsHint(300, 200)).toBe(true);
+    expect(scrollNeedsHint(200, 200)).toBe(false);
+    expect(scrollNeedsHint(200.5, 200)).toBe(false); // 반올림 오차
+    expect(scrollNeedsHint(500, 0)).toBe(false); // 아직 재지 못했다
   });
 
   it('큰 화면에서는 카드가 상한에서 멈춘다', () => {

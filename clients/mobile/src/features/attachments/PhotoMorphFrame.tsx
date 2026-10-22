@@ -1,7 +1,8 @@
 import React, {useEffect, useRef, useState} from 'react';
-import {Animated, Easing, type StyleProp, type ViewStyle} from 'react-native';
+import {Animated, Easing, View, type StyleProp, type ViewStyle} from 'react-native';
 
 import {useReduceMotionRef} from '../../lib/useReduceMotion';
+import {MorphEdgeContext, type MorphEdgeShift} from './morphEdge';
 import {PHOTO_MORPH, type PhotoCardSize} from './photoCardDesign';
 import type {MorphTarget} from './photoMorph';
 
@@ -40,6 +41,12 @@ export interface PhotoMorphFrameProps {
   onSettled?: (target: MorphTarget) => void;
   /** 캡처 하네스: 진행을 이 값(0..1)에 못 박는다. 중간 프레임을 결정적으로 찍는 길이다. */
   pinnedProgress?: number;
+  /**
+   * 카드 층 위에 **아무것도 안 하는 덮개**를 얹어 누름을 삼킨다(연타 방어). 「사진」 행을 두 번 누르는 손의 둘째
+   * 탭은 같은 자리의 카드 칸에 떨어지는데, 카드는 첫 프레임부터 눌려서 사진이 하나 골라졌다. 덮개가 없으면 그
+   * 탭은 뒤의 바깥 표면으로 새지 않는다 — 카드 층이 누름을 받기 때문이다.
+   */
+  cardGuarded?: boolean;
   /** 틀 바깥 꾸밈(그림자). 틀은 안을 자르지만 `boxShadow` 는 자기 `overflow` 에 잘리지 않는다. */
   frameStyle?: StyleProp<ViewStyle>;
   /**
@@ -62,6 +69,7 @@ export function PhotoMorphFrame({
   card,
   onSettled,
   pinnedProgress,
+  cardGuarded,
   frameStyle,
   bodyColor,
   testID = 'photo-morph',
@@ -165,6 +173,14 @@ export function PhotoMorphFrame({
         outputRange: [0, menuTo * (menuSize.height - cardSize.height)],
         extrapolate: CLAMP,
       });
+  // 카드 안 오른쪽 닻 컨트롤이 틀의 오른쪽 가장자리를 따라가게 하는 가로 이동(`morphEdge.ts`).
+  const edgeShift: MorphEdgeShift = still
+    ? 0
+    : progress.interpolate({
+        inputRange: [0, 1],
+        outputRange: [menuSize.width - cardSize.width, 0],
+        extrapolate: CLAMP,
+      });
   const [bodyFrom, bodyTo] = PHOTO_MORPH.bodyFade;
   const bodyOpacity = progress.interpolate({
     inputRange: [bodyFrom, bodyTo],
@@ -209,7 +225,8 @@ export function PhotoMorphFrame({
           },
         ]}
         testID={`${testID}-card`}>
-        {card}
+        <MorphEdgeContext.Provider value={edgeShift}>{card}</MorphEdgeContext.Provider>
+        {cardGuarded === true ? <View style={GUARD_STYLE} testID={`${testID}-guard`} /> : null}
       </Animated.View>
       <Animated.View
         accessibilityElementsHidden={toCard}
@@ -238,6 +255,8 @@ export function PhotoMorphFrame({
 const FRAME_STYLE = {overflow: 'hidden', borderCurve: 'continuous'} as const;
 // 몸통은 틀 전체를 채운다. 두 층 아래(첫 자식)에 서므로 메뉴·사진 층이 그 위에 얹힌다.
 const BODY_STYLE = {position: 'absolute', top: 0, right: 0, bottom: 0, left: 0} as const;
+// 연타 방어 덮개: 카드 층 전체를 덮고 아무 일도 하지 않는다.
+const GUARD_STYLE = {position: 'absolute', top: 0, right: 0, bottom: 0, left: 0} as const;
 // 두 층 모두 틀의 왼쪽 아래에 닻을 내린다 — 틀이 위·오른쪽으로 자란다. 메뉴는 왼쪽 위
 // 모서리를 축으로 줄어들고(카드의 왼쪽 위 칸으로 접혀 든다), 카드는 아래 가운데를 축으로 자란다.
 const MENU_LAYER_STYLE = {

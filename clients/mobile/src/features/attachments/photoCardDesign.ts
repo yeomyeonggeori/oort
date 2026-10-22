@@ -32,12 +32,24 @@ import {TOUCH_TARGET} from '../../design/tokens';
 export const PHOTO_CARD = {
   /** 카드 좌우 여백. Buzz ≈10. */
   inset: 10,
+  /**
+   * 카드 폭 상한. 폰에서는 `창 폭 − 2×inset`(Buzz 382)이 상한에 안 걸린다. iPad 가로(1024)에서 상한이 없으면
+   * 셀이 334pt 정사각형이 돼 한 줄만 보이는 거대한 카드가 된다 — 큰 폰(Pro Max 440)보다 조금 넓은 값에서 멈춘다.
+   */
+  maxWidth: 480,
   /** 카드 높이 = 화면 높이의 비율. Buzz 372 / 874 ≈ 0.426. */
   heightRatio: 0.43,
   /** 작은 화면(iPhone SE 667pt → 287)에서도 3행이 서도록 하한을 둔다. */
   minHeight: 300,
   /** 큰 화면·가로 모드에서 카드가 화면을 먹지 않도록 상한을 둔다. */
   maxHeight: 460,
+  /**
+   * 카드가 글자 배율을 따라 자라는 상한 배수. 본문·설명 글자는 배율 상한이 없어서(읽는 글자는 끝까지 자란다,
+   * `atoms.tsx`) 고정 높이 카드에는 AX5 의 제목·설명이 들지 않았다. 카드가 `min(글자 배율, 이 값)` 만큼 자라
+   * 같은 문장이 더 많이 보이게 하고, 그 위는 스크롤한다(`maxHeight` 가 마지막 상한). 1.6 은 컨트롤의 글자
+   * 상한(`BAR_CONTROL_MAX_SCALE`)과 같은 값이다 — 카드가 컨트롤보다 더 크게 자랄 이유가 없다.
+   */
+  textGrowthMax: 1.6,
   /** 카드 모서리(연속 곡선). 메뉴 카드(`ATTACH_MENU.radius`)와 같다 — 위 「모서리는 메뉴 카드와 같은 값이다」. */
   radius: 34,
   /** 열 수. Buzz 3열. */
@@ -100,13 +112,26 @@ export interface PhotoCardSize {
   height: number;
 }
 
-/** 이 화면에서 카드가 서는 크기. */
-export function photoCardSize(viewport: PhotoCardSize): PhotoCardSize {
-  const height = Math.round(viewport.height * PHOTO_CARD.heightRatio);
+/**
+ * 이 화면에서 카드가 서는 크기. `fontScale`(`useWindowDimensions().fontScale`)이 1 보다 크면 높이가 그만큼
+ * 자란다(`textGrowthMax` 까지, `maxHeight` 로 막힌다). 줄이지는 않는다.
+ */
+export function photoCardSize(viewport: PhotoCardSize & {fontScale?: number}): PhotoCardSize {
+  const grow = Math.min(Math.max(viewport.fontScale ?? 1, 1), PHOTO_CARD.textGrowthMax);
+  const height = Math.round(viewport.height * PHOTO_CARD.heightRatio * grow);
   return {
-    width: viewport.width - 2 * PHOTO_CARD.inset,
+    width: Math.min(PHOTO_CARD.maxWidth, viewport.width - 2 * PHOTO_CARD.inset),
     height: Math.min(PHOTO_CARD.maxHeight, Math.max(PHOTO_CARD.minHeight, height)),
   };
+}
+
+/**
+ * 스크롤 면이 넘쳐서 사람에게 「더 있다」를 알려야 하는가. 안 알리면 넘친 면은 다음 문장·행동이 첫 화면 밖에
+ * 있다는 사실을 아무도 모른다. (RN iOS 스크롤 표시는 스크롤을 시작해야 보이므로 `flashScrollIndicators` 로 한 번
+ * 보인다.)
+ */
+export function scrollNeedsHint(contentHeight: number, layoutHeight: number): boolean {
+  return layoutHeight > 0 && contentHeight > layoutHeight + 1;
 }
 
 /** 카드 폭에서 셀 한 변. 열 사이 틈을 뺀 나머지를 균등 분할한다(소수점은 RN 이 픽셀에 맞춘다). */

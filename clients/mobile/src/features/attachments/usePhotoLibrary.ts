@@ -63,7 +63,6 @@ export interface PhotoLibraryActions {
   attach(): void;
 }
 
-const CAP_NOTICE_MS = 2500;
 const CHANGE_DEBOUNCE_MS = 250;
 
 /**
@@ -268,12 +267,8 @@ export function usePhotoLibrary({
     });
   }, [room]);
 
-  // 안내는 일정 시간 뒤에 걷힌다(상한 안내만 — 실패 안내는 다음 행동까지 남는다).
-  useEffect(() => {
-    if (notice?.kind !== 'capped') return undefined;
-    const timer = setTimeout(() => setNotice(null), CAP_NOTICE_MS);
-    return () => clearTimeout(timer);
-  }, [notice]);
+  // 안내는 **시간으로 사라지지 않는다**(상한 안내도). 다음 선택 변화·첨부·다시 불러오기에서 걷힌다. 2.5초 뒤
+  // 걷던 때에는 느린 독자와 확대 사용자가 읽기 전에 사라졌고, 선택이 왜 안 먹히는지의 이유도 화면에서 없어졌다.
 
   // ---- 행동 ----------------------------------------------------------------
 

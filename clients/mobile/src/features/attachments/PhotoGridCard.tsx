@@ -1,7 +1,8 @@
-import React, {memo, useCallback, useEffect} from 'react';
+import React, {memo, useCallback, useEffect, useRef} from 'react';
 import {
   AccessibilityInfo,
   ActivityIndicator,
+  Animated,
   FlatList,
   Image,
   Platform,
@@ -17,8 +18,14 @@ import {AVATAR_INITIAL_MAX_SCALE, BAR_CONTROL_MAX_SCALE, Sentence} from '../../d
 import {CONV_ICONS, CONV_ICON_SIZE} from '../../design/icons';
 import {usePalette, useStyles} from '../../design/theme';
 import {ds2Radius, font, line, space, type Palette} from '../../design/tokens';
+import {useMorphEdgeShift} from './morphEdge';
 import {PHOTO_COPY} from './photoCardCopy';
-import {PHOTO_CARD, photoCellSize, type PhotoCardSize} from './photoCardDesign';
+import {
+  PHOTO_CARD,
+  photoCellSize,
+  scrollNeedsHint,
+  type PhotoCardSize,
+} from './photoCardDesign';
 import {
   photoDateLabel,
   selectionOrder,
@@ -83,6 +90,8 @@ export function PhotoGridCard({
     onDone,
     initialSelected,
   });
+  // 변신 중 오른쪽 닻 컨트롤(알약·일부 허용 링크)이 틀의 오른쪽 가장자리를 따라간다(`morphEdge.ts`).
+  const edgeShift = useMorphEdgeShift();
   const {permission} = library;
   const reading = permission === 'granted' || permission === 'limited';
   const cell = photoCellSize(size.width);
@@ -139,32 +148,50 @@ export function PhotoGridCard({
       ) : null}
 
       {permission === 'undetermined' ? (
-        <PermissionPane
+        <Face
           title={PHOTO_COPY.askTitle}
           detail={PHOTO_COPY.askDetail}
-          primaryLabel={PHOTO_COPY.allow}
-          primaryHint={PHOTO_COPY.allowHint}
-          primaryBusy={library.requesting}
-          onPrimary={library.request}
-          secondaryLabel={PHOTO_COPY.pickFromAll}
-          onSecondary={onOpenSystemPicker}
+          actions={[
+            {
+              kind: 'primary',
+              label: PHOTO_COPY.allow,
+              hint: PHOTO_COPY.allowHint,
+              busy: library.requesting,
+              onPress: library.request,
+              testID: 'photo-allow',
+            },
+            {
+              kind: 'link',
+              label: PHOTO_COPY.pickFromAll,
+              onPress: onOpenSystemPicker,
+              testID: 'photo-pick-from-all',
+            },
+          ]}
           bottomClear={bottomClear}
           testID="photo-pane-undetermined"
-          primaryTestID="photo-allow"
         />
       ) : null}
 
       {permission === 'denied' ? (
-        <PermissionPane
+        <Face
           title={PHOTO_COPY.deniedTitle}
           detail={PHOTO_COPY.deniedDetail}
-          primaryLabel={PHOTO_COPY.openSettings}
-          onPrimary={library.openSettings}
-          secondaryLabel={PHOTO_COPY.pickFromAll}
-          onSecondary={onOpenSystemPicker}
+          actions={[
+            {
+              kind: 'primary',
+              label: PHOTO_COPY.openSettings,
+              onPress: library.openSettings,
+              testID: 'photo-open-settings',
+            },
+            {
+              kind: 'link',
+              label: PHOTO_COPY.pickFromAll,
+              onPress: onOpenSystemPicker,
+              testID: 'photo-pick-from-all',
+            },
+          ]}
           bottomClear={bottomClear}
           testID="photo-pane-denied"
-          primaryTestID="photo-open-settings"
         />
       ) : null}
 
@@ -177,27 +204,35 @@ export function PhotoGridCard({
                 style={styles.limitedNote}>
                 {PHOTO_COPY.limitedNote}
               </Sentence>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={PHOTO_COPY.limitedMore}
-                accessibilityHint={PHOTO_COPY.limitedMoreHint}
-                onPress={library.presentLimited}
-                style={({pressed}) => [styles.limitedMore, pressed && styles.pressed]}
-                testID="photo-limited-more">
-                <Text
-                  maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
-                  style={styles.limitedMoreLabel}>
-                  {PHOTO_COPY.limitedMore}
-                </Text>
-              </Pressable>
+              <Animated.View style={{transform: [{translateX: edgeShift}]}}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={PHOTO_COPY.limitedMore}
+                  accessibilityHint={PHOTO_COPY.limitedMoreHint}
+                  onPress={library.presentLimited}
+                  style={({pressed}) => [styles.limitedMore, pressed && styles.pressed]}
+                  testID="photo-limited-more">
+                  <Text
+                    maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+                    style={styles.limitedMoreLabel}>
+                    {PHOTO_COPY.limitedMore}
+                  </Text>
+                </Pressable>
+              </Animated.View>
             </View>
           ) : null}
 
           {library.loadFailed ? (
-            <CenterNote
-              text={PHOTO_COPY.loadFailed}
-              actionLabel={PHOTO_COPY.retry}
-              onAction={library.retry}
+            <Face
+              title={PHOTO_COPY.loadFailed}
+              actions={[
+                {
+                  kind: 'link',
+                  label: PHOTO_COPY.retry,
+                  onPress: library.retry,
+                  testID: 'photo-retry',
+                },
+              ]}
               bottomClear={bottomClear}
               testID="photo-load-failed"
             />
@@ -209,13 +244,14 @@ export function PhotoGridCard({
               testID="photo-loading"
             />
           ) : library.assets.length === 0 ? (
-            <CenterNote
-              text={PHOTO_COPY.emptyTitle}
+            <Face
+              title={PHOTO_COPY.emptyTitle}
               detail={
                 permission === 'limited'
                   ? PHOTO_COPY.emptyLimitedDetail
                   : PHOTO_COPY.emptyDetail
               }
+              actions={[]}
               bottomClear={bottomClear}
               testID="photo-empty"
             />
@@ -278,28 +314,31 @@ export function PhotoGridCard({
         </Pressable>
 
         {reading ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={
-              count > 0 ? PHOTO_COPY.attach(count) : PHOTO_COPY.allPhotos
-            }
-            accessibilityHint={count > 0 ? undefined : PHOTO_COPY.allPhotosHint}
-            accessibilityState={{busy: attachingNow, disabled: attachingNow}}
-            disabled={attachingNow}
-            onPress={count > 0 ? library.attach : onOpenSystemPicker}
-            style={({pressed}) => [styles.pill, pressed && styles.pillPressed]}
-            testID="photo-pill">
-            {attachingNow ? (
-              <ActivityIndicator color={palette.onPrimary} />
-            ) : (
-              <Text
-                maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
-                numberOfLines={1}
-                style={styles.pillLabel}>
-                {count > 0 ? PHOTO_COPY.attach(count) : PHOTO_COPY.allPhotos}
-              </Text>
-            )}
-          </Pressable>
+          // 알약은 오른쪽 가장자리에 닻이 있다 — 변신 중에는 틀의 오른쪽 가장자리를 따라간다(`morphEdge.ts`).
+          <Animated.View style={{transform: [{translateX: edgeShift}]}}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                count > 0 ? PHOTO_COPY.attach(count) : PHOTO_COPY.allPhotos
+              }
+              accessibilityHint={count > 0 ? undefined : PHOTO_COPY.allPhotosHint}
+              accessibilityState={{busy: attachingNow, disabled: attachingNow}}
+              disabled={attachingNow}
+              onPress={count > 0 ? library.attach : onOpenSystemPicker}
+              style={({pressed}) => [styles.pill, pressed && styles.pillPressed]}
+              testID="photo-pill">
+              {attachingNow ? (
+                <ActivityIndicator color={palette.onPrimary} />
+              ) : (
+                <Text
+                  maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+                  numberOfLines={1}
+                  style={styles.pillLabel}>
+                  {count > 0 ? PHOTO_COPY.attach(count) : PHOTO_COPY.allPhotos}
+                </Text>
+              )}
+            </Pressable>
+          </Animated.View>
         ) : null}
       </View>
     </View>
@@ -334,9 +373,7 @@ const PhotoCell = memo(function PhotoCellView({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={PHOTO_COPY.photo(photoDateLabel(asset.creationTimeMs))}
-      accessibilityValue={{
-        text: selected ? PHOTO_COPY.selected(order) : PHOTO_COPY.notSelected,
-      }}
+      accessibilityValue={selected ? {text: PHOTO_COPY.order(order)} : undefined}
       accessibilityState={{selected}}
       onPress={() => onPress(asset.id)}
       style={{width: size, height: size}}
@@ -409,116 +446,102 @@ function PhotoSkeleton({
 
 // ---- 권한 설명과 빈 상태 ----------------------------------------------------------
 
-function PermissionPane({
+/**
+ * 카드가 말하는 면(권한 설명·거부·비어 있음·불러오기 실패)의 한 모양.
+ *
+ * **글은 스크롤하고 행동은 바닥에 붙는다.** 글자를 키우면(AX5) 제목·설명이 카드(고정 높이)보다 길어진다.
+ * 행동(「허용」·「설정 열기」·「다시 불러오기」)까지 같은 스크롤 안에 두면 첫 화면에 행동이 없고(권한 면),
+ * 떠 있는 알약 밑에 겹쳤다(오류 면) — design-review. 그래서 글 영역만 스크롤하고 행동은 그 아래 **고정 띠**에
+ * 둔다(떠 있는 뒤로 원·알약 줄 `bottomClear` 위). 기본 글꼴에서는 글이 짧아 스크롤이 나타나지 않고, 글은 위
+ * 영역의 가운데에 선다. 넘치면 스크롤 표시를 한 번 보인다(`scrollNeedsHint`).
+ */
+interface FaceAction {
+  /** `primary` = 채운 알약(주), `link` = 글자만(보조). */
+  kind: 'primary' | 'link';
+  label: string;
+  hint?: string;
+  busy?: boolean;
+  onPress: () => void;
+  testID: string;
+}
+
+function Face({
   title,
   detail,
-  primaryLabel,
-  primaryHint,
-  primaryBusy = false,
-  onPrimary,
-  secondaryLabel,
-  onSecondary,
+  actions,
   bottomClear,
   testID,
-  primaryTestID,
 }: {
   title: string;
-  detail: string;
-  primaryLabel: string;
-  primaryHint?: string;
-  primaryBusy?: boolean;
-  onPrimary: () => void;
-  secondaryLabel: string;
-  onSecondary: () => void;
+  detail?: string;
+  actions: FaceAction[];
   bottomClear: number;
   testID: string;
-  primaryTestID: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
-  // 글자를 키우면 설명이 카드(고정 높이)보다 길어질 수 있다 — 잘리지 않고 스크롤된다.
+  const scroll = useRef<ScrollView>(null);
+  const layoutHeight = useRef(0);
   return (
-    <ScrollView
-      contentContainerStyle={[styles.pane, {paddingBottom: bottomClear}]}
-      showsVerticalScrollIndicator={false}
-      testID={testID}>
-      <Sentence style={styles.paneTitle}>{title}</Sentence>
-      <Sentence style={styles.paneDetail}>{detail}</Sentence>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={primaryLabel}
-        accessibilityHint={primaryHint}
-        accessibilityState={{busy: primaryBusy, disabled: primaryBusy}}
-        disabled={primaryBusy}
-        onPress={onPrimary}
-        style={({pressed}) => [styles.primary, pressed && styles.pillPressed]}
-        testID={primaryTestID}>
-        {primaryBusy ? (
-          <ActivityIndicator color={palette.onPrimary} />
-        ) : (
-          <Text
-            maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
-            numberOfLines={1}
-            style={styles.pillLabel}>
-            {primaryLabel}
-          </Text>
+    <View style={styles.face} testID={testID}>
+      <ScrollView
+        contentContainerStyle={styles.faceText}
+        onContentSizeChange={(_width, height) => {
+          if (scrollNeedsHint(height, layoutHeight.current)) {
+            scroll.current?.flashScrollIndicators?.();
+          }
+        }}
+        onLayout={event => {
+          layoutHeight.current = event.nativeEvent.layout.height;
+        }}
+        ref={scroll}
+        style={styles.faceScroll}
+        testID={`${testID}-text`}>
+        <Sentence accessibilityRole="header" style={styles.paneTitle}>
+          {title}
+        </Sentence>
+        {detail !== undefined ? <Sentence style={styles.paneDetail}>{detail}</Sentence> : null}
+      </ScrollView>
+      <View style={[styles.faceActions, {paddingBottom: bottomClear}]}>
+        {actions.map(action =>
+          action.kind === 'primary' ? (
+            <Pressable
+              accessibilityHint={action.hint}
+              accessibilityLabel={action.label}
+              accessibilityRole="button"
+              accessibilityState={{busy: action.busy === true, disabled: action.busy === true}}
+              disabled={action.busy === true}
+              key={action.testID}
+              onPress={action.onPress}
+              style={({pressed}) => [styles.primary, pressed && styles.pillPressed]}
+              testID={action.testID}>
+              {action.busy === true ? (
+                <ActivityIndicator color={palette.onPrimary} />
+              ) : (
+                <Text
+                  maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+                  numberOfLines={1}
+                  style={styles.pillLabel}>
+                  {action.label}
+                </Text>
+              )}
+            </Pressable>
+          ) : (
+            <Pressable
+              accessibilityLabel={action.label}
+              accessibilityRole="button"
+              key={action.testID}
+              onPress={action.onPress}
+              style={({pressed}) => [styles.secondary, pressed && styles.pressed]}
+              testID={action.testID}>
+              <Text maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE} style={styles.secondaryLabel}>
+                {action.label}
+              </Text>
+            </Pressable>
+          ),
         )}
-      </Pressable>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={secondaryLabel}
-        onPress={onSecondary}
-        style={({pressed}) => [styles.secondary, pressed && styles.pressed]}
-        testID="photo-pick-from-all">
-        <Text maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE} style={styles.secondaryLabel}>
-          {secondaryLabel}
-        </Text>
-      </Pressable>
-    </ScrollView>
-  );
-}
-
-/**
- * 비어 있음·불러오기 실패의 면. **스크롤한다** — 글자를 키우면(AX5) 제목·설명·다시 불러오기가 카드(고정 높이)
- * 보다 길어지는데, 고정 상자에 두면 아래가 떠 있는 알약 밑으로 겹쳐 「다시 불러오기」가 눌리지 않았다
- * (AX5 캡처 ax5-error-dark). 기본 글꼴에서는 내용이 짧아 스크롤이 나타나지 않는다.
- */
-function CenterNote({
-  text,
-  detail,
-  actionLabel,
-  onAction,
-  bottomClear,
-  testID,
-}: {
-  text: string;
-  detail?: string;
-  actionLabel?: string;
-  onAction?: () => void;
-  bottomClear: number;
-  testID: string;
-}): React.JSX.Element {
-  const styles = useStyles(buildStyles);
-  return (
-    <ScrollView
-      contentContainerStyle={[styles.pane, {paddingBottom: bottomClear}]}
-      showsVerticalScrollIndicator={false}
-      testID={testID}>
-      <Sentence style={styles.paneTitle}>{text}</Sentence>
-      {detail !== undefined ? <Sentence style={styles.paneDetail}>{detail}</Sentence> : null}
-      {actionLabel !== undefined && onAction !== undefined ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={actionLabel}
-          onPress={onAction}
-          style={({pressed}) => [styles.secondary, pressed && styles.pressed]}
-          testID="photo-retry">
-          <Text maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE} style={styles.secondaryLabel}>
-            {actionLabel}
-          </Text>
-        </Pressable>
-      ) : null}
-    </ScrollView>
+      </View>
+    </View>
   );
 }
 
@@ -562,13 +585,20 @@ const buildStyles = (color: Palette) =>
       fontWeight: '700',
       color: color.onAccent,
     },
-    pane: {
+    face: {flex: 1},
+    faceScroll: {flex: 1},
+    faceText: {
       flexGrow: 1,
       paddingHorizontal: space.xl,
       paddingTop: space.xl,
       alignItems: 'center',
       justifyContent: 'center',
       gap: space.md,
+    },
+    faceActions: {
+      paddingHorizontal: space.xl,
+      alignItems: 'center',
+      gap: space.sm,
     },
     center: {
       flex: 1,
@@ -598,7 +628,6 @@ const buildStyles = (color: Palette) =>
       backgroundColor: color.primary,
       alignItems: 'center',
       justifyContent: 'center',
-      marginTop: space.sm,
     },
     secondary: {
       minHeight: PHOTO_CARD.control,
@@ -680,6 +709,10 @@ const buildStyles = (color: Palette) =>
       height: PHOTO_CARD.control,
       borderRadius: ds2Radius.pill,
       backgroundColor: color.surface,
+      // 권한·로딩 면처럼 카드 몸통도 `surface` 인 곳에서는 채움만으로는 원이 사라지고 글리프만 남는다 —
+      // 헤더의 뒤로 원과 같은 가는 테두리로 「눌리는 것」의 경계를 건다(design-review L4).
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: color.border,
       boxShadow: color.elevationRest,
       alignItems: 'center',
       justifyContent: 'center',
