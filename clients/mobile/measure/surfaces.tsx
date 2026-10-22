@@ -36,8 +36,11 @@ import {
   INPUT_CHROME_X,
   mentionAnnotationLines,
   mentionRowHeight,
+  placeholderRoom,
+  PLACEHOLDER_MAX_LINES,
   withLatinWordBreaks,
 } from '../src/features/conversation/Composer';
+import {composerTextColumn} from '../src/features/conversation/convDesign';
 import {saveDraft} from '../src/features/conversation/drafts';
 import {CLAUDE_SUBSCRIPTION_AGENT_PAUSED} from '@momo/core/features/ai/aiHubModel';
 import {MessageActionSheet} from '../src/features/conversation/MessageActionSheet';
@@ -167,7 +170,6 @@ import {
   line as lineBox,
   SAFE_GUTTER,
   space,
-  TOUCH_TARGET,
   type Palette,
 } from '../src/design/tokens';
 import {
@@ -785,112 +787,176 @@ function seedAdeControl(): void {
 const PLACEHOLDER_LABELS = ['일반', 'release-2026-08', '프로덕트-디자인'];
 
 /**
- * 이 레포가 문서로 든 폰 예산(`composerCopy.ts` 머리말의 산술): 390pt 화면에서
- * 입력창에 남는 **글의 폭 260pt**.
- *
- * 시뮬레이터를 그 폭으로 만들 수는 없다 — 부팅되는 기기의 논리 폭은 기기가
- * 정한다. 그래서 두 번 잰다: **이 기기의 실제 입력창**과 **문서된 예산 상자**.
- * 앞의 것은 지금 이 화면의 진실이고, 뒤의 것은 우리가 지키기로 한 가장 좁은
- * 화면의 진실이다. 하나만 재면 넓은 기기에서 나온 초록이 예산을 잰 척한다.
+ * 계측이 **배송되는 입력창**을 직접 잴 수 있게 건네받는 자리 — 방 이름마다 하나 (#4179).
+ * 모듈 상수인 이유는 `GROWTH_INPUT_REF` 와 같다: 표면 함수는 렌더마다 다시 도는 평범한 함수라
+ * `useRef` 를 못 부르고, 이 표면은 한 번에 하나만 뜬다.
  */
-const PLACEHOLDER_BUDGET_PT = 260;
+const PLACEHOLDER_INPUT_REFS: Record<
+  string,
+  React.MutableRefObject<TextInput | null>
+> = Object.fromEntries(PLACEHOLDER_LABELS.map(label => [label, {current: null}]));
 
 /**
- * 이 화면에서 플레이스홀더가 **몇 줄인가** (#1422).
+ * 390pt 화면에서 알약의 글 칸 — 문서로 든 폭 (#4179).
  *
- * 폭은 추정하지 않고 잰다: 컴포저의 `bar` 를 같은 토큰으로 한 번 더 세우고,
- * 입력창이 받는 칸에 `onLayout` 을 걸어 실제 폭을 읽는다. 전송 버튼의 폭도
- * 실제로 「보내기」를 그려서 나온다 — `minWidth` 와 글자 폭 중 어느 쪽이 이기는지
- * 를 손으로 정하면 그 순간 이 계측은 산수의 사본이 된다.
+ * 시뮬레이터를 그 폭으로 만들 수는 없다 — 부팅되는 기기의 논리 폭은 기기가 정한다. 그래서 두 번
+ * 잰다: **이 기기의 실제 입력창**과 **390pt 화면의 글 칸**. 앞의 것은 지금 이 화면의 진실이고 뒤의
+ * 것은 우리가 지키기로 한 좁은 화면의 진실이다. 하나만 재면 넓은 기기에서 나온 초록이 예산을 잰
+ * 척한다. 옛 값 260pt 는 알약 이전 바(좌우 16 · 「보내기」 글자 버튼)의 글 칸이었고, 지금은 알약의
+ * 글 칸(`composerTextColumn`)에서 도출한다 — 값을 손으로 적으면 이 계측이 배송되지 않는 칸을 잰다.
+ */
+const PLACEHOLDER_BUDGET_PT = composerTextColumn(390, 1);
+
+/**
+ * 이 화면에서 안내 문장이 **몇 줄로 서 있고 한 줄 예산을 지키는가** (#1422 → #4179).
  *
- * 줄 수는 `onTextLayout` 이 답한다. RN 의 `TextInput` 은 플레이스홀더의 줄 수를
- * 알려 주지 않으므로, 같은 글자 스타일(`font.body` · `line.body`)과 같은 콘텐츠
- * 폭을 가진 `<Text>` 에 같은 문장을 넣어 읽는다. 이 replica 가 정직한 이유는
- * 스타일이 **`Composer` 가 쓰는 그 토큰들**이기 때문이고, 정직하지 **않은** 자리
- * 도 적어 둔다: 이것은 입력창이 아니라 텍스트라, 「두 줄이면 화면에서 어떻게
- * 보이는가」는 이 줄이 아니라 아래 사진이 답한다.
+ * 폭도 줄 수도 **추정하지 않고 배송되는 입력창에서 읽는다.** 옛 판은 컴포저의 알약 이전 바(좌우 16
+ * 거터와 글자 「보내기」 버튼)를 한 번 더 세워 폭을 쟀고, 그 폭은 알약의 글 칸이 아니었다 — 계측이
+ * 배송되지 않는 칸을 재면 사진의 「몇 줄」이 화면의 진실이 아니다. 이제:
+ *
+ *   · 폭 — 실제 입력창을 `measure()` 로 읽고 입력창 자신의 안쪽 여백·테두리(`INPUT_CHROME_X`)를 뺀다.
+ *   · 줄 수 — 같은 글자 스타일·같은 줄바꿈 전략의 `<Text>` 가 **그 폭에서** 문장 전체와 머리 절을
+ *     각각 몇 줄로 쓰는지 `onTextLayout` 이 답한다(컴포저 안의 프로브와 같은 일).
+ *   · 서 있는 줄 수 — 실제 입력창의 높이에서 크롬을 빼고 줄 상자로 나눈다. 플레이스홀더는 RN 이
+ *     줄 수를 알려 주지 않는 유일한 글이라 **상자의 높이가 그 답**이다.
+ *
+ * 판정은 사진에 적힌다: 문장이 한 줄이면 서 있는 줄이 1 이어야 하고, 한 줄이 아니고 머리 절이 한 줄이면
+ * 뒷절이 빠져 1 이어야 하고, 머리 절도 한 줄을 넘으면 버릴 절이 없어 서 있는 줄이 머리의 줄 수여야
+ * 한다. 예산을 2줄로 되돌리면 두 번째 경우가 ✗ 로 찍힌다(시험은 `composerDraftOffline.test.tsx`).
  */
 function PlaceholderProbe(): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {fontScale, height: windowHeight} = useWindowDimensions();
-  const [slotWidth, setSlotWidth] = React.useState(0);
+  const [boxes, setBoxes] = React.useState<
+    Record<string, {width: number; height: number}>
+  >({});
   const [lines, setLines] = React.useState<Record<string, number>>({});
-  // 입력창의 콘텐츠 폭 = 상자 - 좌우 안쪽 여백 - 좌우 테두리. **크롬은 배송되는
-  // 상수를 읽는다** (회전 1 M4): 여기에 `space.md * 2 - 2` 를 다시 적으면 자와
-  // 상자가 각자 다른 수를 들 수 있고, 그러면 이 사진은 배송되지 않는 상자를 잰다.
-  const content = slotWidth === 0 ? 0 : slotWidth - INPUT_CHROME_X;
-  // 절 예산의 문턱 (#1479). 사진이 「뒷절이 사라졌다」를 보여 줄 때, **왜**
-  // 사라졌는지는 이 두 수가 답한다: 상자가 담는 줄 상자 몇 개인가, 그리고 위
-  // 줄들이 세는 문장은 그보다 긴가. 하나만 있으면 사진은 결과만 들고 판정 기준을
-  // 안 든다.
-  const room = composerMaxHeight(fontScale, windowHeight) - INPUT_CHROME;
   const rowPt = lineBox.body * fontScale;
-  const boxes = [
-    {key: '이 기기', width: content},
-    {key: '예산 390pt', width: PLACEHOLDER_BUDGET_PT},
+  const room = placeholderRoom(fontScale);
+  // 상자는 자라다가 상한(`composerMaxHeight`, #1443)에서 멈춘다 — 큰 글자에서 머리 절이 그보다 길면
+  // 상자 높이는 줄 수가 아니라 상한을 말한다. 그 띠는 이 규칙의 일이 아니라 기존 한계라 따로 적는다.
+  const cap = composerMaxHeight(fontScale, windowHeight);
+  const capRows = (cap - INPUT_CHROME) / rowPt;
+
+  // 실제 입력창의 상자를 읽는다. 레이아웃·프로브 왕복이 끝난 뒤(1.5초)에 한 번 — 찍는 쪽은 그보다
+  // 오래 기다린다(`scripts/measure.sh` 의 sleep).
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      for (const label of PLACEHOLDER_LABELS) {
+        PLACEHOLDER_INPUT_REFS[label]?.current?.measure(
+          (_x, _y, width, height) =>
+            setBoxes(previous => ({...previous, [label]: {width, height}})),
+        );
+      }
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const widthOf = (label: string) =>
+    boxes[label] === undefined ? 0 : boxes[label].width - INPUT_CHROME_X;
+  const slots = [
+    ...PLACEHOLDER_LABELS.map(label => ({
+      key: `이 기기/${label}`,
+      label,
+      width: widthOf(label),
+    })),
+    ...PLACEHOLDER_LABELS.map(label => ({
+      key: `390pt/${label}`,
+      label,
+      width: PLACEHOLDER_BUDGET_PT,
+    })),
   ];
-  const read = (box: string, label: string) => lines[`${box}/${label}`] ?? '…';
+  const count = (slot: string, suffix = '') => lines[`${slot}${suffix}`];
+  const show = (value: number | undefined) => (value === undefined ? '…' : `${value}`);
+
   return (
     <View style={styles.probe}>
-      <View style={styles.probeBar} pointerEvents="none">
-        <View
-          style={styles.probeSlot}
-          onLayout={event => setSlotWidth(event.nativeEvent.layout.width)}
-        />
-        <View style={styles.probeSend}>
-          <Text style={styles.probeSendLabel}>보내기</Text>
-        </View>
-      </View>
-      {boxes
-        .filter(box => box.width > 0)
-        .flatMap(box =>
-          PLACEHOLDER_LABELS.flatMap(label =>
-            // 두 문장을 나란히 잰다 (#1479): **절을 다 실은 것**과 **머리 절만**.
-            // 절 예산의 판정이 그 둘 사이에서 나므로, 하나만 재면 사진은 결과를
-            // 들고 그 결과가 나온 이유를 안 든다 — 머리 절도 안 드는 띠에서는
-            // 뒷절을 버려도 화면이 안 변한다는 것이 이 짝으로만 읽힌다.
-            [
-              {suffix: '', text: composerPlaceholder(label, 'place')},
-              {
-                suffix: '/머리',
-                text: composerPlaceholderClauses(label, 'place')[0].text,
-              },
-            ].map(({suffix, text}) => (
-              <View
-                key={`${box.key}/${label}${suffix}`}
-                style={[styles.probeMeasure, {width: box.width}]}>
-                <Text
-                  style={styles.probeText}
-                  lineBreakStrategyIOS="hangul-word"
-                  onTextLayout={event => {
-                    const count = event.nativeEvent.lines.length;
-                    const slot = `${box.key}/${label}${suffix}`;
-                    setLines(previous =>
-                      previous[slot] === count
-                        ? previous
-                        : {...previous, [slot]: count},
-                    );
-                  }}>
-                  {withLatinWordBreaks(text)}
-                </Text>
-              </View>
-            )),
-          ),
+      {slots
+        .filter(slot => slot.width > 0)
+        .flatMap(slot =>
+          // 두 문장을 나란히 잰다: **절을 다 실은 것**과 **머리 절만**. 판정이 그 둘 사이에서 나므로
+          // 하나만 재면 사진은 결과를 들고 그 결과가 나온 이유를 안 든다.
+          [
+            {suffix: '', text: composerPlaceholder(slot.label, 'place')},
+            {
+              suffix: '/머리',
+              text: composerPlaceholderClauses(slot.label, 'place')[0].text,
+            },
+          ].map(({suffix, text}) => (
+            <View
+              key={`${slot.key}${suffix}`}
+              style={[styles.probeMeasure, {width: slot.width}]}>
+              <Text
+                style={styles.probeText}
+                lineBreakStrategyIOS="hangul-word"
+                onTextLayout={event => {
+                  const n = event.nativeEvent.lines.length;
+                  setLines(previous =>
+                    previous[`${slot.key}${suffix}`] === n
+                      ? previous
+                      : {...previous, [`${slot.key}${suffix}`]: n},
+                  );
+                }}>
+                {withLatinWordBreaks(text)}
+              </Text>
+            </View>
+          )),
         )}
-      {boxes.map(box => (
-        <Text key={box.key} style={styles.probeRead}>
-          {`${box.key} 글폭 ${Math.round(box.width)}pt · ` +
-            PLACEHOLDER_LABELS.map(
-              label =>
-                `${label} ${read(box.key, label)}줄(머리 ` +
-                `${read(box.key, `${label}/머리`)}줄)`,
-            ).join(' · ')}
-        </Text>
-      ))}
-      <Text style={styles.probeRead}>
-        {`절 예산 문턱 — 글자 배수 ${fontScale.toFixed(3)} · 줄 상자 ` +
-          `${rowPt.toFixed(1)}pt · 상자가 든 글자리 ${room.toFixed(1)}pt = ` +
-          `${(room / rowPt).toFixed(1)}줄 (#1479)`}
+      {PLACEHOLDER_LABELS.map(label => {
+        const box = boxes[label];
+        const slot = `이 기기/${label}`;
+        const full = count(slot);
+        const head = count(slot, '/머리');
+        // 서 있는 줄 수 = (입력창 높이 − 크롬) ÷ 줄 상자. 한 줄 입력창은 최소 높이(44)가 이긴다.
+        const shown =
+          box === undefined
+            ? undefined
+            : Math.max(1, Math.round((box.height - INPUT_CHROME) / rowPt));
+        let verdict = '…';
+        if (
+          box !== undefined &&
+          shown !== undefined &&
+          full !== undefined &&
+          head !== undefined
+        ) {
+          const expected =
+            full <= PLACEHOLDER_MAX_LINES
+              ? 1
+              : head <= PLACEHOLDER_MAX_LINES
+                ? 1
+                : head;
+          const clipped = box.height >= cap - 0.5;
+          if (clipped && expected > capRows) {
+            verdict = `△ 머리 절 ${head}줄이 상자 상한 ${capRows.toFixed(1)}줄을 넘어 잘림 — 버릴 절은 이미 없음(#1443 기존 한계)`;
+          } else {
+            verdict =
+              shown === expected
+                ? full <= PLACEHOLDER_MAX_LINES
+                  ? '✓ 문장 전체 한 줄'
+                  : head <= PLACEHOLDER_MAX_LINES
+                    ? '✓ 뒷절 빠짐 · 한 줄'
+                    : `✓ 머리 절이 ${head}줄 — 버릴 절 없음`
+                : `✗ 예산 위반 (기대 ${expected}줄)`;
+          }
+        }
+        return (
+          <Text key={label} allowFontScaling={false} style={styles.probeRead}>
+            {`${label}: 입력창 ${box === undefined ? '…' : `${box.width.toFixed(0)}×${box.height.toFixed(1)}pt`}` +
+              ` · 글 칸 ${Math.round(widthOf(label))}pt · 문장 ${show(full)}줄 · 머리 ${show(head)}줄` +
+              ` · 서 있는 안내 ${show(shown)}줄 → ${verdict}`}
+          </Text>
+        );
+      })}
+      <Text allowFontScaling={false} style={styles.probeRead}>
+        {`390pt 화면의 글 칸 ${Math.round(PLACEHOLDER_BUDGET_PT)}pt · ` +
+          PLACEHOLDER_LABELS.map(
+            label =>
+              `${label} ${show(count(`390pt/${label}`))}줄(머리 ${show(count(`390pt/${label}`, '/머리'))}줄)`,
+          ).join(' · ')}
+      </Text>
+      <Text allowFontScaling={false} style={styles.probeRead}>
+        {`안내 줄 예산 ${PLACEHOLDER_MAX_LINES}줄 — 글자 배수 ${fontScale.toFixed(3)} · 줄 상자 ` +
+          `${rowPt.toFixed(1)}pt · 문턱 ${room.toFixed(1)}pt = ${(room / rowPt).toFixed(1)}줄 (#4179)`}
       </Text>
     </View>
   );
@@ -1149,19 +1215,22 @@ function GrowthProbe({
   const insets = useSafeAreaInsets();
   const [boxHeight, setBoxHeight] = React.useState(0);
   const [headerHeight, setHeaderHeight] = React.useState(0);
-  const [slotWidth, setSlotWidth] = React.useState(0);
+  const [inputWidth, setInputWidth] = React.useState(0);
   const [broken, setBroken] = React.useState('…');
   const cap = composerMaxHeight(fontScale, windowHeight);
   const budget = composerColumnBudget(fontScale, windowHeight);
   const row = lineBox.body * fontScale;
-  const content = slotWidth === 0 ? 0 : slotWidth - space.md * 2 - 2;
+  // 글 칸의 폭은 **배송되는 입력창**에서 읽는다 (#4179). 옛 판은 알약 이전 바를 복제해서 쟀고 그
+  // 폭은 알약의 글 칸이 아니었다.
+  const content = inputWidth === 0 ? 0 : inputWidth - INPUT_CHROME_X;
   const measuredChrome = insets.top + headerHeight;
 
   React.useEffect(() => {
     const timer = setTimeout(() => {
-      inputRef.current?.measure((_x, _y, _width, height) =>
-        setBoxHeight(height),
-      );
+      inputRef.current?.measure((_x, _y, width, height) => {
+        setBoxHeight(height);
+        setInputWidth(width);
+      });
     }, 1200);
     return () => clearTimeout(timer);
   }, [inputRef]);
@@ -1173,15 +1242,6 @@ function GrowthProbe({
         pointerEvents="none"
         onLayout={event => setHeaderHeight(event.nativeEvent.layout.height)}>
         <ScreenHeader title="배포" onBack={() => {}} titleTestID="measure-chrome-title" />
-      </View>
-      <View style={styles.probeBar} pointerEvents="none">
-        <View
-          style={styles.probeSlot}
-          onLayout={event => setSlotWidth(event.nativeEvent.layout.width)}
-        />
-        <View style={styles.probeSend}>
-          <Text style={styles.probeSendLabel}>보내기</Text>
-        </View>
       </View>
       {content > 0 ? (
         <View style={[styles.probeMeasure, {width: content}]}>
@@ -3894,7 +3954,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     // ---- #1422 (폰 계측): 빈 컴포저의 문장이 이 화면에서 몇 줄인가 -----------
     case 'composer-placeholder': {
       // 웹은 이 질문에 이미 답이 있다(`gate-work-panel.mjs` 가 실렌더로 잰다).
-      // 폰에는 대응물이 없었고, 예산은 웹보다 빡빡하다 — 상자는 260pt 로 더 넓은데
+      // 폰에는 대응물이 없었고, 예산은 웹보다 빡빡하다 — 상자는 260pt(알약 이전 바의 값) 로 더 넓은데
       // 글자가 16pt 라 두 단 크다(`composerCopy.ts` 의 산술).
       //
       // 그래서 **배송되는 `Composer` 를 그대로** 세 번 세운다. 이름은 코어 스위트가
@@ -3912,6 +3972,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
                 channelLabel={label}
                 directory={DIRECTORY}
                 draftKey={`measure:composer-placeholder:${label}`}
+                // + 원이 서야 입력창이 대화 화면과 **같은 칸**이다(대상이 없으면 Composer 는 + 를 안
+                // 그리고 입력창이 그만큼 넓어져 계측이 배송되지 않는 폭을 잰다).
+                attachmentTarget={{workspaceId: 'measure-ws', channelId: label}}
+                inputRef={PLACEHOLDER_INPUT_REFS[label]}
                 onSend={() => {}}
               />
               <View style={styles.gap} />
@@ -5073,6 +5137,15 @@ function WorkChatSurface({which}: {which: string}): React.JSX.Element {
   const keyboard = which === 'keyboard';
   const asking = which === 'permission';
   const off = which === 'off';
+  // #4179: 알약 상태 — 한 줄(typed) · 여러 줄(multi). 키보드는 올리지 않고 글만 심는다.
+  const draft =
+    which === 'typed'
+      ? '마지막에 린트도 돌려 줘'
+      : which === 'multi'
+        ? '1) 린트 먼저 돌려 주고\n2) 그다음 테스트를 돌려 줘\n3) 끝나면 여기에 알려 줘'
+        : keyboard
+          ? '마지막에 린트도 돌려 줘'
+          : undefined;
   const events: WorkSessionEvent[] = [
     wcEvent('e1', 1, 'agent.status', {terminal_event: 'created'}),
     wcEvent('p1', 3, 'agent.partial', {
@@ -5155,7 +5228,7 @@ function WorkChatSurface({which}: {which: string}): React.JSX.Element {
               onUndelivered={() => {}}
             />
           )}
-          initialText={keyboard ? '마지막에 린트도 돌려 줘' : undefined}
+          initialText={draft}
           autoFocus={keyboard}
         />
       </Screen>
@@ -7020,39 +7093,14 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     pressed: {backgroundColor: rowPressedBackground(color)},
     /** 두 컴포저 사이. 붙여 두면 위아래 테두리가 한 줄로 읽힌다. */
     gap: {height: 24},
-    // ---- #1422 폰 계측 ----------------------------------------------------
-    // 아래 넷은 `features/conversation/Composer.tsx` 의 `bar`·`input`·`send`·
-    // `sendLabel` 과 **같은 토큰**이다. 값을 손으로 적으면 계측이 화면이 아니라
-    // 이 파일을 재게 된다.
+    // ---- #1422 폰 계측 (#4179: 알약 이전 바 복제 — `probeBar`·`probeSlot`·`probeSend` — 는
+    // 걷었다. 폭은 배송되는 입력창을 `measure()` 로 읽는다) -------------------------------
     probe: {paddingBottom: 8},
-    probeBar: {
-      // 화면에서 빼되 **폭은 진짜로** 받는다: 절대 배치 + 좌우 0 이면 이 행은
-      // 컴포저와 같은 폭에서 같은 flex 산수를 돈다.
-      position: 'absolute',
-      left: 0,
-      right: 0,
-      opacity: 0,
-      flexDirection: 'row',
-      alignItems: 'flex-end',
-      gap: space.sm,
-      paddingHorizontal: SAFE_GUTTER,
-      paddingVertical: space.sm,
-    },
-    probeSlot: {flex: 1, minHeight: TOUCH_TARGET},
-    probeSend: {
-      minHeight: TOUCH_TARGET,
-      minWidth: 64,
-      paddingHorizontal: space.md,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    probeSendLabel: {fontSize: font.label, fontWeight: '700'},
     /** 재기만 하는 상자. 화면에 그리면 사진이 계측기의 사진이 된다. */
     probeMeasure: {position: 'absolute', opacity: 0},
     /**
-     * 헤더 표본. `probeBar` 와 같은 이유로 절대 배치 + `opacity: 0` 이고, 같은
-     * 이유로 좌우를 0 에 물린다 — 헤더 높이는 제목이 몇 줄로 감기느냐에 달렸고
-     * 그것은 폭의 함수다.
+     * 헤더 표본. 절대 배치 + `opacity: 0` 이고, 좌우를 0 에 물려 **폭을 진짜로**
+     * 받는다 — 헤더 높이는 제목이 몇 줄로 감기느냐에 달렸고 그것은 폭의 함수다.
      */
     probeHeaderSpecimen: {position: 'absolute', left: 0, right: 0, opacity: 0},
     /** 입력창의 글자 스타일 그대로 — 그래야 재는 것이 같은 글이다. */

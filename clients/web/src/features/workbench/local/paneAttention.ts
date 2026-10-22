@@ -11,6 +11,7 @@ import type { SessionStatus } from "@momo/core/features/workbench/sessionList";
 import { focusPane } from "@momo/core/features/workbench/layoutTree";
 import { isDesktop } from "@/lib/tauri";
 import { desktopNotificationKinds, type DesktopNotifyKind } from "@/features/notifications/preference";
+import { serverPauseActive } from "@/features/notifications/serverPause";
 import { osNotifier, type OsNotifyKind } from "@/features/notifications/osNotifier";
 import {
   browserLayoutStorage,
@@ -28,6 +29,7 @@ import { DOCK_SESSION_KEY, type LocalSessionView } from "./localSessions";
 //     (격자의 활성 칸이 되면) 내려간다.
 //   - 사람이 그 칸을 보고 있지 않으면 OS 알림을 한 번 띄운다. 권한이 없으면
 //     `showNotification`이 조용히 false를 돌려준다. 토스트는 없다(ADR-0182).
+//     알림 일시 중지(서버 규칙)가 켜져 있으면 OS 알림만 건너뛴다 — 인박스 줄은 그대로 오른다(#4197).
 //
 // 이 기기에만 있다. 서버 호출도 저장도 없다(ADR-0190 D2). 앱에 하나다: 도크와
 // 「내 작업」 탭이 번갈아 마운트돼도 같은 이전 판정을 보므로 알림이 두 번 뜨지 않는다.
@@ -66,6 +68,11 @@ export interface PaneAttentionDeps {
   notify: (item: { kind: OsNotifyKind; title: string; body: string; label: string }) => void;
   /** 이 기기에서 이 종류의 OS 알림이 켜져 있는가. 없으면 전부 켜짐. 인박스 줄과는 무관하다. */
   kindEnabled?: (kind: DesktopNotifyKind) => boolean;
+  /**
+   * 알림 일시 중지(서버 규칙, `serverPause.ts`)가 켜져 있는가. 없으면 꺼짐. 켜져 있으면 OS 알림만
+   * 건너뛴다 — 인박스 줄과 배지는 별개 원장이라 그대로 쌓인다(#4197, ADR-0124 D2).
+   */
+  paused?: () => boolean;
   windowFocused: () => boolean;
   now: () => number;
 }
@@ -105,6 +112,7 @@ export function createPaneAttention(deps: PaneAttentionDeps) {
         return keep;
       });
       const focused = deps.windowFocused();
+      const paused = deps.paused?.() ?? false;
       for (const t of fresh) {
         const p = byId.get(t.paneId)!;
         const inView = t.paneId === viewing;
@@ -117,7 +125,7 @@ export function createPaneAttention(deps: PaneAttentionDeps) {
         }
         const prefKind: DesktopNotifyKind = t.status === "waiting" ? "pane-waiting" : "work-mine-done";
         if (
-          shouldNotifyAttention({ windowFocused: focused, paneInView: inView }) &&
+          shouldNotifyAttention({ windowFocused: focused, paneInView: inView, paused }) &&
           (deps.kindEnabled?.(prefKind) ?? true)
         ) {
           const copy = attentionCopy(t.status, { index: p.index, name: p.name }, p.signal);
@@ -156,6 +164,7 @@ export function paneAttention(): PaneAttention {
       if (isDesktop()) osNotifier().offer(item);
     },
     kindEnabled: (kind) => desktopNotificationKinds()[kind],
+    paused: serverPauseActive,
     windowFocused: () => typeof document !== "undefined" && document.hasFocus() && document.visibilityState === "visible",
     now: () => Date.now(),
   });

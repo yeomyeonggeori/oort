@@ -160,8 +160,19 @@ const TIME = new Intl.DateTimeFormat('ko-KR', {hour: 'numeric', minute: '2-digit
 /** 입력창이 자라는 상한(줄 수). */
 const COMPOSER_MAX_ROWS = 5;
 
-/** 38pt 원을 44pt 눌림 영역까지 키우는 여백(손으로 적은 숫자가 아니라 도출). */
-const SEND_SLOP = slopTo(CONV.composerSend);
+/** 36pt 원을 44pt 눌림 영역까지 키우는 여백(손으로 적은 숫자가 아니라 도출). */
+const SEND_SLOP = slopTo(CONV.composerCircle);
+
+/**
+ * 입력 알약의 테두리. 이 알약은 대화 컴포저와 달리 유리가 아니라 선으로 서고(입력 상자의
+ * 경계가 3:1 로 보여야 한다), 선의 두께만큼 안쪽 여백이 줄어야 원이 **바깥 가장자리**에서
+ * `composerGap` 만큼 떨어진다(#4179).
+ */
+const PILL_BORDER = 1;
+
+/** 알약 위·아래 안쪽 여백 — 대화 컴포저의 `BAR_PAD_Y` 와 같은 식에서 테두리만큼 뺀다. */
+const PILL_PAD_Y =
+  CONV.composerGap - PILL_BORDER - (TOUCH_TARGET - CONV.composerCircle) / 2;
 
 // ---- 표시 -----------------------------------------------------------------------
 
@@ -509,7 +520,7 @@ function ChatComposer({
     );
   }
 
-  const maxHeight = line.body * COMPOSER_MAX_ROWS + space.sm * 2;
+  const maxHeight = line.body * COMPOSER_MAX_ROWS + CONV.composerTextInset * 2;
   return (
     <View style={styles.dock} testID="work-chat-dock">
       {gate.kind === 'closed' ? (
@@ -580,10 +591,7 @@ function ChatComposer({
           testID="work-chat-send">
           <Image
             source={CONV_ICONS.up}
-            style={[
-              styles.sendGlyph,
-              {tintColor: canSend ? palette.onPrimary : palette.textFaint},
-            ]}
+            style={[styles.sendGlyph, {tintColor: palette.onPrimary}]}
           />
         </Pressable>
       </View>
@@ -829,7 +837,7 @@ const buildStyles = (color: Palette) =>
       position: 'absolute',
       alignSelf: 'center',
       bottom: space.md,
-      minHeight: CONV.composerSend,
+      minHeight: CONV.pillHeight,
       justifyContent: 'center',
       paddingHorizontal: space.lg,
       borderRadius: ds2Radius.pill,
@@ -843,7 +851,7 @@ const buildStyles = (color: Palette) =>
       fontWeight: '600',
     },
     dock: {
-      paddingHorizontal: CONV.composerInset,
+      paddingHorizontal: CONV.workDockInset,
       paddingTop: space.sm,
       gap: space.xs,
     },
@@ -889,36 +897,41 @@ const buildStyles = (color: Palette) =>
       color: color.dangerText,
       paddingHorizontal: space.xs,
     },
+    // 대화 컴포저와 같은 자 (#4179): 반경 = 원 반경 + 사방 여백, 원은 아래 모서리와 동심.
+    // 바깥 가장자리 기준 여백 = 테두리 + 안쪽 여백이라 `PILL_BORDER` 를 뺀다. **바깥 여백은
+    // 독의 12 그대로다** — 위 안내 줄(「끼어들기」 칩)과 오른쪽 끝이 맞아야 하고, 이 줄은 한
+    // 줄 안내 문장 때문에 더 좁힐 수 없다(대화 컴포저의 `composerFloat` 는 여기 안 쓴다).
     pill: {
       flexDirection: 'row',
       alignItems: 'flex-end',
-      gap: space.sm,
-      minHeight: TOUCH_TARGET,
-      paddingLeft: space.md,
-      paddingRight: (TOUCH_TARGET - CONV.composerSend) / 2,
-      paddingVertical: (TOUCH_TARGET - CONV.composerSend) / 2,
-      borderRadius: ds2Radius.composer,
-      borderWidth: 1,
+      gap: CONV.composerTextInset,
+      paddingLeft: CONV.composerGap + CONV.composerTextInset - PILL_BORDER,
+      paddingRight: CONV.composerGap - PILL_BORDER,
+      paddingVertical: PILL_PAD_Y,
+      borderRadius: CONV.composerRadius,
+      borderWidth: PILL_BORDER,
       borderColor: color.textFaint,
       backgroundColor: color.surface,
     },
     input: {
       flex: 1,
-      minHeight: CONV.composerSend,
-      paddingVertical: space.sm,
+      minHeight: TOUCH_TARGET,
+      paddingVertical: CONV.composerTextInset,
       fontSize: font.body,
       lineHeight: line.body,
       color: color.text,
     },
     send: {
-      width: CONV.composerSend,
-      height: CONV.composerSend,
-      borderRadius: CONV.composerSend / 2,
+      width: CONV.composerCircle,
+      height: CONV.composerCircle,
+      marginBottom: (TOUCH_TARGET - CONV.composerCircle) / 2,
+      borderRadius: CONV.composerCircle / 2,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: color.primary,
     },
     sendGlyph: {width: CONV_ICON_SIZE.up, height: CONV_ICON_SIZE.up},
-    sendDisabled: {backgroundColor: color.surfaceMuted},
+    // 대화 컴포저와 같은 흐린 원 — 잉크를 벗고 중간 회색(알약 위 3.6:1), 글리프는 잉크 때 색.
+    sendDisabled: {backgroundColor: color.textFaint},
     sendPressed: {opacity: 0.8},
   });

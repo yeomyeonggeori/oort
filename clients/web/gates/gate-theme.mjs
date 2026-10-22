@@ -22,6 +22,13 @@
 //      고정하면 다크 앱 위에 라이트 주소창이 남는다(홈 화면 앱에서 크게 보인다).
 //   ⑤ 시스템으로 되돌리기. 스탬프가 사라지고 배경이 OS 쪽으로 돌아와야 한다.
 //      한쪽으로만 가는 스위치는 스위치가 아니다.
+//   ⑥ 외양 v2 (AP-1a #4186). ③과 같은 방법(번들을 붙잡고 첫 문서를 읽는다)으로 셋을 잰다.
+//      · v2 레코드의 아홉 속성(+ 옛 data-accent)이 번들보다 먼저 찍힌다(data-glass는 일부러 없다).
+//      · 부트 캐시(momo.web.theme.cache.v1)는 파생 테마(catalog:·user:)의 것이다. 파생 테마의
+//        캐시가 있으면 변수가 첫 페인트에 이미 꽂혀 있고(앱이 올라온 뒤에도 그대로: 걷는 것은
+//        엔진의 몫), 첫 파티 팔레트는 캐시가 있어도 첫 페인트에 꽂지 않고 앱이 올라오면 낡은
+//        항목을 걷는다(잔존 0).
+//      · 캐시가 없으면 아무 변수도 없이 기본 테마로 서고 앱은 깨지지 않는다.
 //
 // 서버는 라우트 층에서 스텁된다(gate-ailink 전례). 이 게이트가 재는 것은 번들이
 // 그리는 화면과 그것이 브라우저 저장소에 남기는 것뿐이라, 살아 있는 스택이 필요
@@ -36,9 +43,12 @@
 //     무너져야 한다. 통과한다면 그 단언은 첫 페인트가 아니라 아무거나 재고 있었던
 //     것이다.
 //   THEME_GATE_PROVE_RED_PERSIST=1 npm run gate:theme
-//     테마 키에 대한 localStorage.setItem만 무력화한다. 화면은 즉시 바뀌지만 저장이
+//     테마 키(v2 레코드)에 대한 localStorage.setItem만 무력화한다. 화면은 즉시 바뀌지만 저장이
 //     없으므로 ②가 무너져야 한다.
-// 두 씨앗 모두 환경 변수 전용이고, 기본 실행은 손대지 않은 번들을 읽는다.
+//   THEME_GATE_PROVE_RED_CACHE=1 npm run gate:theme
+//     ⑥의 「캐시가 있으면」 장면에서 캐시 항목만 비운다. 첫 페인트에 꽂힐 변수가 사라지므로 그
+//     단언이 무너져야 한다. 통과한다면 그 단언은 캐시가 아니라 아무거나 재고 있었던 것이다.
+// 세 씨앗 모두 환경 변수 전용이고, 기본 실행은 손대지 않은 번들을 읽는다.
 //
 // LIMIT: Chromium against Vite preview, WKWebView도 iOS 사파리도 아니다. 여기서
 // 재는 것은 전부 번들 자바스크립트와 CSS의 성질이고 두 곳에서 동일하지만, 홈 화면
@@ -64,6 +74,12 @@ const outDir = process.env.OUT_DIR
   : resolve(webRoot, "artifacts/design");
 const proveRedBoot = process.env.THEME_GATE_PROVE_RED_BOOT === "1";
 const proveRedPersist = process.env.THEME_GATE_PROVE_RED_PERSIST === "1";
+const proveRedCache = process.env.THEME_GATE_PROVE_RED_CACHE === "1";
+
+// 저장 항목 이름: core appearance.ts · themeCache.ts의 상수와 같다(게이트는 번들 밖이라 문자열로 적는다).
+const V2_ENTRY = "momo.web.appearance.v2";
+const V1_ENTRY = "momo.web.appearance.v1";
+const CACHE_ENTRY = "momo.web.theme.cache.v1";
 
 const workspaceId = "00000000-0000-7000-8000-000000000001";
 const memberId = "019f94e3-7a10-79cd-9dee-208f47edd9a8";
@@ -173,6 +189,66 @@ function themeColorsOf(page) {
   );
 }
 
+/** 번들이 오기 전(React 미렌더)과 번들이 올라온 뒤에 같은 문서를 읽는다. 둘 다 이 함수가 serialize 한다. */
+function readDocument() {
+  const root = document.documentElement;
+  const vars = {};
+  for (let i = 0; i < root.style.length; i++) {
+    const name = root.style.item(i);
+    vars[name] = root.style.getPropertyValue(name);
+  }
+  return {
+    rendered: (document.getElementById("root")?.childElementCount ?? -1) > 0,
+    attrs: Object.fromEntries([...root.attributes].map((a) => [a.name, a.value])),
+    vars,
+    cache: localStorage.getItem("momo.web.theme.cache.v1"),
+  };
+}
+
+async function firstPaintFacts(browser, seeds, { colorScheme = "light" } = {}) {
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 900 },
+    reducedMotion: "reduce",
+    colorScheme,
+  });
+  try {
+    await installRoutes(context);
+    await context.addInitScript((entries) => {
+      for (const [name, value] of entries) localStorage.setItem(name, value);
+    }, Object.entries(seeds));
+    const page = await context.newPage();
+    const held = [];
+    await page.route("**/assets/*.js", async (route) => {
+      held.push(route);
+    });
+    await page.goto(origin, { waitUntil: "commit" });
+    await page.waitForFunction(() => document.getElementById("root") !== null, undefined, { timeout: 5_000 });
+    const early = await page.evaluate(readDocument);
+    await page.unroute("**/assets/*.js");
+    for (const route of held) await route.continue().catch(() => {});
+    await page.waitForFunction(
+      () => (document.getElementById("root")?.childElementCount ?? 0) > 0,
+      undefined,
+      { timeout: 20_000 }
+    );
+    const late = await page.evaluate(readDocument);
+    return { early, late };
+  } finally {
+    await context.close();
+  }
+}
+
+function v2Record(over = {}) {
+  return JSON.stringify({
+    v: 2,
+    scheme: "system",
+    theme: "dawnsky",
+    signal: null,
+    density: "comfortable",
+    ...over,
+  });
+}
+
 async function signIn(page) {
   await advanceToAccount(page);
   await page.getByTestId("login-email").fill("theme@example.test");
@@ -223,7 +299,7 @@ async function main() {
         await context.addInitScript(() => {
           const original = Storage.prototype.setItem;
           Storage.prototype.setItem = function (key, value) {
-            if (key === "momo.web.appearance.v1") return;
+            if (key === "momo.web.appearance.v2") return;
             return original.call(this, key, value);
           };
         });
@@ -297,7 +373,7 @@ async function main() {
       if ((await stampOf(page)) !== "light") {
         fail(
           "새로고침하니 고정이 풀렸다. 이 선택은 localStorage " +
-            "(momo.web.appearance.v1)에 남아야 한다."
+            "(momo.web.appearance.v2)에 남아야 한다."
         );
       }
       if (await surfaceOf(page) !== pinnedLight) {
@@ -406,6 +482,138 @@ async function main() {
       }
       await accentOs.close();
 
+      // ---- ⑥ 외양 v2: 아홉 속성 · 부트 캐시 -----------------------------------------
+      const full = await firstPaintFacts(
+        browser,
+        {
+          [V2_ENTRY]: v2Record({
+            scheme: "dark",
+            theme: "graphite",
+            signal: { preset: "seongun" },
+            density: "compact",
+            fontSize: "larger",
+            threadLayout: "focus",
+            prominentActive: true,
+            wallpaper: { kind: "preset", id: "bam" },
+            glass: { on: true, opacity: 80 },
+          }),
+        },
+        { colorScheme: "light" }
+      );
+      if (full.early.rendered) {
+        fail("v2 첫 페인트 창에서 앱이 이미 그려졌다. 이 창에서는 FOUC를 볼 수 없다.");
+      }
+      const expectedAttrs = {
+        "data-theme": "dark",
+        "data-palette": "graphite",
+        "data-theme-ref": "graphite",
+        "data-signal": "seongun",
+        "data-accent": "seongun",
+        "data-density": "compact",
+        "data-font-size": "larger",
+        "data-thread-layout": "focus",
+        "data-prominent-active": "",
+        "data-wallpaper": "preset",
+      };
+      for (const [name, value] of Object.entries(expectedAttrs)) {
+        if (full.early.attrs[name] !== value) {
+          fail(
+            `번들이 도착하기 전의 문서에 ${name}=${JSON.stringify(full.early.attrs[name])}다 ` +
+              `(v2 시드는 ${JSON.stringify(value)}). 아홉 속성은 defer가 아닌 /theme-boot.js가 붙여야 한다.`
+          );
+        }
+      }
+      if ("data-glass" in full.early.attrs || "data-glass" in full.late.attrs) {
+        fail(
+          "data-glass가 찍혔다. 저장소와 부트는 이 속성을 찍지 않는다: 네이티브 vibrancy가 선 " +
+            "뒤에 켜는 것은 AP-3의 몫이다(planner 결정 2026-10-22)."
+        );
+      }
+      for (const [name, value] of Object.entries(expectedAttrs)) {
+        if (full.late.attrs[name] !== value) {
+          fail(`앱이 올라온 뒤 ${name}=${JSON.stringify(full.late.attrs[name])}다(부트가 찍은 ${JSON.stringify(value)}와 어긋남)`);
+        }
+      }
+
+      const INK = "light-dark(#16171b, #f1f1f3)";
+      const DERIVED = "catalog:nord";
+      const cacheOf = (theme) => JSON.stringify({ key: `1|${theme}|-`, vars: { "--ink": INK } });
+
+      // ① 파생 테마 + 캐시가 있다. red proof(THEME_GATE_PROVE_RED_CACHE)는 이 항목만 비운다.
+      const withCache = await firstPaintFacts(browser, {
+        [V2_ENTRY]: v2Record({ theme: DERIVED }),
+        ...(proveRedCache ? {} : { [CACHE_ENTRY]: cacheOf(DERIVED) }),
+      });
+      if (withCache.early.rendered) {
+        fail("캐시 첫 페인트 창에서 앱이 이미 그려졌다. 이 창에서는 FOUC를 볼 수 없다.");
+      }
+      if (withCache.early.attrs["data-palette"] !== "derived") {
+        fail(`파생 테마(${DERIVED}) 레코드의 첫 문서에 data-palette=${JSON.stringify(withCache.early.attrs["data-palette"])}다(derived여야 한다)`);
+      }
+      if (withCache.early.vars["--ink"] !== INK) {
+        fail(
+          `번들이 도착하기 전의 문서에 캐시 변수가 없다(--ink=${JSON.stringify(withCache.early.vars["--ink"])}). ` +
+            `파생 테마의 캐시가 있으면 /theme-boot.js가 첫 렌더 전에 setProperty로 되꽂아야 한다.`
+        );
+      }
+      if (withCache.late.vars["--ink"] !== INK || withCache.late.cache === null) {
+        fail(
+          `파생 팔레트인데 앱이 올라온 뒤 캐시 변수(${JSON.stringify(withCache.late.vars["--ink"])})나 항목이 걷혔다. ` +
+            `파생 엔진(AP-1b)이 인수하기 전까지 저장소는 파생 팔레트의 캐시를 건드리지 않는다.`
+        );
+      }
+
+      // ② 첫 파티 레코드: 키가 맞는 캐시가 있어도 첫 페인트에 꽂지 않고, 앱이 올라오면 낡은 항목을 걷는다.
+      const firstParty = await firstPaintFacts(browser, {
+        [V2_ENTRY]: v2Record(),
+        [CACHE_ENTRY]: cacheOf("dawnsky"),
+      });
+      if (firstParty.early.vars["--ink"] !== undefined) {
+        fail(
+          "첫 파티 팔레트(dawnsky) 문서의 첫 페인트에 캐시 변수가 꽂혔다. 정적 CSS가 색을 주는 첫 파티는 " +
+            "캐시를 쓰지 않는다(첫 프레임에 캐시 색이 섰다가 걷히는 번쩍임이 생긴다)."
+        );
+      }
+      if (firstParty.late.cache !== null || firstParty.late.vars["--ink"] !== undefined) {
+        fail("첫 파티 팔레트인데 앱이 올라온 뒤에도 낡은 캐시 항목이나 인라인 변수가 남았다(잔존 0).");
+      }
+
+      // ③ 캐시가 없다(파생·첫 파티 둘 다): 변수 없이 기본 테마로 서고 앱은 깨지지 않는다.
+      for (const theme of ["dawnsky", DERIVED]) {
+        const noCache = await firstPaintFacts(browser, { [V2_ENTRY]: v2Record({ theme }) });
+        if (Object.keys(noCache.early.vars).length !== 0) {
+          fail(`캐시가 없는데(${theme}) 첫 문서에 인라인 변수가 있다(${JSON.stringify(noCache.early.vars)})`);
+        }
+        if (!noCache.late.rendered || noCache.late.attrs["data-theme-ref"] !== theme) {
+          fail(`캐시가 없을 때(${theme}) 앱이 올라오지 못했거나 테마 참조가 유지되지 않았다`);
+        }
+      }
+
+      // ④ 다른 테마의 캐시는 파생 테마 문서의 첫 페인트에도 얹지 않는다(키가 맞지 않는다).
+      const stale = await firstPaintFacts(browser, {
+        [V2_ENTRY]: v2Record({ theme: DERIVED }),
+        [CACHE_ENTRY]: cacheOf("catalog:dracula"),
+      });
+      if (stale.early.vars["--ink"] !== undefined) {
+        fail("키가 맞지 않는 캐시(catalog:dracula)가 catalog:nord 문서의 첫 페인트에 꽂혔다");
+      }
+
+      // v1만 있는 사람: 속성도 글꼴도 v2와 같은 규칙으로 선다(이행).
+      const legacy = await firstPaintFacts(browser, {
+        [V1_ENTRY]: JSON.stringify({ scheme: "dark", accent: "gamram", fontSans: "Pretendard" }),
+      });
+      if (
+        legacy.early.attrs["data-theme"] !== "dark" ||
+        legacy.early.attrs["data-signal"] !== "gamram" ||
+        legacy.early.attrs["data-accent"] !== "gamram" ||
+        legacy.early.vars["--font-user-sans"] !== '"Pretendard", var(--font-sans)'
+      ) {
+        fail(
+          `v1 레코드가 v2 규칙으로 이행되어 찍히지 않았다(${JSON.stringify(legacy.early.attrs)} ` +
+            `${JSON.stringify(legacy.early.vars)})`
+        );
+      }
+
       await page.waitForSelector("nav[aria-label='워크스페이스 탐색']");
       await openThemePanel(page);
 
@@ -479,6 +687,8 @@ async function main() {
           `  라이트 고정 배경       ${pinnedLight}`,
           `  첫 페인트 스탬프       ${early.stamp} (React 미렌더 상태에서 측정)`,
           `  첫 페인트 액센트       ${earlyAccent.accent} (시드 ${accentId}, 미렌더)`,
+          `  첫 페인트 v2 속성      ${Object.keys(expectedAttrs).length}개 (아홉 + 옛 data-accent, data-glass 없음, 미렌더)`,
+          `  부트 캐시              파생 테마: 첫 페인트에 --ink 꽂힘 · 첫 파티: 안 꽂고 앱 뒤 항목 걷힘 · 없으면 기본 테마`,
           `  캡처                   ${systemShot}`,
           `                         ${lightShot}`,
           `                         ${darkShot}`,

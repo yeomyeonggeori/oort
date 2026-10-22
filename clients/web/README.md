@@ -246,6 +246,20 @@ how to show a banner, and this decides when one is worth showing.
   `Channel.muted`), an edit of a message that already had its chance, a repeat of
   something already announced, and a burst replayed by a reconnect (judged on
   `hlc_ts`, since the broadcast envelope carries no `created_at_ms`).
+- **The member's own 알림 일시 중지 stops the message banners and the local pane
+  notices (#4197).** The phone push is held back by the server for that rule
+  (`notification_rule.dnd`), so this device reads the server's answer instead of
+  deciding alone: `useServerPause` keeps it in the same query-cache slot that
+  settings and the sidebar line use, `notifyDecision` receives it as `paused`, and
+  the local pane notices read the same value. Expiry is the server's call: once a
+  deadline passes the hook asks again and never releases the pause by this
+  device's clock. A pause set on another device reaches this one within a minute
+  (`SERVER_PAUSE_POLL_MS`): the rule has no event, and a window in the background
+  gets no focus re-read. Badges and the inbox are a separate ledger and do not change.
+  Two other banner paths do **not** read the pause yet and still show during one:
+  the due-reminder banner (`reminders/dueNotify.ts`) and the work-host
+  registration notice (`WorkHostNotices.tsx`, a security notice, ADR-0188 D2).
+  `serverPause.ts` keeps the list of who reads it and who does not, with the reasons.
 - **Copy is thin on purpose.** Sender as the title, one truncated line as the
   body. Fenced and inline code is replaced rather than quoted, and a short list of
   secret-shaped tokens (bearer, JWT, `sk-`, `gh*_`, `xox*-`, `AKIA`) is redacted:
