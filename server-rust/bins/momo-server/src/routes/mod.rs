@@ -82,6 +82,8 @@ pub mod reattach;
 /// ADR-0175 / #1888 — personal message reminders (human-only, no outbox).
 pub mod reminders;
 pub mod roster;
+/// ADR-0208 / #4214 — scheduled messages (human-only, owner-scoped, outbox event on every change).
+pub mod scheduled_messages;
 pub mod search;
 /// #1873 — BZ-4e self display-name rename (`PATCH …/members/me`).
 pub mod self_profile;

@@ -347,7 +347,7 @@ fn harness_refine(
 /// attachment in another tenant is invisible under RLS and lands in the same
 /// branch, so a more specific answer would confirm the existence of rows the
 /// caller may not see.
-fn attachment_link_rejection(rejected: AttachmentLinkRejected) -> ApiError {
+pub(crate) fn attachment_link_rejection(rejected: AttachmentLinkRejected) -> ApiError {
     let message = rejected.to_string();
     match rejected {
         AttachmentLinkRejected::Duplicate | AttachmentLinkRejected::TooMany => {
@@ -423,7 +423,7 @@ fn delivery_refusal(refusal: DeliverRefusal) -> ApiError {
 /// `ready`, the selector opens, and a send made through it works — which is why
 /// there is no ordering left to encode here: the verdict is now a consequence of
 /// where validation runs, not of a hand-written sequence.
-fn thread_root_rejection(invalid: ThreadRootInvalid) -> ApiError {
+pub(crate) fn thread_root_rejection(invalid: ThreadRootInvalid) -> ApiError {
     match invalid {
         ThreadRootInvalid::NotFound => ApiError::not_found(invalid.to_string()),
         ThreadRootInvalid::Deleted | ThreadRootInvalid::NotTopLevel => {

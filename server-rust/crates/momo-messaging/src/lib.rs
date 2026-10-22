@@ -68,11 +68,15 @@ pub mod memory;
 pub mod message;
 pub mod name_guard;
 pub mod notification_rule;
+/// ADR-0208 — the owner-scope GUC (`app.member_id`) binders, shared by reminders and scheduled messages.
+pub mod owner_scope;
 pub mod presence;
 pub mod read_state;
 pub mod refine;
 /// ADR-0175 / #1888 — personal message reminders (no outbox fan-out).
 pub mod reminder;
+/// ADR-0208 / #4214 — scheduled messages: every `scheduled_message` statement (owner-scoped FORCE RLS).
+pub mod scheduled;
 pub mod search;
 /// ADR-0177 / #1932 — member-owned sidebar sections (no outbox fan-out).
 pub mod sidebar_prefs;
@@ -202,6 +206,7 @@ pub use notification_rule::{
     patch_push_kinds_in_tx, pause_in_force, set_notification_rule_in_tx, NotificationRule,
     NotificationRulePatch, NotificationRuleUpdate, PushKinds, PushKindsPatch,
 };
+pub use owner_scope::{bind_owner_guc, clear_owner_guc, current_owner_guc};
 pub use presence::{
     build_presence_payload, declared_presence_for, decode_optional_presence, effective_presence,
     normalize_status_emoji, normalize_status_text, presence_status_for,
@@ -229,6 +234,23 @@ pub use reminder::{
     snooze_reminder_in_tx, MessageReminder, ReminderDueInvalid, ReminderListState,
     ReminderNoteInvalid, ReminderStateInvalid, ReminderTarget, REMINDER_LIST_LIMIT_DEFAULT,
     REMINDER_LIST_LIMIT_MAX, REMINDER_NOTE_MAX_CHARS,
+};
+pub use scheduled::{
+    backoff_seconds, begin_attempt_in_tx, cancel_member_schedules_in_tx, cancel_schedule_in_tx,
+    clamp_schedule_list_limit, count_pending_in_tx, db_now_in_tx, due_schedules,
+    edit_failed_body_in_tx, edit_pending_in_tx, expired_schedules, find_schedule_by_request_in_tx,
+    get_own_schedule_in_tx, hold_lineage_schedules_in_tx, hold_member_schedules_in_tx,
+    insert_schedule_in_tx, is_edit_locked, list_own_schedules_in_tx, lock_attempt_for_send_in_tx,
+    lock_due_for_decision_in_tx, lock_member_schedules_in_tx, lock_own_schedule_in_tx,
+    mark_failed_in_tx, mark_sent_in_tx, purge_expired_schedule_in_tx, rearm_failed_in_tx,
+    record_created_in_tx, record_transition_in_tx, reserve_attachments_in_tx,
+    reserved_attachment_ids_in_tx, schedule_attachments_in_tx, schedule_event_payload,
+    validate_send_at, DueDecision, HeldSchedules, NewSchedule, ReserveRejected, ScheduleActor,
+    ScheduleAudit, ScheduleFailure, ScheduleFilterInvalid, ScheduleListFilter, ScheduleRef,
+    ScheduledMessage, ScheduledStatus, SendAtInvalid, SCHEDULE_ATTACHMENT_LIMIT,
+    SCHEDULE_DONE_RETENTION_DAYS, SCHEDULE_EDIT_LOCK_SECONDS, SCHEDULE_EVENT_TYPE,
+    SCHEDULE_FAILED_RETENTION_DAYS, SCHEDULE_LIST_LIMIT_DEFAULT, SCHEDULE_LIST_LIMIT_MAX,
+    SCHEDULE_MAX_LEAD_DAYS, SCHEDULE_MIN_LEAD_SECONDS, SCHEDULE_PENDING_LIMIT,
 };
 pub use search::{
     clamp_search_limit, decode_search_cursor, encode_search_cursor, literal_like_pattern,
