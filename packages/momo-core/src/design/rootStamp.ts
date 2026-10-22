@@ -39,7 +39,7 @@ import {
   type AppearanceV2,
   type SignalChoice,
 } from "./appearance";
-import { isSignalPresetId, type SignalPresetId } from "./signal";
+import { isSignalPresetId, type SignalPresetId } from "./signalIds";
 import { effectiveScheme, modesOf, paletteOf, type ModeSet, type ThemeRef } from "./themeResolve";
 import type { Mode } from "./themes";
 

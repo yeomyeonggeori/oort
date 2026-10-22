@@ -14,6 +14,7 @@ import { releaseAfter, SESSION_HYDRATE_BUDGET_MS } from "@/app/boot";
 import { trackViewportHeight } from "@/app/viewportHeight";
 import { initFocusModality } from "@/design/focusModality";
 import { initTheme } from "@/design/theme";
+import { startDerivedTheme } from "@/design/themes/applyDerived";
 import { installDesktopDropGuard } from "@/lib/desktopDropGuard";
 import { installDesktopEffects } from "@/features/settings/appearance/desktopEffects";
 import { IS_TAURI } from "@/lib/env";
@@ -29,6 +30,9 @@ trackViewportHeight();
 // 없다. 이 줄이 지키는 것은 그 스크립트가 오지 못한 경우(오프라인 콜드 스타트)와
 // 모듈이 가진 선택이 문서와 어긋나지 않는다는 사실이다.
 initTheme();
+// 카탈로그·사용자 테마는 정적 CSS가 없어 변수를 루트에 꽂아야 서고, 그 길은 저장소 구독이다(AP-1b #4188).
+// 엔진은 지연 로드라 첫 페인트는 부트 캐시가 맡는다(`public/theme-boot.js`).
+startDerivedTheme();
 initFocusModality(document);
 
 // 데스크탑 셸만 (#2671). 셸이 끌기를 WebKit에 넘기므로(`dragDropEnabled: false`),

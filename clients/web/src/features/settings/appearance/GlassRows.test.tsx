@@ -301,14 +301,16 @@ describe("쓸 수 없는 테마 (AC 4)", () => {
     expect(nativeCalls).toEqual([]);
   });
 
+  // 합성 원천을 주입하는 시험의 참조는 카탈로그에 실제로 있는 id를 쓴다(`min`·`vitesse`): 외양 저장소의 `normalizeThemeRef`가 카탈로그 멤버십을
+  // 보고(AP-1b #4188) 없는 `catalog:` 참조는 새벽하늘로 되돌리기 때문이다. 원천은 `mount({ catalog })`가 주입하니 그 id의 실제 색은 쓰이지 않는다.
   it("하한이 95%인 테마는 쓸 수 있고 슬라이더는 한 점이라 잠긴다(경계)", async () => {
     const edge: GlassSource = {
       canvas: [fromChannels(0xf0, 0xf0, 0xf0), fromChannels(0xf0, 0xf0, 0xf0), fromChannels(0xf0, 0xf0, 0xf0)],
       band: null,
       color: { ...THEMES.graphite.light.color, ink: fromChannels(0x49, 0x49, 0x49) },
     };
-    updateAppearance({ scheme: "light", theme: "catalog:edge" as ThemeRef, glass: { on: true } });
-    mount({ catalog: { "catalog:edge": { light: edge, dark: edge } } });
+    updateAppearance({ scheme: "light", theme: "catalog:min" as ThemeRef, glass: { on: true } });
+    mount({ catalog: { "catalog:min": { light: edge, dark: edge } } });
     await settled();
     expect(toggle().disabled).toBe(false);
     expect(toggle().getAttribute("aria-checked")).toBe("true");
@@ -326,8 +328,8 @@ describe("쓸 수 없는 테마 (AC 4)", () => {
       band: null,
       color: { ...THEMES.graphite.light.color, ink: fromChannels(0x4a, 0x4a, 0x4a) },
     };
-    updateAppearance({ scheme: "light", theme: "catalog:over" as ThemeRef, glass: { on: true } });
-    mount({ catalog: { "catalog:over": { light: over, dark: over } } });
+    updateAppearance({ scheme: "light", theme: "catalog:vitesse" as ThemeRef, glass: { on: true } });
+    mount({ catalog: { "catalog:vitesse": { light: over, dark: over } } });
     await settled();
     expect(toggle().disabled).toBe(true);
     expect(text("glass-background-row")).toContain(GLASS_COPY.unusable);
