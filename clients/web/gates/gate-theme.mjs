@@ -34,6 +34,7 @@
 //      청크)이 있으므로 **폐곡선**을 잰다: 엔진이 쓴 캐시를 부트가 그대로 되꽂는다.
 //      · 갤러리로 카탈로그 테마를 고르면 전 화면이 그 테마로 바뀐다(루트 변수 전부, 본문 바닥색, `meta theme-color`),
 //        새로고침 뒤에도 남고, 첫 파티를 고르면 자기가 꽂은 변수가 하나도 안 남고 캐시 항목이 걷힌다(잔존 0).
+//        캐시를 못 쓰는 환경(쓰기를 막는다)에서도 잔존 0이다: 그 길은 저장소의 정리가 아니라 적용기의 정리만이 지킨다.
 //      · 캐시 없이 다크 단독 테마(`catalog:nord`)로 첫 방문 → 엔진이 변수·캐시(`mode: "dark"`)를 쓴다 → 같은
 //        저장소로 JS를 붙잡고 재방문하면 **React가 그리기 전에** 엔진이 쓴 변수 전부가 꽂혀 있고 `data-theme`가
 //        OS(라이트)와 무관하게 다크로 못 박혀 있다. 캐시가 없는 첫 방문의 한 프레임(기본 모습)은 허용된 어긋남이라
@@ -888,6 +889,51 @@ async function main() {
           fail(`첫 파티로 돌아왔는데 theme-color ${meta.media}가 파생 바닥색(${derivedCanvas})에 묶여 있다`);
         }
       }
+
+      // ⑦a2 캐시를 못 쓰는 환경(프라이빗 모드·저장소 정책). 저장소의 정리(`retireThemeCache`)는 **캐시 항목이 이름 붙인**
+      // 변수를 걷으므로 캐시가 없으면 일하지 못한다. 그때는 적용기가 꽂을 때 적어 둔 이름만으로 자기 변수를 전부 걷어야 한다
+      // (잔존 0의 두 번째 방어선). 위 ⑦a는 캐시가 쓰이는 환경이라 두 정리가 겹쳐서, 적용기의 정리가 깨져도 통과한다.
+      await page.evaluate(() => {
+        const original = Storage.prototype.setItem;
+        window.__momoOriginalSetItem = original;
+        Storage.prototype.setItem = function (key, value) {
+          if (key === "momo.web.theme.cache.v1") throw new Error("denied");
+          return original.call(this, key, value);
+        };
+      });
+      await page.locator('label.theme-tile:has(input[value="catalog:github"])').click();
+      await page
+        .waitForFunction(
+          (names) =>
+            document.documentElement.getAttribute("data-theme-ref") === "catalog:github" &&
+            names.every((name) => document.documentElement.style.getPropertyValue(name) !== ""),
+          MUST_HAVE_VARS,
+          { timeout: 20_000 }
+        )
+        .catch(() => fail("캐시 쓰기를 막은 환경에서 GitHub를 골랐는데 파생 변수가 서지 않았다(캐시 없이도 엔진은 변수를 꽂아야 한다)"));
+      if ((await page.evaluate(() => localStorage.getItem("momo.web.theme.cache.v1"))) !== null) {
+        fail("캐시 쓰기를 막았는데 캐시 항목이 있다. 이 장면의 전제(캐시 없음)가 성립하지 않는다.");
+      }
+      await page.locator('label.theme-tile:has(input[value="dawnsky"])').click();
+      await page
+        .waitForFunction(() => document.documentElement.getAttribute("data-theme-ref") === "dawnsky", undefined, {
+          timeout: 5_000,
+        })
+        .catch(() => fail("캐시 쓰기를 막은 환경에서 새벽하늘을 골랐는데 테마 참조가 바뀌지 않았다"));
+      const leftWithoutCache = await page.evaluate(
+        (names) => names.filter((name) => document.documentElement.style.getPropertyValue(name) !== ""),
+        MUST_HAVE_VARS
+      );
+      if (leftWithoutCache.length !== 0) {
+        fail(
+          `캐시를 못 쓰는 환경에서 첫 파티로 돌아왔는데 파생 변수가 남았다(${JSON.stringify(leftWithoutCache)}). ` +
+            `저장소의 정리는 캐시 항목이 있어야 일하므로, 적용기가 꽂을 때 적어 둔 이름으로 스스로 걷어야 한다.`
+        );
+      }
+      await page.evaluate(() => {
+        Storage.prototype.setItem = window.__momoOriginalSetItem;
+        delete window.__momoOriginalSetItem;
+      });
 
       // ---- ⑤ 시스템으로 되돌아온다 ------------------------------------------
       await choose(page, "system");
