@@ -252,6 +252,9 @@ async function measureFacts(page) {
       facts.bodyFontPx = px(cs.fontSize);
       facts.bodyLineHeightPx = px(cs.lineHeight);
     }
+    // 채널 머리의 키: 대화 밀도가 닿으면 안 되는 자리다(폰 폭에서 py-row로 45px를 맞추던 자리).
+    const head = document.querySelector('[data-testid="channel-header"]');
+    if (head) facts.channelHeadPx = Math.round(head.getBoundingClientRect().height * 100) / 100;
     // 아바타 한 변(타임라인 행).
     const avatar = document.querySelector('[data-testid="row-avatar"]');
     if (avatar) facts.avatarPx = [rect(avatar).width, rect(avatar).height];
@@ -548,6 +551,109 @@ async function diff() {
   }
 }
 
+// ---- 결합 점검: 대화 밀도가 닿으면 안 되는 자리(채널 머리·컴포저 자동완성 목록)의 키가 단계마다 같은가 ------
+//   MODE=coupling LABEL=coupling DIST=dist node scripts/capture-4189.mjs
+// 슬래시 명령 목록(`CommandList`)의 행이 `py-row`를 쓰는 자리다. 「@」 목록은 다른 렌더러라 이 값을 읽지 않는다.
+async function autocompleteFacts(page) {
+  const input = page.getByTestId("composer-input");
+  await input.click();
+  await input.fill("/");
+  await page.waitForSelector('[data-testid="composer-command-option"]', { timeout: 6_000 }).catch(() => null);
+  await page.waitForTimeout(200);
+  const facts = await page.evaluate(() => {
+    const options = [...document.querySelectorAll('[data-testid="composer-command-option"]')];
+    const heights = options.map((o) => Math.round(o.getBoundingClientRect().height * 100) / 100);
+    const label = document.querySelector('[data-testid="composer-command-list-panel"] p');
+    return {
+      count: options.length,
+      optionPx: heights[0] ?? null,
+      allSame: heights.every((h) => h === heights[0]),
+      labelPx: label ? Math.round(label.getBoundingClientRect().height * 100) / 100 : null,
+    };
+  });
+  await input.fill("");
+  return facts;
+}
+
+// AI 계정 카드(타임라인 꼬리 행)는 메시지 행의 아바타 거터와 같은 자리를 비워 본문 열에 선다. 거터 폭이 밀도를 따르므로
+// 카드의 왼쪽 가장자리도 본문 열과 같아야 한다(손으로 쓴 w-8이면 compact·spacious에서 4px 어긋난다).
+async function cardAlignmentFacts(page) {
+  const input = page.getByTestId("composer-input");
+  await input.click();
+  await input.fill("/ai");
+  await page.waitForSelector('[data-testid="composer-command-option"]', { timeout: 6_000 }).catch(() => null);
+  await page.keyboard.press("Enter");
+  await page.waitForSelector('[data-testid="ai-connect-card"]', { timeout: 8_000 }).catch(() => null);
+  await page.waitForTimeout(500);
+  return page.evaluate(() => {
+    const card = document.querySelector('[data-testid="ai-connect-card"] .ai-card');
+    const body = [...document.querySelectorAll("[data-row-body]")].at(-1);
+    if (!card || !body) return { opened: Boolean(card), cardLeftPx: null, bodyLeftPx: null, delta: null };
+    const cardLeft = card.getBoundingClientRect().left;
+    const bodyLeft = body.getBoundingClientRect().left;
+    return {
+      opened: true,
+      cardLeftPx: Math.round(cardLeft * 100) / 100,
+      bodyLeftPx: Math.round(bodyLeft * 100) / 100,
+      delta: Math.round((cardLeft - bodyLeft) * 100) / 100,
+    };
+  });
+}
+
+async function coupling() {
+  const distDir = resolve(WEB_ROOT, DIST);
+  if (!existsSync(resolve(distDir, "index.html"))) throw new Error(`${distDir}/index.html 이 없다. 먼저 빌드한다.`);
+  mkdirSync(outDir(), { recursive: true });
+  const preview = await startGuardedPreview({
+    webRoot: WEB_ROOT,
+    port: PORT,
+    portEnvVar: "CAPTURE_PORT",
+    extraArgs: ["--outDir", distDir],
+  });
+  const browser = await ENGINE.launch();
+  const rows = [];
+  try {
+    for (const viewport of [V1440, V390]) {
+      for (const density of ["compact", "comfortable", "spacious"]) {
+        const { context, page } = await openContext(browser, preview.origin, "light", viewport, appearanceRecord("light", "default", density));
+        try {
+          await page.evaluate((id) => { location.hash = `/c/${id}`; }, CH);
+          await page.getByText("이번 주 일정 정리해 줘").first().waitFor({ timeout: 15_000 });
+          await page.waitForTimeout(500);
+          const base = await measureFacts(page);
+          const auto = await autocompleteFacts(page);
+          const card = await cardAlignmentFacts(page);
+          rows.push({ viewport: viewport.name, density, channelHeadPx: base.channelHeadPx, autocomplete: auto, card, avatarPx: base.avatarPx?.[0], withinGroupGapPx: base.withinGroupGapPx });
+        } finally {
+          await context.close();
+        }
+      }
+    }
+  } finally {
+    await browser.close();
+    await preview.stop?.();
+  }
+  for (const r of rows) console.log(JSON.stringify(r));
+  const bad = [];
+  for (const viewport of ["1440", "390"]) {
+    const set = rows.filter((r) => r.viewport === viewport);
+    for (const key of ["channelHeadPx"]) {
+      if (new Set(set.map((r) => r[key])).size !== 1) bad.push(`${viewport}: ${key} 가 단계마다 다르다 ${JSON.stringify(set.map((r) => r[key]))}`);
+    }
+    if (new Set(set.map((r) => r.autocomplete.optionPx)).size !== 1) bad.push(`${viewport}: 명령 목록 행 높이가 단계마다 다르다 ${JSON.stringify(set.map((r) => r.autocomplete.optionPx))}`);
+    if (new Set(set.map((r) => r.autocomplete.labelPx)).size !== 1) bad.push(`${viewport}: 명령 목록 머리글 높이가 단계마다 다르다 ${JSON.stringify(set.map((r) => r.autocomplete.labelPx))}`);
+    if (set.some((r) => !(r.autocomplete.count > 0))) bad.push(`${viewport}: 자동완성 후보를 못 열었다(점검이 아무것도 재지 못했다)`);
+    if (set.some((r) => !r.card.opened)) bad.push(`${viewport}: AI 계정 카드를 못 열었다(점검이 아무것도 재지 못했다)`);
+    for (const r of set) {
+      if (r.card.opened && r.card.delta !== 0) bad.push(`${viewport} ${r.density}: AI 계정 카드가 본문 열에서 ${r.card.delta}px 어긋난다`);
+    }
+    // 대조: 대화 표면은 실제로 단계마다 달라야 한다(점검이 허수가 아니다).
+    if (new Set(set.map((r) => r.withinGroupGapPx)).size !== 3) bad.push(`${viewport}: 대화 행 간격이 단계마다 달라야 한다 ${JSON.stringify(set.map((r) => r.withinGroupGapPx))}`);
+  }
+  console.log(`RESULT ${bad.length === 0 ? "PASS" : "FAIL"}: 밀도가 닿으면 안 되는 자리의 키가 세 단계에서 같다${bad.length ? ` — ${bad.join(" | ")}` : ""}`);
+  if (bad.length) process.exitCode = 1;
+}
+
 // ---- 상호작용 증거: 설정에서 컨트롤을 실제로 눌러 즉시 바뀌고, 새로고침 첫 페인트에도 서 있는지 ---------
 //   MODE=interact LABEL=interact DIST=dist node scripts/capture-4189.mjs
 async function interact() {
@@ -713,7 +819,7 @@ async function interact() {
   if (problems.length) process.exitCode = 1;
 }
 
-(MODE === "diff" ? diff() : MODE === "interact" ? interact() : capture()).catch((error) => {
+(MODE === "diff" ? diff() : MODE === "interact" ? interact() : MODE === "coupling" ? coupling() : capture()).catch((error) => {
   console.error(error);
   process.exit(1);
 });

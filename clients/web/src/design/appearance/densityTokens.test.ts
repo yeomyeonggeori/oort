@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_DENSITY_ID, DENSITY, DENSITY_IDS, type DensityId } from "@momo/core/design/density";
@@ -153,5 +154,94 @@ describe("테마 토큰 표 §5의 밀도 표가 코어 DENSITY와 같다", () =
   it("표가 코어 필드를 빠짐없이 다룬다 — 필드가 늘면 이 표에도 행을 더해야 한다", () => {
     const covered = ROWS.flatMap(([, keys]) => keys).sort();
     expect(covered).toEqual(Object.keys(DENSITY.comfortable).sort());
+  });
+});
+
+// -----------------------------------------------------------------------------
+// 밀도 변수를 읽는 곳은 닫힌 목록이다 (AP-2a #4189 — 실측으로 찾은 결합의 재발 방지).
+//
+// `--spacing-row`는 원래 타임라인 행의 값이었고, 같은 6px이 필요한 다른 자리(폰 폭 채널 머리의 45px 맞춤, 컴포저
+// 슬래시 명령 목록의 행·머리글·발치)가 이름을 빌려 썼다. 값이 늘 6일 때는 문제가 없었고, 밀도가 그 값을 4/6/8로
+// 움직이자 명령 목록 행이 48/52/56px로, 폰 폭 채널 머리가 53/57/61px로 변했다. 밀도는 「대화와 마크다운 글 사이의
+// 간격」이라서 그 둘에 닿으면 안 된다. 그래서 그 자리들은 밀도를 따르지 않는 쌍둥이 `--spacing-row-fixed`를 읽고,
+// 이 시험이 **밀도 변수를 읽는 파일 전부를 열거**해서 다음 빌려 쓰기를 빌드에서 잡는다.
+// -----------------------------------------------------------------------------
+describe("밀도 변수를 읽는 곳은 닫힌 목록이다", () => {
+  const SRC_DIR = fileURLToPath(new URL("../..", import.meta.url));
+
+  /** 주석을 벗긴 소스. 이 저장소의 주석은 클래스 이름과 값을 그대로 인용한다. */
+  const codeOnly = (source: string) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(?<!:)\/\/.*$/gm, "");
+
+  function sourceFiles(dir: string): string[] {
+    const out: string[] = [];
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) out.push(...sourceFiles(full));
+      else if (/\.(tsx?|css)$/.test(entry.name) && !/\.test\./.test(entry.name)) out.push(full);
+    }
+    return out;
+  }
+
+  const FAMILY = "row|rowhead|message-avatar|prose|list-item";
+  /** 간격·크기 유틸리티가 밀도 이름을 읽는 모양(`py-row`). `py-row-fixed`는 뒤따르는 `-`가 걸러 낸다. */
+  const UTILITY = new RegExp(
+    `(?<![\\w-])(?:p[xytblrse]?|m[xytblrse]?|gap(?:-[xy])?|space-[xy]|size|w|h|min-[wh]|max-[wh]|top|bottom|inset(?:-[xy])?|translate-[xy])-(?:${FAMILY})(?![\\w-])`,
+    "g"
+  );
+  const VAR = new RegExp(`var\\(--spacing-(?:${FAMILY})\\)`, "g");
+
+  /**
+   * Tailwind가 **내장 키워드**로 먼저 푸는 이름. `max-w-prose`는 `65ch`이고 `--spacing-prose`를 읽지 않는다(번들에서
+   * `.max-w-prose{max-width:65ch}`로 컴파일되는 것을 변경 전·후 모두 확인했다). 이름만 닮은 다른 뜻이라 읽는 곳으로
+   * 세지 않는다. 툴체인이 이 우선순위를 바꾸면 `densityTokens.browser.test.ts`의 컴파일 단정이 빨개진다.
+   */
+  const TAILWIND_BUILTIN_KEYWORDS = new Set(["max-w-prose"]);
+
+  function readers(): Record<string, string[]> {
+    const found: Record<string, string[]> = {};
+    for (const file of sourceFiles(SRC_DIR)) {
+      const text = codeOnly(readFileSync(file, "utf8"));
+      const hits = [...text.matchAll(UTILITY)]
+        .map((m) => m[0])
+        .filter((hit) => !TAILWIND_BUILTIN_KEYWORDS.has(hit))
+        .concat([...text.matchAll(VAR)].map((m) => m[0]));
+      if (hits.length > 0) found[relative(SRC_DIR, file)] = [...new Set(hits)].sort();
+    }
+    return found;
+  }
+
+  it("클래스·var()로 밀도 변수를 읽는 파일은 타임라인 상수 파일과 tokens.css의 호버 툴바 둘뿐이다", () => {
+    expect(readers()).toEqual({
+      // 대화 행·본문이 읽는 클래스 상수(MessageRow·PendingRow·MessageBody·ConversationPreview·AiConnectCard는 이 상수를 가져다 쓴다).
+      "features/timeline/spacing.ts": [
+        "gap-prose",
+        "mt-list-item",
+        "pb-row",
+        "pt-rowhead",
+        "py-row",
+        "size-message-avatar",
+        "w-message-avatar",
+      ],
+      // 호버 툴바가 행 상단 패딩에 걸치는 두 규칙(행의 패딩이 밀도를 따르므로 같이 따라가야 맞다).
+      "design/tokens.css": ["var(--spacing-row)"],
+    });
+  });
+
+  it("tokens.css에서 --spacing-row를 var()로 읽는 곳은 정확히 호버 툴바 두 규칙이다", () => {
+    const toolbar = codeOnly(TOKENS_CSS).match(/var\(--spacing-row\)/g) ?? [];
+    expect(toolbar).toHaveLength(2);
+    expect(codeOnly(TOKENS_CSS)).toMatch(/@utility hover-toolbar-straddle \{[^}]*var\(--spacing-row\)/);
+    expect(codeOnly(TOKENS_CSS)).toMatch(/@utility hover-toolbar-straddle-below \{[^}]*var\(--spacing-row\)/);
+  });
+
+  it("밀도를 따르지 않는 쌍둥이 --spacing-row-fixed는 6px 하나이고 density.css가 건드리지 않는다", () => {
+    expect(codeOnly(TOKENS_CSS)).toMatch(/^\s*--spacing-row-fixed:\s*6px;/m);
+    expect(codeOnly(DENSITY_CSS)).not.toContain("row-fixed");
+    // 쌍둥이의 쓰임새: 폰 폭 채널 머리와 컴포저 명령 목록. 이 자리들이 밀도 이름으로 돌아가면 위 시험이 먼저 빨개진다.
+    const users = sourceFiles(SRC_DIR)
+      .filter((file) => /-row-fixed\b/.test(codeOnly(readFileSync(file, "utf8"))))
+      .map((file) => relative(SRC_DIR, file))
+      .sort();
+    expect(users).toEqual(["design/tokens.css", "features/chat/ChatShell.tsx", "features/chat/ComposerAutocompleteList.tsx"]);
   });
 });

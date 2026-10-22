@@ -1065,10 +1065,11 @@ export function ChatShell() {
     <>
       {/* 1줄 헤더 (#1865). 넓은 창에서는 떠 있는 판의 머리(DS2-6, 시안 A
           `.a-mhd`: 높이 60 · 좌 24 우 18 · 제목 17/800 · 토픽 13.5)다. 폰에서는
-          py-row(6)×2 + size-control(32) + 하단 경계 1px = 45 그대로다. */}
+          py-row-fixed(6)×2 + size-control(32) + 하단 경계 1px = 45 그대로다. `py-row`가 아닌 이유: 그것은 대화 밀도를
+          따르는 대화 행의 값이라 머리 키가 밀도에 따라 변한다(#4189). */}
       <header
         data-testid="channel-header"
-        className="channel-head flex min-w-0 items-center py-row"
+        className="channel-head flex min-w-0 items-center py-row-fixed"
       >
         <div className="flex min-w-0 items-center gap-2">
           {/* 폰에서 채널 목록으로 돌아가는 길 (goal B6). 사이드바가 열이 아니라

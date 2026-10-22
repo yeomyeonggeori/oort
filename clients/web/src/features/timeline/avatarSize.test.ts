@@ -96,11 +96,22 @@ describe("아바타 크기 다리", () => {
     };
     walk(srcDir);
     expect(found.sort()).toEqual([
+      // AI 계정 카드는 타임라인 꼬리 행이라 본문 줄에 서려고 거터 폭을 비운다. 손으로 쓴 w-8이면 밀도를 바꿀 때 카드만 어긋난다.
+      "features/chat/AiConnectCard.tsx",
       "features/settings/shell/ConversationPreview.tsx",
       "features/timeline/MessageRow.tsx",
       "features/timeline/PendingRow.tsx",
       "features/timeline/spacing.ts",
     ]);
+  });
+
+  it("거터를 흉내 내는 자리가 손으로 쓴 w-8이 아니라 같은 상수를 읽는다 (AI 계정 카드)", () => {
+    const card = readFileSync(fileURLToPath(new URL("../chat/AiConnectCard.tsx", import.meta.url)), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
+    expect(card).toContain('cn("shrink-0", MESSAGE_AVATAR_GUTTER_CLASS)');
+    expect(card).not.toContain('className="w-8 shrink-0"');
   });
 
   it("24px 로 되돌아가지 않는다: 그 크기에서는 아바타로 읽히지 않았다", () => {
