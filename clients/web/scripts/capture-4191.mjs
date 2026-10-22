@@ -630,6 +630,33 @@ async function desktopScenes(browser, origin) {
   }
 }
 
+/**
+ * 맥 데스크탑에서 배경화면을 고르면 유리 스위치가 잠기고 이유 문장이 서는 모습(AC 6). 유리(AP-3)가 이 빌드에 없으면 건너뛴다.
+ * 유리 행은 카드 「색상」에, 배경화면 행은 카드 「배경」에 있어서 두 카드를 한 장씩 찍는다.
+ */
+async function glassExclusionScenes(browser, origin) {
+  const { context, page } = await openContext(browser, origin, "light", VIEWPORTS[0], {}, null, { desktop: true });
+  try {
+    await goSettings(page);
+    if ((await page.getByTestId("glass-background-toggle").count()) === 0) return;
+    for (const scheme of SCHEMES) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.waitForTimeout(300);
+      await pickKind(page, "none", "");
+      await goSettings(page);
+      await page.getByTestId("glass-background-row").scrollIntoViewIfNeeded();
+      await shoot(page, `desktop-glass-open-${scheme}-1440`, { scheme, viewport: "1440", wallpaper: "none", platform: "desktop" });
+      await pickKind(page, "preset", "bam");
+      await waitLive(page);
+      await page.getByTestId("glass-background-row").scrollIntoViewIfNeeded();
+      await shoot(page, `desktop-glass-locked-by-wallpaper-${scheme}-1440`, { scheme, viewport: "1440", wallpaper: "preset", platform: "desktop" });
+      await pickKind(page, "none", "");
+    }
+  } finally {
+    await context.close();
+  }
+}
+
 async function fallbackScenes(browser, origin) {
   const viewport = VIEWPORTS[0];
   // 대비 높이기: Playwright의 contrast 옵션. 투명도 줄이기: CDP의 미디어 특징 에뮬레이션.
@@ -714,6 +741,7 @@ async function capture() {
     if (LABEL !== "before") {
       await themeScenes(browser, preview.origin);
       await desktopScenes(browser, preview.origin);
+      await glassExclusionScenes(browser, preview.origin);
       await fallbackScenes(browser, preview.origin);
       await focusScene(browser, preview.origin);
       await phoneScene(browser, preview.origin);
@@ -1090,6 +1118,39 @@ async function assertions() {
         await c3.close();
       }
     }
+
+    // ⑧ 유리와의 관계(AC 6): 맥 데스크탑에서 배경화면을 고르면 유리 스위치는 잠기고 꺼진 값이며 이유 문장이 선다. 「기본으로」로
+    // 돌아가면 풀린다. 유리(AP-3)가 이 빌드에 없으면(스위치가 없으면) 건너뛴다.
+    {
+      const { context: cg, page: pg } = await openContext(browser, preview.origin, "light", VIEWPORTS[0], {}, null, { desktop: true });
+      try {
+        await goSettings(pg);
+        const toggle = pg.getByTestId("glass-background-toggle");
+        if ((await toggle.count()) === 0) {
+          console.log("SKIP  ⑧ 유리 행이 이 빌드에 없다 (AP-3 합류 전): 상호배제는 core 판정 시험과 computeView 시험이 잰다");
+        } else {
+          const state = async () => ({
+            disabled: await toggle.isDisabled(),
+            checked: (await toggle.getAttribute("aria-checked")) === "true",
+            sentence: (await pg.getByTestId("glass-background-row").textContent()) ?? "",
+          });
+          const none = await state();
+          check("⑧ 배경화면이 없으면 유리 스위치가 열려 있고 이유 문장이 없다", !none.disabled && !none.sentence.includes("배경화면이 켜져 있어서"), JSON.stringify(none));
+          for (const choice of [["solid", "slate"], ["preset", "bam"]]) {
+            await pickKind(pg, choice[0], choice[1]);
+            await waitLive(pg);
+            const locked = await state();
+            check(`⑧ 배경화면(${choice[0]})을 고르면 유리 스위치가 잠기고 꺼진 값이며 이유 문장이 선다`, locked.disabled && !locked.checked && locked.sentence.includes("배경화면이 켜져 있어서"), JSON.stringify(locked));
+          }
+          await pg.getByTestId("wallpaper-reset").click();
+          await pg.waitForTimeout(300);
+          const back = await state();
+          check("⑧ 「기본으로」로 돌아가면 유리 스위치가 다시 열린다", !back.disabled && !back.sentence.includes("배경화면이 켜져 있어서"), JSON.stringify(back));
+        }
+      } finally {
+        await cg.close();
+      }
+    }
   } finally {
     await helper.close().catch(() => undefined);
     await browser.close();
@@ -1101,22 +1162,7 @@ async function assertions() {
   if (failed.length > 0) process.exitCode = 1;
 }
 
-async function debugDesktop() {
-  const preview = await startGuardedPreview({ webRoot: WEB_ROOT, port: PORT, portEnvVar: "CAPTURE_PORT", extraArgs: ["--outDir", resolve(WEB_ROOT, DIST)] });
-  const browser = await launcher.launch();
-  try {
-    const { context, page } = await openContext(browser, preview.origin, "light", VIEWPORTS[0], {}, null, { desktop: true });
-    await page.waitForTimeout(1500);
-    console.log("TESTIDS", JSON.stringify(await page.evaluate(() => [...document.querySelectorAll("[data-testid]")].map((el) => el.getAttribute("data-testid")).filter((id) => /nav|rail|sidebar|toggle|profile|work/.test(id)))));
-    console.log("ATTRS", await page.evaluate(() => ({ tauri: "__TAURI_INTERNALS__" in window, drag: document.querySelector(".app-titlebar")?.hasAttribute("data-tauri-drag-region"), collapsed: document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed"), cols: getComputedStyle(document.querySelector(".app-shell")).gridTemplateColumns })));
-    await context.close();
-  } finally {
-    await browser.close();
-    await preview.stop?.();
-  }
-}
-
-(process.env.DEBUG_DESKTOP ? debugDesktop() : MODE === "assert" ? assertions() : capture()).catch((error) => {
+(MODE === "assert" ? assertions() : capture()).catch((error) => {
   console.error(error);
   process.exit(1);
 });
