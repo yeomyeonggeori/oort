@@ -17,41 +17,24 @@
 // public/theme-boot.js가 첫 페인트 전에 같은 일을 하고, theme.test.ts가 둘을 맞춰 본다.
 // =============================================================================
 
-/** 이름 길이 상한(공백 정리 뒤). */
-export const FONT_NAME_MAX = 64;
+import {
+  FONT_NAME_MAX,
+  FONT_NAME_PATTERN,
+  normalizeFontName,
+  parseFontName,
+  type FontNameResult,
+} from "@momo/core/design/fontName";
+
+// 이름 규칙(허용 목록·길이 상한·거절 이유)은 core `fontName.ts`로 옮겼다(AP-1a #4186): 외양
+// 레코드 v2가 글꼴을 같이 들고 가야 해서 레코드를 읽는 core가 같은 규칙으로 값을 거른다.
+// 이 파일은 그것을 다시 내보내고 **적용**(CSSOM 변수 + 속성)만 맡는다.
+export { FONT_NAME_MAX, FONT_NAME_PATTERN, normalizeFontName, parseFontName };
+export type { FontNameResult };
 
 export const FONT_SANS_VARIABLE = "--font-user-sans";
 export const FONT_MONO_VARIABLE = "--font-user-mono";
 export const FONT_SANS_ATTRIBUTE = "data-font-sans";
 export const FONT_MONO_ATTRIBUTE = "data-font-mono";
-
-/** 허용 목록. 부트 스크립트가 같은 식을 쓴다(테스트가 문자열로 맞춰 본다). */
-export const FONT_NAME_PATTERN = "^[\\p{L}\\p{M}\\p{N} ._+&-]+$";
-const FONT_NAME_RE = new RegExp(FONT_NAME_PATTERN, "u");
-
-export type FontNameResult =
-  | { ok: true; name: string | undefined }
-  | { ok: false; reason: "chars" | "long" };
-
-/**
- * 입력을 글꼴 이름으로 읽는다. 빈 입력은 「기본으로」(`name: undefined`)이고, 앞뒤 공백을
- * 지우고 안쪽 공백은 하나로 접는다. 허용 밖 문자는 `chars`, 상한 초과는 `long`.
- */
-export function parseFontName(raw: unknown): FontNameResult {
-  if (typeof raw !== "string") return { ok: true, name: undefined };
-  const name = raw.replace(/\s+/g, " ").trim();
-  if (name === "") return { ok: true, name: undefined };
-  if (name.length > FONT_NAME_MAX) return { ok: false, reason: "long" };
-  // 개행·탭은 위에서 공백 하나로 접혔다. 접힌 뒤에도 허용 밖이면 거절한다.
-  if (!FONT_NAME_RE.test(name)) return { ok: false, reason: "chars" };
-  return { ok: true, name };
-}
-
-/** 저장소에서 읽을 때: 모르는 값·깨진 값은 undefined(시스템 서체). */
-export function normalizeFontName(raw: unknown): string | undefined {
-  const result = parseFontName(raw);
-  return result.ok ? result.name : undefined;
-}
 
 /** `"이름", var(--font-sans)`. 이름은 허용 목록을 통과한 값이라 따옴표를 닫을 문자가 없다. */
 export function fontStack(name: string, fallbackVariable: "--font-sans" | "--font-mono"): string {

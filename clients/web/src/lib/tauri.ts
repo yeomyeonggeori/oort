@@ -50,9 +50,11 @@ export const DESKTOP_EVENT = {
 
 type CoreModule = typeof import("@tauri-apps/api/core");
 type EventModule = typeof import("@tauri-apps/api/event");
+type WindowModule = typeof import("@tauri-apps/api/window");
 
 let corePromise: Promise<CoreModule> | null = null;
 let eventPromise: Promise<EventModule> | null = null;
+let windowPromise: Promise<WindowModule> | null = null;
 
 function core(): Promise<CoreModule> {
   corePromise ??= import("@tauri-apps/api/core");
@@ -62,6 +64,11 @@ function core(): Promise<CoreModule> {
 function events(): Promise<EventModule> {
   eventPromise ??= import("@tauri-apps/api/event");
   return eventPromise;
+}
+
+function windowApi(): Promise<WindowModule> {
+  windowPromise ??= import("@tauri-apps/api/window");
+  return windowPromise;
 }
 
 async function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
@@ -81,6 +88,31 @@ async function listen<T>(event: string, handler: (payload: T) => void): Promise<
   const { listen: subscribe } = await events();
   const unlisten = await subscribe<T>(event, ({ payload }) => handler(payload));
   return unlisten;
+}
+
+// ---- OS appearance (light/dark) ---------------------------------------------
+
+/**
+ * Listen for the OS switching between light and dark, as the native window reports it
+ * (`tauri://theme-changed`, AP-1a #4186).
+ *
+ * WKWebView can update the dark-scheme media query's `matches` without dispatching its
+ * `change` event until the page reloads, so the web store (`design/theme.ts`) listens to both
+ * sources and takes whichever speaks last. In a browser tab this resolves at once to a no-op
+ * and `@tauri-apps/api/window` is never requested.
+ *
+ * No Rust command is involved: the event comes from the window itself, so there is no
+ * entry in `build.rs` `APP_COMMANDS` and no extra grant (`core:default` carries
+ * `core:event:allow-listen`). `runtime-unverified` on a real WKWebView (#4186).
+ */
+export async function onSystemThemeChanged(
+  handler: (scheme: "light" | "dark") => void
+): Promise<() => void> {
+  if (!IS_TAURI) return noop;
+  const { getCurrentWindow } = await windowApi();
+  return getCurrentWindow().onThemeChanged(({ payload }) => {
+    handler(payload === "dark" ? "dark" : "light");
+  });
 }
 
 // ---- deep links -------------------------------------------------------------

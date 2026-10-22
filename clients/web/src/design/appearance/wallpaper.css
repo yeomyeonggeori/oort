@@ -1,0 +1,11 @@
+/* 자리표시 (AP-1a #4186): 이 조각은 AP-4(#4191)가 채운다. 지금은 비어 있다.
+ *
+ * 대상: 웹·데스크탑 배경화면(`data-wallpaper`)
+ * 건드릴 것: 배경화면 층과 그 위의 scrim 면
+ *
+ * 규칙은 속성 선택자로 쓴다(예: `:root[data-wallpaper] .app-shell { --shell-layer-wallpaper: ...; --shell-layer-canvas: ... }`). 루트 속성 선택자는 `@utility`·단일 클래스
+ * 규칙보다 특이도가 높아 소스 순서와 무관하게 이기므로, `@import`가 맨 위라는 사실 때문에
+ * `tokens.css`를 고칠 필요가 없다. 어느 속성에 무엇이 찍히는지는
+ * `packages/momo-core/src/design/rootStamp.ts`의 표가, 바닥 층 변수는 `tokens.css`의
+ * `app-shell`이 정한다. 컨트롤은 이 규칙이 실제로 화면을 바꾸는 PR에서만 공개한다.
+ */

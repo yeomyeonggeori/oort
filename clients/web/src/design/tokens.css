@@ -1,5 +1,14 @@
 @import "tailwindcss";
 @import "./motion.css";
+/* 모양 설정(AP-1a #4186, 청사진 §5.3-b). 소비자 이슈가 자기 조각만 채운다. 규칙은 루트 속성
+ * 선택자로 쓰므로 소스 순서와 무관하게 이긴다. 조각마다 머리 주석에 소유 이슈가 있다. */
+@import "./appearance/density.css";
+@import "./appearance/typography-scale.css";
+@import "./appearance/prominent.css";
+@import "./appearance/thread-layout.css";
+@import "./appearance/glass.css";
+@import "./appearance/wallpaper.css";
+@import "./appearance/theme-gallery.css";
 
 /* =============================================================================
  * oort design tokens — 새벽하늘(Dawn Sky), 디자인 시스템 2.0 (ADR-0189).
@@ -1416,19 +1425,33 @@
      * 서고, 띠가 없는 테마에서는 `var(--band, transparent)`가 투명이라 층이
      * 사라진다. 사이드바가 자기 바탕을 칠하지 않고 셸이 칠하는 이유는 신호등
      * 줄이다: 상단 줄(`app-titlebar`)은 셸의 첫 행 전체를 가로지르므로, 띠를
-     * 사이드바에만 칠하면 신호등 뒤 40px만 띠 밖에 남는다. */
+     * 사이드바에만 칠하면 신호등 뒤 40px만 띠 밖에 남는다.
+     *
+     * 층은 변수 셋이다(AP-1a #4186, 청사진 §5.3-b). 위에서 아래로 띠 → 바닥 → 배경화면이고,
+     * 기본값은 앞의 한 줄짜리 선언과 같다(배경화면은 `none`이라 아무것도 칠하지 않는다).
+     * 유리(AP-3)와 배경화면(AP-4)은 자기 조각(`appearance/*.css`)에서 이 **변수만** 바꾼다:
+     * 이 줄을 두 이슈가 함께 만지지 않게 하려는 분리다. 배경화면이 바닥 그라데이션 아래에
+     * 서므로, 배경화면이 보이려면 그 이슈가 `--shell-layer-canvas`를 반투명 면으로 바꾼다. */
+    --shell-layer-band: linear-gradient(var(--band, transparent), var(--band, transparent));
+    --shell-layer-canvas: linear-gradient(
+      160deg,
+      var(--canvas-top) 0%,
+      var(--canvas-mid) 42%,
+      var(--canvas-bottom) 100%
+    );
+    --shell-layer-wallpaper: none;
     background-color: var(--canvas-mid);
     background-image:
-      linear-gradient(var(--band, transparent), var(--band, transparent)),
-      linear-gradient(
-        160deg,
-        var(--canvas-top) 0%,
-        var(--canvas-mid) 42%,
-        var(--canvas-bottom) 100%
-      );
+      var(--shell-layer-band), var(--shell-layer-canvas),
+      var(--shell-layer-wallpaper);
     background-size:
       var(--w-sidebar) 100%,
-      100% 100%;
+      100% 100%,
+      cover;
+    background-position:
+      0 0,
+      0 0,
+      center;
     background-repeat: no-repeat;
 
     /* 본문 판은 첫 행(상단 줄)까지 올라가 창 위쪽 인셋 8에서 시작한다. 상단 줄은
@@ -1449,7 +1472,8 @@
       grid-template-columns: var(--spacing-rail) 1fr;
       background-size:
         var(--spacing-rail) 100%,
-        100% 100%;
+        100% 100%,
+        cover;
 
       /* 신호등 옆 토글은 상단 줄 첫 열(인셋 80)에 남는다(#1864 「토글은 자리를 옮기지
        * 않는다」). 판이 첫 행까지 올라가 있으면 그 토글을 덮는다. 그래서 접힌 동안 판은
@@ -1480,10 +1504,7 @@
     }
 
     @media (prefers-contrast: more) {
-      background-image: linear-gradient(
-        var(--band, transparent),
-        var(--band, transparent)
-      );
+      background-image: var(--shell-layer-band);
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -1508,7 +1529,8 @@
     @media (width >= 600px) {
       background-size:
         var(--w-settings-nav) 100%,
-        100% 100%;
+        100% 100%,
+        cover;
     }
 
     > main {
