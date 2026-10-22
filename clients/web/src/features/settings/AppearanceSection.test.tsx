@@ -412,13 +412,17 @@ describe("AppearanceSection: S3b 컨트롤 중 아직 열리지 않은 것 (R4)"
       "density-choice",
       "link-preview-choice",
     ]);
-    expect(host.querySelector('[role="switch"], input[type="range"], input[type="text"]:not([data-testid^="font-"]), select')).toBeNull();
+    // 유리 배경(AP-3 #4190)은 열렸다: 브라우저에서는 잠긴 스위치 하나뿐이다(슬라이더는 켜진 동안에만 선다).
+    expect(host.querySelector('[role="switch"]:not([data-testid^="glass-"]), input[type="range"], input[type="text"]:not([data-testid^="font-"]), select')).toBeNull();
+    const glass = host.querySelector<HTMLButtonElement>('[data-testid="glass-background-toggle"]');
+    expect(glass?.disabled).toBe(true);
+    expect(glass?.getAttribute("aria-checked")).toBe("false");
     // 글꼴(#3774)은 이름 입력 두 칸까지만 연다.
     expect([...host.querySelectorAll('input[type="text"]')].map((i) => i.getAttribute("data-testid"))).toEqual([
       "font-sans-input",
       "font-mono-input",
     ]);
-    for (const closed of ["glass", "palette", "hex"]) {
+    for (const closed of ["palette", "hex"]) {
       expect(host.querySelector(`[data-testid*="${closed}"]`), closed).toBeNull();
     }
   });

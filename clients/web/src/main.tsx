@@ -15,6 +15,7 @@ import { trackViewportHeight } from "@/app/viewportHeight";
 import { initFocusModality } from "@/design/focusModality";
 import { initTheme } from "@/design/theme";
 import { installDesktopDropGuard } from "@/lib/desktopDropGuard";
+import { installDesktopEffects } from "@/features/settings/appearance/desktopEffects";
 import { IS_TAURI } from "@/lib/env";
 import "@/design/tokens.css";
 
@@ -34,6 +35,11 @@ initFocusModality(document);
 // 받는 곳 없이 놓인 파일·링크가 창을 그 파일·주소로 옮기지 않게 여기서 삼킨다.
 // 브라우저 탭은 건드리지 않는다. 자세한 까닭은 lib/desktopDropGuard.ts.
 if (IS_TAURI) installDesktopDropGuard(window);
+
+// 데스크탑 유리 배경 (AP-3 #4190). 켜 둔 사람의 창에 네이티브 블러를 깔고 그 **뒤에** `data-glass`를 찍는다.
+// 첫 프레임은 불투명이고(웹뷰가 뜬 뒤에야 셸에 부를 수 있다) 몇 ms 뒤에 유리로 바뀐다. 꺼 둔 사람에게는
+// 아무 일도 하지 않는다.
+if (IS_TAURI) installDesktopEffects();
 
 // StrictMode is intentionally OFF: its dev-only double-invocation would
 // double-subscribe the Centrifugo rail and make the realtime/resume demo

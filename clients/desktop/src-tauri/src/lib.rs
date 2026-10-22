@@ -99,6 +99,10 @@ mod shell_contract;
 mod terminal_app;
 #[cfg(desktop)]
 mod updater;
+// 「유리 배경」의 셸 쪽(AP-3 #4190, ADR-0189 증보 3 D6): 창 뒤 블러(`window_vibrancy_set`)와 앱
+// 네이티브 appearance(`app_theme_set`). macOS가 아니면 둘 다 `Ok(())`다. 데스크탑 표에만 있다.
+#[cfg(desktop)]
+mod window_vibrancy;
 // This Mac as a work host (ADR-0188 D2 · R1, #2778): the `momo-workd` sidecar,
 // its registration and its user-only control socket. Reachable only through
 // the five `work_host_*` commands, which only `capabilities/work-host.json`
@@ -178,6 +182,8 @@ pub fn run() {
             notification::notification_request_permission,
             notification::notification_show,
             notification::dock_badge_set,
+            window_vibrancy::window_vibrancy_set,
+            window_vibrancy::app_theme_set,
             keychain::keychain_available,
             keychain::keychain_refresh_token_handle,
             keychain::keychain_store_refresh_token,
