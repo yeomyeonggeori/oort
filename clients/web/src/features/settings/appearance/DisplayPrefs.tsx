@@ -51,7 +51,7 @@ export function DisplayPrefs() {
           testId="link-preview-choice"
         />
       </SettingsRow>
-      <SettingsRow label="대화 미리보기" description="링크 카드가 메시지 아래에 이렇게 놓여요." stack>
+      <SettingsRow label="대화 미리보기" description="고른 글자 크기와 대화 밀도, 링크 카드가 이렇게 보여요." stack>
         <ConversationPreview linkPreview={linkPreview} />
       </SettingsRow>
       <ThreadLayoutRow />

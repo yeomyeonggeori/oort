@@ -8,6 +8,7 @@ import {
   APPEARANCE_STORAGE_KEY,
   ACCENT_THEMES,
   getAccent,
+  getAppearance,
   getTheme,
   reloadAppearanceForTest,
   THEME_STORAGE_KEY,
@@ -241,18 +242,138 @@ describe("AppearanceSection: 링크 미리보기와 대화 미리보기", () => 
   });
 });
 
-describe("AppearanceSection: S3b 컨트롤은 아직 열리지 않는다 (R4)", () => {
-  it("offers exactly the three live groups and no switch, slider, or text field", () => {
+describe("AppearanceSection: 글자 크기와 대화 밀도 (AP-2a #4189)", () => {
+  const radios = (host: HTMLElement, testId: string) => [
+    ...(host.querySelector(`[data-testid="${testId}"]`)?.querySelectorAll<HTMLInputElement>('input[type="radio"]') ?? []),
+  ];
+  const labelsOf = (host: HTMLElement, testId: string) =>
+    [...(host.querySelector(`[data-testid="${testId}"]`)?.querySelectorAll("label") ?? [])].map((l) =>
+      l.textContent?.trim()
+    );
+  const storedRecord = () => JSON.parse(localStorage.getItem(APPEARANCE_STORAGE_KEY) ?? "{}") as Record<string, unknown>;
+
+  it("offers the font size as one radio group: 작게 · 기본 · 크게, 기본이 골라져 있다", () => {
+    const host = mount(createElement(AppearanceSection));
+    const group = host.querySelector('[data-testid="font-size-choice"]');
+    expect(group?.tagName).toBe("FIELDSET");
+    const inputs = radios(host, "font-size-choice");
+    expect(inputs.map((r) => r.value)).toEqual(["smaller", "default", "larger"]);
+    expect(inputs.map((r) => r.checked)).toEqual([false, true, false]);
+    expect(labelsOf(host, "font-size-choice")).toEqual(["작게", "기본", "크게"]);
+    expect(new Set(inputs.map((r) => r.name)).size).toBe(1);
+    expect(host.querySelector('[data-testid="font-size-row"]')?.textContent).toContain(
+      "대화와 화면의 글자에 모두 적용돼요."
+    );
+  });
+
+  it("walks the three sizes, stamps data-font-size on the root, and stores the choice", () => {
+    const host = mount(createElement(AppearanceSection));
+    pick(host, "font-size-choice-larger");
+    expect(document.documentElement.getAttribute("data-font-size")).toBe("larger");
+    expect(getAppearance().fontSize).toBe("larger");
+    expect(storedRecord().fontSize).toBe("larger");
+    pick(host, "font-size-choice-smaller");
+    expect(document.documentElement.getAttribute("data-font-size")).toBe("smaller");
+    expect(storedRecord().fontSize).toBe("smaller");
+    // 기본은 직렬화에서 빠진다(폰의 저장 형태를 한 글자도 바꾸지 않는 AP-1a 계약) — 속성은 늘 찍힌다.
+    pick(host, "font-size-choice-default");
+    expect(document.documentElement.getAttribute("data-font-size")).toBe("default");
+    expect(storedRecord()).not.toHaveProperty("fontSize");
+    expect(radios(host, "font-size-choice").map((r) => r.checked)).toEqual([false, true, false]);
+  });
+
+  it("keeps the chosen font size across a reload", () => {
+    const host = mount(createElement(AppearanceSection));
+    pick(host, "font-size-choice-larger");
+    act(() => reloadAppearanceForTest());
+    expect(getAppearance().fontSize).toBe("larger");
+    expect(document.documentElement.getAttribute("data-font-size")).toBe("larger");
+  });
+
+  it("offers the density as one radio group: 촘촘하게 · 편하게 · 여유롭게, 편하게가 골라져 있다", () => {
+    const host = mount(createElement(AppearanceSection));
+    const group = host.querySelector('[data-testid="density-choice"]');
+    expect(group?.tagName).toBe("FIELDSET");
+    const inputs = radios(host, "density-choice");
+    expect(inputs.map((r) => r.value)).toEqual(["compact", "comfortable", "spacious"]);
+    expect(inputs.map((r) => r.checked)).toEqual([false, true, false]);
+    expect(labelsOf(host, "density-choice")).toEqual(["촘촘하게", "편하게", "여유롭게"]);
+    expect(host.querySelector('[data-testid="density-row"]')?.textContent).toContain(
+      "대화와 마크다운 글 사이의 간격이에요."
+    );
+  });
+
+  it("walks the three densities, stamps data-density on the root, and stores the choice", () => {
+    const host = mount(createElement(AppearanceSection));
+    pick(host, "density-choice-spacious");
+    expect(document.documentElement.getAttribute("data-density")).toBe("spacious");
+    expect(getAppearance().density).toBe("spacious");
+    expect(storedRecord().density).toBe("spacious");
+    pick(host, "density-choice-compact");
+    expect(document.documentElement.getAttribute("data-density")).toBe("compact");
+    expect(storedRecord().density).toBe("compact");
+    pick(host, "density-choice-comfortable");
+    expect(document.documentElement.getAttribute("data-density")).toBe("comfortable");
+    expect(radios(host, "density-choice").map((r) => r.checked)).toEqual([false, true, false]);
+  });
+
+  it("changing one setting leaves the other and the color choice alone", () => {
+    const host = mount(createElement(AppearanceSection));
+    pick(host, "theme-choice-dark");
+    pick(host, "font-size-choice-larger");
+    pick(host, "density-choice-spacious");
+    expect(getTheme()).toBe("dark");
+    expect(getAppearance()).toMatchObject({ scheme: "dark", fontSize: "larger", density: "spacious" });
+    pick(host, "font-size-choice-default");
+    expect(getAppearance()).toMatchObject({ scheme: "dark", density: "spacious" });
+  });
+
+  it("puts font size and density at the top of the 대화 표시 card, above the link preview", () => {
+    const host = mount(createElement(AppearanceSection));
+    const order = [...host.querySelectorAll("fieldset")].map((f) => f.getAttribute("data-testid"));
+    expect(order.indexOf("font-size-choice")).toBeGreaterThan(order.indexOf("accent-choice"));
+    expect(order.indexOf("density-choice")).toBe(order.indexOf("font-size-choice") + 1);
+    expect(order.indexOf("link-preview-choice")).toBe(order.indexOf("density-choice") + 1);
+  });
+
+  it("has a conversation preview that reads the timeline's own spacing tokens", () => {
+    const host = mount(createElement(AppearanceSection));
+    const preview = host.querySelector('[data-testid="conversation-preview"]');
+    expect(preview).not.toBeNull();
+    const avatars = [...(preview?.querySelectorAll('[data-testid="preview-avatar"]') ?? [])];
+    expect(avatars).toHaveLength(2);
+    for (const avatar of avatars) {
+      expect(avatar.className).toContain("size-message-avatar");
+      expect(avatar.className).not.toMatch(/\bsize-8\b/);
+    }
+    // 마크다운 글은 타임라인과 같은 컴포넌트가 그린다: 블록 간격·목록 항목 간격 클래스가 거기서 나온다.
+    expect(preview?.querySelector('[data-testid="message-markdown"]')?.className).toContain("gap-prose");
+    const items = [...(preview?.querySelectorAll('[data-testid="message-list"] > li') ?? [])];
+    expect(items.length).toBeGreaterThanOrEqual(2);
+    expect(items[0]?.className).not.toContain("mt-list-item");
+    expect(items[1]?.className).toContain("mt-list-item");
+  });
+});
+
+describe("AppearanceSection: S3b 컨트롤 중 아직 열리지 않은 것 (R4)", () => {
+  it("offers exactly the five live groups and no switch, slider, or text field", () => {
     const host = mount(createElement(AppearanceSection));
     const groups = [...host.querySelectorAll("fieldset")].map((f) => f.getAttribute("data-testid"));
-    expect(groups).toEqual(["theme-choice", "accent-choice", "link-preview-choice"]);
+    // 글자 크기·대화 밀도는 AP-2a(#4189)가 소비자(타임라인·미리보기)와 같은 PR에서 열었다.
+    expect(groups).toEqual([
+      "theme-choice",
+      "accent-choice",
+      "font-size-choice",
+      "density-choice",
+      "link-preview-choice",
+    ]);
     expect(host.querySelector('[role="switch"], input[type="range"], input[type="text"]:not([data-testid^="font-"]), select')).toBeNull();
     // 글꼴(#3774)은 이름 입력 두 칸까지만 연다.
     expect([...host.querySelectorAll('input[type="text"]')].map((i) => i.getAttribute("data-testid"))).toEqual([
       "font-sans-input",
       "font-mono-input",
     ]);
-    for (const closed of ["density", "font-size", "glass", "palette", "hex"]) {
+    for (const closed of ["glass", "palette", "hex"]) {
       expect(host.querySelector(`[data-testid*="${closed}"]`), closed).toBeNull();
     }
   });
