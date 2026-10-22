@@ -86,7 +86,7 @@ export function ThemeTile({
 }) {
   return (
     <label
-      className="theme-tile"
+      className="theme-tile press"
       data-selected={selected ? "" : undefined}
       data-testid={tileTestId(tile.ref)}
     >

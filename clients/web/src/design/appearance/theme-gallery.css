@@ -8,12 +8,17 @@
  * 알파만 읽으므로 불투명 정지점에 `currentcolor`를 쓰고 색을 적지 않는다(`ai_gradient`·`raw_color`에 안 걸린다).
  */
 
-/* 열린 갤러리 한 덩이: 안내 줄 + 격자. 설정 카드의 직계 자식이라 위에 선 하나가 그어진다. */
+/* 열린 갤러리 한 덩이: 안내 줄 + 격자. 설정 카드의 직계 자식이라 위에 선 하나가 그어진다. 줄 사이 간격은 글이 있는
+ * 줄에만 준다(알림 자리는 읽어 주는 영역이라 늘 DOM에 있고, 비어 있을 때 간격을 먹으면 격자 위가 헐겁다). */
 .theme-gallery-region {
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-2);
   padding: var(--spacing-3) var(--spacing-4) var(--spacing-4);
+}
+
+.theme-gallery-hint,
+.theme-gallery-notice:not(:empty) {
+  margin-block-end: var(--spacing-2);
 }
 
 /* 격자는 세 줄 남짓 보이고 안에서 스크롤한다(Buzz `max-h-[430px]`). 높이는 타일 최소 폭의 세 배(480)라 넷째 줄이
@@ -90,6 +95,21 @@
 .theme-tile[data-selected] .theme-tile-name {
   font-weight: 600;
   color: var(--ink);
+}
+
+/* 미니 앱의 제목 글자(「오늘 배포」)는 폭이 모자라면 「오늘…」로 줄이지 않고 **뺀다**: 말줄임표가 든 견본은 어느 타일에서나
+ * 같은 자리에서 잘려 엉성해 보인다. 기준은 제목과 알약이 한 줄에 온전히 드는 최소 폭(11rem)이고, 갤러리 타일(약 140~160)은
+ * 아래이며 접힌 행의 썸네일(200)과 큰 미리보기 카드는 그 위라 글자가 남는다. 타일과 썸네일 틀이 컨테이너다(큰 미리보기
+ * 카드는 컨테이너가 아니라 이 규칙이 닿지 않는다). */
+.theme-tile-frame,
+.theme-style-thumb {
+  container-type: inline-size;
+}
+
+@container (width < 11rem) {
+  .theme-preview-title {
+    display: none;
+  }
 }
 
 /* 접힌 행의 썸네일 한 장. 타일과 같은 미리보기라 크기만 고정이다(타일 최소 폭의 1.25배, 200). 제목 「오늘 배포」와

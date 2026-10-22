@@ -159,7 +159,7 @@ const settle = (page) =>
 
 
 const SCENES = (process.env.SCENES || "app,gallery").split(",");
-const REPS = [
+const REPS_ALL = [
   { ref: "dawnsky", name: "dawnsky", modes: ["light", "dark"] },
   { ref: "graphite", name: "graphite", modes: ["light", "dark"] },
   { ref: "noeul", name: "noeul", modes: ["light", "dark"] },
@@ -169,6 +169,9 @@ const REPS = [
   { ref: "catalog:solarized", name: "solarized", modes: ["light", "dark"] },
   { ref: "catalog:gruvbox-hard", name: "gruvbox-hard", modes: ["light", "dark"] },
 ];
+// `REPS=dawnsky,graphite,noeul`로 일부만 찍는다(전 번들은 카탈로그 테마를 모르므로 첫 파티만 의미가 있다).
+const REPS_FILTER = process.env.REPS ? new Set(process.env.REPS.split(",")) : null;
+const REPS = REPS_FILTER ? REPS_ALL.filter((rep) => REPS_FILTER.has(rep.name)) : REPS_ALL;
 const VIEWPORTS = [
   { name: "1440", width: 1440, height: 900 },
   { name: "390", width: 390, height: 844 },
@@ -280,7 +283,17 @@ async function galleryScenes(browser, origin) {
         await page.waitForTimeout(300);
         await page.getByTestId("theme-style-options").scrollIntoViewIfNeeded();
         const tiles = await page.locator(".theme-tile").count();
-        await shoot(page, `gallery-open-${mode}-${viewport.name}`, { mode, viewport: viewport.name, open: true, tiles });
+        // 미니 앱 제목은 좁은 타일에서 빠지고(display none) 접힌 행 썸네일에는 남는다. 증거로 meta에 적는다.
+        const titles = await page.evaluate(() => {
+          const shown = (el) => (el ? getComputedStyle(el).display : "absent");
+          return {
+            tile: shown(document.querySelector(".theme-tile-frame .theme-preview-title")),
+            thumb: shown(document.querySelector(".theme-style-thumb .theme-preview-title")),
+            tileWidth: Math.round(document.querySelector(".theme-tile-frame")?.getBoundingClientRect().width ?? 0),
+            thumbWidth: Math.round(document.querySelector(".theme-style-thumb")?.getBoundingClientRect().width ?? 0),
+          };
+        });
+        await shoot(page, `gallery-open-${mode}-${viewport.name}`, { mode, viewport: viewport.name, open: true, tiles, titles });
         if (viewport.name === "1440") {
           // 목록 안에서 끝까지 스크롤한 모습(아래 페이드).
           await page.locator(".theme-gallery-scroll").evaluate((el) => { el.scrollTop = el.scrollHeight; });

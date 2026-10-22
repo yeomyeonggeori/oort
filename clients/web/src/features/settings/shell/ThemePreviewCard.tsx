@@ -46,7 +46,7 @@ export function PreviewLayer({
       <div className="theme-preview-pane flex min-w-0 flex-col gap-1 rounded-md bg-pane p-2">
         <div className="flex items-center gap-1">
           <span
-            className="truncate text-timestamp font-semibold text-ink"
+            className="theme-preview-title truncate text-timestamp font-semibold text-ink"
             data-testid={testIds ? "theme-preview-title" : undefined}
           >
             오늘 배포

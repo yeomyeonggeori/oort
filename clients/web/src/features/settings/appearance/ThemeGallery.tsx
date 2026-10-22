@@ -66,7 +66,7 @@ export default function ThemeGallery() {
           aria-label={`테마 스타일, 지금은 ${label}`}
           data-testid="theme-style-trigger"
           onClick={() => setOpen((value) => !value)}
-          className="flex min-w-0 items-center gap-2 rounded-lg bg-transparent p-0 text-ink focus-visible:focus-ring"
+          className="press flex min-w-0 items-center gap-2 rounded-lg bg-transparent p-0 text-ink focus-visible:focus-ring"
         >
           <span data-testid="theme-style-selected-preview" className="flex">
             <TileFace themeRef={theme} kind={thumbKind} signal={signal} className="theme-style-thumb" />
@@ -87,11 +87,11 @@ export default function ThemeGallery() {
           onKeyDown={onKeyDown}
         >
           {scheme === "system" ? (
-            <p className="break-keep text-meta text-ink-muted" data-testid="theme-style-hint">
+            <p className="theme-gallery-hint break-keep text-meta text-ink-muted" data-testid="theme-style-hint">
               라이트와 다크가 짝인 테마만 보여요.
             </p>
           ) : null}
-          <div role="status" className="break-keep text-meta text-ink" data-testid="theme-style-notice">
+          <div role="status" className="theme-gallery-notice break-keep text-meta text-ink" data-testid="theme-style-notice">
             {notice}
           </div>
           <fieldset className="m-0 min-w-0 border-0 p-0" data-testid="theme-style-group">
