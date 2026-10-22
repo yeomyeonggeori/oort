@@ -309,7 +309,8 @@ export const FOREGROUNDS = [
 const TONE_HOST_EXCLUDED = ["surface-pressed", "muted-soft"] as const;
 export const MUTED_SOFT_TONES = ["warn", "signal-text"] as const;
 
-function foregroundHosts(fg: string): readonly string[] {
+/** 어느 전경이 어느 면에 서는가(위 닫힌 표). 카탈로그 시험(`themes/derivedCatalog.contract.test.ts`)도 같은 표를 읽는다. */
+export function foregroundHosts(fg: string): readonly string[] {
   if (fg === "ink" || fg === "ink-muted") return SURFACES;
   const hosts: string[] = SURFACES.filter(
     (bg) => !(TONE_HOST_EXCLUDED as readonly string[]).includes(bg)

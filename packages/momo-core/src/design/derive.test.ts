@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contrast, hueGap, oklabDistance, parseHex, toOklch } from "./color";
+import { contrast, hueGap, luminance, oklabDistance, parseHex, toOklch } from "./color";
 import {
   DERIVED_VAR_NAMES,
   DERIVE_ENGINE_VERSION,
@@ -51,16 +51,18 @@ const ROWS: { id: string; mode: Mode; entry: CatalogEntry; seed: ThemeSeed }[] =
 const STATE_SURFACES = ["surface-hover", "surface-pressed", "muted-soft"] as const;
 /** 신호가 중립 역할(글자·선·아이콘)과 이만큼은 달라야 한다(OKLab). 엔진 목표는 0.06이고 시험은 0.05로 잰다. 첫 파티는 0.12 이상이다. */
 const NEUTRAL_MIN_DISTANCE = 0.05;
+/** `ink`는 `ink-muted`와 이만큼(OKLab)은 떨어져 있다(엔진 `INK_OVER_MUTED`). 첫 파티는 .23 이상이다. */
+const HIERARCHY_MIN_DISTANCE = 0.1;
 const chromaOf = (hex: string): number => toOklch(hex).C;
 
 /**
- * 설계 리뷰(AP-1b 1차) H1~H3의 세 규칙. 첫 파티가 이미 지키는 자라서(대조군 시험이 6행을 잰다) 카탈로그 전수에도 건다.
+ * 설계 리뷰(AP-1b 1·2차) H1~H3·H-C의 규칙. 첫 파티가 이미 지키는 자라서(대조군 시험이 6행을 잰다) 카탈로그 전수에도 건다.
  * `contrastPairs`의 호스트 목록(표면·바닥)에는 없는 것들이라 여기서 따로 잰다.
- *  H1 글자(`ink`·`ink-muted`)는 가리킨 행·눌린 행·칩 그릇 위에서도 4.5다(README §2.2). `signal-soft`·`agent-soft`와 톤
- *     채움 위는 재지 않는다: 앞 둘은 강조색에 따라 달라지고, 톤 채움 위에는 자기 톤의 글자만 서며 그 쌍은
- *     `contrastPairs`(FILL_PAIRS)가 잰다.
+ *  H1 글자(`ink`·`ink-muted`)는 가리킨 행·눌린 행·칩 그릇 위에서도 4.5다(README §2.2).
  *  H2 신호가 중립 역할과 같은 색으로 접히지 않는다(안 읽음·멘션·캐럿·포커스 링의 색 채널).
  *  H3 위험 순서의 자는 채도다: danger > warn > ink-muted(README §2.2). 중립 선·아이콘도 warn 밑이다.
+ *  H-C `ink`와 `ink-muted`가 같은 색으로 접히지 않는다(위계는 크기·굵기만이 아니라 색에도 남는다).
+ * 옅은 채움(선택 행·톤 채움) 위의 대비는 `bandViolations`가 따로 잰다(첫 파티는 손으로 맞춘 값이라 그 일부가 못 미친다).
  */
 function reviewViolations(tokens: ThemeModeTokens): string[] {
   const out: string[] = [];
@@ -84,6 +86,44 @@ function reviewViolations(tokens: ThemeModeTokens): string[] {
   if (!(chromaOf(c.danger) > chromaOf(c.warn))) out.push("H3 danger 채도가 warn보다 크지 않다");
   for (const role of ["ink-muted", "icon", "line-strong"] as const) {
     if (!(chromaOf(c.warn) > chromaOf(c[role]))) out.push(`H3 warn 채도가 ${role}보다 크지 않다`);
+  }
+  const hierarchy = oklabDistance(c.ink, c["ink-muted"]);
+  if (hierarchy < HIERARCHY_MIN_DISTANCE - 1e-9) out.push(`HC ink~ink-muted ${hierarchy.toFixed(3)} < ${HIERARCHY_MIN_DISTANCE}`);
+  return out;
+}
+
+/**
+ * 카탈로그는 첫 파티보다 한 걸음 더 간다(설계 리뷰 2차 H-B): 가리킨 행·눌린 행·칩 그릇과 **옅은 채움 다섯**(선택 행 `signal-soft`·
+ * `agent-soft`·톤 채움 셋) 위에서 글자·톤 글자·아이콘·테두리가 같은 대비를 지킨다. 채움은 칩 그릇 띠 안에 놓이므로(`softOf`) 띠의
+ * 끝에서 지키면 안쪽은 따라온다. 웹의 `derivedCatalog.contract.test.ts`가 첫 파티의 닫힌 표(17면)로 같은 것을 다시 잰다.
+ */
+function bandViolations(tokens: ThemeModeTokens): string[] {
+  const out: string[] = [];
+  const c = tokens.color;
+  const hosts: [string, string][] = [
+    ...STATE_SURFACES.map((s): [string, string] => [s, tokens.derived[s]]),
+    ["signal-soft", c["signal-soft"]],
+    ["agent-soft", c["agent-soft"]],
+    ["ok-soft", c["ok-soft"]],
+    ["warn-soft", c["warn-soft"]],
+    ["danger-soft", c["danger-soft"]],
+  ];
+  const need: [ColorRole, number][] = [
+    ["ink", 4.5],
+    ["ink-muted", 4.5],
+    ["signal-text", 4.5],
+    ["agent", 4.5],
+    ["ok", 4.5],
+    ["warn", 4.5],
+    ["danger", 4.5],
+    ["icon", 3],
+    ["line-strong", 3],
+  ];
+  for (const [role, min] of need) {
+    for (const [name, host] of hosts) {
+      const ratio = contrast(c[role], host);
+      if (ratio < min - 1e-9) out.push(`band ${role}/${name} ${ratio.toFixed(2)} < ${min}`);
+    }
   }
   return out;
 }
@@ -117,11 +157,7 @@ function violations(derived: DerivedMode): string[] {
   }
   if (c.primary !== c.ink) out.push("primary != ink");
   out.push(...reviewViolations(tokens));
-  // 톤 글자·에이전트도 가리킨 행 위에서 4.5다. 첫 파티는 두 행이 4.43·4.48로 못 미친다(그래서 대조군에는 걸지 않는다).
-  for (const role of ["signal-text", "agent", "ok", "warn", "danger"] as const) {
-    const ratio = contrast(c[role], tokens.derived["surface-hover"]);
-    if (ratio < 4.5 - 1e-9) out.push(`H1 ${role}/surface-hover ${ratio.toFixed(2)} < 4.5`);
-  }
+  out.push(...bandViolations(tokens));
   return out;
 }
 
@@ -214,15 +250,29 @@ describe("보정은 필요하고 실제로 일한다 (실패할 수 있는 가�
     expect(bad.map((row) => `${row.id} ${row.mode}`)).toEqual([]);
   });
 
-  it("보정이 `ink` 자체를 옮기는 테마는 몇 안 된다 (기록의 role로 센다)", () => {
+  it("보정이 `ink` 자체를 옮기는 행은 18이다: 씨앗이 대비가 모자란 셋 + 위계(`ink-muted`와 .10)를 위해 더 민 열다섯", () => {
     const moved = ROWS.filter((row) => deriveThemeMode(row.seed).notes.some((n) => n.role === "ink"));
-    // 가리킨 행·눌린 행·칩 그릇이 글자 호스트에 들어와서(H1) 둘이 더 늘었다: everforest 라이트, one 다크.
+    // 씨앗의 fg가 4.5에 못 닿는 행은 material 라이트·solarized 라이트·다크다. 나머지는 `ink-muted`가 칩 그릇·눌린 행 위
+    // 4.5까지 올라오면서 `ink`와 겹쳐서 `ink`를 씨앗 너머로 민 행이다(설계 리뷰 2차 H-C).
     expect(moved.map((row) => `${row.id} ${row.mode}`).sort()).toEqual([
+      "catppuccin light",
+      "catppuccin-frappe dark",
+      "everforest dark",
       "everforest light",
+      "github-dark-dimmed dark",
+      "gruvbox-soft light",
+      "kanagawa light",
       "material light",
+      "material-theme-palenight dark",
+      "nord dark",
       "one dark",
+      "plastic dark",
+      "poimandres dark",
+      "rose-pine light",
+      "snazzy-light light",
       "solarized dark",
       "solarized light",
+      "tokyo-night dark",
     ]);
   });
 
@@ -253,6 +303,42 @@ describe("설계 리뷰 H1~H3: 규칙마다 실패할 수 있는 가드와 대�
     expect(rowsBad("H1", true)).toEqual([]);
   });
 
+  it("H-B 보정 없이는 옅은 채움 다섯 위에서 글자·톤 글자·아이콘·테두리가 못 미치는 행이 대부분이다 (띠 전수)", () => {
+    const bandBad = (adjust: boolean) =>
+      ROWS.filter((row) => {
+        const derived = derivedOrRaw(row.seed, adjust);
+        return derived !== null && bandViolations(derived.tokens).length > 0;
+      }).length;
+    expect(bandBad(false)).toBeGreaterThanOrEqual(50);
+    expect(bandBad(true)).toBe(0);
+  });
+
+  it("H-C 씨앗만으로도 겹치는 행이 있고(comment가 fg와 같은 색), 보정이 `ink-muted`를 4.5까지 올리면 더 많은 행이 겹쳐서 `ink`를 민다", () => {
+    // 보정을 끈 값은 씨앗 그대로라 겹침이 적다(측정 1/57). 겹침의 대부분은 `ink-muted`가 칩 그릇 위 4.5까지 올라오면서 생긴다:
+    // 그 길의 가드는 「보정을 켜면 위반 0」 시험과 `ink`를 밀지 않았을 때 그 시험이 빨개지는 사보타주(S36)가 맡는다.
+    expect(rowsBad("HC", false).length).toBeGreaterThanOrEqual(1);
+    expect(rowsBad("HC", true)).toEqual([]);
+    // 씨앗이 이미 같은 색인 행(houston 다크·material 라이트)은 섞은 색에서 출발해 위계를 만든다.
+    for (const [id, mode] of [["houston", "dark"], ["material", "light"]] as const) {
+      const seed = THEME_CATALOG.find((e) => e.id === id)![mode]!;
+      expect(oklabDistance(seed.fg, seed.comment ?? seed.fg)).toBeLessThan(0.05);
+      const c = deriveThemeMode(seed).tokens.color;
+      expect(oklabDistance(c.ink, c["ink-muted"])).toBeGreaterThanOrEqual(HIERARCHY_MIN_DISTANCE - 1e-9);
+    }
+  });
+
+  it("옅은 채움 다섯은 칩 그릇 띠 안에 놓인다 (가장 바깥은 `muted-soft`의 휘도): 띠의 끝에서 지키면 안쪽은 따라온다", () => {
+    for (const row of ROWS) {
+      const { tokens, mode } = deriveThemeMode(row.seed);
+      const edge = luminance(tokens.derived["muted-soft"]);
+      for (const role of ["signal-soft", "agent-soft", "ok-soft", "warn-soft", "danger-soft"] as const) {
+        const y = luminance(tokens.color[role]);
+        const inside = mode === "light" ? y >= edge - 1e-6 : y <= edge + 1e-6;
+        expect([row.id, row.mode, role, inside]).toEqual([row.id, row.mode, role, true]);
+      }
+    }
+  });
+
   it("H2 보정 없이는 몇 행에서 신호가 중립 역할(선·아이콘·글자)에 접힌다 (측정 6/57)", () => {
     expect(rowsBad("H2", false).length).toBeGreaterThanOrEqual(4);
     expect(rowsBad("H2", true)).toEqual([]);
@@ -265,7 +351,7 @@ describe("설계 리뷰 H1~H3: 규칙마다 실패할 수 있는 가드와 대�
 
   it.each(
     THEME_IDS.flatMap((id) => (["light", "dark"] as const).map((mode) => [`${id} ${mode}`, id, mode] as const))
-  )("대조군 %s: 첫 파티도 같은 세 규칙을 이미 지킨다 (자의 출처는 첫 파티다)", (_name, id, mode) => {
+  )("대조군 %s: 첫 파티도 같은 네 규칙(H1·H2·H3·위계)을 이미 지킨다 (자의 출처는 첫 파티다)", (_name, id, mode) => {
     expect(reviewViolations(THEMES[id][mode])).toEqual([]);
   });
 
@@ -279,7 +365,19 @@ describe("설계 리뷰 H1~H3: 규칙마다 실패할 수 있는 가드와 대�
     // 측정: 씨앗 52 · 기본 2 · 프리셋 3. 씨앗이 쓰이는 것이 기본이다(옅은 씨앗은 채도를 올려서 받는다).
     expect(sources).toEqual({ seed: 52, default: 2, preset: 3 });
     const boosted = ROWS.filter((row) => deriveThemeMode(row.seed).signal.boosted === true).length;
-    expect(boosted).toBe(20); // 씨앗 52곳 가운데 20곳이 채도를 올렸고(중립과 0.06 갈릴 만큼만), 32곳은 자기 씨앗 그대로다
+    expect(boosted).toBe(19); // 씨앗 52곳 가운데 19곳이 채도를 올렸고(중립과 0.06 갈릴 만큼만), 33곳은 자기 씨앗 그대로다
+  });
+
+  it("순서를 지키려고 warn을 먼저 누르지 않는다: danger를 올린다 (tokyo-night 다크: 위험색 씨앗이 옅다)", () => {
+    const seed = THEME_CATALOG.find((e) => e.id === "tokyo-night")!.dark!;
+    const derived = deriveThemeMode(seed);
+    const c = derived.tokens.color;
+    // 위험색 씨앗(#914c54)은 채도 .093이라 경고색(.106)보다 옅다. 예전에는 warn을 .08 아래로 눌러서 베이지가 됐다(설계 리뷰 2차
+    // Medium 2). 지금은 danger를 .13 넘게 올리고 warn은 씨앗의 채도를 지킨다.
+    expect(chromaOf(c.danger)).toBeGreaterThan(0.13);
+    expect(chromaOf(c.warn)).toBeGreaterThan(0.1);
+    expect(chromaOf(c.danger)).toBeGreaterThan(chromaOf(c.warn) + 0.01);
+    expect(derived.notes.find((n) => n.role === "danger")?.delta).toBeGreaterThan(0.05);
   });
 
   it("에이전트 색상각은 작은 쪽으로 돌린다: 57행의 회전은 모두 60° 이하다 (한 방향으로만 돌릴 때는 135°까지였다)", () => {
@@ -321,17 +419,18 @@ describe("골든: 청사진 부록 C의 값과 한 글자까지 같은 곳과 �
     expect(c.surface).toBe("#ffffff");
     expect(c["surface-muted"]).toBe("#f5f5f5");
     expect(c.ink).toBe("#24292e");
-    // 프로토타입 골든은 `ink-muted` #68717b · `icon` #888f96 · `line-strong` #8c8e91이었다. 칩 그릇·눌린 행 위 4.5(H1)와
-    // 중립 채도 상한(H3)이 이 셋을 조금 더 어둡고 덜 푸르게 옮겼다. 면(`surface`·`surface-muted`·바닥)과 `ink`·`line`은 그대로다.
+    // 프로토타입 골든은 `ink-muted` #68717b · `icon` #888f96 · `line-strong` #8c8e91이었다. 칩 그릇·눌린 행·옅은 채움 위
+    // 4.5·3(H1·H-B)과 중립 채도 상한(H3)이 이 셋을 더 어둡고 덜 푸르게 옮겼다. 면(`surface`·`surface-muted`·바닥)과
+    // `ink`·`line`은 그대로다.
     expect(c["ink-muted"]).toBe("#5d656f");
-    expect(c.icon).toBe("#858a91");
+    expect(c.icon).toBe("#7b8188");
     expect(c.line).toBe("#e5e5e6");
-    expect(c["line-strong"]).toBe("#888a8d");
+    expect(c["line-strong"]).toBe("#7f8083");
     expect(contrast(c.ink, c.surface)).toBeCloseTo(14.67, 2);
     expect(contrast(c["ink-muted"], c.surface)).toBeCloseTo(5.9, 2);
     expect(contrast(c["ink-muted"], tokens.derived["muted-soft"])).toBeGreaterThanOrEqual(4.5);
     expect(contrast(c["ink-muted"], tokens.canvas[0])).toBeCloseTo(5.46, 2);
-    expect(contrast(c["line-strong"], tokens.canvas[0])).toBeCloseTo(3.2, 2);
+    expect(contrast(c["line-strong"], tokens.canvas[0])).toBeCloseTo(3.65, 2);
   });
 
   it("dracula 다크: 다크의 면은 판을 한 단씩 올린 값이다", () => {
@@ -359,9 +458,14 @@ describe("골든: 청사진 부록 C의 값과 한 글자까지 같은 곳과 �
     expect(oklabDistance(c.agent, c["signal-text"])).toBeGreaterThanOrEqual(SIGNAL_MIN_DISTANCE);
   });
 
-  it("catppuccin 라이트: 불투명에서도 ink 7:1에 못 닿는 바탕이라 유리 불가 후보다 (글자는 7.06)", () => {
+  it("catppuccin 라이트: 씨앗 ink(#4c4f69)가 `ink-muted`와 겹치지 않게 더 어두워졌다 (표면 위 7.06 → 9.37, 유리 하한 표가 바뀐다)", () => {
+    const seed = THEME_CATALOG.find((e) => e.id === "catppuccin")!.light!;
     const { tokens } = get("catppuccin", "light");
-    expect(contrast(tokens.color.ink, tokens.color.surface)).toBeCloseTo(7.06, 2);
+    // 프로토타입은 이 행을 「불투명에서도 ink 7:1에 못 닿는 바탕」(유리 불가)으로 적었다(글자 7.06). 위계 규칙(H-C)이 `ink`를
+    // 씨앗 너머로 밀어서 지금은 닿는다. 유리 하한(AP-3)은 이 토큰에서 다시 계산된다.
+    expect(contrast(seed.fg, tokens.color.surface)).toBeCloseTo(7.06, 2);
+    expect(contrast(tokens.color.ink, tokens.color.surface)).toBeGreaterThan(9);
+    expect(toOklch(tokens.color.ink).L).toBeLessThan(toOklch(seed.fg).L);
   });
 });
 
@@ -378,11 +482,11 @@ describe("신호: 씨앗 → 기본 → 네 프리셋 → 중립, 에이전트�
     expect(derived.signal).toEqual({ source: "default", seedRejection: "near-danger" });
   });
 
-  it("기본 신호도 위험색에 걸리면 네 프리셋 가운데 처음 서는 것으로 물러난다 (synthwave-84 다크: 혜성, 중립으로 접히지 않는다)", () => {
+  it("기본 신호도 위험색에 걸리면 네 프리셋 가운데 처음 서는 것으로 물러난다 (synthwave-84 다크: 성운, 중립으로 접히지 않는다)", () => {
     const derived = deriveThemeMode(THEME_CATALOG.find((e) => e.id === "synthwave-84")!.dark!);
     expect(derived.signal).toEqual({
       source: "preset",
-      preset: "hyeseong",
+      preset: "seongun",
       seedRejection: "near-danger",
       defaultRejection: "near-danger",
     });
@@ -494,8 +598,8 @@ describe("신호: 씨앗 → 기본 → 네 프리셋 → 중립, 에이전트�
     expect(byPreset.hongyeom).toBeGreaterThan(byPreset.gamram ?? 0);
     // 구현 실측이다(테마 토큰 표 §8.5의 프로토타입 값은 합 39 · 홍염 26 · 성운 13이었다). 숫자가 움직이면 파생 산수가
     // 바뀐 것이니 고치는 사람이 알고 고친다. 혜성·감람은 한 곳도 거절되지 않는다.
-    expect(reasons).toEqual({ "near-danger": 43 });
-    expect(byPreset).toEqual({ hongyeom: 29, seongun: 14 });
+    expect(reasons).toEqual({ "near-danger": 37 });
+    expect(byPreset).toEqual({ hongyeom: 26, seongun: 11 });
   });
 
   it("agentYields가 켜진 풀이는 near-agent로 거절하지 않고, 꺼진 풀이는 거절한다", () => {
