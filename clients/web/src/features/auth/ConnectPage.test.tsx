@@ -10,6 +10,7 @@ import { applyLogin, clearSession } from "@/lib/session";
 import { useRestoredSession } from "@/app/session";
 import { clearRecentServers } from "./recentServers";
 import { ConnectPage } from "./ConnectPage";
+import { NEW_WORKSPACE_ENTRY_GUIDE } from "./loginWorkspaceEntry";
 import {
   clearPhoneLinkCardForTests,
   readPhoneLinkCard,
@@ -683,6 +684,25 @@ describe("D1 로그인 한 화면 (#2809 OB2-3)", () => {
     mount();
     click("login-workspace-toggle");
     expect(q("login-workspace")).not.toBeNull();
+  });
+
+  it("names the escape hatch in the words a new workspace's success panel tells people to look for (#4198)", () => {
+    setServerBase("https://team.example.com");
+    mount();
+    // 새 워크스페이스를 만든 직후의 안내(`NEW_WORKSPACE_ENTRY_GUIDE`)는 이 두 이름을 부른다. 옛 안내는
+    // 로그인 폼이 받지 않는 값(슬러그)을 약속했다(서버는 슬러그를 400으로 거절한다). 여기서는
+    // **화면에 그려진 글자**를 읽어 안내가 부르는 이름과 맞는지 잰다.
+    const toggle = q("login-workspace-toggle")?.textContent ?? "";
+    expect(toggle).toBe("다른 워크스페이스로 로그인");
+    expect(NEW_WORKSPACE_ENTRY_GUIDE).toContain(`「${toggle}」`);
+
+    click("login-workspace-toggle");
+    const label = document.querySelector('label[for="connect-workspace"]')?.textContent ?? "";
+    const fieldName = label.replace(/\s*\(선택\)\s*$/, "");
+    expect(fieldName).toBe("워크스페이스 ID");
+    expect(NEW_WORKSPACE_ENTRY_GUIDE).toContain(`${fieldName} 칸`);
+    // 그 칸은 슬러그를 받는 칸이라고 말하지 않는다.
+    expect(label).not.toContain("슬러그");
   });
 });
 
