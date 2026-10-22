@@ -19,7 +19,13 @@ export const ROW_DESCRIPTION =
 function Pending() {
   return (
     <SettingsRow label={ROW_LABEL} description={ROW_DESCRIPTION} testId="theme-style-row-pending">
-      <span aria-hidden="true" className="theme-style-skeleton" />
+      {/* 접힌 행(`ThemeGallery`의 트리거)과 같은 배치: 이름 자리 막대 + 썸네일 자리 막대. 좁은 카드에서도 같이 세로로 쌓인다. */}
+      <span aria-hidden="true" className="theme-style-trigger">
+        <span className="theme-style-skeleton-name" />
+        <span className="theme-style-trigger-tail">
+          <span className="theme-style-skeleton" />
+        </span>
+      </span>
     </SettingsRow>
   );
 }

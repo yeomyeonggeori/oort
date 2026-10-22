@@ -56,6 +56,82 @@ describe("미니 앱 제목: 말줄임이 아니라 뺀다", () => {
   });
 });
 
+describe("접힌 행의 트리거: 배치는 카드 폭이 정하고 이름 길이가 정하지 않는다 (설계 리뷰 3차 M-1)", () => {
+  const row = readFileSync(new URL("../../features/settings/appearance/ThemeStyleRow.tsx", import.meta.url), "utf8");
+  const gallery = readFileSync(new URL("../../features/settings/appearance/ThemeGallery.tsx", import.meta.url), "utf8");
+
+  it("트리거는 줄바꿈 없는 flex이고, 썸네일과 chevron은 한 덩이(tail)다", () => {
+    const body = ruleBody(css, ".theme-style-trigger");
+    expect(body).toContain("display: flex");
+    expect(body).not.toContain("flex-wrap");
+    expect(ruleBody(css, ".theme-style-trigger-tail")).toContain("flex: none");
+  });
+
+  it("카드가 좁으면 이름이 윗줄이고 tail이 아랫줄이다: 컨테이너 질의(카드 `settings-card`가 컨테이너)", () => {
+    const at = css.indexOf("@container (width < 26.5rem) {");
+    expect(at).toBeGreaterThanOrEqual(0);
+    const block = css.slice(at, css.indexOf("\n}\n", at));
+    expect(block).toContain(".theme-style-trigger");
+    expect(block).toContain("flex-direction: column");
+    expect(block).toContain("align-items: flex-start");
+    expect(tokens).toMatch(/@utility settings-card \{\s*container-type: inline-size/);
+  });
+
+  it("기준 폭은 가장 긴 이름 + 썸네일 + chevron + 간격 + 여백이 한 줄에 드는 카드 폭이다 (그보다 넓을 때만 가로)", () => {
+    const tileMin = Number(/--spacing-theme-tile-min:\s*(\d+)px/.exec(tokens)![1]);
+    const thumb = tileMin * Number(/--theme-thumb-width:\s*calc\(var\(--spacing-theme-tile-min\) \* ([0-9.]+)\)/.exec(css)![1]);
+    const spacing = (n: number) => Number(new RegExp(`--spacing-${n}:\\s*(\\d+)px`).exec(tokens)![1]);
+    const LONGEST_NAME = 132; // 캡처 `names.json`: Catppuccin Macchiato (text-meta 굵게)
+    const CHEVRON = 16; // `size-4`
+    const need = LONGEST_NAME + thumb + CHEVRON + 2 * spacing(3) /* 이름 · 썸네일 · chevron 사이 */ + 2 * spacing(2) /* 트리거 안쪽 */ + 2 * spacing(4) /* 설정 행 좌우 */;
+    const rem = Number(/@container \(width < ([0-9.]+)rem\) \{\s*\.theme-style-trigger \{/.exec(css)![1]);
+    expect(rem * 16).toBeGreaterThanOrEqual(need);
+    // 설정 행이 가로(라벨 왼쪽, 컨트롤 오른쪽)로 서는 기준(34rem)보다는 아래다: 그 위에서는 트리거가 늘 한 줄이다.
+    expect(rem).toBeLessThan(34);
+    expect(need).toBe(420);
+  });
+
+  it("트리거의 간격·여백은 이름 있는 토큰이다 (색 리터럴·임의값 없음)", () => {
+    const body = ruleBody(css, ".theme-style-trigger");
+    expect(body).toContain("gap: var(--spacing-3)");
+    expect(body).toContain("padding: var(--spacing-1) var(--spacing-2)");
+  });
+
+  it("접힌 행과 대기 자리가 같은 구조다: 청크가 도착해도 행 높이가 변하지 않는다", () => {
+    expect(row).toContain('className="theme-style-trigger"');
+    expect(row).toContain("theme-style-skeleton-name");
+    expect(row).toContain("theme-style-trigger-tail");
+    expect(gallery).toContain("theme-style-trigger-tail");
+    expect(gallery).not.toMatch(/flex-wrap/);
+    expect(ruleBody(css, ".theme-style-skeleton-name")).toContain("block-size: var(--text-meta--line-height)");
+  });
+});
+
+describe("폰 폭의 열린 갤러리: 두 열을 지키고 이름은 공백에서 접는다 (설계 리뷰 3차 M-2)", () => {
+  it("카드 22rem 미만에서 열 최소 폭이 줄고, 타일 이름은 말줄임 대신 접힌다", () => {
+    const at = css.indexOf("@container (width < 22rem) {");
+    expect(at).toBeGreaterThanOrEqual(0);
+    const block = css.slice(at, css.indexOf("\n}\n", at));
+    expect(block).toContain("--theme-grid-column-min: calc(var(--spacing-theme-tile-min) * 0.75)");
+    expect(block).toContain(".theme-tile-name");
+    expect(block).toContain("white-space: normal");
+    expect(block).toContain("text-wrap: balance");
+  });
+
+  it("지원 폭 360에서도 두 열이 선다: 열 최소 폭(120) × 2 + 간격 ≤ 360 폭 카드의 격자 안쪽 폭", () => {
+    const tileMin = Number(/--spacing-theme-tile-min:\s*(\d+)px/.exec(tokens)![1]);
+    const narrowMin = tileMin * 0.75;
+    const spacing = (n: number) => Number(new RegExp(`--spacing-${n}:\\s*(\\d+)px`).exec(tokens)![1]);
+    // 360 폭 화면의 설정 카드는 약 310(측정: 한 열일 때 타일 폭 270 + 격자 좌우 여백 8 + 갤러리 좌우 여백 32). 안쪽은 갤러리 좌우 여백(16)과
+    // 격자 좌우 여백(4)을 뺀 값이다.
+    const cardAt360 = 310;
+    const inner = cardAt360 - 2 * spacing(4) - 2 * spacing(1);
+    expect(2 * narrowMin + spacing(4)).toBeLessThanOrEqual(inner);
+    // 기본 열 최소 폭(136)으로는 같은 폭에서 한 열이다: 이 규칙이 일하는 자리다.
+    expect(2 * tileMin * 0.85 + spacing(4)).toBeGreaterThan(inner - 0);
+  });
+});
+
 describe("격자·스크롤·페이드", () => {
   it("격자는 열 최소 폭 기준 auto-fill이다 (폰 두 열 · 데스크탑 네 열)", () => {
     expect(ruleBody(css, ".theme-gallery-grid")).toContain("repeat(auto-fill, minmax(");

@@ -117,6 +117,20 @@
   color: var(--ink);
 }
 
+/* 폰 폭(카드 22rem 미만, 360~390)에서는 열 최소 폭을 줄여 두 열을 지킨다. 375·360에서 한 열이면 타일 한 장이 화면 폭을 다 쓰고 다크
+ * 탭의 안쪽 스크롤이 9,000px를 넘는다(설계 리뷰 3차 M-2). 두 열이 되면 가장 긴 이름(132)이 타일(약 120)보다 길어져서, 이름은 말줄임
+ * 대신 공백에서 두 줄로 접는다(낱말 한가운데서는 끊지 않는다). 지원 폭은 360 이상이다: 320에서는 한 열이다. */
+@container (width < 22rem) {
+  .theme-gallery-region {
+    --theme-grid-column-min: calc(var(--spacing-theme-tile-min) * 0.75);
+  }
+
+  .theme-tile-name {
+    white-space: normal;
+    text-wrap: balance;
+  }
+}
+
 /* 미니 앱의 제목 글자(「오늘 배포」)는 폭이 모자라면 「오늘…」로 줄이지 않고 **뺀다**: 말줄임표가 든 견본은 어느 타일에서나
  * 같은 자리에서 잘려 엉성해 보인다. 기준은 제목과 알약이 한 줄에 온전히 드는 최소 폭(11rem)이고, 갤러리 타일(약 140~160)은
  * 아래이며 접힌 행의 썸네일(200)과 큰 미리보기 카드는 그 위라 글자가 남는다. 타일과 썸네일 틀이 컨테이너다(큰 미리보기
@@ -136,6 +150,43 @@
 .theme-style-thumb {
   inline-size: var(--theme-thumb-width);
   flex: none;
+}
+
+/* 접힌 행의 트리거: 이름 하나와 (썸네일 + chevron) 한 덩이다. 배치는 **이름의 길이가 아니라 카드의 폭**이 정한다: 한 줄이 들 만큼
+ * 넓으면 가로(이름 · 썸네일 · chevron), 아니면 이름이 윗줄이고 썸네일과 chevron이 아랫줄이다. 줄바꿈 flex로 두면 이름마다 배치가
+ * 셋으로 갈려서(한 줄 · chevron만 아랫줄에 홀로 · 이름 위 썸네일 아래) 선택할 때마다 행 높이가 뛰고 펼침 단서가 썸네일에서
+ * 떨어졌다(설계 리뷰 3차 M-1). 기준은 가장 긴 카탈로그 이름(132) + 썸네일(200) + chevron(16) + 간격 둘(24) + 트리거 안쪽
+ * 여백(16)에 설정 행의 좌우 여백(32)을 더한 420이고, 카드(`settings-card`)가 컨테이너다. */
+.theme-style-trigger {
+  display: flex;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  align-items: center;
+  gap: var(--spacing-3);
+  padding: var(--spacing-1) var(--spacing-2);
+}
+
+.theme-style-trigger-tail {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--spacing-3);
+}
+
+@container (width < 26.5rem) {
+  .theme-style-trigger {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--spacing-2);
+  }
+}
+
+/* 불러오는 동안 이름 자리: 접힌 행과 같은 배치라(위 규칙) 청크가 도착해도 행 높이가 변하지 않는다. */
+.theme-style-skeleton-name {
+  inline-size: calc(var(--text-meta--line-height) * 4);
+  block-size: var(--text-meta--line-height);
+  border-radius: var(--radius-sm);
+  background-color: var(--surface-muted);
 }
 
 /* 본문 판: 실제 앱의 `app-pane`처럼 1px 선 고리를 두른다. 다크에서 판이 바닥과 거의 같은 색이어도 가장자리가 선다. */
