@@ -15,15 +15,15 @@ import { BackdropCard } from "./appearance/BackdropCard";
 // 슬롯이 열기 전에 아무것도 그리지 않는다는 쪽은 짝 파일 appearanceSlots.test.tsx다.
 // =============================================================================
 
-vi.mock("./appearance/ThemeStyleRow", () => ({ ThemeStyleRow: () => <div data-testid="slot-ThemeStyleRow" /> }));
-vi.mock("./appearance/GlassRows", () => ({ GlassRows: () => <div data-testid="slot-GlassRows" /> }));
-vi.mock("./appearance/ProminentRow", () => ({ ProminentRow: () => <div data-testid="slot-ProminentRow" /> }));
-vi.mock("./appearance/FontSizeRow", () => ({ FontSizeRow: () => <div data-testid="slot-FontSizeRow" /> }));
-vi.mock("./appearance/DensityRow", () => ({ DensityRow: () => <div data-testid="slot-DensityRow" /> }));
-vi.mock("./appearance/ThreadLayoutRow", () => ({ ThreadLayoutRow: () => <div data-testid="slot-ThreadLayoutRow" /> }));
-vi.mock("./appearance/WallpaperRow", () => ({ WallpaperRow: () => <div data-testid="slot-WallpaperRow" /> }));
-vi.mock("./appearance/SidebarColorRow", () => ({ SidebarColorRow: () => <div data-testid="slot-SidebarColorRow" /> }));
-vi.mock("./appearance/MyThemesCard", () => ({ MyThemesCard: () => <div data-testid="slot-MyThemesCard" /> }));
+vi.mock("./appearance/ThemeStyleRow", () => ({ THEME_STYLE_ROW_OPEN: false, ThemeStyleRow: () => <div data-testid="slot-ThemeStyleRow" /> }));
+vi.mock("./appearance/GlassRows", () => ({ GLASS_ROWS_OPEN: false, GlassRows: () => <div data-testid="slot-GlassRows" /> }));
+vi.mock("./appearance/ProminentRow", () => ({ PROMINENT_ROW_OPEN: false, ProminentRow: () => <div data-testid="slot-ProminentRow" /> }));
+vi.mock("./appearance/FontSizeRow", () => ({ FONT_SIZE_ROW_OPEN: false, FontSizeRow: () => <div data-testid="slot-FontSizeRow" /> }));
+vi.mock("./appearance/DensityRow", () => ({ DENSITY_ROW_OPEN: false, DensityRow: () => <div data-testid="slot-DensityRow" /> }));
+vi.mock("./appearance/ThreadLayoutRow", () => ({ THREAD_LAYOUT_ROW_OPEN: false, ThreadLayoutRow: () => <div data-testid="slot-ThreadLayoutRow" /> }));
+vi.mock("./appearance/WallpaperRow", () => ({ WALLPAPER_ROW_OPEN: false, WallpaperRow: () => <div data-testid="slot-WallpaperRow" /> }));
+vi.mock("./appearance/SidebarColorRow", () => ({ SIDEBAR_COLOR_ROW_OPEN: false, SidebarColorRow: () => <div data-testid="slot-SidebarColorRow" /> }));
+vi.mock("./appearance/MyThemesCard", () => ({ MY_THEMES_CARD_OPEN: false, MyThemesCard: () => <div data-testid="slot-MyThemesCard" /> }));
 
 const reactActEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
 let mountedRoot: Root | null = null;

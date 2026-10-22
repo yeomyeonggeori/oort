@@ -3,6 +3,9 @@
 // 지금은 아무것도 그리지 않는다(카드 껍데기도 그리지 않는다: 빈 카드는 가짜 컨트롤보다 나쁘다).
 // AP-5가 이 파일 전체를 카드로 채운다. 합성하는 쪽(`../AppearanceSection.tsx`)은 건드리지 않는다.
 
+/** AP-5가 이 카드를 채우는 PR에서 `true`로 바꾼다(슬롯 시험의 「아무것도 안 그린다」에서 빠진다). */
+export const MY_THEMES_CARD_OPEN: boolean = false;
+
 export function MyThemesCard(): null {
   return null;
 }

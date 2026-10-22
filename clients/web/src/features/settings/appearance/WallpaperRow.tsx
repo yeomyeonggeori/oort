@@ -6,6 +6,12 @@
 // 소유 이슈는 이 파일만 채우고, 값은 `@/design/theme`의 `updateAppearance`·`useAppearance`로
 // 저장·구독한다. 합성하는 쪽(이 행을 부르는 카드)은 건드리지 않는다.
 
+/**
+ * 소유 이슈가 이 행을 열 때 `true`로 바꾼다(컴포넌트를 채우는 같은 PR에서). 열린 행은 슬롯 시험의
+ * 「아무것도 안 그린다」 단정에서 빠지고, 이 행을 부르는 합성 쪽 파일은 고치지 않는다.
+ */
+export const WALLPAPER_ROW_OPEN: boolean = false;
+
 export function WallpaperRow(): null {
   return null;
 }
