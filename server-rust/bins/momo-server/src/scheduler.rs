@@ -96,8 +96,9 @@ pub async fn ensure_write_pool_rls_bound(pool: &PgPool) -> Result<(), SchedulerE
 /// What the canonical send said about one schedule.
 #[derive(Debug)]
 pub(crate) enum Delivery {
-    /// It went out. The caller closes the row (`mark_sent_in_tx`) in the same transaction.
-    Sent(SentMessage),
+    /// It went out. The caller closes the row (`mark_sent_in_tx`) in the same transaction. Boxed:
+    /// a sent message is large next to the one-byte refusal (`clippy::large_enum_variant`).
+    Sent(Box<SentMessage>),
     /// It was refused, and the transaction is healthy (the savepoint was rolled back). The
     /// caller closes the row `failed` with this reason in the same transaction.
     Refused(ScheduleFailure),
@@ -192,7 +193,7 @@ pub(crate) async fn deliver_schedule_in_tx(
             momo_db::sqlx::query("RELEASE SAVEPOINT scheduled_send")
                 .execute(&mut *conn)
                 .await?;
-            Ok(Delivery::Sent(sent))
+            Ok(Delivery::Sent(Box::new(sent)))
         }
         Err(refusal) => {
             rollback_to_savepoint(conn).await?;

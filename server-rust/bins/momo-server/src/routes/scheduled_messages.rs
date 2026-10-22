@@ -790,7 +790,8 @@ pub async fn delete(
 // ---------------------------------------------------------------------------
 
 enum SendNow {
-    Sent(ScheduledMessage),
+    /// Boxed: the row is large next to the one-byte refusal (`clippy::large_enum_variant`).
+    Sent(Box<ScheduledMessage>),
     /// The canonical send refused it; the row is `failed` with this reason and that is committed.
     Refused(ScheduleFailure),
 }
@@ -849,7 +850,7 @@ pub async fn send_now(
                                 .into(),
                         ))));
                     };
-                    Ok(SendNow::Sent(closed))
+                    Ok(SendNow::Sent(Box::new(closed)))
                 }
                 Delivery::Refused(reason) => {
                     if mark_failed_in_tx(conn, member_id, row.id, reason, actor)
