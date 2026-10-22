@@ -561,6 +561,46 @@ export function githubReturnSentence(
 }
 
 /**
+ * 로그인 안 된 브라우저의 착지(#4220)가 바꿔 읽는 말. 데스크탑에서 시작한 일이 시스템 브라우저에서
+ * 끝나면 그 브라우저에는 앱 화면도 워크스페이스도 없다. 로그인된 화면을 가리키는 말(「이 화면」
+ * 「새로고침」「이 워크스페이스」)만 이 페이지에서도 맞는 말로 바꾸고, 판정(톤)과 닫힌 단어 집합은
+ * 건드리지 않는다.
+ *
+ * 앱 쪽 `seal_failed` 는 일부러 그대로 둔다: 데스크탑에서 시작한 등록은 이 브라우저에서 끝나서, 운영자가
+ * 그 이유(서버 키 설정)를 알 곳이 여기뿐이다. 환경 변수 이름은 비밀이 아니다.
+ */
+const PUBLIC_OVERRIDES: Readonly<
+  Record<GithubReturnKind, Readonly<Record<string, { sentence?: string; next?: string }>>>
+> = {
+  install: {
+    linked: { sentence: "GitHub 계정이 워크스페이스에 연결됐어요." },
+    pending: { next: "잠시 뒤 oort 앱의 GitHub 화면에서 연결됐는지 확인해 보세요." },
+    requested: {
+      next: "소유자가 설치하면 서버를 관리하는 분이 oort 앱 GitHub 화면의 「연결 안 된 설치」에서 워크스페이스에 붙여요.",
+    },
+    state_missing: {
+      next: "서버를 관리하는 분이 oort 앱 GitHub 화면의 「연결 안 된 설치」에서 워크스페이스에 붙여 줘야 해요.",
+    },
+  },
+  app: {},
+};
+
+/**
+ * 로그인 안 된 브라우저의 착지가 읽는 문장. 모르는 단어는 `githubReturnSentence` 와 같이 null 이다.
+ * 판정(톤)은 늘 같다.
+ */
+export function githubPublicReturnSentence(
+  kind: GithubReturnKind,
+  word: string
+): GithubReturnSentence | null {
+  const base = githubReturnSentence(kind, word);
+  if (base === null) return null;
+  const table = PUBLIC_OVERRIDES[kind];
+  const changed = Object.prototype.hasOwnProperty.call(table, word) ? table[word] : undefined;
+  return changed === undefined ? base : { ...base, ...changed };
+}
+
+/**
  * 주소에서 돌아온 단어를 꺼낸다. 아는 단어 하나만 돌려주고, 나머지는 null.
  * `search` 는 `window.location.search` 의 값이다.
  */

@@ -8,9 +8,11 @@ import {
   GITHUB_RECEIVE_FAILED_SENTENCE,
   type GithubAppStatus,
 } from "@momo/core/features/github/model";
+import { act } from "react";
 import { click, flush, mount, type as typeInto, unmount, waitUntil } from "../memory/memoryTestKit";
 import { GithubPane } from "./GithubPane";
 import { GH_PUBLIC_CH, GH_WS, overview, q } from "./githubTestKit";
+import { GITHUB_APP_CALLBACK_PATH, GITHUB_HANDOFF_PATH, readGithubHandoff } from "./handoff";
 
 const api = vi.hoisted(() => ({
   fetchGithubOverview: vi.fn(),
@@ -39,10 +41,10 @@ vi.mock("@/features/workspace/useWorkspace", async (importOriginal) => {
     }),
   };
 });
-const desktop = vi.hoisted(() => ({ on: false }));
+const desktop = vi.hoisted(() => ({ on: false, open: vi.fn() }));
 vi.mock("@/lib/tauri", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/tauri")>();
-  return { ...actual, isDesktop: () => desktop.on, openExternalUrl: vi.fn() };
+  return { ...actual, isDesktop: () => desktop.on, openExternalUrl: (url: string) => desktop.open(url) };
 });
 
 const STATUS_BASE: GithubAppStatus = {
@@ -77,6 +79,8 @@ const REGISTERED: GithubAppStatus = {
 
 beforeEach(() => {
   desktop.on = false;
+  desktop.open.mockReset();
+  desktop.open.mockResolvedValue(true);
   for (const fn of Object.values(api)) fn.mockReset();
   api.fetchGithubOverview.mockResolvedValue(overview());
   api.fetchGithubAppStatus.mockResolvedValue(STATUS_BASE);
@@ -158,21 +162,7 @@ describe("운영자 구역", () => {
     expect(q("github-receive-ok")?.textContent).toContain("사라지고");
     expect(q("github-app-registered")?.textContent).toContain("코드(contents)");
     expect(q("github-app-registered")?.textContent).toContain("쓰기 권한은 없어요");
-  });
-
-  it("데스크탑 셸에서는 POST 폼을 열 수 없다고 정직하게 말한다", async () => {
-    desktop.on = true;
-    api.startGithubManifest.mockResolvedValue({
-      registrationUrl: "https://github.com/settings/apps/new?state=s",
-      manifest: { name: "x" },
-      expiresInSeconds: 3600,
-    });
-    await render();
-    await waitUntil(() => q("github-app-register") !== null, "등록 폼");
-    typeInto(q<HTMLInputElement>("github-org-input"), "acme");
-    click(q("github-register-start"));
-    await waitUntil(() => q("github-manifest-desktop") !== null, "데스크탑 안내");
-    expect(q("github-manifest-handoff")).toBeNull();
+    expect(q("github-app-registered")?.textContent).toContain("등록됨");
   });
 
   it("운영자가 아니면(403) 이 구역은 비어 있고 워크스페이스 구역만 선다", async () => {
@@ -341,5 +331,298 @@ describe("워크스페이스 구역", () => {
     await waitUntil(() => q("github-load-failure") !== null, "오류");
     click([...document.querySelectorAll("button")].find((button) => button.textContent === "다시 시도") ?? null);
     await waitUntil(() => q("github-installations") !== null, "다시 읽음");
+  });
+});
+
+// ---- 데스크탑 셸 (#4220) -------------------------------------------------------------------------
+// 셸에는 GitHub 로 POST 하는 폼을 열 길이 없다. 「GitHub 앱 만들기」 한 번이 기본 브라우저 열기이고,
+// 브라우저에서 돌아오면 창 포커스가 상태를 다시 읽는다.
+
+const PUBLIC_ORIGIN = "https://oort.yeomyeonggeori.test";
+const HANDOFF_STATE = `00000000-0000-7000-8000-000000000001.${"7e1b".repeat(16)}`;
+
+function manifestStart(origin = PUBLIC_ORIGIN, expiresInSeconds = 3600) {
+  return {
+    registrationUrl: `https://github.com/organizations/acme/settings/apps/new?state=${HANDOFF_STATE}`,
+    manifest: {
+      name: "oort-oort-yeomyeonggeori-test",
+      url: origin,
+      hook_attributes: { url: `${origin}/v1/integrations/github/webhook`, active: true },
+      redirect_url: `${origin}${GITHUB_APP_CALLBACK_PATH}`,
+      setup_url: `${origin}/v1/integrations/github/setup`,
+      public: false,
+      default_permissions: { metadata: "read", issues: "read", pull_requests: "read", checks: "read", contents: "read" },
+    },
+    expiresInSeconds,
+  };
+}
+
+async function startOnDesktop(start = manifestStart()) {
+  desktop.on = true;
+  api.startGithubManifest.mockResolvedValue(start);
+  await render();
+  await waitUntil(() => q("github-app-register") !== null, "등록 폼");
+  typeInto(q<HTMLInputElement>("github-org-input"), "acme");
+  click(q("github-register-start"));
+  await waitUntil(() => q("github-manifest-browser") !== null || q("github-manifest-browser-unavailable") !== null, "브라우저 카드");
+}
+
+function focusReturns(): void {
+  act(() => {
+    window.dispatchEvent(new Event("focus"));
+  });
+}
+
+describe("운영자 구역: 데스크탑 셸은 기본 브라우저로 GitHub 앱을 만든다", () => {
+  it("「GitHub 앱 만들기」 한 번이 곧 브라우저 열기이고 막다른 문장이 없다", async () => {
+    await startOnDesktop();
+    expect(api.startGithubManifest).toHaveBeenCalledWith({ ownerType: "organization", organization: "acme" });
+    expect(desktop.open).toHaveBeenCalledTimes(1);
+    const url = String(desktop.open.mock.calls[0][0]);
+    // 이 단정들이 「데스크탑 분기가 다시 막다른 문장을 그리면 빨개지는」 사보타주 대상이다.
+    expect(q("github-manifest-desktop")).toBeNull();
+    expect(q("github-manifest-handoff")).toBeNull();
+    expect(document.body.textContent).not.toContain("열 수 없어요");
+    expect(document.body.textContent).not.toContain("웹 브라우저로 이 서버에 들어와");
+    expect(q("github-manifest-browser")?.textContent).toContain("기본 브라우저에서 GitHub를 열었어요.");
+    expect(q("github-manifest-browser")?.textContent).toContain("60분 안에 마쳐야 해요");
+    expect(url.startsWith(`${PUBLIC_ORIGIN}${GITHUB_HANDOFF_PATH}#`)).toBe(true);
+  });
+
+  it("열리는 주소는 서버의 공개 오리진이고 state 는 쿼리가 아니라 조각에만 있다", async () => {
+    await startOnDesktop();
+    const url = String(desktop.open.mock.calls[0][0]);
+    const parsed = new URL(url);
+    // 이 단정들이 「핸드오프가 state 를 쿼리스트링으로 흘리면 빨개지는」 사보타주 대상이다.
+    expect(parsed.search).toBe("");
+    expect(url.split("#")[0]).not.toContain(HANDOFF_STATE);
+    expect(url).not.toContain("state=");
+    // 받는 쪽이 이 주소로 같은 등록 주소와 매니페스트를 읽는다.
+    const read = readGithubHandoff(parsed.hash, PUBLIC_ORIGIN);
+    expect(read.ok && read.handoff.registrationUrl).toBe(manifestStart().registrationUrl);
+    expect(read.ok && JSON.parse(read.handoff.manifestJson)).toEqual(manifestStart().manifest);
+    // 카드와 화면 글자에는 state 가 없다.
+    expect(document.body.textContent).not.toContain(HANDOFF_STATE);
+  });
+
+  it("열기 전후에 콘솔·저장소·쿠키에 state 를 쓰지 않는다", async () => {
+    const spies = (["log", "info", "warn", "error", "debug"] as const).map((name) =>
+      vi.spyOn(console, name).mockImplementation(() => undefined)
+    );
+    try {
+      await startOnDesktop();
+      const hash = new URL(String(desktop.open.mock.calls[0][0])).hash.slice(1);
+      const written = JSON.stringify({
+        logs: spies.flatMap((spy) => spy.mock.calls),
+        local: { ...localStorage },
+        session: { ...sessionStorage },
+        cookie: document.cookie,
+      });
+      // 이 단정이 「주소를 로그로 찍으면 빨개지는」 사보타주 대상이다.
+      expect(written).not.toContain(HANDOFF_STATE);
+      expect(written).not.toContain(hash);
+      expect(localStorage.length).toBe(0);
+      expect(sessionStorage.length).toBe(0);
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+  });
+
+  it("알림 영역은 글줄만 감싼다: 단추는 영역 밖이라 결과가 바뀌어도 단추 글자가 다시 읽히지 않는다", async () => {
+    await startOnDesktop();
+    const card = q("github-manifest-browser") as HTMLElement;
+    const live = card.querySelector('[role="status"]') as HTMLElement;
+    // 이 단정이 「단추를 알림 영역 안에 두면 빨개지는」 사보타주 대상이다(design-review L6).
+    expect(live).not.toBeNull();
+    expect(card.getAttribute("role")).toBeNull();
+    expect(live.contains(q("github-manifest-browser-open"))).toBe(false);
+    expect(live.textContent).toContain("기본 브라우저에서 GitHub를 열었어요.");
+  });
+
+  it("「」 단추 이름과 조사는 한 덩어리라 좁은 폭에서 조사가 줄머리에 서지 않는다", async () => {
+    await startOnDesktop();
+    // 이 단정이 「묶음을 풀면 빨개지는」 사보타주 대상이다(design-review M2).
+    const nowrap = [...(q("github-manifest-browser") as HTMLElement).querySelectorAll("span.whitespace-nowrap")].map((el) => el.textContent);
+    expect(nowrap).toContain("「Create GitHub App」을");
+    expect(nowrap).toContain("마쳐야 해요.");
+  });
+
+  it("단추 이름은 두 상태에서 같다(막힌 화면의 안내가 그 이름으로 가리킨다)", async () => {
+    desktop.open.mockResolvedValueOnce(false);
+    await startOnDesktop();
+    await waitUntil(() => q("github-manifest-browser")?.getAttribute("data-outcome") === "failed", "열기 실패");
+    expect(q("github-manifest-browser-open")?.textContent).toBe("브라우저에서 다시 열기");
+    click(q("github-manifest-browser-open"));
+    await waitUntil(() => q("github-manifest-browser")?.getAttribute("data-outcome") === "opened", "다시 열림");
+    expect(q("github-manifest-browser-open")?.textContent).toBe("브라우저에서 다시 열기");
+  });
+
+  it("브라우저를 열지 못하면 그렇게 말하고 같은 주소로 다시 열 수 있다", async () => {
+    desktop.open.mockResolvedValueOnce(false);
+    await startOnDesktop();
+    await waitUntil(() => q("github-manifest-browser")?.getAttribute("data-outcome") === "failed", "열기 실패");
+    expect(q("github-manifest-browser")?.textContent).toContain("기본 브라우저를 열지 못했어요.");
+    // 일시적인 실패만 가정하지 않는다(design-review Nitpick).
+    expect(q("github-manifest-browser")?.textContent).not.toContain("잠시 뒤");
+    expect(api.startGithubManifest).toHaveBeenCalledTimes(1);
+    const firstUrl = String(desktop.open.mock.calls[0][0]);
+    click(q("github-manifest-browser-open"));
+    await waitUntil(() => q("github-manifest-browser")?.getAttribute("data-outcome") === "opened", "다시 열림");
+    expect(desktop.open).toHaveBeenCalledTimes(2);
+    // 새 state 를 만들지 않고 들고 있던 주소를 그대로 다시 연다.
+    expect(String(desktop.open.mock.calls[1][0])).toBe(firstUrl);
+    expect(api.startGithubManifest).toHaveBeenCalledTimes(1);
+  });
+
+  it("「GitHub 앱 만들기」를 다시 누르면 새 등록 상태로 다시 연다", async () => {
+    await startOnDesktop();
+    api.startGithubManifest.mockResolvedValue({
+      ...manifestStart(),
+      registrationUrl: `https://github.com/organizations/acme/settings/apps/new?state=${"00000000-0000-7000-8000-000000000001"}.${"9a2c".repeat(16)}`,
+    });
+    click(q("github-register-start"));
+    await waitUntil(() => desktop.open.mock.calls.length === 2, "두 번째 열기");
+    expect(String(desktop.open.mock.calls[1][0])).not.toBe(String(desktop.open.mock.calls[0][0]));
+  });
+
+  it("공개 주소가 너무 길어 opener 한도를 넘으면 열지 않고 직접 말한다", async () => {
+    // 이 시험의 매니페스트는 짧아서(설명·이벤트 목록이 없다) 한도에 닿으려면 주소가 훨씬 길어야 한다. 실제
+    // 매니페스트로 잰 경계는 handoff.test.ts 가 맡는다.
+    await startOnDesktop(manifestStart(`https://${"deep-team-name.".repeat(24)}example.com`));
+    expect(desktop.open).toHaveBeenCalledTimes(0);
+    expect(q("github-manifest-browser-unavailable")?.textContent).toContain("공개 주소가 너무 길어서");
+    expect(q("github-manifest-browser")).toBeNull();
+  });
+
+  it("서버가 보낸 콜백이 https 가 아니면 열지 않는다", async () => {
+    await startOnDesktop(manifestStart("http://oort.yeomyeonggeori.test"));
+    expect(desktop.open).toHaveBeenCalledTimes(0);
+    expect(q("github-manifest-browser-unavailable")).not.toBeNull();
+  });
+
+  it("창 포커스가 돌아오면 상태를 다시 읽어 「등록됨」으로 바뀐다", async () => {
+    await startOnDesktop();
+    const reads = api.fetchGithubAppStatus.mock.calls.length;
+    const overviewReads = api.fetchGithubOverview.mock.calls.length;
+    api.fetchGithubAppStatus.mockResolvedValue(REGISTERED);
+    focusReturns();
+    // 이 단정이 「포커스 복귀 리스너를 지우면 빨개지는」 사보타주 대상이다.
+    await waitUntil(() => q("github-app-registered") !== null, "등록됨");
+    expect(api.fetchGithubAppStatus.mock.calls.length).toBeGreaterThan(reads);
+    expect(api.fetchGithubOverview.mock.calls.length).toBeGreaterThan(overviewReads);
+    expect(q("github-app-register")).toBeNull();
+    expect(q("github-manifest-browser")).toBeNull();
+    expect(q("github-app-registered")?.textContent).toContain("oort-yeomyeonggeori");
+    expect(q("github-app-registered")?.textContent).toContain("등록됨");
+  });
+
+  it("보임으로 돌아온 신호도 같은 손잡이이고, 연달아 와도 한 번만 읽는다", async () => {
+    await startOnDesktop();
+    const reads = api.fetchGithubAppStatus.mock.calls.length;
+    api.fetchGithubAppStatus.mockResolvedValue(REGISTERED);
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await waitUntil(() => q("github-app-registered") !== null, "등록됨");
+    expect(api.fetchGithubAppStatus.mock.calls.length).toBe(reads + 1);
+  });
+
+  it("브라우저를 열지 않은 동안에는 포커스가 와도 다시 읽지 않는다", async () => {
+    desktop.on = true;
+    await render();
+    await waitUntil(() => q("github-app-register") !== null, "등록 폼");
+    const reads = api.fetchGithubAppStatus.mock.calls.length;
+    focusReturns();
+    await flush();
+    expect(api.fetchGithubAppStatus.mock.calls.length).toBe(reads);
+  });
+
+  it("웹 브라우저 탭은 그대로다: 폼 POST, 열기 호출 없음, 포커스에 다시 읽지 않는다", async () => {
+    api.startGithubManifest.mockResolvedValue(manifestStart());
+    await render();
+    await waitUntil(() => q("github-app-register") !== null, "등록 폼");
+    typeInto(q<HTMLInputElement>("github-org-input"), "acme");
+    click(q("github-register-start"));
+    await waitUntil(() => q("github-manifest-handoff") !== null, "넘김 폼");
+    const reads = api.fetchGithubAppStatus.mock.calls.length;
+    api.fetchGithubAppStatus.mockResolvedValue(REGISTERED);
+    focusReturns();
+    await flush();
+    expect(desktop.open).toHaveBeenCalledTimes(0);
+    expect(q("github-manifest-browser")).toBeNull();
+    expect(api.fetchGithubAppStatus.mock.calls.length).toBe(reads);
+    expect(q("github-app-registered")).toBeNull();
+    expect(q("github-manifest-handoff")?.getAttribute("target")).toBe("_blank");
+  });
+});
+
+describe("워크스페이스 구역: 데스크탑의 설치는 기본 브라우저에서 한다", () => {
+  async function openInstallLink() {
+    api.fetchGithubOverview.mockResolvedValue(overview({ installations: [] }));
+    api.startGithubLink.mockResolvedValue({
+      installUrl: "https://github.com/apps/oort/installations/new?state=tok",
+      expiresInSeconds: 600,
+    });
+    await render();
+    await waitUntil(() => q("github-link-start") !== null, "연결 버튼");
+    click(q("github-link-start"));
+    await waitUntil(() => q("github-link-open") !== null, "설치 링크");
+  }
+
+  it("설치 링크는 기본 브라우저로 넘기고 창의 기본 이동은 막는다", async () => {
+    desktop.on = true;
+    await openInstallLink();
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+    act(() => {
+      q("github-link-open")?.dispatchEvent(event);
+    });
+    expect(event.defaultPrevented).toBe(true);
+    expect(desktop.open).toHaveBeenCalledTimes(1);
+    expect(desktop.open).toHaveBeenCalledWith("https://github.com/apps/oort/installations/new?state=tok");
+  });
+
+  it("데스크탑의 설치 안내는 앱으로 돌아오라고 말하고, 웹의 안내는 그대로다", async () => {
+    desktop.on = true;
+    await openInstallLink();
+    // 이 단정들이 「데스크탑에서도 이 화면으로 돌아온다고 거짓말하면 빨개지는」 사보타주 대상이다(design-review M1).
+    const text = q("github-link-ready-text")?.textContent ?? "";
+    expect(text).toContain("이 앱으로 돌아와 주세요");
+    expect(text).toContain("돌아오면 이 화면이 알아서 바뀌어요");
+    expect(text).toContain("10분 안에 마쳐야 해요");
+    expect(text).not.toContain("이 화면으로 돌아와요");
+    unmount();
+    desktop.on = false;
+    await openInstallLink();
+    const web = q("github-link-ready-text")?.textContent ?? "";
+    expect(web).toBe("GitHub에서 설치를 마쳐 주세요. 10분 안에 마치면 이 화면으로 돌아와요.");
+  });
+
+  it("웹에서는 평범한 앵커라 열기 호출이 없다", async () => {
+    await openInstallLink();
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+    act(() => {
+      q("github-link-open")?.dispatchEvent(event);
+    });
+    expect(event.defaultPrevented).toBe(false);
+    expect(desktop.open).toHaveBeenCalledTimes(0);
+  });
+
+  it("설치 링크를 열어 둔 채 창이 돌아오면 연결된 계정을 다시 읽는다", async () => {
+    desktop.on = true;
+    await openInstallLink();
+    const reads = api.fetchGithubOverview.mock.calls.length;
+    api.fetchGithubOverview.mockResolvedValue(overview());
+    focusReturns();
+    await waitUntil(() => q("github-installations") !== null, "연결된 계정");
+    expect(api.fetchGithubOverview.mock.calls.length).toBeGreaterThan(reads);
+  });
+
+  it("웹에서는 창 포커스가 개요를 다시 읽지 않는다", async () => {
+    await openInstallLink();
+    const reads = api.fetchGithubOverview.mock.calls.length;
+    focusReturns();
+    await flush();
+    expect(api.fetchGithubOverview.mock.calls.length).toBe(reads);
   });
 });
