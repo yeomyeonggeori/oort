@@ -26,12 +26,13 @@ import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = process.env.OUT_DIR ? resolve(process.env.OUT_DIR) : resolve(WEB_ROOT, "artifacts/gone-dm-4252");
 const PREFIX = process.env.PREFIX || "c4252";
+const VIEWPORT_TAG = process.env.VIEWPORT && process.env.VIEWPORT !== "1440x900" ? `-${process.env.VIEWPORT}` : "";
 const PORT = Number(process.env.CAPTURE_PORT || 5352);
 const ENGINES = (process.env.ENGINES || "chromium,webkit").split(",");
 const MODE = process.env.MODE === "before" ? "before" : "after";
 const DIST_DIR = process.env.DIST_DIR ? resolve(process.env.DIST_DIR) : null;
 const SHOTS = process.env.SHOTS !== "0";
-// SCENE=only-gone: 명부에 있는 DM 이 하나도 없고 나간 멤버 DM 둘뿐인 구역(빈 안내 + 접힌 줄).
+// SCENE=only-gone: 명부에 있는 DM 이 하나도 없고 나간 멤버 DM 둘뿐인 구역(접힌 줄만 서고 「아직 대화가 없습니다」는 서지 않는다).
 const SCENE = process.env.SCENE === "only-gone" ? "only-gone" : "main";
 
 const workspaceId = "00000000-0000-7000-8000-000000000001";
@@ -151,7 +152,9 @@ async function login(page) {
   else await page.getByTestId("dm-avatar").first().waitFor({ timeout: 20_000 });
 }
 
-async function open(browserType, origin, scheme, viewport = { width: 1440, height: 900 }) {
+// VIEWPORT=900x720 처럼 창 크기를 바꿔 같은 장면을 찍는다(검수 phase 2: 1280·900 폭). 기본은 1440x900.
+const [VIEWPORT_W, VIEWPORT_H] = (process.env.VIEWPORT || "1440x900").split("x").map(Number);
+async function open(browserType, origin, scheme, viewport = { width: VIEWPORT_W, height: VIEWPORT_H }) {
   const browser = await browserType.launch();
   const context = await browser.newContext({ viewport, colorScheme: scheme, serviceWorkers: "block", reducedMotion: "reduce" });
   await installMocks(context);
@@ -165,16 +168,17 @@ async function open(browserType, origin, scheme, viewport = { width: 1440, heigh
 
 const rowOf = (page, id) => page.locator(`[data-testid="channel-item"][data-channel-id="${id}"]`);
 
-/** 목록 끝으로 내려 DM 구역 전체가 화면에 들어오게 한다(1440×900 에서는 DM 구역이 접힘선 아래에 있다). */
+/**
+ * DM 구역 끝이 화면에 들어오게 내린다(1440×900 에서는 DM 구역이 접힘선 아래에 있다). 구역의 끝을 `scrollIntoView` 로 맞추면
+ * 중첩된 스크롤 상자를 브라우저가 알아서 따라 내린다: 창 높이가 780 이하면 사이드바 목록의 스크롤 구조가 달라지기 때문이다.
+ */
 const scrollDmsIntoView = (page) =>
   page.evaluate(() => {
     const section = document.querySelector('[data-testid="sidebar-section-dms"]');
-    let el = section?.parentElement ?? null;
-    while (el && el.scrollHeight <= el.clientHeight + 1) el = el.parentElement;
-    if (el) el.scrollTop = el.scrollHeight;
+    section?.scrollIntoView({ block: "end" });
   });
 
-/** 나간 멤버 DM 뿐인 구역: 빈 안내(아직 대화가 없습니다)는 그대로 서고, 접힌 줄이 그 뒤에 선다. */
+/** 나간 멤버 DM 뿐인 구역: 빈 안내(아직 대화가 없습니다)는 서지 않고 접힌 줄만 선다. */
 async function runOnlyGone(browserType, engine, origin) {
   for (const scheme of engine === "chromium" ? ["light", "dark"] : ["light"]) {
     const { browser, context, page } = await open(browserType, origin, scheme);
@@ -182,7 +186,7 @@ async function runOnlyGone(browserType, engine, origin) {
       if (!SHOTS) return;
       await scrollDmsIntoView(page);
       await page.waitForTimeout(200);
-      await page.screenshot({ path: resolve(OUT_DIR, `${PREFIX}-${MODE}-${engine}-${name}-${scheme}.png`), clip: { x: 0, y: 0, width: 420, height: 900 } });
+      await page.screenshot({ path: resolve(OUT_DIR, `${PREFIX}${VIEWPORT_TAG}-${MODE}-${engine}-${name}-${scheme}.png`), clip: { x: 0, y: 0, width: 420, height: Math.min(900, VIEWPORT_H) } });
     };
     const settle = () => page.waitForTimeout(1200);
     const shown = (id) => rowOf(page, id).count().then((n) => n > 0);
@@ -198,7 +202,7 @@ async function runOnlyGone(browserType, engine, origin) {
         const toggle = page.getByTestId("gone-dm-toggle");
         const empty = page.getByTestId("dm-section-empty");
         check(engine, scheme, "O0 나간 멤버 DM 뿐이면 목록에는 아무 행도 없다", !(await shown(GONE_READ_A)) && !(await shown(GONE_READ_B)), null);
-        check(engine, scheme, "O1 빈 안내는 그대로 서고 접힌 줄이 그 뒤에 선다", (await empty.count()) === 1 && (await empty.innerText()).includes("아직 대화가 없습니다") && (await toggle.innerText()).trim() === "나간 멤버와의 대화 2개", null);
+        check(engine, scheme, "O1 「아직 대화가 없습니다」는 서지 않고 접힌 줄만 선다(한 화면이 없다와 2개 있다를 같이 말하지 않는다)", (await empty.count()) === 0 && (await toggle.innerText()).trim() === "나간 멤버와의 대화 2개", null);
         await shot("sidebar-only-gone");
         await toggle.click();
         await page.mouse.move(900, 450);
@@ -217,11 +221,11 @@ async function runEngine(browserType, engine, origin) {
   if (SCENE === "only-gone") return runOnlyGone(browserType, engine, origin);
   for (const scheme of engine === "chromium" ? ["light", "dark"] : ["light"]) {
     const { browser, context, page } = await open(browserType, origin, scheme);
-    const shot = async (name, clip = { x: 0, y: 0, width: 420, height: 900 }) => {
+    const shot = async (name, clip = { x: 0, y: 0, width: 420, height: Math.min(900, VIEWPORT_H) }) => {
       if (!SHOTS) return;
       await scrollDmsIntoView(page);
       await page.waitForTimeout(200);
-      await page.screenshot({ path: resolve(OUT_DIR, `${PREFIX}-${MODE}-${engine}-${name}-${scheme}.png`), clip });
+      await page.screenshot({ path: resolve(OUT_DIR, `${PREFIX}${VIEWPORT_TAG}-${MODE}-${engine}-${name}-${scheme}.png`), clip });
     };
     const shown = (id) => rowOf(page, id).count().then((n) => n > 0);
     const settle = () => page.waitForTimeout(1200);
@@ -238,7 +242,7 @@ async function runEngine(browserType, engine, origin) {
           check(engine, scheme, "B0 수리 전: 나간 멤버 셋이 모두 목록에 있다", (await shown(GONE_READ_A)) && (await shown(GONE_READ_B)) && (await shown(GONE_UNREAD)), names);
           check(engine, scheme, "B1 수리 전: 접힌 줄이 없다", !hasToggle, null);
           await shot("sidebar");
-          await shot("window", { x: 0, y: 0, width: 1440, height: 900 });
+          await shot("window", { x: 0, y: 0, width: VIEWPORT_W, height: VIEWPORT_H });
           return;
         }
         check(engine, scheme, "G0 안 읽음 없는 나간 멤버 둘은 목록에서 접힌다", !(await shown(GONE_READ_A)) && !(await shown(GONE_READ_B)), names);
@@ -250,7 +254,7 @@ async function runEngine(browserType, engine, origin) {
           return t !== null && t?.nextElementSibling === null;
         }), null);
         await shot("sidebar");
-        await shot("window", { x: 0, y: 0, width: 1440, height: 900 });
+        await shot("window", { x: 0, y: 0, width: VIEWPORT_W, height: VIEWPORT_H });
         // 펼친다.
         await toggle.click();
         await page.mouse.move(900, 450);
@@ -295,7 +299,7 @@ async function main() {
     await preview.stop?.();
   }
   const bad = results.filter((r) => !r.ok);
-  writeFileSync(resolve(OUT_DIR, `${PREFIX}-${MODE}-results.json`), JSON.stringify(results, null, 1));
+  writeFileSync(resolve(OUT_DIR, `${PREFIX}${VIEWPORT_TAG}-${MODE}-results.json`), JSON.stringify(results, null, 1));
   console.log(bad.length === 0 ? `GONE-DM-4252 ${MODE} PASS (${results.length} checks)` : `GONE-DM-4252 ${MODE} FAIL (${bad.length}/${results.length}): ${bad.map((r) => `${r.engine}/${r.scheme}/${r.name}`).join(" | ")}`);
   process.exit(bad.length === 0 ? 0 : 1);
 }

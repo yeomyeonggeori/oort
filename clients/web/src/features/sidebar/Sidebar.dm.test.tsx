@@ -1342,12 +1342,33 @@ describe("나간 멤버와의 대화 (#4252)", () => {
     expect(goneToggle(host)).toBeNull();
   });
 
-  it("나간 멤버뿐인 구역: 빈 안내는 그대로이고 접힌 줄이 그 뒤에 선다", async () => {
+  it("나간 멤버뿐인 구역: 「아직 대화가 없습니다」는 서지 않고 접힌 줄만 선다 (한 화면이 「없다」와 「1개 있다」를 같이 말하지 않는다)", async () => {
     channelsQuery.groups = { channels: [], dms: [dms[5]] };
     channelsQuery.data = [dms[5]];
     const host = await mount("/c/none");
+    expect(host.querySelector('[data-testid="dm-section-empty"]')).toBeNull();
+    expect(host.textContent).not.toContain("아직 대화가 없습니다");
+    expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
+  });
+
+  it("DM 이 하나도 없으면 빈 안내는 예전 그대로다 (접힌 줄이 없으니 모순이 없다)", async () => {
+    channelsQuery.groups = { channels: [], dms: [] };
+    channelsQuery.data = [];
+    const host = await mount("/c/none");
     expect(host.querySelector('[data-testid="dm-section-empty"]')?.textContent).toContain(
       "아직 대화가 없습니다"
+    );
+    expect(goneToggle(host)).toBeNull();
+  });
+
+  it("닫은 DM 과 접힌 나간 멤버가 함께 있으면 닫은 대화 힌트가 서고 접힌 줄이 그 뒤에 선다 (두 말은 모순이 아니다)", async () => {
+    channelsQuery.groups = { channels: [], dms: [dms[0], dms[5]] };
+    channelsQuery.data = [dms[0], dms[5]];
+    closeDmOnDevice(WS, DM_ID(1), 3);
+    setReadStates([readState(DM_ID(1), 3)]);
+    const host = await mount("/c/none");
+    expect(host.querySelector('[data-testid="dm-section-empty"]')?.textContent).toContain(
+      "닫은 대화는 새 메시지가 오면 다시 나타납니다"
     );
     expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
   });

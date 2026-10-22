@@ -1,0 +1,154 @@
+[
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "G0 안 읽음 없는 나간 멤버 둘은 목록에서 접힌다",
+  "ok": true,
+  "detail": [
+   "이\n이도현\n2",
+   "박\n박서연",
+   "K\nkwak의 Claude\n, 연결이 꺼져 있어요",
+   "G\ngrok\n, 방금 응답함",
+   "나간 멤버\n1"
+  ]
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "G1 구역 끝의 줄이 「나간 멤버와의 대화 2개」를 센다",
+  "ok": true,
+  "detail": "나간 멤버와의 대화 2개"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "G2 안 읽은 나간 멤버 DM 은 접히지 않는다(알약 1)",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "G3 명부에 있는 DM(꺼진 에이전트 포함)은 그대로다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "G4 접힌 줄은 DM 구역의 마지막 줄이다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "G5 펼치면 접힌 둘이 줄 아래에 선다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "G6 접힌 행은 기본 아바타와 「나간 멤버」다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "G7 접힌 행을 누르면 그 대화가 열린다(주소 /c/…)",
+  "ok": true,
+  "detail": "http://127.0.0.1:5352/#/c/00000000-0000-7000-8000-000000000308"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "G8 줄을 접어도 열려 있는 나간 멤버 DM 은 목록에 남고, 줄은 남은 하나를 센다",
+  "ok": true,
+  "detail": "나간 멤버와의 대화 1개"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "G9 다른 곳으로 옮겨 가면 접힌 줄로 돌아간다(둘)",
+  "ok": true,
+  "detail": "나간 멤버와의 대화 2개"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "G0 안 읽음 없는 나간 멤버 둘은 목록에서 접힌다",
+  "ok": true,
+  "detail": [
+   "이\n이도현\n2",
+   "박\n박서연",
+   "K\nkwak의 Claude\n, 연결이 꺼져 있어요",
+   "G\ngrok\n, 방금 응답함",
+   "나간 멤버\n1"
+  ]
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "G1 구역 끝의 줄이 「나간 멤버와의 대화 2개」를 센다",
+  "ok": true,
+  "detail": "나간 멤버와의 대화 2개"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "G2 안 읽은 나간 멤버 DM 은 접히지 않는다(알약 1)",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "G3 명부에 있는 DM(꺼진 에이전트 포함)은 그대로다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "G4 접힌 줄은 DM 구역의 마지막 줄이다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "G5 펼치면 접힌 둘이 줄 아래에 선다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "G6 접힌 행은 기본 아바타와 「나간 멤버」다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "G7 접힌 행을 누르면 그 대화가 열린다(주소 /c/…)",
+  "ok": true,
+  "detail": "http://127.0.0.1:5352/#/c/00000000-0000-7000-8000-000000000308"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "G8 줄을 접어도 열려 있는 나간 멤버 DM 은 목록에 남고, 줄은 남은 하나를 센다",
+  "ok": true,
+  "detail": "나간 멤버와의 대화 1개"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "G9 다른 곳으로 옮겨 가면 접힌 줄로 돌아간다(둘)",
+  "ok": true,
+  "detail": "나간 멤버와의 대화 2개"
+ }
+]

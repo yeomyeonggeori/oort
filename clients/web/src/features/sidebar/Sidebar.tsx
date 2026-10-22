@@ -1334,9 +1334,12 @@ export function Sidebar({
                 }
               >
                 {dmSection.channels.map((channel) => rowFor(channel))}
+                {/* 접힌 나간 멤버 대화만 남은 구역이 「아직 대화가 없습니다」라고 말하면 바로 아래 「나간 멤버와의 대화 2개」와
+                    모순이다(#4252). 닫은 DM 의 힌트(#3963)는 접힌 줄과 모순이 아니라 그대로 선다. */}
                 {dmSection.channels.length === 0 &&
                   !channelsQuery.isLoading &&
-                  !channelsQuery.error && (
+                  !channelsQuery.error &&
+                  (closedDmCount > 0 || goneDms.length === 0) && (
                     <li
                       className="px-2 py-1 text-meta text-ink-muted"
                       data-testid="dm-section-empty"
