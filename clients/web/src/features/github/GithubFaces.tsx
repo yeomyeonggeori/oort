@@ -1,6 +1,8 @@
 import { Link, useInRouterContext } from "react-router-dom";
 import { GITHUB_PANE_PATH, githubFacesFor } from "@momo/core/features/github/model";
+import { Button } from "@/design/ui/button";
 import { StatusChip } from "@/features/settings/SettingsFields";
+import { useGithubAppStatus } from "./githubQueries";
 
 // =============================================================================
 // 「앱」 화면 GitHub 카드의 얼굴 둘 (ADR-0205 D10, #3955).
@@ -25,6 +27,34 @@ export function GithubFacesChips({ pluginId }: { pluginId: string }) {
         </StatusChip>
       ))}
     </span>
+  );
+}
+
+/**
+ * 이 서버에 GitHub 앱이 아직 없고 보는 사람이 인스턴스 운영자일 때만 서는 한 줄: 「앱」 카드에서 앱을
+ * 만드는 구역으로 바로 들어간다(#4220). 운영자가 아니거나(403) 이 서버에 표면이 없거나(404)
+ * 키가 없거나(503) 이미 앱이 있으면 아무것도 그리지 않아, 그 사람들의 카드는 이전과 같다.
+ * 읽기는 GitHub 알림 화면의 운영자 구역과 같은 질의 칸이다(캐시를 나눈다).
+ */
+function GithubOperatorEntry() {
+  const status = useGithubAppStatus();
+  if (status.data === undefined || status.data.configured) return null;
+  return (
+    <div
+      className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 pt-1"
+      data-testid="github-faces-operator"
+    >
+      {/* 이 카드의 「설치됨」 칩은 도구(각자 에이전트) 얼굴의 말이다. 이 줄은 알림 얼굴의 말이라 무엇을 위한
+          앱인지 함께 말한다(design-review L5). */}
+      <p className="min-w-0 flex-1 basis-pane-sm break-keep text-meta text-ink-muted">
+        알림을 받으려면 이 서버에 GitHub 앱을 먼저 만들어야 해요.
+      </p>
+      <Button asChild size="sm">
+        <Link to={GITHUB_PANE_PATH} data-testid="github-faces-create">
+          GitHub 앱 만들기
+        </Link>
+      </Button>
+    </div>
   );
 }
 
@@ -55,6 +85,7 @@ export function GithubFacesBlock({ pluginId }: { pluginId: string }) {
               GitHub 알림 열기
             </Link>
           )}
+          {face.id === "notify" && routed && <GithubOperatorEntry />}
         </li>
       ))}
     </ul>

@@ -21,6 +21,9 @@ export function githubOverviewPrefix(workspaceId: string) {
   return ["github", "overview", workspaceId.toLowerCase()] as const;
 }
 
+/** 모든 워크스페이스의 개요 칸. 브라우저에서 돌아온 데스크탑 창이 한꺼번에 다시 읽을 때 쓴다(#4220). */
+export const githubOverviewAll = ["github", "overview"] as const;
+
 export const githubAppStatusKey = ["github", "app-status"] as const;
 export const githubUnlinkedKey = ["github", "unlinked"] as const;
 
