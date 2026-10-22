@@ -399,7 +399,7 @@ describe("색 모드를 바꿀 때 단일 모드 규칙 2·3이 화면 경로에
     click(radio(host, "theme-choice-system"));
     expect(getAppearance().scheme).toBe("system");
     expect(getThemeRef()).toBe("dawnsky");
-    expect(q(host, "theme-mode-notice")?.textContent).toBe("이 테마에는 라이트와 다크 짝이 없어서 새벽하늘로 바꿨어요.");
+    expect(q(host, "theme-mode-notice")?.textContent).toBe("이 테마는 한쪽 모드만 있어서 새벽하늘로 바꿨어요.");
   });
 
   it("옮길 필요가 없으면 테마도 안내도 그대로다 (쌍 테마·첫 파티·같은 모드)", async () => {

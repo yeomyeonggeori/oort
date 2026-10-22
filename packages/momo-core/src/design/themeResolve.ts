@@ -166,6 +166,6 @@ export function moveNotice(move: ThemeMove): string {
   // 떠나는 테마의 이름은 카탈로그 라벨(지연 청크)이라 메인 번들이 모른다: 「이 테마」로 말한다. 옮겨 간 곳은 첫 파티다.
   const to = isThemeId(move.to) ? THEME_LABELS[move.to] : move.to;
   return move.why === "needs-pair"
-    ? `이 테마에는 라이트와 다크 짝이 없어서 ${to}로 바꿨어요.`
+    ? `이 테마는 한쪽 모드만 있어서 ${to}로 바꿨어요.`
     : `이 테마에는 ${MODE_NAMES[move.mode ?? "light"]}가 없어서 ${to}로 바꿨어요.`;
 }

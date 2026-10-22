@@ -226,9 +226,9 @@ describe("단일 모드 규칙 2: 시스템으로 바꿀 때 짝이 없으면 �
     for (const id of THEME_IDS) expect(themeMoveForScheme(id, "system")).toBeNull();
   });
 
-  it("문구: 이 테마에는 라이트와 다크 짝이 없어서 {새벽하늘}로 바꿨어요 (떠나는 테마의 이름은 지연 청크의 라벨이라 메인 번들이 모른다)", () => {
+  it("문구: 이 테마는 한쪽 모드만 있어서 {새벽하늘}로 바꿨어요 (떠나는 테마의 이름은 지연 청크의 라벨이라 메인 번들이 모른다)", () => {
     expect(moveNotice(themeMoveForScheme("catalog:nord", "system")!)).toBe(
-      "이 테마에는 라이트와 다크 짝이 없어서 새벽하늘로 바꿨어요."
+      "이 테마는 한쪽 모드만 있어서 새벽하늘로 바꿨어요."
     );
   });
 });
