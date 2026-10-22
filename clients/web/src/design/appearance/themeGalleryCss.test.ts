@@ -80,7 +80,7 @@ describe("접힌 행의 트리거: 배치는 카드 폭이 정하고 이름 길�
   });
 
   it("카드가 좁으면 이름이 윗줄이고 tail이 아랫줄이다: 컨테이너 질의(카드 `settings-card`가 컨테이너)", () => {
-    const at = css.indexOf("@container (width < 26.5rem) {");
+    const at = css.indexOf("@container (width < 28rem) {");
     expect(at).toBeGreaterThanOrEqual(0);
     const block = css.slice(at, css.indexOf("\n}\n", at));
     expect(block).toContain(".theme-style-trigger");
@@ -93,14 +93,14 @@ describe("접힌 행의 트리거: 배치는 카드 폭이 정하고 이름 길�
     const tileMin = Number(/--spacing-theme-tile-min:\s*(\d+)px/.exec(tokens)![1]);
     const thumb = tileMin * Number(/--theme-thumb-width:\s*calc\(var\(--spacing-theme-tile-min\) \* ([0-9.]+)\)/.exec(css)![1]);
     const spacing = (n: number) => Number(new RegExp(`--spacing-${n}:\\s*(\\d+)px`).exec(tokens)![1]);
-    const LONGEST_NAME = 132; // 캡처 `names.json`: Catppuccin Macchiato (text-meta 굵게)
+    const LONGEST_NAME = 140; // 글자 크기 「크게」의 굵은 이름: Catppuccin Macchiato (캡처 `names` 장면, 설계 리뷰 4차)
     const CHEVRON = 16; // `size-4`
     const need = LONGEST_NAME + thumb + CHEVRON + 2 * spacing(3) /* 이름 · 썸네일 · chevron 사이 */ + 2 * spacing(2) /* 트리거 안쪽 */ + 2 * spacing(4) /* 설정 행 좌우 */;
     const rem = Number(/@container \(width < ([0-9.]+)rem\) \{\s*\.theme-style-trigger \{/.exec(css)![1]);
     expect(rem * 16).toBeGreaterThanOrEqual(need);
     // 설정 행이 가로(라벨 왼쪽, 컨트롤 오른쪽)로 서는 기준(34rem)보다는 아래다: 그 위에서는 트리거가 늘 한 줄이다.
     expect(rem).toBeLessThan(34);
-    expect(need).toBe(420);
+    expect(need).toBe(428);
   });
 
   it("트리거의 간격·여백은 이름 있는 토큰이다 (색 리터럴·임의값 없음)", () => {
@@ -120,11 +120,24 @@ describe("접힌 행의 트리거: 배치는 카드 폭이 정하고 이름 길�
 });
 
 describe("폰 폭의 열린 갤러리: 두 열을 지킨다 (설계 리뷰 3차 M-2)", () => {
-  it("카드 22rem 미만에서 열 최소 폭이 줄어든다", () => {
+  it("카드 22rem 미만에서 열 최소 폭이 줄고, 글자 크기를 키워 이름이 타일보다 길어지면 말줄임 대신 공백에서 접힌다 (4차 B-1)", () => {
     const at = css.indexOf("@container (width < 22rem) {");
     expect(at).toBeGreaterThanOrEqual(0);
     const block = css.slice(at, css.indexOf("\n}\n", at));
     expect(block).toContain("--theme-grid-column-min: calc(var(--spacing-theme-tile-min) * 0.75)");
+    expect(block).toContain(".theme-tile-name");
+    expect(block).toContain("white-space: normal");
+    expect(block).toContain("text-wrap: balance");
+  });
+
+  it("고른 타일은 이름의 굵기를 바꾸지 않는다: 굵게 하면 폭이 늘어서 두 열 타일에서 고른 순간에만 이름이 잘렸다 (4차 B-1)", () => {
+    const selected = ruleBody(css, ".theme-tile[data-selected] .theme-tile-name");
+    expect(selected).not.toContain("font-weight");
+    expect(selected).toContain("color: var(--ink)");
+    // 고름은 링이 말한다: 틀 바깥 4의 잉크 링.
+    expect(ruleBody(css, ".theme-tile[data-selected] .theme-tile-frame")).toContain("var(--ink)");
+    // 기본 이름은 굵기를 정하지 않는다(굵기는 어디서도 바뀌지 않는다).
+    expect(ruleBody(css, ".theme-tile-name")).not.toContain("font-weight");
   });
 
   it("지원 폭 360에서도 두 열이 선다: 열 최소 폭(120) × 2 + 간격 ≤ 360 폭 카드의 격자 안쪽 폭", () => {
@@ -173,9 +186,9 @@ describe("격자·스크롤·페이드", () => {
     expect(declarations).not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/);
   });
 
-  it("고른 타일은 색만이 아니라 링과 굵은 이름으로 말한다", () => {
-    expect(ruleBody(css, ".theme-tile[data-selected] .theme-tile-frame")).toContain("var(--ink)");
-    expect(ruleBody(css, ".theme-tile[data-selected] .theme-tile-name")).toContain("font-weight: 600");
+  it("고른 타일은 색만이 아니라 링(틀 바깥)으로도 말한다: 이름은 잉크색이고 굵기는 그대로다", () => {
+    expect(ruleBody(css, ".theme-tile[data-selected] .theme-tile-frame")).toContain("0 0 0 4px var(--ink)");
+    expect(ruleBody(css, ".theme-tile[data-selected] .theme-tile-name")).toContain("color: var(--ink)");
   });
 
   it("키보드 초점은 집 규칙의 인셋 링이다: 틀 안쪽 2, 라디오가 peer라서 전역 포인터 규칙이 마우스에서 걷는다 (설계 리뷰 M5)", () => {

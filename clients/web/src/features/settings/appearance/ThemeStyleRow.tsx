@@ -18,7 +18,7 @@ export const ROW_DESCRIPTION =
 
 function Pending() {
   return (
-    <SettingsRow label={ROW_LABEL} description={ROW_DESCRIPTION} testId="theme-style-row-pending">
+    <SettingsRow label={ROW_LABEL} description={<span className="block text-balance">{ROW_DESCRIPTION}</span>} testId="theme-style-row-pending">
       {/* 접힌 행(`ThemeGallery`의 트리거)과 같은 배치: 이름 자리 막대 + 썸네일 자리 막대. 좁은 카드에서도 같이 세로로 쌓인다. */}
       <span aria-hidden="true" className="theme-style-trigger">
         <span className="theme-style-skeleton-name" />

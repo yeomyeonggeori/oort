@@ -22,7 +22,9 @@
 //            640~760px 폭의 갤러리 · 390 다크 탭에서 격자 안쪽을 스크롤한 중간 장면.
 //   names    접힌 행의 테마 이름이 한 줄이고 잘리거나 넘치지 않는가를 **모든** 타일(시스템·라이트·다크 탭)에서 320~760 폭으로 잰다
 //            (설계 리뷰 2차 H-A). 그리고 배치가 이름마다 갈리지 않는가(한 줄 · 이름 위 썸네일 아래 · chevron만 홀로 아랫줄)와 선택해도
-//            트리거 높이가 뛰지 않는가를 잰다(3차 M-1). 어기는 것이 하나라도 있으면 캡처가 실패한다(종료 코드 1). 사진은 한 장씩 남긴다.
+//            트리거 높이가 뛰지 않는가를 잰다(3차 M-1). 고를 때마다 **고른 타일의 이름**이 잘리지 않는지와 열린 격자가 움직이지 않는지도
+//            재고(4차 B-1), 글자 크기는 기본과 「크게」 둘이다. 어기는 것이 하나라도 있으면 캡처가 실패한다(종료 코드 1). 사진은 한 장씩 남긴다
+//            (접힌 행, 폰 폭에서는 열린 갤러리에서 가장 긴 이름을 고른 모양).
 //
 // 백엔드 없이 `/v1/**` 고정 응답 + 가짜 소켓. 벽시계·로케일·시간대를 고정한다.
 // =============================================================================
@@ -663,102 +665,131 @@ async function extraScenes(browser, origin) {
   }
 }
 
-// 접힌 행의 이름: 모든 타일을 차례로 골라 가며 이름이 한 줄인지, 잘리지 않는지, 넘치지 않는지, 배치가 이름마다 갈리지 않는지 잰다.
-// 배치는 `row`(이름 · 썸네일 · chevron이 한 줄) 아니면 `stacked`(이름이 윗줄, 썸네일과 chevron이 아랫줄)이고, chevron은 늘 썸네일 옆이다.
+// 접힌 행의 이름과 타일: 모든 타일을 차례로 골라 가며, 고를 때마다 (1) 접힌 행의 이름이 한 줄이고 잘리지 않고 넘치지 않는지 (2) 배치가
+// 이름마다 갈리지 않는지 (3) **고른 타일의 이름**이 잘리지 않는지 (4) 열린 격자가 선택 때문에 움직이지 않는지 잰다. 글자 크기는 기본과
+// 「크게」 둘이다(크게에서는 이름이 타일보다 길어진다). 배치는 `row`(이름 · 썸네일 · chevron이 한 줄) 아니면 `stacked`(이름이 윗줄, 썸네일과
+// chevron이 아랫줄)이고, chevron은 늘 썸네일 옆이다. 3·4는 설계 리뷰 4차 B-1: 타일 이름을 고르기 전에 한 번만 재서, 고른 순간에만 굵어진 이름이
+// 잘리는 것을 못 잡았다.
 const NAME_WIDTHS = (process.env.NAME_WIDTHS ?? "390,375,360,320,640,700,760").split(",").map(Number);
+const NAME_WIDTHS_LARGER = (process.env.NAME_WIDTHS_LARGER ?? "390,375,360,640,700").split(",").map(Number);
 const NAME_SHOT_WIDTHS = new Set([390, 375, 360, 640]);
+const NAME_OPEN_SHOT_WIDTHS = new Set([375, 360]);
 async function nameScenes(browser, origin) {
   const bad = [];
   const report = [];
   const tileReport = [];
-  for (const width of NAME_WIDTHS) {
-    const viewport = { name: String(width), width, height: 844 };
-    for (const mode of ["system", "light", "dark"]) {
-      const osScheme = mode === "dark" ? "dark" : "light";
-      const { context, page } = await openWith(browser, origin, { osScheme, viewport, record: seedRecord({ theme: "dawnsky", scheme: mode }) });
-      const rows = [];
-      try {
-        await goAppearance(page);
-        await page.getByTestId("theme-style-trigger").click();
-        await page.getByTestId("theme-style-options").waitFor();
-        // 타일 이름과 열 수(설계 리뷰 3차 M-2): 360 이상에서는 두 열이고, 이름은 잘리지 않고 두 줄 안에서 접힌다.
-        const tileMeasure = await page.evaluate(() => {
-          const names = [...document.querySelectorAll(".theme-tile-name")];
-          const grid = document.querySelector(".theme-gallery-grid");
-          return {
-            cols: getComputedStyle(grid).gridTemplateColumns.split(" ").length,
-            count: names.length,
-            clipped: names.filter((el) => el.scrollWidth > el.clientWidth + 1).map((el) => el.textContent),
-            maxLines: Math.max(...names.map((el) => Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)))),
-            tileWidth: Math.round(grid.querySelector(".theme-tile").getBoundingClientRect().width),
-          };
-        });
-        tileReport.push({ width, mode, ...tileMeasure });
-        if (tileMeasure.clipped.length > 0 || tileMeasure.maxLines > 2 || (width >= 360 && tileMeasure.cols < 2)) {
-          bad.push({ width, mode, ref: "*", label: `(타일: 열 ${tileMeasure.cols}, 최대 ${tileMeasure.maxLines}줄, 잘린 이름 ${tileMeasure.clipped.join("·") || "없음"})`, lines: tileMeasure.maxLines, truncated: tileMeasure.clipped.length > 0, triggerOverflow: false, layout: "tile", chevronBeside: true });
-        }
-        const refs = await page.locator(".theme-tile input").evaluateAll((nodes) => nodes.map((n) => n.value));
-        for (const ref of refs) {
-          const label = await page.evaluate((value) => document.querySelector(`.theme-tile input[value="${value}"]`)?.closest("label")?.querySelector(".theme-tile-name")?.textContent ?? "", ref);
-          await page.locator(`.theme-tile input[value="${ref}"]`).evaluate((node) => node.closest("label").click());
-          await page.waitForFunction(
-            (text) => document.querySelector('[data-testid="theme-style-selected-name"]')?.textContent === text,
-            label,
-            { timeout: 5000 }
-          );
-          const m = await page.evaluate(() => {
-            const name = document.querySelector('[data-testid="theme-style-selected-name"]');
-            const trigger = document.querySelector('[data-testid="theme-style-trigger"]');
-            const tail = trigger.querySelector(".theme-style-trigger-tail");
-            const chevron = tail.querySelector("svg");
-            const thumb = document.querySelector('[data-testid="theme-style-selected-preview"]');
-            const style = getComputedStyle(name);
-            const lineHeight = parseFloat(style.lineHeight);
-            const rect = name.getBoundingClientRect();
-            const tailBox = tail.getBoundingClientRect();
-            const chevronBox = chevron.getBoundingClientRect();
-            const thumbBox = thumb.getBoundingClientRect();
+  const runs = [
+    ["default", NAME_WIDTHS],
+    ["larger", NAME_WIDTHS_LARGER],
+  ];
+  for (const [fontSize, widths] of runs) {
+    for (const width of widths) {
+      const viewport = { name: String(width), width, height: 844 };
+      for (const mode of ["system", "light", "dark"]) {
+        const osScheme = mode === "dark" ? "dark" : "light";
+        const record = seedRecord({ theme: "dawnsky", scheme: mode, ...(fontSize === "default" ? {} : { fontSize }) });
+        const { context, page } = await openWith(browser, origin, { osScheme, viewport, record });
+        const rows = [];
+        const where = { width, mode, fontSize };
+        try {
+          await goAppearance(page);
+          await page.getByTestId("theme-style-trigger").click();
+          await page.getByTestId("theme-style-options").waitFor();
+          // 타일 이름과 열 수(설계 리뷰 3차 M-2): 360 이상에서는 두 열이고, 이름은 잘리지 않고 두 줄 안에서 접힌다.
+          const tileMeasure = await page.evaluate(() => {
+            const names = [...document.querySelectorAll(".theme-tile-name")];
+            const grid = document.querySelector(".theme-gallery-grid");
             return {
-              lines: Math.round(rect.height / lineHeight),
-              truncated: name.scrollWidth > name.clientWidth + 1,
-              triggerOverflow: trigger.scrollWidth > trigger.clientWidth + 1,
-              pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
-              nameWidth: Math.round(rect.width),
-              triggerWidth: Math.round(trigger.getBoundingClientRect().width),
-              triggerHeight: Math.round(trigger.getBoundingClientRect().height),
-              layout: tailBox.top >= rect.bottom - 1 ? "stacked" : "row",
-              // chevron은 썸네일 옆(위아래로 썸네일 범위 안)에 선다: 홀로 아랫줄에 떨어지지 않는다.
-              chevronBeside: chevronBox.top >= thumbBox.top - 1 && chevronBox.bottom <= thumbBox.bottom + 1 && chevronBox.left >= thumbBox.right - 1,
+              cols: getComputedStyle(grid).gridTemplateColumns.split(" ").length,
+              count: names.length,
+              clipped: names.filter((el) => el.scrollWidth > el.clientWidth + 1).map((el) => el.textContent),
+              maxLines: Math.max(...names.map((el) => Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)))),
+              tileWidth: Math.round(grid.querySelector(".theme-tile").getBoundingClientRect().width),
             };
           });
-          const row = { width, mode, ref, label, ...m };
-          report.push(row);
-          rows.push(row);
-          if (m.lines !== 1 || m.truncated || m.triggerOverflow || m.pageOverflow || !m.chevronBeside) bad.push(row);
+          tileReport.push({ ...where, ...tileMeasure });
+          if (tileMeasure.clipped.length > 0 || tileMeasure.maxLines > 2 || (width >= 360 && tileMeasure.cols < 2)) {
+            bad.push({ ...where, ref: "*", label: `(타일: 열 ${tileMeasure.cols}, 최대 ${tileMeasure.maxLines}줄, 잘린 이름 ${tileMeasure.clipped.join("·") || "없음"})`, lines: tileMeasure.maxLines, truncated: tileMeasure.clipped.length > 0, triggerOverflow: false, layout: "tile", chevronBeside: true });
+          }
+          const refs = await page.locator(".theme-tile input").evaluateAll((nodes) => nodes.map((n) => n.value));
+          for (const ref of refs) {
+            const label = await page.evaluate((value) => document.querySelector(`.theme-tile input[value="${value}"]`)?.closest("label")?.querySelector(".theme-tile-name")?.textContent ?? "", ref);
+            await page.locator(`.theme-tile input[value="${ref}"]`).evaluate((node) => node.closest("label").click());
+            await page.waitForFunction(
+              (text) => document.querySelector('[data-testid="theme-style-selected-name"]')?.textContent === text,
+              label,
+              { timeout: 5000 }
+            );
+            const m = await page.evaluate(() => {
+              const name = document.querySelector('[data-testid="theme-style-selected-name"]');
+              const trigger = document.querySelector('[data-testid="theme-style-trigger"]');
+              const tail = trigger.querySelector(".theme-style-trigger-tail");
+              const chevron = tail.querySelector("svg");
+              const thumb = document.querySelector('[data-testid="theme-style-selected-preview"]');
+              const style = getComputedStyle(name);
+              const lineHeight = parseFloat(style.lineHeight);
+              const rect = name.getBoundingClientRect();
+              const tailBox = tail.getBoundingClientRect();
+              const chevronBox = chevron.getBoundingClientRect();
+              const thumbBox = thumb.getBoundingClientRect();
+              // 고른 타일의 이름(고른 순간에 굵기·색이 바뀌는 자리): 잘리지 않고 두 줄 안이다.
+              const tileName = document.querySelector(".theme-tile[data-selected] .theme-tile-name");
+              const region = document.querySelector('[data-testid="theme-style-options"]');
+              return {
+                lines: Math.round(rect.height / lineHeight),
+                truncated: name.scrollWidth > name.clientWidth + 1,
+                triggerOverflow: trigger.scrollWidth > trigger.clientWidth + 1,
+                pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+                nameWidth: Math.round(rect.width),
+                triggerWidth: Math.round(trigger.getBoundingClientRect().width),
+                triggerHeight: Math.round(trigger.getBoundingClientRect().height),
+                layout: tailBox.top >= rect.bottom - 1 ? "stacked" : "row",
+                // chevron은 썸네일 옆(위아래로 썸네일 범위 안)에 선다: 홀로 아랫줄에 떨어지지 않는다.
+                chevronBeside: chevronBox.top >= thumbBox.top - 1 && chevronBox.bottom <= thumbBox.bottom + 1 && chevronBox.left >= thumbBox.right - 1,
+                tileNameClipped: tileName.scrollWidth > tileName.clientWidth + 1,
+                tileNameLines: Math.round(tileName.getBoundingClientRect().height / parseFloat(getComputedStyle(tileName).lineHeight)),
+                regionHeight: Math.round(region.getBoundingClientRect().height),
+              };
+            });
+            const row = { ...where, ref, label, ...m };
+            report.push(row);
+            rows.push(row);
+            if (m.lines !== 1 || m.truncated || m.triggerOverflow || m.pageOverflow || !m.chevronBeside || m.tileNameClipped || m.tileNameLines > 2) bad.push(row);
+          }
+          // 이름마다 배치·높이가 갈리거나 열린 격자가 선택 때문에 움직이면 선택할 때 화면이 뛴다(설계 리뷰 3차 M-1 · 4차 B-1).
+          const layouts = [...new Set(rows.map((r) => r.layout))];
+          const heights = rows.map((r) => r.triggerHeight);
+          const regionHeights = rows.map((r) => r.regionHeight);
+          if (layouts.length > 1 || Math.max(...heights) - Math.min(...heights) > 1) {
+            bad.push({ ...where, ref: "*", label: `(배치가 이름마다 갈린다: ${layouts.join("/")}, 높이 ${Math.min(...heights)}~${Math.max(...heights)})`, lines: 1, truncated: false, triggerOverflow: false, layout: layouts.join("/"), chevronBeside: true });
+          }
+          if (Math.max(...regionHeights) - Math.min(...regionHeights) > 1) {
+            bad.push({ ...where, ref: "*", label: `(열린 갤러리의 높이가 선택에 따라 움직인다: ${Math.min(...regionHeights)}~${Math.max(...regionHeights)})`, lines: 1, truncated: false, triggerOverflow: false, layout: "region", chevronBeside: true });
+          }
+          // 가장 긴 이름 하나를 사진으로 남긴다: 접힌 행(이름·썸네일)과, 폰 폭에서는 열린 갤러리에서 그 타일이 고른 모양.
+          const longest = rows.slice().sort((a, b) => b.label.length - a.label.length)[0];
+          const suffix = fontSize === "default" ? "" : `-${fontSize}`;
+          const shotNeeded = fontSize === "default" ? NAME_SHOT_WIDTHS.has(width) : NAME_OPEN_SHOT_WIDTHS.has(width);
+          if (longest && shotNeeded) {
+            await page.locator(`.theme-tile input[value="${longest.ref}"]`).evaluate((node) => node.closest("label").click());
+            await page.getByTestId("theme-style-trigger").scrollIntoViewIfNeeded();
+            await page.getByTestId("theme-style-row").scrollIntoViewIfNeeded();
+            await shoot(page, `names-${mode}-${width}${suffix}`, { ...where, longest: longest.label });
+          }
+          if (longest && NAME_OPEN_SHOT_WIDTHS.has(width)) {
+            await page.locator(".theme-tile[data-selected]").scrollIntoViewIfNeeded();
+            await shoot(page, `names-open-${mode}-${width}${suffix}`, { ...where, longest: longest.label });
+          }
+        } finally {
+          await context.close();
         }
-        // 이름마다 배치·높이가 갈리면 선택할 때 행이 뛴다(설계 리뷰 3차 M-1).
-        const layouts = [...new Set(rows.map((r) => r.layout))];
-        const heights = rows.map((r) => r.triggerHeight);
-        if (layouts.length > 1 || Math.max(...heights) - Math.min(...heights) > 1) {
-          bad.push({ width, mode, ref: "*", label: `(배치가 이름마다 갈린다: ${layouts.join("/")}, 높이 ${Math.min(...heights)}~${Math.max(...heights)})`, lines: 1, truncated: false, triggerOverflow: false, layout: layouts.join("/"), chevronBeside: true });
-        }
-        // 가장 긴 이름 하나를 사진으로 남긴다.
-        const longest = report.filter((r) => r.width === width && r.mode === mode).sort((a, b) => b.label.length - a.label.length)[0];
-        if (longest && NAME_SHOT_WIDTHS.has(width)) {
-          await page.locator(`.theme-tile input[value="${longest.ref}"]`).evaluate((node) => node.closest("label").click());
-          await page.getByTestId("theme-style-trigger").scrollIntoViewIfNeeded();
-          await page.getByTestId("theme-style-row").scrollIntoViewIfNeeded();
-          await shoot(page, `names-${mode}-${width}`, { width, mode, longest: longest.label });
-        }
-      } finally {
-        await context.close();
       }
     }
   }
   writeFileSync(resolve(outDir(), "names.json"), JSON.stringify({ checked: report.length, bad, report, tiles: tileReport }, null, 1));
   console.log(`NAMES: ${report.length} measured, ${bad.length} violations`);
   if (bad.length > 0) {
-    console.error(bad.slice(0, 12).map((r) => `${r.width}px ${r.mode} ${r.label}: lines=${r.lines} truncated=${r.truncated} triggerOverflow=${r.triggerOverflow} layout=${r.layout} chevronBeside=${r.chevronBeside}`).join("\n"));
+    console.error(bad.slice(0, 12).map((r) => `${r.width}px ${r.mode} ${r.fontSize} ${r.label}: lines=${r.lines} truncated=${r.truncated} triggerOverflow=${r.triggerOverflow} layout=${r.layout} chevronBeside=${r.chevronBeside} tileNameClipped=${r.tileNameClipped ?? ""}`).join("\n"));
     process.exitCode = 1;
   }
 }

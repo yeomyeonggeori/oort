@@ -379,7 +379,10 @@ function makeFills(surface: string, states: StateFills, mode: Mode, adjusting: b
     const chromas: number[] = [];
     for (let c = TINT_CHROMA_FLOOR; c <= tintCap + 1e-9; c = round3(c + VESSEL_CHROMA_STEP)) chromas.push(c);
     chromas.sort((a, b) => Math.abs(a - o.C) - Math.abs(b - o.C));
+    // 두 단계로 고른다: 살아남는 두 자의 여유 목표를 채우는 후보 가운데 가리킨 행과도 갈리는 첫 후보(키보드 강조와 가리킴은 다른 단계다),
+    // 그런 후보가 없으면 가리킨 행과 가장 먼 후보, 여유 목표를 채우는 후보가 없으면 여유가 가장 큰 후보.
     let best: { hex: string; margin: number } | null = null;
+    let apartFromHover: { hex: string; gap: number } | null = null;
     for (const position of TINT_POSITIONS) {
       const target = yFrom(position);
       // 원래 채움보다 글자 쪽(`signal-text`가 그 채움 위 4.5로 풀린 쪽)으로는 가지 않는다: 다크는 더 어둡게만, 라이트는 더 밝게만.
@@ -388,11 +391,15 @@ function makeFills(surface: string, states: StateFills, mode: Mode, adjusting: b
         const hex = fromOklch({ L: lightnessForLuminance(target, c, o.h, "near"), C: c, h: o.h });
         if (beyond(hex)) continue;
         const m = margin(hex);
-        if (m >= TINT_MARGIN_TARGET) return hex;
+        if (m >= TINT_MARGIN_TARGET) {
+          const gap = oklabDistance(hex, hover);
+          if (gap >= VESSEL_MIN_DISTANCE + SURVIVAL_DISTANCE_MARGIN) return hex;
+          if (apartFromHover === null || gap > apartFromHover.gap) apartFromHover = { hex, gap };
+        }
         if (best === null || m > best.margin) best = { hex, margin: m };
       }
     }
-    return best?.hex ?? soft;
+    return apartFromHover?.hex ?? best?.hex ?? soft;
   };
   return { softFor, placeSelected };
 }
