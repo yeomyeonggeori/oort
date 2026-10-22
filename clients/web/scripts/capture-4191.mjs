@@ -6,7 +6,7 @@
 //   MODE=capture LABEL=after  DIST=dist node scripts/capture-4191.mjs     # 장면 캡처 + meta.json
 //   MODE=capture LABEL=before DIST=<base 빌드> node scripts/capture-4191.mjs  # 같은 화면의 「전」
 //   MODE=assert  DIST=dist node scripts/capture-4191.mjs                  # 실제 앱에서 단정(아래)
-//   MODE=assert  SABOTAGE=scrim|band DIST=dist node scripts/capture-4191.mjs   # ⑥이 실제로 실패할 수 있음을 보이는 사보타주(아래)
+//   MODE=assert  SABOTAGE=scrim|band|titlebar DIST=dist node scripts/capture-4191.mjs   # ⑥이 실제로 실패할 수 있음을 보이는 사보타주(아래)
 //
 // capture: 모양 설정과 대화 화면을 라이트/다크 × 1440/900으로 찍는다. 고르는 일은 전부 **설정 화면의 진짜 컨트롤**을
 // 눌러서 한다(단색·기본 제공의 칩, 사진은 `setInputFiles`로 진짜 파일 선택 경로). 시드로 상태를 박지 않는다.
@@ -51,7 +51,9 @@ const ENGINE = process.env.ENGINE === "webkit" ? "webkit" : "chromium";
 // 비쳐 ⑥이 깨져야 한다(깨지지 않으면 ⑥이 아무것도 재지 않는다는 뜻이다). 정상 실행에서는 쓰지 않는다.
 // SABOTAGE=band: 띠 표지(`data-wallpaper-band`)를 떼어, 띠 위 열에 보정색이 다시 얹히게 한다(수리 전의 모습). 띠가 있는 테마의
 // 「배경화면 없음보다 나빠지지 않는다」 단정이 실제로 빨개져야 한다.
-const SABOTAGE = process.env.SABOTAGE === "scrim" || process.env.SABOTAGE === "band" ? process.env.SABOTAGE : "";
+// SABOTAGE=titlebar: 상단 줄에 보정색을 직접 얹어 「접힌 상단 줄을 플랫폼과 무관하게 늘 보정한다」(design-review H-2 이전의 규칙)를
+// 흉내 낸다. 웹의 노을띠 라이트 접힌 상단 줄 단정이 빨개져야 한다.
+const SABOTAGE = ["scrim", "band", "titlebar"].includes(process.env.SABOTAGE ?? "") ? process.env.SABOTAGE : "";
 const launcher = ENGINE === "webkit" ? webkit : chromium;
 
 const FIXTURE_NOW = Date.parse("2026-10-22T09:30:00+09:00");
@@ -186,7 +188,43 @@ async function installPageFixtures(page) {
   });
 }
 
-async function openContext(browser, origin, scheme, viewport, extra = {}, seed = null) {
+/**
+ * 데스크탑 셸 흉내: 웹뷰가 보는 만큼만 흉내 낸다(`__TAURI_INTERNALS__`). 이것으로 앱이 데스크탑으로 서고, 상단 줄에
+ * `data-tauri-drag-region`이 붙어 토글이 신호등 인셋(80px) 뒤에 서고, 「내 작업」이 열린다. 진짜 Tauri 셸이 아니다
+ * (runtime-unverified: 실제 WKWebView·네이티브 창). 명령은 `capture-rail-unified.mjs`가 쓰는 흉내와 같은 것만 답하고
+ * 나머지는 빈 답이다.
+ */
+async function installDesktopStub(page) {
+  await page.addInitScript(() => {
+    const callbacks = new Map();
+    let nextCallback = 1;
+    let nextPty = 1;
+    window.__TAURI_INTERNALS__ = {
+      metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main", windowLabel: "main" } },
+      transformCallback(callback) { const id = nextCallback++; callbacks.set(id, callback); return id; },
+      unregisterCallback(id) { callbacks.delete(id); },
+      convertFileSrc: (path) => path,
+      async invoke(cmd) {
+        if (cmd === "pty_spawn") return nextPty++;
+        if (cmd === "workbench_git_read") return { outcome: "unknown" };
+        if (cmd === "detect_local_harnesses") return { harnesses: [] };
+        if (cmd === "detect_hosted_agents") return [];
+        if (cmd === "keychain_available") return true;
+        if (cmd === "keychain_store_refresh_token") { window.__kc = true; return null; }
+        if (cmd === "keychain_refresh_token_handle") return window.__kc ? "shell:00000000000000000000000000000001" : null;
+        if (cmd === "keychain_clear_refresh_token") { window.__kc = false; return null; }
+        if (cmd === "deep_link_take_pending") return [];
+        if (cmd === "app_version") return "0.1.15";
+        if (cmd === "notification_permission") return "denied";
+        if (cmd === "updater_check") return null;
+        if (cmd.startsWith("plugin:event|")) return 1;
+        return null;
+      },
+    };
+  });
+}
+
+async function openContext(browser, origin, scheme, viewport, extra = {}, seed = null, { desktop = false } = {}) {
   const context = await browser.newContext({
     viewport: { width: viewport.width, height: viewport.height },
     colorScheme: scheme,
@@ -200,6 +238,7 @@ async function openContext(browser, origin, scheme, viewport, extra = {}, seed =
   await installRoutes(context);
   const page = await context.newPage();
   await installPageFixtures(page);
+  if (desktop) await installDesktopStub(page);
   await page.addInitScript(
     ([server, appearance]) => {
       try { localStorage.setItem("momo.web.server.v1", server); } catch { /* 저장소 없는 캡처 */ }
@@ -232,6 +271,25 @@ async function goChat(page) {
   await page.evaluate((id) => { location.hash = `/c/${id}`; }, CH);
   await page.getByText("이번 주 일정 정리해 줘").first().waitFor({ timeout: 15_000 });
   await page.waitForTimeout(500);
+}
+
+/** 사이드바 목록 열을 접는다(토글을 누른다). 접은 뒤 포인터가 토글 위에 남아 있다. */
+async function collapseSidebar(page) {
+  await goChat(page);
+  await page.getByTestId("sidebar-toggle").click();
+  await page.waitForTimeout(500);
+}
+
+async function expandSidebar(page) {
+  await page.getByTestId("sidebar-toggle").click();
+  await page.waitForTimeout(300);
+}
+
+/** 「내 작업」 격자(데스크탑 전용, `/work?view=terminals`). 주소로 곧바로 간다. */
+async function goMyWork(page) {
+  await page.evaluate(() => { location.hash = "/work?view=terminals"; });
+  await page.getByTestId("my-work-tab").waitFor({ timeout: 15_000 });
+  await page.waitForTimeout(700);
 }
 
 async function goSettings(page) {
@@ -521,10 +579,50 @@ async function themeScenes(browser, origin) {
         await page.waitForTimeout(300);
         await goChat(page);
         await shoot(page, `chat-photo-${theme}-${scheme}-1440`, { scheme, viewport: "1440", wallpaper: "photo", theme });
+        // 접은 사이드바(웹): 토글이 레일 안(안쪽 여백 8px)에 서서 띠가 있는 테마에서는 띠 위다.
+        await collapseSidebar(page);
+        await page.mouse.move(1000, 640);
+        await shoot(page, `chat-photo-${theme}-collapsed-${scheme}-1440`, { scheme, viewport: "1440", wallpaper: "photo", theme, collapsed: true });
+        await expandSidebar(page);
         await goSettings(page);
         await shoot(page, `settings-photo-${theme}-${scheme}-1440`, { scheme, viewport: "1440", wallpaper: "photo", theme });
         await scrollToBackdrop(page);
         await shoot(page, `settings-card-photo-${theme}-${scheme}-1440`, { scheme, viewport: "1440", wallpaper: "photo", theme });
+      }
+    } finally {
+      await context.close();
+    }
+  }
+}
+
+/**
+ * 데스크탑 기하(신호등 인셋 80px): 접힌 상단 줄의 토글은 레일(띠) 밖, scrim 위에 서고, 「내 작업」은 본문이 투명이라 사진이 격자
+ * 뒤에 깔린다. 웹 기하의 같은 장면(토글이 레일 안, 띠 위)과 나란히 본다. 진짜 Tauri 셸이 아니라 웹뷰가 보는 만큼의 흉내다.
+ */
+async function desktopScenes(browser, origin) {
+  const viewport = VIEWPORTS[0];
+  const photo = await (async () => {
+    const holder = await browser.newPage();
+    try { return await makeJpeg(holder, { kind: "dusk", width: 3200, height: 2000, seed: 11 }); } finally { await holder.close(); }
+  })();
+  for (const theme of [null, "noeul"]) {
+    const name = theme ?? "dawnsky";
+    const { context, page } = await openContext(browser, origin, "light", viewport, {}, theme ? { theme } : null, { desktop: true });
+    try {
+      await goSettings(page);
+      await pickPhoto(page, photo, "dusk.jpg");
+      await waitLive(page);
+      for (const scheme of SCHEMES) {
+        await page.emulateMedia({ colorScheme: scheme });
+        await page.waitForTimeout(300);
+        await collapseSidebar(page);
+        await page.mouse.move(1000, 640);
+        await shoot(page, `desktop-collapsed-photo-${name}-${scheme}-1440`, { scheme, viewport: "1440", wallpaper: "photo", theme: name, platform: "desktop" });
+        await expandSidebar(page);
+        await goMyWork(page);
+        await page.mouse.move(1000, 640);
+        await shoot(page, `desktop-mywork-photo-${name}-${scheme}-1440`, { scheme, viewport: "1440", wallpaper: "photo", theme: name, platform: "desktop" });
+        await goChat(page);
       }
     } finally {
       await context.close();
@@ -615,6 +713,7 @@ async function capture() {
     await themeBaselines(browser, preview.origin);
     if (LABEL !== "before") {
       await themeScenes(browser, preview.origin);
+      await desktopScenes(browser, preview.origin);
       await fallbackScenes(browser, preview.origin);
       await focusScene(browser, preview.origin);
       await phoneScene(browser, preview.origin);
@@ -676,18 +775,39 @@ const storedAppearance = (page) => page.evaluate(() => {
 
 async function legibility(browser, origin, helper) {
   const rows = [];
-  // 바닥 위에 직접 서는 세 자리: 펼친 사이드바·상단 줄, 접은 사이드바(레일)·상단 줄, 설정의 목록 열.
-  const CHAT = ".app-shell > .sidebar-drawer, .app-shell > .app-titlebar";
+  // 영역: 바닥 위에 직접 서는 자리들.
+  const RAIL = ".app-shell > .sidebar-drawer";
+  const TITLEBAR = ".app-shell > .app-titlebar";
+  const OPEN = `${RAIL}, ${TITLEBAR}`;
   const SETTINGS = ".app-shell .settings-nav";
-  const statesOf = (page) => [
-    ["펼친 사이드바", CHAT, async () => { await goChat(page); }],
-    ["접은 사이드바", CHAT, async () => { await goChat(page); await page.getByTestId("sidebar-toggle").click(); await page.waitForTimeout(500); }],
-    ["설정 목록 열", SETTINGS, async () => { await goSettings(page); }],
+  const WORK_HEADER = "[data-testid='my-work-tab'] > section > header";
+  const collapse = collapseSidebar;
+  const expand = expandSidebar;
+  const goMine = goMyWork;
+  // 플랫폼마다 상단 줄의 토글이 서는 자리가 다르다: 웹은 안쪽 여백 8px(레일 56px 안, 띠 위), 데스크탑은 신호등 인셋 80px 뒤(레일 밖, scrim 위).
+  // `absolute`는 그 자리가 어느 테마에서나 scrim 위라서 절대 기준을 쓴다는 뜻이다(띠가 있어도).
+  const PLATFORMS = [
+    {
+      name: "웹",
+      desktop: false,
+      states: [
+        { name: "펼친 사이드바", region: OPEN, min: 8, prepare: goChat },
+        { name: "접은 레일", region: RAIL, min: 2, prepare: collapse, restore: expand },
+        { name: "접은 상단 줄", region: TITLEBAR, min: 1, prepare: collapse, restore: expand },
+        { name: "설정 목록 열", region: SETTINGS, min: 8, prepare: goSettings },
+      ],
+    },
+    {
+      name: "데스크탑",
+      desktop: true,
+      states: [
+        { name: "펼친 사이드바", region: OPEN, min: 8, prepare: goChat },
+        { name: "접은 레일", region: RAIL, min: 2, prepare: collapse, restore: expand },
+        { name: "접은 상단 줄", region: TITLEBAR, min: 1, prepare: collapse, restore: expand, absolute: true },
+        { name: "내 작업 머리 줄", region: WORK_HEADER, min: 1, prepare: goMine, absolute: true },
+      ],
+    },
   ];
-  const restore = async (page, name) => {
-    // 접은 상태를 되돌린다.
-    if (name === "접은 사이드바") { await page.getByTestId("sidebar-toggle").click(); await page.waitForTimeout(300); }
-  };
   // 평평한 테마(새벽 하늘·흑연)는 열이 scrim 위에 선다: 절대 기준(글자 4.5:1·아이콘 3:1)을 잰다.
   // 띠가 있는 테마(노을띠)는 사이드바 열의 호스트가 **불투명한 띠**다: 배경화면이 scrim을 얹어도 그 열의 글자는 띠 위에 있다.
   // 그 열의 값은 테마 자신의 몫(설정 목록 열은 기준 빌드부터 라이트에서 읽히지 않는다)이므로, 배경화면 때문에 **나빠지지 않았는지**를
@@ -697,80 +817,101 @@ async function legibility(browser, origin, helper) {
     { theme: "graphite", label: "흑연", compare: false },
     { theme: "noeul", label: "노을띠", compare: true },
   ];
-  for (const { theme, label, compare } of CASES) {
-    const seed = theme ? { theme } : null;
-    const baselines = new Map();
-    if (compare) {
-      const { context, page } = await openContext(browser, origin, "light", VIEWPORTS[0], {}, seed);
-      try {
-        for (const scheme of SCHEMES) {
-          await page.emulateMedia({ colorScheme: scheme });
-          await page.waitForTimeout(400);
-          for (const [name, region, prepare] of statesOf(page)) {
-            await prepare();
-            await settle(page);
-            baselines.set(`${scheme}|${name}`, (await measureLegibility(page, helper, region)).measured);
-            await restore(page, name);
+  // 포인터는 늘 장면 밖(본문 한가운데)에 둔다: 접으려고 누른 토글 위에 남은 포인터가 hover 칠을 깔면 그 칠 위에서 읽힌 값이
+  // 쉬는 상태의 값이 아니다(design-review H-2: 토글이 호버 칠 위에서 9.67로 읽히고 쉬는 값은 1.29였다).
+  const parkPointer = async (page) => { await page.mouse.move(1000, 640); await page.waitForTimeout(150); };
+  for (const platform of PLATFORMS) {
+    for (const { theme, label, compare } of CASES) {
+      const seed = theme ? { theme } : null;
+      const open = () => openContext(browser, origin, "light", VIEWPORTS[0], {}, seed, { desktop: platform.desktop });
+      const baselines = new Map();
+      if (compare) {
+        const { context, page } = await open();
+        try {
+          for (const scheme of SCHEMES) {
+            await page.emulateMedia({ colorScheme: scheme });
+            await page.waitForTimeout(400);
+            for (const state of platform.states) {
+              await state.prepare(page);
+              await parkPointer(page);
+              await settle(page);
+              baselines.set(`${scheme}|${state.name}`, (await measureLegibility(page, helper, state.region)).measured);
+              await state.restore?.(page);
+            }
           }
+        } finally {
+          await context.close();
         }
-      } finally {
-        await context.close();
       }
-    }
-    for (const kind of ["black", "white"]) {
-      const photo = await makeJpeg(helper, { kind, width: 2400, height: 1500 });
-      const { context, page } = await openContext(browser, origin, "light", VIEWPORTS[0], {}, seed);
-      try {
-        await goSettings(page);
-        await pickPhoto(page, photo, `${kind}.jpg`);
-        await waitLive(page);
-        for (const scheme of SCHEMES) {
-          await page.emulateMedia({ colorScheme: scheme });
-          await page.waitForTimeout(400);
-          for (const [name, region, prepare] of statesOf(page)) {
-            await prepare();
-            await settle(page);
-            if (SABOTAGE === "scrim") {
-              await page.evaluate(() => {
-                document.documentElement.style.setProperty("--wallpaper-scrim-light", "transparent");
-                document.documentElement.style.setProperty("--wallpaper-scrim-dark", "transparent");
-              });
+      for (const kind of ["black", "white"]) {
+        const photo = await makeJpeg(helper, { kind, width: 2400, height: 1500 });
+        const { context, page } = await open();
+        try {
+          await goSettings(page);
+          await pickPhoto(page, photo, `${kind}.jpg`);
+          await waitLive(page);
+          for (const scheme of SCHEMES) {
+            await page.emulateMedia({ colorScheme: scheme });
+            await page.waitForTimeout(400);
+            for (const state of platform.states) {
+              await state.prepare(page);
+              await parkPointer(page);
               await settle(page);
-            }
-            if (SABOTAGE === "band") {
-              await page.evaluate(() => document.documentElement.removeAttribute("data-wallpaper-band"));
-              await settle(page);
-            }
-            const { png, measured } = await measureLegibility(page, helper, region);
-            let bad;
-            let worst;
-            if (compare) {
-              const before = baselines.get(`${scheme}|${name}`) ?? [];
-              // 짝이 안 맞으면(요소 수가 다르면) 비교가 성립하지 않는다: 통째로 나쁜 것으로 센다.
-              if (before.length !== measured.length) {
-                bad = [{ label: `요소 수가 다르다 (${before.length} → ${measured.length})` }];
-                worst = 0;
-              } else {
-                // 이미 기준을 넘는 항목은 배경화면 때문에 조금 달라져도 괜찮다. 못 미치던 항목은 더 나빠지면 안 된다.
-                bad = measured.filter((item, index) => item.ratio < item.min - 0.05 && item.ratio < before[index].ratio - 0.05);
-                worst = Math.min(...measured.map((item, index) => Math.min(1, item.ratio / Math.min(before[index].ratio, item.min))));
+              if (SABOTAGE === "scrim") {
+                await page.evaluate(() => {
+                  document.documentElement.style.setProperty("--wallpaper-scrim-light", "transparent");
+                  document.documentElement.style.setProperty("--wallpaper-scrim-dark", "transparent");
+                });
+                await settle(page);
               }
-            } else {
-              bad = measured.filter((item) => item.ratio < item.min - 0.05);
-              worst = Math.min(...measured.map((item) => item.ratio / item.min));
+              if (SABOTAGE === "band") {
+                await page.evaluate(() => document.documentElement.removeAttribute("data-wallpaper-band"));
+                await settle(page);
+              }
+              if (SABOTAGE === "titlebar") {
+                // 수리 전의 규칙: 접힌 상단 줄을 플랫폼과 무관하게 늘 보정한다(웹의 토글이 띠 위에서 깎인다).
+                await page.evaluate(() => {
+                  const bar = document.querySelector(".app-shell[data-sidebar-collapsed] > .app-titlebar");
+                  if (!bar) return;
+                  for (const role of ["ink-muted", "icon", "agent", "warn", "danger", "ok", "signal", "signal-text", "on-signal"]) {
+                    bar.style.setProperty(`--${role}`, `var(--wallpaper-${role})`);
+                  }
+                  bar.style.setProperty("--accent", "var(--signal)");
+                  bar.style.setProperty("--on-accent", "var(--on-signal)");
+                });
+                await settle(page);
+              }
+              const { png, measured } = await measureLegibility(page, helper, state.region);
+              let bad;
+              let worst;
+              if (compare && !state.absolute) {
+                const before = baselines.get(`${scheme}|${state.name}`) ?? [];
+                // 짝이 안 맞으면(요소 수가 다르면) 비교가 성립하지 않는다: 통째로 나쁜 것으로 센다.
+                if (before.length !== measured.length) {
+                  bad = [{ label: `요소 수가 다르다 (${before.length} → ${measured.length})` }];
+                  worst = 0;
+                } else {
+                  // 이미 기준을 넘는 항목은 배경화면 때문에 조금 달라져도 괜찮다. 못 미치던 항목은 더 나빠지면 안 된다.
+                  bad = measured.filter((item, index) => item.ratio < item.min - 0.05 && item.ratio < before[index].ratio - 0.05);
+                  worst = Math.min(...measured.map((item, index) => Math.min(1, item.ratio / Math.min(before[index].ratio, item.min))));
+                }
+              } else {
+                bad = measured.filter((item) => item.ratio < item.min - 0.05);
+                worst = Math.min(...measured.map((item) => item.ratio / item.min));
+              }
+              rows.push({ platform: platform.name, theme: label, compare: compare && !state.absolute, kind, scheme, name: state.name, min: state.min, count: measured.length, worst, bad });
+              const slug = `${platform.desktop ? "desktop-" : ""}${theme ?? "dawnsky"}-${kind}-${scheme}-${state.name.replace(/\s+/g, "")}`;
+              writeFileSync(resolve(outDir(), `legibility-${slug}.png`), png);
+              writeFileSync(
+                resolve(outDir(), `legibility-${slug}.json`),
+                JSON.stringify(measured.map((item) => ({ kind: item.kind, label: item.label, color: item.color, bg: item.bg, ratio: Number(item.ratio.toFixed(2)), min: item.min })), null, 1)
+              );
+              await state.restore?.(page);
             }
-            rows.push({ theme: label, compare, kind, scheme, name, count: measured.length, worst, bad });
-            const slug = `${theme ?? "dawnsky"}-${kind}-${scheme}-${name.replace(/\s+/g, "")}`;
-            writeFileSync(resolve(outDir(), `legibility-${slug}.png`), png);
-            writeFileSync(
-              resolve(outDir(), `legibility-${slug}.json`),
-              JSON.stringify(measured.map((item) => ({ kind: item.kind, label: item.label, color: item.color, bg: item.bg, ratio: Number(item.ratio.toFixed(2)), min: item.min })), null, 1)
-            );
-            await restore(page, name);
           }
+        } finally {
+          await context.close();
         }
-      } finally {
-        await context.close();
       }
     }
   }
@@ -922,7 +1063,7 @@ async function assertions() {
     const rows = await legibility(browser, preview.origin, helper);
     for (const row of rows) {
       const rule = row.compare ? "배경화면 없음보다 나빠지지 않는다 (띠 위 열은 테마의 몫)" : "글자 4.5:1·아이콘 3:1";
-      check(`⑥ ${row.theme} × ${row.kind} 사진 × ${row.scheme} × ${row.name}: ${rule}`, row.bad.length === 0 && row.count >= (row.name === "접은 사이드바" ? 2 : 8),
+      check(`⑥ ${row.platform} × ${row.theme} × ${row.kind} 사진 × ${row.scheme} × ${row.name}: ${rule}`, row.bad.length === 0 && row.count >= row.min,
         `항목 ${row.count}개, 가장 낮은 (대비/기준) = ${row.worst.toFixed(2)}${row.bad.length ? `, 미달: ${JSON.stringify(row.bad.slice(0, 4).map((b) => [b.label, b.color, b.bg, b.ratio === undefined ? null : Number(b.ratio.toFixed(2))]))}` : ""}`);
     }
 
@@ -959,7 +1100,22 @@ async function assertions() {
   if (failed.length > 0) process.exitCode = 1;
 }
 
-(MODE === "assert" ? assertions() : capture()).catch((error) => {
+async function debugDesktop() {
+  const preview = await startGuardedPreview({ webRoot: WEB_ROOT, port: PORT, portEnvVar: "CAPTURE_PORT", extraArgs: ["--outDir", resolve(WEB_ROOT, DIST)] });
+  const browser = await launcher.launch();
+  try {
+    const { context, page } = await openContext(browser, preview.origin, "light", VIEWPORTS[0], {}, null, { desktop: true });
+    await page.waitForTimeout(1500);
+    console.log("TESTIDS", JSON.stringify(await page.evaluate(() => [...document.querySelectorAll("[data-testid]")].map((el) => el.getAttribute("data-testid")).filter((id) => /nav|rail|sidebar|toggle|profile|work/.test(id)))));
+    console.log("ATTRS", await page.evaluate(() => ({ tauri: "__TAURI_INTERNALS__" in window, drag: document.querySelector(".app-titlebar")?.hasAttribute("data-tauri-drag-region"), collapsed: document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed"), cols: getComputedStyle(document.querySelector(".app-shell")).gridTemplateColumns })));
+    await context.close();
+  } finally {
+    await browser.close();
+    await preview.stop?.();
+  }
+}
+
+(process.env.DEBUG_DESKTOP ? debugDesktop() : MODE === "assert" ? assertions() : capture()).catch((error) => {
   console.error(error);
   process.exit(1);
 });
