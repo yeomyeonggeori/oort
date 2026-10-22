@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { exifSegment, injectExif, inspectJpeg } from "../../../scripts/lib/jpegExif.mjs";
 import { stripJpegMetadata } from "@momo/core/design/jpegMetadata";
 import { PHOTO_MAX_BYTES, PHOTO_MAX_LONG_SIDE, PHOTO_THUMB_LONG_SIDE } from "@momo/core/design/wallpaper";
-import type { RunResult } from "./photo.browser.entry";
+import type { RunResult, StoredView } from "./photo.browser.entry";
 
 // =============================================================================
 // 내 사진 → 상한 안의 JPEG: **진짜 브라우저**에서 앱이 쓰는 그 포트와 계단을 돌린다 (AP-4 #4191, 이슈 AC 3).
@@ -20,6 +20,8 @@ import type { RunResult } from "./photo.browser.entry";
 //   · 회전이 **픽셀에 구워졌다**: 가로로 저장된 세로 사진은 출력이 세로이고, 위쪽 표식이 올바른 모서리에 있다.
 //   · 긴 변 ≤ 2560, 크기 ≤ 1.5MB. 큰 잡음 사진은 계단을 내려가 상한 안에 든다.
 //   · 작은 사진은 키우지 않고, 투명 PNG는 흰 바탕 위에 구워지며, JPEG가 아닌 바이트는 읽지 못한 사진이다.
+//   · 사진이 사는 IndexedDB 한 칸: 쓰면 한 장이고, 새로고침 뒤에도 남고, 로그아웃(앱의 `forgetWallpaperOnSignOut`)이
+//     진짜 IndexedDB에서 지운다(이슈 AC 4). 노드에는 IndexedDB가 없어서 여기서만 잴 수 있다.
 //
 // 엔진: Chromium과 WebKit 중 설치된 것 전부. 데스크탑 앱은 macOS의 WKWebView(WebKit)이라 WebKit이 있는 레인에서는
 // 그쪽이 더 중요하다(둘 다 없으면 경고를 남기고 건너뛴다, 다른 브라우저 시험과 같은 규약).
@@ -258,6 +260,82 @@ describe.skipIf(ENGINES.length === 0)("내 사진 처리: 진짜 브라우저에
         // 왼쪽(원래 투명)은 흰색에 가깝고 오른쪽(빨강)은 빨갛다.
         expect(px.topLeft.every((c) => c > 235), `투명했던 자리: ${px.topLeft}`).toBe(true);
         expect(reddish(px.topRight), `빨간 자리: ${px.topRight}`).toBe(true);
+      });
+    }, 60_000);
+
+    // ---- 사진이 사는 IndexedDB 한 칸 (AC 4: 새로고침 후 유지, 로그아웃 시 삭제) --------------------------------------
+    //
+    // IndexedDB는 오리진이 있어야 선다(`about:blank`는 불투명 오리진이다). 그래서 가짜 호스트를 라우트로 받아 진짜 오리진을
+    // 만든다. 읽고 쓰는 쪽은 부를 때마다 새 연결이라 「메모리에 있어서 읽힌다」는 답이 될 수 없다.
+
+    const ORIGIN = "http://wallpaper.test/";
+    const withOriginPage = async <T>(fn: (page: import("playwright").Page) => Promise<T>): Promise<T> => {
+      const playwright = require_("playwright") as Playwright;
+      const browser = await playwright[name].launch();
+      try {
+        const context = await browser.newContext();
+        await context.route(`${ORIGIN}**`, (route) => route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><title>wallpaper</title>" }));
+        const page = await context.newPage();
+        await page.goto(ORIGIN);
+        await page.addScriptTag({ content: script });
+        return await fn(page);
+      } finally {
+        await browser.close();
+      }
+    };
+    type Store = {
+      write(bytes: number[], rev: number, thumb: string | null): Promise<void>;
+      read(): Promise<StoredView | null>;
+      clear(): Promise<void>;
+      signOut(): number;
+    };
+    const readStore = (page: import("playwright").Page) =>
+      page.evaluate(() => (globalThis as unknown as { __wallpaperStore: Store }).__wallpaperStore.read());
+    const writeStore = (page: import("playwright").Page, bytes: number[], rev: number, thumb: string | null = null) =>
+      page.evaluate(([b, r, t]) => (globalThis as unknown as { __wallpaperStore: Store }).__wallpaperStore.write(b as number[], r as number, t as string | null), [bytes, rev, thumb] as const);
+    /** 로그아웃 경로를 부르고, 지워질 때까지(최대 3초) 기다려 마지막 읽기를 돌려준다. 지우기는 기다리지 않는 호출이다. */
+    const signOutAndRead = (page: import("playwright").Page) =>
+      page.evaluate(async () => {
+        const api = (globalThis as unknown as { __wallpaperStore: Store }).__wallpaperStore;
+        const notified = api.signOut();
+        let last = await api.read();
+        for (let i = 0; i < 60 && last !== null; i += 1) {
+          await new Promise((done) => setTimeout(done, 50));
+          last = await api.read();
+        }
+        return { notified, last };
+      });
+
+    it("IndexedDB: 쓴 사진은 한 장이고(덮어쓴다), 새로고침 뒤에도 같은 바이트다", async () => {
+      await withOriginPage(async (page) => {
+        expect(await readStore(page), "전제: 처음에는 비어 있다").toBeNull();
+        await writeStore(page, [1, 2, 3, 4], 1, "data:image/jpeg;base64,AAAA");
+        expect(await readStore(page)).toEqual({ rev: 1, bytes: [1, 2, 3, 4], width: 4, height: 3, thumb: "data:image/jpeg;base64,AAAA" });
+        await writeStore(page, [9, 8, 7], 2);
+        expect(await readStore(page), "다시 고르면 덮어쓴다(한 장)").toEqual({ rev: 2, bytes: [9, 8, 7], width: 4, height: 3, thumb: null });
+        await page.reload();
+        await page.addScriptTag({ content: script });
+        expect(await readStore(page), "새로고침(새 문서, 새 연결) 뒤에도 같은 사진이다").toEqual({ rev: 2, bytes: [9, 8, 7], width: 4, height: 3, thumb: null });
+      });
+    }, 90_000);
+
+    it("IndexedDB: 로그아웃(앱의 forgetWallpaperOnSignOut)이 진짜 저장소의 사진을 지우고 구독자에게 알린다", async () => {
+      await withOriginPage(async (page) => {
+        await writeStore(page, [5, 5, 5, 5], 7);
+        expect(await readStore(page), "전제: 로그아웃 전에는 사진이 있다").not.toBeNull();
+        const out = await signOutAndRead(page);
+        expect(out.notified).toBe(1);
+        expect(out.last, "로그아웃 뒤 저장소는 비어 있다").toBeNull();
+        await page.reload();
+        await page.addScriptTag({ content: script });
+        expect(await readStore(page), "새로고침 뒤에도 비어 있다(메모리에서만 지워진 것이 아니다)").toBeNull();
+      });
+    }, 90_000);
+
+    it("IndexedDB: 지울 것이 없어도 로그아웃은 던지지 않는다", async () => {
+      await withOriginPage(async (page) => {
+        const out = await signOutAndRead(page);
+        expect(out).toEqual({ notified: 1, last: null });
       });
     }, 60_000);
 

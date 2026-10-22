@@ -129,3 +129,58 @@ describe("CSP는 바뀌지 않았고 이 기능은 그 안에서 선다", () => 
     expect(conf.app.security.csp).toContain("img-src 'self' data:");
   });
 });
+
+// ---- 배선: 셸의 첫 자식이 층 요소다 --------------------------------------------------------------------------------
+//
+// 층 요소가 셸에서 빠지거나 다른 데로 옮겨지면 런타임이 붙을 곳이 없어 배경은 영영 서지 않는다(켜도 아무 일 없음).
+// 이 규칙들은 `.app-shell`의 직계 자식이라는 전제로 쓰였다(`wallpaper.css`의 `position: absolute; inset: 0`은 셸을 기준으로
+// 한다). 서식이 바뀌어도 깨지지 않게 소스를 컴파일러로 읽는다.
+
+/** `className="app-shell"`인 JSX 요소의 첫 번째 의미 있는 자식의 태그 이름(공백·주석 표현식은 건너뛴다). 요소가 없으면 null. */
+function firstShellChild(source: string): string | null {
+  const file = ts.createSourceFile("AppShell.tsx", source, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TSX);
+  let found: string | null = null;
+  const visit = (node: ts.Node): void => {
+    if (found !== null) return;
+    if (ts.isJsxElement(node)) {
+      const isShell = node.openingElement.attributes.properties.some(
+        (attribute) =>
+          ts.isJsxAttribute(attribute) &&
+          attribute.name.getText() === "className" &&
+          attribute.initializer !== undefined &&
+          ts.isStringLiteral(attribute.initializer) &&
+          attribute.initializer.text === "app-shell"
+      );
+      if (isShell) {
+        for (const child of node.children) {
+          if (ts.isJsxText(child) && child.containsOnlyTriviaWhiteSpaces) continue;
+          if (ts.isJsxExpression(child) && child.expression === undefined) continue;
+          found = ts.isJsxSelfClosingElement(child) ? child.tagName.getText() : `(${ts.SyntaxKind[child.kind]})`;
+          return;
+        }
+        found = "";
+        return;
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return found;
+}
+
+describe("배선: 층 요소는 셸의 첫 자식이다", () => {
+  it("AppShell의 `.app-shell` 첫 자식은 <WallpaperLayer />이고, 그 모듈을 가져온다", () => {
+    const source = readFileSync(`${WEB_SRC}app/AppShell.tsx`, "utf8");
+    expect(firstShellChild(source)).toBe("WallpaperLayer");
+    expect(source).toContain('import { WallpaperLayer } from "@/design/wallpaper/WallpaperLayer";');
+  });
+
+  it("자기 점검: 층 요소가 둘째거나 없거나 셸이 없으면 잡는다 (실패할 수 있는 가드다)", () => {
+    const shell = (children: string) => `export const A = () => (<div className="app-shell">${children}</div>);`;
+    expect(firstShellChild(shell("<WallpaperLayer /><Titlebar />"))).toBe("WallpaperLayer");
+    expect(firstShellChild(shell("{/* 주석 */}<WallpaperLayer />"))).toBe("WallpaperLayer");
+    expect(firstShellChild(shell("<Titlebar /><WallpaperLayer />"))).toBe("Titlebar");
+    expect(firstShellChild(shell(""))).toBe("");
+    expect(firstShellChild("export const A = () => (<div className=\"other\"><WallpaperLayer /></div>);")).toBeNull();
+  });
+});
