@@ -780,7 +780,8 @@ async function legibility(browser, origin, helper) {
   const TITLEBAR = ".app-shell > .app-titlebar";
   const OPEN = `${RAIL}, ${TITLEBAR}`;
   const SETTINGS = ".app-shell .settings-nav";
-  const WORK_HEADER = "[data-testid='my-work-tab'] > section > header";
+  // 「내 작업」 본문 전체: 머리 줄(제목)·칸 머리·아래 도움말 줄이 모두 창 바닥(scrim 위) 위에 곧바로 선다.
+  const WORK_SECTION = "[data-testid='my-work-tab'] > section";
   const collapse = collapseSidebar;
   const expand = expandSidebar;
   const goMine = goMyWork;
@@ -804,7 +805,7 @@ async function legibility(browser, origin, helper) {
         { name: "펼친 사이드바", region: OPEN, min: 8, prepare: goChat },
         { name: "접은 레일", region: RAIL, min: 2, prepare: collapse, restore: expand },
         { name: "접은 상단 줄", region: TITLEBAR, min: 1, prepare: collapse, restore: expand, absolute: true },
-        { name: "내 작업 머리 줄", region: WORK_HEADER, min: 1, prepare: goMine, absolute: true },
+        { name: "내 작업 본문", region: WORK_SECTION, min: 3, prepare: goMine, absolute: true },
       ],
     },
   ];
