@@ -1,0 +1,94 @@
+/* 슬라이더 (`design/ui/slider.tsx`, AP-3 #4190). 트랙 4 · 알 20은 간격 사다리의 값이고 스위치의 알(20)과
+ * 같다(`switch-thumb`). 색은 토큰만 읽는다: 채움은 주 행동의 색(잉크, 스위치 켬과 같다), 빈 트랙은 3:1
+ * 선(`--line-strong`, 스위치 끔과 같다), 알은 잉크 채움 + 면 색 고리라 채움 위에서도 경계가 선다.
+ *
+ * `--slider-fraction`(0~1)은 컴포넌트가 CSSOM으로 꽂는다. 채움 경계는 알의 중심과 같은 자리여야 하므로
+ * 알 반 칸을 양쪽에서 뺀 길이에서 계산한다(브라우저가 알을 [반 칸, 폭 - 반 칸]에서만 움직인다).
+ *
+ * 포커스 링은 알이 진다: 입력 전체(트랙 폭)에 링을 두르면 4px 선을 따라 긴 윤곽이 그려지기 때문이다. 알 바깥에
+ * 면 색 2px + 신호색 2px 두 겹이라 어느 면 위에서도 3:1이 선다(`focus-ring`과 같은 신호색). */
+.slider {
+  --slider-thumb: calc(var(--spacing-6) - var(--spacing-marker) * 2);
+  --slider-fraction: 0;
+  --slider-pos: calc(var(--slider-thumb) / 2 + (100% - var(--slider-thumb)) * var(--slider-fraction));
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
+  inline-size: calc(var(--spacing-8) * 6);
+  max-inline-size: 100%;
+  block-size: var(--spacing-6);
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  outline: none;
+}
+
+/* 카드가 좁아져 행이 세로로 접히면(`settings-row`와 같은 34rem) 슬라이더는 한 줄을 다 쓴다. */
+@container (width < 34rem) {
+  .slider {
+    inline-size: 100%;
+  }
+}
+
+.slider:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.slider::-webkit-slider-runnable-track {
+  block-size: var(--spacing-1);
+  border-radius: 9999px;
+  background: linear-gradient(
+    to right,
+    var(--primary) var(--slider-pos),
+    var(--line-strong) var(--slider-pos)
+  );
+}
+
+.slider::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  inline-size: var(--slider-thumb);
+  block-size: var(--slider-thumb);
+  /* 트랙(4)의 세로 가운데에 알(20)의 가운데를 맞춘다. */
+  margin-block-start: calc((var(--spacing-1) - var(--slider-thumb)) / 2);
+  border: var(--spacing-marker) solid var(--surface);
+  border-radius: 9999px;
+  background-color: var(--primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.slider:focus-visible::-webkit-slider-thumb {
+  box-shadow:
+    0 0 0 var(--spacing-marker) var(--surface),
+    0 0 0 calc(var(--spacing-marker) * 2) var(--signal);
+}
+
+.slider::-moz-range-track {
+  block-size: var(--spacing-1);
+  border-radius: 9999px;
+  background-color: var(--line-strong);
+}
+
+.slider::-moz-range-progress {
+  block-size: var(--spacing-1);
+  border-radius: 9999px;
+  background-color: var(--primary);
+}
+
+.slider::-moz-range-thumb {
+  box-sizing: border-box;
+  inline-size: var(--slider-thumb);
+  block-size: var(--slider-thumb);
+  border: var(--spacing-marker) solid var(--surface);
+  border-radius: 9999px;
+  background-color: var(--primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.slider:focus-visible::-moz-range-thumb {
+  box-shadow:
+    0 0 0 var(--spacing-marker) var(--surface),
+    0 0 0 calc(var(--spacing-marker) * 2) var(--signal);
+}

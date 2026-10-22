@@ -1,11 +1,118 @@
-/* 자리표시 (AP-1a #4186): 이 조각은 AP-3(#4190)가 채운다. 지금은 비어 있다.
+/* 데스크탑 유리 배경 (AP-3 #4190, ADR-0189 증보 1 D4 · 증보 3 D6, 청사진 §5.4-b).
  *
- * 대상: 데스크탑 유리 배경(`data-glass`)
- * 건드릴 것: 바닥 층 변수(`--shell-layer-canvas`)를 반투명 면으로
+ * 켜면 창 뒤 데스크탑이 사이드바·타이틀바·설정 목록과 창 가장자리에 블러로 비치고, 본문 판은 불투명 그대로다.
+ * 이 조각은 `data-glass`가 서 있을 때만 일한다. 그 속성은 **네이티브 블러가 선 뒤에** `desktopEffects.ts`가
+ * 찍는다(외양 저장소는 찍지도 지우지도 않는다): 투명 바닥이 블러보다 먼저 서면 창 뒤가 비친다.
  *
- * 규칙은 속성 선택자로 쓴다(예: `:root[data-glass] .app-shell { --shell-layer-canvas: ... }`). 루트 속성 선택자는 `@utility`·단일 클래스
- * 규칙보다 특이도가 높아 소스 순서와 무관하게 이기므로, `@import`가 맨 위라는 사실 때문에
- * `tokens.css`를 고칠 필요가 없다. 어느 속성에 무엇이 찍히는지는
- * `packages/momo-core/src/design/rootStamp.ts`의 표가, 바닥 층 변수는 `tokens.css`의
- * `app-shell`이 정한다. 컨트롤은 이 규칙이 실제로 화면을 바꾸는 PR에서만 공개한다.
+ * 규칙은 루트 속성 선택자라 `@utility`(레이어 안)·단일 클래스 규칙을 소스 순서와 무관하게 이긴다. 이 조각은
+ * 레이어 밖이라 레이어 안의 `app-shell`보다 특이도와 상관없이 앞선다. `tokens.css`는 한 글자도 고치지 않는다:
+ * AP-1a가 `.app-shell`의 바닥을 층 변수 셋(`--shell-layer-band`·`--shell-layer-canvas`·`--shell-layer-wallpaper`)
+ * 으로 쪼개 두었고, 여기서는 그 **변수만** 반투명 면으로 바꾼다.
+ *
+ * ## 색조 = 바닥색 한 겹
+ *
+ * 바닥 그라데이션의 세 정지점과 띠를 각각 `color-mix(… var(--glass-tint), transparent)`로 낮춘다. 값은
+ * `--glass-tint-light`·`--glass-tint-dark`(루트의 CSSOM 변수, 모드별 불투명도)에서 스킴에 맞는 쪽을 고른다.
+ * 하한은 테마·모드마다 core `glass.ts`가 정한다(최악 합성에서 주 글자 7:1). 그 위에서 보조 글자·아이콘·신호는
+ * 같은 호스트 위로 명도만 보정한 색(`--glass-<역할>`, 띠 위는 `--glass-band-<역할>`)으로 다시 묶는다.
+ *
+ * ## 어디가 투명이고 어디가 아닌가
+ *
+ *   투명      `body`(셸이 있을 때만), `.app-shell`의 바닥. 사이드바·타이틀바·설정 목록은 바탕이 없어 그 위에 선다.
+ *   불투명    본문 판(`app-pane`, 설정 판 `settings-pane`)과 카드·시트·입력. 로그인 전 화면처럼 셸이 없는 화면은
+ *            `body`가 `--pane`으로 칠해져 있어 **통째로 불투명**이다.
+ *   내 작업   본문이 판 없이 바닥 위에 서는 탭(`data-work-rail`)은 유리 아래에서 `--pane` 면을 깐다: 그 영역의
+ *            글자는 보정되지 않으므로 반투명으로 둘 수 없다(「본문은 불투명」).
+ *
+ * ## 접근성 (증보 1 D4 폴백 2)
+ *
+ * `prefers-reduced-transparency: reduce`·`prefers-contrast: more`에서는 CSS가 **불투명 바닥으로 돌아간다**
+ * (`revert-layer`가 레이어 안 `app-shell`의 원래 값을 되찾는다). `desktopEffects.ts`도 같은 질의로 `data-glass`를
+ * 걷지만, 질의와 JS 사이의 한 프레임도 투명으로 두지 않으려는 이중 장치다. WKWebView는 앞의 질의를 구현하지 않는다
+ * (macOS 27 실측: `no-preference` 질의가 거짓이다). 목록의 한쪽을 모르는 엔진도 나머지 쪽은 읽으므로 쉼표 목록이다.
  */
+
+/* 지금 스킴의 색조 불투명도 한 값. `light-dark()`는 색만 받으므로 `pane`(tokens.css)과 같은 속성·질의 짝으로 고른다. */
+:root[data-glass] {
+  --glass-tint: var(--glass-tint-light, 100%);
+}
+:root[data-glass][data-theme="dark"] {
+  --glass-tint: var(--glass-tint-dark, 100%);
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-glass]:not([data-theme="light"]) {
+    --glass-tint: var(--glass-tint-dark, 100%);
+  }
+}
+
+/* 셸이 있는 화면만 `body`를 비운다. 셸 밖(연결·온보딩·동의 화면)은 `body`가 `--pane`을 그대로 칠한다. */
+:root[data-glass] body:has(.app-shell) {
+  background: transparent;
+}
+
+@media (width >= 600px) {
+  :root[data-glass] .app-shell {
+    --glass-canvas-top: color-mix(in srgb, var(--canvas-top) var(--glass-tint, 100%), transparent);
+    --glass-canvas-mid: color-mix(in srgb, var(--canvas-mid) var(--glass-tint, 100%), transparent);
+    --glass-canvas-bottom: color-mix(in srgb, var(--canvas-bottom) var(--glass-tint, 100%), transparent);
+    --glass-band-tint: color-mix(in srgb, var(--band, transparent) var(--glass-tint, 100%), transparent);
+    /* 160°·42%는 `tokens.css` `app-shell`의 바닥 식이다(같은 정지점, 색만 반투명). */
+    --shell-layer-canvas: linear-gradient(
+      160deg,
+      var(--glass-canvas-top) 0%,
+      var(--glass-canvas-mid) 42%,
+      var(--glass-canvas-bottom) 100%
+    );
+    --shell-layer-band: linear-gradient(var(--glass-band-tint), var(--glass-band-tint));
+    /* `background-color: var(--canvas-mid)`는 층 변수 밖이다(AP-1a 인계 N-8). 두면 층 밑에 불투명 바닥이 깔려 블러가 안 비친다. */
+    background-color: transparent;
+  }
+
+  /* 내 작업 탭: 판이 없어 본문이 바닥 위에 선다. 유리 아래에서는 그 면을 불투명 `--pane`으로 깐다. */
+  :root[data-glass] .app-shell[data-work-rail] > main {
+    background-color: var(--pane);
+  }
+
+  /* 사이드바·타이틀바·설정 목록은 띠(있으면) 위에, 접힌 타이틀바는 바닥 위에 선다. 글자·표식은 두 면 위에서 각각 보정한 색이다. */
+  :root[data-glass] .sidebar-drawer,
+  :root[data-glass] .settings-nav,
+  :root[data-glass] .app-shell:not([data-sidebar-collapsed]) > .app-titlebar {
+    --ink-muted: var(--glass-band-ink-muted);
+    --icon: var(--glass-band-icon);
+    --signal: var(--glass-band-signal);
+    --on-signal: var(--glass-band-on-signal);
+    --signal-text: var(--glass-band-signal-text);
+    --agent: var(--glass-band-agent);
+    --ok: var(--glass-band-ok);
+    --warn: var(--glass-band-warn);
+    --danger: var(--glass-band-danger);
+  }
+
+  :root[data-glass] .app-shell[data-sidebar-collapsed] > .app-titlebar {
+    --ink-muted: var(--glass-ink-muted);
+    --icon: var(--glass-icon);
+    --signal: var(--glass-signal);
+    --on-signal: var(--glass-on-signal);
+    --signal-text: var(--glass-signal-text);
+    --agent: var(--glass-agent);
+    --ok: var(--glass-ok);
+    --warn: var(--glass-warn);
+    --danger: var(--glass-danger);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  :root[data-glass] body:has(.app-shell) {
+    background: revert-layer;
+  }
+
+  :root[data-glass] .app-shell {
+    --shell-layer-canvas: revert-layer;
+    --shell-layer-band: revert-layer;
+    background-color: revert-layer;
+  }
+
+  :root[data-glass] .app-shell[data-work-rail] > main {
+    background-color: revert-layer;
+  }
+}

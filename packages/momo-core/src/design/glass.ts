@@ -56,13 +56,6 @@ import { MODES, THEMES, type BandRole, type ColorRole, type Mode, type ThemeId }
 /** 슬라이더 최대(퍼센트). 하한이 이 값을 넘는 테마·모드는 유리를 쓸 수 없다. */
 export const GLASS_OPACITY_MAX = 95;
 
-/**
- * 저장된 값이 없을 때의 값 = 하한 + 10%p(최대 95)다. 하한 그대로는 보조 글자가 가장 많이 보정되는
- * 자리라 기본으로 두기엔 아슬하고, 위로 10%p에서는 데스크탑이 아직 보이면서 보정이 줄어든다(캡처로
- * 정한 값, AP-3 PR 본문).
- */
-export const GLASS_DEFAULT_ABOVE_FLOOR = 10;
-
 /** 키보드 한 걸음(화살표)과 큰 걸음(PageUp·PageDown), 퍼센트. */
 export const GLASS_STEP = 1;
 export const GLASS_PAGE_STEP = 10;
@@ -190,7 +183,10 @@ export function glassRange(source: GlassSource): GlassRange {
     usable: min <= GLASS_OPACITY_MAX,
     min,
     max: GLASS_OPACITY_MAX,
-    defaultPercent: Math.min(GLASS_OPACITY_MAX, min + GLASS_DEFAULT_ABOVE_FLOOR),
+    // 저장된 값이 없을 때의 값은 하한이다: 보장 안에서 데스크탑이 가장 많이 비치는 값이다. 캡처로 정했다 —
+    // 맥 `Sidebar` 재질은 뒤 그림을 크게 눌러 놓아서(순흑 뒤가 라이트에서 (198,198,197), 순백 뒤가 (222,222,222))
+    // 하한 위 10%p만 되어도 켠 것과 끈 것이 거의 구별되지 않는다. 사람은 슬라이더를 오른쪽으로 옮겨 더 진하게 한다.
+    defaultPercent: Math.min(GLASS_OPACITY_MAX, min),
   };
 }
 

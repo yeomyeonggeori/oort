@@ -388,7 +388,7 @@ describe("범위·판정 — 쓸 수 있는가 (AC 4, 증보 3 D6 불가 기준 
       expect(range.usable, `${theme} ${mode}`).toBe(true);
       expect(range.min).toBe(Math.round(FLOOR[theme][mode] * 100));
       expect(range.max).toBe(95);
-      expect(range.defaultPercent).toBe(Math.min(95, range.min + 10));
+      expect(range.defaultPercent).toBe(range.min);
     }
   });
 
@@ -422,10 +422,10 @@ describe("범위·판정 — 쓸 수 있는가 (AC 4, 증보 3 D6 불가 기준 
   });
 
   it("값 정규화: 없음·숫자 아님은 기본값, 하한 아래는 하한, 95 위는 95, 소수는 반올림", () => {
-    const range = glassRange(sourceOf("dawnsky", "dark")); // 78..95, 기본 88
-    expect(glassOpacity(range, undefined)).toBe(88);
-    expect(glassOpacity(range, Number.NaN)).toBe(88);
-    expect(glassOpacity(range, Number.POSITIVE_INFINITY)).toBe(88);
+    const range = glassRange(sourceOf("dawnsky", "dark")); // 78..95, 기본 78(하한)
+    expect(glassOpacity(range, undefined)).toBe(78);
+    expect(glassOpacity(range, Number.NaN)).toBe(78);
+    expect(glassOpacity(range, Number.POSITIVE_INFINITY)).toBe(78);
     expect(glassOpacity(range, 12)).toBe(78);
     expect(glassOpacity(range, 77)).toBe(78);
     expect(glassOpacity(range, 78)).toBe(78);
@@ -494,10 +494,10 @@ describe("CSS 변수", () => {
     const vars = glassVariables(firstPartyGlassSources("dawnsky"), 74);
     expect(vars[GLASS_VARS.tintLight]).toBe("74%");
     expect(vars[GLASS_VARS.tintDark]).toBe("78%");
-    // 저장이 없으면 모드마다 하한 + 10%p다.
+    // 저장이 없으면 모드마다 자기 하한이다(보장 안에서 가장 많이 비치는 값).
     const defaults = glassVariables(firstPartyGlassSources("dawnsky"), undefined);
-    expect(defaults[GLASS_VARS.tintLight]).toBe("80%");
-    expect(defaults[GLASS_VARS.tintDark]).toBe("88%");
+    expect(defaults[GLASS_VARS.tintLight]).toBe("70%");
+    expect(defaults[GLASS_VARS.tintDark]).toBe("78%");
   });
 
   it("값이 바뀌면 보정 색도 바뀐다(하한 근처와 95%의 보조 글자색이 다르다)", () => {
