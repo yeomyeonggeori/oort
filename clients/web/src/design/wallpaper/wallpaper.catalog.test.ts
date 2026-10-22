@@ -125,6 +125,25 @@ describe.runIf(catalog !== undefined)("카탈로그 57 테마-모드 위의 배�
     expect(bad).toEqual([]);
   });
 
+  // 교정점: ADR-0189 증보 3 D6의 표(프로토타입 측정). 구현이 그 표를 **그대로** 재현한다는 것을 리터럴로 못 박는다. 파생 엔진이
+  // 바닥·잉크 파생을 바꿔서 이 숫자가 움직이면 이 시험이 빨개지고, 그때는 ADR의 표와 함께 의식적으로 고친다.
+  it("교정점: 하한 분포 26·9·13·9 와 유리·배경 불가 9건이 ADR 표와 같다", () => {
+    const floors = rows.map(({ mode, tokens }) => wallpaperTreatment(wallpaperTokensOf(tokens), mode).floor);
+    expect({
+      "0.80 이하": floors.filter((f) => f <= 0.8).length,
+      "0.80 초과 0.85 미만": floors.filter((f) => f > 0.8 && f < 0.85).length,
+      "0.85 이상 0.95 이하": floors.filter((f) => f >= 0.85 && f <= 0.95).length,
+      "0.95 초과": floors.filter((f) => f > 0.95).length,
+    }).toEqual({ "0.80 이하": 26, "0.80 초과 0.85 미만": 9, "0.85 이상 0.95 이하": 13, "0.95 초과": 9 });
+    const unavailable = rows
+      .filter(({ mode, tokens }) => wallpaperTreatment(wallpaperTokensOf(tokens), mode).verdict === "unavailable")
+      .map(({ id, mode }) => `${id}/${mode}`)
+      .sort();
+    expect(unavailable).toEqual(
+      ["catppuccin/light", "everforest/light", "kanagawa/light", "material/light", "one/dark", "rose-pine/light", "snazzy-light/light", "solarized/dark", "solarized/light"].sort()
+    );
+  });
+
   it("판정은 하한의 퍼센트로만 정해진다 (불가는 95% 초과, 힌트는 85~95%)", () => {
     const seen = { ok: 0, blurry: 0, unavailable: 0 };
     for (const { id, mode, tokens } of rows) {
