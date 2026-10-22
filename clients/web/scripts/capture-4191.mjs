@@ -6,7 +6,7 @@
 //   MODE=capture LABEL=after  DIST=dist node scripts/capture-4191.mjs     # 장면 캡처 + meta.json
 //   MODE=capture LABEL=before DIST=<base 빌드> node scripts/capture-4191.mjs  # 같은 화면의 「전」
 //   MODE=assert  DIST=dist node scripts/capture-4191.mjs                  # 실제 앱에서 단정(아래)
-//   MODE=assert  SABOTAGE=scrim DIST=dist node scripts/capture-4191.mjs   # ⑥이 실제로 실패할 수 있음을 보이는 사보타주(아래)
+//   MODE=assert  SABOTAGE=scrim|band DIST=dist node scripts/capture-4191.mjs   # ⑥이 실제로 실패할 수 있음을 보이는 사보타주(아래)
 //
 // capture: 모양 설정과 대화 화면을 라이트/다크 × 1440/900으로 찍는다. 고르는 일은 전부 **설정 화면의 진짜 컨트롤**을
 // 눌러서 한다(단색·기본 제공의 칩, 사진은 `setInputFiles`로 진짜 파일 선택 경로). 시드로 상태를 박지 않는다.
@@ -19,7 +19,8 @@
 //   ④ 네트워크: 사진을 고르고 적용하는 동안 바깥으로 나간 요청이 없다(본문 있는 요청 0, 다른 오리진 0).
 //   ⑤ CSP: Tauri 셸의 정책(`tauri.conf.json`)을 그대로 붙인 번들에서도 사진 배경이 서고 위반 이벤트가 0이다.
 //   ⑥ 읽힘: 순흑 사진·순백 사진 위에서 펼친·접은 사이드바·상단 줄과 설정 목록 열의 글자(4.5:1)와 아이콘(3:1)이 실제 렌더
-//      픽셀 위에서 지켜진다(바탕은 글자를 투명하게 한 같은 장면에서 읽는다: `scripts/lib/legibility.mjs`).
+//      픽셀 위에서 지켜진다(바탕은 글자를 투명하게 한 같은 장면에서 읽는다: `scripts/lib/legibility.mjs`). 새벽 하늘·흑연은
+//      절대 기준이고, 띠가 있는 노을띠는 열의 호스트가 불투명한 띠라 「배경화면 없음」과 짝지어 나빠지지 않았는지를 잰다.
 //   ⑦ 접근성: 대비 높이기·투명도 줄이기가 켜지면 그림이 서지 않고 선택은 남는다.
 //
 // 백엔드 없이 `/v1/**` 고정 응답 + 가짜 소켓. 벽시계·로케일·시간대를 고정한다.
@@ -48,7 +49,9 @@ const PORT = Number(process.env.CAPTURE_PORT || 5391);
 const ENGINE = process.env.ENGINE === "webkit" ? "webkit" : "chromium";
 // SABOTAGE=scrim: ⑥을 재기 직전에 두 모드의 scrim을 투명하게 한다. 가드가 실제로 실패할 수 있다면 순흑·순백 사진이 그대로
 // 비쳐 ⑥이 깨져야 한다(깨지지 않으면 ⑥이 아무것도 재지 않는다는 뜻이다). 정상 실행에서는 쓰지 않는다.
-const SABOTAGE = process.env.SABOTAGE === "scrim" ? "scrim" : "";
+// SABOTAGE=band: 띠 표지(`data-wallpaper-band`)를 떼어, 띠 위 열에 보정색이 다시 얹히게 한다(수리 전의 모습). 띠가 있는 테마의
+// 「배경화면 없음보다 나빠지지 않는다」 단정이 실제로 빨개져야 한다.
+const SABOTAGE = process.env.SABOTAGE === "scrim" || process.env.SABOTAGE === "band" ? process.env.SABOTAGE : "";
 const launcher = ENGINE === "webkit" ? webkit : chromium;
 
 const FIXTURE_NOW = Date.parse("2026-10-22T09:30:00+09:00");
@@ -383,29 +386,31 @@ async function sceneFacts(page) {
 const outDir = () => resolve(OUT_ROOT, ENGINE === "webkit" ? `${LABEL}-webkit` : LABEL);
 const meta = [];
 
+/** 화면에서 「시스템은 라이트예요/다크예요」를 말하는 말단 요소들의 글(식으로 평가한다). */
+const SYSTEM_SCHEME_TEXTS = `[...document.querySelectorAll("p, span, div")]
+  .filter((node) => node.children.length === 0 && /시스템은 (라이트|다크)예요/.test(node.textContent || ""))
+  .map((node) => node.textContent || "")`;
+
 /**
  * 설정의 「색 모드」 행은 「지금 이 기기의 시스템은 라이트예요」처럼 OS 모드를 말한다. 그 문장은 미디어 질의 알림을 받은 뒤에야
  * 바뀌어서, 부하가 큰 실행에서는 장면의 모드를 바꾼 직후 한 장을 찍으면 앞 모드의 문장이 찍힌다(실측: 두 실행을 겹쳤을 때
  * `settings-photo-light-900`이 「다크예요」로 찍혔다). 장면의 모드와 그 문장이 같아질 때까지 기다리고, 끝내 안 맞으면 던진다
  * (문장이 없는 장면은 기다릴 것이 없다).
  */
-async function waitSystemSchemeText(page, scheme) {
+async function waitSystemSchemeText(page, scheme, name) {
   const word = scheme === "dark" ? "다크" : "라이트";
-  await page.waitForFunction(
-    (expected) => {
-      const holder = [...document.querySelectorAll("p, span, div")].find(
-        (node) => node.children.length === 0 && /시스템은 (라이트|다크)예요/.test(node.textContent || "")
-      );
-      return holder === undefined || (holder.textContent || "").includes(`시스템은 ${expected}예요`);
-    },
-    word,
-    { timeout: 10_000 }
-  );
+  try {
+    await page.waitForFunction(`(${SYSTEM_SCHEME_TEXTS}).every((text) => text.includes("시스템은 ${word}예요"))`, undefined, { timeout: 10_000 });
+  } catch (error) {
+    const seen = await page.evaluate(SYSTEM_SCHEME_TEXTS);
+    const dark = await page.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches);
+    throw new Error(`${name}: OS 모드 문장이 「${word}」가 되지 않았다. 본 것: ${JSON.stringify(seen)}, 미디어 질의는 ${dark ? "다크" : "라이트"} (${error.message})`);
+  }
 }
 
 async function shoot(page, name, extra = {}) {
   await settle(page);
-  if (extra.scheme) await waitSystemSchemeText(page, extra.scheme);
+  if (extra.scheme) await waitSystemSchemeText(page, extra.scheme, name);
   const path = resolve(outDir(), `${name}.png`);
   await page.screenshot({ path, animations: "disabled", caret: "hide" });
   meta.push({ name, ...(await sceneFacts(page)), ...extra });
@@ -571,6 +576,15 @@ async function phoneScene(browser, origin) {
   } finally {
     await context.close();
   }
+  // 아무것도 고르지 않은 처음 상태(폰 폭): 「기본으로」가 잠긴 채 늘 있어서, 처음 고르는 순간 칩이 아래로 밀리지 않는다.
+  const fresh = await openContext(browser, origin, "light", viewport);
+  try {
+    await goSettings(fresh.page);
+    await scrollToBackdrop(fresh.page);
+    await shoot(fresh.page, "phone-settings-card-none-light-390", { scheme: "light", viewport: "390", wallpaper: "none" });
+  } finally {
+    await fresh.context.close();
+  }
 }
 
 /** 키보드로 칩에 닿았을 때의 초점 고리(Tab 한 번). */
@@ -665,46 +679,99 @@ async function legibility(browser, origin, helper) {
   // 바닥 위에 직접 서는 세 자리: 펼친 사이드바·상단 줄, 접은 사이드바(레일)·상단 줄, 설정의 목록 열.
   const CHAT = ".app-shell > .sidebar-drawer, .app-shell > .app-titlebar";
   const SETTINGS = ".app-shell .settings-nav";
-  for (const kind of ["black", "white"]) {
-    const photo = await makeJpeg(helper, { kind, width: 2400, height: 1500 });
-    const { context, page } = await openContext(browser, origin, "light", VIEWPORTS[0]);
-    try {
-      await goSettings(page);
-      await pickPhoto(page, photo, `${kind}.jpg`);
-      await waitLive(page);
-      for (const scheme of SCHEMES) {
-        await page.emulateMedia({ colorScheme: scheme });
-        await page.waitForTimeout(400);
-        const states = [
-          ["펼친 사이드바", CHAT, async () => { await goChat(page); }],
-          ["접은 사이드바", CHAT, async () => { await goChat(page); await page.getByTestId("sidebar-toggle").click(); await page.waitForTimeout(500); }],
-          ["설정 목록 열", SETTINGS, async () => { await goSettings(page); }],
-        ];
-        for (const [name, region, prepare] of states) {
-          await prepare();
-          await settle(page);
-          if (SABOTAGE === "scrim") {
-            await page.evaluate(() => {
-              document.documentElement.style.setProperty("--wallpaper-scrim-light", "transparent");
-              document.documentElement.style.setProperty("--wallpaper-scrim-dark", "transparent");
-            });
+  const statesOf = (page) => [
+    ["펼친 사이드바", CHAT, async () => { await goChat(page); }],
+    ["접은 사이드바", CHAT, async () => { await goChat(page); await page.getByTestId("sidebar-toggle").click(); await page.waitForTimeout(500); }],
+    ["설정 목록 열", SETTINGS, async () => { await goSettings(page); }],
+  ];
+  const restore = async (page, name) => {
+    // 접은 상태를 되돌린다.
+    if (name === "접은 사이드바") { await page.getByTestId("sidebar-toggle").click(); await page.waitForTimeout(300); }
+  };
+  // 평평한 테마(새벽 하늘·흑연)는 열이 scrim 위에 선다: 절대 기준(글자 4.5:1·아이콘 3:1)을 잰다.
+  // 띠가 있는 테마(노을띠)는 사이드바 열의 호스트가 **불투명한 띠**다: 배경화면이 scrim을 얹어도 그 열의 글자는 띠 위에 있다.
+  // 그 열의 값은 테마 자신의 몫(설정 목록 열은 기준 빌드부터 라이트에서 읽히지 않는다)이므로, 배경화면 때문에 **나빠지지 않았는지**를
+  // 같은 장면의 「배경화면 없음」과 짝지어 잰다(design-review H-1: 보정색이 띠 위 글자를 덮어 섹션 라벨 2.34 → 1.29).
+  const CASES = [
+    { theme: null, label: "새벽 하늘", compare: false },
+    { theme: "graphite", label: "흑연", compare: false },
+    { theme: "noeul", label: "노을띠", compare: true },
+  ];
+  for (const { theme, label, compare } of CASES) {
+    const seed = theme ? { theme } : null;
+    const baselines = new Map();
+    if (compare) {
+      const { context, page } = await openContext(browser, origin, "light", VIEWPORTS[0], {}, seed);
+      try {
+        for (const scheme of SCHEMES) {
+          await page.emulateMedia({ colorScheme: scheme });
+          await page.waitForTimeout(400);
+          for (const [name, region, prepare] of statesOf(page)) {
+            await prepare();
             await settle(page);
+            baselines.set(`${scheme}|${name}`, (await measureLegibility(page, helper, region)).measured);
+            await restore(page, name);
           }
-          const { png, measured } = await measureLegibility(page, helper, region);
-          const bad = measured.filter((item) => item.ratio < item.min - 0.05);
-          rows.push({ kind, scheme, name, count: measured.length, worst: Math.min(...measured.map((item) => item.ratio / item.min)), bad });
-          const slug = `${kind}-${scheme}-${name.replace(/\s+/g, "")}`;
-          writeFileSync(resolve(outDir(), `legibility-${slug}.png`), png);
-          writeFileSync(
-            resolve(outDir(), `legibility-${slug}.json`),
-            JSON.stringify(measured.map((item) => ({ kind: item.kind, label: item.label, color: item.color, bg: item.bg, ratio: Number(item.ratio.toFixed(2)), min: item.min })), null, 1)
-          );
-          // 접은 상태를 되돌린다.
-          if (name === "접은 사이드바") { await page.getByTestId("sidebar-toggle").click(); await page.waitForTimeout(300); }
         }
+      } finally {
+        await context.close();
       }
-    } finally {
-      await context.close();
+    }
+    for (const kind of ["black", "white"]) {
+      const photo = await makeJpeg(helper, { kind, width: 2400, height: 1500 });
+      const { context, page } = await openContext(browser, origin, "light", VIEWPORTS[0], {}, seed);
+      try {
+        await goSettings(page);
+        await pickPhoto(page, photo, `${kind}.jpg`);
+        await waitLive(page);
+        for (const scheme of SCHEMES) {
+          await page.emulateMedia({ colorScheme: scheme });
+          await page.waitForTimeout(400);
+          for (const [name, region, prepare] of statesOf(page)) {
+            await prepare();
+            await settle(page);
+            if (SABOTAGE === "scrim") {
+              await page.evaluate(() => {
+                document.documentElement.style.setProperty("--wallpaper-scrim-light", "transparent");
+                document.documentElement.style.setProperty("--wallpaper-scrim-dark", "transparent");
+              });
+              await settle(page);
+            }
+            if (SABOTAGE === "band") {
+              await page.evaluate(() => document.documentElement.removeAttribute("data-wallpaper-band"));
+              await settle(page);
+            }
+            const { png, measured } = await measureLegibility(page, helper, region);
+            let bad;
+            let worst;
+            if (compare) {
+              const before = baselines.get(`${scheme}|${name}`) ?? [];
+              // 짝이 안 맞으면(요소 수가 다르면) 비교가 성립하지 않는다: 통째로 나쁜 것으로 센다.
+              if (before.length !== measured.length) {
+                bad = [{ label: `요소 수가 다르다 (${before.length} → ${measured.length})` }];
+                worst = 0;
+              } else {
+                // 이미 기준을 넘는 항목은 배경화면 때문에 조금 달라져도 괜찮다. 못 미치던 항목은 더 나빠지면 안 된다.
+                bad = measured.filter((item, index) => item.ratio < item.min - 0.05 && item.ratio < before[index].ratio - 0.05);
+                worst = Math.min(...measured.map((item, index) => Math.min(1, item.ratio / Math.min(before[index].ratio, item.min))));
+              }
+            } else {
+              bad = measured.filter((item) => item.ratio < item.min - 0.05);
+              worst = Math.min(...measured.map((item) => item.ratio / item.min));
+            }
+            rows.push({ theme: label, compare, kind, scheme, name, count: measured.length, worst, bad });
+            const slug = `${theme ?? "dawnsky"}-${kind}-${scheme}-${name.replace(/\s+/g, "")}`;
+            writeFileSync(resolve(outDir(), `legibility-${slug}.png`), png);
+            writeFileSync(
+              resolve(outDir(), `legibility-${slug}.json`),
+              JSON.stringify(measured.map((item) => ({ kind: item.kind, label: item.label, color: item.color, bg: item.bg, ratio: Number(item.ratio.toFixed(2)), min: item.min })), null, 1)
+            );
+            await restore(page, name);
+          }
+        }
+      } finally {
+        await context.close();
+      }
     }
   }
   return rows;
@@ -854,8 +921,9 @@ async function assertions() {
     // ⑥ 읽힘: 순흑·순백 사진 위의 실제 렌더 픽셀.
     const rows = await legibility(browser, preview.origin, helper);
     for (const row of rows) {
-      check(`⑥ ${row.kind} 사진 × ${row.scheme} × ${row.name}: 글자 4.5:1·아이콘 3:1`, row.bad.length === 0 && row.count >= (row.name === "접은 사이드바" ? 2 : 8),
-        `항목 ${row.count}개, 가장 낮은 (대비/기준) = ${row.worst.toFixed(2)}${row.bad.length ? `, 미달: ${JSON.stringify(row.bad.slice(0, 4).map((b) => [b.label, b.color, b.bg, Number(b.ratio.toFixed(2))]))}` : ""}`);
+      const rule = row.compare ? "배경화면 없음보다 나빠지지 않는다 (띠 위 열은 테마의 몫)" : "글자 4.5:1·아이콘 3:1";
+      check(`⑥ ${row.theme} × ${row.kind} 사진 × ${row.scheme} × ${row.name}: ${rule}`, row.bad.length === 0 && row.count >= (row.name === "접은 사이드바" ? 2 : 8),
+        `항목 ${row.count}개, 가장 낮은 (대비/기준) = ${row.worst.toFixed(2)}${row.bad.length ? `, 미달: ${JSON.stringify(row.bad.slice(0, 4).map((b) => [b.label, b.color, b.bg, b.ratio === undefined ? null : Number(b.ratio.toFixed(2))]))}` : ""}`);
     }
 
     // ⑦ 접근성 폴백: 그림이 서지 않고 선택은 남는다.
