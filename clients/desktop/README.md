@@ -111,6 +111,8 @@ interface HostedAgentProbe {
 | `notification_request_permission` | — | same | Desktop: always `"granted"`, no prompt. macOS asks on the first `notification_show` instead (#2676). |
 | `notification_show` | `{ title: string, body?: string }` | `boolean` | `false` = not shown because permission is not granted. Desktop never returns `false`: a banner macOS drops is still `true` (#2676). |
 | `dock_badge_set` | `{ count: number }` | `void` \| error | Dock badge = the web bundle's 「나에게 필요한 일」 count (`useNeedsMeCount`); `0` clears it, capped at 999. Granted to the `main` window only (#3339). |
+| `window_vibrancy_set` | `{ enabled: boolean, material?: "sidebar" \| "under-window-background" \| "hud-window" }` | `void` \| error | 「유리 배경」의 창 쪽(ADR-0189 증보 3 D6, #4190). macOS: `enabled` 면 이전 블러 층을 지우고 `NSVisualEffectView`(기본 `sidebar`, 모르는 이름도 `sidebar`)를 웹뷰 뒤에 깐 **다음** 웹뷰 캔버스만 투명으로 만든다(wry `drawsBackground`, 비공개 API). 끄면 층만 지운다. 창은 처음부터 불투명이고 런타임에 투명으로 만들지 않는다. macOS가 아니면 `Ok(())`. 웹은 이 호출이 성공한 **뒤에** `data-glass`를 찍고, 끌 때는 `data-glass`를 **먼저** 걷는다. Granted to the `main` window only. |
+| `app_theme_set` | `{ scheme: "light" \| "dark" \| "system" }` | `void` | 앱 네이티브 appearance를 웹이 보여 주는 스킴에 맞춘다(`Sidebar` 재질은 페이지가 아니라 창의 effective appearance로 밝게·어둡게 흐려진다). 모르는 값은 `system`. 이 호출은 페이지의 `prefers-color-scheme`도 바꾸므로 웹은 유리가 켜져 있고 스킴이 고정일 때만 `light`·`dark`를 보내고 그 밖에는 `system`으로 돌려준다. Granted to the `main` window only (#4190). |
 | `keychain_available` | — | `boolean` | Probes the credential store. |
 | `keychain_refresh_token_handle` | — | `string \| null` | `shell:` + 32 hex of the stored token's SHA-256, or `null` (#3106). The token itself never comes back to the webview (`keychain_load_refresh_token` was removed). |
 | `keychain_store_refresh_token` | `{ token: string, origin: string }` | `void` \| error | Rejects an empty token, a `shell:` handle, or a missing/non-http(s) origin. `origin` pins the token to its server: the shell presents it nowhere else (#3106). |
@@ -654,6 +656,51 @@ was read from `log stream` (`usernoted`, `NotificationCenter`) and the
 - Focus: switching to another app fires `blur` (`document.hasFocus()` false),
   clicking the window fires `focus` — the signals the rail's `focused` rule
   reads.
+
+### 2026-10-22, macOS 27.0 (26A428) arm64, debug build (#4190 glass spike)
+
+`window_vibrancy_set` + `app_theme_set` (ADR-0189 증보 3 D6) against the **real shell**:
+`cargo build` (dev profile, unoptimized) of this crate loading a local spike page (a
+268px sidebar tinted like `design/appearance/glass.css` and an opaque pane), built with its own
+bundle identifier (`app.momo.desktop.spike4190`) so no keychain item, app-data folder or
+work-host registration of the installed app was touched. tauri 2.11.5, tauri-runtime-wry 2.11.4,
+wry 0.55.1, tao 0.35.3, window-vibrancy 0.6.0 (the same lock as Buzz). Retina built-in display,
+macOS appearance Dark. Numbers are from `performance.now()` in the page (1 ms resolution) and
+`top` 1 s samples.
+
+- **Works.** `apply_vibrancy(Sidebar)` + `Webview::set_background_color(0,0,0,0)` succeeded on
+  the first call and on all 24 later calls (10 off/on pairs, the three materials, an unknown
+  material that fell back to `sidebar`). The docs say `set_background_color` is not implemented on
+  macOS; wry 0.55.1 implements it (behind `transparent`) and it did what Buzz relies on. With the
+  window active the sidebar showed the blurred desktop and the pane stayed opaque.
+- **Latency.** IPC round trip of `window_vibrancy_set`: 2 ms the first time, median 1 ms after (max
+  2 ms, n = 10 enables and 10 disables). Next painted frame after the call resolved: 9 ms the first
+  time, median 1 ms, max 17 ms after (inside one 60 Hz frame); two frames: 26 ms first, median
+  16 ms. The native step is not what makes the first frame late: until the page has loaded and
+  stamped `data-glass` the window paints the opaque shell, so the first frame after launch is
+  opaque by the length of the web bundle's boot (measured for the real bundle in the PR).
+- **CPU.** Glass off vs on, two runs each, 4 s idle and 5 s of a scripted resize (~30 steps/s):
+  idle main 0.3 to 0.4 %, GPU helper 0.0 to 0.1 %, WebContent 0.1 to 0.2 %, no difference. While
+  resizing: main 10.9 and 11.8 % off, 11.4 and 14.1 % on; GPU 4.9 and 4.5 vs 4.2 and 6.0;
+  WebContent 3.0 and 3.1 vs 3.3 and 4.0. WindowServer sat near 42 % in every run because this Mac
+  drives three displays (resizing: 37.9 and 36.8 % off, 35.6 and 40.0 % on). The glass cost is
+  inside the run-to-run noise except possibly 2 to 3 points of main-process CPU in one pair.
+- **Resize.** A 6 fps contact sheet (36 frames) of a 4 s scripted resize with glass on shows no
+  white or black flash and no torn edge; the blur layer follows the window. Not measured: ProMotion
+  frame pacing and how it feels in a hand.
+- **Inactive window.** `NSVisualEffectView` follows the window's active state (`apply_vibrancy`'s
+  default, Buzz and Finder do the same): an inactive window draws the material flat. Captures are
+  taken with the window active.
+- **`app_theme_set` does follow.** On a dark macOS: `light` made the page's
+  `prefers-color-scheme: dark` false, `dark` made it true, `system` gave the system's value back, and
+  a garbage string was read as `system`. Why it matters, captured at a 30 % tint (spike only, below
+  the product's floor): a page pinned to light on the dark system appearance blurs dark and muddy
+  and its muted sidebar labels are barely readable; after `app_theme_set("light")` the blur is
+  light. The call also moves the page's own color-scheme media query, so the web layer asks for
+  `light`/`dark` only while glass is on and the scheme is pinned.
+- **Not covered.** Release build (LTO, `opt-level = s`), macOS 14 to 26, Windows/Linux (the
+  commands are no-ops there), the Mac App Store (this build carries the private `drawsBackground`
+  key and cannot go there).
 
 ## Known gaps
 
