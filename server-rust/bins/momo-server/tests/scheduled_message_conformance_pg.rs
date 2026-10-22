@@ -1831,6 +1831,86 @@ async fn the_scheduler_write_runs_as_a_role_that_does_not_bypass_rls() {
         outcome.is_err(),
         "a tick on a BYPASSRLS pool reads and writes nothing"
     );
+
+    // `start` is the one entry `main` uses. On a role that skips RLS it does not start the tick…
+    let fx = fixture(&rig.su, "sm-role-guard").await;
+    let token = rig.token(fx.workspace, &fx.a).await;
+    let (_, stop) = watch::channel(false);
+    assert_eq!(
+        rig.create(
+            &token,
+            fx.workspace,
+            fx.channel,
+            create_body("before", 3600)
+        )
+        .await
+        .0,
+        201,
+        "the routes accept schedules while nothing has refused the tick"
+    );
+    let refused =
+        momo_server::scheduler::start(rig.state.clone(), relay.clone(), rig.settings, stop.clone())
+            .await;
+    assert!(refused.is_none(), "no tick on a BYPASSRLS pool");
+    // …and says so on the wire: a server that will not send a schedule must not accept one
+    // (the same 503 as the operator's off switch); listing and deleting still work
+    let (status, value) = rig
+        .create(&token, fx.workspace, fx.channel, create_body("after", 3600))
+        .await;
+    assert_eq!(
+        (status, error_code(&value)),
+        (503, Some("scheduler_disabled")),
+        "{value}"
+    );
+    let (status, listed) = rig.list(&token, fx.workspace, "").await;
+    assert_eq!(status, 200);
+    let kept = listed["scheduledMessages"][0]["id"]
+        .as_str()
+        .expect("the earlier schedule is still listed")
+        .to_string();
+    assert_eq!(
+        rig.patch(&token, fx.workspace, &kept, json!({"body": "x"}))
+            .await
+            .0,
+        503
+    );
+    assert_eq!(rig.send_now(&token, fx.workspace, &kept).await.0, 503);
+    assert_eq!(rig.delete(&token, fx.workspace, &kept).await.0, 204);
+    // an RLS-bound pool starts the tick and lifts the block
+    let (stop_tx, stop_rx) = watch::channel(false);
+    let mut settings = rig.settings;
+    settings.tick_ms = 1000;
+    let running =
+        momo_server::scheduler::start(rig.state.clone(), rig.tick_pool.clone(), settings, stop_rx)
+            .await
+            .expect("momo_app starts the tick");
+    assert_eq!(
+        rig.create(&token, fx.workspace, fx.channel, create_body("again", 3600))
+            .await
+            .0,
+        201,
+        "the routes accept schedules again once a tick runs"
+    );
+    // …and the loop ends when it is told to, promptly, and also when its sender is gone
+    stop_tx.send(true).expect("signal the tick to stop");
+    tokio::time::timeout(std::time::Duration::from_secs(10), running)
+        .await
+        .expect("the tick stops within seconds of the signal")
+        .expect("the tick task did not panic");
+    let (orphan_tx, orphan_rx) = watch::channel(false);
+    let orphan = momo_server::scheduler::start(
+        rig.state.clone(),
+        rig.tick_pool.clone(),
+        settings,
+        orphan_rx,
+    )
+    .await
+    .expect("starts");
+    drop(orphan_tx);
+    tokio::time::timeout(std::time::Duration::from_secs(10), orphan)
+        .await
+        .expect("a tick whose stop sender is gone ends instead of spinning")
+        .expect("no panic");
 }
 
 /// A schedule row inserted straight into a finished state (the retention and definer tests).

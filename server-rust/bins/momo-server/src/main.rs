@@ -324,7 +324,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     // ADR-0208 D5: the scheduled-message tick lives in this process, on **its own two-connection
     // pool** so it never competes with requests. It connects as the same `momo_app` role
-    // (NOBYPASSRLS) as the request pool, and refuses to run if that is ever not true.
+    // (NOBYPASSRLS) as the request pool, and `scheduler::start` refuses to run on a role that
+    // skips row-level security (the routes then answer 503 `scheduler_disabled`).
     let (stop_scheduler, scheduler_stop) = tokio::sync::watch::channel(false);
     let scheduler_task = if config.scheduler.enabled {
         let pool = momo_db::connect(&momo_db::PoolConfig {
@@ -332,12 +333,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ..config.db.clone()
         })
         .await?;
-        Some(tokio::spawn(momo_server::scheduler::run_loop(
-            state.clone(),
-            pool,
-            config.scheduler,
-            scheduler_stop,
-        )))
+        momo_server::scheduler::start(state.clone(), pool, config.scheduler, scheduler_stop).await
     } else {
         tracing::warn!(
             "MOMO_SCHEDULER_ENABLED is off: scheduled messages are not sent and creating, \

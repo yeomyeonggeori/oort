@@ -34,6 +34,7 @@
 //! memory for five minutes; if it still will not close, `oort doctor` raises it (D15).
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use momo_db::{DbError, PgConnection, PgPool};
@@ -707,19 +708,45 @@ pub fn log_report(report: &TickReport) {
     );
 }
 
-/// The loop `main` starts: look every `tick_ms`, stop when `stop` turns true. A look in
-/// progress finishes the row it is on (the rest stays `pending` and a later tick, here or on
-/// another replica, sends it).
-pub async fn run_loop(
+/// Start the tick in this process (ADR-0208 D5), or say why it did not start.
+///
+/// The one entry `main` uses. It first asks the tick's pool which role it connects as and
+/// **refuses a role that skips row-level security** ([`ensure_write_pool_rls_bound`]). A refusal
+/// is not silent: it sets [`AppState::scheduler_blocked`], so creating, editing or sending-now a
+/// schedule answers 503 `scheduler_disabled` exactly as if the operator had switched the scheduler
+/// off — a server that will not send a schedule must not accept one (D15). Listing and deleting
+/// keep working. Any failure of the check itself is treated the same way (the database is
+/// unreachable at boot: loud and fail-closed beats a tick that runs on an unchecked role).
+///
+/// Returns the task to await at shutdown, or `None` when the tick was refused.
+pub async fn start(
+    state: AppState,
+    pool: PgPool,
+    settings: SchedulerSettings,
+    stop: watch::Receiver<bool>,
+) -> Option<tokio::task::JoinHandle<()>> {
+    if let Err(error) = ensure_write_pool_rls_bound(&pool).await {
+        state.scheduler_blocked.store(true, Ordering::SeqCst);
+        tracing::error!(
+            %error,
+            "scheduled messages are NOT being sent: the scheduler refused its database role; \
+             creating, editing or sending one now answers 503 scheduler_disabled"
+        );
+        return None;
+    }
+    state.scheduler_blocked.store(false, Ordering::SeqCst);
+    Some(tokio::spawn(run_loop(state, pool, settings, stop)))
+}
+
+/// Look every `tick_ms`; stop when `stop` turns true **or its sender is gone** (a loop that kept
+/// running with nobody left to stop it would spin). A look in progress finishes the row it is on
+/// (the rest stays `pending` and a later tick, here or on another replica, sends it).
+async fn run_loop(
     state: AppState,
     pool: PgPool,
     settings: SchedulerSettings,
     mut stop: watch::Receiver<bool>,
 ) {
-    if let Err(error) = ensure_write_pool_rls_bound(&pool).await {
-        tracing::error!(%error, "scheduled messages are NOT being sent: the scheduler refused its database role");
-        return;
-    }
     tracing::info!(
         tick_ms = settings.tick_ms,
         batch = settings.batch,
@@ -729,7 +756,11 @@ pub async fn run_loop(
     let mut memory = TickMemory::default();
     loop {
         tokio::select! {
-            _ = stop.changed() => {}
+            changed = stop.changed() => {
+                if changed.is_err() {
+                    break;
+                }
+            }
             _ = tokio::time::sleep(Duration::from_millis(settings.tick_ms)) => {}
         }
         if stopped(&stop) {

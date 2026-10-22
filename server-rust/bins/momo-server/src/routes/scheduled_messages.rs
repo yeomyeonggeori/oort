@@ -25,6 +25,8 @@
 //! must **commit** is `send-now`'s: the canonical send refused the message, the row becomes
 //! `failed` with that reason, and the 409 is answered after the commit ([`SendNow::Refused`]).
 
+use std::sync::atomic::Ordering;
+
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{FromRequest, Path, Query, Request, State};
 use axum::http::StatusCode;
@@ -351,8 +353,10 @@ fn send_now_refusal(reason: ScheduleFailure) -> ApiError {
     ApiError::coded(StatusCode::CONFLICT, reason.as_code(), message)
 }
 
+/// 503 `scheduler_disabled` when the operator turned the scheduler off **or** the tick refused its
+/// database role at boot (`scheduler::start`): either way nothing would send what is accepted.
 fn require_enabled(state: &AppState) -> Result<(), ApiError> {
-    if state.scheduler.enabled {
+    if state.scheduler.enabled && !state.scheduler_blocked.load(Ordering::SeqCst) {
         Ok(())
     } else {
         Err(scheduler_disabled())

@@ -212,6 +212,12 @@ pub struct AppState {
     /// `enabled`; the tick itself is started by `main`, never by [`AppState::new`], so a
     /// test drives `scheduler::run_tick` explicitly).
     pub scheduler: Arc<SchedulerSettings>,
+    /// Set by [`scheduler::start`] when the tick **refused** its database role (a superuser or
+    /// BYPASSRLS pool). The scheduled-message routes then answer 503 `scheduler_disabled` like an
+    /// operator's off switch: a server that will not send a schedule must not accept one
+    /// (ADR-0208 D15). `false` on every state nobody started a tick for (tests drive
+    /// `scheduler::run_tick` directly).
+    pub scheduler_blocked: Arc<std::sync::atomic::AtomicBool>,
     /// ADR-0146 개정 2026-09-28 (#3022): the instance id signed statements echo
     /// and the (default-off) host-registration signature requirement.
     pub device_keys: Arc<DeviceKeySettings>,
@@ -319,6 +325,7 @@ impl AppState {
             agent_port: Arc::new(AgentPortState::default()),
             mentions: Arc::new(MentionSettings::default()),
             scheduler: Arc::new(SchedulerSettings::default()),
+            scheduler_blocked: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             device_keys: Arc::new(DeviceKeySettings::default()),
             cloud_box: Arc::new(CloudBoxConfig::default()),
             cors: Arc::new(CorsConfig::default()),
