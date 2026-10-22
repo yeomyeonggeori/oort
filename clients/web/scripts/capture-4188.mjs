@@ -18,6 +18,8 @@
 //   design   디자인 갤러리 `#/design`(칩 그릇·상태 행이 한 쪽에 있다) × 같은 테마들. `VITE_DESIGN_GALLERY=1`로 빌드한
 //            dist를 `DIST_DESIGN`으로 준다.
 //   widths   설정 > 모양 900·1280(접힘·펼침).
+//   extra    설계 리뷰 2차가 요청한 나머지: 컴포저 `@` 자동완성의 강조된 줄(선택 행 `accent-soft`) × 어두운·밝은 카탈로그 테마 ·
+//            640~760px 폭의 갤러리 · 390 다크 탭에서 격자 안쪽을 스크롤한 중간 장면.
 //   names    접힌 행의 테마 이름이 한 줄이고 잘리거나 넘치지 않는가를 **모든** 타일(시스템·라이트·다크 탭)에서 390·360 폭으로 잰다
 //            (설계 리뷰 2차 H-A). 어기는 이름이 하나라도 있으면 캡처가 실패한다(종료 코드 1). 사진은 한 장씩 남긴다.
 //
@@ -555,6 +557,90 @@ async function designScenes(browser, origin) {
   }
 }
 
+const EXTRA_AUTOCOMPLETE = [
+  { ref: "catalog:vesper", name: "vesper", mode: "dark" },
+  { ref: "catalog:poimandres", name: "poimandres", mode: "dark" },
+  { ref: "catalog:ayu-dark", name: "ayu-dark", mode: "dark" },
+  { ref: "catalog:material-theme-ocean", name: "material-theme-ocean", mode: "dark" },
+  { ref: "catalog:kanagawa", name: "kanagawa", mode: "light" },
+  { ref: "catalog:catppuccin", name: "catppuccin", mode: "light" },
+  { ref: "dawnsky", name: "dawnsky", mode: "dark" },
+];
+
+async function extraScenes(browser, origin) {
+  // 1. 컴포저에 `@`를 치면 뜨는 자동완성의 강조된 줄(`bg-accent-soft`): 보조 글자가 그 채움 위에서 읽히는가.
+  for (const rep of EXTRA_AUTOCOMPLETE) {
+    const viewport = VIEWPORTS[0];
+    const { context, page } = await openWith(browser, origin, { osScheme: rep.mode, viewport, record: seedRecord({ theme: rep.ref, scheme: rep.mode }) });
+    try {
+      await goChat(page);
+      await page.locator("#composer-input").click();
+      await page.keyboard.type("@");
+      await page.getByRole("listbox").first().waitFor({ timeout: 10_000 });
+      await page.waitForTimeout(300);
+      await shoot(page, `extra-mention-${rep.name}-${rep.mode}-1440`, { theme: rep.ref, mode: rep.mode });
+    } finally {
+      await context.close();
+    }
+  }
+  // 2. 640~760px 폭의 갤러리(격자 안쪽 스크롤이 서는 첫 폭).
+  for (const width of [640, 700, 760]) {
+    const viewport = { name: String(width), width, height: 900 };
+    const { context, page } = await openWith(browser, origin, { osScheme: "dark", viewport, record: seedRecord({ theme: "catalog:github", scheme: "dark" }) });
+    try {
+      await goAppearance(page);
+      await page.getByTestId("theme-style-trigger").click();
+      await page.getByTestId("theme-style-options").waitFor();
+      await page.waitForTimeout(300);
+      await page.getByTestId("theme-style-options").scrollIntoViewIfNeeded();
+      const columns = await page.evaluate(() => getComputedStyle(document.querySelector(".theme-gallery-grid")).gridTemplateColumns.split(" ").length);
+      await shoot(page, `extra-width-open-${width}`, { width, columns });
+    } finally {
+      await context.close();
+    }
+  }
+  // 3. 390 다크 탭에서 격자 안쪽을 중간까지 스크롤한 장면과, 끝에서 한 번 더 밀면 페이지가 이어서 스크롤하는지(체이닝).
+  {
+    const viewport = VIEWPORTS[1];
+    const { context, page } = await openWith(browser, origin, { osScheme: "dark", viewport, record: seedRecord({ theme: "dawnsky", scheme: "dark" }) });
+    try {
+      await goAppearance(page);
+      await page.getByTestId("theme-style-trigger").click();
+      await page.getByTestId("theme-style-options").waitFor();
+      await page.getByTestId("theme-style-options").scrollIntoViewIfNeeded();
+      const scroller = page.locator(".theme-gallery-scroll");
+      const metrics = await scroller.evaluate((el) => ({ client: el.clientHeight, scroll: el.scrollHeight }));
+      await scroller.evaluate((el) => { el.scrollTop = Math.round((el.scrollHeight - el.clientHeight) / 2); });
+      await page.waitForTimeout(200);
+      await shoot(page, "extra-gallery-scroll-middle-390", { viewport: "390", metrics });
+      // 체이닝: 격자를 끝까지 내린 뒤 같은 자리에서 휠을 더 굴리면 **바깥** 스크롤 영역(앱의 본문 스크롤러)이 움직인다.
+      // 앱 루트는 창 스크롤이 아니라 안쪽 영역이 스크롤하므로, 격자의 가장 가까운 스크롤 가능 조상을 찾아 잰다.
+      const scrollTopOfOuter = () =>
+        page.evaluate(() => {
+          let node = document.querySelector(".theme-gallery-scroll")?.parentElement ?? null;
+          while (node) {
+            const overflowY = getComputedStyle(node).overflowY;
+            if ((overflowY === "auto" || overflowY === "scroll") && node.scrollHeight > node.clientHeight + 1) return { tag: node.tagName.toLowerCase(), cls: node.className.slice(0, 60), top: node.scrollTop };
+            node = node.parentElement;
+          }
+          return { tag: "window", cls: "", top: window.scrollY };
+        });
+      await scroller.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+      const before = await scrollTopOfOuter();
+      const box = await scroller.boundingBox();
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.wheel(0, 400);
+      await page.waitForTimeout(400);
+      await page.mouse.wheel(0, 400);
+      await page.waitForTimeout(400);
+      const after = await scrollTopOfOuter();
+      meta.push({ name: "extra-gallery-chaining-390", outer: before.tag + "." + before.cls, chained: after.top > before.top, before: before.top, after: after.top });
+    } finally {
+      await context.close();
+    }
+  }
+}
+
 // 접힌 행의 이름: 모든 타일을 차례로 골라 가며 이름이 한 줄인지, 잘리지 않는지, 넘치지 않는지 잰다.
 async function nameScenes(browser, origin) {
   const bad = [];
@@ -668,6 +754,7 @@ async function capture() {
     if (SCENES.includes("review")) await reviewScenes(browser, preview.origin);
     if (SCENES.includes("widths")) await widthScenes(browser, preview.origin);
     if (SCENES.includes("names")) await nameScenes(browser, preview.origin);
+    if (SCENES.includes("extra")) await extraScenes(browser, preview.origin);
     if (SCENES.includes("design")) {
       // 디자인 갤러리는 `VITE_DESIGN_GALLERY=1`로 빌드한 dist가 따로 필요하다.
       const designDist = process.env.DIST_DESIGN ? resolve(WEB_ROOT, process.env.DIST_DESIGN) : null;
