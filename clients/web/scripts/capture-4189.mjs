@@ -252,7 +252,7 @@ async function measureFacts(page) {
       facts.bodyFontPx = px(cs.fontSize);
       facts.bodyLineHeightPx = px(cs.lineHeight);
     }
-    // 채널 머리의 키: 대화 밀도가 닿으면 안 되는 자리다(폰 폭에서 py-row로 45px를 맞추던 자리).
+    // 채널 머리의 키: 대화 밀도가 닿으면 안 되는 자리다(폰 폭에서 py-row로 위아래 여백을 잡던 자리, 57px).
     const head = document.querySelector('[data-testid="channel-header"]');
     if (head) facts.channelHeadPx = Math.round(head.getBoundingClientRect().height * 100) / 100;
     // 아바타 한 변(타임라인 행).

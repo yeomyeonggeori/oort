@@ -160,11 +160,11 @@ describe("테마 토큰 표 §5의 밀도 표가 코어 DENSITY와 같다", () =
 // -----------------------------------------------------------------------------
 // 밀도 변수를 읽는 곳은 닫힌 목록이다 (AP-2a #4189 — 실측으로 찾은 결합의 재발 방지).
 //
-// `--spacing-row`는 원래 타임라인 행의 값이었고, 같은 6px이 필요한 다른 자리(폰 폭 채널 머리의 45px 맞춤, 컴포저
+// `--spacing-row`는 원래 타임라인 행의 값이었고, 같은 6px이 필요한 다른 자리(폰 폭 채널 머리 57px, 컴포저
 // 슬래시 명령 목록의 행·머리글·발치)가 이름을 빌려 썼다. 값이 늘 6일 때는 문제가 없었고, 밀도가 그 값을 4/6/8로
 // 움직이자 명령 목록 행이 48/52/56px로, 폰 폭 채널 머리가 53/57/61px로 변했다. 밀도는 「메시지 사이와 메시지 안 문단·목록 사이의
 // 간격」이라서 그 둘에 닿으면 안 된다. 그래서 그 자리들은 밀도를 따르지 않는 쌍둥이 `--spacing-row-fixed`를 읽고,
-// 이 시험이 **밀도 변수를 읽는 파일 전부를 열거**해서 다음 빌려 쓰기를 빌드에서 잡는다.
+// 이 시험이 **밀도 변수를 읽는 파일 전부를 열거**해서 다음 빌려 쓰기를 시험에서 잡는다.
 // -----------------------------------------------------------------------------
 describe("밀도 변수를 읽는 곳은 닫힌 목록이다", () => {
   const SRC_DIR = fileURLToPath(new URL("../..", import.meta.url));
@@ -183,9 +183,13 @@ describe("밀도 변수를 읽는 곳은 닫힌 목록이다", () => {
   }
 
   const FAMILY = "row|row-head|message-avatar|prose|list-item";
-  /** 간격·크기 유틸리티가 밀도 이름을 읽는 모양(`py-row`). `py-row-fixed`는 뒤따르는 `-`가 걸러 낸다. */
+  /**
+   * 간격·크기 유틸리티가 밀도 이름을 읽는 모양(`py-row`). `py-row-fixed`는 뒤따르는 `-`가 걸러 낸다. 맨 앞 `-`는 음수
+   * 값(마진 유틸리티 앞에 `-`가 붙은 모양)이라 같은 이름을 읽는 것으로 센다(design-review 2차 N-11: 앞 `-`를 거절하는
+   * 뒤돌아보기가 그것을 놓쳤다). 합성어 속은 앞 글자 검사가 여전히 걸러 낸다.
+   */
   const UTILITY = new RegExp(
-    `(?<![\\w-])(?:p[xytblrse]?|m[xytblrse]?|gap(?:-[xy])?|space-[xy]|size|w|h|min-[wh]|max-[wh]|top|bottom|inset(?:-[xy])?|translate-[xy])-(?:${FAMILY})(?![\\w-])`,
+    `(?<![\\w-])-?(?:p[xytblrse]?|m[xytblrse]?|gap(?:-[xy])?|space-[xy]|size|w|h|min-[wh]|max-[wh]|top|bottom|inset(?:-[xy])?|translate-[xy])-(?:${FAMILY})(?![\\w-])`,
     "g"
   );
   const VAR = new RegExp(`var\\(--spacing-(?:${FAMILY})\\)`, "g");
@@ -224,6 +228,43 @@ describe("밀도 변수를 읽는 곳은 닫힌 목록이다", () => {
       ],
       // 호버 툴바가 행 상단 패딩에 걸치는 두 규칙(행의 패딩이 밀도를 따르므로 같이 따라가야 맞다).
       "design/tokens.css": ["var(--spacing-row)"],
+    });
+  });
+
+  it("읽는 모양 정규식은 음수 마진·변형 접두사를 잡고 쌍둥이·합성어는 거른다 — 가드가 빈손이 되지 않는다", () => {
+    const hits = (text: string) => [...text.matchAll(UTILITY)].map((m) => m[0]);
+    // Tailwind는 시험 파일까지 훑어 클래스 후보를 만든다. 견본 클래스를 한 덩어리로 적으면 어디서도 안 쓰는 유틸리티가
+    // 번들 CSS에 실리므로(처음 이 시험을 쓸 때 실제로 세 개가 실렸다) 조각으로 적어 이어 붙인다.
+    const cls = (...parts: string[]) => parts.join("");
+    expect(hits(`className="${cls("-m", "t-row")}"`)).toEqual([cls("-m", "t-row")]);
+    expect(hits(`className="${cls("md:p", "y-row")} ${cls("hover:p", "t-row-head")}"`)).toEqual([
+      cls("p", "y-row"),
+      cls("p", "t-row-head"),
+    ]);
+    expect(hits('className="py-row-fixed foo-py-row"')).toEqual([]);
+  });
+
+  it("행 패딩·문단·목록 간격 상수를 가져다 쓰는 파일도 닫힌 목록이다 (아바타 상수는 avatarSize.test.ts가 같은 틀로 센다)", () => {
+    // 클래스 글자만 세면 상수를 import해서 쓰는 쪽(사이드바 같은 파일)이 밀도를 따라가도 모든 시험이 초록이다
+    // (design-review 2차 N-12). 상수를 유일한 관문으로 삼았으니 그 관문을 지나는 파일도 센다.
+    const NAMES = ["MESSAGE_LIST_ITEM_GAP_CLASS", "MESSAGE_PROSE_GAP_CLASS", "ROW_CONTINUATION_PAD_CLASS", "ROW_GROUP_START_PAD_CLASS"];
+    const found: Record<string, string[]> = {};
+    for (const file of sourceFiles(SRC_DIR)) {
+      const text = codeOnly(readFileSync(file, "utf8"));
+      const names = NAMES.filter((name) => new RegExp(`\\b${name}\\b`).test(text));
+      if (names.length > 0) found[relative(SRC_DIR, file)] = names;
+    }
+    expect(found).toEqual({
+      "features/settings/shell/ConversationPreview.tsx": ["ROW_CONTINUATION_PAD_CLASS", "ROW_GROUP_START_PAD_CLASS"],
+      "features/timeline/MessageBody.tsx": ["MESSAGE_LIST_ITEM_GAP_CLASS", "MESSAGE_PROSE_GAP_CLASS"],
+      "features/timeline/MessageRow.tsx": ["ROW_CONTINUATION_PAD_CLASS", "ROW_GROUP_START_PAD_CLASS"],
+      "features/timeline/PendingRow.tsx": ["ROW_CONTINUATION_PAD_CLASS", "ROW_GROUP_START_PAD_CLASS"],
+      "features/timeline/spacing.ts": [
+        "MESSAGE_LIST_ITEM_GAP_CLASS",
+        "MESSAGE_PROSE_GAP_CLASS",
+        "ROW_CONTINUATION_PAD_CLASS",
+        "ROW_GROUP_START_PAD_CLASS",
+      ],
     });
   });
 
