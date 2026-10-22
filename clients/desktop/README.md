@@ -662,8 +662,10 @@ was read from `log stream` (`usernoted`, `NotificationCenter`) and the
 `window_vibrancy_set` + `app_theme_set` (ADR-0189 증보 3 D6) against the **real shell**:
 `cargo build` (dev profile, unoptimized) of this crate loading a local spike page (a
 268px sidebar tinted like `design/appearance/glass.css` and an opaque pane), built with its own
-bundle identifier (`app.momo.desktop.spike4190`) so no keychain item, app-data folder or
-work-host registration of the installed app was touched. tauri 2.11.5, tauri-runtime-wry 2.11.4,
+bundle identifier (`app.momo.desktop.spike4190`) so the app-data folder and the work-host
+registration of the installed app were not touched. The identifier does **not** isolate the OS
+keychain (see "Full-bundle runs" below): the spike page simply never called a keychain command.
+tauri 2.11.5, tauri-runtime-wry 2.11.4,
 wry 0.55.1, tao 0.35.3, window-vibrancy 0.6.0 (the same lock as Buzz). Retina built-in display,
 macOS appearance Dark. Numbers are from `performance.now()` in the page (1 ms resolution) and
 `top` 1 s samples.
@@ -678,7 +680,12 @@ macOS appearance Dark. Numbers are from `performance.now()` in the page (1 ms re
   time, median 1 ms, max 17 ms after (inside one 60 Hz frame); two frames: 26 ms first, median
   16 ms. The native step is not what makes the first frame late: until the page has loaded and
   stamped `data-glass` the window paints the opaque shell, so the first frame after launch is
-  opaque by the length of the web bundle's boot (measured for the real bundle in the PR).
+  opaque by the length of the web bundle's boot. Measured for the real bundle (six reloads of the
+  full web bundle against a stub backend, glass on, debug build): `data-glass` was stamped 57 to
+  68 ms after navigation start (DOMContentLoaded at 51 to 62 ms) and the first contentful paint
+  came at 1.27 to 1.30 s, so the stamp lands well before the first content paint. A paint of the
+  blank shell before the stamp cannot be observed from the page (WKWebView has no `first-paint`
+  entry), so a possible one-frame opaque flash on a cold launch stays `runtime-unverified`.
 - **CPU.** Glass off vs on, two runs each, 4 s idle and 5 s of a scripted resize (~30 steps/s):
   idle main 0.3 to 0.4 %, GPU helper 0.0 to 0.1 %, WebContent 0.1 to 0.2 %, no difference. While
   resizing: main 10.9 and 11.8 % off, 11.4 and 14.1 % on; GPU 4.9 and 4.5 vs 4.2 and 6.0;
@@ -698,6 +705,17 @@ macOS appearance Dark. Numbers are from `performance.now()` in the page (1 ms re
   and its muted sidebar labels are barely readable; after `app_theme_set("light")` the blur is
   light. The call also moves the page's own color-scheme media query, so the web layer asks for
   `light`/`dark` only while glass is on and the scheme is pinned.
+- **Full-bundle runs share the real keychain item.** `keychain.rs` files its one secret under the
+  constant service `app.momo.desktop`, whatever the bundle identifier says. A run of the real web
+  bundle with a legacy web-storage session (a seeded capture session is one) makes `session.ts`
+  `hydrate()` probe the credential store and move the token into it, i.e. the installed app's item.
+  Patching `window.__TAURI_INTERNALS__.invoke` from the page does nothing (the property is
+  `writable: false`, `configurable: false`, measured), so the capture rig answers `ipc://localhost/keychain_*`
+  and `session_*` in a `window.fetch` wrapper before the request reaches Rust. Check the guard with
+  made-up names: a `keychain_...` command that does not exist must come back with the guard's own
+  error, one outside the prefix must come back from Rust as `Command not found`. The item's
+  modification time (`security find-generic-password -s app.momo.desktop -a refresh-token`, metadata only)
+  was read again after the capture runs and predates the whole session, so nothing wrote to it.
 - **Not covered.** Release build (LTO, `opt-level = s`), macOS 14 to 26, Windows/Linux (the
   commands are no-ops there), the Mac App Store (this build carries the private `drawsBackground`
   key and cannot go there).
