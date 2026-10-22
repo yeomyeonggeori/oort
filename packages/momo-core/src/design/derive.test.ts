@@ -20,11 +20,14 @@ import {
   SIGNAL_MIN_DISTANCE,
   TEXT_FOREGROUNDS,
   VESSEL_MIN_CONTRAST,
+  THEMES,
+  THEME_IDS,
   VESSEL_MIN_DISTANCE,
   contrastPairs,
   deriveRoles,
   type ColorRole,
   type Mode,
+  type ThemeModeTokens,
 } from "./themes";
 import { SIGNAL_PRESET_IDS, resolveSignal } from "./signal";
 
@@ -44,6 +47,46 @@ const ROWS: { id: string; mode: Mode; entry: CatalogEntry; seed: ThemeSeed }[] =
     return seed ? [{ id: entry.id, mode, entry, seed }] : [];
   })
 );
+
+const STATE_SURFACES = ["surface-hover", "surface-pressed", "muted-soft"] as const;
+/** 신호가 중립 역할(글자·선·아이콘)과 이만큼은 달라야 한다(OKLab). 엔진 목표는 0.06이고 시험은 0.05로 잰다. 첫 파티는 0.12 이상이다. */
+const NEUTRAL_MIN_DISTANCE = 0.05;
+const chromaOf = (hex: string): number => toOklch(hex).C;
+
+/**
+ * 설계 리뷰(AP-1b 1차) H1~H3의 세 규칙. 첫 파티가 이미 지키는 자라서(대조군 시험이 6행을 잰다) 카탈로그 전수에도 건다.
+ * `contrastPairs`의 호스트 목록(표면·바닥)에는 없는 것들이라 여기서 따로 잰다.
+ *  H1 글자(`ink`·`ink-muted`)는 가리킨 행·눌린 행·칩 그릇 위에서도 4.5다(README §2.2). `signal-soft`·`agent-soft`와 톤
+ *     채움 위는 재지 않는다: 앞 둘은 강조색에 따라 달라지고, 톤 채움 위에는 자기 톤의 글자만 서며 그 쌍은
+ *     `contrastPairs`(FILL_PAIRS)가 잰다.
+ *  H2 신호가 중립 역할과 같은 색으로 접히지 않는다(안 읽음·멘션·캐럿·포커스 링의 색 채널).
+ *  H3 위험 순서의 자는 채도다: danger > warn > ink-muted(README §2.2). 중립 선·아이콘도 warn 밑이다.
+ */
+function reviewViolations(tokens: ThemeModeTokens): string[] {
+  const out: string[] = [];
+  const c = tokens.color;
+  for (const role of ["ink", "ink-muted"] as const) {
+    for (const state of STATE_SURFACES) {
+      const ratio = contrast(c[role], tokens.derived[state]);
+      if (ratio < 4.5 - 1e-9) out.push(`H1 ${role}/${state} ${ratio.toFixed(2)} < 4.5`);
+    }
+  }
+  for (const [a, b] of [
+    ["signal", "line-strong"],
+    ["signal", "icon"],
+    ["signal", "ink-muted"],
+    ["signal-text", "ink"],
+    ["signal-text", "ink-muted"],
+  ] as const) {
+    const d = oklabDistance(c[a], c[b]);
+    if (d < NEUTRAL_MIN_DISTANCE) out.push(`H2 ${a}~${b} ${d.toFixed(3)} < ${NEUTRAL_MIN_DISTANCE}`);
+  }
+  if (!(chromaOf(c.danger) > chromaOf(c.warn))) out.push("H3 danger 채도가 warn보다 크지 않다");
+  for (const role of ["ink-muted", "icon", "line-strong"] as const) {
+    if (!(chromaOf(c.warn) > chromaOf(c[role]))) out.push(`H3 warn 채도가 ${role}보다 크지 않다`);
+  }
+  return out;
+}
 
 /** 한 파생 결과의 규칙 위반을 사람이 읽는 줄로. 비어 있으면 위반이 없다. */
 function violations(derived: DerivedMode): string[] {
@@ -73,6 +116,12 @@ function violations(derived: DerivedMode): string[] {
     if (oklabDistance(c[a], c[b]) < SIGNAL_MIN_DISTANCE) out.push(`${a}~${b} < ${SIGNAL_MIN_DISTANCE}`);
   }
   if (c.primary !== c.ink) out.push("primary != ink");
+  out.push(...reviewViolations(tokens));
+  // 톤 글자·에이전트도 가리킨 행 위에서 4.5다. 첫 파티는 두 행이 4.43·4.48로 못 미친다(그래서 대조군에는 걸지 않는다).
+  for (const role of ["signal-text", "agent", "ok", "warn", "danger"] as const) {
+    const ratio = contrast(c[role], tokens.derived["surface-hover"]);
+    if (ratio < 4.5 - 1e-9) out.push(`H1 ${role}/surface-hover ${ratio.toFixed(2)} < 4.5`);
+  }
   return out;
 }
 
@@ -166,14 +215,17 @@ describe("보정은 필요하고 실제로 일한다 (실패할 수 있는 가�
 
   it("보정이 `ink` 자체를 옮기는 테마는 몇 안 된다 (기록의 role로 센다)", () => {
     const moved = ROWS.filter((row) => deriveThemeMode(row.seed).notes.some((n) => n.role === "ink"));
+    // 가리킨 행·눌린 행·칩 그릇이 글자 호스트에 들어와서(H1) 둘이 더 늘었다: everforest 라이트, one 다크.
     expect(moved.map((row) => `${row.id} ${row.mode}`).sort()).toEqual([
+      "everforest light",
       "material light",
+      "one dark",
       "solarized dark",
       "solarized light",
     ]);
   });
 
-  it("보정은 명도만 옮긴다: 채도 있는 색은 색상각이 거의 그대로다 (에이전트 회전은 일부러 돌린 것이라 뺀다)", () => {
+  it("보정은 색상각을 지킨다: 명도를 옮기고, 채도는 위험 순서(danger > warn > ink-muted)를 위해서만 누른다 (에이전트 회전은 일부러 돌린 것이라 뺀다)", () => {
     const gaps: number[] = [];
     for (const row of ROWS) {
       for (const note of deriveThemeMode(row.seed).notes) {
@@ -185,6 +237,54 @@ describe("보정은 필요하고 실제로 일한다 (실패할 수 있는 가�
     }
     expect(gaps.length).toBeGreaterThan(100);
     expect(Math.max(...gaps)).toBeLessThan(12);
+  });
+});
+
+describe("설계 리뷰 H1~H3: 규칙마다 실패할 수 있는 가드와 대조군", () => {
+  const rowsBad = (prefix: string, adjust: boolean) =>
+    ROWS.filter((row) => {
+      const derived = derivedOrRaw(row.seed, adjust);
+      return derived !== null && reviewViolations(derived.tokens).some((v) => v.startsWith(prefix));
+    }).map((row) => `${row.id} ${row.mode}`);
+
+  it("H1 보정 없이는 거의 모든 행이 가리킨 행·눌린 행·칩 그릇 위 글자 대비 4.5에 못 미친다 (측정 53/57)", () => {
+    expect(rowsBad("H1", false).length).toBeGreaterThanOrEqual(45);
+    expect(rowsBad("H1", true)).toEqual([]);
+  });
+
+  it("H2 보정 없이는 몇 행에서 신호가 중립 역할(선·아이콘·글자)에 접힌다 (측정 6/57)", () => {
+    expect(rowsBad("H2", false).length).toBeGreaterThanOrEqual(4);
+    expect(rowsBad("H2", true)).toEqual([]);
+  });
+
+  it("H3 보정 없이는 몇 행에서 위험 순서의 채도(danger > warn > ink-muted)가 깨진다 (측정 5/57)", () => {
+    expect(rowsBad("H3", false).length).toBeGreaterThanOrEqual(3);
+    expect(rowsBad("H3", true)).toEqual([]);
+  });
+
+  it.each(
+    THEME_IDS.flatMap((id) => (["light", "dark"] as const).map((mode) => [`${id} ${mode}`, id, mode] as const))
+  )("대조군 %s: 첫 파티도 같은 세 규칙을 이미 지킨다 (자의 출처는 첫 파티다)", (_name, id, mode) => {
+    expect(reviewViolations(THEMES[id][mode])).toEqual([]);
+  });
+
+  it("57행 가운데 신호가 중립(잉크)으로 물러나는 행은 없다: 씨앗 → 기본 → 프리셋에서 늘 하나가 선다", () => {
+    const sources: Record<string, number> = {};
+    for (const row of ROWS) {
+      const source = deriveThemeMode(row.seed).signal.source;
+      sources[source] = (sources[source] ?? 0) + 1;
+    }
+    expect(sources.neutral).toBeUndefined();
+    // 측정: 씨앗 52 · 기본 2 · 프리셋 3. 씨앗이 쓰이는 것이 기본이다(옅은 씨앗은 채도를 올려서 받는다).
+    expect(sources).toEqual({ seed: 52, default: 2, preset: 3 });
+  });
+
+  it("에이전트 색상각은 작은 쪽으로 돌린다: 57행의 회전은 모두 60° 이하다 (한 방향으로만 돌릴 때는 135°까지였다)", () => {
+    const turns = ROWS.flatMap((row) =>
+      deriveThemeMode(row.seed).notes.filter((n) => n.role === "agent" && n.rotated !== undefined).map((n) => n.rotated!)
+    );
+    expect(turns.length).toBeGreaterThanOrEqual(10);
+    expect(Math.max(...turns)).toBeLessThanOrEqual(60);
   });
 });
 
@@ -218,14 +318,17 @@ describe("골든: 청사진 부록 C의 값과 한 글자까지 같은 곳과 �
     expect(c.surface).toBe("#ffffff");
     expect(c["surface-muted"]).toBe("#f5f5f5");
     expect(c.ink).toBe("#24292e");
-    expect(c["ink-muted"]).toBe("#68717b");
-    expect(c.icon).toBe("#888f96");
+    // 프로토타입 골든은 `ink-muted` #68717b · `icon` #888f96 · `line-strong` #8c8e91이었다. 칩 그릇·눌린 행 위 4.5(H1)와
+    // 중립 채도 상한(H3)이 이 셋을 조금 더 어둡고 덜 푸르게 옮겼다. 면(`surface`·`surface-muted`·바닥)과 `ink`·`line`은 그대로다.
+    expect(c["ink-muted"]).toBe("#5d656f");
+    expect(c.icon).toBe("#858a91");
     expect(c.line).toBe("#e5e5e6");
-    expect(c["line-strong"]).toBe("#8c8e91");
+    expect(c["line-strong"]).toBe("#888a8d");
     expect(contrast(c.ink, c.surface)).toBeCloseTo(14.67, 2);
-    expect(contrast(c["ink-muted"], c.surface)).toBeCloseTo(4.96, 2);
-    expect(contrast(c["ink-muted"], tokens.canvas[0])).toBeCloseTo(4.59, 2);
-    expect(contrast(c["line-strong"], tokens.canvas[0])).toBeCloseTo(3.04, 2);
+    expect(contrast(c["ink-muted"], c.surface)).toBeCloseTo(5.9, 2);
+    expect(contrast(c["ink-muted"], tokens.derived["muted-soft"])).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(c["ink-muted"], tokens.canvas[0])).toBeCloseTo(5.46, 2);
+    expect(contrast(c["line-strong"], tokens.canvas[0])).toBeCloseTo(3.2, 2);
   });
 
   it("dracula 다크: 다크의 면은 판을 한 단씩 올린 값이다", () => {
@@ -235,13 +338,18 @@ describe("골든: 청사진 부록 C의 값과 한 글자까지 같은 곳과 �
     expect(pane).toBe("#282a36");
     expect(c.surface).toBe("#31333e");
     expect(c["surface-muted"]).toBe("#393b46");
-    expect(c["ink-muted"]).toBe("#92a4d9");
+    // 프로토타입 골든 #92a4d9: comment의 푸른 채도를 중립 상한(0.04)으로 눌렀다(H3). 면과 선은 그대로다.
+    expect(c["ink-muted"]).toBe("#a9b2ca");
     expect(c.line).toBe("#474952");
   });
 
-  it("nord 다크 단독: 신호는 테마의 버튼색이고 에이전트는 신호에 비켜 색상각을 돌렸다", () => {
+  it("nord 다크 단독: 신호는 테마의 씨앗(채도만 올려 중립과 갈랐다)이고 에이전트는 신호에 비켜 색상각을 돌렸다", () => {
     const derived = get("nord", "dark");
-    expect(derived.tokens.color.signal).toBe("#88c0d0");
+    // 씨앗 #88c0d0(C 0.07)은 선·아이콘과 0.047까지 가까워서 채도만 올렸다. 색상각은 씨앗 그대로의 청록이다.
+    expect(derived.signal).toEqual({ source: "seed" });
+    expect(derived.tokens.color.signal).toBe("#75c3d8");
+    expect(hueGap("#88c0d0", derived.tokens.color.signal)).toBeLessThan(6);
+    expect(toOklch(derived.tokens.color.signal).C).toBeGreaterThan(toOklch("#88c0d0").C);
     expect(derived.notes.find((n) => n.role === "agent")?.rotated).toBeGreaterThan(0);
     const c = derived.tokens.color;
     expect(oklabDistance(c.agent, c.signal)).toBeGreaterThanOrEqual(SIGNAL_MIN_DISTANCE);
@@ -254,7 +362,7 @@ describe("골든: 청사진 부록 C의 값과 한 글자까지 같은 곳과 �
   });
 });
 
-describe("신호: 씨앗 → 기본 → 중립, 에이전트가 비킨다", () => {
+describe("신호: 씨앗 → 기본 → 네 프리셋 → 중립, 에이전트가 비킨다", () => {
   it("테마의 신호 씨앗이 받아들여지면 그 색에서 출발한다 (source seed)", () => {
     const seed = THEME_CATALOG.find((e) => e.id === "nord")!.dark!;
     const derived = deriveThemeMode(seed);
@@ -266,13 +374,45 @@ describe("신호: 씨앗 → 기본 → 중립, 에이전트가 비킨다", () =
     expect(derived.signal).toEqual({ source: "default", seedRejection: "near-danger" });
   });
 
-  it("기본 신호도 거절되면 잉크(중립)로 물러난다. 중립도 규칙을 지킨다", () => {
+  it("기본 신호도 위험색에 걸리면 네 프리셋 가운데 처음 서는 것으로 물러난다 (synthwave-84 다크: 혜성, 중립으로 접히지 않는다)", () => {
     const derived = deriveThemeMode(THEME_CATALOG.find((e) => e.id === "synthwave-84")!.dark!);
-    expect(derived.signal.source).toBe("neutral");
+    expect(derived.signal).toEqual({
+      source: "preset",
+      preset: "hyeseong",
+      seedRejection: "near-danger",
+      defaultRejection: "near-danger",
+    });
     const c = derived.tokens.color;
-    expect(c.signal).toBe(c.ink);
-    expect(c["on-signal"]).toBe(c["on-primary"]);
+    // 예전에는 여기서 `signal-text`가 `ink`와 같은 색(거리 0)이었다(설계 리뷰 H2).
+    expect(oklabDistance(c["signal-text"], c.ink)).toBeGreaterThan(0.1);
+    expect(c.signal).not.toBe(c.ink);
     expect(violations(derived)).toEqual([]);
+  });
+
+  it("씨앗이 무채색이면(채도를 올려도 테마의 색이 못 된다) 중립 역할에 접히지 않고 기본·프리셋으로 물러난다 (min 라이트)", () => {
+    const derived = deriveThemeMode(THEME_CATALOG.find((e) => e.id === "min")!.light!);
+    // 예전에는 신호가 `line-strong`과 같은 회색(#8e8e8e, 거리 0)이었다(설계 리뷰 H2).
+    expect(derived.signal.seedRejection).toBe("near-neutral");
+    expect(derived.signal.source).not.toBe("seed");
+    const c = derived.tokens.color;
+    expect(oklabDistance(c.signal, c["line-strong"])).toBeGreaterThan(0.1);
+    expect(toOklch(c.signal).C).toBeGreaterThan(0.08);
+  });
+
+  it("옅은 씨앗은 채도를 올려 받는다: 색상각은 씨앗 그대로이고 중립 역할과 0.06 넘게 갈린다 (tokyo-night 다크)", () => {
+    const seed = THEME_CATALOG.find((e) => e.id === "tokyo-night")!.dark!;
+    const derived = deriveThemeMode(seed);
+    expect(derived.signal.source).toBe("seed");
+    const c = derived.tokens.color;
+    expect(hueGap(seed.accent!, c.signal)).toBeLessThan(8);
+    expect(toOklch(c.signal).C).toBeGreaterThan(toOklch(seed.accent!).C);
+    expect(oklabDistance(c.signal, c["line-strong"])).toBeGreaterThanOrEqual(0.06);
+  });
+
+  it("사람이 고른 신호에는 중립과의 거리 규칙을 걸지 않는다 (직접 입력한 회색도 받는다)", () => {
+    const seed = THEME_CATALOG.find((e) => e.id === "github")!.light!;
+    const derived = deriveThemeMode(seed, { signal: { custom: "#8a8a8a" } });
+    expect(derived.signal.source).toBe("choice");
   });
 
   it("사람이 프리셋을 고르면 받아들여지는 조합은 그 색에서 푼다 (source choice)", () => {
@@ -331,6 +471,10 @@ describe("신호: 씨앗 → 기본 → 중립, 에이전트가 비킨다", () =
     expect(Object.keys(reasons)).toEqual(["near-danger"]);
     expect(byPreset.hongyeom).toBeGreaterThan(byPreset.seongun);
     expect(byPreset.hongyeom).toBeGreaterThan(byPreset.gamram ?? 0);
+    // 구현 실측이다(테마 토큰 표 §8.5의 프로토타입 값은 합 39 · 홍염 26 · 성운 13이었다). 숫자가 움직이면 파생 산수가
+    // 바뀐 것이니 고치는 사람이 알고 고친다. 혜성·감람은 한 곳도 거절되지 않는다.
+    expect(reasons).toEqual({ "near-danger": 43 });
+    expect(byPreset).toEqual({ hongyeom: 29, seongun: 14 });
   });
 
   it("agentYields가 켜진 풀이는 near-agent로 거절하지 않고, 꺼진 풀이는 거절한다", () => {

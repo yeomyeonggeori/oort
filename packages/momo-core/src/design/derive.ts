@@ -11,9 +11,18 @@
 //   · 바꾼 것: 출력이 shadcn HSL 변수 35개가 아니라 oort의 의미 토큰(`COLOR_ROLES` 22 · 바닥 3 ·
 //     표 밖 5 · `glass`·`scrim` · 웹 전용 `pane`)이다. Buzz는 대비를 강제하지 않지만(알파로 눌러 둔다) oort는
 //     ADR-0189 D7의 대비 규칙을 모든 테마에 전수로 건다: 위반한 색은 **OKLCH 명도만** 옮겨 맞춘다
-//     (라이트는 더 어둡게, 다크는 더 밝게만). 상태색은 의미 색상각 창 밖이면 oort 기본값으로 바꾼다.
-//     신호가 먼저 정해지고 에이전트 색이 색상각을 돌려 비킨다(OKLab ≥ 0.07). 주 버튼은 Buzz처럼
-//     액센트가 아니라 잉크다(`primary = ink`).
+//     (라이트는 더 어둡게, 다크는 더 밝게만). 글자(`ink`·`ink-muted`)는 표면 다섯뿐 아니라 가리킨 행·눌린 행·칩
+//     그릇(`surface-hover`·`surface-pressed`·`muted-soft`) 위에서도 4.5를 지킨다(README §2.2). 상태색은 의미
+//     색상각 창 밖이면 oort 기본값으로 바꾼다. 신호가 먼저 정해지고 에이전트 색이 색상각을 돌려 비킨다(OKLab
+//     ≥ 0.07). 주 버튼은 Buzz처럼 액센트가 아니라 잉크다(`primary = ink`).
+//   · 더한 것(명도 맞춤의 예외, 설계 리뷰 H2·H3): ① **채도 순서** `danger > warn > ink-muted`(README §2.2)를 지키려고
+//     채도만 누른다(`ink-muted`·`icon`·`line-strong`은 상한, warn은 danger 밑으로, 너무 옅은 danger는 올린다. 색상각과
+//     명도는 그대로). ② 신호가 중립 역할(글자·선·아이콘)과 같은 색으로 접히지 않게 한다: 테마의 신호 씨앗이 중립에
+//     너무 가까우면 채도를 올려 보고, 그래도 안 되면 기본 신호 → 네 프리셋 → 중립 순으로 물러난다.
+//     ③ 에이전트 색상각은 작은 쪽으로 돌린다(±15° 단위).
+//   · 일부러 뺀 것: `signal-soft`·`agent-soft`와 톤 채움(`ok/warn/danger-soft`) 위의 글자 대비는 맞추지 않는다. 앞
+//     둘은 사람이 고른 강조색에 따라 달라지고(그러면 강조색을 바꿀 때 본문 글자색이 흔들린다), 톤 채움 위에는 자기
+//     톤의 글자만 서며 그 쌍은 core `contrastPairs`(FILL_PAIRS)가 잰다.
 //
 // 순수 함수만 둔다. 같은 씨앗은 언제나 같은 토큰을 낸다(난수·시계 없음). 이 파일은 카탈로그를 모른다:
 // 씨앗은 호출자가 넘기고, 카탈로그 위의 조회는 `deriveCatalog.ts`가 한다. 그래서 가져온 테마·사용자
@@ -28,24 +37,21 @@ import { contrast, fromOklch, luminance, mixOklab, normalizeHex, oklabDistance, 
 import type { SignalChoice } from "./appearance";
 import { SIGNAL_PRESETS, SIGNAL_PRESET_IDS, resolveSignal, type SignalPresetId, type SignalRejection } from "./signal";
 import { seedMode, type ThemeSeed } from "./themeSeed";
+import { BAND_ROLES, CANVAS_STOPS, COLOR_ROLES, DERIVED_ROLES, type ColorRole } from "./themeRoles";
 import {
-  BAND_ROLES,
-  CANVAS_STOPS,
-  COLOR_ROLES,
-  DERIVED_ROLES,
   SIGNAL_MIN_DISTANCE,
   TEXT_MIN_CONTRAST,
   THEMES,
   NON_TEXT_MIN_CONTRAST,
   deriveRoles,
-  type ColorRole,
+  deriveStateSurfaces,
   type Mode,
   type ThemeModeSource,
   type ThemeModeTokens,
 } from "./themes";
 
 /** 알고리즘이 바뀌면 올린다. 부트 캐시 키에 들어가서 낡은 캐시를 한꺼번에 무효로 한다. */
-export const DERIVE_ENGINE_VERSION = "1";
+export const DERIVE_ENGINE_VERSION = "2";
 
 export class DeriveError extends Error {
   constructor(
@@ -68,14 +74,22 @@ export interface DeriveNote {
   readonly rotated?: number;
 }
 
-export type SignalSource = "choice" | "seed" | "default" | "neutral";
+/** 신호가 어디서 왔는가: 사람의 선택 · 테마의 씨앗 · oort 기본 · 네 프리셋 가운데 처음 서는 것 · 중립(잉크). */
+export type SignalSource = "choice" | "seed" | "default" | "preset" | "neutral";
+
+/** 테마 자신의 신호 후보가 거절된 이유: `resolveSignal`의 이유 또는 「중립 역할과 너무 가깝다」. */
+export type OwnSignalRejection = SignalRejection | "near-neutral";
 
 export interface SignalOutcome {
   readonly source: SignalSource;
   /** 사람이 고른 신호(프리셋·직접 입력)가 이 테마·모드에서 거절된 이유. 받아들여졌거나 고른 적이 없으면 없다. */
   readonly choiceRejection?: SignalRejection;
   /** 테마의 신호 씨앗이 거절된 이유. */
-  readonly seedRejection?: SignalRejection;
+  readonly seedRejection?: OwnSignalRejection;
+  /** oort 기본 신호가 이 테마·모드에서 거절된 이유(씨앗이 쓰이지 못했을 때만 본다). */
+  readonly defaultRejection?: OwnSignalRejection;
+  /** 폴백으로 쓴 프리셋(`source`가 `preset`일 때). */
+  readonly preset?: SignalPresetId;
 }
 
 export interface DerivedMode {
@@ -260,6 +274,29 @@ function semanticSeed(
   return { hex: fallback, fromTheme: false };
 }
 
+// ---- 채도 (OKLCH C) ----------------------------------------------------------------
+
+/** 중립 글자·선·아이콘(`ink-muted`·`icon`·`line-strong`)의 채도 상한. 위험 순서의 자는 채도다: danger > warn > ink-muted(README §2.2). */
+const NEUTRAL_CHROMA_CAP = 0.04;
+/** 순서를 지키려고 엔진이 두는 간격: danger가 warn보다, warn이 ink-muted보다 이만큼 더 선명하다. */
+const DANGER_OVER_WARN = 0.03;
+const WARN_OVER_MUTED = 0.02;
+/** 맞춘 뒤 실제 색(8비트 반올림·색역)에서 다시 재는 최소 순서 간격. */
+const ORDER_MARGIN = 0.01;
+/** 8비트 반올림이 채도를 이만큼 키울 수 있다. */
+const CHROMA_ROUNDING = 0.004;
+
+const chromaOf = (hex: string): number => toOklch(normalizeHex(hex)).C;
+
+/** 색상각·명도를 지키고 채도만 `c`로 둔다(색역 밖이면 `fromOklch`가 그 한계까지만 올린다). */
+function withChroma(hex: string, c: number): string {
+  const o = toOklch(normalizeHex(hex));
+  return fromOklch({ L: o.L, C: c, h: o.h });
+}
+
+const capChroma = (hex: string, max: number): string =>
+  chromaOf(hex) > max ? withChroma(hex, max) : normalizeHex(hex);
+
 // ---- 신호와 무관한 부분 (한 번 계산해 신호 후보마다 재사용한다) ----------------------
 
 interface Status {
@@ -277,6 +314,8 @@ interface Base {
   readonly sheet: string;
   /** 글자·아이콘이 설 수 있는 면 전부(표면·시트·판·바닥). */
   readonly hosts: readonly string[];
+  /** 위에 가리킨 행·눌린 행·칩 그릇을 더한 면: 톤 글자·에이전트·테두리·아이콘이 서는 곳(눌린 행·칩 그릇은 톤 글자에서 뺀다). */
+  readonly markHosts: readonly string[];
   readonly ink: string;
   readonly inkMuted: string;
   readonly icon: string;
@@ -294,6 +333,22 @@ function noteOf(role: string, from: string, to: string, extra: Partial<DeriveNot
   return start === to ? [] : [{ role, from: start, to, delta: oklabDistance(start, to), ...extra }];
 }
 
+/**
+ * danger가 warn보다 선명하도록 두 씨앗의 채도를 먼저 눌러 둔다(명도 맞춤 전). warn을 내리고(하한 0.04), danger가 그
+ * 하한에 간격을 더한 값에도 못 미칠 만큼 옅으면 danger를 올린다. 색상각·명도는 그대로다.
+ */
+function orderedSeeds(dangerSeed: string, warnSeed: string): { danger: string; warn: string } {
+  const cd = chromaOf(dangerSeed);
+  const cw = chromaOf(warnSeed);
+  if (cd >= cw + DANGER_OVER_WARN) return { danger: dangerSeed, warn: warnSeed };
+  const warnTarget = Math.max(MIN_SEMANTIC_CHROMA, cd - DANGER_OVER_WARN);
+  const dangerTarget = Math.max(cd, MIN_SEMANTIC_CHROMA + DANGER_OVER_WARN);
+  return {
+    danger: dangerTarget > cd ? withChroma(dangerSeed, dangerTarget) : dangerSeed,
+    warn: warnTarget < cw ? withChroma(warnSeed, warnTarget) : warnSeed,
+  };
+}
+
 const baseCache = new WeakMap<ThemeSeed, Base>();
 
 function deriveBase(seed: ThemeSeed, fit: Fitter = fitOrThrow): Base {
@@ -307,39 +362,56 @@ function deriveBase(seed: ThemeSeed, fit: Fitter = fitOrThrow): Base {
   const surfaceMuted = mode === "light" ? elevate(0.04) : elevate(0.08);
   const sheet = chrome;
   const hosts = [surface, surfaceMuted, sheet, pane, chrome];
+  // 글자(`ink`·`ink-muted`)는 가리킨 행·눌린 행·칩 그릇 위에도 선다. 이 셋은 `surface`·`sheet`에만 달려서 미리 안다.
+  const states = deriveStateSurfaces(surface, sheet, mode);
+  const textHosts = [...hosts, states.hover, states.pressed, states.mutedSoft];
+  const markHosts = [...hosts, states.hover];
+  const adjusting = cacheable;
   const notes: DeriveNote[] = [];
 
-  const textOk = (min: number) => (hex: string) => holds(hex, hosts, min);
-  const ink = fit("ink", seed.fg, mode, textOk(TEXT_MIN_CONTRAST));
+  // 상태색을 먼저 맞춘다: 그 채도가 중립 글자의 채도 상한을 정한다(위험 순서 danger > warn > ink-muted).
+  const fallback = defaults(mode).color;
+  const dangerSeed = semanticSeed([seed.deleted, seed.ansiRed], HUE_WINDOWS.danger, fallback.danger).hex;
+  const okSeed = semanticSeed([seed.added, seed.ansiGreen], HUE_WINDOWS.ok, fallback.ok).hex;
+  const warnSeed = semanticSeed([seed.modified, seed.ansiYellow], HUE_WINDOWS.warn, fallback.warn).hex;
+  const statusFit = (role: string, rawSeed: string) => fitWithSoft(role, rawSeed, markHosts, surface, mode, fit);
+  const ordered = adjusting ? orderedSeeds(dangerSeed, warnSeed) : { danger: dangerSeed, warn: warnSeed };
+  let dangerStart = ordered.danger;
+  let warnStart = ordered.warn;
+  let danger = statusFit("danger", dangerStart);
+  let warn = statusFit("warn", warnStart);
+  // 명도를 맞추면 색역 때문에 채도가 줄 수 있어 실제 색으로 순서를 다시 잰다.
+  for (let attempt = 0; adjusting && chromaOf(danger.color) < chromaOf(warn.color) + ORDER_MARGIN; attempt++) {
+    if (attempt >= 12) throw new DeriveError("warn", "no chroma keeps warn under danger");
+    if (chromaOf(warn.color) > MIN_SEMANTIC_CHROMA + 0.005) {
+      warnStart = withChroma(warnStart, Math.max(MIN_SEMANTIC_CHROMA, chromaOf(warn.color) - 0.015));
+      warn = statusFit("warn", warnStart);
+    } else {
+      dangerStart = withChroma(dangerStart, chromaOf(danger.color) + 0.02);
+      danger = statusFit("danger", dangerStart);
+    }
+  }
+  const ok = statusFit("ok", okSeed);
+  notes.push(...noteOf("danger", dangerSeed, danger.color));
+  notes.push(...noteOf("ok", okSeed, ok.color));
+  notes.push(...noteOf("warn", warnSeed, warn.color));
+
+  const neutralCap = Math.max(0, Math.min(NEUTRAL_CHROMA_CAP, chromaOf(warn.color) - WARN_OVER_MUTED) - CHROMA_ROUNDING);
+  const neutral = (hex: string) => (adjusting ? capChroma(hex, neutralCap) : normalizeHex(hex));
+  const textOk = (on: readonly string[], min: number) => (hex: string) => holds(hex, on, min);
+  const ink = fit("ink", seed.fg, mode, textOk(textHosts, TEXT_MIN_CONTRAST));
   notes.push(...noteOf("ink", seed.fg, ink));
   const commentSeed = seed.comment ?? mixHex(seed.fg, pane, 0.4);
-  const inkMuted = fit("ink-muted", commentSeed, mode, textOk(TEXT_MIN_CONTRAST));
+  const inkMuted = fit("ink-muted", neutral(commentSeed), mode, textOk(textHosts, TEXT_MIN_CONTRAST));
   notes.push(...noteOf("ink-muted", commentSeed, inkMuted));
   const iconSeed = mixHex(inkMuted, pane, 0.25);
-  const icon = fit("icon", iconSeed, mode, textOk(NON_TEXT_MIN_CONTRAST));
+  const icon = fit("icon", neutral(iconSeed), mode, textOk(markHosts, NON_TEXT_MIN_CONTRAST));
   notes.push(...noteOf("icon", iconSeed, icon));
   const lineStrongSeed = mixHex(seed.fg, pane, 0.5);
-  const lineStrong = fit("line-strong", lineStrongSeed, mode, textOk(NON_TEXT_MIN_CONTRAST));
+  const lineStrong = fit("line-strong", neutral(lineStrongSeed), mode, textOk(markHosts, NON_TEXT_MIN_CONTRAST));
   notes.push(...noteOf("line-strong", lineStrongSeed, lineStrong));
   const line = mixHex(pane, seed.fg, mode === "dark" ? 0.15 : 0.12);
   const onPrimary = contrast(surface, ink) >= contrast(pane, ink) ? surface : pane;
-
-  const statusFit = (role: string, rawSeed: string): Status => {
-    const fitted = fitWithSoft(role, rawSeed, hosts, surface, mode, fit);
-    notes.push(...noteOf(role, fitted.start, fitted.color));
-    return { color: fitted.color, soft: fitted.soft };
-  };
-
-  const fallback = defaults(mode).color;
-  const danger = statusFit(
-    "danger",
-    semanticSeed([seed.deleted, seed.ansiRed], HUE_WINDOWS.danger, fallback.danger).hex
-  );
-  const ok = statusFit("ok", semanticSeed([seed.added, seed.ansiGreen], HUE_WINDOWS.ok, fallback.ok).hex);
-  const warn = statusFit(
-    "warn",
-    semanticSeed([seed.modified, seed.ansiYellow], HUE_WINDOWS.warn, fallback.warn).hex
-  );
 
   const base: Base = {
     mode,
@@ -350,6 +422,7 @@ function deriveBase(seed: ThemeSeed, fit: Fitter = fitOrThrow): Base {
     surfaceMuted,
     sheet,
     hosts,
+    markHosts,
     ink,
     inkMuted,
     icon,
@@ -425,31 +498,75 @@ function neutralSignal(base: Base): SignalValues {
   };
 }
 
-function solveSignal(base: Base, choice: SignalChoice): SolvedSignal {
+/**
+ * 테마가 스스로 말하는 신호(씨앗·기본·프리셋)가 중립 역할과 이만큼은 달라야 한다(OKLab). 신호는 안 읽음·멘션·캐럿·
+ * 포커스 링의 색이라, 테두리·아이콘·본문과 같은 색으로 접히면 색 채널을 잃는다(설계 리뷰 H2). 첫 파티는 0.12 이상이다.
+ */
+const SIGNAL_NEUTRAL_DISTANCE = 0.06;
+/** 옅은 씨앗의 채도를 올려 볼 때의 간격과 상한. 첫 파티 프리셋의 채도(0.11~0.17)와 같은 자리까지만 올린다. */
+const SIGNAL_BOOST_STEP = 0.02;
+const SIGNAL_BOOST_MAX = 0.12;
+/** 이보다 옅은 색은 색상각이 뜻이 없어(무채색) 채도를 올려도 그 테마의 색이 되지 않는다. */
+const SIGNAL_BOOST_MIN_CHROMA = 0.02;
+
+const apartFromNeutrals = (base: Base, values: SignalValues): boolean => {
+  const far = (a: string, b: string) => oklabDistance(a, b) >= SIGNAL_NEUTRAL_DISTANCE;
+  return (
+    far(values.signal, base.lineStrong) &&
+    far(values.signal, base.icon) &&
+    far(values.signal, base.inkMuted) &&
+    far(values["signal-text"], base.ink) &&
+    far(values["signal-text"], base.inkMuted)
+  );
+};
+
+/**
+ * 신호는 씨앗 → 기본 → 네 프리셋 → 중립 순으로 처음 서는 것이다. 사람이 고른 신호가 있으면 그것이 먼저다.
+ * 테마 자신의 후보(씨앗·기본·프리셋)는 중립 역할과도 갈라야 하고, 옅은 씨앗은 채도를 올려 본다. 사람이 고른
+ * 신호에는 이 규칙을 걸지 않는다(고른 것이다).
+ */
+function solveSignal(base: Base, choice: SignalChoice, fit: Fitter): SolvedSignal {
   const tokens = solveTokens(base);
   const attempt = (input: string) => resolveSignal(input, "dawnsky", base.mode, tokens, { agentYields: true });
-  let choiceRejection: SignalRejection | undefined;
-  let seedRejection: SignalRejection | undefined;
+  const separate = fit === fitOrThrow;
+  type Own = { readonly ok: true; readonly values: SignalValues } | { readonly ok: false; readonly reason: OwnSignalRejection };
+  const own = (input: string, boost: boolean): Own => {
+    const first = attempt(input);
+    if (!first.ok) return { ok: false, reason: first.reason };
+    if (!separate || apartFromNeutrals(base, first.values)) return first;
+    const o = toOklch(normalizeHex(input));
+    if (boost && o.C >= SIGNAL_BOOST_MIN_CHROMA) {
+      for (let i = 1; o.C + i * SIGNAL_BOOST_STEP <= SIGNAL_BOOST_MAX + 1e-9; i++) {
+        const boosted = attempt(withChroma(input, o.C + i * SIGNAL_BOOST_STEP));
+        if (!boosted.ok) break;
+        if (apartFromNeutrals(base, boosted.values)) return boosted;
+      }
+    }
+    return { ok: false, reason: "near-neutral" };
+  };
 
+  let choiceRejection: SignalRejection | undefined;
   if (choice !== null) {
     const input = "preset" in choice ? SIGNAL_PRESETS[choice.preset][base.mode] : choice.custom;
     const result = attempt(input);
     if (result.ok) return { values: result.values, outcome: { source: "choice" } };
     choiceRejection = result.reason;
   }
-  if (base.seed.accent !== undefined) {
-    const result = attempt(base.seed.accent);
-    if (result.ok) {
-      return { values: result.values, outcome: { source: "seed", ...(choiceRejection ? { choiceRejection } : {}) } };
-    }
-    seedRejection = result.reason;
-  }
-  const fallback = attempt(defaults(base.mode).color.signal);
-  const rejections = {
+  const rejections: { choiceRejection?: SignalRejection; seedRejection?: OwnSignalRejection; defaultRejection?: OwnSignalRejection } = {
     ...(choiceRejection ? { choiceRejection } : {}),
-    ...(seedRejection ? { seedRejection } : {}),
   };
+  if (base.seed.accent !== undefined) {
+    const result = own(base.seed.accent, true);
+    if (result.ok) return { values: result.values, outcome: { source: "seed", ...rejections } };
+    rejections.seedRejection = result.reason;
+  }
+  const fallback = own(defaults(base.mode).color.signal, false);
   if (fallback.ok) return { values: fallback.values, outcome: { source: "default", ...rejections } };
+  rejections.defaultRejection = fallback.reason;
+  for (const preset of SIGNAL_PRESET_IDS) {
+    const result = own(SIGNAL_PRESETS[preset][base.mode], false);
+    if (result.ok) return { values: result.values, outcome: { source: "preset", preset, ...rejections } };
+  }
   return { values: neutralSignal(base), outcome: { source: "neutral", ...rejections } };
 }
 
@@ -486,15 +603,25 @@ function finish(base: Base, solved: SolvedSignal, fit: Fitter): DerivedMode {
       (other) => oklabDistance(agent, other) >= SIGNAL_MIN_DISTANCE
     );
   const agentSeed = base.seed.agent ?? defaults(mode).color.agent;
-  const agentFit = (rawSeed: string) => fitWithSoft("agent", rawSeed, base.hosts, base.surface, mode, fit);
+  const agentFit = (rawSeed: string) => fitWithSoft("agent", rawSeed, base.markHosts, base.surface, mode, fit);
 
   let agent = agentFit(agentSeed);
   let rotated = 0;
-  while (fit === fitOrThrow && !apart(agent.color)) {
-    rotated += AGENT_ROTATION_STEP;
-    if (rotated >= 360) throw new DeriveError("agent", "no hue keeps the agent apart from the signal and danger");
+  if (fit === fitOrThrow && !apart(agent.color)) {
+    // 작은 쪽으로 돌린다: 같은 크기면 +쪽이 먼저고, 한 바퀴의 반(180°)까지 본다. 멀리 돌릴수록 팔레트 밖의 색이 된다.
     const o = toOklch(normalizeHex(agentSeed));
-    agent = agentFit(fromOklch({ L: o.L, C: Math.max(o.C, AGENT_ROTATION_MIN_CHROMA), h: (o.h + rotated) % 360 }));
+    const chroma = Math.max(o.C, AGENT_ROTATION_MIN_CHROMA);
+    search: for (let angle = AGENT_ROTATION_STEP; angle <= 180; angle += AGENT_ROTATION_STEP) {
+      for (const direction of [1, -1]) {
+        const candidate = agentFit(fromOklch({ L: o.L, C: chroma, h: (o.h + direction * angle + 360) % 360 }));
+        if (apart(candidate.color)) {
+          agent = candidate;
+          rotated = angle;
+          break search;
+        }
+      }
+    }
+    if (rotated === 0) throw new DeriveError("agent", "no hue keeps the agent apart from the signal and danger");
   }
   const agentNotes = noteOf("agent", agentSeed, agent.color, rotated > 0 ? { rotated } : {});
 
@@ -552,7 +679,7 @@ function glassOf(surface: string, mode: Mode): string {
 export function deriveThemeMode(seed: ThemeSeed, options: DeriveOptions = {}): DerivedMode {
   const fit = options.adjust === false ? keepAsIs : fitOrThrow;
   const base = deriveBase(seed, fit);
-  return finish(base, solveSignal(base, options.signal ?? null), fit);
+  return finish(base, solveSignal(base, options.signal ?? null, fit), fit);
 }
 
 // ---- CSS 변수 ---------------------------------------------------------------------
