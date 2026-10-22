@@ -121,13 +121,18 @@ function successfulUploads(id: string): void {
   completeUpload.mockResolvedValue(completedRow(id));
 }
 
-function openPicker(kind: 'camera' | 'photo' | 'file'): void {
+async function openPicker(kind: 'camera' | 'photo' | 'file'): Promise<void> {
   fireEvent.press(screen.getByTestId('composer-attach'));
   // 열린 직후의 누름은 무시한다(연타 방어) — 사람이 메뉴를 본 뒤의 선택이 되도록 그 시간을 보낸다.
   act(() => {
     jest.advanceTimersByTime(ATTACH_MENU.touchGuardMs);
   });
   fireEvent.press(screen.getByTestId(`attachment-pick-${kind}`));
+  if (kind === 'photo') {
+    // 「사진」 행은 메뉴를 **사진 카드로 변신**시킨다(#4181). 시스템 사진 창(기존 `pickPhoto`)으로 가는
+    // 길은 그 카드의 「전체 사진에서 고르기」다 — 이 시험들이 지키는 그 뒤의 계약은 그대로다.
+    fireEvent.press(await screen.findByTestId('photo-pick-from-all'));
+  }
 }
 
 function renderComposer(onSend = jest.fn()) {
@@ -471,7 +476,7 @@ describe('Composer 첨부 렌더·발송', () => {
     };
     const {onSend} = renderComposer();
 
-    openPicker('photo');
+    await openPicker('photo');
 
     // 사진 칩은 썸네일뿐이라 상태 문장은 낭독 라벨에 산다 (#3820).
     await waitFor(() =>
@@ -526,7 +531,7 @@ describe('Composer 첨부 렌더·발송', () => {
     const {onSend} = renderComposer();
 
     fireEvent.changeText(screen.getByTestId('composer-input'), '검토 부탁해요');
-    openPicker('file');
+    await openPicker('file');
     await waitFor(() =>
       expect(screen.getByText(new RegExp(ATTACH_COPY.uploaded))).toBeTruthy(),
     );
@@ -624,7 +629,7 @@ describe('Composer 첨부 렌더·발송', () => {
     };
     const {onSend} = renderComposer();
 
-    openPicker('camera');
+    await openPicker('camera');
 
     await waitFor(() =>
       expect(
@@ -655,7 +660,7 @@ describe('Composer 첨부 렌더·발송', () => {
       .spyOn(Linking, 'openSettings')
       .mockResolvedValue(undefined);
     renderComposer();
-    openPicker('camera');
+    await openPicker('camera');
 
     await waitFor(() =>
       expect(
@@ -695,7 +700,7 @@ describe('Composer 첨부 렌더·발송', () => {
 
   it('선택 취소를 코어의 인라인 문장으로 남긴다', async () => {
     renderComposer();
-    openPicker('file');
+    await openPicker('file');
 
     await waitFor(() =>
       expect(
@@ -715,7 +720,7 @@ describe('Composer 첨부 렌더·발송', () => {
       .spyOn(Linking, 'openSettings')
       .mockResolvedValue(undefined);
     renderComposer();
-    openPicker('photo');
+    await openPicker('photo');
 
     await waitFor(() =>
       expect(
@@ -742,7 +747,7 @@ describe('Composer 첨부 렌더·발송', () => {
       ],
     };
     renderComposer();
-    openPicker('file');
+    await openPicker('file');
 
     await waitFor(() =>
       expect(
@@ -783,7 +788,7 @@ describe('Composer 첨부 렌더·발송', () => {
       ],
     };
     renderComposer();
-    openPicker('file');
+    await openPicker('file');
 
     await waitFor(() =>
       expect(screen.getByTestId('attachment-draft-retry')).toBeTruthy(),
@@ -820,7 +825,7 @@ describe('Composer 첨부 렌더·발송', () => {
       ],
     };
     renderComposer();
-    openPicker('file');
+    await openPicker('file');
 
     await waitFor(() =>
       expect(
@@ -839,7 +844,7 @@ describe('검수 수리 회귀 (design-review High-1·High-2)', () => {
     // High-1: 닫히는 Modal과 같은 틱의 제시는 iOS가 거절할 수 있고, 그 거절은
     // 「업로드 실패」 오탐으로 접힌다. 제시는 onDismiss 또는 폴백 타이머 뒤다.
     renderComposer();
-    openPicker('photo');
+    await openPicker('photo');
     const launch = imagePicker.launchImageLibraryAsync;
     expect(launch).not.toHaveBeenCalled();
     await waitFor(() => expect(launch).toHaveBeenCalledTimes(1));
@@ -861,7 +866,7 @@ describe('검수 수리 회귀 (design-review High-1·High-2)', () => {
           : launcher[kind].mock.calls.length;
       if (kind === 'file') launcher.file.getDocumentAsync.mockClear();
       renderComposer();
-      openPicker(kind);
+      await openPicker(kind);
       // 닫는 요청은 갔지만 Modal 은 아직 서 있다.
       const modal = screen.getByTestId('attach-menu-modal');
       expect(modal).toBeTruthy();
@@ -894,7 +899,7 @@ describe('검수 수리 회귀 (design-review High-1·High-2)', () => {
       ],
     };
     renderComposer();
-    openPicker('photo');
+    await openPicker('photo');
     const announce =
       AccessibilityInfo.announceForAccessibility as unknown as jest.Mock;
     await waitFor(() =>
@@ -913,7 +918,7 @@ describe('검수 수리 회귀 (design-review High-1·High-2)', () => {
       accessPrivileges: 'none',
     };
     renderComposer();
-    openPicker('photo');
+    await openPicker('photo');
     const announce =
       AccessibilityInfo.announceForAccessibility as unknown as jest.Mock;
     await waitFor(() =>

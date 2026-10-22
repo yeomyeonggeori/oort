@@ -1,0 +1,112 @@
+appId: app.momo.ios
+name: "101-photo-card-capture"
+---
+# 101-photo-card-capture — 첨부 메뉴의 「사진」이 최근 사진 카드로 변신한다 (#4181).
+#
+# 표면 `-momoMeasure ATTACH-MENU`(다크) · `LIGHT-ATTACH-MENU`(라이트)는 진짜 머리·타임라인·컴포저를
+# 세운다(`measure/attachMenu.tsx`). 카드를 여는 것은 **정말로 누르는** 이 흐름의 탭이다 — 메뉴의 「사진」
+# 행(`openPhotos`) → 변신 틀 → 카드의 권한 읽기. 상태를 심어서는 그 길이 안 돈다.
+#
+#   xcrun simctl privacy booted reset photos app.momo.ios     # 권한 미결정에서 시작
+#   xcrun simctl launch booted app.momo.ios --args \
+#     -momoMeasure ATTACH-MENU -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro test -e SHOT=photo-card-dark clients/mobile/maestro/101-photo-card-capture.yaml
+#   # 사진: --test-output-dir 아래 takeScreenshot/ (`${SHOT}-menu` · `-ask` · `-grid` · `-selected` · …)
+#
+# 권한이 미결정이면 카드가 먼저 묻고(「허용」) 이 흐름이 시스템 창의 「전체 접근 허용」을 누른다. 이미 허용된
+# 기기에서는 곧장 그리드가 선다 — 두 경우를 한 흐름이 지난다. 거부 면은 `simctl privacy revoke photos` 로 만든다
+# (iOS 는 거부 뒤 다시 묻지 않는다). 일부 허용(limited)은 시뮬레이터에서 만들 수 없어 하네스가 포트를 주입한다
+# (`-momoMeasure PHOTO-CARD-LIMITED`, `measure/photoCard.tsx`).
+#
+# 변신 **도중** 프레임은 이 흐름이 못 찍는다(스크린샷 한 장이 스프링 한 번보다 느리다). 같은 흐름을 돌리는
+# 동안 `xcrun simctl io booted recordVideo --codec h264 f.mp4` 로 영상을 받고 ffmpeg 로 프레임을 뽑는다
+# (VFR 영상이라 바뀐 프레임만 저장된다: `ffmpeg -ss S -to E -i f.mp4 -fps_mode passthrough …`).
+- extendedWaitUntil:
+    visible:
+      id: "composer-attach"
+    timeout: 60000
+# 디버그 빌드의 LogBox 띠가 컴포저 위를 덮고 탭을 먹는다(`subflows/dismiss-dev-logbox.yaml`).
+- runFlow: subflows/dismiss-dev-logbox.yaml
+- takeScreenshot: ${SHOT}-closed
+- tapOn:
+    id: "composer-attach"
+- extendedWaitUntil:
+    visible:
+      id: "attachment-pick-photo"
+    timeout: 10000
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-menu
+- tapOn:
+    id: "attachment-pick-photo"
+- extendedWaitUntil:
+    visible:
+      id: "photo-back"
+    timeout: 10000
+- waitForAnimationToEnd
+# 권한이 미결정이면(「허용」이 보이면) 묻는 면을 찍고 시스템 창을 지난다.
+- runFlow:
+    when:
+      visible:
+        id: "photo-allow"
+    commands:
+      - takeScreenshot: ${SHOT}-ask
+      - tapOn:
+          id: "photo-allow"
+      - extendedWaitUntil:
+          visible: "전체 접근 허용|Allow Full Access"
+          timeout: 20000
+      - tapOn: "전체 접근 허용|Allow Full Access"
+- extendedWaitUntil:
+    visible:
+      id: "photo-grid"
+    timeout: 20000
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-grid
+# 보관함 맨 앞 세 장을 고른다 — 순번 원이 1·2·3 으로 선다.
+- tapOn:
+    id: "photo-cell-.*"
+    index: 0
+- tapOn:
+    id: "photo-cell-.*"
+    index: 1
+- tapOn:
+    id: "photo-cell-.*"
+    index: 2
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-selected
+# 접기: 카드가 메뉴로 접혀 든다.
+- tapOn:
+    id: "photo-back"
+- extendedWaitUntil:
+    visible:
+      id: "attachment-pick-photo"
+    timeout: 10000
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-menu-again
+# 다시 연다(이제 허용된 상태): 카드가 곧장 그리드로 자란다.
+- tapOn:
+    id: "attachment-pick-photo"
+- extendedWaitUntil:
+    visible:
+      id: "photo-grid"
+    timeout: 20000
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-grid-again
+- tapOn:
+    id: "photo-cell-.*"
+    index: 0
+- tapOn:
+    id: "photo-cell-.*"
+    index: 1
+- tapOn:
+    id: "photo-cell-.*"
+    index: 2
+# 첨부: 세 장이 파일(HEIC 는 JPEG)이 되어 한 번에 트레이로 가고 메뉴가 닫힌다.
+- tapOn:
+    id: "photo-pill"
+- extendedWaitUntil:
+    visible:
+      id: "composer-attach"
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-attached
