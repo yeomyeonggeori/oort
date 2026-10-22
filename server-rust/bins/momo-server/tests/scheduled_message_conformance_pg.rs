@@ -2626,11 +2626,102 @@ async fn each_failure_reason_is_named_and_the_grace_boundary_holds() {
         .unwrap();
     expect_failed(&report, id, Reason::AuthorInactive);
 
+    // ── the order the reasons are judged in (D8): a deleted workspace, the grace window, an inactive
+    //    author, membership, the thread root, and only then the send itself
+    // an author who is both suspended and gone from the channel is `author_inactive`
+    let channel = fresh_channel(&rig.su, &fx).await;
+    sqlx::query("UPDATE membership SET left_at = now() WHERE channel_id = $1 AND member_id = $2")
+        .bind(channel)
+        .bind(fx.a.id)
+        .execute(&rig.su)
+        .await
+        .unwrap();
+    let id = insert_schedule(&rig.su, fx.workspace, channel, fx.a.id, "both", -2, None).await;
+    sqlx::query("UPDATE member SET status = 'suspended' WHERE id = $1")
+        .bind(fx.a.id)
+        .execute(&rig.su)
+        .await
+        .unwrap();
+    let report = rig.tick().await;
+    sqlx::query("UPDATE member SET status = 'active' WHERE id = $1")
+        .bind(fx.a.id)
+        .execute(&rig.su)
+        .await
+        .unwrap();
+    expect_failed(&report, id, Reason::AuthorInactive);
+    // a member who left a channel whose thread root is also gone is `not_member`, not `root_unavailable`
+    let channel = fresh_channel(&rig.su, &fx).await;
+    let root = insert_message(&rig.su, fx.workspace, channel, fx.b.id, "root").await;
+    sqlx::query(
+        "UPDATE message SET deleted_at = now(), state = 'deleted', body = NULL WHERE id = $1",
+    )
+    .bind(root)
+    .execute(&rig.su)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE membership SET left_at = now() WHERE channel_id = $1 AND member_id = $2")
+        .bind(channel)
+        .bind(fx.a.id)
+        .execute(&rig.su)
+        .await
+        .unwrap();
+    let id = insert_schedule(
+        &rig.su,
+        fx.workspace,
+        channel,
+        fx.a.id,
+        "left and orphaned",
+        -2,
+        None,
+    )
+    .await;
+    sqlx::query("UPDATE scheduled_message SET root_id = $2 WHERE id = $1")
+        .bind(id)
+        .bind(root)
+        .execute(&rig.su)
+        .await
+        .unwrap();
+    let report = rig.tick().await;
+    expect_failed(&report, id, Reason::NotMember);
+    // a deleted workspace comes before the grace window: its row is cancelled, not `missed`
+    let gone = fixture(&rig.su, "sm-reasons-gone").await;
+    let id = insert_schedule(
+        &rig.su,
+        gone.workspace,
+        gone.channel,
+        gone.a.id,
+        "late and orphaned",
+        -400,
+        None,
+    )
+    .await;
+    sqlx::query("UPDATE workspace SET deleted_at = now() WHERE id = $1")
+        .bind(gone.workspace)
+        .execute(&rig.su)
+        .await
+        .unwrap();
+    let report = rig.tick().await;
+    assert_eq!(report.cancelled, vec![id], "{report:?}");
+    assert!(report.failed.is_empty(), "{report:?}");
+
     // sessions_ended: held by the lifecycle hook (exercised through the routes below); here the
     // reason is checked to be a value the row accepts and the tick never picks up
     let channel = fresh_channel(&rig.su, &fx).await;
     let held = insert_schedule(&rig.su, fx.workspace, channel, fx.a.id, "held", -2, None).await;
     let (workspace, member) = (fx.workspace, fx.a.id);
+    // every pending row and every failed row of this member that is not already held
+    let open_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM scheduled_message WHERE author_member_id = $1 \
+            AND (status = 'pending' OR (status = 'failed' AND failure_reason <> 'sessions_ended'))",
+    )
+    .bind(fx.a.id)
+    .fetch_one(&rig.su)
+    .await
+    .unwrap();
+    assert!(
+        open_rows >= 6,
+        "the cases above left a failed row of each kind: {open_rows}"
+    );
     let changed = momo_db::with_tenant_tx(&rig.app, workspace, move |conn| {
         Box::pin(async move {
             momo_messaging::hold_member_schedules_in_tx(conn, workspace, member).await
@@ -2638,9 +2729,9 @@ async fn each_failure_reason_is_named_and_the_grace_boundary_holds() {
     })
     .await
     .unwrap();
-    // the pending row AND every failed row of the member (the four reasons above): whatever a
+    // the pending row AND every failed row of the member, whatever it failed for: whatever a
     // stolen session may have left behind must be re-read by its author before it goes out
-    assert_eq!(changed.len(), 5, "{changed:?}");
+    assert_eq!(changed.len() as i64, open_rows, "{changed:?}");
     assert!(changed
         .iter()
         .all(|row| row.failure_reason == Some(Reason::SessionsEnded)));
@@ -2915,6 +3006,20 @@ async fn post_answers_a_known_client_request_id_before_any_validation() {
         1,
         "still one row"
     );
+    // the database is the backstop behind the lookup: the same (workspace, author, request id) cannot be
+    // stored twice, whoever tries — a retry that races the first create dies here instead of doubling
+    let duplicate = sqlx::query(
+        "INSERT INTO scheduled_message (workspace_id, channel_id, author_member_id, body, send_at, client_request_id) \
+         SELECT workspace_id, channel_id, author_member_id, 'duplicate', send_at, client_request_id \
+           FROM scheduled_message WHERE id = $1",
+    )
+    .bind(id)
+    .execute(&rig.su)
+    .await;
+    match duplicate {
+        Err(sqlx::Error::Database(db)) => assert_eq!(db.code().as_deref(), Some("23505")),
+        other => panic!("a second row for one request id must be refused by UNIQUE: {other:?}"),
+    }
 }
 
 #[tokio::test]
@@ -3428,4 +3533,768 @@ async fn the_event_rides_the_personal_channel_with_ids_only() {
     .unwrap();
     assert_eq!(partition, Some(fx.a.id));
     let _ = &mut rig;
+}
+
+// ---------------------------------------------------------------------------
+// credential revocation (D14): holding, per lineage, and cancelling
+// ---------------------------------------------------------------------------
+
+#[path = "common/owner_scope_scan.rs"]
+mod owner_scope_scan;
+
+impl Rig {
+    fn host(&self) -> String {
+        self.base.trim_start_matches("http://").to_string()
+    }
+
+    /// A device-link voucher issued by the signed-in `access` session.
+    async fn issue_link(&self, access: &str) -> String {
+        let response = self
+            .http
+            .post(format!("{}/v1/auth/device-link", self.base))
+            .bearer_auth(access)
+            .header("host", self.host())
+            .header("x-forwarded-proto", "http")
+            .send()
+            .await
+            .expect("issue device-link");
+        assert_eq!(response.status().as_u16(), 201, "a voucher is issued");
+        let body: Value = response.json().await.expect("issue body");
+        body["token"].as_str().expect("voucher").to_string()
+    }
+
+    /// A phone session: redeem a voucher as a named linked device (its own sign-in lineage).
+    async fn redeem(&self, voucher: &str, name: &str) -> Session {
+        let response = self
+            .http
+            .post(format!("{}/v1/auth/device-link/redeem", self.base))
+            .header("host", self.host())
+            .header("x-forwarded-proto", "http")
+            .json(&json!({"token": voucher, "device": {"name": name, "platform": "ios"}}))
+            .send()
+            .await
+            .expect("redeem");
+        assert_eq!(response.status().as_u16(), 200, "a voucher redeems");
+        let body: Value = response.json().await.expect("redeem body");
+        Session {
+            access: body["accessToken"].as_str().expect("access").to_string(),
+            refresh: body["refreshToken"].as_str().expect("refresh").to_string(),
+        }
+    }
+
+    async fn linked_phone(&self, desktop: &Session, name: &str) -> (Session, String) {
+        let voucher = self.issue_link(&desktop.access).await;
+        let phone = self.redeem(&voucher, name).await;
+        let (status, listed) = self
+            .call(
+                reqwest::Method::GET,
+                format!("{}/v1/auth/devices", self.base),
+                &desktop.access,
+                None,
+            )
+            .await;
+        assert_eq!(status, 200);
+        let device_id = listed["devices"]
+            .as_array()
+            .expect("devices")
+            .iter()
+            .find(|device| device["label"].as_str() == Some(name))
+            .unwrap_or_else(|| panic!("the linked device {name} is listed"))["id"]
+            .as_str()
+            .expect("device id")
+            .to_string();
+        (phone, device_id)
+    }
+
+    async fn unlink(&self, access: &str, device_id: &str) -> u16 {
+        self.call(
+            reqwest::Method::DELETE,
+            format!("{}/v1/auth/devices/{device_id}", self.base),
+            access,
+            None,
+        )
+        .await
+        .0
+    }
+
+    async fn logout(&self, session: &Session) -> u16 {
+        let response = self
+            .http
+            .post(format!("{}/v1/auth/logout", self.base))
+            .bearer_auth(&session.access)
+            .json(&json!({"refreshToken": session.refresh}))
+            .send()
+            .await
+            .expect("logout");
+        response.status().as_u16()
+    }
+
+    async fn refresh(&self, refresh_token: &str) -> (u16, Value) {
+        let response = self
+            .http
+            .post(format!("{}/v1/auth/refresh", self.base))
+            .json(&json!({"refreshToken": refresh_token}))
+            .send()
+            .await
+            .expect("refresh");
+        let status = response.status().as_u16();
+        (status, response.json().await.unwrap_or(Value::Null))
+    }
+}
+
+/// `token.session_id` of the session an access token belongs to.
+async fn lineage_of(su: &PgPool, raw_token: &str) -> Uuid {
+    sqlx::query_scalar::<_, Option<Uuid>>(
+        "SELECT session_id FROM token WHERE token_hash = digest($1::text, 'sha256')",
+    )
+    .bind(raw_token)
+    .fetch_one(su)
+    .await
+    .expect("token row")
+    .expect("a session token carries a lineage")
+}
+
+/// Force a row into `failed` with the given reason (a prior failure), as the superuser.
+async fn fail_row(su: &PgPool, id: Uuid, reason: &str) {
+    sqlx::query(
+        "UPDATE scheduled_message SET status = 'failed', failure_reason = $2, next_attempt_at = NULL WHERE id = $1",
+    )
+    .bind(id)
+    .bind(reason)
+    .execute(su)
+    .await
+    .expect("fail the row");
+}
+
+/// The `status` of every frame a schedule has produced, oldest first.
+async fn frame_statuses(su: &PgPool, workspace: Uuid, id: Uuid) -> Vec<String> {
+    events_for(su, workspace, id)
+        .await
+        .iter()
+        .map(|frame| {
+            let payload = &frame["data"]["payload"];
+            match payload["failure_reason"].as_str() {
+                Some(reason) => format!("{}:{reason}", payload["status"].as_str().unwrap()),
+                None => payload["status"].as_str().unwrap().to_string(),
+            }
+        })
+        .collect()
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_member_wide_session_end_holds_pending_and_failed_schedules_and_logout_does_not() {
+    let _lock = test_lock().await;
+    let mut rig = Rig::new().await;
+    let fx = fixture(&rig.su, "sm-hold").await;
+    let admin_token = rig.token(fx.workspace, &fx.admin).await;
+
+    // ── a password change ends every sign-in of the member ───────────────────────────────────
+    let pending = insert_schedule(
+        &rig.su,
+        fx.workspace,
+        fx.channel,
+        fx.a.id,
+        "pending text",
+        3600,
+        None,
+    )
+    .await;
+    let failed = insert_schedule(
+        &rig.su,
+        fx.workspace,
+        fx.channel,
+        fx.a.id,
+        "failed text",
+        3600,
+        None,
+    )
+    .await;
+    fail_row(&rig.su, failed, "missed").await;
+    let held_already = insert_schedule(
+        &rig.su,
+        fx.workspace,
+        fx.channel,
+        fx.a.id,
+        "held text",
+        3600,
+        None,
+    )
+    .await;
+    fail_row(&rig.su, held_already, "sessions_ended").await;
+    let cancelled =
+        insert_schedule(&rig.su, fx.workspace, fx.channel, fx.a.id, "x", 3600, None).await;
+    sqlx::query("UPDATE scheduled_message SET status = 'cancelled', body = NULL WHERE id = $1")
+        .bind(cancelled)
+        .execute(&rig.su)
+        .await
+        .unwrap();
+    let others = insert_schedule(
+        &rig.su,
+        fx.workspace,
+        fx.channel,
+        fx.b.id,
+        "someone else's",
+        3600,
+        None,
+    )
+    .await;
+    let before_held = row(&rig.su, held_already).await;
+
+    let session = rig.login(fx.workspace, &fx.a).await;
+    let (status, changed) = rig
+        .call(
+            reqwest::Method::PATCH,
+            rig.workspace_url(fx.workspace, "/members/me/password"),
+            &session.access,
+            Some(
+                json!({"currentPassword": TEST_PASSWORD, "newPassword": "a-brand-new-password-1"}),
+            ),
+        )
+        .await;
+    assert_eq!(status, 200, "{changed}");
+    for id in [pending, failed] {
+        let held = row(&rig.su, id).await;
+        assert_eq!(
+            (held.status.as_str(), held.reason.as_deref(), held.rev),
+            ("failed", Some("sessions_ended"), 1),
+            "{id}: held, not cancelled"
+        );
+        assert!(
+            held.body.is_some(),
+            "the text is kept so its author can read it and decide"
+        );
+        assert_eq!(
+            frame_statuses(&rig.su, fx.workspace, id).await,
+            vec!["failed:sessions_ended"]
+        );
+        assert_eq!(
+            audit_actions_for(&rig.su, id).await,
+            vec!["scheduled_message.failed"]
+        );
+    }
+    let after_held = row(&rig.su, held_already).await;
+    assert_eq!(
+        after_held.rev, before_held.rev,
+        "a row that is already held is not touched again"
+    );
+    assert!(
+        frame_statuses(&rig.su, fx.workspace, held_already)
+            .await
+            .is_empty(),
+        "…and says nothing"
+    );
+    assert_eq!(
+        row(&rig.su, cancelled).await.status,
+        "cancelled",
+        "a finished row stays finished"
+    );
+    assert_eq!(
+        row(&rig.su, others).await.status,
+        "pending",
+        "another member's schedule is not this member's to lose"
+    );
+
+    // a held row never goes out by itself, even when its time comes…
+    move_send_at(&rig.su, pending, -2).await;
+    assert!(
+        rig.tick().await.is_quiet(),
+        "nothing is sent for a held row"
+    );
+    assert_eq!(messages_of(&rig.su, pending).await, 0);
+    // ── a logout is the author leaving: what they armed still goes out (the point of the feature) ──
+    let b_session = rig.login(fx.workspace, &fx.b).await;
+    let (status, created) = rig
+        .create(
+            &b_session.access,
+            fx.workspace,
+            fx.channel,
+            create_body("goes out while I am away", 3600),
+        )
+        .await;
+    assert_eq!(status, 201, "{created}");
+    let armed_then_away = scheduled_id(&created);
+    assert_eq!(rig.logout(&b_session).await, 200);
+    assert_eq!(
+        row(&rig.su, armed_then_away).await.status,
+        "pending",
+        "a logout holds nothing"
+    );
+    move_send_at(&rig.su, armed_then_away, -2).await;
+    let report = rig.tick().await;
+    assert!(
+        report.sent.contains(&armed_then_away),
+        "and it is sent with nobody signed in: {report:?}"
+    );
+
+    // ── suspension holds, and reinstatement does not bring it back ───────────────────────────
+    let target = seed_human(&rig.su, fx.workspace, "carol", "member").await;
+    join_channel(&rig.su, fx.workspace, fx.channel, target.id).await;
+    let carol_pending = insert_schedule(
+        &rig.su,
+        fx.workspace,
+        fx.channel,
+        target.id,
+        "carol's",
+        3600,
+        None,
+    )
+    .await;
+    let (status, value) = rig
+        .call(
+            reqwest::Method::POST,
+            rig.workspace_url(fx.workspace, &format!("/members/{}/suspend", target.id)),
+            &admin_token,
+            None,
+        )
+        .await;
+    assert_eq!(status, 200, "{value}");
+    let held = row(&rig.su, carol_pending).await;
+    assert_eq!(
+        (held.status.as_str(), held.reason.as_deref()),
+        ("failed", Some("sessions_ended"))
+    );
+    let (status, value) = rig
+        .call(
+            reqwest::Method::POST,
+            rig.workspace_url(fx.workspace, &format!("/members/{}/reinstate", target.id)),
+            &admin_token,
+            None,
+        )
+        .await;
+    assert_eq!(status, 200, "{value}");
+    let still = row(&rig.su, carol_pending).await;
+    assert_eq!(
+        (still.status.as_str(), still.reason.as_deref()),
+        ("failed", Some("sessions_ended")),
+        "reinstating the member does not revive what the stolen-session case held (#2677)"
+    );
+    // the author signs in again, reads it, and decides: send now is the re-confirmation
+    let carol_token = rig.token(fx.workspace, &target).await;
+    let (_, listed) = rig.list(&carol_token, fx.workspace, "?status=failed").await;
+    assert_eq!(listed["scheduledMessages"][0]["body"], "carol's");
+    assert_eq!(
+        listed["scheduledMessages"][0]["failureReason"],
+        "sessions_ended"
+    );
+    let (status, sent) = rig
+        .send_now(&carol_token, fx.workspace, &carol_pending.to_string())
+        .await;
+    assert_eq!(status, 200, "{sent}");
+    assert_eq!(messages_of(&rig.su, carol_pending).await, 1);
+    let _ = &mut rig;
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_device_unlink_or_refresh_reuse_holds_only_that_lineages_schedules() {
+    let _lock = test_lock().await;
+    let rig = Rig::with(
+        SchedulerSettings::default(),
+        // a password sign-in is swept on reuse only when the operator turned this on; the
+        // linked-device lineage is swept always
+        DeviceKeySettings {
+            refresh_reuse_sweep_all_sessions: true,
+            ..DeviceKeySettings::default()
+        },
+    )
+    .await;
+    let fx = fixture(&rig.su, "sm-lineage").await;
+    let desktop = rig.login(fx.workspace, &fx.a).await;
+    let (phone, phone_device) = rig.linked_phone(&desktop, "Phone").await;
+    let desktop_lineage = lineage_of(&rig.su, &desktop.access).await;
+    let phone_lineage = lineage_of(&rig.su, &phone.access).await;
+    assert_ne!(
+        desktop_lineage, phone_lineage,
+        "a linked device is its own sign-in lineage"
+    );
+
+    let make = |session: &Session, text: &'static str| {
+        let (rig, access) = (&rig, session.access.clone());
+        let (workspace, channel) = (fx.workspace, fx.channel);
+        async move {
+            let (status, created) = rig
+                .create(&access, workspace, channel, create_body(text, 3600))
+                .await;
+            assert_eq!(status, 201, "{created}");
+            scheduled_id(&created)
+        }
+    };
+    let from_phone = make(&phone, "armed on the phone").await;
+    let from_phone_time_only =
+        make(&phone, "armed on the phone, time moved from the desktop").await;
+    let from_phone_text_edited =
+        make(&phone, "armed on the phone, text rewritten on the desktop").await;
+    let from_desktop = make(&desktop, "armed on the desktop").await;
+    assert_eq!(
+        row(&rig.su, from_phone).await.armed_session_id,
+        Some(phone_lineage)
+    );
+    assert_eq!(
+        row(&rig.su, from_desktop).await.armed_session_id,
+        Some(desktop_lineage)
+    );
+
+    // the lineage that last wrote the CONTENT is the one a hold looks for
+    let later = chrono::Utc::now().timestamp_millis() + 7_200_000;
+    let (status, _) = rig
+        .patch(
+            &desktop.access,
+            fx.workspace,
+            &from_phone_time_only.to_string(),
+            json!({"sendAtMs": later}),
+        )
+        .await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        row(&rig.su, from_phone_time_only).await.armed_session_id,
+        Some(phone_lineage),
+        "moving the time is not rewriting the text: it stays armed by the phone"
+    );
+    let (status, _) = rig
+        .patch(
+            &desktop.access,
+            fx.workspace,
+            &from_phone_text_edited.to_string(),
+            json!({"body": "rewritten here"}),
+        )
+        .await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        row(&rig.su, from_phone_text_edited).await.armed_session_id,
+        Some(desktop_lineage),
+        "rewriting the text makes the editing session the one that vouches for it"
+    );
+
+    // ── unlink the phone from the desktop: only what the phone last wrote is held ─────────────
+    assert_eq!(rig.unlink(&desktop.access, &phone_device).await, 204);
+    for id in [from_phone, from_phone_time_only] {
+        let held = row(&rig.su, id).await;
+        assert_eq!(
+            (held.status.as_str(), held.reason.as_deref()),
+            ("failed", Some("sessions_ended")),
+            "{id}"
+        );
+    }
+    for id in [from_phone_text_edited, from_desktop] {
+        assert_eq!(
+            row(&rig.su, id).await.status,
+            "pending",
+            "{id} was not armed by the unlinked phone"
+        );
+    }
+    assert_eq!(
+        frame_statuses(&rig.su, fx.workspace, from_phone).await,
+        vec!["pending", "failed:sessions_ended"],
+        "the create left a frame and the hold left one, so the phone's other devices see it stop"
+    );
+
+    // ── a phone that signed out and was then unlinked is held too (the link row outlives its tokens) ──
+    let (phone2, phone2_device) = rig.linked_phone(&desktop, "Phone 2").await;
+    let from_phone2 = make(&phone2, "armed on the second phone").await;
+    assert_eq!(rig.logout(&phone2).await, 200);
+    assert_eq!(
+        row(&rig.su, from_phone2).await.status,
+        "pending",
+        "a logout alone holds nothing (D14: arming a message and signing out is the feature)"
+    );
+    let (status, value) = rig
+        .call(
+            reqwest::Method::DELETE,
+            format!("{}/v1/auth/devices/{phone2_device}", rig.base),
+            &desktop.access,
+            None,
+        )
+        .await;
+    assert_eq!(
+        status, 404,
+        "the route still answers what it always answered for a link with no live token: {value}"
+    );
+    let held = row(&rig.su, from_phone2).await;
+    assert_eq!(
+        (held.status.as_str(), held.reason.as_deref()),
+        ("failed", Some("sessions_ended")),
+        "…but the lineage that armed it is held anyway"
+    );
+    // an unknown or foreign id holds nothing and leaks nothing
+    assert_eq!(
+        rig.unlink(&desktop.access, &Uuid::new_v4().to_string())
+            .await,
+        404
+    );
+    let b_session = rig.login(fx.workspace, &fx.b).await;
+    assert_eq!(
+        rig.unlink(&b_session.access, &phone2_device).await,
+        404,
+        "another member cannot reach it"
+    );
+
+    // ── refresh-token reuse ends the linked lineage ──────────────────────────────────────────
+    let (phone3, _) = rig.linked_phone(&desktop, "Phone 3").await;
+    let from_phone3 = make(&phone3, "armed on the third phone").await;
+    let (status, rotated) = rig.refresh(&phone3.refresh).await;
+    assert_eq!(status, 200, "{rotated}");
+    assert!(rotated["refreshToken"].is_string());
+    // the spent token comes back after the 30-second grace: a copy, not a retry
+    sqlx::query(
+        "UPDATE token SET revoked_at = now() - interval '2 minutes' WHERE token_hash = digest($1::text, 'sha256')",
+    )
+    .bind(&phone3.refresh)
+    .execute(&rig.su)
+    .await
+    .unwrap();
+    let (status, _) = rig.refresh(&phone3.refresh).await;
+    assert_eq!(status, 401, "the reuse is refused");
+    let held = row(&rig.su, from_phone3).await;
+    assert_eq!(
+        (held.status.as_str(), held.reason.as_deref()),
+        ("failed", Some("sessions_ended"))
+    );
+    assert_eq!(
+        row(&rig.su, from_desktop).await.status,
+        "pending",
+        "the desktop's lineage is a different one"
+    );
+    assert_eq!(row(&rig.su, from_phone_text_edited).await.status, "pending");
+
+    // a password sign-in's lineage is swept on reuse only when the operator opted in (it is, here)
+    let tab = rig.login(fx.workspace, &fx.a).await;
+    let from_tab = make(&tab, "armed in a browser tab").await;
+    let (status, _) = rig.refresh(&tab.refresh).await;
+    assert_eq!(status, 200);
+    sqlx::query(
+        "UPDATE token SET revoked_at = now() - interval '2 minutes' WHERE token_hash = digest($1::text, 'sha256')",
+    )
+    .bind(&tab.refresh)
+    .execute(&rig.su)
+    .await
+    .unwrap();
+    assert_eq!(rig.refresh(&tab.refresh).await.0, 401);
+    assert_eq!(
+        row(&rig.su, from_tab).await.status,
+        "failed",
+        "the tab's lineage was swept and its schedule held"
+    );
+    assert_eq!(
+        row(&rig.su, from_desktop).await.status,
+        "pending",
+        "…and only the tab's: the desktop session that armed `from_desktop` is another lineage"
+    );
+
+    // a held row can be sent by hand, after its author has read it
+    let (status, sent) = rig
+        .send_now(&desktop.access, fx.workspace, &from_phone.to_string())
+        .await;
+    assert_eq!(status, 200, "{sent}");
+    assert_eq!(messages_of(&rig.su, from_phone).await, 1);
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn removal_and_leave_cancel_schedules_and_a_foreign_member_guc_is_bound_only_in_the_three_named_functions(
+) {
+    let _lock = test_lock().await;
+    let mut rig = Rig::new().await;
+    let fx = fixture(&rig.su, "sm-cancel").await;
+    let admin_token = rig.token(fx.workspace, &fx.admin).await;
+
+    // one member of each kind of row: pending (with a reserved file), failed, already held
+    let su_for_seed = rig.su.clone();
+    let seed_for = |member: Uuid| {
+        let (su, workspace, channel) = (su_for_seed.clone(), fx.workspace, fx.channel);
+        async move {
+            let pending =
+                insert_schedule(&su, workspace, channel, member, "pending text", 3600, None).await;
+            let file = insert_attachment(&su, workspace, channel, member, "complete").await;
+            sqlx::query(
+                "INSERT INTO scheduled_message_attachment (scheduled_message_id, workspace_id, member_id, attachment_id, position) \
+                 VALUES ($1, $2, $3, $4, 0)",
+            )
+            .bind(pending)
+            .bind(workspace)
+            .bind(member)
+            .bind(file)
+            .execute(&su)
+            .await
+            .unwrap();
+            let failed =
+                insert_schedule(&su, workspace, channel, member, "failed text", 3600, None).await;
+            fail_row(&su, failed, "not_member").await;
+            let held =
+                insert_schedule(&su, workspace, channel, member, "held text", 3600, None).await;
+            fail_row(&su, held, "sessions_ended").await;
+            (pending, failed, held)
+        }
+    };
+    let bystander = insert_schedule(
+        &rig.su,
+        fx.workspace,
+        fx.channel,
+        fx.admin.id,
+        "the admin's own",
+        3600,
+        None,
+    )
+    .await;
+
+    // ── removal ───────────────────────────────────────────────────────────────────────────────
+    let (p, f, h) = seed_for(fx.b.id).await;
+    let (status, value) = rig
+        .call(
+            reqwest::Method::DELETE,
+            rig.workspace_url(fx.workspace, &format!("/members/{}", fx.b.id)),
+            &admin_token,
+            None,
+        )
+        .await;
+    assert_eq!(status, 200, "{value}");
+    for id in [p, f, h] {
+        let cancelled = row(&rig.su, id).await;
+        assert_eq!(
+            (cancelled.status.as_str(), cancelled.reason, cancelled.body),
+            ("cancelled", None, None),
+            "{id}: removed means cancelled, with the text erased"
+        );
+    }
+    let reservations: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM scheduled_message_attachment WHERE member_id = $1",
+    )
+    .bind(fx.b.id)
+    .fetch_one(&rig.su)
+    .await
+    .unwrap();
+    assert_eq!(reservations, 0, "the files are released");
+    assert_eq!(
+        row(&rig.su, bystander).await.status,
+        "pending",
+        "nobody else's schedule is touched"
+    );
+    // hold and cancel both ran, in either order the result is the same: pending → failed → cancelled
+    assert_eq!(
+        frame_statuses(&rig.su, fx.workspace, p).await,
+        vec!["failed:sessions_ended", "cancelled"]
+    );
+    assert_eq!(
+        audit_actions_for(&rig.su, p).await,
+        vec!["scheduled_message.failed", "scheduled_message.cancelled"]
+    );
+    assert_eq!(
+        frame_statuses(&rig.su, fx.workspace, h).await,
+        vec!["cancelled"],
+        "an already-held row is only cancelled"
+    );
+    assert!(
+        rig.tick().await.is_quiet(),
+        "nothing of a removed member's is ever sent"
+    );
+
+    // ── leaving the workspace ─────────────────────────────────────────────────────────────────
+    let (p, f, h) = seed_for(fx.a.id).await;
+    let a_token = rig.token(fx.workspace, &fx.a).await;
+    let (status, value) = rig
+        .call(
+            reqwest::Method::DELETE,
+            rig.workspace_url(fx.workspace, "/members/me"),
+            &a_token,
+            None,
+        )
+        .await;
+    assert_eq!(status, 200, "{value}");
+    for id in [p, f, h] {
+        let cancelled = row(&rig.su, id).await;
+        assert_eq!(
+            (cancelled.status.as_str(), cancelled.body),
+            ("cancelled", None),
+            "{id}"
+        );
+    }
+    assert_eq!(row(&rig.su, bystander).await.status, "pending");
+
+    // ── the exception to "a request speaks for itself": the three functions restore what they displaced ──
+    // `with_tenant_tx` binds only the workspace, so the member scope the function binds is somebody else's.
+    let (workspace, other) = (fx.workspace, fx.admin.id);
+    let probe = |label: &'static str, run: u8| {
+        let app = rig.app.clone();
+        async move {
+            momo_db::with_tenant_tx(&app, workspace, move |conn| {
+                Box::pin(async move {
+                    let before = momo_messaging::current_owner_guc(conn).await?;
+                    match run {
+                        0 => {
+                            momo_messaging::hold_member_schedules_in_tx(conn, workspace, other)
+                                .await?;
+                        }
+                        1 => {
+                            momo_messaging::hold_lineage_schedules_in_tx(
+                                conn,
+                                workspace,
+                                other,
+                                Uuid::new_v4(),
+                            )
+                            .await?;
+                        }
+                        _ => {
+                            momo_messaging::cancel_member_schedules_in_tx(
+                                conn,
+                                workspace,
+                                Uuid::new_v4(),
+                            )
+                            .await?;
+                        }
+                    }
+                    let after = momo_messaging::current_owner_guc(conn).await?;
+                    Ok((label, before, after))
+                })
+            })
+            .await
+            .expect("the hook runs")
+        }
+    };
+    for run in 0..3u8 {
+        let (label, before, after) = probe(
+            ["hold_member", "hold_lineage", "cancel_member"][run as usize],
+            run,
+        )
+        .await;
+        assert_eq!(
+            before, "",
+            "{label}: the transaction starts with no member scope"
+        );
+        assert_eq!(
+            after, "",
+            "{label}: …and ends with none — the member it spoke for is not left bound"
+        );
+    }
+    // and a scope the transaction already held comes back exactly
+    let restored = momo_db::with_tenant_tx(&rig.app, workspace, move |conn| {
+        Box::pin(async move {
+            momo_messaging::bind_owner_guc(conn, fx.b.id).await?;
+            momo_messaging::hold_member_schedules_in_tx(conn, workspace, other).await?;
+            momo_messaging::current_owner_guc(conn).await
+        })
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        restored,
+        fx.b.id.to_string(),
+        "a displaced scope is put back"
+    );
+
+    // the source scan: nothing else binds another member's scope (and the scan itself can fail)
+    let sources =
+        owner_scope_scan::load_sources(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."));
+    let problems = owner_scope_scan::violations(&sources);
+    assert!(problems.is_empty(), "{problems:#?}");
+    let mut polluted =
+        owner_scope_scan::load_sources(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."));
+    polluted.push(owner_scope_scan::Source {
+        path: "bins/momo-server/src/routes/sneaky.rs".into(),
+        text: "async fn grab(conn: &mut C, m: Uuid) { bind_foreign_owner_guc(conn, m).await; }"
+            .into(),
+    });
+    assert!(
+        !owner_scope_scan::violations(&polluted).is_empty(),
+        "a binding outside the three named functions is caught"
+    );
 }

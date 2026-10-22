@@ -439,8 +439,8 @@ pub async fn create(
             }
 
             let attachment_ids = request.attachment_ids.unwrap_or_default();
-            let body = request.body.unwrap_or_default();
-            if body.trim().is_empty() && attachment_ids.is_empty() {
+            let body = stored_body(&request.body.unwrap_or_default());
+            if body.is_empty() && attachment_ids.is_empty() {
                 return Err(Refuse::Api(empty_message()));
             }
             let now = db_now_in_tx(conn).await?;
@@ -580,6 +580,17 @@ pub async fn list(
     }))
 }
 
+/// The text a schedule stores: what the author wrote, except that a blank text is the empty string —
+/// an attachment-only schedule has `""` (ADR-0208 D3), which is also what the clients send for an
+/// attachment-only message (`sendMessage(…, "", { attachmentIds })`).
+fn stored_body(raw: &str) -> String {
+    if raw.trim().is_empty() {
+        String::new()
+    } else {
+        raw.to_string()
+    }
+}
+
 fn nonblank(raw: Option<&str>) -> Option<&str> {
     raw.map(str::trim).filter(|value| !value.is_empty())
 }
@@ -629,13 +640,10 @@ pub async fn update(
                 ScheduledStatus::Pending | ScheduledStatus::Failed => {}
             }
             let now = db_now_in_tx(conn).await?;
+            let new_body = request.body.as_deref().map(stored_body);
             // The text must not become empty when nothing is attached to say something.
-            let blank_text = request
-                .body
-                .as_deref()
-                .is_some_and(|text| text.trim().is_empty());
             let held = reserved_attachment_ids_in_tx(conn, member_id, row.id).await?;
-            if blank_text && held.is_empty() {
+            if new_body.as_deref() == Some("") && held.is_empty() {
                 return Err(Refuse::Api(empty_message()));
             }
             let updated = match row.status {
@@ -653,7 +661,7 @@ pub async fn update(
                         .transpose()
                         .map_err(|invalid| Refuse::Api(send_at_error(invalid)))?;
                     // Moving the time does not move who last wrote the text (D14).
-                    let armed = if request.body.is_some() {
+                    let armed = if new_body.is_some() {
                         requester_session(conn, token_id).await?
                     } else {
                         None
@@ -662,7 +670,7 @@ pub async fn update(
                         conn,
                         member_id,
                         row.id,
-                        request.body.as_deref(),
+                        new_body.as_deref(),
                         send_at,
                         armed,
                         actor,
@@ -685,7 +693,7 @@ pub async fn update(
                             conn,
                             member_id,
                             row.id,
-                            request.body.as_deref(),
+                            new_body.as_deref(),
                             send_at,
                             armed,
                             actor,
@@ -698,7 +706,7 @@ pub async fn update(
                             conn,
                             member_id,
                             row.id,
-                            request.body.as_deref().unwrap_or_default(),
+                            new_body.as_deref().unwrap_or_default(),
                             armed,
                             actor,
                         )
