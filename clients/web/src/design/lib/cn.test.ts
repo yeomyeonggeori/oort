@@ -24,10 +24,14 @@ const tokensCss = readFileSync(
 );
 
 /** Every `--text-<role>: ...` in tokens.css. `[a-z]+` (no hyphen) is what keeps
- *  the `--text-<role>--line-height` twins out of the list. */
+ *  the `--text-<role>--line-height` twins out of the list.
+ *
+ *  A role is a multiple of the virtual rem (`calc(var(--type-rem) * <n>)`, AP-2a
+ *  #4189), not a `rem` literal, so that is the shape this reads. The count is pinned
+ *  below: a regex that stops matching would otherwise leave the loop empty and green. */
 function declaredRoles(source: string): string[] {
   const out = new Set<string>();
-  for (const m of source.matchAll(/--text-([a-z]+):\s*[0-9.]+rem/gi)) {
+  for (const m of source.matchAll(/--text-([a-z]+):\s*calc\(var\(--type-rem\)/gi)) {
     out.add(m[1]);
   }
   return [...out].sort();
@@ -69,6 +73,16 @@ describe("cn", () => {
     // A role added to tokens.css but not to cn.ts would silently disappear the
     // first time someone put a color next to it, so the two lists are pinned
     // together rather than kept in sync by memory.
+    expect(declaredRoles(tokensCss)).toEqual([
+      "body",
+      "code",
+      "display",
+      "heading",
+      "label",
+      "meta",
+      "timestamp",
+      "title",
+    ]);
     for (const role of declaredRoles(tokensCss)) {
       expect(cn(`text-${role}`, "text-ink-muted"), role).toBe(
         `text-${role} text-ink-muted`
@@ -150,6 +164,15 @@ describe("house measures resolve sizing conflicts (lightbox, sheets, pickers)", 
   it("control and action measures resolve the same way", () => {
     expect(cn("min-w-action-sm", "min-w-action")).toBe("min-w-action");
     expect(cn("h-control", "h-control-lg")).toBe("h-control-lg");
+  });
+
+  it("the timeline's density-driven avatar size evicts the shared Avatar's default size-8 (AP-2a)", () => {
+    // MessageRow passes `size-message-avatar` into `Avatar`, whose base list starts with `size-8`. If cn did
+    // not know the word measure, both classes would reach the DOM and the stylesheet order would pick the
+    // size: density would silently stop changing the avatar (or the shared default would stop being 32).
+    expect(cn("flex size-8 items-center", "size-message-avatar")).toBe("flex items-center size-message-avatar");
+    expect(cn("size-message-avatar", "size-8")).toBe("size-8");
+    expect(cn("w-8", "w-message-avatar")).toBe("w-message-avatar");
   });
 });
 

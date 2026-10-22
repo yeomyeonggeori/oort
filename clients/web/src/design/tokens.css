@@ -421,8 +421,42 @@
    * 그래서 --spacing-pane / --spacing-action과 같은 규율을 따른다: 격자 밖 측정값은
    * **숫자가 아니라 이름**으로 들어온다. `py-row`는 있고 `py-1.5`는 여전히 없다.
    * 값을 바꾸려면 코어의 `ROW_SPACE`를 바꿔야 하고, 그러면 `spacing.test.ts`가
-   * 둘이 어긋난 것을 잡는다. */
+   * 둘이 어긋난 것을 잡는다.
+   *
+   * **대화 밀도 (AP-2a #4189).** 이 값과 아래 네 값(`row-head`·`message-avatar`·`prose`·
+   * `list-item`)은 「편하게」(기본) 단계다. `data-density`가 `appearance/density.css`에서
+   * 같은 변수를 촘촘(4)·여유(8)로 바꾸고, 그 표는 코어 `DENSITY`가 정본이다
+   * (`densityTokens.test.ts`가 한 칸씩 대조한다). 기본 단계의 화면은 이 기능 전과 같다. */
   --spacing-row: 6px;
+
+  /* 대화 밀도를 따르지 **않는** 6px (AP-2a #4189). `--spacing-row`는 밀도가 4/6/8로 바꾸는 대화 행의 값이다.
+   * 같은 6이 필요하지만 대화가 아닌 자리가 이 이름을 읽는다: 폰 폭 채널 머리(`py-row-fixed`: 터치 타깃 44 + 6×2 + 1 = 57px)와 컴포저
+   * 슬래시 명령 목록의 행·머리글·발치. 그 자리들이 `--spacing-row`를 빌려 쓰던 때는 값이 늘 6이라 문제가 없었고, 밀도가
+   * 그 값을 움직이게 되자 명령 목록 행이 48/52/56px로, 폰 폭 채널 머리가 53/57/61px로 변했다(실측). 둘 다 「대화와
+   * 마크다운 글 사이의 간격」이 아니므로 밀도가 닿지 않게 이름을 갈랐다. `densityTokens.test.ts`가 밀도 변수를 읽는 곳을
+   * 닫힌 목록으로 지켜서 같은 일이 되풀이되지 않게 한다. */
+  --spacing-row-fixed: 6px;
+
+  /* 묶음 머리 행(사람이 바뀌는 자리)이 위로 여는 여백 (AP-2a #4189). 행 하나가 무는 값이 아니라 「묶음이 바뀌는 거리」에서
+   * 위 행의 아래 패딩(`--spacing-row`)을 뺀 나머지다: 6 + 12 = 18, 코어 `ROW_SPACE.betweenGroups`. 12는 리듬 단계(`pt-3`)지만
+   * 밀도가 8·16으로 바꿀 수 있어야 해서 이름을 가진다 — 리듬 단계 `--spacing-3`은 모든 곳에서 12여야 해서 덮어쓸 수 없다. */
+  --spacing-row-head: 12px;
+
+  /* 타임라인 메시지 아바타와 그 거터의 한 변 (AP-2a #4189). 코어 `AVATAR_SIZE`(32)이고 밀도가
+   * 28·36으로 바꾼다. 리듬 단계 `--spacing-8`(32)을 덮어쓰면 그 단계를 쓰는 모든 곳이 따라
+   * 움직여서 이름을 따로 둔다. 이 이름을 쓰는 곳은 타임라인 행(`MessageRow`·`PendingRow`)과
+   * 설정 미리보기뿐이다 — 디렉터리·받은편지함의 아바타는 대화 밀도를 따르지 않는다. */
+  --spacing-message-avatar: 32px;
+
+  /* 마크다운 블록(문단·목록·코드) 사이 간격 (AP-2a #4189). 지금까지 `gap-2`(8)였고 밀도가
+   * 6·10으로 바꾼다. 같은 말을 `--spacing-2`로 쓰면 8px가 모든 곳에서 밀도를 따라야 하므로
+   * 이름이 필요하다. */
+  --spacing-prose: 8px;
+
+  /* 목록 항목 사이 간격 (AP-2a #4189). 현행 0이다 — 본문 줄 높이(`leading-relaxed`)가 항목 사이를
+   * 이미 열어 둔다. 촘촘하게도 0이고 여유롭게만 4로 연다. 0px을 이름으로 두는 이유는 밀도가
+   * 이 변수 하나로 세 단계를 말하게 하려는 것이다. */
+  --spacing-list-item: 0px;
 
   /* Control heights are a separate dimension from spacing. */
   --spacing-control-sm: 28px;
@@ -798,23 +832,32 @@
   /* #3774 (Accepted, docs/design-system/typography-proposal.md §3.1). 크기는 서로
    * 달라야 하고(designSystem.test.ts), 굵기·자간은 롤이 아니라 사용처가 정한다.
    * `caption`은 옛 이름 `timestamp`로 남는다(이름 바꾸기는 다른 워커의 열린 PR과
-   * 충돌하므로 후속). `body-strong`은 크기 토큰이 아니라 `text-body font-semibold`다. */
-  --text-timestamp: 0.6875rem; /* 11px caption: seq / clock / counters / kbd */
-  --text-timestamp--line-height: 1rem;
-  --text-meta: 0.75rem; /* 12px, secondary and meta rows */
-  --text-meta--line-height: 1.125rem;
-  --text-code: 0.8125rem; /* 13px, code and monospace runs */
-  --text-code--line-height: 1.25rem;
-  --text-label: 0.875rem; /* 14px, sidebar rows, menus, controls */
-  --text-label--line-height: 1.25rem;
-  --text-body: 0.9375rem; /* 15px, message body (owner 2026-10-13) */
-  --text-body--line-height: 1.375rem;
-  --text-heading: 1rem; /* 16px, card and section headings, workspace name */
-  --text-heading--line-height: 1.375rem;
-  --text-title: 1.0625rem; /* 17px, surface titles */
-  --text-title--line-height: 1.5rem;
-  --text-display: 1.375rem; /* 22px, at most one per surface */
-  --text-display--line-height: 1.875rem;
+   * 충돌하므로 후속). `body-strong`은 크기 토큰이 아니라 `text-body font-semibold`다.
+   *
+   * **가상 rem (AP-2a #4189, ADR-0189 증보 1 D2·증보 3 D8, ADR-0179 D7).** 여덟 역할의 크기와
+   * 줄 높이는 전부 `calc(var(--type-rem) * <배수>)`다. `--type-rem`은 `1rem`에 글자 크기
+   * 배율(`data-font-size`, `appearance/typography-scale.css`)을 곱한 값이라 「기본」에서는
+   * 1rem 그대로이고, 배수 × 16이 아래 주석의 px이다(15px 본문 = 0.9375). 사용자가 글자 크기를
+   * 고르면 모든 역할이 같은 비율로 따라간다: 작게 14 · 기본 15 · 크게 16px(본문 기준).
+   * 역할을 더할 때도 이 모양을 지킨다 — `rem` 리터럴 역할은 배율을 비껴가고
+   * `designSystem.test.ts`·`cn.test.ts`가 그것을 잡는다. 레이아웃이 읽는 rem(간격·반경·컨트롤
+   * 높이)은 배율을 받지 않는다. */
+  --text-timestamp: calc(var(--type-rem) * 0.6875); /* 11px caption: seq / clock / counters / kbd */
+  --text-timestamp--line-height: calc(var(--type-rem) * 1);
+  --text-meta: calc(var(--type-rem) * 0.75); /* 12px, secondary and meta rows */
+  --text-meta--line-height: calc(var(--type-rem) * 1.125);
+  --text-code: calc(var(--type-rem) * 0.8125); /* 13px, code and monospace runs */
+  --text-code--line-height: calc(var(--type-rem) * 1.25);
+  --text-label: calc(var(--type-rem) * 0.875); /* 14px, sidebar rows, menus, controls */
+  --text-label--line-height: calc(var(--type-rem) * 1.25);
+  --text-body: calc(var(--type-rem) * 0.9375); /* 15px, message body (owner 2026-10-13) */
+  --text-body--line-height: calc(var(--type-rem) * 1.375);
+  --text-heading: calc(var(--type-rem) * 1); /* 16px, card and section headings, workspace name */
+  --text-heading--line-height: calc(var(--type-rem) * 1.375);
+  --text-title: calc(var(--type-rem) * 1.0625); /* 17px, surface titles */
+  --text-title--line-height: calc(var(--type-rem) * 1.5);
+  --text-display: calc(var(--type-rem) * 1.375); /* 22px, at most one per surface */
+  --text-display--line-height: calc(var(--type-rem) * 1.875);
 
   /* 링크 프리뷰 rich 히어로 비율 (#1903 design-review H-2).
    * Open Graph 권장 캔버스는 1.91:1 (1200×630). 카드 폭에 이 비율을 매고
@@ -5627,6 +5670,13 @@
    * 칸은 마지막 두 줄이 받는다(Tailwind preflight의 `font: inherit`와 같은
    * 레이어이고, 그보다 뒤에 선다).
    *
+   * **글자 크기 「작게」(AP-2a #4189)에서도 바닥은 지켜진다.** 모든 역할이 글자 배율을 곱하므로
+   * 기본에서 16px인 heading(→ 14.9px)과 17px인 title(→ 15.9px)이 바닥 밑으로 내려갈 수 있다.
+   * 그래서 이 둘은 `max(바닥, 배율을 곱한 크기)`로 묶는다: 기본·크게에서는 값이 그대로이고(16 ·
+   * 17px) 작게에서만 16px로 올라간다. 바닥보다 작은 다섯 역할은 어느 단계에서도 바닥 밑이라
+   * 그대로 바닥이다(크게의 본문도 정확히 16px이다). display(22 → 20.5px)는 어느 단계에서도
+   * 바닥 위다. 세 단계 전부에서의 계산된 크기는 `fieldTextFloor.browser.test.ts`가 잰다.
+   *
    * 문턱은 둘이다. 좁은 창(`width < 600px`)과 손가락(`hover: none`). 폭만 보면
    * 600px이 넘는 아이패드 세로 화면이 빠지는데, 거기서 입력 칸을 누르는 것도
    * 손가락이다. 마우스로 쓰는 넓은 창의 14px 밀도는 그대로다.
@@ -5653,6 +5703,8 @@
       --text-label--line-height: var(--field-text-floor-leading);
       --text-body: var(--field-text-floor);
       --text-body--line-height: var(--field-text-floor-leading);
+      --text-heading: max(var(--field-text-floor), calc(var(--type-rem) * 1));
+      --text-title: max(var(--field-text-floor), calc(var(--type-rem) * 1.0625));
       font-size: var(--field-text-floor);
       line-height: var(--field-text-floor-leading);
     }
