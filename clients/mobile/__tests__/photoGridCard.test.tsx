@@ -776,6 +776,8 @@ describe('겉모습', () => {
     await renderCard(lib.ports);
     await screen.findByTestId('photo-pane-undetermined');
     expect(insideScroll(screen.getByText(PHOTO_COPY.askTitle))).toBe(true);
+    // 면의 제목은 낭독의 머리(header)다 — 면이 바뀐 것을 제목으로 알아챈다.
+    expect(screen.getByText(PHOTO_COPY.askTitle).props.accessibilityRole).toBe('header');
     expect(insideScroll(screen.getByText(PHOTO_COPY.askDetail))).toBe(true);
     expect(insideScroll(screen.getByTestId('photo-allow'))).toBe(false);
     expect(insideScroll(screen.getByTestId('photo-pick-from-all'))).toBe(false);
