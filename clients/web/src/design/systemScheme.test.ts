@@ -75,6 +75,60 @@ describe("브라우저: 미디어 질의만 듣는다", () => {
   });
 });
 
+describe("구독 공백: 듣는 이가 없는 사이의 변화를 기억이 가리지 않는다 (design-review H-1)", () => {
+  it("발화 → 마지막 구독 해제 → 질의 값 변경 → get()은 질의를 새로 읽는다", () => {
+    const media = new FakeMedia(false);
+    const store = createSystemScheme({ media: () => media });
+    const off = store.subscribe(() => {});
+    media.fire(true); // 설정 화면이 열려 있는 동안 OS가 다크로
+    expect(store.get()).toBe("dark");
+    off(); // 화면을 떠난다
+    media.matches = false; // 듣는 이가 없는 사이에 OS가 라이트로 돌아온다(이벤트는 아무도 못 듣는다)
+    expect(store.get()).toBe("light");
+    store.subscribe(() => {})(); // 화면을 다시 연다
+    expect(store.get()).toBe("light");
+  });
+
+  it("네이티브 발화도 같다: 구독이 풀리면 질의가 다시 진실이다", async () => {
+    const media = new FakeMedia(false);
+    const { native, handlers } = fakeNative();
+    const store = createSystemScheme({ media: () => media, native });
+    const off = store.subscribe(() => {});
+    await flush();
+    handlers[0]("dark");
+    expect(store.get()).toBe("dark");
+    off();
+    expect(store.get()).toBe("light");
+  });
+
+  it("구독이 둘이면 마지막 하나가 풀릴 때까지 기억을 쥔다", () => {
+    const media = new FakeMedia(false);
+    const store = createSystemScheme({ media: () => media });
+    const offA = store.subscribe(() => {});
+    const offB = store.subscribe(() => {});
+    media.fire(true);
+    offA();
+    media.matches = false; // B가 아직 듣고 있으니 기억을 쥐는 것이 맞다(B는 이 변화도 듣는다)
+    expect(store.get()).toBe("dark");
+    offB();
+    expect(store.get()).toBe("light");
+  });
+
+  it("해제를 두 번 불러도 구독 수가 음수로 몰리지 않는다", () => {
+    const media = new FakeMedia(false);
+    const store = createSystemScheme({ media: () => media });
+    const offA = store.subscribe(() => {});
+    const offB = store.subscribe(() => {});
+    offA();
+    offA();
+    media.fire(true);
+    expect(store.get()).toBe("dark"); // B가 듣고 있다
+    offB();
+    media.matches = false;
+    expect(store.get()).toBe("light"); // 마지막 구독이 풀렸으니 기억은 버려졌다
+  });
+});
+
 describe("네이티브 신호원은 구독하는 순간의 셸 판정을 따른다", () => {
   it("판정이 거짓이면 신호원이 있어도 열지 않는다 (브라우저 탭)", () => {
     const { native } = fakeNative();
