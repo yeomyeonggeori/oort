@@ -528,6 +528,18 @@ describe("설계 리뷰 3차 H-1: 칩 그릇은 한 평면에 서고 색상·채
     }
   });
 
+  it("면이 이미 그 톤의 색조인 테마(red 다크)에서도 톤 그릇은 중립 그릇보다 덜 물들지 않는다: 위험 그릇이 면의 붉은 색조 위로 올라간다", () => {
+    // 같은 색상각에서는 채도 차이가 거리의 전부다. 면의 색조(C .083)보다 옅게 만들어도 거리는 서지만 「위험 그릇이 중립 그릇보다 덜 붉은」
+    // 모양이 된다: 그릇은 자기 톤 쪽으로 중립 그릇에서 나가 있어야 톤을 말한다.
+    const { tokens } = deriveThemeMode(THEME_CATALOG.find((e) => e.id === "red")!.dark!);
+    const plane = toOklch(tokens.derived["muted-soft"]);
+    expect(plane.C).toBeGreaterThan(0.06);
+    expect(Math.round(hueGap(tokens.color["danger-soft"], tokens.derived["muted-soft"]))).toBeLessThanOrEqual(15);
+    expect(toOklch(tokens.color["danger-soft"]).C).toBeGreaterThan(plane.C + 0.02);
+    // 색상각이 다른 톤(초록)은 면의 색조와 겹치지 않아서 면의 색조 위로 올릴 까닭이 없다.
+    expect(toOklch(tokens.color["ok-soft"]).C).toBeLessThan(plane.C);
+  });
+
   it("신호를 어떻게 골라도(네 프리셋 · 사람이 고른 hex) 선택 행 채움이 같은 규칙을 지킨다: 그릇이 그 위에서 살고 글자가 4.5다", () => {
     let accepted = 0;
     for (const row of ROWS) {
