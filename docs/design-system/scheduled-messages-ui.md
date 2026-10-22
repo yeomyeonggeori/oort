@@ -54,7 +54,7 @@
 | 보내기 + 예약 단추 | 기존 보내기(`Composer.tsx:1230-1246`: `size="icon"` 34px 원, `SendHorizontal`, `aria-label="메시지 보내기"`)는 **그대로**. 오른쪽에 같은 잉크 채움의 ▾ 반쪽(`ChevronDown` 16px, 폭 24 · 높이 34, 터치에서는 `tap-target`으로 44까지)을 붙여 알약 하나로 보이게 한다. 두 반쪽 사이는 1px 틈(`gap-px`), 바깥 모서리만 `rounded-full` | 버튼은 채움 알약(ADR-0189 D6). 스페이싱은 {4,8,12,16,24,32}와 1px 헤어라인뿐 |
 | 메뉴 | `DropdownMenu`(`@/design/ui/dropdown-menu`), `side="top"` `align="end"` | 스킬 §1: 프리미티브 먼저 |
 | 직접 고르기 | `Dialog` + `Input type="date"`·`type="time"` 두 칸 | `PauseUntilDialog.tsx`·`RemindDialog.tsx`와 같은 문법. `ListboxSelect`는 닫힌 선택 목록이 없어 쓰지 않는다(#4106의 OS 팝업 지적은 선택 목록에 관한 것이다) |
-| 배너 | `InlineBanner`(`@/features/common/States`), 입력창 바로 위 | |
+| 배너 | `InlineBanner`(`@/features/common/States`), 입력창 바로 위. 가운뎃점 앞이 `message`, 뒤가 `actionLabel`(「보기」, `onAction`)이다. 대기 배너는 `tone="neutral"` + `icon`(`Clock`: 눈에 띄어야 하는 배너는 아이콘을 단다는 컴포넌트 주석), 실패 배너는 기본 `tone="error"` | `States.tsx`의 `InlineBanner` props |
 | 사이드바 줄 | `SidebarRow` + `Clock` 아이콘(16px), `DraftsNavItem` 바로 아래, 라우트 `/scheduled`, `testId="nav-scheduled"` | 있을 때만 서는 줄의 선례(`SidebarDestinations.tsx:86`, `DraftsNavItem.tsx`). 인박스는 받는 쪽 투영(ADR-0199)이라 나가는 일을 섞지 않는다 |
 | 목록 화면 | 가운데 영역 한 열, 구획 둘, 행 동작은 행 끝 `⋯` 오버플로 + 컨텍스트 메뉴 | 스킬 §6: 행 동작은 상시 버튼이 아니다 |
 | 삭제 확인 | `AlertDialog` | 스킬 §6: 파괴 동작은 확인 |
@@ -356,9 +356,10 @@
 | `dialog.errInvalid` | 날짜와 시간을 확인해 주세요 |
 | `status.scheduled` | {시각}에 보낼게요 |
 | `status.sentNow` | 메시지를 보냈어요 |
-| `banner.pending` | 이 채널에 예약된 메시지 {n}개 · 보기 |
-| `banner.thread` | 이 스레드에 예약된 메시지 {n}개 · 보기 |
-| `banner.failed` | 예약한 메시지 {n}개를 보내지 못했어요 · 보기 |
+| `banner.pending` | 이 채널에 예약된 메시지 {n}개 |
+| `banner.thread` | 이 스레드에 예약된 메시지 {n}개 |
+| `banner.failed` | 예약한 메시지 {n}개를 보내지 못했어요 |
+| `banner.action` | 보기 |
 | `nav.label` | 예약됨 |
 | `list.title` | 예약됨 |
 | `list.count` | 내 예약 {n}개 |
