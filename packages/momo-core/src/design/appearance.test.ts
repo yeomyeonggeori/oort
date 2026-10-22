@@ -85,7 +85,8 @@ describe("v1 → v2 (ADR-0189 D3 표)", () => {
 
   it.each([
     ["comfy", "comfortable"],
-    ["spacious", "comfortable"],
+    // 증보 1 D1: spacious는 이제 유효한 값이라 comfortable로 접지 않는다(AP-2a #4189).
+    ["spacious", "spacious"],
     ["compact", "compact"],
     ["dense", "comfortable"],
   ])("옛 밀도 이름 %s → %s (D4 방어적 읽기)", (density, expected) => {
