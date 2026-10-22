@@ -1,10 +1,16 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { avatarSurfaceClass } from "@/features/common/avatarTone";
 import {
   AVATAR_SHAPE,
   AVATAR_SIZE,
 } from "@momo/core/features/workspace/avatar";
+import {
+  MESSAGE_AVATAR_GUTTER_CLASS,
+  MESSAGE_AVATAR_SIZE_CLASS,
+} from "./spacing";
 
 // =============================================================================
 // 코어의 아바타 숫자가 화면의 클래스와 갈라지지 않는가 (진단 H-11)
@@ -46,14 +52,66 @@ function spacingStep(step: string): number {
 
 describe("아바타 크기 다리", () => {
   it("코어의 AVATAR_SIZE 가 이 레포의 컴파일되는 한 단계다", () => {
+    // 리듬 단계 8(32)도 그대로 32다. 다만 타임라인의 아바타는 이제 리듬 단계가 아니라 밀도를 따르는
+    // 이름 단계(`--spacing-message-avatar`)를 읽는다(AP-2a #4189): 「편하게」(기본) 값이 AVATAR_SIZE다.
     expect(spacingStep("8")).toBe(AVATAR_SIZE);
+    expect(spacingStep("message-avatar")).toBe(AVATAR_SIZE);
   });
 
-  it("행과 대기행이 그 단계를 쓴다: 아바타와 거터가 같은 폭이다", () => {
+  it("행과 대기행이 그 단계를 쓴다: 아바타와 거터가 같은 한 변이다", () => {
+    // 두 클래스는 같은 이름 단계를 읽는다. 거터가 아바타보다 좁으면 이니셜이 잘리고, 넓으면 본문이
+    // 이유 없이 밀린다.
+    expect(MESSAGE_AVATAR_SIZE_CLASS).toBe("size-message-avatar");
+    expect(MESSAGE_AVATAR_GUTTER_CLASS).toBe("w-message-avatar");
+    expect(MESSAGE_AVATAR_SIZE_CLASS.replace("size-", "")).toBe(
+      MESSAGE_AVATAR_GUTTER_CLASS.replace("w-", "")
+    );
+    // 공용 Avatar의 기본은 그대로 size-8이다(디렉터리·받은편지함 등 대화 밖의 얼굴은 밀도를 따르지 않는다).
     expect(messageRow).toContain("flex size-8 items-center");
-    // 거터가 아바타보다 좁으면 이니셜이 잘리고, 넓으면 본문이 이유 없이 밀린다.
-    expect(messageRow).toContain('className="relative w-8 shrink-0"');
-    expect(pendingRow).toContain('className="w-8 shrink-0"');
+    expect(messageRow).toContain('cn("relative shrink-0", MESSAGE_AVATAR_GUTTER_CLASS)');
+    expect(pendingRow).toContain('cn("shrink-0", MESSAGE_AVATAR_GUTTER_CLASS)');
+    expect(messageRow).toContain("className={MESSAGE_AVATAR_SIZE_CLASS}");
+    expect(pendingRow).toContain("className={MESSAGE_AVATAR_SIZE_CLASS}");
+    // 손으로 적은 `w-8` 거터로 되돌아오면 밀도를 바꿔도 거터만 32에 남는다.
+    expect(messageRow).not.toContain('className="relative w-8 shrink-0"');
+    expect(pendingRow).not.toContain('className="w-8 shrink-0"');
+  });
+
+  it("대화 밀도의 아바타 크기를 받는 곳은 타임라인 행과 설정 미리보기뿐이다", () => {
+    // `Avatar`는 디렉터리·다이얼로그·받은편지함이 함께 쓴다. 거기까지 `size-message-avatar`가 번지면
+    // 「대화 밀도」가 목록의 얼굴까지 키우고 줄인다. 이름 단계를 쓰는 파일을 전부 열거한다.
+    const srcDir = fileURLToPath(new URL("../..", import.meta.url));
+    const found: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = `${dir}/${entry.name}`;
+        if (entry.isDirectory()) walk(full);
+        else if (/\.tsx?$/.test(entry.name) && !/\.test\./.test(entry.name)) {
+          const text = readFileSync(full, "utf8");
+          if (/size-message-avatar|w-message-avatar|MESSAGE_AVATAR_(SIZE|GUTTER)_CLASS/.test(text)) {
+            found.push(relative(srcDir, full));
+          }
+        }
+      }
+    };
+    walk(srcDir);
+    expect(found.sort()).toEqual([
+      // AI 계정 카드는 타임라인 꼬리 행이라 본문 줄에 서려고 거터 폭을 비운다. 손으로 쓴 w-8이면 밀도를 바꿀 때 카드만 어긋난다.
+      "features/chat/AiConnectCard.tsx",
+      "features/settings/shell/ConversationPreview.tsx",
+      "features/timeline/MessageRow.tsx",
+      "features/timeline/PendingRow.tsx",
+      "features/timeline/spacing.ts",
+    ]);
+  });
+
+  it("거터를 흉내 내는 자리가 손으로 쓴 w-8이 아니라 같은 상수를 읽는다 (AI 계정 카드)", () => {
+    const card = readFileSync(fileURLToPath(new URL("../chat/AiConnectCard.tsx", import.meta.url)), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
+    expect(card).toContain('cn("shrink-0", MESSAGE_AVATAR_GUTTER_CLASS)');
+    expect(card).not.toContain('className="w-8 shrink-0"');
   });
 
   it("24px 로 되돌아가지 않는다: 그 크기에서는 아바타로 읽히지 않았다", () => {

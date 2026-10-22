@@ -45,6 +45,10 @@
 //   THEME_GATE_PROVE_RED_PERSIST=1 npm run gate:theme
 //     테마 키(v2 레코드)에 대한 localStorage.setItem만 무력화한다. 화면은 즉시 바뀌지만 저장이
 //     없으므로 ②가 무너져야 한다.
+//   THEME_GATE_PROVE_RED_APPEARANCE_CSS=1 npm run gate:theme
+//     글자 크기·밀도 규칙(`:root[data-font-size=…]`·`:root[data-density=…]`)의 속성 이름만 CSS 응답에서 바꾼다.
+//     속성은 부트 스크립트가 그대로 찍지만 어느 규칙도 맞지 않으므로 ⑥의 「번들이 오기 전 문서의 본문 글자 16px ·
+//     --spacing-row 4px」 단언이 무너져야 한다. 통과한다면 그 단언은 화면이 아니라 속성만 재고 있었던 것이다.
 //   THEME_GATE_PROVE_RED_CACHE=1 npm run gate:theme
 //     ⑥의 「캐시가 있으면」 장면에서 캐시 항목만 비운다. 첫 페인트에 꽂힐 변수가 사라지므로 그
 //     단언이 무너져야 한다. 통과한다면 그 단언은 캐시가 아니라 아무거나 재고 있었던 것이다.
@@ -75,6 +79,9 @@ const outDir = process.env.OUT_DIR
 const proveRedBoot = process.env.THEME_GATE_PROVE_RED_BOOT === "1";
 const proveRedPersist = process.env.THEME_GATE_PROVE_RED_PERSIST === "1";
 const proveRedCache = process.env.THEME_GATE_PROVE_RED_CACHE === "1";
+const proveRedAppearanceCss = process.env.THEME_GATE_PROVE_RED_APPEARANCE_CSS === "1";
+/** red proof가 고쳐 쓴 스타일시트 본문(주소별). 장면마다 컨텍스트가 새로 서도 한 번만 가져온다. */
+const redCssCache = new Map();
 
 // 저장 항목 이름: core appearance.ts · themeCache.ts의 상수와 같다(게이트는 번들 밖이라 문자열로 적는다).
 const V2_ENTRY = "momo.web.appearance.v2";
@@ -128,6 +135,29 @@ async function installRoutes(context) {
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
     return json(route, {});
   });
+
+  if (proveRedAppearanceCss) {
+    // Red proof ⑥(AP-2a #4189): 글자 크기·대화 밀도 규칙의 **속성 선택자 이름만** 바꿔서 어느 규칙도 맞지 않게 한다.
+    // 부트 스크립트는 속성을 그대로 찍으니 「속성은 찍혔는데 화면이 안 따른다」가 정확히 이 모양이다(CSS 조각이 번들에
+    // 안 실리거나 선택자가 틀어진 경우와 같다). 첫 페인트의 본문 글자·행 간격 변수 단언이 무너져야 한다.
+    await context.route("**/assets/*.css", async (route) => {
+      const url = route.request().url();
+      // 고친 본문은 첫 요청 뒤에 즉시 돌려준다: 가져와 고쳐 쓰는 왕복이 매번 끼면 스타일시트가 첫 프레임 측정보다
+      // 늦게 도착해서 ③이 엉뚱한 이유로 먼저 빨개진다(앞선 장면이 캐시를 데운다).
+      if (!redCssCache.has(url)) {
+        const response = await route.fetch();
+        const body = (await response.text())
+          .replaceAll("[data-font-size", "[data-font-sizes")
+          .replaceAll("[data-density", "[data-densitys");
+        // 압축·길이 헤더를 그대로 두면 바뀐 본문과 어긋나 스타일시트 전체가 깨진다.
+        const headers = { ...response.headers() };
+        delete headers["content-encoding"];
+        delete headers["content-length"];
+        redCssCache.set(url, { status: response.status(), headers, body });
+      }
+      await route.fulfill(redCssCache.get(url));
+    });
+  }
 
   if (proveRedBoot) {
     // Red proof ①: 첫 페인트를 맡은 스크립트만 지운다. 번들도 CSS도 그대로이므로
@@ -202,6 +232,9 @@ function readDocument() {
     attrs: Object.fromEntries([...root.attributes].map((a) => [a.name, a.value])),
     vars,
     cache: localStorage.getItem("momo.web.theme.cache.v1"),
+    // 계산된 값(AP-2a #4189): 글자 크기·밀도가 속성으로만이 아니라 화면에 이미 서 있는지.
+    bodyFontPx: Number.parseFloat(getComputedStyle(document.body).fontSize),
+    spacingRowPx: Number.parseFloat(getComputedStyle(root).getPropertyValue("--spacing-row")),
   };
 }
 
@@ -532,6 +565,20 @@ async function main() {
       for (const [name, value] of Object.entries(expectedAttrs)) {
         if (full.late.attrs[name] !== value) {
           fail(`앱이 올라온 뒤 ${name}=${JSON.stringify(full.late.attrs[name])}다(부트가 찍은 ${JSON.stringify(value)}와 어긋남)`);
+        }
+      }
+      // 글자 크기·밀도는 속성만 찍히는 것이 아니라 화면에 이미 서 있다(AP-2a #4189): 번들이 오기 전의
+      // 문서에서 본문 글자가 「크게」(16px)이고 행 간격 변수가 「촘촘하게」(4px)다. 새로고침에 기본 크기가
+      // 한 프레임 보이지 않는다.
+      for (const [when, facts] of [
+        ["번들이 도착하기 전의 문서", full.early],
+        ["앱이 올라온 뒤의 문서", full.late],
+      ]) {
+        if (!(Math.abs(facts.bodyFontPx - 16) <= 0.1)) {
+          fail(`${when}의 본문 글자가 ${facts.bodyFontPx}px다(글자 크기 「크게」 시드는 16px). 속성은 찍혔는데 화면이 안 따른다.`);
+        }
+        if (facts.spacingRowPx !== 4) {
+          fail(`${when}의 --spacing-row가 ${facts.spacingRowPx}px다(대화 밀도 「촘촘하게」 시드는 4px). 속성은 찍혔는데 화면이 안 따른다.`);
         }
       }
 
