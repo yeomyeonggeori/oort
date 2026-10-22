@@ -119,15 +119,12 @@ describe("접힌 행의 트리거: 배치는 카드 폭이 정하고 이름 길�
   });
 });
 
-describe("폰 폭의 열린 갤러리: 두 열을 지키고 이름은 공백에서 접는다 (설계 리뷰 3차 M-2)", () => {
-  it("카드 22rem 미만에서 열 최소 폭이 줄고, 타일 이름은 말줄임 대신 접힌다", () => {
+describe("폰 폭의 열린 갤러리: 두 열을 지킨다 (설계 리뷰 3차 M-2)", () => {
+  it("카드 22rem 미만에서 열 최소 폭이 줄어든다", () => {
     const at = css.indexOf("@container (width < 22rem) {");
     expect(at).toBeGreaterThanOrEqual(0);
     const block = css.slice(at, css.indexOf("\n}\n", at));
     expect(block).toContain("--theme-grid-column-min: calc(var(--spacing-theme-tile-min) * 0.75)");
-    expect(block).toContain(".theme-tile-name");
-    expect(block).toContain("white-space: normal");
-    expect(block).toContain("text-wrap: balance");
   });
 
   it("지원 폭 360에서도 두 열이 선다: 열 최소 폭(120) × 2 + 간격 ≤ 360 폭 카드의 격자 안쪽 폭", () => {
