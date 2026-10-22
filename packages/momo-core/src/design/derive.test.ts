@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contrast, hueGap, luminance, oklabDistance, parseHex, toOklch } from "./color";
+import { contrast, hueGap, luminance, mixOklab, oklabDistance, parseHex, toOklch } from "./color";
 import {
   DERIVED_VAR_NAMES,
   DERIVE_ENGINE_VERSION,
@@ -128,6 +128,80 @@ function bandViolations(tokens: ThemeModeTokens): string[] {
   return out;
 }
 
+/**
+ * 칩 그릇의 규칙(설계 리뷰 3차 H-1). 첫 파티가 지키는 자라서 카탈로그 전수에도 건다. 첫 파티의 표는 웹 `tokens.contrast.test.ts`의
+ * `CHIP_VESSEL_SURFACES`이고, core 시험은 웹 시험을 가져올 수 없어서 같은 표를 여기 적는다. 웹 `derivedCatalog.contract.test.ts`는 그 표를
+ * **가져와서** 같은 규칙을 57행에 다시 잰다: 두 표가 어긋나면 웹 쪽이 빨개진다.
+ *  V1 그릇은 자기가 서는 어떤 행 바탕(면·가리킨 행·눌린 행·선택 행) 위에서도 살아남는다: 대비 ≥ 1.05 **그리고** OKLab 거리 ≥ 0.02.
+ *  V2 톤 그릇은 자기 톤의 색상 가족 안에 머문다(≤ 15°): 대비·거리만 걸면 가장 싼 길이 「눈에 띄는 아무 색」이다.
+ *  V3 나란히 서는 톤 그릇과 중립 그릇은 다른 재료다(OKLab ≥ 0.02): 그릇이 중립 그릇으로 접히면 「같은 모양 알약 둘」이 된다.
+ *  V4 그릇은 상호작용 상태(가리킴·눌림·선택)와 값을 나누지 않는다. 상태는 켜졌다 꺼지고 그릇은 늘 있어야 한다.
+ *  V5 눌린 행은 다른 모든 옅은 채움과 다른 재료다(OKLab ≥ 0.02).
+ * `agent-soft`는 첫 파티 표에 없지만 에이전트 칩도 같은 행 위에 서므로 같은 표에 넣는다.
+ */
+const VESSEL_HOSTS: readonly (readonly [string, readonly string[]])[] = [
+  ["muted-soft", ["surface", "surface-hover", "accent-soft", "surface-raised", "surface-pressed"]],
+  ["ok-soft", ["surface", "surface-hover", "surface-raised", "surface-pressed"]],
+  ["warn-soft", ["surface", "surface-hover", "surface-raised", "accent-soft", "surface-pressed"]],
+  ["danger-soft", ["surface", "surface-hover", "surface-raised", "surface-pressed"]],
+  ["agent-soft", ["surface", "surface-hover", "surface-pressed"]],
+];
+const TONE_VESSELS = [["ok-soft", "ok"], ["warn-soft", "warn"], ["danger-soft", "danger"]] as const;
+const PRESSED_DISTINCT_FROM = [
+  "surface-hover", "accent-soft", "muted-soft", "ok-soft", "warn-soft", "danger-soft", "agent-soft", "surface", "surface-raised", "surface-sidebar",
+] as const;
+/** 톤 그릇이 중립 그릇과 갈리는 가드와, 엔진이 겨냥하는 목표(여유). */
+const SIBLING_GUARD = 0.02;
+const SIBLING_TARGET = 0.03;
+
+function surfaceNamed(tokens: ThemeModeTokens): Record<string, string> {
+  const c = tokens.color;
+  const d = tokens.derived;
+  return {
+    surface: c.surface,
+    "surface-raised": c.surface,
+    "surface-sidebar": c.sheet,
+    "surface-hover": d["surface-hover"],
+    "surface-pressed": d["surface-pressed"],
+    "accent-soft": c["signal-soft"],
+    "muted-soft": d["muted-soft"],
+    "ok-soft": c["ok-soft"],
+    "warn-soft": c["warn-soft"],
+    "danger-soft": c["danger-soft"],
+    "agent-soft": c["agent-soft"],
+  };
+}
+
+function vesselViolations(tokens: ThemeModeTokens): string[] {
+  const out: string[] = [];
+  const S = surfaceNamed(tokens);
+  const c = tokens.color;
+  for (const [vessel, hosts] of VESSEL_HOSTS) {
+    for (const host of hosts) {
+      const ratio = Number(contrast(S[vessel], S[host]).toFixed(3));
+      const distance = Number(oklabDistance(S[vessel], S[host]).toFixed(4));
+      if (ratio < VESSEL_MIN_CONTRAST) out.push(`V1 ${vessel} on ${host} contrast ${ratio} < ${VESSEL_MIN_CONTRAST}`);
+      if (distance < VESSEL_MIN_DISTANCE) out.push(`V1 ${vessel} on ${host} distance ${distance} < ${VESSEL_MIN_DISTANCE}`);
+    }
+  }
+  for (const [vessel, tone] of TONE_VESSELS) {
+    const gap = Math.round(hueGap(S[vessel], c[tone]));
+    if (gap > 15) out.push(`V2 ${vessel} vs ${tone} hue gap ${gap} > 15`);
+    const apart = Number(oklabDistance(S[vessel], S["muted-soft"]).toFixed(4));
+    if (apart < SIBLING_GUARD) out.push(`V3 ${vessel} vs muted-soft distance ${apart} < ${SIBLING_GUARD}`);
+  }
+  for (const [vessel] of VESSEL_HOSTS) {
+    for (const state of ["surface-hover", "accent-soft", "surface-pressed"]) {
+      if (S[vessel].toLowerCase() === S[state].toLowerCase()) out.push(`V4 ${vessel} shares a value with ${state}`);
+    }
+  }
+  for (const other of PRESSED_DISTINCT_FROM) {
+    const distance = Number(oklabDistance(S["surface-pressed"], S[other]).toFixed(4));
+    if (distance < VESSEL_MIN_DISTANCE) out.push(`V5 surface-pressed vs ${other} distance ${distance} < ${VESSEL_MIN_DISTANCE}`);
+  }
+  return out;
+}
+
 /** 한 파생 결과의 규칙 위반을 사람이 읽는 줄로. 비어 있으면 위반이 없다. */
 function violations(derived: DerivedMode): string[] {
   const out: string[] = [];
@@ -158,6 +232,7 @@ function violations(derived: DerivedMode): string[] {
   if (c.primary !== c.ink) out.push("primary != ink");
   out.push(...reviewViolations(tokens));
   out.push(...bandViolations(tokens));
+  out.push(...vesselViolations(tokens));
   return out;
 }
 
@@ -386,6 +461,93 @@ describe("설계 리뷰 H1~H3: 규칙마다 실패할 수 있는 가드와 대�
     );
     expect(turns.length).toBeGreaterThanOrEqual(10);
     expect(Math.max(...turns)).toBeLessThanOrEqual(60);
+  });
+});
+
+describe("설계 리뷰 3차 H-1: 칩 그릇은 한 평면에 서고 색상·채도로 갈린다", () => {
+  /** 3차 이전의 그릇(2차 엔진): 면에서 톤 쪽으로 12%·18% 섞고, 띠(`muted-soft`의 휘도) 밖이면 섞는 비율을 3%까지 줄여서 띠에 가둔다. */
+  function legacyVessel(surface: string, tone: string, mode: Mode, edgeY: number): string {
+    let mix = mode === "light" ? 0.12 : 0.18;
+    let soft = mixOklab(surface, tone, mix);
+    const beyond = (hex: string) => (mode === "light" ? luminance(hex) < edgeY - 1e-9 : luminance(hex) > edgeY + 1e-9);
+    while (beyond(soft) && mix > 0.03 + 1e-9) {
+      mix = Math.round((mix - 0.01) * 100) / 100;
+      soft = mixOklab(surface, tone, mix);
+    }
+    return soft;
+  }
+
+  const derivedRows = ROWS.map((row) => ({ row, derived: deriveThemeMode(row.seed) }));
+
+  it("대조군: 옛 방식(섞는 비율을 줄여 띠에 가둔다)은 이 가드에서 많은 행이 빨갛다 (측정 3차: 다크 40행 가운데 37행에 접힌 톤 그릇)", () => {
+    // 가드가 헛돌지 않는다는 증거: 같은 행·같은 톤 색·같은 띠인데 그릇만 옛 방식으로 만들면 형제 거리 가드(V3)가 빨개진다.
+    const folded = derivedRows.filter(({ derived }) => {
+      const { tokens, mode } = derived;
+      const edgeY = luminance(tokens.derived["muted-soft"]);
+      return TONE_VESSELS.some(([, tone]) => {
+        const vessel = legacyVessel(tokens.color.surface, tokens.color[tone], mode, edgeY);
+        return oklabDistance(vessel, tokens.derived["muted-soft"]) < SIBLING_GUARD;
+      });
+    });
+    // 측정: 57행 가운데 37행(다크 40행 가운데 37행, 접힌 톤 그릇 72쌍). 리뷰어가 3차에서 잰 숫자와 같다.
+    expect(folded.length).toBeGreaterThanOrEqual(30);
+    // 같은 자를 지금 엔진의 그릇에 대면 한 곳도 접히지 않는다(위 전수 시험이 행마다 따로 잰다).
+    expect(derivedRows.filter(({ derived }) => vesselViolations(derived.tokens).some((v) => v.startsWith("V3")))).toEqual([]);
+  });
+
+  it("톤 그릇은 중립 그릇과 목표(.03)만큼 갈린다: 57행 × 셋, 가드(.02)보다 반 넘는 여유다", () => {
+    const gaps = derivedRows.flatMap(({ derived: { tokens } }) =>
+      TONE_VESSELS.map(([vessel]) => oklabDistance(tokens.color[vessel], tokens.derived["muted-soft"]))
+    );
+    expect(gaps).toHaveLength(57 * 3);
+    expect(Math.min(...gaps)).toBeGreaterThanOrEqual(SIBLING_TARGET - 1e-4);
+  });
+
+  it("그릇은 한 평면에 선다: 중립 그릇(띠 끝)과 휘도 대비가 가드(1.05) 아래이고, 띠 밖으로 나가지 않는다", () => {
+    for (const { row, derived } of derivedRows) {
+      const { tokens, mode } = derived;
+      const plane = tokens.derived["muted-soft"];
+      const edge = luminance(plane);
+      for (const role of ["ok-soft", "warn-soft", "danger-soft", "agent-soft"] as const) {
+        const vessel = tokens.color[role];
+        const y = luminance(vessel);
+        const inside = mode === "light" ? y >= edge - 1e-6 : y <= edge + 1e-6;
+        expect([row.id, row.mode, role, inside]).toEqual([row.id, row.mode, role, true]);
+        // 한 평면: 그릇끼리는 명도가 아니라 색상·채도로 갈린다(첫 파티 「한 평면, 색상만 다르다」).
+        expect([row.id, row.mode, role, contrast(vessel, plane) < VESSEL_MIN_CONTRAST]).toEqual([row.id, row.mode, role, true]);
+      }
+    }
+  });
+
+  it("그릇의 색상각은 그 색의 것이다: 톤 그릇은 톤과 15° 안, 에이전트 그릇은 에이전트와 15° 안", () => {
+    for (const { row, derived } of derivedRows) {
+      const c = derived.tokens.color;
+      for (const [vessel, tone] of [...TONE_VESSELS, ["agent-soft", "agent"] as const]) {
+        expect([row.id, row.mode, vessel, Math.round(hueGap(c[vessel], c[tone])) <= 15]).toEqual([row.id, row.mode, vessel, true]);
+      }
+    }
+  });
+
+  it("신호를 어떻게 골라도(네 프리셋 · 사람이 고른 hex) 선택 행 채움이 같은 규칙을 지킨다: 그릇이 그 위에서 살고 글자가 4.5다", () => {
+    let accepted = 0;
+    for (const row of ROWS) {
+      for (const choice of [...SIGNAL_PRESET_IDS.map((preset) => ({ preset })), { custom: "#3b82f6" }, { custom: "#e11d48" }] as const) {
+        const derived = deriveThemeMode(row.seed, { signal: choice });
+        if (derived.signal.source === "choice") accepted++;
+        expect([row.id, row.mode, JSON.stringify(choice), violations(derived)]).toEqual([row.id, row.mode, JSON.stringify(choice), []]);
+      }
+    }
+    // 받아들여진 선택이 충분히 많아야 이 시험이 선택 경로를 잰 것이다(거절은 씨앗·기본·프리셋 경로로 물러나 같은 규칙을 지킨다).
+    expect(accepted).toBeGreaterThan(150);
+  });
+
+  it("선택 행 채움은 면과 칩 그릇 사이에 앉는다: 면에서 1.05, 그릇에서 1.05 이상 떨어진다", () => {
+    for (const { row, derived } of derivedRows) {
+      const { tokens } = derived;
+      const soft = tokens.color["signal-soft"];
+      expect([row.id, row.mode, contrast(soft, tokens.color.surface) >= VESSEL_MIN_CONTRAST]).toEqual([row.id, row.mode, true]);
+      expect([row.id, row.mode, contrast(soft, tokens.derived["muted-soft"]) >= VESSEL_MIN_CONTRAST]).toEqual([row.id, row.mode, true]);
+    }
   });
 });
 

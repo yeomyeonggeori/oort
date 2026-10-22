@@ -12,8 +12,10 @@
 //     표 밖 5 · `glass`·`scrim` · 웹 전용 `pane`)이다. Buzz는 대비를 강제하지 않지만(알파로 눌러 둔다) oort는
 //     ADR-0189 D7의 대비 규칙을 모든 테마에 전수로 건다: 위반한 색은 **OKLCH 명도만** 옮겨 맞춘다
 //     (라이트는 더 어둡게, 다크는 더 밝게만). 글자·톤 글자·아이콘·테두리는 표면 다섯뿐 아니라 **가리킨 행·눌린 행·칩
-//     그릇**(`surface-hover`·`surface-pressed`·`muted-soft`) 위에서도 지키고, 톤·신호·에이전트의 옅은 채움은 그 칩 그릇
-//     띠 안에 놓이게 만든다(띠의 끝에서 지키면 안쪽은 따라온다, README §2.2 · 설계 리뷰 H1·H-B). 상태색은 의미 색상각
+//     그릇**(`surface-hover`·`surface-pressed`·`muted-soft`) 위에서도 지킨다. 톤·에이전트의 옅은 채움(칩 그릇)은 그 띠의 끝(`muted-soft`의
+//     휘도)에 **한 평면으로** 서고 색상각은 그 색의 것, 채도는 중립 그릇과 갈릴 만큼이다(첫 파티의 「한 평면, 색상만 다르다」). 선택 행
+//     채움(`signal-soft`)은 면과 그 평면 사이에 앉아 그릇이 그 위에서도 산다(띠의 끝에서 지키면 안쪽은 따라온다, README §2.2 ·
+//     설계 리뷰 H1·H-B·3차 H-1). 상태색은 의미 색상각
 //     창 밖이면 oort 기본값으로 바꾼다. 신호가 먼저 정해지고 에이전트 색이 색상각을 돌려 비킨다(OKLab ≥ 0.07). 주 버튼은
 //     Buzz처럼 액센트가 아니라 잉크다(`primary = ink`).
 //   · 더한 것(명도 맞춤의 예외, 설계 리뷰 H2·H3·H-C): ① **채도 순서** `danger > warn > ink-muted`(README §2.2)를 지키려고
@@ -35,7 +37,7 @@
 // 어떤 역할도 세울 수 없는 씨앗(바탕이 중간 휘도라 어느 방향으로도 4.5:1에 못 닿는 경우)은 `DeriveError`를 던진다.
 // =============================================================================
 
-import { contrast, fromOklch, luminance, mixOklab, normalizeHex, oklabDistance, parseHex, toOklch } from "./color";
+import { contrast, fromOklch, luminance, mixOklab, normalizeHex, oklabDistance, parseHex, toOklab, toOklch } from "./color";
 import type { SignalChoice } from "./appearance";
 import {
   SIGNAL_PRESETS,
@@ -52,6 +54,8 @@ import {
   TEXT_MIN_CONTRAST,
   THEMES,
   NON_TEXT_MIN_CONTRAST,
+  VESSEL_MIN_CONTRAST,
+  VESSEL_MIN_DISTANCE,
   deriveRoles,
   deriveStateSurfaces,
   type Mode,
@@ -60,7 +64,7 @@ import {
 } from "./themes";
 
 /** 알고리즘이 바뀌면 올린다. 부트 캐시 키에 들어가서 낡은 캐시를 한꺼번에 무효로 한다. */
-export const DERIVE_ENGINE_VERSION = "3";
+export const DERIVE_ENGINE_VERSION = "4";
 
 export class DeriveError extends Error {
   constructor(
@@ -240,34 +244,162 @@ const fitOrThrow: Fitter = (role, start, mode, ok, minChroma) => {
 
 const keepAsIs: Fitter = (_role, start) => normalizeHex(start);
 
-/** 톤의 옅은 채움을 만드는 함수: 색 하나를 받아 그 색의 채움을 낸다(면·모드·띠 한계는 안에 묶여 있다). */
+/** 톤·에이전트의 옅은 채움(칩 그릇)을 만드는 함수: 색 하나를 받아 그 색의 그릇을 낸다(면·모드·띠가 안에 묶여 있다). */
 type SoftFor = (color: string) => string;
 
-/** 채움을 면 쪽으로 섞는 최소 비율. 이보다 옅어지면 채움이 면과 구분되지 않는다. */
-const SOFT_MIX_MIN = 0.03;
-const SOFT_MIX_STEP = 0.01;
+/** 분석용(보정 없음)의 옅은 채움: 면(`surface`)에서 색 쪽으로 OKLab 12%(라이트)·18%(다크) 섞은 색이다. */
+function mixSoft(surface: string, color: string, mode: Mode): string {
+  return mixOklab(surface, color, mode === "light" ? 0.12 : 0.18);
+}
 
-/**
- * 톤의 옅은 채움: 면(`surface`)에서 톤 쪽으로 OKLab 12%(라이트)·18%(다크) 섞은 색이다. `edgeY`(칩 그릇 띠의 가장 바깥, 곧
- * `muted-soft`의 휘도)를 주면 채움이 그 띠 **밖으로 나가지 않을 때까지** 섞는 비율을 줄인다: 가리킨 행·눌린 행·칩
- * 그릇을 글자 호스트로 맞춘 `ink`·`ink-muted`·`icon`·`line-strong`이 그 띠 안의 채움 위에서도 같은 대비를 지킨다
- * (대비는 휘도만 보니 띠의 바깥 끝에서 지키면 안쪽은 따라온다). 첫 파티는 손으로 맞춘 여유로 이 띠 안팎을 가리지 않는다.
- */
-function softOf(surface: string, color: string, mode: Mode, edgeY: number | null): string {
-  let mix = mode === "light" ? 0.12 : 0.18;
-  let soft = mixOklab(surface, color, mix);
-  if (edgeY === null) return soft;
-  const beyond = (hex: string) => (mode === "light" ? luminance(hex) < edgeY - 1e-9 : luminance(hex) > edgeY + 1e-9);
-  while (beyond(soft) && mix > SOFT_MIX_MIN + 1e-9) {
-    mix = Math.round((mix - SOFT_MIX_STEP) * 100) / 100;
-    soft = mixOklab(surface, color, mix);
+// ---- 칩 그릇의 평면과 선택 행 채움 -----------------------------------------------------
+//
+// 글자(`ink`·`ink-muted`·톤 글자·아이콘·테두리)는 가리킨 행·눌린 행·칩 그릇 위에서도 지킨다. 칩 그릇(`muted-soft`)이 이 띠의 가장
+// 바깥이라, 옅은 채움이 그 띠 안에 있으면 「띠의 끝에서 지키면 안쪽은 따라온다」(대비는 휘도만 본다).
+//
+// 첫 파티는 네 그릇(`muted-soft`·`ok-soft`·`warn-soft`·`danger-soft`)을 **한 평면**에 세우고 색상·채도로만 가른다(README §2.2
+// 「한 평면, 색상만 다르다」). 톤 쪽으로 섞는 비율을 줄여서 띠 안에 가두면(설계 리뷰 3차 H-1) 밝은 톤 색이 휘도를 끌어올려서
+// 비율이 3~12%까지 내려가고, 그러면 채도가 같이 지워져 톤 그릇이 중립 그릇으로 접힌다. 그래서 휘도는 띠 끝(`muted-soft`)에
+// 두고, 색상각은 그 색의 것을 지키고, 채도는 중립 그릇과 갈릴 만큼 **올린다**: 휘도와 채도는 서로 다른 축이다.
+
+/** 그릇의 채도(OKLab C) 바닥과 상한. 첫 파티의 톤 그릇은 .034~.043이다. 상한은 면의 색조가 짙은 테마에서 그 색조 위로 올라간다. */
+const VESSEL_CHROMA_FLOOR = 0.03;
+const VESSEL_CHROMA_CAP = 0.09;
+const VESSEL_CHROMA_STEP = 0.005;
+/** 톤 그릇이 중립 그릇(`muted-soft`)과 갈리는 목표(OKLab). 가드는 .02이고(첫 파티 최저 .0456) 여기서는 반 넘는 여유를 둔다. */
+const VESSEL_SIBLING_TARGET = 0.03;
+/** 평면에서 면 쪽으로 물러날 수 있는 최대 칸 수(칸마다 OKLab 명도 한 걸음). */
+const VESSEL_LIFT_STEPS = 6;
+/** 선택 행 채움: 채도 바닥, 그리고 「면·칩 그릇·눌린 행과 두 자(살아남는 두 자)를 이만큼 넘는다」는 목표 여유(비율). */
+const TINT_CHROMA_FLOOR = 0.03;
+const TINT_MARGIN_TARGET = 0.04;
+/** 선택 행 채움을 면에서 칩 그릇 평면까지의 대비 공간에서 어디에 앉혀 보는가(0 = 면, 1 = 평면). 한가운데부터 바깥으로. */
+const TINT_POSITIONS = [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8, 0.1, 0.9] as const;
+/** 살아남는 두 자(`VESSEL_MIN_*`)에 더하는 여유: 8비트로 내릴 때 생기는 어긋남을 흡수한다. */
+const SURVIVAL_CONTRAST_MARGIN = 0.002;
+const SURVIVAL_DISTANCE_MARGIN = 0.002;
+
+/** 가리킨 행·눌린 행·칩 그릇: `deriveStateSurfaces`의 값이다. */
+interface StateFills {
+  readonly hover: string;
+  readonly pressed: string;
+  readonly mutedSoft: string;
+}
+
+interface Fills {
+  /** 톤·에이전트의 그릇: 휘도는 띠 끝, 색상각은 그 색의 것, 채도는 중립 그릇과 갈릴 만큼. */
+  readonly softFor: SoftFor;
+  /** 선택 행 채움(`signal-soft`)을 띠 안에 앉힌다: 그릇이 그 위에서도 살아남는 휘도, 신호의 색상각, 눌린 행과 갈리는 채도. */
+  readonly placeSelected: (soft: string) => string;
+}
+
+/** 휘도가 `target`에 가장 가까이 닿는 OKLab 명도(같은 채도·색상각). `below`는 그 휘도 이하, `above`는 이상, `near`는 가장 가까운 쪽이다. */
+function lightnessForLuminance(target: number, C: number, h: number, side: "below" | "above" | "near"): number {
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 24; i++) {
+    const mid = (lo + hi) / 2;
+    if (luminance(fromOklch({ L: mid, C, h })) < target) lo = mid;
+    else hi = mid;
   }
-  return soft;
+  return side === "below" ? lo : side === "above" ? hi : (lo + hi) / 2;
+}
+
+const round3 = (n: number): number => Math.round(n * 1000) / 1000;
+
+function makeFills(surface: string, states: StateFills, mode: Mode, adjusting: boolean): Fills {
+  if (!adjusting) return { softFor: (color) => mixSoft(surface, color, mode), placeSelected: (soft) => soft };
+  const { hover, pressed, mutedSoft } = states;
+  const dark = mode === "dark";
+  const edgeY = luminance(mutedSoft);
+  const planeLab = toOklab(mutedSoft);
+  const planeChroma = Math.hypot(planeLab.a, planeLab.b);
+  const planeHue = Math.atan2(planeLab.b, planeLab.a);
+  const towardSurface = dark ? -1 : 1;
+  const beyond = (hex: string) => (dark ? luminance(hex) > edgeY + 1e-9 : luminance(hex) < edgeY - 1e-9);
+  const apart = (hex: string, host: string) =>
+    contrast(hex, host) >= VESSEL_MIN_CONTRAST + SURVIVAL_CONTRAST_MARGIN &&
+    oklabDistance(hex, host) >= VESSEL_MIN_DISTANCE + SURVIVAL_DISTANCE_MARGIN;
+  const rowHosts = [surface, hover, pressed];
+
+  const vessels = new Map<string, string>();
+  const softFor: SoftFor = (color) => {
+    const o = toOklch(normalizeHex(color));
+    const key = `${o.h.toFixed(1)}|${o.C.toFixed(3)}`;
+    const known = vessels.get(key);
+    if (known !== undefined) return known;
+    // 시작 채도: 톤이 내던 몫(섞는 비율 × 그 색의 채도), 바닥, 그리고 면의 색조가 이 톤 방향으로 이미 가진 몫. 마지막 것이
+    // 없으면 면이 이미 붉은 테마에서 위험 그릇이 중립 그릇보다 **덜** 붉어진다(같은 색상각에서는 채도 차이가 거리의 전부다).
+    const nominal = o.C * (dark ? 0.18 : 0.12);
+    const along = Math.max(0, planeChroma * Math.cos((o.h * Math.PI) / 180 - planeHue));
+    const start = Math.max(nominal, VESSEL_CHROMA_FLOOR, along);
+    const cap = Math.max(VESSEL_CHROMA_CAP, along + 2 * VESSEL_SIBLING_TARGET);
+    let best: { hex: string; gap: number } | null = null;
+    let found: string | null = null;
+    search: for (let c = start; c <= cap + 1e-9; c = round3(c + VESSEL_CHROMA_STEP)) {
+      // 휘도를 띠 끝에 맞춘 명도에서 시작한다: 같은 명도라도 색상각마다 휘도가 달라서(초록은 빨강보다 밝다) 명도를 그대로 쓰지 않는다.
+      const matched = lightnessForLuminance(edgeY, c, o.h, dark ? "below" : "above");
+      let clipped = false;
+      for (let k = 0; k < VESSEL_LIFT_STEPS; k++) {
+        const hex = fromOklch({ L: matched + towardSurface * k * L_STEP, C: c, h: o.h });
+        if (k === 0) clipped = toOklch(hex).C < c - 0.002; // 색역이 막아서 더 올릴 채도가 없다.
+        if (beyond(hex) || !rowHosts.every((host) => apart(hex, host))) continue;
+        const gap = oklabDistance(hex, mutedSoft);
+        if (gap >= VESSEL_SIBLING_TARGET) {
+          found = hex;
+          break search;
+        }
+        if (best === null || gap > best.gap) best = { hex, gap };
+        break;
+      }
+      if (clipped) break;
+    }
+    const result = found ?? best?.hex ?? mutedSoft;
+    vessels.set(key, result);
+    return result;
+  };
+
+  // 선택 행 채움: 면과 칩 그릇(평면) 사이의 휘도에 앉힌다. 그러면 칩 그릇이 그 위에서도, 면에서도 산다. 면의 색조가 짙은 테마에서는
+  // 채도만으로는 눌린 행과 안 갈려서 휘도의 위치도 함께 움직여 본다(여유가 가장 큰 곳을 고른다).
+  const yFrom = (position: number) =>
+    Math.exp((1 - position) * Math.log(luminance(surface) + 0.05) + position * Math.log(edgeY + 0.05)) - 0.05;
+  const margin = (hex: string): number =>
+    Math.min(
+      contrast(hex, surface) / VESSEL_MIN_CONTRAST - 1,
+      oklabDistance(hex, surface) / VESSEL_MIN_DISTANCE - 1,
+      contrast(hex, mutedSoft) / VESSEL_MIN_CONTRAST - 1,
+      oklabDistance(hex, mutedSoft) / VESSEL_MIN_DISTANCE - 1,
+      oklabDistance(hex, pressed) / VESSEL_MIN_DISTANCE - 1
+    );
+  const tintCap = Math.max(VESSEL_CHROMA_CAP, planeChroma + 2 * VESSEL_SIBLING_TARGET);
+  const placeSelected = (soft: string): string => {
+    const o = toOklch(soft);
+    const original = luminance(soft);
+    // 채도는 원래 채움의 것에 가까운 쪽부터 본다(면의 색조가 짙은 테마에서는 원래 채움의 채도에 그 색조가 섞여 있어서 위아래 양쪽을 본다).
+    const chromas: number[] = [];
+    for (let c = TINT_CHROMA_FLOOR; c <= tintCap + 1e-9; c = round3(c + VESSEL_CHROMA_STEP)) chromas.push(c);
+    chromas.sort((a, b) => Math.abs(a - o.C) - Math.abs(b - o.C));
+    let best: { hex: string; margin: number } | null = null;
+    for (const position of TINT_POSITIONS) {
+      const target = yFrom(position);
+      // 원래 채움보다 글자 쪽(`signal-text`가 그 채움 위 4.5로 풀린 쪽)으로는 가지 않는다: 다크는 더 어둡게만, 라이트는 더 밝게만.
+      if (dark ? target > original + 1e-9 : target < original - 1e-9) continue;
+      for (const c of chromas) {
+        const hex = fromOklch({ L: lightnessForLuminance(target, c, o.h, "near"), C: c, h: o.h });
+        if (beyond(hex)) continue;
+        const m = margin(hex);
+        if (m >= TINT_MARGIN_TARGET) return hex;
+        if (best === null || m > best.margin) best = { hex, margin: m };
+      }
+    }
+    return best?.hex ?? soft;
+  };
+  return { softFor, placeSelected };
 }
 
 /**
- * 글자로 서는 색과 그 색의 옅은 채움. 후보마다 **자기 채움을 새로 만들어** 두 조건(모든 면 위 4.5, 자기
- * 채움 위 4.5)을 한꺼번에 본다. 색을 옮기면 채움도 따라 변하므로 한 번 맞춘 채움에 대고 다시 맞출 필요가 없다.
+ * 글자로 서는 색과 그 색의 옅은 채움. 채움(그릇)은 칩 그릇 띠의 끝에 서므로(`makeFills`) 띠 호스트(칩 그릇 `muted-soft` 포함)
+ * 위 4.5가 자기 채움 위 4.5를 이미 보장한다(대비는 휘도만 본다). 그래서 후보마다 채움을 만들지 않고, 맞춘 색의 채움을 한 번만 낸다.
  */
 function fitWithSoft(
   role: string,
@@ -279,7 +411,7 @@ function fitWithSoft(
   minChroma = 0
 ): Status & { readonly start: string } {
   const start = normalizeHex(rawSeed);
-  const ok = (hex: string) => holds(hex, hosts, TEXT_MIN_CONTRAST) && contrast(hex, softFor(hex)) >= TEXT_MIN_CONTRAST;
+  const ok = (hex: string) => holds(hex, hosts, TEXT_MIN_CONTRAST);
   const color = fit(role, start, mode, ok, minChroma);
   return { color, soft: softFor(color), start };
 }
@@ -366,16 +498,16 @@ interface Base {
   readonly hosts: readonly string[];
   /**
    * 글자·아이콘·테두리가 설 수 있는 면 전부: 위의 면에 **가리킨 행·눌린 행·칩 그릇**을 더한 것. 칩 그릇(`muted-soft`)이 띠의
-   * 가장 바깥이고 톤·신호·에이전트의 옅은 채움은 그 띠 안에 있으므로(`softOf`), 이 목록 위에서 지키면 어느 채움 위에서도
+   * 가장 바깥이고 톤·신호·에이전트의 옅은 채움은 그 띠 안에 있으므로(`makeFills`), 이 목록 위에서 지키면 어느 채움 위에서도
    * 지킨다. 첫 파티는 눌린 행·칩 그릇을 톤 글자의 호스트에서 뺐지만(손으로 맞춘 값이 못 미친다) 기계는 뺄 이유가 없다.
    */
   readonly bandHosts: readonly string[];
   /** 칩 그릇(`muted-soft`): 신호를 풀 때 바닥 정지점 한 칸에 실어 신호가 띠의 끝에서도 읽히게 한다. */
   readonly mutedSoft: string;
-  /** 톤의 옅은 채움을 만드는 함수(띠 한계가 묶여 있다). 에이전트·신호의 채움도 같은 것을 쓴다. */
+  /** 톤·에이전트의 칩 그릇을 만드는 함수(휘도는 띠 끝, 색상각은 그 색의 것, 채도는 중립 그릇과 갈릴 만큼). */
   readonly softFor: SoftFor;
-  /** 신호의 옅은 채움을 띠 안으로 되돌린다(`resolveSignal`은 이 띠를 모른다). */
-  readonly clampSoft: (soft: string) => string;
+  /** 신호의 옅은 채움(선택 행)을 띠 안에 앉힌다(`resolveSignal`은 이 띠를 모른다). */
+  readonly placeSelected: (soft: string) => string;
   readonly ink: string;
   readonly inkMuted: string;
   readonly icon: string;
@@ -407,22 +539,12 @@ function deriveBase(seed: ThemeSeed, fit: Fitter = fitOrThrow): Base {
   const sheet = chrome;
   const hosts = [surface, surfaceMuted, sheet, pane, chrome];
   // 글자는 가리킨 행·눌린 행·칩 그릇 위에도 선다. 이 셋은 `surface`·`sheet`에만 달려서 미리 안다. 칩 그릇(`muted-soft`)이
-  // 띠의 가장 바깥이고, 톤의 옅은 채움은 그 띠 밖으로 나가지 않게 만든다(`softOf`): 띠의 끝에서 지키면 안쪽은 따라온다.
+  // 띠의 가장 바깥이고, 톤·에이전트의 그릇은 그 띠 끝의 평면에 서고 선택 행 채움은 띠 안에 앉는다(`makeFills`): 띠의 끝에서
+  // 지키면 안쪽은 따라온다.
   const states = deriveStateSurfaces(surface, sheet, mode);
   const bandHosts = [...hosts, states.hover, states.pressed, states.mutedSoft];
   const adjusting = cacheable;
-  const edgeY = adjusting ? luminance(states.mutedSoft) : null;
-  const softFor: SoftFor = (color) => softOf(surface, color, mode, edgeY);
-  const clampSoft = (soft: string): string => {
-    if (edgeY === null) return soft;
-    const beyond = (hex: string) => (mode === "light" ? luminance(hex) < edgeY - 1e-9 : luminance(hex) > edgeY + 1e-9);
-    if (!beyond(soft)) return soft;
-    for (let keep = 0.98; keep > 0; keep = Math.round((keep - 0.02) * 100) / 100) {
-      const toward = mixOklab(surface, soft, keep);
-      if (!beyond(toward)) return toward;
-    }
-    return normalizeHex(surface);
-  };
+  const { softFor, placeSelected } = makeFills(surface, states, mode, adjusting);
   const notes: DeriveNote[] = [];
 
   // 상태색을 먼저 맞춘다: 그 채도가 중립 글자의 채도 상한을 정한다(위험 순서 danger > warn > ink-muted).
@@ -491,7 +613,7 @@ function deriveBase(seed: ThemeSeed, fit: Fitter = fitOrThrow): Base {
     bandHosts,
     mutedSoft: states.mutedSoft,
     softFor,
-    clampSoft,
+    placeSelected,
     ink,
     inkMuted,
     icon,
@@ -596,12 +718,10 @@ const apartFromNeutrals = (base: Base, values: SignalValues): boolean => {
  */
 function solveSignal(base: Base, choice: SignalChoice, fit: Fitter): SolvedSignal {
   const tokens = solveTokens(base);
-  const attempt = (input: string): SignalResult => {
-    const result = resolveSignal(input, "dawnsky", base.mode, tokens, { agentYields: true });
-    // 신호의 옅은 채움도 칩 그릇 띠 안으로 되돌린다: 선택된 행의 바탕이라 그 위 글자(ink·ink-muted)가 4.5를 지켜야 한다.
-    // 채움이 면 쪽으로 옮겨 가므로 `signal-text`(그 채움 위 4.5로 풀린 값)의 대비는 오히려 는다.
-    return result.ok ? { ...result, values: { ...result.values, "signal-soft": base.clampSoft(result.values["signal-soft"]) } } : result;
-  };
+  const attempt = (input: string): SignalResult => resolveSignal(input, "dawnsky", base.mode, tokens, { agentYields: true });
+  // 신호의 옅은 채움(선택된 행의 바탕)은 받아들여진 결과에만 한 번 앉힌다: 칩 그릇 띠 안에서 그릇이 그 위에서도 살아남는 자리다.
+  // 채움은 원래보다 면 쪽으로만 옮겨 가므로 `signal-text`(그 채움 위 4.5로 풀린 값)의 대비는 오히려 는다.
+  const seat = (values: SignalValues): SignalValues => ({ ...values, "signal-soft": base.placeSelected(values["signal-soft"]) });
   const separate = fit === fitOrThrow;
   type Own =
     | { readonly ok: true; readonly values: SignalValues; readonly boosted?: true }
@@ -625,7 +745,7 @@ function solveSignal(base: Base, choice: SignalChoice, fit: Fitter): SolvedSigna
   if (choice !== null) {
     const input = "preset" in choice ? SIGNAL_PRESETS[choice.preset][base.mode] : choice.custom;
     const result = attempt(input);
-    if (result.ok) return { values: result.values, outcome: { source: "choice" } };
+    if (result.ok) return { values: seat(result.values), outcome: { source: "choice" } };
     choiceRejection = result.reason;
   }
   const rejections: { choiceRejection?: SignalRejection; seedRejection?: OwnSignalRejection; defaultRejection?: OwnSignalRejection } = {
@@ -634,16 +754,16 @@ function solveSignal(base: Base, choice: SignalChoice, fit: Fitter): SolvedSigna
   if (base.seed.accent !== undefined) {
     const result = own(base.seed.accent, true);
     if (result.ok) {
-      return { values: result.values, outcome: { source: "seed", ...(result.boosted ? { boosted: true as const } : {}), ...rejections } };
+      return { values: seat(result.values), outcome: { source: "seed", ...(result.boosted ? { boosted: true as const } : {}), ...rejections } };
     }
     rejections.seedRejection = result.reason;
   }
   const fallback = own(defaults(base.mode).color.signal, false);
-  if (fallback.ok) return { values: fallback.values, outcome: { source: "default", ...rejections } };
+  if (fallback.ok) return { values: seat(fallback.values), outcome: { source: "default", ...rejections } };
   rejections.defaultRejection = fallback.reason;
   for (const preset of SIGNAL_PRESET_IDS) {
     const result = own(SIGNAL_PRESETS[preset][base.mode], false);
-    if (result.ok) return { values: result.values, outcome: { source: "preset", preset, ...rejections } };
+    if (result.ok) return { values: seat(result.values), outcome: { source: "preset", preset, ...rejections } };
   }
   return { values: neutralSignal(base), outcome: { source: "neutral", ...rejections } };
 }
