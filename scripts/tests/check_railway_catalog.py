@@ -764,7 +764,7 @@ def github_errors(services: dict) -> list[str]:
     api_vars = services["api"].get("variables") or {}
     if api_vars.get(GITHUB_KEY_VAR) != GITHUB_KEY_VALUE:
         errors.append(
-            "api %s %r must be %s (without it every /v1/integrations/github/* route answers 503)"
+            "api %s %r must be %s (without it the GitHub routes answer 503)"
             % (GITHUB_KEY_VAR, api_vars.get(GITHUB_KEY_VAR), GITHUB_KEY_VALUE)
         )
     if api_vars.get(PUBLIC_BASE_VAR) != PUBLIC_BASE_VALUE:
@@ -1262,7 +1262,7 @@ def mutate_catalog(kind: str, data: dict) -> None:
         del api["variables"]["OORT_COHOSTED_AGENT_TOOLS_LOCKED"]
     elif kind == "worker-hermes-attest":
         services["agent-worker"]["variables"]["OORT_COHOSTED_AGENT_TOOLS_LOCKED"] = "1"
-    elif kind == "api-github-key-dropped":  # #4221: api without the key answers 503 on every GitHub route
+    elif kind == "api-github-key-dropped":  # #4221: api without the key: the GitHub routes answer 503
         del api["variables"][GITHUB_KEY_VAR]
     elif kind == "worker-github-key":  # ADR-0203 D6-2: a worker must not open the App's stored key
         services["agent-worker"]["variables"][GITHUB_KEY_VAR] = GITHUB_KEY_VALUE

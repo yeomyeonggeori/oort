@@ -561,11 +561,12 @@ No other service holds either: `check_railway_catalog.py` walks every service
 of the catalog, by name and by `${{shared.GITHUB_APP_MASTER_KEY}}` reference.
 
 - `GITHUB_APP_MASTER_KEY` = `${{shared.GITHUB_APP_MASTER_KEY}}`: the key that
-  seals the App's private key and webhook secret in the database. Absent, every
-  GitHub route answers 503 and every other route is untouched. It must differ
-  from `JWT_HMAC`, both webhook master keys and `PROVIDER_LINK_MASTER_KEY` (the
-  api refuses to boot otherwise). It never reaches agent-worker, relay,
-  webhook-sender, notifier or the Hermes service (ADR-0205 D1, ADR-0203 D6-2).
+  seals the App's private key and webhook secret in the database. Absent, the
+  GitHub routes answer 503 (an unsigned webhook is refused with 401 first) and
+  every other route is untouched. It must differ from `JWT_HMAC`, both webhook
+  master keys and `PROVIDER_LINK_MASTER_KEY` (the api refuses to boot
+  otherwise). It never reaches agent-worker, relay, webhook-sender, notifier or
+  the Hermes service (ADR-0205 D1, ADR-0203 D6-2).
 - `MOMO_PUBLIC_BASE_URL` = `https://${{shared.OORT_SITE_ADDRESS}}`: what the
   App manifest tells GitHub to call (webhook, redirect, setup URL), and the
   origin of the invite links an approval decision answers with (ADR-0186). The
@@ -581,9 +582,9 @@ of the catalog, by name and by `${{shared.GITHUB_APP_MASTER_KEY}}` reference.
 **An install that predates #3947** has no `GITHUB_APP_MASTER_KEY` among its
 shared variables. Add that one variable by hand. Do not re-render the generator
 over live variables: every secret key that is not exported is minted fresh
-(`JWT_HMAC`, the Centrifugo secrets, `PROVIDER_LINK_MASTER_KEY`, the webhook
-master keys), which rotates them under a running instance. The generator is for
-a new project.
+(`JWT_HMAC`, the Centrifugo secrets, `PROVIDER_LINK_MASTER_KEY`, the database
+role passwords), which rotates them under a running instance once pasted. The
+generator is for a new project.
 
 1. **Key**, in the generator's own shape (`gen()` in
    `scripts/self_host_env.sh`). Nothing can re-derive it and a lost key means
@@ -620,9 +621,11 @@ a new project.
      ```
      is `location: https://<domain>/?githubInstall=invalid_request` (status 303).
      503 means no key, 409 means no usable address.
-   - `curl -s -o /dev/null -w '%{http_code}\n' -X POST
-     "https://<domain>/v1/integrations/github/webhook"` is 401: an unsigned
-     request is refused before the key is consulted.
+   - An unsigned request is refused before the key is consulted:
+     ```sh
+     curl -s -o /dev/null -w '%{http_code}\n' -X POST "https://<domain>/v1/integrations/github/webhook"
+     ```
+     prints `401`.
 5. Registering the App itself (GitHub's manifest screen) is the owner's step in
    oort, not part of this catalog.
 
