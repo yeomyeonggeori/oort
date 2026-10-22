@@ -320,6 +320,41 @@ describe("쓸 수 없는 테마 (AC 4)", () => {
   });
 });
 
+describe("테마의 색을 아직 못 읽었을 때 (파생 테마의 조회가 꽂히기 전)", () => {
+  it("맥 데스크탑: 눌러도 아무 일 없는 스위치를 두지 않는다 — 행을 그리지 않고 네이티브도 켜지 않는다", async () => {
+    updateAppearance({ theme: "catalog:nord" as ThemeRef, glass: { on: true } });
+    mount({ catalog: {} });
+    await settled();
+    expect(q("glass-background-row")).toBeNull();
+    expect(toggle()).toBeNull();
+    expect(slider()).toBeNull();
+    expect(nativeCalls).toEqual([]);
+    expect(document.documentElement.hasAttribute("data-glass")).toBe(false);
+  });
+
+  it("조회가 꽂히면 행이 서고 그린다", async () => {
+    updateAppearance({ theme: "catalog:nord" as ThemeRef, scheme: "dark", glass: { on: true } });
+    const catalog: Record<string, GlassSources> = {};
+    mount({ catalog });
+    await settled();
+    expect(q("glass-background-row")).toBeNull();
+    catalog["catalog:nord"] = firstPartyGlassSources("graphite");
+    act(() => effects?.refresh());
+    await settled();
+    expect(toggle().getAttribute("aria-checked")).toBe("true");
+    expect(slider()).not.toBeNull();
+    expect(document.documentElement.hasAttribute("data-glass")).toBe(true);
+  });
+
+  it("브라우저: 테마의 색과 무관하게 「쓸 수 없음」을 문장으로 말하므로 행을 그린다", async () => {
+    updateAppearance({ theme: "catalog:nord" as ThemeRef });
+    mount({ supported: false, catalog: {} });
+    await settled();
+    expect(toggle().disabled).toBe(true);
+    expect(text("glass-background-row")).toContain(GLASS_COPY.unsupported);
+  });
+});
+
 describe("배경화면과의 공존 (결정 9, AC 9)", () => {
   it("배경화면이 켜져 있으면 스위치가 잠기고 문장으로 이유를 말한다. 끄면 돌아온다", async () => {
     updateAppearance({ glass: { on: true }, wallpaper: { kind: "solid", id: "slate" } });

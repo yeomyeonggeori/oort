@@ -180,7 +180,19 @@ let extraResolver: GlassSourcesResolver | null = null;
 /**
  * 첫 파티 밖의 테마(`catalog:`·`user:`)의 색을 이 모듈에 알리는 길. 그 색은 파생 엔진(AP-1b)이 만들고 엔진은
  * 지연 청크라, 엔진이 선 뒤에 파생 토큰(`canvas`·`band`·`color`)을 이 모양으로 돌려주는 조회를 꽂는다. 꽂기
- * 전의 비첫파티 테마는 「색을 아직 못 읽음」이라 그리지도 네이티브를 켜지도 않는다.
+ * 전의 비첫파티 테마는 「색을 아직 못 읽음」이라 그리지도 네이티브를 켜지도 않고, 설정 행도 그동안 걷는다(눌러도
+ * 아무 일 없는 스위치를 두지 않는다). **이 연결은 나중에 머지되는 쪽(AP-1b 또는 AP-3)의 몫이다.** 엔진이 이미
+ * 머지돼 있으면 파생 적용기(`derivedApplier`)가 엔진을 싣는 자리에서 한 번 꽂으면 된다:
+ *
+ *     registerGlassSourcesResolver((ref, signal) => {
+ *       if (!ref.startsWith("catalog:")) return null; // `user:`는 AP-5
+ *       const id = ref.slice("catalog:".length);
+ *       const light = deriveCatalogMode(id, "light", signal)?.tokens;
+ *       const dark = deriveCatalogMode(id, "dark", signal)?.tokens;
+ *       return light || dark ? { ...(light && { light }), ...(dark && { dark }) } : null;
+ *     });
+ *
+ * (`DerivedMode.tokens`는 `GlassSource` 모양을 이미 만족한다: `canvas`·`band`·`color`.)
  */
 export function registerGlassSourcesResolver(resolver: GlassSourcesResolver | null): void {
   extraResolver = resolver;

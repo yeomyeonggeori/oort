@@ -31,8 +31,14 @@ const OPACITY_LABEL_ID = "glass-opacity-label";
 const OPACITY_DESCRIPTION_ID = "glass-opacity-description";
 
 export function GlassRows() {
-  const { view } = useGlassSnapshot();
+  const { status, view } = useGlassSnapshot();
   const { decision, range, opacity } = view;
+
+  // 테마의 색을 아직 못 읽었다(파생 테마인데 엔진 조회가 꽂히지 않았다): 이때 스위치를 켠 채로 두면 눌러도 아무 일도
+  // 없는 컨트롤이 된다(켠 채로 두는 것은 창 쪽 일이 기다린다는 뜻이고 화면은 아무것도 안 그린다). 컨트롤은 앱이 실제로
+  // 따를 때만 공개하므로 행을 걷는다. 색이 읽히면(조회가 꽂히면) 행이 선다. 브라우저·다른 OS는 테마와 무관하게 「쓸 수
+  // 없음」을 문장으로 말하므로 그대로 그린다.
+  if (status.supported && range === null) return null;
 
   const description =
     decision.reason === "unsupported"
