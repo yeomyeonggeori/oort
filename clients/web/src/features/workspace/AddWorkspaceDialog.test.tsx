@@ -5,7 +5,11 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
-import { NEW_WORKSPACE_ENTRY_GUIDE } from "@/features/auth/loginWorkspaceEntry";
+import {
+  NEW_WORKSPACE_ENTRY_GUIDE,
+  NEW_WORKSPACE_ENTRY_TEXT,
+  NEW_WORKSPACE_ID_ONCE_NOTICE,
+} from "@/features/auth/loginWorkspaceEntry";
 import { AddWorkspaceDialog, type WorkspaceDraft } from "./AddWorkspaceDialog";
 
 // 레일 「+」 완료 패널의 막다른 길 (#4198, 멀티 조직 P0-A).
@@ -16,7 +20,12 @@ import { AddWorkspaceDialog, type WorkspaceDraft } from "./AddWorkspaceDialog";
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const MEMBER_ID = "00000000-0000-7000-8000-000000000101";
-/** 서버는 새 워크스페이스 ID를 대문자 UUID로 돌려준다(`CreatedWorkspace.workspaceId` 주석). */
+/**
+ * 코어 타입 주석(`CreatedWorkspace.workspaceId`)은 서버 UUID가 대문자로 올 수 있다고 경고한다(옛 Swift
+ * 서버). 지금 Rust 서버는 소문자를 돌려준다(`workspaces.rs` `Uuid::to_string()`). 시험은 일부러
+ * 대문자 값을 써서 「받은 모양 그대로」를 못 박는다: 줄이거나 다시 쓰면(`toLowerCase` 등) 붙여 넣는
+ * 값이 달라진다.
+ */
 const NEW_WS_ID = "019FA000-1111-7222-8333-444455556666";
 
 const createWorkspaceMock = vi.hoisted(() => vi.fn());
@@ -41,6 +50,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  onOpenChange.mockReset();
   createWorkspaceMock.mockReset();
   createWorkspaceMock.mockResolvedValue({
     schema: "momo.workspace.created.v1",
@@ -98,16 +108,21 @@ function sessionValue(): SessionContextValue {
   };
 }
 
-/** 초안은 호출자(AddWorkspaceProvider)가 들고 있다. 같은 모양으로 상태를 들고 선다. */
-function Harness() {
+/**
+ * 초안은 호출자(AddWorkspaceProvider)가 들고 있다. 같은 모양으로 상태를 들고 선다. `open`은 늘 참이라
+ * 닫으려는 시도는 `onOpenChange(false)` 호출로만 보인다.
+ */
+function Harness({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
   const [draft, setDraft] = useState<WorkspaceDraft>({ name: "", slug: "" });
   return createElement(AddWorkspaceDialog, {
     open: true,
-    onOpenChange: () => undefined,
+    onOpenChange,
     draft,
     setDraft,
   });
 }
+
+const onOpenChange = vi.fn();
 
 function mount() {
   const client = new QueryClient({
@@ -122,7 +137,11 @@ function mount() {
       createElement(
         QueryClientProvider,
         { client },
-        createElement(SessionProvider, { value: sessionValue() }, createElement(Harness))
+        createElement(
+          SessionProvider,
+          { value: sessionValue() },
+          createElement(Harness, { onOpenChange })
+        )
       )
     )
   );
@@ -135,6 +154,21 @@ function setInputValue(input: HTMLInputElement, value: string) {
   const descriptor = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
   descriptor?.set?.call(input, value);
   input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+/**
+ * 스크림을 누른다. 이 Radix 판은 바깥 누름의 해제를 pointerdown이 아니라 이어지는 click까지
+ * 미루고(`deferPointerDownOutside`), 누른 자리가 해제 면(스크림)이 아니면 그 상호작용을 다른 곳이
+ * 가져간 것으로 보고 해제하지 않는다. 그래서 `body`가 아니라 스크림에 두 이벤트를 모두 보낸다.
+ */
+function clickScrim() {
+  const scrim = document.querySelector('[data-overlay-layer="scrim"]');
+  if (!scrim) throw new Error("scrim not found");
+  act(() => {
+    for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
+      scrim.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, button: 0 }));
+    }
+  });
 }
 
 async function createThroughTheDialog() {
@@ -185,7 +219,8 @@ describe("워크스페이스 추가 완료 패널 (#4198)", () => {
     await createThroughTheDialog();
     const text = q("add-workspace-created")?.textContent ?? "";
 
-    expect(q("add-workspace-created-guide")?.textContent).toBe(NEW_WORKSPACE_ENTRY_GUIDE);
+    expect(q("add-workspace-created-guide")?.textContent).toBe(NEW_WORKSPACE_ENTRY_TEXT);
+    expect(text).toContain(NEW_WORKSPACE_ENTRY_GUIDE);
     // 두 낱말은 로그인 화면(ConnectPage)의 접힘 단추·칸 이름이다. ConnectPage.test.tsx가 그쪽 글자를
     // 따로 고정하므로 어느 한쪽만 바뀌면 둘 중 하나가 빨개진다.
     expect(text).toContain("로그아웃한 뒤");
@@ -196,5 +231,73 @@ describe("워크스페이스 추가 완료 패널 (#4198)", () => {
     expect(text).not.toMatch(/슬러그로/);
     // 설정 화면의 합쇼체 금지와 같은 문체 규칙: 해요체.
     expect(text).not.toMatch(/(습니다|됩니다|십시오)/);
+  });
+
+  it("한 번만 보인다는 사실을 말한다: 이 화면을 벗어나면 ID를 다시 볼 수 없다", async () => {
+    await createThroughTheDialog();
+    const text = q("add-workspace-created")?.textContent ?? "";
+    expect(text).toContain(NEW_WORKSPACE_ID_ONCE_NOTICE);
+    // 문장이 바뀌어도 사실과 행동(벗어나기 전에 복사)은 남아야 한다.
+    expect(text).toContain("다시 볼 수 없");
+    expect(text).toContain("복사해 두세요");
+  });
+
+  it("완료 직후 초점이 이름 붙은 완료 묶음으로 간다(눌렀던 만들기 단추는 사라졌다)", async () => {
+    await createThroughTheDialog();
+    const group = q("add-workspace-created");
+    // status(live region)가 아니라 group이다: 36자 ID와 안내가 뜨는 순간 통째로 낭독되지 않는다.
+    expect(group?.getAttribute("role")).toBe("group");
+    expect(document.activeElement).toBe(group);
+    const labelledBy = group?.getAttribute("aria-labelledby") ?? "";
+    expect(document.getElementById(labelledBy)?.textContent).toBe("디자인팀 워크스페이스를 만들었어요.");
+  });
+
+  it("완료 패널이 떠 있는 동안 Esc와 바깥 클릭으로는 닫히지 않고 「닫기」만 닫는다", async () => {
+    mount();
+    // 라이브러리가 바깥 누름 리스너를 다음 틱에 단다.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    // 대조군: 폼이 떠 있을 때는 Esc가 닫는다(이 시험대가 닫으려는 시도를 볼 수 있다는 증거).
+    // 실제 키 이벤트처럼 cancelable이어야 한다: cancelable이 아니면 `preventDefault()`가 아무것도
+    // 막지 못해서 아래 단정이 거짓으로 빨개진다.
+    act(() => {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })
+      );
+    });
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    onOpenChange.mockClear();
+    // 바깥 누름도 같다. 이 대조군이 없으면 아래 「닫히지 않는다」는 라이브러리가 이 이벤트를 아예
+    // 못 듣는 시험대에서도 초록이다.
+    clickScrim();
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    onOpenChange.mockClear();
+
+    act(() => setInputValue(q("add-workspace-name") as HTMLInputElement, "디자인팀"));
+    act(() => setInputValue(q("add-workspace-slug") as HTMLInputElement, "design-team"));
+    await act(async () => {
+      q("add-workspace-submit")?.click();
+    });
+    await vi.waitFor(() => {
+      expect(q("add-workspace-created")).not.toBeNull();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // 그 ID는 다른 어디에도 없다. 반사적인 Esc·바깥 클릭이 지우지 못한다.
+    act(() => {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })
+      );
+    });
+    clickScrim();
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(q("add-workspace-created")).not.toBeNull();
+
+    // 나가는 길은 이름 붙은 하나다.
+    act(() => q("add-workspace-done")?.click());
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });

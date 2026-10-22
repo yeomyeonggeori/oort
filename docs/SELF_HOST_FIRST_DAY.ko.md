@@ -259,7 +259,7 @@ connection `active`) 서버는 오너 오프너가 아직 없을 때 enqueue한�
 (`ProfileCard.tsx:175-189`). 셸 제목 **설정**(`SettingsRoute.tsx:172`).
 좌측 나브 그룹 **개인** / **워크스페이스** / **연결**(`settingsNav.ts`).
 이 세션의 UUID는 **설정 › 워크스페이스**의 「워크스페이스 ID」 줄
-(`WorkspaceSection.tsx:1170`).
+(`WorkspaceSection.tsx:1238-1242`).
 
 ### v0.1.5에 남는 것
 
@@ -310,28 +310,34 @@ ADR-0185는 그 게이트를 풀지 않는다. 새 테넌트는 온보딩 3스�
 프로필 카드 메뉴(`ProfileCard.tsx:161-172`). 다이얼로그 제목
 **워크스페이스 추가**. 설명: 「새 워크스페이스를 만들거나, 초대를 받았다면
 초대 링크로 참여합니다.」
-(`AddWorkspaceDialog.tsx:214-217`).
+(`AddWorkspaceDialog.tsx:240-243`).
 
 ### 칸
 
 | 칸 | 힌트 | 좌표 |
 |---|---|---|
-| **이름** | 「사람이 읽는 이름입니다. 80자까지 쓸 수 있습니다.」 | `WorkspaceSection.tsx:957-960` · `AddWorkspaceDialog.tsx:283-286` |
-| **슬러그** | 설정: 「영문 소문자, 숫자, 하이픈만 쓸 수 있습니다. 서버 전체에서 하나뿐이어야 합니다.」 / 다이얼로그: 「영문 소문자, 숫자, 하이픈만. 서버 전체에서 하나뿐이어야 합니다.」 | `WorkspaceSection.tsx:975-978` · `AddWorkspaceDialog.tsx:307-310` |
+| **이름** | 「사람이 읽는 이름입니다. 80자까지 쓸 수 있습니다.」 | `WorkspaceSection.tsx:957-960` · `AddWorkspaceDialog.tsx:362-365` |
+| **슬러그** | 설정: 「영문 소문자, 숫자, 하이픈만 쓸 수 있습니다. 서버 전체에서 하나뿐이어야 합니다.」 / 다이얼로그: 「영문 소문자, 숫자, 하이픈만. 서버 전체에서 하나뿐이어야 합니다.」 | `WorkspaceSection.tsx:975-978` · `AddWorkspaceDialog.tsx:386-389` |
 
 규칙(서버와 동일): 비면 「슬러그를 입력하세요.」 / 「이름을 입력하세요.」
 (`packages/momo-core/src/features/settings/model.ts:392-412`).
 
 버튼: **워크스페이스 만들기** (진행 중 **만드는 중**)
-(`WorkspaceSection.tsx:1016` · `AddWorkspaceDialog.tsx:373`).
+(`WorkspaceSection.tsx:1016` · `AddWorkspaceDialog.tsx:451`).
 
-성공 카드: 「{이름} 워크스페이스를 만들었어요.」, 안내 한 문장, 그리고
-**슬러그** · **워크스페이스 ID**(ID 옆에 **복사** 단추)
-(`WorkspaceSection.tsx:1301-1338`). 안내는 「들어가려면 로그아웃한 뒤 로그인
+성공 카드: 「{이름} 워크스페이스를 만들었어요.」, 안내 한 문단, 그리고
+**슬러그** · **워크스페이스 ID**(ID 옆에 **복사** 단추)와 **닫기** 단추
+(`WorkspaceSection.tsx:1367-1406`). 안내는 「들어가려면 로그아웃한 뒤 로그인
 화면에서 「다른 워크스페이스로 로그인」을 열고, 워크스페이스 ID 칸에 이 ID를
-붙여 넣어요.」 (`NEW_WORKSPACE_ENTRY_GUIDE`,
-`features/auth/loginWorkspaceEntry.ts`). 다이얼로그의 성공 패널은 같은 문장과
-같은 두 줄, 같은 **복사** 단추를 보여 준다 (`AddWorkspaceDialog.tsx:228-289`).
+붙여 넣어요. 이 화면을 벗어나면 ID를 다시 볼 수 없으니 지금 복사해 두세요.」
+(`NEW_WORKSPACE_ENTRY_TEXT`, `features/auth/loginWorkspaceEntry.ts`). 새 ID는
+만든 응답에서만 나오고 앱 어디에도 다시 보여 주는 곳이 없어서, 카드는 한 번만
+보이는 값의 규칙을 따른다: 나타나는 즉시 초점이 카드로 가고, 떠 있는 동안 Esc는
+아무 일도 하지 않으며, 나가는 길은 **닫기** 하나다. 다이얼로그의 성공 패널도 같은
+문단, 같은 두 줄, 같은 **복사** 단추를 보여 주고 Esc·바깥 클릭으로는 닫히지 않으며
+**닫기**로 닫힌다 (`AddWorkspaceDialog.tsx:246-323`). 같은 설정 섹션의 현재
+워크스페이스 「워크스페이스 ID」 줄에도 **복사**가 있다
+(`WorkspaceSection.tsx:1238-1242`).
 
 **세션 전환은 없다.** 새 테넌트에 들어가려면 **로그아웃**
 (프로필 카드 메뉴 `ProfileCard.tsx:243`, 또는 **설정 › 프로필**의 「로그인」 카드

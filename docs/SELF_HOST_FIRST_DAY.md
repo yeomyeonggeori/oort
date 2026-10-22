@@ -275,7 +275,7 @@ Settings after you are in: profile-card row **설정**, tooltip 「설정
 (⌘,)」 (`ProfileCard.tsx:175-189`). Shell title **설정**
 (`SettingsRoute.tsx:172`). Left nav groups **개인** / **워크스페이스** /
 **연결** (`settingsNav.ts`). This session's UUID is the 「워크스페이스
-ID」 line of **설정 › 워크스페이스** (`WorkspaceSection.tsx:1170`).
+ID」 line of **설정 › 워크스페이스** (`WorkspaceSection.tsx:1238-1242`).
 
 ### What remains in v0.1.5
 
@@ -326,29 +326,37 @@ The form on both entries is the same. Field names are the same.
 **워크스페이스 추가** on the workspace rail (`WorkspaceRail.tsx:113-114`)
 and on the profile-card menu (`ProfileCard.tsx:161-172`). Dialog title
 **워크스페이스 추가**. Description: 「새 워크스페이스를 만들거나, 초대를
-받았다면 초대 링크로 참여합니다。」 (`AddWorkspaceDialog.tsx:214-217`).
+받았다면 초대 링크로 참여합니다。」 (`AddWorkspaceDialog.tsx:240-243`).
 
 ### Fields
 
 | Field | Hint | Coordinate |
 |---|---|---|
-| **이름** | 「사람이 읽는 이름입니다. 80자까지 쓸 수 있습니다。」 | `WorkspaceSection.tsx:957-960` · `AddWorkspaceDialog.tsx:283-286` |
-| **슬러그** | Settings: 「영문 소문자, 숫자, 하이픈만 쓸 수 있습니다. 서버 전체에서 하나뿐이어야 합니다。」 / Dialog: 「영문 소문자, 숫자, 하이픈만. 서버 전체에서 하나뿐이어야 합니다。」 | `WorkspaceSection.tsx:975-978` · `AddWorkspaceDialog.tsx:307-310` |
+| **이름** | 「사람이 읽는 이름입니다. 80자까지 쓸 수 있습니다。」 | `WorkspaceSection.tsx:957-960` · `AddWorkspaceDialog.tsx:362-365` |
+| **슬러그** | Settings: 「영문 소문자, 숫자, 하이픈만 쓸 수 있습니다. 서버 전체에서 하나뿐이어야 합니다。」 / Dialog: 「영문 소문자, 숫자, 하이픈만. 서버 전체에서 하나뿐이어야 합니다。」 | `WorkspaceSection.tsx:975-978` · `AddWorkspaceDialog.tsx:386-389` |
 
 Rules (same as the server): empty → 「슬러그를 입력하세요。」 / 「이름을
 입력하세요。」 (`packages/momo-core/src/features/settings/model.ts:392-412`).
 
 Button: **워크스페이스 만들기** (in progress **만드는 중**)
-(`WorkspaceSection.tsx:1016` · `AddWorkspaceDialog.tsx:373`).
+(`WorkspaceSection.tsx:1016` · `AddWorkspaceDialog.tsx:451`).
 
-Success card: 「{이름} 워크스페이스를 만들었어요。」, one guide sentence,
-then **슬러그** · **워크스페이스 ID** with a **복사** button beside the ID
-(`WorkspaceSection.tsx:1301-1338`). The guide reads 「들어가려면 로그아웃한
-뒤 로그인 화면에서 「다른 워크스페이스로 로그인」을 열고, 워크스페이스 ID
-칸에 이 ID를 붙여 넣어요。」 (`NEW_WORKSPACE_ENTRY_GUIDE`,
-`features/auth/loginWorkspaceEntry.ts`). The dialog's success panel shows
-the same sentence, the same two rows and the same **복사** button
-(`AddWorkspaceDialog.tsx:228-289`).
+Success card: 「{이름} 워크스페이스를 만들었어요。」, one guide paragraph,
+then **슬러그** · **워크스페이스 ID** with a **복사** button beside the ID,
+and a **닫기** button (`WorkspaceSection.tsx:1367-1406`). The paragraph
+reads 「들어가려면 로그아웃한 뒤 로그인 화면에서 「다른 워크스페이스로
+로그인」을 열고, 워크스페이스 ID 칸에 이 ID를 붙여 넣어요。 이 화면을
+벗어나면 ID를 다시 볼 수 없으니 지금 복사해 두세요。」
+(`NEW_WORKSPACE_ENTRY_TEXT`, `features/auth/loginWorkspaceEntry.ts`). The
+new ID comes back in the create response only and nothing in the app lists
+it again, so the card follows the rule for a value you can see once: focus
+moves onto the card when it appears, Esc does nothing while it is up, and
+**닫기** is the one exit. The dialog's success panel says the same
+paragraph, shows the same two rows and the same **복사** button, ignores Esc
+and outside clicks the same way, and closes with **닫기**
+(`AddWorkspaceDialog.tsx:246-323`). The 「워크스페이스 ID」 line of the
+current workspace in the same settings section has **복사** too
+(`WorkspaceSection.tsx:1238-1242`).
 
 **There is no session switch.** To enter the new tenant, **로그아웃**
 (profile-card menu, `ProfileCard.tsx:243`, or the 「로그인」 card of

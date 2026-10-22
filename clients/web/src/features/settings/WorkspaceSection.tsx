@@ -57,7 +57,8 @@ import {
   welcomePromptTooLong,
 } from "@/features/welcome/welcomeKickoff";
 import { CopyButton, Field, OperatorNotice, SaveButton } from "./SettingsFields";
-import { NEW_WORKSPACE_ENTRY_GUIDE } from "@/features/auth/loginWorkspaceEntry";
+import { NEW_WORKSPACE_ENTRY_TEXT } from "@/features/auth/loginWorkspaceEntry";
+import { useEscapeGuard } from "@/design/ui/escapeLayer";
 import { Switch } from "@/design/ui/switch";
 import { SettingsRow } from "./shell/SettingsRow";
 import { SettingsSection } from "./shell/SettingsSection";
@@ -1068,6 +1069,51 @@ function WorkspaceRenameField({
   );
 }
 
+/**
+ * 「워크스페이스 ID」 한 줄: 값과 「복사」. 로그인 화면의 「다른 워크스페이스로 로그인」이 받는 값이 이
+ * ID라서(슬러그가 아니다) 읽기만 하는 줄이 아니다. 일반 카드(지금 열려 있는 워크스페이스)와 새로
+ * 만든 워크스페이스의 완료 카드가 같은 줄을 쓴다. 한쪽만 복사할 수 있으면 같은 낱말이 두 가지로
+ * 동작한다. 단추가 값 옆에 서느냐 아래로 내려가느냐는 내용 폭이 아니라 칸 폭이 정한다
+ * (`@container` + `@sm`): 「복사」가 「복사됨」으로 길어져도 자리가 바뀌지 않는다.
+ */
+function WorkspaceIdRow({
+  id,
+  valueTestId,
+  copyTestId,
+  strong = false,
+}: {
+  id: string;
+  valueTestId: string;
+  copyTestId: string;
+  /** 새로 만든 값처럼 지금 복사해야 하는 줄이면 본문색, 참고용이면 한 단계 물린다. */
+  strong?: boolean;
+}) {
+  return (
+    <SettingsRow label="워크스페이스 ID" stack>
+      <div className="@container min-w-0 flex-1">
+        <div className="flex min-w-0 flex-col items-start gap-2 @sm:flex-row @sm:items-center">
+          <p
+            className={cn(
+              "min-w-0 select-all break-all font-mono text-meta",
+              strong ? "text-ink" : "text-ink-muted"
+            )}
+            data-numeric=""
+            data-testid={valueTestId}
+          >
+            {id}
+          </p>
+          <CopyButton
+            value={id}
+            subject="워크스페이스 ID"
+            testId={copyTestId}
+            className="tap-target"
+          />
+        </div>
+      </div>
+    </SettingsRow>
+  );
+}
+
 export function WorkspaceSection({
   workspaceId,
   offline,
@@ -1088,6 +1134,28 @@ export function WorkspaceSection({
     name?: string;
   }>({});
   const [created, setCreated] = useState<CreatedWorkspace | null>(null);
+  const createdRef = useRef<HTMLDivElement>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
+  // 한 번만 보이는 값의 규칙(웹훅 발급 카드와 같다). 이 카드는 만들기 폼 **아래**에 서서 접힌 곳에
+  // 뜰 수 있고, 그 순간이 새 ID를 볼 수 있는 유일한 순간이다: 나타나는 즉시 초점을 옮기고 화면
+  // 안으로 가져온다.
+  useEffect(() => {
+    if (created && createdRef.current) {
+      createdRef.current.focus({ preventScroll: true });
+      createdRef.current.scrollIntoView({ block: "nearest" });
+    }
+  }, [created]);
+
+  // 카드가 떠 있는 동안 Esc는 아무 일도 하지 않는다. 삼키지 않으면 설정 셸이 그 Esc로 라우트를
+  // 닫고, 다시 볼 수 없는 ID가 확인 한 번 없이 사라진다(웹훅 발급 카드 R2 신규 H와 같은 실패).
+  // 나가는 길은 이 카드가 이름으로 갖고 있다: 「닫기」.
+  useEscapeGuard(created !== null);
+
+  function dismissCreated() {
+    setCreated(null);
+    nameInputRef.current?.focus();
+  }
 
   const create = useMutation({
     mutationFn: () => createWorkspace(normalizeSlug(slug), name.trim()),
@@ -1167,14 +1235,11 @@ export function WorkspaceSection({
                 {query.data.slug}
               </span>
             </SettingsRow>
-            <SettingsRow label="워크스페이스 ID" stack>
-              <p
-                className="min-w-0 break-all font-mono text-meta text-ink-muted"
-                data-numeric=""
-              >
-                {query.data.id}
-              </p>
-            </SettingsRow>
+            <WorkspaceIdRow
+              id={query.data.id}
+              valueTestId="workspace-id"
+              copyTestId="workspace-id-copy"
+            />
           </>
         )}
       </SettingsSection>
@@ -1229,6 +1294,7 @@ export function WorkspaceSection({
                 <Input
                   id="workspace-name"
                   name="name"
+                  ref={nameInputRef}
                   value={name}
                   aria-invalid={fieldErrors.name ? true : undefined}
                   aria-describedby={
@@ -1299,10 +1365,17 @@ export function WorkspaceSection({
       </SettingsSection>
 
       {created && (
-        <div role="status" data-testid="workspace-created">
+        <div
+          ref={createdRef}
+          tabIndex={-1}
+          role="group"
+          aria-label={`${created.name} 워크스페이스를 만들었어요.`}
+          className="rounded-lg focus-visible:focus-ring"
+          data-testid="workspace-created"
+        >
           <SettingsSection
             title={`${created.name} 워크스페이스를 만들었어요.`}
-            description={NEW_WORKSPACE_ENTRY_GUIDE}
+            description={NEW_WORKSPACE_ENTRY_TEXT}
           >
             <SettingsRow label="슬러그" keep>
               <span
@@ -1312,27 +1385,22 @@ export function WorkspaceSection({
                 {created.slug}
               </span>
             </SettingsRow>
-            {/* 레일 「+」 완료 패널과 같은 줄: 값 옆에 복사 단추, 칸이 좁으면 아래(칸 폭이
-                정한다. 「복사」가 「복사됨」으로 길어져도 자리가 바뀌지 않는다). */}
-            <SettingsRow label="워크스페이스 ID" stack>
-              <div className="@container min-w-0 flex-1">
-                <div className="flex min-w-0 flex-col items-start gap-2 @sm:flex-row @sm:items-center">
-                  <p
-                    className="min-w-0 select-all break-all font-mono text-meta text-ink-muted"
-                    data-numeric=""
-                    data-testid="workspace-created-id"
-                  >
-                    {created.workspaceId}
-                  </p>
-                  <CopyButton
-                    value={created.workspaceId}
-                    subject="워크스페이스 ID"
-                    testId="workspace-created-copy"
-                    className="tap-target"
-                  />
-                </div>
-              </div>
-            </SettingsRow>
+            <WorkspaceIdRow
+              id={created.workspaceId}
+              valueTestId="workspace-created-id"
+              copyTestId="workspace-created-copy"
+              strong
+            />
+            <div className="flex flex-wrap items-center justify-end gap-2 px-4 py-3">
+              <Button
+                type="button"
+                size="sm"
+                onClick={dismissCreated}
+                data-testid="workspace-created-done"
+              >
+                닫기
+              </Button>
+            </div>
           </SettingsSection>
         </div>
       )}

@@ -9,8 +9,11 @@
 // (운영 환경에 닿지 않는다). 장면마다 라이트/다크 × 1440/390.
 //
 //   dialog-created    레일 「+」 → 이름·슬러그 → 만들기 → 완료 패널. 패널에 ID·복사·옳은 길 안내가 있는가,
-//                     폭 안에 들어가는가, 복사가 클립보드에 그 ID를 쓰는가, 완료 직후 초점이 어디인가.
+//                     폭 안에 들어가는가, 복사가 클립보드에 그 ID를 쓰는가, 완료 직후 초점이 어디인가,
+//                     한 번만 보이는 ID를 Esc·바깥 클릭이 지우지 않는가(「닫기」만 닫는다).
 //   settings-created  설정 › 워크스페이스 › 새 워크스페이스 만들기 → 완료 카드(같은 사실을 같은 문장으로).
+//                     초점·Esc 삼킴·「닫기」·일반 카드 ID 줄의 복사까지.
+//   settings-fold     900×700에서 만든 직후 완료 카드가 접힌 아래에 숨지 않고 화면 안에 있는가.
 //   login-labels      로그인 화면 「다른 워크스페이스로 로그인」을 열었을 때 그 글자와 칸 이름. 안내 문장이
 //                     가리키는 낱말이 실제 화면에 그대로 있는지 같은 번들에서 잰다.
 //
@@ -53,8 +56,12 @@ const WORKSPACE = {
   id: workspaceId, slug: "yeomyeong", name: "여명거리", updatedAtMs: 1_760_000_000_000,
   roleLabels: {}, welcomeAgentMemberId: null, welcomePrompt: "", subscriptionAgentsEnabled: false,
 };
-/** 서버는 새 워크스페이스 ID를 대문자 UUID로 돌려준다(`CreatedWorkspace.workspaceId` 주석). 그대로 보여 주고 그대로 복사해야 한다. */
-const NEW_WS_ID = "019FA000-1111-7222-8333-444455556666";
+/**
+ * 지금 Rust 서버는 새 워크스페이스 ID를 소문자로 돌려준다(`workspaces.rs` `Uuid::to_string()`). 코어 타입
+ * 주석(`CreatedWorkspace.workspaceId`)이 경고하는 대문자는 옛 Swift 서버의 모양이다. 화면은 어느 쪽이든
+ * 받은 그대로 보여 주고 그대로 복사해야 하고, 그 「그대로」는 단위 시험이 대문자 값으로 못 박는다.
+ */
+const NEW_WS_ID = "019fa000-1111-7222-8333-444455556666";
 const OLD_SENTENCE = "그 슬러그로 다시 로그인";
 
 const json = (route, body, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
@@ -174,6 +181,7 @@ const describeActive = (page) =>
 
 /** 안내 문장이 길을 바르게 말하는가: 로그인 화면에 실제로 있는 두 낱말을 이름으로 부르고, 옛 거짓 문장은 없다. */
 function guideChecks(tag, scope, text) {
+  check(tag, `${scope}: 한 번만 보인다는 사실을 말한다(벗어나면 다시 볼 수 없으니 지금 복사)`, text.includes("다시 볼 수 없") && text.includes("복사해 두세요"), null);
   check(tag, `${scope}: 옛 거짓 안내(「${OLD_SENTENCE}」)가 없다`, !text.includes(OLD_SENTENCE), null);
   check(tag, `${scope}: 길을 이름으로 말한다(「다른 워크스페이스로 로그인」 · 워크스페이스 ID 칸)`, text.includes("「다른 워크스페이스로 로그인」") && text.includes("워크스페이스 ID"), null);
   check(tag, `${scope}: 응답의 워크스페이스 ID가 글자로 들어 있다`, text.includes(NEW_WS_ID), { includes: text.includes(NEW_WS_ID) });
@@ -212,6 +220,8 @@ const SCENES = [
       const active = await describeActive(page);
       report.notes.push({ tag, scene: "dialog-created", activeElementAfterCreate: active });
       check(tag, "완료 직후 초점이 대화상자 안에 있다(<body>로 떨어지지 않았다)", active.inDialog, active);
+      check(tag, "완료 직후 초점이 이름 붙은 완료 묶음(role=group)에 있다(대화상자 껍데기가 아니다)",
+        active.testid === "add-workspace-created" && active.role === "group", active);
 
       if (hasCopy) {
         const dBox = await dialog.boundingBox();
@@ -244,6 +254,23 @@ const SCENES = [
           { dialogBefore: dialogBefore.height, dialogAfter: dialogAfter.height, copyBefore: { x: copyBefore.x, y: copyBefore.y, w: copyBefore.width }, copyAfter: { x: copyAfter.x, y: copyAfter.y, w: copyAfter.width } });
         await shotBox(page, dialog, tag, "dialog-created-copied");
       }
+
+      // 그 ID는 다른 어디에도 없다. 반사적인 Esc·바깥 클릭이 지우지 못하고 나가는 길은 「닫기」 하나다.
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(400);
+      const survivedEsc = (await page.getByTestId("add-workspace-created").count()) === 1;
+      check(tag, "Esc로는 닫히지 않는다(ID가 다른 어디에도 없다)", survivedEsc, { survivedEsc });
+      if (survivedEsc) {
+        await page.mouse.click(4, 4);
+        await page.waitForTimeout(400);
+        const survivedClick = (await page.getByTestId("add-workspace-created").count()) === 1;
+        check(tag, "바깥(스크림) 클릭으로는 닫히지 않는다", survivedClick, { survivedClick });
+        if (survivedClick) {
+          await page.getByTestId("add-workspace-done").click();
+          const closed = await dialog.waitFor({ state: "detached", timeout: 5000 }).then(() => true, () => false);
+          check(tag, "「닫기」로는 닫힌다", closed, { closed });
+        }
+      }
     },
   },
   {
@@ -259,6 +286,10 @@ const SCENES = [
       await page.waitForTimeout(300);
 
       const card = page.getByTestId("workspace-created");
+      const activeSettings = await describeActive(page);
+      report.notes.push({ tag, scene: "settings-created", activeElementAfterCreate: activeSettings });
+      check(tag, "설정 완료 직후 초점이 이름 붙은 완료 묶음(role=group)에 있다",
+        activeSettings.testid === "workspace-created" && activeSettings.role === "group", activeSettings);
       await card.scrollIntoViewIfNeeded();
       const text = await card.innerText();
       report.notes.push({ tag, scene: "settings-created", createdCardText: text });
@@ -289,6 +320,48 @@ const SCENES = [
           Math.abs(cardAfter.height - cardBefore.height) < 0.5 && Math.abs(copyAfter.y - copyBefore.y) < 0.5 && Math.abs(copyAfter.x - copyBefore.x) < 0.5,
           { cardBefore: cardBefore.height, cardAfter: cardAfter.height, copyBefore: { x: copyBefore.x, y: copyBefore.y }, copyAfter: { x: copyAfter.x, y: copyAfter.y } });
       }
+
+      // 일반 카드(지금 열려 있는 워크스페이스)의 ID 줄도 같은 복사 단추를 가진다.
+      const generalCopy = page.getByTestId("workspace-id-copy");
+      check(tag, "일반 카드의 워크스페이스 ID 줄에도 복사 단추가 있다", (await generalCopy.count()) === 1, { count: await generalCopy.count() });
+      if ((await generalCopy.count()) === 1) {
+        await generalCopy.scrollIntoViewIfNeeded();
+        await generalCopy.click();
+        await page.waitForTimeout(200);
+        check(tag, "일반 카드의 복사는 지금 워크스페이스의 ID를 쓴다", (await readClipboard(page)) === workspaceId, { clip: await readClipboard(page) });
+      }
+
+      // 카드가 떠 있는 동안 Esc는 설정을 닫지 않고, 「닫기」가 카드를 지우고 초점을 이름 칸으로 돌려준다.
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(400);
+      const hashAfterEsc = await page.evaluate(() => location.hash);
+      const cardSurvived = (await page.getByTestId("workspace-created").count()) === 1;
+      check(tag, "Esc는 설정을 닫지 않고 ID 카드를 지우지 않는다", hashAfterEsc.includes("section=workspace") && cardSurvived, { hashAfterEsc, cardSurvived });
+      if (cardSurvived) {
+        await page.getByTestId("workspace-created-done").click();
+        const gone = await page.getByTestId("workspace-created").waitFor({ state: "detached", timeout: 5000 }).then(() => true, () => false);
+        const focusedId = await page.evaluate(() => document.activeElement?.id ?? null);
+        check(tag, "「닫기」가 카드를 지우고 초점을 이름 칸으로 돌려준다", gone && focusedId === "workspace-name", { gone, focusedId });
+      }
+    },
+  },
+  {
+    name: "settings-fold",
+    onlyWidths: [900],
+    run: async (page, origin, tag, vp) => {
+      await signIn(page, origin);
+      await page.evaluate(() => { location.hash = "/settings?section=workspace"; });
+      await page.getByTestId("workspace-create-form").waitFor({ timeout: 15_000 });
+      await page.locator("#workspace-name").fill("디자인팀");
+      await page.locator("#workspace-slug").fill("design-team");
+      await page.getByTestId("workspace-create").scrollIntoViewIfNeeded();
+      await page.getByTestId("workspace-create").click();
+      await page.getByTestId("workspace-created").waitFor({ timeout: 10_000 });
+      await page.waitForTimeout(500);
+      const box = await page.getByTestId("workspace-created").boundingBox();
+      const fits = box !== null && box.y >= 0 && box.y + Math.min(box.height, vp.h) <= vp.h + 1;
+      check(tag, "만든 직후 완료 카드가 접힌 아래에 숨지 않고 화면 안에 있다(스크롤 없이)", fits, { box, viewport: vp });
+      await shot(page, tag, "settings-created-fold");
     },
   },
   {
@@ -368,8 +441,11 @@ async function main() {
   const browser = await chromium.launch();
   try {
     for (const scheme of ["light", "dark"]) {
-      for (const vp of [{ w: 1440, h: 900 }, { w: 390, h: 844 }]) {
+      for (const vp of [{ w: 1440, h: 900 }, { w: 390, h: 844 }, { w: 900, h: 700 }]) {
         for (const def of SCENES) {
+          // 접힌 아래 장면은 900×700 한 가지 크기에서만 잰다(라이트).
+          if (def.onlyWidths ? !def.onlyWidths.includes(vp.w) : vp.w === 900) continue;
+          if (def.onlyWidths && scheme === "dark") continue;
           // 로그인 화면은 라이트·다크가 아니라 글자를 재는 장면이라 폭마다 라이트에서만 찍는다.
           if (def.name === "login-labels" && scheme === "dark" && vp.w === 390) continue;
           const tag = `${vp.w}-${scheme}`;

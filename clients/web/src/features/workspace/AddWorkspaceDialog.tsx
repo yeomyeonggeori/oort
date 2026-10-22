@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
@@ -18,7 +18,7 @@ import {
   KeyValueRows,
   OperatorNotice,
 } from "@/features/settings/SettingsFields";
-import { NEW_WORKSPACE_ENTRY_GUIDE } from "@/features/auth/loginWorkspaceEntry";
+import { NEW_WORKSPACE_ENTRY_TEXT } from "@/features/auth/loginWorkspaceEntry";
 import { PRIMARY_ACTION_SHORTCUT } from "@/app/keyboardShortcuts";
 import {
   createWorkspace,
@@ -60,6 +60,13 @@ import {
 // with a 복사 button and names the path in the login screen's own words
 // (`loginWorkspaceEntry.ts`) instead of promising a jump the rail cannot make
 // yet or a slug login the server does not have (#4198, 멀티 조직 P0-A).
+//
+// That ID exists nowhere else: it comes back in the create response only (there is
+// no workspace list to read it from). So the success panel follows the house rule
+// for a value you can see once (the webhook reveal card, the hosted-agent secret
+// card): focus lands on the named group when it appears, the sentence says "leave
+// and it is gone", and Esc / outside click are swallowed so the one explicit exit
+// is 「닫기」, not a reflex.
 // =============================================================================
 
 const FORM_ID = "add-workspace-form";
@@ -136,6 +143,14 @@ function AddWorkspacePanel({
   const nameRef = useRef<HTMLInputElement>(null);
   const slugRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const createdRef = useRef<HTMLDivElement>(null);
+  const createdHeadlineId = useId();
+
+  // 만든 직후 초점이 완료 묶음으로 간다. 눌렀던 「워크스페이스 만들기」는 사라졌고, 이 묶음이
+  // 값을 볼 수 있는 유일한 순간이다. 이름이 낭독되고 그다음 Tab이 「복사」다.
+  useEffect(() => {
+    if (created) createdRef.current?.focus({ preventScroll: true });
+  }, [created]);
 
   const create = useMutation({
     mutationFn: () => createWorkspace(normalizeSlug(slug), name.trim()),
@@ -211,11 +226,14 @@ function AddWorkspacePanel({
           formRef.current?.requestSubmit();
         }
       }}
+      // 만드는 중에는 물론이고, 완료 패널이 떠 있는 동안에도 Esc와 바깥 클릭으로 닫히지 않는다:
+      // 그 ID는 다른 어디에도 없어서, 반사적인 Esc 한 번이 들어갈 길을 지운다. 나가는 길은
+      // 이름 붙은 「닫기」 하나다.
       onEscapeKeyDown={(event) => {
-        if (create.isPending) event.preventDefault();
+        if (create.isPending || created) event.preventDefault();
       }}
       onInteractOutside={(event) => {
-        if (create.isPending) event.preventDefault();
+        if (create.isPending || created) event.preventDefault();
       }}
     >
       <div className="flex flex-col gap-1 border-b border-line p-4">
@@ -227,24 +245,40 @@ function AddWorkspacePanel({
 
       {created ? (
         <div className="flex flex-col gap-3 p-4">
+          {/* `role="status"`가 아니라 이름 붙은 `group`이다: status는 암묵적 live region이라
+              36자 ID와 안내가 뜨는 순간 통째로 낭독된다. 도착했다는 사실은 초점이 이 묶음에
+              들어올 때 이름(헤드라인)으로 말한다(OneTimeSecretCard·웹훅 발급 카드와 같은 규칙). */}
           <div
-            className="flex flex-col gap-3 rounded-md border border-ok bg-surface-raised p-4"
-            role="status"
+            ref={createdRef}
+            tabIndex={-1}
+            role="group"
+            aria-labelledby={createdHeadlineId}
+            className="flex flex-col gap-3 rounded-md border border-ok bg-surface-raised p-4 focus-visible:focus-ring"
             data-testid="add-workspace-created"
           >
-            <p className="break-keep text-body text-ink">
+            <p id={createdHeadlineId} className="break-keep text-body text-ink">
               {created.name} 워크스페이스를 만들었어요.
             </p>
             {/* 로그인 화면이 받는 것은 슬러그가 아니라 이 ID다. 서버가 돌려준 값을
-                그대로(대문자 UUID여도) 보여 주고 그대로 복사한다. `select-all`은 클립보드를
-                못 쓸 때의 한 번 클릭 선택이다(ApprovalActions.LinkOnce와 같은 문법).
+                대소문자도 건드리지 않고 그대로 보여 주고 그대로 복사한다. `select-all`은
+                클립보드를 못 쓸 때의 한 번 클릭 선택이다(ApprovalActions.LinkOnce와 같은 문법).
                 단추가 옆에 서느냐 아래로 내려가느냐는 내용 폭이 아니라 칸 폭이 정한다
                 (`@container` + `@sm`): flex-wrap이면 폰 폭(390)에서 「복사」는 옆에 서다가
                 누르는 순간 「복사됨」으로 길어져 아랫줄로 떨어진다(누른 손가락 아래에서
                 단추가 달아나고 대화상자가 44px 늘어난다, 실측). */}
             <KeyValueRows
               rows={[
-                { key: "슬러그", value: created.slug, numeric: true },
+                {
+                  key: "슬러그",
+                  value: (
+                    <span
+                      className="font-mono text-meta text-ink-muted"
+                      data-numeric=""
+                    >
+                      {created.slug}
+                    </span>
+                  ),
+                },
                 {
                   key: "워크스페이스 ID",
                   value: (
@@ -273,7 +307,7 @@ function AddWorkspacePanel({
               className="break-keep text-meta text-ink-muted"
               data-testid="add-workspace-created-guide"
             >
-              {NEW_WORKSPACE_ENTRY_GUIDE}
+              {NEW_WORKSPACE_ENTRY_TEXT}
             </p>
           </div>
           <div className="flex items-center justify-end gap-2">

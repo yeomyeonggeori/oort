@@ -28,3 +28,14 @@ export const LOGIN_WORKSPACE_ID_LABEL = "워크스페이스 ID";
  * 「이 ID」는 같은 화면에 보이는 「워크스페이스 ID」 줄이다.
  */
 export const NEW_WORKSPACE_ENTRY_GUIDE = `들어가려면 로그아웃한 뒤 로그인 화면에서 「${LOGIN_OTHER_WORKSPACE_LABEL}」을 열고, ${LOGIN_WORKSPACE_ID_LABEL} 칸에 이 ID를 붙여 넣어요.`;
+
+/**
+ * 이 ID는 만든 응답에서만 나온다: 워크스페이스 목록 API도, 다시 보여 주는 화면도 없다(세션 전환·
+ * 계정 집합은 멀티 조직 P1). 그래서 화면을 벗어나기 전에 복사하라고 먼저 말한다. 한 번만 보이는
+ * 값을 말하는 집의 문장과 같은 결이다(웹훅 발급 카드 「이 화면을 벗어나면 다시 볼 수 없어요」).
+ */
+export const NEW_WORKSPACE_ID_ONCE_NOTICE =
+  "이 화면을 벗어나면 ID를 다시 볼 수 없으니 지금 복사해 두세요.";
+
+/** 두 완료 표면이 한 문단으로 말하는 전체: 어떻게 들어가는지, 그리고 지금 복사해야 하는 이유. */
+export const NEW_WORKSPACE_ENTRY_TEXT = `${NEW_WORKSPACE_ENTRY_GUIDE} ${NEW_WORKSPACE_ID_ONCE_NOTICE}`;
