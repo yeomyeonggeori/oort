@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Channel } from "@momo/core/lib/api";
+import type { Channel, RosterMember } from "@momo/core/lib/api";
 import { searchEntryLabel } from "@momo/core/features/search/searchModel";
 import { serverSurface } from "@momo/core/features/capabilities/serverSurfaces";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
@@ -45,6 +45,9 @@ const channels: Channel[] = [
   },
 ];
 
+/** 명부. 기본은 빈 명부(상대를 못 푸는 상태)이고, 시험이 필요하면 채운다. */
+const roster = vi.hoisted(() => ({ members: [] as RosterMember[] }));
+
 // 팔레트가 여는 폼 다이얼로그들은 이 시험의 대상이 아니다. 각자 provider를
 // 요구하므로 여는 쪽만 no-op으로 세워 둔다 — 열림 여부를 읽는 훅들은 기본값
 // (false)이 그대로 맞다.
@@ -77,7 +80,7 @@ vi.mock("@/features/workspace/useWorkspace", async (importOriginal) => {
       refetch: () => undefined,
     }),
     useDirectory: () => ({
-      directory: actual.makeDirectory([]),
+      directory: actual.makeDirectory(roster.members),
       isPending: false,
       refetch: () => undefined,
     }),
@@ -222,6 +225,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   currentPath = "";
+  roster.members = [];
 });
 
 afterEach(() => {
@@ -365,3 +369,32 @@ vi.mock("@/features/directory/useNewDm", () => ({
   useOpenNewDm: () => () => undefined,
   useNewDmOpen: () => false,
 }));
+
+// #4252: 사이드바는 안 읽음이 없는 「나간 멤버와의 대화」를 기본으로 접는다. 접는 것은 진열일 뿐이라 ⌘K 는
+// 그 대화도 그대로 연다(`groups.dms` 를 사이드바의 접힘과 무관하게 읽는다).
+describe("⌘K 는 사이드바가 접은 나간 멤버 DM 도 목록에 둔다 (#4252)", () => {
+  it("명부에 없는 상대의 DM 이 「나간 멤버」로 들어 있고, 이름으로 칠 수 있다", async () => {
+    roster.members = [
+      {
+        id: MEMBER_ID,
+        workspaceId: WS,
+        kind: "human",
+        status: "active",
+        displayName: "곽성재",
+        handle: "seongjae",
+        channelCount: 0,
+        channelIds: [],
+        capabilities: [],
+        createdAtMs: 0,
+        updatedAtMs: 0,
+      },
+    ];
+    await openAt(`/c/${CH_DEPLOY}`);
+    const selector = `[data-testid="switcher-dm"][data-channel-id="${CH_DM}"]`;
+    const dmItem = (): HTMLElement | null => document.querySelector(selector);
+    expect(isVisible(dmItem())).toBe(true);
+    expect(dmItem()?.textContent).toContain("나간 멤버");
+    await type("나간 멤버");
+    expect(isVisible(dmItem())).toBe(true);
+  });
+});

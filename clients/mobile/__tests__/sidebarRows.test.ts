@@ -345,25 +345,185 @@ describe('search', () => {
 
 // #3675 / #3676: 서버 명부는 활성 멤버만 싣는다. 은퇴·정지된 에이전트와의 DM은 상대가
 // 명부에서 빠져, 예전에는 섹션 제목과 같은 낱말 「다이렉트 메시지」가 행 이름이 됐다.
+//
+// #4252: 그 DM 은 안 읽은 것이 없으면 DM 섹션의 `data` 가 아니라 `tucked`(「나간 멤버와의 대화 N개」)로 간다.
+// 판정은 코어 `dmHiddenAsGone` 한 함수이고 웹 사이드바와 같다.
 describe('a DM whose peer left the roster', () => {
   const GONE_ID = 'ffffffff-1111-4111-8111-ffffffffffff';
+  const GONE_ID_B = 'ffffffff-2222-4222-8222-ffffffffffff';
   const DM_GONE = channel({
     id: 'ch-dm-gone',
     kind: 'dm',
     memberIds: [SELF_ID, GONE_ID],
   });
+  const DM_GONE_B = channel({
+    id: 'ch-dm-gone-b',
+    kind: 'dm',
+    memberIds: [SELF_ID, GONE_ID_B],
+  });
+  const ROSTER_READY = makeDirectory([SELF, HUMAN_KIM]);
+
+  function goneInput(overrides: Partial<SidebarInput> = {}): SidebarInput {
+    return input({
+      directory: ROSTER_READY,
+      agents: [],
+      groups: {channels: [], dms: [DM_HUMAN_KIM, DM_GONE]},
+      ...overrides,
+    });
+  }
 
   it('is named 「나간 멤버」, never the section title', () => {
-    const sections = buildSidebarSections(
-      input({
-        directory: makeDirectory([SELF]),
-        agents: [],
-        groups: {channels: [], dms: [DM_GONE]},
-      }),
-    );
-    const row = section(sections, 'dms')?.data[0];
+    const sections = buildSidebarSections(goneInput());
+    const row = section(sections, 'dms')?.tucked?.[0];
     expect(row?.title).toBe('나간 멤버');
     expect(row?.title).not.toBe('다이렉트 메시지');
     expect(row?.isAgent).toBe(false);
+    expect(row?.labelKind).toBe('gone');
+  });
+
+  it('나간 멤버 DM 은 안 읽음이 없으면 접힌다: data 에서 빠지고 tucked 로 간다', () => {
+    const dms = section(buildSidebarSections(goneInput()), 'dms');
+    expect(dms?.data.map(row => row.key)).toEqual(['dm:ch-dm-human']);
+    expect(dms?.tucked?.map(row => row.key)).toEqual(['dm:ch-dm-gone']);
+  });
+
+  it('접힌 것도 세어진다 (rowCount 는 data 와 tucked 를 모두 센다)', () => {
+    expect(rowCount(buildSidebarSections(goneInput()))).toBe(2);
+  });
+
+  it('안 읽은 메시지가 있으면 접히지 않는다', () => {
+    const sections = buildSidebarSections(
+      goneInput({
+        unreadByChannel: new Map([
+          [
+            DM_GONE.id,
+            readState({channelId: DM_GONE.id, lastReadSeq: 3, latestSeq: 5}),
+          ],
+        ]),
+      }),
+    );
+    const dms = section(sections, 'dms');
+    expect(dms?.data.map(row => row.key)).toContain('dm:ch-dm-gone');
+    expect(dms?.tucked).toEqual([]);
+  });
+
+  it('멘션이 있으면 접히지 않는다', () => {
+    const sections = buildSidebarSections(
+      goneInput({
+        unreadByChannel: new Map([
+          [DM_GONE.id, readState({channelId: DM_GONE.id, mentionCount: 1})],
+        ]),
+      }),
+    );
+    expect(section(sections, 'dms')?.tucked).toEqual([]);
+  });
+
+  it('「여기부터 안 읽음」 표시도 센다 (행의 알약과 같은 합성 안 읽음이다)', () => {
+    const sections = buildSidebarSections(
+      goneInput({
+        unreadByChannel: new Map([
+          [
+            DM_GONE.id,
+            readState({
+              channelId: DM_GONE.id,
+              lastReadSeq: 5,
+              latestSeq: 5,
+              markedUnreadBeforeSeq: 4,
+            }),
+          ],
+        ]),
+      }),
+    );
+    expect(section(sections, 'dms')?.tucked).toEqual([]);
+  });
+
+  it('지금 열려 있는 나간 멤버 DM 은 접히지 않는다', () => {
+    const sections = buildSidebarSections(goneInput({openChannelId: DM_GONE.id}));
+    const dms = section(sections, 'dms');
+    expect(dms?.data.map(row => row.key)).toContain('dm:ch-dm-gone');
+    expect(dms?.tucked).toEqual([]);
+  });
+
+  it('대소문자가 다른 id 로 열려 있어도 같은 DM 이다', () => {
+    const sections = buildSidebarSections(
+      goneInput({openChannelId: DM_GONE.id.toUpperCase()}),
+    );
+    expect(section(sections, 'dms')?.tucked).toEqual([]);
+  });
+
+  it('명부를 아직 못 받았으면(빈 명부) 접지 않는다: 「불러오는 중」은 나간 멤버가 아니다', () => {
+    const sections = buildSidebarSections(
+      goneInput({directory: makeDirectory([])}),
+    );
+    const dms = section(sections, 'dms');
+    expect(dms?.tucked).toEqual([]);
+    expect(dms?.data.map(row => row.title)).toContain('불러오는 중');
+  });
+
+  it('명부가 한도(200)에 닿아 잘렸을 수 있으면 접지 않는다: 「없다」가 「나갔다」가 아니다', () => {
+    const filler = Array.from({length: 200}, (_, n) =>
+      member({
+        id: `aaaaaaaa-0000-4000-8000-${String(n).padStart(12, '0')}`,
+        displayName: `멤버${n}`,
+        handle: `m${n}`,
+      }),
+    );
+    const full = makeDirectory([SELF, HUMAN_KIM, ...filler]);
+    const dms = section(buildSidebarSections(goneInput({directory: full})), 'dms');
+    expect(dms?.tucked).toEqual([]);
+    expect(dms?.data.map(row => row.title)).toContain('나간 멤버');
+    // 한 명 모자라면 다 받은 것이다.
+    const almost = makeDirectory([SELF, HUMAN_KIM, ...filler.slice(0, 197)]);
+    expect(
+      section(buildSidebarSections(goneInput({directory: almost})), 'dms')?.tucked,
+    ).toHaveLength(1);
+  });
+
+  it('읽음 투영이 오는 중이면 접힌 채, 못 읽었으면 접지 않는다', () => {
+    expect(
+      section(buildSidebarSections(goneInput({readPhase: 'loading'})), 'dms')?.tucked,
+    ).toHaveLength(1);
+    expect(
+      section(buildSidebarSections(goneInput({readPhase: 'error'})), 'dms')?.tucked,
+    ).toEqual([]);
+  });
+
+  it('검색 중에는 접지 않는다: 이름으로 찾으면 접힌 대화도 나온다', () => {
+    const sections = buildSidebarSections(goneInput({query: '나간'}));
+    const dms = section(sections, 'dms');
+    expect(dms?.tucked).toEqual([]);
+    expect(dms?.data.map(row => row.key)).toEqual(['dm:ch-dm-gone']);
+  });
+
+  it('검색어가 없으면 접힌 대화는 목록에서 빠진 채다', () => {
+    const dms = section(buildSidebarSections(goneInput({query: '  '})), 'dms');
+    expect(dms?.tucked).toHaveLength(1);
+  });
+
+  it('나간 멤버 DM 만 있어도 DM 섹션은 선다 (접힌 줄의 문이 그 섹션 끝에 있다)', () => {
+    const sections = buildSidebarSections(
+      goneInput({groups: {channels: [], dms: [DM_GONE, DM_GONE_B]}}),
+    );
+    const dms = section(sections, 'dms');
+    expect(dms).toBeDefined();
+    expect(dms?.data).toEqual([]);
+    expect(dms?.tucked?.map(row => row.key)).toEqual([
+      'dm:ch-dm-gone',
+      'dm:ch-dm-gone-b',
+    ]);
+    expect(rowCount(sections)).toBe(2);
+  });
+
+  it('상대가 명부에 있는 DM 은 안 읽음이 없어도 접히지 않는다', () => {
+    const dms = section(buildSidebarSections(goneInput()), 'dms');
+    expect(dms?.data.map(row => row.labelKind)).toEqual(['peer']);
+  });
+
+  it('채널 섹션에는 접힌 줄이 없다', () => {
+    const channels = section(
+      buildSidebarSections(goneInput({groups: {channels: [GENERAL], dms: [DM_GONE]}})),
+      'channels',
+    );
+    expect(channels?.tucked).toEqual([]);
   });
 });

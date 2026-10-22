@@ -226,7 +226,7 @@ function sessionValue(): SessionContextValue {
   };
 }
 
-async function mount(): Promise<HTMLElement> {
+async function mount(path = `/c/${DM_ID}`): Promise<HTMLElement> {
   const host = document.createElement("div");
   document.body.append(host);
   mountedHost = host;
@@ -236,14 +236,16 @@ async function mount(): Promise<HTMLElement> {
     { value: sessionValue() },
     createElement(
       MemoryRouter,
-      { initialEntries: [`/c/${DM_ID}`] },
+      { initialEntries: [path] },
       createElement(
         Routes,
         null,
         createElement(Route, {
           path: "/c/:channelId",
           element: createElement(ChatShell),
-        })
+        }),
+        // 인덱스 라우트(#4252): 채널이 없을 때 어떤 대화를 열어 주는가.
+        createElement(Route, { path: "/", element: createElement(ChatShell) })
       )
     )
   );
@@ -307,5 +309,46 @@ describe("ChatShell · 명부에서 빠진 상대와의 DM", () => {
     expect(last.channelLabel).toBe("나간 멤버");
     expect(last.channelLabel).not.toContain("다이렉트 메시지");
     expect(last.recipient).toBe("person");
+  });
+});
+
+// #4252: 사이드바가 「나간 멤버와의 대화」로 접은 DM 은 `/` 가 열어 주는 대화의 후보도 아니다. 사이드바와 본문이
+// 같은 집합을 읽지 않으면, 접힌 대화를 본문이 도로 열어 「열려 있음」으로 되살아난다.
+describe("ChatShell · 인덱스 라우트와 접힌 나간 멤버 DM (#4252)", () => {
+  const PEER = "00000000-0000-7000-8000-0000000001aa";
+  const LIVE_DM = "00000000-0000-7000-8000-0000000002bb";
+  const peer: RosterMember = {
+    ...self,
+    id: PEER,
+    displayName: "이도현",
+    handle: "dohyun",
+    role: "member",
+  };
+  const ghostDm = (): Channel =>
+    ({ id: DM_ID, workspaceId: WS, kind: "dm", muted: false, memberIds: [ME, GONE] }) as Channel;
+  const liveDm = (): Channel =>
+    ({ id: LIVE_DM, workspaceId: WS, kind: "dm", muted: false, memberIds: [ME, PEER] }) as Channel;
+
+  it("채널이 없고 첫 DM 이 접힌 나간 멤버면, 인덱스 라우트는 다음 DM 을 연다", async () => {
+    rosterMembers = [self, peer];
+    channelsState.groups = { channels: [], dms: [ghostDm(), liveDm()] };
+    const host = await mount("/");
+    const header = host.querySelector('[data-testid="channel-header"]');
+    expect(header?.textContent).toContain("이도현");
+    expect(header?.textContent).not.toContain("나간 멤버");
+  });
+
+  it("남은 DM 이 전부 접혔으면 인덱스 라우트는 아무 대화도 열지 않는다", async () => {
+    channelsState.groups = { channels: [], dms: [ghostDm()] };
+    const host = await mount("/");
+    // 열린 대화가 없다: 접힌 DM 의 이름이 머리에 서지 않고, 컴포저도 서지 않는다.
+    expect(host.querySelector('[data-testid="channel-header"]')?.textContent).not.toContain("나간 멤버");
+    expect(composerProps).toEqual([]);
+  });
+
+  it("주소가 정한 대화는 접힌 나간 멤버 DM 이어도 연다 (⌘K·링크로 열린다)", async () => {
+    channelsState.groups = { channels: [], dms: [ghostDm()] };
+    const host = await mount(`/c/${DM_ID}`);
+    expect(host.querySelector('[data-testid="channel-header"]')?.textContent).toContain("나간 멤버");
   });
 });

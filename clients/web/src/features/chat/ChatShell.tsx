@@ -36,6 +36,8 @@ import {
   useClosedDms,
 } from "@/features/sidebar/sidebarDmClosure";
 import { useDmRevival } from "@/features/sidebar/dmRevival";
+import { goneDmIds } from "@/features/sidebar/goneDmHiding";
+import { rosterLoaded } from "@momo/core/features/sidebar/goneDm";
 import { applyFirstAgentFocus } from "@/features/welcome/firstAgentStore";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import {
@@ -209,13 +211,30 @@ export function ChatShell() {
   // 닫은 DM(#3963, `sidebarDmClosure.ts`)은 이 폴백의 후보가 아니다. 사이드바가 같은 함수로 열린 대화를
   // 정하므로, 채널이 없는 멤버의 첫 DM 을 닫으면 본문도 다음 DM(없으면 빈 상태)으로 간다.
   const closedDms = useClosedDms(workspaceId);
+  const readPhase = readProjectionPhase(readStates);
   const latestSeqForClosure = useDmRevival({
     workspaceId,
     dms: channelsQuery.groups.dms,
     closed: closedDms,
     byChannel: readStates.byChannel,
-    phase: readProjectionPhase(readStates),
+    phase: readPhase,
   });
+  // 나간 멤버와의 대화(#4252)로 접힌 DM 도 후보가 아니다: 사이드바가 같은 집합으로 접고, 접힌 대화를 본문이 도로 열면
+  // 열려 있다는 이유로 목록에 되살아난다.
+  const rosterReady = rosterLoaded(directoryQuery);
+  const foldedGone = useMemo(
+    () =>
+      goneDmIds({
+        dms: channelsQuery.groups.dms,
+        directory,
+        selfMemberId: session.member.id,
+        rosterReady,
+        byChannel: readStates.byChannel,
+        openId: null,
+        phase: readPhase,
+      }),
+    [channelsQuery.groups.dms, directory, session.member.id, rosterReady, readStates.byChannel, readPhase]
+  );
   const channelId =
     params.channelId ??
     indexFallbackChannelId({
@@ -223,7 +242,8 @@ export function ChatShell() {
       dms: channelsQuery.groups.dms,
       closed: closedDms,
       latestSeqOf: latestSeqForClosure,
-      phase: readProjectionPhase(readStates),
+      phase: readPhase,
+      foldedGone,
     }) ??
     null;
 

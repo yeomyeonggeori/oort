@@ -109,6 +109,9 @@ import {
   useClosedDms,
 } from "./sidebarDmClosure";
 import { useDmRevival } from "./dmRevival";
+import { goneDmIds } from "./goneDmHiding";
+import { GoneDmFold } from "./GoneDmFold";
+import { rosterLoaded } from "@momo/core/features/sidebar/goneDm";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
 import {
   setSidebarSectionCollapsed,
@@ -128,6 +131,9 @@ import { ShortcutHelpDialog } from "@/app/ShortcutHelpDialog";
 import { useOpenNewDm } from "@/features/directory/useNewDm";
 import { mayActOnLiveness } from "@momo/core/features/agents/liveness";
 import { DmAvatar, DmStatusText } from "./DmAvatar";
+
+/** 펼친 「나간 멤버와의 대화」 목록의 id (펼침 단추의 `aria-controls`). */
+const GONE_DM_LIST_ID = "sidebar-gone-dm-list";
 
 // =============================================================================
 // Sidebar (R-1 §1): workspace header, the two global surfaces (인박스 / 활동),
@@ -350,6 +356,22 @@ export function Sidebar({
     byChannel: readStates.byChannel,
     phase: readPhase,
   });
+  // 나간 멤버와의 대화(#4252, 코어 `dmHiddenAsGone`)로 접히는 DM 은 `/` 가 열어 주는 대화의 후보도 아니다
+  // (`ChatShell` 이 같은 집합으로 폴백을 고른다).
+  const rosterReady = rosterLoaded(directoryQuery);
+  const foldedGoneForFallback = useMemo(
+    () =>
+      goneDmIds({
+        dms,
+        directory: directoryQuery.directory,
+        selfMemberId: session.member.id,
+        rosterReady,
+        byChannel: readStates.byChannel,
+        openId: null,
+        phase: readPhase,
+      }),
+    [dms, directoryQuery.directory, session.member.id, rosterReady, readStates.byChannel, readPhase]
+  );
   const openId = openChannelId(
     routePath,
     indexFallbackChannelId({
@@ -358,6 +380,7 @@ export function Sidebar({
       closed: closedDms,
       latestSeqOf: latestSeqForClosure,
       phase: readPhase,
+      foldedGone: foldedGoneForFallback,
     })
   );
   // 닫기는 행마다 `dmCloseOffered` 가 정한다(호버 X 와 메뉴 항목이 같은 함수를 읽는다): **읽음 투영이 준비된
@@ -378,6 +401,35 @@ export function Sidebar({
     [dms, closedDms, latestSeqForClosure, openId, readPhase]
   );
   const closedDmCount = dms.length - visibleDms.length;
+  // 나간 멤버와의 대화(#4252): 닫기 원장이 거르고 **남은** DM 중 상대가 명부에 없고 안 읽은 것이 없는 것은 목록에서
+  // 접고, DM 구역 끝의 한 줄이 그 수를 센다. 열려 있는 DM 은 접히지 않는다. ⌘K 는 `groups.dms` 를 그대로 읽어
+  // 접힌 대화도 연다. 원장이 숨긴 것은 이 수에 들지 않는다(`closedDmCount` 는 원장만 센다).
+  const foldedGone = useMemo(
+    () =>
+      goneDmIds({
+        dms: visibleDms,
+        directory: directoryQuery.directory,
+        selfMemberId: session.member.id,
+        rosterReady,
+        byChannel: readStates.byChannel,
+        openId,
+        phase: readPhase,
+      }),
+    [visibleDms, directoryQuery.directory, session.member.id, rosterReady, readStates.byChannel, openId, readPhase]
+  );
+  const shownDms = useMemo(
+    () => visibleDms.filter((channel) => !foldedGone.has(channel.id.toLowerCase())),
+    [visibleDms, foldedGone]
+  );
+  const goneDms = useMemo(
+    () => visibleDms.filter((channel) => foldedGone.has(channel.id.toLowerCase())),
+    [visibleDms, foldedGone]
+  );
+  // 펼침은 들여다보는 동작이지 설정이 아니다: 저장하지 않고, 접힌 대화가 없어지면 닫힌 채로 돌아간다.
+  const [goneOpen, setGoneOpen] = useState(false);
+  useEffect(() => {
+    if (goneDms.length === 0) setGoneOpen(false);
+  }, [goneDms.length]);
   // 닫아 둔 DM 이 **열리는** 순간(주소 · ⌘K · 새 DM)이 곧 다시 연다는 뜻이다. 원장에서 지우지
   // 않으면 사람이 일부러 연 대화가 다른 곳으로 옮겨 가는 순간 도로 사라진다. 효과는 `openId` 가
   // **바뀔 때만** 돈다(deps): 열린 DM 을 X 로 닫으면 `closeDmRow` 가 원장을 쓴 뒤 `/` 로 착지시키고,
@@ -400,9 +452,9 @@ export function Sidebar({
       deriveSidebarSections({
         prefs: sidebarPrefs.prefs,
         channels,
-        dms: visibleDms,
+        dms: shownDms,
       }),
-    [sidebarPrefs.prefs, channels, visibleDms]
+    [sidebarPrefs.prefs, channels, shownDms]
   );
   // 캐스트 없음 (design-review #1932 N-2): 기본 두 섹션이 언제나 있다는 것은
   // 코어의 계약이고, 이제 **타입이** 그렇게 말한다.
@@ -1295,6 +1347,28 @@ export function Sidebar({
                         : "아직 대화가 없습니다. ⌘⇧K로 시작하세요."}
                     </li>
                   )}
+                {/* 나간 멤버와의 대화(#4252): 구역 맨 끝의 조용한 줄. 펼치면 접힌 대화가 이 줄 아래에 선다. */}
+                {goneDms.length > 0 && (
+                  <>
+                    <GoneDmFold
+                      count={goneDms.length}
+                      expanded={goneOpen}
+                      onToggle={() => setGoneOpen((open) => !open)}
+                      listId={GONE_DM_LIST_ID}
+                    />
+                    {goneOpen && (
+                      <li>
+                        <ul
+                          id={GONE_DM_LIST_ID}
+                          className="sidebar-stack"
+                          data-testid="gone-dm-list"
+                        >
+                          {goneDms.map((channel) => rowFor(channel))}
+                        </ul>
+                      </li>
+                    )}
+                  </>
+                )}
               </SidebarSection>
 
               {/* The turn pill covers a bounded number of (channel, agent) pairs.

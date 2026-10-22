@@ -3,6 +3,10 @@ import {NetworkError} from '@momo/core/lib/http';
 import {attachParticle} from '@momo/core/lib/koreanParticle';
 import {serverSurface} from '@momo/core/features/capabilities/serverSurfaces';
 import {channelLabel, memberFor} from '@momo/core/features/workspace/directory';
+import {
+  goneDmDisclosureLabel,
+  readProjectionPhase,
+} from '@momo/core/features/sidebar/goneDm';
 import {mayActOnLiveness} from '@momo/core/features/agents/liveness';
 import {
   dmPeerStatusDot,
@@ -53,13 +57,14 @@ import {usePalette, useStyles} from '../design/theme';
 import {useAgentLiveness} from '../features/agents/useAgentLiveness';
 import {useAgentWorkingSignals} from '../features/agents/workingSignal';
 import {StatusDot} from '../features/presence/StatusDot';
-import {useCollapsedSections, visibleRows} from '../features/home/collapsedSections';
+import {useCollapsedSections, homeSectionItems} from '../features/home/collapsedSections';
 import {buildWorkingCard, type WorkingCardModel} from '../features/home/workingCard';
 import {workspaceHeading, type WorkspaceLogo} from '../features/home/workspaceLogo';
 import {
   buildSidebarSections,
   CHANNEL_LIST_FAILED,
   rowCount,
+  type GoneToggleItem,
   type SidebarRow,
   type SidebarSection,
 } from '../features/sidebar/rows';
@@ -320,6 +325,9 @@ export default function SidebarScreen({
   const identity = useWorkspaceIdentity(workspaceId);
   const heading = workspaceHeading(identity);
   const {collapsed, toggle} = useCollapsedSections(workspaceId);
+  // 「나간 멤버와의 대화」 펼침(#4252): 들여다보는 동작이지 설정이 아니라 저장하지 않는다.
+  const [goneOpen, setGoneOpen] = useState(false);
+  const readPhase = readProjectionPhase(readStates);
 
   // Synchronous. See the note above.
   const [query, setQuery] = useState('');
@@ -346,6 +354,7 @@ export default function SidebarScreen({
         unreadByChannel: readStates.byChannel,
         openChannelId,
         query,
+        readPhase,
       }),
     [
       channelsQuery.groups,
@@ -355,6 +364,7 @@ export default function SidebarScreen({
       readStates.byChannel,
       openChannelId,
       query,
+      readPhase,
     ],
   );
 
@@ -429,7 +439,7 @@ export default function SidebarScreen({
   // 섹션 머리의 ⋯ (시안 `.a-sec-h .ctl`). 장식이 아니라 문이다: 헤더에서 내려온
   // 두 검색(이름·메시지)과, DM 섹션에서는 에이전트 목록으로 간다.
   const openSectionMenu = useCallback(
-    (section: SidebarSection) => {
+    (section: Pick<SidebarSection, 'key' | 'label'>) => {
       const items: {label: string; run: () => void}[] = [
         {label: FILTER_ACTION, run: () => setFilterOpen(true)},
       ];
@@ -454,11 +464,11 @@ export default function SidebarScreen({
     () =>
       sections.map(section => ({
         ...section,
-        data: visibleRows(section, collapsed.has(section.key), row =>
+        data: homeSectionItems(section, collapsed.has(section.key), goneOpen, row =>
           uuidEq(row.targetId, openChannelId ?? undefined),
         ),
       })),
-    [sections, collapsed, openChannelId],
+    [sections, collapsed, goneOpen, openChannelId],
   );
 
   const total = rowCount(sections);
@@ -656,19 +666,23 @@ export default function SidebarScreen({
               ) : null}
             </View>
           )}
-          renderItem={({item}) => (
-            <Row
-              row={item}
-              directory={directoryQuery.directory}
-              // `uuidEq`, not `===`: ids cross the wire in mixed case, and the
-              // unread suppression one file over already compares them this way.
-              // Two different answers about the same row is how a highlighted
-              // row keeps its badge.
-              selected={uuidEq(item.targetId, openChannelId ?? undefined)}
-              busy={openDm.isPending && openDm.variables === item.targetId}
-              onPress={() => onRowPress(item)}
-            />
-          )}
+          renderItem={({item}) =>
+            item.kind === 'goneToggle' ? (
+              <GoneToggleRow item={item} onPress={() => setGoneOpen(open => !open)} />
+            ) : (
+              <Row
+                row={item}
+                directory={directoryQuery.directory}
+                // `uuidEq`, not `===`: ids cross the wire in mixed case, and the
+                // unread suppression one file over already compares them this way.
+                // Two different answers about the same row is how a highlighted
+                // row keeps its badge.
+                selected={uuidEq(item.targetId, openChannelId ?? undefined)}
+                busy={openDm.isPending && openDm.variables === item.targetId}
+                onPress={() => onRowPress(item)}
+              />
+            )
+          }
           stickySectionHeadersEnabled={false}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
@@ -752,7 +766,7 @@ function SectionHead({
   onToggle,
   onMenu,
 }: {
-  section: SidebarSection;
+  section: Pick<SidebarSection, 'key' | 'label'>;
   collapsed: boolean;
   onToggle: () => void;
   onMenu: () => void;
@@ -812,6 +826,71 @@ function SectionHead({
 }
 
 // ---- 행 (시안 `.a-row`) --------------------------------------------------------
+
+/**
+ * 상대를 알아볼 수 없는 DM 의 기본 아바타 (#4252, 웹 `DmAvatar` 의 「점선 테두리 원 + 사람 윤곽」). 모를 때 이니셜을
+ * 지어내지 않는다는 코어의 규칙(`avatar.ts`)은 그대로이고, 이니셜이 아닌 것이 서는 자리가 빈 원이 아니게 할 뿐이다.
+ * 점선은 웹의 `--line-strong` 자리(`textFaint`, 3:1)다. 보조기술에는 나가지 않는다: 행의 라벨이 이름을 이미 말한다.
+ */
+function DefaultFace(): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const palette = usePalette();
+  return (
+    <View
+      style={styles.defaultFace}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      testID="home-default-face">
+      <Image
+        source={HOME_ICONS.user}
+        style={[styles.icon18, {tintColor: palette.textMuted}]}
+      />
+    </View>
+  );
+}
+
+/**
+ * DM 섹션 끝의 조용한 줄 「나간 멤버와의 대화 N개」 (#4252). 규칙(무엇이 접히는가)은 코어 `dmHiddenAsGone` 이 갖고,
+ * 이 줄은 접힌 수를 말하고 펼침을 여는 문이다. 얼굴 자리(28)에 셰브론이 서서 글자가 DM 이름과 같은 자리에서 시작한다.
+ * 펼치면 접힌 대화가 이 줄 아래에 선다.
+ */
+function GoneToggleRow({
+  item,
+  onPress,
+}: {
+  item: GoneToggleItem;
+  onPress: () => void;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const palette = usePalette();
+  const label = goneDmDisclosureLabel(item.count);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{expanded: item.expanded}}
+      onPress={() => {
+        haptics.selection();
+        onPress();
+      }}
+      style={({pressed}) => [styles.goneToggle, pressed && styles.rowPressed]}
+      testID="sidebar-gone-toggle">
+      <View style={styles.goneChevronSlot}>
+        <Image
+          source={HOME_ICONS.down}
+          style={[
+            styles.icon20,
+            {tintColor: palette.icon},
+            !item.expanded && styles.chevronCollapsed,
+          ]}
+        />
+      </View>
+      <Text style={styles.goneToggleLabel} numberOfLines={1} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
 
 /** 에이전트의 둥근 사각 (시안 `.a-ag`). 사람의 원과 모양으로 갈린다. */
 function AgentSquare({
@@ -899,6 +978,9 @@ function Row({
     lead = (
       <AgentSquare size={HOME.rowFace} corner={HOME.rowAgentCorner} glyph={HOME.rowAgentGlyph} />
     );
+  } else if (row.labelKind === 'gone' || row.labelKind === 'pending') {
+    // 상대를 알아볼 수 없는 DM(「나간 멤버」, 명부를 받는 중)은 빈 원이 아니라 기본 아바타다(웹 `DmAvatar` 와 같다, #4252).
+    lead = <DefaultFace />;
   } else {
     lead = <View style={styles.faceBlank} />;
   }
@@ -1351,6 +1433,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   },
   icon22: {width: HOME_ICON_SIZE.hash, height: HOME_ICON_SIZE.hash},
   icon20: {width: HOME_ICON_SIZE.more, height: HOME_ICON_SIZE.more},
+  icon18: {width: HOME_ICON_SIZE.user, height: HOME_ICON_SIZE.user},
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1379,6 +1462,34 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     borderWidth: 1,
     borderColor: color.border,
   },
+  // 기본 아바타: 점선 테두리 원(웹 `border-dashed border-line-strong`) 안에 사람 윤곽.
+  defaultFace: {
+    width: HOME.rowFace,
+    height: HOME.rowFace,
+    borderRadius: HOME.rowFace / 2,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: color.textFaint,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // 「나간 멤버와의 대화 N개」 줄: 행과 같은 좌우 안쪽 여백, 얼굴 자리에 셰브론, 글자는 한 단 낮다.
+  goneToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: HOME.rowGap,
+    minHeight: TOUCH_TARGET,
+    paddingLeft: HOME.rowPadLeft,
+    paddingRight: HOME.rowPadRight,
+    borderRadius: HOME.rowRadius,
+  },
+  goneChevronSlot: {
+    width: HOME.rowFace,
+    height: HOME.rowFace,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  goneToggleLabel: {flexShrink: 1, fontSize: font.label, color: color.textMuted},
   // 상태 점이 있는 줄의 얼굴 상자(점의 절대 위치 기준). 크기는 얼굴과 같다.
   face: {width: HOME.rowFace, height: HOME.rowFace},
   statusAnchor: {position: 'absolute', right: -2, bottom: -2},
