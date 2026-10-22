@@ -110,11 +110,10 @@ export function ThemeCard() {
         description={
           <>
             {modeHint}
-            {notice ? (
-              <span role="status" data-testid="theme-mode-notice" className="block text-ink">
-                {notice}
-              </span>
-            ) : null}
+            {/* 읽어 주는 영역은 내용이 생기기 전에 이미 있어야 낭독이 선다(비어 있으면 높이가 없다). */}
+            <span role="status" data-testid="theme-mode-notice" className="block text-ink">
+              {notice}
+            </span>
           </>
         }
         labelId="appearance-mode-label"
@@ -144,7 +143,7 @@ export function ThemeCard() {
       </SettingsRow>
       <GlassRows />
       <ProminentRow />
-      <SettingsRow label="미리보기" description="고른 색 모드와 강조색으로 앱이 이렇게 보여요." stack>
+      <SettingsRow label="미리보기" description="고른 테마·색 모드·강조색으로 앱이 이렇게 보여요." stack>
         <ThemePreviewCard mode={choice} theme={themeRef} />
       </SettingsRow>
     </SettingsSection>

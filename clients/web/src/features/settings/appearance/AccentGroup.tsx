@@ -22,9 +22,10 @@ import { cn } from "@/design/lib/cn";
 // 그 산수(`resolveSignal`)가 메인 번들에 들어가지 않도록 이 청크에서 푼다. 청크를 받는 동안(또는 받지 못했을
 // 때)에는 `ThemeCard`가 기존 모양의 정적 칩을 보인다.
 //
-// 카탈로그에서는 프리셋이 거절될 수 있다(홍염은 57 테마-모드 가운데 26곳에서 위험색과 겹친다, 테마 토큰 표
-// §8.5). 거절된 칩은 눌 수 없고 이유(core `SIGNAL_REJECTION_COPY` 한 줄)가 칩 아래에 선다. 모드는 지금 화면에
-// 서 있는 모드다: 고정이면 그 모드, 시스템이면 이 기기의 시스템이 지금 어느 쪽인가.
+// 카탈로그에서는 프리셋이 거절될 수 있다(홍염은 57 테마-모드 가운데 29곳에서 위험색과 겹친다. core `derive.test.ts`의
+// 「프리셋 거절 통계」가 세고, 테마 토큰 표 §8.5의 프로토타입 값 26과는 구현 실측이 다르다). 거절된 칩은 눌 수 없고
+// 이유(core `SIGNAL_REJECTION_COPY` 한 줄)가 칩 아래에 선다. 모드는 지금 화면에 서 있는 모드다: 고정이면 그 모드,
+// 시스템이면 이 기기의 시스템이 지금 어느 쪽인가.
 // =============================================================================
 
 interface Chip {
@@ -55,13 +56,32 @@ function useChips(): Chips | null {
 }
 
 const REASON_ID = "appearance-accent-unavailable";
+/** 저장된 선택이 이 테마·모드에서 거절돼 화면이 기본 신호로 서 있을 때 이유 줄 끝에 붙는 한 문장(폰도 같은 말을 한다). */
+const STORED_REJECTED_COPY = "고른 강조색은 이 테마에서 쓸 수 없어 기본 색으로 보여요.";
+
+/** 같은 이유로 거절된 칩은 한 줄로 묶는다(「성운·홍염: …」). 같은 문장을 칩마다 되풀이하지 않는다. */
+function reasonText(unavailable: readonly { id: AccentId; label: string }[], chips: Chips | null): string {
+  const groups = new Map<string, string[]>();
+  for (const theme of unavailable) {
+    const reason = chips?.[theme.id]?.reason ?? "";
+    groups.set(reason, [...(groups.get(reason) ?? []), theme.label]);
+  }
+  return [...groups].map(([reason, labels]) => `${labels.join("·")}: ${reason}`).join(" ");
+}
 
 function Swatch({ id, label, checked, chip }: { id: AccentId; label: string; checked: boolean; chip: Chip | undefined }) {
   const node = useRef<HTMLLabelElement>(null);
   const paint = chip?.paint ?? null;
   useLayoutEffect(() => {
-    if (node.current && paint) {
-      paintElement(node.current, { "--signal": paint.signal, "--on-signal": paint.onSignal });
+    const chipNode = node.current;
+    if (!chipNode) return;
+    if (paint) {
+      paintElement(chipNode, { "--signal": paint.signal, "--on-signal": paint.onSignal });
+    } else {
+      // 거절된 칩은 색을 칠하지 않는다. 서 있던 칩이 테마를 바꿔 거절되면 앞 테마가 꽂은 값을 걷어서, 흐린 칩이 늘
+      // 정적 바인딩(새벽하늘 값)으로 보이게 한다(남겨 두면 어느 테마를 거쳐 왔는지에 따라 흐린 색이 달라진다).
+      chipNode.style.removeProperty("--signal");
+      chipNode.style.removeProperty("--on-signal");
     }
   }, [paint]);
   const disabled = chip?.reason != null;
@@ -97,7 +117,8 @@ export default function AccentGroup({ isDawnsky }: { isDawnsky: boolean }) {
   // 고른 프리셋이 이 테마·모드에서 못 쓰는 것이면 화면은 이미 테마의 기본 신호로 서 있으므로 「기본」 칩을 고른
   // 것으로 보인다(저장된 선택은 그대로라 쓸 수 있는 테마로 돌아가면 다시 선다).
   const unavailable = ACCENT_THEMES.filter((theme) => chips?.[theme.id]?.reason != null);
-  const shown: AccentId = chips?.[accent]?.reason != null ? "dawn" : accent;
+  const storedRejected = chips?.[accent]?.reason != null;
+  const shown: AccentId = storedRejected ? "dawn" : accent;
   return (
     <fieldset data-testid="accent-choice" className="m-0 min-w-0 border-0 p-0">
       <legend className="sr-only">강조색</legend>
@@ -114,7 +135,8 @@ export default function AccentGroup({ isDawnsky }: { isDawnsky: boolean }) {
       </div>
       {unavailable.length > 0 ? (
         <p id={REASON_ID} data-testid="accent-unavailable" className="mt-2 break-keep text-meta text-ink-muted">
-          {unavailable.map((theme) => `${theme.label}: ${chips?.[theme.id]?.reason}`).join(" ")}
+          {reasonText(unavailable, chips)}
+          {storedRejected ? ` ${STORED_REJECTED_COPY}` : ""}
         </p>
       ) : null}
     </fieldset>

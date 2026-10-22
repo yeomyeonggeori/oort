@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 
 const css = readFileSync(new URL("./theme-gallery.css", import.meta.url), "utf8");
 const preview = readFileSync(new URL("../../features/settings/shell/ThemePreviewCard.tsx", import.meta.url), "utf8");
+const tile = readFileSync(new URL("../../features/settings/appearance/ThemeTile.tsx", import.meta.url), "utf8");
 const tokens = readFileSync(new URL("../tokens.css", import.meta.url), "utf8");
 
 /** `selector { ... }` 본문. 중첩 블록이 없는 단순 규칙만 읽는다. */
@@ -38,8 +39,14 @@ describe("미니 앱 제목: 말줄임이 아니라 뺀다", () => {
 
   it("기준 폭: 갤러리 타일(약 140~160)은 아래, 접힌 행 썸네일(200)은 위에 놓인다", () => {
     const tileMin = Number(/--spacing-theme-tile-min:\s*(\d+)px/.exec(tokens)![1]);
-    const gridMin = tileMin * Number(/minmax\(calc\(var\(--spacing-theme-tile-min\) \* ([0-9.]+)\), 1fr\)/.exec(css)![1]);
-    const thumb = tileMin * Number(/\.theme-style-thumb \{\s*inline-size: calc\(var\(--spacing-theme-tile-min\) \* ([0-9.]+)\)/.exec(css)![1]);
+    // 세 크기는 이름 있는 지역 변수다(`--theme-grid-column-min`·`--theme-thumb-width`·`--theme-grid-max-height`).
+    const named = (name: string) => tileMin * Number(new RegExp(`${name}:\\s*calc\\(var\\(--spacing-theme-tile-min\\) \\* ([0-9.]+)\\)`).exec(css)![1]);
+    const gridMin = named("--theme-grid-column-min");
+    const thumb = named("--theme-thumb-width");
+    // 격자와 썸네일이 이 이름을 실제로 읽는다(이름만 있고 쓰이지 않는 값이 아니다).
+    expect(ruleBody(css, ".theme-gallery-grid")).toContain("minmax(var(--theme-grid-column-min), 1fr)");
+    const thumbRule = css.slice(css.lastIndexOf(".theme-style-thumb {"));
+    expect(thumbRule.slice(0, thumbRule.indexOf("}"))).toContain("inline-size: var(--theme-thumb-width)");
     const threshold = 11 * 16;
     // 격자 열은 최소 폭부터 늘어난다(1fr). 설정 본문(720)에서 네 열이면 160, 폰(390)에서 두 열이면 약 140이다.
     expect(gridMin).toBeLessThan(threshold);
@@ -55,10 +62,25 @@ describe("격자·스크롤·페이드", () => {
   });
 
   it("스크롤 상한은 타일 최소 폭의 세 배이고 안에서만 스크롤한다", () => {
+    const tileMin = Number(/--spacing-theme-tile-min:\s*(\d+)px/.exec(tokens)![1]);
     const body = ruleBody(css, ".theme-gallery-scroll");
-    expect(body).toContain("max-block-size: calc(var(--spacing-theme-tile-min) * 3)");
+    expect(body).toContain("max-block-size: var(--theme-grid-max-height)");
+    expect(tileMin * Number(/--theme-grid-max-height:\s*calc\(var\(--spacing-theme-tile-min\) \* ([0-9.]+)\)/.exec(css)![1])).toBe(480);
     expect(body).toContain("overflow-y: auto");
     expect(body).toContain("overscroll-behavior: contain");
+    // 키보드로 옮긴 초점 타일이 위아래 페이드 구간(12)에 놓이지 않는다.
+    expect(body).toContain("scroll-padding-block: var(--spacing-3)");
+  });
+
+  it("폰 폭(40rem 미만)에서는 격자 안쪽 스크롤을 두지 않는다 (스크롤 트랩 방지, 설계 리뷰 M4)", () => {
+    const at = css.indexOf("@media (width < 40rem) {");
+    expect(at).toBeGreaterThanOrEqual(0);
+    const block = css.slice(at, css.indexOf("\n}\n", at));
+    expect(block).toContain(".theme-gallery-scroll");
+    expect(block).toContain("max-block-size: none");
+    expect(block).toContain("overflow-y: visible");
+    expect(block).toContain("overscroll-behavior: auto");
+    expect(block).toContain("mask-image: none");
   });
 
   it("위아래 페이드는 mask-image다: 색 리터럴 없이 알파만 쓴다(currentcolor와 transparent)", () => {
@@ -75,8 +97,27 @@ describe("격자·스크롤·페이드", () => {
     expect(ruleBody(css, ".theme-tile[data-selected] .theme-tile-name")).toContain("font-weight: 600");
   });
 
-  it("키보드 초점은 타일 틀 바깥 링이다 (:has(:focus-visible))", () => {
-    expect(ruleBody(css, ".theme-tile:has(:focus-visible) .theme-tile-frame")).toContain("outline: 2px solid");
+  it("키보드 초점은 집 규칙의 인셋 링이다: 틀 안쪽 2, 라디오가 peer라서 전역 포인터 규칙이 마우스에서 걷는다 (설계 리뷰 M5)", () => {
+    const body = ruleBody(css, ".theme-tile > input:focus-visible ~ .theme-tile-frame");
+    expect(body).toContain("outline: 2px solid var(--focus-ring-ink, var(--accent))");
+    expect(body).toContain("outline-offset: -2px"); // tokens.css `focus-ring` 유틸과 같은 값(바깥 오프셋 링은 걷은 모양이다)
+    expect(css).not.toContain(".theme-tile:has(:focus-visible)");
+    // 전역 규칙이 걷으려면 라디오가 `.peer`여야 한다: 링을 그리는 틀이 그 뒤의 형제(`.peer:focus-visible ~ *`)다.
+    expect(tile).toMatch(/className="peer sr-only"/);
+    expect(tokens).toContain(".peer:focus-visible ~ *");
+  });
+
+  it("가리킨 윤곽은 호버가 되는 입력에서만 선다 (터치 잔상 방지)", () => {
+    const at = css.indexOf("@media (hover: hover) {");
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(css.slice(at, css.indexOf("\n}\n", at))).toContain(".theme-tile:hover .theme-tile-frame");
+    // 호버 규칙이 그 밖에 따로 있지 않다.
+    expect(css.split(".theme-tile:hover").length - 1).toBe(1);
+  });
+
+  it("비활성 강조색 칩은 앱의 비활성 표준과 같다: 흐림 0.5, 기본 커서 (형제 프리미티브와 어긋나지 않는다)", () => {
+    expect(ruleBody(css, '.accent-swatch[aria-disabled="true"] .accent-swatch-chip')).toContain("opacity: 0.5");
+    expect(ruleBody(css, '.accent-swatch[aria-disabled="true"]')).toContain("cursor: default");
   });
 
   it("비어 있는 알림 자리는 간격을 먹지 않는다 (읽어 주는 영역은 늘 DOM에 있다)", () => {

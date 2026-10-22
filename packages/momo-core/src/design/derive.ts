@@ -90,6 +90,8 @@ export interface SignalOutcome {
   readonly defaultRejection?: OwnSignalRejection;
   /** 폴백으로 쓴 프리셋(`source`가 `preset`일 때). */
   readonly preset?: SignalPresetId;
+  /** 씨앗이 중립 역할에 너무 가까워 채도를 올려서 받았다(`source`가 `seed`일 때만). 색상각은 씨앗 그대로다. */
+  readonly boosted?: true;
 }
 
 export interface DerivedMode {
@@ -529,7 +531,9 @@ function solveSignal(base: Base, choice: SignalChoice, fit: Fitter): SolvedSigna
   const tokens = solveTokens(base);
   const attempt = (input: string) => resolveSignal(input, "dawnsky", base.mode, tokens, { agentYields: true });
   const separate = fit === fitOrThrow;
-  type Own = { readonly ok: true; readonly values: SignalValues } | { readonly ok: false; readonly reason: OwnSignalRejection };
+  type Own =
+    | { readonly ok: true; readonly values: SignalValues; readonly boosted?: true }
+    | { readonly ok: false; readonly reason: OwnSignalRejection };
   const own = (input: string, boost: boolean): Own => {
     const first = attempt(input);
     if (!first.ok) return { ok: false, reason: first.reason };
@@ -539,7 +543,7 @@ function solveSignal(base: Base, choice: SignalChoice, fit: Fitter): SolvedSigna
       for (let i = 1; o.C + i * SIGNAL_BOOST_STEP <= SIGNAL_BOOST_MAX + 1e-9; i++) {
         const boosted = attempt(withChroma(input, o.C + i * SIGNAL_BOOST_STEP));
         if (!boosted.ok) break;
-        if (apartFromNeutrals(base, boosted.values)) return boosted;
+        if (apartFromNeutrals(base, boosted.values)) return { ok: true, values: boosted.values, boosted: true };
       }
     }
     return { ok: false, reason: "near-neutral" };
@@ -557,7 +561,9 @@ function solveSignal(base: Base, choice: SignalChoice, fit: Fitter): SolvedSigna
   };
   if (base.seed.accent !== undefined) {
     const result = own(base.seed.accent, true);
-    if (result.ok) return { values: result.values, outcome: { source: "seed", ...rejections } };
+    if (result.ok) {
+      return { values: result.values, outcome: { source: "seed", ...(result.boosted ? { boosted: true as const } : {}), ...rejections } };
+    }
     rejections.seedRejection = result.reason;
   }
   const fallback = own(defaults(base.mode).color.signal, false);

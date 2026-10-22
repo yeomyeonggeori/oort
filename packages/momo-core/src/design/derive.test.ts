@@ -277,6 +277,8 @@ describe("설계 리뷰 H1~H3: 규칙마다 실패할 수 있는 가드와 대�
     expect(sources.neutral).toBeUndefined();
     // 측정: 씨앗 52 · 기본 2 · 프리셋 3. 씨앗이 쓰이는 것이 기본이다(옅은 씨앗은 채도를 올려서 받는다).
     expect(sources).toEqual({ seed: 52, default: 2, preset: 3 });
+    const boosted = ROWS.filter((row) => deriveThemeMode(row.seed).signal.boosted === true).length;
+    expect(boosted).toBe(20); // 씨앗 52곳 가운데 20곳이 채도를 올렸고(중립과 0.06 갈릴 만큼만), 32곳은 자기 씨앗 그대로다
   });
 
   it("에이전트 색상각은 작은 쪽으로 돌린다: 57행의 회전은 모두 60° 이하다 (한 방향으로만 돌릴 때는 135°까지였다)", () => {
@@ -346,7 +348,7 @@ describe("골든: 청사진 부록 C의 값과 한 글자까지 같은 곳과 �
   it("nord 다크 단독: 신호는 테마의 씨앗(채도만 올려 중립과 갈랐다)이고 에이전트는 신호에 비켜 색상각을 돌렸다", () => {
     const derived = get("nord", "dark");
     // 씨앗 #88c0d0(C 0.07)은 선·아이콘과 0.047까지 가까워서 채도만 올렸다. 색상각은 씨앗 그대로의 청록이다.
-    expect(derived.signal).toEqual({ source: "seed" });
+    expect(derived.signal).toEqual({ source: "seed", boosted: true });
     expect(derived.tokens.color.signal).toBe("#75c3d8");
     expect(hueGap("#88c0d0", derived.tokens.color.signal)).toBeLessThan(6);
     expect(toOklch(derived.tokens.color.signal).C).toBeGreaterThan(toOklch("#88c0d0").C);
@@ -363,10 +365,11 @@ describe("골든: 청사진 부록 C의 값과 한 글자까지 같은 곳과 �
 });
 
 describe("신호: 씨앗 → 기본 → 네 프리셋 → 중립, 에이전트가 비킨다", () => {
-  it("테마의 신호 씨앗이 받아들여지면 그 색에서 출발한다 (source seed)", () => {
-    const seed = THEME_CATALOG.find((e) => e.id === "nord")!.dark!;
+  it("테마의 신호 씨앗이 받아들여지면 그 색에서 출발한다 (source seed, 채도를 올리지 않은 쪽)", () => {
+    const seed = THEME_CATALOG.find((e) => e.id === "github")!.light!;
     const derived = deriveThemeMode(seed);
     expect(derived.signal).toEqual({ source: "seed" });
+    expect(hueGap(seed.accent!, derived.tokens.color.signal)).toBeLessThan(8);
   });
 
   it("신호 씨앗이 위험색과 가까우면 기본 신호(새벽하늘의 주황)로 물러난다", () => {
@@ -402,7 +405,7 @@ describe("신호: 씨앗 → 기본 → 네 프리셋 → 중립, 에이전트�
   it("옅은 씨앗은 채도를 올려 받는다: 색상각은 씨앗 그대로이고 중립 역할과 0.06 넘게 갈린다 (tokyo-night 다크)", () => {
     const seed = THEME_CATALOG.find((e) => e.id === "tokyo-night")!.dark!;
     const derived = deriveThemeMode(seed);
-    expect(derived.signal.source).toBe("seed");
+    expect(derived.signal).toEqual({ source: "seed", boosted: true });
     const c = derived.tokens.color;
     expect(hueGap(seed.accent!, c.signal)).toBeLessThan(8);
     expect(toOklch(c.signal).C).toBeGreaterThan(toOklch(seed.accent!).C);

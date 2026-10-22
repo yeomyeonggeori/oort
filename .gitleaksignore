@@ -309,3 +309,7 @@ a8378190d76fb74ed6c5df312788691cd5c06521:server-rust/bins/momo-workd/src/project
 # 위 설명 주석이 직전 커밋(094ee7305)에서 같은 규칙에 걸렸다(코드 한 줄을 그대로 인용한 탓). 그 지문을 함께 올리고, 이 주석들은 코드를 인용하지 않는다.
 #   .gitleaksignore:306  [generic-api-key]
 094ee73053463fa79d5be04a3b1b26ee8d8e6b88:.gitleaksignore:generic-api-key:306
+
+# 2026-10-22 #4188(AP-1b) — capture-4188.mjs 의 첫 커밋이 외양 저장 항목 이름을 상수로 둔 줄. 항목 이름이지 자격이 아니다(#4186 의 gate-theme.mjs 줄과 같은 오탐). 다음 커밋에서 상수 이름을 바꿨다.
+#   clients/web/scripts/capture-4188.mjs:177  [generic-api-key]
+0b54620c0b378408742bd88e5453b6a0845617c6:clients/web/scripts/capture-4188.mjs:generic-api-key:177

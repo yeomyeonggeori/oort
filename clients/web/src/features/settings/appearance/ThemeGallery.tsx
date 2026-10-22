@@ -1,5 +1,6 @@
-import { useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
+import type { SchemeChoice } from "@momo/core/design/appearance";
 import {
   galleryTiles,
   pickNotice,
@@ -10,13 +11,16 @@ import {
 import { effectiveScheme, modesOf } from "@momo/core/design/themeResolve";
 import { updateAppearance, useAppearance } from "@/design/theme";
 import { SettingsRow } from "../shell/SettingsRow";
+import { ROW_DESCRIPTION, ROW_LABEL } from "./ThemeStyleRow";
 import { ThemeTile, TileFace, type TileFaceKind } from "./ThemeTile";
 
 // 테마 스타일 행과 갤러리 (AP-1b #4188, 청사진 §5.3-c · Buzz `SettingsPanels.tsx:561-726`을 우리 규칙으로).
 //
-// 접힌 행: 지금 고른 테마의 썸네일 + chevron(`aria-expanded`·`aria-controls`). 펴면 격자가 같은 카드 안에 선다.
-// **탭이 색 모드를 따른다**(별도 탭 위젯이 없다): 시스템은 라이트·다크 짝이 있는 테마만(한 장이 대각 분할),
-// 라이트·다크는 그 모드를 가진 테마 전부다. 고르면 전 화면이 바로 바뀌고(외양 저장소 `commit`) 새로고침 뒤에도
+// 접힌 행: 지금 고른 테마의 이름과 썸네일 + chevron(`aria-expanded`·`aria-controls`). 펴면 격자가 같은 카드 안에 서고
+// 고른 타일이 보이는 자리로 스크롤한다(43장 가운데 어디에 있든 찾을 수 있게).
+// **탭이 색 모드를 따른다**(별도 탭 위젯이 없다): 시스템은 라이트·다크를 모두 가진 테마만(한 장이 대각 분할),
+// 라이트·다크는 그 모드를 가진 테마 전부다. 안 보이는 테마가 어디 있는지는 탭마다 안내 한 줄이 말한다.
+// 트리거 버튼은 `p-1`이다: 집 규칙의 인셋 초점 링(안쪽 2)이 이름 글자와 썸네일 가장자리를 덮지 않게 한다. 고르면 전 화면이 바로 바뀌고(외양 저장소 `commit`) 새로고침 뒤에도
 // 남는다(저장 + 부트 캐시). 단일 모드 테마를 고르면 색 모드를 그 모드로 맞추고 한 줄로 알린다(규칙 1).
 //
 // 이 파일은 지연 청크다(`ThemeStyleRow.tsx`가 `React.lazy`로 싣는다). 카탈로그 씨앗 표와 파생 엔진이 함께 실린다.
@@ -24,11 +28,19 @@ import { ThemeTile, TileFace, type TileFaceKind } from "./ThemeTile";
 // 빈 상태는 모드마다 항목이 0일 수 없어 해당 없음. 한 테마의 파생이 던지면 그 타일만 비워 두고(`paintFor`가
 // `null`이면 층이 루트를 물려받는다) 나머지는 그대로 선다.
 
+/** 이 탭에서 안 보이는 테마가 어디서 보이는지(숨은 테마를 말하지 않으면 없는 줄 안다). */
+const TAB_HINT: Readonly<Record<SchemeChoice, string>> = {
+  system: "라이트와 다크를 모두 가진 테마만 보여요. 한쪽만 있는 테마는 라이트나 다크에서 골라요.",
+  light: "라이트가 있는 테마만 보여요. 다크 전용 테마는 다크에서 골라요.",
+  dark: "다크가 있는 테마만 보여요. 라이트 전용 테마는 라이트에서 골라요.",
+};
+
 export default function ThemeGallery() {
   const { theme, scheme, signal } = useAppearance();
   const [open, setOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  const region = useRef<HTMLDivElement>(null);
   const regionId = useId();
   const groupName = `theme-style-${useId()}`;
   const tiles = useMemo(() => galleryTiles(scheme), [scheme]);
@@ -37,6 +49,12 @@ export default function ThemeGallery() {
   // 단일 모드 테마는 그 모드 한 장, 짝이 있는 테마는 시스템일 때 분할 한 장이다.
   const pinned = effectiveScheme(scheme, modesOf(theme));
   const thumbKind: TileFaceKind = pinned ?? "split";
+
+  // 펼치면 고른 타일이 보이게 한다. `nearest`라서 이미 보이면 아무것도 움직이지 않는다.
+  useEffect(() => {
+    if (!open) return;
+    region.current?.querySelector<HTMLElement>(".theme-tile[data-selected]")?.scrollIntoView?.({ block: "nearest" });
+  }, [open]);
 
   function select(tile: GalleryTile) {
     const next = schemeForThemePick(scheme, tile.ref);
@@ -53,11 +71,7 @@ export default function ThemeGallery() {
 
   return (
     <>
-      <SettingsRow
-        label="테마 스타일"
-        description="앱 전체에 쓰는 색 조합이에요. 라이트와 다크가 짝인 테마는 색 모드를 따라 같이 바뀌어요."
-        testId="theme-style-row"
-      >
+      <SettingsRow label={ROW_LABEL} description={ROW_DESCRIPTION} testId="theme-style-row">
         <button
           ref={trigger}
           type="button"
@@ -66,9 +80,12 @@ export default function ThemeGallery() {
           aria-label={`테마 스타일, 지금은 ${label}`}
           data-testid="theme-style-trigger"
           onClick={() => setOpen((value) => !value)}
-          className="press flex min-w-0 items-center gap-2 rounded-lg bg-transparent p-0 text-ink focus-visible:focus-ring"
+          className="press flex min-w-0 items-center gap-3 rounded-lg bg-transparent p-1 text-ink focus-visible:focus-ring"
         >
-          <span data-testid="theme-style-selected-preview" className="flex">
+          <span data-testid="theme-style-selected-name" className="min-w-0 break-keep text-right text-meta font-semibold text-ink">
+            {label}
+          </span>
+          <span data-testid="theme-style-selected-preview" className="flex shrink-0">
             <TileFace themeRef={theme} kind={thumbKind} signal={signal} className="theme-style-thumb" />
           </span>
           {open ? (
@@ -80,17 +97,16 @@ export default function ThemeGallery() {
       </SettingsRow>
       {open ? (
         <div
+          ref={region}
           id={regionId}
           className="theme-gallery-region"
           data-testid="theme-style-options"
           data-scheme={scheme}
           onKeyDown={onKeyDown}
         >
-          {scheme === "system" ? (
-            <p className="theme-gallery-hint break-keep text-meta text-ink-muted" data-testid="theme-style-hint">
-              라이트와 다크가 짝인 테마만 보여요.
-            </p>
-          ) : null}
+          <p className="theme-gallery-hint break-keep text-meta text-ink-muted" data-testid="theme-style-hint">
+            {TAB_HINT[scheme]}
+          </p>
           <div role="status" className="theme-gallery-notice break-keep text-meta text-ink" data-testid="theme-style-notice">
             {notice}
           </div>

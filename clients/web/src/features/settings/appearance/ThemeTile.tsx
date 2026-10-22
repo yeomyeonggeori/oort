@@ -13,7 +13,8 @@ import { tileTestId } from "./tileIds";
 // 요소마다 변수 열셋을 꽂아 자기 테마의 색으로 칠한다. 첫 파티와 카탈로그가 같은 길이다.
 //
 // 라디오 그룹의 한 칸이다: 보이지 않는 `input[type=radio]` + 라벨 타일(`accent-swatch` 전례). 그룹은 탭 정지점이
-// 하나이고 방향키가 칸을 옮긴다. 고른 칸은 잉크 링과 굵은 이름이 말한다(색만으로 말하지 않는다).
+// 하나이고 방향키가 칸을 옮긴다. 고른 칸은 잉크 링과 굵은 이름이 말한다(색만으로 말하지 않는다). 키보드 초점 링은
+// 집 규칙의 인셋 링이고 라디오가 `peer`라서 마우스로 누른 뒤에는 전역 규칙이 걷는다(theme-gallery.css).
 // 타일 안 신호 알약은 그 테마·모드에 사람이 고른 강조색을 올린 색이다(거절되면 그 테마의 기본 신호).
 
 export type TileFaceKind = "split" | Mode;
@@ -96,7 +97,7 @@ export function ThemeTile({
         value={tile.ref}
         checked={selected}
         onChange={() => onSelect(tile)}
-        className="sr-only"
+        className="peer sr-only"
       />
       <TileFace themeRef={tile.ref} kind={tile.kind} signal={signal} className="theme-tile-frame" />
       <span className="theme-tile-name">{tile.label}</span>

@@ -2,7 +2,7 @@
 // 테마 참조(ThemeRef)와 모드 판정 (AP-1a #4186 골격, AP-1b #4188이 카탈로그를 채웠다. 청사진 §5.2-a·f).
 //
 // 이 파일은 **문법과 판정 규칙**을 든다. `catalog:<id>`가 실제로 있는지·어떤 모드를 갖는지는 카탈로그 **색인**
-// (`themeCatalogIndex.generated.ts`: id·모드·라벨만, 약 1KB)이 답한다. 씨앗 표(`themeCatalog.generated.ts`)는 읽지
+// (`themeCatalogIndex.generated.ts`: id·모드 한 줄, 원문 약 0.6KB)이 답한다. 씨앗 표(`themeCatalog.generated.ts`)는 읽지
 // 않는다: 이 파일은 메인 번들에 들어가고 씨앗 표는 갤러리와 함께 지연 로드된다. 규칙을 가짜 단일 모드 참조로도
 // 잴 수 있도록 조회 함수는 여전히 인자로 받는다(`ModesLookup`, 기본은 카탈로그 색인).
 //

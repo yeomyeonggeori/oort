@@ -148,6 +148,19 @@ describe("행: 접힌 모습", () => {
     expect(thumb.querySelectorAll(".theme-tile-paint")).toHaveLength(2);
   });
 
+  it("접힌 행이 지금 고른 테마의 이름을 글자로 말한다 (aria-label에만 있지 않다, 설계 리뷰 M1)", async () => {
+    let host = await mountSection();
+    expect(q(host, "theme-style-selected-name")?.textContent).toBe("새벽하늘");
+    act(() => mountedRoot?.unmount());
+    mountedRoot = null;
+    mountedHost?.remove();
+    updateAppearance({ theme: "catalog:github", scheme: "dark" });
+    host = await mountSection();
+    expect(q(host, "theme-style-selected-name")?.textContent).toBe("GitHub");
+    change({ theme: "catalog:nord" });
+    expect(q(host, "theme-style-selected-name")?.textContent).toBe("Nord");
+  });
+
   it("썸네일은 그 테마의 색으로 칠해진다 (루트가 아니라 요소의 변수): 새벽하늘 라이트의 바닥", async () => {
     const host = await mountSection();
     const [light, dark] = paintOf(host, "theme-style-selected-preview");
@@ -197,21 +210,43 @@ describe("갤러리: 색 모드가 목록을 정한다 (탭이 모드를 따른�
     expect(tiles(host)).toHaveLength(19);
   });
 
-  it("시스템에서는 짝이 있는 테마만 (한 장이 분할), 안내 한 줄이 선다. 라이트·다크에서는 안내가 없다", async () => {
+  it("시스템에서는 짝이 있는 테마만 (한 장이 분할), 탭마다 안 보이는 테마가 어디서 보이는지 안내 한 줄이 선다", async () => {
     const host = await mountSection();
     open(host);
-    expect(q(host, "theme-style-hint")?.textContent).toBe("라이트와 다크가 짝인 테마만 보여요.");
+    expect(q(host, "theme-style-hint")?.textContent).toBe(
+      "라이트와 다크를 모두 가진 테마만 보여요. 한쪽만 있는 테마는 라이트나 다크에서 골라요."
+    );
     expect(tileRefs(host)).not.toContain("catalog:nord");
     expect(tileRefs(host)).not.toContain("catalog:snazzy-light");
     for (const tile of tiles(host)) expect(tile.querySelector("[data-tile-kind]")?.getAttribute("data-tile-kind")).toBe("split");
     click(radio(host, "theme-choice-dark"));
-    expect(q(host, "theme-style-hint")).toBeNull();
+    expect(q(host, "theme-style-hint")?.textContent).toBe("다크가 있는 테마만 보여요. 라이트 전용 테마는 라이트에서 골라요.");
     expect(tileRefs(host)).toContain("catalog:nord");
     expect(tileRefs(host)).not.toContain("catalog:snazzy-light");
     for (const tile of tiles(host)) expect(tile.querySelector("[data-tile-kind]")?.getAttribute("data-tile-kind")).toBe("dark");
     click(radio(host, "theme-choice-light"));
+    expect(q(host, "theme-style-hint")?.textContent).toBe("라이트가 있는 테마만 보여요. 다크 전용 테마는 다크에서 골라요.");
     expect(tileRefs(host)).toContain("catalog:snazzy-light");
     expect(tileRefs(host)).not.toContain("catalog:nord");
+  });
+
+  it("펼치면 고른 타일이 보이는 자리로 스크롤한다 (43장 가운데 어디에 있든, 설계 리뷰 M1)", async () => {
+    const scrolled: Element[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this);
+    };
+    try {
+      updateAppearance({ theme: "catalog:github", scheme: "dark" });
+      const host = await mountSection();
+      expect(scrolled).toHaveLength(0); // 접힌 행은 아무것도 움직이지 않는다
+      open(host);
+      expect(scrolled).toHaveLength(1);
+      expect(scrolled[0]).toBe(q(host, tileTestId("catalog:github")));
+      expect(scrolled[0].hasAttribute("data-selected")).toBe(true);
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
   });
 
   it("라디오 그룹이다: fieldset + 보이지 않는 legend, 한 이름, 고른 칸은 하나", async () => {
@@ -362,20 +397,31 @@ describe("색 모드를 바꿀 때 단일 모드 규칙 2·3이 화면 경로에
     click(radio(host, "theme-choice-light"));
     click(radio(host, "theme-choice-system"));
     expect(getThemeRef()).toBe("catalog:github");
-    expect(q(host, "theme-mode-notice")).toBeNull();
+    expect(q(host, "theme-mode-notice")?.textContent).toBe("");
     change({ theme: "catalog:nord", scheme: "dark" });
     click(radio(host, "theme-choice-dark"));
     expect(getThemeRef()).toBe("catalog:nord");
-    expect(q(host, "theme-mode-notice")).toBeNull();
+    expect(q(host, "theme-mode-notice")?.textContent).toBe("");
   });
 
   it("안내는 다음 색 모드 변경에서 걷힌다", async () => {
     updateAppearance({ theme: "catalog:nord", scheme: "dark" });
     const host = await mountSection();
     click(radio(host, "theme-choice-light"));
-    expect(q(host, "theme-mode-notice")).not.toBeNull();
+    expect(q(host, "theme-mode-notice")?.textContent).not.toBe("");
     click(radio(host, "theme-choice-dark"));
-    expect(q(host, "theme-mode-notice")).toBeNull();
+    expect(q(host, "theme-mode-notice")?.textContent).toBe("");
+  });
+
+  it("읽어 주는 영역은 안내가 생기기 전부터 있다: 같은 노드의 내용만 바뀐다 (설계 리뷰 M7)", async () => {
+    updateAppearance({ theme: "catalog:nord", scheme: "dark" });
+    const host = await mountSection();
+    const region = q(host, "theme-mode-notice")!;
+    expect(region.getAttribute("role")).toBe("status");
+    expect(region.textContent).toBe("");
+    click(radio(host, "theme-choice-light"));
+    expect(q(host, "theme-mode-notice")).toBe(region); // 새로 붙은 노드가 아니다
+    expect(region.textContent).not.toBe("");
   });
 });
 
@@ -421,7 +467,9 @@ describe("강조색 칩: 그 테마·모드에서 푼 색과 쓸 수 있는지 (
       expect(radio(host, `accent-swatch-${id}`)!.disabled).toBe(true);
     }
     const reason = q(host, "accent-unavailable")!;
-    expect(reason.textContent).toContain(`홍염: ${SIGNAL_REJECTION_COPY["near-danger"]}`);
+    // 같은 이유(위험색과 겹침)로 거절된 두 칩은 한 줄로 묶인다: 같은 문장을 칩마다 되풀이하지 않는다.
+    expect(rejected).toEqual(["seongun", "hongyeom"]);
+    expect(reason.textContent).toBe(`성운·홍염: ${SIGNAL_REJECTION_COPY["near-danger"]}`);
     expect(reason.id).toBe("appearance-accent-unavailable");
     expect(radio(host, "accent-swatch-hongyeom")!.getAttribute("aria-describedby")).toBe(reason.id);
     // 서는 조합은 활성이다.
@@ -437,6 +485,23 @@ describe("강조색 칩: 그 테마·모드에서 푼 색과 쓸 수 있는지 (
     click(radio(host, "accent-swatch-hongyeom"));
     expect(JSON.stringify(getAppearance().signal)).toBe(before);
     expect(getAccent()).toBe("dawn");
+  });
+
+  it("서 있던 칩이 테마를 바꿔 거절되면 앞 테마가 꽂은 색을 걷는다 (흐린 칩이 늘 같은 정적 색이다)", async () => {
+    // 홍염이 서는 테마·모드에서 거절되는 테마·모드로: 같은 화면 마운트 안에서 바꾼다.
+    expect(presetsFor("catalog:github", "light")!.hongyeom.ok).toBe(true);
+    expect(presetsFor("catalog:catppuccin-frappe", "dark")!.hongyeom.ok).toBe(false);
+    change({ theme: "catalog:github", scheme: "light" });
+    const host = await mountSection();
+    expect(chip(host, "hongyeom").style.getPropertyValue("--signal")).not.toBe("");
+    expect(chip(host, "hongyeom").hasAttribute("aria-disabled")).toBe(false);
+    change({ theme: "catalog:catppuccin-frappe", scheme: "dark" });
+    expect(chip(host, "hongyeom").getAttribute("aria-disabled")).toBe("true");
+    expect(chip(host, "hongyeom").style.getPropertyValue("--signal")).toBe("");
+    expect(chip(host, "hongyeom").style.getPropertyValue("--on-signal")).toBe("");
+    // 서는 칩은 그대로 새 테마의 색이다.
+    const outcome = presetsFor("catalog:catppuccin-frappe", "dark")!.gamram;
+    expect(outcome.ok && chip(host, "gamram").style.getPropertyValue("--signal")).toBe(outcome.ok ? outcome.signal : "");
   });
 
   it("서는 조합은 눌러서 고른다 (칩 색은 그 테마·모드의 값)", async () => {
@@ -455,6 +520,8 @@ describe("강조색 칩: 그 테마·모드에서 푼 색과 쓸 수 있는지 (
     expect(radio(host, "accent-swatch-dawn")!.checked).toBe(true);
     expect(radio(host, "accent-swatch-hongyeom")!.checked).toBe(false);
     expect(getAccent()).toBe("hongyeom"); // 저장된 선택은 건드리지 않는다
+    // 화면이 왜 기본 색인지 문장이 말한다(폰도 같은 말을 한다).
+    expect(q(host, "accent-unavailable")!.textContent).toContain("고른 강조색은 이 테마에서 쓸 수 없어 기본 색으로 보여요.");
   });
 
   it("모든 프리셋이 서는 테마에서는 이유 줄이 없다", async () => {
