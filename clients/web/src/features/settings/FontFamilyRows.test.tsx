@@ -4,7 +4,12 @@ import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { FontFamilyRows } from "./FontFamilyRows";
-import { APPEARANCE_STORAGE_KEY, getAppearance, reloadAppearanceForTest } from "@/design/theme";
+import {
+  APPEARANCE_STORAGE_KEY,
+  APPEARANCE_STORAGE_KEY_V1,
+  getAppearance,
+  reloadAppearanceForTest,
+} from "@/design/theme";
 
 const actEnv = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
 let root: Root | null = null;
@@ -112,14 +117,47 @@ describe("FontFamilyRows: 이름 직접 입력", () => {
     expect(document.documentElement.hasAttribute("data-font-mono")).toBe(false);
   });
 
-  it("restores a saved name into the field on load", () => {
+  it("restores a saved name into the field on load (v2 record)", () => {
     localStorage.setItem(
       APPEARANCE_STORAGE_KEY,
-      JSON.stringify({ scheme: "system", accent: "dawn", fontSans: "Pretendard" })
+      JSON.stringify({
+        v: 2,
+        scheme: "system",
+        theme: "dawnsky",
+        signal: null,
+        density: "comfortable",
+        fontSans: "Pretendard",
+      })
     );
     reloadAppearanceForTest();
     const host = mount(createElement(FontFamilyRows));
     expect(byId<HTMLInputElement>(host, "font-sans-input").value).toBe("Pretendard");
+  });
+
+  // AP-1a(#4186) AC 1: 저장이 v2로 옮겨 가도 **글꼴 설정이 사라지지 않는다**. v1 레코드를 읽어
+  // 두 칸에 그대로 채우고, 처음 바꾸는 순간 v2로 써서 이어 간다. v1 항목은 지우지 않는다.
+  it("keeps both fonts when the person is still on the v1 record, and carries them into v2", () => {
+    const v1 = JSON.stringify({ scheme: "dark", accent: "seongun", fontSans: "Pretendard", fontMono: "D2Coding" });
+    localStorage.setItem(APPEARANCE_STORAGE_KEY_V1, v1);
+    reloadAppearanceForTest();
+    const host = mount(createElement(FontFamilyRows));
+    expect(byId<HTMLInputElement>(host, "font-sans-input").value).toBe("Pretendard");
+    expect(byId<HTMLInputElement>(host, "font-mono-input").value).toBe("D2Coding");
+    expect(document.documentElement.style.getPropertyValue("--font-user-sans")).toBe(
+      '"Pretendard", var(--font-sans)'
+    );
+
+    // 한 칸을 바꾸면 v2가 처음 쓰이고, 바꾸지 않은 칸과 v1에서 온 나머지(스킴·신호)가 같이 간다.
+    type(byId<HTMLInputElement>(host, "font-mono-input"), "Menlo");
+    submit(host, "font-mono-apply");
+    expect(stored()).toMatchObject({
+      v: 2,
+      scheme: "dark",
+      signal: { preset: "seongun" },
+      fontSans: "Pretendard",
+      fontMono: "Menlo",
+    });
+    expect(localStorage.getItem(APPEARANCE_STORAGE_KEY_V1)).toBe(v1);
   });
 });
 

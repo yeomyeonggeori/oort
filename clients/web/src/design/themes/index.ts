@@ -1,6 +1,6 @@
 // DS2 테마 팔레트 (ADR-0189 D5). core에서 생성한 `palettes/<id>.css`가
-// `:root[data-palette]`로 색 역할 전체를 다시 묶는다. 부트 스크립트가
-// `data-palette="dawnsky"`를 찍는다(테마 선택 UI는 DS2-7 #2719).
+// `:root[data-palette]`로 색 역할 전체를 다시 묶는다. 부트 스크립트와 `initTheme`가 저장된
+// 테마의 팔레트를 찍는다(AP-1a #4186; 기본은 `dawnsky`이고 고르는 UI는 AP-1b #4188).
 import.meta.glob("./palettes/*.css", { eager: true });
 import.meta.glob("./*.css", { eager: true });
 

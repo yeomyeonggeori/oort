@@ -22,6 +22,7 @@ import { messageAnchorPath } from "@/features/inbox/anchor";
 import { notifyThisDevice } from "./deviceNotify";
 import { osNotifier, type OsNotifyKind } from "./osNotifier";
 import { setBrowserOpenHandler, useBrowserPermission } from "./browserNotify";
+import { useServerPause } from "./useServerPause";
 
 // =============================================================================
 // Desktop notification rail (MOMO-607, ADR-0133 P2) — the trigger MOMO-603 left
@@ -39,6 +40,10 @@ import { setBrowserOpenHandler, useBrowserPermission } from "./browserNotify";
 // banner and no extra Centrifugo subscription, so a tab pays nothing for it.
 // After: the same rules, defaults and grouping as the shell; "in front" means
 // the tab is visible AND focused, and a banner click focuses the tab and routes.
+//
+// While the member's 알림 일시 중지 is on, none of it becomes a banner (#4197):
+// the phone push is stopped by the server for the same rule, so this device
+// reads the server's answer (`useServerPause`) instead of deciding alone.
 // =============================================================================
 
 /**
@@ -62,6 +67,8 @@ export function DesktopNotifications() {
   const browserPermission = useBrowserPermission();
   // 데스크탑 셸이거나, 사람이 켜고 브라우저가 허락한 탭만 알릴 수 있다.
   const canNotify = desktop || browserPermission === "granted";
+  // 서버의 알림 일시 중지를 읽어 배너 판정(`notifyThisDevice`)과 로컬 칸 알림이 함께 본다(#4197).
+  useServerPause(workspaceId, canNotify);
 
   const focusedRef = useRef(
     typeof document === "undefined" ? true : document.hasFocus()

@@ -298,6 +298,45 @@ describe("notifyDecision: suppression", () => {
   });
 });
 
+// 서버의 알림 일시 중지(`notification_rule.dnd`)는 폰 푸시를 멈춘다. 같은 규칙이 이 기기의 OS 배너도
+// 멈춰야 「알림도 함께 멈춰요」가 거짓이 아니다(#4197). 종류를 가리지 않는다: 멘션·승인·DM 모두다.
+describe("notifyDecision: 알림 일시 중지 (#4197)", () => {
+  const approvalEvent = () =>
+    event({
+      type: "approval_request",
+      author_member_id: AGENT,
+      props: { approval_id: "019F8338-025E-7873-93A3-C1FBA9149185" },
+    });
+  const dmEvent = () => event({ props: {}, body: "점심 먹었어요?" });
+
+  it.each<[string, () => MessageNewEvent, Partial<NotifyContext>]>([
+    ["멘션", () => event(), {}],
+    ["승인 요청", approvalEvent, {}],
+    ["DM", dmEvent, { isDirect: () => true }],
+  ])("%s은(는) 일시 중지 중에 OS 배너가 되지 않는다", (_kind, make, extra) => {
+    expect(notifyDecision(make(), context({ ...extra, paused: true }))).toEqual({
+      show: false,
+      skip: "paused",
+    });
+    // 같은 입력에서 일시 중지만 끄면 뜬다: 위 단정이 다른 규칙 때문에 통과한 것이 아니다.
+    expect(notifyDecision(make(), context({ ...extra, paused: false })).show).toBe(true);
+  });
+
+  it("일시 중지가 채널 음소거·이 기기의 종류 스위치보다 먼저 판정된다 (ADR-0124 D5)", () => {
+    expect(
+      notifyDecision(
+        event(),
+        context({ paused: true, isMuted: () => true, kindEnabled: () => false })
+      )
+    ).toEqual({ show: false, skip: "paused" });
+  });
+
+  it("규칙을 읽지 못했으면(입력이 비어 있으면) 배너를 막지 않는다", () => {
+    expect(notifyDecision(event(), context()).show).toBe(true);
+    expect(notifyDecision(event(), context({ paused: undefined })).show).toBe(true);
+  });
+});
+
 describe("notifyDecision: approval copy", () => {
   it("titles the agent and quotes the server's public approval title", () => {
     const decision = notifyDecision(
