@@ -425,20 +425,35 @@ describe("범위·판정 — 쓸 수 있는가 (AC 4, 증보 3 D6 불가 기준 
     }
   });
 
-  // design-review 2차 High: 다크에서 위험(붉은색)을 밝히면 sRGB 경계에서 채도가 먼저 깎여 경고(호박색)보다 덜 진해지는 구간이
-  // 있었고(새벽하늘 다크 78~86%, 흑연 다크 73~79%, 노을띠 다크 78~84%) 시험이 그 역전을 기대값으로 못박았다. 순서는
-  // README §2.2·§3.1 규칙 1의 자다: danger > warn > ink-muted, 대비가 아니라 OKLab 채도로 잰다. 슬라이더의 모든 칸에서 지킨다.
-  describe("채도 순서 danger > warn > ink-muted (README §2.2, 모든 불투명도)", () => {
-    it.each(COMBOS)("%s %s: 하한부터 95까지 모든 칸에서 바닥 위 순서가 선다", (theme, mode) => {
+  // design-review 2차 High + 3차 Medium: 다크에서 위험(붉은색)을 밝히면 sRGB 경계에서 채도가 먼저 깎여 경고(호박색)보다 덜
+  // 진해지는 구간이 있었고(새벽하늘 다크 78~86%, 흑연 다크 73~79%, 노을띠 다크 78~84%) 시험이 그 역전을 기대값으로 못박았다.
+  // 3차는 한 걸음 더 갔다: 맨 `>`로는 동률이 통과하므로 정본 자(`tokens.contrast.test.ts`)가 비로 잰다. 위험 ÷ 경고 ≥ 1.15,
+  // 경고 ÷ 보조 글자 ≥ 2, 둘 다 소수 둘째 자리로 반올림해서(`toFixed(2)`) 정본과 같은 방식으로 단정한다.
+  describe("채도 순서 danger > warn > ink-muted (README §2.2, 정본 자 비 1.15·2, 모든 불투명도)", () => {
+    const ratios = (palette: { danger: string; warn: string; "ink-muted": string }) => ({
+      dangerOverWarn: Number((toOklch(palette.danger).C / toOklch(palette.warn).C).toFixed(2)),
+      warnOverMuted: Number((toOklch(palette.warn).C / toOklch(palette["ink-muted"]).C).toFixed(2)),
+    });
+
+    it.each(COMBOS)("%s %s: 하한부터 95까지 모든 칸에서 바닥 위 순서가 정본 자를 넘는다", (theme, mode) => {
       const source = sourceOf(theme, mode);
       const floor = Math.round(glassFloor(source) * 100);
       for (let percent = floor; percent <= GLASS_OPACITY_MAX; percent += 1) {
-        const palette = glassChrome(source, mode, percent).canvas;
-        const danger = toOklch(palette.danger).C;
-        const warn = toOklch(palette.warn).C;
-        const muted = toOklch(palette["ink-muted"]).C;
-        expect(danger, `${theme} ${mode} ${percent}% danger > warn`).toBeGreaterThan(warn);
-        expect(warn, `${theme} ${mode} ${percent}% warn > ink-muted`).toBeGreaterThan(muted);
+        const { dangerOverWarn, warnOverMuted } = ratios(glassChrome(source, mode, percent).canvas);
+        expect(dangerOverWarn, `${theme} ${mode} ${percent}% danger ÷ warn`).toBeGreaterThanOrEqual(1.15);
+        expect(warnOverMuted, `${theme} ${mode} ${percent}% warn ÷ ink-muted`).toBeGreaterThanOrEqual(2);
+      }
+    });
+
+    it("띠가 없는 테마의 띠 위 팔레트도 같은 자를 넘는다(띠 위 값은 바닥 위 값과 같다)", () => {
+      for (const [theme, mode] of COMBOS) {
+        const source = sourceOf(theme, mode);
+        if (source.band) continue; // 띠 테마의 위험·경고는 tokens.css 띠 규칙이 on-band 계열로 묶는다(이 파일의 몫이 아님)
+        const floor = Math.round(glassFloor(source) * 100);
+        for (const percent of [floor, glassRange(source).defaultPercent, GLASS_OPACITY_MAX]) {
+          const { dangerOverWarn } = ratios(glassChrome(source, mode, percent).band);
+          expect(dangerOverWarn, `${theme} ${mode} ${percent}% band`).toBeGreaterThanOrEqual(1.15);
+        }
       }
     });
 
@@ -460,13 +475,13 @@ describe("범위·판정 — 쓸 수 있는가 (AC 4, 증보 3 D6 불가 기준 
         const hosts = source.canvas.flatMap((stop) => worstCaseBackdrops(stop, percent / 100));
         return fitForeground(source.color.warn, hosts, TEXT_MIN_ON_BACKDROP + FIT_MARGIN, mode);
       };
-      // 라이트 전 구간과 다크 기본값(88): 명도만 옮긴 값과 같다(채도를 만지지 않았다).
+      // 라이트 전 구간과 다크 상단(자를 이미 넘는 칸): 명도만 옮긴 값과 같다(채도를 만지지 않았다).
       for (const [theme, mode, percent] of [
         ["dawnsky", "light", 70],
         ["dawnsky", "light", 80],
         ["dawnsky", "light", 95],
-        ["dawnsky", "dark", 88],
-        ["graphite", "dark", 83],
+        ["dawnsky", "dark", 93],
+        ["graphite", "dark", 88],
       ] as [ThemeId, Mode, number][]) {
         const source = sourceOf(theme, mode);
         expect(glassChrome(source, mode, percent).canvas.warn, `${theme} ${mode} ${percent}%`).toBe(

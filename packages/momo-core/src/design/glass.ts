@@ -283,16 +283,22 @@ function fitFill(
   return candidate;
 }
 
-/** 위험이 경고보다 진해야 하는 최소 간격(OKLab C). 간격을 두는 이유는 16진수 반올림이 순서를 뒤집지 않게 하려는 것이다. */
-const DANGER_OVER_WARN = 0.01;
+/**
+ * 채도의 자(README §3.1 규칙 1, `clients/web/src/design/tokens.contrast.test.ts`의 「ranks danger louder than warn,
+ * and warn louder than muted」와 같은 값): 위험 ÷ 경고 ≥ 1.15, 경고 ÷ 보조 글자 ≥ 2. 비로 잰다: 맨 `>`로는 동률이
+ * 통과한다. 16진수 반올림이 자 밑으로 내리지 않도록 목표에는 여유(`ORDER_CUSHION`)를 얹는다.
+ */
+const DANGER_OVER_WARN_RATIO = 1.15;
+const WARN_OVER_MUTED_RATIO = 2;
+const ORDER_CUSHION = 1.02;
 
 /**
  * 채도 순서 `danger > warn > ink-muted`(design-system README §2.2·§3.1 규칙 1: 위험 순서의 자는 대비가 아니라
- * 채도다)를 보정 뒤에도 지킨다. 다크에서 위험(붉은색)을 밝히면 sRGB 경계 때문에 채도가 먼저 깎여
- * (0.182 → 0.088) 경고(호박색, 0.141)보다 덜 진해지는 불투명도 구간이 생긴다(새벽하늘 다크 78~86%, 흑연 다크
- * 73~79%, 노을띠 다크 78~84%). 위험은 명도·색상각이 보정으로 정해져 더 진하게 만들 수 없다(그 명도의 붉은색은
- * 경계에서 이미 가장 진하다). 그래서 **경고의 채도만** 같은 색상각·명도에서 위험 밑으로 덜어 내고 대비를 다시
- * 맞춘다. 순서가 이미 서 있으면(라이트 전 구간, 다크 기본값 근처) 손대지 않는다.
+ * 채도다)를 보정 뒤에도 정본의 자 그대로 지킨다. 다크에서 위험(붉은색)을 밝히면 sRGB 경계 때문에 채도가 먼저 깎여
+ * (0.182 → 0.088) 경고(호박색, 0.141)와 비슷하거나 덜 진해지는 불투명도 구간이 생긴다(자를 못 채우는 칸: 새벽하늘 다크
+ * 78~90%, 흑연 다크 73~82%, 노을띠 다크 78~88%). 위험은 명도·색상각이 보정으로 정해져 더 진하게 만들 수 없다(그 명도의 붉은색은
+ * 경계에서 이미 가장 진하다). 그래서 **경고의 채도만** 같은 색상각·명도에서 위험 ÷ 1.15 밑으로 덜어 내고 대비를
+ * 다시 맞춘다. 순서가 이미 자를 넘는 칸(라이트 전 구간, 다크 상단)의 경고는 손대지 않는다.
  *
  * ADR-0189 증보 2 D3의 「채도는 그대로」(보정은 명도만 옮긴다)는 **보정 대상 색이 자기 채도를 지킨다**는 약속인데,
  * 지금 경고는 위험이 깎인 만큼의 상대 순서를 지키기 위해서만 내려간다. 이 조정이 정본의 의도(위계)를 따르고
@@ -304,11 +310,11 @@ function keepWarnBelowDanger(
   min: number,
   mode: Mode
 ): void {
-  const ceiling = toOklch(roles.danger).C - DANGER_OVER_WARN;
+  const ceiling = toOklch(roles.danger).C / (DANGER_OVER_WARN_RATIO * ORDER_CUSHION);
   const warn = toOklch(roles.warn);
   if (warn.C <= ceiling) return;
-  // 경고는 보조 글자보다는 계속 진해야 한다(`warn > ink-muted`). 위험이 너무 옅어 두 조건이 겹치면 보조 글자 바로 위에 둔다.
-  const C = Math.max(ceiling, toOklch(roles["ink-muted"]).C + DANGER_OVER_WARN / 2);
+  // 경고는 보조 글자보다 계속 두 배 넘게 진해야 한다. 위험이 너무 옅어 두 자가 겹치면 보조 글자 쪽 자를 지킨다.
+  const C = Math.max(ceiling, toOklch(roles["ink-muted"]).C * WARN_OVER_MUTED_RATIO * ORDER_CUSHION);
   roles.warn = fitForeground(fromOklch({ L: warn.L, C, h: warn.h }), hosts, min, mode);
 }
 

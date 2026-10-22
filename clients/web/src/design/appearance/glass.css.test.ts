@@ -153,7 +153,9 @@ describe("glass.css 문자열 계약", () => {
     const grid = (file: string): string[] =>
       [...readFileSync(join(core, file), "utf8").matchAll(/^const (L_FLOOR|L_CEIL|L_STEP) = ([0-9.]+);$/gm)].map((m) => `${m[1]}=${m[2]}`);
     const scrim = grid("scrim.ts");
-    expect(scrim).toEqual(["L_FLOOR=0.12", "L_CEIL=0.97", "L_STEP=0.0025"]);
+    // 정본 값을 시험에 다시 적지 않는다(그러면 정본을 바꾸는 사람이 시험도 같이 고쳐야 한다): 세 상수를 **찾았는지**만 단정하고
+    // 값은 사본과 비교한다.
+    expect(scrim.map((entry) => entry.split("=")[0])).toEqual(["L_FLOOR", "L_CEIL", "L_STEP"]);
     expect(grid("glass.ts")).toEqual(scrim);
   });
 
