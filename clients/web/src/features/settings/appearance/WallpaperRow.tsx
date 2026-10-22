@@ -309,15 +309,17 @@ export function WallpaperRow() {
             </p>
           </div>
         </fieldset>
+        {/* 지금 배경이 왜 안 보이는지·어떤 모습인지 한 줄. 같은 행의 맨 아래에 서서 위의 안내 문장들과 한 덩어리로 읽힌다. */}
+        {status !== null ? (
+          <p
+            role="status"
+            data-testid="wallpaper-status"
+            className={cn("break-keep text-meta", status.tone === "danger" ? "text-danger" : "text-ink-muted")}
+          >
+            {status.text}
+          </p>
+        ) : null}
       </div>
-      {status !== null ? (
-        <SettingsRow
-          label={status.tone === "danger" ? <span className="text-danger">{status.text}</span> : status.text}
-          plain
-          role="status"
-          testId="wallpaper-status"
-        />
-      ) : null}
     </>
   );
 }

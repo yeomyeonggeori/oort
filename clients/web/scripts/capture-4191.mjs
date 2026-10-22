@@ -6,6 +6,7 @@
 //   MODE=capture LABEL=after  DIST=dist node scripts/capture-4191.mjs     # 장면 캡처 + meta.json
 //   MODE=capture LABEL=before DIST=<base 빌드> node scripts/capture-4191.mjs  # 같은 화면의 「전」
 //   MODE=assert  DIST=dist node scripts/capture-4191.mjs                  # 실제 앱에서 단정(아래)
+//   MODE=assert  SABOTAGE=scrim DIST=dist node scripts/capture-4191.mjs   # ⑥이 실제로 실패할 수 있음을 보이는 사보타주(아래)
 //
 // capture: 모양 설정과 대화 화면을 라이트/다크 × 1440/900으로 찍는다. 고르는 일은 전부 **설정 화면의 진짜 컨트롤**을
 // 눌러서 한다(단색·기본 제공의 칩, 사진은 `setInputFiles`로 진짜 파일 선택 경로). 시드로 상태를 박지 않는다.
@@ -17,7 +18,8 @@
 //   ③ 로그아웃하면 IndexedDB의 사진이 지워지고 외양 레코드의 사진 참조와 루트 속성이 걷힌다(단색은 남는다).
 //   ④ 네트워크: 사진을 고르고 적용하는 동안 바깥으로 나간 요청이 없다(본문 있는 요청 0, 다른 오리진 0).
 //   ⑤ CSP: Tauri 셸의 정책(`tauri.conf.json`)을 그대로 붙인 번들에서도 사진 배경이 서고 위반 이벤트가 0이다.
-//   ⑥ 읽힘: 순흑 사진·순백 사진 위에서 사이드바·상단 줄의 글자(4.5:1)와 아이콘(3:1)이 실제 렌더 픽셀 위에서 지켜진다.
+//   ⑥ 읽힘: 순흑 사진·순백 사진 위에서 펼친·접은 사이드바·상단 줄과 설정 목록 열의 글자(4.5:1)와 아이콘(3:1)이 실제 렌더
+//      픽셀 위에서 지켜진다(바탕은 글자를 투명하게 한 같은 장면에서 읽는다: `scripts/lib/legibility.mjs`).
 //   ⑦ 접근성: 대비 높이기·투명도 줄이기가 켜지면 그림이 서지 않고 선택은 남는다.
 //
 // 백엔드 없이 `/v1/**` 고정 응답 + 가짜 소켓. 벽시계·로케일·시간대를 고정한다.
@@ -44,6 +46,9 @@ const PORT = Number(process.env.CAPTURE_PORT || 5391);
 // 데스크탑 앱은 macOS의 WKWebView(WebKit)이다. ENGINE=webkit 이면 같은 장면·단정을 WebKit으로 돈다(Chromium 전용인
 // CDP 에뮬레이션은 건너뛰고 그 사실을 적는다). 진짜 Tauri 셸에서의 실행은 아니다(runtime-unverified).
 const ENGINE = process.env.ENGINE === "webkit" ? "webkit" : "chromium";
+// SABOTAGE=scrim: ⑥을 재기 직전에 두 모드의 scrim을 투명하게 한다. 가드가 실제로 실패할 수 있다면 순흑·순백 사진이 그대로
+// 비쳐 ⑥이 깨져야 한다(깨지지 않으면 ⑥이 아무것도 재지 않는다는 뜻이다). 정상 실행에서는 쓰지 않는다.
+const SABOTAGE = process.env.SABOTAGE === "scrim" ? "scrim" : "";
 const launcher = ENGINE === "webkit" ? webkit : chromium;
 
 const FIXTURE_NOW = Date.parse("2026-10-22T09:30:00+09:00");
@@ -636,7 +641,9 @@ const storedAppearance = (page) => page.evaluate(() => {
 
 async function legibility(browser, origin, helper) {
   const rows = [];
-  const REGION = ".app-shell > .sidebar-drawer, .app-shell > .app-titlebar";
+  // 바닥 위에 직접 서는 세 자리: 펼친 사이드바·상단 줄, 접은 사이드바(레일)·상단 줄, 설정의 목록 열.
+  const CHAT = ".app-shell > .sidebar-drawer, .app-shell > .app-titlebar";
+  const SETTINGS = ".app-shell .settings-nav";
   for (const kind of ["black", "white"]) {
     const photo = await makeJpeg(helper, { kind, width: 2400, height: 1500 });
     const { context, page } = await openContext(browser, origin, "light", VIEWPORTS[0]);
@@ -647,16 +654,33 @@ async function legibility(browser, origin, helper) {
       for (const scheme of SCHEMES) {
         await page.emulateMedia({ colorScheme: scheme });
         await page.waitForTimeout(400);
-        await goChat(page);
-        await settle(page);
-        const { png, measured } = await measureLegibility(page, helper, REGION);
-        const bad = measured.filter((item) => item.ratio < item.min - 0.05);
-        rows.push({ kind, scheme, count: measured.length, worst: Math.min(...measured.map((item) => item.ratio / item.min)), bad });
-        writeFileSync(resolve(outDir(), `legibility-${kind}-${scheme}.png`), png);
-        writeFileSync(
-          resolve(outDir(), `legibility-${kind}-${scheme}.json`),
-          JSON.stringify(measured.map((item) => ({ kind: item.kind, label: item.label, color: item.color, bg: item.bg, ratio: Number(item.ratio.toFixed(2)), min: item.min })), null, 1)
-        );
+        const states = [
+          ["펼친 사이드바", CHAT, async () => { await goChat(page); }],
+          ["접은 사이드바", CHAT, async () => { await goChat(page); await page.getByTestId("sidebar-toggle").click(); await page.waitForTimeout(500); }],
+          ["설정 목록 열", SETTINGS, async () => { await goSettings(page); }],
+        ];
+        for (const [name, region, prepare] of states) {
+          await prepare();
+          await settle(page);
+          if (SABOTAGE === "scrim") {
+            await page.evaluate(() => {
+              document.documentElement.style.setProperty("--wallpaper-scrim-light", "transparent");
+              document.documentElement.style.setProperty("--wallpaper-scrim-dark", "transparent");
+            });
+            await settle(page);
+          }
+          const { png, measured } = await measureLegibility(page, helper, region);
+          const bad = measured.filter((item) => item.ratio < item.min - 0.05);
+          rows.push({ kind, scheme, name, count: measured.length, worst: Math.min(...measured.map((item) => item.ratio / item.min)), bad });
+          const slug = `${kind}-${scheme}-${name.replace(/\s+/g, "")}`;
+          writeFileSync(resolve(outDir(), `legibility-${slug}.png`), png);
+          writeFileSync(
+            resolve(outDir(), `legibility-${slug}.json`),
+            JSON.stringify(measured.map((item) => ({ kind: item.kind, label: item.label, color: item.color, bg: item.bg, ratio: Number(item.ratio.toFixed(2)), min: item.min })), null, 1)
+          );
+          // 접은 상태를 되돌린다.
+          if (name === "접은 사이드바") { await page.getByTestId("sidebar-toggle").click(); await page.waitForTimeout(300); }
+        }
       }
     } finally {
       await context.close();
@@ -809,7 +833,7 @@ async function assertions() {
     // ⑥ 읽힘: 순흑·순백 사진 위의 실제 렌더 픽셀.
     const rows = await legibility(browser, preview.origin, helper);
     for (const row of rows) {
-      check(`⑥ ${row.kind} 사진 × ${row.scheme}: 사이드바·상단 줄의 글자 4.5:1·아이콘 3:1`, row.bad.length === 0 && row.count > 10,
+      check(`⑥ ${row.kind} 사진 × ${row.scheme} × ${row.name}: 글자 4.5:1·아이콘 3:1`, row.bad.length === 0 && row.count >= (row.name === "접은 사이드바" ? 2 : 8),
         `항목 ${row.count}개, 가장 낮은 (대비/기준) = ${row.worst.toFixed(2)}${row.bad.length ? `, 미달: ${JSON.stringify(row.bad.slice(0, 4).map((b) => [b.label, b.color, b.bg, Number(b.ratio.toFixed(2))]))}` : ""}`);
     }
 
