@@ -170,12 +170,13 @@ describe("지원되는 맥 데스크탑: 켜기·슬라이더 (AC 3·4)", () => 
     expect(toggle().getAttribute("aria-checked")).toBe("true");
     const input = slider();
     expect(input).not.toBeNull();
-    // 새벽하늘 라이트(jsdom 기본은 시스템 라이트): 하한 70, 최대 95, 기본은 하한이다.
+    // 새벽하늘 라이트(jsdom 기본은 시스템 라이트): 하한 70, 최대 95, 기본은 하한 + 10%p(80)다. 알이 범위 안에 서서
+    // 왼쪽(더 비치게)으로도 오른쪽으로도 움직인다.
     expect(input?.min).toBe("70");
     expect(input?.max).toBe("95");
-    expect(input?.value).toBe("70");
-    expect(input?.getAttribute("aria-valuetext")).toBe("70% 불투명");
-    expect(text("glass-opacity-value")).toBe("70%");
+    expect(input?.value).toBe("80");
+    expect(input?.getAttribute("aria-valuetext")).toBe("80% 불투명");
+    expect(text("glass-opacity-value")).toBe("80%");
     expect(text("glass-opacity-row")).toContain("낮출수록 데스크탑이 더 비쳐요. 글자가 읽히도록 이 테마에서는 70% 아래로 내릴 수 없어요.");
   });
 
@@ -184,22 +185,23 @@ describe("지원되는 맥 데스크탑: 켜기·슬라이더 (AC 3·4)", () => 
     mount();
     await settled();
     const input = slider() as HTMLInputElement;
-    // 기본은 하한(70)이다: 아래로는 움직이지 않는다.
+    // 기본은 하한 + 10%p(80)다: 아래로도 위로도 움직인다.
+    expect(slider()?.value).toBe("80");
     press(input, "ArrowLeft");
     await settled();
-    expect(slider()?.value).toBe("70");
-    expect(getAppearance().glass).toEqual({ on: true });
+    expect(getAppearance().glass).toEqual({ on: true, opacity: 79 });
+    expect(document.documentElement.style.getPropertyValue("--glass-tint-light")).toBe("79%");
     press(input, "ArrowRight");
     await settled();
-    expect(getAppearance().glass).toEqual({ on: true, opacity: 71 });
-    expect(document.documentElement.style.getPropertyValue("--glass-tint-light")).toBe("71%");
+    expect(getAppearance().glass).toEqual({ on: true, opacity: 80 });
     press(input, "PageUp");
     await settled();
-    expect(getAppearance().glass).toEqual({ on: true, opacity: 81 });
+    expect(getAppearance().glass).toEqual({ on: true, opacity: 90 });
+    press(input, "PageDown");
     press(input, "PageDown");
     press(input, "PageDown");
     await settled();
-    // 하한 70에서 멈춘다(81 → 71 → 70).
+    // 하한 70에서 멈춘다(90 → 80 → 70 → 70).
     expect(getAppearance().glass?.opacity).toBe(70);
     expect(slider()?.value).toBe("70");
     expect(slider()?.getAttribute("aria-valuetext")).toBe("70% 불투명");
@@ -222,11 +224,23 @@ describe("지원되는 맥 데스크탑: 켜기·슬라이더 (AC 3·4)", () => 
     press(slider() as HTMLInputElement, "ArrowRight");
     await settled();
     expect((q("glass-opacity-reset") as HTMLButtonElement).disabled).toBe(false);
+    // 키보드로 닿은 단추: 누르면 기본값이 되어 잠기지만 포커스는 슬라이더로 넘어가 자리를 잃지 않는다(design-review L3).
+    (q("glass-opacity-reset") as HTMLButtonElement).focus();
     act(() => (q("glass-opacity-reset") as HTMLButtonElement).click());
     await settled();
     expect(getAppearance().glass).toEqual({ on: true });
-    expect(slider()?.value).toBe("70");
+    expect(slider()?.value).toBe("80");
     expect((q("glass-opacity-reset") as HTMLButtonElement).disabled).toBe(true);
+    expect(document.activeElement).toBe(slider());
+  });
+
+  it("리셋 단추에는 이름과 같은 툴팁이 있다(아이콘만 있는 단추)", async () => {
+    updateAppearance({ glass: { on: true } });
+    mount();
+    await settled();
+    const reset = q("glass-opacity-reset") as HTMLButtonElement;
+    expect(reset.getAttribute("title")).toBe("기본값으로 되돌리기");
+    expect(reset.getAttribute("aria-label")).toBe(reset.getAttribute("title"));
   });
 
   it("끄면 슬라이더가 사라지고 불투명도는 남는다(다시 켜면 돌아온다)", async () => {

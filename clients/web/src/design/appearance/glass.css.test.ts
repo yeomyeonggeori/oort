@@ -83,9 +83,18 @@ describe("glass.css 문자열 계약", () => {
     expect(GLASS_CODE).not.toMatch(/:root\[data-glass\] \{[^}]*background/);
   });
 
-  it("내 작업 탭의 본문은 유리 아래에서 `--pane` 면을 깐다", () => {
-    expect(squash(GLASS_CODE)).toContain(
-      ":root[data-glass] .app-shell[data-work-rail] > main { background-color: var(--pane); }"
+  it("내 작업 탭의 본문은 유리 아래에서 `--pane` 판을 깔고, `app-pane`과 같은 문법(인셋 8·반경 18·테두리·그림자·잘림)으로 선다", () => {
+    const flat = squash(GLASS_CODE);
+    expect(flat).toContain(
+      ":root[data-glass] .app-shell[data-work-rail] > main { background-color: var(--pane); margin-block: 0 var(--spacing-2); margin-inline: 0 var(--spacing-2); border-radius: var(--radius-xl); box-shadow: var(--elevation-rest), 0 0 0 1px var(--line); overflow: clip; }"
+    );
+    // 목록 열을 접으면 레일 옆에도 인셋 8(다른 탭의 접힘과 같다).
+    expect(flat).toContain(
+      ":root[data-glass] .app-shell[data-work-rail][data-sidebar-collapsed] > main { margin-inline-start: var(--spacing-2); }"
+    );
+    // `app-pane` 유틸리티(tokens.css)가 쓰는 값과 같은 토큰이다: 여기서 다른 값을 만들지 않는다. 판 문법이 바뀌면 빨개진다.
+    expect(squash(TOKENS)).toContain(
+      "border-radius: var(--radius-xl); box-shadow: var(--elevation-rest), 0 0 0 1px var(--line); overflow: clip;"
     );
   });
 
@@ -97,6 +106,10 @@ describe("glass.css 문자열 계약", () => {
     const body = block?.[1] ?? "";
     for (const property of ["--shell-layer-canvas", "--shell-layer-band", "background-color", "background"]) {
       expect(body, property).toContain(`${property}: revert-layer;`);
+    }
+    // 내 작업 탭의 판도 원래 모양(판 없이 창 끝까지)으로 돌아간다.
+    for (const property of ["margin", "border-radius", "box-shadow", "overflow"]) {
+      expect(body, `내 작업 ${property}`).toContain(`${property}: revert-layer;`);
     }
     // 쉼표 목록이다: 한쪽 질의를 모르는 엔진(WKWebView는 앞의 질의를 구현하지 않는다)도 나머지는 읽는다.
     expect(GLASS_CODE).not.toMatch(/not \(prefers-reduced-transparency/);

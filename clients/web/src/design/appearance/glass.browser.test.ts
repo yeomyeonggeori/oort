@@ -87,8 +87,8 @@ interface Scene {
   backdrop: keyof typeof BACKDROPS;
   /** 저장된 불투명도(퍼센트). 없으면 기본. */
   opacity?: number;
-  /** 셸 속성: `collapsed` · `work-rail` · `settings` · `none`(셸 없는 화면). */
-  shell?: "collapsed" | "work-rail" | "settings" | "none";
+  /** 셸 속성: `collapsed` · `work-rail` · `work-rail-collapsed` · `settings` · `none`(셸 없는 화면). */
+  shell?: "collapsed" | "work-rail" | "work-rail-collapsed" | "settings" | "none";
 }
 
 /** 루트에 꽂을 변수. 바닥은 평면으로 덮고(세 정지점 같은 색), 띠가 있는 테마는 띠 변수도 꽂는다. */
@@ -126,9 +126,11 @@ function html(css: string, scene: Scene): string {
       ? " data-sidebar-collapsed"
       : scene.shell === "work-rail"
         ? " data-work-rail"
-        : scene.shell === "settings"
-          ? " data-settings-surface"
-          : "";
+        : scene.shell === "work-rail-collapsed"
+          ? " data-work-rail data-sidebar-collapsed"
+          : scene.shell === "settings"
+            ? " data-settings-surface"
+            : "";
   const body =
     scene.shell === "none"
       ? `<main id="plain">로그인 전 화면</main>`
@@ -281,6 +283,45 @@ describe.skipIf(ENGINES.length === 0)("유리 CSS의 실제 렌더 (AP-3 #4190)"
           expect(body[3]).toBeGreaterThanOrEqual(OPAQUE);
           const side = await pixel(page, 100, 300);
           expect(side[3], "사이드바는 여전히 유리다").toBeLessThan(OPAQUE);
+        } finally {
+          await ctx.close();
+        }
+      }, 90_000);
+
+      it("내 작업 탭의 판은 다른 탭의 판과 같은 문법으로 서서 오른쪽·아래 가장자리에 유리가 남는다. 끄면·고대비면 원래 모양이다 (design-review M3)", async () => {
+        const ctx = await launch(engine, await buildCss());
+        try {
+          const geometry = (page: Page) =>
+            page.evaluate(() => {
+              const main = document.querySelector("main") as HTMLElement;
+              const box = main.getBoundingClientRect();
+              const style = getComputedStyle(main);
+              return {
+                left: box.left,
+                right: innerWidth - box.right,
+                bottom: innerHeight - box.bottom,
+                radius: style.borderTopLeftRadius,
+                shadow: style.boxShadow !== "none",
+                overflow: style.overflow,
+              };
+            });
+          const scene = { theme: "dawnsky", mode: "light", glass: true, backdrop: "red", opacity: 80 } as const;
+          const chat = await geometry(await ctx.open(scene));
+          const rail = await geometry(await ctx.open({ ...scene, shell: "work-rail" }));
+          // 다른 탭의 판: 오른쪽·아래 인셋 8, 반경 18, 그림자·테두리, 잘림. 내 작업은 같은 문법이다.
+          expect(chat).toMatchObject({ right: 8, bottom: 8, radius: "18px", shadow: true, overflow: "clip" });
+          expect(rail).toMatchObject({ right: chat.right, bottom: chat.bottom, radius: chat.radius, shadow: true, overflow: "clip" });
+          // 접힘: 목록 열을 접으면 레일 옆 인셋도 다른 탭의 접힘과 같다.
+          const collapsedChat = await geometry(await ctx.open({ ...scene, shell: "collapsed" }));
+          const collapsedRail = await geometry(await ctx.open({ ...scene, shell: "work-rail-collapsed" }));
+          expect(collapsedRail.left).toBe(collapsedChat.left);
+          expect(collapsedRail.right).toBe(8);
+          // 끄면 원래 모양이다(판 없이 창 끝까지).
+          const off = await geometry(await ctx.open({ ...scene, glass: false, shell: "work-rail" }));
+          expect(off).toMatchObject({ right: 0, bottom: 0, radius: "0px", shadow: false });
+          // 대비 높이기: CSS가 불투명 바닥으로 돌아가며 이 탭도 원래 모양이다.
+          const contrast = await geometry(await ctx.open({ ...scene, shell: "work-rail" }, { contrast: "more" }));
+          expect(contrast).toMatchObject({ right: 0, bottom: 0, radius: "0px", shadow: false });
         } finally {
           await ctx.close();
         }

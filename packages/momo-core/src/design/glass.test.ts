@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { contrast, hueGap, normalizeHex } from "./color";
+import { contrast, hueGap, normalizeHex, toOklch } from "./color";
 import {
+  GLASS_DEFAULT_OVER_FLOOR,
   GLASS_NON_TEXT_ROLES,
   GLASS_OPACITY_MAX,
   GLASS_PAGE_STEP,
@@ -388,7 +389,41 @@ describe("범위·판정 — 쓸 수 있는가 (AC 4, 증보 3 D6 불가 기준 
       expect(range.usable, `${theme} ${mode}`).toBe(true);
       expect(range.min).toBe(Math.round(FLOOR[theme][mode] * 100));
       expect(range.max).toBe(95);
-      expect(range.defaultPercent).toBe(range.min);
+      expect(range.defaultPercent).toBe(Math.min(95, range.min + GLASS_DEFAULT_OVER_FLOOR));
+    }
+  });
+
+  it("기본값은 하한 + 10%p다: 하한에서 열면 위계가 가장 눌린다(design-review H1) — 같은 면의 끔 상태와 잰다", () => {
+    expect(GLASS_DEFAULT_OVER_FLOOR).toBe(10);
+    // 띠 없는 두 테마(바닥 위에 직접 서는 글자)로 잰다. 잉크 대 보조 글자 대비가 끔 상태에 얼마나 가까운가.
+    const retained = (theme: ThemeId, mode: Mode, percent: number): number => {
+      const source = sourceOf(theme, mode);
+      const off = contrast(source.color.ink, source.color["ink-muted"]);
+      const fitted = glassChrome(source, mode, percent).canvas["ink-muted"];
+      return (contrast(source.color.ink, fitted) - 1) / (off - 1);
+    };
+    for (const [theme, mode] of [
+      ["dawnsky", "light"],
+      ["dawnsky", "dark"],
+      ["graphite", "light"],
+      ["graphite", "dark"],
+    ] as [ThemeId, Mode][]) {
+      const range = glassRange(sourceOf(theme, mode));
+      const atFloor = retained(theme, mode, range.min);
+      const atDefault = retained(theme, mode, range.defaultPercent);
+      // 실측(design-review): 하한에서 끔의 25~45%만 남는다. 기본값에서는 절반 가까이이거나 끔과 같다.
+      expect(atFloor, `${theme} ${mode} 하한`).toBeLessThan(0.45);
+      expect(atDefault, `${theme} ${mode} 기본값`).toBeGreaterThan(atFloor);
+      expect(atDefault, `${theme} ${mode} 기본값`).toBeGreaterThanOrEqual(0.45);
+    }
+    // 다크는 기본값에서 끔의 위계가 통째로 돌아오고, 위험 > 경고 채도 순서(README §2.2)도 돌아온다.
+    for (const theme of ["dawnsky", "graphite"] as ThemeId[]) {
+      const source = sourceOf(theme, "dark");
+      const range = glassRange(source);
+      const atFloor = glassChrome(source, "dark", range.min).canvas;
+      const atDefault = glassChrome(source, "dark", range.defaultPercent).canvas;
+      expect(toOklch(atFloor.danger).C, `${theme} 하한`).toBeLessThan(toOklch(atFloor.warn).C);
+      expect(toOklch(atDefault.danger).C, `${theme} 기본값`).toBeGreaterThanOrEqual(toOklch(atDefault.warn).C);
     }
   });
 
@@ -422,10 +457,10 @@ describe("범위·판정 — 쓸 수 있는가 (AC 4, 증보 3 D6 불가 기준 
   });
 
   it("값 정규화: 없음·숫자 아님은 기본값, 하한 아래는 하한, 95 위는 95, 소수는 반올림", () => {
-    const range = glassRange(sourceOf("dawnsky", "dark")); // 78..95, 기본 78(하한)
-    expect(glassOpacity(range, undefined)).toBe(78);
-    expect(glassOpacity(range, Number.NaN)).toBe(78);
-    expect(glassOpacity(range, Number.POSITIVE_INFINITY)).toBe(78);
+    const range = glassRange(sourceOf("dawnsky", "dark")); // 78..95, 기본 88(하한 + 10%p)
+    expect(glassOpacity(range, undefined)).toBe(88);
+    expect(glassOpacity(range, Number.NaN)).toBe(88);
+    expect(glassOpacity(range, Number.POSITIVE_INFINITY)).toBe(88);
     expect(glassOpacity(range, 12)).toBe(78);
     expect(glassOpacity(range, 77)).toBe(78);
     expect(glassOpacity(range, 78)).toBe(78);
@@ -494,10 +529,10 @@ describe("CSS 변수", () => {
     const vars = glassVariables(firstPartyGlassSources("dawnsky"), 74);
     expect(vars[GLASS_VARS.tintLight]).toBe("74%");
     expect(vars[GLASS_VARS.tintDark]).toBe("78%");
-    // 저장이 없으면 모드마다 자기 하한이다(보장 안에서 가장 많이 비치는 값).
+    // 저장이 없으면 모드마다 자기 하한 + 10%p다(라이트 80, 다크 88).
     const defaults = glassVariables(firstPartyGlassSources("dawnsky"), undefined);
-    expect(defaults[GLASS_VARS.tintLight]).toBe("70%");
-    expect(defaults[GLASS_VARS.tintDark]).toBe("78%");
+    expect(defaults[GLASS_VARS.tintLight]).toBe("80%");
+    expect(defaults[GLASS_VARS.tintDark]).toBe("88%");
   });
 
   it("값이 바뀌면 보정 색도 바뀐다(하한 근처와 95%의 보조 글자색이 다르다)", () => {

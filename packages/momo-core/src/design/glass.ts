@@ -60,6 +60,17 @@ export const GLASS_OPACITY_MAX = 95;
 export const GLASS_STEP = 1;
 export const GLASS_PAGE_STEP = 10;
 
+/**
+ * 저장된 값이 없을 때 하한 위로 얹는 퍼센트포인트(청사진 §5.4-b 「기본값 = 하한 + 10%p 정도」, 캡처로 확인).
+ * 하한에서는 위계가 가장 많이 눌린다: 글자·표식을 순흑·순백 그림 위에서 4.5·3:1로 보정하는데 실제 맥 `Sidebar`
+ * 재질은 그 두 끝을 만들지 못해서(라이트 (198,198,197)~(222,222,222), 다크 (34,34,35)~(78,78,78), 실측)
+ * 보조 글자가 필요한 것의 두 배쯤 진해진다. 새벽하늘 라이트의 잉크 대 보조 대비가 끔 2.69, 하한 70% 1.46,
+ * 80% 1.90이고, 새벽하늘 다크는 끔 2.13, 하한 78% 1.48, 88% 2.13(끔과 같고 위험 > 경고 채도 순서도 돌아온다)이다.
+ * 하한에서 열면 켠 직후 사이드바의 구획 라벨·아이콘이 항목 글자에 붙는다(design-review H1). 하한 아래로 내려
+ * 더 비치게 하는 길은 하한 산수(ADR 증보 3 D6 결정 4 (c))를 다시 정할 때만 열린다.
+ */
+export const GLASS_DEFAULT_OVER_FLOOR = 10;
+
 /** 하한 위에서 명도를 보정하는 글자 역할(4.5:1 + 여유). 폰 `onImage` 글자 목록과 같다. */
 export const GLASS_TEXT_ROLES = [
   "ink-muted",
@@ -183,10 +194,9 @@ export function glassRange(source: GlassSource): GlassRange {
     usable: min <= GLASS_OPACITY_MAX,
     min,
     max: GLASS_OPACITY_MAX,
-    // 저장된 값이 없을 때의 값은 하한이다: 보장 안에서 데스크탑이 가장 많이 비치는 값이다. 캡처로 정했다 —
-    // 맥 `Sidebar` 재질은 뒤 그림을 크게 눌러 놓아서(순흑 뒤가 라이트에서 (198,198,197), 순백 뒤가 (222,222,222))
-    // 하한 위 10%p만 되어도 켠 것과 끈 것이 거의 구별되지 않는다. 사람은 슬라이더를 오른쪽으로 옮겨 더 진하게 한다.
-    defaultPercent: Math.min(GLASS_OPACITY_MAX, min),
+    // 저장된 값이 없을 때의 값은 하한 + 10%p다(`GLASS_DEFAULT_OVER_FLOOR`). 하한에서 열면 글자·표식 위계가 가장
+    // 눌린다. 사람은 슬라이더를 왼쪽으로 하한까지 옮겨 더 비치게 하거나 오른쪽으로 옮겨 더 진하게 한다.
+    defaultPercent: Math.min(GLASS_OPACITY_MAX, min + GLASS_DEFAULT_OVER_FLOOR),
   };
 }
 

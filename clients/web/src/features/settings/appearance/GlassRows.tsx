@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { RotateCcw } from "lucide-react";
 import { GLASS_PAGE_STEP, GLASS_STEP } from "@momo/core/design/glass";
 import { Button } from "@/design/ui/button";
@@ -33,6 +34,9 @@ const OPACITY_DESCRIPTION_ID = "glass-opacity-description";
 export function GlassRows() {
   const { status, view } = useGlassSnapshot();
   const { decision, range, opacity } = view;
+  // 리셋을 누르면 기본값이 되어 단추가 잠긴다(포커스가 body로 떨어진다). 키보드로 누른 사람이 자리를 잃지 않게
+  // 포커스를 슬라이더로 넘긴다.
+  const sliderRef = useRef<HTMLInputElement>(null);
 
   // 테마의 색을 아직 못 읽었다(파생 테마인데 엔진 조회가 꽂히지 않았다): 이때 스위치를 켠 채로 두면 눌러도 아무 일도
   // 없는 컨트롤이 된다(켠 채로 두는 것은 창 쪽 일이 기다린다는 뜻이고 화면은 아무것도 안 그린다). 컨트롤은 앱이 실제로
@@ -102,6 +106,7 @@ export function GlassRows() {
             describedBy={OPACITY_DESCRIPTION_ID}
             onValueChange={setGlassOpacity}
             testId="glass-opacity-slider"
+            inputRef={sliderRef}
           />
           <span
             data-numeric
@@ -116,8 +121,12 @@ export function GlassRows() {
             variant="ghost"
             size="icon"
             aria-label={GLASS_COPY.reset}
+            title={GLASS_COPY.reset}
             disabled={opacity === range.defaultPercent}
-            onClick={() => setGlassOpacity(undefined)}
+            onClick={() => {
+              setGlassOpacity(undefined);
+              sliderRef.current?.focus();
+            }}
             data-testid="glass-opacity-reset"
           >
             <RotateCcw aria-hidden="true" />

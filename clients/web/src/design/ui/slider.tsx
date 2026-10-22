@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type KeyboardEvent } from "react";
+import { useCallback, useLayoutEffect, useRef, type KeyboardEvent, type Ref } from "react";
 import { cn } from "@/design/lib/cn";
 import "./slider.css";
 
@@ -34,6 +34,8 @@ export interface SliderProps {
   id?: string;
   className?: string;
   testId?: string;
+  /** 입력 요소. 값을 바꾼 컨트롤이 사라지며 포커스를 잃는 호출자가 포커스를 되돌릴 때 쓴다. */
+  inputRef?: Ref<HTMLInputElement>;
 }
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
@@ -80,8 +82,18 @@ export function Slider({
   id,
   className,
   testId,
+  inputRef,
 }: SliderProps) {
-  const ref = useRef<HTMLInputElement>(null);
+  const ref = useRef<HTMLInputElement | null>(null);
+  // 안쪽 ref(채움 변수를 꽂는다)와 호출자의 ref를 함께 채운다.
+  const setRef = useCallback(
+    (node: HTMLInputElement | null) => {
+      ref.current = node;
+      if (typeof inputRef === "function") inputRef(node);
+      else if (inputRef) (inputRef as { current: HTMLInputElement | null }).current = node;
+    },
+    [inputRef]
+  );
   const span = max - min;
   const shown = clamp(value, min, Math.max(min, max));
   const fraction = span > 0 ? (shown - min) / span : 1;
@@ -103,7 +115,7 @@ export function Slider({
 
   return (
     <input
-      ref={ref}
+      ref={setRef}
       type="range"
       id={id}
       min={min}

@@ -21,8 +21,10 @@
  *   투명      `body`(셸이 있을 때만), `.app-shell`의 바닥. 사이드바·타이틀바·설정 목록은 바탕이 없어 그 위에 선다.
  *   불투명    본문 판(`app-pane`, 설정 판 `settings-pane`)과 카드·시트·입력. 로그인 전 화면처럼 셸이 없는 화면은
  *            `body`가 `--pane`으로 칠해져 있어 **통째로 불투명**이다.
- *   내 작업   본문이 판 없이 바닥 위에 서는 탭(`data-work-rail`)은 유리 아래에서 `--pane` 면을 깐다: 그 영역의
- *            글자는 보정되지 않으므로 반투명으로 둘 수 없다(「본문은 불투명」).
+ *   내 작업   본문이 판 없이 바닥 위에 서는 탭(`data-work-rail`)은 유리 아래에서 `--pane` 판을 깐다: 그 영역의
+ *            글자는 보정되지 않으므로 반투명으로 둘 수 없다(「본문은 불투명」). 판은 다른 탭의 판과 같은 문법
+ *            (오른쪽·아래 인셋 8, 반경 18, 테두리·그림자)으로 선다: 창 끝까지 닿는 직각 슬랩이면 가장자리의 유리가
+ *            사라진다(design-review M3).
  *
  * ## 접근성 (증보 1 D4 폴백 2)
  *
@@ -68,9 +70,22 @@
     background-color: transparent;
   }
 
-  /* 내 작업 탭: 판이 없어 본문이 바닥 위에 선다. 유리 아래에서는 그 면을 불투명 `--pane`으로 깐다. */
+  /* 내 작업 탭: 판이 없어 본문이 바닥 위에 선다(tokens.css는 면·그림자·반경·여백을 걷었다). 유리 아래에서는 그 면을
+   * 불투명 `--pane` 판으로 깔되 `app-pane`과 같은 문법으로 둔다. 위는 상단 줄 아래(둘째 행)에서 시작해 인셋이 없고,
+   * 왼쪽은 사이드바가 여백이다. 목록 열을 접으면 레일 옆에 다른 탭처럼 인셋 8을 둔다. */
   :root[data-glass] .app-shell[data-work-rail] > main {
     background-color: var(--pane);
+    margin-block: 0 var(--spacing-2);
+    margin-inline: 0 var(--spacing-2);
+    border-radius: var(--radius-xl);
+    box-shadow:
+      var(--elevation-rest),
+      0 0 0 1px var(--line);
+    overflow: clip;
+  }
+
+  :root[data-glass] .app-shell[data-work-rail][data-sidebar-collapsed] > main {
+    margin-inline-start: var(--spacing-2);
   }
 
   /* 사이드바·타이틀바·설정 목록은 띠(있으면) 위에, 접힌 타이틀바는 바닥 위에 선다. 글자·표식은 두 면 위에서 각각 보정한 색이다. */
@@ -112,7 +127,12 @@
     background-color: revert-layer;
   }
 
-  :root[data-glass] .app-shell[data-work-rail] > main {
+  :root[data-glass] .app-shell[data-work-rail] > main,
+  :root[data-glass] .app-shell[data-work-rail][data-sidebar-collapsed] > main {
     background-color: revert-layer;
+    margin: revert-layer;
+    border-radius: revert-layer;
+    box-shadow: revert-layer;
+    overflow: revert-layer;
   }
 }

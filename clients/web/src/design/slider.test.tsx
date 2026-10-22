@@ -2,6 +2,9 @@
 
 import { act, createElement, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { Slider, sliderKeyTarget } from "./ui/slider";
 
@@ -203,5 +206,51 @@ describe("Slider", () => {
     press(input, "Home");
     press(input, "PageUp");
     expect(Number(input.style.getPropertyValue("--slider-fraction"))).toBeCloseTo(10 / 25, 5);
+  });
+
+  it("inputRef가 입력 요소를 받는다(호출자가 포커스를 되돌릴 수 있게), 안쪽 채움 변수도 그대로 꽂힌다", () => {
+    let received: HTMLInputElement | null = null;
+    host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+    act(() =>
+      root?.render(
+        createElement(Slider, {
+          value: 80,
+          min: 70,
+          max: 95,
+          onValueChange: () => undefined,
+          testId: "slider",
+          inputRef: (node: HTMLInputElement | null) => {
+            received = node;
+          },
+        })
+      )
+    );
+    const input = host.querySelector<HTMLInputElement>('[data-testid="slider"]');
+    expect(received).toBe(input);
+    expect(input?.style.getPropertyValue("--slider-fraction")).toBe("0.4");
+  });
+});
+
+describe("slider.css — 호버·눌림·포커스 (design-review L4)", () => {
+  const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "ui", "slider.css"), "utf8");
+  it("알은 호버에서 옅은 선 한 겹, 눌림에서 살짝 커지고, 잠긴 슬라이더는 반응하지 않는다", () => {
+    for (const thumb of ["::-webkit-slider-thumb", "::-moz-range-thumb"]) {
+      expect(css).toContain(`.slider:where(:not(:disabled)):hover${thumb}`);
+      expect(css).toContain(`.slider:where(:not(:disabled)):active${thumb}`);
+    }
+    expect(css).toMatch(/:active::-webkit-slider-thumb \{\s*transform: scale\(1\.1\);/);
+  });
+  it("포커스 링 규칙이 호버 규칙보다 뒤에 서서 호버가 링을 가리지 않는다", () => {
+    for (const thumb of ["::-webkit-slider-thumb", "::-moz-range-thumb"]) {
+      const hover = css.indexOf(`.slider:where(:not(:disabled)):hover${thumb}`);
+      const focus = css.indexOf(`.slider:focus-visible${thumb}`);
+      expect(hover).toBeGreaterThan(-1);
+      expect(focus).toBeGreaterThan(hover);
+    }
+  });
+  it("모션 감소에서는 전이를 끈다", () => {
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{[^}]*transition: none;/);
   });
 });

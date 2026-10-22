@@ -19,19 +19,19 @@ describe("computeView — 설정 행과 창 쪽 일이 함께 읽는 판정", ()
   const sources = firstPartyGlassSources("dawnsky");
   const base = { supported: true, failed: false, reducedTransparency: false, mode: "light" as const, sources };
 
-  it("켬: 하한 70(새벽하늘 라이트), 저장이 없으면 기본은 하한 70, 슬라이더 값은 하한에 맞춘다", () => {
+  it("켬: 하한 70(새벽하늘 라이트), 저장이 없으면 기본은 하한 + 10%p인 80, 슬라이더 값은 하한에 맞춘다", () => {
     const view = computeView({ glass: ON, wallpaper: undefined }, base);
     expect(view.decision).toMatchObject({ reason: null, checked: true, paintWanted: true });
-    expect(view.range).toEqual({ usable: true, min: 70, max: 95, defaultPercent: 70 });
-    expect(view.opacity).toBe(70);
+    expect(view.range).toEqual({ usable: true, min: 70, max: 95, defaultPercent: 80 });
+    expect(view.opacity).toBe(80);
     expect(computeView({ glass: { on: true, opacity: 50 }, wallpaper: undefined }, base).opacity).toBe(70);
     expect(computeView({ glass: { on: true, opacity: 99 }, wallpaper: undefined }, base).opacity).toBe(95);
   });
 
-  it("모드마다 하한이 다르다(다크 78)", () => {
+  it("모드마다 하한이 다르다(다크 78, 기본 88)", () => {
     const view = computeView({ glass: ON, wallpaper: undefined }, { ...base, mode: "dark" });
     expect(view.range?.min).toBe(78);
-    expect(view.opacity).toBe(78);
+    expect(view.opacity).toBe(88);
   });
 
   it("색을 못 읽은 테마(조회 없음)는 범위가 없고 켠 채로 기다린다", () => {
@@ -88,8 +88,8 @@ describe("켜기와 끄기의 순서 (AC 3)", () => {
     expect(after[after.length - 1]).toBe(`attr+${GLASS_ATTRIBUTE}`);
     expect(env.painted()).toBe(true);
     expect(env.root.vars.get("background")).toBe("transparent");
-    expect(env.root.vars.get(GLASS_VARS.tintLight)).toBe("70%");
-    expect(env.root.vars.get(GLASS_VARS.tintDark)).toBe("78%");
+    expect(env.root.vars.get(GLASS_VARS.tintLight)).toBe("80%");
+    expect(env.root.vars.get(GLASS_VARS.tintDark)).toBe("88%");
     expect(env.effects.getSnapshot().status).toMatchObject({ native: true, painted: true });
   });
 
@@ -435,7 +435,7 @@ describe("값이 바뀌면 다시 꽂는다", () => {
     const env = makeEnv({ glass: ON });
     env.effects.start();
     await settle();
-    expect(env.root.vars.get(GLASS_VARS.tintLight)).toBe("70%");
+    expect(env.root.vars.get(GLASS_VARS.tintLight)).toBe("80%");
     env.set({ glass: { on: true, opacity: 93 } });
     await settle();
     expect(env.root.vars.get(GLASS_VARS.tintLight)).toBe("93%");
