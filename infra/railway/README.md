@@ -598,7 +598,9 @@ a new project.
    `pbcopy < ~/.momo-secrets/railway-github-app-master-key` fills the clipboard
    without printing the value.
 3. **api references**, single-quoted so the shell leaves `${{ }}` alone, with
-   `--skip-deploys` so setting them does not redeploy the running image:
+   `--skip-deploys` so setting them does not redeploy the running image. Run it
+   from a directory linked to the team project; `railway status` names the
+   project and environment it will change:
    ```sh
    railway variable set 'GITHUB_APP_MASTER_KEY=${{shared.GITHUB_APP_MASTER_KEY}}' \
      'MOMO_PUBLIC_BASE_URL=https://${{shared.OORT_SITE_ADDRESS}}' -s api --skip-deploys
