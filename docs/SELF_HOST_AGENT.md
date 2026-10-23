@@ -2722,6 +2722,7 @@ string (doctor already prints `fix` on fail). Summary of ids:
 | `stack.healthz` | not 200 `database:ok` | `logs api`. |
 | `stack.agent_port` | not 401 + Bearer scope | Wrong image; check `releases/latest.json`. |
 | `stack.outbox` | non-`done` rows | `push_candidate` pending is **info** (count) when no push relay is configured (no `PUSH_RELAY_URL` / `docker-compose.push.yml` `push-relay`/`notifier`). `agent_job` pending younger than 5 minutes is info; older is major (kind/status/count/max age listed). Other kinds: `logs relay` if pending/failed. |
+| `stack.scheduler` | a scheduled message is more than 5 minutes past its time and still `pending` (major; says "past the grace window" when it is past `MOMO_SCHEDULER_GRACE_SECONDS`, default 3600) | The api tick is not running or cannot close the row: `logs api` for `scheduled messages tick`; `MOMO_SCHEDULER_ENABLED=0` stops it. **info** = schedules the server missed in the last 24 h (no action; their author decides). **skip** = the connection cannot skip row-level security, so the count is unknown (use the owner URL). |
 | `stack.migrate_idempotency` | no `IDEMPOTENCY_OK` | `logs migrate`. |
 | `public.healthz` / `public.websocket` | public origin registered but 200/101 missing | Tunnel/Caddy and `CENTRIFUGO_ALLOWED_ORIGINS`. Funnel: §3.3.10 restart-once. Cloudflare T3 (§3.8): a `public.*` skip (「흔적 없음」) is a user error — run `--public-origin` first; skip is not PASS. |
 
