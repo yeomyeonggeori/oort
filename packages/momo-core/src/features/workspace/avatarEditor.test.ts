@@ -131,6 +131,10 @@ describe("프리셋", () => {
     expect(new Set(AVATAR_PRESET_IDS.map(avatarPresetLabel)).size).toBe(6);
   });
 
+  it("자르기 값은 문서와 같다: 바꾸려면 이 시험과 expressions.md 3절을 함께 고친다", () => {
+    expect(AVATAR_PRESET_CROP).toEqual({ x: 0.025, y: 0.105, size: 0.8 });
+  });
+
   it("자르기는 원본 안에 있는 정사각이고 정본 컷을 늘이지 않는다", () => {
     expect(AVATAR_PRESET_CROP.x).toBeGreaterThanOrEqual(0);
     expect(AVATAR_PRESET_CROP.y).toBeGreaterThanOrEqual(0);

@@ -19,6 +19,7 @@ import type { ComposeResult } from "./canvasPorts.browser.entry";
 //   · 네 모서리가 배경색과 **정확히** 같다(불투명, 색 관리로 값이 밀리지 않는다).
 //   · 글리프가 그려졌고 가운데에 서며, 사람 아바타의 원(`rounded-full`) 밖으로 나가지 않는다.
 //   · 같은 초안은 같은 바이트다(이 엔진 안에서). 기기마다 다른 것은 이모지 그림이고, 그래서 PNG 가 정본이다.
+//   · 코메토 출력은 정본 컷을 `AVATAR_PRESET_CROP` 으로 자르고 단색 바탕에 한 번 그린 **기준 그림과 픽셀 단위로 같다**(아무것도 더 얹지 않았다).
 //   · 판정이 진짜 그림에서 동작한다: 🌕 은 진한 배경에서 서고 노란 배경에서 묻힌다. 코메토는 진한 배경에서만 선다.
 //
 // 엔진: Chromium 과 WebKit 중 설치된 것 전부(데스크탑 앱은 macOS 의 WKWebView 라 WebKit 이 더 중요하다). 둘 다 없으면
@@ -247,6 +248,26 @@ describe.skipIf(ENGINES.length === 0)("아바타 그리기: 진짜 브라우저�
           expect(decoded.strong!.count, preset).toBeGreaterThan(512 * 512 * 0.5);
           const light = await run(page, "compose", { kind: "preset", preset, bg: BUTTER.hex });
           expect(light, preset).toEqual({ ok: false, reason: "low-contrast" });
+        }
+      });
+    }, 120_000);
+
+    it("코메토는 정본 컷의 자르기와 배경색 조합뿐이다: 기준 그림과 픽셀 하나도 다르지 않다 (새 그림·외곽선·그림자 금지)", async () => {
+      await withPage(async (page) => {
+        for (const preset of AVATAR_PRESET_IDS) {
+          for (const bg of [NAVY.hex, avatarBackgroundById("forest")!.hex]) {
+            const out = await run(page, "render", { kind: "preset", preset, bg });
+            expect(out.ok, `${preset} ${JSON.stringify(out)}`).toBe(true);
+            const different = await page.evaluate(
+              async ([bytes, input]) =>
+                (globalThis as unknown as { __avatarPorts: { differencesFromPlainCrop(b: number[], i: unknown): Promise<number> } }).__avatarPorts.differencesFromPlainCrop(
+                  bytes as number[],
+                  input
+                ),
+              [out.bytes!, { preset, bg }] as [number[], { preset: string; bg: string }]
+            );
+            expect(different, `${preset} on ${bg}: ${different} channel values differ from the plain crop`).toBe(0);
+          }
         }
       });
     }, 120_000);
