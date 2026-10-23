@@ -1,11 +1,14 @@
 import type {Message, RosterMember} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import React, {useEffect, useState} from 'react';
+import {Text} from 'react-native';
 import {Screen} from '../src/design/atoms';
+import {usePalette} from '../src/design/theme';
 import {Composer} from '../src/features/conversation/Composer';
 import {ConversationHeader} from '../src/features/conversation/ConversationHeader';
 import {ConversationLayout} from '../src/features/conversation/ConversationLayout';
 import {Timeline} from '../src/features/conversation/Timeline';
+import {EdgeSwipeBack} from '../src/nav/EdgeSwipeBack';
 import {setServerBase} from '../src/storage/serverBase';
 
 // =============================================================================
@@ -103,6 +106,21 @@ const MULTI: Message[] = [
   ]),
 ];
 
+const FILL = {flex: 1} as const;
+const WENT_BACK_TEXT = {padding: 24} as const;
+
+/** 가장자리 쓸기로 대화가 닫힌 뒤의 자리. 앱에서는 이 자리에 이전 화면이 선다. */
+function WentBack(): React.JSX.Element {
+  const palette = usePalette();
+  return (
+    <Screen>
+      <Text style={[WENT_BACK_TEXT, {color: palette.text}]} testID="harness-went-back">
+        뒤로 갔어요 (하네스: 대화 화면이 닫혔다)
+      </Text>
+    </Screen>
+  );
+}
+
 export function PhotoViewerSurface({which}: {which: string}): React.JSX.Element {
   // 첫 렌더 전에 한 번: 사진 타일은 마운트 직후 내려받기를 시작한다.
   useState(() => {
@@ -110,39 +128,45 @@ export function PhotoViewerSurface({which}: {which: string}): React.JSX.Element 
     return null;
   });
   useEffect(() => () => setServerBase(null), []);
+  const [wentBack, setWentBack] = useState(false);
+  if (wentBack) return <WentBack />;
+  // 앱의 셸처럼 대화를 가장자리 뒤로가기로 감싼다 — 뷰어를 연 채 좌측 가장자리에서 쓸어도 그대로
+  // 뒤로 가는지(`maestro/106-photo-viewer-edge-swipe-capture.yaml`)가 이 감싸기로 보인다.
   return (
-    <Screen style={NO_TOP}>
-      <ConversationHeader
-        title="박서연"
-        kind="dm"
-        peerId={PEER}
-        peerStatusTone="ok"
-        directory={DIRECTORY}
-        onBack={() => {}}
-        menu={[{label: '고정', run: () => {}}]}
-        railStatus="connected"
-      />
-      <ConversationLayout
-        list={
-          <Timeline
-            messages={which === 'multi' ? MULTI : SOLO}
-            directory={DIRECTORY}
-            status="ready"
-            channelKind="dm"
-            myMemberId={SELF}
-            nowMs={NOW}
-          />
-        }
-        composer={
-          <Composer
-            recipient="person"
-            channelLabel="박서연"
-            directory={DIRECTORY}
-            draftKey="measure:photo-viewer"
-            onSend={() => {}}
-          />
-        }
-      />
-    </Screen>
+    <EdgeSwipeBack onBack={() => setWentBack(true)} style={FILL}>
+      <Screen style={NO_TOP}>
+        <ConversationHeader
+          title="박서연"
+          kind="dm"
+          peerId={PEER}
+          peerStatusTone="ok"
+          directory={DIRECTORY}
+          onBack={() => {}}
+          menu={[{label: '고정', run: () => {}}]}
+          railStatus="connected"
+        />
+        <ConversationLayout
+          list={
+            <Timeline
+              messages={which === 'multi' ? MULTI : SOLO}
+              directory={DIRECTORY}
+              status="ready"
+              channelKind="dm"
+              myMemberId={SELF}
+              nowMs={NOW}
+            />
+          }
+          composer={
+            <Composer
+              recipient="person"
+              channelLabel="박서연"
+              directory={DIRECTORY}
+              draftKey="measure:photo-viewer"
+              onSend={() => {}}
+            />
+          }
+        />
+      </Screen>
+    </EdgeSwipeBack>
   );
 }
