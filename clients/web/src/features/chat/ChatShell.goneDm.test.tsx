@@ -85,6 +85,8 @@ const self: RosterMember = {
 };
 
 let rosterMembers: RosterMember[] = [];
+/** 명부 조회가 한 번도 못 받은 채 실패했다(`isError`, 데이터 없음). 이때 명부는 비어 있다(#4252 M2). */
+const rosterFailure = { failed: false };
 vi.mock("@/features/workspace/useWorkspace", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@/features/workspace/useWorkspace")>();
@@ -92,9 +94,11 @@ vi.mock("@/features/workspace/useWorkspace", async (importOriginal) => {
     ...actual,
     useChannels: () => channelsState,
     useDirectory: () => ({
-      directory: makeDirectory(rosterMembers),
+      directory: makeDirectory(rosterFailure.failed ? [] : rosterMembers),
       isPending: false,
       isFetching: false,
+      isError: rosterFailure.failed,
+      data: undefined,
       error: null,
       refetch: () => undefined,
     }),
@@ -261,6 +265,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  rosterFailure.failed = false;
   rosterMembers = [self];
   composerProps.length = 0;
   channelsState.isLoading = false;
@@ -350,5 +355,20 @@ describe("ChatShell · 인덱스 라우트와 접힌 나간 멤버 DM (#4252)", 
     channelsState.groups = { channels: [], dms: [ghostDm()] };
     const host = await mount(`/c/${DM_ID}`);
     expect(host.querySelector('[data-testid="channel-header"]')?.textContent).toContain("나간 멤버");
+  });
+});
+
+// #4252 M2: 「명부를 믿을 수 있나」는 한 함수(`rosterLoaded`)가 답한다. 조회가 실패하면 비어 있는 명부 앞에서 모든 DM 이 「나간 멤버」로
+// 읽히는 거짓이 사이드바 행과 이 머리·컴포저에 똑같이 있었다.
+describe("ChatShell · 명부를 못 받았을 때의 이름 (#4252)", () => {
+  it("명부 조회가 실패하면 머리와 컴포저는 「나간 멤버」가 아니라 「불러오는 중」이다", async () => {
+    rosterFailure.failed = true;
+    const host = await mount();
+    const header = host.querySelector('[data-testid="channel-header"]');
+    expect(header?.textContent).toContain("불러오는 중");
+    expect(header?.textContent).not.toContain("나간 멤버");
+    const last = composerProps[composerProps.length - 1];
+    expect(last.channelLabel).toBe("불러오는 중");
+    expect(last.recipient).toBe("place");
   });
 });

@@ -6,6 +6,7 @@ import {channelLabel, memberFor} from '@momo/core/features/workspace/directory';
 import {
   goneDmDisclosureLabel,
   readProjectionPhase,
+  rosterLoaded,
 } from '@momo/core/features/sidebar/goneDm';
 import {mayActOnLiveness} from '@momo/core/features/agents/liveness';
 import {
@@ -328,6 +329,30 @@ export default function SidebarScreen({
   // 「나간 멤버와의 대화」 펼침(#4252): 들여다보는 동작이지 설정이 아니라 저장하지 않는다.
   const [goneOpen, setGoneOpen] = useState(false);
   const readPhase = readProjectionPhase(readStates);
+  // 행 이름과 접는 판정이 같은 답을 읽는다(`rows.ts` `rosterReady`).
+  const rosterReady = rosterLoaded(directoryQuery);
+  // 줄은 목록 맨 끝이라 펼친 결과가 화면 밖에 서기 쉽다(웹과 같은 규칙, design-review #4252 M1). 펼친 직후 접힌 행이 그려져 내용이
+  // 자라면 끝으로 내린다. 표지는 한 번만 쓰고(`onContentSizeChange` 가 다른 이유로 와도 내리지 않는다), 안 오면 곧 거둔다.
+  const listHandle = useRef<{
+    getScrollResponder: () => {scrollToEnd: (options?: {animated?: boolean}) => void} | undefined | null;
+  } | null>(null);
+  const revealGoneOnGrow = useRef(false);
+  const onToggleGone = useCallback(() => {
+    if (!goneOpen) {
+      revealGoneOnGrow.current = true;
+      setTimeout(() => {
+        revealGoneOnGrow.current = false;
+      }, 1500);
+    } else {
+      revealGoneOnGrow.current = false;
+    }
+    setGoneOpen(open => !open);
+  }, [goneOpen]);
+  const onListContentGrow = useCallback(() => {
+    if (!revealGoneOnGrow.current) return;
+    revealGoneOnGrow.current = false;
+    listHandle.current?.getScrollResponder()?.scrollToEnd({animated: true});
+  }, []);
 
   // Synchronous. See the note above.
   const [query, setQuery] = useState('');
@@ -355,6 +380,7 @@ export default function SidebarScreen({
         openChannelId,
         query,
         readPhase,
+        rosterReady,
       }),
     [
       channelsQuery.groups,
@@ -365,6 +391,7 @@ export default function SidebarScreen({
       openChannelId,
       query,
       readPhase,
+      rosterReady,
     ],
   );
 
@@ -603,6 +630,10 @@ export default function SidebarScreen({
         />
       ) : (
         <SectionList
+          ref={list => {
+            listHandle.current = list;
+          }}
+          onContentSizeChange={onListContentGrow}
           sections={shownSections}
           keyExtractor={row => row.key}
           ListHeaderComponent={
@@ -668,7 +699,7 @@ export default function SidebarScreen({
           )}
           renderItem={({item}) =>
             item.kind === 'goneToggle' ? (
-              <GoneToggleRow item={item} onPress={() => setGoneOpen(open => !open)} />
+              <GoneToggleRow item={item} onPress={onToggleGone} />
             ) : (
               <Row
                 row={item}

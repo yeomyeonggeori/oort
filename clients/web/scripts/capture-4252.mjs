@@ -178,6 +178,19 @@ const scrollDmsIntoView = (page) =>
     section?.scrollIntoView({ block: "end" });
   });
 
+/** 이 행이 가장 가까운 스크롤 상자 안에서 눈에 보이는가(잘리지 않고 전부). */
+const visibleInScrollport = (page, id) =>
+  page.evaluate((channelId) => {
+    const row = document.querySelector(`[data-testid="channel-item"][data-channel-id="${channelId}"]`);
+    if (!row) return false;
+    let box = row.parentElement;
+    while (box && box.scrollHeight <= box.clientHeight + 1) box = box.parentElement;
+    if (!box) return true;
+    const r = row.getBoundingClientRect();
+    const c = box.getBoundingClientRect();
+    return r.top >= c.top - 1 && r.bottom <= c.bottom + 1;
+  }, id);
+
 /** 나간 멤버 DM 뿐인 구역: 빈 안내(아직 대화가 없습니다)는 서지 않고 접힌 줄만 선다. */
 async function runOnlyGone(browserType, engine, origin) {
   for (const scheme of engine === "chromium" ? ["light", "dark"] : ["light"]) {
@@ -221,9 +234,10 @@ async function runEngine(browserType, engine, origin) {
   if (SCENE === "only-gone") return runOnlyGone(browserType, engine, origin);
   for (const scheme of engine === "chromium" ? ["light", "dark"] : ["light"]) {
     const { browser, context, page } = await open(browserType, origin, scheme);
-    const shot = async (name, clip = { x: 0, y: 0, width: 420, height: Math.min(900, VIEWPORT_H) }) => {
+    // `scroll: false` 는 하네스가 스크롤을 대신하지 않는다: 앱이 스스로 맞춘 모양 그대로 찍는다(펼침·열린 행의 증거).
+    const shot = async (name, clip = { x: 0, y: 0, width: 420, height: Math.min(900, VIEWPORT_H) }, { scroll = true } = {}) => {
       if (!SHOTS) return;
-      await scrollDmsIntoView(page);
+      if (scroll) await scrollDmsIntoView(page);
       await page.waitForTimeout(200);
       await page.screenshot({ path: resolve(OUT_DIR, `${PREFIX}${VIEWPORT_TAG}-${MODE}-${engine}-${name}-${scheme}.png`), clip });
     };
@@ -255,22 +269,28 @@ async function runEngine(browserType, engine, origin) {
         }), null);
         await shot("sidebar");
         await shot("window", { x: 0, y: 0, width: VIEWPORT_W, height: VIEWPORT_H });
-        // 펼친다.
+        // 사람은 줄을 찾으려고 목록 맨 아래까지 내린 뒤 누른다: 하네스가 스크롤을 대신하지 않는다(design-review M1).
+        await scrollDmsIntoView(page);
         await toggle.click();
         await page.mouse.move(900, 450);
         await settle();
         check(engine, scheme, "G5 펼치면 접힌 둘이 줄 아래에 선다", (await shown(GONE_READ_A)) && (await shown(GONE_READ_B)) && (await toggle.getAttribute("aria-expanded")) === "true", null);
+        check(engine, scheme, "G5b 펼친 직후 접힌 행이 스크롤 상자 안에 보인다(앱이 스스로 맞춘다, 하네스 스크롤 없음)", (await visibleInScrollport(page, GONE_READ_A)) && (await visibleInScrollport(page, GONE_READ_B)), null);
         check(engine, scheme, "G6 접힌 행은 기본 아바타와 「나간 멤버」다", (await rowOf(page, GONE_READ_A).innerText()).includes("나간 멤버") && (await rowOf(page, GONE_READ_A).locator('[data-testid="dm-avatar-default"]').count()) === 1, null);
-        await shot("sidebar-expanded");
-        // 접힌 행을 눌러도 대화가 열린다.
-        await rowOf(page, GONE_READ_A).click();
+        await shot("sidebar-expanded", undefined, { scroll: false });
+        // 키보드로 접힌 행을 연다(design-review H1): 캐럿이 그 행에 남고 행은 접힌 목록의 제자리에 머문다.
+        await rowOf(page, GONE_READ_A).focus();
+        await page.keyboard.press("Enter");
         await settle();
-        check(engine, scheme, "G7 접힌 행을 누르면 그 대화가 열린다(주소 /c/…)", page.url().toLowerCase().endsWith(`/c/${GONE_READ_A}`.toLowerCase()), page.url());
-        // 줄을 접어도 열려 있는 나간 멤버 DM 은 목록에 남고(보던 대화가 사라지지 않는다), 줄의 수만 하나 준다.
+        check(engine, scheme, "G7 접힌 행을 열면 그 대화가 열린다(주소 /c/…)", page.url().toLowerCase().endsWith(`/c/${GONE_READ_A}`.toLowerCase()), page.url());
+        check(engine, scheme, "G7b Enter 뒤에도 캐럿이 그 행에 있다(<body> 로 떨어지지 않는다)", await page.evaluate((id) => document.activeElement?.getAttribute("data-channel-id")?.toLowerCase() === id.toLowerCase(), GONE_READ_A), await page.evaluate(() => document.activeElement?.tagName));
+        check(engine, scheme, "G7c 열린 행은 접힌 목록의 제자리에 머물고 선택 표시만 바뀐다(점프 없음, 줄은 그대로 2개)", (await page.evaluate(() => document.querySelector('[data-testid="gone-dm-list"] [data-testid="channel-item"][aria-current="page"]') !== null)) && (await toggle.innerText()).trim() === "나간 멤버와의 대화 2개", await toggle.innerText());
+        await shot("sidebar-open-gone-expanded", undefined, { scroll: false });
+        // 줄을 접으면 열려 있는 나간 멤버 DM 은 위 목록으로 올라와 남고(보던 대화가 사라지지 않는다), 줄의 수만 하나 준다.
         await toggle.click();
         await page.mouse.move(900, 450);
         await settle();
-        check(engine, scheme, "G8 줄을 접어도 열려 있는 나간 멤버 DM 은 목록에 남고, 줄은 남은 하나를 센다", (await shown(GONE_READ_A)) && !(await shown(GONE_READ_B)) && (await toggle.innerText()).trim() === "나간 멤버와의 대화 1개", await toggle.innerText());
+        check(engine, scheme, "G8 줄을 접으면 열려 있는 나간 멤버 DM 은 위 목록에 남고, 줄은 남은 하나를 센다", (await shown(GONE_READ_A)) && !(await shown(GONE_READ_B)) && (await toggle.innerText()).trim() === "나간 멤버와의 대화 1개", await toggle.innerText());
         await shot("sidebar-open-gone");
         // 다른 대화로 옮겨 가면 다시 접힌 줄로 돌아간다.
         await rowOf(page, dmId(2)).click();

@@ -1292,11 +1292,14 @@ describe("나간 멤버와의 대화 (#4252)", () => {
     expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
   });
 
-  it("명부 조회가 실패했으면 접지 않는다 — 비어 있는 명부 앞에서는 모든 DM 이 나간 멤버로 읽히지만 그것을 접힌 줄 뒤로 숨기지 않는다", async () => {
+  it("명부 조회가 실패했으면 접지 않고, 이름도 「나간 멤버」라고 거짓말하지 않는다 (「불러오는 중」, 명부를 믿을 수 있는지는 한 함수가 답한다)", async () => {
     rosterPhase.failed = true;
     const host = await mount();
     for (const n of [1, 2, 3, 4, 5, 6]) expect(rowIds(host)).toContain(DM_ID(n));
     expect(goneToggle(host)).toBeNull();
+    // 이도현·박서연까지 「나간 멤버」로 읽히던 거짓(design-review M2): 명부를 못 받았으면 이름은 아직 모른다.
+    expect(host.textContent).not.toContain("나간 멤버");
+    expect(dmRow(host, DM_ID(1)).textContent).toContain("불러오는 중");
   });
 
   it("읽음 투영을 한 번도 못 읽었으면 접지 않는다 — 안 읽은 것이 있는지 모를 때 숨기는 쪽이 최악이다", async () => {
@@ -1382,6 +1385,75 @@ describe("나간 멤버와의 대화 (#4252)", () => {
     expect(rowIds(host)).toEqual([DM_ID(1)]);
     expect(dmRow(host, DM_ID(1)).querySelector('[data-testid="unread-count"]')).toBeNull();
     expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
+  });
+
+  it("펼친 목록에서 접힌 행을 열어도 행은 제자리에 머문다: 같은 노드·같은 목록·캐럿 유지, 줄의 수도 그대로 (design-review H1)", async () => {
+    // 예전에는 열리는 순간 행이 접힘에서 빠져 위 목록으로 옮겨 가며 리마운트됐다: 눌린 링크가 사라져 캐럿이 <body> 로 떨어지고
+    // 포인터는 행이 점프하는 것을 봤다.
+    const host = await mount();
+    expandGone(host);
+    const link = dmRow(host, GONE_DM);
+    act(() => link.focus());
+    expect(document.activeElement).toBe(link);
+    act(() => link.click());
+    await settle();
+    const after = dmRow(host, GONE_DM);
+    expect(after).toBe(link);
+    expect(after.isConnected).toBe(true);
+    expect(document.activeElement).toBe(after);
+    expect(after.getAttribute("aria-current")).toBe("page");
+    expect(after.closest('[data-testid="gone-dm-list"]')).not.toBeNull();
+    expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
+  });
+
+  it("펼친 채 다른 대화로 옮겨 가도 접힌 행은 그 자리에 있다 (선택 표시만 바뀐다)", async () => {
+    const host = await mount();
+    expandGone(host);
+    act(() => dmRow(host, GONE_DM).click());
+    await settle();
+    expect(dmRow(host, GONE_DM).getAttribute("aria-current")).toBe("page");
+    act(() => dmRow(host, DM_ID(1)).click());
+    await settle();
+    const row = dmRow(host, GONE_DM);
+    expect(row.closest('[data-testid="gone-dm-list"]')).not.toBeNull();
+    expect(row.getAttribute("aria-current")).toBeNull();
+    expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
+  });
+
+  it("줄을 접으면 열린 나간 멤버 행이 위 목록으로 올라오고, 줄은 남은 수를 센다. 다시 펼치면 제자리로 돌아간다", async () => {
+    channelsQuery.groups = { channels: [general], dms: [...dms, ghostB] };
+    channelsQuery.data = [general, ...dms, ghostB];
+    const host = await mount(`/c/${GONE_DM}`);
+    // 접힌 채: 열린 행은 위, 줄은 남은 하나.
+    expect(dmRow(host, GONE_DM).closest('[data-testid="gone-dm-list"]')).toBeNull();
+    expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
+    // 펼치면 열린 행도 접힌 목록의 제자리로 들어간다(둘).
+    expandGone(host);
+    expect(dmRow(host, GONE_DM).closest('[data-testid="gone-dm-list"]')).not.toBeNull();
+    expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 2개");
+    // 접으면 다시 위로.
+    act(() => goneToggle(host)!.click());
+    expect(dmRow(host, GONE_DM).closest('[data-testid="gone-dm-list"]')).toBeNull();
+    expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
+  });
+
+  it("줄을 펼치는 순간 접힌 목록이 보이게 스크롤을 맞춘다 (목록 맨 끝의 줄이라 결과가 화면 밖에 서기 쉽다, design-review M1)", async () => {
+    const reveals: Element[] = [];
+    HTMLElement.prototype.scrollIntoView = function (this: Element, options?: unknown) {
+      reveals.push(this);
+      expect(options).toEqual({ block: "nearest" });
+    };
+    try {
+      const host = await mount();
+      expect(reveals).toEqual([]);
+      expandGone(host);
+      expect(reveals.map((el) => el.id)).toEqual(["sidebar-gone-dm-list"]);
+      // 접을 때는 아무것도 옮기지 않는다.
+      act(() => goneToggle(host)!.click());
+      expect(reveals).toHaveLength(1);
+    } finally {
+      delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    }
   });
 
   it("DM 구획을 접으면 줄도 함께 접힌다 (구획의 문법)", async () => {

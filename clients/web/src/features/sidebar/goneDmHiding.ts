@@ -25,7 +25,14 @@ import { sidebarUnreadCounts } from "./sidebarUnread";
 // 이 줄이 도로 펼치지 않는다).
 // =============================================================================
 
-/** 접히는 DM 의 id(소문자). `openId` 가 곧 「지금 보고 있는 DM」이라 그 DM 은 접히지 않는다. */
+/**
+ * 접히는 DM 의 id(소문자). `openId` 가 곧 「지금 보고 있는 DM」이라 그 DM 은 접히지 않는다 - **`foldOpen` 이 아니면**.
+ *
+ * `foldOpen` 은 줄을 **펼쳐 둔 동안**의 규칙이다: 펼친 목록에서 접힌 행을 열었을 때 그 행이 다른 목록으로 옮겨 가면 눌린
+ * 링크가 사라져 키보드 캐럿이 `<body>` 로 떨어지고(design-review #4252 H1), 포인터는 행이 점프하는 것을 본다. 그래서 펼친
+ * 동안은 열린 행도 접힌 목록의 제자리에 머문다(선택 표시만 바뀐다). 줄을 접으면 열린 행이 위 목록으로 올라와 보던 대화가
+ * 목록에서 사라지지 않는다. 안 읽음 값은 어느 쪽이든 열린 DM 을 읽은 것으로 접어 센다(`sidebarUnreadCounts`).
+ */
 export function goneDmIds(input: {
   dms: readonly Channel[];
   directory: Directory;
@@ -38,6 +45,8 @@ export function goneDmIds(input: {
   byChannel: Map<string, ReadState>;
   openId: string | null;
   phase: ReadProjectionPhase;
+  /** 줄이 펼쳐져 있나. 펼친 동안은 열린 DM 도 접힌 목록에 머문다(위). */
+  foldOpen?: boolean;
 }): ReadonlySet<string> {
   const folded = new Set<string>();
   for (const dm of input.dms) {
@@ -51,7 +60,8 @@ export function goneDmIds(input: {
         rosterComplete: rosterIsComplete(input.directory.members.length),
         unreadCount: counts.unreadCount,
         mentionCount: counts.mentionCount,
-        isOpen: input.openId !== null && uuidEq(dm.id, input.openId),
+        isOpen:
+          input.foldOpen !== true && input.openId !== null && uuidEq(dm.id, input.openId),
         phase: input.phase,
       })
     ) {

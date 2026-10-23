@@ -208,6 +208,10 @@ export function personalAliasValid(alias: string): boolean {
   return PERSONAL_ALIAS_PATTERN.test(alias);
 }
 
+/** 개인 에이전트를 끈 뒤 사이드바에서 그 대화가 어떻게 보이는가(한 문장, 두 문구가 같이 쓴다). */
+const OFF_RESULT =
+  "그 대화는 「나간 멤버」라는 이름이 되고, 안 읽은 메시지가 없으면 목록의 「나간 멤버와의 대화」로 접혀요.";
+
 export const PERSONAL_AGENT_COPY = {
   toggleLabel: "개인 에이전트로 쓰기",
   toggleHint: "별칭을 붙이면 어느 채널에서든 나만 @로 부를 수 있어요. 내 맥이 켜져 있을 때만 답해요.",
@@ -223,10 +227,11 @@ export const PERSONAL_AGENT_COPY = {
   off: "꺼 둔 개인 에이전트",
   // 「연결 끊기」는 이 맥의 CLI 로그인만 푼다(#4252). 멤버인 개인 에이전트는 스위치 하나로만 꺼지고, 꺼야 대화
   // 목록에서도 정리된다. 두 컨트롤이 한 카드에 있어서 「끊었는데 왜 남아 있나」가 되풀이됐다.
-  disconnectKeepsAgent:
-    "연결을 끊어도 개인 에이전트는 켜져 있어요. 대화 목록에서 없애려면 「개인 에이전트로 쓰기」를 꺼 주세요.",
-  toolOffKeepsAgent:
-    "이 도구에 연결돼 있지 않아도 개인 에이전트는 켜져 있어요. 대화 목록에서 없애려면 이 스위치를 꺼 주세요.",
+  //
+  // 약속은 사이드바에서 사람이 보게 되는 결과와 같아야 한다(design-review #4252 M3): 끄면 서버 명부(활성만)에서 빠져 그 DM 의
+  // 이름이 「나간 멤버」가 되고, 안 읽은 메시지가 없으면 목록의 「나간 멤버와의 대화」로 접힌다.
+  disconnectKeepsAgent: `연결을 끊어도 개인 에이전트는 켜져 있어요. 정리하려면 「개인 에이전트로 쓰기」를 꺼 주세요. 끄면 ${OFF_RESULT}`,
+  toolOffKeepsAgent: `이 도구에 연결돼 있지 않아도 개인 에이전트는 켜져 있어요. 이 스위치를 끄면 ${OFF_RESULT}`,
   unavailable: "이 서버에서는 아직 개인 에이전트를 켤 수 없어요. 서버가 업데이트되면 열려요.",
   loadFailed: "개인 에이전트 상태를 읽지 못했어요.",
   retry: "다시 읽기",

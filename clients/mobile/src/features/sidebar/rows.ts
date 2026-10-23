@@ -175,6 +175,11 @@ export interface SidebarInput {
    * 않는다). 생략하면 `ready` 다.
    */
   readPhase?: ReadProjectionPhase;
+  /**
+   * 명부를 받았나(코어 `rosterLoaded`). 행 이름과 접는 판정이 **같은 답**을 읽는다: 받지 못했으면 상대 없는 DM 은
+   * 「불러오는 중」이라 접히지 않는다. 생략하면 코어의 기본(멤버가 한 명이라도 있으면 받은 것)이다.
+   */
+  rosterReady?: boolean;
 }
 
 /**
@@ -230,7 +235,12 @@ function channelRow(
   input: SidebarInput,
   kind: 'channel' | 'dm',
 ): SidebarRow {
-  const label = channelLabelParts(channel, input.directory, input.selfMemberId);
+  const label = channelLabelParts(
+    channel,
+    input.directory,
+    input.selfMemberId,
+    input.rosterReady === undefined ? {} : {rosterReady: input.rosterReady},
+  );
   // A DM's peer handle is searchable even when the label does not show it.
   const peer =
     kind === 'dm' ? dmPeer(channel, input.directory, input.selfMemberId) : null;

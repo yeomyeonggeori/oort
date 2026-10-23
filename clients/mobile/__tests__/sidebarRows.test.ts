@@ -479,6 +479,18 @@ describe('a DM whose peer left the roster', () => {
     ).toHaveLength(1);
   });
 
+  it('명부를 받지 못했다고 호출부가 말하면(rosterReady false) 이름은 「불러오는 중」이고 접지 않는다: 행 이름과 접힘이 한 답을 읽는다', () => {
+    // 명부는 채워져 있어도(예: 마지막으로 받은 것) 호출부가 「못 받았다」고 하면 상대 없는 DM 은 「나간 멤버」가 아니다.
+    const dms = section(buildSidebarSections(goneInput({rosterReady: false})), 'dms');
+    expect(dms?.tucked).toEqual([]);
+    expect(dms?.data.map(row => row.title)).toContain('불러오는 중');
+    expect(dms?.data.map(row => row.title)).not.toContain('나간 멤버');
+    // 받았다고 하면 같은 입력이 접힌다.
+    expect(
+      section(buildSidebarSections(goneInput({rosterReady: true})), 'dms')?.tucked,
+    ).toHaveLength(1);
+  });
+
   it('읽음 투영이 오는 중이면 접힌 채, 못 읽었으면 접지 않는다', () => {
     expect(
       section(buildSidebarSections(goneInput({readPhase: 'loading'})), 'dms')?.tucked,

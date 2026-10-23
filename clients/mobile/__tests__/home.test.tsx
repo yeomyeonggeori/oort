@@ -14,7 +14,7 @@ import {
   within,
 } from '@testing-library/react-native';
 import React from 'react';
-import {AccessibilityInfo, ActionSheetIOS, StyleSheet} from 'react-native';
+import {AccessibilityInfo, ActionSheetIOS, SectionList, StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -1024,6 +1024,30 @@ describe('홈 — 나간 멤버와의 대화 (#4252)', () => {
     expect(label.props.maxFontSizeMultiplier).toBeUndefined();
     // 줄이 바뀌어도 한글 낱말 가운데서 끊지 않는다(AX5 실측: 「대 / 화 2개」).
     expect(label.props.lineBreakStrategyIOS).toBe('hangul-word');
+  });
+
+  it('줄을 펼치면 내용이 자란 뒤 한 번만 끝으로 내린다 (줄이 목록 맨 끝이라 결과가 화면 밖에 서기 쉽다, design-review M1)', async () => {
+    const scrollToEnd = jest.fn();
+    jest
+      .spyOn(SectionList.prototype, 'getScrollResponder')
+      .mockReturnValue({scrollToEnd} as never);
+    await mountHome({channels: withGone});
+    const list = await screen.findByTestId('sidebar-list');
+    // 펼치기 전의 크기 변화는 아무 일도 하지 않는다.
+    fireEvent(list, 'contentSizeChange', 320, 900);
+    expect(scrollToEnd).not.toHaveBeenCalled();
+    fireEvent.press(await screen.findByTestId('sidebar-gone-toggle'));
+    await screen.findByTestId(GONE_ROW);
+    fireEvent(list, 'contentSizeChange', 320, 1200);
+    expect(scrollToEnd).toHaveBeenCalledTimes(1);
+    expect(scrollToEnd).toHaveBeenCalledWith({animated: true});
+    // 한 번만: 같은 펼침의 다음 크기 변화(새로고침 등)는 내리지 않는다.
+    fireEvent(list, 'contentSizeChange', 320, 1300);
+    expect(scrollToEnd).toHaveBeenCalledTimes(1);
+    // 접을 때는 내리지 않는다.
+    fireEvent.press(screen.getByTestId('sidebar-gone-toggle'));
+    fireEvent(list, 'contentSizeChange', 320, 900);
+    expect(scrollToEnd).toHaveBeenCalledTimes(1);
   });
 
   it('기본 아바타는 나간 멤버에만 선다: 상대가 명부에 있는 DM 은 그 사람의 얼굴이다', async () => {

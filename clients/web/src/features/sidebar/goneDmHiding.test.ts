@@ -89,6 +89,18 @@ describe("goneDmIds: 나간 멤버 DM 은 안 읽음이 없으면 접힌다", ()
     expect([...folded]).toEqual([DM_GONE_B.toLowerCase()]);
   });
 
+  it("줄을 펼쳐 둔 동안(foldOpen)에는 열려 있는 나간 멤버 DM 도 접힌 목록에 머문다 (열면 행이 다른 목록으로 옮겨 가 키보드 캐럿을 잃는다, H1)", () => {
+    const open = DM_GONE_A.toLowerCase();
+    // 접힌 채(예전 그대로): 열린 DM 은 위 목록으로 올라온다.
+    expect(goneDmIds({ ...base, openId: open, foldOpen: false }).has(open)).toBe(false);
+    // 펼친 동안: 열린 DM 도 접힌 목록에 있다. 다른 행의 판정은 그대로다.
+    const kept = goneDmIds({ ...base, openId: open, foldOpen: true });
+    expect([...kept].sort()).toEqual([DM_GONE_A, DM_GONE_B].map((id) => id.toLowerCase()).sort());
+    // 안 읽음이 있는 DM 은 펼쳐 둬도 접히지 않는다(펼침은 「열림」만 바꾼다).
+    const byChannel = projection(read(DM_GONE_A, { latestSeq: 9 }), read(DM_GONE_B));
+    expect(goneDmIds({ ...base, byChannel, openId: DM_GONE_B, foldOpen: true }).has(DM_GONE_A.toLowerCase())).toBe(false);
+  });
+
   it("열려 있는 DM 의 안 읽음은 0 으로 접힌 값이라, 읽는 동안 서버 투영이 늦어도 접히지 않는다", () => {
     const byChannel = projection(read(DM_GONE_A, { latestSeq: 9 }), read(DM_GONE_B));
     const folded = goneDmIds({ ...base, byChannel, openId: DM_GONE_A });

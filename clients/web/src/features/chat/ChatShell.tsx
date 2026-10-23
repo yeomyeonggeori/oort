@@ -261,7 +261,7 @@ export function ChatShell() {
   // take a string (the composer placeholder, its sr-only label) gets them
   // joined. A DM in this workspace can be one of two 김인턴.
   const labelOptions = {
-    rosterReady: !directoryQuery.isPending,
+    rosterReady,
     selfName: session.member.displayName,
   };
   const labelParts = channel

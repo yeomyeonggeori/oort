@@ -432,7 +432,10 @@ describe("연결을 끊어도 개인 에이전트는 켜져 있다 (#4252)", () 
     click(q("tool-card-claude-disconnect"));
     const line = q("tool-card-claude-disconnect-keeps-agent");
     expect(line?.textContent).toContain("연결을 끊어도 개인 에이전트는 켜져 있어요");
-    expect(line?.textContent).toContain("대화 목록에서 없애려면");
+    expect(line?.textContent).toContain("정리하려면");
+    // 약속은 사이드바에서 보게 될 결과와 같다: 끄면 이름이 「나간 멤버」가 되고, 안 읽음이 없으면 접힌 줄로 간다(design-review M3).
+    expect(line?.textContent).toContain("「나간 멤버」라는 이름이 되고");
+    expect(line?.textContent).toContain("「나간 멤버와의 대화」로 접혀요");
     // 낱말은 스위치의 이름과 같다(이름이 둘이면 컨트롤도 둘이다).
     expect(line?.textContent).toContain(PERSONAL_AGENT_COPY.toggleLabel);
   });
@@ -458,6 +461,7 @@ describe("연결을 끊어도 개인 에이전트는 켜져 있다 (#4252)", () 
     act(() => ctx.cli.exit(0, 0));
     await until(() => card("claude")?.getAttribute("data-login") === "disconnected");
     expect(q("tool-card-claude-personal")?.textContent).toContain("연결돼 있지 않아도 개인 에이전트는 켜져 있어요");
+    expect(q("tool-card-claude-personal")?.textContent).toContain("「나간 멤버와의 대화」로 접혀요");
     // 켜져 있는 그대로다: 스위치는 아직 켜짐이고 서버는 끄라는 요청을 받은 적이 없다.
     expect(card("claude")?.getAttribute("data-personal")).toBe("on");
     expect(ctx.server.disable).not.toHaveBeenCalled();

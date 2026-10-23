@@ -404,6 +404,10 @@ export function Sidebar({
   // 나간 멤버와의 대화(#4252): 닫기 원장이 거르고 **남은** DM 중 상대가 명부에 없고 안 읽은 것이 없는 것은 목록에서
   // 접고, DM 구역 끝의 한 줄이 그 수를 센다. 열려 있는 DM 은 접히지 않는다. ⌘K 는 `groups.dms` 를 그대로 읽어
   // 접힌 대화도 연다. 원장이 숨긴 것은 이 수에 들지 않는다(`closedDmCount` 는 원장만 센다).
+  //
+  // 펼침은 들여다보는 동작이지 설정이 아니다: 저장하지 않는다. 펼쳐 둔 동안은 열린 나간 멤버 DM 도 접힌 목록의 제자리에 머문다
+  // (`foldOpen`): 펼친 목록에서 행을 열 때 행이 위 목록으로 옮겨 가면 눌린 링크가 사라져 키보드 캐럿을 잃고 포인터는 점프를 본다.
+  const [goneOpen, setGoneOpen] = useState(false);
   const foldedGone = useMemo(
     () =>
       goneDmIds({
@@ -414,8 +418,9 @@ export function Sidebar({
         byChannel: readStates.byChannel,
         openId,
         phase: readPhase,
+        foldOpen: goneOpen,
       }),
-    [visibleDms, directoryQuery.directory, session.member.id, rosterReady, readStates.byChannel, openId, readPhase]
+    [visibleDms, directoryQuery.directory, session.member.id, rosterReady, readStates.byChannel, openId, readPhase, goneOpen]
   );
   const shownDms = useMemo(
     () => visibleDms.filter((channel) => !foldedGone.has(channel.id.toLowerCase())),
@@ -425,11 +430,18 @@ export function Sidebar({
     () => visibleDms.filter((channel) => foldedGone.has(channel.id.toLowerCase())),
     [visibleDms, foldedGone]
   );
-  // 펼침은 들여다보는 동작이지 설정이 아니다: 저장하지 않고, 접힌 대화가 없어지면 닫힌 채로 돌아간다.
-  const [goneOpen, setGoneOpen] = useState(false);
+  // 접힌 대화가 없어지면 펼침은 닫힌 채로 돌아간다.
   useEffect(() => {
     if (goneDms.length === 0) setGoneOpen(false);
   }, [goneDms.length]);
+  // 줄은 목록 맨 끝이라 펼친 결과가 스크롤 밖에 서기 쉽다(design-review #4252 M1: 줄을 찾으려고 이미 맨 아래까지 내린 사람이
+  // 누르면 셰브론만 바뀌고 행은 보이지 않았다). 펼치는 순간 접힌 목록이 보이게 가장 가까운 끝으로 맞춘다. 키보드는 ↓ 포커스가
+  // 스크롤을 따라가 이미 보인다. 기본(`auto`)은 즉시 이동이라 움직임 줄이기와 부딪히지 않는다.
+  useEffect(() => {
+    if (goneOpen) {
+      document.getElementById(GONE_DM_LIST_ID)?.scrollIntoView?.({ block: "nearest" });
+    }
+  }, [goneOpen]);
   // 닫아 둔 DM 이 **열리는** 순간(주소 · ⌘K · 새 DM)이 곧 다시 연다는 뜻이다. 원장에서 지우지
   // 않으면 사람이 일부러 연 대화가 다른 곳으로 옮겨 가는 순간 도로 사라진다. 효과는 `openId` 가
   // **바뀔 때만** 돈다(deps): 열린 DM 을 X 로 닫으면 `closeDmRow` 가 원장을 쓴 뒤 `/` 로 착지시키고,
@@ -690,7 +702,7 @@ export function Sidebar({
       channel,
       directoryQuery.directory,
       session.member.id,
-      { rosterReady: !directoryQuery.isPending, selfName }
+      { rosterReady, selfName }
     );
     const peer =
       channel.kind === "dm"
