@@ -19,6 +19,7 @@
 //   s7 실패          missed · not_member · sessions_ended + 내용 확인(지우기 확인 줄)
 //   s8 오프라인       입력창 · 목록 · 대화상자 안의 줄 · 거는 도중 끊김(같은 clientRequestId로 다시)
 //   w  폭            1280 · 900 · 접힌 사이드바: 입력창(▾가 보내기에 붙어 있다)·배너·메뉴
+//   p  폰 폭(390)     입력창의 3초 줄(막힌 ▾의 이유·예약 확정·예약을 끈 서버)이 그릇 위에 서고 잘리지 않는다
 //   s9 보충          비밀 키 줄 · 예약을 끈 서버(흐린 ▾와 이유) · 요청 중(예약 중) · 이벤트로만 안 행(뼈대 막대)
 //   (s7 안에 이벤트 장면이 있다: 개인 채널 신호로 sessions_ended가 멈춘 즉시 배너·알약·목록에 선다, owner 결정 6)
 // 단언이 하나라도 실패하면(후 판에서) 종료 코드 1이다.
@@ -38,7 +39,7 @@ const OUT_DIR = process.env.OUT_DIR
   ? resolve(process.env.OUT_DIR)
   : resolve(WEB_ROOT, BEFORE ? "captures/4215/before" : "captures/4215");
 const PORT = Number(process.env.CAPTURE_PORT || 5415);
-const WANT = new Set((process.env.SCENES || "s1,s2,s3,s4,s5,s6,s7,s8,s9,w").split(",").map((s) => s.trim()));
+const WANT = new Set((process.env.SCENES || "s1,s2,s3,s4,s5,s6,s7,s8,s9,w,p").split(",").map((s) => s.trim()));
 
 const ORIGIN = "https://oort.yeomyeonggeori.test";
 // 2026-10-22(목) 14:30 KST. 명세의 예시(「내일 오전 9:00, 10월 23일 금요일」)가 이 날을 기준으로 쓰였다.
@@ -1261,6 +1262,115 @@ async function sceneExtras(browser, origin, scheme, viewport) {
   await context.close();
 }
 
+// ---- p 폰 폭(390) ------------------------------------------------------------------------------------
+// 폰 폭(<600px)에서 액션 행의 메타 슬롯은 107px다: 3초 줄(「10월 26일 (월) 오전 9:00에 보낼게요」 184px, 막힌 ▾의 이유)이
+// 잘리고, 터치에는 `title`이 없다. 그래서 이 폭에서는 줄이 그릇 **위**에 서고(폰 DM 힌트·오프라인 줄과 같은 자리) 잘리지 않아야 한다.
+async function scenePhone(browser, origin, scheme) {
+  if (BEFORE) return;
+  const viewport = { width: 390, height: 844 };
+  const tag = `${viewport.width}-${scheme}`;
+  const facts = (page) => page.evaluate(() => {
+    const line = document.querySelector('[data-testid="composer-status-line"]');
+    if (!line) return null;
+    const rect = line.getBoundingClientRect();
+    const slot = Array.from(document.querySelectorAll("[data-composer-meta-slot]")).map((el) => el.textContent ?? "").join("");
+    const root = document.querySelector('[data-testid="composer"]')?.getBoundingClientRect();
+    return {
+      text: (line.textContent ?? "").replace(/\s+/g, " ").trim(),
+      outsideForm: line.closest("form") === null,
+      ariaHidden: line.getAttribute("aria-hidden"),
+      left: rect.left, right: rect.right, height: rect.height,
+      clipped: line.scrollWidth > line.clientWidth + 1,
+      inSlot: slot.includes((line.textContent ?? "").trim()),
+      lines: Math.round(rect.height / parseFloat(getComputedStyle(line).lineHeight)),
+      composerHeight: root ? root.height : null,
+      viewportWidth: window.innerWidth,
+    };
+  });
+  const composerHeight = (page) => page.evaluate(() => document.querySelector('[data-testid="composer"]')?.getBoundingClientRect().height ?? null);
+  const expectBand = async (page, label, expected) => {
+    const f = await facts(page);
+    check(`${tag} p ${label}: 문장이 그릇 위 줄에 그대로 선다`, f !== null && f.text === expected, JSON.stringify(f));
+    check(`${tag} p ${label}: 폼(액션 행) 밖이고 낭독에는 한 번만(aria-hidden)`, f !== null && f.outsideForm && f.ariaHidden === "true", JSON.stringify(f));
+    check(`${tag} p ${label}: 화면 안에서 잘리지 않고(${f?.lines}줄) 슬롯에 사본이 없다`, f !== null && !f.clipped && f.left >= 0 && f.right <= f.viewportWidth && f.lines <= 2 && !f.inSlot, JSON.stringify(f));
+    check(`${tag} p ${label}: 낭독 노드가 같은 문장을 읽는다`, (await textOf(page, "composer-status")) === expected, await textOf(page, "composer-status"));
+    return f;
+  };
+
+  // (1) 막힌 ▾의 이유
+  resetWorld();
+  let { context, page } = await open(browser, origin, scheme, viewport);
+  await openChannel(page);
+  const idleHeight = await composerHeight(page);
+  const trigger = page.getByTestId("composer-schedule-trigger");
+  const triggerBox = await trigger.boundingBox();
+  const sendBox = await page.getByTestId("composer-send").boundingBox();
+  check(`${tag} p ▾와 보내기는 44px 타깃이다(${triggerBox?.width}×${triggerBox?.height}, ${sendBox?.width}×${sendBox?.height})`, triggerBox !== null && sendBox !== null && triggerBox.width >= 44 && triggerBox.height >= 44 && sendBox.width >= 44 && sendBox.height >= 44);
+  await trigger.focus();
+  await trigger.click({ force: true });
+  await page.waitForTimeout(150);
+  const blocked = await expectBand(page, "막힌 ▾", "보낼 내용을 쓰면 예약할 수 있어요");
+  check(`${tag} p 막힌 ▾: 줄이 서 있는 동안 입력창은 한 줄만큼 자란다(${idleHeight} → ${blocked?.composerHeight})`, idleHeight !== null && blocked !== null && blocked.composerHeight !== null && blocked.composerHeight > idleHeight && blocked.composerHeight - idleHeight <= 40, `${idleHeight} -> ${blocked?.composerHeight}`);
+  check(`${tag} p 가로 넘침 0 (줄이 서 있을 때)`, (await overflowX(page)) === 0);
+  await shot(page, "p-blocked", tag);
+  await page.waitForFunction(() => !document.querySelector('[data-testid="composer-status-line"]'), null, { timeout: 6000 });
+  check(`${tag} p 3초 뒤 줄이 걷히고 입력창은 원래 높이로 돌아온다`, Math.abs((await composerHeight(page)) - idleHeight) < 1, `${idleHeight} -> ${await composerHeight(page)}`);
+
+  // (2) 메뉴는 화면 안에 서고, 예약 확정 줄이 그릇 위에 선다
+  await type(page, "composer-input", "내일 회의 전에 자료 올려 둘게요");
+  await trigger.click();
+  await must(page, "composer-schedule-menu", 5000);
+  check(`${tag} p 메뉴가 화면 안에 선다`, await page.getByTestId("composer-schedule-menu").evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return r.left >= 0 && r.right <= window.innerWidth && r.top >= 0 && r.bottom <= window.innerHeight;
+  }));
+  await shot(page, "p-menu", tag);
+  await page.getByTestId("composer-schedule-preset-tomorrow").click();
+  await page.waitForFunction(() => (document.querySelector('[data-testid="composer-status-line"]')?.textContent ?? "").includes("보낼게요"), null, { timeout: 5000 });
+  await expectBand(page, "예약 확정", "내일 오전 9:00에 보낼게요");
+  check(`${tag} p 예약 확정: 배너도 서 있다`, (await textOf(page, "composer-scheduled-banner")).startsWith("이 채널에 예약된 메시지 1개"));
+  await shot(page, "p-after", tag);
+  await context.close();
+
+  // (3) 가장 긴 문장: 월요일로 밀린 확정 줄(184px)
+  resetWorld();
+  ({ context, page } = await open(browser, origin, scheme, viewport));
+  await openChannel(page);
+  await type(page, "composer-input", "내일 회의 전에 자료 올려 둘게요");
+  await page.getByTestId("composer-schedule-trigger").click();
+  await must(page, "composer-schedule-menu", 5000);
+  await page.getByTestId("composer-schedule-preset-next-monday").click();
+  await page.waitForFunction(() => (document.querySelector('[data-testid="composer-status-line"]')?.textContent ?? "").includes("보낼게요"), null, { timeout: 5000 });
+  await expectBand(page, "가장 긴 확정 문장", "10월 26일 (월) 오전 9:00에 보낼게요");
+  await shot(page, "p-after-long", tag);
+  await context.close();
+
+  // (4) 예약을 끈 서버의 이유
+  resetWorld();
+  world.createMode = "disabled";
+  ({ context, page } = await open(browser, origin, scheme, viewport));
+  await openChannel(page);
+  await type(page, "composer-input", "내일 회의 전에 자료 올려 둘게요");
+  await page.getByTestId("composer-schedule-trigger").click();
+  await must(page, "composer-schedule-menu", 5000);
+  await page.getByTestId("composer-schedule-preset-tomorrow").click();
+  await must(page, "schedule-dialog", 5000);
+  await page.waitForFunction(() => document.querySelector('[data-testid="schedule-dialog-error"]') !== null, null, { timeout: 5000 });
+  check(`${tag} p 예약을 끈 서버: 대화상자가 화면 안에 서고 가로 넘침이 없다`, await page.getByTestId("schedule-dialog").evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return r.left >= 0 && r.right <= window.innerWidth && r.bottom <= window.innerHeight;
+  }) && (await overflowX(page)) === 0);
+  await shot(page, "p-disabled-dialog", tag);
+  await page.getByTestId("schedule-dialog-cancel").click();
+  await page.getByTestId("schedule-dialog").waitFor({ state: "detached", timeout: 3000 });
+  await page.getByTestId("composer-schedule-trigger").focus();
+  await page.getByTestId("composer-schedule-trigger").click({ force: true });
+  await page.waitForTimeout(150);
+  await expectBand(page, "예약을 끈 서버", "이 서버에서는 예약을 쓸 수 없어요");
+  await shot(page, "p-disabled", tag);
+  await context.close();
+}
+
 // ---- w 폭 ---------------------------------------------------------------------------------------------
 async function sceneWidths(browser, origin, scheme) {
   if (BEFORE) return;
@@ -1308,8 +1418,10 @@ async function main() {
     webRoot: WEB_ROOT, port: PORT, portEnvVar: "CAPTURE_PORT",
     extraArgs: ["--outDir", DIST_DIR],
   });
-  const browser = await chromium.launch();
-  const browserWithBars = await chromium.launch({ ignoreDefaultArgs: ["--hide-scrollbars"] });
+  // `--lang=ko-KR`: 헤드리스 Chromium은 `locale: "ko-KR"`만으로는 날짜·시간 칸을 영어 모양(10/23/2026, 09:00 AM)으로 그린다.
+  // 브라우저의 UI 언어를 맞춰야 한국어 모양(2026. 10. 23., 오전 09:00)이 된다(design-review가 짚은 하네스 한계).
+  const browser = await chromium.launch({ args: ["--lang=ko-KR"] });
+  const browserWithBars = await chromium.launch({ args: ["--lang=ko-KR"], ignoreDefaultArgs: ["--hide-scrollbars"] });
   try {
     for (const scheme of (process.env.SCHEMES || "light,dark").split(",")) {
       const desktop = { width: 1440, height: 900 };
@@ -1330,6 +1442,7 @@ async function main() {
       if (WANT.has("s8")) await sceneOffline(browser, preview.origin, scheme, desktop);
       if (WANT.has("s9")) await sceneExtras(browser, preview.origin, scheme, desktop);
       if (WANT.has("w")) await sceneWidths(browser, preview.origin, scheme);
+      if (WANT.has("p")) await scenePhone(browser, preview.origin, scheme);
     }
   } finally {
     await browser.close();

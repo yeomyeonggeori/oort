@@ -800,6 +800,7 @@ export function Composer({
       setSecretBlocks((count) => count + 1);
     },
   });
+  const phoneStatusLine = isMobile && schedule.statusText !== null;
   const showsSchedule = schedule.gate.entry === "shown";
 
   function submit(body: string) {
@@ -1105,6 +1106,21 @@ export function Composer({
         testId="composer-scheduled-banner"
       />
 
+      {/* 폰 폭(<600px)의 3초 줄은 그릇 **위**에 선다(폰 DM 힌트·오프라인 줄과 같은 자리·같은 모양). 액션 행의 메타 슬롯은
+          이 폭에서 107px라 「10월 26일 (월) 오전 9:00에 보낼게요」(184px)·막힌 ▾의 이유가 잘리는데, 터치에는 `title`이 없고
+          낭독 노드는 눈으로 읽는 사람에게 소용이 없어서 이 줄이 「왜 흐린가」·「언제 나가나」의 유일한 눈에 보이는 답이다.
+          그 대가로 3초 동안 입력창이 한 줄(약 24px) 움직인다: #1749의 「입력창이 움직이면 안 된다」는 한 줄 슬롯이 있는
+          데스크탑 폭의 논거다. 낭독은 아래 늘 붙어 있는 `role="status"` 노드가 그대로 맡는다(이 줄은 `aria-hidden`). */}
+      {phoneStatusLine && (
+        <p
+          aria-hidden="true"
+          className="px-6 pb-2 text-meta text-ink-muted"
+          data-testid="composer-status-line"
+        >
+          {schedule.statusText}
+        </p>
+      )}
+
       <form onSubmit={onSubmit} className="relative p-3">
         {secretBlocked && (
           <SecretKeyBlockNotice
@@ -1272,7 +1288,7 @@ export function Composer({
             <p role="status" className="sr-only" data-testid="composer-status">
               {schedule.statusText}
             </p>
-            {schedule.statusText !== null ? (
+            {schedule.statusText !== null && !isMobile ? (
               <p
                 aria-hidden="true"
                 className="min-w-0 flex-1 truncate text-right text-meta text-ink-muted"

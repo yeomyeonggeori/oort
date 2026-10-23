@@ -930,3 +930,68 @@ describe("배너 (UI 명세 1.6)", () => {
     expect(here).toBe(`/scheduled?channel=${CH}`);
   });
 });
+
+describe("폰 폭(<600px): 3초 줄은 그릇 위에 선다 (design-review 최종: 슬롯은 107px라 문장이 잘린다)", () => {
+  function phoneWidth() {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query === "(width < 600px)",
+      media: query,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    }));
+  }
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const slot = () => document.querySelector("[data-composer-meta-slot]");
+
+  it("막힌 ▾의 이유가 그릇(폼) 밖 위에 서고, 액션 행의 메타 슬롯에는 서지 않는다", async () => {
+    phoneWidth();
+    await mount();
+    await pressBlockedTrigger();
+    const line = need("composer-status-line");
+    expect(line.textContent).toBe("보낼 내용을 쓰면 예약할 수 있어요");
+    // 그릇 위: 폼 안(액션 행)이 아니고, 폼보다 앞(위)에 있다.
+    expect(line.closest("form")).toBeNull();
+    expect(line.compareDocumentPosition(need("composer-input")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // 눈에만 보이는 줄이다: 낭독은 늘 붙어 있는 노드가 한 번만 맡는다.
+    expect(line.getAttribute("aria-hidden")).toBe("true");
+    expect(textOf("composer-status")).toBe("보낼 내용을 쓰면 예약할 수 있어요");
+    // 같은 문장이 슬롯에 또 서지 않는다(잘리는 사본).
+    expect(slot()?.textContent ?? "").not.toContain("예약할 수 있어요");
+    expect(document.querySelectorAll('[data-testid="composer-status-line"]')).toHaveLength(1);
+  });
+
+  it("예약 확정 줄도 그릇 위에 서고, 낭독 노드에는 한 번만 실린다", async () => {
+    phoneWidth();
+    scheduledApi.createScheduledMessage.mockResolvedValue(scheduledRow({ sendAtMs: NEXT_MONDAY_9 }));
+    await mount();
+    await type("글");
+    await openMenu();
+    await choose("composer-schedule-preset-tomorrow");
+    const line = need("composer-status-line");
+    expect(line.textContent).toBe("10월 26일 (월) 오전 9:00에 보낼게요");
+    expect(line.closest("form")).toBeNull();
+    expect(textOf("composer-status")).toBe("10월 26일 (월) 오전 9:00에 보낼게요");
+    expect(slot()?.textContent ?? "").not.toContain("보낼게요");
+  });
+
+  it("줄이 없으면 그릇 위에도 아무것도 두지 않는다(빈 띠를 만들지 않는다)", async () => {
+    phoneWidth();
+    await mount();
+    expect(byId("composer-status-line")).toBeNull();
+    expect(need("composer-status").textContent).toBe("");
+  });
+
+  it("데스크탑 폭에서는 예전 그대로 액션 행의 메타 슬롯에 선다", async () => {
+    await mount();
+    await pressBlockedTrigger();
+    const line = need("composer-status-line");
+    expect(line.closest("form")).not.toBeNull();
+    expect(line.hasAttribute("data-composer-meta-slot")).toBe(true);
+  });
+});

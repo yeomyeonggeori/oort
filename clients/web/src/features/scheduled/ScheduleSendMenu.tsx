@@ -67,7 +67,14 @@ export interface ScheduleSendMenuProps {
   testIdPrefix: string;
 }
 
-/** ▾ 반쪽: 폭 24 · 높이 34(`h-icon-button`), 600px 미만에서는 `tap-target`으로 44까지 자란다. 바깥(오른쪽) 모서리만 둥글다. */
+/**
+ * ▾ 반쪽: 폭 24 · 높이 34(`h-icon-button`), 600px 미만에서는 `tap-target`으로 44까지 자란다. 바깥(오른쪽) 모서리만 둥글다.
+ *
+ * `Button` 프리미티브가 아니라 손으로 그린 이유(웹 스킬 §1): (1) 막힌 ▾는 `disabled` 속성이 아니라 `aria-disabled`로
+ * **포커스를 받아야** 한다(누르면 이유를 말한다. `disabled`는 포커스와 클릭을 없앤다). (2) 보내기 반쪽에 1px 틈으로 붙은
+ * 24px 폭의 반쪽 알약이라 `Button`의 크기·모양 변형에 없다. 색·눌림·포커스 링은 같은 토큰(`bg-primary`·`press`·
+ * `focus-ring-on-primary`)을 쓴다.
+ */
 const triggerClass =
   "tap-target flex h-icon-button w-6 shrink-0 items-center justify-center rounded-r-full bg-primary text-on-primary press hover:opacity-90 focus-visible:focus-ring focus-ring-on-primary aria-disabled:opacity-50";
 
