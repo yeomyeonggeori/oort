@@ -234,6 +234,7 @@ export function ChatShell() {
     byChannel: readStates.byChannel,
     phase: readPhase,
     closed: closedDms,
+    closureLatestSeqOf: latestSeqForClosure,
   });
   const foldedGone = useMemo(
     () =>

@@ -20,7 +20,7 @@ import {
   unreadFor,
   type Directory,
 } from "@momo/core/features/workspace/directory";
-import { closedAtSeqOf, type ClosedDms } from "./sidebarDmClosure";
+import { closedAtSeqOf, dmHiddenByClosure, type ClosedDms } from "./sidebarDmClosure";
 
 // =============================================================================
 // 나간 멤버 DM 의 안 읽음이 「사람이 읽을 것」인지 (#4252, 이슈 AC 「안 읽은 사람 메시지가 있으면 보인다」).
@@ -52,17 +52,40 @@ export function useGoneUnreadVerdicts(input: {
   byChannel: Map<string, ReadState>;
   phase: ReadProjectionPhase;
   /**
-   * 이 기기에서 X 로 닫은 DM(`sidebarDmClosure.ts`). 닫은 DM 은 접힘의 후보가 아니다: 원장이 먼저 거르고, 되살아난 DM 은 사람이 읽을
-   * 글이 있다는 판정이 이미 났다(`dmRevival.ts`). 후보에서 빼야 같은 안 읽은 쪽을 두 번 읽지 않는다(design-review #4252 Low).
+   * 이 기기에서 X 로 닫은 DM(`sidebarDmClosure.ts`)과, 되살림 판정이 가리는 그 DM 의 최신 seq(`useDmRevival`). 원장이 **지금
+   * 숨기고 있는** DM(`dmHiddenByClosure`)은 후보가 아니다: 사이드바에 서지 않으니 접을 일이 없고, 되살림 판정이 같은 안 읽은 쪽을
+   * 이미 읽는다(design-review #4252 Low: 같은 쪽을 두 번 읽던 것). 원장 항목이 **남아 있는** 것만으로는 빼지 않는다: 닫은 뒤 사람 글이
+   * 와서 되살아난 DM 은 읽고 난 뒤에도 원장 항목이 남아 있고, 그 뒤에 온 기계 메시지는 이 훅이 가려야 접힌다(design-review 3차 재확인
+   * High: 항목이 있다는 이유로 빼면 사람 글을 읽은 뒤 기계 메시지만 와도 도로 보였다).
    */
   closed: ClosedDms;
+  closureLatestSeqOf: (channelId: string) => number | undefined;
 }): ReadonlyMap<string, GoneUnreadVerdict> {
-  const { workspaceId, dms, directory, selfMemberId, rosterReady, byChannel, phase, closed } = input;
+  const {
+    workspaceId,
+    dms,
+    directory,
+    selfMemberId,
+    rosterReady,
+    byChannel,
+    phase,
+    closed,
+    closureLatestSeqOf,
+  } = input;
   const candidates = useMemo(() => {
     const rosterComplete = rosterIsComplete(directory.members.length);
     const out: { id: string; after: number; latest: number }[] = [];
     for (const dm of dms) {
-      if (closedAtSeqOf(closed, dm.id) !== undefined) continue;
+      if (
+        dmHiddenByClosure({
+          closedAtSeq: closedAtSeqOf(closed, dm.id),
+          latestSeq: closureLatestSeqOf(dm.id),
+          isOpen: false,
+          phase,
+        })
+      ) {
+        continue;
+      }
       const read = unreadFor(byChannel, dm.id);
       const after = goneUnreadProbeAfterSeq({
         labelKind: channelLabelParts(dm, directory, selfMemberId, { rosterReady }).kind,
@@ -76,7 +99,7 @@ export function useGoneUnreadVerdicts(input: {
       if (after !== null && read) out.push({ id: idKey(dm.id), after, latest: read.latestSeq });
     }
     return out;
-  }, [dms, directory, selfMemberId, rosterReady, byChannel, phase, closed]);
+  }, [dms, directory, selfMemberId, rosterReady, byChannel, phase, closed, closureLatestSeqOf]);
 
   // 결과를 「id:판정」 문자열로 접는다: 원시값이라 쿼리 결과가 같으면 참조가 같고 소비자가 불필요하게 다시 계산하지 않는다.
   const signature = useQueries({

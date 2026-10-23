@@ -585,8 +585,13 @@ export default function SidebarScreen({
           are not there. Saying so is cheaper than letting someone conclude they
           have read everything. */}
       {readStates.isError && !listFailed ? (
+        // 나간 멤버 DM 이 도로 보일 때는 새 문장이라 제목과 설명이 같은 말투(해요체)다. 그 밖에는 이 화면의 기존 문장 그대로다.
         <NoticeBlock
-          headline="안 읽음 표시를 불러오지 못했습니다."
+          headline={
+            goneUnfoldedByReadFailure
+              ? '안 읽음 표시를 불러오지 못했어요.'
+              : '안 읽음 표시를 불러오지 못했습니다.'
+          }
           detail={
             goneUnfoldedByReadFailure
               ? '안 읽은 개수를 알 수 없어서 나간 멤버와의 대화도 접지 못했어요.'

@@ -167,8 +167,10 @@ const liveness = vi.hoisted(() => ({ byAgent: new Map<string, string>() }));
  * 닫은 뒤의 메시지 쪽의 대역(#4142). 적지 않은 DM 은 사람이 쓴 글 한 건이 있다(= 되살아난다).
  * `"fail"` 은 읽기가 실패한다. 호출 기록으로 「한 번만 읽는다」를 잡는다.
  */
+type RevivalPage = Array<{ type: string; props?: Record<string, unknown> }>;
 const revival = vi.hoisted(() => ({
-  pages: new Map<string, "fail" | "pending" | Array<{ type: string; props?: Record<string, unknown> }>>(),
+  /** 채널 id(소문자) -> 쪽. 함수면 요청의 `after` 로 쪽을 고른다(같은 DM 을 되살림과 안 읽음 판정이 다른 `after` 로 읽을 때). */
+  pages: new Map<string, "fail" | "pending" | RevivalPage | ((after: number | undefined) => RevivalPage)>(),
   calls: [] as Array<{ channelId: string; after?: number; limit?: number }>,
 }));
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
@@ -177,7 +179,8 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
     ...actual,
     fetchMessages: async (_ws: string, channelId: string, query: { after?: number; limit?: number } = {}) => {
       revival.calls.push({ channelId: channelId.toLowerCase(), after: query.after, limit: query.limit });
-      const page = revival.pages.get(channelId.toLowerCase()) ?? [{ type: "text" }];
+      const entry = revival.pages.get(channelId.toLowerCase()) ?? [{ type: "text" }];
+      const page = typeof entry === "function" ? entry(query.after) : entry;
       if (page === "fail") throw new actual.ApiError(500, "boom");
       if (page === "pending") return new Promise<never>(() => undefined);
       return {
@@ -1551,7 +1554,45 @@ describe("나간 멤버 DM 의 안 읽음은 사람이 읽을 것이어야 보�
     expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
   });
 
-  it("X 로 닫은 나간 멤버 DM 은 후보가 아니다: 되살림 판정이 읽은 같은 쪽을 한 번 더 읽지 않는다 (design-review Low)", async () => {
+  it("닫은 뒤 사람 글로 되살아나 읽은 DM 에 기계 메시지만 새로 오면 접힌다: 원장 항목이 남아 있어도 후보에서 빼지 않는다 (design-review 3차 재확인 High)", async () => {
+    // 이 기기에서 seq 3 에 닫았다. 사람 글(seq 5)이 와서 되살아났고, 다른 기기에서 읽었다(5/5). 그 뒤 기계 메시지가 새로 온다(6~8).
+    // 되살림 판정은 닫을 때(3) 뒤를 읽어 사람 글(5)을 계속 보므로 원장 항목이 남아 있는 동안은 읽은 뒤에도 되살림이 유지된다.
+    const HUMAN = { type: "text" };
+    revival.pages.set(GONE_DM, (after) => ((after ?? 0) >= 5 ? AMBIENT : [{ type: "system" }, HUMAN]));
+    closeDmOnDevice(WS, GONE_DM, 3);
+    setReadStates([readState(GONE_DM, 5, 3)]);
+    const host = await mount();
+    await settle();
+    await flush();
+    // (b1) 사람 글이 와서 되살아났다: 안 읽은 사람 글이라 보인다.
+    expect(rowIds(host)).toContain(GONE_DM);
+    // (b2) 읽었다: 되살림은 유지되고(원장 항목이 남아 있다) 안 읽음이 없는 나간 멤버 DM 이라 접힌다.
+    setReadStates([readState(GONE_DM, 5, 5)]);
+    await rerender();
+    await settle();
+    await flush();
+    expect(rowIds(host)).not.toContain(GONE_DM);
+    expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
+    // (c) 기계 메시지 세 건이 새로 온다(6~8): 안 읽은 사람 글이 없으니 접힌 채여야 한다.
+    revival.calls.length = 0;
+    setReadStates([readState(GONE_DM, 8, 5)]);
+    await rerender();
+    await settle();
+    await flush();
+    expect(rowIds(host)).not.toContain(GONE_DM);
+    expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
+    // 마지막으로 읽은 seq(5) 뒤를 이 훅이 읽었다(되살림은 닫을 때 3 뒤를 읽는다).
+    expect(callsFor(GONE_DM)).toContainEqual({ channelId: GONE_DM, after: 5, limit: 200 });
+    // 새 쪽에 사람 글이 오면 도로 보인다.
+    revival.pages.set(GONE_DM, (after) => ((after ?? 0) >= 5 ? [{ type: "system" }, HUMAN] : [{ type: "system" }, HUMAN]));
+    setReadStates([readState(GONE_DM, 9, 5)]);
+    await rerender();
+    await settle();
+    await flush();
+    expect(rowIds(host)).toContain(GONE_DM);
+  });
+
+  it("X 로 닫아 지금 숨은 나간 멤버 DM 은 후보가 아니다: 되살림 판정이 읽은 같은 쪽을 한 번 더 읽지 않는다 (design-review Low)", async () => {
     // 닫을 때의 seq(3) 뒤로 기계 메시지만 쌓였다: 되살림은 닫은 뒤(3)부터를 한 번 읽어 숨은 채로 둔다.
     revival.pages.set(GONE_DM, AMBIENT);
     closeDmOnDevice(WS, GONE_DM, 3);

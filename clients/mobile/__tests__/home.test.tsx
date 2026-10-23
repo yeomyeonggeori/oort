@@ -1190,8 +1190,10 @@ describe('홈 — 나간 멤버와의 대화 (#4252)', () => {
     renderShell();
     await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
     const notice = await screen.findByTestId('read-state-error');
-    expect(notice).toHaveTextContent(/안 읽음 표시를 불러오지 못했습니다\./);
+    // 제목과 설명이 같은 말투(해요체)다.
+    expect(notice).toHaveTextContent(/안 읽음 표시를 불러오지 못했어요\./);
     expect(notice).toHaveTextContent(/나간 멤버와의 대화도 접지 못했어요\./);
+    expect(notice).not.toHaveTextContent(/습니다/);
     expect(notice).not.toHaveTextContent(/목록은 그대로/);
     // 접지 않는다: 나간 멤버 DM 이 목록에 있고 접힌 줄은 없다.
     expect(screen.getByTestId(GONE_ROW)).toBeTruthy();
@@ -1211,6 +1213,7 @@ describe('홈 — 나간 멤버와의 대화 (#4252)', () => {
     renderShell();
     await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
     const notice = await screen.findByTestId('read-state-error');
+    expect(notice).toHaveTextContent(/안 읽음 표시를 불러오지 못했습니다\./);
     expect(notice).toHaveTextContent(/목록은 그대로이고, 안 읽은 개수만 지금 알 수 없습니다\./);
     expect(notice).not.toHaveTextContent(/접지 못했어요/);
   });

@@ -371,6 +371,7 @@ export function Sidebar({
     byChannel: readStates.byChannel,
     phase: readPhase,
     closed: closedDms,
+    closureLatestSeqOf: latestSeqForClosure,
   });
   const foldedGoneForFallback = useMemo(
     () =>
