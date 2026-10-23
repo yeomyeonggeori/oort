@@ -4839,9 +4839,9 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     case 'dm-status-dots-member':
     case 'dm-status-dots-states':
     case 'dm-status-dots-states-member':
-    // #4252: 「나간 멤버와의 대화」. 사이드바를 **그대로** 세운다. 나간 멤버 DM 셋(안 읽음 없음 둘 · 안 읽은 사람 메시지 하나)과
-    // 명부에 있는 DM(꺼진 에이전트 「kwak의 Claude」 포함)이 한 목록에 선다. 접힌 줄은 `maestro/102-gone-dm-capture.yaml` 이 눌러
-    // 펼친다. 수리 전 코드로 띄우면 나간 멤버 셋이 모두 목록에 선다.
+    // #4252: 「나간 멤버와의 대화」. 사이드바를 **그대로** 세운다. 나간 멤버 DM 넷(안 읽음 없음 둘 · 안 읽은 사람 메시지 하나 ·
+    // 기계 메시지뿐인 안 읽음 하나)과 명부에 있는 DM(꺼진 에이전트 「kwak의 Claude」 포함)이 한 목록에 선다. 접힌 줄은
+    // `maestro/102-gone-dm-capture.yaml` 이 눌러 펼친다. 수리 전 코드로 띄우면 나간 멤버 넷이 모두 목록에 선다.
     case 'gone-dm-home':
       return (
         <View style={styles.fill}>
@@ -6011,7 +6011,12 @@ function seedDmStatusDots(surface: string): void {
  *
  *   이도현   안 읽음 2                    박서연   다 읽음
  *   kwak의 Claude  꺼진 에이전트(명부에 **있다** - 접지 않는 쪽)       grok   응답함
- *   나간 멤버 ×3  명부에 없는 상대. 둘은 다 읽음(접힌다), 하나는 안 읽은 사람 메시지 1(접히지 않는다)
+ *   나간 멤버 ×4  명부에 없는 상대. 둘은 다 읽음(접힌다), 하나는 안 읽은 사람 메시지 1(접히지 않는다), 하나는 안 읽음 4 가
+ *                 전부 기계 메시지(작업 상태·시스템 줄)라 사람이 읽을 것이 없다(접힌다, 이슈 AC 「안 읽은 사람 메시지」)
+ *
+ * 안 읽은 쪽을 읽어 가르는 질의(`['gone-unread', ws, id, after, latest]`, `useGoneUnreadVerdicts`)도 **미리 꽂는다**: 이 하네스의
+ * `fetch` 는 끝나지 않는 약속이라 판정이 영영 오는 중이고, 그러면 안 읽은 사람 메시지가 있는 DM 도 접힌 채 남는다. 값은 「사람이
+ * 읽을 메시지가 있는가」(`pageHasHumanMessage`)다.
  */
 function seedGoneDmHome(): void {
   // 서버가 없는 하네스: 질의가 다시 나가도 끝나지 않는 약속으로 둔다(실패하면 세션 만료로 읽혀 캐시가 지워진다).
@@ -6075,6 +6080,7 @@ function seedGoneDmHome(): void {
     dm('gone-a', id('98')),
     dm('gone-unread', id('97')),
     dm('gone-b', id('99')),
+    dm('gone-machine', id('96')),
   ]);
   const read = (channelId: string, lastReadSeq: number, latestSeq: number) => ({
     channelId,
@@ -6093,7 +6099,11 @@ function seedGoneDmHome(): void {
     read('dm-gone-a', 6, 6),
     read('dm-gone-unread', 3, 4),
     read('dm-gone-b', 3, 3),
+    read('dm-gone-machine', 2, 6),
   ]);
+  // 안 읽은 쪽의 판정: 사람 메시지가 있는 쪽은 true(보인다), 기계 메시지뿐인 쪽은 false(접힌다).
+  harnessClient.setQueryData(['gone-unread', ADE_WS, 'dm-gone-unread', 3, 4], true);
+  harnessClient.setQueryData(['gone-unread', ADE_WS, 'dm-gone-machine', 2, 6], false);
 }
 
 /**

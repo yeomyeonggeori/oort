@@ -2,6 +2,7 @@ import { uuidEq, type Channel, type ReadState } from "@momo/core/lib/api";
 import {
   dmHiddenAsGone,
   rosterIsComplete,
+  type GoneUnreadVerdict,
   type ReadProjectionPhase,
 } from "@momo/core/features/sidebar/goneDm";
 import {
@@ -18,7 +19,8 @@ import { sidebarUnreadCounts } from "./sidebarUnread";
 //
 // 입력은 행이 그리는 것과 **같은 값**이다: 이름 갈래는 `channelLabelParts`(사이드바 행과 같은 함수·같은
 // 명부 도착 판정), 안 읽음은 `sidebarUnreadCounts`(열려 있는 DM 은 0 으로 접힌 값). 그래서 행의 알약과
-// 접힘이 같은 사실을 말한다.
+// 접힘이 같은 사실에서 출발한다. 한 가지를 더한다: 안 읽음이 기계 메시지(작업 상태·영수증)뿐이면 사람이 읽을 것이 없다
+// (이슈 AC 「안 읽은 사람 메시지」). 그 판정은 안 읽은 쪽을 읽어야 알 수 있어서 호출부의 훅(`useGoneUnreadVerdicts`)이 가져온다.
 //
 // 닫기 원장(`sidebarDmClosure.ts`)과의 순서: 원장이 사람이 X 로 닫은 대화를 먼저 거르고, 호출부는 그
 // **남은** DM 만 여기에 넘긴다. 원장이 숨긴 나간 멤버 DM 은 접힌 줄의 수에도 들지 않는다(사람이 닫은 것을
@@ -47,6 +49,11 @@ export function goneDmIds(input: {
   phase: ReadProjectionPhase;
   /** 줄이 펼쳐져 있나. 펼친 동안은 열린 DM 도 접힌 목록에 머문다(위). */
   foldOpen?: boolean;
+  /**
+   * 안 읽음이 있는 나간 멤버 DM 의 안 읽음이 사람이 읽을 것인지의 판정(소문자 id -> 판정, `useGoneUnreadVerdicts`).
+   * 생략하거나 없는 id 는 모른다: 안 읽음이 있으면 보인다.
+   */
+  verdicts?: ReadonlyMap<string, GoneUnreadVerdict>;
 }): ReadonlySet<string> {
   const folded = new Set<string>();
   for (const dm of input.dms) {
@@ -63,6 +70,7 @@ export function goneDmIds(input: {
         isOpen:
           input.foldOpen !== true && input.openId !== null && uuidEq(dm.id, input.openId),
         phase: input.phase,
+        unreadVerdict: input.verdicts?.get(idKey(dm.id)),
       })
     ) {
       folded.add(idKey(dm.id));

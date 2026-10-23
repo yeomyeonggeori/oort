@@ -3,6 +3,7 @@ import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {
   agentsWithoutDm,
   buildSidebarSections,
+  goneUnreadCandidates,
   rowCount,
   type SidebarInput,
   type SidebarSection,
@@ -537,5 +538,113 @@ describe('a DM whose peer left the roster', () => {
       'channels',
     );
     expect(channels?.tucked).toEqual([]);
+  });
+
+  describe('안 읽음이 있는 나간 멤버 DM 은 그 안 읽음이 사람이 읽을 것인지의 판정을 따른다 (이슈 AC 「안 읽은 사람 메시지」)', () => {
+    const UNREAD = new Map([
+      [DM_GONE.id, readState({channelId: DM_GONE.id, lastReadSeq: 3, latestSeq: 8})],
+    ]);
+    const build = (
+      verdict?: 'human' | 'ambient' | 'pending' | 'error',
+      overrides: Partial<SidebarInput> = {},
+    ) =>
+      section(
+        buildSidebarSections(
+          goneInput({
+            unreadByChannel: UNREAD,
+            goneUnreadVerdicts:
+              verdict === undefined ? undefined : new Map([[DM_GONE.id, verdict]]),
+            ...overrides,
+          }),
+        ),
+        'dms',
+      );
+
+    it('기계 메시지뿐이라고 판정되면(ambient) 안 읽음이 있어도 접힌다', () => {
+      expect(build('ambient')?.tucked?.map(row => row.key)).toEqual(['dm:ch-dm-gone']);
+      expect(build('ambient')?.data.map(row => row.key)).toEqual(['dm:ch-dm-human']);
+    });
+
+    it('판정이 오는 중이면(pending) 접힌 채 둔다', () => {
+      expect(build('pending')?.tucked).toHaveLength(1);
+    });
+
+    it('사람이 읽을 것이 있다고 판정되면(human)·못 읽었으면(error)·판정이 없으면 접히지 않는다', () => {
+      for (const verdict of ['human', 'error', undefined] as const) {
+        expect({verdict, tucked: build(verdict)?.tucked}).toEqual({verdict, tucked: []});
+        expect(build(verdict)?.data.map(row => row.key)).toContain('dm:ch-dm-gone');
+      }
+    });
+
+    it('판정의 키는 id 의 소문자다 (대소문자가 달라도 같은 DM)', () => {
+      const upper = {...DM_GONE, id: 'CH-DM-GONE'};
+      const sections = buildSidebarSections(
+        goneInput({
+          groups: {channels: [], dms: [DM_HUMAN_KIM, upper]},
+          unreadByChannel: new Map([
+            ['ch-dm-gone', readState({channelId: 'ch-dm-gone', lastReadSeq: 1, latestSeq: 4})],
+          ]),
+          goneUnreadVerdicts: new Map([['ch-dm-gone', 'ambient']]),
+        }),
+      );
+      expect(section(sections, 'dms')?.tucked).toHaveLength(1);
+    });
+
+    it('검색 중에는 판정과 상관없이 접지 않는다', () => {
+      const dms = build('ambient', {query: '나간'});
+      expect(dms?.tucked).toEqual([]);
+      expect(dms?.data.map(row => row.key)).toContain('dm:ch-dm-gone');
+    });
+  });
+
+  describe('goneUnreadCandidates: 안 읽음이 사람이 읽을 것인지 메시지를 읽어 가려야 하는 DM', () => {
+    const cands = (
+      unread: ReadState[],
+      overrides: Partial<SidebarInput> = {},
+    ) =>
+      goneUnreadCandidates(
+        goneInput({
+          unreadByChannel: new Map(unread.map(state => [state.channelId, state])),
+          ...overrides,
+        }),
+      );
+
+    it('안 읽음이 있는 나간 멤버 DM 은 마지막으로 읽은 seq 뒤를 읽는다', () => {
+      expect(
+        cands([readState({channelId: DM_GONE.id, lastReadSeq: 3, latestSeq: 8})]),
+      ).toEqual([{id: 'ch-dm-gone', after: 3, latest: 8}]);
+    });
+
+    it('상대가 있는 DM · 안 읽음이 없는 DM · 멘션 · 「여기부터 안 읽음」 표시는 읽지 않는다', () => {
+      expect(
+        cands([
+          readState({channelId: DM_HUMAN_KIM.id, lastReadSeq: 1, latestSeq: 9}),
+          readState({channelId: DM_GONE.id, lastReadSeq: 5, latestSeq: 5}),
+        ]),
+      ).toEqual([]);
+      expect(
+        cands([
+          readState({channelId: DM_GONE.id, lastReadSeq: 3, latestSeq: 8, mentionCount: 1}),
+        ]),
+      ).toEqual([]);
+      expect(
+        cands([
+          readState({
+            channelId: DM_GONE.id,
+            lastReadSeq: 3,
+            latestSeq: 8,
+            markedUnreadBeforeSeq: 2,
+          }),
+        ]),
+      ).toEqual([]);
+    });
+
+    it('열려 있는 DM · 투영이 오는 중/못 읽음 · 명부를 못 받았을 때는 읽지 않는다', () => {
+      const unread = [readState({channelId: DM_GONE.id, lastReadSeq: 3, latestSeq: 8})];
+      expect(cands(unread, {openChannelId: DM_GONE.id})).toEqual([]);
+      expect(cands(unread, {readPhase: 'loading'})).toEqual([]);
+      expect(cands(unread, {readPhase: 'error'})).toEqual([]);
+      expect(cands(unread, {rosterReady: false})).toEqual([]);
+    });
   });
 });

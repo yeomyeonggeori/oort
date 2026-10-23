@@ -1,0 +1,47 @@
+import { describe, expect, it } from "vitest";
+import {
+  HUMAN_MESSAGE_PAGE_LIMIT,
+  isAmbientMessage,
+  pageHasHumanMessage,
+} from "./ambientMessage";
+
+// #4142 에서 웹에 있던 구별을 #4252 가 코어로 옮겼다(웹·폰이 같이 읽는다). 웹 `dmRevival.test.ts` 가 다시 내보낸 이름으로 같은
+// 표를 한 번 더 잰다. 여기서는 코어가 자기 이름으로 그 계약을 잡는다.
+
+describe("isAmbientMessage", () => {
+  it.each([
+    ["system", { type: "system" as const }],
+    ["tool_call", { type: "tool_call" as const }],
+    ["tool_result", { type: "tool_result" as const }],
+    ["work_session 카드", { type: "text" as const, props: { kind: "work_session" } }],
+    ["지워진 글", { type: "text" as const, state: "deleted" as const }],
+  ])("%s 는 사람이 읽을 것이 아니다", (_name, message) => {
+    expect(isAmbientMessage(message)).toBe(true);
+  });
+
+  it.each([
+    ["글", { type: "text" as const }],
+    ["승인 요청", { type: "approval_request" as const }],
+    ["산출물", { type: "artifact" as const }],
+  ])("%s 는 사람이 읽을 것이다", (_name, message) => {
+    expect(isAmbientMessage(message)).toBe(false);
+  });
+});
+
+describe("pageHasHumanMessage", () => {
+  it("기계 메시지뿐이면 없다, 하나라도 섞이면 있다", () => {
+    expect(pageHasHumanMessage([{ type: "system" }, { type: "tool_call" }])).toBe(false);
+    expect(pageHasHumanMessage([{ type: "system" }, { type: "text" }])).toBe(true);
+  });
+
+  it("쪽이 가득 찼으면 뒤를 모르므로 있다고 본다 (모르면 보이는 쪽)", () => {
+    expect(HUMAN_MESSAGE_PAGE_LIMIT).toBe(50);
+    const full = Array.from({ length: HUMAN_MESSAGE_PAGE_LIMIT }, () => ({ type: "system" as const }));
+    expect(pageHasHumanMessage(full)).toBe(true);
+    expect(pageHasHumanMessage(full.slice(1))).toBe(false);
+  });
+
+  it("빈 쪽은 없다", () => {
+    expect(pageHasHumanMessage([])).toBe(false);
+  });
+});

@@ -127,6 +127,39 @@ describe("goneDmIds: 나간 멤버 DM 은 안 읽음이 없으면 접힌다", ()
   it("투영에 행이 없는 DM(메시지가 한 번도 없는 DM)은 안 읽음이 0 이라 접힌다", () => {
     expect(goneDmIds({ ...base, byChannel: new Map() }).size).toBe(2);
   });
+
+  describe("안 읽음이 있는 나간 멤버 DM 은 그 안 읽음이 사람이 읽을 것인지의 판정을 따른다 (이슈 AC 「안 읽은 사람 메시지」)", () => {
+    const A = DM_GONE_A.toLowerCase();
+    const B = DM_GONE_B.toLowerCase();
+    const unread = projection(read(DM_LIVE), read(DM_GONE_A, { latestSeq: 8 }), read(DM_GONE_B));
+    const folded = (verdicts?: ReadonlyMap<string, "human" | "ambient" | "pending" | "error">) =>
+      [...goneDmIds({ ...base, byChannel: unread, verdicts })].sort();
+
+    it("기계 메시지뿐이라고 판정되면(ambient) 안 읽음이 있어도 접힌다", () => {
+      expect(folded(new Map([[A, "ambient" as const]]))).toEqual([A, B].sort());
+    });
+
+    it("사람이 읽을 것이 있다고 판정되면(human) 접히지 않는다", () => {
+      expect(folded(new Map([[A, "human" as const]]))).toEqual([B]);
+    });
+
+    it("판정이 오는 중이면(pending) 접힌 채, 못 읽었으면(error)·판정이 없으면 보인다", () => {
+      expect(folded(new Map([[A, "pending" as const]]))).toEqual([A, B].sort());
+      expect(folded(new Map([[A, "error" as const]]))).toEqual([B]);
+      expect(folded(new Map())).toEqual([B]);
+      expect(folded()).toEqual([B]);
+    });
+
+    it("판정의 키는 소문자 id 다: 안 읽음이 없는 DM 은 판정이 무엇이든 접힌다", () => {
+      expect(folded(new Map([[B, "human" as const]]))).toEqual([B]);
+    });
+
+    it("판정은 멘션을 이기지 못한다 (사람이 부른 것이다)", () => {
+      const byChannel = projection(read(DM_GONE_A, { latestSeq: 8, mentionCount: 1 }), read(DM_GONE_B));
+      const verdicts = new Map([[A, "ambient" as const]]);
+      expect([...goneDmIds({ ...base, byChannel, verdicts })]).toEqual([B]);
+    });
+  });
 });
 
 describe("indexFallbackChannelId: 접힌 나간 멤버 DM 은 `/` 가 열어 주는 대화의 후보가 아니다", () => {

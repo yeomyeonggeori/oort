@@ -110,6 +110,7 @@ import {
 } from "./sidebarDmClosure";
 import { useDmRevival } from "./dmRevival";
 import { goneDmIds } from "./goneDmHiding";
+import { useGoneUnreadVerdicts } from "./goneUnreadVerdicts";
 import { GoneDmFold } from "./GoneDmFold";
 import { rosterLoaded } from "@momo/core/features/sidebar/goneDm";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
@@ -359,6 +360,17 @@ export function Sidebar({
   // 나간 멤버와의 대화(#4252, 코어 `dmHiddenAsGone`)로 접히는 DM 은 `/` 가 열어 주는 대화의 후보도 아니다
   // (`ChatShell` 이 같은 집합으로 폴백을 고른다).
   const rosterReady = rosterLoaded(directoryQuery);
+  // 안 읽음이 있는 나간 멤버 DM 은 그 안 읽음이 사람이 읽을 것인지 한 번 읽어 가른다(`goneUnreadVerdicts.ts`). `ChatShell` 이 같은
+  // 훅을 부른다(키가 같아 한 번만 읽는다).
+  const goneVerdicts = useGoneUnreadVerdicts({
+    workspaceId,
+    dms,
+    directory: directoryQuery.directory,
+    selfMemberId: session.member.id,
+    rosterReady,
+    byChannel: readStates.byChannel,
+    phase: readPhase,
+  });
   const foldedGoneForFallback = useMemo(
     () =>
       goneDmIds({
@@ -369,8 +381,9 @@ export function Sidebar({
         byChannel: readStates.byChannel,
         openId: null,
         phase: readPhase,
+        verdicts: goneVerdicts,
       }),
-    [dms, directoryQuery.directory, session.member.id, rosterReady, readStates.byChannel, readPhase]
+    [dms, directoryQuery.directory, session.member.id, rosterReady, readStates.byChannel, readPhase, goneVerdicts]
   );
   const openId = openChannelId(
     routePath,
@@ -419,8 +432,9 @@ export function Sidebar({
         openId,
         phase: readPhase,
         foldOpen: goneOpen,
+        verdicts: goneVerdicts,
       }),
-    [visibleDms, directoryQuery.directory, session.member.id, rosterReady, readStates.byChannel, openId, readPhase, goneOpen]
+    [visibleDms, directoryQuery.directory, session.member.id, rosterReady, readStates.byChannel, openId, readPhase, goneOpen, goneVerdicts]
   );
   const shownDms = useMemo(
     () => visibleDms.filter((channel) => !foldedGone.has(channel.id.toLowerCase())),
@@ -442,6 +456,55 @@ export function Sidebar({
       document.getElementById(GONE_DM_LIST_ID)?.scrollIntoView?.({ block: "nearest" });
     }
   }, [goneOpen]);
+  // 줄이 눌린 채 사라질 때(접힌 대화가 0 이 됐다: 접힌 대화가 하나뿐이고 그것이 열려 있을 때 줄을 접으면 그 행이 위 목록으로
+  // 올라간다) 캐럿이 `<body>` 로 떨어지지 않게 가장 가까운 정거장으로 넘긴다(design-review #4252 H1). 갈 곳은 ①줄을 접어 위로
+  // 올라온 열린 행 ②줄 바로 위의 행 ③DM 구획 머리글 순이다. 불리는 시점의 클로저는 줄이 마지막으로 그려진 렌더의 것이다.
+  const handOffFromGoneFold = () => {
+    const target =
+      goneDms.find((channel) => openId !== null && uuidEq(channel.id, openId))?.id ??
+      shownDms[shownDms.length - 1]?.id ??
+      null;
+    if (target !== null) {
+      scheduleSidebarChannelRowFocus(target);
+      return;
+    }
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => {
+        navRef.current
+          ?.querySelector<HTMLElement>('[data-testid="section-collapse-dms"]')
+          ?.focus();
+      });
+    }
+  };
+  // 명부·읽음 투영이 **한 번도 못 온 채 실패했을 때** 사람에게 이유를 말한다(design-review #4252 H2·M1): 전자는 상대가 있는 DM
+  // 도 「불러오는 중」으로 남고, 후자는 접어야 할 나간 멤버 DM 이 도로 보인다. 말은 영향을 받는 DM 구역에만 선다(영향받는 DM 이
+  // 없으면 말할 일도 없다). 폰은 명부 실패를 목록 실패로, 읽음 실패를 고지로 이미 말한다.
+  const rosterFailed = !rosterReady && directoryQuery.isError === true;
+  const dmNamesStuck = useMemo(
+    () =>
+      rosterFailed &&
+      dms.some(
+        (channel) =>
+          channelLabelParts(channel, directoryQuery.directory, session.member.id, {
+            rosterReady,
+            selfName,
+          }).kind === "pending"
+      ),
+    [rosterFailed, dms, directoryQuery.directory, session.member.id, rosterReady, selfName]
+  );
+  const goneUnfoldedByReadFailure = useMemo(
+    () =>
+      readPhase === "error" &&
+      rosterReady &&
+      dms.some(
+        (channel) =>
+          channelLabelParts(channel, directoryQuery.directory, session.member.id, {
+            rosterReady,
+            selfName,
+          }).kind === "gone"
+      ),
+    [readPhase, rosterReady, dms, directoryQuery.directory, session.member.id, selfName]
+  );
   // 닫아 둔 DM 이 **열리는** 순간(주소 · ⌘K · 새 DM)이 곧 다시 연다는 뜻이다. 원장에서 지우지
   // 않으면 사람이 일부러 연 대화가 다른 곳으로 옮겨 가는 순간 도로 사라진다. 효과는 `openId` 가
   // **바뀔 때만** 돈다(deps): 열린 DM 을 X 로 닫으면 `closeDmRow` 가 원장을 쓴 뒤 `/` 로 착지시키고,
@@ -1345,6 +1408,35 @@ export function Sidebar({
                   </button>
                 }
               >
+                {/* 명부를 못 받으면 DM 이름이 전부 「불러오는 중」으로 남는다. 이유와 다시 시도를 구역 안에서 말한다(#4252). */}
+                {dmNamesStuck && (
+                  <li>
+                    <InlineBanner
+                      message="멤버 목록을 불러오지 못해 대화 이름을 알 수 없어요."
+                      actionLabel="다시 시도"
+                      onAction={() => void directoryQuery.refetch()}
+                      separator={false}
+                      // 행과 같은 좌우 10: 배너 첫 글자가 행의 아바타와 같은 자에서 시작한다.
+                      className="px-2.5"
+                      testId="roster-error"
+                    />
+                  </li>
+                )}
+                {/* 안 읽음 표시를 못 받으면 나간 멤버와의 대화를 접을 근거가 없어 도로 보인다(안 읽은 것이 있는지 모를 때 숨기는
+                    쪽이 최악이다). 그 이유를 말한다(#4252). */}
+                {goneUnfoldedByReadFailure && (
+                  <li>
+                    <InlineBanner
+                      tone="neutral"
+                      message="안 읽음 표시를 불러오지 못해 나간 멤버와의 대화를 접지 못했어요."
+                      actionLabel="다시 시도"
+                      onAction={() => void readStates.refetch()}
+                      separator={false}
+                      className="px-2.5"
+                      testId="read-state-error"
+                    />
+                  </li>
+                )}
                 {dmSection.channels.map((channel) => rowFor(channel))}
                 {/* 접힌 나간 멤버 대화만 남은 구역이 「아직 대화가 없습니다」라고 말하면 바로 아래 「나간 멤버와의 대화 2개」와
                     모순이다(#4252). 닫은 DM 의 힌트(#3963)는 접힌 줄과 모순이 아니라 그대로 선다. */}
@@ -1370,6 +1462,7 @@ export function Sidebar({
                       expanded={goneOpen}
                       onToggle={() => setGoneOpen((open) => !open)}
                       listId={GONE_DM_LIST_ID}
+                      onVanishWhileFocused={handOffFromGoneFold}
                     />
                     {goneOpen && (
                       <li>

@@ -2,7 +2,9 @@ import {uuidEq, type Channel, type ReadState, type RosterMember} from '@momo/cor
 import {composedUnreadCount} from '@momo/core/features/readState/model';
 import {
   dmHiddenAsGone,
+  goneUnreadProbeAfterSeq,
   rosterIsComplete,
+  type GoneUnreadVerdict,
   type ReadProjectionPhase,
 } from '@momo/core/features/sidebar/goneDm';
 import {
@@ -61,7 +63,8 @@ export const CHANNEL_LIST_FAILED = '채널을 불러오지 못했습니다.';
 //      것이 없는 DM 은 DM 섹션의 `data` 가 아니라 `tucked` 로 간다. 판정은 코어
 //      `dmHiddenAsGone` 한 함수이고 웹 사이드바와 같다(이 파일은 그 입력을 모아 줄 뿐
 //      이다). **검색 중에는 접지 않는다**: 이름으로 찾는 것은 접힌 대화를 찾겠다는
-//      뜻이고, 웹도 ⌘K 와 검색으로는 접힌 대화를 연다. 열려 있는 DM 은 접지 않는다.
+//      뜻이고, 웹도 ⌘K 와 검색으로는 접힌 대화를 연다. 열려 있는 DM 은 접지 않는다. 안 읽음이 있는 DM 은
+//      그 안 읽음이 기계 메시지뿐이면(훅이 안 읽은 쪽을 읽어 가른다, `goneUnreadVerdicts`) 접힌다.
 //
 // ## The count is the COMPOSED one (ADR-0178 D3, #1964)
 //
@@ -180,6 +183,54 @@ export interface SidebarInput {
    * 「불러오는 중」이라 접히지 않는다. 생략하면 코어의 기본(멤버가 한 명이라도 있으면 받은 것)이다.
    */
   rosterReady?: boolean;
+  /**
+   * 안 읽음이 있는 나간 멤버 DM 의 안 읽음이 사람이 읽을 것인지의 판정(소문자 id -> 판정, `useGoneUnreadVerdicts`). 기계
+   * 메시지(작업 상태·영수증)뿐이면 사람이 읽을 것이 없다(이슈 AC 「안 읽은 사람 메시지」). 생략하거나 없는 id 는 모른다:
+   * 안 읽음이 있으면 보인다.
+   */
+  goneUnreadVerdicts?: ReadonlyMap<string, GoneUnreadVerdict>;
+}
+
+/**
+ * 안 읽음이 사람이 읽을 것인지 **메시지를 읽어 가려야** 하는 나간 멤버 DM (코어 `goneUnreadProbeAfterSeq` 가 규칙이다).
+ * 화면의 훅(`useGoneUnreadVerdicts`)이 이 목록을 읽는다. 열려 있는 DM 은 행이 안 읽음을 0 으로 접으므로 후보가 아니다.
+ */
+export function goneUnreadCandidates(
+  input: Pick<
+    SidebarInput,
+    | 'groups'
+    | 'directory'
+    | 'selfMemberId'
+    | 'unreadByChannel'
+    | 'openChannelId'
+    | 'readPhase'
+    | 'rosterReady'
+  >,
+): Array<{id: string; after: number; latest: number}> {
+  const rosterComplete = rosterIsComplete(input.directory.members.length);
+  const phase = input.readPhase ?? 'ready';
+  const out: Array<{id: string; after: number; latest: number}> = [];
+  for (const channel of input.groups.dms) {
+    const open =
+      input.openChannelId !== null && uuidEq(channel.id, input.openChannelId);
+    const read = open ? null : unreadFor(input.unreadByChannel, channel.id);
+    const after = goneUnreadProbeAfterSeq({
+      labelKind: channelLabelParts(
+        channel,
+        input.directory,
+        input.selfMemberId,
+        input.rosterReady === undefined ? {} : {rosterReady: input.rosterReady},
+      ).kind,
+      rosterComplete,
+      isOpen: open,
+      phase,
+      read,
+    });
+    if (after !== null && read) {
+      out.push({id: idKey(channel.id), after, latest: read.latestSeq});
+    }
+  }
+  return out;
 }
 
 /**
@@ -331,6 +382,7 @@ export function buildSidebarSections(input: SidebarInput): SidebarSection[] {
               input.openChannelId !== null &&
               uuidEq(row.targetId, input.openChannelId),
             phase,
+            unreadVerdict: input.goneUnreadVerdicts?.get(idKey(row.targetId)),
           }),
         );
   const tuckedSet = new Set(tucked);

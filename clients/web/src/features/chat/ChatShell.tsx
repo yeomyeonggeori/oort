@@ -37,6 +37,7 @@ import {
 } from "@/features/sidebar/sidebarDmClosure";
 import { useDmRevival } from "@/features/sidebar/dmRevival";
 import { goneDmIds } from "@/features/sidebar/goneDmHiding";
+import { useGoneUnreadVerdicts } from "@/features/sidebar/goneUnreadVerdicts";
 import { rosterLoaded } from "@momo/core/features/sidebar/goneDm";
 import { applyFirstAgentFocus } from "@/features/welcome/firstAgentStore";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
@@ -222,6 +223,17 @@ export function ChatShell() {
   // 나간 멤버와의 대화(#4252)로 접힌 DM 도 후보가 아니다: 사이드바가 같은 집합으로 접고, 접힌 대화를 본문이 도로 열면
   // 열려 있다는 이유로 목록에 되살아난다.
   const rosterReady = rosterLoaded(directoryQuery);
+  // 안 읽음이 있는 나간 멤버 DM 은 그 안 읽음이 사람이 읽을 것인지 한 번 읽어 가른다. 사이드바가 **같은 훅**을 부른다(키가 같아
+  // 한 번만 읽는다): 둘이 다르면 사이드바는 접는데 본문은 연다.
+  const goneVerdicts = useGoneUnreadVerdicts({
+    workspaceId,
+    dms: channelsQuery.groups.dms,
+    directory,
+    selfMemberId: session.member.id,
+    rosterReady,
+    byChannel: readStates.byChannel,
+    phase: readPhase,
+  });
   const foldedGone = useMemo(
     () =>
       goneDmIds({
@@ -232,8 +244,9 @@ export function ChatShell() {
         byChannel: readStates.byChannel,
         openId: null,
         phase: readPhase,
+        verdicts: goneVerdicts,
       }),
-    [channelsQuery.groups.dms, directory, session.member.id, rosterReady, readStates.byChannel, readPhase]
+    [channelsQuery.groups.dms, directory, session.member.id, rosterReady, readStates.byChannel, readPhase, goneVerdicts]
   );
   const channelId =
     params.channelId ??

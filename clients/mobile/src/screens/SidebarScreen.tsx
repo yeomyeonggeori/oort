@@ -69,6 +69,7 @@ import {
   type SidebarRow,
   type SidebarSection,
 } from '../features/sidebar/rows';
+import {useGoneUnreadVerdicts} from '../features/sidebar/useGoneUnreadVerdicts';
 import {
   useChannels,
   useDirectory,
@@ -260,6 +261,13 @@ export function ProfileAvatarButton({
   );
 }
 
+/**
+ * 「나간 멤버와의 대화」 줄을 누른 뒤, 펼친 행이 그려져 목록 내용이 자랄 때까지 끝으로 내릴 준비를 해 두는 시간(ms).
+ * 내용이 안 자라면(접힌 행이 이미 화면 안이다) 이 시간이 지나 표지를 거둔다. 표지가 남으면 이후 다른 이유의 크기 변화가
+ * 스크롤을 빼앗는다.
+ */
+const REVEAL_WINDOW_MS = 1500;
+
 export default function SidebarScreen({
   openChannelId,
   onOpenConversation,
@@ -342,7 +350,7 @@ export default function SidebarScreen({
       revealGoneOnGrow.current = true;
       setTimeout(() => {
         revealGoneOnGrow.current = false;
-      }, 1500);
+      }, REVEAL_WINDOW_MS);
     } else {
       revealGoneOnGrow.current = false;
     }
@@ -369,6 +377,18 @@ export default function SidebarScreen({
     [directoryQuery.directory],
   );
 
+  // 안 읽음이 있는 나간 멤버 DM 은 그 안 읽음이 사람이 읽을 것인지 한 번 읽어 가른다(웹과 같은 규칙, `useGoneUnreadVerdicts`).
+  const goneUnreadVerdicts = useGoneUnreadVerdicts({
+    workspaceId,
+    groups: channelsQuery.groups,
+    directory: directoryQuery.directory,
+    selfMemberId: member.id,
+    unreadByChannel: readStates.byChannel,
+    openChannelId,
+    readPhase,
+    rosterReady,
+  });
+
   const sections = useMemo(
     () =>
       buildSidebarSections({
@@ -381,6 +401,7 @@ export default function SidebarScreen({
         query,
         readPhase,
         rosterReady,
+        goneUnreadVerdicts,
       }),
     [
       channelsQuery.groups,
@@ -392,8 +413,15 @@ export default function SidebarScreen({
       query,
       readPhase,
       rosterReady,
+      goneUnreadVerdicts,
     ],
   );
+  // 접힌 대화가 없어지면 펼침은 닫힌 채로 돌아간다(웹과 같다). 접힌 줄이 없는데 펼침만 남으면 나중에 접힌 대화가 생겼을 때
+  // 처음부터 펼쳐진 채 선다.
+  const goneCount = sections.find(section => section.key === 'dms')?.tucked?.length ?? 0;
+  useEffect(() => {
+    if (goneCount === 0) setGoneOpen(false);
+  }, [goneCount]);
 
   // ---- 「작업 중」 카드 (시안 A `.a-now`) -------------------------------------
   // 시계는 두지 않는다 — 카드는 경과 숫자를 그리지 않고, 스토어가 발행·해제마다
