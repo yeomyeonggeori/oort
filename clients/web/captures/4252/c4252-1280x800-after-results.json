@@ -50,6 +50,13 @@
  {
   "engine": "chromium",
   "scheme": "light",
+  "name": "G5b 펼친 직후 접힌 행이 스크롤 상자 안에 보인다(앱이 스스로 맞춘다, 하네스 스크롤 없음)",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
   "name": "G6 접힌 행은 기본 아바타와 「나간 멤버」다",
   "ok": true,
   "detail": null
@@ -57,14 +64,28 @@
  {
   "engine": "chromium",
   "scheme": "light",
-  "name": "G7 접힌 행을 누르면 그 대화가 열린다(주소 /c/…)",
+  "name": "G7 접힌 행을 열면 그 대화가 열린다(주소 /c/…)",
   "ok": true,
   "detail": "http://127.0.0.1:5352/#/c/00000000-0000-7000-8000-000000000308"
  },
  {
   "engine": "chromium",
   "scheme": "light",
-  "name": "G8 줄을 접어도 열려 있는 나간 멤버 DM 은 목록에 남고, 줄은 남은 하나를 센다",
+  "name": "G7b Enter 뒤에도 캐럿이 그 행에 있다(<body> 로 떨어지지 않는다)",
+  "ok": true,
+  "detail": "A"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "G7c 열린 행은 접힌 목록의 제자리에 머물고 선택 표시만 바뀐다(점프 없음, 줄은 그대로 2개)",
+  "ok": true,
+  "detail": "나간 멤버와의 대화 2개"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "G8 줄을 접으면 열려 있는 나간 멤버 DM 은 위 목록에 남고, 줄은 남은 하나를 센다",
   "ok": true,
   "detail": "나간 멤버와의 대화 1개"
  },
@@ -126,6 +147,13 @@
  {
   "engine": "chromium",
   "scheme": "dark",
+  "name": "G5b 펼친 직후 접힌 행이 스크롤 상자 안에 보인다(앱이 스스로 맞춘다, 하네스 스크롤 없음)",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
   "name": "G6 접힌 행은 기본 아바타와 「나간 멤버」다",
   "ok": true,
   "detail": null
@@ -133,14 +161,28 @@
  {
   "engine": "chromium",
   "scheme": "dark",
-  "name": "G7 접힌 행을 누르면 그 대화가 열린다(주소 /c/…)",
+  "name": "G7 접힌 행을 열면 그 대화가 열린다(주소 /c/…)",
   "ok": true,
   "detail": "http://127.0.0.1:5352/#/c/00000000-0000-7000-8000-000000000308"
  },
  {
   "engine": "chromium",
   "scheme": "dark",
-  "name": "G8 줄을 접어도 열려 있는 나간 멤버 DM 은 목록에 남고, 줄은 남은 하나를 센다",
+  "name": "G7b Enter 뒤에도 캐럿이 그 행에 있다(<body> 로 떨어지지 않는다)",
+  "ok": true,
+  "detail": "A"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "G7c 열린 행은 접힌 목록의 제자리에 머물고 선택 표시만 바뀐다(점프 없음, 줄은 그대로 2개)",
+  "ok": true,
+  "detail": "나간 멤버와의 대화 2개"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "G8 줄을 접으면 열려 있는 나간 멤버 DM 은 위 목록에 남고, 줄은 남은 하나를 센다",
   "ok": true,
   "detail": "나간 멤버와의 대화 1개"
  },
