@@ -156,9 +156,16 @@ describe("CohostedModelSection", () => {
   it("draws nothing for a stranger, and nothing is written", async () => {
     api.request.mockRejectedValue(new ApiError(403, "no"));
     const el = mount();
-    await waitFor(() => expect(api.request).toHaveBeenCalled());
-    await act(async () => undefined);
-    expect(el.querySelector("[data-testid='ai-cohosted-model']")).toBeNull();
+    // 보임은 서버 답이다: 답이 오기 전에는 낯선 사람에게도 「불러오는 중」 껍데기가 선다(카드가 연결 직후 초점을 그 구획으로 보내는 근거다).
+    // 요청이 나갔다는 것만 기다리면 답이 화면에 닿기 전에 잰다: 요청은 마운트 때 이미 나갔고, 그 답을 구독자에게 알리는 react-query 는
+    // 알림을 setTimeout(0) 으로 미뤄서 act 가 끝나는 틱과의 경쟁이 부하에서 졌다(#4208).
+    expect(q("ai-cohosted-model-loading")).not.toBeNull();
+    // 껍데기는 쿼리가 아직 pending 이라는 뜻이다. 껍데기가 걷혔다 = 답이 와서 화면까지 번졌다.
+    await waitFor(() => expect(q("ai-cohosted-model-loading")).toBeNull());
+    // 껍데기뿐 아니라 초점을 받을 빈 상자도 남기지 않는다(구획 하나가 아니라 아무것도 없다).
+    expect(el.innerHTML).toBe("");
+    // 읽기는 한 번, 쓰기는 없다.
+    expect(calls()).toEqual([`GET ${MODELS_PATH}`]);
     expect(putBodies()).toEqual([]);
   });
 
