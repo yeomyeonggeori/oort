@@ -3,6 +3,7 @@ import { loadCatalog, type CatalogEmoji } from "@/features/emoji/catalog";
 import { PICKER_EMOJI } from "@/features/emoji/EmojiPickerDialog";
 import { EmojiPickerPanel } from "@/features/emoji/EmojiPickerPanel";
 import { recordEmojiUse } from "@/features/emoji/frequencyStore";
+import "./avatarEditor.css";
 
 // 아바타 이모지 고르기 (#4261): 컴포저·반응·상태 글이 쓰는 같은 목록(`EmojiPickerPanel`)을 대화상자 **안에** 놓는다.
 // 같은 카탈로그(emojibase compact + iamcal 숏코드, 같은 오리진 번들), 같은 검색·피부색·「자주 쓰는」 목록이라
@@ -45,7 +46,7 @@ export function AvatarEmojiPicker({
   }, [nonce]);
 
   return (
-    <div data-testid="avatar-emoji-picker">
+    <div className="avatar-emoji-picker" data-testid="avatar-emoji-picker">
       <EmojiPickerPanel
         itemPrefix="avatar-emoji"
         entries={entries}

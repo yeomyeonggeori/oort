@@ -93,3 +93,11 @@
 .avatar-choice:has(:disabled) .avatar-chip {
   opacity: 0.35;
 }
+
+/* 이모지 패널의 격자 높이: 「자주 쓰는」 시드 서른둘이 정확히 네 줄(한 줄 약 60px)이다. 기본 높이(--spacing-pane, 320)는 다섯째 줄을
+ * 반만 보이게 자르고, 낮은 창에서는 아래의 배경색까지 닿으려 스크롤이 더 길어진다. 높이는 이름 붙은 값에서 계산한다
+ * (`--spacing-pane`에서 컨트롤 두 칸을 뺀다). 패널 컴포넌트는 건드리지 않는다: 패널의 `max-h-pane`(클래스, 0,1,0)보다 이
+ * 규칙(0,2,0)이 이긴다. */
+.avatar-emoji-picker [role="tabpanel"] {
+  max-block-size: calc(var(--spacing-pane) - var(--spacing-control-lg) * 2);
+}
