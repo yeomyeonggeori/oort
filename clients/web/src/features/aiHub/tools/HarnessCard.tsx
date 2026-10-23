@@ -7,6 +7,7 @@ import {
   DISCONNECT_FAILED_LINE,
   HARNESS_LOGIN_VIEW_LABEL,
   HOST_VIEW_LABEL,
+  PERSONAL_AGENT_COPY,
   TOOLS_COPY,
   harnessLoginTone,
   harnessLoginView,
@@ -420,6 +421,14 @@ export function HarnessCard({ harness, desktop, pill, host, sessions, sessionsVe
           data-testid={`tool-card-${harness}-disconnect-confirm`}
         >
           <p className="break-keep text-meta text-ink">{TOOLS_COPY.disconnectWarn}</p>
+          {personalOn && (
+            <p
+              className="break-keep text-meta text-ink-muted"
+              data-testid={`tool-card-${harness}-disconnect-keeps-agent`}
+            >
+              {PERSONAL_AGENT_COPY.disconnectKeepsAgent}
+            </p>
+          )}
           <div className="flex flex-wrap items-center gap-2">
             <Button
               type="button"
@@ -453,7 +462,12 @@ export function HarnessCard({ harness, desktop, pill, host, sessions, sessionsVe
         </div>
       )}
 
-      <PersonalAgentRow harness={harness} title={name} {...personal} />
+      <PersonalAgentRow
+        harness={harness}
+        title={name}
+        {...personal}
+        toolOff={desktop && (view === "disconnected" || view === "reauth")}
+      />
 
       {desktop && (
         <HarnessLoginDialog
