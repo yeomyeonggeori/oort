@@ -841,16 +841,23 @@ async function legibility(browser, origin, helper) {
   // 띠가 있는 테마(노을띠)는 사이드바 열의 호스트가 **불투명한 띠**다: 배경화면이 scrim을 얹어도 그 열의 글자는 띠 위에 있다.
   // 그 열의 값은 테마 자신의 몫(설정 목록 열은 기준 빌드부터 라이트에서 읽히지 않는다)이므로, 배경화면 때문에 **나빠지지 않았는지**를
   // 같은 장면의 「배경화면 없음」과 짝지어 잰다(design-review H-1: 보정색이 띠 위 글자를 덮어 섹션 라벨 2.34 → 1.29).
+  // 카탈로그 테마(AP-1b): 파생 엔진이 루트에 꽂은 변수를 읽어서 같은 산수가 선다(별도 연결 없음). 하한이 높은(힌트) 테마와 낮은 테마를
+  // 섞었다. 웹 기하만 잰다(띠가 없는 평평한 테마라 데스크탑 기하와 호스트가 같다).
   const CASES = [
     { theme: null, label: "새벽 하늘", compare: false },
     { theme: "graphite", label: "흑연", compare: false },
     { theme: "noeul", label: "노을띠", compare: true },
+    { theme: "catalog:nord", label: "카탈로그 nord", compare: false, webOnly: true },
+    { theme: "catalog:solarized", label: "카탈로그 solarized", compare: false, webOnly: true },
+    { theme: "catalog:github", label: "카탈로그 github", compare: false, webOnly: true },
+    { theme: "catalog:gruvbox-hard", label: "카탈로그 gruvbox-hard", compare: false, webOnly: true },
   ];
   // 포인터는 늘 장면 밖(본문 한가운데)에 둔다: 접으려고 누른 토글 위에 남은 포인터가 hover 칠을 깔면 그 칠 위에서 읽힌 값이
   // 쉬는 상태의 값이 아니다(design-review H-2: 토글이 호버 칠 위에서 9.67로 읽히고 쉬는 값은 1.29였다).
   const parkPointer = async (page) => { await page.mouse.move(1000, 640); await page.waitForTimeout(150); };
   for (const platform of PLATFORMS) {
-    for (const { theme, label, compare } of CASES) {
+    for (const { theme, label, compare, webOnly } of CASES) {
+      if (webOnly && platform.desktop) continue;
       const seed = theme ? { theme } : null;
       const open = () => openContext(browser, origin, "light", VIEWPORTS[0], {}, seed, { desktop: platform.desktop });
       const baselines = new Map();
@@ -929,7 +936,7 @@ async function legibility(browser, origin, helper) {
                 worst = Math.min(...measured.map((item) => item.ratio / item.min));
               }
               rows.push({ platform: platform.name, theme: label, compare: compare && !state.absolute, kind, scheme, name: state.name, min: state.min, count: measured.length, worst, bad });
-              const slug = `${platform.desktop ? "desktop-" : ""}${theme ?? "dawnsky"}-${kind}-${scheme}-${state.name.replace(/\s+/g, "")}`;
+              const slug = `${platform.desktop ? "desktop-" : ""}${(theme ?? "dawnsky").replace(/[^a-z0-9-]/g, "-")}-${kind}-${scheme}-${state.name.replace(/\s+/g, "")}`;
               writeFileSync(resolve(outDir(), `legibility-${slug}.png`), png);
               writeFileSync(
                 resolve(outDir(), `legibility-${slug}.json`),
@@ -1136,6 +1143,11 @@ async function assertions() {
           });
           const none = await state();
           check("⑧ 배경화면이 없으면 유리 스위치가 열려 있고 이유 문장이 없다", !none.disabled && !none.sentence.includes("배경화면이 켜져 있어서"), JSON.stringify(none));
+          // 유리를 켜 둔 사람의 길: 켬 → 배경화면을 고르면 잠기고 꺼진 값 → 「기본으로」로 돌아오면 저장된 켬이 되살아난다.
+          await toggle.click();
+          await pg.waitForTimeout(400);
+          const on = await state();
+          check("⑧ 유리를 켜면 스위치가 켜진 값이다", !on.disabled && on.checked, JSON.stringify(on));
           for (const choice of [["solid", "slate"], ["preset", "bam"]]) {
             await pickKind(pg, choice[0], choice[1]);
             await waitLive(pg);
@@ -1143,9 +1155,9 @@ async function assertions() {
             check(`⑧ 배경화면(${choice[0]})을 고르면 유리 스위치가 잠기고 꺼진 값이며 이유 문장이 선다`, locked.disabled && !locked.checked && locked.sentence.includes("배경화면이 켜져 있어서"), JSON.stringify(locked));
           }
           await pg.getByTestId("wallpaper-reset").click();
-          await pg.waitForTimeout(300);
+          await pg.waitForTimeout(400);
           const back = await state();
-          check("⑧ 「기본으로」로 돌아가면 유리 스위치가 다시 열린다", !back.disabled && !back.sentence.includes("배경화면이 켜져 있어서"), JSON.stringify(back));
+          check("⑧ 「기본으로」로 돌아가면 유리 스위치가 다시 열리고 저장해 둔 켬이 되살아난다", !back.disabled && back.checked && !back.sentence.includes("배경화면이 켜져 있어서"), JSON.stringify(back));
         }
       } finally {
         await cg.close();
