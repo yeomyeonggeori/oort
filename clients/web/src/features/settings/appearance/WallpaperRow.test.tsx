@@ -431,6 +431,8 @@ describe("지금 배경이 왜 안 보이는지 한 줄로 말한다", () => {
 
   it("창 폭과 무관하게 참인 이유가 좁은 창 문장보다 먼저다: 좁은 창에서도 대비 높이기·테마 불가를 말한다 (창을 넓혀도 안 보이는데 「넓은 창에서는 보여요」라고 하지 않는다)", () => {
     state.narrow = true;
+    // 고른 것이 있어야 좁은 창 문장이 후보가 된다(고르지 않았으면 안 보이는 것이 정상이다). 그 상태에서 이유가 있으면 이유가 이긴다.
+    updateAppearance({ wallpaper: solid });
     state.plan = planOf({ ref: solid, live: false, reason: "increase-contrast" });
     const contrast = mount(createElement(WallpaperRow));
     expect(statusText(contrast)).toBe(WALLPAPER_OFF_COPY["increase-contrast"]);
@@ -446,7 +448,6 @@ describe("지금 배경이 왜 안 보이는지 한 줄로 말한다", () => {
     mountedHost?.remove();
     state.plan = planOf({ ref: solid, live: true });
     const plain = mount(createElement(WallpaperRow));
-    pick(plain, "wallpaper-solid-slate");
     expect(statusText(plain)).toBe(WALLPAPER_NARROW_COPY);
   });
 
