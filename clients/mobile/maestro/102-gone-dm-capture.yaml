@@ -1,0 +1,24 @@
+appId: app.momo.ios
+name: 102-gone-dm-capture
+---
+# 102-gone-dm-capture - 사이드바 「나간 멤버와의 대화」 (#4252).
+#
+# 표면 `-momoMeasure GONE-DM-HOME`(다크), `LIGHT-GONE-DM-HOME`(라이트)은 진짜 `SidebarScreen` 을 하네스의 씨앗 위에 세운다.
+# 접힌 줄은 사람이 누르는 것이라 이 흐름이 눌러 펼친다(수리 전 번들에는 그 줄이 없어서 첫 사진만 의미가 있다).
+#
+#   xcrun simctl launch booted app.momo.ios --args \
+#     -momoMeasure GONE-DM-HOME -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro test -e SHOT=gone-dm-dark clients/mobile/maestro/102-gone-dm-capture.yaml
+#   # 사진: ~/.maestro/tests/<타임스탬프>/102-gone-dm-capture/takeScreenshot/
+- extendedWaitUntil:
+    visible:
+      id: "sidebar-list"
+    timeout: 60000
+- takeScreenshot: ${SHOT}-folded
+- tapOn:
+    id: "sidebar-gone-toggle"
+- extendedWaitUntil:
+    visible:
+      id: "sidebar-row-dm:dm-gone-a"
+    timeout: 10000
+- takeScreenshot: ${SHOT}-expanded

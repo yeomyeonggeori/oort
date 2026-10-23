@@ -141,3 +141,20 @@ describe("에이전트 채널 배치: 채널에 추가 칸", () => {
     expect(document.querySelector('[role="listbox"]')).toBeNull();
   });
 });
+
+describe("에이전트 채널 배치: 내보내기 확인 (#4252)", () => {
+  it("내보내기는 채널 멤버십만 지운다는 것과 에이전트·다이렉트 메시지가 남는다는 것을 말한다 (사이드바에 대화가 계속 보이는 이유)", () => {
+    mount();
+    act(() => {
+      document
+        .querySelector<HTMLButtonElement>('[data-testid="agent-hub-channel-remove"]')!
+        .click();
+    });
+    const confirmText = [...document.querySelectorAll<HTMLElement>('[data-testid="agent-hub-channel-row"] .text-meta')]
+      .map((el) => el.textContent)
+      .join(" ");
+    expect(confirmText).toContain("내보내면 이 채널의 멘션이 더 이상 전달되지 않아요.");
+    expect(confirmText).toContain("에이전트 자체와 다이렉트 메시지는 그대로 남아요.");
+    expect(document.querySelector('[data-testid="agent-hub-channel-remove-confirm"]')).not.toBeNull();
+  });
+});

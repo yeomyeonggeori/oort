@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LocalHarnessProbe } from "@momo/core/features/hostedAgents/detect";
-import type { PersonalAgentSummary } from "@momo/core/features/ai/harnessCard";
+import { PERSONAL_AGENT_COPY, type PersonalAgentSummary } from "@momo/core/features/ai/harnessCard";
 import { listWorkHosts, type WorkHost } from "@momo/core/features/settings/api";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import type { MirrorFactory, PtyPort } from "@/features/workbench/local/localSessions";
@@ -157,9 +157,12 @@ const probes = (claude: LocalHarnessProbe["auth"], codex: LocalHarnessProbe["aut
 const act_ = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
 let root: Root | null = null;
 let el: HTMLElement | null = null;
+/** 마지막으로 세운 트리의 쿼리 클라이언트. 어떤 쿼리를 다시 읽게 했는지 잴 때 쓴다. */
+let lastClient: QueryClient | null = null;
 
 function mount(options: { store: HarnessSessionStore; port: PersonalAgentPort }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  lastClient = client;
   el = document.createElement("div");
   document.body.append(el);
   root = createRoot(el);
@@ -409,6 +412,83 @@ describe("연결 끊기", () => {
   });
 });
 
+// #4252: 「연결 끊기」는 이 맥의 CLI 로그인만 푼다. 멤버인 개인 에이전트는 따로 켜져 있고, 그것이 대화 목록에
+// 「오프라인」으로 남는다. 두 컨트롤이 한 카드에 있어 둘을 같은 것으로 읽은 사람에게 조용히 남던 자리다.
+describe("연결을 끊어도 개인 에이전트는 켜져 있다 (#4252)", () => {
+  const ON = {
+    id: "a1",
+    handle: "my-claude",
+    displayName: "my-claude",
+    harness: "claude_code" as const,
+    enabled: true,
+    label: "곽성재의 개인 에이전트",
+  };
+
+  it("개인 에이전트가 켜져 있으면 끊기 확인이 그 사실과 정리하는 길(스위치)을 말한다", async () => {
+    const ctx = setup([ON]);
+    mount({ store: ctx.store, port: ctx.server.port });
+    await until(() => card("claude")?.getAttribute("data-login") === "connected");
+    await until(() => card("claude")?.getAttribute("data-personal") === "on");
+    click(q("tool-card-claude-disconnect"));
+    const line = q("tool-card-claude-disconnect-keeps-agent");
+    expect(line?.textContent).toContain("연결을 끊어도 개인 에이전트는 켜져 있어요");
+    // 약속은 사이드바에서 보게 될 결과와 같다: 끄면 다 읽은 대화가 목록 끝의 「나간 멤버와의 대화」 줄로 접힌다(design-review M3).
+    expect(line?.textContent).toContain("다 읽은 대화는 「나간 멤버와의 대화」로 접혀요");
+    // 낱말은 스위치의 이름과 같다(이름이 둘이면 컨트롤도 둘이다).
+    expect(line?.textContent).toContain(`「${PERSONAL_AGENT_COPY.toggleLabel}」를 끄면`);
+  });
+
+  it("개인 에이전트가 꺼져 있거나 없으면 그 문장은 없다", async () => {
+    const ctx = setup();
+    mount({ store: ctx.store, port: ctx.server.port });
+    await until(() => card("claude")?.getAttribute("data-login") === "connected");
+    click(q("tool-card-claude-disconnect"));
+    expect(q("tool-card-claude-disconnect-confirm")).not.toBeNull();
+    expect(q("tool-card-claude-disconnect-keeps-agent")).toBeNull();
+  });
+
+  it("끊긴 뒤에도 켜져 있는 개인 에이전트의 줄이 그 사실을 말한다", async () => {
+    const ctx = setup([ON]);
+    mount({ store: ctx.store, port: ctx.server.port });
+    await until(() => card("claude")?.getAttribute("data-personal") === "on");
+    await until(() => card("claude")?.getAttribute("data-login") === "connected");
+    click(q("tool-card-claude-disconnect"));
+    click(q("tool-card-claude-disconnect-go"));
+    await until(() => ctx.cli.spawns.length === 1);
+    shell.probes = probes("needs_login");
+    act(() => ctx.cli.exit(0, 0));
+    await until(() => card("claude")?.getAttribute("data-login") === "disconnected");
+    expect(q("tool-card-claude-personal")?.textContent).toContain("연결돼 있지 않아도 개인 에이전트는 켜져 있어요");
+    expect(q("tool-card-claude-personal")?.textContent).toContain("다 읽은 대화는 「나간 멤버와의 대화」로 접혀요");
+    // 켜져 있는 그대로다: 스위치는 아직 켜짐이고 서버는 끄라는 요청을 받은 적이 없다.
+    expect(card("claude")?.getAttribute("data-personal")).toBe("on");
+    expect(ctx.server.disable).not.toHaveBeenCalled();
+  });
+
+  it("연결이 있는 동안에는 평소 힌트 그대로다", async () => {
+    const ctx = setup([ON]);
+    mount({ store: ctx.store, port: ctx.server.port });
+    await until(() => card("claude")?.getAttribute("data-personal") === "on");
+    await until(() => card("claude")?.getAttribute("data-login") === "connected");
+    expect(q("tool-card-claude-personal")?.textContent).toContain("나만 부를 수 있어요");
+    expect(q("tool-card-claude-personal")?.textContent).not.toContain("연결돼 있지 않아도");
+  });
+
+  it("문장의 낱말은 스위치 이름에서 갈라지지 않는다 (「이 스위치」 같은 새 낱말이 없다)", () => {
+    for (const sentence of [PERSONAL_AGENT_COPY.disconnectKeepsAgent, PERSONAL_AGENT_COPY.toolOffKeepsAgent]) {
+      expect(sentence).toContain(`「${PERSONAL_AGENT_COPY.toggleLabel}」`);
+      expect(sentence).not.toContain("스위치");
+    }
+  });
+
+  it("두 문장은 짧다 (스위치에 포커스할 때마다 읽히므로 두 문장 안에서 끝난다, design-review L5)", () => {
+    for (const sentence of [PERSONAL_AGENT_COPY.disconnectKeepsAgent, PERSONAL_AGENT_COPY.toolOffKeepsAgent]) {
+      expect(sentence.length).toBeLessThanOrEqual(80);
+      expect(sentence.split(/(?<=요\.)\s/)).toHaveLength(2);
+    }
+  });
+});
+
 describe("개인 에이전트로 쓰기", () => {
   it("켜기: 스위치 → 별칭 → 개인 표식과 호스트 상태. 별칭은 소문자로 접어 보낸다", async () => {
     const { store, server } = setup();
@@ -462,6 +542,32 @@ describe("개인 에이전트로 쓰기", () => {
     await until(() => card("claude")?.getAttribute("data-personal") === "off");
     expect(server.disable).toHaveBeenCalledWith("a1");
     expect(q("tool-card-claude-personal-badge")).toBeNull();
+  });
+
+  it("끄면 명부도 다시 읽는다: 꺼진 멤버는 서버 명부(활성만)에서 빠지므로 사이드바 DM 이 이름 그대로 남지 않는다 (#4252)", async () => {
+    const { store, server } = setup([
+      { id: "a1", handle: "my-claude", displayName: "my-claude", harness: "claude_code", enabled: true, label: "곽성재의 개인 에이전트" },
+    ]);
+    mount({ store, port: server.port });
+    await until(() => card("claude")?.getAttribute("data-personal") === "on");
+    const invalidate = vi.spyOn(lastClient!, "invalidateQueries");
+    click(q("tool-card-claude-personal-switch"));
+    await until(() => card("claude")?.getAttribute("data-personal") === "off");
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["roster", WS] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["ai", "personal-agents", WS] });
+  });
+
+  it("켜도 명부를 다시 읽는다 (새 멤버가 멘션·DM 목록에 선다)", async () => {
+    const { store, server } = setup();
+    mount({ store, port: server.port });
+    await until(() => q("tool-card-claude-personal")?.getAttribute("data-read") === "ok");
+    const invalidate = vi.spyOn(lastClient!, "invalidateQueries");
+    click(q("tool-card-claude-personal-switch"));
+    const input = (await until(() => q("tool-card-claude-alias-input"))) as HTMLInputElement;
+    type(input, "my-claude");
+    click(q("tool-card-claude-alias-submit"));
+    await until(() => card("claude")?.getAttribute("data-personal") === "on");
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["roster", WS] });
   });
 
   it("서버에 라우트가 없으면 스위치 대신 차분한 한 줄이다", async () => {

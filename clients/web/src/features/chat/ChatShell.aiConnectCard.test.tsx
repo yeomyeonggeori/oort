@@ -39,6 +39,12 @@ vi.mock("@/features/sidebar/dmRevival", () => ({
   useDmRevival: () => () => undefined,
 }));
 
+// #4252: 나간 멤버 DM 의 안 읽음 판정(`useGoneUnreadVerdicts`)도 메시지 쪽을 읽는 쿼리라 QueryClient 가 필요하다. 이 시험이 보는
+// 것이 아니다(판정은 goneUnreadVerdicts.test.tsx · Sidebar.dm.test.tsx).
+vi.mock("@/features/sidebar/goneUnreadVerdicts", () => ({
+  useGoneUnreadVerdicts: () => new Map(),
+}));
+
 vi.mock("@/features/chat/usePersonalCall", () => ({
   usePersonalCall: () => ({
     planFor: () => null,
