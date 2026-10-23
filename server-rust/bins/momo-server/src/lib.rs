@@ -44,6 +44,8 @@ pub mod plugin_writes;
 pub mod rate_limit;
 pub mod realtime_advert;
 pub mod routes;
+/// ADR-0208 D5/D7 — the scheduled-message tick that lives in the api process.
+pub mod scheduler;
 mod session_end;
 pub mod work_host_auth;
 
@@ -62,7 +64,7 @@ use momo_db::PgPool;
 use crate::config::{
     AgentGatewaySettings, AgentPortConfig, CloudBoxConfig, CorsConfig, DeviceKeySettings,
     EphemeralSettings, LiveKitConfig, MentionSettings, RateLimitConfig, RealtimeSettings,
-    SettingsConfig, T3Settings, WebhookSettings,
+    SchedulerSettings, SettingsConfig, T3Settings, WebhookSettings,
 };
 use crate::error::ApiError;
 use crate::rate_limit::SlidingWindowRateLimiter;
@@ -206,6 +208,16 @@ pub struct AppState {
     /// disabled state: routing an `@mention` to its agent is the product, so an
     /// instance that configured nothing still does it.
     pub mentions: Arc<MentionSettings>,
+    /// ADR-0208 D15 — the scheduled-message knobs. On by default (the routes check
+    /// `enabled`; the tick itself is started by `main`, never by [`AppState::new`], so a
+    /// test drives `scheduler::run_tick` explicitly).
+    pub scheduler: Arc<SchedulerSettings>,
+    /// Set by [`scheduler::start`] when the tick **refused** its database role (a superuser or
+    /// BYPASSRLS pool). The scheduled-message routes then answer 503 `scheduler_disabled` like an
+    /// operator's off switch: a server that will not send a schedule must not accept one
+    /// (ADR-0208 D15). `false` on every state nobody started a tick for (tests drive
+    /// `scheduler::run_tick` directly).
+    pub scheduler_blocked: Arc<std::sync::atomic::AtomicBool>,
     /// ADR-0146 개정 2026-09-28 (#3022): the instance id signed statements echo
     /// and the (default-off) host-registration signature requirement.
     pub device_keys: Arc<DeviceKeySettings>,
@@ -312,6 +324,8 @@ impl AppState {
             rate_limit: Arc::new(RateLimitState::default()),
             agent_port: Arc::new(AgentPortState::default()),
             mentions: Arc::new(MentionSettings::default()),
+            scheduler: Arc::new(SchedulerSettings::default()),
+            scheduler_blocked: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             device_keys: Arc::new(DeviceKeySettings::default()),
             cloud_box: Arc::new(CloudBoxConfig::default()),
             cors: Arc::new(CorsConfig::default()),
@@ -549,6 +563,13 @@ impl AppState {
     /// Attach the mention-routing knobs (B5.2).
     pub fn with_mentions(mut self, settings: MentionSettings) -> Self {
         self.mentions = Arc::new(settings);
+        self
+    }
+
+    /// Attach the scheduled-message knobs (ADR-0208 D15). Default: on, 5 s tick, batch 100,
+    /// 60 minutes of grace.
+    pub fn with_scheduler(mut self, settings: SchedulerSettings) -> Self {
+        self.scheduler = Arc::new(settings);
         self
     }
 
@@ -1050,6 +1071,24 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/reminders/{id}",
             patch(routes::reminders::update).delete(routes::reminders::delete),
+        )
+        // ADR-0208 / #4214 — scheduled messages: the server sends it itself at
+        // `sendAtMs`. Human-only, owner scoped (an agent bearer is not on the allow-list).
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/scheduled-messages",
+            post(routes::scheduled_messages::create),
+        )
+        .route(
+            "/v1/workspaces/{ws}/scheduled-messages",
+            get(routes::scheduled_messages::list),
+        )
+        .route(
+            "/v1/workspaces/{ws}/scheduled-messages/{id}",
+            patch(routes::scheduled_messages::update).delete(routes::scheduled_messages::delete),
+        )
+        .route(
+            "/v1/workspaces/{ws}/scheduled-messages/{id}/send-now",
+            post(routes::scheduled_messages::send_now),
         )
         // ADR-0186 D1 — the action catalog an agent proposes from and a
         // person's palette merges in. Read-only: proposing is the Agent Port's

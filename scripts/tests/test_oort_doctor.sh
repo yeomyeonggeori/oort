@@ -179,7 +179,7 @@ has_check "$OUT" env.role_passwords || fail "missing env.role_passwords"
 [ "$(check_field "$OUT" env.role_passwords status)" = "pass" ] || \
   fail "valid role passwords should pass"
 
-for id in stack.compose_ps stack.healthz stack.agent_port stack.outbox stack.migrate_idempotency roles.momo_notifier; do
+for id in stack.compose_ps stack.healthz stack.agent_port stack.outbox stack.scheduler stack.migrate_idempotency roles.momo_notifier; do
   has_check "$OUT" "$id" || fail "missing $id"
   [ "$(check_field "$OUT" "$id" status)" = "skip" ] || \
     fail "$id should skip when stack is down: $(check_field "$OUT" "$id" status)"
@@ -509,12 +509,12 @@ validate_schema "$OUT" || fail "unknown platform JSON schema: $(head -c 400 "$OU
 [ "$(check_field "$OUT" env.platform status)" = "fail" ] || \
   fail "unknown platform env.platform status=$(check_field "$OUT" env.platform status) detail=$(check_field "$OUT" env.platform detail)"
 UNK_COUNT="$(jq -r '.checks[].id' "$OUT" | wc -l | tr -d '[:space:]')"
-[ "$UNK_COUNT" = "36" ] || \
-  fail "unknown platform check id count ${UNK_COUNT} != 36 (env.platform extra on the normal 35)"
+[ "$UNK_COUNT" = "37" ] || \
+  fail "unknown platform check id count ${UNK_COUNT} != 37 (env.platform extra on the normal 36)"
 if grep -F -- "$TOKEN_PG" "$OUT" "$ERR" >/dev/null; then
   fail "unknown platform leaked password"
 fi
-pass "unknown MOMO_SELF_HOST_PLATFORM → exit 1 + JSON env.platform fail; 35 ids"
+pass "unknown MOMO_SELF_HOST_PLATFORM → exit 1 + JSON env.platform fail; 36 ids"
 
 # -----------------------------------------------------------------------------
 # 5. outbox oracle: push_candidate|pending is non-failing without a push relay
@@ -634,12 +634,12 @@ printf '%s' "$SQL_FN" | grep -Eq '^SELECT 1;?$' && \
 T1_IDS="$SANDBOX/t1.ids"
 jq -r '.checks[].id' "$SANDBOX/status.out" | sort >"$T1_IDS"
 # status --json includes the same checks as doctor plus image; ids come from doctor.
-# Normal case is 35 (#2066 added env.webhook_master_keys, #3947 env.github_app_master_key). 36 is not the happy path:
+# Normal case is 36 (#2066 added env.webhook_master_keys, #3947 env.github_app_master_key, #4214 stack.scheduler). 37 is not the happy path:
 #   - stack.migrate_files (info) when server/Migrations and /opt/momo/migrations
 #     are both missing (see the missing-dir probe above)
 #   - env.platform (fail) when MOMO_SELF_HOST_PLATFORM is not a platform_profiles row
 T1_COUNT="$(wc -l <"$T1_IDS" | tr -d '[:space:]')"
-[ "$T1_COUNT" = "35" ] || fail "T1 check id count ${T1_COUNT} != 35 (normal case)"
+[ "$T1_COUNT" = "36" ] || fail "T1 check id count ${T1_COUNT} != 36 (normal case)"
 
 PG_PORT="$(pick_port 25432)"
 MOCK_PORT="$(pick_port 18765)"
@@ -664,6 +664,19 @@ CREATE TABLE outbox (
   status text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   lease_acquired_at timestamptz
+);
+-- the two tables stack.scheduler reads (only the columns its query names)
+CREATE TABLE workspace (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  deleted_at timestamptz
+);
+CREATE TABLE scheduled_message (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id uuid NOT NULL REFERENCES workspace(id),
+  status text NOT NULL,
+  failure_reason text,
+  send_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE schema_migrations (
   version text PRIMARY KEY,
@@ -870,7 +883,7 @@ validate_schema "$OUT" || fail "T2 doctor JSON schema: $(head -c 400 "$OUT")"
 T2_IDS="$SANDBOX/t2.ids"
 jq -r '.checks[].id' "$OUT" | sort >"$T2_IDS"
 T2_COUNT="$(wc -l <"$T2_IDS" | tr -d '[:space:]')"
-[ "$T2_COUNT" = "35" ] || fail "T2 check id count ${T2_COUNT} != 35 (normal case)"
+[ "$T2_COUNT" = "36" ] || fail "T2 check id count ${T2_COUNT} != 36 (normal case)"
 [ "$T1_COUNT" = "$T2_COUNT" ] || \
   fail "T2 check id count ${T2_COUNT} != T1 ${T1_COUNT}"
 cmp -s "$T1_IDS" "$T2_IDS" || \
@@ -880,7 +893,7 @@ cmp -s "$T1_IDS" "$T2_IDS" || \
 detail="$(check_field "$OUT" stack.compose_ps detail)"
 printf '%s' "$detail" | grep -Fq 'T2: compose 없음, 플랫폼 서비스 상태는 레시피 CLI 소관' || \
   fail "compose_ps skip wording: $detail"
-for id in stack.healthz stack.agent_port stack.outbox stack.migrate_idempotency roles.momo_notifier; do
+for id in stack.healthz stack.agent_port stack.outbox stack.scheduler stack.migrate_idempotency roles.momo_notifier; do
   st="$(check_field "$OUT" "$id" status)"
   [ "$st" = "pass" ] || [ "$st" = "fail" ] || \
     fail "$id T2 status was $st (pass/fail only)"
@@ -892,6 +905,8 @@ done
   fail "T2 stack.agent_port want pass: $(check_field "$OUT" stack.agent_port detail)"
 [ "$(check_field "$OUT" stack.outbox status)" = "pass" ] || \
   fail "T2 stack.outbox want pass: $(check_field "$OUT" stack.outbox detail)"
+[ "$(check_field "$OUT" stack.scheduler status)" = "pass" ] || \
+  fail "T2 stack.scheduler want pass: $(check_field "$OUT" stack.scheduler detail)"
 [ "$(check_field "$OUT" stack.migrate_idempotency status)" = "pass" ] || \
   fail "T2 stack.migrate_idempotency want pass: $(check_field "$OUT" stack.migrate_idempotency detail)"
 [ "$(check_field "$OUT" roles.momo_notifier status)" = "pass" ] || \
@@ -968,6 +983,80 @@ assert_no_secret_leak "delete-grant json" "$OUT"
 pass "sabotage GRANT DELETE ON outbox → roles.momo_notifier fail (blocker)"
 docker exec -i "$PG_CID" psql -U momo -d momo -v ON_ERROR_STOP=1 \
   -c "REVOKE DELETE ON TABLE outbox FROM momo_notifier;" >/dev/null
+
+# ADR-0208 D15 — stack.scheduler reads what the api tick should already have sent. Each state below must
+# change the verdict (a check that cannot fail proves nothing): overdue → fail, past the grace window → fail
+# naming the grace, missed/send_error in the last day → info, a deleted workspace's rows → not counted,
+# and a connection that cannot skip RLS → unknown (skip), never a quiet pass.
+SCHED_WS="$(docker exec -i "$PG_CID" psql -U momo -d momo -At -c "INSERT INTO workspace DEFAULT VALUES RETURNING id;" | head -n1)"
+SCHED_DEAD_WS="$(docker exec -i "$PG_CID" psql -U momo -d momo -At -c "INSERT INTO workspace (deleted_at) VALUES (now()) RETURNING id;" | head -n1)"
+sched_status() {
+  local name="$1"
+  OUT="$SANDBOX/t2-sched-${name}.json"
+  ERR="$SANDBOX/t2-sched-${name}.err"
+  run_doctor "${2:-$T2_ENV}" "$OUT" "$ERR" --json --tier t2 >/dev/null
+}
+docker exec -i "$PG_CID" psql -U momo -d momo -v ON_ERROR_STOP=1 -c \
+  "INSERT INTO scheduled_message (workspace_id, status, send_at) VALUES ('${SCHED_WS}', 'pending', now() + interval '1 hour');" >/dev/null
+sched_status future
+[ "$(check_field "$OUT" stack.scheduler status)" = "pass" ] || \
+  fail "a schedule that is not due yet must pass: $(check_field "$OUT" stack.scheduler detail)"
+docker exec -i "$PG_CID" psql -U momo -d momo -v ON_ERROR_STOP=1 -c \
+  "INSERT INTO scheduled_message (workspace_id, status, send_at) VALUES ('${SCHED_WS}', 'pending', now() - interval '6 minutes');" >/dev/null
+sched_status overdue
+[ "$(check_field "$OUT" stack.scheduler status)" = "fail" ] || \
+  fail "a pending schedule 6 minutes late must fail: $(check_field "$OUT" stack.scheduler status) $(check_field "$OUT" stack.scheduler detail)"
+[ "$(check_field "$OUT" stack.scheduler severity)" = "major" ] || fail "overdue schedule severity"
+printf '%s' "$(check_field "$OUT" stack.scheduler detail)" | grep -Fq '5분 넘게 지난 pending 예약 1건' || \
+  fail "overdue detail: $(check_field "$OUT" stack.scheduler detail)"
+docker exec -i "$PG_CID" psql -U momo -d momo -v ON_ERROR_STOP=1 -c \
+  "INSERT INTO scheduled_message (workspace_id, status, send_at) VALUES ('${SCHED_WS}', 'pending', now() - interval '2 hours');" >/dev/null
+sched_status past-grace
+[ "$(check_field "$OUT" stack.scheduler status)" = "fail" ] || fail "past grace must fail"
+printf '%s' "$(check_field "$OUT" stack.scheduler detail)" | grep -Fq '유예(3600초)를 넘긴 pending 예약 1건' || \
+  fail "past-grace detail must name the grace window and the stuck row: $(check_field "$OUT" stack.scheduler detail)"
+# the operator's own grace window is honoured: with 3 hours the 2-hour-late row is merely overdue
+GRACE_ENV="$SANDBOX/t2-sched-grace.env"
+cp "$T2_ENV" "$GRACE_ENV"
+printf '\nMOMO_SCHEDULER_GRACE_SECONDS=10800\n' >>"$GRACE_ENV"
+chmod 600 "$GRACE_ENV"
+sched_status long-grace "$GRACE_ENV"
+printf '%s' "$(check_field "$OUT" stack.scheduler detail)" | grep -Fq '유예 10800초 안' || \
+  fail "MOMO_SCHEDULER_GRACE_SECONDS must reach the check: $(check_field "$OUT" stack.scheduler detail)"
+# a deleted workspace's rows are the tick's to cancel, not a stuck tick
+docker exec -i "$PG_CID" psql -U momo -d momo -v ON_ERROR_STOP=1 -c \
+  "DELETE FROM scheduled_message WHERE workspace_id = '${SCHED_WS}';
+   INSERT INTO scheduled_message (workspace_id, status, send_at) VALUES ('${SCHED_DEAD_WS}', 'pending', now() - interval '3 hours');" >/dev/null
+sched_status deleted-workspace
+[ "$(check_field "$OUT" stack.scheduler status)" = "pass" ] || \
+  fail "a deleted workspace's overdue row must not count: $(check_field "$OUT" stack.scheduler detail)"
+docker exec -i "$PG_CID" psql -U momo -d momo -v ON_ERROR_STOP=1 -c \
+  "DELETE FROM scheduled_message;
+   INSERT INTO scheduled_message (workspace_id, status, failure_reason, send_at) VALUES ('${SCHED_WS}', 'failed', 'missed', now() - interval '1 hour');" >/dev/null
+sched_status missed
+[ "$(check_field "$OUT" stack.scheduler status)" = "info" ] || \
+  fail "a schedule the server missed in the last day is info: $(check_field "$OUT" stack.scheduler status) $(check_field "$OUT" stack.scheduler detail)"
+# a connection that does not skip RLS counts zero without an error — the check must say "unknown"
+docker exec -i "$PG_CID" psql -U momo -d momo -v ON_ERROR_STOP=1 -c \
+  "CREATE ROLE sched_plain LOGIN PASSWORD '${TOKEN_PG}' NOSUPERUSER NOBYPASSRLS;
+   GRANT SELECT ON scheduled_message, workspace TO sched_plain;" >/dev/null
+PLAIN_ENV="$SANDBOX/t2-sched-plain.env"
+awk -v url="postgres://sched_plain:${TOKEN_PG}@127.0.0.1:${PG_PORT}/momo" '
+  index($0, "MIGRATE_DATABASE_URL=") == 1 { print "MIGRATE_DATABASE_URL=" url; next }
+  { print }
+' "$T2_ENV" >"$PLAIN_ENV"
+chmod 600 "$PLAIN_ENV"
+sched_status plain-role "$PLAIN_ENV"
+[ "$(check_field "$OUT" stack.scheduler status)" = "skip" ] || \
+  fail "a role that cannot skip RLS must be reported unknown (skip), got $(check_field "$OUT" stack.scheduler status) $(check_field "$OUT" stack.scheduler detail)"
+printf '%s' "$(check_field "$OUT" stack.scheduler detail)" | grep -Fq '알 수 없음' || \
+  fail "unknown detail: $(check_field "$OUT" stack.scheduler detail)"
+assert_no_secret_leak "scheduler json" "$OUT"
+docker exec -i "$PG_CID" psql -U momo -d momo -v ON_ERROR_STOP=1 -c \
+  "REVOKE ALL ON scheduled_message, workspace FROM sched_plain; DROP ROLE sched_plain; DELETE FROM scheduled_message;" >/dev/null
+sched_status clean
+[ "$(check_field "$OUT" stack.scheduler status)" = "pass" ] || fail "clean again must pass"
+pass "stack.scheduler: pass · overdue fail · past-grace fail (operator grace honoured) · deleted workspace ignored · missed info · non-RLS-skipping role unknown"
 
 # Incomplete ledger (one migration missing) → migrate_idempotency fail.
 docker exec -i "$PG_CID" psql -U momo -d momo -v ON_ERROR_STOP=1 \

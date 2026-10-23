@@ -28,6 +28,8 @@ pub mod cloud_boxes;
 pub mod cloud_hosts;
 pub mod cohosted_agent;
 pub mod credits;
+/// ADR-0208 D4 — the send composition `POST …/messages` and the scheduler share.
+pub(crate) mod deliver;
 pub mod device_keys;
 pub mod device_link;
 pub mod devices;
@@ -80,6 +82,8 @@ pub mod reattach;
 /// ADR-0175 / #1888 — personal message reminders (human-only, no outbox).
 pub mod reminders;
 pub mod roster;
+/// ADR-0208 / #4214 — scheduled messages (human-only, owner-scoped, outbox event on every change).
+pub mod scheduled_messages;
 pub mod search;
 /// #1873 — BZ-4e self display-name rename (`PATCH …/members/me`).
 pub mod self_profile;

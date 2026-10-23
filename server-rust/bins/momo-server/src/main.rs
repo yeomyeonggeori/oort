@@ -73,6 +73,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         drive_configured = config.drive.shared_drive_id.is_some()
             || config.drive.backend == momo_drive::LOCAL_BACKEND,
         livekit_configured = config.livekit.is_some(),
+        // ADR-0208 D15: whether schedules are accepted and sent. Booleans and numbers only.
+        scheduler_enabled = config.scheduler.enabled,
+        scheduler_tick_ms = config.scheduler.tick_ms,
+        scheduler_grace_seconds = config.scheduler.grace_seconds,
         "momo-server starting"
     );
     // MOMO-605: a refused entry is silent otherwise, and silence here reads as
@@ -265,6 +269,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // B5.2: mention→run routing is always on (routing an `@mention` to its agent
         // is the product); the only knob is how much history rides the job.
         .with_mentions(config.mentions.clone())
+        // ADR-0208 D15: scheduled messages are on unless an operator turns them off; off is
+        // visible (503 `scheduler_disabled`), never a silent accept.
+        .with_scheduler(config.scheduler)
         // ADR-0146 개정 (#3022): member-scoped host registration signatures are
         // verified when sent and required only when the operator turned on
         // MOMO_HOST_REGISTER_SIGNATURE_REQUIRED (off until the R1 re-review PASS).
@@ -315,6 +322,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(policy) => state.with_turn(policy),
         None => state,
     };
+    // ADR-0208 D5: the scheduled-message tick lives in this process, on **its own two-connection
+    // pool** so it never competes with requests. It connects as the same `momo_app` role
+    // (NOBYPASSRLS) as the request pool, and `scheduler::start` refuses to run on a role that
+    // skips row-level security (the routes then answer 503 `scheduler_disabled`).
+    let (stop_scheduler, scheduler_stop) = tokio::sync::watch::channel(false);
+    let scheduler_task = if config.scheduler.enabled {
+        let pool = momo_db::connect(&momo_db::PoolConfig {
+            max_connections: 2,
+            ..config.db.clone()
+        })
+        .await?;
+        momo_server::scheduler::start(state.clone(), pool, config.scheduler, scheduler_stop).await
+    } else {
+        tracing::warn!(
+            "MOMO_SCHEDULER_ENABLED is off: scheduled messages are not sent and creating, \
+             editing or sending one now answers 503 scheduler_disabled (listing and deleting still work)"
+        );
+        None
+    };
     let app = build_app(state);
 
     let address: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
@@ -329,8 +355,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
-    .with_graceful_shutdown(shutdown_signal())
+    .with_graceful_shutdown(async move {
+        shutdown_signal().await;
+        // The tick finishes the row it is on and stops; what it leaves is still `pending`, and
+        // the next process (or another replica) sends it.
+        let _ = stop_scheduler.send(true);
+    })
     .await?;
+    if let Some(task) = scheduler_task {
+        if tokio::time::timeout(std::time::Duration::from_secs(25), task)
+            .await
+            .is_err()
+        {
+            tracing::warn!("the scheduled messages tick did not stop within 25 seconds");
+        }
+    }
     Ok(())
 }
 

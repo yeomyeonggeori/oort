@@ -11,6 +11,7 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use momo_auth::{Principal, WorkspaceRole};
 use momo_db::audit::{write_audit, AuditEntry};
+use momo_messaging::RevocationCause;
 use momo_settings::{
     change_channel_role_in_tx, change_workspace_role_in_tx, create_workspace_ban_in_tx,
     delete_workspace_ban_in_tx, leave_channel_in_tx, list_workspace_bans_in_tx,
@@ -246,7 +247,13 @@ async fn set_status(
                         // phones registered under those sessions must not come
                         // back to life on reinstatement (#2677).
                         if transition == StatusTransition::Suspend {
-                            end_member_sessions_in_tx(conn, workspace_id, target_id).await?;
+                            end_member_sessions_in_tx(
+                                conn,
+                                workspace_id,
+                                target_id,
+                                RevocationCause::Suspended,
+                            )
+                            .await?;
                         }
                         write_audit(
                             conn,
@@ -314,7 +321,24 @@ pub async fn remove(
                     Ok(applied) => {
                         // Removal revokes every token of the member, and with
                         // them every push registration (#2677) and device key (#3022).
-                        end_member_sessions_in_tx(conn, workspace_id, target_id).await?;
+                        end_member_sessions_in_tx(
+                            conn,
+                            workspace_id,
+                            target_id,
+                            RevocationCause::Removed,
+                        )
+                        .await?;
+                        // ADR-0208 D14 point 3: someone who is no longer here has nobody to
+                        // re-read a held schedule, so what they armed is cancelled (the body
+                        // erased), not held. `momo-settings` cannot depend on `momo-messaging`,
+                        // so this sits in the route layer beside the session end.
+                        momo_messaging::cancel_member_schedules_in_tx(
+                            conn,
+                            workspace_id,
+                            target_id,
+                            RevocationCause::Removed,
+                        )
+                        .await?;
                         write_audit(
                             conn,
                             &AuditEntry::new(workspace_id, "member.removed")
