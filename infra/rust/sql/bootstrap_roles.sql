@@ -237,6 +237,138 @@ END
 $$;
 -- END cloud-box-lockdown
 
+-- BEGIN scheduled-message-lockdown (#4214; ADR-0208 D3·D6). Identical in 145_scheduled_message.sql,
+-- bootstrap_roles.sql and bootstrap_runtime_roles.sql; tests compare the text between the markers.
+-- Idempotent and order-proof: a pass before the migration (no tables, no functions) or before the runtime
+-- roles exist finishes what it can; the pass after lands the rest. The BYPASSRLS roles skip RLS, so their
+-- table privileges are what keeps a pending body away from them. momo_app keeps all four (the tick and the
+-- retention sweep DELETE as momo_app). Then the self-check fails loudly: without it the tick would read
+-- nothing and report nothing.
+DO $$
+DECLARE
+  t text;
+  r text;
+  f text;
+  sealed text[] := ARRAY['momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin'];
+BEGIN
+  FOREACH t IN ARRAY ARRAY['scheduled_message', 'scheduled_message_attachment'] LOOP
+    CONTINUE WHEN to_regclass('public.' || t) IS NULL;
+    EXECUTE format('REVOKE ALL ON TABLE public.%I FROM PUBLIC', t);
+    FOREACH r IN ARRAY sealed LOOP
+      CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
+      EXECUTE format('REVOKE ALL ON TABLE public.%I FROM %I', t, r);
+    END LOOP;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_app') THEN
+      EXECUTE format('REVOKE TRUNCATE, REFERENCES, TRIGGER ON TABLE public.%I FROM momo_app', t);
+      EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.%I TO momo_app', t);
+    END IF;
+  END LOOP;
+  IF to_regnamespace('momo_schedule_private') IS NOT NULL THEN
+    REVOKE ALL ON SCHEMA momo_schedule_private FROM PUBLIC;
+    FOREACH r IN ARRAY sealed LOOP
+      CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
+      EXECUTE format('REVOKE ALL ON SCHEMA momo_schedule_private FROM %I', r);
+    END LOOP;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_app') THEN
+      GRANT USAGE ON SCHEMA momo_schedule_private TO momo_app;
+    END IF;
+  END IF;
+  FOREACH f IN ARRAY ARRAY[
+    'momo_schedule_private.due_scheduled_messages(integer)',
+    'momo_schedule_private.expired_scheduled_messages(integer)'
+  ] LOOP
+    CONTINUE WHEN to_regprocedure(f) IS NULL;
+    EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC', f);
+    FOREACH r IN ARRAY sealed LOOP
+      CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
+      EXECUTE format('REVOKE ALL ON FUNCTION %s FROM %I', f, r);
+    END LOOP;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_app') THEN
+      EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO momo_app', f);
+    END IF;
+  END LOOP;
+END
+$$;
+
+DO $$
+DECLARE
+  t text;
+  r text;
+  f text;
+  p text;
+  sealed text[] := ARRAY['momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin'];
+BEGIN
+  FOREACH t IN ARRAY ARRAY['scheduled_message', 'scheduled_message_attachment'] LOOP
+    CONTINUE WHEN to_regclass('public.' || t) IS NULL;
+    FOREACH r IN ARRAY sealed LOOP
+      CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
+      FOREACH p IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'] LOOP
+        IF has_table_privilege(r, format('public.%I', t), p) THEN
+          RAISE EXCEPTION 'role % must hold no % on %', r, p, t;
+        END IF;
+      END LOOP;
+    END LOOP;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_app') THEN
+      FOREACH p IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE'] LOOP
+        IF NOT has_table_privilege('momo_app', format('public.%I', t), p) THEN
+          RAISE EXCEPTION 'momo_app must hold % on %', p, t;
+        END IF;
+      END LOOP;
+    END IF;
+  END LOOP;
+  IF to_regnamespace('momo_schedule_private') IS NOT NULL THEN
+    FOREACH r IN ARRAY sealed LOOP
+      CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
+      IF has_schema_privilege(r, 'momo_schedule_private', 'USAGE') THEN
+        RAISE EXCEPTION 'role % must not use schema momo_schedule_private', r;
+      END IF;
+    END LOOP;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_app')
+       AND NOT has_schema_privilege('momo_app', 'momo_schedule_private', 'USAGE') THEN
+      RAISE EXCEPTION 'momo_app must use schema momo_schedule_private';
+    END IF;
+  END IF;
+  FOREACH f IN ARRAY ARRAY[
+    'momo_schedule_private.due_scheduled_messages(integer)',
+    'momo_schedule_private.expired_scheduled_messages(integer)'
+  ] LOOP
+    CONTINUE WHEN to_regprocedure(f) IS NULL;
+    IF has_function_privilege('public', f, 'EXECUTE') THEN
+      RAISE EXCEPTION 'PUBLIC must not execute %', f;
+    END IF;
+    FOREACH r IN ARRAY sealed LOOP
+      CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
+      IF has_function_privilege(r, f, 'EXECUTE') THEN
+        RAISE EXCEPTION 'role % must not execute %', r, f;
+      END IF;
+    END LOOP;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_app')
+       AND NOT has_function_privilege('momo_app', f, 'EXECUTE') THEN
+      RAISE EXCEPTION 'momo_app must execute %', f;
+    END IF;
+    -- 소유자 posture: 최소 권한 정의자 역할, 본문 열 권한 없음, 어느 런타임 역할의 멤버도 아님.
+    IF NOT EXISTS (
+         SELECT 1 FROM pg_proc p JOIN pg_roles o ON o.oid = p.proowner
+          WHERE p.oid = to_regprocedure(f)
+            AND o.rolname = 'momo_sched_definer'
+            AND NOT (o.rolsuper OR o.rolbypassrls OR o.rolcanlogin)
+       ) THEN
+      RAISE EXCEPTION '% must be owned by the NOLOGIN NOSUPERUSER NOBYPASSRLS role momo_sched_definer', f;
+    END IF;
+    IF has_column_privilege('momo_sched_definer', 'public.scheduled_message', 'body', 'SELECT') THEN
+      RAISE EXCEPTION 'momo_sched_definer must not read scheduled_message.body';
+    END IF;
+    FOREACH r IN ARRAY (sealed || ARRAY['momo_app']) LOOP
+      CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
+      IF pg_has_role(r, 'momo_sched_definer', 'MEMBER') THEN
+        RAISE EXCEPTION 'runtime role % must not be a member of momo_sched_definer', r;
+      END IF;
+    END LOOP;
+  END LOOP;
+END
+$$;
+-- END scheduled-message-lockdown
+
 -- #3212 (migration 110): the memory reset and the team-notice read are API entry points reserved for momo_app
 -- (not PUBLIC). Migration 110 can run before the runtime roles exist, so reassert the grant here.
 DO $$

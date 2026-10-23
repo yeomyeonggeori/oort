@@ -34,8 +34,8 @@ use axum::{Extension, Json};
 use momo_auth::Principal;
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_messaging::{
-    active_workspace_role, read_workspace_for_active_member, WorkspaceIdentity, WorkspaceRead,
-    WorkspaceRole,
+    active_workspace_role, read_workspace_for_active_member, RevocationCause, WorkspaceIdentity,
+    WorkspaceRead, WorkspaceRole,
 };
 use momo_settings::{
     create_workspace_in_tx, lock_membership_mutation, normalized_workspace_name,
@@ -348,7 +348,17 @@ pub async fn leave(
                 let revoked = revoke_member_tokens_in_tx(conn, workspace_id, member_id).await?;
                 // Every session just ended; so does every push registration
                 // (#2677) and device key (#3022) made under them.
-                end_member_sessions_in_tx(conn, workspace_id, member_id).await?;
+                end_member_sessions_in_tx(conn, workspace_id, member_id, RevocationCause::Left)
+                    .await?;
+                // ADR-0208 D14 point 3: a member who left has nobody to re-read a held
+                // schedule; what they armed is cancelled, its body erased.
+                momo_messaging::cancel_member_schedules_in_tx(
+                    conn,
+                    workspace_id,
+                    member_id,
+                    RevocationCause::Left,
+                )
+                .await?;
                 terminate_workspace_membership_in_tx(conn, workspace_id, member_id).await?;
                 write_audit(
                     conn,

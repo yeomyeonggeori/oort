@@ -421,6 +421,28 @@ pub async fn revoke_device(
                         ),
                 )
                 .await?;
+            } else if outcome == LinkedDeviceRevoke::NotFound {
+                // ADR-0208 D14 point 2. `NotFound` also answers a link whose tokens a **logout**
+                // already revoked — there is nothing live left to flip, but the link row is still
+                // here, and a stolen session that armed a schedule and then signed out must not
+                // slip past this disconnect. The lineage is read through the link row, which
+                // outlives its tokens; for a link that is not this member's (or does not exist)
+                // the read finds no session, so this is a no-op. Only the schedules are held: the
+                // push registrations and device keys of that lineage ended with the logout.
+                if let Some(session_id) =
+                    linked_device_session_id_in_tx(conn, workspace_id, member_id, device_id)
+                        .await
+                        .map_err(DbError::from)?
+                {
+                    momo_messaging::hold_lineage_schedules_in_tx(
+                        conn,
+                        workspace_id,
+                        member_id,
+                        session_id,
+                        momo_messaging::RevocationCause::DeviceUnlinked,
+                    )
+                    .await?;
+                }
             }
             Ok::<_, DbError>(outcome)
         })

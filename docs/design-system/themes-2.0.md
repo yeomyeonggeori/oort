@@ -1,6 +1,6 @@
 # 테마 토큰 표 — 디자인 시스템 2.0
 
-> 결정: [ADR-0189](../adr/0189-design-system-2-dawn-sky-multi-theme.md). 이 문서는 그 결정에 쓰는 **값과 실측 결과**를 담는다. 코드의 정본은 `packages/momo-core/src/design/themes.ts`다(DS2-0, #2712). 둘이 어긋나면 core가 이긴다. 그 경우 이 표를 core에서 다시 적는다. §2 값과 §3 실측은 웹 `clients/web/src/design/themes/palettes/themes2.doc.test.ts`가 core와 한 칸씩 대조한다.
+> 결정: [ADR-0189](../adr/0189-design-system-2-dawn-sky-multi-theme.md). 이 문서는 그 결정에 쓰는 **값과 실측 결과**를 담는다. 코드의 정본은 `packages/momo-core/src/design/themes.ts`다(DS2-0, #2712). 둘이 어긋나면 core가 이긴다. 그 경우 이 표를 core에서 다시 적는다. §2 값과 §3 실측은 웹 `clients/web/src/design/themes/palettes/themes2.doc.test.ts`가 core와 한 칸씩 대조한다. §8~§13은 증보 3(2026-10-21)의 카탈로그·유리와 배경화면 하한·열린 테마·표시 설정을 담는다. 그 수치는 프로토타입 측정이라 이 시험이 읽지 않고, 구현 이슈(AP-1b·AP-1c·AP-3~5)가 core 시험을 더하면 그 시험이 정본이 된다.
 >
 > 출처는 로컬 방향 제안서 `claudedocs/design-2.0/brief.md` §3·§6과 시안 `mockups.html`의 CSS 변수다. 두 파일 모두 gitignore 대상이다. 시안에 없던 값과 기준을 못 넘어 고친 값은 §1에 모았고, 전부 §3에서 쟀다.
 
@@ -290,6 +290,8 @@ WCAG 2.1 상대 휘도로 계산했다. 텍스트 기준은 4.5, 비텍스트 �
   16px 밑으로 내려갈 heading·title은 `max(바닥, 배율을 곱한 크기)`로 묶었다).
 - 폰은 이 슬라이스의 범위 밖이다(폰 글자 크기는 DS2-5 시트가 따로 정한다).
 
+> 증보 1 D1(2026-10-07)이 밀도를 3단(`compact`·`comfortable`·`spacious`)으로 바꿨다. `spacious` 열과 3단의 최종 수치는 AP-2a(#4189, #2720을 흡수)가 대화 표면에서 읽어 이 표에 옮긴다. 글자 크기는 §12다.
+
 ## 6. DS2 시리즈
 
 | 단계 | 이슈 | 내용 | 의존 |
@@ -302,7 +304,7 @@ WCAG 2.1 상대 휘도로 계산했다. 텍스트 기준은 4.5, 비텍스트 �
 | DS2-5 | #2717 | 프로필·설정 시트 재도색, 테마 행(#2702 후속) | #2702, DS2-2 |
 | DS2-6 | #2718 | 데스크탑 셸 | DS2-1 |
 | DS2-7 | #2719 | 테마 선택·커스텀 UI, ADR-0174 이행 | DS2-0, DS2-1, DS2-5, DS2-6 |
-| DS2-8 | #2720 | 밀도 옵션 | DS2-1, DS2-3, DS2-4, DS2-6, DS2-7 |
+| DS2-8 | #2720 | 밀도 옵션(증보 1 D1이 3단으로 바꿨고 AP-2a #4189가 흡수한다, §13) | DS2-1, DS2-3, DS2-4, DS2-6, DS2-7 |
 
 상위 이슈는 #2703(모바일)과 #2704(데스크탑·웹)다. 로고·마스코트는 #2705에서 정한다. 정식 앱 아이콘은 #2650에서 정한다.
 
@@ -315,3 +317,284 @@ iOS 「대비 증가」는 React Native에서 읽을 수 있다. 폰이 쓰는 R
 - `DynamicColorIOS({light, dark, highContrastLight, highContrastDark})`: 시스템이 대비 증가 여부에 따라 색을 고른다. 다만 D7의 고대비 규칙(평면 바닥, 불투명 유리, 카드 테두리, 보조 글자를 `ink`로)은 색 하나를 바꾸는 것보다 넓다. 그래서 적용은 위 조회와 이벤트로 하는 것을 기본으로 둔다. 적용은 DS2-2 이후 폰 셸의 일이다.
 - 투명도 줄이기는 `AccessibilityInfo.isReduceTransparencyEnabled()`와 `reduceTransparencyChanged` 이벤트로 읽는다(D7).
 - 실기기에서 켜고 끄며 확인하지는 않았다(`runtime-unverified`). 근거는 설치된 RN 소스(`Libraries/Components/AccessibilityInfo/AccessibilityInfo.js`, `React/CoreModules/RCTAccessibilityManager.mm`)다.
+
+## 8. 카탈로그 — 첫 파티 3종 곁의 57종 (증보 3 D1·D2)
+
+> ADR-0189 증보 3(2026-10-21)이 더하는 선택 테마다. §8~§13의 수치는 프로토타입(`derive2.mjs`)을 57종으로 다시 잰 값(2026-10-22)이고 아직 어떤 시험도 이 절을 대조하지 않는다. 코드의 정본은 AP-1b(#4188)가 만드는 `themeCatalog.generated.ts`와 `derive.ts`다. 그 시험이 들어오면 이 표를 core에서 다시 적는다.
+
+### 8.1 구성
+
+| 단계 | 수 |
+|---|---|
+| Buzz 목록(커밋 `af5bb0a`, `theme-loader.ts`) | 62 |
+| − Buzz 자체 테마 `buzz`·`buzz-dark`(브랜드 전용, 우리 자리는 첫 파티 3종) | 60 |
+| − `aurora-x`(GPL-3.0, 허용 라이선스 밖) | 59 |
+| − `slack-dark`·`slack-ochin`(경쟁 제품 이름·상표, 결정 2) | **57** |
+
+- 57종은 쌍 16 × 2 + 라이트 단독 1 + 다크 단독 24이고 묶으면 **41항목**이다. 쌍 묶기는 Buzz의 `THEME_PAIRS`를 따르되 항목 하나로 합친다(id는 라이트 쪽 기준의 명시 표).
+- 갤러리 타일은 첫 파티 3종을 더해 시스템 19 · 라이트 20 · 다크 43이다. 정렬은 첫 파티 먼저, 그다음 id 순이다. 라벨은 생성기의 명시 표다(모드 낱말을 자동으로 지우면 `light-plus`처럼 이름 전체가 사라지는 사례가 있다).
+- 라이선스는 MIT 52 · Apache-2.0 5(`material-theme` 계열)이고 상류 저장소는 25곳이다. 근거는 `tm-themes@1.12.12`의 `NOTICE`다. Buzz가 잠근 `shiki 4.1.0`의 테마 파일과 이 `NOTICE` 사이의 차이는 확인하지 못했다.
+- 청사진 R6 초안은 59종·42항목 기준이었다(하한 분포 8/14/28 등). 이 문서의 수치는 전부 57종으로 다시 쟀다.
+
+### 8.2 항목 표 (41항목)
+
+저장 문자열은 `catalog:<id>`다. 「하한」은 §9의 값이고 굵게 표시한 「불가」는 하한이 95%를 넘는 테마·모드다.
+
+| id | 구분 | 라이트 출처 | 다크 출처 | SPDX | 하한 라이트 | 하한 다크 |
+|---|---|---|---|---|---|---|
+| `andromeeda` | 다크 단독 | - | andromeeda | MIT | - | 0.84 |
+| `ayu-dark` | 다크 단독 | - | ayu-dark | MIT | - | 0.82 |
+| `catppuccin` | 쌍 | catppuccin-latte | catppuccin-mocha | MIT | **1.00** 불가 | 0.80 |
+| `catppuccin-frappe` | 다크 단독 | - | catppuccin-frappe | MIT | - | 0.90 |
+| `catppuccin-macchiato` | 다크 단독 | - | catppuccin-macchiato | MIT | - | 0.84 |
+| `dracula` | 다크 단독 | - | dracula | MIT | - | 0.76 |
+| `dracula-soft` | 다크 단독 | - | dracula-soft | MIT | - | 0.76 |
+| `everforest` | 쌍 | everforest-light | everforest-dark | MIT | **1.00** 불가 | 0.93 |
+| `github` | 쌍 | github-light | github-dark | MIT | 0.73 | 0.80 |
+| `github-dark-dimmed` | 다크 단독 | - | github-dark-dimmed | MIT | - | 0.92 |
+| `github-default` | 쌍 | github-light-default | github-dark-default | MIT | 0.71 | 0.70 |
+| `github-high-contrast` | 쌍 | github-light-high-contrast | github-dark-high-contrast | MIT | 0.65 | 0.69 |
+| `gruvbox-hard` | 쌍 | gruvbox-light-hard | gruvbox-dark-hard | MIT | 0.86 | 0.78 |
+| `gruvbox-medium` | 쌍 | gruvbox-light-medium | gruvbox-dark-medium | MIT | 0.88 | 0.83 |
+| `gruvbox-soft` | 쌍 | gruvbox-light-soft | gruvbox-dark-soft | MIT | 0.92 | 0.86 |
+| `houston` | 다크 단독 | - | houston | MIT | - | 0.71 |
+| `kanagawa` | 쌍 | kanagawa-lotus | kanagawa-wave | MIT | **1.00** 불가 | 0.80 |
+| `kanagawa-dragon` | 다크 단독 | - | kanagawa-dragon | MIT | - | 0.81 |
+| `laserwave` | 다크 단독 | - | laserwave | MIT | - | 0.72 |
+| `material` | 쌍 | material-theme-lighter | material-theme | Apache-2.0 | **1.00** 불가 | 0.77 |
+| `material-theme-darker` | 다크 단독 | - | material-theme-darker | Apache-2.0 | - | 0.71 |
+| `material-theme-ocean` | 다크 단독 | - | material-theme-ocean | Apache-2.0 | - | 0.82 |
+| `material-theme-palenight` | 다크 단독 | - | material-theme-palenight | Apache-2.0 | - | 0.93 |
+| `min` | 쌍 | min-light | min-dark | MIT | 0.70 | 0.81 |
+| `monokai` | 다크 단독 | - | monokai | MIT | - | 0.74 |
+| `night-owl` | 다크 단독 | - | night-owl | MIT | - | 0.75 |
+| `nord` | 다크 단독 | - | nord | MIT | - | 0.86 |
+| `one` | 쌍 | one-light | one-dark-pro | MIT | 0.85 | **0.96** 불가 |
+| `plastic` | 다크 단독 | - | plastic | MIT | - | 0.93 |
+| `poimandres` | 다크 단독 | - | poimandres | MIT | - | 0.92 |
+| `red` | 다크 단독 | - | red | MIT | - | 0.69 |
+| `rose-pine` | 쌍 | rose-pine-dawn | rose-pine | MIT | **1.00** 불가 | 0.74 |
+| `rose-pine-moon` | 다크 단독 | - | rose-pine-moon | MIT | - | 0.79 |
+| `snazzy-light` | 라이트 단독 | snazzy-light | - | MIT | **1.00** 불가 | - |
+| `solarized` | 쌍 | solarized-light | solarized-dark | MIT | **1.00** 불가 | **1.00** 불가 |
+| `synthwave-84` | 다크 단독 | - | synthwave-84 | MIT | - | 0.83 |
+| `tokyo-night` | 다크 단독 | - | tokyo-night | MIT | - | 0.90 |
+| `vesper` | 다크 단독 | - | vesper | MIT | - | 0.66 |
+| `vitesse` | 쌍 | vitesse-light | vitesse-dark | MIT | 0.82 | 0.75 |
+| `vitesse-black` | 다크 단독 | - | vitesse-black | MIT | - | 0.75 |
+| `vscode-plus` | 쌍 | light-plus | dark-plus | MIT | 0.61 | 0.80 |
+
+쌍 16 · 라이트 단독 1 · 다크 단독 24 = 41. 첫 파티 3종(`dawnsky`·`graphite`·`noeul`)을 더하면 44다.
+
+### 8.3 씨앗과 파생 요약
+
+- **씨앗**(테마당 한 모드): 필수 `editor.background`·`editor.foreground`. 선택으로 `comment` 토큰 색(`tokenColors`와 `settings` 둘 다 읽는다), git 장식색 `added`·`deleted`·`modified`(키 우선순위 `gitDecoration.*ResourceForeground` > `editorGutter.*Background` > `diffEditor.*TextBackground`), 신호 씨앗(`focusBorder` > `textLink.foreground` > `button.background` > `activityBarBadge.background`), 에이전트 씨앗(`terminal.ansiCyan` > `terminal.ansiBlue`), 사이드바 `sideBar.background`, 상태색 대체 후보인 ANSI 초록·빨강·노랑. 모드는 바탕 휘도가 0.5 미만이면 다크다(`type`은 힌트일 뿐이다).
+- **바닥과 표면**: Buzz `adaptive-theme.ts`의 산수를 쓴다. 바탕 휘도 L에서 d = `0.035·ln(1+(L+0.0135)·10)`를 구해, 바닥(`chrome`: 바닥 세 정지점·시트)은 바탕보다 휘도가 d만큼 낮은 색이고 본문 판(`pane`)은 바탕이다. 바탕이 너무 어두워 d만큼 내릴 수 없으면 바닥은 순흑이고 판이 휘도 d의 색이 된다. `surface`는 라이트에서 판 그대로, 다크에서 판을 `elevate`(.04)한 색이다. `surface-muted`는 판을 `elevate`(라이트 .04, 다크 .08)한 색이다(`elevate`는 라이트에서 어둡게, 다크에서 밝게 간다). `line`은 판과 글자의 12%(라이트)·15%(다크) 혼합이다. 카탈로그에는 띠(`band`)가 없다.
+- **글자**: `ink`·`ink-muted`·`icon`·`line-strong`은 OKLCH 명도만 옮겨 모든 면(표면·시트·판·바닥)에서 4.5·4.5·3·3을 맞춘다. 라이트는 더 어둡게, 다크는 더 밝게만 가고, 0.0025 단계이며 명도 범위는 [0.02, 1.0]이다(순백·순흑 씨앗에서도 출발해야 한다). `primary`는 `ink`이고 `on-primary`는 `surface`·`pane` 중 `ink`와 대비가 큰 쪽이다. `ink-muted`는 `comment`에서, 없으면 글자와 바탕 40% 혼합에서 출발한다.
+- **상태색**: 후보 목록에서 의미 색상각 창(OKLCH) 안의 첫 값을 쓰고 없으면 oort 기본값이다. `danger` 10–40°, `ok` 120–170°, `warn` 60–100°(채도 0.04 이상). `*-soft`는 `surface`에서 상태색 쪽으로 OKLab 12%(라이트)·18%(다크) 섞은 색이고, 상태색은 그 위에서도 4.5가 되게 맞춘다.
+- **신호와 에이전트**: 신호가 먼저 정해진다(씨앗 → `resolveSignal`, 거절이면 기본 신호, 그래도 거절이면 `ink`로 중립). 에이전트는 그 뒤 씨앗에서 만들고 신호·위험과 OKLab 거리 0.07 이상이 될 때까지 색상각을 15°씩 돌린다. 기존 core 함수의 변경은 `resolveSignal`의 옵션 `agentYields`(에이전트 거리 검사를 끔) 하나이고 기본값은 현행 의미 그대로다.
+- **표 밖 역할 5개**는 core `deriveRoles`가 그대로 계산한다. `glass`는 `surface`에 알파 .74(라이트)·.72(다크), `scrim`은 첫 파티와 같은 상수다.
+- **Buzz 결함은 옮기지 않는다.** Buzz는 comment 색을 `settings`만 읽는데 shiki 4.1.0 테마 모듈에는 `settings`가 없고 `tokenColors`만 있다. 우리는 `tokenColors ?? settings`로 읽고 `tokenColors`만 있는 픽스처로 시험한다.
+
+### 8.4 대비 보정 실측 (57종)
+
+| 측정 | 결과 |
+|---|---|
+| 보정 없이 파생 | 57종 중 **56종**이 `contrastPairs`·신호·에이전트·위험 거리 0.07 중 하나 이상을 어긴다 |
+| 명도 보정 + 의미 색상각 창 + 신호 우선 | **0/57** 위반(`deriveRoles` 성공) |
+| 보정이 닿은 테마 | 56/57. 역할별(테마 수): `ink-muted` 48 · `danger` 47 · `line-strong` 32 · `ok` 30 · `warn` 28 · `icon` 23 · **`ink` 3**(`material-theme-lighter`·`solarized-dark`·`solarized-light`). 에이전트 색상각을 돌린 테마 5 |
+| 이동량(OKLab ΔE) | `ink-muted` 중앙 0.103·최대 0.272(comment가 있는 53종), `ink` 최대 0.173. 큰 이동(`ink` > 0.15 또는 `ink-muted` > 0.25)은 2종 |
+| 상태색의 출처 | `danger` 45 · `ok` 37 · `warn` 46종이 테마 씨앗에서, 나머지는 oort 기본값 |
+| 신호 씨앗 | 50종 통과(그중 28종은 명도 보정), 7종 거절 → 기본 신호(`near-agent` 5 · `near-danger` 2) |
+| 속도 | 57종 약 38ms(테마당 약 0.66ms, 최악 1.23ms, V8). WKWebView·Hermes는 미측정 |
+| 크기 | 씨앗 표 5색 3.2KB(gzip 1.4KB) · 13색 6.6KB(gzip 2.6KB). 정적 CSS로 바꾸면 41항목 약 65KB(gzip 약 10.4KB). Buzz식 테마 모듈 57종은 합 약 1.32MB |
+| 원본 사이드바 색 | 씨앗이 있는 55종 중 에디터 바탕과 눈에 띄게 다른 것(ΔY > 0.02) 7종, 띠로 쓸 수 있는 것 51종 |
+
+한계: 프로토타입은 테마의 한 모드만 파생하고 시험 쌍 계산을 위해 `{light, dark}`에 같은 값을 채웠다(두 모드의 씨앗이 서로 독립이라 결과에는 영향이 없다). 신호 씨앗은 `button.background` 먼저 읽었고 구현은 `focusBorder` 먼저 읽는다. 시안(캡처)을 보지 않아 미감은 미검증이다.
+
+### 8.5 신호 프리셋 × 카탈로그 (결정 11)
+
+4프리셋 × 57 테마-모드 = 228조합을 `resolveSignal`로 풀었다.
+
+| 의미 | 거절 | 이유 | 프리셋별 |
+|---|---|---|---|
+| 에이전트 고정(현행 core) | 43 | `near-danger` 39 · `near-agent` 4 | 성운 13 · 홍염 26 · 혜성 0 · 감람 4 |
+| 에이전트 양보(D2 순서) | 39 | 전부 `near-danger` | 성운 13 · 홍염 26 · 혜성 0 · 감람 0 |
+
+카탈로그·사용자 테마에서는 프리셋을 런타임으로 풀고, 거절된 스와치는 `aria-disabled`와 core `SIGNAL_REJECTION_COPY` 한 줄로 보인다. 홍염이 57 테마-모드 중 26곳에서 못 쓰이는 것은 정상이다(위험 표시 색과 겹치지 않게 하는 본문 D3의 규칙이다). 생성 CSS의 「모든 테마에서 통과해야 한다」 `throw`는 첫 파티에만 남는다.
+
+### 8.6 id·네임스페이스·단일 모드 규칙
+
+- **id 핀을 넓히지 않는다.** `THEME_ID_RE = /^[a-z]+$/`(core `themes.ts`)와 같은 문자 집합이 부트 스크립트·캡처·게이트에 박혀 있어 `github-light-default` 같은 하이픈 id가 막힌다. 첫 파티 id는 그대로이고 카탈로그는 새 네임스페이스다(저장 `catalog:github-default`·`user:abc123`, 정규식 `/^[a-z0-9]+(-[a-z0-9]+)*$/`). 루트에는 `data-palette="derived"`와 `data-theme-ref="catalog:github-default"`를 찍는다.
+- **단일 모드 규칙 세 가지**(Buzz `resolveSystemTheme`·`handleModeSelect`를 순수 함수 `themeResolve.ts`로 옮긴다).
+  1. 라이트·다크 탭에서 단일 모드 테마를 고르면 색 모드를 그 모드로 맞춘다.
+  2. 색 모드를 시스템으로 바꿀 때 현재 테마에 짝이 없으면 첫 짝 테마(새벽하늘)로 옮기고 한 줄로 알린다.
+  3. 색 모드를 라이트↔다크로 바꿀 때 현재 테마에 그 모드가 없으면 짝으로, 짝도 없으면 그 모드의 첫 테마로 간다.
+- 유효 스킴은 테마가 한 모드뿐이면 그 모드이고, 이때 루트 `data-theme`를 그 모드로 못 박아 폼 컨트롤·스크롤바의 `color-scheme`이 어긋나지 않게 한다.
+
+### 8.7 귀속 절차
+
+1. 생성기가 `tm-themes` NOTICE에서 SPDX·저작권·원문 URL을 읽어 `themeCatalog.generated.ts`의 `source`와 `legal/generated/THEME_PALETTE_NOTICES.txt`(상류 25곳의 고지 본문)를 만든다. `aurora-x`와 허용 밖 SPDX는 생성기가 거절한다.
+2. `legal/THIRD_PARTY_NOTICES.md`에 상류 25곳 행을 더하고 Buzz 행을 코드 차용으로 고친다(위치·도입 이슈 표기). 코드가 들어오는 AP-1b·AP-3 PR이 한다.
+3. 차용한 파일 머리에 Apache-2.0 §4(b) 변경 표시(출처 파일·커밋 `af5bb0a`·변경 요약)를 단다.
+4. 시험: 모든 항목의 SPDX가 허용 목록 안, `source.repo`가 `legal/` 파일에 있음, `aurora-x` 부재.
+
+## 9. 유리·배경화면 하한 (증보 3 D4·D6)
+
+### 9.1 정의
+
+- **최악 합성**: 색조 한 겹(`canvas-mid`, 불투명도 α)을 순흑·순백 위에 얹은 두 끝이다. 합성 채널값이 바탕 픽셀에 대해 단조라서 어떤 사진·바탕화면에서도 최악은 이 두 끝이다(증보 2 D3).
+- **하한**: 두 끝 모두에서 `ink`가 7:1을 지키는 최소 α(0.01 올림)다. 폰 `scrim.ts`의 `minimumScrimAlpha`와 같은 산수이고, 같은 함수가 증보 2의 표(0.69/0.76 · 0.65/0.73 · 0.69/0.78)를 재현한다. AP-1c(#4187)가 이 산수를 core로 올린다.
+- 그 α에서 `ink-muted`·`icon`·`signal-text`는 최악 합성 위에서 OKLCH 명도만 옮겨 4.5·3으로 맞춘다(여유 `FIT_MARGIN` 0.3). 사이드바·타이틀바의 글자는 띠 규칙의 `on-band`·`on-band-muted`로 다시 묶어 보정값을 꽂는다.
+- 슬라이더 범위는 [하한, 95%]다. **하한이 95%를 넘는 테마·모드는 유리도 배경화면도 쓸 수 없다**(불가). 0.97 기준은 쓰지 않는다. 기본값은 AP-3(#4190)이 캡처로 정한다.
+- `GLASS_FALLBACK_OPACITY`(94%)는 블러 미지원 폴백이고 하한이 아니다.
+
+### 9.2 첫 파티 6조합 (현행 core 값)
+
+| 조합 | 보정 없이 `ink`·`ink-muted`·`icon`을 지키는 최소 α | `ink` 7:1만 지키는 최소 α(하한) |
+|---|---|---|
+| 새벽하늘 라이트 / 다크 | 0.94 / 0.85 | 0.69 / 0.76 |
+| 흑연 라이트 / 다크 | 0.95 / 0.83 | 0.65 / 0.73 |
+| 노을띠 라이트 / 다크 | 0.93 / 0.88 | 0.69 / 0.78 |
+
+Buzz의 30–90%는 왼쪽 열을 어기므로 옮기지 않는다. 오른쪽 열이 슬라이더 하한이다.
+
+### 9.3 카탈로그 57종의 분포
+
+최소 0.61 · 중앙 0.82 · 최대 1.00(항목별 값은 §8.2).
+
+| 하한 | 테마-모드 | 뜻 |
+|---|---|---|
+| 0.80 이하 | 26 | 범위가 넓다 |
+| 0.80 초과 0.85 미만 | 9 | |
+| 0.85 이상 0.95 이하 | 13 | 범위가 좁다(폭 10%p 이하). 배경에는 「사진이 많이 흐려져요」 힌트 |
+| 0.95 초과 | **9** | **불가** |
+
+불가 9건은 `catppuccin`·`everforest`·`kanagawa`·`material`·`rose-pine`·`snazzy-light`의 라이트, `solarized`의 라이트와 다크, `one`의 다크(0.96)다. 하한 1.00인 8건은 불투명(α=1)에서도 `ink`가 7:1에 못 미친다(대비 4.50~6.77). ADR-0189 증보 3 D6에 표가 있다. 하한이 정확히 95%인 테마는 지금 카탈로그에 없다.
+
+### 9.4 불가·공존
+
+- 불가일 때: 유리는 토글을 비활성으로 두고 이유를 말한다(제안 「이 테마에서는 글자가 읽히도록 유리 배경을 쓸 수 없어요.」). 배경화면도 비활성이다(제안 「이 테마에서는 글자 대비 때문에 배경 사진을 쓸 수 없어요.」).
+- 폴백 세 갈래(미지원 / 투명도 줄이기·고대비 / 켜기 실패)는 ADR-0189 증보 1 D4 그대로다.
+- 배경과 유리는 공존하지 않는다(결정 9). `data-wallpaper`가 켜져 있으면 유리 토글은 비활성이고 문장으로 이유를 말한다. 판정 함수 하나를 AP-3과 AP-4가 공유하고, 둘이 같은 파도에서 나가므로 뒤에 랜딩하는 쪽이 연결한다.
+
+## 10. 배경화면 — 웹·데스크탑 (증보 3 D4)
+
+- **종류**: 없음 / 단색 8 / 기본 제공 6 / 내 사진 / 「기본으로」. 폰의 `BACKDROP_SOLIDS`·`BACKDROP_PRESETS`와 모델을 core `wallpaper.ts`로 복사한다(폰 import 교체는 AP-6). 움직이는 배경은 P2다(AP-8).
+- **자리**: `.app-shell`의 배경 맨 아래 층(`--shell-layer-wallpaper`, AP-1a가 층 변수로 쪼갠다). 보이는 곳은 사이드바 열·창 가장자리(판 인셋 8px)·상단 줄이다. 본문 판·카드·시트는 그 위(불투명)라 읽기가 안전하다.
+- **scrim**: 폰 `scrim.ts`의 `blend`·`worstCaseBackdrops`·`minimumScrimAlpha`·`fitForeground`를 core로 올려(AP-1c) 바닥색 한 겹을 α = 하한으로 얹고, 글자 역할은 최악 합성 위로 보정한다(4.5·3 + 여유 0.3). 불가·힌트 판정은 §9.
+- **사진 처리**: `<input type="file" accept="image/*">` → `createImageBitmap` → canvas에서 긴 변 ≤ 2560px → JPEG 재인코딩(품질 0.85 → 0.7 → 0.55 → 0.4, 그래도 크면 해상도 0.75배 → 0.56배)으로 1.5MB 이하. 끝까지 크면 거절하고 이유를 말한다. 항상 재인코딩이라 EXIF(위치 포함)가 벗겨진다. 상한은 웹 화면에 맞춘 제안값이다(폰은 1600px·1MB).
+- **저장**: IndexedDB(DB `momo-appearance`, 스토어 `blobs`, 키 `wallpaper`). 프로덕션 코드의 IndexedDB 전례가 없어 AP-4가 Tauri 웹뷰의 영속성·쿼터를 실측한다. CSP가 `img-src 'self' data:`라 `blob:` URL은 쓸 수 없다.
+- **그리기**: `FileReader.readAsDataURL`로 `data:` URL을 만들어 전용 요소 `<div data-wallpaper-layer>`의 `style.backgroundImage`를 CSSOM으로 한 번 설정한다. 1.4MB 문자열을 상속되는 커스텀 프로퍼티에 싣지 않는다. JSX `style=`은 쓰지 않는다(`inline_style` 게이트).
+- **수명**: 바꾸거나 「기본으로」를 누르면 이전 사진을 지우고, 로그아웃·세션 경계에서도 지운다. 시작할 때 참조가 가리키는 사진이 없으면 「없음」으로 돌린다. 네트워크 호출은 0이며 모듈 소스에 `fetch`·`XMLHttpRequest`·`upload`가 없음을 정적으로 단정한다.
+- **접근성**: `prefers-reduced-transparency`·`prefers-contrast: more`가 켜지면 배경을 끄고 불투명 기본 바닥으로 돌아간다. 선택은 지우지 않는다.
+
+## 11. 열린 테마 (증보 3 D3·D5)
+
+### 11.1 범위
+
+- 여는 것: ① VS Code·shiki 테마 JSON 가져오기(파일·붙여넣기) → 씨앗 → 파생 ② oort 테마 JSON 내보내기·가져오기 ③ 사용자 토큰 편집기(기본 테마 + 덮어쓰기) ④ 배경화면(§10) ⑤ 사이드바 색 ⑥ 저장은 이 기기.
+- 열지 않는 것: 임의 CSS(외부 `url()`로 새는 길, `raw_color`·`inline_style` 규칙, CSP 충돌. 결정 8), 외부 URL 이미지, 서버 업로드, 테마가 반경·그림자·타입·내비를 바꾸는 것(본문 D2), 공유 링크와 마켓(P2).
+
+### 11.2 가져오기 규칙 (`vscodeImport.ts`, 순수)
+
+- 입력은 256KB 이하의 문자열이다. JSONC(주석·후행 쉼표)를 의존성 없이 직접 벗긴다(문자열 리터럴 안은 보존). VS Code 공식 가이드에서 JSONC·`include` 지원 문구는 확인하지 못했다(미확인). 실무에서 쓰이므로 가정하고 설계한다.
+- 필수는 `editor.background`·`editor.foreground`이고 없으면 거절한다(「배경색과 글자색이 있는 테마만 가져올 수 있어요.」). 모드는 바탕 휘도로 정한다.
+- 색은 `#RGB`·`#RGBA`·`#RRGGBB`·`#RRGGBBAA`만 읽고 알파는 버린다. `rgb()`·이름 색은 그 키만 무시한다. `include`는 무시하고 경고한다(「이 테마는 다른 파일을 포함해요. 포함된 색은 가져오지 못했어요.」). `tokenColors`가 문자열(외부 `.tmTheme` 경로)이면 무시한다.
+- **보안 경계**: 입력은 신뢰하지 않는다. 결과는 `#rrggbb` 12개 안팎과 이름뿐이고, CSS로 나가는 값은 전부 우리가 다시 직렬화한다. 이름·작성자는 40자 이하, 제어문자 제거, 텍스트로만 그린다. JSON 깊이 8 이하, 키 수 상한, 모르는 키는 버린다. 시험은 악성 샘플(거대 중첩·`</style>`·`url(`·`__proto__`)과 로컬 퍼저다.
+
+### 11.3 사용자 토큰 편집기 (AP-5)
+
+「새 테마 만들기」는 기본 테마를 고른 뒤 아래만 덮어쓴다. 라이트·다크 탭마다 따로다.
+
+| 그룹 | 항목 | 내부 처리 |
+|---|---|---|
+| 바탕 | 창 바탕(평면 1색 또는 2~3정지점 그라데이션), 본문 판 | 씨앗 `bg` 재파생 또는 역할 덮어쓰기 → 파생 재계산 |
+| 사이드바 | 사이드바 색 | `band` 덮어쓰기. `on-band`·`on-band-muted`는 엔진이 푼다 |
+| 글자 | 본문 글자색, 보조 글자색 | 명도 보정 4.5 |
+| 강조 | 강조색 | `resolveSignal`(보정·거절 문구는 기존 것) |
+| 에이전트·상태 | 에이전트색, 성공·경고·위험 | 명도 보정 + 거리 0.07 |
+
+- 덮어쓸 수 있는 역할은 10개다. 강조색은 기존 `signal` 필드이고 나머지 아홉(`canvas`·`surface`·`ink`·`ink-muted`·`agent`·`ok`·`warn`·`danger`·`band`)은 `overrides`다. 전부 직접 지정하는 「고급」 모드는 P2다.
+- 항목마다 색 입력(텍스트 hex가 정본, 컬러 입력은 보조)·「기본으로」·보정 또는 거절 문구가 있고, 미리보기는 앱 전체가 라이브다.
+- 현재 모양은 기본 테마 + `overrides`(+ 배경)다. 설정의 「사이드바 색」 같은 행은 현재 모양의 `overrides`를 바로 고치고, 「내 테마로 저장」은 그 스냅샷을 이름 붙여 저장한다. 가져온 테마도 같은 목록에 들어간다.
+
+### 11.4 `oort-theme` v1
+
+```jsonc
+{
+  "format": "oort-theme",
+  "version": 1,
+  "id": "midnight-dev",                  // /^[a-z0-9]+(-[a-z0-9]+)*$/, 40자 이하. 저장 시 user:<id>
+  "name": "한밤 개발자",                   // 1~40자, 제어문자 제거, 일반 텍스트로만 표시
+  "author": "kwak",                      // 선택, 40자 이하
+  "license": "CC0-1.0",                  // 선택, 40자 이하, 정보용
+  "extends": "catalog:nord",             // 선택: "oort:<dawnsky|graphite|noeul>" 또는 "catalog:<id>"
+  "seed": {                              // extends가 없으면 필수. 최소 한 모드
+    "light": { "bg": "#fdf6e3", "fg": "#586e75", "comment": "#93a1a1",
+               "added": "#859900", "deleted": "#dc322f", "modified": "#b58900",
+               "accent": "#268bd2", "agent": "#2aa198", "sidebar": "#eee8d5" },
+    "dark":  { "bg": "#002b36", "fg": "#839496" }
+  },
+  "signal": { "custom": "#ff7b72" },     // 선택: null | { "preset": id } | { "custom": "#RRGGBB" } (기존 신호 규칙·보정·거절 그대로)
+  "overrides": {                         // 선택. 모드별. 허용 키 9개뿐
+    "dark": { "canvas": ["#101418", "#0d1117", "#0b0f14"], "surface": "#161b22",
+              "ink": "#e6edf3", "ink-muted": "#9aa7b4", "agent": "#79c0ff",
+              "ok": "#3fb950", "warn": "#d29922", "danger": "#f85149", "band": "#0b1020" },
+    "light": { "band": "#eee8d5" }
+  },
+  "wallpaper": { "kind": "preset", "id": "bam" }   // none | solid | preset (image는 기본 제외)
+  // "wallpaper": { "kind": "image", "dataUrl": "data:image/jpeg;base64,..." }  ← 내보낼 때 「사진 포함」을 고른 경우만, 1.5MB 이하
+}
+```
+
+- 검증: 크기 256KB 이하(이미지 없음) 또는 2.2MB 이하(이미지 포함), 깊이 8 이하, 색은 전부 `#RRGGBB`만 통과, 모르는 키는 버리고 경고, `id`·`name` 정규화, `format`·`version` 불일치는 거절한다. 값이 하나도 CSS 문자열로 그대로 가지 않는다. `export → import`가 같은 파생 결과를 낸다(속성 시험).
+- `extends`와 `seed`가 함께 있을 때의 우선순위는 AP-5가 정한다. 모듈 위치는 `packages/momo-core/src/design/userTheme.ts`(+시험)이고 폰도 같은 파서를 쓴다.
+- 사용자 테마는 최대 20개, 개당 8KB 이하(이미지 제외)이며 id는 `user:<slug>`다. 저장은 `momo.web.userThemes.v1`이다.
+
+### 11.5 사이드바 색 (D5)
+
+이미 있는 장치를 쓴다. 사이드바 열 아래의 `--band` 층, 사이드바 안 글자 역할을 띠 역할로 다시 묶는 규칙, 「띠 위에는 `on-band`·`on-band-muted`·`signal`만 선다」는 시험이다. 사용자가 색 하나(모드별, `overrides.band`)를 고르면 엔진이 `on-band`(4.5)·`on-band-muted`(4.5)를 풀고 신호가 띠 위 3:1인지 확인한다(`resolveSignal`이 띠를 비텍스트 호스트로 이미 다룬다). 카탈로그의 원본 사이드바 색은 눈에 띄게 다른 테마가 55종 중 7종뿐이라 옵션으로 만들지 않고 사용자 지정만 연다. 사이드바 이미지는 P2다.
+
+### 11.6 공유 링크 (P2)
+
+딥링크 `oort://theme?d=<base64url(deflate(json))>`을 재사용하고, 자동 적용 없이 미리보기와 「가져오기」 확인을 거친다. 이미지는 제외하고 길이 상한을 둔다. 형식(v1)이 굳은 뒤 별도 이슈다(AP-8).
+
+## 12. 표시 설정 (증보 3 D8)
+
+| 컨트롤 | 값 | 저장 | 앱에 닿는 경로 | 이슈 |
+|---|---|---|---|---|
+| 글자 크기 | 작게·기본·크게 = 메시지 본문 14·15·16px(±0.1) | `fontSize` | 루트 `data-font-size` → `--type-scale` → `--type-rem` → `--text-*`. 다른 글자 역할도 비례하고 브라우저 줌과 직교한다. 터치 입력 칸의 `--field-text-floor`(16px)는 변하지 않는다 | AP-2a |
+| 대화 밀도 | 촘촘하게·편하게·여유롭게 | `density` | 루트 `data-density`. 값은 §5의 표이고 AP-2a가 대화 표면에서 읽어 옮긴다 | AP-2a |
+| 선택한 항목 강조 | 켬·끔 | `prominentActive` | 루트 `data-prominent-active`. 선택 행이 `--primary` 채움과 `--on-primary` 글자(4.5:1, 띠 위 사이드바에서도) | AP-2b |
+| 스레드 배치 | 옆에 열기(`split`)·겹쳐 열기(`focus`) | `threadLayout` | 루트 `data-thread-layout`. `focus`는 폭과 무관하게 겹쳐 열린다. `split`은 현행(900px 미만에서 자동 겹침)이고 행 설명이 그 사실을 말한다 | AP-2b |
+
+- 컨트롤은 소비자와 같은 PR에서만 공개한다(S0 핸드오프 R4). 눌러도 안 바뀌는 컨트롤은 한 번도 나가지 않는다.
+- 본문 15px(`--text-body`)이 기준이다. 증보 1 D2의 13/14/15는 14/15/16으로 대체했다.
+
+## 13. AP 시리즈 (증보 3)
+
+상위는 설정 개편 에픽 #3578이다. #2720(DS2-8)은 AP-2a가 흡수한다.
+
+| 단계 | 이슈 | 내용 | 트랙 | 규모 | 의존 | 우선 |
+|---|---|---|---|---|---|---|
+| AP-0 | #4185 | 증보 3 + 문서·이슈 정리 | 엔진(기획 문서) | S | — | P0 |
+| AP-1a | #4186 | 외양 저장소 v2 이행·루트 속성·CSS 조각·합성 골격(보이는 변화 0) | UXUI | M~L | — | P0 |
+| AP-1c | #4187 | scrim 산수 core 이전 | UXUI | S | — | P0 |
+| AP-1b | #4188 | 테마 엔진 + 카탈로그 57종 + 갤러리 | UXUI | L | 1a, 1c, 증보 3 | P0 |
+| AP-2a | #4189 | 글자 크기 3단 + 대화 밀도 3단(#2720 흡수) | UXUI | L | 1a | P0 |
+| AP-3 | #4190 | 데스크탑 유리 배경 + 불투명도 슬라이더 | UXUI | M | 1a, 1c | P0 |
+| AP-4 | #4191 | 배경화면(웹·데스크탑) | UXUI | L | 1a, 1c, 증보 3 | P0~P1 |
+| AP-5 | #4192 | 열린 테마: 가져오기·편집기·내보내기·사이드바 색 | UXUI | L | 1b, 증보 3 | P1 |
+| AP-2b | #4193 | 선택한 항목 강조 + 스레드 배치 | UXUI | S | 1a | P1 |
+| AP-6 | #4194 | 모바일 카탈로그 + 테마 고르기 화면 | UXUI(폰) | M~L | 1b, 1c, 증보 3 | P1 |
+| AP-7 | #4195 | 외양 계정 동기화(새 ADR 필수) | 엔진 + UXUI | L | 5 안정화 | P2 |
+| AP-8 | #4196 | P2 묶음(공유 링크·Base16·오로라·사이드바 이미지·터미널 파생·Liquid Glass·코드 하이라이트) | UXUI | 항목별 | — | P2 |
+
+**병렬 파도**: 파도 0은 AP-0 ‖ AP-1a ‖ AP-1c(서로 다른 파일). 파도 1은 1a·1c 머지 뒤 AP-1b ‖ AP-2a ‖ AP-3 ‖ AP-4(「엔진 + 갤러리」가 첫 가치라 AP-1b가 먼저 시작·검수된다). 파도 2는 AP-5(1b 뒤) ‖ AP-2b ‖ AP-6(1b 뒤). 파도 3은 AP-7·AP-8이다. 증보 3이 Accepted로 track/engine에 랜딩하는 것이 AP-1b·4·5·6의 머지 조건이고 착수와 PR 작성은 먼저 해도 된다(ADR-0100).
+
+**충돌 방지(파일 소유)**
+- `design/theme.ts`·`public/theme-boot.js`·core `appearance.ts`·`AppearanceSection.tsx`와 `tokens.css`의 두 군데(`.app-shell` 배경 층 변수화, 파일 위쪽의 `@import`)는 AP-1a가 소유한다. 다른 이슈는 건드리지 않고 `design/appearance/*.css` 조각과 행 파일만 더한다.
+- `tokens.css`의 `@theme --text-*`와 `--spacing-row`는 AP-2a만 만진다.
+- core `design/`의 새 파일은 이슈마다 따로다(AP-1c `scrim.ts`, AP-1b `themeSeed.ts`·`themeCatalog.generated.ts`·`derive.ts`, AP-2a `density.ts`, AP-4 `wallpaper.ts`, AP-5 `userTheme.ts`·`vscodeImport.ts`). `themeResolve.ts`만 AP-1a에서 AP-1b로 이어진다.
+- `legal/THIRD_PARTY_NOTICES.md`는 AP-1b(Buzz 행·카탈로그 행)와 AP-3(「Desktop client direct additions」 행)이 서로 다른 표를 고친다.

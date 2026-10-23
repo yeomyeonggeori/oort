@@ -21,7 +21,7 @@ use momo_auth::{
     PasswordResetIssueError, Principal, CLAIM_KIND_PASSWORD_RESET,
 };
 use momo_db::audit::{write_audit, AuditEntry};
-use momo_messaging::get_member;
+use momo_messaging::{get_member, RevocationCause};
 use uuid::Uuid;
 
 use crate::dto::{ChangePasswordRequest, LoginResponse, MemberDto, PasswordResetClaimResponse};
@@ -193,7 +193,13 @@ pub async fn change_own_password(
                     // The change revoked every session of the member (the
                     // caller gets a fresh one below); every phone registered
                     // under them stops receiving pushes now (#2677).
-                    end_member_sessions_in_tx(conn, workspace_id, member_id).await?;
+                    end_member_sessions_in_tx(
+                        conn,
+                        workspace_id,
+                        member_id,
+                        RevocationCause::PasswordChanged,
+                    )
+                    .await?;
                     write_audit(
                         conn,
                         &AuditEntry::new(workspace_id, "member.password_changed")

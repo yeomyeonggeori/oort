@@ -137,6 +137,7 @@ compose's default (`${CENTRIFUGO_LOG_LEVEL:-info}`). Paste them decoded, e.g.
 | api | `PORT` | `8080` |
 | api | `RAILWAY_RUN_UID` | `0` — the start command drops to uid 10001 itself (see Drive) |
 | api | `CENT_API_URL` | `http://centrifugo.railway.internal:8000/api` |
+| api | `MOMO_PUBLIC_BASE_URL` | `https://${{shared.OORT_SITE_ADDRESS}}` — the address GitHub is told to call (ADR-0205 D2) and the origin of the invite links an approval decision answers with (ADR-0186); api only. The generator does not write this key: the scheme is typed here, the host is the one already declared for this edge (see "GitHub App on this instance") |
 | relay | `CENT_API_URL` | `http://centrifugo.railway.internal:8000/api` |
 | agent-worker | `WORKER_DATABASE_URL` | `postgres://momo_worker:${{shared.WORKER_POSTGRES_PASSWORD}}@postgres.railway.internal:5432/${{shared.POSTGRES_DB}}` |
 | api | `HERMES_BASE_URL` | `http://hermes.railway.internal:8642/v1` |
@@ -501,7 +502,9 @@ generator's output, so the domain comes first:
    - `GITHUB_APP_MASTER_KEY` (ADR-0205, #3947) reaches **api only** (one shared
      reference, optional: empty ⇒ only the GitHub 알림 surface is 503). Do not add
      it to agent-worker, relay or any Hermes service. The owner sets the value;
-     the generator emits a fresh random for a new project.
+     the generator emits a fresh random for a new project. `MOMO_PUBLIC_BASE_URL`
+     (#4221) is api only as well. An install that predates #3947 adds both by
+     hand: see "GitHub App on this instance".
    - `OUTBOUND_WEBHOOK_MASTER_KEY` must reach **webhook-sender as well as api**,
      with the same value (the same shared reference). #2066 deleted the
      binary's `JWT_HMAC` fallback: a sender without it refuses to boot, and one
@@ -550,6 +553,83 @@ client-IP gate passes; nobody else gets the link until it does.
 4. **Client-IP gate** (Public edge → Client-IP gate). It must PASS before the
    claim link is shared or the team is invited; repeat it about two weeks
    later.
+
+## GitHub App on this instance (ADR-0205, #4221)
+
+The GitHub surface (`/v1/integrations/github/*`) reads two **api** variables.
+No other service holds either: `check_railway_catalog.py` walks every service
+of the catalog, by name and by `${{shared.GITHUB_APP_MASTER_KEY}}` reference.
+
+- `GITHUB_APP_MASTER_KEY` = `${{shared.GITHUB_APP_MASTER_KEY}}`: the key that
+  seals the App's private key and webhook secret in the database. Absent, the
+  GitHub routes answer 503 (an unsigned webhook is refused with 401 first) and
+  every other route is untouched. It must differ from `JWT_HMAC`, both webhook
+  master keys and `PROVIDER_LINK_MASTER_KEY` (the api refuses to boot
+  otherwise). It never reaches agent-worker, relay, webhook-sender, notifier or
+  the Hermes service (ADR-0205 D1, ADR-0203 D6-2).
+- `MOMO_PUBLIC_BASE_URL` = `https://${{shared.OORT_SITE_ADDRESS}}`: what the
+  App manifest tells GitHub to call (webhook, redirect, setup URL), and the
+  origin of the invite links an approval decision answers with (ADR-0186). The
+  api reads it only as an absolute `https://` origin with a host; anything else
+  is ignored with one startup warning and the App registration answers 409
+  `public_address_required`. A wrong host behind a correct prefix is not
+  detected by the api at all, which is why the catalog pins the exact
+  reference. `OORT_SITE_ADDRESS` is the host the generator derived from
+  `RAILWAY_PUBLIC_DOMAIN` (scheme stripped), the one host Caddy serves, so the
+  two cannot drift. `MOMO_T3_ENABLED` is not part of this catalog, so the address
+  is not handed to a workd (`ready_t3` answers 503 before it reads the URL);
+  setting that flag by hand changes this.
+
+**An install that predates #3947** has no `GITHUB_APP_MASTER_KEY` among its
+shared variables. Add that one variable by hand. Do not re-render the generator
+over live variables: every secret key that is not exported is minted fresh
+(`JWT_HMAC`, the Centrifugo secrets, `PROVIDER_LINK_MASTER_KEY`, the two
+webhook master keys, the database role passwords), which rotates them under a
+running instance once pasted. The generator is for a new project.
+
+1. **Key**, in the generator's own shape (`gen()` in
+   `scripts/self_host_env.sh`). Nothing can re-derive it and a lost key means
+   registering the App again, so keep the file:
+   ```sh
+   umask 077; mkdir -p ~/.momo-secrets
+   openssl rand -hex 24 > ~/.momo-secrets/railway-github-app-master-key
+   ```
+2. **Shared variable**: Project Settings → Shared Variables → new variable
+   `GITHUB_APP_MASTER_KEY` with the file's content. `railway variable set` is
+   service-scoped (CLI 4.27 has no shared flag), so this step is the dashboard.
+   `pbcopy < ~/.momo-secrets/railway-github-app-master-key` fills the clipboard
+   without printing the value; `pbcopy < /dev/null` clears it afterwards.
+3. **api references**, single-quoted so the shell leaves `${{ }}` alone, with
+   `--skip-deploys` so setting them does not redeploy the running image. Run it
+   from a directory linked to the team project; `railway status` names the
+   project and environment it will change (`-s api` assumes the service is
+   named `api`):
+   ```sh
+   railway variable set 'GITHUB_APP_MASTER_KEY=${{shared.GITHUB_APP_MASTER_KEY}}' \
+     'MOMO_PUBLIC_BASE_URL=https://${{shared.OORT_SITE_ADDRESS}}' -s api --skip-deploys
+   ```
+   They take effect with the next api deployment, the one that carries the
+   image with the GitHub routes. That the CLI stores `${{shared.…}}` as a live
+   reference is not verifiable from the repo; the api service's Variables tab
+   takes the same two values. If `OORT_SITE_ADDRESS` is not the bare host,
+   type `https://<domain>` for `MOMO_PUBLIC_BASE_URL` instead.
+4. **After that deployment** (`<domain>` is the caddy public host):
+   - As the instance operator, `GET /v1/integrations/github/app` answers 200
+     with `masterKeyConfigured` and `publicAddressConfigured` both `true`. The
+     second only proves an `https://` prefix and a host.
+   - The value itself, with no bearer and nothing written:
+     ```sh
+     curl -si "https://<domain>/v1/integrations/github/setup" | grep -i '^location:'
+     ```
+     is `location: https://<domain>/?githubInstall=invalid_request` (status 303).
+     503 means no key, 409 means no usable address.
+   - An unsigned request is refused before the key is consulted:
+     ```sh
+     curl -s -o /dev/null -w '%{http_code}\n' -X POST "https://<domain>/v1/integrations/github/webhook"
+     ```
+     prints `401`.
+5. Registering the App itself (GitHub's manifest screen) is the owner's step in
+   oort, not part of this catalog.
 
 ## Backups and upgrades
 

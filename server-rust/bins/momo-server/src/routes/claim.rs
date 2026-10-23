@@ -37,6 +37,7 @@ use momo_auth::{
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_tenant_tx, DbError};
+use momo_messaging::RevocationCause;
 
 use crate::dto::{ClaimRequest, LoginResponse, MemberDto};
 use crate::error::{db_error, ApiError};
@@ -108,7 +109,13 @@ pub async fn claim(
                     // (`consume_claim_in_tx`); their push registrations and device keys (#3022) end in
                     // the same commit (#2677). An owner bootstrap revokes none.
                     if outcome.claim_kind == momo_auth::CLAIM_KIND_PASSWORD_RESET {
-                        end_member_sessions_in_tx(conn, workspace_id, outcome.member_id).await?;
+                        end_member_sessions_in_tx(
+                            conn,
+                            workspace_id,
+                            outcome.member_id,
+                            RevocationCause::PasswordReset,
+                        )
+                        .await?;
                     }
                     write_audit(
                         conn,
