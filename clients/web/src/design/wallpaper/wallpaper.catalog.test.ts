@@ -125,23 +125,25 @@ describe.runIf(catalog !== undefined)("카탈로그 57 테마-모드 위의 배�
     expect(bad).toEqual([]);
   });
 
-  // 교정점: ADR-0189 증보 3 D6의 표(프로토타입 측정). 구현이 그 표를 **그대로** 재현한다는 것을 리터럴로 못 박는다. 파생 엔진이
-  // 바닥·잉크 파생을 바꿔서 이 숫자가 움직이면 이 시험이 빨개지고, 그때는 ADR의 표와 함께 의식적으로 고친다.
-  it("교정점: 하한 분포 26·9·13·9 와 유리·배경 불가 9건이 ADR 표와 같다", () => {
+  // 교정점: 파생 엔진(AP-1b #4256)이 머지된 뒤의 57 테마-모드 하한 분포를 리터럴로 못 박는다. 파생 엔진이 바닥·잉크 파생을 바꿔서 이
+  // 숫자가 움직이면 이 시험이 빨개지고, 그때는 문서와 함께 의식적으로 고친다.
+  //
+  // **ADR-0189 증보 3 D6의 표(26·9·13·9, 불가 9건)와 다르다.** 그 표는 Buzz 원본 색을 그대로 잰 프로토타입 값이다. 엔진이 들어온 뒤에는
+  // 잉크가 바닥과의 대비(7:1)를 지키도록 파생되어서 하한이 내려갔고, 0.95를 넘는 모드가 없다(쓸 수 없는 테마 0, 힌트 22).
+  // ADR·이슈 정정 코멘트의 「57종 중 9」는 엔진 뒤의 값이 아니다(문서 갱신은 기획 트랙의 몫, PR 본문에 적었다).
+  it("교정점: 하한 분포 26·9·22·0 — 파생 엔진 뒤의 값이고, 쓸 수 없는 모드는 없다", () => {
     const floors = rows.map(({ mode, tokens }) => wallpaperTreatment(wallpaperTokensOf(tokens), mode).floor);
     expect({
       "0.80 이하": floors.filter((f) => f <= 0.8).length,
       "0.80 초과 0.85 미만": floors.filter((f) => f > 0.8 && f < 0.85).length,
       "0.85 이상 0.95 이하": floors.filter((f) => f >= 0.85 && f <= 0.95).length,
       "0.95 초과": floors.filter((f) => f > 0.95).length,
-    }).toEqual({ "0.80 이하": 26, "0.80 초과 0.85 미만": 9, "0.85 이상 0.95 이하": 13, "0.95 초과": 9 });
+    }).toEqual({ "0.80 이하": 26, "0.80 초과 0.85 미만": 9, "0.85 이상 0.95 이하": 22, "0.95 초과": 0 });
     const unavailable = rows
       .filter(({ mode, tokens }) => wallpaperTreatment(wallpaperTokensOf(tokens), mode).verdict === "unavailable")
       .map(({ id, mode }) => `${id}/${mode}`)
       .sort();
-    expect(unavailable).toEqual(
-      ["catppuccin/light", "everforest/light", "kanagawa/light", "material/light", "one/dark", "rose-pine/light", "snazzy-light/light", "solarized/dark", "solarized/light"].sort()
-    );
+    expect(unavailable).toEqual([]);
   });
 
   it("판정은 하한의 퍼센트로만 정해진다 (불가는 95% 초과, 힌트는 85~95%)", () => {
