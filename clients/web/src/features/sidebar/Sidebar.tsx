@@ -1416,8 +1416,8 @@ export function Sidebar({
                       actionLabel="다시 시도"
                       onAction={() => void directoryQuery.refetch()}
                       separator={false}
-                      // 행과 같은 좌우 10: 배너 첫 글자가 행의 아바타와 같은 자에서 시작한다.
-                      className="px-2.5"
+                      // 배너 첫 글자가 행의 아바타 왼쪽 끝(아이콘 칸 10 - 번짐 3 = 7)과 거의 같은 자에서 시작한다: 이 간격표의 가장 가까운 칸이 2(8px)다.
+                      className="px-2"
                       testId="roster-error"
                     />
                   </li>
@@ -1432,7 +1432,7 @@ export function Sidebar({
                       actionLabel="다시 시도"
                       onAction={() => void readStates.refetch()}
                       separator={false}
-                      className="px-2.5"
+                      className="px-2"
                       testId="read-state-error"
                     />
                   </li>
