@@ -59,6 +59,12 @@ export interface DestinationMarks {
   chat: DestinationMark;
   inbox: DestinationMark;
   mine: DestinationMark;
+  /**
+   * 「예약됨」 줄(ADR-0208, #4215). 잉크 알약 = **보내지 못한 예약의 수**다: 그것은 사람이 결정해야 하는
+   * 일이라 「나에게 직접 필요한 수」에 든다. 대기 개수는 달지 않고(알약의 뜻을 흐리지 않는다) 점도 쓰지
+   * 않는다(점은 접혀서 수를 못 그릴 때의 문법이고 이 줄은 접히지 않는다). 접힌 레일에는 표지가 없다.
+   */
+  scheduled: DestinationMark;
 }
 
 const NONE: DestinationMark = { pill: null, dot: null };
@@ -69,11 +75,14 @@ const NONE: DestinationMark = { pill: null, dot: null };
  *           안 그리고, 접힌 레일만 그린다(`WorkspaceRail`).
  *   inbox = 잉크 알약, 나에게 필요한 일 전부.
  *   mine  = 잉크 알약(응답 필요 칸), 없으면 아직 안 본 끝남이 초록 점.
+ *   scheduled = 잉크 알약, 보내지 못한 예약의 수(ADR-0208). 점은 없다.
  */
 export function destinationMarks(input: {
   needsMe: Pick<NeedsMe, "total" | "panes">;
   unreadChannels: number;
   doneUnseen: boolean;
+  /** 보내지 못한 예약의 수(ADR-0208). 생략하면 0이다: 이 입력을 모르는 호출처는 예전 그대로다. */
+  scheduledFailed?: number;
 }): DestinationMarks {
   const minePill = badgeFor({ needsMe: input.needsMe.panes });
   return {
@@ -83,5 +92,6 @@ export function destinationMarks(input: {
       pill: minePill,
       dot: minePill === null && input.doneUnseen ? "ok" : null,
     },
+    scheduled: { pill: badgeFor({ needsMe: input.scheduledFailed }), dot: null },
   };
 }

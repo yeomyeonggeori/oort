@@ -35,6 +35,7 @@ vi.mock("./uploadTransport", () => ({
 const {
   addFiles,
   clearSurface,
+  dropClaimed,
   dropDraft,
   peekSent,
   readSurface,
@@ -361,6 +362,53 @@ describe("upload orchestration", () => {
       mime: "text/plain",
       size: 0,
     });
+  });
+
+  it("drops only the files a schedule claimed and keeps the ones attached while the request was in flight (ADR-0208 D16)", async () => {
+    createAttachmentUpload
+      .mockResolvedValueOnce({ id: "att-1", status: "pending", uploadUrl: "https://archive.invalid/1" })
+      .mockResolvedValueOnce({ id: "att-2", status: "pending", uploadUrl: "https://archive.invalid/2" });
+    completeAttachmentUpload
+      .mockResolvedValueOnce({ id: "att-1", channelId: "ch", uploaderMemberId: "m", name: "a.log", mime: "text/plain", size: 8, status: "complete", createdAtMs: 0 })
+      .mockResolvedValueOnce({ id: "att-2", channelId: "ch", uploaderMemberId: "m", name: "b.log", mime: "text/plain", size: 8, status: "complete", createdAtMs: 0 });
+    addFiles(KEY, TARGET, [file("a.log", 8)]);
+    await settle();
+    await settle();
+    const snapshot = peekSent(KEY).attachmentIds;
+    expect(snapshot).toEqual(["att-1"]);
+    // 요청이 나는 동안 새로 붙인 파일.
+    addFiles(KEY, TARGET, [file("b.log", 8)]);
+    await settle();
+    await settle();
+    expect(peekSent(KEY).attachmentIds).toEqual(["att-1", "att-2"]);
+
+    dropClaimed(KEY, snapshot);
+
+    expect(peekSent(KEY).attachmentIds).toEqual(["att-2"]);
+    expect(readSurface(KEY).drafts).toHaveLength(1);
+  });
+
+  it("matches a claimed id whatever its letter case, in both directions, and does nothing for an empty claim", async () => {
+    // 서버는 id를 대소문자를 섞어 준다: 올라간 파일의 id가 대문자일 때 점유 목록이 소문자여도, 그 반대여도 같은 파일이다.
+    createAttachmentUpload.mockResolvedValue({ id: "ATT-UP", status: "pending", uploadUrl: "https://archive.invalid/up" });
+    completeAttachmentUpload.mockResolvedValue({ id: "ATT-UP", channelId: "ch", uploaderMemberId: "m", name: "a.log", mime: "text/plain", size: 8, status: "complete", createdAtMs: 0 });
+    addFiles(KEY, TARGET, [file("a.log", 8)]);
+    await settle();
+    await settle();
+    expect(peekSent(KEY).attachmentIds).toEqual(["ATT-UP"]);
+    dropClaimed(KEY, []);
+    expect(readSurface(KEY).drafts).toHaveLength(1);
+    dropClaimed(KEY, ["att-up"]);
+    expect(readSurface(KEY).drafts).toHaveLength(0);
+
+    createAttachmentUpload.mockResolvedValue({ id: "att-low", status: "pending", uploadUrl: "https://archive.invalid/low" });
+    completeAttachmentUpload.mockResolvedValue({ id: "att-low", channelId: "ch", uploaderMemberId: "m", name: "b.log", mime: "text/plain", size: 8, status: "complete", createdAtMs: 0 });
+    addFiles(KEY, TARGET, [file("b.log", 8)]);
+    await settle();
+    await settle();
+    expect(peekSent(KEY).attachmentIds).toEqual(["att-low"]);
+    dropClaimed(KEY, ["ATT-LOW"]);
+    expect(readSurface(KEY).drafts).toHaveLength(0);
   });
 
   it("clears everything a surface holds, aborting what was in flight", async () => {

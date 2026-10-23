@@ -1,0 +1,1485 @@
+{
+  "mode": "after",
+  "results": [
+    {
+      "name": "1440-light s1 보낼 내용이 있으면 ▾가 서 있다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s1 ▾ 이름은 「예약해서 보내기」",
+      "ok": true
+    },
+    {
+      "name": "1440-light s1 막히지 않으면 aria-disabled가 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s1 빈 입력: ▾가 aria-disabled",
+      "ok": true
+    },
+    {
+      "name": "1440-light s1 빈 입력: ▾가 포커스를 받는다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s1 빈 입력: 누르면 이유를 말한다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s1 빈 입력: 메뉴는 열리지 않는다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 가로 넘침 0 (기본)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s2 항목: 내일 · 다음 주 월요일 · 직접 고르기…",
+      "ok": true
+    },
+    {
+      "name": "1440-light s2 내일 오전 9:00 + 10월 23일 (금)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s2 둘째: 다음 주 월요일 오전 9:00 + 10월 26일 (월)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s2 시간대 안내 줄",
+      "ok": true
+    },
+    {
+      "name": "1440-light s2 첫 항목에 초점",
+      "ok": true
+    },
+    {
+      "name": "1440-light s2 일요일: 다음 주 월요일 항목이 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s2 일요일: 내일 오전 9:00은 있다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s2 한도: 메뉴는 열린다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s2 한도 문장",
+      "ok": true
+    },
+    {
+      "name": "1440-light s2 한도: 항목은 aria-disabled이고 disabled가 아니다(키보드가 닿는다)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s2 한도: 흐린 항목에 키보드가 닿는다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s3 처음 값은 내일 오전 9:00",
+      "ok": true
+    },
+    {
+      "name": "1440-light s3 결과 문장",
+      "ok": true
+    },
+    {
+      "name": "1440-light s3 시간대 줄",
+      "ok": true
+    },
+    {
+      "name": "1440-light s3 초점은 날짜 칸",
+      "ok": true
+    },
+    {
+      "name": "1440-light s3 1분 안: 오류 줄",
+      "ok": true
+    },
+    {
+      "name": "1440-light s3 오류 줄은 role=alert",
+      "ok": true
+    },
+    {
+      "name": "1440-light 서버에는 아무것도 가지 않았다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 가로 넘침 0 (직접 고르기)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s4 서버가 받았다: 내일 오전 9:00",
+      "ok": true
+    },
+    {
+      "name": "1440-light s4 요청에 clientRequestId가 있다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s4 입력창은 비워졌다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s4 상태줄: 응답의 시각으로",
+      "ok": true
+    },
+    {
+      "name": "1440-light s4 상태줄 낭독 노드는 늘 붙어 있다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s4 배너(대기): 이 채널에 예약된 메시지 1개",
+      "ok": true
+    },
+    {
+      "name": "1440-light s4 입력창으로 초점이 돌아와 있다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 가로 넘침 0 (예약 직후)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s4 3초 뒤 상태줄이 걷힌다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s4 배너는 남는다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s4 프리셋 실패: 직접 고르기가 같은 시각으로 열린다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s4 프리셋 실패: 오류 줄이 이유를 말한다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s4 프리셋 실패: 글은 그대로다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s5 (a) 채널: 이 채널에 예약된 메시지 2개",
+      "ok": true
+    },
+    {
+      "name": "1440-light s5 (a) 대기 배너는 role=status",
+      "ok": true
+    },
+    {
+      "name": "1440-light s5 (a) 「보기」 단추",
+      "ok": true
+    },
+    {
+      "name": "1440-light s5 사이드바: 「예약됨」 줄이 서고 알약은 없다(대기는 세지 않는다)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s5 「보기」는 그 채널로 거른 목록을 연다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s5 거른 목록 머리: 「#일반 예약만 보고 있어요」",
+      "ok": true
+    },
+    {
+      "name": "1440-light s5 거른 목록: 두 행",
+      "ok": true
+    },
+    {
+      "name": "1440-light s5 (a) 대화: 이 대화에 예약된 메시지 1개",
+      "ok": true
+    },
+    {
+      "name": "1440-light s5 스레드 패널은 320px 열이다(명세 5: 320px 스레드 패널의 입력창)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s5 (b) 스레드: 이 스레드에 예약된 메시지 1개",
+      "ok": true
+    },
+    {
+      "name": "1440-light s5 (b) 스레드 배너: 두 줄이 비슷한 길이로 접힌다(줄 폭 [69,106])",
+      "ok": true
+    },
+    {
+      "name": "1440-light s5 (b) 스레드 배너는 입력 틀에 닿지 않는다(간격 8px ≥ 8)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s5 (b) 채널 배너는 둘을 센다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s5 스레드 입력창에도 ▾가 서 있다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s5 스레드: 빈 입력이라 ▾는 흐리다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s5 스레드: 이유는 안 보이는 낭독 문장에 실려 있다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s5 스레드: 눈에 보이는 상태줄이 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s5 스레드: 글을 쓰면 ▾가 켜진다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 가로 넘침 0 (스레드 패널)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s5 (c) 실패: 예약한 메시지 1개를 보내지 못했어요",
+      "ok": true
+    },
+    {
+      "name": "1440-light s5 (c) 실패 배너는 role=alert",
+      "ok": true
+    },
+    {
+      "name": "1440-light s5 (c) 사이드바 알약: 보내지 못한 수 1개(잉크)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s5 (c) 알약의 낭독 이름",
+      "ok": true
+    },
+    {
+      "name": "1440-light s5 (c) 스레드 실패 배너: 예약한 메시지 1개를 보내지 못했어요",
+      "ok": true
+    },
+    {
+      "name": "1440-light s5 (c) 스레드 실패 배너: 두 줄이 비슷한 길이로 접힌다(줄 폭 [119,95])",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 사이드바 알약: 보내지 못한 예약 2개",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 머리: 내 예약 7개",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 구획: 보내지 못함이 위, 보낼 예정이 아래",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 행은 일곱",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 실패 1 not_member: 이유·다음 줄·「내용 복사」만",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 실패 2 missed: 「지금 보내기」(주)·「다시 예약」",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 마감 30초 안의 행: 「곧 보내요」",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 내일 오전 9:00 + 첨부 2개",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 긴 채널 이름 행",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 DM 행: 김인턴과의 대화 · 10월 26일 (월) 오전 9:00",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 나간 채널: 알 수 없는 채널",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 보낼 예정 행에는 상시 버튼이 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 ⋯ 이름은 행마다 다르다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 행 낭독 이름: 보낼 예정은 「{채널}, {미리보기}, {시각(요일까지)}에 보내요」",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 행 낭독 이름: 보내지 못함은 「{채널}, {미리보기}, {사유}」",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 긴 채널 이름 칸은 한 줄 말줄임 모양이다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 DM 행의 앞머리는 상대의 아바타(24px, 에이전트라 둥근 사각)다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 채널 행의 앞머리는 종류 아이콘이다(아바타 없음)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 미리보기는 두 줄에서 접힌다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 가로 넘침 0 (목록)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 잠긴 행의 메뉴: 지금 보내기 · 시간 바꾸기(흐림) · 고치기(흐림) · 지우기",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 잠긴 항목의 이유 줄은 흐려지지 않는다(실효 투명도 1)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 Esc로 닫으면 초점이 ⋯로 돌아간다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 우클릭 메뉴: 지금 보내기 · 시간 바꾸기 · 고치기 · 지우기(⋯와 같다)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 지금 보내기: 한 번 누르면 간다(확인 없음)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 지금 보내기: 목록 머리 상태줄 「메시지를 보냈어요」",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 지금 보내기: 초점은 다음 행의 첫 컨트롤",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 상태줄은 「내 예약 N개」의 자리를 대신 쓴다(눈에 보이는 줄 「메시지를 보냈어요」, 머리 안, 개수는 잠시 없다)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 상태줄이 목록을 밀지 않는다(「보내지 못함」 제목 y 47 → 47)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 3초 뒤 「내 예약 N개」가 돌아오고 상태줄은 사라진다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 돌아온 뒤에도 목록은 그 자리다(y 47)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 지우기 대화상자: 제목과 본문",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 지우기: 초점은 다음 행의 첫 컨트롤",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 720px: 긴 채널 이름이 말줄임으로 닫힌다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 720px: 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 빈: 예약한 메시지가 없어요 + 대화로 돌아가기",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 오류: 예약 목록을 불러오지 못했어요 + 다시 불러오기(role=alert)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 로딩: 세 행 높이의 중성 스켈레톤, 제목은 서 있고 개수는 아직 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 복사 실패: 누른 단추가 밀리지 않는다(y 189 → 189), 실패 줄은 단추 아래에 선다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 복사 실패: 이유와 다음 행동이 행 안에 선다(role=alert)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 복사 실패: 단추는 「복사됨」이 되지 않는다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 없는 서버: 이유와 다음 행동 줄 + 대화로 돌아가기",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 없는 서버: 사이드바에 「예약됨」 줄이 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s6 없는 서버: 「대화로 돌아가기」가 목록 밖으로 나간다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7 세 행: not_member · missed · sessions_ended(시각 순)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7 sessions_ended 행: 이유·다음 줄·「내용 확인」만",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7 사유 줄은 위험 어조, 다음 줄은 보조 어조",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7 sessions_ended의 ⋯: 내용 확인 · 고치기 · 내용 복사 · 지우기(지금 보내기·다시 예약 없음)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7 내용 확인: 초점은 제목",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7 내용 확인: 설명",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7 내용 확인: 채널",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7 내용 확인: 본문 상자는 `scrollbar-visible`이고 세로로 스크롤한다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7 내용 확인: 본문 전체(길면 이 상자만 스크롤)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7 내용 확인: 첨부 이름",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7 내용 확인: 보내려던 시각",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7 내용 확인: 푸터 닫기 · 지우기 · 다시 예약 · 지금 보내기",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7 내용 확인: Tab 순서 본문 → 닫기 → 지우기 → 다시 예약 → 지금 보내기",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7 지우기 확인: 초점은 「취소」(안전한 쪽)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7 지우기 확인: 그룹 이름 「예약을 지울까요?」와 본문",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7 지우기 확인: 본문은 그대로 보인다(대화상자는 겹치지 않는다)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7 Esc 한 번: 확인만 취소하고 초점은 「지우기」",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7 Esc 한 번 더: 닫히고 초점은 행의 「내용 확인」",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7 지금 보내기 거절: 대화상자 안에 3.2의 이유 줄",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7 지금 보내기 거절: 대화상자는 열려 있다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7 다시 예약: 내용 확인은 닫히고 「다시 예약하기」가 열린다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7 다시 예약을 Esc로 닫으면 초점은 행의 「내용 확인」",
+      "ok": true
+    },
+    {
+      "name": "1440-light 가로 넘침 0 (실패 행)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7 긴 본문: 본문이 한 화면의 3배 넘게 길다(2678px / 보이는 318px)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7 긴 본문: 스크롤 막대가 자리를 차지해 늘 보인다(폭 10px ≥ 10, 오버레이 막대는 스크롤해야 나타난다)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7 긴 본문: 마지막 줄은 스크롤 전에는 가려져 있고(scrollTop 0) 그 줄이 본문에 있다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7 긴 본문: 맨 아래로 스크롤하면 마지막 줄까지 닿는다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7e 처음: 대기 배너 · 알약 없음",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7e 신호가 구독한 개인 채널로 갔다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7e 신호 도착 즉시 배너가 실패 어조: 예약한 메시지 1개를 보내지 못했어요",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7e 사이드바 알약 1",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7e 새로 읽지 않았다: 쓰던 글이 그대로",
+      "ok": true
+    },
+    {
+      "name": "1440-light s7e 목록: 「보내지 못함」 구획에 sessions_ended 행, 「내용 확인」만",
+      "ok": true
+    },
+    {
+      "name": "1440-light s8 입력창: ▾가 흐리다(aria-disabled)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s8 입력창: 보내기도 흐리다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s8 입력창: 예약용 오프라인 줄·배너를 따로 만들지 않는다(앱의 줄 하나)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s8 입력창: 캐시된 대기 배너는 그대로 보인다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s8 입력창: ▾가 포커스를 받는다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s8 목록: 연결이 없어요. 연결되면 예약을 바꿀 수 있어요.",
+      "ok": true
+    },
+    {
+      "name": "1440-light s8 목록: 캐시된 네 행이 그대로 보인다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s8 목록: 실패 행의 상시 버튼이 모두 흐리다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s8 목록: ⋯ 메뉴의 항목이 모두 흐리다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s8 대화상자: 연결이 없어서 지금은 할 수 없어요. 연결되면 다시 눌러 주세요.",
+      "ok": true
+    },
+    {
+      "name": "1440-light s8 대화상자: 확인이 흐리다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s8 거는 도중 끊김: 예약됐는지 확인하지 못했어요. 연결을 확인하고 다시 눌러 주세요.",
+      "ok": true
+    },
+    {
+      "name": "1440-light s8 거는 도중 끊김: 오류 줄은 role=alert",
+      "ok": true
+    },
+    {
+      "name": "1440-light s8 거는 도중 끊김: 쓰던 글은 그대로",
+      "ok": true
+    },
+    {
+      "name": "1440-light s8 다시 누르면 같은 clientRequestId로 건다(멱등)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s9 비밀 키: 줄의 첫 문장이 「이 메시지는 예약하지 않았어요.」",
+      "ok": true
+    },
+    {
+      "name": "1440-light s9 비밀 키: 서버를 부르지 않았고 쓰던 글이 그대로다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s9 예약을 끈 서버: 직접 고르기가 이유 + 다음 행동을 말한다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s9 예약을 끈 서버: 「예약하기」가 흐리다(disabled, 불투명도 0.5)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s9 예약을 끈 서버: 취소는 눌린다(닫을 길이 있다)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s9 예약을 끈 서버: 날짜·시간 칸도 오프라인처럼 잠긴다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s9 예약을 끈 서버: ▾가 흐리고(aria-disabled) title이 이유 + 다음 행동을 합쳐 싣는다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s9 예약을 끈 서버: 눌러서 이유를 듣는다(입력창 3초 줄)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s9 요청 중: 확인은 「예약 중」(aria-busy)이고 칸과 취소가 잠긴다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s9 요청 중: Esc가 대화상자를 닫지 않는다(결과를 모르는 채 화면이 사라지지 않는다)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s9 요청 중(프리셋): 보내기와 ▾가 aria-busy이고 글은 아직 그대로다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s9 요청 중(프리셋): 눈에 보이는 3초 줄 자리와 낭독 노드가 「예약 중」을 말한다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s9 뼈대 행: 신호가 구독한 개인 채널로 갔다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s9 뼈대 행: 본문 자리는 24px 높이의 중성 막대로 서 있다(높이 24)",
+      "ok": true
+    },
+    {
+      "name": "1440-light s9 뼈대 행: 사유 줄과 「내용 확인」은 이미 서 있다",
+      "ok": true
+    },
+    {
+      "name": "1440-light s9 뼈대 행: 읽기가 끝나면 본문이 채워진다",
+      "ok": true
+    },
+    {
+      "name": "1280-light w ▾와 보내기가 한 줄에 붙어 있다",
+      "ok": true
+    },
+    {
+      "name": "1280-light w 배너가 보인다",
+      "ok": true
+    },
+    {
+      "name": "1280-light w 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "1280-light w 메뉴가 화면 안에 선다",
+      "ok": true
+    },
+    {
+      "name": "900-light w ▾와 보내기가 한 줄에 붙어 있다",
+      "ok": true
+    },
+    {
+      "name": "900-light w 배너가 보인다",
+      "ok": true
+    },
+    {
+      "name": "900-light w 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "900-light w 메뉴가 화면 안에 선다",
+      "ok": true
+    },
+    {
+      "name": "1440-collapsed-light w ▾와 보내기가 한 줄에 붙어 있다",
+      "ok": true
+    },
+    {
+      "name": "1440-collapsed-light w 배너가 보인다",
+      "ok": true
+    },
+    {
+      "name": "1440-collapsed-light w 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "1440-collapsed-light w 메뉴가 화면 안에 선다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s1 보낼 내용이 있으면 ▾가 서 있다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s1 ▾ 이름은 「예약해서 보내기」",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s1 막히지 않으면 aria-disabled가 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s1 빈 입력: ▾가 aria-disabled",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s1 빈 입력: ▾가 포커스를 받는다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s1 빈 입력: 누르면 이유를 말한다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s1 빈 입력: 메뉴는 열리지 않는다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 가로 넘침 0 (기본)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s2 항목: 내일 · 다음 주 월요일 · 직접 고르기…",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s2 내일 오전 9:00 + 10월 23일 (금)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s2 둘째: 다음 주 월요일 오전 9:00 + 10월 26일 (월)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s2 시간대 안내 줄",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s2 첫 항목에 초점",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s2 일요일: 다음 주 월요일 항목이 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s2 일요일: 내일 오전 9:00은 있다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s2 한도: 메뉴는 열린다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s2 한도 문장",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s2 한도: 항목은 aria-disabled이고 disabled가 아니다(키보드가 닿는다)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s2 한도: 흐린 항목에 키보드가 닿는다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s3 처음 값은 내일 오전 9:00",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s3 결과 문장",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s3 시간대 줄",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s3 초점은 날짜 칸",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s3 1분 안: 오류 줄",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s3 오류 줄은 role=alert",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 서버에는 아무것도 가지 않았다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 가로 넘침 0 (직접 고르기)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s4 서버가 받았다: 내일 오전 9:00",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s4 요청에 clientRequestId가 있다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s4 입력창은 비워졌다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s4 상태줄: 응답의 시각으로",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s4 상태줄 낭독 노드는 늘 붙어 있다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s4 배너(대기): 이 채널에 예약된 메시지 1개",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s4 입력창으로 초점이 돌아와 있다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 가로 넘침 0 (예약 직후)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s4 3초 뒤 상태줄이 걷힌다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s4 배너는 남는다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s4 프리셋 실패: 직접 고르기가 같은 시각으로 열린다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s4 프리셋 실패: 오류 줄이 이유를 말한다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s4 프리셋 실패: 글은 그대로다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s5 (a) 채널: 이 채널에 예약된 메시지 2개",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s5 (a) 대기 배너는 role=status",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s5 (a) 「보기」 단추",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s5 사이드바: 「예약됨」 줄이 서고 알약은 없다(대기는 세지 않는다)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s5 「보기」는 그 채널로 거른 목록을 연다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s5 거른 목록 머리: 「#일반 예약만 보고 있어요」",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s5 거른 목록: 두 행",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s5 (a) 대화: 이 대화에 예약된 메시지 1개",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s5 스레드 패널은 320px 열이다(명세 5: 320px 스레드 패널의 입력창)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s5 (b) 스레드: 이 스레드에 예약된 메시지 1개",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s5 (b) 스레드 배너: 두 줄이 비슷한 길이로 접힌다(줄 폭 [69,106])",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s5 (b) 스레드 배너는 입력 틀에 닿지 않는다(간격 8px ≥ 8)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s5 (b) 채널 배너는 둘을 센다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s5 스레드 입력창에도 ▾가 서 있다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s5 스레드: 빈 입력이라 ▾는 흐리다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s5 스레드: 이유는 안 보이는 낭독 문장에 실려 있다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s5 스레드: 눈에 보이는 상태줄이 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s5 스레드: 글을 쓰면 ▾가 켜진다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 가로 넘침 0 (스레드 패널)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s5 (c) 실패: 예약한 메시지 1개를 보내지 못했어요",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s5 (c) 실패 배너는 role=alert",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s5 (c) 사이드바 알약: 보내지 못한 수 1개(잉크)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s5 (c) 알약의 낭독 이름",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s5 (c) 스레드 실패 배너: 예약한 메시지 1개를 보내지 못했어요",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s5 (c) 스레드 실패 배너: 두 줄이 비슷한 길이로 접힌다(줄 폭 [119,95])",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 사이드바 알약: 보내지 못한 예약 2개",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 머리: 내 예약 7개",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 구획: 보내지 못함이 위, 보낼 예정이 아래",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 행은 일곱",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 실패 1 not_member: 이유·다음 줄·「내용 복사」만",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 실패 2 missed: 「지금 보내기」(주)·「다시 예약」",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 마감 30초 안의 행: 「곧 보내요」",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 내일 오전 9:00 + 첨부 2개",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 긴 채널 이름 행",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 DM 행: 김인턴과의 대화 · 10월 26일 (월) 오전 9:00",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 나간 채널: 알 수 없는 채널",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 보낼 예정 행에는 상시 버튼이 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 ⋯ 이름은 행마다 다르다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 행 낭독 이름: 보낼 예정은 「{채널}, {미리보기}, {시각(요일까지)}에 보내요」",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 행 낭독 이름: 보내지 못함은 「{채널}, {미리보기}, {사유}」",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 긴 채널 이름 칸은 한 줄 말줄임 모양이다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 DM 행의 앞머리는 상대의 아바타(24px, 에이전트라 둥근 사각)다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 채널 행의 앞머리는 종류 아이콘이다(아바타 없음)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 미리보기는 두 줄에서 접힌다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 가로 넘침 0 (목록)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 잠긴 행의 메뉴: 지금 보내기 · 시간 바꾸기(흐림) · 고치기(흐림) · 지우기",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 잠긴 항목의 이유 줄은 흐려지지 않는다(실효 투명도 1)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 Esc로 닫으면 초점이 ⋯로 돌아간다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 우클릭 메뉴: 지금 보내기 · 시간 바꾸기 · 고치기 · 지우기(⋯와 같다)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 지금 보내기: 한 번 누르면 간다(확인 없음)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 지금 보내기: 목록 머리 상태줄 「메시지를 보냈어요」",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 지금 보내기: 초점은 다음 행의 첫 컨트롤",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 상태줄은 「내 예약 N개」의 자리를 대신 쓴다(눈에 보이는 줄 「메시지를 보냈어요」, 머리 안, 개수는 잠시 없다)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 상태줄이 목록을 밀지 않는다(「보내지 못함」 제목 y 47 → 47)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 3초 뒤 「내 예약 N개」가 돌아오고 상태줄은 사라진다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 돌아온 뒤에도 목록은 그 자리다(y 47)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 지우기 대화상자: 제목과 본문",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 지우기: 초점은 다음 행의 첫 컨트롤",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 720px: 긴 채널 이름이 말줄임으로 닫힌다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 720px: 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 빈: 예약한 메시지가 없어요 + 대화로 돌아가기",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 오류: 예약 목록을 불러오지 못했어요 + 다시 불러오기(role=alert)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 로딩: 세 행 높이의 중성 스켈레톤, 제목은 서 있고 개수는 아직 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 복사 실패: 누른 단추가 밀리지 않는다(y 189 → 189), 실패 줄은 단추 아래에 선다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 복사 실패: 이유와 다음 행동이 행 안에 선다(role=alert)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 복사 실패: 단추는 「복사됨」이 되지 않는다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 없는 서버: 이유와 다음 행동 줄 + 대화로 돌아가기",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 없는 서버: 사이드바에 「예약됨」 줄이 없다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s6 없는 서버: 「대화로 돌아가기」가 목록 밖으로 나간다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7 세 행: not_member · missed · sessions_ended(시각 순)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7 sessions_ended 행: 이유·다음 줄·「내용 확인」만",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7 사유 줄은 위험 어조, 다음 줄은 보조 어조",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7 sessions_ended의 ⋯: 내용 확인 · 고치기 · 내용 복사 · 지우기(지금 보내기·다시 예약 없음)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7 내용 확인: 초점은 제목",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7 내용 확인: 설명",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7 내용 확인: 채널",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7 내용 확인: 본문 상자는 `scrollbar-visible`이고 세로로 스크롤한다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7 내용 확인: 본문 전체(길면 이 상자만 스크롤)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7 내용 확인: 첨부 이름",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7 내용 확인: 보내려던 시각",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7 내용 확인: 푸터 닫기 · 지우기 · 다시 예약 · 지금 보내기",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7 내용 확인: Tab 순서 본문 → 닫기 → 지우기 → 다시 예약 → 지금 보내기",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7 지우기 확인: 초점은 「취소」(안전한 쪽)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7 지우기 확인: 그룹 이름 「예약을 지울까요?」와 본문",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7 지우기 확인: 본문은 그대로 보인다(대화상자는 겹치지 않는다)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7 Esc 한 번: 확인만 취소하고 초점은 「지우기」",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7 Esc 한 번 더: 닫히고 초점은 행의 「내용 확인」",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7 지금 보내기 거절: 대화상자 안에 3.2의 이유 줄",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7 지금 보내기 거절: 대화상자는 열려 있다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7 다시 예약: 내용 확인은 닫히고 「다시 예약하기」가 열린다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7 다시 예약을 Esc로 닫으면 초점은 행의 「내용 확인」",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 가로 넘침 0 (실패 행)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7 긴 본문: 본문이 한 화면의 3배 넘게 길다(2678px / 보이는 318px)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7 긴 본문: 스크롤 막대가 자리를 차지해 늘 보인다(폭 10px ≥ 10, 오버레이 막대는 스크롤해야 나타난다)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7 긴 본문: 마지막 줄은 스크롤 전에는 가려져 있고(scrollTop 0) 그 줄이 본문에 있다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7 긴 본문: 맨 아래로 스크롤하면 마지막 줄까지 닿는다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7e 처음: 대기 배너 · 알약 없음",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7e 신호가 구독한 개인 채널로 갔다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7e 신호 도착 즉시 배너가 실패 어조: 예약한 메시지 1개를 보내지 못했어요",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7e 사이드바 알약 1",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7e 새로 읽지 않았다: 쓰던 글이 그대로",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s7e 목록: 「보내지 못함」 구획에 sessions_ended 행, 「내용 확인」만",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s8 입력창: ▾가 흐리다(aria-disabled)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s8 입력창: 보내기도 흐리다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s8 입력창: 예약용 오프라인 줄·배너를 따로 만들지 않는다(앱의 줄 하나)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s8 입력창: 캐시된 대기 배너는 그대로 보인다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s8 입력창: ▾가 포커스를 받는다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s8 목록: 연결이 없어요. 연결되면 예약을 바꿀 수 있어요.",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s8 목록: 캐시된 네 행이 그대로 보인다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s8 목록: 실패 행의 상시 버튼이 모두 흐리다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s8 목록: ⋯ 메뉴의 항목이 모두 흐리다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s8 대화상자: 연결이 없어서 지금은 할 수 없어요. 연결되면 다시 눌러 주세요.",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s8 대화상자: 확인이 흐리다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s8 거는 도중 끊김: 예약됐는지 확인하지 못했어요. 연결을 확인하고 다시 눌러 주세요.",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s8 거는 도중 끊김: 오류 줄은 role=alert",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s8 거는 도중 끊김: 쓰던 글은 그대로",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s8 다시 누르면 같은 clientRequestId로 건다(멱등)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s9 비밀 키: 줄의 첫 문장이 「이 메시지는 예약하지 않았어요.」",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s9 비밀 키: 서버를 부르지 않았고 쓰던 글이 그대로다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s9 예약을 끈 서버: 직접 고르기가 이유 + 다음 행동을 말한다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s9 예약을 끈 서버: 「예약하기」가 흐리다(disabled, 불투명도 0.5)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s9 예약을 끈 서버: 취소는 눌린다(닫을 길이 있다)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s9 예약을 끈 서버: 날짜·시간 칸도 오프라인처럼 잠긴다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s9 예약을 끈 서버: ▾가 흐리고(aria-disabled) title이 이유 + 다음 행동을 합쳐 싣는다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s9 예약을 끈 서버: 눌러서 이유를 듣는다(입력창 3초 줄)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s9 요청 중: 확인은 「예약 중」(aria-busy)이고 칸과 취소가 잠긴다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s9 요청 중: Esc가 대화상자를 닫지 않는다(결과를 모르는 채 화면이 사라지지 않는다)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s9 요청 중(프리셋): 보내기와 ▾가 aria-busy이고 글은 아직 그대로다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s9 요청 중(프리셋): 눈에 보이는 3초 줄 자리와 낭독 노드가 「예약 중」을 말한다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s9 뼈대 행: 신호가 구독한 개인 채널로 갔다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s9 뼈대 행: 본문 자리는 24px 높이의 중성 막대로 서 있다(높이 24)",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s9 뼈대 행: 사유 줄과 「내용 확인」은 이미 서 있다",
+      "ok": true
+    },
+    {
+      "name": "1440-dark s9 뼈대 행: 읽기가 끝나면 본문이 채워진다",
+      "ok": true
+    },
+    {
+      "name": "1280-dark w ▾와 보내기가 한 줄에 붙어 있다",
+      "ok": true
+    },
+    {
+      "name": "1280-dark w 배너가 보인다",
+      "ok": true
+    },
+    {
+      "name": "1280-dark w 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "1280-dark w 메뉴가 화면 안에 선다",
+      "ok": true
+    },
+    {
+      "name": "900-dark w ▾와 보내기가 한 줄에 붙어 있다",
+      "ok": true
+    },
+    {
+      "name": "900-dark w 배너가 보인다",
+      "ok": true
+    },
+    {
+      "name": "900-dark w 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "900-dark w 메뉴가 화면 안에 선다",
+      "ok": true
+    },
+    {
+      "name": "1440-collapsed-dark w ▾와 보내기가 한 줄에 붙어 있다",
+      "ok": true
+    },
+    {
+      "name": "1440-collapsed-dark w 배너가 보인다",
+      "ok": true
+    },
+    {
+      "name": "1440-collapsed-dark w 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "1440-collapsed-dark w 메뉴가 화면 안에 선다",
+      "ok": true
+    }
+  ]
+}

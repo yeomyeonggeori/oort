@@ -130,11 +130,13 @@ export const ContextMenuItem = React.forwardRef<
   React.ElementRef<typeof ContextMenuPrimitive.Item>,
   React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.Item> & {
     tone?: "danger";
+    /** The `DropdownMenuItem` twin: `stack` lets a dimmed row carry its reason on a second line. */
+    layout?: "row" | "stack";
   }
->(({ className, tone, ...props }, ref) => (
+>(({ className, tone, layout = "row", ...props }, ref) => (
   <ContextMenuPrimitive.Item
     ref={ref}
-    className={menuRowClass({ tone, className })}
+    className={menuRowClass({ tone, layout, className })}
     {...props}
   />
 ));

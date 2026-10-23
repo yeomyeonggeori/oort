@@ -48,6 +48,10 @@ import {
   readStateRailChannelName,
   type InboxEvent,
 } from "@momo/core/features/inbox/serverInbox";
+import {
+  asScheduledMessageFrame,
+  type ScheduledMessageFrame,
+} from "@momo/core/features/scheduled/events";
 import { apiBase } from "./serverBase";
 
 // =============================================================================
@@ -592,8 +596,37 @@ export function createRealtime(
     );
   }
 
+  // ADR-0208 D12 (#4215): the scheduled-message signal rides the SAME personal channel as the inbox
+  // signals (`attach` shares the one subscription). `asInboxEvent` drops every other type, so this
+  // caller reads its own: `asScheduledMessageFrame` returns null for anything that is not
+  // `scheduled_message.updated`. A frame carries ids, status and time only, so the caller reads the
+  // list again for the text and `onResync` heals what a dropped socket missed.
+  function subscribeScheduled(
+    memberId: string,
+    handlers: { onEvent: (frame: ScheduledMessageFrame) => void; onResync: () => void }
+  ): () => void {
+    return attach(
+      readStateRailChannelName(memberId),
+      { recoverable: true, positioned: true },
+      (sub) => {
+        const onSubscribed = () => handlers.onResync();
+        const onPublication = (ctx: { data?: unknown }) => {
+          const frame = asScheduledMessageFrame(ctx.data);
+          if (frame) handlers.onEvent(frame);
+        };
+        sub.on("subscribed", onSubscribed);
+        sub.on("publication", onPublication);
+        return () => {
+          sub.off("subscribed", onSubscribed);
+          sub.off("publication", onPublication);
+        };
+      }
+    );
+  }
+
   return {
     subscribeInbox,
+    subscribeScheduled,
     subscribeWorkHostNotices,
     subscribeChannel,
     subscribeAgent,
