@@ -28,7 +28,7 @@ El nombre es la [nube de Oort](https://es.wikipedia.org/wiki/Nube_de_Oort): una 
 </tr></table>
 
 <table><tr>
-<td width="62%" valign="top"><a href="docs/assets/readme/themes.png"><img src="docs/assets/readme/themes.png" alt="El mismo canal en cuatro temas: Dawn sky, Sunset band, Catppuccin y Gruvbox Hard" width="100%"></a><br><sub><strong>57 temas de catálogo junto a nuestros tres propios</strong> (claro y oscuro contados por separado): aquí Dawn sky, Sunset band, Catppuccin y Gruvbox Hard. <em>Integrado; aún sin publicar.</em></sub></td>
+<td width="62%" valign="top"><a href="docs/assets/readme/themes.png"><img src="docs/assets/readme/themes.png" alt="El mismo canal en cuatro temas: Dawn sky, Sunset band, Catppuccin y Gruvbox Hard" width="100%"></a><br><sub><strong>57 temas de catálogo junto a nuestros tres propios</strong> (claro y oscuro contados por separado): aquí Dawn sky, Sunset band, Catppuccin y Gruvbox Hard.</sub></td>
 <td width="38%" valign="top"><a href="docs/assets/readme/phone.png"><img src="docs/assets/readme/phone.png" alt="El primer paso de la app de iPhone, «¿Qué notificaciones quieres?»: vista previa de una solicitud de aprobación con los botones Aprobar y Rechazar, trabajo terminado y menciones" width="100%"></a><br><sub><strong>En el teléfono.</strong> El primer paso al abrir la app muestra una vista previa de cada tipo de notificación: las solicitudes de aprobación y las menciones llegan siempre, y el trabajo terminado tiene un interruptor. Las compilaciones de prueba de iOS van a un pequeño grupo interno de TestFlight.</sub></td>
 </tr></table>
 
@@ -47,7 +47,7 @@ Una base de datos. Una vía de escritura. Personas y agentes en la misma lista, 
 
 ## Funciona hoy · En integración · Opiniones firmes, código pendiente
 
-✅ **Funciona hoy** — en [v0.1.35](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.35) (la imagen del servidor y la web; las apps de escritorio e iOS se compilan aparte)
+✅ **Funciona hoy** — en [v0.1.36](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.36) (la imagen del servidor y la web; las apps de escritorio e iOS se compilan aparte)
 
 - Canales, hilos, mensajes directos, citas, indicador de escritura, fijados y búsqueda — en web, escritorio (Tauri, macOS) e iOS (React Native)
 - Agentes como miembros: menciona a uno, mira su ejecución fluir al canal con un estado honesto y detenla a mitad de camino
@@ -57,13 +57,15 @@ Una base de datos. Una vía de escritura. Personas y agentes en la misma lista, 
 - Adjuntos: los archivos viven en el volumen propio de tu servidor (el valor por defecto del autoalojado) o en una unidad compartida de Google que es tuya; las descargas pasan la comprobación de pertenencia al canal del servidor y, con el backend de Google, las subidas van directamente a Drive
 - Un camino de autoalojado medido — clone → script de env → compose up → sesión iniciada — e imágenes multiarquitectura fijadas por digest con procedencia SLSA ([detalles](SECURITY.md#security-posture))
 - Un sistema de diseño («Oort cloud») cuyas reglas de contraste verifican las pruebas, en claro y oscuro
+- Apariencia a tu medida: 57 temas de catálogo junto a nuestros tres propios, con galería; tamaño de texto y densidad del chat; y un fondo de cristal con control de opacidad en la app de escritorio de macOS
+- Un menú de adjuntos en el teléfono que se abre desde el círculo + (cámara, cuadrícula de fotos recientes, archivos), y crear la GitHub App desde la app de escritorio en el navegador predeterminado
 
 🚧 **En integración**
 
 - Aprobar/Rechazar desde la pantalla de bloqueo del iPhone — implementado en v0.1.30; la comprobación en dispositivos reales sigue abierta ([comprobación en dispositivo](docs/cicd/11-ios-push-device-check.md))
 - Memoria de equipo (resúmenes, decisiones, hechos, compromisos; explorar, editar, olvidar) — publicada en v0.1.15; sus resúmenes necesitan una conexión de IA predeterminada del equipo, y las notas de la versión siguen listando como no verificada la calidad de los resúmenes con un modelo real
 - Eventos de la GitHub App en los canales — publicados en v0.1.32, desactivados hasta que el operador configure la clave de la App
-- Integrado, aún sin publicar: el catálogo de 57 temas y su galería, tamaño de texto y densidad del chat, el fondo de cristal del escritorio, el menú de adjuntos del teléfono (cuadrícula de fotos recientes y cámara), crear la GitHub App desde el escritorio y el servidor de mensajes programados (sus pantallas están en curso)
+- Mensajes programados — el servidor llegó en la v0.1.36; sus pantallas están en curso
 - Las apps de escritorio e iOS siguen siendo compilaciones de prueba para los dispositivos de quienes mantienen oort y un pequeño grupo interno de TestFlight; el despliegue a todo el equipo espera la compuerta interna ([M7](docs/cicd/03-store-readiness-gate.md)), y no hay una descarga pública con soporte
 
 💭 **Opiniones firmes, código pendiente**
@@ -96,7 +98,7 @@ Un **host de trabajo** opcional permite que los agentes ejecuten sesiones de có
 
 ### Solo quiero probar la app
 
-Todavía no hay una descarga pública con soporte ni una instancia alojada pública. Primero va nuestro propio equipo ([objetivo A](docs/adr/0187-goal-a-team-daily-desktop-ios.md)): las compilaciones de prueba de las apps de macOS e iOS van solo a los dispositivos de quienes mantienen oort y a un pequeño grupo interno de TestFlight, y la App Store, un DMG público y TestFlight externo esperan la [compuerta de tiendas](docs/cicd/03-store-readiness-gate.md). (Un DMG temprano de macOS, de agosto, sigue adjunto a la versión v0.1.1; es anterior a la app actual.) El cliente web viene dentro de la imagen del servidor, así que la forma más rápida de ver oort es el siguiente camino.
+Todavía no hay una descarga pública con soporte ni una instancia alojada pública. Primero va nuestro propio equipo ([objetivo A](docs/adr/0187-goal-a-team-daily-desktop-ios.md)): las compilaciones de prueba de las apps de macOS e iOS van solo a los dispositivos de quienes mantienen oort y a un pequeño grupo interno de TestFlight, y la App Store, un DMG público y TestFlight externo esperan la [compuerta de tiendas](docs/cicd/03-store-readiness-gate.md). El cliente web viene dentro de la imagen del servidor, así que la forma más rápida de ver oort es el siguiente camino.
 
 ### Quiero tenerlo en mi propio servidor
 
