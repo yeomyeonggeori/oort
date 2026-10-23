@@ -1,6 +1,11 @@
 import { useMemo } from "react";
 import { useQueries } from "@tanstack/react-query";
-import { fetchMessages, type Message, type ReadState } from "@momo/core/lib/api";
+import { fetchMessages, type ReadState } from "@momo/core/lib/api";
+import {
+  HUMAN_MESSAGE_PAGE_LIMIT,
+  isAmbientMessage,
+  pageHasHumanMessage,
+} from "@momo/core/features/sidebar/ambientMessage";
 import { unreadFor } from "@momo/core/features/workspace/directory";
 import { closedAtSeqOf, type ClosedDms, type ReadProjectionPhase } from "./sidebarDmClosure";
 
@@ -31,32 +36,13 @@ import { closedAtSeqOf, type ClosedDms, type ReadProjectionPhase } from "./sideb
 // =============================================================================
 
 /** 닫은 뒤 메시지를 읽는 한 쪽의 크기. 이만큼이 다 기계 메시지면 뒤에 더 있는지 몰라 되살린다. */
-export const REVIVAL_PAGE_LIMIT = 50;
+export const REVIVAL_PAGE_LIMIT = HUMAN_MESSAGE_PAGE_LIMIT;
 
 export const REVIVAL_RETRY_DELAY_MS = 300;
 
-/** 사람이 읽을 것이 아닌 메시지: 도구 호출·결과, 시스템 줄, 작업 세션 상태 카드, 지워진 메시지. */
-export function isAmbientMessage(
-  message: Pick<Message, "type" | "props" | "state">
-): boolean {
-  if (message.state === "deleted") return true;
-  if (
-    message.type === "tool_call" ||
-    message.type === "tool_result" ||
-    message.type === "system"
-  ) {
-    return true;
-  }
-  return message.props?.kind === "work_session";
-}
-
-/** 닫은 뒤의 한 쪽에 사람이 읽을 메시지가 있는가. 쪽이 가득 찼으면 모르므로 있다고 본다. */
-export function pageHasHumanMessage(
-  messages: readonly Pick<Message, "type" | "props" | "state">[]
-): boolean {
-  if (messages.length >= REVIVAL_PAGE_LIMIT) return true;
-  return messages.some((message) => !isAmbientMessage(message));
-}
+// 「사람이 읽을 메시지」 구별은 코어로 옮겼다(#4252): 나간 멤버 DM 이 안 읽음 때문에 접히지 못하는 조건도 같은 구별을 읽는다
+// (웹·폰, `@momo/core/features/sidebar/ambientMessage`). 기존 import 가 그대로 동작하도록 여기서 다시 내보낸다.
+export { isAmbientMessage, pageHasHumanMessage };
 
 export type RevivalVerdict = "human" | "ambient" | "pending" | "error";
 

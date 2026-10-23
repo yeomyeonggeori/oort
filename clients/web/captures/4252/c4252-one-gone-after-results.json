@@ -1,0 +1,218 @@
+[
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "H0 접힌 대화가 하나뿐이면 줄은 「나간 멤버와의 대화 1개」다",
+  "ok": true,
+  "detail": "나간 멤버와의 대화 1개"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "H1 줄을 펼치고 ↓ 로 접힌 행에 닿는다",
+  "ok": true,
+  "detail": {
+   "tag": "A",
+   "channel": "00000000-0000-7000-8000-000000000308",
+   "testid": "channel-item"
+  }
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "H2 Enter 로 그 행을 연다(주소 /c/…)",
+  "ok": true,
+  "detail": "http://127.0.0.1:5352/#/c/00000000-0000-7000-8000-000000000308"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "H3 ↑ 로 줄에 돌아온다",
+  "ok": true,
+  "detail": {
+   "tag": "BUTTON",
+   "channel": null,
+   "testid": "gone-dm-toggle"
+  }
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "H4 줄을 접으면 줄이 사라진다(접힌 대화가 0 이 됐다)",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "H5 눌린 줄이 사라져도 캐럿은 <body> 로 떨어지지 않고 열린 행에 있다",
+  "ok": true,
+  "detail": {
+   "tag": "A",
+   "channel": "00000000-0000-7000-8000-000000000308",
+   "testid": "channel-item"
+  }
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "H6 열린 행은 위 목록으로 올라와 있다(접힌 목록 밖)",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "H7 ↑ 로 이웃 행으로 걸을 수 있다(로빙이 산다)",
+  "ok": true,
+  "detail": {
+   "tag": "A",
+   "channel": "00000000-0000-7000-8000-000000000302",
+   "testid": "channel-item"
+  }
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "H0 접힌 대화가 하나뿐이면 줄은 「나간 멤버와의 대화 1개」다",
+  "ok": true,
+  "detail": "나간 멤버와의 대화 1개"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "H1 줄을 펼치고 ↓ 로 접힌 행에 닿는다",
+  "ok": true,
+  "detail": {
+   "tag": "A",
+   "channel": "00000000-0000-7000-8000-000000000308",
+   "testid": "channel-item"
+  }
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "H2 Enter 로 그 행을 연다(주소 /c/…)",
+  "ok": true,
+  "detail": "http://127.0.0.1:5352/#/c/00000000-0000-7000-8000-000000000308"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "H3 ↑ 로 줄에 돌아온다",
+  "ok": true,
+  "detail": {
+   "tag": "BUTTON",
+   "channel": null,
+   "testid": "gone-dm-toggle"
+  }
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "H4 줄을 접으면 줄이 사라진다(접힌 대화가 0 이 됐다)",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "H5 눌린 줄이 사라져도 캐럿은 <body> 로 떨어지지 않고 열린 행에 있다",
+  "ok": true,
+  "detail": {
+   "tag": "A",
+   "channel": "00000000-0000-7000-8000-000000000308",
+   "testid": "channel-item"
+  }
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "H6 열린 행은 위 목록으로 올라와 있다(접힌 목록 밖)",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "H7 ↑ 로 이웃 행으로 걸을 수 있다(로빙이 산다)",
+  "ok": true,
+  "detail": {
+   "tag": "A",
+   "channel": "00000000-0000-7000-8000-000000000302",
+   "testid": "channel-item"
+  }
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "H0 접힌 대화가 하나뿐이면 줄은 「나간 멤버와의 대화 1개」다",
+  "ok": true,
+  "detail": "나간 멤버와의 대화 1개"
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "H1 줄을 펼치고 ↓ 로 접힌 행에 닿는다",
+  "ok": true,
+  "detail": {
+   "tag": "A",
+   "channel": "00000000-0000-7000-8000-000000000308",
+   "testid": "channel-item"
+  }
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "H2 Enter 로 그 행을 연다(주소 /c/…)",
+  "ok": true,
+  "detail": "http://127.0.0.1:5352/#/c/00000000-0000-7000-8000-000000000308"
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "H3 ↑ 로 줄에 돌아온다",
+  "ok": true,
+  "detail": {
+   "tag": "BUTTON",
+   "channel": null,
+   "testid": "gone-dm-toggle"
+  }
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "H4 줄을 접으면 줄이 사라진다(접힌 대화가 0 이 됐다)",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "H5 눌린 줄이 사라져도 캐럿은 <body> 로 떨어지지 않고 열린 행에 있다",
+  "ok": true,
+  "detail": {
+   "tag": "A",
+   "channel": "00000000-0000-7000-8000-000000000308",
+   "testid": "channel-item"
+  }
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "H6 열린 행은 위 목록으로 올라와 있다(접힌 목록 밖)",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "H7 ↑ 로 이웃 행으로 걸을 수 있다(로빙이 산다)",
+  "ok": true,
+  "detail": {
+   "tag": "A",
+   "channel": "00000000-0000-7000-8000-000000000302",
+   "testid": "channel-item"
+  }
+ }
+]

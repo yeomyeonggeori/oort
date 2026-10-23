@@ -44,6 +44,9 @@ export const HOME_ICONS = {
   more: require('./more.png') as ImageSourcePropType,
   down: require('./down.png') as ImageSourcePropType,
   bot: require('./bot.png') as ImageSourcePropType,
+  // 상대를 알아볼 수 없는 DM(「나간 멤버」)의 기본 아바타 글리프 (#4252). 웹 `DmAvatar` 의 Lucide `user`
+  // (16)와 같은 모양이고 같은 레시피(선 1.8, viewBox 24, 18pt 의 1·2·3배)다.
+  user: require('./user18.png') as ImageSourcePropType,
 } as const;
 
 export type HomeIconName = keyof typeof HOME_ICONS;
@@ -60,6 +63,7 @@ export const HOME_ICON_SIZE: Readonly<Record<HomeIconName, number>> = {
   more: 20,
   down: 20,
   bot: 18,
+  user: 18,
 };
 
 // ---- 대화 아이콘 일곱 (DS2-4 #2716) ------------------------------------------

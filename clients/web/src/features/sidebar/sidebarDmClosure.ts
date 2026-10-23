@@ -1,4 +1,8 @@
 import { useSyncExternalStore } from "react";
+import {
+  readProjectionPhase,
+  type ReadProjectionPhase,
+} from "@momo/core/features/sidebar/goneDm";
 
 // =============================================================================
 // DM 을 이 기기의 사이드바에서 닫는다 (#3963, 성재 2026-10-16: 「DM은 호버하면 X 표시가 떠서
@@ -177,21 +181,9 @@ export function closedAtSeqOf(closed: ClosedDms, channelId: string): number | un
   return own(closed, channelId.toLowerCase());
 }
 
-export type ReadProjectionPhase = "loading" | "error" | "ready";
-
-/**
- * 서버 read-state 투영이 어디까지 왔는가. 쿼리의 세 플래그에서 갈라 읽는다: 한 번 읽은 뒤의
- * 배경 재조회 실패는 `ready` 다(손에 든 투영이 있다). 위험한 것은 「한 번도 못 읽었다」 하나다.
- */
-export function readProjectionPhase(query: {
-  isPending: boolean;
-  isError?: boolean;
-  data?: unknown;
-}): ReadProjectionPhase {
-  if (query.isPending) return "loading";
-  if (query.isError === true && query.data === undefined) return "error";
-  return "ready";
-}
+// 읽음 투영의 국면 판정은 코어로 옮겼다(#4252): 폰의 「나간 멤버와의 대화」 규칙도 같은 세 갈래를 읽는다.
+// 이 파일을 import 하던 자리는 그대로 동작하도록 이름을 다시 내보낸다.
+export { readProjectionPhase, type ReadProjectionPhase };
 
 /**
  * 이 DM 에 닫기를 내미는가 - 호버 X 와 우클릭 메뉴의 「사이드바에서 닫기」가 **같은 한 함수**를 읽는다.
@@ -242,6 +234,9 @@ export function dmHiddenByClosure(input: {
  * (design-review R1 H1: 보이는 컨트롤이 무반응). 닫은 DM 은 후보에서 빠지므로 본문은 다음 DM 을
  * 열거나, 남은 것이 없으면 빈 상태를 그린다. 새 메시지가 와서 돌아온 DM(`dmHiddenByClosure` 가
  * 거짓)은 다시 후보다.
+ *
+ * 「나간 멤버와의 대화」로 접힌 DM(#4252, `goneDmHiding.ts`)도 후보가 아니다. 같은 이유다: 사이드바가 접은
+ * 대화를 본문이 도로 열면 접힌 대화가 「열려 있음」으로 되살아난다.
  */
 export function indexFallbackChannelId(input: {
   channels: readonly { id: string }[];
@@ -249,6 +244,8 @@ export function indexFallbackChannelId(input: {
   closed: ClosedDms;
   latestSeqOf: (channelId: string) => number | undefined;
   phase: ReadProjectionPhase;
+  /** 나간 멤버와의 대화로 접힌 DM 인가(소문자 id 집합). 없으면 접힌 DM 이 없는 것이다. */
+  foldedGone?: ReadonlySet<string>;
 }): string | null {
   const channel = input.channels[0];
   if (channel !== undefined) return channel.id;
@@ -260,7 +257,7 @@ export function indexFallbackChannelId(input: {
       isOpen: false,
       phase: input.phase,
     });
-    if (!hidden) return dm.id;
+    if (!hidden && input.foldedGone?.has(dm.id.toLowerCase()) !== true) return dm.id;
   }
   return null;
 }

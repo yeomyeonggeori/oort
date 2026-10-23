@@ -1,0 +1,222 @@
+[
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "G0 안 읽음 없는 나간 멤버 둘은 목록에서 접힌다",
+  "ok": true,
+  "detail": [
+   "이\n이도현\n2",
+   "박\n박서연",
+   "K\nkwak의 Claude\n, 연결이 꺼져 있어요",
+   "G\ngrok\n, 방금 응답함",
+   "나간 멤버\n1"
+  ]
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "G1 구역 끝의 줄이 「나간 멤버와의 대화 3개」를 센다",
+  "ok": true,
+  "detail": "나간 멤버와의 대화 3개"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "G2 안 읽은 사람 메시지가 있는 나간 멤버 DM 은 접히지 않는다(알약 1)",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "G2b 안 읽음이 기계 메시지뿐인 나간 멤버 DM 은 안 읽음 4 가 있어도 접힌다(이슈 AC 「안 읽은 사람 메시지」)",
+  "ok": true,
+  "detail": [
+   "이\n이도현\n2",
+   "박\n박서연",
+   "K\nkwak의 Claude\n, 연결이 꺼져 있어요",
+   "G\ngrok\n, 방금 응답함",
+   "나간 멤버\n1"
+  ]
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "G3 명부에 있는 DM(꺼진 에이전트 포함)은 그대로다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "G4 접힌 줄은 DM 구역의 마지막 줄이다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "G5 펼치면 접힌 셋이 줄 아래에 선다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "G5b 펼친 직후 접힌 행이 스크롤 상자 안에 보인다(앱이 스스로 맞춘다, 하네스 스크롤 없음)",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "G6 접힌 행은 기본 아바타와 「나간 멤버」다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "G7 접힌 행을 열면 그 대화가 열린다(주소 /c/…)",
+  "ok": true,
+  "detail": "http://127.0.0.1:5352/#/c/00000000-0000-7000-8000-000000000308"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "G7b Enter 뒤에도 캐럿이 그 행에 있다(<body> 로 떨어지지 않는다)",
+  "ok": true,
+  "detail": "A"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "G7c 열린 행은 접힌 목록의 제자리에 머물고 선택 표시만 바뀐다(점프 없음, 줄은 그대로 3개)",
+  "ok": true,
+  "detail": "나간 멤버와의 대화 3개"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "G8 줄을 접으면 열려 있는 나간 멤버 DM 은 위 목록에 남고, 줄은 남은 둘을 센다",
+  "ok": true,
+  "detail": "나간 멤버와의 대화 2개"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "G9 다른 곳으로 옮겨 가면 접힌 줄로 돌아간다(셋)",
+  "ok": true,
+  "detail": "나간 멤버와의 대화 3개"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "G0 안 읽음 없는 나간 멤버 둘은 목록에서 접힌다",
+  "ok": true,
+  "detail": [
+   "이\n이도현\n2",
+   "박\n박서연",
+   "K\nkwak의 Claude\n, 연결이 꺼져 있어요",
+   "G\ngrok\n, 방금 응답함",
+   "나간 멤버\n1"
+  ]
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "G1 구역 끝의 줄이 「나간 멤버와의 대화 3개」를 센다",
+  "ok": true,
+  "detail": "나간 멤버와의 대화 3개"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "G2 안 읽은 사람 메시지가 있는 나간 멤버 DM 은 접히지 않는다(알약 1)",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "G2b 안 읽음이 기계 메시지뿐인 나간 멤버 DM 은 안 읽음 4 가 있어도 접힌다(이슈 AC 「안 읽은 사람 메시지」)",
+  "ok": true,
+  "detail": [
+   "이\n이도현\n2",
+   "박\n박서연",
+   "K\nkwak의 Claude\n, 연결이 꺼져 있어요",
+   "G\ngrok\n, 방금 응답함",
+   "나간 멤버\n1"
+  ]
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "G3 명부에 있는 DM(꺼진 에이전트 포함)은 그대로다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "G4 접힌 줄은 DM 구역의 마지막 줄이다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "G5 펼치면 접힌 셋이 줄 아래에 선다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "G5b 펼친 직후 접힌 행이 스크롤 상자 안에 보인다(앱이 스스로 맞춘다, 하네스 스크롤 없음)",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "G6 접힌 행은 기본 아바타와 「나간 멤버」다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "G7 접힌 행을 열면 그 대화가 열린다(주소 /c/…)",
+  "ok": true,
+  "detail": "http://127.0.0.1:5352/#/c/00000000-0000-7000-8000-000000000308"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "G7b Enter 뒤에도 캐럿이 그 행에 있다(<body> 로 떨어지지 않는다)",
+  "ok": true,
+  "detail": "A"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "G7c 열린 행은 접힌 목록의 제자리에 머물고 선택 표시만 바뀐다(점프 없음, 줄은 그대로 3개)",
+  "ok": true,
+  "detail": "나간 멤버와의 대화 3개"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "G8 줄을 접으면 열려 있는 나간 멤버 DM 은 위 목록에 남고, 줄은 남은 둘을 센다",
+  "ok": true,
+  "detail": "나간 멤버와의 대화 2개"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "G9 다른 곳으로 옮겨 가면 접힌 줄로 돌아간다(셋)",
+  "ok": true,
+  "detail": "나간 멤버와의 대화 3개"
+ }
+]

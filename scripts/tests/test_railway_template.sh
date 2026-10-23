@@ -9,7 +9,9 @@
 #     commands name momo-rust-entrypoint, pre-deploy is `/bin/sh -c`, Centrifugo
 #     v6 names, api drive volume + RAILWAY_RUN_UID + privilege drop, PG18 +
 #     pgvector image service with a volume, push services on tmpfs keys,
-#     `${{shared.KEY}}` ⊆ generator keys, README hand-mapped table;
+#     `${{shared.KEY}}` ⊆ generator keys, README hand-mapped table, and (#4221,
+#     ADR-0205) GITHUB_APP_MASTER_KEY + MOMO_PUBLIC_BASE_URL on api only, the
+#     address exactly `https://${{shared.OORT_SITE_ADDRESS}}`;
 #   * X-Forwarded-Proto: adapt JSON (static) and a live echo upstream behind the
 #     committed Caddyfile.railway (https) vs a copy without header_up (http);
 #   * local-archive upload route: a PUT to /__momo_stub/drive/uploads/… reaches
@@ -269,13 +271,17 @@ for mutation in start-bare-api start-bare-relay start-no-exec predeploy-raw \
   hermes-no-sha-check hermes-image-floating hermes-oort-secret hermes-cors-open \
   hermes-key-literal api-hermes-wildcard-host api-hermes-attest-dropped \
   worker-hermes-attest api-relay-key-chat-key api-relay-url-wrong worker-relay-key hermes-relay-key-chat-key hermes-relay-stale-sha \
-  hermes-relay-key-not-unset hermes-relay-unconditional readme-row-missing centrifugo-json-new-key; do
+  hermes-relay-key-not-unset hermes-relay-unconditional \
+  api-github-key-dropped worker-github-key hermes-github-key worker-github-key-renamed \
+  extra-service-github-key api-public-base-dropped api-public-base-http \
+  api-public-base-wrong-host worker-public-base \
+  readme-row-missing centrifugo-json-new-key; do
   grep -Fq "mutation ${mutation} RED" "$TMP_ROOT/catalog.out" || \
     fail "catalog checker missing mutation proof: ${mutation}"
 done
 grep -Fq 'committed catalog still passes' "$TMP_ROOT/catalog.out" || \
   fail "catalog checker missing restore proof"
-pass "catalog: start commands = canonical command lists (operators, order, values), pre-deploy sh -c + root→momo drop, Centrifugo v6 names + infra/centrifugo.json parity and settings set, api volume/UID/chown -R/setpriv/env -u, PG18+pgvector image+volume, push tmpfs guard/umask order/unset, variables ⊆ compose twin, shared refs ⊆ --claim keys, README hand-mapped table, hermes private + digest + gate-first/sha-pinned + no oort secret; 68 mutations RED"
+pass "catalog: start commands = canonical command lists (operators, order, values), pre-deploy sh -c + root→momo drop, Centrifugo v6 names + infra/centrifugo.json parity and settings set, api volume/UID/chown -R/setpriv/env -u, PG18+pgvector image+volume, push tmpfs guard/umask order/unset, variables ⊆ compose twin, shared refs ⊆ --claim keys, README hand-mapped table, hermes private + digest + gate-first/sha-pinned + no oort secret, GitHub App key + public address on api only (#4221); 77 mutations RED"
 
 # ①b #4072 — the Hermes default config and the tool-lock gate's own rules. The
 # catalog above pins the start command to these files' sha256, so a gate that

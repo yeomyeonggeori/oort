@@ -655,12 +655,19 @@ mod tests {
     ///
     /// 144 is #4143's co-hosted model pin (ADR-0203 증보 2026-10-20): `agent_provider_pin` gains
     /// the `model_provider` + `model_id` pair (both NULL = today's behaviour, operator_env only).
+    ///
+    /// 145 is #4214's scheduled messages (ADR-0208): the owner-scoped FORCE-RLS tables
+    /// `scheduled_message` and `scheduled_message_attachment` (workspace **and** author in the policy,
+    /// both through `NULLIF`), the `NOLOGIN NOBYPASSRLS` definer role `momo_sched_definer` with
+    /// column-level SELECT and a SELECT-only policy, the id-only `SECURITY DEFINER` functions
+    /// `momo_schedule_private.due_scheduled_messages` / `expired_scheduled_messages`, and the
+    /// `scheduled-message-lockdown` block (also in both bootstrap SQL files).
     #[test]
-    fn discovers_contiguous_migrations_001_to_144() {
+    fn discovers_contiguous_migrations_001_to_145() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=144).collect();
+        let expected: Vec<i64> = (1..=145).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -668,7 +675,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=144 under {}",
+            "expected contiguous 001..=145 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -676,7 +683,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("144_agent_pin_model"));
+            .starts_with("145_scheduled_message"));
     }
 
     #[test]
