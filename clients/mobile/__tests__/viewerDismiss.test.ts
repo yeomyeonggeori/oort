@@ -85,9 +85,18 @@ describe('놓았을 때: 닫는가, 돌아가는가', () => {
 });
 
 describe('언제 뷰어가 손가락을 가져가는가', () => {
-  it('문턱(8pt) 안에서는 가져가지 않는다 — 탭과 떨림이다', () => {
-    const {last} = run([{kind: 'move', x: 0, y: CLAIM_SLOP_PT}]);
+  it('문턱(8pt) 안에서는 가져가지 않고 아무것도 정하지 않는다 — 탭과 떨림이다', () => {
+    const {last, state} = run([{kind: 'move', x: 0, y: CLAIM_SLOP_PT}]);
     expect(last.claims).toBe(false);
+    expect(state.dead).toBe(false); // 아직 정하지 않았다
+    // 정하지 않았으므로 다음 걸음이 아래로 문턱을 넘으면 가져간다.
+    const next = viewerDragStep(
+      state,
+      {kind: 'move', touches: 1, point: {x: 0, y: 40}},
+      ON,
+      HEIGHT,
+    );
+    expect(next.claims).toBe(true);
   });
 
   it('아래로 문턱을 넘으면 가져간다', () => {
@@ -102,6 +111,24 @@ describe('언제 뷰어가 손가락을 가져가는가', () => {
       {kind: 'move', x: 20, y: 10},
       {kind: 'move', x: 40, y: 20},
       {kind: 'move', x: 80, y: 40},
+    ]);
+    expect(results.some(result => result.claims)).toBe(false);
+  });
+
+  it('처음 문턱을 넘은 방향이 가로면, 이후 아래로 아무리 가도 가져가지 않는다 — 방향은 한 번 정해진다', () => {
+    const {results} = run([
+      {kind: 'move', x: 12, y: 2}, // 가로로 문턱을 넘었다 — 페이지 넘김이다
+      {kind: 'move', x: 14, y: 60},
+      {kind: 'move', x: 16, y: 400}, // 이제 세로가 훨씬 크지만 이 손가락은 이미 가로의 것이다
+    ]);
+    expect(results.some(result => result.claims)).toBe(false);
+  });
+
+  it('처음 문턱을 넘은 방향이 위쪽이면 영영 가져가지 않는다', () => {
+    const {results} = run([
+      {kind: 'move', x: 0, y: -12},
+      {kind: 'move', x: 0, y: 60},
+      {kind: 'move', x: 0, y: 300},
     ]);
     expect(results.some(result => result.claims)).toBe(false);
   });

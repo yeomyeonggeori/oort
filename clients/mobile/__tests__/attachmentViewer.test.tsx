@@ -79,6 +79,9 @@ type Handlers = { props: Record<string, (event: unknown) => unknown> };
 // 손가락. React Native 의 responder 시스템이 뷰에게 하는 호출을 그대로 한다
 // (`edgeSwipeBack.test.tsx` 의 같은 이름 도우미와 같은 모양 — 거기 것은 고치지 않는다).
 // `PanResponder` 가 `touchHistory` 로 속도(`vy`, px/ms)를 계산하므로 그것도 진짜 모양으로 준다.
+//
+// 닿을 때의 협상 순서는 실제 그대로다: capture(위에서 아래로) → bubble(아래에서 위로) → 쥐면 grant·start.
+// 뷰어는 capture 를 걸지 않고(그 아래 단추의 탭이 죽는다) bubble 에서 쥔다.
 // -----------------------------------------------------------------------------
 interface Sample {
   x: number;
@@ -92,7 +95,6 @@ function finger(target: Handlers) {
   let current: Sample = start;
   let clock = 1_000;
   let active = true;
-  let granted = false;
   let count = 1;
 
   function event() {
@@ -135,46 +137,46 @@ function finger(target: Handlers) {
   }
 
   return {
-    /** 화면에 손가락이 닿았다. 시작에서 가져갔으면(가져가면 안 된다) true. */
-    down(x: number, y: number): boolean {
+    /**
+     * 화면에 손가락이 닿았다. `capture` 는 위에서 아래로 가는 capture 가 쥐었는가(쥐면 안 된다 —
+     * 그 아래 단추의 탭이 죽는다), `granted` 는 bubble 에서 뷰어가 쥐었는가.
+     */
+    down(x: number, y: number): { capture: boolean; granted: boolean } {
       clock += 16;
       start = { x, y, t: clock };
       previous = start;
       current = start;
       active = true;
-      granted = false;
       count = 1;
-      let claimed = false;
+      let capture = false;
+      let granted = false;
       act(() => {
-        claimed = Boolean(target.props.onStartShouldSetResponderCapture?.(event()));
+        capture = Boolean(target.props.onStartShouldSetResponderCapture?.(event()));
+        if (capture) return;
+        granted = Boolean(target.props.onStartShouldSetResponder?.(event()));
+        if (granted) {
+          target.props.onResponderGrant?.(event());
+          // 응답 시스템은 쥔 직후 같은 닿음을 Start 로도 알린다.
+          target.props.onResponderStart?.(event());
+        }
       });
-      return claimed;
+      return { capture, granted };
     },
-    /** 손가락이 움직였다. 이 걸음에서 가져갔으면 true. */
-    move(x: number, y: number, dt = 16): boolean {
+    /** 손가락이 움직였다. */
+    move(x: number, y: number, dt = 16) {
       clock += dt;
       previous = current;
       current = { x, y, t: clock };
-      let claimed = false;
       act(() => {
-        if (!granted) {
-          claimed = Boolean(target.props.onMoveShouldSetResponderCapture?.(event()));
-          if (claimed) {
-            granted = true;
-            target.props.onResponderGrant?.(event());
-          }
-        } else {
-          target.props.onResponderMove?.(event());
-        }
+        target.props.onResponderMove?.(event());
       });
-      return claimed;
     },
-    /** 둘째 손가락이 닿았다. 응답 시스템은 공통 조상에게 시작을 다시 묻는다. */
+    /** 둘째 손가락이 닿았다. 응답을 쥔 뷰어는 Start 로 그것을 안다. */
     second() {
       count = 2;
       clock += 16;
       act(() => {
-        target.props.onStartShouldSetResponderCapture?.(event());
+        target.props.onResponderStart?.(event());
       });
     },
     /** 손가락을 뗐다. */
@@ -184,14 +186,15 @@ function finger(target: Handlers) {
         target.props.onResponderRelease?.(event());
       });
     },
-    /** 응답 시스템이 제스처를 빼앗았다(전화·OS 취소). */
+    /** 응답 시스템이 제스처를 빼앗았다(스크롤뷰·가장자리 뒤로가기·전화·OS 취소). */
     terminate() {
       act(() => {
         target.props.onResponderTerminate?.(event());
       });
     },
-    get granted() {
-      return granted;
+    /** 다른 응답자(가로 스크롤뷰·가장자리 뒤로가기)가 응답을 달라고 한다. 양보하면 true. */
+    yields(): boolean {
+      return Boolean(target.props.onResponderTerminationRequest?.(event()));
     },
   };
 }
@@ -291,8 +294,10 @@ describe('① 단추 띠는 안전 영역 안에 선다', () => {
     const safeArea = require('react-native-safe-area-context');
     jest
       .spyOn(safeArea, 'SafeAreaProvider')
-      .mockImplementation(({ children }: { children: React.ReactNode }) => (
-        <View testID="viewer-safe-area-provider">{children}</View>
+      .mockImplementation((props: unknown) => (
+        <View testID="viewer-safe-area-provider">
+          {(props as { children: React.ReactNode }).children}
+        </View>
       ));
     await mount();
     const modal = screen.getByTestId('attachment-viewer-modal');
@@ -397,17 +402,30 @@ describe('② 아래로 쓸어 닫기', () => {
     expect(progress.current).toBe(0);
   });
 
-  it('문턱 안의 움직임과 탭은 가져가지 않는다 — 닫기 단추의 탭이 산다', async () => {
+  it('닿는 순간 응답은 뷰어가 쥔다 — 뒤의 메시지 행이 뷰어 안의 터치를 가져가지 못한다', async () => {
+    // Modal 은 메시지 행의 React 자손이라 응답이 위로 번지면 행의 Pressable 이 쥔다. 그러면 이동
+    // 협상이 뷰어 뿌리를 지나지 않아 쓸어 닫기가 한 번도 불리지 않는다(시뮬레이터가 보여 준 것).
+    await mount();
+    const touch = finger(root());
+    const { capture, granted } = touch.down(200, 300);
+    expect(granted).toBe(true);
+    // capture 는 걸지 않는다 — 걸면 그 아래 닫기·공유 단추의 탭이 죽는다.
+    expect(capture).toBe(false);
+  });
+
+  it('문턱 안의 움직임과 탭은 아무것도 끌지 않는다 — 닫기 단추의 탭이 산다', async () => {
     const { onClose, progress } = await mount();
     const touch = finger(root());
-    expect(touch.down(200, 300)).toBe(false); // 시작에서는 절대 가져가지 않는다
-    expect(touch.move(200, 307)).toBe(false);
+    touch.down(200, 300);
+    touch.move(200, 307);
     expect(progress.current).toBeNull();
     touch.up();
     expect(onClose).not.toHaveBeenCalled();
+    fireEvent.press(screen.getByTestId('attachment-viewer-close'));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('가로로 넘기는 손가락은 가져가지 않는다 — 페이지 넘김을 훔치지 않는다', async () => {
+  it('가로로 넘기는 손가락은 가져가지 않고, 응답도 양보한다 — 페이지 넘김의 길이다', async () => {
     const { onClose, progress } = await mount();
     const touch = finger(root());
     touch.down(300, 400);
@@ -418,9 +436,20 @@ describe('② 아래로 쓸어 닫기', () => {
       [150, 420],
       [60, 430],
     ] as const) {
-      expect(touch.move(x, y)).toBe(false);
+      touch.move(x, y);
     }
-    expect(touch.granted).toBe(false);
+    expect(progress.current).toBeNull();
+    expect(touch.yields()).toBe(true); // 가로 ScrollView 가 응답을 달라고 하면 내준다
+    touch.up();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('가로로 시작한 손가락은 나중에 아래로 꺾여도 가져가지 않는다', async () => {
+    const { onClose, progress } = await mount();
+    const touch = finger(root());
+    touch.down(300, 300);
+    touch.move(270, 302); // 가로로 문턱을 넘었다
+    for (const dy of [60, 160, 260]) touch.move(268, 300 + dy);
     expect(progress.current).toBeNull();
     touch.up();
     expect(onClose).not.toHaveBeenCalled();
@@ -430,8 +459,8 @@ describe('② 아래로 쓸어 닫기', () => {
     const { progress } = await mount();
     const touch = finger(root());
     touch.down(200, 600);
-    expect(touch.move(200, 560)).toBe(false);
-    expect(touch.move(200, 480)).toBe(false);
+    touch.move(200, 560);
+    touch.move(200, 480);
     expect(progress.current).toBeNull();
   });
 
@@ -440,7 +469,6 @@ describe('② 아래로 쓸어 닫기', () => {
     const touch = finger(root());
     touch.down(200, 300);
     dragSlowly(touch, 200, 300, 400);
-    expect(touch.granted).toBe(false);
     expect(progress.current).toBeNull();
     touch.up();
     expect(onClose).not.toHaveBeenCalled();
@@ -468,10 +496,14 @@ describe('② 아래로 쓸어 닫기', () => {
     expect(progress.current).toBe(0);
   });
 
-  it('잡았으면 놓지 않는다 — 밑의 스크롤뷰가 도중에 되가져가지 못하게', async () => {
+  it('끌기를 가져가기 전에는 응답을 양보하고(가장자리 뒤로가기가 가져갈 수 있다), 가져간 뒤에는 거절한다', async () => {
     await mount();
-    const handlers = root().props;
-    expect((handlers.onResponderTerminationRequest as () => boolean)()).toBe(false);
+    const touch = finger(root());
+    touch.down(200, 300);
+    expect(touch.yields()).toBe(true);
+    dragSlowly(touch, 200, 300, 60);
+    // 잡았으면 놓지 않는다 — 밑의 스크롤뷰가 도중에 되가져가면 사진이 손가락을 놓친다.
+    expect(touch.yields()).toBe(false);
   });
 });
 

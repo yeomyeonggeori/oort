@@ -2,10 +2,9 @@
 // 사진 뷰어: 아래로 쓸어 닫기 — **규칙만** (#4293). 배선은 `useViewerDismiss.ts`,
 // 화면은 `AttachmentViewer.tsx` 다.
 //
-// 베타 테스터가 뷰어에 갇혔다. 위쪽 단추가 상태 막대 밑에 깔려 눌리지 않았고, 화면
-// 한가운데를 눌러도 닫히지 않았다. 닫는 길이 단추 하나뿐이면 그 단추가 가려지는 날
-// 사람이 갇힌다 — 그래서 **손가락으로 쓸어 내리는 길**을 하나 더 둔다. 이 파일은 그
-// 길의 판정이다.
+// 베타 테스터가 뷰어에 갇혔다. 위쪽 단추가 상태 막대 밑에 깔려 눌리지 않았는데, 닫는 길이
+// 그 단추 하나뿐이었다. 길이 하나뿐이면 그 길이 가려지는 날 사람이 갇힌다 — 그래서
+// **손가락으로 쓸어 내리는 길**을 하나 더 둔다. 이 파일은 그 길의 판정이다.
 //
 // ## 값은 Buzz 모바일의 것이다
 //
@@ -24,8 +23,17 @@
 // `nav/edgeSwipe.ts` 가 같은 이유로 갈라 뒀다: 판정이 터치 핸들러에 붙어 있으면 테스트로
 // 재생할 수 없고, 재생할 수 없는 방어는 죽어도 아무도 모른다. 이 제스처는 그 옆에 하나 더
 // 있다 — 가로 페이지 넘김(ScrollView)과 같은 손가락을 두고 다툰다. **가로가 앞서면 가져가지
-// 않는다**는 것이 이 파일이 지키는 약속이고, `__tests__/attachmentViewerDismiss.test.ts` 가
-// 그 약속을 재생한다.
+// 않는다**는 것이 이 파일이 지키는 약속이고, `__tests__/viewerDismiss.test.ts` 가 그 약속을
+// 재생한다.
+//
+// ## 방향은 문턱을 처음 넘는 순간 한 번 정해진다
+//
+// 손가락이 8pt 안에 있는 동안은 탭이거나 떨림이라 아무것도 정하지 않는다. 어느 축으로든 처음
+// 문턱을 넘는 순간 **방향이 정해지고 되돌리지 않는다.** 아래로(세로가 가로보다 크게) 갔으면
+// 뷰어가 가져가고, 그 밖의 모든 것(가로로 갔다·위로 갔다·꺼져 있다)은 이 손가락의 남은
+// 일생 동안 뷰어의 일이 아니다. 되돌릴 길을 두지 않는 이유는 `edgeSwipe.ts` 의 「세로가 먼저
+// 움직였으면 영영 탈락」과 같다: 가로로 페이지를 넘기던 손가락이 비스듬히 내려오다 사진을 닫아
+// 버리는 것이 이 배치가 고치려는 문제보다 나쁘다.
 //
 // ## 확대 중에는 끄지 않는다 (아직 확대가 없다)
 //
@@ -77,7 +85,10 @@ export interface ViewerDragState {
   origin: DragPoint | null;
   /** 이 손가락이 뷰어를 가져갔다. */
   claimed: boolean;
-  /** 손가락이 둘 이상이 되었다 — 이 손가락의 남은 일생 동안 다시 가져가지 않는다. */
+  /**
+   * 이 손가락은 뷰어의 것이 아니다 — 손가락이 둘이 되었거나, 처음 문턱을 넘은 방향이 아래가
+   * 아니었거나, 꺼져 있었다. 손을 뗄 때까지 다시 가져가지 않는다.
+   */
   dead: boolean;
 }
 
@@ -113,10 +124,10 @@ export function followY(dy: number, height: number): number {
  * 가져가는 조건(전부여야 한다):
  *   · 켜져 있다 ({@link ViewerDragContext.enabled})
  *   · 손가락이 하나다(둘이면 핀치다)
- *   · **아래로** 문턱({@link CLAIM_SLOP_PT})을 넘었다
- *   · 세로가 가로보다 크다 — 이것이 가로 페이지 넘김을 지킨다
+ *   · **아래로** 문턱({@link CLAIM_SLOP_PT})을 처음 넘었다
+ *   · 그때 세로가 가로보다 크다 — 이것이 가로 페이지 넘김을 지킨다
  *
- * 한 번 가져간 뒤에는 방향을 다시 묻지 않는다(대각선으로 끌어도 뷰어가 손가락을 따라간다).
+ * 가져간 뒤에는 방향을 다시 묻지 않는다(대각선으로 끌어도 뷰어가 손가락을 따라간다).
  */
 export function viewerDragStep(
   state: ViewerDragState,
@@ -161,15 +172,26 @@ export function viewerDragStep(
     };
   }
 
-  if (!context.enabled) {
+  // 문턱 안: 탭이거나 떨림이다. 아직 아무것도 정하지 않는다 — 다음 걸음이 정한다.
+  if (Math.max(Math.abs(dx), Math.abs(dy)) <= CLAIM_SLOP_PT) {
     return {state, claims: false, offset: 0, cancelled: false};
   }
 
-  const claims = dy > CLAIM_SLOP_PT && dy > Math.abs(dx);
+  // 문턱을 처음 넘은 순간 방향이 정해진다. 아래로 가고 세로가 가로보다 크면 가져가고,
+  // 그 밖에는 이 손가락의 남은 일생 동안 뷰어의 일이 아니다.
+  const claims = context.enabled && dy > CLAIM_SLOP_PT && dy > Math.abs(dx);
+  if (!claims) {
+    return {
+      state: {...state, dead: true},
+      claims: false,
+      offset: 0,
+      cancelled: false,
+    };
+  }
   return {
-    state: claims ? {...state, claimed: true} : state,
-    claims,
-    offset: claims ? followY(dy, height) : 0,
+    state: {...state, claimed: true},
+    claims: true,
+    offset: followY(dy, height),
     cancelled: false,
   };
 }
