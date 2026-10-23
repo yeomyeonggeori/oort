@@ -631,6 +631,34 @@ async function desktopScenes(browser, origin) {
 }
 
 /**
+ * 카탈로그 테마(AP-1b) 위의 배경화면: 파생 엔진이 루트에 꽂은 변수를 읽어서 같은 산수가 선다(별도 연결 없음). 하한이 높은(힌트) 테마와
+ * 낮은 테마를 섞어 라이트·다크로 한 장씩. 단일 모드 테마는 두 모드가 같은 장면이다.
+ */
+async function catalogScenes(browser, origin) {
+  const viewport = VIEWPORTS[0];
+  const photo = await (async () => {
+    const holder = await browser.newPage();
+    try { return await makeJpeg(holder, { kind: "dusk", width: 3200, height: 2000, seed: 11 }); } finally { await holder.close(); }
+  })();
+  for (const id of ["nord", "solarized", "github", "gruvbox-hard"]) {
+    const { context, page } = await openContext(browser, origin, "light", viewport, {}, { theme: `catalog:${id}` });
+    try {
+      await goSettings(page);
+      await pickPhoto(page, photo, "dusk.jpg");
+      await waitLive(page);
+      for (const scheme of SCHEMES) {
+        await page.emulateMedia({ colorScheme: scheme });
+        await page.waitForTimeout(300);
+        await goChat(page);
+        await shoot(page, `chat-photo-catalog-${id}-${scheme}-1440`, { scheme, viewport: "1440", wallpaper: "photo", theme: `catalog:${id}` });
+      }
+    } finally {
+      await context.close();
+    }
+  }
+}
+
+/**
  * 맥 데스크탑에서 배경화면을 고르면 유리 스위치가 잠기고 이유 문장이 서는 모습(AC 6). 유리(AP-3)가 이 빌드에 없으면 건너뛴다.
  * 유리 행은 카드 「색상」에, 배경화면 행은 카드 「배경」에 있어서 두 카드를 한 장씩 찍는다.
  */
@@ -741,6 +769,7 @@ async function capture() {
     if (LABEL !== "before") {
       await themeScenes(browser, preview.origin);
       await desktopScenes(browser, preview.origin);
+      await catalogScenes(browser, preview.origin);
       await glassExclusionScenes(browser, preview.origin);
       await fallbackScenes(browser, preview.origin);
       await focusScene(browser, preview.origin);
