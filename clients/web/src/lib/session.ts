@@ -11,6 +11,7 @@ import type {
   HostRefreshRequest,
   HostRevokeRequest,
 } from "@momo/core/runtime/host";
+import { forgetWallpaperOnSignOut } from "../design/wallpaper/signOut";
 import { withRotationLock } from "./rotationLock";
 import { apiBase } from "./serverBase";
 import { desktopKeychain, desktopRotationHold, desktopSession, isDesktop } from "./tauri";
@@ -562,5 +563,7 @@ export function clearSession(): void {
   } catch {
     // Private mode / non-browser. Same key as deviceLinkLive.ts.
   }
+  // 배경 사진은 사람의 것이다(ADR-0189 증보 3 D4): 세션이 끝나는 모든 길이 지나는 이 자리에서 지운다.
+  forgetWallpaperOnSignOut();
   notify();
 }

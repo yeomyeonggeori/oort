@@ -20,6 +20,7 @@ import {StyleSheet, Text, View} from 'react-native';
 import {font, radius, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {Avatar} from '../conversation/Avatar';
+import {CONV} from '../conversation/convDesign';
 import {RespondingDots} from './RespondingDots';
 
 // =============================================================================
@@ -347,6 +348,10 @@ const buildStyles = (color: Palette) => StyleSheet.create({
 
   activityBar: {
     paddingHorizontal: space.lg,
+    // 마지막 행과의 거리는 8 이다 — 목록 꼬리가 8 을 주던 때의 값 그대로. 대화 화면이 꼬리를 줄인 만큼
+    // (`CONV.conversationTail`) 이 줄이 진다(#4264). **이 값은 대화 화면의 도크 전용이다**: 꼬리 기본(8)을 쓰는 표면에
+    // 세우면 8 + 8 = 16 이 된다(이 줄은 `ConversationScreen` 과 그것을 본뜬 계측 표면에만 선다).
+    paddingTop: space.sm - CONV.conversationTail,
     paddingBottom: space.xs,
     gap: 2,
   },

@@ -65,7 +65,7 @@ class AppDelegate: ExpoAppDelegate {
     // startup. It hard-requires an ExpoReactNativeFactoryDelegate —
     // ExpoReactNativeFactory.swift:33 fatalErrors on anything else.
     let factory = ExpoReactNativeFactory(delegate: delegate)
-    delegate.dependencyProvider = RCTAppDependencyProvider()
+    delegate.dependencyProvider = MomoDependencyProvider()
 
     reactNativeDelegate = delegate
     reactNativeFactory = factory
@@ -97,6 +97,19 @@ class AppDelegate: ExpoAppDelegate {
       return true
     }
     return super.application(app, open: url, options: options)
+  }
+}
+
+/// React Native's codegen builds `imageURLLoaderClassNames` from the libraries the community CLI
+/// autolinks. Expo modules are not in that list, so `expo-media-library`'s own
+/// `codegenConfig.ios.modulesConformingToProtocol` (`RCTImageURLLoader: MediaLibraryImageLoader`) is
+/// never read: the generated list is empty and, under Bridgeless, `<Image source={{uri: 'ph://…'}} />`
+/// dies with the RedBox "No suitable image URL loader found for ph://…" (#4181 — seen on the
+/// simulator with the photo card's thumbnails). Registering the class here is the whole fix; the
+/// class itself ships in the ExpoMediaLibrary pod. `projectShape.test.ts` holds this line.
+final class MomoDependencyProvider: RCTAppDependencyProvider {
+  override func imageURLLoaderClassNames() -> [String] {
+    super.imageURLLoaderClassNames() + ["MediaLibraryImageLoader"]
   }
 }
 

@@ -1,0 +1,23 @@
+[
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "OB0 수리 전: 나간 멤버 둘이 목록에 그대로 있다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "OB0 수리 전: 나간 멤버 둘이 목록에 그대로 있다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "OB0 수리 전: 나간 멤버 둘이 목록에 그대로 있다",
+  "ok": true,
+  "detail": null
+ }
+]

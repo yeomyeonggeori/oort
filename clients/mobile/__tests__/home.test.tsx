@@ -14,7 +14,7 @@ import {
   within,
 } from '@testing-library/react-native';
 import React from 'react';
-import {AccessibilityInfo, ActionSheetIOS, StyleSheet} from 'react-native';
+import {AccessibilityInfo, ActionSheetIOS, SectionList, StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -25,6 +25,7 @@ import {
   resetAgentWorking,
 } from '../src/features/agents/workingSignal';
 import {parseCollapsed, visibleRows} from '../src/features/home/collapsedSections';
+import {workspaceKeys} from '../src/features/workspace/queries';
 import {buildWorkingCard, workingStep} from '../src/features/home/workingCard';
 import {
   isWorkspaceAvatarPath,
@@ -129,12 +130,19 @@ function jsonResponse(status: number, body: unknown): Response {
 interface Routes {
   roster?: unknown[];
   channels?: unknown[];
+  /** 서버 읽음 투영의 행(와이어 형상). 생략하면 기본 `READ_STATES`. */
+  readStates?: unknown[];
   workspace?: () => Response | Promise<Response>;
   /**
    * 에이전트 생존 판정(#3964): id → 상태. 적지 않은 에이전트는 404 다(= 「라벨 없음」, 호스티드가 아님).
    * `'pending'` 은 응답이 오지 않는다(아직 모름).
    */
   liveness?: Record<string, string>;
+  /**
+   * 메시지 쪽의 응답(와이어 형상). 생략하면 빈 쪽이다. 나간 멤버 DM 의 안 읽음이 사람이 읽을 것인지 가르는 쪽(#4252)이 이
+   * 길로 읽는다. `'fail'` 은 500, `'pending'` 은 응답이 오지 않는다.
+   */
+  messages?: unknown[] | 'fail' | 'pending';
 }
 
 function installFetch(routes: Routes = {}): jest.Mock {
@@ -154,9 +162,13 @@ function installFetch(routes: Routes = {}): jest.Mock {
       return jsonResponse(200, {members: routes.roster ?? ROSTER});
     }
     if (url.includes('/read-state')) {
-      return jsonResponse(200, {read_states: READ_STATES});
+      return jsonResponse(200, {read_states: routes.readStates ?? READ_STATES});
     }
-    if (url.includes('/messages')) return jsonResponse(200, {messages: []});
+    if (url.includes('/messages')) {
+      if (routes.messages === 'pending') return new Promise<Response>(() => {});
+      if (routes.messages === 'fail') return jsonResponse(500, {error: {message: 'boom'}});
+      return jsonResponse(200, {messages: routes.messages ?? []});
+    }
     if (url.includes('/approvals')) return jsonResponse(200, {approvals: []});
     if (url.includes('/work-sessions')) return jsonResponse(200, {sessions: []});
     if (url.includes('/dms')) {
@@ -366,6 +378,7 @@ function row(over: Partial<SidebarRow>): SidebarRow {
     handle: null,
     avatarMemberId: null,
     isAgent: false,
+    labelKind: 'channel',
     isPrivate: false,
     muted: false,
     unreadCount: 0,
@@ -407,9 +420,10 @@ describe('섹션 접기', () => {
 // ---- 4. 배송되는 셸 안에서 --------------------------------------------------------
 
 async function mountHome(routes: Routes = {}) {
-  installFetch(routes);
+  const fetchMock = installFetch(routes);
   renderShell();
   await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
+  return fetchMock;
 }
 
 function flat(style: unknown): Record<string, unknown> {
@@ -952,5 +966,318 @@ describe('고지는 목록 상태와 무관하게 선다', () => {
     );
     await waitFor(() => expect(screen.getByTestId('channels-error')).toBeTruthy());
     expect(screen.getByTestId('notification-tap-notice')).toBeTruthy();
+  });
+});
+
+// ---- 5. 나간 멤버와의 대화 (#4252) -------------------------------------------------
+//
+// 상대가 명부에 없고 안 읽은 것이 없는 DM 은 기본으로 접히고, DM 섹션 끝의 조용한 줄이 수를 센다. 판정은 코어
+// `dmHiddenAsGone` 이고(웹 사이드바와 같은 함수) 여기서는 폰 화면이 그것을 제대로 그리는지 잰다.
+
+describe('홈 — 나간 멤버와의 대화 (#4252)', () => {
+  const GONE_ID = 'ffffffff-1111-4111-8111-ffffffffffff';
+  const GONE_DM = {
+    id: 'ch-dm-gone',
+    workspaceId: WS,
+    kind: 'dm',
+    muted: false,
+    memberIds: [SELF_ID, GONE_ID],
+  };
+  // 채널은 하나만 둔다: `SectionList` 는 처음에 열 항목만 그리고(`initialNumToRender`, 시험 렌더러에는 레이아웃이
+  // 없어 창이 자라지 않는다) 접힌 행은 목록의 끝에 서므로, 앞이 길면 펼친 행이 창 밖에 있다.
+  const withGone = [CHANNELS[1], CHANNELS[3], CHANNELS[4], GONE_DM];
+  const GONE_ROW = 'sidebar-row-dm:ch-dm-gone';
+
+  it('접힌 줄이 DM 섹션 끝에 서고, 나간 멤버 행은 기본으로 보이지 않는다', async () => {
+    await mountHome({channels: withGone});
+    const toggle = await screen.findByTestId('sidebar-gone-toggle');
+    expect(toggle).toHaveTextContent('나간 멤버와의 대화 1개');
+    expect(toggle.props.accessibilityLabel).toBe('나간 멤버와의 대화 1개');
+    expect(toggle.props.accessibilityState).toMatchObject({expanded: false});
+    expect(screen.queryByTestId(GONE_ROW)).toBeNull();
+    // 줄은 DM 행들 뒤, 구역의 마지막이다.
+    const order = screen
+      .getAllByTestId(/^sidebar-(row-(dm|agent):|gone-toggle)/)
+      .map(node => node.props.testID);
+    expect(order[order.length - 1]).toBe('sidebar-gone-toggle');
+    expect(order).toContain('sidebar-row-dm:ch-dm-human');
+  });
+
+  it('누르면 접힌 대화가 줄 아래에 펼쳐지고, 얼굴은 빈 원이 아니라 기본 아바타다', async () => {
+    await mountHome({channels: withGone});
+    fireEvent.press(await screen.findByTestId('sidebar-gone-toggle'));
+    const goneRow = await screen.findByTestId(GONE_ROW);
+    expect(goneRow).toHaveTextContent('나간 멤버');
+    expect(
+      within(goneRow).getByTestId('home-default-face', {includeHiddenElements: true}),
+    ).toBeTruthy();
+    const order = screen
+      .getAllByTestId(/^sidebar-(row-(dm|agent):|gone-toggle)/)
+      .map(node => node.props.testID);
+    // 줄이 먼저, 접힌 행이 그 뒤다(눌렀던 줄이 손가락 밑에 그대로 있다).
+    expect(order.indexOf('sidebar-gone-toggle')).toBeLessThan(order.indexOf('sidebar-row-dm:ch-dm-gone'));
+    expect(screen.getByTestId('sidebar-gone-toggle').props.accessibilityState).toMatchObject({
+      expanded: true,
+    });
+    // 접힌 대화의 행은 그대로 대화로 간다(접힘은 진열일 뿐이다).
+    fireEvent.press(screen.getByTestId('sidebar-gone-toggle'));
+    await waitFor(() => expect(screen.queryByTestId(GONE_ROW)).toBeNull());
+  });
+
+  it('접힌 줄의 글자는 행의 이름처럼 사용자의 글자 크기를 따르고, 가장 큰 크기에서도 자르지 않고 줄을 바꾼다', async () => {
+    // AX5 에서 「나간 멤버와의 대화 2개」가 한 줄에 안 들어갈 때 말줄임이 지우는 것은 끝의 「N개」다. 배율 상한도 두지
+    // 않는다(행의 이름과 같은 규칙): 상한이 있으면 이 줄만 혼자 작게 남는다.
+    await mountHome({channels: withGone});
+    const label = within(await screen.findByTestId('sidebar-gone-toggle')).getByText(
+      '나간 멤버와의 대화 1개',
+    );
+    expect(label.props.numberOfLines).toBeUndefined();
+    expect(label.props.maxFontSizeMultiplier).toBeUndefined();
+    // 줄이 바뀌어도 한글 낱말 가운데서 끊지 않는다(AX5 실측: 「대 / 화 2개」).
+    expect(label.props.lineBreakStrategyIOS).toBe('hangul-word');
+  });
+
+  it('줄을 펼치면 내용이 자란 뒤 한 번만 끝으로 내린다 (줄이 목록 맨 끝이라 결과가 화면 밖에 서기 쉽다, design-review M1)', async () => {
+    const scrollToEnd = jest.fn();
+    jest
+      .spyOn(SectionList.prototype, 'getScrollResponder')
+      .mockReturnValue({scrollToEnd} as never);
+    await mountHome({channels: withGone});
+    const list = await screen.findByTestId('sidebar-list');
+    // 펼치기 전의 크기 변화는 아무 일도 하지 않는다.
+    fireEvent(list, 'contentSizeChange', 320, 900);
+    expect(scrollToEnd).not.toHaveBeenCalled();
+    fireEvent.press(await screen.findByTestId('sidebar-gone-toggle'));
+    await screen.findByTestId(GONE_ROW);
+    fireEvent(list, 'contentSizeChange', 320, 1200);
+    expect(scrollToEnd).toHaveBeenCalledTimes(1);
+    expect(scrollToEnd).toHaveBeenCalledWith({animated: true});
+    // 한 번만: 같은 펼침의 다음 크기 변화(새로고침 등)는 내리지 않는다.
+    fireEvent(list, 'contentSizeChange', 320, 1300);
+    expect(scrollToEnd).toHaveBeenCalledTimes(1);
+    // 접을 때는 내리지 않는다.
+    fireEvent.press(screen.getByTestId('sidebar-gone-toggle'));
+    fireEvent(list, 'contentSizeChange', 320, 900);
+    expect(scrollToEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it('기본 아바타는 나간 멤버에만 선다: 상대가 명부에 있는 DM 은 그 사람의 얼굴이다', async () => {
+    await mountHome({channels: withGone});
+    await screen.findByTestId('sidebar-gone-toggle');
+    expect(
+      within(screen.getByTestId('sidebar-row-dm:ch-dm-human')).queryByTestId('home-default-face', {
+        includeHiddenElements: true,
+      }),
+    ).toBeNull();
+  });
+
+  // 안 읽음이 있는 나간 멤버 DM 은 그 안 읽음이 사람이 읽을 것인지 안 읽은 쪽을 읽어 가른다(`useGoneUnreadVerdicts`, 이슈 AC
+  // 「안 읽은 사람 메시지」). 응답 메시지는 와이어가 아니라 `fetchMessages` 가 받아들이는 형상이다.
+  const wireMessage = (seq: number, type = 'text', props?: Record<string, unknown>) => ({
+    id: `m${seq}`,
+    channelId: 'ch-dm-gone',
+    authorMemberId: GONE_ID,
+    seq,
+    hlcTs: seq,
+    hlcCount: 0,
+    createdAtMs: seq,
+    type,
+    ...(props ? {props} : {}),
+  });
+  const goneRead = (lastRead: number, latest: number, extra: Record<string, unknown> = {}) => ({
+    channel_id: 'ch-dm-gone',
+    last_read_seq: lastRead,
+    latest_seq: latest,
+    unread_count: Math.max(0, latest - lastRead),
+    mention_count: 0,
+    ...extra,
+  });
+  const goneMessageCalls = (fetchMock: jest.Mock) =>
+    fetchMock.mock.calls
+      .map(call => String(call[0]))
+      .filter(url => url.includes('/channels/ch-dm-gone/messages'));
+  const AMBIENT = [wireMessage(2, 'system'), wireMessage(3, 'text', {kind: 'work_session'})];
+
+  it('안 읽은 사람 메시지가 있으면 접히지 않고, 줄도 없다', async () => {
+    await mountHome({
+      channels: withGone,
+      readStates: [...READ_STATES, goneRead(1, 3)],
+      messages: [wireMessage(2, 'text'), wireMessage(3, 'system')],
+    });
+    await waitFor(() => expect(screen.getByTestId(GONE_ROW)).toBeTruthy());
+    expect(screen.queryByTestId('sidebar-gone-toggle')).toBeNull();
+  });
+
+  it('안 읽음이 기계 메시지뿐이면 접힌다: 끈 에이전트의 DM 이 작업 상태 줄 때문에 남지 않는다', async () => {
+    const fetchMock = await mountHome({
+      channels: withGone,
+      readStates: [...READ_STATES, goneRead(1, 3)],
+      messages: AMBIENT,
+    });
+    await waitFor(() => expect(goneMessageCalls(fetchMock)).toHaveLength(1));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const toggle = await screen.findByTestId('sidebar-gone-toggle');
+    expect(toggle).toHaveTextContent('나간 멤버와의 대화 1개');
+    expect(screen.queryByTestId(GONE_ROW)).toBeNull();
+    // 마지막으로 읽은 seq 뒤를 한 번만 읽는다.
+    const [call] = goneMessageCalls(fetchMock);
+    expect(call).toContain('after=1');
+    // 서버가 한 쪽에 줄 수 있는 최대(200건)까지 읽는다: 안 읽은 기계 메시지가 많아도 접힌다(design-review M-A).
+    expect(call).toContain('limit=200');
+  });
+
+  it('판정이 오는 중이면 접힌 채다 (읽는 중에 깜빡이며 나타나지 않는다)', async () => {
+    const fetchMock = await mountHome({
+      channels: withGone,
+      readStates: [...READ_STATES, goneRead(1, 3)],
+      messages: 'pending',
+    });
+    await waitFor(() => expect(goneMessageCalls(fetchMock)).toHaveLength(1));
+    expect(await screen.findByTestId('sidebar-gone-toggle')).toHaveTextContent(
+      '나간 멤버와의 대화 1개',
+    );
+    expect(screen.queryByTestId(GONE_ROW)).toBeNull();
+  });
+
+  it('메시지를 못 읽었으면 보인다 (안 읽은 것이 사람이 읽을 것인지 모를 때 숨기는 쪽이 최악이다)', async () => {
+    await mountHome({
+      channels: withGone,
+      readStates: [...READ_STATES, goneRead(1, 3)],
+      messages: 'fail',
+    });
+    await waitFor(() => expect(screen.getByTestId(GONE_ROW)).toBeTruthy(), {timeout: 3000});
+    expect(screen.queryByTestId('sidebar-gone-toggle')).toBeNull();
+  });
+
+  it('멘션이 있는 DM 은 메시지를 읽지 않고 보인다 (사람이 부른 것이다)', async () => {
+    const fetchMock = await mountHome({
+      channels: withGone,
+      readStates: [...READ_STATES, goneRead(3, 3, {mention_count: 1})],
+      messages: AMBIENT,
+    });
+    await waitFor(() => expect(screen.getByTestId(GONE_ROW)).toBeTruthy());
+    expect(goneMessageCalls(fetchMock)).toEqual([]);
+  });
+
+  it('사람이 직접 한 「여기부터 안 읽음」 표시가 있는 DM 은 메시지를 읽지 않고 보인다 (사람의 뜻이다)', async () => {
+    const fetchMock = await mountHome({
+      channels: withGone,
+      readStates: [...READ_STATES, goneRead(3, 3, {marked_unread_before_seq: 2})],
+      messages: AMBIENT,
+    });
+    await waitFor(() => expect(screen.getByTestId(GONE_ROW)).toBeTruthy());
+    expect(goneMessageCalls(fetchMock)).toEqual([]);
+  });
+
+  it('안 읽음이 없는 나간 멤버 DM 은 메시지를 읽지 않고 접힌다', async () => {
+    const fetchMock = await mountHome({channels: withGone, messages: AMBIENT});
+    await screen.findByTestId('sidebar-gone-toggle');
+    expect(goneMessageCalls(fetchMock)).toEqual([]);
+  });
+
+  it('읽음 투영을 한 번도 못 읽으면 나간 멤버 DM 이 도로 보이고, 고지가 그 이유를 말한다 (「목록은 그대로」는 거짓이다)', async () => {
+    installFetch({channels: withGone});
+    (globalThis.fetch as jest.Mock).mockImplementation(async (url: string) => {
+      if (String(url).includes('/read-state')) return jsonResponse(500, {error: {message: 'boom'}});
+      if (String(url).includes('/channels') && !String(url).includes('/messages')) {
+        return jsonResponse(200, {channels: withGone});
+      }
+      if (String(url).includes('/roster')) return jsonResponse(200, {members: ROSTER});
+      return jsonResponse(200, {});
+    });
+    renderShell();
+    await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
+    const notice = await screen.findByTestId('read-state-error');
+    // 제목과 설명이 같은 말투(해요체)다.
+    expect(notice).toHaveTextContent(/안 읽음 표시를 불러오지 못했어요\./);
+    expect(notice).toHaveTextContent(/나간 멤버와의 대화도 접지 못했어요\./);
+    expect(notice).not.toHaveTextContent(/습니다/);
+    expect(notice).not.toHaveTextContent(/목록은 그대로/);
+    // 접지 않는다: 나간 멤버 DM 이 목록에 있고 접힌 줄은 없다.
+    expect(screen.getByTestId(GONE_ROW)).toBeTruthy();
+    expect(screen.queryByTestId('sidebar-gone-toggle')).toBeNull();
+  });
+
+  it('읽음 투영 실패라도 나간 멤버 DM 이 없으면 목록은 그대로라고 말한다', async () => {
+    installFetch();
+    (globalThis.fetch as jest.Mock).mockImplementation(async (url: string) => {
+      if (String(url).includes('/read-state')) return jsonResponse(500, {error: {message: 'boom'}});
+      if (String(url).includes('/channels') && !String(url).includes('/messages')) {
+        return jsonResponse(200, {channels: CHANNELS});
+      }
+      if (String(url).includes('/roster')) return jsonResponse(200, {members: ROSTER});
+      return jsonResponse(200, {});
+    });
+    renderShell();
+    await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
+    const notice = await screen.findByTestId('read-state-error');
+    expect(notice).toHaveTextContent(/안 읽음 표시를 불러오지 못했습니다\./);
+    expect(notice).toHaveTextContent(/목록은 그대로이고, 안 읽은 개수만 지금 알 수 없습니다\./);
+    expect(notice).not.toHaveTextContent(/접지 못했어요/);
+  });
+
+  it('접힌 대화가 없어지면 펼침은 닫힌 채로 돌아간다 (웹과 같다)', async () => {
+    await mountHome({channels: withGone});
+    fireEvent.press(await screen.findByTestId('sidebar-gone-toggle'));
+    await screen.findByTestId(GONE_ROW);
+    // 안 읽은 사람 글이 오면 그 DM 이 보이게 되고 접힌 줄이 사라진다.
+    const projection = (lastRead: number, latest: number) => [
+      {
+        channelId: 'ch-dm-gone',
+        lastReadSeq: lastRead,
+        latestSeq: latest,
+        unreadCount: Math.max(0, latest - lastRead),
+        mentionCount: 0,
+        markedUnreadBeforeSeq: null,
+      },
+    ];
+    // 사람이 읽을 쪽을 돌려줘서 보이게 한다.
+    (globalThis.fetch as jest.Mock).mockImplementation(async (url: string) =>
+      String(url).includes('/messages')
+        ? jsonResponse(200, {messages: [wireMessage(2, 'text')]})
+        : jsonResponse(200, {}),
+    );
+    act(() => {
+      queryClient!.setQueryData(workspaceKeys.readState(WS), projection(1, 3));
+    });
+    // 판정(안 읽은 쪽 읽기)이 돌아올 시간을 준다.
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 300));
+    });
+    await waitFor(() => expect(screen.queryByTestId('sidebar-gone-toggle')).toBeNull());
+    expect(screen.getByTestId(GONE_ROW)).toBeTruthy();
+    // 읽으면 다시 접힌다: 줄은 처음처럼 접힌 채 선다.
+    act(() => {
+      queryClient!.setQueryData(workspaceKeys.readState(WS), projection(3, 3));
+    });
+    const toggle = await screen.findByTestId('sidebar-gone-toggle');
+    expect(toggle.props.accessibilityState).toMatchObject({expanded: false});
+    expect(screen.queryByTestId(GONE_ROW)).toBeNull();
+  });
+
+  it('DM 섹션을 접으면 줄도 접힌다', async () => {
+    await mountHome({channels: withGone});
+    await screen.findByTestId('sidebar-gone-toggle');
+    fireEvent.press(screen.getByTestId('home-section-toggle-dms'));
+    await waitFor(() => expect(screen.queryByTestId('sidebar-gone-toggle')).toBeNull());
+  });
+
+  it('이름으로 찾으면 접힌 대화도 나오고, 줄은 서지 않는다', async () => {
+    await mountHome({channels: withGone});
+    await screen.findByTestId('sidebar-gone-toggle');
+    chooseFromMenu('dms', FILTER_ACTION);
+    fireEvent.changeText(await screen.findByTestId('sidebar-search'), '나간');
+    await waitFor(() => expect(screen.getByTestId(GONE_ROW)).toBeTruthy());
+    expect(screen.queryByTestId('sidebar-gone-toggle')).toBeNull();
+  });
+
+  it('나간 멤버 DM 뿐이어도 목록이 선다 (「참여한 채널이 없다」고 말하지 않는다)', async () => {
+    await mountHome({channels: [GONE_DM]});
+    expect(await screen.findByTestId('sidebar-gone-toggle')).toHaveTextContent(
+      '나간 멤버와의 대화 1개',
+    );
+    expect(screen.queryByTestId('channels-empty')).toBeNull();
   });
 });

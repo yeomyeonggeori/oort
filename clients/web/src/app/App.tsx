@@ -1,6 +1,10 @@
 import { lazy, Suspense, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import { GithubReturnLanding } from "@/features/github/GithubReturnLanding";
+import { GithubHandoffPage } from "@/features/github/GithubHandoffPage";
+import { GithubPublicReturn } from "@/features/github/GithubPublicReturn";
+import { isGithubHandoffPath } from "@/features/github/handoff";
+import { githubReturnFromSearch } from "@momo/core/features/github/model";
 import { queryClient } from "@/app/queryClient";
 import { SessionProvider, useRestoredSession } from "@/app/session";
 import {
@@ -159,6 +163,12 @@ export function App() {
   const { status, session, signIn, signOut, replaceSessionMember } =
     useRestoredSession();
   const [firstRunTick, setFirstRunTick] = useState(0);
+  // GitHub 에서 돌아온 주소의 단어(`?githubApp=`·`?githubInstall=`)는 첫 렌더에 한 번만 읽어 붙든다.
+  // 로그인 안 된 브라우저의 착지가 읽은 뒤 주소에서 지우기 때문이다(#4220). 로그인된 브라우저는 이
+  // 값을 쓰지 않고 `GithubReturnLanding` 이 주소를 직접 읽는다: 웹 동작은 그대로다. 세션이 한 번이라도
+  // 서면 붙든 단어를 버린다: 그 단어는 이미 GitHub 알림 화면의 것이고, 나중에 로그아웃해도 이 착지가
+  // 다시 서면 안 된다.
+  const [publicGithubReturn, setPublicGithubReturn] = useState(() => githubReturnFromSearch(window.location.search));
   useSyncExternalStore(subscribeFirstRun, snapshotFirstRun, snapshotFirstRun);
   useSyncExternalStore(
     subscribeOwnerOnboarding,
@@ -198,10 +208,21 @@ export function App() {
   }, [session]);
 
   useEffect(() => {
+    if (session) setPublicGithubReturn(null);
+  }, [session]);
+
+  useEffect(() => {
     if (firstRun !== "app") return;
     const resumeHash = takeFirstAgentResumeHash();
     if (resumeHash) window.location.hash = resumeHash;
   }, [firstRun, firstRunTick]);
+
+  // GitHub 앱 만들기의 브라우저 쪽 문(#4220)도 HashRouter 밖의 실경로다. 데스크탑이 시스템 브라우저로
+  // 여는 `/github/handoff#<payload>` 는 세션과 무관한 공개 페이지라서 복원을 기다리지도, 로그인을
+  // 요구하지도 않는다(handoff.ts).
+  if (isGithubHandoffPath(window.location.pathname)) {
+    return <GithubHandoffPage />;
+  }
 
   // OAuth resource-owner consent 는 HashRouter 밖의 실경로다(#1369). provider
   // 리다이렉트가 `/oauth/consent?request=...` 로 떨어뜨리는데, 그 쿼리는 해시가
@@ -226,6 +247,11 @@ export function App() {
   }
 
   if (!session) {
+    // GitHub 에서 돌아왔는데 이 브라우저는 로그인돼 있지 않다(데스크탑이 시작한 일이 시스템 브라우저에서
+    // 끝난 경우, #4220). 로그인 화면 대신 결과 한 문장과 「oort 앱으로 돌아가세요」를 말한다.
+    if (publicGithubReturn !== null) {
+      return <GithubPublicReturn returned={publicGithubReturn} />;
+    }
     // `#/design` 은 세션 없이 열려야 한다. ConnectPage 는 react-router 를
     // import 하지 않아, 이 HashRouter 는 오늘 로그인 화면과 같다.
     // gallery.test.tsx 가 src/features/auth 의 react-router import 0건을 잰다.

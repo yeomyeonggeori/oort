@@ -1,0 +1,115 @@
+{
+  "A-paused-light": [
+    {
+      "title": "곽민지",
+      "body": "@성재 스테이징 배포 확인 부탁드립니다"
+    },
+    {
+      "title": "승인 필요 · @hermes",
+      "body": "스테이징에 배포"
+    },
+    {
+      "title": "곽민지",
+      "body": "점심 먹었어요?"
+    }
+  ],
+  "B-control-light": [
+    {
+      "title": "곽민지",
+      "body": "@성재 스테이징 배포 확인 부탁드립니다"
+    },
+    {
+      "title": "승인 필요 · @hermes",
+      "body": "스테이징에 배포"
+    },
+    {
+      "title": "곽민지",
+      "body": "점심 먹었어요?"
+    }
+  ],
+  "C-resume-light": {
+    "during": [
+      {
+        "title": "곽민지",
+        "body": "@성재 스테이징 배포 확인 부탁드립니다"
+      }
+    ],
+    "after": [
+      {
+        "title": "곽민지",
+        "body": "@성재 스테이징 배포 확인 부탁드립니다"
+      },
+      {
+        "title": "곽민지",
+        "body": "@성재 스테이징 배포 확인 부탁드립니다"
+      }
+    ]
+  },
+  "A-paused-dark": [
+    {
+      "title": "곽민지",
+      "body": "@성재 스테이징 배포 확인 부탁드립니다"
+    },
+    {
+      "title": "승인 필요 · @hermes",
+      "body": "스테이징에 배포"
+    },
+    {
+      "title": "곽민지",
+      "body": "점심 먹었어요?"
+    }
+  ],
+  "B-control-dark": [
+    {
+      "title": "곽민지",
+      "body": "@성재 스테이징 배포 확인 부탁드립니다"
+    },
+    {
+      "title": "승인 필요 · @hermes",
+      "body": "스테이징에 배포"
+    },
+    {
+      "title": "곽민지",
+      "body": "점심 먹었어요?"
+    }
+  ],
+  "C-resume-dark": {
+    "during": [
+      {
+        "title": "곽민지",
+        "body": "@성재 스테이징 배포 확인 부탁드립니다"
+      }
+    ],
+    "after": [
+      {
+        "title": "곽민지",
+        "body": "@성재 스테이징 배포 확인 부탁드립니다"
+      },
+      {
+        "title": "곽민지",
+        "body": "@성재 스테이징 배포 확인 부탁드립니다"
+      }
+    ]
+  },
+  "E-expiry-light": {
+    "during": 1,
+    "after": [
+      {
+        "title": "곽민지",
+        "body": "@성재 스테이징 배포 확인 부탁드립니다"
+      },
+      {
+        "title": "곽민지",
+        "body": "@성재 스테이징 배포 확인 부탁드립니다"
+      }
+    ],
+    "reread": false
+  },
+  "D-cross-device-light": {
+    "first": 1,
+    "second": 2,
+    "third": 3,
+    "polled": false,
+    "polledAgain": false
+  }
+}

@@ -28,6 +28,11 @@ export interface PersonalAgentRowProps {
   /** 켜기·끄기가 끝나면 목록을 다시 읽는다. */
   onChanged: () => void;
   offline: boolean;
+  /**
+   * 이 도구가 이 맥에 연결돼 있지 않은가(끊었거나 로그인이 풀렸다). 개인 에이전트는 그와 별개로 켜져 있으므로
+   * 켜져 있는 채라면 힌트가 그 사실과 정리하는 길(이 스위치)을 말한다(#4252).
+   */
+  toolOff?: boolean;
 }
 
 /**
@@ -35,7 +40,7 @@ export interface PersonalAgentRowProps {
  * 에이전트 켜기」. 끄기: 스위치를 끄면 멤버가 비활성이 된다(별칭은 예약돼 있어 같은 별칭으로
  * 다시 켜면 같은 멤버가 돌아온다). 서버 거절은 그 자리에서 말한다.
  */
-export function PersonalAgentRow({ harness, read, agent, port, onChanged, offline }: PersonalAgentRowProps) {
+export function PersonalAgentRow({ harness, read, agent, port, onChanged, offline, toolOff = false }: PersonalAgentRowProps) {
   const labelId = useId();
   const hintId = useId();
   const aliasId = useId();
@@ -109,7 +114,9 @@ export function PersonalAgentRow({ harness, read, agent, port, onChanged, offlin
                 : offline
                   ? COPY.offlineHint
                   : on
-                    ? `${agent?.label ?? ""} ${COPY.badgeHint}`.trim()
+                    ? toolOff
+                      ? COPY.toolOffKeepsAgent
+                      : `${agent?.label ?? ""} ${COPY.badgeHint}`.trim()
                     : agent
                       ? COPY.off
                       : COPY.toggleHint}

@@ -31,6 +31,7 @@
     "expo-haptics": "~57.0.3",
     "expo-image-manipulator": "~57.0.7",
     "expo-image-picker": "~57.0.7",
+    "expo-media-library": "~57.0.3",
     "expo-notifications": "^57.0.8",
     "react": "19.2.3",
     "react-native": "0.86.2",

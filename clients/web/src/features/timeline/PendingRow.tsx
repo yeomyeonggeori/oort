@@ -9,6 +9,8 @@ import type { PendingMessage } from "@momo/core/features/timeline/model";
 import { resolveQuote } from "@momo/core/features/timeline/quote";
 import type { Message } from "@momo/core/lib/api";
 import {
+  MESSAGE_AVATAR_GUTTER_CLASS,
+  MESSAGE_AVATAR_SIZE_CLASS,
   ROW_CONTINUATION_PAD_CLASS,
   ROW_GROUP_START_PAD_CLASS,
 } from "./spacing";
@@ -74,8 +76,10 @@ export function PendingRow({
         startsGroup ? ROW_GROUP_START_PAD_CLASS : ROW_CONTINUATION_PAD_CLASS
       )}
     >
-      <div className="w-8 shrink-0">
-        {startsGroup && <Avatar member={author} />}
+      <div className={cn("shrink-0", MESSAGE_AVATAR_GUTTER_CLASS)}>
+        {startsGroup && (
+          <Avatar member={author} className={MESSAGE_AVATAR_SIZE_CLASS} />
+        )}
       </div>
       <div className="min-w-0 flex-1">
         {startsGroup && (

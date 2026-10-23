@@ -20,11 +20,13 @@ import {
 } from "@momo/core/features/github/model";
 import { channelLabel, useChannels, useDirectory } from "@/features/workspace/useWorkspace";
 import { StatusChip, Subsection } from "@/features/settings/SettingsFields";
+import { isDesktop } from "@/lib/tauri";
 import { GithubExternalLink } from "./GithubExternalLink";
 import { GithubOperatorBlock } from "./GithubOperatorBlock";
 import { GithubLoadFailure } from "./GithubStates";
 import { GithubSubscriptionList } from "./GithubSubscriptionList";
-import { githubOverviewPrefix, useGithubOverview } from "./githubQueries";
+import { githubOverviewPrefix, githubUnlinkedKey, useGithubOverview } from "./githubQueries";
+import { useReturnRefresh } from "./useReturnRefresh";
 
 // =============================================================================
 // AI › 외부 연결 › GitHub 알림 (ADR-0205 D10, #3955). 한 화면에 세 구역:
@@ -151,6 +153,7 @@ function ConnectBlock({
   offline: boolean;
   data: GithubWorkspaceOverview;
 }) {
+  const client = useQueryClient();
   const [link, setLink] = useState<GithubLinkStart | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const mint = useMutation({
@@ -168,6 +171,13 @@ function ConnectBlock({
     const timer = window.setTimeout(() => setLink(null), link.expiresInSeconds * 1000);
     return () => window.clearTimeout(timer);
   }, [link]);
+
+  // 데스크탑: 설치는 기본 브라우저에서 한다. 링크를 열어 둔 채 창이 다시 앞으로 오면 연결된 계정을
+  // 다시 읽는다(#4220). 웹 브라우저 탭은 켜지 않는다.
+  useReturnRefresh(isDesktop() && link !== null, () => {
+    void client.invalidateQueries({ queryKey: githubOverviewPrefix(workspaceId) });
+    void client.invalidateQueries({ queryKey: githubUnlinkedKey });
+  });
 
   if (!data.appRegistered) {
     return (
@@ -242,8 +252,12 @@ function ConnectBlock({
           className="flex min-w-0 flex-col gap-2 rounded-md border border-line p-3"
           data-testid="github-link-ready"
         >
-          <p className="break-keep text-body text-ink">
-            GitHub에서 설치를 마쳐 주세요. {minutes}분 안에 마치면 이 화면으로 돌아와요.
+          {/* 데스크탑에서는 설치도 기본 브라우저에서 끝나고 GitHub 가 돌려보내는 곳도 그 브라우저다. 「이 화면으로
+              돌아와요」는 거짓이라, 앱으로 돌아오라고 말하고 돌아오면 알아서 바뀐다고 말한다(design-review M1). */}
+          <p className="break-keep text-body text-ink" data-testid="github-link-ready-text">
+            {isDesktop()
+              ? `기본 브라우저에서 GitHub 설치를 마친 뒤 이 앱으로 돌아와 주세요. 돌아오면 이 화면이 알아서 바뀌어요. ${minutes}분 안에 마쳐야 해요.`
+              : `GitHub에서 설치를 마쳐 주세요. ${minutes}분 안에 마치면 이 화면으로 돌아와요.`}
           </p>
           <div className="flex flex-wrap items-center justify-end gap-2">
             <Button type="button" variant="secondary" size="sm" onClick={() => setLink(null)}>

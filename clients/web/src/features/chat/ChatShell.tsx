@@ -36,6 +36,9 @@ import {
   useClosedDms,
 } from "@/features/sidebar/sidebarDmClosure";
 import { useDmRevival } from "@/features/sidebar/dmRevival";
+import { goneDmIds } from "@/features/sidebar/goneDmHiding";
+import { useGoneUnreadVerdicts } from "@/features/sidebar/goneUnreadVerdicts";
+import { rosterLoaded } from "@momo/core/features/sidebar/goneDm";
 import { applyFirstAgentFocus } from "@/features/welcome/firstAgentStore";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import {
@@ -209,13 +212,44 @@ export function ChatShell() {
   // 닫은 DM(#3963, `sidebarDmClosure.ts`)은 이 폴백의 후보가 아니다. 사이드바가 같은 함수로 열린 대화를
   // 정하므로, 채널이 없는 멤버의 첫 DM 을 닫으면 본문도 다음 DM(없으면 빈 상태)으로 간다.
   const closedDms = useClosedDms(workspaceId);
+  const readPhase = readProjectionPhase(readStates);
   const latestSeqForClosure = useDmRevival({
     workspaceId,
     dms: channelsQuery.groups.dms,
     closed: closedDms,
     byChannel: readStates.byChannel,
-    phase: readProjectionPhase(readStates),
+    phase: readPhase,
   });
+  // 나간 멤버와의 대화(#4252)로 접힌 DM 도 후보가 아니다: 사이드바가 같은 집합으로 접고, 접힌 대화를 본문이 도로 열면
+  // 열려 있다는 이유로 목록에 되살아난다.
+  const rosterReady = rosterLoaded(directoryQuery);
+  // 안 읽음이 있는 나간 멤버 DM 은 그 안 읽음이 사람이 읽을 것인지 한 번 읽어 가른다. 사이드바가 **같은 훅**을 부른다(키가 같아
+  // 한 번만 읽는다): 둘이 다르면 사이드바는 접는데 본문은 연다.
+  const goneVerdicts = useGoneUnreadVerdicts({
+    workspaceId,
+    dms: channelsQuery.groups.dms,
+    directory,
+    selfMemberId: session.member.id,
+    rosterReady,
+    byChannel: readStates.byChannel,
+    phase: readPhase,
+    closed: closedDms,
+    closureLatestSeqOf: latestSeqForClosure,
+  });
+  const foldedGone = useMemo(
+    () =>
+      goneDmIds({
+        dms: channelsQuery.groups.dms,
+        directory,
+        selfMemberId: session.member.id,
+        rosterReady,
+        byChannel: readStates.byChannel,
+        openId: null,
+        phase: readPhase,
+        verdicts: goneVerdicts,
+      }),
+    [channelsQuery.groups.dms, directory, session.member.id, rosterReady, readStates.byChannel, readPhase, goneVerdicts]
+  );
   const channelId =
     params.channelId ??
     indexFallbackChannelId({
@@ -223,7 +257,8 @@ export function ChatShell() {
       dms: channelsQuery.groups.dms,
       closed: closedDms,
       latestSeqOf: latestSeqForClosure,
-      phase: readProjectionPhase(readStates),
+      phase: readPhase,
+      foldedGone,
     }) ??
     null;
 
@@ -241,7 +276,7 @@ export function ChatShell() {
   // take a string (the composer placeholder, its sr-only label) gets them
   // joined. A DM in this workspace can be one of two 김인턴.
   const labelOptions = {
-    rosterReady: !directoryQuery.isPending,
+    rosterReady,
     selfName: session.member.displayName,
   };
   const labelParts = channel
@@ -1065,10 +1100,11 @@ export function ChatShell() {
     <>
       {/* 1줄 헤더 (#1865). 넓은 창에서는 떠 있는 판의 머리(DS2-6, 시안 A
           `.a-mhd`: 높이 60 · 좌 24 우 18 · 제목 17/800 · 토픽 13.5)다. 폰에서는
-          py-row(6)×2 + size-control(32) + 하단 경계 1px = 45 그대로다. */}
+          세로 여백이 py-row-fixed(6)×2다. `py-row`가 아닌 이유: 그것은 대화 밀도를 따르는 대화 행의 값이라 머리 키가
+          밀도에 따라 변한다(#4189, 폰 폭에서 53/57/61px로 실측). */}
       <header
         data-testid="channel-header"
-        className="channel-head flex min-w-0 items-center py-row"
+        className="channel-head flex min-w-0 items-center py-row-fixed"
       >
         <div className="flex min-w-0 items-center gap-2">
           {/* 폰에서 채널 목록으로 돌아가는 길 (goal B6). 사이드바가 열이 아니라

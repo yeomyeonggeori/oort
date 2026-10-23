@@ -9,6 +9,7 @@ import { useOffline } from "@/features/common/useOffline";
 import { useWorkHosts } from "@/features/settings/workHostsQuery";
 import { useLocalHarnessWatch } from "@/features/welcome/useLocalHarnessWatch";
 import { IS_TAURI } from "@/lib/env";
+import { rosterQueryKey } from "@/features/workspace/useWorkspace";
 import { MyPersonalKeysSection } from "../MyPersonalKeysSection";
 import { HarnessCard } from "./HarnessCard";
 import { harnessSessions, type HarnessSessionStore } from "./harnessSessionStore";
@@ -46,6 +47,9 @@ export function MyToolsPane({
   });
   const reload = useCallback(() => {
     void client.invalidateQueries({ queryKey: personalKey });
+    // 켜고 끄는 것은 멤버의 상태를 바꾼다: 끄면 서버 명부(활성 멤버만)에서 빠진다. 사이드바의 DM 이름은 그 명부를
+    // 읽으므로 같이 다시 읽지 않으면 끈 에이전트가 앱을 다시 시작하기 전까지 이름 그대로 목록에 남았다(#4252).
+    void client.invalidateQueries({ queryKey: rosterQueryKey(workspaceId) });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, workspaceId]);
 

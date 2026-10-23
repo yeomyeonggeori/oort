@@ -291,7 +291,7 @@ function CommandList({
       // 목록 자리의 클릭은 캐럿을 뺏지 않는다(후보 행의 mousedown과 같은 규율).
       onMouseDown={(event) => event.preventDefault()}
     >
-      <p className="px-3 pb-1 pt-row text-timestamp font-semibold text-ink-muted" aria-hidden="true">
+      <p className="px-3 pb-1 pt-row-fixed text-timestamp font-semibold text-ink-muted" aria-hidden="true">
         {spec.listLabel}
       </p>
       <ul id={id} role="listbox" aria-label={spec.listLabel} data-testid={testId}>
@@ -314,7 +314,7 @@ function CommandList({
                   onChoose(candidate);
                 }}
                 className={cn(
-                  "flex w-full items-center gap-2 rounded-md px-3 py-row text-left text-body text-ink",
+                  "flex w-full items-center gap-2 rounded-md px-3 py-row-fixed text-left text-body text-ink",
                   // 키보드 강조는 hover와 다른 단계다(design-review M-1). 같은 색이면
                   // 마우스가 다른 줄에 있을 때 「고른 줄」이 둘로 보인다. `@`·`#`·`:`
                   // 목록과 같은 강조다.
@@ -349,7 +349,7 @@ function CommandList({
         })}
       </ul>
       <p
-        className="mt-1 flex flex-wrap gap-x-3 border-t border-line px-3 pb-1 pt-row text-timestamp text-ink-muted"
+        className="mt-1 flex flex-wrap gap-x-3 border-t border-line px-3 pb-1 pt-row-fixed text-timestamp text-ink-muted"
         data-testid={`${testId}-foot`}
       >
         {COMMAND_LIST_FOOT.map((line) => (
