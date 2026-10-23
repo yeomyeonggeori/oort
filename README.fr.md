@@ -10,7 +10,7 @@
 
 oort est une messagerie que vous hébergez vous-même, où les personnes et les agents d’IA partagent les mêmes canaux. La plupart des produits de chat greffent l’IA comme un bot : un utilisateur spécial avec des API spéciales, dont le travail se passe là où vous ne le voyez pas. oort refuse cette forme. Ici, un agent est un `member (kind = agent)` : même liste de membres, mêmes canaux, même surface de permissions qu’une personne.
 
-Quand un agent travaille, son exécution défile dans le canal. Quand il a besoin d’une permission, un humain l’accorde ou la refuse **dans la conversation** — ou directement depuis l’écran de verrouillage d’un téléphone, où les boutons Approuver et Refuser demandent d’abord Face ID ou le code (implémenté dans la v0.1.30 ; la vérification sur de vrais appareils reste ouverte). Ce que l’exécution a coûté, ce qu’elle a touché et comment elle s’est terminée sont des messages dans la même séquence que vous faites défiler. La conversation est le registre ; il n’y a pas de second endroit où regarder.
+Quand un agent travaille, son exécution défile dans le canal. Quand il a besoin d’une permission, un humain l’accorde ou la refuse **dans la conversation** — ou directement depuis l’écran de verrouillage d’un téléphone, où les boutons Approuver et Refuser demandent d’abord Face ID ou le code (implémenté dans la v0.1.30 ; la vérification sur de vrais appareils reste ouverte). Ce que l’exécution a coûté, quelles actions elle a demandé à effectuer et comment elle s’est terminée sont des messages dans la même séquence que vous faites défiler. La conversation est le registre ; il n’y a pas de second endroit où regarder.
 
 Le nom vient du [nuage d’Oort](https://fr.wikipedia.org/wiki/Nuage_d%27Oort) : une coquille silencieuse de petits corps aux confins de la portée d’une étoile — distante, autonome, et tout entière en orbite autour d’un foyer qui est le vôtre.
 
@@ -22,19 +22,15 @@ Le nom vient du [nuage d’Oort](https://fr.wikipedia.org/wiki/Nuage_d%27Oort) :
 
 ## Un coup d’œil à l’intérieur
 
-<table>
-<tr>
-<td width="50%" valign="top"><a href="docs/assets/readme/run.png"><img src="docs/assets/readme/run.png" alt="Un canal avec le panneau de travail ouvert : l’exécution de l’agent est listée étape par étape, avec un bouton Arrêter" width="100%"></a><br><sub><strong>Des exécutions que l’on peut suivre et arrêter.</strong> Le panneau liste ce que l’agent a signalé, étape par étape. L’enregistrement vit sur le serveur : un autre appareil le voit aussi.</sub></td>
+<table><tr>
+<td width="50%" valign="top"><a href="docs/assets/readme/run.png"><img src="docs/assets/readme/run.png" alt="Un canal avec le panneau de travail ouvert : l’exécution de l’agent est listée étape par étape, avec un bouton Arrêter" width="100%"></a><br><sub><strong>Des exécutions que l’on peut suivre et arrêter.</strong> Le panneau liste ce que oort a enregistré et ce que l’agent a signalé, étape par étape. L’enregistrement vit sur le serveur : un autre appareil le voit aussi.</sub></td>
 <td width="50%" valign="top"><a href="docs/assets/readme/jobs.png"><img src="docs/assets/readme/jobs.png" alt="L’écran Travail : tâches en cours et terminées de toute l’équipe, avec le rapport d’un agent sur une pull request ouverte et des tests réussis" width="100%"></a><br><sub><strong>Les résultats d’abord.</strong> Ce qui tourne, ce qui est terminé, et le rapport de l’agent lui-même — PR ouverte, tests réussis — étiqueté comme rapport.</sub></td>
-</tr>
-</table>
+</tr></table>
 
-<table>
-<tr>
+<table><tr>
 <td width="62%" valign="top"><a href="docs/assets/readme/themes.png"><img src="docs/assets/readme/themes.png" alt="Le même canal dans quatre thèmes : Dawn sky, Sunset band, Catppuccin et Gruvbox Hard" width="100%"></a><br><sub><strong>57 thèmes de catalogue en plus de nos trois propres thèmes</strong> (clair et sombre comptés séparément) : ici Dawn sky, Sunset band, Catppuccin et Gruvbox Hard. <em>Fusionné dans la branche ; pas encore publié.</em></sub></td>
-<td width="38%" valign="top"><a href="docs/assets/readme/phone.png"><img src="docs/assets/readme/phone.png" alt="La première étape de l’application iPhone, « Quelles notifications voulez-vous ? » : aperçu d’une demande d’approbation avec les boutons Approuver et Refuser, du travail terminé et des mentions" width="100%"></a><br><sub><strong>Sur le téléphone.</strong> La première étape au lancement vous laisse choisir les notifications reçues : demandes d’approbation, travail terminé, mentions. Les builds iOS sont dans un groupe TestFlight interne.</sub></td>
-</tr>
-</table>
+<td width="38%" valign="top"><a href="docs/assets/readme/phone.png"><img src="docs/assets/readme/phone.png" alt="La première étape de l’application iPhone, « Quelles notifications voulez-vous ? » : aperçu d’une demande d’approbation avec les boutons Approuver et Refuser, du travail terminé et des mentions" width="100%"></a><br><sub><strong>Sur le téléphone.</strong> La première étape au lancement présente un aperçu de chaque type de notification : les demandes d’approbation et les mentions arrivent toujours, et le travail terminé a un interrupteur. Les builds de test iOS vont à un petit groupe TestFlight interne.</sub></td>
+</tr></table>
 
 ## Pourquoi ça tient
 
@@ -51,15 +47,15 @@ Une base de données. Un chemin d’écriture. Personnes et agents sur la même 
 
 ## Fonctionne aujourd’hui · En cours de câblage · Convictions fortes, code à venir
 
-✅ **Fonctionne aujourd’hui** — publié dans la [v0.1.35](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.35)
+✅ **Fonctionne aujourd’hui** — dans la [v0.1.35](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.35) (l’image du serveur et du web ; les applications de bureau et iOS sont construites à part)
 
 - Canaux, fils de discussion, messages privés, citations, indicateur de saisie, épingles et recherche — sur le web, le bureau (Tauri, macOS) et iOS (React Native)
 - Des agents comme membres : mentionnez-en un, regardez son exécution défiler dans le canal avec un état honnête, arrêtez-la en cours de route
-- Approbations humaines dans le canal et la boîte de réception ; résultats d’exécution, registre d’usage et de coût, et décisions d’approbation (qui a décidé, et quand) dans la conversation
+- Approbations humaines dans le canal et la boîte de réception ; résultats d’exécution, coût de chaque tour et décisions d’approbation (qui a décidé, et quand) dans la conversation, et une page d’usage dans les Réglages
 - L’écran Travail (les résultats d’abord, les miens ou toute l’équipe) et l’observation en direct du terminal d’une session d’agent depuis l’application de bureau
 - Vos propres connexions d’IA : clés d’API (Anthropic, xAI, OpenRouter), un Hermes sur le même serveur, ou un backend local compatible OpenAI
 - Pièces jointes : les fichiers vivent sur le volume propre de votre serveur (le défaut de l’auto-hébergement) ou dans un disque partagé Google qui vous appartient ; les téléchargements passent la vérification d’appartenance au canal du serveur et, avec le backend Google, les envois vont directement vers Drive
-- Un parcours d’auto-hébergement mesuré — clone → script d’env → compose up → connecté — et des images multi-architectures épinglées par digest avec provenance SLSA
+- Un parcours d’auto-hébergement mesuré — clone → script d’env → compose up → connecté — et des images multi-architectures épinglées par digest avec provenance SLSA ([détails](SECURITY.md#security-posture))
 - Un système de design (« Oort cloud ») dont les règles de contraste sont garanties par des tests, en clair et en sombre
 
 🚧 **En cours de câblage**
@@ -67,8 +63,8 @@ Une base de données. Un chemin d’écriture. Personnes et agents sur la même 
 - Approuver/Refuser depuis l’écran de verrouillage de l’iPhone — implémenté dans la v0.1.30 ; la vérification sur de vrais appareils reste ouverte ([vérification sur appareil](docs/cicd/11-ios-push-device-check.md))
 - Mémoire d’équipe (résumés, décisions, faits, engagements ; parcourir, modifier, oublier) — publiée dans la v0.1.15 ; ses résumés exigent une connexion d’IA par défaut de l’équipe, et les notes de version listent encore comme non vérifiée la qualité des résumés avec un vrai modèle
 - Événements de la GitHub App dans les canaux — publiés dans la v0.1.32, désactivés tant que l’opérateur n’a pas défini la clé de l’App
-- Fusionné dans une branche, pas encore publié : le catalogue de 57 thèmes et sa galerie, la taille du texte et la densité du chat, le fond en verre du bureau, l’ajout de photos sur le téléphone, la création de la GitHub App depuis le bureau, et le serveur des messages programmés (ses écrans sont en cours)
-- Les builds de bureau et iOS vont d’abord à notre propre équipe (groupe TestFlight interne) ; il n’y a pas de téléchargement public
+- Fusionné dans une branche, pas encore publié : le catalogue de 57 thèmes et sa galerie, la taille du texte et la densité du chat, le fond en verre du bureau, le menu de pièces jointes du téléphone (grille des photos récentes et appareil photo), la création de la GitHub App depuis le bureau, et le serveur des messages programmés (ses écrans sont en cours)
+- Les applications de bureau et iOS sont encore des builds de test pour les appareils de ceux qui maintiennent oort et un petit groupe TestFlight interne ; le déploiement à toute l’équipe attend la porte d’accès interne ([M7](docs/cicd/03-store-readiness-gate.md)), et il n’existe pas de téléchargement public pris en charge
 
 💭 **Convictions fortes, code à venir**
 
@@ -100,7 +96,7 @@ Un **hôte de travail** optionnel permet aux agents d’exécuter des sessions d
 
 ### Je veux juste essayer l’application
 
-Il n’y a pas encore de téléchargement public ni d’instance hébergée publique. Notre propre équipe passe d’abord ([objectif A](docs/adr/0187-goal-a-team-daily-desktop-ios.md)) : les applications macOS et iOS vont uniquement à cette équipe (un groupe TestFlight interne et un canal de mise à jour d’équipe), et l’App Store, un DMG public et TestFlight externe attendent la [porte d’accès aux stores](docs/cicd/03-store-readiness-gate.md). Le client web est livré dans l’image du serveur ; le moyen le plus rapide de voir oort est donc la voie suivante.
+Il n’existe pas encore de téléchargement public pris en charge ni d’instance hébergée publique. Notre propre équipe passe d’abord ([objectif A](docs/adr/0187-goal-a-team-daily-desktop-ios.md)) : les builds de test des applications macOS et iOS vont uniquement aux appareils de ceux qui maintiennent oort et à un petit groupe TestFlight interne, et l’App Store, un DMG public et TestFlight externe attendent la [porte d’accès aux stores](docs/cicd/03-store-readiness-gate.md). (Un ancien DMG macOS d’août reste attaché à la version v0.1.1 ; il est antérieur à l’application actuelle.) Le client web est livré dans l’image du serveur ; le moyen le plus rapide de voir oort est donc la voie suivante.
 
 ### Je le veux sur mon propre serveur
 
@@ -112,14 +108,22 @@ scripts/self_host_env.sh   # écrit votre fichier env et affiche votre première
 # puis lancez la ligne compose affichée et ouvrez l'adresse locale indiquée
 ```
 
-Trois commandes, aucune branche, et aucune durée promise. Ou collez ceci dans votre agent : *« Sur cette machine, sous le compte de cet utilisateur uniquement : lis https://raw.githubusercontent.com/yeomyeonggeori/oort/main/docs/SELF_HOST_AGENT.md et suis son contrat §0 pour installer oort. Ne déclare avoir terminé que lorsque `scripts/oort doctor` est en PASS. »* Le pas-à-pas complet, le mode image publiée (`--published-image`, épinglée par digest depuis [`releases/latest.json`](releases/latest.json)), une origine publique et Railway ([`infra/railway/README.md`](infra/railway/README.md)) sont dans [`docs/SELF_HOST.md`](docs/SELF_HOST.md).
+Trois commandes, aucune bifurcation, et aucune durée promise. Ou confiez la tâche à votre agent — collez ceci :
+
+```text
+Sur cette machine, sous le compte de cet utilisateur uniquement : lis
+https://raw.githubusercontent.com/yeomyeonggeori/oort/main/docs/SELF_HOST_AGENT.md
+et suis son contrat §0 pour installer oort.
+Ne déclare avoir terminé que lorsque `scripts/oort doctor` est en PASS.
+```
+
+Le pas-à-pas complet, le mode image publiée (`--published-image`, épinglée par digest depuis [`releases/latest.json`](releases/latest.json)), une origine publique et Railway ([`infra/railway/README.md`](infra/railway/README.md)) sont dans [`docs/SELF_HOST.md`](docs/SELF_HOST.md).
 
 ### Je veux compiler depuis le code
 
 ```sh
 npm ci && npm --prefix clients/web ci && npm --prefix clients/mobile ci
-make build   # server-rust (Rust 1.88+) et les vérifications de types TypeScript
-make test    # cargo test et les tests web, core et téléphone
+make build && make test   # compile server-rust (Rust 1.88+), vérifie les types TypeScript, lance tous les tests
 ```
 
 Commencez par [`docs/architecture/overview.md`](docs/architecture/overview.md) et les [ADR](docs/adr/) : les décisions expliquent le code mieux que le code lui-même. La façon dont les changements sont vérifiés avant d’atterrir : [validation du développement](docs/runbooks/development-validation.md).

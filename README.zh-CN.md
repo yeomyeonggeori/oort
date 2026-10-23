@@ -10,7 +10,7 @@
 
 oort 是你自己托管的即时通讯工具，人和 AI 智能体共用同样的频道。大多数聊天产品把 AI 当作机器人附加上去：一个拥有特殊 API 的特殊用户，它的工作发生在你看不见的地方。oort 拒绝这种形态。这里的智能体是 `member (kind = agent)`——同样的成员名册、同样的频道、同样的权限面，和人一样。
 
-智能体工作时，它的运行会流入频道。需要权限时，由人**在对话里**批准或拒绝——也可以直接在手机锁屏上操作，那里的“批准”和“拒绝”按钮会先要求 Face ID 或设备密码（已在 v0.1.30 实现，真机验证仍未完成）。这次运行花了多少钱、碰过什么、如何结束，都是你滚动浏览的同一条时间线里的消息。对话就是账本，没有第二个地方可看。
+智能体工作时，它的运行会流入频道。需要权限时，由人**在对话里**批准或拒绝——也可以直接在手机锁屏上操作，那里的“批准”和“拒绝”按钮会先要求 Face ID 或设备密码（已在 v0.1.30 实现，真机验证仍未完成）。这次运行花了多少钱、请求执行过哪些操作、如何结束，都是你滚动浏览的同一条时间线里的消息。对话就是账本，没有第二个地方可看。
 
 名字取自[奥尔特云](https://zh.wikipedia.org/wiki/奥尔特云)：位于恒星影响范围最边缘的一圈安静的小天体——遥远、自成一体，完全环绕着一个属于你的家。
 
@@ -22,19 +22,15 @@ oort 是你自己托管的即时通讯工具，人和 AI 智能体共用同样�
 
 ## 内部一瞥
 
-<table>
-<tr>
-<td width="50%" valign="top"><a href="docs/assets/readme/run.png"><img src="docs/assets/readme/run.png" alt="打开了工作面板的频道：智能体的运行按步骤列出，并带有“停止”按钮" width="100%"></a><br><sub><strong>看得见、停得下的运行。</strong> 面板按步骤列出智能体上报的内容。记录保存在服务器上，所以换一台设备也能看到。</sub></td>
+<table><tr>
+<td width="50%" valign="top"><a href="docs/assets/readme/run.png"><img src="docs/assets/readme/run.png" alt="打开了工作面板的频道：智能体的运行按步骤列出，并带有“停止”按钮" width="100%"></a><br><sub><strong>看得见、停得下的运行。</strong> 面板按步骤列出 oort 记录的内容和智能体上报的内容。记录保存在服务器上，所以换一台设备也能看到。</sub></td>
 <td width="50%" valign="top"><a href="docs/assets/readme/jobs.png"><img src="docs/assets/readme/jobs.png" alt="“工作”界面：整个团队正在运行和已完成的任务，以及智能体对已开 PR 和通过的测试所做的报告" width="100%"></a><br><sub><strong>结果优先。</strong> 正在运行的、已完成的，以及智能体自己的报告——已开 PR、测试通过——并标注为“报告”。</sub></td>
-</tr>
-</table>
+</tr></table>
 
-<table>
-<tr>
+<table><tr>
 <td width="62%" valign="top"><a href="docs/assets/readme/themes.png"><img src="docs/assets/readme/themes.png" alt="同一个频道的四种主题：Dawn sky、Sunset band、Catppuccin 和 Gruvbox Hard" width="100%"></a><br><sub><strong>在我们自带的三个主题之外，还有 57 个目录主题</strong>（浅色和深色分开计数）：这里是 Dawn sky、Sunset band、Catppuccin 和 Gruvbox Hard。<em>已合入分支，尚未发布。</em></sub></td>
-<td width="38%" valign="top"><a href="docs/assets/readme/phone.png"><img src="docs/assets/readme/phone.png" alt="iPhone 应用的首次启动步骤“想收到哪些通知？”：带“批准”和“拒绝”按钮的审批请求、工作完成和提及的预览" width="100%"></a><br><sub><strong>在手机上。</strong> 首次启动的步骤里选择要接收的通知：审批请求、工作完成、提及。iOS 构建在内部 TestFlight 分组中。</sub></td>
-</tr>
-</table>
+<td width="38%" valign="top"><a href="docs/assets/readme/phone.png"><img src="docs/assets/readme/phone.png" alt="iPhone 应用的首次启动步骤“想收到哪些通知？”：带“批准”和“拒绝”按钮的审批请求、工作完成和提及的预览" width="100%"></a><br><sub><strong>在手机上。</strong> 首次启动的步骤会预览每一类通知：审批请求和提及始终开启，“工作完成”有一个开关。iOS 测试构建发给一个小型 TestFlight 内部分组。</sub></td>
+</tr></table>
 
 ## 为什么它不会散架
 
@@ -51,15 +47,15 @@ oort 是你自己托管的即时通讯工具，人和 AI 智能体共用同样�
 
 ## 现已可用 · 接线中 · 主张已定，代码未到
 
-✅ **现已可用** — 已随 [v0.1.35](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.35) 发布
+✅ **现已可用** — 在 [v0.1.35](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.35) 中（服务器和 Web 镜像；桌面端和 iOS 应用单独构建）
 
 - 频道、线程、私信、引用、输入中提示、置顶和搜索——支持 Web、桌面端（Tauri，macOS）和 iOS（React Native）
 - 作为成员的智能体：@ 它，看它的运行以诚实的状态流入频道，可随时中途停止
-- 频道和收件箱里的人工审批；运行结果、用量/费用账本，以及审批决定（谁在何时决定）都在对话里
+- 频道和收件箱里的人工审批；运行结果、每一轮的费用，以及审批决定（谁在何时决定）都在对话里，设置里还有用量页面
 - “工作”界面（结果优先，看自己的或整个团队的），以及在桌面应用里实时观察智能体会话的终端
 - 你自己的 AI 连接：API 密钥（Anthropic、xAI、OpenRouter）、同一台服务器上的 Hermes，或本地兼容 OpenAI 的后端
 - 附件：文件存放在你服务器自己的卷上（自托管默认），或你自己的 Google 共享云端硬盘里；下载要通过服务器的频道成员资格检查，使用 Google 后端时上传直接发往 Drive
-- 经过实测的自托管路径——clone → env 脚本 → compose up → 登录——以及按 digest 固定、带 SLSA provenance 的多架构镜像
+- 经过实测的自托管路径——clone → env 脚本 → compose up → 登录——以及按 digest 固定、带 SLSA provenance 的多架构镜像（[详情](SECURITY.md#security-posture)）
 - 由测试守住对比度规则的设计系统（“Oort cloud”），支持浅色和深色
 
 🚧 **接线中**
@@ -67,8 +63,8 @@ oort 是你自己托管的即时通讯工具，人和 AI 智能体共用同样�
 - iPhone 锁屏上的批准/拒绝——已在 v0.1.30 实现；真机验证仍未完成（[设备检查](docs/cicd/11-ios-push-device-check.md)）
 - 团队记忆（摘要、决定、事实、承诺；浏览、编辑、遗忘）——已随 v0.1.15 发布；其摘要需要团队默认的 AI 连接，发布说明仍把真实模型下的摘要质量列为未验证
 - 频道里的 GitHub App 事件——已随 v0.1.32 发布，在运维者设置 App 密钥之前保持关闭
-- 已合入分支、尚未发布：57 个目录主题和主题库、文字大小与聊天密度、桌面端毛玻璃背景、手机端照片附件、从桌面端创建 GitHub App，以及定时消息的服务端（界面仍在制作中）
-- 桌面端和 iOS 构建先发给我们自己的团队（TestFlight 内部分组）；目前没有公开下载
+- 已合入分支、尚未发布：57 个目录主题和主题库、文字大小与聊天密度、桌面端毛玻璃背景、手机端附件菜单（最近照片网格和相机）、从桌面端创建 GitHub App，以及定时消息的服务端（界面仍在制作中）
+- 桌面端和 iOS 应用目前仍是面向维护者自己的设备和小型 TestFlight 内部分组的测试构建；面向整个团队的分发要等内部门禁（[M7](docs/cicd/03-store-readiness-gate.md)），目前没有受支持的公开下载
 
 💭 **主张已定，代码未到**
 
@@ -100,7 +96,7 @@ PostgreSQL 是 oort 的事实来源。工作区成员关系、频道消息、审
 
 ### 我只想试试应用
 
-目前还没有公开下载，也没有公开托管的实例。我们自己的团队优先（[目标 A](docs/adr/0187-goal-a-team-daily-desktop-ios.md)）：macOS 和 iOS 应用只发给这个团队（TestFlight 内部分组和团队更新通道），App Store、公开 DMG 和外部 TestFlight 要等[商店门禁](docs/cicd/03-store-readiness-gate.md)。Web 客户端就在服务器镜像里，所以最快看到 oort 的办法是下一条路径。
+目前还没有受支持的公开下载，也没有公开托管的实例。我们自己的团队优先（[目标 A](docs/adr/0187-goal-a-team-daily-desktop-ios.md)）：macOS 和 iOS 应用的测试构建只发给维护者自己的设备和一个小型 TestFlight 内部分组，App Store、公开 DMG 和外部 TestFlight 要等[商店门禁](docs/cicd/03-store-readiness-gate.md)。（8 月的一个早期 macOS DMG 仍附在 v0.1.1 发布上，但它早于当前的应用。）Web 客户端就在服务器镜像里，所以最快看到 oort 的办法是下一条路径。
 
 ### 我想放在自己的服务器上
 
@@ -112,14 +108,22 @@ scripts/self_host_env.sh   # 写出你的 env 文件并打印首次登录信息
 # 然后运行它打印出的 compose 命令行，打开它指明的本地地址
 ```
 
-三条命令，没有分支，也不承诺耗时。也可以把这段话交给你的智能体：“在这台机器上，只在这个用户的账户下：读取 https://raw.githubusercontent.com/yeomyeonggeori/oort/main/docs/SELF_HOST_AGENT.md ，并按其 §0 的约定安装 oort。只有当 `scripts/oort doctor` 为 PASS 时才报告完成。”完整的操作流程、已发布镜像模式（`--published-image`，按 [`releases/latest.json`](releases/latest.json) 里的 digest 固定）、公网入口和 Railway（[`infra/railway/README.md`](infra/railway/README.md)）见 [`docs/SELF_HOST.md`](docs/SELF_HOST.md)。
+三条命令，没有岔路，也不承诺耗时。也可以把这件事交给你的智能体——粘贴下面这段：
+
+```text
+在这台机器上，只在这个用户的账户下：
+读取 https://raw.githubusercontent.com/yeomyeonggeori/oort/main/docs/SELF_HOST_AGENT.md ，
+并按其 §0 的约定安装 oort。
+只有当 `scripts/oort doctor` 为 PASS 时才报告完成。
+```
+
+完整的操作流程、已发布镜像模式（`--published-image`，按 [`releases/latest.json`](releases/latest.json) 里的 digest 固定）、公网入口和 Railway（[`infra/railway/README.md`](infra/railway/README.md)）见 [`docs/SELF_HOST.md`](docs/SELF_HOST.md)。
 
 ### 我想从代码构建
 
 ```sh
 npm ci && npm --prefix clients/web ci && npm --prefix clients/mobile ci
-make build   # server-rust（Rust 1.88+）和 TypeScript 类型检查
-make test    # cargo test 以及 Web、core、手机端测试
+make build && make test   # 构建 server-rust（Rust 1.88+）、TypeScript 类型检查、运行全部测试
 ```
 
 先读 [`docs/architecture/overview.md`](docs/architecture/overview.md) 和 [ADR](docs/adr/)——这些决定比代码更能解释代码。变更落地前如何验证，见[开发验证](docs/runbooks/development-validation.md)。

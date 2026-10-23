@@ -10,7 +10,7 @@
 
 oort 是你自己架設的通訊軟體，人與 AI 代理共用同樣的頻道。多數聊天產品把 AI 當成機器人外掛上去：一個擁有特殊 API 的特殊使用者，它的工作發生在你看不見的地方。oort 拒絕這種形態。這裡的代理是 `member (kind = agent)`——同樣的成員名冊、同樣的頻道、同樣的權限面，和人一樣。
 
-代理工作時，它的執行會流入頻道。需要權限時，由人**在對話裡**核准或拒絕——也可以直接在手機鎖定畫面上操作，那裡的「核准」與「拒絕」按鈕會先要求 Face ID 或裝置密碼（已在 v0.1.30 實作，實機驗證仍未完成）。這次執行花了多少錢、碰過什麼、如何結束，都是你捲動瀏覽的同一條時間軸裡的訊息。對話就是帳本，沒有第二個地方可看。
+代理工作時，它的執行會流入頻道。需要權限時，由人**在對話裡**核准或拒絕——也可以直接在手機鎖定畫面上操作，那裡的「核准」與「拒絕」按鈕會先要求 Face ID 或裝置密碼（已在 v0.1.30 實作，實機驗證仍未完成）。這次執行花了多少錢、請求執行過哪些操作、如何結束，都是你捲動瀏覽的同一條時間軸裡的訊息。對話就是帳本，沒有第二個地方可看。
 
 名字取自[歐特雲](https://zh.wikipedia.org/zh-tw/奥尔特云)：位於恆星影響範圍最邊緣的一圈安靜的小天體——遙遠、自成一體，完全環繞著一個屬於你的家。
 
@@ -22,19 +22,15 @@ oort 是你自己架設的通訊軟體，人與 AI 代理共用同樣的頻道�
 
 ## 內部一瞥
 
-<table>
-<tr>
-<td width="50%" valign="top"><a href="docs/assets/readme/run.png"><img src="docs/assets/readme/run.png" alt="開啟了工作面板的頻道：代理的執行依步驟列出，並附有「停止」按鈕" width="100%"></a><br><sub><strong>看得見、停得下的執行。</strong> 面板依步驟列出代理回報的內容。紀錄保存在伺服器上，所以換一台裝置也看得到。</sub></td>
+<table><tr>
+<td width="50%" valign="top"><a href="docs/assets/readme/run.png"><img src="docs/assets/readme/run.png" alt="開啟了工作面板的頻道：代理的執行依步驟列出，並附有「停止」按鈕" width="100%"></a><br><sub><strong>看得見、停得下的執行。</strong> 面板依步驟列出 oort 記錄的內容與代理回報的內容。紀錄保存在伺服器上，所以換一台裝置也看得到。</sub></td>
 <td width="50%" valign="top"><a href="docs/assets/readme/jobs.png"><img src="docs/assets/readme/jobs.png" alt="「工作」畫面：整個團隊正在執行與已完成的任務，以及代理對已開啟的 PR 與通過的測試所做的回報" width="100%"></a><br><sub><strong>結果優先。</strong> 正在執行的、已完成的，以及代理自己的回報——已開 PR、測試通過——並標示為「回報」。</sub></td>
-</tr>
-</table>
+</tr></table>
 
-<table>
-<tr>
+<table><tr>
 <td width="62%" valign="top"><a href="docs/assets/readme/themes.png"><img src="docs/assets/readme/themes.png" alt="同一個頻道的四種主題：Dawn sky、Sunset band、Catppuccin 與 Gruvbox Hard" width="100%"></a><br><sub><strong>在我們自有的三個主題之外，還有 57 個目錄主題</strong>（淺色與深色分開計算）：這裡是 Dawn sky、Sunset band、Catppuccin 與 Gruvbox Hard。<em>已合併進分支，尚未發布。</em></sub></td>
-<td width="38%" valign="top"><a href="docs/assets/readme/phone.png"><img src="docs/assets/readme/phone.png" alt="iPhone 應用程式的首次啟動步驟「想收到哪些通知？」：附有「核准」與「拒絕」按鈕的核准請求、工作完成與提及的預覽" width="100%"></a><br><sub><strong>在手機上。</strong> 首次啟動的步驟裡選擇要接收的通知：核准請求、工作完成、提及。iOS 建置版本在內部 TestFlight 群組中。</sub></td>
-</tr>
-</table>
+<td width="38%" valign="top"><a href="docs/assets/readme/phone.png"><img src="docs/assets/readme/phone.png" alt="iPhone 應用程式的首次啟動步驟「想收到哪些通知？」：附有「核准」與「拒絕」按鈕的核准請求、工作完成與提及的預覽" width="100%"></a><br><sub><strong>在手機上。</strong> 首次啟動的步驟會預覽每一類通知：核准請求與提及一律開啟，「工作完成」有一個開關。iOS 測試建置版本發給一個小型 TestFlight 內部群組。</sub></td>
+</tr></table>
 
 ## 為什麼它不會散架
 
@@ -51,15 +47,15 @@ oort 是你自己架設的通訊軟體，人與 AI 代理共用同樣的頻道�
 
 ## 現已可用 · 接線中 · 主張已定，程式未到
 
-✅ **現已可用** — 已隨 [v0.1.35](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.35) 發布
+✅ **現已可用** — 在 [v0.1.35](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.35) 中（伺服器與 Web 映像檔；桌面版與 iOS 應用程式另外建置）
 
 - 頻道、討論串、私訊、引用、輸入中提示、釘選與搜尋——支援 Web、桌面版（Tauri，macOS）與 iOS（React Native）
 - 作為成員的代理：@ 它，看它的執行以誠實的狀態流入頻道，可隨時中途停止
-- 頻道與收件匣裡的人工核准；執行結果、用量／費用帳本，以及核准決定（誰在何時決定）都在對話裡
+- 頻道與收件匣裡的人工核准；執行結果、每一輪的費用，以及核准決定（誰在何時決定）都在對話裡，設定裡還有用量頁面
 - 「工作」畫面（結果優先，看自己的或整個團隊的），以及在桌面版應用程式裡即時觀察代理工作階段的終端機
 - 你自己的 AI 連線：API 金鑰（Anthropic、xAI、OpenRouter）、同一台伺服器上的 Hermes，或本機相容 OpenAI 的後端
 - 附件：檔案存放在你伺服器自己的磁碟區上（自架預設），或你自己的 Google 共用雲端硬碟裡；下載要通過伺服器的頻道成員資格檢查，使用 Google 後端時上傳直接送往 Drive
-- 經過實測的自架路徑——clone → env 指令碼 → compose up → 登入——以及依 digest 固定、附有 SLSA provenance 的多架構映像檔
+- 經過實測的自架路徑——clone → env 指令碼 → compose up → 登入——以及依 digest 固定、附有 SLSA provenance 的多架構映像檔（[詳情](SECURITY.md#security-posture)）
 - 由測試守住對比規則的設計系統（「Oort cloud」），支援淺色與深色
 
 🚧 **接線中**
@@ -67,8 +63,8 @@ oort 是你自己架設的通訊軟體，人與 AI 代理共用同樣的頻道�
 - iPhone 鎖定畫面上的核准／拒絕——已在 v0.1.30 實作；實機驗證仍未完成（[裝置檢查](docs/cicd/11-ios-push-device-check.md)）
 - 團隊記憶（摘要、決定、事實、承諾；瀏覽、編輯、遺忘）——已隨 v0.1.15 發布；其摘要需要團隊預設的 AI 連線，發布說明仍把真實模型下的摘要品質列為未驗證
 - 頻道裡的 GitHub App 事件——已隨 v0.1.32 發布，在維運者設定 App 金鑰之前保持關閉
-- 已合併進分支、尚未發布：57 個目錄主題與主題庫、文字大小與聊天密度、桌面版毛玻璃背景、手機端照片附件、從桌面版建立 GitHub App，以及排程訊息的伺服器端（畫面仍在製作中）
-- 桌面版與 iOS 建置版本先發給我們自己的團隊（TestFlight 內部群組）；目前沒有公開下載
+- 已合併進分支、尚未發布：57 個目錄主題與主題庫、文字大小與聊天密度、桌面版毛玻璃背景、手機端附件選單（最近照片格狀檢視與相機）、從桌面版建立 GitHub App，以及排程訊息的伺服器端（畫面仍在製作中）
+- 桌面版與 iOS 應用程式目前仍是面向維護者自己的裝置與小型 TestFlight 內部群組的測試建置版本；面向整個團隊的發放要等內部關卡（[M7](docs/cicd/03-store-readiness-gate.md)），目前沒有受支援的公開下載
 
 💭 **主張已定，程式未到**
 
@@ -100,7 +96,7 @@ PostgreSQL 是 oort 的事實來源。工作區成員關係、頻道訊息、核
 
 ### 我只想試試應用程式
 
-目前還沒有公開下載，也沒有公開託管的實例。我們自己的團隊優先（[目標 A](docs/adr/0187-goal-a-team-daily-desktop-ios.md)）：macOS 與 iOS 應用程式只發給這個團隊（TestFlight 內部群組與團隊更新通道），App Store、公開 DMG 與外部 TestFlight 要等[商店關卡](docs/cicd/03-store-readiness-gate.md)。Web 用戶端就在伺服器映像檔裡，所以最快看到 oort 的辦法是下一條路徑。
+目前還沒有受支援的公開下載，也沒有公開託管的實例。我們自己的團隊優先（[目標 A](docs/adr/0187-goal-a-team-daily-desktop-ios.md)）：macOS 與 iOS 應用程式的測試建置版本只發給維護者自己的裝置和一個小型 TestFlight 內部群組，App Store、公開 DMG 與外部 TestFlight 要等[商店關卡](docs/cicd/03-store-readiness-gate.md)。（8 月的一個早期 macOS DMG 仍附在 v0.1.1 發布上，但它早於目前的應用程式。）Web 用戶端就在伺服器映像檔裡，所以最快看到 oort 的辦法是下一條路徑。
 
 ### 我想放在自己的伺服器上
 
@@ -112,14 +108,22 @@ scripts/self_host_env.sh   # 寫出你的 env 檔並印出首次登入資訊
 # 然後執行它印出的 compose 指令，開啟它指明的本機位址
 ```
 
-三條指令，沒有分支，也不承諾耗時。也可以把這段話交給你的代理：「在這台機器上，只在這個使用者的帳號下：讀取 https://raw.githubusercontent.com/yeomyeonggeori/oort/main/docs/SELF_HOST_AGENT.md ，並依其 §0 的約定安裝 oort。只有當 `scripts/oort doctor` 為 PASS 時才回報完成。」完整的操作流程、已發布映像檔模式（`--published-image`，依 [`releases/latest.json`](releases/latest.json) 裡的 digest 固定）、公開網域與 Railway（[`infra/railway/README.md`](infra/railway/README.md)）見 [`docs/SELF_HOST.md`](docs/SELF_HOST.md)。
+三條指令，沒有岔路，也不承諾耗時。也可以把這件事交給你的代理——貼上下面這段：
+
+```text
+在這台機器上，只在這個使用者的帳號下：
+讀取 https://raw.githubusercontent.com/yeomyeonggeori/oort/main/docs/SELF_HOST_AGENT.md ，
+並依其 §0 的約定安裝 oort。
+只有當 `scripts/oort doctor` 為 PASS 時才回報完成。
+```
+
+完整的操作流程、已發布映像檔模式（`--published-image`，依 [`releases/latest.json`](releases/latest.json) 裡的 digest 固定）、公開網域與 Railway（[`infra/railway/README.md`](infra/railway/README.md)）見 [`docs/SELF_HOST.md`](docs/SELF_HOST.md)。
 
 ### 我想從原始碼建置
 
 ```sh
 npm ci && npm --prefix clients/web ci && npm --prefix clients/mobile ci
-make build   # server-rust（Rust 1.88+）與 TypeScript 型別檢查
-make test    # cargo test 以及 Web、core、手機端測試
+make build && make test   # 建置 server-rust（Rust 1.88+）、TypeScript 型別檢查、執行全部測試
 ```
 
 先讀 [`docs/architecture/overview.md`](docs/architecture/overview.md) 與 [ADR](docs/adr/)——這些決定比程式碼更能解釋程式碼。變更落地前如何驗證，見[開發驗證](docs/runbooks/development-validation.md)。

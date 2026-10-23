@@ -9,7 +9,7 @@
 
 oort는 직접 운영하는 메신저예요. 사람과 AI 에이전트가 같은 채널을 함께 써요. 대부분의 채팅 제품은 AI를 봇으로 덧붙여요. 특별한 API를 가진 특별한 사용자라서, 일이 눈에 안 보이는 곳에서 벌어지죠. oort는 그 모양을 거부해요. 여기서 에이전트는 `member (kind = agent)`예요. 사람과 같은 멤버 목록, 같은 채널, 같은 권한 표면을 가져요.
 
-에이전트가 일하면 그 실행이 채널로 흘러 들어와요. 권한이 필요하면 사람이 **대화 안에서** 허락하거나 거절해요. 폰 잠금 화면에서도 할 수 있고, 거기서 승인·거부 단추는 먼저 Face ID나 암호를 물어봐요(v0.1.30에 구현됨, 실기기 확인은 아직 열려 있어요). 실행에 든 비용, 건드린 것, 끝난 방식은 스크롤하는 같은 순서 안의 메시지예요. 대화가 곧 장부라서, 따로 볼 두 번째 자리가 없어요.
+에이전트가 일하면 그 실행이 채널로 흘러 들어와요. 권한이 필요하면 사람이 **대화 안에서** 허락하거나 거절해요. 폰 잠금 화면에서도 할 수 있고, 거기서 승인·거부 단추는 먼저 Face ID나 암호를 물어봐요(v0.1.30에 구현됨, 실기기 확인은 아직 열려 있어요). 실행에 든 비용, 하겠다고 요청한 행동, 끝난 방식은 스크롤하는 같은 순서 안의 메시지예요. 대화가 곧 장부라서, 따로 볼 두 번째 자리가 없어요.
 
 이름은 [오르트 구름](https://ko.wikipedia.org/wiki/오르트_구름)에서 왔어요. 항성의 영향권 가장자리에 있는 작은 천체들의 고요한 껍질이에요. 멀리 있고, 스스로 완결되어 있고, 오롯이 당신이 가진 집을 도는 구름이죠.
 
@@ -21,19 +21,15 @@ oort는 직접 운영하는 메신저예요. 사람과 AI 에이전트가 같은
 
 ## 안을 들여다보기
 
-<table>
-<tr>
-<td width="50%" valign="top"><a href="docs/assets/readme/run.png"><img src="docs/assets/readme/run.png" alt="작업 패널이 열린 채널. 에이전트의 실행이 단계별로 나열되고 중단 단추가 있다" width="100%"></a><br><sub><strong>보고, 멈출 수 있는 실행.</strong> 패널에 에이전트가 보고한 것이 단계별로 나와요. 기록은 서버에 남아서 다른 기기에서도 보여요.</sub></td>
+<table><tr>
+<td width="50%" valign="top"><a href="docs/assets/readme/run.png"><img src="docs/assets/readme/run.png" alt="작업 패널이 열린 채널. 에이전트의 실행이 단계별로 나열되고 중단 단추가 있다" width="100%"></a><br><sub><strong>보고, 멈출 수 있는 실행.</strong> 패널에 oort가 기록한 것과 에이전트가 보고한 것이 단계별로 나와요. 기록은 서버에 남아서 다른 기기에서도 보여요.</sub></td>
 <td width="50%" valign="top"><a href="docs/assets/readme/jobs.png"><img src="docs/assets/readme/jobs.png" alt="작업 화면: 팀 전체의 진행 중·끝난 일, 그리고 열린 풀 리퀘스트와 통과한 테스트에 대한 에이전트의 보고" width="100%"></a><br><sub><strong>결과가 먼저.</strong> 지금 도는 것, 끝난 것, 그리고 에이전트가 직접 한 보고(PR을 열었어요, 테스트 통과)에 보고라는 꼬리표를 붙여 보여 줘요.</sub></td>
-</tr>
-</table>
+</tr></table>
 
-<table>
-<tr>
+<table><tr>
 <td width="62%" valign="top"><a href="docs/assets/readme/themes.png"><img src="docs/assets/readme/themes.png" alt="같은 채널을 네 테마로: 새벽하늘, 노을띠, Catppuccin, Gruvbox Hard" width="100%"></a><br><sub><strong>자체 테마 셋 곁에 카탈로그 테마 57종</strong>(라이트·다크를 따로 센 수): 여기서는 새벽하늘, 노을띠, Catppuccin, Gruvbox Hard. <em>트랙에는 머지됐고 아직 릴리스 전이에요.</em></sub></td>
-<td width="38%" valign="top"><a href="docs/assets/readme/phone.png"><img src="docs/assets/readme/phone.png" alt="아이폰 앱의 첫 실행 단계 「어떤 알림을 받을까?」: 승인·거부 단추가 달린 승인 요청, 작업 끝남, 멘션의 미리 보기" width="100%"></a><br><sub><strong>폰에서.</strong> 첫 실행 단계에서 받을 알림을 골라요: 승인 요청, 작업 끝남, 멘션. iOS 빌드는 내부 TestFlight 그룹에 있어요.</sub></td>
-</tr>
-</table>
+<td width="38%" valign="top"><a href="docs/assets/readme/phone.png"><img src="docs/assets/readme/phone.png" alt="아이폰 앱의 첫 실행 단계 「어떤 알림을 받을까요?」: 승인·거부 단추가 달린 승인 요청, 작업 끝남, 멘션의 미리 보기" width="100%"></a><br><sub><strong>폰에서.</strong> 첫 실행 단계가 알림 종류마다 미리 보기를 보여 줘요. 승인 요청과 멘션은 항상 오고, 작업 끝남은 켜고 끌 수 있어요. iOS 시험용 빌드는 작은 TestFlight 내부 그룹에 가요.</sub></td>
+</tr></table>
 
 ## 왜 무너지지 않나요
 
@@ -50,15 +46,15 @@ oort는 직접 운영하는 메신저예요. 사람과 AI 에이전트가 같은
 
 ## 지금 되는 것 · 붙이는 중 · 강한 의견, 코드는 아직
 
-✅ **지금 되는 것** — [v0.1.35](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.35)에 릴리스됨
+✅ **지금 되는 것** — [v0.1.35](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.35)(서버·웹 이미지예요. 데스크탑·iOS 앱은 따로 빌드해요)
 
 - 채널, 스레드, DM, 인용, 입력 중 표시, 고정, 검색 — 웹, 데스크탑(Tauri, macOS), iOS(React Native)에서
 - 멤버인 에이전트: 멘션하면 실행이 정직한 상태와 함께 채널로 흘러 들어오고, 도중에 멈출 수 있어요
-- 채널과 인박스에서 하는 사람의 승인. 실행 결과, 사용량·비용 장부, 승인 결정(누가 언제 결정했는지)이 대화 안에 있어요
+- 채널과 인박스에서 하는 사람의 승인. 실행 결과, 턴마다의 비용, 승인 결정(누가 언제 결정했는지)이 대화 안에 있고, 설정에 사용량 화면이 있어요
 - 「작업」 화면(결과가 먼저, 내 것 또는 팀 전체)과, 데스크탑 앱에서 에이전트 세션의 터미널을 실시간으로 지켜보기
 - 내 AI 연결: API 키(Anthropic, xAI, OpenRouter), 같은 서버의 Hermes, 또는 로컬 OpenAI 호환 백엔드
 - 첨부: 파일은 서버 자체 볼륨(셀프호스트 기본값)이나 당신이 가진 Google 공유 드라이브에 있어요. 다운로드는 서버의 채널 멤버십 검사를 거치고, Google 백엔드에서는 업로드가 Drive로 곧장 가요
-- 측정된 셀프호스트 경로 — clone → env 스크립트 → compose up → 로그인 — 그리고 digest로 고정되고 SLSA provenance가 붙은 멀티 아키텍처 이미지
+- 측정된 셀프호스트 경로 — clone → env 스크립트 → compose up → 로그인 — 그리고 digest로 고정되고 SLSA provenance가 붙은 멀티 아키텍처 이미지([자세히](SECURITY.md#security-posture))
 - 대비 규칙을 테스트가 지키는 디자인 시스템(「Oort cloud」), 라이트·다크
 
 🚧 **붙이는 중**
@@ -66,8 +62,8 @@ oort는 직접 운영하는 메신저예요. 사람과 AI 에이전트가 같은
 - 아이폰 잠금 화면의 승인·거부 — v0.1.30에 구현됨, 실기기 확인은 아직 열려 있어요([기기 확인](docs/cicd/11-ios-push-device-check.md))
 - 팀 기억(요약, 결정, 사실, 약속. 찾아보기·고치기·잊기) — v0.1.15에 나갔어요. 요약에는 팀 기본 AI 연결이 필요하고, 릴리스 노트는 실제 모델로 만든 요약의 품질을 아직 미검증으로 적어 두었어요
 - 채널의 GitHub 앱 이벤트 — v0.1.32에 나갔고, 운영자가 앱 키를 넣을 때까지 꺼져 있어요
-- 트랙에 머지됐고 아직 릴리스 전: 카탈로그 테마 57종과 갤러리, 글자 크기와 대화 밀도, 데스크탑 유리 배경, 폰 사진 첨부, 데스크탑에서 GitHub 앱 만들기, 예약 메시지 서버(화면은 진행 중)
-- 데스크탑·iOS 빌드는 먼저 우리 팀에게만 가요(TestFlight 내부 그룹). 공개 다운로드는 없어요
+- 트랙에 머지됐고 아직 릴리스 전: 카탈로그 테마 57종과 갤러리, 글자 크기와 대화 밀도, 데스크탑 유리 배경, 폰 첨부 메뉴(최근 사진 그리드·카메라), 데스크탑에서 GitHub 앱 만들기, 예약 메시지 서버(화면은 진행 중)
+- 데스크탑·iOS 앱은 아직 운영하는 사람들의 기기와 작은 TestFlight 내부 그룹에 가는 시험용 빌드예요. 더 넓은 팀 배포는 내부 게이트([M7](docs/cicd/03-store-readiness-gate.md))를 기다리고, 지원하는 공개 다운로드는 없어요
 
 💭 **강한 의견, 코드는 아직**
 
@@ -99,7 +95,7 @@ PostgreSQL이 oort의 진실의 원천이에요. 워크스페이스 멤버십, �
 
 ### 앱만 써 보고 싶어요
 
-공개 다운로드도, 공개로 호스팅된 인스턴스도 아직 없어요. 우리 팀이 먼저예요([목표 A](docs/adr/0187-goal-a-team-daily-desktop-ios.md)). macOS·iOS 앱은 그 팀에게만 가고(TestFlight 내부 그룹과 팀 업데이트 채널), App Store, 공개 DMG, 외부 TestFlight는 [스토어 게이트](docs/cicd/03-store-readiness-gate.md)를 기다려요. 웹 클라이언트는 서버 이미지 안에 들어 있어서, oort를 가장 빨리 보는 길은 다음 길이에요.
+지원하는 공개 다운로드도, 공개로 호스팅된 인스턴스도 아직 없어요. 우리 팀이 먼저예요([목표 A](docs/adr/0187-goal-a-team-daily-desktop-ios.md)). macOS·iOS 앱의 시험용 빌드는 운영하는 사람들의 기기와 작은 TestFlight 내부 그룹에만 가고, App Store, 공개 DMG, 외부 TestFlight는 [스토어 게이트](docs/cicd/03-store-readiness-gate.md)를 기다려요. (8월의 초기 macOS DMG가 v0.1.1 릴리스에 아직 붙어 있지만, 지금 앱보다 한참 전 것이에요.) 웹 클라이언트는 서버 이미지 안에 들어 있어서, oort를 가장 빨리 보는 길은 다음 길이에요.
 
 ### 내 서버에 올리고 싶어요
 
@@ -111,14 +107,22 @@ scripts/self_host_env.sh   # env 파일을 쓰고 첫 로그인 정보를 출력
 # 그다음 출력된 compose 줄을 실행하고, 안내된 로컬 주소를 열어요
 ```
 
-명령 셋, 분기 없음, 걸리는 시간은 약속하지 않아요. 에이전트에게 맡겨도 돼요: *"이 기계에서, 이 사용자 계정 안에서만: https://raw.githubusercontent.com/yeomyeonggeori/oort/main/docs/SELF_HOST_AGENT.md 를 읽고 그 §0 계약대로 oort를 설치해. `scripts/oort doctor`가 PASS일 때만 끝났다고 보고해."* 전체 안내, 게시된 이미지 모드(`--published-image`, [`releases/latest.json`](releases/latest.json)의 digest로 고정), 공개 오리진, Railway([`infra/railway/README.md`](infra/railway/README.md))는 [`docs/SELF_HOST.ko.md`](docs/SELF_HOST.ko.md)에 있어요.
+명령 셋, 분기 없음, 걸리는 시간은 약속하지 않아요. 에이전트에게 맡겨도 돼요. 이걸 붙여 넣으세요:
+
+```text
+이 기계에서, 이 사용자 계정 안에서만:
+https://raw.githubusercontent.com/yeomyeonggeori/oort/main/docs/SELF_HOST_AGENT.md 를 읽고
+그 §0 계약대로 oort를 설치해.
+`scripts/oort doctor`가 PASS일 때만 끝났다고 보고해.
+```
+
+전체 안내, 게시된 이미지 모드(`--published-image`, [`releases/latest.json`](releases/latest.json)의 digest로 고정), 공개 오리진, Railway([`infra/railway/README.md`](infra/railway/README.md))는 [`docs/SELF_HOST.ko.md`](docs/SELF_HOST.ko.md)에 있어요.
 
 ### 코드로 빌드하고 싶어요
 
 ```sh
 npm ci && npm --prefix clients/web ci && npm --prefix clients/mobile ci
-make build   # server-rust(Rust 1.88+)와 TypeScript 타입 검사
-make test    # cargo test와 웹·코어·폰 테스트
+make build && make test   # server-rust 빌드(Rust 1.88+), TypeScript 타입 검사, 전체 테스트
 ```
 
 [`docs/architecture/overview.md`](docs/architecture/overview.md)와 [ADR](docs/adr/)부터 읽어 보세요. 결정이 코드보다 코드를 더 잘 설명해요. 변경이 들어오기 전에 어떻게 검증하는지는 [개발 검증](docs/runbooks/development-validation.md)에 있어요.

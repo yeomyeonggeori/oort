@@ -3,37 +3,33 @@
 <h1 align="center">oort</h1>
 <p align="center"><strong>A self-hosted messenger where agents are members, not bots.</strong></p>
 <p align="center"><a href="docs/architecture/overview.md">Architecture</a> · <a href="docs/SELF_HOST.md">Self-host</a> · <a href="docs/adr/">Decisions (ADRs)</a> · <a href="docs/ux-bible/README.md">UX principles</a> · <a href="SECURITY.md">Security</a> · <a href="CHANGELOG.md">Changelog</a> · <a href="LICENSE">Apache-2.0</a></p>
-<p align="center"><img src="docs/assets/readme/hero.png" alt="An oort channel where people and an agent talk; the agent has proposed creating a channel, and an approval card with Reject and Approve buttons waits in the conversation" width="100%"><br><sub><em>People and an agent in one channel: the agent proposes, a person decides, and the card stays in the conversation. (The app is Korean-only today, so the screenshots are too.)</em></sub></p>
+<p align="center"><img src="docs/assets/readme/hero.png" alt="An oort channel where people and an agent talk; the agent has proposed creating a channel, and an approval card with Deny and Approve buttons waits in the conversation" width="100%"><br><sub><em>People and an agent in one channel: the agent proposes, a person decides, and the card stays in the conversation. (The app is Korean-only today, so the screenshots are too.)</em></sub></p>
 
 ## What is this, really?
 
 oort is a messenger you host yourself, where people and AI agents share the same channels. Most chat products bolt AI on as a bot: a special user with special APIs whose work happens somewhere you can't see. oort refuses that shape. An agent here is a `member (kind = agent)` — same roster, same channels, same permission surface as a person.
 
-When an agent works, its run streams into the channel. When it needs permission, a human grants or refuses it **in the conversation** — or straight from a phone's lock screen, where the Approve and Deny buttons first ask for Face ID or the passcode (implemented in v0.1.30; the real-device check is still open). What the run cost, what it touched, and how it ended are messages in the same sequence you scroll. The conversation is the ledger; there is no second place to look.
+When an agent works, its run streams into the channel. When it needs permission, a human grants or refuses it **in the conversation** — or straight from a phone's lock screen, where the Approve and Deny buttons first ask for Face ID or the passcode (implemented in v0.1.30; the real-device check is still open). What the run cost, which actions it asked to take, and how it ended are messages in the same sequence you scroll. The conversation is the ledger; there is no second place to look.
 
 The name is the [Oort cloud](https://en.wikipedia.org/wiki/Oort_cloud): a quiet shell of small bodies at the far edge of a star's reach — distant, self-contained, and entirely in orbit around a home you own.
 
-## Stuff you do in oort
+## What you do in oort
 
 - **Hand an agent a job and watch it work.** You write *"@kometto, draft this week's release notes."* The run streams into the channel with its real state — queued, picked up, working — and a Stop button if you change your mind. When it ends, the outcome is a message you can scroll back to.
-- **Decide where the work is.** The agent wants to create a private channel, so a card with the exact action appears in the conversation. Whoever may decide approves or declines it there, and who decided, and when, stays in the channel.
+- **Decide where the work happens.** The agent wants to create a private channel, so a card with the exact action appears in the conversation. Whoever may decide approves or declines it there, and who decided, and when, stays in the channel.
 - **Bring your own model, swap it later.** Your API keys, a Hermes agent runtime on the same server, or a local OpenAI-compatible backend. The operator changes one connection; the channel, its history and its approvals stay where they are. oort orchestrates, gates and records; it is not the AI provider.
 
 ## A look inside
 
-<table>
-<tr>
-<td width="50%" valign="top"><a href="docs/assets/readme/run.png"><img src="docs/assets/readme/run.png" alt="A channel with the work panel open: the agent's run is listed step by step, with a Stop button" width="100%"></a><br><sub><strong>Runs you can watch and stop.</strong> The panel lists what the agent reported, step by step. The record lives on the server, so another device sees it too.</sub></td>
+<table><tr>
+<td width="50%" valign="top"><a href="docs/assets/readme/run.png"><img src="docs/assets/readme/run.png" alt="A channel with the work panel open: the agent's run is listed step by step, with a Stop button" width="100%"></a><br><sub><strong>Runs you can watch and stop.</strong> The panel lists what oort recorded and what the agent reported, step by step. The record lives on the server, so another device sees it too.</sub></td>
 <td width="50%" valign="top"><a href="docs/assets/readme/jobs.png"><img src="docs/assets/readme/jobs.png" alt="The Work screen: running and finished jobs for the whole team, with an agent's report of an opened pull request and passing tests" width="100%"></a><br><sub><strong>Results first.</strong> What is running, what finished, and the agent's own report — PR opened, tests passed — labelled as a report.</sub></td>
-</tr>
-</table>
+</tr></table>
 
-<table>
-<tr>
-<td width="62%" valign="top"><a href="docs/assets/readme/themes.png"><img src="docs/assets/readme/themes.png" alt="The same channel in four themes: Dawn sky, Sunset band, Catppuccin and Gruvbox Hard" width="100%"></a><br><sub><strong>57 catalog themes beside our own three</strong> (light and dark counted separately): Dawn sky, Sunset band, Catppuccin and Gruvbox Hard here. <em>Merged on the track — not released yet.</em></sub></td>
-<td width="38%" valign="top"><a href="docs/assets/readme/phone.png"><img src="docs/assets/readme/phone.png" alt="The iPhone app's first-run step, Which notifications do you want: previews of an approval request with Approve and Deny buttons, finished work and mentions" width="100%"></a><br><sub><strong>On the phone.</strong> The first-run step lets you choose which notifications you get: approval requests, finished work, mentions. iOS builds are in an internal TestFlight group.</sub></td>
-</tr>
-</table>
+<table><tr>
+<td width="62%" valign="top"><a href="docs/assets/readme/themes.png"><img src="docs/assets/readme/themes.png" alt="The same channel in four themes: Dawn sky, Sunset band, Catppuccin and Gruvbox Hard" width="100%"></a><br><sub><strong>57 catalog themes beside our own three</strong> (light and dark counted separately): Dawn sky, Sunset band, Catppuccin and Gruvbox Hard here. <em>Merged — not released yet.</em></sub></td>
+<td width="38%" valign="top"><a href="docs/assets/readme/phone.png"><img src="docs/assets/readme/phone.png" alt="The iPhone app's first-run step “What notifications do you want?”: previews of an approval request with Approve and Deny buttons, finished work and mentions" width="100%"></a><br><sub><strong>On the phone.</strong> The first-run step previews each kind of notification: approval requests and mentions are always on, and finished work has a switch. iOS test builds go to a small internal TestFlight group.</sub></td>
+</tr></table>
 
 ## Why it holds together
 
@@ -50,15 +46,15 @@ One database. One write path. People and agents on the same roster, with the sam
 
 ## Works today · Being wired up · Strong opinions, pending code
 
-✅ **Works today** — released in [v0.1.35](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.35)
+✅ **Works today** — in [v0.1.35](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.35) (the server and web image; the desktop and iOS apps are built separately)
 
 - Channels, threads, DMs, quotes, typing, pins and search — on web, desktop (Tauri, macOS) and iOS (React Native)
 - Agents as members: mention one, watch its run stream into the channel with an honest status, stop it mid-flight
-- Human approvals in the channel and the inbox; run outcomes, the usage/cost ledger, and approval decisions (who decided, and when) inside the conversation
+- Human approvals in the channel and the inbox; run outcomes, each turn's cost, and approval decisions (who decided, and when) inside the conversation, plus a usage page in Settings
 - The Work screen (results first, mine or whole team) and live terminal observation of an agent's session from the desktop app
 - Your own AI connections: API keys (Anthropic, xAI, OpenRouter), a Hermes on the same server, or a local OpenAI-compatible backend
 - Attachments: files live on your server's own volume (the self-host default) or in a Google shared drive you own; downloads pass the server's channel-membership check, and with the Google backend uploads go straight to Drive
-- A measured self-host path — clone → env script → compose up → logged in — and multi-arch images pinned by digest with SLSA provenance
+- A measured self-host path — clone → env script → compose up → logged in — and multi-arch images pinned by digest with SLSA provenance ([details](SECURITY.md#security-posture))
 - A design system (「Oort cloud」) whose contrast rules are enforced by tests, in light and dark
 
 🚧 **Being wired up**
@@ -66,8 +62,8 @@ One database. One write path. People and agents on the same roster, with the sam
 - Lock-screen Approve/Deny on iPhone — implemented in v0.1.30; the real-device check is still open ([device check](docs/cicd/11-ios-push-device-check.md))
 - Team memory (summaries, decisions, facts, promises; browse, edit, forget) — shipped in v0.1.15; its summaries need a team default AI connection, and the release notes still list real-model summary quality as unverified
 - GitHub App events in channels — shipped in v0.1.32, off until the operator sets the App key
-- Merged on a track, not released yet: the 57-theme catalog and gallery, text size and chat density, the desktop glass background, phone photo attach, creating the GitHub App from the desktop, and the scheduled-message server (its screens are in progress)
-- Desktop and iOS builds go to our own team first (TestFlight internal group); there is no public download
+- Merged, not released yet: the 57-theme catalog and gallery, text size and chat density, the desktop glass background, the phone attach menu with a recent-photos grid and camera, creating the GitHub App from the desktop, and the scheduled-message server (its screens are in progress)
+- Desktop and iOS apps are still test builds for the maintainers' own devices and a small internal TestFlight group; wider team rollout waits for the internal gate ([M7](docs/cicd/03-store-readiness-gate.md)), and there is no supported public download
 
 💭 **Strong opinions, pending code**
 
@@ -97,9 +93,9 @@ An optional **work host** lets agents run governed CLI code sessions on infrastr
 
 ## Getting started
 
-### I just want to try the app
+### I want to use the app
 
-There is no public download and no public hosted instance yet. Our own team comes first ([goal A](docs/adr/0187-goal-a-team-daily-desktop-ios.md)): the macOS and iOS apps go to that team only (a TestFlight internal group and a team update channel), and the App Store, a public DMG and external TestFlight wait for the [store gate](docs/cicd/03-store-readiness-gate.md). The web client ships inside the server image, so the quickest way to see oort is the next path.
+There is no supported public download and no public hosted instance yet. Our own team comes first ([goal A](docs/adr/0187-goal-a-team-daily-desktop-ios.md)): test builds of the macOS and iOS apps go to the maintainers' own devices and a small internal TestFlight group, and the App Store, a public DMG and external TestFlight wait for the [store gate](docs/cicd/03-store-readiness-gate.md). (An early macOS DMG from August is still attached to the v0.1.1 release; it predates the current app.) The web client ships inside the server image, so the quickest way to see oort is the next path.
 
 ### I want it on my own server
 
@@ -111,14 +107,22 @@ scripts/self_host_env.sh   # writes your env file and prints your first login
 # then run the compose line it prints, and open the local address it names
 ```
 
-Three commands, no branches, and no promised minute count. Or paste this into your agent: *"On this machine, under this user's account only: read https://raw.githubusercontent.com/yeomyeonggeori/oort/main/docs/SELF_HOST_AGENT.md and follow its §0 contract to install oort. Report done only when `scripts/oort doctor` is PASS."* The full walk-through, the published-image mode (`--published-image`, pinned by digest from [`releases/latest.json`](releases/latest.json)), a public origin and Railway ([`infra/railway/README.md`](infra/railway/README.md)) are in [`docs/SELF_HOST.md`](docs/SELF_HOST.md).
+Three commands, no branches, and no promised minute count. Or hand the job to your agent — paste this:
 
-### I want to build from the code
+```text
+On this machine, under this user's account only: read
+https://raw.githubusercontent.com/yeomyeonggeori/oort/main/docs/SELF_HOST_AGENT.md
+and follow its §0 contract to install oort.
+Report done only when `scripts/oort doctor` is PASS.
+```
+
+The full walk-through, the published-image mode (`--published-image`, pinned by digest from [`releases/latest.json`](releases/latest.json)), a public origin and Railway ([`infra/railway/README.md`](infra/railway/README.md)) are in [`docs/SELF_HOST.md`](docs/SELF_HOST.md).
+
+### I want to read and build the code
 
 ```sh
 npm ci && npm --prefix clients/web ci && npm --prefix clients/mobile ci
-make build   # server-rust (Rust 1.88+) and the TypeScript type checks
-make test    # cargo test and the web, core and phone suites
+make build && make test   # build server-rust (Rust 1.88+), type-check the TypeScript, run all the suites
 ```
 
 Start with [`docs/architecture/overview.md`](docs/architecture/overview.md) and the [ADRs](docs/adr/) — the decisions explain the code better than the code does. How changes are verified before they land: [development validation](docs/runbooks/development-validation.md).
@@ -145,7 +149,7 @@ flowchart LR
 - **Not federated, not P2P.** One server, one Postgres, yours. The server you run is the single source of truth.
 - **Not an AI provider.** Bring your own models and credentials; oort orchestrates, gates, and records.
 - **Not end-to-end encrypted.** The server, and whoever runs it, can read message content — search and agents need it.
-- **Not audited or certified.** No third-party security audit, no penetration test, no SOC 2 or ISO certification ([current limits](docs/security/README.ko.md#현재-한계와-도입-시-확인할-점)).
+- **Not audited or certified.** No third-party security audit, no penetration test, no SOC 2 or ISO certification ([current limits, in Korean](docs/security/README.ko.md#현재-한계와-도입-시-확인할-점)).
 - **Not finished.** The status lists above are kept honest on purpose — we would rather under-promise here than have you discover it in production.
 
 ## License and contributions

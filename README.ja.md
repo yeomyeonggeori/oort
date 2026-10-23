@@ -10,7 +10,7 @@
 
 oort は自分でホストするメッセンジャーで、人と AI エージェントが同じチャンネルを使います。多くのチャットサービスは AI を「ボット」として後付けします。特別な API を持つ特別なユーザーで、その仕事は見えない場所で行われます。oort はその形を拒みます。ここでのエージェントは `member (kind = agent)` で、人と同じメンバー一覧、同じチャンネル、同じ権限の面を持ちます。
 
-エージェントが作業すると、その実行がチャンネルに流れ込みます。権限が必要になったら、人が**会話の中で**許可または拒否します。スマートフォンのロック画面からもでき、そこでは承認・拒否ボタンがまず Face ID かパスコードを求めます（v0.1.30 で実装済み、実機での確認はまだ終わっていません）。実行にかかったコスト、触れたもの、終わり方は、スクロールする同じ流れの中のメッセージです。会話が台帳なので、見に行く第二の場所はありません。
+エージェントが作業すると、その実行がチャンネルに流れ込みます。権限が必要になったら、人が**会話の中で**許可または拒否します。スマートフォンのロック画面からもでき、そこでは承認・拒否ボタンがまず Face ID かパスコードを求めます（v0.1.30 で実装済み、実機での確認はまだ終わっていません）。実行にかかったコスト、実行しようとした操作、終わり方は、スクロールする同じ流れの中のメッセージです。会話が台帳なので、見に行く第二の場所はありません。
 
 名前は[オールトの雲](https://ja.wikipedia.org/wiki/オールトの雲)から。恒星の影響圏のはるか端にある小天体の静かな殻——遠くにあり、それだけで完結し、あなたが持つ「家」のまわりを回っています。
 
@@ -22,19 +22,15 @@ oort は自分でホストするメッセンジャーで、人と AI エージ�
 
 ## 中をのぞく
 
-<table>
-<tr>
-<td width="50%" valign="top"><a href="docs/assets/readme/run.png"><img src="docs/assets/readme/run.png" alt="作業パネルを開いたチャンネル。エージェントの実行が手順ごとに並び、停止ボタンがある" width="100%"></a><br><sub><strong>見て、止められる実行。</strong> パネルにエージェントが報告したことが手順ごとに並びます。記録はサーバーに残るので、別の端末からも見えます。</sub></td>
+<table><tr>
+<td width="50%" valign="top"><a href="docs/assets/readme/run.png"><img src="docs/assets/readme/run.png" alt="作業パネルを開いたチャンネル。エージェントの実行が手順ごとに並び、停止ボタンがある" width="100%"></a><br><sub><strong>見て、止められる実行。</strong> パネルに oort が記録したことと、エージェントが報告したことが手順ごとに並びます。記録はサーバーに残るので、別の端末からも見えます。</sub></td>
 <td width="50%" valign="top"><a href="docs/assets/readme/jobs.png"><img src="docs/assets/readme/jobs.png" alt="作業画面: チーム全体の実行中・完了した仕事と、開かれたプルリクエストと通ったテストについてのエージェントの報告" width="100%"></a><br><sub><strong>結果が先。</strong> 実行中のもの、終わったもの、そしてエージェント自身の報告（PR を開いた、テストが通った）に「報告」のラベルを付けて表示します。</sub></td>
-</tr>
-</table>
+</tr></table>
 
-<table>
-<tr>
+<table><tr>
 <td width="62%" valign="top"><a href="docs/assets/readme/themes.png"><img src="docs/assets/readme/themes.png" alt="同じチャンネルを 4 つのテーマで: Dawn sky、Sunset band、Catppuccin、Gruvbox Hard" width="100%"></a><br><sub><strong>独自の 3 テーマに加えてカタログ 57 テーマ</strong>（ライト／ダークを別々に数えた数）: ここでは Dawn sky、Sunset band、Catppuccin、Gruvbox Hard。<em>トラックにはマージ済みで、まだリリース前です。</em></sub></td>
-<td width="38%" valign="top"><a href="docs/assets/readme/phone.png"><img src="docs/assets/readme/phone.png" alt="iPhone アプリの初回起動ステップ「どんな通知を受け取る？」: 承認・拒否ボタン付きの承認リクエスト、作業完了、メンションのプレビュー" width="100%"></a><br><sub><strong>スマートフォンで。</strong> 初回起動のステップで受け取る通知を選びます: 承認リクエスト、作業完了、メンション。iOS ビルドは内部 TestFlight グループにあります。</sub></td>
-</tr>
-</table>
+<td width="38%" valign="top"><a href="docs/assets/readme/phone.png"><img src="docs/assets/readme/phone.png" alt="iPhone アプリの初回起動ステップ「どんな通知を受け取る？」: 承認・拒否ボタン付きの承認リクエスト、作業完了、メンションのプレビュー" width="100%"></a><br><sub><strong>スマートフォンで。</strong> 初回起動のステップが通知の種類ごとにプレビューを見せます。承認リクエストとメンションは常にオンで、作業完了にはスイッチがあります。iOS のテスト用ビルドは小さな TestFlight 内部グループに配布されます。</sub></td>
+</tr></table>
 
 ## なぜ崩れないのか
 
@@ -51,15 +47,15 @@ oort は自分でホストするメッセンジャーで、人と AI エージ�
 
 ## 今できること · 配線中 · 強い意見（コードはこれから）
 
-✅ **今できること** — [v0.1.35](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.35) でリリース済み
+✅ **今できること** — [v0.1.35](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.35)（サーバーと Web のイメージ。デスクトップと iOS のアプリは別にビルドされます）
 
 - チャンネル、スレッド、DM、引用、入力中表示、ピン留め、検索 — Web、デスクトップ（Tauri、macOS）、iOS（React Native）で
 - メンバーとしてのエージェント: メンションすると実行が正直な状態とともにチャンネルに流れ、途中で止められます
-- チャンネルと受信箱での人の承認。実行結果、使用量・コストの台帳、承認の決定（誰がいつ決めたか）が会話の中にあります
+- チャンネルと受信箱での人の承認。実行結果、ターンごとのコスト、承認の決定（誰がいつ決めたか）が会話の中にあり、設定には使用量の画面があります
 - 「作業」画面（結果が先、自分の分またはチーム全体）と、デスクトップアプリでのエージェントのセッションのターミナルのライブ観察
 - 自分の AI 接続: API キー（Anthropic、xAI、OpenRouter）、同じサーバー上の Hermes、またはローカルの OpenAI 互換バックエンド
 - 添付: ファイルはサーバー自身のボリューム（セルフホストの既定）か、あなたが持つ Google 共有ドライブにあります。ダウンロードはサーバーのチャンネルメンバーシップ検査を通り、Google バックエンドではアップロードが Drive へ直接行きます
-- 計測済みのセルフホスト経路——clone → env スクリプト → compose up → ログイン——と、digest で固定され SLSA provenance が付いたマルチアーキテクチャのイメージ
+- 計測済みのセルフホスト経路——clone → env スクリプト → compose up → ログイン——と、digest で固定され SLSA provenance が付いたマルチアーキテクチャのイメージ（[詳細](SECURITY.md#security-posture)）
 - コントラスト規則をテストが守るデザインシステム（「Oort cloud」）、ライトとダーク
 
 🚧 **配線中**
@@ -67,8 +63,8 @@ oort は自分でホストするメッセンジャーで、人と AI エージ�
 - iPhone のロック画面での承認・拒否 — v0.1.30 で実装済み。実機での確認はまだ終わっていません（[デバイス確認](docs/cicd/11-ios-push-device-check.md)）
 - チームの記憶（要約、決定、事実、約束。閲覧・編集・忘却）— v0.1.15 で提供。要約にはチームの既定 AI 接続が必要で、リリースノートは実モデルでの要約品質を未検証としたままです
 - チャンネルでの GitHub App イベント — v0.1.32 で提供、運営者が App キーを設定するまでオフです
-- トラックにマージ済み・未リリース: カタログ 57 テーマとギャラリー、文字サイズと会話の密度、デスクトップのガラス背景、スマートフォンの写真添付、デスクトップからの GitHub App 作成、予約メッセージのサーバー（画面は作業中）
-- デスクトップと iOS のビルドは、まず自分たちのチームに配布します（TestFlight 内部グループ）。公開ダウンロードはありません
+- トラックにマージ済み・未リリース: カタログ 57 テーマとギャラリー、文字サイズと会話の密度、デスクトップのガラス背景、スマートフォンの添付メニュー（最近の写真グリッドとカメラ）、デスクトップからの GitHub App 作成、予約メッセージのサーバー（画面は作業中）
+- デスクトップと iOS のアプリは、まだ運営者自身の端末と小さな TestFlight 内部グループに向けたテスト用ビルドです。チーム全体への配布は内部ゲート（[M7](docs/cicd/03-store-readiness-gate.md)）を待っており、サポート対象の公開ダウンロードはありません
 
 💭 **強い意見（コードはこれから）**
 
@@ -100,7 +96,7 @@ PostgreSQL が oort の真実の源です。ワークスペースのメンバー
 
 ### アプリだけ試したい
 
-公開ダウンロードも、公開のホスト型インスタンスもまだありません。まず自分たちのチームが先です（[目標 A](docs/adr/0187-goal-a-team-daily-desktop-ios.md)）。macOS と iOS のアプリはそのチームだけに配布され（TestFlight 内部グループとチーム用のアップデートチャンネル）、App Store、公開 DMG、外部 TestFlight は[ストアゲート](docs/cicd/03-store-readiness-gate.md)を待ちます。Web クライアントはサーバーイメージに入っているので、oort を最短で見る方法は次の道です。
+サポート対象の公開ダウンロードも、公開のホスト型インスタンスもまだありません。まず自分たちのチームが先です（[目標 A](docs/adr/0187-goal-a-team-daily-desktop-ios.md)）。macOS と iOS アプリのテスト用ビルドは、運営者自身の端末と小さな TestFlight 内部グループにだけ配布され、App Store、公開 DMG、外部 TestFlight は[ストアゲート](docs/cicd/03-store-readiness-gate.md)を待ちます。（8 月の初期の macOS 用 DMG が v0.1.1 リリースにまだ添付されていますが、現在のアプリよりずっと前のものです。）Web クライアントはサーバーイメージに入っているので、oort を最短で見る方法は次の道です。
 
 ### 自分のサーバーに置きたい
 
@@ -112,14 +108,22 @@ scripts/self_host_env.sh   # env ファイルを書き、最初のログイン�
 # 表示された compose の行を実行し、案内されたローカルアドレスを開きます
 ```
 
-コマンドは 3 つ、分岐なし、所要時間は約束しません。エージェントに任せることもできます: 「このマシンで、このユーザーのアカウントの範囲だけで: https://raw.githubusercontent.com/yeomyeonggeori/oort/main/docs/SELF_HOST_AGENT.md を読み、その §0 の契約に従って oort をインストールして。`scripts/oort doctor` が PASS のときだけ完了と報告して。」詳しい手順、公開済みイメージのモード（`--published-image`、[`releases/latest.json`](releases/latest.json) の digest で固定）、公開オリジン、Railway（[`infra/railway/README.md`](infra/railway/README.md)）は [`docs/SELF_HOST.md`](docs/SELF_HOST.md) にあります。
+コマンドは 3 つ、分岐なし、所要時間は約束しません。エージェントに任せることもできます。これを貼り付けてください:
+
+```text
+このマシンで、このユーザーのアカウントの範囲だけで:
+https://raw.githubusercontent.com/yeomyeonggeori/oort/main/docs/SELF_HOST_AGENT.md を読み、
+その §0 の契約に従って oort をインストールして。
+`scripts/oort doctor` が PASS のときだけ完了と報告して。
+```
+
+詳しい手順、公開済みイメージのモード（`--published-image`、[`releases/latest.json`](releases/latest.json) の digest で固定）、公開オリジン、Railway（[`infra/railway/README.md`](infra/railway/README.md)）は [`docs/SELF_HOST.md`](docs/SELF_HOST.md) にあります。
 
 ### コードからビルドしたい
 
 ```sh
 npm ci && npm --prefix clients/web ci && npm --prefix clients/mobile ci
-make build   # server-rust（Rust 1.88+）と TypeScript の型チェック
-make test    # cargo test と Web・コア・スマートフォンのテスト
+make build && make test   # server-rust のビルド（Rust 1.88+）、TypeScript の型チェック、全テスト
 ```
 
 まず [`docs/architecture/overview.md`](docs/architecture/overview.md) と [ADR](docs/adr/) を読んでください。決定のほうが、コードよりもコードをよく説明します。変更が入る前にどう検証するかは[開発の検証](docs/runbooks/development-validation.md)にあります。
