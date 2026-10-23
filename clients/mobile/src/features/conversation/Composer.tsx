@@ -603,7 +603,7 @@ const BAR_PAD_Y = BAR_PAD_X - (TOUCH_TARGET - CONV.composerCircle) / 2;
  * 상수로 이름을 갖는 이유는 `INPUT_CHROME` 과 같다: 산수와 실제 스타일이 같은 값을
  * 읽어야 하고, 사본을 두면 사본이 거짓말한다(디자인 시스템 §5.5).
  */
-const DOCK_CHROME = (PILL_EDGE + BAR_PAD_Y) * 2 + space.sm;
+const DOCK_CHROME = (PILL_EDGE + BAR_PAD_Y) * 2 + CONV.composerTopAir;
 
 /** 알약 안 두 원(36)을 엄지 44 로 만드는 여유 — 도출한다(감사 M-14). */
 const ATTACH_SLOP = slopTo(CONV.composerCircle);
@@ -1639,7 +1639,7 @@ export function Composer({
           .join(' ') || undefined;
 
   return (
-    <View style={styles.root}>
+    <View style={styles.root} testID="composer-root">
       {showSlash ? (
         <View style={styles.mentions} testID="slash-list">
           <Text style={styles.slashHead} accessibilityRole="header">
@@ -2124,7 +2124,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    * 도크. 선도 바닥색도 없다 — 알약이 바닥 위에 뜬다(시안 `.a-comp`). 위 여백과
    * 알약 안 위아래 여백의 합이 `DOCK_CHROME` 이다(시트 상한 산수가 읽는 그 수).
    */
-  root: {paddingTop: space.sm},
+  root: {paddingTop: CONV.composerTopAir},
   /**
    * 반경은 원 반경 + 사방 여백(`CONV.composerRadius`)이라 두 원과 동심이다 (#4179). 좌우로
    * 뜬 거리는 폭과 글자 배수가 정하므로 **여기 없다** — 컴포넌트가 `composerFloat` 로 계산해
@@ -2245,7 +2245,9 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     // 그리고 글자를 칠 때마다 후보 수가 바뀔 때마다 도크가 자라고 줄어서 「따라가는 목록」의
     // 보이는 창이 그만큼 줄었다 늘었다 한다 — 목록은 그때마다 `onLayout` 으로 바닥에 다시
     // 붙는다. 시트는 입력창 바로 위에 목록을 **덮고** 서므로 목록은 아무것도 모른다.
-    // `bottom: '100%'` 는 루트 윗면(`root.paddingTop` 위)에 서므로 알약에 거의 붙어(캡처로 ~4px) 선다.
+    // `bottom: '100%'` 의 시트는 알약에 거의 붙어(캡처로 ~4px) 선다. #4264 실측(16 Pro, `GAP-TYPING+SHEET`): 시트 아래
+    // 끝이 알약 위 끝에서 0.7pt(16 Pro, SE 1.0pt) 위 — 루트의 위 여백(8)을 지나 내용 상자 윗면에 선다. 그래서 도크 위의 「작성 중」 줄은 그 줄이
+    // 여백 안으로 걸치든 아니든 시트에 온전히 덮인다(걸침이 위 여백보다 작은 한, `conversationGap.test.tsx`).
     position: 'absolute',
     left: 0,
     right: 0,

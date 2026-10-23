@@ -59,6 +59,7 @@ import {
   Sentence,
   STACK_PILL_SCALE,
 } from '../../design/atoms';
+import {CONV} from '../conversation/convDesign';
 import {useHostedConnections} from '../hostedAgents/queries';
 import {useDirectory} from '../workspace/queries';
 import {useKeyboardShown} from '../../lib/useKeyboardShown';
@@ -860,7 +861,12 @@ function buildStyles(color: Palette) {
   // 자리(10→8, 14→12 등)는 PR 「시안과의 차이」 표에 있다.
   return StyleSheet.create({
     // 시안 `.pcomp{left:12px;right:12px}` — 입력창과 같은 가장자리에 선다.
-    wrap: {paddingHorizontal: space.md, paddingTop: space.xs, paddingBottom: space.sm},
+    // 위 여백 12 = 목록 꼬리 8 + 4 였다. 대화 화면이 꼬리를 줄인 만큼(`CONV.conversationTail`) 이 카드가 진다(#4264).
+    wrap: {
+      paddingHorizontal: space.md,
+      paddingTop: space.xs + space.sm - CONV.conversationTail,
+      paddingBottom: space.sm,
+    },
     card: {
       borderWidth: StyleSheet.hairlineWidth * 2,
       borderColor: color.border,
