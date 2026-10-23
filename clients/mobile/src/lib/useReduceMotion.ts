@@ -50,9 +50,14 @@ export function useReduceMotionRef(): MutableRefObject<boolean> {
  * 첫 답이 오기 전에는 `true` 다. 위의 ref 판과 반대인 이유: 저것은 한 번의 점프이고,
  * 이것은 끝없이 반복되는 움직임이다. 모르는 한 틱 동안 멈춰 있는 것은 아무도 해치지
  * 않지만, 동작을 줄여 달라고 한 사람에게 한 틱이라도 맥박을 보이는 것은 해친다.
+ *
+ * `whileUnknown` 은 그 **모르는 동안의 값**이다(#4293). 맥박처럼 끝없이 도는 움직임은 기본값
+ * `true` 가 맞지만, 한 번 서는 화면의 시작 모양을 정하는 자리(사진 뷰어 Modal 의
+ * `animationType`)에서는 `true` 가 모두의 첫 모습을 바꾼다 — 답은 한 틱 뒤에 오는데
+ * Modal 은 첫 렌더의 값으로 이미 떠 버린다. 그런 자리는 `false` 를 넘긴다.
  */
-export function useReduceMotion(): boolean {
-  const [reduce, setReduce] = useState(true);
+export function useReduceMotion(whileUnknown: boolean = true): boolean {
+  const [reduce, setReduce] = useState(whileUnknown);
   useEffect(() => {
     let alive = true;
     AccessibilityInfo.isReduceMotionEnabled().then(
@@ -60,7 +65,7 @@ export function useReduceMotion(): boolean {
         if (alive) setReduce(value);
       },
       () => {
-        /* 모름은 true 로 남는다 */
+        /* 모름은 `whileUnknown` 으로 남는다 */
       },
     );
     const subscription = AccessibilityInfo.addEventListener(
