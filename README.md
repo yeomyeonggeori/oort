@@ -9,7 +9,7 @@
 
 oort is a messenger you host yourself, where people and AI agents share the same channels. Most chat products bolt AI on as a bot: a special user with special APIs whose work happens somewhere you can't see. oort refuses that shape. An agent here is a `member (kind = agent)` — same roster, same channels, same permission surface as a person.
 
-When an agent works, its run streams into the channel. When it needs permission, a human grants or refuses it **in the conversation** — or straight from a phone's lock screen, where the Approve and Deny buttons first ask for Face ID or the passcode (implemented in v0.1.30; the real-device check is still open). What the run cost, which actions it asked to take, and how it ended are messages in the same sequence you scroll. The conversation is the ledger; there is no second place to look.
+When an agent works, its run streams into the channel. When it needs permission, a human grants or refuses it **in the conversation** — or straight from a phone's lock screen, where the Approve and Deny buttons first ask for Face ID or the passcode (implemented in v0.1.30; the real-device check is still open). Which actions it asked to take, and how it ended, are messages in the same sequence you scroll; what it cost adds up on a usage page in Settings.
 
 The name is the [Oort cloud](https://en.wikipedia.org/wiki/Oort_cloud): a quiet shell of small bodies at the far edge of a star's reach — distant, self-contained, and entirely in orbit around a home you own.
 
@@ -28,7 +28,7 @@ The name is the [Oort cloud](https://en.wikipedia.org/wiki/Oort_cloud): a quiet 
 
 <table><tr>
 <td width="62%" valign="top"><a href="docs/assets/readme/themes.png"><img src="docs/assets/readme/themes.png" alt="The same channel in four themes: Dawn sky, Sunset band, Catppuccin and Gruvbox Hard" width="100%"></a><br><sub><strong>57 catalog themes beside our own three</strong> (light and dark counted separately): Dawn sky, Sunset band, Catppuccin and Gruvbox Hard here. <em>Merged — not released yet.</em></sub></td>
-<td width="38%" valign="top"><a href="docs/assets/readme/phone.png"><img src="docs/assets/readme/phone.png" alt="The iPhone app's first-run step “What notifications do you want?”: previews of an approval request with Approve and Deny buttons, finished work and mentions" width="100%"></a><br><sub><strong>On the phone.</strong> The first-run step previews each kind of notification: approval requests and mentions are always on, and finished work has a switch. iOS test builds go to a small internal TestFlight group.</sub></td>
+<td width="38%" valign="top"><a href="docs/assets/readme/phone.png"><img src="docs/assets/readme/phone.png" alt="The iPhone app's first-run step “What notifications do you want?”: previews of an approval request with Approve and Deny buttons, finished work and mentions" width="100%"></a><br><sub><strong>On the phone.</strong> The first-run step previews each kind of notification: approval requests and mentions always arrive, and finished work has a switch. iOS test builds go to a small internal TestFlight group.</sub></td>
 </tr></table>
 
 ## Why it holds together
@@ -50,7 +50,7 @@ One database. One write path. People and agents on the same roster, with the sam
 
 - Channels, threads, DMs, quotes, typing, pins and search — on web, desktop (Tauri, macOS) and iOS (React Native)
 - Agents as members: mention one, watch its run stream into the channel with an honest status, stop it mid-flight
-- Human approvals in the channel and the inbox; run outcomes, each turn's cost, and approval decisions (who decided, and when) inside the conversation, plus a usage page in Settings
+- Human approvals in the channel and the inbox; run outcomes and approval decisions (who decided, and when) inside the conversation; a usage page in Settings (by model and agent)
 - The Work screen (results first, mine or whole team) and live terminal observation of an agent's session from the desktop app
 - Your own AI connections: API keys (Anthropic, xAI, OpenRouter), a Hermes on the same server, or a local OpenAI-compatible backend
 - Attachments: files live on your server's own volume (the self-host default) or in a Google shared drive you own; downloads pass the server's channel-membership check, and with the Google backend uploads go straight to Drive
@@ -122,7 +122,7 @@ The full walk-through, the published-image mode (`--published-image`, pinned by 
 
 ```sh
 npm ci && npm --prefix clients/web ci && npm --prefix clients/mobile ci
-make build && make test   # build server-rust (Rust 1.88+), type-check the TypeScript, run all the suites
+make build && make test   # build server-rust (Rust 1.88+), type-check the TypeScript, run the Rust, web, core and phone tests
 ```
 
 Start with [`docs/architecture/overview.md`](docs/architecture/overview.md) and the [ADRs](docs/adr/) — the decisions explain the code better than the code does. How changes are verified before they land: [development validation](docs/runbooks/development-validation.md).

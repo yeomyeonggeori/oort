@@ -10,7 +10,7 @@
 
 oort 是你自己托管的即时通讯工具，人和 AI 智能体共用同样的频道。大多数聊天产品把 AI 当作机器人附加上去：一个拥有特殊 API 的特殊用户，它的工作发生在你看不见的地方。oort 拒绝这种形态。这里的智能体是 `member (kind = agent)`——同样的成员名册、同样的频道、同样的权限面，和人一样。
 
-智能体工作时，它的运行会流入频道。需要权限时，由人**在对话里**批准或拒绝——也可以直接在手机锁屏上操作，那里的“批准”和“拒绝”按钮会先要求 Face ID 或设备密码（已在 v0.1.30 实现，真机验证仍未完成）。这次运行花了多少钱、请求执行过哪些操作、如何结束，都是你滚动浏览的同一条时间线里的消息。对话就是账本，没有第二个地方可看。
+智能体工作时，它的运行会流入频道。需要权限时，由人**在对话里**批准或拒绝——也可以直接在手机锁屏上操作，那里的“批准”和“拒绝”按钮会先要求 Face ID 或设备密码（已在 v0.1.30 实现，真机验证仍未完成）。请求执行过哪些操作、如何结束，都是你滚动浏览的同一条时间线里的消息；花了多少钱，则汇总在设置里的用量页面。
 
 名字取自[奥尔特云](https://zh.wikipedia.org/wiki/奥尔特云)：位于恒星影响范围最边缘的一圈安静的小天体——遥远、自成一体，完全环绕着一个属于你的家。
 
@@ -28,8 +28,8 @@ oort 是你自己托管的即时通讯工具，人和 AI 智能体共用同样�
 </tr></table>
 
 <table><tr>
-<td width="62%" valign="top"><a href="docs/assets/readme/themes.png"><img src="docs/assets/readme/themes.png" alt="同一个频道的四种主题：Dawn sky、Sunset band、Catppuccin 和 Gruvbox Hard" width="100%"></a><br><sub><strong>在我们自带的三个主题之外，还有 57 个目录主题</strong>（浅色和深色分开计数）：这里是 Dawn sky、Sunset band、Catppuccin 和 Gruvbox Hard。<em>已合入分支，尚未发布。</em></sub></td>
-<td width="38%" valign="top"><a href="docs/assets/readme/phone.png"><img src="docs/assets/readme/phone.png" alt="iPhone 应用的首次启动步骤“想收到哪些通知？”：带“批准”和“拒绝”按钮的审批请求、工作完成和提及的预览" width="100%"></a><br><sub><strong>在手机上。</strong> 首次启动的步骤会预览每一类通知：审批请求和提及始终开启，“工作完成”有一个开关。iOS 测试构建发给一个小型 TestFlight 内部分组。</sub></td>
+<td width="62%" valign="top"><a href="docs/assets/readme/themes.png"><img src="docs/assets/readme/themes.png" alt="同一个频道的四种主题：Dawn sky、Sunset band、Catppuccin 和 Gruvbox Hard" width="100%"></a><br><sub><strong>在我们自带的三个主题之外，还有 57 个目录主题</strong>（浅色和深色分开计数）：这里是 Dawn sky、Sunset band、Catppuccin 和 Gruvbox Hard。<em>已合并，尚未发布。</em></sub></td>
+<td width="38%" valign="top"><a href="docs/assets/readme/phone.png"><img src="docs/assets/readme/phone.png" alt="iPhone 应用的首次启动步骤“想收到哪些通知？”：带“批准”和“拒绝”按钮的审批请求、工作完成和提及的预览" width="100%"></a><br><sub><strong>在手机上。</strong> 首次启动的步骤会预览每一类通知：审批请求和提及始终会送达，“工作完成”有一个开关。iOS 测试构建发给一个小型 TestFlight 内部分组。</sub></td>
 </tr></table>
 
 ## 为什么它不会散架
@@ -51,7 +51,7 @@ oort 是你自己托管的即时通讯工具，人和 AI 智能体共用同样�
 
 - 频道、线程、私信、引用、输入中提示、置顶和搜索——支持 Web、桌面端（Tauri，macOS）和 iOS（React Native）
 - 作为成员的智能体：@ 它，看它的运行以诚实的状态流入频道，可随时中途停止
-- 频道和收件箱里的人工审批；运行结果、每一轮的费用，以及审批决定（谁在何时决定）都在对话里，设置里还有用量页面
+- 频道和收件箱里的人工审批；运行结果和审批决定（谁在何时决定）都在对话里，设置里还有按模型、按智能体的用量页面
 - “工作”界面（结果优先，看自己的或整个团队的），以及在桌面应用里实时观察智能体会话的终端
 - 你自己的 AI 连接：API 密钥（Anthropic、xAI、OpenRouter）、同一台服务器上的 Hermes，或本地兼容 OpenAI 的后端
 - 附件：文件存放在你服务器自己的卷上（自托管默认），或你自己的 Google 共享云端硬盘里；下载要通过服务器的频道成员资格检查，使用 Google 后端时上传直接发往 Drive
@@ -63,7 +63,7 @@ oort 是你自己托管的即时通讯工具，人和 AI 智能体共用同样�
 - iPhone 锁屏上的批准/拒绝——已在 v0.1.30 实现；真机验证仍未完成（[设备检查](docs/cicd/11-ios-push-device-check.md)）
 - 团队记忆（摘要、决定、事实、承诺；浏览、编辑、遗忘）——已随 v0.1.15 发布；其摘要需要团队默认的 AI 连接，发布说明仍把真实模型下的摘要质量列为未验证
 - 频道里的 GitHub App 事件——已随 v0.1.32 发布，在运维者设置 App 密钥之前保持关闭
-- 已合入分支、尚未发布：57 个目录主题和主题库、文字大小与聊天密度、桌面端毛玻璃背景、手机端附件菜单（最近照片网格和相机）、从桌面端创建 GitHub App，以及定时消息的服务端（界面仍在制作中）
+- 已合并、尚未发布：57 个目录主题和主题库、文字大小与聊天密度、桌面端毛玻璃背景、手机端附件菜单（最近照片网格和相机）、从桌面端创建 GitHub App，以及定时消息的服务端（界面仍在制作中）
 - 桌面端和 iOS 应用目前仍是面向维护者自己的设备和小型 TestFlight 内部分组的测试构建；面向整个团队的分发要等内部门禁（[M7](docs/cicd/03-store-readiness-gate.md)），目前没有受支持的公开下载
 
 💭 **主张已定，代码未到**
@@ -123,7 +123,7 @@ scripts/self_host_env.sh   # 写出你的 env 文件并打印首次登录信息
 
 ```sh
 npm ci && npm --prefix clients/web ci && npm --prefix clients/mobile ci
-make build && make test   # 构建 server-rust（Rust 1.88+）、TypeScript 类型检查、运行全部测试
+make build && make test   # 构建 server-rust（Rust 1.88+）、TypeScript 类型检查、运行 Rust、Web、core 和手机端测试
 ```
 
 先读 [`docs/architecture/overview.md`](docs/architecture/overview.md) 和 [ADR](docs/adr/)——这些决定比代码更能解释代码。变更落地前如何验证，见[开发验证](docs/runbooks/development-validation.md)。
@@ -150,7 +150,7 @@ flowchart LR
 - **不是联邦式，也不是 P2P。** 一台服务器，一个 Postgres，归你所有。你运行的服务器是唯一的事实来源。
 - **不是 AI 提供方。** 模型和凭据请自带；oort 负责编排、把关和记录。
 - **不是端到端加密。** 服务器，以及运行它的人，可以读取消息内容——搜索和智能体都需要这一点。
-- **没有经过审计或认证。** 没有第三方安全审计，没有渗透测试，没有 SOC 2 或 ISO 认证（[当前局限](docs/security/README.ko.md#현재-한계와-도입-시-확인할-점)）。
+- **没有经过审计或认证。** 没有第三方安全审计，没有渗透测试，没有 SOC 2 或 ISO 认证（[当前局限，韩文](docs/security/README.ko.md#현재-한계와-도입-시-확인할-점)）。
 - **还没做完。** 上面的状态清单是有意写得诚实的——我们宁可在这里少承诺，也不愿你在生产环境里才发现。
 
 ## 许可与贡献

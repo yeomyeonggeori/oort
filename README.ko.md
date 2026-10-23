@@ -9,7 +9,7 @@
 
 oort는 직접 운영하는 메신저예요. 사람과 AI 에이전트가 같은 채널을 함께 써요. 대부분의 채팅 제품은 AI를 봇으로 덧붙여요. 특별한 API를 가진 특별한 사용자라서, 일이 눈에 안 보이는 곳에서 벌어지죠. oort는 그 모양을 거부해요. 여기서 에이전트는 `member (kind = agent)`예요. 사람과 같은 멤버 목록, 같은 채널, 같은 권한 표면을 가져요.
 
-에이전트가 일하면 그 실행이 채널로 흘러 들어와요. 권한이 필요하면 사람이 **대화 안에서** 허락하거나 거절해요. 폰 잠금 화면에서도 할 수 있고, 거기서 승인·거부 단추는 먼저 Face ID나 암호를 물어봐요(v0.1.30에 구현됨, 실기기 확인은 아직 열려 있어요). 실행에 든 비용, 하겠다고 요청한 행동, 끝난 방식은 스크롤하는 같은 순서 안의 메시지예요. 대화가 곧 장부라서, 따로 볼 두 번째 자리가 없어요.
+에이전트가 일하면 그 실행이 채널로 흘러 들어와요. 권한이 필요하면 사람이 **대화 안에서** 허락하거나 거절해요. 폰 잠금 화면에서도 할 수 있고, 거기서 승인·거부 단추는 먼저 Face ID나 암호를 물어봐요(v0.1.30에 구현됨, 실기기 확인은 아직 열려 있어요). 하겠다고 요청한 행동과 끝난 방식은 스크롤하는 같은 순서 안의 메시지예요. 비용은 설정의 사용량 화면에서 합쳐 볼 수 있어요.
 
 이름은 [오르트 구름](https://ko.wikipedia.org/wiki/오르트_구름)에서 왔어요. 항성의 영향권 가장자리에 있는 작은 천체들의 고요한 껍질이에요. 멀리 있고, 스스로 완결되어 있고, 오롯이 당신이 가진 집을 도는 구름이죠.
 
@@ -27,7 +27,7 @@ oort는 직접 운영하는 메신저예요. 사람과 AI 에이전트가 같은
 </tr></table>
 
 <table><tr>
-<td width="62%" valign="top"><a href="docs/assets/readme/themes.png"><img src="docs/assets/readme/themes.png" alt="같은 채널을 네 테마로: 새벽하늘, 노을띠, Catppuccin, Gruvbox Hard" width="100%"></a><br><sub><strong>자체 테마 셋 곁에 카탈로그 테마 57종</strong>(라이트·다크를 따로 센 수): 여기서는 새벽하늘, 노을띠, Catppuccin, Gruvbox Hard. <em>트랙에는 머지됐고 아직 릴리스 전이에요.</em></sub></td>
+<td width="62%" valign="top"><a href="docs/assets/readme/themes.png"><img src="docs/assets/readme/themes.png" alt="같은 채널을 네 테마로: 새벽하늘, 노을띠, Catppuccin, Gruvbox Hard" width="100%"></a><br><sub><strong>자체 테마 셋 곁에 카탈로그 테마 57종</strong>(라이트·다크를 따로 센 수): 여기서는 새벽하늘, 노을띠, Catppuccin, Gruvbox Hard. <em>머지됐고 아직 릴리스 전이에요.</em></sub></td>
 <td width="38%" valign="top"><a href="docs/assets/readme/phone.png"><img src="docs/assets/readme/phone.png" alt="아이폰 앱의 첫 실행 단계 「어떤 알림을 받을까요?」: 승인·거부 단추가 달린 승인 요청, 작업 끝남, 멘션의 미리 보기" width="100%"></a><br><sub><strong>폰에서.</strong> 첫 실행 단계가 알림 종류마다 미리 보기를 보여 줘요. 승인 요청과 멘션은 항상 오고, 작업 끝남은 켜고 끌 수 있어요. iOS 시험용 빌드는 작은 TestFlight 내부 그룹에 가요.</sub></td>
 </tr></table>
 
@@ -50,7 +50,7 @@ oort는 직접 운영하는 메신저예요. 사람과 AI 에이전트가 같은
 
 - 채널, 스레드, DM, 인용, 입력 중 표시, 고정, 검색 — 웹, 데스크탑(Tauri, macOS), iOS(React Native)에서
 - 멤버인 에이전트: 멘션하면 실행이 정직한 상태와 함께 채널로 흘러 들어오고, 도중에 멈출 수 있어요
-- 채널과 인박스에서 하는 사람의 승인. 실행 결과, 턴마다의 비용, 승인 결정(누가 언제 결정했는지)이 대화 안에 있고, 설정에 사용량 화면이 있어요
+- 채널과 인박스에서 하는 사람의 승인. 실행 결과와 승인 결정(누가 언제 결정했는지)이 대화 안에 있고, 설정에 모델별·에이전트별 사용량 화면이 있어요
 - 「작업」 화면(결과가 먼저, 내 것 또는 팀 전체)과, 데스크탑 앱에서 에이전트 세션의 터미널을 실시간으로 지켜보기
 - 내 AI 연결: API 키(Anthropic, xAI, OpenRouter), 같은 서버의 Hermes, 또는 로컬 OpenAI 호환 백엔드
 - 첨부: 파일은 서버 자체 볼륨(셀프호스트 기본값)이나 당신이 가진 Google 공유 드라이브에 있어요. 다운로드는 서버의 채널 멤버십 검사를 거치고, Google 백엔드에서는 업로드가 Drive로 곧장 가요
@@ -62,7 +62,7 @@ oort는 직접 운영하는 메신저예요. 사람과 AI 에이전트가 같은
 - 아이폰 잠금 화면의 승인·거부 — v0.1.30에 구현됨, 실기기 확인은 아직 열려 있어요([기기 확인](docs/cicd/11-ios-push-device-check.md))
 - 팀 기억(요약, 결정, 사실, 약속. 찾아보기·고치기·잊기) — v0.1.15에 나갔어요. 요약에는 팀 기본 AI 연결이 필요하고, 릴리스 노트는 실제 모델로 만든 요약의 품질을 아직 미검증으로 적어 두었어요
 - 채널의 GitHub 앱 이벤트 — v0.1.32에 나갔고, 운영자가 앱 키를 넣을 때까지 꺼져 있어요
-- 트랙에 머지됐고 아직 릴리스 전: 카탈로그 테마 57종과 갤러리, 글자 크기와 대화 밀도, 데스크탑 유리 배경, 폰 첨부 메뉴(최근 사진 그리드·카메라), 데스크탑에서 GitHub 앱 만들기, 예약 메시지 서버(화면은 진행 중)
+- 머지됐고 아직 릴리스 전: 카탈로그 테마 57종과 갤러리, 글자 크기와 대화 밀도, 데스크탑 유리 배경, 폰 첨부 메뉴(최근 사진 그리드·카메라), 데스크탑에서 GitHub 앱 만들기, 예약 메시지 서버(화면은 진행 중)
 - 데스크탑·iOS 앱은 아직 운영하는 사람들의 기기와 작은 TestFlight 내부 그룹에 가는 시험용 빌드예요. 더 넓은 팀 배포는 내부 게이트([M7](docs/cicd/03-store-readiness-gate.md))를 기다리고, 지원하는 공개 다운로드는 없어요
 
 💭 **강한 의견, 코드는 아직**
@@ -122,7 +122,7 @@ https://raw.githubusercontent.com/yeomyeonggeori/oort/main/docs/SELF_HOST_AGENT.
 
 ```sh
 npm ci && npm --prefix clients/web ci && npm --prefix clients/mobile ci
-make build && make test   # server-rust 빌드(Rust 1.88+), TypeScript 타입 검사, 전체 테스트
+make build && make test   # server-rust 빌드(Rust 1.88+), TypeScript 타입 검사, Rust·웹·코어·폰 테스트
 ```
 
 [`docs/architecture/overview.md`](docs/architecture/overview.md)와 [ADR](docs/adr/)부터 읽어 보세요. 결정이 코드보다 코드를 더 잘 설명해요. 변경이 들어오기 전에 어떻게 검증하는지는 [개발 검증](docs/runbooks/development-validation.md)에 있어요.

@@ -10,7 +10,7 @@
 
 oort est une messagerie que vous hébergez vous-même, où les personnes et les agents d’IA partagent les mêmes canaux. La plupart des produits de chat greffent l’IA comme un bot : un utilisateur spécial avec des API spéciales, dont le travail se passe là où vous ne le voyez pas. oort refuse cette forme. Ici, un agent est un `member (kind = agent)` : même liste de membres, mêmes canaux, même surface de permissions qu’une personne.
 
-Quand un agent travaille, son exécution défile dans le canal. Quand il a besoin d’une permission, un humain l’accorde ou la refuse **dans la conversation** — ou directement depuis l’écran de verrouillage d’un téléphone, où les boutons Approuver et Refuser demandent d’abord Face ID ou le code (implémenté dans la v0.1.30 ; la vérification sur de vrais appareils reste ouverte). Ce que l’exécution a coûté, quelles actions elle a demandé à effectuer et comment elle s’est terminée sont des messages dans la même séquence que vous faites défiler. La conversation est le registre ; il n’y a pas de second endroit où regarder.
+Quand un agent travaille, son exécution défile dans le canal. Quand il a besoin d’une permission, un humain l’accorde ou la refuse **dans la conversation** — ou directement depuis l’écran de verrouillage d’un téléphone, où les boutons Approuver et Refuser demandent d’abord Face ID ou le code (implémenté dans la v0.1.30 ; la vérification sur de vrais appareils reste ouverte). Quelles actions elle a demandé à effectuer et comment elle s’est terminée sont des messages dans la même séquence que vous faites défiler ; ce qu’elle a coûté s’additionne dans une page d’usage des Réglages.
 
 Le nom vient du [nuage d’Oort](https://fr.wikipedia.org/wiki/Nuage_d%27Oort) : une coquille silencieuse de petits corps aux confins de la portée d’une étoile — distante, autonome, et tout entière en orbite autour d’un foyer qui est le vôtre.
 
@@ -28,7 +28,7 @@ Le nom vient du [nuage d’Oort](https://fr.wikipedia.org/wiki/Nuage_d%27Oort) :
 </tr></table>
 
 <table><tr>
-<td width="62%" valign="top"><a href="docs/assets/readme/themes.png"><img src="docs/assets/readme/themes.png" alt="Le même canal dans quatre thèmes : Dawn sky, Sunset band, Catppuccin et Gruvbox Hard" width="100%"></a><br><sub><strong>57 thèmes de catalogue en plus de nos trois propres thèmes</strong> (clair et sombre comptés séparément) : ici Dawn sky, Sunset band, Catppuccin et Gruvbox Hard. <em>Fusionné dans la branche ; pas encore publié.</em></sub></td>
+<td width="62%" valign="top"><a href="docs/assets/readme/themes.png"><img src="docs/assets/readme/themes.png" alt="Le même canal dans quatre thèmes : Dawn sky, Sunset band, Catppuccin et Gruvbox Hard" width="100%"></a><br><sub><strong>57 thèmes de catalogue en plus de nos trois propres thèmes</strong> (clair et sombre comptés séparément) : ici Dawn sky, Sunset band, Catppuccin et Gruvbox Hard. <em>Fusionné ; pas encore publié.</em></sub></td>
 <td width="38%" valign="top"><a href="docs/assets/readme/phone.png"><img src="docs/assets/readme/phone.png" alt="La première étape de l’application iPhone, « Quelles notifications voulez-vous ? » : aperçu d’une demande d’approbation avec les boutons Approuver et Refuser, du travail terminé et des mentions" width="100%"></a><br><sub><strong>Sur le téléphone.</strong> La première étape au lancement présente un aperçu de chaque type de notification : les demandes d’approbation et les mentions arrivent toujours, et le travail terminé a un interrupteur. Les builds de test iOS vont à un petit groupe TestFlight interne.</sub></td>
 </tr></table>
 
@@ -51,7 +51,7 @@ Une base de données. Un chemin d’écriture. Personnes et agents sur la même 
 
 - Canaux, fils de discussion, messages privés, citations, indicateur de saisie, épingles et recherche — sur le web, le bureau (Tauri, macOS) et iOS (React Native)
 - Des agents comme membres : mentionnez-en un, regardez son exécution défiler dans le canal avec un état honnête, arrêtez-la en cours de route
-- Approbations humaines dans le canal et la boîte de réception ; résultats d’exécution, coût de chaque tour et décisions d’approbation (qui a décidé, et quand) dans la conversation, et une page d’usage dans les Réglages
+- Approbations humaines dans le canal et la boîte de réception ; résultats d’exécution et décisions d’approbation (qui a décidé, et quand) dans la conversation, et une page d’usage dans les Réglages (par modèle et par agent)
 - L’écran Travail (les résultats d’abord, les miens ou toute l’équipe) et l’observation en direct du terminal d’une session d’agent depuis l’application de bureau
 - Vos propres connexions d’IA : clés d’API (Anthropic, xAI, OpenRouter), un Hermes sur le même serveur, ou un backend local compatible OpenAI
 - Pièces jointes : les fichiers vivent sur le volume propre de votre serveur (le défaut de l’auto-hébergement) ou dans un disque partagé Google qui vous appartient ; les téléchargements passent la vérification d’appartenance au canal du serveur et, avec le backend Google, les envois vont directement vers Drive
@@ -63,7 +63,7 @@ Une base de données. Un chemin d’écriture. Personnes et agents sur la même 
 - Approuver/Refuser depuis l’écran de verrouillage de l’iPhone — implémenté dans la v0.1.30 ; la vérification sur de vrais appareils reste ouverte ([vérification sur appareil](docs/cicd/11-ios-push-device-check.md))
 - Mémoire d’équipe (résumés, décisions, faits, engagements ; parcourir, modifier, oublier) — publiée dans la v0.1.15 ; ses résumés exigent une connexion d’IA par défaut de l’équipe, et les notes de version listent encore comme non vérifiée la qualité des résumés avec un vrai modèle
 - Événements de la GitHub App dans les canaux — publiés dans la v0.1.32, désactivés tant que l’opérateur n’a pas défini la clé de l’App
-- Fusionné dans une branche, pas encore publié : le catalogue de 57 thèmes et sa galerie, la taille du texte et la densité du chat, le fond en verre du bureau, le menu de pièces jointes du téléphone (grille des photos récentes et appareil photo), la création de la GitHub App depuis le bureau, et le serveur des messages programmés (ses écrans sont en cours)
+- Fusionné, pas encore publié : le catalogue de 57 thèmes et sa galerie, la taille du texte et la densité du chat, le fond en verre du bureau, le menu de pièces jointes du téléphone (grille des photos récentes et appareil photo), la création de la GitHub App depuis le bureau, et le serveur des messages programmés (ses écrans sont en cours)
 - Les applications de bureau et iOS sont encore des builds de test pour les appareils de ceux qui maintiennent oort et un petit groupe TestFlight interne ; le déploiement à toute l’équipe attend la porte d’accès interne ([M7](docs/cicd/03-store-readiness-gate.md)), et il n’existe pas de téléchargement public pris en charge
 
 💭 **Convictions fortes, code à venir**
@@ -123,7 +123,7 @@ Le pas-à-pas complet, le mode image publiée (`--published-image`, épinglée p
 
 ```sh
 npm ci && npm --prefix clients/web ci && npm --prefix clients/mobile ci
-make build && make test   # compile server-rust (Rust 1.88+), vérifie les types TypeScript, lance tous les tests
+make build && make test   # compile server-rust (Rust 1.88+), vérifie les types TypeScript, lance les tests Rust, web, core et téléphone
 ```
 
 Commencez par [`docs/architecture/overview.md`](docs/architecture/overview.md) et les [ADR](docs/adr/) : les décisions expliquent le code mieux que le code lui-même. La façon dont les changements sont vérifiés avant d’atterrir : [validation du développement](docs/runbooks/development-validation.md).
@@ -150,7 +150,7 @@ flowchart LR
 - **Ni fédéré, ni P2P.** Un serveur, un Postgres, à vous. Le serveur que vous exploitez est l’unique source de vérité.
 - **Pas un fournisseur d’IA.** Apportez vos modèles et vos identifiants ; oort orchestre, contrôle et enregistre.
 - **Pas de chiffrement de bout en bout.** Le serveur, et celui ou celle qui l’exploite, peut lire le contenu des messages — la recherche et les agents en ont besoin.
-- **Ni audité, ni certifié.** Pas d’audit de sécurité par un tiers, pas de test d’intrusion, pas de certification SOC 2 ni ISO ([limites actuelles](docs/security/README.ko.md#현재-한계와-도입-시-확인할-점)).
+- **Ni audité, ni certifié.** Pas d’audit de sécurité par un tiers, pas de test d’intrusion, pas de certification SOC 2 ni ISO ([limites actuelles, en coréen](docs/security/README.ko.md#현재-한계와-도입-시-확인할-점)).
 - **Pas terminé.** Les listes d’état ci-dessus sont honnêtes à dessein : nous préférons sous-promettre ici plutôt que vous laisser le découvrir en production.
 
 ## Licence et contributions

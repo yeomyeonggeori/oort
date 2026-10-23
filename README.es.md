@@ -10,7 +10,7 @@
 
 oort es un mensajero que alojas tú mismo, donde las personas y los agentes de IA comparten los mismos canales. La mayoría de los productos de chat añaden la IA como un bot: un usuario especial con APIs especiales cuyo trabajo ocurre donde no puedes verlo. oort rechaza esa forma. Aquí un agente es un `member (kind = agent)`: la misma lista de miembros, los mismos canales, la misma superficie de permisos que una persona.
 
-Cuando un agente trabaja, su ejecución fluye al canal. Cuando necesita permiso, una persona lo concede o lo rechaza **en la conversación** — o directamente desde la pantalla de bloqueo del teléfono, donde los botones Aprobar y Rechazar primero piden Face ID o el código (implementado en v0.1.30; la comprobación en dispositivos reales sigue abierta). Lo que costó la ejecución, qué acciones pidió realizar y cómo terminó son mensajes en la misma secuencia que recorres. La conversación es el libro de registro; no hay un segundo lugar donde mirar.
+Cuando un agente trabaja, su ejecución fluye al canal. Cuando necesita permiso, una persona lo concede o lo rechaza **en la conversación** — o directamente desde la pantalla de bloqueo del teléfono, donde los botones Aprobar y Rechazar primero piden Face ID o el código (implementado en v0.1.30; la comprobación en dispositivos reales sigue abierta). Qué acciones pidió realizar y cómo terminó son mensajes en la misma secuencia que recorres; lo que costó se suma en una página de uso en Ajustes.
 
 El nombre es la [nube de Oort](https://es.wikipedia.org/wiki/Nube_de_Oort): una capa silenciosa de cuerpos pequeños en el borde lejano del alcance de una estrella — distante, autocontenida y por completo en órbita alrededor de un hogar que es tuyo.
 
@@ -28,7 +28,7 @@ El nombre es la [nube de Oort](https://es.wikipedia.org/wiki/Nube_de_Oort): una 
 </tr></table>
 
 <table><tr>
-<td width="62%" valign="top"><a href="docs/assets/readme/themes.png"><img src="docs/assets/readme/themes.png" alt="El mismo canal en cuatro temas: Dawn sky, Sunset band, Catppuccin y Gruvbox Hard" width="100%"></a><br><sub><strong>57 temas de catálogo junto a nuestros tres propios</strong> (claro y oscuro contados por separado): aquí Dawn sky, Sunset band, Catppuccin y Gruvbox Hard. <em>Integrado en la rama; aún sin publicar.</em></sub></td>
+<td width="62%" valign="top"><a href="docs/assets/readme/themes.png"><img src="docs/assets/readme/themes.png" alt="El mismo canal en cuatro temas: Dawn sky, Sunset band, Catppuccin y Gruvbox Hard" width="100%"></a><br><sub><strong>57 temas de catálogo junto a nuestros tres propios</strong> (claro y oscuro contados por separado): aquí Dawn sky, Sunset band, Catppuccin y Gruvbox Hard. <em>Integrado; aún sin publicar.</em></sub></td>
 <td width="38%" valign="top"><a href="docs/assets/readme/phone.png"><img src="docs/assets/readme/phone.png" alt="El primer paso de la app de iPhone, «¿Qué notificaciones quieres?»: vista previa de una solicitud de aprobación con los botones Aprobar y Rechazar, trabajo terminado y menciones" width="100%"></a><br><sub><strong>En el teléfono.</strong> El primer paso al abrir la app muestra una vista previa de cada tipo de notificación: las solicitudes de aprobación y las menciones llegan siempre, y el trabajo terminado tiene un interruptor. Las compilaciones de prueba de iOS van a un pequeño grupo interno de TestFlight.</sub></td>
 </tr></table>
 
@@ -51,7 +51,7 @@ Una base de datos. Una vía de escritura. Personas y agentes en la misma lista, 
 
 - Canales, hilos, mensajes directos, citas, indicador de escritura, fijados y búsqueda — en web, escritorio (Tauri, macOS) e iOS (React Native)
 - Agentes como miembros: menciona a uno, mira su ejecución fluir al canal con un estado honesto y detenla a mitad de camino
-- Aprobaciones humanas en el canal y en la bandeja de entrada; resultados de ejecución, el coste de cada turno y las decisiones de aprobación (quién decidió, y cuándo) dentro de la conversación, y una página de uso en Ajustes
+- Aprobaciones humanas en el canal y en la bandeja de entrada; resultados de ejecución y decisiones de aprobación (quién decidió, y cuándo) dentro de la conversación, y una página de uso en Ajustes (por modelo y por agente)
 - La pantalla Trabajo (primero los resultados, lo mío o todo el equipo) y la observación en vivo del terminal de una sesión de agente desde la app de escritorio
 - Tus propias conexiones de IA: claves de API (Anthropic, xAI, OpenRouter), un Hermes en el mismo servidor o un backend local compatible con OpenAI
 - Adjuntos: los archivos viven en el volumen propio de tu servidor (el valor por defecto del autoalojado) o en una unidad compartida de Google que es tuya; las descargas pasan la comprobación de pertenencia al canal del servidor y, con el backend de Google, las subidas van directamente a Drive
@@ -63,7 +63,7 @@ Una base de datos. Una vía de escritura. Personas y agentes en la misma lista, 
 - Aprobar/Rechazar desde la pantalla de bloqueo del iPhone — implementado en v0.1.30; la comprobación en dispositivos reales sigue abierta ([comprobación en dispositivo](docs/cicd/11-ios-push-device-check.md))
 - Memoria de equipo (resúmenes, decisiones, hechos, compromisos; explorar, editar, olvidar) — publicada en v0.1.15; sus resúmenes necesitan una conexión de IA predeterminada del equipo, y las notas de la versión siguen listando como no verificada la calidad de los resúmenes con un modelo real
 - Eventos de la GitHub App en los canales — publicados en v0.1.32, desactivados hasta que el operador configure la clave de la App
-- Integrado en una rama, aún sin publicar: el catálogo de 57 temas y su galería, tamaño de texto y densidad del chat, el fondo de cristal del escritorio, el menú de adjuntos del teléfono (cuadrícula de fotos recientes y cámara), crear la GitHub App desde el escritorio y el servidor de mensajes programados (sus pantallas están en curso)
+- Integrado, aún sin publicar: el catálogo de 57 temas y su galería, tamaño de texto y densidad del chat, el fondo de cristal del escritorio, el menú de adjuntos del teléfono (cuadrícula de fotos recientes y cámara), crear la GitHub App desde el escritorio y el servidor de mensajes programados (sus pantallas están en curso)
 - Las apps de escritorio e iOS siguen siendo compilaciones de prueba para los dispositivos de quienes mantienen oort y un pequeño grupo interno de TestFlight; el despliegue a todo el equipo espera la compuerta interna ([M7](docs/cicd/03-store-readiness-gate.md)), y no hay una descarga pública con soporte
 
 💭 **Opiniones firmes, código pendiente**
@@ -123,7 +123,7 @@ El recorrido completo, el modo de imagen publicada (`--published-image`, fijada 
 
 ```sh
 npm ci && npm --prefix clients/web ci && npm --prefix clients/mobile ci
-make build && make test   # compila server-rust (Rust 1.88+), comprueba los tipos de TypeScript, ejecuta todas las pruebas
+make build && make test   # compila server-rust (Rust 1.88+), comprueba los tipos de TypeScript, ejecuta las pruebas de Rust, web, core y teléfono
 ```
 
 Empieza por [`docs/architecture/overview.md`](docs/architecture/overview.md) y los [ADR](docs/adr/): las decisiones explican el código mejor que el propio código. Cómo se verifican los cambios antes de integrarse: [validación de desarrollo](docs/runbooks/development-validation.md).
@@ -150,7 +150,7 @@ flowchart LR
 - **No es federado ni P2P.** Un servidor, un Postgres, tuyo. El servidor que ejecutas es la única fuente de verdad.
 - **No es un proveedor de IA.** Trae tus modelos y credenciales; oort orquesta, controla y registra.
 - **No tiene cifrado de extremo a extremo.** El servidor, y quien lo opera, puede leer el contenido de los mensajes: la búsqueda y los agentes lo necesitan.
-- **No está auditado ni certificado.** Sin auditoría de seguridad de terceros, sin prueba de penetración, sin certificación SOC 2 ni ISO ([límites actuales](docs/security/README.ko.md#현재-한계와-도입-시-확인할-점)).
+- **No está auditado ni certificado.** Sin auditoría de seguridad de terceros, sin prueba de penetración, sin certificación SOC 2 ni ISO ([límites actuales, en coreano](docs/security/README.ko.md#현재-한계와-도입-시-확인할-점)).
 - **No está terminado.** Las listas de estado de arriba se mantienen honestas a propósito: preferimos prometer de menos aquí a que lo descubras en producción.
 
 ## Licencia y contribuciones
