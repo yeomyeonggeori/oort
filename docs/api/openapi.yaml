@@ -123,6 +123,10 @@ tags:
     description: >
       ADR-0175 personal message reminders (later-alert). Human-only owner CRUD.
       v1 has no outbox fan-out — clients poll the list.
+  - name: scheduled-messages
+    description: >
+      ADR-0208 scheduled messages. Human-only, owner-scoped. The server keeps the
+      message and sends it itself at `sendAtMs` through the `sendMessage` path.
   - name: memory
     description: >
       ADR-0196 team memory v2 — channel/thread digests with evidence links,
@@ -4735,6 +4739,367 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "429":
           $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/scheduled-messages:
+    post:
+      tags: [scheduled-messages]
+      operationId: createScheduledMessage
+      summary: Schedule a message to be sent later to a channel, DM or thread.
+      description: >
+        ADR-0208. Human bearer only (an agent bearer is 403). The caller must be
+        a current member of the channel.
+        The server keeps the message and sends it itself at `sendAtMs`, even
+        when none of the caller's devices is on, through the same send path as
+        `sendMessage`: mentions, agent calls, notifications and the inbox behave
+        as for any message, at the time it is sent. `sendAtMs` must be between
+        60 seconds and 120 days from the server's now: 400 with code
+        `send_at_too_soon` (the past included) or `send_at_too_far`. At least
+        one of a non-blank `body` or `attachmentIds` is required (400
+        `empty_message`). Attachments are checked with the `sendMessage`
+        binding rules and reserved for this schedule until it is sent or
+        cancelled (409 `attachment_reserved` when another schedule holds one).
+        `rootId` is checked like `sendMessage` (404 not found, 400 deleted or
+        not top level). `replyToId`, `routing`, `props`, `type` and `signature`
+        are not accepted (400: the request is closed). The same
+        `clientRequestId` from the same member answers 201 with the same row and
+        creates no second one; that lookup comes before every other check, so a
+        different body or time under a known id still returns the first row (use a
+        new id when the request changes). At most 50 `pending` rows per member per
+        workspace (409 `pending_limit_reached`). 503 `scheduler_disabled` when
+        the operator turned the scheduler off or the server could not check its
+        database role at boot (see the api log). 409 `scheduled_busy` when the
+        request waited more than 3 seconds for a lock or lost a lock race.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateScheduledMessageRequest"
+      responses:
+        "201":
+          description: Scheduled, or the same row again on a retry with the same `clientRequestId`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScheduledMessageResponse"
+        "400":
+          description: >
+            Invalid body or unknown field, `send_at_too_soon`, `send_at_too_far`,
+            `empty_message`, or a `sendMessage`-style attachment or thread-root
+            refusal (duplicate or too many attachments, deleted or non-top-level
+            root).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, inactive membership, not a member of the channel or no such channel (the same judgment as `sendMessage`), or an attachment that belongs to another uploader or channel.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Thread root or attachment not found (also for ones the caller cannot see).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: >
+            `pending_limit_reached` (50 waiting), `attachment_reserved` (another
+            schedule holds the file), `scheduled_busy` (the request waited more
+            than 3 seconds for a lock or lost a lock race; retry with the same
+            `clientRequestId`), or an attachment that is not complete or is
+            already linked to a message.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          description: "`scheduler_disabled`: the operator turned the scheduler off, or the server refused or could not yet check its database role at boot (see the api log); nothing can be scheduled until then."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/workspaces/{workspaceId}/scheduled-messages:
+    get:
+      tags: [scheduled-messages]
+      operationId: listScheduledMessages
+      summary: List the caller's own scheduled messages, soonest first.
+      description: >
+        ADR-0208. Owner-scoped: only the
+        caller's rows, never another member's, not even for a workspace owner.
+        `status=open` (default) is `pending` plus `failed`. `sent` and
+        `cancelled` rows are never listed: they are body-less tombstones kept for
+        7 days for retries and the audit link. `channelId` narrows to one
+        channel. Keyset pagination over `(sendAtMs, id)` via `cursor` = the
+        previous page's last row id. The personal channel event
+        `scheduled_message.updated` (ids, status and time only) tells a client
+        when to read again; a missed event is repaired by the next read.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: channelId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [open, pending, failed]
+            default: open
+        - name: cursor
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        "200":
+          description: The caller's scheduled messages.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScheduledMessageListResponse"
+        "400":
+          description: Invalid status, channel id or cursor.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer or inactive membership.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/scheduled-messages/{scheduledMessageId}:
+    patch:
+      tags: [scheduled-messages]
+      operationId: updateScheduledMessage
+      summary: Change the text or the send time of a scheduled message.
+      description: >
+        ADR-0208. Body `{body?, sendAtMs?}`,
+        at least one. Allowed on a `pending` row only while more than 30 seconds
+        remain before `sendAtMs` (`editableUntilMs` says when it stops): inside
+        the last 30 seconds it is 409 `scheduled_too_late`. `sendAtMs` follows
+        the create bounds (400 `send_at_too_soon` / `send_at_too_far`). On a
+        `failed` row `sendAtMs` re-arms it to `pending` (attempts and failure
+        cleared, counted against the 50 cap: 409 `pending_limit_reached`), and
+        `body` alone only edits the text. A blank `body` on a row with no
+        attachments is 400 `empty_message`. A sent row is 409
+        `scheduled_already_sent`; a cancelled row or one that is not the
+        caller's answers 404. Attachments cannot be changed: cancel and
+        schedule again.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: scheduledMessageId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateScheduledMessageRequest"
+      responses:
+        "200":
+          description: The updated row.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScheduledMessageResponse"
+        "400":
+          description: Invalid body or unknown field, no field given, `send_at_too_soon`, `send_at_too_far`, `empty_message`, or a malformed scheduled message id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer or inactive membership.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found for this caller (another member's row, or a cancelled one).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: >
+            `scheduled_too_late` (last 30 seconds), `scheduled_already_sent`,
+            `scheduled_busy` (the row was locked by a send or a sign-in ending for
+            more than 3 seconds, or the request lost a lock race; retry), or
+            `pending_limit_reached` when re-arming a failed row.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          description: "`scheduler_disabled`: the operator turned the scheduler off, or the server refused or could not yet check its database role at boot (see the api log); a time cannot be set until then."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      tags: [scheduled-messages]
+      operationId: deleteScheduledMessage
+      summary: Cancel a scheduled message so it is never sent.
+      description: >
+        ADR-0208. Allowed on `pending` and
+        `failed` rows, up to the moment the row is sent, including the last 30
+        seconds: the row lock decides a race, so either the cancel wins and
+        nothing is sent, or the send wins and this is 409
+        `scheduled_already_sent`. The body is discarded and the attachments are
+        released (the files stay). Cancelling a cancelled row is 204 again.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: scheduledMessageId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Cancelled and audited (or already cancelled).
+        "400":
+          description: Invalid scheduled message id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer or inactive membership.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found for this caller.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "`scheduled_already_sent` (it went out first) or `scheduled_busy` (a send or a sign-in ending held the row for more than 3 seconds, or this request lost a lock race; retry)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/scheduled-messages/{scheduledMessageId}/send-now:
+    post:
+      tags: [scheduled-messages]
+      operationId: sendScheduledMessageNow
+      summary: Send a scheduled message right now.
+      description: >
+        ADR-0208. Allowed on `pending` and
+        `failed` rows. It runs inside this request, through the same send
+        function as the scheduler and as `sendMessage`, so the caller gets the
+        result at once (`status: sent`, `sentMessageId`). The row lock keeps the
+        scheduler out: a row already sent is 409 `scheduled_already_sent`, one
+        locked for more than 3 seconds (or a lock race this request lost) is 409
+        `scheduled_busy`. When the send is
+        refused (the author left the channel, the thread root is gone, an
+        attachment cannot be used) the answer is 409 whose `error.code` is the
+        failure reason (`not_member`, `root_unavailable`, `attachment_unavailable`,
+        `send_error`, `not_allowed`) and the row becomes `failed`. A row held as
+        `sessions_ended` can be sent now by its author: that is the re-confirmation.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: scheduledMessageId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Sent. The row is `sent` and carries `sentMessageId`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScheduledMessageResponse"
+        "400":
+          description: Invalid scheduled message id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer or inactive membership.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found for this caller (another member's row, or a cancelled one).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: >
+            `scheduled_already_sent`, `scheduled_busy`, or a failure reason code
+            when the send itself is refused.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          description: "`scheduler_disabled`: the operator turned the scheduler off, or the server refused or could not yet check its database role at boot (see the api log)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /v1/workspaces/{workspaceId}/channels/{channelId}/memory/digests:
     get:
@@ -12350,7 +12715,22 @@ components:
                 `device_key_not_endorsable`, `device_key_already_registered`,
                 `session_lineage_ended`, `device_root_password_required`,
                 `device_root_linked_session`, `host_register_replayed`,
-                `instance_id_unconfigured`.
+                `instance_id_unconfigured`; ADR-0208 (#4214, scheduled
+                messages): 400 `send_at_too_soon` (less than 60 seconds ahead,
+                the past included), `send_at_too_far` (beyond 120 days),
+                `empty_message` (neither text nor an attachment); 409
+                `pending_limit_reached` (50 waiting), `attachment_reserved`
+                (another schedule holds the file), `scheduled_too_late` (an edit
+                inside the last 30 seconds), `scheduled_already_sent`,
+                `scheduled_busy` (a row or the session was locked for more than 3
+                seconds, or the request lost a lock race, for example with a
+                sign-in ending; retry); 503 `scheduler_disabled` (the operator
+                turned the scheduler off, or the server refused or could not yet
+                check its database role at boot); and, as the code of a refused
+                send-now (409),
+                the failure reason that the row now carries: `author_inactive`,
+                `not_member`, `root_unavailable`, `attachment_unavailable`,
+                `send_error`, `not_allowed`.
 
     # ---- Memory Plane (ADR-0129 / MOMO-526) ---------------------------------
     MemoryScope:
@@ -15609,6 +15989,135 @@ components:
         reminders:
           type: array
           items: {$ref: "#/components/schemas/Reminder"}
+        nextCursor: {type: string, format: uuid}
+
+    ScheduledMessageStatus:
+      type: string
+      enum: [pending, sent, failed, cancelled]
+      description: >
+        ADR-0208 D3. `pending` waits for `sendAtMs`. `sent` went out as an
+        ordinary message (`sentMessageId`). `failed` could not be sent
+        (`failureReason`) and keeps its body so it can be re-armed, sent now or
+        copied. `cancelled` was removed by its author, or by the system when the
+        author was removed from or left the workspace or the workspace was
+        deleted (the body is discarded either way). There is no `sending`
+        state: the send and the status change are one transaction, and the claim
+        before it is a separate short transaction that leaves the row `pending`.
+
+    ScheduledMessageFailureReason:
+      type: string
+      enum: [sessions_ended, author_inactive, missed, send_error, not_member, root_unavailable, attachment_unavailable, not_allowed]
+      description: >
+        ADR-0208 D8, a closed set owned by the engine (TRACKS section 1).
+        `sessions_ended`: the author's sign-in ended (password change or reset,
+        suspension, a device unlinked or a refresh-token reuse caught), so the
+        schedule was held, not sent; the author re-arms it or sends it now
+        after reading it (clients show the whole text first). Removal and
+        leaving the workspace cancel the schedules instead. `author_inactive`: the author is
+        suspended or removed at send time (a safety net behind the hold).
+        `missed`: the grace window (default 60 minutes) passed without a single
+        attempt. `send_error`: at least one attempt was made and the grace
+        window passed while transient errors continued, or the schedule id
+        collided with another message's `clientMsgId`. `not_member`: the author left the channel or conversation.
+        `root_unavailable`: the thread root is deleted or gone.
+        `attachment_unavailable`: an attachment is missing or was used
+        elsewhere. `not_allowed`: a policy the send path adds later.
+
+    CreateScheduledMessageRequest:
+      type: object
+      required: [sendAtMs, clientRequestId]
+      additionalProperties: false
+      properties:
+        body:
+          type: string
+          description: Message text. At least one of a non-blank `body` or `attachmentIds` is required. No cap beyond the request-body limit `sendMessage` has.
+        sendAtMs:
+          type: integer
+          format: int64
+          description: Epoch milliseconds. Between 60 seconds and 120 days after the server's now.
+        rootId:
+          type: string
+          format: uuid
+          description: Undeleted top-level message in this channel; the scheduled message is a reply in its thread.
+        attachmentIds:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+          description: Completed attachments uploaded by the caller in this channel. They are reserved, and linked when the message is sent.
+        clientRequestId:
+          type: string
+          format: uuid
+          description: Idempotency key for this create. The same id from the same member answers with the same row.
+
+    UpdateScheduledMessageRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        body: {type: string}
+        sendAtMs: {type: integer, format: int64}
+
+    ScheduledMessage:
+      type: object
+      required: [id, workspaceId, memberId, channelId, status, sendAtMs, rev, createdAtMs, updatedAtMs]
+      properties:
+        id: {type: string, format: uuid}
+        workspaceId: {type: string, format: uuid}
+        memberId:
+          type: string
+          format: uuid
+          description: The author, always the caller.
+        channelId: {type: string, format: uuid}
+        rootId: {type: string, format: uuid}
+        body:
+          type: string
+          description: Omitted once the row is sent or cancelled (the sent message is the record).
+        attachments:
+          type: array
+          items: {$ref: "#/components/schemas/MessageAttachment"}
+          description: Reserved attachments. Omitted when there are none, and once the row is sent or cancelled.
+        sendAtMs: {type: integer, format: int64}
+        status: {$ref: "#/components/schemas/ScheduledMessageStatus"}
+        failureReason:
+          allOf:
+            - $ref: "#/components/schemas/ScheduledMessageFailureReason"
+          description: Present only when `status` is `failed`.
+        sentMessageId:
+          type: string
+          format: uuid
+          description: Present only when `status` is `sent`.
+        sentAtMs:
+          type: integer
+          format: int64
+          description: Present only when `status` is `sent`.
+        editableUntilMs:
+          type: integer
+          format: int64
+          description: Present only when `status` is `pending`; equals `sendAtMs` minus 30 seconds. A hint for clients, the server decides.
+        rev:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Raised by one on every change. The personal channel event carries the same value, so a client keeps the larger.
+        createdAtMs: {type: integer, format: int64}
+        updatedAtMs: {type: integer, format: int64}
+
+    ScheduledMessageResponse:
+      type: object
+      required: [scheduledMessage]
+      properties:
+        scheduledMessage: {$ref: "#/components/schemas/ScheduledMessage"}
+
+    ScheduledMessageListResponse:
+      type: object
+      required: [scheduledMessages]
+      properties:
+        scheduledMessages:
+          type: array
+          items: {$ref: "#/components/schemas/ScheduledMessage"}
         nextCursor: {type: string, format: uuid}
 
     MemoryEvidenceLink:

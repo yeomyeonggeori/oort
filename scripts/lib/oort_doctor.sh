@@ -149,6 +149,7 @@ oort_doctor_skip_stack() {
   oort_doctor_record stack.healthz blocker skip "$why" "$fix"
   oort_doctor_record stack.agent_port major skip "$why" "$fix"
   oort_doctor_record stack.outbox major skip "$why" "$fix"
+  oort_doctor_record stack.scheduler major skip "$why" "$fix"
   oort_doctor_record stack.migrate_idempotency major skip "$why" "$fix"
   oort_doctor_record roles.momo_notifier blocker skip "$why" "$fix"
 }
@@ -1096,6 +1097,107 @@ EOF
   fi
 }
 
+# ADR-0208 D15 — scheduled messages. The tick lives in the api process and stops without a sound, so the
+# doctor reads the rows the tick should already have sent. `scheduled_message` is FORCE RLS: only a role that
+# skips RLS (the owner / compose superuser, which is the connection stack.outbox already needs) can count
+# across tenants. A role that does not skip it would count zero without an error, so the query reports that
+# fact and the check answers "unknown" (skip) instead of a false pass.
+oort_doctor_scheduler_grace_seconds() {
+  local raw
+  raw="$(oort_doctor_int_or_zero "$(oort_doctor_trim "$(oort_doctor_get MOMO_SCHEDULER_GRACE_SECONDS)")")"
+  [ "$raw" -ne 0 ] || raw=3600
+  [ "$raw" -ge 300 ] || raw=300
+  [ "$raw" -le 86400 ] || raw=86400
+  printf '%s' "$raw"
+}
+
+# One row: sees_all<TAB>overdue<TAB>past_grace<TAB>failed_24h. Rows of a deleted workspace do not count (the
+# tick closes those as cancelled). $1 = grace seconds (digits only, validated by the caller).
+oort_doctor_scheduler_sql() {
+  local grace="${1:-3600}"
+  printf '%s' "SELECT (r.rolsuper OR r.rolbypassrls)::int, count(*) FILTER (WHERE s.status = 'pending' AND s.send_at < now() - interval '5 minutes' AND w.deleted_at IS NULL), count(*) FILTER (WHERE s.status = 'pending' AND s.send_at < now() - make_interval(secs => ${grace}) AND w.deleted_at IS NULL), count(*) FILTER (WHERE s.status = 'failed' AND s.failure_reason IN ('missed', 'send_error') AND s.updated_at > now() - interval '24 hours' AND w.deleted_at IS NULL) FROM pg_roles r LEFT JOIN scheduled_message s ON true LEFT JOIN workspace w ON w.id = s.workspace_id WHERE r.rolname = current_user GROUP BY r.rolsuper, r.rolbypassrls;"
+}
+
+# stdin: the one row above. $1 = grace seconds. Sets OORT_DOCTOR_SCHEDULER_STATUS / SEVERITY / DETAIL / FIX.
+oort_doctor_classify_scheduler() {
+  local grace="${1:-3600}"
+  local line sees overdue past failed
+  line="$(cat | tr -d '\r' | awk 'NF { print; exit }')"
+  OORT_DOCTOR_SCHEDULER_STATUS=pass
+  OORT_DOCTOR_SCHEDULER_SEVERITY=major
+  OORT_DOCTOR_SCHEDULER_DETAIL="마감이 5분 넘게 지난 예약 0건, 최근 24시간 missed/send_error 0건"
+  OORT_DOCTOR_SCHEDULER_FIX=""
+  if [ -z "$line" ]; then
+    OORT_DOCTOR_SCHEDULER_STATUS=skip
+    OORT_DOCTOR_SCHEDULER_SEVERITY=minor
+    OORT_DOCTOR_SCHEDULER_DETAIL="예약 질의가 아무 행도 돌려주지 않았다"
+    OORT_DOCTOR_SCHEDULER_FIX="잠시 뒤 다시 실행하라."
+    return
+  fi
+  sees="$(oort_doctor_int_or_zero "$(printf '%s' "$line" | awk -F '\t' '{ print $1 }')")"
+  overdue="$(oort_doctor_int_or_zero "$(printf '%s' "$line" | awk -F '\t' '{ print $2 }')")"
+  past="$(oort_doctor_int_or_zero "$(printf '%s' "$line" | awk -F '\t' '{ print $3 }')")"
+  failed="$(oort_doctor_int_or_zero "$(printf '%s' "$line" | awk -F '\t' '{ print $4 }')")"
+  if [ "$sees" != "1" ]; then
+    OORT_DOCTOR_SCHEDULER_STATUS=skip
+    OORT_DOCTOR_SCHEDULER_SEVERITY=minor
+    OORT_DOCTOR_SCHEDULER_DETAIL="연결 역할이 슈퍼유저도 BYPASSRLS도 아니라 예약 개수를 셀 수 없다 (알 수 없음)"
+    OORT_DOCTOR_SCHEDULER_FIX="MIGRATE_DATABASE_URL 은 소유자(슈퍼유저) URL 이어야 한다. stack.outbox 와 같은 연결이다."
+    return
+  fi
+  if [ "$past" -gt 0 ]; then
+    OORT_DOCTOR_SCHEDULER_STATUS=fail
+    OORT_DOCTOR_SCHEDULER_SEVERITY=major
+    OORT_DOCTOR_SCHEDULER_DETAIL="유예(${grace}초)를 넘긴 pending 예약 ${past}건 — 틱이 닫지 못하는 행이다 (마감이 5분 넘게 지난 pending ${overdue}건)"
+    OORT_DOCTOR_SCHEDULER_FIX="api 로그의 'scheduled messages tick' 줄을 보라: scripts/self_host_env.sh --compose logs api. MOMO_SCHEDULER_ENABLED=0 이면 켜거나 예약을 지워라."
+    return
+  fi
+  if [ "$overdue" -gt 0 ]; then
+    OORT_DOCTOR_SCHEDULER_STATUS=fail
+    OORT_DOCTOR_SCHEDULER_SEVERITY=major
+    OORT_DOCTOR_SCHEDULER_DETAIL="마감이 5분 넘게 지난 pending 예약 ${overdue}건 (정상 백오프 중인 행도 걸린다; 유예 ${grace}초 안)"
+    OORT_DOCTOR_SCHEDULER_FIX="api 가 떠 있는지, MOMO_SCHEDULER_ENABLED 가 꺼져 있지 않은지 확인하라: scripts/self_host_env.sh --compose logs api"
+    return
+  fi
+  if [ "$failed" -gt 0 ]; then
+    OORT_DOCTOR_SCHEDULER_STATUS=info
+    OORT_DOCTOR_SCHEDULER_SEVERITY=minor
+    OORT_DOCTOR_SCHEDULER_DETAIL="최근 24시간에 missed/send_error 로 닫힌 예약 ${failed}건 (서버가 쉬었거나 일시 오류가 이어졌다; 작성자가 지금 보내기·다시 예약·삭제를 정한다)"
+    return
+  fi
+}
+
+# Map a psql result onto classify_scheduler or an accurate skip/fail.
+# $1=grace  $2=psql rc  $3=stderr  $4=1 when a failed query is a failure (T2), 0 when it is a retryable skip
+# stdin = psql stdout.
+oort_doctor_apply_scheduler_query() {
+  local grace="${1:-3600}" rc="${2:-1}" err="${3:-}" hard="${4:-0}"
+  local tsv
+  tsv="$(cat)"
+  err="$(printf '%s' "$err" | tr '\t\r\n' '   ')"
+  if [ "$rc" = "0" ]; then
+    oort_doctor_classify_scheduler "$grace" <<EOF
+$tsv
+EOF
+    return
+  fi
+  OORT_DOCTOR_SCHEDULER_STATUS=skip
+  OORT_DOCTOR_SCHEDULER_SEVERITY=minor
+  OORT_DOCTOR_SCHEDULER_FIX="스택이 기동 중이면 잠시 후 다시 실행하라 (재시도)."
+  if printf '%s' "$err" | grep -Fq 'does not exist'; then
+    OORT_DOCTOR_SCHEDULER_DETAIL="scheduled_message 테이블이 아직 없다 (migrate 대기, 재시도)"
+    return
+  fi
+  if [ "$hard" = "1" ]; then
+    OORT_DOCTOR_SCHEDULER_STATUS=fail
+    OORT_DOCTOR_SCHEDULER_SEVERITY=major
+    OORT_DOCTOR_SCHEDULER_DETAIL="MIGRATE_DATABASE_URL 로 예약 질의가 실패했다${err:+ (${err})}"
+    OORT_DOCTOR_SCHEDULER_FIX="MIGRATE_DATABASE_URL 과 scheduled_message 테이블 상태를 확인하라."
+    return
+  fi
+  OORT_DOCTOR_SCHEDULER_DETAIL="예약 점검을 실행하지 못했다${err:+ (${err})}"
+}
+
 # schema_migrations.version is the migration filename (momo-db::migrate / momo-migrate).
 oort_doctor_expected_migration_count() {
   local dir=""
@@ -1250,6 +1352,9 @@ except Exception:
     oort_doctor_record stack.outbox major fail \
       "MIGRATE_DATABASE_URL 없음 — outbox SQL-over-URL 실패" \
       "슈퍼유저 URL (MIGRATE_DATABASE_URL) 을 env 에 넣어라. DATABASE_URL 로 질의하지 않는다."
+    oort_doctor_record stack.scheduler major fail \
+      "MIGRATE_DATABASE_URL 없음 — 예약 질의를 하지 못했다" \
+      "슈퍼유저 URL (MIGRATE_DATABASE_URL) 을 env 에 넣어라."
     oort_doctor_record stack.migrate_idempotency major fail \
       "MIGRATE_DATABASE_URL 없음 — migrate 원장을 읽지 못했다" \
       "슈퍼유저 URL 을 env 에 넣어라."
@@ -1284,6 +1389,23 @@ EOF
       "$OORT_DOCTOR_OUTBOX_DETAIL" \
       "$OORT_DOCTOR_OUTBOX_FIX"
   fi
+
+  sched_grace="$(oort_doctor_scheduler_grace_seconds)"
+  errf="$(mktemp "${TMPDIR:-/tmp}/oort-doctor-t2-scheduler.XXXXXX")"
+  set +e
+  sched="$(oort_psql_migrate_all "$(oort_doctor_scheduler_sql "$sched_grace")" 2>"$errf")"
+  sched_rc=$?
+  set -e
+  sched_err="$(cat "$errf" 2>/dev/null || true)"
+  rm -f "$errf"
+  oort_doctor_apply_scheduler_query "$sched_grace" "$sched_rc" "$sched_err" 1 <<EOF
+$sched
+EOF
+  oort_doctor_record stack.scheduler \
+    "${OORT_DOCTOR_SCHEDULER_SEVERITY:-major}" \
+    "$OORT_DOCTOR_SCHEDULER_STATUS" \
+    "$OORT_DOCTOR_SCHEDULER_DETAIL" \
+    "$OORT_DOCTOR_SCHEDULER_FIX"
 
   expected="$(oort_doctor_expected_migration_count)"
   sql="$(oort_doctor_migrate_idempotency_sql "$expected")"
@@ -1451,6 +1573,29 @@ EOF
     "$OORT_DOCTOR_OUTBOX_STATUS" \
     "$OORT_DOCTOR_OUTBOX_DETAIL" \
     "$OORT_DOCTOR_OUTBOX_FIX"
+
+  # ADR-0208 D15 — the compose superuser skips RLS, so it can count every tenant's schedules.
+  sched_grace="$(oort_doctor_scheduler_grace_seconds)"
+  errf="$(mktemp "${TMPDIR:-/tmp}/oort-doctor-scheduler.XXXXXX")"
+  set +e
+  sched="$(docker compose -p "$project" exec -T postgres \
+    psql -U "$pg_user" -d "$pg_db" -At -F $'\t' \
+    -c "$(oort_doctor_scheduler_sql "$sched_grace")" 2>"$errf")"
+  sched_rc=$?
+  set -e
+  sched_err="$(cat "$errf" 2>/dev/null || true)"
+  rm -f "$errf"
+  if [ "$sched_rc" -ne 0 ] && { [ "$pg_state" != "running" ] || [ "$pg_health" = "starting" ] || [ "$pg_health" = "unhealthy" ]; }; then
+    sched_err="postgres 컨테이너가 아직 준비되지 않음 (state=${pg_state:-unknown} health=${pg_health:-none})"
+  fi
+  oort_doctor_apply_scheduler_query "$sched_grace" "$sched_rc" "$sched_err" 0 <<EOF
+$sched
+EOF
+  oort_doctor_record stack.scheduler \
+    "${OORT_DOCTOR_SCHEDULER_SEVERITY:-major}" \
+    "$OORT_DOCTOR_SCHEDULER_STATUS" \
+    "$OORT_DOCTOR_SCHEDULER_DETAIL" \
+    "$OORT_DOCTOR_SCHEDULER_FIX"
 
   logs="$(docker compose -p "$project" logs migrate 2>/dev/null || true)"
   if [ -z "$logs" ]; then

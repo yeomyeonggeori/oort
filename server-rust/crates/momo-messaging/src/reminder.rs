@@ -120,11 +120,9 @@ pub async fn bind_reminder_owner_guc(
     conn: &mut PgConnection,
     member_id: Uuid,
 ) -> Result<(), DbError> {
-    sqlx::query("SELECT set_config('app.member_id', $1, true)")
-        .bind(member_id.to_string())
-        .execute(&mut *conn)
-        .await?;
-    Ok(())
+    // The binder is shared with `scheduled_message` (ADR-0208 D3), so it lives in
+    // `owner_scope`; this name stays for the reminder callers.
+    crate::owner_scope::bind_owner_guc(conn, member_id).await
 }
 
 /// The named message must live in `channel_id` and the caller must currently

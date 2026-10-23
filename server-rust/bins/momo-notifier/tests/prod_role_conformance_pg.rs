@@ -27,7 +27,7 @@
 //! | `a_hosted_work_run_push_and_run_status_trigger_run_as_the_notifier_role` (#3740) | drop `GRANT SELECT, INSERT ON agent_run_event TO momo_notifier` — the migration-128 ledger trigger appends as the invoking role (verified red: `permission denied for table agent_run_event`) |
 //! | `an_approval_audience_is_judged_as_the_production_notifier_role` (ADR-0204 D7, #3928) | drop `GRANT SELECT (workspace_id, member_id, role) ON workspace_membership` — `may_approve_in_tx` reads it for every role-gated card (verified red: `permission denied for table workspace_membership`); or drop the `agent` / `work_host` SELECT the agent-owner and host-owner arms read |
 //! | `the_personal_agent_member_trigger_runs_as_every_role_that_writes_member` (#3591) | drop `GRANT UPDATE ON agent` from a role that can UPDATE `member` (the migration-123 trigger updates `agent` as the invoking role), or add the trigger's table to a lockdown |
-//! | `the_other_runtime_roles_reach_every_table_the_migrations_created` | a new table that `app`/`relay`/`worker` cannot read or write, or a cloud-box lockdown that drifts |
+//! | `the_other_runtime_roles_reach_every_table_the_migrations_created` | a new table that `app`/`relay`/`worker` cannot read or write, or a cloud-box lockdown or a `scheduled_message*` lockdown (ADR-0208 D3: `momo_app` all four verbs, relay/worker/notifier none) that drifts |
 //! | `a_dead_push_token_is_invalidated_by_the_production_notifier_role` (#3930) | drop `GRANT UPDATE (invalidated_at, updated_at) ON push_token TO momo_notifier` — the settle's `UPDATE push_token` dies with `permission denied for table push_token`, and rolls back to its savepoint, so ONLY this suite sees it; widen the grant past those two columns and the denied-write half goes red |
 //! | `closing_a_stream_enqueues_its_candidate_as_every_role_that_writes_a_stream` (ADR-0204 증보 1 D8-a, #3987) | revoke `INSERT` on `outbox` from `momo_app` or `momo_worker` (the stream's closing write enqueues the `push_candidate` as the invoking role — the same privilege the 011 trigger already needs for the opening INSERT), or give the outbox a kind-specific lockdown |
 //!
@@ -929,9 +929,10 @@ async fn the_notifier_role_has_no_delete_and_no_table_it_does_not_name() {
 async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     let db = ProdDb::create().await;
     // `mem_*` tables (#3161), the migration-owned `plugin_registry` (revoked from
-    // momo_app on purpose) and the `cloud_box*` tables (ADR-0197 D10 lockdown, see
-    // below) are the only tables outside the rule; everything else must be readable
-    // and writable by the three ALL-TABLES roles.
+    // momo_app on purpose), the `cloud_box*` tables (ADR-0197 D10 lockdown, see
+    // below) and the `scheduled_message*` tables (ADR-0208 D3 lockdown, see below) are
+    // the only tables outside the rule; everything else must be readable and writable
+    // by the three ALL-TABLES roles.
     let missing: Vec<String> = sqlx::query_scalar(
         "SELECT format('%s:%s:%s', r.rolname, c.relname, p.priv) \
            FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
@@ -940,6 +941,7 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
           WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') \
             AND c.relname NOT LIKE 'mem\\_%' AND c.relname <> 'plugin_registry' \
             AND c.relname NOT LIKE 'cloud\\_box%' \
+            AND c.relname NOT LIKE 'scheduled\\_message%' \
             AND NOT has_table_privilege(r.rolname, c.oid, p.priv) \
           ORDER BY 1",
     )
@@ -963,6 +965,34 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     .fetch_all(&db.su)
     .await
     .expect("cloud box privilege scan");
+    // `scheduled-message-lockdown` (bootstrap_runtime_roles.sql, ADR-0208 D3): the body of a
+    // schedule that has not gone out belongs to its author alone, and the BYPASSRLS roles skip
+    // RLS, so their table privileges are what keeps it from them. `momo_app` keeps **all four**
+    // verbs — the tick and the retention sweep DELETE as `momo_app` (the cloud-box block
+    // revokes DELETE because a box row is never deleted; this table's rows are).
+    let schedule_drift: Vec<String> = sqlx::query_scalar(
+        "SELECT format('%s:%s:%s has=%s', r.rolname, c.relname, p.priv, \
+                       has_table_privilege(r.rolname, c.oid, p.priv)) \
+           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+           CROSS JOIN (VALUES ('momo_app'), ('momo_relay'), ('momo_worker'), ('momo_notifier')) AS r(rolname) \
+           CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE')) AS p(priv) \
+          WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') \
+            AND c.relname LIKE 'scheduled\\_message%' \
+            AND has_table_privilege(r.rolname, c.oid, p.priv) \
+                IS DISTINCT FROM (r.rolname = 'momo_app') \
+          ORDER BY 1",
+    )
+    .fetch_all(&db.su)
+    .await
+    .expect("scheduled message privilege scan");
+    let sealed_tables: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+          WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') \
+            AND c.relname LIKE 'scheduled\\_message%'",
+    )
+    .fetch_one(&db.su)
+    .await
+    .expect("scheduled message table count");
     db.finish().await;
     assert!(
         missing.is_empty(),
@@ -971,6 +1001,14 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     assert!(
         box_drift.is_empty(),
         "cloud_box* privileges drifted from the lockdown: {box_drift:?}"
+    );
+    assert_eq!(
+        sealed_tables, 2,
+        "the scan must actually see both scheduled_message tables, or it proves nothing"
+    );
+    assert!(
+        schedule_drift.is_empty(),
+        "scheduled_message* privileges drifted from the lockdown: {schedule_drift:?}"
     );
 }
 
