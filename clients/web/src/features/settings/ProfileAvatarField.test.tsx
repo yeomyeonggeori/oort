@@ -121,6 +121,8 @@ function mount(options: { member?: RosterMember; offline?: boolean; onBusyChange
 }
 
 const node = (id: string) => document.body.querySelector<HTMLElement>(`[data-testid="${id}"]`);
+// 편집기 청크의 첫 `import()` 는 메시지 행·이모지 패널까지 모듈 그래프를 처음 변환하므로, 부하가 있으면 1초(기본)를 넘는다.
+const SLOW = { timeout: 20_000 };
 const entry = () => node("profile-avatar-change") as HTMLButtonElement;
 
 async function settle(rounds = 3) {
@@ -135,7 +137,7 @@ async function openEditor() {
   await act(async () => {
     entry().click();
   });
-  await vi.waitFor(() => expect(node("avatar-editor-dialog")).not.toBeNull());
+  await vi.waitFor(() => expect(node("avatar-editor-dialog")).not.toBeNull(), SLOW);
   await settle();
 }
 
@@ -171,9 +173,9 @@ describe("ProfileAvatarField: 여는 자리", () => {
     await act(async () => {
       node("avatar-editor-cancel")!.click();
     });
-    await vi.waitFor(() => expect(node("avatar-editor-dialog")).toBeNull());
+    await vi.waitFor(() => expect(node("avatar-editor-dialog")).toBeNull(), SLOW);
     // Radix 는 초점을 언마운트 뒤 한 틱 늦게 돌려준다.
-    await vi.waitFor(() => expect(document.activeElement).toBe(entry()));
+    await vi.waitFor(() => expect(document.activeElement).toBe(entry()), SLOW);
   });
 
   it("열 때마다 새 초안이다: 앞에서 고른 사진이 다음 번에 남아 있지 않다", async () => {
@@ -184,7 +186,7 @@ describe("ProfileAvatarField: 여는 자리", () => {
     await act(async () => {
       node("avatar-editor-cancel")!.click();
     });
-    await vi.waitFor(() => expect(node("avatar-editor-dialog")).toBeNull());
+    await vi.waitFor(() => expect(node("avatar-editor-dialog")).toBeNull(), SLOW);
     await openEditor();
     expect(node("avatar-editor-preview")?.getAttribute("data-source")).toBe("current");
     expect(upload).not.toHaveBeenCalled();
@@ -209,7 +211,7 @@ describe("ProfileAvatarField: 여는 자리", () => {
     await act(async () => {
       node("avatar-editor-save")!.click();
     });
-    await vi.waitFor(() => expect(node("avatar-editor-dialog")).toBeNull());
+    await vi.waitFor(() => expect(node("avatar-editor-dialog")).toBeNull(), SLOW);
     expect(node("profile-avatar-status")?.textContent).toBe("프로필 사진을 올렸어요.");
     await act(async () => {
       entry().click();
@@ -244,5 +246,20 @@ describe("ProfileAvatarField: 여는 자리", () => {
     mount({ member: me(`/v1/workspaces/${WS}/members/${MEMBER_ID}/avatar/content?v=m`) });
     await openEditor();
     expect(node("avatar-editor-reset")).not.toBeNull();
+  });
+
+  it("되돌리기가 성공해도 초점은 <body> 가 아니라 이 단추로 돌아오고, 끝난 한 줄을 말한다", async () => {
+    mount({ member: me(`/v1/workspaces/${WS}/members/${MEMBER_ID}/avatar/content?v=m`) });
+    await openEditor();
+    await act(async () => {
+      node("avatar-editor-reset")!.click();
+    });
+    await act(async () => {
+      node("avatar-editor-reset-confirm")!.click();
+    });
+    await vi.waitFor(() => expect(node("avatar-editor-dialog")).toBeNull(), SLOW);
+    expect(removeMyAvatar).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(document.activeElement).toBe(entry()), SLOW);
+    expect(node("profile-avatar-status")?.textContent).toBe("기본 아바타로 돌아갔어요.");
   });
 });

@@ -524,12 +524,14 @@ const tid = (host: HTMLElement, id: string) =>
 
 // 편집기는 지연 청크 + 대화상자(포털)다. 버튼을 누르면 청크를 받고 나서 body 에 선다.
 const editorNode = (id: string) => document.body.querySelector<HTMLElement>(`[data-testid="${id}"]`);
+// 편집기 청크의 첫 `import()` 는 모듈 그래프를 처음 변환하므로 부하가 있으면 기본 1초를 넘는다.
+const SLOW = { timeout: 20_000 };
 
 async function openEditor(host: HTMLElement) {
   await act(async () => {
     tid(host, "profile-avatar-change")!.click();
   });
-  await vi.waitFor(() => expect(editorNode("avatar-editor-dialog")).not.toBeNull());
+  await vi.waitFor(() => expect(editorNode("avatar-editor-dialog")).not.toBeNull(), SLOW);
 }
 
 async function pickPng() {
@@ -593,18 +595,18 @@ describe("ProfileSection 한 페이지", () => {
     const spy = vi.spyOn(client, "invalidateQueries");
     // 손잡이는 진짜 단추를 대신 누른다: 편집기가 열린다.
     act(() => (tid(host, "profile-hero-camera") as HTMLButtonElement).click());
-    await vi.waitFor(() => expect(editorNode("avatar-editor-dialog")).not.toBeNull());
+    await vi.waitFor(() => expect(editorNode("avatar-editor-dialog")).not.toBeNull(), SLOW);
     await act(async () => {
       editorNode("avatar-editor-cancel")!.click();
     });
-    await vi.waitFor(() => expect(editorNode("avatar-editor-dialog")).toBeNull());
+    await vi.waitFor(() => expect(editorNode("avatar-editor-dialog")).toBeNull(), SLOW);
     await openEditor(host);
     await pickPng();
     await saveAvatar();
-    await vi.waitFor(() => expect(uploadAvatar).toHaveBeenCalledTimes(1));
-    await vi.waitFor(() => expect(spy).toHaveBeenCalledWith({ queryKey: ["roster", WS] }));
+    await vi.waitFor(() => expect(uploadAvatar).toHaveBeenCalledTimes(1), SLOW);
+    await vi.waitFor(() => expect(spy).toHaveBeenCalledWith({ queryKey: ["roster", WS] }), SLOW);
     // 끝나면 편집기가 닫히고 히어로의 상태 줄이 한 번 말한다.
-    await vi.waitFor(() => expect(editorNode("avatar-editor-dialog")).toBeNull());
+    await vi.waitFor(() => expect(editorNode("avatar-editor-dialog")).toBeNull(), SLOW);
     expect(tid(host, "profile-avatar-status")?.textContent).toBe("프로필 사진을 올렸어요.");
   });
 
@@ -626,8 +628,8 @@ describe("ProfileSection 한 페이지", () => {
     await act(async () => {
       editorNode("avatar-editor-reset-confirm")!.click();
     });
-    await vi.waitFor(() => expect(removeMyAvatar).toHaveBeenCalledTimes(1));
-    await vi.waitFor(() => expect(tid(host, "profile-avatar-status")?.textContent).toBe("기본 아바타로 돌아갔어요."));
+    await vi.waitFor(() => expect(removeMyAvatar).toHaveBeenCalledTimes(1), SLOW);
+    await vi.waitFor(() => expect(tid(host, "profile-avatar-status")?.textContent).toBe("기본 아바타로 돌아갔어요."), SLOW);
   });
 
   it("오프라인이면 이름·핸들·카메라가 잠기고 아바타 바꾸기는 편집기를 열지 않으며 이유를 한 번 말한다", async () => {
@@ -681,7 +683,7 @@ describe("ProfileSection 한 페이지", () => {
     await openEditor(host);
     await pickPng();
     await saveAvatar();
-    await vi.waitFor(() => expect(camera.disabled).toBe(true));
+    await vi.waitFor(() => expect(camera.disabled).toBe(true), SLOW);
     const button = tid(host, "profile-avatar-change") as HTMLButtonElement;
     const click = vi.spyOn(button, "click");
     act(() => camera.click());
@@ -701,6 +703,6 @@ describe("ProfileSection 한 페이지", () => {
     });
     await vi.waitFor(() => {
       expect((tid(host, "profile-hero-camera") as HTMLButtonElement).disabled).toBe(true);
-    });
+    }, SLOW);
   });
 });
