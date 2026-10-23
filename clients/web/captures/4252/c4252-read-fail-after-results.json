@@ -1,0 +1,86 @@
+[
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "F0 DM 구역이 접지 못한 이유를 말한다",
+  "ok": true,
+  "detail": "안 읽음 표시를 불러오지 못해 나간 멤버와의 대화를 접지 못했어요.\n다시 시도"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "F1 「다시 시도」 버튼이 있다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "F2 접지 않는다: 나간 멤버 넷이 모두 목록에 있다(안 읽은 것이 있는지 모를 때 숨기는 쪽이 최악이다)",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "F3 접힌 줄이 없다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "F0 DM 구역이 접지 못한 이유를 말한다",
+  "ok": true,
+  "detail": "안 읽음 표시를 불러오지 못해 나간 멤버와의 대화를 접지 못했어요.\n다시 시도"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "F1 「다시 시도」 버튼이 있다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "F2 접지 않는다: 나간 멤버 넷이 모두 목록에 있다(안 읽은 것이 있는지 모를 때 숨기는 쪽이 최악이다)",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "F3 접힌 줄이 없다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "F0 DM 구역이 접지 못한 이유를 말한다",
+  "ok": true,
+  "detail": "안 읽음 표시를 불러오지 못해 나간 멤버와의 대화를 접지 못했어요.\n다시 시도"
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "F1 「다시 시도」 버튼이 있다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "F2 접지 않는다: 나간 멤버 넷이 모두 목록에 있다(안 읽은 것이 있는지 모를 때 숨기는 쪽이 최악이다)",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "F3 접힌 줄이 없다",
+  "ok": true,
+  "detail": null
+ }
+]
