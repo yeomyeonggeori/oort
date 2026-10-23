@@ -31,6 +31,17 @@ describe("키 차단 경고 문구 (#2942, review R2 M-2 · R3 M-3)", () => {
     );
   });
 
+  it("예약 경로는 첫 문장만 「예약하지 않았어요」로 바꾸고 나머지는 그대로 쓴다 (ADR-0208 UI 명세 0.4)", () => {
+    const lead = "키는 채팅에 붙여 넣지 마세요. 이 메시지는 예약하지 않았어요.";
+    const channel = render({ id: "a", testId: "a", cardAvailable: true, lead });
+    expect(channel).toContain(lead);
+    expect(channel).not.toContain("보내지 않았어요");
+    expect(channel).toContain("/연결 팀키로 카드의 입력 칸");
+    const thread = render({ id: "a", testId: "a", cardAvailable: true, surface: "thread", lead });
+    expect(thread).toContain(lead);
+    expect(thread).toContain("AI 화면의 입력 칸");
+  });
+
   it("스레드: `/` 명령을 권하지 않는다(그 입력창에서는 평문 답글이 된다)", () => {
     const text = render({ id: "a", testId: "a", cardAvailable: true, surface: "thread" });
     expect(text).not.toContain("/연결");

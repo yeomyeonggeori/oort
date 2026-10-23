@@ -142,6 +142,19 @@ describe("scheduled copy table (UI spec section 3)", () => {
   });
 });
 
+describe("copy failure sentence (not in the spec table, design-review #4215 round 2 M5)", () => {
+  it("says it in two haeyo lines: the reason, then where the whole text can be copied from", () => {
+    expect(SCHEDULED_COPY.list.copyFailed).toEqual({
+      reason: "복사하지 못했어요",
+      next: "고치기에서 글을 열어 복사할 수 있어요",
+    });
+  });
+
+  it("names an action that exists: 고치기 is the row action that opens the whole text", () => {
+    expect(SCHEDULED_COPY.list.copyFailed.next).toContain(SCHEDULED_COPY.action.edit);
+  });
+});
+
 describe("failure reason sentences (UI spec 3.2)", () => {
   it("names all eight reasons with the spec's reason line and next-action line", () => {
     expect(failureLines("sessions_ended", "채널")).toEqual({

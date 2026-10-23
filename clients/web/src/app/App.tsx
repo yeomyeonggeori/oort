@@ -31,6 +31,7 @@ import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
 import { ChatShell } from "@/features/chat/ChatShell";
 import { InboxRoute } from "@/features/inbox/InboxRoute";
 import { DraftsRoute } from "@/features/drafts/DraftsRoute";
+import { ScheduledRoute } from "@/features/scheduled/ScheduledRoute";
 import { ActivityRoute } from "@/features/activity/ActivityRoute";
 import { DirectoryRoute } from "@/features/directory/DirectoryRoute";
 import { SettingsRoute } from "@/features/settings/SettingsRoute";
@@ -354,6 +355,7 @@ export function App() {
           <Route path="c/:channelId" element={<ChatShell />} />
           <Route path="inbox" element={<InboxRoute />} />
           <Route path="drafts" element={<DraftsRoute />} />
+          <Route path="scheduled" element={<ScheduledRoute />} />
           <Route path="activity" element={<ActivityRoute />} />
           <Route path="directory" element={<DirectoryRoute />} />
           <Route path="agents" element={<AgentHubRoute />} />
