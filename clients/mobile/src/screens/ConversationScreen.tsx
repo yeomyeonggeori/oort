@@ -87,7 +87,8 @@ import {
   type ComposerSendOptions,
 } from '../features/conversation/Composer';
 import {channelDraftKey} from '../features/conversation/drafts';
-import {TypingBar} from '../features/conversation/TypingBar';
+import {CONV} from '../features/conversation/convDesign';
+import {TYPING_OVERHANG, TypingBar} from '../features/conversation/TypingBar';
 import {
   markTyping,
   resetTyping,
@@ -1812,6 +1813,9 @@ export default function ConversationScreen({
               onJumpMissed={onJumpMissed}
               onJumpLanded={clearJumpNotice}
               onReaderTookList={onReaderTookList}
+              // 목록 꼬리는 0 이다(#4264): 도크 맨 위의 「작성 중」 예약 줄이 그 자리를 지켜서, 꼬리까지 두면
+              // 마지막 행 → 알약 간격이 같은 공기를 두 번 센다. 근거와 산수는 `CONV.listPillGap`.
+              tailGap={CONV.conversationTail}
               // 위 「안읽음으로」·아래 「최신으로」 (#1892). 위 필의 N 은 위의
               // 동결 스냅샷(`unreadCount`) 그대로다 — 구분선과 같은 수.
               jumpPills
@@ -2032,6 +2036,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    */
   stopOutcome: {
     paddingHorizontal: SAFE_GUTTER,
+    // 위의 「작성 중」 줄 상자가 걸친 몫을 받는다(`TypingBar` 의 `TYPING_OVERHANG`) — 안 받으면 두 글줄이 겹친다.
+    paddingTop: TYPING_OVERHANG,
     paddingBottom: space.xs,
     fontSize: font.meta,
     color: color.textMuted,
