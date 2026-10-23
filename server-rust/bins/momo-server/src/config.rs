@@ -95,6 +95,8 @@ pub struct Config {
     /// Mention→run routing knobs (B5.2). Always on; only the history window is
     /// configurable.
     pub mentions: MentionSettings,
+    /// ADR-0208 D15 — the scheduled-message tick: on by default, four optional knobs.
+    pub scheduler: SchedulerSettings,
     /// ADR-0146 개정 2026-09-28 (R2) — the server instance id signed statements
     /// echo, and whether a member-scoped host registration must carry its root
     /// key's `host_register` signature. **Off by default** (D-11 / Q11: the R2
@@ -1217,6 +1219,94 @@ impl MentionSettings {
             ),
             hosted_inplace_grant_enabled: hosted_inplace_grant_switch_on(
                 env("MOMO_HOSTED_INPLACE_GRANT_ENABLED").as_deref(),
+            ),
+        }
+    }
+}
+
+/// ADR-0208 D15 (#4214) — the scheduled-message tick's four optional knobs. Every one has a
+/// default and none is required, so an instance that configured nothing runs the scheduler
+/// exactly as the ADR describes.
+///
+/// `MOMO_SCHEDULER_ENABLED=0` is a kill switch with a **visible** off state: the tick does not
+/// run and creating, editing or sending-now a schedule answers 503 `scheduler_disabled`
+/// (listing and deleting still work), so a schedule is never silently accepted by a server that
+/// will not send it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SchedulerSettings {
+    /// `MOMO_SCHEDULER_ENABLED` — default on. See [`parse_scheduler_enabled`].
+    pub enabled: bool,
+    /// `MOMO_SCHEDULER_TICK_MS` — how often the tick looks for due schedules. Default 5000, floor 1000.
+    pub tick_ms: u64,
+    /// `MOMO_SCHEDULER_BATCH` — due rows taken per look. Default 100, 1..=200 (the definer function's own cap).
+    pub batch: i32,
+    /// `MOMO_SCHEDULER_GRACE_SECONDS` — how late a schedule may still be sent after its time (a rolling
+    /// deploy, a restart, a short outage). Default 3600, 300..=86400. Past it the row is closed `failed`
+    /// and the author decides (ADR-0208 D7).
+    pub grace_seconds: i64,
+}
+
+impl Default for SchedulerSettings {
+    fn default() -> Self {
+        SchedulerSettings {
+            enabled: true,
+            tick_ms: SCHEDULER_TICK_MS_DEFAULT,
+            batch: SCHEDULER_BATCH_DEFAULT,
+            grace_seconds: SCHEDULER_GRACE_SECONDS_DEFAULT,
+        }
+    }
+}
+
+pub const SCHEDULER_TICK_MS_DEFAULT: u64 = 5000;
+pub const SCHEDULER_TICK_MS_FLOOR: u64 = 1000;
+pub const SCHEDULER_BATCH_DEFAULT: i32 = 100;
+pub const SCHEDULER_BATCH_MAX: i32 = 200;
+pub const SCHEDULER_GRACE_SECONDS_DEFAULT: i64 = 3600;
+pub const SCHEDULER_GRACE_SECONDS_MIN: i64 = 300;
+pub const SCHEDULER_GRACE_SECONDS_MAX: i64 = 86400;
+
+/// Unset or blank = on; an explicit `1`/`true`/`on`/`yes` (any case) = on; **anything else = off**.
+/// Off is the fail-closed side here — it is visible (503) rather than silent — so a value that is
+/// not clearly "on" does not keep accepting schedules the tick may not send.
+pub fn parse_scheduler_enabled(raw: Option<&str>) -> bool {
+    match raw.map(str::trim).filter(|value| !value.is_empty()) {
+        None => true,
+        Some(value) => ["1", "true", "on", "yes"]
+            .iter()
+            .any(|on| value.eq_ignore_ascii_case(on)),
+    }
+}
+
+/// Unparsable falls back to the default (a typo in a knob must not stop the tick); below the floor is raised to it.
+pub fn parse_scheduler_tick_ms(raw: Option<&str>) -> u64 {
+    raw.and_then(|value| value.trim().parse::<u64>().ok())
+        .map_or(SCHEDULER_TICK_MS_DEFAULT, |ms| {
+            ms.max(SCHEDULER_TICK_MS_FLOOR)
+        })
+}
+
+pub fn parse_scheduler_batch(raw: Option<&str>) -> i32 {
+    raw.and_then(|value| value.trim().parse::<i32>().ok())
+        .map_or(SCHEDULER_BATCH_DEFAULT, |batch| {
+            batch.clamp(1, SCHEDULER_BATCH_MAX)
+        })
+}
+
+pub fn parse_scheduler_grace_seconds(raw: Option<&str>) -> i64 {
+    raw.and_then(|value| value.trim().parse::<i64>().ok())
+        .map_or(SCHEDULER_GRACE_SECONDS_DEFAULT, |seconds| {
+            seconds.clamp(SCHEDULER_GRACE_SECONDS_MIN, SCHEDULER_GRACE_SECONDS_MAX)
+        })
+}
+
+impl SchedulerSettings {
+    pub fn from_env() -> SchedulerSettings {
+        SchedulerSettings {
+            enabled: parse_scheduler_enabled(env("MOMO_SCHEDULER_ENABLED").as_deref()),
+            tick_ms: parse_scheduler_tick_ms(env("MOMO_SCHEDULER_TICK_MS").as_deref()),
+            batch: parse_scheduler_batch(env("MOMO_SCHEDULER_BATCH").as_deref()),
+            grace_seconds: parse_scheduler_grace_seconds(
+                env("MOMO_SCHEDULER_GRACE_SECONDS").as_deref(),
             ),
         }
     }
@@ -2386,6 +2476,7 @@ impl Config {
             rate_limit: RateLimitConfig::from_env(),
             agent_port: AgentPortConfig::from_env()?,
             mentions: MentionSettings::from_env(),
+            scheduler: SchedulerSettings::from_env(),
             device_keys,
             cloud_box: CloudBoxConfig::from_env(),
             // ADR-0149: never fatal. An instance that was not given the
@@ -2600,6 +2691,71 @@ mod tests {
         ] {
             assert!(!hosted_inplace_grant_switch_on(off), "{off:?}");
         }
+    }
+
+    /// ADR-0208 D15 — four optional knobs, every one with a default, none required.
+    #[test]
+    fn the_scheduler_knobs_default_to_the_adr_and_clamp_to_its_ranges() {
+        let default = SchedulerSettings::default();
+        assert!(default.enabled);
+        assert_eq!(default.tick_ms, 5000);
+        assert_eq!(default.batch, 100);
+        assert_eq!(default.grace_seconds, 3600);
+
+        // Unset / blank = on; "0" is how an operator turns it off; a value that is not
+        // clearly "on" is off (visible as a 503, never a silent accept).
+        for on in [
+            None,
+            Some(""),
+            Some("  "),
+            Some("1"),
+            Some("true"),
+            Some("TRUE"),
+            Some("on"),
+            Some("Yes"),
+        ] {
+            assert!(parse_scheduler_enabled(on), "{on:?}");
+        }
+        for off in [
+            Some("0"),
+            Some("false"),
+            Some("off"),
+            Some("no"),
+            Some("disabled"),
+            Some("2"),
+        ] {
+            assert!(!parse_scheduler_enabled(off), "{off:?}");
+        }
+
+        assert_eq!(parse_scheduler_tick_ms(None), 5000);
+        assert_eq!(parse_scheduler_tick_ms(Some("250")), 1000, "floor 1 s");
+        assert_eq!(parse_scheduler_tick_ms(Some("1000")), 1000);
+        assert_eq!(parse_scheduler_tick_ms(Some("12000")), 12000);
+        assert_eq!(
+            parse_scheduler_tick_ms(Some("soon")),
+            5000,
+            "a typo keeps the default"
+        );
+
+        assert_eq!(parse_scheduler_batch(None), 100);
+        assert_eq!(parse_scheduler_batch(Some("0")), 1);
+        assert_eq!(parse_scheduler_batch(Some("500")), 200);
+        assert_eq!(parse_scheduler_batch(Some("64")), 64);
+        assert_eq!(parse_scheduler_batch(Some("many")), 100);
+
+        assert_eq!(parse_scheduler_grace_seconds(None), 3600);
+        assert_eq!(
+            parse_scheduler_grace_seconds(Some("60")),
+            300,
+            "five minutes at least"
+        );
+        assert_eq!(
+            parse_scheduler_grace_seconds(Some("999999")),
+            86400,
+            "a day at most"
+        );
+        assert_eq!(parse_scheduler_grace_seconds(Some("1800")), 1800);
+        assert_eq!(parse_scheduler_grace_seconds(Some("an hour")), 3600);
     }
 
     /// #3022: the requirement is off by default, and turning it on without the

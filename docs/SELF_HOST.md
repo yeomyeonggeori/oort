@@ -806,6 +806,51 @@ Respond in this order:
 
 Installing on selected repositories only keeps step 1's blast radius small.
 
+## Scheduled messages (ADR-0208)
+
+A member can schedule a message for later; the **server** sends it at that time
+even when none of their devices is on. The sender is a tick inside the `api`
+process (one more loop beside the web server, on its own two database
+connections, as the same `momo_app` role the requests use), so there is no extra
+service to run and no extra credential. Several `api` replicas are safe: a row
+is locked while it is sent, and every send goes through the same function a
+normal message does, so a scheduled `@agent` mention starts the same run it
+would have started live.
+
+Every key is optional. Put the ones you want in `infra/rust/local.secrets.env`:
+
+| key | default | meaning |
+|---|---|---|
+| `MOMO_SCHEDULER_ENABLED` | on | Unset, blank, `1`, `true`, `on` or `yes` keeps it on; any other value (use `0`) turns it off. Off is **visible**: creating, editing or sending-now a schedule answers 503 `scheduler_disabled`, so nothing is accepted that will not be sent. Listing and deleting still work. |
+| `MOMO_SCHEDULER_TICK_MS` | 5000 | How often the tick looks for due schedules (at least 1000). A schedule goes out within about 30 seconds of its time; that is a target, not a promise. |
+| `MOMO_SCHEDULER_BATCH` | 100 | Due schedules taken per look (1 to 200). One workspace never takes more than 25 of them, so a busy tenant cannot starve another. |
+| `MOMO_SCHEDULER_GRACE_SECONDS` | 3600 | How late a schedule may still go out after its time (a rolling restart, a short outage): 300 to 86400. Past it the schedule is **not** sent; it is closed as failed (`missed`, or `send_error` when an attempt was made) and its author chooses to send it now, set a new time, or delete it. |
+
+What an operator should know:
+
+- **Restart the api to change a key.** The values are read at boot.
+- **A schedule is the author's.** Its text is readable by the author only, not by
+  workspace owners or admins, and is erased when the schedule is sent or
+  cancelled. Sent and cancelled rows are kept as body-less records for 7 days,
+  failed ones (with their text, so the author can re-send) for 30.
+- **A sign-in that ends holds what it armed.** After a password change or reset,
+  a suspension, a device unlink or a refresh-token reuse that ends the sign-in
+  (a linked phone's always; a password sign-in's only when
+  `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS=true`), the schedules that sign-in wrote
+  are held as failed (`sessions_ended`) instead of going out; their author reads
+  them and re-arms or sends them. A plain logout holds nothing.
+  Removing a member or a member leaving cancels their schedules.
+- **`oort doctor` checks it.** `stack.scheduler` fails (major) when a schedule is
+  more than 5 minutes past its time and still pending — the tick is not running
+  or cannot close it — and says so when the schedule is past the grace window.
+  It reports **info** for schedules the server missed in the last 24 hours. It
+  counts across workspaces, so it needs the owner connection (`MIGRATE_DATABASE_URL`
+  on a platform install); a connection that cannot skip row-level security is
+  reported as unknown, never as a pass.
+- **Push is not part of this slice.** A schedule that fails shows up in the app
+  (list, banner, sidebar badge) the next time it is open; a push for it is a
+  separate decision (ADR-0208 D8).
+
 ## Stop · wipe
 
 The argument bundle from step 3 is long, so from here it is written as one

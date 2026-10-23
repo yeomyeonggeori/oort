@@ -127,7 +127,6 @@ tags:
     description: >
       ADR-0208 scheduled messages. Human-only, owner-scoped. The server keeps the
       message and sends it itself at `sendAtMs` through the `sendMessage` path.
-      Contract draft: served from #4214, until then these routes answer 404.
   - name: memory
     description: >
       ADR-0196 team memory v2 — channel/thread digests with evidence links,
@@ -4747,9 +4746,8 @@ paths:
       operationId: createScheduledMessage
       summary: Schedule a message to be sent later to a channel, DM or thread.
       description: >
-        ADR-0208 contract draft. The server does not serve this route until
-        #4214 lands; until then it answers 404. Human bearer only (an agent
-        bearer is 403). The caller must be a current member of the channel.
+        ADR-0208. Human bearer only (an agent bearer is 403). The caller must be
+        a current member of the channel.
         The server keeps the message and sends it itself at `sendAtMs`, even
         when none of the caller's devices is on, through the same send path as
         `sendMessage`: mentions, agent calls, notifications and the inbox behave
@@ -4768,7 +4766,9 @@ paths:
         different body or time under a known id still returns the first row (use a
         new id when the request changes). At most 50 `pending` rows per member per
         workspace (409 `pending_limit_reached`). 503 `scheduler_disabled` when
-        the operator turned the scheduler off.
+        the operator turned the scheduler off or the server could not check its
+        database role at boot (see the api log). 409 `scheduled_busy` when the
+        request waited more than 3 seconds for a lock or lost a lock race.
       security:
         - bearerAuth: []
       parameters:
@@ -4814,7 +4814,9 @@ paths:
         "409":
           description: >
             `pending_limit_reached` (50 waiting), `attachment_reserved` (another
-            schedule holds the file), or an attachment that is not complete or is
+            schedule holds the file), `scheduled_busy` (the request waited more
+            than 3 seconds for a lock or lost a lock race; retry with the same
+            `clientRequestId`), or an attachment that is not complete or is
             already linked to a message.
           content:
             application/json:
@@ -4823,7 +4825,7 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
         "503":
-          description: "`scheduler_disabled`: the operator turned the scheduler off, so nothing can be scheduled."
+          description: "`scheduler_disabled`: the operator turned the scheduler off, or the server refused or could not yet check its database role at boot (see the api log); nothing can be scheduled until then."
           content:
             application/json:
               schema:
@@ -4835,7 +4837,7 @@ paths:
       operationId: listScheduledMessages
       summary: List the caller's own scheduled messages, soonest first.
       description: >
-        ADR-0208 contract draft (404 until #4214 lands). Owner-scoped: only the
+        ADR-0208. Owner-scoped: only the
         caller's rows, never another member's, not even for a workspace owner.
         `status=open` (default) is `pending` plus `failed`. `sent` and
         `cancelled` rows are never listed: they are body-less tombstones kept for
@@ -4901,7 +4903,7 @@ paths:
       operationId: updateScheduledMessage
       summary: Change the text or the send time of a scheduled message.
       description: >
-        ADR-0208 contract draft (404 until #4214 lands). Body `{body?, sendAtMs?}`,
+        ADR-0208. Body `{body?, sendAtMs?}`,
         at least one. Allowed on a `pending` row only while more than 30 seconds
         remain before `sendAtMs` (`editableUntilMs` says when it stops): inside
         the last 30 seconds it is 409 `scheduled_too_late`. `sendAtMs` follows
@@ -4959,9 +4961,9 @@ paths:
         "409":
           description: >
             `scheduled_too_late` (last 30 seconds), `scheduled_already_sent`,
-            `scheduled_busy` (the row was locked by a send in progress for more
-            than 3 seconds; retry), or `pending_limit_reached` when re-arming a
-            failed row.
+            `scheduled_busy` (the row was locked by a send or a sign-in ending for
+            more than 3 seconds, or the request lost a lock race; retry), or
+            `pending_limit_reached` when re-arming a failed row.
           content:
             application/json:
               schema:
@@ -4969,7 +4971,7 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
         "503":
-          description: "`scheduler_disabled`: the operator turned the scheduler off, so a time cannot be set."
+          description: "`scheduler_disabled`: the operator turned the scheduler off, or the server refused or could not yet check its database role at boot (see the api log); a time cannot be set until then."
           content:
             application/json:
               schema:
@@ -4979,7 +4981,7 @@ paths:
       operationId: deleteScheduledMessage
       summary: Cancel a scheduled message so it is never sent.
       description: >
-        ADR-0208 contract draft (404 until #4214 lands). Allowed on `pending` and
+        ADR-0208. Allowed on `pending` and
         `failed` rows, up to the moment the row is sent, including the last 30
         seconds: the row lock decides a race, so either the cancel wins and
         nothing is sent, or the send wins and this is 409
@@ -5019,7 +5021,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: "`scheduled_already_sent` (it went out first) or `scheduled_busy` (a send held the row for more than 3 seconds; retry)."
+          description: "`scheduled_already_sent` (it went out first) or `scheduled_busy` (a send or a sign-in ending held the row for more than 3 seconds, or this request lost a lock race; retry)."
           content:
             application/json:
               schema:
@@ -5033,12 +5035,13 @@ paths:
       operationId: sendScheduledMessageNow
       summary: Send a scheduled message right now.
       description: >
-        ADR-0208 contract draft (404 until #4214 lands). Allowed on `pending` and
+        ADR-0208. Allowed on `pending` and
         `failed` rows. It runs inside this request, through the same send
         function as the scheduler and as `sendMessage`, so the caller gets the
         result at once (`status: sent`, `sentMessageId`). The row lock keeps the
         scheduler out: a row already sent is 409 `scheduled_already_sent`, one
-        locked for more than 3 seconds is 409 `scheduled_busy`. When the send is
+        locked for more than 3 seconds (or a lock race this request lost) is 409
+        `scheduled_busy`. When the send is
         refused (the author left the channel, the thread root is gone, an
         attachment cannot be used) the answer is 409 whose `error.code` is the
         failure reason (`not_member`, `root_unavailable`, `attachment_unavailable`,
@@ -5092,7 +5095,7 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
         "503":
-          description: "`scheduler_disabled`: the operator turned the scheduler off."
+          description: "`scheduler_disabled`: the operator turned the scheduler off, or the server refused or could not yet check its database role at boot (see the api log)."
           content:
             application/json:
               schema:
@@ -12712,7 +12715,22 @@ components:
                 `device_key_not_endorsable`, `device_key_already_registered`,
                 `session_lineage_ended`, `device_root_password_required`,
                 `device_root_linked_session`, `host_register_replayed`,
-                `instance_id_unconfigured`.
+                `instance_id_unconfigured`; ADR-0208 (#4214, scheduled
+                messages): 400 `send_at_too_soon` (less than 60 seconds ahead,
+                the past included), `send_at_too_far` (beyond 120 days),
+                `empty_message` (neither text nor an attachment); 409
+                `pending_limit_reached` (50 waiting), `attachment_reserved`
+                (another schedule holds the file), `scheduled_too_late` (an edit
+                inside the last 30 seconds), `scheduled_already_sent`,
+                `scheduled_busy` (a row or the session was locked for more than 3
+                seconds, or the request lost a lock race, for example with a
+                sign-in ending; retry); 503 `scheduler_disabled` (the operator
+                turned the scheduler off, or the server refused or could not yet
+                check its database role at boot); and, as the code of a refused
+                send-now (409),
+                the failure reason that the row now carries: `author_inactive`,
+                `not_member`, `root_unavailable`, `attachment_unavailable`,
+                `send_error`, `not_allowed`.
 
     # ---- Memory Plane (ADR-0129 / MOMO-526) ---------------------------------
     MemoryScope:
