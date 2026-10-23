@@ -5,11 +5,13 @@ import {
   fireEvent,
   render,
   screen,
+  within,
 } from '@testing-library/react-native';
 import React from 'react';
 import {
   AccessibilityInfo,
   Animated,
+  View,
   type NativeTouchEvent,
 } from 'react-native';
 
@@ -283,11 +285,19 @@ describe('① 단추 띠는 안전 영역 안에 선다', () => {
     }
   });
 
-  it('인셋은 Modal 안의 SafeAreaProvider 가 준다 — Modal 은 앱 루트와 다른 네이티브 계층이다', async () => {
-    // 대역은 SafeAreaProvider 를 투명하게 지나가므로 존재만 본다: Modal 의 자식이 곧 뷰어 뿌리다.
+  it('인셋은 Modal **안의** SafeAreaProvider 가 준다 — Modal 은 앱 루트와 다른 네이티브 계층이다', async () => {
+    // 대역은 SafeAreaProvider 를 투명하게 지나가므로, 눈에 보이는 상자로 바꿔 자리를 본다:
+    // 제공자는 Modal 의 자식이고, 뷰어 뿌리는 그 제공자의 자식이다. 제공자를 걷어내면 빨갛다.
+    const safeArea = require('react-native-safe-area-context');
+    jest
+      .spyOn(safeArea, 'SafeAreaProvider')
+      .mockImplementation(({ children }: { children: React.ReactNode }) => (
+        <View testID="viewer-safe-area-provider">{children}</View>
+      ));
     await mount();
-    expect(screen.getByTestId('attachment-viewer-modal')).toBeTruthy();
-    expect(screen.getByTestId('attachment-viewer')).toBeTruthy();
+    const modal = screen.getByTestId('attachment-viewer-modal');
+    const provider = within(modal).getByTestId('viewer-safe-area-provider');
+    expect(within(provider).getByTestId('attachment-viewer')).toBeTruthy();
   });
 });
 
