@@ -1,0 +1,60 @@
+appId: app.momo.ios
+name: "105-photo-viewer-swipe-capture"
+---
+# 105-photo-viewer-swipe-capture — 뷰어를 아래로 쓸어 닫는다 (#4293).
+#
+# 표면 `-momoMeasure PHOTO-VIEWER-MULTI`(다크) · `LIGHT-PHOTO-VIEWER-MULTI`(라이트)는 사진 세 장짜리
+# 메시지를 세운다(`measure/photoViewer.tsx`). 격자의 가운데 장을 눌러 「2 / 3」으로 연 뒤:
+#
+#   ① 옆으로 넘긴다 — 쓸어 닫기가 가로 페이지 넘김을 훔치지 않는다(「3 / 3」).
+#   ② 모자라게(약 70pt, 느리게) 내렸다 놓는다 — 제자리로 돌아온다(뷰어가 그대로 서 있다).
+#   ③ 충분히(약 400pt) 내렸다 놓는다 — 닫히고 뒤의 대화가 보인다.
+#
+# 끄는 도중의 모양(배경이 옅어지고 사진이 줄어드는 프레임)은 이 흐름이 못 찍는다 — 스크린샷 한 장이
+# 제스처보다 느리다. 같은 흐름을 돌리는 동안 `xcrun simctl io <udid> recordVideo --codec h264 f.mp4` 로
+# 영상을 받고 ffmpeg 로 프레임을 뽑는다(`101-photo-card-capture.yaml` 머리말과 같은 절차).
+#
+#   node clients/mobile/measure/photo-stub.mjs &
+#   xcrun simctl launch <udid> app.momo.ios --args \
+#     -momoMeasure PHOTO-VIEWER-MULTI -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro --udid <udid> test -e SHOT=swipe-dark clients/mobile/maestro/105-photo-viewer-swipe-capture.yaml
+- extendedWaitUntil:
+    visible:
+      id: "attachment-item"
+    timeout: 60000
+- runFlow: subflows/dismiss-dev-logbox.yaml
+- extendedWaitUntil:
+    visible:
+      id: "attachment-preview-image"
+    timeout: 30000
+- takeScreenshot: ${SHOT}-chat
+- tapOn:
+    id: "attachment-item"
+    index: 1
+- extendedWaitUntil:
+    visible:
+      id: "attachment-viewer"
+    timeout: 10000
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-open-2of3
+# ① 가로 페이지 넘김은 그대로다.
+- swipe:
+    start: 85%, 50%
+    end: 15%, 50%
+    duration: 300
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-paged-3of3
+# ② 모자라게 내렸다 놓는다 — 제자리로.
+- swipe:
+    start: 50%, 40%
+    end: 50%, 48%
+    duration: 500
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-short-swipe-stays
+# ③ 충분히 내렸다 놓는다 — 닫힌다.
+- swipe:
+    start: 50%, 30%
+    end: 50%, 75%
+    duration: 400
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-long-swipe-closed

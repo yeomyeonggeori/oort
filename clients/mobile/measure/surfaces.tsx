@@ -187,6 +187,7 @@ import {AppsTailSurface} from './appsTail';
 import {OortLoaderSurface} from './oortLoader';
 import {PhotoCardSurface} from './photoCard';
 import {AttachMenuSurface} from './attachMenu';
+import {PhotoViewerSurface} from './photoViewer';
 import TeamBoardScreen from '../src/screens/TeamBoardScreen';
 import WorkJobsScreen from '../src/screens/WorkJobsScreen';
 import {TeamBoardDetailSheet} from '../src/features/work/teamBoard/TeamBoardDetailSheet';
@@ -2222,6 +2223,11 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   // #4180: 첨부 메뉴(+ 원에서 펼쳐지는 카드). 실제 머리·타임라인·컴포저, 여는 것은 Maestro 의 실제 탭.
   if (name.startsWith('attach-menu')) {
     return <AttachMenuSurface which={name.slice('attach-menu'.length).replace(/^-/, '')} />;
+  }
+
+  // #4293: 사진 뷰어(안전 영역·아래로 쓸어 닫기). 실제 대화에 사진 메시지, 여는 것은 Maestro 의 실제 탭.
+  if (name.startsWith('photo-viewer')) {
+    return <PhotoViewerSurface which={name.slice('photo-viewer'.length).replace(/^-/, '')} />;
   }
 
   switch (name) {
