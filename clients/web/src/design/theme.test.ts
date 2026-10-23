@@ -416,7 +416,9 @@ const FIXTURES: Array<[string, Items]> = [
   ],
   ["v2: 직접 고른 신호색", { [V2_ENTRY]: record({ signal: { custom: hex("9c447c") } }) }],
   ["v2: 틀린 신호색", { [V2_ENTRY]: record({ signal: { custom: hex("9c44") } }) }],
-  ["v2: 카탈로그 참조", { [V2_ENTRY]: record({ theme: "catalog:nord", scheme: "light" }) }],
+  // 두 모드를 가진 카탈로그 테마라 캐시 없이도 부트와 런타임이 같다. 모드가 하나뿐인 테마의 첫 프레임은 아래
+  // 「단일 모드 테마」 절이 따로 잰다(캐시 `mode`가 있으면 같고, 없으면 첫 실행의 기본 모습 한 프레임이 허용된다).
+  ["v2: 카탈로그 참조(쌍)", { [V2_ENTRY]: record({ theme: "catalog:github", scheme: "light" }) }],
   ["v2: 사용자 참조", { [V2_ENTRY]: record({ theme: "user:my-theme-2" }) }],
   ["v2: 문법이 틀린 참조", { [V2_ENTRY]: record({ theme: "catalog:Nord" }) }],
   ["v2: 너무 긴 참조", { [V2_ENTRY]: record({ theme: `catalog:${"a".repeat(41)}` }) }],
@@ -567,23 +569,32 @@ describe("the pre-paint boot script is the runtime rule, executed (ADR-0189 증�
   });
 });
 
-describe("단일 모드 테마: 스토어와 부트가 같은 모드로 못 박는다 (AP-1a AC 8)", () => {
-  const SOLO = "catalog:solo-dark";
-  const lookup: ModesLookup = (ref) => (ref === SOLO ? ["dark"] : null);
+describe("단일 모드 테마: 스토어와 부트가 같은 모드로 못 박는다 (AP-1a AC 8, AP-1b #4188)", () => {
+  // AP-1b: 카탈로그 색인이 진짜 답을 한다. nord는 다크 단독이다(24종 가운데 하나).
+  const SOLO = "catalog:nord";
   const doc = (scheme: string, theme: string = SOLO) => ({ [V2_ENTRY]: record({ scheme, theme }) });
 
   it.each(["system", "light", "dark"])("런타임: 스킴 %s여도 다크 단독 테마는 data-theme=dark", (scheme) => {
-    const { attrs, metas } = snapshot(runRuntime(doc(scheme), lookup));
+    const { attrs, metas } = snapshot(runRuntime(doc(scheme)));
     expect(attrs["data-theme"]).toBe("dark");
     expect(metas.map((m) => m.content)).toEqual([NIGHT, NIGHT]);
   });
 
-  it("런타임: 조회가 없으면(카탈로그 전) 같은 참조도 둘 다로 보고 시스템을 따른다", () => {
-    expect(snapshot(runRuntime(doc("system"))).attrs).not.toHaveProperty("data-theme");
+  it("런타임: 라이트 단독 테마는 스킴이 무엇이든 라이트다", () => {
+    for (const scheme of ["system", "light", "dark"]) {
+      expect(snapshot(runRuntime(doc(scheme, "catalog:snazzy-light"))).attrs["data-theme"], scheme).toBe("light");
+    }
+  });
+
+  it("런타임: 조회를 주지 않으면 카탈로그 색인이 답하고, 주면 그것이 이긴다", () => {
+    expect(snapshot(runRuntime(doc("system"))).attrs["data-theme"]).toBe("dark");
+    expect(snapshot(runRuntime(doc("system"), () => null)).attrs).not.toHaveProperty("data-theme");
   });
 
   it("런타임: 짝 있는 테마와 첫 파티는 단일 모드 규칙을 타지 않는다", () => {
+    const lookup: ModesLookup = (ref) => (ref === SOLO ? ["dark"] : null);
     expect(snapshot(runRuntime(doc("system", "dawnsky"), lookup)).attrs).not.toHaveProperty("data-theme");
+    expect(snapshot(runRuntime(doc("system", "catalog:github"))).attrs).not.toHaveProperty("data-theme");
     expect(snapshot(runRuntime(doc("light", "dawnsky"), () => ["dark"])).attrs["data-theme"]).toBe("light");
   });
 
@@ -594,7 +605,7 @@ describe("단일 모드 테마: 스토어와 부트가 같은 모드로 못 박�
       mode: "dark",
     });
     const booted = snapshot(runBoot({ ...doc("system"), [CACHE_ENTRY]: entry }));
-    const runtime = snapshot(runRuntime(doc("system"), lookup));
+    const runtime = snapshot(runRuntime(doc("system")));
     expect(booted.attrs).toEqual(runtime.attrs);
     expect(booted.metas).toEqual(runtime.metas);
     expect(booted.attrs["data-theme"]).toBe("dark");
@@ -606,6 +617,25 @@ describe("단일 모드 테마: 스토어와 부트가 같은 모드로 못 박�
       vars: { "--ink": hex("d8dee9") },
     });
     expect(snapshot(runBoot({ ...doc("system"), [CACHE_ENTRY]: entry })).attrs).not.toHaveProperty("data-theme");
+  });
+
+  it("허용된 어긋남: 카탈로그에 없는 catalog: 참조는 부트가 문법만 보고 런타임이 멤버십까지 본다 (색은 둘 다 기본이다)", () => {
+    // 부트는 카탈로그를 모른다(씨앗 표는 지연 청크). 지워졌거나 미래 버전이 쓴 id는 부트가 `derived`로 찍지만 변수를
+    // 꽂지 않으므로(캐시 키가 맞지 않는다) 색은 기본이고, 앱이 올라오면 런타임이 새벽하늘로 읽는다.
+    const unknown = doc("system", "catalog:solo-dark");
+    const booted = snapshot(runBoot(unknown));
+    const runtime = snapshot(runRuntime(unknown));
+    expect(booted.attrs["data-palette"]).toBe("derived");
+    expect(runtime.attrs["data-palette"]).toBe("dawnsky");
+    expect(booted.vars).toEqual({});
+    expect(runtime.vars).toEqual({});
+  });
+
+  it("허용된 어긋남: 캐시 없이 다크 단독 테마를 처음 여는 한 프레임은 부트가 못 박지 못한다 (청사진 §5.2-i, design-review N-1)", () => {
+    // 부트는 카탈로그를 모르므로 캐시가 없으면 기본 모습으로 서고, 앱이 올라오면 런타임이 못 박는다.
+    // 파생 엔진이 캐시를 쓸 때 단일 모드 테마에는 반드시 mode를 함께 쓰므로(applyDerived) 첫 실행 한 번뿐이다.
+    expect(snapshot(runBoot(doc("system"))).attrs).not.toHaveProperty("data-theme");
+    expect(snapshot(runRuntime(doc("system"))).attrs["data-theme"]).toBe("dark");
   });
 });
 

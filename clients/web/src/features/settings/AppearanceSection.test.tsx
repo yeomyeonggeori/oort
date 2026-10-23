@@ -12,6 +12,7 @@ import {
   getTheme,
   reloadAppearanceForTest,
   THEME_STORAGE_KEY,
+  updateAppearance,
 } from "@/design/theme";
 import {
   LINK_PREVIEW_STORAGE_KEY,
@@ -181,13 +182,24 @@ describe("AppearanceSection: 테마 미리보기 카드", () => {
     expect(layers.map((l) => l.getAttribute("data-preview-mode"))).toEqual(["light"]);
   });
 
-  it("scopes every layer to the active palette, and the pill follows the accent", () => {
+  it("reads the root instead of scoping to a palette, so the pill follows the accent AND the theme (AP-1b #4188)", () => {
     const host = mount(createElement(AppearanceSection));
     pick(host, "accent-swatch-hongyeom");
-    const { layers } = preview(host);
-    for (const layer of layers) expect(layer.getAttribute("data-palette-preview")).toBe("dawnsky");
+    const { card, layers } = preview(host);
+    // 예전에는 층마다 `data-palette-preview`로 새벽하늘에 묶었고 알약은 새벽하늘 프리셋 값에 묶였다. 이제 둘 다 없다:
+    // 층은 루트가 들고 있는 지금 테마·신호·모드의 변수를 그대로 물려받는다.
+    for (const layer of layers) expect(layer.hasAttribute("data-palette-preview")).toBe(false);
     const pill = host.querySelector('[data-testid="theme-preview-pill"]');
-    expect(pill?.getAttribute("data-accent-swatch")).toBe("hongyeom");
+    expect(pill?.hasAttribute("data-accent-swatch")).toBe(false);
+    expect(document.documentElement.getAttribute("data-signal")).toBe("hongyeom");
+    expect(card.getAttribute("data-theme-ref")).toBe("dawnsky");
+  });
+
+  it("names the selected theme on the card (catalog themes included)", () => {
+    updateAppearance({ theme: "catalog:nord" });
+    const host = mount(createElement(AppearanceSection));
+    const { card } = preview(host);
+    expect(card.getAttribute("data-theme-ref")).toBe("catalog:nord");
   });
 
   it("is decoration: hidden from assistive tech and not focusable", () => {
@@ -401,13 +413,15 @@ describe("AppearanceSection: 글자 크기와 대화 밀도 (AP-2a #4189)", () =
 });
 
 describe("AppearanceSection: S3b 컨트롤 중 아직 열리지 않은 것 (R4)", () => {
-  it("offers exactly the five live groups and no switch, slider, or text field", () => {
+  it("offers exactly the six live groups and no switch, slider, or text field", () => {
     const host = mount(createElement(AppearanceSection));
     const groups = [...host.querySelectorAll("fieldset")].map((f) => f.getAttribute("data-testid"));
-    // 글자 크기·대화 밀도는 AP-2a(#4189)가 소비자(타임라인·미리보기)와 같은 PR에서 열었다.
+    // 글자 크기·대화 밀도는 AP-2a(#4189)가 소비자(타임라인·미리보기)와 같은 PR에서 열었고, 배경화면(AP-4 #4191)은
+    // 카드 「배경」의 라디오 묶음 하나를 더했다(카드 순서: 색상 → 배경 → 대화 표시).
     expect(groups).toEqual([
       "theme-choice",
       "accent-choice",
+      "wallpaper-choice",
       "font-size-choice",
       "density-choice",
       "link-preview-choice",

@@ -51,9 +51,11 @@ export const SIGNAL_ROLES = ["signal", "on-signal", "signal-text", "signal-soft"
 export type SignalRole = (typeof SIGNAL_ROLES)[number];
 export type SignalValues = Readonly<Record<SignalRole, string>>;
 
-/** ADR-0174 액센트에서 옮긴 네 프리셋(표 §4). `dawn`은 옮기지 않는다. */
-export const SIGNAL_PRESET_IDS = ["seongun", "hongyeom", "hyeseong", "gamram"] as const;
-export type SignalPresetId = (typeof SIGNAL_PRESET_IDS)[number];
+// 프리셋 id 목록(`SIGNAL_PRESET_IDS`·`SignalPresetId`·`isSignalPresetId`)은 `signalIds.ts`에 있다. 외양 레코드와
+// 루트 스탬프(웹 메인 번들)가 id만 알면 되는데 이 파일은 보정 엔진까지 들고 있어서, 이 파일을 가져오면 엔진이
+// 메인 번들로 끌려온다(AP-1b 번들 예산). 아래 재내보내기는 기존 가져오기(폰·시험)가 그대로 서게 하려는 것이다.
+export { SIGNAL_PRESET_IDS, isSignalPresetId, type SignalPresetId } from "./signalIds";
+import { SIGNAL_PRESET_IDS, type SignalPresetId } from "./signalIds";
 
 export const SIGNAL_PRESETS: Readonly<
   Record<SignalPresetId, { label: string; light: string; dark: string }>
@@ -63,10 +65,6 @@ export const SIGNAL_PRESETS: Readonly<
   hyeseong: { label: "혜성", light: "#8B005A", dark: "#FF4BCC" },
   gamram: { label: "감람", light: "#005400", dark: "#8CB858" },
 };
-
-export function isSignalPresetId(value: unknown): value is SignalPresetId {
-  return typeof value === "string" && (SIGNAL_PRESET_IDS as readonly string[]).includes(value);
-}
 
 export type SignalRejection = "invalid-hex" | "unreachable" | "near-agent" | "near-danger";
 
@@ -115,6 +113,15 @@ function withinLightness(hex: string): boolean {
   return L >= L_MIN - 1e-9 && L <= L_MAX + 1e-9;
 }
 
+export interface ResolveSignalOptions {
+  /**
+   * 에이전트가 신호에 비킨다(ADR-0189 증보 3 D2). 켜면 신호와 에이전트 색의 거리 검사(`near-agent`)를 하지
+   * 않는다: 파생 테마(카탈로그·가져온 테마)에서는 신호가 먼저 정해지고 에이전트 색이 색상각을 돌려
+   * 신호와 위험에서 0.07 이상 떨어진다(`derive.ts`). 기본 거짓은 첫 파티의 의미(에이전트 고정)다.
+   */
+  readonly agentYields?: boolean;
+}
+
 /**
  * 입력 hex를 한 테마 × 모드의 신호 네 값으로 보정하거나 거절한다.
  * `tokens`를 받는 것은 시험이 원천 밖 값으로 엔진을 잴 수 있게 하려는 것이다.
@@ -123,7 +130,8 @@ export function resolveSignal(
   input: string,
   theme: ThemeId,
   mode: Mode,
-  tokens: ThemeModeTokens = THEMES[theme][mode]
+  tokens: ThemeModeTokens = THEMES[theme][mode],
+  options: ResolveSignalOptions = {}
 ): SignalResult {
   if (!parseHex(input)) return reject("invalid-hex");
   const c = tokens.color;
@@ -148,7 +156,7 @@ export function resolveSignal(
   if (!signal) return reject("unreachable");
 
   if (oklabDistance(signal, c.danger) < SIGNAL_MIN_DISTANCE) return reject("near-danger");
-  if (oklabDistance(signal, c.agent) < SIGNAL_MIN_DISTANCE) return reject("near-agent");
+  if (!options.agentYields && oklabDistance(signal, c.agent) < SIGNAL_MIN_DISTANCE) return reject("near-agent");
 
   let soft = mixOklab(c.surface, signal, SOFT_MIX[mode]);
   for (let t = SOFT_MIX[mode]; t < 0.6; t += 0.01) {
@@ -164,7 +172,7 @@ export function resolveSignal(
   // `signal-text`도 같은 구분 제한을 받는다(DS2-7 planner 결정, #2735 M2). 글자로 서는 신호가
   // 에이전트·오류 표시 색과 가까우면 `signal`이 멀어도 화면에서 두 뜻이 섞인다.
   if (oklabDistance(text, c.danger) < SIGNAL_MIN_DISTANCE) return reject("near-danger");
-  if (oklabDistance(text, c.agent) < SIGNAL_MIN_DISTANCE) return reject("near-agent");
+  if (!options.agentYields && oklabDistance(text, c.agent) < SIGNAL_MIN_DISTANCE) return reject("near-agent");
 
   return {
     ok: true,

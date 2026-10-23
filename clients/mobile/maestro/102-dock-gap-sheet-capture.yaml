@@ -1,0 +1,38 @@
+appId: app.momo.ios
+name: 102-dock-gap-sheet-capture
+---
+# 102-dock-gap-sheet-capture — 「작성 중」 줄이 서 있는 대화에서 후보 시트가 **열린** 사진 (#4264, design-review H-1b).
+#
+# 도크 위 「작성 중」 줄은 예약 12 에 줄 상자 4 가 컴포저 위 여백으로 걸쳐 선다. 후보 시트가 열릴 때 그 걸친 몫이 시트
+# 밑으로 삐져나오는지가 질문이었고, 시트의 아래 끝이 루트의 **내용 상자 윗면**(알약 위 1.3pt)이라 삐져나오지 않는다는 것이
+# 이 사진으로 확인됐다. 시트를 여는 것은 `@` 한 글자이고 그 글자는 사람이 치는 것이다 — 초안으로 심는 길은 `Composer` 의
+# 캐럿 주석대로 막혀 있다(`90-mention-sheet-capture.yaml` 과 같은 이유).
+#
+#   xcrun simctl launch booted app.momo.ios --args \
+#     -momoMeasure GAP-TYPING+SHEET -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro test clients/mobile/maestro/102-dock-gap-sheet-capture.yaml
+#   # 사진: `xcrun simctl io booted screenshot <out.png>` (흐름이 끝난 뒤 시트가 열린 채 서 있다)
+#
+# 라이트는 표면 이름에 스킴 접두사를 붙인다(`LIGHT-GAP-TYPING+SHEET`, `measure/root.ts`). 이 흐름은 컴포저가 **비어 있는**
+# 상태에서 시작한다(`measure/dockGap.tsx` 는 `sheet` 상태에서 초안을 지운다) — `dismiss-dev-logbox` 를 쓰지 않는 이유다.
+- extendedWaitUntil:
+    visible:
+      id: "composer-input"
+    timeout: 60000
+# 탭이 키보드를 올리고, 시뮬레이터는 키보드가 처음 오를 때 받아쓰기 설정을 물을 수 있다. 그 시스템 알림이 앱 트리를 가리므로
+# 여는 탭과 치는 탭 사이에서 걷어낸다.
+- tapOn:
+    id: "composer-input"
+- runFlow:
+    when:
+      visible: "지금 안 함"
+    commands:
+      - tapOn: "지금 안 함"
+- tapOn:
+    id: "composer-input"
+- inputText: "@"
+- extendedWaitUntil:
+    visible:
+      id: "mention-list"
+    timeout: 20000
+- waitForAnimationToEnd

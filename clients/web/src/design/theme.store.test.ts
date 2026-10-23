@@ -180,32 +180,48 @@ describe("루트 스탬프: 표 한 곳에서 나온 것만 찍힌다", () => {
 });
 
 describe("단일 모드 테마: 스토어가 유효 스킴으로 data-theme를 찍는다 (AC 8)", () => {
-  const lookup: ModesLookup = (ref) =>
-    ref === "catalog:solo-dark" ? ["dark"] : ref === "catalog:solo-light" ? ["light"] : null;
+  // AP-1b(#4188): 카탈로그가 들어와 판정이 진짜 색인을 읽는다. 다크 단독은 nord, 라이트 단독은 snazzy-light다.
+  const SOLO_DARK = "catalog:nord";
+  const SOLO_LIGHT = "catalog:snazzy-light";
 
   it("다크 단독 테마를 시스템에서 고르면 다크로 못 박히고, 첫 파티로 돌아오면 풀린다", () => {
-    setThemeModesLookupForTest(lookup);
-    setThemeRef("catalog:solo-dark");
-    expect(getThemeRef()).toBe("catalog:solo-dark");
+    setThemeRef(SOLO_DARK);
+    expect(getThemeRef()).toBe(SOLO_DARK);
     expect(root().getAttribute("data-theme")).toBe("dark");
     expect(root().getAttribute("data-palette")).toBe("derived");
-    expect(root().getAttribute("data-theme-ref")).toBe("catalog:solo-dark");
-    expect(getAppearance().scheme).toBe("system"); // 사람의 선택은 건드리지 않는다.
+    expect(root().getAttribute("data-theme-ref")).toBe(SOLO_DARK);
+    expect(getAppearance().scheme).toBe("system"); // 사람의 선택은 건드리지 않는다(맞추는 일은 고르는 쪽의 몫, 규칙 1).
     setThemeRef("dawnsky");
     expect(root().hasAttribute("data-theme")).toBe(false);
   });
 
   it("라이트로 골라 둔 사람이 다크 단독 테마를 고르면 그 테마의 모드가 이긴다", () => {
-    setThemeModesLookupForTest(lookup);
     setTheme("light");
-    setThemeRef("catalog:solo-dark");
+    setThemeRef(SOLO_DARK);
     expect(root().getAttribute("data-theme")).toBe("dark");
-    setThemeRef("catalog:solo-light");
+    setThemeRef(SOLO_LIGHT);
     expect(root().getAttribute("data-theme")).toBe("light");
   });
 
-  it("조회가 없으면(카탈로그 전) 같은 참조도 둘 다로 본다", () => {
-    setThemeRef("catalog:solo-dark");
+  it("짝이 있는 카탈로그 테마는 단일 모드 규칙을 타지 않는다 (시스템이면 찍지 않는다)", () => {
+    setThemeRef("catalog:github");
+    expect(root().getAttribute("data-palette")).toBe("derived");
+    expect(root().hasAttribute("data-theme")).toBe(false);
+    setTheme("dark");
+    expect(root().getAttribute("data-theme")).toBe("dark");
+  });
+
+  it("조회를 주입하면 그것이 이긴다 (가짜 단일 모드로 규칙만 재는 길은 남아 있다)", () => {
+    const lookup: ModesLookup = (ref) => (ref === "catalog:github" ? ["dark"] : null);
+    setThemeModesLookupForTest(lookup);
+    setThemeRef("catalog:github");
+    expect(root().getAttribute("data-theme")).toBe("dark");
+  });
+
+  it("카탈로그에 없는 catalog: 참조는 저장·적용되지 않고 새벽하늘이다 (멤버십)", () => {
+    updateAppearance({ theme: "catalog:solo-dark" as never });
+    expect(getThemeRef()).toBe("dawnsky");
+    expect(root().getAttribute("data-palette")).toBe("dawnsky");
     expect(root().hasAttribute("data-theme")).toBe(false);
   });
 

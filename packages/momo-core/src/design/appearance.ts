@@ -36,7 +36,7 @@
 import { parseHex } from "./color";
 import { DEFAULT_DENSITY_ID, normalizeDensity, type DensityId } from "./density";
 import { normalizeFontName } from "./fontName";
-import { isSignalPresetId, type SignalPresetId } from "./signal";
+import { isSignalPresetId, type SignalPresetId } from "./signalIds";
 import { normalizeThemeRef, type ThemeRef } from "./themeResolve";
 import { DEFAULT_THEME_ID, isThemeId, type ThemeId } from "./themes";
 

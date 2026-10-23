@@ -63,6 +63,7 @@ import {
 import { SurfaceGate } from "@/features/capabilities/SurfaceGate";
 import { isDesktop } from "@/lib/tauri";
 import { cn } from "@/design/lib/cn";
+import { WallpaperLayer } from "@/design/wallpaper/WallpaperLayer";
 import { ConnectedTerminalDock } from "@/features/workbench/agent/ConnectedTerminalDock";
 import { useDockState } from "@/features/workbench/local/dockState";
 import { isMyWorkTab } from "@momo/core/features/workbench/workTab";
@@ -378,6 +379,8 @@ export function AppShell({
             data-work-rail={myWorkTab && !isSettingsSurface ? "" : undefined}
             data-settings-surface={isSettingsSurface ? "" : undefined}
           >
+            {/* 배경화면(AP-4 #4191): 창 바닥 맨 아래의 그림 한 장. 켜져 있지 않으면 보이지 않는다. */}
+            <WallpaperLayer />
             {!isSettingsSurface && (
               <AppTitlebar
                 collapsed={displayedCollapsed}

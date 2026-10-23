@@ -40,7 +40,7 @@ import {
   PLACEHOLDER_MAX_LINES,
   withLatinWordBreaks,
 } from '../src/features/conversation/Composer';
-import {composerTextColumn} from '../src/features/conversation/convDesign';
+import {CONV, composerTextColumn} from '../src/features/conversation/convDesign';
 import {saveDraft} from '../src/features/conversation/drafts';
 import {CLAUDE_SUBSCRIPTION_AGENT_PAUSED} from '@momo/core/features/ai/aiHubModel';
 import {MessageActionSheet} from '../src/features/conversation/MessageActionSheet';
@@ -181,6 +181,7 @@ import {PullProbe} from './pullProbe';
 import {PullHold} from './pullHold';
 import {PullRefreshSurface} from './pullRefresh';
 import {DmConversationSurface} from './dmConversation';
+import {DockGapSurface} from './dockGap';
 import {AppsSurface} from './apps';
 import {AppsTailSurface} from './appsTail';
 import {OortLoaderSurface} from './oortLoader';
@@ -2192,6 +2193,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   if (name.startsWith('dm-conversation')) {
     return <DmConversationSurface which={name.slice('dm-conversation'.length).replace(/^-/, '')} />;
   }
+  // #4264: 마지막 행 아래 → 알약 위 간격. 대화 화면의 도크 스택 그대로 + 레이아웃 값 계측.
+  if (name === 'gap' || name.startsWith('gap-')) {
+    return <DockGapSurface which={name.slice('gap'.length).replace(/^-/, '')} />;
+  }
   // #4181: 사진 카드(첨부 메뉴가 변신해 도착하는 최근 사진 그리드). 실제 카드·진짜 PhotoKit 포트.
   if (name.startsWith('photo-card')) {
     return <PhotoCardSurface which={name.slice('photo-card'.length).replace(/^-/, '')} />;
@@ -4121,6 +4126,8 @@ export function Surface({name}: {name: string}): React.JSX.Element {
                 channelKind="public"
                 myMemberId={SELF}
                 nowMs={NOW + 900_000}
+                // 대화 화면과 같은 꼬리(#4264) — 이 표면의 도크는 작업 중 줄 + 작성 중 줄이라 꼬리 기본 8 이면 제품보다 8 느슨하게 찍힌다.
+                tailGap={CONV.conversationTail}
               />
             }
             composer={

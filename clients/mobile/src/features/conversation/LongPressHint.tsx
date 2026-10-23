@@ -2,6 +2,7 @@ import React, {useCallback, useEffect, useState} from 'react';
 import {AccessibilityInfo, Image, Pressable, StyleSheet, Text, View} from 'react-native';
 import {ds2Radius, font, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {CONV_ICONS, CONV_ICON_SIZE} from '../../design/icons';
+import {CONV} from './convDesign';
 import {usePalette, useStyles} from '../../design/theme';
 import {NON_SECRET_KEYS, nonSecretStore} from '../../storage/kv';
 
@@ -154,14 +155,21 @@ export function useLongPressHint(): {
 }
 
 const buildStyles = (color: Palette) => StyleSheet.create({
-  /** 도크 위에 뜨는 자리. 도크의 세로를 한 픽셀도 밀지 않는다. */
+  /**
+   * 도크 위에 뜨는 자리. 도크의 세로를 한 픽셀도 밀지 않는다.
+   *
+   * **코치마크는 마지막 행의 아래 가장자리 위에 선다** (#4264, design-review H-1a). 목록 꼬리가 8 이던 때 도크 위 8
+   * (이 아래 여백)은 정확히 그 가장자리였다 — 코치가 마지막 글줄을 덮되 글줄의 아래 끝(행 상자 아래 7.7pt)보다 아래에서
+   * 끝났다. 대화 화면이 꼬리를 줄인 만큼(`CONV.conversationTail`) 이 값도 같이 줄어야 같은 자리에 선다 — 8 로 두면 코치가 8
+   * 올라가서 마지막 글줄의 아래 1pt 안팎이 코치 밑으로 삐져나온다(16 Pro 실측 0.67pt).
+   */
   anchor: {
     position: 'absolute',
     left: SAFE_GUTTER,
     right: SAFE_GUTTER,
     bottom: '100%',
     alignItems: 'center',
-    paddingBottom: space.sm,
+    paddingBottom: CONV.conversationTail,
     zIndex: 2,
   },
   /** 잉크 알약 — 시안 `.a-pill.pri` 의 색. 떠 있는 것이 무엇인지 한눈에 다르다. */

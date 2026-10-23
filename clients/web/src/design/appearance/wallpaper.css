@@ -1,11 +1,200 @@
-/* 자리표시 (AP-1a #4186): 이 조각은 AP-4(#4191)가 채운다. 지금은 비어 있다.
+/* 웹·데스크탑 배경화면 (AP-4 #4191, ADR-0189 증보 3 D4·D6, 청사진 §5.5-d).
  *
- * 대상: 웹·데스크탑 배경화면(`data-wallpaper`)
- * 건드릴 것: 배경화면 층과 그 위의 scrim 면
+ * 대상: 창 바닥(`.app-shell`) 뒤에 깔리는 그림 한 장과 그 위의 scrim, 그리고 그 위에 **직접** 서는 글자·표식
+ * (사이드바 열·상단 줄·설정 목록 열·「내 작업」 격자의 바닥)의 보정색.
  *
- * 규칙은 속성 선택자로 쓴다(예: `:root[data-wallpaper] .app-shell { --shell-layer-wallpaper: ...; --shell-layer-canvas: ... }`). 루트 속성 선택자는 `@utility`·단일 클래스
- * 규칙보다 특이도가 높아 소스 순서와 무관하게 이기므로, `@import`가 맨 위라는 사실 때문에
- * `tokens.css`를 고칠 필요가 없다. 어느 속성에 무엇이 찍히는지는
- * `packages/momo-core/src/design/rootStamp.ts`의 표가, 바닥 층 변수는 `tokens.css`의
- * `app-shell`이 정한다. 컨트롤은 이 규칙이 실제로 화면을 바꾸는 PR에서만 공개한다.
+ * ## 층의 순서 (아래 → 위)
+ *
+ *   배경 요소 `[data-wallpaper-layer]`   그림(단색·그라데이션·사진). z-index: -1
+ *   셸의 바닥 층 `--shell-layer-canvas`    바닥색 한 겹(scrim). AP-1a #4186이 나눈 층 변수를 **바꾸기만** 한다
+ *   셸의 바닥 층 `--shell-layer-band`      띠(노을띠). 불투명하게 scrim 위에 서므로 사진이 띠 열을 가린다
+ *   내용                                    사이드바·상단 줄·본문 판
+ *
+ * `.app-shell`은 쌓임 맥락(stacking context)이 아니다(`isolation`도 `z-index`도 없다). 그래서 `z-index: -1`인
+ * 배경 요소는 문서의 루트 맥락에 놓여 **셸 자신의 바탕 아래**에 깔리고, 셸의 바탕(투명하게 만든 색 + scrim 층 + 띠 층)이
+ * 그 위에 선다. 셸을 맥락으로 만들면(`isolation: isolate`) 이 순서가 거꾸로 뒤집히고 평소의 쌓임도 바뀐다. 그래서
+ * 만들지 않는다. 대신 배경 요소와 셸 사이에 불투명한 조상 바탕이 없다는 것이 이 규칙의 전제이고, 캡처 스크립트가
+ * 그 조상들의 계산된 바탕색을 기록한다.
+ *
+ * ## 켜지는 조건은 하나다: 루트의 `data-wallpaper-live`
+ *
+ * 외양 레코드가 찍는 `data-wallpaper`(종류)는 **선택**을 말한다. 접근성이 배경을 끄거나 이 테마에서 쓸 수 없거나
+ * 사진이 아직 없으면 선택은 남아 있어도 그림은 서지 않는다. 그때 평평한 scrim만 서면 안 되므로 이 조각의 모든
+ * 규칙은 JS가 실제로 깔 때만 켜는 `data-wallpaper-live`에만 걸린다(`design/wallpaper/runtime.ts`). 접근성(투명도 줄이기,
+ * 대비 높이기)도 CSS 미디어 질의가 아니라 그 속성이 이긴다: `prefers-reduced-transparency`를 모르는 엔진에서 질의가
+ * 조용히 거짓이 되어 규칙이 안 걸리는 일이 없고, 판단이 한 곳(JS)에 있다.
+ *
+ * 띠가 있는 테마(노을띠)에서는 사이드바 열이 불투명한 띠 위에 서므로 그 열의 보정은 하지 않는다. 런타임이 켜져 있는 동안
+ * 루트에 `data-wallpaper-band`를 찍고, 보정 규칙은 그 속성이 없을 때만 그 열에 선다(아래 「호스트가 무엇인가」).
+ *
+ * 규칙은 루트 속성 선택자로 쓴다. `@utility`(레이어 안)·단일 클래스 규칙보다 특이도가 높고 이 조각은 레이어 밖이라
+ * 소스 순서와 무관하게 이긴다. 600px 미만(폰 폭)은 판이 창 자체라 바닥이 보이지 않으므로 아무것도 하지 않는다.
  */
+
+/* 요소는 늘 DOM에 있고, 켜질 때만 보인다. */
+[data-wallpaper-layer] {
+  display: none;
+}
+
+@media (width >= 600px) {
+  :root[data-wallpaper-live] [data-wallpaper-layer] {
+    /* 셸 바탕 **아래** 한 층. 이름 붙은 층 사다리(`--layer-*`)의 바깥쪽 끝이고, 이름 있는 층(`content-float` 이상)과
+     * 겹치지 않는다. */
+    --layer-wallpaper: -1;
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: var(--layer-wallpaper);
+    pointer-events: none;
+    /* 사진이 디코드되기 전 한 프레임은 평소 바닥과 같은 색이다. 단색·기본 제공은 CSSOM이 이 값을 덮는다. */
+    background-color: var(--canvas-mid);
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: cover;
+  }
+
+  :root[data-wallpaper-live] .app-shell {
+    /* 셸 자신의 바탕을 비워 아래의 그림이 비친다. 그 위에 scrim과 띠가 선다. */
+    background-color: transparent;
+    /* scrim: 바닥색(`canvas-mid`) 한 겹. 색은 JS가 두 모드로 싣고(`#rrggbbaa`, 불투명도는 테마·모드별 하한)
+     * `light-dark()`가 모드를 고른다. */
+    --shell-layer-canvas: linear-gradient(
+      light-dark(var(--wallpaper-scrim-light), var(--wallpaper-scrim-dark)),
+      light-dark(var(--wallpaper-scrim-light), var(--wallpaper-scrim-dark))
+    );
+  }
+
+  /* ---- 바닥 위에 직접 서는 글자·표식 ---------------------------------------------------------------
+   *
+   * 보정값은 scrim 최악 합성(순흑·순백 그림) 위에서 4.5(글자)·3(표식)이 되도록 명도만 옮긴 색이다
+   * (core `wallpaperTreatment`). 잉크는 불투명도 자체가 7:1을 지키므로 옮기지 않는다. 사이드바 안에서
+   * 흰 면에 서는 것(선택 행·검색·지금 카드)은 `band-surface`가 원래 역할을 되찾는다. 이 조각이 바꾸는 것은
+   * 바닥 위의 글자뿐이다. 본문 판·카드·시트는 불투명한 면이라 손대지 않는다. */
+  :root[data-wallpaper-live] {
+    --wallpaper-ink-muted: light-dark(var(--wallpaper-ink-muted-light), var(--wallpaper-ink-muted-dark));
+    --wallpaper-icon: light-dark(var(--wallpaper-icon-light), var(--wallpaper-icon-dark));
+    --wallpaper-agent: light-dark(var(--wallpaper-agent-light), var(--wallpaper-agent-dark));
+    --wallpaper-warn: light-dark(var(--wallpaper-warn-light), var(--wallpaper-warn-dark));
+    --wallpaper-danger: light-dark(var(--wallpaper-danger-light), var(--wallpaper-danger-dark));
+    --wallpaper-ok: light-dark(var(--wallpaper-ok-light), var(--wallpaper-ok-dark));
+    --wallpaper-signal: light-dark(var(--wallpaper-signal-light), var(--wallpaper-signal-dark));
+    --wallpaper-signal-text: light-dark(var(--wallpaper-signal-text-light), var(--wallpaper-signal-text-dark));
+    --wallpaper-on-signal: light-dark(var(--wallpaper-on-signal-light), var(--wallpaper-on-signal-dark));
+  }
+
+  /* **호스트가 무엇인가가 규칙을 가른다.**
+   *
+   * 띠가 없는 테마에서는 사이드바·상단 줄·설정 목록 열이 scrim 위에 서므로 보정색이 맞다. 띠가 있는 테마(노을띠)에서는 그 열들이
+   * **불투명한 띠** 위에 선다(띠는 scrim 위에 칠한다). 보정색은 scrim 최악 합성에 맞춘 값이라 라이트에서는 늘 어두운 쪽으로
+   * 옮겨 있어서, 남색 띠 위에서는 곧바로 대비를 깎는다(design-review H-1: 설정 목록 열의 섹션 라벨 2.34 → 1.29, 아이콘
+   * 3.85 → 1.88, 접속 점과 신호색이 거의 검은색, 포커스 링 3:1 미달). 그래서 띠가 있으면(루트의 `data-wallpaper-band`, 런타임이
+   * 찍는다) 띠 위의 자리는 건드리지 않는다: AP-1a의 on-band 묶음(`tokens.css` 「띠 위의 글자」)이 띠 위 규칙대로 읽는다.
+   *
+   * 띠 위의 자리 (띠가 있으면 보정하지 않는다):
+   *   · 사이드바, 펼친 상단 줄, 설정 목록 열: 띠가 열 폭을 덮는다.
+   *   · **웹의 접힌 상단 줄**: 토글이 줄 안쪽 여백 8px에 서서 레일(56px, 띠가 덮는다) 안에 있다.
+   * scrim 위의 자리 (늘 보정한다):
+   *   · **데스크탑의 접힌 상단 줄**: 신호등 자리를 비우려고 토글이 80px 뒤에 서서(`data-tauri-drag-region`이 인셋을 연다,
+   *     `tokens.css` `app-titlebar`) 레일 오른쪽, 띠 밖이다(design-review H-2: 이 자리를 웹과 같다고 보고 늘 보정하면 웹의
+   *     토글이 띠 위에서 깎인다).
+   *   · 「내 작업」 격자의 바닥: 본문이 투명이라 사진이 뒤에 깔리고 띠는 사이드바 열까지만 칠한다. */
+  :root[data-wallpaper-live]:not([data-wallpaper-band]) .app-shell > .sidebar-drawer,
+  :root[data-wallpaper-live]:not([data-wallpaper-band]) .app-shell > .app-titlebar,
+  :root[data-wallpaper-live]:not([data-wallpaper-band]) .app-shell .settings-nav,
+  :root[data-wallpaper-live] .app-shell[data-sidebar-collapsed] > .app-titlebar[data-tauri-drag-region],
+  :root[data-wallpaper-live] .app-shell[data-work-rail] > main {
+    --ink-muted: var(--wallpaper-ink-muted);
+    --icon: var(--wallpaper-icon);
+    --agent: var(--wallpaper-agent);
+    --warn: var(--wallpaper-warn);
+    --danger: var(--wallpaper-danger);
+    --ok: var(--wallpaper-ok);
+    --signal: var(--wallpaper-signal);
+    --signal-text: var(--wallpaper-signal-text);
+    --on-signal: var(--wallpaper-on-signal);
+    --accent: var(--signal);
+    --on-accent: var(--on-signal);
+  }
+}
+
+/* ---- 설정 > 모양 > 배경 카드의 선택 칩 ------------------------------------------------------------
+ *
+ * 색은 CSS가 아니라 core 표(`WALLPAPER_SOLIDS`·`WALLPAPER_PRESETS`)에서 와서 변수 둘(`--wallpaper-chip-color`·
+ * `--wallpaper-chip-image`)로 넘어온다(칩이 마운트될 때 한 번). 칠하는 규칙은 여기 있다. 라디오는 화면에서 숨기고(`sr-only`) 칩이 라디오의 얼굴이다. 고른 칩은 잉크
+ * 고리와 체크를 든다(강조색 스와치 `accent-swatch`와 같은 문법). */
+.wallpaper-choice {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-1);
+  min-inline-size: var(--tap-target);
+  cursor: pointer;
+}
+
+.wallpaper-chip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+  background-color: var(--wallpaper-chip-color, var(--surface-muted));
+  background-image: var(--wallpaper-chip-image, none);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  /* 칩과 면의 경계: 면과 비슷한 색(밝은 모드의 진주·없음, 어두운 모드의 먹·없음)이 면에 묻히지 않도록 3:1을 지키는 선
+   * 하나(`--line-strong`, 글자 아닌 표식의 경계). 색 자체가 이 칩의 내용이라 경계가 사라지면 무엇을 고르는지 알 수 없다. */
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.wallpaper-chip[data-shape="circle"] {
+  inline-size: var(--spacing-control-lg);
+  block-size: var(--spacing-control-lg);
+  border-radius: 9999px;
+}
+
+.wallpaper-chip[data-shape="tile"] {
+  inline-size: calc(var(--spacing-control-lg) * 2);
+  block-size: calc(var(--spacing-control-lg) + var(--spacing-2));
+  border-radius: var(--radius-lg);
+}
+
+/* 체크는 고른 칩에서만 보인다. 칩 색이 무엇이든 읽히도록 작은 잉크 원 위에 선다. 흐름 밖에 두고(절대 위치) 칩 한가운데에
+ * 놓는다: 안 보일 때도(opacity 0) 자리를 차지하면 「기본」 칩의 아이콘이 가운데가 아니라 왼쪽 테두리에 붙는다
+ * (design-review M-1). */
+.wallpaper-chip-check {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: var(--spacing-6);
+  block-size: var(--spacing-6);
+  border-radius: 9999px;
+  background-color: var(--primary);
+  color: var(--on-primary);
+  opacity: 0;
+}
+
+.wallpaper-choice:has(:checked) .wallpaper-chip {
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 4px var(--ink);
+}
+
+.wallpaper-choice:has(:checked) .wallpaper-chip-check {
+  opacity: 1;
+}
+
+.wallpaper-choice:has(:focus-visible) {
+  outline: 2px solid var(--focus-ring-ink, var(--accent));
+  outline-offset: 2px;
+  border-radius: var(--radius-lg);
+}
+
+.wallpaper-choice:has(:disabled) {
+  cursor: default;
+  opacity: 0.5;
+}
