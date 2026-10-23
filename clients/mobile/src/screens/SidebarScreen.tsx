@@ -526,6 +526,16 @@ export default function SidebarScreen({
     [sections, collapsed, goneOpen, openChannelId],
   );
 
+  // 읽음 투영을 한 번도 못 읽었으면 접을 근거가 없어 나간 멤버 DM 이 도로 보인다(코어 `dmHiddenAsGone`: 모를 때 숨기는 쪽이 최악이다).
+  // 그때 「목록은 그대로」라고 말하면 거짓이라 이유를 말한다(웹 DM 구역의 같은 안내와 같은 뜻, design-review #4252 Low).
+  const goneUnfoldedByReadFailure =
+    readPhase === 'error' &&
+    rosterReady &&
+    sections.some(
+      section =>
+        section.key === 'dms' && section.data.some(row => row.labelKind === 'gone'),
+    );
+
   const total = rowCount(sections);
   const searching = query.trim() !== '';
   const loading = channelsQuery.isLoading || directoryQuery.isLoading;
@@ -577,7 +587,11 @@ export default function SidebarScreen({
       {readStates.isError && !listFailed ? (
         <NoticeBlock
           headline="안 읽음 표시를 불러오지 못했습니다."
-          detail="목록은 그대로이고, 안 읽은 개수만 지금 알 수 없습니다."
+          detail={
+            goneUnfoldedByReadFailure
+              ? '안 읽은 개수를 알 수 없어서 나간 멤버와의 대화도 접지 못했어요.'
+              : '목록은 그대로이고, 안 읽은 개수만 지금 알 수 없습니다.'
+          }
           testID="read-state-error"
         />
       ) : null}

@@ -2,7 +2,7 @@ import {useMemo, useRef} from 'react';
 import {useQueries} from '@tanstack/react-query';
 import {fetchMessages} from '@momo/core/lib/api';
 import {
-  HUMAN_MESSAGE_PAGE_LIMIT,
+  GONE_UNREAD_PAGE_LIMIT,
   pageHasHumanMessage,
 } from '@momo/core/features/sidebar/ambientMessage';
 import {
@@ -84,9 +84,10 @@ export function useGoneUnreadVerdicts(
           (
             await fetchMessages(workspaceId, candidate.id, {
               after: candidate.after,
-              limit: HUMAN_MESSAGE_PAGE_LIMIT,
+              limit: GONE_UNREAD_PAGE_LIMIT,
             })
           ).messages,
+          GONE_UNREAD_PAGE_LIMIT,
         ),
       staleTime: Infinity,
       // 일시 실패 한 번은 다시 읽는다(실패는 곧 보임이라 깜빡임이 생긴다). 그동안은 오는 중으로 접힌 채다.

@@ -1124,7 +1124,8 @@ describe('홈 — 나간 멤버와의 대화 (#4252)', () => {
     // 마지막으로 읽은 seq 뒤를 한 번만 읽는다.
     const [call] = goneMessageCalls(fetchMock);
     expect(call).toContain('after=1');
-    expect(call).toContain('limit=50');
+    // 서버가 한 쪽에 줄 수 있는 최대(200건)까지 읽는다: 안 읽은 기계 메시지가 많아도 접힌다(design-review M-A).
+    expect(call).toContain('limit=200');
   });
 
   it('판정이 오는 중이면 접힌 채다 (읽는 중에 깜빡이며 나타나지 않는다)', async () => {
@@ -1174,6 +1175,44 @@ describe('홈 — 나간 멤버와의 대화 (#4252)', () => {
     const fetchMock = await mountHome({channels: withGone, messages: AMBIENT});
     await screen.findByTestId('sidebar-gone-toggle');
     expect(goneMessageCalls(fetchMock)).toEqual([]);
+  });
+
+  it('읽음 투영을 한 번도 못 읽으면 나간 멤버 DM 이 도로 보이고, 고지가 그 이유를 말한다 (「목록은 그대로」는 거짓이다)', async () => {
+    installFetch({channels: withGone});
+    (globalThis.fetch as jest.Mock).mockImplementation(async (url: string) => {
+      if (String(url).includes('/read-state')) return jsonResponse(500, {error: {message: 'boom'}});
+      if (String(url).includes('/channels') && !String(url).includes('/messages')) {
+        return jsonResponse(200, {channels: withGone});
+      }
+      if (String(url).includes('/roster')) return jsonResponse(200, {members: ROSTER});
+      return jsonResponse(200, {});
+    });
+    renderShell();
+    await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
+    const notice = await screen.findByTestId('read-state-error');
+    expect(notice).toHaveTextContent(/안 읽음 표시를 불러오지 못했습니다\./);
+    expect(notice).toHaveTextContent(/나간 멤버와의 대화도 접지 못했어요\./);
+    expect(notice).not.toHaveTextContent(/목록은 그대로/);
+    // 접지 않는다: 나간 멤버 DM 이 목록에 있고 접힌 줄은 없다.
+    expect(screen.getByTestId(GONE_ROW)).toBeTruthy();
+    expect(screen.queryByTestId('sidebar-gone-toggle')).toBeNull();
+  });
+
+  it('읽음 투영 실패라도 나간 멤버 DM 이 없으면 목록은 그대로라고 말한다', async () => {
+    installFetch();
+    (globalThis.fetch as jest.Mock).mockImplementation(async (url: string) => {
+      if (String(url).includes('/read-state')) return jsonResponse(500, {error: {message: 'boom'}});
+      if (String(url).includes('/channels') && !String(url).includes('/messages')) {
+        return jsonResponse(200, {channels: CHANNELS});
+      }
+      if (String(url).includes('/roster')) return jsonResponse(200, {members: ROSTER});
+      return jsonResponse(200, {});
+    });
+    renderShell();
+    await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
+    const notice = await screen.findByTestId('read-state-error');
+    expect(notice).toHaveTextContent(/목록은 그대로이고, 안 읽은 개수만 지금 알 수 없습니다\./);
+    expect(notice).not.toHaveTextContent(/접지 못했어요/);
   });
 
   it('접힌 대화가 없어지면 펼침은 닫힌 채로 돌아간다 (웹과 같다)', async () => {

@@ -169,14 +169,14 @@ const liveness = vi.hoisted(() => ({ byAgent: new Map<string, string>() }));
  */
 const revival = vi.hoisted(() => ({
   pages: new Map<string, "fail" | "pending" | Array<{ type: string; props?: Record<string, unknown> }>>(),
-  calls: [] as Array<{ channelId: string; after?: number }>,
+  calls: [] as Array<{ channelId: string; after?: number; limit?: number }>,
 }));
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
   return {
     ...actual,
-    fetchMessages: async (_ws: string, channelId: string, query: { after?: number } = {}) => {
-      revival.calls.push({ channelId: channelId.toLowerCase(), after: query.after });
+    fetchMessages: async (_ws: string, channelId: string, query: { after?: number; limit?: number } = {}) => {
+      revival.calls.push({ channelId: channelId.toLowerCase(), after: query.after, limit: query.limit });
       const page = revival.pages.get(channelId.toLowerCase()) ?? [{ type: "text" }];
       if (page === "fail") throw new actual.ApiError(500, "boom");
       if (page === "pending") return new Promise<never>(() => undefined);
@@ -957,8 +957,8 @@ describe("닫은 DM 은 사람이 읽을 새 메시지가 올 때만 돌아온�
     await rerender();
     await flush();
     expect(rowIds(host)).not.toContain(DM_ID(2));
-    // 닫은 뒤(9)부터를 읽었다.
-    expect(revival.calls).toContainEqual({ channelId: DM_ID(2), after: 9 });
+    // 닫은 뒤(9)부터를 읽었다(되살림의 크기 50).
+    expect(revival.calls).toContainEqual({ channelId: DM_ID(2), after: 9, limit: 50 });
   });
 
   it("읽는 동안에는 깜빡이며 나타나지 않는다(숨은 채 기다린다)", async () => {
@@ -1504,7 +1504,7 @@ describe("나간 멤버 DM 의 안 읽음은 사람이 읽을 것이어야 보�
     expect(rowIds(host)).not.toContain(GONE_DM);
     expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
     // 마지막으로 읽은 seq 뒤를 한 번만 읽는다.
-    expect(callsFor(GONE_DM)).toEqual([{ channelId: GONE_DM, after: 5 }]);
+    expect(callsFor(GONE_DM)).toEqual([{ channelId: GONE_DM, after: 5, limit: 200 }]);
   });
 
   it("사람이 읽을 메시지가 섞여 있으면 보인다", async () => {
@@ -1516,12 +1516,30 @@ describe("나간 멤버 DM 의 안 읽음은 사람이 읽을 것이어야 보�
     expect(goneToggle(host)).toBeNull();
   });
 
-  it("쪽이 가득 차면(50건이 다 기계 메시지) 뒤를 모르므로 보인다", async () => {
-    revival.pages.set(GONE_DM, Array.from({ length: 50 }, () => ({ type: "system" })));
-    setReadStates([readState(GONE_DM, 80, 5)]);
+  it("안 읽은 기계 메시지가 50~199건이어도 접힌다: 서버가 한 쪽에 줄 수 있는 최대(200건)까지 읽는다 (design-review M-A)", async () => {
+    for (const n of [50, 120, 199]) {
+      revival.pages.set(GONE_DM, Array.from({ length: n }, () => ({ type: "system" })));
+      revival.calls.length = 0;
+      setReadStates([readState(GONE_DM, 5 + n, 5)]);
+      const host = await mount();
+      await settle();
+      expect({ n, shown: rowIds(host).includes(GONE_DM) }).toEqual({ n, shown: false });
+      expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
+      expect(callsFor(GONE_DM)).toEqual([{ channelId: GONE_DM, after: 5, limit: 200 }]);
+      act(() => mountedRoot?.unmount());
+      mountedRoot = null;
+      mountedHost?.remove();
+      mountedHost = null;
+    }
+  });
+
+  it("쪽이 가득 차면(200건이 다 기계 메시지) 뒤를 모르므로 보인다", async () => {
+    revival.pages.set(GONE_DM, Array.from({ length: 200 }, () => ({ type: "system" })));
+    setReadStates([readState(GONE_DM, 250, 5)]);
     const host = await mount();
     await settle();
     expect(rowIds(host)).toContain(GONE_DM);
+    expect(goneToggle(host)).toBeNull();
   });
 
   it("판정이 오는 중이면 접힌 채다 (읽는 중에 깜빡이며 나타나지 않는다)", async () => {
@@ -1531,6 +1549,20 @@ describe("나간 멤버 DM 의 안 읽음은 사람이 읽을 것이어야 보�
     await settle();
     expect(rowIds(host)).not.toContain(GONE_DM);
     expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
+  });
+
+  it("X 로 닫은 나간 멤버 DM 은 후보가 아니다: 되살림 판정이 읽은 같은 쪽을 한 번 더 읽지 않는다 (design-review Low)", async () => {
+    // 닫을 때의 seq(3) 뒤로 기계 메시지만 쌓였다: 되살림은 닫은 뒤(3)부터를 한 번 읽어 숨은 채로 둔다.
+    revival.pages.set(GONE_DM, AMBIENT);
+    closeDmOnDevice(WS, GONE_DM, 3);
+    setReadStates([readState(GONE_DM, 8, 3)]);
+    const host = await mount();
+    await settle();
+    await flush();
+    expect(rowIds(host)).not.toContain(GONE_DM);
+    expect(goneToggle(host)).toBeNull();
+    // 같은 URL(after=3)이 두 번 나가지 않는다: 되살림의 한 번(limit 50)뿐이다.
+    expect(callsFor(GONE_DM)).toEqual([{ channelId: GONE_DM, after: 3, limit: 50 }]);
   });
 
   it("메시지를 못 읽었으면 보인다 (안 읽은 것이 사람이 읽을 것인지 모를 때 숨기는 쪽이 최악이다)", async () => {

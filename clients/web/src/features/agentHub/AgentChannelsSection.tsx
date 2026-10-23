@@ -181,8 +181,10 @@ export function AgentChannelsSection({
                 </span>
                 {confirming ? (
                   <span className="flex flex-wrap items-center gap-2">
+                    {/* 이 단추는 채널 멤버십만 지운다. 에이전트 자체와 그 다이렉트 메시지는 남는다: 사이드바에 에이전트와의 대화가
+                        계속 보이는 이유를 사람이 알 수 있게 말한다(#4252, 성재의 「추방하는데 왜 자꾸 떠요」). */}
                     <span className="text-meta text-ink">
-                      내보내면 이 채널의 멘션이 더 이상 전달되지 않아요.
+                      내보내면 이 채널의 멘션이 더 이상 전달되지 않아요. 에이전트 자체와 다이렉트 메시지는 그대로 남아요.
                     </span>
                     <Button
                       type="button"

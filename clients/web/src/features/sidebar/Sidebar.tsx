@@ -370,6 +370,7 @@ export function Sidebar({
     rosterReady,
     byChannel: readStates.byChannel,
     phase: readPhase,
+    closed: closedDms,
   });
   const foldedGoneForFallback = useMemo(
     () =>

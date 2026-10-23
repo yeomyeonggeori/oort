@@ -233,6 +233,7 @@ export function ChatShell() {
     rosterReady,
     byChannel: readStates.byChannel,
     phase: readPhase,
+    closed: closedDms,
   });
   const foldedGone = useMemo(
     () =>
