@@ -249,3 +249,81 @@ describe("데스크탑: 네이티브 창 신호도 듣는다", () => {
     }
   });
 });
+
+describe("구독이 여럿일 때: 한 신호원의 말은 열려 있는 모든 듣는 이에게 간다 (AP-4 #4191 캡처가 드러낸 결함)", () => {
+  // 구독마다 자기 미디어 질의를 갖고, 질의는 만들어진 뒤의 변화만 쏜다. 변화 직후에 열린 구독의 질의는 그 변화를 못 듣는다.
+  // 먼저 열려 있던 구독의 질의가 말해 기억이 바뀌어도 나중 구독의 듣는 이가 깨지 않으면 그 구독은 낡은 값에 머문다.
+  it("먼저 열린 구독의 질의가 말하면, 변화 뒤에 열려 그 변화를 못 들은 구독의 듣는 이도 깨어난다", () => {
+    const first = new FakeMedia(false);
+    let current = first;
+    const store = createSystemScheme({ media: () => current });
+    const earlier = vi.fn();
+    const offEarlier = store.subscribe(earlier); // 첫 질의로 연다
+
+    first.fire(true); // OS가 다크가 되었다: 기억은 다크.
+    expect(store.get()).toBe("dark");
+
+    // OS가 다시 라이트가 된 직후 새 구독이 열린다. 새 질의는 이미 라이트에서 태어나 그 변화를 쏘지 않는다.
+    current = new FakeMedia(false);
+    const later = vi.fn();
+    const offLater = store.subscribe(later);
+    first.matches = false;
+    for (const listener of [...first.listeners]) listener({ matches: false }); // 먼저 열린 질의만 말한다
+
+    expect(store.get()).toBe("light");
+    expect(earlier).toHaveBeenCalledTimes(2);
+    expect(later, "나중 구독의 듣는 이도 깨어난다 (수정 전에는 한 번도 깨지 않았다)").toHaveBeenCalledTimes(1);
+    offEarlier();
+    offLater();
+  });
+
+  it("같은 값을 두 구독의 질의가 되풀이해 말해도 각 듣는 이는 한 번만 깨어난다", () => {
+    const shared = new FakeMedia(false);
+    const store = createSystemScheme({ media: () => shared });
+    const a = vi.fn();
+    const b = vi.fn();
+    const offA = store.subscribe(a);
+    const offB = store.subscribe(b);
+    shared.fire(true); // 두 구독의 리스너가 같은 질의에서 차례로 불린다
+    expect(a).toHaveBeenCalledTimes(1);
+    expect(b).toHaveBeenCalledTimes(1);
+    shared.fire(false);
+    expect(a).toHaveBeenCalledTimes(2);
+    expect(b).toHaveBeenCalledTimes(2);
+    offA();
+    offB();
+  });
+
+  it("해제한 구독의 듣는 이는 더 깨우지 않는다 (남은 구독만 깬다)", () => {
+    const media = new FakeMedia(false);
+    const store = createSystemScheme({ media: () => media });
+    const stay = vi.fn();
+    const leave = vi.fn();
+    const offStay = store.subscribe(stay);
+    const offLeave = store.subscribe(leave);
+    offLeave();
+    media.fire(true);
+    expect(leave).not.toHaveBeenCalled();
+    expect(stay).toHaveBeenCalledTimes(1);
+    offStay();
+  });
+
+  it("네이티브 신호도 열려 있는 모든 듣는 이를 깨운다 (신호를 받은 구독이 하나여도)", async () => {
+    const media = new FakeMedia(false);
+    const { native, handlers } = fakeNative();
+    const store = createSystemScheme({ media: () => media, native });
+    const a = vi.fn();
+    const offA = store.subscribe(a);
+    await flush();
+    // 둘째 구독은 네이티브 핸들러를 따로 받지만, 여기서는 첫째 핸들러 하나만 말한다.
+    const b = vi.fn();
+    const offB = store.subscribe(b);
+    await flush();
+    handlers[0]?.("dark");
+    expect(store.get()).toBe("dark");
+    expect(a).toHaveBeenCalledTimes(1);
+    expect(b, "네이티브 핸들러를 따로 받은 구독도 같은 말에 깨어난다").toHaveBeenCalledTimes(1);
+    offA();
+    offB();
+  });
+});
