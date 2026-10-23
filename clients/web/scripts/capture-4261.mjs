@@ -6,6 +6,7 @@
 //   node scripts/capture-4261.mjs                     # Chromium
 //   ENGINE=webkit node scripts/capture-4261.mjs       # WebKit(데스크탑 앱의 WKWebView 와 같은 엔진)
 //   OUT_ROOT=<폴더> ...                               # 캡처를 놓을 곳(기본 artifacts/avatar-4261, 커밋하지 않는다)
+//   SCENES=keyboard node scripts/capture-4261.mjs     # 장면 묶음 고르기: main(저장 길·세 모드) · keyboard(창 높이 여섯 × 초점) · states(올리는 중·오류·오프라인·Esc)
 //
 // 라이트·다크 × (사진 · 이모지 · 코메토) 편집기를 찍는다. 대화상자 맨 위의 미리보기 띠가 **진짜 아바타 컴포넌트**를
 // 사이드바 24 · 메시지 32 · 프로필 큰 원으로 보여 주므로 한 장에 세 크기가 다 들어온다. 고르는 일은 전부 진짜 컨트롤을
@@ -84,11 +85,17 @@ function messageRows() {
 }
 
 // ---- 서버 상태(모의): 올린 아바타 한 장 --------------------------------------------------------
-const server = { upload: null, served: null, mediaId: null, avatarUrl: null, writes: [], outbound: [], authHeaders: [] };
+const server = { upload: null, served: null, mediaId: null, avatarUrl: null, writes: [], outbound: [], authHeaders: [], hold: null, release: null, failUpload: null };
 
 function resetServer() {
   server.upload = null; server.served = null; server.mediaId = null; server.avatarUrl = null;
   server.writes.length = 0; server.outbound.length = 0; server.authHeaders.length = 0;
+  server.hold = null; server.release = null; server.failUpload = null;
+}
+
+/** 다음 Drive PUT 응답을 붙들어 둔다(올리는 중 장면). `server.release()` 가 놓는다. */
+function holdNextUpload() {
+  server.hold = new Promise((resolve) => { server.release = () => { server.hold = null; resolve(); }; });
 }
 
 async function installRoutes(context, origin) {
@@ -104,6 +111,7 @@ async function installRoutes(context, origin) {
     if (path.startsWith("/__drive/") && method === "PUT") {
       server.upload = request.postDataBuffer();
       server.authHeaders.push(request.headers()["authorization"] ?? null);
+      if (server.hold) await server.hold;
       return route.fulfill({ status: 200, body: "" });
     }
     if (!path.startsWith("/v1/")) return route.continue();
@@ -114,6 +122,9 @@ async function installRoutes(context, origin) {
       return json(route, { token: "capture", tokenType: "Bearer", expiresAtMs: FIXTURE_NOW + 600_000, ttlSeconds: 60, workspaceId, memberId });
     }
     // ---- 내 아바타 (ADR-0161 증보) -------------------------------------------------------------
+    if (path.endsWith("/members/me/avatar/uploads") && method === "POST" && server.failUpload) {
+      return json(route, { error: { code: "capture_failure", message: "capture-only failure" } }, server.failUpload);
+    }
     if (path.endsWith("/members/me/avatar/uploads") && method === "POST") {
       server.writes.push("create-upload");
       server.mediaId = "00000000-0000-7000-8000-00000000f001";
@@ -192,6 +203,11 @@ async function installPageFixtures(page) {
       }
       return nativeSend.call(this, body);
     };
+  });
+  // 오프라인 장면: 창이 열려 있는 동안 연결이 끊기는 것을 모든 엔진에서 같게 만든다(`context.setOffline` 은 엔진마다 `navigator.onLine`
+  // 이 다르다). `window.__forceOffline` 을 켜고 `offline` 이벤트를 쏘면 앱의 오프라인 판단(`useBrowserOffline`)이 그대로 읽는다.
+  await page.addInitScript(() => {
+    Object.defineProperty(Navigator.prototype, "onLine", { configurable: true, get: () => !window.__forceOffline });
   });
   await page.addInitScript(() => {
     class CaptureSocket {
@@ -354,6 +370,9 @@ async function scenesFor(browser, origin, scheme) {
     await waitDraftPreview(page);
     await settle(page);
     await shoot(dialog(page), "mode-emoji", scheme);
+    // H-2: 아바타로 고른 이모지는 컴포저·반응·메시지 툴바가 읽는 「자주 쓰는」 기록을 바꾸지 않는다.
+    const frequency = await page.evaluate(() => localStorage.getItem("momo.web.emoji.frequency.v1"));
+    check(`⑩ 아바타로 이모지를 골라도 「자주 쓰는」 기록은 그대로다 [${scheme}]`, frequency === null, `localStorage=${frequency}`);
 
     // ⑤ 묻히는 조합: 밝은 이모지(🌕 계열 노랑) 위에 연한 배경을 직접 입력한다. 서버 쓰기는 없어야 한다.
     await emojiCell(page, "✨").click();
@@ -365,6 +384,8 @@ async function scenesFor(browser, origin, scheme) {
     await page.getByTestId("avatar-editor-save").click({ force: true });
     await page.waitForTimeout(200);
     check(`⑤ 잠긴 저장 단추를 눌러도 서버 쓰기가 없다 [${scheme}]`, server.writes.length === 0, `writes=${server.writes.join(",") || "none"}`);
+    // 잠긴 단추의 전이(색·불투명도)가 끝난 뒤에 찍는다: 전이 중간 프레임은 활성 단추처럼 보인다(design-review Low).
+    await page.waitForTimeout(400);
     await shoot(dialog(page), "emoji-blocked", scheme);
 
     // 되돌려 정상 조합으로: 칩이 흐려진 색은 고를 수 없고, 팔레트에서 통과하는 색을 고른다.
@@ -386,21 +407,49 @@ async function scenesFor(browser, origin, scheme) {
     await shoot(dialog(page), "mode-preset-forest", scheme);
     await pickColor(page, "navy");
 
-    // ---- ⑥ 낮은 창: 색 칩까지 스크롤해도 미리보기가 위에 붙어 보인다 ----------------------------------
+    // ---- ⑥ 창 높이에 따른 미리보기 띠 (design-review H-3) ----------------------------------------------
+    // 높이 780 초과에서는 색 칩까지 스크롤해도 미리보기가 위에 붙어 보이고, 그 이하(노트북 창·지원 최소 창)에서는 붙지 않고 본문과
+    // 같이 스크롤된다(붙은 띠가 본문 높이를 먹어서 지원 최소 창에서 컨트롤이 60px 만 보였다).
     await chooseMode(page, "emoji");
     await emojiCell(page, "🚀").click();
     await waitDraftPreview(page);
-    await page.setViewportSize({ width: 1280, height: 720 });
-    await settle(page);
-    await page.getByTestId("avatar-color-input").scrollIntoViewIfNeeded();
-    await settle(page);
-    const box = async (id) => page.getByTestId(id).boundingBox();
-    const panel = await dialog(page).boundingBox();
-    const previewBox = await box("avatar-editor-preview");
-    const pickerBox = await box("avatar-color-picker");
-    const inside = (inner) => !!inner && !!panel && inner.y >= panel.y - 1 && inner.y + inner.height <= panel.y + panel.height + 1;
-    check(`⑥ 낮은 창에서 색 칩까지 스크롤해도 미리보기가 대화상자 안에 보인다 [${scheme}]`, inside(previewBox) && inside(pickerBox), `panel=${JSON.stringify(panel)} preview=${JSON.stringify(previewBox)} picker=${JSON.stringify(pickerBox)}`);
-    await shoot(dialog(page), "short-window-scrolled", scheme);
+    for (const [name, height, pinned] of [["tall-900", 900, true], ["short-720", 720, false]]) {
+      await page.setViewportSize({ width: 1280, height });
+      await settle(page);
+      await page.waitForTimeout(200);
+      await page.getByTestId("avatar-color-input").scrollIntoViewIfNeeded();
+      await settle(page);
+      const state = await page.evaluate(() => {
+        const body = document.querySelector('[data-testid="avatar-editor-body"]');
+        const sticky = document.querySelector(".avatar-editor-sticky");
+        const input = document.querySelector('[data-testid="avatar-color-input"]');
+        const rect = (node) => { const r = node.getBoundingClientRect(); return { top: Math.round(r.top), bottom: Math.round(r.bottom) }; };
+        return {
+          position: getComputedStyle(sticky).position,
+          cssHeight: body.style.getPropertyValue("--avatar-editor-sticky-height"),
+          stickyHeight: Math.round(sticky.getBoundingClientRect().height),
+          scrollable: body.hasAttribute("data-scrollable"),
+          mask: getComputedStyle(body).maskImage || getComputedStyle(body).webkitMaskImage || "",
+          body: rect(body), sticky: rect(sticky), input: rect(input),
+          bodyClient: body.clientHeight, scrollTop: Math.round(body.scrollTop),
+        };
+      });
+      const detail = JSON.stringify(state);
+      if (pinned) {
+        check(`⑥ ${name}: 미리보기 띠가 붙고(sticky) 색 입력까지 스크롤해도 본문 맨 위에 보인다 [${scheme}]`,
+          state.position === "sticky" && state.sticky.top >= state.body.top - 1 && state.sticky.bottom <= state.body.bottom + 1 && state.scrollTop > 0, detail);
+        check(`⑥ ${name}: 띠 높이를 재서 초점 스크롤 여백으로 넘긴다 (--avatar-editor-sticky-height) [${scheme}]`,
+          state.cssHeight === `${state.stickyHeight}px`, detail);
+        check(`⑥ ${name}: 색 입력이 띠 밑이 아니라 띠 아래에 선다 [${scheme}]`, state.input.top >= state.sticky.bottom - 1, detail);
+      } else {
+        check(`⑥ ${name}: 낮은 창에서는 띠가 붙지 않고 본문과 같이 스크롤된다 [${scheme}]`,
+          state.position !== "sticky" && state.sticky.bottom <= state.body.top + 1, detail);
+        check(`⑥ ${name}: 색 입력이 본문 안에 온전히 보인다 [${scheme}]`, state.input.top >= state.body.top - 1 && state.input.bottom <= state.body.bottom + 1, detail);
+      }
+      check(`⑥ ${name}: 내용이 본문보다 길면 스크롤 단서(아래 가장자리 마스크)가 선다 [${scheme}]`,
+        state.scrollable && /gradient/.test(state.mask), detail);
+      await shoot(dialog(page), `${name}-scrolled`, scheme);
+    }
     await page.setViewportSize(VIEWPORT);
     await settle(page);
 
@@ -414,7 +463,7 @@ async function scenesFor(browser, origin, scheme) {
         await settle(page);
         const overflow = await page.evaluate(() => {
           const panel = document.querySelector('[data-testid="avatar-editor-dialog"]');
-          const body = panel?.querySelector(".overflow-y-auto");
+          const body = panel?.querySelector('[data-testid="avatar-editor-body"]');
           return {
             page: document.documentElement.scrollWidth - document.documentElement.clientWidth,
             panel: panel ? panel.scrollWidth - panel.clientWidth : -1,
@@ -494,14 +543,375 @@ async function scenesFor(browser, origin, scheme) {
   }
 }
 
+// =============================================================================
+// 키보드와 낮은 창 (design-review B-1 · H-3). 「키보드로는 닿는데 눈으로는 못 보는 컨트롤」은 늘 Blocker 라서(ADR-0112 D6),
+// 창 높이 여섯 가지에서 초점이 가는 모든 칸이 **눈에 보이는지**를 잰다.
+//
+// 보인다는 것: ① 창 안, ② 스크롤하는 모든 조상 상자의 보이는 영역 안(위에 붙은 미리보기 띠 아래, 아래 가장자리를 녹이는 16px 위),
+// ③ 칸의 한가운데를 실제로 그 칸이 받는다(`elementFromPoint`, 띠가 덮으면 걸린다). 숨긴 라디오는 라벨(칩) 전체로 잰다: 눈에 보이는 것은
+// 칩이고, 칩의 선택 고리·초점 고리는 칩 밖 4px 까지 그려지므로 그만큼의 여유도 요구한다.
+// =============================================================================
+const KEYBOARD_VIEWPORTS = [
+  { name: "h1000", width: 1280, height: 1000 },
+  { name: "h860", width: 1280, height: 860 },
+  { name: "h800", width: 1280, height: 800 },
+  { name: "h720", width: 1280, height: 720 },
+  { name: "h600", width: 1024, height: 600 },
+  // 데스크탑 셸의 최소 창(`clients/desktop/src-tauri/tauri.conf.json` 의 minWidth 720 · minHeight 480).
+  { name: "min-720x480", width: 720, height: 480 },
+];
+
+const focusReport = (page) =>
+  page.evaluate(() => {
+    const RING = 4; // 칩의 선택 고리·초점 고리가 칩 밖으로 그려지는 두께
+    const FADE = 16; // 스크롤 단서가 아래 가장자리를 녹이는 두께
+    const active = document.activeElement;
+    if (!active || active === document.body) return { ok: false, why: ["no-focus"] };
+    const label = active instanceof HTMLInputElement && active.type === "radio" ? active.closest("label") : null;
+    const box = label ?? active;
+    const r = box.getBoundingClientRect();
+    const why = [];
+    const named = (node) => node.getAttribute("data-testid") ?? (node.getAttribute("role") ? `role=${node.getAttribute("role")}` : node.className.toString().split(" ")[0]);
+    const info = {
+      tag: active.tagName.toLowerCase(),
+      testid: active.getAttribute("data-testid") ?? active.closest("[data-testid]")?.getAttribute("data-testid") ?? null,
+      name: (active.getAttribute("aria-label") ?? label?.textContent ?? active.textContent ?? "").trim().slice(0, 20),
+      top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right),
+    };
+    const ring = label ? RING : 0;
+    if (r.top < -0.5 || r.bottom > innerHeight + 0.5 || r.left < -0.5 || r.right > innerWidth + 0.5) why.push("outside-window");
+    const sticky = document.querySelector(".avatar-editor-sticky");
+    const pinned = !!sticky && getComputedStyle(sticky).position === "sticky";
+    for (let node = box.parentElement; node && node !== document.body; node = node.parentElement) {
+      if (!/(auto|scroll)/.test(getComputedStyle(node).overflowY)) continue;
+      if (node.scrollHeight <= node.clientHeight + 1) continue;
+      const nr = node.getBoundingClientRect();
+      let top = nr.top + node.clientTop;
+      let bottom = top + node.clientHeight;
+      const isBody = node.getAttribute("data-testid") === "avatar-editor-body";
+      if (isBody && pinned && !sticky.contains(box)) top = Math.max(top, sticky.getBoundingClientRect().bottom);
+      if (isBody && node.hasAttribute("data-scrollable")) bottom -= FADE;
+      if (r.top - ring < top - 0.5) why.push(`above ${named(node)} by ${Math.round(top - (r.top - ring))}px`);
+      if (r.bottom + ring > bottom + 0.5) why.push(`below ${named(node)} by ${Math.round(r.bottom + ring - bottom)}px`);
+    }
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    if (!hit || !box.contains(hit)) why.push(`covered by ${hit ? `${hit.tagName.toLowerCase()}.${hit.className.toString().split(" ")[0]}` : "nothing"}`);
+    return { ...info, ok: why.length === 0, why };
+  });
+
+const describeStop = (stop) => `${stop.testid ?? stop.tag}${stop.name ? ` "${stop.name}"` : ""} [${stop.top},${stop.bottom}] ${stop.why?.join("; ") ?? ""}`;
+
+async function focusAndReport(page, locator) {
+  await locator.focus();
+  await settle(page);
+  return focusReport(page);
+}
+
+async function keyWalk(page, key, steps) {
+  const stops = [];
+  for (let i = 0; i < steps; i += 1) {
+    await page.keyboard.press(key);
+    await settle(page);
+    stops.push(await focusReport(page));
+  }
+  return stops;
+}
+
+async function openEditorFresh(page) {
+  await goProfile(page);
+  await page.getByTestId("profile-avatar-change").click();
+  await dialog(page).waitFor({ timeout: 15_000 });
+  await settle(page);
+}
+
+async function closeEditor(page) {
+  await page.getByTestId("avatar-editor-cancel").click();
+  await dialog(page).waitFor({ state: "detached", timeout: 15_000 });
+  await settle(page);
+}
+
+function checkStops(label, stops, scheme) {
+  const bad = stops.filter((stop) => !stop.ok);
+  check(`⌨ ${label}: 초점이 간 ${stops.length}곳이 모두 눈에 보인다 [${scheme}]`, stops.length > 0 && bad.length === 0,
+    bad.length ? bad.map(describeStop).join(" | ") : stops.map((stop) => stop.testid ?? stop.tag).join(" > "));
+}
+
+async function keyboardScenes(browser, origin, scheme) {
+  resetServer();
+  const { context, page } = await openContext(browser, origin, scheme);
+  try {
+    for (const viewport of KEYBOARD_VIEWPORTS) {
+      const tag = viewport.name;
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await settle(page);
+      await openEditorFresh(page);
+      await chooseMode(page, "emoji");
+      await emojiCell(page, "🚀").waitFor({ timeout: 15_000 });
+      await emojiCell(page, "🚀").click();
+      await waitDraftPreview(page);
+      await settle(page);
+      await page.waitForTimeout(200);
+
+      // 구조: 높이 780 초과에서만 띠가 붙고, 지원 최소 창에서도 본문이 컨트롤을 보일 만큼의 높이를 남긴다.
+      const layout = await page.evaluate(() => {
+        const body = document.querySelector('[data-testid="avatar-editor-body"]');
+        const sticky = document.querySelector(".avatar-editor-sticky");
+        const panel = document.querySelector('[data-testid="avatar-editor-dialog"]').getBoundingClientRect();
+        return {
+          pinned: getComputedStyle(sticky).position === "sticky",
+          bodyClient: body.clientHeight,
+          scrollable: body.hasAttribute("data-scrollable"),
+          panelBottom: Math.round(panel.bottom), innerHeight,
+        };
+      });
+      check(`⌨ ${tag}: 미리보기 띠는 높이 780 초과에서만 붙는다 [${scheme}]`, layout.pinned === viewport.height > 780, JSON.stringify(layout));
+      check(`⌨ ${tag}: 본문이 컨트롤을 보일 높이를 남긴다(200px 이상) [${scheme}]`, layout.bodyClient >= 200, JSON.stringify(layout));
+      check(`⌨ ${tag}: 대화상자가 창 안에 선다 [${scheme}]`, layout.panelBottom <= layout.innerHeight, JSON.stringify(layout));
+
+      const enabledChips = await page.locator('[data-testid^="avatar-color-"][type="radio"]:not([disabled])').evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-testid")));
+      const cells = page.locator('[data-testid="avatar-emoji-picker"] [data-emoji-cell]');
+      const modeRadio = page.locator('[data-testid^="avatar-editor-mode-"]:checked');
+      const sequence = [
+        modeRadio,
+        page.getByTestId("emoji-search"),
+        cells.first(), cells.nth(20), cells.nth(31),
+        ...enabledChips.map((id) => page.getByTestId(id)),
+        page.getByTestId("avatar-color-input"),
+        page.getByTestId("avatar-editor-cancel"),
+        page.getByTestId("avatar-editor-save"),
+      ];
+
+      // ① 두 엔진 공통: 초점을 위에서 아래로, 다시 아래에서 위로 옮기며 매 정차를 잰다(스크롤이 양방향으로 일어난다).
+      const forward = [];
+      for (const locator of sequence) forward.push(await focusAndReport(page, locator));
+      checkStops(`${tag} 초점을 위에서 아래로`, forward, scheme);
+      const backward = [];
+      for (const locator of [...sequence].reverse()) backward.push(await focusAndReport(page, locator));
+      checkStops(`${tag} 초점을 아래에서 위로`, backward, scheme);
+
+      // ② 방향키: 이모지 격자(내부 스크롤 상자 안)와 배경색 칩 줄. 두 엔진 공통이다.
+      await cells.first().focus();
+      const gridDown = await keyWalk(page, "ArrowDown", 4);
+      const gridUp = await keyWalk(page, "ArrowUp", 4);
+      checkStops(`${tag} 이모지 격자 ↓4 ↑4`, [...gridDown, ...gridUp], scheme);
+      await page.locator('[data-testid^="avatar-color-"][type="radio"]:checked').focus();
+      const chipsRight = await keyWalk(page, "ArrowRight", 6);
+      const chipsLeft = await keyWalk(page, "ArrowLeft", 6);
+      checkStops(`${tag} 배경색 칩 →6 ←6`, [...chipsRight, ...chipsLeft], scheme);
+
+      // ③ 진짜 Tab·Shift+Tab 은 Chromium 에서만 잰다(WebKit 의 Tab 은 기본 설정에서 단추와 라디오를 건너뛴다: 엔진 기본값).
+      if (ENGINE === "chromium") {
+        await modeRadio.focus();
+        const tabForward = [];
+        for (let i = 0; i < 40; i += 1) {
+          const [stop] = await keyWalk(page, "Tab", 1);
+          tabForward.push(stop);
+          if (stop.testid === "avatar-editor-save") break;
+        }
+        check(`⌨ ${tag} Tab 이 저장 단추까지 닿는다 [${scheme}]`, tabForward.at(-1)?.testid === "avatar-editor-save", tabForward.map((stop) => stop.testid ?? stop.tag).join(" > "));
+        checkStops(`${tag} Tab`, tabForward, scheme);
+        const tabBackward = [];
+        for (let i = 0; i < 40; i += 1) {
+          const [stop] = await keyWalk(page, "Shift+Tab", 1);
+          tabBackward.push(stop);
+          if (stop.testid?.startsWith("avatar-editor-mode-")) break;
+        }
+        check(`⌨ ${tag} Shift+Tab 이 종류 고르기까지 올라온다 [${scheme}]`, !!tabBackward.at(-1)?.testid?.startsWith("avatar-editor-mode-"), tabBackward.map((stop) => stop.testid ?? stop.tag).join(" > "));
+        checkStops(`${tag} Shift+Tab`, tabBackward, scheme);
+      }
+
+      // 증거 캡처: 마지막 색 칩에 초점이 있을 때의 대화상자와(낮은 창에서 가장 깊은 곳), 창 전체.
+      if (enabledChips.length > 0) await page.getByTestId(enabledChips.at(-1)).focus();
+      await settle(page);
+      await shoot(dialog(page), `kbd-${tag}-last-chip`, scheme);
+      if (tag === "h720" || tag === "min-720x480") {
+        const path = resolve(outDir(), `kbd-${tag}-page-${scheme}.png`);
+        await page.screenshot({ path });
+        meta.push({ name: `kbd-${tag}-page`, scheme, path });
+        await page.getByTestId("avatar-editor-mode-emoji").focus();
+        await settle(page);
+        await shoot(dialog(page), `kbd-${tag}-first-stop`, scheme);
+      }
+      await closeEditor(page);
+    }
+  } finally {
+    await context.close();
+  }
+}
+
+// =============================================================================
+// 상태 장면 (design-review 의 증거 레인 보강): 올리는 중 · 오류 · 깨진 사진 · 오프라인 · 되돌리기 확인과 Esc.
+// =============================================================================
+async function saveEmojiAvatar(page, glyph = "🚀") {
+  await openEditorFresh(page);
+  await chooseMode(page, "emoji");
+  await emojiCell(page, glyph).click();
+  await waitDraftPreview(page);
+  await pickColor(page, "navy");
+  await settle(page);
+  await page.getByTestId("avatar-editor-save").click();
+  await dialog(page).waitFor({ state: "detached", timeout: 20_000 });
+  await page.waitForFunction(() => document.querySelector('[data-testid="profile-avatar"] img'), null, { timeout: 15_000 });
+  await settle(page);
+}
+
+const activeTestId = (page) => page.evaluate(() => document.activeElement?.getAttribute("data-testid") ?? document.activeElement?.tagName ?? null);
+
+async function statesScenes(browser, origin, scheme) {
+  resetServer();
+  const { context, page } = await openContext(browser, origin, scheme);
+  try {
+    await goProfile(page);
+    await saveEmojiAvatar(page);
+
+    // ---- 올리는 중: 취소는 native disabled, Esc 도 못 닫는다(H-1) -----------------------------------
+    await openEditorFresh(page);
+    await chooseMode(page, "emoji");
+    await emojiCell(page, "🔥").click();
+    await waitDraftPreview(page);
+    await pickColor(page, "forest");
+    await settle(page);
+    holdNextUpload();
+    await page.getByTestId("avatar-editor-save").click();
+    await page.waitForFunction(() => document.querySelector('[data-testid="avatar-editor-save"]')?.getAttribute("aria-busy") === "true", null, { timeout: 10_000 });
+    await page.waitForTimeout(250);
+    const cancel = page.getByTestId("avatar-editor-cancel");
+    check(`H-1 올리는 동안 취소는 native disabled 다 [${scheme}]`, await cancel.isDisabled(), "");
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(200);
+    check(`H-1 올리는 동안 Esc 도 대화상자를 닫지 못한다 [${scheme}]`, await dialog(page).isVisible(), "");
+    await shoot(dialog(page), "busy-uploading", scheme);
+    server.release();
+    await dialog(page).waitFor({ state: "detached", timeout: 20_000 });
+    await settle(page);
+
+    // ---- 오류: 그려 올린 PNG 는 「프로필 사진」이라고 말하지 않는다(M-4) ----------------------------------
+    for (const [status, expected, label] of [[500, /아바타를 올리지 못했어요/, "error-500"], [429, /아바타를 너무 자주 바꿨어요/, "error-429"]]) {
+      await openEditorFresh(page);
+      await chooseMode(page, "emoji");
+      await emojiCell(page, "🚀").click();
+      await waitDraftPreview(page);
+      await pickColor(page, "navy");
+      await settle(page);
+      server.failUpload = status;
+      await page.getByTestId("avatar-editor-save").click();
+      await page.getByTestId("avatar-editor-error").waitFor({ timeout: 10_000 });
+      const message = (await page.getByTestId("avatar-editor-error").textContent())?.trim() ?? "";
+      check(`M-4 서버 ${status} 는 아바타 문장으로 말한다 (「프로필 사진」·한도 숫자가 없다) [${scheme}]`, expected.test(message) && !/프로필 사진|5MB|4096px/.test(message), `"${message}"`);
+      check(`M-4 서버 ${status} 뒤에도 대화상자가 열려 있고 취소가 다시 열린다 [${scheme}]`, (await dialog(page).isVisible()) && !(await page.getByTestId("avatar-editor-cancel").isDisabled()), "");
+      await shoot(dialog(page), label, scheme);
+      server.failUpload = null;
+      await closeEditor(page);
+    }
+
+    // ---- 깨진 사진(M-3): 이름만 .png 인 바이트는 미리보기도 저장도 열지 않는다 ----------------------------
+    await openEditorFresh(page);
+    await page.getByTestId("profile-avatar-input").setInputFiles({ name: "fake.png", mimeType: "image/png", buffer: Buffer.from("this is not an image at all, only bytes with a png name") });
+    await page.getByTestId("avatar-editor-error").waitFor({ timeout: 10_000 });
+    const brokenText = (await page.getByTestId("avatar-editor-error").textContent())?.trim() ?? "";
+    const brokenSource = await page.getByTestId("avatar-editor-preview").getAttribute("data-source");
+    const brokenSave = await page.getByTestId("avatar-editor-save").getAttribute("aria-disabled");
+    check(`M-3 이미지로 열리지 않는 파일은 읽지 못했다고 말하고 저장을 열지 않는다 [${scheme}]`, /읽지 못했어요/.test(brokenText) && brokenSource === "current" && brokenSave === "true", `"${brokenText}" source=${brokenSource} save.aria-disabled=${brokenSave}`);
+    await shoot(dialog(page), "photo-broken", scheme);
+    await closeEditor(page);
+
+    // ---- 오프라인: 이유가 잠긴 단추 바로 위에 선다(M-1) ------------------------------------------------
+    await openEditorFresh(page);
+    await chooseMode(page, "emoji");
+    await emojiCell(page, "🚀").click();
+    await waitDraftPreview(page);
+    await settle(page);
+    await page.evaluate(() => { window.__forceOffline = true; window.dispatchEvent(new Event("offline")); });
+    await page.getByTestId("avatar-editor-offline").waitFor({ timeout: 10_000 });
+    await settle(page);
+    const offline = await page.evaluate(() => {
+      const banner = document.querySelector('[data-testid="avatar-editor-offline"]');
+      const body = document.querySelector('[data-testid="avatar-editor-body"]');
+      const save = document.querySelector('[data-testid="avatar-editor-save"]');
+      const reset = document.querySelector('[data-testid="avatar-editor-reset"]');
+      const bannerRect = banner.getBoundingClientRect();
+      const saveRect = save.getBoundingClientRect();
+      const reasonText = (button) => (button?.getAttribute("aria-describedby") ?? "").split(" ").filter(Boolean).map((id) => document.getElementById(id)?.textContent ?? "").join(" ");
+      return {
+        outsideBody: !body.contains(banner),
+        aboveButtons: bannerRect.bottom <= saveRect.top,
+        sameInset: Math.abs(bannerRect.left - document.querySelector('[data-testid="avatar-editor-dialog"]').getBoundingClientRect().left - 16) <= 1,
+        saveLocked: save.getAttribute("aria-disabled") === "true",
+        saveReason: reasonText(save),
+        resetReason: reasonText(reset),
+        visible: bannerRect.top >= 0 && bannerRect.bottom <= innerHeight,
+      };
+    });
+    check(`M-1 오프라인 배너가 스크롤 본문 밖, 잠긴 단추 위에 서서 늘 보인다 [${scheme}]`, offline.outsideBody && offline.aboveButtons && offline.visible, JSON.stringify(offline));
+    check(`M-1 배너가 푸터와 같은 안쪽 여백(16px)에 선다 [${scheme}]`, offline.sameInset, JSON.stringify(offline));
+    check(`M-1 잠긴 저장·되돌리기가 가리키는 이유 문장이 배너의 그 문장이다 [${scheme}]`, offline.saveLocked && /오프라인|연결이 끊겨/.test(offline.saveReason) && /오프라인|연결이 끊겨/.test(offline.resetReason), JSON.stringify(offline));
+    await shoot(dialog(page), "offline-editor", scheme);
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await settle(page);
+    await page.getByTestId("avatar-color-input").scrollIntoViewIfNeeded();
+    await settle(page);
+    const shortOffline = await page.evaluate(() => {
+      const banner = document.querySelector('[data-testid="avatar-editor-offline"]').getBoundingClientRect();
+      return banner.top >= 0 && banner.bottom <= innerHeight;
+    });
+    check(`M-1 낮은 창에서 본문 끝까지 스크롤해도 오프라인 이유가 보인다 [${scheme}]`, shortOffline, "");
+    await shoot(dialog(page), "offline-editor-short-scrolled", scheme);
+    await page.setViewportSize(VIEWPORT);
+    await page.evaluate(() => { window.__forceOffline = false; window.dispatchEvent(new Event("online")); });
+    await page.getByTestId("avatar-editor-offline").waitFor({ state: "detached", timeout: 10_000 });
+    await closeEditor(page);
+
+    // ---- 되돌리기 확인과 Esc (두 엔진): 첫 Esc 는 질문만, 둘째가 대화상자 ------------------------------------
+    await openEditorFresh(page);
+    await page.getByTestId("avatar-editor-reset").click();
+    await page.getByTestId("avatar-editor-reset-question").waitFor();
+    await settle(page);
+    const asking = await page.evaluate(() => {
+      const save = document.querySelector('[data-testid="avatar-editor-save"]');
+      const question = document.querySelector('[data-testid="avatar-editor-reset-question"]').getBoundingClientRect();
+      const panel = document.querySelector('[data-testid="avatar-editor-dialog"]').getBoundingClientRect();
+      return { saveHidden: save.getBoundingClientRect().width === 0, questionInside: question.left >= panel.left && question.right <= panel.right };
+    });
+    check(`M-2 확인 질문이 열리면 저장·취소는 숨어 「취소」가 둘이 되지 않는다 [${scheme}]`, asking.saveHidden && asking.questionInside, JSON.stringify(asking));
+    await shoot(dialog(page), "reset-confirm", scheme);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await settle(page);
+    const narrow = await page.evaluate(() => {
+      const question = document.querySelector('[data-testid="avatar-editor-reset-question"]').getBoundingClientRect();
+      const panel = document.querySelector('[data-testid="avatar-editor-dialog"]').getBoundingClientRect();
+      return { overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, questionInside: question.left >= panel.left - 0.5 && question.right <= panel.right + 0.5 };
+    });
+    check(`M-2 390px 에서도 확인 질문이 대화상자 안에 서고 가로로 넘치지 않는다 [${scheme}]`, narrow.overflow <= 0 && narrow.questionInside, JSON.stringify(narrow));
+    await shoot(dialog(page), "narrow-390-reset-confirm", scheme);
+    await page.setViewportSize(VIEWPORT);
+    await settle(page);
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(250);
+    check(`Esc 첫 번째: 질문만 닫히고 대화상자는 남으며 초점은 「기본으로 되돌리기」로 간다 [${scheme}]`,
+      (await page.getByTestId("avatar-editor-reset-question").count()) === 0 && (await dialog(page).isVisible()) && (await activeTestId(page)) === "avatar-editor-reset",
+      `active=${await activeTestId(page)}`);
+    await page.keyboard.press("Escape");
+    await dialog(page).waitFor({ state: "detached", timeout: 10_000 });
+    await page.waitForTimeout(250);
+    check(`Esc 두 번째: 대화상자가 닫히고 초점이 「아바타 바꾸기」 단추로 돌아온다 [${scheme}]`, (await activeTestId(page)) === "profile-avatar-change", `active=${await activeTestId(page)}`);
+  } finally {
+    await context.close();
+  }
+}
+
 async function main() {
   const distDir = resolve(WEB_ROOT, DIST);
   if (!existsSync(resolve(distDir, "index.html"))) throw new Error(`${distDir}/index.html 이 없다. 먼저 빌드한다.`);
   mkdirSync(outDir(), { recursive: true });
   const preview = await startGuardedPreview({ webRoot: WEB_ROOT, port: PORT, portEnvVar: "CAPTURE_PORT", extraArgs: ["--outDir", distDir] });
   const browser = await launcher.launch();
+  const wanted = new Set((process.env.SCENES || "main,keyboard,states").split(",").map((name) => name.trim()));
   try {
-    for (const scheme of SCHEMES) await scenesFor(browser, preview.origin, scheme);
+    for (const scheme of SCHEMES) {
+      if (wanted.has("main")) await scenesFor(browser, preview.origin, scheme);
+      if (wanted.has("keyboard")) await keyboardScenes(browser, preview.origin, scheme);
+      if (wanted.has("states")) await statesScenes(browser, preview.origin, scheme);
+    }
   } finally {
     await browser.close();
     await preview.stop?.();

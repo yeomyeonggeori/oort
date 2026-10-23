@@ -98,7 +98,7 @@ function contractViolations(css: string): string[] {
   if (stickyTall?.get("z-index") !== "var(--layer-content-float)") problems.push("띠의 층이 이름 붙은 층(--layer-content-float)이 아니다");
   if (!stickyTall?.has("background-color")) problems.push("띠에 바탕이 없다(스크롤하는 칸이 비친다)");
   if (!stickyBase?.has("margin-inline") || !stickyBase?.has("padding-inline")) problems.push("띠가 본문의 바깥 여백까지 덮지 않는다");
-  if (!/^var\(--avatar-editor-sticky-height, [^)]+\)$/.test(bodyTall?.get("scroll-padding-block-start") ?? "")) {
+  if (!/^calc\(var\(--avatar-editor-sticky-height, [^)]+\) \+ var\(--spacing-\d+\)\)$/.test(bodyTall?.get("scroll-padding-block-start") ?? "")) {
     problems.push("큰 창에서 초점 스크롤이 띠 높이를 비우지 않는다(scroll-padding-block-start)");
   }
   return problems;
@@ -154,12 +154,12 @@ describe("avatarEditor.css: 키보드로 닿은 칸이 눈에 보이게 하는 �
     ],
     [
       "초점 스크롤의 띠 높이 여백을 빼면",
-      (css) => css.replace(/scroll-padding-block-start: var\(--avatar-editor-sticky-height, [^)]+\);/, ""),
+      (css) => css.replace(/scroll-padding-block-start: calc\(var\(--avatar-editor-sticky-height, [^)]+\) \+ var\(--spacing-\d+\)\);/, ""),
       /scroll-padding-block-start/,
     ],
     [
       "본문의 초점 스크롤 여백을 빼면",
-      (css) => css.replace(/scroll-padding-block: var\(--spacing-2\) var\(--spacing-6\);/, ""),
+      (css) => css.replace(/scroll-padding-block: var\(--spacing-3\) var\(--spacing-8\);/, ""),
       /scroll-padding-block\)/,
     ],
     [
