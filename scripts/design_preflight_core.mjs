@@ -144,12 +144,22 @@ const CATEGORIES = [
 // ---- 토큰 원천 예외 (ADR-0189 D5, #2712) ------------------------------------
 //
 // 디자인 시스템 2.0은 테마 × 모드 × 역할의 **값**을 코어에 둔다(웹 `themes/`
-// 생성본과 폰이 같은 표를 읽게 하려는 결정). 그 표가 들어 있는 두 파일만
+// 생성본과 폰이 같은 표를 읽게 하려는 결정). 그 표가 들어 있는 파일만
 // raw_color 에서 뺀다. 웹 pre-flight 가 `src/design/tokens.css`·`themes/` 를 빼는
 // 것과 같은 성질의 예외이고, 파일 이름으로 닫혀 있다: 같은 폴더의 다른 파일
-// (생성기·이행·밀도)이나 코어 어디에서든 색 문자열이 새로 나오면 계속 빨갛다.
-// em-dash·과장 어휘·진행 낱말은 이 두 파일에서도 그대로 잰다.
-const TOKEN_SOURCE_FILES = new Set(["design/themes.ts", "design/signal.ts"]);
+// (생성기·이행·밀도·파생 엔진)이나 코어 어디에서든 색 문자열이 새로 나오면 계속 빨갛다.
+// em-dash·과장 어휘·진행 낱말은 이 파일들에서도 그대로 잰다.
+//
+// `design/themeCatalog.generated.ts` (AP-1b #4188, ADR-0189 증보 3 D1)는 세 번째 원천이다: 카탈로그
+// 57종의 **색 씨앗**(테마당 열두 색 이하)을 생성해 커밋한 표라 hex 가 본문이다. 청사진 초안은 「카탈로그는 core
+// 라 raw_color 밖」이라고 적었지만 이 검사는 `packages/momo-core/src` 를 훑으므로 예외 목록에 올려야 한다.
+// 같은 폴더의 파생 엔진(`derive.ts`)과 씨앗 추출(`themeSeed.ts`)은 색을 글자로 적지 않고(첫 파티 값을
+// `themes.ts` 에서 읽고 채널 숫자로 쓴다) 예외가 아니다.
+const TOKEN_SOURCE_FILES = new Set([
+  "design/themes.ts",
+  "design/signal.ts",
+  "design/themeCatalog.generated.ts",
+]);
 
 // 배경화면의 단색·기본 제공 표(AP-4 #4191, ADR-0189 증보 3 D4)도 같은 성질의 원천이다: 폰
 // `design/tokens.ts`의 `BACKDROP_SOLIDS`·`BACKDROP_PRESETS`를 옮긴 취향 표라 hex 가 본문이다.
@@ -313,7 +323,7 @@ const SELFTEST_CASES = [
     why: "과장 어휘도 사용자 문장의 문제다",
     src: 'export const NOTE = "손쉽게 이어서 작업하세요";',
   },
-  // ---- 토큰 원천 예외 (ADR-0189 D5, #2712) — 닫힌 두 파일만, raw_color 만.
+  // ---- 토큰 원천 예외 (ADR-0189 D5, #2712; 카탈로그 AP-1b #4188) — 닫힌 세 파일만, raw_color 만.
   {
     want: [],
     file: "design/themes.ts",
@@ -331,6 +341,24 @@ const SELFTEST_CASES = [
     file: "design/signal.ts",
     why: "예외는 raw_color 하나뿐이다 — 원천 파일의 거절 문구도 em-dash 를 잰다",
     src: 'export const REASON = "쓸 수 없어요 — 다른 색을 고르세요";',
+  },
+  {
+    want: [],
+    file: "design/themeCatalog.generated.ts",
+    why: "카탈로그 씨앗 표도 원천이다 (ADR-0189 증보 3 D1)",
+    src: 'export const NORD = { bg: "#2e3440", fg: "#d8dee9" };',
+  },
+  {
+    want: ["raw_color"],
+    file: "design/derive.ts",
+    why: "같은 폴더의 파생 엔진은 색을 글자로 적지 않는다 — 예외가 아니다",
+    src: 'export const FALLBACK = "#2e3440";',
+  },
+  {
+    want: ["raw_color"],
+    file: "design/themeSeed.ts",
+    why: "씨앗 추출의 기본색도 채널 숫자로 쓴다 — 예외가 아니다",
+    src: 'export const FALLBACK_BG = "#1e1e1e";',
   },
   {
     want: ["raw_color"],

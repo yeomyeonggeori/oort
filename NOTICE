@@ -66,6 +66,13 @@ upstream code is copied. The consolidation job re-implements Hindsight's consoli
 Graphiti's contradiction/interval-closing rule over PostgreSQL.
 The attribution table is legal/THIRD_PARTY_NOTICES.md ("Adapted designs and prompts").
 
+Theme catalog (ADR-0189 증보 3, #4188): the theme derivation arithmetic and the theme list/pairs are adapted
+from Buzz (https://github.com/block/buzz, commit af5bb0a, Apache-2.0, Copyright 2026 Block, Inc.); each adapted
+file carries its origin and a change notice in its header, and legal/THIRD_PARTY_NOTICES.md ("Adapted designs
+and prompts") carries the row. The theme catalog also bundles a handful of colors read from 57 third-party
+MIT and Apache-2.0 VS Code color themes; their upstream notices are in legal/THIRD_PARTY_NOTICES.md ("Theme
+palette seeds") and the full texts in legal/generated/THEME_PALETTE_NOTICES.txt.
+
 Named runtime companions operators actually run next to these images:
 
 - PostgreSQL 18 (PostgreSQL License)

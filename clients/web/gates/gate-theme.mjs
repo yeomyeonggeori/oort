@@ -30,6 +30,16 @@
 //        항목을 걷는다(잔존 0).
 //      · 캐시가 없으면 아무 변수도 없이 기본 테마로 서고 앱은 깨지지 않는다.
 //
+//   ⑦ 파생 테마와 엔진 (AP-1b #4188). ⑥은 부트가 **심어 둔** 캐시를 읽는 쪽만 쟀다. 이제 쓰는 쪽(파생 엔진, 지연
+//      청크)이 있으므로 **폐곡선**을 잰다: 엔진이 쓴 캐시를 부트가 그대로 되꽂는다.
+//      · 갤러리로 카탈로그 테마를 고르면 전 화면이 그 테마로 바뀐다(루트 변수 전부, 본문 바닥색, `meta theme-color`),
+//        새로고침 뒤에도 남고, 첫 파티를 고르면 자기가 꽂은 변수가 하나도 안 남고 캐시 항목이 걷힌다(잔존 0).
+//        캐시를 못 쓰는 환경(쓰기를 막는다)에서도 잔존 0이다: 그 길은 저장소의 정리가 아니라 적용기의 정리만이 지킨다.
+//      · 캐시 없이 다크 단독 테마(`catalog:nord`)로 첫 방문 → 엔진이 변수·캐시(`mode: "dark"`)를 쓴다 → 같은
+//        저장소로 JS를 붙잡고 재방문하면 **React가 그리기 전에** 엔진이 쓴 변수 전부가 꽂혀 있고 `data-theme`가
+//        OS(라이트)와 무관하게 다크로 못 박혀 있다. 캐시가 없는 첫 방문의 한 프레임(기본 모습)은 허용된 어긋남이라
+//        여기서 그 사실(변수 0)을 명시적으로 잰다(청사진 §5.2-i, design-review N-1).
+//
 // 서버는 라우트 층에서 스텁된다(gate-ailink 전례). 이 게이트가 재는 것은 번들이
 // 그리는 화면과 그것이 브라우저 저장소에 남기는 것뿐이라, 살아 있는 스택이 필요
 // 없다.
@@ -52,7 +62,14 @@
 //   THEME_GATE_PROVE_RED_CACHE=1 npm run gate:theme
 //     ⑥의 「캐시가 있으면」 장면에서 캐시 항목만 비운다. 첫 페인트에 꽂힐 변수가 사라지므로 그
 //     단언이 무너져야 한다. 통과한다면 그 단언은 캐시가 아니라 아무거나 재고 있었던 것이다.
-// 세 씨앗 모두 환경 변수 전용이고, 기본 실행은 손대지 않은 번들을 읽는다.
+//   THEME_GATE_PROVE_RED_LOOP=1 npm run gate:theme
+//     ⑦의 재방문(엔진이 쓴 캐시를 부트가 읽는 장면)에서 캐시 항목만 비운다. 첫 페인트에 꽂힐 변수가 사라지므로 폐곡선
+//     단언이 무너져야 한다(⑥의 심어 둔 캐시 장면은 그대로라 ⑦만 잡는다는 것까지 보인다).
+//   THEME_GATE_PROVE_RED_ENGINE=1 npm run gate:theme
+//     파생 엔진 청크(`derivedApplier-*.js`)의 요청을 막는다. 엔진이 안 도니 변수도 캐시도 다시 쓰이지 않아서 ⑥①(엔진이
+//     심어 둔 가짜 캐시를 인수한다)과 ⑦이 무너져야 한다. 통과한다면 그 단언들은 엔진이 아니라 부트가 심은 값만 재고
+//     있었던 것이다. 첫 파티만 쓰는 ①~⑤는 이 청크가 필요 없어 그대로 선다.
+// 다섯 씨앗 모두 환경 변수 전용이고, 기본 실행은 손대지 않은 번들을 읽는다.
 //
 // LIMIT: Chromium against Vite preview, WKWebView도 iOS 사파리도 아니다. 여기서
 // 재는 것은 전부 번들 자바스크립트와 CSS의 성질이고 두 곳에서 동일하지만, 홈 화면
@@ -79,6 +96,8 @@ const outDir = process.env.OUT_DIR
 const proveRedBoot = process.env.THEME_GATE_PROVE_RED_BOOT === "1";
 const proveRedPersist = process.env.THEME_GATE_PROVE_RED_PERSIST === "1";
 const proveRedCache = process.env.THEME_GATE_PROVE_RED_CACHE === "1";
+const proveRedLoop = process.env.THEME_GATE_PROVE_RED_LOOP === "1";
+const proveRedEngine = process.env.THEME_GATE_PROVE_RED_ENGINE === "1";
 const proveRedAppearanceCss = process.env.THEME_GATE_PROVE_RED_APPEARANCE_CSS === "1";
 /** red proof가 고쳐 쓴 스타일시트 본문(주소별). 장면마다 컨텍스트가 새로 서도 한 번만 가져온다. */
 const redCssCache = new Map();
@@ -135,6 +154,12 @@ async function installRoutes(context) {
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
     return json(route, {});
   });
+
+  if (proveRedEngine) {
+    // Red proof ⑦-엔진: 파생 엔진을 싣는 청크만 막는다. 첫 파티는 이 청크가 필요 없어서 ①~⑤는 그대로 서고, 파생 테마를
+    // 다루는 ⑥①·⑦만 변수·캐시를 못 얻는다.
+    await context.route("**/assets/derivedApplier-*.js", (route) => route.abort());
+  }
 
   if (proveRedAppearanceCss) {
     // Red proof ⑥(AP-2a #4189): 글자 크기·대화 밀도 규칙의 **속성 선택자 이름만** 바꿔서 어느 규칙도 맞지 않게 한다.
@@ -238,7 +263,8 @@ function readDocument() {
   };
 }
 
-async function firstPaintFacts(browser, seeds, { colorScheme = "light" } = {}) {
+/** 파생 엔진(지연 청크)이 변수를 꽂고 캐시를 다시 쓴 뒤의 문서. `seededCache`와 다른 캐시 항목이 생기면 엔진이 인수한 것이다. */
+async function firstPaintFacts(browser, seeds, { colorScheme = "light", untilEngine = null } = {}) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 900 },
     reducedMotion: "reduce",
@@ -264,7 +290,21 @@ async function firstPaintFacts(browser, seeds, { colorScheme = "light" } = {}) {
       undefined,
       { timeout: 20_000 }
     );
+    if (untilEngine !== null) {
+      // 엔진은 번들보다 늦게 도착하는 지연 청크라 「루트에 자식이 생긴 때」와 경쟁한다. 읽기 전에 그것이 끝나기를 기다린다.
+      await page
+        .waitForFunction(
+          ([name, seeded]) => {
+            const raw = localStorage.getItem(name);
+            return raw !== null && raw !== seeded && raw.includes('"vars"');
+          },
+          [CACHE_ENTRY, untilEngine.seededCache ?? ""],
+          { timeout: 20_000 }
+        )
+        .catch(() => fail(untilEngine.failure));
+    }
     const late = await page.evaluate(readDocument);
+    late.themeColors = await themeColorsOf(page);
     return { early, late };
   } finally {
     await context.close();
@@ -296,6 +336,20 @@ async function choose(page, mode) {
   if (!(await page.getByTestId(`theme-choice-${mode}`).isChecked())) {
     fail(`「${mode}」 칸을 눌렀는데 라디오가 선택되지 않았다`);
   }
+}
+
+/** `#rrggbb` → `rgb(r, g, b)`(브라우저가 계산한 배경색과 같은 모양). */
+function rgbOf(hex) {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim());
+  if (!m) fail(`#rrggbb가 아니다: ${hex}`);
+  return `rgb(${parseInt(m[1], 16)}, ${parseInt(m[2], 16)}, ${parseInt(m[3], 16)})`;
+}
+
+/** `light-dark(a, b)`에서 모드에 맞는 쪽을, 색 하나면 그대로 돌려준다. */
+function pickMode(value, mode) {
+  const pair = /^light-dark\(\s*(#[0-9a-fA-F]{6})\s*,\s*(#[0-9a-fA-F]{6})\s*\)$/.exec(value.trim());
+  if (pair) return mode === "dark" ? pair[2] : pair[1];
+  return value.trim();
 }
 
 async function openThemePanel(page) {
@@ -583,14 +637,30 @@ async function main() {
       }
 
       const INK = "light-dark(#16171b, #f1f1f3)";
+      // 파생 테마가 루트에 꽂는 변수 가운데 화면이 가장 먼저 읽는 것들(전체 33개의 이름은 core derive.test.ts가 정본).
+      const MUST_HAVE_VARS = ["--ink", "--ink-muted", "--surface", "--pane", "--canvas-mid", "--signal", "--agent", "--danger", "--line-strong"];
       const DERIVED = "catalog:nord";
       const cacheOf = (theme) => JSON.stringify({ key: `1|${theme}|-`, vars: { "--ink": INK } });
 
       // ① 파생 테마 + 캐시가 있다. red proof(THEME_GATE_PROVE_RED_CACHE)는 이 항목만 비운다.
-      const withCache = await firstPaintFacts(browser, {
-        [V2_ENTRY]: v2Record({ theme: DERIVED }),
-        ...(proveRedCache ? {} : { [CACHE_ENTRY]: cacheOf(DERIVED) }),
-      });
+      // 심어 둔 캐시는 `--ink` 하나뿐인 가짜다. 부트가 그것을 첫 페인트에 꽂는지(early)를 재고, 앱이 올라온 뒤에는
+      // 파생 엔진이 인수해 **엔진의 값**으로 덮고 캐시를 다시 쓴다(late, AP-1b #4188).
+      const seededCache = cacheOf(DERIVED);
+      const withCache = await firstPaintFacts(
+        browser,
+        {
+          [V2_ENTRY]: v2Record({ theme: DERIVED }),
+          ...(proveRedCache ? {} : { [CACHE_ENTRY]: seededCache }),
+        },
+        {
+          untilEngine: {
+            seededCache,
+            failure:
+              "파생 엔진이 캐시를 다시 쓰지 않았다(20초). 파생 테마(catalog:nord)가 저장돼 있으면 앱이 올라온 뒤 " +
+              "엔진 청크를 싣고 변수·캐시를 써야 한다.",
+          },
+        }
+      );
       if (withCache.early.rendered) {
         fail("캐시 첫 페인트 창에서 앱이 이미 그려졌다. 이 창에서는 FOUC를 볼 수 없다.");
       }
@@ -603,10 +673,15 @@ async function main() {
             `파생 테마의 캐시가 있으면 /theme-boot.js가 첫 렌더 전에 setProperty로 되꽂아야 한다.`
         );
       }
-      if (withCache.late.vars["--ink"] !== INK || withCache.late.cache === null) {
+      if (withCache.late.cache === null) {
+        fail("파생 팔레트인데 앱이 올라온 뒤 캐시 항목이 걷혔다. 파생 테마의 캐시는 엔진이 다시 써야 한다.");
+      }
+      // 엔진이 인수했다: 심어 둔 가짜 값(--ink 하나)이 아니라 엔진의 33개 변수가 서 있다.
+      if (withCache.late.vars["--ink"] === INK || Object.keys(withCache.late.vars).length < MUST_HAVE_VARS.length) {
         fail(
-          `파생 팔레트인데 앱이 올라온 뒤 캐시 변수(${JSON.stringify(withCache.late.vars["--ink"])})나 항목이 걷혔다. ` +
-            `파생 엔진(AP-1b)이 인수하기 전까지 저장소는 파생 팔레트의 캐시를 건드리지 않는다.`
+          `앱이 올라오고 엔진이 캐시를 다시 썼는데 루트의 변수가 엔진의 것이 아니다(--ink=${JSON.stringify(
+            withCache.late.vars["--ink"]
+          )}, 변수 ${Object.keys(withCache.late.vars).length}개). 심어 둔 가짜 캐시를 엔진이 덮어야 한다.`
         );
       }
 
@@ -661,8 +736,251 @@ async function main() {
         );
       }
 
+      // ---- ⑦b 폐곡선: 엔진이 쓴 캐시를 부트가 그대로 되꽂는다 (AP-1b #4188, AC 4) -------------
+      // OS는 라이트, 저장된 것은 다크 단독 테마(nord) + 시스템 스킴이다. 다크로 못 박히려면 캐시의 mode가 일해야 한다.
+      const nordSeed = { [V2_ENTRY]: v2Record({ theme: DERIVED, scheme: "system" }) };
+      const first = await firstPaintFacts(browser, nordSeed, {
+        colorScheme: "light",
+        untilEngine: {
+          seededCache: "",
+          failure:
+            "캐시 없이 파생 테마(catalog:nord)로 첫 방문했는데 엔진이 캐시를 쓰지 않았다(20초). 엔진 청크가 " +
+            "안 왔거나 적용기가 파생 테마를 보지 못한다.",
+        },
+      });
+      if (first.early.rendered) fail("⑦b 첫 방문의 첫 페인트 창에서 앱이 이미 그려졌다. FOUC를 볼 수 없다.");
+      // 허용된 어긋남: 캐시가 없는 첫 실행의 한 프레임은 기본 모습이다(청사진 §5.2-i). 그 사실을 명시적으로 잰다.
+      if (Object.keys(first.early.vars).length !== 0 || "data-theme" in first.early.attrs) {
+        fail(
+          `캐시가 없는 첫 방문의 첫 페인트에 변수나 data-theme이 있다(${JSON.stringify(first.early.vars)}, ` +
+            `${first.early.attrs["data-theme"]}). 부트는 캐시 없이 파생 값을 지어내지 않는다.`
+        );
+      }
+      if (first.late.attrs["data-theme"] !== "dark") {
+        fail(
+          `다크 단독 테마(nord)인데 OS 라이트 위에서 앱이 올라온 뒤 data-theme=${first.late.attrs["data-theme"]}다. ` +
+            `단일 모드 테마는 사람이 고른 스킴(시스템)이나 OS와 무관하게 그 모드로 못 박혀야 한다.`
+        );
+      }
+      for (const name of MUST_HAVE_VARS) {
+        const value = first.late.vars[name];
+        if (!value) fail(`엔진이 ${name}을 꽂지 않았다`);
+        if (value.includes("light-dark")) fail(`단일 모드 테마의 ${name}이 light-dark 쌍이다(${value}). 색 하나여야 한다.`);
+      }
+      const written = JSON.parse(first.late.cache);
+      if (!/^[^|]+\|catalog:nord\|-$/.test(written.key)) fail(`엔진이 쓴 캐시 키가 틀리다: ${written.key}`);
+      if (written.mode !== "dark") {
+        fail(
+          `엔진이 단일 모드(다크) 테마의 캐시에 mode를 쓰지 않았다(${JSON.stringify(written.mode)}). mode가 없으면 ` +
+            `다음 부팅의 첫 프레임에 부트와 런타임이 data-theme를 다르게 찍는다.`
+        );
+      }
+      for (const [name, value] of Object.entries(written.vars)) {
+        if (first.late.vars[name] !== value) fail(`캐시의 ${name}(${value})이 루트에 꽂힌 값(${first.late.vars[name]})과 다르다`);
+      }
+      for (const meta of first.late.themeColors) {
+        if (meta.content.toLowerCase() !== first.late.vars["--canvas-mid"].toLowerCase()) {
+          fail(`엔진이 올라온 뒤 theme-color ${meta.media}가 ${meta.content}다(파생 바닥색 ${first.late.vars["--canvas-mid"]}이어야 한다)`);
+        }
+      }
+
+      // 재방문: 엔진이 쓴 캐시 그대로를 심고 JS를 붙잡는다. red proof(THEME_GATE_PROVE_RED_LOOP)는 이 캐시만 비운다.
+      const second = await firstPaintFacts(
+        browser,
+        { ...nordSeed, ...(proveRedLoop ? {} : { [CACHE_ENTRY]: first.late.cache }) },
+        { colorScheme: "light" }
+      );
+      if (second.early.rendered) fail("⑦b 재방문의 첫 페인트 창에서 앱이 이미 그려졌다. FOUC를 볼 수 없다.");
+      const missing = Object.keys(written.vars).filter((name) => second.early.vars[name] !== written.vars[name]);
+      if (missing.length > 0) {
+        fail(
+          `엔진이 쓴 캐시가 있는데 번들이 도착하기 전의 문서에 변수 ${missing.length}/${Object.keys(written.vars).length}개가 ` +
+            `없거나 다르다(${missing.slice(0, 4).join(", ")}). 파생 테마는 엔진이 쓴 캐시를 부트가 첫 렌더 전에 되꽂아야 한다.`
+        );
+      }
+      if (second.early.attrs["data-theme"] !== "dark" || second.early.attrs["data-palette"] !== "derived") {
+        fail(
+          `재방문의 첫 페인트에 data-theme=${second.early.attrs["data-theme"]} data-palette=${second.early.attrs["data-palette"]}다 ` +
+            `(OS는 라이트지만 다크 단독 테마의 캐시 mode가 첫 프레임을 다크로 못 박아야 한다)`
+        );
+      }
+
       await page.waitForSelector("nav[aria-label='워크스페이스 탐색']");
       await openThemePanel(page);
+
+      // ---- ⑦a 갤러리로 파생 테마를 고른다 (AP-1b #4188) ----------------------
+      // 위 ②에서 새로고침한 라이트 고정 상태(첫 파티)에서 시작한다. 갤러리를 펴고 카탈로그의 짝 테마 GitHub를 고른다.
+      await page.getByTestId("theme-style-trigger").waitFor({ timeout: 20_000 }); // 갤러리는 지연 청크다
+      await page.getByTestId("theme-style-trigger").click();
+      await page.getByTestId("theme-style-options").waitFor();
+      await page.locator('label.theme-tile:has(input[value="catalog:github"])').click();
+      await page
+        .waitForFunction(
+          (names) =>
+            document.documentElement.getAttribute("data-theme-ref") === "catalog:github" &&
+            names.every((name) => document.documentElement.style.getPropertyValue(name) !== ""),
+          MUST_HAVE_VARS,
+          { timeout: 20_000 }
+        )
+        .catch(() =>
+          fail(
+            "갤러리에서 GitHub를 골랐는데 루트에 파생 변수가 서지 않았다. 고른 테마는 저장·스탬프만 되고 엔진이 변수를 " +
+              "꽂지 못했다(파생 엔진 청크가 안 왔거나 적용기가 구독하지 않는다)."
+          )
+        );
+      const picked = await page.evaluate(() => {
+        const root = document.documentElement;
+        const vars = {};
+        for (let i = 0; i < root.style.length; i++) {
+          const name = root.style.item(i);
+          vars[name] = root.style.getPropertyValue(name);
+        }
+        return {
+          attrs: Object.fromEntries([...root.attributes].map((a) => [a.name, a.value])),
+          vars,
+          cache: localStorage.getItem("momo.web.theme.cache.v1"),
+          stored: localStorage.getItem("momo.web.appearance.v2"),
+        };
+      });
+      if (picked.attrs["data-palette"] !== "derived" || picked.attrs["data-theme"] !== "light") {
+        fail(
+          `GitHub를 골랐는데 루트가 data-palette=${picked.attrs["data-palette"]} data-theme=${picked.attrs["data-theme"]}다 ` +
+            `(derived·light여야 한다: 라이트 고정은 테마를 바꿔도 유지된다)`
+        );
+      }
+      const derivedPane = pickMode(picked.vars["--pane"], "light");
+      const bodyAfterPick = await surfaceOf(page);
+      if (bodyAfterPick !== rgbOf(derivedPane)) {
+        fail(
+          `전 화면이 고른 테마로 바뀌지 않았다. 본문 배경이 ${bodyAfterPick}인데 엔진의 --pane(라이트)은 ` +
+            `${derivedPane}(${rgbOf(derivedPane)})다. 변수는 꽂혔지만 화면이 그것을 읽지 않는다.`
+        );
+      }
+      if (bodyAfterPick === pinnedLight) {
+        fail(`고른 테마(GitHub)와 첫 파티(새벽하늘)의 본문 배경이 같다(${bodyAfterPick}). 테마가 화면에 닿지 않았다.`);
+      }
+      if (luminance(bodyAfterPick) <= systemDarkLum) {
+        fail(`라이트 고정 위에서 파생 테마의 배경(${bodyAfterPick})이 OS 다크(${systemDark})보다 밝지 않다`);
+      }
+      // ④ 파생 바닥색을 따라간다: 라이트 고정이면 두 줄 모두 라이트의 바닥색이다.
+      const derivedCanvas = pickMode(picked.vars["--canvas-mid"], "light");
+      const derivedMetas = await themeColorsOf(page);
+      for (const meta of derivedMetas) {
+        if (meta.content.toLowerCase() !== derivedCanvas.toLowerCase()) {
+          fail(
+            `theme-color ${meta.media}가 ${meta.content}다. 파생 테마를 고르면 파생 바닥색(${derivedCanvas})으로 ` +
+              `맞춰져야 한다(주소창이 앱 색과 어긋난다).`
+          );
+        }
+      }
+      const pickedCache = JSON.parse(picked.cache ?? "null");
+      if (!pickedCache || !/^[^|]+\|catalog:github\|-$/.test(pickedCache.key) || pickedCache.mode !== undefined) {
+        fail(`파생 테마를 고른 뒤 부트 캐시가 없거나 키·mode가 틀리다: ${picked.cache}`);
+      }
+      for (const name of MUST_HAVE_VARS) {
+        if (pickedCache.vars[name] !== picked.vars[name]) {
+          fail(`캐시의 ${name}(${pickedCache.vars[name]})이 루트의 값(${picked.vars[name]})과 다르다`);
+        }
+      }
+      if (JSON.parse(picked.stored).theme !== "catalog:github") {
+        fail("고른 테마가 localStorage(momo.web.appearance.v2)에 저장되지 않았다");
+      }
+      await page.screenshot({ path: `${outDir}/settings-theme-derived-github-light.png` });
+
+      // 새로고침 뒤에도 남는다(저장 + 캐시 + 엔진).
+      await page.reload({ waitUntil: "networkidle" });
+      await openThemePanel(page);
+      await page
+        .waitForFunction(
+          (names) =>
+            document.documentElement.getAttribute("data-theme-ref") === "catalog:github" &&
+            names.every((name) => document.documentElement.style.getPropertyValue(name) !== ""),
+          MUST_HAVE_VARS,
+          { timeout: 20_000 }
+        )
+        .catch(() => fail("새로고침하니 고른 파생 테마가 풀렸거나 변수가 다시 서지 않았다"));
+      await page.getByTestId("theme-style-trigger").waitFor({ timeout: 20_000 });
+      if (!(await page.getByTestId("theme-style-trigger").getAttribute("aria-label"))?.includes("GitHub")) {
+        fail("새로고침 뒤 갤러리 행이 고른 테마(GitHub)를 가리키지 않는다");
+      }
+
+      // 첫 파티로 돌아가면 자기가 꽂은 변수가 하나도 안 남고 캐시 항목이 걷힌다(잔존 0).
+      await page.getByTestId("theme-style-trigger").click();
+      await page.getByTestId("theme-style-options").waitFor();
+      await page.locator('label.theme-tile:has(input[value="dawnsky"])').click();
+      await page
+        .waitForFunction(() => document.documentElement.getAttribute("data-theme-ref") === "dawnsky", undefined, {
+          timeout: 5_000,
+        })
+        .catch(() => fail("갤러리에서 새벽하늘을 골랐는데 테마 참조가 바뀌지 않았다"));
+      const back = await page.evaluate((names) => {
+        const root = document.documentElement;
+        return {
+          left: names.filter((name) => root.style.getPropertyValue(name) !== ""),
+          palette: root.getAttribute("data-palette"),
+          cache: localStorage.getItem("momo.web.theme.cache.v1"),
+        };
+      }, MUST_HAVE_VARS);
+      if (back.left.length !== 0 || back.palette !== "dawnsky" || back.cache !== null) {
+        fail(
+          `첫 파티로 돌아왔는데 파생 흔적이 남았다: 변수 ${JSON.stringify(back.left)}, palette ${back.palette}, ` +
+            `캐시 ${back.cache === null ? "없음" : "있음"} (잔존 0이어야 한다)`
+        );
+      }
+      if ((await surfaceOf(page)) !== pinnedLight) {
+        fail("첫 파티로 돌아왔는데 본문 배경이 원래 라이트 새벽하늘이 아니다");
+      }
+      const backMetas = await themeColorsOf(page);
+      for (const meta of backMetas) {
+        if (meta.content.toLowerCase() === derivedCanvas.toLowerCase()) {
+          fail(`첫 파티로 돌아왔는데 theme-color ${meta.media}가 파생 바닥색(${derivedCanvas})에 묶여 있다`);
+        }
+      }
+
+      // ⑦a2 캐시를 못 쓰는 환경(프라이빗 모드·저장소 정책). 저장소의 정리(`retireThemeCache`)는 **캐시 항목이 이름 붙인**
+      // 변수를 걷으므로 캐시가 없으면 일하지 못한다. 그때는 적용기가 꽂을 때 적어 둔 이름만으로 자기 변수를 전부 걷어야 한다
+      // (잔존 0의 두 번째 방어선). 위 ⑦a는 캐시가 쓰이는 환경이라 두 정리가 겹쳐서, 적용기의 정리가 깨져도 통과한다.
+      await page.evaluate(() => {
+        const original = Storage.prototype.setItem;
+        window.__momoOriginalSetItem = original;
+        Storage.prototype.setItem = function (key, value) {
+          if (key === "momo.web.theme.cache.v1") throw new Error("denied");
+          return original.call(this, key, value);
+        };
+      });
+      await page.locator('label.theme-tile:has(input[value="catalog:github"])').click();
+      await page
+        .waitForFunction(
+          (names) =>
+            document.documentElement.getAttribute("data-theme-ref") === "catalog:github" &&
+            names.every((name) => document.documentElement.style.getPropertyValue(name) !== ""),
+          MUST_HAVE_VARS,
+          { timeout: 20_000 }
+        )
+        .catch(() => fail("캐시 쓰기를 막은 환경에서 GitHub를 골랐는데 파생 변수가 서지 않았다(캐시 없이도 엔진은 변수를 꽂아야 한다)"));
+      if ((await page.evaluate(() => localStorage.getItem("momo.web.theme.cache.v1"))) !== null) {
+        fail("캐시 쓰기를 막았는데 캐시 항목이 있다. 이 장면의 전제(캐시 없음)가 성립하지 않는다.");
+      }
+      await page.locator('label.theme-tile:has(input[value="dawnsky"])').click();
+      await page
+        .waitForFunction(() => document.documentElement.getAttribute("data-theme-ref") === "dawnsky", undefined, {
+          timeout: 5_000,
+        })
+        .catch(() => fail("캐시 쓰기를 막은 환경에서 새벽하늘을 골랐는데 테마 참조가 바뀌지 않았다"));
+      const leftWithoutCache = await page.evaluate(
+        (names) => names.filter((name) => document.documentElement.style.getPropertyValue(name) !== ""),
+        MUST_HAVE_VARS
+      );
+      if (leftWithoutCache.length !== 0) {
+        fail(
+          `캐시를 못 쓰는 환경에서 첫 파티로 돌아왔는데 파생 변수가 남았다(${JSON.stringify(leftWithoutCache)}). ` +
+            `저장소의 정리는 캐시 항목이 있어야 일하므로, 적용기가 꽂을 때 적어 둔 이름으로 스스로 걷어야 한다.`
+        );
+      }
+      await page.evaluate(() => {
+        Storage.prototype.setItem = window.__momoOriginalSetItem;
+        delete window.__momoOriginalSetItem;
+      });
 
       // ---- ⑤ 시스템으로 되돌아온다 ------------------------------------------
       await choose(page, "system");
@@ -736,6 +1054,8 @@ async function main() {
           `  첫 페인트 액센트       ${earlyAccent.accent} (시드 ${accentId}, 미렌더)`,
           `  첫 페인트 v2 속성      ${Object.keys(expectedAttrs).length}개 (아홉 + 옛 data-accent, data-glass 없음, 미렌더)`,
           `  부트 캐시              파생 테마: 첫 페인트에 --ink 꽂힘 · 첫 파티: 안 꽂고 앱 뒤 항목 걷힘 · 없으면 기본 테마`,
+          `  파생 엔진(AP-1b)       갤러리로 GitHub 선택 → 본문 배경 ${bodyAfterPick} = 엔진의 --pane · theme-color ${derivedCanvas} · 새로고침 유지 · 첫 파티로 돌아오면 잔존 0`,
+          `  폐곡선                 엔진이 쓴 캐시 ${Object.keys(written.vars).length}개 변수가 재방문 첫 페인트(미렌더)에 모두 꽂힘 · OS 라이트 위 다크 단독 테마 data-theme=dark`,
           `  캡처                   ${systemShot}`,
           `                         ${lightShot}`,
           `                         ${darkShot}`,
