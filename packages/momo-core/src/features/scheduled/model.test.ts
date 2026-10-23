@@ -44,8 +44,13 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+/**
+ * 2026년 Asia/Seoul 벽시계 시각의 에포크. **프로세스의 TZ와 무관하게** 계산한다: 모듈 상수(`NOW`)는 `beforeEach`가
+ * TZ를 고정하기 전에 만들어지고, CI는 UTC로 돌아서 지역 시각(`new Date(y, m, d, h)`)으로 만들면 9시간이 어긋난다.
+ * 서울은 서머타임이 없어 `UTC+9`가 늘 맞다.
+ */
 function at(month: number, day: number, hour: number, minute = 0, second = 0): number {
-  return new Date(2026, month - 1, day, hour, minute, second, 0).getTime();
+  return Date.UTC(2026, month - 1, day, hour - 9, minute, second, 0);
 }
 
 // 2026-10-22(목) 14:30
