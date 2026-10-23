@@ -46,15 +46,6 @@ export const TOUCH_TARGET = 44;
 export const SAFE_GUTTER = 16;
 
 /**
- * 첨부 picker 시트 grabber의 시각 너비.
- *
- * 지금 값은 `TOUCH_TARGET`과 우연히 같지만 이 막대는 누르는 컨트롤이 아니다. 터치
- * 최소값을 조정하는 날 grabber까지 따라 움직이지 않도록, 시트의 측정값으로 따로
- * 이름 붙인다 (#1703). 시트 radius·가족 문법 통일은 이 이름의 범위가 아니다.
- */
-export const ATTACHMENT_SHEET_GRABBER_WIDTH = 44;
-
-/**
  * 컴포저 첨부 트레이가 차지할 수 있는 최대 높이.
  *
  * 웹의 같은 첨부 트레이 측정 `--spacing-tray-max`와 240으로 짝을 이룬다. 행 수를
@@ -607,8 +598,12 @@ export const ds2Radius = {
   row: 14,
   /** 카드·묶음. */
   card: 20,
-  /** 컴포저. */
-  composer: 26,
+  /**
+   * 컴포저 — 원 반경 18 + 원 ↔ 알약 가장자리 9 (#4179). 시안 A 의 26 이던 것을 Buzz 실측
+   * (한 줄 높이 53.3pt)에 맞춰 올렸다: 두 원이 끝 반원과 동심이려면 반경이 원 반경 + 사방
+   * 여백이어야 한다(`CONV.composerRadius`, 관계는 `composerPill.test.tsx`).
+   */
+  composer: 27,
   /** 페이지 시트 위 모서리. */
   sheet: 30,
   pill: 999,

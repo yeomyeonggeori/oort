@@ -78,6 +78,10 @@ export const INLINE_PREVIEW_MAX_BYTES = 8 * 1024 * 1024;
  *
  *   selection-cancelled → 그대로 작성한다    (실패가 아니고 재시도도 아니다)
  *   permission-denied  → 기기 설정을 연다    (picker를 다시 열기 전 선행 행동)
+ *   camera-permission-denied → 기기 설정을 연다 (카메라로 찍기 전 선행 행동. 사진 보관함과
+ *                                               설정의 다른 행이라 문장이 달라야 한다 — #4180)
+ *   camera-unavailable → 다시 눌러 본다      (카메라가 다른 앱에 쓰이거나 막혀 있다. 시뮬레이터에는
+ *                                               없다. 올린 적이 없으니 「업로드 실패」가 아니다 — #4180)
  *   too-large   → 다른 파일을 고른다        (재시도는 의미가 없다)
  *   forbidden   → 이 방에서는 못 한다        (재시도는 의미가 없다)
  *   no-archive  → 관리자에게 알린다          (재시도는 의미가 없다)
@@ -88,6 +92,8 @@ export const INLINE_PREVIEW_MAX_BYTES = 8 * 1024 * 1024;
 export type UploadIssue =
   | "selection-cancelled"
   | "permission-denied"
+  | "camera-permission-denied"
+  | "camera-unavailable"
   | "too-large"
   | "forbidden"
   | "no-archive"
@@ -217,6 +223,10 @@ export function uploadIssueCopy(issue: UploadIssue): string {
       return "선택을 취소했습니다";
     case "permission-denied":
       return "사진 접근 권한이 꺼져 있습니다";
+    case "camera-permission-denied":
+      return "카메라 접근 권한이 꺼져 있어요";
+    case "camera-unavailable":
+      return "카메라를 열지 못했어요";
     case "too-large":
       return "100MB를 초과함";
     case "forbidden":
@@ -244,6 +254,8 @@ export function uploadIssueNext(issue: UploadIssue): string | null {
   switch (issue) {
     case "permission-denied":
       return "기기 설정에서 사진 접근을 허용한 뒤 다시 시도하세요";
+    case "camera-permission-denied":
+      return "기기 설정에서 카메라 접근을 허용한 뒤 다시 시도해 주세요";
     case "selection-cancelled":
       return null;
     case "too-large":
@@ -256,6 +268,7 @@ export function uploadIssueNext(issue: UploadIssue): string | null {
       return "서버 설정을 확인하세요";
     case "mismatch":
     case "unavailable":
+    case "camera-unavailable":
       return null;
   }
 }

@@ -325,6 +325,99 @@ fn the_shipped_csp_runs_only_bundled_scripts() {
 }
 
 // ---------------------------------------------------------------------------
+// Window glass (ADR-0189 증보 3 D6, AP-3 #4190)
+// ---------------------------------------------------------------------------
+
+const GLASS_COMMANDS: [&str; 2] = ["window_vibrancy_set", "app_theme_set"];
+const CARGO_TOML: &str = include_str!("../Cargo.toml");
+
+/// The two glass commands are in the ACL manifest, in the desktop handler table only, and
+/// the main window's bundled origin is the only caller Tauri's resolver lets through:
+/// not a remote page loaded into the main window, not another window. A page that could
+/// call them could stack blur views or pin the app's appearance.
+#[test]
+fn tauri_grants_the_window_glass_commands_to_the_local_main_window_only() {
+    let manifest = quoted_list(BUILD_RS, "const APP_COMMANDS");
+    let blocks = handler_blocks(LIB_RS);
+    let desktop = blocks
+        .iter()
+        .find(|b| b.contains(&"updater_check".to_string()))
+        .expect("desktop handler table");
+    let mobile = blocks
+        .iter()
+        .find(|b| !b.contains(&"updater_check".to_string()))
+        .expect("mobile handler table");
+    let mut context = crate::context();
+    let authority = context.runtime_authority_mut();
+    let local = tauri::ipc::Origin::Local;
+    let remotes = [
+        "https://evil.example/",
+        "https://oort-team.up.railway.app/",
+        "http://127.0.0.1:8080/",
+    ];
+    for command in GLASS_COMMANDS {
+        assert!(
+            manifest.iter().any(|c| c == command),
+            "{command} not in build.rs APP_COMMANDS"
+        );
+        assert!(desktop.iter().any(|c| c == command), "{command} desktop");
+        assert!(!mobile.iter().any(|c| c == command), "{command} mobile");
+        assert!(
+            authority
+                .resolve_access(command, "main", "main", &local)
+                .is_some(),
+            "{command} local main"
+        );
+        for url in remotes {
+            let remote = tauri::ipc::Origin::Remote {
+                url: url.parse().unwrap(),
+            };
+            assert!(
+                authority
+                    .resolve_access(command, "main", "main", &remote)
+                    .is_none(),
+                "{command} from {url}"
+            );
+        }
+        // Granted per window, like every command in `default.json`: another window is refused.
+        assert!(authority
+            .resolve_access(command, "other", "other", &local)
+            .is_none());
+    }
+}
+
+/// The glass invariants (the doc comment of `window_vibrancy.rs`): the window is created
+/// opaque, and the private-API switch is a pair. tauri-build refuses a pair that disagrees,
+/// but only when the build runs; this fails earlier and says why.
+#[test]
+fn the_window_is_created_opaque_and_the_private_api_switch_is_a_pair() {
+    let conf: Value = serde_json::from_str(CONF).unwrap();
+    for window in conf["app"]["windows"].as_array().expect("app.windows") {
+        // Absent means Tauri's default, `false`. A window created transparent makes tao call
+        // `setOpaque(false)`, and tauri has no runtime way back.
+        assert!(
+            window
+                .get("transparent")
+                .is_none_or(|t| t == &Value::Bool(false)),
+            "a window is created transparent: {window}"
+        );
+    }
+    assert_eq!(
+        conf["app"]["macOSPrivateApi"],
+        Value::Bool(true),
+        "app.macOSPrivateApi"
+    );
+    let feature_on = CARGO_TOML
+        .lines()
+        .map(str::trim)
+        .any(|l| l.starts_with("tauri = ") && l.contains("\"macos-private-api\""));
+    assert!(
+        feature_on,
+        "Cargo.toml `tauri` lacks the macos-private-api feature"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Local terminal lane (ADR-0190 D1, #2772)
 // ---------------------------------------------------------------------------
 

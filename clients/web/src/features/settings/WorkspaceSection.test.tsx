@@ -11,6 +11,11 @@ import { roleLabelsSaveMessage } from "@momo/core/features/settings/model";
 import type { WorkspaceIdentity } from "@momo/core/features/settings/api";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { workspaceIdentityKey } from "@/features/workspace/useWorkspace";
+import {
+  NEW_WORKSPACE_ENTRY_GUIDE,
+  NEW_WORKSPACE_ID_ONCE_NOTICE,
+} from "@/features/auth/loginWorkspaceEntry";
+import { escapeIsClaimed } from "@/design/ui/escapeLayer";
 import { WorkspaceSection } from "./WorkspaceSection";
 import {
   clearOwnerOnboardingPending,
@@ -720,5 +725,197 @@ describe("워크스페이스 페이지 상태 (S5b)", () => {
       ).toContain("서버의 운영자만");
     });
     expect(host.querySelector('[data-testid="workspace-create-form"]')).toBeNull();
+  });
+});
+
+// 새 워크스페이스 완료 카드의 막다른 길 (#4198, 멀티 조직 P0-A). 레일 「+」 완료 패널
+// (`AddWorkspaceDialog.test.tsx`)과 같은 사실을 같은 문장으로 말한다.
+describe("새 워크스페이스 완료 카드 (#4198)", () => {
+  /**
+   * 코어 타입 주석(`CreatedWorkspace.workspaceId`)은 서버 UUID가 대문자로 올 수 있다고 경고한다(옛
+   * Swift 서버). 지금 Rust 서버는 소문자를 돌려준다. 시험은 일부러 대문자 값으로 「받은 모양 그대로」를
+   * 못 박는다.
+   */
+  const NEW_WS_ID = "019FA000-1111-7222-8333-444455556666";
+  const writeText = vi.fn();
+  const scrollIntoView = vi.fn();
+
+  beforeEach(() => {
+    writeText.mockReset();
+    writeText.mockResolvedValue(undefined);
+    scrollIntoView.mockReset();
+    Object.defineProperty(window.navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    // jsdom에는 scrollIntoView가 없다. 카드는 나타나는 즉시 화면 안으로 가져온다.
+    Object.defineProperty(window.HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      writable: true,
+      value: scrollIntoView,
+    });
+  });
+
+  afterEach(() => {
+    Reflect.deleteProperty(window.navigator, "clipboard");
+    Reflect.deleteProperty(window.HTMLElement.prototype, "scrollIntoView");
+  });
+
+  async function createNewTeam(host: HTMLElement) {
+    createWorkspaceMock.mockResolvedValue({
+      schema: "momo.workspace.created.v1",
+      workspaceId: NEW_WS_ID,
+      slug: "new-team",
+      name: "새 팀",
+    });
+    act(() => setInputValue(host.querySelector("#workspace-name") as HTMLInputElement, "새 팀"));
+    act(() => setInputValue(host.querySelector("#workspace-slug") as HTMLInputElement, "new-team"));
+    await act(async () => {
+      (host.querySelector('[data-testid="workspace-create"]') as HTMLButtonElement).click();
+    });
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="workspace-created"]')).not.toBeNull();
+    });
+  }
+
+  it("카드에 응답의 ID와 복사 단추가 있고 복사는 그 ID를 쓴다", async () => {
+    const host = mountSection({ role: "owner" });
+    await createNewTeam(host);
+
+    const card = host.querySelector('[data-testid="workspace-created"]');
+    expect(card?.textContent).toContain(NEW_WS_ID);
+    expect(host.querySelector('[data-testid="workspace-created-id"]')?.textContent).toBe(NEW_WS_ID);
+
+    const copy = host.querySelector('[data-testid="workspace-created-copy"]') as HTMLButtonElement | null;
+    expect(copy).not.toBeNull();
+    expect(copy?.getAttribute("aria-label")).toBe("워크스페이스 ID 복사");
+    await act(async () => {
+      copy?.click();
+    });
+    expect(writeText).toHaveBeenCalledWith(NEW_WS_ID);
+    await vi.waitFor(() => {
+      expect(copy?.textContent).toBe("복사됨");
+    });
+  });
+
+  it("안내는 로그인 화면이 받는 길을 말하고, 슬러그로 다시 로그인한다고 하지 않는다", async () => {
+    const host = mountSection({ role: "owner" });
+    await createNewTeam(host);
+
+    const text = host.querySelector('[data-testid="workspace-created"]')?.textContent ?? "";
+    expect(host.querySelector('[data-testid="workspace-created-guide"]')?.textContent).toBe(
+      NEW_WORKSPACE_ENTRY_GUIDE
+    );
+    expect(text).toContain(NEW_WORKSPACE_ENTRY_GUIDE);
+    expect(text).toContain("「다른 워크스페이스로 로그인」");
+    expect(text).toContain("워크스페이스 ID 칸");
+    expect(text).not.toContain("그 슬러그로 다시 로그인");
+    expect(text).not.toMatch(/슬러그로/);
+    expect(text).not.toMatch(/습니다/);
+  });
+
+  it("한 번만 보인다는 사실을 말한다: 이 화면을 벗어나면 ID를 다시 볼 수 없다", async () => {
+    const host = mountSection({ role: "owner" });
+    await createNewTeam(host);
+    const text = host.querySelector('[data-testid="workspace-created"]')?.textContent ?? "";
+    expect(text).toContain(NEW_WORKSPACE_ID_ONCE_NOTICE);
+    expect(text).toContain("다시 볼 수 없");
+    expect(text).toContain("복사해 두세요");
+  });
+
+  it("경고는 값보다 앞(카드 위 설명), 방법은 값 뒤다(레일 패널과 같은 자리)", async () => {
+    const host = mountSection({ role: "owner" });
+    await createNewTeam(host);
+    const card = host.querySelector('[data-testid="workspace-created"]') as HTMLElement;
+    const notice = [...card.querySelectorAll("p")].find(
+      (node) => node.textContent === NEW_WORKSPACE_ID_ONCE_NOTICE
+    );
+    const id = host.querySelector('[data-testid="workspace-created-id"]');
+    const guide = host.querySelector('[data-testid="workspace-created-guide"]');
+    expect(notice && id && guide).toBeTruthy();
+    // 한 번만 보이는 값의 집 모양은 경고가 값보다 앞이다. 레일 패널(`AddWorkspaceDialog.test.tsx`)과
+    // 같은 자리여야 같은 문장이 두 표면에서 다른 자리에 서는 어긋남이 없다(design-review 3차 H1).
+    expect(notice!.compareDocumentPosition(id!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(id!.compareDocumentPosition(guide!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("나타나는 즉시 이름 붙은 묶음으로 초점이 가고 화면 안으로 들어온다(접힌 아래에 뜨기 때문)", async () => {
+    const host = mountSection({ role: "owner" });
+    await createNewTeam(host);
+    const group = host.querySelector('[data-testid="workspace-created"]');
+    // status(live region)가 아니라 이름 붙은 group이다: ID가 뜨는 순간 통째로 낭독되지 않는다.
+    expect(group?.getAttribute("role")).toBe("group");
+    expect(group?.getAttribute("aria-label")).toBe("새 팀 워크스페이스를 만들었어요.");
+    expect(document.activeElement).toBe(group);
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+  });
+
+  it("카드가 떠 있는 동안 Esc는 삼켜지고, 「닫기」가 카드를 지우고 초점을 이름 칸으로 돌려준다", async () => {
+    const host = mountSection({ role: "owner" });
+    expect(escapeIsClaimed()).toBe(false);
+    await createNewTeam(host);
+
+    // 설정 셸이 Esc로 라우트를 닫으면 다시 볼 수 없는 ID가 확인 없이 사라진다(웹훅 발급 카드와 같은 규칙).
+    expect(escapeIsClaimed()).toBe(true);
+    const reachedShell = vi.fn();
+    window.addEventListener("keydown", reachedShell);
+    try {
+      act(() => {
+        window.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })
+        );
+      });
+    } finally {
+      window.removeEventListener("keydown", reachedShell);
+    }
+    expect(reachedShell).not.toHaveBeenCalled();
+    expect(host.querySelector('[data-testid="workspace-created"]')).not.toBeNull();
+
+    act(() => (host.querySelector('[data-testid="workspace-created-done"]') as HTMLButtonElement).click());
+    expect(host.querySelector('[data-testid="workspace-created"]')).toBeNull();
+    expect(escapeIsClaimed()).toBe(false);
+    expect(document.activeElement).toBe(host.querySelector("#workspace-name"));
+  });
+
+  it("요청이 날아가는 동안에도 Esc는 삼켜진다(설정이 닫히면 만들어진 워크스페이스의 ID를 영영 못 본다)", async () => {
+    createWorkspaceMock.mockReturnValue(new Promise(() => undefined));
+    const host = mountSection({ role: "owner" });
+    expect(escapeIsClaimed()).toBe(false);
+    act(() => setInputValue(host.querySelector("#workspace-name") as HTMLInputElement, "새 팀"));
+    act(() => setInputValue(host.querySelector("#workspace-slug") as HTMLInputElement, "new-team"));
+    await act(async () => {
+      (host.querySelector('[data-testid="workspace-create"]') as HTMLButtonElement).click();
+    });
+    expect(
+      host.querySelector('[data-testid="workspace-create"]')?.getAttribute("aria-busy")
+    ).toBe("true");
+    expect(host.querySelector('[data-testid="workspace-created"]')).toBeNull();
+
+    // 아직 카드가 없어도 층은 열려 있다: 요청 중에 라우트가 닫히면 POST는 이미 서버에 갔는데
+    // 카드는 한 번도 그려지지 않는다.
+    expect(escapeIsClaimed()).toBe(true);
+    const reachedShell = vi.fn();
+    window.addEventListener("keydown", reachedShell);
+    try {
+      act(() => {
+        window.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })
+        );
+      });
+    } finally {
+      window.removeEventListener("keydown", reachedShell);
+    }
+    expect(reachedShell).not.toHaveBeenCalled();
+  });
+
+  it("지금 열려 있는 워크스페이스의 ID 줄에도 같은 복사 단추가 있다(같은 낱말이 두 가지로 동작하지 않는다)", async () => {
+    const host = mountSection({ role: "owner" });
+    expect(host.querySelector('[data-testid="workspace-id"]')?.textContent).toBe(WS);
+    const copy = host.querySelector('[data-testid="workspace-id-copy"]') as HTMLButtonElement | null;
+    expect(copy).not.toBeNull();
+    await act(async () => {
+      copy?.click();
+    });
+    expect(writeText).toHaveBeenCalledWith(WS);
   });
 });

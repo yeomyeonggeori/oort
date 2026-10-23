@@ -61,6 +61,7 @@ import {
 import { ListboxSelect } from "@/design/ui/listbox-select";
 import { Select } from "@/design/ui/select";
 import { SegmentedControl } from "@/design/ui/segmented-control";
+import { Slider } from "@/design/ui/slider";
 import { Switch } from "@/design/ui/switch";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { OpenMemberProfileContext } from "@/features/directory/memberProfileContext";
@@ -977,6 +978,32 @@ function GalleryBody() {
             <Switch checked={false} onCheckedChange={() => undefined} aria-label="끔" />
             <Switch checked onCheckedChange={() => undefined} aria-label="켬" />
             <Switch checked disabled onCheckedChange={() => undefined} aria-label="잠긴 켬" />
+          </div>
+        </Export>
+      </section>
+
+      <section className="flex flex-col gap-3 border-b border-line py-6">
+        <h2 className="text-title font-medium text-ink">Slider</h2>
+        <p className="text-meta text-ink-muted">
+          채움은 잉크, 빈 트랙은 line-strong. 방향키 1, PageUp·PageDown 10, Home·End은 끝.
+        </p>
+        <Export name="Slider">
+          <div className="flex flex-col gap-4">
+            <Slider
+              value={80}
+              min={70}
+              max={95}
+              onValueChange={() => undefined}
+              valueText={(value) => `${value}% 불투명`}
+              aria-label="범위 안의 값"
+            />
+            <Slider
+              value={95}
+              min={95}
+              max={95}
+              onValueChange={() => undefined}
+              aria-label="범위가 한 점이라 잠긴 값"
+            />
           </div>
         </Export>
       </section>

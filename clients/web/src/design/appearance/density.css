@@ -1,0 +1,47 @@
+/* 대화 밀도 세 단계 (AP-2a #4189, ADR-0189 증보 1 D1).
+ *
+ * 한 줄 요약: 루트 속성 `data-density`가 **대화 표면의 간격 변수 다섯 개**만 바꾼다. 값은 core
+ * `DENSITY`(`packages/momo-core/src/design/density.ts`)가 정본이고 이 파일은 그 번역이다.
+ * 둘이 갈라지면 `densityTokens.test.ts`가 한 칸씩 대조해 빨개진다(CSP가 인라인 스타일을 막아서
+ * 숫자가 CSS에 한 벌 더 있을 수밖에 없다).
+ *
+ * | 변수 (`tokens.css` `@theme`) | 쓰는 클래스 | core 필드 | 촘촘 | 기본 | 여유 |
+ * |---|---|---|---|---|---|
+ * | `--spacing-row` | `py-row`·`pb-row` | `messageGap` ÷ 2 | 4 | 6 | 8 |
+ * | `--spacing-row-head` | `pt-row-head` | `messageGroupGap` − `messageGap` ÷ 2 | 8 | 12 | 16 |
+ * | `--spacing-message-avatar` | `size-message-avatar`·`w-message-avatar` | `messageAvatar` | 28 | 32 | 36 |
+ * | `--spacing-prose` | `gap-prose` | `proseGap` | 6 | 8 | 10 |
+ * | `--spacing-list-item` | `mt-list-item` | `listItemGap` | 0 | 0 | 4 |
+ *
+ * 「기본」 열은 `tokens.css`의 `@theme`이 가진다(그래서 이 파일에 `comfortable` 규칙은 없다).
+ * 기본 단계의 화면은 이 기능이 생기기 전과 픽셀이 같다. 행 사이 거리는 위 행의 아래 패딩 +
+ * 아래 행의 위 패딩이라 `--spacing-row`를 두 번 더해 만들고, 묶음이 바뀌는 자리는 위 행의
+ * `--spacing-row` + 머리 행의 `--spacing-row-head`다.
+ *
+ * 밀도가 바꾸지 않는 것: 터치 타깃 하한 44(`tap-target`), 컨트롤 높이, 타입 스케일(글자 크기는
+ * `typography-scale.css`가 따로 고른다). 그리고 대화 표면 밖의 값: 사이드바 행 높이·카드 안 여백·반경은
+ * 코어 `DENSITY`에 설계값이 있지만 아직 읽는 곳이 없어서 이 파일이 건드리지 않는다.
+ *
+ * 규칙은 루트 속성 선택자로 쓴다. 이 파일은 레이어 밖이라 `@theme`(레이어 안)의 같은 변수를
+ * 특이도와 무관하게 이긴다. 부트 스크립트가 `data-density`를 첫 페인트 전에 찍어서 새로고침에
+ * 한 프레임 기본 간격이 보이지 않는다.
+ *
+ * 개념 출처: Buzz desktop `src/shared/styles/globals/typography.css:34-66`(Apache-2.0,
+ * Copyright 2026 Block, Inc., 커밋 af5bb0a)의 「밀도 세 단계가 간격 변수만 바꾼다」는 구조와
+ * 문단 간격 6/8/10. 변수 이름·대상·나머지 수치는 oort 대화 표면에서 읽은 값이고 코드는 복사하지
+ * 않았다. */
+:root[data-density="compact"] {
+  --spacing-row: 4px;
+  --spacing-row-head: 8px;
+  --spacing-message-avatar: 28px;
+  --spacing-prose: 6px;
+  --spacing-list-item: 0px;
+}
+
+:root[data-density="spacious"] {
+  --spacing-row: 8px;
+  --spacing-row-head: 16px;
+  --spacing-message-avatar: 36px;
+  --spacing-prose: 10px;
+  --spacing-list-item: 4px;
+}

@@ -1,0 +1,113 @@
+[
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "R0 DM 구역이 이유를 말한다",
+  "ok": true,
+  "detail": "멤버 목록을 불러오지 못해 대화 이름을 알 수 없어요.\n다시 시도"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "R1 「다시 시도」 버튼이 있다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "R2 DM 이름은 「불러오는 중」이지 「나간 멤버」가 아니다",
+  "ok": true,
+  "detail": [
+   "불러오는 중\n2",
+   "불러오는 중",
+   "불러오는 중",
+   "불러오는 중",
+   "불러오는 중",
+   "불러오는 중\n1",
+   "불러오는 중",
+   "불러오는 중\n4"
+  ]
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "R3 접힌 줄이 없다(명부를 못 믿는데 접지 않는다)",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "R0 DM 구역이 이유를 말한다",
+  "ok": true,
+  "detail": "멤버 목록을 불러오지 못해 대화 이름을 알 수 없어요.\n다시 시도"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "R1 「다시 시도」 버튼이 있다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "R2 DM 이름은 「불러오는 중」이지 「나간 멤버」가 아니다",
+  "ok": true,
+  "detail": [
+   "불러오는 중\n2",
+   "불러오는 중",
+   "불러오는 중",
+   "불러오는 중",
+   "불러오는 중",
+   "불러오는 중\n1",
+   "불러오는 중",
+   "불러오는 중\n4"
+  ]
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "R3 접힌 줄이 없다(명부를 못 믿는데 접지 않는다)",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "R0 DM 구역이 이유를 말한다",
+  "ok": true,
+  "detail": "멤버 목록을 불러오지 못해 대화 이름을 알 수 없어요.\n다시 시도"
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "R1 「다시 시도」 버튼이 있다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "R2 DM 이름은 「불러오는 중」이지 「나간 멤버」가 아니다",
+  "ok": true,
+  "detail": [
+   "불러오는 중\n2",
+   "불러오는 중",
+   "불러오는 중",
+   "불러오는 중",
+   "불러오는 중",
+   "불러오는 중\n1",
+   "불러오는 중",
+   "불러오는 중\n4"
+  ]
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "R3 접힌 줄이 없다(명부를 못 믿는데 접지 않는다)",
+  "ok": true,
+  "detail": null
+ }
+]

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
@@ -13,7 +13,15 @@ import {
 import { Input } from "@/design/ui/input";
 import { InlineBanner } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
-import { OperatorNotice } from "@/features/settings/SettingsFields";
+import {
+  CopyButton,
+  KeyValueRows,
+  OperatorNotice,
+} from "@/features/settings/SettingsFields";
+import {
+  NEW_WORKSPACE_ENTRY_GUIDE,
+  NEW_WORKSPACE_ID_ONCE_NOTICE,
+} from "@/features/auth/loginWorkspaceEntry";
 import { PRIMARY_ACTION_SHORTCUT } from "@/app/keyboardShortcuts";
 import {
   createWorkspace,
@@ -50,8 +58,18 @@ import {
 //
 // What this dialog does NOT do is switch to the workspace it just made:
 // multi-workspace session switching is ADR-0161 4b-3, so a new workspace is
-// entered by signing in to it, and the success panel says exactly that instead
-// of promising a jump the rail cannot make yet.
+// entered by signing in to it. The sign-in form takes a workspace ID, never the
+// slug (the server answers a slug with 400), so the success panel shows that ID
+// with a 복사 button and names the path in the login screen's own words
+// (`loginWorkspaceEntry.ts`) instead of promising a jump the rail cannot make
+// yet or a slug login the server does not have (#4198, 멀티 조직 P0-A).
+//
+// That ID exists nowhere else: it comes back in the create response only (there is
+// no workspace list to read it from). So the success panel follows the house rule
+// for a value you can see once (the webhook reveal card, the hosted-agent secret
+// card): focus lands on the named group when it appears, the sentence says "leave
+// and it is gone", and Esc / outside click are swallowed so the one explicit exit
+// is 「닫기」, not a reflex.
 // =============================================================================
 
 const FORM_ID = "add-workspace-form";
@@ -128,6 +146,15 @@ function AddWorkspacePanel({
   const nameRef = useRef<HTMLInputElement>(null);
   const slugRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const createdRef = useRef<HTMLDivElement>(null);
+  const createdHeadlineId = useId();
+  const createdNoticeId = useId();
+
+  // 만든 직후 초점이 완료 묶음으로 간다. 눌렀던 「워크스페이스 만들기」는 사라졌고, 이 묶음이
+  // 값을 볼 수 있는 유일한 순간이다. 이름이 낭독되고 그다음 Tab이 「복사」다.
+  useEffect(() => {
+    if (created) createdRef.current?.focus({ preventScroll: true });
+  }, [created]);
 
   const create = useMutation({
     mutationFn: () => createWorkspace(normalizeSlug(slug), name.trim()),
@@ -203,46 +230,127 @@ function AddWorkspacePanel({
           formRef.current?.requestSubmit();
         }
       }}
+      // 만드는 중에는 물론이고, 완료 패널이 떠 있는 동안에도 Esc와 바깥 클릭으로 닫히지 않는다:
+      // 그 ID는 다른 어디에도 없어서, 반사적인 Esc 한 번이 들어갈 길을 지운다. 나가는 길은
+      // 이름 붙은 「닫기」 하나다.
       onEscapeKeyDown={(event) => {
-        if (create.isPending) event.preventDefault();
+        if (create.isPending || created) event.preventDefault();
       }}
       onInteractOutside={(event) => {
-        if (create.isPending) event.preventDefault();
+        if (create.isPending || created) event.preventDefault();
       }}
     >
       <div className="flex flex-col gap-1 border-b border-line p-4">
         <DialogTitle>워크스페이스 추가</DialogTitle>
+        {/* 만든 뒤에는 폼 설명이 쓸모없어서 그 자리를 경고가 쓴다. 고정 머리라 스크롤 상자 밖이고,
+            값보다 앞이며, 어떤 창 높이에서도 보인다: Esc·바깥 클릭을 막은 이유(이 ID는 다시 볼 수
+            없다)를 말하는 문장이 접힌 아래로 사라지면 눈에 보이는 컨트롤이 되돌릴 수 없는 「닫기」
+            하나가 된다(design-review 3차 H1, 실측). */}
         <DialogDescription>
-          새 워크스페이스를 만들거나, 초대를 받았다면 초대 링크로 참여해요.
+          {created ? (
+            <span
+              id={createdNoticeId}
+              className="break-keep"
+              data-testid="add-workspace-created-notice"
+            >
+              {NEW_WORKSPACE_ID_ONCE_NOTICE}
+            </span>
+          ) : (
+            "새 워크스페이스를 만들거나, 초대를 받았다면 초대 링크로 참여해요."
+          )}
         </DialogDescription>
       </div>
 
       {created ? (
-        <div className="flex flex-col gap-3 p-4">
-          <div
-            className="flex flex-col gap-2 rounded-md border border-ok bg-surface-raised p-4"
-            role="status"
-            data-testid="add-workspace-created"
-          >
-            <p className="text-body text-ink">
-              {created.name} 워크스페이스를 만들었어요.
-            </p>
-            <p className="text-meta text-ink-muted">
-              슬러그 {created.slug}. 새 워크스페이스로는 그 슬러그로 다시
-              로그인해서 들어가요.
-            </p>
+        <>
+          {/* 폼 분기와 같은 구조다: 내용은 스크롤 상자 안에, 나가는 길은 상자 밖 바닥에 늘 보인다.
+              이 분기는 Esc·바깥 클릭을 막으므로 「닫기」가 유일한 출구인데, 스크롤 상자가 없으면
+              패널 높이 상한(`dialog-panel`, 창 높이 - 64px) 아래로 내용이 흘러내려 낮은 창(가로
+              폰 667x375, 브라우저 200%)에서 출구가 화면 밖에 걸린다(design-review 2차 B1, 실측). */}
+          {/* `scrollbar-visible`: 오버레이 스크롤바는 스크롤을 시작해야 보여서, 상자가 넘친다는 신호가
+              없으면 패널이 끝난 것처럼 읽힌다(집의 이름 붙은 처방, MOMO-620 R2). */}
+          <div className="scrollbar-visible flex min-h-0 flex-col gap-3 overflow-y-auto p-4">
+            {/* `role="status"`가 아니라 이름 붙은 `group`이다: status는 암묵적 live region이라
+                36자 ID와 안내가 뜨는 순간 통째로 낭독된다. 도착했다는 사실은 초점이 이 묶음에
+                들어올 때 이름(헤드라인)으로 말한다(OneTimeSecretCard·웹훅 발급 카드와 같은 규칙). */}
+            <div
+              ref={createdRef}
+              tabIndex={-1}
+              role="group"
+              aria-labelledby={createdHeadlineId}
+              aria-describedby={createdNoticeId}
+              className="flex flex-col gap-3 rounded-md border border-ok bg-surface-raised p-4 focus-visible:focus-ring"
+              data-testid="add-workspace-created"
+            >
+              <p id={createdHeadlineId} className="break-keep text-body text-ink">
+                {created.name} 워크스페이스를 만들었어요.
+              </p>
+              {/* 로그인 화면이 받는 것은 슬러그가 아니라 이 ID다. 서버가 돌려준 값을
+                  대소문자도 건드리지 않고 그대로 보여 주고 그대로 복사한다. `select-all`은
+                  클립보드를 못 쓸 때의 한 번 클릭 선택이다(ApprovalActions.LinkOnce와 같은 문법).
+                  단추가 옆에 서느냐 아래로 내려가느냐는 내용 폭이 아니라 칸 폭이 정한다
+                  (`@container` + `@sm`): flex-wrap이면 폰 폭(390)에서 「복사」는 옆에 서다가
+                  누르는 순간 「복사됨」으로 길어져 아랫줄로 떨어진다(누른 손가락 아래에서
+                  단추가 달아나고 대화상자가 44px 늘어난다, 실측). */}
+              <KeyValueRows
+                rows={[
+                  {
+                    key: "워크스페이스 ID",
+                    value: (
+                      <span className="@container block min-w-0">
+                        <span className="flex min-w-0 flex-col items-start gap-2 @sm:flex-row @sm:items-center">
+                          <span
+                            className="min-w-0 select-all break-all font-mono text-meta text-ink"
+                            data-numeric=""
+                            data-testid="add-workspace-created-id"
+                          >
+                            {created.workspaceId}
+                          </span>
+                          <CopyButton
+                            value={created.workspaceId}
+                            subject="워크스페이스 ID"
+                            testId="add-workspace-created-copy"
+                            className="tap-target"
+                          />
+                        </span>
+                      </span>
+                    ),
+                  },
+                  {
+                    key: "슬러그",
+                    value: (
+                      <span
+                        className="font-mono text-meta text-ink-muted"
+                        data-numeric=""
+                      >
+                        {created.slug}
+                      </span>
+                    ),
+                  },
+                ]}
+              />
+              <p
+                className="break-keep text-meta text-ink-muted"
+                data-testid="add-workspace-created-guide"
+              >
+                {NEW_WORKSPACE_ENTRY_GUIDE}
+              </p>
+            </div>
           </div>
-          <div className="flex items-center justify-end gap-2">
+          {/* 터치에서 그 순간 반드시 눌러야 하는 하나는 이제 「닫기」다(`CopyButton`의 `tap-target`
+              주석, design-review #2540 R1 M6): 폰 폭에서 44px로 자란다. */}
+          <div className="flex items-center justify-end gap-2 border-t border-line p-4">
             <Button
               type="button"
               size="sm"
+              className="tap-target"
               onClick={() => onOpenChange(false)}
               data-testid="add-workspace-done"
             >
               닫기
             </Button>
           </div>
-        </div>
+        </>
       ) : operatorDenied ? (
         <div className="flex flex-col gap-3 p-4">
           <OperatorNotice

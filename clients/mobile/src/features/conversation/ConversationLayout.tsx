@@ -99,6 +99,28 @@ import {KeyboardPane} from '../../lib/keyboardPane';
 // line on both, and on the third rule that is new here — that no `transform`
 // style is set from JS, because React Native writes `layer.transform` whenever
 // that prop changes and would take the property back from the native side.
+//
+// ## Two gaps, two owners: below the pill and ABOVE it (#4264)
+//
+// Everything above is about the gap UNDER the pill (`KEYBOARD_GAP`: pill ↔ keys,
+// and the home-indicator inset that exists only while the keyboard is down).
+//
+// The gap ABOVE the pill — last row ↔ pill — is a different number with a
+// different owner, and it was misdiagnosed once: 성재 (2026-10-23) found it
+// "조금 과한" and the issue suspected the safe-area inset (34) left under the list
+// while typing. It is not. While the keyboard is up this pane pays only
+// `insets.bottom - bottomInset` (= `KEYBOARD_GAP`) and the list ends exactly on the
+// dock's top edge (`__tests__/conversationGap.test.tsx` reads both from the real
+// tree). The number was the SUM of three spacers decided at three different times:
+// list tail 8 + the reserved 「작성 중」 line 20 + the composer's own top air 8 = 36
+// (44 to the glyph, simulator-measured). `CONV.listPillGap` now names the sum (20, Buzz) and the
+// pieces derive from it; the same value holds with the keyboard up or down because
+// none of the three reads the keyboard — the lift is the native pane's, as one unit.
+//
+// What this component owns of that sum is **nothing**: no padding or margin on the
+// list wrapper or the dock wrapper, and the dock is a flow sibling that never
+// overlaps the list. That is the "마지막 행이 알약에 가려지지 않는다" guarantee, and
+// the test fails if either wrapper starts paying a spacer (a safe-area inset, say).
 // =============================================================================
 
 /**
@@ -147,7 +169,9 @@ export function ConversationLayout({
         bottomInset={Math.max(0, restingBottomPadding(insets.bottom) - KEYBOARD_GAP)}
         style={[styles.root, {paddingBottom: restingBottomPadding(insets.bottom)}]}
         testID="conversation-layout">
-        <View style={styles.list}>{list}</View>
+        <View style={styles.list} testID="conversation-list">
+          {list}
+        </View>
         <View testID="composer-dock">{composer}</View>
       </KeyboardPane>
     </View>

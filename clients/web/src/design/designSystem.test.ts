@@ -165,11 +165,18 @@ describe("간격 축", () => {
 // 3. 타이포 축 — 크기 하나에 줄 높이 하나
 // -----------------------------------------------------------------------------
 
-/** `--text-<role>: <n>rem` — `--line-height` 짝은 이름에서 걸러 낸다. */
+/**
+ * `--text-<role>: calc(var(--type-rem) * <n>)` — `--line-height` 짝은 이름에서 걸러 낸다.
+ *
+ * 역할의 크기는 가상 rem의 배수다(AP-2a #4189, ADR-0179 D7). 곱수 × 16이 「기본」 글자 크기
+ * 단계의 px이고, 단계가 바뀌면 `--type-rem`이 같은 비율로 움직인다. 이 정규식은 `rem`
+ * 리터럴이 아니라 **그 곱셈 식**을 읽는다 — 리터럴 역할이 하나 생기면 읽히지 않아 아래
+ * 「여덟 역할이 전부 읽혔다」가 빨개진다(조용히 빈손이 되지 않게).
+ */
 function textRoles(): Record<string, number> {
   const roles: Record<string, number> = {};
   for (const found of CSS.matchAll(
-    /^\s*--text-([a-z][a-z0-9-]*?):\s*([\d.]+)rem;/gm
+    /^\s*--text-([a-z][a-z0-9-]*?):\s*calc\(var\(--type-rem\)\s*\*\s*([\d.]+)\);/gm
   )) {
     if (found[1].endsWith("--line-height")) continue;
     roles[found[1]] = Number(found[2]) * 16;
@@ -180,7 +187,7 @@ function textRoles(): Record<string, number> {
 function textLineHeights(): Record<string, number> {
   const heights: Record<string, number> = {};
   for (const found of CSS.matchAll(
-    /^\s*--text-([a-z][a-z0-9-]*?)--line-height:\s*([\d.]+)rem;/gm
+    /^\s*--text-([a-z][a-z0-9-]*?)--line-height:\s*calc\(var\(--type-rem\)\s*\*\s*([\d.]+)\);/gm
   )) {
     heights[found[1]] = Number(found[2]) * 16;
   }
@@ -190,7 +197,24 @@ function textLineHeights(): Record<string, number> {
 const TEXT_ROLES = textRoles();
 const TEXT_LINE_HEIGHTS = textLineHeights();
 
+/** 닫힌 역할 집합. 하나를 더하는 것은 결정이라 이 표를 고쳐야 한다. */
+const ROLE_NAMES = ["body", "code", "display", "heading", "label", "meta", "timestamp", "title"];
+
 describe("타이포 축", () => {
+  it("여덟 역할이 전부 읽혔고 이름이 닫힌 집합이다 — 정규식이 조용히 빈손이 되지 않는다", () => {
+    // 읽는 길이 식 모양을 바꾸는 날(리터럴 `rem`으로 돌아가거나 곱수 없이 `var(--type-rem)`만 쓰는 날)
+    // 아래 모든 단정은 빈 객체 위에서 초록이 된다. 개수와 이름을 먼저 잡는다.
+    expect(Object.keys(TEXT_ROLES).sort()).toEqual(ROLE_NAMES);
+    expect(Object.keys(TEXT_LINE_HEIGHTS).sort()).toEqual(ROLE_NAMES);
+  });
+
+  it("어떤 역할도 rem 리터럴이 아니다 — 전부 가상 rem 배율을 곱한다", () => {
+    // `--text-body: 0.9375rem;` 같은 줄이 하나라도 있으면 그 역할은 글자 크기 설정을 비껴간다
+    // (설정 > 모양 > 글자 크기가 앱 전체에 닿는다는 약속의 구멍).
+    const literal = [...CSS.matchAll(/^\s*--text-[a-z][a-z0-9-]*:\s*[\d.]+rem;/gm)].map((m) => m[0].trim());
+    expect(literal).toEqual([]);
+  });
+
   it("텍스트 롤마다 줄 높이가 있다", () => {
     // 크기만 있고 줄 높이가 없는 롤은 Tailwind 기본 `line-height` 를 받는다 —
     // `--text-*: initial` 로 축을 지웠으므로 그 기본이 무엇인지는 롤마다 다르고,
@@ -344,6 +368,7 @@ const CONTROL_PRIMITIVES = [
   "listbox-select.tsx",
   "segmented-control.tsx",
   "select.tsx",
+  "slider.tsx",
   "switch.tsx",
 ] as const;
 
@@ -445,7 +470,7 @@ describe("컴포넌트는 스타일을 짓지 않는다 — 런타임 몫", () =
   /**
    * `element.style.x = …` 로 스타일을 쓰는 파일. **0 이 아니라 잔량이다.**
    *
-   * 셋 다 「스타일시트가 미리 알 수 없는 값」을 쓴다:
+   * 모두 「스타일시트가 미리 알 수 없는 값」을 쓴다:
    *
    *   `useAutoGrow`      내용에서 잰 높이. 값이 사람이 친 글에서 나온다.
    *   `placeholderFit`   계산된 글자꼴의 사본. 값이 `getComputedStyle` 에서 나온다.
@@ -454,6 +479,11 @@ describe("컴포넌트는 스타일을 짓지 않는다 — 런타임 몫", () =
    *                      옮긴다. 기간·이징은 `.skel.is-sizing`의
    *                      `--motion-standard` 사다리다. JSX `style=` 은 프리플라이트가
    *                      막으므로 `host.style.height` 만 쓴다.
+   *
+   *   `wallpaper/runtime`  사람이 고른 사진 한 장의 `data:` URL(약 2MB)과 단색·기본 제공의 바탕. 상속되는
+   *                      커스텀 프로퍼티에 큰 문자열을 싣지 않으려고 **전용 요소(`[data-wallpaper-layer]`) 한 개**의
+   *                      `backgroundColor`·`backgroundImage`에만 그림이 바뀔 때 한 번 쓴다(AP-4 #4191, 청사진 §5.5-d).
+   *                      JSX `style=`이 아니고, 어떤 컴포넌트도 지나지 않는다.
    *
    * 지어낸 값(자리·가시성·줄바꿈)은 스타일시트에 있다 — `placeholderFit`
    * 의 것은 `tokens.css` 의 `text-probe` 다. 그래서 이 목록은 「인라인 스타일이
@@ -470,6 +500,7 @@ describe("컴포넌트는 스타일을 짓지 않는다 — 런타임 몫", () =
     "features/timeline/useAutoGrow.ts",
     "features/chat/placeholderFit.ts",
     "features/common/States.tsx",
+    "design/wallpaper/runtime.ts",
   ];
 
   it("런타임 스타일 작성자가 잔량 목록보다 늘지 않는다", () => {

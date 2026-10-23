@@ -791,6 +791,7 @@ function TimelineInner({
   jumpPills = false,
   pillsRef,
   tailRef,
+  tailGap,
   metricsRef,
   listRef: externalListRef,
 }: {
@@ -966,6 +967,14 @@ function TimelineInner({
    * answer is a distance in points rather than a word.
    */
   tailRef?: React.MutableRefObject<View | null>;
+  /**
+   * 목록 꼬리(마지막 행 바로 아래 이음매)의 높이 (#4264). 기본은 `space.sm`(8) — 스레드 패널과 계측
+   * 표면의 값이다. 대화 화면은 `CONV.conversationTail`(0)을 준다: 그 도크의 첫 줄(「작성 중」 예약 줄)이 이미
+   * 그 자리를 지켜서, 꼬리까지 두면 마지막 행 → 알약 간격이 같은 공기를 두 번 센다(36 → 20).
+   *
+   * 이음매 노드는 높이가 0 이어도 **그대로 서 있다** — `tailRef` 가 답하는 것은 높이가 아니라 위치다.
+   */
+  tailGap?: number;
   /**
    * Same seam, for the geometry: the list's own last scroll report, written
    * without a re-render. What a harness wants to know after a send is how far
@@ -2894,9 +2903,14 @@ function TimelineInner({
       // the harness measures the SAME node the app renders: a footer that only
       // becomes measurable when someone is measuring is a footer whose position
       // was never the app's.
-      <View ref={tailNodeRef} collapsable={false} style={styles.footer} />
+      <View
+        ref={tailNodeRef}
+        collapsable={false}
+        style={tailGap === undefined ? styles.footer : [styles.footer, {height: tailGap}]}
+        testID="timeline-tail"
+      />
     ),
-    [tailNodeRef, styles],
+    [tailNodeRef, styles, tailGap],
   );
 
   if (status === 'error') {

@@ -6,6 +6,7 @@ import {
   reloadDesktopNotificationKindsForTest,
   setDesktopNotificationKind,
 } from "./preference";
+import { setServerPause } from "./serverPause";
 
 const NOW = 1_700_000_000_000;
 const SELF = "00000000-0000-7000-8000-000000000101";
@@ -53,7 +54,7 @@ function approvalEvent(): MessageNewEvent {
   };
 }
 
-function context(): Omit<NotifyContext, "kindEnabled"> {
+function context(): Omit<NotifyContext, "kindEnabled" | "paused"> {
   return {
     isDesktop: true,
     windowFocused: false,
@@ -75,7 +76,10 @@ class MemoryStorage {
   }
 }
 
-afterEach(() => reloadDesktopNotificationKindsForTest(null));
+afterEach(() => {
+  reloadDesktopNotificationKindsForTest(null);
+  setServerPause(false);
+});
 
 describe("notifyThisDevice", () => {
   it("does not fire a mention when that kind is off on this device", () => {
@@ -115,7 +119,7 @@ describe("notifyThisDevice", () => {
       payload: { ...e.payload, props: {}, body: "점심 먹었어요?" },
     } as MessageNewEvent;
   }
-  const dmContext = (over: Partial<Omit<NotifyContext, "kindEnabled">> = {}) => ({
+  const dmContext = (over: Partial<Omit<NotifyContext, "kindEnabled" | "paused">> = {}) => ({
     ...context(),
     isDirect: () => true,
     ...over,
@@ -154,5 +158,27 @@ describe("notifyThisDevice", () => {
     expect(
       notifyThisDevice(dmEvent(), dmContext({ windowFocused: true, isTargetVisible: () => false })).show
     ).toBe(true);
+  });
+
+  // ---- #4197: 서버의 알림 일시 중지 ------------------------------------------
+  // 이 기기의 종류 스위치가 전부 켜져 있어도(기본값) 서버가 일시 중지라고 답한 동안은 아무것도 뜨지 않는다.
+  // 값은 판정 시점에 읽는다: 훅이 새 답을 넣으면 바로 다음 이벤트에 닿는다.
+  it("서버가 일시 중지라고 답한 동안은 멘션·승인·DM 모두 뜨지 않는다", () => {
+    const storage = new MemoryStorage();
+    reloadDesktopNotificationKindsForTest(storage);
+    setDesktopNotificationKind("dm", true, storage);
+    setServerPause(true);
+    expect(notifyThisDevice(mentionEvent(), context())).toEqual({ show: false, skip: "paused" });
+    expect(notifyThisDevice(approvalEvent(), context())).toEqual({ show: false, skip: "paused" });
+    expect(notifyThisDevice(dmEvent(), dmContext())).toEqual({ show: false, skip: "paused" });
+  });
+
+  it("일시 중지가 풀리면 같은 이벤트가 다음 판정부터 뜬다(값을 판정 시점에 읽는다)", () => {
+    const storage = new MemoryStorage();
+    reloadDesktopNotificationKindsForTest(storage);
+    setServerPause(true);
+    expect(notifyThisDevice(mentionEvent(), context()).show).toBe(false);
+    setServerPause(false);
+    expect(notifyThisDevice(mentionEvent(), context()).show).toBe(true);
   });
 });

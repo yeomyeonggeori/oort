@@ -295,6 +295,11 @@ jest.mock('expo-image-picker', () => {
     result: {canceled: true, assets: null},
     failure: null,
     permission: {status: 'granted', accessPrivileges: 'all'},
+    // 카메라 (#4180). 사진 보관함과 달리 권한을 **먼저 받아야** 촬영이 열린다 —
+    // `launchCameraAsync` 는 묻지 않고 거절한다. 그래서 권한·결과·실패가 따로 선다.
+    cameraPermission: {status: 'granted', granted: true, canAskAgain: true},
+    cameraResult: {canceled: true, assets: null},
+    cameraFailure: null,
   };
   return {
     __state: state,
@@ -302,12 +307,107 @@ jest.mock('expo-image-picker', () => {
       state.result = {canceled: true, assets: null};
       state.failure = null;
       state.permission = {status: 'granted', accessPrivileges: 'all'};
+      state.cameraPermission = {status: 'granted', granted: true, canAskAgain: true};
+      state.cameraResult = {canceled: true, assets: null};
+      state.cameraFailure = null;
     },
     launchImageLibraryAsync: jest.fn(async () => {
       if (state.failure) throw state.failure;
       return state.result;
     }),
     getMediaLibraryPermissionsAsync: jest.fn(async () => state.permission),
+    requestCameraPermissionsAsync: jest.fn(async () => state.cameraPermission),
+    getCameraPermissionsAsync: jest.fn(async () => state.cameraPermission),
+    launchCameraAsync: jest.fn(async () => {
+      if (state.cameraFailure) throw state.cameraFailure;
+      return state.cameraResult;
+    }),
+  };
+});
+
+// ---- expo-media-library (ADR-0168 증보 1, #4181) ----------------------------
+// 앱은 **`expo-media-library/legacy`** 만 읽는다 — SDK 57 에서 패키지 루트의 옛 함수 이름은
+// 런타임에 던진다(`photosNative.ts` 머리 주석). 이 경로의 실제 모듈은 ESM TS 소스라
+// 목 없이는 node 에서 못 돈다. 시험은 보통 `PhotoLibraryPorts` 를 바꿔 끼우고, 이 목은
+// 네이티브 포트 파일(`photosNative.ts`)의 변환과 호출 횟수를 재는 시험이 쓴다.
+//
+// `__state.assets` 는 최신순 자산 배열이고 `getAssetsAsync` 는 `after` 커서로 이어서 자른다
+// (진짜 커서처럼 모르는 id 면 던진다). `info` 는 자산 id → `getAssetInfoAsync` 의 답이다.
+jest.mock('expo-media-library/legacy', () => {
+  const state = {
+    permission: {
+      status: 'undetermined',
+      accessPrivileges: 'none',
+      granted: false,
+      canAskAgain: true,
+    },
+    // `requestPermissionsAsync` 가 사람의 답으로 바꿔 놓는 값.
+    answer: {
+      status: 'granted',
+      accessPrivileges: 'all',
+      granted: true,
+      canAskAgain: true,
+    },
+    assets: [],
+    info: new Map(),
+    failure: null,
+    listeners: new Set(),
+  };
+  const fresh = () => ({
+    status: 'undetermined',
+    accessPrivileges: 'none',
+    granted: false,
+    canAskAgain: true,
+  });
+  return {
+    __state: state,
+    __reset: () => {
+      state.permission = fresh();
+      state.answer = {
+        status: 'granted',
+        accessPrivileges: 'all',
+        granted: true,
+        canAskAgain: true,
+      };
+      state.assets = [];
+      state.info = new Map();
+      state.failure = null;
+      state.listeners = new Set();
+    },
+    getPermissionsAsync: jest.fn(async () => state.permission),
+    requestPermissionsAsync: jest.fn(async () => {
+      state.permission = state.answer;
+      return state.permission;
+    }),
+    presentPermissionsPickerAsync: jest.fn(async () => undefined),
+    getAssetsAsync: jest.fn(async options => {
+      if (state.failure) throw state.failure;
+      const first = options.first ?? 20;
+      let start = 0;
+      if (options.after != null) {
+        const at = state.assets.findIndex(asset => asset.id === options.after);
+        if (at < 0) throw new Error('CursorException: invalid cursor');
+        start = at + 1;
+      }
+      const page = state.assets.slice(start, start + first);
+      const end = start + page.length;
+      return {
+        assets: page,
+        endCursor: page.length > 0 ? page[page.length - 1].id : (options.after ?? ''),
+        hasNextPage: end < state.assets.length,
+        totalCount: state.assets.length,
+      };
+    }),
+    getAssetInfoAsync: jest.fn(async (id, options = {shouldDownloadFromNetwork: true}) => {
+      const known = state.info.get(id);
+      if (known === undefined) return {id};
+      if (typeof known === 'function') return known(options);
+      return {id, ...known};
+    }),
+    addListener: jest.fn(listener => {
+      state.listeners.add(listener);
+      return {remove: () => state.listeners.delete(listener)};
+    }),
   };
 });
 
@@ -415,11 +515,15 @@ jest.mock('expo-camera', () => {
 });
 
 jest.mock('expo-device', () => {
-  const state = {modelName: 'iPhone 17 Pro'};
+  // `isDevice` (#4180): 시뮬레이터는 false. 카메라 촬영은 실기기에서만 연다 — 기본은 실기기다.
+  const state = {modelName: 'iPhone 17 Pro', isDevice: true};
   return {
     __state: state,
     get modelName() {
       return state.modelName;
+    },
+    get isDevice() {
+      return state.isDevice;
     },
   };
 });

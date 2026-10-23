@@ -151,7 +151,9 @@ export function AttachmentTray({
           >
             {pickerReason}
           </Text>
-          {pickerIssue === 'permission-denied' && pickerNext !== null ? (
+          {(pickerIssue === 'permission-denied' ||
+            pickerIssue === 'camera-permission-denied') &&
+          pickerNext !== null ? (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={pickerNext}

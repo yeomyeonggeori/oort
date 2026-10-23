@@ -174,6 +174,8 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 
 격자 밖 측정값은 **숫자가 아니라 이름**으로 들어온다(`--spacing-pane`, `--spacing-action`, `--spacing-row` …). 이름 축의 각 값은 자기가 왜 격자 밖인지를 주석으로 진다.
 
+**대화 밀도는 이름 축의 값 다섯을 단계마다 바꾸는 설정이다**(웹, ADR-0189 증보 1 D1, AP-2a #4189): `--spacing-row`·`--spacing-row-head`·`--spacing-message-avatar`·`--spacing-prose`·`--spacing-list-item`을 루트 속성 `data-density`(촘촘하게·편하게·여유롭게)가 고른다. **대화 표면(타임라인·스레드 행, 메시지 안 문단·목록, 설정 미리보기, 타임라인 꼬리 행의 거터)만** 읽고, 같은 6px이 필요한 대화 밖 자리(폰 폭 채널 머리, 컴포저 슬래시 명령 목록)는 밀도를 따르지 않는 쌍둥이 `--spacing-row-fixed`를 읽는다. 값 표는 [themes-2.0.md §5](themes-2.0.md). 밀도 변수를 읽는 파일은 `densityTokens.test.ts`가 닫힌 목록으로 지키고(빌려 쓰기를 시험에서 잡는다), `densityTokens.browser.test.ts`가 계산된 값을 코어 `DENSITY`와 대조한다.
+
 폰의 `space {xs 4, sm 8, md 12, lg 16, xl 24}`는 전부 웹 리듬 단계이고, `clients/mobile/__tests__/designSystem.test.ts`가 웹 파일을 파싱해 대조한다.
 
 | | 웹 | 폰 | 관계 |
@@ -201,13 +203,15 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 
 **온보딩 2.0 예외 (ADR-0193 D11, #2807).** 온보딩 틀(`clients/web/src/features/onboarding/guide/`, `tokens.css` 「온보딩 2.0 공통 틀」 블록)은 owner가 고른 시안을 따라 입력 그릇과 행동 버튼을 높이 44, 반경 10(`--radius-md`)으로 그리고, 보조 행동은 채움 알약이 아니라 `--line-strong` 1px 테두리(`.onboarding-action[data-variant="secondary"]`)다. 주 행동은 여전히 잉크 채움이고 입력 그릇만 `--surface`다. 이 예외는 온보딩 틀 안에서만 유효하다. 제품 셸의 버튼은 §2.2의 채움 알약(`rounded-full`) 규칙을 그대로 따르고, 이 클래스를 온보딩 밖에서 빌려 쓰지 않는다. 같은 틀의 진행 점은 시안의 `--muted-soft` 대신 남은 칸에 `--line-strong`을 써서 바닥 세 정지점 위 비텍스트 3:1을 지킨다(core `ONBOARDING_DOT_ROLES`, `guide.test.ts`).
 
-폰은 `10·14·20·26·30·pill`이다([테마 토큰 표](themes-2.0.md) §5). `designSystem.test.ts`가 웹 사다리의 값·순서와 프리미티브가 자기 자리에 서는지를 잰다. 옛 `sm/md/lg` 세 값은 같은 값이라 기존 소비처의 기하는 움직이지 않았다.
+폰은 `10·14·20·27·30·pill`이다([테마 토큰 표](themes-2.0.md) §5; 컴포저 단은 #4179가 26 → 27로 옮겼다). `designSystem.test.ts`가 웹 사다리의 값·순서와 프리미티브가 자기 자리에 서는지를 잰다. 옛 `sm/md/lg` 세 값은 같은 값이라 기존 소비처의 기하는 움직이지 않았다.
 
 ### 2.5 타이포
 
 **역할이지 크기가 아니다.** 웹은 `text-timestamp`(11, 캡션) / `text-meta`(12) / `text-code`(13) / `text-label`(14) / `text-body`(15) / `text-heading`(16) / `text-title`(17) / `text-display`(22)이고 각 롤이 자기 줄 높이를 동봉한다(Accepted, [typography-proposal.md](typography-proposal.md) §3.1, #3774). 굵기는 400/500/600/700만 쓴다(800 폐지). `body-strong`은 크기 토큰이 아니라 `text-body font-semibold`다. `--text-*: initial`이 스톡 스케일을 지우므로 `text-sm`은 **컴파일되지 않는다**. `text-[13px]`는 — 간격과 같은 이유로 — **컴파일된다**; 그것을 막는 것은 프리플라이트 `arbitrary_tw`다. CSS 안의 `font-size: 13.5px` 같은 리터럴은 `designSystem.test.ts` 「토큰 밖 글자 크기 금지」가 막는다. 외부 폰트·CDN은 프리플라이트 `external_font`가 막는다.
 
-폰은 `font {title 26, heading 18, body 16, label 13, meta 12}` + `line {head 15, meta 17, label 18, body 22}`.
+**글자 크기는 설정이 고르는 축이다**(웹, ADR-0189 증보 1 D2 · 증보 3 D8, AP-2a #4189). 여덟 롤의 크기·줄 높이는 `calc(var(--type-rem) * 곱수)`이고(`--type-rem` = `1rem` × 배율), 루트 속성 `data-font-size`가 배율(작게 14/15 · 기본 1 · 크게 16/15)을 골라 **본문이 14·15·16px**이 되고 나머지 롤은 같은 비율로 따라간다. 브라우저 줌·루트 글자 크기와 직교하고(`rem`에서 나오므로 그 위에 얹힌다) 레이아웃 rem은 배율을 받지 않는다. 롤을 더할 때도 이 모양을 지킨다 — 리터럴 `rem` 롤은 설정을 비껴간다(`designSystem.test.ts`가 잡는다). 손가락 화면 입력 칸의 16px 바닥은 세 단계 모두에서 지킨다(`fieldTextFloor.browser.test.ts`). **가장 작은 글자는 「작게」의 캡션 `text-timestamp`로 10.3px(11 × 14/15)다.** `typographyScale.test.ts`가 10px 밑으로 내려가는 배율·롤을 막지만 이것은 시험의 안전선이지 정해진 하한 규칙이 아니다. 캡션에 `max()` 바닥을 둘지는 owner 판단으로 [§7](#7-미결-결정) 10번에 열려 있고, 더 작은 배율을 더하려면 그 결정이 먼저다. 값 표는 [themes-2.0.md §5](themes-2.0.md).
+
+폰은 `font {title 26, heading 18, body 16, label 13, meta 12}` + `line {head 15, meta 17, label 18, body 22}`. 글자 크기 설정은 폰에 없다(증보 1 D2가 폰을 범위 밖으로 둔다). 대화 밀도는 코어 `DENSITY`에 폰 값이 있지만 폰이 아직 읽지 않는다.
 
 **역할과 값이 둘 다 맞는 짝은 `meta`(12px) 하나뿐이다.** 이 축은 짝이 거의 없는 것이 정답이다:
 
@@ -453,6 +457,8 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 | **간격** | `--spacing: initial`(격자 밖 *단계*만 차단) + 프리플라이트 `arbitrary_tw`(임의값) + `spacing.test.ts`(코어 값 ↔ 클래스) + `designSystem.test.ts`(리듬 8단계 고정·이름 축 근거 강제) | `designSystem.test.ts` **`src/` 전수 스윕** + `conversationVisual.test.tsx:229`(2파일 심층) | `designSystem.test.ts` — 웹 CSS 파싱 ✅ (#1211) |
 | **반경** | `--radius-*: initial`(이름 단계만) + `arbitrary_tw`(`rounded-[9px]`) + `designSystem.test.ts`(3단계·순서) | `designSystem.test.ts` 전수 스윕 | `designSystem.test.ts` — 짝 1 · 분기 1(상한 포함) ✅ (#1211) |
 | **타이포** | `--text-*: initial`(이름 단계만) + `arbitrary_tw`(`text-[13px]`) + `designSystem.test.ts`(롤마다 줄 높이·크기 중복 금지) | `designSystem.test.ts` 전수 스윕(`fontSize`·`lineHeight`) | `designSystem.test.ts` — 짝 1 · 나머지 관계 ✅ (#1211) |
+| **글자 크기 설정** | `typographyScale.test.ts`(배율 변수·14/15/16·하한 10px·표 §5 대조·`@import` 핀) + `typeScale.browser.test.ts`(WebKit·Chromium 계산값, 루트 글자 20px 직교) + `fieldTextFloor.browser.test.ts`(입력 칸 16px 바닥 × 세 단계) + `gate:theme` ⑥(첫 페인트에 이미 선 값, red proof `THEME_GATE_PROVE_RED_APPEARANCE_CSS`; **게이트 미배선** §5.4 — 사람이 `npm run gate:theme`을 돌린다) | ❌ (폰은 범위 밖) | — |
+| **대화 밀도 설정** | `densityTokens.test.ts`(CSS ↔ 코어 `DENSITY` ↔ 표 §5, **밀도 변수를 읽는 파일의 닫힌 목록**, `@import` 핀) + `densityTokens.browser.test.ts`(계산된 값, 밀도를 안 따르는 쌍둥이 6px) + `spacing.test.ts`(세 단계의 행 사이·묶음 사이) + `ConversationPreview.test.ts`·`AppearanceSection.test.tsx`(미리보기가 타임라인과 같은 상수를 읽음) | ❌ (폰은 아직 읽지 않는다) | — |
 | **그림자** | `designSystem.test.ts` — `--elevation-rest/float` 이름 + 클래스 두 단 | `designSystem.test.ts` — `shadowColor`는 팔레트에서만 | **대조 불가 축**(§2.6) |
 | **겹침 층** | `overlayLayers.test.ts` — `--layer-*` 순서·바닥(`z-50` 위)·`data-overlay-layer` 여섯 파일 + 잔량 허용목록. 히트 테스트와 **루트 스윕**(이름 밖 수치 z = 0)은 `scripts/capture-overlay-layers.mjs` | ❌ | — |
 | **모션** | `motion.test.ts`(사다리·상수·눌림·reduced-motion) + 프리플라이트 `raw_motion`·`motion_lib_scope`. 데스크톱 사이드바 접기(셸 상태 변화) = `--motion-standard` 240 · 390 오버레이 드로어·스크림(`--elevation-float` 표면) = `--motion-fast` 180 대칭 | ❌ (M1a) | 값 파생은 M1a |
@@ -572,3 +578,4 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 | 7 | `light-dark()`의 실제 브라우저 하한선 | Tauri macOS는 WKWebView(OS 버전에 묶임). **미확인** |
 | 8 | 액센트 후보 세트 확정 | **결정됨** [ADR-0189](../adr/0189-design-system-2-dawn-sky-multi-theme.md) D2·D3: 테마 3종(새벽하늘·흑연·노을띠) × 모드, 신호 프리셋 4종과 커스텀 hex. 값은 [테마 토큰 표](themes-2.0.md)에 있다 |
 | 9 | 타이포 체계 재정의 (본문 기준 크기, 한글 서체, 폰 Dynamic Type, 굵기 800 폐지) | **결정됨 (2026-10-13)** [typography-proposal.md](typography-proposal.md) (#3774): 웹 본문 15, 시스템 서체 + 사용자 글꼴 설정, 폰 본문은 Dynamic Type 상한 없음·크롬 1.6, 800 폐지 |
+| 10 | 「작게」 단계의 가장 작은 글자(캡션 10.3px)에 `max()` 바닥을 둘 것인가 | **미결** (AP-2a #4189): 글자 크기 배율 14/15/16([ADR-0189](../adr/0189-design-system-2-dawn-sky-multi-theme.md) 증보 3 D8)으로 「작게」의 `text-timestamp`가 11 × 14/15 = 10.3px가 됐다. 지금은 `typographyScale.test.ts`의 10px 안전선만 있고 규칙이 아니다. 올린다면 `--text-timestamp`를 `max()`로 묶는 한 줄이다 |

@@ -3,9 +3,11 @@
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, useLocation } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import type { MessageNewEvent } from "@momo/core/lib/realtimeEvents";
+import type { NotificationRules } from "@momo/core/features/settings/notificationRules";
 import type { RealtimeHandle } from "@/lib/realtime";
 import { DesktopNotifications } from "./DesktopNotifications";
 import { osNotifier } from "./osNotifier";
@@ -13,6 +15,7 @@ import {
   reloadDesktopNotificationKindsForTest,
   setDesktopNotificationKind,
 } from "./preference";
+import { serverPauseActive } from "./serverPause";
 
 // 브라우저 탭(셸 없음)에서의 같은 규칙 (#3340).
 
@@ -23,6 +26,19 @@ const IDS = vi.hoisted(() => ({
   channel: "00000000-0000-7000-8000-00000000020a",
   dm: "00000000-0000-7000-8000-00000000020b",
 }));
+
+const fetchNotificationRules = vi.hoisted(() => vi.fn());
+
+// 서버 규칙 읽기만 가짜다(`DesktopNotifications.test.tsx` 와 같은 방식). 훅·판정·묶음·`Notification` 은 진짜(가짜 클래스)다.
+vi.mock("@momo/core/features/settings/notificationRules", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@momo/core/features/settings/notificationRules")>();
+  return {
+    ...actual,
+    fetchNotificationRules: (workspaceId: string) =>
+      fetchNotificationRules(workspaceId) as Promise<NotificationRules>,
+  };
+});
 
 vi.mock("@/lib/tauri", () => ({
   isDesktop: () => false,
@@ -91,6 +107,8 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  fetchNotificationRules.mockReset();
+  fetchNotificationRules.mockResolvedValue({ dnd: false, mentionOverridesMute: false });
   FakeNotification.permission = "granted";
   FakeNotification.instances = [];
   FakeNotification.requestPermission.mockClear();
@@ -176,13 +194,30 @@ function mountRail(path = "/"): void {
     MemoryRouter,
     { initialEntries: [path] },
     createElement(
-      SessionProvider,
-      { value: sessionValue() },
-      createElement(DesktopNotifications),
-      createElement(PathProbe)
+      QueryClientProvider,
+      { client: new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }) },
+      createElement(
+        SessionProvider,
+        { value: sessionValue() },
+        createElement(DesktopNotifications),
+        createElement(PathProbe)
+      )
     )
   );
   act(() => mountedRoot?.render(tree));
+}
+
+/**
+ * 조건이 설 때까지 기다린다. 질의의 상태 알림은 약속이 풀린 **뒤** 매크로태스크에 나가므로 고정된 한 틱은
+ * 부하에서 어긋난다(전체 시험에서만 붉던 시험이 그 증거다).
+ */
+async function until(condition: () => boolean, what: string): Promise<void> {
+  for (let attempt = 0; attempt < 100 && !condition(); attempt += 1) {
+    await act(async () => {
+      await new Promise((resolve) => globalThis.setTimeout(resolve, 2));
+    });
+  }
+  expect(condition(), what).toBe(true);
 }
 
 async function deliver(event: MessageNewEvent): Promise<void> {
@@ -202,6 +237,8 @@ describe("DesktopNotifications in a browser tab (#3340)", () => {
     expect(FakeNotification.instances).toHaveLength(0);
     // 권한이 없으면 구독도 만들지 않는다: 탭은 켜지 않은 기능에 값을 내지 않는다.
     expect(subscribed).toBe(0);
+    // 일시 중지 규칙도 읽지 않는다 — 배너를 낼 수 없는 탭이 쓰지 않을 값에 요청을 내지 않는다(#4197).
+    expect(fetchNotificationRules).not.toHaveBeenCalled();
   });
 
   it("a denied tab stays silent", async () => {
@@ -210,6 +247,7 @@ describe("DesktopNotifications in a browser tab (#3340)", () => {
     await deliver(mention());
     expect(FakeNotification.instances).toHaveLength(0);
     expect(subscribed).toBe(0);
+    expect(fetchNotificationRules).not.toHaveBeenCalled();
   });
 
   it("a granted, hidden tab gets the mention banner", async () => {
@@ -218,6 +256,28 @@ describe("DesktopNotifications in a browser tab (#3340)", () => {
     await deliver(mention());
     expect(FakeNotification.instances).toHaveLength(1);
     expect(FakeNotification.instances[0]?.title).toBe("곽성재");
+  });
+
+  it("a granted tab holds its banner while the server pause is on, and shows it once it is off (#4197)", async () => {
+    // 같은 규칙이 탭에도 선다: 서버가 일시 중지라고 답한 동안은 권한이 있어도 배너가 없다.
+    fetchNotificationRules.mockResolvedValue({
+      dnd: true,
+      mentionOverridesMute: false,
+      dndUntilMs: Date.now() + 3_600_000,
+    });
+    mountRail();
+    await until(serverPauseActive, "서버의 일시 중지가 이 탭에 닿았다");
+    expect(fetchNotificationRules).toHaveBeenCalledTimes(1);
+    await deliver(mention());
+    expect(FakeNotification.instances).toHaveLength(0);
+  });
+
+  it("the same tab shows the banner when the server pause is off (control for the one above)", async () => {
+    mountRail();
+    await until(() => fetchNotificationRules.mock.calls.length >= 1, "규칙 읽기가 시작됐다");
+    await deliver(mention());
+    expect(serverPauseActive()).toBe(false);
+    expect(FakeNotification.instances).toHaveLength(1);
   });
 
   it("DM is off by default, and on once the person turns it on", async () => {
