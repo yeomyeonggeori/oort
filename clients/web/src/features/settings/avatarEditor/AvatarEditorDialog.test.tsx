@@ -259,6 +259,13 @@ async function typeColor(value: string) {
   await settle();
 }
 
+async function pressEscape() {
+  await act(async () => {
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  });
+  await settle();
+}
+
 const saveDisabled = () => q("avatar-editor-save")?.getAttribute("aria-disabled") === "true";
 const chipDisabled = (id: string) => (q(`avatar-color-${id}`) as HTMLInputElement).disabled;
 const checked = (id: string) => (q(id) as HTMLInputElement).checked;
@@ -587,6 +594,20 @@ describe("AvatarEditorDialog: 기본으로 되돌리기", () => {
     expect(mounted.onOpenChange).toHaveBeenCalledWith(false);
   });
 
+  it("확인 질문이 열려 있을 때 첫 Esc 는 질문만 닫고 대화상자는 남는다, 둘째 Esc 가 대화상자를 닫는다 (초점은 되돌리기 단추로)", async () => {
+    const mounted = await mountEditor({ member: me(HAS_AVATAR) });
+    await click("avatar-editor-reset");
+    expect(q("avatar-editor-reset-question")).not.toBeNull();
+    await pressEscape();
+    expect(q("avatar-editor-reset-question")).toBeNull();
+    expect(q("avatar-editor-reset")).not.toBeNull();
+    expect(mounted.onOpenChange).not.toHaveBeenCalled();
+    expect(removeMyAvatar).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(q("avatar-editor-reset"));
+    await pressEscape();
+    expect(mounted.onOpenChange).toHaveBeenCalledWith(false);
+  });
+
   it("되돌리기가 실패하면 오류를 말하고 닫히지 않는다", async () => {
     removeMyAvatar.mockRejectedValue(new ApiError(500, "x"));
     const mounted = await mountEditor({ member: me(HAS_AVATAR) });
@@ -609,6 +630,13 @@ describe("AvatarEditorDialog: 오프라인과 진행", () => {
     await settle();
     expect(upload).not.toHaveBeenCalled();
     expect(q("avatar-editor-reset")?.getAttribute("aria-disabled")).toBe("true");
+    // 잠긴 두 단추가 가리키는 이유 문장은 실제로 DOM 에 있고 오프라인 배너의 그 문장이다.
+    for (const id of ["avatar-editor-save", "avatar-editor-reset"]) {
+      const tokens = (q(id)?.getAttribute("aria-describedby") ?? "").split(" ").filter(Boolean);
+      expect(tokens.length, `${id} describedby`).toBeGreaterThan(0);
+      for (const token of tokens) expect(document.getElementById(token), `${id} → #${token}`).not.toBeNull();
+      expect(tokens.map((token) => document.getElementById(token)?.textContent ?? "").join(" "), id).toContain(AVATAR_EDITOR_COPY.offline);
+    }
     await click("avatar-editor-reset");
     expect(q("avatar-editor-reset-question")).toBeNull();
     expect(removeMyAvatar).not.toHaveBeenCalled();

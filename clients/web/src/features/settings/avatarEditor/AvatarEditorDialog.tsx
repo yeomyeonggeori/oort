@@ -150,6 +150,9 @@ export function AvatarEditorDialog({
   const inputRef = useRef<HTMLInputElement>(null);
   const pickToken = useRef(0);
   const reasonId = useId();
+  const offlineId = useId();
+  const resetSlotRef = useRef<HTMLDivElement>(null);
+  const refocusReset = useRef(false);
   const [now] = useState(() => nowMs ?? Date.now());
 
   const [mode, setMode] = useState<Mode>("photo");
@@ -159,6 +162,10 @@ export function AvatarEditorDialog({
   const [emojiColor, setEmojiColor] = useState<ColorState>(() => initialColor(DEFAULT_EMOJI_BACKGROUND));
   const [presetColor, setPresetColor] = useState<ColorState>(() => initialColor(DEFAULT_PRESET_BACKGROUND));
   const [skinOpen, setSkinOpen] = useState(false);
+  // 되돌리기의 제자리 확인 질문이 열려 있는가. 대화상자 안에서는 `ConfirmButton` 이 자기 Esc 층을 받지 못한다(Radix 가 Esc 의 임자다,
+  // `escapeLayer.ts`). 그래서 첫 Esc 는 여기서 질문만 닫는다(`resetKey` 를 올려 새로 세운다): 피부색 목록과 같은 「가장 안쪽 먼저」다.
+  const [resetAsking, setResetAsking] = useState(false);
+  const [resetKey, setResetKey] = useState(0);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [thumbs, setThumbs] = useState<Partial<Record<AvatarPresetId, string>>>({});
@@ -275,6 +282,12 @@ export function AvatarEditorDialog({
   useEffect(() => {
     onBusyChange?.(busy);
   }, [busy, onBusyChange]);
+  // Esc 로 질문을 닫으면 새로 선 「되돌리기」 단추가 초점을 이어받는다(안 그러면 초점이 대화상자 껍데기로 떨어진다).
+  useEffect(() => {
+    if (!refocusReset.current) return;
+    refocusReset.current = false;
+    resetSlotRef.current?.querySelector("button")?.focus({ preventScroll: true });
+  }, [resetKey]);
 
   // ---- 저장해도 되는가, 안 되면 왜 ---------------------------------------------------
   const colorSynced = normalizeFreeColor(color.text) === color.bg;
@@ -297,6 +310,11 @@ export function AvatarEditorDialog({
     ready = true;
   }
   const canSave = ready && !offline && !busy;
+  // 잠긴 저장 단추가 이유를 가리키는 곳: 오프라인 배너와, 상태 줄(막힌 이유·오류)이 문장을 든 때의 그 줄. 빈 줄은 가리키지 않는다.
+  const saveDescribedBy =
+    !canSave && !saving
+      ? [offline ? offlineId : null, blockReason !== null || error !== null ? reasonId : null].filter(Boolean).join(" ") || undefined
+      : undefined;
 
   const status = saving
     ? `${AVATAR_EDITOR_COPY.saving} ${Math.round(progress * 100)}%.`
@@ -373,11 +391,19 @@ export function AvatarEditorDialog({
         data-testid="avatar-editor-dialog"
         className="gap-3 p-4"
         onEscapeKeyDown={(event) => {
-          // 한 번의 Esc 는 가장 안쪽의 것만 닫는다: 열려 있는 피부색 목록이 먼저다.
+          // 한 번의 Esc 는 가장 안쪽의 것만 닫는다: 열려 있는 피부색 목록, 그다음 되돌리기의 확인 질문, 마지막이 대화상자다.
           event.stopPropagation();
-          if (!skinOpen) return;
-          event.preventDefault();
-          setSkinOpen(false);
+          if (skinOpen) {
+            event.preventDefault();
+            setSkinOpen(false);
+            return;
+          }
+          if (resetAsking) {
+            event.preventDefault();
+            refocusReset.current = true;
+            setResetAsking(false);
+            setResetKey((n) => n + 1);
+          }
         }}
       >
         <DialogTitle>{AVATAR_EDITOR_COPY.title}</DialogTitle>
@@ -385,7 +411,7 @@ export function AvatarEditorDialog({
 
         <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
           {offline ? (
-            <InlineBanner tone="neutral" message={AVATAR_EDITOR_COPY.offline} testId="avatar-editor-offline" />
+            <InlineBanner tone="neutral" message={AVATAR_EDITOR_COPY.offline} messageId={offlineId} testId="avatar-editor-offline" />
           ) : null}
 
           {/* 미리보기는 스크롤 본문 안에서 위에 붙는다: 낮은 창에서 아래의 색 칩을 고르는 동안에도 결과가 보인다. */}
@@ -478,16 +504,18 @@ export function AvatarEditorDialog({
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="min-w-0">
+          <div ref={resetSlotRef} className="min-w-0">
             {hasAvatar ? (
               <ConfirmButton
+                key={resetKey}
                 label={AVATAR_EDITOR_COPY.reset}
                 question={AVATAR_EDITOR_COPY.resetQuestion}
                 confirmLabel={AVATAR_EDITOR_COPY.resetConfirm}
                 busy={resetting}
                 busyLabel={AVATAR_EDITOR_COPY.resetBusy}
                 disabled={offline || saving}
-                describedBy={offline ? "avatar-editor-offline" : undefined}
+                describedBy={offline ? offlineId : undefined}
+                onAskingChange={setResetAsking}
                 onConfirm={() => {
                   clearError();
                   reset.mutate();
@@ -505,7 +533,7 @@ export function AvatarEditorDialog({
               type="button"
               aria-disabled={!canSave || undefined}
               aria-busy={saving || undefined}
-              aria-describedby={!canSave && !saving ? reasonId : undefined}
+              aria-describedby={saveDescribedBy}
               className={cn(!canSave && !saving && "opacity-50")}
               onClick={() => {
                 if (!canSave) return;
