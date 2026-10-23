@@ -141,8 +141,12 @@ afterAll(async () => {
   await browser.close();
 }, 60_000);
 
-/** Page-clock frames: unlike a wall-clock sleep they cannot be starved. */
-const FRAMES_JS = `(n) => new Promise((done) => { const step = (left) => left <= 0 ? done() : requestAnimationFrame(() => step(left - 1)); step(n); })`;
+/**
+ * #4269: how long the H-1 runtime probe waits for `transitionrun:transform`.
+ * A healthy product answers within a few frames; only a product that never runs
+ * the press transition spends this budget (and then fails with its `events=`).
+ */
+const TRANSITION_RUN_BUDGET_MS = 5_000;
 
 function classTokens(className: string): string[] {
   return className.split(/\s+/).filter(Boolean);
@@ -523,17 +527,49 @@ describe("ADR-0179 D5 눌림 단일점", () => {
         if (!box) throw new Error("button box missing");
         await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
         await page.mouse.down();
-        // #3100: was `waitForTimeout(180)`. Under load the :active style had
-        // not even been recalculated 180ms after mousedown. Wait 3 frames of
-        // the page's own clock instead (style recalc has certainly run), then
-        // read: a product with no transform transition still reads false.
-        await page.evaluate(`(${FRAMES_JS})(3)`);
-        const events = await el.evaluate(
-          (node) => (node as HTMLElement & { __ev: string[] }).__ev
+        // #4269: wait for the event itself, never for a number of frames or
+        // milliseconds. `transform` is compositor-driven: the transition is
+        // created in mousedown's own style recalc but stays `pending`, and its
+        // `transitionrun` is withheld, until the compositor confirms the start
+        // (a cross-thread round trip of a couple of frames). `background-color`
+        // (the hover) starts on the main thread, so its run is already in. Under
+        // CPU load queued BeginFrames drain back to back: #3100's 3 rAF
+        // callbacks all ran within ~10ms and the read beat the confirmation by
+        // 6-9ms (`events=transitionrun:background-color` only). Poll on the
+        // page's own frames until the run is recorded; the budget is spent only
+        // by a product that never runs it.
+        const probe = await el.evaluate(
+          (node, budgetMs) =>
+            new Promise<{ events: string[]; animations: string[] }>((resolve) => {
+              const target = node as HTMLElement & { __ev: string[] };
+              const deadline = performance.now() + budgetMs;
+              const poll = () => {
+                const ran = target.__ev.some((entry) =>
+                  entry.startsWith("transitionrun:transform")
+                );
+                if (!ran && performance.now() < deadline) {
+                  requestAnimationFrame(poll);
+                  return;
+                }
+                resolve({
+                  events: [...target.__ev],
+                  animations: node
+                    .getAnimations()
+                    .map(
+                      (animation) =>
+                        `${(animation as CSSTransition).transitionProperty}:${
+                          animation.pending ? "pending" : animation.playState
+                        }`
+                    ),
+                });
+              };
+              poll();
+            }),
+          TRANSITION_RUN_BUDGET_MS
         );
         expect(
-          events.some((entry) => entry.startsWith("transitionrun:transform")),
-          `events=${events.join(" ")}`
+          probe.events.some((entry) => entry.startsWith("transitionrun:transform")),
+          `events=${probe.events.join(" ")} animations=${probe.animations.join(" ")}`
         ).toBe(true);
         await page.mouse.up();
       } finally {

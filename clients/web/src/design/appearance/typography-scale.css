@@ -1,0 +1,42 @@
+/* 글자 크기 세 단계 (AP-2a #4189, ADR-0189 증보 1 D2 · 증보 3 D8, ADR-0179 D7 「가상 rem」).
+ *
+ * 한 줄 요약: 루트 속성 `data-font-size`가 **글자 배율** 하나(`--type-scale`)를 고르고, 텍스트
+ * 역할 여덟 개(`tokens.css`의 `--text-<역할>`과 `--text-<역할>--line-height`)가 모두 그 배율을 곱한
+ * 가상 rem(`--type-rem`)에서 자기 크기를 낸다. 레이아웃이 읽는 rem(간격·반경·컨트롤 높이)은
+ * 건드리지 않는다. 그래서 글자만 커지고 틀은 움직이지 않는다.
+ *
+ *   작게 14px · 기본 15px · 크게 16px   (메시지 본문 `text-body` 기준, 증보 3 D8)
+ *
+ * 다른 역할은 같은 비율로 따라간다(예: 보조 글자 12px → 11.2 · 12 · 12.8). 본문 15px은
+ * 2026-10-13 owner 결정으로 올라간 값이고, 증보 1의 13/14/15를 그대로 쓰면 「기본」을 눌렀을 때
+ * 글자가 줄어들어서 14/15/16으로 정정했다.
+ *
+ * 브라우저 확대·축소와 직교한다: `--type-rem`은 `rem`에서 나오므로 사용자가 브라우저의 기본
+ * 글자 크기를 바꾸면 그 위에 얹혀 같이 움직인다(`typeScale.browser.test.ts`가 루트 글자를 20px로
+ * 바꿔 비율이 그대로인지 잰다).
+ *
+ * 입력 칸은 이 배율을 받지 않는다. 손가락 화면에서 16px 밑으로 내려가면 iOS 사파리가 페이지를
+ * 확대하므로, `tokens.css`의 입력 칸 바닥 규칙이 모든 단계에서 `--field-text-floor`(1rem, 이
+ * 파일의 변수와 무관)를 지킨다(`fieldTextFloor.browser.test.ts`가 세 단계 모두에서 잰다).
+ *
+ * 규칙은 루트 속성 선택자로 쓴다. 이 파일은 레이어 밖이라 `@theme`(레이어 안)의 값을 특이도와
+ * 무관하게 이기고, 소스 순서에도 기대지 않는다. 어느 속성에 무엇이 찍히는지는
+ * `packages/momo-core/src/design/rootStamp.ts`의 표가 정한다(`data-font-size`는 부트 스크립트가
+ * 첫 페인트 전에 찍는다).
+ *
+ * 개념 출처: Buzz desktop `src/shared/styles/globals/typography.css:16-52`(Apache-2.0,
+ * Copyright 2026 Block, Inc., 커밋 af5bb0a)의 「루트 속성이 배율 변수 하나를 고르고 모든 글자
+ * 토큰이 그 변수에서 파생된다」는 구조. 배율(13/14/15 대신 14/15/16)과 변수 이름, 대상 역할은
+ * oort 것이고 코드는 복사하지 않았다. */
+:root {
+  --type-scale: 1;
+  --type-rem: calc(1rem * var(--type-scale));
+}
+
+:root[data-font-size="smaller"] {
+  --type-scale: calc(14 / 15);
+}
+
+:root[data-font-size="larger"] {
+  --type-scale: calc(16 / 15);
+}

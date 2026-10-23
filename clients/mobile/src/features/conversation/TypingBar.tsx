@@ -1,8 +1,9 @@
 import type {TypingSegment} from '@momo/core/features/chat/typing';
 import React from 'react';
 import {StyleSheet, Text} from 'react-native';
-import {font, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
+import {font, line as lineScale, SAFE_GUTTER, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
+import {CONV} from './convDesign';
 
 // =============================================================================
 // 「작성 중」 — 사람이 지금 무언가 치고 있다 (ADR-0149).
@@ -57,7 +58,33 @@ import {useStyles} from '../../design/theme';
 // 예약 높이는 **1줄 고정**이다(웹과 같은 트레이드오프). 두 줄까지 예약하면 평소에
 // 정말로 빈 띠가 생기고, 이름이 길어 두 줄이 되는 경우는 드물다 — 그때는 이
 // 줄이 한 줄 밀어내는 쪽을 택한다.
+//
+// ## 예약은 12, 줄 상자는 16 — 이 줄이 「마지막 행 → 알약」 간격 20 의 한가운데다 (#4264)
+//
+// 성재 실기(2026-10-23): 「타이핑하면서 채팅바랑 마지막 채팅 사이의 거리가 조금 과한 느낌」. 그 간격은 목록 꼬리 8 +
+// 이 줄의 예약 20(줄 16 + 아래 4) + 컴포저 위 여백 8 = 36 이었다. H-3 의 약속(「나타나고 사라져도 아래가 안
+// 움직인다」)은 줄이 **한 줄(16) 이상**을 예약해야 서므로, 이 줄을 없애지 않고는 20 에 닿지 않는다 — 그래서 다른
+// 두 조각을 정리했다: 대화 화면은 목록 꼬리를 0 으로 받고(`CONV.conversationTail`), 이 줄은 아래 4 를 지고
+// 있던 것을 **걷는다**. 줄 상자(`line.meta` 16)는 그대로인데 흐름에서는 `TYPING_RESERVE`(12)만 먹고, 상자의 아래
+// `TYPING_OVERHANG`(4)는 컴포저가 늘 비워 두는 위 여백(8) 위에 걸친다 — 거기는 빈 자리다. 글이 서 있을 때
+// (16 Pro 실측, 글자 기준) 마지막 글자 → 「작성 중」 글자 18 → 10pt, 「작성 중」 글자 → 알약 15 → 7pt 다.
+//
+// 걸친 만큼 **다음 형제가 올라와 겹친다.** 다음 형제가 컴포저 루트이면 겹치는 곳이 빈 위 여백이라 아무것도 안
+// 가린다. 다음 형제가 중단 영수증·개인 호출 알림(`stopOutcome`)이면 그 글줄의 위 4 가 걸침을 받아야 하므로
+// `ConversationScreen` 의 그 스타일이 위 여백 `TYPING_OVERHANG` 를 진다.
+//
+// 잠금: `__tests__/conversationGap.test.tsx` 가 화면의 실제 렌더 트리에서 세 조각의 합을 잰다.
 // =============================================================================
+
+/**
+ * 이 줄이 대화 화면의 도크 **흐름**에서 먹는 높이 — 비어 있어도, 글이 있어도 같다(H-3). 마지막 행 → 알약
+ * 간격(`CONV.listPillGap`)에서 목록 꼬리와 컴포저 위 여백을 뺀 나머지다.
+ */
+export const TYPING_RESERVE =
+  CONV.listPillGap - CONV.conversationTail - CONV.composerTopAir;
+
+/** 줄 상자가 예약보다 큰 만큼. 컴포저 위 여백(`CONV.composerTopAir`)보다 작아야 알약에 안 닿는다. */
+export const TYPING_OVERHANG = lineScale.meta - TYPING_RESERVE;
 
 /**
  * 컴포저 위 「작성 중」 한 줄.
@@ -141,7 +168,6 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    */
   line: {
     paddingHorizontal: SAFE_GUTTER,
-    paddingBottom: space.xs,
     fontSize: font.meta,
     // `textFaint` 는 배경 대비 **3.562:1** 로 본문 AA(4.5)에 못 미친다
     // (design-review M-6, 실측 확정). `textMuted` 는 6.358:1 이다.
@@ -149,8 +175,11 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     color: color.textMuted,
     // 자리 예약의 실체 (H-3): 줄이 비어도 이 높이가 남으므로 아래의 컴포저가
     // 남의 키보드 박자로 움직이지 않는다. 1줄 고정이다.
-    lineHeight: 16,
-    minHeight: 16 + space.xs,
+    lineHeight: lineScale.meta,
+    minHeight: lineScale.meta,
+    // 흐름에서는 `TYPING_RESERVE` 만 먹는다 — 줄 상자의 아래 `TYPING_OVERHANG` 는 다음 형제의 위 여백 위에
+    // 걸친다(머리말 「예약은 12, 줄 상자는 16」).
+    marginBottom: -TYPING_OVERHANG,
   },
   // 이름만 한 급 밝다 (M-4). 「작성」과 「작업」을 가르는 한 음절 말고 **눈에
   // 보이는 축**을 하나 준다 — 에이전트 줄은 이름을 agent 색으로 칠한다.

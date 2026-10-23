@@ -22,7 +22,12 @@ import { agentCardModel } from "../timeline/agentCardModel";
 //     screen, or one keystroke away);
 //   - never twice for the same message, never for one's own writing, never for
 //     a channel the server says is muted, and never for a burst replayed by a
-//     reconnect long after the fact.
+//     reconnect long after the fact;
+//   - never while the member's own 알림 일시 중지 is on (#4197). The phone push
+//     stops for it on the server (ADR-0124 증보 2, `judge_targets`), so a banner
+//     that kept coming would make 「알림도 함께 멈춰요」 untrue on a surface that
+//     decides for itself. The pause is the SERVER's value, handed in as
+//     `paused`; this module never compares its expiry with a clock (see there).
 //
 // The copy is deliberately thin: sender as the title, one truncated line as the
 // body. Code and secret-shaped tokens are replaced rather than forwarded — a
@@ -49,6 +54,8 @@ export type NotifySkip =
   | "self"
   /** The server's per-member mute for this channel. */
   | "muted"
+  /** The member's own 알림 일시 중지 is on — nothing becomes a banner, mentions and approvals included (#4197). */
+  | "paused"
   /** momo is the window in front — showing a banner would be noise. */
   | "focused"
   /** Already announced this run. */
@@ -199,6 +206,18 @@ export interface NotifyContext {
   /** Is this channel a one-to-one DM? Absent means no channel is. */
   isDirect?: (channelId: string) => boolean;
   selfMemberId: string;
+  /**
+   * 이 멤버의 **알림 일시 중지**(서버 `notification_rule.dnd`)가 켜져 있다 (#4197). 켜져 있으면
+   * 멘션·승인·DM 어느 것도 OS 배너가 되지 않는다: 폰 푸시는 같은 규칙으로 서버에서 멈추는데(ADR-0124
+   * 증보 2, ADR-0204 D2) 배너만 계속 오면 「알림도 함께 멈춰요」가 이 기기에서만 거짓이 된다.
+   * 채널 음소거·종류 스위치보다 위다(ADR-0124 D5: 일시 중지 > 채널 mute > 사유).
+   *
+   * **기한(`dndUntilMs`)을 여기서 시계와 비교하지 않는다.** 만료는 서버가 판정하고(증보 2 D7, 읽기도
+   * 유효 값을 준다) 클라이언트는 기한이 지나면 규칙을 **다시 읽을** 뿐이다(ADR-0204 D3). 그러니 이 값은
+   * 서버가 마지막으로 답한 `dnd` 그대로다. 못 읽었으면 비운다 — 읽지 못한 규칙으로 배너를 막지 않는다.
+   * 배지·인박스는 이 입력과 무관하다(별개 원장, ADR-0124 D2).
+   */
+  paused?: boolean;
   /** Server per-member mute for a channel (Channel.muted). */
   isMuted: (channelId: string) => boolean;
   /** Message ids already announced this run. */
@@ -235,6 +254,8 @@ export function notifyDecision(
   if (uuidEq(message.authorMemberId, context.selfMemberId)) {
     return { show: false, skip: "self" };
   }
+  // 일시 중지는 채널 음소거·종류 스위치보다 위다(ADR-0124 D5).
+  if (context.paused) return { show: false, skip: "paused" };
   if (context.isMuted(message.channelId)) return { show: false, skip: "muted" };
   if (context.kindEnabled && !context.kindEnabled(kind)) {
     return { show: false, skip: "kind-disabled" };

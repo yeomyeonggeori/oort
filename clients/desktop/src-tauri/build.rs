@@ -36,6 +36,10 @@ const APP_COMMANDS: &[&str] = &[
     // Dock badge = the web side's needs-me count (#3339). Desktop only;
     // granted to the main window in capabilities/default.json.
     "dock_badge_set",
+    // Window glass (AP-3 #4190): blur-behind layer and the app's native appearance.
+    // Desktop only; granted to the main window in capabilities/default.json.
+    "window_vibrancy_set",
+    "app_theme_set",
     "keychain_available",
     // Desktop: the webview's handle for the stored token (#3106).
     "keychain_refresh_token_handle",

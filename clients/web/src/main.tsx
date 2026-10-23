@@ -14,7 +14,9 @@ import { releaseAfter, SESSION_HYDRATE_BUDGET_MS } from "@/app/boot";
 import { trackViewportHeight } from "@/app/viewportHeight";
 import { initFocusModality } from "@/design/focusModality";
 import { initTheme } from "@/design/theme";
+import { startDerivedTheme } from "@/design/themes/applyDerived";
 import { installDesktopDropGuard } from "@/lib/desktopDropGuard";
+import { installDesktopEffects } from "@/features/settings/appearance/desktopEffects";
 import { IS_TAURI } from "@/lib/env";
 import "@/design/tokens.css";
 
@@ -28,12 +30,20 @@ trackViewportHeight();
 // 없다. 이 줄이 지키는 것은 그 스크립트가 오지 못한 경우(오프라인 콜드 스타트)와
 // 모듈이 가진 선택이 문서와 어긋나지 않는다는 사실이다.
 initTheme();
+// 카탈로그·사용자 테마는 정적 CSS가 없어 변수를 루트에 꽂아야 서고, 그 길은 저장소 구독이다(AP-1b #4188).
+// 엔진은 지연 로드라 첫 페인트는 부트 캐시가 맡는다(`public/theme-boot.js`).
+startDerivedTheme();
 initFocusModality(document);
 
 // 데스크탑 셸만 (#2671). 셸이 끌기를 WebKit에 넘기므로(`dragDropEnabled: false`),
 // 받는 곳 없이 놓인 파일·링크가 창을 그 파일·주소로 옮기지 않게 여기서 삼킨다.
 // 브라우저 탭은 건드리지 않는다. 자세한 까닭은 lib/desktopDropGuard.ts.
 if (IS_TAURI) installDesktopDropGuard(window);
+
+// 데스크탑 유리 배경 (AP-3 #4190). 켜 둔 사람의 창에 네이티브 블러를 깔고 그 **뒤에** `data-glass`를 찍는다.
+// 첫 프레임은 불투명이고(웹뷰가 뜬 뒤에야 셸에 부를 수 있다) 몇 ms 뒤에 유리로 바뀐다. 꺼 둔 사람에게는
+// 아무 일도 하지 않는다.
+if (IS_TAURI) installDesktopEffects();
 
 // StrictMode is intentionally OFF: its dev-only double-invocation would
 // double-subscribe the Centrifugo rail and make the realtime/resume demo

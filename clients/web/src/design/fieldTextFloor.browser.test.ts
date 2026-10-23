@@ -32,6 +32,11 @@ import { describe, expect, it } from "vitest";
  *   - 넓은 창 1280px, 마우스: 대조군. 데스크탑 밀도(컨트롤 14px, 컴포저·본문 15px)는 그대로여야 한다. 이 칸이
  *     없으면 「어디서나 16px」도 초록이 된다.
  *
+ * 글자 크기 세 단계(작게·기본·크게, AP-2a #4189)를 각 갈래에 곱해서 잰다. 모든 역할이 글자 배율을 곱하므로
+ * 「작게」에서는 기본에서 16px인 heading과 17px인 title도 바닥 밑으로 내려갈 수 있고, 그 칸이 막혀 있는지가
+ * 이 시험의 새 일이다. 대조군은 단계마다 `기본 크기 × 배율`이어야 한다(바닥 규칙이 넓은 마우스 화면의 글자를
+ * 건드리면 글자 크기 설정이 입력 칸에서만 거짓말을 한다).
+ *
  * 엔진: WebKit(사파리의 엔진)과 Chromium 중 설치된 것 전부. 둘 다 없으면 경고를 남기고
  * 건너뛴다(다른 브라우저 시험과 같은 규약, CI 레인은 #2129).
  */
@@ -63,17 +68,34 @@ const ENGINES: EngineName[] = (["webkit", "chromium"] as const).filter((name) =>
   return missing === null;
 });
 
-/** tokens.css `@theme`의 텍스트 역할과 그 rem 값. `--text-*: initial`과 줄 높이는 뺀다. */
+/**
+ * tokens.css `@theme`의 텍스트 역할과 「기본」 단계의 px. `--text-*: initial`과 줄 높이는 뺀다.
+ * 역할은 `calc(var(--type-rem) * <곱수>)`이고 곱수 × 16이 기본 단계의 px다.
+ */
 function textRoles(): { role: string; px: number }[] {
   const css = readFileSync(TOKENS, "utf8");
-  const roles = [...css.matchAll(/^\s*--text-([a-z]+):\s*([\d.]+)rem;/gm)].map(
-    (m) => ({ role: m[1]!, px: Number(m[2]) * 16 })
-  );
-  if (roles.length < 5) {
+  const roles = [
+    ...css.matchAll(/^\s*--text-([a-z]+):\s*calc\(var\(--type-rem\)\s*\*\s*([\d.]+)\);/gm),
+  ].map((m) => ({ role: m[1]!, px: Number(m[2]) * 16 }));
+  if (roles.length < 8) {
     throw new Error(`tokens.css text roles not found (${roles.length})`);
   }
   return roles;
 }
+
+/**
+ * 글자 크기 단계와 그 배율. 본문 14/15/16px ⇒ 14/15 · 1 · 16/15(ADR-0189 증보 3 D8). CSS가 같은 배율을
+ * 내는지는 `typeScale.browser.test.ts`가 따로 잰다(이 목록을 CSS에서 읽지 않는 이유: 배율이 바뀌었을 때
+ * 그 시험이 먼저 빨개져야 하고, 여기는 「바닥이 그 배율 위에서 선다」만 묻는다).
+ */
+const FONT_STEPS = [
+  { step: "smaller", scale: 14 / 15 },
+  { step: "default", scale: 1 },
+  { step: "larger", scale: 16 / 15 },
+] as const;
+
+/** 계산된 글자 크기 비교의 허용 오차(px). 엔진이 부동소수를 1/64px 단위로 접는다. */
+const EPSILON_PX = 0.05;
 
 /** `cn(` 다음의 첫 문자열 리터럴. 사이에 낀 `//` 주석은 건너뛴다. */
 function primitiveClasses(file: string): string {
@@ -175,7 +197,7 @@ function escapeAttr(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
 }
 
-function pageHtml(css: string, list: Field[]): string {
+function pageHtml(css: string, list: Field[], step: string): string {
   const rows = list
     .map((field, index) => {
       const cls = escapeAttr(field.classes);
@@ -190,7 +212,7 @@ function pageHtml(css: string, list: Field[]): string {
       return `<div class="${escapeAttr(field.parent ?? "")}">${control}</div>`;
     })
     .join("\n");
-  return `<!doctype html><html lang="ko"><head>
+  return `<!doctype html><html lang="ko" data-font-size="${step}"><head>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>${css}</style></head><body>${rows}</body></html>`;
 }
@@ -218,10 +240,10 @@ const CONTEXTS = [
 
 describe("입력 칸 글자 바닥 16px (#2616)", () => {
   it.skipIf(ENGINES.length === 0)(
-    "손가락·좁은 화면에서 모든 입력 칸이 16px 이상이고, 넓은 마우스 화면의 밀도는 그대로다",
+    "손가락·좁은 화면에서 모든 입력 칸이 글자 크기 세 단계 모두 16px 이상이고, 넓은 마우스 화면의 밀도는 배율만큼만 움직인다",
     async () => {
       const list = fields();
-      const html = pageHtml(await buildCss(list), list);
+      const css = await buildCss(list);
       const playwright = await import("playwright");
       const violations: string[] = [];
       const measured: string[] = [];
@@ -230,44 +252,55 @@ describe("입력 칸 글자 바닥 16px (#2616)", () => {
         const browser = await playwright[engine].launch();
         try {
           for (const context of CONTEXTS) {
-            const ctx = await browser.newContext(context.options);
-            try {
-              const page = await ctx.newPage();
-              await page.setContent(html);
-              const media = await page.evaluate(() => ({
-                width: matchMedia("(width < 600px)").matches,
-                hoverNone: matchMedia("(hover: none)").matches,
-              }));
-              // 축이 흉내 내어지지 않으면 이 칸의 초록은 아무것도 재지 않은 것이다.
-              expect(media, `${engine} ${context.name} media`).toEqual(context.expect);
-              const sizes = await page.evaluate(() =>
-                [...document.querySelectorAll<HTMLElement>("[data-field]")].map((el) =>
-                  Number.parseFloat(getComputedStyle(el).fontSize)
-                )
-              );
-              list.forEach((field, index) => {
-                const px = sizes[index]!;
-                if (context.floor && !(px >= FLOOR_PX)) {
-                  violations.push(`${engine} ${context.name} ${field.label}: ${px}px < ${FLOOR_PX}px`);
-                }
-                // 바닥은 올리기만 한다. 바닥보다 큰 역할(title·display)이 16px로
-                // 끌려 내려오면 그것은 바닥이 아니라 덮어쓰기다.
-                if (
-                  context.floor &&
-                  field.widePx !== undefined &&
-                  field.widePx > FLOOR_PX &&
-                  px !== field.widePx
-                ) {
-                  violations.push(`${engine} ${context.name} ${field.label}: ${px}px, 기대 ${field.widePx}px (바닥보다 큰 역할)`);
-                }
-                if (!context.floor && field.widePx !== undefined && px !== field.widePx) {
-                  violations.push(`${engine} ${context.name} ${field.label}: ${px}px, 기대 ${field.widePx}px`);
-                }
-              });
-              const composer = list.findIndex((field) => field.label === "채널 컴포저");
-              measured.push(`${engine} ${context.name}: 채널 컴포저 ${sizes[composer]}px`);
-            } finally {
-              await ctx.close();
+            for (const { step, scale } of FONT_STEPS) {
+              const label = `${engine} ${context.name} · 글자 ${step}`;
+              const ctx = await browser.newContext(context.options);
+              try {
+                const page = await ctx.newPage();
+                await page.setContent(pageHtml(css, list, step));
+                const media = await page.evaluate(() => ({
+                  width: matchMedia("(width < 600px)").matches,
+                  hoverNone: matchMedia("(hover: none)").matches,
+                }));
+                // 축이 흉내 내어지지 않으면 이 칸의 초록은 아무것도 재지 않은 것이다.
+                expect(media, `${label} media`).toEqual(context.expect);
+                // 단계가 정말 문서에 서 있는지(속성이 안 찍힌 채 「기본」만 재면 세 단계가 한 칸이다).
+                expect(
+                  await page.evaluate(() => document.documentElement.getAttribute("data-font-size")),
+                  `${label} data-font-size`
+                ).toBe(step);
+                const sizes = await page.evaluate(() =>
+                  [...document.querySelectorAll<HTMLElement>("[data-field]")].map((el) =>
+                    Number.parseFloat(getComputedStyle(el).fontSize)
+                  )
+                );
+                list.forEach((field, index) => {
+                  const px = sizes[index]!;
+                  if (context.floor && !(px >= FLOOR_PX - EPSILON_PX)) {
+                    violations.push(`${label} ${field.label}: ${px}px < ${FLOOR_PX}px`);
+                  }
+                  // 바닥은 올리기만 한다. 바닥보다 큰 역할(title·display)은 자기 배율 크기를 지키고,
+                  // 배율이 그것을 바닥 밑으로 끌어내린 만큼만(작게의 title 15.9px) 바닥이 올린다. 16px로 끌려 내려오면
+                  // 그것은 바닥이 아니라 덮어쓰기다.
+                  if (context.floor && field.widePx !== undefined && field.widePx > FLOOR_PX) {
+                    const want = Math.max(FLOOR_PX, field.widePx * scale);
+                    if (Math.abs(px - want) > EPSILON_PX) {
+                      violations.push(`${label} ${field.label}: ${px}px, 기대 ${want}px (바닥보다 큰 역할)`);
+                    }
+                  }
+                  // 대조군: 바닥 규칙이 닿지 않는 화면에서는 「기본 크기 × 배율」 그대로다.
+                  if (!context.floor && field.widePx !== undefined) {
+                    const want = field.widePx * scale;
+                    if (Math.abs(px - want) > EPSILON_PX) {
+                      violations.push(`${label} ${field.label}: ${px}px, 기대 ${want}px`);
+                    }
+                  }
+                });
+                const composer = list.findIndex((field) => field.label === "채널 컴포저");
+                measured.push(`${label}: 채널 컴포저 ${sizes[composer]}px`);
+              } finally {
+                await ctx.close();
+              }
             }
           }
         } finally {
@@ -276,32 +309,49 @@ describe("입력 칸 글자 바닥 16px (#2616)", () => {
       }
 
       expect(violations).toEqual([]);
-      expect(measured.length).toBe(ENGINES.length * CONTEXTS.length);
+      expect(measured.length).toBe(ENGINES.length * CONTEXTS.length * FONT_STEPS.length);
     },
-    60_000
+    120_000
   );
 
   // 브라우저가 없는 곳(CI 유닛 레인)에서도 도는 절반. 계산된 크기는 못 재지만,
   // 역할이 새로 생겼는데 입력 칸 규칙이 그것을 다시 묶지 않은 상태는 잡는다.
-  it("tokens.css의 입력 칸 규칙이 바닥 밑 역할을 전부 다시 묶는다", () => {
+  it("tokens.css의 입력 칸 규칙이 바닥 밑으로 내려갈 수 있는 역할 전부를 다시 묶는다", () => {
     const css = readFileSync(TOKENS, "utf8");
     const block = css.match(
       /@media \(width < 600px\), \(hover: none\) \{\s*input,\s*textarea,\s*select,\s*\[data-field-adornment\] \{([^}]*)\}/
     );
     expect(block, "입력 칸 규칙(@media (width < 600px), (hover: none))이 없다").not.toBeNull();
     const body = block![1]!;
-    const rebound = [...body.matchAll(/--text-([a-z]+):\s*var\(--field-text-floor\);/g)].map(
-      (m) => m[1]
-    );
-    const belowFloor = textRoles()
-      .filter((r) => r.px < FLOOR_PX)
-      .map((r) => r.role);
+    const roles = textRoles();
+
+    // 기본 단계에서 이미 바닥 밑인 역할은 바닥 자체로 묶고, 줄 높이도 바닥의 짝 줄 높이로 묶는다.
+    const rebound = [...body.matchAll(/--text-([a-z]+):\s*var\(--field-text-floor\);/g)].map((m) => m[1]);
+    const belowFloor = roles.filter((r) => r.px < FLOOR_PX).map((r) => r.role);
     expect(belowFloor.length).toBeGreaterThan(0);
     expect(rebound.sort()).toEqual([...belowFloor].sort());
     for (const role of belowFloor) {
       expect(body).toContain(`--text-${role}--line-height: var(--field-text-floor-leading);`);
     }
+
+    // 기본에서는 바닥 이상이지만 「작게」에서 바닥 밑으로 내려가는 역할(heading·title)은 `max(바닥, 배율을 곱한 크기)`다.
+    // 곱수가 그 역할의 곱수와 같아야 기본·크게의 크기가 그대로 선다.
+    const smallest = Math.min(...FONT_STEPS.map((s) => s.scale));
+    const atRisk = roles.filter((r) => r.px >= FLOOR_PX && r.px * smallest < FLOOR_PX);
+    expect(atRisk.length).toBeGreaterThan(0);
+    const bound = [
+      ...body.matchAll(
+        /--text-([a-z]+):\s*max\(var\(--field-text-floor\),\s*calc\(var\(--type-rem\)\s*\*\s*([\d.]+)\)\);/g
+      ),
+    ].map((m) => ({ role: m[1]!, px: Number(m[2]) * 16 }));
+    expect(bound.map((r) => r.role).sort()).toEqual(atRisk.map((r) => r.role).sort());
+    for (const role of atRisk) {
+      expect(bound.find((r) => r.role === role.role)?.px, role.role).toBeCloseTo(role.px, 6);
+    }
+
     expect(body).toMatch(/font-size:\s*var\(--field-text-floor\);/);
     expect(css).toMatch(/--field-text-floor:\s*1rem;/);
+    // 바닥은 글자 크기 배율을 받지 않는다: 가상 rem이 아니라 rem 그대로다.
+    expect(css).not.toMatch(/--field-text-floor:\s*calc\(/);
   });
 });

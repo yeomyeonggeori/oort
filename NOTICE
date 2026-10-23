@@ -38,7 +38,7 @@ The React Native graph is license-gated in full by
 scripts/check_npm_licenses.mjs; direct phone dependencies that an ADR
 introduced are named in legal/THIRD_PARTY_NOTICES.md ("Phone client
 direct additions"), currently expo-blur (MIT, ADR-0189), expo-image-manipulator (MIT, ADR-0189
-증보 2), expo-haptics and expo-glass-effect
+증보 2), expo-media-library (MIT, ADR-0168 증보 1), expo-haptics and expo-glass-effect
 (MIT, #3580) and the Lucide
 icon paths (ISC) rasterized into clients/mobile/src/design/icons.
 Direct desktop dependencies an ADR introduced are named there too
@@ -65,6 +65,13 @@ MIT: Copyright (c) 2025 Vectorize AI, Inc.) and Graphiti (Zep Software, Inc., Ap
 upstream code is copied. The consolidation job re-implements Hindsight's consolidation flow and
 Graphiti's contradiction/interval-closing rule over PostgreSQL.
 The attribution table is legal/THIRD_PARTY_NOTICES.md ("Adapted designs and prompts").
+
+Theme catalog (ADR-0189 증보 3, #4188): the theme derivation arithmetic and the theme list/pairs are adapted
+from Buzz (https://github.com/block/buzz, commit af5bb0a, Apache-2.0, Copyright 2026 Block, Inc.); each adapted
+file carries its origin and a change notice in its header, and legal/THIRD_PARTY_NOTICES.md ("Adapted designs
+and prompts") carries the row. The theme catalog also bundles a handful of colors read from 57 third-party
+MIT and Apache-2.0 VS Code color themes; their upstream notices are in legal/THIRD_PARTY_NOTICES.md ("Theme
+palette seeds") and the full texts in legal/generated/THEME_PALETTE_NOTICES.txt.
 
 Named runtime companions operators actually run next to these images:
 

@@ -41,47 +41,10 @@ export function isThemeId(value: unknown): value is ThemeId {
   return typeof value === "string" && (THEME_IDS as readonly string[]).includes(value);
 }
 
-/** 표 §2의 색 역할(바닥·띠 제외). 모든 테마가 같은 목록을 든다. */
-export const COLOR_ROLES = [
-  "surface",
-  "surface-muted",
-  "sheet",
-  "ink",
-  "ink-muted",
-  "icon",
-  "line",
-  "line-strong",
-  "primary",
-  "on-primary",
-  "signal",
-  "on-signal",
-  "signal-text",
-  "signal-soft",
-  "agent",
-  "agent-soft",
-  "ok",
-  "ok-soft",
-  "warn",
-  "warn-soft",
-  "danger",
-  "danger-soft",
-] as const;
-export type ColorRole = (typeof COLOR_ROLES)[number];
-
-export const BAND_ROLES = ["band", "on-band", "on-band-muted"] as const;
-export type BandRole = (typeof BAND_ROLES)[number];
-
-export const CANVAS_STOPS = ["canvas-top", "canvas-mid", "canvas-bottom"] as const;
-export type CanvasStop = (typeof CANVAS_STOPS)[number];
-
-export const DERIVED_ROLES = [
-  "surface-hover",
-  "surface-pressed",
-  "muted-soft",
-  "danger-fill",
-  "on-danger-fill",
-] as const;
-export type DerivedRole = (typeof DERIVED_ROLES)[number];
+// 색 역할 이름 목록은 `themeRoles.ts`에 있고(지연 청크만 읽는다, 이유는 그 파일 머리) 여기서 다시 내보낸다.
+import { CANVAS_STOPS, type BandRole, type CanvasStop, type ColorRole, type DerivedRole } from "./themeRoles";
+export { BAND_ROLES, CANVAS_STOPS, COLOR_ROLES, DERIVED_ROLES } from "./themeRoles";
+export type { BandRole, CanvasStop, ColorRole, DerivedRole };
 
 /** 한 테마 × 모드의 원천 값(표 §2 그대로). */
 export interface ThemeModeSource {
@@ -340,6 +303,28 @@ function stepUntil(from: string, direction: 1 | -1, ok: (hex: string) => boolean
 }
 
 /**
+ * 가리킨 행·눌린 행·칩 그릇(`surface-hover`·`surface-pressed`·`muted-soft`). 이 셋은 `surface`·`sheet`와 모드에만
+ * 달려 있다. 파생 엔진(`derive.ts`)은 글자를 맞추기 전에 이 면들을 미리 알아야 한다: 글자(`ink`·`ink-muted`)는
+ * 이 면 위에도 선다(README §2.2의 휘도 0.769 산수).
+ */
+export function deriveStateSurfaces(
+  surface: string,
+  sheet: string,
+  mode: Mode
+): { hover: string; pressed: string; mutedSoft: string } {
+  const towardInk: 1 | -1 = mode === "light" ? -1 : 1;
+  const hover = stepUntil(surface, towardInk, (x) => separated(x, [surface, sheet]), "surface-hover");
+  const pressed = stepUntil(hover, towardInk, (x) => separated(x, [surface, sheet, hover]), "surface-pressed");
+  const mutedSoft = stepUntil(
+    surface,
+    towardInk,
+    (x) => separated(x, [surface, sheet, hover, pressed]),
+    "muted-soft"
+  );
+  return { hover, pressed, mutedSoft };
+}
+
+/**
  * 표 밖 역할을 표의 값에서 계산한다.
  *
  * - `surface-hover`: `surface`에서 잉크 쪽으로 한 단. `surface`·`sheet` 둘 다에서
@@ -354,19 +339,7 @@ function stepUntil(from: string, direction: 1 | -1, ok: (hex: string) => boolean
 export function deriveRoles(source: ThemeModeSource, mode: Mode): Record<DerivedRole, string> {
   const c = source.color;
   const towardInk: 1 | -1 = mode === "light" ? -1 : 1;
-  const hover = stepUntil(c.surface, towardInk, (x) => separated(x, [c.surface, c.sheet]), "surface-hover");
-  const pressed = stepUntil(
-    hover,
-    towardInk,
-    (x) => separated(x, [c.surface, c.sheet, hover]),
-    "surface-pressed"
-  );
-  const mutedSoft = stepUntil(
-    c.surface,
-    towardInk,
-    (x) => separated(x, [c.surface, c.sheet, hover, pressed]),
-    "muted-soft"
-  );
+  const { hover, pressed, mutedSoft } = deriveStateSurfaces(c.surface, c.sheet, mode);
 
   const fillHosts = [c.surface, c["surface-muted"], c.sheet, ...source.canvas];
   const inks = [c["on-primary"], c.ink];

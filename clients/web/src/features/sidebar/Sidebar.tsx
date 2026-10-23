@@ -109,6 +109,10 @@ import {
   useClosedDms,
 } from "./sidebarDmClosure";
 import { useDmRevival } from "./dmRevival";
+import { goneDmIds } from "./goneDmHiding";
+import { useGoneUnreadVerdicts } from "./goneUnreadVerdicts";
+import { GoneDmFold } from "./GoneDmFold";
+import { rosterLoaded } from "@momo/core/features/sidebar/goneDm";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
 import {
   setSidebarSectionCollapsed,
@@ -128,6 +132,9 @@ import { ShortcutHelpDialog } from "@/app/ShortcutHelpDialog";
 import { useOpenNewDm } from "@/features/directory/useNewDm";
 import { mayActOnLiveness } from "@momo/core/features/agents/liveness";
 import { DmAvatar, DmStatusText } from "./DmAvatar";
+
+/** 펼친 「나간 멤버와의 대화」 목록의 id (펼침 단추의 `aria-controls`). */
+const GONE_DM_LIST_ID = "sidebar-gone-dm-list";
 
 // =============================================================================
 // Sidebar (R-1 §1): workspace header, the two global surfaces (인박스 / 활동),
@@ -350,6 +357,36 @@ export function Sidebar({
     byChannel: readStates.byChannel,
     phase: readPhase,
   });
+  // 나간 멤버와의 대화(#4252, 코어 `dmHiddenAsGone`)로 접히는 DM 은 `/` 가 열어 주는 대화의 후보도 아니다
+  // (`ChatShell` 이 같은 집합으로 폴백을 고른다).
+  const rosterReady = rosterLoaded(directoryQuery);
+  // 안 읽음이 있는 나간 멤버 DM 은 그 안 읽음이 사람이 읽을 것인지 한 번 읽어 가른다(`goneUnreadVerdicts.ts`). `ChatShell` 이 같은
+  // 훅을 부른다(키가 같아 한 번만 읽는다).
+  const goneVerdicts = useGoneUnreadVerdicts({
+    workspaceId,
+    dms,
+    directory: directoryQuery.directory,
+    selfMemberId: session.member.id,
+    rosterReady,
+    byChannel: readStates.byChannel,
+    phase: readPhase,
+    closed: closedDms,
+    closureLatestSeqOf: latestSeqForClosure,
+  });
+  const foldedGoneForFallback = useMemo(
+    () =>
+      goneDmIds({
+        dms,
+        directory: directoryQuery.directory,
+        selfMemberId: session.member.id,
+        rosterReady,
+        byChannel: readStates.byChannel,
+        openId: null,
+        phase: readPhase,
+        verdicts: goneVerdicts,
+      }),
+    [dms, directoryQuery.directory, session.member.id, rosterReady, readStates.byChannel, readPhase, goneVerdicts]
+  );
   const openId = openChannelId(
     routePath,
     indexFallbackChannelId({
@@ -358,6 +395,7 @@ export function Sidebar({
       closed: closedDms,
       latestSeqOf: latestSeqForClosure,
       phase: readPhase,
+      foldedGone: foldedGoneForFallback,
     })
   );
   // 닫기는 행마다 `dmCloseOffered` 가 정한다(호버 X 와 메뉴 항목이 같은 함수를 읽는다): **읽음 투영이 준비된
@@ -378,6 +416,97 @@ export function Sidebar({
     [dms, closedDms, latestSeqForClosure, openId, readPhase]
   );
   const closedDmCount = dms.length - visibleDms.length;
+  // 나간 멤버와의 대화(#4252): 닫기 원장이 거르고 **남은** DM 중 상대가 명부에 없고 안 읽은 것이 없는 것은 목록에서
+  // 접고, DM 구역 끝의 한 줄이 그 수를 센다. 열려 있는 DM 은 접히지 않는다. ⌘K 는 `groups.dms` 를 그대로 읽어
+  // 접힌 대화도 연다. 원장이 숨긴 것은 이 수에 들지 않는다(`closedDmCount` 는 원장만 센다).
+  //
+  // 펼침은 들여다보는 동작이지 설정이 아니다: 저장하지 않는다. 펼쳐 둔 동안은 열린 나간 멤버 DM 도 접힌 목록의 제자리에 머문다
+  // (`foldOpen`): 펼친 목록에서 행을 열 때 행이 위 목록으로 옮겨 가면 눌린 링크가 사라져 키보드 캐럿을 잃고 포인터는 점프를 본다.
+  const [goneOpen, setGoneOpen] = useState(false);
+  const foldedGone = useMemo(
+    () =>
+      goneDmIds({
+        dms: visibleDms,
+        directory: directoryQuery.directory,
+        selfMemberId: session.member.id,
+        rosterReady,
+        byChannel: readStates.byChannel,
+        openId,
+        phase: readPhase,
+        foldOpen: goneOpen,
+        verdicts: goneVerdicts,
+      }),
+    [visibleDms, directoryQuery.directory, session.member.id, rosterReady, readStates.byChannel, openId, readPhase, goneOpen, goneVerdicts]
+  );
+  const shownDms = useMemo(
+    () => visibleDms.filter((channel) => !foldedGone.has(channel.id.toLowerCase())),
+    [visibleDms, foldedGone]
+  );
+  const goneDms = useMemo(
+    () => visibleDms.filter((channel) => foldedGone.has(channel.id.toLowerCase())),
+    [visibleDms, foldedGone]
+  );
+  // 접힌 대화가 없어지면 펼침은 닫힌 채로 돌아간다.
+  useEffect(() => {
+    if (goneDms.length === 0) setGoneOpen(false);
+  }, [goneDms.length]);
+  // 줄은 목록 맨 끝이라 펼친 결과가 스크롤 밖에 서기 쉽다(design-review #4252 M1: 줄을 찾으려고 이미 맨 아래까지 내린 사람이
+  // 누르면 셰브론만 바뀌고 행은 보이지 않았다). 펼치는 순간 접힌 목록이 보이게 가장 가까운 끝으로 맞춘다. 키보드는 ↓ 포커스가
+  // 스크롤을 따라가 이미 보인다. 기본(`auto`)은 즉시 이동이라 움직임 줄이기와 부딪히지 않는다.
+  useEffect(() => {
+    if (goneOpen) {
+      document.getElementById(GONE_DM_LIST_ID)?.scrollIntoView?.({ block: "nearest" });
+    }
+  }, [goneOpen]);
+  // 줄이 눌린 채 사라질 때(접힌 대화가 0 이 됐다: 접힌 대화가 하나뿐이고 그것이 열려 있을 때 줄을 접으면 그 행이 위 목록으로
+  // 올라간다) 캐럿이 `<body>` 로 떨어지지 않게 가장 가까운 정거장으로 넘긴다(design-review #4252 H1). 갈 곳은 ①줄을 접어 위로
+  // 올라온 열린 행 ②줄 바로 위의 행 ③DM 구획 머리글 순이다. 불리는 시점의 클로저는 줄이 마지막으로 그려진 렌더의 것이다.
+  const handOffFromGoneFold = () => {
+    const target =
+      goneDms.find((channel) => openId !== null && uuidEq(channel.id, openId))?.id ??
+      shownDms[shownDms.length - 1]?.id ??
+      null;
+    if (target !== null) {
+      scheduleSidebarChannelRowFocus(target);
+      return;
+    }
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => {
+        navRef.current
+          ?.querySelector<HTMLElement>('[data-testid="section-collapse-dms"]')
+          ?.focus();
+      });
+    }
+  };
+  // 명부·읽음 투영이 **한 번도 못 온 채 실패했을 때** 사람에게 이유를 말한다(design-review #4252 H2·M1): 전자는 상대가 있는 DM
+  // 도 「불러오는 중」으로 남고, 후자는 접어야 할 나간 멤버 DM 이 도로 보인다. 말은 영향을 받는 DM 구역에만 선다(영향받는 DM 이
+  // 없으면 말할 일도 없다). 폰은 명부 실패를 목록 실패로, 읽음 실패를 고지로 이미 말한다.
+  const rosterFailed = !rosterReady && directoryQuery.isError === true;
+  const dmNamesStuck = useMemo(
+    () =>
+      rosterFailed &&
+      dms.some(
+        (channel) =>
+          channelLabelParts(channel, directoryQuery.directory, session.member.id, {
+            rosterReady,
+            selfName,
+          }).kind === "pending"
+      ),
+    [rosterFailed, dms, directoryQuery.directory, session.member.id, rosterReady, selfName]
+  );
+  const goneUnfoldedByReadFailure = useMemo(
+    () =>
+      readPhase === "error" &&
+      rosterReady &&
+      dms.some(
+        (channel) =>
+          channelLabelParts(channel, directoryQuery.directory, session.member.id, {
+            rosterReady,
+            selfName,
+          }).kind === "gone"
+      ),
+    [readPhase, rosterReady, dms, directoryQuery.directory, session.member.id, selfName]
+  );
   // 닫아 둔 DM 이 **열리는** 순간(주소 · ⌘K · 새 DM)이 곧 다시 연다는 뜻이다. 원장에서 지우지
   // 않으면 사람이 일부러 연 대화가 다른 곳으로 옮겨 가는 순간 도로 사라진다. 효과는 `openId` 가
   // **바뀔 때만** 돈다(deps): 열린 DM 을 X 로 닫으면 `closeDmRow` 가 원장을 쓴 뒤 `/` 로 착지시키고,
@@ -400,9 +529,9 @@ export function Sidebar({
       deriveSidebarSections({
         prefs: sidebarPrefs.prefs,
         channels,
-        dms: visibleDms,
+        dms: shownDms,
       }),
-    [sidebarPrefs.prefs, channels, visibleDms]
+    [sidebarPrefs.prefs, channels, shownDms]
   );
   // 캐스트 없음 (design-review #1932 N-2): 기본 두 섹션이 언제나 있다는 것은
   // 코어의 계약이고, 이제 **타입이** 그렇게 말한다.
@@ -638,7 +767,7 @@ export function Sidebar({
       channel,
       directoryQuery.directory,
       session.member.id,
-      { rosterReady: !directoryQuery.isPending, selfName }
+      { rosterReady, selfName }
     );
     const peer =
       channel.kind === "dm"
@@ -1281,10 +1410,42 @@ export function Sidebar({
                   </button>
                 }
               >
+                {/* 명부를 못 받으면 DM 이름이 전부 「불러오는 중」으로 남는다. 이유와 다시 시도를 구역 안에서 말한다(#4252). */}
+                {dmNamesStuck && (
+                  <li>
+                    <InlineBanner
+                      message="멤버 목록을 불러오지 못해 대화 이름을 알 수 없어요."
+                      actionLabel="다시 시도"
+                      onAction={() => void directoryQuery.refetch()}
+                      separator={false}
+                      // 배너 첫 글자가 행의 아바타 왼쪽 끝(아이콘 칸 10 - 번짐 3 = 7)과 거의 같은 자에서 시작한다: 이 간격표의 가장 가까운 칸이 2(8px)다.
+                      className="px-2"
+                      testId="roster-error"
+                    />
+                  </li>
+                )}
+                {/* 안 읽음 표시를 못 받으면 나간 멤버와의 대화를 접을 근거가 없어 도로 보인다(안 읽은 것이 있는지 모를 때 숨기는
+                    쪽이 최악이다). 그 이유를 말한다(#4252). */}
+                {goneUnfoldedByReadFailure && (
+                  <li>
+                    <InlineBanner
+                      tone="neutral"
+                      message="안 읽음 표시를 불러오지 못해 나간 멤버와의 대화를 접지 못했어요."
+                      actionLabel="다시 시도"
+                      onAction={() => void readStates.refetch()}
+                      separator={false}
+                      className="px-2"
+                      testId="read-state-error"
+                    />
+                  </li>
+                )}
                 {dmSection.channels.map((channel) => rowFor(channel))}
+                {/* 접힌 나간 멤버 대화만 남은 구역이 「아직 대화가 없습니다」라고 말하면 바로 아래 「나간 멤버와의 대화 2개」와
+                    모순이다(#4252). 닫은 DM 의 힌트(#3963)는 접힌 줄과 모순이 아니라 그대로 선다. */}
                 {dmSection.channels.length === 0 &&
                   !channelsQuery.isLoading &&
-                  !channelsQuery.error && (
+                  !channelsQuery.error &&
+                  (closedDmCount > 0 || goneDms.length === 0) && (
                     <li
                       className="px-2 py-1 text-meta text-ink-muted"
                       data-testid="dm-section-empty"
@@ -1295,6 +1456,29 @@ export function Sidebar({
                         : "아직 대화가 없습니다. ⌘⇧K로 시작하세요."}
                     </li>
                   )}
+                {/* 나간 멤버와의 대화(#4252): 구역 맨 끝의 조용한 줄. 펼치면 접힌 대화가 이 줄 아래에 선다. */}
+                {goneDms.length > 0 && (
+                  <>
+                    <GoneDmFold
+                      count={goneDms.length}
+                      expanded={goneOpen}
+                      onToggle={() => setGoneOpen((open) => !open)}
+                      listId={GONE_DM_LIST_ID}
+                      onVanishWhileFocused={handOffFromGoneFold}
+                    />
+                    {goneOpen && (
+                      <li>
+                        <ul
+                          id={GONE_DM_LIST_ID}
+                          className="sidebar-stack"
+                          data-testid="gone-dm-list"
+                        >
+                          {goneDms.map((channel) => rowFor(channel))}
+                        </ul>
+                      </li>
+                    )}
+                  </>
+                )}
               </SidebarSection>
 
               {/* The turn pill covers a bounded number of (channel, agent) pairs.

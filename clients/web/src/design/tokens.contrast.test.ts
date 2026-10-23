@@ -249,7 +249,7 @@ export const CHIP_VESSEL_SURFACES = [
  * 그릇에 초록 잉크로 서고, 그 조합은 사람이 다시 스크린샷을 뜰 때만 잡힌다.
  * `--danger-fill` 이 위험 색상 가족을 벗어나지 못하게 한 단정과 같은 자다.
  */
-const TONE_VESSELS = [
+export const TONE_VESSELS = [
   ["ok-soft", "ok"],
   ["warn-soft", "warn"],
   ["danger-soft", "danger"],
@@ -263,7 +263,7 @@ const TONE_VESSELS = [
  * 색상뿐이다. 실측 최소는 라이트 danger 쌍의 0.0203 이다 — sRGB 에서 이 명도의
  * 빨강이 채도를 다 사지 못해 가장 좁다.
  */
-const CHIP_VESSEL_MIN_SIBLING_DISTANCE = 0.02;
+export const CHIP_VESSEL_MIN_SIBLING_DISTANCE = 0.02;
 
 /**
  * 그릇이 행 바탕에서 살아남았다고 말할 수 있는 바닥.
@@ -275,6 +275,20 @@ const CHIP_VESSEL_MIN_SIBLING_DISTANCE = 0.02;
  */
 export const CHIP_VESSEL_MIN_CONTRAST = 1.05;
 export const CHIP_VESSEL_MIN_DISTANCE = 0.02;
+
+/** 눌린 행(`--surface-pressed`)이 다른 재료여야 하는 면 (#2000 B-1). OKLab 거리 ≥ 0.02. */
+export const PRESSED_DISTINCT_FROM = [
+  "surface-hover",
+  "accent-soft",
+  "muted-soft",
+  "ok-soft",
+  "warn-soft",
+  "danger-soft",
+  "agent-soft",
+  "surface",
+  "surface-raised",
+  "surface-sidebar",
+] as const;
 
 /** Foregrounds that render text or meaningful glyphs. */
 export const FOREGROUNDS = [
@@ -309,7 +323,8 @@ export const FOREGROUNDS = [
 const TONE_HOST_EXCLUDED = ["surface-pressed", "muted-soft"] as const;
 export const MUTED_SOFT_TONES = ["warn", "signal-text"] as const;
 
-function foregroundHosts(fg: string): readonly string[] {
+/** 어느 전경이 어느 면에 서는가(위 닫힌 표). 카탈로그 시험(`themes/derivedCatalog.contract.test.ts`)도 같은 표를 읽는다. */
+export function foregroundHosts(fg: string): readonly string[] {
   if (fg === "ink" || fg === "ink-muted") return SURFACES;
   const hosts: string[] = SURFACES.filter(
     (bg) => !(TONE_HOST_EXCLUDED as readonly string[]).includes(bg)
@@ -638,18 +653,7 @@ describe("Dawn palette", () => {
   });
 
   it("pressed fill is a different material from every other soft/state fill (#2000 B-1)", () => {
-    const others = [
-      "surface-hover",
-      "accent-soft",
-      "muted-soft",
-      "ok-soft",
-      "warn-soft",
-      "danger-soft",
-      "agent-soft",
-      "surface",
-      "surface-raised",
-      "surface-sidebar",
-    ] as const;
+    const others = PRESSED_DISTINCT_FROM;
     for (const scheme of SCHEMES) {
       const pressed = pick("surface-pressed", scheme.index);
       for (const other of others) {

@@ -137,7 +137,49 @@ oort. They are listed because ADR-0196 D2 requires attribution for translated or
 | mem0 (Mem0, Inc., https://github.com/mem0ai/mem0, v3) | Apache-2.0 | Add-only, single-pass extraction: one model call returns new memories and never edits existing ones (`mem0/configs/prompts.py`, `ADDITIVE_EXTRACTION_PROMPT`) | same prompt; the add-only write path `mem_add_item` (`server/Migrations/104_mem_item.sql`) | ADR-0196 D2/D4, #3168 |
 | Hindsight (Vectorize AI, Inc., https://github.com/vectorize-io/hindsight, commit eb021da, MIT, Copyright (c) 2025 Vectorize AI, Inc.) | MIT | Consolidation flow: candidate observations → judge whether they say the same thing → fold the losing one into the winner keeping time bounds and evidence, every step logged (`hindsight-api-slim/hindsight_api/engine/consolidation/consolidator.py`, `prompts.py`; the code lived under `hindsight_api/engine/consolidation/` when ADR-0196 was written). Re-implemented over PostgreSQL functions; the Korean judging prompt is written for oort and is not a translation | `server/Migrations/107_mem_consolidate.sql` (`mem_cons_pairs`, `mem_cons_apply`, `mem_cons_merge_items`), `server-rust/bins/momo-agent-worker/src/consolidate.rs`, `server-rust/crates/momo-agent/src/memory_cons.rs` | ADR-0196 D2/D4, #3172 |
 | Graphiti (Zep Software, Inc., https://github.com/getzep/graphiti, commit 852ca40, Apache-2.0; no NOTICE file upstream) | Apache-2.0 | Contradiction resolution over a bi-temporal fact: when a newer fact contradicts an older one whose validity is still open, the older one's validity ends where the newer begins (`invalid_at = new valid_at`) instead of being deleted (`graphiti_core/utils/maintenance/edge_operations.py`, `resolve_edge_contradictions`). Only the interval rule is adapted; the graph database is not used | `server/Migrations/107_mem_consolidate.sql` (`mem_cons_close_item`, `mem_item.valid_to` / `closed_by_id`), `server-rust/bins/momo-agent-worker/src/consolidate.rs` (`SYSTEM_JUDGE_DECISION`) | ADR-0196 D2/D3, #3172 |
-| Buzz desktop (https://github.com/block/buzz, commit af5bb0a, Apache-2.0; copyright holder per upstream LICENSE/NOTICE) | Apache-2.0 | Settings information architecture and appearance-page composition: grouped settings navigation with icons, grouped option cards with label/control rows, color mode / theme style / accent / font size / conversation density controls with a live conversation preview, a profile hero with an edit affordance, and a desktop glass-background toggle with opacity (`desktop/src/features/settings/ui/SettingsView.tsx`, `SettingsOptionGroup.tsx`, `SettingsPanels.tsx`, `AppearanceSettingsControls.tsx`, `ProfileSettingsCard.tsx`). Design only; no source file or CSS is copied, and the controls are re-implemented on oort's tokens | `clients/web/src/features/settings/shell/` and `clients/web/src/design/ui/` (planned, #3578 S1-S5) | ADR-0189 증보 1, #3578 |
+| Buzz desktop (https://github.com/block/buzz, commit af5bb0a, Apache-2.0, Copyright 2026 Block, Inc.; no NOTICE file upstream) | Apache-2.0 | (1) Design: settings information architecture and appearance-page composition (grouped settings navigation with icons, grouped option cards with label/control rows, color mode / theme style / accent / font size / conversation density controls with a live conversation preview, a profile hero with an edit affordance, and a desktop glass-background toggle with opacity: `desktop/src/features/settings/ui/SettingsView.tsx`, `SettingsOptionGroup.tsx`, `SettingsPanels.tsx`, `AppearanceSettingsControls.tsx`, `ProfileSettingsCard.tsx`). The controls, theme tiles and copy are re-implemented on oort's tokens; no CSS or markup is copied. (2) **Code adapted** (ADR-0189 증보 3 D9, #4188): the theme derivation arithmetic of `desktop/src/shared/theme/adaptive-theme.ts` (light or dark by background luminance, the sidebar luminance drop `0.035*ln(1+(L+0.0135)*10)` with its bisection, `elevate`, the border mix, sRGB mixing) and, from `desktop/src/shared/theme/theme-loader.ts`, the theme list, the light/dark pairs, and the key order for the git decoration colors and the comment color. oort changes: the output is oort's own semantic tokens instead of shadcn HSL variables; contrast is enforced by fitting OKLCH lightness; the comment color is read from `tokenColors` as well as `settings`; accent and agent seeds are new. Every adapted file carries an Apache-2.0 section 4(b) change notice in its header. The vibrancy command of `desktop/src-tauri/src/commands/window_vibrancy.rs` landed with AP-3 (#4190) and has its own row in the table below. | Design: `clients/web/src/features/settings/shell/`, `clients/web/src/design/ui/`. Code: `packages/momo-core/src/design/derive.ts`, `packages/momo-core/src/design/themeSeed.ts`, `clients/web/scripts/lib/catalogBuild.ts` (the theme list and pairs also appear in the generated `packages/momo-core/src/design/themeCatalog.generated.ts`) | ADR-0189 증보 1·3 D9, #3578, #4188 |
+
+### Theme palette seeds (theme catalog)
+
+The theme gallery (ADR-0189 증보 3 D1, #4188) bundles a handful of colors (background, foreground, comment color,
+git decoration colors, accent, terminal colors) read from 57 third-party VS Code color themes, in
+`packages/momo-core/src/design/themeCatalog.generated.ts`. The themes come from the npm packages
+`@shikijs/themes@4.1.0` (MIT) and `tm-themes@1.12.12` (MIT), whose `NOTICE` file records each theme's upstream
+license. Only MIT and Apache-2.0 themes are included: the generator fails on any other SPDX identifier, and by name on the
+one GPL-3.0 theme that `tm-themes` also ships. No theme file is redistributed; oort derives its own interface tokens
+from the colors.
+The full upstream license texts are in [`legal/generated/THEME_PALETTE_NOTICES.txt`](generated/THEME_PALETTE_NOTICES.txt)
+(generated by `npm --prefix clients/web run gen:theme-catalog -- --from <dir>`; a test fails if a catalog upstream is
+missing from this table or from that file).
+
+| Upstream (https://github.com/...) | License | Copyright | Themes used |
+|---|---|---|---|
+| akamud/vscode-theme-onelight | MIT | Copyright (c) 2015 Mahmoud Ali | one-light |
+| antfu/vsc-material-theme | Apache-2.0 | Copyright 2017 Mattia Astorino | material-theme, material-theme-darker, material-theme-lighter, material-theme-ocean, material-theme-palenight |
+| antfu/vscode-theme-vitesse | MIT | Copyright (c) 2020 Primer / Copyright (c) 2021 Anthony Fu | vitesse-black, vitesse-dark, vitesse-light |
+| ayu-theme/vscode-ayu | MIT | Copyright (c) 2016 Ike Kurghinyan | ayu-dark |
+| Binaryify/OneDark-Pro | MIT | Copyright (c) 2013-2022 Binaryify | one-dark-pro |
+| catppuccin/vscode | MIT | Copyright (c) 2021 Catppuccin | catppuccin-frappe, catppuccin-latte, catppuccin-macchiato, catppuccin-mocha |
+| dracula/visual-studio-code | MIT | Copyright (c) 2016 Dracula Theme | dracula, dracula-soft |
+| drcmda/poimandres-theme | MIT | Copyright (c) 2023 drcmda | poimandres |
+| EliverLara/Andromeda | MIT | Copyright (c) 2017 eliverlara | andromeeda |
+| Jaredk3nt/laserwave | MIT | Copyright (c) 2019 Jared Jones | laserwave |
+| jdinhify/vscode-theme-gruvbox | MIT | Copyright (c) 2017 JD | gruvbox-dark-hard, gruvbox-dark-medium, gruvbox-dark-soft, gruvbox-light-hard, gruvbox-light-medium, gruvbox-light-soft |
+| loilo/vscode-snazzy-light | MIT | Copyright (c) 2020 Florian Reuschel | snazzy-light |
+| microsoft/vscode | MIT | Copyright (c) 2015 - present Microsoft Corporation | dark-plus, light-plus, monokai, red, solarized-dark, solarized-light |
+| miguelsolorio/min-theme | MIT | Copyright (c) 2018-2021 Miguel Solorio | min-dark, min-light |
+| nordtheme/visual-studio-code | MIT | Copyright (c) 2016-present Sven Greb | nord |
+| paccodes/kanagawa-vscode-theme | MIT | Copyright (c) 2025 Pierre-Alain Castella | kanagawa-dragon, kanagawa-lotus, kanagawa-wave |
+| primer/github-vscode-theme | MIT | Copyright (c) 2020 Primer | github-dark, github-dark-default, github-dark-dimmed, github-dark-high-contrast, github-light, github-light-default, github-light-high-contrast |
+| raunofreiberg/vesper | MIT | Copyright (c) 2023 Rauno Freiberg | vesper |
+| robb0wen/synthwave-vscode | MIT | Copyright (c) 2019 Robb Owen | synthwave-84 |
+| rose-pine/vscode | MIT | Copyright (c) 2021 Rose Pine | rose-pine, rose-pine-dawn, rose-pine-moon |
+| sainnhe/everforest-vscode | MIT | Copyright (c) 2020 sainnhe | everforest-dark, everforest-light |
+| sdras/night-owl-vscode-theme | MIT | Copyright (c) 2018 Sarah Drasner | night-owl |
+| tokyo-night/tokyo-night-vscode-theme | MIT | Copyright (c) 2018-present Enkia | tokyo-night |
+| will-stone/plastic | MIT | Copyright (c) 2017-present, Will Stone | plastic |
+| withastro/houston-vscode | MIT | Copyright (c) 2022 The Astro Technology Company | houston |
+
 
 ### Phone client direct additions
 
@@ -150,6 +192,7 @@ full transitive graph is still only license-gated, not bundled.
 | expo-haptics | 57.0.3 | MIT | `clients/mobile` (npm + CocoaPods `ExpoHaptics`) | #3580 (tab·profile·filter haptics; 1st-party Expo SDK 57 module) |
 | expo-glass-effect | 57.0.4 | MIT | `clients/mobile` (npm + CocoaPods `ExpoGlassEffect`) | #3580 (iOS 26 Liquid Glass tab bar; falls back to expo-blur below iOS 26) |
 | expo-image-manipulator | 57.0.21 | MIT | `clients/mobile` (npm + CocoaPods `ExpoImageManipulator`) | ADR-0189 증보 2, #3907 (내 사진 배경: 긴 변 1600px 축소·JPEG 재인코딩). CocoaPods 전이 의존: SDWebImage·SDWebImageWebPCoder(MIT), libwebp(BSD-3-Clause) |
+| expo-media-library | 57.0.5 | MIT | `clients/mobile` (npm + CocoaPods `ExpoMediaLibrary`; 시스템 프레임워크 Photos·PhotosUI) | ADR-0168 증보 1, #4181 (첨부 메뉴의 최근 사진 그리드: 사진 보관함을 읽어 썸네일·목록·자산별 로컬 파일을 얻는다. 쓰기·앨범·삭제 API는 부르지 않는다). 전이 의존 없음(peer `expo`·`react-native`) |
 | Lucide icon paths `home`·`inbox`·`search`·`plus` | via design mockup A | ISC | `clients/mobile/src/design/icons/*.png` (rasterized) | #2714 (shell icons; same set the web uses as `lucide-react`) |
 
 ### Desktop client direct additions
@@ -166,6 +209,8 @@ Direct desktop (Tauri shell) dependencies an ADR introduced. The full
 | unicode-normalization | 0.1.25 | MIT OR Apache-2.0 | `clients/desktop/src-tauri` (NFC for signed human text, same as `momo-wire`) | ADR-0146 개정 2026-09-28 D-5, #3025 |
 | security-framework / -sys, core-foundation, objc2, objc2-foundation, objc2-app-kit | 3 / 2, 0.10, 0.6, 0.3, 0.3 | MIT OR Apache-2.0 (objc2*: also Zlib) | `clients/desktop/src-tauri` (Secure Enclave key, LAContext, NSAlert); already in the graph via keyring/tauri, now direct | ADR-0146 개정 2026-09-28 D-3, #3025 |
 | reqwest | 0.13.4 | MIT OR Apache-2.0 | `clients/desktop/src-tauri` (the shell's own `/v1/auth/refresh` rotation with the refresh-key proof); already in the graph via tauri-plugin-updater, now direct, no crate added | ADR-0146 D-7 증보 #3079, #3106 |
+| window-vibrancy | 0.6.0 | Apache-2.0 OR MIT | `clients/desktop/src-tauri` (`NSVisualEffectView` blur behind the webview for the glass background, `src/window_vibrancy.rs`); already in the graph as tauri's own dependency, now direct on macOS, no crate added. Enabled together with tauri's `macos-private-api` feature and `app.macOSPrivateApi`, which write WKWebView's private `drawsBackground` key: a build that carries them cannot be submitted to the Mac App Store, and the notarized DMG is the only channel that ships it (ADR-0189 증보 3 D6) | ADR-0189 증보 3 D6, #4190 |
+| Buzz desktop `desktop/src-tauri/src/commands/window_vibrancy.rs` (https://github.com/block/buzz, commit af5bb0a, Apache-2.0, Copyright 2026 Block, Inc.) | af5bb0a | Apache-2.0 | `clients/desktop/src-tauri/src/window_vibrancy.rs`: the `window_vibrancy_set` command (clear any earlier blur view, install `NSVisualEffectView`, then make only the webview canvas transparent) is adapted source. Changes from the original, listed in the file header per Apache-2.0 section 4(b): command renamed, material list cut to three names, parsing split into pure functions with tests, comments and error strings rewritten; `app_theme_set` is new (Buzz never sets the native appearance). Buzz's Design-only row in the adapted-designs table above covers the settings-page composition; the web side of the glass background is re-implemented on oort's tokens | ADR-0189 증보 3 D9, #4190 |
 
 ## Historical (frozen snapshots)
 

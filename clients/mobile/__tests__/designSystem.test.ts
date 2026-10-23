@@ -77,11 +77,16 @@ function webRadius(): Record<string, number> {
   return steps;
 }
 
-/** `--text-<role>: <n>rem;` 을 px 로. 웹의 루트 글자는 브라우저 기본 16px 이다. */
+/**
+ * `--text-<role>: calc(var(--type-rem) * <n>);` 을 「기본」 글자 크기 단계의 px 로. 웹의 루트
+ * 글자는 브라우저 기본 16px 이고, 곱수 × 16 이 그 역할의 크기다. 웹 역할은 글자 크기 설정이
+ * 곱하는 가상 rem 의 배수다(웹 AP-2a #4189) — `rem` 리터럴이던 때의 읽는 식을 그 모양으로
+ * 옮겼다. 읽은 역할 수는 아래 「세 축이 전부 읽혔다」가 잡는다(식이 바뀌면 빈손이 되지 않게).
+ */
 function webText(): Record<string, number> {
   const roles: Record<string, number> = {};
   for (const found of WEB_TOKENS_CSS.matchAll(
-    /^\s*--text-([a-z][a-z0-9-]*?):\s*([\d.]+)rem;/gm,
+    /^\s*--text-([a-z][a-z0-9-]*?):\s*calc\(var\(--type-rem\)\s*\*\s*([\d.]+)\);/gm,
   )) {
     if (found[1].endsWith('--line-height')) continue;
     roles[found[1]] = Number(found[2]) * 16;
@@ -111,7 +116,17 @@ describe('읽기 경로가 조용히 실패하지 않는다', () => {
   it('세 축이 전부 읽혔다', () => {
     expect(Object.keys(WEB_RHYTHM).length).toBeGreaterThan(0);
     expect(Object.keys(WEB_RADIUS).length).toBeGreaterThan(0);
-    expect(Object.keys(WEB_TEXT).length).toBeGreaterThan(0);
+    // 웹 글자 역할은 여덟이다. 식이 바뀌어 하나도 안 읽히면 아래 타이포 단정이 빈 표 위에서 초록이 된다.
+    expect(Object.keys(WEB_TEXT).sort()).toEqual([
+      'body',
+      'code',
+      'display',
+      'heading',
+      'label',
+      'meta',
+      'timestamp',
+      'title',
+    ]);
   });
 });
 
@@ -194,7 +209,7 @@ describe('간격 축이 웹 정본과 같은 표 위에 있다', () => {
 
 describe('반경 축', () => {
   // ADR-0189 D6(확정 항목 7): 폰·웹 반경의 **값 대조는 폐기**한다. 반경은 플랫폼층의
-  // 일이고, 두 클라는 이름만 공유한다(폰 `10·14·20·26·30·pill`, 웹 `6·10·14·18·20·
+  // 일이고, 두 클라는 이름만 공유한다(폰 `10·14·20·27·30·pill`, 웹 `6·10·14·18·20·
   // pill`). 여기 있던 단정들 — 「sm 이 웹 --radius-sm 과 같다」「값이 다른 단계가 md
   // 하나뿐」「짝 없는 단계가 양쪽에 하나씩」 — 은 웹 `tokens.css` 를 읽어 값을 맞췄고,
   // 웹 DS2-1(#2713)이 `--radius-xl` 을 더하자 옳은 이유로 빨개졌다. 대조는 걷고 폰

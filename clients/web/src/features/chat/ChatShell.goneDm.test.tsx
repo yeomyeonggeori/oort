@@ -26,6 +26,16 @@ vi.mock("@/features/sidebar/dmRevival", () => ({
   useDmRevival: () => () => undefined,
 }));
 
+// #4252: 나간 멤버 DM 의 안 읽음 판정(`useGoneUnreadVerdicts`)은 메시지 쪽을 읽는 쿼리라 QueryClient 가 필요하다. 판정 자체는
+// goneUnreadVerdicts.test.tsx · Sidebar.dm.test.tsx 가 잰다. 여기서는 인덱스 라우트가 그 판정으로 접힌 집합을 따르는지만 보므로
+// 시험이 판정을 직접 정하는 대역을 둔다(소문자 id -> 판정).
+const goneVerdicts = vi.hoisted(() => ({ byId: new Map<string, string>() }));
+/** 읽음 투영의 대역(소문자 id -> 행). 기본은 비어 있다(안 읽음 없음). */
+const readProjection = vi.hoisted(() => ({ byChannel: new Map<string, unknown>() }));
+vi.mock("@/features/sidebar/goneUnreadVerdicts", () => ({
+  useGoneUnreadVerdicts: () => goneVerdicts.byId,
+}));
+
 vi.mock("@/features/chat/usePersonalCall", () => ({
   usePersonalCall: () => ({
     planFor: () => null,
@@ -85,6 +95,8 @@ const self: RosterMember = {
 };
 
 let rosterMembers: RosterMember[] = [];
+/** 명부 조회가 한 번도 못 받은 채 실패했다(`isError`, 데이터 없음). 이때 명부는 비어 있다(#4252 M2). */
+const rosterFailure = { failed: false };
 vi.mock("@/features/workspace/useWorkspace", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@/features/workspace/useWorkspace")>();
@@ -92,14 +104,16 @@ vi.mock("@/features/workspace/useWorkspace", async (importOriginal) => {
     ...actual,
     useChannels: () => channelsState,
     useDirectory: () => ({
-      directory: makeDirectory(rosterMembers),
+      directory: makeDirectory(rosterFailure.failed ? [] : rosterMembers),
       isPending: false,
       isFetching: false,
+      isError: rosterFailure.failed,
+      data: undefined,
       error: null,
       refetch: () => undefined,
     }),
     useReadStates: () => ({
-      byChannel: new Map(),
+      byChannel: readProjection.byChannel,
       isPending: false,
       error: null,
     }),
@@ -226,7 +240,7 @@ function sessionValue(): SessionContextValue {
   };
 }
 
-async function mount(): Promise<HTMLElement> {
+async function mount(path = `/c/${DM_ID}`): Promise<HTMLElement> {
   const host = document.createElement("div");
   document.body.append(host);
   mountedHost = host;
@@ -236,14 +250,16 @@ async function mount(): Promise<HTMLElement> {
     { value: sessionValue() },
     createElement(
       MemoryRouter,
-      { initialEntries: [`/c/${DM_ID}`] },
+      { initialEntries: [path] },
       createElement(
         Routes,
         null,
         createElement(Route, {
           path: "/c/:channelId",
           element: createElement(ChatShell),
-        })
+        }),
+        // 인덱스 라우트(#4252): 채널이 없을 때 어떤 대화를 열어 주는가.
+        createElement(Route, { path: "/", element: createElement(ChatShell) })
       )
     )
   );
@@ -259,6 +275,9 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  goneVerdicts.byId.clear();
+  readProjection.byChannel = new Map();
+  rosterFailure.failed = false;
   rosterMembers = [self];
   composerProps.length = 0;
   channelsState.isLoading = false;
@@ -307,5 +326,101 @@ describe("ChatShell · 명부에서 빠진 상대와의 DM", () => {
     expect(last.channelLabel).toBe("나간 멤버");
     expect(last.channelLabel).not.toContain("다이렉트 메시지");
     expect(last.recipient).toBe("person");
+  });
+});
+
+// #4252: 사이드바가 「나간 멤버와의 대화」로 접은 DM 은 `/` 가 열어 주는 대화의 후보도 아니다. 사이드바와 본문이
+// 같은 집합을 읽지 않으면, 접힌 대화를 본문이 도로 열어 「열려 있음」으로 되살아난다.
+describe("ChatShell · 인덱스 라우트와 접힌 나간 멤버 DM (#4252)", () => {
+  const PEER = "00000000-0000-7000-8000-0000000001aa";
+  const LIVE_DM = "00000000-0000-7000-8000-0000000002bb";
+  const peer: RosterMember = {
+    ...self,
+    id: PEER,
+    displayName: "이도현",
+    handle: "dohyun",
+    role: "member",
+  };
+  const ghostDm = (): Channel =>
+    ({ id: DM_ID, workspaceId: WS, kind: "dm", muted: false, memberIds: [ME, GONE] }) as Channel;
+  const liveDm = (): Channel =>
+    ({ id: LIVE_DM, workspaceId: WS, kind: "dm", muted: false, memberIds: [ME, PEER] }) as Channel;
+
+  it("채널이 없고 첫 DM 이 접힌 나간 멤버면, 인덱스 라우트는 다음 DM 을 연다", async () => {
+    rosterMembers = [self, peer];
+    channelsState.groups = { channels: [], dms: [ghostDm(), liveDm()] };
+    const host = await mount("/");
+    const header = host.querySelector('[data-testid="channel-header"]');
+    expect(header?.textContent).toContain("이도현");
+    expect(header?.textContent).not.toContain("나간 멤버");
+  });
+
+  it("남은 DM 이 전부 접혔으면 인덱스 라우트는 아무 대화도 열지 않는다", async () => {
+    channelsState.groups = { channels: [], dms: [ghostDm()] };
+    const host = await mount("/");
+    // 열린 대화가 없다: 접힌 DM 의 이름이 머리에 서지 않고, 컴포저도 서지 않는다.
+    expect(host.querySelector('[data-testid="channel-header"]')?.textContent).not.toContain("나간 멤버");
+    expect(composerProps).toEqual([]);
+  });
+
+  it("주소가 정한 대화는 접힌 나간 멤버 DM 이어도 연다 (⌘K·링크로 열린다)", async () => {
+    channelsState.groups = { channels: [], dms: [ghostDm()] };
+    const host = await mount(`/c/${DM_ID}`);
+    expect(host.querySelector('[data-testid="channel-header"]')?.textContent).toContain("나간 멤버");
+  });
+
+  // 안 읽음이 있는 나간 멤버 DM 은 그 안 읽음이 사람이 읽을 것인지의 판정(`useGoneUnreadVerdicts`, 사이드바가 같은 훅을 읽는다)이
+  // 접힘을 정한다. 본문이 다른 답을 읽으면 사이드바는 접었는데 본문이 도로 연다.
+  const unreadGone = () => {
+    readProjection.byChannel = new Map([
+      [
+        DM_ID,
+        { channelId: DM_ID, lastReadSeq: 5, latestSeq: 8, unreadCount: 3, mentionCount: 0, markedUnreadBeforeSeq: null },
+      ],
+    ]);
+  };
+
+  it("안 읽음이 기계 메시지뿐이라는 판정이면 그 나간 멤버 DM 은 접혀서 인덱스 라우트 후보가 아니다", async () => {
+    rosterMembers = [self, peer];
+    unreadGone();
+    goneVerdicts.byId.set(DM_ID, "ambient");
+    channelsState.groups = { channels: [], dms: [ghostDm(), liveDm()] };
+    const host = await mount("/");
+    const header = host.querySelector('[data-testid="channel-header"]');
+    expect(header?.textContent).toContain("이도현");
+    expect(header?.textContent).not.toContain("나간 멤버");
+  });
+
+  it("사람이 읽을 안 읽음이 있다는 판정이면 접히지 않아 인덱스 라우트가 첫 DM 으로 연다", async () => {
+    rosterMembers = [self, peer];
+    unreadGone();
+    goneVerdicts.byId.set(DM_ID, "human");
+    channelsState.groups = { channels: [], dms: [ghostDm(), liveDm()] };
+    const host = await mount("/");
+    expect(host.querySelector('[data-testid="channel-header"]')?.textContent).toContain("나간 멤버");
+  });
+
+  it("판정이 오는 중이면 접힌 채라 인덱스 라우트가 열지 않는다 (사이드바와 같은 답)", async () => {
+    rosterMembers = [self, peer];
+    unreadGone();
+    goneVerdicts.byId.set(DM_ID, "pending");
+    channelsState.groups = { channels: [], dms: [ghostDm(), liveDm()] };
+    const host = await mount("/");
+    expect(host.querySelector('[data-testid="channel-header"]')?.textContent).toContain("이도현");
+  });
+});
+
+// #4252 M2: 「명부를 믿을 수 있나」는 한 함수(`rosterLoaded`)가 답한다. 조회가 실패하면 비어 있는 명부 앞에서 모든 DM 이 「나간 멤버」로
+// 읽히는 거짓이 사이드바 행과 이 머리·컴포저에 똑같이 있었다.
+describe("ChatShell · 명부를 못 받았을 때의 이름 (#4252)", () => {
+  it("명부 조회가 실패하면 머리와 컴포저는 「나간 멤버」가 아니라 「불러오는 중」이다", async () => {
+    rosterFailure.failed = true;
+    const host = await mount();
+    const header = host.querySelector('[data-testid="channel-header"]');
+    expect(header?.textContent).toContain("불러오는 중");
+    expect(header?.textContent).not.toContain("나간 멤버");
+    const last = composerProps[composerProps.length - 1];
+    expect(last.channelLabel).toBe("불러오는 중");
+    expect(last.recipient).toBe("place");
   });
 });

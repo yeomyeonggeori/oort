@@ -100,6 +100,16 @@ describe("attentionTransitions: 알림은 상태가 새로 될 때 한 번", () 
     expect(shouldNotifyAttention({ windowFocused: true, paneInView: false })).toBe(true);
   });
 
+  it("알림 일시 중지 중에는 어느 칸도 OS 알림을 띄우지 않는다 (#4197)", () => {
+    // 창이 뒤에 있고 칸이 안 보여서 평소라면 뜰 자리다(위 단정의 true 두 줄과 같은 입력).
+    expect(shouldNotifyAttention({ windowFocused: false, paneInView: false })).toBe(true);
+    expect(shouldNotifyAttention({ windowFocused: false, paneInView: false, paused: true })).toBe(false);
+    expect(shouldNotifyAttention({ windowFocused: false, paneInView: true, paused: true })).toBe(false);
+    expect(shouldNotifyAttention({ windowFocused: true, paneInView: false, paused: true })).toBe(false);
+    // 못 읽은 규칙(비어 있음)이나 꺼진 규칙은 막지 않는다.
+    expect(shouldNotifyAttention({ windowFocused: false, paneInView: false, paused: false })).toBe(true);
+  });
+
   it("알림 문구는 칸 번호·이름과 이유만", () => {
     expect(attentionCopy("waiting", { index: 3, name: "claude" }, "waiting-permission")).toEqual({
       title: "응답 필요",

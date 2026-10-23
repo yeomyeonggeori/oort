@@ -52,6 +52,10 @@ import {
   OnboardingFrame,
 } from "@/features/onboarding/guide/OnboardingFrame";
 import { useDiscovery } from "./discovery";
+import {
+  LOGIN_OTHER_WORKSPACE_LABEL,
+  LOGIN_WORKSPACE_ID_LABEL,
+} from "./loginWorkspaceEntry";
 import { OnboardingSlideTransition } from "./OnboardingSlideTransition";
 import {
   initialOnboarding,
@@ -627,13 +631,13 @@ export function ConnectPage({
               className="tap-target press self-start rounded-sm text-meta text-ink-muted underline underline-offset-4 hover:text-ink focus-visible:focus-ring"
               data-testid="login-workspace-toggle"
             >
-              다른 워크스페이스로 로그인
+              {LOGIN_OTHER_WORKSPACE_LABEL}
             </button>
             {workspaceOpen && (
               <div id="connect-workspace-field">
                 <OnboardingFieldBlock
                   id="connect-workspace"
-                  label="워크스페이스 ID"
+                  label={LOGIN_WORKSPACE_ID_LABEL}
                   optional
                   hint="비워 두면 기본 워크스페이스로 연결합니다."
                   hintId="connect-workspace-hint"

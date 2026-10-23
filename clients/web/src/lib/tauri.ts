@@ -19,6 +19,7 @@
 // =============================================================================
 
 import { IS_TAURI } from "./env";
+import { keyPlatformOf } from "@momo/core/features/workbench/keymap";
 import type { HostedAgentProbe as HostedAgentProbeWire } from "@momo/core/features/hostedAgents/detect";
 import type { LocalHarnessProbe } from "@momo/core/features/hostedAgents/detect";
 import type { LocalWorkHostStatus } from "@momo/core/features/settings/thisMacHost";
@@ -50,9 +51,11 @@ export const DESKTOP_EVENT = {
 
 type CoreModule = typeof import("@tauri-apps/api/core");
 type EventModule = typeof import("@tauri-apps/api/event");
+type WindowModule = typeof import("@tauri-apps/api/window");
 
 let corePromise: Promise<CoreModule> | null = null;
 let eventPromise: Promise<EventModule> | null = null;
+let windowPromise: Promise<WindowModule> | null = null;
 
 function core(): Promise<CoreModule> {
   corePromise ??= import("@tauri-apps/api/core");
@@ -62,6 +65,11 @@ function core(): Promise<CoreModule> {
 function events(): Promise<EventModule> {
   eventPromise ??= import("@tauri-apps/api/event");
   return eventPromise;
+}
+
+function windowApi(): Promise<WindowModule> {
+  windowPromise ??= import("@tauri-apps/api/window");
+  return windowPromise;
 }
 
 async function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
@@ -81,6 +89,79 @@ async function listen<T>(event: string, handler: (payload: T) => void): Promise<
   const { listen: subscribe } = await events();
   const unlisten = await subscribe<T>(event, ({ payload }) => handler(payload));
   return unlisten;
+}
+
+// ---- OS appearance (light/dark) ---------------------------------------------
+
+/**
+ * Listen for the OS switching between light and dark, as the native window reports it
+ * (`tauri://theme-changed`, AP-1a #4186).
+ *
+ * WKWebView can update the dark-scheme media query's `matches` without dispatching its
+ * `change` event until the page reloads, so the web store (`design/theme.ts`) listens to both
+ * sources and takes whichever speaks last. In a browser tab this resolves at once to a no-op
+ * and `@tauri-apps/api/window` is never requested.
+ *
+ * No Rust command is involved: the event comes from the window itself, so there is no
+ * entry in `build.rs` `APP_COMMANDS` and no extra grant (`core:default` carries
+ * `core:event:allow-listen`). `runtime-unverified` on a real WKWebView (#4186).
+ */
+export async function onSystemThemeChanged(
+  handler: (scheme: "light" | "dark") => void
+): Promise<() => void> {
+  if (!IS_TAURI) return noop;
+  const { getCurrentWindow } = await windowApi();
+  return getCurrentWindow().onThemeChanged(({ payload }) => {
+    handler(payload === "dark" ? "dark" : "light");
+  });
+}
+
+// ---- window glass (AP-3 #4190) ------------------------------------------------
+
+/**
+ * True on the macOS desktop shell: the only place `window_vibrancy_set` does anything (the Rust command
+ * answers `Ok(())` and does nothing elsewhere, so the page has to know for itself, or it would tell a
+ * person their glass is on when nothing happened). The browser's `navigator.platform` is what the other
+ * desktop-only rows read (`AppTitlebar`).
+ */
+export function isMacDesktop(): boolean {
+  if (!IS_TAURI || typeof navigator === "undefined") return false;
+  return keyPlatformOf(navigator.platform || navigator.userAgent) === "mac";
+}
+
+/**
+ * Turn the window's blur-behind layer on or off (ADR-0189 증보 3 D6). Resolves `true` when the shell did it.
+ * `false` is a normal answer: not the macOS shell, or the shell refused (the person is told in the settings
+ * row, never by a throw). On the enable path the Rust side installs the blur first and only then makes the
+ * webview canvas see-through, so the page may stamp `data-glass` once this resolves `true`, and has to take
+ * `data-glass` off BEFORE calling it with `false`.
+ */
+export async function setWindowVibrancy(enabled: boolean): Promise<boolean> {
+  if (!isMacDesktop()) return false;
+  try {
+    await invoke<void>("window_vibrancy_set", { enabled, material: "sidebar" });
+    return true;
+  } catch (error) {
+    console.warn("[momo] window vibrancy failed", error);
+    return false;
+  }
+}
+
+/**
+ * Point the app's native appearance at the scheme the page shows, or give it back to the system. The
+ * `Sidebar` material blurs light or dark by the window's appearance, not by the page. Note the side effect:
+ * it also moves the page's own dark-mode media query, so the caller pins it only while glass is on and the
+ * scheme is pinned. `true` = applied; `false` = browser, or the shell refused.
+ */
+export async function setAppTheme(scheme: "light" | "dark" | "system"): Promise<boolean> {
+  if (!IS_TAURI) return false;
+  try {
+    await invoke<void>("app_theme_set", { scheme });
+    return true;
+  } catch (error) {
+    console.warn("[momo] app theme failed", error);
+    return false;
+  }
 }
 
 // ---- deep links -------------------------------------------------------------

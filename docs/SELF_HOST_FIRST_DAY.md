@@ -275,7 +275,7 @@ Settings after you are in: profile-card row **설정**, tooltip 「설정
 (⌘,)」 (`ProfileCard.tsx:175-189`). Shell title **설정**
 (`SettingsRoute.tsx:172`). Left nav groups **개인** / **워크스페이스** /
 **연결** (`settingsNav.ts`). This session's UUID is the 「워크스페이스
-ID」 line of **설정 › 계정** (`AccountSection.tsx:22-26`).
+ID」 line of **설정 › 워크스페이스** (`WorkspaceSection.tsx:1242-1246`).
 
 ### What remains in v0.1.5
 
@@ -302,7 +302,7 @@ Verification: **code-derived** · **needs live run**.
 This is **not** the first-day funnel. Invites and mentions work on the
 workspace S1 just named. `POST /v1/workspaces` stays gated on
 `require_instance_operator`
-(`server-rust/bins/momo-server/src/routes/workspaces.rs:200-216`).
+(`server-rust/bins/momo-server/src/routes/workspaces.rs:205-224`).
 ADR-0185 does not relax that gate. A new tenant is an extra operator
 action, not step 3 of onboarding.
 
@@ -311,52 +311,71 @@ The form on both entries is the same. Field names are the same.
 ### Entry A — settings
 
 1. **설정** → left nav group **워크스페이스** → **워크스페이스**
-   (`settingsNav.ts`).
-2. Section title **워크스페이스**. Description: 「지금 열려 있는
-   워크스페이스를 확인하고, 새 워크스페이스를 만듭니다。」 / 「새
-   워크스페이스는 만든 사람이 오너가 되고 #general 채널 하나로
-   시작합니다。」 (`WorkspaceSection.tsx:887-893`).
-3. Subheading **새 워크스페이스 만들기** (`:944`). Above that heading the
-   same section now also shows the current-tenant card (including
-   **워크스페이스 이름** / **이름 저장** — S1's settings door) plus
-   role labels, welcome kickoff, unfurl, and leave.
+   (`settingsNav.ts:91`).
+2. The page has five cards: **일반** (name, avatar, slug, workspace ID),
+   link check (server), role labels, welcome kickoff, and
+   **새 워크스페이스 만들기**. The description of **일반** is 「지금 열려 있는
+   워크스페이스예요. 이름과 아바타는 소유자와 관리자가 바꿀 수 있어요。」
+   (`WorkspaceSection.tsx:1199-1203`), and S1's settings door,
+   **워크스페이스 이름** / **이름 저장**, is in it (`:1005`, `:1063`).
+3. The last card, **새 워크스페이스 만들기** (`:1272-1276`), has the
+   description 「이 서버에 새 워크스페이스를 하나 더 만들어요. 만든 사람이
+   소유자가 되고 #general 채널 하나로 시작해요. 서버 운영자만 만들 수
+   있어요。」 Leaving a workspace is not on this page; it is on
+   설정 › 프로필 (`LeaveWorkspaceRow`).
 
 ### Entry B — rail
 
-**워크스페이스 추가** on the workspace rail (`WorkspaceRail.tsx:113-114`)
-and on the profile-card menu (`ProfileCard.tsx:161-172`). Dialog title
+**워크스페이스 추가** on the workspace rail (`WorkspaceRail.tsx:153-154`)
+and on the profile-card menu (`ProfileCard.tsx:210-222`). Dialog title
 **워크스페이스 추가**. Description: 「새 워크스페이스를 만들거나, 초대를
-받았다면 초대 링크로 참여합니다。」 (`AddWorkspaceDialog.tsx:214-217`).
+받았다면 초대 링크로 참여해요。」 (`AddWorkspaceDialog.tsx:244-261`).
 
 ### Fields
 
 | Field | Hint | Coordinate |
 |---|---|---|
-| **이름** | 「사람이 읽는 이름입니다. 80자까지 쓸 수 있습니다。」 | `WorkspaceSection.tsx:957-960` · `AddWorkspaceDialog.tsx:283-286` |
-| **슬러그** | Settings: 「영문 소문자, 숫자, 하이픈만 쓸 수 있습니다. 서버 전체에서 하나뿐이어야 합니다。」 / Dialog: 「영문 소문자, 숫자, 하이픈만. 서버 전체에서 하나뿐이어야 합니다。」 | `WorkspaceSection.tsx:975-978` · `AddWorkspaceDialog.tsx:307-310` |
+| **이름** | 「사람이 읽는 이름이에요. 80자까지 쓸 수 있어요。」 | `WorkspaceSection.tsx:1295` · `AddWorkspaceDialog.tsx:392-395` |
+| **슬러그** | Settings: 「영문 소문자, 숫자, 하이픈만 쓸 수 있어요. 서버 전체에서 하나뿐이어야 해요。」 / Dialog: 「영문 소문자, 숫자, 하이픈만. 서버 전체에서 하나뿐이어야 해요。」 | `WorkspaceSection.tsx:1315` · `AddWorkspaceDialog.tsx:416-419` |
 
 Rules (same as the server): empty → 「슬러그를 입력하세요。」 / 「이름을
-입력하세요。」 (`packages/momo-core/src/features/settings/model.ts:392-412`).
+입력하세요。」 (`packages/momo-core/src/features/settings/model.ts:399-423`).
 
 Button: **워크스페이스 만들기** (in progress **만드는 중**)
-(`WorkspaceSection.tsx:1016` · `AddWorkspaceDialog.tsx:373`).
+(`WorkspaceSection.tsx:1364` · `AddWorkspaceDialog.tsx:481`).
 
-Success card: 「{이름} 워크스페이스를 만들었습니다。」 then **슬러그** ·
-**워크스페이스 ID**. Then 「새 워크스페이스로는 그 슬러그로 다시
-로그인해서 들어갑니다。」 (`WorkspaceSection.tsx:1028-1038`). The dialog
-uses the same success sentence plus 「슬러그 {slug}. 새 워크스페이스로는
-그 슬러그로 다시 로그인해서 들어갑니다。」 (`AddWorkspaceDialog.tsx:227-232`).
+Success card: 「{이름} 워크스페이스를 만들었어요。」 with the warning 「이 화면을
+벗어나면 ID를 다시 볼 수 없으니 지금 복사해 두세요。」 above the card, then
+**워크스페이스 ID** with a **복사** button beside it, **슬러그**, the guide
+「들어가려면 로그아웃한 뒤 로그인 화면에서 「다른 워크스페이스로 로그인」을
+열고, 워크스페이스 ID 칸에 이 ID를 붙여 넣어요。」, and a **닫기** button
+(`WorkspaceSection.tsx:1371-1418`; sentences in
+`features/auth/loginWorkspaceEntry.ts`). The new ID comes back in the create
+response only and nothing in the app lists it again, so both surfaces follow
+the rule for a value you can see once: the warning comes before the value,
+focus moves onto the card when it appears, Esc does nothing while it is up
+(nor while the request is in flight), and **닫기** is the one exit. The
+dialog's success panel puts the same warning in its pinned header, where the
+form's description stood, so it stays on screen at any window height; below
+it the content scrolls and **닫기** stays pinned in the footer, so both are
+reachable on a short window too. Same rows, same **복사** button, same guide
+after the rows (`AddWorkspaceDialog.tsx:244-261`, `:264-353`). The 「워크스페이스
+ID」 line of the current workspace in the same settings section has **복사**
+too (`WorkspaceSection.tsx:1242-1246`).
 
 **There is no session switch.** To enter the new tenant, **로그아웃**
-(`AccountSection.tsx:31-32`) then on the sign-in screen expand 「다른
-워크스페이스로 로그인」 and put the success card's **워크스페이스 ID**
-(UUID). The sign-in form accepts a UUID, not a slug
-(`ConnectPage.tsx`). An invite is issued to the workspace you are **in
-now**. First-day invites stay on the workspace S1 named — do not make this
-switch.
+(profile-card menu, `ProfileCard.tsx:243`, or the 「로그인」 card of
+**설정 › 프로필**, `ProfileSection.tsx:288`) then on the sign-in screen
+expand 「다른 워크스페이스로 로그인」 and paste the success card's
+**워크스페이스 ID** (UUID; **복사** copies it) into the 「워크스페이스 ID」
+field. The sign-in form accepts a UUID, not a slug: the server answers a
+slug with 400 (`ConnectPage.tsx`; `resolve_login_workspace`,
+`server-rust/bins/momo-server/src/routes/auth_routes.rs:313-318`). An
+invite is issued to the workspace you are **in now**. First-day invites
+stay on the workspace S1 named — do not make this switch.
 
 On 403 the screen replaces the form with: 「새 워크스페이스는 이 서버의
-운영자만 만들 수 있습니다。」 (`WorkspaceSection.tsx:947-949`). Look at
+운영자만 만들 수 있어요。」 (`WorkspaceSection.tsx:1281`). Look at
 step 1's `PLATFORM_ADMIN_EMAILS`.
 
 ---
