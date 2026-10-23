@@ -404,6 +404,32 @@ async function scenesFor(browser, origin, scheme) {
     await page.setViewportSize(VIEWPORT);
     await settle(page);
 
+    // ---- 좁은 창·중간 창: 가로로 넘치지 않고 칩과 단추가 접힌다 ---------------------------------------
+    for (const size of [{ name: "narrow-390", width: 390, height: 844 }, { name: "mid-900", width: 900, height: 700 }]) {
+      await page.setViewportSize({ width: size.width, height: size.height });
+      await settle(page);
+      for (const mode of ["emoji", "preset"]) {
+        await chooseMode(page, mode);
+        if (mode === "preset") await page.getByTestId("avatar-preset-picker").locator("img").first().waitFor({ timeout: 15_000 });
+        await settle(page);
+        const overflow = await page.evaluate(() => {
+          const panel = document.querySelector('[data-testid="avatar-editor-dialog"]');
+          const body = panel?.querySelector(".overflow-y-auto");
+          return {
+            page: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+            panel: panel ? panel.scrollWidth - panel.clientWidth : -1,
+            body: body ? body.scrollWidth - body.clientWidth : -1,
+          };
+        });
+        check(`⑦ ${size.width}px ${mode} 탭이 가로로 넘치지 않는다 [${scheme}]`, overflow.page <= 0 && overflow.panel <= 0 && overflow.body <= 0, JSON.stringify(overflow));
+        await shoot(dialog(page), `${size.name}-${mode}`, scheme);
+      }
+    }
+    await page.setViewportSize(VIEWPORT);
+    await settle(page);
+    await chooseMode(page, "emoji");
+    await settle(page);
+
     // ---- 저장(진짜 쓰기 길) ------------------------------------------------------------------
     await chooseMode(page, "emoji");
     await emojiCell(page, "🚀").click();
