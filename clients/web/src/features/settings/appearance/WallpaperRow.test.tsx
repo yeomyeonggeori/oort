@@ -429,6 +429,34 @@ describe("지금 배경이 왜 안 보이는지 한 줄로 말한다", () => {
     expect(WALLPAPER_NARROW_COPY).not.toContain("넓히");
   });
 
+  it("창 폭과 무관하게 참인 이유가 좁은 창 문장보다 먼저다: 좁은 창에서도 대비 높이기·테마 불가를 말한다 (창을 넓혀도 안 보이는데 「넓은 창에서는 보여요」라고 하지 않는다)", () => {
+    state.narrow = true;
+    state.plan = planOf({ ref: solid, live: false, reason: "increase-contrast" });
+    const contrast = mount(createElement(WallpaperRow));
+    expect(statusText(contrast)).toBe(WALLPAPER_OFF_COPY["increase-contrast"]);
+    act(() => mountedRoot?.unmount());
+    mountedRoot = null;
+    mountedHost?.remove();
+    state.plan = planOf({ ref: solid, live: false, verdict: "unavailable" });
+    const unusable = mount(createElement(WallpaperRow));
+    expect(statusText(unusable)).toBe(WALLPAPER_OFF_COPY.unavailable);
+    // 이유가 없을 때만 좁은 창 문장이다.
+    act(() => mountedRoot?.unmount());
+    mountedRoot = null;
+    mountedHost?.remove();
+    state.plan = planOf({ ref: solid, live: true });
+    const plain = mount(createElement(WallpaperRow));
+    pick(plain, "wallpaper-solid-slate");
+    expect(statusText(plain)).toBe(WALLPAPER_NARROW_COPY);
+  });
+
+  it("폰 폭에서 자기 줄을 갖는 단추 둘(「기본으로」·「사진 고르기」)은 44px 하한을 단다 (sm은 조밀한 컨트롤이라 tap-target을 직접 단다)", () => {
+    const host = mount(createElement(WallpaperRow));
+    for (const id of ["wallpaper-reset", "wallpaper-pick-photo"]) {
+      expect(q(host, id)?.className, id).toContain("tap-target");
+    }
+  });
+
   it("말할 것이 없으면 문장이 없다", () => {
     const host = mount(createElement(WallpaperRow));
     expect(statusText(host)).toBe("");

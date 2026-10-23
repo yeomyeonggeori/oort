@@ -148,11 +148,13 @@ export function WallpaperRow() {
   const status = (() => {
     if (notice !== null) return { text: notice, tone: "danger" as const };
     if (photo.status === "missing") return { text: WALLPAPER_OFF_COPY["no-photo"], tone: "muted" as const };
-    // 아무것도 고르지 않았으면 안 보이는 것이 정상이다: 좁은 창을 말할 일이 없다.
-    if (narrow && chosen !== undefined) return { text: WALLPAPER_NARROW_COPY, tone: "muted" as const };
+    // 창 폭과 무관하게 참인 이유가 먼저다: 좁은 창에서 「대비 높이기」가 켜져 있는데 「넓은 창에서는 보여요」라고 하면, 창을 넓혀도
+    // 안 보여서 거짓말이 된다(design-review 최종 L-2).
     const reason = plan.decision.reason;
     if (reason !== null) return { text: WALLPAPER_OFF_COPY[reason], tone: "muted" as const };
     if (unavailable) return { text: WALLPAPER_OFF_COPY.unavailable, tone: "muted" as const };
+    // 아무것도 고르지 않았으면 안 보이는 것이 정상이다: 좁은 창을 말할 일이 없다.
+    if (narrow && chosen !== undefined) return { text: WALLPAPER_NARROW_COPY, tone: "muted" as const };
     if (plan.decision.live && plan.hasBand) return { text: WALLPAPER_BAND_COPY, tone: "muted" as const };
     if (plan.treatment?.verdict === "blurry") return { text: WALLPAPER_BLURRY_COPY, tone: "muted" as const };
     return null;
@@ -191,6 +193,7 @@ export function WallpaperRow() {
           type="button"
           variant="secondary"
           size="sm"
+          className="tap-target"
           disabled={chosen === undefined}
           onClick={() => pick(() => store.reset())}
           data-testid="wallpaper-reset"
@@ -281,6 +284,7 @@ export function WallpaperRow() {
                   type="button"
                   variant="secondary"
                   size="sm"
+                  className="tap-target"
                   disabled={busy}
                   aria-busy={busy}
                   onClick={() => fileInput.current?.click()}
