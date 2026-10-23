@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "@momo/core/lib/api";
+import { AVATAR_EDITOR_COPY } from "@momo/core/features/workspace/avatarEditor";
 import {
+  MEMBER_AVATAR_MAX_SIDE,
   memberAvatarPickError,
+  memberAvatarRemoveError,
   memberAvatarUploadError,
 } from "./memberAvatarCopy";
 
@@ -38,5 +41,34 @@ describe("memberAvatarUploadError", () => {
   });
   it("ApiError 가 아니면 일반 문구", () => {
     expect(memberAvatarUploadError(new Error("boom"))).toMatch(/올리지 못했어요/);
+  });
+});
+
+describe("memberAvatarUploadError: 그려 올린 PNG (이모지·코메토)", () => {
+  it("한도·형식 문장(프로필 사진·5MB·4096px)을 쓰지 않고 일반 문장으로 읽는다", () => {
+    for (const status of [413, 422, 409, 500]) {
+      const message = memberAvatarUploadError(new ApiError(status, "x"), "drawn");
+      expect(message, String(status)).toBe(AVATAR_EDITOR_COPY.uploadFailed);
+      expect(message, String(status)).not.toMatch(/프로필 사진|5MB|4096px/);
+    }
+    expect(memberAvatarUploadError(new Error("boom"), "drawn")).toBe(AVATAR_EDITOR_COPY.uploadFailed);
+  });
+  it("너무 잦은 변경(429)만 따로 말한다", () => {
+    expect(memberAvatarUploadError(new ApiError(429, "x"), "drawn")).toBe(AVATAR_EDITOR_COPY.uploadTooOften);
+    expect(AVATAR_EDITOR_COPY.uploadTooOften).not.toBe(AVATAR_EDITOR_COPY.uploadFailed);
+  });
+  it("종류를 안 주면 사진이다 (기존 호출부가 그대로 사진 문장을 받는다)", () => {
+    expect(memberAvatarUploadError(new ApiError(413, "x"))).toMatch(/5MB까지/);
+    expect(memberAvatarUploadError(new ApiError(413, "x"), "photo")).toMatch(/5MB까지/);
+  });
+  it("사진의 422 는 편집기와 같은 문장이고, 상한은 서버의 4096px 이다", () => {
+    expect(memberAvatarUploadError(new ApiError(422, "x"), "photo")).toBe(AVATAR_EDITOR_COPY.photoUnusable);
+    expect(AVATAR_EDITOR_COPY.photoUnusable).toContain(String(MEMBER_AVATAR_MAX_SIDE));
+  });
+});
+
+describe("memberAvatarRemoveError", () => {
+  it("편집기와 같은 되돌리기 실패 문장을 말한다", () => {
+    expect(memberAvatarRemoveError()).toBe(AVATAR_EDITOR_COPY.resetFailed);
   });
 });

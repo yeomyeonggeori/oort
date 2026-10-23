@@ -306,10 +306,9 @@ export async function composeAvatarPng<Layer>(
  */
 export const AVATAR_EDITOR_COPY = {
   title: "아바타 바꾸기",
-  description: "다른 멤버에게도 이 모습으로 보여요. 사진이 없으면 이름의 첫 글자가 보여요.",
+  description: "다른 멤버에게도 이 모습으로 보여요.",
   modeLegend: "아바타 종류",
   modes: { photo: "사진", emoji: "이모지", preset: "코메토" },
-  previewLegend: "실제 크기 미리보기",
   previewSizes: { sidebar: "사이드바", message: "메시지", profile: "프로필" },
   photoPick: "사진 고르기",
   photoChange: "다른 사진 고르기",
@@ -339,6 +338,17 @@ export const AVATAR_EDITOR_COPY = {
   emojiLowContrast: "이 색 위에서는 이모지가 잘 안 보여요. 다른 색을 골라 주세요.",
   presetLowContrast: "이 색 위에서는 코메토가 잘 안 보여요. 다른 색을 골라 주세요.",
   emojiBlank: "이 기기에서는 이 이모지를 그리지 못했어요. 다른 이모지를 골라 주세요.",
+  /** 이모지 패널(컴포저와 공용)이 카탈로그 실패·빈 검색에서 하는 말. 이 대화상자의 어조(해요체)로 넘긴다. */
+  emojiPanel: {
+    error: "이모지 목록을 불러오지 못했어요.",
+    offline: "지금 오프라인이에요. 연결되면 다시 열어 주세요.",
+    retry: "다시 시도",
+    emptyHeadline: "찾는 이모지가 없어요",
+    emptyDetail: "영문 이름이나 :code:로 검색해요. 한글 검색은 아직 없어요.",
+  },
+  uploadFailed: "아바타를 올리지 못했어요. 잠시 뒤에 다시 시도해 주세요.",
+  uploadTooOften: "아바타를 너무 자주 바꿨어요. 잠시 뒤에 다시 시도해 주세요.",
+  photoUnusable: "이 이미지는 사용할 수 없어요. 열 수 있는 이미지이고 가로세로 4096px 이하인지 확인해 주세요.",
   invalidColor: "색은 #RRGGBB 꼴로 적어 주세요.",
   drawFailed: "아바타를 그리지 못했어요. 잠시 뒤에 다시 시도해 주세요.",
 } as const;

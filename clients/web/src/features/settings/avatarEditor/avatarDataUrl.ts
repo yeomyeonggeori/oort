@@ -23,3 +23,21 @@ export function readFileAsDataUrl(file: Blob): Promise<string | null> {
     reader.readAsDataURL(file);
   });
 }
+
+export type PhotoProbe = { readonly ok: true; readonly width: number; readonly height: number } | { readonly ok: false };
+
+/**
+ * 고른 파일이 이미지로 **열리는가**와 그 크기. 이름이 `.png` 인 임의의 바이트는 미리보기가 깨진 이미지 글리프가 되는데도 저장이
+ * 열려 있었다(design-review M-3). `createImageBitmap` 이 없는 환경(jsdom)은 잴 수 없으므로 통과시키고 서버가 판정한다.
+ */
+export async function probePhoto(file: Blob): Promise<PhotoProbe> {
+  if (typeof createImageBitmap !== "function") return { ok: true, width: 0, height: 0 };
+  try {
+    const bitmap = await createImageBitmap(file);
+    const result = { ok: true as const, width: bitmap.width, height: bitmap.height };
+    bitmap.close?.();
+    return result;
+  } catch {
+    return { ok: false };
+  }
+}

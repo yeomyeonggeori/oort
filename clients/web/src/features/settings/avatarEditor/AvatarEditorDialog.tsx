@@ -38,16 +38,23 @@ import {
 import { SegmentedControl, type SegmentOption } from "@/design/ui/segmented-control";
 import { InlineBanner } from "@/features/common/States";
 import { primeMemberAvatar } from "@/features/sidebar/useMemberAvatar";
-import { memberAvatarPickError, memberAvatarRemoveError, memberAvatarUploadError } from "../memberAvatarCopy";
+import {
+  MEMBER_AVATAR_MAX_SIDE,
+  memberAvatarPickError,
+  memberAvatarRemoveError,
+  memberAvatarUploadError,
+} from "../memberAvatarCopy";
 import { ConfirmButton } from "../SettingsFields";
 import { uploadMyAvatar } from "../uploadMyAvatar";
 import { AvatarColorPicker } from "./AvatarColorPicker";
-import { bytesToPngDataUrl, readFileAsDataUrl } from "./avatarDataUrl";
+import { bytesToPngDataUrl, probePhoto, readFileAsDataUrl } from "./avatarDataUrl";
 import { AvatarEditorPreview } from "./AvatarEditorPreview";
 import { AvatarEmojiPicker } from "./AvatarEmojiPicker";
 import { AvatarPresetPicker } from "./AvatarPresetPicker";
+import "./avatarEditor.css";
 import { canvasAvatarPorts } from "./canvasPorts";
 import { useGlyphSample, usePaletteVerdicts, usePreviewUrl } from "./useAvatarRender";
+import { useScrollBodyCues } from "./useScrollBodyCues";
 
 // Reading this as: settings dialog (profile hero) for internal team users on web+Tauri, density 7/10, motion 2/10.
 
@@ -152,6 +159,7 @@ export function AvatarEditorDialog({
   const reasonId = useId();
   const offlineId = useId();
   const resetSlotRef = useRef<HTMLDivElement>(null);
+  const { bodyRef, innerRef, stickyRef } = useScrollBodyCues();
   const refocusReset = useRef(false);
   const [now] = useState(() => nowMs ?? Date.now());
 
@@ -262,7 +270,7 @@ export function AvatarEditorDialog({
       setError(
         failure instanceof AvatarComposeError
           ? avatarComposeFailureMessage(failure.reason, failure.kind)
-          : memberAvatarUploadError(failure)
+          : memberAvatarUploadError(failure, mode === "photo" ? "photo" : "drawn")
       ),
   });
 
@@ -290,8 +298,10 @@ export function AvatarEditorDialog({
   }, [resetKey]);
 
   // ---- 저장해도 되는가, 안 되면 왜 ---------------------------------------------------
+  // 쓰는 글자가 배경과 같은 색을 말하는가. 세 자리 줄임은 칸을 떠나야 배경이 되므로 그 전에는 같지 않다(저장은 막혀 있다).
+  // 인라인 오류는 **읽을 수 없는** 글자에만 선다: 아직 풀리지 않았을 뿐인 올바른 줄임에는 말하지 않는다.
   const colorSynced = normalizeFreeColor(color.text) === color.bg;
-  const colorFormatProblem = !colorSynced && color.left ? AVATAR_EDITOR_COPY.invalidColor : null;
+  const colorFormatProblem = color.left && normalizeFreeColor(color.text) === null ? AVATAR_EDITOR_COPY.invalidColor : null;
 
   let blockReason: string | null = null;
   let ready = false;
@@ -342,10 +352,15 @@ export function AvatarEditorDialog({
       return;
     }
     const token = (pickToken.current += 1);
-    const url = await readFileAsDataUrl(file);
+    // 이미지로 열리는지, 4096px 안인지 올리기 전에 먼저 본다(이름만 .png 인 바이트가 깨진 미리보기로 저장까지 가지 않게, design-review M-3).
+    const [url, probe] = await Promise.all([readFileAsDataUrl(file), probePhoto(file)]);
     if (token !== pickToken.current) return; // 그사이 다른 파일을 골랐다.
-    if (url === null) {
+    if (url === null || !probe.ok) {
       setError(AVATAR_EDITOR_COPY.photoReadFailed);
+      return;
+    }
+    if (probe.width > MEMBER_AVATAR_MAX_SIDE || probe.height > MEMBER_AVATAR_MAX_SIDE) {
+      setError(AVATAR_EDITOR_COPY.photoUnusable);
       return;
     }
     setPhoto({ file, url });
@@ -358,7 +373,9 @@ export function AvatarEditorDialog({
 
   function typeColor(value: string) {
     clearError();
-    const normalized = normalizeFreeColor(value);
+    // 세 자리 줄임은 칸을 떠날 때 받는다: 여섯 자리를 치는 도중 앞의 세 자리에서 배경이 잠깐 다른 색으로 바뀌지 않게.
+    const shorthand = /^#?[0-9a-fA-F]{3}$/.test(value.trim());
+    const normalized = shorthand ? null : normalizeFreeColor(value);
     updateColor((current) => ({
       ...current,
       text: value,
@@ -380,7 +397,9 @@ export function AvatarEditorDialog({
       problem={colorFormatProblem}
       onPalette={pickPalette}
       onText={typeColor}
-      onTextBlur={() => updateColor((current) => ({ ...current, left: true }))}
+      onTextBlur={() =>
+        updateColor((current) => ({ ...current, left: true, bg: normalizeFreeColor(current.text) ?? current.bg }))
+      }
     />
   );
 
@@ -409,80 +428,94 @@ export function AvatarEditorDialog({
         <DialogTitle>{AVATAR_EDITOR_COPY.title}</DialogTitle>
         <DialogDescription>{AVATAR_EDITOR_COPY.description}</DialogDescription>
 
-        <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
-          {offline ? (
-            <InlineBanner tone="neutral" message={AVATAR_EDITOR_COPY.offline} messageId={offlineId} testId="avatar-editor-offline" />
-          ) : null}
+        {/* 스크롤 본문. 위치 기준·바깥 여백·초점 스크롤 여백·스크롤 단서는 `avatarEditor.css` 의 `.avatar-editor-body` 가 쥔다(키보드로
+            닿는 칸이 눈에 보이게 하는 규칙이라 한 곳에 모아 시험이 지킨다, design-review B-1). 자식은 `inner` 하나다. */}
+        <div ref={bodyRef} className="avatar-editor-body min-h-0 overflow-y-auto" data-testid="avatar-editor-body">
+          <div ref={innerRef} className="flex flex-col gap-3">
+            {/* 미리보기는 큰 창(높이 780 초과)에서만 스크롤 본문 위에 붙는다(CSS 미디어 쿼리). 낮은 창에서는 붙은 띠(약 166px)가 본문
+                높이를 먹고 초점이 가는 칸을 가려서, 띠도 내용과 같이 스크롤된다(design-review H-3). */}
+            <div ref={stickyRef} className="avatar-editor-sticky">
+              <AvatarEditorPreview me={me} src={previewSrc} nowMs={now} />
+            </div>
 
-          {/* 미리보기는 스크롤 본문 안에서 위에 붙는다: 낮은 창에서 아래의 색 칩을 고르는 동안에도 결과가 보인다. */}
-          <div className="sticky top-0 layer-content-float bg-surface-raised pb-1">
-            <AvatarEditorPreview me={me} src={previewSrc} nowMs={now} />
-          </div>
+            <SegmentedControl
+              legend={AVATAR_EDITOR_COPY.modeLegend}
+              options={MODE_OPTIONS}
+              value={mode}
+              onValueChange={onMode}
+              testId="avatar-editor-mode"
+            />
 
-          <SegmentedControl
-            legend={AVATAR_EDITOR_COPY.modeLegend}
-            options={MODE_OPTIONS}
-            value={mode}
-            onValueChange={onMode}
-            testId="avatar-editor-mode"
-          />
-
-          {mode === "photo" ? (
-            <div className="flex flex-col gap-2" data-testid="avatar-editor-photo">
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="tap-target"
-                  aria-disabled={busy || undefined}
-                  onClick={() => {
-                    if (!busy) inputRef.current?.click();
-                  }}
-                  data-testid="avatar-photo-pick"
-                >
-                  {photo === null ? AVATAR_EDITOR_COPY.photoPick : AVATAR_EDITOR_COPY.photoChange}
-                </Button>
+            {mode === "photo" ? (
+              <div className="flex flex-col gap-2" data-testid="avatar-editor-photo">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="tap-target"
+                    aria-disabled={busy || undefined}
+                    onClick={() => {
+                      if (!busy) inputRef.current?.click();
+                    }}
+                    data-testid="avatar-photo-pick"
+                  >
+                    {photo === null ? AVATAR_EDITOR_COPY.photoPick : AVATAR_EDITOR_COPY.photoChange}
+                  </Button>
+                </div>
+                <p className="text-meta text-ink-muted">{AVATAR_EDITOR_COPY.photoHint}</p>
+                <input
+                  ref={inputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/gif,image/webp"
+                  className="sr-only"
+                  onChange={(event) => void onPickFile(event)}
+                  data-testid="profile-avatar-input"
+                  tabIndex={-1}
+                  aria-hidden="true"
+                />
               </div>
-              <p className="text-meta text-ink-muted">{AVATAR_EDITOR_COPY.photoHint}</p>
-              <input
-                ref={inputRef}
-                type="file"
-                accept="image/png,image/jpeg,image/gif,image/webp"
-                className="sr-only"
-                onChange={(event) => void onPickFile(event)}
-                data-testid="profile-avatar-input"
-                tabIndex={-1}
-                aria-hidden="true"
-              />
-            </div>
-          ) : mode === "emoji" ? (
-            <div className="flex flex-col gap-3" data-testid="avatar-editor-emoji">
-              <AvatarEmojiPicker
-                skinOpen={skinOpen}
-                onSkinOpenChange={setSkinOpen}
-                onPick={(picked) => {
-                  clearError();
-                  setEmoji(picked);
-                }}
-              />
-              {colorPicker}
-            </div>
-          ) : (
-            <div className="flex flex-col gap-3" data-testid="avatar-editor-preset">
-              <p className="text-meta text-ink-muted">{AVATAR_EDITOR_COPY.presetHint}</p>
-              <AvatarPresetPicker
-                value={preset}
-                thumbs={thumbs}
-                onChange={(next) => {
-                  clearError();
-                  setPreset(next);
-                }}
-              />
-              {colorPicker}
-            </div>
-          )}
+            ) : mode === "emoji" ? (
+              <div className="flex flex-col gap-3" data-testid="avatar-editor-emoji">
+                <AvatarEmojiPicker
+                  skinOpen={skinOpen}
+                  onSkinOpenChange={setSkinOpen}
+                  onPick={(picked) => {
+                    clearError();
+                    setEmoji(picked);
+                  }}
+                />
+                {colorPicker}
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3" data-testid="avatar-editor-preset">
+                <p className="text-meta text-ink-muted">{AVATAR_EDITOR_COPY.presetHint}</p>
+                <AvatarPresetPicker
+                  value={preset}
+                  thumbs={thumbs}
+                  onChange={(next) => {
+                    clearError();
+                    setPreset(next);
+                  }}
+                />
+                {colorPicker}
+              </div>
+            )}
+          </div>
         </div>
+
+        {/* 오프라인의 이유는 그 이유로 잠긴 단추 바로 위에 선다(스크롤 본문 맨 위에 두면 낮은 창에서 단추 곁에는 이유가 없다,
+            design-review M-1). 한 칸에 하나만 서는 아래 상태 줄과는 다른 줄이다: 배너는 단추가 잠겨 있는 동안 늘 선다. */}
+        {offline ? (
+          <InlineBanner
+            tone="neutral"
+            separator={false}
+            className="rounded-lg px-3"
+            message={AVATAR_EDITOR_COPY.offline}
+            messageId={offlineId}
+            testId="avatar-editor-offline"
+          />
+        ) : null}
 
         {/* 한 칸에 하나만 선다: 오류 > 진행 > 막힌 이유. 칸의 높이는 늘 예약해 두므로(min-h-6) 문장이 나타나도 아래가 밀리지 않는다. */}
         <div className="min-h-6">
@@ -525,8 +558,17 @@ export function AvatarEditorDialog({
               />
             ) : null}
           </div>
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button type="button" variant="secondary" onClick={() => handleOpenChange(false)} data-testid="avatar-editor-cancel">
+          {/* 확인 질문이 열려 있는 동안은 질문이 줄을 쓰고(「취소」가 둘이 되지 않게), 저장·취소는 질문이 닫히면 돌아온다. */}
+          <div className={cn("flex flex-wrap justify-end gap-2", resetAsking && "hidden")}>
+            {/* 올리는 동안 취소는 native disabled 다: 눌러도 아무 일이 없는 살아 보이는 단추를 두지 않는다(형제 PauseUntilDialog 의
+                design-review H1 과 같은 규칙, 이 대화상자의 design-review H-1). 초점은 저장 단추에 있으므로 떨구지 않는다. */}
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={busy}
+              onClick={() => handleOpenChange(false)}
+              data-testid="avatar-editor-cancel"
+            >
               {AVATAR_EDITOR_COPY.cancel}
             </Button>
             <Button

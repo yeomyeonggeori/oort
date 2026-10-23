@@ -6,11 +6,18 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type RosterMember } from "@momo/core/lib/api";
 import { AVATAR_EDITOR_COPY } from "@momo/core/features/workspace/avatarEditor";
+import { AVATAR_ENTRY_COPY } from "@momo/core/features/workspace/avatarEditorCopy";
 import { avatarBackgroundHex } from "@momo/core/features/workspace/avatarPalette";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
-import { resetEmojiFrequencyForTests } from "@/features/emoji/frequencyStore";
+import {
+  EMOJI_FREQUENCY_STORAGE_KEY,
+  getEmojiFrequency,
+  getEmojiRankingSnapshot,
+  resetEmojiFrequencyForTests,
+} from "@/features/emoji/frequencyStore";
 import { resetEmojiSkinToneForTests } from "@/features/emoji/skinToneStore";
 import type { CatalogEmoji } from "@/features/emoji/catalog";
+import { EMOJI_CATALOG_COPY } from "@/features/emoji/copy";
 import { AvatarEditorDialog, type AvatarEditorDialogProps } from "./AvatarEditorDialog";
 import { BRIGHT_GLYPH, DARK_GLYPH, fakeAvatarPorts, sameBytes, type FakeAvatarPortsOptions } from "./avatarTestKit";
 
@@ -259,6 +266,13 @@ async function typeColor(value: string) {
   await settle();
 }
 
+async function leaveColorInput() {
+  await act(async () => {
+    (q("avatar-color-input") as HTMLInputElement).dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+  });
+  await settle();
+}
+
 async function pressEscape() {
   await act(async () => {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
@@ -463,23 +477,45 @@ describe("AvatarEditorDialog: 이모지 (그려 올린 PNG 가 정본)", () => {
     expect(saveDisabled()).toBe(false);
   });
 
-  it("색 입력이 #RRGGBB 꼴이 아니면 칸을 떠난 뒤 한 줄로 말하고 저장은 막힌다, 세 자리 줄임 꼴은 받는다", async () => {
+  it("색 입력이 #RRGGBB 꼴이 아니면 칸을 떠난 뒤 한 줄로 말하고 저장은 막힌다", async () => {
     await mountEditor({ ports: { glyph: BRIGHT_GLYPH } });
     await chooseMode("emoji");
     await pickEmoji("🚀");
     await typeColor(hash("12"));
     expect(q("avatar-color-problem")).toBeNull(); // 쓰는 중에는 말하지 않는다
-    await act(async () => {
-      (q("avatar-color-input") as HTMLInputElement).dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
-    });
-    await settle();
+    await leaveColorInput();
     expect(text("avatar-color-problem")).toBe(AVATAR_EDITOR_COPY.invalidColor);
     expect(q("avatar-color-input")?.getAttribute("aria-invalid")).toBe("true");
     expect(saveDisabled()).toBe(true);
+  });
+
+  it("세 자리 줄임은 칸을 떠날 때 받는다: 여섯 자리를 치는 도중 배경이 잠깐 바뀌지 않고, 올바른 줄임에는 오류를 말하지 않는다", async () => {
+    const mounted = await mountEditor({ ports: { glyph: BRIGHT_GLYPH } });
+    await chooseMode("emoji");
+    await pickEmoji("🚀");
+    await leaveColorInput(); // 한 번 떠난 뒤에는 꼴 오류가 쓰는 중에도 선다
+    const before = mounted.kit.log.filter((line) => line.startsWith("fill:")).length;
     await typeColor(hash("123"));
-    expect(q("avatar-color-problem")).toBeNull();
+    // 입력 칸은 친 글자를 보이고, 배경은 아직 그대로다(줄임은 칸을 떠날 때 여섯 자리로 풀린다).
     expect((q("avatar-color-input") as HTMLInputElement).value).toBe(hash("123"));
+    expect(mounted.kit.log.filter((line) => line.startsWith("fill:")).length).toBe(before);
+    expect(q("avatar-color-problem")).toBeNull();
+    expect(saveDisabled()).toBe(true);
+    await leaveColorInput();
+    expect(q("avatar-color-problem")).toBeNull();
     expect(saveDisabled()).toBe(false);
+    await click("avatar-editor-save");
+    await settle();
+    expect(mounted.kit.log.filter((line) => line.startsWith("fill:512:")).at(-1)).toBe(`fill:512:${hash("112233")}`);
+  });
+
+  it("여섯 자리는 치는 즉시 배경이 되고 대문자도 받는다", async () => {
+    await mountEditor({ ports: { glyph: BRIGHT_GLYPH } });
+    await chooseMode("emoji");
+    await pickEmoji("🚀");
+    await typeColor(hash("1A2B3C"));
+    expect(saveDisabled()).toBe(false);
+    expect(q("avatar-color-problem")).toBeNull();
   });
 
   it("화면의 판정이 낡았어도 저장 길이 한 번 더 막는다: 서버를 부르지 않고 이유를 말한다", async () => {
@@ -662,7 +698,8 @@ describe("AvatarEditorDialog: 오프라인과 진행", () => {
       (upload.mock.calls[0]?.[2] as (fraction: number) => void)(0.4);
     });
     expect(text("avatar-editor-status")).toBe("올리는 중 40%.");
-    // 취소도 Esc 도 닫지 못한다.
+    // 취소도 Esc 도 닫지 못한다. 취소는 눌러도 아무 일이 없는 살아 보이는 단추가 아니라 native disabled 다(design-review H-1).
+    expect((q("avatar-editor-cancel") as HTMLButtonElement).disabled).toBe(true);
     await click("avatar-editor-cancel");
     await act(async () => {
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
@@ -676,10 +713,261 @@ describe("AvatarEditorDialog: 오프라인과 진행", () => {
     expect(mounted.onBusyChange).toHaveBeenLastCalledWith(false);
   });
 
-  it("올리지 않는 동안은 취소가 닫는다", async () => {
+  it("올리지 않는 동안은 취소가 열려 있고 닫는다", async () => {
     const mounted = await mountEditor();
+    expect((q("avatar-editor-cancel") as HTMLButtonElement).disabled).toBe(false);
     await click("avatar-editor-cancel");
     expect(mounted.onOpenChange).toHaveBeenCalledWith(false);
     expect(upload).not.toHaveBeenCalled();
+  });
+
+  it("올리다 실패하면 취소가 다시 열리고 오류 줄이 선다", async () => {
+    upload.mockRejectedValue(new ApiError(500, "x"));
+    const mounted = await mountEditor();
+    await pickPhoto(pngFile());
+    await click("avatar-editor-save");
+    await settle();
+    expect((q("avatar-editor-cancel") as HTMLButtonElement).disabled).toBe(false);
+    expect(text("avatar-editor-error")).not.toBe("");
+    expect(mounted.onOpenChange).not.toHaveBeenCalledWith(false);
+  });
+
+  it("되돌리는 동안에도 취소는 잠겨 있다", async () => {
+    let finish: () => void = () => undefined;
+    removeMyAvatar.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        })
+    );
+    const mounted = await mountEditor({ member: me(HAS_AVATAR) });
+    await click("avatar-editor-reset");
+    await click("avatar-editor-reset-confirm");
+    expect((q("avatar-editor-cancel") as HTMLButtonElement).disabled).toBe(true);
+    expect(mounted.onOpenChange).not.toHaveBeenCalled();
+    await act(async () => {
+      finish();
+    });
+    await settle();
+    expect(mounted.onOpenChange).toHaveBeenCalledWith(false);
+  });
+});
+
+// =============================================================================
+// design-review 수리 (#4261): 키보드·낮은 창의 구조(B-1·H-3)는 `avatarEditor.css.test.ts` 와 캡처 하네스의 키보드 장면이 지키고,
+// 여기는 DOM 이 그 CSS 가 기대는 모양인지와 나머지 수리의 행동을 못 박는다.
+// =============================================================================
+describe("AvatarEditorDialog: 스크롤 본문의 구조", () => {
+  it("미리보기·종류·고르기는 스크롤 본문 안에, 저장·취소·상태 줄은 본문 밖에 선다", async () => {
+    await mountEditor();
+    const body = q("avatar-editor-body");
+    expect(body).not.toBeNull();
+    expect(body?.classList.contains("avatar-editor-body")).toBe(true);
+    for (const id of ["avatar-editor-preview", "avatar-editor-mode", "avatar-editor-photo"]) {
+      expect(body?.contains(q(id)), id).toBe(true);
+    }
+    for (const id of ["avatar-editor-save", "avatar-editor-cancel", "avatar-editor-status"]) {
+      expect(body?.contains(q(id)), `${id} 는 본문 밖`).toBe(false);
+    }
+    // 띠(미리보기 래퍼)는 CSS 가 큰 창에서 붙이는 클래스를 들고, 본문의 자식은 안쪽 상자 하나다(훅이 그 높이를 잰다).
+    expect(q("avatar-editor-preview")?.parentElement?.classList.contains("avatar-editor-sticky")).toBe(true);
+    expect(body?.children).toHaveLength(1);
+  });
+});
+
+describe("AvatarEditorDialog: 이모지 고르기는 공용 「자주 쓰는」 기록을 바꾸지 않는다 (design-review H-2)", () => {
+  it("고른 이모지가 사용 기록에 남지 않고, 메시지 툴바의 한 번 클릭 슬롯이 쓰는 순위도 그대로다", async () => {
+    await mountEditor();
+    await chooseMode("emoji");
+    const order = () => qa("[data-emoji-cell]").map((node) => node.textContent);
+    const before = order();
+    expect(before.length).toBeGreaterThan(0);
+    await pickEmoji("🔥");
+    expect(getEmojiFrequency("🔥")).toBe(0);
+    expect(getEmojiRankingSnapshot()).toHaveLength(0);
+    expect(memory.has(EMOJI_FREQUENCY_STORAGE_KEY)).toBe(false);
+    // 방금 고른 칸이 첫 칸으로 가고 나머지가 한 칸씩 밀리지 않는다: 격자 순서는 대화상자가 열려 있는 동안 그대로다.
+    expect(order()).toEqual(before);
+    await pickEmoji("🚀");
+    await pickEmoji("🔥");
+    expect(order()).toEqual(before);
+    expect(memory.has(EMOJI_FREQUENCY_STORAGE_KEY)).toBe(false);
+  });
+});
+
+describe("AvatarEditorDialog: 깨진 사진·너무 큰 사진은 저장에 닿지 않는다 (design-review M-3)", () => {
+  const bitmap = (width: number, height: number) => vi.fn(async () => ({ width, height, close: () => undefined }));
+
+  it("이미지로 열리지 않는 바이트는 미리보기도 저장도 열지 않고 다시 고르라고 말한다", async () => {
+    vi.stubGlobal("createImageBitmap", vi.fn(async () => Promise.reject(new DOMException("bad image", "InvalidStateError"))));
+    const mounted = await mountEditor();
+    await pickPhoto(pngFile("fake.png"));
+    expect(text("avatar-editor-error")).toBe(AVATAR_EDITOR_COPY.photoReadFailed);
+    expect(q("avatar-editor-preview")?.getAttribute("data-source")).toBe("current");
+    expect(saveDisabled()).toBe(true);
+    await click("avatar-editor-save");
+    await settle();
+    expect(upload).not.toHaveBeenCalled();
+    expect(mounted.onOpenChange).not.toHaveBeenCalledWith(false);
+  });
+
+  it("가로나 세로가 4096px 을 넘으면 서버를 부르기 전에 막고, 앞에 고른 사진은 그대로다", async () => {
+    vi.stubGlobal("createImageBitmap", bitmap(640, 480));
+    await mountEditor();
+    await pickPhoto(pngFile("keep.png"));
+    expect(q("avatar-editor-preview")?.getAttribute("data-source")).toBe("draft");
+    vi.stubGlobal("createImageBitmap", bitmap(4097, 100));
+    await pickPhoto(pngFile("wide.png"));
+    expect(text("avatar-editor-error")).toBe(AVATAR_EDITOR_COPY.photoUnusable);
+    expect(q("avatar-editor-preview")?.getAttribute("data-source")).toBe("draft");
+    vi.stubGlobal("createImageBitmap", bitmap(100, 4097));
+    await pickPhoto(pngFile("tall.png"));
+    expect(text("avatar-editor-error")).toBe(AVATAR_EDITOR_COPY.photoUnusable);
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it("4096px 정확히는 통과하고, 열어 본 비트맵은 닫는다", async () => {
+    const close = vi.fn();
+    vi.stubGlobal("createImageBitmap", vi.fn(async () => ({ width: 4096, height: 4096, close })));
+    await mountEditor();
+    await pickPhoto(pngFile("edge.png"));
+    expect(text("avatar-editor-error")).toBe("");
+    expect(q("avatar-editor-preview")?.getAttribute("data-source")).toBe("draft");
+    expect(saveDisabled()).toBe(false);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("AvatarEditorDialog: 그려 올린 PNG 의 오류는 「프로필 사진」이라고 말하지 않는다 (design-review M-4)", () => {
+  it.each([
+    [500, AVATAR_EDITOR_COPY.uploadFailed],
+    [413, AVATAR_EDITOR_COPY.uploadFailed],
+    [422, AVATAR_EDITOR_COPY.uploadFailed],
+    [409, AVATAR_EDITOR_COPY.uploadFailed],
+    [429, AVATAR_EDITOR_COPY.uploadTooOften],
+  ])("이모지 저장이 서버 %i 로 실패하면 아바타 문장으로 말한다", async (status, expected) => {
+    upload.mockRejectedValue(new ApiError(status, "x"));
+    const mounted = await mountEditor({ ports: { glyph: BRIGHT_GLYPH } });
+    await chooseMode("emoji");
+    await pickEmoji("🚀");
+    await click("avatar-editor-save");
+    await settle();
+    expect(text("avatar-editor-error")).toBe(expected);
+    expect(text("avatar-editor-error")).not.toMatch(/프로필 사진|5MB|4096px/);
+    expect(mounted.onOpenChange).not.toHaveBeenCalledWith(false);
+  });
+
+  it("코메토 저장도 같고, 사진 저장은 사진 문장을 그대로 쓴다", async () => {
+    upload.mockRejectedValue(new ApiError(429, "x"));
+    await mountEditor({ ports: { glyph: BRIGHT_GLYPH } });
+    await chooseMode("preset");
+    await click("avatar-preset-happy");
+    await settle();
+    await click("avatar-editor-save");
+    await settle();
+    expect(text("avatar-editor-error")).toBe(AVATAR_EDITOR_COPY.uploadTooOften);
+    await chooseMode("photo");
+    await pickPhoto(pngFile());
+    await click("avatar-editor-save");
+    await settle();
+    expect(text("avatar-editor-error")).toBe("프로필 사진을 너무 자주 바꿨어요. 잠시 뒤에 다시 시도해 주세요.");
+  });
+
+  it("안내 문장 두 곳(히어로 힌트·대화상자 설명)은 「사진이 없으면」으로 사진만 말하지 않고, 서로 같은 문장을 되풀이하지 않는다", () => {
+    expect(AVATAR_EDITOR_COPY.description).not.toMatch(/사진이 없으면/);
+    expect(AVATAR_ENTRY_COPY.hint).not.toMatch(/사진이 없으면/);
+    expect(AVATAR_ENTRY_COPY.hint).not.toContain(AVATAR_EDITOR_COPY.description);
+    expect(AVATAR_EDITOR_COPY.description).not.toContain(AVATAR_ENTRY_COPY.hint);
+  });
+});
+
+describe("AvatarEditorDialog: 이모지 패널의 말이 이 대화상자의 해요체를 따른다 (design-review M-8)", () => {
+  it("넘기는 문장 표는 패널이 쓰는 표와 같은 열쇠를 가진다 (한쪽이 늘면 다른 쪽도 늘어야 한다)", () => {
+    expect(Object.keys(AVATAR_EDITOR_COPY.emojiPanel).sort()).toEqual(Object.keys(EMOJI_CATALOG_COPY).sort());
+  });
+
+  it("카탈로그를 못 받으면 해요체 문장이 서고 다시 시도로 이어진다", async () => {
+    catalog.load.mockRejectedValueOnce(new Error("offline"));
+    await mountEditor();
+    await chooseMode("emoji");
+    expect(text("emoji-catalog-error")).toContain(AVATAR_EDITOR_COPY.emojiPanel.error);
+    expect(text("emoji-catalog-error")).not.toMatch(/습니다/);
+    // 다시 시도하면 목록이 선다.
+    const retry = [...(q("emoji-catalog-error")?.querySelectorAll("button") ?? [])].find((node) => node.textContent === AVATAR_EDITOR_COPY.emojiPanel.retry);
+    expect(retry).toBeDefined();
+    await act(async () => {
+      retry?.click();
+    });
+    await settle();
+    expect(qa("[data-emoji-cell]").length).toBeGreaterThan(0);
+  });
+
+  it("브라우저가 오프라인이면 오프라인 문장도 해요체다", async () => {
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    catalog.load.mockRejectedValueOnce(new Error("offline"));
+    await mountEditor();
+    await chooseMode("emoji");
+    expect(text("emoji-catalog-error")).toContain(AVATAR_EDITOR_COPY.emojiPanel.offline);
+    expect(text("emoji-catalog-error")).not.toMatch(/습니다|여세요/);
+  });
+});
+
+describe("AvatarEditorDialog: 배경색 두 단 (design-review M-5)", () => {
+  it("연한 단 여덟, 진한 단 일곱으로 두 줄이 서고, 모든 칸이 한 라디오 그룹이다", async () => {
+    await mountEditor();
+    await chooseMode("emoji");
+    const rows = qa('[data-testid="avatar-color-picker"] [data-tier]');
+    expect(rows.map((row) => row.dataset.tier)).toEqual(["light", "deep"]);
+    expect(rows.map((row) => row.querySelectorAll('input[type="radio"]').length)).toEqual([8, 7]);
+    expect(qa('[data-testid="avatar-color-picker"] [role="radiogroup"]')).toHaveLength(1);
+    const names = new Set(qa('[data-testid="avatar-color-picker"] input[type="radio"]').map((node) => (node as HTMLInputElement).name));
+    expect(names.size).toBe(1);
+  });
+
+  it("코메토 탭에서는 연한 단 전체가 흐려지고 진한 단만 열려 있다", async () => {
+    await mountEditor({ ports: { glyph: BRIGHT_GLYPH } });
+    await chooseMode("preset");
+    const [light, deep] = qa('[data-testid="avatar-color-picker"] [data-tier]');
+    for (const radio of light.querySelectorAll<HTMLInputElement>("input")) expect(radio.disabled, radio.value).toBe(true);
+    for (const radio of deep.querySelectorAll<HTMLInputElement>("input")) expect(radio.disabled, radio.value).toBe(false);
+  });
+});
+
+describe("AvatarEditorDialog: 오프라인 이유는 잠긴 단추 곁에 선다 (design-review M-1)", () => {
+  it("배너는 스크롤 본문 밖, 상태 줄과 단추 줄 위에 서서 본문이 스크롤돼도 늘 보인다", async () => {
+    await mountEditor({ props: { offline: true } });
+    const banner = q("avatar-editor-offline");
+    const body = q("avatar-editor-body");
+    expect(banner).not.toBeNull();
+    expect(body?.contains(banner)).toBe(false);
+    expect(body?.compareDocumentPosition(banner as Node)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(banner?.compareDocumentPosition(q("avatar-editor-status") as Node)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(banner?.compareDocumentPosition(q("avatar-editor-save") as Node)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    // 대화상자의 안쪽 가로 여백(p-4)에 맞춘다: 배너가 푸터보다 16px 더 들여써지지 않는다.
+    expect(banner?.className).toMatch(/\bpx-3\b/);
+    expect(banner?.className).not.toMatch(/\bpx-4\b/);
+  });
+});
+
+describe("AvatarEditorDialog: 되돌리기 확인 질문이 열리면 푸터가 질문에 줄을 내준다 (design-review M-2)", () => {
+  it("질문이 열린 동안 저장·취소는 숨고(「취소」가 둘이 되지 않는다), 질문을 닫으면 돌아온다", async () => {
+    await mountEditor({ member: me(HAS_AVATAR) });
+    const actions = () => q("avatar-editor-save")?.parentElement as HTMLElement;
+    expect(actions().classList.contains("hidden")).toBe(false);
+    await click("avatar-editor-reset");
+    expect(q("avatar-editor-reset-question")).not.toBeNull();
+    expect(actions().classList.contains("hidden")).toBe(true);
+    await pressEscape();
+    expect(q("avatar-editor-reset-question")).toBeNull();
+    expect(actions().classList.contains("hidden")).toBe(false);
+  });
+
+  it("질문을 확인으로 닫아도 돌아온다 (되돌리기가 실패해 대화상자가 남는 경우)", async () => {
+    removeMyAvatar.mockRejectedValue(new ApiError(500, "x"));
+    await mountEditor({ member: me(HAS_AVATAR) });
+    await click("avatar-editor-reset");
+    await click("avatar-editor-reset-confirm");
+    await settle();
+    expect((q("avatar-editor-save")?.parentElement as HTMLElement).classList.contains("hidden")).toBe(false);
   });
 });

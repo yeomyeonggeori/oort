@@ -3,6 +3,7 @@ import type { RosterMember } from "@momo/core/lib/api";
 import { AVATAR_EDITOR_COPY } from "@momo/core/features/workspace/avatarEditor";
 import { DmAvatar } from "@/features/sidebar/DmAvatar";
 import { Avatar } from "@/features/timeline/MessageRow";
+import { ActualSizeFigure, ActualSizePreview } from "../shell/ActualSizePreview";
 import { ProfileAvatar } from "../shell/ProfileAvatar";
 
 // 실제 크기 미리보기 (#4261): 사이드바 24 · 메시지 32 · 프로필 큰 원.
@@ -12,7 +13,8 @@ import { ProfileAvatar } from "../shell/ProfileAvatar";
 // 코어의 `renderableAvatarUrl` 이 통과시키는 `data:image/` 길(배포 CSP `img-src 'self' data:`)을 그대로 걷는다.
 // `src` 가 없으면 지금의 내 아바타를 그대로 보인다(고른 것이 아직 없다).
 //
-// 장식이다(`aria-hidden`): 고르는 값은 아래 컨트롤이 글자로 말한다.
+// 상자의 틀(둥근 면, 이름표 달린 그림)은 `shell/ActualSizePreview` 의 것이다: 다른 설정 미리보기가 같은 틀을 쓰도록 이 편집기
+// 폴더 밖에 있고, 여기는 무엇을 그릴지(세 아바타)만 정한다. 장식이다(`aria-hidden`): 고르는 값은 아래 컨트롤이 글자로 말한다.
 
 export function AvatarEditorPreview({
   me,
@@ -28,24 +30,16 @@ export function AvatarEditorPreview({
     [me, src]
   );
   return (
-    <div
-      aria-hidden="true"
-      data-testid="avatar-editor-preview"
-      data-source={src === null ? "current" : "draft"}
-      className="flex items-end justify-center gap-8 rounded-lg bg-surface-muted p-3"
-    >
-      <figure className="m-0 flex flex-col items-center gap-2">
+    <ActualSizePreview testId="avatar-editor-preview" dataAttrs={{ "data-source": src === null ? "current" : "draft" }}>
+      <ActualSizeFigure caption={AVATAR_EDITOR_COPY.previewSizes.profile}>
         <ProfileAvatar member={shown} size="hero" />
-        <figcaption className="text-meta text-ink-muted">{AVATAR_EDITOR_COPY.previewSizes.profile}</figcaption>
-      </figure>
-      <figure className="m-0 flex flex-col items-center gap-2">
+      </ActualSizeFigure>
+      <ActualSizeFigure caption={AVATAR_EDITOR_COPY.previewSizes.message}>
         <Avatar member={shown} />
-        <figcaption className="text-meta text-ink-muted">{AVATAR_EDITOR_COPY.previewSizes.message}</figcaption>
-      </figure>
-      <figure className="m-0 flex flex-col items-center gap-2">
+      </ActualSizeFigure>
+      <ActualSizeFigure caption={AVATAR_EDITOR_COPY.previewSizes.sidebar}>
         <DmAvatar member={shown} nowMs={nowMs} viewerMayAct={false} />
-        <figcaption className="text-meta text-ink-muted">{AVATAR_EDITOR_COPY.previewSizes.sidebar}</figcaption>
-      </figure>
-    </div>
+      </ActualSizeFigure>
+    </ActualSizePreview>
   );
 }

@@ -26,7 +26,7 @@ import {
   emojiGridPadRows,
   emojiGridWindow,
 } from "./gridWindow";
-import { EMOJI_CATALOG_COPY } from "./copy";
+import { EMOJI_CATALOG_COPY, type EmojiCatalogCopy } from "./copy";
 import { filterEmojis, isEmojiSearchQuery } from "./search";
 import { useEmojiSkinTone } from "./skinToneStore";
 
@@ -93,6 +93,7 @@ export function EmojiPickerPanel({
   skinOpen,
   onSkinOpenChange,
   autoFocusSearch = true,
+  copy = EMOJI_CATALOG_COPY,
 }: {
   itemPrefix: string;
   entries: CatalogEmoji[] | null;
@@ -105,6 +106,8 @@ export function EmojiPickerPanel({
   skinOpen: boolean;
   onSkinOpenChange: (open: boolean) => void;
   autoFocusSearch?: boolean;
+  /** 카탈로그 실패·오프라인·빈 검색의 문장. 생략하면 컴포저와 같은 표(`EMOJI_CATALOG_COPY`)다. */
+  copy?: EmojiCatalogCopy;
 }) {
   const id = useId();
   const tablistId = `${id}-tabs`;
@@ -409,18 +412,18 @@ export function EmojiPickerPanel({
           <InlineBanner
             message={
               browserOffline
-                ? EMOJI_CATALOG_COPY.offline
-                : EMOJI_CATALOG_COPY.error
+                ? copy.offline
+                : copy.error
             }
-            actionLabel={EMOJI_CATALOG_COPY.retry}
+            actionLabel={copy.retry}
             onAction={onRetry}
             separator={false}
             testId="emoji-catalog-error"
           />
         ) : visible.length === 0 && searching ? (
           <EmptyInvite
-            headline={EMOJI_CATALOG_COPY.emptyHeadline}
-            detail={EMOJI_CATALOG_COPY.emptyDetail}
+            headline={copy.emptyHeadline}
+            detail={copy.emptyDetail}
             className="px-0 py-4"
             testId="emoji-search-empty"
             actions={

@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Camera } from "lucide-react";
+import { Pencil } from "lucide-react";
 import type { RosterMember } from "@momo/core/lib/api";
 import { Card } from "@/design/ui/card";
 import { ProfileAvatarField } from "../ProfileAvatarField";
@@ -7,7 +7,7 @@ import { ProfileAvatar } from "./ProfileAvatar";
 
 // 프로필 히어로 (#3578 S2): 큰 아바타 + 이름·핸들·역할 + 아바타 바꾸기. 고르기·올리기·되돌리기 논리는
 // `ProfileAvatarField` 가 열어 주는 편집기가 지고(#3277 사진, #4261 이모지·코메토), 여기는 그 위의 얼굴과 자리만 정한다.
-// 아바타 우하단 둥근 카메라 단추는 「아바타 바꾸기」 단추를 대신 누르는 **포인터용 손잡이**다
+// 아바타 우하단 둥근 연필 단추(옛 카메라: 사진만이 아니라 이모지·코메토도 바꾸는 자리라 모양을 바꿨다)는 「아바타 바꾸기」 단추를 대신 누르는 **포인터용 손잡이**다
 // (잠금은 그 단추가 진다: 올리는 중·되돌리는 중·오프라인에 편집기가 열리지 않는다). 키보드·
 // 보조기술은 옆의 「아바타 바꾸기」 단추(같은 일을 하는 진짜 단추)로 가므로 이 손잡이는
 // 탭 순서와 접근성 트리에서 뺀다(같은 동작이 두 번 읽히지 않게).
@@ -49,7 +49,7 @@ export function ProfileHero({
           data-testid="profile-hero-camera"
           className="press tap-target absolute bottom-0 end-0 flex size-icon-button items-center justify-center rounded-full bg-primary text-on-primary ring-2 ring-surface-raised enabled:hover:opacity-90 disabled:opacity-50"
         >
-          <Camera aria-hidden className="size-4" />
+          <Pencil aria-hidden className="size-4" />
         </button>
       </div>
       <div className="flex w-full min-w-0 flex-1 flex-col items-center gap-3 @sm:items-start">

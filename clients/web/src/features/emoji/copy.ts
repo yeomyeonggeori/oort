@@ -21,3 +21,9 @@ export const EMOJI_CATALOG_COPY = {
   emptyHeadline: "찾는 이모지가 없습니다",
   emptyDetail: "영문 이름이나 :code:로 검색하세요. 한글 검색은 아직 없습니다.",
 } as const;
+
+/**
+ * 패널이 말하는 문장의 모양. 기본은 위 `EMOJI_CATALOG_COPY`(컴포저와 같은 합쇼체 어조)이고, 다른 어조의 표면(해요체 설정
+ * 대화상자)은 같은 모양의 표를 넘겨 자기 어조로 말한다(#4261 design-review M-8).
+ */
+export type EmojiCatalogCopy = { readonly [K in keyof typeof EMOJI_CATALOG_COPY]: string };

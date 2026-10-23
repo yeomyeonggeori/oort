@@ -36,10 +36,44 @@ describe("아바타 편집기 문구", () => {
   });
 
   it("실패 문장은 다음 행동을 말한다", () => {
-    for (const key of ["emojiLowContrast", "presetLowContrast", "emojiBlank", "drawFailed", "resetFailed", "photoReadFailed"] as const) {
-      expect(AVATAR_EDITOR_COPY[key], key).toMatch(/골라 주세요|다시 시도|확인하고/);
+    for (const key of [
+      "emojiLowContrast",
+      "presetLowContrast",
+      "emojiBlank",
+      "drawFailed",
+      "resetFailed",
+      "photoReadFailed",
+      "uploadFailed",
+      "uploadTooOften",
+      "photoUnusable",
+    ] as const) {
+      expect(AVATAR_EDITOR_COPY[key], key).toMatch(/골라 주세요|다시 시도|확인하고|확인해 주세요/);
     }
     expect(AVATAR_ENTRY_COPY.loadFailed).toMatch(/다시 시도/);
+  });
+
+  it("그려 올리는 이모지·코메토 오류는 「프로필 사진」·한도 숫자로 말하지 않는다 (사진 문장과 분리)", () => {
+    for (const key of ["uploadFailed", "uploadTooOften", "drawFailed"] as const) {
+      expect(AVATAR_EDITOR_COPY[key], key).not.toMatch(/프로필 사진|5MB|4096px/);
+    }
+    expect(AVATAR_EDITOR_COPY.photoUnusable).toMatch(/4096px/);
+  });
+
+  it("안내 문장은 사진만 말하지 않고 서로 같은 문장을 되풀이하지 않는다", () => {
+    expect(AVATAR_EDITOR_COPY.description).not.toMatch(/사진이 없으면/);
+    expect(AVATAR_ENTRY_COPY.hint).not.toMatch(/사진이 없으면/);
+    expect(AVATAR_ENTRY_COPY.hint).not.toContain(AVATAR_EDITOR_COPY.description);
+    expect(AVATAR_EDITOR_COPY.description).not.toContain(AVATAR_ENTRY_COPY.hint);
+  });
+
+  it("이모지 패널(컴포저와 공용)에 넘기는 문장은 해요체이고 합쇼체가 없다", () => {
+    const panel = sentences(AVATAR_EDITOR_COPY.emojiPanel);
+    expect(panel.length).toBe(5);
+    for (const text of panel) {
+      expect(text, text).not.toMatch(/습니다|하세요|여세요/);
+    }
+    expect(AVATAR_EDITOR_COPY.emojiPanel.error).toMatch(/요\.$/);
+    expect(AVATAR_EDITOR_COPY.emojiPanel.offline).toMatch(/요\.$/);
   });
 
   it("열기 자리의 말과 편집기 본체의 말은 같은 사실을 같은 낱말로 말한다 (단추·제목)", () => {

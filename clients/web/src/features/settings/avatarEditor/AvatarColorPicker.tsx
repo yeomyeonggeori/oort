@@ -20,6 +20,8 @@ import "./avatarEditor.css";
 // 입력한 색이 묻히면 아래 한 줄이 이유를 말한다(그 줄은 편집기가 `colorProblem` 으로 넘긴다). 마지막 저장 길(`composeAvatarPng`)은
 // 이 화면의 상태와 무관하게 한 번 더 판정한다.
 
+const TIERS = ["light", "deep"] as const;
+
 function Swatch({
   entry,
   selected,
@@ -93,20 +95,22 @@ export function AvatarColorPicker({
       <p id={legendId} className="text-meta text-ink-muted">
         {AVATAR_EDITOR_COPY.colorLegend}
       </p>
-      <div
-        role="radiogroup"
-        aria-labelledby={legendId}
-        className="flex flex-wrap gap-x-2 gap-y-1"
-      >
-        {AVATAR_BACKGROUNDS.map((entry) => (
-          <Swatch
-            key={entry.id}
-            entry={entry}
-            selected={selected?.id === entry.id}
-            blocked={disabled || blocked[entry.id] === true}
-            groupName={groupName}
-            onSelect={() => onPalette(entry)}
-          />
+      <div role="radiogroup" aria-labelledby={legendId} className="flex flex-col gap-1">
+        {/* 연한 단 여덟, 진한 단 일곱: 폭이 넓은 창에서도 두 줄이 이 모양으로 서서(한 줄 아홉이 아니다) 연한 줄이 통째로 흐려질 때
+            진한 줄이 따로 읽힌다(코메토 탭). 좁은 창에서는 각 줄이 접힌다. */}
+        {TIERS.map((tier) => (
+          <div key={tier} className="flex flex-wrap gap-x-2 gap-y-1" data-tier={tier}>
+            {AVATAR_BACKGROUNDS.filter((entry) => entry.tier === tier).map((entry) => (
+              <Swatch
+                key={entry.id}
+                entry={entry}
+                selected={selected?.id === entry.id}
+                blocked={disabled || blocked[entry.id] === true}
+                groupName={groupName}
+                onSelect={() => onPalette(entry)}
+              />
+            ))}
+          </div>
         ))}
       </div>
       {anyBlocked ? (

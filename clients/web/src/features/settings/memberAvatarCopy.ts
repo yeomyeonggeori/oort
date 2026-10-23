@@ -25,14 +25,30 @@ export function memberAvatarPickError(file: {
 
 const GENERIC = "프로필 사진을 올리지 못했어요. 잠시 뒤에 다시 시도해 주세요.";
 
-/** 업로드·완료 단계의 서버 오류를 사람 말로. */
-export function memberAvatarUploadError(error: unknown): string {
+/** 서버가 사진에 대해 말하는 4096px 상한(`MAX_MEMBER_AVATAR_DIMENSION`). 클라가 올리기 전에 먼저 거르는 데도 쓴다. */
+export const MEMBER_AVATAR_MAX_SIDE = 4096;
+
+/**
+ * 업로드·완료 단계의 서버 오류를 사람 말로.
+ *
+ * `kind` 가 `drawn` 이면 우리가 그려 올린 512px PNG(이모지·코메토)라서 「프로필 사진」·「5MB」·「4096px」 문장이 맞지 않는다
+ * (design-review M-4): 한도 초과와 형식 거절은 우리 PNG 에서는 나올 수 없으므로 일반 문장으로 읽고, 너무 잦은 변경만 따로 말한다.
+ */
+export function memberAvatarUploadError(
+  error: unknown,
+  kind: "photo" | "drawn" = "photo"
+): string {
+  if (kind === "drawn") {
+    return error instanceof ApiError && error.status === 429
+      ? AVATAR_EDITOR_COPY.uploadTooOften
+      : AVATAR_EDITOR_COPY.uploadFailed;
+  }
   if (!(error instanceof ApiError)) return GENERIC;
   switch (error.status) {
     case 413:
       return "프로필 사진은 5MB까지 올릴 수 있어요.";
     case 422:
-      return "이 이미지는 사용할 수 없어요. 열 수 있는 이미지이고 가로세로 4096px 이하인지 확인해 주세요.";
+      return AVATAR_EDITOR_COPY.photoUnusable;
     case 409:
       return "파일 형식이 맞지 않거나 그사이 다른 사진으로 바뀌었어요. 이미지를 다시 골라 주세요.";
     case 429:
