@@ -6,6 +6,7 @@
 //   node scripts/capture-4261.mjs                     # Chromium
 //   ENGINE=webkit node scripts/capture-4261.mjs       # WebKit(데스크탑 앱의 WKWebView 와 같은 엔진)
 //   OUT_ROOT=<폴더> ...                               # 캡처를 놓을 곳(기본 artifacts/avatar-4261, 커밋하지 않는다)
+//   SCHEMES=light node scripts/capture-4261.mjs       # 색 구성 고르기(기본 light,dark)
 //   SCENES=keyboard node scripts/capture-4261.mjs     # 장면 묶음 고르기: main(저장 길·세 모드) · keyboard(창 높이 여섯 × 초점) · states(올리는 중·오류·오프라인·Esc)
 //
 // 라이트·다크 × (사진 · 이모지 · 코메토) 편집기를 찍는다. 대화상자 맨 위의 미리보기 띠가 **진짜 아바타 컴포넌트**를
@@ -36,7 +37,7 @@ const OUT_ROOT = process.env.OUT_ROOT ? resolve(process.env.OUT_ROOT) : resolve(
 const PORT = Number(process.env.CAPTURE_PORT || 5393);
 const ENGINE = process.env.ENGINE === "webkit" ? "webkit" : "chromium";
 const launcher = ENGINE === "webkit" ? webkit : chromium;
-const SCHEMES = ["light", "dark"];
+const SCHEMES = (process.env.SCHEMES || "light,dark").split(",").map((name) => name.trim()).filter((name) => name === "light" || name === "dark");
 const VIEWPORT = { width: 1440, height: 1000 };
 
 const FIXTURE_NOW = Date.parse("2026-10-23T10:00:00+09:00");
@@ -719,6 +720,59 @@ async function keyboardScenes(browser, origin, scheme) {
         check(`⌨ ${tag} Shift+Tab 이 종류 고르기까지 올라온다 [${scheme}]`, !!tabBackward.at(-1)?.testid?.startsWith("avatar-editor-mode-"), tabBackward.map((stop) => stop.testid ?? stop.tag).join(" > "));
         checkStops(`${tag} Shift+Tab`, tabBackward, scheme);
       }
+
+      // ④ 코메토 탭: 표정 타일은 칩보다 크고(이름표까지 한 라벨) 줄이 접힌다. 타일 여섯과 진한 단 칩을 위·아래로 오가며 잰다.
+      await chooseMode(page, "preset");
+      await page.getByTestId("avatar-preset-happy").waitFor({ timeout: 15_000 });
+      await page.waitForFunction(() => document.querySelectorAll('[data-testid="avatar-preset-picker"] img').length === 6, null, { timeout: 15_000 });
+      await settle(page);
+      await page.waitForTimeout(150);
+      const presetChips = await page.locator('[data-testid^="avatar-color-"][type="radio"]:not([disabled])').evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-testid")));
+      const tiles = ["idle", "thinking", "happy", "flustered", "working", "sleepy"].map((id) => page.getByTestId(`avatar-preset-${id}`));
+      const presetSequence = [
+        page.locator('[data-testid^="avatar-editor-mode-"]:checked'),
+        ...tiles,
+        ...presetChips.map((id) => page.getByTestId(id)),
+        page.getByTestId("avatar-color-input"),
+        page.getByTestId("avatar-editor-cancel"),
+        page.getByTestId("avatar-editor-save"),
+      ];
+      const presetForward = [];
+      for (const locator of presetSequence) presetForward.push(await focusAndReport(page, locator));
+      checkStops(`${tag} 코메토: 초점을 위에서 아래로`, presetForward, scheme);
+      const presetBackward = [];
+      for (const locator of [...presetSequence].reverse()) presetBackward.push(await focusAndReport(page, locator));
+      checkStops(`${tag} 코메토: 초점을 아래에서 위로`, presetBackward, scheme);
+      await tiles[0].focus();
+      const tilesRight = await keyWalk(page, "ArrowRight", 5);
+      const tilesLeft = await keyWalk(page, "ArrowLeft", 5);
+      checkStops(`${tag} 코메토 타일 →5 ←5`, [...tilesRight, ...tilesLeft], scheme);
+      if (ENGINE === "chromium") {
+        await page.locator('[data-testid^="avatar-editor-mode-"]:checked').focus();
+        const presetTab = [];
+        for (let i = 0; i < 40; i += 1) {
+          const [stop] = await keyWalk(page, "Tab", 1);
+          presetTab.push(stop);
+          if (stop.testid === "avatar-editor-save") break;
+        }
+        checkStops(`${tag} 코메토 Tab`, presetTab, scheme);
+      }
+      if (tag === "h720" || tag === "min-720x480") {
+        await tiles.at(-1).focus();
+        await settle(page);
+        await shoot(dialog(page), `kbd-${tag}-preset-last-tile`, scheme);
+      }
+
+      // ⑤ 사진 탭: 고르기 단추와 아래 단추 둘.
+      await chooseMode(page, "photo");
+      await settle(page);
+      const photoStops = [];
+      for (const locator of [page.locator('[data-testid^="avatar-editor-mode-"]:checked'), page.getByTestId("avatar-photo-pick"), page.getByTestId("avatar-editor-cancel"), page.getByTestId("avatar-editor-save")]) {
+        photoStops.push(await focusAndReport(page, locator));
+      }
+      checkStops(`${tag} 사진`, photoStops, scheme);
+      await chooseMode(page, "emoji");
+      await settle(page);
 
       // 증거 캡처: 마지막 색 칩에 초점이 있을 때의 대화상자와(낮은 창에서 가장 깊은 곳), 창 전체.
       if (enabledChips.length > 0) await page.getByTestId(enabledChips.at(-1)).focus();
