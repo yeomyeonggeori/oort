@@ -54,6 +54,12 @@ export interface WallpaperRuntimeDeps {
   increaseContrast: MediaFlag;
   /** 루트의 색을 바꿀 수 있는 속성이 바뀔 때 부른다. */
   observeRoot(listener: () => void): () => void;
+  /**
+   * 창이 다시 앞에 왔을 때(초점·보임) 부른다. 시스템 설정에서 「대비 높이기」를 켜고 앱으로 돌아오는 것이 접근성을 바꾸는 보통의
+   * 길인데, WKWebView(데스크탑 셸)는 미디어 질의 값을 바꾸고도 `change`를 쏘지 않거나 늦게 쏜다(`design/systemScheme.ts`의 같은
+   * 사정). 그래서 돌아올 때 한 번 다시 읽는다. 입력이 같으면 서명이 같아 아무 일도 하지 않는다. 주지 않으면 이 길은 없다.
+   */
+  onWake?(listener: () => void): () => void;
 }
 
 export interface WallpaperRuntime {
@@ -166,6 +172,7 @@ export function createWallpaperRuntime(deps: WallpaperRuntimeDeps): WallpaperRun
         deps.reduceTransparency.subscribe(sync),
         deps.increaseContrast.subscribe(sync),
         deps.observeRoot(sync),
+        ...(deps.onWake ? [deps.onWake(sync)] : []),
       ];
       sync();
     },
@@ -238,6 +245,15 @@ function browserDeps(): WallpaperRuntimeDeps {
       const observer = new MutationObserver(() => listener());
       observer.observe(root, { attributes: true, attributeFilter: ROOT_ATTRIBUTES });
       return () => observer.disconnect();
+    },
+    onWake(listener) {
+      if (typeof window === "undefined" || typeof document === "undefined") return () => undefined;
+      window.addEventListener("focus", listener);
+      document.addEventListener("visibilitychange", listener);
+      return () => {
+        window.removeEventListener("focus", listener);
+        document.removeEventListener("visibilitychange", listener);
+      };
     },
   };
 }

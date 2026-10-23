@@ -41,7 +41,7 @@ interface World {
   system: Mode;
   flags: { reduceTransparency: boolean; increaseContrast: boolean };
   cssVars: Record<string, string>;
-  fire: { appearance(): void; photo(): void; system(): void; reduce(): void; contrast(): void; root(): void };
+  fire: { appearance(): void; photo(): void; system(): void; reduce(): void; contrast(): void; root(): void; wake(): void };
   deps: WallpaperRuntimeDeps;
   ensureLoaded: ReturnType<typeof vi.fn>;
   clearWallpaper: ReturnType<typeof vi.fn>;
@@ -52,7 +52,7 @@ function world(theme: "dawnsky" | "graphite" | "noeul" = "dawnsky", wallpaper?: 
   const attrs = new Map<string, string>();
   const props = new Map<string, string>();
   const log: string[] = [];
-  const listeners = { appearance: new Set<() => void>(), photo: new Set<() => void>(), system: new Set<() => void>(), reduce: new Set<() => void>(), contrast: new Set<() => void>(), root: new Set<() => void>() };
+  const listeners = { appearance: new Set<() => void>(), photo: new Set<() => void>(), system: new Set<() => void>(), reduce: new Set<() => void>(), contrast: new Set<() => void>(), root: new Set<() => void>(), wake: new Set<() => void>() };
   const layerState = { backgroundColor: "", backgroundImage: "" };
   const layer = {
     style: {
@@ -71,7 +71,7 @@ function world(theme: "dawnsky" | "graphite" | "noeul" = "dawnsky", wallpaper?: 
     cssVars: varsOf(theme),
   } as World;
   const fireAll = (set: Set<() => void>) => () => { for (const l of [...set]) l(); };
-  w.fire = { appearance: fireAll(listeners.appearance), photo: fireAll(listeners.photo), system: fireAll(listeners.system), reduce: fireAll(listeners.reduce), contrast: fireAll(listeners.contrast), root: fireAll(listeners.root) };
+  w.fire = { appearance: fireAll(listeners.appearance), photo: fireAll(listeners.photo), system: fireAll(listeners.system), reduce: fireAll(listeners.reduce), contrast: fireAll(listeners.contrast), root: fireAll(listeners.root), wake: fireAll(listeners.wake) };
   const sub = (set: Set<() => void>) => (listener: () => void) => { set.add(listener); return () => { set.delete(listener); }; };
   w.ensureLoaded = vi.fn();
   w.clearWallpaper = vi.fn(() => { delete w.appearance.wallpaper; w.fire.appearance(); });
@@ -93,6 +93,7 @@ function world(theme: "dawnsky" | "graphite" | "noeul" = "dawnsky", wallpaper?: 
     reduceTransparency: { matches: () => w.flags.reduceTransparency, subscribe: sub(listeners.reduce) },
     increaseContrast: { matches: () => w.flags.increaseContrast, subscribe: sub(listeners.contrast) },
     observeRoot: sub(listeners.root),
+    onWake: sub(listeners.wake),
   };
   w.runtime = createWallpaperRuntime(w.deps);
   return w;
@@ -371,6 +372,41 @@ describe("띠가 있는 테마: 켜져 있는 동안 루트에 띠 표지를 함
     const w = world("noeul", { kind: "solid", id: "slate" });
     attach(w);
     w.runtime.detach();
+    expect(w.attrs.size).toBe(0);
+  });
+});
+
+describe("창이 다시 앞에 오면 접근성을 한 번 다시 읽는다 (WKWebView는 미디어 질의의 change를 쏘지 않거나 늦게 쏜다)", () => {
+  it("대비 높이기가 change 없이 켜져도 돌아오는 순간 그림이 걷히고, 꺼진 채 돌아오면 다시 선다", () => {
+    const w = world("dawnsky", { kind: "solid", id: "slate" });
+    attach(w);
+    expect(w.attrs.get(LIVE_ATTRIBUTE)).toBe("");
+    // 시스템 설정에서 켰지만 change는 오지 않았다: 앱은 아직 모른다.
+    w.flags.increaseContrast = true;
+    expect(w.attrs.get(LIVE_ATTRIBUTE)).toBe("");
+    w.fire.wake();
+    expect(w.attrs.has(LIVE_ATTRIBUTE)).toBe(false);
+    expect(w.runtime.getPlan().decision.reason).toBe("increase-contrast");
+    w.flags.increaseContrast = false;
+    w.fire.wake();
+    expect(w.attrs.get(LIVE_ATTRIBUTE)).toBe("");
+  });
+
+  it("바뀐 것이 없으면 돌아와도 DOM을 다시 쓰지 않는다", () => {
+    const w = world("dawnsky", { kind: "solid", id: "slate" });
+    attach(w);
+    const writes = w.log.length;
+    w.fire.wake();
+    w.fire.wake();
+    expect(w.log.length).toBe(writes);
+  });
+
+  it("detach하면 돌아와도 아무 일도 없다 (구독을 푼다)", () => {
+    const w = world("dawnsky", { kind: "solid", id: "slate" });
+    attach(w);
+    w.runtime.detach();
+    w.flags.increaseContrast = true;
+    w.fire.wake();
     expect(w.attrs.size).toBe(0);
   });
 });
