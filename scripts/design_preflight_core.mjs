@@ -167,9 +167,17 @@ const TOKEN_SOURCE_FILES = new Set([
 // 만지지 않는다). 닫힌 파일 이름이라는 성질은 같다: 같은 폴더의 다른 파일은 계속 빨갛다.
 const WALLPAPER_TABLE_FILES = new Set(["design/wallpaper.ts"]);
 
+// 아바타 배경 팔레트와 글자 잉크(#4261): 이모지·코메토 아바타는 클라이언트가 PNG 로 구워 올리고, 그 PNG 는
+// 라이트·다크와 무관한 **고정 색**이라 토큰(`light-dark()`)으로 쓸 수 없다. 웹 컴포넌트는 색 글자를 못 적으므로
+// (raw_color) 이 표가 웹·폰이 같이 읽는 유일한 자리다. 위 두 목록과 같은 성질이고(닫힌 파일 이름, 같은 폴더의
+// 다른 파일은 계속 빨갛다), 같은 파도의 다른 이슈가 위 목록을 함께 고치므로 한 줄을 둘이 만지지 않게 따로 둔다.
+const AVATAR_PALETTE_FILES = new Set(["features/workspace/avatarPalette.ts"]);
+
 function categoriesFor(file) {
   const rel = relative(CORE_SRC, file).split("\\").join("/");
-  return TOKEN_SOURCE_FILES.has(rel) || WALLPAPER_TABLE_FILES.has(rel)
+  return TOKEN_SOURCE_FILES.has(rel) ||
+    WALLPAPER_TABLE_FILES.has(rel) ||
+    AVATAR_PALETTE_FILES.has(rel)
     ? CATEGORIES.filter((c) => c.key !== "raw_color")
     : CATEGORIES;
 }
@@ -390,6 +398,31 @@ const SELFTEST_CASES = [
     file: "design/wallpaperPhoto.ts",
     why: "같은 폴더라도 예외 목록 밖 파일의 색 문자열은 빨갛다",
     src: 'export const FILL = "#FFFFFF";',
+  },
+  // ---- 아바타 팔레트 (#4261) — 닫힌 한 파일만, raw_color 만.
+  {
+    want: [],
+    file: "features/workspace/avatarPalette.ts",
+    why: "아바타 배경 팔레트는 구워 올리는 PNG 의 고정 색 원천이다 (#4261)",
+    src: 'export const NAVY = { id: "navy", hex: "#222840" };',
+  },
+  {
+    want: ["emdash"],
+    file: "features/workspace/avatarPalette.ts",
+    why: "예외는 raw_color 하나뿐이다 — 팔레트 파일의 문장도 em-dash 를 잰다",
+    src: 'export const NOTE = "쓸 수 없어요 — 다른 색을 고르세요";',
+  },
+  {
+    want: ["raw_color"],
+    file: "features/workspace/avatarEditor.ts",
+    why: "같은 폴더라도 예외 목록 밖 파일의 색 문자열은 빨갛다 (편집기 모델은 팔레트에서 읽는다)",
+    src: 'export const FALLBACK = "#222840";',
+  },
+  {
+    want: ["raw_color"],
+    file: "features/workspace/avatarContrast.ts",
+    why: "판정 파일도 색 글자를 적지 않는다 (잉크는 팔레트 파일의 `AVATAR_INK`)",
+    src: 'export const DARK = "#16171b";',
   },
   // ---- progress_word · latin_particle (#1511) — 정의와 케이스 본대는
   // design_preflight_ast.mjs·web_strings 쪽. 여기는 코어에 실재하던 두 모양만.
