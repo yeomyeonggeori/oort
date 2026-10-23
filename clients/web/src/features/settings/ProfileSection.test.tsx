@@ -522,8 +522,18 @@ describe("ProfileSection", () => {
 const tid = (host: HTMLElement, id: string) =>
   host.querySelector<HTMLElement>(`[data-testid="${id}"]`);
 
-async function pickPng(host: HTMLElement) {
-  const input = tid(host, "profile-avatar-input") as HTMLInputElement;
+// 편집기는 지연 청크 + 대화상자(포털)다. 버튼을 누르면 청크를 받고 나서 body 에 선다.
+const editorNode = (id: string) => document.body.querySelector<HTMLElement>(`[data-testid="${id}"]`);
+
+async function openEditor(host: HTMLElement) {
+  await act(async () => {
+    tid(host, "profile-avatar-change")!.click();
+  });
+  await vi.waitFor(() => expect(editorNode("avatar-editor-dialog")).not.toBeNull());
+}
+
+async function pickPng() {
+  const input = editorNode("profile-avatar-input") as HTMLInputElement;
   Object.defineProperty(input, "files", {
     value: [new File([new Uint8Array(8)], "a.png", { type: "image/png" })],
     configurable: true,
@@ -532,7 +542,13 @@ async function pickPng(host: HTMLElement) {
     input.dispatchEvent(new Event("change", { bubbles: true }));
   });
   await act(async () => {
-    await new Promise((r) => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 20));
+  });
+}
+
+async function saveAvatar() {
+  await act(async () => {
+    editorNode("avatar-editor-save")!.click();
   });
 }
 
@@ -572,50 +588,63 @@ describe("ProfileSection 한 페이지", () => {
     expect(host.textContent).not.toContain("위험 구역");
   });
 
-  it("사진 올리기: 카메라 손잡이와 「사진 올리기」 단추가 같은 파일 입력을 열고 업로드 후 로스터를 다시 받는다", async () => {
+  it("아바타 바꾸기: 카메라 손잡이와 「아바타 바꾸기」 단추가 같은 편집기를 열고, 사진을 올린 뒤 로스터를 다시 받는다", async () => {
     const { host, client } = mountSection();
     const spy = vi.spyOn(client, "invalidateQueries");
-    const input = tid(host, "profile-avatar-input") as HTMLInputElement;
-    const click = vi.spyOn(input, "click").mockImplementation(() => undefined);
+    // 손잡이는 진짜 단추를 대신 누른다: 편집기가 열린다.
     act(() => (tid(host, "profile-hero-camera") as HTMLButtonElement).click());
-    act(() => (tid(host, "profile-avatar-change") as HTMLButtonElement).click());
-    expect(click).toHaveBeenCalledTimes(2);
-    await pickPng(host);
-    expect(uploadAvatar).toHaveBeenCalledTimes(1);
-    expect(spy).toHaveBeenCalledWith({ queryKey: ["roster", WS] });
+    await vi.waitFor(() => expect(editorNode("avatar-editor-dialog")).not.toBeNull());
+    await act(async () => {
+      editorNode("avatar-editor-cancel")!.click();
+    });
+    await vi.waitFor(() => expect(editorNode("avatar-editor-dialog")).toBeNull());
+    await openEditor(host);
+    await pickPng();
+    await saveAvatar();
+    await vi.waitFor(() => expect(uploadAvatar).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(spy).toHaveBeenCalledWith({ queryKey: ["roster", WS] }));
+    // 끝나면 편집기가 닫히고 히어로의 상태 줄이 한 번 말한다.
+    await vi.waitFor(() => expect(editorNode("avatar-editor-dialog")).toBeNull());
+    expect(tid(host, "profile-avatar-status")?.textContent).toBe("프로필 사진을 올렸어요.");
   });
 
-  it("사진 지우기: 사진이 있을 때만 보이고 제자리 확인 뒤에야 지운다", async () => {
+  it("기본으로 되돌리기: 아바타가 있을 때만 편집기에 보이고 제자리 확인 뒤에야 지운다", async () => {
     const without = mountSection();
-    expect(tid(without.host, "profile-avatar-remove")).toBeNull();
+    await openEditor(without.host);
+    expect(editorNode("avatar-editor-reset")).toBeNull();
     act(() => mountedRoot?.unmount());
     mountedRoot = null;
     mountedHost?.remove();
+    document.body.replaceChildren();
 
     const { host } = mountSection({ avatarUrl: "/v1/avatar?v=m" });
+    await openEditor(host);
     await act(async () => {
-      tid(host, "profile-avatar-remove")!.click();
+      editorNode("avatar-editor-reset")!.click();
     });
     expect(removeMyAvatar).not.toHaveBeenCalled();
-    const confirm = [...host.querySelectorAll("button")].find(
-      (b) => b.textContent === "지우기"
-    );
-    expect(confirm).toBeTruthy();
     await act(async () => {
-      confirm!.click();
+      editorNode("avatar-editor-reset-confirm")!.click();
     });
-    expect(removeMyAvatar).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(removeMyAvatar).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(tid(host, "profile-avatar-status")?.textContent).toBe("기본 아바타로 돌아갔어요."));
   });
 
-  it("오프라인이면 사진·이름·핸들·카메라가 잠기고 이유를 한 번 말한다", () => {
+  it("오프라인이면 이름·핸들·카메라가 잠기고 아바타 바꾸기는 편집기를 열지 않으며 이유를 한 번 말한다", async () => {
     const { host } = mountSection({ offline: true, avatarUrl: "/v1/avatar?v=m" });
     expect(tid(host, "profile-offline-banner")).not.toBeNull();
     expect((tid(host, "profile-display-name") as HTMLInputElement).disabled).toBe(true);
     expect((tid(host, "profile-handle") as HTMLInputElement).disabled).toBe(true);
     expect((tid(host, "profile-hero-camera") as HTMLButtonElement).disabled).toBe(true);
     expect(tid(host, "profile-avatar-change")?.getAttribute("aria-disabled")).toBe("true");
-    expect(tid(host, "profile-avatar-remove")?.getAttribute("aria-disabled")).toBe("true");
     expect(tid(host, "profile-save")?.getAttribute("aria-disabled")).toBe("true");
+    await act(async () => {
+      tid(host, "profile-avatar-change")!.click();
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(editorNode("avatar-editor-dialog")).toBeNull();
     // 나가기도 오프라인에서는 잠긴다.
     expect(tid(host, "workspace-leave")?.getAttribute("aria-disabled")).toBe("true");
   });
@@ -644,28 +673,31 @@ describe("ProfileSection 한 페이지", () => {
     expect(tid(host, "profile-handle-error")?.textContent ?? "").not.toContain("이미 쓰는");
   });
 
-  it("올리는 중에는 카메라 손잡이가 잠겨 파일 창을 열지 않는다 (L1)", async () => {
+  it("올리는 중에는 카메라 손잡이가 잠겨 편집기를 다시 열지 않는다 (L1)", async () => {
     uploadAvatar.mockReturnValue(new Promise(() => undefined));
     const { host } = mountSection();
     const camera = tid(host, "profile-hero-camera") as HTMLButtonElement;
     expect(camera.disabled).toBe(false);
-    await pickPng(host);
+    await openEditor(host);
+    await pickPng();
+    await saveAvatar();
     await vi.waitFor(() => expect(camera.disabled).toBe(true));
-    const input = tid(host, "profile-avatar-input") as HTMLInputElement;
-    const click = vi.spyOn(input, "click").mockImplementation(() => undefined);
+    const button = tid(host, "profile-avatar-change") as HTMLButtonElement;
+    const click = vi.spyOn(button, "click");
     act(() => camera.click());
+    // 잠긴 손잡이는 진짜 단추를 누르지 않는다.
     expect(click).not.toHaveBeenCalled();
   });
 
-  it("지우는 중에도 카메라 손잡이가 잠긴다 (L1)", async () => {
+  it("되돌리는 중에도 카메라 손잡이가 잠긴다 (L1)", async () => {
     removeMyAvatar.mockReturnValue(new Promise(() => undefined));
     const { host } = mountSection({ avatarUrl: "/v1/avatar?v=m" });
+    await openEditor(host);
     await act(async () => {
-      tid(host, "profile-avatar-remove")!.click();
+      editorNode("avatar-editor-reset")!.click();
     });
-    const confirm = [...host.querySelectorAll("button")].find((b) => b.textContent === "지우기");
     await act(async () => {
-      confirm!.click();
+      editorNode("avatar-editor-reset-confirm")!.click();
     });
     await vi.waitFor(() => {
       expect((tid(host, "profile-hero-camera") as HTMLButtonElement).disabled).toBe(true);

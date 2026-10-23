@@ -3,6 +3,7 @@ import {
   MEMBER_AVATAR_MAX_BYTES,
   MEMBER_AVATAR_MIMES,
 } from "@momo/core/lib/api";
+import { AVATAR_EDITOR_COPY } from "@momo/core/features/workspace/avatarEditor";
 
 // 내 프로필 사진(ADR-0161 증보 2026-10-01, #3277)의 말: 서버를 부르기 전의 검사와
 // 서버가 돌려주는 코드별 해요체 문구. 화면은 이 모듈이 돌려준 문장만 그린다.
@@ -41,6 +42,7 @@ export function memberAvatarUploadError(error: unknown): string {
   }
 }
 
+/** 「기본으로 되돌리기」(`removeMyAvatar`)의 실패. 문장은 코어에 있어 폰이 같은 말을 한다. */
 export function memberAvatarRemoveError(): string {
-  return "프로필 사진을 지우지 못했어요. 연결을 확인하고 다시 시도해 주세요.";
+  return AVATAR_EDITOR_COPY.resetFailed;
 }

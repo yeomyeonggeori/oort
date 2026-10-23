@@ -33,7 +33,7 @@ import { SettingsSection } from "./shell/SettingsSection";
 // 옛 「계정」 페이지(`?section=account`)는 이 페이지의 별칭이다(`settingsNav`).
 //
 // 표시 이름과 핸들(E2)을 S1과 같이 한 폼·한 PATCH로 저장한다. 아바타는
-// 사진은 별도 저장 단추 없이 고르는 즉시 올리고(ProfileAvatarField, #3277),
+// 히어로의 「아바타 바꾸기」가 연 편집기에서 따로 저장하고(ProfileAvatarField, #3277 사진·#4261 이모지·코메토),
 // 이름·핸들 폼과 독립이다. 검증은 제출/blur.
 // 성공 시에만 roster와 세션을 갱신한다 (낙관 갱신 없음).
 
@@ -173,7 +173,7 @@ export function ProfileSection({ offline }: { offline: boolean }) {
       {offline ? (
         <InlineBanner
           tone="neutral"
-          message="연결이 끊겨 지금은 표시 이름, 핸들, 프로필 사진을 바꿀 수 없어요."
+          message="연결이 끊겨 지금은 표시 이름, 핸들, 아바타를 바꿀 수 없어요."
           messageId="profile-offline-reason"
           testId="profile-offline-banner"
         />
@@ -193,7 +193,7 @@ export function ProfileSection({ offline }: { offline: boolean }) {
       ) : null}
       <SettingsSection
         title="프로필"
-        description="이 워크스페이스에서 다른 멤버에게 보이는 이름, 핸들, 프로필 사진이에요."
+        description="이 워크스페이스에서 다른 멤버에게 보이는 이름, 핸들, 아바타예요."
         testId="profile-card"
       >
         <form className="flex min-w-0 flex-col divide-y divide-line" onSubmit={handleSubmit}>

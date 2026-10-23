@@ -1,0 +1,95 @@
+/* =============================================================================
+ * 아바타 편집기의 선택 칩 (#4261): 배경색 열다섯 칸과 코메토 표정 여섯 칸.
+ *
+ * 편집기 지연 청크가 이 파일을 가져온다(`AvatarEditorDialog.tsx`). 메인 CSS 에 싣지 않는 이유는 편집기가
+ * 설정 화면에서만 쓰이기 때문이다(메인 청크를 키우지 않는다는 이슈 조건).
+ *
+ * 색은 CSS 가 아니라 core 표(`avatarPalette.ts`)에서 와서 변수 하나(`--avatar-chip-color`)로 넘어온다
+ * (칩이 마운트될 때 한 번, `wallpaper.css` 의 `.wallpaper-chip` 과 같은 길). 코메토 타일은 그려 둔 PNG
+ * (`data:` 주소)를 `<img>` 로 얹으므로 변수가 필요 없다. 라디오는 화면에서 숨기고(`sr-only`) 칩이 라디오의
+ * 얼굴이다. 고른 칩은 잉크 고리와 체크를 든다. 흐려진 칩은 지금 고른 그림이 그 색 위에서 묻혀서 고를 수
+ * 없는 칸이다(`disabled`).
+ * ========================================================================== */
+.avatar-choice {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-1);
+  min-inline-size: var(--tap-target);
+  cursor: pointer;
+}
+
+.avatar-chip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+  inline-size: var(--spacing-control-lg);
+  block-size: var(--spacing-control-lg);
+  border-radius: 9999px;
+  background-color: var(--avatar-chip-color, var(--surface-muted));
+  /* 칩과 면의 경계: 면과 가까운 색(라이트의 버터·모래, 다크의 남색·먹)이 면에 묻히지 않도록 3:1을 지키는 선 하나.
+   * 색 자체가 이 칩의 내용이라 경계가 사라지면 무엇을 고르는지 알 수 없다. */
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+/* 코메토 타일: 칩보다 한 칸 크다. 그림이 클수록 표정이 읽힌다. 가장자리는 선택 고리가 두르므로 칩과 같은 안쪽 선을 둔다. */
+.avatar-chip[data-size="art"] {
+  inline-size: calc(var(--spacing-control-lg) + var(--spacing-4));
+  block-size: calc(var(--spacing-control-lg) + var(--spacing-4));
+}
+
+.avatar-chip-image {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+
+/* 체크는 고른 칩에서만 보인다. 칩 색이 무엇이든 읽히도록 작은 잉크 원 위에 선다. 흐름 밖(절대 위치)에 둬서 칩
+ * 한가운데에 놓는다. */
+.avatar-chip-check {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: var(--spacing-6);
+  block-size: var(--spacing-6);
+  border-radius: 9999px;
+  background-color: var(--primary);
+  color: var(--on-primary);
+  opacity: 0;
+}
+
+.avatar-choice:has(:checked) .avatar-chip {
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 4px var(--ink);
+}
+
+.avatar-choice:has(:checked) .avatar-chip-check {
+  opacity: 1;
+}
+
+/* 코메토 타일은 체크를 얹지 않는다: 한가운데의 체크가 얼굴 창, 곧 고른 표정 자체를 가린다. 고른 타일은 잉크 고리와 굵은
+ * 이름이 말한다(색이 아닌 모양과 글자의 변화라 색각 이상에도 읽힌다). */
+.avatar-chip[data-size="art"] .avatar-chip-check {
+  display: none;
+}
+
+.avatar-choice:has(:focus-visible) {
+  outline: 2px solid var(--focus-ring-ink, var(--accent));
+  outline-offset: 2px;
+  border-radius: var(--radius-lg);
+}
+
+.avatar-choice:has(:disabled) {
+  cursor: default;
+}
+
+.avatar-choice:has(:disabled) .avatar-chip {
+  opacity: 0.35;
+}
