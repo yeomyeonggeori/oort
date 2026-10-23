@@ -120,6 +120,11 @@ import {
 } from "@momo/core/features/commands/slash";
 import { containsSecretKey } from "@momo/core/features/chat/secretKey";
 import { SecretKeyBlockNotice } from "@/features/chat/SecretKeyBlockNotice";
+import { SCHEDULED_COPY } from "@momo/core/features/scheduled/copy";
+import { ScheduleDialog } from "@/features/scheduled/ScheduleDialog";
+import { ScheduleSendMenu } from "@/features/scheduled/ScheduleSendMenu";
+import { ScheduledBanner } from "@/features/scheduled/ScheduledBanner";
+import { useComposerSchedule } from "@/features/scheduled/useComposerSchedule";
 import { PersonalCallNotice, PersonalCallPreview } from "@/features/chat/PersonalCallLine";
 import type { PersonalCallController } from "@/features/chat/usePersonalCall";
 import type { PersonalCallSpec } from "@/features/work/personalAgentCalling";
@@ -499,6 +504,8 @@ export function Composer({
   // 새로 세워(key) 화면 낭독기가 다시 읽게 한다(design-review N-4).
   const [secretBlocks, setSecretBlocks] = useState(0);
   const secretBlocked = secretBlocks > 0;
+  // 키 차단 줄의 첫 문장은 막은 길이 정한다: 보내기는 「보내지 않았어요」, 예약은 「예약하지 않았어요」(예약 UI 명세 0.4).
+  const [secretVia, setSecretVia] = useState<"send" | "schedule">("send");
   const cardAvailable = hasLocalCardHost(channelId);
   const { session, connStatus } = useSession();
   const autocomplete = useComposerAutocomplete({
@@ -759,6 +766,43 @@ export function Composer({
     attachBlock === null &&
     (text.trim().length > 0 || hasReadyAttachments);
 
+  // ── 예약해서 보내기 (ADR-0208, #4215) ────────────────────────────────────────
+  //
+  // 보내기 옆 ▾와 그 흐름 한 벌은 `useComposerSchedule`이 진다(스레드 입력창과 같은 훅). 여기 있는 것은 이 입력창이
+  // 비워야 할 것과 자리뿐이다. 예약은 **서버가 201을 준 뒤에만** 비운다: 글·초안은 요청 중에 고치지 않았을 때만
+  // (`textUnchanged`) 비우고, 스냅샷의 첨부는 훅이 항상 뺐다.
+  const schedule = useComposerSchedule({
+    surface: "channel",
+    workspaceId,
+    channelId,
+    text,
+    readText: () => textRef.current,
+    trayKey,
+    drafts: tray.drafts,
+    offline,
+    commandDraft: autocomplete.kind === "command" || parseSlashCommand(text) !== null,
+    personalCall: callPlan !== null,
+    quoting: quote !== null,
+    routingSet: routingPayload(routing.draft) !== undefined,
+    focusInput: () => inputRef.current?.focus(),
+    onScheduled: ({ textUnchanged }) => {
+      if (!textUnchanged) return;
+      // 참조부터 비운다: 이 컴포저의 정리 함수가 `textRef`의 옛 글을 초안으로 되쓰지 않게(`runCommand`와 같은 이유).
+      textRef.current = "";
+      setText("");
+      autocomplete.close();
+      format.dismiss();
+      routing.reset();
+      clearDraft(workspaceId, channelId);
+    },
+    onSecretKey: () => {
+      setSecretVia("schedule");
+      setSecretBlocks((count) => count + 1);
+    },
+  });
+  const phoneStatusLine = isMobile && schedule.statusText !== null;
+  const showsSchedule = schedule.gate.entry === "shown";
+
   function submit(body: string) {
     // 오버라이드는 이 전송분과 함께 떠난다. 값을 먼저 읽어 두고 상태를 비우는
     // 순서인 이유는 "1회"라는 라벨이 지켜져야 하기 때문이다: 보낸 뒤에도 줄이
@@ -848,6 +892,7 @@ export function Composer({
    */
   function trySend(): "sent" | "command" | "blocked" {
     if (containsSecretKey(text)) {
+      setSecretVia("send");
       setSecretBlocks((count) => count + 1);
       return "blocked";
     }
@@ -862,7 +907,8 @@ export function Composer({
 
   function onSubmit(event: FormEvent) {
     event.preventDefault();
-    if (!canSend) return;
+    // 예약 요청이 나는 동안은 보내기도 잠긴다: 같은 글이 일반 메시지와 예약으로 둘 다 나가면 안 된다.
+    if (!canSend || schedule.busy) return;
     trySend();
   }
 
@@ -909,7 +955,7 @@ export function Composer({
         // 않는다 — 그 사람은 키가 어디 있는지 아직 모르고, 힌트 줄은 정확히 그
         // 사람을 위한 것이다. 오프라인이라 보내지 못한 누름도 세지 않는다: 배운
         // 것은 「이 키가 전송이다」인데 그 누름은 그것을 보여 주지 못했다.
-        if (canSend && trySend() === "sent") {
+        if (canSend && !schedule.busy && trySend() === "sent") {
           rememberSendLearned();
         }
         return;
@@ -1053,6 +1099,28 @@ export function Composer({
         live={railLive}
       />
 
+      {/* 예약 배너(ADR-0208, UI 명세 1.6): 입력창 바로 위, 시간으로 사라지지 않는 지속 카드다. */}
+      <ScheduledBanner
+        place={schedule.place}
+        word={schedule.bannerWord}
+        testId="composer-scheduled-banner"
+      />
+
+      {/* 폰 폭(<600px)의 3초 줄은 그릇 **위**에 선다(폰 DM 힌트·오프라인 줄과 같은 자리·같은 모양). 액션 행의 메타 슬롯은
+          이 폭에서 107px라 「10월 26일 (월) 오전 9:00에 보낼게요」(184px)·막힌 ▾의 이유가 잘리는데, 터치에는 `title`이 없고
+          낭독 노드는 눈으로 읽는 사람에게 소용이 없어서 이 줄이 「왜 흐린가」·「언제 나가나」의 유일한 눈에 보이는 답이다.
+          그 대가로 3초 동안 입력창이 한 줄(약 24px) 움직인다: #1749의 「입력창이 움직이면 안 된다」는 한 줄 슬롯이 있는
+          데스크탑 폭의 논거다. 낭독은 아래 늘 붙어 있는 `role="status"` 노드가 그대로 맡는다(이 줄은 `aria-hidden`). */}
+      {phoneStatusLine && (
+        <p
+          aria-hidden="true"
+          className="px-6 pb-2 text-meta text-ink-muted"
+          data-testid="composer-status-line"
+        >
+          {schedule.statusText}
+        </p>
+      )}
+
       <form onSubmit={onSubmit} className="relative p-3">
         {secretBlocked && (
           <SecretKeyBlockNotice
@@ -1060,6 +1128,7 @@ export function Composer({
             id="composer-secret-block"
             testId="composer-secret-block"
             cardAvailable={cardAvailable}
+            {...(secretVia === "schedule" ? { lead: SCHEDULED_COPY.secretKey.lead } : {})}
           />
         )}
         <ComposerAutocompleteList
@@ -1212,7 +1281,23 @@ export function Composer({
                 <Smile aria-hidden="true" />
               </Button>
             </div>
-            {metaMode === "hint" ? (
+            {/* 예약 확정 줄(ADR-0182 ②, UI 명세 0.3): 힌트·작성 중 줄이 서는 **같은 고정 자리**를 3초 동안 대신 쓰고
+                원래 줄로 돌아간다. 새 줄을 만들지 않으므로 입력창이 움직이지 않는다(#1749). 누를 것은 두지 않는다. 낭독은
+                늘 붙어 있는 안 보이는 `role="status"` 노드가 맡는다: 조건부로 처음 생기는 라이브 리전은 낭독이
+                보장되지 않는다. */}
+            <p role="status" className="sr-only" data-testid="composer-status">
+              {schedule.statusText}
+            </p>
+            {schedule.statusText !== null && !isMobile ? (
+              <p
+                aria-hidden="true"
+                className="min-w-0 flex-1 truncate text-right text-meta text-ink-muted"
+                data-composer-meta-slot=""
+                data-testid="composer-status-line"
+              >
+                {schedule.statusText}
+              </p>
+            ) : metaMode === "hint" ? (
               <ComposerHint
                 dmHint={dmHint}
                 keysHintNeeded={keysHintNeeded}
@@ -1226,25 +1311,30 @@ export function Composer({
                 directory={directory}
               />
             )}
-            <Button
-              type="submit"
-              size="icon"
-              className="tap-target shrink-0"
-              // 오프라인에서는 보낼 수 없다 (진단 H-10). 누르면 실패 행 하나를 만들고
-              // 끝나므로, 막고 **왜**를 위 한 줄이 말한다. 입력창은 잠그지 않는다:
-              // 연결이 끊겼다고 글을 못 쓸 이유가 없고, 그동안 쓴 것은 초안이 지킨다.
-              disabled={!canSend}
-              aria-label="메시지 보내기"
-              title={
-                offline
-                  ? COMPOSER_OFFLINE_COPY
-                  : (attachBlockCopy ??
-                    (isMobile ? "메시지 보내기" : "메시지 보내기 (Enter)"))
-              }
-              data-testid="composer-send"
-            >
-              <SendHorizontal />
-            </Button>
+            {/* 보내기 반쪽 + ▾ 반쪽이 알약 하나다(UI 명세 1.1). ▾가 없는 서버에서는 예전 그대로 원 하나다. */}
+            <div className="flex shrink-0 items-center gap-px">
+              <Button
+                type="submit"
+                size="icon"
+                className={cn("tap-target shrink-0", showsSchedule && "rounded-r-none")}
+                // 오프라인에서는 보낼 수 없다 (진단 H-10). 누르면 실패 행 하나를 만들고
+                // 끝나므로, 막고 **왜**를 위 한 줄이 말한다. 입력창은 잠그지 않는다:
+                // 연결이 끊겼다고 글을 못 쓸 이유가 없고, 그동안 쓴 것은 초안이 지킨다.
+                disabled={!canSend}
+                aria-busy={schedule.busy || undefined}
+                aria-label="메시지 보내기"
+                title={
+                  offline
+                    ? COMPOSER_OFFLINE_COPY
+                    : (attachBlockCopy ??
+                      (isMobile ? "메시지 보내기" : "메시지 보내기 (Enter)"))
+                }
+                data-testid="composer-send"
+              >
+                <SendHorizontal />
+              </Button>
+              <ScheduleSendMenu {...schedule.menuProps} />
+            </div>
           </div>
         </div>
       </form>
@@ -1268,6 +1358,7 @@ export function Composer({
         purpose="insert"
         testId="composer-emoji-picker"
       />
+      <ScheduleDialog {...schedule.dialogProps} />
     </div>
   );
 }

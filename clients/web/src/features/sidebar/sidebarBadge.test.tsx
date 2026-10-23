@@ -108,6 +108,39 @@ describe("접힌 레일 = 펼친 줄", () => {
   });
 });
 
+describe("「예약됨」 줄의 표지 (ADR-0208, #4215)", () => {
+  const none = { total: 0, panes: 0 };
+
+  it("보내지 못한 예약의 수가 잉크 알약이고 점은 없다", () => {
+    const marks = destinationMarks({ needsMe: none, unreadChannels: 0, doneUnseen: false, scheduledFailed: 2 });
+    expect(marks.scheduled).toEqual({ pill: { tone: "ink", count: 2 }, dot: null });
+  });
+
+  it("입력을 주지 않거나 0이면 알약이 없다: 대기 예약의 수는 알약이 아니다", () => {
+    for (const scheduledFailed of [undefined, 0, -1, Number.NaN]) {
+      const marks = destinationMarks({ needsMe: none, unreadChannels: 0, doneUnseen: false, scheduledFailed });
+      expect(marks.scheduled, String(scheduledFailed)).toEqual({ pill: null, dot: null });
+    }
+  });
+
+  it("다른 목적지의 표지를 바꾸지 않는다", () => {
+    const base = { needsMe: { total: 6, panes: 1 }, unreadChannels: 2, doneUnseen: false };
+    const without = destinationMarks(base);
+    const withFailed = destinationMarks({ ...base, scheduledFailed: 3 });
+    expect(withFailed.chat).toEqual(without.chat);
+    expect(withFailed.inbox).toEqual(without.inbox);
+    expect(withFailed.mine).toEqual(without.mine);
+  });
+
+  it("줄에 그려진 알약은 같은 수를 잉크로 말한다", () => {
+    const failed = 2;
+    const marks = destinationMarks({ needsMe: none, unreadChannels: 0, doneUnseen: false, scheduledFailed: failed });
+    const rows = row({ mentionCount: failed });
+    expect(rows.getByTestId("mention-badge").textContent).toBe(String(marks.scheduled.pill?.count));
+    expect(rows.getByTestId("mention-badge").className).toContain(INK);
+  });
+});
+
 describe("세션 칩", () => {
   it.each([
     ["running", "실행 중"],

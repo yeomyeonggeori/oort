@@ -14,6 +14,7 @@ export function SecretKeyBlockNotice({
   testId,
   cardAvailable,
   surface = "channel",
+  lead = SECRET_KEY_BLOCK_COPY.lead,
 }: {
   id: string;
   testId: string;
@@ -21,6 +22,11 @@ export function SecretKeyBlockNotice({
   surface?: "channel" | "thread";
   /** `/연결 팀키`가 지금 카드를 여는가, 설정으로 가는가(design-review M-2). */
   cardAvailable: boolean;
+  /**
+   * 첫 문장. 보내기는 「이 메시지는 보내지 않았어요」이고, 예약 경로는 둘째 문장만 「이 메시지는 예약하지
+   * 않았어요」로 바뀐다(예약 UI 명세 0.4). 나머지 문장은 같은 것을 그대로 쓴다.
+   */
+  lead?: string;
 }) {
   return (
     <p
@@ -32,11 +38,11 @@ export function SecretKeyBlockNotice({
       <CircleAlert className="mt-px size-4 shrink-0" aria-hidden="true" />
       {surface === "thread" ? (
         <span>
-          {SECRET_KEY_BLOCK_COPY.lead} {SECRET_KEY_BLOCK_COPY.thread}
+          {lead} {SECRET_KEY_BLOCK_COPY.thread}
         </span>
       ) : (
         <span>
-          {SECRET_KEY_BLOCK_COPY.lead}{" "}
+          {lead}{" "}
           <b className="font-semibold">{SECRET_KEY_BLOCK_COPY.command}</b>
           {cardAvailable ? SECRET_KEY_BLOCK_COPY.tail : SECRET_KEY_BLOCK_COPY.tailFallback}
         </span>
