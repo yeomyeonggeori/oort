@@ -62,6 +62,13 @@ def main():
     if level != "forbid":
         errors.append(f"server-rust/Cargo.toml: [workspace.lints.rust] unsafe_code must be \"forbid\" (found {level!r})")
 
+    ws_members = ws.get("workspace", {}).get("members")
+    if ws_members != ["crates/*", "bins/*"] or ws.get("workspace", {}).get("exclude"):
+        errors.append(
+            f"server-rust/Cargo.toml: workspace members must be exactly [\"crates/*\", \"bins/*\"] with no exclude "
+            f"(found members={ws_members!r}); this gate only enumerates those two directories"
+        )
+
     allow = {}
     tsv = os.path.join(root, "server-rust", "unsafe-allowlist.tsv")
     if not os.path.isfile(tsv):

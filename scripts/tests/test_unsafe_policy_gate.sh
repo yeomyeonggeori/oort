@@ -42,6 +42,7 @@ fresh; sed -i.bak '/momo-embed/d' "$T/t/server-rust/unsafe-allowlist.tsv"; expec
 fresh; printf 'server-rust/crates/momo-wire\tshort\n' >> "$T/t/server-rust/unsafe-allowlist.tsv"; expect "allowlist row with empty-ish reason" 1 "needs a real reason"
 fresh; printf 'server-rust/crates/momo-nope\tthis crate does not exist but has a long reason\n' >> "$T/t/server-rust/unsafe-allowlist.tsv"; expect "allowlist row for missing crate" 1 "momo-nope has no Cargo.toml"
 fresh; mkdir -p "$T/t/server-rust/crates/momo-newcrate"; printf '[package]\nname = "momo-newcrate"\nversion = "0.0.0"\n' > "$T/t/server-rust/crates/momo-newcrate/Cargo.toml"; expect "new crate without lints" 1 "momo-newcrate: no [lints] workspace = true"
+fresh; ed "$T/t/server-rust/Cargo.toml" 'members = ["crates/*", "bins/*"]' 'members = ["crates/*", "bins/*", "tools/*"]'; expect "workspace gains a member dir the gate cannot see" 1 "workspace members must be exactly"
 fresh; rm "$T/t/server-rust/unsafe-allowlist.tsv"; expect "allowlist file deleted" 1 "unsafe-allowlist.tsv is missing"
 
 if [ "${1:-}" = "--compile" ]; then
