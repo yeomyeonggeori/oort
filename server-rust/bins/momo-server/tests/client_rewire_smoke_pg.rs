@@ -1446,9 +1446,12 @@ async fn a_connection_token_never_outlives_its_access_token() {
         now
     );
     assert!(
-        body["ttlSeconds"].as_i64().expect("ttlSeconds") <= 180,
-        "{body}"
+        claims.exp as i64 >= now + 150,
+        "exp {} must still carry the 180s of life left, not collapse to a stub",
+        claims.exp
     );
+    let ttl = body["ttlSeconds"].as_i64().expect("ttlSeconds");
+    assert!((150..=180).contains(&ttl), "{body}");
     // While the row is alive the proxy still lets the member in.
     let (_, allowed) =
         subscribe_proxy(&http, &base, TEST_PROXY_SECRET, &claims, &channel_name).await;
