@@ -103,12 +103,13 @@ cmd_run() {
   cmd_lint
   [ -n "${DATABASE_URL:-}" ] || die "DATABASE_URL(슈퍼유저)이 필요해요"
   mkdir -p "$OUT"
-  local total=0 targets=0 start now pkg test n
+  local total=0 targets=0 start now t0 pkg test n
   start="$(date +%s)"
   while read -r _d pkg test; do
+    t0="$(date +%s)"
     n="$(run_target "$pkg" "$test" "$OUT/$pkg.$test.log")"
     total=$((total + n)); targets=$((targets + 1))
-    echo "[security-pack] ok $pkg/$test passed=$n"
+    echo "[security-pack] ok $pkg/$test passed=$n seconds=$(( $(date +%s) - t0 ))"
   done < <(entries)
   now="$(date +%s)"
   echo "[security-pack] PASS targets=$targets tests=$total seconds=$((now - start))"
@@ -119,13 +120,13 @@ url_with_db() { printf '%s' "${DATABASE_URL%/*}/$1"; }
 
 cmd_negative() {
   [ -n "${DATABASE_URL:-}" ] || die "DATABASE_URL(슈퍼유저)이 필요해요"
-  local psql db url log
-  psql="$(psql_bin)"; db="sec03_negative_$$"; url="$(url_with_db "$db")"
+  local url log
+  NEG_PSQL="$(psql_bin)"; NEG_DB="sec03_negative_$$"; url="$(url_with_db "$NEG_DB")"
   mkdir -p "$OUT"; log="$OUT/negative.log"
-  "$psql" "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -c "CREATE DATABASE $db"
-  trap '"$psql" "$DATABASE_URL" -q -c "DROP DATABASE IF EXISTS '"$db"'" >/dev/null 2>&1 || true' EXIT
+  "$NEG_PSQL" "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -c "CREATE DATABASE $NEG_DB"
+  trap '"$NEG_PSQL" "$DATABASE_URL" -q -c "DROP DATABASE IF EXISTS $NEG_DB" >/dev/null 2>&1 || true' EXIT
   setup_db "$url"
-  "$psql" "$url" -v ON_ERROR_STOP=1 -q -f "$ROOT/infra/security-pack/negative/unforced_tenant_table.sql"
+  "$NEG_PSQL" "$url" -v ON_ERROR_STOP=1 -q -f "$ROOT/infra/security-pack/negative/unforced_tenant_table.sql"
   if DATABASE_URL="$url" cargo test --locked --manifest-path "$MANIFEST" -p momo-db --test tenant_catalog_pg -- --ignored --test-threads=1 >"$log" 2>&1; then
     tail -n 30 "$log" >&2
     die "음성 대조 실패: FORCE 없는 테넌트 테이블이 있는데 tenant_catalog_pg 가 초록이에요"

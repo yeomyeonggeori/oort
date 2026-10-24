@@ -23,7 +23,6 @@ approval momo-server approval_push_audience_conformance_pg
 approval momo-server tool_grants_conformance_pg
 push momo-push device_conformance_pg
 push momo-notifier push_conformance_pg
-push momo-notifier prod_role_conformance_pg
 push momo-server push_action_token_conformance_pg
 push momo-server push_fetch_token_conformance_pg
 push momo-server push_session_end_conformance_pg
