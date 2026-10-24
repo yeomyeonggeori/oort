@@ -17,11 +17,14 @@
 mod common;
 
 use common::{
-    definer_search_path_violations, definer_search_path_violations_against,
-    exposed_relation_violations, public_definer_violations, public_definer_violations_against,
-    role_boundary_violations, tenant_rls_violations, tenant_table_count, unforced_dml_violations,
-    unprotected_write_violations, untracked_table_violations, GUC_GATED_POLICIES,
-    NON_TENANT_TABLES, PG_CATALOG_ONLY_DEFINERS, PUBLIC_DEFINER_FUNCTIONS,
+    app_definer_violations, app_definer_violations_against, definer_search_path_violations,
+    definer_search_path_violations_against, exposed_relation_violations,
+    non_tenant_policy_violations, non_tenant_policy_violations_against, policy_fingerprint,
+    public_definer_violations, public_definer_violations_against, role_boundary_violations,
+    table_policy_fingerprint, tenant_rls_violations, tenant_rls_violations_against,
+    tenant_table_count, unforced_dml_violations, unprotected_write_violations,
+    untracked_table_violations, GUC_GATED_POLICIES, NON_TENANT_POLICY_PINS, NON_TENANT_TABLES,
+    PG_CATALOG_ONLY_DEFINERS, PUBLIC_DEFINER_FUNCTIONS,
 };
 use momo_db::sqlx;
 use momo_db::PgPool;
@@ -122,13 +125,13 @@ async fn the_real_database_has_no_unclassified_non_tenant_table() {
             "{name}: the allowlist reason must say something"
         );
     }
-    for (name, reason) in PG_CATALOG_ONLY_DEFINERS {
+    for (name, _hash, reason) in PG_CATALOG_ONLY_DEFINERS {
         assert!(
             reason.len() > 20,
             "{name}: the allowlist reason must say something"
         );
     }
-    for (name, reason) in GUC_GATED_POLICIES {
+    for (name, _hash, reason) in GUC_GATED_POLICIES {
         assert!(
             reason.len() > 20,
             "{name}: the allowlist reason must say something"
@@ -219,6 +222,31 @@ async fn the_real_database_unprotected_writable_tables_equal_the_known_list() {
     assert!(
         violations.is_empty(),
         "tables with no workspace_id and no RLS that {APP_ROLE} can write must equal KNOWN_UNPROTECTED_NON_TENANT: {violations:#?}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a migrated pgvector/pg18 DB"]
+async fn the_real_database_non_tenant_policies_are_unchanged_since_review() {
+    let _guard = lock().await;
+    let pool = pool().await;
+    assert!(!NON_TENANT_POLICY_PINS.is_empty());
+    let violations = non_tenant_policy_violations(&pool).await;
+    assert!(
+        violations.is_empty(),
+        "non-tenant tables must keep RLS enabled+FORCEd and their reviewed policies: {violations:#?}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a migrated pgvector/pg18 DB"]
+async fn the_real_database_momo_app_executes_only_the_listed_security_definers() {
+    let _guard = lock().await;
+    let pool = pool().await;
+    let violations = app_definer_violations(&pool, APP_ROLE, None).await;
+    assert!(
+        violations.is_empty(),
+        "SECURITY DEFINER functions executable by {APP_ROLE} must equal APP_EXECUTABLE_DEFINERS: {violations:#?}"
     );
 }
 
@@ -360,7 +388,9 @@ async fn control_update_only_workspace_policy_is_red() {
     })
     .await;
     assert!(
-        !found.is_empty() && found.iter().all(|l| l.starts_with("sec04_neg.half:")),
+        found.contains(
+            &"sec04_neg.half: no permissive SELECT policy references app.workspace_id".to_string()
+        ) && found.iter().all(|l| l.starts_with("sec04_neg.half:")),
         "got {found:#?}"
     );
 }
@@ -462,6 +492,8 @@ async fn control_momo_app_dml_on_an_unforced_tenant_table_is_red() {
     );
 }
 
+const MD5_SELECT_1: &str = "b1698e52a0f16203489454196a0c6307"; // md5('SELECT 1'), the prosrc of the scratch definers
+
 const GOOD_POLICY_LINE: &str = "CREATE POLICY ws ON sec04_neg.good";
 
 #[tokio::test]
@@ -546,7 +578,10 @@ async fn control_policy_that_only_quotes_the_guc_name_is_red() {
     })
     .await;
     assert!(
-        !found.is_empty() && found.iter().all(|l| l.starts_with("sec04_neg.good:")),
+        found.contains(
+            &"sec04_neg.good: permissive policy ws (ALL) does not tie its rows to app.workspace_id"
+                .to_string()
+        ) && found.iter().all(|l| l.starts_with("sec04_neg.good:")),
         "got {found:#?}"
     );
 }
@@ -734,21 +769,34 @@ async fn control_pg_catalog_only_exception_is_exact() {
            SET search_path = pg_catalog, public AS 'SELECT 1';
          CREATE FUNCTION sec04_neg.unlisted_catalog_only() RETURNS int LANGUAGE sql SECURITY DEFINER
            SET search_path = pg_catalog AS 'SELECT 1';
+         CREATE FUNCTION sec04_neg.edited_body() RETURNS int LANGUAGE sql SECURITY DEFINER
+           SET search_path = pg_catalog AS 'SELECT 2';
          REVOKE ALL ON FUNCTION sec04_neg.ok_listed(), sec04_neg.listed_but_widened(),
-           sec04_neg.unlisted_catalog_only() FROM PUBLIC;";
+           sec04_neg.unlisted_catalog_only(), sec04_neg.edited_body() FROM PUBLIC;";
     let found = in_scratch(&pool, ddl, |p, s| async move {
         definer_search_path_violations_against(
             &p,
             Some(s),
             &[
-                ("sec04_neg.ok_listed()", "reviewed"),
-                ("sec04_neg.listed_but_widened()", "reviewed"),
+                ("sec04_neg.ok_listed()", MD5_SELECT_1, "reviewed"),
+                ("sec04_neg.listed_but_widened()", MD5_SELECT_1, "reviewed"),
+                ("sec04_neg.edited_body()", MD5_SELECT_1, "reviewed"),
             ],
         )
         .await
     })
     .await;
-    assert_eq!(found.len(), 2, "widened and unlisted only: {found:#?}");
+    assert_eq!(
+        found.len(),
+        3,
+        "widened, unlisted and edited-body only, never ok_listed: {found:#?}"
+    );
+    assert!(
+        found
+            .iter()
+            .any(|l| l.starts_with("sec04_neg.edited_body():")),
+        "{found:#?}"
+    );
     assert!(
         found
             .iter()
@@ -761,4 +809,217 @@ async fn control_pg_catalog_only_exception_is_exact() {
             .any(|l| l.starts_with("sec04_neg.unlisted_catalog_only():")),
         "{found:#?}"
     );
+}
+
+const WS_EQ: &str = "workspace_id = current_setting('app.workspace_id', true)::uuid";
+
+/// One RLS-enabled tenant table `t` whose only SELECT policy is `using`.
+fn table_with_select_policy(using: &str) -> String {
+    format!(
+        "CREATE TABLE sec04_neg.t (id int PRIMARY KEY, other uuid, workspace_id uuid NOT NULL);
+         ALTER TABLE sec04_neg.t ENABLE ROW LEVEL SECURITY;
+         ALTER TABLE sec04_neg.t FORCE ROW LEVEL SECURITY;
+         CREATE POLICY p ON sec04_neg.t FOR SELECT USING ({using});"
+    )
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a migrated pgvector/pg18 DB"]
+async fn control_policy_shapes_that_look_tied_but_are_open_are_red() {
+    let _guard = lock().await;
+    let pool = pool().await;
+    let open = [
+        format!("{WS_EQ} OR true"),
+        "current_setting('app.workspace_id', true) IS NOT NULL".to_string(),
+        "other = current_setting('app.workspace_id', true)::uuid".to_string(),
+        format!("{WS_EQ} OR other IS NOT NULL"),
+        format!("({WS_EQ}) OR (id > 0)"),
+    ];
+    for using in &open {
+        let found = in_scratch(&pool, &table_with_select_policy(using), |p, s| async move {
+            tenant_rls_violations(&p, Some(s), APP_ROLE).await
+        })
+        .await;
+        assert!(
+            found.iter().any(|l| l == "sec04_neg.t: permissive policy p (SELECT) does not tie its rows to app.workspace_id"),
+            "{using} must be red: {found:#?}"
+        );
+    }
+    // and the shapes the real schema uses stay green
+    let tied = [
+        WS_EQ.to_string(),
+        "workspace_id = nullif(current_setting('app.workspace_id', true), '')::uuid".to_string(),
+        format!("{WS_EQ} AND id > 0"),
+        format!("{WS_EQ} AND (other IS NULL OR id > 0)"),
+        format!("({WS_EQ} AND id > 0) OR ({WS_EQ} AND other IS NULL)"),
+    ];
+    for using in &tied {
+        let found = in_scratch(&pool, &table_with_select_policy(using), |p, s| async move {
+            tenant_rls_violations(&p, Some(s), APP_ROLE).await
+        })
+        .await;
+        assert!(found.is_empty(), "{using} must be green: {found:#?}");
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a migrated pgvector/pg18 DB"]
+async fn control_allowlisted_policy_is_exempt_only_while_its_text_is_unchanged() {
+    let _guard = lock().await;
+    let pool = pool().await;
+    let ddl = table_with_select_policy("true");
+    let found = in_scratch(&pool, &ddl, |p, s| async move {
+        let fp = policy_fingerprint(&p, "sec04_neg.t", "p").await;
+        let key = "sec04_neg.t.p";
+        let mut all = tenant_rls_violations_against(
+            &p,
+            Some(s),
+            APP_ROLE,
+            &[(key, &fp, "reviewed open policy")],
+        )
+        .await;
+        // pinned and unchanged: only the table-level SELECT rule speaks
+        all.retain(|l| !l.contains("no permissive SELECT policy"));
+        sqlx::raw_sql("ALTER POLICY p ON sec04_neg.t USING (id >= 0)")
+            .execute(&p)
+            .await
+            .expect("alter policy");
+        all.push("---".to_string());
+        all.extend(
+            tenant_rls_violations_against(
+                &p,
+                Some(s),
+                APP_ROLE,
+                &[(key, &fp, "reviewed open policy")],
+            )
+            .await,
+        );
+        all
+    })
+    .await;
+    let (before, after) = found.split_at(found.iter().position(|l| l == "---").unwrap());
+    assert!(
+        before.is_empty(),
+        "pinned policy must be exempt: {before:#?}"
+    );
+    assert!(
+        after
+            .iter()
+            .any(|l| l.starts_with("sec04_neg.t: allowlisted policy p (SELECT) changed")),
+        "an edited allowlisted policy must be red: {after:#?}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a migrated pgvector/pg18 DB"]
+async fn control_non_tenant_policy_pin_catches_an_edited_policy_and_disabled_rls() {
+    let _guard = lock().await;
+    let pool = pool().await;
+    let ddl = "CREATE TABLE sec04_neg.cfg (k text PRIMARY KEY);
+         ALTER TABLE sec04_neg.cfg ENABLE ROW LEVEL SECURITY;
+         ALTER TABLE sec04_neg.cfg FORCE ROW LEVEL SECURITY;
+         CREATE POLICY op ON sec04_neg.cfg USING (current_setting('app.x', true) = 'on');";
+    let found = in_scratch(&pool, ddl, |p, _s| async move {
+        let fp = table_policy_fingerprint(&p, "sec04_neg.cfg").await;
+        let pins = [("sec04_neg.cfg", fp.as_str())];
+        let mut all = non_tenant_policy_violations_against(&p, &pins).await;
+        all.push("---1".to_string());
+        sqlx::raw_sql("ALTER POLICY op ON sec04_neg.cfg USING (true)").execute(&p).await.expect("alter");
+        all.extend(non_tenant_policy_violations_against(&p, &pins).await);
+        all.push("---2".to_string());
+        sqlx::raw_sql("ALTER POLICY op ON sec04_neg.cfg USING (current_setting('app.x', true) = 'on'); ALTER TABLE sec04_neg.cfg NO FORCE ROW LEVEL SECURITY")
+            .execute(&p).await.expect("alter");
+        all.extend(non_tenant_policy_violations_against(&p, &pins).await);
+        all
+    })
+    .await;
+    let i1 = found.iter().position(|l| l == "---1").unwrap();
+    let i2 = found.iter().position(|l| l == "---2").unwrap();
+    assert!(found[..i1].is_empty(), "unchanged pin is green: {found:#?}");
+    assert!(
+        found[i1 + 1..i2]
+            .iter()
+            .any(|l| l.starts_with("sec04_neg.cfg: policies changed")),
+        "{found:#?}"
+    );
+    assert!(
+        found[i2 + 1..]
+            .iter()
+            .any(|l| l == "sec04_neg.cfg: RLS is not enabled and FORCEd"),
+        "{found:#?}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a migrated pgvector/pg18 DB"]
+async fn control_definer_granted_only_to_momo_app_is_red() {
+    let _guard = lock().await;
+    let pool = pool().await;
+    let ddl = "CREATE FUNCTION sec04_neg.grant_app() RETURNS int LANGUAGE sql SECURITY DEFINER
+           SET search_path = pg_catalog, pg_temp AS 'SELECT 1';
+         REVOKE ALL ON FUNCTION sec04_neg.grant_app() FROM PUBLIC;
+         GRANT EXECUTE ON FUNCTION sec04_neg.grant_app() TO momo_app;
+         CREATE FUNCTION sec04_neg.nobody() RETURNS int LANGUAGE sql SECURITY DEFINER
+           SET search_path = pg_catalog, pg_temp AS 'SELECT 1';
+         REVOKE ALL ON FUNCTION sec04_neg.nobody() FROM PUBLIC;";
+    let found = in_scratch(&pool, ddl, |p, s| async move {
+        app_definer_violations_against(&p, APP_ROLE, Some(s), &[]).await
+    })
+    .await;
+    assert!(
+        names_only(&found, "sec04_neg.grant_app():"),
+        "got {found:#?}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a migrated pgvector/pg18 DB"]
+async fn control_bypassrls_or_ownership_inherited_through_membership_is_red() {
+    let _guard = lock().await;
+    let pool = pool().await;
+    let ddl = format!(
+        "DROP ROLE IF EXISTS sec04_neg_member; DROP ROLE IF EXISTS sec04_neg_grp; DROP ROLE IF EXISTS sec04_neg_own;
+         CREATE ROLE sec04_neg_grp NOLOGIN BYPASSRLS;
+         CREATE ROLE sec04_neg_own NOLOGIN;
+         CREATE ROLE sec04_neg_member NOLOGIN;
+         GRANT sec04_neg_grp, sec04_neg_own TO sec04_neg_member;
+         {GOOD_TABLE}
+         ALTER TABLE sec04_neg.good OWNER TO sec04_neg_own;"
+    );
+    let found = in_scratch(&pool, &ddl, |p, s| async move {
+        role_boundary_violations(&p, "sec04_neg_member", Some(s)).await
+    })
+    .await;
+    sqlx::raw_sql(
+        "DROP ROLE IF EXISTS sec04_neg_member; DROP ROLE IF EXISTS sec04_neg_grp; DROP ROLE IF EXISTS sec04_neg_own;",
+    )
+    .execute(&pool)
+    .await
+    .expect("drop scratch roles");
+    assert!(
+        found
+            .iter()
+            .any(|l| l == "sec04_neg_member (via role sec04_neg_grp): has BYPASSRLS"),
+        "{found:#?}"
+    );
+    assert!(
+        found
+            .iter()
+            .any(|l| l.starts_with("sec04_neg.good: sec04_neg_member owns a tenant table")),
+        "{found:#?}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a migrated pgvector/pg18 DB"]
+async fn control_column_level_write_on_an_unprotected_table_is_red() {
+    let _guard = lock().await;
+    let pool = pool().await;
+    let ddl = "CREATE TABLE sec04_neg.cols (k text PRIMARY KEY, v text);
+         GRANT UPDATE (v) ON sec04_neg.cols TO momo_app;";
+    let found = in_scratch(&pool, ddl, |p, s| async move {
+        unprotected_write_violations(&p, APP_ROLE, Some(s)).await
+    })
+    .await;
+    assert!(names_only(&found, "sec04_neg.cols:"), "got {found:#?}");
 }

@@ -100,27 +100,108 @@ pub const KNOWN_UNPROTECTED_NON_TENANT: &[&str] = &[
     "public.work_cloud_host_transition",
 ];
 
+/// SQL that renders an expression the way the fingerprints below were taken:
+/// `pg_get_expr` with whitespace collapsed, `NULL` for an absent expression.
+const NORM_Q: &str =
+    "coalesce(regexp_replace(pg_get_expr(p.polqual, p.polrelid), '\\s+', ' ', 'g'), 'NULL')";
+const NORM_WC: &str =
+    "coalesce(regexp_replace(pg_get_expr(p.polwithcheck, p.polrelid), '\\s+', ' ', 'g'), 'NULL')";
+
 /// Permissive policies on a `workspace_id` table that apply to `momo_app` yet
-/// are deliberately not keyed on `app.workspace_id`: instance-level GitHub
-/// ingress / link flows that run before a workspace is known, each gated by
-/// its own GUC. Entry = `schema.table.policy`.
-pub const GUC_GATED_POLICIES: &[(&str, &str)] = &[
+/// are deliberately not a plain `workspace_id = app.workspace_id` conjunct.
+/// Entry = `schema.table.policy`, `md5(USING || '||' || WITH CHECK)` of the
+/// whitespace-collapsed `pg_get_expr` text, reason. The fingerprint pins the
+/// *content*: editing an allowlisted policy (say to `true`) turns the test red
+/// and forces a re-review, instead of the name alone keeping it exempt.
+/// Note the GUC gates (`app.github_*`) are conventions the server sets, not a
+/// boundary against a session that can already run arbitrary SQL as `momo_app`.
+pub const GUC_GATED_POLICIES: &[(&str, &str, &str)] = &[
     (
         "public.github_app_installation.github_app_installation_insert",
+        "e0351cfd1fb472c888045d8543104899",
         "webhook ingress inserts the installation before it is bound to a workspace; gated on app.github_ingress (140/142)",
     ),
     (
+        "public.github_app_installation.github_app_installation_select",
+        "e12486138bcee348d8d080e29991e98f",
+        "ingress/admin/link flows read installations across workspaces; a workspace session sees only its own rows (140/142)",
+    ),
+    (
         "public.github_app_installation.github_app_installation_update",
-        "ingress/admin updates; gated on app.github_ingress or app.github_app_admin (140/142)",
+        "9adfe81fe0013f64893c5c91f8492562",
+        "ingress/admin updates and the link flow binding a workspace-less installation; gated on app.github_* (140/142)",
     ),
     (
         "public.github_link_claim.github_link_claim_link_select",
+        "6362d9fcd578a356a96c3c62335779bc",
         "install-link callback reads a purpose='install' claim before the workspace is known; gated on app.github_link (140/142)",
     ),
     (
         "public.github_link_claim.github_link_claim_link_update",
+        "d9ee52def7cc2880407973821f0b93aa",
         "install-link callback consumes the claim; gated on app.github_link and purpose='install' (140/142)",
     ),
+    (
+        "public.model_pricing.ws_isolation",
+        "b648fb2ec17d9ab10d87451e152e85a1",
+        "workspace_id IS NULL rows are the shared default price list every workspace reads; writes stay workspace-bound via WITH CHECK",
+    ),
+];
+
+/// Non-tenant tables whose RLS is deliberately keyed on something other than
+/// `app.workspace_id`. Entry = table, `md5` over its policies (name, cmd,
+/// permissive, USING, WITH CHECK, sorted by name, whitespace collapsed). Each
+/// must also have RLS enabled and FORCEd; a changed policy set (say
+/// `github_app_operator` turned into `USING (true)`) turns the test red.
+pub const NON_TENANT_POLICY_PINS: &[(&str, &str)] = &[
+    ("public.github_app", "aa87d647c41272f63e4a19aa8a38c85a"),
+    (
+        "public.github_app_public",
+        "d7e701eaa5eaeee119124aff7c59d686",
+    ),
+    (
+        "public.github_installation_repository",
+        "fb58f838a407a3451aa5b2eae319a86b",
+    ),
+    (
+        "public.provider_default_ai",
+        "6d483744024adf956f7ea81afbdfcfd7",
+    ),
+    (
+        "public.provider_key_budget",
+        "02e9705224a65294bc5936d1eb3488d4",
+    ),
+    ("public.provider_link", "6895408ae264bb143f5d19ae85dd5245"),
+    (
+        "public.provider_link_chain",
+        "0d5f42ee6035573349c5eed3304b6283",
+    ),
+    ("public.quota_snapshot", "7640e9c7f4aecef32702c4d30ec3827f"),
+    ("public.workspace", "d964332dcea90820b1cc0a9594fe8ab1"),
+];
+
+/// Every SECURITY DEFINER function `momo_app` can execute, exact signature.
+/// A definer runs as its owner, who bypasses RLS, so granting `momo_app` a new
+/// one is a tenant-boundary decision. Baseline 2026-10-24 (includes the PUBLIC
+/// ones above).
+pub const APP_EXECUTABLE_DEFINERS: &[&str] = &[
+    "momo_join_private.device_link_workspace_id(text)",
+    "momo_join_private.invite_workspace_id(text)",
+    "momo_join_private.owner_claim_workspace_id(text)",
+    "momo_schedule_private.due_scheduled_messages(integer)",
+    "momo_schedule_private.expired_scheduled_messages(integer)",
+    "public.mem_accept_proposal(uuid)",
+    "public.mem_digest_evidence_ok(uuid)",
+    "public.mem_edit_item(uuid, text, text)",
+    "public.mem_forget_item(uuid)",
+    "public.mem_item_evidence_ok(uuid)",
+    "public.mem_proposal_evidence_ok(uuid)",
+    "public.mem_reject_proposal(uuid)",
+    "public.mem_reset_workspace(bigint)",
+    "public.mem_revert_consolidation(uuid)",
+    "public.mem_search_items(text, integer, uuid, text)",
+    "public.mem_summary_provider()",
+    "public.mem_topic_summary_ok(uuid)",
 ];
 
 /// `current_setting('app.workspace_id'` as `pg_get_expr` renders it. A bare
@@ -154,18 +235,146 @@ pub async fn tenant_table_count(pool: &PgPool, schemas: Option<&[&str]>) -> i64 
         .expect("count tenant tables")
 }
 
+/// `(table, policy, cmd, USING, WITH CHECK, fingerprint)` of one policy.
+type PolicyRow = (
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    String,
+);
+
+/// `md5` of one policy's `USING || '||' || WITH CHECK`, the text
+/// [`GUC_GATED_POLICIES`] fingerprints are taken from.
+pub async fn policy_fingerprint(pool: &PgPool, qualified_table: &str, polname: &str) -> String {
+    let sql = format!(
+        "SELECT md5({NORM_Q} || '||' || {NORM_WC}) FROM pg_policy p \
+          WHERE p.polrelid = $1::regclass AND p.polname = $2"
+    );
+    sqlx::query_scalar(&sql)
+        .bind(qualified_table)
+        .bind(polname)
+        .fetch_one(pool)
+        .await
+        .expect("policy fingerprint")
+}
+
+/// Strip parentheses that wrap the whole expression.
+fn strip_outer_parens(mut e: &str) -> &str {
+    loop {
+        e = e.trim();
+        if !(e.starts_with('(') && e.ends_with(')')) {
+            return e;
+        }
+        let mut depth = 0i32;
+        let mut quoted = false;
+        for (i, ch) in e.char_indices() {
+            match ch {
+                '\'' => quoted = !quoted,
+                '(' if !quoted => depth += 1,
+                ')' if !quoted => {
+                    depth -= 1;
+                    if depth == 0 && i != e.len() - 1 {
+                        return e; // the first '(' closes before the end
+                    }
+                }
+                _ => {}
+            }
+        }
+        e = &e[1..e.len() - 1];
+    }
+}
+
+/// Split at depth 0 (outside parentheses and string literals) on `sep`.
+fn split_top<'a>(e: &'a str, sep: &str) -> Vec<&'a str> {
+    let mut parts = Vec::new();
+    let (mut depth, mut quoted, mut start) = (0i32, false, 0usize);
+    let mut i = 0;
+    while i < e.len() {
+        let ch = e[i..].chars().next().expect("char");
+        match ch {
+            '\'' => quoted = !quoted,
+            '(' if !quoted => depth += 1,
+            ')' if !quoted => depth -= 1,
+            _ if !quoted && depth == 0 && e[i..].starts_with(sep) => {
+                parts.push(&e[start..i]);
+                i += sep.len();
+                start = i;
+                continue;
+            }
+            _ => {}
+        }
+        i += ch.len_utf8();
+    }
+    parts.push(&e[start..]);
+    parts
+}
+
+/// `workspace_id = current_setting('app.workspace_id')::uuid` in either shape
+/// Postgres renders (with or without `NULLIF(.., '')`), column optionally
+/// qualified.
+fn is_workspace_equality(term: &str) -> bool {
+    let t = strip_outer_parens(term);
+    let Some((lhs, rhs)) = t.split_once(" = ") else {
+        return false;
+    };
+    let lhs = strip_outer_parens(lhs);
+    let column_ok = lhs == "workspace_id"
+        || lhs.strip_suffix(".workspace_id").is_some_and(|q| {
+            !q.is_empty()
+                && q.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
+        });
+    let rhs = strip_outer_parens(rhs.trim());
+    column_ok
+        && (rhs == "(current_setting('app.workspace_id'::text, true))::uuid"
+            || rhs == "(NULLIF(current_setting('app.workspace_id'::text, true), ''::text))::uuid")
+}
+
+/// Every OR branch of `expr` must contain, as a top-level AND conjunct, the
+/// workspace equality. `... OR true`, `current_setting(..) IS NOT NULL`, a
+/// comparison on another column, or a bare GUC mention all fail.
+fn ties_rows_to_workspace(expr: &str) -> bool {
+    // `pg_get_expr` breaks long CASE expressions over lines.
+    let expr = expr.split_whitespace().collect::<Vec<_>>().join(" ");
+    split_top(strip_outer_parens(&expr), " OR ")
+        .into_iter()
+        .all(|branch| {
+            split_top(strip_outer_parens(branch), " AND ")
+                .into_iter()
+                .any(is_workspace_equality)
+        })
+}
+
 /// (1a) Every table with a `workspace_id` column: RLS enabled, FORCEd, at
-/// least one permissive policy that applies to SELECT and names
-/// `current_setting('app.workspace_id'` in USING, **and** every permissive
-/// policy that applies to `role` ties its rows to that GUC for each command it
-/// covers (USING for SELECT/UPDATE/DELETE, WITH CHECK for INSERT/UPDATE).
-/// Permissive policies are OR-ed, so one open policy beside a good one opens
-/// the table. Policies in [`GUC_GATED_POLICIES`] are the reviewed exceptions;
-/// restrictive policies only narrow access and are not judged.
+/// least one permissive SELECT policy keyed on `app.workspace_id`, **and**
+/// every permissive policy that applies to `role` ties its rows to
+/// `workspace_id = app.workspace_id` for each command it covers (USING for
+/// SELECT/UPDATE/DELETE, WITH CHECK for INSERT/UPDATE). Permissive policies
+/// are OR-ed, so one open policy beside a good one opens the table; the shape
+/// check ([`ties_rows_to_workspace`]) also rejects `.. OR true`. Policies in
+/// [`GUC_GATED_POLICIES`] are exempt only while their text matches the pinned
+/// fingerprint. Restrictive policies only narrow access and are not judged.
 pub async fn tenant_rls_violations(
     pool: &PgPool,
     schemas: Option<&[&str]>,
     role: &str,
+) -> Vec<String> {
+    let allow: &[(&str, &str, &str)] = if schemas.is_none() {
+        GUC_GATED_POLICIES
+    } else {
+        &[]
+    };
+    tenant_rls_violations_against(pool, schemas, role, allow).await
+}
+
+/// [`tenant_rls_violations`] with the exemption list passed in (controls).
+pub async fn tenant_rls_violations_against(
+    pool: &PgPool,
+    schemas: Option<&[&str]>,
+    role: &str,
+    allow: &[(&str, &str, &str)],
 ) -> Vec<String> {
     let sql = format!(
         "SELECT n.nspname || '.' || c.relname || ': ' || CASE \
@@ -187,59 +396,118 @@ pub async fn tenant_rls_violations(
         .await
         .expect("tenant rls query");
 
-    let allow: Vec<String> = if schemas.is_none() {
-        GUC_GATED_POLICIES
-            .iter()
-            .map(|(n, _)| (*n).to_string())
-            .collect()
-    } else {
-        Vec::new()
-    };
-    let qual = "coalesce(pg_get_expr(p.polqual, p.polrelid), '')";
-    let check =
-        "coalesce(pg_get_expr(p.polwithcheck, p.polrelid), pg_get_expr(p.polqual, p.polrelid), '')";
-    let with_check = "coalesce(pg_get_expr(p.polwithcheck, p.polrelid), '')";
+    // Permissive policies that apply to `role` (PUBLIC or via membership).
     let sql = format!(
-        "SELECT n.nspname || '.' || c.relname || ': permissive policy ' || p.polname || ' (' || \
-                CASE p.polcmd WHEN '*' THEN 'ALL' WHEN 'r' THEN 'SELECT' WHEN 'a' THEN 'INSERT' \
-                              WHEN 'w' THEN 'UPDATE' ELSE 'DELETE' END || \
-                ') does not tie its rows to app.workspace_id' \
+        "SELECT n.nspname || '.' || c.relname, p.polname, p.polcmd::text, \
+                pg_get_expr(p.polqual, p.polrelid), pg_get_expr(p.polwithcheck, p.polrelid), \
+                md5({NORM_Q} || '||' || {NORM_WC}) \
            FROM pg_policy p JOIN pg_class c ON c.oid = p.polrelid \
                 JOIN pg_namespace n ON n.oid = c.relnamespace \
           WHERE c.relkind IN ('r','p') AND {SCOPE} AND {HAS_WORKSPACE_ID} AND p.polpermissive \
             AND (p.polroles = '{{0}}'::oid[] OR EXISTS ( \
                    SELECT 1 FROM unnest(p.polroles) AS o CROSS JOIN pg_roles m \
-                    WHERE m.rolname = $3 AND o <> 0 AND pg_has_role(m.oid, o, 'USAGE'))) \
-            AND (n.nspname || '.' || c.relname || '.' || p.polname) <> ALL($2::text[]) \
-            AND ((p.polcmd IN ('*','r','w','d') AND {qual} NOT LIKE '%{WS_GUC}%') \
-              OR (p.polcmd = 'a' AND {with_check} NOT LIKE '%{WS_GUC}%') \
-              OR (p.polcmd IN ('*','w') AND {check} NOT LIKE '%{WS_GUC}%')) \
-          ORDER BY 1"
+                    WHERE m.rolname = $2 AND o <> 0 AND pg_has_role(m.oid, o, 'USAGE'))) \
+          ORDER BY 1, 2"
     );
-    out.extend(
-        sqlx::query_scalar::<_, String>(&sql)
-            .bind(owned(schemas))
-            .bind(&allow)
-            .bind(role)
-            .fetch_all(pool)
-            .await
-            .expect("tenant policy query"),
-    );
-    if schemas.is_none() {
-        let stale: Vec<String> = sqlx::query_scalar(
-            "SELECT a.name || ': GUC_GATED_POLICIES entry is stale (policy gone or not permissive)' \
-               FROM unnest($1::text[]) AS a(name) \
-              WHERE NOT EXISTS (SELECT 1 FROM pg_policy p JOIN pg_class c ON c.oid = p.polrelid \
-                                 JOIN pg_namespace n ON n.oid = c.relnamespace \
-                                WHERE p.polpermissive \
-                                  AND (n.nspname || '.' || c.relname || '.' || p.polname) = a.name) \
-              ORDER BY 1",
-        )
-        .bind(&allow)
+    let rows: Vec<PolicyRow> = sqlx::query_as(&sql)
+        .bind(owned(schemas))
+        .bind(role)
         .fetch_all(pool)
         .await
-        .expect("stale policy allowlist query");
-        out.extend(stale);
+        .expect("tenant policy query");
+    let mut seen: Vec<String> = Vec::new();
+    for (table, polname, cmd, qual, wc, fp) in rows {
+        let key = format!("{table}.{polname}");
+        let cmd_name = match cmd.as_str() {
+            "*" => "ALL",
+            "r" => "SELECT",
+            "a" => "INSERT",
+            "w" => "UPDATE",
+            _ => "DELETE",
+        };
+        if let Some((_, pinned, _)) = allow.iter().find(|(k, _, _)| *k == key) {
+            seen.push(key.clone());
+            if fp != *pinned {
+                out.push(format!(
+                    "{table}: allowlisted policy {polname} ({cmd_name}) changed (fingerprint {fp}, pinned {pinned}): re-review GUC_GATED_POLICIES"
+                ));
+            }
+            continue;
+        }
+        let qual = qual.unwrap_or_default();
+        let check = wc.clone().unwrap_or_else(|| qual.clone());
+        let bad_using =
+            matches!(cmd.as_str(), "*" | "r" | "w" | "d") && !ties_rows_to_workspace(&qual);
+        let bad_check = matches!(cmd.as_str(), "a" | "*" | "w") && !ties_rows_to_workspace(&check);
+        if bad_using || bad_check {
+            out.push(format!(
+                "{table}: permissive policy {polname} ({cmd_name}) does not tie its rows to app.workspace_id"
+            ));
+        }
+    }
+    if schemas.is_none() {
+        for (key, _, _) in allow {
+            if !seen.iter().any(|k| k == key) {
+                out.push(format!(
+                    "{key}: GUC_GATED_POLICIES entry is stale (policy gone, not permissive, or no longer applies to {role})"
+                ));
+            }
+        }
+    }
+    out
+}
+
+/// `md5` over a table's policies, the same text the fingerprints in
+/// [`NON_TENANT_POLICY_PINS`] were taken from.
+pub async fn table_policy_fingerprint(pool: &PgPool, qualified: &str) -> String {
+    let sql = format!(
+        "SELECT coalesce(md5(string_agg(p.polname || ':' || p.polcmd::text || ':' || p.polpermissive::text \
+                || ':' || {NORM_Q} || '||' || {NORM_WC}, ';;' ORDER BY p.polname)), 'none') \
+           FROM pg_policy p WHERE p.polrelid = $1::regclass"
+    );
+    sqlx::query_scalar(&sql)
+        .bind(qualified)
+        .fetch_one(pool)
+        .await
+        .expect("table policy fingerprint")
+}
+
+/// (1c) Non-tenant tables kept off `app.workspace_id` on purpose: RLS enabled
+/// and FORCEd, policies unchanged since review.
+pub async fn non_tenant_policy_violations(pool: &PgPool) -> Vec<String> {
+    non_tenant_policy_violations_against(pool, NON_TENANT_POLICY_PINS).await
+}
+
+/// [`non_tenant_policy_violations`] with the pin list passed in (controls).
+pub async fn non_tenant_policy_violations_against(
+    pool: &PgPool,
+    pins: &[(&str, &str)],
+) -> Vec<String> {
+    let mut out = Vec::new();
+    for (table, pinned) in pins {
+        let state: Option<(bool, bool)> = sqlx::query_as(
+            "SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = to_regclass($1)",
+        )
+        .bind(*table)
+        .fetch_optional(pool)
+        .await
+        .expect("non-tenant state");
+        let Some((enabled, forced)) = state else {
+            out.push(format!(
+                "{table}: NON_TENANT_POLICY_PINS entry is stale (table gone)"
+            ));
+            continue;
+        };
+        if !enabled || !forced {
+            out.push(format!("{table}: RLS is not enabled and FORCEd"));
+            continue;
+        }
+        let fp = table_policy_fingerprint(pool, table).await;
+        if fp != *pinned {
+            out.push(format!(
+                "{table}: policies changed (fingerprint {fp}, pinned {pinned}): re-review NON_TENANT_POLICY_PINS"
+            ));
+        }
     }
     out
 }
@@ -301,29 +569,36 @@ fn definer_from() -> String {
 
 /// SECURITY DEFINER functions whose `search_path` is exactly `pg_catalog`
 /// (no `pg_temp`). Baseline 2026-10-24: the five private lookup functions of
-/// migrations 113/115-style join and schedule paths. Their bodies qualify every
-/// relation (`public.x`), so a session's temp schema cannot shadow anything;
-/// follow-up is appending `pg_temp` so this list can go. Entry = exact
-/// signature, and the config must still be exactly `pg_catalog`.
-pub const PG_CATALOG_ONLY_DEFINERS: &[(&str, &str)] = &[
+/// the join and schedule paths. Their bodies qualify every relation
+/// (`public.x`), so a session's temp schema cannot shadow anything. Entry =
+/// exact signature, `md5(prosrc)`, reason: a body change breaks the reason, so
+/// it must be re-reviewed (a plpgsql edit that reads an unqualified table
+/// would otherwise let a temp table stand in). Follow-up: append `pg_temp` so
+/// this list can go.
+pub const PG_CATALOG_ONLY_DEFINERS: &[(&str, &str, &str)] = &[
     (
         "momo_join_private.device_link_workspace_id(text)",
+        "a9b03cbe6c040b499bbe436c80be424d",
         "body only reads schema-qualified public.* relations and public.digest",
     ),
     (
         "momo_join_private.invite_workspace_id(text)",
+        "480be45b58d12f80d4e3e6d04cc1c79a",
         "body only reads schema-qualified public.* relations and public.digest",
     ),
     (
         "momo_join_private.owner_claim_workspace_id(text)",
+        "0238cd772f2f469c34923fb1656b40e8",
         "body only reads schema-qualified public.* relations and public.digest",
     ),
     (
         "momo_schedule_private.due_scheduled_messages(integer)",
+        "30f3cbd320e5ddd324711ad14b89a703",
         "body only reads schema-qualified public.scheduled_message",
     ),
     (
         "momo_schedule_private.expired_scheduled_messages(integer)",
+        "26883dc3ceb3d51694e802b39405af58",
         "body only reads schema-qualified public.scheduled_message",
     ),
 ];
@@ -336,7 +611,7 @@ pub async fn definer_search_path_violations(
     pool: &PgPool,
     schemas: Option<&[&str]>,
 ) -> Vec<String> {
-    let allow: &[(&str, &str)] = if schemas.is_none() {
+    let allow: &[(&str, &str, &str)] = if schemas.is_none() {
         PG_CATALOG_ONLY_DEFINERS
     } else {
         &[]
@@ -348,16 +623,19 @@ pub async fn definer_search_path_violations(
 pub async fn definer_search_path_violations_against(
     pool: &PgPool,
     schemas: Option<&[&str]>,
-    allow: &[(&str, &str)],
+    allow: &[(&str, &str, &str)],
 ) -> Vec<String> {
-    let allow_owned: Vec<String> = allow.iter().map(|(n, _)| (*n).to_string()).collect();
+    let sigs: Vec<String> = allow.iter().map(|(n, _, _)| (*n).to_string()).collect();
+    let hashes: Vec<String> = allow.iter().map(|(_, h, _)| (*h).to_string()).collect();
     let sql = format!(
         "SELECT {FN_SIG} || ': ' || \
                 CASE WHEN sp.cfg IS NULL THEN 'SECURITY DEFINER without a pinned search_path' \
                      ELSE 'search_path must name pg_temp explicitly and last: ' || sp.cfg END \
          {from} \
            AND ((sp.cfg IS NULL) OR (sp.cfg !~ 'pg_temp\\s*$')) \
-           AND NOT (sp.cfg = 'pg_catalog' AND ({FN_SIG}) = ANY($2::text[])) \
+           AND NOT (sp.cfg = 'pg_catalog' AND EXISTS ( \
+                 SELECT 1 FROM unnest($2::text[], $3::text[]) AS a(sig, h) \
+                  WHERE a.sig = ({FN_SIG}) AND a.h = md5(p.prosrc))) \
          ORDER BY 1",
         from = definer_from().replace(
             "WHERE p.prosecdef",
@@ -368,20 +646,22 @@ pub async fn definer_search_path_violations_against(
     );
     let mut out: Vec<String> = sqlx::query_scalar(&sql)
         .bind(owned(schemas))
-        .bind(&allow_owned)
+        .bind(&sigs)
+        .bind(&hashes)
         .fetch_all(pool)
         .await
         .expect("definer search_path query");
     if schemas.is_none() {
         let stale: Vec<String> = sqlx::query_scalar(&format!(
-            "SELECT a.name || ': PG_CATALOG_ONLY_DEFINERS entry is stale (gone, or search_path is no longer exactly pg_catalog)' \
-               FROM unnest($1::text[]) AS a(name) \
+            "SELECT a.sig || ': PG_CATALOG_ONLY_DEFINERS entry is stale (gone, body changed, or search_path is no longer exactly pg_catalog)' \
+               FROM unnest($1::text[], $2::text[]) AS a(sig, h) \
               WHERE NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace \
-                                 WHERE p.prosecdef AND ({FN_SIG}) = a.name \
+                                 WHERE p.prosecdef AND ({FN_SIG}) = a.sig AND md5(p.prosrc) = a.h \
                                    AND 'search_path=pg_catalog' = ANY(p.proconfig)) \
               ORDER BY 1"
         ))
-        .bind(&allow_owned)
+        .bind(&sigs)
+        .bind(&hashes)
         .fetch_all(pool)
         .await
         .expect("stale search_path allowlist query");
@@ -447,7 +727,8 @@ pub async fn public_definer_violations_against(
 
 /// (4) `role` (the API's `momo_app`) holds no SELECT/INSERT/UPDATE/DELETE on a
 /// tenant table whose RLS is off or not FORCEd. Privileges are the effective
-/// ones (`has_table_privilege` includes PUBLIC and inherited grants).
+/// ones (`has_any_column_privilege` includes PUBLIC, inherited and
+/// column-level grants).
 pub async fn unforced_dml_violations(
     pool: &PgPool,
     role: &str,
@@ -466,13 +747,14 @@ pub async fn unforced_dml_violations(
     let sql = format!(
         "SELECT n.nspname || '.' || c.relname || ': ' || $2::text || ' has ' || \
                 array_to_string(ARRAY(SELECT priv FROM unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE']) priv \
-                                      WHERE has_table_privilege($2::text, c.oid, priv)), ',') || \
+                                      WHERE CASE WHEN priv = 'DELETE' THEN has_table_privilege($2::text, c.oid, priv) \
+                                                 ELSE has_any_column_privilege($2::text, c.oid, priv) END), ',') || \
                 ' on a tenant table without enabled+FORCEd RLS' \
            FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
           WHERE c.relkind IN ('r','p') AND {SCOPE} AND {HAS_WORKSPACE_ID} \
             AND (NOT c.relrowsecurity OR NOT c.relforcerowsecurity) \
-            AND (has_table_privilege($2::text, c.oid, 'SELECT') OR has_table_privilege($2::text, c.oid, 'INSERT') \
-              OR has_table_privilege($2::text, c.oid, 'UPDATE') OR has_table_privilege($2::text, c.oid, 'DELETE')) \
+            AND (has_any_column_privilege($2::text, c.oid, 'SELECT') OR has_any_column_privilege($2::text, c.oid, 'INSERT') \
+              OR has_any_column_privilege($2::text, c.oid, 'UPDATE') OR has_table_privilege($2::text, c.oid, 'DELETE')) \
          ORDER BY 1"
     );
     sqlx::query_scalar(&sql)
@@ -497,8 +779,10 @@ async fn assert_role_exists(pool: &PgPool, role: &str) {
 }
 
 /// (4b) The premise of every RLS check: `role` is not a superuser, does not
-/// have BYPASSRLS, owns no tenant table (an owner can DISABLE RLS or drop the
-/// policy), and cannot TRUNCATE one (TRUNCATE ignores RLS, FORCE or not).
+/// have BYPASSRLS, is not a member of a role that is (membership with
+/// `USAGE` means inherited rights), owns no tenant table directly or through a
+/// role it inherits (an owner can DISABLE RLS or drop the policy), and cannot
+/// TRUNCATE one (TRUNCATE ignores RLS, FORCE or not).
 pub async fn role_boundary_violations(
     pool: &PgPool,
     role: &str,
@@ -506,8 +790,10 @@ pub async fn role_boundary_violations(
 ) -> Vec<String> {
     assert_role_exists(pool, role).await;
     let mut out: Vec<String> = sqlx::query_scalar(
-        "SELECT $1::text || ': ' || CASE WHEN rolsuper THEN 'is a superuser' ELSE 'has BYPASSRLS' END \
-           FROM pg_roles WHERE rolname = $1 AND (rolsuper OR rolbypassrls)",
+        "SELECT CASE WHEN r.rolname = $1 THEN $1::text ELSE $1::text || ' (via role ' || r.rolname || ')' END \
+                || ': ' || CASE WHEN r.rolsuper THEN 'is a superuser' ELSE 'has BYPASSRLS' END \
+           FROM pg_roles r WHERE (r.rolsuper OR r.rolbypassrls) AND pg_has_role($1, r.oid, 'USAGE') \
+          ORDER BY 1",
     )
     .bind(role)
     .fetch_all(pool)
@@ -515,12 +801,12 @@ pub async fn role_boundary_violations(
     .expect("role attribute query");
     let sql = format!(
         "SELECT n.nspname || '.' || c.relname || ': ' || $2::text || ' ' || \
-                CASE WHEN c.relowner = (SELECT oid FROM pg_roles WHERE rolname = $2) \
+                CASE WHEN pg_has_role($2::text, c.relowner, 'USAGE') \
                      THEN 'owns a tenant table (can disable RLS)' \
                      ELSE 'can TRUNCATE a tenant table (TRUNCATE ignores RLS)' END \
            FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
           WHERE c.relkind IN ('r','p') AND {SCOPE} AND {HAS_WORKSPACE_ID} \
-            AND (c.relowner = (SELECT oid FROM pg_roles WHERE rolname = $2) \
+            AND (pg_has_role($2::text, c.relowner, 'USAGE') \
                  OR has_table_privilege($2::text, c.oid, 'TRUNCATE')) \
           ORDER BY 1"
     );
@@ -532,6 +818,64 @@ pub async fn role_boundary_violations(
             .await
             .expect("role tenant table query"),
     );
+    out
+}
+
+/// (4e) Every SECURITY DEFINER function `role` can execute (directly, via
+/// PUBLIC or inherited) must be on [`APP_EXECUTABLE_DEFINERS`], exact
+/// signature; a vanished entry is stale (`schemas = None` only).
+pub async fn app_definer_violations(
+    pool: &PgPool,
+    role: &str,
+    schemas: Option<&[&str]>,
+) -> Vec<String> {
+    let allow: &[&str] = if schemas.is_none() {
+        APP_EXECUTABLE_DEFINERS
+    } else {
+        &[]
+    };
+    app_definer_violations_against(pool, role, schemas, allow).await
+}
+
+/// [`app_definer_violations`] with the allowlist passed in (controls).
+pub async fn app_definer_violations_against(
+    pool: &PgPool,
+    role: &str,
+    schemas: Option<&[&str]>,
+    allow: &[&str],
+) -> Vec<String> {
+    assert_role_exists(pool, role).await;
+    let allow_owned: Vec<String> = allow.iter().map(|n| (*n).to_string()).collect();
+    let sql = format!(
+        "SELECT DISTINCT {FN_SIG} || ': SECURITY DEFINER executable by ' || $3::text || ' and not in APP_EXECUTABLE_DEFINERS' \
+         {from} AND has_function_privilege($3::text, p.oid, 'EXECUTE') \
+            AND ({FN_SIG}) <> ALL($2::text[]) \
+         ORDER BY 1",
+        from = definer_from()
+    );
+    let mut out: Vec<String> = sqlx::query_scalar(&sql)
+        .bind(owned(schemas))
+        .bind(&allow_owned)
+        .bind(role)
+        .fetch_all(pool)
+        .await
+        .expect("app definer query");
+    if schemas.is_none() {
+        let stale: Vec<String> = sqlx::query_scalar(&format!(
+            "SELECT a.name || ': APP_EXECUTABLE_DEFINERS entry is stale (gone or no longer executable by ' || $2::text || ')' \
+               FROM unnest($1::text[]) AS a(name) \
+              WHERE NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace \
+                                 WHERE p.prosecdef AND ({FN_SIG}) = a.name \
+                                   AND has_function_privilege($2::text, p.oid, 'EXECUTE')) \
+              ORDER BY 1"
+        ))
+        .bind(&allow_owned)
+        .bind(role)
+        .fetch_all(pool)
+        .await
+        .expect("stale app definer query");
+        out.extend(stale);
+    }
     out
 }
 
@@ -557,8 +901,8 @@ pub async fn exposed_relation_violations(
             AND (c.relkind <> 'v' OR NOT EXISTS ( \
                    SELECT 1 FROM unnest(coalesce(c.reloptions, '{{}}'::text[])) o \
                     WHERE o ~ '^security_invoker=(true|on|1|yes)$')) \
-            AND (has_table_privilege($2::text, c.oid, 'SELECT') OR has_table_privilege($2::text, c.oid, 'INSERT') \
-              OR has_table_privilege($2::text, c.oid, 'UPDATE') OR has_table_privilege($2::text, c.oid, 'DELETE')) \
+            AND (has_any_column_privilege($2::text, c.oid, 'SELECT') OR has_any_column_privilege($2::text, c.oid, 'INSERT') \
+              OR has_any_column_privilege($2::text, c.oid, 'UPDATE') OR has_table_privilege($2::text, c.oid, 'DELETE')) \
           ORDER BY 1"
     );
     sqlx::query_scalar(&sql)
@@ -586,8 +930,8 @@ pub async fn unprotected_write_violations(
     } else {
         Vec::new()
     };
-    let writes = "(has_table_privilege($2::text, c.oid, 'INSERT') \
-                   OR has_table_privilege($2::text, c.oid, 'UPDATE') \
+    let writes = "(has_any_column_privilege($2::text, c.oid, 'INSERT') \
+                   OR has_any_column_privilege($2::text, c.oid, 'UPDATE') \
                    OR has_table_privilege($2::text, c.oid, 'DELETE'))";
     let sql = format!(
         "SELECT n.nspname || '.' || c.relname || ': ' || $2::text || ' can write a table that has no workspace_id and no RLS' \
