@@ -512,7 +512,7 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
 ### F8. 내 앱 실행 장소 투영 — 소유자에게만 (새 읽기 API)
 
 - `GET /v1/workspaces/{ws}/members/me/app-runtimes`(`require_human`)예요. 요청자가 소유한 에이전트 가운데 아래 판별식에 맞는 것만 돌려줘요.
-  - 모양: `[{ agentId, path: "hermes_trial" | "hosted_vendor", apps: [pluginId…], enforced: boolean, blocked: null | "attest" | "members" | "apps" | "connection" | "channel" | "paused" }]`
+  - 모양: `[{ agentId, path: "hermes_trial" | "hosted_vendor", apps: [pluginId…], enforced: boolean, blocked: null | "hosted_off" | "connection" | "attest" | "members" | "apps" | "paused" }]`
 - **공통 술어**: `member.kind = 'agent' AND status = 'active' AND deleted_at IS NULL`(표시를 켜는 PUT과 같아요), `connector_owner_human_id = 요청자`예요.
   - 「활성 grant」는 요청자의 `plugin_grant` ⋈ `workspace_plugin_install`(설치 `enabled AND revoked_at IS NULL`)이에요. `TRIAL_FACTS_SQL`(`connector_trial.rs`)과 같은 조인이에요.
 - **`path` 판별식**:
@@ -521,9 +521,15 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
   - `hosted_vendor` = 공통 술어 AND 호스팅 연결이 있음 AND personal agent 아님 AND 구독 하네스 아님이에요. `enforced: false`이고, `apps` = 요청자 활성 grant예요.
     - 화면은 칩 피커에 E3 문장 「앱 권한은 ○○가 관리해요. oort는 허용 기록만 남겨요」를 그대로 보여요.
   - 그 밖은 v1 응답에 없어요. 표시를 켠 personal agent(내 맥 하네스 — 서버가 메시지로 시작하지 않음)와 구독 하네스가 여기에 들어요. 내 맥 경로(`mac`)는 `PLUGIN_MAC_APP_USE_READY`가 참이 될 때(ADR-0188 §8.9) 더해요.
-- **`blocked` — 「능력」이 아니라 「지금 배달되나」**: 배달 관문(`agent_mentions.rs` `delivery_gate`)과 **같은 순수 함수**로 채워요. `null`이 아니면 F5에서 그 에이전트는 자격이 없고, 칩 피커는 이유를 사람 말로 보여요.
-  - `hermes_trial`: `connector_trial_stop`의 결과예요. `attest`(선언 불완전), `members`(활성 사람 ≠ 1), `apps`(운영자가 켠 앱 중 소유자 grant가 없는 것이 있음 — 배달은 「켠 앱 ⊆ grant」)가 있어요.
-  - `hosted_vendor`: `connection`(활성 연결 없음), `channel`(이 채널 미승인 — 대화마다 달라서 F5가 대화 맥락과 함께 봐요), `paused`(일시정지)예요.
+- **`blocked` — 「능력」이 아니라 「지금 배달되나」**: 배달 관문(`agent_mentions.rs` `delivery_gate`)의 **에이전트 단 단계**를 관문과 같은 순서로 평가하는 순수 함수로 채워요. 첫 막힘 하나만 실어요. `null`이 아니면 F5에서 그 에이전트는 자격이 없고, 칩 피커는 이유를 사람 말로 보여요.
+  - `hermes_trial`: 먼저 `connector_trial_stop`의 결과예요. `attest`(선언 불완전), `members`(활성 사람 ≠ 1), `apps`(운영자가 켠 앱 중 소유자 grant가 없는 것이 있음 — 배달은 「켠 앱 ⊆ grant」)가 있어요. 그다음 `paused`예요.
+  - `hosted_vendor`: `hosted_off` → `connection` → `paused` 순서예요.
+    - `hosted_off`는 인스턴스의 호스팅 배달 스위치(`MOMO_HOSTED_DELIVERY_ENABLED`, 관문의 `HostedDeliveryNotEnabled`)가 꺼진 경우예요. 기본값이 꺼짐(`config.rs` `hosted_delivery_enabled: false`)이라, 이 값이 없으면 기본 설정 서버의 호스팅 에이전트가 전부 `null`(배달됨)로 잘못 나가요.
+    - `connection`은 활성 연결이 없는 경우예요(`HostedConnectionUnavailable`).
+  - `paused`는 관문의 마지막 단계라서 두 경로 모두에 걸려요.
+  - **대화마다 다른 사실은 싣지 않아요.** F8은 `channelId`를 받지 않아요.
+    - 대화 멤버 여부(`NotChannelMember`)는 F5 자격 3이 로스터로 판정해요.
+    - 호스팅 연결의 채널 승인(`HostedChannelUnapproved`)은 피커가 막지 않아요. 보낸 뒤 기존 관문이 그 자리에서 「이 채널에서 쓰기」 카드(ADR-0162 증보 5 G1)로 처리해요.
   - 문장은 소유자(팀원)에게 맞는 말로 써요. 운영자용 문장(「Hermes의 앱 연결을 지우거나…」)을 그대로 보이지 않아요.
 - **가시성**: 요청자 본인 소유 에이전트만 실어요. 남의 에이전트와 남의 grant는 이 응답에 절대 없어요. 로스터·에이전트 DTO에는 싣지 않아요. 실으면 모든 멤버가 「누구의 에이전트에 어떤 개인 앱이 붙었나」를 보게 되기 때문이에요.
 - **권한 층**: 이 경로는 에이전트 경로 허용목록(`momo-auth/src/agent_scope.rs`)에 넣지 않아서 에이전트 bearer는 403이에요. `require_human`이 두 번째 층이에요.
@@ -565,7 +571,7 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
    - 남의 에이전트와 남의 grant가 없어요. 다른 멤버 소유의 `owner_only` 하네스 에이전트와 커넥터 에이전트 픽스처를 넣어 재요. 사보타주: 소유자 술어를 지우면 빨강이에요(정지된 시험은 목록에 남고 `blocked`를 가지므로 이 사보타주가 의미를 가져요).
    - `hermes_trial.apps` ⊆ 요청자 활성 grant예요.
    - 표시를 켠 personal agent는 응답에 없어요.
-   - 정지된 시험·연결 없는 호스팅 에이전트는 `blocked`가 `null`이 아니에요.
+   - `blocked`가 `null`이 아닌 경우를 각각 재요: 정지된 시험(`attest`·`members`·`apps`), 연결 없는 호스팅 에이전트(`connection`), 호스팅 배달 스위치가 꺼진 서버(기본 설정)의 호스팅 에이전트(`hosted_off`), 두 경로의 일시정지(`paused`). 사보타주: `hosted_off` 단계를 빼면 기본 설정 픽스처에서 빨개요.
    - 에이전트 bearer는 403이에요(경로 허용목록·`require_human` 두 층 각각).
 8. 해석(UI 시험):
    - 실행 장소가 있지만 대화 멤버가 아니면 메시지 POST가 0이고 「DM에서 쓰기」가 서요.
