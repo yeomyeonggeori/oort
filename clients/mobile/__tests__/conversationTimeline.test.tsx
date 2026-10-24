@@ -358,9 +358,10 @@ describe('받기 — 실시간과 리플레이', () => {
         call += 1;
         if (call === 1) return jsonResponse(200, {messages: [message(1)]});
         // The backfill page, ascending.
-        return call === 2
-          ? jsonResponse(200, {messages: [message(2), message(3)]})
-          : jsonResponse(200, {messages: []});
+        if (call === 2) return jsonResponse(200, {messages: [message(2), message(3)]});
+        // 끊긴 사이 온 한 줄 — 이번에는 되찾은 것이 있다(#4292: 빈손이면 표지가 서지 않는다).
+        if (call === 3) return jsonResponse(200, {messages: [message(4)]});
+        return jsonResponse(200, {messages: []});
       },
     });
     const {rail, subscription} = makeRail();
@@ -382,6 +383,395 @@ describe('받기 — 실시간과 리플레이', () => {
     await waitFor(() => expect(result.current.recoveryMarkers.length).toBe(1));
     expect(result.current.recoveryMarkers[0].source).toBe('backfill');
     expect(log.urls.some(u => u.includes('after=1'))).toBe(true);
+  });
+
+  // ===========================================================================
+  // 표지는 「끊겼던 구간이 있었고 그것을 메웠다」는 말이다 — 메운 것이 없으면 서지 않는다 (#4292).
+  //
+  // 소켓이 흔들리는 서버 쪽 사고는 모든 기기에 한꺼번에 닿고, 재연결마다 표지가 서던 때는 **메시지가 하나도 안 왔는데** 목록이
+  // 행 하나만큼 미끄러졌다 돌아왔다(맨 아래 행의 창 좌표를 프레임마다 잰 값은 `measure/steady.tsx`, PR 본문의 표).
+  // ===========================================================================
+  it('꼬리를 읽었더니 빈손이면 — 메운 것이 없으므로 — 표지를 세우지 않는다 (#4292)', async () => {
+    let call = 0;
+    const log = installFetch({
+      messages: () => {
+        call += 1;
+        return call === 1
+          ? jsonResponse(200, {messages: [message(1)]})
+          : jsonResponse(200, {messages: []});
+      },
+    });
+    const {rail, subscription} = makeRail();
+    const {result} = renderTimeline(rail);
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    const tailReads = () => log.urls.filter(url => url.includes('after=')).length;
+
+    act(() => {
+      subscription().__subscribed({recovered: false});
+    });
+    await waitFor(() => expect(tailReads()).toBe(1));
+
+    // 재구독이 두 번 — 둘 다 REST 꼬리를 읽고 둘 다 빈손이다.
+    for (let round = 2; round <= 3; round += 1) {
+      await act(async () => {
+        subscription().__subscribed({recovered: false});
+      });
+      await waitFor(() => expect(tailReads()).toBe(round));
+      // 읽기가 돌아와 `.then` 이 돈 뒤까지 비운다.
+      await act(async () => {
+        await new Promise(resolve => setTimeout(resolve, 0));
+      });
+    }
+
+    expect(result.current.state.messages.map(m => m.seq)).toEqual([1]);
+    expect(result.current.recoveryMarkers).toEqual([]);
+  });
+
+  it('레일이 되쏜 것이 없으면(recovered 인데 publications 가 비었다) 표지를 세우지 않는다 (#4292)', async () => {
+    installFetch({messages: () => jsonResponse(200, {messages: [message(1)]})});
+    const {rail, subscription} = makeRail();
+    const {result} = renderTimeline(rail);
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    act(() => {
+      subscription().__subscribed({recovered: false});
+    });
+
+    // `recovered: true` 는 「끊긴 구간을 이을 수 있었다」일 뿐 그 구간에 무엇이 있었다는 말이 아니다. 아무도 말하지 않은
+    // 구간의 복구에도 참이다.
+    for (let round = 0; round < 3; round += 1) {
+      await act(async () => {
+        subscription().__subscribed({recovered: true, publications: []});
+      });
+    }
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+
+    expect(result.current.resume.resubscribeCount).toBe(3);
+    expect(result.current.resume.lastRecovered).toBe(true);
+    expect(result.current.recoveryMarkers).toEqual([]);
+  });
+
+  // ===========================================================================
+  // 내가 보낸 줄은 복구한 것이 아니다 (#4292, 2026-10-24 실기 사례).
+  //
+  // 앱을 백그라운드에서 다시 연 직후 메시지 두 개를 보냈다. 소켓이 15초 유예 뒤 끊겼다 다시 붙는 중이었고, 재구독 복구가 끝나자 **방금
+  // 내가 보낸 두 줄 아래에** 「재연결됨, 여기까지 복구」 표지가 붙었다. 운영 로그에는 그 시간대 오류가 0건이다 — 서버가 아니라 표지 판정이다.
+  // 복구가 들여온 것이 내 줄뿐이거나 이미 타임라인에 있던 줄이면 복구한 것이 없다. 표지는 **다른 사람(또는 에이전트)의 새 메시지**를
+  // 들여왔을 때만 선다. 「새것」은 seq 가 아니라 id 로 가린다(내 REST 응답이 먼저 들어와 seq 를 올려 두어도, 더 작은 seq 로 뒤늦게 닿은
+  // 남의 줄은 새것이다).
+  // ===========================================================================
+  describe('내가 보낸 줄은 복구한 것이 아니다 (#4292)', () => {
+    const OTHER_ID = 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb';
+    const tick = () =>
+      act(async () => {
+        await new Promise(resolve => setTimeout(resolve, 0));
+      });
+    const head = () => jsonResponse(200, {messages: [message(1)]});
+    const empty = () => jsonResponse(200, {messages: []});
+
+    it('되쏘기에 실려 온 것이 내 줄뿐이면 표지를 세우지 않는다 — 줄은 들어온다', async () => {
+      installFetch({messages: head});
+      const {rail, subscription} = makeRail();
+      const {result} = renderTimeline(rail);
+      await waitFor(() => expect(result.current.status).toBe('ready'));
+      act(() => {
+        subscription().__subscribed({recovered: false});
+      });
+
+      await act(async () => {
+        subscription().__subscribed({
+          recovered: true,
+          publications: [
+            frame(2, {author_member_id: SELF_ID}),
+            frame(3, {author_member_id: SELF_ID}),
+          ],
+        });
+      });
+      await tick();
+
+      expect(result.current.state.messages.map(m => m.seq)).toEqual([1, 2, 3]);
+      expect(result.current.recoveryMarkers).toEqual([]);
+    });
+
+    it('내 REST 응답이 먼저 들어와 있었다면 같은 줄이 되쏘기로 와도 표지를 세우지 않는다', async () => {
+      installFetch({messages: head});
+      const {rail, subscription} = makeRail();
+      const {result} = renderTimeline(rail);
+      await waitFor(() => expect(result.current.status).toBe('ready'));
+      act(() => {
+        subscription().__subscribed({recovered: false});
+      });
+      await act(async () => {
+        await result.current.send('안녕');
+      });
+      // 확정 응답이 이 줄을 이미 들였다(seq 100, id server-echo).
+      expect(result.current.state.messages.map(m => m.id)).toContain('server-echo');
+
+      await act(async () => {
+        subscription().__subscribed({
+          recovered: true,
+          publications: [
+            frame(100, {id: 'server-echo', author_member_id: SELF_ID, body: '안녕'}),
+          ],
+        });
+      });
+      await tick();
+
+      expect(result.current.recoveryMarkers).toEqual([]);
+    });
+
+    it('꼬리 읽기가 가져온 것이 내 줄뿐이면 표지를 세우지 않는다 — 가져온 수는 그대로 센다', async () => {
+      let call = 0;
+      installFetch({
+        messages: () => {
+          call += 1;
+          if (call === 1) return head();
+          if (call === 3) {
+            return jsonResponse(200, {
+              messages: [
+                message(2, {authorMemberId: SELF_ID}),
+                message(3, {authorMemberId: SELF_ID}),
+              ],
+            });
+          }
+          return empty();
+        },
+      });
+      const {rail, subscription} = makeRail();
+      const {result} = renderTimeline(rail);
+      await waitFor(() => expect(result.current.status).toBe('ready'));
+      act(() => {
+        subscription().__subscribed({recovered: false});
+      });
+      await tick();
+
+      await act(async () => {
+        subscription().__subscribed({recovered: false});
+      });
+      await waitFor(() => expect(result.current.state.messages.length).toBe(3));
+      await tick();
+
+      expect(result.current.resume.lastBackfillCount).toBe(2);
+      expect(result.current.recoveryMarkers).toEqual([]);
+    });
+
+    it('읽는 사이 내 REST 응답이 먼저 들어왔다면(같은 줄이 꼬리 읽기에도 실려 온다) 표지를 세우지 않는다', async () => {
+      let call = 0;
+      let release: (response: Response) => void = () => undefined;
+      installFetch({
+        messages: () => {
+          call += 1;
+          if (call === 1) return head();
+          // 세 번째 읽기(재구독의 꼬리)는 붙잡아 둔다.
+          if (call === 3) {
+            return new Promise<Response>(resolve => {
+              release = resolve;
+            });
+          }
+          return empty();
+        },
+      });
+      const {rail, subscription} = makeRail();
+      const {result} = renderTimeline(rail);
+      await waitFor(() => expect(result.current.status).toBe('ready'));
+      act(() => {
+        subscription().__subscribed({recovered: false});
+      });
+      await tick();
+      await act(async () => {
+        subscription().__subscribed({recovered: false});
+      });
+      await waitFor(() => expect(call).toBe(3));
+
+      // 읽는 동안 내 확정 응답이 같은 줄을 먼저 들인다.
+      await act(async () => {
+        await result.current.send('안녕');
+      });
+      await act(async () => {
+        release(
+          jsonResponse(200, {
+            messages: [
+              message(100, {authorMemberId: SELF_ID, id: 'server-echo', body: '안녕'}),
+            ],
+          }),
+        );
+      });
+      await tick();
+
+      expect(result.current.resume.lastBackfillCount).toBe(1);
+      expect(result.current.recoveryMarkers).toEqual([]);
+    });
+
+    it('남의 줄이라도 이미 타임라인에 있던 줄이 되쏘기에 또 실려 오면 표지를 세우지 않는다 — 새것은 id 로 가린다', async () => {
+      installFetch({messages: head});
+      const {rail, subscription} = makeRail();
+      const {result} = renderTimeline(rail);
+      await waitFor(() => expect(result.current.status).toBe('ready'));
+      act(() => {
+        subscription().__subscribed({recovered: false});
+      });
+      // 실시간으로 남의 줄이 먼저 왔다.
+      act(() => {
+        subscription().__emit('publication', {data: frame(2)});
+      });
+      expect(result.current.state.messages.map(m => m.seq)).toEqual([1, 2]);
+
+      await act(async () => {
+        subscription().__subscribed({recovered: true, publications: [frame(2)]});
+      });
+      await tick();
+
+      expect(result.current.recoveryMarkers).toEqual([]);
+    });
+
+    it('읽는 사이 남의 줄이 실시간으로 먼저 들어왔다면(같은 줄이 꼬리 읽기에도 실려 온다) 표지를 세우지 않는다', async () => {
+      let call = 0;
+      let release: (response: Response) => void = () => undefined;
+      installFetch({
+        messages: () => {
+          call += 1;
+          if (call === 1) return head();
+          if (call === 3) {
+            return new Promise<Response>(resolve => {
+              release = resolve;
+            });
+          }
+          return empty();
+        },
+      });
+      const {rail, subscription} = makeRail();
+      const {result} = renderTimeline(rail);
+      await waitFor(() => expect(result.current.status).toBe('ready'));
+      act(() => {
+        subscription().__subscribed({recovered: false});
+      });
+      await tick();
+      await act(async () => {
+        subscription().__subscribed({recovered: false});
+      });
+      await waitFor(() => expect(call).toBe(3));
+
+      act(() => {
+        subscription().__emit('publication', {data: frame(2)});
+      });
+      await act(async () => {
+        release(jsonResponse(200, {messages: [message(2)]}));
+      });
+      await tick();
+
+      expect(result.current.resume.lastBackfillCount).toBe(1);
+      expect(result.current.recoveryMarkers).toEqual([]);
+    });
+
+    it('위로 더 불러온 줄(loadOlder)의 수정 프레임이 되쏘기로 와도 표지를 세우지 않는다 — 그 쪽의 id 도 이미 든 것이다', async () => {
+      let call = 0;
+      installFetch({
+        messages: () => {
+          call += 1;
+          if (call === 1) {
+            return jsonResponse(200, {messages: [message(10), message(11)], nextBefore: 10});
+          }
+          if (call === 3) return jsonResponse(200, {messages: [message(8), message(9)]});
+          return empty();
+        },
+      });
+      const {rail, subscription} = makeRail();
+      const {result} = renderTimeline(rail);
+      await waitFor(() => expect(result.current.status).toBe('ready'));
+      act(() => {
+        subscription().__subscribed({recovered: false});
+      });
+      await tick();
+      await act(async () => {
+        await result.current.loadOlder();
+      });
+      expect(result.current.state.messages.map(m => m.seq)).toEqual([8, 9, 10, 11]);
+
+      // 끊긴 사이 남이 그 오래된 줄(seq 8)을 고쳤다 — 새 줄이 아니라 이미 든 줄의 수정이다.
+      await act(async () => {
+        subscription().__subscribed({
+          recovered: true,
+          publications: [{...frame(8, {body: '고쳐 썼어요'}), type: 'message.edited'}],
+        });
+      });
+      await tick();
+
+      expect(result.current.recoveryMarkers).toEqual([]);
+    });
+
+    it('작성자 id 의 대소문자가 달라도 내 줄이다 — 표지를 세우지 않는다 (uuidEq)', async () => {
+      installFetch({messages: head});
+      const {rail, subscription} = makeRail();
+      const me = 'AbCdEf12-1111-4111-8111-AAAAAAAAAAAA';
+      const {result} = renderHook(() => useTimeline(rail, WS, CH, me));
+      await waitFor(() => expect(result.current.status).toBe('ready'));
+      act(() => {
+        subscription().__subscribed({recovered: false});
+      });
+
+      await act(async () => {
+        subscription().__subscribed({
+          recovered: true,
+          publications: [frame(2, {author_member_id: me.toLowerCase()})],
+        });
+      });
+      await tick();
+
+      expect(result.current.state.messages.map(m => m.seq)).toEqual([1, 2]);
+      expect(result.current.recoveryMarkers).toEqual([]);
+    });
+
+    it('줄 id 의 대소문자가 달라도 이미 든 줄이다 — 되쏘기에 또 실려 와도 표지를 세우지 않는다', async () => {
+      installFetch({messages: head});
+      const {rail, subscription} = makeRail();
+      const {result} = renderTimeline(rail);
+      await waitFor(() => expect(result.current.status).toBe('ready'));
+      act(() => {
+        subscription().__subscribed({recovered: false});
+      });
+      act(() => {
+        subscription().__emit('publication', {data: frame(2)});
+      });
+
+      await act(async () => {
+        subscription().__subscribed({
+          recovered: true,
+          publications: [frame(2, {id: 'MSG-2'})],
+        });
+      });
+      await tick();
+
+      expect(result.current.recoveryMarkers).toEqual([]);
+    });
+
+    it('남의 줄이 함께 오면 표지가 선다 — 그 줄이 내 줄보다 작은 seq 로 뒤늦게 닿아도 (seq 가 아니라 id 로 새것을 가린다)', async () => {
+      installFetch({messages: head});
+      const {rail, subscription} = makeRail();
+      const {result} = renderTimeline(rail);
+      await waitFor(() => expect(result.current.status).toBe('ready'));
+      act(() => {
+        subscription().__subscribed({recovered: false});
+      });
+      await act(async () => {
+        await result.current.send('안녕');
+      });
+      // 내 확정 줄이 가장 새 seq(100)를 이미 쥐고 있다. 남의 줄(seq 99)은 그보다 작지만 이 타임라인에는 처음이다.
+      await act(async () => {
+        subscription().__subscribed({
+          recovered: true,
+          publications: [
+            frame(99, {author_member_id: OTHER_ID}),
+            frame(100, {id: 'server-echo', author_member_id: SELF_ID, body: '안녕'}),
+          ],
+        });
+      });
+      await tick();
+
+      expect(result.current.state.messages.map(m => m.seq)).toEqual([1, 99, 100]);
+      expect(result.current.recoveryMarkers).toHaveLength(1);
+      expect(result.current.recoveryMarkers[0].source).toBe('replay');
+    });
   });
 
   it('삭제 프레임은 행을 제자리에서 지우고 seq 는 남긴다', async () => {
