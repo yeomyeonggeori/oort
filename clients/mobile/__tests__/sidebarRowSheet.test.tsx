@@ -380,6 +380,28 @@ describe('채널 나가기는 확인 단계를 지난다', () => {
     await waitFor(() => expect(screen.queryByTestId('channel-action-sheet')).toBeNull());
   });
 
+  it('열려 있는 채널을 나가면 그 대화가 걷히고 사이드바로 돌아간다 (웹은 `/` 로 착지한다)', async () => {
+    await mount();
+    fireEvent.press(screen.getByTestId('sidebar-row-channel:ch-general'));
+    await waitFor(() => expect(screen.getByTestId('conversation-pane')).toBeTruthy());
+    longPress('sidebar-row-channel:ch-general');
+    fireEvent.press(screen.getByTestId('channel-sheet-leave'));
+    fireEvent.press(screen.getByTestId('channel-leave-confirm-button'));
+    await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
+  });
+
+  it('다른 채널을 나가도 열려 있는 대화는 그대로다', async () => {
+    await mount();
+    fireEvent.press(screen.getByTestId('sidebar-row-channel:ch-quiet'));
+    await waitFor(() => expect(screen.getByTestId('conversation-pane')).toBeTruthy());
+    longPress('sidebar-row-channel:ch-general');
+    fireEvent.press(screen.getByTestId('channel-sheet-leave'));
+    fireEvent.press(screen.getByTestId('channel-leave-confirm-button'));
+    await waitFor(() => expect(calls.some(call => call.method === 'DELETE')).toBe(true));
+    await waitFor(() => expect(screen.queryByTestId('channel-action-sheet')).toBeNull());
+    expect(screen.getByTestId('conversation-pane')).toBeTruthy();
+  });
+
   it('403: 확인 단계가 그대로 서서 이유를 말한다 — 시트가 사라지지 않는다', async () => {
     await mount({leaveStatus: 403});
     longPress('sidebar-row-channel:ch-general');

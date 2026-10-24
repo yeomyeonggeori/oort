@@ -284,11 +284,14 @@ export default function SidebarScreen({
   onOpenSearch,
   onOpenAgentList,
   onOpenWorkList,
+  onChannelLeft,
   notificationNotice = null,
   onDismissNotificationNotice,
   active = true,
 }: {
   openChannelId: string | null;
+  /** 채널을 나간 뒤. 열려 있던 그 대화를 걷는다(웹은 `/` 로 착지한다). */
+  onChannelLeft?: (channelId: string) => void;
   onOpenConversation: (channelId: string, title: string) => void;
   /**
    * Open 메시지 검색, optionally carrying what was already typed here.
@@ -502,7 +505,7 @@ export default function SidebarScreen({
   );
 
   // 행을 길게 누르면 열리는 시트(#4229). 항목은 코어 표가 정하고(`channelRowActionItems`), 시트는 화면에 하나다.
-  const rowActions = useChannelRowActions(workspaceId, member.id);
+  const rowActions = useChannelRowActions(workspaceId, member.id, onChannelLeft);
   const channelById = useMemo(
     () =>
       new Map(

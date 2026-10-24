@@ -73,6 +73,8 @@ function announce(message: string): void {
 export function useChannelRowActions(
   workspaceId: string,
   selfMemberId: string,
+  /** 채널을 나간 뒤(서버가 답한 뒤)에 부른다. 열려 있던 대화를 걷는 일은 부르는 쪽(셸)이 한다. */
+  onLeft?: (channelId: string) => void,
 ): ChannelRowActions {
   const client = useQueryClient();
   const markRead = useMarkRead();
@@ -280,6 +282,7 @@ export function useChannelRowActions(
         void client.invalidateQueries({queryKey: workspaceKeys.channels(workspaceId)});
         void client.invalidateQueries({queryKey: workspaceKeys.roster(workspaceId)});
         succeeded('채널에서 나갔습니다.');
+        onLeft?.(target.channel.id);
       })
       .catch(cause => {
         if (!mounted.current) return;
@@ -290,7 +293,7 @@ export function useChannelRowActions(
       .finally(() => {
         if (mounted.current) setLeavePending(false);
       });
-  }, [active, client, leavePending, selfMemberId, succeeded, workspaceId]);
+  }, [active, client, leavePending, onLeft, selfMemberId, succeeded, workspaceId]);
 
   const cancelLeave = useCallback(() => {
     setConfirmingLeave(false);
