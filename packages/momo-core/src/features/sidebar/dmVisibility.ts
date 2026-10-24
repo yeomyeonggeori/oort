@@ -144,7 +144,7 @@ export const DM_REOPEN_LABEL = "다시 열기";
 
 /** 목록 머리의 한 줄. 닫기는 지우기가 아니라는 것과 돌아오는 조건을 말한다. */
 export const DM_CLOSED_LIST_HINT =
-  "닫은 대화와 나간 멤버와의 대화예요. 닫은 대화는 새 메시지가 오면 사이드바에 돌아와요.";
+  "닫은 대화와 나간 멤버와의 대화예요. 닫은 대화는 새 메시지가 오면 돌아와요.";
 
 /** 목록 행의 이유 줄. `closed` 는 내가 닫았고, `gone` 은 상대가 나갔다. */
 export function dmClosedReasonLabel(reason: "closed" | "gone"): string {

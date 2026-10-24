@@ -241,7 +241,8 @@ async function runScheme(browserType, engine, origin, scheme) {
     });
     await attempt(engine, scheme, "C.gone-open", async () => {
       server.calls.length = 0;
-      await page.goto(`${origin}/c/${GONE}`, { waitUntil: "domcontentloaded" });
+      await page.goto(`${origin}/#/c/${GONE}`, { waitUntil: "domcontentloaded" });
+      await page.reload({ waitUntil: "domcontentloaded" });
       await page.getByTestId("dm-avatar").first().waitFor({ timeout: 20_000 });
       await settle();
       check(engine, scheme, "C0 나간 상대의 DM 을 열면 서버에 아무것도 쓰지 않고, 열려 있는 동안 목록에 선다", server.calls.length === 0 && (await shown(GONE)), JSON.stringify(server.calls));

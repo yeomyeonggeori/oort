@@ -90,7 +90,7 @@ export function DmClosedMenu({
         <DialogContent className="gap-4 p-4" data-testid="dm-closed-list">
           <div className="flex flex-col gap-1">
             <DialogTitle>{DM_CLOSED_LIST_LABEL}</DialogTitle>
-            <DialogDescription>{DM_CLOSED_LIST_HINT}</DialogDescription>
+            <DialogDescription className="break-keep">{DM_CLOSED_LIST_HINT}</DialogDescription>
           </div>
           <ul className="flex max-h-[50vh] flex-col overflow-y-auto" data-testid="dm-closed-list-items">
             {items.map((item) => (
