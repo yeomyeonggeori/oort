@@ -139,6 +139,38 @@ export function peekMemberAvatar(key: string): string | null {
   return hit.file.uri;
 }
 
+/**
+ * 올린 직후: 로컬 파일(줄인 JPEG)을 이 경로의 캐시 파일로 복사해 색인에 올린다(#4384). 키는 서버가
+ * complete 로 준 `?v=` 주소라 roster 가 같은 주소를 주면 내려받기 없이 그대로 맞고, 다르면
+ * 새 키로 받는다(시드는 덮이지 않고 LRU 로 밀려난다). 베어러를 쓰지 않으므로 경로 모양만 검사한다.
+ */
+export function seedMemberAvatar(
+  path: string,
+  sourceUri: string,
+  /** `memberAvatarGeneration()` 을 올리기 시작할 때 읽은 값. 그 사이 비우기(로그아웃·계정 교체)가 있었으면 쓰지 않는다. */
+  startedGeneration: number = generation,
+): boolean {
+  if (startedGeneration !== generation) return false;
+  if (memberAvatarContentPath(path) === null) return false;
+  try {
+    adoptExisting();
+    const key = memberAvatarCacheKey(path);
+    const name = hashName(key);
+    const source = new File(sourceUri);
+    if (!source.exists) return false;
+    const destination = fileFor(name);
+    if (destination.exists) destination.delete();
+    source.copy(destination);
+    index.delete(name);
+    index.set(name, {file: destination, size: destination.size ?? 0});
+    failedUntil.delete(key);
+    evict();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function isUnauthorized(error: unknown): boolean {
   return /(?:status(?: code)?\s*[:=]?\s*401|http\s*401|unauthori[sz]ed)/i.test(
     error instanceof Error ? error.message : String(error),
@@ -222,6 +254,11 @@ export function loadMemberAvatar(path: string): Promise<string | null> {
     });
   inflight.set(key, request);
   return request;
+}
+
+/** 비우기 세대. 올리기 같은 긴 일이 시작할 때 읽어 두었다가 끝에 `seedMemberAvatar` 로 넘긴다. */
+export function memberAvatarGeneration(): number {
+  return generation;
 }
 
 /** 로그아웃·세션 경계: 메모리 색인과 디스크 파일을 모두 비운다. */

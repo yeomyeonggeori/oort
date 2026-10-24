@@ -216,6 +216,12 @@ jest.mock('expo-file-system', () => {
     delete() {
       files.delete(this.uri);
     }
+    copy(destination) {
+      if (!files.has(this.uri)) throw new Error('source missing');
+      if (files.has(destination.uri)) throw new Error('destination exists');
+      files.add(destination.uri);
+      state.sizes.set(destination.uri, state.sizes.get(this.uri) ?? 0);
+    }
     move(destination) {
       files.delete(this.uri);
       files.add(destination.uri);

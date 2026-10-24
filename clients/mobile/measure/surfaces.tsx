@@ -130,9 +130,12 @@ import {
 import {AiSheet} from '../src/shell/AiSheet';
 import {AskMacSheet, type AskMacPreview} from '../src/shell/AskMacSheet';
 import NetInfo from '@react-native-community/netinfo';
+import {File as FsFile, Paths} from 'expo-file-system';
+import * as ImagePicker from 'expo-image-picker';
 import {bootSpawnPort} from '../src/boot/spawnPort';
 import {workRunFailure} from '@momo/core/features/agents/workRunRequest';
 import {INITIAL_NAV, navReducer} from '../src/nav/state';
+import {seedMemberAvatar} from '../src/features/conversation/memberAvatarImage';
 import {ProfilePage, ProfileSheet} from '../src/features/profile/ProfileSheet';
 import {__setPermissionReader} from '../src/push/permissionStatus';
 import {clearPushOptOut, setPushOptedOut} from '../src/push/pushOptOut';
@@ -4728,6 +4731,39 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           />
         </View>
       );
+    // #4384: 프로필 사진 장. 진짜 셸 위의 진짜 프로필 시트가 사진 장으로 열린다(`initialPage="avatar"`).
+    // `-photo` 는 내 사진이 있는 사람(지우기 줄이 선다), `-offline` 은 연결이 끊긴 때(세 줄 잠김),
+    // `-denied` 는 사진 접근이 꺼진 때(고르기를 누르면 문장 + 「설정 열기」 — Maestro 가 누른다).
+    // 시뮬레이터에는 카메라가 없어 「사진 찍기」 줄은 서지 않는다(의도).
+    case 'shell-avatar-sheet':
+    case 'shell-avatar-sheet-photo':
+    case 'shell-avatar-sheet-offline':
+    case 'shell-avatar-sheet-denied':
+      return (
+        <View style={styles.fill}>
+          <Shell />
+          <ProfileSheet
+            initialPage="avatar"
+            workspaceId={HARNESS_MEMBER.workspaceId}
+            member={HARNESS_MEMBER}
+            directory={makeDirectory(
+              name === 'shell-avatar-sheet-photo'
+                ? SHELL_ROSTER.map(member =>
+                    member.id === SELF
+                      ? {
+                          ...member,
+                          avatarUrl: `/v1/workspaces/${ADE_WS}/members/${SELF}/avatar/content?v=media-1`,
+                        }
+                      : member,
+                  )
+                : SHELL_ROSTER,
+            )}
+            connected
+            onSignOut={() => {}}
+            onClose={() => {}}
+          />
+        </View>
+      );
     case 'shell-profile-sheet':
       return (
         <View style={styles.fill}>
@@ -6631,6 +6667,43 @@ function seedPause(surface: string): void {
   }
 }
 
+/**
+ * #4384: 프로필 사진 장의 씨앗. 연결 신호를 못 박고(`-offline` 만 끊김), `-denied` 는 사진 접근이 꺼진
+ * 기기를 만든다 — 고르기가 실패하고 권한 상태가 「거부」로 읽힌다. 시스템 편집기는 시뮬레이터에서
+ * 사람이 닫아야 하므로 이 표면은 그것을 띄우지 않는다.
+ */
+const SEED_PNG_B64 =
+  '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';
+
+function seedAvatarSheet(surface: string): void {
+  forceNetwork(surface !== 'shell-avatar-sheet-offline');
+  if (surface === 'shell-avatar-sheet-photo') {
+    // 내려받을 서버가 없다 — 올린 직후와 같은 길(`seedMemberAvatar`)로 캐시를 채워 사진이 서 있게 한다.
+    try {
+      const file = new FsFile(Paths.cache, 'measure-avatar-seed.png');
+      if (file.exists) file.delete();
+      file.create();
+      file.write(Uint8Array.from(atob(SEED_PNG_B64), c => c.charCodeAt(0)));
+      seedMemberAvatar(`/v1/workspaces/${ADE_WS}/members/${SELF}/avatar/content?v=media-1`, file.uri);
+    } catch {
+      // 시드가 실패하면 이니셜이 찍힌다 — 캡처를 읽을 때 드러난다.
+    }
+  }
+  if (surface !== 'shell-avatar-sheet-denied') return;
+  const picker = ImagePicker as unknown as Record<string, unknown>;
+  const override = (key: string, value: unknown) =>
+    Object.defineProperty(picker, key, {value, configurable: true, writable: true});
+  override('launchImageLibraryAsync', async () => {
+    throw new Error('denied');
+  });
+  override('getMediaLibraryPermissionsAsync', async () => ({
+    status: 'denied',
+    granted: false,
+    canAskAgain: false,
+    expires: 'never',
+  }));
+}
+
 function seedShell(surface: string): void {
   // 셸은 명시적으로 켜진 질의(인박스·에이전트 레일)도 세운다. 서버가 없는 하네스에서
   // 그 요청이 실패하면 세션 만료로 읽혀 캐시가 통째로 지워지고(`useSession` 의
@@ -7389,6 +7462,7 @@ if (
 ) {
   if (isPauseSurface(LAUNCHED.name)) keepPauseSeeds();
   seedShell(LAUNCHED.name);
+  if (LAUNCHED.name.startsWith('shell-avatar-')) seedAvatarSheet(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-delegate-')) seedDelegate(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-ask-')) seedAsk(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-ai-')) seedAi(LAUNCHED.name);
