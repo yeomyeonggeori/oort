@@ -77,6 +77,8 @@ describe("member.avatar.set 카드의 action.preview (#4394)", () => {
       `/v1/workspaces/${WS}/members/${APPROVAL}/avatar/content?v=${SHA}`,
       `/v1/workspaces/${WS}/approvals/${APPROVAL}/avatar-preview`,
       `/v1/workspaces/${WS}/approvals/${APPROVAL}/avatar-preview?v=zz`,
+      `/v1/workspaces/${WS}/approvals/${APPROVAL}/avatar-preview?v=abcd`, // 해시는 64자다
+      `/v1/workspaces/${WS}/approvals/${APPROVAL}/avatar-preview?v=${SHA}ab`, // 길어도 안 된다
       `/v1/workspaces/${WS}/approvals/${APPROVAL}/avatar-preview?v=${SHA}&x=1`,
       `/v1/workspaces/${WS}/approvals/a/b/avatar-preview?v=${SHA}`,
       `https://evil.example/v1/workspaces/${WS}/approvals/${APPROVAL}/avatar-preview?v=${SHA}`,
