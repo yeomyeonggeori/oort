@@ -3,7 +3,7 @@
 - Status: **Accepted** (2026-10-13 성재 결재 — 아래 「결재 기록」. 공개 API·DB 계약 변경이라 ADR-0100에 따라 이 Accepted가 구현 머지 조건이다.) 초안은 같은 날 Proposed였고 결재로 D4-5(`oort_ping`)가 추천안과 달라졌다.
 - Date: 2026-10-13
 - Deciders: 성재
-- 증보: 2026-10-14 (#3822) 도어벨 깨움 `doorbell_rung` · **2026-10-15 (#3838) oort 호출 기록 `tool_call`(T1~T5)·「지금 실행 중」 읽기(R1)** — 파일 끝.
+- 증보: 2026-10-14 (#3822) 도어벨 깨움 `doorbell_rung` · 2026-10-15 (#3838) oort 호출 기록 `tool_call`(T1~T5)·「지금 실행 중」 읽기(R1) · **2026-10-24 증보 3 (#4332) 깨웠는데 가져가지 않은 run 종결 `woken_not_collected`(30분)·환영 run 종결은 조용히·환영 대상 정책·notifier 열 읽기** — 파일 끝.
 - 기안: Opus 5.5 (#3736 + #3737 묶음)
 - 관계: ADR-0162 증보 3(D9 「새 저장소 없음」, D11 「단계 표식은 realtime 없음」, D13 보드 가시성, D17 비목표, 부록 A lease·암묵 갱신) **일부를 이 ADR이 바꾼다**(아래 「바뀌는 기존 결정」), ADR-0171(도어벨), ADR-0186(승인 액션 — run을 park), ADR-0199(인박스 투영 — 같은 방식의 쓰기 시 투영), ADR-0198, ADR-0100
 - 표기: [V] 코드·문서 직접 확인 · **[추정]** 해석 · [확인 필요] 구현 전 사실 확인 · `runtime-unverified` 실행 안 함
@@ -87,7 +87,7 @@ DB 열거형(`run_status`)은 바꾸지 않는다. 읽기 응답에 **파생 필
 - 수령 이력은 job 행의 `lease_acquired_at`(현재 lease만)으로는 부족하다. 수령 시각을 **원장 행(D2, `kind='claimed'`)** 으로 같은 tx에서 남긴다(전달 job 행에 열을 더하지 않는다: `outbox`는 범용·핫 테이블이다).
 - **lease_state**는 `phase`와 직교하는 서버 사실이다: `live`(`lease_expires_at > now()`) / `stale`(만료, 재claim 없음) / `none`. `stale`의 문구는 **「lease 미갱신 n분」** 이다. 부록 A3 때문에 만료 lease의 에이전트는 **돌아올 수 있다** — 만료는 「끊김」이 아니라 「n분째 소식 없음, 돌아올 수 있음」이다. 그래서 「끊김」 문구는 쓰지 않는다.
 - **「신호 소실」을 없앤다.** 클라이언트 TTL(90s/120s)로 상태를 정하는 일을 hosted run에서 멈춘다. 대신 서버 사실만 말한다: 수령 전이면 「대기 중(미수령 n분)」, 수령 뒤면 「마지막 보고 n분 전 · lease 미갱신 n분」.
-- **D1-4. 영원히 `running`인 run 방지.** 하드 종결은 클라 TTL이 아니라 서버 스위프의 명시적 사실로 한다(결재 2). notifier 스위프가 `running/claimed`이고 `lease_state=stale`이며 `last_event_at`(없으면 `claimed_at`)이 **lease 만료 후 2시간 이상** 지난 run을 `timed_out{code:"lease_abandoned"}`로 종결하고(승인 스위프와 같은 `end_parked_run_in_tx` 경로·종결 프레임), 수령되지 않은 `queued` run은 **24시간** 뒤 `timed_out{code:"unclaimed_expired"}`로 종결한다. 재claim으로 되살아난 run은 위 조건이 깨지므로 건드리지 않는다. 전달 job을 다른 에이전트로 옮기는 재배정은 하지 않는다. 「전달 job 이 settle 된 고아 run」(연결 해제·credential 폐기 뒤 남은 run)도 같은 코드 `lease_abandoned`로 끝낸다 — 에이전트가 그 run 에 보고할 길이 없기 때문이다(S5 검수 M-3). 7일 넘게 침묵한 유령은 채널 줄·rail 프레임 없이 조용히 끝낸다. 숫자는 환경변수로 봉인했다(`MOMO_RUN_LEASE_ABANDON_HOURS` 2, `MOMO_RUN_UNCLAIMED_EXPIRE_HOURS` 24).
+- **D1-4. 영원히 `running`인 run 방지.** 하드 종결은 클라 TTL이 아니라 서버 스위프의 명시적 사실로 한다(결재 2). notifier 스위프가 `running/claimed`이고 `lease_state=stale`이며 `last_event_at`(없으면 `claimed_at`)이 **lease 만료 후 2시간 이상** 지난 run을 `timed_out{code:"lease_abandoned"}`로 종결하고(승인 스위프와 같은 `end_parked_run_in_tx` 경로·종결 프레임), 수령되지 않은 `queued` run은 **24시간** 뒤 `timed_out{code:"unclaimed_expired"}`로 종결한다. 재claim으로 되살아난 run은 위 조건이 깨지므로 건드리지 않는다. 전달 job을 다른 에이전트로 옮기는 재배정은 하지 않는다. 「전달 job 이 settle 된 고아 run」(연결 해제·credential 폐기 뒤 남은 run)도 같은 코드 `lease_abandoned`로 끝낸다 — 에이전트가 그 run 에 보고할 길이 없기 때문이다(S5 검수 M-3). 7일 넘게 침묵한 유령은 채널 줄·rail 프레임 없이 조용히 끝낸다. 숫자는 환경변수로 봉인했다(`MOMO_RUN_LEASE_ABANDON_HOURS` 2, `MOMO_RUN_UNCLAIMED_EXPIRE_HOURS` 24). → **2026-10-24 증보 3**이 초인종이 닿았는데 수령·생존 증거 없이 30분이 지난 run을 `woken_not_collected`로 끝내는 규칙과, 환영 run의 종결 줄·종결 프레임을 남기지 않는 규칙을 더한다(24시간 값은 그대로).
 - `awaiting_approval`은 절대 「작업 중」이 아니다(`workingSignal.ts` 머리말과 같은 규칙, 유지).
 
 ### D2. run 이벤트 원장 — 서버가 기억하고, 닫아도 남는다
@@ -331,3 +331,268 @@ last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
 - **T-S1 (engine) 기록.** migration(kind CHECK·`tool`/`duration_ms` 열·trim 술어·130 트리거 술어·`agent_run_tool_tally`), 디스패처 기록, 귀속 규칙. red proof: ① 핸들 도구 한 번이 `tool_call` 행 1개·집계 1을 만든다, ② 인자·본문이 행 어디에도 없다(열 목록 고정 시험), ③ `oort_inbox_read`·`oort_message_post`는 행 0개, ④ 101번째 호출은 행이 늘지 않고 집계만 오른다(상한을 지우면 실패), ⑤ trim이 `tool_call`을 지우지 않고 200행 계산에 넣지 않는다(술어를 되돌리면 실패), ⑥ 다른 테넌트가 집계를 못 읽는다(RLS), ⑦ 기록 tx 실패가 도구 응답을 바꾸지 않는다.
 - **T-S2 (engine) 읽기.** `include=tools`(쉼표 집합), `toolTally`, R1 경로. red proof: ① `include` 없으면 `tool_call`이 없다(필터를 지우면 실패), ② `include=doorbell,tools`가 둘 다 싣는다, ③ 모르는 값 400, ④ R1에서 비멤버 채널 run은 행에 없고 `activeTotal`에만 반영, ⑤ 멘션 run 포함, ⑥ DM run은 그 두 사람에게만.
 - **T-U1 (UXUI).** run 상세에 「oort 기록」 칸(호출 이름·시간·성공/오류, 「에이전트 보고」 칸과 분리), 구 서버 400 물러서기, 「작업」 화면 머리의 에이전트별 「동시 n건」(ADR-0202).
+
+## 증보 3 (2026-10-24, #4332 → 구현 #4284) — 깨웠는데 가져가지 않은 작업을 정직하게 끝낸다
+
+- Status: **Accepted** (2026-10-24).
+  - 근거: 성재 2026-10-24 「저거 정상은 아니잖아. 문제원인 파악하고 해결좀 해봐.」(DM 아래 「grok: 대기 1번째 17시간째 기다려요」 캡처) + 2026-10-22 위임 「결정 부탁드릴 것은 너가 권장으로 진행해봐.」
+  - 이 증보는 결재 2(24시간 `unclaimed_expired`)를 **초인종이 닿았고 에이전트가 살아 있는 다른 증거가 없는 run에 한해** 앞당겨요. 닫힌 종결 코드 하나와 notifier 역할의 읽기 범위가 늘어요.
+  - 그래서 ADR-0100에 따라 #4284 머지 조건이에요.
+- 독립 설계 검토 두 번(1회차 High 3, 2회차 High 2. 지적 요약은 #4332 코멘트)을 반영한 판이에요.
+- 표기: [V] 코드·운영 직접 확인 · **[추정]** 해석 · **[권장]** planner 결정(위임)
+
+### 배경 — 운영 실측 (2026-10-24, 읽기 전용, 이슈 #4284 코멘트)
+- [V] 사람이 부른 DM run이 10-23 21:00 `queued`가 됐어요.
+  - 원장에는 `doorbell_rung` `leading_ok`가 두 번 있어요(21:00:30, 10-24 14:20:31).
+  - `claimed`는 없어요. 화면은 「대기 1번째 17시간째 기다려요」였어요.
+- [V] 그 연결의 `hosted_agent_liveness`
+  - `last_inbox_read_at` 10-19 13:02, `last_claim_at` 10-18 00:30
+  - `last_run_event_at` 10-18 00:30, `last_ping_at` 10-24 14:26(`idle`)
+  - 마지막 도구 거절은 10-16이고, 그 뒤로 oort가 거절한 적은 없어요(권한 조건 전부 참·cursor 봉인 키 불변·도구 계약 추가만).
+  - 실행기는 깨어나 ping만 보내고 받은편지함을 읽지 않아요.
+- [V] 같은 에이전트의 15분 sweep 루틴 실측(운영 감사 `auth.agent_bearer.used`, 10-18 17:11~10-19 02:55, #4284 코멘트 3)
+  - 깨어남 37회, 간격 36개예요. 간격은 10~29분, 중앙값 15분, 평균 16.2분이에요.
+  - 표본은 한 에이전트·약 10시간이에요.
+  - `SELF_HOST_AGENT.ko.md`는 「`@every 15m` 스케줄 루틴의 첫 실행은 지연 가능(수십 분), 실측 첫 발화 ~28분」이라고 적어요.
+- [V] 서버는 이 상태를 이미 D4 `woken_not_collected`로 판정해요(`momo-agent/src/hosted_liveness.rs` `derive_liveness`). 연결 단위 마지막 발사를 써요.
+- [V] 그런데 D1-4의 수령 전 종결은 24시간 `unclaimed_expired` 하나뿐이에요(`momo-outbox/src/stalled.rs`).
+  - 10-23 환영 작업(#general)도 24시간을 기다렸어요. 그 뒤 사람 없는 채널에 「아무도 가져가지 않아…」 줄을 남겼어요(운영 원장 조회, #4284 코멘트).
+- 리서치 `docs/planning/research/2026-08-24-grokbot-webhook-doorbell.md` §fallback이 예고한 실패 모드예요.
+
+### 결정
+
+**E1. 종결 조건 — run 단위, 판정은 Rust 한 곳.**
+
+스위프 구조는 둘로 나눠요.
+- **후보**: notifier 교차 테넌트 SQL은 상위집합 후보만 골라요.
+  - 조건: `status='queued'`, 원장에 `claimed` 없음, 호스티드 run, 원장에 `doorbell_rung` `<edge>_ok` 행 있음, `created_at ≤ now() − MOMO_RUN_WOKEN_EXPIRE_MINUTES`
+  - 상위집합인 이유: T(아래 4·5)는 이 run의 원장 ok 행 시각이거나 그보다 늦어요. run 생성 뒤이므로 `now − created_at ≥ now − T`예요. 그래서 판정이 참인 run은 모두 후보에 들어요.
+- **판정**: 테넌트 tx에서 run 행과 전달 job 행을 함께 잠가요(`FOR UPDATE OF o`, `pending_job_has_live_lease_in_tx`와 같은 모양). 그다음 **`momo-agent`의 순수 Rust 함수 `woken_uncollected_verdict(..)`**가 최종 판정해요.
+  - claim은 job 행을 잠가요. 그래서 판정과 종결 사이에 claim이 끼어들지 못해요.
+  - SQL은 판정을 대신하지 않아요.
+
+아래를 **모두** 만족할 때만 `timed_out{code:"woken_not_collected"}`로 끝내요. 조건마다 판정 함수의 입력 하나예요.
+
+1. **연결 상태**: 그 run 에이전트의 호스티드 연결이 지금 `active`예요(D4 `inactive`가 아님).
+   - 운영자가 연결을 해제했으면 이 규칙 대상이 아니에요. 24시간 규칙과 연결 해제 정리가 다뤄요.
+2. **oort 쪽 거절 없음**: 이 연결의 `last_tool_error_at`이 T 이후가 아니에요.
+   - T 이후에 거절이 있었다면 원인이 oort 쪽일 수 있어서 이 규칙 대상이 아니에요. 24시간 규칙과 연결 화면이 다뤄요.
+   - D4 `error`와 같은 이유예요. 조건은 그보다 좁아요(D4는 「거절이 마지막 성공보다 새로움」).
+   - 폐기된 토큰으로 시도한 에이전트도 거절이 남아서 여기서 보호돼요.
+3. **수령 가능 job — oort 쪽 사실만**: 이 run의 전달 job이 지금 oort 쪽 조건으로는 수령 가능해요.
+   - job: `method='gateway'`, `status='pending'`, `available_at ≤ now()`, live lease 없음
+   - run: 승인 대기·종결이 아님
+   - 에이전트: 멤버 active(`member`)
+   - 커넥터 소유자 조건: 에이전트에 `agent.connector_owner_human_id`가 있으면 job의 `author_member_id`가 그 사람이어야 하고, trial 정지(`agent_provider_pin.kind='operator_env'`이면서 활성 사람 수가 1이 아님)가 아니어야 해요. 술어의 같은 하위 절(`gateway.rs` `trial_members_stop_sql!`)을 그대로 써요.
+   - 연결: `approved_scopes`에 `agent:jobs:read`, run 채널이 연결의 승인 채널(`hosted_connection_channel_ids`)
+   - 게이트웨이 claim 술어(`momo-outbox/src/gateway.rs` `CLAIMABLE_JOB_PREDICATE`)에서 **토큰 조건과 연결 상태(1)를 뺀 부분집합**이에요. 토큰 조건은 토큰 행의 종류·폐기·만료·audience·scope예요.
+   - 토큰 만료·갱신 누락은 에이전트 쪽 사실이라 보호가 아니에요. OAuth 접근 토큰은 30분이면 만료돼요(`momo-auth/src/hosted_oauth.rs`). 술어 전체를 쓰면 죽은 OAuth 연결의 run이 이 규칙에서 빠져요.
+   - **live lease**는 `lease_owner IS NOT NULL AND lease_expires_at > now()`예요. lease를 되돌리는 reaper가 없어서 만료된 `lease_owner`가 job 행에 남아요. 만료된 lease는 수령 가능이에요(`gateway.rs` 술어와 같아요).
+   - 하나라도 거짓이면 24시간 규칙이에요.
+4. **깨움 시각 T**: 공용 비교식 **`collected_since(t, row)`**를 써요. 정의는 `max(last_inbox_read_at, last_claim_at) ≥ t − 30초`예요.
+   - 30초는 발사 시각이 HTTP 응답 뒤에 찍히는 skew 여유예요.
+   - T는 이 run 원장의 `doorbell_rung` `<edge>_ok` 행 가운데 `collected_since(행 시각)`이 거짓인 **가장 이른** 행의 시각이에요. 곧 마지막 수령 증거 뒤의 첫 미수령 발사예요.
+   - D4 `derive_liveness`도 같은 함수를 연결 단위 발사 시각으로 불러요. 두 판정의 차이는 넘기는 시각뿐이에요.
+   - 그런 행이 없으면 이 규칙 대상이 아니에요(24시간 규칙). run 생성 이전 발사는 이 run 원장에 없어서 T가 될 수 없어요.
+   - 연결 단위 `last_fired_at`은 T로 쓰지 않아요. 초인종은 승인 채널의 모든 새 메시지에 울려요(쿨다운 60초). 그래서 대화가 이어지면 약 60초마다 갱신돼요. 그걸 T로 쓰면 낮에 대화하는 워크스페이스에서는 30분이 차지 않아요.
+5. **시계는 사람만 되돌려요**: 대화로 발사가 이어져도 T는 첫 미수령 발사에 서 있어요.
+   - T보다 늦은 사람의 「다시 깨우기」 요청(이 연결의 `hosted_agent_doorbell_ring.requested_at`)이 있으면, T를 그 가운데 가장 늦은 요청 시각으로 옮겨요.
+   - 사람이 다시 깨운 직후에 바로 끝내지 않으려는 거예요.
+6. **살아서 다른 일을 하는 증거 없음**: 아래 셋 중 하나라도 참이면 끝내지 않아요.
+   - (i) 같은 에이전트가 다른 `agent_job`의 live lease(3의 정의)를 쥐고 있어요. 만료된 lease는 보호하지 않아요.
+   - (ii) `last_run_event_at ≥ T`예요.
+   - (iii) T 이후에 `oort_ping{state:"working"}`이 왔어요.
+     - `last_ping_state`는 마지막 값 하나라서, 새 wake의 `idle` ping이 `working`을 덮어써요.
+     - 그래서 (iii)은 약한 보호예요. 겹치는 wake에서는 (i)·(ii)가 보호해요.
+   - 사건의 grok은 셋 모두 해당하지 않아요. 마지막 claim(10-18 00:30) 뒤 lease 상한 120분이 지나 live lease가 없고, ping은 `idle`만 왔어요. 그래서 여전히 잡혀요.
+7. **경과**: `now() − T ≥ MOMO_RUN_WOKEN_EXPIRE_MINUTES`예요(E2).
+
+**남는 위험**: 아래 run은 이 규칙 대상이 아니라서 기존 24시간 규칙으로 끝나요. 모두 보호 쪽 오류예요.
+- 수령 증거 뒤 발사가 원장에 없는 run. 원장 쓰기 한도 때문이에요.
+  - run당 처음 10행(`DOORBELL_RUNG_PER_RUN_CAP`)을 수령 증거 전에 다 쓴 run
+  - 발사마다 최근 20개 run에만 행을 쓰는 한도(`DOORBELL_RUNG_RUNS_PER_RING`) 밖의 오래된 run
+  - best-effort 원장 쓰기가 실패한 run
+- 승인 뒤 재큐된 run. `claimed` 행이 이미 있고 ring 행을 쓰지 않아요.
+- 받은편지함을 읽기만 하고 이 job을 가져가지 않는 에이전트의 run. 읽기가 수령 증거라서 보호돼요(기각 B).
+- 초인종이 없는 연결의 run.
+- 이 run들의 종결 전 표시는 E6이 다뤄요. 줄이는 방법은 후속 이슈로 남겨요.
+
+**배포 첫 스위프**: 배포 시점에 이미 조건을 만족하는 queued run(24시간 이내)은 첫 틱에 한꺼번에 끝나요. 사람이 부른 run마다 줄·푸시가 나가요. 의도된 소급이에요(7일 유령 규칙과 같은 이유, `run_stall_sweep.rs`).
+
+결재 2의 24시간 `unclaimed_expired`·7일 유령 규칙은 그대로예요.
+
+**E2. 기본값 30분 [권장].**
+- 근거: 실측 sweep 간격(중앙값 15분, 최대 29분)과 문서가 인정한 첫 실행 지연(~28분)이에요. 첫 미수령 발사 뒤 sweep이 한 번은 돌 시간을 줘요. 15분 × 2 = 30분이에요.
+- 마진은 최대 간격보다 1분이에요. 표본이 한 에이전트·약 10시간이라서, 운영에서 더 긴 간격이 보이면 env로 값을 올려요.
+- #4284 본문의 「10~15분」에서 늘렸어요. 15분이면 지연된 sweep(최대 29분)이 회수했을 run을 먼저 끝내요.
+- clamp 범위는 10~1440이에요. 전역 값이라 모든 호스티드 연결에 같아요. 연결별 값은 범위 밖이에요.
+- D4의 `woken_grace`(5분)는 「깨웠지만 아직 안 가져감」을 **보이기 시작하는** 시점이에요. 30분은 **끝내는** 시점이에요.
+
+**E3. 정리 경로 — `unclaimed_expired`와 같아요.** 한 테넌트 tx에서 아래를 해요. 행위자는 시계예요. 재배정·재시도는 없어요(D1-4).
+- run 종결(원장 트리거가 코드 기록)
+- 전달 job 은퇴
+- 감사 1행(`agent.run.stalled`, code)
+- E4의 줄·프레임 규칙
+
+앱 표지는 **`site_silent`**(「에이전트가 답하지 않아요」)예요. 초인종이 닿았으니 「꺼져 있음」(`site_off`)은 거짓이에요. `run_stall_sweep.rs`의 코드↔표지 고정 시험에 새 코드를 넣어요.
+
+**E4. 줄과 프레임 — 「아무도 기다리지 않는 서버 작업」만 조용히.**
+- **조용히 끝내는 대상은 환영 run 하나예요.**
+  - 판별: `input.welcome_kind`가 있거나 `idempotency_key`가 `welcome:`으로 시작해요.
+  - 처리: 채널 줄 없이 끝내요. 원장·감사에는 남아요.
+  - 적용 범위: 스위프 줄 한 곳에서 **세 코드 모두**(`woken_not_collected`·`unclaimed_expired`·`lease_abandoned`)에 적용해요.
+- **사람이 부른 run**(트리거 메시지가 있는 run + 사람이 「작업」 버튼으로 요청한 Work run)은 서버가 본문을 쓴 시스템 줄 `agent_run_timed_out{code}`을 남겨요.
+  - `woken_not_collected` 본문: 「에이전트가 이 작업을 가져가지 않아 종료했어요. 다시 요청해 주세요. 계속 안 되면 에이전트 소유자에게 알려 주세요.」
+  - 일반 멤버는 연결을 볼 수 없어요. 연결 확인은 소유자·admin이 보는 liveness 문구(E6)에 맡겨요.
+  - 「트리거 없음」은 판별자가 아니에요. Work run도 트리거가 없어요.
+- **종결 rail 프레임 기준은 하나예요.** 시작 프레임이 있는 run(사람이 부른 run)이나 원장에 `claimed`가 있는 run만 종결 프레임을 내요.
+  - 환영 run은 시작 프레임이 없어요(`routes/welcome.rs`). 그래서 수령 전에 끝나면(`woken_not_collected`·`unclaimed_expired`) 종결 프레임이 없어요.
+  - 환영 run도 에이전트가 claim해서 상태 프레임을 낸 뒤 `lease_abandoned`로 끝나면 종결 프레임을 내요. 줄은 어느 쪽도 없어요.
+  - migration 130 트리거가 원장 행마다 내는 얇은 `agent.run.event` 프레임은 그대로 나가요(화면 갱신용).
+- 코어 `runPhase.ts` `END_REASON_TEXT`에 `woken_not_collected: "깨웠지만 가져가지 않아 끝냈어요"`를 더해요. 푸시·`answers_message_id`는 ADR-0204 D8 그대로예요.
+
+**E5. 환영 대상 정책 (ADR-0181 D3 보강).**
+
+호스티드 에이전트를 환영 대상으로 삼으려면 아래 중 하나가 참이어야 해요. 호스티드 에이전트는 호스티드 연결이 있는 에이전트예요. `owner_only`만으로는 해당하지 않아요.
+- (a) 일 신호 `max(last_inbox_read_at, last_claim_at, last_run_event_at)`가 최근 `MOMO_WELCOME_HOSTED_SIGNAL_HOURS` 안이에요. 기본 24 [권장], 범위 1~168이에요.
+- (b) 연결이 `active`가 된 지(`proved_at`) 같은 창 안이에요. 이건 **신규 연결 예외**예요. ADR-0185 D-C c2의 「활성 전이 = 첫 환영」 훅이 이 예외로 그대로 살아요.
+
+동작 정리:
+- 표준 sweep을 도는 건강한 에이전트(15분마다 읽음)는 통과해요.
+- 10-23의 grok은 일 신호가 4일 전이고 활성은 10-10이라 탈락해요. 이 규칙이 10-23 사건을 막아요.
+- 한계: 초인종 전용이면서 하루 넘게 한가한 에이전트도 탈락해요.
+  - 그 경우는 다음 후보나 「오프너 없음」이에요.
+  - 운영자가 웰컴 에이전트를 지정하면 되돌릴 수 있어요.
+- 지정 에이전트(`welcome_agent_member_id`)의 의미는 **현행 그대로**예요. 지정이 대상이 될 수 없으면 다음 후보로 넘어가지 않고 오프너를 만들지 않아요(`welcome.rs` 현행 `None`).
+- 지정이 없을 때는 #general 안 후보를 생성순으로 보되, 호스티드 후보마다 위 검사를 해요.
+- 환영 마커는 사람마다 한 번만 써요(`welcome:{ws}:{member}:opener:v1`). 죽은 에이전트로 고르면 그 사람의 첫 환영이 사라져요. 그래서 이 검사가 필요해요.
+- 적용 위치: 활성 전이 호출(`auth.rs` 활성화·OAuth 첫 토큰)과 가입 호출(`routes/join.rs`·`routes/claim.rs`) 모두 같은 정책을 써요.
+
+**E6. 화면 계약 — 새 필드 없음.**
+- 종결 코드 enum에 `woken_not_collected` 하나가 늘어요.
+  - [V] 클라이언트 원장 파서는 `code`를 닫힌 집합으로 검사하지 않아요(`packages/momo-core/src/lib/api.ts` `optionalString(row, "code")`).
+  - 모르는 `kind`도 #3824부터 `unknown` 한 줄로 받아요.
+  - 그래서 이미 배포된 맥·웹·폰은 깨지지 않아요.
+- 시스템 줄 본문은 서버가 써서, 구 클라이언트도 그대로 보여요.
+- **종결 전 표시**: 대기 run 에이전트에게 D4 경고 라벨(예: `woken_not_collected`·`work_waiting`·`unresponsive`)이 있으면, 「대기 1번째 n시간째 기다려요」 대신 그 liveness 문구를 먼저 보이고 경과 시간은 뒤에 보여요.
+  - 30분 창의 `woken_not_collected`만이 아니에요. 24시간 규칙으로 남는 run(E1 남는 위험)도 이 표시로 정직해져요.
+  - 범위는 #4285(대화 아래 활동 줄·홈 작업 카드)예요.
+  - 소유자·admin에게는 「다시 깨우기」(S4)와 연결 화면으로 가는 길을 둬요.
+- 롤백: 데이터 정리가 필요 없어요. 새 코드로 끝난 run은 구 서버에서도 `timed_out` 행일 뿐이에요. E7의 열 단위 SELECT도 읽기뿐이라 롤백해도 해가 없어요.
+
+**E7. 권한 — notifier 역할의 읽기 범위.**
+- 스위프는 `momo_notifier`(BYPASSRLS, 테이블·열 단위 GRANT)로 돌아요. 판정(E1)에 필요한 만큼 아래 **열 단위 SELECT만** 더해요. 쓰기·DELETE는 없어요.
+  - `hosted_agent_liveness(workspace_id, connection_id, agent_member_id, last_inbox_read_at, last_claim_at, last_run_event_at, last_ping_at, last_ping_state, last_tool_error_at)`: 새로 줘요.
+  - `hosted_agent_connection`: 이미 있는 `(workspace_id, agent_member_id)`에 `id, status, approved_scopes, approved_channel_ids, approved_dm_channel_ids, confirmed_by`를 더해요. 뒤의 세 열은 `hosted_connection_channel_ids`(invoker 권한)가 읽어요.
+  - `hosted_agent_doorbell_ring(workspace_id, connection_id, requested_at)`: E1-5에 써요.
+  - `agent_provider_pin(workspace_id, agent_member_id, kind)`: E1-3의 trial 정지에 써요.
+- 주지 않는 것
+  - `token`: BYPASSRLS 역할에 토큰 읽기를 주지 않아요. E1-3이 토큰 조건을 빼는 이유이기도 해요.
+  - `hosted_agent_doorbell`: `url`·`secret_sealed`가 있는 테이블이에요. E1은 연결 단위 발사를 쓰지 않아요.
+- 이미 있는 권한
+  - `outbox`: 테이블 단위 SELECT·INSERT·UPDATE
+  - `agent_run_event`: SELECT·INSERT
+  - `agent`·`member`·`membership`·`channel`: 테이블 단위 SELECT. 커넥터 소유자 조건의 `agent.connector_owner_human_id`와 활성 사람 수(`member.kind·status·deleted_at`)는 여기로 읽어요.
+- 구현은 `infra/rust/sql/bootstrap_runtime_roles.sql`·`scripts/tests/test_notifier_role_grants.sh`·`prod_role_conformance_pg.rs`를 함께 고쳐요.
+- 열 목록은 구현 쿼리와 맞춰 확정해요. 이 목록보다 늘어나면 머지 전에 ADR 증보로 적어요.
+
+**E8. 바뀌지 않는 것.**
+- D1-4의 `lease_abandoned`(2시간)·`unclaimed_expired`(24시간)와 그 값, 7일 유령 규칙
+- D4 liveness 상태·임계값. 단 비교식을 공용 `collected_since`로 옮기면서 30초 skew 여유가 D4에도 들어가요.
+  - 발사 전 30초 안의 읽기를 수령으로 봐요. 그래서 D4 `woken_not_collected` 라벨이 그만큼 덜 서요.
+  - `hosted_liveness.rs`의 경계 시험을 이 값에 맞춰 고쳐요.
+- ADR-0171 초인종 페이로드·쿨다운·대상
+- 재배정 없음
+- 결재 3의 `oort_ping` 의미(ping `idle`은 일을 가져간다는 증거가 아니에요)
+
+### 기각 대안
+| 대안 | 기각 이유 |
+|---|---|
+| A. 24시간 값을 줄인다 | 초인종 사실 없이 시간만 보면, 살아서 줄을 처리하는 에이전트의 정상 대기까지 끊어요. |
+| B. claim만 본다(읽기 무시) | 앞선 작업을 처리하며 받은편지함을 읽는 에이전트의 대기 run을 끊어요. |
+| C. 연결 단위 발사(`last_fired_at`)를 T로 쓴다 | 대화가 이어지면 약 60초마다 갱신돼 30분이 차지 않아요. run 생성 이전 발사도 이 run의 깨움으로 세요. |
+| D. 원장의 마지막 미수령 발사를 T로 쓴다 | C와 같은 이유로 대화가 시계를 계속 밀어요. 첫 미수령 발사에 고정하고, 사람의 「다시 깨우기」만 되돌려요(E1-5). |
+| E. 시계 재시작을 허용하고 상한(첫 미수령 발사 + 60분)을 둔다 | 실효 기한이 대화량에 따라 30~60분으로 흔들려요. 고정 T가 더 단순하고 같은 사건을 잡아요. |
+| F. claim 술어 전체(토큰 포함)를 수령 가능 조건으로 쓴다 | 토큰 만료라는 에이전트 쪽 사실이 보호가 돼서, 죽은 OAuth 연결의 run이 빠져요. BYPASSRLS 역할에 `token` 읽기도 필요해요. |
+| G. ping을 「살아 있음」으로 보고 끝내지 않는다 | 이번 실측이 반례예요. ping `idle`만 5일째 오고 일은 하지 않았어요. `working` ping만 보호해요(E1-6). |
+| H. 재배정·자동 재시도 | D1-4가 기각했어요(중복 응답, 다른 에이전트의 오답). |
+| I. 클라이언트 TTL로 표시만 | D1 「서버 사실만」에 어긋나요. |
+| J. 「트리거 없음」으로 침묵 판별 | Work run이 사람이 부른 작업인데 조용히 끝나요. |
+| K. 환영 대상에 `last_claim_at` 7일 | 신규 연결이 첫 환영에서 영영 빠지고, 10-23 사건(claim 5일 전)도 못 막아요. |
+
+### 수용 기준 (red proof, #4284)
+
+판정 조건은 순수 함수 `woken_uncollected_verdict(..)`의 표 시험으로 써요. 표의 각 행은 **한 번에 한 조건만 거짓**이에요. DB 통합 시험은 그 위에 아래 픽스처 규칙으로 더해요.
+- 원장 ring 행은 손으로 INSERT하지 않아요. 실제 `record_doorbell_rung_in_tx`로 만들어요.
+- 시계는 과거 `created_at`을 지정한 superuser INSERT로 넣어요. 원장에 UPDATE 불변 트리거가 있어서 행을 늙힐 수 없어요(migration 128).
+
+1. **종결**: 첫 미수령 `ok` 발사 뒤 30분 동안 수령 증거·살아 있는 증거가 없는 사람 트리거 run은 `timed_out{woken_not_collected}`으로 끝나요. 원장 1, 감사 1, 채널 줄 1(서버 본문), 종결 프레임 1, job 은퇴가 남아요.
+2. **보호 짝**: 아래 각각은 끝내지 않아요. 각 조건을 판정에서 지우면 그 행이 빨개지는 사보타주를 둬요.
+   - T 뒤 받은편지함 읽기 1회
+   - 다른 job의 live lease
+   - `last_run_event_at ≥ T`
+   - T 뒤 `working` ping
+   - 연결 비활성(표 시험에서 나머지 조건은 모두 참)
+   - T 뒤 도구 거절
+   - oort 쪽으로 수령 불가인 job(채널 미승인·scope 없음·trial 정지 각각)
+   - **음성 대조**: 아래는 보호하지 않아요(끝내요). 보호 조건에 넣으면 빨개져요.
+     - 만료된 lease(`lease_owner`가 남아 있고 `lease_expires_at ≤ now()`)
+     - 만료된 토큰(OAuth 접근 토큰 만료)
+3. **경계**
+   - 29분 59초는 끝내지 않고 30분은 끝내요.
+   - `read = T − 29초`는 수령으로 보고 `T − 31초`는 미수령으로 봐요.
+   - clamp 밖 env는 경계값을 써요.
+4. **시계**
+   - 대화로 발사가 계속 나서 원장 ok 행이 이어져도 T는 첫 미수령 발사예요. 사보타주: 마지막 발사를 T로 쓰면 빨개요.
+   - T 뒤에 사람의 「다시 깨우기」 요청이 있으면 T는 그 시각이에요. 사보타주: 요청을 무시하면 빨개요.
+   - 수령 증거 뒤 원장 ok 행이 없으면(상한을 수령 전에 다 씀) 대상이 아니에요.
+   - 연결 `last_fired_at`만 있고 원장 행이 없으면 대상이 아니에요.
+5. **깨움 실패**
+   - `_failed`만 있으면 대상이 아니에요(24시간).
+   - `_ok` 뒤 `_failed`가 온 run은 그 `_ok`가 T예요.
+   - 사보타주: `_failed` 행을 T로 쓰면 빨개요.
+6. **줄·프레임**
+   - 환영 run의 세 코드는 줄 0이에요.
+   - 환영 run의 수령 전 종결(`woken_not_collected`·`unclaimed_expired`)은 종결 rail 프레임 0이고, claim 뒤 `lease_abandoned`는 종결 프레임 1이에요.
+   - Work run의 같은 코드는 줄 1, 종결 프레임 1이에요.
+   - 사보타주: 판별자를 `trigger IS NULL`로 바꾸면 Work 시험이 빨개요.
+7. **환영 대상**
+   - 사건 재현(claim 5일 전·읽기 4일 전·활성 14일 전): 그 호스티드 에이전트로 환영 run이 생기지 않아요.
+   - 막 활성된 연결(일 신호 없음): 생겨요.
+   - 15분마다 읽는 에이전트: 생겨요.
+   - 지정 에이전트가 탈락하면 오프너가 없어요(다음 후보로 넘어가지 않음).
+   - 사보타주: 신규 연결 예외를 제거하거나 검사를 제거하면 빨개요.
+8. **건드리지 않는 run**: claim된 run, `running`·`awaiting_approval` run, 원장에 `doorbell_rung` ok 행이 없는 run(초인종이 없거나 울리지 않음)이에요.
+   - 각 대조군은 그 조건 하나만 빼고 E1의 나머지 조건을 모두 만족해야 해요. 나머지 조건은 ring ok 행·수령 증거 없음·30분 경과예요.
+   - 판정 함수는 「`queued`이고 `claimed` 없음」을 잠근 행에서 다시 확인해요. 후보 SQL만 믿지 않아요.
+   - 그래야 상태 필터를 지우면 빨개져요.
+9. **한 정의**
+   - `collected_since`의 비교 방향을 뒤집으면 D4 시험과 스위프 시험이 같이 빨개져요.
+   - SQL 후보는 Rust 판정의 상위집합이에요. DB 통합 시험에 아래 입력을 넣어서, 판정이 참인 입력이 모두 후보 SQL에 잡히는 걸 보여요.
+     - `created_at = now() − 30분` 경계
+     - 원장 ok 행 1개뿐
+     - 다시 깨우기로 T가 늦어진 run
+10. **권한**
+    - notifier 역할로 스위프가 권한 오류 없이 돌아요(prod role 시험).
+    - grant 시험이 `hosted_agent_liveness`·`hosted_agent_connection`·`hosted_agent_doorbell_ring`·`agent_provider_pin`에 테이블 단위 SELECT가 없음을 단언해요. 모양은 `test_notifier_role_grants.sh`의 `workspace` 단언과 같아요. 새 열은 `column_reads`에 올려요.
+    - `token`·`hosted_agent_doorbell`에는 notifier GRANT가 하나도 없음을 단언해요. 기존 파서는 `ON TABLE` 줄만 보므로, 열 단위 GRANT(`GRANT SELECT (…) ON …`)까지 읽도록 파서를 넓히고 그 확장이 열 단위 GRANT 픽스처에서 빨개지는지 보여요. 실제 DB에서는 `has_table_privilege`·`has_column_privilege`로 한 번 더 단언해요(prod role 시험).
+11. **표지**: `woken_not_collected`의 앱 표지는 `site_silent`예요(코드↔표지 고정 시험).
+12. **교차 테넌트**: 다른 워크스페이스에 **같은 `run_id`의 `doorbell_rung` ok 행**을 넣어요. 원장은 FK가 없어서 넣을 수 있어요(migration 128).
+    - 판정·후보 조인에서 `workspace_id` 조건을 지우면 빨개져요.
+    - `hosted_agent_liveness`·`hosted_agent_doorbell_ring`은 복합 FK(`workspace_id, connection_id`)라 다른 워크스페이스 행을 같은 연결 id로 만들 수 없어요. 이 두 조인은 FK가 막는다는 사실을 스키마 시험으로 고정하고, 판정 쿼리의 조인 키에 `workspace_id`가 있음을 소스 시험으로 봐요.
+13. **호환**: 코어 `agentRunLedgerFromWire`가 `timed_out`+`woken_not_collected` 행을 받아들여요. `endReasonText`는 새 문장을 돌려주고, 모르는 코드에는 `undefined`를 돌려줘요(`runPhase.test.ts` 모양).
+14. **줄 계약**: 새 코드의 줄도 `answers_message_id`를 가져요. `client_msg_id`는 run id가 아니에요(기존 push·agent port 적합성 시험 모양).
+
+### 구현 슬라이스
+- **#4284 (engine)**
+  - 범위: E1~E5·E7, 서버 본문·코어 코드 문구, 위 수용 기준
+  - 함께 바꿀 것
+    - `StallKind` 변종과 고정 시험(`stalled.rs`), `stall_app_notice` 분기와 고정 시험
+    - 부트스트랩 GRANT·prod role 시험·grant 시험
+    - 새 환경변수 두 개(`MOMO_RUN_WOKEN_EXPIRE_MINUTES`·`MOMO_WELCOME_HOSTED_SIGNAL_HOURS`)의 설정·배포 문서
+    - `docs/SELF_HOST_AGENT.md`·`SELF_HOST_AGENT.ko.md`의 종결 코드 서술
+    - 코어 `END_REASON_TEXT`와 시험
+    - `run_stall_sweep.rs`의 낡은 주석(트리거 없는 run의 줄)
+  - 검증: workspace `cargo fmt/clippy/test`, 독립 보안 검수 Blocker 0·High 0(BYPASSRLS 역할 범위 변경)
+- **#4285 (UXUI)**: E6 종결 전 표시(대화 아래 활동 줄·홈 작업 카드)와 소유자 「다시 깨우기」 길(웹·데스크탑·폰). 사람 트리거 종결 줄은 서버 본문이라 화면 변경 없이 보여요.
+- 역방향 줄: ADR-0181 D3, ADR-0204 D8(이 PR).
