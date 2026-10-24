@@ -1148,7 +1148,7 @@ export function Composer({
           // 입력 그릇이 곧 떠 있는 카드다. 폰에서는 3:1 경계(--line-strong)의
           // 그릇이고, 넓은 창에서는 반경 20 · float 그림자 · 1px 선 고리다(시안).
           // 고대비에서는 고리가 다시 --line-strong이 된다(tokens.css).
-          className="composer-card focus-visible-within:focus-ring data-warn:border-warn"
+          className="@container composer-card focus-visible-within:focus-ring data-warn:border-warn"
           data-testid="composer-frame"
           data-warn={secretBlocked ? "" : undefined}
           onClick={(event) => {
@@ -1298,6 +1298,9 @@ export function Composer({
                 hasText={text.trim().length > 0}
                 onPress={format.openForSelection}
                 testId="composer-format-trigger"
+                // 카드가 15rem(240px)보다 좁으면(접히지 않은 사이드바 옆 600폭) 서식 단추부터 접는다:
+                // 단추를 더 얹으면 ▾가 카드 밖으로 나간다. 서식은 ⌘B·⌘I 로도 닿는다.
+                className="@max-[15rem]:hidden"
               />
             </div>
             {/* 예약 확정 줄(ADR-0182 ②, UI 명세 0.3): 힌트·작성 중 줄이 서는 **같은 고정 자리**를 3초 동안 대신 쓰고

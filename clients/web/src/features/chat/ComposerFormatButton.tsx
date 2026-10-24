@@ -1,4 +1,5 @@
 import { Bold } from "lucide-react";
+import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 
 // 도구 줄의 「서식」 (#4317). 서식 트레이는 글을 고르면 뜨는 것이 원래 길이고, 이 단추는 같은 트레이를
@@ -15,12 +16,14 @@ export function ComposerFormatButton({
   hasText,
   onPress,
   testId,
+  className,
 }: {
   available: boolean;
   open: boolean;
   hasText: boolean;
   onPress: () => void;
   testId: string;
+  className?: string;
 }) {
   if (!available) return null;
   return (
@@ -28,7 +31,7 @@ export function ComposerFormatButton({
       type="button"
       variant="ghost"
       size="icon"
-      className="tap-target shrink-0 aria-disabled:opacity-50"
+      className={cn("tap-target shrink-0 aria-disabled:opacity-50", className)}
       aria-label={COMPOSER_FORMAT_BUTTON_LABEL}
       aria-pressed={open}
       aria-disabled={hasText ? undefined : true}
