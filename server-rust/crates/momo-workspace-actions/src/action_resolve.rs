@@ -2411,14 +2411,13 @@ pub async fn resolve_action_with_origin_in_tx(
             let Some(run_id) = run_id else {
                 return Ok(Err(ActionRejection::new("avatar target did not resolve")));
             };
-            let Some((requester, run_channel)) =
-                momo_messaging::requester_of_run_in_tx(
-                    conn,
-                    workspace_id,
-                    run_id,
-                    proposer_member_id,
-                )
-                .await?
+            let Some((requester, run_channel)) = momo_messaging::requester_of_run_in_tx(
+                conn,
+                workspace_id,
+                run_id,
+                proposer_member_id,
+            )
+            .await?
             else {
                 return Ok(Err(ActionRejection::new("avatar target did not resolve")));
             };
@@ -2470,8 +2469,9 @@ pub async fn resolve_action_with_origin_in_tx(
                     image_id, sha256, ..
                 } => {
                     let pin = decode_sha256_hex(sha256);
-                    let row = momo_messaging::read_avatar_image_in_tx(conn, workspace_id, *image_id)
-                        .await?;
+                    let row =
+                        momo_messaging::read_avatar_image_in_tx(conn, workspace_id, *image_id)
+                            .await?;
                     let bound = row.is_some_and(|row| {
                         row.member_id == requester
                             && row.proposed_by == proposer_member_id

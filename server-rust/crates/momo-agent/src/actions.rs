@@ -3212,7 +3212,9 @@ mod tests {
         assert_eq!(action.proposers, Proposers::Any);
         assert_eq!(action.secret_delivery, SecretDelivery::None);
         assert_eq!(action.risk, Risk::Approval);
-        assert!(proposable_action_by_id(ACTION_MEMBER_AVATAR_SET, ProposalDoor::AgentPort).is_some());
+        assert!(
+            proposable_action_by_id(ACTION_MEMBER_AVATAR_SET, ProposalDoor::AgentPort).is_some()
+        );
         assert!(
             !TEAM_AI_ACTION_IDS.contains(&ACTION_MEMBER_AVATAR_SET),
             "the helper cannot raise it: it has no run whose caller could be the person"

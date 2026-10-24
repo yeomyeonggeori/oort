@@ -83,9 +83,8 @@ use momo_agent::actions::{
     AUDIT_WORKSPACE_SETTING_UPDATED_SCHEMA, AUDIT_WORK_TIER_POLICY_CHANGED,
     AUDIT_WORK_TIER_POLICY_CHANGED_SCHEMA, DEFAULT_INVITE_EXPIRES_IN_DAYS, INVITE_RESULT_NEXT,
     LAST_ATTEMPT_PROPS_KEY, REF_TYPE_AGENT, REF_TYPE_CHANNEL, REF_TYPE_HOSTED_CONNECTION,
-    REF_TYPE_MEMBER,
-    REF_TYPE_INVITE, REF_TYPE_WORKSPACE_SETTINGS, ROLE_REQUIRED, SECRET_ONCE_INVITE_LINK,
-    SECRET_ONCE_PAIRING,
+    REF_TYPE_INVITE, REF_TYPE_MEMBER, REF_TYPE_WORKSPACE_SETTINGS, ROLE_REQUIRED,
+    SECRET_ONCE_INVITE_LINK, SECRET_ONCE_PAIRING,
 };
 use momo_agent::approval::{
     decided_props_patch, decision_broadcast_payload, decision_event_payload, decision_receipt,
@@ -111,13 +110,12 @@ use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::PgConnection;
 use momo_messaging::{
     add_channel_member_in_tx, apply_agent_card_in_tx, apply_avatar_image_in_tx,
-    apply_human_avatar_image_in_tx, cent_channel,
-    clear_avatar_image_in_tx, create_channel_detailed_in_tx, delete_staged_avatar_image_in_tx,
-    emit_message_edited_in_tx, lock_agent_card_in_tx, normalize_channel_kind,
-    patch_and_prune_message_props_in_tx, patch_message_props_in_tx, read_avatar_image_bytes_in_tx,
-    read_avatar_image_in_tx, rename_agent_display_name_in_tx, send_message_in_tx,
-    staged_image_matches_pin_in_tx, AgentCard, AgentCardPatch, CardStatusPatch, FieldPatch,
-    MessageType, NewChannel, NewMessage,
+    apply_human_avatar_image_in_tx, cent_channel, clear_avatar_image_in_tx,
+    create_channel_detailed_in_tx, delete_staged_avatar_image_in_tx, emit_message_edited_in_tx,
+    lock_agent_card_in_tx, normalize_channel_kind, patch_and_prune_message_props_in_tx,
+    patch_message_props_in_tx, read_avatar_image_bytes_in_tx, read_avatar_image_in_tx,
+    rename_agent_display_name_in_tx, send_message_in_tx, staged_image_matches_pin_in_tx, AgentCard,
+    AgentCardPatch, CardStatusPatch, FieldPatch, MessageType, NewChannel, NewMessage,
 };
 use momo_outbox::{emit_outbox, OutboxKind, RESUME_APPROVAL_JOB_METHOD};
 use momo_settings::{
@@ -1843,7 +1841,9 @@ async fn execute_workspace_action(
             Execution::Refused(decision) => return Ok(Ok(decision)),
         },
         ActionArgs::MemberAvatarSet { target: None, .. } => {
-            return Err(protocol_error("member.avatar.set resolved without a person"));
+            return Err(protocol_error(
+                "member.avatar.set resolved without a person",
+            ));
         }
         ActionArgs::PluginInstall {
             plugin_id,
@@ -3186,8 +3186,7 @@ async fn execute_member_avatar_set(
             "member.avatar.set reached the executor for someone else",
         ));
     }
-    let pin =
-        decode_pin_hex(sha256).ok_or_else(|| protocol_error("avatar pin is not a sha256"))?;
+    let pin = decode_pin_hex(sha256).ok_or_else(|| protocol_error("avatar pin is not a sha256"))?;
     if !staged_image_matches_pin_in_tx(
         conn,
         input.workspace_id,

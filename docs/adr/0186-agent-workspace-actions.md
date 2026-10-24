@@ -634,3 +634,126 @@ Accepted 본문의 수치·모양 중 구현에서 측정으로 바뀐 것만 �
 10. **관측**: 저장소에 메트릭 레지스트리가 없어 새 카운터는 만들지 않았다. 감사 행(`agent.avatar.updated`: 출처·mime·치수·크기·sha256 앞 12자, 바이트 없음)을 시간 단위로 집계하면 된다.
 11. **`agent.invite`의 구현 모양 (#3788)**: ① 레지스트리 `secret_delivery`는 회수 호출(I2)이 생기기 전까지 `None`이다 — 플래그를 켜도 받을 길이 없는 코드가 되지 않도록 P0의 `deliver_secret_not_supported`가 거절하고, I2가 `OptIn`으로 바꾼다. ② 감사는 기존 `hosted_agent.connection.created`를 바꾸지 않고 별도 행 `agent.invited`(`via_agent`·`approval_id`·`platform`·`connection_id`, 값 없음)를 더한다. ③ 핸들은 표시 이름과 같은 엄격 규칙(예약어)·명단 충돌·멘션 겹침·삭제된 멤버의 핸들까지 제안 시점에 검사한다(보안 검수 M1/M2/L1). ④ 결정 응답을 잃으면 코드는 복구할 수 없고 소유자가 기존 재발급 경로로 새로 받는다(D4).
 12. **`oort_action_claim_secret`의 구현 모양 (#3789)**: ① 도구 오류 어휘에 두 코드를 더했다 — `already_claimed`(-32006)와 `claim_expired`(-32007)는 **제안자에게만** 닿는다. 제안자 아님·미승인·허가 없음·거절·대상 소멸·없는 승인은 모두 같은 `unavailable`(-32004)이다. ② `handle`은 `bound_handle`로만 증명하고(연결·에이전트 바인딩) 임대 생존은 요구하지 않는다 — 승인 뒤 run은 이미 끝나 임대가 없기 때문이다. ③ 허가는 `payload.secretClaim`에 `{allowed, deadlineMs, kind, refId, decidedBy, origin}`로만 기록한다(값 없음); 초대 링크의 절대 origin은 승인 요청의 것을 저장해 회수 때 같은 링크를 만든다. ④ 초대 `regenerate_invite`는 만료를 7일로 되돌리므로, 회수는 원래 `expires_at`을 그대로 되돌려 쓰고 `created_by`는 승인자다. ⑤ 승인 때 만든 값(pairing·초대 코드)은 아무에게도 보이지 않은 채 버려지고, 회수 시점의 새 값만 나간다. ⑥ 레지스트리: `invite.create`=`Always`, `agent.invite`=`OptIn`; 결과 줄과 제안 카드 행(「초대 링크: 에이전트가 이 링크를 받아 전달해요」, 「연결 코드: 승인할 때 고르세요」→선택 결과)이 선택을 늘 보여 준다. ⑦ 초대 링크의 origin은 운영자가 설정한 공개 주소가 있으면 그것이 우선하고, 없을 때만 승인 요청의 origin을 쓴다(회수한 링크는 사람이 보지 않고 에이전트를 거치므로). 설정이 없는 배포에서 `Host`를 믿는 한계는 기존 초대 링크와 같고, 설정을 권장한다. ⑧ 회수 시 승인자(`decidedBy`)가 여전히 관리자인지 다시 증명한다.
+
+## 증보 2026-10-25 — 사람 프로필 사진 행동: `member.avatar.set` (v4, #4385)
+
+- Status: **Proposed** (2026-10-25. 머지 조건 = 성재의 Accepted 결재, ADR-0100. V4-10의 결재 요청 다섯 건에 답이 필요하고, 구현은 이 증보와 함께 올라간 슬라이스 하나다)
+- 발제: 성재 2026-10-25 「모바일에서도 grok을 통해서 내 프로필을 바꿀 수도 있는거지 ?」 → 사실은 「안 된다」였고(레지스트리에 사람 프로필 사진을 바꾸는 행동이 없다), 요청은 「대화에 사진을 첨부하고 그록봇에게 〈이걸로 내 프로필 사진 바꿔줘〉」다.
+- 기안: Sonnet 5.5 worker(#4385)
+- Consumes: ADR-0186 D2~D4·V1~V7·V3-2a·V3-13 · ADR-0161 D-M2~D-M4(사람 아바타 `members/me/avatar`, 증보 1) · ADR-0204 D7(승인 푸시 대상·앱에서 열기) · ADR-0162 D6(Agent Port 승인 채널) · ADR-0100
+- 접점 이슈: #3791(승인 카드 렌더, UXUI — `action.preview`·`ref.type: member` 표시), #3787(에이전트 아바타 A1 — 같은 이미지 처리 파이프라인)
+- 이 증보가 **의도적으로 바꾸는 경계 셋**: ① ADR-0161 D-M2 「에이전트는 인간 아바타를 바꿀 수 없다」 → **승인된 액션 경유로만, 본인에게만** 허용(V4-2). 직접 경로(`members/me/avatar`)의 `require_human`과 에이전트 bearer 비허용은 그대로다. ② ADR-0186 D3의 역할 어휘에 `requesting_member`를 더한다(V4-3): 지금까지 어떤 역할도 「그 행동이 바꾸는 사람 본인」을 뜻하지 않았다. ③ 131의 `agent_avatar_image`가 **주인으로 사람을 받는다**(V4-6, migration 147). 새 테이블은 없다. **바꾸지 않는 것**: D2(제안 → 승인 → 실행)·이미지 처리(V3-2a의 1~3, 6~8: 재인코딩·핀·불변)·`instructions` 불가침·직접 업로드 경로.
+- 표기: [V] 코드 직접 확인 · [추정] 해석 · [확인 필요] 근거가 약해 실측이 필요한 것.
+
+### V4-0. 코드로 확인한 사실(2026-10-25, track/engine `d037effa2` 기준)
+- 사람 아바타의 유일한 쓰기 길은 `POST/DELETE …/members/me/avatar…`다. 업로드는 Drive 세션을 열고 클라이언트가 Drive에 PUT한 뒤 `complete`가 크기·mime·매직 넘버·헤더 치수(≤4096)를 검증한다. 저장은 `member_avatar_media`(Drive 파일 id)이고 `member.avatar_media_id`가 포인터다. [V]
+- Drive에는 서버가 바이트를 쓰는 API가 없다(131 머리말). 그리고 **교체·삭제·실패·방치된 아바타의 Drive 객체는 회수 잡이 지운다**(`avatar_reclaim`). [V]
+- `/members/{m}/avatar/content`와 로스터의 `avatarUrl`은 이미 `avatar_image_id`(131)를 모든 멤버에 대해 먼저 읽고(`read_current_avatar_image_in_tx`, `COALESCE(avatar_media_id, avatar_image_id)`) 없으면 Drive 업로드를 읽는다. 사람 멤버가 `avatar_image_id`를 가져도 서빙·로스터 쪽은 고칠 곳이 없다. [V]
+- 131의 INSERT 트리거는 이미지의 **주인(`member_id`)이 에이전트**여야 한다고 강제했다. `member_avatar_exclusive_ck`는 한 멤버가 업로드 아바타와 이미지 아바타를 동시에 갖지 못하게 한다. [V]
+- `settle_member_avatar_upload_in_tx`는 `avatar_media_id`만 쓰고, `clear_own_member_avatar_in_tx`는 `avatar_media_id`만 지운다. 사람이 이미지 아바타를 갖게 되면 앞의 것은 CHECK 위반(500), 뒤의 것은 「내 사진 지우기」가 이미지를 못 지우는 결함이 된다. [V — 시험으로 재현·수리]
+- 에이전트 런의 「누가 불렀나」는 `agent_run.trigger_message_id`의 작성자다. 사람이 에이전트를 멘션한 REST 전송이 그 메시지다. [V]
+- `find_visible_image_attachment_in_tx`(에이전트 자기 프로필용)는 DM을 제외하고 에이전트의 승인 채널 집합을 경계로 쓴다. 사람이 자기 에이전트와 말하는 곳은 DM일 수 있고, 경계가 되어야 하는 것은 승인 채널 집합이 아니라 **그 대화**다. [V]
+- 승인 결정 경로의 역할 판정은 `decider_gate`/`GatePlan`(exhaustive match) 한 곳이고, 푸시 대상(ADR-0204 D7)이 같은 함수를 읽는다. 새 역할은 두 곳이 컴파일러에 의해 같이 정해진다. [V]
+
+### V4-1. 결정 요약
+| # | 결정 | 근거 |
+|---|---|---|
+| 1 | 행동 `member.avatar.set`, 인자는 **`{attachmentId}` 하나**. 대상·URL·바이트·프리셋 키는 스키마에 없다(`additionalProperties:false`) | 「내 얼굴은 내가 고른다」가 검증기가 아니라 스키마의 성질이 되게 |
+| 2 | **대상 = 요청자 본인**. 서버가 런의 트리거 메시지 작성자(활성 사람)에서 도출한다. 에이전트가 쓴 문자열은 대상이 되지 못한다 | V1-a(이름이 대상이 되는 길 없음)의 사람판 |
+| 3 | **소스 = 그 사람이 같은 대화에 올린 첨부만.** 작성자 = 요청자, 채널 = 런의 채널(DM 포함), 완료·삭제 안 됨·PNG/JPEG/WebP·≤5 MiB. 다른 사람의 첨부·다른 대화의 첨부는 존재하지 않는 id와 **같은** `InvalidArguments` | V3-2a(a)의 경계를 「에이전트가 읽을 수 있는 곳」에서 「그 대화·그 사람」으로 좁힘 |
+| 4 | **승인자 = 사진 주인 본인뿐.** 워크스페이스 관리자도, 에이전트의 소유자도, 같은 방의 다른 사람도 승인·미리보기를 못 한다 | 관리자가 남의 얼굴을 정하는 길은 만들지 않는다 |
+| 5 | 이미지 검사·재인코딩·sha256 핀·`staged → applied`·불변은 **V3-2a의 파이프라인을 그대로** 쓴다(입력 한 변 ≤2048, ≤5 MiB, PNG/JPEG/WebP 정지 이미지, 결과 ≤512²·≤512 KiB) | 새 디코더 경계를 만들지 않는다 |
+| 6 | 저장·서빙은 131의 `agent_avatar_image`·`member.avatar_image_id`·기존 content 프록시. **기존 `members/me/avatar` 경로와는 포인터 단계에서 공존**한다(V4-6) | Drive에 서버가 쓸 길이 없고, Drive 파일을 별칭하면 회수 잡이 첨부를 지운다(V4-8) |
+| 7 | 카드는 항상 **앱에서 열어 결정**한다(잠금 화면 승인 없음). 미리보기는 `avatar-preview`를 재사용하되 읽는 사람이 본인 하나 | 사진은 배너로 판단할 수 없다(2026-10-17 결정의 연장) |
+| 8 | 한 사람에게 대기 카드는 하나(같은 행동·같은 대상 중복 `Conflict`), 에이전트당 대기 3개 상한은 그대로 | V1-e·V4-M-9 재사용 |
+| 9 | Agent Port 전용(`Proposers::Any`, 팀 AI 목록에는 없다). 팀 AI는 런이 없어 「부른 사람」이 없다 | 대상 도출의 전제 |
+
+### V4-2. 행동 계약
+- **제안**: `oort_action_propose {handle, actionId:"member.avatar.set", args:{attachmentId}}`. `attachmentId`는 `oort_conversation_read`의 `imageAttachments[].id`다(V3-13 6). 핸들·임대·승인 채널·스코프 판정은 다른 행동과 같다.
+- **도출(트랜잭션 안, 두 번)**: 제안 때와 결정 때 모두 `requester_of_run_in_tx`가 `(런, 제안 에이전트)`로 트리거 작성자를 읽는다. 작성자가 활성 사람이 아니면(에이전트·탈퇴·삭제·트리거 없음) 거절한다. 다른 에이전트의 런은 이 에이전트의 제안에 쓰이지 못한다.
+- **소스 검사**: `find_requester_attachment_in_tx` — 작성자 = 요청자 AND 채널 = 런의 채널 AND 완료 AND 허용 mime AND 크기 상한 AND 메시지가 삭제되지 않음 AND 채널이 보관되지 않음. 이 검사는 Drive 읽기 **앞**에서 한 번, 카드를 쓰는 트랜잭션에서 한 번 더 한다.
+- **검사·재인코딩**: V3-2a 공통 처리 1~3(매직 넘버, 헤더 치수, 디코더 할당 한도, 동시 디코드 2, 10초 상한, 재인코딩). 원본·메타데이터는 어느 경로로도 저장·서빙하지 않는다.
+- **저장**: `agent_avatar_image`에 `staged`로 INSERT — `member_id`=요청자, `proposed_by`=제안 에이전트, `source='attachment'`. 승인이 만들어진 뒤 `approval_id`를 한 번 묶는다. 저장 인자는 `{avatar:{source:"staged", imageId, sha256, origin:"attachment"}}`이고 첨부 id·Drive 파일 id·바이트는 어디에도 남지 않는다. 핀은 `{target: <요청자>, avatar:{imageId, sha256}}`다.
+- **카드**: 행 「대상」(서버가 읽은 표시 이름·핸들), 「프로필 사진」(현재 → 새 이미지), 「사진 출처」(내가 이 대화에 보낸 첨부). `action.preview`는 서버가 만든 값(`imageId`·`sha256`·`mime`·치수·크기·`origin`)뿐이다.
+- **결정**: 판정 순서는 다른 행동과 같다 — 역할이 주체에 대해 판정되므로 인자를 다시 증명한 **뒤**에 한다. 결정자 ≠ 핀의 사람이면 403 `role_required`(승인 소모 없음). 오래돼 어긋난 카드(핀·해시)는 본인에게만 409 `action_args_invalid`로 말하고 나머지에게는 `role_required`다(대상 존재 여부를 말하지 않는다). 승인되면 한 트랜잭션에서 핀을 다시 확인하고(DB가 바이트를 재해시) `apply_human_avatar_image_in_tx`가 멤버 행을 잠근 채 이미지를 `applied`로, 포인터를 옮기고 `avatar_media_id`를 비우고 **이전 이미지 행을 지운다**.
+- **거절·만료**: 기존 arm이 `staged` 행을 지운다(`args.avatar.source == "staged"`를 읽는 공용 arm이라 새 코드 없음). 얼굴은 그대로다.
+- **감사**(값·바이트 없음, sha256은 앞 12자까지): `member.avatar.staged`(제안·카드 작성 시), `member.avatar.set`(적용, 행위자=본인, 주체=본인, `via_agent`·`approval_id`·출처·mime·치수·크기), `member.avatar.refused`(카드가 만들어지기 전에 거절된 제안, `reason` 코드).
+- **결과 `ref`**: `{type:"member", id:<본인>}`(OpenAPI `WorkspaceActionRef.type`에 `member` 추가).
+
+**거절 사유 표**(에이전트가 보는 것은 항상 맨 오른쪽 한 가지고, 사유는 감사 `reason`에만 남는다)
+| 사유 | 감사 `reason` | 에이전트가 보는 것 |
+|---|---|---|
+| 런이 없거나 트리거가 사람이 아님·탈퇴·삭제 | `no_requester` | `InvalidArguments` |
+| 첨부가 없음·남의 것·다른 대화·삭제된 메시지·미완료·비이미지·5 MiB 초과(DB 크기) | `attachment_not_available` | `InvalidArguments` |
+| Drive에서 읽지 못함 | `drive_unavailable` | `InvalidArguments` |
+| 실제 바이트가 5 MiB 초과 | `too_large` | `InvalidArguments` |
+| 매직 넘버가 PNG·JPEG·WebP가 아님(GIF·SVG 포함) | `unsupported_type` | `InvalidArguments` |
+| 움직이는 WebP | `animated` | `InvalidArguments` |
+| 헤더 치수를 읽지 못함 / 한 변 > 2048 또는 0 | `dimensions_unreadable` / `dimensions_out_of_range` | `InvalidArguments` |
+| 디코드 실패·결과가 512 KiB 초과·타임아웃·디코더 대기 | `decode_failed`·`output_too_large`·`timeout`·`busy` | `InvalidArguments` |
+| 알 수 없는 키(`memberId`·`targetHandle`·`url`·`dataBase64`…) | — (스키마·파서) | `InvalidArguments` |
+| 같은 사람에게 대기 카드가 이미 있음 / 에이전트의 대기 3개 | — | `Conflict`(409) |
+| 결정자가 사진 주인이 아님 | — | (결정 응답) 403 `role_required`, 승인 소모 없음 |
+| 핀·해시가 어긋남 | — | (결정 응답) 409 `action_args_invalid`, 승인 소모 없음 |
+
+### V4-3. 역할 `requesting_member`
+`RequiredRole::RequestingMember`(와이어 `requesting_member`, 한국어 「사진 주인 본인」)는 「그 행동이 바꾸는 사람이 결정자」다. `gate_plan`의 exhaustive match가 `GatePlan::RequestingMember`를 정하고, 결정 경로(`execute_workspace_action`)는 해석된 `GateSubject::Member(person)`을 `input.member_id`와 비교하며, 푸시 대상(`CardAudience::allows`)은 같은 핀(`pinned_target_member`)의 사람 하나에게만 깨어난다. 어느 쪽도 관리자 분기를 갖지 않는다.
+
+### V4-4. 입력 크기: 폰 사진이 거절된다 — 성재 결정 필요 ⚠
+- 직접 업로드(ADR-0161 D-M3)는 **4096×4096·GIF 허용**이고, 에이전트 경로의 이미지 파이프라인은 **한 변 ≤2048·PNG/JPEG/WebP 정지 이미지**다(V3-13 2: 4096²에서 RSS 160~310 MB, 디코드 2건 동시). 4032×3024 폰 사진은 이 행동에서 **거절된다**. 시험이 이 사실을 못박는다(`…refuses_every_picture…`의 「a phone-size picture」).
+- 이 행동의 대표 시나리오가 「폰에서 찍은 사진을 첨부」라는 점이 문제다. [확인 필요] 폰 첨부 업로드가 길이를 줄이는지(iOS 선택기의 「실제 크기」 옵션, HEIC→JPEG 변환 여부)는 이 증보가 실측하지 않았다 — UXUI/폰 쪽 확인이 필요하다. HEIC가 그대로 올라오면 mime 허용 목록(PNG/JPEG/WebP) 밖이라 이 행동도, 직접 업로드도 못 쓴다.
+- 선택지: (A) **지금 상한 유지** — 에이전트 지시문이 「크면 줄여 다시 보내 달라고」 안내한다(구현됨). (B) 이 행동에만 **입력 상한을 4096으로 올리고** 동시 디코드를 1로 낮추거나, 큰 입력을 **축소 먼저** 디코드하는 경로(JPEG DCT 스케일 디코드)를 따로 만든다 — 메모리 실측(RSS)이 선행 조건이다. (C) 폰 클라이언트가 첨부를 올리기 전에 긴 변 2048로 줄인다(서버 변경 없음, UXUI 이슈).
+- 이 증보의 구현은 (A)다. 어느 쪽으로 가든 서버 상수 하나(`AGENT_AVATAR_IN_MAX_DIM`)와 이 표의 문구가 바뀐다.
+
+### V4-5. 에이전트 지시문(제안 방법)
+레지스트리가 한 곳에서 소유한다(`MEMBER_AVATAR_SET_PROMPT_LINE`, 도구 스키마 분기의 `description`, `docs/SELF_HOST_AGENT.md` 3.3.16b의 표 행과 항목이 같은 내용을 말한다): 누군가 사진을 보내며 「이걸로 내 프로필 사진 바꿔줘」라고 하면 `member.avatar.set`으로 제안한다. `attachmentId`는 `oort_conversation_read`의 `imageAttachments[].id`이고 **그 사람이 이 대화에 보낸 사진 하나**다. 대상은 말을 건 본인뿐이고 다른 사람의 사진·다른 대화의 사진은 쓸 수 없다. 그 사람이 카드에서 직접 보고 승인해야 바뀐다. 한 변 2048px을 넘는 사진·GIF·움직이는 이미지는 거절되니 그땐 사진을 줄여 다시 보내 달라고 부탁한다. 제안 뒤에는 턴을 끝낸다(3.3.16b의 규칙 그대로).
+
+### V4-6. 저장: 131 테이블을 사람에게 열고, 사람 쪽 두 경로를 고친다 (migration 147)
+- 새 테이블은 없다. 147은 `agent_avatar_image_guard_insert` 하나를 바꾼다: **제안자(`proposed_by`)가 에이전트**이고 **주인(`member_id`)이 살아 있는 멤버**이면 된다(131: 주인이 에이전트). 사람이 이 테이블에 자기 행을 직접 넣는 길은 여전히 없다(제안자 = 에이전트). 불변 트리거·`approval_id` write-once·복합 FK(자기 몫 이미지만 가리킴)·`member_avatar_exclusive_ck`·RLS FORCE는 그대로다. 테이블 이름 변경은 범위 밖이다.
+- `apply_human_avatar_image_in_tx`는 `apply_avatar_image_in_tx`와 **단어 하나**(`kind`)만 다르다. 에이전트 프로필 카드가 사람에게 이미지를 적용할 수 없고, 사람 카드가 에이전트에게 적용할 수 없다(시험).
+- **공존(이 증보의 실제 「재사용」)**: 사람이 직접 올린 사진(`settle_member_avatar_upload_in_tx`)은 같은 UPDATE에서 `avatar_image_id`를 비우고 교체된 이미지 행을 지운다. 「내 사진 지우기」(`clear_own_member_avatar_in_tx`)는 업로드 포인터와 이미지 포인터를 함께 지우고 이미지 행을 지운다. 둘 다 이 증보 없이는 사람이 이미지 아바타를 가질 수 없어 생기지 않던 결함이다. 사람이 방금 고른 쪽이 늘 이긴다.
+- 서빙: 변경 없음(V4-0).
+
+### V4-7. 범위 밖과 이유
+- **프리셋·`generated`(에이전트가 만든 이미지)·URL**: 사람의 얼굴은 그 사람이 보낸 사진이어야 한다. 에이전트가 그려 주는 사람 사진은 다른 결정이다.
+- **다른 사람의 프로필을 바꾸는 행동**(관리자 대행 포함): 이 증보는 「본인만」이다.
+- **표시 이름·소개·상태**(사람 프로필 텍스트): 별 증보. 사람 프로필의 신뢰 표면은 에이전트의 것과 다른 규칙이 필요하다.
+- **카드 UI·「프로필 사진 지우기」 에이전트 행동·워크스페이스 아바타**: UXUI/별 이슈.
+- **팀 AI 경로**: V4-1 9.
+- **벤더(그록봇·dots·Muse)와의 실제 왕복**: 시험 범위 밖이며 `runtime-unverified`다.
+
+### V4-8. 기각한 대안
+| 대안 | 기각 이유 |
+|---|---|
+| 첨부의 Drive 파일 id를 `member_avatar_media` 행에 **별칭**으로 걸어 `members/me/avatar` 경로를 그대로 쓴다 | 서버가 Drive에 쓸 길이 없어 가장 싸 보이지만, 같은 Drive 객체를 첨부와 아바타 두 행이 가리키게 된다. 아바타 회수 잡(`avatar_reclaim`)은 교체·삭제된 아바타의 Drive 객체를 **지운다** — 사람이 사진을 한 번 더 바꾸면 **메시지 첨부의 원본이 사라진다**. 재인코딩도 없어 EXIF(위치)·폴리글랏이 그대로 서빙된다 |
+| 관리자(또는 에이전트 소유자)도 승인할 수 있다 | 관리자가 남의 얼굴을 정하는 길이 된다. 「본인만」이 이 행동의 핵심이다 |
+| `targetHandle`로 대상을 받는다 | 대상이 에이전트의 문자열이 되어 V1-a를 깬다. 런에서 도출하면 인자가 없다 |
+| 첨부 대신 URL·base64를 받는다 | 외부 URL 금지(131), 사람 얼굴에 에이전트 생성물을 올리는 것은 V4-7 |
+| 에이전트의 승인 채널 집합을 경계로 쓴다(V3-2a (a) 그대로) | DM을 제외해 「그록봇과 DM으로 말하며 사진을 보낸다」가 안 된다. 사람과 에이전트가 대화한 곳이 경계다 |
+| `RequiredRole::AgentEditor`를 재사용한다 | 대상이 에이전트가 아니고 사람이며, 관리자 우회가 들어 있다 |
+
+### V4-9. 보안 검수가 특히 볼 곳
+1. 결정 게이트: `person != input.member_id`(approvals.rs, 주체 판정 직후)와 실행기의 백스톱(`execute_member_avatar_set`), 미리보기의 `target != viewer`, 푸시 대상. 넷 중 하나가 빠져도 시험 하나가 빨개져야 한다(사보타주 표).
+2. 도출: `requester_of_run_in_tx` — 트리거 작성자가 사람인가, 런이 이 에이전트의 것인가. 이 도출이 에이전트가 고른 값에 의존하는 길이 있는가.
+3. 소스 질의: 작성자·채널 두 조건과 DM(경계가 승인 채널 집합이 아님)의 의미.
+4. 두 사람 경로의 공존 수리(147과 `settle`·`clear`)가 직접 업로드의 기존 계약(자기만·20회/시간·Drive 검증)을 건드리지 않는가.
+5. 감사 3종이 값·바이트 없이 사유 코드만 남기는가.
+6. 같은 사람에게 에이전트가 반복 제안해 카드를 쌓는 남용: 한 사람 한 카드·에이전트 대기 3개·디코드 동시 2·10초. **시간당 상한은 두지 않았다**(V3-6 결재 4와 같은 이유; 다르게 하려면 성재 결정).
+
+### V4-10. 결재 요청 (성재)
+1. **이 증보의 Accepted 여부**(사람 프로필 사진을 승인된 액션으로 에이전트가 제안한다, 본인만 승인).
+2. **V4-4**: 폰 사진 입력 한 변 상한 — (A) 2048 유지+「줄여 보내 달라」 안내(구현) / (B) 서버에서 4096·축소 디코드 / (C) 폰이 올리기 전에 줄임.
+3. **V4-6**: `agent_avatar_image` 이름·「주인=에이전트」 가정을 사람에게 여는 것(147)에 동의하는지, 아니면 사람 이미지는 별도 테이블로 가를지.
+4. 에이전트가 **자기 소유자 아닌 사람**의 요청에도 이 카드를 제안할 수 있다(그 사람이 에이전트를 불렀다면) — 의도가 맞는지(구현: 맞다; 본인이 부른 에이전트이면 누구든).
+5. 시간당 제안 상한 비도입 유지 여부(V4-9 6).
+
+### V4-11. 구현 슬라이스와 수용 기준(red proof)
+한 슬라이스(#4385, base `track/engine`): migration 147 · 레지스트리·역할·결정기·푸시 · 소스·도출 질의 · 제안 준비·스테이징·감사 · 미리보기 판정 · 사람 경로 공존 수리 · OpenAPI·런북·도구 스키마. 각 시험은 해당 분기를 지우면 실패해야 한다(PR 본문의 사보타주 표가 정본이다).
+- 레지스트리: 역할 `requesting_member`, 스키마의 유일한 키 `attachmentId`, 항상 앱에서 열기, `ACTIONS`·도구 enum·OpenAPI 9개 일치.
+- 제안: 남의 첨부·다른 대화 첨부·GIF·폰 크기·비이미지·미완료·미결속·없는 id는 **같은 응답**이고 `staged` 행 0개. 대상·URL·바이트 키는 `InvalidArguments`. 관리자가 멘션해 만든 런으로는 요청자의 파일을 쓰지 못한다. 대조군으로 같은 설정에서 요청자의 파일은 200.
+- 카드: 핀의 대상 = 요청자, 저장 인자에 첨부 id·Drive id 없음, 스테이징 행의 주인 = 요청자·제안자 = 에이전트.
+- 미리보기·결정·푸시: 요청자만 200, 관리자·에이전트 소유자·다른 방 멤버는 404/403 `role_required`·승인 pending·포인터 불변. 바이트를 바꾼 뒤 결정하면 409 `action_args_invalid`.
+- 적용: 포인터·`applied`·서빙 바이트 = 서버가 쓴 것, 감사 행위자=주체=본인·값 없음. 거절·만료는 `staged` 삭제·얼굴 불변. 한 사람 한 카드(409).
+- 공존: 에이전트가 정해 준 이미지가 있는 사람이 직접 올리면 성공하고 이미지 행이 사라진다. 「내 사진 지우기」는 이미지도 지운다. 에이전트용 apply가 사람에게, 사람용 apply가 에이전트에게 적용되지 않는다. 사람이 이 테이블에 직접 INSERT하면 거절.
+- 도출: 에이전트가 쓴 트리거·다른 에이전트의 런·탈퇴한 사람은 요청자가 없다. DM의 요청자 파일은 찾고 다른 대화·남의 파일·삭제된 메시지·크기 초과는 못 찾는다.
+- 미검증 표시: DM에서 실제 호스티드 에이전트 런이 이 행동까지 도달하는 왕복(승인 채널 집합에 DM이 들어 있어야 한다), 벤더와의 실제 왕복, 폰·웹 승인 카드 표시(UXUI)는 `runtime-unverified`다.

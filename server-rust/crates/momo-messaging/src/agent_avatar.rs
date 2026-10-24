@@ -512,8 +512,15 @@ pub async fn apply_avatar_image_in_tx(
     image_id: Uuid,
     approval_id: Uuid,
 ) -> Result<Option<Option<Uuid>>, DbError> {
-    apply_avatar_image_for_kind_in_tx(conn, workspace_id, member_id, image_id, approval_id, "agent")
-        .await
+    apply_avatar_image_for_kind_in_tx(
+        conn,
+        workspace_id,
+        member_id,
+        image_id,
+        approval_id,
+        "agent",
+    )
+    .await
 }
 
 /// [`apply_avatar_image_in_tx`] for a **person** (ADR-0186 증보 v4 `member.avatar.set`):
@@ -527,8 +534,15 @@ pub async fn apply_human_avatar_image_in_tx(
     image_id: Uuid,
     approval_id: Uuid,
 ) -> Result<Option<Option<Uuid>>, DbError> {
-    apply_avatar_image_for_kind_in_tx(conn, workspace_id, member_id, image_id, approval_id, "human")
-        .await
+    apply_avatar_image_for_kind_in_tx(
+        conn,
+        workspace_id,
+        member_id,
+        image_id,
+        approval_id,
+        "human",
+    )
+    .await
 }
 
 async fn apply_avatar_image_for_kind_in_tx(
