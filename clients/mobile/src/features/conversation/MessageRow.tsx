@@ -1,3 +1,4 @@
+import {isMemberAvatarSetAction} from '@momo/core/features/approvals/avatarPreview';
 import {missingMemberLabel} from '@momo/core/features/workspace/directory';
 import {
   threadRollup,
@@ -34,7 +35,7 @@ import {
 import {
   ACTION_RESULT_SECRET_ONCE_NOTE,
   ACTION_RESULT_STATUS_LABEL,
-  ACTION_RESULT_STATUS_NOTE,
+  actionResultStatusNote,
   type ActionResultStatus,
   type AgentActionResultCard,
 } from '@momo/core/features/timeline/actionResultCard';
@@ -105,6 +106,7 @@ import {MessageActionSheet, timeLabel} from './MessageActionSheet';
 import {MessageEditorSheet} from './MessageEditorSheet';
 import {appNote} from './appVoice';
 import {Avatar} from './Avatar';
+import {ApprovalAvatarPreview} from './ApprovalAvatarPreview';
 import {CONV} from './convDesign';
 import {AiConnectSuggestion} from './AiConnectSuggestion';
 import {SettingsOpenSuggestion} from './SettingsOpenSuggestion';
@@ -1427,7 +1429,7 @@ function ActionResultCardView({
         </View>
       ) : null}
       <Sentence style={styles.cardBody} testID="action-result-note">
-        {ACTION_RESULT_STATUS_NOTE[card.status]}
+        {actionResultStatusNote(card.status, card.actionId)}
       </Sentence>
       {card.secretShownOnce ? (
         <Sentence
@@ -1703,6 +1705,14 @@ function AgentCard({
             action={card.action}
             teamAi={card.proposedVia !== undefined}
             styles={styles}
+          />
+        ) : null}
+        {/* 「내 프로필 사진 바꾸기」(#4394): 한 문장과 제안된 사진은 서버 행 아래, 버튼 위에
+            선다. 결정이 난 카드에는 서지 않는다 — 결과는 결과 카드가 말한다. */}
+        {settledStatus === 'pending' && isMemberAvatarSetAction(card.action?.id) ? (
+          <ApprovalAvatarPreview
+            card={card}
+            agentName={memberFor(directory, card.requestedByMemberId)?.displayName ?? null}
           />
         ) : null}
         {/* =====================================================================
