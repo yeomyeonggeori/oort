@@ -341,12 +341,15 @@ free_port() {
 webhook_key() { python3 -c 'import secrets; print(secrets.token_hex(24))'; }
 WEBHOOK_KEY_INGRESS="$(webhook_key)"
 WEBHOOK_KEY_OUTBOUND="$(webhook_key)"
+# The app JWT signing secret is also mandatory at boot (MissingJwtSecret).
+APP_JWT_HMAC="$(webhook_key)"
 
 SERVER_PORT="$(free_port)"
 (
   cd "$REPO_ROOT"
   DATABASE_URL="postgres://momo_app:momo_app_dev_pw@127.0.0.1:$HOST_PORT/$RECOVERY_DB" \
     MOMO_ENV=local HOST=127.0.0.1 PORT="$SERVER_PORT" \
+    JWT_HMAC="${JWT_HMAC:-$APP_JWT_HMAC}" \
     WEBHOOK_INGRESS_MASTER_KEY="${WEBHOOK_INGRESS_MASTER_KEY:-$WEBHOOK_KEY_INGRESS}" \
     OUTBOUND_WEBHOOK_MASTER_KEY="${OUTBOUND_WEBHOOK_MASTER_KEY:-$WEBHOOK_KEY_OUTBOUND}" \
     cargo run --manifest-path "$REPO_ROOT/server-rust/Cargo.toml" --bin momo-server

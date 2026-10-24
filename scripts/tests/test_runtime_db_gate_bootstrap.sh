@@ -15,7 +15,7 @@
 #   E  verify_owner_bootstrap_rust.sh env covers every `${VAR:?}` the runtime-roles
 #                              and migrate services demand (NOTIFIER_* was missing).
 #   F  verify_t3_migration_repair.sh   no retired `swift` requirement; the server it
-#                              boots gets both webhook master keys.
+#                              boots gets JWT_HMAC and both webhook master keys.
 #   G  verify_huddle_lifecycle.sh      accepts keg-only libpq (not on PATH).
 set -euo pipefail
 
@@ -182,7 +182,8 @@ case "$tool_line" in *" cargo"*) ;; *) fail "F: cargo (what the server boot real
 env_block="$(awk '/^SERVER_PORT=/{f=1} f{print} /cargo run --manifest-path/{exit}' "$T3")"
 printf '%s\n' "$env_block" | grep -q 'WEBHOOK_INGRESS_MASTER_KEY=' || fail "F: momo-server boots without WEBHOOK_INGRESS_MASTER_KEY"
 printf '%s\n' "$env_block" | grep -q 'OUTBOUND_WEBHOOK_MASTER_KEY=' || fail "F: momo-server boots without OUTBOUND_WEBHOOK_MASTER_KEY"
-pass "F t3 repair: no swift requirement, both webhook master keys reach the booted server"
+printf '%s\n' "$env_block" | grep -q 'JWT_HMAC=' || fail "F: momo-server boots without JWT_HMAC (MissingJwtSecret, seen on a real run)"
+pass "F t3 repair: no swift requirement, JWT secret and both webhook master keys reach the booted server"
 
 # ---- G: huddle verifier accepts keg-only libpq -------------------------------
 # docker/cargo stubs let the script run through; psql only exists in the fake libpq dir.
