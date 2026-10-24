@@ -17,6 +17,7 @@ import {MEMBER_AVATAR_MAX_BYTES, type RosterMember} from '@momo/core/lib/api';
 //     벗기고 HEIC·PNG·GIF 를 JPEG 로 정규화한다. 긴 변은 512 를 넘지 않는다(더 작으면 키우지 않는다).
 //   * 줄인 파일이 5MiB 를 넘으면 서버를 부르지 않는다(세션을 열지 않는다).
 //   * Drive PUT 이 실패하면 complete 를 부르지 않는다(코어 `uploadMyAvatarWith`).
+//   * 성공하면 줄인 파일로 내 아바타 캐시를 바로 채운다(서버가 준 `?v=` 주소가 키) — 이니셜이 깜빡이지 않는다.
 //   * 임시 파일(고른 것·줄인 것)은 어느 길로 끝나든 지운다.
 //
 // 고르기·줄이기·올리기·지우기는 포트(`AvatarPhotoPorts`)로 받는다. 네이티브 구현은
@@ -66,6 +67,14 @@ export interface AvatarPhotoPorts {
   put(uploadUrl: string, uri: string, mime: string): Promise<{ok: boolean}>;
   /** 임시 파일을 지운다. 실패해도 던지지 않는다. */
   discard(uri: string): void;
+  /**
+   * 올린 파일(줄인 것)로 내 아바타 캐시를 바로 채운다 — 서버가 준 버전 붙은 주소가 키라서
+   * 새 사진이 내려받기 전에도 첫 프레임부터 서고, roster 가 같은 주소를 주면 그대로 맞는다.
+   * 실패해도 던지지 않는다(이니셜이 잠깐 설 뿐이다).
+   */
+  seed(avatarUrl: string, uri: string): void;
+  /** 이 기기에서 카메라를 열 수 있는가(시뮬레이터·제한이면 `false`). */
+  cameraAvailable(): boolean;
 }
 
 export type AvatarFailure =
@@ -173,6 +182,12 @@ export async function changeAvatarPhoto(
         {name: AVATAR_FILE_NAME, mime: AVATAR_MIME, size},
         uploadUrl => ports.put(uploadUrl, shrunk.uri, AVATAR_MIME),
       );
+      try {
+        // discard(finally) 보다 먼저 — 줄인 파일이 아직 있을 때만 복사할 수 있다.
+        ports.seed(media.avatarUrl, shrunk.uri);
+      } catch {
+        // 캐시 시드는 덤이다. 실패해도 업로드는 성공이다.
+      }
       return {ok: true, avatarUrl: media.avatarUrl};
     } catch (error: unknown) {
       return fail({kind: 'upload', message: memberAvatarUploadError(error)});

@@ -57,6 +57,10 @@ function ports(over: Partial<AvatarPhotoPorts> & {picked?: AvatarPickOutcome} = 
     discard: jest.fn((uri: string) => {
       log.push(`discard:${uri}`);
     }),
+    seed: jest.fn((url: string, uri: string) => {
+      log.push(`seed:${url}|${uri}`);
+    }),
+    cameraAvailable: jest.fn(() => true),
   };
   return {...base, ...rest} as AvatarPhotoPorts;
 }
@@ -83,6 +87,7 @@ describe('changeAvatarPhoto — 순서와 업로드 대상', () => {
       'create:{"name":"avatar.jpg","mime":"image/jpeg","size":90000}',
       'put:https://drive.example/cap|file:///cache/shrunk.jpg|image/jpeg',
       'complete',
+      `seed:${NEW_PATH}|file:///cache/shrunk.jpg`,
     ]);
     expect(mockComplete).toHaveBeenCalledWith(WS, 'media-2');
   });
@@ -254,5 +259,34 @@ describe('withMyAvatar — roster 에서 나만 바뀐다', () => {
 
   it('아직 읽지 않은 roster 는 만들어 내지 않는다', () => {
     expect(withMyAvatar(undefined, 'me-1', NEW_PATH)).toBeUndefined();
+  });
+});
+
+describe('changeAvatarPhoto — 업로드 직후 캐시 시드 (#4384 결정 3)', () => {
+  it('성공하면 줄인 파일을 서버가 준 ?v= 주소로 시드하고, 그 뒤에 임시 파일을 지운다', async () => {
+    const p = ports();
+    await changeAvatarPhoto(WS, 'library', p);
+    expect(p.seed).toHaveBeenCalledTimes(1);
+    expect(p.seed).toHaveBeenCalledWith(NEW_PATH, 'file:///cache/shrunk.jpg');
+    expect(log.indexOf(`seed:${NEW_PATH}|file:///cache/shrunk.jpg`)).toBeGreaterThan(log.indexOf('complete'));
+    expect(log.indexOf(`seed:${NEW_PATH}|file:///cache/shrunk.jpg`)).toBeLessThan(
+      log.indexOf('discard:file:///cache/shrunk.jpg'),
+    );
+  });
+
+  it('실패(PUT 실패·용량 초과·취소)에서는 시드하지 않는다', async () => {
+    const failing = ports({put: jest.fn(async () => ({ok: false}))});
+    await changeAvatarPhoto(WS, 'library', failing);
+    const big = ports({sizeOf: jest.fn(() => 5 * MIB + 1)});
+    await changeAvatarPhoto(WS, 'library', big);
+    const cancelled = ports({picked: {kind: 'cancelled'}});
+    await changeAvatarPhoto(WS, 'library', cancelled);
+    for (const p of [failing, big, cancelled]) expect(p.seed).not.toHaveBeenCalled();
+  });
+
+  it('시드가 던져도 업로드는 성공이다', async () => {
+    const p = ports({seed: jest.fn(() => { throw new Error('disk'); })});
+    expect(await changeAvatarPhoto(WS, 'library', p)).toEqual({ok: true, avatarUrl: NEW_PATH});
+    expect(p.discard).toHaveBeenCalledWith('file:///cache/shrunk.jpg');
   });
 });

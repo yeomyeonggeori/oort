@@ -102,6 +102,8 @@ beforeEach(() => {
     sizeOf: jest.fn(() => 50_000),
     put: jest.fn(async () => ({ok: true})),
     discard: jest.fn(),
+    seed: jest.fn(),
+    cameraAvailable: jest.fn(() => true),
   };
   mockCreate.mockReset().mockResolvedValue({id: 'media-new', status: 'pending', uploadUrl: 'https://drive.example/cap'});
   mockComplete.mockReset().mockResolvedValue({id: 'media-new', memberId: ME, status: 'ready', avatarUrl: NEW_PATH});
@@ -115,6 +117,16 @@ afterEach(() => {
 
 const ROWS_WITH_PHOTO = () => [member(ME, '이도현', OLD_PATH), member(OTHER, '박서연', OTHER_PATH)];
 const ROWS_NO_PHOTO = () => [member(ME, '이도현'), member(OTHER, '박서연', OTHER_PATH)];
+
+describe('카메라를 못 여는 기기 (#4384 결정 4)', () => {
+  it('cameraAvailable 이 false 면 「사진 찍기」 줄이 없고 고르기·지우기는 남는다', () => {
+    (ports.cameraAvailable as jest.Mock).mockReturnValue(false);
+    mount(ROWS_WITH_PHOTO());
+    expect(screen.queryByTestId('avatar-choose-camera')).toBeNull();
+    expect(screen.getByTestId('avatar-choose-library')).toBeTruthy();
+    expect(screen.getByTestId('avatar-remove')).toBeTruthy();
+  });
+});
 
 describe('세 줄', () => {
   it('사진이 없으면 지우기 줄이 없다(고르기·찍기만)', () => {

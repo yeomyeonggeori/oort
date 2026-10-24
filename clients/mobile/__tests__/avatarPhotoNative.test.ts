@@ -159,3 +159,12 @@ describe('줄이기와 올리기', () => {
     expect(await nativeAvatarPhotoPorts.put('u', 'file:///x', 'image/jpeg')).toEqual({ok: false});
   });
 });
+
+describe('카메라 가용성 (#4384 결정 4)', () => {
+  it('실기기만 true, 시뮬레이터는 false', () => {
+    device.__state.isDevice = true;
+    expect(nativeAvatarPhotoPorts.cameraAvailable()).toBe(true);
+    device.__state.isDevice = false;
+    expect(nativeAvatarPhotoPorts.cameraAvailable()).toBe(false);
+  });
+});

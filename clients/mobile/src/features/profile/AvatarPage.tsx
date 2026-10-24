@@ -65,6 +65,8 @@ export function AvatarPage({
 
   const self: RosterMember | undefined = memberFor(directory, selfId) ?? undefined;
   const hasPhoto = self?.avatarUrl !== undefined;
+  // 카메라를 못 여는 기기(시뮬레이터 등)에는 줄을 세우지 않는다 — 눌러서 막히는 줄을 두지 않는다.
+  const cameraAvailable = ports.cameraAvailable();
   const locked = busy !== null || !online;
 
   const settle = (avatarUrl: string | undefined) => {
@@ -147,16 +149,18 @@ export function AvatarPage({
           trailing={busy === 'library' ? spinner : undefined}
           testID="avatar-choose-library"
         />
-        <GroupRow
-          title="사진 찍기"
-          detail="카메라로 지금 찍어요"
-          chevron={busy !== 'camera'}
-          separated
-          disabled={locked}
-          onPress={() => choose('camera')}
-          trailing={busy === 'camera' ? spinner : undefined}
-          testID="avatar-choose-camera"
-        />
+        {cameraAvailable ? (
+          <GroupRow
+            title="사진 찍기"
+            detail="카메라로 지금 찍어요"
+            chevron={busy !== 'camera'}
+            separated
+            disabled={locked}
+            onPress={() => choose('camera')}
+            trailing={busy === 'camera' ? spinner : undefined}
+            testID="avatar-choose-camera"
+          />
+        ) : null}
         {hasPhoto ? (
           <GroupRow
             title="사진 지우기"

@@ -3,6 +3,7 @@ import * as Device from 'expo-device';
 import * as ImagePicker from 'expo-image-picker';
 import {ImageManipulator, SaveFormat} from 'expo-image-manipulator';
 
+import {seedMemberAvatar} from '../conversation/memberAvatarImage';
 import {putAttachmentBytes} from '../attachments/uploadTransport';
 import type {AvatarPhotoPorts, AvatarPickOutcome, AvatarSource} from './avatarPhoto';
 
@@ -82,6 +83,11 @@ export const nativeAvatarPhotoPorts: AvatarPhotoPorts = {
     const result = await putAttachmentBytes(uploadUrl, uri, mime, () => undefined).done;
     return {ok: result.ok};
   },
+  seed(avatarUrl, uri) {
+    seedMemberAvatar(avatarUrl, uri);
+  },
+  // 시뮬레이터에서 `sourceType = .camera` 는 네이티브 예외다 — 실기기만 줄을 세운다.
+  cameraAvailable: () => Device.isDevice,
   discard(uri) {
     try {
       const file = new File(uri);
