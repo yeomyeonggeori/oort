@@ -113,7 +113,7 @@ export function MessageEditorSheet({
             // 전수로 센다.
             lineBreakStrategyIOS="hangul-word"
             autoFocus
-            blurOnSubmit={false}
+            submitBehavior="newline"
             textAlignVertical="top"
             accessibilityLabel="고칠 메시지 내용"
             placeholder="메시지 내용"
