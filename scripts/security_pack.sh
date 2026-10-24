@@ -85,9 +85,21 @@ cmd_setup() {
   setup_db "$DATABASE_URL"
 }
 
+# 일부 시험은 사설 PG 클라이언트(psql)를 PGHOST·PGPORT·PGUSER·PGPASSWORD·PGDATABASE 로 띄운다
+# (tool_grants_conformance_pg 등). 설정되지 않은 값만 DATABASE_URL 에서 채운다. 값은 출력하지 않는다.
+export_pg_env() {
+  local url="$1" rest cred hostport
+  rest="${url#*://}"; cred="${rest%%@*}"; rest="${rest#*@}"
+  hostport="${rest%%/*}"
+  export PGUSER="${PGUSER:-${cred%%:*}}" PGPASSWORD="${PGPASSWORD:-${cred#*:}}"
+  export PGHOST="${PGHOST:-${hostport%%:*}}" PGPORT="${PGPORT:-${hostport##*:}}"
+  rest="${rest#*/}"; export PGDATABASE="${PGDATABASE:-${rest%%\?*}}"
+}
+
 # $1=패키지 $2=타깃 $3=로그. 통과 개수(N)를 stdout 으로.
 run_target() {
   local pkg="$1" test="$2" log="$3" line passed failed
+  export_pg_env "$DATABASE_URL"
   cargo test --locked --manifest-path "$MANIFEST" -p "$pkg" --test "$test" -- --ignored --test-threads=1 >"$log" 2>&1 \
     || { tail -n 40 "$log" >&2; die "빨강: $pkg/$test (전체 로그: $log)"; }
   line="$(grep -E '^test result: ' "$log" | tail -n 1)"
@@ -139,7 +151,23 @@ cmd_negative() {
 cmd_nightly() {
   [ -n "${DATABASE_URL:-}" ] || die "DATABASE_URL(슈퍼유저)이 필요해요"
   mkdir -p "$OUT"
-  cargo test --locked --manifest-path "$MANIFEST" --workspace -- --ignored --test-threads=1 2>&1 | tee "$OUT/nightly.log"
+  export_pg_env "$DATABASE_URL"
+  local rc=0 skips="" t
+  # prod_role_conformance_pg 는 cluster-global 역할 비밀번호를 재설정해 이후 타깃을 오염시킨다.
+  # 1) 그 타깃의 시험만 건너뛰고 나머지 전량을 돌린 뒤, 2) 마지막 순서로 따로 돌린다.
+  for t in every_notifier_job_iteration_runs_as_its_production_role \
+           a_hosted_work_run_push_and_run_status_trigger_run_as_the_notifier_role \
+           the_run_stall_and_ledger_retention_sweeps_do_real_work_as_their_production_roles; do
+    skips="$skips --skip $t"
+  done
+  # shellcheck disable=SC2086
+  cargo test --locked --manifest-path "$MANIFEST" --workspace --no-fail-fast -- --ignored --test-threads=1 $skips \
+    >"$OUT/nightly.log" 2>&1 || rc=1
+  tail -n 40 "$OUT/nightly.log"
+  cargo test --locked --manifest-path "$MANIFEST" -p momo-notifier --test prod_role_conformance_pg -- --ignored --test-threads=1 \
+    >"$OUT/nightly-prod-role.log" 2>&1 || rc=1
+  tail -n 40 "$OUT/nightly-prod-role.log"
+  return "$rc"
 }
 
 case "${1:-}" in
