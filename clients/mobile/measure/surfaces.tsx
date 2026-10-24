@@ -182,6 +182,7 @@ import {PullHold} from './pullHold';
 import {PullRefreshSurface} from './pullRefresh';
 import {DmConversationSurface} from './dmConversation';
 import {DockGapSurface} from './dockGap';
+import {ComposerNewlineSurface} from './composerNewline';
 import {SteadySurface, seedSteady} from './steady';
 import {AppsSurface} from './apps';
 import {AppsTailSurface} from './appsTail';
@@ -2202,6 +2203,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   // #4264: 마지막 행 아래 → 알약 위 간격. 대화 화면의 도크 스택 그대로 + 레이아웃 값 계측.
   if (name === 'gap' || name.startsWith('gap-')) {
     return <DockGapSurface which={name.slice('gap'.length).replace(/^-/, '')} />;
+  }
+  // #4321: 「가 ⏎ 나」를 보내면 줄바꿈이 어느 단계에서 사라지는가. 배송되는 컴포저 + 맨 입력창 + 모의 API.
+  if (name === 'composer-newline' || name.startsWith('composer-newline-')) {
+    return <ComposerNewlineSurface which={name.slice('composer-newline'.length).replace(/^-/, '')} />;
   }
   // #4181: 사진 카드(첨부 메뉴가 변신해 도착하는 최근 사진 그리드). 실제 카드·진짜 PhotoKit 포트.
   if (name.startsWith('photo-card')) {
