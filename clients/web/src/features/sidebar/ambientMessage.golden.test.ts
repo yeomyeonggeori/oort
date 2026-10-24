@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
-import type { Message } from "../../lib/api";
-import { isAmbientMessage } from "./ambientMessage";
-import golden from "./__fixtures__/dm-readable-message.golden.json";
+import type { Message } from "@momo/core/lib/api";
+import { isAmbientMessage } from "@momo/core/features/sidebar/ambientMessage";
+import golden from "../../../../../docs/api/dm-readable-message.golden.json";
 
 // =============================================================================
-// 규칙 드리프트 골든, 코어 쪽 (#4227, ADR-0177 증보 D9).
+// 규칙 드리프트 골든, 코어 함수 쪽 (#4227, ADR-0177 증보 D9).
 //
-// 「읽을 메시지」와 「기계 메시지」의 구별은 두 곳에 한 벌씩 있다: 이 패키지의 `isAmbientMessage`(클라이언트가 메시지를
-// 읽어 가르는 쪽)와 Postgres 트리거 `message_last_readable_seq_trg`(서버가 channel_seq.last_readable_seq 를 올리는
-// 쪽, server/Migrations/146_dm_closure.sql). 한쪽만 바뀌면 같은 DM 이 기기마다 다르게 보인다. 두 구현이 공유하는 기대값은
-// `__fixtures__/dm-readable-message.golden.json` 한 파일이고 사본이 없다: 여기서는 `core` 칸을 재고, Rust 격리 PG 시험
-// (`dm_closure_conformance_pg.rs`)이 같은 파일의 `trigger` 칸을 실제 트리거에 넣어 잰다. 이 파일은 코어 안에 있다 — 코어
-// 순수성 게이트는 패키지 밖 파일 읽기를 막으므로, Rust 가 이 경로를 읽는다.
+// 「읽을 메시지」와 「기계 메시지」의 구별은 두 곳에 한 벌씩 있다: 코어의 `isAmbientMessage`(클라이언트가 메시지를 읽어 가르는
+// 쪽)와 Postgres 트리거 `message_last_readable_seq_trg`(서버가 channel_seq.last_readable_seq 를 올리는 쪽,
+// server/Migrations/146_dm_closure.sql). 한쪽만 바뀌면 같은 DM 이 기기마다 다르게 보인다. 두 구현이 공유하는 기대값은
+// `docs/api/dm-readable-message.golden.json` 한 파일이고 사본이 없다: 여기서는 `core` 칸을 재고, Rust 격리 PG 시험
+// (`dm_closure_conformance_pg.rs`)이 같은 파일의 `trigger` 칸을 실제 트리거에 넣어 잰다. 골든은 repo 문서라 코어 순수 게이트가
+// 읽을 수 없어(`packages/momo-core/src` 밖), 웹 시험이 맡는다(`commandSuggest.settingsOpenGolden.test.ts`와 같다).
 // =============================================================================
 
 interface GoldenShape {

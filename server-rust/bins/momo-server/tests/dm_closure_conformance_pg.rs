@@ -46,10 +46,8 @@ use momo_server::{build_app, AppState};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-/// The same bytes the core vitest reads (`ambientMessage.golden.test.ts`): one file, no copy.
-const GOLDEN: &str = include_str!(
-    "../../../../packages/momo-core/src/features/sidebar/__fixtures__/dm-readable-message.golden.json"
-);
+/// The same bytes the web vitest reads (`clients/web/.../ambientMessage.golden.test.ts`): one file, no copy.
+const GOLDEN: &str = include_str!("../../../../docs/api/dm-readable-message.golden.json");
 
 async fn test_lock() -> tokio::sync::MutexGuard<'static, ()> {
     static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();

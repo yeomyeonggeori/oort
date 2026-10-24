@@ -1,12 +1,11 @@
 //! #4227 / ADR-0177 증보 D9 — the shape and invariants of the readable-message drift golden.
 //!
-//! No database. The golden file (`dm-readable-message.golden.json`, in the core package so the core's
-//! purity gate lets its vitest read it) is the one place the two implementations of "is this message
-//! worth reading" — the core's `isAmbientMessage` and the Postgres trigger
-//! `message_last_readable_seq_trg` — agree on by value. Two suites read it for the values:
+//! No database. The golden file (`docs/api/dm-readable-message.golden.json`) is the one place the two
+//! implementations of "is this message worth reading" — the core's `isAmbientMessage` and the Postgres
+//! trigger `message_last_readable_seq_trg` — agree on by value. Two suites read it for the values:
 //!
-//! * `packages/momo-core/.../ambientMessage.golden.test.ts` runs every shape through
-//!   `isAmbientMessage` and compares with `core`;
+//! * `clients/web/src/features/sidebar/ambientMessage.golden.test.ts` (a web test: the core's purity gate
+//!   cannot read repo docs) runs every shape through `isAmbientMessage` and compares with `core`;
 //! * `bins/momo-server/tests/dm_closure_conformance_pg.rs` (`#[ignore]`, real Postgres) inserts every
 //!   shape through the production send path and compares the trigger's effect with `trigger`.
 //!
@@ -19,9 +18,7 @@ use serde_json::Value;
 
 /// The same bytes the vitest and the PG suite read. `include_str!` makes the file's absence a build
 /// error, so the golden cannot be deleted from under the Rust side.
-const GOLDEN: &str = include_str!(
-    "../../../../packages/momo-core/src/features/sidebar/__fixtures__/dm-readable-message.golden.json"
-);
+const GOLDEN: &str = include_str!("../../../../docs/api/dm-readable-message.golden.json");
 
 const NOT_APPLICABLE: &str = "n/a(insert-time)";
 
