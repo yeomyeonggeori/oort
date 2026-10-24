@@ -2070,10 +2070,16 @@ export function Composer({
           // 앱이 문장마다 다르게 끊긴다(디자인 시스템 §5.3: 한국어 텍스트 처리 ·
           // 한 클라 안의 내부 불일치). 그래서 여기서도 어절이 단위다.
           lineBreakStrategyIOS="hangul-word"
-          // Enter inserts a newline (see the header). `blurOnSubmit` false keeps
-          // the keyboard up, because on a phone the return key is the only line
-          // break there is.
-          blurOnSubmit={false}
+          // Enter inserts a newline (see the header), and the keyboard stays up:
+          // on a phone the return key is the only line break there is. Said out
+          // loud with `submitBehavior` (#4321) instead of inherited from the
+          // deprecated `blurOnSubmit={false}`, which RN only translates into
+          // this value on a multiline input — the return key can neither send
+          // (no `onSubmitEditing` is wired, on purpose) nor be swallowed
+          // (`'submit'` drops the `\n` and sends nothing) nor close the
+          // keyboard (`'blurAndSubmit'`). `__tests__/composerNewline.test.tsx`
+          // pins the value; `maestro/70-composer-newline.yaml` is the key press.
+          submitBehavior="newline"
           textAlignVertical="top"
           testID="composer-input"
         />
