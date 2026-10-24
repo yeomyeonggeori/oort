@@ -96,6 +96,7 @@ import {
   type TextStyle,
 } from 'react-native';
 import {font, line, radius, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {pressFace, ROW_FACE} from './rowFace';
 import {usePalette, useStyles} from '../../design/theme';
 import {CONV_ICONS, CONV_ICON_SIZE} from '../../design/icons';
 import {COPY_RECEIPT_MS, copyText} from './copy';
@@ -2834,9 +2835,10 @@ function MessageRowInner({
       style={[
         styles.row,
         startsGroup && styles.rowStartsGroup,
-        // 착지 틴트는 **그릇**이 입는다: 안쪽(`rowInner`)에 걸면 좌우
-        // `SAFE_GUTTER` 만큼이 물들지 않아, 화면 너비를 가로지르는 한 줄이 아니라
-        // 가운데 떠 있는 상자가 된다 — 그것은 「여기다」가 아니라 카드다.
+        // 착지 틴트는 **그릇**이 입는다. 그릇 상자가 곧 강조 면이다 — 화면 끝에서
+        // `ROW_FACE.outer` 떨어지고 모서리가 둥글다(눌림 면·물러나는 덮개와 같은 상자,
+        // `rowFace.ts`). 옛 근거(「안쪽에 걸면 좌우가 안 물든다」)는 owner 2026-10-24 가
+        // 「각지다」고 짚어 대체됐다.
         landed && styles.rowLanded,
       ]}
       testID="message-row"
@@ -3001,6 +3003,14 @@ function MessageRowInner({
                 // 「보내는 중엔 선택되고 확인되면 꺼진다」가 이제 뜻을 갖는다.
                 // ===================================================
                 selectable={!actionable}
+                // 말풍선 (#4300): 내 글은 신호색, 남·에이전트 글은 표면. 카드·첨부는 아래에서
+                // 말풍선 밖 전체 폭으로 선다.
+                bubble={
+                  actions?.myMemberId !== undefined &&
+                  message.authorMemberId === actions.myMemberId
+                    ? 'mine'
+                    : 'other'
+                }
               />
             ) : null}
 
@@ -3539,13 +3549,13 @@ MessageRow.displayName = 'MessageRow';
  * 색을 **베껴 적으면** 그 사진은 증거가 아니게 된다. 같은 심볼을 들면 이 값이
  * 바뀌는 순간 사진도 함께 틀린 것이 된다.
  *
- * 그리고 이것이 M-2 의 실체다: 이 값은 코드 상자의 채움과 **같은 `color.surface`**
- * 라서, 행을 누르는 동안 상자의 고도가 사라진다(1.000:1). 값 공간을 가르는 것은
- * 토큰 체계 결정이라 U2 소관이고, 여기서는 그 사실을 **사진과 단정으로 붙잡아
- * 둔다**.
+ * 값은 **강조색 10%**(Buzz `highlightColor: primary 10%`, #4300)이고, 그 면이 바닥에서 안
+ * 보이는 테마만 `surface` 로 물러난다(`rowFace.ts` `pressFace`). 예전 값(`surface`)은 코드
+ * 상자의 채움과 같아 눌리는 동안 상자의 고도가 사라졌다(M-2, 1.000:1) — 틴트는 그 일치를
+ * 깬다. 알파 hex 라 아래 바닥이 비치므로 상자 채움과 같은 값이 될 일이 없다.
  */
 export function rowPressedBackground(color: Palette): string {
-  return color.surface;
+  return pressFace(color).color;
 }
 
 export function rowAccessibilityLabel({
@@ -3765,6 +3775,8 @@ export function PendingRow({
           muted
           selectable
           selfMemberId={pending.authorMemberId}
+          // 낙관적 메아리는 언제나 내 글이다 — 서버 사본이 대체할 때 모양이 안 바뀌어야 한다.
+          bubble="mine"
         />
         {pending.attachments && pending.attachments.length > 0 ? (
           <AttachmentList
@@ -3798,11 +3810,14 @@ export function PendingRow({
 }
 
 const buildStyles = (color: Palette) => StyleSheet.create({
-  // The padding lives on the inner pressable so the press highlight covers the
-  // whole row rather than a box floating inside it.
-  row: {},
+  // 행 그릇 = 강조 면의 상자 (`rowFace.ts`). 화면 끝에서 `outer` 띄우고 모서리를 둥글게
+  // 한다 — 서 있는 착지 틴트(`rowLanded`)와 물러나는 덮개가 이 상자를 입는다. 눌림 면은
+  // 안쪽 Pressable(`rowInner`)이 같은 상자를 꽉 채워 입는다. (옛 주석 「눌림 면이 행 전체를
+  // 덮는다 — 안에 뜬 상자가 아니라」는 owner 2026-10-24 로 대체됐다.)
+  row: {marginHorizontal: ROW_FACE.outer, borderRadius: ROW_FACE.radius},
   rowInner: {
-    paddingHorizontal: SAFE_GUTTER,
+    borderRadius: ROW_FACE.radius,
+    paddingHorizontal: ROW_FACE.inner,
     // 3pt 였다 — 한 사람이 연달아 쓴 다섯 줄이 한 덩이 문단으로 읽혔다(감사
     // H-7). 값은 **코어가 정한다**: 두 행 사이에 실제로 남는 거리가
     // `CONTINUATION_GAP` 이 되도록 절반씩 나눠 문다. 웹은 같은 값을
@@ -3828,7 +3843,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    *
    * ## 값
    *
-   * `SAFE_GUTTER`(그릇 자신의 여백) + `CONV.avatar`(40, owner 표) + `CONV.avatarGap`
+   * `ROW_FACE.inner`(면 안쪽 여백; 바깥 6 은 그릇 마진 — 합이 옛 `SAFE_GUTTER`) + `CONV.avatar`(40, owner 표) + `CONV.avatarGap`
    * (10, 시안 `.a-m{gap:10px}`). 아바타는 화면 왼쪽에서 `SAFE_GUTTER` 만큼 떨어져
    * 서므로(`rowAvatar.left`), 아바타의 오른쪽 끝과 내용의 왼쪽 끝 사이에 정확히
    * `avatarGap` 이 남는다.
@@ -3840,14 +3855,14 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    * 넣으면 감사 M-3 이 이미 「5조각 과적재」로 센 줄에 여섯 번째가 붙고, 32pt 가
    * 13pt 글자 옆 흐름에 들어가 머리 행이 한 줄만큼 자란다(묶음마다 반복된다).
    */
-  rowAvatarReserve: {paddingLeft: SAFE_GUTTER + CONV.avatar + CONV.avatarGap},
+  rowAvatarReserve: {paddingLeft: ROW_FACE.inner + CONV.avatar + CONV.avatarGap},
   /**
    * 아바타가 앉는 자리. 규칙: **이 메시지의
    * 맨 위 왼쪽**이고, 그 y 는 그릇의 위쪽 패딩과 **같은 곳**에서 온다.
    */
   rowAvatar: {
     position: 'absolute',
-    left: SAFE_GUTTER,
+    left: ROW_FACE.inner,
     top: CONTINUATION_GAP / 2,
   },
   // Feedback that the row is interactive at all. On a phone this is one of the
@@ -3954,7 +3969,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    * 물러나는 모양은 `LandedTintFade` 가 든다: 그릇이 배경을 벗는 그 커밋에 같은 색의
    * 덮개가 불투명도 1 에서 0 으로 녹는다. 「동작 줄이기」면 덮개 없이 즉시다.
    */
-  rowLanded: {backgroundColor: color.warnSurface},
+  rowLanded: {backgroundColor: color.warnSurface, borderRadius: ROW_FACE.radius},
   // 그룹 사이는 `CONV.groupGap`. 안쪽이 이미 절반씩 물고 있으므로 차이만 더한다.
   /**
    * 작성자가 바뀌는 자리의 틈. 시안 `.a-m{margin-bottom:16px}` — 두 행의 안쪽 패딩
