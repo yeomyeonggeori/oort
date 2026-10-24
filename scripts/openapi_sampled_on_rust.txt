@@ -209,6 +209,8 @@ GET /v1/workspaces/{workspaceId}/search/messages
 GET /v1/workspaces/{workspaceId}/read-state
 PUT /v1/workspaces/{workspaceId}/channels/{channelId}/read-state
 PUT /v1/workspaces/{workspaceId}/channels/{channelId}/viewing
+PUT /v1/workspaces/{workspaceId}/channels/{channelId}/closure
+DELETE /v1/workspaces/{workspaceId}/channels/{channelId}/closure
 POST /v1/workspaces/{workspaceId}/channels/{channelId}/scheduled-messages
 GET /v1/workspaces/{workspaceId}/scheduled-messages
 PATCH /v1/workspaces/{workspaceId}/scheduled-messages/{scheduledMessageId}

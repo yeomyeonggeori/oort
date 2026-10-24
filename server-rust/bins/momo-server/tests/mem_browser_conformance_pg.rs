@@ -1903,44 +1903,82 @@ async fn guard_cases(su: PgPool, worker: PgPool, app: PgPool, w: World) {
             })
         }
     };
-    assert_eq!(run_as_worker().await, Err("42501".to_string()));
-    let original = sabotage(
-        &su,
-        forget_sig,
-        &[("session_user::text <> 'momo_app'", "false")],
-    )
-    .await;
-    let acted = run_as_worker().await;
-    restore(&su, &original).await;
-    println!(
-        "RED [forget: session_user guard]: shipped -> 42501; sabotaged momo_worker -> {acted:?}"
-    );
-    assert!(acted.is_ok());
-    let original = sabotage(
-        &su,
-        edit_sig,
-        &[("session_user::text <> 'momo_app'", "false")],
-    )
-    .await;
-    let acted = {
-        let mut tx = worker.begin().await.unwrap();
-        sqlx::query("SELECT set_config('app.workspace_id', $1, true), set_config('app.member_id', $2, true)")
-            .bind(w.ws.to_string())
-            .bind(w.bob.id.to_string())
-            .execute(&mut *tx)
+    // #4381: EXECUTE on both functions is momo_app only. Check that wall, then grant EXECUTE to the role this
+    // worker connection acts as (`momo_memory`, see `worker_pool`) for this section (revoked again after the edit
+    // sabotage below) so the in-function session_user guard is what refuses.
+    for sig in [forget_sig, edit_sig] {
+        for role in ["momo_worker", "momo_memory"] {
+            let may: bool = sqlx::query_scalar(
+                "SELECT has_function_privilege($1, $2::regprocedure, 'EXECUTE')",
+            )
+            .bind(role)
+            .bind(sig)
+            .fetch_one(&su)
             .await
-            .unwrap();
-        let r = sqlx::query_scalar::<_, Uuid>(&format!(
-            "SELECT mem_edit_item('{}', '워커가 쓴 leopardnut 본문')",
-            w.a1
-        ))
-        .fetch_one(&mut *tx)
+            .expect("has_function_privilege");
+            assert!(!may, "{role} must not EXECUTE {sig}");
+        }
+    }
+    for sig in [forget_sig, edit_sig] {
+        sqlx::raw_sql(&format!("GRANT EXECUTE ON FUNCTION {sig} TO momo_memory"))
+            .execute(&su)
+            .await
+            .expect("grant");
+    }
+    // The GRANT above is committed (the worker connection is another session), so the REVOKE must also run when an
+    // assertion in between panics: run the section under catch_unwind, REVOKE, then re-raise.
+    let section = std::panic::AssertUnwindSafe(async {
+        assert_eq!(run_as_worker().await, Err("42501".to_string()));
+        let original = sabotage(
+            &su,
+            forget_sig,
+            &[("session_user::text <> 'momo_app'", "false")],
+        )
         .await;
-        tx.rollback().await.ok();
-        r
+        let acted = run_as_worker().await;
+        restore(&su, &original).await;
+        println!(
+            "RED [forget: session_user guard]: shipped -> 42501; sabotaged momo_worker -> {acted:?}"
+        );
+        assert!(acted.is_ok());
+        let original = sabotage(
+            &su,
+            edit_sig,
+            &[("session_user::text <> 'momo_app'", "false")],
+        )
+        .await;
+        let acted = {
+            let mut tx = worker.begin().await.unwrap();
+            sqlx::query("SELECT set_config('app.workspace_id', $1, true), set_config('app.member_id', $2, true)")
+                .bind(w.ws.to_string())
+                .bind(w.bob.id.to_string())
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+            let r = sqlx::query_scalar::<_, Uuid>(&format!(
+                "SELECT mem_edit_item('{}', '워커가 쓴 leopardnut 본문')",
+                w.a1
+            ))
+            .fetch_one(&mut *tx)
+            .await;
+            tx.rollback().await.ok();
+            r
+        };
+        restore(&su, &original).await;
+        println!("RED [edit: session_user guard]: sabotaged momo_worker edit -> {acted:?}");
+        acted
+    });
+    let outcome = futures::FutureExt::catch_unwind(section).await;
+    for sig in [forget_sig, edit_sig] {
+        sqlx::raw_sql(&format!("REVOKE ALL ON FUNCTION {sig} FROM momo_memory"))
+            .execute(&su)
+            .await
+            .expect("revoke");
+    }
+    let acted = match outcome {
+        Ok(acted) => acted,
+        Err(panic) => std::panic::resume_unwind(panic),
     };
-    restore(&su, &original).await;
-    println!("RED [edit: session_user guard]: sabotaged momo_worker edit -> {acted:?}");
     assert!(acted.is_ok());
 
     // evidence copy: without it the new item has no evidence and the read rule hides it. (#3172 L-6: a definer

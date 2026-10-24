@@ -298,7 +298,7 @@ covered by each image's Debian copyright inventory, not this table.
 |---|---|---|
 | Centrifugo v6 | MIT/OSS(검증) | 메시지 전송계층(셀프호스트) — companion service, not baked into the app image |
 | PostgreSQL 18 | PostgreSQL License | DB (oort-postgres image) |
-| pgvector 0.8.5 | PostgreSQL License | PostgreSQL 벡터 타입·HNSW 검색 확장 |
+| pgvector 0.8.7 | PostgreSQL License | PostgreSQL 벡터 타입·HNSW 검색 확장 |
 | pgBackRest 2.59.0 | MIT | PostgreSQL 연속 WAL archive·암호화 backup/PITR |
 | libssh2 1.11.1 | BSD-3-Clause/ISC | pgBackRest S3-compatible transport |
 | Node.js | MIT | web-build stage only; not a runtime package of the app image |

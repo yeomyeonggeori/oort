@@ -23,6 +23,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let config = Config::from_env()?;
+    // ADR-0200 증보 3 E5: read once, clamped 1..=168 hours, fixed for the process.
+    momo_agent::configure_welcome_hosted_signal_hours(
+        std::env::var("MOMO_WELCOME_HOSTED_SIGNAL_HOURS")
+            .ok()
+            .as_deref(),
+    );
     // Log the shape of the deployment, never a credential.
     tracing::info!(
         environment = %config.environment,

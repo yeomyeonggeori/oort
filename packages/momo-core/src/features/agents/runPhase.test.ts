@@ -167,6 +167,9 @@ describe("상태 어휘: 대기 n번째 / 가져감 / 진행 / 승인 대기 / �
   it("종료 사유: 닫힌 코드만 문장이 되고 모르는 코드는 만들어 내지 않는다", () => {
     expect(endReasonText("approval_expired")).toBe("승인이 만료됐어요");
     expect(endReasonText("unclaimed_expired")).toBe("아무도 가져가지 않아 끝냈어요");
+    // ADR-0200 증보 3 E4(#4284): 새 닫힌 코드의 문장. 「아무도」(24시간 규칙)와 다른 사실이라 문장도 다르다.
+    expect(endReasonText("woken_not_collected")).toBe("깨웠지만 가져가지 않아 끝냈어요");
+    expect(endReasonText("woken_not_collected")).not.toBe(endReasonText("unclaimed_expired"));
     expect(endReasonText("cancelled_by_member")).toBe("멤버가 취소했어요");
     // 서버의 사람 중단(`POST …/agent-runs/{run}/cancel`)이 원장에 남기는 코드다.
     // 이 줄이 없으면 「취소됐어요」 아래 사유가 비어, 누가 멈췄는지 기록이 말하지 않는다.

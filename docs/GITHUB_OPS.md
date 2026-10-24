@@ -86,7 +86,7 @@
 
 ### 3.2a PR CI + Local PR Gate
 
-공개 레포 전환 뒤 canonical PR은 `main`·`track/engine`·`track/uxui`에서 `PR CI gate`와 base-trusted `Policy integrity gate` 두 required context를 쓴다(ADR-0153 D5). Rust/Node/legacy 생성계약은 `pr-ci`가 변경 경로별로 실행한다. DB·Centrifugo·Docker·외부 provider runtime은 계속 local gate가 정본이다. release/유료 macOS workflow의 owner·M7 등급(M7-I·M7-S) 제한은 그대로다.
+공개 레포 전환 뒤 canonical PR은 `main`·`track/engine`·`track/uxui`에서 `PR CI gate`와 base-trusted `Policy integrity gate` 두 required context를 쓴다(ADR-0153 D5). Rust/Node/legacy 생성계약은 `pr-ci`가 변경 경로별로 실행한다. 테넌트 격리·인증·승인·푸시·첨부·웹훅 PG 시험은 `pr-ci`의 「Security pack」 잡(`pgvector/pgvector:pg18` 서비스, `scripts/security_pack.sh`, 선택 목록 `infra/security-pack/selection.txt`)이 PR마다, 나머지 `#[ignore]` PG 시험은 `security-nightly.yml`이 매일 돈다(#4241). Centrifugo·Docker·외부 provider runtime은 계속 local gate가 정본이다. release/유료 macOS workflow의 owner·M7 등급(M7-I·M7-S) 제한은 그대로다.
 
 - 정본: [`docs/LOCAL_PR_GATE.md`](LOCAL_PR_GATE.md), 실행 진입점: `scripts/local_gate.sh`.
 - PR body에는 `scripts/local_gate.sh --profile ...`가 출력하는 `Local Gate: PASS`, 날짜, machine/toolchain, 실행 명령, runtime coverage, 미검증 범위를 붙인다.

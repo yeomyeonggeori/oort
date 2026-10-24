@@ -29,3 +29,6 @@ unicode-normalization.workspace = true
 # of the DB-free `cargo test --workspace` unit pass.
 momo-db = { path = "../momo-db" }
 tokio = { workspace = true }
+
+[lints]
+workspace = true

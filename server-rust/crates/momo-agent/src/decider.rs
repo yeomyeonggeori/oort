@@ -71,6 +71,12 @@ pub enum GatePlan {
     /// the route resolves from the proposal ([`pinned_target_agent`] is the same
     /// id, as the card pinned it).
     TargetAgent,
+    /// **The person the action changes, and nobody else** (`member.avatar.set`, ADR-0186
+    /// 증보 v4): the decider must be the card's pinned target member
+    /// ([`pinned_target_member`]) — an admin is not enough, the agent's owner is not
+    /// enough. The pin is the person the *server* derived from the run, so the card was
+    /// drawn for exactly one human.
+    RequestingMember,
 }
 
 /// The `required_role` the registry publishes for this proposal's action.
@@ -94,6 +100,7 @@ pub fn action_required_role(payload: &Value) -> Option<RequiredRole> {
 pub fn gate_plan(role: Option<RequiredRole>) -> GatePlan {
     match role {
         Some(RequiredRole::AgentEditor) => GatePlan::TargetAgent,
+        Some(RequiredRole::RequestingMember) => GatePlan::RequestingMember,
         Some(RequiredRole::WorkspaceOperator) => GatePlan::Operator,
         Some(RequiredRole::Admin) | None => GatePlan::Admin,
     }
@@ -136,6 +143,14 @@ pub fn pinned_target_agent(payload: &Value) -> Option<Uuid> {
         .and_then(|pins| pins.get("target"))
         .and_then(Value::as_str)
         .and_then(|raw| Uuid::parse_str(raw).ok())
+}
+
+/// The person a `member.avatar.set` card was drawn for (`action.pins.target`) — the subject
+/// of a [`GatePlan::RequestingMember`] gate. The same pin path as [`pinned_target_agent`];
+/// a separate name because the subject here is a **human**, and a reader of the push
+/// audience should not have to know that an agent pin and a member pin share a key.
+pub fn pinned_target_member(payload: &Value) -> Option<Uuid> {
+    pinned_target_agent(payload)
 }
 
 #[cfg(test)]
@@ -216,6 +231,32 @@ mod tests {
     /// Anything that is not a workspace action asks nothing more of its approver
     /// than a seat in the room — a payload that merely *contains* an action id must
     /// not borrow a role.
+    /// `member.avatar.set` is decided by the person it changes — not by an admin and not by
+    /// the agent's owner — and the push audience reads the same pin.
+    #[test]
+    fn a_member_avatar_card_is_gated_to_its_pinned_person() {
+        let person = Uuid::from_u128(77);
+        let payload = json!({"action": {
+            "id": crate::actions::ACTION_MEMBER_AVATAR_SET,
+            "args": {},
+            "pins": {"target": person.to_string()},
+        }});
+        assert_eq!(
+            action_required_role(&payload),
+            Some(RequiredRole::RequestingMember)
+        );
+        assert_eq!(
+            decider_gate(ACTION_TYPE_WORKSPACE_ACTION, &payload, true),
+            GatePlan::RequestingMember
+        );
+        assert_eq!(pinned_target_member(&payload), Some(person));
+        // Rejecting needs only a seat in the room, as for every ordinary action.
+        assert_eq!(
+            decider_gate(ACTION_TYPE_WORKSPACE_ACTION, &payload, false),
+            GatePlan::ChannelMember
+        );
+    }
+
     #[test]
     fn a_tool_call_or_a_spawn_takes_only_a_seat_in_the_room() {
         for action_type in ["tool_call", "work.spawn"] {

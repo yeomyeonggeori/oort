@@ -1757,8 +1757,26 @@ async fn identity_gucs_do_not_outlive_the_transaction() {
 // worker-only functions (review 2: H-A / H-B) and the privilege matrix (M-A / M-B)
 // ---------------------------------------------------------------------------
 
+/// Definer functions reserved for `momo_app` (not PUBLIC, no other runtime role): the API entry points
+/// (#3212 reset/notice, #3208 edit/forget, #3169 accept/reject, #3172 revert, #3168 search) and the four
+/// RLS policy helpers the reading role evaluates (#4381, migration 147).
+const API_ONLY: [&str; 12] = [
+    "mem_reset_workspace",
+    "mem_summary_provider",
+    "mem_edit_item",
+    "mem_forget_item",
+    "mem_search_items",
+    "mem_accept_proposal",
+    "mem_reject_proposal",
+    "mem_revert_consolidation",
+    "mem_digest_evidence_ok",
+    "mem_item_evidence_ok",
+    "mem_proposal_evidence_ok",
+    "mem_topic_summary_ok",
+];
+
 /// SECURITY DEFINER functions that ignore `app.member_id`. EXECUTE belongs to `momo_memory`
-/// alone. (`mem_digest_evidence_ok` is the one definer function the RLS policy needs PUBLIC for.)
+/// alone. (The RLS policy helpers are in `API_ONLY`: only `momo_app` evaluates those policies.)
 const WORKER_ONLY: [&str; 7] = [
     "mem_apply_digest",
     "mem_advance_cursor",
@@ -2065,9 +2083,15 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
             "{when}: {must} exists"
         );
     }
+    for must in API_ONLY {
+        assert!(
+            functions.iter().any(|(_, n)| n == must),
+            "{when}: {must} exists"
+        );
+    }
     for (signature, name) in &functions {
-        if name == "mem_reset_workspace" || name == "mem_summary_provider" {
-            // #3212 L-6: API entry points reserved for momo_app — not PUBLIC. The in-function session_user guard
+        if API_ONLY.contains(&name.as_str()) {
+            // #3212 L-6 / #4381: API entry points and RLS policy helpers reserved for momo_app — not PUBLIC. The in-function session_user guard
             // stays as the second wall (exercised and sabotaged in mem_reset_conformance_pg).
             let public_exec: bool = sqlx::query_scalar(
                 "SELECT has_function_privilege('public', $1::regprocedure, 'EXECUTE')",
@@ -2092,52 +2116,6 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
                     "{when}: {role} EXECUTE {signature} (only momo_app)"
                 );
             }
-            continue;
-        }
-        if name == "mem_edit_item" || name == "mem_forget_item" {
-            // #3208: the API's write entry points are PUBLIC EXECUTE on purpose (the same shape as
-            // `mem_search_items`: no dependence on role-creation order); what protects them is the
-            // in-function `session_user` guard and the actor derived from `app.member_id`, both
-            // exercised (and sabotaged) in mem_browser_conformance_pg. Pin the state so a change
-            // in either direction is noticed.
-            let public_exec: bool = sqlx::query_scalar(
-                "SELECT has_function_privilege('public', $1::regprocedure, 'EXECUTE')",
-            )
-            .bind(signature)
-            .fetch_one(su)
-            .await
-            .expect("public execute");
-            assert!(
-                public_exec,
-                "{when}: PUBLIC must be able to EXECUTE {signature}"
-            );
-            for role in &roles {
-                let has: bool = sqlx::query_scalar(
-                    "SELECT has_function_privilege($1, $2::regprocedure, 'EXECUTE')",
-                )
-                .bind(role)
-                .bind(signature)
-                .fetch_one(su)
-                .await
-                .expect("has_function_privilege");
-                assert!(has, "{when}: {role} EXECUTE {signature} (via PUBLIC)");
-            }
-            continue;
-        }
-        if name == "mem_digest_evidence_ok"
-            || name == "mem_item_evidence_ok"
-            || name == "mem_search_items"
-            // #3169: the proposal decision entry points (session_user guard + GUC viewer inside) and
-            // the RLS policy helper are PUBLIC on purpose, like their #3168 siblings.
-            || name == "mem_accept_proposal"
-            || name == "mem_reject_proposal"
-            || name == "mem_proposal_evidence_ok"
-            || name == "mem_topic_summary_ok"
-            || name == "mem_revert_consolidation"
-        {
-            // The RLS policies call the evidence helpers as the reading role; `mem_search_items`
-            // is the API entry point (session_user guard inside; the worker-only twin is
-            // `mem_search_items_for`, which the loop covers).
             continue;
         }
         let public_grants: i64 = sqlx::query_scalar(

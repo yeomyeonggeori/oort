@@ -2,7 +2,7 @@
 
 이 문서는 조직이 oort를 도입할지 판단할 때 읽는, 구현과 결정 기록에 연결된 한국어 자료다. 취약점 신고 절차와 지원 범위는 영문 [Security Policy](../../SECURITY.md)를 따른다. 여기서 말하는 경계는 현재 저장소의 코드와 ADR에 근거하며, 인증·심사·무결함을 보증하지 않는다.
 
-**읽는 규칙.** 줄 번호는 `track/engine` `6b786885f` 위에서 2026-10-22에 쓴 것이라 코드가 바뀌면 어긋난다. 그래서 가능한 곳에는 함수·시험 이름을 함께 적었다. 시험 이름 뒤의 (PG)는 격리 PostgreSQL이 필요한 `#[ignore]` 시험이다. 공개 PR CI는 이 시험을 돌리지 않는다. [근거: `pr-ci.yml` 378–380행](../../.github/workflows/pr-ci.yml#L378-L380) 사람이 격리 PostgreSQL에 대해 `cargo test … -- --ignored`로 돌리고(대부분의 시험 파일 머리말에 실행 명령이 있다) 결과는 그 시험을 건드린 PR 본문에 남긴다. 일부 묶음만 `scripts/verify_*.sh`나 로컬 게이트 프로파일이 따로 돌린다. (스크립트)는 `scripts/tests/`의 셸·파이썬 시험으로, 로컬 게이트의 docs 프로파일이 돌린다. 표시가 없는 시험은 PR CI의 `cargo test --workspace`·vitest·jest가 돌리는 단위 시험이다.
+**읽는 규칙.** 줄 번호는 `track/engine` `6b786885f` 위에서 2026-10-22에 쓴 것이라 코드가 바뀌면 어긋난다. 그래서 가능한 곳에는 함수·시험 이름을 함께 적었다. 시험 이름 뒤의 (PG)는 격리 PostgreSQL이 필요한 `#[ignore]` 시험이다. 공개 PR CI의 「Security pack」 잡은 `infra/security-pack/selection.txt`에 적힌 타깃만 돌리고, 나머지는 야간 워크플로나 수동 실행이다. 사람이 격리 PostgreSQL에 대해 `cargo test … -- --ignored`로 돌리고(대부분의 시험 파일 머리말에 실행 명령이 있다) 결과는 그 시험을 건드린 PR 본문에 남긴다. 일부 묶음만 `scripts/verify_*.sh`나 로컬 게이트 프로파일이 따로 돌린다. (스크립트)는 `scripts/tests/`의 셸·파이썬 시험으로, 로컬 게이트의 docs 프로파일이 돌린다. 표시가 없는 시험은 PR CI의 `cargo test --workspace`·vitest·jest가 돌리는 단위 시험이다. `docs/security/claims.yaml`의 주장↔시험 매핑을 검사하는 린트(`scripts/check_security_claims.py`)는 현재 관리자의 로컬 게이트에서만 강제되고 공개 PR CI에는 아직 없다(후속 편입 예정).
 
 ## 신뢰 경계
 
@@ -106,10 +106,23 @@ oort는 Apache-2.0이고 기여에는 DCO를 사용하며 별도 CLA를 요구�
 
 Tauri **next** 채널은 minisign 업데이트 서명과 Developer ID 서명·공증·staple 절차를 문서화한다. 공개키는 빌드에 컴파일돼 있어 서명 없는 페이로드는 설치되지 않는다. next 채널은 팀 채널이며 매니페스트와 자산은 공개 URL이다. [근거: `NEXT_CHANNEL.md` 4행](../NEXT_CHANNEL.md#L4) · [37–61행](../NEXT_CHANNEL.md#L37-L61), [`tauri.conf.json` 40–45행](../../clients/desktop/src-tauri/tauri.conf.json#L40-L45)
 
+## 하지 않는 것
+
+시험으로 증명할 수 없어서 주장하지 않는 것이다. 보안 주장은 [`claims.yaml`](claims.yaml)에서 증명 시험에 연결되고, 시험이 없는 문장은 공개하지 않는다([ADR-0214](../adr/0214-security-claims-need-tests.md)).
+
+- <!-- limit:LIM-1 -->**종단 간 암호화(E2EE)가 아니다.** 서버는 메시지 내용을 읽을 수 있다. 검색·에이전트·알림 미리보기가 그 위에서 동작한다. 비교: Slack 보안 페이지도 전송 중 TLS와 저장 암호화를 설명할 뿐 종단 간 암호화를 주장하지 않는다([출처](https://slack.com/resources/why-use-slack/security-at-slack)).
+- <!-- limit:LIM-2 -->**외부 보안 감사·침투 시험을 받지 않았다.** 이 문서의 근거는 관리자가 직접 돌린 시험과 그 증거다.
+- <!-- limit:LIM-3 -->**SOC 2·ISO 27001 같은 인증이 없다.**
+- <!-- limit:LIM-4 -->**서버 운영자는 평문 메시지와 DB를 볼 수 있다.** Zulip 보안 모델 문서도 애플리케이션·DB 서버의 root 권한자는 「메시지를 읽고 기록을 고칠 수 있다」고 적는다([출처](https://zulip.readthedocs.io/en/latest/production/security-model.html)). 신뢰할 수 있는 운영자를 고른다.
+
+## 공개하지 않는 것
+
+공개가 공격 지도가 되지 않도록 통제 목록·시험 이름·CI 링크·수정이 끝난 권고는 공개하고, 다음은 공개하지 않는다. 수정 전 취약점의 세부, 운영 중 인스턴스의 설정값·시크릿, 공격 단계 수준의 위협 모델(요약만), 프롬프트 인젝션 공격 코퍼스(방법·통계만), 운영 환경 스캔 결과. 정본은 ADR-0214다.
+
 ## 현재 한계와 도입 시 확인할 점
 
 - API 프로세스는 기동할 때 자기가 어떤 DB 역할로 접속했는지 확인하지 않는다. `MOMO_APP_DATABASE_URL`을 `momo_app`이 아닌 역할로 가리켜도 서버가 막지 않고, `scripts/oort doctor`가 env 파일 기준으로 blocker로 보고할 뿐이다(위 「테넌트 격리와 DB 역할」).
-- 테넌트 테이블 전수가 RLS `FORCE`임은 위의 카탈로그 측정으로 확인했지만, 이를 표마다 단정하는 시험은 아직 없다. DB가 필요한 시험은 공개 PR CI에서 돌지 않는다.
+- 테넌트 테이블 전수가 RLS `FORCE`이고 `app.workspace_id` 정책을 가졌다는 것은 이제 `tenant_catalog_pg` 카탈로그 시험이 표마다 단정하고 공개 PR CI의 Security pack이 매번 돌린다(주장 TEN-1~3, [`claims.yaml`](claims.yaml)). 위의 「측정」 문단은 그 시험이 생기기 전 수동 측정의 기록이다.
 - 감사 행(`audit_log`)을 관리자가 목록으로 읽는 REST 경로는 Rust 서버에 없다. OpenAPI에는 `GET /v1/workspaces/{workspaceId}/audit`(`listWorkspaceAudit`)가 적혀 있지만 라우터에 등록된 핸들러가 없고 클라이언트도 부르지 않으며, ADR-0183 판정표가 이 경로를 폐기로 분류했다. [근거: `openapi.yaml` 2026–2050행](../api/openapi.yaml#L2026-L2050), [ADR-0183 판정표 audit 행 112행](../adr/0183-codebase-docs-lightening.md#L112)
 - Drive 도구 호출(`tools/call`) 경로는 Rust 서버로 옮기지 않았다. 플러그인 레지스트리의 Drive 항목은 설치·grant 기록이고, 서버가 Drive 도구를 대신 실행하지는 않는다. [근거: ADR-0183 판정표 mcp 잔여 행 114행](../adr/0183-codebase-docs-lightening.md#L114)
 - 첨부에는 바이러스·멀웨어 검사가 없다. 서버 코드·infra·스크립트에서 `clamav`·`antivirus`·`virus`를 검색하면 결과가 없다. MIME은 `type/subtype` 형식과 선언값·보관소 메타데이터의 일치만 확인하고 내용을 sniffing하지 않는다. [근거: `attachment.rs` 134–155행](../../server-rust/crates/momo-messaging/src/attachment.rs#L134-L155), [`attachments.rs` 253–261행](../../server-rust/bins/momo-server/src/routes/attachments.rs#L253-L261)

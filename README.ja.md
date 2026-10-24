@@ -28,7 +28,7 @@ oort は自分でホストするメッセンジャーで、人と AI エージ�
 </tr></table>
 
 <table><tr>
-<td width="62%" valign="top"><a href="docs/assets/readme/themes.png"><img src="docs/assets/readme/themes.png" alt="同じチャンネルを 4 つのテーマで: Dawn sky、Sunset band、Catppuccin、Gruvbox Hard" width="100%"></a><br><sub><strong>独自の 3 テーマに加えてカタログ 57 テーマ</strong>（ライト／ダークを別々に数えた数）: ここでは Dawn sky、Sunset band、Catppuccin、Gruvbox Hard。<em>マージ済みで、まだリリース前です。</em></sub></td>
+<td width="62%" valign="top"><a href="docs/assets/readme/themes.png"><img src="docs/assets/readme/themes.png" alt="同じチャンネルを 4 つのテーマで: Dawn sky、Sunset band、Catppuccin、Gruvbox Hard" width="100%"></a><br><sub><strong>独自の 3 テーマに加えてカタログ 57 テーマ</strong>（ライト／ダークを別々に数えた数）: ここでは Dawn sky、Sunset band、Catppuccin、Gruvbox Hard。</sub></td>
 <td width="38%" valign="top"><a href="docs/assets/readme/phone.png"><img src="docs/assets/readme/phone.png" alt="iPhone アプリの初回起動ステップ「どんな通知を受け取る？」: 承認・拒否ボタン付きの承認リクエスト、作業完了、メンションのプレビュー" width="100%"></a><br><sub><strong>スマートフォンで。</strong> 初回起動のステップが通知の種類ごとにプレビューを見せます。承認リクエストとメンションは常に届き、作業完了にはスイッチがあります。iOS のテスト用ビルドは小さな TestFlight 内部グループに配布されます。</sub></td>
 </tr></table>
 
@@ -47,7 +47,7 @@ oort は自分でホストするメッセンジャーで、人と AI エージ�
 
 ## 今できること · 配線中 · 強い意見（コードはこれから）
 
-✅ **今できること** — [v0.1.35](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.35)（サーバーと Web のイメージ。デスクトップと iOS のアプリは別にビルドされます）
+✅ **今できること** — [v0.1.36](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.36)（サーバーと Web のイメージ。デスクトップと iOS のアプリは別にビルドされます）
 
 - チャンネル、スレッド、DM、引用、入力中表示、ピン留め、検索 — Web、デスクトップ（Tauri、macOS）、iOS（React Native）で
 - メンバーとしてのエージェント: メンションすると実行が正直な状態とともにチャンネルに流れ、途中で止められます
@@ -57,13 +57,15 @@ oort は自分でホストするメッセンジャーで、人と AI エージ�
 - 添付: ファイルはサーバー自身のボリューム（セルフホストの既定）か、あなたが持つ Google 共有ドライブにあります。ダウンロードはサーバーのチャンネルメンバーシップ検査を通り、Google バックエンドではアップロードが Drive へ直接行きます
 - 計測済みのセルフホスト経路——clone → env スクリプト → compose up → ログイン——と、digest で固定され SLSA provenance が付いたマルチアーキテクチャのイメージ（[詳細](SECURITY.md#security-posture)）
 - コントラスト規則をテストが守るデザインシステム（「Oort cloud」）、ライトとダーク
+- 見た目を変えられます: 独自の 3 テーマに加えてカタログ 57 テーマとギャラリー、文字サイズと会話の密度、macOS デスクトップアプリのガラス背景（不透明度の調整つき）
+- スマートフォンの添付メニュー（＋の円から広がるカード: カメラ、最近の写真のグリッド、ファイル）と、デスクトップアプリから既定のブラウザーで行う GitHub App の作成
 
 🚧 **配線中**
 
 - iPhone のロック画面での承認・拒否 — v0.1.30 で実装済み。実機での確認はまだ終わっていません（[デバイス確認](docs/cicd/11-ios-push-device-check.md)）
 - チームの記憶（要約、決定、事実、約束。閲覧・編集・忘却）— v0.1.15 で提供。要約にはチームの既定 AI 接続が必要で、リリースノートは実モデルでの要約品質を未検証としたままです
 - チャンネルでの GitHub App イベント — v0.1.32 で提供、運営者が App キーを設定するまでオフです
-- マージ済み・未リリース: カタログ 57 テーマとギャラリー、文字サイズと会話の密度、デスクトップのガラス背景、スマートフォンの添付メニュー（最近の写真グリッドとカメラ）、デスクトップからの GitHub App 作成、予約メッセージのサーバー（画面は作業中）
+- 予約メッセージ — サーバーは v0.1.36 で提供、画面は作業中です
 - デスクトップと iOS のアプリは、まだ運営者自身の端末と小さな TestFlight 内部グループに向けたテスト用ビルドです。チーム全体への配布は内部ゲート（[M7](docs/cicd/03-store-readiness-gate.md)）を待っており、サポート対象の公開ダウンロードはありません
 
 💭 **強い意見（コードはこれから）**
@@ -96,7 +98,7 @@ PostgreSQL が oort の真実の源です。ワークスペースのメンバー
 
 ### アプリだけ試したい
 
-サポート対象の公開ダウンロードも、公開のホスト型インスタンスもまだありません。まず自分たちのチームが先です（[目標 A](docs/adr/0187-goal-a-team-daily-desktop-ios.md)）。macOS と iOS アプリのテスト用ビルドは、運営者自身の端末と小さな TestFlight 内部グループにだけ配布され、App Store、公開 DMG、外部 TestFlight は[ストアゲート](docs/cicd/03-store-readiness-gate.md)を待ちます。（8 月の初期の macOS 用 DMG が v0.1.1 リリースにまだ添付されていますが、現在のアプリよりずっと前のものです。）Web クライアントはサーバーイメージに入っているので、oort を最短で見る方法は次の道です。
+サポート対象の公開ダウンロードも、公開のホスト型インスタンスもまだありません。まず自分たちのチームが先です（[目標 A](docs/adr/0187-goal-a-team-daily-desktop-ios.md)）。macOS と iOS アプリのテスト用ビルドは、運営者自身の端末と小さな TestFlight 内部グループにだけ配布され、App Store、公開 DMG、外部 TestFlight は[ストアゲート](docs/cicd/03-store-readiness-gate.md)を待ちます。Web クライアントはサーバーイメージに入っているので、oort を最短で見る方法は次の道です。
 
 ### 自分のサーバーに置きたい
 

@@ -28,7 +28,7 @@ Le nom vient du [nuage d’Oort](https://fr.wikipedia.org/wiki/Nuage_d%27Oort) :
 </tr></table>
 
 <table><tr>
-<td width="62%" valign="top"><a href="docs/assets/readme/themes.png"><img src="docs/assets/readme/themes.png" alt="Le même canal dans quatre thèmes : Dawn sky, Sunset band, Catppuccin et Gruvbox Hard" width="100%"></a><br><sub><strong>57 thèmes de catalogue en plus de nos trois propres thèmes</strong> (clair et sombre comptés séparément) : ici Dawn sky, Sunset band, Catppuccin et Gruvbox Hard. <em>Fusionné ; pas encore publié.</em></sub></td>
+<td width="62%" valign="top"><a href="docs/assets/readme/themes.png"><img src="docs/assets/readme/themes.png" alt="Le même canal dans quatre thèmes : Dawn sky, Sunset band, Catppuccin et Gruvbox Hard" width="100%"></a><br><sub><strong>57 thèmes de catalogue en plus de nos trois propres thèmes</strong> (clair et sombre comptés séparément) : ici Dawn sky, Sunset band, Catppuccin et Gruvbox Hard.</sub></td>
 <td width="38%" valign="top"><a href="docs/assets/readme/phone.png"><img src="docs/assets/readme/phone.png" alt="La première étape de l’application iPhone, « Quelles notifications voulez-vous ? » : aperçu d’une demande d’approbation avec les boutons Approuver et Refuser, du travail terminé et des mentions" width="100%"></a><br><sub><strong>Sur le téléphone.</strong> La première étape au lancement présente un aperçu de chaque type de notification : les demandes d’approbation et les mentions arrivent toujours, et le travail terminé a un interrupteur. Les builds de test iOS vont à un petit groupe TestFlight interne.</sub></td>
 </tr></table>
 
@@ -47,7 +47,7 @@ Une base de données. Un chemin d’écriture. Personnes et agents sur la même 
 
 ## Fonctionne aujourd’hui · En cours de câblage · Convictions fortes, code à venir
 
-✅ **Fonctionne aujourd’hui** — dans la [v0.1.35](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.35) (l’image du serveur et du web ; les applications de bureau et iOS sont construites à part)
+✅ **Fonctionne aujourd’hui** — dans la [v0.1.36](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.36) (l’image du serveur et du web ; les applications de bureau et iOS sont construites à part)
 
 - Canaux, fils de discussion, messages privés, citations, indicateur de saisie, épingles et recherche — sur le web, le bureau (Tauri, macOS) et iOS (React Native)
 - Des agents comme membres : mentionnez-en un, regardez son exécution défiler dans le canal avec un état honnête, arrêtez-la en cours de route
@@ -57,13 +57,15 @@ Une base de données. Un chemin d’écriture. Personnes et agents sur la même 
 - Pièces jointes : les fichiers vivent sur le volume propre de votre serveur (le défaut de l’auto-hébergement) ou dans un disque partagé Google qui vous appartient ; les téléchargements passent la vérification d’appartenance au canal du serveur et, avec le backend Google, les envois vont directement vers Drive
 - Un parcours d’auto-hébergement mesuré — clone → script d’env → compose up → connecté — et des images multi-architectures épinglées par digest avec provenance SLSA ([détails](SECURITY.md#security-posture))
 - Un système de design (« Oort cloud ») dont les règles de contraste sont garanties par des tests, en clair et en sombre
+- Une apparence à votre main : 57 thèmes de catalogue en plus de nos trois propres thèmes, avec une galerie ; la taille du texte et la densité du chat ; et un fond en verre avec réglage d’opacité dans l’application de bureau macOS
+- Un menu de pièces jointes sur le téléphone qui s’ouvre depuis le cercle + (appareil photo, grille des photos récentes, fichiers), et la création de la GitHub App depuis l’application de bureau, dans le navigateur par défaut
 
 🚧 **En cours de câblage**
 
 - Approuver/Refuser depuis l’écran de verrouillage de l’iPhone — implémenté dans la v0.1.30 ; la vérification sur de vrais appareils reste ouverte ([vérification sur appareil](docs/cicd/11-ios-push-device-check.md))
 - Mémoire d’équipe (résumés, décisions, faits, engagements ; parcourir, modifier, oublier) — publiée dans la v0.1.15 ; ses résumés exigent une connexion d’IA par défaut de l’équipe, et les notes de version listent encore comme non vérifiée la qualité des résumés avec un vrai modèle
 - Événements de la GitHub App dans les canaux — publiés dans la v0.1.32, désactivés tant que l’opérateur n’a pas défini la clé de l’App
-- Fusionné, pas encore publié : le catalogue de 57 thèmes et sa galerie, la taille du texte et la densité du chat, le fond en verre du bureau, le menu de pièces jointes du téléphone (grille des photos récentes et appareil photo), la création de la GitHub App depuis le bureau, et le serveur des messages programmés (ses écrans sont en cours)
+- Messages programmés — le serveur est sorti dans la v0.1.36 ; ses écrans sont en cours
 - Les applications de bureau et iOS sont encore des builds de test pour les appareils de ceux qui maintiennent oort et un petit groupe TestFlight interne ; le déploiement à toute l’équipe attend la porte d’accès interne ([M7](docs/cicd/03-store-readiness-gate.md)), et il n’existe pas de téléchargement public pris en charge
 
 💭 **Convictions fortes, code à venir**
@@ -96,7 +98,7 @@ Un **hôte de travail** optionnel permet aux agents d’exécuter des sessions d
 
 ### Je veux juste essayer l’application
 
-Il n’existe pas encore de téléchargement public pris en charge ni d’instance hébergée publique. Notre propre équipe passe d’abord ([objectif A](docs/adr/0187-goal-a-team-daily-desktop-ios.md)) : les builds de test des applications macOS et iOS vont uniquement aux appareils de ceux qui maintiennent oort et à un petit groupe TestFlight interne, et l’App Store, un DMG public et TestFlight externe attendent la [porte d’accès aux stores](docs/cicd/03-store-readiness-gate.md). (Un ancien DMG macOS d’août reste attaché à la version v0.1.1 ; il est antérieur à l’application actuelle.) Le client web est livré dans l’image du serveur ; le moyen le plus rapide de voir oort est donc la voie suivante.
+Il n’existe pas encore de téléchargement public pris en charge ni d’instance hébergée publique. Notre propre équipe passe d’abord ([objectif A](docs/adr/0187-goal-a-team-daily-desktop-ios.md)) : les builds de test des applications macOS et iOS vont uniquement aux appareils de ceux qui maintiennent oort et à un petit groupe TestFlight interne, et l’App Store, un DMG public et TestFlight externe attendent la [porte d’accès aux stores](docs/cicd/03-store-readiness-gate.md). Le client web est livré dans l’image du serveur ; le moyen le plus rapide de voir oort est donc la voie suivante.
 
 ### Je le veux sur mon propre serveur
 

@@ -227,6 +227,14 @@ policy_path() {
     .github/workflows/*|\
     .github/labels.json|\
     deny.toml|\
+    osv-scanner.toml|\
+    .github/dependabot.yml|\
+    scripts/check_advisories.py|\
+    docs/security/claims.yaml|\
+    scripts/check_security_claims.py|\
+    scripts/tests/test_security_claims.sh|\
+    scripts/tests/test_advisory_gate.sh|\
+    scripts/tests/fixtures/advisories/*|\
     scripts/check_branch_skew.sh|\
     scripts/check_track_alignment.sh|\
     scripts/github_track_guardrails.sh|\

@@ -384,15 +384,14 @@ hermes 바이너리가 없다. 대체는 `scripts/mock_hermes.py` 다.
 
 ```sh
 MOMO_HERMES_PLUGIN_INSTALL_MODE=copy scripts/momo hermes-gateway-install-plugin
-scripts/verify_hermes_gateway_adapter.sh
 ```
 
 copy 모드는 `plugin.yaml` 옆에 대문자 `PLUGIN.yaml` 도 쓴다(대소문자 구분
 볼륨에서 Hermes가 대문자 이름을 찾는다). 살아 있는 검사는 설치기다.
-`scripts/verify_hermes_gateway_adapter.sh` 는 삭제된 Swift 서버 패키지를
-띄운다(`swift run --package-path server`, LS-1 / #2165). Rust 스택 PASS가
-아니다 — SH-9 잔여
-[#2231](https://github.com/yeomyeonggeori/oort/issues/2231).
+gateway REST 문 자체는 Rust PG 시험
+(`server-rust/bins/momo-server/tests/sec07_gateway_pg.rs`, 실행은
+`scripts/verify_sec07_ported_claims.sh`)이 증명한다. Swift 호스트 검증기는
+SEC-07 [#4245](https://github.com/yeomyeonggeori/oort/issues/4245)에서 은퇴했다.
 
 [`external-agent-provider/hermes-gateway-native-platform.md`](external-agent-provider/hermes-gateway-native-platform.md)
 를 본다.
