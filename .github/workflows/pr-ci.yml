@@ -368,6 +368,65 @@ jobs:
             --log-opts "$log_opts" \
             --redact=90
 
+  # ── 의존성 어드바이저리 게이트 (#4243, SEC-05) ───────────────────────────
+  # 새 RUSTSEC·GHSA는 lockfile을 건드리지 않은 PR에도 생긴다. 그래서 gitleaks처럼
+  # 경로 필터 없이 항상 돌고(`changes`에 의존하지 않는다), 게이트가 이 결과를 필수로
+  # 요구한다. 대가는 명시한다: 고칠 수 없는 새 권고는 정책 PR(deny.toml·
+  # osv-scanner.toml에 이유+만료일 예외)이 들어올 때까지 모든 PR을 막는다.
+  # 판정은 scripts/check_advisories.py 한 곳이다(예외 장부 만료 검사, cargo deny
+  # advisories, npm audit --omit=dev --audit-level=high, OSV-Scanner 5개 lockfile).
+  # 스캐너 도구는 버전을 못 박는다: cargo-deny는 아래 rust 레인과 같은 핀, OSV-Scanner는
+  # gitleaks처럼 릴리스 바이너리 + sha256 검증이다(서드파티 액션 없음).
+  # 음성 대조(test_advisory_gate.sh --online)가 실전 스캔 바로 뒤에 같은 러너에서 돈다:
+  # 알려진 취약 버전 픽스처가 빨강이 아니면(DB가 비었거나 경로가 틀린 눈먼 스캐너)
+  # 이 레인이 빨강이다.
+  advisories:
+    name: dependency advisory gate
+    runs-on: ubuntu-latest
+    # 행 방지용 상한: cargo metadata가 두 워크스페이스 크레이트를 내려받는 콜드 실행이 가장 길다.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '24'
+
+      - name: cargo-deny 설치
+        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2
+        with:
+          tool: cargo-deny@0.20.2
+
+      - name: install pinned osv-scanner
+        env:
+          OSV_VERSION: 2.7.0
+          OSV_SHA256: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
+        run: |
+          set -euo pipefail
+          arch="$(uname -m)"
+          [ "$arch" = "x86_64" ] || {
+            echo "osv-scanner pin is linux_amd64; unsupported runner arch $arch" >&2
+            exit 1
+          }
+          [ -n "${RUNNER_TEMP:-}" ] || {
+            echo "RUNNER_TEMP is unset" >&2
+            exit 1
+          }
+          mkdir -p "$RUNNER_TEMP/osv-bin"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/osv-bin/osv-scanner" \
+            "https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/osv-scanner_linux_amd64"
+          echo "${OSV_SHA256}  $RUNNER_TEMP/osv-bin/osv-scanner" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/osv-bin/osv-scanner"
+          echo "$RUNNER_TEMP/osv-bin" >> "$GITHUB_PATH"
+
+      - name: advisory gate (ledger + cargo deny + npm audit + OSV-Scanner)
+        run: python3 scripts/check_advisories.py
+
+      - name: negative controls (known-vulnerable fixtures must be red)
+        run: bash scripts/tests/test_advisory_gate.sh --online
+
   # ── ② Rust 레인 ─────────────────────────────────────────────────────────
   # `cargo test --workspace` + 카고 라이선스 게이트.
   #
@@ -504,13 +563,14 @@ jobs:
 
   # Branch protection requires this one stable context. Optional path lanes may
   # be skipped, but a failure/cancellation in any selected lane keeps it red.
-  # alignment and gitleaks always run; a skip there is red.
+  # alignment, gitleaks and advisories always run; a skip there is red.
   gate:
     name: PR CI gate
     needs:
       - changes
       - alignment
       - gitleaks
+      - advisories
       - rust
       - node
     if: always()
@@ -520,6 +580,7 @@ jobs:
       CHANGES_RESULT: ${{ needs.changes.result }}
       ALIGNMENT_RESULT: ${{ needs.alignment.result }}
       GITLEAKS_RESULT: ${{ needs.gitleaks.result }}
+      ADVISORIES_RESULT: ${{ needs.advisories.result }}
       RUST_RESULT: ${{ needs.rust.result }}
       NODE_RESULT: ${{ needs.node.result }}
       RUST_SELECTED: ${{ needs.changes.outputs.rust }}
@@ -531,6 +592,7 @@ jobs:
           test "$CHANGES_RESULT" = success
           test "$ALIGNMENT_RESULT" = success
           test "$GITLEAKS_RESULT" = success
+          test "$ADVISORIES_RESULT" = success
           require_optional_lane() {
             selected="$1"
             result="$2"
