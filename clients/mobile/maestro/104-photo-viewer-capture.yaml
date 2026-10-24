@@ -39,4 +39,7 @@ name: "104-photo-viewer-capture"
 - tapOn:
     id: "attachment-viewer-close"
 - waitForAnimationToEnd
+# 닫기 탭이 **닫았는가**를 단정한다(고치기 전 다이내믹 아일랜드 기기에서는 탭이 상태 막대에 먹혀 뷰어가 남는다).
+- assertNotVisible:
+    id: "attachment-viewer"
 - takeScreenshot: ${SHOT}-after-close-tap

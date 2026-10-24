@@ -6,9 +6,13 @@ name: "105-photo-viewer-swipe-capture"
 # 표면 `-momoMeasure PHOTO-VIEWER-MULTI`(다크) · `LIGHT-PHOTO-VIEWER-MULTI`(라이트)는 사진 세 장짜리
 # 메시지를 세운다(`measure/photoViewer.tsx`). 격자의 가운데 장을 눌러 「2 / 3」으로 연 뒤:
 #
-#   ① 옆으로 넘긴다 — 쓸어 닫기가 가로 페이지 넘김을 훔치지 않는다(「3 / 3」).
-#   ② 모자라게(약 70pt, 느리게) 내렸다 놓는다 — 제자리로 돌아온다(뷰어가 그대로 서 있다).
-#   ③ 충분히(약 400pt) 내렸다 놓는다 — 닫히고 뒤의 대화가 보인다.
+#   ① 옆으로 넘긴다 — 쓸어 닫기가 가로 페이지 넘김을 훔치지 않는다(「2 / 3」 → 「3 / 3」, **단정한다**).
+#   ② 모자라게(약 70pt, 느리게) 내렸다 놓는다 — 제자리로 돌아온다(뷰어가 그대로 서 있다, 「3 / 3」 그대로).
+#   ③ 충분히(약 400pt) 내렸다 놓는다 — 닫히고 뒤의 대화가 보인다(뷰어가 사라진 것을 단정한다).
+#
+# 단정이 이 흐름의 요점이다. 앞 판은 세 제스처를 돌리고 사진만 찍었다 — 가로 넘김이 죽어도(r2 판정 B-1:
+# 응답을 쥔 뿌리 View 가 가로 ScrollView 의 조상이라 iOS 가 스크롤을 막았다) Maestro 는 COMPLETED 였다.
+# 고치기 전 코드에서 ① 의 「3 / 3」 단정이 빨갛고 고친 뒤 초록인 것을 PR 본문에 남겼다.
 #
 # 끄는 도중의 모양(배경이 옅어지고 사진이 줄어드는 프레임)은 이 흐름이 못 찍는다 — 스크린샷 한 장이
 # 제스처보다 느리다. 같은 흐름을 돌리는 동안 `xcrun simctl io <udid> recordVideo --codec h264 f.mp4` 로
@@ -36,6 +40,9 @@ name: "105-photo-viewer-swipe-capture"
       id: "attachment-viewer"
     timeout: 10000
 - waitForAnimationToEnd
+- assertVisible:
+    id: "attachment-viewer-position"
+    text: "2 / 3"
 - takeScreenshot: ${SHOT}-open-2of3
 # ① 가로 페이지 넘김은 그대로다.
 - swipe:
@@ -43,6 +50,10 @@ name: "105-photo-viewer-swipe-capture"
     end: 15%, 50%
     duration: 300
 - waitForAnimationToEnd
+# 단정이 없으면 이 흐름은 가로 넘김이 죽어도 초록이다(r2 판정 B-1: 사진은 찍혔지만 읽히지 않았다).
+- assertVisible:
+    id: "attachment-viewer-position"
+    text: "3 / 3"
 - takeScreenshot: ${SHOT}-paged-3of3
 # ② 모자라게 내렸다 놓는다 — 제자리로.
 - swipe:
@@ -50,6 +61,9 @@ name: "105-photo-viewer-swipe-capture"
     end: 50%, 48%
     duration: 500
 - waitForAnimationToEnd
+- assertVisible:
+    id: "attachment-viewer-position"
+    text: "3 / 3"
 - takeScreenshot: ${SHOT}-short-swipe-stays
 # ③ 충분히 내렸다 놓는다 — 닫힌다.
 - swipe:
@@ -57,4 +71,8 @@ name: "105-photo-viewer-swipe-capture"
     end: 50%, 75%
     duration: 400
 - waitForAnimationToEnd
+- assertNotVisible:
+    id: "attachment-viewer"
+- assertVisible:
+    id: "attachment-item"
 - takeScreenshot: ${SHOT}-long-swipe-closed

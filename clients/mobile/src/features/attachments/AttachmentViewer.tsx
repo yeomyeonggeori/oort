@@ -3,9 +3,10 @@ import {
   attachmentDisplayName,
   type MessageAttachment,
 } from '@momo/core/features/attachments/model';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
+  type GestureResponderHandlers,
   Image,
   Modal,
   Pressable,
@@ -27,6 +28,7 @@ import {
   TOUCH_TARGET,
   type Palette,
 } from '../../design/tokens';
+import { BAR_CONTROL_MAX_SCALE } from '../../design/atoms';
 import { useStyles } from '../../design/theme';
 import { useReduceMotion } from '../../lib/useReduceMotion';
 import { useAttachmentPreview } from './content';
@@ -53,6 +55,14 @@ import { backdropStops, chromeStops, scaleStops } from './viewerDismiss';
 //      (`viewerDismiss.ts` 의 규칙, `useViewerDismiss.ts` 의 배선). 끄는 동안 배경이 옅어져
 //      뒤의 대화가 비친다 — 그래서 Modal 이 `transparent` 이고, 배경은 이 파일이 그린다.
 //
+// ## 응답을 쥐는 자리 — 쪽이다 (design-review r2 B-1)
+//
+// 사진 위에 닿은 손가락은 뿌리가 아니라 **쪽**(`ViewerPage` 의 View)이 쥔다. 뿌리는 가로 ScrollView 의
+// 조상이고, iOS 의 ScrollView 는 조상이 JS 응답자이면 스크롤을 시작하지 못한다 — 둘째 판은 이것 때문에
+// 옆으로 넘기기가 죽었다(jest 에는 네이티브 스크롤뷰가 없어 초록이었다). 뿌리는 사진 밖(단추 띠의 빈
+// 곳·인셋)에 닿은 손가락만 쥔다. 자세한 까닭은 `useViewerDismiss.ts` 머리말이다. 이 구조를 지키는 것은
+// `attachmentViewer.test.tsx` 의 「응답을 쥔 뷰는 스크롤뷰의 조상이 아니다」와 Maestro 105 의 「3 / 3」 단정이다.
+//
 // ## 이어받는 쪽에 (#4297)
 //
 //   · 확대: 확대 중에는 쓸어 닫기가 꺼져야 한다. `dismissEnabled={!zoomed}` 한 줄이다.
@@ -67,11 +77,14 @@ function ViewerPage({
   channelId,
   attachment,
   width,
+  responder,
 }: {
   workspaceId: string;
   channelId: string;
   attachment: MessageAttachment;
   width: number;
+  /** 사진 위에 닿은 손가락을 쥐는 핸들러 — 쪽은 가로 ScrollView 의 자손이라 스크롤을 막지 않는다. */
+  responder: GestureResponderHandlers;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const preview = useAttachmentPreview(
@@ -81,7 +94,13 @@ function ViewerPage({
     true,
   );
   return (
-    <View style={[styles.viewerPage, { width }]}>
+    <View
+      style={[styles.viewerPage, { width }]}
+      // 레이아웃 속성만 있는 View 는 평탄화되어 네이티브 뷰가 사라질 수 있다 — 그러면 닿는 대상이 못 된다.
+      collapsable={false}
+      testID="attachment-viewer-page"
+      {...responder}
+    >
       {preview.status === 'ready' ? (
         <Image
           source={{ uri: preview.uri }}
@@ -152,18 +171,35 @@ function ViewerFrame({
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const [index, setIndex] = useState(startIndex);
+  // 끌기를 쥐는 동안 가로 스크롤을 잠근다(대각선으로 내릴 때 옆 장이 끌려 들어오는 것을 막는다).
+  const [dragging, setDragging] = useState(false);
+  const scrollRef = useRef<ScrollView>(null);
   const current = images[index] ?? images[0];
   const [download, share] = useShareAttachment(
     workspaceId,
     channelId,
     current as MessageAttachment,
   );
-  const { drag, panHandlers } = useViewerDismiss({
+  const { drag, pageHandlers, frameHandlers } = useViewerDismiss({
     enabled: dismissEnabled,
     height,
     onDismiss: onClose,
     progressRef,
+    onDraggingChange: setDragging,
   });
+
+  // 끌기가 쥐어지거나 끝나면 현재 쪽의 정확한 자리에 다시 맞춘다. 잠기기 전에 스크롤뷰가 가로로 몇 pt 따라갔다면 그
+  // 어긋남이 끌기가 끝난 뒤에도 남는다(`pagingEnabled` 는 스스로 맞추지 않는다). 첫 렌더에서는 이미 맞다.
+  const pinned = useRef(false);
+  useEffect(() => {
+    if (!pinned.current) {
+      pinned.current = true;
+      return;
+    }
+    scrollRef.current?.scrollTo({ x: index * width, y: 0, animated: false });
+    // `index`·`width` 는 일부러 뺐다: 이 맞춤은 끌기의 시작·끝에만 한다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dragging]);
 
   // 끄는 거리(`drag`) 한 값에서 세 모양이 파생한다. 표는 `viewerDismiss.ts` 에 한 벌이다.
   const backdropOpacity = useMemo(
@@ -186,7 +222,8 @@ function ViewerFrame({
       onAccessibilityEscape={onClose}
       style={styles.viewer}
       testID="attachment-viewer"
-      {...panHandlers}
+      // 사진 밖에 닿은 손가락만 쥔다(부분 집합). 사진 위는 쪽이 쥔다 — 위 「응답을 쥐는 자리」.
+      {...frameHandlers}
     >
       <Animated.View
         pointerEvents="none"
@@ -220,10 +257,19 @@ function ViewerFrame({
           ]}
           testID="attachment-viewer-close"
         >
-          <Text style={styles.viewerButtonLabel}>닫기</Text>
+          <Text
+            style={styles.viewerButtonLabel}
+            maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+          >
+            닫기
+          </Text>
         </Pressable>
         {images.length > 1 ? (
-          <Text style={styles.viewerPosition} testID="attachment-viewer-position">
+          <Text
+            style={styles.viewerPosition}
+            maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+            testID="attachment-viewer-position"
+          >
             {`${index + 1} / ${images.length}`}
           </Text>
         ) : (
@@ -239,7 +285,10 @@ function ViewerFrame({
           ]}
           testID="attachment-viewer-share"
         >
-          <Text style={styles.viewerButtonLabel}>
+          <Text
+            style={styles.viewerButtonLabel}
+            maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+          >
             {download.status === 'downloading'
               ? ATTACH_COPY.downloading
               : download.status === 'failed'
@@ -260,8 +309,11 @@ function ViewerFrame({
         testID="attachment-viewer-pager"
       >
         <ScrollView
+          ref={scrollRef}
           horizontal
           pagingEnabled
+          scrollEnabled={!dragging}
+          testID="attachment-viewer-scroll"
           showsHorizontalScrollIndicator={false}
           contentOffset={{ x: startIndex * width, y: 0 }}
           onMomentumScrollEnd={event =>
@@ -275,6 +327,7 @@ function ViewerFrame({
               channelId={channelId}
               attachment={image}
               width={width}
+              responder={pageHandlers}
             />
           ))}
         </ScrollView>
