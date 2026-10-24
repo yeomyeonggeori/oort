@@ -1,0 +1,8 @@
+# Minimal lockfile for the OSV GHSA-only (no RUSTSEC id) negative control.
+version = 4
+
+[[package]]
+name = "jsonwebtoken"
+version = "9.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0000000000000000000000000000000000000000000000000000000000000000"

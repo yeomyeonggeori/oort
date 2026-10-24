@@ -48,7 +48,7 @@ services:
   # Same digest as prod (docker-compose.prod.yml:64) — PG18 + pgvector, because
   # migrations 027/028 create vector columns.
   postgres:
-    image: pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e
+    image: pgvector/pgvector:0.8.7-pg18-trixie@sha256:9d9c930220cb9bf2f956d10a8f909cf9973d9672ca0278aef2c1e6facccad2e0
     mem_limit: ${MOMO_POSTGRES_MEM_LIMIT:-2g}
     labels: *momo-janitor-labels
     restart: unless-stopped

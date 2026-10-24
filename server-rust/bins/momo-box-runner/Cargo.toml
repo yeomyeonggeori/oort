@@ -41,3 +41,12 @@ uuid.workspace = true
 [dev-dependencies]
 # A mock oort server for the poll→execute→complete loop test.
 axum.workspace = true
+
+# unsafe-allowlist (SEC-08, #4246): one call, libc::geteuid() (config.rs, the refuse-to-run-as-
+# root check). std has no safe effective-uid API; replacing it needs a new dependency
+# (rustix/nix) for a single line, which is out of scope for the policy change (candidate follow-
+# up: remove this entry then).
+# Adding a crate here needs a reason row in server-rust/unsafe-allowlist.tsv; scripts/check_unsafe_policy.py
+# keeps this table and the workspace forbid in sync.
+[lints.rust]
+unsafe_code = "allow"

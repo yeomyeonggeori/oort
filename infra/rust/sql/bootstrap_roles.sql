@@ -382,6 +382,51 @@ BEGIN
   END LOOP;
 END $$;
 
+-- #4381 (migration 147): the ten API-side mem_* definer functions (six API entry points and the four RLS
+-- policy helpers) are executable by momo_app only, not PUBLIC. Migration 147 can run before the runtime roles exist,
+-- so reassert the grant here.
+DO $$
+DECLARE f text;
+BEGIN
+  FOREACH f IN ARRAY ARRAY[
+    'mem_accept_proposal(uuid)', 'mem_digest_evidence_ok(uuid)', 'mem_edit_item(uuid,text,text)',
+    'mem_forget_item(uuid)', 'mem_item_evidence_ok(uuid)', 'mem_proposal_evidence_ok(uuid)',
+    'mem_reject_proposal(uuid)', 'mem_revert_consolidation(uuid)',
+    'mem_search_items(text,integer,uuid,text)', 'mem_topic_summary_ok(uuid)'
+  ] LOOP
+    IF to_regprocedure('public.' || f) IS NOT NULL THEN
+      EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC', f);
+      EXECUTE format('GRANT EXECUTE ON FUNCTION public.%s TO momo_app', f);
+    END IF;
+  END LOOP;
+END $$;
+
+-- BEGIN catalog-readonly-lockdown (#4372; SEC-04 follow-up). Identical in bootstrap_roles.sql and
+-- bootstrap_runtime_roles.sql; tests compare the text between the markers.
+-- plugin_registry (013), schema_migrations (momo_db::migrate / migrate.sh) and work_cloud_host_transition
+-- (053/057) carry no tenant rows and no RLS, and only migrations (the schema owner) ever write them: the
+-- routes read plugin_registry, the T3 trigger only SELECTs the transition table. The ALL TABLES grant above
+-- (and DEFAULT PRIVILEGES for tables a migration creates later) hands every runtime role DML on them, so a
+-- compromised API session could add a plugin, rewrite the migration ledger or open an illegal host
+-- transition. Revoke every write-class verb; SELECT stays. Reasserted on both passes of momo-migrate.
+DO $$
+DECLARE
+  r text;
+  t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['plugin_registry', 'schema_migrations', 'work_cloud_host_transition'] LOOP
+    IF to_regclass('public.' || t) IS NULL THEN
+      CONTINUE;
+    END IF;
+    FOREACH r IN ARRAY ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin'] LOOP
+      IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
+        EXECUTE format('REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE public.%I FROM %I', t, r);
+      END IF;
+    END LOOP;
+  END LOOP;
+END $$;
+-- END catalog-readonly-lockdown
+
 -- Migration 009 can run before these runtime roles exist (the production
 -- internal-smoke order). Reassert the locked join boundary after role creation:
 -- only the NOBYPASSRLS API role may resolve one invite code to its workspace.

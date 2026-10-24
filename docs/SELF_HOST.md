@@ -422,15 +422,14 @@ uppercase `PLUGIN.yaml` on a case-sensitive volume):
 
 ```sh
 MOMO_HERMES_PLUGIN_INSTALL_MODE=copy scripts/momo hermes-gateway-install-plugin
-scripts/verify_hermes_gateway_adapter.sh
 ```
 
 Copy mode also writes uppercase `PLUGIN.yaml` next to `plugin.yaml` (Hermes
 on a case-sensitive volume looks up the uppercase name). The installer is
-the living check. `scripts/verify_hermes_gateway_adapter.sh` still starts
-the deleted Swift server package (`swift run --package-path server`, LS-1 /
-#2165) and is not a Rust-stack PASS — remainder of SH-9
-[#2231](https://github.com/yeomyeonggeori/oort/issues/2231).
+the living check. The gateway REST door itself is proven by Rust PG tests
+(`server-rust/bins/momo-server/tests/sec07_gateway_pg.rs`, run by
+`scripts/verify_sec07_ported_claims.sh`); the Swift-host verifier was retired
+in SEC-07 [#4245](https://github.com/yeomyeonggeori/oort/issues/4245).
 
 See [`external-agent-provider/hermes-gateway-native-platform.md`](external-agent-provider/hermes-gateway-native-platform.md).
 

@@ -498,7 +498,7 @@ pub const TOOL_COUNT_KEYS: [&str; 6] = ["run", "edit", "read", "search", "web", 
 /// `docs/api/openapi.yaml`'s `WorkspaceActionId` against each other. Adding an
 /// action means editing three lines; forgetting one of them is a red test, not a
 /// production surprise.
-const WORKSPACE_ACTION_IDS: [&str; 8] = [
+const WORKSPACE_ACTION_IDS: [&str; 9] = [
     "invite.create",
     "channel.create",
     "channel.member.add",
@@ -507,6 +507,7 @@ const WORKSPACE_ACTION_IDS: [&str; 8] = [
     "workspace.settings.update",
     "agent.profile.update",
     "agent.invite",
+    "member.avatar.set",
 ];
 
 // The argument vocabulary the registry publishes, restated here for the same
@@ -639,7 +640,33 @@ fn action_args_branches() -> Vec<Value> {
                 "handle": required_text(WORKSPACE_MEMBER_HANDLE_MAX_BYTES)
             }),
         ),
+        member_avatar_set_branch(),
     ]
+}
+
+/// `member.avatar.set` (ADR-0186 증보 v4): one key. The description is the instruction an
+/// agent runtime shows its model — it says who the target is (the person who called you,
+/// never an argument), where the picture must come from, and what to do when the server
+/// refuses.
+fn member_avatar_set_branch() -> Value {
+    let mut branch = action_args_branch(
+        "member.avatar.set",
+        &["attachmentId"],
+        json!({
+            "attachmentId": required_text(WORKSPACE_AVATAR_ID_MAX_CHARS)
+        }),
+    );
+    branch["description"] = json!(
+        "When the person who called you attaches a picture and asks you to make it THEIR profile \
+         picture, propose this with that picture's id (imageAttachments[].id from \
+         oort_conversation_read): one image THEY attached in THIS conversation. The target is \
+         always that person — you cannot name anyone else, and another person's or another \
+         conversation's picture is refused. They see the picture on an approval card and only \
+         they can approve it. Pictures over 4096 px on a side (or 16 megapixels), GIF and animated images \
+         are refused; an iPhone HEIC photo is not supported either (and is not listed in \
+         imageAttachments): ask them to send it as a JPEG (\"사진을 JPEG로 보내 주세요\")."
+    );
+    branch
 }
 
 /// The `avatar` argument of `agent.profile.update` (증보 v3 V3-2a): exactly one of

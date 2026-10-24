@@ -221,6 +221,49 @@ SCAN_SCOPE = [
         ),
     },
     {
+        # ADR-0200 증보 3 E1/E7 (#4284): the woken-not-collected verdict's reads. Column
+        # grants only; `token` and `hosted_agent_doorbell` stay unreadable (asserted below).
+        "path": "server-rust/crates/momo-agent/src/woken.rs",
+        "mode": "all",
+        "column_reads": {
+            "hosted_agent_connection": ["workspace_id", "id", "agent_member_id", "status"],
+            "hosted_agent_liveness": [
+                "workspace_id", "connection_id", "last_inbox_read_at", "last_claim_at",
+                "last_run_event_at", "last_ping_at", "last_ping_state", "last_tool_error_at",
+            ],
+            "hosted_agent_doorbell_ring": ["workspace_id", "connection_id", "requested_at"],
+        },
+        "why": (
+            "notifier run_stall_sweep.rs woken_run_should_end_in_tx → "
+            "active_hosted_connection_id_in_tx / load_woken_agent_facts_in_tx: the run's "
+            "status and ledger (agent_run, agent_run_event: already granted), the agent's "
+            "ACTIVE connection, its liveness row and the last manual ring."
+        ),
+    },
+    {
+        "path": "server-rust/crates/momo-outbox/src/gateway.rs",
+        "mode": "symbols",
+        "symbols": ["lock_woken_job_facts_in_tx"],
+        # `trial_members_stop_sql!` is spliced into the statement by `concat!`, so its
+        # text is not in this slice: `agent_provider_pin` is named here (`kind` is the only
+        # column it reads) and `hosted_connection_channel_ids()` — an INVOKER function the
+        # statement calls — reads three more columns of hosted_agent_connection.
+        "literal_tables": ["agent_provider_pin"],
+        "column_reads": {
+            "agent_provider_pin": ["workspace_id", "agent_member_id", "kind"],
+            "hosted_agent_connection": [
+                "workspace_id", "agent_member_id", "id", "approved_scopes",
+                "approved_channel_ids", "approved_dm_channel_ids", "confirmed_by",
+            ],
+        },
+        "why": (
+            "notifier run_stall_sweep.rs woken_run_should_end_in_tx → "
+            "lock_woken_job_facts_in_tx: the delivery job row (outbox FOR UPDATE, already "
+            "granted) and oort's own claimability (agent, member, agent_run, "
+            "hosted_agent_connection scope + channels), without the token join."
+        ),
+    },
+    {
         "path": "server-rust/crates/momo-outbox/src/agent_job.rs",
         "mode": "symbols",
         "symbols": ["retire_pending_agent_jobs_for_run_with_reason_in_tx"],
@@ -1151,6 +1194,73 @@ if not any("push_token: a SET list in the scan scope cannot be parsed" in p for 
 print(
     "[test-notifier-role-grants] ok: sabotage tuple-form SET list on push_token "
     f"→ RED ({[p for p in probs_h5 if 'cannot be parsed' in p][0]})"
+)
+
+# (i) ADR-0200 증보 3 E7 (#4284): a BYPASSRLS role never reads a credential or a sealed
+# webhook secret. The table-grant parsers only see `ON TABLE` lines, so this one reads
+# EVERY `GRANT … ON [TABLE] <name> TO momo_notifier`, column-scoped ones included.
+NEVER_GRANTED_TO_NOTIFIER = {
+    "token": "credentials (the woken verdict drops the claim predicate's token join for this reason)",
+    "hosted_agent_doorbell": "url and secret_sealed (the verdict needs no fire time)",
+}
+ANY_NOTIFIER_GRANT_RE = re.compile(
+    r'GRANT\s+[^;]*?\bON\s+(?:TABLE\s+)?([a-z][a-z0-9_]*)\s+TO\s+momo_notifier\b',
+    re.I,
+)
+
+
+def forbidden_notifier_grants(text):
+    named = {m.group(1).lower() for m in ANY_NOTIFIER_GRANT_RE.finditer(text)}
+    return sorted(named & set(NEVER_GRANTED_TO_NOTIFIER))
+
+
+bootstrap_text = bootstrap.read_text(encoding="utf-8")
+bad_i = forbidden_notifier_grants(bootstrap_text)
+if bad_i:
+    fail(f"momo_notifier is granted {bad_i} ({[NEVER_GRANTED_TO_NOTIFIER[t] for t in bad_i]})")
+# the parser must SEE a column-scoped grant (the old ON TABLE parsers did not)
+for fixture in (
+    "GRANT SELECT (id, token_hash) ON token TO momo_notifier;",
+    "GRANT SELECT ON TABLE token TO momo_notifier;",
+    "GRANT SELECT (url) ON hosted_agent_doorbell TO momo_notifier;",
+):
+    if not forbidden_notifier_grants(bootstrap_text + "\n" + fixture):
+        fail(f"sabotage `{fixture}` stayed GREEN (the grant reader does not see this shape)")
+print(
+    "[test-notifier-role-grants] ok: no GRANT (table or column) on token / "
+    "hosted_agent_doorbell to momo_notifier; sabotage table- and column-scoped grants → RED"
+)
+
+# (j) ADR-0200 증보 3 E7: the new tables are column-scoped only. A table-level SELECT on
+# any of them is an over-grant (compare() → "table-level SELECT …"); dropping a column
+# the verdict reads is a missing grant.
+for table in ("hosted_agent_liveness", "hosted_agent_doorbell_ring", "agent_provider_pin"):
+    if table not in COLUMN_READS or table not in COLUMN_GRANTS:
+        fail(f"{table} must be a column-scoped read (scan scope + bootstrap)")
+    grants_j = {t: set(vs) for t, vs in grants.items()}
+    grants_j[table] = {"SELECT"}
+    probs_j = compare(used_real, grants_j, real)
+    if not any(f"table-level SELECT {table}" in p for p in probs_j):
+        fail(f"sabotage table-level SELECT {table} stayed GREEN (problems={probs_j})")
+    col_j = {t: set(c) for t, c in COLUMN_GRANTS.items()}
+    col_j.pop(table, None)
+    probs_j2 = compare(used_real, grants, real, col_grants=col_j)
+    if not any(f"column read {table}." in p for p in probs_j2):
+        fail(f"sabotage drop {table} column GRANT stayed GREEN (problems={probs_j2})")
+    # an extra granted column no statement reads
+    col_j3 = {t: set(c) for t, c in COLUMN_GRANTS.items()}
+    col_j3[table].add("zz_extra")
+    probs_j3 = compare(used_real, grants, real, col_grants=col_j3)
+    if not any(f"over-grant column {table}.zz_extra" in p for p in probs_j3):
+        fail(f"sabotage over-granted {table} column stayed GREEN (problems={probs_j3})")
+# the columns the verdict reads for a connection beyond (workspace_id, agent_member_id)
+for col in ("id", "status", "approved_scopes", "approved_channel_ids",
+            "approved_dm_channel_ids", "confirmed_by"):
+    if col not in COLUMN_GRANTS.get("hosted_agent_connection", set()):
+        fail(f"hosted_agent_connection.{col} missing from the notifier column grant")
+print(
+    "[test-notifier-role-grants] ok: woken-verdict tables are column-scoped; table-level "
+    "SELECT / dropped column / extra column → RED"
 )
 
 # (f) #3377: a share-retention DELETE in the scanned notifier source → RED.

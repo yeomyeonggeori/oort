@@ -111,6 +111,7 @@ docker run --rm --entrypoint sh "$IMAGE" -c \
 # ---------------------------------------------------------------------------
 gen() { openssl rand -hex 24; }
 PG_PASSWORD="$(gen)"; APP_PASSWORD="$(gen)"; RELAY_PASSWORD="$(gen)"; WORKER_PASSWORD="$(gen)"
+NOTIFIER_PASSWORD="$(gen)"
 # Lowercase because phases 1-4 assert on this exact spelling in both directions;
 # the mixed-case round trip that #1234 fixed gets its own address in phase 5b.
 OWNER_EMAIL="owner-$(printf '%s' "$RUN_TAG" | tr 'A-Z' 'a-z')@momo.local"
@@ -133,6 +134,8 @@ MIGRATE_DATABASE_URL=postgres://momo:$PG_PASSWORD@postgres:5432/momo
 MOMO_APP_POSTGRES_PASSWORD=$APP_PASSWORD
 RELAY_POSTGRES_PASSWORD=$RELAY_PASSWORD
 WORKER_POSTGRES_PASSWORD=$WORKER_PASSWORD
+NOTIFIER_POSTGRES_PASSWORD=$NOTIFIER_PASSWORD
+NOTIFIER_DATABASE_URL=postgres://momo_notifier:$NOTIFIER_PASSWORD@postgres:5432/momo
 MOMO_APP_DATABASE_URL=postgres://momo_app:$APP_PASSWORD@postgres:5432/momo
 RELAY_DATABASE_URL=postgres://momo_relay:$RELAY_PASSWORD@postgres:5432/momo
 JWT_HMAC=$(gen)

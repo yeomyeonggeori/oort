@@ -21,7 +21,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 CANONICAL_IMAGE = "ghcr.io/yeomyeonggeori/oort"
 POSTGRES_IMAGE = "ghcr.io/yeomyeonggeori/oort-postgres"
-POSTGRES_BASE_DIGEST = "9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e"
+POSTGRES_BASE_DIGEST = "9d9c930220cb9bf2f956d10a8f909cf9973d9672ca0278aef2c1e6facccad2e0"
 DOCKERFILE_FRONTEND_DIGEST = "a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e"
 PGBACKREST_VERSION = "2.59.0-1.pgdg13+1"
 PGBACKREST_PACKAGE_SHA256 = {
@@ -561,7 +561,7 @@ def validate_postgres_dockerfile(text: str) -> None:
         "remote Dockerfile frontend must be digest pinned",
     )
     expected_base = (
-        "pgvector/pgvector:0.8.5-pg18-trixie@sha256:"
+        "pgvector/pgvector:0.8.7-pg18-trixie@sha256:"
         f"{POSTGRES_BASE_DIGEST}"
     )
     from_images = re.findall(r"(?m)^FROM\s+(\S+)", text)

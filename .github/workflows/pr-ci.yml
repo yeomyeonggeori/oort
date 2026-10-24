@@ -187,7 +187,7 @@ jobs:
           rust=false
           node=false
           printf '%s\n' "$files" | grep -Eq \
-            '^(server-rust/|clients/desktop/src-tauri/|deny\.toml$|scripts/check_cargo_licenses\.sh$|scripts/generate_ghcr_notice_bundle\.py$|scripts/check_ghcr_notice_bundle\.sh$|scripts/check_debian_copyrights\.sh$|scripts/tests/test_ghcr_notice_bundle\.sh$|legal/generated/|legal/THIRD_PARTY_NOTICES\.md$|NOTICE$|docs/api/openapi\.yaml$|docs/api/[^/]+\.golden\.json$|docs/api/[^/]+\.vectors?\.json$|server/Migrations/|server/Fixtures/plugin-manifests/|server/Fixtures/plugin-wire/|infra/rust/sql/|infra/([^/]+/)*centrifugo[^/]*\.json$|docs/SELF_HOST_AGENT\.md$|scripts/desktop/build_workd_sidecar\.sh$|packages/momo-core/src/lib/http\.ts$|packages/momo-core/src/features/ai/aiHubModel\.ts$|packages/momo-core/src/features/timeline/|packages/momo-core/src/features/auth/__fixtures__/|packages/momo-core/src/features/workbench/__fixtures__/|clients/web/src/lib/session\.ts$|clients/web/src/features/settings/settingsNav\.ts$|clients/web/src/design/tokens\.css$|clients/web/src/features/work/__fixtures__/|clients/mobile/__tests__/fixtures/|\.github/workflows/pr-ci\.yml$)' \
+            '^(server-rust/|clients/desktop/src-tauri/|deny\.toml$|scripts/check_cargo_licenses\.sh$|scripts/generate_ghcr_notice_bundle\.py$|scripts/check_ghcr_notice_bundle\.sh$|scripts/check_debian_copyrights\.sh$|scripts/tests/test_ghcr_notice_bundle\.sh$|legal/generated/|legal/THIRD_PARTY_NOTICES\.md$|NOTICE$|docs/api/openapi\.yaml$|docs/api/[^/]+\.golden\.json$|docs/api/[^/]+\.vectors?\.json$|server/Migrations/|server/Fixtures/plugin-manifests/|server/Fixtures/plugin-wire/|infra/rust/sql/|infra/security-pack/|scripts/security_pack\.sh$|scripts/tests/test_security_pack\.sh$|infra/([^/]+/)*centrifugo[^/]*\.json$|docs/SELF_HOST_AGENT\.md$|scripts/desktop/build_workd_sidecar\.sh$|packages/momo-core/src/lib/http\.ts$|packages/momo-core/src/features/ai/aiHubModel\.ts$|packages/momo-core/src/features/timeline/|packages/momo-core/src/features/auth/__fixtures__/|packages/momo-core/src/features/workbench/__fixtures__/|clients/web/src/lib/session\.ts$|clients/web/src/features/settings/settingsNav\.ts$|clients/web/src/design/tokens\.css$|clients/web/src/features/work/__fixtures__/|clients/mobile/__tests__/fixtures/|\.github/workflows/pr-ci\.yml$)' \
             && rust=true
           printf '%s\n' "$files" | grep -Eq \
             '^(clients/web/|clients/mobile/|packages/|server/Fixtures/|package\.json$|package-lock\.json$|scripts/check_npm_licenses\.mjs$|\.github/workflows/pr-ci\.yml$)' \
@@ -368,6 +368,65 @@ jobs:
             --log-opts "$log_opts" \
             --redact=90
 
+  # ── 의존성 어드바이저리 게이트 (#4243, SEC-05) ───────────────────────────
+  # 새 RUSTSEC·GHSA는 lockfile을 건드리지 않은 PR에도 생긴다. 그래서 gitleaks처럼
+  # 경로 필터 없이 항상 돌고(`changes`에 의존하지 않는다), 게이트가 이 결과를 필수로
+  # 요구한다. 대가는 명시한다: 고칠 수 없는 새 권고는 정책 PR(deny.toml·
+  # osv-scanner.toml에 이유+만료일 예외)이 들어올 때까지 모든 PR을 막는다.
+  # 판정은 scripts/check_advisories.py 한 곳이다(예외 장부 만료 검사, cargo deny
+  # advisories, npm audit --omit=dev --audit-level=high, OSV-Scanner 5개 lockfile).
+  # 스캐너 도구는 버전을 못 박는다: cargo-deny는 아래 rust 레인과 같은 핀, OSV-Scanner는
+  # gitleaks처럼 릴리스 바이너리 + sha256 검증이다(서드파티 액션 없음).
+  # 음성 대조(test_advisory_gate.sh --online)가 실전 스캔 바로 뒤에 같은 러너에서 돈다:
+  # 알려진 취약 버전 픽스처가 빨강이 아니면(DB가 비었거나 경로가 틀린 눈먼 스캐너)
+  # 이 레인이 빨강이다.
+  advisories:
+    name: dependency advisory gate
+    runs-on: ubuntu-latest
+    # 행 방지용 상한: cargo metadata가 두 워크스페이스 크레이트를 내려받는 콜드 실행이 가장 길다.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '24'
+
+      - name: cargo-deny 설치
+        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2
+        with:
+          tool: cargo-deny@0.20.2
+
+      - name: install pinned osv-scanner
+        env:
+          OSV_VERSION: 2.7.0
+          OSV_SHA256: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
+        run: |
+          set -euo pipefail
+          arch="$(uname -m)"
+          [ "$arch" = "x86_64" ] || {
+            echo "osv-scanner pin is linux_amd64; unsupported runner arch $arch" >&2
+            exit 1
+          }
+          [ -n "${RUNNER_TEMP:-}" ] || {
+            echo "RUNNER_TEMP is unset" >&2
+            exit 1
+          }
+          mkdir -p "$RUNNER_TEMP/osv-bin"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/osv-bin/osv-scanner" \
+            "https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/osv-scanner_linux_amd64"
+          echo "${OSV_SHA256}  $RUNNER_TEMP/osv-bin/osv-scanner" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/osv-bin/osv-scanner"
+          echo "$RUNNER_TEMP/osv-bin" >> "$GITHUB_PATH"
+
+      - name: advisory gate (ledger + cargo deny + npm audit + OSV-Scanner)
+        run: python3 scripts/check_advisories.py
+
+      - name: negative controls (known-vulnerable fixtures must be red)
+        run: bash scripts/tests/test_advisory_gate.sh --online
+
   # ── ② Rust 레인 ─────────────────────────────────────────────────────────
   # `cargo test --workspace` + 카고 라이선스 게이트.
   #
@@ -429,6 +488,63 @@ jobs:
         # 로컬 게이트와 CI가 서로 다른 정책으로 갈라진다.
         # `check licenses`만 돈다(advisories/bans는 #1225 스코프 밖).
         run: scripts/check_cargo_licenses.sh
+
+  # ── ②-b 보안 팩 레인 (#4241 SEC-03) ──────────────────────────────────────
+  # 위의 `rust` 잡은 DB 시험을 전부 `#[ignore]`라 돌리지 못한다(그래서 RLS·인증·승인·푸시·
+  # 첨부·웹훅 시험이 PR 증거에 없었다). 이 잡은 실제 `pgvector/pgvector:pg18` 서비스
+  # 컨테이너에 마이그레이션 + bootstrap_roles.sql 을 얹고, infra/security-pack/selection.txt 가
+  # 고른 `_pg` 시험을 `--ignored --test-threads=1` 로 돌린다. 선택은 SEC-02(#4224) claims.yaml
+  # 이 착륙하면 거기서 파생한다. 나머지 PG 시험은 야간 잡(security-nightly.yml) 몫이다.
+  # 시크릿 없음: `pull_request` + `contents: read`, DB 비밀번호는 일회용 서비스 컨테이너 것.
+  # 필수 컨텍스트 이름은 「Security pack」 — 브랜치 보호 등록은 owner 설정 변경이다.
+  security_pack:
+    name: Security pack
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    # 행 방지 안전장치. 콜드 실측은 첫 런에서 PR 본문에 기록한다(목표 15분, 상한 25분).
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: momo
+          POSTGRES_PASSWORD: momo
+          POSTGRES_DB: momo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U momo -d momo"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://momo:momo@localhost:5432/momo
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: 선택 목록 lint + lint 음성 대조(DB 없이)
+        run: |
+          scripts/security_pack.sh lint
+          bash scripts/tests/test_security_pack.sh
+
+      - name: cargo 캐시(레지스트리 + target)
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: server-rust
+
+      - name: DB 준비(마이그레이션 + bootstrap_roles.sql)
+        run: |
+          psql --version
+          scripts/security_pack.sh setup
+
+      - name: 보안 팩 시험(--ignored --test-threads=1)
+        run: scripts/security_pack.sh run
+
+      - name: 음성 대조 — FORCE 없는 테넌트 테이블이면 tenant_catalog_pg 가 빨강
+        run: scripts/security_pack.sh negative
 
   # ── ③ Node 레인 ─────────────────────────────────────────────────────────
   # npm 라이선스 게이트 + 타입체크 3트리 + 단위 테스트 3트리.
@@ -504,14 +620,16 @@ jobs:
 
   # Branch protection requires this one stable context. Optional path lanes may
   # be skipped, but a failure/cancellation in any selected lane keeps it red.
-  # alignment and gitleaks always run; a skip there is red.
+  # alignment, gitleaks and advisories always run; a skip there is red.
   gate:
     name: PR CI gate
     needs:
       - changes
       - alignment
       - gitleaks
+      - advisories
       - rust
+      - security_pack
       - node
     if: always()
     runs-on: ubuntu-latest
@@ -520,7 +638,9 @@ jobs:
       CHANGES_RESULT: ${{ needs.changes.result }}
       ALIGNMENT_RESULT: ${{ needs.alignment.result }}
       GITLEAKS_RESULT: ${{ needs.gitleaks.result }}
+      ADVISORIES_RESULT: ${{ needs.advisories.result }}
       RUST_RESULT: ${{ needs.rust.result }}
+      SECURITY_PACK_RESULT: ${{ needs.security_pack.result }}
       NODE_RESULT: ${{ needs.node.result }}
       RUST_SELECTED: ${{ needs.changes.outputs.rust }}
       NODE_SELECTED: ${{ needs.changes.outputs.node }}
@@ -531,6 +651,7 @@ jobs:
           test "$CHANGES_RESULT" = success
           test "$ALIGNMENT_RESULT" = success
           test "$GITLEAKS_RESULT" = success
+          test "$ADVISORIES_RESULT" = success
           require_optional_lane() {
             selected="$1"
             result="$2"
@@ -541,4 +662,5 @@ jobs:
             esac
           }
           require_optional_lane "$RUST_SELECTED" "$RUST_RESULT" rust
+          require_optional_lane "$RUST_SELECTED" "$SECURITY_PACK_RESULT" security_pack
           require_optional_lane "$NODE_SELECTED" "$NODE_RESULT" node

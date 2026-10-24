@@ -411,15 +411,32 @@ pub async fn settle_member_avatar_upload_in_tx(
         // The re-point: the single act of "replace my avatar". `m.id = $1` is the
         // caller; the composite FK additionally rejects a media row that is not
         // this member's.
-        sqlx::query(
-            "UPDATE member SET avatar_media_id = $2, updated_at = now() \
-              WHERE id = $1 AND workspace_id = $3",
+        //
+        // An image avatar an agent set for this person (ADR-0186 증보 v4,
+        // `member.avatar.set`) never coexists with an upload (`member_avatar_exclusive_ck`):
+        // the upload wins here because the person just chose it, and the image row it
+        // replaces is deleted in the same transaction (it is a server-held copy no one
+        // points at any more). Without clearing the pointer the CHECK would refuse this
+        // UPDATE and the person's own upload would fail with a 500.
+        let replaced_image: Option<Uuid> = sqlx::query_scalar(
+            "UPDATE member m SET avatar_media_id = $2, avatar_image_id = NULL, updated_at = now() \
+              FROM (SELECT id, avatar_image_id FROM member \
+                     WHERE id = $1 AND workspace_id = $3 FOR UPDATE) old \
+             WHERE m.id = old.id AND m.workspace_id = $3 \
+             RETURNING old.avatar_image_id",
         )
         .bind(member_id)
         .bind(media_id)
         .bind(workspace_id)
-        .execute(&mut *conn)
+        .fetch_one(&mut *conn)
         .await?;
+        if let Some(image_id) = replaced_image {
+            sqlx::query("DELETE FROM agent_avatar_image WHERE workspace_id = $1 AND id = $2")
+                .bind(workspace_id)
+                .bind(image_id)
+                .execute(&mut *conn)
+                .await?;
+        }
     }
 
     let action = if matched {
@@ -457,20 +474,29 @@ pub async fn clear_own_member_avatar_in_tx(
     member_id: Uuid,
     via_token_id: Option<Uuid>,
 ) -> Result<bool, DbError> {
-    let previous: Option<Uuid> = sqlx::query_scalar(
-        "UPDATE member m SET avatar_media_id = NULL, updated_at = now() \
-          FROM (SELECT id, avatar_media_id FROM member \
+    // The uploaded avatar **and** an image avatar an agent set for this person
+    // (ADR-0186 증보 v4): 「내 사진 지우기」 removes whichever the person is wearing.
+    let previous: Option<(Option<Uuid>, Option<Uuid>)> = sqlx::query_as(
+        "UPDATE member m SET avatar_media_id = NULL, avatar_image_id = NULL, updated_at = now() \
+          FROM (SELECT id, avatar_media_id, avatar_image_id FROM member \
                  WHERE id = $1 AND workspace_id = $2 FOR UPDATE) old \
-         WHERE m.id = old.id AND old.avatar_media_id IS NOT NULL \
-         RETURNING old.avatar_media_id",
+         WHERE m.id = old.id AND (old.avatar_media_id IS NOT NULL OR old.avatar_image_id IS NOT NULL) \
+         RETURNING old.avatar_media_id, old.avatar_image_id",
     )
     .bind(member_id)
     .bind(workspace_id)
     .fetch_optional(&mut *conn)
     .await?;
-    let Some(previous) = previous else {
+    let Some((previous_media, previous_image)) = previous else {
         return Ok(false);
     };
+    if let Some(image_id) = previous_image {
+        sqlx::query("DELETE FROM agent_avatar_image WHERE workspace_id = $1 AND id = $2")
+            .bind(workspace_id)
+            .bind(image_id)
+            .execute(&mut *conn)
+            .await?;
+    }
     write_audit(
         &mut *conn,
         &AuditEntry::new(workspace_id, "member.avatar_removed")
@@ -479,7 +505,10 @@ pub async fn clear_own_member_avatar_in_tx(
             .via_token(via_token_id)
             .with_schema(
                 "momo.member.avatar_removed.v1",
-                json!({ "media_id": previous.to_string() }),
+                json!({
+                    "media_id": previous_media.map(|id| id.to_string()),
+                    "image_id": previous_image.map(|id| id.to_string()),
+                }),
             ),
     )
     .await?;

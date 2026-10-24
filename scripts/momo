@@ -37,7 +37,7 @@ Commands:
   hermes-gateway-install-plugin
               Link/copy adapters/hermes into the local Hermes plugin directory.
   hermes-gateway-smoke
-              Run mock smoke, or pass --real [--trigger] for real Hermes evidence.
+              Run the Rust gateway/PG tests (isolated PG18), or pass --real [--trigger] for real Hermes evidence.
   host add ssh://user@host [options]
               Copy a target-compatible momo-workd and install its user service.
   cleanup-seeded-agents
@@ -788,7 +788,7 @@ provider credentials.
 Install/link the plugin for a local Hermes install:
   scripts/momo hermes-gateway-install-plugin
 
-Mock contract smoke:
+Gateway REST door tests (Rust, isolated PG18; needs Docker):
   scripts/momo hermes-gateway-smoke
 
 Real Hermes status/smoke:
@@ -901,7 +901,9 @@ hermes_gateway_smoke() {
       "$REPO_ROOT/scripts/verify_hermes_gateway_real_smoke.sh" "$@"
       ;;
     *)
-      "$REPO_ROOT/scripts/verify_hermes_gateway_adapter.sh" "$@"
+      # SEC-07 (#4245): the Swift-host gateway verifier is retired; the REST door
+      # is proven by the Rust PG tests on an isolated PG18.
+      "$REPO_ROOT/scripts/verify_sec07_ported_claims.sh" "$@"
       ;;
   esac
 }

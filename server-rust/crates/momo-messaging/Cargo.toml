@@ -38,3 +38,6 @@ image.workspace = true
 # DB-free `cargo test --workspace` unit pass.
 tokio = { workspace = true }
 futures = { workspace = true }
+
+[lints]
+workspace = true
