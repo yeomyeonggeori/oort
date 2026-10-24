@@ -15,7 +15,7 @@ import {
 import {
   channelActionMenuLabel,
   type ChannelSectionChoice,
-} from "@/features/chat/channelActionModel";
+} from "@momo/core/features/channels/actionModel";
 import { scheduleSidebarChannelRowFocus } from "./sidebarRowFocus";
 
 // =============================================================================

@@ -26,7 +26,13 @@ const CONTROLS = readFileSync(
 );
 const CONTROLS_CODE = codeOnly(CONTROLS);
 const ACTION_MODEL_CODE = codeOnly(
-  readFileSync(new URL("./channelActionModel.ts", import.meta.url), "utf8")
+  readFileSync(
+    new URL(
+      "../../../../../packages/momo-core/src/features/channels/actionModel.ts",
+      import.meta.url
+    ),
+    "utf8"
+  )
 );
 const ACTION_MENU_CODE = codeOnly(
   readFileSync(new URL("./channelActions.tsx", import.meta.url), "utf8")

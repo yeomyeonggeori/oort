@@ -17,7 +17,7 @@ import type {UpdateReadStateOptions} from '@momo/core/lib/api';
 // ## 호출 자리는 이유를 말하고, 와이어 모양은 여기서만 정한다
 //
 // 웹 `clients/web/src/features/chat/advertiseReadState.ts` 와 같은 분류다. 폰에
-// 있는 갈래는 셋이다:
+// 있는 갈래는 다섯이다(앞의 셋과, 아래 시트의 둘):
 //
 //   channel_open   대화 화면이 연 방문의 **첫** 광고 → `explicit_open`.
 //                  D4/D6 의 「명시 열람」이다.
@@ -29,22 +29,29 @@ import type {UpdateReadStateOptions} from '@momo/core/lib/api';
 // 「background」를 문자열로 보내는 갈래는 없다. 생략이 그 와이어 모양이다
 // (`updateReadState` 가 `explicit_open` 이외의 값을 싣지 않는 것도 같은 규율).
 //
-// 폰에는 아직 「읽음 처리」 메뉴와 「여기부터 안 읽음」이 없다. 생기면 웹의
-// `mark_read_menu`(explicit_open)와 `mark_unread`(생략 + 마크) 갈래가 여기에
-// 같은 모양으로 더해진다 — 특히 뒤의 것에 explicit_open 을 실으면 마크를 건 바로
-// 그 tx 가 마크를 지운다.
+// 행을 길게 눌러 여는 시트(#4229)가 웹의 두 갈래를 같은 모양으로 더했다:
+//
+//   mark_read_menu  시트의 「읽음 처리하기」 → `explicit_open`. 사람이 그 채널을 읽었다고
+//                   말한 것이라 열람과 같은 뜻이다(웹 `mark_read_menu`).
+//   mark_unread     시트의 「읽지 않음으로 표시하기」 → 생략 + `markUnreadBeforeSeq`.
+//                   **여기에 explicit_open 을 실으면 마크를 건 바로 그 tx 가 마크를
+//                   지운다** — 그래서 이 갈래는 와이어 판별자를 절대 싣지 않는다.
 // =============================================================================
 
 export type ReadAdvertisementReason =
   | 'channel_open'
   | 'arrival_flush'
-  | 'inbox_mention';
+  | 'inbox_mention'
+  | 'mark_read_menu'
+  | 'mark_unread';
 
-/** D6 판별자의 와이어 모양. `channel_open` 만 싣는다. */
+/** D6 판별자의 와이어 모양. 열람(`channel_open`)과 시트의 읽음 처리(`mark_read_menu`)만 싣는다. */
 export function readIntentWire(
   reason: ReadAdvertisementReason,
 ): UpdateReadStateOptions['readIntent'] {
-  return reason === 'channel_open' ? 'explicit_open' : undefined;
+  return reason === 'channel_open' || reason === 'mark_read_menu'
+    ? 'explicit_open'
+    : undefined;
 }
 
 /**

@@ -20,7 +20,7 @@ import {
 import {
   channelActionMenuLabel,
   type ChannelActionKey,
-} from "./channelActionModel";
+} from "@momo/core/features/channels/actionModel";
 
 // =============================================================================
 // 채널 헤더 ⋮ 메뉴 (검수 피드백 #3 · #1865). 트리거는 헤더 우측 라운드 버튼
@@ -46,7 +46,7 @@ import {
 //
 // ## 이 파일에 실행부가 없는 이유 (BT-1 / #1929)
 //
-// 위 세 항목의 인벤토리는 `channelActionModel.ts`, 그 실행(알림 PUT · 나가기
+// 위 세 항목의 인벤토리는 코어 `channels/actionModel.ts`, 그 실행(알림 PUT · 나가기
 // DELETE · 확인 다이얼로그)은 `channelActions.tsx`가
 // 갖는다. 같은 일을 하는 두 번째 표면(사이드바 행 우클릭)이 생겼기 때문이고,
 // 두 표면이 실행을 각자 들면 다음 수리는 한쪽에만 들어간다. 이 파일에 남는 것은

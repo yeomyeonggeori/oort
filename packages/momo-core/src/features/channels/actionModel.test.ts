@@ -9,12 +9,12 @@ import {
   CHANNEL_MUTE_LABEL,
   CHANNEL_TOPIC_VIEW_LABEL,
   CHANNEL_UNMUTE_LABEL,
-} from "@momo/core/features/channels/model";
+} from "./model";
 import {
   COPY_LINK_ACTION_LABEL,
   COPY_LINK_DONE_LABEL,
-} from "@momo/core/features/timeline/copyLabels";
-import type { Channel } from "@momo/core/lib/api";
+} from "../timeline/copyLabels";
+import type { Channel } from "../../lib/api";
 import {
   channelActionAvailability,
   channelActionClusterTitle,
@@ -24,7 +24,7 @@ import {
   channelActionMenuLabel,
   type ChannelActionKey,
   type ChannelActionState,
-} from "./channelActionModel";
+} from "./actionModel";
 
 const WS = "00000000-0000-7000-8000-000000000001";
 
