@@ -26,20 +26,46 @@
 # license is compatible with redistributing oort under Apache-2.0* — never to
 # widen the list silently.
 #
-# Scope note: this runs `check licenses` only. `cargo deny check advisories`
-# (RUSTSEC) and `bans`/`sources` are a separate follow-up — they need the
-# advisory database and a duplicate-crate policy, and mixing them into the
-# license gate would make a security failure read as a license failure.
+# Scope note: `scripts/check_cargo_licenses.sh` runs `check licenses` only, so a
+# security failure never reads as a license failure. The RUSTSEC side is its own
+# gate, `scripts/check_advisories.py` (#4243), which runs `check advisories`
+# against this same file; `bans`/`sources` stay a separate follow-up.
 # =============================================================================
 
-# Advisories are NOT part of the CI gate (`check licenses` only, #1225); this section only records
-# reviewed exceptions for anyone who runs `cargo deny check advisories` by hand.
+# Advisory exceptions (#4243). `scripts/check_advisories.py` runs `cargo deny check advisories`
+# for server-rust and for clients/desktop/src-tauri (macOS targets only: the only shipped
+# bundle targets are "app" and "dmg", see tauri.conf.json), and the PR CI lane `advisories`
+# makes it a required check.
+#
+# Every entry MUST carry a reason AND `expires=YYYY-MM-DD` inside that reason. The date is the
+# FIRST RED DAY: on that day the gate fails and the entry has to be fixed, removed, or renewed
+# by a reviewed policy change (this file is a policy path). Entries may not expire more than
+# 180 days out. Unmaintained and unsound advisories are gated like vulnerabilities (`all`),
+# so a transitive crate going unmaintained is an explicit, dated decision and not silence.
 [advisories]
+unmaintained = "all"
+unsound = "all"
 ignore = [
     # paste 1.0.15 (RUSTSEC-2024-0436, "no longer maintained"; a proc-macro, no known vulnerability).
-    # Reaches us only through tokenizers 0.23 <- fastembed 7.1 <- momo-embed (#3173). Review by
-    # 2026-12-31 or when tokenizers moves to pastey, whichever is first.
-    { id = "RUSTSEC-2024-0436", reason = "unmaintained proc-macro via tokenizers (#3173); revisit 2026-12-31" },
+    # Reaches us only through tokenizers 0.23 <- fastembed 7.1 <- momo-embed (#3173).
+    { id = "RUSTSEC-2024-0436", reason = "paste unmaintained proc-macro, no vulnerability; only via tokenizers <- fastembed <- momo-embed (#3173); revisit when tokenizers moves to pastey; expires=2026-12-31" },
+
+    # unic-* 0.9.0 (five RUSTSEC-2025 "unmaintained" notices, no vulnerability). The whole family
+    # comes from one edge: tauri-utils 2.9.3 -> urlpattern 0.3.0 -> unic-ucd-ident/unic-char-range/
+    # unic-common/unic-char-property/unic-ucd-version. Fix is upstream (Tauri/urlpattern).
+    { id = "RUSTSEC-2025-0075", reason = "unic-char-range unmaintained, no vulnerability; via tauri-utils <- urlpattern, upstream Tauri must move; expires=2027-01-22" },
+    { id = "RUSTSEC-2025-0080", reason = "unic-common unmaintained, no vulnerability; via tauri-utils <- urlpattern, upstream Tauri must move; expires=2027-01-22" },
+    { id = "RUSTSEC-2025-0081", reason = "unic-char-property unmaintained, no vulnerability; via tauri-utils <- urlpattern, upstream Tauri must move; expires=2027-01-22" },
+    { id = "RUSTSEC-2025-0098", reason = "unic-ucd-version unmaintained, no vulnerability; via tauri-utils <- urlpattern, upstream Tauri must move; expires=2027-01-22" },
+    { id = "RUSTSEC-2025-0100", reason = "unic-ucd-ident unmaintained, no vulnerability; via tauri-utils <- urlpattern, upstream Tauri must move; expires=2027-01-22" },
+
+    # crypto-bigint 0.5.5 (RUSTSEC-2026-0387, secret-dependent timing in constant-time arithmetic;
+    # fixed only in >=0.7.6). Desktop reaches it through p256 0.13 -> elliptic-curve 0.13. The
+    # fix is a p256 0.13 -> 0.14 manifest change (server-rust already runs 0.14 and is patched),
+    # which is not a lockfile repair. Desktop uses p256 only to VERIFY signatures over public
+    # data (session_refresh/refresh_key.rs, device_key/payload.rs); the signing key lives in
+    # the Secure Enclave and `SigningKey` appears only under #[cfg(test)] (device_key/tests.rs).
+    { id = "RUSTSEC-2026-0387", reason = "desktop p256 0.13 -> crypto-bigint 0.5.5 timing issue; p256 only verifies public data in production (signing is Secure Enclave, SigningKey only in cfg(test)); fix = p256 0.14 migration (follow-up); expires=2027-01-22" },
 ]
 
 [licenses]

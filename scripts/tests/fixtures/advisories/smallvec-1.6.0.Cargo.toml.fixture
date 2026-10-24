@@ -1,0 +1,10 @@
+[package]
+name = "advisory-fixture"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+
+# Deliberately pinned to a version with a permanent RUSTSEC advisory (RUSTSEC-2021-0003).
+[dependencies]
+smallvec = "=1.6.0"

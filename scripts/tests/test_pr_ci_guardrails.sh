@@ -88,12 +88,43 @@ gitleaks_job_compliant() {
   return 0
 }
 
+advisories_job_compliant() {
+  local advisories="$1"
+  [ -n "$advisories" ] || return 1
+  grep -Fq '    name: dependency advisory gate' <<<"$advisories" || return 1
+  grep -Fq 'persist-credentials: false' <<<"$advisories" || return 1
+  grep -Fq 'tool: cargo-deny@0.20.2' <<<"$advisories" || return 1
+  grep -Fq 'OSV_VERSION: 2.7.0' <<<"$advisories" || return 1
+  grep -Fq 'OSV_SHA256: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b' <<<"$advisories" || return 1
+  grep -Fq 'sha256sum -c -' <<<"$advisories" || return 1
+  grep -Fq 'osv-scanner/releases/download/v${OSV_VERSION}/' <<<"$advisories" || return 1
+  # The real scan is the whole gate (no --only), and the negative controls run after it.
+  grep -Fq '        run: python3 scripts/check_advisories.py' <<<"$advisories" || return 1
+  grep -Fq '        run: bash scripts/tests/test_advisory_gate.sh --online' <<<"$advisories" || return 1
+  # Always on: a new advisory appears without any lockfile change, and a gate that
+  # is path-filtered, soft, or waits on another lane would let it through.
+  if grep -Fq '    if:' <<<"$advisories"; then
+    return 1
+  fi
+  if grep -Fq 'needs:' <<<"$advisories"; then
+    return 1
+  fi
+  if grep -Fq 'continue-on-error' <<<"$advisories"; then
+    return 1
+  fi
+  if grep -Fq -- '--only' <<<"$advisories"; then
+    return 1
+  fi
+  return 0
+}
+
 workflow_compliant() {
   local workflow="$1"
-  local bootstrap_allowlist changes alignment gitleaks rust node contract gate
+  local bootstrap_allowlist changes alignment gitleaks advisories rust node contract gate
   changes="$(job_block "$workflow" changes)"
   alignment="$(job_block "$workflow" alignment)"
   gitleaks="$(job_block "$workflow" gitleaks)"
+  advisories="$(job_block "$workflow" advisories)"
   rust="$(job_block "$workflow" rust)"
   node="$(job_block "$workflow" node)"
   contract="$(job_block "$workflow" contract)"
@@ -123,6 +154,7 @@ workflow_compliant() {
     return 1
   fi
   gitleaks_job_compliant "$gitleaks" || return 1
+  advisories_job_compliant "$advisories" || return 1
   if grep -Fq 'pull_request_target' "$workflow"; then
     return 1
   fi
@@ -163,13 +195,13 @@ workflow_compliant() {
   if grep -Fq 'inboxApproval' <<<"$node"; then
     return 1
   fi
-  for dependency in changes alignment gitleaks rust node; do
+  for dependency in changes alignment gitleaks advisories rust node; do
     grep -Fq "      - $dependency" <<<"$gate" || return 1
   done
   if grep -Fq "      - contract" <<<"$gate"; then
     return 1
   fi
-  for result in CHANGES_RESULT ALIGNMENT_RESULT GITLEAKS_RESULT RUST_RESULT NODE_RESULT; do
+  for result in CHANGES_RESULT ALIGNMENT_RESULT GITLEAKS_RESULT ADVISORIES_RESULT RUST_RESULT NODE_RESULT; do
     grep -Fq "      ${result}: \${{ needs." <<<"$gate" || return 1
   done
   for selected in RUST_SELECTED NODE_SELECTED; do
@@ -184,6 +216,8 @@ workflow_compliant() {
   grep -Fq 'test "$ALIGNMENT_RESULT" = success' <<<"$gate" || return 1
   # shellcheck disable=SC2016 # These are literal workflow shell contracts.
   grep -Fq 'test "$GITLEAKS_RESULT" = success' <<<"$gate" || return 1
+  # shellcheck disable=SC2016 # These are literal workflow shell contracts.
+  grep -Fq 'test "$ADVISORIES_RESULT" = success' <<<"$gate" || return 1
   grep -Fq 'true:success|false:skipped) ;;' <<<"$gate" || return 1
   grep -Fq 'lane selection/result mismatch:' <<<"$gate" || return 1
 
@@ -214,7 +248,12 @@ for required in \
   'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' \
   'actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444' \
   'scripts/tests/test_ghcr_notice_bundle.sh' \
-  'scripts/check_ghcr_notice_bundle.sh --stale-only'; do
+  'scripts/check_ghcr_notice_bundle.sh --stale-only' \
+  '  advisories:' \
+  '    name: dependency advisory gate' \
+  '      ADVISORIES_RESULT: ${{ needs.advisories.result }}' \
+  'OSV_SHA256: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b' \
+  'run: python3 scripts/check_advisories.py'; do
   grep -Fq -- "$required" "$WORKFLOW" || fail "pr-ci missing: $required"
 done
 
@@ -353,6 +392,58 @@ sed -i.bak 's/run: npm --prefix clients\/mobile run test/run: npm --prefix clien
   "$TMP_DIR/mobile-inbox-exclude.yml"
 if workflow_compliant "$TMP_DIR/mobile-inbox-exclude.yml"; then
   fail "mobile inboxApproval filename exclusion was accepted"
+fi
+
+# Advisory lane (#4243): each way of making it unable to fail must turn the guard red.
+cp "$WORKFLOW" "$TMP_DIR/missing-advisories.yml"
+sed -i.bak '/^      - advisories$/d' "$TMP_DIR/missing-advisories.yml"
+if workflow_compliant "$TMP_DIR/missing-advisories.yml"; then
+  fail "missing advisories gate dependency was accepted"
+fi
+
+cp "$WORKFLOW" "$TMP_DIR/advisories-optional.yml"
+# shellcheck disable=SC2016 # Literal workflow contract, not a shell expansion.
+sed -i.bak '/test "$ADVISORIES_RESULT" = success/d' "$TMP_DIR/advisories-optional.yml"
+if workflow_compliant "$TMP_DIR/advisories-optional.yml"; then
+  fail "advisories result not required by the gate was accepted"
+fi
+
+cp "$WORKFLOW" "$TMP_DIR/advisories-path-filtered.yml"
+sed -i.bak 's/^    name: dependency advisory gate$/    name: dependency advisory gate\
+    if: needs.changes.outputs.node == '\''true'\''/' "$TMP_DIR/advisories-path-filtered.yml"
+if workflow_compliant "$TMP_DIR/advisories-path-filtered.yml"; then
+  fail "path-filtered advisories job was accepted"
+fi
+
+cp "$WORKFLOW" "$TMP_DIR/advisories-soft.yml"
+sed -i.bak 's/^    name: dependency advisory gate$/    name: dependency advisory gate\
+    continue-on-error: true/' "$TMP_DIR/advisories-soft.yml"
+if workflow_compliant "$TMP_DIR/advisories-soft.yml"; then
+  fail "continue-on-error advisories job was accepted"
+fi
+
+cp "$WORKFLOW" "$TMP_DIR/advisories-narrowed.yml"
+sed -i.bak 's#run: python3 scripts/check_advisories.py$#run: python3 scripts/check_advisories.py --only ledger#' "$TMP_DIR/advisories-narrowed.yml"
+if workflow_compliant "$TMP_DIR/advisories-narrowed.yml"; then
+  fail "narrowed advisory gate (--only) was accepted"
+fi
+
+cp "$WORKFLOW" "$TMP_DIR/advisories-no-negative-control.yml"
+sed -i.bak '/test_advisory_gate.sh --online/d' "$TMP_DIR/advisories-no-negative-control.yml"
+if workflow_compliant "$TMP_DIR/advisories-no-negative-control.yml"; then
+  fail "advisory lane without negative controls was accepted"
+fi
+
+cp "$WORKFLOW" "$TMP_DIR/advisories-osv-no-checksum.yml"
+sed -i.bak '/OSV_SHA256}  /d' "$TMP_DIR/advisories-osv-no-checksum.yml"
+if workflow_compliant "$TMP_DIR/advisories-osv-no-checksum.yml"; then
+  fail "osv-scanner install without checksum was accepted"
+fi
+
+cp "$WORKFLOW" "$TMP_DIR/advisories-osv-unpinned.yml"
+sed -i.bak 's/OSV_VERSION: 2.7.0/OSV_VERSION: latest/' "$TMP_DIR/advisories-osv-unpinned.yml"
+if workflow_compliant "$TMP_DIR/advisories-osv-unpinned.yml"; then
+  fail "unpinned osv-scanner version was accepted"
 fi
 
 # Execute the exact embedded classifier with a fake GitHub API. These fixtures
