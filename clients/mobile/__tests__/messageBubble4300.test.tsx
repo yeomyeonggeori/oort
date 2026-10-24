@@ -164,7 +164,10 @@ describe('행 강조 면 — 화면 끝에서 띄운 둥근 면', () => {
     // 면 가장자리 → 내용 시작 ≥ 안쪽 여백 10(아바타는 절대 배치 left 가 같은 값).
     expect(Number(inner.paddingLeft) - CONV.avatar - CONV.avatarGap).toBe(ROW_FACE.inner);
     expect(inner.paddingHorizontal).toBe(ROW_FACE.inner);
-    // 깨뜨리면: rowAvatar.left 를 SAFE_GUTTER 로 되돌리면 아바타가 6 어긋난다(avatarRender 시험).
+    // 아바타 칸은 면 안쪽 여백만큼 안에서 시작한다(옛 SAFE_GUTTER 가 아니다 — 그릇이 6 안쪽).
+    const slot = flat(screen.getByTestId('message-avatar-slot').props.style);
+    expect(slot.left).toBe(ROW_FACE.inner);
+    // 깨뜨리면: rowAvatar.left 를 SAFE_GUTTER 로 되돌리면 아바타가 6 어긋난다.
   });
 
   it('PendingRow(낙관적 메아리)도 같은 그릇·같은 안쪽 여백을 진다', () => {

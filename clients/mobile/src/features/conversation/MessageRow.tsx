@@ -2867,7 +2867,7 @@ function MessageRowInner({
         {/* 왼쪽 칸. **묶음의 머리에만** 그려지고, 칸 자체는 모든 행이 비워 둔다 —
             그래야 한 묶음의 본문이 같은 x 에서 시작한다 (감사 H-11). */}
         {startsGroup ? (
-          <View style={styles.rowAvatar}>
+          <View style={styles.rowAvatar} testID="message-avatar-slot">
             {actions?.onOpenProfile ? (
               <Pressable
                 accessibilityRole="button"
@@ -3969,7 +3969,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    * 물러나는 모양은 `LandedTintFade` 가 든다: 그릇이 배경을 벗는 그 커밋에 같은 색의
    * 덮개가 불투명도 1 에서 0 으로 녹는다. 「동작 줄이기」면 덮개 없이 즉시다.
    */
-  rowLanded: {backgroundColor: color.warnSurface, borderRadius: ROW_FACE.radius},
+  // 모서리는 그릇(`row`)이 이미 든다 — 서 있는 착지는 그 상자에 색만 입힌다.
+  rowLanded: {backgroundColor: color.warnSurface},
   // 그룹 사이는 `CONV.groupGap`. 안쪽이 이미 절반씩 물고 있으므로 차이만 더한다.
   /**
    * 작성자가 바뀌는 자리의 틈. 시안 `.a-m{margin-bottom:16px}` — 두 행의 안쪽 패딩
