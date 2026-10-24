@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Channel, RosterMember } from "@momo/core/lib/api";
+import { QueryClient } from "@tanstack/react-query";
+import type { Channel, ReadState, RosterMember } from "@momo/core/lib/api";
 import {
   channelLabel,
   channelLabelParts,
@@ -9,6 +10,9 @@ import {
   makeDirectory,
   memberFor,
   memberNameParts,
+  applyClosureToCache,
+  applyReadStateToCache,
+  mergeReadStateRow,
 } from "./useWorkspace";
 
 // =============================================================================
@@ -241,5 +245,90 @@ describe("memberNameParts", () => {
     expect(
       memberNameParts(DIRECTORY, "019f0000-0000-7000-8000-000000000999", "에이전트")
     ).toEqual({ name: "에이전트" });
+  });
+});
+
+
+// =============================================================================
+// 읽음 투영 캐시의 합류 (ADR-0177 D10, #4228): `PUT read-state` 응답과 실시간 프레임은 `latestReadableSeq`·`closedAtSeq` 를 싣지 않는다.
+// 「이번 응답이 말하지 않음」(`undefined`)이 「닫힘 없음」(`null`)으로 바뀌면 닫은 DM 이 되살아난다.
+// =============================================================================
+
+const READ_CH = "00000000-0000-7000-8000-000000000301";
+const OTHER_CH = "00000000-0000-7000-8000-000000000302";
+
+function readRow(channelId: string, patch: Partial<ReadState> = {}): ReadState {
+  return {
+    channelId,
+    lastReadSeq: 10,
+    latestSeq: 10,
+    unreadCount: 0,
+    mentionCount: 0,
+    markedUnreadBeforeSeq: null,
+    ...patch,
+  };
+}
+
+describe("읽음 투영 캐시: 두 필드는 말하지 않은 응답이 지우지 않는다", () => {
+  it("말하지 않은 응답(undefined)은 캐시의 값을 지키고, 나머지 칸은 응답을 따른다", () => {
+    const current = readRow(READ_CH, { closedAtSeq: 10, latestReadableSeq: 9, lastReadSeq: 4 });
+    const incoming = readRow(READ_CH, { lastReadSeq: 10 });
+    expect(mergeReadStateRow(current, incoming)).toEqual({
+      ...incoming,
+      closedAtSeq: 10,
+      latestReadableSeq: 9,
+    });
+  });
+
+  it("null 은 답이다(「안 닫았다」): 캐시의 값을 대신한다", () => {
+    const current = readRow(READ_CH, { closedAtSeq: 10, latestReadableSeq: 9 });
+    const incoming = readRow(READ_CH, { closedAtSeq: null, latestReadableSeq: 12 });
+    const merged = mergeReadStateRow(current, incoming);
+    expect(merged.closedAtSeq).toBeNull();
+    expect(merged.latestReadableSeq).toBe(12);
+  });
+
+  it("캐시에도 응답에도 없으면 키를 만들지 않는다(여전히 「말하지 않음」)", () => {
+    const merged = mergeReadStateRow(readRow(READ_CH), readRow(READ_CH));
+    expect("closedAtSeq" in merged).toBe(false);
+    expect("latestReadableSeq" in merged).toBe(false);
+  });
+
+  it("applyReadStateToCache: PUT 응답이 다른 DM 의 닫힘을 지우지 않고, 그 채널 자신의 닫힘도 지키며, 새 행은 덧붙인다", () => {
+    const client = new QueryClient();
+    client.setQueryData<ReadState[]>(["read-state", WS], [
+      readRow(READ_CH, { closedAtSeq: 10, latestReadableSeq: 10 }),
+      readRow(OTHER_CH, { closedAtSeq: null, latestReadableSeq: 3 }),
+    ]);
+    // 다른 DM 을 열어 읽음 커서를 올렸다(PUT 응답: 두 필드 없음).
+    applyReadStateToCache(client, WS, readRow(OTHER_CH, { lastReadSeq: 3, latestSeq: 3 }));
+    // 닫은 DM 자신에게도 읽음 쓰기가 온다.
+    applyReadStateToCache(client, WS, readRow(READ_CH, { lastReadSeq: 10 }));
+    const rows = client.getQueryData<ReadState[]>(["read-state", WS]) ?? [];
+    expect(rows.find((row) => row.channelId === READ_CH)?.closedAtSeq).toBe(10);
+    expect(rows.find((row) => row.channelId === OTHER_CH)?.closedAtSeq).toBeNull();
+    // 행이 없던 채널은 응답 그대로 덧붙는다.
+    applyReadStateToCache(client, WS, readRow("00000000-0000-7000-8000-000000000303"));
+    expect(client.getQueryData<ReadState[]>(["read-state", WS])).toHaveLength(3);
+  });
+
+  it("applyClosureToCache: 쓴 기기는 즉시 반영한다(D10) - 숫자는 닫힘, null 은 다시 열기, 다른 행은 그대로", () => {
+    const client = new QueryClient();
+    client.setQueryData<ReadState[]>(["read-state", WS], [
+      readRow(READ_CH, { closedAtSeq: null, latestReadableSeq: 10 }),
+      readRow(OTHER_CH, { closedAtSeq: null, latestReadableSeq: 3 }),
+    ]);
+    applyClosureToCache(client, WS, READ_CH, 10);
+    let rows = client.getQueryData<ReadState[]>(["read-state", WS]) ?? [];
+    expect(rows.map((row) => row.closedAtSeq)).toEqual([10, null]);
+    applyClosureToCache(client, WS, READ_CH, null);
+    rows = client.getQueryData<ReadState[]>(["read-state", WS]) ?? [];
+    expect(rows.map((row) => row.closedAtSeq)).toEqual([null, null]);
+  });
+
+  it("applyClosureToCache: 캐시가 아직 없으면 만들지 않는다(없는 투영을 지어내지 않는다)", () => {
+    const client = new QueryClient();
+    applyClosureToCache(client, WS, READ_CH, 10);
+    expect(client.getQueryData(["read-state", WS])).toBeUndefined();
   });
 });

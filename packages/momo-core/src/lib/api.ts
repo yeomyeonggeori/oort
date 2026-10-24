@@ -337,6 +337,30 @@ export interface ReadState {
    * `features/readState/model.ts` is the only composition point.
    */
   markedUnreadBeforeSeq: number | null;
+  /**
+   * ADR-0177 D9 (#4227). The newest seq worth reading (tool calls, system lines and work-session
+   * cards do not count; `latestSeq` counts everything). Wire name `latest_readable_seq`.
+   *
+   * **`undefined` means "this response did not say"**, not zero: an older server, the `PUT
+   * read-state` response and the realtime `read_state` frame (ADR-0177 D10: no closure event) all
+   * omit it. Only a `GET read-state` row from a server with migration 146 carries it. A merge that
+   * replaces a cached row with a response lacking the field must keep the value it already had.
+   */
+  latestReadableSeq?: number;
+  /**
+   * ADR-0177 D6/D8 (#4227). The **requesting member's own** DM-closure watermark ("closed having
+   * seen up to here"). Wire name `closed_at_seq`. Three distinct states, and the difference between
+   * the last two is the point:
+   *
+   * - `number`: the caller closed this DM at that seq;
+   * - `null`: a `GET read-state` row said the caller has NOT closed it (and for every non-DM);
+   * - `undefined`: this response did not say (older server, `PUT read-state` response, realtime
+   *   frame). Keep what you had — never turn it into `null`, which would reopen a closed DM.
+   *
+   * Nothing is stored when a DM revives: whether it shows is the comparison of this with
+   * `latestReadableSeq` (the shared decision function lands with #4228).
+   */
+  closedAtSeq?: number | null;
 }
 
 /** ADR-0178 D6. Only `"explicit_open"` is sent; absence means background. */
@@ -2316,6 +2340,10 @@ interface WireReadState {
   unread_count: number;
   mention_count: number;
   marked_unread_before_seq?: number | null;
+  /** ADR-0177 D9. Absent on an older server and on a `PUT read-state` response. */
+  latest_readable_seq?: number;
+  /** ADR-0177 D6/D8. `null` = not closed (GET), absent = the response did not say. */
+  closed_at_seq?: number | null;
 }
 
 function markedUnreadBeforeSeqFromWire(
@@ -2329,8 +2357,26 @@ function markedUnreadBeforeSeqFromWire(
   return null;
 }
 
+/** A non-negative integer seq, or `undefined` for anything else (including absent). */
+function seqFromWire(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+/**
+ * ADR-0177 D6/D8: keeps `undefined` ("did not say"), `null` ("not closed") and a number
+ * ("closed at") apart. A malformed value is "did not say" - neither a claim that the DM is closed
+ * nor one that it is open.
+ */
+function closedAtSeqFromWire(wire: WireReadState): number | null | undefined {
+  const value = wire.closed_at_seq;
+  if (value === null) return null;
+  return seqFromWire(value);
+}
+
 function toReadState(wire: WireReadState): ReadState {
-  return {
+  const state: ReadState = {
     channelId: wire.channel_id,
     lastReadSeq: wire.last_read_seq,
     latestSeq: wire.latest_seq,
@@ -2338,6 +2384,13 @@ function toReadState(wire: WireReadState): ReadState {
     mentionCount: wire.mention_count,
     markedUnreadBeforeSeq: markedUnreadBeforeSeqFromWire(wire),
   };
+  // Present only when the response said something: an absent key stays absent so a caller can tell
+  // "not closed" (`null`) from "not told" (no key).
+  const latestReadableSeq = seqFromWire(wire.latest_readable_seq);
+  if (latestReadableSeq !== undefined) state.latestReadableSeq = latestReadableSeq;
+  const closedAtSeq = closedAtSeqFromWire(wire);
+  if (closedAtSeq !== undefined) state.closedAtSeq = closedAtSeq;
+  return state;
 }
 
 /** Bulk read-state, one entry per membership (P7 server single truth). */
@@ -2356,6 +2409,30 @@ export async function fetchReadStates(
       typeof (state as Record<string, unknown>).unread_count === "number" &&
       typeof (state as Record<string, unknown>).mention_count === "number";
   }).map(toReadState);
+}
+
+/**
+ * 이 DM 을 닫는다 (ADR-0177 증보 D7, #4227). `seenSeq` 는 **화면이 본** 마지막 seq(읽음 투영의 `latestSeq`)다.
+ * 서버는 `GREATEST(기존 값, LEAST(seenSeq, 채널의 마지막 seq))` 로 저장해서, 투영과 이 호출 사이에 온 메시지는 묻히지
+ * 않고 같은 호출의 재전송은 결과가 같다. 204 - 본문이 없다. 참여자가 아니거나 보관된 DM 이면 404.
+ */
+export async function closeDm(
+  workspaceId: string,
+  channelId: string,
+  seenSeq: number
+): Promise<void> {
+  await authedRequest(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(channelId)}/closure`,
+    { method: "PUT", body: JSON.stringify({ seenSeq }) }
+  );
+}
+
+/** 닫은 DM 을 다시 연다 (D7·D8). 행이 없어도 204, 참여자가 아니거나 보관된 DM 이면 404. */
+export async function reopenDm(workspaceId: string, channelId: string): Promise<void> {
+  await authedRequest(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(channelId)}/closure`,
+    { method: "DELETE" }
+  );
 }
 
 /**
