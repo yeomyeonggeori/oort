@@ -39,7 +39,7 @@ let log: string[];
 function ports(over: Partial<AvatarPhotoPorts> & {picked?: AvatarPickOutcome} = {}) {
   const {picked, ...rest} = over;
   const base: AvatarPhotoPorts = {
-    pick: jest.fn(async (source: string) => {
+    pick: jest.fn(async (source: string): Promise<AvatarPickOutcome> => {
       log.push(`pick:${source}`);
       return (
         picked ?? {kind: 'picked', uri: 'file:///cache/picked.jpg', width: 1000, height: 1000}
@@ -232,6 +232,8 @@ describe('withMyAvatar — roster 에서 나만 바뀐다', () => {
       channelCount: 0,
       channelIds: [],
       capabilities: [],
+      createdAtMs: 0,
+      updatedAtMs: 0,
       ...(avatarUrl ? {avatarUrl} : {}),
     }) as RosterMember;
 

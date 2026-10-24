@@ -194,13 +194,18 @@ describe('고르기 → 올리기 → roster', () => {
     expect(open).toHaveBeenCalledTimes(1);
   });
 
-  it('같은 줄을 연달아 눌러도 고르기는 한 번만 시작한다', async () => {
+  it('상태가 다시 그려지기 전에 들어온 두 번째 탭은 무시한다(한 프레임 안의 연타)', async () => {
     let release: (value: AvatarPickOutcome) => void = () => {};
     (ports.pick as jest.Mock).mockImplementation(() => new Promise<AvatarPickOutcome>(resolve => (release = resolve)));
     mount(ROWS_NO_PHOTO());
-    fireEvent.press(screen.getByTestId('avatar-choose-library'));
-    fireEvent.press(screen.getByTestId('avatar-choose-library'));
-    fireEvent.press(screen.getByTestId('avatar-choose-camera'));
+    const library = screen.getByTestId('avatar-choose-library');
+    const camera = screen.getByTestId('avatar-choose-camera');
+    // 같은 act 안: 첫 탭이 낸 `busy` 상태가 아직 줄을 잠그기 전이다.
+    await act(async () => {
+      fireEvent.press(library);
+      fireEvent.press(library);
+      fireEvent.press(camera);
+    });
     expect(ports.pick).toHaveBeenCalledTimes(1);
     await act(async () => release({kind: 'cancelled'}));
   });
@@ -227,7 +232,7 @@ describe('사진 지우기', () => {
 });
 
 describe('연결이 끊긴 동안', () => {
-  it('이유를 말하고 세 줄을 잠근다 — 눌러도 아무것도 시작하지 않는다', () => {
+  it('이유를 말하고 세 줄을 잠근다 — 눌러도 아무것도 시작하지 않고 잠긴 것으로 읽힌다', () => {
     mockOnline = false;
     mount(ROWS_WITH_PHOTO());
     expect(screen.getByTestId('avatar-page-offline')).toHaveTextContent(AVATAR_PAGE_OFFLINE);
@@ -236,5 +241,9 @@ describe('연결이 끊긴 동안', () => {
     fireEvent.press(screen.getByTestId('avatar-remove'));
     expect(ports.pick).not.toHaveBeenCalled();
     expect(mockRemove).not.toHaveBeenCalled();
+    // 눌러도 아무 일이 없을 뿐 아니라 줄이 잠긴 것으로 보이고 읽힌다.
+    for (const id of ['avatar-choose-library', 'avatar-choose-camera', 'avatar-remove']) {
+      expect(screen.getByTestId(id).props.accessibilityState).toMatchObject({disabled: true});
+    }
   });
 });

@@ -102,9 +102,13 @@ describe('카메라', () => {
 describe('줄이기와 올리기', () => {
   function spyContext() {
     const calls: string[] = [];
-    const context = {
-      crop: jest.fn((rect: unknown) => (calls.push(`crop:${JSON.stringify(rect)}`), context)),
-      resize: jest.fn((size: unknown) => (calls.push(`resize:${JSON.stringify(size)}`), context)),
+    const context: {
+      crop: jest.Mock;
+      resize: jest.Mock;
+      renderAsync: jest.Mock;
+    } = {
+      crop: jest.fn(),
+      resize: jest.fn(),
       renderAsync: jest.fn(async () => ({
         saveAsync: jest.fn(async (options: unknown) => {
           calls.push(`save:${JSON.stringify(options)}`);
@@ -112,6 +116,14 @@ describe('줄이기와 올리기', () => {
         }),
       })),
     };
+    context.crop.mockImplementation((rect: unknown) => {
+      calls.push(`crop:${JSON.stringify(rect)}`);
+      return context;
+    });
+    context.resize.mockImplementation((size: unknown) => {
+      calls.push(`resize:${JSON.stringify(size)}`);
+      return context;
+    });
     jest.spyOn(ImageManipulator, 'manipulate').mockReturnValue(context as never);
     return {calls, context};
   }
