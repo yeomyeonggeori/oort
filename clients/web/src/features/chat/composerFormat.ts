@@ -405,3 +405,41 @@ export function toggleComposerFormat(
   const { prefix, suffix } = AFFIX[kind];
   return toggleAffixSegments(value, segments, prefix, suffix, kind);
 }
+
+/**
+ * 「서식」 단추가 선택이 없을 때 고르는 범위: 캐럿이 닿은 낱말(공백이 아닌 연속). 캐럿이 낱말에 닿아 있으면(바로 앞·뒤
+ * 포함) 그 낱말, 공백 한가운데면 오른쪽 낱말(없으면 왼쪽)이다. 글에 공백 아닌 것이 없으면 null(단추가 흐려진다).
+ */
+export function wordRangeAt(
+  value: string,
+  caret: number
+): { start: number; end: number } | null {
+  const at = Math.max(0, Math.min(caret, value.length));
+  const isWord = (index: number) =>
+    index >= 0 && index < value.length && (value[index] ?? "").trim() !== "";
+  let anchor = -1;
+  if (isWord(at)) anchor = at;
+  else if (isWord(at - 1)) anchor = at - 1;
+  else {
+    for (let i = at; i < value.length; i += 1) {
+      if (isWord(i)) {
+        anchor = i;
+        break;
+      }
+    }
+    if (anchor < 0) {
+      for (let i = at - 1; i >= 0; i -= 1) {
+        if (isWord(i)) {
+          anchor = i;
+          break;
+        }
+      }
+    }
+  }
+  if (anchor < 0) return null;
+  let start = anchor;
+  let end = anchor + 1;
+  while (isWord(start - 1)) start -= 1;
+  while (isWord(end)) end += 1;
+  return { start, end };
+}

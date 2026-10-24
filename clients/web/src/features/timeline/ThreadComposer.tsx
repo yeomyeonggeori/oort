@@ -482,6 +482,11 @@ export function ThreadComposer({
               data-testid="thread-composer-actions"
             >
               <div className="flex items-center gap-1">
+                <AttachButton
+                  onPick={onFiles}
+                  disabled={sending}
+                  className="disabled:opacity-100"
+                />
                 <Button
                   type="button"
                   variant="ghost"
@@ -495,11 +500,6 @@ export function ThreadComposer({
                 >
                   <AtSign aria-hidden="true" />
                 </Button>
-                <AttachButton
-                  onPick={onFiles}
-                  disabled={sending}
-                  className="disabled:opacity-100"
-                />
                 <Button
                   type="button"
                   variant="ghost"
