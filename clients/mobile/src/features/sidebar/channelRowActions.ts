@@ -18,18 +18,17 @@ import {composedUnreadCount} from '@momo/core/features/readState/model';
 //
 // ## 폰에 손이 없는 항목은 내놓지 않는다 (죽은 항목 금지)
 //
-// 코어의 `row` 표면에는 별표·섹션 이동·DM 닫기도 있다. 폰은 그 손(`onToggleStar` ·
-// 커스텀 섹션 · 닫기)이 없으므로 **입력으로 막는다** — 코어 판정이 「그릴 수 없다」고
+// 코어의 `row` 표면에는 별표·섹션 이동도 있다. 폰은 그 손(`onToggleStar` ·
+// 커스텀 섹션)이 없으므로 **입력으로 막는다** — 코어 판정이 「그릴 수 없다」고
 // 답하게 한다. 항목을 그린 뒤 뒤에서 거르면 구분선이 사라진 항목을 기준으로 서 있게
 // 된다(코어 `withClusterSeparators` 머리말).
 //
 //   - 별표·섹션 이동: 폰 UI 가 별도 판단이다(이슈 Out of scope).
-//   - 「대화 닫기」: 서버가 기억하는 닫기(#4227/#4228)는 이미 있고 판정 함수도 코어
-//     `features/sidebar/dmVisibility.ts`(`dmVisibility` · `dmCloseOffered`)에 있다. 그런데 폰 사이드바는 아직
-//     그 함수가 아니라 `dmHiddenAsGone`(나간 상대만 접는다)으로 DM 을 거른다. 닫기를 내밀면 닫은 DM 이 폰
-//     목록에 그대로 남는다 — 죽은 항목이다. 그래서 폰 사이드바가 `dmVisibility` 로 옮겨 가는 일(읽음 투영의
-//     `closedAtSeq`·hold·「닫은 대화」 목록)과 **한 묶음**으로만 켠다. **폰에 기기 로컬 닫기를 새로 만들지
-//     않는다** — 기기마다 어긋나던 문제를 되풀이한다.
+//   - 「대화 닫기」: 서버가 기억하는 닫기(#4227/#4228)를 쓴다. 폰 사이드바가 코어 `dmVisibility` 로 DM 을 거르므로(#4367,
+//     `dmVerdicts.ts`) 닫은 DM 은 목록에서 사라지고 「⋯ › 닫은 대화」 시트에서 돌아온다. 항목을 **내미는가**는 코어
+//     `dmCloseOffered`(웹 호버 X·행 메뉴와 같은 한 함수) 한 곳이 정하고, 이 파일은 그 답(`closeOffered`)을 `canCloseDm`
+//     으로 넘길 뿐이다. 서버가 닫기를 싣지 않는 서버에서는 내밀지 않는다. **폰에 기기 로컬 닫기를 새로 만들지 않는다** - 기기마다
+//     어긋나던 문제를 되풀이한다.
 //   - 「주제 보기」·「기억 설정」·「GitHub 알림」: `row` 표면에 없는 항목이다.
 //   - 「채널·상대 정보 보기」: 폰에 그 정보를 보여 줄 화면이 아직 없다(목적지 없음 →
 //     항목 없음). 화면이 생기면 코어 표에 열쇠를 더하고 여기서 손만 넘긴다.
@@ -43,6 +42,7 @@ export const PHONE_CHANNEL_ACTION_KEYS: ReadonlySet<ChannelActionKey> = new Set<
   'mark-read',
   'mark-unread',
   'mute',
+  'close-dm',
   'leave',
 ]);
 
@@ -55,6 +55,11 @@ export interface ChannelRowTarget {
   selfRole: MembershipRole | undefined;
   /** 서버 읽음 투영의 이 채널 항목. 없으면 읽음 처리·안 읽음 표시를 내놓지 않는다. */
   readState: ReadState | null;
+  /**
+   * 「대화 닫기」를 내미는가. 호출부가 코어 `dmCloseOffered` 로 정하고(투영이 준비됐고·안 읽은 것이 없고·서버가 닫기를 싣는다),
+   * 생략하면 내밀지 않는다.
+   */
+  closeOffered?: boolean;
 }
 
 export interface ChannelRowCopied {
@@ -80,7 +85,8 @@ export function channelRowActionItems(
     canStar: false,
     hasMemorySettings: false,
     hasGithubNotifications: false,
-    canCloseDm: false,
+    // DM 이 아닌 채널에는 코어 표가 닫기를 내지 않는다(`isDm &&`).
+    canCloseDm: target.closeOffered === true,
     // 투영이 있고, 다 읽었고, 메시지가 하나라도 있을 때만(빈 채널에는 표시할 메시지가 없다).
     canMarkUnread:
       target.readState != null &&

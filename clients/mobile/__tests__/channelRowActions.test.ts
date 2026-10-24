@@ -5,6 +5,7 @@ import {
   CHANNEL_MARK_UNREAD_LABEL,
   CHANNEL_MUTE_LABEL,
   CHANNEL_UNMUTE_LABEL,
+  DM_CLOSE_LABEL,
 } from '@momo/core/features/channels/model';
 
 import {
@@ -127,6 +128,38 @@ describe('DM 행', () => {
   });
 });
 
+describe('DM 행의 「대화 닫기」 (#4367)', () => {
+  const dmKeys = (over: Partial<ChannelRowTarget> = {}) => keys(target({kind: 'dm', ...over}));
+
+  it('내미는 손(closeOffered)을 받은 DM 에만 선다: 알림 다음, 코어 표의 차례 그대로', () => {
+    expect(dmKeys({closeOffered: true})).toEqual([
+      'copy-name',
+      'copy-link',
+      'copy-id',
+      'mark-read',
+      'mute',
+      'close-dm',
+    ]);
+    const item = channelRowActionItems(target({kind: 'dm', closeOffered: true})).find(
+      candidate => candidate.key === 'close-dm',
+    );
+    expect(item?.label).toBe(DM_CLOSE_LABEL);
+    // 상태 무리에 붙는다: 나가기처럼 위험 색이나 구분선이 서지 않는다(지우는 것이 아니다).
+    expect(item?.tone).toBeUndefined();
+  });
+
+  it('손을 안 받으면(생략·false) 서지 않는다: 서버가 닫기를 안 싣거나, 안 읽은 것이 있거나, 투영이 안 왔다', () => {
+    expect(dmKeys()).not.toContain('close-dm');
+    expect(dmKeys({closeOffered: false})).not.toContain('close-dm');
+  });
+
+  it('DM 이 아닌 채널에는 손을 받아도 서지 않는다', () => {
+    for (const kind of ['public', 'private'] as const) {
+      expect(keys(target({kind, closeOffered: true}))).not.toContain('close-dm');
+    }
+  });
+});
+
 describe('죽은 항목이 없다', () => {
   const roles: (MembershipRole | undefined)[] = ['owner', 'admin', 'member', 'guest', undefined];
   const reads: (ReadState | null)[] = [
@@ -142,24 +175,26 @@ describe('죽은 항목이 없다', () => {
       for (const selfRole of roles) {
         for (const readState of reads) {
           for (const muted of [false, true]) {
-            for (const item of channelRowActionItems(
-              target({kind, selfRole, readState, muted}),
-            )) {
-              seen.add(item.key);
-              expect(PHONE_CHANNEL_ACTION_KEYS.has(item.key)).toBe(true);
+            for (const closeOffered of [false, true]) {
+              for (const item of channelRowActionItems(
+                target({kind, selfRole, readState, muted, closeOffered}),
+              )) {
+                seen.add(item.key);
+                expect(PHONE_CHANNEL_ACTION_KEYS.has(item.key)).toBe(true);
+              }
             }
           }
         }
       }
     }
-    // 실행할 줄 아는 일곱 가지가 모두 어딘가에서는 나온다 — 허용 목록이 헛돌지 않는다.
+    // 실행할 줄 아는 여덟 가지가 모두 어딘가에서는 나온다 — 허용 목록이 헛돌지 않는다.
     expect([...seen].sort()).toEqual([...PHONE_CHANNEL_ACTION_KEYS].sort());
   });
 
-  it('별표·섹션 이동·DM 닫기·주제·기억·GitHub 는 어떤 입력에서도 폰 시트에 없다', () => {
+  it('별표·섹션 이동·주제·기억·GitHub 는 어떤 입력에서도 폰 시트에 없다', () => {
     for (const kind of ['public', 'private', 'dm'] as const) {
-      const k = keys(target({kind}));
-      for (const absent of ['star', 'move-to-section', 'close-dm', 'topic', 'memory', 'github']) {
+      const k = keys(target({kind, closeOffered: true}));
+      for (const absent of ['star', 'move-to-section', 'topic', 'memory', 'github']) {
         expect(k).not.toContain(absent);
       }
     }
@@ -178,7 +213,7 @@ describe('VoiceOver 로터는 시트와 같은 배열이다', () => {
 
   it('모르는 동작 이름은 아무 열쇠도 아니다', () => {
     expect(channelRowActionKeyOf('activate')).toBeNull();
-    expect(channelRowActionKeyOf('momoChannel:close-dm')).toBeNull();
+    expect(channelRowActionKeyOf('momoChannel:close-dm')).toBe('close-dm');
     expect(channelRowActionKeyOf('momoChannel:star')).toBeNull();
   });
 });

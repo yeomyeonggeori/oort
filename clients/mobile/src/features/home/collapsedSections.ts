@@ -1,11 +1,6 @@
 import {useCallback, useState} from 'react';
 import {NON_SECRET_KEYS, nonSecretStore} from '../../storage/kv';
-import type {
-  GoneToggleItem,
-  HomeListItem,
-  SidebarRow,
-  SidebarSection,
-} from '../sidebar/rows';
+import type {SidebarRow, SidebarSection} from '../sidebar/rows';
 
 // =============================================================================
 // 홈 섹션 접기 — 사람의 선택을 기기에 남긴다 (DS2-3 #2715).
@@ -51,31 +46,6 @@ export function visibleRows(
   return section.data.filter(
     row => row.unreadCount > 0 || row.mentionCount > 0 || isOpen(row),
   );
-}
-
-/**
- * 섹션이 목록에 그리는 항목들 (#4252): 보이는 행, 그리고 DM 섹션에 「나간 멤버와의 대화」로 접힌 줄이
- * 있으면 그 수를 세는 펼침 줄, 펼쳤으면 그 줄 **아래**에 접힌 행.
- *
- * 접힌 섹션은 안 읽은 행과 열린 행만 남기고(`visibleRows`) 펼침 줄도 그리지 않는다. 접힌 대화는 안 읽음이
- * 없는 것뿐이라 접은 섹션에서 잃을 것이 없다.
- */
-export function homeSectionItems(
-  section: SidebarSection,
-  collapsed: boolean,
-  goneExpanded: boolean,
-  isOpen: (row: SidebarRow) => boolean,
-): HomeListItem[] {
-  const rows: HomeListItem[] = visibleRows(section, collapsed, isOpen);
-  const tucked = section.tucked ?? [];
-  if (collapsed || tucked.length === 0) return rows;
-  const toggle: GoneToggleItem = {
-    key: 'gone-toggle',
-    kind: 'goneToggle',
-    count: tucked.length,
-    expanded: goneExpanded,
-  };
-  return goneExpanded ? [...rows, toggle, ...tucked] : [...rows, toggle];
 }
 
 /** 이 워크스페이스에서 접힌 섹션과, 한 섹션을 뒤집는 함수. */
