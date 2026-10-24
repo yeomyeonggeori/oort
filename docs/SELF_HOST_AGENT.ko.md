@@ -1623,14 +1623,23 @@ run도 같은 정직함으로 보인다. 아무도 안 가져간 run은 `queued`
 끝으로 닫힌 사유가 붙은 `succeeded` / `failed` / `timed_out` / `cancelled`. 에이전트가
 조용해지면 서버가 직접 run 을 끝낸다: lease가 만료됐고 run이 2시간 동안 이벤트가 없으면
 (또는 연결 해제로 전달 job이 정리되고 run이 그만큼 조용하면) `lease_abandoned`, 24시간
-아무도 안 가져가면 `unclaimed_expired`. 재배정·재시도는 없고 다시 요청하면 새 run이다.
+아무도 안 가져가면 `unclaimed_expired`. 도어벨은 닿았는데 아무도 job을 가져가지 않으면
+더 일찍 `woken_not_collected`로 끝난다. 첫 미수령 발사 30분 뒤에, 그 발사 이후 에이전트가
+받은편지함을 읽거나 claim하지 않았고, 다른 job의 살아 있는 lease도 없고, run 이벤트나
+`oort_ping` `working`도 없고, oort가 에이전트를 거절한 적도 없을 때다(토큰이 폐기·만료된
+것은 보호가 아니다. 에이전트 쪽 사실이다). 사람이 「다시 깨우기」를 하면 그 시계가
+뒤로 간다. 요청한 사람에게는 채널에 한 줄이 가고, 서버가 만든 환영 run은 줄 없이
+끝난다. 재배정·재시도는 없고 다시 요청하면 새 run이다.
 끝난 run에 뒤늦게 보고하면 409다.
 
 운영 설정(모두 선택): api의 `MOMO_AGENT_PORT_LIVENESS_RESPONSIVE_MINUTES`(20, 1~240),
 `MOMO_AGENT_PORT_LIVENESS_QUIET_MINUTES`(60, 앞의 값 미만 불가),
 `MOMO_AGENT_PORT_LIVENESS_WOKEN_GRACE_MINUTES`(5, 1~60), notifier의
 `MOMO_RUN_LEASE_ABANDON_HOURS`(2, 1~168), `MOMO_RUN_UNCLAIMED_EXPIRE_HOURS`(24,
-1~720). run 원장은 run이 끝난 뒤 30일 보관한다.
+1~720), `MOMO_RUN_WOKEN_EXPIRE_MINUTES`(30, 10~1440, 범위 밖은 경계값), api의
+`MOMO_WELCOME_HOSTED_SIGNAL_HOURS`(24, 1~168, api 시작 때 한 번 읽어 바꾸려면 재시작): 호스티드 에이전트는 이 시간 안에
+받은편지함을 읽거나 claim·보고했거나, 연결이 이 시간 안에 활성이 된 경우에만 첫 입장
+환영을 받는다. run 원장은 run이 끝난 뒤 30일 보관한다.
 
 oort가 보여 줄 수 있는 것은 에이전트가 **보낸** 것뿐이다: 단계, `oort_ping`, 스트리밍한
 `textDelta`(저장되지 않음). 에이전트의 속 추론은 단계로 보고하지 않는 한 절대 보이지

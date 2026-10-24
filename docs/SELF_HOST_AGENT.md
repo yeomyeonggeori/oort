@@ -1947,15 +1947,26 @@ in the agent's queue), then `claimed` (when and by which connection), then
 server ends a run itself when its agent has gone quiet: `lease_abandoned`
 when the lease expired and the run had no event for 2 hours (or the delivery
 job was settled by a disconnect and the run is that silent), and
-`unclaimed_expired` when nobody took it for 24 hours. Nothing is reassigned or
-retried; ask again to start a new run. If a late agent reports on an ended run
+`unclaimed_expired` when nobody took it for 24 hours. When the doorbell reached
+your receiver but nothing collected the job, the run ends sooner as
+`woken_not_collected`: 30 minutes after the first uncollected ring, if the
+agent neither read its inbox nor claimed since the ring, holds no other live
+lease, sent no run event or `oort_ping` `working` since, and oort itself has not
+refused it (a revoked or expired token does not count as protection: that is on
+the agent's side). A person's "wake again" moves that clock. The people who
+asked get one line in the channel; the server's own welcome run ends without
+one. Nothing is reassigned or retried; ask again to start a new run. If a late agent reports on an ended run
 it gets 409.
 
 Operator settings (all optional): `MOMO_AGENT_PORT_LIVENESS_RESPONSIVE_MINUTES`
 (20, 1..240), `MOMO_AGENT_PORT_LIVENESS_QUIET_MINUTES` (60, never below the
 first), `MOMO_AGENT_PORT_LIVENESS_WOKEN_GRACE_MINUTES` (5, 1..60) on the api;
-`MOMO_RUN_LEASE_ABANDON_HOURS` (2, 1..168) and `MOMO_RUN_UNCLAIMED_EXPIRE_HOURS`
-(24, 1..720) on the notifier. The run ledger is kept for 30 days after a run
+`MOMO_RUN_LEASE_ABANDON_HOURS` (2, 1..168), `MOMO_RUN_UNCLAIMED_EXPIRE_HOURS`
+(24, 1..720) and `MOMO_RUN_WOKEN_EXPIRE_MINUTES` (30, 10..1440; a value outside
+the range uses the boundary) on the notifier; `MOMO_WELCOME_HOSTED_SIGNAL_HOURS`
+(24, 1..168; read once at api start, so a change needs a restart) on the api: a hosted agent is handed the first-join welcome only if
+it read its inbox, claimed or reported within that window, or its connection
+became active within it. The run ledger is kept for 30 days after a run
 finishes.
 
 What oort can show is what the agent **sends**: the stages, `oort_ping`, and any

@@ -131,6 +131,8 @@ export function elapsedSpan(sinceMs: number, nowMs: number): string | undefined 
 const END_REASON_TEXT: Record<string, string> = {
   approval_expired: "승인이 만료됐어요",
   unclaimed_expired: "아무도 가져가지 않아 끝냈어요",
+  // ADR-0200 증보 3 E4(#4284): 초인종이 닿았는데 가져가지 않아 30분 뒤 서버가 끝낸 run.
+  woken_not_collected: "깨웠지만 가져가지 않아 끝냈어요",
   lease_abandoned: "가져간 에이전트가 오래 응답하지 않아 서버가 끝냈어요",
   agent_error: "에이전트가 오류로 끝냈어요",
   cancelled_by_member: "멤버가 취소했어요",

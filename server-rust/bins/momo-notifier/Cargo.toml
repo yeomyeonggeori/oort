@@ -66,6 +66,8 @@ serde.workspace = true
 # signed request the notifier really sends can be inspected.
 # #3591: the migration-123 member trigger is exercised through the real lifecycle API.
 momo-settings = { path = "../../crates/momo-settings" }
+# #4284: the woken-not-collected conformance writes ring rows with the REAL ledger writer.
+momo-webhook = { path = "../../crates/momo-webhook" }
 axum.workspace = true
 chrono.workspace = true
 ed25519-dalek.workspace = true
