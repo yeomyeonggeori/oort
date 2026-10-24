@@ -11,6 +11,28 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+### Added
+- Server: an external agent that was woken by the doorbell but never collected its job is now ended after 30 minutes as `timed_out{woken_not_collected}` with an honest line, and a hosted agent with no work signal for a day is not picked for welcome runs (ADR-0200 addendum 3, #4284, #4359, #4365).
+- Server: DM closure is server state — closing a DM on one device closes it everywhere, and conversations with members who left are closed by default (ADR-0177 addendum, #4227, #4335; migration 146).
+- Server: an agent can propose changing *your own* profile photo from an attachment in the same conversation; you approve it on a preview card (`member.avatar.set`, ADR-0186 addendum v4, #4385, #4398; migration 148). The card UI follows in #4394.
+- Phone: change your profile photo from the profile sheet — pick, take, crop, remove (#4384, #4391).
+- Phone: long-press a channel or DM in the sidebar for copy, read/unread, mute, leave and close conversation; closed DMs live under "⋯ › Closed conversations" (#4229, #4366, #4367, #4396).
+- Phone: Buzz-style message bubbles with rounded press/landing faces, and a sent message rises from the composer (respects Reduce Motion) (#4300, #4388, #4383, #4400).
+- Web and desktop: scheduled messages (#4215, #4275).
+- Security: claims-to-tests mapping (`docs/security/claims.yaml`, ADR-0214) and a "what oort does not do" section (#4224, #4389); a PR CI "Security pack" lane that runs the tenant-isolation, auth and approval PG tests (#4241, #4378); a required dependency-advisory lane (#4243, #4358); `unsafe_code = "forbid"` across the server workspace (#4246, #4373); tenant catalog invariants (#4242, #4371).
+
+### Changed
+- Phone: the composer is a one-line pill that expands into an editor while you type and returns to one line after sending; no haptic while typing (#4305, #4368).
+- Web and desktop: composer tool row (+ · mention · emoji · format) with a context band; message rows get a soft hover, a pill toolbar and shared tooltips; DM closure syncs across devices (#4317, #4379, #4324, #4392, #4228, #4360).
+- Web and desktop: "Create GitHub app" no longer shows an example that looks like a value, names the app after the host, and warns that GitHub may ask you to confirm access (#4333, #4374).
+- Server: Postgres image pinned to 18.6 with a version floor test (#4244, #4369). The running team instance is upgraded separately (#4370).
+- Server: runtime roles lose write access to three RLS-off catalog tables, and the ten `mem_*` SECURITY DEFINER functions are executable by `momo_app` only (#4372, #4387, #4381, #4395; migration 147).
+
+### Fixed
+- Server: realtime connection tokens no longer outlive the access token they are bound to, so subscriptions opened just before expiry are not refused with 403 (#4311, #4364).
+- Server: gateway usage reported with camelCase keys is recorded instead of silently becoming zero (#4375, #4380).
+- Phone: the conversation no longer shifts while typing (the activity line keeps its height) or on reconnect, the photo viewer controls sit inside the safe area, and the return key inserts a newline (#4331, #4357, #4292, #4327, #4293, #4329, #4321, #4330).
+
 ## [0.1.36] - 2026-10-23
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.36>. Tag target: `main=16780cb3f`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres lists. One database migration (145, the schema goes to 145) and one new block in `bootstrap_runtime_roles.sql` (the same `scheduled-message-lockdown` text as the migration). New environment variables are all optional (`MOMO_SCHEDULER_ENABLED`, `MOMO_SCHEDULER_TICK_MS`, `MOMO_SCHEDULER_BATCH`, `MOMO_SCHEDULER_GRACE_SECONDS`). This release adds the scheduled-message server, a theme catalog with text size, chat density and wallpapers, a desktop glass background, a new phone attach menu, and the Railway wiring that keeps the GitHub App key and public address on the api only.
