@@ -4867,7 +4867,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     case 'dm-status-dots-states-member':
     // #4252·#4367: 「닫은 대화」와 「나간 멤버와의 대화」. 사이드바를 **그대로** 세운다. 서버가 닫기를 싣는 투영 위에서, 내가 닫은 DM
     // 하나·나간 멤버 DM 넷(안 읽음 없음 둘 · 안 읽은 사람 메시지 하나 · 기계 메시지뿐인 안 읽음 하나)과 명부에 있는 DM(꺼진 에이전트
-    // 「kwak의 Claude」 포함)이 한 목록에 선다. 숨은 DM 은 `maestro/102-gone-dm-capture.yaml` 이 DM 섹션 ⋯ 의 「닫은 대화」로 열고,
+    // 꺼진 개인 에이전트 포함)이 한 목록에 선다. 숨은 DM 은 `maestro/102-gone-dm-capture.yaml` 이 DM 섹션 ⋯ 의 「닫은 대화」로 열고,
     // `maestro/104-dm-close-capture.yaml` 이 행을 길게 눌러 「대화 닫기」를 찍는다. 수리 전 코드로 띄우면 닫은 DM 이 목록에 그대로 선다.
     case 'gone-dm-home':
       return (
@@ -6038,7 +6038,7 @@ function seedDmStatusDots(surface: string): void {
  * 형상(`latestReadableSeq`·`closedAtSeq` 가 모든 행에 있다)이라 보임 판정이 코어 `dmVisibility` 한 함수로 돈다.
  *
  *   이도현   안 읽음 2                    박서연   다 읽음(닫기를 내민다)
- *   kwak의 Claude  꺼진 에이전트(명부에 **있다** - 숨지 않는 쪽)       grok   응답함
+ *   꺼진 개인 에이전트(명부에 **있다** - 숨지 않는 쪽)       grok   응답함
  *   최민수   내가 닫은 DM(closedAtSeq = 읽을 seq) - 목록에 없고 「닫은 대화」 시트에 「내가 닫았어요」로 선다
  *   나간 멤버 ×4  명부에 없는 상대. 둘은 다 읽음(숨는다), 하나는 안 읽은 사람 메시지 1(보인다), 하나는 안 읽음 4 가 전부 기계
  *                 메시지(작업 상태·시스템 줄)라 서버가 읽을 seq 를 읽은 자리에 둔다(숨는다, 이슈 AC 「안 읽은 사람 메시지」)

@@ -141,7 +141,8 @@ export function dmClosedEntries(
   const out: DmClosedEntry[] = [];
   for (const channel of dms) {
     const verdict = verdicts.get(idKey(channel.id));
-    if (verdict === undefined || verdict.shown) continue;
+    if (verdict === undefined) continue;
+    // 숨은 DM 만 6·7번에 닿는다: 목록에 드는 줄은 코어 `dmClosedListReason` 한 곳이 정한다.
     const reason = dmClosedListReason(verdict.rule);
     if (reason !== null) out.push({channel, reason});
   }
