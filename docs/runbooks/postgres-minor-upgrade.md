@@ -18,5 +18,8 @@ RLS FORCE가 테넌트 경계라서 DB 마이너는 보안 패치 선(현재 **1
 3. 이미지(digest)만 새 핀으로 바꿔 서비스를 재배포한다. 볼륨·`PGDATA` 경로는 그대로 둔다.
 4. 확인: `SHOW server_version;`이 18.6 이상, `SHOW server_version_num;` ≥ 180006, 앱 `/health`, 마이그레이션 상태, `scripts/verify_rls.sh`.
 5. 되돌리기: 마이너 다운그레이드는 지원하지 않는다. 문제가 생기면 같은 이미지 계열에서 백업 복원으로 간다.
-
-pgvector 확장 버전은 이미지 태그를 따르지만 기존 DB의 `vector` 확장은 `ALTER EXTENSION vector UPDATE`를 돌리기 전까지 옛 버전으로 남는다. 필요할 때만 따로 판단한다(이 문서의 범위 밖).
+6. pgvector 확장 갱신(선택, 별도 판단): 이미지는 pgvector 0.8.7 바이너리를 싣지만 이미 만든 DB의 `vector` 확장은 `ALTER EXTENSION vector UPDATE`를 돌리기 전까지 옛 버전으로 남는다. 이 PR과 배포는 이 명령을 실행하지 않는다. 아래 조건이 모두 맞을 때만 한 번 실행한다.
+   - 4단계 확인이 모두 통과했고(18.6 재시작 뒤 앱·`verify_rls.sh` 정상), 최신 백업이 재시작 뒤에도 유효하다.
+   - `SELECT extversion FROM pg_extension WHERE extname='vector';`이 0.8.7보다 낮다.
+   - 한가한 시간이고 owner가 공지했다. 확장 갱신은 마이너 이미지 교체와 따로, 한 번에 하나씩 한다.
+   실행 뒤 `SELECT extversion ...`이 0.8.7인지, 벡터 인덱스 질의가 정상인지 확인한다. 신규 DB(`CREATE EXTENSION`)는 처음부터 0.8.7이다.
