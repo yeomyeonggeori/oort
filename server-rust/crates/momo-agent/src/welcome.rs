@@ -283,12 +283,20 @@ pub fn parse_welcome_hosted_signal_hours(raw: Option<&str>) -> i64 {
         .clamp(1, 168)
 }
 
+static WELCOME_HOSTED_SIGNAL_HOURS: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
+
+/// Server startup hook: the operator's value, clamped, fixed for the life of the process
+/// (read once from server config — never per call). Returns the value now in force.
+pub fn configure_welcome_hosted_signal_hours(raw: Option<&str>) -> i64 {
+    let hours = parse_welcome_hosted_signal_hours(raw);
+    *WELCOME_HOSTED_SIGNAL_HOURS.get_or_init(|| hours)
+}
+
 fn welcome_hosted_signal_hours() -> i64 {
-    parse_welcome_hosted_signal_hours(
-        std::env::var("MOMO_WELCOME_HOSTED_SIGNAL_HOURS")
-            .ok()
-            .as_deref(),
-    )
+    WELCOME_HOSTED_SIGNAL_HOURS
+        .get()
+        .copied()
+        .unwrap_or(DEFAULT_WELCOME_HOSTED_SIGNAL_HOURS)
 }
 
 struct WelcomeAgent {
@@ -619,6 +627,16 @@ mod tests {
             ..hosted_candidate()
         };
         assert!(hosted_agent_is_deliverable(&native, true));
+    }
+
+    /// Decision 3: the window is server config read once at startup, not a per-call env
+    /// read. The first configure wins; a later env change cannot move it.
+    #[test]
+    fn the_configured_signal_window_is_fixed_at_startup_and_clamped() {
+        assert_eq!(configure_welcome_hosted_signal_hours(Some("9999")), 168);
+        assert_eq!(welcome_hosted_signal_hours(), 168);
+        assert_eq!(configure_welcome_hosted_signal_hours(Some("2")), 168);
+        assert_eq!(welcome_hosted_signal_hours(), 168);
     }
 
     #[test]

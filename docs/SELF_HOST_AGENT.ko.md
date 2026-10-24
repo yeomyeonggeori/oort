@@ -1637,7 +1637,7 @@ run도 같은 정직함으로 보인다. 아무도 안 가져간 run은 `queued`
 `MOMO_AGENT_PORT_LIVENESS_WOKEN_GRACE_MINUTES`(5, 1~60), notifier의
 `MOMO_RUN_LEASE_ABANDON_HOURS`(2, 1~168), `MOMO_RUN_UNCLAIMED_EXPIRE_HOURS`(24,
 1~720), `MOMO_RUN_WOKEN_EXPIRE_MINUTES`(30, 10~1440, 범위 밖은 경계값), api의
-`MOMO_WELCOME_HOSTED_SIGNAL_HOURS`(24, 1~168): 호스티드 에이전트는 이 시간 안에
+`MOMO_WELCOME_HOSTED_SIGNAL_HOURS`(24, 1~168, api 시작 때 한 번 읽어 바꾸려면 재시작): 호스티드 에이전트는 이 시간 안에
 받은편지함을 읽거나 claim·보고했거나, 연결이 이 시간 안에 활성이 된 경우에만 첫 입장
 환영을 받는다. run 원장은 run이 끝난 뒤 30일 보관한다.
 

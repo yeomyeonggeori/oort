@@ -4,8 +4,8 @@
 //! SQL is a superset of the verdict, the locked re-reads, the cross-tenant joins, and the
 //! one transaction that ends the run (ledger, audit, system line, terminal frame, job).
 //!
-//! Status: WRITTEN AND TYPE-CHECKED, NOT YET RUN (stage 1 of #4284 had no Docker). The
-//! second stage runs it:
+//! Status: RUN in stage 2 of #4284 against an isolated pgvector/pg18 container (9 of 9 pass).
+//! Run it with:
 //!
 //! ```text
 //! DATABASE_URL=postgres://… (superuser, pgvector/pg18) \
@@ -25,6 +25,7 @@
 //! | `each_protection_keeps_a_woken_run_alive_in_the_database` | drop the matching condition from `woken_uncollected_verdict` or the loader read behind it |
 //! | `a_dead_token_does_not_protect_a_run_the_agent_never_collected` | add the token join back (the verdict must not read `token`) |
 //! | `the_candidate_read_is_a_superset_of_the_verdict_at_the_boundary` | tighten the candidate read past `created_at <= now() - window` |
+//! | `a_run_exactly_one_window_old_is_a_candidate_and_one_millisecond_younger_is_not` | turn `<=` into `<` in the candidate read, or widen it |
 //! | `a_ring_row_of_another_workspace_never_wakes_this_workspaces_run` | drop `workspace_id` from the ring/ledger joins |
 //! | `a_welcome_run_ends_silently_and_a_work_run_gets_its_line` | judge "welcome" by `trigger IS NULL`, or drop the welcome guard on the line |
 //! | `runs_that_are_not_queued_or_have_no_ok_ring_are_left_alone` | drop `status = 'queued'` / the `_ok` ring condition |
@@ -521,7 +522,7 @@ async fn a_woken_uncollected_run_ends_in_one_transaction_with_every_trace() {
     .unwrap();
     assert_eq!(answers, queued.trigger.map(|id| id.to_string()));
     assert_ne!(client_msg_id, Some(queued.run));
-    let job_status: String = sqlx::query_scalar("SELECT status FROM outbox WHERE id = $1")
+    let job_status: String = sqlx::query_scalar("SELECT status::text FROM outbox WHERE id = $1")
         .bind(queued.job)
         .fetch_one(&su)
         .await
@@ -547,7 +548,7 @@ async fn arrange(su: &PgPool, h: &Hosted, name: &str) {
         }
         "the connection is no longer active" => {
             sqlx::query(
-                "UPDATE hosted_agent_connection SET status='disconnected' \
+                "UPDATE hosted_agent_connection SET status='cleanup_pending' \
                   WHERE workspace_id=$1 AND id=$2",
             )
             .bind(h.workspace)
@@ -738,6 +739,60 @@ async fn the_candidate_read_is_a_superset_of_the_verdict_at_the_boundary() {
         ("timed_out".into(), Some("woken_not_collected".into())),
         "RED: the candidate read dropped a run the verdict accepts"
     );
+}
+
+/// Acceptance 9, the exact boundary point: a run created at `now() - window` (the SAME
+/// `now()`: one transaction pins it) is a candidate; one millisecond younger is not. The
+/// candidate read is `<=`, so a row sitting exactly on the line is never lost.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn a_run_exactly_one_window_old_is_a_candidate_and_one_millisecond_younger_is_not() {
+    let _guard = serial().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    for (age_millis_short, expect_candidate) in [(0_i64, true), (1_i64, false)] {
+        let hosted = seed_hosted(&su).await;
+        let (workspace, connection, agent, channel) = (
+            hosted.workspace,
+            hosted.connection,
+            hosted.agent,
+            hosted.channel,
+        );
+        let listed: bool = with_tenant_tx(&su, workspace, move |conn| {
+            Box::pin(async move {
+                let run = Uuid::new_v4();
+                sqlx::query(
+                    "INSERT INTO agent_run(id, workspace_id, agent_member_id, channel_id, input, \
+                                           idempotency_key, created_at, updated_at) \
+                     VALUES($1,$2,$3,$4,'{\"type\":\"work\"}'::jsonb,$5, \
+                            now() - make_interval(secs => 1800) + make_interval(secs => $6::float8 / 1000), \
+                            now())",
+                )
+                .bind(run)
+                .bind(workspace)
+                .bind(agent)
+                .bind(channel)
+                .bind(format!("work:{run}"))
+                .bind(age_millis_short as f64)
+                .execute(&mut *conn)
+                .await?;
+                momo_webhook::record_doorbell_rung_in_tx(
+                    conn, workspace, connection, "leading", true,
+                )
+                .await?;
+                let found =
+                    momo_outbox::workspaces_with_woken_candidates(conn, policy(1800), 100_000)
+                        .await?;
+                Ok(found.contains(&workspace))
+            })
+        })
+        .await
+        .expect("boundary read");
+        assert_eq!(
+            listed, expect_candidate,
+            "RED: the candidate read must keep a run exactly one window old (<=) and drop a younger one"
+        );
+    }
 }
 
 /// Acceptance 12: the ledger has no foreign key (migration 128), so another workspace can

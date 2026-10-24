@@ -1964,7 +1964,7 @@ first), `MOMO_AGENT_PORT_LIVENESS_WOKEN_GRACE_MINUTES` (5, 1..60) on the api;
 `MOMO_RUN_LEASE_ABANDON_HOURS` (2, 1..168), `MOMO_RUN_UNCLAIMED_EXPIRE_HOURS`
 (24, 1..720) and `MOMO_RUN_WOKEN_EXPIRE_MINUTES` (30, 10..1440; a value outside
 the range uses the boundary) on the notifier; `MOMO_WELCOME_HOSTED_SIGNAL_HOURS`
-(24, 1..168) on the api: a hosted agent is handed the first-join welcome only if
+(24, 1..168; read once at api start, so a change needs a restart) on the api: a hosted agent is handed the first-join welcome only if
 it read its inbox, claimed or reported within that window, or its connection
 became active within it. The run ledger is kept for 30 days after a run
 finishes.
