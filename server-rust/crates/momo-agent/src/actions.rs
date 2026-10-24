@@ -773,6 +773,14 @@ pub const AUDIT_MEMBER_AVATAR_STAGED_SCHEMA: &str = "momo.member.avatar.staged.v
 pub const AUDIT_MEMBER_AVATAR_REFUSED: &str = "member.avatar.refused";
 pub const AUDIT_MEMBER_AVATAR_REFUSED_SCHEMA: &str = "momo.member.avatar.refused.v1";
 
+/// How many `member.avatar.set` proposals (staged or refused) one person can be the
+/// subject of per hour (ADR-0186 증보 v4 V4-10 5). Past it the proposal is refused
+/// before any image is fetched or decoded, with the audit reason `rate_limited`
+/// (which does not itself count, so the window drains).
+pub const MEMBER_AVATAR_PROPOSALS_PER_HOUR: i64 = 10;
+/// The audit reason code for a proposal refused by that ceiling.
+pub const MEMBER_AVATAR_RATE_LIMITED_REASON: &str = "rate_limited";
+
 /// The proposal ceiling on `welcomePrompt`, in characters. The REST surface allows
 /// 2000: this text is read by a *different agent* (the welcome agent), so a
 /// proposal — an agent writing another agent's instructions — gets a quarter.

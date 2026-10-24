@@ -15485,7 +15485,7 @@ async fn an_agent_avatar_image_is_staged_pinned_applied_and_served() {
              SELECT workspace_id, member_id, proposed_by, source, mime, width, height, size_bytes, \
                     sha256, bytes, 'applied' FROM agent_avatar_image WHERE id = $1",
         ),
-        // Migration 147 (ADR-0186 증보 v4): a person MAY be the owner of an image — the one
+        // Migration 148 (ADR-0186 증보 v4): a person MAY be the owner of an image — the one
         // an agent staged for them (`member.avatar.set`) — but never its proposer.
         (
             "a human as the proposer",
@@ -19914,6 +19914,33 @@ async fn member_avatar_set_only_the_pictured_person_decides_and_previews() {
     assert_eq!(served.status().as_u16(), 200);
     assert_eq!(served.headers()["x-content-type-options"], "nosniff");
     assert_eq!(served.bytes().await.unwrap().to_vec(), stored);
+    // The roster (what every timeline and member list draws) hands out the versioned URL
+    // for a person whose face is an agent-set image — not null, not a stale value.
+    let roster: Value = client
+        .get(format!("{base}/v1/workspaces/{ws}/roster"))
+        .bearer_auth(&w.other_jwt)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let members = roster["members"]
+        .as_array()
+        .or(roster.as_array())
+        .expect("roster list");
+    let drawn = members
+        .iter()
+        .find(|m| m["id"] == json!(w.requester.to_string()))
+        .expect("the person is on the roster");
+    assert_eq!(
+        drawn["avatarUrl"],
+        json!(format!(
+            "/v1/workspaces/{ws}/members/{}/avatar/content?v={image_id}",
+            w.requester
+        )),
+        "{drawn}"
+    );
     assert_eq!(audit_count_4385(su, ws, "member.avatar.set").await, 1);
     let (actor, subject, via_agent): (Uuid, Option<Uuid>, Option<String>) = sqlx::query_as(
         "SELECT actor_member_id, subject_member_id, detail->>'via_agent' FROM audit_log \
@@ -19973,6 +20000,8 @@ async fn member_avatar_set_refuses_every_picture_that_is_not_the_requesters_own(
         "elsewhere",
         "gif",
         "huge",
+        "heavy",
+        "heic",
         "text",
         "pending",
         "unbound",
@@ -19988,10 +20017,20 @@ async fn member_avatar_set_refuses_every_picture_that_is_not_the_requesters_own(
         b"GIF89a\x01\x00\x01\x00\x00\x00\x00;".to_vec(),
     );
     let mut huge = tiny_png_3787();
-    // A phone photo's 4032x3024 header: over the 2048 input ceiling (see the ADR §V4-4).
-    huge[16..20].copy_from_slice(&4032u32.to_be_bytes());
-    huge[20..24].copy_from_slice(&3024u32.to_be_bytes());
+    // A header over the 4096-per-side input ceiling (V4-10 2).
+    huge[16..20].copy_from_slice(&5000u32.to_be_bytes());
+    huge[20..24].copy_from_slice(&3000u32.to_be_bytes());
     w.drive.files.lock().unwrap().insert("huge".into(), huge);
+    // Inside 4096 per side but over the 16 MP pixel budget.
+    let mut heavy = tiny_png_3787();
+    heavy[16..20].copy_from_slice(&4096u32.to_be_bytes());
+    heavy[20..24].copy_from_slice(&4096u32.to_be_bytes());
+    w.drive.files.lock().unwrap().insert("heavy".into(), heavy);
+    // An iPhone photo that was declared as PNG: the bytes say HEIC.
+    let mut heic = vec![0, 0, 0, 24];
+    heic.extend_from_slice(b"ftypheic");
+    heic.extend_from_slice(&[0; 40]);
+    w.drive.files.lock().unwrap().insert("heic".into(), heic);
     w.drive
         .files
         .lock()
@@ -20058,6 +20097,24 @@ async fn member_avatar_set_refuses_every_picture_that_is_not_the_requesters_own(
         "complete",
     )
     .await;
+    let heavy = att(
+        fixture.channel,
+        w.requester,
+        Some(mine_msg),
+        "heavy",
+        "image/png",
+        "complete",
+    )
+    .await;
+    let heic = att(
+        fixture.channel,
+        w.requester,
+        Some(mine_msg),
+        "heic",
+        "image/png",
+        "complete",
+    )
+    .await;
     let text = att(
         fixture.channel,
         w.requester,
@@ -20091,7 +20148,9 @@ async fn member_avatar_set_refuses_every_picture_that_is_not_the_requesters_own(
         ("somebody else's file", theirs),
         ("another conversation's file", elsewhere),
         ("a GIF declared as PNG", gif),
-        ("a phone-size picture", huge),
+        ("a picture over 4096 px a side", huge),
+        ("a 4096x4096 picture over the pixel budget", heavy),
+        ("a HEIC photo declared as PNG", heic),
         ("a text file", text),
         ("a pending upload", pending),
         ("an unbound upload", unbound),
@@ -20162,12 +20221,34 @@ async fn member_avatar_set_refuses_every_picture_that_is_not_the_requesters_own(
         "attachment_not_available",
         "unsupported_type",
         "dimensions_out_of_range",
+        "heic_unsupported",
     ] {
         assert!(
             reasons.iter().any(|r| r == expected),
             "{expected} in {reasons:?}"
         );
     }
+    // Both the 5000x3000 header (per-side limit) and the 4096x4096 header (pixel budget)
+    // are refused from the header alone, not by a decoder failing later.
+    assert_eq!(
+        reasons
+            .iter()
+            .filter(|r| *r == "dimensions_out_of_range")
+            .count(),
+        2,
+        "{reasons:?}"
+    );
+
+    // The refusals above are proposals too and count toward the hourly ceiling (V4-10 5).
+    // Age them out so the control below is judged on the file alone, not on the rate limit.
+    sqlx::query(
+        "UPDATE audit_log SET created_at = now() - interval '2 hours' \
+          WHERE workspace_id=$1 AND action='member.avatar.refused'",
+    )
+    .bind(ws)
+    .execute(su)
+    .await
+    .unwrap();
 
     // Control: with the same setup the requester's own file is accepted.
     let (status, ok) = propose_member_avatar_4385(
@@ -20795,4 +20876,152 @@ async fn member_avatar_set_works_in_a_dm_with_the_agent_and_stays_inside_it() {
     .await;
     assert_eq!(status, 200, "{approved}");
     assert!(member_pointers_4385(su, person).await.1.is_some());
+}
+
+/// V4-10 2: a phone photo (4032x3024, a real JPEG) is accepted end to end and the staged
+/// picture is the shrunk one, never the original.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn member_avatar_set_accepts_a_phone_size_photo_and_stores_it_shrunk() {
+    let w = world_4385().await;
+    let (su, client, base, fixture) = (&w.su, &w.client, &w.base, &w.fixture);
+    let ws = fixture.workspace;
+    let photo = {
+        let buffer = image::ImageBuffer::from_fn(4032, 3024, |x, y| {
+            image::Rgb([(x % 251) as u8, (y % 241) as u8, ((x + y) % 239) as u8])
+        });
+        let mut out = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(buffer)
+            .write_to(&mut out, image::ImageFormat::Jpeg)
+            .unwrap();
+        out.into_inner()
+    };
+    assert!(
+        photo.len() < 5 << 20,
+        "fixture fits the 5 MiB attachment ceiling"
+    );
+    w.drive.files.lock().unwrap().insert("photo".into(), photo);
+    let msg = seed_message_4385(su, ws, fixture.channel, w.requester, "photo").await;
+    let att = seed_attachment_4385(
+        su,
+        ws,
+        fixture.channel,
+        w.requester,
+        Some(msg),
+        "photo",
+        "image/jpeg",
+        "complete",
+    )
+    .await;
+    let (status, ok) = propose_member_avatar_4385(
+        client,
+        base,
+        su,
+        fixture,
+        &w.requester_jwt,
+        json!({"attachmentId": att.to_string()}),
+    )
+    .await;
+    assert_eq!(status, 200, "{ok}");
+    let (width, height, size): (i32, i32, i32) = sqlx::query_as(
+        "SELECT width, height, size_bytes FROM agent_avatar_image WHERE workspace_id=$1",
+    )
+    .bind(ws)
+    .fetch_one(su)
+    .await
+    .unwrap();
+    assert_eq!((width, height), (512, 384));
+    assert!(size as usize <= momo_messaging::AGENT_AVATAR_OUT_MAX_BYTES);
+}
+
+/// V4-10 5: at most 10 proposals per person per hour; the 11th is refused before any
+/// image is fetched or decoded, the audit says why, and the window drains.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn member_avatar_set_is_limited_to_ten_proposals_per_person_per_hour() {
+    let w = world_4385().await;
+    let (su, client, base, fixture) = (&w.su, &w.client, &w.base, &w.fixture);
+    let ws = fixture.workspace;
+    let msg = seed_message_4385(su, ws, fixture.channel, w.requester, "mine").await;
+    w.drive
+        .files
+        .lock()
+        .unwrap()
+        .insert("mine".into(), tiny_png_3787());
+    let att = seed_attachment_4385(
+        su,
+        ws,
+        fixture.channel,
+        w.requester,
+        Some(msg),
+        "mine",
+        "image/png",
+        "complete",
+    )
+    .await;
+    let seed_rows = |n: i64, subject: Uuid| {
+        let su = su.clone();
+        async move {
+            sqlx::query(
+                "INSERT INTO audit_log (workspace_id, actor_member_id, subject_member_id, action, detail) \
+                 SELECT $1, $2, $3, 'member.avatar.refused', '{\"reason\":\"too_large\"}'::jsonb \
+                   FROM generate_series(1, $4)",
+            )
+            .bind(ws)
+            .bind(fixture.hosted_agent)
+            .bind(subject)
+            .bind(n as i32)
+            .execute(&su)
+            .await
+            .unwrap();
+        }
+    };
+    // Ten earlier proposals for ANOTHER person do not count against this one.
+    seed_rows(10, w.other).await;
+    // Ten for this person: the next is refused and nothing is staged.
+    seed_rows(10, w.requester).await;
+    let (status, refused) = propose_member_avatar_4385(
+        client,
+        base,
+        su,
+        fixture,
+        &w.requester_jwt,
+        json!({"attachmentId": att.to_string()}),
+    )
+    .await;
+    assert_eq!(status, 400, "{refused}");
+    assert_eq!(staged_rows_3787(su, ws).await, 0);
+    let limited: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND subject_member_id=$2 \
+           AND action='member.avatar.refused' AND detail->>'reason'='rate_limited'",
+    )
+    .bind(ws)
+    .bind(w.requester)
+    .fetch_one(su)
+    .await
+    .unwrap();
+    assert_eq!(limited, 1, "the refusal says why in the audit log");
+    // The rate-limit refusals themselves do not extend the window: one row older than
+    // the hour drops out and the ceiling is 10, so nine remain and the next goes through.
+    sqlx::query(
+        "UPDATE audit_log SET created_at = now() - interval '61 minutes' WHERE id = ( \
+           SELECT id FROM audit_log WHERE workspace_id=$1 AND subject_member_id=$2 \
+              AND detail->>'reason'='too_large' LIMIT 1)",
+    )
+    .bind(ws)
+    .bind(w.requester)
+    .execute(su)
+    .await
+    .unwrap();
+    let (status, ok) = propose_member_avatar_4385(
+        client,
+        base,
+        su,
+        fixture,
+        &w.requester_jwt,
+        json!({"attachmentId": att.to_string()}),
+    )
+    .await;
+    assert_eq!(status, 200, "{ok}");
+    assert_eq!(staged_rows_3787(su, ws).await, 1);
 }

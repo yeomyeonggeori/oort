@@ -56,11 +56,15 @@ pub const AGENT_AVATAR_OUT_MAX_BYTES: usize = 512 * 1024;
 pub const AGENT_AVATAR_IN_MAX_BYTES_GENERATED: usize = 44_000;
 /// An image already uploaded to the workspace (V3-2a: ≤5 MiB, like member avatars).
 pub const AGENT_AVATAR_IN_MAX_BYTES_ATTACHMENT: usize = 5 * 1024 * 1024;
-/// The longest side of an **input** image. The stored result is at most 512, so an
-/// input beyond 2048 buys nothing and costs memory: a 2048×2048 16-bit RGBA frame is
-/// 32 MiB. (Security review of #3799 measured 160–310 MB of RSS for 4096² inputs;
-/// 2048² is a quarter of that.)
-pub const AGENT_AVATAR_IN_MAX_DIM: u32 = 2048;
+/// The longest side of an **input** image (ADR-0186 증보 v4 V4-10 2: 2048 → 4096, so a
+/// phone photo of 4032×3024 is accepted). The stored result is at most 512, so the
+/// extra pixels only cost memory; they are bounded by [`AGENT_AVATAR_IN_MAX_PIXELS`]
+/// and the caller's decode concurrency, and the shrink happens before the rotation.
+pub const AGENT_AVATAR_IN_MAX_DIM: u32 = 4096;
+/// The most pixels (width × height) an **input** may claim, read from the header before
+/// any decoder allocates. 16 000 000 keeps a 12 MP phone photo (and 4096×3906) and
+/// refuses a 4096×4096 frame; an 8-bit RGB decode of the maximum is 48 MB.
+pub const AGENT_AVATAR_IN_MAX_PIXELS: u64 = 16_000_000;
 /// The decoder's allocation ceiling. What it actually bounds is the decoder's
 /// **scratch** — the PNG `iCCP`/`zTXt` inflation and similar — not the decoded frame
 /// (a 2048² 16-bit frame is 32 MiB and decodes fine with this set far lower; the
@@ -86,6 +90,10 @@ pub enum AvatarImageRejected {
     TooLarge,
     #[error("image type is not allowed (PNG, JPEG or still WebP only)")]
     UnsupportedType,
+    #[error(
+        "HEIC/HEIF photos are not supported: 사진을 JPEG로 보내 주세요 (send the photo as JPEG)"
+    )]
+    Heic,
     #[error("animated images are not allowed")]
     Animated,
     #[error("image dimensions could not be read")]
@@ -105,6 +113,7 @@ impl AvatarImageRejected {
             AvatarImageRejected::Empty => "empty",
             AvatarImageRejected::TooLarge => "too_large",
             AvatarImageRejected::UnsupportedType => "unsupported_type",
+            AvatarImageRejected::Heic => "heic_unsupported",
             AvatarImageRejected::Animated => "animated",
             AvatarImageRejected::DimensionsUnreadable => "dimensions_unreadable",
             AvatarImageRejected::DimensionsOutOfRange => "dimensions_out_of_range",
@@ -122,6 +131,17 @@ pub struct ProcessedAvatar {
     pub width: u32,
     pub height: u32,
     pub sha256: [u8; 32],
+}
+
+/// Whether the bytes are an ISO-BMFF `ftyp` box with a HEIC/HEIF brand (an iPhone's
+/// default photo format). Refused by name so the person is told what to do.
+fn is_heif(prefix: &[u8]) -> bool {
+    prefix.len() >= 12
+        && &prefix[4..8] == b"ftyp"
+        && matches!(
+            &prefix[8..12],
+            b"heic" | b"heix" | b"hevc" | b"hevx" | b"heim" | b"heis" | b"mif1" | b"msf1" | b"heif"
+        )
 }
 
 /// Whether a WebP is animated: the `VP8X` extended header's animation flag
@@ -179,6 +199,7 @@ pub fn process_with_all_limits(
             }
             ImageFormat::WebP
         }
+        _ if is_heif(prefix) => return Err(AvatarImageRejected::Heic),
         _ => return Err(AvatarImageRejected::UnsupportedType),
     };
     let mime = match format {
@@ -195,6 +216,7 @@ pub fn process_with_all_limits(
         || height == 0
         || width > AGENT_AVATAR_IN_MAX_DIM
         || height > AGENT_AVATAR_IN_MAX_DIM
+        || u64::from(width) * u64::from(height) > AGENT_AVATAR_IN_MAX_PIXELS
     {
         return Err(AvatarImageRejected::DimensionsOutOfRange);
     }
@@ -1006,14 +1028,54 @@ mod tests {
     }
 
     #[test]
-    fn the_input_dimension_ceiling_is_the_one_documented() {
-        assert_eq!(AGENT_AVATAR_IN_MAX_DIM, 2048);
+    fn the_input_ceilings_are_the_ones_documented() {
+        assert_eq!(AGENT_AVATAR_IN_MAX_DIM, 4096);
+        assert_eq!(AGENT_AVATAR_IN_MAX_PIXELS, 16_000_000);
+    }
+
+    #[test]
+    fn a_phone_photo_size_is_accepted_and_shrunk() {
+        // 4032x3024 (12 MP): the size that V4-4 (A) refused.
+        let photo = jpeg_of(4032, 3024);
+        let out = process_avatar_image(&photo, 5 << 20).expect("a phone-size photo");
+        assert_eq!((out.width, out.height), (512, 384));
+    }
+
+    #[test]
+    fn a_frame_over_the_pixel_budget_is_refused_from_the_header() {
+        // 4096x4096 is inside the per-side limit but over 16 MP.
+        let mut png = png_of(8, 8, [0, 0, 0, 255]);
+        png[16..20].copy_from_slice(&4096u32.to_be_bytes());
+        png[20..24].copy_from_slice(&4096u32.to_be_bytes());
+        assert_eq!(
+            process_avatar_image(&png, 1 << 20).unwrap_err(),
+            AvatarImageRejected::DimensionsOutOfRange
+        );
+    }
+
+    #[test]
+    fn a_heic_photo_is_refused_by_name_with_the_instruction() {
+        let mut heic = vec![0, 0, 0, 24];
+        heic.extend_from_slice(b"ftypheic");
+        heic.extend_from_slice(&[0; 32]);
+        let rejected = process_avatar_image(&heic, 1 << 20).unwrap_err();
+        assert_eq!(rejected, AvatarImageRejected::Heic);
+        assert_eq!(rejected.code(), "heic_unsupported");
+        assert!(rejected.to_string().contains("사진을 JPEG로 보내 주세요"));
+        // Any other box is still the generic refusal.
+        let mut other = vec![0, 0, 0, 24];
+        other.extend_from_slice(b"ftypmp42");
+        other.extend_from_slice(&[0; 32]);
+        assert_eq!(
+            process_avatar_image(&other, 1 << 20).unwrap_err(),
+            AvatarImageRejected::UnsupportedType
+        );
     }
 
     #[test]
     fn a_header_that_claims_a_huge_canvas_never_reaches_the_decoder() {
-        // A real PNG header (IHDR) claiming 2049 and then 4097 wide, then nothing.
-        for claimed in [2049u32, 4097] {
+        // A real PNG header (IHDR) claiming 4097 and then 70000 wide, then nothing.
+        for claimed in [4097u32, 70_000] {
             let mut png = png_of(8, 8, [0, 0, 0, 255]);
             png[16..20].copy_from_slice(&claimed.to_be_bytes());
             assert_eq!(

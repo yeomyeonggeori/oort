@@ -2374,8 +2374,8 @@ struct PreparedAvatar {
 const AVATAR_PROCESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// How many image decodes may run at once, process-wide. A decode of a tiny file can
-/// peak at tens of MiB (the security review of #3799 measured 160–310 MB before the
-/// input cap came down to 2048 px), and `spawn_blocking` is not cancelled by the
+/// peak at tens of MiB (the security review of #3799 measured 160–310 MB at 4096² before the
+/// shrink-then-rotate order; #4385 measured the 4096 px / 16 MP ceiling), and `spawn_blocking` is not cancelled by the
 /// timeout, so without this several agents — or one agent retrying — would multiply
 /// that. Two at a time; a third caller waits (still inside the timeout) or is refused.
 static AVATAR_DECODE_PERMITS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
@@ -2626,6 +2626,30 @@ async fn prepare_member_avatar(
             else {
                 return Ok(Err((ToolFailure::InvalidArguments, None, "no_requester")));
             };
+            // Per-person hourly ceiling, before a byte is fetched or decoded. Counts the
+            // proposals that were staged or refused for this person (not the rate-limit
+            // refusals themselves, so the window drains as the hour passes).
+            let recent: i64 = momo_db::sqlx::query_scalar(
+                "SELECT count(*) FROM audit_log \
+                  WHERE workspace_id = $1 AND subject_member_id = $2 \
+                    AND action IN ($3, $4) \
+                    AND detail->>'reason' IS DISTINCT FROM $5 \
+                    AND created_at > now() - interval '1 hour'",
+            )
+            .bind(caller.workspace_id)
+            .bind(person)
+            .bind(momo_agent::actions::AUDIT_MEMBER_AVATAR_STAGED)
+            .bind(momo_agent::actions::AUDIT_MEMBER_AVATAR_REFUSED)
+            .bind(momo_agent::actions::MEMBER_AVATAR_RATE_LIMITED_REASON)
+            .fetch_one(&mut *conn)
+            .await?;
+            if recent >= momo_agent::actions::MEMBER_AVATAR_PROPOSALS_PER_HOUR {
+                return Ok(Err((
+                    ToolFailure::InvalidArguments,
+                    Some(person),
+                    momo_agent::actions::MEMBER_AVATAR_RATE_LIMITED_REASON,
+                )));
+            }
             let source = momo_messaging::find_requester_attachment_in_tx(
                 conn,
                 caller.workspace_id,

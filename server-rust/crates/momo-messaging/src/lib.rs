@@ -93,8 +93,9 @@ pub use agent_avatar::{
     stage_avatar_image_in_tx, staged_image_matches_pin_in_tx, AgentAvatarBytes, AgentAvatarImage,
     AvatarAttachmentSource, AvatarImageRejected, ProcessedAvatar, AGENT_AVATAR_DECODE_ALLOC_LIMIT,
     AGENT_AVATAR_IN_MAX_BYTES_ATTACHMENT, AGENT_AVATAR_IN_MAX_BYTES_GENERATED,
-    AGENT_AVATAR_IN_MAX_DIM, AGENT_AVATAR_OUT_MAX_BYTES, AGENT_AVATAR_OUT_MAX_DIM,
-    AGENT_AVATAR_PRESETS, AGENT_AVATAR_SOURCES, AGENT_AVATAR_STAGED_TTL_HOURS,
+    AGENT_AVATAR_IN_MAX_DIM, AGENT_AVATAR_IN_MAX_PIXELS, AGENT_AVATAR_OUT_MAX_BYTES,
+    AGENT_AVATAR_OUT_MAX_DIM, AGENT_AVATAR_PRESETS, AGENT_AVATAR_SOURCES,
+    AGENT_AVATAR_STAGED_TTL_HOURS,
 };
 pub use agent_card::{
     apply_agent_card_in_tx, lock_agent_card_in_tx, read_agent_card_in_tx, AgentCard,

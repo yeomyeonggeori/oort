@@ -662,8 +662,9 @@ fn member_avatar_set_branch() -> Value {
          oort_conversation_read): one image THEY attached in THIS conversation. The target is \
          always that person — you cannot name anyone else, and another person's or another \
          conversation's picture is refused. They see the picture on an approval card and only \
-         they can approve it. Pictures over 2048 px on a side, GIF and animated images are \
-         refused: ask them to send a smaller one."
+         they can approve it. Pictures over 4096 px on a side (or 16 megapixels), GIF and animated images \
+         are refused; an iPhone HEIC photo is not supported either (and is not listed in \
+         imageAttachments): ask them to send it as a JPEG (\"사진을 JPEG로 보내 주세요\")."
     );
     branch
 }
