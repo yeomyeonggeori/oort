@@ -48,7 +48,7 @@ case "$1" in
   info) exit 0 ;;
   run) exit 0 ;;
   port) echo "127.0.0.1:45432"; exit 0 ;;
-  exec) exit 0 ;;
+  exec) [ -n "${DOCKER_STUB_EXEC_FAIL:-}" ] && exit 1; exit 0 ;;
   inspect)
     case "$*" in
       *State.Status*) echo running ;;
@@ -140,24 +140,78 @@ printf 'momo-gate-pg-fixture\n' >"$OUT/runtime-db.container"
 : >"$CALLS"
 PATH="$BASE_PATH" DOCKER_STUB_LABEL="test-run-4386" bash "$SCRIPTS/gate_runtime_db.sh" down >/dev/null 2>&1
 grep -q '^rm -f momo-gate-pg-fixture' "$CALLS" || fail "C: down did not remove the run's own container"
-pass "C down: removes only the container labelled with this run"
+# --keep must leave the container alone (and the state file for a later down).
+printf 'momo-gate-pg-fixture\n' >"$OUT/runtime-db.container"
+: >"$CALLS"
+PATH="$BASE_PATH" DOCKER_STUB_LABEL="test-run-4386" bash "$SCRIPTS/gate_runtime_db.sh" down --keep >/dev/null 2>&1 \
+  || fail "C: down --keep must succeed"
+if grep -q '^rm ' "$CALLS"; then fail "C: down --keep removed the container"; fi
+[ -f "$OUT/runtime-db.container" ] || fail "C: down --keep dropped the state file a later down needs"
+# A boot that dies before readiness must still be removable: the container name is
+# recorded before the readiness wait, so the interrupt/cleanup path can find it.
+rm -f "$OUT/runtime-db.container" "$OUT/runtime-db.env"
+: >"$CALLS"
+if PATH="$BASE_PATH" MOMO_LIBPQ_BIN_DIRS="$LIBPQ" DOCKER_STUB_EXEC_FAIL=1 GATE_RUNTIME_DB_BOOT_TIMEOUT=1 \
+  bash "$SCRIPTS/gate_runtime_db.sh" up >/dev/null 2>&1; then
+  fail "C: up must fail when PostgreSQL never becomes ready"
+fi
+[ -s "$OUT/runtime-db.container" ] || fail "C: the container name was not recorded before the readiness wait"
+: >"$CALLS"
+PATH="$BASE_PATH" DOCKER_STUB_LABEL="test-run-4386" bash "$SCRIPTS/gate_runtime_db.sh" down >/dev/null 2>&1
+grep -q '^rm -f momo-gate-pg-' "$CALLS" || fail "C: a boot that failed before readiness left its container behind"
+pass "C down: removes only the container labelled with this run; --keep keeps; a half-booted run is still found"
 
 # ---- D: local_gate.sh wiring ------------------------------------------------
+# Structural, not behavioural: local_gate.sh cannot be executed here (its static
+# lane alone runs ~70 heavy commands). So every assertion reads the source with
+# comment lines removed (a commented-out call must not satisfy it), pins the exact
+# command strings, and ties the two files together (env file name, output dir).
+# The behavioural proof is the real clean-machine `--profile runtime-db` run in the
+# PR body. What this cannot see: a runtime ordering bug between steps.
 GATE="${UNDER_TEST_GATE:-$REPO_ROOT/scripts/local_gate.sh}"
-block="$(awk '/^  runtime-db\)$/{f=1;next} f&&/^    ;;$/{exit} f' "$GATE")"
+# `grep -q` closes the pipe early; qgrep reads to the end instead, so no SIGPIPE noise.
+qgrep() { grep "$@" >/dev/null; }
+nocomment() { grep -Ev '^[[:space:]]*#' "$1"; }
+GATE_CODE="$(nocomment "$GATE")"
+block="$(printf '%s\n' "$GATE_CODE" | awk '/^  runtime-db\)$/{f=1;next} f&&/^    ;;$/{f=0} f')"
 [ -n "$block" ] || fail "D: could not find the runtime-db profile block"
-up_n="$(printf '%s\n' "$block" | grep -n 'add_runtime_gate_db_up_command' | head -n1 | cut -d: -f1)"
-guard_n="$(printf '%s\n' "$block" | grep -n 'add_runtime_env_guard_command' | head -n1 | cut -d: -f1)"
+up_n="$(printf '%s\n' "$block" | grep -n '^    add_runtime_gate_db_up_command$' | head -n1 | cut -d: -f1)"
+guard_n="$(printf '%s\n' "$block" | grep -n '^    add_runtime_env_guard_command$' | head -n1 | cut -d: -f1)"
 [ -n "$up_n" ] && [ -n "$guard_n" ] && [ "$up_n" -lt "$guard_n" ] \
-  || fail "D: the gate DB must come up before the env guard that reads ENV_FILE"
-boot="$(awk '/^add_runtime_bootstrap_commands\(\) \{$/{f=1} f{print} f&&/^}$/{exit}' "$GATE")"
-printf '%s\n' "$boot" | grep -q 'RUNTIME_GATE_DB' || fail "D: bootstrap does not branch on the gate-owned DB"
+  || fail "D: the gate DB must come up (uncommented) before the env guard that reads ENV_FILE"
+upfn="$(printf '%s\n' "$GATE_CODE" | awk '/^add_runtime_gate_db_up_command\(\) \{$/{f=1} f{print} f&&/^}$/{f=0}')"
+printf '%s\n' "$upfn" | qgrep -F 'add_cmd_once "$RUNTIME_GATE_DB_UP_LABEL" "bash scripts/gate_runtime_db.sh up"' \
+  || fail "D: the up step is not exactly 'bash scripts/gate_runtime_db.sh up'"
+printf '%s\n' "$upfn" | qgrep -F 'add_final_cleanup_cmd "remove gate-owned runtime DB" "bash scripts/gate_runtime_db.sh down' \
+  || fail "D: no final cleanup step removes the gate-owned DB"
+printf '%s\n' "$GATE_CODE" | qgrep -Fx '[ "$PROFILE" = "runtime-db" ] && RUNTIME_GATE_DB=1' \
+  || fail "D: RUNTIME_GATE_DB is not switched on exactly for the runtime-db profile"
+boot="$(printf '%s\n' "$GATE_CODE" | awk '/^add_runtime_bootstrap_commands\(\) \{$/{f=1} f{print} f&&/^}$/{f=0}')"
+printf '%s\n' "$boot" | qgrep -F 'if [ "$RUNTIME_GATE_DB" -eq 1 ]; then' || fail "D: bootstrap does not branch on the gate-owned DB"
 # `make up` must be reachable only from the non-gate-DB branch.
-printf '%s\n' "$boot" | grep -Ev '^[[:space:]]*#' | awk '/if \[ "\$RUNTIME_GATE_DB" -eq 1 \]/{g=1} /^  else$/{g=0;e=1} e&&/make up/{ok=1} g&&/make up/{bad=1} END{exit !(ok&&!bad)}' \
+printf '%s\n' "$boot" | awk '/if \[ "\$RUNTIME_GATE_DB" -eq 1 \]/{g=1} /^  else$/{g=0;e=1} e&&/make up/{ok=1} g&&/make up/{bad=1} END{exit !(ok&&!bad)}' \
   || fail "D: make up is still reachable on the runtime-db path"
-grep -Eq 'export ENV_FILE="\$RUNTIME_GATE_DB_ENV_FILE"' "$GATE" || fail "D: ENV_FILE is not exported to the gate DB env after it comes up"
-grep -q 'gate_runtime_db.sh" down' "$GATE" || fail "D: the interrupt path does not tear the gate DB down"
-pass "D local_gate wiring: DB up before env guard, no make up on runtime-db, ENV_FILE exported, interrupt teardown"
+# ENV_FILE: exactly one export, inside run_cmd, gated on the up step's label.
+[ "$(printf '%s\n' "$GATE_CODE" | grep -c 'export ENV_FILE=')" = "1" ] \
+  || fail "D: ENV_FILE must be exported in exactly one place (a global export leaks it into static steps)"
+printf '%s\n' "$GATE_CODE" | awk '/^run_cmd\(\) \{$/{f=1} f&&/^}$/{f=0} f' \
+  | qgrep -F 'export ENV_FILE="$RUNTIME_GATE_DB_ENV_FILE"' || fail "D: the ENV_FILE export is not inside run_cmd"
+printf '%s\n' "$GATE_CODE" | awk '/^run_cmd\(\) \{$/{f=1} f&&/^}$/{f=0} f' \
+  | qgrep -Fx '    if [ "$RUNTIME_GATE_DB" -eq 1 ] && [ "$label" = "$RUNTIME_GATE_DB_UP_LABEL" ]; then' || fail "D: the ENV_FILE export is not tied to the up step passing"
+# The env file the gate expects is the one the script writes, in the same directory.
+gate_env_name="$(printf '%s\n' "$GATE_CODE" | sed -n 's|^RUNTIME_GATE_DB_ENV_FILE="\$RUN_ARTIFACT_DIR/\(.*\)"$|\1|p')"
+script_env_name="$(nocomment "$SCRIPTS/gate_runtime_db.sh" | sed -n 's|^ENV_OUT="\$OUT_DIR/\(.*\)"$|\1|p')"
+[ -n "$gate_env_name" ] && [ "$gate_env_name" = "$script_env_name" ] \
+  || fail "D: local_gate expects '$gate_env_name' but gate_runtime_db.sh writes '$script_env_name'"
+printf '%s\n' "$GATE_CODE" | qgrep -Fx 'export LOCAL_GATE_OUTPUT_DIR="$RUN_ARTIFACT_DIR"' \
+  || fail "D: gate_runtime_db.sh would write somewhere other than RUN_ARTIFACT_DIR"
+# Interrupt teardown: inside the emergency-cleanup function, on the live path.
+cleanup_fn="$(printf '%s\n' "$GATE_CODE" | awk '/local_gate_emergency_cleanup\(\) \{$/{f=1} f{print} f&&/^    }$/{f=0}')"
+printf '%s\n' "$cleanup_fn" | qgrep -F 'if [ "$RUNTIME_GATE_DB" -eq 1 ] && [ "$KEEP_STACK" -eq 0 ]; then' \
+  || fail "D: emergency cleanup does not tear the gate DB down when it is not kept"
+printf '%s\n' "$cleanup_fn" | qgrep -F 'gate_runtime_db.sh" down' || fail "D: emergency cleanup never calls gate_runtime_db.sh down"
+printf '%s\n' "$GATE_CODE" | qgrep -Fx '    trap local_gate_emergency_cleanup EXIT' || fail "D: emergency cleanup is not installed on EXIT"
+pass "D local_gate wiring: DB up before env guard, no make up on runtime-db, single scoped ENV_FILE export, shared env filename, interrupt teardown"
 
 # ---- E: owner bootstrap env covers compose's required variables --------------
 OB="$SCRIPTS/verify_owner_bootstrap_rust.sh"
@@ -179,7 +233,7 @@ T3="$SCRIPTS/verify_t3_migration_repair.sh"
 tool_line="$(grep -E '^for tool in ' "$T3")"
 case "$tool_line" in *" swift"*) fail "F: retired swift toolchain is still required: $tool_line" ;; esac
 case "$tool_line" in *" cargo"*) ;; *) fail "F: cargo (what the server boot really uses) is not required: $tool_line" ;; esac
-env_block="$(awk '/^SERVER_PORT=/{f=1} f{print} /cargo run --manifest-path/{exit}' "$T3")"
+env_block="$(grep -Ev '^[[:space:]]*#' "$T3" | awk '/^SERVER_PORT=/{f=1} f{print} /cargo run --manifest-path/{exit}')"
 printf '%s\n' "$env_block" | grep -q 'WEBHOOK_INGRESS_MASTER_KEY=' || fail "F: momo-server boots without WEBHOOK_INGRESS_MASTER_KEY"
 printf '%s\n' "$env_block" | grep -q 'OUTBOUND_WEBHOOK_MASTER_KEY=' || fail "F: momo-server boots without OUTBOUND_WEBHOOK_MASTER_KEY"
 printf '%s\n' "$env_block" | grep -q 'JWT_HMAC=' || fail "F: momo-server boots without JWT_HMAC (MissingJwtSecret, seen on a real run)"
