@@ -3,6 +3,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { GITHUB_IDENTITY_CHECK_SENTENCE } from "@momo/core/features/github/model";
 import { GITHUB_APP_CALLBACK_PATH, GITHUB_HANDOFF_PATH } from "./handoff";
 import { GithubHandoffPage } from "./GithubHandoffPage";
 
@@ -185,6 +186,8 @@ describe("GitHub 앱 만들기 핸드오프 페이지: GitHub 로 POST", () => {
     expect(el.textContent).toContain(window.location.host);
     expect(el.textContent).toContain("oort-oort-yeomyeonggeori-test");
     expect(el.textContent).toContain("60분 안에 마쳐야 해요");
+    // GitHub 가 곧 본인 확인(sudo mode)을 물을 수 있다고 미리 말한다 (#4333).
+    expect(q("github-handoff-identity")?.textContent).toBe(GITHUB_IDENTITY_CHECK_SENTENCE);
     expect(q("github-handoff-title")?.textContent).toBe("GitHub 앱 만들기 화면으로 이동해요.");
   });
 

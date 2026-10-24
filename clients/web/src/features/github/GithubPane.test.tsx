@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@momo/core/lib/api";
 import {
   GITHUB_DOWNTIME_SENTENCE,
+  GITHUB_IDENTITY_CHECK_SENTENCE,
+  GITHUB_ORG_EXAMPLE,
   GITHUB_RECEIVE_FAILED_SENTENCE,
   type GithubAppStatus,
 } from "@momo/core/features/github/model";
@@ -108,7 +110,48 @@ describe("운영자 구역", () => {
     click(q("github-register-start"));
     await flush();
     expect(api.startGithubManifest).toHaveBeenCalledTimes(0);
-    expect(document.body.textContent).toContain("조직 이름은 영문, 숫자, 하이픈");
+    expect(document.body.textContent).toContain("조직 이름을 적어 주세요.");
+  });
+
+  it("조직 이름 칸의 예시 글자는 값이 아니라 「예: …」이고, 오류는 예시를 되풀이하지 않는다 (#4333)", async () => {
+    await render();
+    await waitUntil(() => q("github-app-register") !== null, "등록 폼");
+    const input = q<HTMLInputElement>("github-org-input") as HTMLInputElement;
+    // 값은 비어 있고, 예시는 「예: 」로 시작해 입력값처럼 보이지 않는다.
+    expect(input.value).toBe("");
+    expect(input.placeholder).toBe(`예: ${GITHUB_ORG_EXAMPLE}`);
+    click(q("github-register-start"));
+    await flush();
+    const empty = q("github-app-register")?.textContent ?? "";
+    expect(empty).not.toContain("yeomyeonggeori");
+    expect(empty).not.toContain("영문, 숫자, 하이픈으로 적어 주세요. 예:");
+    // 주소를 통째로 붙여 넣으면 무엇이 틀렸는지 말하고 요청은 나가지 않는다.
+    typeInto(input, "github.com/dalmuri");
+    click(q("github-register-start"));
+    await flush();
+    expect(api.startGithubManifest).toHaveBeenCalledTimes(0);
+    expect(document.body.textContent).toContain("「.」은 쓸 수 없어요");
+    expect(document.body.textContent).not.toContain("조직 이름을 적어 주세요.");
+    // 고치면 오류가 사라지고 시작 요청이 나간다.
+    api.startGithubManifest.mockResolvedValue({
+      registrationUrl: "https://github.com/organizations/dalmuri/settings/apps/new?state=s2",
+      manifest: { name: "oort-team" },
+      expiresInSeconds: 3600,
+    });
+    typeInto(input, "dalmuri");
+    expect(document.body.textContent).not.toContain("쓸 수 없어요");
+    click(q("github-register-start"));
+    await waitUntil(() => api.startGithubManifest.mock.calls.length === 1, "시작 요청");
+    expect(api.startGithubManifest).toHaveBeenCalledWith({ ownerType: "organization", organization: "dalmuri" });
+  });
+
+  it("권한 문장은 코드 읽기를 받는 까닭을 말하고, 본인 확인 예고가 만들기 앞에 선다 (#4333)", async () => {
+    await render();
+    await waitUntil(() => q("github-app-register") !== null, "등록 폼");
+    const text = q("github-app-register")?.textContent ?? "";
+    expect(text).toContain("push·release 알림을 받으려는 것이고");
+    expect(text).not.toContain("코드는 읽지 않아요");
+    expect(q("github-identity-notice")?.textContent).toBe(GITHUB_IDENTITY_CHECK_SENTENCE);
   });
 
   it("조직 이름을 적으면 소유자 선택을 그대로 서버에 보내고 GitHub 로 가는 폼을 세운다", async () => {
@@ -131,6 +174,7 @@ describe("운영자 구역", () => {
     const hidden = form?.querySelector<HTMLInputElement>('input[name="manifest"]');
     expect(JSON.parse(hidden?.value ?? "{}")).toMatchObject({ name: "oort-yeomyeonggeori" });
     expect(form?.textContent).toContain("60분 안에");
+    expect(form?.textContent).toContain(GITHUB_IDENTITY_CHECK_SENTENCE);
   });
 
   it("공개 주소가 없으면 「GitHub 수신 실패」 줄이 서고 만들기는 요청을 보내지 않는다", async () => {
@@ -386,6 +430,7 @@ describe("운영자 구역: 데스크탑 셸은 기본 브라우저로 GitHub �
     expect(document.body.textContent).not.toContain("웹 브라우저로 이 서버에 들어와");
     expect(q("github-manifest-browser")?.textContent).toContain("기본 브라우저에서 GitHub를 열었어요.");
     expect(q("github-manifest-browser")?.textContent).toContain("60분 안에 마쳐야 해요");
+    expect(q("github-manifest-browser")?.textContent).toContain(GITHUB_IDENTITY_CHECK_SENTENCE);
     expect(url.startsWith(`${PUBLIC_ORIGIN}${GITHUB_HANDOFF_PATH}#`)).toBe(true);
   });
 

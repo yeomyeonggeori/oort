@@ -11,10 +11,13 @@ import {
 } from "@momo/core/features/github/api";
 import {
   GITHUB_DOWNTIME_SENTENCE,
+  GITHUB_IDENTITY_CHECK_SENTENCE,
+  GITHUB_ORG_EXAMPLE,
   GITHUB_PERMISSIONS_SENTENCE,
   GITHUB_RECEIVE_FAILED_NEXT,
   GITHUB_RECEIVE_FAILED_SENTENCE,
   githubFailureMessage,
+  githubOrgProblem,
   installationSelectionSentence,
   isGithubUnavailable,
   permissionLabels,
@@ -190,8 +193,9 @@ function RegisterApp({ status, offline }: { status: GithubAppStatus; offline: bo
     setMessage(null);
     if (ownerType === "organization") {
       const org = organization.trim();
-      if (!/^[A-Za-z0-9-]{1,39}$/.test(org)) {
-        setOrgError("조직 이름은 영문, 숫자, 하이픈으로 적어 주세요. 예: yeomyeonggeori");
+      const problem = githubOrgProblem(org);
+      if (problem !== null) {
+        setOrgError(problem);
         return;
       }
       setOrgError(null);
@@ -208,6 +212,9 @@ function RegisterApp({ status, offline }: { status: GithubAppStatus; offline: bo
       <p className="break-keep text-body text-ink-muted">
         아직 이 서버에는 GitHub 앱이 없어요. 만들면 GitHub 화면이 열리고, 이름과 권한이 미리 채워져 있어요.
         {" "}{GITHUB_PERMISSIONS_SENTENCE}
+      </p>
+      <p className="break-keep text-meta text-ink-muted" data-testid="github-identity-notice">
+        {GITHUB_IDENTITY_CHECK_SENTENCE}
       </p>
       <form
         className="flex min-w-0 flex-col gap-3"
@@ -232,7 +239,7 @@ function RegisterApp({ status, offline }: { status: GithubAppStatus; offline: bo
           testId="github-owner-choice"
         />
         {ownerType === "organization" && (
-          <Field label="조직 이름" htmlFor={`${formId}-org`} error={orgError}>
+          <Field label="조직 이름" htmlFor={`${formId}-org`} hint="github.com/ 뒤에 오는 이름이에요." error={orgError}>
             <Input
               id={`${formId}-org`}
               value={organization}
@@ -241,7 +248,7 @@ function RegisterApp({ status, offline }: { status: GithubAppStatus; offline: bo
                 setOrgError(null);
                 setHandoff(null);
               }}
-              placeholder="yeomyeonggeori"
+              placeholder={`예: ${GITHUB_ORG_EXAMPLE}`}
               autoComplete="off"
               spellCheck={false}
               data-testid="github-org-input"
@@ -294,6 +301,7 @@ function ManifestHandoff({ handoff }: { handoff: GithubManifestStart }) {
         준비됐어요. GitHub에서 「Create GitHub App」을 눌러 마치면 이 서버로 돌아와요.
       </p>
       <p className="break-keep text-meta text-ink-muted">{minutes}분 안에 마쳐야 해요.</p>
+      <p className="break-keep text-meta text-ink-muted">{GITHUB_IDENTITY_CHECK_SENTENCE}</p>
       <div className="flex justify-end">
         <Button type="submit" size="sm" data-testid="github-manifest-submit">
           GitHub에서 앱 만들기
