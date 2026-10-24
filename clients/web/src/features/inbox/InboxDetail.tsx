@@ -98,7 +98,7 @@ function ContextRow({
       data-highlighted={highlighted ? "true" : undefined}
       className={cn(
         "flex gap-3 rounded-md px-3 py-2",
-        highlighted && "bg-accent-soft"
+        highlighted && "landed-surface"
       )}
     >
       <span className="shrink-0 pt-0.5">

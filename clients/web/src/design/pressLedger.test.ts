@@ -1728,10 +1728,11 @@ export function Probe() {
 
   it("메시지 본문 행은 press 가 아니라 구분된 active 채움이다 (#1743)", async () => {
     const article = [
-      ...MESSAGE_ROW_SRC.matchAll(/"(group relative flex gap-2 px-4[^"]*)"/g),
+      ...MESSAGE_ROW_SRC.matchAll(/"(group relative flex gap-2 mx-1[^"]*)"/g),
     ].map((m) => m[1]);
     expect(article, "MessageRow article class").toHaveLength(1);
-    expect(article[0]).toMatch(/hover:bg-surface-hover/);
+    // #4324: 호버·초점 면은 `row-hover`(옅은 섞음), 눌림은 구분된 `active:` 채움이다.
+    expect(article[0]).toMatch(/(?<![\w-])row-hover\b/);
     expect(article[0]).toMatch(/active:bg-surface-pressed/);
     expect(article[0]).not.toMatch(/(?<![\w-])press\b/);
     const pending = [
@@ -2080,7 +2081,7 @@ export function Probe() {
     expect(MESSAGE_ROW_SRC).toMatch(/active:bg-surface-pressed/);
     expect(PENDING_ROW_SRC).toMatch(/active:bg-surface-pressed/);
     const article = MESSAGE_ROW_SRC.match(
-      /"(group relative flex gap-2 px-4[^"]*)"/
+      /"(group relative flex gap-2 mx-1[^"]*)"/
     )?.[1];
     expect(article).not.toMatch(/(?<![\w-])press\b/);
     expect(constString(SETTINGS_FIELDS_SRC, "SETTINGS_COLLAPSIBLE_SUMMARY_CLASS")).not.toMatch(

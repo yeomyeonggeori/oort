@@ -458,6 +458,12 @@
    * 이 변수 하나로 세 단계를 말하게 하려는 것이다. */
   --spacing-list-item: 0px;
 
+  /* 줄 도구 막대의 단추 사이 2px (#4324). 격자(4의 배수) 밖이라 이름으로 들어온다. 막대 안쪽
+   * 여백은 4(`p-1`), 단추는 `size-control`(32)이다. */
+  --spacing-toolbar: 2px;
+  /* 공용 툴팁의 세로 여백 6px (#4324). 가로 12는 `px-3`이다. */
+  --spacing-tooltip-y: 6px;
+
   /* Control heights are a separate dimension from spacing. */
   --spacing-control-sm: 28px;
   --spacing-control: 32px;
@@ -2430,6 +2436,88 @@
   top: auto;
   bottom: 0;
   translate: 0 calc(100% - var(--spacing-row));
+}
+
+/* 메시지 줄·인박스 줄의 옅은 호버 (#4324). 가리킨 줄과 키보드 초점 줄은 `--surface-hover`를
+ * `--row-hover-strength`(50%)만 섞은 면이다. Buzz의 `bg-muted/50`과 같은 단계다. 옅게 섞은 면은
+ * `--surface`와 `--surface-hover` 사이에 있으므로 글자 대비는 `--surface-hover` 위에서 이미
+ * 재던 값보다 항상 높다. 보이는지(바닥과의 거리)는 `derivedCatalog.contract.test.ts`가 57행에서 잰다.
+ * 눌림(`:active`)은 이 면이 물러나고 `--surface-pressed`가 칠한다. 색은 `var(--surface-hover)`를
+ * 읽으므로 사이드바 띠 위에서는 띠 채움(`--band-fill`)을 그대로 따른다. */
+@utility row-hover {
+  --row-hover-strength: 50%;
+  transition: background-color var(--motion-instant) var(--motion-ease-standard);
+  @media (hover: hover) {
+    &:hover:not(:active) {
+      background-color: color-mix(in srgb, var(--surface-hover) var(--row-hover-strength), transparent);
+    }
+  }
+  &:focus-visible:not(:active) {
+    background-color: color-mix(in srgb, var(--surface-hover) var(--row-hover-strength), transparent);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
+}
+
+/* 줄 착지 면 (#4324 결정 2). 링크·인박스 카드로 도착한 줄이 잠깐 물드는 면이다. 폰의 착지 면(`warnSurface` + `warnBorder`
+ * 1px, #4300)과 같은 말이다: 바탕은 `--warn-soft`, 테두리는 그 바탕에 `--warn`을 35%(OKLab) 섞은 1px이다.
+ * 테두리는 안쪽 그림자(`inset`)로 그려 줄 크기가 1px 움직이지 않고 둥근 모서리를 따른다. 호버·키보드 초점 면(`row-hover`)보다
+ * 늦게 와야 하므로 같은 선택자로 한 번 더 칠한다. 색이 다 토큰이라 57 테마가 따라간다. */
+@utility landed-surface {
+  background-color: var(--warn-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--warn-soft), var(--warn) 35%);
+  /* `row-hover`의 선택자(`:hover:not(:active)`)와 같은 무게라 `:not(:disabled)` 한 겹으로 한 단 위에 선다(순서에 기대지 않는다). */
+  &:not(:active):is(:hover, :focus-visible):not(:disabled) {
+    background-color: var(--warn-soft);
+  }
+}
+
+/* 줄 도구 막대의 빠른 반응 이모지 20px (#4324). 글자 역할(`--text-*` 여덟)을 늘리지 않으려고 `--text-title`
+ * (17px)의 20/17배로 쓴다: 기본 20px이고, 글자 크기 설정(`--type-rem`)도 그대로 따른다. */
+@utility reaction-glyph {
+  font-size: calc(var(--text-title) * 20 / 17);
+  line-height: 1;
+}
+
+/* 줄 도구 막대의 알약 재료 (#4324). 테두리는 `--line`의 70%, 면은 `--surface-raised` 95%
+ * (블러가 서면 85% + 4px 블러), 그림자는 `--shadow-sm` 한 단계다. 사이드바 유리(`glass`, #4190)와는
+ * 다른 재료다: 유리는 창 뒤 네이티브 층을 비치게 하는 셸 면이고, 이 막대는 본문 판 위에 뜨는
+ * 작은 면이라 뒤에 있는 것은 메시지 글자뿐이다. 그래서 `glass`의 22px 블러가 아니라 4px이다. 투명도 줄이기와
+ * 고대비에서는 `glass`와 같이 불투명 면으로 물러난다(고대비는 `--line-strong` 테두리). */
+@utility toolbar-float {
+  border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  background-color: color-mix(in srgb, var(--surface-raised) 95%, transparent);
+  box-shadow: var(--shadow-sm);
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    background-color: color-mix(in srgb, var(--surface-raised) 85%, transparent);
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    background-color: var(--surface-raised);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  @media (prefers-contrast: more) {
+    background-color: var(--surface-raised);
+    border-color: var(--line-strong);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* 공용 툴팁의 면 (#4324). 작고 둥근 면(`--radius-md`), 작은 글자(`text-meta` 12px), 여백 12×6.
+ * 나타남은 fade + 95%→100% + 방향별 2px 이동(`motion.css`의 `motion-tooltip-enter`)이다. */
+@utility tooltip-surface {
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background-color: var(--surface-raised);
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
+  padding: var(--spacing-tooltip-y) var(--spacing-3);
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 /* 컴포저 선택 서식 트레이 (#1902). 선택 영역 위(여유 없으면 아래)에 고정한다.

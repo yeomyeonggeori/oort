@@ -51,7 +51,7 @@ const HIGHLIGHT_MS = 1_600;
 
 // Written as a literal so the Tailwind scanner emits the class: it is applied
 // imperatively below, not through JSX.
-const HIGHLIGHT_CLASS = "bg-accent-soft";
+const HIGHLIGHT_CLASS = "landed-surface";
 
 /**
  * Route for a channel, optionally anchored at a message seq.

@@ -509,3 +509,53 @@ describe("M-1 ⋯ 이름", () => {
     expect(overflow?.getAttribute("aria-label")).toBe("더 많은 액션");
   });
 });
+
+describe("#4324 도구 막대 툴팁", () => {
+  it("툴바 단추는 title 속성 대신 공용 툴팁을 쓴다: 키보드 초점이면 즉시 뜨고 이름이 맞다", () => {
+    const host = mountToolbar();
+    const buttons = Array.from(
+      host.querySelectorAll<HTMLElement>("[data-toolbar-item]")
+    );
+    expect(buttons.length).toBeGreaterThanOrEqual(5);
+    for (const button of buttons) {
+      expect(button.hasAttribute("title"), button.dataset.testid).toBe(false);
+    }
+    const reply = host.querySelector<HTMLElement>('[data-testid="toolbar-reply"]')!;
+    expect(host.querySelector('[data-testid="tooltip"]')).toBeNull();
+    stubFocusVisible(reply, true);
+    act(() => reply.focus());
+    const tip = host.querySelector('[data-testid="tooltip"]');
+    expect(tip?.textContent).toBe("답글 달기");
+    // 막대가 행 위 경계에 걸친 기본 자리에서는 툴팁이 아래로 뜬다(막대가 가린 쪽의 반대).
+    expect(tip?.getAttribute("data-side")).toBe("bottom");
+  });
+
+  it("Tab으로 행에 닿아 ⋯로 핸드오프되면 ⋯의 툴팁이 뜬다(키보드로 도구 막대에 닿는 길)", async () => {
+    const host = mountTimeline(null, null, false);
+    const row = host.querySelector('[data-seq="3"]') as HTMLElement;
+    await vi.waitFor(() => expect(row.tabIndex).toBe(0));
+    stubFocusVisible(row, true);
+    act(() => {
+      row.focus();
+    });
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="tooltip"]')?.textContent).toBe(
+        "더 많은 액션"
+      );
+    });
+    // M-1: 가장자리 단추(⋯)의 툴팁은 오른쪽 끝을 단추에 맞춘다(가운데 정렬이면 판 밖으로 잘린다).
+    const cls = host.querySelector('[data-testid="tooltip"]')?.className ?? "";
+    expect(cls).toContain("right-0");
+    expect(cls).not.toContain("-translate-x-1/2");
+  });
+
+  it("반응 단추의 툴팁은 내가 남겼는지에 따라 이름이 달라진다", () => {
+    const host = mountToolbar();
+    const first = host.querySelector<HTMLElement>('[data-testid^="toolbar-react-"]')!;
+    stubFocusVisible(first, true);
+    act(() => first.focus());
+    expect(host.querySelector('[data-testid="tooltip"]')?.textContent).toMatch(
+      /반응 남기기$/
+    );
+  });
+});

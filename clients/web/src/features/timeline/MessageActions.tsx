@@ -45,6 +45,7 @@ import {
   DropdownMenuTrigger,
 } from "@/design/ui/dropdown-menu";
 import { Button } from "@/design/ui/button";
+import { Tooltip } from "@/design/ui/tooltip";
 import { useEscapeLayer } from "@/design/ui/escapeLayer";
 
 // =============================================================================
@@ -328,8 +329,23 @@ function MessageActionMenuItems({
   );
 }
 
-const toolbarItemClass =
-  "flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring";
+/**
+ * 줄 도구 막대의 모양 (#4324, Buzz 수준). 클래스를 이 파일의 최상위 문자열로 두는 이유는
+ * 눌림 원장·층 시험이 같은 파일의 문자열을 읽고, `rowSurface.browser.test.ts`가 이 상수를 그대로
+ * 엔진에 먹여 계산된 값(32px 원·16 아이콘·20 이모지·막대 안쪽 4·단추 사이 2)을 재기 때문이다.
+ */
+/** 알약 막대: 완전한 둥글기, 안쪽 4, 단추 사이 2, 재료는 `toolbar-float`(옅은 테두리·반투명·블러·옅은 그림자). */
+export const TOOLBAR_CLASS =
+  "absolute right-3 layer-content-float flex select-none items-center gap-toolbar rounded-full p-1 toolbar-float motion-fast-enter motion-reduce:animate-none";
+/** 오른쪽 12는 줄 안쪽 여백(`px-3`)과 같아 막대 오른끝이 본문 글자 끝과 맞는다. */
+export const toolbarItemClass =
+  "flex size-control items-center justify-center rounded-full text-ink-muted press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring";
+/** 빠른 반응 이모지: 글리프 20px. 내가 남긴 반응은 `accent-soft`. */
+export const toolbarReactionClass =
+  "flex size-control items-center justify-center rounded-full reaction-glyph press focus-visible:focus-ring";
+/** 반응과 행동 사이 세로 구분선(1×16). */
+export const toolbarDividerClass = "mx-1 h-4 w-px bg-line";
+const toolbarIconClass = "size-4";
 
 /**
  * Floating hover/focus toolbar. The parent decides whether this is mounted;
@@ -395,6 +411,8 @@ export function MessageHoverToolbar({
   }, [straddleBelow]);
   const hasMenu = messageActionItems(available, copyState).length > 0;
   if (!available.react && !available.reply && !hasMenu) return null;
+  // 막대가 행 위 경계에 걸치면 툴팁은 아래로, 아래 경계로 뒤집히면 위로 뜬다(막대가 가린 쪽의 반대).
+  const tipSide = straddleBelow ? "top" : "bottom";
 
   return (
     <div
@@ -408,70 +426,73 @@ export function MessageHoverToolbar({
         straddleBelow
           ? "hover-toolbar-straddle-below"
           : "hover-toolbar-straddle",
-        "absolute right-4 layer-content-float flex select-none items-center gap-px rounded-md border border-line-strong bg-surface-raised p-px shadow-lg"
+        TOOLBAR_CLASS
       )}
     >
       {available.react &&
         slots.map((emoji) => {
           const mine = mineEmojis.has(emoji);
+          const label = mine ? `${emoji} 반응 취소` : `${emoji} 반응 남기기`;
           return (
-            <button
-              key={emoji}
-              type="button"
-              data-toolbar-item=""
-              data-row-action=""
-              data-testid={`toolbar-react-${emoji}`}
-              aria-label={
-                mine ? `${emoji} 반응 취소` : `${emoji} 반응 남기기`
-              }
-              title={mine ? `${emoji} 반응 취소` : `${emoji} 반응 남기기`}
-              aria-pressed={mine}
-              onClick={() => {
-                recordEmojiUse(emoji);
-                callbacks.onReact(emoji);
-              }}
-              className={cn(
-                "flex size-control-sm items-center justify-center rounded-sm press focus-visible:focus-ring",
-                "text-title",
-                mine
-                  ? "bg-accent-soft text-ink active:bg-surface-pressed"
-                  : "text-ink-muted hover:bg-surface-hover hover:text-ink"
-              )}
-            >
-              <span aria-hidden="true">{emoji}</span>
-            </button>
+            <Tooltip key={emoji} label={label} side={tipSide}>
+              <button
+                type="button"
+                data-toolbar-item=""
+                data-row-action=""
+                data-testid={`toolbar-react-${emoji}`}
+                aria-label={label}
+                aria-pressed={mine}
+                onClick={() => {
+                  recordEmojiUse(emoji);
+                  callbacks.onReact(emoji);
+                }}
+                className={cn(
+                  toolbarReactionClass,
+                  mine
+                    ? "bg-accent-soft text-ink active:bg-surface-pressed"
+                    : "text-ink-muted hover:bg-surface-hover hover:text-ink"
+                )}
+              >
+                <span aria-hidden="true">{emoji}</span>
+              </button>
+            </Tooltip>
           );
         })}
       {available.react && (
-        <div className="mx-px h-4 w-px bg-line" aria-hidden="true" />
+        <div className={toolbarDividerClass} aria-hidden="true" />
       )}
       {available.react && (
-        <button
-          type="button"
-          data-toolbar-item=""
-          data-row-action=""
-          data-testid="toolbar-react-more"
-          aria-label="다른 반응 고르기"
-          title="다른 반응 고르기"
-          onClick={(event) => onOpenPicker(event.currentTarget)}
-          className={toolbarItemClass}
-        >
-          <Smile className="size-4" aria-hidden="true" />
-        </button>
+        <Tooltip label="다른 반응 고르기" side={tipSide}>
+          <button
+            type="button"
+            data-toolbar-item=""
+            data-row-action=""
+            data-testid="toolbar-react-more"
+            aria-label="다른 반응 고르기"
+            onClick={(event) => onOpenPicker(event.currentTarget)}
+            className={toolbarItemClass}
+          >
+            <Smile className={toolbarIconClass} aria-hidden="true" />
+          </button>
+        </Tooltip>
       )}
       {available.reply && (
-        <button
-          type="button"
-          data-toolbar-item=""
-          data-row-action=""
-          data-testid="toolbar-reply"
-          aria-label="답글 달기"
-          title="답글 달기"
-          onClick={() => callbacks.onReply()}
-          className={toolbarItemClass}
-        >
-          <MessageSquareReply className="size-4" aria-hidden="true" />
-        </button>
+        <Tooltip label="답글 달기" side={tipSide}>
+          <button
+            type="button"
+            data-toolbar-item=""
+            data-row-action=""
+            data-testid="toolbar-reply"
+            aria-label="답글 달기"
+            onClick={() => callbacks.onReply()}
+            className={toolbarItemClass}
+          >
+            <MessageSquareReply
+              className={toolbarIconClass}
+              aria-hidden="true"
+            />
+          </button>
+        </Tooltip>
       )}
       {hasMenu && (
         <DropdownMenu
@@ -479,23 +500,27 @@ export function MessageHoverToolbar({
           onOpenChange={onMenuOpenChange}
           modal={false}
         >
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              ref={triggerRef}
-              data-toolbar-item=""
-              data-testid="message-actions-trigger"
-              data-row-action="primary"
-              aria-label="더 많은 액션"
-              title="더 많은 액션"
-              className={cn(
-                toolbarItemClass,
-                "data-[state=open]:bg-surface-hover data-[state=open]:text-ink"
-              )}
-            >
-              <MoreHorizontal className="size-4" aria-hidden="true" />
-            </button>
-          </DropdownMenuTrigger>
+          <Tooltip label="더 많은 액션" side={tipSide} align="end">
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                ref={triggerRef}
+                data-toolbar-item=""
+                data-testid="message-actions-trigger"
+                data-row-action="primary"
+                aria-label="더 많은 액션"
+                className={cn(
+                  toolbarItemClass,
+                  "data-[state=open]:bg-surface-hover data-[state=open]:text-ink"
+                )}
+              >
+                <MoreHorizontal
+                  className={toolbarIconClass}
+                  aria-hidden="true"
+                />
+              </button>
+            </DropdownMenuTrigger>
+          </Tooltip>
           <DropdownMenuContent
             align="end"
             data-testid="message-action-menu"
