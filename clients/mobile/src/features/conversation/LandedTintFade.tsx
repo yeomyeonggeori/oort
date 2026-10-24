@@ -11,6 +11,7 @@ import {Animated, StyleSheet} from 'react-native';
 import {EASE_OUT, LANDED_TINT_FADE_MS} from '../../design/motion';
 import {useStyles} from '../../design/theme';
 import type {Palette} from '../../design/tokens';
+import {ROW_FACE} from './rowFace';
 
 // =============================================================================
 // 착지 틴트가 물러나는 한 번의 전환 (#3921).
@@ -126,6 +127,9 @@ const buildStyles = (color: Palette) =>
       right: 0,
       bottom: 0,
       left: 0,
+      borderRadius: ROW_FACE.radius,
+      borderWidth: ROW_FACE.edge,
+      borderColor: color.warnBorder,
       backgroundColor: color.warnSurface,
     },
   });

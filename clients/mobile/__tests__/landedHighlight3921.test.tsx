@@ -746,6 +746,11 @@ describe('LandedTintFade — 행 하나의 전환', () => {
       screen.getByTestId('message-row').props.style,
     );
     expect(standing.backgroundColor).toBe(color.warnSurface);
+    // 서 있는 착지의 테두리 덧그림(#4300) — 덮개는 같은 테두리를 들고 녹는다.
+    const standingEdge = StyleSheet.flatten(
+      screen.getByTestId('message-row-landed-edge').props.style,
+    );
+    expect(standingEdge.borderColor).toBe(color.warnBorder);
 
     view.rerender(row(false, false));
 
@@ -754,14 +759,19 @@ describe('LandedTintFade — 행 하나의 전환', () => {
       StyleSheet.flatten(screen.getByTestId('message-row').props.style)
         .backgroundColor,
     ).toBeUndefined();
-    // 덮개는 벗은 색 그대로(서 있던 값과 대조), 그릇 전체(네 변 0), 불투명도 1 — 그리고 `margin`·
-    // `borderRadius` 같은 다른 키가 없다(`toEqual`: 있으면 면이 그릇과 달라진다).
+    // 덮개는 벗은 색 그대로(서 있던 값과 대조), 그릇 전체(네 변 0), 불투명도 1 — 그리고 `margin` 같은
+    // 다른 키가 없다(`toEqual`: 있으면 면이 그릇과 달라진다).
     expect(StyleSheet.flatten(fadeOverlay()!.props.style)).toEqual({
       position: 'absolute',
       top: 0,
       right: 0,
       bottom: 0,
       left: 0,
+      // 그릇이 화면 끝에서 띄운 둥근 상자라(`rowFace.ts`) 덮개도 **같은 모서리**다 — 사각형 덮개가
+      // 둥근 서 있는 면 위에 올라 물러나는 순간 모서리가 튀면 안 된다(#4300 세 겹 사보타주).
+      borderRadius: standing.borderRadius,
+      borderWidth: standingEdge.borderWidth,
+      borderColor: standingEdge.borderColor,
       backgroundColor: standing.backgroundColor,
       opacity: 1,
     });
