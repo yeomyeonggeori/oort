@@ -1336,7 +1336,7 @@ async fn sec07_g1_8_a_lapsed_lease_is_taken_over_and_the_old_owner_is_locked_out
     assert!(body["leaseExpiresAtMs"].as_i64().expect("new expiry") > now_ms());
 
     // The lease lapses (a crashed consumer): the next claim takes the same job.
-    sqlx::query("UPDATE outbox SET lease_expires_at = now() - interval '1 minute' WHERE id = $1")
+    sqlx::query("UPDATE outbox SET lease_acquired_at = now() - interval '2 minutes', lease_expires_at = now() - interval '1 minute' WHERE id = $1")
         .bind(job_id)
         .execute(&rig.su)
         .await
