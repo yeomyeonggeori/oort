@@ -58,7 +58,7 @@ sha2 = "0.10"
 # ADR-0186 증보 2026-10-13 V3-2a (A0): decode + RE-ENCODE agent avatar images. Minimal
 # features (PNG/JPEG/WebP decode; PNG/JPEG encode); no GIF, no default features.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
-base64 = "0.22"
+base64 = "0.23"
 hex = "0.4"
 # ADR-0115 webhook secret derivation + the outbound delivery signature (#1222).
 # Both webhook families are HMAC-SHA256 over a domain-separated string, which is
