@@ -1,4 +1,5 @@
 import {
+  closeDm,
   removeChannelMember,
   setChannelNotificationPref,
   uuidEq,
@@ -10,6 +11,7 @@ import {
   CHANNEL_MARK_READ_FAILURE,
   CHANNEL_MARK_UNREAD_FAILURE,
   CHANNEL_MUTE_FAILURE,
+  DM_CLOSE_FAILURE,
   channelLeaveFailureMessage,
 } from '@momo/core/features/channels/model';
 import {channelShareUrlFromServerBase} from '@momo/core/features/channels/shareLink';
@@ -18,7 +20,7 @@ import {useCallback, useEffect, useRef, useState} from 'react';
 import {AccessibilityInfo} from 'react-native';
 import {copyText, COPY_RECEIPT_MS} from '../conversation/copy';
 import {useMarkRead} from '../inbox/useInbox';
-import {workspaceKeys} from '../workspace/queries';
+import {applyClosureToReadStates, workspaceKeys} from '../workspace/queries';
 import {haptics} from '../../lib/haptics';
 import {apiBase} from '../../storage/serverBase';
 import {
@@ -73,7 +75,7 @@ function announce(message: string): void {
 export function useChannelRowActions(
   workspaceId: string,
   selfMemberId: string,
-  /** 채널을 나간 뒤(서버가 답한 뒤)에 부른다. 열려 있던 대화를 걷는 일은 부르는 쪽(셸)이 한다. */
+  /** 채널을 나간 뒤·DM 을 닫은 뒤(서버가 답한 뒤)에 부른다. 열려 있던 대화를 걷는 일은 부르는 쪽(셸)이 한다. */
   onLeft?: (channelId: string) => void,
 ): ChannelRowActions {
   const client = useQueryClient();
@@ -252,6 +254,27 @@ export function useChannelRowActions(
           );
           return;
         }
+        case 'close-dm': {
+          const state = target.readState;
+          if (state === null || target.closeOffered !== true) return;
+          // `seenSeq` 는 화면이 본 마지막 seq(투영의 `latestSeq`)다. 서버가 채널 head 로 누르고, 같은 호출의 재전송은 결과가 같다.
+          const seenSeq = state.latestSeq;
+          void track(
+            key,
+            target,
+            DM_CLOSE_FAILURE,
+            async () => {
+              await closeDm(workspaceId, channel.id, seenSeq);
+              // 서버가 답한 **뒤에** 이 기기의 투영 행에 적는다(낙관 갱신 없음, 머리말). 다른 기기는 다음 투영에서 맞춘다.
+              applyClosureToReadStates(client, workspaceId, channel.id, seenSeq);
+              void client.invalidateQueries({queryKey: workspaceKeys.readState(workspaceId)});
+              // 지금 보던 대화였으면 걷는다(웹 `closeDmRow` 의 착지와 같다). 셸이 열린 대화인지 본다.
+              onLeft?.(channel.id);
+            },
+            '대화를 닫았습니다.',
+          );
+          return;
+        }
         case 'leave': {
           // 확인 단계로 간다. 나가기는 되돌릴 길이 없다(다시 들어오려면 관리자가 추가해야 한다).
           reset();
@@ -264,7 +287,7 @@ export function useChannelRowActions(
           return;
       }
     },
-    [client, failed, flashCopied, markRead, reset, track, workspaceId],
+    [client, failed, flashCopied, markRead, onLeft, reset, track, workspaceId],
   );
 
   const confirmLeave = useCallback(() => {

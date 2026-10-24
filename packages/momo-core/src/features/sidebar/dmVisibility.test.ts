@@ -4,6 +4,7 @@ import {
   dmCloseBlockedByStar,
   dmCloseOffered,
   dmClosedListReason,
+  dmReadFacts,
   dmClosedReasonLabel,
   dmReopenLabelFor,
   DM_CLOSED_LIST_HINT,
@@ -151,5 +152,53 @@ describe("「닫은 대화」 문구 (D11)", () => {
     expect(DM_CLOSED_LIST_LABEL).toBe("닫은 대화");
     expect(DM_CLOSED_LIST_HINT).toContain("새 메시지가 오면");
     expect(DM_CLOSED_LIST_HINT).not.toContain("—");
+  });
+});
+
+describe("읽음 투영 행에서 판정 입력 뽑기 (dmReadFacts, #4367)", () => {
+  const row = {
+    channelId: "c",
+    lastReadSeq: 4,
+    latestSeq: 9,
+    unreadCount: 5,
+    mentionCount: 2,
+    markedUnreadBeforeSeq: 3,
+    latestReadableSeq: 6,
+    closedAtSeq: 5,
+  };
+
+  it("서버가 닫기를 싣는 동안은 행 그대로다", () => {
+    expect(dmReadFacts(row, true)).toEqual({
+      closedAtSeq: 5,
+      latestReadableSeq: 6,
+      lastReadSeq: 4,
+      markedUnreadBeforeSeq: 3,
+      mentionCount: 2,
+    });
+  });
+
+  it("closedAtSeq 의 세 상태를 섞지 않는다: undefined 는 undefined 로 남는다 (null 로 읽으면 닫은 DM 이 되살아난다)", () => {
+    expect(dmReadFacts({ ...row, closedAtSeq: undefined }, true).closedAtSeq).toBeUndefined();
+    expect(dmReadFacts({ ...row, closedAtSeq: null }, true).closedAtSeq).toBeNull();
+  });
+
+  it("행이 읽을 seq 를 말하지 않았으면 전체 seq 로 대신한다", () => {
+    expect(dmReadFacts({ ...row, latestReadableSeq: undefined }, true).latestReadableSeq).toBe(9);
+  });
+
+  it("옛 서버: 닫힘이 없고 읽을 seq 는 전체 seq 다 - 행이 뭐라 하든", () => {
+    const facts = dmReadFacts(row, false);
+    expect(facts.closedAtSeq).toBeNull();
+    expect(facts.latestReadableSeq).toBe(9);
+  });
+
+  it("행이 없는 DM: 닫을 것도 읽을 것도 없다", () => {
+    expect(dmReadFacts(undefined, true)).toEqual({
+      closedAtSeq: null,
+      latestReadableSeq: 0,
+      lastReadSeq: 0,
+      markedUnreadBeforeSeq: null,
+      mentionCount: 0,
+    });
   });
 });

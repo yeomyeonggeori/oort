@@ -1,3 +1,4 @@
+import type { ReadState } from "../../lib/api";
 import type { ReadProjectionPhase } from "./goneDm";
 
 // =============================================================================
@@ -85,6 +86,40 @@ export function dmVisibility(input: DmVisibilityInput): DmVisibilityVerdict {
     return input.latestReadableSeq <= input.closedAtSeq ? verdict("hidden", 7) : verdict("shown", 8);
   }
   return verdict("shown", 9);
+}
+
+/** `dmVisibility` 입력 중 읽음 투영 한 행에서 오는 다섯 사실. */
+export type DmReadFacts = Pick<
+  DmVisibilityInput,
+  "closedAtSeq" | "latestReadableSeq" | "lastReadSeq" | "markedUnreadBeforeSeq" | "mentionCount"
+>;
+
+/**
+ * 읽음 투영 한 행에서 보임 판정이 쓰는 사실을 뽑는다 - 클라이언트가 행의 필드를 이름으로 부르지 않게 **행을 통째로** 넘기는 한 점이다
+ * (폰은 「여기부터 안 읽음」 필드를 어디서도 부르지 않는다, ADR-0178 D3).
+ *
+ *   * 행이 없다(메시지가 한 번도 없는 DM): 닫을 것도 읽을 것도 없다.
+ *   * `serverCarriesClosure`: 서버가 닫기를 싣는다. 행 그대로다. 행이 읽을 seq 를 말하지 않았으면(옛 행) 전체 seq 로 대신한다 -
+ *     더 많이 보이는 쪽이다. `closedAtSeq` 는 `undefined` 를 `null` 로 바꾸지 않는다(위 머리말).
+ *   * 그렇지 않다(옛 서버): 닫힘이 없고(`null`) 읽을 seq 는 전체 seq 다.
+ */
+export function dmReadFacts(read: ReadState | undefined, serverCarriesClosure: boolean): DmReadFacts {
+  if (read === undefined) {
+    return {
+      closedAtSeq: null,
+      latestReadableSeq: 0,
+      lastReadSeq: 0,
+      markedUnreadBeforeSeq: null,
+      mentionCount: 0,
+    };
+  }
+  return {
+    closedAtSeq: serverCarriesClosure ? read.closedAtSeq : null,
+    latestReadableSeq: serverCarriesClosure ? (read.latestReadableSeq ?? read.latestSeq) : read.latestSeq,
+    lastReadSeq: read.lastReadSeq,
+    markedUnreadBeforeSeq: read.markedUnreadBeforeSeq,
+    mentionCount: read.mentionCount,
+  };
 }
 
 /**

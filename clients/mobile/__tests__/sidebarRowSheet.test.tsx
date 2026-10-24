@@ -13,6 +13,7 @@ import React from 'react';
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
+import {DM_CLOSE_FAILURE, DM_CLOSE_LABEL} from '@momo/core/features/channels/model';
 import {AGENT_LIST_ACTION} from '../src/screens/SidebarScreen';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
@@ -89,6 +90,17 @@ interface Call {
 }
 
 interface Routes {
+  /**
+   * 서버가 닫기를 싣는 투영(`latest_readable_seq`·`closed_at_seq` 가 모든 행에 있다)인가. 기본은 옛 서버다: 닫기를 내밀지 않는다.
+   * 켜면 닫기·다시 열기(`PUT`·`DELETE …/closure`)가 서버 상태(`closedDms`)에 쓰이고 다음 투영이 그것을 싣는다.
+   */
+  serverClosure?: boolean;
+  /** 사람 DM 을 다 읽은 상태로 둔다(닫기는 안 읽은 것이 없을 때만 내밀어진다). */
+  dmRead?: boolean;
+  /** `PUT …/closure` 의 응답 상태. 기본 204. */
+  closePutStatus?: number;
+  /** 닫은 뒤의 읽음 투영 요청이 끝나지 않는다(서버가 느리다). 닫은 기기가 다음 투영을 기다리지 않고 반영하는지 잰다. */
+  hangReadStateAfterClose?: boolean;
   selfRole?: string;
   /** DELETE members 의 응답 상태. 기본 200. */
   leaveStatus?: number;
@@ -98,14 +110,45 @@ interface Routes {
 
 let calls: Call[] = [];
 let channelListFetches = 0;
+/** 서버가 기억하는 닫기: 채널 id -> closed_at_seq. */
+let closedDms = new Map<string, number>();
+
+function readStatesFor(routes: Routes) {
+  return READ_STATES.map(state => {
+    const row =
+      routes.dmRead && state.channel_id === 'ch-dm-human'
+        ? {...state, last_read_seq: 2, unread_count: 0}
+        : state;
+    return routes.serverClosure
+      ? {
+          ...row,
+          latest_readable_seq: row.latest_seq,
+          closed_at_seq: closedDms.get(row.channel_id) ?? null,
+        }
+      : row;
+  });
+}
 
 function installFetch(routes: Routes = {}) {
   calls = [];
   channelListFetches = 0;
+  closedDms = new Map();
   globalThis.fetch = jest.fn(async (url: string, init?: {method?: string; body?: string}) => {
     const method = init?.method ?? 'GET';
     const body = init?.body ? (JSON.parse(init.body) as Record<string, unknown>) : null;
     if (method !== 'GET') calls.push({method, url, body});
+    const closure = /\/channels\/([^/]+)\/closure$/.exec(url);
+    if (closure && method === 'PUT') {
+      if ((routes.closePutStatus ?? 204) !== 204) {
+        return jsonResponse(routes.closePutStatus as number, {error: {message: 'nope'}});
+      }
+      closedDms.set(closure[1], Number(body?.seenSeq));
+      return jsonResponse(204, {});
+    }
+    if (closure && method === 'DELETE') {
+      closedDms.delete(closure[1]);
+      return jsonResponse(204, {});
+    }
     if (method === 'PUT' && url.endsWith('/notification-pref')) {
       return jsonResponse(200, {muted: body?.muted});
     }
@@ -144,7 +187,12 @@ function installFetch(routes: Routes = {}) {
     if (url.includes('/roster')) {
       return jsonResponse(200, {members: roster(routes.selfRole ?? 'admin')});
     }
-    if (url.includes('/read-state')) return jsonResponse(200, {read_states: READ_STATES});
+    if (url.includes('/read-state')) {
+      if (routes.hangReadStateAfterClose && closedDms.size > 0) {
+        return new Promise<Response>(() => {});
+      }
+      return jsonResponse(200, {read_states: readStatesFor(routes)});
+    }
     if (url.includes('/messages')) return jsonResponse(200, {messages: []});
     if (url.includes('/approvals')) return jsonResponse(200, {approvals: []});
     if (url.includes('/work-sessions')) return jsonResponse(200, {sessions: []});
@@ -221,7 +269,7 @@ async function flush() {
 
 const sheetKeys = () =>
   screen
-    .queryAllByTestId(/^channel-sheet-(copy|mark|mute|leave)/)
+    .queryAllByTestId(/^channel-sheet-(copy|mark|mute|close-dm|leave)/)
     .map(node => String(node.props.testID).replace('channel-sheet-', ''));
 
 describe('길게 누르기가 시트를 연다', () => {
@@ -414,6 +462,98 @@ describe('채널 나가기는 확인 단계를 지난다', () => {
     await waitFor(() => expect(screen.getByTestId('channel-leave-error')).toBeTruthy());
     expect(screen.getByTestId('channel-leave-error')).toHaveTextContent(/나갈 권한이 없습니다/);
     expect(screen.getByTestId('channel-leave-confirm')).toBeTruthy();
+  });
+});
+
+describe('DM 의 「대화 닫기」 (#4367, ADR-0177 증보 D7)', () => {
+  const DM_ROW = 'sidebar-row-dm:ch-dm-human';
+  const closureCalls = () => calls.filter(call => call.url.endsWith('/closure'));
+
+  it('서버가 닫기를 싣고 다 읽은 DM: 상태 무리 끝(알림 다음)에 「대화 닫기」가 서고, 나가기는 여전히 없다', async () => {
+    await mount({serverClosure: true, dmRead: true});
+    longPress(DM_ROW);
+    expect(sheetKeys()).toEqual([
+      'copy-name',
+      'copy-link',
+      'copy-id',
+      'mark-unread',
+      'mute-toggle',
+      'close-dm',
+    ]);
+    expect(screen.getByTestId('channel-sheet-close-dm')).toHaveTextContent(DM_CLOSE_LABEL);
+  });
+
+  it('안 읽은 메시지가 있는 DM 에는 내밀지 않는다 (2026-10-17 소유자 결정)', async () => {
+    await mount({serverClosure: true});
+    longPress(DM_ROW);
+    expect(sheetKeys()).toContain('mark-read');
+    expect(sheetKeys()).not.toContain('close-dm');
+  });
+
+  it('서버가 닫기를 안 싣는 옛 서버에서는 내밀지 않는다: 폰에 기기 로컬 닫기는 없다', async () => {
+    await mount({dmRead: true});
+    longPress(DM_ROW);
+    expect(sheetKeys()).not.toContain('close-dm');
+  });
+
+  it('채널 행에는 서버가 닫기를 실어도 없다', async () => {
+    await mount({serverClosure: true, dmRead: true});
+    longPress('sidebar-row-channel:ch-quiet');
+    expect(sheetKeys()).not.toContain('close-dm');
+  });
+
+  it('누르면 서버에 PUT …/closure 를 seenSeq(투영의 latestSeq)로 한 번 보내고, 시트가 닫히고, 행이 목록에서 사라진다', async () => {
+    await mount({serverClosure: true, dmRead: true});
+    longPress(DM_ROW);
+    fireEvent.press(screen.getByTestId('channel-sheet-close-dm'));
+    await waitFor(() => expect(closureCalls()).toHaveLength(1));
+    const put = closureCalls()[0];
+    expect(put.method).toBe('PUT');
+    expect(put.url).toContain('/channels/ch-dm-human/closure');
+    expect(put.body).toEqual({seenSeq: 2});
+    await waitFor(() => expect(screen.queryByTestId('channel-action-sheet')).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId(DM_ROW)).toBeNull());
+    // 닫기는 지우기가 아니다: DM 섹션의 ⋯ 에 돌아올 문이 선다.
+    expect(screen.getByTestId('home-section-menu-dms')).toBeTruthy();
+  });
+
+  it('닫은 기기는 다음 투영을 기다리지 않는다: 서버가 답하면 이 기기의 투영 행에 바로 적어 행이 사라진다', async () => {
+    await mount({serverClosure: true, dmRead: true, hangReadStateAfterClose: true});
+    longPress(DM_ROW);
+    fireEvent.press(screen.getByTestId('channel-sheet-close-dm'));
+    await waitFor(() => expect(closureCalls()).toHaveLength(1));
+    await waitFor(() => expect(screen.queryByTestId(DM_ROW)).toBeNull());
+  });
+
+  it('서버가 거절하면(500) 시트가 열린 채 그 자리에서 이유를 말하고, 행은 목록에 그대로 있다', async () => {
+    await mount({serverClosure: true, dmRead: true, closePutStatus: 500});
+    longPress(DM_ROW);
+    fireEvent.press(screen.getByTestId('channel-sheet-close-dm'));
+    await waitFor(() => expect(screen.getByTestId('channel-sheet-error')).toBeTruthy());
+    expect(screen.getByTestId('channel-sheet-error')).toHaveTextContent(DM_CLOSE_FAILURE);
+    expect(screen.getByTestId('channel-action-sheet')).toBeTruthy();
+    expect(screen.getByTestId(DM_ROW)).toBeTruthy();
+    expect(closedDms.size).toBe(0);
+  });
+
+  it('지금 보고 있는 DM 을 닫으면 그 대화가 걷히고 사이드바로 돌아간다 (웹은 `/` 로 착지한다)', async () => {
+    await mount({serverClosure: true, dmRead: true});
+    fireEvent.press(screen.getByTestId(DM_ROW));
+    await waitFor(() => expect(screen.getByTestId('conversation-pane')).toBeTruthy());
+    longPress(DM_ROW);
+    fireEvent.press(screen.getByTestId('channel-sheet-close-dm'));
+    await waitFor(() => expect(closureCalls()).toHaveLength(1));
+    await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
+  });
+
+  it('로터의 「대화 닫기」도 같은 일을 한다 (시트를 열지 않고 같은 PUT)', async () => {
+    await mount({serverClosure: true, dmRead: true});
+    const row = screen.getByTestId(DM_ROW);
+    const actions = row.props.accessibilityActions as {name: string; label: string}[];
+    expect(actions.map(action => action.label)).toContain(DM_CLOSE_LABEL);
+    fireEvent(row, 'accessibilityAction', {nativeEvent: {actionName: 'momoChannel:close-dm'}});
+    await waitFor(() => expect(closureCalls()).toHaveLength(1));
+    expect(closureCalls()[0].body).toEqual({seenSeq: 2});
   });
 });
 
