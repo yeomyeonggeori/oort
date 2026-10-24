@@ -3890,10 +3890,33 @@ sample dm-reopen post "/v1/workspaces/{workspaceId}/dms" \
   "/v1/workspaces/$WS/dms" 200 \
   "$(jq -cn --arg m "$GATE_PEER_ID" '{memberId:$m}')" "$ACCESS"
 guard_jq '.created == false' "reopening the same pair is idempotent"
+GATE_DM_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.channel.id | ascii_downcase')"
+canonical_uuid "$GATE_DM_ID" || {
+  echo "[openapi-rust] DM reopen omitted a canonical channel id" >&2
+  exit 1
+}
 
 sample dms-list get "/v1/workspaces/{workspaceId}/dms" \
   "/v1/workspaces/$WS/dms" 200 "" "$ACCESS"
 guard_jq '(.channels | length) >= 1' "DM list contains the opened conversation"
+
+# DM 닫기 (ADR-0177 증보 D6·D7 / #4227): 본문 `{seenSeq}`, 204. 소유자는 bearer 다. 표본은 닫기 →
+# 투영에서 본인의 워터마크가 보임 → 다시 열기 → 투영에서 사라짐의 한 바퀴이고, 사이사이의 GET 은
+# 표본이 아니라 단정이다(`read-state-list` 가 이미 그 연산을 샘플한다).
+sample dm-closure-put put "/v1/workspaces/{workspaceId}/channels/{channelId}/closure" \
+  "/v1/workspaces/$WS/channels/$GATE_DM_ID/closure" 204 '{"seenSeq":0}' "$ACCESS"
+expect dm-closure-visible get "/v1/workspaces/$WS/read-state" 200 "" "$ACCESS"
+guard_jq --arg id "$GATE_DM_ID" \
+  'any(.read_states[]; (.channel_id | ascii_downcase) == $id and .closed_at_seq == 0)' \
+  "the caller's own closure shows in its read-state row"
+guard_jq 'all(.read_states[]; has("latest_readable_seq") and has("closed_at_seq"))' \
+  "every read-state row carries both ADR-0177 fields"
+sample dm-closure-delete delete "/v1/workspaces/{workspaceId}/channels/{channelId}/closure" \
+  "/v1/workspaces/$WS/channels/$GATE_DM_ID/closure" 204 "" "$ACCESS"
+expect dm-closure-gone get "/v1/workspaces/$WS/read-state" 200 "" "$ACCESS"
+guard_jq --arg id "$GATE_DM_ID" \
+  'any(.read_states[]; (.channel_id | ascii_downcase) == $id and .closed_at_seq == null)' \
+  "reopening drops the closure from the row"
 
 # ---------------------------------------------------------------------------
 # 초대 admin (#1769) — create/list/status/revoke/regenerate/redeem

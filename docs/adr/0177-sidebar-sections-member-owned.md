@@ -60,7 +60,7 @@
 - **`channel_seq`**:
   - `channel_seq(channel_id, workspace_id, last_seq)`는 FORCE RLS 표이고, seq는 한 곳에서 올려요(`momo-messaging/src/message.rs:507-510`).
   - 메시지 INSERT 트리거 선례는 `push_candidate_enqueue_trg`예요(`011_push_notifier.sql`, INVOKER 함수가 FORCE RLS 표 `outbox`에 씀).
-  - migration의 FORCE RLS 표 백필에는 선례(`002`·`005`·`012`·`055`·`064`·`088`)대로 `SET LOCAL row_security = off`를 걸어요. migration은 정책을 우회하는 역할(`002_seed.sql:21` 「DB owner/superuser 컨텍스트」)로 돌아서 이 줄은 우회 스위치가 아니라 안전망이에요. 우회 권한이 없는 역할이면 조용히 0행이 되는 대신 오류로 멈춰요(`088_push_session_lineage.sql:79-82`, 수용 기준 7).
+  - migration의 FORCE RLS 표 백필에는 선례(`002`·`005`·`012`·`055`·`064`·`088`)대로 `SET LOCAL row_security = off`를 걸어요. migration은 정책을 우회하는 역할로 돌아서 이 줄은 우회 스위치가 아니라 안전망이에요. FORCE RLS 표는 DB owner만으로는 정책을 우회하지 못해요. 우회는 슈퍼유저·BYPASSRLS 역할이 해요(`002_seed.sql:21` 「DB owner/superuser 컨텍스트」, `088_push_session_lineage.sql:80` 「우회 권한(슈퍼유저·BYPASSRLS)」). 우회 권한이 없는 역할이면 조용히 0행이 되는 대신 오류로 멈춰요(`088_push_session_lineage.sql:79-82`, 수용 기준 7).
 - **에이전트 bearer는 정확한 경로 허용목록에 없는 경로에 오지 못해요**(`momo-auth/src/agent_scope.rs:84-`). `require_human`은 그 위의 두 번째 층이에요(`routes/sidebar_prefs.rs` 머리 설명).
 - **클라이언트의 「이 서버가 싣는 표면」 판정**은 코어 `serverSurfaces.ts`의 정적 표와 404 접기(`serverSaysAbsent`) 두 겹이에요.
 
