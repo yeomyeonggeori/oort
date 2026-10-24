@@ -1,0 +1,50 @@
+# oort — 야간 PG 시험 전량 (#4241 SEC-03). PR CI 의 「Security pack」(pr-ci.yml)은 선택 목록만 돌고,
+# 나머지 `#[ignore]` PG 시험은 여기서 매일 돈다. 시크릿 없음(`contents: read`, 일회용 서비스 DB).
+name: security-nightly
+
+on:
+  schedule:
+    - cron: "17 19 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-nightly
+  cancel-in-progress: false
+
+jobs:
+  pg-all:
+    name: PG 시험 전량(야간)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: momo
+          POSTGRES_PASSWORD: momo
+          POSTGRES_DB: momo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U momo -d momo"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://momo:momo@localhost:5432/momo
+      SECURITY_PACK_OUT: ${{ runner.temp }}/security-pack
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: cargo 캐시(레지스트리 + target)
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: server-rust
+      - name: DB 준비(마이그레이션 + bootstrap_roles.sql)
+        run: scripts/security_pack.sh setup
+      - name: 모든 #[ignore] PG 시험(--workspace --ignored --test-threads=1)
+        run: scripts/security_pack.sh nightly

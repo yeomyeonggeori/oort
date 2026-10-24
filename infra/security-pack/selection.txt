@@ -1,0 +1,33 @@
+# oort 「Security pack」 선택 목록 (#4241 SEC-03). scripts/security_pack.sh 가 읽는다.
+# 형식: <영역> <cargo 패키지> <시험 타깃(tests/<타깃>.rs)>
+# 영역: tenant-isolation auth approval push attachment webhook (여섯 개 모두 1개 이상이어야 lint 통과)
+# 모든 타깃은 #[ignore] PG 시험이다(--ignored 로 실행). 목록은 SEC-02(#4224) claims.yaml 이
+# 착륙하면 거기서 파생하도록 바꾼다 — 그 전까지는 이 파일이 정본이다.
+tenant-isolation momo-db conformance_pg
+tenant-isolation momo-db tenant_catalog_pg
+tenant-isolation momo-server http_smoke_pg
+tenant-isolation momo-server search_scope_conformance_pg
+tenant-isolation momo-server workspace_membership_pg
+tenant-isolation momo-messaging conformance_pg
+tenant-isolation momo-relay relay_conformance_pg
+auth momo-server claim_conformance_pg
+auth momo-server refresh_proof_conformance_pg
+auth momo-server login_relay_conformance_pg
+auth momo-server password_reset_conformance_pg
+auth momo-server device_key_conformance_pg
+auth momo-server invite_lifecycle_conformance_pg
+auth momo-server join_conformance_pg
+auth momo-server membership_lifecycle_conformance_pg
+approval momo-agent approval_pg
+approval momo-server approval_push_audience_conformance_pg
+approval momo-server tool_grants_conformance_pg
+push momo-push device_conformance_pg
+push momo-notifier push_conformance_pg
+push momo-notifier prod_role_conformance_pg
+push momo-server push_action_token_conformance_pg
+push momo-server push_fetch_token_conformance_pg
+push momo-server push_session_end_conformance_pg
+attachment momo-server attachment_conformance_pg
+webhook momo-server webhook_admin_conformance_pg
+webhook momo-server webhook_inbound_conformance_pg
+webhook momo-webhook-sender webhook_delivery_conformance_pg
