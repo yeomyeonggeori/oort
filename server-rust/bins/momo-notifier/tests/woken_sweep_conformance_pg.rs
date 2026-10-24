@@ -32,7 +32,7 @@
 
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
@@ -114,6 +114,16 @@ fn ensure_schema_and_roles() {
         .expect("spawn psql");
     assert!(status.success(), "bootstrap_roles.sql failed to apply");
     *ready = true;
+}
+
+/// The sweep is global (every tenant, one batch) and the window is one second, so a
+/// sibling test's sweep landing between this test's ring and its assertion would end ITS
+/// run. Serialize the tests in-file, so nobody has to remember `--test-threads=1`.
+async fn serial() -> tokio::sync::MutexGuard<'static, ()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+        .lock()
+        .await
 }
 
 const HOSTED_SCOPES: [&str; 6] = [
@@ -453,6 +463,7 @@ const TERMINAL_FRAMES: &str = "SELECT count(*) FROM outbox WHERE workspace_id = 
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
 async fn a_woken_uncollected_run_ends_in_one_transaction_with_every_trace() {
+    let _guard = serial().await;
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let hosted = seed_hosted(&su).await;
@@ -605,6 +616,7 @@ async fn arrange(su: &PgPool, h: &Hosted, name: &str) {
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
 async fn each_protection_keeps_a_woken_run_alive_in_the_database() {
+    let _guard = serial().await;
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let cases = [
@@ -638,6 +650,7 @@ async fn each_protection_keeps_a_woken_run_alive_in_the_database() {
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
 async fn a_dead_token_does_not_protect_a_run_the_agent_never_collected() {
+    let _guard = serial().await;
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let hosted = seed_hosted(&su).await;
@@ -694,6 +707,7 @@ async fn a_dead_token_does_not_protect_a_run_the_agent_never_collected() {
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
 async fn the_candidate_read_is_a_superset_of_the_verdict_at_the_boundary() {
+    let _guard = serial().await;
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let hosted = seed_hosted(&su).await;
@@ -731,6 +745,7 @@ async fn the_candidate_read_is_a_superset_of_the_verdict_at_the_boundary() {
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
 async fn a_ring_row_of_another_workspace_never_wakes_this_workspaces_run() {
+    let _guard = serial().await;
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let hosted = seed_hosted(&su).await;
@@ -760,6 +775,7 @@ async fn a_ring_row_of_another_workspace_never_wakes_this_workspaces_run() {
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
 async fn a_welcome_run_ends_silently_and_a_work_run_gets_its_line() {
+    let _guard = serial().await;
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let welcome_host = seed_hosted(&su).await;
@@ -808,6 +824,7 @@ async fn a_welcome_run_ends_silently_and_a_work_run_gets_its_line() {
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
 async fn runs_that_are_not_queued_or_have_no_ok_ring_are_left_alone() {
+    let _guard = serial().await;
     ensure_schema_and_roles();
     let su = superuser_pool().await;
 
@@ -872,6 +889,7 @@ async fn runs_that_are_not_queued_or_have_no_ok_ring_are_left_alone() {
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
 async fn a_hosted_agent_silent_for_days_is_not_handed_the_welcome_opener() {
+    let _guard = serial().await;
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let hosted = seed_hosted(&su).await;
