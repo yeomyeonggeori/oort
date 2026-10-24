@@ -12,6 +12,7 @@ import {
   AccessibilityInfo,
   Animated,
   Dimensions,
+  Pressable,
   ScrollView,
   View,
   type NativeTouchEvent,
@@ -135,6 +136,7 @@ function finger(target: Instance) {
       timestamp: current.t,
     } as unknown as NativeTouchEvent;
     return {
+      persist() {},
       nativeEvent: {
         ...touch,
         touches: active ? Array.from({ length: count }, () => touch) : [],
@@ -188,14 +190,17 @@ function finger(target: Instance) {
     node.props.onResponderStart?.(event());
   }
 
-  /** 다른 뷰가 응답을 달라고 한다: 응답자가 양보하면 옮겨 가고, 아니면 거절된다. */
+  /**
+   * 다른 뷰가 응답을 달라고 한다. 응답 시스템은 양보를 묻기 **전에** 청한 쪽에 Grant 를 먼저 알리고(`setResponderAndExtractTransfer`),
+   * 응답자가 양보하면 Terminate 와 함께 응답이 옮겨 가고, 아니면 청한 쪽이 Reject 를 받는다.
+   */
   function transfer(to: Instance) {
     const from = responder;
     if (from === null) return grant(to);
+    to.props.onResponderGrant?.(event());
     if (from.props.onResponderTerminationRequest?.(event())) {
       from.props.onResponderTerminate?.(event());
-      responder = null;
-      grant(to);
+      responder = to;
     } else {
       to.props.onResponderReject?.(event());
     }
@@ -210,13 +215,13 @@ function finger(target: Instance) {
      * 화면에 손가락이 닿았다. `capture` 는 위에서 아래로 가는 capture 가 쥐었는가(쥐면 안 된다 —
      * 그 아래 단추의 탭이 죽는다), `granted` 는 bubble 에서 누가 쥐었는가.
      */
-    down(x: number, y: number): { capture: boolean; granted: boolean } {
+    down(x: number, y: number, fingers = 1): { capture: boolean; granted: boolean } {
       clock += 16;
       start = { x, y, t: clock };
       previous = start;
       current = start;
       active = true;
-      count = 1;
+      count = fingers; // 2 면 두 손가락이 한 터치 이벤트로 한꺼번에 닿은 것이다(핀치)
       responder = null;
       let capture = false;
       act(() => {
@@ -238,15 +243,20 @@ function finger(target: Instance) {
         responder?.props.onResponderMove?.(event());
       });
     },
-    /** 둘째 손가락이 닿았다. 응답자의 조상들에게 다시 묻고, 응답자는 Start 로 그것을 안다. */
-    second() {
+    /**
+     * 둘째 손가락이 닿았다. 응답자의 조상들에게 다시 묻고, 응답자는 Start 로 그것을 안다. 돌려주는 것은 응답을 **청한**
+     * 뷰다(없으면 null) — 청하는 것은 뒤의 행뿐이어야 하고 뷰어의 뿌리여서는 안 된다.
+     */
+    second(): Instance | null {
       count = 2;
       clock += 16;
+      let wanted: Instance | null = null;
       act(() => {
-        const wants = negotiate('Start');
-        if (wants && wants !== responder) transfer(wants);
+        wanted = negotiate('Start');
+        if (wanted && wanted !== responder) transfer(wanted);
         responder?.props.onResponderStart?.(event());
       });
+      return wanted;
     },
     /** 손가락을 뗐다. */
     up() {
@@ -281,7 +291,11 @@ function dragSlowly(touch: ReturnType<typeof finger>, x: number, y0: number, tot
 interface Mounted {
   onClose: jest.Mock;
   progress: { current: number | null };
-  /** 바깥 「메시지 행」이 응답을 쥔 횟수(`inRow` 로 감쌌을 때만 의미가 있다). */
+  /**
+   * 바깥 「메시지 행」이 눌림을 받은 횟수(`inRow` 로 감쌌을 때만 의미가 있다). 행은 진짜 `Pressable` 이라 응답을 받는 순간
+   * (`onResponderGrant`) `onPressIn` 이 불린다 — 그 Grant 는 양보를 묻기 **전에** 오고, Pressability 는 Reject 를 다루지
+   * 않으므로 한 번 받으면 눌린 채 길게 누르기 타이머가 선다.
+   */
   rowGrants: jest.Mock;
 }
 
@@ -310,13 +324,9 @@ async function mount(
   );
   render(
     options.inRow ? (
-      <View
-        testID="message-row"
-        onStartShouldSetResponder={() => true}
-        onResponderGrant={rowGrants}
-      >
+      <Pressable testID="message-row" onPressIn={rowGrants}>
         {viewer}
-      </View>
+      </Pressable>
     ) : (
       viewer
     ),
@@ -687,15 +697,73 @@ describe('③ 응답을 쥐는 자리 — 가로 넘김을 죽이지 않는다 (
     }
   });
 
-  it('쪽이 쥔 채 둘째 손가락이 닿아도 응답이 뿌리(스크롤뷰의 조상)로 옮겨 가지 않는다', async () => {
-    // 옮겨 가면 넘기던 스크롤이 도중에 멈춘다(조상이 JS 응답자가 되므로).
+  it('쪽이 쥔 채 둘째 손가락이 닿아도 뿌리(스크롤뷰의 조상)는 응답을 청하지 않는다 — 청하는 것은 방패뿐이고 쪽은 거절한다', async () => {
+    // 뿌리가 청하면 응답이 쪽에서 뿌리로 옮겨 가 넘기던 스크롤이 도중에 멈춘다(조상이 JS 응답자가 되므로). 뿌리의 Grant 는
+    // 공유 규칙 상태도 건드린다(끌던 중이면 취소를 삼킨다). 그래서 뿌리의 시작 가드가 둘째 손가락을 거절해야 한다.
     await mount();
     const touch = finger(photo());
     touch.down(200, 300);
     const first = touch.responder;
-    touch.second();
-    expect(touch.responder === first).toBe(true);
+    const wanted = touch.second();
+    expect(wanted?.props.testID).toBe('attachment-viewer-shield'); // 뿌리가 아니다
+    expect(touch.responder === first).toBe(true); // 쪽이 거절했다
     expect(touch.responder?.props.testID).toBe('attachment-viewer-page');
+  });
+
+  it('쪽이 쥔 채 둘째 손가락이 닿으면 방패가 청하고 쪽은 거절한다 — 뒤의 메시지 행은 묻지도 못한다 (r3 M-2)', async () => {
+    // RN 은 양보를 묻기 전에 청한 뷰에 Grant 를 알린다 → 행(Pressable)은 Grant 로 길게 누르기 타이머를 시작한다.
+    // 거절만으로는 못 막고, 행에 닿기 전에 항상 참을 주는 뷰어 소유의 조상(방패)이 묻는 길을 끝내야 한다.
+    const { rowGrants } = await mount({}, { inRow: true });
+    const touch = finger(photo());
+    touch.down(200, 300); // 끌기를 쥐기 전: 한 손가락일 때는 양보한다(가로 넘김·가장자리 뒤로가기)
+    expect(touch.yields()).toBe(true);
+    const wanted = touch.second();
+    expect(wanted?.props.testID).toBe('attachment-viewer-shield'); // 청한 것은 방패뿐이다 — 뿌리도 행도 아니다
+    expect(touch.responder?.props.testID).toBe('attachment-viewer-page'); // 응답은 그대로다
+    expect(rowGrants).not.toHaveBeenCalled(); // 행은 Grant 도 받지 못했다 — 눌림도 길게 누르기 타이머도 서지 않는다
+    expect(touch.yields()).toBe(false); // 손가락이 둘인 동안은 끌기를 쥐기 전에도 양보하지 않는다
+  });
+
+  it('뿌리가 쥔 채(단추 띠의 빈 곳을 짚은 채) 둘째 손가락이 닿아도 방패가 청하고 뿌리는 양보하지 않는다 (r3 L-8)', async () => {
+    // 뿌리가 응답자이면 뿌리는 「응답자 자신」이라 묻는 길에서 건너뛰어진다 — capture 가 돌지 않아 gestureState 의 손가락 수는
+    // 아직 1 이다. 이벤트의 터치 수를 함께 읽어야 뿌리도 거절한다.
+    const { rowGrants } = await mount({}, { inRow: true });
+    const touch = finger(screen.getByTestId('attachment-viewer-bar'));
+    touch.down(200, 70);
+    expect(touch.responder === root()).toBe(true);
+    const wanted = touch.second();
+    expect(wanted?.props.testID).toBe('attachment-viewer-shield');
+    expect(touch.responder === root()).toBe(true); // 응답은 뿌리에 그대로다
+    expect(rowGrants).not.toHaveBeenCalled();
+  });
+
+  it('방패는 첫 손가락에는 나서지 않는다 — 쪽·뿌리가 먼저 쥔다', async () => {
+    await mount({}, { inRow: true });
+    for (const target of [photo(), screen.getByTestId('attachment-viewer-bar'), screen.getByTestId('attachment-viewer-pager')]) {
+      const touch = finger(target);
+      touch.down(200, 300);
+      expect(touch.responder?.props.testID).not.toBe('attachment-viewer-shield');
+      touch.up();
+    }
+  });
+
+  it('두 손가락이 한꺼번에 닿아도(핀치) 쪽이 쥔다 — 뒤의 메시지 행이 가져가지 못한다 (r3 M-2)', async () => {
+    // 첫 가드(`touches <= 1`)는 이 길을 열었다: 쪽도 뿌리도 쥐지 않아 행이 곧바로 응답자가 됐다.
+    const { rowGrants } = await mount({}, { inRow: true });
+    const touch = finger(photo());
+    expect(touch.down(200, 300, 2).granted).toBe(true);
+    expect(touch.responder?.props.testID).toBe('attachment-viewer-page');
+    expect(rowGrants).not.toHaveBeenCalled();
+  });
+
+  it('손가락 둘이 한꺼번에 닿은 제스처는 끌기를 가져가지 않는다 — 핀치는 뷰어를 닫지 않는다', async () => {
+    const { onClose, progress } = await mount();
+    const touch = finger(photo());
+    touch.down(200, 300, 2);
+    dragSlowly(touch, 200, 300, DISMISS_DISTANCE_PT + 40);
+    expect(progress.current).toBeNull();
+    touch.up();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('단추 띠의 빈 곳에서 시작한 끌기도 닫는다 — 뿌리가 쥔 손가락은 뿌리가 끝까지 따라간다', async () => {

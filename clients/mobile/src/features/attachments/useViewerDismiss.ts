@@ -4,6 +4,7 @@ import {
   PanResponder,
   type GestureResponderEvent,
   type GestureResponderHandlers,
+  type PanResponderGestureState,
 } from 'react-native';
 import {VIEWER_SNAP_SPRING} from '../../design/motion';
 import {useReduceMotionRef} from '../../lib/useReduceMotion';
@@ -62,16 +63,31 @@ import {
 // ### ③ 뿌리가 받는 것은 부분 집합이다
 //
 // 한 `PanResponder` 의 핸들러를 조상(뿌리)과 자손(쪽)에 **같이 펼치면 안 된다.** 응답자가 쪽이면 응답
-// 시스템은 이동마다 쪽의 **조상**에게 `onMoveShouldSetResponder(Capture)` 를 묻는데, PanResponder 는
-// 그 물음에서 공유 `gestureState` 를 먼저 갱신하고(`_accountsForMovesUpTo`) 같은 이동의
-// `onResponderMove` 를 「이미 처리함」으로 건너뛴다 — 끌기가 한 걸음도 안 간다. 그래서 뿌리에는 이동
-// should-set 둘을 뺀 나머지만 준다.
+// 시스템은 이동마다 쪽의 **조상**에게 `onMoveShouldSetResponder(Capture)` 를 묻는데, PanResponder 의
+// capture 판(`onMoveShouldSetResponderCapture`)은 그 물음에서 공유 `gestureState` 를 먼저 갱신하고
+// (`_accountsForMovesUpTo`) 같은 이동의 `onResponderMove` 를 「이미 처리함」으로 건너뛴다 — 끌기가 한 걸음도
+// 안 간다. bubble 판은 설정이 없으면 거짓만 돌려주지만 짝이라서 같이 뺀다. 그래서 뿌리에는 이동 should-set 둘을
+// 뺀 나머지만 준다.
 //
-// ### ④ 둘째 손가락은 쥐지 않는다
+// ### ④ 둘째 손가락은 응답을 옮기지 않는다 (design-review r3 M-2)
 //
-// 닿는 순간 쥐는 것은 **첫** 손가락뿐이다. 쪽이 쥔 채 둘째 손가락이 닿으면 응답 시스템은 쪽의 조상(뿌리)에게도
-// `onStartShouldSetResponder` 를 묻는데, 거기서 참을 주면 응답이 쪽에서 뿌리(= 스크롤뷰의 조상)로 옮겨 가
-// 넘기던 스크롤이 도중에 멈춘다.
+// 이미 쥔 손가락이 있는데 둘째 손가락이 닿으면 응답 시스템은 쪽의 **조상**(뿌리 → … → 뒤의 메시지 행)에게
+// `onStartShouldSetResponder` 를 다시 묻고, 참을 준 첫 뷰가 응답을 청한다 — 청한 뷰는 쥔 쪽의 양보를 묻기 **전에**
+// `onResponderGrant` 를 받는다(RN 의 `setResponderAndExtractTransfer`). 새는 길이 셋이다.
+//   · 뿌리가 참을 주면 응답이 스크롤뷰의 조상으로 옮겨 가 넘기던 스크롤이 도중에 멈춘다.
+//   · 뒤의 행(`Pressable`)이 참을 주면: 쥔 쪽이 양보하면 응답이 행으로 넘어가 탭이 행을 열고, 거절해도 행은 이미
+//     Grant 를 받아 **길게 누르기 타이머**(500ms)를 시작한다 — 행 시트가 뜬다. 사진 뷰어에서 가장 자연스러운 손짓이
+//     핀치이고 확대(#4297)가 아직 없어 사람이 거듭 시도한다.
+//   · 두 손가락이 한꺼번에 닿으면(핀치) 쥔 쪽이 아직 없어서 가드가 거짓을 주면 행이 곧바로 응답자가 된다.
+// 그래서 셋을 이렇게 닫는다.
+//   ① 시작 가드: **이미 쥔 손가락이 있는데 둘째 손가락이 닿은 것**일 때만 거절한다(`stateRef.origin`). 아무것도 쥐고
+//      있지 않으면 손가락이 몇이든 쪽이 쥔다(셋째 길 닫힘 — 첫 `touches ≤ 1` 가드는 이 길을 새로 열었다).
+//   ② 양보 청구: 손가락이 둘이면 끌기를 쥐기 전에도 거절한다(`touchesDown`: 이벤트의 터치 수와 gestureState 의
+//      `numberActiveTouches` 중 큰 쪽). 가로 넘김·가장자리 뒤로가기가 청하는 것은 손가락 하나일 때다. 거절하지 않으면
+//      청한 뷰가 응답을 가져간다(첫째·둘째 길).
+//   ③ **방패**(`AttachmentViewer` 의 SafeAreaProvider 바로 밑 View): 둘째 손가락의 묻는 길이 행에 닿기 전에 항상 참을
+//      주는 뷰어 소유의 조상이 끝낸다. 위 ①·② 만으로는 행이 Grant 를 받는 것을 못 막는다(행은 눌린 채 남고 길게 누르기
+//      타이머가 돈다 — Pressability 는 Reject 를 다루지 않는다). 방패가 청해도 쥔 쪽이 ② 로 거절하므로 응답은 그대로다.
 //
 // ### ⑤ 끌기를 쥐면 가로 스크롤을 잠근다 (대각선 끌기)
 //
@@ -128,6 +144,15 @@ const FRAME_OMITTED = [
   'onMoveShouldSetResponder',
   'onMoveShouldSetResponderCapture',
 ] as const;
+
+/**
+ * 지금 닿아 있는 손가락 수. 닿을 때·움직일 때 오는 양보 청구는 그 이벤트가 알고, 스크롤뷰의 청구는 스크롤 이벤트로 와서
+ * 터치가 없으므로 `PanResponder` 가 마지막으로 갱신한 수(`numberActiveTouches`)를 쓴다. 둘 중 큰 쪽이다 — 뿌리가
+ * 응답자일 때는 뿌리의 capture 가 돌지 않아 gestureState 의 수가 아직 1 일 수 있다.
+ */
+function touchesDown(event: GestureResponderEvent, gesture: PanResponderGestureState): number {
+  return Math.max(event.nativeEvent.touches?.length ?? 0, gesture.numberActiveTouches);
+}
 
 export function useViewerDismiss({
   enabled,
@@ -215,11 +240,13 @@ export function useViewerDismiss({
     };
 
     return PanResponder.create({
-      // 닿는 순간 **첫 손가락**을 쥔다(bubble). 닫기·공유 단추는 더 깊어서 자기 탭을 먼저 쥔다.
-      // 둘째 손가락은 쥐지 않는다 — 쪽이 쥔 채 둘째 손가락이 닿을 때 뿌리가 응답을 가져가면 응답이
-      // 스크롤뷰의 조상으로 옮겨 가 넘기던 스크롤이 멈춘다(위 ④).
+      // 닿는 순간 쥔다(bubble). 닫기·공유 단추는 더 깊어서 자기 탭을 먼저 쥔다. 다만 **이미 쥔 손가락이 있는데**
+      // 둘째 손가락이 닿은 것이면 쥐지 않는다 — 뿌리가 쪽의 응답을 가로채지 못하게(위 ④).
       onStartShouldSetPanResponder: event =>
-        (event.nativeEvent.touches?.length ?? 1) <= 1,
+        !(
+          stateRef.current.origin !== null &&
+          (event.nativeEvent.touches?.length ?? 1) > 1
+        ),
       onPanResponderGrant: event => {
         step('down', event);
       },
@@ -242,8 +269,10 @@ export function useViewerDismiss({
           write(result.offset);
         }
       },
-      // 끌기를 가져가기 전에는 양보한다(가로 넘김·가장자리 뒤로가기), 가져간 뒤에는 거절한다.
-      onPanResponderTerminationRequest: () => !stateRef.current.claimed,
+      // 끌기를 가져가기 전에는 양보한다(가로 넘김·가장자리 뒤로가기), 가져간 뒤에는 거절한다. 손가락이 둘이면 언제나
+      // 거절한다 — 그때 청하는 것은 방패(위 ④ ③)뿐이다. 거절하지 않으면 청한 뷰가 응답을 가져간다.
+      onPanResponderTerminationRequest: (event, gesture) =>
+        !stateRef.current.claimed && touchesDown(event, gesture) <= 1,
       onPanResponderRelease: (_event, gesture) => {
         const claimed = stateRef.current.claimed;
         stateRef.current = IDLE;

@@ -61,7 +61,8 @@ import { backdropStops, chromeStops, scaleStops } from './viewerDismiss';
 // 조상이고, iOS 의 ScrollView 는 조상이 JS 응답자이면 스크롤을 시작하지 못한다 — 둘째 판은 이것 때문에
 // 옆으로 넘기기가 죽었다(jest 에는 네이티브 스크롤뷰가 없어 초록이었다). 뿌리는 사진 밖(단추 띠의 빈
 // 곳·인셋)에 닿은 손가락만 쥔다. 자세한 까닭은 `useViewerDismiss.ts` 머리말이다. 이 구조를 지키는 것은
-// `attachmentViewer.test.tsx` 의 「응답을 쥔 뷰는 스크롤뷰의 조상이 아니다」와 Maestro 105 의 「3 / 3」 단정이다.
+// `attachmentViewer.test.tsx` 의 「사진 위에 닿은 손가락을 쥐는 뷰는 가로 스크롤뷰의 조상이 아니다」와 Maestro 105 의
+// 「3 / 3」 단정이다.
 //
 // ## 이어받는 쪽에 (#4297)
 //
@@ -120,6 +121,10 @@ function ViewerPage({
   );
 }
 
+/** 닿는 모든 시작에 「내가 쥔다」고 답한다 — 아래 방패 View 의 한 줄이다. */
+const CLAIM_EVERY_START = () => true;
+const SHIELD = { flex: 1 } as const;
+
 export interface AttachmentViewerProps {
   workspaceId: string;
   channelId: string;
@@ -152,7 +157,19 @@ export function AttachmentViewer({
       testID="attachment-viewer-modal"
     >
       <SafeAreaProvider>
-        <ViewerFrame onClose={onClose} {...frame} />
+        <View
+          style={SHIELD}
+          // 방패: 뷰어 Modal 은 메시지 행의 React 자손이라, 뷰어 안에서 아무도 쥐지 않은 시작은 위로 번져 행의
+          // `Pressable` 이 묻는다. 둘째 손가락이 닿을 때(쪽·뿌리는 쥐지 않고 쪽은 양보도 거절한다) 그 묻는 길의 끝에 이
+          // View 가 있어서 행까지 가지 못한다 — 행은 `onResponderGrant` 를 받는 순간 길게 누르기 타이머를 시작하기
+          // 때문이다(RN 은 양보를 묻기 **전에** 청한 쪽에 Grant 를 알린다). 첫 손가락은 더 깊은 쪽·뿌리가 먼저 쥐므로
+          // 여기까지 오지 않는다.
+          collapsable={false}
+          onStartShouldSetResponder={CLAIM_EVERY_START}
+          testID="attachment-viewer-shield"
+        >
+          <ViewerFrame onClose={onClose} {...frame} />
+        </View>
       </SafeAreaProvider>
     </Modal>
   );
