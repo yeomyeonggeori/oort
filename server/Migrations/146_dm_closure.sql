@@ -28,6 +28,11 @@
 --
 -- RLS: dm_closure 는 ENABLE + FORCE, 표준 ws_isolation(084·141 과 같은 문법). 멤버 경계는
 -- 정책이 아니라 쿼리 술어(`member_id = 요청자`)가 지킨다 — RLS 는 워크스페이스만 가른다.
+-- 운영 메모(락): `psql --single-transaction` 한 번 안에서 `ALTER TABLE channel_seq`(ACCESS EXCLUSIVE) →
+-- `CREATE TRIGGER … ON message`(SHARE ROW EXCLUSIVE) → 전 채널 백필이 이어지고, 커밋 전까지 메시지 전송
+-- (= channel_seq 갱신)이 기다린다. 백필은 채널마다 message_channel_seq_idx 를 한 번 타서 보통 짧다. 꼬리에
+-- 기계 메시지가 아주 긴 큰 DB는 점검 창에서 적용한다(대형 데이터에서의 시간은 측정하지 않았다).
+--
 -- 이벤트 없음(D10): outbox 트리거도 relay 팬아웃도 만들지 않는다. 다른 기기는 다음 읽음 투영
 -- 조회에서 맞춰진다.
 -- =============================================================================
