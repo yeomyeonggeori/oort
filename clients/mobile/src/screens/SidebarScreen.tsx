@@ -67,6 +67,7 @@ import {
 import {useGoneUnreadVerdicts} from '../features/sidebar/useGoneUnreadVerdicts';
 import {dmClosedEntries, dmClosureMode, dmVerdicts} from '../features/sidebar/dmVerdicts';
 import {DmClosedSheet} from '../features/sidebar/DmClosedSheet';
+import {useDmClosedCacheInitial, useDmClosedCacheWrite} from '../features/sidebar/dmClosedCache';
 import {useDmReopen} from '../features/sidebar/useDmReopen';
 import {
   useChannels,
@@ -372,6 +373,9 @@ export default function SidebarScreen({
     rosterReady,
   });
 
+  // 마지막 투영의 닫힘 id: 첫 프레임에만 쓰는 캐시(원장 아님, `dmClosedCache.ts`).
+  const cachedClosed = useDmClosedCacheInitial(workspaceId);
+
   // DM 이 목록에 서는가: 코어 `dmVisibility` 한 함수(웹과 같다). 숨은 DM 은 「⋯ › 닫은 대화」가 연다.
   const verdicts = useMemo(
     () =>
@@ -385,6 +389,7 @@ export default function SidebarScreen({
         rosterReady,
         mode: closureMode,
         goneVerdicts: goneUnreadVerdicts,
+        cachedClosed,
       }),
     [
       channelsQuery.groups.dms,
@@ -396,8 +401,10 @@ export default function SidebarScreen({
       rosterReady,
       closureMode,
       goneUnreadVerdicts,
+      cachedClosed,
     ],
   );
+  useDmClosedCacheWrite(workspaceId, readPhase, closureMode === 'server', verdicts);
   const closedEntries = useMemo(
     () => dmClosedEntries(channelsQuery.groups.dms, verdicts),
     [channelsQuery.groups.dms, verdicts],

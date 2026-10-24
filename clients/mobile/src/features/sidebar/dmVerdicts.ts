@@ -25,8 +25,8 @@ import {uuidEq} from '@momo/core/lib/api';
 //
 //   * 기기 로컬 닫기 원장이 없다. 만들지 않는다: 기기마다 어긋나던 문제를 되풀이한다(`channelRowActions.ts` 머리말). 그래서 서버가
 //     닫기를 싣지 않는 서버(`legacy`)에서는 닫기를 내밀지 않고, 닫힘 없이 나간 상대 접기(6번)만 이 판정으로 돈다.
-//   * 첫 페인트 캐시가 없다. 투영이 오는 중(`loading`)에는 나간 상대의 DM 만 접힌 채로 둔다(지금까지의 동작). 닫은 DM 이 콜드스타트
-//     첫 프레임에 잠깐 보였다 사라질 수 있다 - 이슈 AC 밖이라 미결로 둔다.
+//   * 첫 페인트 캐시는 **닫힘 id 목록 하나**다(`dmClosedCache.ts`, 원장 아님). 투영이 오는 중에는 나간 상대의 DM 과 마지막 투영에서
+//     닫혀 있던 DM 만 접힌 채로 둔다: 콜드스타트 첫 프레임에 닫은 DM 이 잠깐 보였다 사라지지 않게(웹 D8 캐시와 같은 원칙).
 //
 // ## 두 갈래, 한 판정
 //
@@ -69,6 +69,8 @@ export interface DmVerdictsInput {
   mode: DmClosureMode;
   /** legacy 에서 나간 상대 DM 의 안 읽음 판정(`useGoneUnreadVerdicts`). */
   goneVerdicts?: ReadonlyMap<string, GoneUnreadVerdict>;
+  /** 마지막 투영에서 닫혀 있던 DM id(소문자 키). 투영이 오기 전 첫 페인트에서만 읽는다. */
+  cachedClosed?: ReadonlySet<string>;
 }
 
 /** DM 마다의 판정(소문자 id 키). */
@@ -115,9 +117,11 @@ export function dmVerdicts(input: DmVerdictsInput): Map<string, DmVerdict> {
       phase: input.phase,
     });
     if (verdict.visibility === 'hold') {
-      // 오는 중이면 나간 상대만 접힌 채(깜빡이며 나타났다 사라지지 않게), 그 밖에는 보인다.
+      // 오는 중이면 나간 상대와 마지막 투영에서 닫혀 있던 DM 만 접힌 채(깜빡이며 나타났다 사라지지 않게), 그 밖에는 보인다.
+      // 열린 DM 은 코어 1번이 먼저 보임으로 가르므로 이 갈래(hold)에 오지 않는다 - 캐시가 열린 DM 을 숨기지 못한다.
+      const cachedClosed = input.cachedClosed?.has(id) === true;
       out.set(id, {
-        shown: !(input.phase === 'loading' && counterpart === 'gone'),
+        shown: !(input.phase === 'loading' && (counterpart === 'gone' || cachedClosed)),
         rule: verdict.rule,
       });
     } else {

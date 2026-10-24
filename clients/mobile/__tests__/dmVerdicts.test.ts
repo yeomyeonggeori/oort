@@ -237,6 +237,37 @@ describe('투영이 오는 중(loading)이면 나간 상대만 숨은 채다', (
   });
 });
 
+describe('첫 페인트 캐시: 마지막 투영에서 닫혀 있던 DM 은 오는 중에도 접힌 채다 (#4367)', () => {
+  const cached = new Set([DM_PEER.id]);
+
+  it('loading 이면 캐시의 닫힘 DM 이 숨는다(콜드스타트 첫 프레임 깜빡임 없음)', () => {
+    const v = verdicts([], {phase: 'loading', mode: 'unknown', cachedClosed: cached});
+    expect(v.get(DM_PEER.id)?.shown).toBe(false);
+  });
+
+  it('열려 있는 DM 은 캐시가 닫았어도 보인다', () => {
+    const v = verdicts([], {
+      phase: 'loading',
+      mode: 'unknown',
+      cachedClosed: cached,
+      openChannelId: DM_PEER.id,
+    });
+    expect(v.get(DM_PEER.id)?.shown).toBe(true);
+  });
+
+  it('투영이 오면(ready) 캐시는 판정에 닿지 않는다: 서버가 열렸다고 하면 보인다', () => {
+    const v = verdicts([row(DM_PEER.id, {closedAtSeq: null, latestReadableSeq: 5})], {
+      cachedClosed: cached,
+    });
+    expect(v.get(DM_PEER.id)).toEqual({shown: true, rule: 9});
+  });
+
+  it('투영을 못 읽었으면(error) 캐시로도 숨기지 않는다', () => {
+    const v = verdicts([], {phase: 'error', mode: 'unknown', cachedClosed: cached});
+    expect(v.get(DM_PEER.id)?.shown).toBe(true);
+  });
+});
+
 describe('dmClosedEntries: 「닫은 대화」 목록은 숨은 DM 중 닫음(7)과 나감(6)만', () => {
   it('보이는 대화는 넣지 않고, 이유를 붙인다', () => {
     const rows = [
