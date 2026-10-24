@@ -81,9 +81,11 @@ export function parseAvatarImagePreview(value: unknown): AvatarImagePreview | nu
 }
 
 /** `GET …/approvals/{approval}/avatar-preview?v={sha256}` 의 모양. 베어러를 싣기 전에 대조한다. */
-// 세그먼트는 `.`·`..` 가 될 수 없다(정규화되면 같은 서버의 다른 GET 경로로 베어러가 간다 — 보안 검수 L1).
+// 세그먼트는 UUID·슬러그 글자(`[A-Za-z0-9_-]`)만 받는다: `.`·`..`·`%2e`·`\`·탭·개행처럼 URL 파서가
+// 다른 경로로 정규화하는 표기는 글자째 들어올 수 없다(보안 검수 L1·r2 — 정규화되면 같은 서버의
+// 다른 GET 경로로 베어러가 간다). 서버 id 는 UUID 라 정상 경로는 그대로 통과한다.
 export const APPROVAL_AVATAR_PREVIEW_PATH =
-  /^\/v1\/workspaces\/(?!(?:\.|%2[eE])+\/)[^/?#]+\/approvals\/(?!(?:\.|%2[eE])+\/)[^/?#]+\/avatar-preview\?v=[0-9a-f]{64}$/;
+  /^\/v1\/workspaces\/[A-Za-z0-9_-]+\/approvals\/[A-Za-z0-9_-]+\/avatar-preview\?v=[0-9a-f]{64}$/;
 
 export function isApprovalAvatarPreviewPath(path: string | null | undefined): boolean {
   return typeof path === "string" && APPROVAL_AVATAR_PREVIEW_PATH.test(path);

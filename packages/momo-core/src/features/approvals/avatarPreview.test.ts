@@ -88,7 +88,9 @@ describe("member.avatar.set 카드의 action.preview (#4394)", () => {
       `/v1/workspaces/${WS}/approvals/%2e%2e/avatar-preview?v=${SHA}`,
       `/v1/workspaces/${WS}/approvals/%2E%2E/avatar-preview?v=${SHA}`,
       `/v1/workspaces/../approvals/${APPROVAL}/avatar-preview?v=${SHA}`,
-      `/v1/workspaces/${WS}/approvals/${APPROVAL}\\x/avatar-preview?v=${SHA}\n`,
+      `/v1/workspaces/${WS}/approvals/${APPROVAL}\\x/avatar-preview?v=${SHA}`, // 원시 백슬래시
+      `/v1/workspaces/${WS}/approvals/${APPROVAL}\t/avatar-preview?v=${SHA}`, // 탭은 URL 파서가 지운다
+      `/v1/workspaces/${WS}/approvals/${APPROVAL}/avatar-preview?v=${SHA}\n`,
     ]) {
       expect(isApprovalAvatarPreviewPath(bad)).toBe(false);
     }
