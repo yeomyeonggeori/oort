@@ -435,6 +435,8 @@ export interface PillState {
   /** `seen@<offset>` = 창 안에서 봤다 · `pressed` = 위 필을 눌렀다. */
   latchNote: string | null;
   settled: boolean;
+  /** 떠 있는 날짜 알약이 지금 서 있다 (#4331 — 프로그램이 낸 스크롤에는 서지 않는지 재는 seam). */
+  day: boolean;
 }
 
 /** 아직 아무 행도 보고되지 않았다. 빈 배열 하나를 모두가 나눠 쓴다. */
@@ -523,6 +525,12 @@ export function floatingDayFor(
  * 어디까지 왔는지 읽을 틈이다.
  */
 export const DAY_PILL_LINGER_MS = 1200;
+
+/**
+ * 손가락이 뗀 뒤 관성이 시작하기를 기다리는 시간(ms, #4331). UIKit 은 `scrollViewDidEndDragging` 직후 같은 호출 안에서
+ * `scrollViewWillBeginDecelerating` 을 보내므로 두 이벤트는 사실상 붙어 온다 — 이 시간은 JS 가 바쁜 순간의 여유일 뿐이다.
+ */
+export const DRAG_MOMENTUM_GRACE_MS = 150;
 
 function sameFloatingDay(
   a: {key: string} | null,
@@ -1180,9 +1188,53 @@ function TimelineInner({
       setDayPillLive(false);
     }, DAY_PILL_LINGER_MS);
   }, []);
+  // ## 알약은 **손가락이 끈 스크롤**에만 선다 (#4331)
+  //
+  // `onMomentumScrollBegin` 은 UIKit 이 **감속을 시작할 때마다** 온다. 손가락이 끈 뒤의 관성이 그 대부분이지만, 이 목록이 스스로 낸 이동
+  // (입력창이 자라고 줄어 창이 변할 때의 바닥 맞춤 · 새 줄을 따라가는 활강 · 보낸 뒤의 끝 쫓기)이 낳은 감속도 같은 신호를 낸다.
+  // 그 신호로 알약을 세우면 입력하는 동안 알약이 떴다 사라진다(실기 3053: 「채팅을 치면 … 위에 날짜가 뜨고 안뜨고 하면서 채팅이
+  // 이동해」). 그래서 관성은 **직전에 손가락이 끈 것일 때만** 알약을 세운다:
+  //
+  //   `onScrollBeginDrag`(손가락이 잡음) → 자격이 선다.
+  //   `onScrollEndDrag`(손가락이 뗌) → 관성이 이어지면 곧바로 `onMomentumScrollBegin` 이 온다. `DRAG_MOMENTUM_GRACE_MS` 안에
+  //     안 오면 관성 없이 멈춘 것이라 자격을 거둔다(그 뒤의 감속은 손가락의 것이 아니다).
+  //   `onMomentumScrollEnd` → 자격을 거둔다.
+  const dragOwnsScrollRef = useRef(false);
+  const momentumAfterDragRef = useRef(false);
+  const dragGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearDragGrace = useCallback(() => {
+    if (dragGraceTimerRef.current !== null) clearTimeout(dragGraceTimerRef.current);
+    dragGraceTimerRef.current = null;
+  }, []);
+  const grabDayPill = useCallback(() => {
+    clearDragGrace();
+    dragOwnsScrollRef.current = true;
+    momentumAfterDragRef.current = false;
+    holdDayPill();
+  }, [clearDragGrace, holdDayPill]);
+  const letGoDayPill = useCallback(() => {
+    releaseDayPill();
+    clearDragGrace();
+    dragGraceTimerRef.current = setTimeout(() => {
+      dragGraceTimerRef.current = null;
+      if (!momentumAfterDragRef.current) dragOwnsScrollRef.current = false;
+    }, DRAG_MOMENTUM_GRACE_MS);
+  }, [clearDragGrace, releaseDayPill]);
+  const onMomentumScrollBegin = useCallback(() => {
+    if (!dragOwnsScrollRef.current) return;
+    momentumAfterDragRef.current = true;
+    holdDayPill();
+  }, [holdDayPill]);
+  const onMomentumScrollEnd = useCallback(() => {
+    clearDragGrace();
+    dragOwnsScrollRef.current = false;
+    momentumAfterDragRef.current = false;
+    releaseDayPill();
+  }, [clearDragGrace, releaseDayPill]);
   useEffect(
     () => () => {
       if (dayPillTimerRef.current !== null) clearTimeout(dayPillTimerRef.current);
+      if (dragGraceTimerRef.current !== null) clearTimeout(dragGraceTimerRef.current);
     },
     [],
   );
@@ -1437,6 +1489,7 @@ function TimelineInner({
       latched: unreadLatched,
       latchNote: unreadLatched ? latchNoteRef.current : null,
       settled: entrySettledRef.current,
+      day: dayPillLive && floatingDay !== null && !showJumpUnread,
     };
   }
 
@@ -2200,23 +2253,23 @@ function TimelineInner({
     // is the likeliest prelude to them scrolling UP into history, which is the
     // one thing that must never move under them.
     setChasingTail(false);
-    // 떠 있는 날짜 알약은 손가락이 목록을 잡는 순간 선다(DS2-4 B-1).
-    holdDayPill();
+    // 떠 있는 날짜 알약은 손가락이 목록을 잡는 순간 선다(DS2-4 B-1). 관성이 이어져도 그 손가락의 것이다(#4331).
+    grabDayPill();
   }, [
     cancelConvergence,
     cancelFocus,
     cancelJumpTravel,
     settleEntry,
     onReaderTookList,
-    holdDayPill,
+    grabDayPill,
   ]);
 
   /** 손가락이 떨어졌다 — 그 뒤의 따라가기 활강은 다시 제 핀을 건다 (#2686). */
   const onScrollEndDrag = useCallback(() => {
     fingerOnListRef.current = false;
-    // 관성이 이어지면 `onMomentumScrollBegin` 이 다시 붙잡는다.
-    releaseDayPill();
-  }, [releaseDayPill]);
+    // 관성이 이어지면 `onMomentumScrollBegin` 이 다시 붙잡는다(곧바로 오지 않으면 관성 없이 멈춘 것이다).
+    letGoDayPill();
+  }, [letGoDayPill]);
 
   // ===========================================================================
   // ## 따라가기 활강도 이 목록이 낸 이동이다 (#2686, 실측)
@@ -2984,8 +3037,8 @@ function TimelineInner({
       onScrollBeginDrag={onScrollBeginDrag}
       onScrollEndDrag={onScrollEndDrag}
       // 떠 있는 날짜 알약만 관성을 본다(DS2-4 B-1) — 따라가기 판정은 여기 없다.
-      onMomentumScrollBegin={jumpPills ? holdDayPill : undefined}
-      onMomentumScrollEnd={jumpPills ? releaseDayPill : undefined}
+      onMomentumScrollBegin={jumpPills ? onMomentumScrollBegin : undefined}
+      onMomentumScrollEnd={jumpPills ? onMomentumScrollEnd : undefined}
       scrollEventThrottle={16}
       onContentSizeChange={onContentSizeChange}
       onLayout={onLayout}

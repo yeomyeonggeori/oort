@@ -401,10 +401,11 @@ describe('떠 있는 날짜 알약은 스크롤 중에만 선다 (검수 B-1)', 
       'utf8',
     );
     expect(code).toContain('dayPillLive && floatingDay !== null');
-    expect(code).toMatch(/onMomentumScrollEnd=\{jumpPills \? releaseDayPill/);
+    expect(code).toMatch(/onMomentumScrollEnd=\{jumpPills \? onMomentumScrollEnd/);
     // 손가락이 잡는 순간 세운다 — 콜백이 의존성 목록에만 있고 불리지 않던 판이 있었다.
+    // (#4331: 잡는 순간은 `grabDayPill` 이고 관성이 이어질 자격도 함께 선다. 동작은 `timelineDayPill4331.test.tsx` 가 잰다.)
     const begin = code.slice(code.indexOf('const onScrollBeginDrag'), code.indexOf('const onScrollEndDrag'));
-    expect(begin).toMatch(/\bholdDayPill\(\);/);
+    expect(begin).toMatch(/\bgrabDayPill\(\);/);
   });
 
   it('알약 바탕이 불투명이다 — 밑 본문 획과 섞이지 않는다', () => {
