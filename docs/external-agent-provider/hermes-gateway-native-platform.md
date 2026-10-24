@@ -139,23 +139,31 @@ scripts/momo hermes-gateway-smoke
 scripts/momo hermes-gateway-smoke --real
 ```
 
-`hermes-gateway-smoke` runs the repo-local mock gateway harness:
+`hermes-gateway-smoke` (without `--real`) runs the Rust gateway/PG tests on an
+isolated PostgreSQL 18 (needs Docker); the Swift-host harness was retired in
+SEC-07 ([#4245](https://github.com/yeomyeonggeori/oort/issues/4245)):
 
 ```sh
-scripts/verify_hermes_gateway_adapter.sh
+scripts/verify_sec07_ported_claims.sh
 ```
 
-Expected coverage:
+Coverage (`server-rust/bins/momo-server/tests/sec07_gateway_pg.rs` plus
+`gateway_mode_conformance_pg.rs`, `agent_credential_conformance_pg.rs`):
 
-- `@hermes` mention creates `agent_run`.
-- `agent_job` outbox uses `method='gateway'`.
-- `agent.job` broadcast is produced on the agent realtime channel.
-- Missing/revoked/expired agent bearer is rejected with 401.
+- `@hermes` mention creates an `agent_run` and a pending `method='gateway'`
+  `agent_job`; the private `agent.job` doorbell is produced on the agent realtime
+  channel.
+- Missing/revoked/expired agent bearer is rejected with 401; a gateway job has
+  one lease owner, a lapsed lease can be taken over, and the old owner is locked
+  out.
 - Gateway event and completion callbacks are accepted only when bearer actor and
   target agent match.
-- Final agent response is written as a durable channel message.
-- `usage_ledger` and `audit_log` rows are created.
-- The gateway job is marked `done`.
+- Final agent response is written as a durable channel message; `usage_ledger`
+  and `audit_log` rows (with `via_token_id`) are created; the job is marked
+  `done`.
+- Not carried over (the Rust server has no such door): REST gateway
+  `approval_request` / `tool_call` events and the approval-resume job for an
+  external gateway.
 
 ## Real Hermes Gateway
 
