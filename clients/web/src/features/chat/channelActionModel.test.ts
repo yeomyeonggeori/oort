@@ -369,7 +369,7 @@ describe("channelActionItemsForSurface", () => {
       ["mute", false],
       ["close-dm", true],
     ]);
-    expect(items.find((i) => i.key === "close-dm")?.label).toBe("사이드바에서 닫기");
+    expect(items.find((i) => i.key === "close-dm")?.label).toBe("대화 닫기");
     // 닫기는 파괴적이지 않다(대화가 지워지지 않는다): 빨강 행이 아니다.
     expect(items.find((i) => i.key === "close-dm")?.tone).toBeUndefined();
   });

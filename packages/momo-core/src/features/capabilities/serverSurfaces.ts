@@ -154,7 +154,8 @@ export type SurfaceId =
   | "hostedAgentPairing"
   | "settingsOpenCard"
   | "appsUsedTail"
-  | "githubNotifications";
+  | "githubNotifications"
+  | "dmClosure";
 
 /** Workd/T3 데몬을 전제하는 표면. 셀프호스트 기본은 모두 숨긴다 (ADR-0183 D4-② · #2166). */
 export const WORK_SURFACE_IDS: readonly SurfaceId[] = [
@@ -573,6 +574,23 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
       "POST …/github/link, POST …/github/subscriptions, DELETE …/github/subscriptions/{subscription}가 " +
       "등록됨. 공개 경로는 GET …/github/app/callback, GET …/github/setup, POST …/github/webhook. " +
       "엔진이 이 트리에 들어오면 라우트 소스 시험으로 박는다.",
+  },
+  dmClosure: {
+    id: "dmClosure",
+    label: "대화 닫기",
+    // #4228(ADR-0177 증보 D6~D12, 엔진 #4227): DM 닫기를 서버가 기억해 한 기기에서 닫으면 모든 기기에서 닫힌다.
+    // 이 칸은 **이 코드베이스의 서버가 경로를 싣는가**를 말한다(`githubNotifications` 와 같은 갈래). 서버가 아직 이것을
+    // 싣지 않았는지는 두 겹으로 안다: ①`GET read-state` 의 모든 행에 `latest_readable_seq` 가 없다(`dmClosureProvided`,
+    // 읽음 투영이 곧 탐지다 - 쓰기 없이, 첫 페인트 전에) ②닫기 경로가 404/405/501 이면 `serverSaysAbsent` 가 접는다.
+    // 어느 쪽이든 클라이언트는 지금까지의 기기 로컬 원장(`sidebarDmClosure.ts`)으로 돌아간다.
+    provided: true,
+    absentReason: "이 서버는 아직 닫은 대화를 기억하지 않아요.",
+    fallback: "이 기기에서만 대화를 닫아 둘 수 있어요.",
+    measured:
+      "2026-10-24 PR #4335(#4227) 소스 대조(runtime-unverified, track/uxui 에는 엔진이 없다): " +
+      "server-rust/bins/momo-server/src/routes/dm_closure.rs가 PUT/DELETE …/channels/{ch}/closure를 " +
+      "등록하고, GET …/read-state 행이 latest_readable_seq와 요청자 본인의 closed_at_seq를 싣는다. " +
+      "PUT read-state 응답과 실시간 프레임에는 두 필드가 없다(D10).",
   },
 };
 

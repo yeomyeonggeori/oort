@@ -103,7 +103,25 @@ export function useInvalidateReadStates(workspaceId: string) {
 /**
  * Replace one channel's row with the server's answer. `marked_unread_before_seq:
  * null` drops a local mark — the client does not guess.
+ *
+ * **Two fields are the exception (ADR-0177 D10, #4228).** `latestReadableSeq` and `closedAtSeq` ride
+ * only on a `GET read-state` row: the `PUT read-state` answer (open a DM, mark read, mark unread)
+ * and the realtime frame do not carry them. `undefined` there means "this response did not say",
+ * so the value the cached row already holds stays. Replacing the row wholesale would turn a closed
+ * DM's `closedAtSeq` into `undefined` the moment the person opened any other conversation, and the
+ * closed DM would come back. `null` is different: it IS an answer ("not closed") and replaces.
  */
+export function mergeReadStateRow(current: ReadState, incoming: ReadState): ReadState {
+  const merged: ReadState = { ...incoming };
+  if (incoming.latestReadableSeq === undefined && current.latestReadableSeq !== undefined) {
+    merged.latestReadableSeq = current.latestReadableSeq;
+  }
+  if (incoming.closedAtSeq === undefined && current.closedAtSeq !== undefined) {
+    merged.closedAtSeq = current.closedAtSeq;
+  }
+  return merged;
+}
+
 export function applyReadStateToCache(
   client: QueryClient,
   workspaceId: string,
@@ -116,8 +134,28 @@ export function applyReadStateToCache(
     const next = current.map((row) => {
       if (idKey(row.channelId) !== key) return row;
       found = true;
-      return incoming;
+      return mergeReadStateRow(row, incoming);
     });
     return found ? next : [...next, incoming];
+  });
+}
+
+/**
+ * The writing device already knows the new closure state (ADR-0177 D10: other devices converge on
+ * their next projection read), so a successful `PUT`/`DELETE closure` writes it straight into the
+ * cached row instead of waiting for the next refetch. `null` = reopened.
+ */
+export function applyClosureToCache(
+  client: QueryClient,
+  workspaceId: string,
+  channelId: string,
+  closedAtSeq: number | null
+): void {
+  client.setQueryData<ReadState[]>(["read-state", workspaceId], (current) => {
+    if (!current) return current;
+    const key = idKey(channelId);
+    return current.map((row) =>
+      idKey(row.channelId) === key ? { ...row, closedAtSeq } : row
+    );
   });
 }

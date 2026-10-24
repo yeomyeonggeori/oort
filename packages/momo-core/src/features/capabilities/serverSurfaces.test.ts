@@ -238,3 +238,14 @@ describe("팀 공유 드라이브 표면 (#3949, ADR-0113 증보 2 E2·E4)", () 
     expect(row.measured).toContain("runtime-unverified");
   });
 });
+
+describe("대화 닫기 표면 (#4228, ADR-0177 D12)", () => {
+  it("정적으로 켜져 있고(githubNotifications 와 같은 갈래) 옛 서버에서는 런타임이 접는다", () => {
+    expect(isSurfaceProvided("dmClosure")).toBe(true);
+    const row = serverSurface("dmClosure");
+    expect(row.label).toBe("대화 닫기");
+    // 엔진이 이 트리에 없어서 소스 대조까지만 했다: 그 사실을 숨기지 않는다.
+    expect(row.measured).toContain("runtime-unverified");
+    expect(row.fallback).toContain("이 기기");
+  });
+});

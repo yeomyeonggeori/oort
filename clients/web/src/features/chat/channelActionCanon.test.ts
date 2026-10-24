@@ -191,15 +191,19 @@ describe("#3963: 새 낱말과 새 쓰기 길도 한 곳이다", () => {
     }
   });
 
-  it("DM 닫기 원장에 쓰는 자리는 사이드바 한 곳이다(모듈 정의는 제외)", () => {
-    // 행 메뉴·호버 X 가 각자 원장을 만지면 닫는 순서(이웃 → 원장 → 착지 → 캐럿)가 갈라진다.
-    // 두 입구는 사이드바의 `closeDmRow` 하나를 지난다.
+  it("DM 닫기가 쓰는 자리는 한 훅이다: 서버 쓰기와 옛 원장은 `useDmVisibility` 를 지난다(모듈 정의는 제외)", () => {
+    // 행 메뉴·호버 X 가 각자 쓰면 닫는 순서(이웃 → 쓰기 → 착지 → 캐럿)와 서버·원장 갈래가 갈라진다.
+    // 두 입구는 사이드바의 `closeDmRow` 하나를 지나고, 그 안의 쓰기는 `useDmClosureActions` 하나가 서버/원장을 고른다.
     const sidebar = "features/sidebar/Sidebar.tsx";
     const module = "features/sidebar/sidebarDmClosure.ts";
-    expect(callers("closeDmOnDevice").sort()).toEqual([module, sidebar].sort());
-    expect(callers("reopenDmOnDevice").sort()).toEqual([module, sidebar].sort());
+    const hook = "features/sidebar/useDmVisibility.ts";
+    expect(callers("closeDmOnDevice").sort()).toEqual([module, hook].sort());
+    // 다시 열기는 훅(액션·이전)과 사이드바의 「열림」 효과(옛 서버의 원장 항목 지우기)다.
+    expect(callers("reopenDmOnDevice").sort()).toEqual([module, hook, sidebar].sort());
+    expect(callers("closeDm").sort()).toContain(hook);
+    expect(callers("closeDm")).not.toContain(sidebar);
     for (const path of [HEADER, ROW, "features/sidebar/SidebarRow.tsx"]) {
-      expect(fileCode(path)).not.toMatch(/closeDmOnDevice|reopenDmOnDevice|localStorage/);
+      expect(fileCode(path)).not.toMatch(/closeDmOnDevice|reopenDmOnDevice|localStorage|\bcloseDm\(/);
     }
   });
 });
@@ -212,6 +216,10 @@ describe("#3963 H1: `/` 가 여는 대화는 한 함수가 고른다", () => {
     const shell = "features/chat/ChatShell.tsx";
     expect(callers("indexFallbackChannelId").sort()).toEqual(
       ["features/sidebar/sidebarDmClosure.ts", shell, sidebar].sort()
+    );
+    // 그 함수에 건네는 판정도 한 훅이다(코어 `dmVisibility` 한 함수가 그 뒤에 선다).
+    expect(callers("useDmVisibility").sort()).toEqual(
+      ["features/sidebar/useDmVisibility.ts", shell, sidebar].sort()
     );
     for (const path of [sidebar, shell]) {
       expect(fileCode(path)).not.toMatch(/dms\[0\]/);

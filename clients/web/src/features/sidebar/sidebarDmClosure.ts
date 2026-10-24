@@ -5,6 +5,10 @@ import {
 } from "@momo/core/features/sidebar/goneDm";
 
 // =============================================================================
+// **레거시 갈래 (ADR-0177 증보 D12, #4228).** 서버가 DM 닫기를 기억하면(읽음 투영이 `latestReadableSeq`·`closedAtSeq` 를 싣는다)
+// 이 원장은 **읽지 않는다**: 한 번 서버로 옮기고 비운다(`dmClosureModel.ts` `migrateDmLedger`). 서버가 아직 안 싣는 옛 서버에서만
+// 이 원장이 닫기의 정본이고, 아래 머리말은 그 갈래의 규칙이다. 보임 판정은 어느 갈래든 코어 `dmVisibility` 한 함수다.
+//
 // DM 을 이 기기의 사이드바에서 닫는다 (#3963, 성재 2026-10-16: 「DM은 호버하면 X 표시가 떠서
 // 삭제할 수 있어야 해」).
 //
@@ -51,7 +55,7 @@ import {
 // ## 안 읽음이 있는 DM 은 닫기를 내밀지 않는다 (소유자 결정 2026-10-17)
 //
 // 성재(AskUserQuestion): 「안 읽음 있으면 X 숨김 (Recommended)」. 안 읽은 메시지(**멘션 포함**)가 있는 DM 행에는
-// 호버 X 도 우클릭 메뉴의 「사이드바에서 닫기」도 없고(둘이 **같은 한 함수**, `dmCloseOffered`, 를 읽는다), 읽고 나면
+// 호버 X 도 우클릭 메뉴의 「대화 닫기」도 없고(둘이 **같은 한 함수**, `dmCloseOffered`, 를 읽는다), 읽고 나면
 // 다시 보인다. 닫기는 읽음 커서를 건드리지 않는다(서버 쓰기 0건) - 읽지 않은 것을 가리지 않으므로 「행은 없는데 숫자만
 // 사이드바 밖 집계(독 배지·탭 제목·인박스·레일의 멘션 합)에 남는」 모양이 생길 길이 거의 없다(design-review R2 M1 이 짚은 것을
 // 길 (c)로 닫았다). 열려 있는 DM 은 읽고 있는 것이라 안 읽음이 0 으로 접혀 있고(`sidebarUnreadCounts`) 닫을 수 있다 - 이것이
@@ -186,25 +190,6 @@ export function closedAtSeqOf(closed: ClosedDms, channelId: string): number | un
 export { readProjectionPhase, type ReadProjectionPhase };
 
 /**
- * 이 DM 에 닫기를 내미는가 - 호버 X 와 우클릭 메뉴의 「사이드바에서 닫기」가 **같은 한 함수**를 읽는다.
- *
- *   * 읽음 투영이 **준비된 뒤에만**(R1 M1): 닫을 때 워터마크로 적을 최신 seq 가 있어야 한다.
- *   * **안 읽은 메시지(멘션 포함)가 있으면 내밀지 않는다**(소유자 결정 2026-10-17, 머리말). 읽고 나면 다시 보인다.
- *
- * `unreadCount`·`mentionCount` 는 행이 보여 주는 값 그대로다(`sidebarUnreadCounts`: 합성 안 읽음 포함, 지금 읽고
- * 있는 DM 은 0). 행의 알약과 닫기가 같은 사실을 말한다.
- */
-export function dmCloseOffered(input: {
-  phase: ReadProjectionPhase;
-  unreadCount: number;
-  mentionCount: number;
-}): boolean {
-  return (
-    input.phase === "ready" && input.unreadCount <= 0 && input.mentionCount <= 0
-  );
-}
-
-/**
  * 이 DM 을 사이드바에서 숨기는가. 규칙과 근거는 머리말에 있다.
  *
  * `latestSeq` 가 `undefined` 인 것은 투영이 이 DM 의 항목을 주지 않았다는 뜻이다(메시지가 한 번도
@@ -226,38 +211,25 @@ export function dmHiddenByClosure(input: {
 }
 
 /**
- * 인덱스 라우트(`/`)가 열어 주는 대화: 첫 채널, 채널이 없으면 **닫지 않은** 첫 DM, 그것도 없으면
- * `null`(빈 상태).
+ * 인덱스 라우트(`/`)가 열어 주는 대화: 첫 채널, 채널이 없으면 **보이는** 첫 DM, 그것도 없으면 `null`(빈 상태).
  *
- * 사이드바(`openId`)와 `ChatShell`(본문)이 **같은 함수**를 읽는다. 둘이 따로 `dms[0]` 을 고르면
- * 채널이 없는 멤버가 첫 DM 을 X 로 닫아도 `/` 가 그 DM 을 도로 열어 「열려 있음」으로 되살아났다
- * (design-review R1 H1: 보이는 컨트롤이 무반응). 닫은 DM 은 후보에서 빠지므로 본문은 다음 DM 을
- * 열거나, 남은 것이 없으면 빈 상태를 그린다. 새 메시지가 와서 돌아온 DM(`dmHiddenByClosure` 가
- * 거짓)은 다시 후보다.
+ * 사이드바(`openId`)와 `ChatShell`(본문)이 **같은 함수**를 읽는다. 둘이 따로 `dms[0]` 을 고르면 채널이 없는 멤버가 첫 DM 을
+ * X 로 닫아도 `/` 가 그 DM 을 도로 열어 「열려 있음」으로 되살아났다(design-review R1 H1: 보이는 컨트롤이 무반응). 닫은 DM·
+ * 나간 상대의 DM·판정이 미뤄진 DM 은 후보에서 빠지므로 본문은 다음 DM 을 열거나, 남은 것이 없으면 빈 상태를 그린다.
  *
- * 「나간 멤버와의 대화」로 접힌 DM(#4252, `goneDmHiding.ts`)도 후보가 아니다. 같은 이유다: 사이드바가 접은
- * 대화를 본문이 도로 열면 접힌 대화가 「열려 있음」으로 되살아난다.
+ * `shown` 은 코어 `dmVisibility` 의 결과(열림을 뺀 판정)다. 후보를 고르는 중에는 열려 있다는 사실이 이 판정의 입력이 아니라
+ * 결과라서 열림은 넣지 않는다.
  */
 export function indexFallbackChannelId(input: {
   channels: readonly { id: string }[];
   dms: readonly { id: string }[];
-  closed: ClosedDms;
-  latestSeqOf: (channelId: string) => number | undefined;
-  phase: ReadProjectionPhase;
-  /** 나간 멤버와의 대화로 접힌 DM 인가(소문자 id 집합). 없으면 접힌 DM 이 없는 것이다. */
-  foldedGone?: ReadonlySet<string>;
+  /** 이 DM 이 목록에 서는가(`useDmVisibility().verdictOf(id).state === "shown"`). */
+  shown: (channelId: string) => boolean;
 }): string | null {
   const channel = input.channels[0];
   if (channel !== undefined) return channel.id;
   for (const dm of input.dms) {
-    const hidden = dmHiddenByClosure({
-      closedAtSeq: closedAtSeqOf(input.closed, dm.id),
-      latestSeq: input.latestSeqOf(dm.id),
-      // 후보를 고르는 중이다: 열려 있다는 사실은 이 판정의 입력이 아니라 결과다.
-      isOpen: false,
-      phase: input.phase,
-    });
-    if (!hidden && input.foldedGone?.has(dm.id.toLowerCase()) !== true) return dm.id;
+    if (input.shown(dm.id)) return dm.id;
   }
   return null;
 }

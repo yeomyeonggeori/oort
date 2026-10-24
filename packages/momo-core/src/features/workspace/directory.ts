@@ -179,6 +179,18 @@ export interface ChannelLabelParts {
 
 /** 명부에 없는 멤버(은퇴·정지·나감)의 이름. DM 상대뿐 아니라 그 멤버가 쓴 글의 글쓴이에도 같은 이름을 쓴다. 사람 이름도 id도 지어내지 않는다. */
 export const GONE_MEMBER_LABEL = "나간 멤버";
+/**
+ * 명부에 없는 상대가 **에이전트**였을 때의 이름(ADR-0177 증보 D11). 사람은 「나간 멤버」, 에이전트는 「꺼진 에이전트」다.
+ * 어느 쪽인지는 호출부가 **알 때만** 넘긴다(`ChannelLabelOptions.goneKind`): 명부에서 빠진 멤버의 종류는 채널 DTO 에도
+ * 없다. 모르면 사람 쪽 이름을 쓴다 - 에이전트를 사람이라 부르는 쪽이 사람을 에이전트라 부르는 쪽보다 덜 틀리다.
+ */
+export const GONE_AGENT_LABEL = "꺼진 에이전트";
+
+/** 명부에 없는 멤버의 이름을 종류로 가른다(D11). `undefined` 는 모른다. */
+export function goneMemberLabelFor(kind: "human" | "agent" | undefined): string {
+  return kind === "agent" ? GONE_AGENT_LABEL : GONE_MEMBER_LABEL;
+}
+
 /** 명부를 아직 받는 중일 때의 이름. */
 export const PENDING_MEMBER_LABEL = "불러오는 중";
 
@@ -201,6 +213,8 @@ export interface ChannelLabelOptions {
   rosterReady?: boolean;
   /** 명부에서 나를 못 찾을 때 「이름 (나)」에 쓸 내 이름(세션이 안다). */
   selfName?: string;
+  /** 명부에 없는 상대의 종류를 **알 때만**(D11). 모르면 생략하고, 「나간 멤버」가 된다. */
+  goneKind?: "human" | "agent";
 }
 
 /**
@@ -248,9 +262,9 @@ export function channelLabelParts(
   }
   const ready = options.rosterReady ?? directory.members.length > 0;
   return {
-    text: ready ? GONE_MEMBER_LABEL : PENDING_MEMBER_LABEL,
+    text: ready ? goneMemberLabelFor(options.goneKind) : PENDING_MEMBER_LABEL,
     handle: null,
-    isAgent: false,
+    isAgent: options.goneKind === "agent" && ready,
     kind: ready ? "gone" : "pending",
   };
 }
