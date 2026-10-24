@@ -17,7 +17,7 @@ import {memberNameParts} from '@momo/core/features/workspace/directory';
 import type {Directory} from '@momo/core/features/workspace/directory';
 import React, {useMemo} from 'react';
 import {StyleSheet, Text, View} from 'react-native';
-import {font, radius, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
+import {font, line as lineHeightToken, radius, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {Avatar} from '../conversation/Avatar';
 import {CONV} from '../conversation/convDesign';
@@ -357,7 +357,9 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   },
   activityRow: {
     flexDirection: 'row',
-    alignItems: 'baseline',
+    // 가운데 맞춤이다 — `baseline` 이면 줄 높이가 **글자에 따라** 1~2pt 달라졌다(「59분째」→「1시간째」에서 활동 줄이 1~2pt 줄고, 그만큼 입력창 위
+    // 대화가 움직였다 #4331). 줄 높이는 가장 큰 자식(중단 컨트롤의 손가락 바닥 44)이 정하고, 글자는 그 안에서 가운데에 선다.
+    alignItems: 'center',
     gap: space.sm,
     // `flexWrap` is REQUIRED, not tidying (2R H1). The stop control's confirm
     // panel asks for the full width (`flexBasis: '100%'`), and in React Native a
@@ -370,15 +372,15 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     // property explicitly (`MessageRow.tsx` reaction bar, and four more).
     flexWrap: 'wrap',
   },
-  // 얼굴은 줄(meta 글자) 높이에 맞춘 작은 자리다. 행이 baseline 정렬이라 가운데로 뺀다.
+  // 얼굴은 줄(meta 글자) 높이에 맞춘 작은 자리다. 행이 가운데 맞춤이 되기 전(baseline)에 가운데로 빼 둔 것이라 지금은 같은 뜻이다.
   activityFace: {alignSelf: 'center'},
-  activityText: {fontSize: font.meta, color: color.textMuted},
+  activityText: {fontSize: font.meta, lineHeight: lineHeightToken.meta, color: color.textMuted},
   activityTextFlex: {flexShrink: 1},
   activityName: {color: color.agent},
-  activityClock: {fontSize: font.meta, color: color.textFaint},
+  activityClock: {fontSize: font.meta, lineHeight: lineHeightToken.meta, color: color.textFaint},
   // 근거 줄은 사람이 판단하는 근거라 시계(장식)와 위계가 다르다: 본문 AA를 노리는
   // `textMuted`이고, 줄이 모자라면 이름이 아니라 이 줄이 줄어든다(design-review U4).
-  activityDetail: {fontSize: font.meta, color: color.textMuted, flexShrink: 1},
+  activityDetail: {fontSize: font.meta, lineHeight: lineHeightToken.meta, color: color.textMuted, flexShrink: 1},
   staleText: {fontSize: font.meta, color: color.warn},
   staleNotice: {
     paddingHorizontal: SAFE_GUTTER,
