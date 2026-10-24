@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
 import { InlineBanner } from "@/features/common/States";
-import type { GithubManifestStart } from "@momo/core/features/github/model";
+import { GITHUB_IDENTITY_CHECK_SENTENCE, type GithubManifestStart } from "@momo/core/features/github/model";
 import { openExternalUrl } from "@/lib/tauri";
 import { NoBreak } from "./NoBreak";
 import { buildGithubHandoffUrl, type GithubHandoffBuildFailure } from "./handoff";
@@ -84,6 +84,7 @@ export function BrowserHandoff({ handoff }: { handoff: GithubManifestStart }) {
             </>
           )}
         </p>
+        {!failed && <p className="break-keep text-meta text-ink-muted">{GITHUB_IDENTITY_CHECK_SENTENCE}</p>}
       </div>
       <div className="flex justify-end">
         <Button

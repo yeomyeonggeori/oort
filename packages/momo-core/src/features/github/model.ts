@@ -427,8 +427,44 @@ export const GITHUB_DOWNTIME_SENTENCE =
 export const GITHUB_RECEIVE_FAILED_NEXT =
   "MOMO_PUBLIC_BASE_URL에 이 서버의 공개 HTTPS 주소를 정하면 받을 수 있어요.";
 
+/**
+ * 권한 한 문장. 코드 읽기(contents)를 받는 까닭과 oort 가 코드를 읽지 않는 것을 같은 줄에서 말한다:
+ * 「받아요」와 「읽지 않아요」를 따로 두면 서로 어긋나 보인다(#4333). 서버 매니페스트의 description
+ * (`momo-settings` `build_manifest`)과 같은 뜻이다.
+ */
 export const GITHUB_PERMISSIONS_SENTENCE =
-  "읽기 권한 다섯 줄을 받아요: 메타데이터, 이슈, PR, 체크, 코드(contents). 쓰기 권한은 없어요. 알림만 받고 코드는 읽지 않아요.";
+  "읽기 권한 다섯 줄을 받아요: 메타데이터, 이슈, PR, 체크, 코드(contents). 쓰기 권한은 없어요. 코드 읽기는 push·release 알림을 받으려는 것이고, oort 서버는 알림을 위해 코드를 읽지 않아요.";
+
+/** GitHub 앱 만들기 안내 곳곳에서 같은 말로 예고한다(GitHub 의 sudo mode, #4333). */
+export const GITHUB_IDENTITY_CHECK_SENTENCE =
+  "GitHub가 본인 확인을 한 번 요구할 수 있어요. GitHub Mobile, 인증 앱, 이메일 코드 중 하나로 확인해 주세요.";
+
+/** 조직 이름 칸의 예시. 칸 안에서는 「예: 」가 붙어 값이 아니라 예시로 읽힌다. */
+export const GITHUB_ORG_EXAMPLE = "my-team";
+
+export const GITHUB_ORG_EMPTY_SENTENCE = "조직 이름을 적어 주세요.";
+
+/**
+ * 조직 이름(GitHub 로그인)이 무엇이 틀렸는지 한 줄로. 맞으면 null. 서버 `is_valid_org_login` 과 같은
+ * 규칙(영문·숫자·하이픈, 1~39자, 하이픈으로 시작·끝 금지)이다. 오류 문장에는 예시를 쓰지 않는다:
+ * 예시가 칸의 예시 글자와 같으면 무엇이 틀렸는지 알 수 없다(#4333).
+ */
+export function githubOrgProblem(raw: string): string | null {
+  const org = raw.trim();
+  if (org === "") return GITHUB_ORG_EMPTY_SENTENCE;
+  if (org.length > 39) {
+    return `조직 이름은 39자까지예요. 지금 ${org.length}자예요.`;
+  }
+  const bad = org.match(/[^A-Za-z0-9-]/u);
+  if (bad !== null) {
+    const shown = bad[0] === " " ? "공백" : `「${bad[0]}」`;
+    return `조직 이름에 ${shown}은 쓸 수 없어요. 영문, 숫자, 하이픈(-)만 쓸 수 있어요. 주소가 아니라 이름만 적어 주세요.`;
+  }
+  if (org.startsWith("-") || org.endsWith("-")) {
+    return "조직 이름은 하이픈(-)으로 시작하거나 끝날 수 없어요.";
+  }
+  return null;
+}
 
 export const GITHUB_SELECTED_ONLY_ADVICE =
   "설치할 때 「선택한 저장소만」을 고르길 권해요. 알림이 필요한 저장소만 이 앱에 보여요.";
