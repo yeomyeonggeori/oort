@@ -47,6 +47,8 @@ const CANDIDATES = [
   ...split(TOOLTIP_MOTION),
   "flex",
   "bg-surface-hover",
+  "bg-warn-soft",
+  "landed-surface",
   "bg-surface-pressed",
   "bg-line",
   "relative",
@@ -58,6 +60,8 @@ body { margin: 0; padding: 120px 40px; }
 [data-probe] { box-sizing: border-box; }
 </style></head><body>
 <div id="row" tabindex="0" class="flex relative ${MESSAGE_ROW_SURFACE_CLASS}" style="height:48px">row</div>
+<div id="landed" class="flex relative ${MESSAGE_ROW_SURFACE_CLASS} landed-surface" style="height:48px;margin-top:8px">landed</div>
+<div id="warn-ref" class="bg-warn-soft" style="height:8px"></div>
 <div id="hover-ref" class="bg-surface-hover" style="height:8px"></div>
 <div id="pressed-ref" class="bg-surface-pressed" style="height:8px"></div>
 <div id="line-ref" class="bg-line" style="height:8px"></div>
@@ -91,6 +95,11 @@ interface Snap {
   rowHover: string;
   rowFocus: string;
   rowPressed: string;
+  landedRest: string;
+  landedHover: string;
+  landedShadow: string;
+  landedBox: { h: number };
+  warnRef: string;
   hoverRef: string;
   pressedRef: string;
   lineRef: string;
@@ -125,12 +134,28 @@ async function snap(page: Page): Promise<Snap> {
   await page.evaluate(() => document.getElementById("row")!.focus());
   await page.waitForTimeout(300);
   const rowFocus = await bg();
+  // 착지 줄: 가만히 있을 때와, 가리켰을 때(줄 호버 면이 덮지 못해야 한다).
+  const landedBg = () =>
+    page.evaluate(() => getComputedStyle(document.getElementById("landed")!).backgroundColor);
+  const landedRest = await landedBg();
+  const landedBox = await page.evaluate(() => ({ h: document.getElementById("landed")!.getBoundingClientRect().height }));
+  const landedShadow = await page.evaluate(() => getComputedStyle(document.getElementById("landed")!).boxShadow);
+  const lb = await page.evaluate(() => {
+    const r = document.getElementById("landed")!.getBoundingClientRect();
+    return { x: r.x + 100, y: r.y + r.height / 2 };
+  });
+  await page.mouse.move(lb.x, lb.y);
+  await page.waitForTimeout(300);
+  const landedHover = await landedBg();
+  await page.mouse.move(700, 580);
+  await page.waitForTimeout(100);
   const rest = await page.evaluate(() => {
     const g = (id: string) => getComputedStyle(document.getElementById(id)!);
     const r = (id: string) => document.getElementById(id)!.getBoundingClientRect();
     const pick = (id: string, props: string[]) =>
       Object.fromEntries(props.map((p) => [p, g(id).getPropertyValue(p)]));
     return {
+      warnRef: g("warn-ref").backgroundColor,
       hoverRef: g("hover-ref").backgroundColor,
       pressedRef: g("pressed-ref").backgroundColor,
       lineRef: g("line-ref").backgroundColor,
@@ -195,7 +220,7 @@ async function snap(page: Page): Promise<Snap> {
       ),
     };
   });
-  return { ...rest, rowRest, rowHover, rowFocus, rowPressed } as Snap;
+  return { ...rest, rowRest, rowHover, rowFocus, rowPressed, landedRest, landedHover, landedShadow, landedBox } as Snap;
 }
 
 /** `2px`와 `calc(2px * -1)` 둘 다 읽는다(미등록 사용자 속성은 쓰인 식 그대로 돌아온다). */
@@ -263,6 +288,18 @@ describe("줄·도구 막대·툴팁의 계산된 값 (#4324)", () => {
               for (let i = 0; i < 3; i++) {
                 eq(`${at} 눌림 채널${i}`, pressed[i], pressedRef[i], 0.01);
               }
+
+              // 착지 줄: 바탕은 --warn-soft 불투명 그대로, 가리켜도 줄 호버 면이 덮지 못하고, 1px 안쪽 테두리(크기 불변)
+              const warn = parseColor(m.warnRef);
+              for (const [name, value] of [["가만", m.landedRest], ["호버", m.landedHover]] as const) {
+                const c = parseColor(value);
+                eq(`${at} 착지 ${name} 알파`, c[3], 1, 0.01);
+                for (let i = 0; i < 3; i++) eq(`${at} 착지 ${name} 채널${i}`, c[i], warn[i], 0.01);
+              }
+              if (!/inset/.test(m.landedShadow) || !/\b1px\b/.test(m.landedShadow)) {
+                problems.push(`${at} 착지 테두리(안쪽 1px 그림자) 아님: ${m.landedShadow}`);
+              }
+              eq(`${at} 착지 줄 높이(테두리가 크기를 안 민다)`, m.landedBox.h, 48);
 
               // 막대
               eq(

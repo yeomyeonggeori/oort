@@ -375,10 +375,12 @@ describe("watchForMessage", () => {
     });
     expect(row.scrollIntoView).toHaveBeenCalledWith({ block: "center" });
     expect(row.classList.add).toHaveBeenCalled();
+    // #4324: 착지 면은 폰과 같은 말(`--warn-soft` + 1px 테두리, tokens.css `landed-surface`)이다. 앰버 accent 면이 아니다.
+    expect(row.classList.add).toHaveBeenCalledWith("landed-surface");
     // The only thing still queued is the highlight teardown.
     expect(queued).toHaveLength(1);
     queued[0]();
-    expect(row.classList.remove).toHaveBeenCalled();
+    expect(row.classList.remove).toHaveBeenCalledWith("landed-surface");
   });
 
   it("gives up quietly once the watch window is spent", () => {

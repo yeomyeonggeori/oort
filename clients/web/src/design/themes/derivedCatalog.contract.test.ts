@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { THEME_CATALOG } from "@momo/core/design/themeCatalog.generated";
 import { deriveCatalogMode } from "@momo/core/design/deriveCatalog";
+import { mixOklab } from "@momo/core/design/color";
 import { THEMES, THEME_IDS, type Mode } from "@momo/core/design/themes";
 import {
   CHIP_VESSEL_MIN_CONTRAST,
@@ -252,5 +253,44 @@ describe("옅은 줄 호버 면은 57행 모두에서 보이되 튀지 않는다
     expect(deltaE(row.surfaces.pane, full)).toBeCloseTo(deltaE(row.surfaces.pane, row.surfaces["surface-hover"]), 6);
     const weak = over(row.surfaces["surface-hover"], row.surfaces.pane, 0.02);
     expect(deltaE(row.surfaces.pane, weak)).toBeLessThan(ROW_HOVER_MIN_DISTANCE);
+  });
+});
+
+// =============================================================================
+// 줄 착지 면 (#4324 결정 2). `landed-surface` 유틸 = `--warn-soft` 바탕 + `--warn`을 OKLab으로 N% 섞은 1px 테두리(폰 #4300의
+// `warnSurface`·`warnBorder`와 같은 말). 57행 전부에서 (1) 그 위 글자 대비가 4.5 이상이고 (2) 테두리가 바탕과 눈에 띄게 다르며
+// (3) 착지 면이 본문 판과 눈에 띄게 다르다. 섞는 비율은 CSS에서 읽는다 — 시험이 자기 숫자를 들고 있으면 CSS를 바꿔도 초록이다.
+// =============================================================================
+
+const LANDED_BORDER_MIX = Number(/@utility landed-surface[\s\S]*?color-mix\(in oklab,\s*var\(--warn-soft\),\s*var\(--warn\)\s+(\d+)%\)/.exec(TOKENS_CSS)?.[1] ?? "NaN") / 100;
+const LANDED_BORDER_MIN_DISTANCE = 0.04;
+const LANDED_FACE_MIN_DISTANCE = 0.02;
+
+describe("줄 착지 면은 57행 모두에서 읽히고 보인다 (#4324)", () => {
+  it("테두리 섞는 비율을 CSS에서 읽었다(0 초과 1 미만)", () => {
+    expect(LANDED_BORDER_MIX).toBeGreaterThan(0);
+    expect(LANDED_BORDER_MIX).toBeLessThan(1);
+  });
+
+  it.each(CATALOG_ROWS.map((row) => [row.name, row] as const))("%s: 글자 대비 4.5, 테두리·면이 눈에 띈다", (_name, row) => {
+    const S = row.surfaces;
+    const out: string[] = [];
+    const face = S["warn-soft"];
+    const border = mixOklab(face, row.color.warn, LANDED_BORDER_MIX);
+    for (const fg of ["ink", "ink-muted"] as const) {
+      const ratio = Number(contrast(row.color[fg], face).toFixed(2));
+      if (ratio < 4.5) out.push(`${fg} on 착지 면 ${ratio} < 4.5`);
+    }
+    const edge = Number(deltaE(face, border).toFixed(4));
+    if (edge < LANDED_BORDER_MIN_DISTANCE) out.push(`테두리-면 거리 ${edge} < ${LANDED_BORDER_MIN_DISTANCE}`);
+    const seen = Number(deltaE(S.pane, face).toFixed(4));
+    if (seen < LANDED_FACE_MIN_DISTANCE) out.push(`본문 판-착지 면 거리 ${seen} < ${LANDED_FACE_MIN_DISTANCE}`);
+    expect(out).toEqual([]);
+  });
+
+  it("사보타주: 테두리를 0%로 섞으면 면과 같아져 「테두리가 보인다」 단정이 붉다(자가 점검)", () => {
+    const row = CATALOG_ROWS[0];
+    const none = mixOklab(row.surfaces["warn-soft"], row.color.warn, 0);
+    expect(deltaE(row.surfaces["warn-soft"], none)).toBeLessThan(LANDED_BORDER_MIN_DISTANCE);
   });
 });
