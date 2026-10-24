@@ -881,6 +881,35 @@ pub async fn has_active_realtime_credential(
         .await
 }
 
+/// Seconds of life the credential a connection token binds to has left, by the
+/// DB clock (`None` = the row has no expiry). `Some(0)` when the row is missing
+/// or already expired, so a caller treats "gone" like "about to expire" (#4311).
+/// Floor-rounded: it must never promise more life than the row has.
+///
+/// `conn` must already carry the tenant GUC.
+pub async fn credential_remaining_seconds(
+    conn: &mut PgConnection,
+    token_id: Uuid,
+    member_id: Uuid,
+    workspace_id: Uuid,
+) -> Result<Option<i64>, sqlx::Error> {
+    let row: Option<Option<f64>> = sqlx::query_scalar(
+        "SELECT EXTRACT(EPOCH FROM (expires_at - now()))::float8 \
+           FROM token \
+          WHERE id = $1 AND actor_member_id = $2 AND workspace_id = $3",
+    )
+    .bind(token_id)
+    .bind(member_id)
+    .bind(workspace_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(match row {
+        None => Some(0),
+        Some(None) => None,
+        Some(Some(seconds)) => Some((seconds.floor() as i64).max(0)),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
