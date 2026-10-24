@@ -1,27 +1,114 @@
+# Dependabot version updates (#4243, SEC-05). Blast radius, kept honest:
+#
+# * Every ecosystem that ships or builds oort now has an entry: the two cargo workspaces,
+#   the three npm trees (root workspace = packages/*, web, mobile), the compose file that
+#   pins Postgres/Centrifugo by digest, and the Dockerfiles that pin base images.
+# * `cooldown` is deliberate. A version update PR waits N days after a release before it is
+#   proposed, which gives a poisoned or yanked release time to be noticed (the supply-chain
+#   attack shape of 2025-2026). GitHub exempts security updates from the cooldown, so a
+#   patched advisory is still proposed immediately. Majors wait longest on purpose.
+# * Whether an alert is closed is decided by the CI gate, not by this file:
+#   scripts/check_advisories.py (deny.toml + osv-scanner.toml carry the dated exceptions).
+#
+# Ignored on purpose:
+# * clients/mobile expo*, react, react-native, @react-native/*, react-test-renderer majors:
+#   they move together with an Expo SDK upgrade (SDK 57 pins RN 0.86 and React 19.2); a lone
+#   major bump breaks the build. That upgrade is a planned issue, not a bot PR.
+# * clients/desktop tauri* majors: the Rust shell, the JS plugins and tauri.conf.json move as one.
+# * clients/mobile Gemfile (Ruby: CocoaPods/Xcode build tooling, no lockfile, never shipped) is
+#   not given a bundler entry; see the mobile triage table in the PR that added this file.
 version: 2
 updates:
+  # ---- Rust ---------------------------------------------------------------
+  - package-ecosystem: cargo
+    directory: /server-rust
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
+
+  - package-ecosystem: cargo
+    directory: /clients/desktop/src-tauri
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
+    ignore:
+      - dependency-name: "tauri*"
+        update-types: ["version-update:semver-major"]
+
+  # ---- npm ----------------------------------------------------------------
   - package-ecosystem: npm
     directories:
       # ADR-0133 canonical UI (promoted from the P0 spike by MOMO-596).
       - /clients/web
+      # Workspace root: package-lock.json + packages/* (@momo/core, ADR-0137 D3).
+      - /
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
 
-  # TODO(ADR-0133): clients/desktop/src-tauri (cargo) has no dependabot coverage
-  # yet — adding a cargo ecosystem is a supply-chain policy call, not part of the
-  # MOMO-596 path promotion.
+  - package-ecosystem: npm
+    directory: /clients/mobile
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
+    ignore:
+      - dependency-name: "expo*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-native"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-test-renderer"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@react-native/*"
+        update-types: ["version-update:semver-major"]
+
+  # ---- Containers: the digest pins (Postgres, Centrifugo, LiveKit, Caddy) ---
+  # docker-compose reads infra/rust/docker-compose*.yml (image: ...@sha256:...);
+  # docker reads the Dockerfiles that carry FROM pins.
+  - package-ecosystem: docker-compose
+    directory: /infra/rust
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: docker
     directories:
-      - /infra
-      - /infra/prod
+      - /infra/rust/postgres-pgbackrest
+      - /infra/railway
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
 
+  # ---- GitHub Actions (all uses: are pinned to commit SHAs, see pr-ci.yml) ---
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
