@@ -72,22 +72,12 @@ pub const NON_TENANT_TABLES: &[(&str, &str)] = &[
     ),
 ];
 
-/// SECURITY DEFINER functions that are executable by PUBLIC today. Baseline
-/// 2026-10-21: Postgres' default `EXECUTE` to PUBLIC was never revoked on
-/// these `mem_*` entry points (105-107). Shrinking the list is welcome; a new
-/// PUBLIC definer must be added here on purpose, with a review.
-pub const PUBLIC_DEFINER_FUNCTIONS: &[&str] = &[
-    "public.mem_accept_proposal(uuid)",
-    "public.mem_digest_evidence_ok(uuid)",
-    "public.mem_edit_item(uuid, text, text)",
-    "public.mem_forget_item(uuid)",
-    "public.mem_item_evidence_ok(uuid)",
-    "public.mem_proposal_evidence_ok(uuid)",
-    "public.mem_reject_proposal(uuid)",
-    "public.mem_revert_consolidation(uuid)",
-    "public.mem_search_items(text, integer, uuid, text)",
-    "public.mem_topic_summary_ok(uuid)",
-];
+/// SECURITY DEFINER functions that are executable by PUBLIC. Baseline 2026-10-21 held ten
+/// `mem_*` entry points (105-107) because Postgres' default `EXECUTE` to PUBLIC was never
+/// revoked; migration 147 (#4381) moved all ten to `momo_app` only, so the list is empty and
+/// any new PUBLIC definer fails the test. A new one must be added here on purpose, with a
+/// review. (`control_unlisted_public_definer_is_red` keeps the check from going blind.)
+pub const PUBLIC_DEFINER_FUNCTIONS: &[&str] = &[];
 
 /// Non-tenant tables (see [`NON_TENANT_TABLES`]) on which RLS is off while
 /// `momo_app` can still write. Baseline 2026-10-24 held three (`plugin_registry`,
@@ -182,8 +172,8 @@ pub const NON_TENANT_POLICY_PINS: &[(&str, &str)] = &[
 
 /// Every SECURITY DEFINER function `momo_app` can execute, exact signature.
 /// A definer runs as its owner, who bypasses RLS, so granting `momo_app` a new
-/// one is a tenant-boundary decision. Baseline 2026-10-24 (includes the PUBLIC
-/// ones above).
+/// one is a tenant-boundary decision. Baseline 2026-10-24; the ten `mem_*` ones are
+/// `momo_app`-only since migration 147 (#4381).
 pub const APP_EXECUTABLE_DEFINERS: &[&str] = &[
     "momo_join_private.device_link_workspace_id(text)",
     "momo_join_private.invite_workspace_id(text)",
