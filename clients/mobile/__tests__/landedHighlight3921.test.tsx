@@ -746,6 +746,11 @@ describe('LandedTintFade — 행 하나의 전환', () => {
       screen.getByTestId('message-row').props.style,
     );
     expect(standing.backgroundColor).toBe(color.warnSurface);
+    // 서 있는 착지의 테두리 덧그림(#4300) — 덮개는 같은 테두리를 들고 녹는다.
+    const standingEdge = StyleSheet.flatten(
+      screen.getByTestId('message-row-landed-edge').props.style,
+    );
+    expect(standingEdge.borderColor).toBe(color.warnBorder);
 
     view.rerender(row(false, false));
 
@@ -765,6 +770,8 @@ describe('LandedTintFade — 행 하나의 전환', () => {
       // 그릇이 화면 끝에서 띄운 둥근 상자라(`rowFace.ts`) 덮개도 **같은 모서리**다 — 사각형 덮개가
       // 둥근 서 있는 면 위에 올라 물러나는 순간 모서리가 튀면 안 된다(#4300 세 겹 사보타주).
       borderRadius: standing.borderRadius,
+      borderWidth: standingEdge.borderWidth,
+      borderColor: standingEdge.borderColor,
       backgroundColor: standing.backgroundColor,
       opacity: 1,
     });

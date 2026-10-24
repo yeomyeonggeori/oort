@@ -23,6 +23,9 @@ export const ROW_FACE = {
   outer: 6,
   inner: 10,
   radius: ds2Radius.row,
+  /** 착지 면의 테두리 — `warnBorder` 1px. 라이트 3테마에서 `warnSurface` 가 바닥과 1.02~1.04:1 이라
+   * 면만으로는 경계가 안 서서 세운다. 절대 배치 덧그림이라 레이아웃을 1px 도 밀지 않는다. */
+  edge: 1,
 } as const;
 
 /** 눌림 틴트의 불투명도 — Buzz `highlightColor: primary 10%`. */

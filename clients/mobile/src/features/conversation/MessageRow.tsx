@@ -2846,6 +2846,11 @@ function MessageRowInner({
       {/* 틴트가 **물러나는 순간**의 덮개 (#3921). 서 있는 동안은 아무것도 그리지 않는다 —
           위 그릇이 배경으로 입는다. 첫 자식이라 내용 뒤에 깔린다. */}
       <LandedTintFade landed={landed === true} />
+      {/* 서 있는 착지의 테두리(`warnBorder` 1px). 면만으로는 라이트에서 경계가 안 선다 —
+          덮개(`LandedTintFade`)도 같은 테두리를 들고 녹는다. 절대 배치라 레이아웃 불변. */}
+      {landed ? (
+        <View pointerEvents="none" style={styles.rowLandedEdge} testID="message-row-landed-edge" />
+      ) : null}
       <Pressable
         // The tap rule is above. The row stays pressable even when it has no
         // door and no actions (a tombstone), because with the keyboard up every
@@ -3971,6 +3976,16 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    */
   // 모서리는 그릇(`row`)이 이미 든다 — 서 있는 착지는 그 상자에 색만 입힌다.
   rowLanded: {backgroundColor: color.warnSurface},
+  rowLandedEdge: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    borderRadius: ROW_FACE.radius,
+    borderWidth: ROW_FACE.edge,
+    borderColor: color.warnBorder,
+  },
   // 그룹 사이는 `CONV.groupGap`. 안쪽이 이미 절반씩 물고 있으므로 차이만 더한다.
   /**
    * 작성자가 바뀌는 자리의 틈. 시안 `.a-m{margin-bottom:16px}` — 두 행의 안쪽 패딩

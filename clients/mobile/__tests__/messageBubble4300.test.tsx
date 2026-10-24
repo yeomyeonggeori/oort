@@ -135,6 +135,12 @@ describe('행 강조 면 — 화면 끝에서 띄운 둥근 면', () => {
     expect(bowl.marginHorizontal).toBe(ROW_FACE.outer);
     expect(bowl.borderRadius).toBe(ROW_FACE.radius);
     expect(bowl.backgroundColor).toBe(color.warnSurface);
+    // 서 있는 착지의 테두리 — 그릇을 꽉 채우는 절대 배치 + warnBorder 1px + 같은 모서리.
+    const edge = flat(screen.getByTestId('message-row-landed-edge').props.style);
+    expect(edge).toMatchObject({top: 0, right: 0, bottom: 0, left: 0});
+    expect(edge.borderRadius).toBe(bowl.borderRadius);
+    expect(edge.borderWidth).toBe(ROW_FACE.edge);
+    expect(edge.borderColor).toBe(color.warnBorder);
 
     // 눌림 = 그릇 안쪽 Pressable 이 같은 상자를 꽉 채운다(마진 없음 = 그릇과 같은 경계).
     const pressed = pressedStyle();
@@ -149,6 +155,11 @@ describe('행 강조 면 — 화면 끝에서 띄운 둥근 면', () => {
     expect(fade).toMatchObject({top: 0, right: 0, bottom: 0, left: 0});
     expect(fade.borderRadius).toBe(bowl.borderRadius);
     expect(fade.backgroundColor).toBe(bowl.backgroundColor);
+    // 덮개도 같은 테두리를 든 채 녹는다 — 테두리만 먼저 사라지거나 늦게 남지 않는다.
+    expect(fade.borderWidth).toBe(edge.borderWidth);
+    expect(fade.borderColor).toBe(edge.borderColor);
+    // 서 있는 착지가 끝나면 테두리 덧그림도 함께 빠진다(덮개가 이어받는다).
+    expect(screen.queryByTestId('message-row-landed-edge')).toBeNull();
     // 깨뜨리면(각각): 그릇 borderRadius 제거 · rowInner borderRadius 제거 · 덮개 borderRadius 제거
     //                 · 덮개를 다른 값으로 → 해당 줄만 빨개진다.
   });
@@ -237,7 +248,8 @@ describe('눌림 틴트 — 강조색 10%, 안 보이는 테마만 surface', () 
   ];
 
   const LANDED_FACE_MIN_CONTRAST = 1.1;
-  const KNOWN_WEAK_LANDED = new Set([
+  /** 면(warnSurface)만으로는 바닥과 안 갈리는 테마 — 내장 3테마 라이트. 테두리가 경계를 세운다. */
+  const FACE_ALONE_WEAK = new Set([
     'dawnsky/light/default',
     'graphite/light/default',
     'noeul/light/default',
@@ -247,6 +259,8 @@ describe('눌림 틴트 — 강조색 10%, 안 보이는 테마만 surface', () 
       `noeul/light/${id}`,
     ]),
   ]);
+  /** 테두리(warnBorder 1px)가 바닥에서 이만큼은 갈려야 면이 약한 테마에서도 경계가 선다. */
+  const LANDED_EDGE_MIN_CONTRAST = 1.2;
 
   it('조합 수가 많다 — 내장 3 테마 × 2 모드 × (기본 + 프리셋) + 카탈로그 전체', () => {
     expect(COMBOS.length).toBeGreaterThan(60);
@@ -269,11 +283,18 @@ describe('눌림 틴트 — 강조색 10%, 안 보이는 테마만 surface', () 
       if (warn !== undefined) {
         // 착지 면은 내 말풍선(강조색)과 갈린다.
         expect(`${name} ${contrast(p.accent, warn) >= 3}`).toBe(`${name} true`);
-        // 착지 면이 바닥에서 보이는가. **알려진 약점**: 내장 3 테마의 라이트는 `warnSurface` 가
-        // 바닥과 1.02~1.04:1 이라 둥근 면의 경계가 거의 안 보인다(#4300 발견, 2단계 design-review
-        // 결정 — progress.md). 목록 밖에서 약해지면 빨개지고, 고치면 목록을 줄이라고 빨개진다.
+        // 착지 면이 바닥에서 보이는가. 내장 3 테마의 라이트는 `warnSurface` 만으로는 바닥과
+        // 1.02~1.04:1 이라 경계가 안 선다 — planner 결정(2026-10-25): `warnBorder` 1px 헤어라인을
+        // 더한다. 면이 약한 조합의 목록은 고정하고(목록 밖에서 약해지면 빨강), 그 조합마다
+        // 테두리가 바닥에서 갈리는지를 잰다. 약점은 더 이상 「알려진 약점」이 아니다.
         const weak = contrast(warn, p.bg) < LANDED_FACE_MIN_CONTRAST;
-        expect(`${name} weak=${weak}`).toBe(`${name} weak=${KNOWN_WEAK_LANDED.has(name)}`);
+        expect(`${name} weak=${weak}`).toBe(`${name} weak=${FACE_ALONE_WEAK.has(name)}`);
+        const edge = (p as {warnBorder?: string}).warnBorder;
+        if (weak) {
+          expect(edge).toBeDefined();
+          const c = contrast(edge as string, p.bg);
+          expect(`${name} edge=${c >= LANDED_EDGE_MIN_CONTRAST}`).toBe(`${name} edge=true`);
+        }
       }
     }
     // 눈으로 볼 수 있게 이름을 남긴다 — 물러난 테마가 늘면 이 목록이 증거다.

@@ -128,6 +128,8 @@ const buildStyles = (color: Palette) =>
       bottom: 0,
       left: 0,
       borderRadius: ROW_FACE.radius,
+      borderWidth: ROW_FACE.edge,
+      borderColor: color.warnBorder,
       backgroundColor: color.warnSurface,
     },
   });

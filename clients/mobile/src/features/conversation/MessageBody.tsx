@@ -197,6 +197,8 @@ const NO_MENTIONS: MentionRendering = {
  * 자기 색을 박고 있어(채움이 바닥 기준으로 정해진 값) 말풍선 채움 위에서 깨진다 — 그 셋만
  * 이 맥락을 읽어 말풍선 잉크로 갈아입는다. 말풍선 밖(`null`)은 예전 그대로다.
  */
+/** 말풍선 안 인라인 코드 칩의 채움 — 말풍선 글자색 위 알파 18%(0x2e). */
+const INLINE_CODE_ALPHA_HEX = '2e';
 const BubbleInk = React.createContext<{fg: string; mine: boolean} | null>(null);
 
 function InlineNodes({
@@ -245,7 +247,7 @@ function InlineNode({
         style={[
           styles.inlineCode,
           // 내 말풍선(신호색 채움) 위에서는 바닥 기준 채움이 안 읽힌다 — 같은 잉크의 옅은 막.
-          ink?.mine && {backgroundColor: ink.fg + '2e'},
+          ink?.mine && {backgroundColor: ink.fg + INLINE_CODE_ALPHA_HEX},
         ]}
         testID="message-inline-code">
         {node.text}
