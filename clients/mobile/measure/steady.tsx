@@ -1,19 +1,23 @@
 import type {Message, RosterMember} from '@momo/core/lib/api';
 import type {MessageNewEvent, RealtimeStatus} from '@momo/core/lib/realtimeEvents';
+import type {AgentWorkingSignal} from '@momo/core/features/agents/workingSignal';
 import {typingSegments} from '@momo/core/features/chat/typing';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import NetInfo from '@react-native-community/netinfo';
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {Settings, StyleSheet, Text, TextInput, View} from 'react-native';
 import {Screen} from '../src/design/atoms';
+import {usePalette} from '../src/design/theme';
+import {font, space, TOUCH_TARGET} from '../src/design/tokens';
 import {AgentActivityBar} from '../src/features/agents/turnSurfaces';
+import {useTickingNow} from '../src/features/agents/workingSignal';
 import {Composer} from '../src/features/conversation/Composer';
 import {ConversationHeader} from '../src/features/conversation/ConversationHeader';
 import {ConversationLayout} from '../src/features/conversation/ConversationLayout';
 import {CONV} from '../src/features/conversation/convDesign';
 import {PinListPanel} from '../src/features/conversation/PinListPanel';
-import {clearDraft} from '../src/features/conversation/drafts';
-import {Timeline, type TimelineGeometry} from '../src/features/conversation/Timeline';
+import {clearDraft, readDraft} from '../src/features/conversation/drafts';
+import {Timeline, type PillState, type TimelineGeometry} from '../src/features/conversation/Timeline';
 import {TypingBar} from '../src/features/conversation/TypingBar';
 import {useTimeline} from '../src/features/conversation/useTimeline';
 import type {ChannelRail} from '../src/realtime/channelRail';
@@ -40,6 +44,14 @@ import {setServerBase} from '../src/storage/serverBase';
 //             panel       `hold` + 전면 덮개(고정 목록, 진짜 `PinListPanel`)가 열려 있다 — 덮개가 머리 **위**에 서는지 보는 사진용.
 //                         대화 화면과 같은 구조: 머리·목록을 한 틀에 담고 덮개는 틀 뒤 형제.
 //             panel-flat  `panel` 인데 머리·목록을 틀 없이 `Screen` 직속으로 둔다 — **되살린 결함**(머리 `zIndex` 가 덮개 위로 올라온다)의 사진용.
+//
+//   #4331 「입력해도 대화가 출렁이지 않는가」 — **에이전트 DM** 에 「대기 1번째 N시간째 기다려요 · 중단」 활동 줄이 서 있는 도크.
+//             tick        활동 줄이 선 채 「N분째」 글자가 1초마다 바뀐다(59분 50초에서 시작해 「1시간째」로 넘어간다).
+//             bar         활동 줄이 3번 나타났다 사라진다.
+//             live        70초 동안 재기만 한다 — 사람(Maestro)이 진짜로 치고 보낸다(`maestro/103-input-steady.yaml`): 1→2→3줄, 지우기, 2줄 보내기.
+//                         초안·보냄을 표식으로 남긴다. (입력창 글을 `draftKey` 로 갈아 끼우는 판은 쓰지 않는다 — Fabric 의 `TextInput` 은 값을 갈아 끼워도
+//                         높이가 한 걸음 늦게 따라와서 실제 입력의 레이아웃이 아니다.)
+//             `+nobar`    활동 줄 없이(대조군). 예: `DM-STEADY-TYPE+NOBAR`.
 //
 // **대화 화면이 세우는 순서 그대로** 세운다: 머리(연결 띠가 서는 자리) · 레이아웃(목록 / 도크) · 도크의 「작업 중」·
 // 「작성 중」 줄 · 컴포저. 목록의 데이터는 **진짜 `useTimeline`** 이 만든다 — 서버와 소켓만 이 파일의 가짜다
@@ -82,6 +94,44 @@ const SELF_MEMBER = member({id: SELF, displayName: '이도현', handle: 'dohyun'
 const PEER_MEMBER = member({id: PEER, displayName: '박서연', handle: 'seoyeon'});
 const DIRECTORY = makeDirectory([SELF_MEMBER, PEER_MEMBER]);
 
+// ---- 에이전트 DM (#4331) -------------------------------------------------------
+// 실기 장면: 에이전트와의 DM, 마지막 줄은 내가 보낸 두 줄 메시지, 입력창 위에 에이전트 활동 줄. 대화 문구는 지어낸 것이다.
+const AGENT = '00000000-0000-7000-8000-0000000000e4';
+const AGENT_MEMBER = member({id: AGENT, kind: 'agent', displayName: 'hermes', handle: 'hermes'});
+const AGENT_DIRECTORY = makeDirectory([SELF_MEMBER, AGENT_MEMBER]);
+const AGENT_RUN = 'A2222222-2222-4222-8222-A22222222222';
+const AGENT_HISTORY: readonly {self: boolean; body: string}[] = [
+  {self: true, body: '이번 주 일정 정리해 줄래요'},
+  {self: false, body: '네, 월요일부터 금요일까지 정리해서 올릴게요'},
+  {self: false, body: '월 시안 검토, 화 회의, 수 배포 준비, 목 배포, 금 회고예요'},
+  {self: true, body: '수요일 회의는 오후로 옮겨 주세요'},
+  {self: false, body: '옮겼어요. 참석자에게도 알렸어요'},
+  {self: true, body: '고마워요'},
+  {self: true, body: '그리고 목요일 배포 체크리스트도 만들어 줘요'},
+  {self: false, body: '체크리스트 초안이에요. 빠진 항목이 있으면 알려 주세요'},
+  {self: false, body: '1) 빌드 확인 2) 마이그레이션 3) 알림 점검 4) 롤백 경로'},
+  {self: true, body: '좋아요 이대로 갈게요'},
+  {self: false, body: '알겠어요. 목요일 아침에 다시 알려 드릴게요'},
+  {self: true, body: '다음 주 일정도 부탁해요'},
+  {self: false, body: '다음 주는 휴일이 있어서 나흘이에요. 정리해 둘게요'},
+  {self: true, body: '확인 부탁해요\n급하지 않아요'},
+];
+
+/** 대기 중인 run 하나. 활동 줄이 「hermes: 대기 1번째 · N째 기다려요」로 선다(`queued` 는 목록 안 자리표시를 만들지 않는다). */
+function queuedTurn(ageMs: number): AgentWorkingSignal {
+  const now = Date.now();
+  return {
+    memberId: AGENT,
+    channelId: CHANNEL,
+    state: 'queued',
+    source: 'run',
+    runId: AGENT_RUN,
+    headlines: [],
+    lastActivityAtMs: now,
+    server: {phase: 'queued', leaseState: 'none', queuePosition: 1, aheadTotal: 0, queuedAtMs: now - ageMs},
+  };
+}
+
 // ---- 서버(가짜) ---------------------------------------------------------------
 
 const BASE_MS = Date.now() - 3_600_000;
@@ -122,7 +172,16 @@ function wireMessage(seq: number, author: string, body: string): Message {
 /** 서버가 가진 메시지. 스크립트가 덧붙이고, REST 읽기는 여기서 답한다. */
 const server: {messages: Message[]} = {messages: []};
 
-function resetServer(): void {
+function resetServer(agentDm = false): void {
+  if (agentDm) {
+    // 12시간 간격 — 날짜 구분선이 여럿 서고 떠 있는 날짜 알약에 날이 있다.
+    server.messages = AGENT_HISTORY.map((row, index) => {
+      const message = wireMessage(index + 1, row.self ? SELF : AGENT, row.body);
+      message.createdAtMs = Date.now() - (AGENT_HISTORY.length - index) * 12 * 3_600_000;
+      return message;
+    });
+    return;
+  }
   server.messages = HISTORY_BODIES.map((body, index) =>
     wireMessage(index + 1, index % 2 === 0 ? PEER : SELF, body),
   );
@@ -160,6 +219,16 @@ export function ensureFakeFetch(): void {
       const url = String(input);
       if (url.startsWith('http://127.0.0.1') || url.startsWith('http://localhost')) {
         return (realFetch as typeof fetch)(input as RequestInfo, init);
+      }
+      if (url.includes('/messages') && init?.method === 'POST') {
+        // 보내기: 서버가 줄을 받아 확정본을 돌려준다(응답이 곧 실시간 프레임과 같은 확정본 — `useTimeline.post`).
+        const request = JSON.parse(String(init.body ?? '{}')) as {body?: string};
+        const seq = (server.messages[server.messages.length - 1]?.seq ?? 0) + 1;
+        const message = wireMessage(seq, SELF, request.body ?? '');
+        message.createdAtMs = Date.now();
+        server.messages.push(message);
+        await wait(250);
+        return json(message);
       }
       if (url.includes('/messages')) {
         const after = /[?&]after=(\d+)/.exec(url);
@@ -281,6 +350,16 @@ interface Frame {
   offset: number | null;
   content: number | null;
   viewport: number | null;
+  /** 도크 높이 — 입력창·활동 줄이 자라면 이만큼 커진다. */
+  dockH: number | null;
+  /** 활동 줄 자리의 윗면(활동 줄이 없으면 도크 윗면과 같다). 마지막 행이 이 아래로 내려가면 줄에 가린 것이다. */
+  bar: number | null;
+  /** 활동 줄 자리의 높이. */
+  barH: number | null;
+  /** 떠 있는 날짜 알약이 서 있다. */
+  day: boolean;
+  /** 「최신으로」 필이 서 있다. */
+  latest: boolean;
 }
 
 interface Summary {
@@ -334,7 +413,9 @@ export function summarize(values: readonly (number | null)[]): Summary | null {
 
 const wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
-type ScenarioName = 'idle' | 'peer' | 'blip' | 'outage' | 'gap' | 'hold' | 'own';
+type ScenarioName = 'idle' | 'peer' | 'blip' | 'outage' | 'gap' | 'hold' | 'own' | 'tick' | 'bar' | 'live';
+/** #4331: 에이전트 DM 에 활동 줄이 서는 장면들. */
+const INPUT_SCENES: readonly string[] = ['tick', 'bar', 'live'];
 /** `hold` 는 연결 띠를 세운 채 90초 머문다 — 사진용이고 `all` 에 들지 않는다. */
 const ALL: readonly ScenarioName[] = ['idle', 'peer', 'blip', 'outage', 'gap'];
 
@@ -344,6 +425,8 @@ interface Controls {
   /** 서버에 메시지를 더하고(`deliver` 가 참이면 레일로도 보낸다). `author` 를 안 주면 상대의 말이다. */
   say: (body: string, deliver: boolean, author?: string) => Message;
   mark: (what: string) => void;
+  /** 활동 줄의 run 들을 갈아 끼운다(#4331). */
+  setTurns: (turns: readonly AgentWorkingSignal[]) => void;
 }
 
 /** 4초 유예(`DISPLAY_GRACE_MS`) 뒤에 띠가 선다 — 앱의 `connectionDisplay` 가 하는 일을 시간표대로 옮긴 것이다. */
@@ -392,6 +475,43 @@ async function runScenario(name: ScenarioName, c: Controls): Promise<void> {
     }
     return;
   }
+  if (name === 'tick') {
+    // 활동 줄의 글자가 1초마다 바뀐다. 시작이 59분 50초라 10초 뒤 「1시간째」로 넘어가는 순간도 지난다.
+    c.mark('tick-start');
+    await wait(24_000);
+    return;
+  }
+  if (name === 'bar') {
+    for (let index = 0; index < 3; index += 1) {
+      c.mark(`bar-${index + 1}-on`);
+      c.setTurns([queuedTurn(17 * 3_600_000)]);
+      await wait(2_500);
+      c.mark(`bar-${index + 1}-off`);
+      c.setTurns([]);
+      await wait(2_500);
+    }
+    return;
+  }
+  if (name === 'live') {
+    // 사람이 친다. 초안이 바뀔 때마다·메시지가 늘 때마다 표식을 남겨 프레임과 맞춘다.
+    c.mark('live-start');
+    let lastDraft = readDraft(DRAFT_KEY);
+    let lastCount = server.messages.length;
+    const until = Date.now() + 70_000;
+    while (Date.now() < until) {
+      const draft = readDraft(DRAFT_KEY);
+      if (draft !== lastDraft) {
+        lastDraft = draft;
+        c.mark(`draft-${draft === '' ? 0 : draft.split('\n').length}-lines`);
+      }
+      if (server.messages.length !== lastCount) {
+        lastCount = server.messages.length;
+        c.mark('sent');
+      }
+      await wait(40);
+    }
+    return;
+  }
   if (name === 'own') {
     for (let index = 0; index < 2; index += 1) {
       // (a) 되쏘기: 같은 구독이 복구돼 돌아오며 끊긴 사이 내가 보낸 두 줄이 실려 온다(`subscribed` 직후 같은 틱에 flush).
@@ -437,25 +557,73 @@ interface Result {
   dock: Summary | null;
   content: Summary | null;
   viewport: Summary | null;
+  dockH: Summary | null;
+  /** 떠 있는 날짜 알약이 서 있던 프레임 수. 손가락 없는 장면이면 0 이어야 한다(#4331). */
+  dayFrames: number;
+  latestFrames: number;
+  /** 마지막 행이 활동 줄(도크) 밑으로 가려진 가장 큰 높이(pt)와 그 프레임 수(1pt 초과). */
+  hiddenMax: number;
+  hiddenFrames: number;
   events: {t: number; what: string}[];
 }
 
 export function SteadySurface({which}: {which: string}): React.JSX.Element {
+  // `type+nobar` 처럼 `+` 뒤는 옵션이다(#4331).
+  const [base = '', ...mods] = which.split('+');
+  const agentDm = INPUT_SCENES.includes(base);
   // `hold-unread`: 같은 `hold` 장면에 안 읽은 줄이 있는 대화(위쪽 필이 서는 대화)로 연다.
   const unread = which === 'hold-unread';
   const panelOpen = which === 'panel' || which === 'panel-flat';
   const scenarios: readonly ScenarioName[] = unread || panelOpen
     ? ['hold']
-    : (ALL as readonly string[]).includes(which) || which === 'hold' || which === 'own'
-      ? [which as ScenarioName]
-      : ALL;
+    : agentDm
+      ? [base as ScenarioName]
+      : (ALL as readonly string[]).includes(which) || which === 'hold' || which === 'own'
+        ? [which as ScenarioName]
+        : ALL;
   ensureFakeFetch();
+  // 에이전트 DM 은 자기 대화 기록으로 연다 — 첫 렌더 한 번, `useTimeline` 이 읽기 전.
+  useState(() => {
+    if (agentDm) resetServer(true);
+    return null;
+  });
+  const directory = agentDm ? AGENT_DIRECTORY : DIRECTORY;
+  const peerId = agentDm ? AGENT : PEER;
+  const peerName = agentDm ? 'hermes' : '박서연';
+  const historyLength = agentDm ? AGENT_HISTORY.length : HISTORY_BODIES.length;
   const fake = useRef<FakeRail | null>(null);
   if (fake.current === null) fake.current = createFakeRail();
   const [status, setStatus] = useState<RealtimeStatus>('connected');
   // 대화 화면과 같은 배선: 뜬 띠의 높이를 머리가 알리고, 목록의 위쪽 필이 그 밑에 쌓인다.
   const [bannerInset, setBannerInset] = useState(0);
   const timeline = useTimeline(fake.current.rail, WS, CHANNEL, SELF);
+  // #4331: 활동 줄(대기 중인 run 하나)과 1초 시계 — 대화 화면이 턴이 열려 있는 동안 초당 한 번 다시 그리는 것과 같다.
+  const startAge = base === 'tick' ? 59 * 60_000 + 50_000 : 17 * 3_600_000;
+  const [turns, setTurns] = useState<readonly AgentWorkingSignal[]>(() =>
+    agentDm && base !== 'bar' && !mods.includes('nobar') ? [queuedTurn(startAge)] : [],
+  );
+  const turnNowMs = useTickingNow(turns.length > 0);
+  const [selfSendToken, setSelfSendToken] = useState(0);
+  const sendMessage = timeline.send;
+  const onSend = useCallback(
+    (body: string) => {
+      setSelfSendToken(token => token + 1);
+      void sendMessage(body);
+    },
+    [sendMessage],
+  );
+  const pillsRef = useRef<PillState | null>(null);
+  const barRef = useRef<View | null>(null);
+  const palette = usePalette();
+  // 「중단」 자리: 진짜 `StopTurnControl` 은 세션을 알아야 해서, 같은 크기(손가락 바닥 44 · 가로 여백 · meta 글자)의 자리만 세운다.
+  const renderStop = useCallback(
+    () => (
+      <View style={stopStyle.quiet}>
+        <Text style={[stopStyle.label, {color: palette.accentText}]}>중단</Text>
+      </View>
+    ),
+    [palette],
+  );
   const anchorRef = useRef<View | null>(null);
   const tailRef = useRef<View | null>(null);
   const dockRef = useRef<View | null>(null);
@@ -472,7 +640,7 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
   // 앱과 같은 박자의 시계(분 단위). 매 렌더의 `Date.now()` 를 먹이면 목록이 하네스의 렌더마다 다시 그려져 재는 대상이 달라진다.
   const nowMs = useNow();
   // 재는 행: 장면이 시작될 때의 가장 새 메시지. 장면 안에서 자라는 만큼은 그 행이 밀려 올라가는 것으로 보인다.
-  const [anchorSeq, setAnchorSeq] = useState(HISTORY_BODIES.length);
+  const [anchorSeq, setAnchorSeq] = useState(historyLength);
   const loadOlder = timeline.loadOlder;
   const onStartReached = useCallback(() => void loadOlder(), [loadOlder]);
 
@@ -493,7 +661,6 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
     let cancelled = false;
     const sink = Settings.get('momoGapSink');
     const lines: string[] = [];
-    const nextSeq = {value: HISTORY_BODIES.length + 1};
     void (async () => {
       // 진입 수렴(목록이 끝에 앉는 데 걸리는 시간)이 끝나도록 기다린다.
       await wait(4_000);
@@ -516,6 +683,11 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
             offset: metricsRef.current?.offsetY ?? null,
             content: metricsRef.current?.contentHeight ?? null,
             viewport: metricsRef.current?.viewportHeight ?? null,
+            dockH: null,
+            bar: null,
+            barH: null,
+            day: pillsRef.current?.day === true,
+            latest: pillsRef.current?.latest === true,
           };
           frames.push(frame);
           void rectOf(anchorRef.current).then(rect => {
@@ -526,15 +698,19 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
           });
           void rectOf(dockRef.current).then(rect => {
             frame.dock = rect === null ? null : rect.y;
+            frame.dockH = rect === null ? null : rect.h;
+          });
+          void rectOf(barRef.current).then(rect => {
+            frame.bar = rect === null ? null : rect.y;
+            frame.barH = rect === null ? null : rect.h;
           });
           requestAnimationFrame(sample);
         };
         const controls: Controls = {
           setStatus,
           fake: fake.current as FakeRail,
-          say: (body, deliver, author = PEER) => {
-            const seq = nextSeq.value;
-            nextSeq.value += 1;
+          say: (body, deliver, author = peerId) => {
+            const seq = (server.messages[server.messages.length - 1]?.seq ?? 0) + 1;
             const message = wireMessage(seq, author, body);
             message.createdAtMs = Date.now();
             server.messages.push(message);
@@ -542,11 +718,15 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
             return message;
           },
           mark: what => events.push({t: Date.now() - begin, what}),
+          setTurns,
         };
         requestAnimationFrame(sample);
         await runScenario(name, controls);
         sampling = false;
         await wait(200);
+        const hidden = frames.map(frame =>
+          frame.anchor !== null && frame.bar !== null ? frame.anchor - frame.bar : 0,
+        );
         const result: Result = {
           scenario: name,
           durationMs: Date.now() - begin,
@@ -556,6 +736,11 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
           dock: summarize(frames.map(frame => frame.dock)),
           content: summarize(frames.map(frame => frame.content)),
           viewport: summarize(frames.map(frame => frame.viewport)),
+          dockH: summarize(frames.map(frame => frame.dockH)),
+          dayFrames: frames.filter(frame => frame.day).length,
+          latestFrames: frames.filter(frame => frame.latest).length,
+          hiddenMax: Math.round(Math.max(0, ...hidden) * 10) / 10,
+          hiddenFrames: hidden.filter(value => value > 1).length,
           events,
         };
         console.log(`STEADY4292 ${JSON.stringify(result)}`);
@@ -571,7 +756,7 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
         }
         const a = result.anchor;
         lines.push(
-          `${name.padEnd(7)} range ${a?.range ?? '-'} · travel ${a?.travel ?? '-'} · maxStep ${a?.maxStep ?? '-'} · moves ${a?.moves ?? '-'} · rev ${a?.reversals ?? '-'} · dock ${result.dock?.range ?? '-'} (${result.frames}f)`,
+          `${name.padEnd(7)} range ${a?.range ?? '-'} · travel ${a?.travel ?? '-'} · maxStep ${a?.maxStep ?? '-'} · moves ${a?.moves ?? '-'} · rev ${a?.reversals ?? '-'} · dock ${result.dock?.range ?? '-'} · pill ${result.dayFrames} · hidden ${result.hiddenMax} (${result.frames}f)`,
         );
         setReport([...lines]);
       }
@@ -592,10 +777,10 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
       {/* 대화 화면과 같은 구조: 머리 · 목록을 한 틀에 담아 머리의 `zIndex` 가 틀 안에서만 겨루게 한다(`panel-flat` 만 틀이 없다). */}
       <Frame flat={which === 'panel-flat'}>
       <ConversationHeader
-        title="박서연"
+        title={peerName}
         kind="dm"
-        peerId={PEER}
-        directory={DIRECTORY}
+        peerId={peerId}
+        directory={directory}
         onBack={() => {}}
         menu={[{label: '고정', run: () => {}}]}
         railStatus={status}
@@ -605,7 +790,7 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
         list={
           <Timeline
             messages={timeline.state.messages}
-            directory={DIRECTORY}
+            directory={directory}
             status={timeline.status}
             channelKind="dm"
             myMemberId={SELF}
@@ -628,20 +813,30 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
             anchorRef={anchorRef}
             tailRef={tailRef}
             metricsRef={metricsRef}
+            pillsRef={pillsRef}
+            selfSendToken={selfSendToken}
           />
         }
         composer={
           <View ref={dockRef} collapsable={false}>
-            <AgentActivityBar turns={[]} directory={DIRECTORY} nowMs={nowMs} live />
+            <View ref={barRef} collapsable={false}>
+              <AgentActivityBar
+                turns={turns}
+                directory={directory}
+                nowMs={turnNowMs}
+                live
+                renderStop={renderStop}
+              />
+            </View>
             <TypingBar segments={typingSegments([])} label={null} />
             <Composer
               recipient="person"
-              channelLabel="박서연"
-              directory={DIRECTORY}
+              channelLabel={peerName}
+              directory={directory}
               draftKey={DRAFT_KEY}
               attachmentTarget={TARGET}
               inputRef={inputRef}
-              onSend={() => {}}
+              onSend={onSend}
             />
           </View>
         }
@@ -686,6 +881,11 @@ function Frame({flat, children}: {flat: boolean; children: React.ReactNode}): Re
 }
 
 // 장면이 끝나면 맨 위에 서는 결과 줄(화면 캡처용). 측정 대상 레이아웃 밖에서 손을 받지 않는다.
+const stopStyle = StyleSheet.create({
+  quiet: {minHeight: TOUCH_TARGET, justifyContent: 'center', paddingHorizontal: space.sm},
+  label: {fontSize: font.meta, fontWeight: '600'},
+});
+
 const styles = StyleSheet.create({
   column: {flex: 1},
   reportLayer: {position: 'absolute', left: 12, right: 12, bottom: 150},

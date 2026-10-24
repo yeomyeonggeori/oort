@@ -1,0 +1,84 @@
+appId: app.momo.ios
+name: 103-input-steady
+---
+# 103-input-steady — 에이전트 DM 의 입력창에서 **진짜로 치고 보내는** 흐름 (#4331). 재는 것은 앱이 한다(`measure/steady.tsx` 의 `live` 장면).
+#
+#   xcrun simctl launch <udid> app.momo.ios --args -momoMeasure DM-STEADY-LIVE \
+#     -RCT_jsLocation 127.0.0.1:$PORT -momoGapSink 127.0.0.1:$SINK
+#   maestro --device <udid> test clients/mobile/maestro/103-input-steady.yaml
+#
+# 장면은 70초 재고 끝난다. 이 흐름은 그 안에 끝나야 한다(앞 6초는 목록이 끝에 앉는 시간이라 기다린다).
+- extendedWaitUntil:
+    visible:
+      id: "composer-input"
+    timeout: 60000
+# 장면이 재기 시작할 때까지 기다린다(진입 수렴 4초 + 0.8초).
+- extendedWaitUntil:
+    visible:
+      id: "no-such-element"
+    timeout: 7000
+    optional: true
+# 탭이 키보드를 올리고, 시뮬레이터는 키보드가 처음 오를 때 받아쓰기 설정을 물을 수 있다 — 그 알림이 앱 트리를 가린다.
+- tapOn:
+    id: "composer-input"
+- runFlow:
+    when:
+      visible: "지금 안 함"
+    commands:
+      - tapOn: "지금 안 함"
+- tapOn:
+    id: "composer-input"
+- extendedWaitUntil:
+    visible:
+      id: "no-such-element"
+    timeout: 2000
+    optional: true
+# 1줄 → 2줄 → 3줄
+- inputText: "금요일 배포는 오후로 미룰게요"
+- extendedWaitUntil:
+    visible:
+      id: "no-such-element"
+    timeout: 1500
+    optional: true
+- pressKey: Enter
+- inputText: "그 전에 시안부터 확인해 주세요"
+- extendedWaitUntil:
+    visible:
+      id: "no-such-element"
+    timeout: 1500
+    optional: true
+- pressKey: Enter
+- inputText: "끝나면 여기에 남겨 둘게요"
+- extendedWaitUntil:
+    visible:
+      id: "no-such-element"
+    timeout: 2000
+    optional: true
+# 지우기: 3줄 → 2줄 → 1줄
+- eraseText: 14
+- extendedWaitUntil:
+    visible:
+      id: "no-such-element"
+    timeout: 1500
+    optional: true
+- eraseText: 16
+- extendedWaitUntil:
+    visible:
+      id: "no-such-element"
+    timeout: 1500
+    optional: true
+# 다시 2줄을 쓰고 보낸다(보낸 뒤 입력창이 비며 줄어들고 확정 줄이 들어온다).
+- pressKey: Enter
+- inputText: "시험 한 번"
+- extendedWaitUntil:
+    visible:
+      id: "no-such-element"
+    timeout: 1500
+    optional: true
+- tapOn:
+    id: "composer-send"
+- extendedWaitUntil:
+    visible:
+      id: "no-such-element"
+    timeout: 3000
+    optional: true

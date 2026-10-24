@@ -467,6 +467,24 @@ describe('확정 패널이 들어앉을 자리 (2R H1)', () => {
   });
 });
 
+describe('활동 줄은 도크의 흐름 안에 선다 (#4331)', () => {
+  it('진짜 대화 화면에서 활동 줄은 목록 쪽이 아니라 도크 안이다 — 마지막 행은 줄 위에 온전히 선다', async () => {
+    // 목록(`flex: 1`)은 도크 윗면에서 끝난다. 활동 줄이 도크 밖으로 빠지면(목록 안이나 겹치는 층) 마지막 행이 줄 밑으로 들어간다.
+    installFetch();
+    await openTurn();
+    const ids: string[] = [];
+    for (
+      let node: ReturnType<typeof screen.getByTestId> | null = screen.getByTestId('composer-working');
+      node !== null;
+      node = node.parent
+    ) {
+      if (typeof node.props.testID === 'string') ids.push(node.props.testID);
+    }
+    expect(ids).toContain('composer-dock');
+    expect(ids).not.toContain('conversation-list');
+  });
+});
+
 describe('중단을 권하지 않는 자리', () => {
   it('연결이 끊긴 동안에는 중단 버튼이 없다', async () => {
     installFetch();

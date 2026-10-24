@@ -1,0 +1,27 @@
+appId: app.momo.ios
+name: 104-day-pill-capture
+---
+# 104-day-pill-capture — 손가락이 끄는 동안에는 떠 있는 날짜 알약이 **선다**는 사진 (#4331). 알약이 프로그램 스크롤에 안 서게 좁힌 뒤에도
+# 사람이 끄는 스크롤에는 그대로 서야 한다.
+#
+#   xcrun simctl launch <udid> app.momo.ios --args -momoMeasure DM-STEADY-TICK -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro --device <udid> test clients/mobile/maestro/104-day-pill-capture.yaml
+#
+# 사진은 이 흐름 **밖에서** 찍는다: 흐름이 "Swipe from" 줄을 찍은 2.5~3초 뒤 `xcrun simctl io <udid> screenshot day-pill.png`.
+# Maestro 의 `takeScreenshot` 은 끌기가 끝난 **뒤** 찍혀서 알약이 이미 물러난 모습(손을 뗀 1.2초 뒤)이 된다. 끌기를 6초로 늘려 손가락이 닿은
+# 채로 가운데쯤에서 찍는다. `waitToSettleTimeoutMs: 1` 은 끌기가 끝난 뒤 화면이 가라앉기를 기다리지 않게 한다.
+- extendedWaitUntil:
+    visible:
+      id: "composer-input"
+    timeout: 60000
+# 목록이 끝에 앉을 때까지(`no-such-element` 는 없어서 optional 로 시간만 흘린다).
+- extendedWaitUntil:
+    visible:
+      id: "no-such-element"
+    timeout: 6000
+    optional: true
+- swipe:
+    start: 50%, 38%
+    end: 50%, 66%
+    duration: 6000
+    waitToSettleTimeoutMs: 1
