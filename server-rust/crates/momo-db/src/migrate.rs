@@ -662,12 +662,17 @@ mod tests {
     /// column-level SELECT and a SELECT-only policy, the id-only `SECURITY DEFINER` functions
     /// `momo_schedule_private.due_scheduled_messages` / `expired_scheduled_messages`, and the
     /// `scheduled-message-lockdown` block (also in both bootstrap SQL files).
+    ///
+    /// 146 is #4227's DM closure (ADR-0177 증보 D6·D9): `channel_seq.last_readable_seq`, the
+    /// `AFTER INSERT ON message` trigger that raises it (SECURITY INVOKER, `IS DISTINCT FROM`), the
+    /// backfill that follows the trigger (`row_security = off`, a `GET DIAGNOSTICS` row-count
+    /// assertion), and the member-owned `dm_closure` table (ENABLE + FORCE + `ws_isolation`).
     #[test]
-    fn discovers_contiguous_migrations_001_to_145() {
+    fn discovers_contiguous_migrations_001_to_146() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=145).collect();
+        let expected: Vec<i64> = (1..=146).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -675,7 +680,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=145 under {}",
+            "expected contiguous 001..=146 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -683,7 +688,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("145_scheduled_message"));
+            .starts_with("146_dm_closure"));
     }
 
     #[test]
