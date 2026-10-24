@@ -5457,7 +5457,9 @@ export default function SurfacesHarness({
   // 사람의 선택이 사진에 새어 들어오고, 시스템 추종에 맡기면 시뮬레이터 설정이
   // 새어 들어온다. 사진은 인자가 말한 것만 찍는다.
   return (
-    <FixedScheme scheme={scheme}>
+    <FixedScheme
+      scheme={scheme}
+      bubble={name.startsWith('bubble-row') || name.startsWith('bubble-arrive-row') ? {layout: 'row'} : undefined}>
       <SafeAreaProvider>
         <QueryClientProvider client={harnessClient}>
           <SessionProvider member={HARNESS_MEMBER}>
