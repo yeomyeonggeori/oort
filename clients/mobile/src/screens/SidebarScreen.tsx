@@ -2,7 +2,7 @@ import {ApiError, openDirectMessage, uuidEq} from '@momo/core/lib/api';
 import {NetworkError} from '@momo/core/lib/http';
 import {attachParticle} from '@momo/core/lib/koreanParticle';
 import {serverSurface} from '@momo/core/features/capabilities/serverSurfaces';
-import {channelLabel, memberFor} from '@momo/core/features/workspace/directory';
+import {channelLabel, idKey, memberFor} from '@momo/core/features/workspace/directory';
 import {
   goneDmDisclosureLabel,
   readProjectionPhase,
@@ -78,6 +78,16 @@ import {
   useWorkspaceIdentity,
 } from '../features/workspace/queries';
 import {Avatar} from '../features/conversation/Avatar';
+import type {ChannelActionKey} from '@momo/core/features/channels/actionModel';
+import {useLongPress} from '../features/conversation/useLongPress';
+import {ChannelActionSheet} from '../features/sidebar/ChannelActionSheet';
+import {
+  channelRowAccessibilityActions,
+  channelRowActionItems,
+  channelRowActionKeyOf,
+  type ChannelRowTarget,
+} from '../features/sidebar/channelRowActions';
+import {useChannelRowActions} from '../features/sidebar/useChannelRowActions';
 import {ProfileSheet} from '../features/profile/ProfileSheet';
 import {
   AppUpdateBanner,
@@ -491,6 +501,36 @@ export default function SidebarScreen({
     [openDm, onOpenConversation],
   );
 
+  // 행을 길게 누르면 열리는 시트(#4229). 항목은 코어 표가 정하고(`channelRowActionItems`), 시트는 화면에 하나다.
+  const rowActions = useChannelRowActions(workspaceId, member.id);
+  const channelById = useMemo(
+    () =>
+      new Map(
+        [...channelsQuery.groups.channels, ...channelsQuery.groups.dms].map(channel => [
+          idKey(channel.id),
+          channel,
+        ]),
+      ),
+    [channelsQuery.groups],
+  );
+  const selfRole = memberFor(directoryQuery.directory, member.id)?.role;
+  const actionTargetFor = useCallback(
+    (row: SidebarRow): ChannelRowTarget | null => {
+      // 아직 DM 이 없는 에이전트 줄은 채널이 아니다(누르면 DM 을 연다) — 열 시트가 없다.
+      if (row.kind === 'agent') return null;
+      const channel = channelById.get(idKey(row.targetId));
+      if (channel === undefined) return null;
+      return {
+        channel,
+        title: row.title,
+        muted: row.muted,
+        selfRole,
+        readState: readStates.byChannel.get(idKey(row.targetId)) ?? null,
+      };
+    },
+    [channelById, selfRole, readStates.byChannel],
+  );
+
   // 섹션 머리의 ⋯ (시안 `.a-sec-h .ctl`). 장식이 아니라 문이다: 헤더에서 내려온
   // 두 검색(이름·메시지)과, DM 섹션에서는 에이전트 목록으로 간다.
   const openSectionMenu = useCallback(
@@ -758,6 +798,9 @@ export default function SidebarScreen({
                 selected={uuidEq(item.targetId, openChannelId ?? undefined)}
                 busy={openDm.isPending && openDm.variables === item.targetId}
                 onPress={() => onRowPress(item)}
+                actionTarget={actionTargetFor(item)}
+                onOpenActions={rowActions.open}
+                onRunAction={rowActions.run}
               />
             )
           }
@@ -770,6 +813,21 @@ export default function SidebarScreen({
           testID="sidebar-list"
         />
       )}
+
+      {rowActions.active !== null ? (
+        <ChannelActionSheet
+          target={rowActions.active}
+          items={channelRowActionItems(rowActions.active, rowActions.copied)}
+          confirmingLeave={rowActions.confirmingLeave}
+          isPending={rowActions.isPending}
+          error={rowActions.error}
+          leave={rowActions.leave}
+          onRun={key => rowActions.run(rowActions.active as ChannelRowTarget, key)}
+          onConfirmLeave={rowActions.confirmLeave}
+          onCancelLeave={rowActions.cancelLeave}
+          onClose={rowActions.close}
+        />
+      ) : null}
 
       {updateSheetOpen && updateOffer ? (
         <AppUpdateSheet
@@ -1031,16 +1089,38 @@ function Row({
   selected,
   busy,
   onPress,
+  actionTarget,
+  onOpenActions,
+  onRunAction,
 }: {
   row: SidebarRow;
   directory: Directory;
   selected: boolean;
   busy: boolean;
   onPress: () => void;
+  /** 이 줄이 길게 누르면 여는 시트의 대상. 채널이 아닌 줄(DM 이 아직 없는 에이전트)은 `null` — 무장하지 않는다. */
+  actionTarget: ChannelRowTarget | null;
+  onOpenActions: (target: ChannelRowTarget) => void;
+  onRunAction: (target: ChannelRowTarget, key: ChannelActionKey) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
   const status = useRowStatusDot(row, directory);
+  // 길게 누르기와 VoiceOver 로터가 **같은 항목 배열**을 쓴다(코어 표의 답). 손가락에만 있는 동작은 없다.
+  const actionItems = useMemo(
+    () => (actionTarget === null ? [] : channelRowActionItems(actionTarget)),
+    [actionTarget],
+  );
+  const accessibilityActions = useMemo(
+    () => channelRowAccessibilityActions(actionItems),
+    [actionItems],
+  );
+  const longPress = useLongPress({
+    enabled: actionTarget !== null && actionItems.length > 0,
+    onFire: () => {
+      if (actionTarget !== null) onOpenActions(actionTarget);
+    },
+  });
   const unread = row.unreadCount > 0 || row.mentionCount > 0;
   let lead: React.ReactNode;
   if (row.kind === 'channel') {
@@ -1090,7 +1170,15 @@ function Row({
           : `${row.accessibilityLabel}, ${status.label}`
       }
       accessibilityState={{selected, busy}}
+      accessibilityActions={accessibilityActions.length > 0 ? accessibilityActions : undefined}
+      onAccessibilityAction={event => {
+        const key = channelRowActionKeyOf(event.nativeEvent.actionName);
+        if (key !== null && actionTarget !== null) onRunAction(actionTarget, key);
+      }}
       onPress={onPress}
+      delayLongPress={longPress.delayLongPress}
+      onLongPress={longPress.onLongPress}
+      {...longPress.handlers}
       style={({pressed}) => [
         styles.row,
         selected && styles.rowSelected,

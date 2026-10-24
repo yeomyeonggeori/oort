@@ -14,15 +14,15 @@ import {
   channelMuteToggleBusyLabel,
   channelMuteToggleLabel,
   normalizeChannelTopic,
-} from "@momo/core/features/channels/model";
-import { copyLinkActionLabel } from "@momo/core/features/timeline/copyLabels";
+} from "./model";
+import { copyLinkActionLabel } from "../timeline/copyLabels";
 import {
   channelStarToggleLabel,
   SECTION_MOVE_GROUP_LABEL,
-} from "@momo/core/features/sidebar/sidebarSections";
-import { CHANNEL_MEMORY_SETTINGS_LABEL } from "@momo/core/features/memory/presentation";
-import { CHANNEL_GITHUB_LABEL } from "@momo/core/features/github/model";
-import type { Channel, MembershipRole } from "@momo/core/lib/api";
+} from "../sidebar/sidebarSections";
+import { CHANNEL_MEMORY_SETTINGS_LABEL } from "../memory/presentation";
+import { CHANNEL_GITHUB_LABEL } from "../github/model";
+import type { Channel, MembershipRole } from "../../lib/api";
 
 // =============================================================================
 // 채널 액션 인벤토리 (BT-1 / #1929).

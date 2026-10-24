@@ -70,12 +70,12 @@ import {
   type ChannelActionState,
   type ChannelActionSurface,
   type ChannelSectionChoice,
-} from "./channelActionModel";
+} from "@momo/core/features/channels/actionModel";
 
 // =============================================================================
 // 채널 액션 **실행부** 하나 (BT-1 / #1929).
 //
-// 이 파일이 있는 이유는 `channelActionModel.ts` 가 있는 이유와 같지만, 값이
+// 이 파일이 있는 이유는 코어 `channels/actionModel.ts` 가 있는 이유와 같지만, 값이
 // 다르다: 모델은 「무엇을 그리는가」를 한 곳에 두고, 여기는 「누르면 무슨 일이
 // 일어나는가」를 한 곳에 둔다. 헤더 ⋮ 메뉴가 갖고 있던 뮤테이션(알림 PUT ·
 // 나가기 DELETE)을 사이드바 행 메뉴가 복사했다면 다음 수리는 한쪽에만 들어갔을
@@ -458,7 +458,7 @@ export function useChannelActions({
 /**
  * 「섹션으로 이동」 — 제목 하나와 그 아래 라디오 행들 (ADR-0177 D4 / BT-4 #1932).
  *
- * 서브메뉴가 아닌 이유는 `channelActionModel.ts` 머리말에 있다(요약: 이 레포는
+ * 서브메뉴가 아닌 이유는 코어 `channels/actionModel.ts` 머리말에 있다(요약: 이 레포는
  * 서브메뉴를 이슈 번호까지 달아 금지하고, 그 문단이 대체물로 「화면에 남는 행들
  * 위의 제목」을 지정한다). 라디오인 이유는 배치가 **여럿 중 하나**라서다 -
  * 지금 속한 섹션이 `aria-checked` 로 들려야 하고, 그것은 체크 표시가 눈에
@@ -471,7 +471,7 @@ export function useChannelActions({
  * 그릇은 **표면이 고른다** (design-review #1932 N-1). 오늘 이 무리는 행 메뉴에만
  * 서고(`SURFACE_KEYS.header` 가 이 열쇠를 주지 않는다) 그래서 컨텍스트 메뉴를
  * 하드코딩해도 안전했다. 그런데 이 파일의 형제 컴포넌트는 전부 `surface` 로 갈라
- * 그릇을 고르고, `channelActionModel.ts` 는 확장점을 「열쇠 하나·분기 하나·
+ * 그릇을 고르고, 코어 `channels/actionModel.ts` 는 확장점을 「열쇠 하나·분기 하나·
  * SURFACE_KEYS 항목 하나」라고 광고한다. 그 한 줄을 믿고 헤더에 이 열쇠를 넣는
  * 사람은 Radix 루트 없는 컨텍스트 메뉴 조각을 렌더하게 된다 - 광고한 확장점이
  * 실제로 그만큼만 드는 것이 이 분기의 값이다.
@@ -624,7 +624,7 @@ function clusterRuns(items: ChannelActionItem[]): ChannelActionItem[][] {
  * 한 무리의 행들. 제목이 있는 무리(「복사」)는 제목 + 그룹으로, 없는 무리는 행만 선다.
  *
  * 제목은 서브메뉴가 아니라 **화면에 남는 행들 위의 제목**이다(위 `ChannelSectionMoveGroup` 과
- * 같은 문법, 이유는 `channelActionModel.ts` 머리말). 제목은 `useId` 로 자기 id 를 갖고 그룹이
+ * 같은 문법, 이유는 코어 `channels/actionModel.ts` 머리말). 제목은 `useId` 로 자기 id 를 갖고 그룹이
  * `aria-labelledby` 로 되짚는다 - Radix 의 Label 은 aria 를 하나도 걸어 주지 않는다.
  * 그릇은 `ChannelSectionMoveGroup` 처럼 **표면이 고른다**: 오늘 이 무리는 행 메뉴에만 서지만
  * 열쇠 하나를 헤더에 더하는 사람이 Radix 루트 없는 조각을 렌더하지 않게.
