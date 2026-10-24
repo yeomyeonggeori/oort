@@ -338,6 +338,9 @@ export default function ConversationScreen({
   const styles = useStyles(buildStyles);
   const {member, workspaceId} = useSession();
   const {rail, status: railStatus} = useRealtime();
+  // 뜬 연결 띠가 목록 위 가장자리를 가린 높이(#4292). 띠는 목록 위에 떠서 목록의 높이를 바꾸지 않는 대신, 같은 자리를 쓰는
+  // 목록의 위쪽 필이 그 밑에 쌓이도록 이 값을 `Timeline` 에 건넨다. 띠가 걷히면 0.
+  const [bannerInset, setBannerInset] = useState(0);
   const nowMs = useNow();
 
   const {directory, data: rosterMembers} = useDirectory(workspaceId);
@@ -1688,6 +1691,14 @@ export default function ConversationScreen({
           오른쪽 글자 링크에서 ⋮ 메뉴로 옮겼다 — 고정이 하나도 없어도 메뉴 항목은
           남는다(처음 고정하는 사람이 목록이 어디 있는지 배울 자리, 그때 열리는
           화면이 빈 상태로 그것을 말한다). 연결 상태는 부제가 아니라 머리 밑 띠다. */}
+      {/* 머리 · 요약 줄 · 목록을 **한 틀**에 담는다(#4292). 머리 뿌리는 연결 띠를 목록 위에 띄우려고 `zIndex` 를 가지는데(`ConversationHeader`
+          의 `root`), RN 새 아키텍처에서 `zIndex` 는 형제의 그리기·누르기 순서를 트리 순서보다 앞세운다(`ShellChrome` 의 「시안의 z-index 는 옮기지
+          않는다」, design-review B1). 머리가 `Screen` 직속이면 그 `zIndex` 가 아래 전면 덮개(스레드 · 고정 목록 · 작업 목록)와 겨뤄 열린 덮개
+          **위에** 머리가 그려지고 눌린다. 틀 안에 두면 겨루는 형제가 목록뿐이고, 덮개는 틀 **뒤** 형제(`zIndex` 없음)로 남아 층은 여전히 JSX
+          순서다. `collapsable={false}` 가 필수다: 스태킹 컨텍스트를 만들지 않는 뷰는(시각 속성이 없어 평탄화되는 틀은 물론, `testID` 만 있는 틀도) 후손이 부모의 정렬
+          목록으로 올라와 자식(머리, `zIndex` 1)이 `Screen` 직속 형제와 함께 정렬되고, 그러면 틀이 아무것도 가두지 못한다(시뮬레이터 캡처로 확인:
+          `measure/captures/steady4292-panel-*`). 안쪽 들여쓰기는 더하지 않았다 — 이 구간을 만지는 형제 이슈(#4305·#4300)와의 병합 충돌을 줄이려는 것이다. */}
+      <View collapsable={false} style={styles.column} testID="conversation-column">
       <ConversationHeader
         title={title}
         subtitle={headerSubtitle}
@@ -1699,6 +1710,7 @@ export default function ConversationScreen({
         onBack={onBack}
         menu={headerMenu}
         railStatus={railStatus}
+        onBannerInset={setBannerInset}
       />
       {/* 워크스페이스 전역 집계 한 줄. 살아 있는 작업이 없으면 **아무것도 그리지
           않는다** — 빈 띠도 남기지 않는 것이 이 줄의 계약이고, 그래서 이 자리는
@@ -1819,6 +1831,7 @@ export default function ConversationScreen({
               // 목록 꼬리는 0 이다(#4264): 도크 맨 위의 「작성 중」 예약 줄이 그 자리를 지켜서, 꼬리까지 두면
               // 마지막 행 → 알약 간격이 같은 공기를 두 번 센다. 근거와 산수는 `CONV.listPillGap`.
               tailGap={CONV.conversationTail}
+              topPillInset={bannerInset}
               // 위 「안읽음으로」·아래 「최신으로」 (#1892). 위 필의 N 은 위의
               // 동결 스냅샷(`unreadCount`) 그대로다 — 구분선과 같은 수.
               jumpPills
@@ -1921,6 +1934,7 @@ export default function ConversationScreen({
           </>
         }
       />
+      </View>
 
       {thread ? (
         <ThreadPanel
@@ -2018,6 +2032,8 @@ export default function ConversationScreen({
 
 const buildStyles = (color: Palette) => StyleSheet.create({
   notice: {padding: space.md},
+  /** 머리 · 요약 줄 · 목록의 틀(#4292). `Screen` 의 남은 높이를 다 쓴다 — 이 틀 안에서만 머리의 `zIndex` 가 겨룬다. */
+  column: {flex: 1},
   /**
    * 시안 A `.a-conv{background:linear-gradient(180deg,var(--bgTop) 0,var(--surface) 210px)}`
    * (다크는 `var(--bgMid) 220px`). 머리 유리가 비치는 바닥이다. 210/844 ≈ 25%.
