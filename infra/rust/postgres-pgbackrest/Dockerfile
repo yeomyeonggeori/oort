@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
 
-# PostgreSQL 18.4 + pgvector 0.8.5 is the production database base. Keep the
+# PostgreSQL >= 18.6 (SEC-06 #4244) + pgvector 0.8.7 is the production database base. Keep the
 # multi-platform manifest digest immutable; tags are only human-readable hints.
-FROM pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e AS packages-amd64
+FROM pgvector/pgvector:0.8.7-pg18-trixie@sha256:9d9c930220cb9bf2f956d10a8f909cf9973d9672ca0278aef2c1e6facccad2e0 AS packages-amd64
 
 # Package bytes are pinned independently of repository metadata so a republish
 # or moving package index fails at the Docker layer. The URLs are permanent
@@ -17,7 +17,7 @@ ADD --checksum=sha256:dbb1024c192d4d292b7cfa902b96076cfe81b56a5eed4fb28da36e8bf5
     https://snapshot.debian.org/archive/debian/20260905T205002Z/pool/main/libs/libssh2/libssh2-1t64_1.11.1-1%2Bdeb13u2_amd64.deb \
     /packages/libssh2.deb
 
-FROM pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e AS packages-arm64
+FROM pgvector/pgvector:0.8.7-pg18-trixie@sha256:9d9c930220cb9bf2f956d10a8f909cf9973d9672ca0278aef2c1e6facccad2e0 AS packages-arm64
 
 ADD --checksum=sha256:bb42e82a8c02a556b98e2002f4ea2aa14675d34627ba4025351e56c9c520fc20 \
     https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/pgbackrest/pgbackrest_2.59.0-1.pgdg13%2B1_arm64.deb \
@@ -26,7 +26,7 @@ ADD --checksum=sha256:245565f4ce5493d67a3c54e26bc3d9cf28b1b70eeb912de7cda61af522
     https://snapshot.debian.org/archive/debian/20260905T205002Z/pool/main/libs/libssh2/libssh2-1t64_1.11.1-1%2Bdeb13u2_arm64.deb \
     /packages/libssh2.deb
 
-FROM pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e AS runtime
+FROM pgvector/pgvector:0.8.7-pg18-trixie@sha256:9d9c930220cb9bf2f956d10a8f909cf9973d9672ca0278aef2c1e6facccad2e0 AS runtime
 
 ARG TARGETARCH
 ARG MOMO_BUILD_SHA=unknown
@@ -34,7 +34,7 @@ ARG MOMO_BUILD_SHA=unknown
 LABEL org.opencontainers.image.title="oort PostgreSQL 18 + pgBackRest" \
       org.opencontainers.image.description="Pinned pgvector PostgreSQL 18 base with pgBackRest; image copies LICENSE/NOTICE/index/generated bundle and verifies every dpkg copyright file exists. That inventory is evidence, not a legal-sufficiency claim." \
       org.opencontainers.image.revision="${MOMO_BUILD_SHA}" \
-      com.oor7.oort.postgres-base.digest="sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e" \
+      com.oor7.oort.postgres-base.digest="sha256:9d9c930220cb9bf2f956d10a8f909cf9973d9672ca0278aef2c1e6facccad2e0" \
       com.oor7.oort.pgbackrest.version="2.59.0-1.pgdg13+1" \
       com.oor7.oort.libssh2.version="1.11.1-1+deb13u2" \
       com.oor7.oort.additive-licenses="MIT AND BSD-3-Clause AND ISC"

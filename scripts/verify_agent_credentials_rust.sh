@@ -56,7 +56,7 @@ command -v openssl >/dev/null 2>&1 || {
 
 PROJECT_PREFIX="${AGENT_CREDENTIALS_RUST_PROJECT:-w1358-agent-credentials-verify}"
 PG_PORT="${AGENT_CREDENTIALS_RUST_PG_PORT:-24538}"
-PG_IMAGE="pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e"
+PG_IMAGE="pgvector/pgvector:0.8.7-pg18-trixie@sha256:9d9c930220cb9bf2f956d10a8f909cf9973d9672ca0278aef2c1e6facccad2e0"
 KEEP_STACK="${AGENT_CREDENTIALS_RUST_KEEP_STACK:-0}"
 OWNERSHIP_LABEL="com.momo.agent-credentials.invocation"
 DOCKER_BIN="${DOCKER_BIN:-docker}"
