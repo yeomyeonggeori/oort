@@ -338,7 +338,7 @@ last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
   - 근거: 성재 2026-10-24 「저거 정상은 아니잖아. 문제원인 파악하고 해결좀 해봐.」(DM 아래 「grok: 대기 1번째 17시간째 기다려요」 캡처) + 2026-10-22 위임 「결정 부탁드릴 것은 너가 권장으로 진행해봐.」
   - 이 증보는 결재 2(24시간 `unclaimed_expired`)를 **초인종이 닿았고 에이전트가 살아 있는 다른 증거가 없는 run에 한해** 앞당겨요. 닫힌 종결 코드 하나와 notifier 역할의 읽기 범위가 늘어요.
   - 그래서 ADR-0100에 따라 #4284 머지 조건이에요.
-- 독립 설계 검토 두 번(1회차 High 3, 2회차 High 2. 기록은 #4332)을 반영한 판이에요.
+- 독립 설계 검토 두 번(1회차 High 3, 2회차 High 2. 지적 요약은 #4332 코멘트)을 반영한 판이에요.
 - 표기: [V] 코드·운영 직접 확인 · **[추정]** 해석 · **[권장]** planner 결정(위임)
 
 ### 배경 — 운영 실측 (2026-10-24, 읽기 전용, 이슈 #4284 코멘트)
@@ -382,8 +382,9 @@ last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
 3. **수령 가능 job — oort 쪽 사실만**: 이 run의 전달 job이 지금 oort 쪽 조건으로는 수령 가능해요.
    - job: `method='gateway'`, `status='pending'`, `available_at ≤ now()`, live lease 없음
    - run: 승인 대기·종결이 아님
-   - 에이전트: 멤버 active, trial 정지 아님(`agent_provider_pin`과 활성 사람 수)
-   - 연결: `approved_scopes`에 `agent:jobs:read`, run 채널이 연결의 승인 채널(`hosted_connection_channel_ids`), 커넥터 소유자 조건
+   - 에이전트: 멤버 active(`member`)
+   - 커넥터 소유자 조건: 에이전트에 `agent.connector_owner_human_id`가 있으면 job의 `author_member_id`가 그 사람이어야 하고, trial 정지(`agent_provider_pin.kind='operator_env'`이면서 활성 사람 수가 1이 아님)가 아니어야 해요. 술어의 같은 하위 절(`gateway.rs` `trial_members_stop_sql!`)을 그대로 써요.
+   - 연결: `approved_scopes`에 `agent:jobs:read`, run 채널이 연결의 승인 채널(`hosted_connection_channel_ids`)
    - 게이트웨이 claim 술어(`momo-outbox/src/gateway.rs` `CLAIMABLE_JOB_PREDICATE`)에서 **토큰 조건과 연결 상태(1)를 뺀 부분집합**이에요. 토큰 조건은 토큰 행의 종류·폐기·만료·audience·scope예요.
    - 토큰 만료·갱신 누락은 에이전트 쪽 사실이라 보호가 아니에요. OAuth 접근 토큰은 30분이면 만료돼요(`momo-auth/src/hosted_oauth.rs`). 술어 전체를 쓰면 죽은 OAuth 연결의 run이 이 규칙에서 빠져요.
    - **live lease**는 `lease_owner IS NOT NULL AND lease_expires_at > now()`예요. lease를 되돌리는 reaper가 없어서 만료된 `lease_owner`가 job 행에 남아요. 만료된 lease는 수령 가능이에요(`gateway.rs` 술어와 같아요).
@@ -491,7 +492,7 @@ last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
 - 이미 있는 권한
   - `outbox`: 테이블 단위 SELECT·INSERT·UPDATE
   - `agent_run_event`: SELECT·INSERT
-  - `agent`·`member`·`membership`·`channel`: 테이블 단위 SELECT
+  - `agent`·`member`·`membership`·`channel`: 테이블 단위 SELECT. 커넥터 소유자 조건의 `agent.connector_owner_human_id`와 활성 사람 수(`member.kind·status·deleted_at`)는 여기로 읽어요.
 - 구현은 `infra/rust/sql/bootstrap_runtime_roles.sql`·`scripts/tests/test_notifier_role_grants.sh`·`prod_role_conformance_pg.rs`를 함께 고쳐요.
 - 열 목록은 구현 쿼리와 맞춰 확정해요. 이 목록보다 늘어나면 머지 전에 ADR 증보로 적어요.
 
