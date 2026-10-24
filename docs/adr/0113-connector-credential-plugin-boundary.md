@@ -352,7 +352,7 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
 - Status: **Accepted** (2026-10-24). 근거는 아래 owner 원문 두 줄과 2026-10-22 위임 원문이에요.
   - 매니페스트 와이어(D6 계약), 메시지 send 요청(새 필드 `apps`), 새 읽기 API(F8)가 생겨서, ADR-0100에 따라 이 기록이 구현 머지 조건이에요.
   - **이 증보는 모양과 진입만 바꿔요.** 실행 장소(E1)·배달(E3)·승인(E4)·근거(E5)·토큰 위치(D1-A)는 그대로예요. 사람별 연결과 토큰 금고는 ADR-0211(#4238) 몫이에요.
-  - 독립 설계 검토 1회차(2026-10-24, FAIL: High 3 — `props` 와이어, 해석기 데이터, 대화 멤버십)를 반영한 판이에요.
+  - 독립 설계 검토 1회차(2026-10-24, FAIL: High 3 — `props` 와이어, 해석기 데이터, 대화 멤버십)와 2회차(High 0, Medium N1~N5·Low N6~N9)를 반영한 판이에요.
 - owner 원문 (2026-10-24, Codex 데스크탑 「플러그인」 목록과 Gmail 상세 캡처와 함께):
   1. 「플러그인은 채널이나 DM 레벨에 위치해서 ChatGPT 데스크탑 앱처럼 접근및 표시가 되어야할 거 같은데. 그 부분도 체크해줘.」
   2. 「GPT 앱처럼 플러그인에 들어가면 저런 좋은 UI와 실제 해당 플러그인과 관련된 로고도 표시하고 … 이런식으로 보일 수 있게 작업해줄 수 있어 ?」
@@ -462,7 +462,7 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
 |---|---|---|
 | 인스턴스 운영자 | 앱 등록 상태·미연결 설치·만들기 | 설치·내 grant |
 | 워크스페이스 관리자 | 이 워크스페이스 연결 여부와 구독 안내(남의 설치 목록 없음, 0205 D3) | 설치·내 grant |
-| 멤버 | 켜짐/꺼짐 한 줄 | 설치 여부·내 grant |
+| 멤버 | 「GitHub 알림은 관리자가 켜요」 고정 안내 한 줄(서버 값 없음 — 멤버가 읽을 연결 상태 경로를 만들지 않아요) | 설치 여부·내 grant |
 
 - 「AI › 외부 연결」의 「GitHub 알림」 줄은 이 상세의 구획 1로 이어요. ADR-0205의 자격증명(인스턴스 App)과 이 ADR의 사람 grant는 섞지 않아요.
 
@@ -482,9 +482,14 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
   - 자격 에이전트 1 → 그 에이전트 멘션으로 보내요.
   - 자격 에이전트 2 이상 → 피커가 어느 에이전트인지 물어요. 앱마다 마지막 선택을 기억하는데, 저장 키는 (워크스페이스, 멤버, 앱)이에요. 보낼 때 현재 자격 집합과 다시 맞추고, 낡은 id면 다시 물어요.
 - **개인 앱 경고(E10)**: 개인 앱은 결과 정책이 개인인 앱(Gmail·Google Calendar·내 드라이브)이에요. 이런 앱을 사람 2명 이상인 대화에서 고르면, 보내기 전 칩 아래에 「답이 이 대화의 n명에게 보여요」 한 줄을 보여요. 막지는 않아요.
+  - 내 에이전트와의 1:1 DM이면 경고하지 않아요.
+  - 채널인데 인원을 모르면(`ChannelAudienceContext`가 `null`) 숫자 없이 「답이 이 채널에 보여요」를 보여요.
 - **요청 필드 `apps`** (가산, 공개 API): send 요청 본문의 새 필드 `apps: ["<pluginId>"…]`예요. `harnessRefine` 선례대로 전용 필드로 받고, 평평한 `props` 맵에 싣지 않아요.
-  - **서버 검증**: 작성자가 사람이고, 각 id가 이 워크스페이스에 설치된 활성 공식 앱이고, 중복을 뺀 뒤 3개 이하여야 해요. 어기면 400이에요. 조용히 버리지 않아서 클라이언트 버그를 숨기지 않아요.
-  - **저장**: 통과한 목록을 서버 소유 키 `props.requestedApps`(JSON 배열)로 써요. 클라이언트가 `props` 맵으로 보낸 같은 이름의 키는 버려요(서버 소유 키 목록에 더함).
+  - **서버 검증**: 작성자가 사람이고, 각 id가 이 워크스페이스에 설치된 활성 공식 앱이고, 중복을 뺀 뒤 3개 이하여야 해요.
+    - 어기면 코드 달린 400 `apps_unavailable`이에요(`ApiError::coded`). 클라이언트는 칩을 지우고 앱 목록을 새로 받고, 초안 본문은 남겨요. 조용히 버리지 않아서 클라이언트 버그를 숨기지 않아요.
+    - 검증은 send tx 안에서 **새 INSERT일 때만** 돌아요. 같은 `client_msg_id`의 재전송(`deduped`)은 `apps` 검증과 무관하게 저장본을 201로 돌려줘요(`routing` 허용목록 선례, `routes/messages.rs` 「201 in both the insert and the idempotent-retry case」). 그래서 첫 요청 뒤 앱이 해제돼도 재전송이 중복 전송을 만들지 않아요.
+  - **저장**: 통과한 목록을 서버 소유 키 `props.requestedApps`(JSON 배열)로 써요. 이 키는 `momo_agent::SERVER_OWNED_APP_PROPS_KEYS`(`app_notice.rs`)에 더해요. 보내기·웹훅 수신·게이트웨이 답이 함께 읽는 목록이라, 클라이언트 `props` 맵·외부 웹훅 발신자·게이트웨이 어느 쪽이 보낸 같은 이름의 키도 버려져요.
+  - 클라이언트는 **사람이 작성한 메시지에만** `requestedApps` 칩을 그려요(`appsTail.ts`가 반대 방향으로 이미 하는 방어와 같은 원칙).
   - **뜻**: 「요청자가 고른 앱」 표시예요.
     - 답의 사용 영수증 `appsUsed`(서버 소유, E8)와 다르고, grant도 아니에요.
     - 배달 판정과 `tool_grants` 계산은 이 필드를 읽지 않아요.
@@ -496,25 +501,33 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
 ### F6. 대화 속 표시 — 로고 칩
 
 - 에이전트 답의 「쓴 앱」 꼬리(E8·E10)를 로고 칩으로 그려요. 이름·횟수·권한 주인·「이 채널 n명에게 보여요」는 그대로예요.
-- 「붙은 앱」 칩(에이전트 행·프로필)은 **소유자 본인에게만** 보여요(F8과 같은 가시성). 다른 멤버는 남의 에이전트에 어떤 개인 앱이 붙었는지 보지 못해요.
+- 「붙은 앱」 칩(에이전트 행·프로필)은 **소유자 본인에게만** 보여요(F8과 같은 가시성). 다른 멤버는 남의 에이전트에 붙은 앱을 **목록으로는** 보지 못해요. 보낸 사람이 칩을 고른 메시지와 답의 「쓴 앱」 꼬리로 추론될 수는 있는데, 그건 E10이 받아들인 노출이에요.
 - 사람 메시지의 `props.requestedApps`는 본문 위 작은 로고 칩으로 보여요. 대화 멤버 모두에게 보이는데, 보낸 사람이 F5 경고를 보고 고른 표시라서예요.
 
 ### F7. 예시 문장 — 누르면 할 일이 생겨요
 
-- 상세의 예시 카드를 누르면, 그 앱의 실행 장소인 내 에이전트(F8)가 있을 때 기존 「DM 열기」(멱등, `dm_key`)로 그 에이전트와의 DM을 열어요. 그리고 컴포저에 문장과 앱 칩을 채워요. 보내지는 않아요.
+- 상세의 예시 카드를 누르면, 그 앱의 실행 장소인 내 에이전트(F8, `blocked = null`)가 있을 때 기존 「DM 열기」로 그 에이전트와의 DM을 열어요. 이 동작은 DM이 없으면 만들어요(`dm_key` 멱등 — 쓰기가 한 번 일어날 수 있어요). 그리고 컴포저에 문장과 앱 칩을 채워요. 보내지는 않아요.
 - 실행 장소가 없으면 「쓰려면」 단계판을 열어요. 예시 카드는 장식으로 두지 않아요.
 
 ### F8. 내 앱 실행 장소 투영 — 소유자에게만 (새 읽기 API)
 
-- `GET /v1/workspaces/{ws}/members/me/app-runtimes`(`require_human`)예요. 요청자가 소유한 에이전트 가운데 앱 실행 장소인 것만 돌려줘요.
-  - 모양: `[{ agentId, path: "hermes_trial" | "hosted_vendor", apps: [pluginId…], enforced: boolean }]`
-- **`hermes_trial`**: 요청자가 `connector_owner_human_id`인 co-hosted 에이전트예요. `enforced: true`예요.
-  - `apps` = 서버 환경변수 `OORT_COHOSTED_AGENT_CONNECTOR_APPS`의 앱 id ∩ 요청자의 활성 grant예요.
-  - 앱 id 목록은 비밀이 아니에요. 다른 설정값은 싣지 않아요.
-- **`hosted_vendor`**: 요청자가 `connector_owner_human_id`인 호스팅 벤더 에이전트예요. `apps` = 요청자의 활성 grant(설치된 공식 앱)이고, `enforced: false`예요.
-  - 화면은 칩 피커에 E3 문장 「앱 권한은 ○○가 관리해요. oort는 허용 기록만 남겨요」를 그대로 보여요.
-- 내 맥 경로(`mac`)는 `PLUGIN_MAC_APP_USE_READY`가 참이 될 때(ADR-0188 §8.9) 이 모양에 더해요. v1 응답에는 없어요.
+- `GET /v1/workspaces/{ws}/members/me/app-runtimes`(`require_human`)예요. 요청자가 소유한 에이전트 가운데 아래 판별식에 맞는 것만 돌려줘요.
+  - 모양: `[{ agentId, path: "hermes_trial" | "hosted_vendor", apps: [pluginId…], enforced: boolean, blocked: null | "attest" | "members" | "apps" | "connection" | "channel" | "paused" }]`
+- **공통 술어**: `member.kind = 'agent' AND status = 'active' AND deleted_at IS NULL`(표시를 켜는 PUT과 같아요), `connector_owner_human_id = 요청자`예요.
+  - 「활성 grant」는 요청자의 `plugin_grant` ⋈ `workspace_plugin_install`(설치 `enabled AND revoked_at IS NULL`)이에요. `TRIAL_FACTS_SQL`(`connector_trial.rs`)과 같은 조인이에요.
+- **`path` 판별식**:
+  - `hermes_trial` = 공통 술어 AND `agent_provider_pin.kind = 'operator_env'`(`TRIAL_FACTS_SQL`과 같은 술어)예요. `enforced: true`예요.
+    - `apps` = 서버 환경변수 `OORT_COHOSTED_AGENT_CONNECTOR_APPS`의 앱 id ∩ 요청자 활성 grant예요. **언제나 요청자 활성 grant의 부분집합**이라 운영자 설정 전체가 드러나지 않아요. 앱 id는 공개 카탈로그 id라 비밀이 아니에요.
+  - `hosted_vendor` = 공통 술어 AND 호스팅 연결이 있음 AND personal agent 아님 AND 구독 하네스 아님이에요. `enforced: false`이고, `apps` = 요청자 활성 grant예요.
+    - 화면은 칩 피커에 E3 문장 「앱 권한은 ○○가 관리해요. oort는 허용 기록만 남겨요」를 그대로 보여요.
+  - 그 밖은 v1 응답에 없어요. 표시를 켠 personal agent(내 맥 하네스 — 서버가 메시지로 시작하지 않음)와 구독 하네스가 여기에 들어요. 내 맥 경로(`mac`)는 `PLUGIN_MAC_APP_USE_READY`가 참이 될 때(ADR-0188 §8.9) 더해요.
+- **`blocked` — 「능력」이 아니라 「지금 배달되나」**: 배달 관문(`agent_mentions.rs` `delivery_gate`)과 **같은 순수 함수**로 채워요. `null`이 아니면 F5에서 그 에이전트는 자격이 없고, 칩 피커는 이유를 사람 말로 보여요.
+  - `hermes_trial`: `connector_trial_stop`의 결과예요. `attest`(선언 불완전), `members`(활성 사람 ≠ 1), `apps`(운영자가 켠 앱 중 소유자 grant가 없는 것이 있음 — 배달은 「켠 앱 ⊆ grant」)가 있어요.
+  - `hosted_vendor`: `connection`(활성 연결 없음), `channel`(이 채널 미승인 — 대화마다 달라서 F5가 대화 맥락과 함께 봐요), `paused`(일시정지)예요.
+  - 문장은 소유자(팀원)에게 맞는 말로 써요. 운영자용 문장(「Hermes의 앱 연결을 지우거나…」)을 그대로 보이지 않아요.
 - **가시성**: 요청자 본인 소유 에이전트만 실어요. 남의 에이전트와 남의 grant는 이 응답에 절대 없어요. 로스터·에이전트 DTO에는 싣지 않아요. 실으면 모든 멤버가 「누구의 에이전트에 어떤 개인 앱이 붙었나」를 보게 되기 때문이에요.
+- **권한 층**: 이 경로는 에이전트 경로 허용목록(`momo-auth/src/agent_scope.rs`)에 넣지 않아서 에이전트 bearer는 403이에요. `require_human`이 두 번째 층이에요.
+- **옛 서버**: 클라이언트는 코어 `serverSurfaces.ts`에 표면 키 `appRuntimes`를 두고, F8이 404·405·501이면(`serverSaysAbsent`) 칩을 세우지 않고 `apps`도 보내지 않아요. 옛 서버의 send DTO는 `deny_unknown_fields`라 `apps`를 400으로 거절하기 때문이에요.
 
 ### 바뀌지 않는 것
 
@@ -526,12 +539,12 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
 
 ### 구현 슬라이스 (한 슬라이스 = 한 이슈)
 
-- **#4313 (engine)**: 증보 3의 서버 계약 전부예요.
+- **#4313 (engine)**: 증보 3의 서버 계약 전부예요. 공식 목록 픽스처 `server/Fixtures/plugin-wire/catalog.json`에 `logoKey`를 실어 수용 기준 4가 시드를 덮게 해요.
   - F1: 검증기 필드, `starterPrompts.tool` 검사, 시드, `publisher.name` DTO, 롤백 SQL
   - F5: 요청 필드 `apps`와 서버 소유 키 `requestedApps`
   - F8: 투영
   - `openapi.yaml`, 코어 타입·파서, 서버 시험
-- **#4314 (uxui)**: F2·F3·F4·F7이에요. #4200을 흡수해요.
+- **#4314 (uxui, #4313 뒤)**: F2·F3·F4·F7과 수용 기준 4·11·12예요. #4200을 흡수해요.
 - **#4315 (uxui, #4313 뒤)**: F5 피커·칩·해석·직렬화·개인 앱 경고, F6 로고 칩, `registry.ts:502-505` 보류 주석 정리, 클라이언트 시험이에요.
 - 폰은 후속 이슈예요. 읽기 목록·상세에 로고를 먼저 달고, 컴포저 피커는 입력창 두 상태(#4305) 뒤에 해요.
 
@@ -542,17 +555,24 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
 3. 시드 migration이 `manifest`와 `manifest_digest`를 함께 갱신해요(기존 `computed_digest` 시험).
 4. 시드 `logoKey` ⊆ 번들 자산 ∪ 글자 타일 목록이에요(클라이언트 시험, 서버 픽스처 공유). 모르는 `logoKey`는 글자 타일로 그려요.
 5. `apps` 요청 필드:
-   - 사람 아닌 작성자·미설치·비공식·중복 뺀 뒤 4개 이상이면 400이에요.
+   - 사람 아닌 작성자·미설치·비공식·중복 뺀 뒤 4개 이상이면 `apps_unavailable` 400이에요.
+   - 설치 해제 뒤 같은 `client_msg_id`로 재전송하면 201이고 `requestedApps`가 첫 저장본과 같아요.
+   - 웹훅 수신·게이트웨이 답이 실은 `requestedApps`도 버려져요.
    - 통과하면 `props.requestedApps`에 중복 없이 저장돼요.
    - `props` 맵으로 보낸 `requestedApps`는 버려져요.
 6. `props.requestedApps`를 바꿔도 배달 판정과 `tool_grants`가 같아요. 사보타주: 배달 가드가 `requestedApps`가 있으면 소유자 검사를 건너뛰게 하면 빨강이에요.
-7. F8 투영에 남의 에이전트와 남의 grant가 없어요. 다른 멤버 소유의 `owner_only` 하네스 에이전트와 커넥터 에이전트 픽스처를 넣어 재요. 사보타주: 소유자 술어를 지우면 빨강이에요.
+7. F8 투영:
+   - 남의 에이전트와 남의 grant가 없어요. 다른 멤버 소유의 `owner_only` 하네스 에이전트와 커넥터 에이전트 픽스처를 넣어 재요. 사보타주: 소유자 술어를 지우면 빨강이에요(정지된 시험은 목록에 남고 `blocked`를 가지므로 이 사보타주가 의미를 가져요).
+   - `hermes_trial.apps` ⊆ 요청자 활성 grant예요.
+   - 표시를 켠 personal agent는 응답에 없어요.
+   - 정지된 시험·연결 없는 호스팅 에이전트는 `blocked`가 `null`이 아니에요.
+   - 에이전트 bearer는 403이에요(경로 허용목록·`require_human` 두 층 각각).
 8. 해석(UI 시험):
    - 실행 장소가 있지만 대화 멤버가 아니면 메시지 POST가 0이고 「DM에서 쓰기」가 서요.
    - 실행 장소가 없으면 POST가 0이고 「앱 필요」 카드가 서요.
 9. 보낸 본문에 앱 이름 글자(`@Gmail`)가 없고 자격 에이전트 멘션만 있어요(UI 시험).
 10. 개인 앱을 사람 2명 이상인 대화에서 고르면 보내기 전 노출 줄이 서요. 문구를 지우면 UI 시험이 빨개요.
-11. GitHub 한 타일: 멤버 응답과 화면에 GitHub 계정 login·installation_id가 없어요.
+11. GitHub 한 타일: 멤버 화면에 GitHub 계정 login·installation_id가 없고, 멤버 행은 고정 안내 한 줄이에요(멤버가 관리자 API를 부르지 않음 — 403을 장애로 그리지 않음).
 12. 예시 카드는 실행 장소가 있으면 DM 컴포저를 채우고 보내지 않아요. 없으면 「쓰려면」을 열어요(UI 시험).
 
 ### 아직 열려 있는 것
