@@ -94,7 +94,7 @@ describe('프로필 시트 → 프로필 사진 장', () => {
   it('큰 얼굴을 누르면 사진 장이 열리고, 「‹ 프로필」로 돌아온다', () => {
     mount();
     expect(screen.queryByTestId('avatar-page')).toBeNull();
-    fireEvent.press(screen.getByTestId('self-profile-avatar'));
+    fireEvent.press(screen.getByTestId('self-profile-avatar', {includeHiddenElements: true}));
     expect(screen.getByTestId('avatar-page')).toBeTruthy();
     expect(screen.getByText('프로필 사진')).toBeTruthy();
     fireEvent.press(screen.getByTestId('profile-back'));
@@ -108,9 +108,14 @@ describe('프로필 시트 → 프로필 사진 장', () => {
     expect(screen.getByTestId('avatar-page')).toBeTruthy();
   });
 
-  it('두 입구 모두 이름이 있어 화면 낭독이 「프로필 사진 바꾸기」라고 읽는다', () => {
+  it('낭독은 「사진 바꾸기」 줄 하나만 읽고 얼굴 탭은 낭독에서 숨는다(같은 단추 두 번 읽기 방지)', () => {
     mount();
-    expect(screen.getByTestId('self-profile-avatar').props.accessibilityLabel).toBe('프로필 사진 바꾸기');
     expect(screen.getByTestId('self-profile-avatar-change').props.accessibilityLabel).toBe('프로필 사진 바꾸기');
+    const face = screen.getByTestId('self-profile-avatar', {includeHiddenElements: true});
+    expect(face.props.accessible).toBe(false);
+    expect(face.props.accessibilityElementsHidden).toBe(true);
+    // 눈으로 누르는 길은 그대로 같은 장을 연다.
+    fireEvent.press(face);
+    expect(screen.getByTestId('avatar-page')).toBeTruthy();
   });
 });

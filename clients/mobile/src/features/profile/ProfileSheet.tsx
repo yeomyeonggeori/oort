@@ -530,8 +530,12 @@ export function ProfilePage({
         {/* 머리의 큰 얼굴과 그 밑의 「사진 바꾸기」가 같은 장을 연다(#4384). 얼굴만 누르게
             두면 바꿀 수 있다는 것을 아는 사람만 바꾼다 — owner 가 「수단이 없다」고 했다. */}
         <Pressable
+          // 낭독은 아래 「사진 바꾸기」 줄이 맡는다 — 같은 단추를 두 번 읽지 않게 얼굴은 눈으로 누르는 길이다.
+          accessible={onOpenAvatar === undefined}
           accessibilityRole="button"
-          accessibilityLabel="프로필 사진 바꾸기"
+          accessibilityLabel={onOpenAvatar === undefined ? '프로필 사진(흐림)' : undefined}
+          importantForAccessibility={onOpenAvatar === undefined ? 'auto' : 'no-hide-descendants'}
+          accessibilityElementsHidden={onOpenAvatar !== undefined}
           disabled={onOpenAvatar === undefined}
           onPress={onOpenAvatar}
           style={({pressed}) => [styles.heroRing, pressed && styles.pressed]}
@@ -1092,7 +1096,7 @@ const buildStyles = (color: Palette) =>
       borderWidth: 1,
       borderColor: color.textFaint,
     },
-    // 「사진 바꾸기」 — 44 의 눌림 칸, 글자는 시트의 다른 텍스트 단추(`navButtonLabel`)와 같다.
+    // 「사진 바꾸기」 — 44 의 눌림 칸. 위 얼굴과 사이를 한 칸(`space.sm`) 좁힌다(폰 선례: `WorkConversation` `rowTight` 의 음수 마진), 글자는 시트의 다른 텍스트 단추(`navButtonLabel`)와 같다.
     photoLink: {
       minHeight: TOUCH_TARGET,
       justifyContent: 'center',
