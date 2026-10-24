@@ -136,11 +136,9 @@ describe("「닫은 대화」 목록에 드는 줄 (D11)", () => {
 });
 
 describe("「닫은 대화」 문구 (D11)", () => {
-  it("이유 줄은 이름을 되풀이하지 않는다: 닫음은 「내가 닫았어요」, 나간 상대는 숨은 까닭(안 읽은 메시지 없음)을 말한다", () => {
+  it("이유 줄: 닫음은 「내가 닫았어요」, 나간 상대는 원인(상대가 나갔다)과 조건(안 읽은 메시지가 없다)을 함께 말한다", () => {
     expect(dmClosedReasonLabel("closed")).toBe("내가 닫았어요");
-    expect(dmClosedReasonLabel("gone")).toBe("안 읽은 메시지가 없어요");
-    // 이름 줄이 이미 「나간 멤버」다.
-    expect(dmClosedReasonLabel("gone")).not.toContain("나간");
+    expect(dmClosedReasonLabel("gone")).toBe("상대가 나갔고 안 읽은 메시지가 없어요");
   });
 
   it("동작 낱말: 닫은 대화는 「다시 열기」, 나간 상대는 풀 닫힘이 없어 「열기」", () => {

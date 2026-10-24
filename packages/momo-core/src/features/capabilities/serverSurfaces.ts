@@ -588,8 +588,8 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
     fallback: "이 기기에서만 대화를 닫아 둘 수 있어요.",
     measured:
       "2026-10-24 PR #4335(#4227) 소스 대조(runtime-unverified, track/uxui 에는 엔진이 없다): " +
-      "server-rust/bins/momo-server/src/routes/dm_closure.rs 가 PUT/DELETE …/channels/{ch}/closure 를 " +
-      "등록하고, GET …/read-state 행이 latest_readable_seq 와 요청자 본인의 closed_at_seq 를 싣는다. " +
+      "server-rust/bins/momo-server/src/routes/dm_closure.rs가 PUT/DELETE …/channels/{ch}/closure를 " +
+      "등록하고, GET …/read-state 행이 latest_readable_seq와 요청자 본인의 closed_at_seq를 싣는다. " +
       "PUT read-state 응답과 실시간 프레임에는 두 필드가 없다(D10).",
   },
 };

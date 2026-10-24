@@ -372,6 +372,6 @@ describe("읽지 않음으로 표시 · DM 닫기 낱말", () => {
 
   it("호버 X 의 이름은 어느 대화인지 말한다(행의 링크 이름 꼴: 이름, 뜻)", () => {
     expect(dmCloseButtonLabel("이도현")).toBe("이도현, 대화 닫기");
-    expect(dmCloseButtonLabel("kwak의 Claude")).toBe("kwak의 Claude, 대화 닫기");
+    expect(dmCloseButtonLabel("하윤의 Claude")).toBe("하윤의 Claude, 대화 닫기");
   });
 });

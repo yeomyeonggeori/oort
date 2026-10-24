@@ -24,7 +24,7 @@ import {
 
 // =============================================================================
 // DM 구역 머리 「⋯ › 닫은 대화」 (ADR-0177 증보 D11, #4228). 「나간 멤버와의 대화 N개」 줄을 대신한다: 줄은 지울 수 없는 채로
-// 구역 끝에 서 있었다(성재 2026-10-24). 이 목록은 내가 **닫은** 대화와 상대가 **나간** 대화를 「다시 열기」와 함께 보여 주고,
+// 구역 끝에 서 있었다(owner 2026-10-24). 이 목록은 내가 **닫은** 대화와 상대가 **나간** 대화를 「다시 열기」와 함께 보여 주고,
 // 지금 사이드바에 보이는 대화는 넣지 않는다. 호버 클러스터의 규약(`data-section-action`)을 입고, 닫은 대화가 없으면 문이 서지 않는다.
 // =============================================================================
 
@@ -99,7 +99,7 @@ export function DmClosedMenu({
               {DM_CLOSED_LIST_EMPTY}
             </p>
           )}
-          <ul className="flex max-h-[50vh] flex-col overflow-y-auto" data-testid="dm-closed-list-items">
+          <ul className="flex max-h-pane flex-col overflow-y-auto" data-testid="dm-closed-list-items">
             {items.map((item) => (
               <li
                 key={item.id}

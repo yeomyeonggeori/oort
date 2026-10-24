@@ -146,11 +146,11 @@ export const DM_REOPEN_LABEL = "다시 열기";
 export const DM_CLOSED_LIST_HINT = "새 메시지가 오면 닫은 대화는 사이드바로 돌아와요.";
 
 /**
- * 목록 행의 이유 줄. `closed` 는 내가 닫았다. `gone` 은 이름이 이미 「나간 멤버」라 이유를 되풀이하지 않고, 왜 숨었는지를 말한다:
- * 상대가 나갔고 안 읽은 메시지가 없다.
+ * 목록 행의 이유 줄. `closed` 는 내가 닫았다. `gone` 은 왜 숨었는지를 원인까지 말한다: 상대가 나갔고(원인) 안 읽은 메시지가 없다
+ * (조건). 이름 줄의 「나간 멤버」만으로는 원인이 이름에 기대고, 이 줄이 그 뒤를 잇는다.
  */
 export function dmClosedReasonLabel(reason: "closed" | "gone"): string {
-  return reason === "closed" ? "내가 닫았어요" : "안 읽은 메시지가 없어요";
+  return reason === "closed" ? "내가 닫았어요" : "상대가 나갔고 안 읽은 메시지가 없어요";
 }
 
 /**

@@ -86,8 +86,10 @@ const wireRead = (id) => ({
 });
 const wireReadPut = (id) => {
   // `PUT read-state` 응답에는 두 필드가 없다(D10). 앱이 이것으로 닫힘을 지우면 안 된다.
-  const { latest_readable_seq, closed_at_seq, ...rest } = wireRead(id);
-  return rest;
+  const full = wireRead(id);
+  delete full.latest_readable_seq;
+  delete full.closed_at_seq;
+  return full;
 };
 
 async function installMocks(context) {

@@ -84,7 +84,7 @@ describe("DmClosedMenu", () => {
     expect(rows[0]?.textContent).toContain("이도현");
     expect(rows[0]?.textContent).toContain("내가 닫았어요");
     expect(rows[1]?.textContent).toContain("나간 멤버");
-    expect(rows[1]?.textContent).toContain("안 읽은 메시지가 없어요");
+    expect(rows[1]?.textContent).toContain("상대가 나갔고 안 읽은 메시지가 없어요");
     const buttons = [...document.querySelectorAll<HTMLElement>('[data-testid="dm-closed-list-reopen"]')];
     expect(buttons.map((button) => button.textContent)).toEqual(["다시 열기", "열기"]);
     expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual([
