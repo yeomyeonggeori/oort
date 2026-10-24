@@ -20636,3 +20636,163 @@ async fn member_avatar_set_human_upload_and_removal_coexist_with_an_agent_set_im
         .unwrap();
     assert_eq!(gone, 0, "removing the picture removes the stored image");
 }
+
+/// **A person talks to the agent in a DM** — the way a phone user does. Hosted agents cover
+/// their owner's 1:1 DM automatically (`hosted_connection_channel_ids`, ADR-0162 증보 2 B2),
+/// so the run's channel is the DM and the boundary for the picture is that conversation:
+/// the person's file in the DM works, their file in another conversation does not, and the
+/// approval is still theirs alone.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn member_avatar_set_works_in_a_dm_with_the_agent_and_stays_inside_it() {
+    let w = world_4385().await;
+    let (su, client, base, fixture) = (&w.su, &w.client, &w.base, &w.fixture);
+    let ws = fixture.workspace;
+    // The agent's owner is the person whose 1:1 DM is covered automatically — and only when
+    // they also confirmed the connection (ADR-0162 증보 2 B6): the fixture's human did both.
+    set_agent_owner_3708(su, fixture.hosted_agent, Some(fixture.human)).await;
+    let person = fixture.human;
+    let person_jwt = fixture.human_jwt.clone();
+    for id in ["dm-mine", "channel-mine"] {
+        w.drive
+            .files
+            .lock()
+            .unwrap()
+            .insert(id.into(), tiny_png_3787());
+    }
+    let dm = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO channel(id, workspace_id, kind, name, dm_key) VALUES($1,$2,'dm',NULL,$3)",
+    )
+    .bind(dm)
+    .bind(ws)
+    .bind(format!("dm-{}", dm.simple()))
+    .execute(su)
+    .await
+    .expect("seed a DM channel");
+    sqlx::query("INSERT INTO channel_seq(channel_id, workspace_id, last_seq) VALUES($1,$2,0)")
+        .bind(dm)
+        .bind(ws)
+        .execute(su)
+        .await
+        .unwrap();
+    for member in [person, fixture.hosted_agent] {
+        sqlx::query("INSERT INTO membership(workspace_id, channel_id, member_id) VALUES($1,$2,$3)")
+            .bind(ws)
+            .bind(dm)
+            .bind(member)
+            .execute(su)
+            .await
+            .expect("seat the DM");
+    }
+    let in_dm = seed_message_4385(su, ws, dm, person, "내 사진").await;
+    let in_channel = seed_message_4385(su, ws, fixture.channel, person, "다른 곳의 내 사진").await;
+    let dm_file = seed_attachment_4385(
+        su,
+        ws,
+        dm,
+        person,
+        Some(in_dm),
+        "dm-mine",
+        "image/png",
+        "complete",
+    )
+    .await;
+    let channel_file = seed_attachment_4385(
+        su,
+        ws,
+        fixture.channel,
+        person,
+        Some(in_channel),
+        "channel-mine",
+        "image/png",
+        "complete",
+    )
+    .await;
+
+    // The person writes in the DM (no mention needed there); the agent claims the job.
+    let propose_in_dm = |attachment: Uuid| {
+        let (client, base, jwt) = (client.clone(), base.clone(), person_jwt.clone());
+        async move {
+            let sent: Value = client
+                .post(format!("{base}/v1/workspaces/{ws}/channels/{dm}/messages"))
+                .bearer_auth(&jwt)
+                .json(&json!({
+                    "clientMsgId": Uuid::new_v4(),
+                    "body": "이걸로 내 프로필 사진 바꿔줘"
+                }))
+                .send()
+                .await
+                .expect("DM send")
+                .json()
+                .await
+                .expect("DM body");
+            assert!(sent["id"].is_string(), "{sent}");
+            let (status, claimed) = call(
+                &client,
+                &base,
+                &fixture.hosted_bearer,
+                "oort_jobs_claim",
+                json!({"limit": 10}),
+            )
+            .await;
+            assert_eq!(status, 200, "{claimed}");
+            let job = &structured(&claimed)["jobs"][0];
+            assert!(
+                job["leaseHandle"].is_string(),
+                "the DM message reached the agent as a job: {claimed}"
+            );
+            let handle = job["leaseHandle"].as_str().unwrap().to_string();
+            let (status, answer) = call(
+                &client,
+                &base,
+                &fixture.hosted_bearer,
+                "oort_action_propose",
+                json!({"handle": handle, "actionId": "member.avatar.set",
+                       "args": {"attachmentId": attachment.to_string()}}),
+            )
+            .await;
+            remember_handle_3789(&answer, &handle);
+            (status, answer)
+        }
+    };
+    // Another conversation's file is refused even though it is the person's own…
+    let (status, refused) = propose_in_dm(channel_file).await;
+    assert_eq!(status, 400, "{refused}");
+    assert_eq!(staged_rows_3787(su, ws).await, 0);
+    // …and their file in the DM is accepted, staged for them.
+    let (status, proposed) = propose_in_dm(dm_file).await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let (staged_for, state): (Uuid, String) =
+        sqlx::query_as("SELECT member_id, status FROM agent_avatar_image WHERE approval_id=$1")
+            .bind(approval)
+            .fetch_one(su)
+            .await
+            .unwrap();
+    assert_eq!((staged_for, state.as_str()), (person, "staged"));
+    // Somebody else cannot decide it; the person can.
+    let (status, _h, refused) = decide_as(
+        client,
+        base,
+        ws,
+        &w.other_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 403, "{refused}");
+    let (status, _h, approved) = decide_as(
+        client,
+        base,
+        ws,
+        &person_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert!(member_pointers_4385(su, person).await.1.is_some());
+}

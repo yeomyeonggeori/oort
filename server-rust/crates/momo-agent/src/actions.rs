@@ -737,14 +737,6 @@ fn member_avatar_set_args_schema() -> Value {
     })
 }
 
-/// What an agent is told about `member.avatar.set` (the 제안 방법 지시문): shipped in the
-/// registry so the Agent Port's tool description, the catalog and the ADR say one thing.
-pub const MEMBER_AVATAR_SET_PROMPT_LINE: &str = "누군가 사진을 보내며 「이걸로 내 프로필 사진 바꿔줘」라고 하면 `member.avatar.set`으로 \
-제안해(`attachmentId`는 `oort_conversation_read`의 `imageAttachments[].id`, 그 사람이 이 대화에 보낸 사진 하나). \
-대상은 말을 건 본인 한 명뿐이고 다른 사람의 사진이나 다른 대화의 사진은 쓸 수 없어. 사진은 그 사람이 \
-카드에서 직접 보고 승인해야 바뀌고, 큰 사진(한 변 2048px 초과)·GIF·움직이는 이미지는 거절되니 \
-그땐 사진을 줄여 다시 보내 달라고 부탁해.";
-
 /// The card row naming whose picture changes. Both halves are the server's (the person
 /// the run was raised by, read from the member row).
 pub fn member_avatar_set_rows(display_name: &str, handle: &str, had_avatar: bool) -> Vec<Value> {
@@ -3228,8 +3220,6 @@ mod tests {
             .keys()
             .collect();
         assert_eq!(keys, ["attachmentId"]);
-        assert!(MEMBER_AVATAR_SET_PROMPT_LINE.contains(ACTION_MEMBER_AVATAR_SET));
-        assert!(MEMBER_AVATAR_SET_PROMPT_LINE.contains("imageAttachments"));
         // The sentence an approver reads names whose authority it is.
         assert!(proposal_summary(action).contains("사진 주인 본인"));
     }
