@@ -258,6 +258,7 @@ export type NavAction =
   | {type: 'openHostedConnection'; connection: OpenHostedConnection}
   | {type: 'openAppsList'}
   | {type: 'openApp'; pluginId: string; name: string}
+  | {type: 'channelLeft'; channelId: string}
   | {type: 'back'}
   | {type: 'reset'};
 
@@ -393,6 +394,16 @@ export function navReducer(state: NavState, action: NavAction): NavState {
         ...state,
         apps: {kind: 'detail', pluginId: action.pluginId, name: action.name},
       };
+    case 'channelLeft':
+      // 열려 있는 채널을 **내가 나갔다** (#4229). 웹은 `/` 로 착지한다. 폰의 같은 자리는 그 대화 층을 걷어
+      // 아래 화면(사이드바)으로 돌아가는 것이다. 다른 채널이 열려 있으면 건드리지 않는다.
+      if (
+        state.conversation === null ||
+        state.conversation.channelId.toLowerCase() !== action.channelId.toLowerCase()
+      ) {
+        return state;
+      }
+      return {...state, conversation: null};
     case 'back':
       // One step at a time, innermost first: a conversation opened FROM a search
       // result (or from an agent's own screen) goes back to where it was opened

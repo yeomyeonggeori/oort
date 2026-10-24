@@ -338,6 +338,9 @@ export default function ConversationScreen({
   const styles = useStyles(buildStyles);
   const {member, workspaceId} = useSession();
   const {rail, status: railStatus} = useRealtime();
+  // 뜬 연결 띠가 목록 위 가장자리를 가린 높이(#4292). 띠는 목록 위에 떠서 목록의 높이를 바꾸지 않는 대신, 같은 자리를 쓰는
+  // 목록의 위쪽 필이 그 밑에 쌓이도록 이 값을 `Timeline` 에 건넨다. 띠가 걷히면 0.
+  const [bannerInset, setBannerInset] = useState(0);
   const nowMs = useNow();
 
   const {directory, data: rosterMembers} = useDirectory(workspaceId);
@@ -1493,7 +1496,7 @@ export default function ConversationScreen({
   //   같은 방·첫 페이지 오는 중 그 읽기는 탭 **앞에** 떠났다 → 첫 페이지가 온 뒤
   //                            꼬리를 다시 읽는다(R3 N-3, `'awaiting-head'`).
   //   같은 방·들고 있음        꼬리를 다시 읽고(`catchUp`) 그 답으로 「없다」를 판정한다.
-  //   그 읽기가 실패           말하지 않는다. 레일이 다시 붙으면(복구 표지) 탭 뒤에
+  //   그 읽기가 실패           말하지 않는다. 레일이 다시 붙으면(재구독) 탭 뒤에
   //                            **다시 읽는다** — 판정은 그 답이 한다. 보이지 않는
   //                            기다림이라 세션 앵커와 같은 30초 시계를 달고, 다 되면
   //                            조용히 접는다.
@@ -1502,15 +1505,18 @@ export default function ConversationScreen({
   // 늦게 온 답이 잡은 목록을 옮기면 안 된다. `cancelJump` 의 「닫기가 곧 취소」와 같은
   // 규율이고, 이 기다림에는 상자가 없으니 손가락이 그 닫기다.
   const catchUpTimeline = timeline.catchUp;
-  const recoveryMarkCount = timeline.recoveryMarkers.length;
+  // 「레일이 다시 붙었다」를 세는 값. **복구 표지의 개수가 아니다**(#4292): 표지는 「메운 것이 있을 때만」 서므로 아무것도
+  // 놓치지 않은 재연결에는 서지 않고, 서 있던 표지도 새 메시지가 오면 걷힌다 — 개수는 재연결을 세는 값이 아니다. 재구독 횟수는
+  // 재연결이 일어날 때마다 곧바로 하나 는다.
+  const railRejoinCount = timeline.resume.resubscribeCount;
   const [landingRead, setLandingRead] = useState<{
     token: number;
     state: 'awaiting-head' | 'reading' | 'waiting-rail' | 'fresh';
   } | null>(null);
   const landingReadRef = useRef(landingRead);
   landingReadRef.current = landingRead;
-  /** 탭을 처음 본 순간의 복구 표지 수 — 그 뒤에 늘면 레일이 다시 붙은 것이다. */
-  const landingSightRef = useRef<{token: number; markers: number} | null>(null);
+  /** 탭을 처음 본 순간의 재구독 횟수 — 그 뒤에 늘면 레일이 다시 붙은 것이다. */
+  const landingSightRef = useRef<{token: number; rejoins: number} | null>(null);
   /** 앞 커밋까지 이 화면이 보이던 방 — 탭과 함께 방이 바뀌었는가(N-3). */
   const shownChannelRef = useRef<string | null>(null);
   const openThreadRootId = thread?.id ?? null;
@@ -1544,7 +1550,7 @@ export default function ConversationScreen({
     if (!notification) return;
     if (landingSightRef.current?.token === notification.token) return;
     const {token} = notification;
-    landingSightRef.current = {token, markers: recoveryMarkCount};
+    landingSightRef.current = {token, rejoins: railRejoinCount};
     const roomChanged =
       shownChannelRef.current === null ||
       !uuidEq(shownChannelRef.current, channelId);
@@ -1560,7 +1566,7 @@ export default function ConversationScreen({
     channelId,
     timelineHoldsThisChannel,
     landingHeld,
-    recoveryMarkCount,
+    railRejoinCount,
     readAfterTap,
   ]);
   // 위 효과 **뒤에** 선언한다 — 같은 커밋에서 위 효과는 앞 커밋의 방을 읽어야 한다.
@@ -1574,17 +1580,17 @@ export default function ConversationScreen({
     if (!timelineHoldsThisChannel || landingHeld) return;
     readAfterTap(landingRead.token);
   }, [landingRead, timelineHoldsThisChannel, landingHeld, readAfterTap]);
-  // 읽기가 실패한 뒤 레일이 다시 붙었다(복구 표지가 늘었다) → 탭 뒤에 다시 읽는다.
-  // 표지 자체로는 판정하지 않는다: 재생에는 그 행이 아직 없을 수 있다(R3 M-1).
-  // 읽는 중에 온 표지는 셀 필요가 없다 — 그 읽기가 답한다.
+  // 읽기가 실패한 뒤 레일이 다시 붙었다(재구독이 늘었다) → 탭 뒤에 다시 읽는다.
+  // 재연결 자체로는 판정하지 않는다: 재생에는 그 행이 아직 없을 수 있다(R3 M-1).
+  // 읽는 중에 온 재연결은 셀 필요가 없다 — 그 읽기가 답한다.
   useEffect(() => {
     const sight = landingSightRef.current;
     if (sight === null || landingRead?.token !== sight.token) return;
     if (landingRead.state !== 'waiting-rail') return;
-    if (recoveryMarkCount <= sight.markers) return;
-    sight.markers = recoveryMarkCount;
+    if (railRejoinCount <= sight.rejoins) return;
+    sight.rejoins = railRejoinCount;
     readAfterTap(sight.token);
-  }, [recoveryMarkCount, landingRead, readAfterTap]);
+  }, [railRejoinCount, landingRead, readAfterTap]);
   // 보이지 않는 기다림의 시계.
   useEffect(() => {
     if (landingRead?.state !== 'waiting-rail') return undefined;
@@ -1685,6 +1691,14 @@ export default function ConversationScreen({
           오른쪽 글자 링크에서 ⋮ 메뉴로 옮겼다 — 고정이 하나도 없어도 메뉴 항목은
           남는다(처음 고정하는 사람이 목록이 어디 있는지 배울 자리, 그때 열리는
           화면이 빈 상태로 그것을 말한다). 연결 상태는 부제가 아니라 머리 밑 띠다. */}
+      {/* 머리 · 요약 줄 · 목록을 **한 틀**에 담는다(#4292). 머리 뿌리는 연결 띠를 목록 위에 띄우려고 `zIndex` 를 가지는데(`ConversationHeader`
+          의 `root`), RN 새 아키텍처에서 `zIndex` 는 형제의 그리기·누르기 순서를 트리 순서보다 앞세운다(`ShellChrome` 의 「시안의 z-index 는 옮기지
+          않는다」, design-review B1). 머리가 `Screen` 직속이면 그 `zIndex` 가 아래 전면 덮개(스레드 · 고정 목록 · 작업 목록)와 겨뤄 열린 덮개
+          **위에** 머리가 그려지고 눌린다. 틀 안에 두면 겨루는 형제가 목록뿐이고, 덮개는 틀 **뒤** 형제(`zIndex` 없음)로 남아 층은 여전히 JSX
+          순서다. `collapsable={false}` 가 필수다: 스태킹 컨텍스트를 만들지 않는 뷰는(시각 속성이 없어 평탄화되는 틀은 물론, `testID` 만 있는 틀도) 후손이 부모의 정렬
+          목록으로 올라와 자식(머리, `zIndex` 1)이 `Screen` 직속 형제와 함께 정렬되고, 그러면 틀이 아무것도 가두지 못한다(시뮬레이터 캡처로 확인:
+          `measure/captures/steady4292-panel-*`). 안쪽 들여쓰기는 더하지 않았다 — 이 구간을 만지는 형제 이슈(#4305·#4300)와의 병합 충돌을 줄이려는 것이다. */}
+      <View collapsable={false} style={styles.column} testID="conversation-column">
       <ConversationHeader
         title={title}
         subtitle={headerSubtitle}
@@ -1696,6 +1710,7 @@ export default function ConversationScreen({
         onBack={onBack}
         menu={headerMenu}
         railStatus={railStatus}
+        onBannerInset={setBannerInset}
       />
       {/* 워크스페이스 전역 집계 한 줄. 살아 있는 작업이 없으면 **아무것도 그리지
           않는다** — 빈 띠도 남기지 않는 것이 이 줄의 계약이고, 그래서 이 자리는
@@ -1816,6 +1831,7 @@ export default function ConversationScreen({
               // 목록 꼬리는 0 이다(#4264): 도크 맨 위의 「작성 중」 예약 줄이 그 자리를 지켜서, 꼬리까지 두면
               // 마지막 행 → 알약 간격이 같은 공기를 두 번 센다. 근거와 산수는 `CONV.listPillGap`.
               tailGap={CONV.conversationTail}
+              topPillInset={bannerInset}
               // 위 「안읽음으로」·아래 「최신으로」 (#1892). 위 필의 N 은 위의
               // 동결 스냅샷(`unreadCount`) 그대로다 — 구분선과 같은 수.
               jumpPills
@@ -1918,6 +1934,7 @@ export default function ConversationScreen({
           </>
         }
       />
+      </View>
 
       {thread ? (
         <ThreadPanel
@@ -2015,6 +2032,8 @@ export default function ConversationScreen({
 
 const buildStyles = (color: Palette) => StyleSheet.create({
   notice: {padding: space.md},
+  /** 머리 · 요약 줄 · 목록의 틀(#4292). `Screen` 의 남은 높이를 다 쓴다 — 이 틀 안에서만 머리의 `zIndex` 가 겨룬다. */
+  column: {flex: 1},
   /**
    * 시안 A `.a-conv{background:linear-gradient(180deg,var(--bgTop) 0,var(--surface) 210px)}`
    * (다크는 `var(--bgMid) 220px`). 머리 유리가 비치는 바닥이다. 210/844 ≈ 25%.

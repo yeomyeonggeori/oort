@@ -52,6 +52,13 @@ import { useAutoGrow } from "./useAutoGrow";
 import { containsSecretKey } from "@momo/core/features/chat/secretKey";
 import { SecretKeyBlockNotice } from "@/features/chat/SecretKeyBlockNotice";
 import { hasLocalCardHost } from "@/features/chat/localCards";
+import { COMPOSER_OFFLINE_COPY } from "@momo/core/features/chat/composerCopy";
+import { SCHEDULED_COPY } from "@momo/core/features/scheduled/copy";
+import { useOffline } from "@/features/common/useOffline";
+import { ScheduleDialog } from "@/features/scheduled/ScheduleDialog";
+import { ScheduleSendMenu } from "@/features/scheduled/ScheduleSendMenu";
+import { ScheduledBanner } from "@/features/scheduled/ScheduledBanner";
+import { useComposerSchedule } from "@/features/scheduled/useComposerSchedule";
 
 // =============================================================================
 // Writing a reply, from inside the thread (B11).
@@ -112,6 +119,11 @@ export function ThreadComposer({
   // 키 모양을 보고 전송을 막은 횟수 (#2942 GC-1). 채널 컴포저와 같은 문이다.
   const [secretBlocks, setSecretBlocks] = useState(0);
   const secretBlocked = secretBlocks > 0;
+  // 키 차단 줄의 첫 문장은 막은 길이 정한다(보내기는 「보내지 않았어요」, 예약은 「예약하지 않았어요」).
+  const [secretVia, setSecretVia] = useState<"send" | "schedule">("send");
+  // 이 입력창에는 오프라인 판정이 없었다(채널 입력창만 읽었다). 예약을 달면서 같은 훅을 연결한다: 보내기와 ▾가
+  // 같은 판정으로 함께 흐려지고, 채널 입력창과 같은 오프라인 줄이 안내 블록에 선다(예약 UI 명세 0.4·1.9).
+  const offline = useOffline();
   const ref = useRef<HTMLTextAreaElement | null>(null);
   const justComposedRef = useRef(false);
   const isMobile = useIsMobileShell();
@@ -203,13 +215,52 @@ export function ThreadComposer({
   // 파일만 보내는 답글도 답글이다. 채널 컴포저와 같은 규칙을 같은 함수로 판정한다.
   const canSend =
     !sending &&
+    !offline &&
     attachBlock === null &&
     (draft.trim().length > 0 || tray.drafts.length > 0);
 
+  // ── 예약해서 보내기 (ADR-0208, #4215) ────────────────────────────────────────
+  //
+  // 채널 입력창과 같은 훅이다. 이 호스트에는 보이는 3초 상태줄 자리가 없어서(액션 행은 아이콘 셋과 보내기뿐이고
+  // 위의 `p-3` 블록은 조건부로 생기고 지워지는 줄들이다) 확인은 ③ 지속 배너가 맡고, 낭독은 늘 붙어 있는 안 보이는
+  // `role="status"` 노드가 읽는다. 예약에 `rootId`가 실린다. 예약은 **서버가 201을 준 뒤에만** 비운다.
+  const schedule = useComposerSchedule({
+    surface: "thread",
+    workspaceId,
+    channelId,
+    rootId,
+    text: draft,
+    readText: () => draftRef.current,
+    trayKey,
+    drafts: tray.drafts,
+    offline,
+    commandDraft: false,
+    personalCall: false,
+    quoting: false,
+    routingSet: false,
+    hostBusy: sending,
+    focusInput: () => ref.current?.focus(),
+    onScheduled: ({ textUnchanged }) => {
+      if (!textUnchanged) return;
+      clearThreadDraft(workspaceId, rootId);
+      draftRef.current = "";
+      setDraft("");
+      autocomplete.close();
+      format.dismiss();
+    },
+    onSecretKey: () => {
+      setSecretVia("schedule");
+      setSecretBlocks((count) => count + 1);
+    },
+  });
+  const showsSchedule = schedule.gate.entry === "shown";
+
   const submit = () => {
-    if (!canSend) return;
+    // 예약 요청이 나는 동안은 보내기도 잠긴다: 같은 글이 답글과 예약으로 둘 다 나가면 안 된다.
+    if (!canSend || schedule.busy) return;
     // 키는 답글로도 보내지 않는다. 글은 남겨 두고 이유를 말한다.
     if (containsSecretKey(draft)) {
+      setSecretVia("send");
       setSecretBlocks((count) => count + 1);
       return;
     }
@@ -264,6 +315,28 @@ export function ThreadComposer({
         onAcknowledgeNotices={() => acknowledgeNotices(trayKey)}
       />
       <div className="p-3">
+        {/* 이 스레드의 예약 배너(UI 명세 1.6 (b), 1.1): 이 호스트의 확인은 ③ 지속 배너가 맡는다. 「이 스레드에 예약된
+            메시지 1개」가 생기거나 숫자가 오르는 것이 확인이고, 보내지 못한 예약이 있으면 실패 어조 한 줄이 대신 선다. */}
+        <ScheduledBanner
+          place={schedule.place}
+          word={schedule.bannerWord}
+          className="mb-2"
+          testId="thread-composer-scheduled-banner"
+        />
+        {/* 늘 붙어 있는 안 보이는 낭독 노드(`PaletteStatus` 모양, 높이 0): 확인과 막힌 이유를 읽는다. 조건부로 처음
+            생기는 `role="status"`는 낭독이 보장되지 않아서 노드를 늘 둔다. */}
+        <div role="status" className="sr-only" data-testid="thread-composer-status">
+          {schedule.statusText}
+        </div>
+        {offline && (
+          <p
+            role="status"
+            className="px-3 pb-2 text-meta text-warn"
+            data-testid="thread-composer-offline"
+          >
+            {COMPOSER_OFFLINE_COPY}
+          </p>
+        )}
         {error && (
           <InlineBanner
             message={error}
@@ -278,6 +351,7 @@ export function ThreadComposer({
             testId="thread-composer-secret-block"
             cardAvailable={hasLocalCardHost(channelId)}
             surface="thread"
+            {...(secretVia === "schedule" ? { lead: SCHEDULED_COPY.secretKey.lead } : {})}
           />
         )}
         {agentNotice !== null && (
@@ -408,6 +482,11 @@ export function ThreadComposer({
               data-testid="thread-composer-actions"
             >
               <div className="flex items-center gap-1">
+                <AttachButton
+                  onPick={onFiles}
+                  disabled={sending}
+                  className="disabled:opacity-100"
+                />
                 <Button
                   type="button"
                   variant="ghost"
@@ -421,11 +500,6 @@ export function ThreadComposer({
                 >
                   <AtSign aria-hidden="true" />
                 </Button>
-                <AttachButton
-                  onPick={onFiles}
-                  disabled={sending}
-                  className="disabled:opacity-100"
-                />
                 <Button
                   type="button"
                   variant="ghost"
@@ -443,22 +517,29 @@ export function ThreadComposer({
                   <Smile aria-hidden="true" />
                 </Button>
               </div>
-              <button
-                type="button"
-                disabled={!canSend}
-                onClick={submit}
-                aria-label="답글 보내기"
-                title={attachBlockCopy ?? "답글 보내기"}
-                data-testid="thread-composer-send"
-                className={cn(
-                  "tap-target flex size-icon-button shrink-0 items-center justify-center rounded-full bg-primary text-on-primary press hover:opacity-90 focus-visible:focus-ring focus-ring-on-primary",
-                  // 전송 중에는 그릇의 opacity가 상태를 진다. 빈 초안처럼 그릇은
-                  // 정상인 판에서는 버튼 자신이 채널 컴포저와 같은 50%로 흐려진다.
-                  sending ? "disabled:opacity-100" : "disabled:opacity-50"
-                )}
-              >
-                <SendHorizontal className="size-4" aria-hidden="true" />
-              </button>
+              {/* 보내기 반쪽 + ▾ 반쪽이 알약 하나다(UI 명세 1.1). ▾는 서버에 예약이 있으면 늘 그려져(자리가 움직이지 않는다)
+                  막힌 동안 흐리고 이유는 `title`·`aria-describedby`에 실린다. */}
+              <div className="flex shrink-0 items-center gap-px">
+                <button
+                  type="button"
+                  disabled={!canSend}
+                  onClick={submit}
+                  aria-busy={schedule.busy || undefined}
+                  aria-label="답글 보내기"
+                  title={offline ? COMPOSER_OFFLINE_COPY : (attachBlockCopy ?? "답글 보내기")}
+                  data-testid="thread-composer-send"
+                  className={cn(
+                    "tap-target flex size-icon-button shrink-0 items-center justify-center bg-primary text-on-primary press hover:opacity-90 focus-visible:focus-ring focus-ring-on-primary",
+                    showsSchedule ? "rounded-l-full rounded-r-none" : "rounded-full",
+                    // 전송 중에는 그릇의 opacity가 상태를 진다. 빈 초안처럼 그릇은
+                    // 정상인 판에서는 버튼 자신이 채널 컴포저와 같은 50%로 흐려진다.
+                    sending ? "disabled:opacity-100" : "disabled:opacity-50"
+                  )}
+                >
+                  <SendHorizontal className="size-4" aria-hidden="true" />
+                </button>
+                <ScheduleSendMenu {...schedule.menuProps} />
+              </div>
             </div>
           </div>
         </div>
@@ -482,6 +563,7 @@ export function ThreadComposer({
         purpose="insert"
         testId="thread-composer-emoji-picker"
       />
+      <ScheduleDialog {...schedule.dialogProps} />
     </div>
   );
 }

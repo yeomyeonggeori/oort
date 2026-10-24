@@ -10,6 +10,7 @@ import React from 'react';
 
 import {color, font, SAFE_GUTTER, space} from '../src/design/tokens';
 import {CONV} from '../src/features/conversation/convDesign';
+import {ROW_FACE} from '../src/features/conversation/rowFace';
 import {MessageActionSheet} from '../src/features/conversation/MessageActionSheet';
 import {MessageBody} from '../src/features/conversation/MessageBody';
 import {
@@ -659,17 +660,17 @@ describe('#1079 — 사진이 배송되는 화면과 갈라지지 않게', () =>
     expect(code).not.toMatch(/authorMemberId: SELF,\s*\n\s*\}\)\}/);
   });
 
-  it('M-2 — 눌린 행과 코드 상자가 같은 값이라는 사진의 전제를 잠근다', () => {
-    // 이 사진이 보여 주려는 것은 「눌리면 상자가 사라진다」이고, 그 전제는
-    // 두 채움이 같은 색이라는 것이다. 전제가 깨지면 사진이 거짓말하게 되므로
-    // 여기서 값으로 붙잡는다. (값 공간을 가르는 것은 U2 소관 — 범위 밖.)
+  it('M-2 (#4300 로 뒤집힘) — 눌린 행의 틴트가 코드 상자의 채움과 같은 값이 아니다', () => {
+    // 옛 전제: 눌린 행 채움 = `surface` = 코드 상자 채움 → 눌리는 동안 상자가 사라진다(1.000:1).
+    // #4300 이 눌림 면을 강조색 10% 알파 틴트로 바꿔 그 일치가 깨졌다. 이 단정은 일치가
+    // **다시 생기지 않게** 잠근다(`rowPressedBackground` 가 `surface` 로 되돌아가면 빨개진다).
     const body = render(<MessageBody body={'```sh\necho hi\n```'} />);
     const wrap = flatten(body.getByTestId('message-code-block').props.style);
-    // 팔레트를 **인자로** 넘긴다 (U2). 이 스위트가 그리는 것은 다크 스킴이고
-    // (`jest.setup.js`), 눌린 채움도 같은 스킴에서 물어야 같은 질문이 된다.
     const pressed = rowPressedBackground(color);
-    expect(wrap.backgroundColor).toBe(pressed);
-    expect(contrast(String(wrap.backgroundColor), pressed)).toBe(1);
+    expect(wrap.backgroundColor).toBe(color.surface);
+    expect(pressed).not.toBe(wrap.backgroundColor);
+    // 알파 hex — 아래 바닥이 비친다. 불투명 `surface` 와 같아질 수 없는 이유다.
+    expect(pressed).toMatch(/^#[0-9a-f]{6}1a$/);
   });
 });
 
@@ -783,13 +784,18 @@ describe('#3386 — 연속 행에는 시각이 없다 (Buzz, owner 2026-10-03 �
     const head = flatten(rowAt(true).getByTestId('message-press').props.style);
     const cont = flatten(rowAt(false).getByTestId('message-press').props.style);
     expect(cont.paddingLeft).toBe(head.paddingLeft);
-    expect(cont.paddingLeft).toBe(SAFE_GUTTER + CONV.avatar + CONV.avatarGap);
+    // 화면 끝에서 내용까지 = 바깥 마진 + 안쪽 패딩 (#4300).
+    expect(ROW_FACE.outer + Number(cont.paddingLeft)).toBe(
+      SAFE_GUTTER + CONV.avatar + CONV.avatarGap,
+    );
   });
 
   it('오른쪽 시각 예약이 없다 — 본문이 오른쪽 여백까지 간다 (Buzz)', () => {
     for (const head of [true, false]) {
       const inner = flatten(rowAt(head).getByTestId('message-press').props.style);
-      expect(inner.paddingRight ?? inner.paddingHorizontal).toBe(SAFE_GUTTER);
+      expect(
+        ROW_FACE.outer + Number(inner.paddingRight ?? inner.paddingHorizontal),
+      ).toBe(SAFE_GUTTER);
     }
     expect(codeOnly(SRC('MessageRow.tsx'))).not.toContain('rowTimeReserve');
     expect(codeOnly(SRC('MessageRow.tsx'))).not.toContain('rowTime:');

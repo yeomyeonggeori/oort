@@ -198,6 +198,10 @@ export function Shell({
   );
 
   const onBack = useCallback(() => dispatch({type: 'back'}), []);
+  const onChannelLeft = useCallback(
+    (channelId: string) => dispatch({type: 'channelLeft', channelId}),
+    [],
+  );
   const onOpenSearch = useCallback(
     (initialQuery?: string) => dispatch({type: 'openSearch', initialQuery}),
     [],
@@ -331,6 +335,7 @@ export function Shell({
               onOpenSearch={onOpenSearch}
               onOpenAgentList={onOpenAgentList}
               onOpenWorkList={onOpenWorkList}
+              onChannelLeft={onChannelLeft}
               notificationNotice={tapRouting.notice}
               onDismissNotificationNotice={tapRouting.dismissNotice}
             />

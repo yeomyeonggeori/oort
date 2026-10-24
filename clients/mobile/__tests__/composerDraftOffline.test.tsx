@@ -381,7 +381,12 @@ describe('성장 정책 — 상한이 도출된 숫자다', () => {
     const input = screen.getByTestId('composer-input');
     expect(input.props.multiline).toBe(true);
     expect(input.props.numberOfLines).toBeUndefined();
-    const style = StyleSheet.flatten(input.props.style) as {height?: number};
+    // 글이 있는 동안 높이는 못 박히지 않는다. (비었을 때만 접힘 높이를 명시한다 — #4305,
+    // `composerTwoState.test.tsx` 가 그 쪽을 든다.)
+    fireEvent.changeText(input, '아주 길게 감기는 한 줄 문단');
+    const style = StyleSheet.flatten(
+      screen.getByTestId('composer-input').props.style,
+    ) as {height?: number};
     expect(style.height).toBeUndefined();
     // 그리고 텍스트가 늘어도 스타일은 그대로다 — 높이를 정하는 것은 이 파일이
     // 아니라 OS 다.

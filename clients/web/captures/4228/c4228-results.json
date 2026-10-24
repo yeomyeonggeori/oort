@@ -1,0 +1,275 @@
+[
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "A0 닫기 전: 이도현·박서연·최민수·김인턴이 목록에 서고 나간 멤버는 목록에 없다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "A1 「나간 멤버와의 대화 N개」 줄이 어디에도 없다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "A2 호버하면 이름을 말하는 X(「이도현, 대화 닫기」)가 선다",
+  "ok": true,
+  "detail": "이도현, 대화 닫기"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "A3 서버에 PUT …/closure 가 seenSeq=12(화면이 본 투영의 latestSeq)로 나갔다",
+  "ok": true,
+  "detail": "[{\"method\":\"PUT\",\"id\":\"00000000-0000-7000-8000-000000000301\",\"seenSeq\":12}]"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "A4 닫은 기기는 즉시 반영한다: 이도현이 목록에서 빠졌다(재조회 전)",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "A5 서버 갈래는 이 기기의 원장에 쓰지 않는다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "A6 다시 읽어도 닫혀 있다(서버가 기억한다)",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "A7 저장소를 지운 뒤(재설치 모사)에도 투영이 오면 닫혀 있다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "B0 DM 구역 머리에 「⋯」 가 서고 닫은 대화 둘(내가 닫은 하나 + 나간 멤버)을 센다",
+  "ok": true,
+  "detail": "2"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "B1 목록에 이도현(내가 닫았어요)과 나간 멤버(안 읽은 메시지가 없어요)가 있고 지금 보이는 대화는 없다",
+  "ok": true,
+  "detail": "이도현\n내가 닫았어요\n다시 열기 | 나간 멤버\n상대가 나갔고 안 읽은 메시지가 없어요\n열기"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "B2 「다시 열기」: DELETE 가 나가고 그 대화가 열린다",
+  "ok": true,
+  "detail": "[{\"method\":\"DELETE\",\"id\":\"00000000-0000-7000-8000-000000000301\"}] http://127.0.0.1:5428/#/c/00000000-0000-7000-8000-000000000301"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "B3 이도현이 목록에 돌아왔다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "light",
+  "name": "C0 나간 상대의 DM 을 열면 서버에 아무것도 쓰지 않고, 열려 있는 동안 목록에 선다",
+  "ok": true,
+  "detail": "[]"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "A0 닫기 전: 이도현·박서연·최민수·김인턴이 목록에 서고 나간 멤버는 목록에 없다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "A1 「나간 멤버와의 대화 N개」 줄이 어디에도 없다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "A2 호버하면 이름을 말하는 X(「이도현, 대화 닫기」)가 선다",
+  "ok": true,
+  "detail": "이도현, 대화 닫기"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "A3 서버에 PUT …/closure 가 seenSeq=12(화면이 본 투영의 latestSeq)로 나갔다",
+  "ok": true,
+  "detail": "[{\"method\":\"PUT\",\"id\":\"00000000-0000-7000-8000-000000000301\",\"seenSeq\":12}]"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "A4 닫은 기기는 즉시 반영한다: 이도현이 목록에서 빠졌다(재조회 전)",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "A5 서버 갈래는 이 기기의 원장에 쓰지 않는다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "A6 다시 읽어도 닫혀 있다(서버가 기억한다)",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "A7 저장소를 지운 뒤(재설치 모사)에도 투영이 오면 닫혀 있다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "B0 DM 구역 머리에 「⋯」 가 서고 닫은 대화 둘(내가 닫은 하나 + 나간 멤버)을 센다",
+  "ok": true,
+  "detail": "2"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "B1 목록에 이도현(내가 닫았어요)과 나간 멤버(안 읽은 메시지가 없어요)가 있고 지금 보이는 대화는 없다",
+  "ok": true,
+  "detail": "이도현\n내가 닫았어요\n다시 열기 | 나간 멤버\n상대가 나갔고 안 읽은 메시지가 없어요\n열기"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "B2 「다시 열기」: DELETE 가 나가고 그 대화가 열린다",
+  "ok": true,
+  "detail": "[{\"method\":\"DELETE\",\"id\":\"00000000-0000-7000-8000-000000000301\"}] http://127.0.0.1:5428/#/c/00000000-0000-7000-8000-000000000301"
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "B3 이도현이 목록에 돌아왔다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "chromium",
+  "scheme": "dark",
+  "name": "C0 나간 상대의 DM 을 열면 서버에 아무것도 쓰지 않고, 열려 있는 동안 목록에 선다",
+  "ok": true,
+  "detail": "[]"
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "A0 닫기 전: 이도현·박서연·최민수·김인턴이 목록에 서고 나간 멤버는 목록에 없다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "A1 「나간 멤버와의 대화 N개」 줄이 어디에도 없다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "A2 호버하면 이름을 말하는 X(「이도현, 대화 닫기」)가 선다",
+  "ok": true,
+  "detail": "이도현, 대화 닫기"
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "A3 서버에 PUT …/closure 가 seenSeq=12(화면이 본 투영의 latestSeq)로 나갔다",
+  "ok": true,
+  "detail": "[{\"method\":\"PUT\",\"id\":\"00000000-0000-7000-8000-000000000301\",\"seenSeq\":12}]"
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "A4 닫은 기기는 즉시 반영한다: 이도현이 목록에서 빠졌다(재조회 전)",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "A5 서버 갈래는 이 기기의 원장에 쓰지 않는다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "A6 다시 읽어도 닫혀 있다(서버가 기억한다)",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "A7 저장소를 지운 뒤(재설치 모사)에도 투영이 오면 닫혀 있다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "B0 DM 구역 머리에 「⋯」 가 서고 닫은 대화 둘(내가 닫은 하나 + 나간 멤버)을 센다",
+  "ok": true,
+  "detail": "2"
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "B1 목록에 이도현(내가 닫았어요)과 나간 멤버(안 읽은 메시지가 없어요)가 있고 지금 보이는 대화는 없다",
+  "ok": true,
+  "detail": "이도현\n내가 닫았어요\n다시 열기 | 나간 멤버\n상대가 나갔고 안 읽은 메시지가 없어요\n열기"
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "B2 「다시 열기」: DELETE 가 나가고 그 대화가 열린다",
+  "ok": true,
+  "detail": "[{\"method\":\"DELETE\",\"id\":\"00000000-0000-7000-8000-000000000301\"}] http://127.0.0.1:5428/#/c/00000000-0000-7000-8000-000000000301"
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "B3 이도현이 목록에 돌아왔다",
+  "ok": true,
+  "detail": null
+ },
+ {
+  "engine": "webkit",
+  "scheme": "light",
+  "name": "C0 나간 상대의 DM 을 열면 서버에 아무것도 쓰지 않고, 열려 있는 동안 목록에 선다",
+  "ok": true,
+  "detail": "[]"
+ }
+]

@@ -51,6 +51,21 @@ describe("channelLabelParts · DM 이름 해석", () => {
     expect(parts.handle).toBeNull();
   });
 
+  it("명부에 없는 상대가 에이전트라고 **알 때만** 「꺼진 에이전트」다 - 모르면 「나간 멤버」 (ADR-0177 D11)", () => {
+    const dir = makeDirectory([self]);
+    expect(channelLabelParts(dm([ME, GONE]), dir, ME, { goneKind: "agent" })).toMatchObject({
+      text: "꺼진 에이전트",
+      kind: "gone",
+      isAgent: true,
+    });
+    expect(channelLabelParts(dm([ME, GONE]), dir, ME, { goneKind: "human" }).text).toBe("나간 멤버");
+    expect(channelLabelParts(dm([ME, GONE]), dir, ME).text).toBe("나간 멤버");
+    // 명부를 못 받았으면 종류와 무관하게 「불러오는 중」이다.
+    expect(
+      channelLabelParts(dm([ME, GONE]), makeDirectory([]), ME, { goneKind: "agent" })
+    ).toMatchObject({ text: "불러오는 중", kind: "pending", isAgent: false });
+  });
+
   it("명부를 아직 못 받았으면 「불러오는 중」이고, 받은 뒤에는 「나간 멤버」다", () => {
     expect(channelLabelParts(dm([ME, GONE]), makeDirectory([]), ME).text).toBe("불러오는 중");
     expect(

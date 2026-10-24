@@ -261,27 +261,54 @@ pub fn build_manifest(public_base_url: &str, app_name: &str) -> serde_json::Valu
     })
 }
 
-/// A GitHub App name (≤ 34 chars, `[A-Za-z0-9 -]`) derived from the instance
-/// host, e.g. `oort-team-example-com`. The operator can rename it on GitHub.
+/// A GitHub App name (≤ 34 chars, `[A-Za-z0-9 -]`) a person can read, derived from
+/// the instance host's **first label**: `https://oort-team.up.railway.app` ->
+/// `oort-team`, `https://chat.example.com` -> `oort-chat`. (The old rule joined the
+/// whole host, `oort-oort-team-up-railway-app`; #4333.) A label already starting
+/// with `oort` is not prefixed again.
+///
+/// GitHub App names are globally unique and capped at 34 characters. Two rules
+/// keep a long or crowded host from colliding with another instance's name:
+/// a name longer than 34 characters keeps its first 29 and ends in `-` plus four
+/// hex digits of the **whole host** (so two long hosts that share a prefix differ),
+/// and an instance whose name is taken anyway can rename it on GitHub's own form
+/// (the manifest only pre-fills it).
 pub fn default_app_name(public_base_url: &str) -> String {
     let host = public_base_url
         .trim()
         .trim_start_matches("https://")
+        .trim_start_matches("http://")
         .split(['/', ':'])
         .next()
         .unwrap_or("");
-    let slug: String = host
+    let label = host.split('.').next().unwrap_or("");
+    let slug: String = label
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect();
     let slug = slug.trim_matches('-');
-    let mut name = if slug.is_empty() {
+    // A bare IPv4 host (`10.0.0.5`) has no readable label.
+    let readable = !slug.is_empty() && !slug.bytes().all(|b| b.is_ascii_digit());
+    let name = if !readable {
         "oort".to_string()
+    } else if slug.starts_with("oort") {
+        slug.to_string()
     } else {
         format!("oort-{slug}")
     };
-    name.truncate(34);
-    name.trim_end_matches('-').to_string()
+    if name.len() <= 34 {
+        return name;
+    }
+    let digest = Sha256::digest(host.as_bytes());
+    let tag = format!("{:02x}{:02x}", digest[0], digest[1]);
+    let head = name[..29].trim_end_matches('-');
+    format!("{head}-{tag}")
 }
 
 // ---------------------------------------------------------------------------
@@ -696,11 +723,34 @@ mod tests {
         for bad in ["", "-a", "a-", "a/b", "a b", "a?x=1", &"x".repeat(40)] {
             assert!(!is_valid_org_login(bad), "{bad}");
         }
+        // First label only, never the whole host (#4333).
+        assert_eq!(default_app_name("https://momo.example.com"), "oort-momo");
         assert_eq!(
-            default_app_name("https://momo.example.com"),
-            "oort-momo-example-com"
+            default_app_name("https://oort-team.up.railway.app"),
+            "oort-team"
         );
-        assert!(default_app_name("https://a.very-long-host-name.example.com:8443/x").len() <= 34);
+        assert_eq!(default_app_name("https://OORT.example.com/"), "oort");
+        assert_eq!(default_app_name("https://10.0.0.5:8443"), "oort");
+        assert_eq!(default_app_name("   "), "oort");
+        // A long label is cut and tagged by the whole host: no longer than GitHub allows,
+        // and two hosts sharing a long prefix do not collapse into one name.
+        let long_a = default_app_name("https://a-very-long-instance-name-for-the-team.example.com");
+        let long_b = default_app_name("https://a-very-long-instance-name-for-the-team.example.org");
+        assert!(
+            long_a.len() <= 34 && long_b.len() <= 34,
+            "{long_a} {long_b}"
+        );
+        assert_ne!(long_a, long_b);
+        assert!(
+            long_a.starts_with("oort-a-very-long-instance-nam"),
+            "{long_a}"
+        );
+        for name in [&long_a, &long_b] {
+            assert!(
+                name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'),
+                "{name}"
+            );
+        }
         assert_eq!(
             manifest_registration_url(&ManifestOwner::Organization("acme".into()), "a b"),
             "https://github.com/organizations/acme/settings/apps/new?state=a%20b"

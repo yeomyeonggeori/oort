@@ -509,14 +509,23 @@ export function useMarkRead(): (
   channelId: string,
   seq: number,
   reason: ReadAdvertisementReason,
+  options?: {markUnreadBeforeSeq?: number},
 ) => Promise<void> {
   const {workspaceId} = useSession();
   const invalidateReadStates = useInvalidateReadStates(workspaceId);
   const client = useQueryClient();
   return useCallback(
-    async (channelId: string, seq: number, reason: ReadAdvertisementReason) => {
+    async (
+      channelId: string,
+      seq: number,
+      reason: ReadAdvertisementReason,
+      options?: {markUnreadBeforeSeq?: number},
+    ) => {
       await updateReadState(workspaceId, channelId, seq, {
         readIntent: readIntentWire(reason),
+        ...(options?.markUnreadBeforeSeq !== undefined
+          ? {markUnreadBeforeSeq: options.markUnreadBeforeSeq}
+          : {}),
       });
       invalidateReadStates();
       await client.invalidateQueries({

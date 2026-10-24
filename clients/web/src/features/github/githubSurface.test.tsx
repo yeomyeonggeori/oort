@@ -4,7 +4,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { channelActionAvailability, channelActionItemsForSurface } from "@/features/chat/channelActionModel";
+import { channelActionAvailability, channelActionItemsForSurface } from "@momo/core/features/channels/actionModel";
 import { GITHUB_PLUGIN_ID, githubFacesFor } from "@momo/core/features/github/model";
 
 // serverSurfaces 숨김 시험 (#3955 수용): 서버가 GitHub 알림을 싣지 않으면

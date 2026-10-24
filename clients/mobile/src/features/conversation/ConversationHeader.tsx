@@ -1,9 +1,10 @@
 import type {RealtimeStatus} from '@momo/core/lib/realtimeEvents';
 import type {Directory} from '@momo/core/features/workspace/directory';
-import React, {useCallback} from 'react';
+import React, {useCallback, useEffect} from 'react';
 import {
   ActionSheetIOS,
   Image,
+  type LayoutChangeEvent,
   Pressable,
   StyleSheet,
   Text,
@@ -47,6 +48,16 @@ import {CONV} from './convDesign';
 //   덮는다 — 상태 막대 밑만 다른 색이면 띠가 떠 보이지 않는다.
 // * 연결 상태는 부제가 아니라 머리 **밑의 가벼운 띠**다(owner 표). 부제는 방이
 //   무엇인지를 말하는 자리이고, 연결은 방의 정체가 아니다.
+// * 띠는 **목록 위에 뜬다 — 흐름에 끼지 않는다**(#4292). 흐름 안에 끼면 4초 넘는 끊김마다 머리가 36.7pt
+//   자라 목록의 보이는 높이가 매번 그만큼 줄었다 돌아오고, 목록은 그 변화를 한 프레임 늦게 알아채 끝으로
+//   따라가므로 그 한 프레임 동안 맨 아래 줄이 밀렸다 돌아오기도 했다(간헐적 — 시뮬레이터 실측
+//   `measure/steady.tsx` 에서 높이 변화는 매번 36.7, 줄의 이동은 한 번 36.7·다른 실행에서는 0). 높이가 안
+//   바뀌면 그 전제가 사라진다. 표지(#4016)와 달리 이 줄은 「실제로 바뀐 것이 있을 때만 선다」로 줄일 수
+//   없다 — 연결이 정말 끊긴 것이 바뀐 것이다. 줄일 수 없으니 자리를 차지하지 않게 한다. 머리 뿌리에
+//   `zIndex` 를 주는 이유도 같다: 뒤 형제인 목록이 위에 그려지면 띠가 목록 밑으로 숨는다.
+// * 목록 위 가운데는 목록의 떠 있는 필(날짜 · 「안 읽은 곳으로」, `JumpPillDock`)이 이미 쓰는 자리다. 띠가 뜨면
+//   그 필들은 띠 밑에 쌓여야 하므로(안 그러면 필이 띠 뒤에 숨은 채 눌리는 컨트롤이 된다) 띠의 **실제** 높이를
+//   `onBannerInset` 으로 알린다 — 글자 크기에 따라 띠 높이가 달라서 상수로 둘 수 없다.
 // =============================================================================
 
 export interface ConversationHeaderMenuItem {
@@ -84,6 +95,7 @@ export function ConversationHeader({
   menu,
   huddle,
   railStatus,
+  onBannerInset,
   titleTestID = 'conversation-title',
 }: {
   title: string;
@@ -101,6 +113,11 @@ export function ConversationHeader({
   menu: readonly ConversationHeaderMenuItem[];
   huddle?: HuddleSlot;
   railStatus: RealtimeStatus;
+  /**
+   * 뜬 띠가 목록 위 가장자리를 가린 높이(pt, 띠 위 여백 포함). 띠가 서면 그 높이, 걷히면 0. 목록의 떠 있는 필이 그
+   * 밑에 쌓이도록 화면이 `Timeline.topPillInset` 에 건넨다(#4292).
+   */
+  onBannerInset?: (inset: number) => void;
   titleTestID?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -110,6 +127,15 @@ export function ConversationHeader({
   // 기기가 오프라인이면(NetInfo) 레일 재시도가 닿을 수 없다. 웹 배너의 browser-offline 과 같은 규칙으로
   // 같은 마크가 멈춘다(#3961 design-review M-2). 문장은 그대로다.
   const online = useOnline();
+
+  const onBannerLayout = useCallback(
+    (event: LayoutChangeEvent) => onBannerInset?.(event.nativeEvent.layout.height),
+    [onBannerInset],
+  );
+  // 띠가 걷히면 비운다 — 위쪽 필이 사라진 띠 밑 자리에 남지 않게.
+  useEffect(() => {
+    if (banner === null) onBannerInset?.(0);
+  }, [banner, onBannerInset]);
 
   const openMenu = useCallback(() => {
     ActionSheetIOS.showActionSheetWithOptions(
@@ -123,7 +149,7 @@ export function ConversationHeader({
   }, [menu, title]);
 
   return (
-    <View testID="conversation-header">
+    <View testID="conversation-header" style={styles.root}>
       <GlassSurface radius={0} style={[styles.band, {paddingTop: insets.top}]}>
         <View style={styles.row}>
           <Pressable
@@ -212,17 +238,25 @@ export function ConversationHeader({
         </View>
       </GlassSurface>
       {banner ? (
+        // 머리 밑 가장자리에 매달려 목록 위에 뜬다. 문장이 아닌 띠 바깥은 손을 받지 않는다 — 알약 밑의 메시지가
+        // 눌려야 하고, 이 줄은 누르는 것이 아니다.
         <View
-          accessibilityRole="text"
-          accessibilityLiveRegion="polite"
-          style={styles.banner}
-          testID="connection-banner">
-          {/* 두 문장(「연결 중…」·「연결이 끊겼습니다」) 모두 레일이 다시 연결을 시도하는 동안이라
-              같은 로더가 돈다(#3961). 문장은 그대로고 로더는 곁들일 뿐이다. 기기가 오프라인이면 멈춘다. */}
-          <OortLoader size={BANNER_LOADER_SIZE} still={!online} testID="connection-loader" />
-          <Text style={styles.bannerText} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
-            {banner}
-          </Text>
+          pointerEvents="none"
+          onLayout={onBannerLayout}
+          style={styles.bannerLayer}
+          testID="connection-banner-layer">
+          <View
+            accessibilityRole="text"
+            accessibilityLiveRegion="polite"
+            style={styles.banner}
+            testID="connection-banner">
+            {/* 두 문장(「연결 중…」·「연결이 끊겼습니다」) 모두 레일이 다시 연결을 시도하는 동안이라
+                같은 로더가 돈다(#3961). 문장은 그대로고 로더는 곁들일 뿐이다. 기기가 오프라인이면 멈춘다. */}
+            <OortLoader size={BANNER_LOADER_SIZE} still={!online} testID="connection-loader" />
+            <Text style={styles.bannerText} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
+              {banner}
+            </Text>
+          </View>
         </View>
       ) : null}
     </View>
@@ -279,10 +313,25 @@ const buildStyles = (color: Palette) =>
       color: color.text,
     },
     subtitle: {fontSize: font.meta, color: color.textMuted},
+    // 머리 뿌리: 뒤 형제(목록)보다 위에 그려져야 매달린 띠가 목록 밑으로 숨지 않는다. 뿌리의 크기는 띠가
+    // 서든 말든 같다(띠는 아래 `bannerLayer` 가 흐름 밖에서 진다).
+    // **이 `zIndex` 는 호출자가 틀로 봉인해야 한다**: RN 새 아키텍처에서 `zIndex` 는 형제의 그리기·누르기 순서를 트리 순서보다 앞세우므로,
+    // 머리가 `Screen` 직속이면 뒤에 서는 전면 덮개(스레드 · 고정 목록 · 작업 목록) **위로** 올라온다. `ConversationScreen` 은 머리 · 목록을
+    // `collapsable={false}` 틀 하나에 담아 이 `zIndex` 가 틀 안에서만 겨루게 한다(시험이 잠근다).
+    root: {zIndex: 1},
+    // 흐름 밖. `top: '100%'` 는 머리 뿌리의 높이 — 곧 머리 유리 띠의 밑 가장자리다.
+    bannerLayer: {
+      position: 'absolute',
+      top: '100%',
+      left: 0,
+      right: 0,
+      alignItems: 'center',
+      // 긴 문장(다른 언어 · 큰 글자)이 화면 가장자리에 닿지 않게 알약의 폭을 한계 안에 둔다.
+      paddingHorizontal: space.md,
+    },
     banner: {
       flexDirection: 'row',
       alignItems: 'center',
-      alignSelf: 'center',
       gap: space.sm,
       marginTop: space.sm,
       paddingHorizontal: space.md,
@@ -291,6 +340,10 @@ const buildStyles = (color: Palette) =>
       backgroundColor: color.surfaceMuted,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: color.border,
+      // 이제 행 위에 뜬다 — 이 알약은 컨트롤이 아니라 상태라 테두리가 아니라 **고도**로 층임을 말한다. 같은 자리의 `FloatingDayPill`·같은
+      // 파일의 머리 원형 버튼과 같은 토큰이다: 다크에서도 보이도록 윗면 하이라이트와 짙은 그림자가 이미 따로 정의돼 있다(옛
+      // `shadowOpacity` 레시피의 검정 18% 는 어두운 바닥 위에서 3단계밖에 못 누른다).
+      boxShadow: color.elevationRest,
     },
-    bannerText: {fontSize: font.meta, color: color.text, fontWeight: '600'},
+    bannerText: {fontSize: font.meta, color: color.text, fontWeight: '600', flexShrink: 1},
   });

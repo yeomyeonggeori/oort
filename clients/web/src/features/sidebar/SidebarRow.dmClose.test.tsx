@@ -121,10 +121,10 @@ describe("호버 X 가 서는 조건", () => {
 
 describe("호버 X 가 말하는 것", () => {
   it("이름은 어느 대화인지 말하고, 탭 정거장이 아니며, 링크 안이 아니다", () => {
-    mount({ onClose: () => undefined, closeLabel: "이도현, 사이드바에서 닫기" });
+    mount({ onClose: () => undefined, closeLabel: "이도현, 대화 닫기" });
     enter();
-    expect(x()?.getAttribute("aria-label")).toBe("이도현, 사이드바에서 닫기");
-    expect(x()?.getAttribute("title")).toBe("사이드바에서 닫기");
+    expect(x()?.getAttribute("aria-label")).toBe("이도현, 대화 닫기");
+    expect(x()?.getAttribute("title")).toBe("대화 닫기");
     expect(x()?.tabIndex).toBe(-1);
     expect(link().contains(x())).toBe(false);
   });
@@ -132,7 +132,7 @@ describe("호버 X 가 말하는 것", () => {
   it("이름이 없으면 낱말만 쓴다", () => {
     mount({ onClose: () => undefined });
     enter();
-    expect(x()?.getAttribute("aria-label")).toBe("사이드바에서 닫기");
+    expect(x()?.getAttribute("aria-label")).toBe("대화 닫기");
   });
 
   it("닫을 수 없는 행의 DOM 은 예전 그대로다: 오른쪽 끝의 것들을 묶는 상자가 없다", () => {

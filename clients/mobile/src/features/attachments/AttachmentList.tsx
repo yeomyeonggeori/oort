@@ -11,13 +11,9 @@ import {
 import React, { useCallback, useState } from 'react';
 import {
   Image,
-  Modal,
   Pressable,
-  ScrollView,
-  Share,
   StyleSheet,
   Text,
-  useWindowDimensions,
   View,
   type GestureResponderEvent,
 } from 'react-native';
@@ -34,7 +30,9 @@ import { usePalette, useStyles } from '../../design/theme';
 import { CONV_ICONS, CONV_ICON_SIZE } from '../../design/icons';
 import { CONV } from '../conversation/convDesign';
 import { useSession } from '../../session/useSession';
-import { downloadAttachmentFile, useAttachmentPreview } from './content';
+import { useAttachmentPreview } from './content';
+import { AttachmentViewer } from './AttachmentViewer';
+import { useShareAttachment, type DownloadState } from './useShareAttachment';
 
 // =============================================================================
 // 타임라인의 첨부 — 웹 컴포넌트를 공유하지 않고 폰 문법으로 번역한다 (#1681 · #3820).
@@ -59,11 +57,6 @@ export interface AttachmentGesture {
   delayLongPress: number;
   consumeTap: () => boolean;
 }
-
-type DownloadState =
-  | { status: 'idle' }
-  | { status: 'downloading'; progress: number | null }
-  | { status: 'failed' };
 
 function FileName({ name }: { name: string }): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -228,31 +221,6 @@ function DownloadStatus({
   );
 }
 
-/** 내려받아 iOS 공유시트에 넘긴다. 카드 탭과 전체 화면 보기의 「공유」가 같은 길이다. */
-function useShareAttachment(
-  workspaceId: string,
-  channelId: string,
-  attachment: MessageAttachment,
-): [DownloadState, () => void] {
-  const [download, setDownload] = useState<DownloadState>({ status: 'idle' });
-  const start = useCallback(() => {
-    if (download.status === 'downloading') return;
-    setDownload({ status: 'downloading', progress: null });
-    void downloadAttachmentFile(workspaceId, channelId, attachment, progress =>
-      setDownload({ status: 'downloading', progress }),
-    )
-      .then(file =>
-        Share.share({
-          title: attachmentDisplayName(attachment),
-          url: file.uri,
-        }),
-      )
-      .then(() => setDownload({ status: 'idle' }))
-      .catch(() => setDownload({ status: 'failed' }));
-  }, [attachment, channelId, download.status, workspaceId]);
-  return [download, start];
-}
-
 function FileCard({
   workspaceId,
   channelId,
@@ -332,133 +300,6 @@ function FileCard({
         </View>
       </View>
     </Pressable>
-  );
-}
-
-/** 전체 화면 보기의 한 쪽. 쪽마다 자기 미리보기를 받는다. */
-function ViewerPage({
-  workspaceId,
-  channelId,
-  attachment,
-  width,
-}: {
-  workspaceId: string;
-  channelId: string;
-  attachment: MessageAttachment;
-  width: number;
-}): React.JSX.Element {
-  const styles = useStyles(buildStyles);
-  const preview = useAttachmentPreview(
-    workspaceId,
-    channelId,
-    attachment,
-    true,
-  );
-  return (
-    <View style={[styles.viewerPage, { width }]}>
-      {preview.status === 'ready' ? (
-        <Image
-          source={{ uri: preview.uri }}
-          resizeMode="contain"
-          style={styles.viewerImage}
-          accessibilityLabel={attachmentDisplayName(attachment)}
-          testID="attachment-viewer-image"
-        />
-      ) : (
-        <Text style={styles.viewerState}>
-          {preview.status === 'loading'
-            ? ATTACH_COPY.previewLoading
-            : ATTACH_COPY.previewFailed}
-        </Text>
-      )}
-    </View>
-  );
-}
-
-function AttachmentViewer({
-  workspaceId,
-  channelId,
-  images,
-  startIndex,
-  onClose,
-}: {
-  workspaceId: string;
-  channelId: string;
-  images: MessageAttachment[];
-  startIndex: number;
-  onClose: () => void;
-}): React.JSX.Element {
-  const styles = useStyles(buildStyles);
-  const { width } = useWindowDimensions();
-  const [index, setIndex] = useState(startIndex);
-  const current = images[index] ?? images[0];
-  const [download, share] = useShareAttachment(
-    workspaceId,
-    channelId,
-    current as MessageAttachment,
-  );
-  return (
-    <Modal
-      visible
-      transparent={false}
-      animationType="fade"
-      onRequestClose={onClose}
-    >
-      <View style={styles.viewer} testID="attachment-viewer">
-        <View style={styles.viewerBar}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="닫기"
-            onPress={onClose}
-            style={({ pressed }) => [styles.viewerButton, pressed && styles.pressed]}
-            testID="attachment-viewer-close"
-          >
-            <Text style={styles.viewerButtonLabel}>닫기</Text>
-          </Pressable>
-          {images.length > 1 ? (
-            <Text style={styles.viewerPosition} testID="attachment-viewer-position">
-              {`${index + 1} / ${images.length}`}
-            </Text>
-          ) : (
-            <View />
-          )}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`${ATTACH_COPY.download}, 공유하기`}
-            onPress={share}
-            style={({ pressed }) => [styles.viewerButton, pressed && styles.pressed]}
-            testID="attachment-viewer-share"
-          >
-            <Text style={styles.viewerButtonLabel}>
-              {download.status === 'downloading'
-                ? ATTACH_COPY.downloading
-                : download.status === 'failed'
-                ? ATTACH_COPY.retry
-                : '공유'}
-            </Text>
-          </Pressable>
-        </View>
-        <ScrollView
-          horizontal
-          pagingEnabled
-          showsHorizontalScrollIndicator={false}
-          contentOffset={{ x: startIndex * width, y: 0 }}
-          onMomentumScrollEnd={event =>
-            setIndex(Math.round(event.nativeEvent.contentOffset.x / width))
-          }
-        >
-          {images.map(image => (
-            <ViewerPage
-              key={image.id}
-              workspaceId={workspaceId}
-              channelId={channelId}
-              attachment={image}
-              width={width}
-            />
-          ))}
-        </ScrollView>
-      </View>
-    </Modal>
   );
 }
 
@@ -561,38 +402,6 @@ const buildStyles = (color: Palette) =>
       overflow: 'hidden',
       borderRadius: radius.md,
       backgroundColor: color.surface,
-    },
-    viewer: { flex: 1, backgroundColor: color.bg },
-    viewerBar: {
-      minHeight: TOUCH_TARGET,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingHorizontal: space.md,
-    },
-    viewerButton: {
-      minHeight: TOUCH_TARGET,
-      justifyContent: 'center',
-      paddingHorizontal: space.sm,
-      borderRadius: radius.sm,
-    },
-    viewerButtonLabel: {
-      fontSize: font.body,
-      lineHeight: line.body,
-      color: color.text,
-    },
-    viewerPosition: {
-      fontSize: font.label,
-      lineHeight: line.label,
-      color: color.textMuted,
-      fontVariant: ['tabular-nums'],
-    },
-    viewerPage: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-    viewerImage: { width: '100%', height: '100%' },
-    viewerState: {
-      fontSize: font.meta,
-      lineHeight: line.meta,
-      color: color.textMuted,
     },
     previewImage: { width: '100%', height: '100%' },
     previewState: {

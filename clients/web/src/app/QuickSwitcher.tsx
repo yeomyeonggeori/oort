@@ -1,5 +1,4 @@
 import {
-  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -57,6 +56,10 @@ import { useAddWorkspaceOpen } from "@/features/workspace/useAddWorkspace";
 import { useNewDmOpen, useOpenNewDm } from "@/features/directory/useNewDm";
 import { useDraftsPanel } from "@/features/drafts/useDraftsPanel";
 import { InlineBanner } from "@/features/common/States";
+import {
+  TRANSIENT_STATUS_HOLD_MS,
+  useTransientStatus,
+} from "@/features/common/useTransientStatus";
 import { useSurfaceProvidedPredicate } from "@/features/capabilities/useSurfaceProvided";
 import {
   isSurfaceProvided,
@@ -217,13 +220,10 @@ function writeCommandUsage(usage: CommandUsage): void {
 }
 
 /**
- * 상태줄이 문장을 쥐고 있는 시간 (ADR-0182 D5 ② = 3s).
- *
- * 숫자를 여기 한 번만 적는다. `3000ms` 같은 손기입 duration은 사다리 밖이라
- * 프리플라이트가 막고(ADR-0179 D10), 이 값은 CSS duration이 아니라 **문장이
- * 남아 있는 시간**이라 모션 사다리와 다른 축이다.
+ * 상태줄이 문장을 쥐고 있는 시간 (ADR-0182 D5 ② = 3s). 숫자는 한 번만 적는다: 컴포저의 예약 확정 줄이
+ * 같은 시간을 쥐므로 타이머와 함께 `useTransientStatus`로 올라갔고, 이 이름은 팔레트 쪽의 같은 값이다.
  */
-export const PALETTE_STATUS_HOLD_MS = 3_000;
+export const PALETTE_STATUS_HOLD_MS = TRANSIENT_STATUS_HOLD_MS;
 
 /**
  * 팔레트 하단 상태줄 (ADR-0182 ②).
@@ -248,35 +248,13 @@ export function usePaletteStatus(open: boolean): {
   status: string | null;
   announce: (text: string | null) => void;
 } {
-  const [status, setStatus] = useState<string | null>(null);
-  const timerRef = useRef<number | null>(null);
+  const { status, announce, clear } = useTransientStatus();
 
-  const stopTimer = useCallback(() => {
-    if (timerRef.current === null) return;
-    window.clearTimeout(timerRef.current);
-    timerRef.current = null;
-  }, []);
-
+  // 열 때 지운다. 닫을 때는 지우지 않는다(위 설명).
   useEffect(() => {
     if (!open) return;
-    stopTimer();
-    setStatus(null);
-  }, [open, stopTimer]);
-
-  useEffect(() => stopTimer, [stopTimer]);
-
-  const announce = useCallback(
-    (text: string | null) => {
-      stopTimer();
-      setStatus(text);
-      if (text === null) return;
-      timerRef.current = window.setTimeout(() => {
-        timerRef.current = null;
-        setStatus(null);
-      }, PALETTE_STATUS_HOLD_MS);
-    },
-    [stopTimer]
-  );
+    clear();
+  }, [open, clear]);
 
   return { status, announce };
 }

@@ -1,0 +1,59 @@
+appId: app.momo.ios
+name: "107-photo-viewer-diagonal-drag-capture"
+---
+# 107-photo-viewer-diagonal-drag-capture — 대각선으로 끌어도 옆 장이 끌려 들어오지 않는다 (#4293).
+#
+# 사진을 아래로 쓸어 닫을 때 손가락은 늘 반듯하게 내려가지 않는다. 쪽(ViewerPage)이 끌기를 쥐어도 가로 ScrollView
+# 의 네이티브 팬은 따로 살아 있어서, 대각선으로 내리면 사진이 내려가는 동안 옆 장이 같이 끌려 들어왔다(시뮬레이터
+# 녹화에서 본 것 — `directionalLockEnabled` 는 이를 막지 못했다). 끌기를 쥐면 스크롤을 잠그고(`scrollEnabled`),
+# 끝나면 풀어 현재 쪽에 다시 맞춘다. 표면은 105 와 같다(`-momoMeasure PHOTO-VIEWER-MULTI`).
+#
+#   ① 모자라게(약 70pt 아래 · 32pt 옆, 느리게) 대각선으로 내렸다 놓는다 — 제자리로 돌아오고 「2 / 3」 그대로다.
+#      이 사진(`-diagonal-short-stays`)은 열린 직후(`-open-2of3`)와 **바이트까지 같아야 한다**: 한 픽셀이라도
+#      옆으로 어긋나 있으면(잠금이 새거나 다시 맞추지 않았거나) 다르다. Maestro 는 바이트를 비교하지 못하므로 PR
+#      본문이 두 해시를 비교해 적는다.
+#   ② 충분히(약 245pt 아래 · 96pt 옆, 느리게) 대각선으로 내렸다 놓는다 — 닫힌다.
+#
+# 끄는 도중의 모양(옆 장이 끌려 들어오지 않는 프레임)은 이 흐름이 못 찍는다 — 105 머리말과 같은 절차로 영상을 받는다.
+- extendedWaitUntil:
+    visible:
+      id: "attachment-item"
+    timeout: 60000
+- runFlow: subflows/dismiss-dev-logbox.yaml
+- extendedWaitUntil:
+    visible:
+      id: "attachment-preview-image"
+    timeout: 30000
+- tapOn:
+    id: "attachment-item"
+    index: 1
+- extendedWaitUntil:
+    visible:
+      id: "attachment-viewer"
+    timeout: 10000
+- waitForAnimationToEnd
+- assertVisible:
+    id: "attachment-viewer-position"
+    text: "2 / 3"
+- takeScreenshot: ${SHOT}-open-2of3
+# ① 모자라게 대각선으로 — 제자리로.
+- swipe:
+    start: 62%, 40%
+    end: 54%, 48%
+    duration: 600
+- waitForAnimationToEnd
+- assertVisible:
+    id: "attachment-viewer-position"
+    text: "2 / 3"
+- takeScreenshot: ${SHOT}-diagonal-short-stays
+# ② 충분히 대각선으로 — 닫힌다.
+- swipe:
+    start: 62%, 30%
+    end: 38%, 58%
+    duration: 1600
+- waitForAnimationToEnd
+- assertNotVisible:
+    id: "attachment-viewer"
+- assertVisible:
+    id: "attachment-item"
+- takeScreenshot: ${SHOT}-diagonal-long-closed

@@ -15,7 +15,7 @@ import {
 import {
   channelActionMenuLabel,
   type ChannelSectionChoice,
-} from "@/features/chat/channelActionModel";
+} from "@momo/core/features/channels/actionModel";
 import { scheduleSidebarChannelRowFocus } from "./sidebarRowFocus";
 
 // =============================================================================
@@ -140,7 +140,7 @@ export function SidebarRowContextMenu({
   starred?: boolean;
   onToggleStar?: () => void;
   /**
-   * DM 행의 「사이드바에서 닫기」 (#3963). 손이 없으면(채널 행·터치) 항목이 서지 않는다.
+   * DM 행의 「대화 닫기」 (#3963). 손이 없으면(채널 행·터치) 항목이 서지 않는다.
    * 닫는 일의 실행(원장 · 착지 · 이웃 행 캐럿)은 사이드바가 지고, 이 파일은 그릇과 입력만 정한다.
    */
   onCloseDm?: () => void;
