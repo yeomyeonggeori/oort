@@ -69,6 +69,7 @@ import {
   type AgentToolCatalogEntry,
 } from "../features/agents/toolCatalog";
 import { normalizeWorkRunInput, type WorkRunDraft } from "../features/agents/workRunRequest";
+import { APPROVAL_AVATAR_PREVIEW_PATH } from "../features/approvals/avatarPreview";
 import { parseAliases } from "../features/routing/helperAliases";
 
 export type { AgentToolCatalogEntry };
@@ -3200,6 +3201,21 @@ export async function fetchMemberAvatar(avatarUrl: string): Promise<Blob> {
     avatarUrl,
     /^\/v1\/workspaces\/[^/]+\/members\/[^/]+\/avatar\/content(\?|$)/,
     "not a member avatar content path"
+  );
+}
+
+/**
+ * 승인 카드가 제안하는 사진의 바이트 (`GET …/approvals/{approval}/avatar-preview?v={sha256}`,
+ * ADR-0186 증보 v3 V3-2a · v4 V4-2, #4394). 베어러가 있어야 읽히므로 `<img src>` 에 그대로 실을 수
+ * 없다 — 호스트가 이 함수로 받아 실을 수 있는 스킴으로 바꾼다. 읽을 수 있는 사람은 서버가 정하고
+ * (`member.avatar.set` 은 사진 주인 본인뿐) 나머지는 모두 같은 404 다. 경로가 그 모양이 아니면
+ * 베어러를 싣지 않고 거절한다(임의 주소로 토큰이 새지 않게).
+ */
+export async function fetchApprovalAvatarPreview(previewPath: string): Promise<Blob> {
+  return fetchAvatarBlob(
+    previewPath,
+    APPROVAL_AVATAR_PREVIEW_PATH,
+    "not an approval avatar preview path"
   );
 }
 

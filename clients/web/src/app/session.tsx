@@ -28,6 +28,7 @@ import {
 } from "@/features/auth/onboardingSessionHold";
 import { clearAllDrafts } from "@/features/chat/draftStore";
 import { clearAllFirstMentionRecords } from "@/features/hostedAgents/firstMentionStore";
+import { clearApprovalAvatarPreviews } from "@/features/timeline/useApprovalAvatarPreview";
 import type { RealtimeHandle, RealtimeStatus } from "@/lib/realtime";
 
 /**
@@ -157,6 +158,7 @@ export function useRestoredSession(): SessionLifecycle {
   useEffect(() => {
     if (!expired) return;
     clearSession();
+    clearApprovalAvatarPreviews(); // 본인 전용 사진: 계정 경계를 넘어 남지 않게.
     setSession(null);
     setStatus("anonymous");
   }, [expired]);
@@ -180,6 +182,7 @@ export function useRestoredSession(): SessionLifecycle {
     // not `/v1/auth/refresh`, so this hidden rotation escaped to a real backend,
     // came back 401, and bounced the app to the login card mid-run.
     attempted.current = true;
+    clearApprovalAvatarPreviews();
     setSession(next);
     setStatus("signed-in");
   }, []);
@@ -202,6 +205,7 @@ export function useRestoredSession(): SessionLifecycle {
     // 같은 순간에 사라져야 한다(`draftStore.ts` 머리말의 비용 항목).
     clearAllDrafts();
     clearAllFirstMentionRecords();
+    clearApprovalAvatarPreviews();
     setSession(null);
     setStatus("anonymous");
   }, []);

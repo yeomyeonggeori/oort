@@ -5,6 +5,7 @@ import {
   ACTION_RESULT_PROP_KEY,
   ACTION_RESULT_STATUS_LABEL,
   ACTION_RESULT_STATUS_NOTE,
+  actionResultStatusNote,
   MAX_ACTION_RESULT_ROWS,
   actionResultCard,
   parseActionResultStatus,
@@ -160,3 +161,40 @@ describe("action_result 카드 (ADR-0186 부록 B)", () => {
     expect(card.title).toBe("워크스페이스 행동");
   });
 });
+
+describe("member.avatar.set 결과 (#4394)", () => {
+  const AVATAR = {
+    action_id: "member.avatar.set",
+    ref: { type: "member", id: "019f9a01-0000-7000-8000-000000000501" },
+    next: undefined,
+    secret_shown_once: false,
+    rows: [{ label: "프로필 사진", value: "카드에 보인 이미지로 바뀌었어요" }],
+  };
+
+  it("ref.type member 를 읽는다", () => {
+    const card = agentCardModel(resultMessage({ ...AVATAR, status: "executed" }));
+    if (card?.kind !== "action_result") throw new Error("not an action_result");
+    expect(card.ref).toEqual({ type: "member", id: "019f9a01-0000-7000-8000-000000000501" });
+  });
+
+  it("결과 줄은 관리자가 아니라 사진 주인 본인을 가리킨다", () => {
+    expect(actionResultStatusNote("role_required", "member.avatar.set")).toBe(
+      "사진 주인 본인이 승인해야 해요."
+    );
+    expect(actionResultStatusNote("rejected", "member.avatar.set")).toContain("그대로");
+    expect(actionResultStatusNote("expired", "member.avatar.set")).toContain("그대로");
+    // 표에 없는 상태는 기본 문장으로 떨어진다.
+    expect(actionResultStatusNote("executed", "member.avatar.set")).toBe(
+      ACTION_RESULT_STATUS_NOTE.executed
+    );
+  });
+
+  it("다른 행동·프로토타입 키는 지금까지의 문장 그대로다", () => {
+    for (const id of ["invite.create", "agent.profile.update", "constructor", "__proto__"]) {
+      expect(actionResultStatusNote("role_required", id)).toBe(
+        ACTION_RESULT_STATUS_NOTE.role_required
+      );
+    }
+  });
+});
+

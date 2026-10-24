@@ -3,7 +3,7 @@ import { Button } from "@/design/ui/button";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import {
   ACTION_RESULT_SECRET_ONCE_NOTE,
-  ACTION_RESULT_STATUS_NOTE,
+  actionResultStatusNote,
   type AgentActionResultCard,
 } from "@momo/core/features/timeline/actionResultCard";
 import { formatCount } from "@momo/core/features/timeline/agentCardModel";
@@ -110,7 +110,7 @@ export function ActionResultBody({
             className="break-keep text-body text-ink"
             data-testid="action-result-note"
           >
-            {ACTION_RESULT_STATUS_NOTE[card.status]}
+            {actionResultStatusNote(card.status, card.actionId)}
           </p>
           {card.secretShownOnce && (
             <p

@@ -74,6 +74,30 @@ function message(overrides: Partial<Message> = {}): Message {
   };
 }
 
+describe("승인 알림 문구: member.avatar.set (#4394)", () => {
+  it("OS 배너는 서버가 정한 행동 이름을 말하고 원문 id 를 내지 않는다", () => {
+    const decision = notifyDecision(
+      event({
+        type: "approval_request",
+        author_member_id: AGENT,
+        body: "승인 요청: 내 프로필 사진 바꾸기",
+        props: {
+          approval_id: "019F8338-025E-7873-93A3-C1FBA9149185",
+          status: "pending",
+          title: "내 프로필 사진 바꾸기",
+          action: { id: "member.avatar.set", rows: [], required_role: "requesting_member" },
+        },
+      }),
+      context()
+    );
+    expect(decision.show).toBe(true);
+    if (!decision.show) return;
+    expect(decision.notification.title).toBe("승인 필요 · @hermes");
+    expect(decision.notification.body).toBe("내 프로필 사진 바꾸기");
+    expect(JSON.stringify(decision.notification)).not.toContain("member.avatar.set");
+  });
+});
+
 describe("notifiableKind", () => {
   it("reads the server's own mention decision, not the body text", () => {
     expect(
